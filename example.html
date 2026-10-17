@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>wavefw Waveform Framework</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="wavefw.css">
+<style>
+/* Page layout (same reading column / bench panels as template.html); wave tokens come from wavefw.css. */
+:root { --pass: #2a7a46; --pass-soft: #dcefe1; --fail: #b8322b; --fail-soft: #f6dcd9; --warn: #9a6b00; --warn-soft: #f6ecc8; --code-bg: #efede6; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme]) { --pass: #6cc98a; --pass-soft: #1f3a29; --fail: #ef7a71; --fail-soft: #3f2321; --warn: #e2b74c; --warn-soft: #3d3215; --code-bg: #272b33; } }
+[data-theme="white"] { --code-bg: #f3f4f6; }
+[data-theme="dark"] { --pass: #6cc98a; --pass-soft: #1f3a29; --fail: #ef7a71; --fail-soft: #3f2321; --warn: #e2b74c; --warn-soft: #3d3215; --code-bg: #272b33; }
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.55; padding-inline: clamp(16px, 4vw, 48px); padding-block: 0 64px; }
+h1, h2, h3, h4 { line-height: 1.2; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(26px, 4vw, 38px); font-weight: 700; letter-spacing: -0.01em; }
+h2 { font-size: 24px; font-weight: 600; margin-block: 56px 16px; padding-top: 12px; border-top: 2px solid var(--accent); }
+h3 { font-size: 18px; font-weight: 600; margin-block: 28px 10px; }
+h4 { font-size: 15px; font-weight: 600; margin-block: 18px 6px; }
+p, ul, ol { max-width: 72ch; }
+p { margin-block: 0 12px; }
+ul, ol { margin-block: 0 12px; padding-left: 22px; }
+li { margin-block: 3px; }
+a { color: var(--accent); }
+code, kbd { font-family: var(--font-mono); font-size: 0.92em; background: var(--code-bg); padding: 1px 5px; border-radius: 3px; }
+pre { font-family: var(--font-mono); font-size: 12.5px; background: var(--code-bg); padding: 12px 14px; border-radius: 6px; overflow-x: auto; line-height: 1.5; max-width: 100%; margin-block: 8px 16px; }
+pre code { background: none; padding: 0; }
+.eyebrow { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.muted { color: var(--muted); }
+.mono { font-family: var(--font-mono); }
+header.top { padding-block: 36px 24px; border-bottom: 1px solid var(--line); display: grid; gap: 14px; }
+header.top .sub { color: var(--muted); max-width: 80ch; font-size: 16px; }
+header.top .row1 { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+.facts { display: flex; flex-wrap: wrap; gap: 8px 28px; font-size: 13.5px; }
+.facts b { font-weight: 600; display: block; }
+nav.toc { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; background: var(--bg); border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 2px 14px; padding-block: 8px; font-size: 13.5px; }
+nav.toc a { color: var(--fg); text-decoration: none; padding: 2px 4px; border-radius: 3px; }
+nav.toc a:hover, nav.toc a:focus-visible { background: var(--accent-soft); outline: none; }
+.bench { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px; margin-block: 12px 20px; min-width: 0; }
+.bench.styles p { margin: 8px 0 2px; font-size: 12px; }
+figure { margin: 0; }
+figcaption { font-size: 13.5px; color: var(--muted); margin-top: 8px; max-width: 90ch; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 600; background: var(--panel-2); white-space: nowrap; }
+td.mono { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
+tr.group td { background: var(--panel-2); font-weight: 600; }
+.tbl { overflow-x: auto; margin-block: 8px 18px; }
+.note { border-left: 3px solid var(--warn); background: var(--warn-soft); padding: 10px 14px; border-radius: 0 6px 6px 0; max-width: 90ch; margin-block: 12px 18px; }
+.note.info { border-color: var(--accent); background: var(--accent-soft); }
+.pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 10px; letter-spacing: 0.03em; white-space: nowrap; }
+.pill.pass { background: var(--pass-soft); color: var(--pass); }
+.pill.fail { background: var(--fail-soft); color: var(--fail); }
+.pill.info { background: var(--accent-soft); color: var(--accent); }
+button.theme { font: inherit; font-size: 12.5px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); border-radius: 4px; padding: 3px 10px; cursor: pointer; }
+button.theme:hover { border-color: var(--accent); color: var(--accent); }
+/* example = source next to its rendering */
+.ex { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 14px; align-items: start; }
+.ex pre { margin: 0; font-size: 11.5px; max-height: 360px; }
+.ex .out { min-width: 0; }
+.themes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.themes > div { min-width: 0; }
+.themes .lbl, .palette .lbl { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+@media (max-width: 860px) { .themes { grid-template-columns: 1fr; } }
+.palette { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; font-size: 13.5px; }
+.palette label { display: inline-flex; gap: 6px; align-items: center; }
+.palette input[type=color] { width: 34px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); }
+@media (max-width: 860px) { .ex { grid-template-columns: 1fr; } }
+.tcase { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); margin-block: 14px; }
+.tcase > summary { list-style: none; cursor: pointer; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 10px 14px; }
+.tcase > summary::-webkit-details-marker { display: none; }
+.tcase > summary .id { font-family: var(--font-mono); font-weight: 600; color: var(--accent); }
+.tcase > summary .ttl { font-weight: 600; }
+.tcase > summary .cfg { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.tcase > summary .chev { margin-left: auto; color: var(--muted); font-size: 12px; }
+.tcase[open] > summary { border-bottom: 1px solid var(--line); }
+.tcase .inner { padding: 12px 14px 16px; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="row1"><div class="eyebrow">Framework demo &amp; reference</div><button type="button" class="theme" id="theme">Theme: auto</button></div>
+  <h1>wavefw <span class="mono muted" style="font-weight:400;font-size:0.6em">WaveDrom JSON → interactive waves</span></h1>
+  <p class="sub">A dependency-free renderer for the WaveDrom format with two outputs from one model: the interactive canvas viewer of the PSI5 datasheet (<code>template.html</code>) and a static WaveDrom-style SVG for figures. Waves are written by hand or converted from a simulator dump with <a href="https://github.com/kleverhq/wavepeek">wavepeek</a>. Everything on this page renders from <code>file://</code> with one script and one stylesheet.</p>
+  <div class="facts" id="facts"></div>
+</header>
+
+<nav class="toc" aria-label="Sections">
+  <a href="#overview">Overview</a>
+  <a href="#quick">Quick start</a>
+  <a href="#format">WaveDrom format</a>
+  <a href="#viewer">Viewer</a>
+  <a href="#themes">Themes &amp; colours</a>
+  <a href="#vcd">From a VCD</a>
+  <a href="#cards">Lazy cards</a>
+  <a href="#api">API</a>
+  <a href="#repro">Reproduce</a>
+</nav>
+
+<!-- ============================================================ -->
+<h2 id="overview">1. Overview</h2>
+<p><code>wavefw.js</code> parses WaveJSON (the input of the WaveDrom editor) into one time-ordered transition list per signal. Two painters draw that model with the same routine, so a figure and a viewer of the same data look alike:</p>
+<ul>
+  <li><b>WaveView</b>: a canvas viewer with a name column showing values at the cursor, wheel zoom at the pointer, drag to pan, click to set the cursor, keyboard control, markers, jump buttons and groups you can fold.</li>
+  <li><b>WaveSVG</b>: an inline SVG that follows the page's light/dark tokens (<code>var(--wave-1)</code>, <code>var(--wave-bus)</code> …) and stays sharp when printed.</li>
+</ul>
+<p>Two small extensions keep stock WaveDrom compatibility. <code>"time"</code> maps cycles to picoseconds, so the axis shows real time. The per-signal <code>"tv"</code> list carries exact transitions from a dump. Stock WaveDrom ignores both keys.</p>
+
+<!-- ============================================================ -->
+<h2 id="quick">2. Quick start</h2>
+<pre><code>&lt;link rel="stylesheet" href="wavefw.css"&gt;
+&lt;script src="wavefw.js"&gt;&lt;/script&gt;
+
+&lt;!-- interactive viewer --&gt;
+&lt;script type="application/wavedrom"&gt;
+{ "signal": [ { "name": "clk", "wave": "p......" },
+              { "name": "dat", "wave": "x.34.x.", "data": ["A", "B"] } ] }
+&lt;/script&gt;
+
+&lt;!-- static SVG (stock WaveDrom's script type renders as SVG by default) --&gt;
+&lt;script type="WaveDrom"&gt; { signal: [ { name: 'req', wave: '01..0' } ] } &lt;/script&gt;
+
+&lt;!-- model from a data file or another script, built when its &lt;details&gt; opens --&gt;
+&lt;div data-wave="DEMO_WAVES.exact" data-lazy&gt;&lt;/div&gt;</code></pre>
+
+<!-- ============================================================ -->
+<h2 id="format">3. WaveDrom format, rendered as SVG</h2>
+<p>Each example shows its source on the left and the SVG from <code>WaveSVG</code> on the right. The source panel is filled from the same script block that is rendered, so the two cannot drift apart. <code>tools/conformance.html</code> puts every character next to stock WaveDrom 3.5.0.</p>
+
+<h3>Wave characters</h3>
+<div class="bench"><div class="ex"><pre></pre><div class="out">
+<script type="application/wavedrom" data-mode="svg">
+{ "signal": [
+  { "name": "p / n clock",   "wave": "p.....|..." },
+  { "name": "P / N + arrow", "wave": "P.....|..." },
+  { "name": "n clock",       "wave": "n.....|..." },
+  { "name": "0 1 (soft)",    "wave": "01.0.1|.0." },
+  { "name": "h l H L",       "wave": "hl.H.L|.h." },
+  { "name": "x z",           "wave": "x.1.z.|0x." },
+  { "name": "u d (pull)",    "wave": "0u..d.|1.." },
+  { "name": "bus = 2-9",     "wave": "=.3.4.|5=.", "data": ["IDLE", "HEAD", "DATA", "CRC", "IDLE"] },
+  { "name": "colours",       "wave": "23456789x.", "data": "2 3 4 5 6 7 8 9" }
+ ],
+ "head": { "text": "WaveDrom characters", "tick": 0 },
+ "foot": { "text": "'|' marks a gap; '.' extends the previous state" } }
+</script></div></div></div>
+
+<h3>Groups, spacers, period and phase</h3>
+<div class="bench"><div class="ex"><pre></pre><div class="out">
+<script type="application/wavedrom" data-mode="svg">
+{ "signal": [
+  { "name": "clk", "wave": "p.......", "period": 1 },
+  { "name": "clk/2", "wave": "p...", "period": 2 },
+  {},
+  ["Master",
+    { "name": "req",  "wave": "01..0...", "phase": 0.5 },
+    { "name": "addr", "wave": "x3.x....", "data": ["A1"] }
+  ],
+  ["Slave",
+    { "name": "ack",  "wave": "0..10...", "phase": 0.5 },
+    { "name": "rdata","wave": "x..4x...", "data": ["D1"] }
+  ]
+ ],
+ "head": { "text": "Groups & phase", "tick": 0 },
+ "foot": { "tock": 0 },
+ "config": { "hscale": 1.5 } }
+</script></div></div></div>
+
+<h3>Nodes and edges</h3>
+<div class="bench"><div class="ex"><pre></pre><div class="out">
+<script type="application/wavedrom" data-mode="svg">
+{ "signal": [
+  { "name": "A", "wave": "01........0....", "node": ".a........j" },
+  { "name": "B", "wave": "0.1.......0.1..", "node": "..b.......i" },
+  { "name": "C", "wave": "0..1....0...1..", "node": "...c....h.." },
+  { "name": "D", "wave": "0...1..0.....1.", "node": "....d..g...." },
+  { "name": "E", "wave": "0....10.......1", "node": ".....ef......" }
+ ],
+ "edge": ["a~b t1", "c-~a t2", "c-~>e", "d~-e", "e~>f t3", "f->g", "g-|>h", "h-|-i", "i|->j t4", "a<->j period"],
+ "head": { "text": "Edge shapes: - ~ -~ ~- -| |- -|- with < >" } }
+</script></div></div></div>
+
+<h3>Pasted from the WaveDrom editor</h3>
+<p>Stock <code>&lt;script type="WaveDrom"&gt;</code> blocks also work. Their relaxed syntax (unquoted keys, single quotes, trailing commas) is evaluated the way stock WaveDrom does it.</p>
+<div class="bench"><div class="ex"><pre></pre><div class="out">
+<script type="WaveDrom">
+{ signal: [
+  { name: 'clk',  wave: 'P.......' },
+  { name: 'bus',  wave: 'x.==.=x.', data: ['head', 'body', 'tail'] },
+  { name: 'wire', wave: '0.1..0..' },
+], head: { text: 'editor syntax' } }
+</script></div></div></div>
+
+<!-- ============================================================ -->
+<h2 id="viewer">4. Interactive viewer</h2>
+<p>The same parser feeds <code>WaveView</code>. Without the <code>time</code> extension the axis counts cycles, starting at <code>head.tick</code>. Markers and jump buttons come from the optional <code>markers</code> and <code>jumps</code> keys. Click a group header (▾) to fold it.</p>
+<div class="bench">
+<script type="application/wavedrom" id="ex-handshake">
+{ "signal": [
+  { "name": "clk",   "wave": "p..............." },
+  ["request",
+    { "name": "valid", "wave": "0.1...0..1.0....", "node": "..a...b.." },
+    { "name": "addr",  "wave": "x.3...x..4.x....", "data": ["0x1000", "0x2004"] }
+  ],
+  ["response",
+    { "name": "ready", "wave": "0....10...10....", "node": ".....c...." },
+    { "name": "resp",  "wave": "z....5z...7z....", "data": ["OK", "ERR"] }
+  ],
+  {},
+  { "name": "state", "wave": "3.4..53..4.53...", "data": ["IDLE", "WAIT", "DONE", "IDLE", "WAIT", "DONE", "IDLE"] }
+ ],
+ "edge": ["a~>c 3 cyc"],
+ "head": { "text": "valid/ready handshake · cycle axis", "tick": 0 },
+ "markers": [{ "cycle": 2, "label": "req 1" }, { "cycle": 9, "label": "req 2" }],
+ "jumps": [{ "label": "Req 1", "cycle": 1.5, "span": 6 }, { "label": "Req 2", "cycle": 8.5, "span": 6 }],
+ "cursor": 5.5 }
+</script>
+</div>
+
+<h3 id="sorting">Sorting signals</h3>
+<p>The <b>Sort</b> button cycles <i>off → A→Z → Z→A</i> (key <kbd>s</kbd> on the canvas). The field next to it lists name prefixes that are skipped when names are compared, so with <code>i_,o_</code> the signal <code>i_valid</code> sorts as <i>valid</i>; the skipped prefix is drawn dimmed. Names compare naturally (<code>d2</code> before <code>d10</code>), groups move as a block and their members are sorted inside, and a <code>{}</code> spacer splits the list into runs that are sorted separately. To start sorted, use <code>"config": {"sort": "asc", "sortIgnore": ["i_", "o_"]}</code> in the JSON, <code>data-sort="asc" data-sort-ignore="i_,o_"</code> on the element, or the settings file. Static SVGs take the same keys.</p>
+<div class="bench">
+<script type="application/wavedrom" id="ex-sort" data-sort-ignore="i_,o_">
+{ "signal": [
+  { "name": "rst_n",   "wave": "01.............." },
+  { "name": "o_ready", "wave": "0..1..0...1..0.." },
+  { "name": "i_valid", "wave": "0.1....0..1...0." },
+  { "name": "clk",     "wave": "p..............." },
+  { "name": "o_data",  "wave": "x..3..x...4..x..", "data": ["A1", "B2"] },
+  { "name": "i_data",  "wave": "x.5....x..6...x.", "data": ["0x10", "0x20"] }
+ ],
+ "head": { "text": "file order · press Sort" } }
+</script>
+</div>
+
+<h3 id="styles">Edge styles and radix</h3>
+<p>The <code>style</code> setting draws edges WaveDrom-like (<code>wavedrom</code>: slanted 1-bit edges, <code>&lt;&gt;</code> bus ends) or like a simulator's wave window (<code>questa</code>: vertical edges, narrow bus crossings; <code>square</code>: vertical edges, square bus ends). <code>auto</code>, the default, slants WaveDrom wave strings and draws exact <code>tv</code> transitions vertically. The <code>radix</code> setting (<code>auto | hex | dec | signed | bin | oct | ascii</code>) formats bus values from <code>tv</code>; <code>auto</code> shows up to 6 bits in decimal and wider buses in hex. Both settings also exist per signal (<code>"style"</code>, <code>"radix"</code> in the signal object) and override the global value. The three figures below render the same JSON with <code>data-config='{"style": "…"}'</code>; each bus row sets its own radix.</p>
+<script type="application/json" id="ex-style-src">
+{ "signal": [
+  { "name": "clk",   "wave": "p........." },
+  { "name": "valid", "tv": [[0, "0"], [2, "1"], [4, "0"], [5, "1"], [8, "0"]] },
+  ["data",
+   { "name": "hex",    "width": 8, "radix": "hex",    "tv": [[0, "xx"], [2, "41"], [4, "5a"], [5, "80"], [8, "ff"]] },
+   { "name": "signed", "width": 8, "radix": "signed", "tv": [[0, "xx"], [2, "41"], [4, "5a"], [5, "80"], [8, "ff"]] },
+   { "name": "bin",    "width": 8, "radix": "bin",    "tv": [[0, "xx"], [2, "41"], [4, "5a"], [5, "80"], [8, "ff"]] },
+   { "name": "ascii",  "width": 8, "radix": "ascii",  "tv": [[0, "xx"], [2, "41"], [4, "5a"], [5, "80"], [8, "ff"]] }
+  ]
+ ] }
+</script>
+<div class="bench styles">
+  <p class="muted mono">style: wavedrom</p><div data-wave="#ex-style-src" data-mode="svg" data-config='{"style": "wavedrom"}' id="ex-style-wavedrom"></div>
+  <p class="muted mono">style: questa</p><div data-wave="#ex-style-src" data-mode="svg" data-config='{"style": "questa"}' id="ex-style-questa"></div>
+  <p class="muted mono">style: square</p><div data-wave="#ex-style-src" data-mode="svg" data-config='{"style": "square"}' id="ex-style-square"></div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="themes">5. Themes and colours</h2>
+<p>There are three themes: <b>light</b> (the datasheet's warm paper), <b>white</b> (pure white with stock-WaveDrom colours, for print and slides) and <b>dark</b>. Wave colours are CSS custom properties, so a theme or palette can be set at three levels:</p>
+<ul>
+  <li><b>All waves</b>: <code>&lt;html data-theme="white"&gt;</code>, or <code>WaveFW.setTheme('white')</code> and <code>WaveFW.setColors({trace: '#c00'})</code>. The theme button in the header and the palette below use these calls.</li>
+  <li><b>One wave</b>: a <code>data-theme</code> / <code>data-colors</code> attribute on its element, or <code>config.theme</code> / <code>config.colors</code> in the JSON.</li>
+  <li><b>One signal</b>: <code>stroke</code> (trace and outline) and <code>fill</code> (bus fill) in the signal object.</li>
+</ul>
+
+<h3>All waves: global palette</h3>
+<div class="bench palette" id="palette">
+  <span class="lbl" style="margin:0">WaveFW.setColors(…)</span>
+  <label><input type="color" data-k="trace" value="#1d1f24"> trace</label>
+  <label><input type="color" data-k="bus" value="#2f5d8a"> bus</label>
+  <label><input type="color" data-k="x" value="#c23a2b"> x</label>
+  <label><input type="color" data-k="accent" value="#b5551b"> cursor &amp; edges</label>
+  <label><input type="color" data-k="c5" value="#d3e5f7"> fill 5</label>
+  <button type="button" class="theme" id="pal-reset">Reset</button>
+</div>
+<p class="muted">The palette is applied to <code>&lt;html&gt;</code>, so every wave on the page changes, except waves that set their own theme or colours.</p>
+
+<h3>One wave: per-element theme</h3>
+<p>The same JSON drawn three times. Only the <code>data-theme</code> attribute differs, and a themed SVG paints its own background. The viewer below uses <code>data-theme="white"</code> whatever the page theme is.</p>
+<script type="application/json" id="ex-theme">
+{ "signal": [
+  { "name": "clk",  "wave": "p.......", "node": ".a......" },
+  { "name": "req",  "wave": "01..0...", "node": ".b..c..." },
+  { "name": "data", "wave": "x3.45.x.", "data": ["HEAD", "BODY", "CRC"] },
+  { "name": "oe",   "wave": "z.1..0z." },
+  { "name": "err",  "wave": "0....x0." }
+ ],
+ "edge": ["b~>c 3T"],
+ "head": { "tick": 0 } }
+</script>
+<div class="bench themes">
+  <div><div class="lbl">data-theme="light"</div><div data-wave="#ex-theme" data-mode="svg" data-theme="light" data-fit></div></div>
+  <div><div class="lbl">data-theme="white"</div><div data-wave="#ex-theme" data-mode="svg" data-theme="white" data-fit></div></div>
+  <div><div class="lbl">data-theme="dark"</div><div data-wave="#ex-theme" data-mode="svg" data-theme="dark" data-fit></div></div>
+</div>
+<div class="bench"><div data-wave="#ex-theme" data-theme="white" data-title="viewer · data-theme=white" id="wv-white"></div></div>
+
+<h3>One wave: its own palette in the JSON</h3>
+<div class="bench"><div class="ex"><pre></pre><div class="out">
+<script type="application/wavedrom" id="ex-palette">
+{ "signal": [
+  { "name": "clk",   "wave": "P......." },
+  { "name": "valid", "wave": "0.1..0..", "node": "..a..b" },
+  { "name": "data",  "wave": "x.3.4.x.", "data": ["0xCAFE", "0xF00D"] },
+  { "name": "state", "wave": "5.6...5.", "data": ["IDLE", "BUSY", "IDLE"] }
+ ],
+ "edge": ["a<->b burst"],
+ "head": { "text": "config.theme + config.colors", "tick": 0 },
+ "config": { "theme": "dark", "colors": {
+   "bg": "#0d1117", "header": "#161b22", "grid": "#30363d", "text": "#c9d1d9",
+   "trace": "#7ee787", "bus": "#d2a8ff", "accent": "#ffa657",
+   "c3": "#3b2e58", "c4": "#1f3b5c", "c5": "#4a3418", "c6": "#1d3d2c" } } }
+</script></div></div></div>
+
+<h3>One signal: <code>stroke</code> and <code>fill</code></h3>
+<div class="bench"><div class="ex"><pre></pre><div class="out">
+<script type="application/wavedrom" data-mode="svg">
+{ "signal": [
+  { "name": "clk",     "wave": "p.........", "stroke": "#6b7280" },
+  { "name": "tx",      "wave": "0.1.0.11.0", "stroke": "#d6336c" },
+  { "name": "rx",      "wave": "0..1.0.1.0", "stroke": "#0ca678" },
+  { "name": "payload", "wave": "x.=.=.=.x.", "data": ["A", "B", "C"], "stroke": "#7048e8", "fill": "#e5dbff" },
+  { "name": "status",  "wave": "=...=.....", "data": ["OK", "RETRY"], "fill": "#fff3bf" },
+  { "name": "default", "wave": "x.3.4.5.x." , "data": "3 4 5" }
+ ],
+ "head": { "text": "per-signal colours" } }
+</script></div></div></div>
+
+<!-- ============================================================ -->
+<h2 id="vcd">6. From a simulator dump</h2>
+<p>The data below comes from <code>tools/demo/demo_tb.sv</code>, a small Manchester transmitter (2 start bits, 8 data bits LSB first, even parity, 100 MHz clock, 8 clocks per bit). Verilator writes the VCD, <code>tools/vcd2wavedrom.py</code> queries it with wavepeek, and <code>tools/embed.py</code> packs the JSON into <code>demo_waves.js</code>. <code>make demo</code> runs the whole chain.</p>
+
+<h3>Exact transitions, interactive</h3>
+<p>Every edge is drawn at its real timestamp (the <code>tv</code> extension). The markers are the results of <code>wavepeek change --on 'posedge start'</code> and <code>'posedge done'</code>, and the viewer turns each marker into a jump button.</p>
+<div class="bench"><div data-wave="DEMO_WAVES.exact"></div></div>
+
+<h3>Same dump, one byte as a static figure</h3>
+<p>The first byte, cut out of the same model with <code>data-from</code>/<code>data-to</code> and drawn by <code>WaveSVG</code>. This is how the "frame anatomy" figure of the PSI5 datasheet can be produced from data.</p>
+<div class="bench"><figure>
+  <div data-wave="DEMO_WAVES.exact" data-mode="svg" data-from="0ns" data-to="960ns" data-width="1100"></div>
+  <figcaption id="cap-byte"></figcaption>
+</figure></div>
+
+<h3>Clock-sampled, plain WaveDrom</h3>
+<p>With <code>--clock clk</code> the converter samples every rising edge and writes ordinary wave strings, which stock WaveDrom also renders. <code>--gap 100ns:250ns</code> folded 15 cycles into one <code>|</code> cell. The <code>time.skip</code> entry keeps the time axis correct in the viewer.</p>
+<div class="bench"><div data-wave="DEMO_WAVES.cycle" data-mode="svg"></div></div>
+<details class="bench" style="padding:10px 14px"><summary class="muted" style="cursor:pointer">Generated WaveJSON (clock-sampled)</summary><pre id="cyc-src"></pre></details>
+
+<!-- ============================================================ -->
+<h2 id="cards">7. Lazy cards</h2>
+<p>A viewer marked <code>data-lazy</code> is built only when its <code>&lt;details&gt;</code> opens or its button is pressed, as in the test-scenario cards of the datasheet. The first card starts open.</p>
+<div id="cardlist"></div>
+
+<!-- ============================================================ -->
+<h2 id="api">8. API and format reference</h2>
+<h3>Declarative</h3>
+<div class="tbl"><table>
+<tr><th>Markup</th><th>Effect</th></tr>
+<tr><td class="mono">&lt;script type="application/wavedrom"&gt;</td><td>Replaced by a viewer. The body is JSON, or WaveDrom-editor syntax (unquoted keys, single quotes).</td></tr>
+<tr><td class="mono">&lt;script type="WaveDrom"&gt;</td><td>Stock WaveDrom's tag. Rendered as static SVG by default.</td></tr>
+<tr><td class="mono">&lt;div data-wave="#id | VAR.key"&gt;</td><td>Model taken from another script element or from a global loaded with <code>&lt;script src&gt;</code>.</td></tr>
+<tr><td class="mono">data-mode="svg | view"</td><td>Choose the renderer.</td></tr>
+<tr><td class="mono">data-from / data-to</td><td>Viewer: initial window. SVG: the window that is drawn. Plain numbers are model units; <code>120ns</code> or <code>1.5us</code> are times.</td></tr>
+<tr><td class="mono">data-cursor, data-title, data-width, data-fit</td><td>Cursor position, bar title, SVG width in px, scale the SVG to its container.</td></tr>
+<tr><td class="mono">data-theme="light | white | dark"</td><td>On <code>&lt;html&gt;</code>: the page and all waves. On a wave element or its <code>&lt;script&gt;</code>: that wave only.</td></tr>
+<tr><td class="mono">data-colors='{"trace": "#c00"}'</td><td>Palette for one wave. Keys: <code>trace bus x xfill z bg header grid text muted accent c3…c9</code>, or any CSS custom property.</td></tr>
+<tr><td class="mono">data-sort="asc | desc", data-sort-ignore="i_,o_"</td><td>Initial signal order and the prefixes skipped when sorting. The viewer's Sort button and prefix field change them.</td></tr>
+<tr><td class="mono">data-config='{"rowHeight": 30}'</td><td>Any setting (see <i>Settings</i> below) for this wave only.</td></tr>
+<tr><td class="mono">data-lazy</td><td>Built on click, or when the enclosing <code>&lt;details&gt;</code> opens.</td></tr>
+<tr><td class="mono">&lt;script src="wavefw.js" data-manual&gt;</td><td>Turns off the automatic upgrade; call <code>WaveFW.upgrade(root)</code> yourself.</td></tr>
+</table></div>
+<h3>JavaScript</h3>
+<div class="tbl"><table>
+<tr><th>Call</th><th>Description</th></tr>
+<tr><td class="mono">WaveFW.parse(json | text)</td><td>Model: <code>rows</code>, <code>nodes</code>, <code>edges</code>, <code>t0</code>/<code>t1</code>, <code>timed</code>, <code>markers</code>.</td></tr>
+<tr><td class="mono">new WaveView(el, model, opts)</td><td>opts: <code>title, cursor, markers, jumps, from, to, minSpan</code>. Also <code>theme, colors</code>. Methods: <code>zoom(f, at)</code>, <code>fit()</code>, <code>goto(t, span)</code>, <code>setTheme(name)</code>, <code>setColors(map)</code>, <code>draw()</code>, <code>destroy()</code>.</td></tr>
+<tr><td class="mono">WaveSVG.render(el, model, opts)</td><td>opts: <code>from, to, width, cyclePx, axis, bg, fit, markers, theme, colors</code>. <code>WaveSVG.toString()</code> returns the markup.</td></tr>
+<tr><td class="mono">WaveFW.enums[name] = {0: 'IDLE'}</td><td>Global enum labels per signal name, like <code>decode()</code> in the datasheet. A per-signal <code>"enum"</code> takes precedence.</td></tr>
+<tr><td class="mono">WaveFW.setTheme(name, el?)<br>WaveFW.setColors(map, el?)</td><td>Theme (<code>light | white | dark | auto</code>) or palette for <code>el</code>. Without <code>el</code> it applies to <code>&lt;html&gt;</code>, i.e. every wave. A <code>null</code> colour removes the override. Viewers are redrawn.</td></tr>
+<tr><td class="mono">WaveFW.fromTV(wave)</td><td>Converts the datasheet's dump format (<code>{t0, t1, signals: [{name, w, t}]}</code>) to WaveJSON.</td></tr>
+<tr><td class="mono">WaveFW.configure(settings)</td><td>Global settings for every wave (see below); viewers and static SVGs are redrawn. <code>view.setSort('asc', 'i_,o_')</code> sorts one viewer.</td></tr>
+</table></div>
+<h3>Settings (config file)</h3>
+<p>Colours, sizes, fonts, line widths and sorting are settings. They are merged in this order, later wins: built-in defaults, the global settings (<code>wavefw.config.js</code> loaded before <code>wavefw.js</code>, which sets <code>window.WAVEFW_CONFIG</code>, or <code>WaveFW.configure()</code>), the diagram's <code>"config"</code> object, and the element's <code>data-*</code> attributes or the constructor options. The <code>"config"</code> section of a converter config file (<code>tools/demo/demo.config.json</code>, <code>dump.config.json</code>) is written into the generated JSON; <code>tools/mkhtml.py</code> uses the top-level one as the page's global settings. This page loads <code>wavefw.config.js</code>.</p>
+<div class="tbl"><table>
+<tr><th>Key</th><th>Meaning</th></tr>
+<tr><td class="mono">theme, colors</td><td>As in section 5. Global: applied to <code>&lt;html&gt;</code>.</td></tr>
+<tr><td class="mono">rowHeight, groupHeight, spaceHeight, headerHeight</td><td>Row heights in px (26, 22, 14, 24; static SVG group/spacer rows default to 20 and 12).</td></tr>
+<tr><td class="mono">nameWidth, fontSize, labelSize</td><td>Viewer name column (200 px), name text (11.5 px), bus labels (11 px).</td></tr>
+<tr><td class="mono">fontMono, fontBody</td><td>CSS font-family lists (set <code>--font-mono</code> / <code>--font-body</code>).</td></tr>
+<tr><td class="mono">traceWidth, busWidth</td><td>Line widths of 1-bit traces (1.4) and bus outlines (1.2).</td></tr>
+<tr><td class="mono">sort, sortIgnore</td><td><code>none | asc | desc</code> and the prefixes skipped when sorting (array or <code>"i_,o_"</code>).</td></tr>
+<tr><td class="mono">sortButton, hint</td><td>Show the Sort controls and the help line (both <code>true</code>).</td></tr>
+<tr><td class="mono">style, radix</td><td>Edge style <code>auto | wavedrom | questa | square</code> and bus value radix <code>auto | hex | dec | signed | bin | oct | ascii</code> (see section 4). A signal's own <code>"style"</code> / <code>"radix"</code> wins.</td></tr>
+<tr><td class="mono">fold</td><td>Groups folded when a viewer opens: <code>true</code> (all), a nesting depth (<code>2</code>: groups inside groups inside groups) or group paths (<code>["tb.dut"]</code>).</td></tr>
+</table></div>
+<h3>Extensions to WaveJSON</h3>
+<div class="tbl"><table>
+<tr><th>Key</th><th>Meaning</th></tr>
+<tr><td class="mono">time: {t0, cycle, t1?, skip?}</td><td>Cycle <i>c</i> starts at <code>t0 + c·cycle</code> ps. <code>skip: [[k, n]]</code> means the <code>|</code> cell at index <i>k</i> stands for <i>n</i> cycles.</td></tr>
+<tr><td class="mono">signal[i].tv: [[t, v], …]</td><td>Exact transitions in model time. 1-bit values are <code>0 1 x z</code>; buses are hex strings. Takes precedence over <code>wave</code>.</td></tr>
+<tr><td class="mono">signal[i].width, enum, radix, style, color</td><td>Bus width, value labels, value radix (<code>fmt</code> is an alias), edge style, fixed fill colour 3–9 (a CSS colour string in <code>color</code> acts like <code>stroke</code>).</td></tr>
+<tr><td class="mono">signal[i].path, same</td><td>Full hierarchical path (shown as the name's tooltip). <code>"same": "path"</code> takes the <code>tv</code> of the signal with that path, so one net seen at several levels is stored once.</td></tr>
+<tr><td class="mono">signal[i].stroke, fill</td><td>CSS colours for this signal's trace/outline and bus fill. The name is drawn in the stroke colour.</td></tr>
+<tr><td class="mono">config.theme, config.colors, config.*</td><td>Theme, palette (same keys as <code>data-colors</code>) and any other setting for this diagram.</td></tr>
+<tr><td class="mono">markers / jumps / cursor</td><td><code>{t | cycle, label}</code> and <code>{t | cycle, span, label}</code>; <code>t</code> is in model units or a time string.</td></tr>
+</table></div>
+
+<!-- ============================================================ -->
+<h2 id="repro">9. Reproduce</h2>
+<pre><code>make demo        # verilator --binary --trace  ->  /tmp/wavefw_demo.vcd
+                 # tools/vcd2wavedrom.py --config tools/demo/demo.config.json (wavepeek)  ->  demo_waves.js
+make html        # tools/mkhtml.py: every view of the config  ->  one self-contained page (/tmp/wavefw_demo.html)
+make html CONFIG=dump.config.json HTML=dump.html     # the same for any dump
+make html WAVES=test_stream_video.vcd                # from the VCD alone: makes test_stream_video.config.json
+                                                     # (every signal, full paths, editable) and test_stream_video.html
+make smoke       # headless Chromium (playwright): no console errors, interaction checks, screenshots
+
+python3 -I tools/vcd2wavedrom.py --waves dump.vcd --scope tb.u_dut --exact \
+    --from 896us --to 1155us --signals i_sat_rxd_comp,r_state,o_sat_data \
+    --enum r_state=0:IDLE,1:VERIFY,2:RECEIVE,3:GAP,5:ERROR \
+    --marker 'posedge o_sat_data_eof=eof' --out frame.json</code></pre>
+<p class="muted">To cross-check a window in a GUI, open the same VCD in <a href="https://surfer-project.org">Surfer</a> and compare the edge times at the markers. Surfer is not needed to build the page.</p>
+
+<script src="wavefw.config.js"></script>
+<script src="wavefw.js"></script>
+<script src="demo_waves.js"></script>
+<script>
+'use strict';
+/* ---------------- source panels: show the script each example renders ---------------- */
+document.querySelectorAll('.ex').forEach(ex => { ex.querySelector('pre').textContent = ex.querySelector('script').textContent.trim(); });
+
+/* ---------------- page theme (auto → light → white → dark) and global palette ---------------- */
+(function theme() {
+  const b = document.getElementById('theme'), modes = ['auto', 'light', 'white', 'dark'];
+  let i = 0;
+  b.addEventListener('click', () => { i = (i + 1) % modes.length; WaveFW.setTheme(modes[i]); b.textContent = 'Theme: ' + modes[i]; });
+  const pal = document.getElementById('palette'), inputs = [...pal.querySelectorAll('input[type=color]')];
+  pal.addEventListener('input', e => { const k = e.target.dataset.k; if (k) WaveFW.setColors({ [k]: e.target.value }); });
+  document.getElementById('pal-reset').addEventListener('click', () => {
+    WaveFW.setColors(Object.fromEntries(inputs.map(x => [x.dataset.k, null])));
+    inputs.forEach(x => { x.value = x.defaultValue; });
+  });
+})();
+
+/* ---------------- facts, captions and cards from the demo data ---------------- */
+(function demo() {
+  const D = window.DEMO_WAVES, facts = [['Framework', 'wavefw ' + WaveFW.version], ['Renderers', 'WaveView (canvas) · WaveSVG']];
+  if (D) {
+    const m = D.exact.meta;
+    facts.push(['Dump', m.waves + ', ' + WaveFW.fmtTime(m.to_ps - m.from_ps) + ' window'], ['Wave tool', m.tool], ['Simulator', 'Verilator 5.046']);
+    const done = D.exact.markers.filter(x => x.label.startsWith('done'));
+    document.getElementById('cap-byte').textContent = `Byte 0xA5 on txd: two start bits, the data bits 1 0 1 0 0 1 0 1 (LSB first) and the even-parity bit 0; done is pulsed at ${WaveFW.fmtTime(done[0].t, 1000)}. Colours show the enum state of the transmitter FSM.`;
+    document.getElementById('cyc-src').textContent = JSON.stringify(D.cycle, null, 1).replace(/\n {2,}/g, ' ');
+  }
+  document.getElementById('facts').innerHTML = facts.map(([k, v]) => `<div><b>${k}</b>${v}</div>`).join('');
+  const cards = document.getElementById('cardlist');
+  if (!D) { cards.innerHTML = '<div class="note">demo_waves.js is missing: run <code>make demo</code>.</div>'; return; }
+  const st = D.exact.markers.filter(x => x.label.startsWith('start')), dn = D.exact.markers.filter(x => x.label.startsWith('done'));
+  const bytes = [['B1', '0xA5', st[0], dn[0]], ['B2', '0x3C', st[1], dn[1]]];
+  const flat = D.exact.signal.flat(), rx = flat.find(x => x.name === 'rx_sr');
+  const rxAt = t => { let v; for (const [tt, vv] of rx.tv) if (tt <= t) v = vv; return v; };
+  const pill = (val, b) => parseInt(rxAt(b.t + 20000), 16) === parseInt(val, 16) ? '<span class="pill pass">PASS</span>' : '<span class="pill fail">FAIL</span>';
+  cards.innerHTML = bytes.map(([id, val, a, b], i) => `<details class="tcase"${i === 0 ? ' open' : ''}>
+    <summary><span class="id">${id}</span><span class="ttl">Transmit ${val}</span><span class="cfg">start ${WaveFW.fmtTime(a.t, 1000)} · done ${WaveFW.fmtTime(b.t, 1000)} · ${WaveFW.fmtTime(b.t - a.t, 1000)} frame</span>${pill(val, b)}<span class="chev">▾ waves</span></summary>
+    <div class="inner"><p>11 Manchester cells of 80 ns each: 2 start bits, 8 data bits LSB first and the parity bit; <code>done</code> is pulsed after the last cell, and <code>rx_sr</code> takes the byte. The verdict compares <code>rx_sr</code> 20 ns after <code>done</code> with the byte sent.</p>
+      <div data-wave="DEMO_WAVES.exact" data-lazy data-title="${id} · ${val}" data-from="${a.t - 20000}" data-to="${b.t + 60000}" data-cursor="${b.t}"></div></div></details>`).join('');
+  WaveFW.upgrade(cards);
+})();
+</script>
+</body>
+</html>

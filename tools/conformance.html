@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wavefw Conformance</title>
+<link rel="stylesheet" href="../wavefw.css">
+<style>
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 14px; padding: 0 clamp(16px, 3vw, 32px) 48px; }
+h1 { font-size: 26px; margin: 28px 0 6px; }
+p { max-width: 90ch; color: var(--muted); }
+code { font-family: var(--font-mono); font-size: 0.92em; background: var(--panel-2); padding: 1px 5px; border-radius: 3px; }
+.case { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; margin-block: 14px; overflow: hidden; }
+.case h2 { font-size: 14px; margin: 0; padding: 8px 12px; background: var(--panel-2); border-bottom: 1px solid var(--line); display: flex; gap: 12px; flex-wrap: wrap; }
+.case h2 code { font-weight: 400; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid > div { padding: 10px 12px; min-width: 0; overflow-x: auto; }
+.grid > div + div { border-left: 1px solid var(--line); }
+.grid .lbl { font-size: 11.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+.stock { background: #fff; border-radius: 4px; }   /* stock WaveDrom's default skin assumes a white page */
+.viewer { padding: 0 12px 12px; }
+@media (max-width: 860px) { .grid { grid-template-columns: 1fr; } .grid > div + div { border-left: 0; border-top: 1px solid var(--line); } }
+</style>
+</head>
+<body>
+<h1>wavefw conformance</h1>
+<p>Each case is drawn three times: wavefw's static SVG, stock WaveDrom 3.5.0 (vendored in <code>tools/vendor/</code>, only used here), and the wavefw interactive viewer. The <code>&lt;…&gt;</code> sub-cycle syntax and WaveDrom's <code>skin</code>/<code>reg</code> features are out of scope.</p>
+<div id="cases"></div>
+
+<script src="../wavefw.js" data-manual></script>
+<script src="vendor/default.js"></script>
+<script src="vendor/wavedrom.min.js"></script>
+<script>
+'use strict';
+const CASES = [
+  ['Clocks p n P N, period 2', { signal: [{ name: 'p', wave: 'p.....' }, { name: 'n', wave: 'n.....' }, { name: 'P', wave: 'P.....' }, { name: 'N', wave: 'N.....' }, { name: 'p, period 2', wave: 'p..', period: 2 }] }],
+  ['Levels 0 1 h l H L', { signal: [{ name: '0 1', wave: '010.1.0' }, { name: 'h l', wave: 'hlh.l.h' }, { name: 'H L', wave: 'HLH.L.H' }, { name: 'mixed', wave: '0h.l1.0' }] }],
+  ['Unknown and high-Z: x z', { signal: [{ name: 'x', wave: 'x.1.x.0' }, { name: 'z', wave: 'z.1.z.0' }, { name: 'bus x', wave: 'x.=.x..', data: ['A'] }] }],
+  ['Pull-up / pull-down: u d', { signal: [{ name: 'u d', wave: '0u..d.1' }, { name: 'd', wave: '1d..u.0' }] }],
+  ['Bus = 2-9 with data', { signal: [{ name: '= 2', wave: '=.2.=.', data: 'A B C' }, { name: '3-9', wave: '3456789', data: ['3', '4', '5', '6', '7', '8', '9'] }, { name: 'same char twice', wave: '33.4', data: ['a', 'b', 'c'] }] }],
+  ['Gap |', { signal: [{ name: 'clk', wave: 'p..|..' }, { name: 'data', wave: '=.=|=.', data: ['A', 'B', 'C'] }, { name: 'bit', wave: '01.|.0' }] }],
+  ['Phase', { signal: [{ name: 'clk', wave: 'p.....' }, { name: 'phase 0.5', wave: '01.0..', phase: 0.5 }, { name: 'phase -0.5', wave: '01.0..', phase: -0.5 }] }],
+  ['Groups and spacers', { signal: [{ name: 'clk', wave: 'p....' }, {}, ['grp A', { name: 'a1', wave: '01.0.' }, ['nested', { name: 'a2', wave: '0.1.0' }]], ['grp B', { name: 'b1', wave: '=.=..', data: 'X Y' }]] }],
+  ['Edges', { signal: [{ name: 'A', wave: '01..0..', node: '.a..b..' }, { name: 'B', wave: '0.1..0.', node: '..c..d.' }, { name: 'C', wave: '0..1..0', node: '...e..f' }],
+    edge: ['a~>c t1', 'c-|>e', 'b-~>d', 'd~->f', 'a<->b width', 'e|-f', 'c+d gap'] }],
+  ['head / foot with tick / tock', { signal: [{ name: 'clk', wave: 'p.....' }, { name: 'd', wave: 'x3.4.x', data: 'A B' }], head: { text: 'Title', tick: 4 }, foot: { text: 'footnote', tock: 0 } }],
+  ['hscale 2', { signal: [{ name: 'clk', wave: 'p...' }, { name: 'd', wave: '=.=.', data: 'long-label-1 long-label-2' }], config: { hscale: 2 } }],
+];
+const root = document.getElementById('cases');
+CASES.forEach(([title, json], i) => {
+  const c = document.createElement('section'); c.className = 'case';
+  c.innerHTML = `<h2>${title} <code></code></h2><div class="grid"><div><div class="lbl">wavefw · WaveSVG</div><div class="mine"></div></div>
+    <div><div class="lbl">stock WaveDrom 3.5.0</div><div class="stock" id="WaveDrom_Display_${i}"></div></div></div><div class="viewer"><div class="lbl" style="font-size:11.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:6px 0">wavefw · WaveView</div><div class="v"></div></div>`;
+  c.querySelector('h2 code').textContent = JSON.stringify(json.signal.map(s => s.wave).filter(Boolean));
+  root.appendChild(c);
+  WaveSVG.render(c.querySelector('.mine'), json);
+  new WaveView(c.querySelector('.v'), json, { title });
+  if (window.WaveDrom) WaveDrom.RenderWaveForm(i, JSON.parse(JSON.stringify(json)), 'WaveDrom_Display_');
+  else c.querySelector('.stock').textContent = 'stock WaveDrom not vendored (see README)';
+});
+</script>
+</body>
+</html>

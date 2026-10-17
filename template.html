@@ -1,0 +1,943 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PSI5 Manchester Decoder</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: one reading column (72ch) for prose, full-width "bench" panels for diagrams, waveforms and tables. */
+:root {
+  --bg: #f7f6f2;        /* warm paper */
+  --panel: #ffffff;
+  --panel-2: #efede6;
+  --fg: #1d1f24;
+  --muted: #5e6472;
+  --line: #d9d6cc;
+  --accent: #b5551b;    /* copper: PSI5 is a current-modulated two-wire bus */
+  --accent-soft: #f4e2d4;
+  --wave-1: #1d1f24;    /* single bit trace */
+  --wave-bus: #2f5d8a;  /* bus outline */
+  --wave-x: #c23a2b;
+  --pass: #2a7a46;  --pass-soft: #dcefe1;
+  --fail: #b8322b;  --fail-soft: #f6dcd9;
+  --warn: #9a6b00;  --warn-soft: #f6ecc8;
+  --code-bg: #efede6;
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #16181d; --panel: #1f2229; --panel-2: #272b33; --fg: #e8e6df; --muted: #9aa0ab; --line: #363b45;
+  --accent: #e4834a; --accent-soft: #3a2a1f; --wave-1: #e8e6df; --wave-bus: #7fb0dd; --wave-x: #e0665a;
+  --pass: #6cc98a; --pass-soft: #1f3a29; --fail: #ef7a71; --fail-soft: #3f2321; --warn: #e2b74c; --warn-soft: #3d3215;
+  --code-bg: #272b33; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #16181d; --panel: #1f2229; --panel-2: #272b33; --fg: #e8e6df; --muted: #9aa0ab; --line: #363b45;
+  --accent: #e4834a; --accent-soft: #3a2a1f; --wave-1: #e8e6df; --wave-bus: #7fb0dd; --wave-x: #e0665a;
+  --pass: #6cc98a; --pass-soft: #1f3a29; --fail: #ef7a71; --fail-soft: #3f2321; --warn: #e2b74c; --warn-soft: #3d3215;
+  --code-bg: #272b33; color-scheme: dark; }
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.55;
+  padding-inline: clamp(16px, 4vw, 48px); padding-block: 0 64px; }
+h1, h2, h3, h4 { line-height: 1.2; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(26px, 4vw, 38px); font-weight: 700; letter-spacing: -0.01em; }
+h2 { font-size: 24px; font-weight: 600; margin-block: 56px 16px; padding-top: 12px; border-top: 2px solid var(--accent); }
+h3 { font-size: 18px; font-weight: 600; margin-block: 28px 10px; }
+h4 { font-size: 15px; font-weight: 600; margin-block: 18px 6px; }
+p, ul, ol { max-width: 72ch; }
+p { margin-block: 0 12px; }
+ul, ol { margin-block: 0 12px; padding-left: 22px; }
+li { margin-block: 3px; }
+a { color: var(--accent); }
+code, kbd { font-family: var(--font-mono); font-size: 0.92em; background: var(--code-bg); padding: 1px 5px; border-radius: 3px; }
+pre { font-family: var(--font-mono); font-size: 13px; background: var(--code-bg); padding: 12px 14px; border-radius: 6px;
+  overflow-x: auto; line-height: 1.5; max-width: 100%; margin-block: 8px 16px; }
+pre code { background: none; padding: 0; }
+.eyebrow { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.muted { color: var(--muted); }
+.mono { font-family: var(--font-mono); }
+.num { font-variant-numeric: tabular-nums; }
+
+header.top { padding-block: 36px 24px; border-bottom: 1px solid var(--line); display: grid; gap: 14px; }
+header.top .sub { color: var(--muted); max-width: 80ch; font-size: 16px; }
+.facts { display: flex; flex-wrap: wrap; gap: 8px 28px; font-size: 13.5px; }
+.facts div { min-width: 0; }
+.facts b { font-weight: 600; display: block; }
+
+nav.toc { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; background: var(--bg); border-bottom: 1px solid var(--line);
+  display: flex; flex-wrap: wrap; gap: 2px 14px; padding-block: 8px; font-size: 13.5px; }
+nav.toc a { color: var(--fg); text-decoration: none; padding: 2px 4px; border-radius: 3px; }
+nav.toc a:hover, nav.toc a:focus-visible { background: var(--accent-soft); outline: none; }
+
+.bench { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px; margin-block: 12px 20px; min-width: 0; }
+.bench.scroll { overflow-x: auto; }
+figure { margin: 0; }
+figcaption { font-size: 13.5px; color: var(--muted); margin-top: 8px; max-width: 90ch; }
+
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 600; background: var(--panel-2); white-space: nowrap; }
+td.mono, th.mono { font-family: var(--font-mono); font-size: 12.5px; white-space: nowrap; }
+tr.group td { background: var(--panel-2); font-weight: 600; }
+.tbl { overflow-x: auto; margin-block: 8px 18px; }
+#testtbl td:nth-child(2) { min-width: 220px; }
+#testtbl td:nth-child(5) { min-width: 160px; }
+
+.pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 10px; letter-spacing: 0.03em; white-space: nowrap; }
+.pill.pass { background: var(--pass-soft); color: var(--pass); }
+.pill.fail { background: var(--fail-soft); color: var(--fail); }
+.pill.warn { background: var(--warn-soft); color: var(--warn); }
+.pill.info { background: var(--accent-soft); color: var(--accent); }
+
+.note { border-left: 3px solid var(--warn); background: var(--warn-soft); padding: 10px 14px; border-radius: 0 6px 6px 0; max-width: 90ch; margin-block: 12px 18px; }
+.note.ok { border-color: var(--pass); background: var(--pass-soft); }
+.note.info { border-color: var(--accent); background: var(--accent-soft); }
+
+/* diagrams */
+.diagram { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 14px; }
+.diagram svg { width: 100%; height: auto; display: block; }
+.diagram .detail { background: var(--panel-2); border-radius: 6px; padding: 12px 14px; font-size: 13.5px; min-width: 0; }
+.diagram .detail h4 { margin-top: 0; }
+.diagram .detail dl { display: grid; grid-template-columns: max-content 1fr; gap: 3px 10px; margin: 8px 0; font-size: 12.5px; }
+.diagram .detail dt { font-family: var(--font-mono); color: var(--muted); }
+.diagram .detail dd { margin: 0; }
+.diagram .detail ul { padding-left: 18px; font-size: 13px; }
+@media (max-width: 860px) { .diagram { grid-template-columns: 1fr; } }
+.blk { cursor: pointer; }
+.blk rect { fill: var(--panel); stroke: var(--fg); stroke-width: 1.2; transition: fill 120ms, stroke 120ms; }
+.blk text { fill: var(--fg); font-family: var(--font-body); font-size: 12.5px; pointer-events: none; }
+.blk text.sub { font-size: 10.5px; fill: var(--muted); font-family: var(--font-mono); }
+.blk:hover rect, .blk:focus-visible rect { stroke: var(--accent); stroke-width: 1.6; }
+.blk:focus-visible { outline: none; }
+.blk.active rect { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2; }
+.blk.active text { fill: var(--fg); }
+.edge { fill: none; stroke: var(--fg); stroke-width: 1.2; }
+.edge.dim { opacity: 0.22; }
+.edge.hot { stroke: var(--accent); stroke-width: 2; }
+.edge-label { font-family: var(--font-mono); font-size: 10px; fill: var(--muted); }
+.edge-label.hot { fill: var(--accent); font-weight: 600; }
+.port { font-family: var(--font-mono); font-size: 10.5px; fill: var(--fg); }
+.st circle { fill: var(--panel); stroke: var(--fg); stroke-width: 1.4; }
+.st text { fill: var(--fg); font-family: var(--font-mono); font-size: 11px; pointer-events: none; }
+.st { cursor: pointer; }
+.st:hover circle, .st:focus-visible circle { stroke: var(--accent); }
+.st:focus-visible { outline: none; }
+.st.active circle { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2.2; }
+.st.err circle { stroke-dasharray: 4 3; }
+
+/* waveform viewer */
+.wv { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); overflow: hidden; }
+.wv .bar { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--panel-2); font-size: 12.5px; }
+.wv .bar button { font: inherit; font-size: 12px; padding: 2px 9px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); border-radius: 4px; cursor: pointer; }
+.wv .bar button:hover { border-color: var(--accent); color: var(--accent); }
+.wv .bar button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.wv .bar .cur { font-family: var(--font-mono); margin-left: auto; color: var(--muted); }
+.wv .body { display: grid; grid-template-columns: 200px minmax(0, 1fr); }
+.wv .names { border-right: 1px solid var(--line); font-family: var(--font-mono); font-size: 11.5px; overflow: hidden; }
+.wv .names .hdr { height: 24px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
+.wv .names .row { height: 26px; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 8px; border-bottom: 1px dotted var(--line); white-space: nowrap; }
+.wv .names .row .n { overflow: hidden; text-overflow: ellipsis; }
+.wv .names .row .v { color: var(--accent); font-weight: 600; flex-shrink: 0; }
+.wv canvas { display: block; width: 100%; cursor: crosshair; touch-action: none; }
+.wv .hint { font-size: 11.5px; color: var(--muted); padding: 4px 10px; border-top: 1px solid var(--line); }
+@media (max-width: 600px) { .wv .body { grid-template-columns: 130px minmax(0, 1fr); } }
+
+/* test cards */
+.summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-block: 12px 18px; }
+.tile { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }
+.tile .big { font-size: 26px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.tile .lbl { font-size: 12px; color: var(--muted); }
+.tcase { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); margin-block: 14px; }
+.tcase > summary { list-style: none; cursor: pointer; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 10px 14px; }
+.tcase > summary::-webkit-details-marker { display: none; }
+.tcase > summary .id { font-family: var(--font-mono); font-weight: 600; color: var(--accent); }
+.tcase > summary .ttl { font-weight: 600; }
+.tcase > summary .cfg { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.tcase > summary .chev { margin-left: auto; color: var(--muted); font-size: 12px; }
+.tcase[open] > summary { border-bottom: 1px solid var(--line); }
+.tcase .inner { padding: 12px 14px 16px; }
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px 24px; }
+.cols > div { min-width: 0; }
+.crit li { margin-block: 4px; }
+.crit .ok::marker { color: var(--pass); }
+.obs td.ok { color: var(--pass); font-weight: 600; }
+.obs td.bad { color: var(--fail); font-weight: 600; }
+.lazy-wave { min-height: 60px; }
+button.linkish { font: inherit; background: none; border: 1px solid var(--line); border-radius: 4px; color: var(--accent); padding: 3px 10px; cursor: pointer; }
+button.linkish:hover { border-color: var(--accent); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="eyebrow">IP datasheet &amp; verification report</div>
+  <h1>PSI5 Manchester Decoder <span class="mono muted" style="font-weight:400;font-size:0.6em">psi5_mc_decoder</span></h1>
+  <p class="sub">Receiver-side Manchester decoder for one PSI5 satellite channel: it takes the current-comparator output of the SATx RXD pin, filters it, recovers 10- or 16-bit sensor frames at 125 or 189 kbps, checks CRC-3 or parity through two redundant shift registers, and reports data or a typed error code to the SPI status logic. This page combines the IP description, interactive block and state diagrams, and the Verilator regression with waveforms pulled from the VCD dump with wavepeek.</p>
+  <div class="facts" id="facts"></div>
+</header>
+
+<nav class="toc" aria-label="Sections">
+  <a href="#overview">Overview</a>
+  <a href="#interfaces">Interfaces</a>
+  <a href="#arch">Architecture</a>
+  <a href="#fsm">Decoder FSM</a>
+  <a href="#frame">Frame &amp; timing</a>
+  <a href="#filters">Input filters</a>
+  <a href="#tbench">Testbench</a>
+  <a href="#tests">Test scenarios</a>
+  <a href="#repro">Reproduce</a>
+</nav>
+
+<!-- ============================================================ -->
+<h2 id="overview">1. Overview</h2>
+<p>PSI5 (Peripheral Sensor Interface 5) sensors answer a voltage sync pulse by modulating a current on the two-wire line. The satellite front-end turns that current into a digital comparator signal, <code>i_sat_rxd_comp</code>, which is the only data input of this IP. The decoder reconstructs the Manchester-coded frame: two start bits, 10 or 16 data bits (LSB first), then either one parity bit or three CRC bits, followed by a gap.</p>
+<h3>Features</h3>
+<ul>
+  <li>Bit rates 125 kbps and 189 kbps, selected by <code>i_sat1_cnf.baudrate</code>; the sampling clock enable (4 MHz or 6 MHz derived from the 12 MHz system clock) is switched accordingly, so all timing windows are expressed in sample ticks and stay identical for both rates.</li>
+  <li>Frame formats 10P, 10C, 16P and 16C (10/16 data bits, parity or CRC-3).</li>
+  <li>Input conditioning chain: 2-FF synchroniser, SYNC-pulse blanking, up/down-counter deglitcher (6 ticks at 12 MHz), 4-sample confirmed-edge filter.</li>
+  <li>Phase-tracking decoder: separate timers since the last rising and the last falling edge, so asymmetric comparator slew does not shift the sampling point.</li>
+  <li>Robustness checks: start-bit spacing, bit timing windows, baud-rate plausibility counter, gap check after the last bit, plus an extra "additional bit during gap" detector.</li>
+  <li>Safety: two redundant 19-bit shift registers compared at end of frame; CRC and parity computed twice (running during reception and recomputed from the shift register) to catch common-mode faults. Test-mode input <code>i_tm_sim_sr_error</code> forces a mismatch.</li>
+  <li>Outputs a one-clock <code>o_sat_data_eof</code> strobe per frame, with <code>o_sat_data_valid</code> for clean data or an error code in <code>o_sat_data</code> (0x7FFA frame / shift-register error, 0x7FFB checksum error, Atic256 variant).</li>
+  <li><code>o_mc_blank</code> freezes base-current tracking while a frame is being decoded.</li>
+</ul>
+<h3>Key facts</h3>
+<div class="tbl"><table>
+<tr><th>Item</th><th>Value</th></tr>
+<tr><td>Top module</td><td class="mono">psi5_mc_decoder (package psi5_pkg)</td></tr>
+<tr><td>Sub-modules</td><td class="mono">cdc_sync, psi5_degl, psi5_confirmed_edge</td></tr>
+<tr><td>System clock</td><td>12 MHz, asynchronous active-low reset <code>i_rst_n</code></td></tr>
+<tr><td>Sampling clock enables</td><td>4 MHz (<code>i_clk_sampl_125_en</code>, 1 of 3 cycles) for 125 kbps; 6 MHz (<code>i_clk_sampl_189_en</code>, 1 of 2 cycles) for 189 kbps</td></tr>
+<tr><td>Bit period</td><td class="num">8.0 µs = 32 ticks (125 kbps); 5.3 µs ≈ 31.8 ticks (189 kbps)</td></tr>
+<tr><td>Frame length (incl. 2 start bits)</td><td>10P: 13 bits · 10C: 15 bits · 16P: 19 bits · 16C: 21 bits</td></tr>
+<tr><td>Variant</td><td><code>c_atic256_variant = 1</code>: error codes on <code>o_sat_data</code>; variant 0 (Atic30x) returns 0x7FFF instead</td></tr>
+<tr><td>Register count (approx.)</td><td>2×19 b shift registers, 2×6 b edge timers, 5 b bit counter, 3 b CRC, 3 b FSM, status flags; ~70 flip-flops plus filters</td></tr>
+</table></div>
+
+<!-- ============================================================ -->
+<h2 id="interfaces">2. Interfaces</h2>
+<div class="tbl"><table>
+<tr><th>Port</th><th>Dir</th><th>Width</th><th>Description</th></tr>
+<tr class="group"><td colspan="4">Global</td></tr>
+<tr><td class="mono">i_rst_n</td><td>in</td><td>1</td><td>Asynchronous active-low reset.</td></tr>
+<tr><td class="mono">i_clk_12m</td><td>in</td><td>1</td><td>12 MHz system clock; all flops run on it.</td></tr>
+<tr><td class="mono">i_clk_sampl_125_en</td><td>in</td><td>1</td><td>4 MHz sampling clock enable for 125 kbps.</td></tr>
+<tr><td class="mono">i_clk_sampl_189_en</td><td>in</td><td>1</td><td>6 MHz sampling clock enable for 189 kbps.</td></tr>
+<tr class="group"><td colspan="4">SPI / configuration</td></tr>
+<tr><td class="mono">i_sat_on</td><td>in</td><td>1</td><td>Channel enable. Low holds filters, timers, FSM and shift registers in reset.</td></tr>
+<tr><td class="mono">i_sat1_cnf</td><td>in</td><td>3</td><td><code>t_psi5_ch_cfg</code>: {baudrate (0=125k, 1=189k), frame_length (0=10 b, 1=16 b), pc (0=parity, 1=CRC)}.</td></tr>
+<tr><td class="mono">i_md_trim</td><td>in</td><td>1</td><td>CTM trim: 1 disables the "current high 22 ticks after a rising data edge" check in CHECK_GAP. Keep 0.</td></tr>
+<tr class="group"><td colspan="4">Analog front-end</td></tr>
+<tr><td class="mono">i_sat_rxd_comp</td><td>in</td><td>1</td><td>Current comparator output of the SATx RXD pin (asynchronous).</td></tr>
+<tr class="group"><td colspan="4">Internal</td></tr>
+<tr><td class="mono">i_sync_blank</td><td>in</td><td>1</td><td>SYNC pulse active: masks the comparator input while the sync pulse is driven.</td></tr>
+<tr><td class="mono">o_mc_blank</td><td>out</td><td>1</td><td>High while the decoder is not in IDLE; stops base-current (Ibase) tracking.</td></tr>
+<tr><td class="mono">o_sat_data</td><td>out</td><td>16</td><td>Sensor data (valid with eof &amp; valid) or error code 0x7FFA / 0x7FFB (valid with eof &amp; !valid). 0 otherwise.</td></tr>
+<tr><td class="mono">o_sat_data_valid</td><td>out</td><td>1</td><td>One-clock strobe with eof: frame received without any error.</td></tr>
+<tr><td class="mono">o_sat_data_eof</td><td>out</td><td>1</td><td>One-clock strobe: a frame (good or bad) has terminated.</td></tr>
+<tr><td class="mono">o_err_sat</td><td>out</td><td>3</td><td><code>psi5_error_status_t</code> {sr_error[2], checksum_error[1], frame_error[0]}; one-clock pulse with eof.</td></tr>
+<tr class="group"><td colspan="4">Test mode</td></tr>
+<tr><td class="mono">i_tm_sim_sr_error</td><td>in</td><td>1</td><td>Inverts the bit shifted into the second shift register to provoke a shift-register mismatch.</td></tr>
+</table></div>
+
+<h3>Output coding</h3>
+<div class="tbl"><table>
+<tr><th>Condition at eof</th><th class="mono">o_sat_data_valid</th><th class="mono">o_err_sat</th><th class="mono">o_sat_data</th></tr>
+<tr><td>Frame OK</td><td>1</td><td class="mono">000</td><td class="mono">16C: sr[15:0] · 16P: sr[17:2] · 10C: {D9..D0, 6'b0} · 10P: {D9..D0, 6'b0}</td></tr>
+<tr><td>Shift-register mismatch (CHECK_GAP, sr1 ≠ sr2)</td><td>0</td><td class="mono">100</td><td class="mono">0x7FFA</td></tr>
+<tr><td>Frame / timing error (FSM ended in FRAME_ERROR)</td><td>0</td><td class="mono">001</td><td class="mono">0x7FFA</td></tr>
+<tr><td>CRC ≠ 0 (running or recomputed) with pc=1</td><td>0</td><td class="mono">010</td><td class="mono">0x7FFB</td></tr>
+<tr><td>Parity odd (running or recomputed) with pc=0</td><td>0</td><td class="mono">010</td><td class="mono">0x7FFB</td></tr>
+</table></div>
+<p class="muted">The 10-bit formats place the data at bits [15:6] because the shift register fills from the MSB side and only 13 or 11 bits are shifted in. Downstream logic therefore reads the same bit positions for both frame lengths.</p>
+
+<!-- ============================================================ -->
+<h2 id="arch">3. Architecture</h2>
+<p>Click a block to read what it does, its parameters and the timing it adds. The arrows carry the internal signal names used in the waveforms below, so the diagram, the RTL and the traces share one vocabulary.</p>
+<div class="bench">
+  <div class="diagram">
+    <figure>
+      <svg id="blockdiag" viewBox="0 0 1180 470" role="img" aria-label="Block diagram: comparator input through synchroniser, blanking, deglitcher and confirmed-edge filter into the Manchester FSM with edge timers, then redundant shift registers, CRC/parity and the output mux"></svg>
+      <figcaption>Signal flow of psi5_mc_decoder. Solid arrows are the data path; dashed arrows are enables and control. All blocks run on the 12 MHz clock; blocks marked "@sampl" only advance when the selected sampling clock enable is high.</figcaption>
+    </figure>
+    <div class="detail" id="blockdetail"></div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="fsm">4. Manchester decoder FSM</h2>
+<p>The decoder is a five-state machine evaluated only on sampling-clock ticks. Every timing condition is expressed in ticks of the selected sampling clock (250 ns at 125 kbps, 166.7 ns at 189 kbps); the nominal bit period is 32 ticks and the half bit is 16 ticks. Click a state to list its exits.</p>
+<div class="bench">
+  <div class="diagram">
+    <figure>
+      <svg id="fsmdiag" viewBox="0 0 820 380" role="img" aria-label="State diagram with MC_IDLE, MC_VERIFY_STARTBIT, MC_RECEIVE_DATA, MC_CHECK_GAP and MC_FRAME_ERROR"></svg>
+      <figcaption>Decoder states. <code>re</code>/<code>fe</code> are the confirmed rising/falling edges, <code>cnt_re</code>/<code>cnt_fe</code> the ticks since the last confirmed rising/falling edge (saturating at 55). Any state returns to MC_IDLE when <code>i_sat_on</code> is low.</figcaption>
+    </figure>
+    <div class="detail" id="fsmdetail"></div>
+  </div>
+</div>
+
+<h3>Timing windows</h3>
+<div class="tbl"><table id="timingtbl">
+<tr><th>Check</th><th>Condition (ticks)</th><th>At 125 kbps (250 ns/tick)</th><th>At 189 kbps (166.7 ns/tick)</th><th>Purpose</th></tr>
+</table></div>
+
+<h3>Bit decoding rule</h3>
+<p>PSI5 Manchester coding has the data edge in the middle of the bit cell: a falling edge codes 0 and a rising edge codes 1 (as produced by the sensor model: first half carries the bit, second half its complement). The decoder tracks which edge polarity was the last data edge (<code>r_act_edge_sel</code>) and distinguishes two cases per bit cell:</p>
+<ul>
+  <li><b>Same-phase transition</b> (same polarity as the previous data edge) arriving 19…43 ticks later: the bit repeats the previous value (rising → 0, falling → 1). Arrival outside the window is a frame error.</li>
+  <li><b>Opposite-phase transition</b>: accepted when the opposite edge arrives 29…43 ticks after the previous data edge, or (back-up rule) when the same-edge timer reaches 38 while the opposite edge is 9…18 ticks old. The bit toggles and the tracked polarity flips.</li>
+  <li>If the same-edge timer reaches 43 without any decision, the frame is aborted.</li>
+</ul>
+<p>Each accepted bit is shifted into both shift registers, into the running CRC-3 (polynomial x³+x+1, seed 111) and the running parity. After the configured number of bits the FSM moves to MC_CHECK_GAP, where the line must stay low for one full bit period.</p>
+
+<!-- ============================================================ -->
+<h2 id="frame">5. Frame anatomy from the simulation</h2>
+<p>The figure is drawn from the VCD: test 1, frame 2 (sensor data 0x5A5A, 16 bits, CRC). Each tick on the bottom row is a <code>sr_data_in_valid</code> pulse found with <code>wavepeek change --on 'posedge i_clk_12m'</code>; the label shows the decoded bit and the bit counter.</p>
+<div class="bench scroll">
+  <figure>
+    <svg id="anatomy" role="img" aria-label="Comparator waveform of one 16-bit CRC frame with start bits, data bits and CRC bits annotated with the decoded values"></svg>
+    <figcaption id="anatomy-cap"></figcaption>
+  </figure>
+</div>
+<div class="bench">
+  <div class="wv" id="wv-frame"></div>
+</div>
+<p class="muted">The viewer above shows the complete frame with all decoder internals. Scroll to zoom, drag to pan, click to place the cursor; the left column shows every signal's value at the cursor. Buttons jump to the sync pulse, the start bits and the end-of-frame strobe.</p>
+
+<!-- ============================================================ -->
+<h2 id="filters">6. Input filter latency</h2>
+<p>The comparator edge passes three filters before the FSM sees it. The zoomed trace shows the first start-bit edge of the frame above together with the 12 MHz clock and the 4 MHz sampling enable.</p>
+<div class="bench">
+  <div class="wv" id="wv-zoom"></div>
+</div>
+<div class="tbl"><table id="lat-tbl">
+<tr><th>Stage</th><th>Signal</th><th>Delay after comparator edge</th><th>Mechanism</th></tr>
+</table></div>
+<p>Because the filters only delay the signal (they never shorten a pulse that is wider than their window), the decoder's timing windows are measured between confirmed edges and are unaffected by the latency itself. The confirmed-edge filter rejects any pulse shorter than 4 sampling ticks (1 µs at 125 kbps), the deglitcher any pulse shorter than 6 system clocks (0.5 µs).</p>
+
+<!-- ============================================================ -->
+<h2 id="tbench">7. Verification environment</h2>
+<p>The module-level testbench <code>au_psi5_mc_decoder_tb</code> drives the DUT from a behavioural PSI5 sensor model and checks the decoded word and error status on every end-of-frame strobe.</p>
+<div class="bench">
+  <figure>
+    <svg id="tbdiag" viewBox="0 0 900 250" role="img" aria-label="Testbench: clock generator and sampling-enable models, sensor model producing the comparator signal, DUT, and the checking tasks"></svg>
+    <figcaption>Testbench structure. The sync pulse (20 µs high, 450 µs period) triggers the sensor model, which starts its frame 20 µs after the pulse ends. The test program sets <code>sensor_cfg</code> and <code>sensor_data</code>, waits for <code>o_sat_data_eof</code> (430 µs timeout) and compares.</figcaption>
+  </figure>
+</div>
+<h3>Sensor model (<code>psi5_sensor_model</code>)</h3>
+<ul>
+  <li>Bit clock 8 µs (125 kbps) or 5.3 µs (189 kbps); <code>error.baudrate</code> swaps the rate while the DUT configuration keeps the configured one.</li>
+  <li>Frame: start bits S1 S2 (two rising data edges), data LSB first, then CRC-3 MSB first or one parity bit, then gap. <code>error.gap</code> drives one extra high half-bit in the gap.</li>
+  <li><code>error.checksum</code> inverts one random CRC bit (or the parity bit). <code>error.shift_register</code> is routed to the DUT's <code>i_tm_sim_sr_error</code>.</li>
+  <li><code>delay_rising</code>/<code>delay_falling</code> (×0.1 µs) skew one edge polarity to emulate a comparator threshold that is not at the mid-level, i.e. a duty cycle different from 50 %.</li>
+</ul>
+<h3>Checking tasks</h3>
+<ul>
+  <li><code>tb_send_and_verify_data</code>: expects <code>o_sat_data</code> equal to the sent word (16-bit) or to <code>(data &amp; 0x3FF) &lt;&lt; 6</code> (10-bit); reports <code>$error</code> on mismatch or on a missing eof.</li>
+  <li><code>tb_send_and_check_error</code>: expects the error code on <code>o_sat_data</code> and the matching <code>o_err_sat</code> bit; a missing eof is only reported with <code>$display</code>, so a silently ignored frame does not fail the run.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="tests">8. Test scenarios</h2>
+<p>Sixteen scenarios, four frames each (0x0000, 0x5A5A, 0xA5A5, 0xAD2C; the last one is the CRC reference vector of the PSI5 specification). The verdict on this page is computed from the waveform data: for every frame the values of <code>o_sat_data</code>, <code>o_err_sat</code> and <code>o_sat_data_valid</code> sampled at the <code>o_sat_data_eof</code> edge with <code>wavepeek change --on 'posedge o_sat_data_eof'</code> are compared with the PASS criteria of the scenario. The simulator log is the second, independent source: it contains no <code>$error</code>.</p>
+<div class="summary-grid" id="summary"></div>
+<div class="tbl"><table id="testtbl">
+<tr><th>ID</th><th>Scenario</th><th>Format</th><th>Rate</th><th>Injected</th><th>Expected at eof</th><th>Observed (4 frames)</th><th>Verdict</th></tr>
+</table></div>
+<div id="testcards"></div>
+
+<!-- ============================================================ -->
+<h2 id="repro">9. Reproducing the waves and this page</h2>
+<p>Everything on this page is generated from one VCD dump. The flow uses Verilator for the simulation and <a href="https://github.com/kleverhq/wavepeek">wavepeek</a> (Apache-2.0, Rust) to query the dump without a GUI.</p>
+<h4>1. Build wavepeek from source</h4>
+<pre><code>git clone --depth 1 https://github.com/kleverhq/wavepeek.git ~/tools/wavepeek_src
+cargo build --release --manifest-path ~/tools/wavepeek_src/Cargo.toml --target-dir ~/tools/wavepeek_target
+cp ~/tools/wavepeek_target/release/wavepeek ~/.local/bin/
+wavepeek --version        # v3.1.0 used for this page</code></pre>
+<h4>2. Run the regression with VCD tracing</h4>
+<pre><code>make trace-vcd            # TRACE=vcd ./verilate_build.sh ; ./verilate_run.sh +trace +wavefile=waves.vcd
+# or, with the build directory on the Linux file system (much faster under WSL):
+TRACE=vcd OBJ_DIR=/tmp/obj_dir_vcd ./verilate_build.sh
+/tmp/obj_dir_vcd/Vau_psi5_mc_decoder_tb +trace +wavefile=waves.vcd | tee sim.log</code></pre>
+<p>The testbench dumps the whole hierarchy when <code>+trace</code> is given (<code>$dumpfile</code>/<code>$dumpvars</code> block at the top of <code>au_psi5_mc_decoder_tb.sv</code>). The run takes about one second and produces a 20 MB VCD covering 29 ms of simulated time.</p>
+<h4>3. Query the dump</h4>
+<pre><code>wavepeek info   --waves waves.vcd
+wavepeek scope  --waves waves.vcd --tree --max-depth 3
+wavepeek signal --waves waves.vcd --scope au_psi5_mc_decoder_tb.u_dut --max unlimited
+
+# test windows: every change of the tb_test variable
+wavepeek change --waves waves.vcd --on '*' --sample-mode native --max unlimited \
+   --signals au_psi5_mc_decoder_tb.tb_test
+
+# decoder result at every end-of-frame strobe (one row per frame)
+wavepeek change --waves waves.vcd --scope au_psi5_mc_decoder_tb.u_dut \
+   --on 'posedge o_sat_data_eof' --sample-mode native --max unlimited \
+   --signals o_sat_data,o_err_sat,o_sat_data_valid,r_state,sr_match
+
+# sparse transition list of one frame for the viewer (JSON)
+wavepeek change --waves waves.vcd --from 896008208ps --to 1155176668ps \
+   --on '*' --sample-mode native --row-mode sparse --row-values delta --max unlimited \
+   --signals au_psi5_mc_decoder_tb.u_dut.r_state,au_psi5_mc_decoder_tb.u_dut.o_sat_data --json</code></pre>
+<h4>4. Regenerate the page</h4>
+<pre><code>python3 -I doc/gen_doc_waves.py --waves waves.vcd --out doc/waves_data.json
+python3 -I doc/build_doc.py        # injects waves_data.json into template.html -> psi5_mc_decoder_ip.html</code></pre>
+<p class="muted">Note on sampling modes: the extraction uses <code>--sample-mode native</code> for asynchronous changes (what the dump contains at that timestamp) and the default pre-edge mode only for the clock-aligned bit list in section 5, where values must be those the flops sampled.</p>
+
+<script id="wave-data" type="application/json">/*WAVE_DATA*/</script>
+<script>
+'use strict';
+const DATA = JSON.parse(document.getElementById('wave-data').textContent);
+const US = 1e6; // ps per µs
+const fmtUs = (ps, d = 2) => (ps / US).toFixed(d) + ' µs';
+
+/* ---------------- header facts ---------------- */
+(function facts() {
+  const el = document.getElementById('facts');
+  const items = [
+    ['Simulator', 'Verilator 5.046, --timing --assert'],
+    ['Dump', 'waves.vcd, ' + (parseInt(DATA.info.time_end) / 1e9).toFixed(2) + ' ms, ' + DATA.info.time_unit + ' resolution'],
+    ['Wave tool', DATA.wavepeek_version],
+    ['Testbench', 'au_psi5_mc_decoder_tb, 16 scenarios × 4 frames'],
+    ['Generated', '2026-10-12'],
+  ];
+  el.innerHTML = items.map(([k, v]) => `<div><b>${k}</b>${v}</div>`).join('');
+})();
+
+/* ---------------- enum decoders ---------------- */
+const ENUMS = {
+  'r_state': { 0: 'MC_IDLE', 1: 'MC_VERIFY_STARTBIT', 2: 'MC_RECEIVE_DATA', 3: 'MC_CHECK_GAP', 5: 'MC_FRAME_ERROR' },
+  'sensor.state': { 0: 'IDLE', 1: 'START', 2: 'DATA', 3: 'CRC', 4: 'PARITY', 5: 'GAP' },
+  'r_act_edge_sel': { 0: 'RISING', 1: 'FALLING' },
+  'o_err_sat': { 0: 'none', 1: 'frame', 2: 'checksum', 4: 'sr_mismatch' },
+};
+function decode(sig, v) {
+  if (v === undefined) return '?';
+  if (/[xz]/i.test(v)) return v;
+  const e = ENUMS[sig.name];
+  if (e) { const n = parseInt(v, 16); if (e[n] !== undefined) return e[n]; }
+  if (sig.name === 'sensor.bit_n') { const n = parseInt(v, 16) | 0; return String(n); }
+  if (sig.w === 1) return v;
+  if (sig.w <= 6) return String(parseInt(v, 16));
+  return '0x' + v.toUpperCase();
+}
+
+/* ---------------- waveform viewer ---------------- */
+class WaveView {
+  constructor(root, wave, opts = {}) {
+    this.root = root; this.wave = wave; this.opts = opts;
+    this.sigs = wave.signals;
+    this.rowH = 26; this.hdrH = 24;
+    this.t0 = wave.t0; this.span = wave.t1 - wave.t0;
+    this.cursor = opts.cursor ?? wave.t0;
+    this.markers = opts.markers || [];
+    this.build();
+    this.fit();
+    this.ro = new ResizeObserver(() => this.draw());
+    this.ro.observe(this.canvas);
+  }
+  build() {
+    const r = this.root; r.classList.add('wv');
+    const jumps = (this.opts.jumps || []).map((j, i) => `<button type="button" data-jump="${i}">${j.label}</button>`).join('');
+    r.innerHTML = `<div class="bar"><span class="eyebrow">${this.opts.title || 'Waveform'}</span>
+      <button type="button" data-act="in">Zoom +</button><button type="button" data-act="out">Zoom −</button>
+      <button type="button" data-act="fit">Fit</button>${jumps}<span class="cur"></span></div>
+      <div class="body"><div class="names"><div class="hdr"></div>${this.sigs.map(s => `<div class="row"><span class="n" title="${s.name}">${s.name}</span><span class="v"></span></div>`).join('')}</div>
+      <canvas tabindex="0" aria-label="waveform canvas"></canvas></div>
+      <div class="hint">Wheel: zoom at pointer · drag: pan · click: cursor · keys: + − 0 ← →</div>`;
+    this.canvas = r.querySelector('canvas');
+    this.vals = [...r.querySelectorAll('.names .row .v')];
+    this.curEl = r.querySelector('.cur');
+    r.querySelector('.bar').addEventListener('click', e => {
+      const b = e.target.closest('button'); if (!b) return;
+      if (b.dataset.act === 'in') this.zoom(0.5, 0.5);
+      else if (b.dataset.act === 'out') this.zoom(2, 0.5);
+      else if (b.dataset.act === 'fit') this.fit();
+      else if (b.dataset.jump !== undefined) { const j = this.opts.jumps[b.dataset.jump]; this.goto(j.t, j.span); }
+    });
+    const c = this.canvas;
+    c.addEventListener('wheel', e => { e.preventDefault(); const f = e.deltaY > 0 ? 1.25 : 0.8; this.zoom(f, this.frac(e)); }, { passive: false });
+    let drag = null;
+    c.addEventListener('pointerdown', e => { drag = { x: e.clientX, t0: this.t0, moved: false }; c.setPointerCapture(e.pointerId); });
+    c.addEventListener('pointermove', e => {
+      if (!drag) return; const dx = e.clientX - drag.x; if (Math.abs(dx) > 3) drag.moved = true;
+      this.t0 = this.clamp(drag.t0 - dx / this.pxPerPs()); this.draw();
+    });
+    c.addEventListener('pointerup', e => { if (drag && !drag.moved) { this.cursor = this.t0 + (e.clientX - c.getBoundingClientRect().left) / this.pxPerPs(); this.draw(); } drag = null; });
+    c.addEventListener('keydown', e => {
+      const k = e.key; let h = true;
+      if (k === '+' || k === '=') this.zoom(0.5, 0.5); else if (k === '-') this.zoom(2, 0.5); else if (k === '0') this.fit();
+      else if (k === 'ArrowLeft') { this.t0 = this.clamp(this.t0 - this.span * 0.2); this.draw(); }
+      else if (k === 'ArrowRight') { this.t0 = this.clamp(this.t0 + this.span * 0.2); this.draw(); }
+      else h = false;
+      if (h) e.preventDefault();
+    });
+  }
+  frac(e) { const r = this.canvas.getBoundingClientRect(); return (e.clientX - r.left) / r.width; }
+  pxPerPs() { return this.canvas.getBoundingClientRect().width / this.span; }
+  clamp(t) { return Math.min(Math.max(t, this.wave.t0), this.wave.t1 - this.span); }
+  zoom(f, at) {
+    const tAt = this.t0 + at * this.span;
+    this.span = Math.min(Math.max(this.span * f, 2000), this.wave.t1 - this.wave.t0);
+    this.t0 = this.clamp(tAt - at * this.span); this.draw();
+  }
+  fit() { this.t0 = this.wave.t0; this.span = this.wave.t1 - this.wave.t0; this.draw(); }
+  goto(t, span) { this.span = Math.min(span, this.wave.t1 - this.wave.t0); this.t0 = this.clamp(t - span * 0.1); this.cursor = t; this.draw(); }
+  valueAt(sig, t) { // binary search: last transition with time <= t
+    const a = sig.t; let lo = 0, hi = a.length - 1, ans = -1;
+    while (lo <= hi) { const m = (lo + hi) >> 1; if (a[m][0] <= t) { ans = m; lo = m + 1; } else hi = m - 1; }
+    return ans < 0 ? undefined : a[ans][1];
+  }
+  niceStep(pxPerPs) {
+    const target = 90 / pxPerPs; // ps per ~90px
+    const steps = [1, 2, 5]; let p = 1000; // ns
+    for (;;) for (const s of steps) { if (p * s >= target) return p * s; if (s === 5) p *= 10; }
+  }
+  draw() {
+    const c = this.canvas, dpr = window.devicePixelRatio || 1;
+    const W = c.getBoundingClientRect().width || 600, H = this.hdrH + this.rowH * this.sigs.length;
+    if (c.width !== Math.round(W * dpr) || c.height !== Math.round(H * dpr)) { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); c.style.height = H + 'px'; }
+    const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const cs = getComputedStyle(this.root);
+    const col = { fg: cs.getPropertyValue('--fg').trim(), muted: cs.getPropertyValue('--muted').trim(), line: cs.getPropertyValue('--line').trim(),
+      panel: cs.getPropertyValue('--panel').trim(), panel2: cs.getPropertyValue('--panel-2').trim(), acc: cs.getPropertyValue('--accent').trim(),
+      bus: cs.getPropertyValue('--wave-bus').trim(), one: cs.getPropertyValue('--wave-1').trim(), x: cs.getPropertyValue('--wave-x').trim() };
+    g.fillStyle = col.panel; g.fillRect(0, 0, W, H);
+    const k = W / this.span, X = t => (t - this.t0) * k;
+    // header / time axis
+    g.fillStyle = col.panel2; g.fillRect(0, 0, W, this.hdrH);
+    g.strokeStyle = col.line; g.lineWidth = 1;
+    const step = this.niceStep(k); g.font = '10.5px ' + cs.getPropertyValue('--font-mono');
+    g.fillStyle = col.muted; g.textBaseline = 'middle';
+    const first = Math.ceil(this.t0 / step) * step;
+    for (let t = first; t <= this.t0 + this.span; t += step) {
+      const x = X(t); g.beginPath(); g.moveTo(x, this.hdrH - 6); g.lineTo(x, H); g.strokeStyle = col.line; g.globalAlpha = 0.6; g.stroke(); g.globalAlpha = 1;
+      g.textAlign = 'center'; g.fillText(fmtUs(t, step >= US ? 0 : (step >= US / 10 ? 1 : 3)), x, this.hdrH / 2);
+    }
+    // rows
+    this.sigs.forEach((s, i) => {
+      const y0 = this.hdrH + i * this.rowH, yh = y0 + 4, yl = y0 + this.rowH - 5;
+      g.strokeStyle = col.line; g.globalAlpha = 0.5; g.beginPath(); g.moveTo(0, y0 + this.rowH - 0.5); g.lineTo(W, y0 + this.rowH - 0.5); g.stroke(); g.globalAlpha = 1;
+      const a = s.t; if (!a.length) return;
+      // find first index with time <= t0
+      let lo = 0, hi = a.length - 1, idx = 0;
+      while (lo <= hi) { const m = (lo + hi) >> 1; if (a[m][0] <= this.t0) { idx = m; lo = m + 1; } else hi = m - 1; }
+      const tEnd = this.t0 + this.span;
+      if (s.w === 1) {
+        g.strokeStyle = col.one; g.lineWidth = 1.4; g.beginPath();
+        let x = Math.max(X(a[idx][0]), 0), v = a[idx][1];
+        const yOf = v => v === '1' ? yh : (v === '0' ? yl : (yh + yl) / 2);
+        g.moveTo(x, yOf(v));
+        for (let j = idx + 1; j < a.length && a[j][0] <= tEnd; j++) {
+          const nx = X(a[j][0]); g.lineTo(nx, yOf(v)); v = a[j][1]; g.lineTo(nx, yOf(v));
+        }
+        g.lineTo(W, yOf(v)); g.stroke();
+      } else {
+        g.lineWidth = 1.2; g.font = '11px ' + cs.getPropertyValue('--font-mono'); g.textAlign = 'left';
+        let j = idx;
+        while (j < a.length && a[j][0] <= tEnd) {
+          const xs = Math.max(X(a[j][0]), -2), xe = (j + 1 < a.length) ? Math.min(X(a[j + 1][0]), W + 2) : W + 2;
+          const v = a[j][1], bad = /[xz]/i.test(v);
+          g.strokeStyle = bad ? col.x : col.bus; g.fillStyle = bad ? col.x : col.bus;
+          const sl = Math.min(3, (xe - xs) / 2);
+          g.beginPath(); g.moveTo(xs, (yh + yl) / 2); g.lineTo(xs + sl, yh); g.lineTo(xe - sl, yh); g.lineTo(xe, (yh + yl) / 2); g.lineTo(xe - sl, yl); g.lineTo(xs + sl, yl); g.closePath(); g.stroke();
+          const label = decode(s, v), tw = g.measureText(label).width;
+          if (xe - xs > tw + 10) { g.fillStyle = col.fg; g.fillText(label, Math.max(xs, 0) + 5, (yh + yl) / 2); }
+          j++;
+        }
+      }
+    });
+    // markers
+    g.font = '10px ' + cs.getPropertyValue('--font-mono'); g.textAlign = 'left';
+    for (const m of this.markers) {
+      if (m.t < this.t0 || m.t > this.t0 + this.span) continue;
+      const x = X(m.t); g.strokeStyle = col.muted; g.setLineDash([3, 3]); g.beginPath(); g.moveTo(x, this.hdrH); g.lineTo(x, H); g.stroke(); g.setLineDash([]);
+      g.fillStyle = col.muted; g.fillText(m.label, x + 3, this.hdrH + 8);
+    }
+    // cursor
+    if (this.cursor >= this.t0 && this.cursor <= this.t0 + this.span) {
+      const x = X(this.cursor); g.strokeStyle = col.acc; g.lineWidth = 1.2; g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke();
+    }
+    this.curEl.textContent = 'cursor ' + fmtUs(this.cursor, 3) + ' · view ' + fmtUs(this.span, 1);
+    this.sigs.forEach((s, i) => { this.vals[i].textContent = decode(s, this.valueAt(s, this.cursor)); });
+  }
+}
+
+/* ---------------- block diagram ---------------- */
+const BLOCKS = [
+  { id: 'cdc', x: 110, y: 80, w: 120, h: 54, t: 'cdc_sync', s: '2-FF synchroniser' },
+  { id: 'blank', x: 270, y: 80, w: 110, h: 54, t: 'Blanking', s: '& ~i_sync_blank' },
+  { id: 'degl', x: 420, y: 80, w: 130, h: 54, t: 'psi5_degl', s: 'up/down cnt 0..6' },
+  { id: 'ce', x: 590, y: 80, w: 150, h: 54, t: 'psi5_confirmed_edge', s: '4-sample confirm @sampl' },
+  { id: 'clk', x: 420, y: 200, w: 170, h: 54, t: 'Sampling clock select', s: '125k: 4 MHz en · 189k: 6 MHz en' },
+  { id: 'cnt', x: 780, y: 80, w: 130, h: 54, t: 'Edge timers', s: 'r_cnt_re / r_cnt_fe @sampl' },
+  { id: 'fsm', x: 950, y: 60, w: 190, h: 94, t: 'Manchester FSM', s: 'IDLE · VERIFY · RECEIVE · GAP · ERROR' },
+  { id: 'sr', x: 780, y: 300, w: 160, h: 60, t: 'Redundant shift regs', s: 'r_sr_data1 / r_sr_data2 (19 b)' },
+  { id: 'chk', x: 590, y: 300, w: 150, h: 60, t: 'CRC-3 / parity', s: 'running + recomputed' },
+  { id: 'out', x: 270, y: 300, w: 270, h: 60, t: 'Error status & output mux', s: 'eof · valid · err · 0x7FFA/0x7FFB' },
+];
+const EDGES = [
+  { from: 'in', to: 'cdc', pts: [[20, 107], [110, 107]], lbl: 'i_sat_rxd_comp', lx: 22, ly: 98 },
+  { from: 'cdc', to: 'blank', pts: [[230, 107], [270, 107]], lbl: 'sync_sat_rxd', lx: 226, ly: 70 },
+  { from: 'blank', to: 'degl', pts: [[380, 107], [420, 107]], lbl: 'blank_sat_rxd', lx: 372, ly: 70 },
+  { from: 'degl', to: 'ce', pts: [[550, 107], [590, 107]], lbl: 'degl_sat_rxd', lx: 546, ly: 70 },
+  { from: 'ce', to: 'cnt', pts: [[740, 107], [780, 107]], lbl: 'ce_sat_rxd_re / _fe', lx: 736, ly: 70 },
+  { from: 'ce', to: 'fsm', pts: [[740, 125], [760, 125], [760, 170], [930, 170], [930, 130], [950, 130]], lbl: 'ce_sat_rxd, re, fe', lx: 800, ly: 183 },
+  { from: 'cnt', to: 'fsm', pts: [[910, 107], [950, 107]], lbl: 'cnt_same/opp_edge', lx: 905, ly: 70 },
+  { from: 'clk', to: 'ce', pts: [[590, 227], [665, 227], [665, 134]], lbl: 'clk_sampl_en', lx: 600, ly: 218, dash: true },
+  { from: 'clk', to: 'cnt', pts: [[590, 240], [845, 240], [845, 134]], lbl: '', dash: true },
+  { from: 'clk', to: 'fsm', pts: [[590, 250], [1045, 250], [1045, 154]], lbl: '', dash: true },
+  { from: 'fsm', to: 'sr', pts: [[1045, 154], [1045, 280], [860, 280], [860, 300]], lbl: 'sr_data_in, sr_data_in_valid', lx: 870, ly: 275 },
+  { from: 'fsm', to: 'chk', pts: [[1000, 154], [1000, 265], [665, 265], [665, 300]], lbl: 'sr_data_in (running CRC/parity)', lx: 672, ly: 278 },
+  { from: 'sr', to: 'chk', pts: [[780, 330], [740, 330]], lbl: 'sr1 → sr_crc / sr_parity', lx: 742, ly: 322 },
+  { from: 'sr', to: 'out', pts: [[780, 350], [560, 350], [560, 340], [540, 340]], lbl: 'r_sr_data1, sr_match', lx: 560, ly: 362 },
+  { from: 'chk', to: 'out', pts: [[590, 320], [540, 320]], lbl: 'r_crc, r_parity', lx: 542, ly: 312 },
+  { from: 'fsm', to: 'out', pts: [[1110, 154], [1110, 400], [405, 400], [405, 360]], lbl: 'end_of_frame, r_state', lx: 410, ly: 395 },
+  { from: 'out', to: 'o', pts: [[270, 330], [20, 330]], lbl: 'o_sat_data[15:0], o_sat_data_valid, o_sat_data_eof, o_err_sat[2:0]', lx: 22, ly: 322 },
+  { from: 'fsm', to: 'o2', pts: [[1140, 107], [1170, 107]], lbl: 'o_mc_blank', lx: 1110, ly: 45 },
+  { from: 'cfg', to: 'clk', pts: [[505, 180], [505, 200]], lbl: 'i_sat1_cnf.baudrate', lx: 440, ly: 176, dash: true },
+  { from: 'cfg', to: 'fsm', pts: [[1020, 30], [1020, 60]], lbl: 'i_sat1_cnf.frame_length/pc, i_md_trim', lx: 930, ly: 26, dash: true },
+  { from: 'blankin', to: 'blank', pts: [[325, 40], [325, 80]], lbl: 'i_sync_blank', lx: 300, ly: 34, dash: true },
+  { from: 'tm', to: 'sr', pts: [[860, 420], [860, 360]], lbl: 'i_tm_sim_sr_error', lx: 820, ly: 437, dash: true },
+];
+const BLOCK_INFO = {
+  cdc: { h: 'cdc_sync — 2-flop synchroniser', p: 'Brings the asynchronous comparator output into the 12 MHz domain. Two flip-flops in series (ASYNC_REG) with a reset value of 0.',
+    dl: [['latency', '1–2 clocks (83–167 ns)'], ['param', 'G_RST_VAL = 0'], ['in', 'i_sat_rxd_comp'], ['out', 'sync_sat_rxd']] },
+  blank: { h: 'SYNC blanking', p: 'While the sync pulse is driven (i_sync_blank = 1) the comparator output is forced low, so the current step of the sync pulse itself cannot be mistaken for a start bit.',
+    dl: [['logic', 'blank_sat_rxd = sync_sat_rxd & ~i_sync_blank'], ['note', 'the RTL carries a "check start-up blanking" to-do here']] },
+  degl: { h: 'psi5_degl — deglitch filter', p: 'An up/down counter saturating at COUNT_MAX. The output rises when the input is high and the counter has reached 6; it falls when the input is low and the counter has returned to 0. Pulses shorter than 6 system clocks (0.5 µs) are swallowed.',
+    dl: [['params', 'COUNT_MAX=6, COUNT_RANGE=3, OUT_INIT=0'], ['clock', '12 MHz, i_clk_en tied 1'], ['enable', 'i_sat_on (reset when off)'], ['latency', '≈ 6 clocks = 0.5 µs'], ['out', 'degl_sat_rxd']] },
+  ce: { h: 'psi5_confirmed_edge — confirmed-edge filter', p: 'Runs on the sampling clock enable. A 4-bit shift register of the deglitched input; a rising edge is confirmed when the register is 1111 and the input is still 1 while the filtered output is 0 (falling edge: 0000 / 0 / 1). The confirmed edge is a one-tick pulse; the filtered level follows one tick later.',
+    dl: [['window', '5 consecutive samples'], ['latency', '≈ 5 ticks = 1.25 µs at 125 kbps'], ['out', 'ce_sat_rxd, ce_sat_rxd_re, ce_sat_rxd_fe'], ['reject', 'pulses < 4 ticks (1 µs / 0.67 µs)']] },
+  clk: { h: 'Sampling clock select', p: 'clk_sampl_en = baudrate ? i_clk_sampl_189_en : i_clk_sampl_125_en. The decoder keeps all its thresholds in ticks, so changing the baud rate only changes the tick period (250 ns ↔ 166.7 ns).',
+    dl: [['125 kbps', '4 MHz, 32 ticks per bit'], ['189 kbps', '6 MHz, 31.75 ticks per bit']] },
+  cnt: { h: 'Edge timers', p: 'Two 6-bit counters count sampling ticks since the last confirmed rising edge (r_cnt_re) and falling edge (r_cnt_fe). They saturate at 55, are cleared on the respective edge, in IDLE, and when the channel is off. The FSM reads them as cnt_same_edge / cnt_opp_edge depending on which polarity was the last data edge.',
+    dl: [['width', '6 bit, saturate at 55'], ['why two', 'asymmetric comparator slew does not shift the sample point']] },
+  fsm: { h: 'Manchester decoder FSM', p: 'Five states evaluated on sampling ticks: waits for the first rising edge, verifies the second start-bit edge 19…43 ticks later, receives the configured number of bits with same-/opposite-phase edge rules, checks the gap and finally raises end_of_frame. Any timing violation ends in MC_FRAME_ERROR, which waits for a quiet line before returning to IDLE.',
+    dl: [['bits', '10P:10, 10C:13, 16P:17, 16C:19 (incl. check bits)'], ['baud check', '≥4 rising edges outside 25…37 ticks → error'], ['outputs', 'sr_data_in(_valid), end_of_frame, o_mc_blank']] },
+  sr: { h: 'Redundant shift registers', p: 'Both 19-bit registers shift in the same decoded bit (MSB side, so the first bit ends at the lowest used position). r_sr_data2 receives the inverted bit when i_tm_sim_sr_error is set. At CHECK_GAP end the two must be equal, otherwise sr_error is raised. Cleared in MC_VERIFY_STARTBIT.',
+    dl: [['width', '2 × 19 bit, syn_keep'], ['compare', 'sr_match = (sr1 == sr2)']] },
+  chk: { h: 'CRC-3 and parity', p: 'r_crc runs the x³+x+1 LFSR (seed 111) over every accepted bit including the received CRC, so a correct frame ends at 000. Independently, sr_crc recomputes the CRC from r_sr_data1 (19 or 13 bits) and sr_parity the XOR of all 19 bits. Both the running and the recomputed value must be clean.',
+    dl: [['poly', 'x³ + x + 1, init 3\'b111'], ['parity', 'even: XOR of data + parity bit must be 0'], ['purpose', 'common-mode fault detection']] },
+  out: { h: 'Error status and output mux', p: 'One clock after end_of_frame the flags are registered with priority: shift-register mismatch, frame error, checksum error. o_sat_data shows the data word only during the eof strobe when valid; during an error strobe it shows 0x7FFA (frame or sr error) or 0x7FFB (checksum); otherwise 0.',
+    dl: [['strobes', 'o_sat_data_eof, o_sat_data_valid, o_err_sat: 1 clock'], ['data select', 'pc ? sr[15:0] : sr[17:2]'], ['variant', 'Atic256 (codes) vs Atic30x (0x7FFF)']] },
+};
+(function blockDiagram() {
+  const svg = document.getElementById('blockdiag'), NS = 'http://www.w3.org/2000/svg';
+  const el = (n, a = {}) => { const e = document.createElementNS(NS, n); for (const k in a) e.setAttribute(k, a[k]); return e; };
+  const defs = el('defs'); defs.innerHTML = '<marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker>';
+  svg.appendChild(defs);
+  const edges = [];
+  for (const e of EDGES) {
+    const p = el('polyline', { points: e.pts.map(q => q.join(',')).join(' '), class: 'edge', 'marker-end': 'url(#arr)' });
+    if (e.dash) p.setAttribute('stroke-dasharray', '5 4');
+    svg.appendChild(p);
+    let lab = null;
+    if (e.lbl) { lab = el('text', { x: e.lx, y: e.ly, class: 'edge-label' }); lab.textContent = e.lbl; svg.appendChild(lab); }
+    edges.push({ e, p, lab });
+  }
+  // external ports
+  for (const [x, y, t, anchor] of [[8, 115, 'from AFE', 'start'], [8, 345, 'to SPI status', 'start'], [1172, 120, 'to Ibase', 'start']]) {
+    const tx = el('text', { x, y, class: 'port', 'text-anchor': anchor }); tx.textContent = t; svg.appendChild(tx);
+  }
+  const detail = document.getElementById('blockdetail');
+  const groups = {};
+  for (const b of BLOCKS) {
+    const g = el('g', { class: 'blk', tabindex: 0, role: 'button', 'aria-label': b.t });
+    g.appendChild(el('rect', { x: b.x, y: b.y, width: b.w, height: b.h, rx: 4 }));
+    const t1 = el('text', { x: b.x + b.w / 2, y: b.y + b.h / 2 - 5, 'text-anchor': 'middle' }); t1.textContent = b.t;
+    const t2 = el('text', { x: b.x + b.w / 2, y: b.y + b.h / 2 + 12, 'text-anchor': 'middle', class: 'sub' }); t2.textContent = b.s;
+    g.append(t1, t2); svg.appendChild(g); groups[b.id] = g;
+    const sel = () => select(b.id);
+    g.addEventListener('click', sel); g.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); sel(); } });
+  }
+  function select(id) {
+    for (const k in groups) groups[k].classList.toggle('active', k === id);
+    for (const { e, p, lab } of edges) {
+      const hot = e.from === id || e.to === id;
+      p.classList.toggle('hot', hot); p.classList.toggle('dim', !hot);
+      if (lab) lab.classList.toggle('hot', hot);
+    }
+    const i = BLOCK_INFO[id];
+    detail.innerHTML = `<h4>${i.h}</h4><p>${i.p}</p><dl>${i.dl.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl><p class="muted" style="font-size:12px">Highlighted arrows are the signals entering or leaving this block.</p>`;
+  }
+  select('fsm');
+})();
+
+/* ---------------- FSM diagram ---------------- */
+const STATES = [
+  { id: 'IDLE', n: 'MC_IDLE', x: 120, y: 110 },
+  { id: 'VERIFY', n: 'MC_VERIFY_STARTBIT', x: 400, y: 110 },
+  { id: 'RECV', n: 'MC_RECEIVE_DATA', x: 680, y: 110 },
+  { id: 'GAP', n: 'MC_CHECK_GAP', x: 680, y: 290 },
+  { id: 'ERR', n: 'MC_FRAME_ERROR', x: 400, y: 290, err: true },
+];
+const TRANS = [
+  { f: 'IDLE', t: 'VERIFY', c: 'confirmed rising edge (first start bit)', path: 'M165 95 L355 95', lx: 260, ly: 86 },
+  { f: 'VERIFY', t: 'RECV', c: 'rising edge with cnt_re ≥ 19 (second start bit): act_edge = RISING', path: 'M445 95 L635 95', lx: 540, ly: 86 },
+  { f: 'VERIFY', t: 'IDLE', c: 'cnt_re ≥ 43 or cnt_fe ≥ 43 without a second edge (not an error)', path: 'M355 125 L165 125', lx: 260, ly: 140 },
+  { f: 'VERIFY', t: 'ERR', c: 'rising edge with cnt_re < 19 (start bit too short)', path: 'M400 155 L400 245', lx: 410, ly: 200 },
+  { f: 'RECV', t: 'RECV', c: 'bit accepted: same-phase edge 19…43 ticks, or opposite-phase edge 29…43 ticks (or same timer = 38 with opposite edge 9…18 old) → sr_data_in_valid', path: 'M700 68 C 730 10, 790 10, 760 60', lx: 735, ly: 22 },
+  { f: 'RECV', t: 'GAP', c: 'all_bits_received after the accepted bit (10/13/17/19 bits)', path: 'M680 155 L680 245', lx: 690, ly: 200 },
+  { f: 'RECV', t: 'ERR', c: 'same-phase edge < 19 or > 43 ticks; no edge until same-timer = 43; ≥ 4 rising edges outside 25…37 ticks (baud-rate fault)', path: 'M645 140 L435 260', lx: 480, ly: 190 },
+  { f: 'GAP', t: 'IDLE', c: 'cnt_re ≥ 43 and cnt_fe ≥ 43 (line quiet for a bit period) → end_of_frame', path: 'M635 300 L165 300 L120 300 L120 155', lx: 300, ly: 318 },
+  { f: 'GAP', t: 'ERR', c: 'rising edge while cnt_fe ≤ 43; line high at cnt_re = 44; line high at cnt_re = 22 after a rising data edge (unless i_md_trim)', path: 'M635 280 L445 280', lx: 540, ly: 272 },
+  { f: 'ERR', t: 'IDLE', c: 'cnt_re ≥ 38 and cnt_fe ≥ 38 and line low → end_of_frame (frame_error); goes to VERIFY instead if a rising edge arrives at that tick', path: 'M355 305 L165 305 L135 305 L120 160', lx: 240, ly: 340 },
+];
+(function fsmDiagram() {
+  const svg = document.getElementById('fsmdiag'), NS = 'http://www.w3.org/2000/svg';
+  const el = (n, a = {}) => { const e = document.createElementNS(NS, n); for (const k in a) e.setAttribute(k, a[k]); return e; };
+  const defs = el('defs'); defs.innerHTML = '<marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker>';
+  svg.appendChild(defs);
+  const paths = TRANS.map((t, i) => {
+    const p = el('path', { d: t.path, class: 'edge', 'marker-end': 'url(#arr2)' }); svg.appendChild(p);
+    const l = el('text', { x: t.lx, y: t.ly, class: 'edge-label', 'text-anchor': 'middle' }); l.textContent = String(i + 1); svg.appendChild(l);
+    return { t, p, l };
+  });
+  const detail = document.getElementById('fsmdetail'); const gs = {};
+  for (const s of STATES) {
+    const g = el('g', { class: 'st' + (s.err ? ' err' : ''), tabindex: 0, role: 'button', 'aria-label': s.n });
+    g.appendChild(el('circle', { cx: s.x, cy: s.y, r: 45 }));
+    const t = el('text', { x: s.x, y: s.y + 4, 'text-anchor': 'middle' }); t.textContent = s.n.replace('MC_', ''); g.appendChild(t);
+    svg.appendChild(g); gs[s.id] = g;
+    const sel = () => select(s.id);
+    g.addEventListener('click', sel); g.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); sel(); } });
+  }
+  function select(id) {
+    for (const k in gs) gs[k].classList.toggle('active', k === id);
+    const s = STATES.find(x => x.id === id);
+    let html = `<h4>${s.n}</h4><ul>`;
+    paths.forEach(({ t, p, l }, i) => {
+      const out = t.f === id, inn = t.t === id;
+      p.classList.toggle('hot', out); p.classList.toggle('dim', !out && !inn); l.classList.toggle('hot', out);
+      if (out) html += `<li><b>${i + 1} → ${STATES.find(x => x.id === t.t).n.replace('MC_', '')}</b>: ${t.c}</li>`;
+    });
+    html += '</ul>';
+    const extra = { IDLE: 'Edge timers are held at 0; bit counter and baud-rate fault counter cleared. o_mc_blank is low only here.',
+      VERIFY: 'Shift registers, CRC and parity are cleared while in this state.',
+      RECV: 'Each accepted bit updates sr_data_in / sr_data_in_valid for one tick; the bit counter increments.',
+      GAP: 'Waits one bit period of silence after the last data edge. The extra "line high at 22 ticks" rule catches a stray 1 bit after the frame (test 7–9).',
+      ERR: 'No data is accepted. Leaves only when the line has been quiet for ≥ 38 ticks after the last edge, so a corrupted frame cannot re-trigger mid-way.' }[id];
+    detail.innerHTML = html + `<p class="muted" style="font-size:12.5px">${extra}</p>`;
+  }
+  select('RECV');
+})();
+
+/* ---------------- timing table ---------------- */
+(function timing() {
+  const rows = [
+    ['Nominal bit period', '32', 'cell period of one Manchester bit'],
+    ['Second start-bit edge', '19 ≤ cnt_re ≤ 43', 'accept the second rising start edge; < 19 → error; ≥ 43 → back to IDLE'],
+    ['Same-phase data edge', '19 … 43 after previous data edge', 'bit cell boundary tolerance ±13 ticks (≈ ±40 %)'],
+    ['Opposite-phase data edge', '29 … 43 (same-edge timer) or timer = 38 with opposite edge 9 … 18 old', 'bit value toggles'],
+    ['No decision', 'same-edge timer = 43', 'abort → FRAME_ERROR'],
+    ['Baud-rate plausibility', 'rising → rising outside 25 … 37, 4 times', 'detects a sensor at the other rate (test 11)'],
+    ['Gap: stray rising edge', 'rising edge with cnt_fe ≤ 43', 'extra bit after frame'],
+    ['Gap: line still high', 'ce_sat_rxd = 1 at cnt_re = 44, or at cnt_re = 22 after a rising data edge', 'extra 1 bit after frame (second rule disabled by i_md_trim)'],
+    ['End of frame', 'cnt_re ≥ 43 and cnt_fe ≥ 43', 'one bit period of silence'],
+    ['Error recovery', 'cnt_re ≥ 38 and cnt_fe ≥ 38, line low', 'return to IDLE after a corrupt frame'],
+    ['Timer saturation', '55', 'counters stop at 55 ticks'],
+  ];
+  const tbl = document.getElementById('timingtbl');
+  const toUs = (txt, tick) => txt.replace(/\d+/g, n => (n * tick / 1000).toFixed(2).replace(/\.?0+$/, '') + ' µs');
+  for (const [a, b, c] of rows) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${a}</td><td class="mono">${b}</td><td class="num">${toUs(b, 250)}</td><td class="num">${toUs(b, 166.667)}</td><td>${c}</td>`;
+    tbl.appendChild(tr);
+  }
+})();
+
+/* ---------------- frame anatomy ---------------- */
+(function anatomy() {
+  const t1 = DATA.tests.find(t => t.n === 1), fr = t1.frames[t1.wave_frame];
+  const rxd = t1.wave.signals.find(s => s.name === 'i_sat_rxd_comp');
+  const bits = DATA.anatomy; const bitT = 8 * US;
+  const tStart = bits[0].t - 3 * bitT, tEnd = bits[bits.length - 1].t + 1.5 * bitT;
+  const W = 1180, H = 170, L = 20, R = 20, X = t => L + (t - tStart) / (tEnd - tStart) * (W - L - R);
+  const svg = document.getElementById('anatomy'); svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  let d = '', v = '0', first = true;
+  for (const [t, val] of rxd.t) {
+    if (t < tStart) { v = val; continue; }
+    if (first) { d += `M${L} ${v === '1' ? 40 : 80} `; first = false; }
+    d += `L${X(t).toFixed(1)} ${v === '1' ? 40 : 80} L${X(t).toFixed(1)} ${val === '1' ? 40 : 80} `; v = val;
+  }
+  d += `L${W - R} ${v === '1' ? 40 : 80}`;
+  let html = `<path d="${d}" fill="none" stroke="var(--wave-1)" stroke-width="1.6"/>`;
+  html += `<text x="${L}" y="24" class="port">i_sat_rxd_comp (sensor data 0x${fr.sensor_data.toUpperCase()}, 16 bit, CRC)</text>`;
+  // start bits: two rising edges before the first data bit
+  const rises = rxd.t.filter(([t, val]) => val === '1' && t >= tStart && t < bits[0].t - bitT / 2).map(x => x[0]);
+  const names = [...Array(16).keys()].map(i => 'D' + i).concat(['C2', 'C1', 'C0']);
+  const cells = rises.slice(-2).map((t, i) => ({ t, n: 'S' + (i + 1), v: '', cls: 'start' })).concat(bits.map((b, i) => ({ t: b.t - 1.925 * US, n: names[i], v: b.sr_data_in, cnt: parseInt(b.r_cnt_bit, 16) })));
+  for (const c of cells) {
+    const x0 = X(c.t - bitT / 2), x1 = X(c.t + bitT / 2);
+    html += `<rect x="${x0.toFixed(1)}" y="96" width="${(x1 - x0).toFixed(1)}" height="22" fill="${c.v === '' ? 'var(--accent-soft)' : 'var(--panel-2)'}" stroke="var(--line)"/>`;
+    html += `<text x="${((x0 + x1) / 2).toFixed(1)}" y="111" text-anchor="middle" class="port">${c.n}</text>`;
+    if (c.v !== '') html += `<text x="${((x0 + x1) / 2).toFixed(1)}" y="138" text-anchor="middle" class="port" fill="var(--accent)" font-weight="600">${c.v}</text>`;
+    html += `<line x1="${X(c.t).toFixed(1)}" y1="36" x2="${X(c.t).toFixed(1)}" y2="96" stroke="var(--accent)" stroke-dasharray="2 3"/>`;
+  }
+  html += `<text x="${L}" y="138" class="port">decoded bit</text><text x="${L}" y="160" class="port">data edges (dashed) occur mid-cell; the FSM accepts each bit ≈ 1.9 µs later (filter latency) — LSB first, CRC MSB first</text>`;
+  svg.innerHTML = html;
+  const word = bits.slice(0, 16).map(b => b.sr_data_in).reverse().join('');
+  document.getElementById('anatomy-cap').textContent = `Decoded bits D0…D15 = ${word.match(/.{4}/g).join(' ')}₂ = 0x${parseInt(word, 2).toString(16).toUpperCase().padStart(4, '0')}, CRC ${bits.slice(16).map(b => b.sr_data_in).join('')}; every edge-to-edge distance measured 8.000 µs (cnt_same_edge = 31 ticks at each accepted bit). End-of-frame at ${fmtUs(fr.eof.t - fr.sync)} after the sync pulse.`;
+  // full-frame viewer
+  const jumps = [{ label: 'Sync', t: fr.sync - 2 * US, span: 60 * US }, { label: 'Start bits', t: bits[0].t - 20 * US, span: 40 * US }, { label: 'EOF', t: fr.eof.t - 10 * US, span: 40 * US }];
+  new WaveView(document.getElementById('wv-frame'), t1.wave, { title: 'Test 1 · frame 2 · 0x5A5A 16C', cursor: bits[1].t,
+    markers: [{ t: fr.sync, label: 'sync' }, { t: bits[0].t, label: 'D0' }, { t: fr.eof.t, label: 'eof' }], jumps });
+})();
+
+/* ---------------- filter latency ---------------- */
+(function latency() {
+  const z = DATA.zoom; const S = Object.fromEntries(z.signals.map(s => [s.name, s]));
+  const rise = s => (s.t.find(([t, v], i) => i > 0 && v === '1') || [NaN])[0];
+  const r0 = rise(S['sensor.rxd (undelayed)']);
+  const rows = [
+    ['Comparator (sensor model)', 'i_sat_rxd_comp', rise(S['i_sat_rxd_comp']), 'asynchronous input'],
+    ['Synchroniser', 'sync_sat_rxd', rise(S['sync_sat_rxd']), '2 flops at 12 MHz'],
+    ['Deglitcher', 'degl_sat_rxd', rise(S['degl_sat_rxd']), 'counter must reach 6 (0.5 µs)'],
+    ['Confirmed edge pulse', 'ce_sat_rxd_re', rise(S['ce_sat_rxd_re']), '4 samples high + current sample, registered'],
+    ['Confirmed level', 'ce_sat_rxd', rise(S['ce_sat_rxd']), 'one sampling tick after the pulse'],
+  ];
+  const tbl = document.getElementById('lat-tbl');
+  for (const [a, b, t, c] of rows) {
+    const tr = document.createElement('tr'); tr.innerHTML = `<td>${a}</td><td class="mono">${b}</td><td class="num">${((t - r0) / 1000).toFixed(0)} ns</td><td>${c}</td>`; tbl.appendChild(tr);
+  }
+  new WaveView(document.getElementById('wv-zoom'), z, { title: 'Start-bit edge S1, test 1 frame 2 (5 µs window)', cursor: rise(S['ce_sat_rxd_re']),
+    markers: [{ t: r0, label: 'comparator edge' }, { t: rise(S['ce_sat_rxd_re']), label: 'confirmed' }] });
+})();
+
+/* ---------------- testbench diagram ---------------- */
+(function tbDiagram() {
+  const svg = document.getElementById('tbdiag');
+  const box = (x, y, w, h, t, s) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4" fill="var(--panel)" stroke="var(--fg)" stroke-width="1.2"/><text x="${x + w / 2}" y="${y + h / 2 - 4}" text-anchor="middle" fill="var(--fg)" font-size="12.5" font-family="var(--font-body)">${t}</text><text x="${x + w / 2}" y="${y + h / 2 + 12}" text-anchor="middle" fill="var(--muted)" font-size="10.5" font-family="var(--font-mono)">${s}</text>`;
+  const arr = (pts, lbl, lx, ly, dash) => `<polyline points="${pts}" fill="none" stroke="var(--fg)" stroke-width="1.2" marker-end="url(#arr3)" ${dash ? 'stroke-dasharray="5 4"' : ''}/>` + (lbl ? `<text x="${lx}" y="${ly}" class="edge-label">${lbl}</text>` : '');
+  svg.innerHTML = `<defs><marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>` +
+    box(20, 30, 150, 50, 'clk_gen', '12 MHz, enable') + box(20, 110, 150, 50, 'sampling-enable models', '1/3 and 1/2 of 12 MHz') +
+    box(20, 190, 150, 50, 'sync generator', '20 µs high, 450 µs period') +
+    box(230, 110, 190, 70, 'psi5_sensor_model', 'Manchester encoder + errors') +
+    box(490, 110, 190, 70, 'psi5_mc_decoder (DUT)', 'via psi5_mc_decoder_if') +
+    box(740, 20, 140, 70, 'test program', 'sensor_cfg, sensor_data') +
+    box(740, 150, 140, 70, 'checkers', 'verify_data / check_error') +
+    arr('170,55 480,55 480,110', 'i_clk_12m', 300, 48) + arr('170,135 230,135', '', 0, 0) + arr('170,215 325,215 325,180', 'sensor_sync', 230, 230) +
+    arr('420,145 490,145', 'i_sat_rxd_comp', 418, 138) + arr('680,145 740,175', 'o_sat_data, eof, valid, err', 560, 238) +
+    arr('740,55 325,55 325,110', 'sensor_cfg / sensor_data', 400, 100, true) + arr('740,70 585,70 585,110', 'i_sat1_cnf, i_tm_sim_sr_error', 590, 100, true) +
+    arr('170,120 480,120 480,110', '', 0, 0);
+})();
+
+/* ---------------- tests ---------------- */
+const TESTS = {
+  1: { title: '16-bit frame, CRC, ideal timing', grp: 'data', inj: 'none', why: 'Baseline decode of the longest frame (21 bits incl. start) with the CRC path.' },
+  2: { title: '10-bit frame, CRC, ideal timing', grp: 'data', inj: 'none', why: 'Short frame with CRC; checks the 13-bit shift-register alignment (data at [15:6]).' },
+  3: { title: '16-bit frame, parity, ideal timing', grp: 'data', inj: 'none', why: 'Parity path and the [17:2] output selection.' },
+  4: { title: '10-bit frame, parity, ideal timing', grp: 'data', inj: 'none', why: 'Shortest frame (11 bits incl. parity).' },
+  5: { title: '16-bit CRC, rising edges delayed 2 µs', grp: 'data', inj: 'delay_rising = 2.0 µs', why: 'Comparator threshold above mid-level: rising edges late by a quarter bit. The separate rising/falling timers must keep the bit windows.' },
+  6: { title: '16-bit CRC, falling edges delayed 1 µs', grp: 'data', inj: 'delay_falling = 1.0 µs', why: 'Opposite skew. The testbench notes that a 2 µs falling delay is not supported without i_md_trim (gap rule at 22 ticks).' },
+  7: { title: '10-bit CRC + extra bit in gap, ideal timing', grp: 'frame', inj: 'error.gap = 1', why: 'One stray high half-bit after the CRC must be rejected by MC_CHECK_GAP.' },
+  8: { title: '10-bit CRC + extra bit in gap, rising delayed 2 µs', grp: 'frame', inj: 'error.gap = 1, delay_rising = 2.0 µs', why: 'Gap detection with skewed edges.' },
+  9: { title: '10-bit CRC + extra bit in gap, falling delayed 2 µs', grp: 'frame', inj: 'error.gap = 1, delay_falling = 2.0 µs', why: 'Gap detection with the opposite skew.' },
+  10: { title: 'Wrong baud rate: DUT 189 kbps, sensor 125 kbps', grp: 'baud-slow', inj: 'error.baudrate = 1 (sensor sends 8 µs bits, DUT samples at 6 MHz)', why: 'A slow sensor seen by a fast decoder: start-bit edges are 48 ticks apart, outside the 19…43 window.' },
+  11: { title: 'Wrong baud rate: DUT 125 kbps, sensor 189 kbps', grp: 'frame', inj: 'error.baudrate = 1 (sensor sends 5.3 µs bits, DUT samples at 4 MHz)', why: 'A fast sensor seen by a slow decoder: bits are ~21 ticks apart, inside the start window, so the bit-timing rules must reject the frame.' },
+  12: { title: '16-bit CRC, one CRC bit inverted', grp: 'checksum', inj: 'error.checksum = 1', why: 'Checksum error path, 19-bit CRC recomputation.' },
+  13: { title: '10-bit CRC, one CRC bit inverted', grp: 'checksum', inj: 'error.checksum = 1', why: 'Checksum error path, 13-bit CRC recomputation.' },
+  14: { title: '16-bit parity, parity bit inverted', grp: 'checksum', inj: 'error.checksum = 1', why: 'Parity error path (running and recomputed parity).' },
+  15: { title: '10-bit parity, parity bit inverted', grp: 'checksum', inj: 'error.checksum = 1', why: 'Parity error path, short frame.' },
+  16: { title: '16-bit CRC, shift-register mismatch (test mode)', grp: 'sr', inj: 'i_tm_sim_sr_error = 1', why: 'The second shift register receives inverted bits; the comparison at end of frame must flag sr_error with priority over everything else.' },
+};
+const GROUPS = {
+  data: { exp: 'valid = 1, err = 000, data = word', code: null,
+    pass: ['exactly one o_sat_data_eof strobe per frame, within 430 µs of the sync pulse', 'o_sat_data_valid = 1 at the strobe', 'o_err_sat = 000', 'o_sat_data equals the sent word (16-bit) or (word & 0x3FF) << 6 (10-bit)'],
+    fail: ['missing or additional eof strobe', 'any error bit set', 'data mismatch in any of the four frames'] },
+  frame: { exp: 'valid = 0, err = 001, data = 0x7FFA', code: '7ffa', err: 1,
+    pass: ['one eof strobe per frame', 'o_sat_data_valid = 0', 'o_err_sat = 001 (frame_error)', 'o_sat_data = 0x7FFA'],
+    fail: ['frame accepted as valid', 'wrong error class (checksum or sr_error instead of frame_error)', 'no eof strobe (frame silently dropped)'] },
+  'baud-slow': { exp: 'no valid data; if a frame terminates: err = 001, data = 0x7FFA', code: '7ffa', err: 1, allowNone: true,
+    pass: ['o_sat_data_valid never asserted in any of the four frames', 'if an eof strobe occurs it carries frame_error / 0x7FFA'],
+    fail: ['any frame reported valid', 'eof with a different error class'] },
+  checksum: { exp: 'valid = 0, err = 010, data = 0x7FFB', code: '7ffb', err: 2,
+    pass: ['one eof strobe per frame', 'o_sat_data_valid = 0', 'o_err_sat = 010 (checksum_error)', 'o_sat_data = 0x7FFB'],
+    fail: ['frame accepted as valid', 'frame_error instead of checksum_error (would indicate a timing problem masking the checksum path)', 'no eof strobe'] },
+  sr: { exp: 'valid = 0, err = 100, data = 0x7FFA', code: '7ffa', err: 4,
+    pass: ['one eof strobe per frame', 'o_sat_data_valid = 0', 'o_err_sat = 100 (sr_error)', 'o_sat_data = 0x7FFA'],
+    fail: ['frame accepted as valid', 'checksum_error or frame_error reported instead of sr_error', 'no eof strobe'] },
+};
+function expectedWord(fr) {
+  const w = parseInt(fr.sensor_data, 16);
+  return fr.frame_length === '1' ? w : ((w & 0x3ff) << 6);
+}
+function judge(te) {
+  const g = GROUPS[TESTS[te.n].grp]; const rows = []; let pass = true;
+  for (const [i, fr] of te.frames.entries()) {
+    const e = fr.eof; let exp, obs, ok;
+    if (g.code === null) {
+      const w = expectedWord(fr); exp = `0x${w.toString(16).toUpperCase().padStart(4, '0')} · valid · 000`;
+      ok = !!e && parseInt(e.o_sat_data, 16) === w && e.o_sat_data_valid === '1' && parseInt(e.o_err_sat, 16) === 0;
+    } else {
+      exp = `0x${g.code.toUpperCase()} · !valid · ${g.err.toString(2).padStart(3, '0')}` + (g.allowNone ? ' (or no eof)' : '');
+      ok = e ? (e.o_sat_data === g.code && e.o_sat_data_valid === '0' && parseInt(e.o_err_sat, 16) === g.err) : !!g.allowNone;
+    }
+    obs = e ? `0x${e.o_sat_data.toUpperCase()} · ${e.o_sat_data_valid === '1' ? 'valid' : '!valid'} · ${parseInt(e.o_err_sat, 16).toString(2).padStart(3, '0')} @ ${fmtUs(e.t - fr.sync, 1)}` : 'no eof within the frame slot';
+    rows.push({ i, word: fr.sensor_data.toUpperCase(), exp, obs, ok }); pass = pass && ok;
+  }
+  return { pass, rows };
+}
+(function tests() {
+  const tbl = document.getElementById('testtbl'), cards = document.getElementById('testcards');
+  let nPass = 0, nFrames = 0, nFramesOk = 0, nNote = 0;
+  const fmt = fr => (fr.frame_length === '1' ? '16' : '10') + (fr.pc === '1' ? 'C' : 'P');
+  const rate = fr => fr.baudrate === '1' ? '189 kbps' : '125 kbps';
+  for (const te of DATA.tests) {
+    const T = TESTS[te.n], g = GROUPS[T.grp], v = judge(te), f0 = te.frames[0];
+    const note = T.grp === 'baud-slow' && te.frames.every(f => !f.eof);
+    if (v.pass) nPass++; if (note) nNote++;
+    nFrames += v.rows.length; nFramesOk += v.rows.filter(r => r.ok).length;
+    const pill = v.pass ? (note ? '<span class="pill warn">PASS · no eof</span>' : '<span class="pill pass">PASS</span>') : '<span class="pill fail">FAIL</span>';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td class="mono"><a href="#t${te.n}">T${te.n}</a></td><td>${T.title}</td><td class="mono">${fmt(f0)}</td><td>${rate(f0)}</td><td>${T.inj}</td><td class="mono">${g.exp}</td><td class="mono">${v.rows.map(r => r.obs.split(' @')[0]).join('<br>')}</td><td>${pill}</td>`;
+    tbl.appendChild(tr);
+    const det = document.createElement('details'); det.className = 'tcase'; det.id = 't' + te.n; if (te.n === 1) det.open = true;
+    const wf = te.frames[te.wave_frame];
+    det.innerHTML = `<summary><span class="id">T${te.n}</span><span class="ttl">${T.title}</span><span class="cfg">${fmt(f0)} · ${rate(f0)} · delay r/f ${parseInt(f0.delay_rising, 16) / 10}/${parseInt(f0.delay_falling, 16) / 10} µs</span>${pill}<span class="chev">▾ details &amp; waves</span></summary>
+      <div class="inner">
+        <div class="cols">
+          <div><h4>Description</h4><p>${T.why}</p>
+            <h4>Stimulus</h4><ul><li>Configuration <code>i_sat1_cnf</code> = {baudrate ${f0.baudrate}, frame_length ${f0.frame_length}, pc ${f0.pc}} (${fmt(f0)}, ${rate(f0)})</li><li>Injected: ${T.inj}</li><li>Four frames: ${te.frames.map(f => '0x' + f.sensor_data.toUpperCase()).join(', ')}; sync period 450 µs, data starts 20 µs after the sync pulse</li></ul></div>
+          <div><h4>PASS criteria</h4><ul class="crit">${g.pass.map(c => `<li class="ok">${c}</li>`).join('')}</ul>
+            <h4>FAIL criteria</h4><ul class="crit">${g.fail.map(c => `<li>${c}</li>`).join('')}</ul></div>
+        </div>
+        <h4>Observed at o_sat_data_eof (from waves.vcd)</h4>
+        <div class="tbl"><table class="obs"><tr><th>Frame</th><th>Word</th><th>Expected</th><th>Observed (o_sat_data · valid · o_err_sat @ time after sync)</th><th>Result</th></tr>
+        ${v.rows.map(r => `<tr><td>${r.i + 1}</td><td class="mono">0x${r.word}</td><td class="mono">${r.exp}</td><td class="mono">${r.obs}</td><td class="${r.ok ? 'ok' : 'bad'}">${r.ok ? 'PASS' : 'FAIL'}</td></tr>`).join('')}</table></div>
+        ${note ? '<div class="note"><b>Observation.</b> The decoder never leaves MC_VERIFY_STARTBIT: the second start-bit edge arrives 48 ticks after the first (8 µs at 6 MHz), beyond the 43-tick limit, so the FSM returns to IDLE on every rising edge and no frame is ever opened. No error is reported to the host; the testbench treats the missing eof as acceptable (<code>$display</code> only). Review item: decide whether a silent drop or a frame_error is the required behaviour for a baud-rate mismatch in this direction.</div>' : ''}
+        ${te.n === 6 ? '<div class="note"><b>Limitation noted in the testbench.</b> A falling-edge delay of 2 µs makes the line still high 22 ticks after the last rising data edge in MC_CHECK_GAP, which the decoder reads as an additional 1 bit. The test therefore uses 1 µs; <code>i_md_trim = 1</code> disables that rule.</div>' : ''}
+        ${te.n === 11 ? '<div class="note ok"><b>Mechanism.</b> Bits 5.3 µs apart are ≈ 21 ticks at 4 MHz: the second start edge passes the 19-tick minimum, so the frame opens and bits are collected until a same-phase edge falls below 19 ticks or the opposite-phase rules fail; the FSM then ends in MC_FRAME_ERROR and reports 0x7FFA. In the waveform the bit counter reaches 15 before the abort.</div>' : ''}
+        <h4>Waveform · frame ${te.wave_frame + 1} (0x${wf.sensor_data.toUpperCase()})</h4>
+        <div class="lazy-wave" data-test="${te.n}"><button type="button" class="linkish">Load waveform</button></div>
+      </div>`;
+    cards.appendChild(det);
+  }
+  document.getElementById('summary').innerHTML = [
+    [DATA.tests.length, 'scenarios'], [nPass + ' / ' + DATA.tests.length, 'scenarios PASS'], [nFramesOk + ' / ' + nFrames, 'frames meeting criteria'],
+    [nNote, 'with review note'], ['0', '$error in sim.log'],
+  ].map(([b, l]) => `<div class="tile"><div class="big">${b}</div><div class="lbl">${l}</div></div>`).join('');
+  // lazy waveform creation
+  const make = holder => {
+    if (holder.dataset.done) return; holder.dataset.done = 1;
+    const te = DATA.tests.find(t => t.n === +holder.dataset.test), wf = te.frames[te.wave_frame];
+    const markers = [{ t: wf.sync, label: 'sync' }]; if (wf.eof) markers.push({ t: wf.eof.t, label: 'eof' });
+    const bits = te.wave.signals.find(s => s.name === 'sr_data_in_valid').t.find(([t, v], i) => i > 0 && v === '1');
+    const jumps = [{ label: 'Sync', t: wf.sync - 2 * US, span: 60 * US }];
+    if (bits) jumps.push({ label: 'First bit', t: bits[0] - 25 * US, span: 50 * US });
+    if (wf.eof) jumps.push({ label: 'EOF', t: wf.eof.t - 12 * US, span: 40 * US });
+    holder.innerHTML = ''; const d = document.createElement('div'); holder.appendChild(d);
+    new WaveView(d, te.wave, { title: `T${te.n} · frame ${te.wave_frame + 1} · 0x${wf.sensor_data.toUpperCase()} ${fmt(wf)}`, cursor: wf.eof ? wf.eof.t : wf.sync, markers, jumps });
+  };
+  cards.addEventListener('click', e => { const b = e.target.closest('.lazy-wave button'); if (b) make(b.parentElement); });
+  cards.addEventListener('toggle', e => { const d = e.target; if (d.open) { const h = d.querySelector('.lazy-wave'); if (h) make(h); } }, true);
+  make(document.querySelector('#t1 .lazy-wave'));
+})();
+</script>
+</body>
+</html>

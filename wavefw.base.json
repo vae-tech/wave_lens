@@ -1,0 +1,31 @@
+{
+  "comment": [
+    "Base settings for tools/mkconfig.py (make config / make html WAVES=dump.vcd): copied into every generated <dump>.config.json.",
+    "select and rules only decide the starting per-signal settings of the generated file; edit that file afterwards.",
+    "select: depth = scope levels below the top that start shown, constants = show signals that never change,",
+    "  hide = full-path patterns left out, budget = most value changes on one page (deeper levels are dropped first).",
+    "rules: {match: pattern(s) on the full path, width: 8 | '>1' | '>=32', then show/radix/color/style/fill/alias/enum}; later rules win."
+  ],
+  "exact": true,
+  "hierarchy": true,
+  "config": {
+    "theme": null,
+    "colors": {},
+    "style": "auto",
+    "radix": "auto",
+    "fold": 2,
+    "nameWidth": 260,
+    "rowHeight": 24,
+    "sort": "none",
+    "sortIgnore": ["i_", "o_", "s_", "m_"]
+  },
+  "page": { "intro": "Signals are grouped by scope (click a group to fold it); hover a name for its full path." },
+  "views": {
+    "all": { "title": "whole dump · exact transitions" }
+  },
+  "select": { "depth": 2, "constants": false, "hide": ["$rootio.*"], "budget": 1500000 },
+  "rules": [
+    { "match": ["*clk", "*clk_i", "*clk_in", "*clock"], "width": 1, "color": "#2f9e44" },
+    { "match": ["*rst", "*rst_n", "*rst_ni", "*reset", "*reset_n"], "width": 1, "color": "#e8590c" }
+  ]
+}

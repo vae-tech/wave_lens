@@ -1,0 +1,28 @@
+{
+  "description": "make demo / make html: Verilator demo (tools/demo/demo_tb.sv). Keys = vcd2wavedrom.py options; views = named variants.",
+  "waves": "/tmp/wavefw_demo.vcd",
+  "scope": "demo_tb",
+  "enum": { "state": { "0": "IDLE", "1": "START", "2": "DATA", "3": "PARITY" } },
+  "config": {
+    "sortIgnore": ["rx_", "bit_"],
+    "rowHeight": 26
+  },
+  "page": { "title": "mc_tx demo", "intro": "Manchester transmitter from tools/demo/demo_tb.sv, simulated with Verilator and converted with vcd2wavedrom.py." },
+  "views": {
+    "cycle": {
+      "clock": "clk", "from": "20ns", "to": "370ns",
+      "signals": ["clk", "rst_n", "start", "data", "state", "bit_cnt", "txd", "done"],
+      "group": { "tx": ["state", "bit_cnt", "txd"] },
+      "gap": ["100ns:250ns"],
+      "title": "mc_tx · first byte 0xA5 · clock-sampled",
+      "render": "svg"
+    },
+    "exact": {
+      "exact": true, "from": "0ns", "to": "2100ns",
+      "signals": ["clk", "rst_n", "start", "data", "state", "bit_cnt", "txd", "busy", "done", "rx_sr"],
+      "group": { "mc_tx": ["state", "bit_cnt", "txd", "busy", "done"] },
+      "marker": ["posedge start=start", "posedge done=done"],
+      "title": "mc_tx · two bytes · exact timing"
+    }
+  }
+}
