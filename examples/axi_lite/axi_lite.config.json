@@ -1,0 +1,39 @@
+{
+  "description": "make example EX=axi_lite: AXI4-Lite master + register slave (axi_lite_tb.sv). Hand-written: views, channel groups, bookmarks and arrows; the Makefile passes the dump with --waves.",
+  "scope": "axi_lite_tb",
+  "enum": { "BRESP": { "0": "OKAY", "2": "SLVERR" }, "RRESP": { "0": "OKAY", "2": "SLVERR" } },
+  "group": { "aw": ["AWVALID", "AWREADY", "AWADDR"], "w": ["WVALID", "WREADY", "WDATA", "WSTRB"], "b": ["BVALID", "BREADY", "BRESP"],
+             "ar": ["ARVALID", "ARREADY", "ARADDR"], "r": ["RVALID", "RREADY", "RDATA", "RRESP"] },
+  "config": { "radix": "hex", "nameWidth": 170, "rowHeight": 24, "highlight": ["aw", "w", "b"],
+              "groupColors": { "aw": "#339af0", "w": "#37b24d", "b": "#f59f00", "ar": "#ae3ec9", "r": "#1098ad" } },
+  "page": { "title": "AXI4-Lite · one write, one read",
+            "intro": "The master writes 0x1234ABCD to 0x08 (address, then data, then the response; the slave raises AWREADY a cycle late) and reads it back. Signals are grouped by channel, one colour per channel (groupColors); the write channels open highlighted (Esc clears it)." },
+  "views": {
+    "handshakes": {
+      "clock": "ACLK", "from": "0ns", "to": "180ns",
+      "signals": ["ACLK", "ARESETn", "AWVALID", "AWREADY", "AWADDR", "WVALID", "WREADY", "WDATA", "WSTRB", "BVALID", "BREADY", "BRESP",
+                  "ARVALID", "ARREADY", "ARADDR", "RVALID", "RREADY", "RDATA", "RRESP"],
+      "title": "AXI4-Lite · handshakes · clock-sampled",
+      "note": "a bookmark on every VALID & READY cycle; the arrows give the latency between the channels",
+      "bookmarks": [
+        { "n": 1, "t": "50ns", "signal": "aw.AWVALID", "text": "AW handshake: address 0x08 accepted (AWREADY came a cycle after AWVALID)" },
+        { "n": 2, "t": "70ns", "signal": "w.WVALID", "text": "W handshake: data 0x1234ABCD, all four strobes" },
+        { "n": 3, "t": "90ns", "signal": "b.BVALID", "text": "B handshake: response OKAY" },
+        { "n": 4, "t": "130ns", "signal": "ar.ARVALID", "text": "AR handshake: read address 0x08" },
+        { "n": 5, "t": "150ns", "signal": "r.RVALID", "text": "R handshake: 0x1234ABCD back, OKAY" }
+      ],
+      "arrows": [
+        { "from": 1, "to": 2, "shape": "-|-", "label": "2T" },
+        { "from": 2, "to": 3, "shape": "-|-", "label": "2T" },
+        { "from": 4, "to": 5, "shape": "-|-", "label": "2T" }
+      ]
+    },
+    "exact": {
+      "exact": true, "from": "0ns", "to": "195ns",
+      "signals": ["ACLK", "ARESETn", "AWVALID", "AWREADY", "AWADDR", "WVALID", "WREADY", "WDATA", "WSTRB", "BVALID", "BREADY", "BRESP",
+                  "ARVALID", "ARREADY", "ARADDR", "RVALID", "RREADY", "RDATA", "RRESP"],
+      "marker": ["posedge BVALID=B", "posedge RVALID=R"],
+      "title": "AXI4-Lite · the whole run · exact transitions"
+    }
+  }
+}

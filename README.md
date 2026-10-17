@@ -1,182 +1,261 @@
 # wavefw — WaveDrom JSON → interactive waves
 
-A dependency-free HTML/JS framework that renders **WaveDrom JSON** with the look and interaction of the
-waveform panels in `template.html`. Two renderers share one model:
+wavefw draws **WaveDrom JSON** in two ways from one model: as an interactive canvas viewer (zoom, cursor, fold, find,
+bookmarks) and as a static WaveDrom-style SVG for documents. A few Python tools turn a simulator dump (VCD or FST) into
+one self-contained HTML page that you can mail or archive. One JavaScript file, one stylesheet, no build step, no
+dependencies: the pages open from `file://`.
 
-- `WaveView`: an interactive canvas viewer. It has a name column with values at the cursor, wheel zoom, drag pan, cursor, `+ − 0 ← → s` keys, markers, jump buttons, foldable groups and signal sorting (with name prefixes such as `i_`, `o_` ignored).
-- `WaveSVG`: a static, WaveDrom-style inline SVG for documents and print. It follows the page's light/dark tokens.
+![The APB example in the dark theme: viewer bar, waves, numbered bookmarks and arrow labels in their own lanes](docs/img/hero.png)
 
-No build step, no bundler: open the page from `file://`.
+## Quick start
 
-```
-wavefw.js / wavefw.css      framework (one <script> + one <link>)
-wavefw.config.js            global settings file (all keys, with defaults), loaded before wavefw.js
-example.html                datasheet-style demo and reference page
-demo_waves.js               generated demo data (make demo)
-dump.config.json            converter + page settings for dump.vcd (make html CONFIG=dump.config.json HTML=dump.html)
-wavefw.base.json            base settings for generated configs (make config / make html WAVES=x.vcd)
-test_stream_video.config.json  generated from test_stream_video.vcd by mkconfig.py: every signal, editable
-tools/mkconfig.py           VCD/FST -> editable config: every signal under its full path, per-signal settings
-tools/dumpscan.py           the built-in reader: a dump as VCD text (FST via fst2vcd -e): signals, changes, enum tables
-tools/vcd2wavedrom.py       VCD/FST -> WaveDrom JSON, via wavepeek (options on the command line or in a config file)
-tools/mkhtml.py             config views or WaveJSON files -> one self-contained HTML page (make html)
-tools/embed.py              JSON -> data.js (file:// pages) or into an HTML placeholder
-tools/wavejson.py           readable JSON output shared by the tools (one signal per line, wrapped "tv" lists)
-tools/demo/demo.config.json settings of the demo (make demo, make html)
-tools/demo/demo_tb.sv       Manchester transmitter + testbench (Verilator)
-tools/conformance.html      every feature next to stock WaveDrom 3.5.0 (tools/vendor/, test-only)
-tools/smoke.py              headless Chromium check + screenshots (playwright)
+```sh
+make examples                   # needs Verilator: APB, AXI-Lite and FSM pages in /tmp/wavefw/examples/<ex>/<ex>.html
+make html WAVES=work/my.vcd     # your dump -> work/my.config.json (every signal, editable) + work/my.html
 ```
 
-## Use
+Open the `.html` in a browser. `make html` reads the dump with the built-in reader (Python 3 standard library only).
+Optional: GTKWave's `fst2vcd` to read FST dumps, [wavepeek](https://github.com/kleverhq/wavepeek) as a second reader,
+Python playwright for the tests and the screenshots. `make` alone lists the targets; build products go to
+`BUILD` (default `/tmp/wavefw`, because this repository lives on a slow Windows mount; `make BUILD=build …` keeps them
+in the repository). The full reference with live examples is [`docs/index.html`](docs/index.html).
+
+## Use cases
+
+### WaveDrom JSON in your own page
 
 ```html
-<link rel="stylesheet" href="wavefw.css">
-<script src="wavefw.js"></script>
+<link rel="stylesheet" href="wavefw/wavefw.css">
+<script src="wavefw/wavefw.js"></script>
 
 <script type="application/wavedrom">          <!-- interactive viewer -->
 { "signal": [ { "name": "clk", "wave": "p....." }, { "name": "d", "wave": "x.34.x", "data": ["A", "B"] } ] }
 </script>
 <script type="WaveDrom"> {signal: [{name: 'req', wave: '01..0'}]} </script>   <!-- static SVG -->
-<div data-wave="DEMO_WAVES.exact" data-lazy></div>                           <!-- from a data file, lazy -->
+<div data-wave="DEMO_WAVES.exact" data-lazy></div>                           <!-- from a data .js file, built on demand -->
 ```
 
-| Attribute | Meaning |
-|---|---|
-| `data-wave="#id"` / `"VAR.key"` | model from a script element or a global (data `.js` loaded with `<script src>`) |
-| `data-mode="view"` / `"svg"` | renderer (default: `view`; `svg` for `type="WaveDrom"`) |
-| `data-from`, `data-to` | viewer: initial window; SVG: drawn window. Numbers are model units; `120ns` / `1.5us` are times |
-| `data-cursor`, `data-title`, `data-width`, `data-fit` | cursor, bar title, SVG width px, scale SVG to container |
-| `data-sort="asc"`, `data-sort-ignore="i_,o_"` | initial signal order and the prefixes skipped when sorting |
-| `data-config='{"rowHeight": 30}'` | any setting (see *Settings*) for this wave |
-| `data-lazy` | build on button click, or when the enclosing `<details>` opens |
-| `<script src="wavefw.js" data-manual>` | no automatic upgrade; call `WaveFW.upgrade(root)` |
+Every element is upgraded when the page loads. `data-mode="svg"` picks the static renderer, `data-from` / `data-to` /
+`data-cursor` / `data-title` set the window, `data-lazy` builds the viewer when its `<details>` opens (*lazy cards*, for
+pages with many diagrams), `data-config='{"rowHeight": 30}'` sets any setting. JSON from files goes into a data script
+with `tools/embed.py` (a page from `file://` cannot `fetch()` it). Attributes and the JavaScript API:
+[`docs/index.html` § API](docs/index.html#api).
 
-JavaScript: `WaveFW.parse(jsonOrText)`, `new WaveView(el, model, {title, cursor, markers, jumps, from, to, minSpan})`,
-`WaveSVG.render(el, model, {from, to, width, cyclePx, axis, bg, fit, markers})`, `WaveSVG.toString(model, opts)`,
-`WaveFW.enums[name] = {0: 'IDLE'}`, `WaveFW.fromTV(wave)` (converts `template.html`'s `{t0, t1, signals: [{name, w, t}]}`),
-`WaveFW.configure(settings)`, `view.setSort('asc' | 'desc' | 'none', 'i_,o_')`, `WaveFW.sortRows(model, dir, ignore)`.
-Viewers redraw when the theme changes (`prefers-color-scheme`, `data-theme`/`style` on `<html>`, `setTheme`/`setColors`), when the size changes and once web fonts have loaded.
+### A dump to a page in one command
 
-## Themes and colours
+```sh
+make html WAVES=work/my.vcd               # makes work/my.config.json if missing, then work/my.html
+make html WAVES=work/my.fst               # FST (through fst2vcd): FSM states named from the dump
+make config WAVES=work/my.vcd             # after the dump changed: new signals added, gone ones dropped, edits kept
+make html CONFIG=work/dump.config.json    # a config written by hand -> work/dump.html
+```
 
-Three themes: `light` (warm paper, as in `template.html`), `white` (pure white, black traces and stock-WaveDrom bus
-colours, for print and slides) and `dark`. Every colour is a CSS custom property, so a theme or palette can be applied at three levels:
+Keep your dumps and configs under `work/`: the configs are tracked, the dumps and pages are ignored by git. The page has
+every view of the config, each as a viewer or a static SVG; scopes become foldable groups.
 
-| Level | How |
-|---|---|
-| page + all waves | `<html data-theme="white">`, `WaveFW.setTheme('white')`, `WaveFW.setColors({trace: '#c00', bus: 'navy'})`. No theme = auto (`prefers-color-scheme`) |
-| one wave | `data-theme="dark"` / `data-colors='{"trace":"#7ee787"}'` on the element or its `<script>`; `"config": {"theme": "white", "colors": {…}}` in the JSON; `view.setTheme()` / `view.setColors()`; `WaveFW.setTheme(name, el)` |
-| one signal | `"stroke": "#d6336c"` (trace, bus outline, name), `"fill": "#e5dbff"` (bus fill); a colour string in `"color"` acts like `stroke` |
+### The generated config, and what you edit in it
 
-Colour keys: `trace bus x xfill z bg header grid text muted accent page c3…c9`, or any CSS custom property name
-(`--wave-1` …). A `null` value removes the override, and `setTheme('auto')` drops the theme. A wave with its own theme or palette is not changed by
-the global calls. A themed static SVG paints its own background.
+`tools/mkconfig.py` lists every signal of the dump under its full path, one line each:
 
-## Settings (config file)
+```json
+"signals": {
+    "tb_cxp_top.app_clk":    {"show": true,  "radix": "", "color": "#2f9e44", "style": "", "width": 1,  "changes": 32123},
+    "tb_cxp_top.s_pix_data": {"show": true,  "radix": "", "color": "",        "style": "", "width": 16, "changes": 2189},
+    "tb_cxp_top.cxp_device_top_i.cfg.run": {"show": false, "radix": "", "color": "", "style": "", "width": 1, "changes": 2}
+}
+```
 
-Colours, sizes, fonts, line widths and sorting are *settings*. Layers, later wins:
+Edit `show` (false = left out), `radix` (`auto hex dec signed bin oct ascii`), `color`, `style`
+(`auto wavedrom questa square`), and add `alias`, `fill` or `enum` (`{"0": "IDLE"}`); `""` takes the global value from
+`"config"`. `width` and `changes` are information. Next to `signals`: `"config"` (page settings, below), `"page"` (title,
+intro), and `"views"` — named variants, each with its own `signals` (patterns such as `"tb.*_valid"`), `from` / `to`,
+`clock` (one cell per clock) or `exact`, `group`, `marker`, `bookmarks`, `arrows` and `render` (`view`, `svg`, `both`).
+The starting values come from `tools/base.config.json` (`BASE=`): which scope depth starts shown, which paths are hidden,
+how many value changes fit on a page, and rules by path pattern and width (`python3 -I tools/mkconfig.py --help`).
+The example configs in [`examples/`](examples) are written by hand and show every key.
+
+### FSM state names: FST, or VCD + sources
+
+An FST written by Verilator (`--trace-fst`) carries the enum tables of the design, so state buses show `IDLE`, `START`, …
+straight from the dump. A VCD has none: `make html WAVES=x.vcd SV="rtl/*.sv"` (`mkconfig.py --sv`) reads
+`typedef enum {…} name_t;` from the sources and labels the signals declared with those types; or write `"enum"` into an
+entry. The FSM example builds both pages.
+
+![The FSM example: state names from the FST, questa edges, -|- arrows between the state changes](docs/img/fsm.png)
+
+### Colours per signal, per group, per module
+
+Colour is the quickest way to read a bus. Give every **channel** of a protocol its own colour — for AXI4-Lite the
+address-write, write-data, write-response, address-read and read-data channels, for AXI4 the same plus the IDs and
+bursts, for AXI-Stream the `TVALID TREADY TDATA TLAST` group of each port — or one colour per **module** of a generated
+page. A group's colour goes to its signals (trace, bus outline, name) and to its name; a signal with its own colour keeps
+it.
+
+```json
+"group":  { "aw": ["AWVALID", "AWREADY", "AWADDR"], "w": ["WVALID", "WREADY", "WDATA", "WSTRB"], "b": ["BVALID", "BREADY", "BRESP"],
+            "ar": ["ARVALID", "ARREADY", "ARADDR"], "r": ["RVALID", "RREADY", "RDATA", "RRESP"] },
+"config": { "groupColors": { "aw": "#339af0", "w": "#37b24d", "b": "#f59f00", "ar": "#ae3ec9", "r": "#1098ad" } }
+```
+
+![AXI-Lite: one colour per channel, a bookmark on every VALID & READY, arrows AW → W → B and AR → R with the latency](docs/img/axi.png)
+
+`groupColors` keys are group names, full paths or `*` patterns, and the nearest matching group wins:
+`{"s_axis": "#339af0", "m_axis": "#37b24d"}` for two stream ports, `{"tb.dut.u_rx": "#37b24d", "*fifo*": "#f59f00"}`
+for modules of a generated config (the hierarchy picture below). One signal: `"color"` in its entry of a generated config,
+`"color"` / `"stroke"` and `"fill"` in WaveJSON. Many signals by name: a rule in `tools/base.config.json`, e.g.
+`{"match": ["*_valid", "*_ready"], "width": 1, "color": "#f59f00"}`, colours them in every config `mkconfig.py` writes.
+Interactively: find the signals and **Paint** them (see *Fuzzy find*).
+
+### Settings
+
+Colours, sizes, fonts, line widths, sorting, folding and highlight are *settings*, merged in this order (later wins):
 
 1. built-in defaults (`WaveFW.defaults`)
-2. global: `wavefw.config.js` loaded before `wavefw.js` (it sets `window.WAVEFW_CONFIG`), or `WaveFW.configure({…})` at run time (viewers and SVGs are redrawn, `null` removes a key)
-3. the diagram's `"config"` object in the WaveJSON
-4. the element: `data-config='{…}'`, `data-sort`, `data-sort-ignore`, `data-theme`, `data-colors`, or constructor options
+2. global: [`wavefw/wavefw.config.js`](wavefw/wavefw.config.js) loaded before `wavefw.js` (every key with its default),
+   or `WaveFW.configure({…})` at run time; for a generated page, the top-level `"config"` of the config file
+3. the diagram's `"config"` object in the WaveJSON (a view's `"config"`)
+4. the element: `data-config='{…}'`, `data-sort`, `data-theme`, `data-colors`, …, or the constructor options
 
 | Key | Default | Meaning |
 |---|---|---|
-| `theme`, `colors` | auto, `{}` | as in *Themes and colours*; globally they go to `<html>` |
-| `rowHeight`, `groupHeight`, `spaceHeight`, `headerHeight` | 26, 22, 14, 24 | row heights, px (static SVG: group 20, spacer 12) |
+| `theme`, `colors` | auto, `{}` | `light`, `white`, `dark`; colour tokens (see *Themes*) |
+| `rowHeight`, `groupHeight`, `spaceHeight`, `headerHeight` | 26, 22, 14, 24 | row heights, px |
 | `nameWidth`, `fontSize`, `labelSize` | 200, 11.5, 11 | name column, name text, bus labels, px |
-| `fontMono`, `fontBody` | IBM Plex | CSS font-family lists (`--font-mono`, `--font-body`) |
+| `fontMono`, `fontBody` | IBM Plex | CSS font-family lists |
 | `traceWidth`, `busWidth` | 1.4, 1.2 | line widths, px |
-| `sort`, `sortIgnore` | `none`, `[]` | `none \| asc \| desc`; prefixes skipped when comparing names (array or `"i_,o_"`) |
+| `sort`, `sortIgnore` | `none`, `[]` | `none \| asc \| desc`; name prefixes skipped when sorting (`["i_", "o_"]`) |
 | `sortButton`, `hint` | true, true | show the Sort controls / the help line |
-| `style` | `auto` | edges: `wavedrom` (slanted 1-bit edges, `<>` bus ends), `questa` (vertical edges, narrow bus crossings), `square` (vertical, square bus ends); `auto` slants wave strings and draws exact `tv` transitions vertically |
+| `style` | `auto` | edges: `wavedrom` (slanted), `questa` (vertical, narrow bus crossings), `square`; `auto` slants wave strings and draws exact `tv` transitions vertically |
 | `radix` | `auto` | bus values from `tv`: `auto` (≤ 6 bits decimal, else hex) `hex dec signed bin oct ascii` |
-| `fold` | none | groups folded when a viewer opens: `true`, a nesting depth (`2`), or group paths (`["tb.dut"]`) |
-| `arrowLabels`, `laneHeight` | `lane`, 16 | bookmark arrow labels in a thin row of their own between the signals (px per label), or `overlay` on the arrow |
-| `groupOrder` | `file` | inside every group: `last` = its signals first, then the sub-groups (modules); `first` = the other way round; `file` = as given (also when sorted). Generated configs use `last` |
-| `findHighlight`, `findOpen` | true, true | starting state of the fuzzy-find options (see *Fuzzy find*) |
-| `moduleShading` | true | the signals of neighbouring modules alternate between two backgrounds, with a line where the module changes; module rows are bold on a darker band |
-| `maxHeight` | none | e.g. `"80vh"`: rows scroll inside the viewer; any number of rows (the canvas covers only the visible part) |
-| `highlight`, `dim` | none, 0.3 | instances highlighted at start (full paths, names, `*` patterns; one colour each) and the opacity of the other rows |
+| `fold` | none | groups folded at start: `true`, a nesting depth (`2`), or group paths |
+| `groupOrder` | `file` | inside a group: `last` = signals first, then sub-modules; `first`; `file` |
+| `moduleShading` | true | neighbouring modules alternate between two backgrounds; module rows bold |
+| `maxHeight` | none | e.g. `"80vh"`: the rows scroll inside the viewer (any number of rows) |
+| `groupColors` | none | one colour per group: `{"aw": "#339af0", "tb.dut.u_rx": "#37b24d"}` (names, paths, `*` patterns) |
+| `highlight`, `dim` | none, 0.3 | instances in front at start (paths, names, `*` patterns) and the opacity of the rest |
+| `findHighlight`, `findOpen` | true, true | starting state of the find options |
+| `arrowLabels`, `laneHeight` | `lane`, 16 | arrow labels in a lane of their own between the signals, or `overlay` |
 
-A signal's own `"style"` and `"radix"` override the settings.
+### Themes
 
-The converter config file (below) has a `"config"` section with the same keys. `vcd2wavedrom.py` writes it into the
-WaveJSON `config`, and `mkhtml.py` uses the top-level one as the page's global settings.
+Three themes — `light` (warm paper), `white` (black traces, for print and slides) and `dark` — chosen by
+`prefers-color-scheme` or set with `<html data-theme="white">`, `WaveFW.setTheme('dark')`, the page's theme button, or
+`"config": {"theme": …}`. Every colour is a CSS custom property: `WaveFW.setColors({trace: '#c00', bus: 'navy'})` for all
+waves, `data-colors` / `"config": {"colors": …}` for one wave, `"color"` / `"fill"` for one signal. Details:
+[`docs/index.html` § Themes](docs/index.html#themes). The pictures in this README are dark; the same APB view in `light`:
 
-### Highlighting instances
+![The APB example in the light theme](docs/img/light.png)
 
-Every name row has a mark ○ in its left gutter (visible on hover). Clicking it, or ctrl/⌘+clicking the name, highlights
-that signal or group; a group covers all its members, so one click picks a whole instance (`tb_cxp_top ▸ cxp_device_top_i`).
-Highlighted rows stay in front with a colour bar and tint; all other rows fade to `dim` opacity but stay visible, and the
-headers of groups that contain a highlighted row stay in front. Several instances can be highlighted at once, each in its
-own colour (`--wave-hl1…6`, `colors: {hl1: …}`). **Highlight: N ✕** in the bar or Esc clears. From JSON / config files:
-`"highlight": ["tb.dut.u_tx", "*.irq"]`; on an element: `data-highlight="tx"`; in code: `view.highlight([...])`,
-`view.toggleHighlight('tb.dut')`, `view.highlighted()`. Static SVGs follow the setting.
+### Static SVG for documents
 
-### Viewer bar
+A view with `"render": "svg"` (or `data-mode="svg"`, `<script type="WaveDrom">`, `WaveSVG.toString(model)` for a file)
+is drawn as an inline SVG in the WaveDrom look, with the same bookmarks and arrows and a legend of the bookmark texts.
+It follows the page theme, or paints its own background when it has one.
 
-The bar has a title line (title, short messages such as "copied 3", cursor and view span) and the tools in labelled
-groups: **cursor** (a time and its unit ps … s, **Set** puts the cursor there; a span and **Show** gives a window of that
-width centred on the cursor, key `c` does it with the current width; a typed unit such as `85.12us` wins over the list;
-cycle diagrams count in cycles; the fields follow the cursor and the view), **view** (− + Fit), **find** (field, count, ‹ ›, Highlight / Open, colour + Paint, Unpaint, Copy), **list**
-(Sort with the ignored prefixes, Expand / Collapse, clear highlight), **edges** (◀ edge kind ▶, + Mark) and **go to**
-(marker jumps). Keys work while the waves have the focus, which a click on the waves or on a name gives them:
-`+ − 0` zoom, `← →` pan, `c` window at the cursor, `↑ ↓` select a signal, `/` find, `n N` next / previous match, `[ ]` edges, `e` edge kind,
-`m` bookmark, `s` sort, ctrl+C copy, Esc reset.
+![The APB write as a static SVG with its bookmark legend](docs/img/svg.png)
 
-### Fuzzy find
+### Large dumps
 
-The **find** field in the viewer bar (key `/`) searches the way fzf / telescope do in nvim: the typed letters must appear
-in that order anywhere in a name, not necessarily next to each other (`pxvd` finds `s_pix_valid`, `txarb` finds
-`cxp_tx_arbiter_i`). A word with a `.` runs over the full path (`dev.fifo` = a `fifo…` somewhere below a `…dev…`
-module), and words separated by spaces must all match. Matched letters are underlined in the names, the count is shown,
-Enter / shift+Enter, the ‹ › buttons, or `n` / `N` on the waves (as in vim) go to the next / previous match (opening
-its modules). Esc clears the search but leaves the view as
-it is (the modules it opened, the scroll position, the selected signal), so you stay at what you found; switching **Open**
-off is what brings the earlier folding back. On the waves (canvas focused), ctrl+C ends the search the same way.
+`test_stream_video.vcd` (24 MB, 3520 signals in 214 scopes, 4.9 M value changes): the config in 5 s, a page with every
+changing signal (1526 signals, all 9 scope levels) in 25 s and 6.3 MB; it opens in 2 s and redraws in 4 ms. The viewer's
+canvas only covers the visible rows, so any number of rows scrolls smoothly. Above `select.budget` value changes
+(6 M) `mkconfig.py` hides the deepest levels first and says which depth it kept.
 
-**Esc resets.** Esc anywhere in the viewer (waves, find field, names; not in the bookmark fields) brings back the plain
-state: no search, no highlighted rows (also those from the `highlight` setting), no selected signal. The view stays as it
-is: opened modules, scroll position, time window. Paint colours are kept (Unpaint removes them). Options, applied live while typing:
+## The viewer
 
-- **Highlight**: found rows (signals and modules) in front, everything else dimmed (like a highlight, in the accent colour)
-- **Open**: every module folded except the ones that contain a match; clearing the search brings the previous folding back
-- **colour + Paint**: give the found signals that colour (trace, outline, name); kept in the browser, **Unpaint** undoes it
-- **Copy**: the full paths of the found rows, one per line
+![The viewer bar with its groups](docs/img/bar.png)
 
-**Copying signal names.** Select names in the names column with the mouse and copy (ctrl+C): the clipboard gets the full
-paths of those rows, one per line, without values. With a signal selected and no search running, ctrl+C on the waves copies its
-path (with nothing selected: the highlighted rows). A short "copied N" shows in the bar.
+The bar has a title line (title, short messages, cursor and view span) and the tools in groups: **cursor** (a time and
+its unit, **Set**; a span, **Show** = that window around the cursor), **view** (− + Fit), **find** (field, count, ‹ ›,
+Highlight / Open, colour + Paint, Copy), **list** (Sort and the ignored prefixes, Expand / Collapse, clear highlight),
+**edges** (◀ edge kind ▶, + Mark) and **go to** (marker jumps). Keys work once the waves have the focus (a click on the
+waves or on a name):
 
-### Edge search and bookmarks
+| Key | Action | Key | Action |
+|---|---|---|---|
+| wheel, `+ − 0` | zoom, fit | shift+wheel, drag, `← →` | pan |
+| click | cursor + select the signal | `↑ ↓` | select the previous / next signal |
+| `c` | window of the current span at the cursor | `[ ]`, `e` | previous / next edge, edge kind |
+| `/`, `n N` | find, next / previous match | `m` | bookmark at the cursor |
+| `s` | sort off → A→Z → Z→A | ctrl+C | copy the selected / found / highlighted paths |
+| ○ or ctrl+click a name | highlight the signal or instance | Esc | reset: no search, highlight or selection |
 
-Click a signal name or its row on the waves to select it (↑ ↓ move the selection). **◀ ▶** (`[` `]`) move the cursor to the
-previous / next edge of the selected signal, of the kind chosen between them (`e`): any edge, rising or falling. On buses
-every value change counts. With nothing selected, the nearest change of any shown signal is used. **+ Mark** (`m`) puts
-a numbered bookmark (a circle on the signal row) at the cursor, snapped to an edge within 6 px. Below the waves each bookmark
-has an editable time (`250ns`, `85.12us`, or a number in the unit shown; the cursor button moves it to the cursor), a signal (or the time axis), the
-edge found there, a colour (default: the accent) and a text field for the event. On the waves, drag a circle to move it
-(time snapped to an edge of the row under the pointer, row = signal), and shift+drag from one circle to another to draw an
-arrow. Arrows have from → to, shape (WaveDrom edge shapes `- ~ -~ ~- -| |- -|-`), head (end, both, start, none), line
-(solid, dashed, dotted), colour and label; any number per bookmark. A label is written into a thin lane inserted between
-the signals under the arrow's upper end (above the row when both ends share it), never over a wave; `laneHeight` sets its
-height, `arrowLabels: "overlay"` draws labels on the arrows instead. Click a number to go there, an arrow to edit its label.
-Bookmarks are kept in the browser (`localStorage`); **JSON** gives `"bookmarks"` and `"arrows"` lists to paste into a config
-file or a view, so a page built by `make html` and its static SVG (with a legend of the texts) carry them. **Expand** /
-**Collapse** open or fold all groups. In code: `el.waveView` (`select`, `edge`, `mark`, `arrow`, `bookmarks`, `arrowList`,
-`setBookmarks`, `expandAll`, `collapseAll`).
+**Hierarchy and module shading.** With `"hierarchy": true` (generated configs) every scope is a group: module rows are
+bold on a darker band, the signals of neighbouring modules alternate between two backgrounds, a click on a module folds
+it, **Expand** / **Collapse** open or fold all. Hover a name for its full path. With `groupColors` each module has its
+own colour (here `u_master`, `u_slave`, `u_regfile`; the clocks keep the green of a `*clk` rule).
 
-### Sorting
+![The generated AXI-Lite page: u_master folded, u_slave and u_regfile open, one colour per module](docs/img/hierarchy.png)
 
-The viewer's **Sort** button cycles *off → A→Z → Z→A* (key `s`). The field next to it lists prefixes that are ignored
-when names are compared, so with `i_,o_` the signal `i_valid` sorts as `valid`; the skipped prefix is drawn dimmed. Names compare
-naturally (`d2` before `d10`, ties broken by the full name). Groups move as a block and are sorted inside, and `{}`
-spacers split the list into runs that are sorted separately.
+**Highlight.** The ○ mark in front of a name (or ctrl+click) puts that signal or whole instance in front in its own
+colour; the rest is dimmed but stays visible. Several instances at once; **Highlight: N ✕** or Esc clears it.
+`"highlight": ["tb.dut.u_tx"]` in `"config"` starts a page that way.
 
-## Supported WaveDrom subset
+![Two instances highlighted in two colours](docs/img/highlight.png)
+
+**Fuzzy find.** The find field (`/`) matches the typed letters in order anywhere in a name, as fzf does: `awvd` finds
+`AWVALID`. A word with a `.` runs over the full path (`dev.fifo`), words separated by spaces must all match. Matched
+letters are underlined; Enter, ‹ › or `n N` step through the matches. **Highlight** dims the rest, **Open** folds every
+module without a match, **Paint** colours the found signals (kept in the browser), **Copy** copies their paths.
+
+![Fuzzy find "awvd" with Highlight and Open](docs/img/find.png)
+
+**Edges and the cursor fields.** Select a signal (click its name or its row), then ◀ ▶ (`[ ]`) jump to its previous /
+next edge of the kind chosen between them (any, rising, falling; every value change on a bus). The cursor field takes a
+time (`1.2us` wins over the unit list) and **Set** moves the cursor there; the span field and **Show** give a window of
+that width around the cursor. Cycle diagrams count in cycles.
+
+![Cursor at 1.2 µs, a 100 ns window around it](docs/img/cursor.png)
+
+**Bookmarks and arrows.** **+ Mark** (`m`) puts a numbered bookmark on the selected signal at the cursor, snapped to an
+edge. Below the waves each bookmark has a time, a signal, a colour and a text; drag a circle to move it, shift+drag from
+one circle to another to draw an arrow (shape `- ~ -~ ~- -| |- -|-`, head, line, colour, label). Labels get a thin
+lane of their own between the signals. Bookmarks are kept in the browser; **JSON** gives the `"bookmarks"` and
+`"arrows"` lists to paste into a config, so the built page (and its static SVG) carries them. The AXI-Lite picture
+above shows arrows between handshakes with the latency as the label.
+
+![The bookmark and arrow lists under the waves](docs/img/bookmarks.png)
+
+**Sorting.** **Sort** (`s`) cycles off → A→Z → Z→A; the prefixes in the field next to it (`i_,o_`) are skipped when
+names are compared and drawn dimmed. Groups move as a block and are sorted inside.
+
+![Sort A→Z with i_ and o_ ignored](docs/img/sorting.png)
+
+**Copying names and Esc.** Names selected with the mouse copy as full paths, one per line. With no search running,
+ctrl+C on the waves copies the selected signal (or the highlighted ones). Esc anywhere in the viewer clears the search,
+the highlight and the selection and leaves the view as it is: opened modules, scroll position, time window.
+
+## Examples
+
+Each directory in [`examples/`](examples) has a testbench, a hand-written config and a README; `make example EX=<ex>`
+builds its VCD, FST and two pages: `<ex>.html` from the config and `<ex>_all.html` from a config that `mkconfig.py` makes
+from the dump (the whole hierarchy).
+
+| Example | What it shows | Picture |
+|---|---|---|
+| [`apb`](examples/apb) | APB3 write, read with two wait states, `PSLVERR` on an unmapped address; enum `phase`; a static-SVG view | [hero](docs/img/hero.png), [light](docs/img/light.png), [svg](docs/img/svg.png) |
+| [`axi_lite`](examples/axi_lite) | AXI4-Lite write (`AWREADY` a cycle late) and read; channel groups with a colour each, highlight from the config, latency arrows; three module levels in `_all` | [axi](docs/img/axi.png), [hierarchy](docs/img/hierarchy.png) |
+| [`fsm`](examples/fsm) | UART receiver with `typedef enum` states in a package: names from the FST and, for the VCD, from the sources; questa edges | [fsm](docs/img/fsm.png) |
+| [`demo`](examples/demo) | the Manchester transmitter behind [`docs/index.html`](docs/index.html) (`make demo`) | [cursor](docs/img/cursor.png) |
+
+## Tools
+
+All tools are `python3 -I tools/<tool>.py --help`; the Makefile calls them for you.
+
+| Tool | Does | Main options |
+|---|---|---|
+| `mkconfig.py` | dump → editable config with every signal | `DUMP`, `--out`, `--update`, `--force`, `--base`, `--depth`, `--sv FILES` |
+| `mkhtml.py` | config (every view) or WaveJSON files → one self-contained page | `--config`, `--view`, `--waves`, `--render`, `--out` |
+| `vcd2wavedrom.py` | one window of a dump → WaveJSON | `--config` + `--view`, or `--waves --scope --signals --clock/--exact --from --to --marker --group --enum` |
+| `embed.py` | WaveJSON → `data.js` for `file://` pages, or into an HTML placeholder | `--var NAME key=file.json`, `--html --placeholder` |
+| `dumpscan.py`, `wavejson.py` | the built-in dump reader (VCD text, FST via `fst2vcd -e`) and the readable JSON writer | modules |
+
+`vcd2wavedrom.py` has two readers with byte-identical output: the built-in one (default) and wavepeek
+(`--reader wavepeek`, `READER=wavepeek`), which also takes any wavepeek `--on` expression as a marker.
+
+## Formats
+
+### WaveDrom subset
 
 | Feature | Notes |
 |---|---|
@@ -194,7 +273,8 @@ spacers split the list into runs that are sorted separately.
 | `head.text/tick/every`, `foot.text/tock`, `config.hscale` | |
 
 Not supported: `<…>` sub-cycles, `reg` diagrams, skins, JsonML styling inside text (only the text is used). Unknown wave
-characters are treated as `.` (note: `,` is not a WaveDrom character).
+characters are treated as `.`. [`tests/conformance.html`](tests/conformance.html) draws every case next to stock
+WaveDrom 3.5.0.
 
 ### Extensions (stock WaveDrom ignores them)
 
@@ -202,177 +282,63 @@ characters are treated as `.` (note: `,` is not a WaveDrom character).
 |---|---|
 | `time: {t0, cycle, t1?, skip?}` | cycle *c* starts at `t0 + c·cycle` ps, so the axis shows real time; `skip: [[k, n]]` = the `\|` cell at index *k* stands for *n* cycles |
 | `signal[i].tv: [[t, v], …]` | exact transitions in model time (ps when `time` is set). 1-bit: `0 1 x z`; bus: hex. Takes precedence over `wave` |
-| `signal[i].width / enum / radix / style / color` | bus width, value labels (`{"0": "IDLE"}`), value radix (`fmt` is an alias), edge style, fixed fill 3–9 |
+| `signal[i].width / enum / radix / style / color / fill` | bus width, value labels (`{"0": "IDLE"}`), radix, edge style, colours |
 | `signal[i].path`, `same` | full hierarchical path (the name's tooltip); `"same": "tb.clk"` = the `tv` of the signal with that `path` (one net seen at several levels is stored once) |
-| `bookmarks: [{n, t, signal, text, color}]` | numbered events on signal rows (`signal` = full path, `t` in model units or `"85.12us"`); static SVGs add a legend of the texts |
+| `config: {…}` | the settings of this diagram (see *Settings*) |
+| `bookmarks: [{n, t, signal, text, color}]` | numbered events on signal rows (`signal` = full path, `group.name` without one; `t` in model units or `"85.12us"`) |
 | `arrows: [{from, to, shape, head, line, color, label}]` | arrows between bookmarks: shape `- ~ -~ ~- -\| \|- -\|-`, head `> <> <` or `""`, line `solid dashed dotted` |
-| `markers: [{t \| cycle, label}]` | dashed markers. They become jump buttons when there are ≤ 6 and no `jumps` are given |
+| `markers: [{t \| cycle, label}]` | dashed markers; they become jump buttons when there are ≤ 6 and no `jumps` |
 | `jumps: [{t \| cycle, span, label}]`, `cursor` | jump buttons and the initial cursor |
 
-## VCD / FST → WaveDrom
+## Project layout
 
-`tools/vcd2wavedrom.py` writes WaveJSON. Two readers give the same output:
+```
+wavefw/                       what a page needs, nothing else
+  wavefw.js / wavefw.css      framework (one <script> + one <link>)
+  wavefw.config.js            global settings file (all keys, with defaults), loaded before wavefw.js
+tools/                        what you run: python3 -I tools/<tool>.py
+  mkconfig.py vcd2wavedrom.py mkhtml.py embed.py dumpscan.py wavejson.py
+  base.config.json            base settings for generated configs (make config / make html WAVES=x.vcd)
+examples/                     apb/ axi_lite/ fsm/ demo/: testbench, config, README
+docs/                         what you look at
+  index.html                  the reference page with live examples (opens from file://)
+  demo_waves.js               its data (make demo), tracked
+  img/                        the README screenshots (make shots)
+  reference/template.html     the original visual reference (PSI5 datasheet)
+tests/
+  smoke.py                    behaviour checks in headless Chromium (make smoke)
+  shots.py                    the screenshots (make shots)
+  conformance.html            every feature next to stock WaveDrom 3.5.0 (vendor/, test-only)
+work/                         your dumps and their configs: configs tracked, dumps and pages git-ignored
+prompts/                      the roadmap as a series of prompts
+Makefile                      make help lists the targets; build products go to BUILD (default /tmp/wavefw)
+```
 
-- **builtin** (default): `tools/dumpscan.py` reads the dump once as VCD text (an FST through GTKWave's `fst2vcd -e`),
-  keeps only the requested signals, and computes the window, clock sampling and markers in memory. Paths are spelled as
-  wavepeek spells them (`mem.[1]`, bit-blasted vectors joined, `sig[7:4]` bit selects). Markers: `posedge X`,
-  `negedge X`, `edge X`, or `X` (any change).
-- **wavepeek** (`--reader wavepeek`, `"reader": "wavepeek"` in a config, `make … READER=wavepeek`): runs
-  [wavepeek](https://github.com/kleverhq/wavepeek) (`info`, `value`, `change`); markers may be any wavepeek `--on`
-  expression. It needs wavepeek on `PATH` or in `~/.local/bin`
-  (`cargo build --release --manifest-path ~/tools/wavepeek_src/Cargo.toml`); it is also used when an FST cannot be read
-  as text (no fst2vcd).
+## Development
 
-Measured on this machine (16 CPUs), output byte-identical between the readers:
+```sh
+make demo examples html     # rebuild docs/demo_waves.js, the example pages, the demo page
+make smoke                  # tests/smoke.py: every page in light and dark, ~200 behaviour checks, PNGs in BUILD/shots
+make shots                  # tests/shots.py: docs/img/*.png, dark theme (after make examples; ~10 s, same bytes every run)
+```
+
+`make smoke` is the gate for every change: it opens `docs/index.html`, `tests/conformance.html` and every built page
+that exists (demo, FST demo, examples, `work/*.html`), fails on console errors, and runs interaction checks per page
+(cursor, zoom, sort, settings layers, highlight, find, bookmarks and arrows, FSM names). `make shots` checks looks rather
+than behaviour: fixed viewport, fixed clicks, one element per image. Both need Python playwright (a user-site install,
+so they run without `-I`). Environment used: Verilator 5.046, wavepeek 3.1.0, GTKWave fst2vcd.
+
+The two dump readers, measured on this machine (16 CPUs), output byte-identical:
 
 | Job | builtin | wavepeek |
 |---|---|---|
 | `test_stream_video.vcd` (24 MB), every changing signal: 1526 signals, 4.8 M changes | 25 s, 1.5 GB | 45 s, 2.9 GB |
 | `mkconfig.py test_stream_video.vcd` (3520 signals listed, changes counted) | 5.4 s | 12 s |
 | `dump.vcd` (14 MB), view `full` (15 signals, exact, markers) | 2.0 s | 7.0 s |
-| `dump.vcd`, view `start` (clock-sampled 2 µs) | 1.2 s | 2.6 s |
 | demo (25 signals) | 0.15 s | 0.19 s |
 
-In the first row the builtin reader spends 4.8 s reading the dump; the rest is building the JSON, which both share.
+## Roadmap
 
-```sh
-# clock-sampled: one cycle per clock period, plain WaveDrom wave strings + "time"
-python3 -I tools/vcd2wavedrom.py --waves dump.vcd --scope tb --clock clk --from 20ns --to 370ns \
-    --signals clk,start,data,state,txd=TXD --enum state=0:IDLE,1:START,2:DATA,3:PARITY \
-    --group tx=state,TXD --gap 100ns:250ns --out cyc.json
-
-# exact: per-signal "tv" transitions (+ a quantised wave string as a fallback for stock WaveDrom)
-python3 -I tools/vcd2wavedrom.py --waves dump.vcd --scope tb.u_dut --exact --from 896us --to 1155us \
-    --signals i_sat_rxd_comp,r_state,o_sat_data --marker 'posedge o_sat_data_eof=eof' --out frame.json
-
-python3 -I tools/embed.py --var WAVES frame=frame.json --out waves.js        # <div data-wave="WAVES.frame">
-python3 -I tools/embed.py --html template.html --placeholder '/*WAVE_DATA*/' frame.json --out page.html
-
-# all options from a config file; --view picks one entry of "views"; command-line options win
-python3 -I tools/vcd2wavedrom.py --config dump.config.json --view full --out full.json
-```
-
-The generated JSON has line breaks: one key per line, one signal per line, a group opens a block, and long `tv` lists
-are wrapped at 16 transitions per line. `embed.py` writes the same layout (`--compact` gives one line).
-
-### From the VCD or FST alone (make config)
-
-```sh
-make html WAVES=test_stream_video.vcd     # makes test_stream_video.config.json (if missing), then test_stream_video.html
-make config WAVES=test_stream_video.vcd   # after the dump changed: adds new signals, drops gone ones, keeps your edits
-python3 -I tools/mkconfig.py dump.vcd [--base my.base.json] [--depth 3] [--out x.config.json] [--update | --force]
-```
-
-`tools/mkconfig.py` lists every signal of the dump (wavepeek; declaration order, value-change counts and enum tables read
-from the VCD text, or from an FST through GTKWave's `fst2vcd -e`) and writes one line per signal under its full
-hierarchical path:
-
-```json
-"signals": {
-    "tb_cxp_top.app_clk":    {"show": true,  "radix": "", "color": "#2f9e44", "style": "", "width": 1,  "changes": 32123},
-    "tb_cxp_top.s_pix_data": {"show": true,  "radix": "", "color": "",        "style": "", "width": 16, "changes": 2189},
-
-    "tb_cxp_top.cxp_device_top_i.cfg.run": {"show": false, "radix": "", "color": "", "style": "", "width": 1, "changes": 2}
-}
-```
-
-Edit it by hand: `show` (false = left out), `radix` (`auto hex dec signed bin oct ascii`), `color` (trace, outline and
-name), `style` (`auto wavedrom questa square`); optional `alias`, `fill`, `enum`. `""` means the global value from `"config"`
-(`style`, `radix`, `fold`, `theme`, `colors`, …). `width` and `changes` are information only. With `"hierarchy": true` the
-page nests the signals in groups by scope (`tb_cxp_top ▸ cxp_device_top_i ▸ …`); hover a name for its full path.
-A view may select from the catalog with patterns: `"signals": ["tb_cxp_top.s_pix_*", "tb_cxp_top.app_clk"]`, and may be
-clock-sampled (`"clock": "tb_cxp_top.app_clk", "from": "84us", "to": "85us"`).
-
-The starting values come from the base file `wavefw.base.json` (`BASE=` in make, `--base`): its `config`, `page`,
-`views`, `exact`, `hierarchy` are copied, and two generator keys decide the per-signal defaults:
-
-- `select`: `depth` (scope levels below the top that start shown, 2), `constants` (show signals that never change, false),
-  `hide` (path patterns, `$rootio.*` — Verilator's copy of the top ports), `budget` (most value changes on one page,
-  1.5 M; deeper levels are dropped first)
-- `rules`: `[{"match": ["*clk", "*clk_i"], "width": 1, "color": "#2f9e44"}, …]` — any per-signal key by path pattern
-  (`*`, `?`) and optional width (`8`, `">1"`, `">=32"`); later rules win
-
-`make html WAVES=x.vcd` never overwrites an existing `x.config.json`.
-
-**Hierarchy depth.** `select.depth` is 99 (every level), so the page has the whole scope tree of the dump down to the last
-level (`test_stream_video.vcd`: 205 scopes, 9 levels, 1526 changing signals); `fold: 2` only folds the deeper groups at
-start (**Expand** opens all). Only when the shown signals have more than `budget` value changes (6 M) are the deepest
-levels left out (`show: false`, the message says which depth was kept); `--depth N` or the base file changes this.
-Constant signals (parameters, package constants) start hidden. The viewer draws any number of rows: the canvas covers
-only the visible part (it stays in view while the rows scroll, the time axis on top), and `maxHeight: "80vh"` in the
-base file gives the rows their own scroll bar so the viewer bar stays in view.
-
-**FSM states by name.** An FST (Verilator `--trace-fst`) carries the enum tables of the design; `mkconfig.py` writes them
-into the signal entries (`"enum": {"0": "IDLE", …}`) and `vcd2wavedrom.py` uses them directly, so state buses show
-`IDLE`, `START`, … (`make demo-fst` shows it). A VCD has no enum information: `--sv rtl/*.sv` (make: `SV="rtl/*.sv"`)
-reads `typedef enum … {…} name_t;` and inline `enum {…} var;` from the sources and labels the signals declared with those
-types (by signal name), or write `"enum"` into an entry by hand.
-
-### Config file
-
-Every option is a key (`from`, `to`, `signals`, `clock` / `exact`, `scope`, …). Relative `waves` paths are relative to the config file.
-
-```json
-{
-  "waves": "dump.vcd", "scope": "tb_top",
-  "enum": { "state": { "0": "IDLE", "1": "RUN" } },
-  "config": { "theme": "white", "colors": { "bus": "navy" }, "rowHeight": 24, "sort": "asc", "sortIgnore": ["i_", "o_"] },
-  "page": { "title": "my dump", "intro": "text under the title" },
-  "views": {
-    "start": { "clock": "clk", "from": "0ns", "to": "2us", "signals": ["clk", "state", "i_data"],
-               "group": { "core": ["state", "i_data"] }, "gap": ["1us:1.5us"], "render": "svg" },
-    "full":  { "exact": true, "signals": "clk,state,i_data", "marker": ["posedge done=done"], "note": "whole run" }
-  }
-}
-```
-
-A view overrides the top-level keys (`config` and `enum` are merged). `render` (`view` | `svg` | `both`) and `note`
-are used by `mkhtml.py` only.
-
-### HTML page (make html)
-
-```sh
-make html                                           # demo config -> /tmp/wavefw_demo.html
-make html CONFIG=dump.config.json HTML=dump.html    # any dump; WAVES=other.vcd overrides the config's dump
-python3 -I tools/mkhtml.py --config cfg.json --view full --out page.html
-python3 -I tools/mkhtml.py a=a.json b=b.json --settings cfg.json --out page.html   # from WaveJSON files
-```
-
-The page is one file: `wavefw.css`, `wavefw.js` and the data are inlined, so it can be mailed or archived. It has a theme button.
-
-### Large dumps
-
-`test_stream_video.vcd` (24 MB, 3520 signals in 214 scopes, 160 µs, 4.9 M value changes): `mkconfig.py` takes about
-12 s; with every changing signal on every level (1526 signals, 4.8 M value changes) `make html` writes a 6.3 MB page in
-about 55 s, which opens in about 2 s; Expand (1731 rows, 41 000 px) takes 0.1 s and a redraw 4 ms. Identical
-transitions of one net seen at several levels are stored once (`"same"`). Long signal lists are split over several
-wavepeek calls run in parallel (each call reads the whole dump; one argument is limited to 128 KiB).
-
-Checked with `dump.vcd`: 14 MB, 355 signals, 226 µs. A full-range exact view of 15 signals (56 k clock edges,
-25 k bus values) converts in about 2 s, a clock-sampled 2 µs window in 0.5 s, and `make html` writes a 2.3 MB page.
-Transitions closer than 1 px are drawn as one solid bar, so a full-range redraw takes about 6 ms instead of 400 ms.
-Widths come from wavepeek's value literals, so signals in child scopes (`u_core.state`) are buses, not bits.
-Repeated values (for example the initial `$dumpvars`) are dropped from `tv`.
-
-- `--clock` samples with `--on 'posedge CLK' --sample-mode native`, so each cell shows the value after the edge.
-- `--exact` uses `--on '*' --row-mode sparse --row-values delta`, with a `value --at FROM` baseline.
-- `--marker 'EXPR=label'` takes any wavepeek `--on` expression.
-- Signals may be `path=alias` and may use bit selects (`status[7:4]`).
-
-To check a window by eye, open the same dump in [Surfer](https://surfer-project.org)
-(`cargo install --git https://gitlab.com/surfer-project/surfer surfer`) and compare the edges at the marker times.
-Surfer is not a dependency.
-
-## Demo and tests
-
-```sh
-make demo     # Verilator VCD (/tmp) -> vcd2wavedrom.py --config tools/demo/demo.config.json -> demo_waves.js
-make html     # tools/mkhtml.py: the demo config's views -> /tmp/wavefw_demo.html
-make html WAVES=x.vcd   # tools/mkconfig.py (x.config.json, if missing) + mkhtml.py -> x.html (x.fst works too)
-make demo-fst # the demo dumped as FST -> /tmp/wavefw_demo_fst.html, FSM states named from the FST enum tables
-make smoke    # tools/smoke.py: example.html + conformance.html (+ pages from make html), light & dark,
-              # interaction, sorting and settings checks, PNGs in /tmp/wavefw_shots
-```
-
-Environment used: Verilator 5.046, wavepeek 3.1.0, Python 3 with playwright (Chromium). There is no node/npm.
-`smoke.py` runs without `-I` because playwright is a user-site install.
+The next stages are prompts in [`prompts/`](prompts/00-roadmap.md); next is a SystemVerilog Assertion engine: parse
+`property` / `sequence` / `assert property`, bind an assertion to an instance of the waveform, evaluate it over the dump,
+and draw the attempts, steps and failures next to the signals, with statistics.

@@ -26,6 +26,7 @@ window.WAVEFW_CONFIG = {
   fold: null,                   // groups folded at start: true | depth (number) | ['group.path', …]
   highlight: null,              // instances highlighted at start: ['tb.dut.u_tx', '*.irq'] (paths, names, * patterns)
   dim: 0.3,                     // opacity of the rows that are not highlighted
+  groupColors: null,            // one colour per group: {aw: '#339af0', 'tb.dut.u_rx': '#37b24d', '*.fifo*': …} (path, name, * pattern)
   arrowLabels: 'lane',          // bookmark arrow labels: 'lane' (a thin row of their own between signals) | 'overlay' (on the arrow)
   laneHeight: 16,               // px per label in such a lane
   groupOrder: 'file',           // inside every group: 'last' = signals first, then the sub-groups (modules); 'first'; 'file' = as given

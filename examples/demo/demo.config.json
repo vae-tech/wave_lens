@@ -1,13 +1,12 @@
 {
-  "description": "make demo / make html: Verilator demo (tools/demo/demo_tb.sv). Keys = vcd2wavedrom.py options; views = named variants.",
-  "waves": "/tmp/wavefw_demo.vcd",
+  "description": "make demo / make html: Verilator demo (examples/demo/demo_tb.sv). Keys = vcd2wavedrom.py options; views = named variants. The dump is built under BUILD and passed with --waves by the Makefile.",
   "scope": "demo_tb",
   "enum": { "state": { "0": "IDLE", "1": "START", "2": "DATA", "3": "PARITY" } },
   "config": {
     "sortIgnore": ["rx_", "bit_"],
     "rowHeight": 26
   },
-  "page": { "title": "mc_tx demo", "intro": "Manchester transmitter from tools/demo/demo_tb.sv, simulated with Verilator and converted with vcd2wavedrom.py." },
+  "page": { "title": "mc_tx demo", "intro": "Manchester transmitter from examples/demo/demo_tb.sv, simulated with Verilator and converted with vcd2wavedrom.py." },
   "views": {
     "cycle": {
       "clock": "clk", "from": "20ns", "to": "370ns",

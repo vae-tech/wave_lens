@@ -16,7 +16,7 @@ Per-signal entry ("" = the global setting from "config"):
   width and changes (value changes in the dump) are information only. "enum" is filled from the dump (FST enum tables)
   or from --sv sources, so FSM states show by name.
 
-Base file (--base, default wavefw.base.json in the project root): copied into the new config, except two generator keys
+Base file (--base, default tools/base.config.json beside this script): copied into the new config, except two generator keys
   "select" {"depth": 2, "constants": false, "hide": ["$rootio.*"], "budget": 1500000}  which signals start with
            "show": true — scope depth <= depth below the top, not constant, not hidden, at most `budget` value changes
            in total (the deepest levels are dropped first)
@@ -31,6 +31,8 @@ sys.path.insert(0, HERE)   # -I drops the script dir from sys.path
 import dumpscan, vcd2wavedrom  # noqa: E402
 
 ROOT = os.path.dirname(HERE)
+BASE = os.path.join(HERE, 'base.config.json')
+OLD_BASE = os.path.join(ROOT, 'wavefw.base.json')   # name before the restructure, read with a warning
 ENTRY = ('show', 'radix', 'color', 'style')          # keys every entry gets (empty = global setting)
 INFO = ('width', 'changes')
 GENERATOR_KEYS = ('select', 'rules')
@@ -209,7 +211,7 @@ HELP = [
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('waves', help='VCD or FST dump')
-    ap.add_argument('--base', help='base settings (default: wavefw.base.json in the project root, if present)')
+    ap.add_argument('--base', help='base settings (default: tools/base.config.json, if present)')
     ap.add_argument('--out', help='config file to write (default: <dump>.config.json next to the dump)')
     ap.add_argument('--update', action='store_true', help='the output exists: sync its signals with the dump, keep all edits')
     ap.add_argument('--force', action='store_true', help='overwrite an existing output (edits are lost)')
@@ -228,7 +230,10 @@ def main():
         old = vcd2wavedrom.load_config(out)
         if not isinstance(old.get('signals'), dict):
             die(f'{out} has no "signals" catalog (not made by mkconfig.py); use another --out or --force')
-    base_path = a.base or os.path.join(ROOT, 'wavefw.base.json')
+    base_path = a.base or BASE
+    if not a.base and os.path.exists(OLD_BASE):
+        print(f'mkconfig: {OLD_BASE} is deprecated and used instead of {BASE}: move it there', file=sys.stderr)
+        base_path = OLD_BASE
     base = vcd2wavedrom.load_config(base_path) if (a.base or os.path.exists(base_path)) else {}
     if a.depth is not None:
         base['select'] = {**(base.get('select') or {}), 'depth': a.depth}

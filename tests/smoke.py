@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
-"""smoke.py — headless Chromium check of example.html and tools/conformance.html (Python playwright).
+"""smoke.py — headless Chromium check of docs/index.html and tests/conformance.html (Python playwright).
 
 For each page and colour scheme: no console errors / page errors / wavefw error boxes, every viewer has a
-drawn canvas, and on example.html the viewer interaction works (cursor click updates the value column, wheel
+drawn canvas, and on docs/index.html the viewer interaction works (cursor click updates the value column, wheel
 zoom changes the view span, Fit restores it, jump buttons move the cursor, group folding hides rows, a lazy
 card builds its viewer when opened, Sort with ignored prefixes, settings layers, edge styles and radix). Pages built by
-`make html` (/tmp/wavefw_demo.html, dump.html, test_stream_video.html: scope hierarchy, folding, "same") are checked too
-when they exist. Full-page PNGs go to --out.
+`make html` / `make demo-fst` / `make examples` (BUILD/demo.html, BUILD/demo_fst.html, BUILD/examples/<ex>/<ex>.html and
+<ex>_all.html, work/dump.html, work/test_stream_video.html: scope hierarchy, folding, "same", bookmarks and arrows of the
+examples, FSM state names) are checked too when they exist. Full-page PNGs go to --out.
 
-  python3 tools/smoke.py [--out /tmp/wavefw_shots]   (no -I: playwright is usually a user-site install)
+  python3 tests/smoke.py [--build /tmp/wavefw] [--out /tmp/wavefw/shots]   (no -I: playwright is usually a user-site install)
 """
 import argparse, os, pathlib, re, sys
 from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-PAGES = [ROOT / 'example.html', ROOT / 'tools' / 'conformance.html']
-BUILT = [pathlib.Path('/tmp/wavefw_demo.html'), ROOT / 'dump.html', ROOT / 'test_stream_video.html',   # from make html, optional
-         pathlib.Path('/tmp/wavefw_demo_fst.html')]                                                      # make demo-fst
+PAGES = [ROOT / 'docs' / 'index.html', ROOT / 'tests' / 'conformance.html']
+BUILT = []   # pages from make html / make demo-fst, checked when they exist (set in main from --build)
 fails = []
 
 
@@ -374,6 +374,40 @@ def fst(page):
     check(g == ['▾ demo_tb', '▾ u_tx'], f'FST hierarchy as groups {g}')
 
 
+EXAMPLES = {'apb': (6, 3), 'axi_lite': (5, 3), 'fsm': (4, 3)}   # bookmarks and arrows of the first view
+
+
+def example(page, ex):
+    v = page.locator('.wv').first
+    bms, ars = EXAMPLES[ex]
+    bl, al = v.locator('.notes ol.bms > li'), v.locator('.notes ol.ars > li')
+    check(bl.count() == bms and al.count() == ars, f'{ex}: the bookmarks and arrows of the config are listed ({bl.count()}/{bms}, {al.count()}/{ars})')
+    check(v.locator('.names .row.lane').count() > 0, f'{ex}: arrow labels have their lanes')
+    if ex == 'axi_lite':
+        check(v.locator('.names .row.grp.hl').count() == 3 and v.locator('.names .row.dim').count() > 0, 'axi_lite: highlight of the write channels from the config')
+        col = lambda n: v.locator('.names .row', has_text=n).first.locator('.n').evaluate('e => getComputedStyle(e).color')
+        check([col('AWVALID'), col('WDATA'), col('RRESP')] == ['rgb(51, 154, 240)', 'rgb(55, 178, 77)', 'rgb(16, 152, 173)'],
+              f'axi_lite: groupColors give every channel its colour ({col("AWVALID")}, {col("WDATA")}, {col("RRESP")})')
+        svg = page.evaluate("""WaveFW.WaveSVG.toString({signal: [['g', {name: 'a', wave: '01'}, {name: 'b', wave: '10', color: '#ff0000'}], {name: 'c', wave: '01'}]},
+            {groupColors: {g: '#00ff00'}})""")
+        check(svg.count('#00ff00') >= 2 and '#ff0000' in svg, 'groupColors in the static SVG; a signal with its own colour keeps it')
+    if ex == 'fsm':
+        st = v.locator('.names .row', has_text='state').first
+        st.locator('.n').click()
+        vals = []
+        for _ in range(4):
+            v.locator('button[data-act=next]').click(); vals.append(st.locator('.v').inner_text())
+        check(vals == ['START', 'DATA', 'STOP', 'IDLE'], f'fsm: state names in the value column {vals}')
+
+
+def fsm_vcd(page):
+    v = page.locator('.wv').first
+    st = v.locator('.names .row:not(.grp)', has_text='state').first
+    st.locator('.n').click()
+    v.locator('button[data-act=next]').click()
+    check(st.locator('.v').inner_text() == 'START', f'fsm_all (VCD + mkconfig --sv): state names from the SV package ({st.locator(".v").inner_text()})')
+
+
 def deep(page):
     js = lambda e: page.evaluate(f"(() => {{ const v = document.querySelector('.wv').waveView; return {e}; }})()")
     check(js('Math.max(...v.M.rows.map(r => r.depth))') >= 8 and js('Object.keys(v.M.groups).length') > 200, 'every level of the hierarchy is on the page')
@@ -418,8 +452,13 @@ def themes(page):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--out', default='/tmp/wavefw_shots')
+    ap.add_argument('--build', default='/tmp/wavefw', help='the Makefile BUILD directory (demo.html, demo_fst.html)')
+    ap.add_argument('--out', help='screenshots (default: BUILD/shots)')
     a = ap.parse_args()
+    a.out = a.out or os.path.join(a.build, 'shots')
+    build = pathlib.Path(a.build)
+    BUILT[:] = [build / 'demo.html', ROOT / 'work' / 'dump.html', ROOT / 'work' / 'test_stream_video.html', build / 'demo_fst.html']
+    BUILT.extend(build / 'examples' / ex / f'{ex}{s}.html' for ex in EXAMPLES for s in ('', '_all'))
     os.makedirs(a.out, exist_ok=True)
     with sync_playwright() as p:
         b = p.chromium.launch()
@@ -442,7 +481,7 @@ def main():
                 check(n > 0 and blank == 0, f'{n} viewers, all canvases drawn')
                 if path not in BUILT:
                     check(page.locator('.wvs svg').count() > 0, f'{page.locator(".wvs svg").count()} static SVGs')
-                if path.name == 'example.html' and scheme == 'light':
+                if path == PAGES[0] and scheme == 'light':
                     interact(page)
                     sorting(page)
                     settings(page)
@@ -456,8 +495,12 @@ def main():
                         hierarchy(page)
                         find(page)
                         deep(page)
-                    if path.name == 'wavefw_demo_fst.html':
+                    if path.name == 'demo_fst.html':
                         fst(page)
+                    if path.stem in EXAMPLES:
+                        example(page, path.stem)
+                    if path.stem == 'fsm_all':
+                        fsm_vcd(page)
                     big(page)
                 shot = os.path.join(a.out, f'{path.stem}_{scheme}.png')
                 page.screenshot(path=shot, full_page=True)

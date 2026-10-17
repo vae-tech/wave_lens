@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>wavefw Conformance</title>
-<link rel="stylesheet" href="../wavefw.css">
+<link rel="stylesheet" href="../wavefw/wavefw.css">
 <style>
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 14px; padding: 0 clamp(16px, 3vw, 32px) 48px; }
@@ -25,10 +25,10 @@ code { font-family: var(--font-mono); font-size: 0.92em; background: var(--panel
 </head>
 <body>
 <h1>wavefw conformance</h1>
-<p>Each case is drawn three times: wavefw's static SVG, stock WaveDrom 3.5.0 (vendored in <code>tools/vendor/</code>, only used here), and the wavefw interactive viewer. The <code>&lt;…&gt;</code> sub-cycle syntax and WaveDrom's <code>skin</code>/<code>reg</code> features are out of scope.</p>
+<p>Each case is drawn three times: wavefw's static SVG, stock WaveDrom 3.5.0 (vendored in <code>tests/vendor/</code>, only used here), and the wavefw interactive viewer. The <code>&lt;…&gt;</code> sub-cycle syntax and WaveDrom's <code>skin</code>/<code>reg</code> features are out of scope.</p>
 <div id="cases"></div>
 
-<script src="../wavefw.js" data-manual></script>
+<script src="../wavefw/wavefw.js" data-manual></script>
 <script src="vendor/default.js"></script>
 <script src="vendor/wavedrom.min.js"></script>
 <script>

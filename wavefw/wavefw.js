@@ -30,7 +30,7 @@ const flatText = t => Array.isArray(t) ? t.slice(typeof t[1] === 'object' && !Ar
 // theme and colors are not merged here: they become data-theme / CSS custom properties (see applyLook).
 const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight: 24, traceWidth: 1.4, busWidth: 1.2,
   labelSize: 11, fontSize: 11.5, sort: 'none', sortIgnore: [], sortButton: true, hint: true, style: 'auto', radix: 'auto', fold: null,
-  highlight: null, dim: 0.3, arrowLabels: 'lane', laneHeight: 16, maxHeight: null,
+  highlight: null, dim: 0.3, groupColors: null, arrowLabels: 'lane', laneHeight: 16, maxHeight: null,
   groupOrder: 'file', moduleShading: true, findHighlight: true, findOpen: true };
 const SVG_DEFAULTS = { groupHeight: 20, spaceHeight: 12 };   // the static figure is a little denser
 const GLOBAL = {};
@@ -82,6 +82,22 @@ function hlState(M, picks, dim) {
     if (c !== undefined) { cover.set(r, c); on.add(r); r.anc.forEach(id => on.add(M.groups[id])); }   // keep their group headers too
   }
   return { cover, on, dim };
+}
+
+/* ---------------- group colours: every signal of a group in one colour (AXI channels, modules …) ---------------- */
+// "groupColors" setting {group: colour}: group = full path, name or "*" pattern; the nearest matching group wins. Its
+// signals take the colour (trace, bus outline, name) unless they have their own "color" / "stroke"; the group's name too.
+function groupPaint(M, map) {
+  const list = Object.entries(map || {}).map(([p, c]) => [p.includes('*') ? glob(p) : p, c]);
+  const of = g => { for (const [p, c] of list) if (typeof p === 'string' ? g.full === p || g.name === p : p.test(g.full)) return c; };
+  for (const r of M.rows) {
+    if (r.type === 'space' || r.type === 'lane') continue;
+    if (!('own' in r)) r.own = r.stroke;
+    let c = r.type === 'group' ? of(r) : undefined;
+    for (let i = r.anc.length - 1; c === undefined && i >= 0; i--) c = of(M.groups[r.anc[i]]);
+    const v = r.own ?? c;
+    if ('stroke0' in r) r.stroke0 = v ?? null; else r.stroke = v;   // painted by find: the paint stays on top
+  }
 }
 
 /* ---------------- signal sorting (natural order, optional prefixes ignored: i_, o_ …) ---------------- */
@@ -647,6 +663,7 @@ class WaveView {
   // settings from all layers; a global WaveFW.configure() calls this again on every viewer
   restyle(redraw = true) {
     const S = this.S = settings(GLOBAL, this.M.cfg, this.opts);
+    groupPaint(this.M, S.groupColors);
     for (const [name, v] of styleVars(Object.assign({}, this.M.cfg, this.opts))) this.root.style.setProperty(name, v);
     this.rowH = { sig: S.rowHeight, group: S.groupHeight, space: S.spaceHeight }; this.hdrH = S.headerHeight;
     this.sort = S.sort; this.sortIgnore = S.sortIgnore;
@@ -1104,7 +1121,7 @@ class WaveView {
       const h = this.rowH[r.type], i = ++vi;
       if (r.type === 'space') return `<div class="row space${alt(r)}${hl ? ' dim' : ''}" data-r="${i}" style="height:${h}px;${pad(r)}"><span class="n">${esc(r.name)}</span></div>`;
       const [cls, st, mk] = mark(r);
-      if (r.type === 'group') { const open = !this.collapsed.has(r.id); return `<div class="row grp${cls}" data-r="${i}" style="height:${h}px;${st}${pad(r)}" data-g="${r.id}" tabindex="0" role="button" aria-expanded="${open}" title="${esc(r.path)}">${mk}<span class="n">${open ? '▾' : '▸'} ${label(r)}</span></div>`; }
+      if (r.type === 'group') { const open = !this.collapsed.has(r.id); return `<div class="row grp${cls}" data-r="${i}" style="height:${h}px;${st}${pad(r)}" data-g="${r.id}" tabindex="0" role="button" aria-expanded="${open}" title="${esc(r.path)}">${mk}<span class="n"${r.stroke ? ` style="color:${esc(r.stroke)}"` : ''}>${open ? '▾' : '▸'} ${label(r)}</span></div>`; }
       return `<div class="row${cls}${alt(r)}${r === this.sel ? ' sel' : ''}" data-r="${i}" style="height:${h}px;${st}${pad(r)}">${mk}<span class="n" title="${esc(r.full || r.name)}"${r.stroke ? ` style="color:${esc(r.stroke)}"` : ''}>${label(r)}</span><span class="v"></span></div>`;
     }).join('');
     this.vals = [...this.namesEl.querySelectorAll('.row .v')];
@@ -1201,6 +1218,7 @@ const WaveSVG = {
   // opts: from/to (model units or "12us"), width (px, fits the wave area), cyclePx (default 40·hscale), axis (force), bg, markers
   toString(model, opts = {}) {
     const M = parse(model), S = settings(SVG_DEFAULTS, GLOBAL, M.cfg, opts), P = new SvgPainter(S);
+    groupPaint(M, S.groupColors);
     const from = parseT(opts.from) ?? M.t0, to = parseT(opts.to) ?? M.t1, fs = S.fontSize;
     const sorted = orderRows(M.rows, S.sort, S.sortIgnore, S.groupOrder), rh = { sig: S.rowHeight, group: S.groupHeight, space: S.spaceHeight };
     const rows = S.arrowLabels === 'lane' ? withLanes(sorted, arrowLanes(sorted, M.bookmarks, M.arrows)) : sorted;

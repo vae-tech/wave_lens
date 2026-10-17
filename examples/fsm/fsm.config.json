@@ -1,0 +1,40 @@
+{
+  "description": "make example EX=fsm: UART receiver whose state is a typedef enum (uart_pkg.sv). No enum here: the FST dump brings the state names. Hand-written views, bookmarks and arrows; the Makefile passes the dump with --waves.",
+  "scope": "fsm_tb",
+  "config": { "style": "questa", "nameWidth": 120, "rowHeight": 26 },
+  "page": { "title": "UART receiver FSM · state names from the dump",
+            "intro": "An 8N1 receiver (4 clocks per bit) takes 0xA5, then a frame with a low stop bit that ends in ERROR. The state names come from the FST's enum table; edges are drawn in the questa style." },
+  "views": {
+    "frame": {
+      "clock": "clk", "from": "0ns", "to": "440ns",
+      "signals": ["clk", "rst_n", "rxd", "state", "bit_cnt", "data", "valid", "frame_err"],
+      "title": "first frame 0xA5 · clock-sampled",
+      "note": "a bookmark at every state change, on the signal that shows why; the arrows give the time spent in each state",
+      "bookmarks": [
+        { "n": 1, "t": "45ns", "signal": "rxd", "text": "IDLE → START: rxd went low" },
+        { "n": 2, "t": "65ns", "signal": "rxd", "text": "START → DATA: rxd still low in the middle of the start bit" },
+        { "n": 3, "t": "385ns", "signal": "rxd", "text": "DATA → STOP: eight bits shifted in, LSB first; rxd carries the stop bit" },
+        { "n": 4, "t": "425ns", "signal": "valid", "text": "STOP → IDLE: stop bit high, valid, data = 0xA5" }
+      ],
+      "arrows": [
+        { "from": 1, "to": 2, "shape": "-|-", "label": "START 2T" },
+        { "from": 2, "to": 3, "shape": "-|-", "label": "DATA 32T" },
+        { "from": 3, "to": 4, "shape": "-|-", "label": "STOP 4T" }
+      ]
+    },
+    "run": {
+      "exact": true, "from": "0ns", "to": "1000ns",
+      "signals": ["clk", "rst_n", "rxd", "state", "bit_cnt", "data", "valid", "frame_err"],
+      "title": "both frames · exact transitions",
+      "bookmarks": [
+        { "n": 1, "t": "865ns", "signal": "rxd", "text": "DATA → STOP: second frame, 0x3C shifted in" },
+        { "n": 2, "t": "905ns", "signal": "frame_err", "text": "STOP → ERROR: the stop bit is low, frame_err", "color": "#e03131" },
+        { "n": 3, "t": "925ns", "signal": "rxd", "text": "ERROR → IDLE: the line is high again" }
+      ],
+      "arrows": [
+        { "from": 1, "to": 2, "shape": "-|-", "label": "STOP 4T" },
+        { "from": 2, "to": 3, "shape": "-|-", "label": "ERROR 2T", "color": "#e03131" }
+      ]
+    }
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "description": "make example EX=apb: APB3 master + register file (apb_tb.sv). Hand-written: views, signal lists, bookmarks and arrows; the Makefile passes the dump with --waves.",
+  "scope": "apb_tb",
+  "enum": { "phase": { "0": "IDLE", "1": "SETUP", "2": "ACCESS" } },
+  "config": { "radix": "hex", "nameWidth": 170, "rowHeight": 26 },
+  "page": { "title": "APB3 · write, read with wait states, slave error",
+            "intro": "An APB3 master drives a four-register slave: a write to 0x04, a read of 0x04 that the slave stretches with two wait states, and a write to the unmapped address 0x40 that ends with PSLVERR." },
+  "views": {
+    "transfers": {
+      "clock": "PCLK", "from": "0ns", "to": "200ns",
+      "signals": ["PCLK", "PRESETn", "phase", "PSEL", "PENABLE", "PWRITE", "PADDR", "PWDATA", "PRDATA", "PREADY", "PSLVERR"],
+      "title": "APB3 · three transfers · clock-sampled",
+      "note": "one cell per PCLK; the numbered bookmarks explain the transfers, the arrows join cause and effect",
+      "bookmarks": [
+        { "n": 1, "t": "50ns", "signal": "PSEL", "text": "SETUP: PSEL high, PADDR / PWRITE / PWDATA valid for the whole transfer" },
+        { "n": 2, "t": "60ns", "signal": "PENABLE", "text": "ACCESS: PENABLE high; PREADY high ends the write in this cycle" },
+        { "n": 3, "t": "105ns", "signal": "PREADY", "text": "two wait states: the slave holds PREADY low, the master keeps every signal" },
+        { "n": 4, "t": "120ns", "signal": "PRDATA", "text": "read data 0xCAFE0001 is valid with PREADY" },
+        { "n": 5, "t": "150ns", "signal": "PADDR", "text": "0x40 is not mapped in the register file", "color": "#e03131" },
+        { "n": 6, "t": "160ns", "signal": "PSLVERR", "text": "PSLVERR with PREADY: the transfer failed", "color": "#e03131" }
+      ],
+      "arrows": [
+        { "from": 1, "to": 2, "shape": "-|-", "label": "setup → access" },
+        { "from": 3, "to": 4, "shape": "~", "label": "2 wait states" },
+        { "from": 5, "to": 6, "shape": "-|-", "label": "unmapped", "color": "#e03131" }
+      ]
+    },
+    "write": {
+      "clock": "PCLK", "from": "30ns", "to": "80ns",
+      "signals": ["PCLK", "PSEL", "PENABLE", "PWRITE", "PADDR", "PWDATA", "PREADY"],
+      "title": "APB3 write · static SVG", "render": "svg",
+      "note": "the same data as a static figure, with the bookmark texts as a legend",
+      "bookmarks": [
+        { "n": 1, "t": "50ns", "signal": "PSEL", "text": "SETUP: address, direction and data valid" },
+        { "n": 2, "t": "60ns", "signal": "PENABLE", "text": "ACCESS: PREADY completes the write" }
+      ],
+      "arrows": [ { "from": 1, "to": 2, "shape": "-|-", "label": "setup → access" } ]
+    },
+    "exact": {
+      "exact": true, "from": "0ns", "to": "205ns",
+      "signals": ["PCLK", "PRESETn", "phase", "PSEL", "PENABLE", "PWRITE", "PADDR", "PWDATA", "PRDATA", "PREADY", "PSLVERR", "done", "err", "rdata"],
+      "marker": ["posedge done=done", "posedge PSLVERR=error"],
+      "title": "APB3 · the whole run · exact transitions"
+    }
+  }
+}

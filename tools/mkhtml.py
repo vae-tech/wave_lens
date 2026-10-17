@@ -17,7 +17,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)   # -I drops the script dir from sys.path
 import vcd2wavedrom, wavejson  # noqa: E402
 
-ROOT = os.path.dirname(HERE)
+FW = os.path.join(os.path.dirname(HERE), 'wavefw')   # the framework files inlined into the page
 
 PAGE = '''<!doctype html>
 <html lang="en"{theme}>
@@ -138,9 +138,9 @@ def main():
              ('Wave tool', ', '.join(sorted({m['tool'] for m in metas if 'tool' in m})) or '—'),
              ('Views', str(len(docs))), ('Generated', datetime.datetime.now().strftime('%Y-%m-%d %H:%M'))]
     theme = settings.get('theme')
-    with open(os.path.join(ROOT, 'wavefw.css'), encoding='utf-8') as f:
+    with open(os.path.join(FW, 'wavefw.css'), encoding='utf-8') as f:
         css = f.read()
-    with open(os.path.join(ROOT, 'wavefw.js'), encoding='utf-8') as f:
+    with open(os.path.join(FW, 'wavefw.js'), encoding='utf-8') as f:
         js = f.read()
     safe = lambda t: t.replace('</', '<\\/')
     text = PAGE.format(

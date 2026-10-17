@@ -1,11 +1,10 @@
-# simulator dumps (large; regenerate or keep outside git)
+# simulator dumps (large; regenerate or keep outside git), anywhere
 *.vcd
 *.fst
-# pages built by make html (self-contained copies of wavefw.js + data)
-dump.html
-test_stream_video.html
-wavefw_demo.html
-# Verilator build, Python caches
-wavefw_obj/
+# pages built from your configs by make html (self-contained copies of wavefw.js + data)
+work/*.html
+# build products with make BUILD=build (default BUILD is /tmp/wavefw)
+build/
+# Python caches
 __pycache__/
 *.pyc

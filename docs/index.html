@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>wavefw Waveform Framework</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="wavefw.css">
+<link rel="stylesheet" href="../wavefw/wavefw.css">
 <style>
-/* Page layout (same reading column / bench panels as template.html); wave tokens come from wavefw.css. */
+/* Page layout (same reading column / bench panels as reference/template.html); wave tokens come from wavefw.css. */
 :root { --pass: #2a7a46; --pass-soft: #dcefe1; --fail: #b8322b; --fail-soft: #f6dcd9; --warn: #9a6b00; --warn-soft: #f6ecc8; --code-bg: #efede6; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme]) { --pass: #6cc98a; --pass-soft: #1f3a29; --fail: #ef7a71; --fail-soft: #3f2321; --warn: #e2b74c; --warn-soft: #3d3215; --code-bg: #272b33; } }
 [data-theme="white"] { --code-bg: #f3f4f6; }
@@ -85,7 +85,7 @@ button.theme:hover { border-color: var(--accent); color: var(--accent); }
 <header class="top">
   <div class="row1"><div class="eyebrow">Framework demo &amp; reference</div><button type="button" class="theme" id="theme">Theme: auto</button></div>
   <h1>wavefw <span class="mono muted" style="font-weight:400;font-size:0.6em">WaveDrom JSON → interactive waves</span></h1>
-  <p class="sub">A dependency-free renderer for the WaveDrom format with two outputs from one model: the interactive canvas viewer of the PSI5 datasheet (<code>template.html</code>) and a static WaveDrom-style SVG for figures. Waves are written by hand or converted from a simulator dump with <a href="https://github.com/kleverhq/wavepeek">wavepeek</a>. Everything on this page renders from <code>file://</code> with one script and one stylesheet.</p>
+  <p class="sub">A dependency-free renderer for the WaveDrom format with two outputs from one model: the interactive canvas viewer of the PSI5 datasheet (<code>docs/reference/template.html</code>) and a static WaveDrom-style SVG for figures. Waves are written by hand or converted from a simulator dump with <a href="https://github.com/kleverhq/wavepeek">wavepeek</a>. Everything on this page renders from <code>file://</code> with one script and one stylesheet.</p>
   <div class="facts" id="facts"></div>
 </header>
 
@@ -129,7 +129,7 @@ button.theme:hover { border-color: var(--accent); color: var(--accent); }
 
 <!-- ============================================================ -->
 <h2 id="format">3. WaveDrom format, rendered as SVG</h2>
-<p>Each example shows its source on the left and the SVG from <code>WaveSVG</code> on the right. The source panel is filled from the same script block that is rendered, so the two cannot drift apart. <code>tools/conformance.html</code> puts every character next to stock WaveDrom 3.5.0.</p>
+<p>Each example shows its source on the left and the SVG from <code>WaveSVG</code> on the right. The source panel is filled from the same script block that is rendered, so the two cannot drift apart. <code>tests/conformance.html</code> puts every character next to stock WaveDrom 3.5.0.</p>
 
 <h3>Wave characters</h3>
 <div class="bench"><div class="ex"><pre></pre><div class="out">
@@ -385,7 +385,7 @@ button.theme:hover { border-color: var(--accent); color: var(--accent); }
 
 <!-- ============================================================ -->
 <h2 id="vcd">6. From a simulator dump</h2>
-<p>The data below comes from <code>tools/demo/demo_tb.sv</code>, a small Manchester transmitter (2 start bits, 8 data bits LSB first, even parity, 100 MHz clock, 8 clocks per bit). Verilator writes the VCD, <code>tools/vcd2wavedrom.py</code> queries it with wavepeek, and <code>tools/embed.py</code> packs the JSON into <code>demo_waves.js</code>. <code>make demo</code> runs the whole chain.</p>
+<p>The data below comes from <code>examples/demo/demo_tb.sv</code>, a small Manchester transmitter (2 start bits, 8 data bits LSB first, even parity, 100 MHz clock, 8 clocks per bit). Verilator writes the VCD, <code>tools/vcd2wavedrom.py</code> reads it (built-in reader, or wavepeek), and <code>tools/embed.py</code> packs the JSON into <code>docs/demo_waves.js</code>. <code>make demo</code> runs the whole chain.</p>
 
 <h3>Exact transitions, interactive</h3>
 <p>Every edge is drawn at its real timestamp (the <code>tv</code> extension). The markers are the results of <code>wavepeek change --on 'posedge start'</code> and <code>'posedge done'</code>, and the viewer turns each marker into a jump button.</p>
@@ -441,7 +441,7 @@ button.theme:hover { border-color: var(--accent); color: var(--accent); }
 <tr><td class="mono">view.select(path)<br>view.edge(±1, 'any|rise|fall')<br>view.mark(text?)<br>view.arrow(from, to, {shape, head, line, color, label})<br>view.bookmarks() / arrowList() / setBookmarks(list, arrows)<br>view.expandAll() / collapseAll()</td><td>Select a signal, move the cursor to its previous / next edge, bookmark the cursor, read or replace the bookmarks, open or fold every group. The viewer object is <code>element.waveView</code>.</td></tr>
 </table></div>
 <h3>Settings (config file)</h3>
-<p>Colours, sizes, fonts, line widths and sorting are settings. They are merged in this order, later wins: built-in defaults, the global settings (<code>wavefw.config.js</code> loaded before <code>wavefw.js</code>, which sets <code>window.WAVEFW_CONFIG</code>, or <code>WaveFW.configure()</code>), the diagram's <code>"config"</code> object, and the element's <code>data-*</code> attributes or the constructor options. The <code>"config"</code> section of a converter config file (<code>tools/demo/demo.config.json</code>, <code>dump.config.json</code>) is written into the generated JSON; <code>tools/mkhtml.py</code> uses the top-level one as the page's global settings. This page loads <code>wavefw.config.js</code>.</p>
+<p>Colours, sizes, fonts, line widths and sorting are settings. They are merged in this order, later wins: built-in defaults, the global settings (<code>wavefw/wavefw.config.js</code> loaded before <code>wavefw.js</code>, which sets <code>window.WAVEFW_CONFIG</code>, or <code>WaveFW.configure()</code>), the diagram's <code>"config"</code> object, and the element's <code>data-*</code> attributes or the constructor options. The <code>"config"</code> section of a converter config file (<code>examples/demo/demo.config.json</code>, <code>work/dump.config.json</code>) is written into the generated JSON; <code>tools/mkhtml.py</code> uses the top-level one as the page's global settings. This page loads <code>wavefw.config.js</code>.</p>
 <div class="tbl"><table>
 <tr><th>Key</th><th>Meaning</th></tr>
 <tr><td class="mono">theme, colors</td><td>As in section 5. Global: applied to <code>&lt;html&gt;</code>.</td></tr>
@@ -452,6 +452,7 @@ button.theme:hover { border-color: var(--accent); color: var(--accent); }
 <tr><td class="mono">sort, sortIgnore</td><td><code>none | asc | desc</code> and the prefixes skipped when sorting (array or <code>"i_,o_"</code>).</td></tr>
 <tr><td class="mono">sortButton, hint</td><td>Show the Sort controls and the help line (both <code>true</code>).</td></tr>
 <tr><td class="mono">style, radix</td><td>Edge style <code>auto | wavedrom | questa | square</code> and bus value radix <code>auto | hex | dec | signed | bin | oct | ascii</code> (see section 4). A signal's own <code>"style"</code> / <code>"radix"</code> wins.</td></tr>
+<tr><td class="mono">groupColors</td><td>One colour per group, e.g. the channels of a bus: <code>{"aw": "#339af0", "w": "#37b24d", "tb.dut.u_rx": "#ae3ec9", "*fifo*": "#f59f00"}</code> (group names, full paths or <code>*</code> patterns; the nearest matching group wins). The signals take it as trace, bus outline and name colour, the group its name colour; a signal with its own <code>color</code> / <code>stroke</code> keeps it. Static SVGs follow it.</td></tr>
 <tr><td class="mono">highlight, dim</td><td>Instances highlighted at start (full paths, names or <code>*</code> patterns; a group covers its members; one colour each) and the opacity of the other rows (0.3). Colours: <code>hl1</code>…<code>hl6</code> in <code>colors</code>.</td></tr>
 <tr><td class="mono">groupOrder, moduleShading</td><td><code>groupOrder: "last"</code> lists the signals of every group first and its sub-groups (modules) after them (<code>"first"</code>: the other way round, <code>"file"</code>: as given), also when sorted; generated configs use <code>"last"</code>. <code>moduleShading</code> (default on): the signals of neighbouring modules alternate between two backgrounds, with a line where the module changes.</td></tr>
 <tr><td class="mono">maxHeight</td><td>For example <code>"80vh"</code> or <code>600</code>: the rows scroll inside the viewer and its bar stays in view. Any number of rows works: the canvas only covers the visible part and the time axis stays on top.</td></tr>
@@ -474,15 +475,18 @@ button.theme:hover { border-color: var(--accent); color: var(--accent); }
 
 <!-- ============================================================ -->
 <h2 id="repro">9. Reproduce</h2>
-<pre><code>make demo        # verilator --binary --trace  ->  /tmp/wavefw_demo.vcd
-                 # tools/vcd2wavedrom.py --config tools/demo/demo.config.json (wavepeek)  ->  demo_waves.js
-make html        # tools/mkhtml.py: every view of the config  ->  one self-contained page (/tmp/wavefw_demo.html)
-make html CONFIG=dump.config.json HTML=dump.html     # the same for any dump
-make html WAVES=test_stream_video.vcd                # from the VCD alone: makes test_stream_video.config.json
-                                                     # (every signal, full paths, editable) and test_stream_video.html
+<pre><code>make demo        # verilator --binary --trace  ->  $(BUILD)/demo.vcd   (BUILD ?= /tmp/wavefw)
+                 # tools/vcd2wavedrom.py --config examples/demo/demo.config.json  ->  docs/demo_waves.js
+make examples    # examples/apb, axi_lite, fsm: VCD + FST, a page from each config, a page of the whole hierarchy
+                 # ->  $(BUILD)/examples/&lt;ex&gt;/&lt;ex&gt;.html, &lt;ex&gt;_all.html   (make example EX=apb: one of them)
+make html        # tools/mkhtml.py: every view of the config  ->  one self-contained page ($(BUILD)/demo.html)
+make html CONFIG=work/dump.config.json HTML=work/dump.html     # the same for any dump
+make html WAVES=work/test_stream_video.vcd           # from the VCD alone: makes work/test_stream_video.config.json
+                                                     # (every signal, full paths, editable) and work/test_stream_video.html
 make demo-fst    # the demo as FST (verilator --trace-fst): FSM states named from the dump's enum tables
 make html WAVES=x.vcd SV="rtl/*.sv"                  # VCD: enum labels from typedef enum in the sources
 make smoke       # headless Chromium (playwright): no console errors, interaction checks, screenshots
+make shots       # the README screenshots in docs/img/ (tests/shots.py)
 
 python3 -I tools/vcd2wavedrom.py --waves dump.vcd --scope tb.u_dut --exact \
     --from 896us --to 1155us --signals i_sat_rxd_comp,r_state,o_sat_data \
@@ -490,8 +494,8 @@ python3 -I tools/vcd2wavedrom.py --waves dump.vcd --scope tb.u_dut --exact \
     --marker 'posedge o_sat_data_eof=eof' --out frame.json</code></pre>
 <p class="muted">To cross-check a window in a GUI, open the same VCD in <a href="https://surfer-project.org">Surfer</a> and compare the edge times at the markers. Surfer is not needed to build the page.</p>
 
-<script src="wavefw.config.js"></script>
-<script src="wavefw.js"></script>
+<script src="../wavefw/wavefw.config.js"></script>
+<script src="../wavefw/wavefw.js"></script>
 <script src="demo_waves.js"></script>
 <script>
 'use strict';
