@@ -24,4 +24,13 @@ window.WAVEFW_CONFIG = {
   style: 'auto',                // edges: 'auto' | 'wavedrom' (slanted) | 'questa' / 'square' (vertical, like a simulator)
   radix: 'auto',                // bus values: 'auto' (≤6 bits dec, else hex) | 'hex' | 'dec' | 'signed' | 'bin' | 'oct' | 'ascii'
   fold: null,                   // groups folded at start: true | depth (number) | ['group.path', …]
+  highlight: null,              // instances highlighted at start: ['tb.dut.u_tx', '*.irq'] (paths, names, * patterns)
+  dim: 0.3,                     // opacity of the rows that are not highlighted
+  arrowLabels: 'lane',          // bookmark arrow labels: 'lane' (a thin row of their own between signals) | 'overlay' (on the arrow)
+  laneHeight: 16,               // px per label in such a lane
+  groupOrder: 'file',           // inside every group: 'last' = signals first, then the sub-groups (modules); 'first'; 'file' = as given
+  findHighlight: true,          // fuzzy find: found rows in front, the rest dimmed
+  findOpen: true,               // fuzzy find: every module folded except the ones with a match
+  moduleShading: true,          // signals of neighbouring modules on alternating backgrounds, a line where the module changes
+  maxHeight: null,              // e.g. '80vh' or 600: the rows scroll inside the viewer (the bar stays in view); null = page scroll
 };

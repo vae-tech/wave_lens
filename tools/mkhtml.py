@@ -100,6 +100,7 @@ def main():
     ap.add_argument('--settings', help='settings file used only for "config"/"page" (with WaveJSON inputs)')
     ap.add_argument('--view', action='append', help='only these views (repeatable)')
     ap.add_argument('--waves', help='override the dump file of every view')
+    ap.add_argument('--reader', choices=('builtin', 'wavepeek'), help='how the dumps are read (default: the config\'s "reader", else builtin)')
     ap.add_argument('--title', help='page title')
     ap.add_argument('--render', choices=('view', 'svg', 'both'), help='renderer for every section')
     ap.add_argument('--out', required=True, help='output .html')
@@ -117,7 +118,7 @@ def main():
             vcfg = vcd2wavedrom.view_config(cfg, key)
             own = (views.get(key) or {}) if key else {}
             vcfg['config'] = own.get('config') or {}   # the top-level "config" is the page's global setting
-            argv = ['--waves', a.waves] if a.waves else []
+            argv = (['--waves', a.waves] if a.waves else []) + (['--reader', a.reader] if a.reader else [])
             o = vcd2wavedrom.resolve(vcd2wavedrom.parser().parse_args(argv), vcfg, base)
             name = key or 'wave'
             print(f'mkhtml: view {name}: {o.waves} ({"clock " + o.clock if o.clock else "exact"})', file=sys.stderr)

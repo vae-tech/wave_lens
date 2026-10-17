@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """vcd2wavedrom.py — convert a window of a VCD/FST dump into WaveDrom JSON, using wavepeek for every query.
+Enum labels (FSM states) come from the config ("enum", per-signal "enum") or from the dump's own enum tables (FST).
 
 Modes
   --clock CLK   one WaveDrom cycle per period of CLK. Values are sampled with
@@ -13,7 +14,8 @@ Modes
 Config file (--config cfg.json): every option can be a key (dashes or underscores), command-line options win.
   "signals" list or comma string, or a catalog {full.path: {per-signal settings}} (what mkconfig.py writes),
   "enum" {sig: {"0": "IDLE"}}, "group" {name: [sigs]}, "hierarchy" true (nest signals in groups by scope),
-  "gap" ["A:B"], "marker" ["EXPR=label"], "config" {...} (copied into the WaveJSON "config": theme, colors,
+  "gap" ["A:B"], "marker" ["EXPR=label"], "bookmarks" [{"n": 1, "t": 85120000, "signal": "tb.x", "text": "…"}], "arrows" [{"from": 1, "to": 2}],
+  "config" {...} (copied into the WaveJSON "config": theme, colors,
   style, radix, fold, rowHeight, sort, …), "views" {key: {...}} named variants of the top-level settings (pick one
   with --view; mkhtml.py builds them all). With a catalog, a view's "signals" list selects from it ("*" and "?"
   patterns match full paths). Relative "waves" paths are relative to the config file.
@@ -28,15 +30,16 @@ Examples
       --signals clk,txd,state --group tx=state,txd --marker 'posedge done=done' --out exact.json
   python3 -I tools/vcd2wavedrom.py --config dump.config.json --view exact --out exact.json
 """
-import argparse, json, os, re, shutil, statistics, subprocess, sys
+import argparse, bisect, concurrent.futures, functools, heapq, json, os, re, shutil, statistics, subprocess, sys
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
-import wavejson  # noqa: E402
+import dumpscan, wavejson  # noqa: E402
 
 UNIT_PS = {'zs': 1e-9, 'as': 1e-6, 'fs': 1e-3, 'ps': 1, 'ns': 1e3, 'us': 1e6, 'ms': 1e9, 's': 1e12}
 
 
+@functools.lru_cache(maxsize=1 << 16)   # wavepeek repeats the same time strings in every chunk
 def to_ps(s):
     m = re.fullmatch(r'\s*([\d.]+(?:e-?\d+)?)\s*(zs|as|fs|ps|ns|us|ms|s)\s*', str(s))
     if not m:
@@ -59,17 +62,21 @@ class Peek:
         n = round(ps / self.unit_ps)
         return f'{n * self.unit[0]}{self.unit[1]}'
 
-    def chunks(self, paths, limit=60000):   # one argv string must stay below the OS limit (128 KiB on Linux)
-        out, cur = [], []
+    def chunks(self, paths, parts=1, limit=100000):   # one argv string must stay below the OS limit (128 KiB on Linux)
+        out, cur, n, size = [], [], 0, max(1, -(-len(paths) // parts))
         for p in paths:
-            if cur and sum(len(x) + 1 for x in cur) + len(p) > limit:
-                out.append(cur); cur = []
-            cur.append(p)
+            if cur and (n + len(p) + 1 > limit or len(cur) >= size):
+                out.append(cur); cur, n = [], 0
+            cur.append(p); n += len(p) + 1
         return out + [cur] if cur else out
 
     def run_signals(self, cmd, paths, *args):
-        """`wavepeek cmd ... --signals paths`, split into several calls for long lists; results merged per row."""
-        docs = [self.run(cmd, *args, '--signals', ','.join(c), scoped=True)['data'] for c in self.chunks(paths)]
+        """`wavepeek cmd ... --signals paths`, split into several calls for long lists (run in parallel: each call reads
+        the whole dump, so a long "change" query is spread over the CPUs); results merged per row."""
+        parts = min(os.cpu_count() or 1, 8, max(1, len(paths) // 40)) if cmd == 'change' else 1
+        cs = self.chunks(paths, parts)
+        with concurrent.futures.ThreadPoolExecutor(len(cs)) as ex:
+            docs = list(ex.map(lambda c: self.run(cmd, *args, '--signals', ','.join(c), scoped=True)['data'], cs))
         if len(docs) == 1:
             return docs[0]
         if cmd == 'value' or '--row-mode' in args and args[args.index('--row-mode') + 1] == 'dense':
@@ -78,7 +85,7 @@ class Peek:
                 for r, r2 in zip(rows, d):
                     r['signals'] += r2['signals']
             return rows
-        return sorted((r for d in docs for r in d), key=lambda r: to_ps(r['time']))   # sparse rows
+        return list(heapq.merge(*docs, key=lambda r: to_ps(r['time'])))   # sparse rows, each chunk already in time order
 
     def run(self, cmd, *args, scoped=False):
         argv = [self.exe, cmd, '--waves', self.waves, *args, '--json']
@@ -96,6 +103,160 @@ class Peek:
         return doc
 
 
+    # ---- reader interface (shared with Builtin): prepare, base, changes, sampled, events ----
+    tool = property(lambda self: 'wavepeek ' + self.version)
+
+    def prepare(self, paths, clock=None, events=()):
+        """-> [(canonical path, width)]; the width comes from the value literal ("7'h00"), so bit selects work too."""
+        self.paths = paths
+        b = self.run_signals('value', paths, '--at', self.t(self.t_start))[0]['signals']
+        self.specs = []
+        for p, x in zip(paths, b):
+            lit, sel = re.match(r"(\d+)'", x['value']), re.search(r'\[(\d+):(\d+)\]$', p)
+            self.specs.append((x['path'], int(lit.group(1)) if lit else abs(int(sel.group(1)) - int(sel.group(2))) + 1 if sel else 1))
+        return self.specs
+
+    def base(self, t):
+        b = self.run_signals('value', self.paths, '--at', self.t(t))[0]['signals']
+        return [norm(x['value'], w) for x, (_, w) in zip(b, self.specs)]
+
+    def changes(self, t0, t1):   # -> per path [(t, value)] in [t0, t1]
+        rows = self.run_signals('change', self.paths, '--from', self.t(t0), '--to', self.t(t1), '--on', '*', '--sample-mode', 'native',
+                                '--row-mode', 'sparse', '--row-values', 'delta', '--max', 'unlimited')
+        idx = {pa: i for i, (pa, _) in enumerate(self.specs)}
+        out = [[] for _ in self.specs]
+        for r in rows:
+            t = to_ps(r['time'])
+            for v in r['signals']:
+                i = idx[v['path']]; out[i].append((t, norm(v['value'], self.specs[i][1])))
+        return out
+
+    def sampled(self, clock, t0, t1):   # -> (posedge times, per path [value after each edge])
+        rows = self.run_signals('change', self.paths, '--from', self.t(t0), '--to', self.t(t1), '--on', f'posedge {clock}',
+                                '--sample-mode', 'native', '--row-mode', 'dense', '--row-values', 'full', '--max', 'unlimited')
+        return [to_ps(r['time']) for r in rows], [[norm(r['signals'][j]['value'], w) for r in rows] for j, (_, w) in enumerate(self.specs)]
+
+    def events(self, expr, t0, t1):   # any wavepeek --on expression
+        return [to_ps(r['time']) for r in self.run('change', '--from', self.t(t0), '--to', self.t(t1), '--on', expr, '--sample-mode', 'native',
+                                                    '--max', 'unlimited', '--signals', self.paths[0], scoped=True)['data']]
+
+
+class Builtin:
+    """The built-in reader: one pass over the dump as VCD text (an FST through fst2vcd), keeping only the requested
+    signals; the window, clock sampling and markers are then computed in memory. Paths as wavepeek spells them."""
+    EVENT = re.compile(r'\s*(?:(posedge|negedge|edge)\s+)?([^\s()|&!=<>~^*]+)\s*')
+
+    def __init__(self, waves, scope):
+        self.waves, self.scope = waves, scope
+        self.decl = dumpscan.read(waves, None)
+        self.tool = 'wavefw reader' + ('' if waves.lower().endswith('.vcd') else ' (fst2vcd)')
+        self.streams = {}
+
+    def resolve(self, p):
+        q = p if not self.scope or p.startswith(self.scope + '.') else self.scope + '.' + p
+        hit = self.decl.find(q)
+        if hit:
+            return hit, None
+        m = re.fullmatch(r'(.+)\[(\d+):(\d+)\]', q)
+        if m and self.decl.find(m.group(1)):
+            return self.decl.find(m.group(1)), (int(m.group(2)), int(m.group(3)))
+        raise SystemExit(f'vcd2wavedrom: no signal "{p}" in {os.path.basename(self.waves)}' + (f' (scope {self.scope})' if self.scope else ''))
+
+    def event_signal(self, expr):
+        m = self.EVENT.fullmatch(expr)
+        if not m:
+            raise SystemExit(f'vcd2wavedrom: the built-in reader takes markers "posedge X", "negedge X", "edge X" or "X" (any change); '
+                             f'for "{expr}" use --reader wavepeek')
+        return m.group(1) or 'change', m.group(2)
+
+    def prepare(self, paths, clock=None, events=()):
+        self.res = [self.resolve(p) for p in paths]
+        extra = ([self.resolve(clock)] if clock else []) + [self.resolve(self.event_signal(e)[1]) for e in events]
+        codes = {c for path, _ in self.res + extra for c, _ in self.decl.vars[path].members}
+        self.d = dumpscan.read(self.waves, 'collect', codes)
+        self.t_start, self.t_end = self.d.t_start, self.d.t_end
+        self.specs = [(path + (f'[{sl[0]}:{sl[1]}]' if sl else ''), sl[0] - sl[1] + 1 if sl else self.decl.vars[path].width) for path, sl in self.res]
+        return self.specs
+
+    def stream(self, path, sl=None):
+        """[(t ps, normalised value)] over the whole dump, one entry per timestamp with a change."""
+        key = (path, sl)
+        if key not in self.streams:
+            v, u, out = self.decl.vars[path], self.d.unit_ps, []
+            w = v.width
+            if len(v.members) == 1 and v.members[0][1] is None:
+                for t, raw in self.d.trans[v.members[0][0]]:
+                    val = bits(raw, w, sl)
+                    if out and out[-1][0] == t * u:
+                        out[-1] = (t * u, val)
+                    else:
+                        out.append((t * u, val))
+            else:   # bit-blasted vector: rebuild it from its 1-bit members
+                state = ['x'] * w
+                ev = sorted((t, b, raw) for code, b in v.members for t, raw in self.d.trans[code])
+                for i, (t, b, raw) in enumerate(ev):
+                    state[b] = raw.decode().lower()
+                    if i + 1 == len(ev) or ev[i + 1][0] != t:
+                        out.append((t * u, bits(''.join(reversed(state)).encode(), w, sl)))
+            self.streams[key] = out
+        return self.streams[key]
+
+    def _at(self, st, t):   # value at t (after the changes at t)
+        i = bisect.bisect_right(st, (t, '\uffff')) - 1
+        return st[i][1] if i >= 0 else None
+
+    def base(self, t):
+        return [self._at(self.stream(*r), t) or bits(b'x', w, None) for r, (_, w) in zip(self.res, self.specs)]
+
+    def changes(self, t0, t1):
+        out = []
+        for r in self.res:
+            st = self.stream(*r)
+            out.append(st[bisect.bisect_left(st, (t0, '')):bisect.bisect_right(st, (t1, '\uffff'))])
+        return out
+
+    def edges(self, path, kind, t0, t1):
+        st, out, prev = self.stream(path), [], None
+        for t, v in st:
+            if prev is not None and t0 <= t <= t1:
+                rise = (prev == '0' and v in '1xz') or (prev in 'xz' and v == '1')
+                fall = (prev == '1' and v in '0xz') or (prev in 'xz' and v == '0')
+                if (kind == 'posedge' and rise) or (kind == 'negedge' and fall) or (kind == 'edge' and (rise or fall)) or (kind == 'change' and v != prev):
+                    out.append(t)
+            prev = v
+        return out
+
+    def sampled(self, clock, t0, t1):
+        times = self.edges(self.resolve(clock)[0], 'posedge', t0, t1)
+        return times, [[self._at(self.stream(*r), t) for t in times] for r in self.res]
+
+    def events(self, expr, t0, t1):
+        kind, sig = self.event_signal(expr)
+        return self.edges(self.resolve(sig)[0], kind, t0, t1)
+
+
+@functools.lru_cache(maxsize=1 << 18)
+def bits(raw, width, sl):
+    """VCD value bytes ("b10x1", "1", "r1.5") -> the normalised form of norm(); VCD left-extends with 0, or x / z."""
+    if raw[:1] == b'r':
+        return raw[1:].decode()
+    b = raw.decode().lower()
+    b = b.rjust(width, b[0] if b[0] in 'xz' else '0')[-width:]
+    if sl:
+        b, width = b[len(b) - 1 - sl[0]:len(b) - sl[1]], sl[0] - sl[1] + 1
+    return norm(f"{width}'b{b}", width)
+
+
+def open_reader(a):
+    if a.reader == 'wavepeek':
+        return Peek(a.wavepeek, a.waves, a.scope)
+    if not dumpscan.available(a.waves):
+        print('vcd2wavedrom: cannot read the FST as text (no fst2vcd): using wavepeek', file=sys.stderr)
+        return Peek(a.wavepeek, a.waves, a.scope)
+    return Builtin(a.waves, a.scope)
+
+
+@functools.lru_cache(maxsize=1 << 18)   # values repeat a lot (clocks, flags)
 def norm(value, width):
     """Verilog literal from wavepeek ("8'ha5", "1'h1", "4'bxx01") -> '0'/'1'/'x'/'z' (1 bit) or lower-case hex."""
     m = re.fullmatch(r"(\d+)'([hbdo])([0-9a-fA-FxXzZ_]+)", value)
@@ -203,7 +364,11 @@ def parser():
     ap.add_argument('--hierarchy', action='store_true', default=None, help='nest signals in groups by their scope path (instead of --group)')
     ap.add_argument('--marker', action='append', help="'EVENT=label', EVENT is a wavepeek --on expression")
     ap.add_argument('--title', help='head.text')
+    ap.add_argument('--bookmarks', help='JSON list [{"n", "t", "signal", "text", "color"}] (usually in the config file; the viewer\'s JSON button writes it)')
+    ap.add_argument('--arrows', help='JSON list [{"from", "to", "shape", "head", "line", "color", "label"}] between bookmarks')
     ap.add_argument('--hscale', type=float)
+    ap.add_argument('--reader', choices=('builtin', 'wavepeek'), help='how the dump is read: builtin (default: one pass in Python; '
+                    'an FST through fst2vcd) or wavepeek (any --marker expression)')
     ap.add_argument('--wavepeek', help='wavepeek executable (default: on PATH or ~/.local/bin)')
     ap.add_argument('--out', help='output file (default: stdout)')
     return ap
@@ -279,8 +444,9 @@ def resolve(a, cfg, base='.'):
     if bool(a.clock) == bool(a.exact):
         raise SystemExit('vcd2wavedrom: need exactly one of --clock CLK / --exact')
     a.hscale = a.hscale or 1
+    a.reader = a.reader or 'builtin'
     a.wavepeek = os.path.expanduser(a.wavepeek or shutil.which('wavepeek') or '~/.local/bin/wavepeek')
-    if not os.path.exists(a.wavepeek):
+    if (a.reader == 'wavepeek' or not dumpscan.available(a.waves)) and not os.path.exists(a.wavepeek):
         raise SystemExit('vcd2wavedrom: wavepeek not found (cargo build it, see README.md)')
     return a
 
@@ -331,9 +497,7 @@ def parse_markers(items):  # -> [(expr, label)]
 # ---------------- conversion ----------------
 def convert(a):
     """Resolved options -> WaveJSON dict."""
-    wp = Peek(a.wavepeek, a.waves, a.scope)
-    t_from = to_ps(a.t_from) if a.t_from else wp.t_start
-    t_to = to_ps(a.t_to) if a.t_to else wp.t_end
+    rd = open_reader(a)
 
     # ---- signal list, widths (from the value literal, e.g. "7'h00", so nested scopes and bit selects work) ----
     specs = []
@@ -355,28 +519,31 @@ def convert(a):
     if not specs:
         raise SystemExit('vcd2wavedrom: no signals to show (all "show": false?)')
     paths = [s['path'] for s in specs]
-    base = wp.run_signals('value', paths, '--at', wp.t(t_from))[0]['signals']
-    for s, b in zip(specs, base):
-        s['abs'] = b['path']
-        lit = re.match(r"(\d+)'", b['value'])
-        sel = re.search(r'\[(\d+):(\d+)\]$', s['path'])
-        s['width'] = int(lit.group(1)) if lit else abs(int(sel.group(1)) - int(sel.group(2))) + 1 if sel else 1
-        s['base'] = norm(b['value'], s['width'])
-    by_abs = {s['abs']: s for s in specs}
+    marks = parse_markers(a.marker)
+    for s, (absp, w) in zip(specs, rd.prepare(paths, a.clock, [e for e, _ in marks])):
+        s['abs'], s['width'] = absp, w
+    t_from = to_ps(a.t_from) if a.t_from else rd.t_start
+    t_to = to_ps(a.t_to) if a.t_to else rd.t_end
+    for s, b in zip(specs, rd.base(t_from)):
+        s['base'] = b
     enums = parse_enums(a.enum)
     for s in specs:
         e = s['set'].get('enum')
         s['enum'] = parse_enums([{s['path']: e}])[s['path']] if e else enums.get(s['name'], enums.get(s['path']))
         s['radix'] = s['set'].get('radix') or None
+    if any(not s['enum'] for s in specs):   # FSM states by name: enum tables of the dump (FST; VCD written by fst2vcd -e)
+        decl = dumpscan.scan(a.waves, body=False)
+        for s in specs:
+            e = (decl.get(s['abs']) or {}).get('enum')
+            if not s['enum'] and e:
+                s['enum'] = e
 
     doc = {}
     sig_json = {}
     if a.clock:
-        rows = wp.run_signals('change', paths, '--from', wp.t(t_from), '--to', wp.t(t_to), '--on', f'posedge {a.clock}',
-                              '--sample-mode', 'native', '--row-mode', 'dense', '--row-values', 'full', '--max', 'unlimited')
-        if len(rows) < 2:
+        times, cols = rd.sampled(a.clock, t_from, t_to)
+        if len(times) < 2:
             raise SystemExit('vcd2wavedrom: fewer than two clock edges in the window')
-        times = [to_ps(r['time']) for r in rows]
         cycle = statistics.median(b - a_ for a_, b in zip(times, times[1:]))
         gaps = [tuple(map(to_ps, g.split(':') if isinstance(g, str) else g)) for g in a.gap]
         cells, skip = [], []   # cells: row index or None ('|'); skip: [[cell index, cycles it stands for]]
@@ -388,7 +555,7 @@ def convert(a):
                 skip[-1][1] += 1
             else:
                 cells.append(None); skip.append([len(cells) - 1, 1, g])
-        vals = {s['abs']: [norm(v['value'], s['width']) for v in (r['signals'][j] for r in rows)] for j, s in enumerate(specs)}
+        vals = {s['abs']: cols[j] for j, s in enumerate(specs)}
         clk_abs = next((s['abs'] for s in specs if s['path'] == a.clock or s['name'] == a.clock), None)
         for s in specs:
             items = [None if c is None else vals[s['abs']][c] for c in cells]
@@ -402,14 +569,10 @@ def convert(a):
         if skip:
             doc['time']['skip'] = [[k, n] for k, n, _ in skip]
     else:
-        rows = wp.run_signals('change', paths, '--from', wp.t(t_from), '--to', wp.t(t_to), '--on', '*', '--sample-mode', 'native',
-                              '--row-mode', 'sparse', '--row-values', 'delta', '--max', 'unlimited')
         tv = {s['abs']: [[t_from, s['base']]] for s in specs}
-        for r in rows:
-            t = to_ps(r['time'])
-            for v in r['signals']:
-                s = by_abs[v['path']]
-                q, val = tv[s['abs']], norm(v['value'], s['width'])
+        for s, ch in zip(specs, rd.changes(t_from, t_to)):
+            for t, val in ch:
+                q = tv[s['abs']]
                 if q[-1][0] == t:          # same timestamp (e.g. the baseline): keep the last value
                     q[-1][1] = val
                     if len(q) > 1 and q[-2][1] == val:
@@ -486,14 +649,17 @@ def convert(a):
 
     # ---- markers from wavepeek event expressions ----
     markers = []
-    for expr, lab in parse_markers(a.marker):
-        hits = wp.run('change', '--from', wp.t(t_from), '--to', wp.t(t_to), '--on', expr, '--sample-mode', 'native',
-                      '--max', 'unlimited', '--signals', paths[0], scoped=True)['data']
-        for i, r in enumerate(hits):
-            markers.append({'t': to_ps(r['time']), 'label': lab if len(hits) == 1 else f'{lab} {i + 1}'})
+    for expr, lab in marks:
+        hits = rd.events(expr, t_from, t_to)
+        for i, t in enumerate(hits):
+            markers.append({'t': t, 'label': lab if len(hits) == 1 else f'{lab} {i + 1}'})
     if markers:
         doc['markers'] = sorted(markers, key=lambda m: m['t'])
-    doc['meta'] = {'waves': os.path.basename(a.waves), 'tool': 'wavepeek ' + wp.version, 'mode': 'clock' if a.clock else 'exact',
+    for k in ('bookmarks', 'arrows'):
+        v = getattr(a, k)
+        if v:
+            doc[k] = json.loads(v) if isinstance(v, str) else v
+    doc['meta'] = {'waves': os.path.basename(a.waves), 'tool': rd.tool, 'mode': 'clock' if a.clock else 'exact',
                    'from_ps': t_from, 'to_ps': t_to}
     return doc
 

@@ -237,6 +237,60 @@ button.theme:hover { border-color: var(--accent); color: var(--accent); }
 </script>
 </div>
 
+<h3 id="highlight">Highlighting instances</h3>
+<p>Each name row has a small mark ○ in its left gutter (it shows on hover). Click it, or <kbd>ctrl</kbd>/<kbd>⌘</kbd>+click the name, to <b>highlight</b> that signal or group: a group covers all its members, nested groups included, so one click picks a whole instance. The highlighted rows stay in front, tinted in their own colour with a bar at the left edge. The other rows fade to the background (the <code>dim</code> setting, 0.3) but stay visible, and the headers of the groups that contain a highlighted row stay in front too. Several instances can be highlighted at once, each in its own colour (six colours, then they repeat). <b>Highlight: N ✕</b> in the bar or <kbd>Esc</kbd> on the canvas clears it. To start highlighted, set <code>"config": {"highlight": ["tx", "*.irq"]}</code> in the JSON, <code>data-highlight="tx"</code> on the element, or the setting in a config file. Entries are full paths (<code>tb.dut.u_tx</code>), names, or <code>*</code> patterns, one colour per entry. Static SVGs take the same setting.</p>
+<div class="bench">
+<script type="application/wavedrom" id="ex-hl">
+{ "signal": [
+  { "name": "clk", "wave": "p..........." },
+  ["tx",
+   { "name": "valid", "wave": "0.1..0.1.0.." },
+   { "name": "ready", "wave": "1...0.1....." },
+   { "name": "data",  "wave": "x.3..x.4.x..", "data": ["A1", "B2"] }
+  ],
+  ["rx",
+   { "name": "valid", "wave": "0...1.0..1.0" },
+   { "name": "data",  "wave": "x...5.x..6.x", "data": ["C3", "D4"] }
+  ],
+  { "name": "irq", "wave": "0......1.0.." }
+ ],
+ "head": { "text": "tx highlighted from the JSON · click ○ or ctrl+click a name" },
+ "config": { "highlight": ["tx"] } }
+</script>
+</div>
+
+<h3 id="cursor">Cursor time and window</h3>
+<p>The <b>cursor</b> group in the bar takes a time: type a number in the unit chosen next to it (ps, ns, µs, ms, s), or a time with its own unit such as <code>85.12us</code>, then Enter or <b>Set</b>; the cursor goes there and the view follows when needed. The second field is a <b>span</b>: Enter or <b>Show</b> (key <kbd>c</kbd> on the waves, with the current span) shows a window of that width centred on the cursor. Both fields follow the cursor and the view while you are not typing in them; diagrams counted in cycles take cycles.</p>
+
+<h3 id="find">Fuzzy find</h3>
+<p>The <b>find</b> field in the bar (key <kbd>/</kbd>) searches like fzf / telescope in nvim: the typed letters in that order, anywhere in a name (<code>rqv</code> finds <code>req</code> … <code>valid</code>-like names, <code>txd</code> finds <code>txd</code> and <code>tx_data</code>). A word with a <code>.</code> runs over the full path, and words separated by spaces must all match. Matched letters are underlined; Enter / shift+Enter, the <b>‹ ›</b> buttons or <kbd>n</kbd> / <kbd>N</kbd> on the waves (as in vim) go to the next / previous match, Esc anywhere in the viewer clears the search, every highlighted row and the selected signal, and leaves the view where it is (<kbd>ctrl</kbd>+<kbd>C</kbd> on the waves ends a search too) (switch <b>Open</b> off to get the earlier folding back). <b>Copy</b> puts the full paths of the found rows on the clipboard. Names selected with the mouse copy as clean full paths too (one per line), and with no search running <kbd>ctrl</kbd>+<kbd>C</kbd> on the waves copies the selected signal. The options apply while you type: <b>Highlight</b> puts the found rows in front and dims the rest, <b>Open</b> folds every module except those that contain a match (the earlier folding comes back when the search is cleared), and the colour next to <b>Paint</b> recolours the found signals (kept in this browser; <b>Unpaint</b> undoes it). Try <code>val</code> or <code>bus.d</code> in the viewer below.</p>
+
+<h3 id="bookmarks">Edge search and bookmarks</h3>
+<p>Click a signal name, or a row on the waves, to <b>select</b> it (<kbd>↑</kbd> <kbd>↓</kbd> move the selection). <b>◀ ▶</b> in the bar (<kbd>[</kbd> <kbd>]</kbd>) move the cursor to the previous or next edge of the selected signal; the list between them (<kbd>e</kbd>) picks <i>↕ any edge</i>, <i>↑ rising</i> or <i>↓ falling</i>. A bus has no direction, so there every value change counts. With no signal selected the search takes the nearest change of any shown signal. <b>+ Mark</b> (<kbd>m</kbd>) puts a numbered <b>bookmark</b> on the selected signal at the cursor, snapped to an edge within 6 px. Below the waves each bookmark has a line: its <b>time</b> (type <code>250ns</code>, <code>85.12us</code>, or a number in the unit shown; <b>cursor</b> moves it to the cursor), its <b>signal</b> (or <i>— axis</i>), the edge found there, a <b>colour</b> (the accent colour unless changed) and a text field for describing the event. On the waves, <b>drag</b> a circle to move the bookmark: left/right changes the time (snapped to an edge of that row), up/down moves it to another signal row or onto the time axis. <b>Shift+drag</b> from one circle to another draws an <b>arrow</b> between them; <b>+ Arrow</b> adds one between the last two bookmarks. Each arrow has its from → to, a shape (WaveDrom edge shapes: <code>-</code> straight, <code>~</code> curve, <code>-~</code> <code>~-</code> curves bending late or early, <code>-|</code> <code>|-</code> corners, <code>-|-</code> step), a head (end, both, start, none), a line (solid, dashed, dotted), a colour and a label; click an arrow on the waves to edit its label. Any number of arrows can leave or reach one bookmark. An arrow's label goes into a thin <b>lane</b> of its own, inserted between the signals under the upper end of the arrow (above the row when both ends are on it), so the text never covers a wave; several labels at one place stack in the lane. The <code>laneHeight</code> setting sets its height per label (16 px), and <code>arrowLabels: "overlay"</code> puts the labels back on the arrows. Click a number, in the list or on the waves, to go to that bookmark. Bookmarks and arrows are kept in this browser (<code>localStorage</code>). <b>JSON</b> gives them as <code>"bookmarks"</code> and <code>"arrows"</code> lists for the WaveJSON or a config file, so a generated page and its static SVG carry them; the SVG adds a legend with the texts. <b>Expand</b> / <b>Collapse</b> open or fold every group at once.</p>
+<script type="application/json" id="ex-bm-src">
+{ "signal": [
+  { "name": "clk", "wave": "p..........." },
+  ["bus",
+   { "name": "req",  "wave": "0.1...0..1.0" },
+   { "name": "ack",  "wave": "0...1.0....1" },
+   { "name": "data", "wave": "x.3...x..4.x", "data": ["A1", "B2"] }
+  ],
+  { "name": "irq", "wave": "0.....1.0..." }
+ ],
+ "head": { "text": "bookmarks from the JSON · select a row, ◀ ▶ edges, + Mark" },
+ "bookmarks": [
+  { "n": 1, "t": 2, "signal": "bus.req", "text": "request raised with data A1" },
+  { "n": 2, "t": 4, "signal": "bus.ack", "text": "acknowledged two cycles later" },
+  { "n": 3, "t": 6, "signal": "irq", "text": "interrupt when the transfer ends", "color": "#1c7ed6" }
+ ],
+ "arrows": [
+  { "from": 1, "to": 2, "shape": "-|-", "label": "2T" },
+  { "from": 2, "to": 3, "shape": "~", "line": "dashed", "color": "#1c7ed6", "label": "irq" }
+ ] }
+</script>
+<div class="bench"><div data-wave="#ex-bm-src" id="ex-bm"></div></div>
+<div class="bench"><div data-wave="#ex-bm-src" data-mode="svg" id="ex-bm-svg"></div></div>
+
 <h3 id="styles">Edge styles and radix</h3>
 <p>The <code>style</code> setting draws edges WaveDrom-like (<code>wavedrom</code>: slanted 1-bit edges, <code>&lt;&gt;</code> bus ends) or like a simulator's wave window (<code>questa</code>: vertical edges, narrow bus crossings; <code>square</code>: vertical edges, square bus ends). <code>auto</code>, the default, slants WaveDrom wave strings and draws exact <code>tv</code> transitions vertically. The <code>radix</code> setting (<code>auto | hex | dec | signed | bin | oct | ascii</code>) formats bus values from <code>tv</code>; <code>auto</code> shows up to 6 bits in decimal and wider buses in hex. Both settings also exist per signal (<code>"style"</code>, <code>"radix"</code> in the signal object) and override the global value. The three figures below render the same JSON with <code>data-config='{"style": "…"}'</code>; each bus row sets its own radix.</p>
 <script type="application/json" id="ex-style-src">
@@ -367,6 +421,7 @@ button.theme:hover { border-color: var(--accent); color: var(--accent); }
 <tr><td class="mono">data-cursor, data-title, data-width, data-fit</td><td>Cursor position, bar title, SVG width in px, scale the SVG to its container.</td></tr>
 <tr><td class="mono">data-theme="light | white | dark"</td><td>On <code>&lt;html&gt;</code>: the page and all waves. On a wave element or its <code>&lt;script&gt;</code>: that wave only.</td></tr>
 <tr><td class="mono">data-colors='{"trace": "#c00"}'</td><td>Palette for one wave. Keys: <code>trace bus x xfill z bg header grid text muted accent c3…c9</code>, or any CSS custom property.</td></tr>
+<tr><td class="mono">data-highlight="tx, *.irq"</td><td>Instances highlighted when the viewer opens (see section 4).</td></tr>
 <tr><td class="mono">data-sort="asc | desc", data-sort-ignore="i_,o_"</td><td>Initial signal order and the prefixes skipped when sorting. The viewer's Sort button and prefix field change them.</td></tr>
 <tr><td class="mono">data-config='{"rowHeight": 30}'</td><td>Any setting (see <i>Settings</i> below) for this wave only.</td></tr>
 <tr><td class="mono">data-lazy</td><td>Built on click, or when the enclosing <code>&lt;details&gt;</code> opens.</td></tr>
@@ -382,6 +437,8 @@ button.theme:hover { border-color: var(--accent); color: var(--accent); }
 <tr><td class="mono">WaveFW.setTheme(name, el?)<br>WaveFW.setColors(map, el?)</td><td>Theme (<code>light | white | dark | auto</code>) or palette for <code>el</code>. Without <code>el</code> it applies to <code>&lt;html&gt;</code>, i.e. every wave. A <code>null</code> colour removes the override. Viewers are redrawn.</td></tr>
 <tr><td class="mono">WaveFW.fromTV(wave)</td><td>Converts the datasheet's dump format (<code>{t0, t1, signals: [{name, w, t}]}</code>) to WaveJSON.</td></tr>
 <tr><td class="mono">WaveFW.configure(settings)</td><td>Global settings for every wave (see below); viewers and static SVGs are redrawn. <code>view.setSort('asc', 'i_,o_')</code> sorts one viewer.</td></tr>
+<tr><td class="mono">view.highlight(list | null)<br>view.toggleHighlight(path)<br>view.highlighted()</td><td>Replace or clear the highlighted instances, toggle one (full path or name), list them.</td></tr>
+<tr><td class="mono">view.select(path)<br>view.edge(±1, 'any|rise|fall')<br>view.mark(text?)<br>view.arrow(from, to, {shape, head, line, color, label})<br>view.bookmarks() / arrowList() / setBookmarks(list, arrows)<br>view.expandAll() / collapseAll()</td><td>Select a signal, move the cursor to its previous / next edge, bookmark the cursor, read or replace the bookmarks, open or fold every group. The viewer object is <code>element.waveView</code>.</td></tr>
 </table></div>
 <h3>Settings (config file)</h3>
 <p>Colours, sizes, fonts, line widths and sorting are settings. They are merged in this order, later wins: built-in defaults, the global settings (<code>wavefw.config.js</code> loaded before <code>wavefw.js</code>, which sets <code>window.WAVEFW_CONFIG</code>, or <code>WaveFW.configure()</code>), the diagram's <code>"config"</code> object, and the element's <code>data-*</code> attributes or the constructor options. The <code>"config"</code> section of a converter config file (<code>tools/demo/demo.config.json</code>, <code>dump.config.json</code>) is written into the generated JSON; <code>tools/mkhtml.py</code> uses the top-level one as the page's global settings. This page loads <code>wavefw.config.js</code>.</p>
@@ -395,6 +452,10 @@ button.theme:hover { border-color: var(--accent); color: var(--accent); }
 <tr><td class="mono">sort, sortIgnore</td><td><code>none | asc | desc</code> and the prefixes skipped when sorting (array or <code>"i_,o_"</code>).</td></tr>
 <tr><td class="mono">sortButton, hint</td><td>Show the Sort controls and the help line (both <code>true</code>).</td></tr>
 <tr><td class="mono">style, radix</td><td>Edge style <code>auto | wavedrom | questa | square</code> and bus value radix <code>auto | hex | dec | signed | bin | oct | ascii</code> (see section 4). A signal's own <code>"style"</code> / <code>"radix"</code> wins.</td></tr>
+<tr><td class="mono">highlight, dim</td><td>Instances highlighted at start (full paths, names or <code>*</code> patterns; a group covers its members; one colour each) and the opacity of the other rows (0.3). Colours: <code>hl1</code>…<code>hl6</code> in <code>colors</code>.</td></tr>
+<tr><td class="mono">groupOrder, moduleShading</td><td><code>groupOrder: "last"</code> lists the signals of every group first and its sub-groups (modules) after them (<code>"first"</code>: the other way round, <code>"file"</code>: as given), also when sorted; generated configs use <code>"last"</code>. <code>moduleShading</code> (default on): the signals of neighbouring modules alternate between two backgrounds, with a line where the module changes.</td></tr>
+<tr><td class="mono">maxHeight</td><td>For example <code>"80vh"</code> or <code>600</code>: the rows scroll inside the viewer and its bar stays in view. Any number of rows works: the canvas only covers the visible part and the time axis stays on top.</td></tr>
+<tr><td class="mono">arrowLabels, laneHeight</td><td><code>lane</code> (default): bookmark arrow labels get a thin row of their own between the signals, <code>laneHeight</code> px per label (16); <code>overlay</code>: on the arrow.</td></tr>
 <tr><td class="mono">fold</td><td>Groups folded when a viewer opens: <code>true</code> (all), a nesting depth (<code>2</code>: groups inside groups inside groups) or group paths (<code>["tb.dut"]</code>).</td></tr>
 </table></div>
 <h3>Extensions to WaveJSON</h3>
@@ -406,6 +467,8 @@ button.theme:hover { border-color: var(--accent); color: var(--accent); }
 <tr><td class="mono">signal[i].path, same</td><td>Full hierarchical path (shown as the name's tooltip). <code>"same": "path"</code> takes the <code>tv</code> of the signal with that path, so one net seen at several levels is stored once.</td></tr>
 <tr><td class="mono">signal[i].stroke, fill</td><td>CSS colours for this signal's trace/outline and bus fill. The name is drawn in the stroke colour.</td></tr>
 <tr><td class="mono">config.theme, config.colors, config.*</td><td>Theme, palette (same keys as <code>data-colors</code>) and any other setting for this diagram.</td></tr>
+<tr><td class="mono">bookmarks: [{n, t, signal, text, color}]</td><td>Numbered events: <code>t</code> in model units (or a time string), <code>signal</code> the full path (<code>group.name</code>), a CSS colour (default: the accent). Static SVGs add a legend with the texts.</td></tr>
+<tr><td class="mono">arrows: [{from, to, shape, head, line, color, label}]</td><td>Arrows between bookmarks <i>n</i>: shape <code>- ~ -~ ~- -| |- -|-</code> (default <code>~</code>), head <code>&gt; &lt;&gt; &lt;</code> or <code>""</code> (default <code>&gt;</code>), line <code>solid dashed dotted</code>.</td></tr>
 <tr><td class="mono">markers / jumps / cursor</td><td><code>{t | cycle, label}</code> and <code>{t | cycle, span, label}</code>; <code>t</code> is in model units or a time string.</td></tr>
 </table></div>
 
@@ -417,6 +480,8 @@ make html        # tools/mkhtml.py: every view of the config  ->  one self-conta
 make html CONFIG=dump.config.json HTML=dump.html     # the same for any dump
 make html WAVES=test_stream_video.vcd                # from the VCD alone: makes test_stream_video.config.json
                                                      # (every signal, full paths, editable) and test_stream_video.html
+make demo-fst    # the demo as FST (verilator --trace-fst): FSM states named from the dump's enum tables
+make html WAVES=x.vcd SV="rtl/*.sv"                  # VCD: enum labels from typedef enum in the sources
 make smoke       # headless Chromium (playwright): no console errors, interaction checks, screenshots
 
 python3 -I tools/vcd2wavedrom.py --waves dump.vcd --scope tb.u_dut --exact \

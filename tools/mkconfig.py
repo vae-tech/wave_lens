@@ -5,13 +5,16 @@ under its full hierarchical path, one line each, with per-signal settings to fil
   mkconfig.py test_stream_video.vcd                    -> test_stream_video.config.json (next to the dump)
   mkconfig.py dump.vcd --base my.base.json --out my.config.json
   mkconfig.py dump.vcd --out dump.config.json --update # dump changed: add new signals, drop gone ones, keep all edits
+  mkconfig.py dump.fst                                 # FST: read through GTKWave's fst2vcd, FSM enum labels included
+  mkconfig.py dump.vcd --sv rtl/*.sv                   # VCD: enum labels from "typedef enum" in the sources
 
 Per-signal entry ("" = the global setting from "config"):
   "tb.dut.state": {"show": true, "radix": "", "color": "", "style": "", "width": 3, "changes": 120}
   show   true/false (false: left out of the page)        radix  auto hex dec signed bin oct ascii
   color  trace / outline / name colour, e.g. "#e03131"   style  auto wavedrom questa square
   also   "alias": "name shown", "fill": "#ffe066" (bus fill), "enum": {"0": "IDLE", "1": "RUN"}
-  width and changes (value changes in the dump) are information only.
+  width and changes (value changes in the dump) are information only. "enum" is filled from the dump (FST enum tables)
+  or from --sv sources, so FSM states show by name.
 
 Base file (--base, default wavefw.base.json in the project root): copied into the new config, except two generator keys
   "select" {"depth": 2, "constants": false, "hide": ["$rootio.*"], "budget": 1500000}  which signals start with
@@ -25,7 +28,7 @@ import argparse, collections, json, os, re, shutil, subprocess, sys
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)   # -I drops the script dir from sys.path
-import vcd2wavedrom  # noqa: E402
+import dumpscan, vcd2wavedrom  # noqa: E402
 
 ROOT = os.path.dirname(HERE)
 ENTRY = ('show', 'radix', 'color', 'style')          # keys every entry gets (empty = global setting)
@@ -64,41 +67,49 @@ def list_signals(exe, waves):
     return out
 
 
-def scan_vcd(path):
-    """VCD -> {signal path: (declaration index, value changes)}; the $dumpvars initial value is not a change.
-    wavepeek names differ for arrays: "mem[1] [7:0]" is "mem.[1]", bit-blasted "err[0]".."err[3]" is one vector "err"."""
-    with open(path, 'rb') as f:
-        data = f.read()
-    end = data.find(b'$enddefinitions')
-    if end < 0:
-        return {}
-    ids, info, scope, n = collections.defaultdict(list), {}, [], 0
-    for tok in (line.split() for line in data[:end].split(b'\n')):
-        if not tok:
-            continue
-        if tok[0] == b'$scope' and len(tok) > 2:
-            scope.append(tok[2].decode(errors='replace'))
-        elif tok[0] == b'$upscope' and scope:
-            scope.pop()
-        elif tok[0] == b'$var' and len(tok) > 4:
-            ref = tok[4].decode(errors='replace')
-            p = '.'.join(scope + [ref])
-            keys = [p] + ([p + tok[5].decode()] if len(tok) > 6 and tok[5].startswith(b'[') else [])
-            if '[' in ref and not ref.startswith('['):
-                keys.append('.'.join(scope + [ref.replace('[', '.[')]))
-                keys.append(('+', '.'.join(scope + [ref[:ref.index('[')]])))   # bits of a blasted vector
-            ids[tok[3]].append((n, keys)); n += 1
-    cnt = collections.Counter(l[1:].strip() if l[0] in b'01xzXZ' else l.rpartition(b' ')[2].strip()
-                              for l in data[end:].split(b'\n') if l and l[0] in b'01xzXZbBrR')
-    vec = {}
-    for code, decls in ids.items():
-        for i, keys in decls:
-            for k in keys:
-                if isinstance(k, tuple):
-                    o, c = vec.get(k[1], (i, 0)); vec[k[1]] = (min(o, i), c + max(0, cnt[code] - 1))
-                else:
-                    info.setdefault(k, (i, max(0, cnt[code] - 1)))
-    return {**vec, **info}
+# ---------------- enum labels from SystemVerilog sources (VCD has none; FST carries its own tables) ----------------
+SV_WORDS = {'input', 'output', 'inout', 'ref', 'var', 'const', 'static', 'automatic', 'logic', 'wire', 'reg', 'bit', 'signed', 'unsigned'}
+
+
+def sv_value(v, prev):
+    v = v.strip().replace('_', '')
+    if not v:
+        return prev + 1
+    m = re.fullmatch(r"(?:\d+)?'[sS]?([bodhBODH])([0-9a-fA-F]+)", v)
+    if m:
+        return int(m.group(2), {'b': 2, 'o': 8, 'd': 10, 'h': 16}[m.group(1).lower()])
+    return int(v, 0) if re.fullmatch(r'\d+|0[xX][0-9a-fA-F]+', v) else prev + 1
+
+
+def sv_enums(files):
+    """typedef enum … {A, B = 2'd3, …} name_t; + declarations "name_t state_q, state_d;" / "enum {…} st;" ->
+    {variable name: {value: label}} (by name only: a variable with that name in any scope gets the labels)."""
+    out, types = {}, {}
+    def items(body):
+        table, v = {}, -1
+        for it in body.split(','):
+            name, _, val = it.partition('=')
+            name = name.strip()
+            if re.fullmatch(r'\w+', name):
+                v = sv_value(val, v); table[v] = name
+        return table
+    texts = []
+    for f in files:
+        with open(f, encoding='utf-8', errors='replace') as fh:
+            texts.append(re.sub(r'//[^\n]*|/\*.*?\*/', ' ', fh.read(), flags=re.S))
+    for t in texts:
+        for m in re.finditer(r'\btypedef\s+enum\b[^{;]*\{([^}]*)\}\s*(\w+)\s*;', t):
+            types[m.group(2)] = items(m.group(1))
+        for m in re.finditer(r'(?<!typedef)\s\benum\b[^{;]*\{([^}]*)\}\s*(\w+(?:\s*,\s*\w+)*)\s*;', t):
+            for n in m.group(2).split(','):
+                out[n.strip()] = items(m.group(1))
+    for t in texts:
+        for name, table in types.items():
+            for m in re.finditer(r'\b(?:\w+::)?' + re.escape(name) + r'\b\s+(?:\[[^\]]*\]\s*)*(\w+(?:\s*(?:\[[^\]]*\]\s*)*,\s*\w+)*)', t):
+                for n in re.split(r'\s*(?:\[[^\]]*\]\s*)*,\s*', m.group(1)):
+                    if n and n not in SV_WORDS and n not in types:
+                        out[n] = table
+    return out
 
 
 # ---------------- catalog ----------------
@@ -114,6 +125,8 @@ def build(sigs, base):
         e['width'] = s['width']
         if s['changes'] is not None:
             e['changes'] = s['changes']
+        if s.get('enum'):
+            e['enum'] = {str(k): v for k, v in sorted(s['enum'].items())}
         cat[s['path']] = e
     total = lambda: sum(e.get('changes') or 0 for e in cat.values() if e['show'])
     budget, cut = sel.get('budget'), sel['depth']
@@ -140,7 +153,7 @@ def merge(old, new):
     out = {}
     for p, e in new.items():
         if p in old:
-            e = {**old[p], **{k: e[k] for k in INFO if k in e}}
+            e = {**old[p], **{k: e[k] for k in INFO if k in e}, **({'enum': e['enum']} if 'enum' in e and 'enum' not in old[p] else {})}
         out[p] = e
     gone = [p for p in old if p not in new]
     if gone:
@@ -185,9 +198,11 @@ HELP = [
     '  show true/false · radix auto hex dec signed bin oct ascii · color "#e03131" (trace, outline, name) · style auto wavedrom questa square',
     '  optional: "alias": "shown name", "fill": "#ffe066" (bus fill), "enum": {"0": "IDLE"}; width/changes are information only.',
     'config: page-wide wavefw settings — style (edges: auto | wavedrom slanted | questa / square vertical), radix, theme, colors,',
-    '  fold (group depth folded at start, true/false or scope paths), rowHeight, nameWidth, fontSize, sort, sortIgnore …',
+    '  fold (group depth folded at start, true/false or scope paths), highlight (instances in front at start, e.g. ["tb.dut.u_x"]),',
+    '  dim (opacity of the other rows), rowHeight, nameWidth, fontSize, sort, sortIgnore …',
     'views: one section of the page each; a view may set "signals": ["tb.dut.*", "tb.clk"] (patterns over the paths below),',
-    '  "from"/"to" ("10us"), "clock": "tb.clk" (clock-sampled instead of exact), "title", "render": view | svg | both.',
+    '  "from"/"to" ("10us"), "clock": "tb.clk" (clock-sampled instead of exact), "title", "render": view | svg | both,',
+    '  "bookmarks": [...], "arrows": [...] (numbered events with text, arrows between them: the viewer\'s Bookmarks › JSON button writes both).',
 ]
 
 
@@ -199,6 +214,8 @@ def main():
     ap.add_argument('--update', action='store_true', help='the output exists: sync its signals with the dump, keep all edits')
     ap.add_argument('--force', action='store_true', help='overwrite an existing output (edits are lost)')
     ap.add_argument('--depth', type=int, help='override select.depth of the base file')
+    ap.add_argument('--sv', nargs='+', metavar='FILE', help='SystemVerilog sources: enum labels for signals declared with an enum type (a VCD has none; an FST brings its own)')
+    ap.add_argument('--reader', choices=('builtin', 'wavepeek'), default='builtin', help='list the signals with the built-in reader (default) or wavepeek')
     ap.add_argument('--wavepeek', help='wavepeek executable (default: on PATH or ~/.local/bin)')
     a = ap.parse_args()
     if not os.path.exists(a.waves):
@@ -216,13 +233,29 @@ def main():
     if a.depth is not None:
         base['select'] = {**(base.get('select') or {}), 'depth': a.depth}
 
-    exe = os.path.expanduser(a.wavepeek or shutil.which('wavepeek') or '~/.local/bin/wavepeek')
-    if not os.path.exists(exe):
-        die('wavepeek not found (cargo build it, see README.md)')
-    sigs = list_signals(exe, a.waves)
-    info = scan_vcd(a.waves) if a.waves.lower().endswith('.vcd') else {}
+    info = dumpscan.scan(a.waves)   # VCD text, or FST through fst2vcd: signals, order, change counts, FST enum tables
+    if a.reader == 'wavepeek' or not info:
+        exe = os.path.expanduser(a.wavepeek or shutil.which('wavepeek') or '~/.local/bin/wavepeek')
+        if not os.path.exists(exe):
+            die('wavepeek not found (cargo build it, see README.md)' if info else 'cannot read the dump: no fst2vcd for an FST and no wavepeek')
+        sigs = list_signals(exe, a.waves)
+    else:   # the same paths and widths as wavepeek lists them
+        decl = dumpscan.read(a.waves, None)
+        sigs = [{'path': p, 'width': v.width} for p, v in decl.vars.items()]
     for i, s in enumerate(sigs):
-        s['order'], s['changes'] = info.get(s['path'], (len(info) + i, None))
+        d = info.get(s['path']) or {'order': len(info) + i, 'changes': None, 'enum': None}
+        s.update(order=d['order'], changes=d['changes'], enum=d['enum'])
+    if a.sv:
+        labels, n = sv_enums(a.sv), 0
+        for s in sigs:
+            leaf = re.sub(r'\[\d+\]$', '', SPLIT.split(s['path'])[-1])
+            t = labels.get(leaf)
+            if not s['enum'] and t and max(t) < 2 ** s['width']:
+                s['enum'] = t; n += 1
+        print(f'mkconfig: --sv: {len(labels)} enum-typed names, labels for {n} signals', file=sys.stderr)
+    found = sum(1 for s in sigs if s['enum'])
+    if found:
+        print(f'mkconfig: {found} signals with enum labels (FSM states shown by name)', file=sys.stderr)
     sigs.sort(key=lambda s: s['order'])   # declaration order of the dump (wavepeek lists alphabetically)
     cat = build(sigs, base)
     if old is not None:
