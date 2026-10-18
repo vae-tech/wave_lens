@@ -8,18 +8,18 @@
 const TOK = { fg: '--fg', muted: '--muted', line: '--line', panel: '--panel', panel2: '--panel-2', acc: '--accent',
   one: '--wave-1', bus: '--wave-bus', x: '--wave-x', xsoft: '--wave-x-soft', z: '--wave-z',
   c3: '--wave-c3', c4: '--wave-c4', c5: '--wave-c5', c6: '--wave-c6', c7: '--wave-c7', c8: '--wave-c8', c9: '--wave-c9',
+  band: '--wave-band',
   hl1: '--wave-hl1', hl2: '--wave-hl2', hl3: '--wave-hl3', hl4: '--wave-hl4', hl5: '--wave-hl5', hl6: '--wave-hl6', hl7: '--accent', hl8: '--wave-hl8',   // hl7: find, hl8: plugins
   paint: '--wave-paint' };   // the find group's Paint colour; plugins add their own (WaveFW.registerTokens)
 // a colour name of the painters: a token, a CSS custom property ("--x", "var(--x)") or a colour as it is
 const registerTokens = map => { for (const [k, v] of Object.entries(map || {})) TOK[k] = v; return Object.assign({}, TOK); };
-// the token of a highlight: a colour index (0…5 the picks, 6 find, 7 plugins) or a token name of its own
-const hlTok = c => typeof c === 'number' ? 'hl' + (c + 1) : c;
 const tokVar = n => TOK[n] ? `var(${TOK[n]})` : /^--[\w-]+$/.test(n) ? `var(${n})` : n;   // a colour name as CSS
 // Friendly names for colour maps (config.colors, data-colors, WaveFW.setColors) -> CSS custom properties.
 const CVAR = { trace: '--wave-1', one: '--wave-1', bus: '--wave-bus', x: '--wave-x', xfill: '--wave-x-soft', z: '--wave-z',
   bg: '--panel', panel: '--panel', header: '--panel-2', grid: '--line', text: '--fg', muted: '--muted', accent: '--accent', cursor: '--accent',
   page: '--bg', c3: '--wave-c3', c4: '--wave-c4', c5: '--wave-c5', c6: '--wave-c6', c7: '--wave-c7', c8: '--wave-c8', c9: '--wave-c9',
-  hl1: '--wave-hl1', hl2: '--wave-hl2', hl3: '--wave-hl3', hl4: '--wave-hl4', hl5: '--wave-hl5', hl6: '--wave-hl6' };
+  hl1: '--wave-hl1', hl2: '--wave-hl2', hl3: '--wave-hl3', hl4: '--wave-hl4', hl5: '--wave-hl5', hl6: '--wave-hl6',
+  band: '--wave-band' };
 const THEMES = ['light', 'white', 'dark'];
 const ENUMS = {};   // global enum registry: full path (or a signal name, for every signal of that name) -> { value: label }
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -39,7 +39,7 @@ const flatText = t => Array.isArray(t) ? t.slice(typeof t[1] === 'object' && !Ar
 const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight: 24, traceWidth: 1.4, busWidth: 1.2,
   labelSize: 11, fontSize: 11.5, sort: 'none', sortIgnore: [], sortButton: true, hint: true, style: 'auto', radix: 'auto', fold: null,
   highlight: null, dim: 0.3, groupColors: null, arrowLabels: 'lane', laneHeight: 16, maxHeight: null,
-  groupOrder: 'file', moduleShading: true, findHighlight: true, findOpen: true };
+  groupOrder: 'file', moduleShading: true, findHighlight: true, findOpen: true, cursorSnap: 8, wheel: 'scroll', contextMenu: true, busDetect: true, buses: null };
 const SVG_DEFAULTS = { groupHeight: 20, spaceHeight: 12 };   // the static figure is a little denser
 const GLOBAL = {};
 // settings that live in CSS (so the names column, fonts and static SVG text follow them too); numbers are px
@@ -59,6 +59,7 @@ const styleVars = cfg => Object.entries(STYLE_VAR).filter(([k]) => cfg && cfg[k]
 // edge styles ("style" setting or per signal): slope = px of a slanted 1-bit edge (null: WaveDrom wave strings slanted,
 // exact "tv" transitions vertical), bevel = px of the bus "<>" ends. questa/square = vertical edges like a simulator viewer.
 const EDGES = { auto: { slope: null, bevel: 3 }, wavedrom: { slope: 2.5, bevel: 3 }, questa: { slope: 0, bevel: 1.5 }, square: { slope: 0, bevel: 0 } };
+const STYLE_NAMES = { auto: 'auto', wavedrom: 'slanted', questa: 'vertical', square: 'square' };   // in the viewer's list
 // fold setting: true (every group), a depth (groups at that nesting depth and deeper) or group paths ("tb.dut", "dut")
 function foldSet(M, f) {
   const out = new Set(), names = Array.isArray(f) ? new Set(f.map(String)) : typeof f === 'string' ? new Set(prefixes(f)) : null;
@@ -80,7 +81,8 @@ function hlPick(M, list) {
   });
   return picks;
 }
-// picks -> { cover: Map(row -> colour) for picked rows and members of picked groups, on: rows drawn in front, dim }
+// picks -> { cover: Map(row -> colour) for picked rows and members of picked groups, on: rows drawn in front, dim }.
+// Your picks and the find's (a colour index) only bring their rows to the front; a plugin's (a token: 'hl8') also tints them
 function hlState(M, picks, dim, rows = M.rows) {
   if (!picks || !picks.size) return null;
   const cover = new Map(), on = new Set();

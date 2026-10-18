@@ -49,7 +49,12 @@ python3 tools/mkhtml.py --config work/my.config.json --out work/my.html --sva ch
   ([USAGE § Large dumps](docs/USAGE.md#large-dumps)).
 - **The viewer**: cursor and span fields, zoom and pan by wheel and keys, fuzzy find with highlight / open / paint,
   edge search, highlight of instances, bookmarks and arrows that go back into the config, sorting with ignored
-  prefixes ([USAGE § The viewer](docs/USAGE.md#the-viewer)).
+  prefixes, a tooltip with the keys on every control and a **?** box of all the keys, a measured range (shift+drag, edges snapped) and the right button's menu (zoom, bookmarks, the picture as
+  PNG / SVG, a signal's colour); **Save / Load…** puts all of it (with the assertions and ƒ rows) in a file and back
+  ([USAGE § The viewer](docs/USAGE.md#the-viewer)).
+- **Bus transactions**: the ports of AXI4 / AXI4-Lite / AXI3, AXI4-Stream, APB, AHB, Avalon-MM / ST, Wishbone and OBI
+  found by their names and drawn as transfers (address to response, bursts, packets, errors) with a row per channel
+  where every beat shows its stall ([USAGE § The viewer](docs/USAGE.md#the-viewer)).
 - **Assertions (SVA)**: bind an assertion to an instance of the waveform and it is evaluated over the dump (in the
   page as WebAssembly, or when the page is built by the Rust CLI); every attempt is a bar under that instance, every
   sequence step a numbered circle — on its own row and, for the selected attempt, on the signals it reads, with

@@ -15,6 +15,9 @@
   /* highlight colours, one per highlighted instance (cycled) */
   --wave-hl1: #1c7ed6; --wave-hl2: #ae3ec9; --wave-hl3: #0c8599; --wave-hl4: #d6336c; --wave-hl5: #5c940d; --wave-hl6: #e8590c;
   --wave-hl8: #7048e8;    /* highlight of plugins (the rows of a selected assertion attempt) */
+  --wave-band: #e6f2fd;   /* the second background of neighbouring instances (moduleShading): a pale blue */
+  --bus-write: #1c7ed6; --bus-read: #2b8a3e; --bus-error: #c92a2a; --bus-channel: #868e96;   /* bus transactions (bus.js) */
+  --bus-write: #1c7ed6; --bus-read: #2b8a3e; --bus-error: #c92a2a; --bus-channel: #868e96;   /* bus transactions (bus.js) */
   --wave-paint: #d6336c;  /* the find group's Paint colour (its first value) */
   /* assertions on the waves (sva.js): attempt bars, step circles, the per-cycle strip, a drop target */
   --sva-pass: #2b7a3b; --sva-fail: #c92a2a; --sva-disabled: #6c757d; --sva-active: #1971c2; --sva-capped: #706b80; --sva-ok: #37b24d;
@@ -30,7 +33,8 @@
   --wave-c3: #3d3818; --wave-c4: #42301c; --wave-c5: #1f3247; --wave-c6: #1b3a3c;
   --wave-c7: #20391f; --wave-c8: #33264a; --wave-c9: #452423; color-scheme: dark;
   --wave-hl1: #4dabf7; --wave-hl2: #da77f2; --wave-hl3: #3bc9db; --wave-hl4: #f783ac; --wave-hl5: #a9e34b; --wave-hl6: #ff922b;
-  --wave-hl8: #9775fa; --wave-paint: #f06595; --sva-pass: #51cf66; --sva-fail: #ff6b6b; --sva-disabled: #868e96; --sva-active: #4dabf7; --sva-capped: #adb5bd; --sva-ok: #69db7c; } }
+  --wave-hl8: #9775fa; --wave-paint: #f06595; --sva-pass: #51cf66; --sva-fail: #ff6b6b; --sva-disabled: #868e96; --sva-active: #4dabf7; --sva-capped: #adb5bd; --sva-ok: #69db7c;
+  --wave-band: #1f2d39; --bus-write: #4dabf7; --bus-read: #69db7c; --bus-error: #ff6b6b; --bus-channel: #adb5bd; } }
 [data-theme="dark"] {
   --bg: #16181d; --panel: #1f2229; --panel-2: #272b33; --fg: #e8e6df; --muted: #9aa0ab; --line: #363b45;
   --accent: #e4834a; --accent-soft: #3a2a1f; --wave-1: #e8e6df; --wave-bus: #7fb0dd; --wave-x: #e0665a;
@@ -38,7 +42,8 @@
   --wave-c3: #3d3818; --wave-c4: #42301c; --wave-c5: #1f3247; --wave-c6: #1b3a3c;
   --wave-c7: #20391f; --wave-c8: #33264a; --wave-c9: #452423; color-scheme: dark;
   --wave-hl1: #4dabf7; --wave-hl2: #da77f2; --wave-hl3: #3bc9db; --wave-hl4: #f783ac; --wave-hl5: #a9e34b; --wave-hl6: #ff922b;
-  --wave-hl8: #9775fa; --wave-paint: #f06595; --sva-pass: #51cf66; --sva-fail: #ff6b6b; --sva-disabled: #868e96; --sva-active: #4dabf7; --sva-capped: #adb5bd; --sva-ok: #69db7c; }
+  --wave-hl8: #9775fa; --wave-paint: #f06595; --sva-pass: #51cf66; --sva-fail: #ff6b6b; --sva-disabled: #868e96; --sva-active: #4dabf7; --sva-capped: #adb5bd; --sva-ok: #69db7c;
+  --wave-band: #1f2d39; --bus-write: #4dabf7; --bus-read: #69db7c; --bus-error: #ff6b6b; --bus-channel: #adb5bd; }
 /* white: pure white paper, black traces and stock-WaveDrom bus colours (good for print and slides) */
 [data-theme="white"] {
   --bg: #ffffff; --panel: #ffffff; --panel-2: #f3f4f6; --fg: #000000; --muted: #4b5563; --line: #d1d5db;
@@ -46,7 +51,8 @@
   --wave-x-soft: #ffffff; --wave-z: #0041c4;
   --wave-c3: #ffffb4; --wave-c4: #ffe0b9; --wave-c5: #b9e0ff; --wave-c6: #ccfdfe;
   --wave-c7: #cdfdc5; --wave-c8: #f0c1fb; --wave-c9: #f5c2c0; color-scheme: light;
-  --sva-pass: #2b7a3b; --sva-fail: #e03131; --sva-active: #1971c2; }
+  --sva-pass: #2b7a3b; --sva-fail: #e03131; --sva-active: #1971c2;
+  --wave-band: #e6f2fd; }
 
 /* ---------------- interactive viewer (WaveView) ---------------- */
 .wv { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); overflow: clip;   /* clip, not hidden: hidden would stop the sticky canvas */ color: var(--fg); font-family: var(--font-body); }
@@ -103,7 +109,7 @@
 .wv .bar .toast:empty { display: none; }
 .wv .bar .toast:empty + .cur { margin-left: auto; }
 .wv .names .row .n b.fm { color: var(--accent); font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
-.wv .names .row.alt { background-color: color-mix(in srgb, var(--panel-2) 60%, transparent); }
+.wv .names .row.alt { background-color: var(--wave-band); }
 .wv .names .row.grp:hover, .wv .names .row.grp:focus-visible { color: var(--accent); outline: none; }
 .wv .names .row.space { border-bottom-color: transparent; }
 .wv .names .row.lane { padding: 0; border-bottom: 0; background: color-mix(in srgb, var(--panel-2) 45%, transparent); }   /* arrow labels */
@@ -112,8 +118,8 @@
 .wv .names .row .mk { position: absolute; left: 4px; top: 50%; width: 9px; height: 9px; margin-top: -5.5px; border: 1.5px solid var(--muted); border-radius: 50%; opacity: 0.25; cursor: pointer; }
 .wv .names .row:hover .mk, .wv .names .row .mk:focus-visible { opacity: 1; outline: none; }
 .wv .names .row .mk:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
-.wv .names .row .mk[aria-checked="true"] { opacity: 1; background: var(--hl); border-color: var(--hl); }
-.wv .names .row.hl { box-shadow: inset 3px 0 0 var(--hl); background-image: linear-gradient(color-mix(in srgb, var(--hl) 12%, transparent), color-mix(in srgb, var(--hl) 12%, transparent)); }
+.wv .names .row .mk[aria-checked="true"] { opacity: 1; background: var(--fg); border-color: var(--fg); }
+.wv .names .row.tint { box-shadow: inset 3px 0 0 var(--hl); background-image: linear-gradient(color-mix(in srgb, var(--hl) 12%, transparent), color-mix(in srgb, var(--hl) 12%, transparent)); }   /* a plugin's highlight (its own token) */
 .wv .names .row.dim { opacity: var(--wv-dim, 0.3); }
 .wv .bar button[data-act="hl"] { border-color: var(--accent); color: var(--accent); }
 .wv [hidden] { display: none !important; }
@@ -164,26 +170,32 @@
 .wv .sva .sve .eb { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
 .wv .sva .sve .em { color: var(--sva-fail); font-size: 12px; }
 .wv .sva .ed { font-size: 11px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--accent); color: var(--accent); }
-/* the list of assertions: a table on one grid (subgrid rows): #, name, kind, property, bound to, results, the
-   binding's buttons, the assertion's buttons; the header sticks while the list scrolls. The instance path wraps
-   after its dots (<wbr>) or anywhere, nothing added: it copies as one line */
+/* the list of assertions: a table on one grid (subgrid rows), two lines per assertion: #, its name, the instance it is
+   bound to, its buttons; under them its kind and property, the results, the binding's buttons (.b1 adds no box: its
+   cells are the line's). The header sticks while the list scrolls. The instance path wraps after its dots (<wbr>) or
+   anywhere, nothing added: it copies as one line */
 .wv .sva ol.asv { list-style: none; margin: 4px 0 0; padding: 0; display: grid; column-gap: 10px; align-content: start; overflow: auto; resize: vertical;
-  max-height: min(17em, 32vh); grid-template-columns: max-content minmax(10ch, max-content) max-content minmax(12ch, 46ch) minmax(10ch, 30ch) max-content max-content max-content; }
-.wv .sva ol.asv > li { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; padding: 1px 4px; border-radius: 4px; border-top: 1px solid var(--line); cursor: grab; }
+  max-height: min(25em, 40vh); grid-template-columns: max-content minmax(18ch, 60ch) minmax(14ch, 44ch) max-content; }
+.wv .sva ol.asv > li { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; row-gap: 1px; padding: 2px 4px; border-radius: 4px; border-top: 1px solid var(--line); cursor: grab; }
 .wv .sva ol.asv > li.hd { position: sticky; top: 0; z-index: 1; background: var(--panel-2); border-top: 0; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; cursor: default; }
 .wv .sva ol.asv > li.hd > span { white-space: nowrap; }
 .wv .sva .an { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); text-align: right; white-space: nowrap; }
 .wv .sva .an .grip { margin-right: 4px; }
 .wv .sva .nm { display: inline-flex; gap: 6px; align-items: center; min-width: 0; }
 .wv .sva .nm .al { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wv .sva ol.asv > li > .b1 { grid-column: 5 / span 3; display: grid; grid-template-columns: subgrid; align-items: center; }
-.wv .sva .b1 > .st { grid-column: 1; min-width: 0; }
-.wv .sva .b1 > .st.no, .wv .sva .b1 > .st.run { grid-column: 1 / span 2; }
-.wv .sva .b1 > .cn { grid-column: 2; white-space: nowrap; }
-.wv .sva .b1 > .bb, .wv .sva ul.bnd > li > .bb { grid-column: 3; }
-.wv .sva .b1 > ol.atl, .wv .sva ul.bnd > li > ol.atl { grid-column: 1 / -1; margin-left: 0; }
+.wv .sva ol.asv > li > .an, .wv .sva ol.asv > li > .nm { grid-row: 1; }
+.wv .sva ol.asv > li > .nm { grid-column: 2; }
+.wv .sva ol.asv > li > .pr { grid-column: 2; grid-row: 2; display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+.wv .sva ol.asv > li > .pr > code.at { flex: 1; }
+.wv .sva ol.asv > li > .b1 { display: contents; }
+.wv .sva .b1 > .bp { grid-column: 3; grid-row: 1; min-width: 0; }
+.wv .sva .b1 > .bs { grid-column: 3; grid-row: 2; }
+.wv .sva .b1 > .bb { grid-column: 4; grid-row: 2; }
+.wv .sva ol.asv > li > .ab { grid-column: 4; grid-row: 1; }
+.wv .sva .bs { display: flex; flex-wrap: wrap; gap: 0 8px; align-items: baseline; min-width: 0; }
+.wv .sva .bs > .cn { white-space: nowrap; }
+.wv .sva .b1 > ol.atl { grid-column: 2 / -1; margin-left: 0; }
 .wv .sva .bb, .wv .sva .ab { display: inline-flex; flex-wrap: nowrap; gap: 4px; align-items: center; }
-.wv .sva ol.asv > li > .ab { grid-column: 8; }
 .wv .sva .st b.sp { overflow-wrap: anywhere; user-select: text; cursor: text; }   /* selectable inside the draggable line (sva.js: no drag from it) */
 .wv .sva ol.asv > li > .pick, .wv .sva ol.asv > li > .sve { grid-column: 1 / -1; }
 .wv .sva ol.asv > li:not(.hd):hover { background: var(--panel-2); }
@@ -207,10 +219,11 @@
 .wv .sva .cn .c-fail { color: var(--sva-no); font-weight: 600; }
 .wv .sva .cn .c-fail.zero { color: var(--muted); font-weight: 400; }
 .wv .sva ul.bnd { grid-column: 1 / -1; list-style: none; margin: 0 0 2px; padding: 0; display: grid; grid-template-columns: subgrid; row-gap: 2px; cursor: default; }
-.wv .sva ul.bnd > li { grid-column: 5 / span 3; display: grid; grid-template-columns: subgrid; align-items: center; }
-.wv .sva ul.bnd > li > .st { grid-column: 1; min-width: 0; }
-.wv .sva ul.bnd > li > .st.no, .wv .sva ul.bnd > li > .st.run { grid-column: 1 / span 2; }
-.wv .sva ul.bnd > li > .cn { grid-column: 2; white-space: nowrap; }
+.wv .sva ul.bnd > li { grid-column: 2 / -1; display: grid; grid-template-columns: subgrid; align-items: center; }   /* instance, results, buttons */
+.wv .sva ul.bnd > li > .bp { grid-column: 1; min-width: 0; }
+.wv .sva ul.bnd > li > .bs { grid-column: 2; }
+.wv .sva ul.bnd > li > .bb { grid-column: 3; }
+.wv .sva ul.bnd > li > ol.atl { grid-column: 1 / -1; margin-left: 0; }
 .wv .sva .pick { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin-left: 22px; padding: 4px 6px; border: 1px dashed var(--line); border-radius: 4px; cursor: default; }
 .wv .sva .pick .muted { color: var(--muted); font-size: 11.5px; }
 .wv .sva .pick .no { color: var(--sva-no); font-size: 11.5px; }
@@ -226,6 +239,7 @@
 .wv.sva-drag .names .row.sva-no.sva-over { outline-color: var(--sva-no); }
 /* assertion groups on the waves: the group in the accent colour, its step rows and copied signals quieter */
 .wv .names .row.sva-g .n { color: var(--accent); }
+.wv .names .row.bus-g .n { color: var(--bus-write); }   /* a bus port's group (bus.js) */
 .wv .names .row.sva-g.fails .n { color: var(--sva-fail); }
 .wv .names .row.sva-lane .n, .wv .names .row.sva-step .n { color: var(--muted); }
 .wv .names .row.sva-step .n b.sn { display: inline-block; min-width: 1.6em; color: var(--fg); font-weight: 600; }
@@ -278,7 +292,7 @@
 .wv .sva button.lnk { color: var(--accent); }
 .wv .sva ol.atl { flex-basis: 100%; margin: 2px 0 2px 22px; padding: 0; list-style: none; font-family: var(--font-mono); font-size: 11px; max-height: 12em; overflow-y: auto; }
 .wv .sva ol.atl button { padding: 0 5px; font-size: 11px; }
-.wv .sva .st .sel { margin-left: 6px; color: var(--wave-hl8); font-weight: 600; }
+.wv .sva .bs .sel { font-size: 11.5px; color: var(--wave-hl8); font-weight: 600; }
 .wv canvas { display: block; width: 100%; cursor: crosshair; touch-action: none; position: sticky; top: 0; }
 .wv canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .wv canvas.wv-print { position: absolute; left: 0; width: 100%; }   /* print: the rows in pages of canvases (paintPrint) */
@@ -301,3 +315,30 @@
 .wvf-lazy button { font: inherit; background: none; border: 1px solid var(--line); border-radius: 4px; color: var(--accent); padding: 3px 10px; cursor: pointer; }
 .wvf-lazy button:hover { border-color: var(--accent); }
 .wvf-err { border-left: 3px solid var(--wave-x); background: var(--wave-x-soft); padding: 8px 12px; border-radius: 0 6px 6px 0; font-family: var(--font-mono); font-size: 12.5px; white-space: pre-wrap; }
+/* the right button's menu on the waves (the range, the picture, the signal under the pointer) */
+.wv .wv-menu { position: fixed; z-index: 50; min-width: 200px; padding: 4px; display: flex; flex-direction: column; background: var(--panel); color: var(--fg);
+  border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18); font: 12.5px var(--font-body); }
+.wv .wv-menu button, .wv .wv-menu .mi { all: unset; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 10px; border-radius: 4px; cursor: pointer; }
+.wv .wv-menu button:hover, .wv .wv-menu button:focus-visible, .wv .wv-menu .mi:hover { background: var(--accent-soft); }
+.wv .wv-menu .mi input { width: 34px; height: 18px; padding: 0; border: 1px solid var(--line); background: none; cursor: pointer; }
+.wv .wv-menu .mh { padding: 4px 10px 2px; font: 600 11px var(--font-mono); color: var(--muted); overflow-wrap: anywhere; }
+.wv .wv-menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 2px; }
+/* tooltips of the controls (what it does, its keys) and the help box (? in the bar) */
+.wv .wv-tip { position: fixed; z-index: 60; max-width: 340px; padding: 5px 8px; border-radius: 5px; background: var(--fg); color: var(--panel); font: 12px/1.35 var(--font-body);
+  pointer-events: none; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2); display: flex; flex-direction: column; gap: 3px; }
+.wv .wv-tip .tk { display: flex; flex-wrap: wrap; gap: 3px; }
+.wv .wv-tip kbd, .wv .wv-help kbd { display: inline-block; padding: 0 5px; border-radius: 3px; font: 11px/1.5 var(--font-mono); }
+.wv .wv-tip kbd { border: 1px solid color-mix(in srgb, var(--panel) 45%, transparent); }
+.wv .bar .hb { margin-left: 8px; width: 22px; height: 22px; padding: 0; border-radius: 50%; font-weight: 700; }
+.wv .wv-help { position: fixed; z-index: 55; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(820px, 94vw); max-height: 84vh; overflow: auto; padding: 10px 14px 14px;
+  background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25); font: 12.5px/1.4 var(--font-body); }
+.wv .wv-help .hh { display: flex; gap: 10px; align-items: baseline; margin-bottom: 6px; }
+.wv .wv-help .hh .muted { color: var(--muted); font-size: 11.5px; flex: 1; }
+.wv .wv-help .hg { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 4px 22px; }
+.wv .wv-help h4 { margin: 8px 0 3px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.wv .wv-help table { border-collapse: collapse; width: 100%; }
+.wv .wv-help td { padding: 2px 6px 2px 0; vertical-align: top; }
+.wv .wv-help td:first-child { white-space: nowrap; width: 1%; }
+.wv .wv-help kbd { border: 1px solid var(--line); background: var(--panel-2); }
+.wv .wv-help:focus { outline: none; }
+.wv .wv-menu .kk { color: var(--muted); font: 11px var(--font-mono); margin-left: 16px; }

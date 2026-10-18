@@ -13,6 +13,7 @@ wavefw/                       what a page needs, nothing else
                               boot.js (themes, configure, upgrade, exports): one scope, concatenated in this order
   wavefw.config.js            global settings file (all keys, with defaults), loaded before wavefw.js
   sva.js, sva.wasm.js         assertions in the page: the panel, binding, evaluation; the engine (generated, make sva-build)
+  bus.js                      bus transactions: ports found by their names, decoders (AXI, AXI-Stream, APB, AHB, Avalon, Wishbone, OBI), rows
 tools/                        what you run: python3 -I tools/<tool>.py
   mkconfig.py vcd2wavedrom.py mkhtml.py embed.py dumpscan.py wavejson.py svabuild.py
   base.config.json            base settings for generated configs (make config / make html WAVES=x.vcd)

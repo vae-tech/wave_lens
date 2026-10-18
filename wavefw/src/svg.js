@@ -2,32 +2,41 @@
 
 /* ---------------- static SVG ---------------- */
 const WaveSVG = {
-  // opts: from/to (model units or "12us"), width (px, fits the wave area), cyclePx (default 40·hscale), axis (force), bg, markers
+  // opts: from/to (model units or "12us"), width (px, fits the wave area), cyclePx (default 40·hscale), axis (force), bg, markers;
+  // view: a viewer, drawn as it shows its waves (its rows — opts.rows, a part of them —, folding, colours, highlight,
+  // bookmarks, cursor; the model is the viewer's): its picture (view.toSVG)
   toString(model, opts = {}) {
-    const M = parse(model), S = settings(SVG_DEFAULTS, GLOBAL, M.cfg, opts), P = new SvgPainter(S);
-    const gp = groupPaint(M, S.groupColors), strokeOf = r => r.stroke ?? gp.get(r);
+    const V = opts.view, M = V ? V.M : parse(model), S = V ? V.S : settings(SVG_DEFAULTS, GLOBAL, M.cfg, opts), P = new SvgPainter(S);
+    const gp = groupPaint(M, S.groupColors), strokeOf = V ? r => V.strokeOf(r) : r => r.stroke ?? gp.get(r);
     const from = parseT(opts.from) ?? M.t0, to = parseT(opts.to) ?? M.t1, fs = S.fontSize;
-    const sorted = orderRows(M.rows, S.sort, S.sortIgnore, S.groupOrder), rh = { sig: S.rowHeight, group: S.groupHeight, space: S.spaceHeight };
-    const all = withExtra(sorted, (opts.extraRows || []).concat(...SVG_PLUGINS.map(f => f(M, S, opts) || [])), M, opts.owner || M);
-    const C = compose(M, S, all, M.bookmarks, M.arrows, hlPick(M, S.highlight)), rows = C.rows, hl = C.hl;
+    const rh = { sig: S.rowHeight, group: S.groupHeight, space: S.spaceHeight }, bms = V ? V.bms : M.bookmarks, ars = V ? V.arrows : M.arrows;
+    let C;
+    if (V) C = { rows: opts.rows || V.rowsL, band: V.band, hl: V.hl };
+    else {
+      const sorted = orderRows(M.rows, S.sort, S.sortIgnore, S.groupOrder);
+      const all = withExtra(sorted, (opts.extraRows || []).concat(...SVG_PLUGINS.map(f => f(M, S, opts) || [])), M, opts.owner || M);
+      C = compose(M, S, all, M.bookmarks, M.arrows, hlPick(M, S.highlight));
+    }
+    const rows = C.rows, hl = C.hl;
     const nameW = Math.ceil(Math.max(40, ...rows.map(r => P.measure(r.name || '', { size: fs, weight: r.type === 'group' ? 600 : 400 }) + 22 + r.depth * 12)));
     let k = ((opts.cyclePx || 40) * M.hscale) / M.cycle;
     if (opts.width) k = (opts.width - nameW - 8) / (to - from);
     const waveW = (to - from) * k, Wt = Math.ceil(nameW + waveW + 8);
     const showAxis = opts.axis ?? (M.timed || M.tick != null), showTock = M.tock != null;
     let y = 4;
-    const titleY = y; if (M.title) y += 22;
+    const titleY = y; if (V ? V.opts.title || M.title : M.title) y += 22;
     const axisY = y; if (showAxis) y += 20;
     const lay = layoutRows(rows, rh, S.laneHeight, y); y = lay.H;
     const bodyEnd = y, tockY = y; if (showTock) y += 20;
     const footY = y; if (M.foot) y += 20;
-    const notes = M.bookmarks.filter(b => b.text), notesY = y + 6; if (notes.length) y += 8 + notes.length * 20;   // bookmark legend
-    const legend = rows.flatMap(r => r.legend || []), legendY = y + 6; if (legend.length) y += 8 + legend.length * 18;   // rows of plugins
+    const notes = bms.filter(b => b.text && b.t >= from && b.t <= to), notesY = y + 6; if (notes.length) y += 8 + notes.length * 20;   // bookmark legend
+    const legend = rows.flatMap(r => (V && r.type === 'group' && V.collapsed.has(r.id) ? [] : r.legend || [])), legendY = y + 6; if (legend.length) y += 8 + legend.length * 18;   // rows of plugins
     const Ht = Math.ceil(y + 4), xL = nameW, xR = nameW + waveW, X = t => xL + (t - from) * k;
-    const theme = opts.theme ?? M.theme, colors = Object.assign({}, M.colors, opts.colors);
-    const bg = opts.bg || (theme && theme !== 'auto') || colors.bg ? opts.bg || 'panel' : null;
+    const theme = V ? null : opts.theme ?? M.theme, colors = V ? {} : Object.assign({}, M.colors, opts.colors);
+    const bg = V || opts.bg || (theme && theme !== 'auto') || colors.bg ? opts.bg || 'panel' : null;
     if (bg) P.rect(0, 0, Wt, Ht, bg);
-    if (M.title) P.text(nameW + waveW / 2, titleY + 9, M.title, { anchor: 'middle', size: 13, weight: 600, body: true });
+    const title = V ? V.opts.title || M.title : M.title;
+    if (title) P.text(nameW + waveW / 2, titleY + 9, title, { anchor: 'middle', size: 13, weight: 600, body: true });
     if (M.foot) P.text(nameW + waveW / 2, footY + 9, M.foot, { anchor: 'middle', size: 12, fill: 'muted', body: true });
     // names and group brackets (a group spans down to its last member in display order)
     const last = {};
@@ -35,7 +44,7 @@ const WaveSVG = {
     lay.forEach(({ row, y: ry, h }, i) => {
       const c = hl ? hl.cover.get(row) : undefined;
       P.fade = hl && !hl.on.has(row) ? hl.dim : 1;
-      if (c !== undefined) { P.rect(0, ry, xL, h, hlTok(c), 0.1); P.rect(0, ry, 3, h, hlTok(c)); }
+      if (typeof c === 'string') { P.rect(0, ry, xL, h, c, 0.1); P.rect(0, ry, 3, h, c); }   // a plugin's highlight
       if (!row.name) return;
       const g = row.type === 'group';
       P.text(6 + row.depth * 12 + (g ? 0 : 8), ry + h / 2, row.name, { size: fs, weight: g ? 700 : 400, fill: strokeOf(row) || 'fg' });
@@ -51,7 +60,8 @@ const WaveSVG = {
       if (showTock) paintAxis(P, { from, span: to - from, xL, xR, y: tockY, h: 20, yEnd: tockY, X, timed: M.timed, tick: M.tock, every: M.every, step, mid: true });
       const rowY = paintBody(P, M, lay, X, from, to, xL, xR, hl, null, null, C.band, null, strokeOf), top = showAxis ? axisY + 20 : lay.length ? lay[0].y : y;
       paintMarkers(P, (opts.markers || []).concat(M.markers), X, from, to, top, bodyEnd);
-      paintBookmarks(P, M.bookmarks, M.arrows, X, from, to, rowY, top, bodyEnd, showAxis ? axisY + 10 : top + 10, null, laneY(lay, S.laneHeight));
+      paintBookmarks(P, bms, ars, X, from, to, rowY, top, bodyEnd, showAxis ? axisY + 10 : top + 10, null, laneY(lay, S.laneHeight));
+      if (V && V.cursor >= from && V.cursor <= to) P.path([['M', X(V.cursor), top], ['L', X(V.cursor), bodyEnd]], { stroke: 'acc', w: 1.2 });
     });
     notes.forEach((b, i) => {
       const cy = notesY + i * 20 + 10;
@@ -63,7 +73,7 @@ const WaveSVG = {
       if (l.n != null) { P.path(circle(14, cy, 7), { fill: l.color || 'acc' }); P.text(14, cy + 0.5, String(l.n), { anchor: 'middle', size: 9, weight: 700, fill: 'panel' }); }
       P.text(l.n != null ? 28 : 6, cy, l.text, { size: l.bold ? 12 : 11.5, weight: l.bold ? 600 : 400, body: !l.mono, fill: l.fill || 'fg' });
     });
-    const css = [lookCss(colors), ...styleVars(Object.assign({}, M.cfg, opts)).map(([n, v]) => `${n}:${v}`)].filter(Boolean).join(';');
+    const css = [lookCss(colors), ...styleVars(V ? {} : Object.assign({}, M.cfg, opts)).map(([n, v]) => `${n}:${v}`)].filter(Boolean).join(';');
     const look = (THEMES.includes(theme) ? ` data-theme="${theme}"` : '') + (css ? ` style="${esc(css)}"` : '');
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${Wt} ${Ht}" width="${Wt}" height="${Ht}" role="img" aria-label="${esc(M.title || 'waveform')}"${look}>${P.out.join('')}</svg>`;
   },

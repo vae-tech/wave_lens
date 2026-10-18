@@ -68,7 +68,7 @@ function arrowHead(P, x, y, fx, fy, fill) { // filled arrow with its tip at (x, 
   let dx = x - fx, dy = y - fy; const L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L;
   P.path([['M', x, y], ['L', x - 7 * dx + 3 * dy, y - 7 * dy - 3 * dx], ['L', x - 7 * dx - 3 * dy, y - 7 * dy + 3 * dx], ['Z']], { fill });
 }
-function paintSig(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk = s.stroke) {   // sk: its colour (a viewer's paint)
+function paintSig(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk = s.stroke, bg = 'panel') {   // sk: its colour (a viewer's paint), bg: the row's background (the module band)
   const a = s.tr; if (!a.length) return;
   const yh = y + 4, yl = y + h - 5, ym = (yh + yl) / 2;
   const cl = x => Math.min(Math.max(x, xL - 8), xR + 8);
@@ -106,7 +106,7 @@ function paintSig(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk = s.stroke) {   // sk:
         const sb = Math.min(E.bevel, w / 2), x0 = cl(xs), x1 = cl(xe);
         const hex = [['M', x0, ym], ['L', x0 + sb, yh], ['L', x1 - sb, yh], ['L', x1, ym], ['L', x1 - sb, yl], ['L', x0 + sb, yl], ['Z']];
         const isx = o.k === 'x';
-        P.path(hex, { fill: isx ? 'xsoft' : s.fill || (o.c >= 3 && o.c <= 9 ? 'c' + o.c : 'panel') });
+        P.path(hex, { fill: isx ? 'xsoft' : s.fill || (o.c >= 3 && o.c <= 9 ? 'c' + o.c : bg) });
         if (isx && w > 4) P.clip(x0 + sb, yh, x1 - x0 - 2 * sb, yl - yh, () => {
           const hh = yl - yh, d = []; for (let x = x0 - hh; x < x1; x += 6) d.push(['M', x, yl], ['L', x + hh, yh]);
           P.path(d, { stroke: 'x', w: 0.8, alpha: 0.7 });
@@ -125,7 +125,7 @@ function paintSig(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk = s.stroke) {   // sk:
   for (const g of s.gaps || []) { // WaveDrom '|' gap mark: a slanted break through the row
     if (g < tA || g > tB) continue;
     const x = X(g), y0 = y + 2, y1 = y + h - 2;
-    P.path([['M', x - 5, y1], ['L', x - 1, y0], ['L', x + 3, y0], ['L', x - 1, y1], ['Z']], { fill: 'panel' });
+    P.path([['M', x - 5, y1], ['L', x - 1, y0], ['L', x + 3, y0], ['L', x - 1, y1], ['Z']], { fill: bg });
     P.path([['M', x - 5, y1], ['L', x - 1, y0], ['M', x - 1, y1], ['L', x + 3, y0]], { stroke: 'one', w: 1 });
   }
 }
@@ -187,18 +187,19 @@ function paintBody(P, M, lay, X, tA, tB, xL, xR, hl, sel, allLay, band, late, st
   if (allLay) for (const o of allLay) if (o.row.type === 'sig') rowY.set(o.row, o.y + o.h / 2);
   for (const { row, y, h } of lay) {
     const c = hl ? hl.cover.get(row) : undefined;
-    P.fade = hl && row.type !== 'lane' && !hl.on.has(row) ? hl.dim : 1;
+    P.fade = 1;   // the module band does not dim with the rows: the modules stay apart while something is highlighted
     const b = band ? band.get(row) : undefined;
     if (b !== undefined) { if (pb !== undefined && b !== pb) edge.push(['M', xL, y + 0.5], ['L', xR, y + 0.5]); pb = b; }
-    if (b === 1) P.rect(xL, y, xR - xL, h, 'panel2', 0.6);
+    if (b === 1) P.rect(xL, y, xR - xL, h, 'band');
+    P.fade = hl && row.type !== 'lane' && !hl.on.has(row) ? hl.dim : 1;
     if (row.type === 'lane') { P.rect(xL, y, xR - xL, h, 'panel2', 0.45); continue; }
     if (row.type === 'group') { P.rect(xL, y, xR - xL, h, 'panel2'); P.rect(xL, y, xR - xL, h, 'fg', 0.08); edge.push(['M', xL, y + 0.5], ['L', xR, y + 0.5]); pb = undefined; }
-    if (c !== undefined) P.rect(xL, y, xR - xL, h, hlTok(c), 0.1);
+    if (typeof c === 'string') P.rect(xL, y, xR - xL, h, c, 0.1);   // a plugin's highlight
     if (row === sel) P.rect(xL, y, xR - xL, h, 'acc', 0.08);
     if (row.type !== 'space') sep.push(['M', xL, y + h - 0.5], ['L', xR, y + h - 0.5]);
     if (row.draw) row.draw(P, { y, h, X, tA, tB, xL, xR });
     if (row.overlay) over.add(row.overlay);
-    if (row.type === 'sig') { if (row.tr) paintSig(P, row, y, h, X, tA, tB, xL, xR, M.t1, strokeOf(row)); rowY.set(row, y + h / 2); }
+    if (row.type === 'sig') { if (row.tr) paintSig(P, row, y, h, X, tA, tB, xL, xR, M.t1, strokeOf(row), b === 1 ? 'band' : 'panel'); rowY.set(row, y + h / 2); }
   }
   P.fade = 1;
   P.path(sep, { stroke: 'line', w: 1, alpha: 0.5 });

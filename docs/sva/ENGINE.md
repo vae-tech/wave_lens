@@ -132,7 +132,7 @@ arrow "… nT (trace cut)", and the bar's tooltip says "trace cut". Tooltips giv
 cycle numbers in brackets: cycle numbers count from the first edge of the evaluated window (`sva eval --from`, or the
 view's start for an in-page Evaluate), so the same failure can carry another number after an in-page Evaluate;
 `sva eval --to` lists no edge after the window in `cycles`. Selecting an attempt (a click on a bar or circle, Go to
-first failure, the failure buttons, `f` / `F`, a click on the assertion's line, `a` / `A`) sets `view.sva.selA`, moves
+first failure, the failure buttons, `]f` / `[f`, a click on the assertion's line, `]a` / `[a`) sets `view.sva.selA`, moves
 the window to the attempt at the current zoom (the attempt in the middle; a longer one starts near the left edge),
 scrolls its attempts row to the middle of the waves (`view.centerRow`), marks the binding's line (`li.here`), highlights the bound rows through
 `view.extraPicks` and updates the binding's line only; unbinding, re-evaluating or removing the selected binding (and

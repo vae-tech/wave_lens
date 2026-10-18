@@ -10,18 +10,18 @@
 const TOK = { fg: '--fg', muted: '--muted', line: '--line', panel: '--panel', panel2: '--panel-2', acc: '--accent',
   one: '--wave-1', bus: '--wave-bus', x: '--wave-x', xsoft: '--wave-x-soft', z: '--wave-z',
   c3: '--wave-c3', c4: '--wave-c4', c5: '--wave-c5', c6: '--wave-c6', c7: '--wave-c7', c8: '--wave-c8', c9: '--wave-c9',
+  band: '--wave-band',
   hl1: '--wave-hl1', hl2: '--wave-hl2', hl3: '--wave-hl3', hl4: '--wave-hl4', hl5: '--wave-hl5', hl6: '--wave-hl6', hl7: '--accent', hl8: '--wave-hl8',   // hl7: find, hl8: plugins
   paint: '--wave-paint' };   // the find group's Paint colour; plugins add their own (WaveFW.registerTokens)
 // a colour name of the painters: a token, a CSS custom property ("--x", "var(--x)") or a colour as it is
 const registerTokens = map => { for (const [k, v] of Object.entries(map || {})) TOK[k] = v; return Object.assign({}, TOK); };
-// the token of a highlight: a colour index (0…5 the picks, 6 find, 7 plugins) or a token name of its own
-const hlTok = c => typeof c === 'number' ? 'hl' + (c + 1) : c;
 const tokVar = n => TOK[n] ? `var(${TOK[n]})` : /^--[\w-]+$/.test(n) ? `var(${n})` : n;   // a colour name as CSS
 // Friendly names for colour maps (config.colors, data-colors, WaveFW.setColors) -> CSS custom properties.
 const CVAR = { trace: '--wave-1', one: '--wave-1', bus: '--wave-bus', x: '--wave-x', xfill: '--wave-x-soft', z: '--wave-z',
   bg: '--panel', panel: '--panel', header: '--panel-2', grid: '--line', text: '--fg', muted: '--muted', accent: '--accent', cursor: '--accent',
   page: '--bg', c3: '--wave-c3', c4: '--wave-c4', c5: '--wave-c5', c6: '--wave-c6', c7: '--wave-c7', c8: '--wave-c8', c9: '--wave-c9',
-  hl1: '--wave-hl1', hl2: '--wave-hl2', hl3: '--wave-hl3', hl4: '--wave-hl4', hl5: '--wave-hl5', hl6: '--wave-hl6' };
+  hl1: '--wave-hl1', hl2: '--wave-hl2', hl3: '--wave-hl3', hl4: '--wave-hl4', hl5: '--wave-hl5', hl6: '--wave-hl6',
+  band: '--wave-band' };
 const THEMES = ['light', 'white', 'dark'];
 const ENUMS = {};   // global enum registry: full path (or a signal name, for every signal of that name) -> { value: label }
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -41,7 +41,7 @@ const flatText = t => Array.isArray(t) ? t.slice(typeof t[1] === 'object' && !Ar
 const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight: 24, traceWidth: 1.4, busWidth: 1.2,
   labelSize: 11, fontSize: 11.5, sort: 'none', sortIgnore: [], sortButton: true, hint: true, style: 'auto', radix: 'auto', fold: null,
   highlight: null, dim: 0.3, groupColors: null, arrowLabels: 'lane', laneHeight: 16, maxHeight: null,
-  groupOrder: 'file', moduleShading: true, findHighlight: true, findOpen: true };
+  groupOrder: 'file', moduleShading: true, findHighlight: true, findOpen: true, cursorSnap: 8, wheel: 'scroll', contextMenu: true, busDetect: true, buses: null };
 const SVG_DEFAULTS = { groupHeight: 20, spaceHeight: 12 };   // the static figure is a little denser
 const GLOBAL = {};
 // settings that live in CSS (so the names column, fonts and static SVG text follow them too); numbers are px
@@ -61,6 +61,7 @@ const styleVars = cfg => Object.entries(STYLE_VAR).filter(([k]) => cfg && cfg[k]
 // edge styles ("style" setting or per signal): slope = px of a slanted 1-bit edge (null: WaveDrom wave strings slanted,
 // exact "tv" transitions vertical), bevel = px of the bus "<>" ends. questa/square = vertical edges like a simulator viewer.
 const EDGES = { auto: { slope: null, bevel: 3 }, wavedrom: { slope: 2.5, bevel: 3 }, questa: { slope: 0, bevel: 1.5 }, square: { slope: 0, bevel: 0 } };
+const STYLE_NAMES = { auto: 'auto', wavedrom: 'slanted', questa: 'vertical', square: 'square' };   // in the viewer's list
 // fold setting: true (every group), a depth (groups at that nesting depth and deeper) or group paths ("tb.dut", "dut")
 function foldSet(M, f) {
   const out = new Set(), names = Array.isArray(f) ? new Set(f.map(String)) : typeof f === 'string' ? new Set(prefixes(f)) : null;
@@ -82,7 +83,8 @@ function hlPick(M, list) {
   });
   return picks;
 }
-// picks -> { cover: Map(row -> colour) for picked rows and members of picked groups, on: rows drawn in front, dim }
+// picks -> { cover: Map(row -> colour) for picked rows and members of picked groups, on: rows drawn in front, dim }.
+// Your picks and the find's (a colour index) only bring their rows to the front; a plugin's (a token: 'hl8') also tints them
 function hlState(M, picks, dim, rows = M.rows) {
   if (!picks || !picks.size) return null;
   const cover = new Map(), on = new Set();
@@ -499,7 +501,7 @@ function arrowHead(P, x, y, fx, fy, fill) { // filled arrow with its tip at (x, 
   let dx = x - fx, dy = y - fy; const L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L;
   P.path([['M', x, y], ['L', x - 7 * dx + 3 * dy, y - 7 * dy - 3 * dx], ['L', x - 7 * dx - 3 * dy, y - 7 * dy + 3 * dx], ['Z']], { fill });
 }
-function paintSig(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk = s.stroke) {   // sk: its colour (a viewer's paint)
+function paintSig(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk = s.stroke, bg = 'panel') {   // sk: its colour (a viewer's paint), bg: the row's background (the module band)
   const a = s.tr; if (!a.length) return;
   const yh = y + 4, yl = y + h - 5, ym = (yh + yl) / 2;
   const cl = x => Math.min(Math.max(x, xL - 8), xR + 8);
@@ -537,7 +539,7 @@ function paintSig(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk = s.stroke) {   // sk:
         const sb = Math.min(E.bevel, w / 2), x0 = cl(xs), x1 = cl(xe);
         const hex = [['M', x0, ym], ['L', x0 + sb, yh], ['L', x1 - sb, yh], ['L', x1, ym], ['L', x1 - sb, yl], ['L', x0 + sb, yl], ['Z']];
         const isx = o.k === 'x';
-        P.path(hex, { fill: isx ? 'xsoft' : s.fill || (o.c >= 3 && o.c <= 9 ? 'c' + o.c : 'panel') });
+        P.path(hex, { fill: isx ? 'xsoft' : s.fill || (o.c >= 3 && o.c <= 9 ? 'c' + o.c : bg) });
         if (isx && w > 4) P.clip(x0 + sb, yh, x1 - x0 - 2 * sb, yl - yh, () => {
           const hh = yl - yh, d = []; for (let x = x0 - hh; x < x1; x += 6) d.push(['M', x, yl], ['L', x + hh, yh]);
           P.path(d, { stroke: 'x', w: 0.8, alpha: 0.7 });
@@ -556,7 +558,7 @@ function paintSig(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk = s.stroke) {   // sk:
   for (const g of s.gaps || []) { // WaveDrom '|' gap mark: a slanted break through the row
     if (g < tA || g > tB) continue;
     const x = X(g), y0 = y + 2, y1 = y + h - 2;
-    P.path([['M', x - 5, y1], ['L', x - 1, y0], ['L', x + 3, y0], ['L', x - 1, y1], ['Z']], { fill: 'panel' });
+    P.path([['M', x - 5, y1], ['L', x - 1, y0], ['L', x + 3, y0], ['L', x - 1, y1], ['Z']], { fill: bg });
     P.path([['M', x - 5, y1], ['L', x - 1, y0], ['M', x - 1, y1], ['L', x + 3, y0]], { stroke: 'one', w: 1 });
   }
 }
@@ -618,18 +620,19 @@ function paintBody(P, M, lay, X, tA, tB, xL, xR, hl, sel, allLay, band, late, st
   if (allLay) for (const o of allLay) if (o.row.type === 'sig') rowY.set(o.row, o.y + o.h / 2);
   for (const { row, y, h } of lay) {
     const c = hl ? hl.cover.get(row) : undefined;
-    P.fade = hl && row.type !== 'lane' && !hl.on.has(row) ? hl.dim : 1;
+    P.fade = 1;   // the module band does not dim with the rows: the modules stay apart while something is highlighted
     const b = band ? band.get(row) : undefined;
     if (b !== undefined) { if (pb !== undefined && b !== pb) edge.push(['M', xL, y + 0.5], ['L', xR, y + 0.5]); pb = b; }
-    if (b === 1) P.rect(xL, y, xR - xL, h, 'panel2', 0.6);
+    if (b === 1) P.rect(xL, y, xR - xL, h, 'band');
+    P.fade = hl && row.type !== 'lane' && !hl.on.has(row) ? hl.dim : 1;
     if (row.type === 'lane') { P.rect(xL, y, xR - xL, h, 'panel2', 0.45); continue; }
     if (row.type === 'group') { P.rect(xL, y, xR - xL, h, 'panel2'); P.rect(xL, y, xR - xL, h, 'fg', 0.08); edge.push(['M', xL, y + 0.5], ['L', xR, y + 0.5]); pb = undefined; }
-    if (c !== undefined) P.rect(xL, y, xR - xL, h, hlTok(c), 0.1);
+    if (typeof c === 'string') P.rect(xL, y, xR - xL, h, c, 0.1);   // a plugin's highlight
     if (row === sel) P.rect(xL, y, xR - xL, h, 'acc', 0.08);
     if (row.type !== 'space') sep.push(['M', xL, y + h - 0.5], ['L', xR, y + h - 0.5]);
     if (row.draw) row.draw(P, { y, h, X, tA, tB, xL, xR });
     if (row.overlay) over.add(row.overlay);
-    if (row.type === 'sig') { if (row.tr) paintSig(P, row, y, h, X, tA, tB, xL, xR, M.t1, strokeOf(row)); rowY.set(row, y + h / 2); }
+    if (row.type === 'sig') { if (row.tr) paintSig(P, row, y, h, X, tA, tB, xL, xR, M.t1, strokeOf(row), b === 1 ? 'band' : 'panel'); rowY.set(row, y + h / 2); }
   }
   P.fade = 1;
   P.path(sep, { stroke: 'line', w: 1, alpha: 0.5 });
@@ -749,6 +752,53 @@ function paintBookmarks(P, bms, arrows, X, tA, tB, rowY, y0, y1, yAxis, rubber, 
 /* ---------------- the viewer's parts: Bar (tools), Names (the names column), Notes (bookmarks and arrows) ---------------- */
 // Each part takes the viewer v and keeps its state there (v.qEl, v.vis, v.rowEls, v.bms …): a part is where the code of
 // a piece of the page lives; the viewer is the one object that plugins and tests talk to.
+/* ---------------- tooltips and help ---------------- */
+// A control's tooltip: [what it does, in a few words, its keys]; found by its data-act / -sv / -x / -bm / -m value or a
+// class (".q"); plugins add theirs (WaveFW.tips.add). A control without one shows its title the same way (boot.js).
+const TIPS = {
+  '.ct': ['Cursor time: 85.12us, or a number in the unit', ['Enter']], 'act:cset': ['Put the cursor at this time', ['Enter']],
+  '.cs': ['Window span around the cursor', ['Enter']], 'act:cshow': ['The window of this span at the cursor', ['c']],
+  '.cu': ['Unit of the cursor field'], '.su': ['Unit of the span field'],
+  'act:out': ['Zoom out', ['o', '-', 'ctrl+wheel']], 'act:in': ['Zoom in', ['i', '+', 'ctrl+wheel']], 'act:fit': ['Show everything', ['f']],
+  '.ws': ['Edge style: auto, slanted (WaveDrom), vertical (simulator), square'],
+  '.q': ['Fuzzy find: letters in order, a.b for paths', ['/', 'ctrl+F', 'Enter', 'Esc']],
+  'act:fprev': ['Previous match', ['N', 'shift+Enter']], 'act:fnext': ['Next match', ['n', 'Enter']],
+  'act:fhl': ['Found rows in front, the rest dimmed'], 'act:fopen': ['Fold the modules without a match'],
+  '.fcol': ['Colour for Paint'], 'act:fpaint': ['Paint the found and highlighted signals'], 'act:funpaint': ['Their own colours back'],
+  'act:fcopy': ['Copy the paths of the found rows'],
+  'act:sort': ['Sort: off → A→Z → Z→A', ['s']], '.pfx': ['Name prefixes ignored when sorting: i_,o_'],
+  'act:expand': ['Open every module', ['zR']], 'act:collapse': ['Fold every module', ['zM']],
+  'act:hl': ['Clear the highlight', ['Esc']], 'act:unhide': ['Show the hidden rows again'],
+  'act:prev': ['Previous edge of the selected signal', ['shift+Tab', '[e']], '.edge': ['Edge kind: any, rising, falling', ['e']],
+  'act:next': ['Next edge of the selected signal', ['Tab', ']e']], 'act:mark': ['Bookmark at the cursor', ['m']],
+  'act:ssave': ['Save the view to a file (.view.json)'], 'act:sload': ['Load a saved view'],
+  'act:help': ['Keys and mouse', ['?']], 'jump': ['Go to this marker'],
+  '.mk': ['Highlight: in front, the rest dimmed', ['ctrl+click']],
+  'bm:json': ['The bookmarks and arrows as JSON for a config'], 'bm:clear': ['Remove this browser\'s bookmarks'],
+  'bm:go': ['Go to this bookmark', [']m', '[m']], 'bm:here': ['Move it to the cursor'], 'bm:del': ['Delete the bookmark and its arrows'],
+  'bm:addar': ['Arrow between the last two bookmarks', ['shift+drag a circle']], 'bm:adel': ['Delete the arrow'],
+  '.tm': ['Bookmark time: 250ns, 85.12us', ['Enter']], '.sig': ['Its signal (empty: the time axis)', ['Enter']], '.txt': ['What happens here'],
+  '.col': ['Colour'], '.lab': ['Arrow label'], '.from': ['From bookmark'], '.to': ['To bookmark'], '.shape': ['Arrow shape'], '.head': ['Arrow head'], '.line': ['Line'],
+  'm:zoom': ['Zoom to the range', ['middle drag']], 'm:marks': ['Bookmarks at its ends, an arrow with Δ'], 'm:copyd': ['Copy Δ'],
+  'm:copyimg': ['The range (else the window) as PNG to the clipboard'], 'm:png': ['Save the picture as PNG'], 'm:svg': ['Save the picture as SVG'],
+  'm:hl': ['Highlight', ['ctrl+click']], 'm:hide': ['Leave it out of the view'], 'm:unhide': ['Show the hidden rows'],
+  'm:fold': ['Fold / open this module'], 'm:foldup': ['Fold its module', ['zc']], 'm:zM': ['Fold every module', ['zM']], 'm:zR': ['Open every module', ['zR']],
+  'm:mark': ['Bookmark on this signal here', ['m']], 'm:copyname': ['Copy the path', ['yy']], 'm:clear': ['Clear the range', ['Esc', 'shift+click']],
+  'm:unpaint': ['Its own colour back'],
+};
+// the help (? in the bar, key ?): the keys and the mouse by what they do; plugins' keys come from their addKey help
+const HELP = [
+  ['Zoom and move', [[['i', '+'], 'zoom in'], [['o', '-'], 'zoom out'], [['f'], 'show everything'], [['l'], 'the window before the last zoom'], [['c'], 'the window around the cursor'],
+    [['ctrl+wheel', 'pinch'], 'zoom at the pointer'], [['wheel'], 'scroll the rows'], [['shift+wheel', 'drag', '←', '→'], 'pan'], [['middle drag'], 'zoom into a range'], [['Home', 'End'], 'the start / end'], [['PgUp', 'PgDn'], 'a page of rows']]],
+  ['Cursor and edges', [[['click'], 'cursor on a near edge (alt: not) + select the signal'], [['shift+←', 'shift+→'], 'move the cursor'], [['Tab', 'shift+Tab'], 'next / previous edge'], [[']e', '[e'], 'next / previous edge'], [['e'], 'edge kind']]],
+  ['Signals', [[['↑', '↓', 'j', 'k'], 'select the next / previous'], [['gg', 'G'], 'the first / last'], [['ctrl+click', '○'], 'highlight'], [['zM', 'zR'], 'fold / open every module'],
+    [['zc', 'zo', 'za'], 'the selected signal\'s module'], [['s'], 'sort'], [['yy', 'ctrl+C'], 'copy the path'], [['Esc'], 'reset: search, highlight, selection']]],
+  ['Find', [[['/', 'ctrl+F'], 'find'], [['n', 'N', 'Enter'], 'next / previous match'], [['*'], 'find the selected name']]],
+  ['Measure and mark', [[['shift+drag'], 'measure a range (Δ, cycles)'], [['right button'], 'a range and the menu: picture, colour, radix, hide'], [['m'], 'bookmark at the cursor'],
+    [[']m', '[m'], 'next / previous bookmark'], [['drag a bookmark'], 'move it'], [['shift+drag a bookmark'], 'an arrow to another one']]],
+  ['Help', [[['?'], 'this box'], [['hover a button'], 'what it does, its keys']]],
+];
+
 class Bar {
   // the viewer's markup: the bar (title line, tool groups), the names column and the waves, the lists, the hint
   static html(v) {
@@ -761,29 +811,33 @@ class Bar {
       seg(`<input type="search" class="q" spellcheck="false" autocomplete="off" placeholder="find  /" aria-label="fuzzy find signals" title="Fuzzy find: the letters in order (pxvd finds s_pix_valid); a word with '.' searches full paths (dev.fifo); words separated by spaces must all match. Enter / n: next, shift+Enter / N: previous, Esc: reset">`,
         '<span class="cnt"></span><button type="button" data-act="fprev" title="Previous match (N, shift+Enter)">‹</button><button type="button" data-act="fnext" title="Next match (n, Enter)">›</button>'),
       seg(`<button type="button" data-act="fhl" aria-pressed="${!!S.findHighlight}" title="Found rows in front, the rest dimmed">Highlight</button>`, `<button type="button" data-act="fopen" aria-pressed="${!!S.findOpen}" title="Every module folded except the ones with a match">Open</button>`),
-      seg(`<input type="color" class="fcol" value="${/^#[0-9a-f]{6}$/i.test(paint) ? paint : '#d6336c'}" aria-label="paint colour" title="Colour for Paint">`, '<button type="button" data-act="fpaint" title="Paint the found signals in this colour (kept in this browser)">Paint</button>'),
+      seg(`<input type="color" class="fcol" value="${/^#[0-9a-f]{6}$/i.test(paint) ? paint : '#d6336c'}" aria-label="paint colour" title="Colour for Paint">`, '<button type="button" data-act="fpaint" title="Paint the found and the highlighted signals in this colour (none: the selected one; kept in this browser)">Paint</button>'),
       `<button type="button" data-act="funpaint" title="Back to the signals' own colours" hidden>Unpaint</button><button type="button" data-act="fcopy" title="Copy the full paths of the found rows, one per line">Copy</button>`).replace('class="tg"', 'class="tg find"');
     // cursor: type a time (in the unit chosen, or with its own: 85.12us) and Set; a span and Show: the window around the cursor
+    // the edge style of the waves (the "style" setting): kept in this browser; a signal with a style of its own keeps it
+    const wstyle = `<select class="ws" aria-label="edge style" title="Edges: auto (wave strings slanted, exact transitions vertical) · slanted (WaveDrom) · vertical (a simulator: narrow bus crossings) · square (no bevel). Kept in this browser; a signal with its own style keeps it">${Object.entries(STYLE_NAMES).map(([k, n]) => `<option value="${k}"${k === S.style ? ' selected' : ''}>${n}</option>`).join('')}</select>`;
     const units = v.M.timed ? `<select class="cu" aria-label="time unit" title="Unit of the two fields">${['ps', 'ns', 'µs', 'ms', 's'].map(u => `<option${u === v.unit() ? ' selected' : ''}>${u}</option>`).join('')}</select>` : '<span class="cyc">cyc</span>';
     const cursor = seg('<input type="text" class="ct" inputmode="decimal" spellcheck="false" aria-label="cursor time" title="Cursor time: a number in the unit shown, or with a unit (85.12us); Enter or Set">',
         units, '<button type="button" data-act="cset" title="Put the cursor at this time">Set</button>') +
       seg('<span class="lbl">span</span><input type="text" class="cs" inputmode="decimal" spellcheck="false" aria-label="view span" title="Width of the window; Enter or Show">',
         units.replace('class="cu"', 'class="su"'), '<button type="button" data-act="cshow" title="Window of this span centred on the cursor (key: c)">Show</button>');
     const list = grp('list', sort ? seg(sort) : '', groups ? seg('<button type="button" data-act="expand" title="Expand all groups">Expand</button>', '<button type="button" data-act="collapse" title="Collapse all groups">Collapse</button>') : '',
-      '<button type="button" data-act="hl" title="Clear the highlight (Esc)" hidden></button>');
+      '<button type="button" data-act="hl" title="Clear the highlight (Esc)" hidden></button>', '<button type="button" data-act="unhide" title="Show the rows hidden with the right button\'s menu again" hidden></button>');
     const edges = grp('edges', seg('<button type="button" data-act="prev" title="Previous edge of the selected signal, or of any shown signal ([)">◀</button>',
       `<select class="edge" aria-label="edge kind" title="Edge kind (e)">${Object.entries(EDGE_KINDS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select>`,
       '<button type="button" data-act="next" title="Next edge (])">▶</button>'), '<button type="button" data-act="mark" title="Bookmark at the cursor, on the selected signal (m)">+ Mark</button>');
-    return `<div class="bar"><div class="head"><span class="eyebrow">${esc(v.opts.title || v.M.title || 'Waveform').replace(/µ/g, '<span class="mu">µ</span>')}</span><span class="toast" role="status" aria-live="polite"></span><span class="cur"></span></div>
-      <div class="tools">${grp('cursor', cursor)}${grp('view', seg('<button type="button" data-act="out" title="Zoom out (−)">−</button>', '<button type="button" data-act="in" title="Zoom in (+)">+</button>', '<button type="button" data-act="fit" title="Show everything (0)">Fit</button>'))}${find}${list}${edges}${jumps ? grp('go to', jumps) : ''}</div></div>
+    const state = grp('state', '<button type="button" data-act="ssave" title="Save what you did in this viewer to a file: the window, the cursor, the order, the folding, the highlight, the paint, the bookmarks and arrows, the search, the assertions and the ƒ rows">Save</button>',
+      '<button type="button" data-act="sload" title="Load a saved file into this viewer (what is not in these waves is left out)">Load…</button><input type="file" class="sfile" accept=".json,application/json" hidden>');
+    return `<div class="bar"><div class="head"><span class="eyebrow">${esc(v.opts.title || v.M.title || 'Waveform').replace(/µ/g, '<span class="mu">µ</span>')}</span><span class="toast" role="status" aria-live="polite"></span><span class="cur"></span><button type="button" class="hb" data-act="help" aria-label="keys and mouse">?</button></div>
+      <div class="tools">${grp('cursor', cursor)}${grp('view', seg('<button type="button" data-act="out" title="Zoom out (−)">−</button>', '<button type="button" data-act="in" title="Zoom in (+)">+</button>', '<button type="button" data-act="fit" title="Show everything (0)">Fit</button>'), wstyle)}${find}${list}${edges}${state}${jumps ? grp('go to', jumps) : ''}</div></div>
       <div class="body"><div class="names"></div><div class="wcol"><canvas tabindex="0" role="application" aria-roledescription="waveform" aria-label="waveform: + − zoom, ← → pan, shift+← → move the cursor, ↑ ↓ select a signal, [ ] edges"></canvas></div></div>
       <div class="notes" hidden></div>
-      ${S.hint ? `<div class="hint">${esc(v.hintBase = `Wheel: zoom · shift+wheel / drag: pan · click: cursor + select a signal · keys on the waves: + − 0 zoom · ← → pan · shift+← → cursor · c window at the cursor · ↑ ↓ select · / find, n N next / previous match · [ ] edges, e edge kind · m bookmark${S.sortButton ? ' · s sort' : ''} · Esc reset${groups ? ' · click a module to fold it' : ''} · ○ or ctrl+click a name: highlight`)}</div>` : ''}`;
+      ${S.hint ? `<div class="hint">${esc(v.hintBase = `Wheel: scroll · ctrl+wheel: zoom · shift+wheel / drag: pan · middle drag: zoom to a range · click: cursor (on a near edge; alt: not) + select a signal · keys on the waves (as in Questa): i o zoom in / out, f full, l last, c at the cursor · ← → pan, Home End · shift+← → cursor · ↑ ↓ (j k) select, gg G first / last · Tab shift+Tab next / previous edge, e edge kind · / ctrl+F find, n N next / previous match, * the selected name · m bookmark, ]m [m next / previous · zM zR fold / open all, zc zo the selected module · yy ctrl+C copy${S.sortButton ? ' · s sort' : ''} · Esc reset${groups ? ' · click a module to fold it' : ''} · ○ or ctrl+click a name: highlight`)}</div>` : ''}`;
   }
   constructor(v) {
     this.v = v; const r = v.root;
     v.canvas = r.querySelector('canvas'); v.wcol = r.querySelector('.wcol'); v.bodyEl = r.querySelector('.body'); v.namesEl = r.querySelector('.names'); v.curEl = r.querySelector('.cur');
-    v.sortBtn = r.querySelector('button[data-act=sort]'); v.hlBtn = r.querySelector('button[data-act=hl]');
+    v.sortBtn = r.querySelector('button[data-act=sort]'); v.hlBtn = r.querySelector('button[data-act=hl]'); v.unhideBtn = r.querySelector('button[data-act=unhide]');
     v.notesEl = r.querySelector('.notes'); v.edgeSel = r.querySelector('select.edge');
     v.ctEl = r.querySelector('input.ct'); v.csEl = r.querySelector('input.cs');
     v.cuEl = r.querySelector('select.cu'); v.suEl = r.querySelector('select.su');
@@ -799,6 +853,7 @@ class Bar {
 
     });
     v.edgeSel.addEventListener('change', () => { v.edgeKind = v.edgeSel.value; });
+    v.wsEl = r.querySelector('select.ws'); v.wsEl.addEventListener('change', () => v.setStyle(v.wsEl.value));
     r.querySelector('.bar').addEventListener('click', e => {
       const b = e.target.closest('button'); if (!b) return;
       if (b.dataset.act === 'in') v.zoom(0.5, 0.5);
@@ -806,6 +861,7 @@ class Bar {
       else if (b.dataset.act === 'fit') v.fit();
       else if (b.dataset.act === 'sort') v.setSort(SORTS[(SORTS.indexOf(v.sort) + 1) % SORTS.length]);
       else if (b.dataset.act === 'hl') v.highlight(null);
+      else if (b.dataset.act === 'unhide') v.unhide();
       else if (b.dataset.act === 'expand') v.expandAll();
       else if (b.dataset.act === 'collapse') v.collapseAll();
       else if (b.dataset.act === 'prev' || b.dataset.act === 'next') v.edge(b.dataset.act === 'next' ? 1 : -1);
@@ -819,8 +875,13 @@ class Bar {
       else if (b.dataset.act === 'cshow') v.showCursor(v.csEl.value);
       else if (b.dataset.act === 'fnext' || b.dataset.act === 'fprev') v.findStep(b.dataset.act === 'fnext' ? 1 : -1);
       else if (b.dataset.act === 'fcopy') v.copyRows(v.allRows().filter(r => v.found.has(r)));
+      else if (b.dataset.act === 'ssave') v.saveState();
+      else if (b.dataset.act === 'help') v.help();
+      else if (b.dataset.act === 'sload') v.sfile.click();
       else if (b.dataset.jump !== undefined) { const j = v.jumps[b.dataset.jump]; v.goto(j.t, j.span); }
     });
+    v.sfile = r.querySelector('input.sfile');
+    v.sfile.addEventListener('change', () => { const f = v.sfile.files[0]; v.sfile.value = ''; if (f) v.loadState(f); });
     const pfx = r.querySelector('input.pfx');
     if (pfx) pfx.addEventListener('input', () => { v.fitPfx(); v.setSort(v.sort, pfx.value); });
     v.fitPfx();
@@ -873,6 +934,7 @@ class Names {
     v.lanes = C.lanes; v.rowsL = C.rows; v.band = C.band; v.hl = C.hl;
     v.laneSig = JSON.stringify([...v.lanes]); v.laneKey = laneKey(v.bms, v.arrows);
     if (v.hlBtn) { v.hlBtn.hidden = !v.picks.size; v.hlBtn.textContent = `Highlight: ${v.picks.size} ✕`; }
+    if (v.unhideBtn) { v.unhideBtn.hidden = !v.hiddenRows.size; v.unhideBtn.textContent = `Hidden: ${v.hiddenRows.size} ✕`; }
     if (v.sortBtn) { v.sortBtn.textContent = 'Sort: ' + { none: 'off', asc: 'A→Z', desc: 'Z→A' }[v.sort]; v.sortBtn.setAttribute('aria-pressed', v.sort !== 'none'); }
     const shape = [v.sort, v.sortIgnore.join(','), v.hdrH, JSON.stringify(v.rowH), v.S.laneHeight].join('|');
     v.labGen = v.q || '';   // the marks of a search are in the labels
@@ -920,8 +982,8 @@ class Names {
     v.rowKey.set(r, key);
     el.classList.toggle('dim', dim);
     if (r.type === 'space') return;
-    el.classList.toggle('hl', c !== undefined);
-    const hv = c !== undefined ? tokVar(hlTok(c)) : '';
+    el.classList.toggle('hl', c !== undefined); el.classList.toggle('tint', typeof c === 'string');
+    const hv = typeof c === 'string' ? tokVar(c) : '';
     if (el.style.getPropertyValue('--hl') !== hv) { if (hv) el.style.setProperty('--hl', hv); else el.style.removeProperty('--hl'); }
     const own = v.picks.has(r), m = el.firstChild;
     if (m.getAttribute('aria-checked') !== String(own)) {
@@ -1036,12 +1098,14 @@ class WaveView {
     this.root = root; this.M = parse(model); this.opts = opts;
     const M = this.M;
     applyLook(root, opts.theme ?? M.theme, Object.assign({}, M.colors, opts.colors));
+    this.storeId = this.storeName();
+    this.lookKey = 'wavefw.look:' + this.storeId; this.local = this.loadLook();   // the bar's own layer of the settings (the edge style)
     this.restyle(false); this.collapsed = foldSet(M, this.S.fold);
     this.picks = hlPick(M, this.S.highlight); this.hlFrom = JSON.stringify(this.S.highlight ?? null);
     this.found = new Map(); this.findPicks = new Map(); this.findHl = this.S.findHighlight; this.findOpen = this.S.findOpen;   // fuzzy find
-    this.storeId = this.storeName();
     this.paintKey = 'wavefw.paint:' + this.storeId;
     this.painted = new Map(); this.loadPaint();
+    this.rowsKey = 'wavefw.rows:' + this.storeId; this.radixes = new Map(); this.hiddenRows = new Set(); this.loadRows();   // the menu's radix per signal, hidden rows
     this.t0 = M.t0; this.span = M.t1 - M.t0;
     this.minSpan = opts.minSpan ?? (M.timed ? Math.max(this.span / 1e6, 10) : 0.5);
     this.cursor = opts.cursor ?? M.cursor ?? M.t0;
@@ -1050,6 +1114,7 @@ class WaveView {
       ? this.markers.map(m => ({ label: '→ ' + m.label, t: m.t, span: this.span / 5 })) : []);
     this.sel = null; this.edgeKind = 'any';   // selected signal row (edge search, bookmarks), edge kind
     this.extraJSON = [];   // plugins: () -> '"key": …' lines for the bookmarks JSON (or null)
+    this.extraState = [];   // plugins: {key, get() -> a JSON value, set(value) (may be async)}: their part of the saved state
     this.extraRows = [];   // plugins: rows under a group (withExtra)
     this.extraPicks = new Map();   // plugins: rows highlighted, row -> a token ('hl8': --wave-hl8) or a colour index; Esc clears (then wavefw:reset)
     this.keys = {};   // plugins: key -> fn(event) on the waves (addKey)
@@ -1083,7 +1148,7 @@ class WaveView {
   }
   // settings from all layers; a global WaveFW.configure() calls this again on every viewer
   restyle(redraw = true) {
-    const S = this.S = settings(GLOBAL, this.M.cfg, this.opts);
+    const S = this.S = settings(GLOBAL, this.M.cfg, this.opts, this.local);
     this.groupStroke = groupPaint(this.M, S.groupColors);
     for (const [name, v] of styleVars(Object.assign({}, this.M.cfg, this.opts))) this.root.style.setProperty(name, v);
     this.rowH = { sig: S.rowHeight, group: S.groupHeight, space: S.spaceHeight }; this.hdrH = S.headerHeight;
@@ -1093,6 +1158,7 @@ class WaveView {
     const hlFrom = JSON.stringify(S.highlight ?? null);   // a new "highlight" setting (configure) replaces the picks
     if (redraw && hlFrom !== this.hlFrom) { this.hlFrom = hlFrom; this.picks = hlPick(this.M, S.highlight); }
     if (redraw && this.qEl && this.q) this.find(this.q);
+    if (this.wsEl) this.wsEl.value = S.style;
     if (redraw) { const i = this.root.querySelector('input.pfx'); if (i) i.value = S.sortIgnore.join(','); this.fitPfx(); this.renderNames(); this.draw(); this.settingsChanged(); }
   }
   build() {
@@ -1103,21 +1169,36 @@ class WaveView {
     const c = this.canvas;
     // wheel by its size: a mouse notch (100 px) zooms ×1.22, a trackpad's small steps zoom smoothly, ctrl+wheel (a pinch)
     // zooms faster; a horizontal swipe or shift+wheel pans by the pixels moved. deltaMode: lines (16 px) or pages.
+    // the wheel as in Questa: it scrolls the rows (the page, or the viewer's own scroll bar), ctrl+wheel (a pinch) zooms
+    // at the pointer by how far it turned, shift+wheel (a sideways swipe) pans; the setting wheel: "zoom" zooms without ctrl
     c.addEventListener('wheel', e => {
-      e.preventDefault();
       const u = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? c.clientHeight || 400 : 1;
       let dx = e.deltaX * u, dy = e.deltaY * u;
       if (e.shiftKey && !dx) { dx = dy; dy = 0; }
-      if (Math.abs(dx) > Math.abs(dy)) { this.t0 = this.clamp(this.t0 + dx / this.pxPerT()); this.invalidate(); }
-      else if (dy) this.zoom(Math.exp(dy * (e.ctrlKey ? 0.01 : 0.002)), this.frac(e), true);
+      if (Math.abs(dx) > Math.abs(dy)) { e.preventDefault(); this.t0 = this.clamp(this.t0 + dx / this.pxPerT()); this.invalidate(); }
+      else if (dy && (e.ctrlKey || this.S.wheel === 'zoom')) {
+        e.preventDefault(); this.markView(true);
+        const pinch = e.ctrlKey && e.deltaMode === 0 && Math.abs(dy) < 50;   // a trackpad pinch: small steps, many of them
+        this.zoom(Math.exp(dy * (pinch ? 0.01 : 0.002)), this.frac(e), true);
+      }
     }, { passive: false });
+    // the middle button (Questa): drag over a time range to zoom into it
+    c.addEventListener('mousedown', e => { if (e.button === 1) e.preventDefault(); });   // no autoscroll, no paste
     let drag = null;
     const local = e => { const b = c.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top + (this.oy || 0)]; };   // layout y
     // on a bookmark: drag moves it (time + signal row), shift+drag draws an arrow to another bookmark; elsewhere drag pans
+    c.addEventListener('contextmenu', e => { if (this.S.contextMenu) e.preventDefault(); });   // the viewer's menu instead
     c.addEventListener('pointerdown', e => {
-      if (e.button !== 0) return;   // right / middle button: not a cursor, not a pan (the context menu comes in 9.5)
-      const [x, y] = local(e), bm = this.bmAt(x, y);
-      drag = { x: e.clientX, y: e.clientY, t0: this.t0, moved: false, bm, arrow: bm && e.shiftKey };
+      if (e.button === 1) { const [x] = local(e); drag = { zoom: x, x: e.clientX, y: e.clientY }; c.setPointerCapture(e.pointerId); return; }
+      const [x, y] = local(e), bm = e.button === 0 && this.bmAt(x, y);
+      // a range: shift+drag (not from a bookmark: that draws an arrow) or the right button (then the menu), its ends on
+      // the edges of the signal under the pointer (alt: not)
+      if ((e.button === 2 && this.S.contextMenu) || (e.button === 0 && e.shiftKey && !bm)) {
+        drag = { range: this.pickTime(x, y, e.altKey), menu: e.button === 2, x: e.clientX, y: e.clientY, moved: false, free: e.altKey, row: this.rowOfY(y) };
+        c.setPointerCapture(e.pointerId); return;
+      }
+      if (e.button !== 0) return;
+      drag = { x: e.clientX, y: e.clientY, t0: this.t0, moved: false, bm, arrow: bm && e.shiftKey, free: e.altKey };
       c.setPointerCapture(e.pointerId);
     });
     c.addEventListener('pointermove', e => {
@@ -1127,6 +1208,12 @@ class WaveView {
         const val = !bm && !tip && o && o.row.type === 'sig' && o.row.tr ? this.valueTip(o.row, this.t0 + x / this.pxPerT()) : '';   // the value under the pointer
         c.style.cursor = bm ? 'grab' : tip ? 'pointer' : ''; c.title = bm ? `Bookmark ${bm.n}: drag to move it, shift+drag to another bookmark for an arrow` : tip || val; return;
       }
+      if (drag.zoom != null) { this.zband = [drag.zoom, x].map(px => this.t0 + px / this.pxPerT()); this.draw(); return; }
+      if (drag.range != null) {
+        if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 3) drag.moved = true;
+        if (drag.moved) { this.setRange(drag.range, this.pickTime(x, y, drag.free)); }
+        return;
+      }
       const dx = e.clientX - drag.x, dy = e.clientY - drag.y; if (Math.hypot(dx, dy) > 3) drag.moved = true;
       if (!drag.moved) return;
       if (drag.arrow) { this.rubber = { from: drag.bm.n, x, y }; this.draw(); }
@@ -1135,6 +1222,17 @@ class WaveView {
     });
     c.addEventListener('pointerup', e => {
       const [x, y] = local(e);
+      if (drag && drag.range != null) {   // a range ends; the right button opens the menu (on it, or on the signal under it)
+        const d = drag; drag = null;
+        if (!d.moved && !d.menu) this.setRange(null);   // shift+click: no range
+        if (d.menu) this.menu(e.clientX, e.clientY, d.row, d.range);
+        return;
+      }
+      if (drag && drag.zoom != null) {   // the middle button released: the range dragged over (4 px at least) fills the view
+        const b = this.zband; this.zband = null; drag = null;
+        if (b && Math.abs(b[1] - b[0]) * this.pxPerT() >= 4) this.zoomTo(Math.min(...b), Math.max(...b)); else this.draw();
+        return;
+      }
       if (drag && drag.moved && drag.arrow) {
         const to = this.bmAt(x, y); this.rubber = null;
         if (to && to.n !== drag.bm.n) { this.arrows.push(arNorm([{ from: drag.bm.n, to: to.n }])[0]); this.saveBookmarks(); this.renderNotes(); }
@@ -1144,10 +1242,11 @@ class WaveView {
         const hit = this.bmAt(x, y), mid = !hit && this.bmGeo && this.bmGeo.mids.find(([, mx, my]) => Math.hypot(mx - x, my - y) <= 10);
         if (hit) { this.cursor = hit.t; this.draw(); this.notesEl.querySelector(`li[data-n="${hit.n}"] input.txt`)?.focus(); }
         else if (mid) this.notesEl.querySelector(`li[data-a="${mid[0]}"] input.lab`)?.focus();
-        else {   // cursor here; the signal row under the pointer becomes the selected one (a row of a plugin may take the click)
+        else {   // cursor here (on an edge of the signal under the pointer within cursorSnap px, alt: not), the signal row
+          // under the pointer becomes the selected one (a row of a plugin may take the click)
           const row = (this.lay || []).find(o => y >= o.y && y < o.y + o.h);
           if (!(row && row.row.click && row.row.click(x, y - row.y, this))) {
-            this.cursor = this.timeAt(x);
+            this.cursor = this.pickTime(x, y, drag.free); this.range = null;
             if (row && row.row.type === 'sig' && row.row.tr) this.sel = row.row;
             this.renderNames(); this.draw();
           }
@@ -1155,31 +1254,40 @@ class WaveView {
       }
       drag = null;
     });
-    c.addEventListener('pointercancel', () => { drag = null; if (this.rubber) { this.rubber = null; this.draw(); } });
+    c.addEventListener('pointercancel', () => { drag = null; if (this.rubber || this.zband) { this.rubber = this.zband = null; this.draw(); } });
+    // The keys on the waves: navigation as in Questa's wave window, the lists and the text as in vim. Two-key sequences
+    // (gg, zR, yy, ]f …) start with g z y [ ]: the second key within a second
     c.addEventListener('keydown', e => {
-      const k = e.key, copy = (k === 'c' || k === 'C') && (e.ctrlKey || e.metaKey) && !e.altKey; let h = true;
-      if ((e.ctrlKey || e.metaKey || e.altKey) && !copy) return;   // ctrl+S, ctrl+M … stay the browser's
-      if (k === '+' || k === '=') this.zoom(0.5, 0.5); else if (k === '-') this.zoom(2, 0.5); else if (k === '0') this.fit();
-      else if (k === 's' && this.S.sortButton) this.setSort(SORTS[(SORTS.indexOf(this.sort) + 1) % SORTS.length]);
-      else if (this.q && (k === 'c' || k === 'C') && (e.ctrlKey || e.metaKey)) this.clearFind();   // on the waves: ctrl+C ends the search
-      else if (k === 'Escape') h = false;   // handled by the viewer (reset)
-      else if (k === ']' || k === '[') this.edge(k === ']' ? 1 : -1);
+      const k = e.key, ctl = e.ctrlKey || e.metaKey; let h = true;
+      if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock'].includes(k)) return;   // a modifier alone: a sequence goes on (z, shift+M)
+      if (e.altKey || (ctl && !['c', 'C', 'f', 'F'].includes(k))) return;   // ctrl+S, ctrl+M … stay the browser's
+      if (ctl) { if (k === 'f' || k === 'F' ? (this.focusFind(), true) : this.copyKey()) e.preventDefault(); return; }   // ctrl+F: find (Questa), ctrl+C: copy (nothing to copy: the browser's)
+      const pre = this.kpre && Date.now() - this.kpre.t < 1000 ? this.kpre.k : ''; this.kpre = null;
+      if (pre && this.seq(pre + k)) { e.preventDefault(); return; }
+      if (!pre && 'gzy[]'.includes(k) && k.length === 1) { this.kpre = { k, t: Date.now() }; e.preventDefault(); return; }
+      const sigStep = d => { const sigs = this.vis.filter(r => r.type === 'sig' && r.tr), i = sigs.indexOf(this.sel); this.select(sigs[Math.min(Math.max(i < 0 ? 0 : i + d, 0), sigs.length - 1)] || null); };
+      if (k === 'i' || k === 'I' || k === '+' || k === '=') { this.markView(); this.zoom(0.5, 0.5); }
+      else if (k === 'o' || k === 'O' || k === '-') { this.markView(); this.zoom(2, 0.5); }
+      else if (k === 'f' || k === 'F') { this.markView(); this.fit(); }
+      else if (k === 'l' || k === 'L') this.zoomLast();
+      else if (k === 'c') { this.markView(); this.showCursor(); }   // the window around the cursor
+      else if (k === 'Tab') this.edge(e.shiftKey ? -1 : 1);   // the next / previous transition of the selected signal (Questa)
       else if (k === 'e') { const ks = Object.keys(EDGE_KINDS); this.edgeKind = ks[(ks.indexOf(this.edgeKind) + 1) % ks.length]; this.edgeSel.value = this.edgeKind; }
-      else if (k === 'm') this.mark();
-      else if (k === '/') { this.qEl.focus(); this.qEl.select(); }
-      else if (k === 'c' && !e.ctrlKey && !e.metaKey) this.showCursor();   // the window around the cursor
-      else if ((k === 'n' || k === 'N') && !e.ctrlKey && !e.metaKey && this.found.size) this.findStep(k === 'n' ? 1 : -1);   // like vim
-      else if ((k === 'c' || k === 'C') && (e.ctrlKey || e.metaKey)) {   // copy: the selected signal, else the highlighted rows
-        const rows = this.sel ? [this.sel] : [...this.picks.keys()]; if (rows.length) this.copyRows(rows); else h = false;
-      }
-      else if (k === 'ArrowDown' || k === 'ArrowUp') {
-        const sigs = this.vis.filter(r => r.type === 'sig' && r.tr), i = sigs.indexOf(this.sel);
-        this.select(sigs[Math.min(Math.max(i < 0 ? 0 : i + (k === 'ArrowDown' ? 1 : -1), 0), sigs.length - 1)] || null);
-      }
+      else if (k === 'Home' || k === 'End') { this.markView(); this.t0 = this.clamp(k === 'Home' ? this.M.t0 : this.M.t1); this.draw(); }
+      else if (k === 'PageDown' || k === 'PageUp') this.pageRows(k === 'PageDown' ? 1 : -1);
+      else if (k === 'ArrowDown' || k === 'j') sigStep(1);
+      else if (k === 'ArrowUp' || k === 'k') sigStep(-1);
+      else if (k === 'G') { const sigs = this.vis.filter(r => r.type === 'sig' && r.tr); this.select(sigs[sigs.length - 1] || null); }
       else if ((k === 'ArrowLeft' || k === 'ArrowRight') && e.shiftKey) this.nudge(k === 'ArrowRight' ? 1 : -1);   // the cursor, a 100th of the view
-      else if (k === 'ArrowLeft') { this.t0 = this.clamp(this.t0 - this.span * 0.2); this.invalidate(); }
-      else if (k === 'ArrowRight') { this.t0 = this.clamp(this.t0 + this.span * 0.2); this.invalidate(); }
-      else if (this.keys[k] && !e.ctrlKey && !e.metaKey && !e.altKey) this.keys[k](e);
+      else if (k === 'ArrowLeft' || k === 'ArrowRight') { this.t0 = this.clamp(this.t0 + this.span * (k === 'ArrowRight' ? 0.2 : -0.2)); this.invalidate(); }
+      else if (k === '/') this.focusFind();
+      else if ((k === 'n' || k === 'N') && this.found.size) this.findStep(k === 'n' ? 1 : -1);   // like vim
+      else if (k === '*' || k === '#') { if (this.sel) { this.qEl.value = this.sel.name; this.find(this.sel.name); this.findStep(k === '*' ? 1 : -1); } }   // the selected name (vim: the word under the cursor)
+      else if (k === 'm') this.mark();
+      else if (k === '?') this.help();
+      else if (k === 's' && this.S.sortButton) this.setSort(SORTS[(SORTS.indexOf(this.sort) + 1) % SORTS.length]);
+      else if (k === 'Escape') h = false;   // handled by the viewer (reset)
+      else if (this.keys[k]) this.keys[k](e);
       else h = false;
       if (h) e.preventDefault();
     });
@@ -1197,7 +1305,12 @@ class WaveView {
   }
   fitPfx() { const i = this.root.querySelector('input.pfx'); if (i) i.style.width = Math.max(7, i.value.length + 2) + 'ch'; }
   // every row in display order (the model's and the plugins'), and the ones not folded away
-  allRows() { return (this.rowsAll = withExtra(orderRows(this.M.rows, this.sort, this.sortIgnore, this.S.groupOrder), this.extraRows, this.M, this)); }
+  allRows() {
+    const rows = withExtra(orderRows(this.M.rows, this.sort, this.sortIgnore, this.S.groupOrder), this.extraRows, this.M, this);
+    if (!this.hiddenRows.size) return (this.rowsAll = rows);
+    const H = this.hiddenRows, ids = new Set(Object.values(this.M.groups).filter(g => H.has(g.path)).map(g => g.id));   // a hidden module: all of it
+    return (this.rowsAll = rows.filter(r => !(r.type !== 'space' && r.type !== 'lane' && r.full && H.has(r.full)) && !r.anc.some(id => ids.has(id))));
+  }
   visible() { return this.allRows().filter(r => !r.anc.some(id => this.collapsed.has(id))); }
   settingsChanged() { this.root.dispatchEvent(new CustomEvent('wavefw:settings')); }   // sort, prefixes, settings
   // dir: none | asc | desc; ignore: prefixes skipped when comparing names ("i_,o_" or an array)
@@ -1251,7 +1364,7 @@ class WaveView {
   reset() { // Esc: search, highlight and the selected signal go; scroll and time stay, the folding from before the search is back
     const keep = this.fiRow || this.sel;
     if (this.qEl) this.qEl.value = '';
-    this.picks = new Map(); this.sel = null; this.extraPicks = new Map();
+    this.picks = new Map(); this.sel = null; this.extraPicks = new Map(); this.range = null; this.closeMenu();
     this.root.dispatchEvent(new CustomEvent('wavefw:reset'));
     return this.find('', false, keep);
   }
@@ -1318,14 +1431,123 @@ class WaveView {
     this.copied = text; return this;
   }
   toast(msg) { const t = this.root.querySelector('.bar .toast'); if (!t) return; t.textContent = msg; clearTimeout(this.toastT); this.toastT = setTimeout(() => { t.textContent = ''; }, 1600); }
-  paint(color) { // the found signals take this colour (trace, outline, name); kept in this browser
-    for (const r of this.found.keys()) if (r.type === 'sig') this.painted.set(r.full, color);
+  paint(color) { // the found and the highlighted signals (a highlighted module: its signals; neither: the selected one) take this colour (trace, outline, name); kept in this browser
+    this.paintRows().forEach(r => this.painted.set(r.full, color));
     this.savePaint(); this.renderNames(); this.draw(); return this;
   }
+  paintRows() {
+    const rows = this.M.rows.filter(r => r.type === 'sig' && (this.found.has(r) || this.picks.has(r) || r.anc.some(id => this.picks.has(this.M.groups[id]))));
+    return rows.length ? rows : this.sel && this.sel.type === 'sig' ? [this.sel] : [];
+  }
   unpaint() { this.painted.clear(); this.savePaint(); this.renderNames(); this.draw(); return this; }
+  // the radix of a signal (a row or its path; one of RADIX, null: the page's) and hidden rows (signals, modules: all of
+  // them), from the right button's menu; kept in this browser and in the saved state
+  setRadix(row, radix) {
+    if (typeof row === 'string') row = this.M.rows.find(r => r.type === 'sig' && r.full === row);
+    if (!row || row.type !== 'sig') return this;
+    if (!('radix0' in row)) row.radix0 = row.radix;
+    if (RADIX.includes(radix)) { row.radix = radix; this.radixes.set(row.full, radix); } else { row.radix = row.radix0; this.radixes.delete(row.full); }
+    this.valsAt = null; this.saveRows(); this.renderNames(); this.draw(); return this;
+  }
+  hide(rows) {   // rows or paths
+    for (const r of [].concat(rows)) { const p = typeof r === 'string' ? r : r && (r.full || r.path); if (p) this.hiddenRows.add(p); }
+    if (this.sel && !this.allRows().includes(this.sel)) this.sel = null;
+    this.saveRows(); this.renderNames(); this.draw(); return this;
+  }
+  unhide(paths) {   // these paths (none: every hidden row) back
+    if (paths) [].concat(paths).forEach(p => this.hiddenRows.delete(p)); else this.hiddenRows.clear();
+    this.saveRows(); this.renderNames(); this.draw(); return this;
+  }
+  loadRows() {
+    let o = {};
+    try { o = JSON.parse(localStorage.getItem(this.rowsKey) || '{}') || {}; } catch (e) { /* no storage */ }
+    this.hiddenRows = new Set(Array.isArray(o.hidden) ? o.hidden : []);
+    for (const [p, rx] of Object.entries(o.radix || {})) { const r = this.M.rows.find(x => x.type === 'sig' && x.full === p); if (r && RADIX.includes(rx)) { r.radix0 = r.radix; r.radix = rx; this.radixes.set(p, rx); } }
+  }
+  saveRows() {
+    try {
+      if (this.radixes.size || this.hiddenRows.size) localStorage.setItem(this.rowsKey, JSON.stringify({ radix: Object.fromEntries(this.radixes), hidden: [...this.hiddenRows] }));
+      else localStorage.removeItem(this.rowsKey);
+    } catch (e) { /* private mode */ }
+  }
   loadPaint() {
     try { for (const [k, c] of Object.entries(JSON.parse(localStorage.getItem(this.paintKey) || '{}'))) this.painted.set(k, c); }
     catch (e) { /* no storage */ }
+  }
+  // the edge style of the waves ("auto" | "wavedrom" | "questa" | "square"; null: the settings' again), from the bar's list;
+  // kept in this browser. Signals with a style of their own keep it
+  setStyle(name) {
+    if (EDGES[name]) this.local.style = name; else delete this.local.style;
+    try { if (this.local.style) localStorage.setItem(this.lookKey, JSON.stringify(this.local)); else localStorage.removeItem(this.lookKey); } catch (e) { /* private mode */ }
+    this.S.style = this.local.style || settings(GLOBAL, this.M.cfg, this.opts).style;
+    if (this.wsEl) this.wsEl.value = this.S.style;
+    this.draw(); this.settingsChanged(); return this;
+  }
+  loadLook() { try { const o = JSON.parse(localStorage.getItem(this.lookKey) || '{}'); return o && EDGES[o.style] ? { style: o.style } : {}; } catch (e) { return {}; } }
+  // what you did in this viewer as one JSON object (Save / Load… in the bar): the window, the cursor, the order and its
+  // prefixes, the folding, the highlight (in its colours' order), the paint, the selected signal, the search, the
+  // bookmarks and arrows, and the plugins' parts (extraState). The keys of "config" are settings: they paste into a
+  // config file as they are. Paths are full paths; times are model units.
+  state() {
+    const M = this.M, folded = this.foldSaved || this.collapsed;   // during a search: the folding from before it
+    const st = { wavefw: 'state', version: 1, title: this.opts.title || M.title || '', from: this.t0, to: this.t0 + this.span, cursor: this.cursor,
+      config: { style: this.S.style, sort: this.sort, sortIgnore: [...this.sortIgnore], fold: [...folded].map(id => M.groups[id] && M.groups[id].path).filter(Boolean),
+        highlight: [...this.picks].sort((a, b) => a[1] - b[1]).map(([r]) => r.full).filter(Boolean), findHighlight: !!this.findHl, findOpen: !!this.findOpen },
+      paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), hidden: [...this.hiddenRows], select: (this.sel && this.sel.full) || null, find: this.q || '', bookmarks: this.bookmarks(), arrows: this.arrowList() };
+    for (const x of this.extraState) { try { const val = x.get(); if (val !== undefined) st[x.key] = val; } catch (e) { console.error('wavefw state:', e); } }
+    return st;
+  }
+  // a state (state()) back: every key it has replaces this viewer's; the plugins' parts first (their rows may come).
+  // -> the paths it names that these waves do not have (left out)
+  async setState(st) {
+    if (!st || typeof st !== 'object' || Array.isArray(st)) throw new Error('not a saved viewer state');
+    const M = this.M, C = st.config || {}, miss = new Set();
+    for (const x of this.extraState) if (st[x.key] !== undefined) { try { await x.set(st[x.key]); } catch (e) { this.toast(`${x.key}: ${e.message}`); } }
+    this.allRows();   // the plugins' groups are there now (their folding)
+    const paths = new Set([...M.rows.map(r => r.full), ...Object.values(M.groups).map(g => g.path)]), seen = p => paths.has(p) || (miss.add(p), false);
+    if (C.style !== undefined) this.setStyle(C.style);
+    if (C.sort !== undefined || C.sortIgnore !== undefined) {
+      const pfx = this.root.querySelector('input.pfx');
+      this.sort = sortDir(C.sort ?? this.sort); if (C.sortIgnore !== undefined) this.sortIgnore = prefixes(C.sortIgnore).sort((a, b) => b.length - a.length);
+      if (pfx) { pfx.value = this.sortIgnore.join(','); this.fitPfx(); }
+    }
+    for (const [k, own] of [['findHighlight', 'findHl'], ['findOpen', 'findOpen']]) if (C[k] !== undefined) {
+      this[own] = !!C[k]; this.root.querySelector(`button[data-act=${k === 'findOpen' ? 'fopen' : 'fhl'}]`)?.setAttribute('aria-pressed', this[own]);
+    }
+    if (C.fold !== undefined) { (Array.isArray(C.fold) ? C.fold : []).forEach(p => seen(p)); this.foldSaved = null; this.collapsed = foldSet(M, C.fold); this.foldTouched = true; }
+    if (C.highlight !== undefined) { prefixes(C.highlight).filter(p => !p.includes('*')).forEach(p => seen(p)); this.picks = hlPick(M, C.highlight); }
+    if (st.paint !== undefined) { this.painted = new Map(Object.entries(st.paint || {}).filter(([p, c]) => typeof c === 'string' && seen(p))); this.savePaint(); }
+    if (st.radix !== undefined) {
+      for (const p of [...this.radixes.keys()]) this.setRadix(p, null);
+      for (const [p, rx] of Object.entries(st.radix || {})) if (seen(p)) this.setRadix(p, rx);
+    }
+    if (st.hidden !== undefined) { this.hiddenRows = new Set((st.hidden || []).filter(p => seen(p))); this.saveRows(); }
+    if (st.bookmarks !== undefined || st.arrows !== undefined) {
+      const bms = (st.bookmarks || []).filter(b => !b.signal || seen(b.signal) || (b.signal = null, true));   // on the time axis when its signal is not here
+      this.bms = bmNorm(bms); this.arrows = arNorm(st.arrows || [], bms); this.saveBookmarks(); this.renderNotes();
+    }
+    if (st.select !== undefined) this.sel = (st.select && seen(st.select) && M.rows.find(r => r.type === 'sig' && r.tr && r.full === st.select)) || null;
+    if (st.from != null && st.to != null && isFinite(st.from) && isFinite(st.to)) { this.span = Math.min(Math.max(st.to - st.from, this.minSpan), M.t1 - M.t0); this.t0 = this.clamp(st.from); }
+    if (st.cursor != null && isFinite(st.cursor)) this.cursor = Math.min(Math.max(st.cursor, M.t0), M.t1);
+    if (st.find !== undefined && this.qEl) this.qEl.value = st.find || '';
+    this.find(st.find !== undefined ? st.find || '' : this.q || '');   // draws; with Open the folding above is the one from before the search
+    this.settingsChanged();
+    return [...miss];
+  }
+  // Save: the state as <title>.view.json (a download); Load…: a file of it (a File, or its text)
+  saveState(name) {
+    const st = this.state(), a = document.createElement('a');
+    a.download = name || (String(st.title || 'waves').replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'waves') + '.view.json';
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(st, null, 1)], { type: 'application/json' }));
+    document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    this.toast(`saved ${a.download}`); return st;
+  }
+  async loadState(file) {
+    try {
+      const text = typeof file === 'string' ? file : await file.text(), miss = await this.setState(JSON.parse(text));
+      this.toast(`${file.name || 'state'} loaded${miss.length ? ` · not in these waves: ${miss.length} (${miss.slice(0, 3).join(', ')}${miss.length > 3 ? ', …' : ''})` : ''}`);
+      return miss;
+    } catch (e) { this.toast(`${file.name || 'state'}: ${e.message}`); return null; }
   }
   // the colour a row is drawn in here: your paint, its own colour, its group's (groupColors); the model is not changed
   strokeOf(r) { return (r.type === 'sig' && this.painted.get(r.full)) || r.stroke || (this.groupStroke && this.groupStroke.get(r)) || undefined; }
@@ -1363,7 +1585,25 @@ class WaveView {
   // an event listener on a part of the viewer: 'names' (the names column), 'waves' (the canvas), 'bar', 'lists'
   listen(part, type, fn, o) { ({ names: this.namesEl, waves: this.canvas, bar: this.root.querySelector('.bar'), lists: this.notesEl })[part].addEventListener(type, fn, o); return this; }
   // a key on the waves (without ctrl / alt / meta) and its line in the hint ("f F next / previous failure")
-  addKey(key, fn, help) { this.keys[key] = fn; if (help) this.hints.push(help); return this; }
+  addKey(key, fn, help) { this.keys[key] = fn; if (help) { this.hints.push(help); this.keyHelp = (this.keyHelp || []).concat([help]); } return this; }
+  // ? : the keys and the mouse in a box over the viewer (Esc, ? or a click outside closes it)
+  help(on = !this.helpEl) {
+    if (this.helpEl) { this.helpEl.remove(); this.helpEl = null; document.removeEventListener('pointerdown', this.offHelp, true); }
+    if (!on) return this;
+    const kb = ks => ks.map(x => `<kbd>${esc(x)}</kbd>`).join(' ');
+    const plug = (this.keyHelp || []).map(h => { const m = h.match(/^((?:\S{1,3}\s+)+?)([a-z(].*)$/); return m ? [m[1].trim().split(/\s+/), m[2]] : [[], h]; });
+    const sec = ([title, rows]) => `<section><h4>${esc(title)}</h4><table>${rows.map(([k, t]) => `<tr><td>${kb(k)}</td><td>${esc(t)}</td></tr>`).join('')}</table></section>`;
+    const el = this.helpEl = document.createElement('div'); el.className = 'wv-help'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'keys and mouse');
+    el.innerHTML = `<div class="hh"><b>Keys and mouse</b><span class="muted">on the waves (a click there gives them the keys); hover a button for what it does</span><button type="button" class="ic" aria-label="close">✕</button></div>` +
+      `<div class="hg">${HELP.concat(plug.length ? [['Plugins', plug]] : []).map(sec).join('')}</div>`;
+    this.root.append(el);
+    el.querySelector('button').addEventListener('click', () => this.help(false));
+    el.addEventListener('keydown', e => { if (e.key === 'Escape' || e.key === '?') { e.preventDefault(); e.stopPropagation(); this.help(false); this.canvas.focus({ preventScroll: true }); } });
+    this.offHelp = e => { if (!el.contains(e.target) && !e.target.closest('[data-act=help]')) this.help(false); };
+    setTimeout(() => document.addEventListener('pointerdown', this.offHelp, true), 0);
+    el.tabIndex = -1; el.focus({ preventScroll: true });
+    return this;
+  }
   renderHint() { const h = this.root.querySelector('.hint'); if (h) h.textContent = [this.hintBase, ...this.hints].join(' · '); }
   savePaint() {
     try { if (this.painted.size) localStorage.setItem(this.paintKey, JSON.stringify(Object.fromEntries(this.painted))); else localStorage.removeItem(this.paintKey); } catch (e) { /* private mode */ }
@@ -1451,7 +1691,173 @@ class WaveView {
     this.t0 = this.clamp(tAt - at * this.span); if (lazy) this.invalidate(); else this.draw();
   }
   fit() { this.t0 = this.M.t0; this.span = this.M.t1 - this.M.t0; this.draw(); }
-  goto(t, span) { this.span = Math.min(Math.max(span, this.minSpan), this.M.t1 - this.M.t0); this.t0 = this.clamp(t - this.span * 0.1); this.cursor = t; this.draw(); }
+  // the window to go back to with l (Questa's zoom last): the one before a zoom, fit, a jump; a run of wheel steps is one
+  markView(burst = false) {
+    const now = Date.now();
+    if (!burst || now - (this.viewT || 0) > 500) this.lastView = { t0: this.t0, span: this.span };
+    this.viewT = burst ? now : 0;
+  }
+  zoomLast() { const b = this.lastView; if (!b) return this; this.lastView = { t0: this.t0, span: this.span }; this.span = b.span; this.t0 = this.clamp(b.t0); this.draw(); return this; }
+  zoomTo(a, b) { this.markView(); this.span = Math.min(Math.max(b - a, this.minSpan), this.M.t1 - this.M.t0); this.t0 = this.clamp(a); this.draw(); return this; }   // the window [a, b]
+  // a two-key sequence (vim): gg first signal, zR / zM open / fold every module, zc fold / zo open the selected signal's
+  // module, yy copy, ]m [m next / previous bookmark, ]e [e next / previous edge; plugins add theirs (addKey(']f', …)).
+  // -> whether it was one
+  seq(s) {
+    const sigs = () => this.vis.filter(r => r.type === 'sig' && r.tr), up = this.sel && this.sel.anc[this.sel.anc.length - 1];
+    if (s === 'gg') this.select(sigs()[0] || null);
+    else if (s === 'zR') this.expandAll();
+    else if (s === 'zM') this.collapseAll();
+    else if (s === 'zc' || s === 'zo' || s === 'za') {
+      if (up == null) return true;
+      const shut = s === 'zc' || (s === 'za' && !this.collapsed.has(up));
+      if (shut) { this.collapsed.add(up); this.sel = null; } else this.collapsed.delete(up);
+      this.foldTouched = true; this.renderNames(); this.draw();
+    }
+    else if (s === 'yy') this.copyKey();
+    else if (s === ']m' || s === '[m') this.stepMark(s[0] === ']' ? 1 : -1);
+    else if (s === ']e' || s === '[e') this.edge(s[0] === ']' ? 1 : -1);
+    else if (this.keys[s]) this.keys[s]();
+    else return false;
+    return true;
+  }
+  stepMark(dir) {   // the cursor to the next / previous bookmark in time (round the ends)
+    const bs = [...this.bms].sort((a, b) => a.t - b.t); if (!bs.length) return this;
+    const eps = 1e-9 * Math.max(1, Math.abs(this.cursor));
+    let b = dir > 0 ? bs.find(x => x.t > this.cursor + eps) : [...bs].reverse().find(x => x.t < this.cursor - eps);
+    if (!b) b = dir > 0 ? bs[0] : bs[bs.length - 1];
+    this.cursor = b.t; if (b.t < this.t0 || b.t > this.t0 + this.span) this.t0 = this.clamp(b.t - this.span / 2);
+    if (b.signal) this.sel = this.M.rows.find(r => r.full === b.signal) || this.sel;
+    this.renderNames(); this.draw(); return this;
+  }
+  pageRows(dir) {   // PgUp / PgDn: the rows a page (the viewer's own scroll bar, else the page)
+    if (this.root.classList.contains('wv-scroll')) this.bodyEl.scrollTop += dir * this.bodyEl.clientHeight * 0.9;
+    else window.scrollBy(0, dir * window.innerHeight * 0.9);
+  }
+  focusFind() { this.qEl.focus(); this.qEl.select(); }
+  rowOfY(y) { const o = (this.lay || []).find(o => y >= o.y && y < o.y + o.h); return o ? o.row : null; }
+  // the time at x on the waves (layout y): on an edge of the signal at y within cursorSnap px (free: not), else a round
+  // time at the zoom — for the cursor and the ends of a range
+  pickTime(x, y, free = false) {
+    const r = this.rowOfY(y), sig = r && r.type === 'sig' && r.tr ? r : null, raw = this.t0 + x / this.pxPerT();
+    const at = sig && this.S.cursorSnap > 0 && !free ? this.snap(sig, raw, this.S.cursorSnap) : raw;
+    return at !== raw ? at : this.timeAt(x);
+  }
+  // the measured range [a, b] (shift+drag, the right button; null: none): drawn over the waves with its Δ, in the readout
+  setRange(a, b) {
+    this.range = a == null || b == null || a === b ? null : [Math.min(a, b), Math.max(a, b)];
+    this.draw(); this.root.dispatchEvent(new CustomEvent('wavefw:range', { detail: { range: this.range } })); return this;
+  }
+  // "Δ 25 ns · 5 ↑ clk": the range's length, and the rising edges of the selected 1-bit signal in it (its cycles)
+  rangeText() {
+    if (!this.range) return '';
+    const [a, b] = this.range, d = b - a, s = this.sel;
+    const n = s && s.tr && s.width === 1 ? s.tr.filter((o, i) => i && o.t > a && o.t <= b && o.k === '1' && s.tr[i - 1].k === '0').length : 0;
+    return 'Δ ' + (this.M.timed ? fmtExact(d) : trimNum(d) + ' cycles') + (n ? ` · ${n} ↑ ${s.name}` : '');
+  }
+  // the rows shown on the screen now (for a picture of what you see)
+  screenRows() {
+    const top = this.oy || 0, h = this.hc || 0, hdr = this.hdrH;
+    const on = (this.lay || []).filter(o => o.y + o.h > top + hdr && o.y < top + h);
+    return (on.length ? on : this.lay || []).map(o => o.row);
+  }
+  // the waves as a picture: the rows on the screen (rows: "all": every row shown) from the range (else the window), with
+  // the names, the axis, the cursor and the bookmarks, as this viewer draws them; the page's colours put in: a standalone SVG
+  toSVG(o = {}) {
+    const [a, b] = this.range || [this.t0, this.t0 + this.span], cs = getComputedStyle(this.root);
+    const svg = WaveSVG.toString(null, { view: this, from: o.from ?? a, to: o.to ?? b, rows: o.rows === 'all' ? this.rowsL : this.screenRows(), width: o.width || Math.max(640, this.root.clientWidth) });
+    return svg.replace(/var\((--[\w-]+)\)/g, (m, n) => cs.getPropertyValue(n).trim().replace(/"/g, "'") || m);
+  }
+  // -> a Promise of a PNG Blob of toSVG at scale × (2: sharp on a high-density screen and in a document)
+  toPNG(o = {}, scale = 2) {
+    const svg = this.toSVG(o), w = +svg.match(/width="(\d+)"/)[1], h = +svg.match(/height="(\d+)"/)[1];
+    return new Promise((ok, no) => {
+      const img = new Image(), url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+      img.onload = () => {
+        const cv = document.createElement('canvas'); cv.width = w * scale; cv.height = h * scale;
+        const g = cv.getContext('2d'); g.scale(scale, scale); g.drawImage(img, 0, 0); URL.revokeObjectURL(url);
+        cv.toBlob(bl => (bl ? ok(bl) : no(new Error('no PNG'))), 'image/png');
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); no(new Error('the picture did not render')); };
+      img.src = url;
+    });
+  }
+  download(blob, name) {
+    const a = document.createElement('a'); a.download = name; a.href = URL.createObjectURL(blob);
+    document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+  picName(ext) { return (String(this.opts.title || this.M.title || 'waves').replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'waves') + '.' + ext; }
+  // the right button's menu at (cx, cy) on the screen: the range (zoom, bookmarks at its ends, copy Δ), the picture (copy,
+  // PNG, SVG), the signal under the pointer (colour, highlight, copy its path); Esc, a click elsewhere or a choice closes it
+  menu(cx, cy, row, at = this.cursor) {
+    this.closeMenu();
+    const r = this.range, sig = row && row.type === 'sig' && row.tr ? row : null, grp = row && row.type === 'group' && this.M.groups[row.id] === row ? row : null, it = row && (sig || grp);
+    const up = sig && sig.anc.length ? sig.anc[sig.anc.length - 1] : null, nh = this.hiddenRows.size, ng = Object.keys(this.M.groups).length;
+    const acc = getComputedStyle(this.root).getPropertyValue('--wave-paint').trim(), col = sig && this.painted.get(sig.full) || (/^#[0-9a-f]{6}$/i.test(acc) ? acc : '#d6336c');
+    const b = (m, label) => { const k = (TIPS['m:' + m] || [])[1]; return `<button type="button" role="menuitem" data-m="${m}"><span>${label}</span>${k ? `<span class="kk">${esc(k[0])}</span>` : ''}</button>`; };
+    const el = document.createElement('div'); el.className = 'wv-menu'; el.setAttribute('role', 'menu');
+    el.innerHTML = (r ? `<div class="mh">${esc(this.rangeText())}</div>` + b('zoom', 'Zoom to the range') + b('marks', 'Bookmarks at its ends', 'Two bookmarks and an arrow with the Δ between them') + b('copyd', 'Copy Δ') + '<hr>' : '') +
+      b('copyimg', 'Copy image', `${r ? 'The range' : 'The window'}, the rows on the screen, as PNG to the clipboard`) + b('png', 'Save image as PNG') + b('svg', 'Save image as SVG') +
+      (it ? `<hr><div class="mh">${esc(it.full || it.name)}</div>` +
+        (sig ? `<label class="mi">Colour <input type="color" value="${esc(col)}" aria-label="colour of ${esc(sig.name)}"></label>` + (this.painted.has(sig.full) ? b('unpaint', 'Its own colour') : '') : '') +
+        (sig && sig.width > 1 && sig.tr.some(o => o.raw != null) ? `<label class="mi">Radix <select aria-label="radix of ${esc(sig.name)}"><option value="">the page's (${esc(sig.radix0 !== undefined ? sig.radix0 || this.S.radix : sig.radix || this.S.radix)})</option>${RADIX.map(x => `<option${this.radixes.get(sig.full) === x ? ' selected' : ''}>${x}</option>`).join('')}</select></label>` : '') +
+        b('hl', this.picks.has(it) ? 'Remove the highlight' : 'Highlight') + b('hide', grp ? 'Hide this module' : 'Hide', 'Leave it out of the view (Hidden: N ✕ in the bar shows it again)') +
+        (grp ? b('fold', this.collapsed.has(grp.id) ? 'Open this module' : 'Fold this module') : up != null ? b('foldup', 'Fold its module') : '') +
+        (sig ? b('mark', 'Bookmark here', 'A bookmark on this signal at the time clicked') : '') + b('copyname', 'Copy the path') : '') +
+      (ng || nh ? '<hr>' + (ng ? b('zM', 'Fold every module') + b('zR', 'Open every module') : '') + (nh ? b('unhide', `Show the hidden (${nh})`) : '') : '') +
+      (r ? '<hr>' + b('clear', 'Clear the range') : '');
+    this.root.append(el); this.menuEl = el;
+    const box = el.getBoundingClientRect();
+    el.style.left = Math.max(4, Math.min(cx, innerWidth - box.width - 4)) + 'px'; el.style.top = Math.max(4, Math.min(cy, innerHeight - box.height - 4)) + 'px';
+    const done = () => { this.closeMenu(); this.canvas.focus({ preventScroll: true }); };
+    el.addEventListener('click', e => {
+      const m = e.target.closest('button[data-m]'); if (!m) return;
+      const act = m.dataset.m;
+      if (act === 'zoom') this.zoomTo(...r);
+      else if (act === 'marks') {
+        const n = Math.max(0, ...this.bms.map(x => x.n)) + 1, s = sig ? sig.full : null;
+        this.bms.push(...bmNorm([{ n, t: r[0], signal: s }, { n: n + 1, t: r[1], signal: s }]));
+        this.arrows.push(...arNorm([{ from: n, to: n + 1, shape: '-', head: '<>', label: this.rangeText().replace(/^Δ /, '') }])); this.changed(true);
+      }
+      else if (act === 'copyd') this.copyText(this.rangeText().replace(/^Δ /, '').split(' · ')[0]);
+      else if (act === 'copyimg') {
+        const png = this.toPNG();
+        try { navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]).then(() => this.toast('image copied'), err => this.toast('not copied: ' + err.message)); }
+        catch (err) { this.toast('this browser cannot copy an image: Save image as PNG'); }
+      }
+      else if (act === 'png') this.toPNG().then(bl => { this.download(bl, this.picName('png')); this.toast('saved ' + this.picName('png')); }, err => this.toast(err.message));
+      else if (act === 'svg') { this.download(new Blob([this.toSVG()], { type: 'image/svg+xml' }), this.picName('svg')); this.toast('saved ' + this.picName('svg')); }
+      else if (act === 'unpaint') { this.painted.delete(sig.full); this.savePaint(); this.renderNames(); this.draw(); }
+      else if (act === 'hl') this.toggleHighlight(it);
+      else if (act === 'hide') this.hide(it);
+      else if (act === 'unhide') this.unhide();
+      else if (act === 'fold') { if (this.collapsed.has(grp.id)) this.collapsed.delete(grp.id); else this.collapsed.add(grp.id); this.foldTouched = true; this.renderNames(); this.draw(); }
+      else if (act === 'foldup') { this.collapsed.add(up); if (this.sel && this.sel.anc.includes(up)) this.sel = null; this.foldTouched = true; this.renderNames(); this.draw(); }
+      else if (act === 'zM' || act === 'zR') this.seq(act);
+      else if (act === 'mark') { const t = this.snap(sig, at), n = Math.max(0, ...this.bms.map(x => x.n)) + 1; this.bms.push({ n, t, signal: sig.full, text: '', color: null }); this.changed(true); this.notesEl.querySelector(`li[data-n="${n}"] input.txt`)?.focus(); return this.closeMenu(); }
+      else if (act === 'copyname') this.copyRows([it]);
+      else if (act === 'clear') this.setRange(null);
+      done();
+    });
+    el.addEventListener('change', e => { if (e.target.tagName === 'SELECT' && sig) { this.setRadix(sig, e.target.value || null); done(); } });
+    el.addEventListener('input', e => { if (e.target.type === 'color' && sig) { this.painted.set(sig.full, e.target.value); this.savePaint(); this.renderNames(); this.draw(); } });
+    el.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); done(); } });
+    this.offMenu = e => { if (!el.contains(e.target)) this.closeMenu(); };
+    setTimeout(() => { document.addEventListener('pointerdown', this.offMenu, true); window.addEventListener('blur', this.offMenu); }, 0);
+    (el.querySelector('button') || el).focus({ preventScroll: true });
+    return el;
+  }
+  closeMenu() {
+    if (!this.menuEl) return;
+    this.menuEl.remove(); this.menuEl = null;
+    document.removeEventListener('pointerdown', this.offMenu, true); window.removeEventListener('blur', this.offMenu);
+  }
+  copyText(t) { try { navigator.clipboard.writeText(t).then(() => this.toast('copied: ' + t), () => this.toast(t)); } catch (e) { this.toast(t); } }
+  copyKey() {   // ctrl+C / yy: while searching it ends the search; else the selected signal (or the highlighted ones) to the clipboard
+    if (this.q) { this.clearFind(); return true; }
+    const rows = this.sel ? [this.sel] : [...this.picks.keys()]; if (rows.length) this.copyRows(rows);
+    return rows.length > 0;
+  }
+  goto(t, span) { this.markView(); this.span = Math.min(Math.max(span, this.minSpan), this.M.t1 - this.M.t0); this.t0 = this.clamp(t - this.span * 0.1); this.cursor = t; this.draw(); }
   fmt(t, ref, unitRef) { return this.M.timed ? fmtTime(t, ref, unitRef) : 'cycle ' + (t + (this.M.tick || 0)).toFixed(Math.max(0, Math.min(2, Math.ceil(-Math.log10(ref))))); }
   // the cursor as typed or clicked: exact (fmtExact), in the unit of the view span
   fmtCursor(t) { return this.M.timed ? fmtExact(t, this.span) : 'cycle ' + trimNum(t + (this.M.tick || 0)); }
@@ -1520,6 +1926,12 @@ class WaveView {
     paintMarkers(P, this.markers, X, this.t0, tB, oy + hdr, oy + Hc);
     g.restore();
     if (this.cursor >= this.t0 && this.cursor <= tB) P.path([['M', X(this.cursor), 0], ['L', X(this.cursor), Hc]], { stroke: 'acc', w: 1.2 });
+    if (this.range) {   // the measured range: shaded, its ends dashed, its Δ in the axis band
+      const [a, b] = this.range.map(X), mid = (a + b) / 2, t = this.rangeText(), tw = P.measure(t, { size: 11 }) + 10;
+      P.rect(a, 0, b - a, Hc, 'acc', 0.1); P.path([['M', a, 0], ['L', a, Hc], ['M', b, 0], ['L', b, Hc]], { stroke: 'acc', w: 1, dash: [4, 3] });
+      if (top) { const lx = Math.min(Math.max(mid, tw / 2 + 2), W - tw / 2 - 2); P.rect(lx - tw / 2, 3, tw, hdr - 6, 'panel'); P.path([['M', lx - tw / 2, 3], ['L', lx + tw / 2, 3], ['L', lx + tw / 2, hdr - 3], ['L', lx - tw / 2, hdr - 3], ['Z']], { stroke: 'acc', w: 1 }); P.text(lx, hdr / 2, t, { anchor: 'middle', size: 11, fill: 'acc' }); }
+    }
+    if (this.zband) { const [a, b] = this.zband.map(X).sort((p, q) => p - q); P.rect(a, 0, b - a, Hc, 'acc', 0.15); P.path([['M', a, 0], ['L', a, Hc], ['M', b, 0], ['L', b, Hc]], { stroke: 'acc', w: 1 }); }   // middle-button drag
     if (late.length) { g.save(); g.beginPath(); g.rect(0, hdr, W, Hc - hdr); g.clip(); g.translate(0, -oy); late.forEach(f => f()); g.restore(); }   // plugin overlays over the cursor
     g.save(); g.translate(0, -oy);
     const geo = paintBookmarks(P, this.bms, this.arrows, X, this.t0, tB, rowY, oy + hdr, oy + Hc, oy + this.hdrH / 2, this.rubber, laneY(lay, this.S.laneHeight));
@@ -1545,7 +1957,7 @@ class WaveView {
     if (this.evT0 !== this.t0 || this.evSpan !== this.span) { this.evT0 = this.t0; this.evSpan = this.span; fire('view', { t0: this.t0, span: this.span }); }
     if (this.evSel !== this.sel) { this.evSel = this.sel; fire('select', { row: this.sel }); }
     this.syncCursorFields();
-    this.curEl.textContent = 'cursor ' + this.fmtCursor(this.cursor) + ' · view ' + (M.timed ? fmtTime(this.span, this.span / 10, this.span) : this.span.toFixed(1) + ' cycles');
+    this.curEl.textContent = 'cursor ' + this.fmtCursor(this.cursor) + ' · view ' + (M.timed ? fmtTime(this.span, this.span / 10, this.span) : this.span.toFixed(1) + ' cycles') + (this.range ? ' · ' + this.rangeText() : '');
     if (this.valsAt !== this.cursor || this.valsGen !== this.namesGen || this.valsRadix !== this.S.radix) {   // value column: only when it changes
       this.valsAt = this.cursor; this.valsGen = this.namesGen; this.valsRadix = this.S.radix;
       let vi = 0;
@@ -1564,7 +1976,7 @@ class WaveView {
     this.bodyEl.removeEventListener('scroll', this.onScroll); this.root.removeEventListener('pointerdown', this.onActive, true);
     cancelAnimationFrame(this.raf); cancelAnimationFrame(this.inv); clearTimeout(this.toastT);
     if (ACTIVE.view === this) ACTIVE.view = null;
-    VIEWS.delete(this);
+    this.closeMenu(); VIEWS.delete(this);
     this.root.dispatchEvent(new CustomEvent('wavefw:destroy'));
     if (this.root.waveView === this) delete this.root.waveView;
   }
@@ -1572,32 +1984,41 @@ class WaveView {
 /* ======================== src/svg.js ======================== */
 /* ---------------- static SVG ---------------- */
 const WaveSVG = {
-  // opts: from/to (model units or "12us"), width (px, fits the wave area), cyclePx (default 40·hscale), axis (force), bg, markers
+  // opts: from/to (model units or "12us"), width (px, fits the wave area), cyclePx (default 40·hscale), axis (force), bg, markers;
+  // view: a viewer, drawn as it shows its waves (its rows — opts.rows, a part of them —, folding, colours, highlight,
+  // bookmarks, cursor; the model is the viewer's): its picture (view.toSVG)
   toString(model, opts = {}) {
-    const M = parse(model), S = settings(SVG_DEFAULTS, GLOBAL, M.cfg, opts), P = new SvgPainter(S);
-    const gp = groupPaint(M, S.groupColors), strokeOf = r => r.stroke ?? gp.get(r);
+    const V = opts.view, M = V ? V.M : parse(model), S = V ? V.S : settings(SVG_DEFAULTS, GLOBAL, M.cfg, opts), P = new SvgPainter(S);
+    const gp = groupPaint(M, S.groupColors), strokeOf = V ? r => V.strokeOf(r) : r => r.stroke ?? gp.get(r);
     const from = parseT(opts.from) ?? M.t0, to = parseT(opts.to) ?? M.t1, fs = S.fontSize;
-    const sorted = orderRows(M.rows, S.sort, S.sortIgnore, S.groupOrder), rh = { sig: S.rowHeight, group: S.groupHeight, space: S.spaceHeight };
-    const all = withExtra(sorted, (opts.extraRows || []).concat(...SVG_PLUGINS.map(f => f(M, S, opts) || [])), M, opts.owner || M);
-    const C = compose(M, S, all, M.bookmarks, M.arrows, hlPick(M, S.highlight)), rows = C.rows, hl = C.hl;
+    const rh = { sig: S.rowHeight, group: S.groupHeight, space: S.spaceHeight }, bms = V ? V.bms : M.bookmarks, ars = V ? V.arrows : M.arrows;
+    let C;
+    if (V) C = { rows: opts.rows || V.rowsL, band: V.band, hl: V.hl };
+    else {
+      const sorted = orderRows(M.rows, S.sort, S.sortIgnore, S.groupOrder);
+      const all = withExtra(sorted, (opts.extraRows || []).concat(...SVG_PLUGINS.map(f => f(M, S, opts) || [])), M, opts.owner || M);
+      C = compose(M, S, all, M.bookmarks, M.arrows, hlPick(M, S.highlight));
+    }
+    const rows = C.rows, hl = C.hl;
     const nameW = Math.ceil(Math.max(40, ...rows.map(r => P.measure(r.name || '', { size: fs, weight: r.type === 'group' ? 600 : 400 }) + 22 + r.depth * 12)));
     let k = ((opts.cyclePx || 40) * M.hscale) / M.cycle;
     if (opts.width) k = (opts.width - nameW - 8) / (to - from);
     const waveW = (to - from) * k, Wt = Math.ceil(nameW + waveW + 8);
     const showAxis = opts.axis ?? (M.timed || M.tick != null), showTock = M.tock != null;
     let y = 4;
-    const titleY = y; if (M.title) y += 22;
+    const titleY = y; if (V ? V.opts.title || M.title : M.title) y += 22;
     const axisY = y; if (showAxis) y += 20;
     const lay = layoutRows(rows, rh, S.laneHeight, y); y = lay.H;
     const bodyEnd = y, tockY = y; if (showTock) y += 20;
     const footY = y; if (M.foot) y += 20;
-    const notes = M.bookmarks.filter(b => b.text), notesY = y + 6; if (notes.length) y += 8 + notes.length * 20;   // bookmark legend
-    const legend = rows.flatMap(r => r.legend || []), legendY = y + 6; if (legend.length) y += 8 + legend.length * 18;   // rows of plugins
+    const notes = bms.filter(b => b.text && b.t >= from && b.t <= to), notesY = y + 6; if (notes.length) y += 8 + notes.length * 20;   // bookmark legend
+    const legend = rows.flatMap(r => (V && r.type === 'group' && V.collapsed.has(r.id) ? [] : r.legend || [])), legendY = y + 6; if (legend.length) y += 8 + legend.length * 18;   // rows of plugins
     const Ht = Math.ceil(y + 4), xL = nameW, xR = nameW + waveW, X = t => xL + (t - from) * k;
-    const theme = opts.theme ?? M.theme, colors = Object.assign({}, M.colors, opts.colors);
-    const bg = opts.bg || (theme && theme !== 'auto') || colors.bg ? opts.bg || 'panel' : null;
+    const theme = V ? null : opts.theme ?? M.theme, colors = V ? {} : Object.assign({}, M.colors, opts.colors);
+    const bg = V || opts.bg || (theme && theme !== 'auto') || colors.bg ? opts.bg || 'panel' : null;
     if (bg) P.rect(0, 0, Wt, Ht, bg);
-    if (M.title) P.text(nameW + waveW / 2, titleY + 9, M.title, { anchor: 'middle', size: 13, weight: 600, body: true });
+    const title = V ? V.opts.title || M.title : M.title;
+    if (title) P.text(nameW + waveW / 2, titleY + 9, title, { anchor: 'middle', size: 13, weight: 600, body: true });
     if (M.foot) P.text(nameW + waveW / 2, footY + 9, M.foot, { anchor: 'middle', size: 12, fill: 'muted', body: true });
     // names and group brackets (a group spans down to its last member in display order)
     const last = {};
@@ -1605,7 +2026,7 @@ const WaveSVG = {
     lay.forEach(({ row, y: ry, h }, i) => {
       const c = hl ? hl.cover.get(row) : undefined;
       P.fade = hl && !hl.on.has(row) ? hl.dim : 1;
-      if (c !== undefined) { P.rect(0, ry, xL, h, hlTok(c), 0.1); P.rect(0, ry, 3, h, hlTok(c)); }
+      if (typeof c === 'string') { P.rect(0, ry, xL, h, c, 0.1); P.rect(0, ry, 3, h, c); }   // a plugin's highlight
       if (!row.name) return;
       const g = row.type === 'group';
       P.text(6 + row.depth * 12 + (g ? 0 : 8), ry + h / 2, row.name, { size: fs, weight: g ? 700 : 400, fill: strokeOf(row) || 'fg' });
@@ -1621,7 +2042,8 @@ const WaveSVG = {
       if (showTock) paintAxis(P, { from, span: to - from, xL, xR, y: tockY, h: 20, yEnd: tockY, X, timed: M.timed, tick: M.tock, every: M.every, step, mid: true });
       const rowY = paintBody(P, M, lay, X, from, to, xL, xR, hl, null, null, C.band, null, strokeOf), top = showAxis ? axisY + 20 : lay.length ? lay[0].y : y;
       paintMarkers(P, (opts.markers || []).concat(M.markers), X, from, to, top, bodyEnd);
-      paintBookmarks(P, M.bookmarks, M.arrows, X, from, to, rowY, top, bodyEnd, showAxis ? axisY + 10 : top + 10, null, laneY(lay, S.laneHeight));
+      paintBookmarks(P, bms, ars, X, from, to, rowY, top, bodyEnd, showAxis ? axisY + 10 : top + 10, null, laneY(lay, S.laneHeight));
+      if (V && V.cursor >= from && V.cursor <= to) P.path([['M', X(V.cursor), top], ['L', X(V.cursor), bodyEnd]], { stroke: 'acc', w: 1.2 });
     });
     notes.forEach((b, i) => {
       const cy = notesY + i * 20 + 10;
@@ -1633,7 +2055,7 @@ const WaveSVG = {
       if (l.n != null) { P.path(circle(14, cy, 7), { fill: l.color || 'acc' }); P.text(14, cy + 0.5, String(l.n), { anchor: 'middle', size: 9, weight: 700, fill: 'panel' }); }
       P.text(l.n != null ? 28 : 6, cy, l.text, { size: l.bold ? 12 : 11.5, weight: l.bold ? 600 : 400, body: !l.mono, fill: l.fill || 'fg' });
     });
-    const css = [lookCss(colors), ...styleVars(Object.assign({}, M.cfg, opts)).map(([n, v]) => `${n}:${v}`)].filter(Boolean).join(';');
+    const css = [lookCss(colors), ...styleVars(V ? {} : Object.assign({}, M.cfg, opts)).map(([n, v]) => `${n}:${v}`)].filter(Boolean).join(';');
     const look = (THEMES.includes(theme) ? ` data-theme="${theme}"` : '') + (css ? ` style="${esc(css)}"` : '');
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${Wt} ${Ht}" width="${Wt}" height="${Ht}" role="img" aria-label="${esc(M.title || 'waveform')}"${look}>${P.out.join('')}</svg>`;
   },
@@ -1746,6 +2168,42 @@ if (G.WAVEFW_CONFIG) configure(G.WAVEFW_CONFIG);   // settings file loaded befor
 const manual = document.currentScript && document.currentScript.dataset.manual != null;
 if (!manual) { if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => upgrade()); else upgrade(); }
 
+/* ---------------- tooltips: what a control of a viewer does and its keys ---------------- */
+// [text, keys] of a control: TIPS by its data-act / -sv / -x / -bm / -m / -jump value or a class, else its own title
+const TIP_DATA = ['act', 'sv', 'x', 'bm', 'm', 'jump'];
+function tipOf(el) {
+  const d = el.dataset;
+  for (const k of TIP_DATA) if (d[k] != null) { const t = TIPS[`${k}:${d[k]}`] || (k === 'jump' && TIPS.jump); if (t) return t; }
+  for (const c of el.classList) if (TIPS['.' + c]) return TIPS['.' + c];
+  const own = el.title || d.ttl;
+  return own ? [own] : null;
+}
+const TIP_SEL = '.wv button, .wv input, .wv select, .wv .mk, .wv label.mi, .wv [data-tip]';
+let tipEl = null, tipAt = null, tipT = 0;
+function tipHide() { clearTimeout(tipT); tipAt = null; if (tipEl) { tipEl.remove(); tipEl = null; } }
+function tipShow(el) {
+  const t = el.isConnected && tipOf(el), root = el.closest('.wv'); if (!t || !root) return;
+  if (el.title) { el.dataset.ttl = el.title; el.removeAttribute('title'); }   // ours instead of the browser's
+  tipEl = document.createElement('div'); tipEl.className = 'wv-tip'; tipEl.setAttribute('role', 'tooltip');
+  tipEl.innerHTML = `<span>${esc(t[0])}</span>${t[1] && t[1].length ? `<span class="tk">${t[1].map(k => `<kbd>${esc(k)}</kbd>`).join('')}</span>` : ''}`;
+  root.append(tipEl);
+  const r = el.getBoundingClientRect(), b = tipEl.getBoundingClientRect(), below = r.bottom + 6 + b.height < innerHeight;
+  tipEl.style.left = Math.max(4, Math.min(r.left + r.width / 2 - b.width / 2, innerWidth - b.width - 4)) + 'px';
+  tipEl.style.top = (below ? r.bottom + 6 : r.top - b.height - 6) + 'px';
+}
+document.addEventListener('pointerover', e => {
+  const el = e.target.closest && e.target.closest(TIP_SEL);
+  if (el === tipAt) return;
+  tipHide(); if (!el) return;
+  if (el.title) { el.dataset.ttl = el.title; el.removeAttribute('title'); }   // no browser tooltip while ours waits
+  tipAt = el; tipT = setTimeout(() => tipShow(el), 350);
+});
+document.addEventListener('pointerout', e => { if (tipAt && !(e.relatedTarget && tipAt.contains(e.relatedTarget))) tipHide(); });
+document.addEventListener('focusin', e => { const el = e.target.closest && e.target.closest(TIP_SEL); tipHide(); if (el && el.matches(':focus-visible')) { tipAt = el; tipT = setTimeout(() => tipShow(el), 350); } });
+for (const ev of ['pointerdown', 'keydown', 'wheel']) document.addEventListener(ev, e => { if (ev !== 'keydown' || e.key !== 'Tab') tipHide(); }, true);
+G.addEventListener('scroll', tipHide, true);
+const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
+
 // plugins: fn(viewer) runs for every viewer already built and every later one
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavefw plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
@@ -1753,6 +2211,6 @@ const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
 G.WaveFW = { version: '1.8.0', rowId: () => ++XID, parse, fromTV, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme, setColors, configure, plugin, svgPlugin, views: () => [...VIEWS], defaults: DEFAULTS,
   paint: { circle, arrowHead, edgeGeom, lastLE },
   sortRows: (M, dir = 'asc', ignore = [], groupOrder = 'file') => orderRows(parse(M).rows, sortDir(dir), prefixes(ignore), groupOrder), fuzzy, themes: THEMES, colorNames: CVAR, styles: Object.keys(EDGES), radixes: RADIX, enums: ENUMS, decode, fmtTime, fmtExact, parseT,
-  registerTokens, util: { esc, glob, lastLE, lastBefore, circle } };
+  registerTokens, tips, util: { esc, glob, lastLE, lastBefore, circle } };
 G.WaveView = WaveView; G.WaveSVG = WaveSVG;
 })(window);

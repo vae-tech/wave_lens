@@ -228,6 +228,21 @@ function rowSampler(rows) {
 }
 Object.assign(SVA, { load, plan, assemble, tvSampler, rowSampler, fromLabel });
 
+// the tooltips of the panel's and the bar's controls (WaveFW.tips): what each does, its keys
+if (G.WaveFW && G.WaveFW.tips) G.WaveFW.tips.add({
+  'sv:load': ['Load .sv / .sva files (kept in this browser)'], 'sv:tw': ['Fold / open the assertions'],
+  'sv:watch': ['Read the files again when they change on the disk'], 'sv:json': ['The bindings (and files) as JSON for a config'],
+  'sv:clear': ['Forget this browser\'s files and bindings'], 'sv:table': ['One row per binding: counts, failures, latency'],
+  'sv:fails': ['Every failed attempt by time'], 'sv:xmd': ['Download the report as Markdown'], 'sv:xjson': ['Download the results as JSON'],
+  'sv:bind': ['Bind to an instance', ['drag the line onto a module']], 'sv:edit': ['Edit it here', ['ctrl+Enter', 'Esc']],
+  'sv:reload': ['Read its file from the disk again'], 'sv:del': ['Remove it from the list'], 'sv:eval': ['Evaluate again'],
+  'sv:fail': ['Go to the first failure', [']f']], 'sv:unbind': ['Remove this binding'], 'sv:apply': ['Parse and evaluate', ['ctrl+Enter']],
+  'sv:noedit': ['Cancel', ['Esc']], 'sv:revert': ['Back to the page\'s file'], 'sv:nopick': ['Close'], 'sv:to': ['Bind to this instance'],
+  'sv:go': ['Go to this attempt'], 'sv:only': ['Only these attempts (again: all)'], 'sv:wt': ['The cursor to this cycle'], 'sv:nowhy': ['Close Why', ['Esc']],
+  'x:prev': ['The previous time it becomes true', ['shift+Enter']], 'x:next': ['The next time it becomes true', ['Enter']],
+  'x:add': ['Draw it as a row ƒ'], 'x:del': ['Remove the row ƒ'], '.svq': ['An expression of the signals: PSEL && !PREADY', ['Enter', 'shift+Enter']],
+});
+
 /* ---------------- the assertion files of the page ---------------- */
 // files: the page's (window.SVA.files, WaveJSON "sva".files) and this browser's (Load file…), parsed as one compilation
 // unit in that order; byLabel: label -> {a: assertion, file}
@@ -895,12 +910,13 @@ class Panel {
     v.listen('names', 'drop', e => { const t = this.dropTarget(e); if (!t) return; e.preventDefault(); this.dragEnd(); this.drop(t); });
     v.root.addEventListener('wavefw:settings', () => this.sync());   // sortIgnore prefixes: the names resolve again
     if (v.extraJSON) v.extraJSON.push(() => this.bindings.length ? `"bind": [\n${this.bindJSON().map(x => '  ' + JSON.stringify(x)).join(',\n')}\n]` : null);
+    if (v.extraState) v.extraState.push({ key: 'sva', get: () => this.snapshot(), set: s => this.restore(s) });
     // on the waves: the rows of the bindings, f / F through the failures, Esc unselects
     this.selA = null; this.dirty = true; this.at = new Map(); this.sumN = 0;
     this.el.addEventListener('change', e => { if (e.target.matches('select[data-sv=ffilter]')) { this.failFilter = e.target.value; this.fillSummary(this.el.querySelector('.svr'), 'fails'); } });
     if (v.extraRows) v.extraRows.push(g => this.rowsFor(g));
-    v.addKey('f', () => this.step(1), 'f F next / previous assertion failure').addKey('F', () => this.step(-1));
-    v.addKey('a', () => this.stepAssert(1), 'a A next / previous assertion').addKey('A', () => this.stepAssert(-1));
+    v.addKey(']f', () => this.step(1), ']f [f next / previous assertion failure').addKey('[f', () => this.step(-1));
+    v.addKey(']a', () => this.stepAssert(1), ']a [a next / previous assertion').addKey('[a', () => this.stepAssert(-1));
     v.root.addEventListener('wavefw:reset', () => this.unselect(false));
     v.root.addEventListener('wavefw:destroy', () => { LIB.panels.delete(this); this.el.remove(); v.sva = null; }, { once: true });
     // this browser's bindings, with the page's that are new since (the ones the user unbound stay away)
@@ -927,6 +943,25 @@ class Panel {
     this.saved = rec;
   }
   bindJSON() { return this.bindings.map(b => ({ assert: b.assert, scope: b.scope })); }
+  // the viewer's saved state (Save / Load…): this browser's files (loaded, edited, read from the disk: their text), the
+  // bindings and the assertions taken off the list. Loading replaces the bindings; the page's come back with their results
+  snapshot() { return { files: LIB.files.filter(f => f.origin === 'local').map(({ name, source }) => ({ name, source })), bind: this.bindJSON(), hidden: [...this.hidden] }; }
+  async restore(s) {
+    const files = (s.files || []).filter(f => f && f.name && typeof f.source === 'string' && !active().some(x => x.name === f.name && x.source === f.source));
+    if (files.length) await SVA.loadFiles(files.map(f => ({ name: f.name, text: f.source }))); else await LIB.parsing;
+    if (s.bind === undefined && s.hidden === undefined) return;
+    const list = (s.bind || []).filter(b => b && b.assert).map(b => ({ assert: b.assert, scope: b.scope || '' })), want = new Set(list.map(bkey));
+    const old = this.bindings, page = (this.v.M.src.sva && this.v.M.src.sva.bind) || [];
+    for (const b of old) if (!want.has(bkey(b))) { this.dropSel(b); if (b.page) this.removed.add(bkey(b)); }
+    this.bindings = list.map(x => {
+      const b = old.find(o => bkey(o) === bkey(x)); if (b) return b;
+      const pb = page.find(p => bkey(p) === bkey(x)); this.removed.delete(bkey(x));
+      return { assert: x.assert, scope: x.scope, results: pb && pb.results ? pb.results : null, page: !!pb, fromPage: !!(pb && pb.results) };
+    });
+    if (s.hidden !== undefined) this.hidden = new Set(s.hidden || []);
+    old.filter(b => !this.bindings.includes(b)).forEach(b => this.changed(b, false));
+    this.save(); this.sync(); await this.queue;
+  }
   toast(m) { this.v.toast(m); }
   // after the files or the settings changed: resolve the bindings again, take kept results, evaluate the others
   sync() {
@@ -1181,19 +1216,23 @@ class Panel {
     this.open = true; this.render(); this.toast(`${files.map(f => f.name).join(', ')}: ${n} assertion${n === 1 ? '' : 's'}`);
   }
   label(S) { return S || '(top)'; }
+  // a binding's two cells: where (the instance path, on the assertion's first line) and how it went (status, counts, the
+  // selected attempt; on the second line)
   state(b) {
     const sc = esc(this.label(b.scope)), path = sc.replace(/\./g, '.<wbr>'), o = outcome(b);
     const how = [...((b.res && b.res.notes) || []), ...((b.res && b.res.errors) || [])];
     if (b.workerError) how.push(`the worker failed (${b.workerError}): evaluated in the page`);
     const info = how.length ? ` <button type="button" class="how" data-sv="how" aria-label="how ${esc(b.assert)} was bound" title="${esc(how.join('\n'))}">ⓘ</button>` : '';
-    if (b.running) return `<span class="st run" title="bound to ${sc}"><b class="sp">${path}</b> · ${esc(b.msg || 'evaluating…')}</span>`;
-    if (b.error) return `<span class="st no" title="bound to ${sc}"><b class="sp">${path}</b> · ${esc(b.error)}</span>`;
-    if (b.state === 'cannot') return `<span class="st no">cannot bind to <b>${sc}</b>: ${esc([...(b.res.missing.length ? ['missing ' + b.res.missing.join(', ')] : []), ...b.res.errors].join('; '))}</span>`;
+    const two = (cls, tip, msg, cn) => `<span class="st bp ${cls}" title="${esc(tip)}"><b class="sp">${path}</b>${info}</span>` +
+      `<span class="bs">${msg ? `<span class="st ${cls}">${msg}</span>` : ''}${cn && o ? `<span class="cn">${counts(o, b.only || null)}</span>` : ''}${cn ? this.selHTML(b) : ''}</span>`;
+    if (b.running) return two('run', 'bound to ' + this.label(b.scope), esc(b.msg || 'evaluating…'));
+    if (b.error) return two('no', 'bound to ' + this.label(b.scope), esc(b.error));
+    if (b.state === 'cannot') return two('no', 'cannot bind to ' + this.label(b.scope), `cannot bind: ${esc([...(b.res.missing.length ? ['missing ' + b.res.missing.join(', ')] : []), ...b.res.errors].join('; '))}`);
     if (b.state === 'dump') {
       const not = [...b.res.missing, ...b.res.errors].join(', ');
-      return `<span class="st dump" title="${esc('bound to ' + this.label(b.scope) + '; results of sva eval at build time; this view does not show ' + not)}"><b class="sp">${path}</b> · from the dump, not in this view: ${esc(not)}${this.selHTML(b)}</span>` + (o ? `<span class="cn">${counts(o, b.only || null)}</span>` : '');
+      return two('dump', 'bound to ' + this.label(b.scope) + '; results of sva eval at build time; this view does not show ' + not, `from the dump, not in this view: ${esc(not)}`, true);
     }
-    return `<span class="st ok" title="bound to ${sc}"><b class="sp">${path}</b>${info}${this.selHTML(b)}</span>` + (o ? `<span class="cn">${counts(o, b.only || null)}</span>` : '');
+    return two('ok', 'bound to ' + this.label(b.scope), '', true);
   }
   selHTML(b) {
     const a = this.selA && this.selA.b === b && outcome(b) && outcome(b).attempts[this.selA.i];
@@ -1247,17 +1286,16 @@ class Panel {
     el.hidden = !list.length && !LIB.notes.length && !orphans.length;
     if (el.hidden) { el.innerHTML = ''; return; }
     const ol = el.querySelector('ol.asv'), keep = ol ? { top: ol.scrollTop, h: ol.style.height } : null;
-    // a table: one line per assertion (#, name, kind, property, binding, results, buttons); one binding on the
-    // assertion's line, several: one line each under it, in the binding's columns
+    // a table, two lines per assertion: #, its name, the instance it is bound to, its buttons; under them its kind and
+    // property, the results, the binding's buttons. Several bindings: one line each under it (instance, results, buttons)
     const line = ({ a, file }, k) => {
       const bs = this.bindings.filter(b => b.assert === a.label), sigs = a.signals.map(s => s.name);
       const pick = this.pick === a.label ? this.pickHTML(a) : '';
       return `<li data-a="${esc(a.label)}" draggable="true" title="click: go to it on the waves (again: its next attempt) · drag onto a module in the names column to bind it">
         <span class="an"><span class="grip" aria-hidden="true">⠿</span>${k + 1}</span>
         <span class="nm"><b class="al">${esc(a.label)}</b>${changedHere(a, file) ? `<span class="ed" title="its text differs from the page's ${esc(file.name)}: this browser's copy (${file.edited ? 'edited here' : 'read from the disk'}) replaces the page's file; Revert in the editor (✎) brings the page's back">${file.edited ? 'edited' : 'changed'}</span>` : ''}</span>
-        <span class="ak k-${a.kind}">${a.kind}</span>
-        <code class="at" title="${esc(a.text || '')}\n— ${esc(file.name)}:${a.line}\nsignals (the clock first): ${esc(sigs.join(' '))}">${propParts(a.text || '').map(t => `<span class="pp">${esc(t)}</span>`).join(' ')}</code>
-        ${bs.length === 1 ? `<span class="b1" data-b="${this.bindings.indexOf(bs[0])}" aria-live="polite">${this.bindHTML(bs[0])}</span>` : `<span class="b1"><span class="st">${bs.length ? `${bs.length} bindings ↓` : 'unbound'}</span></span>`}
+        <span class="pr"><span class="ak k-${a.kind}">${a.kind}</span><code class="at" title="${esc(a.text || '')}\n— ${esc(file.name)}:${a.line}\nsignals (the clock first): ${esc(sigs.join(' '))}">${propParts(a.text || '').map(t => `<span class="pp">${esc(t)}</span>`).join(' ')}</code></span>
+        ${bs.length === 1 ? `<span class="b1" data-b="${this.bindings.indexOf(bs[0])}" aria-live="polite">${this.bindHTML(bs[0])}</span>` : `<span class="b1"><span class="st bp">${bs.length ? `${bs.length} bindings ↓` : 'unbound'}</span></span>`}
         <span class="ab"><button type="button" data-sv="bind" title="Bind to an instance: the modules where all its signals are">Bind…</button><button type="button" class="ic" data-sv="edit" aria-label="edit ${esc(a.label)}" title="Edit this assertion here: Apply parses it and evaluates its bindings again (ctrl+Enter)"${a.at ? '' : ' disabled'}>✎</button><button type="button" class="ic" data-sv="reload" aria-label="read ${esc(file.name)} again" title="Read ${esc(file.name)} from the disk again: its assertions are parsed and evaluated again (the first time: pick the file)">⟳</button><button type="button" class="ic" data-sv="del" aria-label="remove ${esc(a.label)}" title="Remove this assertion from the list (and its bindings)">✕</button></span>
         ${pick}${this.editing === a.label ? this.editHTML(a, file) : ''}${bs.length > 1 ? `<ul class="bnd">${bs.map(b => `<li data-b="${this.bindings.indexOf(b)}" aria-live="polite">${this.bindHTML(b)}</li>`).join('')}</ul>` : ''}</li>`;
     };
@@ -1266,7 +1304,7 @@ class Panel {
       <button type="button" data-sv="json" title="The bindings (and files) for the config file">JSON</button><button type="button" data-sv="clear" title="Forget this browser's files and bindings for this page (every viewer of it); the page's own come back">Clear</button>
       <span class="svx"><button type="button" data-sv="table" aria-pressed="${!!this.showTable}" title="One row per binding: counts, first and last failure, longest attempt, antecedent → consequent latency">Table</button><button type="button" data-sv="fails" aria-pressed="${!!this.showFails}" title="Every failed attempt by time; a row selects it on the waves">Failures</button><button type="button" data-sv="xmd" title="Download the report of this view's bindings as Markdown (the tables)">report.md</button><button type="button" data-sv="xjson" title="Download the results of this view's bindings with the page's meta (sva report reads it)">report.json</button></span></div>` +
       (this.open ? `<div class="svr" aria-live="polite"></div><div class="svw"${this.why ? '' : ' hidden'}>${this.why || ''}</div>` + (LIB.notes.length ? `<ul class="svn">${LIB.notes.map(n => `<li class="${n.err ? 'err' : 'warn'}">${esc(n.text)}</li>`).join('')}</ul>` : '') +
-      `<ol class="asv"><li class="hd" aria-hidden="true"><span>#</span><span>Assertion</span><span>Kind</span><span>Property</span><span>Bound to</span><span>Results</span><span></span><span></span></li>${list.map(line).join('')}</ol>` +
+      `<ol class="asv"><li class="hd" aria-hidden="true"><span>#</span><span>Assertion · property</span><span>Bound to · results</span><span></span></li>${list.map(line).join('')}</ol>` +
       (orphans.length ? `<ul class="svn">${orphans.map(b => `<li class="warn">bind: no assertion '${esc(b.assert)}' is loaded (${esc(this.label(b.scope))})</li>`).join('')}</ul>` : '') +
       `<textarea class="json" readonly${this.jsonOpen ? '' : ' hidden'} aria-label="assertion bindings as JSON"></textarea>` : '');
     const nol = el.querySelector('ol.asv');
@@ -1597,6 +1635,7 @@ class Exprs {
     g.addEventListener('click', e => { const b = e.target.closest('button[data-x]'); if (!b) return; ({ prev: () => this.find(-1), next: () => this.find(1), add: () => this.add(), del: () => this.del() })[b.dataset.x](); });
     v.listen('names', 'click', e => { const r = v.rowAt(e.target); if (r && r.x && this.list.includes(r.x)) { this.inp.value = r.x.text; this.cnt.textContent = ''; } }, { capture: true });   // before the names are drawn again
     if (v.extraRows) v.extraRows.push(grp => (grp ? [] : exprRows(this.st, this.list)));
+    if (v.extraState) v.extraState.push({ key: 'exprs', get: () => this.json(), set: l => this.setList(l) });
     if (v.extraJSON) v.extraJSON.push(() => this.list.length ? `"exprs": [\n${this.list.map(x => '  ' + JSON.stringify(x.scope ? { expr: x.text, scope: x.scope } : x.text)).join(',\n')}\n]` : null);
     v.root.addEventListener('wavefw:settings', () => this.again());
     const page = (v.M.src.sva && v.M.src.sva.exprs) || [], kept = store.get(this.key);
@@ -1617,7 +1656,14 @@ class Exprs {
     await Promise.all(this.list.map(async x => { x.res = await this.value(x); }));
     this.v.renderNames(); this.v.draw();
   }
-  save() { if (!store.set(this.key, this.list.map(x => (x.scope ? { expr: x.text, scope: x.scope } : x.text)))) this.v.toast('not kept in this browser'); }
+  json() { return this.list.map(x => (x.scope ? { expr: x.text, scope: x.scope } : x.text)); }
+  save() { if (!store.set(this.key, this.json())) this.v.toast('not kept in this browser'); }
+  // a saved list (Load… of the viewer's state): the rows of these expressions
+  async setList(l) {
+    this.list = (Array.isArray(l) ? l : []).map(x => (typeof x === 'string' ? { text: x, scope: '' } : { text: x.expr || x.text, scope: x.scope || '' })).filter(x => x.text);
+    if (this.v.sel && this.v.sel.x && !this.list.includes(this.v.sel.x)) this.v.sel = null;
+    this.save(); await this.again();
+  }
   text() { const t = this.inp.value.trim(); if (!t) { this.v.toast('type an expression of the signals, e.g. PSEL && !PREADY'); this.inp.focus(); } return t; }
   async add() {
     const t = this.text(); if (!t) return;

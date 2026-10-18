@@ -103,6 +103,42 @@ if (G.WAVEFW_CONFIG) configure(G.WAVEFW_CONFIG);   // settings file loaded befor
 const manual = document.currentScript && document.currentScript.dataset.manual != null;
 if (!manual) { if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => upgrade()); else upgrade(); }
 
+/* ---------------- tooltips: what a control of a viewer does and its keys ---------------- */
+// [text, keys] of a control: TIPS by its data-act / -sv / -x / -bm / -m / -jump value or a class, else its own title
+const TIP_DATA = ['act', 'sv', 'x', 'bm', 'm', 'jump'];
+function tipOf(el) {
+  const d = el.dataset;
+  for (const k of TIP_DATA) if (d[k] != null) { const t = TIPS[`${k}:${d[k]}`] || (k === 'jump' && TIPS.jump); if (t) return t; }
+  for (const c of el.classList) if (TIPS['.' + c]) return TIPS['.' + c];
+  const own = el.title || d.ttl;
+  return own ? [own] : null;
+}
+const TIP_SEL = '.wv button, .wv input, .wv select, .wv .mk, .wv label.mi, .wv [data-tip]';
+let tipEl = null, tipAt = null, tipT = 0;
+function tipHide() { clearTimeout(tipT); tipAt = null; if (tipEl) { tipEl.remove(); tipEl = null; } }
+function tipShow(el) {
+  const t = el.isConnected && tipOf(el), root = el.closest('.wv'); if (!t || !root) return;
+  if (el.title) { el.dataset.ttl = el.title; el.removeAttribute('title'); }   // ours instead of the browser's
+  tipEl = document.createElement('div'); tipEl.className = 'wv-tip'; tipEl.setAttribute('role', 'tooltip');
+  tipEl.innerHTML = `<span>${esc(t[0])}</span>${t[1] && t[1].length ? `<span class="tk">${t[1].map(k => `<kbd>${esc(k)}</kbd>`).join('')}</span>` : ''}`;
+  root.append(tipEl);
+  const r = el.getBoundingClientRect(), b = tipEl.getBoundingClientRect(), below = r.bottom + 6 + b.height < innerHeight;
+  tipEl.style.left = Math.max(4, Math.min(r.left + r.width / 2 - b.width / 2, innerWidth - b.width - 4)) + 'px';
+  tipEl.style.top = (below ? r.bottom + 6 : r.top - b.height - 6) + 'px';
+}
+document.addEventListener('pointerover', e => {
+  const el = e.target.closest && e.target.closest(TIP_SEL);
+  if (el === tipAt) return;
+  tipHide(); if (!el) return;
+  if (el.title) { el.dataset.ttl = el.title; el.removeAttribute('title'); }   // no browser tooltip while ours waits
+  tipAt = el; tipT = setTimeout(() => tipShow(el), 350);
+});
+document.addEventListener('pointerout', e => { if (tipAt && !(e.relatedTarget && tipAt.contains(e.relatedTarget))) tipHide(); });
+document.addEventListener('focusin', e => { const el = e.target.closest && e.target.closest(TIP_SEL); tipHide(); if (el && el.matches(':focus-visible')) { tipAt = el; tipT = setTimeout(() => tipShow(el), 350); } });
+for (const ev of ['pointerdown', 'keydown', 'wheel']) document.addEventListener(ev, e => { if (ev !== 'keydown' || e.key !== 'Tab') tipHide(); }, true);
+G.addEventListener('scroll', tipHide, true);
+const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
+
 // plugins: fn(viewer) runs for every viewer already built and every later one
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavefw plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
@@ -110,6 +146,6 @@ const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
 G.WaveFW = { version: '1.8.0', rowId: () => ++XID, parse, fromTV, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme, setColors, configure, plugin, svgPlugin, views: () => [...VIEWS], defaults: DEFAULTS,
   paint: { circle, arrowHead, edgeGeom, lastLE },
   sortRows: (M, dir = 'asc', ignore = [], groupOrder = 'file') => orderRows(parse(M).rows, sortDir(dir), prefixes(ignore), groupOrder), fuzzy, themes: THEMES, colorNames: CVAR, styles: Object.keys(EDGES), radixes: RADIX, enums: ENUMS, decode, fmtTime, fmtExact, parseT,
-  registerTokens, util: { esc, glob, lastLE, lastBefore, circle } };
+  registerTokens, tips, util: { esc, glob, lastLE, lastBefore, circle } };
 G.WaveView = WaveView; G.WaveSVG = WaveSVG;
 })(window);

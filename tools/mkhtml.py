@@ -79,7 +79,7 @@ window.WAVES = {data};
 <script>
 {js}
 </script>
-{sva}<script>
+{bus}{sva}<script>
 (function () {{ // page theme button: auto -> light -> white -> dark
   const b = document.getElementById('theme'), modes = ['auto', 'light', 'white', 'dark'];
   let i = Math.max(0, modes.indexOf(document.documentElement.dataset.theme || 'auto'));
@@ -207,6 +207,8 @@ def main():
     with open(os.path.join(FW, 'wavefw.js'), encoding='utf-8') as f:
         js = f.read()
     safe = lambda t: t.replace('</', '<\\/')
+    with open(os.path.join(FW, 'bus.js'), encoding='utf-8') as f:   # bus transactions: always (a few kB)
+        bus = '<script>\n' + f.read().replace('</script', '<\\/script') + '\n</script>\n'
     sva = ''
     if with_sva:
         parts = []
@@ -247,7 +249,7 @@ def main():
         intro=f'<p class="muted">{html.escape(page["intro"])}</p>' if page.get('intro') else '',
         facts=''.join(f'<div><b>{html.escape(k)}</b>{html.escape(v)}</div>' for k, v in facts),
         sections='\n\n'.join([section(k, d, *renders[k]) for k, d in docs.items()] + ([report] if report else [])),
-        settings=safe(json.dumps({k: v for k, v in settings.items() if k != 'theme'}, ensure_ascii=False)), sva=sva,
+        settings=safe(json.dumps({k: v for k, v in settings.items() if k != 'theme'}, ensure_ascii=False)), sva=sva, bus=bus,
         data=safe(wavejson.dumps_many(docs)))
     with open(a.out, 'w', encoding='utf-8') as f:
         f.write(text)

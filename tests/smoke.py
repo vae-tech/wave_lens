@@ -94,9 +94,9 @@ def interact(page):
     check(val.inner_text() != before, f'cursor click updates value column ({before!r} -> {val.inner_text()!r})')
     span0 = cur.inner_text()
     page.mouse.move(box['x'] + box['width'] * 0.5, box['y'] + 40)
-    page.mouse.wheel(0, -300)
+    page.keyboard.down('Control'); page.mouse.wheel(0, -300); page.keyboard.up('Control')
     settle(page)
-    check(cur.inner_text().split('view')[1] != span0.split('view')[1], f'wheel zoom changes span ({span0.split("·")[1].strip()} -> {cur.inner_text().split("·")[1].strip()})')
+    check(cur.inner_text().split('view')[1] != span0.split('view')[1], f'ctrl+wheel zoom changes span ({span0.split("·")[1].strip()} -> {cur.inner_text().split("·")[1].strip()})')
     v.locator('button[data-act=fit]').click()
     check(cur.inner_text().split('view')[1] == span0.split('view')[1], 'Fit restores the full span')
     v.locator('button[data-jump="1"]').click()
@@ -187,8 +187,11 @@ def highlight(page):
           f'config highlight "tx": group + 3 members in front, 5 rows dimmed ({n("hl")}/{n("dim")}, {btn.inner_text()!r})')
     irq = rows.filter(has_text='irq')
     irq.hover(); irq.locator('.mk').click()
-    colors = set(v.locator('.names .row.hl').evaluate_all("els => els.map(e => e.style.getPropertyValue('--hl'))"))
-    check(n('hl') == 5 and len(colors) == 2, f'a second instance gets its own colour {sorted(colors)}')
+    look = v.locator('.names').evaluate("""n => { const hl = [...n.querySelectorAll('.row.hl')], cs = e => getComputedStyle(e);
+        return [[...new Set(hl.map(e => cs(e).boxShadow))], n.querySelectorAll('.row.tint').length,
+            [...new Set([...n.querySelectorAll('.mk[aria-checked="true"]')].map(m => cs(m).backgroundColor))]]; }""")
+    check(n('hl') == 5 and look[0] == ['none'] and look[1] == 0 and len(look[2]) == 1,
+          f'a second instance: no tint, no bar, no colour per instance: the marks of both in one colour {look}')
     rows.filter(has_text='clk').locator('.n').click(modifiers=['Control'])
     check(n('hl') == 6 and btn.inner_text() == 'Highlight: 3 ✕', 'ctrl+click a name highlights it too')
     rx = v.locator('.names .row.grp', has_text='rx')
@@ -198,7 +201,7 @@ def highlight(page):
     v.locator('canvas').focus(); page.keyboard.press('Escape')
     check(n('hl') == 0 and n('dim') == 0 and not btn.is_visible(), 'Esc clears the highlight')
     svg = page.evaluate("WaveFW.WaveSVG.toString(document.getElementById('ex-hl').textContent, {highlight: 'rx'})")
-    check('opacity:0.3' in svg and 'var(--wave-hl1)' in svg, 'static SVG dims and tints from the highlight setting')
+    check('opacity:0.3' in svg and 'var(--wave-hl1)' not in svg, 'static SVG dims the rows the highlight setting leaves out, no tint')
     page.evaluate("WaveFW.configure({highlight: ['state']})")
     ex = page.locator('.bench > div.wv[data-wave="DEMO_WAVES.exact"]')
     check(ex.locator('.names .row.hl').count() == 1 and v.locator('.names .row.hl').count() == 0,
@@ -365,6 +368,9 @@ def find(page, P):
     v.locator('input.fcol').fill('#2f9e44'); v.locator('button[data-act=fpaint]').click()
     painted = js("[[...v.found.keys()].every(r => v.strokeOf(r) === '#2f9e44'), [...v.found.keys()].some(r => r.stroke === '#2f9e44')]")
     check(painted == [True, False] and v.locator('button[data-act=funpaint]').is_visible(), f'Paint recolours the found signals in this viewer, the model rows stay as they are {painted}')
+    hp = js("""(() => { const was = v.picks, r = v.M.rows.find(r => r.type === 'sig' && !v.found.has(r) && v.strokeOf(r) !== '#2f9e44'); v.picks = new Map([[r, 0]]);
+        v.paint('#1971c2'); const out = [v.strokeOf(r), [...v.found.keys()].every(f => v.strokeOf(f) === '#1971c2')]; v.picks = was; return out; })()""")
+    check(hp == ['#1971c2', True], f'Paint recolours the highlighted signals too (ctrl+click, the mark), not only the found ones {hp}')
     v.locator('button[data-act=fopen]').click()
     check(js('[...v.collapsed].sort((a, b) => a - b)') == pre, f'Open off: the folding from before the search is back ({len(pre)} folded)')
     v.locator('button[data-act=fopen]').click()
@@ -420,7 +426,10 @@ def hierarchy(page, P):
           if (r.type === 'group') seen.add(p); else if (r.type === 'sig' && seen.has(p)) bad.push(r.full); }
         return bad; })()""")
     check(late == [], f'groupOrder "last": in every module its signals come before its sub-modules {late[:3]}')
-    check(v.locator('.names .row.alt').count() > 0 and page.evaluate("document.querySelector('.wv').waveView.band.size") > 0, 'moduleShading: alternate backgrounds per module')
+    bg = page.evaluate("""(() => { const n = document.querySelector('.wv .names'), c = s => n.querySelector('.row:not(.grp)' + s), b = e => e && getComputedStyle(e).backgroundColor;
+        return [b(c('.alt')), b(c(':not(.alt)'))]; })()""")
+    check(v.locator('.names .row.alt').count() > 0 and page.evaluate("document.querySelector('.wv').waveView.band.size") > 0 and bg[0] and bg[0] != bg[1],
+          f'moduleShading: neighbouring instances on two backgrounds {bg}')
     t = v.locator('.names .row:not(.grp) .n').nth(0).get_attribute('title')
     check(t and t.startswith(P['top'] + '.'), f'names carry the full path as tooltip ({t})')
     dev = v.locator('.names .row.grp', has_text=P['inst']).first
@@ -522,30 +531,83 @@ def viewer(page):
         v.canvas.dispatchEvent(new WheelEvent('wheel', Object.assign({{clientX: b.left + b.width / 2, clientY: b.top + 40, bubbles: true, cancelable: true}}, {json.dumps(o)}))); }})()""")
     zoom_in = lambda: js('(v.span = (v.M.t1 - v.M.t0) / 4, v.t0 = v.clamp(v.M.t0 + v.span), v.draw(), 0)')
     zoom_in(); s0 = js('v.span')
-    for _ in range(10): wheel(deltaY=-3)
+    wheel(deltaY=100); settle(page); r0 = js('v.span') / s0
+    for _ in range(10): wheel(deltaY=-3, ctrlKey=True)
     settle(page); r1 = js('v.span') / s0
-    zoom_in(); wheel(deltaY=100); settle(page); r2 = js('v.span') / s0
-    zoom_in(); wheel(deltaY=3, deltaMode=1); settle(page); r3 = js('v.span') / s0
+    zoom_in(); wheel(deltaY=100, ctrlKey=True); settle(page); r2 = js('v.span') / s0
+    zoom_in(); wheel(deltaY=3, deltaMode=1, ctrlKey=True); settle(page); r3 = js('v.span') / s0
     zoom_in(); t0, ppt = js('v.t0'), js('v.pxPerT()'); wheel(deltaX=50); settle(page); dt = (js('v.t0') - t0) * ppt
-    zoom_in(); wheel(deltaY=-10, ctrlKey=True); settle(page); r5 = js('v.span') / s0
-    check(0.9 < r1 < 0.99 and abs(r2 - 1.2214) < 0.01 and abs(r3 - 1.1008) < 0.01 and abs(dt - 50) < 0.5 and abs(r5 - 0.9048) < 0.01,
-          f'wheel by its size: ten trackpad steps of -3 x{r1:.3f}, a notch of 100 x{r2:.3f}, 3 lines x{r3:.3f}, a swipe of 50 px pans {dt:.1f} px, a pinch x{r5:.3f}')
+    zoom_in(); t0b = js('v.t0'); wheel(deltaY=50, shiftKey=True); settle(page); dt2 = (js('v.t0') - t0b) * ppt
+    check(r0 == 1 and abs(r1 - 0.7408) < 0.01 and abs(r2 - 1.2214) < 0.01 and abs(r3 - 1.1008) < 0.01 and abs(dt - 50) < 0.5 and abs(dt2 - 50) < 0.5,
+          f'the wheel as in Questa: a notch scrolls (x{r0:.3f}); ctrl+wheel zooms by its size: ten pinch steps of -3 x{r1:.3f}, a notch x{r2:.3f}, 3 lines x{r3:.3f}; a swipe or shift+wheel of 50 px pans {dt:.1f} / {dt2:.1f} px')
     # the cursor reads exactly, at any zoom; a click puts it on a short time; bookmarks show the same
     js('(v.fit(), v.setCursor(1234567), 0)'); a = v.locator('.cur').inner_text()
     js('(v.span = 50000, v.t0 = v.clamp(1200000), v.draw(), 0)'); b = v.locator('.cur').inner_text()
     check('cursor 1.234567 µs' in a and 'cursor 1234.567 ns' in b, f'the cursor reads 1234567 ps whatever the zoom ({a.split("·")[0].strip()} / {b.split("·")[0].strip()})')
-    box = c.bounding_box(); page.mouse.click(box['x'] + box['width'] * 0.371, box['y'] + 60); cur = js('v.cursor')
+    box = c.bounding_box(); page.keyboard.down('Alt'); page.mouse.click(box['x'] + box['width'] * 0.371, box['y'] + 60); page.keyboard.up('Alt'); cur = js('v.cursor')
     q = js('(() => { const tpp = 1 / v.pxPerT(), e = 10 ** Math.floor(Math.log10(tpp)); return [1, 2, 5, 10].find(m => m * e >= tpp) * e; })()')
-    check(abs(cur / q - round(cur / q)) < 1e-6, f'a click puts the cursor on a 1-2-5 step of a pixel ({cur} ps, step {q} ps)')
+    check(abs(cur / q - round(cur / q)) < 1e-6, f'alt+click puts the cursor on a 1-2-5 step of a pixel ({cur} ps, step {q} ps)')
+    # a click near an edge of a signal: the cursor on that edge (cursorSnap px); farther, or alt+click: a round time
+    near = js("""(() => { const k = v.pxPerT(), o = v.lay.find(o => o.row.type === 'sig' && o.row.tr && o.row.tr.some((e, i) => i && e.t > v.t0 + v.span * 0.1 && e.t < v.t0 + v.span * 0.9));
+        const e = o.row.tr.find((e, i) => i && e.t > v.t0 + v.span * 0.1 && e.t < v.t0 + v.span * 0.9); return [(e.t - v.t0) * k, o.y + o.h / 2, e.t, v.S.cursorSnap]; })()""")
+    got = []
+    for dx, alt in ((5, False), (5, True), (near[3] + 6, False)):
+        if alt: page.keyboard.down('Alt')
+        page.mouse.click(box['x'] + near[0] + dx, box['y'] + near[1])
+        if alt: page.keyboard.up('Alt')
+        got.append(js('v.cursor') == near[2])
+    check(got == [True, False, False], f'a click 5 px from an edge puts the cursor on it; alt+click, or {near[3] + 6} px away, does not {got}')
+    # the edge style from the bar: the waves drawn again, kept over a reload, in the saved state
+    ws = v.locator('select.ws')
+    sty = [ws.input_value()]; ws.select_option('questa')
+    sty += [js('v.S.style'), js("JSON.parse(localStorage.getItem(v.lookKey)).style"), js('v.state().config.style')]
+    page.reload(); page.wait_for_load_state('networkidle')
+    sty += [ws.input_value(), js('v.S.style')]; ws.select_option('auto'); js('(v.setStyle(null), 0)'); sty.append(js('localStorage.getItem(v.lookKey)'))
+    check(sty == ['auto', 'questa', 'questa', 'questa', 'questa', 'questa', None], f'the edge style list: vertical (questa) drawn, kept in this browser and in the state, back to the settings\' {sty}')
     keep = js('[v.bookmarks(), v.arrowList()]'); js('(v.setBookmarks([{n: 1, t: 1234567}]), 0)')
     check(v.locator('.notes input.tm').input_value() == '1.234567 µs', f'a bookmark shows its exact time ({v.locator(".notes input.tm").input_value()})')
     page.evaluate(f"document.querySelector('{ex}').waveView.setBookmarks(...{json.dumps(keep)})")
-    # right / middle button: no cursor, no pan
+    # the right button: no cursor, no pan; the middle one (Questa): a drag zooms into the range, l the window before
     t0, cur = js('v.t0'), js('v.cursor')
-    for btn in ('right', 'middle'):
-        page.mouse.move(box['x'] + 100, box['y'] + 60); page.mouse.down(button=btn); page.mouse.move(box['x'] + 300, box['y'] + 60); page.mouse.up(button=btn)
-    check(js('[v.t0, v.cursor]') == [t0, cur], 'the right and the middle button neither pan nor move the cursor')
+    page.mouse.move(box['x'] + 100, box['y'] + 60); page.mouse.down(button='right'); page.mouse.move(box['x'] + 300, box['y'] + 60); page.mouse.up(button='right')
+    check(js('[v.t0, v.cursor]') == [t0, cur], 'the right button neither pans nor moves the cursor')
+    w0 = js('[v.t0, v.span]'); want = js('[v.t0 + 100 / v.pxPerT(), 200 / v.pxPerT()]')
+    page.mouse.move(box['x'] + 100, box['y'] + 60); page.mouse.down(button='middle'); page.mouse.move(box['x'] + 200, box['y'] + 60, steps=3)
+    band = js('!!v.zband'); page.mouse.move(box['x'] + 300, box['y'] + 60, steps=3); page.mouse.up(button='middle')
+    w1 = js('[v.t0, v.span, v.cursor]'); c.focus(); page.keyboard.press('l'); w2 = js('[v.t0, v.span]')
+    check(band and abs(w1[0] - want[0]) <= want[1] * 0.02 and abs(w1[1] - want[1]) <= want[1] * 0.02 and w1[2] == cur and w2 == w0,
+          f'a middle-button drag over 200 px zooms into that range (the band shown while dragging, the cursor stays); l: the window before {w0} -> {w1} -> {w2}')
+    # the keys as in Questa (i o f l, Tab, Home / End, PgDn) and vim (j k gg G zM zR, ]m, *)
+    keys = []
+    def press(*ks):
+        for k in ks: page.keyboard.press(k)
+    js('(v.fit(), v.select(null), 0)'); c.focus(); s1 = js('v.span')
+    press('i'); keys.append(round(js('v.span') / s1, 3)); press('i', 'o'); keys.append(round(js('v.span') / s1, 3)); press('f'); keys.append(js('v.span') == s1)
+    press('i', 'i', 'l'); keys.append(round(js('v.span') / s1, 3)); press('l')
+    press('End'); keys.append(abs(js('v.t0 + v.span') - js('v.M.t1')) < 1e-6); press('Home'); keys.append(js('v.t0') == js('v.M.t0'))
+    press('j', 'j'); a = js('v.sel && v.sel.full'); press('k'); b = js('v.sel && v.sel.full'); press('g', 'g'); g1 = js('v.sel && v.sel.full'); press('Shift+G'); g2 = js('v.sel && v.sel.full')
+    sigs = js("v.vis.filter(r => r.type === 'sig' && r.tr).map(r => r.full)"); keys.append([a == sigs[1], b == sigs[0], g1 == sigs[0], g2 == sigs[-1]])
+    js('(v.select(v.vis.filter(r => r.type === "sig" && r.tr && r.tr.length > 3)[0]), v.cursor = v.M.t0, v.draw(), 0)')
+    press('Tab'); e1 = js('v.cursor'); press('Tab'); e2 = js('v.cursor'); press('Shift+Tab'); keys.append([e1 > js('v.M.t0'), e2 > e1, js('v.cursor') == e1])
+    keys.append(js('document.activeElement === v.canvas'))
+    print('  keys ' + str(keys))
+    vk = []
+    keep = js('[v.bookmarks(), v.arrowList()]'); bt = js('[v.M.t0 + v.span * 0.3, v.M.t0 + v.span * 0.6]')
+    js(f'(v.setBookmarks([{{n: 1, t: {bt[0]}}}, {{n: 2, t: {bt[1]}}}]), v.cursor = v.M.t0, 0)')
+    press(']', 'm'); vk.append(js('v.cursor') == bt[0]); press(']', 'm'); vk.append(js('v.cursor') == bt[1]); press(']', 'm'); vk.append(js('v.cursor') == bt[0])
+    press('[', 'm'); vk.append(js('v.cursor') == bt[1])
+    page.evaluate(f"document.querySelector('{ex}').waveView.setBookmarks(...{json.dumps(keep)})")
+    press('g', 'g', '*'); vk.append(js('[v.q, v.found.size > 0]') == [js('v.sel ? v.sel.name : v.q'), True]); press('Escape'); c.focus()
+    page.evaluate("window.__c = null; navigator.clipboard.writeText = t => (window.__c = t, Promise.resolve())")
+    press('g', 'g', 'y', 'y'); vk.append(page.evaluate('window.__c') == js('v.sel && v.sel.full'))
+    ng = js('Object.keys(v.M.groups).length')
+    press('z', 'Shift+M'); vk.append(js('v.collapsed.size') == ng); press('z', 'Shift+R'); vk.append(js('v.collapsed.size') == 0)
+    press('g', 'x'); vk.append(js('v.collapsed.size') == 0)   # an unknown sequence does nothing
+    check(all(vk), f'vim: ]m [m next / previous bookmark round the ends, * finds the selected name, yy copies it, zM / zR fold / open every group ({ng}) {vk}')
+    check(keys[:6] == [0.5, 0.5, True, 0.5, True, True] and all(keys[6]) and all(keys[7]) and keys[8],
+          f'keys as in Questa: i o zoom in / out, f full, l the window before the last zoom (i i l: x0.5), End / Home, Tab / shift+Tab the next / previous edge (the focus stays); vim: j k, gg, G {keys}')
     # the value under the pointer
+    c.scroll_into_view_if_needed(); box = c.bounding_box()
     y = js("(o => o.y + o.h / 2 - v.oy)(v.lay.find(o => o.row.name === 'state'))")
     page.mouse.move(box['x'] + box['width'] * 0.5, box['y'] + y); tip = c.get_attribute('title') or ''
     check(tip.startswith('state = ') and '→' in tip and '@' in tip, f'the value under the pointer: {tip!r}')
@@ -753,6 +815,126 @@ def sva_exprs(browser, build):
           f'names: from the selected signal\'s module (u_regs) up to the top, a full path as it is {h}')
     page.evaluate('localStorage.clear()')
     check(not errs, 'no page errors (expressions)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
+    ctx.close()
+
+
+def state(browser, build):
+    """Save / Load… of a viewer: everything done in it to a file and back, the assertions and ƒ rows too; another page
+    takes what it has."""
+    apb, axi = build / 'examples' / 'apb' / 'apb.html', build / 'examples' / 'axi_lite' / 'axi_lite.html'
+    if not need(apb, axi, how='make examples'):
+        return
+    print('viewer state: Save / Load')
+    ctx = browser.new_context(viewport={'width': 1360, 'height': 1400}, accept_downloads=True)
+    page = ctx.new_page()
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('SVA.ready()'); page.evaluate('localStorage.clear()')
+    v = page.locator('.wv').first
+    st = page.evaluate("""async () => { const v = document.querySelector('.wv').waveView, sig = v.M.rows.filter(r => r.type === 'sig' && r.tr);
+        v.setSort('desc', 'P'); v.toggleHighlight(sig[2]); v.toggleHighlight(sig[4]); v.paint('#123456'); v.collapseAll(); v.select(sig[1]);
+        v.goto(v.M.t0 + (v.M.t1 - v.M.t0) / 3, (v.M.t1 - v.M.t0) / 10); v.mark('saved here'); v.find('pready');
+        await v.svaExprs.setList(['PSEL && !PREADY']); v.sva.unbind(v.sva.bindings[0]); v.sva.bind('apb_enable_needs_sel', 'apb_tb.u_regs'); await v.sva.queue;
+        return v.state(); }""")
+    with page.expect_download() as dl:
+        v.locator('button[data-act=ssave]').click()
+    path = dl.value.path(); name = dl.value.suggested_filename
+    saved = json.loads(pathlib.Path(path).read_text(encoding='utf-8'))
+    check(saved == st and name.endswith('.view.json') and set(st) >= {'from', 'to', 'cursor', 'config', 'paint', 'select', 'find', 'bookmarks', 'arrows', 'sva', 'exprs'},
+          f'Save downloads the viewer\'s state ({name}): window, cursor, sort, folding, highlight, paint, selection, search, bookmarks, assertions, ƒ rows')
+    page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle'); page.evaluate('SVA.ready()')
+    v.locator('input.sfile').set_input_files(path)
+    page.wait_for_function("document.querySelector('.wv .bar .toast').textContent.includes('loaded')")
+    page.evaluate('SVA.ready()'); page.evaluate('document.querySelector(".wv").waveView.sva.queue')
+    back = page.evaluate("document.querySelector('.wv').waveView.state()")
+    diff = [k for k in st if st[k] != back.get(k)]
+    shown = page.evaluate("""(() => { const v = document.querySelector('.wv').waveView;
+        return [v.sortBtn.textContent, v.root.querySelector('input.pfx').value, v.qEl.value, v.sva.bindings.find(b => b.scope === 'apb_tb.u_regs').state,
+            v.vis.some(r => (r.cls || '').startsWith('sva-expr')), [...v.notesEl.querySelectorAll('input.txt')].some(i => i.value === 'saved here')]; })()""")
+    check(not diff and shown == ['Sort: Z→A', 'P', 'pready', 'cannot', True, True],
+          f'Load… after a reload with nothing kept: the same state, the bar and the lists show it (differs: {diff}) {shown}')
+    page.goto(axi.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('SVA.ready()')
+    v.locator('input.sfile').set_input_files(path)
+    page.wait_for_function("document.querySelector('.wv .bar .toast').textContent.includes('loaded')")
+    toast = v.locator('.bar .toast').inner_text()
+    got = page.evaluate("(() => { const v = document.querySelector('.wv').waveView; return [v.sort, v.painted.size, v.bms.every(b => !b.signal || v.M.rows.some(r => r.full === b.signal))]; })()")
+    check('not in these waves' in toast and got == ['desc', 0, True], f'Load… on other waves: what they have is taken, the rest is said and left out {got} {toast!r}')
+    bad = page.evaluate("document.querySelector('.wv').waveView.loadState('[1, 2]').then(m => [m, document.querySelector('.wv .bar .toast').textContent])")
+    check(bad[0] is None and 'not a saved viewer state' in bad[1], f'Load… of another JSON: said, nothing changes {bad}')
+    page.evaluate('localStorage.clear()')
+    check(not errs, 'no page errors (state)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
+    ctx.close()
+
+
+def ranges(browser, build):
+    """A range on the waves (shift+drag, the right button) with its ends on edges, the right button's menu: zoom,
+    bookmarks at the ends, the picture as SVG / PNG / clipboard, the colour of the signal under the pointer."""
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('viewer: range and menu')
+    ctx = browser.new_context(viewport={'width': 1400, 'height': 1000}, accept_downloads=True)
+    page = ctx.new_page()
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('SVA.ready()'); page.evaluate('localStorage.clear()')
+    js = lambda e: page.evaluate(f"(() => {{ const v = document.querySelector('.wv').waveView; return {e}; }})()")
+    c = page.locator('.wv canvas').first; c.scroll_into_view_if_needed(); box = c.bounding_box()
+    r = js("""(() => { const o = v.lay.find(o => o.row.name === 'PSEL'), k = v.pxPerT(), e = o.row.tr.filter((e, i) => i && e.t > v.t0 && e.t < v.t0 + v.span);
+        return [o.y + o.h / 2 - (v.oy || 0), (e[0].t - v.t0) * k, (e[1].t - v.t0) * k, e[0].t, e[1].t]; })()""")
+    cur0 = js('v.cursor')
+    page.keyboard.down('Shift'); page.mouse.move(box['x'] + r[1] + 4, box['y'] + r[0]); page.mouse.down()
+    page.mouse.move(box['x'] + r[2] - 3, box['y'] + r[0], steps=5); page.mouse.up(); page.keyboard.up('Shift')
+    got = [js('v.range'), js('v.cursor') == cur0, 'Δ 20 ns' in js('v.curEl.textContent')]
+    check(got == [[r[3], r[4]], True, True], f'shift+drag: a range from edge to edge of PSEL (4 px off each), Δ in the readout, the cursor stays {got} / {r[3:]}')
+    page.mouse.move(box['x'] + r[1] + 3, box['y'] + r[0]); page.mouse.down(button='right'); page.mouse.move(box['x'] + r[2] + 2, box['y'] + r[0], steps=5); page.mouse.up(button='right')
+    menu = page.locator('.wv-menu')
+    items = menu.locator('button[data-m]').evaluate_all('bs => bs.map(b => b.dataset.m)')
+    check(js('v.range') == [r[3], r[4]] and items[:6] == ['zoom', 'marks', 'copyd', 'copyimg', 'png', 'svg'] and {'hl', 'hide', 'mark', 'copyname', 'clear'} <= set(items) and 'PSEL' in menu.inner_text(),
+          f'the right button: the same range, then its menu (range, picture, the signal under the pointer) {items}')
+    with page.expect_download() as dl:
+        menu.locator('button[data-m=svg]').click()
+    svg = pathlib.Path(dl.value.path()).read_text(encoding='utf-8')
+    ok = page.evaluate("s => !new DOMParser().parseFromString(s, 'image/svg+xml').querySelector('parsererror')", svg)
+    check(menu.count() == 0 and ok and 'var(' not in svg and '>PSEL<' in svg and dl.value.suggested_filename.endswith('.svg'),
+          f'Save image as SVG: a standalone picture (the colours put in, no var()), the names in it ({len(svg)} chars, {dl.value.suggested_filename})')
+    page.mouse.click(box['x'] + 5, box['y'] + r[0], button='right')
+    with page.expect_download() as dl:
+        menu.locator('button[data-m=png]').click()
+    png = pathlib.Path(dl.value.path()).read_bytes()
+    page.evaluate("window.__img = null; navigator.clipboard.write = items => (window.__img = items.map(i => i.types).flat(), Promise.resolve()); 0")
+    page.mouse.click(box['x'] + 5, box['y'] + r[0], button='right'); menu.locator('button[data-m=copyimg]').click()
+    page.wait_for_function('window.__img')
+    check(png[:8] == bytes([137, 80, 78, 71, 13, 10, 26, 10]) and len(png) > 5000 and page.evaluate('window.__img') == ['image/png'],
+          f'Save image as PNG ({len(png)} bytes), Copy image: a PNG to the clipboard')
+    nb = js('v.bms.length'); page.mouse.click(box['x'] + 5, box['y'] + r[0], button='right'); menu.locator('button[data-m=marks]').click()
+    mk = js("[v.bms.length, v.bms.slice(-2).map(b => [b.t, b.signal]), v.arrows[v.arrows.length - 1].label]")
+    y2 = js("(o => o.y + o.h / 2 - (v.oy || 0))(v.lay.find(o => o.row.name === 'PSEL'))")   # the arrow's label lane moved it
+    page.mouse.click(box['x'] + 5, box['y'] + y2, button='right')
+    menu.locator('input[type=color]').evaluate("i => { i.value = '#2f9e44'; i.dispatchEvent(new Event('input', { bubbles: true })); }")
+    page.keyboard.press('Escape'); col = js("v.strokeOf(v.M.rows.find(r => r.name === 'PSEL'))")
+    page.mouse.click(box['x'] + 5, box['y'] + r[0], button='right'); menu.locator('button[data-m=zoom]').click(); z = js('[v.t0, v.t0 + v.span]')
+    check(mk == [nb + 2, [[r[3], 'PSEL'], [r[4], 'PSEL']], '20 ns'] and col == '#2f9e44' and menu.count() == 0 and z == [r[3], r[4]],
+          f'the menu: bookmarks at the ends with an arrow "Δ", the colour of PSEL, Esc closes it, zoom to the range {mk} {col} {z}')
+    c.focus(); page.keyboard.press('Escape'); page.keyboard.down('Shift'); page.mouse.click(box['x'] + 50, box['y'] + r[0]); page.keyboard.up('Shift')
+    check(js('v.range') is None, 'Esc, or a shift+click, clears the range')
+    # radix and hide from the menu (a bus of the dump: apb_tb.PADDR), the Hidden button, kept over a reload and in the state
+    page.goto((build / 'examples' / 'apb' / 'apb_all.html').as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+    c.scroll_into_view_if_needed(); box = c.bounding_box()
+    yb = lambda n: js(f"(o => o.y + o.h / 2 - (v.oy || 0))(v.lay.find(o => o.row.full === 'apb_tb.{n}'))")
+    page.mouse.click(box['x'] + 300, box['y'] + yb('PADDR'), button='right'); menu.locator('select').select_option('bin')
+    rx = [js("v.valueAt(v.M.rows.find(r => r.full === 'apb_tb.PADDR'), v.cursor)"), menu.count()]
+    page.mouse.click(box['x'] + 300, box['y'] + yb('PWDATA'), button='right'); menu.locator('button[data-m=hide]').click()
+    hid = [js("v.vis.some(r => r.full === 'apb_tb.PWDATA')"), page.locator('.wv button[data-act=unhide]').first.inner_text(), js('v.state().hidden'), js('v.state().radix')]
+    page.reload(); page.wait_for_load_state('networkidle')
+    kept = [js("v.vis.some(r => r.full === 'apb_tb.PWDATA')"), js("v.M.rows.find(r => r.full === 'apb_tb.PADDR').radix")]
+    page.locator('.wv button[data-act=unhide]').first.click(); js("(v.setRadix('apb_tb.PADDR', null), 0)")
+    back = [js("v.vis.some(r => r.full === 'apb_tb.PWDATA')"), js("v.M.rows.find(r => r.full === 'apb_tb.PADDR').radix || ''"), js('localStorage.getItem(v.rowsKey)')]
+    check((rx[0].startswith('0b') or set(rx[0]) <= set('01_')) and rx[1] == 0 and hid[:2] == [False, 'Hidden: 1 ✕'] and hid[2] == ['apb_tb.PWDATA'] and hid[3] == {'apb_tb.PADDR': 'bin'}
+          and kept == [False, 'bin'] and back == [True, '', None],
+          f'the menu: Radix bin on PADDR, Hide PWDATA, Hidden: 1 ✕ in the bar; kept over a reload and in the state; shown again, the page\'s radix back {rx} {hid} {kept} {back}')
+    page.evaluate('localStorage.clear()')
+    check(not errs, 'no page errors (range, menu)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
     ctx.close()
 
 
@@ -972,12 +1154,17 @@ def sva_waves(browser, build):
     check(flow[0] == ['▶ ✕ fail'] and flow[1] == [[1, False], [1, False], [2, True]] and flow[2] == ['▶ start', '✓ pass']
           and flow[3] == [1, 1, 1, 1, 2, 2, 3] and flow[4] == flow[3] and flow[5] == [True, True] and ['pass', None, True] in flow[6],
           f'the selected attempt on its signals: step 1 on PSEL and PENABLE, the ✕ on PREADY, ▶ ✕ fail in one cycle; apb_read_waits 1 (4 signals), 2 2 3 on PREADY, ▶ start … ✓ pass {flow}')
-    # the list of assertions is a table: a header, the same columns on every line
+    # the list of assertions is a table: a header, the same columns on every line, two lines per assertion (name and
+    # instance over kind and property, results)
     tab = js("""const ol = p.el.querySelector('ol.asv'), hd = [...ol.querySelectorAll(':scope > li.hd > span')].map(e => e.textContent);
-        const ls = [...ol.querySelectorAll(':scope > li[data-a]')].slice(0, 4), x = sel => ls.map(li => Math.round(li.querySelector(sel).getBoundingClientRect().left));
-        return [hd, ls.map(li => li.querySelector('.an').lastChild.textContent), ['code.at', '.b1 .st', '.b1 .cn', '.ab'].map(x)];""")
-    check(tab[0] == ['#', 'Assertion', 'Kind', 'Property', 'Bound to', 'Results', '', ''] and tab[1] == ['1', '2', '3', '4']
-          and all(len(set(c)) == 1 for c in tab[2]), f'the assertions are a table: a header, numbered lines, property, signals, results and buttons in columns {tab}')
+        const ls = [...ol.querySelectorAll(':scope > li[data-a]')].slice(0, 4), q = (li, sel) => li.querySelector(sel).getBoundingClientRect();
+        const has = sel => ls.filter(li => li.querySelector(sel)), x = sel => has(sel).map(li => Math.round(q(li, sel).left));
+        const below = (a, b) => has(b).length > 0 && has(b).every(li => q(li, b).top >= q(li, a).bottom - 1);
+        return [hd, ls.map(li => li.querySelector('.an').lastChild.textContent), ['.nm', '.pr', '.b1 .bp', '.b1 .bs', '.ab'].map(x),
+            [below('.nm', '.pr'), below('.b1 .bp', '.b1 .bs'), below('.ab', '.b1 .bb')]];""")
+    check(tab[0] == ['#', 'Assertion · property', 'Bound to · results', ''] and tab[1] == ['1', '2', '3', '4']
+          and all(len(set(c)) == 1 for c in tab[2]) and tab[2][0] == tab[2][1] and tab[2][2] == tab[2][3] and all(tab[3]),
+          f'the assertions are a table: a header, numbered lines, name over property, instance over results, buttons in columns {tab}')
     at = page.locator('.wv').first.locator('.sva li[data-a="apb_read_waits"] code.at')
     sel0 = js('return [p.selA.b.assert, p.selA.i];')
     at.scroll_into_view_if_needed(); bb = at.bounding_box()
@@ -997,14 +1184,14 @@ def sva_waves(browser, build):
           bs[2].click(); r([bs.map(b => b.textContent), t.querySelectorAll('td.hit').length, t.querySelectorAll('td.miss').length, v.cursor, +bs[2].dataset.t]); }, 100));""")
     check(len(w2[0]) == 4 and w2[1] == 4 and w2[2] == 0 and w2[3] == w2[4], f'Why of a passing 4-cycle attempt: 4 columns, a ring where each step matched, a cycle header moves the cursor {w2}')
     js("p.select(p.bindings.find(b => b.assert === 'apb_demo_no_wait'), 1);")
-    # f / F: next / previous failure (round the end); the go-to buttons; Esc
+    # ]f / [f: next / previous failure (round the end); the go-to buttons; Esc
     v = page.locator('.wv').first
     v.locator('canvas').focus()
     seq = []
-    for k in ('f', 'f', 'F'):
-        page.keyboard.press(k); seq.append(js('return [p.selA.i, v.cursor];'))
+    for k in (']f', ']f', '[f'):
+        page.keyboard.press(k[0]); page.keyboard.press(k[1]); seq.append(js('return [p.selA.i, v.cursor];'))
     btns = v.locator('.bar .svj button.fail')
-    check([x[0] for x in seq] == [2, 1, 2] and seq[0][1] == 115000 and btns.count() == 2, f'f / F step through the two failures, round the end {seq}; {btns.count()} failure buttons in go to')
+    check([x[0] for x in seq] == [2, 1, 2] and seq[0][1] == 115000 and btns.count() == 2, f']f / [f step through the two failures, round the end {seq}; {btns.count()} failure buttons in go to')
     page.keyboard.press('Escape')
     esc = js("return [p.selA, v.extraPicks.size, p.el.querySelector('li[data-a=\"apb_demo_no_wait\"]').innerText.includes('attempt'), p.el.querySelector('.svw').hidden];")
     btns.nth(1).click()
@@ -1037,12 +1224,12 @@ def sva_waves(browser, build):
     ln('apb_demo_no_wait').click(); nav.append(js(geo))
     ln('apb_demo_no_wait').click(); nav.append(js(geo))
     ln('apb_setup_then_access').click(); nav.append(js(geo))
-    v.locator('canvas').focus(); page.keyboard.press('a'); nav.append(js(geo)[0]); page.keyboard.press('A'); nav.append(js(geo)[0])
+    v.locator('canvas').focus(); page.keyboard.press(']'); page.keyboard.press('a'); nav.append(js(geo)[0]); page.keyboard.press('['); page.keyboard.press('a'); nav.append(js(geo)[0])
     order = js("return p.drawn().map(b => b.assert);")
     k = order.index('apb_setup_then_access')
     check(nav[0][:3] == ['apb_demo_no_wait', 1, 'fail'] and nav[1][:3] == ['apb_demo_no_wait', 2, 'fail'] and nav[2][2] == 'pass'
           and all(x[3] == span0 and abs(x[4] - 0.5) < 0.1 and x[5] and x[6] for x in nav[:3]) and nav[3] == order[(k + 1) % len(order)] and nav[4] == 'apb_setup_then_access',
-          f'a click on an assertion: its first failure at the same zoom ({span0} ps), the attempt in the middle {nav[0][4]}; again: the next failure; a passing one: a pass; a / A: the next / previous assertion {nav}')
+          f'a click on an assertion: its first failure at the same zoom ({span0} ps), the attempt in the middle {nav[0][4]}; again: the next failure; a passing one: a pass; ]a / [a: the next / previous assertion {nav}')
     page.keyboard.press('Escape')
     # sorting, find, Expand / Collapse keep the groups where they are
     js("v.setSort('desc');")
@@ -1613,6 +1800,157 @@ def synth_page(build):
     return page
 
 
+def bus_vcd(path):
+    """A dump with one port of every protocol bus.js decodes, each with known transfers: AXI4 (a burst, reads answered
+    out of order by ID, SLVERR), AXI4-Stream (a stall), APB (a wait state, PSLVERR), AHB (pipelined, a wait state in a
+    burst), Avalon-MM (waitrequest, pipelined reads), Avalon-ST, Wishbone classic and pipelined, OBI. Cycle c is
+    [10c, 10c + 10) ns; the registered signals change at the rising edge 10c."""
+    N, mods = 20, {}
+    def port(mod, sigs):   # sigs: name -> width
+        mods[mod] = {n: [w, [0] * N] for n, w in sigs.items()}
+    def put(mod, c0, c1, **vals):   # cycles c0..c1 (inclusive)
+        for n, v in vals.items():
+            for c in range(c0, c1 + 1): mods[mod][n][1][c] = v
+    port('u_axi', dict(s_axi_awvalid=1, s_axi_awready=1, s_axi_awaddr=32, s_axi_awid=4, s_axi_awlen=8, s_axi_wvalid=1, s_axi_wready=1, s_axi_wdata=32, s_axi_wlast=1,
+                       s_axi_bvalid=1, s_axi_bready=1, s_axi_bresp=2, s_axi_bid=4, s_axi_arvalid=1, s_axi_arready=1, s_axi_araddr=32, s_axi_arid=4, s_axi_arlen=8,
+                       s_axi_rvalid=1, s_axi_rready=1, s_axi_rdata=32, s_axi_rresp=2, s_axi_rid=4, s_axi_rlast=1))
+    a = 'u_axi'; put(a, 0, N - 1, s_axi_bready=1, s_axi_rready=1)
+    put(a, 2, 3, s_axi_awvalid=1, s_axi_awaddr=0x100, s_axi_awid=1, s_axi_awlen=1); put(a, 3, 3, s_axi_awready=1)
+    put(a, 4, 4, s_axi_wvalid=1, s_axi_wready=1, s_axi_wdata=0xa1); put(a, 5, 5, s_axi_wvalid=1, s_axi_wready=1, s_axi_wdata=0xa2, s_axi_wlast=1)
+    put(a, 7, 7, s_axi_bvalid=1, s_axi_bid=1)
+    put(a, 9, 9, s_axi_arvalid=1, s_axi_arready=1, s_axi_araddr=0x200, s_axi_arid=2); put(a, 10, 10, s_axi_arvalid=1, s_axi_arready=1, s_axi_araddr=0x300, s_axi_arid=3, s_axi_arlen=1)
+    put(a, 12, 12, s_axi_rvalid=1, s_axi_rid=3, s_axi_rdata=0x31); put(a, 13, 13, s_axi_rvalid=1, s_axi_rid=3, s_axi_rdata=0x32, s_axi_rlast=1)
+    put(a, 14, 14, s_axi_rvalid=1, s_axi_rid=2, s_axi_rdata=0x21, s_axi_rlast=1)
+    put(a, 16, 16, s_axi_awvalid=1, s_axi_awready=1, s_axi_awaddr=0x400, s_axi_awid=1, s_axi_wvalid=1, s_axi_wready=1, s_axi_wdata=0xbad, s_axi_wlast=1)
+    put(a, 17, 17, s_axi_bvalid=1, s_axi_bid=1, s_axi_bresp=2)
+    port('u_axis', dict(m_axis_tvalid=1, m_axis_tready=1, m_axis_tdata=8, m_axis_tlast=1))
+    put('u_axis', 2, 4, m_axis_tvalid=1); put('u_axis', 2, 3, m_axis_tdata=5); put('u_axis', 3, 4, m_axis_tready=1); put('u_axis', 4, 4, m_axis_tdata=6, m_axis_tlast=1)
+    port('u_apb', dict(PSEL=1, PENABLE=1, PREADY=1, PADDR=16, PWRITE=1, PWDATA=32, PRDATA=32, PSLVERR=1))
+    put('u_apb', 2, 4, PSEL=1, PADDR=0x10, PWRITE=1, PWDATA=0x55); put('u_apb', 3, 4, PENABLE=1); put('u_apb', 4, 4, PREADY=1)
+    put('u_apb', 6, 7, PSEL=1, PADDR=0x14); put('u_apb', 7, 7, PENABLE=1, PREADY=1, PRDATA=0x77, PSLVERR=1)
+    port('u_ahb', dict(HTRANS=2, HADDR=32, HWRITE=1, HWDATA=32, HRDATA=32, HREADY=1, HRESP=1))
+    h = 'u_ahb'; put(h, 0, N - 1, HREADY=1)
+    put(h, 2, 2, HTRANS=2, HADDR=0x20, HWRITE=1); put(h, 3, 3, HWDATA=0x99, HTRANS=2, HADDR=0x24); put(h, 4, 4, HRDATA=0x88)
+    put(h, 6, 6, HTRANS=2, HADDR=0x40, HWRITE=1); put(h, 7, 7, HTRANS=3, HADDR=0x44, HWRITE=1, HWDATA=1); put(h, 8, 9, HTRANS=3, HADDR=0x48, HWRITE=1, HWDATA=2)
+    put(h, 8, 8, HREADY=0); put(h, 10, 10, HWDATA=3)
+    port('u_avmm', dict(avs_address=16, avs_read=1, avs_write=1, avs_writedata=32, avs_readdata=32, avs_readdatavalid=1, avs_waitrequest=1))
+    m = 'u_avmm'; put(m, 2, 3, avs_write=1, avs_address=0x8, avs_writedata=0x11); put(m, 2, 2, avs_waitrequest=1)
+    put(m, 5, 5, avs_read=1, avs_address=0xc); put(m, 6, 6, avs_read=1, avs_address=0x10); put(m, 7, 7, avs_readdatavalid=1, avs_readdata=0xa); put(m, 8, 8, avs_readdatavalid=1, avs_readdata=0xb)
+    port('u_avst', dict(asi_valid=1, asi_ready=1, asi_data=8, asi_startofpacket=1, asi_endofpacket=1))
+    put('u_avst', 0, N - 1, asi_ready=1); put('u_avst', 2, 4, asi_valid=1); put('u_avst', 2, 2, asi_startofpacket=1, asi_data=1); put('u_avst', 3, 3, asi_data=2); put('u_avst', 4, 4, asi_data=3, asi_endofpacket=1)
+    port('u_wb', dict(wb_cyc_o=1, wb_stb_o=1, wb_we_o=1, wb_adr_o=16, wb_dat_o=32, wb_dat_i=32, wb_ack_i=1))
+    put('u_wb', 2, 3, wb_cyc_o=1, wb_stb_o=1, wb_we_o=1, wb_adr_o=0x30, wb_dat_o=0x12); put('u_wb', 3, 3, wb_ack_i=1)
+    put('u_wb', 5, 6, wb_cyc_o=1, wb_stb_o=1, wb_adr_o=0x34); put('u_wb', 6, 6, wb_ack_i=1, wb_dat_i=0xab)
+    port('u_wbp', dict(wbp_cyc_o=1, wbp_stb_o=1, wbp_we_o=1, wbp_adr_o=16, wbp_dat_o=32, wbp_dat_i=32, wbp_ack_i=1, wbp_stall_i=1))
+    put('u_wbp', 2, 6, wbp_cyc_o=1); put('u_wbp', 2, 4, wbp_stb_o=1); put('u_wbp', 2, 2, wbp_adr_o=0x50); put('u_wbp', 3, 4, wbp_adr_o=0x54); put('u_wbp', 3, 3, wbp_stall_i=1)
+    put('u_wbp', 5, 5, wbp_ack_i=1, wbp_dat_i=0xc1); put('u_wbp', 6, 6, wbp_ack_i=1, wbp_dat_i=0xc2)
+    port('u_obi', dict(data_req_o=1, data_gnt_i=1, data_addr_o=32, data_we_o=1, data_wdata_o=32, data_rvalid_i=1, data_rdata_i=32, data_err_i=1))
+    o = 'u_obi'; put(o, 2, 2, data_req_o=1, data_gnt_i=1, data_addr_o=0x60, data_we_o=1, data_wdata_o=7); put(o, 3, 4, data_req_o=1, data_addr_o=0x64); put(o, 4, 4, data_gnt_i=1)
+    put(o, 4, 4, data_rvalid_i=1); put(o, 6, 6, data_rvalid_i=1, data_rdata_i=0x99)
+    ids, lines, k = {}, ['$timescale 1ns $end', '$scope module tb $end', '$var wire 1 ! clk $end'], 0
+    code = lambda i: ''.join(chr(34 + (i // 90 ** j) % 90) for j in range(1 + (i >= 90)))
+    for mod, sigs in mods.items():
+        lines.append(f'$scope module {mod} $end')
+        for n, (w, _) in sigs.items():
+            k += 1; ids[(mod, n)] = code(k); lines.append(f'$var wire {w} {ids[(mod, n)]} {n}{f" [{w - 1}:0]" if w > 1 else ""} $end')
+        lines.append('$upscope $end')
+    lines += ['$upscope $end', '$enddefinitions $end']
+    fmt = lambda w, v, i: f'{v}{i}' if w == 1 else f'b{v:b} {i}'
+    last = {}
+    for c in range(N + 1):
+        lines.append(f'#{10 * c}'); lines.append(('1' if c else '0') + '!')
+        for mod, sigs in mods.items():
+            for n, (w, vals) in sigs.items():
+                v = vals[c] if c < N else 0
+                if last.get((mod, n)) != v: lines.append(fmt(w, v, ids[(mod, n)])); last[(mod, n)] = v
+        lines.append(f'#{10 * c + 5}'); lines.append('0!')
+    path.write_text('\n'.join(lines) + '\n')
+
+
+def buses(browser, build):
+    """Stage 11: bus.js on a dump with a port of every protocol (bus_vcd), and on the APB / AXI-Lite example pages."""
+    d = build / 'smoke'; d.mkdir(parents=True, exist_ok=True)
+    vcd, cfg, html = d / 'buses.vcd', d / 'buses.config.json', d / 'buses.html'
+    bus_vcd(vcd)
+    py = lambda *a: subprocess.run([sys.executable, '-I', *map(str, a)], capture_output=True, text=True)
+    r = py(ROOT / 'tools' / 'mkconfig.py', vcd, '--out', cfg, '--force')
+    if r.returncode == 0:
+        r = py(ROOT / 'tools' / 'mkhtml.py', '--config', cfg, '--no-sva', '--reproducible', '--out', html)
+    check(r.returncode == 0, 'the bus page built' + (': ' + r.stderr.strip()[-300:] if r.returncode else ''))
+    if r.returncode:
+        return
+    print('buses')
+    page = browser.new_page(viewport={'width': 1400, 'height': 1000})
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(html.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()')
+    got = page.evaluate("""(() => { const v = document.querySelector('.wv').waveView;
+        return Object.fromEntries(v.buses.list().map(p => [p.scope.split('.').pop(), [p.label || p.proto, p.D.tx.map(x => x.label + (x.err ? ' !' : '') + ' ' + x.lat)]])); })()""")
+    want = {
+        'u_axi': ['AXI4', ['W 0x100 ← 0xa1 ×2 6', 'R 0x200 → 0x21 6', 'R 0x300 → 0x31 ×2 4', 'W 0x400 ← 0xbad ! 2']],
+        'u_axis': ['axis', ['2 beats 0x5 3']],
+        'u_apb': ['apb', ['W 0x10 ← 0x55 3', 'R 0x14 → 0x77 ! 2']],
+        'u_ahb': ['ahb', ['W 0x20 ← 0x99 2', 'R 0x24 → 0x88 2', 'W 0x40 ← 0x1 ×3 5']],
+        'u_avmm': ['avmm', ['W 0x8 ← 0x11 2', 'R 0xc → 0xa 3', 'R 0x10 → 0xb 3']],
+        'u_avst': ['avst', ['3 beats 0x1 3']],
+        'u_wb': ['Wishbone', ['W 0x30 ← 0x12 2', 'R 0x34 → 0xab 2']],
+        'u_wbp': ['Wishbone pipelined', ['R 0x50 → 0xc1 4', 'R 0x54 → 0xc2 4']],
+        'u_obi': ['obi', ['W 0x60 ← 0x7 3', 'R 0x64 → 0x99 4']],
+    }
+    for k, w in want.items():
+        check(got.get(k) == w, f'{k}: {w[0]}: the transfers, their errors and cycles {got.get(k)}')
+    # a click on a transaction (on the folded group's header): the cursor at its start, its range, its signals highlighted
+    sel = page.evaluate("""(() => { const v = document.querySelector('.wv').waveView, p = v.buses.list().find(p => p.proto === 'apb'), x = p.D.tx[1];
+        v.buses.select(p, x); return [v.cursor === x.t0, v.range && v.range[0] === x.t0 && v.range[1] === x.t1, v.extraPicks.size, v.vis.some(r => r === v.buses.st.get(p.key).g)]; })()""")
+    c = page.locator('.wv canvas').first; c.focus(); page.evaluate("document.querySelector('.wv').waveView.cursor = 0")
+    page.keyboard.press(']'); page.keyboard.press('t'); t1 = page.evaluate("document.querySelector('.wv').waveView.cursor")
+    check(sel[:2] == [True, True] and sel[2] >= 8 and sel[3] and t1 == 20000, f'a transaction selected: the cursor at its start, its range measured, its signals highlighted; ]t: the first one {sel} {t1}')
+    svg = page.evaluate("WaveFW.WaveSVG.toString(WAVES[Object.keys(WAVES)[0]])")
+    check(svg.count('⇄') >= 9 and 'W 0x100' in svg, f'the static SVG draws the ports and their transactions ({svg.count("⇄")} ports)')
+    check(not errs, 'no page errors (buses)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
+    for ex, want2 in (('apb/apb.html', ['W 0x4 ← 0xcafe0001', 'R 0x4 → 0xcafe0001', 'W 0x40 ← 0xdeadbeef !']), ('axi_lite/axi_lite.html', ['W 0x8 ← 0x1234abcd', 'R 0x8 → 0x1234abcd'])):
+        if not need(build / 'examples' / ex, how='make examples'):
+            continue
+        page.goto((build / 'examples' / ex).as_uri()); page.wait_for_load_state('networkidle')
+        g = page.evaluate("document.querySelector('.wv').waveView.buses.list().map(p => p.D.tx.map(x => x.label + (x.err ? ' !' : '')))")
+        check(g == [want2], f'{ex}: its port found and decoded {g}')
+    page.close()
+
+
+def tips(browser, build):
+    """Every control of a viewer has a tooltip (what it does, its keys), ours instead of the browser's; ? shows the keys."""
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('tooltips and help')
+    page = browser.new_page(viewport={'width': 1400, 'height': 1000})
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()')
+    js = lambda e: page.evaluate(f"(() => {{ const v = document.querySelector('.wv').waveView; return {e}; }})()")
+    js('(v.mark("x"), 0)')   # the bookmark list too
+    miss = page.evaluate("""[...document.querySelector('.wv').querySelectorAll('button, input:not([type=file]), select, .mk')].filter(e => !WaveFW.tips.of(e)).map(e => e.outerHTML.slice(0, 80))""")
+    check(not miss, f'every button, field and list of a viewer (bar, assertions, bookmarks) has a tooltip (missing: {miss[:5]})')
+    b = page.locator('.wv button[data-act=in]').first; b.hover(); page.wait_for_timeout(600)
+    tip = page.locator('.wv-tip')
+    got = [tip.count() == 1 and tip.locator('span').first.inner_text(), tip.locator('kbd').all_inner_texts(), b.get_attribute('title')]
+    page.mouse.move(5, 5); page.wait_for_timeout(100); got.append(tip.count())
+    check(got == ['Zoom in', ['i', '+', 'ctrl+wheel'], None, 0], f'hover: "Zoom in" and its keys after a moment, no browser tooltip, gone when the pointer leaves {got}')
+    page.locator('.wv canvas').first.click(); page.keyboard.press('?')
+    hl = page.locator('.wv-help')
+    hk = [hl.count(), hl.locator('h4').all_inner_texts(), ']f' in hl.inner_text() and ']t' in hl.inner_text()]
+    page.keyboard.press('Escape'); hk.append(hl.count()); page.locator('.wv button[data-act=help]').first.click(); hk.append(hl.count())
+    page.mouse.click(5, 5); hk.append(hl.count())
+    check(hk[0] == 1 and hk[1][:5] == ['ZOOM AND MOVE', 'CURSOR AND EDGES', 'SIGNALS', 'FIND', 'MEASURE AND MARK'] and hk[2] and hk[3:] == [0, 1, 0],
+          f'? (key and button): the keys and the mouse by what they do, the plugins\' too (]f, ]t); Esc or a click outside closes it {hk}')
+    c = page.locator('.wv canvas').first; bb = c.bounding_box(); page.mouse.click(bb['x'] + 200, bb['y'] + 60, button='right')
+    kk = page.locator('.wv-menu button[data-m=copyname] .kk').inner_text() if page.locator('.wv-menu button[data-m=copyname]').count() else None
+    page.keyboard.press('Escape')
+    check(kk == 'yy', f'the menu shows the keys of its items (Copy the path: {kk})')
+    check(not errs, 'no page errors (tooltips, help)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
+    page.close()
+
+
 def spike(browser, build):
     """make sva-spike: sva-core as WebAssembly in a page."""
     path = build / 'sva' / 'spike.html'
@@ -1655,6 +1993,10 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'sva_hardening': 'stage 6.1 on the example pages',
     'sva_waves': 'stage 7: the assertion groups on the waves',
     'sva_exprs': 'stage 10: expressions in the bar (search, rows ƒ, kept, JSON), names in a hierarchy',
+    'state': 'Save / Load… of a viewer (the APB and AXI-Lite pages): its state to a file and back, on other waves',
+    'ranges': 'a range on the waves (shift+drag, the right button) and its menu: zoom, bookmarks, the picture, a colour',
+    'tips': 'every control has a tooltip with its keys; ? shows the keys and the mouse',
+    'buses': 'stage 11: bus transactions (AXI4, AXI4-Stream, APB, AHB, Avalon-MM / ST, Wishbone, OBI) on a dump of every protocol and the examples',
     'sva_report': 'stage 8: the report against sva eval',
     'sva_edit': 'an assertion edited in the page (✎, Apply, kept, Revert, a bad text) and read from the disk again (⟳, Watch)',
     'sva_report_hardening': 'stage 8.1: names, aliases, recovery, caps, print, mkconfig --update, make html SVA=',
@@ -1766,6 +2108,10 @@ def main():
         run('sva_hardening', sva_hardening, b, build)
         run('sva_waves', sva_waves, b, build)
         run('sva_exprs', sva_exprs, b, build)
+        run('state', state, b, build)
+        run('ranges', ranges, b, build)
+        run('buses', buses, b, build)
+        run('tips', tips, b, build)
         run('sva_report', sva_report, b, build)
         run('sva_edit', sva_edit, b, build)
         run('sva_report_hardening', sva_report_hardening, b, build)

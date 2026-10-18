@@ -5,7 +5,7 @@
    (null removes a key). Values here are the built-in defaults, except sortIgnore. */
 window.WAVEFW_CONFIG = {
   theme: null,                  // 'light' | 'white' | 'dark'; null = auto (prefers-color-scheme)
-  colors: {},                   // trace bus x xfill z bg header grid text muted accent page c3…c9, or any --css-var
+  colors: {},                   // trace bus x xfill z bg header grid text muted accent page c3…c9 band, or any --css-var
   rowHeight: 26,                // px: signal row
   groupHeight: 22,              // px: group header row (static SVG default: 20)
   spaceHeight: 14,              // px: {} spacer row (static SVG default: 12)
@@ -32,6 +32,11 @@ window.WAVEFW_CONFIG = {
   groupOrder: 'file',           // inside every group: 'last' = signals first, then the sub-groups (modules); 'first'; 'file' = as given
   findHighlight: true,          // fuzzy find: found rows in front, the rest dimmed
   findOpen: true,               // fuzzy find: every module folded except the ones with a match
+  wheel: 'scroll',              // the wheel scrolls the rows, ctrl+wheel zooms (as in Questa); 'zoom': the wheel zooms
+  busDetect: true,              // bus.js: the bus ports found by their signal names (AXI, AXI-Stream, APB, AHB, Avalon, Wishbone, OBI) drawn as transactions
+  buses: null,                  // bus.js: ports of your own [{protocol, scope, prefix?, map?: {role: name}, clock?, name?}] (busDetect: false: only these)
+  contextMenu: true,            // the right button on the waves: a range and the viewer's menu (picture, colour, …); false: the browser's
+  cursorSnap: 8,                // px: a click on the waves puts the cursor on an edge of that signal this near (alt+click: not); 0 = off
   moduleShading: true,          // signals of neighbouring modules on alternating backgrounds, a line where the module changes
   svaSignals: 'view',           // assertion groups (sva.js): the bound signals again under the steps: 'view' (viewers), true (also static SVGs), false
   svaShow: null,                // assertion groups drawn: null = all, or labels / * patterns ['apb_*']
