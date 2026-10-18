@@ -157,20 +157,44 @@
 .wv .sva button:disabled { opacity: 0.45; cursor: default; border-color: var(--line); color: var(--fg); }
 .wv .sva button.tw { border: 0; padding: 0 4px 0 0; background: none; }
 .wv .sva .ic { padding: 1px 6px; }
-.wv .sva ol.asv { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 1px; max-height: min(15.5em, 30vh); overflow-y: auto; resize: vertical; }
-.wv .sva ol.asv > li { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: center; padding: 1px 4px; border-radius: 4px; cursor: grab; }
-.wv .sva .b1, .wv .sva .bb, .wv .sva .ab { display: inline-flex; flex-wrap: wrap; gap: 2px 8px; align-items: center; }
-.wv .sva .bb, .wv .sva .ab { gap: 4px; }
-.wv .sva ol.asv > li > .ab { margin-left: auto; }
-.wv .sva ol.asv > li:hover { background: var(--panel-2); }
+/* ✎: the editor of an assertion under its line; "edited" / "from disk": this browser's copy replaces the page's file */
+.wv .sva .sve { flex-basis: 100%; display: grid; gap: 4px; margin: 4px 0 2px; }
+.wv .sva .sve textarea.src { font: 12px/1.45 var(--font-mono); width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); color: var(--fg); resize: vertical; tab-size: 4; }
+.wv .sva .sve textarea.src:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+.wv .sva .sve .eb { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+.wv .sva .sve .em { color: var(--sva-fail); font-size: 12px; }
+.wv .sva .ed { font-size: 11px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--accent); color: var(--accent); }
+/* the list of assertions: a table on one grid (subgrid rows): #, name, kind, property, bound to, results, the
+   binding's buttons, the assertion's buttons; the header sticks while the list scrolls. The instance path wraps
+   after its dots (<wbr>) or anywhere, nothing added: it copies as one line */
+.wv .sva ol.asv { list-style: none; margin: 4px 0 0; padding: 0; display: grid; column-gap: 10px; align-content: start; overflow: auto; resize: vertical;
+  max-height: min(17em, 32vh); grid-template-columns: max-content minmax(10ch, max-content) max-content minmax(12ch, 46ch) minmax(10ch, 30ch) max-content max-content max-content; }
+.wv .sva ol.asv > li { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; padding: 1px 4px; border-radius: 4px; border-top: 1px solid var(--line); cursor: grab; }
+.wv .sva ol.asv > li.hd { position: sticky; top: 0; z-index: 1; background: var(--panel-2); border-top: 0; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; cursor: default; }
+.wv .sva ol.asv > li.hd > span { white-space: nowrap; }
+.wv .sva .an { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); text-align: right; white-space: nowrap; }
+.wv .sva .an .grip { margin-right: 4px; }
+.wv .sva .nm { display: inline-flex; gap: 6px; align-items: center; min-width: 0; }
+.wv .sva .nm .al { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wv .sva ol.asv > li > .b1 { grid-column: 5 / span 3; display: grid; grid-template-columns: subgrid; align-items: center; }
+.wv .sva .b1 > .st { grid-column: 1; min-width: 0; }
+.wv .sva .b1 > .st.no, .wv .sva .b1 > .st.run { grid-column: 1 / span 2; }
+.wv .sva .b1 > .cn { grid-column: 2; white-space: nowrap; }
+.wv .sva .b1 > .bb, .wv .sva ul.bnd > li > .bb { grid-column: 3; }
+.wv .sva .b1 > ol.atl, .wv .sva ul.bnd > li > ol.atl { grid-column: 1 / -1; margin-left: 0; }
+.wv .sva .bb, .wv .sva .ab { display: inline-flex; flex-wrap: nowrap; gap: 4px; align-items: center; }
+.wv .sva ol.asv > li > .ab { grid-column: 8; }
+.wv .sva .st b.sp { overflow-wrap: anywhere; user-select: text; cursor: text; }   /* selectable inside the draggable line (sva.js: no drag from it) */
+.wv .sva ol.asv > li > .pick, .wv .sva ol.asv > li > .sve { grid-column: 1 / -1; }
+.wv .sva ol.asv > li:not(.hd):hover { background: var(--panel-2); }
 .wv .sva ol.asv > li.here, .wv .sva ul.bnd > li.here { background: var(--panel-2); box-shadow: inset 3px 0 0 var(--accent); }
 .wv .sva ol.asv > li { cursor: pointer; } .wv .sva ol.asv > li .grip { cursor: grab; }
 .wv .sva .grip { color: var(--muted); letter-spacing: -2px; }
 .wv .sva .al { font-family: var(--font-mono); font-size: 12px; }
 .wv .sva .ak { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; }
 .wv .sva .ak.k-cover { color: var(--accent); }
-.wv .sva code.at { flex: 1 1 14ch; min-width: 0; font-family: var(--font-mono); font-size: 11.5px; max-width: 48ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); opacity: 0.85; }
-.wv .sva .sg { flex: 0 1 12ch; min-width: 0; font-family: var(--font-mono); font-size: 11px; color: var(--muted); max-width: 26ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wv .sva code.at { min-width: 0; font-family: var(--font-mono); font-size: 11.5px; color: var(--fg); opacity: 0.85; padding-left: 2ch; text-indent: -2ch; user-select: text; cursor: text; }   /* lines after the first indented */
+.wv .sva code.at .pp { display: inline-block; max-width: 100%; text-indent: 0; vertical-align: top; overflow-wrap: anywhere; }   /* a part wraps as a whole (inside: at its spaces) */
 .wv .sva .st { font-size: 11.5px; color: var(--muted); }
 .wv .sva .st.ok { color: var(--sva-ok); }
 .wv .sva .st.no { color: var(--sva-no); }
@@ -182,8 +206,11 @@
 .wv .sva .cn { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
 .wv .sva .cn .c-fail { color: var(--sva-no); font-weight: 600; }
 .wv .sva .cn .c-fail.zero { color: var(--muted); font-weight: 400; }
-.wv .sva ul.bnd { flex-basis: 100%; list-style: none; margin: 0 0 2px 22px; padding: 0; display: grid; gap: 2px; cursor: default; }
-.wv .sva ul.bnd > li { display: flex; flex-wrap: wrap; gap: 3px 8px; align-items: center; }
+.wv .sva ul.bnd { grid-column: 1 / -1; list-style: none; margin: 0 0 2px; padding: 0; display: grid; grid-template-columns: subgrid; row-gap: 2px; cursor: default; }
+.wv .sva ul.bnd > li { grid-column: 5 / span 3; display: grid; grid-template-columns: subgrid; align-items: center; }
+.wv .sva ul.bnd > li > .st { grid-column: 1; min-width: 0; }
+.wv .sva ul.bnd > li > .st.no, .wv .sva ul.bnd > li > .st.run { grid-column: 1 / span 2; }
+.wv .sva ul.bnd > li > .cn { grid-column: 2; white-space: nowrap; }
 .wv .sva .pick { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin-left: 22px; padding: 4px 6px; border: 1px dashed var(--line); border-radius: 4px; cursor: default; }
 .wv .sva .pick .muted { color: var(--muted); font-size: 11.5px; }
 .wv .sva .pick .no { color: var(--sva-no); font-size: 11.5px; }
@@ -206,6 +233,31 @@
 .wv .names .row.sva-lane .v.fail, .wv .names .row.sva-lane .v { font-weight: 600; }
 .wv .bar .svj button.fail { color: var(--sva-fail); }
 /* numbers of the assertions (stage 8): totals, the table, the failure list; a count is a filter button */
+/* expressions (stage 10): the field in the bar, the ƒ rows; Why: the selected attempt taken apart, a column per cycle */
+.wv .bar input.svq { font: inherit; font-family: var(--font-mono); font-size: 11.5px; width: 26ch; padding: 2px 6px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); }
+.wv .bar input.svq:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+.wv .bar input.svq.bad { border-color: var(--sva-fail); }
+.wv .bar .svqn { font-family: var(--font-mono); font-size: 11px; color: var(--muted); min-width: 3ch; }
+.wv .names .row.sva-xg .n { color: var(--accent); }
+.wv .names .row.sva-expr .n { font-family: var(--font-mono); }
+.wv .names .row.sva-expr.bad .n { color: var(--sva-fail); }
+.wv .sva .svw { margin: 4px 0; border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px; }
+.wv .sva .svw .wh { display: flex; gap: 6px; align-items: center; font-size: 12px; }
+.wv .sva .svw .wh .ic { margin-left: auto; }
+.wv .sva .svw .muted { color: var(--muted); font-size: 11.5px; margin: 2px 0; }
+.wv .sva .svw .ww { overflow: auto; max-height: min(20em, 36vh); margin-top: 3px; }
+.wv .sva table.svw-t { border-collapse: collapse; font-family: var(--font-mono); font-size: 11px; }
+.wv .sva table.svw-t th, .wv .sva table.svw-t td { padding: 1px 5px; border-top: 1px solid var(--line); white-space: nowrap; text-align: center; }
+.wv .sva table.svw-t thead th { position: sticky; top: 0; background: var(--panel-2); }
+.wv .sva table.svw-t thead button { border: 0; background: none; padding: 0 2px; font: inherit; color: var(--accent); cursor: pointer; }
+.wv .sva table.svw-t tbody th { text-align: left; font-weight: 400; position: sticky; left: 0; background: var(--panel); max-width: 48ch; overflow: hidden; text-overflow: ellipsis; }
+.wv .sva table.svw-t tr.top th { font-weight: 600; }
+.wv .sva table.svw-t tr.top { border-top: 2px solid var(--line); }
+.wv .sva table.svw-t td.t { color: var(--sva-pass); font-weight: 600; }
+.wv .sva table.svw-t td.f { color: var(--muted); }
+.wv .sva table.svw-t td.x { color: var(--sva-fail); }
+.wv .sva table.svw-t td.hit { box-shadow: inset 0 0 0 1.5px var(--sva-pass); border-radius: 8px; }
+.wv .sva table.svw-t td.miss { background: color-mix(in srgb, var(--sva-fail) 22%, transparent); box-shadow: inset 0 0 0 1.5px var(--sva-fail); color: var(--sva-fail); font-weight: 700; }
 .wv .sva .svx { display: inline-flex; gap: 4px; margin-left: 6px; padding-left: 10px; border-left: 1px solid var(--line); }
 .wv .sva .svx button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 .wv .sva .svr .tot { margin: 4px 0 2px; font-size: 12px; color: var(--muted); }

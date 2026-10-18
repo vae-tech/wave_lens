@@ -1561,7 +1561,7 @@ fn fnv(s: &str) -> u64 {
 }
 
 /// A bus value for the results: a number when it is known (and exact in JSON), else the binary digits with x.
-fn value_json(v: V, w: u32) -> serde_json::Value {
+pub(crate) fn value_json(v: V, w: u32) -> serde_json::Value {
     if v.x == 0 && v.v < 1 << 53 {
         v.v.into()
     } else if v.x == 0 {

@@ -8,7 +8,7 @@ with its "Generated" time. The pictures use IBM Plex (Google Fonts, or a local i
 package fonts-ibm-plex when offline): without it every PNG would differ, so shots.py stops with a message instead.
 Needs `make examples` first (pages in BUILD/examples/) and docs/index.html with docs/demo_waves.js.
 
-  python3 tests/shots.py [--build /tmp/wavefw] [--out docs/img] [--only hero,bar]   (no -I: playwright)
+  python3 tests/shots.py [--build out] [--out docs/img] [--only hero,bar]   (no -I: playwright)
 """
 import argparse, os, pathlib, sys, time
 from playwright.sync_api import sync_playwright
@@ -61,7 +61,7 @@ def js(page, i, expr):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--build', default='/tmp/wavefw', help='the Makefile BUILD directory (examples/<ex>/<ex>.html)')
+    ap.add_argument('--build', default=str(pathlib.Path(__file__).resolve().parent.parent / 'out'), help='the Makefile BUILD directory (examples/<ex>/<ex>.html)')
     ap.add_argument('--out', default=str(ROOT / 'docs' / 'img'))
     ap.add_argument('--only', help='comma-separated shot names')
     a = ap.parse_args()

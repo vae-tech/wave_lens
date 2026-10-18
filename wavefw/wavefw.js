@@ -144,8 +144,9 @@ function orderRows(rows, dir, pfx, groupOrder) {
 // `id` from WaveFW.rowId() and joins the model's groups (folding, Expand / Collapse); a row with draw(P, {y, h, X, tA,
 // tB, xL, xR}) paints itself, a "sig" row with `tr` like a signal. Return the same objects while they stay: the viewer
 // keys its state (selection, highlight, folding) by them. More, all optional: `height` (px), `cls` (classes of its name),
-// `title` (of a group's name), `value(t)` (the value column), `overlay(P, {pos: Map(row -> {y, h}), X, tA, tB, xL, xR})`
-// (drawn once after all rows: arrows between rows), `click(x, y, view)` / `tip(x, y, view)` (a click / the tooltip on
+// `title` (of a group's name), `value(t)` (the value column), `overlay(P, {pos: Map(row -> {y, h}), X, tA, tB, xL, xR, yA, yB})`
+// (drawn once after all rows: arrows between rows; yA–yB the rows drawn; `overlay.rows`: other rows it draws on, it runs
+// when one of those is on screen too), `click(x, y, view)` / `tip(x, y, view)` (a click / the tooltip on
 // the waves, y inside the row; click returns true when it handled it), `same: true` (a copy of a signal shown elsewhere:
 // bookmarks stay on the original), `legend: [{n?, text, color?, bold?}]` (lines under the static SVG).
 let XID = 1e6;
@@ -633,8 +634,13 @@ function paintBody(P, M, lay, X, tA, tB, xL, xR, hl, sel, allLay, band, late, st
   P.fade = 1;
   P.path(sep, { stroke: 'line', w: 1, alpha: 0.5 });
   P.path(edge, { stroke: 'line', w: 1 });   // module borders
+  if (allLay) {   // an overlay that also draws on other rows (f.rows: the signals it marks) runs when one of those is shown
+    const on = new Set(lay.map(o => o.row));
+    for (const o of allLay) { const f = o.row.overlay; if (f && f.rows && !over.has(f) && f.rows.some(r => on.has(r))) over.add(f); }
+  }
   if (over.size) {
-    const pos = new Map((allLay || lay).map(o => [o.row, o])), go = () => { for (const f of over) f(P, { pos, X, tA, tB, xL, xR }); };
+    const yA = lay.length ? lay[0].y : 0, yB = lay.length ? lay[lay.length - 1].y + lay[lay.length - 1].h : 0;   // the rows drawn: from, to
+    const pos = new Map((allLay || lay).map(o => [o.row, o])), go = () => { for (const f of over) f(P, { pos, X, tA, tB, xL, xR, yA, yB }); };
     if (late) late.push(go); else go();
   }
   paintEdges(P, M, rowY, X);

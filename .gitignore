@@ -4,7 +4,8 @@
 # pages built from your configs by make html (self-contained copies of wavefw.js + data)
 work/*.html
 examples/*/*.html
-# build products with make BUILD=build (default BUILD is /tmp/wavefw)
+# build products: make's BUILD (default out/; make BUILD=build … the older place)
+out/
 build/
 # Python caches
 __pycache__/

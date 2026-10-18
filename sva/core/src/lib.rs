@@ -13,6 +13,7 @@ mod ast;
 mod consts;
 mod engine;
 mod expand;
+mod explain;
 mod expr;
 mod lex;
 mod parse;
@@ -24,6 +25,7 @@ mod summary;
 mod value;
 
 pub use ast::*;
+pub use explain::{explain, expressions};
 pub use engine::{evaluate, evaluate_all, text, Attempt, Column, Options, Outcome, Results, StepInfo, Stats, Status, Trace, TraceStep, XMode};
 pub use value::V;
 pub use lex::Span;
@@ -106,6 +108,13 @@ impl Unit {
         self.st.macros.insert(name.to_string(), pre::Macro { params: None, body });
     }
 
+    /// One expression in this unit (after its files): macros applied, constants resolved, its signals
+    /// (`expand::expression`).
+    pub fn expression(&mut self, src: &str) -> Result<(Expr, Vec<SignalRef>), SvaError> {
+        let e = parse_in(&mut self.st, src, |p| p.expr())?;
+        expand::expression(&self.st, &e)
+    }
+
     pub fn parse(&mut self, src: &str) -> Parsed {
         let mut diag = pre::Diag::default();
         let toks = pre::preprocess(lex::lex(src), &mut self.st.macros, &mut diag);
@@ -160,13 +169,16 @@ pub fn parse(src: &str) -> Parsed {
 }
 
 fn parse_one<T>(src: &str, f: impl FnOnce(&mut parse::Parser) -> Result<T, SvaError>) -> Result<T, SvaError> {
-    let mut st = parse::UnitState::default();
+    parse_in(&mut parse::UnitState::default(), src, f)
+}
+
+fn parse_in<T>(st: &mut parse::UnitState, src: &str, f: impl FnOnce(&mut parse::Parser) -> Result<T, SvaError>) -> Result<T, SvaError> {
     let mut diag = pre::Diag::default();
     let toks = pre::preprocess(lex::lex(src), &mut st.macros, &mut diag);
     if let Some(e) = diag.errors.into_iter().next() {
         return Err(e);
     }
-    let mut p = parse::Parser::new(src, toks, &mut st, pre::Diag::default());
+    let mut p = parse::Parser::new(src, toks, st, pre::Diag::default());
     let x = f(&mut p)?;
     if !matches!(p.tok(), lex::Tok::End) {
         return p.expected("the end of the text");
@@ -193,6 +205,11 @@ pub fn run(source: &str, trace: &Trace, opt: &Options, only: &[String]) -> Resul
 /// assertions of the last unit are kept, so evaluating it again (the page: one request per binding or clock) does not
 /// parse it again.
 pub fn run_unit(sources: &[String], trace: &Trace, opt: &Options, only: &[String]) -> Result<Results, Vec<SvaError>> {
+    evaluate_all(&unit_assertions(sources)?, trace, opt, only)
+}
+
+/// The assertions of the files read as one unit, from the cache when the files are the last ones read.
+fn unit_assertions(sources: &[String]) -> Result<std::rc::Rc<Vec<Assertion>>, Vec<SvaError>> {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     sources.hash(&mut h);
@@ -211,7 +228,7 @@ pub fn run_unit(sources: &[String], trace: &Trace, opt: &Options, only: &[String
             a
         }
     };
-    evaluate_all(&asserts, trace, opt, only)
+    Ok(asserts)
 }
 
 thread_local! {
@@ -241,13 +258,29 @@ struct Request {
     /// with `report`: `"md"`, `"junit"` or `"html"` adds that text
     #[serde(default)]
     format: Option<String>,
+    /// expressions of the page (virtual signals, searches) in the unit of `files`; with `trace` their values too
+    #[serde(default)]
+    exprs: Vec<String>,
+    /// with `files` and `trace`: the booleans of one assertion and their parts, valued over cycles `from..=to`
+    #[serde(default)]
+    explain: Option<ExplainReq>,
+}
+
+#[derive(Deserialize)]
+struct ExplainReq {
+    assert: String,
+    from: usize,
+    to: usize,
 }
 
 /// JSON in, JSON out (the WebAssembly entry point). `{"source": "..."}` -> the [`Parsed`] file; `{"files": ["...",
 /// ...]}` (the texts of several files, one compilation unit) -> `{"files": [Parsed, ...]}`; with `"trace": {...}`,
 /// `"options"?: {...}` and `"assert"?: ["name", ...]` either gives the [`Results`] of its assertions or
 /// `{"errors": [{"line", "col", "msg", ...}]}`. `{"report": {"meta", "results": [...]}, "format"?: "md" | "junit" |
-/// "html"}` -> `{"summary": {...}, "text"?: "..."}` (the report of stage 8).
+/// "html"}` -> `{"summary": {...}, "text"?: "..."}` (the report of stage 8). `{"files"?, "exprs": ["a && b", ...],
+/// "trace"?}` -> `{"exprs": [{"text", "signals": [...], "width"?, "values"?: [...] } | {"text", "errors"}]}` (the page's
+/// virtual signals and searches, [`expressions`]); `{"files", "trace", "explain": {"assert", "from", "to"}}` -> `{"explain":
+/// [...]}` ([`explain`]).
 pub fn run_json(request: &str) -> String {
     let out = match serde_json::from_str::<Request>(request) {
         Err(e) => serde_json::json!({ "errors": [{ "line": e.line(), "col": e.column(), "msg": format!("request: {e}") }] }),
@@ -267,6 +300,17 @@ pub fn run_json(request: &str) -> String {
                     Err(f) => serde_json::json!({ "errors": [{ "line": 0, "col": 0, "msg": format!("report: no format '{f}' (md, junit, html)") }] }),
                 }
             }
+        },
+        Ok(Request { files, exprs, trace, .. }) if !exprs.is_empty() => serde_json::json!({ "exprs": expressions(&files, &exprs, trace.as_ref()) }),
+        Ok(Request { files, trace: Some(t), explain: Some(x), .. }) => match unit_assertions(&files) {
+            Err(errors) => serde_json::json!({ "errors": errors }),
+            Ok(asserts) => match asserts.iter().find(|a| a.label == x.assert) {
+                None => serde_json::json!({ "errors": [{ "line": 0, "col": 0, "msg": format!("explain: no assertion '{}'", x.assert) }] }),
+                Some(a) => match explain(a, &t, x.from, x.to) {
+                    Ok(v) => serde_json::json!({ "explain": v }),
+                    Err(m) => serde_json::json!({ "errors": [{ "line": 0, "col": 0, "msg": format!("explain: {m}") }] }),
+                },
+            },
         },
         Ok(Request { source, files, trace, options, assert, .. }) => {
             let one = files.is_empty();

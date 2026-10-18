@@ -183,9 +183,12 @@ instance in which every signal resolves, `"show": true` when there is only one s
 it keeps your choices, the lines and keys you wrote and the other files of `"sva"` (a mistyped `SVA=` stops `make`).
 `mkhtml.py` parses the files (`sva parse --json`; errors become a note in the page, not a failed build) and evaluates
 every binding over the dump, so the page opens with them bound and drawn. In the page every viewer has an **assertions**
-group in its bar (**Load file…** reads more `.sv` / `.sva` files into this browser) and a panel under the bar: one line
-per assertion with its label, kind, property, signals and binding — *unbound*, *bound to tb.dut.u_apb* with its counts,
-or *cannot bind* with what is missing. Drag a line onto a module in the names column (the modules that have all its
+group in its bar (**Load file…** reads more `.sv` / `.sva` files into this browser) and a panel under the bar: a table, one
+numbered line per assertion with the columns **#**, **Assertion**, **Kind**, **Property** (wrapped at its operators —
+`|->`, `|=>`, `##`, `intersect`, `throughout`, `and`, `or`, … — the lines after the first indented; its tooltip: the
+file, the line and the signals it needs), **Bound to** (*unbound*, the instance — `tb.dut.u_apb` — or *cannot bind* with what is
+missing; a long path wraps after its dots; it and the property copy as one line), **Results** (its counts) and the buttons; with
+several bindings, one line each under it in the same columns. Drag a line onto a module in the names column (the modules that have all its
 signals turn green; the others fade and say what they miss), or press **Bind…** for the list. Names resolve by one rule
 everywhere (the page, `mkconfig.py --sva`, `sva eval --resolve scope`): the exact name in the instance, then the shown
 name (`alias`), then the name without the `sortIgnore` prefixes (`valid` finds `s_valid`), `u_fifo.full` below it; only
@@ -197,12 +200,31 @@ browser (**Clear** forgets them); the panel's **JSON** button gives the `"bind"`
 `mkhtml.py --no-sva` leaves the engine (`sva.js` + `sva.wasm.js`, ~330 kB) out of a page and evaluates nothing. A
 loaded file the engine cannot read is an error line in the panel and is not kept; the page's own assertions go on.
 
+**Edit and run again.** Every line of the panel has **✎** and **⟳**, so you can change a check and see it on the waves
+without building the page again:
+
+- **✎** opens the assertion's statement (its label to the `;`, the `else $error(…)` with it) under its line. Change it
+  and press **Apply** (ctrl+Enter): its file is parsed again in the page and only the bindings of the assertions whose
+  text changed are evaluated again — the others keep their results; the attempts, steps and arrows on the waves follow.
+  A text that does not parse is not applied: the editor keeps it and says where it stops. The edited file is this
+  browser's copy (kept over a reload, marked **edited** on the lines that differ from the page's file);
+  **Revert to the page's** in the editor, or **Clear**, brings the page's file back. Copy the text into your source
+  when you are happy with it.
+- **⟳** reads the assertion's file from the disk again. The first time the browser asks you to pick the file (Chrome /
+  Edge keep it: after a reload of the page only the permission is asked again; Firefox and Safari have no such API and
+  ask every time); its changed assertions are marked **changed** and evaluated again.
+- **Watch** (in the panel's header, Chrome / Edge) checks every second the files read with ⟳: save one in your editor
+  and the page parses it and evaluates its bindings again by itself.
+
+The static SVG figures of a page keep the results the page was built with.
+
 **On the waves**, every bound assertion is a group directly under its instance (the top of the diagram for the view's
 own scope): **⚑ a_req_ack · 40 pass · 2 fail**, red when it fails, foldable, found by its name and step labels,
 highlighted and copied (`a_req_ack@tb.dut`) like a module. Inside:
 
-- **attempts**: a bar per attempt — green pass, red fail, grey disabled, striped active, hatched grey capped (no
-  verdict); three rows, more merged with a count — under a thin strip with one mark per cycle, so failures are red
+- **attempts**: a bracket per attempt, `┌──┐` from its first to its last cycle, so its start and end are plain — green
+  pass; a failure green up to its last matched step and red from there to where it failed; grey disabled; an active
+  (not ended) or capped one open at its end, striped; where attempts crowd, a bar; three rows, more merged with a count — under a thin strip with one mark per cycle, so failures are red
   ticks even with the whole dump in view. The value column shows the attempt at the cursor; a tooltip its start → end times, cycles and note.
 - one row per **step** of the sequence (`1. req`, `2. ##[1:3] ack`): a numbered circle at every match (a dot where they crowd), a red ✕ where an
   attempt failed. The step's role (antecedent, consequent, condition) is in the static figure's legend.
@@ -210,6 +232,11 @@ highlighted and copied (`a_req_ack@tb.dut`) like a module. Inside:
   reason (`no ack within [1:3]`): for every attempt on screen when there are fewer than 20, else for the selected one; a long trace kept in part
   shows its cut as a grey dashed `… nT (trace cut)`.
 - the **bound signals** again (`= req`; `"svaSignals": false` leaves them out).
+- the **selected attempt on the signals**: its numbered circles (and the ✕) on the rows each step reads — the names in
+  the step's label, `1. PSEL && PENABLE` on PSEL and on PENABLE — joined by arrows, on the bound signals of the
+  instance and on their copies in the group; its **start and end** as dashed lines across the rows with flags in the
+  group's band: `▶ start`, and how it ended — `✓ pass`, `✕ fail`, `… not ended` (still active at the end of the dump),
+  `⊘ disabled`, `… capped` (one flag, `▶ ✓ pass`, when it starts and ends in one cycle).
 
 **Click a line of the panel** to go to that assertion: its group opens on the waves with its first failure (else its
 first pass) selected at the zoom you have, the attempt in the middle of the window; click again for its next one,
@@ -217,7 +244,26 @@ first pass) selected at the zoom you have, the attempt in the middle of the wind
 `F`: the attempt is **selected** — the cursor at its start, the view moved to it at the same zoom, its circles and arrows in front, the
 signals it read highlighted; Esc clears it. With more than three assertions at one place the ones without failures
 start folded; `"svaShow": ["apb_*"]` limits which are drawn. A `"render": "svg"` view draws the same rows with every
-attempt's arrows and a legend of the steps.
+attempt's arrows and a legend of the steps, and the first failure (else the first attempt) of each assertion on its
+signals with its start and end flags.
+
+**Why.** With an attempt selected the panel shows **Why**: the assertion's booleans (its steps, an `if` condition,
+`disable iff`), each taken apart into its operands (`PSEL && PENABLE` → `PSEL`, `PENABLE`; `$rose(req)` → `req`), one
+column per cycle of the attempt (at most 64) with the value of every part — 1 green, 0 grey, x red, buses in hex. A
+cell where a step matched is ringed, the one where the attempt failed is red, so the operand that broke it is read off
+directly. A cycle's header puts the cursor there; ✕ or Esc closes it.
+
+**Expressions** (the **expression** field in the bar). Any expression of the signals, written as in an assertion —
+`PSEL && !PREADY`, `state == pkg::WAIT && timeout`, `addr[7:4] == 4'h3`, `$rose(req)`; `@(posedge PCLK) …` samples it
+at the clock's edges like an assertion, without a clock it is valued after every change of its signals. Names are
+looked up from the selected signal's module up to the top (or give a full path); package constants come from the loaded
+files.
+- **Enter** / **shift+Enter**: the cursor to the next / previous time it becomes true, round the ends; the field shows
+  which one of how many (`2/3`).
+- **+ Row** draws it as a signal in the group **ƒ expressions** under the top (a bus when it is wider than a bit);
+  click a row's name to put it back in the field, **− Row** removes it. The rows are kept in this browser, the JSON
+  button lists them as `"exprs"`, and a config's `"exprs": ["…", {"expr": "…", "scope": "tb.dut"}]` (or `vcd2wavedrom
+  --expr`) puts them in the page, the static SVG included.
 
 ![The assertions panel: totals, one row per binding, the failures](img/sva-table.png)
 
@@ -397,7 +443,7 @@ WaveDrom 3.5.0.
 | `arrows: [{from, to, shape, head, line, color, label}]` | arrows between bookmarks: shape `- ~ -~ ~- -\| \|- -\|-`, head `> <> <` or `""`, line `solid dashed dotted` |
 | `markers: [{t \| cycle, label}]` | dashed markers; they become jump buttons when there are ≤ 6 and no `jumps` |
 | `jumps: [{t \| cycle, span, label}]`, `cursor` | jump buttons and the initial cursor |
-| `sva: {files?, bind, notes?}` | assertions (`wavefw/sva.js`): `files: [{name, path, source, parsed?}]` (`parsed`: `sva parse --json`, else the page parses), `bind: [{assert, scope, results?}]` (`scope` an instance path, `""` the top of the diagram; `results` from `sva eval`, else evaluated when the page opens) |
+| `sva: {files?, bind, notes?, exprs?}` | assertions (`wavefw/sva.js`): `files: [{name, path, source, parsed?}]` (`parsed`: `sva parse --json`, else the page parses), `bind: [{assert, scope, results?}]` (`scope` an instance path, `""` the top of the diagram; `results` from `sva eval`, else evaluated when the page opens), `exprs: ["expr" \| {expr, scope}]` (rows ƒ, valued in the page) |
 | `meta.scope` | the converter's `--scope`: the instance the top rows belong to |
 | `signal[i].width`, `raw` (clock-sampled) | a bus's width, and the hex value of each `data` label when the labels do not read back as values (`bin` `signed` `oct` `ascii` radix, x digits): what the page's assertions sample |
 

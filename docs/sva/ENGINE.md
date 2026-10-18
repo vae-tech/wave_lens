@@ -84,7 +84,9 @@ Over a view of exact transitions the page gives the counts of `sva eval --resolv
 binding of the examples). In a clock-sampled view the first cell has no value before it, so its edge is not a sampling
 point: one attempt less than the dump.
 
-Kept in this browser (`localStorage`): the loaded files (one per name; the page's files come first in the unit), and per
+Kept in this browser (`localStorage`): the loaded files (one per name; the page's files come first in the unit; a file of
+this browser with the name of a page's file replaces it in the unit — an edit with ✎ or a reload from the disk with ⟳ —
+until Revert or Clear), and per
 viewer its bindings, the ones of the config the user unbound, the assertions removed with ✕, and the results evaluated
 in the page when they are under 200 kB (with a hash of the files: other files, evaluated again). The config's bindings
 that are new since join the stored ones. **Clear** forgets this browser's files and the bindings of every viewer of the
@@ -93,6 +95,11 @@ view". A label is unique in its module (as in SystemVerilog): the same label in 
 `module.label` (`cxp_short_pkt_sva.a_hold_until_ready`; the first keeps the plain label) — in the page, the CLI's
 `--assert` and `mkconfig.py --sva` alike. A second assertion with the same label in the same module (a file loaded
 twice) is listed as a note and cannot be bound. A change of the sort prefixes binds again (`wavefw:settings`).
+After the files change (✎ Apply, ⟳, Watch, Load file…) a binding keeps its results only while its assertion is the
+same: the parsed assertion without its position (`asig`) is compared, and the page's build-time results of an assertion
+whose statement differs from the page's file are dropped; the others are evaluated again. ✎ replaces the statement
+from the start of the label's line to the `;` that ends it (`at.start` / `at.end` are UTF-8 byte offsets); a text with
+a new parse error in that file is not applied.
 
 `view.extraRows` (wavefw.js) lets a plugin put rows under a group: they fold, sort as a block after the group's
 signals, are found and highlighted, may draw themselves, and reach the static SVG through `opts.extraRows`.
@@ -103,7 +110,9 @@ copies of the bound rows (`same: true`, `svaSignals`). The drawing reads `attemp
 for the thin per-cycle strip) and places every cycle at `cycles[k]` of the results, so build-time results over a
 clock-sampled view, which have one more cycle, still land on their edges (a bar that starts left of the window is
 clipped). Attempts take three sub-lanes in start order (first fit); the rest share the third, merged where they
-overlap, with a count. Bars, strip marks and circles are binned by pixel, so a redraw with 1200 attempts on screen
+overlap, with a count. An attempt alone in its pixels is a bracket over its cycles (ticks at both ends, open at the
+end when active or capped; a failure green to the last trace point before `failed_at`, red from there, at least the
+failing cycle); merged ones are a bar. Bars, strip marks and circles are binned by pixel, so a redraw with 1200 attempts on screen
 takes about 3 ms. A failure is a red ✕ on the step of `reason.step` (else the last consequent step) at `failed_at`,
 joined to the last matched step by a dashed arrow labelled from `reason.kind` and `note`; `capped` attempts are hatched
 grey, never failures. Arrows follow the trace of the selected attempt, or of every attempt when fewer than 20 are on
@@ -111,7 +120,14 @@ screen (all of them in the static SVG); their labels sit at the arrow's middle a
 the selected attempt's always show — a deliberate difference from the label lanes of bookmark arrows, which would add
 rows per binding and move the layout on every pan. Plugin overlays (these arrows) are drawn over the cursor line, so a
 same-cycle failure arrow under the cursor stays visible. A circle is drawn small, without its number, where its
-neighbour is closer than 14 px. A truncated trace (`"truncated": true`) draws the step across its cut as a grey dashed
+neighbour is closer than 14 px. The selected attempt (the static SVG: the first failure, else the first attempt) is
+drawn on the signals too: the rows a step reads are the names of the assertion's `signals` found in the step's label
+(`sva.js` `stepSignals`: system functions, based literals and strings skipped, `a.b.c` read as the longest known name),
+each matched step a numbered circle on every such row, arrows from the first row of one step to the first of the next
+(on the bound rows and on their copies, each set on its own); its start and end are dashed lines over the rows drawn,
+with flags in the group's band (`▶ start`, then `✓ pass`, `✕ fail`, `… not ended` for an active attempt, `⊘ disabled`,
+`… capped`). The overlay carries `overlay.rows` (the bound rows), so the viewer draws it when one of them is on screen
+even with the group out of view. A truncated trace (`"truncated": true`) draws the step across its cut as a grey dashed
 arrow "… nT (trace cut)", and the bar's tooltip says "trace cut". Tooltips give times first (start → end, failed at),
 cycle numbers in brackets: cycle numbers count from the first edge of the evaluated window (`sva eval --from`, or the
 view's start for an in-page Evaluate), so the same failure can carry another number after an in-page Evaluate;
@@ -123,6 +139,26 @@ scrolls its attempts row to the middle of the waves (`view.centerRow`), marks th
 Clear) drop the selection and the highlight. Changes to several bindings (Clear, ✕) redraw once; the panel's report
 runs at most once per task and only when the bindings' results changed (`resultsKey`). The groups a plugin added to
 the model through `extraRows` leave `M.groups` when the plugin no longer returns them.
+
+## Expressions and Why (stage 10)
+
+Two more requests of `run_json` (`sva-core/src/explain.rs`), both in the unit of the page's files:
+
+- `{"files"?, "exprs": ["a && !b", ...], "trace"?}` → `{"exprs": [{"text", "signals": [{name, width?}], "width"?,
+  "values"?} | {"text", "errors"}]}`. An expression is parsed and expanded in `$unit` (macros, `pkg::NAME` constants);
+  without a trace the answer is its signals (the page resolves them and samples them), with one its width and its value
+  at every cycle (the forms of the results: a number, `"h…"` past 2^53, binary digits with x; at most 4 M values).
+  `sva.js` builds the trace itself: with a clock prefix `@(edge clk)` (cut off in the page) the values just before each
+  edge, as for an assertion; without one, the value after the changes at each time any of its signals changes. Names
+  resolve from the scope the expression was written in up to the top, then as a path from the top. A match of the
+  search is a time where the value becomes true (a nonzero known bit). Rows are plugin `sig` rows made through
+  `WaveFW.parse` of a `tv` list, so they draw, sort and show values like signals.
+- `{"files", "trace", "explain": {"assert", "from", "to"}}` → `{"explain": [{"id"?, "what", "tree"}]}`: the booleans
+  of the assertion in source order (sequence elements with their `steps` id, `if` conditions, `disable iff`), each a
+  tree `{text, w, values, kids?}` of its sub-expressions (operands; a chain of `&&` / `||` as one list; the arguments of
+  a system function; constants left out; at most 64 nodes per boolean), valued at cycles `from..=to` (at most 512). The
+  page asks for the selected attempt with the trace of its binding (`plan` of that one assertion) and maps the attempt's
+  cycles through their times, so build-time results over a window still find their columns.
 
 ## Report (stage 8)
 

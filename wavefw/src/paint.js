@@ -203,8 +203,13 @@ function paintBody(P, M, lay, X, tA, tB, xL, xR, hl, sel, allLay, band, late, st
   P.fade = 1;
   P.path(sep, { stroke: 'line', w: 1, alpha: 0.5 });
   P.path(edge, { stroke: 'line', w: 1 });   // module borders
+  if (allLay) {   // an overlay that also draws on other rows (f.rows: the signals it marks) runs when one of those is shown
+    const on = new Set(lay.map(o => o.row));
+    for (const o of allLay) { const f = o.row.overlay; if (f && f.rows && !over.has(f) && f.rows.some(r => on.has(r))) over.add(f); }
+  }
   if (over.size) {
-    const pos = new Map((allLay || lay).map(o => [o.row, o])), go = () => { for (const f of over) f(P, { pos, X, tA, tB, xL, xR }); };
+    const yA = lay.length ? lay[0].y : 0, yB = lay.length ? lay[lay.length - 1].y + lay[lay.length - 1].h : 0;   // the rows drawn: from, to
+    const pos = new Map((allLay || lay).map(o => [o.row, o])), go = () => { for (const f of over) f(P, { pos, X, tA, tB, xL, xR, yA, yB }); };
     if (late) late.push(go); else go();
   }
   paintEdges(P, M, rowY, X);

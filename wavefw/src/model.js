@@ -142,8 +142,9 @@ function orderRows(rows, dir, pfx, groupOrder) {
 // `id` from WaveFW.rowId() and joins the model's groups (folding, Expand / Collapse); a row with draw(P, {y, h, X, tA,
 // tB, xL, xR}) paints itself, a "sig" row with `tr` like a signal. Return the same objects while they stay: the viewer
 // keys its state (selection, highlight, folding) by them. More, all optional: `height` (px), `cls` (classes of its name),
-// `title` (of a group's name), `value(t)` (the value column), `overlay(P, {pos: Map(row -> {y, h}), X, tA, tB, xL, xR})`
-// (drawn once after all rows: arrows between rows), `click(x, y, view)` / `tip(x, y, view)` (a click / the tooltip on
+// `title` (of a group's name), `value(t)` (the value column), `overlay(P, {pos: Map(row -> {y, h}), X, tA, tB, xL, xR, yA, yB})`
+// (drawn once after all rows: arrows between rows; yA–yB the rows drawn; `overlay.rows`: other rows it draws on, it runs
+// when one of those is on screen too), `click(x, y, view)` / `tip(x, y, view)` (a click / the tooltip on
 // the waves, y inside the row; click returns true when it handled it), `same: true` (a copy of a signal shown elsewhere:
 // bookmarks stay on the original), `legend: [{n?, text, color?, bold?}]` (lines under the static SVG).
 let XID = 1e6;

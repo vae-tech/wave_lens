@@ -259,7 +259,7 @@ def main():
     ap.add_argument('--reader', choices=('builtin', 'wavepeek'), default='builtin', help='list the signals with the built-in reader (default) or wavepeek')
     ap.add_argument('--wavepeek', help='wavepeek executable (default: on PATH or ~/.local/bin)')
     ap.add_argument('--sva', nargs='+', action='extend', metavar='FILE', help='SystemVerilog assertion files: "sva" and a "bind" line per instance that has every signal of an assertion')
-    ap.add_argument('--sva-bin', help='the sva CLI (default: $WAVEFW_SVA, sva on PATH, /tmp/wavefw/sva-target/release/sva)')
+    ap.add_argument('--sva-bin', help='the sva CLI (default: $WAVEFW_SVA, out/sva-target/release/sva, the prebuilt bin/<os>-x86_64/sva, sva on PATH)')
     a = ap.parse_args()
     if not os.path.exists(a.waves):
         die(f'no such dump: {a.waves}')

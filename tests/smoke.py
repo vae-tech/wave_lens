@@ -22,7 +22,7 @@ it, --only runs some of them. A section or a page whose build product is missing
 builds it, and the summary counts them: --strict (make smoke STRICT=1, make check) fails on any skip. Time limits are
 for a desktop machine; SMOKE_TIME_SCALE=3 allows three times as much on a slow or loaded one.
 
-  python3 tests/smoke.py [--build /tmp/wavefw] [--out /tmp/wavefw/shots] [--strict] [--only find,sva_bind] [--list]
+  python3 tests/smoke.py [--build out] [--out out/shots] [--strict] [--only find,sva_bind] [--list]
   (no -I: playwright is usually a user-site install)
 """
 import argparse, json, os, pathlib, re, subprocess, sys
@@ -704,6 +704,58 @@ def themes(page):
     check(css(ex, '--wave-1') == '#1d1f24', 'null colour and theme "auto" restore the defaults')
 
 
+def sva_exprs(browser, build):
+    """Stage 10: the expression field of the bar on the APB pages."""
+    apb, apb_all = build / 'examples' / 'apb' / 'apb.html', build / 'examples' / 'apb' / 'apb_all.html'
+    if not need(apb, apb_all, how='make examples'):
+        return
+    print('assertions: expressions')
+    ctx = browser.new_context(viewport={'width': 1360, 'height': 1400})
+    page = ctx.new_page()
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('SVA.ready()'); page.evaluate('localStorage.clear()')
+    v = page.locator('.wv').first
+    js = lambda e: page.evaluate(f"(() => {{ const v = document.querySelector('.wv').waveView, x = v.svaExprs; {e} }})()")
+    inp, cnt = v.locator('input.svq'), v.locator('.svqn')
+    js('v.cursor = 0;')
+    inp.fill('PSEL && !PREADY')
+    seq = []
+    for k in ('Enter', 'Enter', 'Enter', 'Enter', 'Shift+Enter'):
+        prev = cnt.inner_text(); inp.press(k)
+        page.wait_for_function('(n) => document.querySelector(".wv .svqn").textContent !== n', arg=prev)
+        seq.append([cnt.inner_text(), js('return v.cursor;')])
+    check([x[0] for x in seq] == ['1/3', '2/3', '3/3', '1/3', '3/3'] and [x[1] for x in seq][:3] == [45000, 85000, 145000],
+          f'Enter / shift+Enter: the times PSEL && !PREADY becomes true, from the cursor, round the ends {seq}')
+    v.locator('button[data-x=add]').click()
+    inp.fill('@(posedge PCLK) PSEL && PENABLE && !PREADY'); v.locator('button[data-x=add]').click()
+    inp.fill('PSEL && nope'); v.locator('button[data-x=add]').click()
+    page.wait_for_function("document.querySelector('.wv').waveView.vis.filter(r => (r.cls || '').startsWith('sva-expr')).length === 2")
+    toast = v.locator('.bar .toast').inner_text()
+    rows = js("return v.vis.filter(r => (r.cls || '').startsWith('sva-expr')).map(r => [r.name, r.tr.filter(o => o.k === '1').map(o => o.t)]);")
+    check(rows == [['ƒ PSEL && !PREADY', [45000, 85000, 145000]], ['ƒ @(posedge PCLK) PSEL && PENABLE && !PREADY', [105000]]] and 'not found: nope' in toast,
+          f'+ Row: two rows ƒ (the clocked one at the edge after its cycle); a name that is not there is said, no row {rows} {toast!r}')
+    jtxt = page.evaluate("document.querySelector('.wv').waveView.extraJSON.map(f => f()).filter(Boolean).join('\\n')")
+    page.reload(); page.wait_for_load_state('networkidle'); page.evaluate('SVA.ready()')
+    page.wait_for_function("document.querySelector('.wv').waveView.vis.filter(r => (r.cls || '').startsWith('sva-expr') && r.tr.length).length === 2")
+    v.locator('.names .row', has_text='ƒ PSEL && !PREADY').first.click()
+    got = [inp.input_value()]
+    v.locator('button[data-x=del]').click()
+    got.append(js("return v.vis.filter(r => (r.cls || '').startsWith('sva-expr')).map(r => r.name);"))
+    check('"exprs": [\n  "PSEL && !PREADY",' in jtxt and got == ['PSEL && !PREADY', ['ƒ @(posedge PCLK) PSEL && PENABLE && !PREADY']],
+          f'the rows are kept over a reload and in the JSON ("exprs"); a click on a row puts it in the field, − Row removes it {got}')
+    # a hierarchy: names from the selected signal's module up, or a full path
+    page.goto(apb_all.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('SVA.ready()')
+    h = js("""v.expandAll(); const I = SVA.scopeInfo(v.M), r = v.M.rows.find(r => r.src && r.src.path === 'apb_tb.u_regs.PREADY'); v.select(r);
+        const X = SVA.expressions, M = v.M, go = x => X.valueOf(M, [], x).then(o => o.err || Object.values(o.map).map(r => r.src.path));
+        return Promise.all([go({ text: 'PSEL && PREADY', scope: x.scope() }), go({ text: 'apb_tb.u_master.PSEL || PCLK', scope: 'apb_tb.u_regs' }), go({ text: 'PSEL', scope: 'apb_tb.u_count' })]);""")
+    check(h[0] == ['apb_tb.u_regs.PSEL', 'apb_tb.u_regs.PREADY'] and h[1] == ['apb_tb.u_master.PSEL', 'apb_tb.u_regs.PCLK'] and h[2] == ['apb_tb.PSEL'],
+          f'names: from the selected signal\'s module (u_regs) up to the top, a full path as it is {h}')
+    page.evaluate('localStorage.clear()')
+    check(not errs, 'no page errors (expressions)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
+    ctx.close()
+
+
 def sva_docs(page):
     v = page.locator('#ex-sva')
     page.evaluate('SVA.ready()')
@@ -720,14 +772,28 @@ def sva_docs(page):
     v.locator('li[data-a="a_req_ack"] button[data-sv=fail]').click()
     check('cursor cycle 7 ' in v.locator('.cur').inner_text() and 'no ack within [1:3]' in v.locator('.bar .toast').inner_text() and 'attempt 2: fail' in v.locator('li[data-a="a_req_ack"]').inner_text(),
           f'docs: Go to first failure selects the attempt, the cursor at its start ({v.locator(".cur").inner_text()}, {v.locator(".bar .toast").inner_text()})')
+    mk = page.evaluate("document.querySelector('#ex-sva').waveView.sva.bindings[0].draw.lane.marks.map(k => [k[0], k[1] < k[3] && k[3] < k[2], k[4]])")
+    check(['fail', True, True] in mk and ['pass', False, True] in mk,
+          f'docs: an attempt is a bracket from its start to its end; the failure green up to its last good step, then red {mk}')
     page.keyboard.press('Escape')
-    rows = page.evaluate("document.querySelector('#ex-sva').waveView.vis.filter(r => r.cls).map(r => [r.cls, r.name])")
+    rows = page.evaluate("document.querySelector('#ex-sva').waveView.vis.filter(r => r.cls && !/^sva-x|^sva-expr/.test(r.cls)).map(r => [r.cls, r.name])")
     check(rows[:4] == [['sva-g fails', '⚑ a_req_ack · 2 pass · 1 fail'], ['sva-lane', 'attempts'], ['sva-step', '1. req'], ['sva-step', '2. ##[1:3] ack']]
           and [r[1] for r in rows if r[0] == 'sva-copy'][:4] == ['clk', 'rst_n', 'req', 'ack'], f'docs: the assertion group under the top: lane, steps, the bound signals {rows[:6]}')
+    page.wait_for_function("document.querySelector('#ex-sva').waveView.vis.filter(r => (r.cls || '').startsWith('sva-expr') && r.tr.length).length === 2")
+    xr = page.evaluate("""(() => { const v = document.querySelector('#ex-sva').waveView, rs = v.vis.filter(r => (r.cls || '').startsWith('sva-expr'));
+      return [v.vis[v.vis.findIndex(r => r.cls === 'sva-xg') - 1].name, rs.map(r => [r.name, r.tr.filter(o => o.k === '1').map(o => o.t)])]; })()""")
+    check(xr[0] == 'ack' and xr[1] == [['ƒ req && !ack', [2, 6, 11]], ['ƒ @(posedge clk) $past(req) && !ack', [8, 13]]],
+          f'docs: the WaveJSON\'s "exprs" are rows ƒ under the top\'s signals: after every change of their signals, or sampled at the clock {xr}')
     svg = page.locator('#ex-sva-svg svg')
+    page.wait_for_function("(document.querySelector('#ex-sva-svg svg') || {}).innerHTML.includes('ƒ req')")
     txt = svg.inner_html() if svg.count() else ''
+    check('ƒ expressions (2)' in txt and 'ƒ req &amp;&amp; !ack' in txt, 'docs: the static SVG draws the expressions too')
     check('⚑ a_req_ack · 2 pass · 1 fail' in txt and '##[1:3] ack  (cons)' in txt and 'no ack within [1:3]' in txt and '>1T<' in txt,
           'docs: the static SVG of the same JSON, evaluated in the page: the group, the arrows with their labels, the legend of the steps')
+    fl = page.evaluate("""(() => { const fig = document.querySelector('#ex-apb-svg svg'); return [document.querySelector('#ex-sva-svg svg').innerHTML.match(/>(▶ start|✕ fail|✓ pass)</g),
+        fig ? fig.innerHTML.match(/>(▶ start|✓ pass)</g) : null]; })()""")
+    check(fl == [['>▶ start<', '>✕ fail<', '>▶ start<', '>✓ pass<'], ['>▶ start<', '>✓ pass<']],
+          f'docs: the static SVGs show the first failure (else the first attempt) of each assertion with its start and end flags {fl}')
 
 
 def sva_units(page):
@@ -768,6 +834,20 @@ def sva_units(page):
         { name: 'e', wave: '=.=.', data: ['?', '?'], raw: ['a', '5'], width: 4 }], time: { t0: 0, cycle: 10 } });
       const rows = Object.fromEntries(W.rows.map(r => [r.name, r])), s = SVA.rowSampler(rows); return [s.column('d', [15, 25]), s.column('e', [15, 25]), s.width('e')]; })()""")
     check(raw == [['0101', '0011'], ['ha', 'h5'], 4], f'sva.js: a clock-sampled bus: its label by radix, or its "raw" value; "width" {raw}')
+    ss = page.evaluate("""(() => { const n = new Set(['PSEL', 'PENABLE', 'PADDR', 'req', 'u.full', 'hb', 'd']);
+      return [SVA.stepSignals('PSEL && !PENABLE && PADDR[7:4] == 0 && PSEL', n), SVA.stepSignals("##[1:3] $rose(req) && d == 8'hb && u.full.x", n),
+        SVA.stepSignals("st == pkg::IDLE && $past(d, 2) != 4'bxx01", n), SVA.stepSignals(`"req" || 1'b1`, n)]; })()""")
+    ex = page.evaluate("""(async () => { const e = await SVA.engine(), X = SVA.expressions;
+      const r = e.call({ files: ['package p; localparam int TWO = 2; endpackage'], exprs: ['a && !b', 'd == p::TWO', 'a +', '$rose(a)'], trace: { signals: { a: [0, 1, 1, 0], b: [1, 1, 0, 0], d: [2, 2, 3, 2] }, widths: { d: 4 } } });
+      return [r.exprs.map(x => x.values || x.errors), r.exprs[1].signals, X.splitClock('@( negedge clk_i ) a ##1 b'), X.splitClock(' a'), [X.tvValue(1, 1), X.tvValue('x', 1), X.tvValue(300, 12), X.tvValue('hABC', 12), X.tvValue('1x0101', 6)]]; })()""")
+    check(ex[0][:2] == [[0, 0, 1, 0], [1, 1, 0, 1]] and '1:4' in ex[0][2][0] and ex[0][3] == [0, 1, 0, 0] and ex[1] == [{'name': 'd'}]
+          and ex[2] == {'clock': {'edge': 'negedge', 'signal': 'clk_i'}, 'body': 'a ##1 b'} and ex[3]['clock'] is None and ex[4] == ['1', 'x', '12c', 'abc', 'x5'],
+          f'sva.js: expressions through the engine (values per cycle, package constants, errors with line:col), the clock prefix, values as "tv" {ex}')
+    pp = page.evaluate("SVA.propParts('a && b |-> ##[1:3] c intersect (d ##1 e) or f throughout g iff error_or')")
+    check(pp == ['a && b', '|-> ##[1:3] c', 'intersect (d', '##1 e)', 'or f', 'throughout g', 'iff error_or'],
+          f'sva.js: a property in parts that wrap whole, each from an operator (an operator alone joins the next part) {pp}')
+    check(ss == [['PSEL', 'PENABLE', 'PADDR'], ['req', 'd', 'u.full'], ['d'], []],
+          f'sva.js: the signals a step reads, from its label (system functions, based literals, strings, unknown names skipped; a.b.c -> a.b) {ss}')
 
 
 def sva_hardening(browser, build):
@@ -880,6 +960,43 @@ def sva_waves(browser, build):
         v.extraPicks.size, document.querySelectorAll('.wv .names .row.hl').length, p.el.querySelector('li[data-a="apb_demo_no_wait"]').innerText];""")
     check(sel[:3] == ['apb_demo_no_wait', 1, hit[2]] and ['expected PREADY', True] in sel[3] and sel[4] >= 5 and sel[5] >= 5 and 'attempt 2: fail' in sel[6],
           f'click on a failing bar: the attempt selected, the cursor at its start, a red arrow "expected PREADY", the bound signals highlighted, the panel line says so {sel[:6]}')
+    # the selected attempt on the signals its steps read (the bound rows and their copies), start / end flags in the band
+    flow = js("""const b = p.bindings.find(b => b.assert === 'apb_demo_no_wait'), g = b.draw.g, src = b.res ? b.res.map : null;
+        const out = [g.flow.filter(f => f.flag).map(f => f.flag), g.flow.filter(f => f.on === 'src').map(f => [f.s, f.fail])];
+        const w = p.bindings.find(b => b.assert === 'apb_read_waits'); p.select(w, 0); v.draw();
+        out.push(w.draw.g.flow.filter(f => f.flag).map(f => f.flag), w.draw.g.flow.filter(f => f.on === 'src').map(f => f.s), w.draw.g.flow.filter(f => f.on === 'cp').map(f => f.s));
+        const row = n => v.lay.find(o => o.row === w.res.map[n]), y = n => row(n).y + row(n).h / 2;
+        out.push(['PSEL', 'PREADY'].map(n => w.draw.g.flow.some(f => f.on === 'src' && Math.abs(f.y - y(n)) < 0.5)));
+        out.push(w.draw.lane.marks.map(k => [k[0], k[3], k[4]]));
+        p.select(b, 1); v.draw(); return out;""")
+    check(flow[0] == ['▶ ✕ fail'] and flow[1] == [[1, False], [1, False], [2, True]] and flow[2] == ['▶ start', '✓ pass']
+          and flow[3] == [1, 1, 1, 1, 2, 2, 3] and flow[4] == flow[3] and flow[5] == [True, True] and ['pass', None, True] in flow[6],
+          f'the selected attempt on its signals: step 1 on PSEL and PENABLE, the ✕ on PREADY, ▶ ✕ fail in one cycle; apb_read_waits 1 (4 signals), 2 2 3 on PREADY, ▶ start … ✓ pass {flow}')
+    # the list of assertions is a table: a header, the same columns on every line
+    tab = js("""const ol = p.el.querySelector('ol.asv'), hd = [...ol.querySelectorAll(':scope > li.hd > span')].map(e => e.textContent);
+        const ls = [...ol.querySelectorAll(':scope > li[data-a]')].slice(0, 4), x = sel => ls.map(li => Math.round(li.querySelector(sel).getBoundingClientRect().left));
+        return [hd, ls.map(li => li.querySelector('.an').lastChild.textContent), ['code.at', '.b1 .st', '.b1 .cn', '.ab'].map(x)];""")
+    check(tab[0] == ['#', 'Assertion', 'Kind', 'Property', 'Bound to', 'Results', '', ''] and tab[1] == ['1', '2', '3', '4']
+          and all(len(set(c)) == 1 for c in tab[2]), f'the assertions are a table: a header, numbered lines, property, signals, results and buttons in columns {tab}')
+    at = page.locator('.wv').first.locator('.sva li[data-a="apb_read_waits"] code.at')
+    sel0 = js('return [p.selA.b.assert, p.selA.i];')
+    at.scroll_into_view_if_needed(); bb = at.bounding_box()
+    page.mouse.move(bb['x'] + 2, bb['y'] + 4); page.mouse.down(); page.mouse.move(bb['x'] + bb['width'] - 2, bb['y'] + bb['height'] - 4, steps=6); page.mouse.up()
+    pc = [page.evaluate('getSelection().toString()'), at.get_attribute('title').split('\n')[0], at.locator('.pp').count(), bb['height'] > 20, js('return [p.selA.b.assert, p.selA.i];') == sel0]
+    page.evaluate('getSelection().removeAllRanges()')
+    check(pc[0] == pc[1] and pc[2] >= 2 and pc[3] and pc[4],
+          f'Property: wraps at its operators, the mouse selects it in the draggable line and it copies as the one-line text (no jump to the waves) {pc}')
+    # Why: the selected attempt taken apart, a column per cycle, the step that failed in red
+    why = js("""const w = p.el.querySelector('.svw'), t = w.querySelector('table'); if (!t) return [w.innerText];
+        return [[...t.querySelectorAll('thead button')].map(b => b.textContent), [...t.querySelectorAll('tbody tr')].map(r => r.querySelector('th').textContent),
+          [...t.querySelectorAll('td.miss')].map(c => c.textContent), t.querySelectorAll('td.hit').length];""")
+    check(why[0] == ['10'] and why[1][:4] == ['1. PSEL && PENABLE ante', 'PSEL', 'PENABLE', '2. PREADY cons'] and why[2] == ['0'] and why[3] == 1,
+          f'Why: the failing attempt\'s booleans and their parts at cycle 10, the antecedent matched, PREADY red {why}')
+    w2 = js("""p.select(p.bindings.find(b => b.assert === 'apb_read_waits'), 0);
+        return new Promise(r => setTimeout(() => { const t = p.el.querySelector('.svw table'); const bs = [...t.querySelectorAll('thead button')];
+          bs[2].click(); r([bs.map(b => b.textContent), t.querySelectorAll('td.hit').length, t.querySelectorAll('td.miss').length, v.cursor, +bs[2].dataset.t]); }, 100));""")
+    check(len(w2[0]) == 4 and w2[1] == 4 and w2[2] == 0 and w2[3] == w2[4], f'Why of a passing 4-cycle attempt: 4 columns, a ring where each step matched, a cycle header moves the cursor {w2}')
+    js("p.select(p.bindings.find(b => b.assert === 'apb_demo_no_wait'), 1);")
     # f / F: next / previous failure (round the end); the go-to buttons; Esc
     v = page.locator('.wv').first
     v.locator('canvas').focus()
@@ -889,9 +1006,9 @@ def sva_waves(browser, build):
     btns = v.locator('.bar .svj button.fail')
     check([x[0] for x in seq] == [2, 1, 2] and seq[0][1] == 115000 and btns.count() == 2, f'f / F step through the two failures, round the end {seq}; {btns.count()} failure buttons in go to')
     page.keyboard.press('Escape')
-    esc = js("return [p.selA, v.extraPicks.size, p.el.querySelector('li[data-a=\"apb_demo_no_wait\"]').innerText.includes('attempt')];")
+    esc = js("return [p.selA, v.extraPicks.size, p.el.querySelector('li[data-a=\"apb_demo_no_wait\"]').innerText.includes('attempt'), p.el.querySelector('.svw').hidden];")
     btns.nth(1).click()
-    check(esc == [None, 0, False] and js('return p.selA && p.selA.i;') == 2, f'Esc clears the selection {esc}; the second failure button selects that attempt')
+    check(esc == [None, 0, False, True] and js('return p.selA && p.selA.i;') == 2, f'Esc clears the selection and Why {esc}; the second failure button selects that attempt')
     # tooltips: a circle names its step, the ✕ its reason once; a bar gives start → end
     tips = js("""const st = p.bindings.find(b => b.assert === 'apb_demo_no_wait').draw;
         v.namesEl.querySelector(`.row[data-r="${v.vis.indexOf(st.lane)}"]`).scrollIntoView({ block: 'start' }); v.draw();
@@ -969,9 +1086,11 @@ def sva_waves(browser, build):
         p.redraw(); v.expandAll();
         const b = p.bindings[p.bindings.length - 1], st = b.draw, val = st.lane.value(T[75]);
         p.select(b, 71); const arrows = (st.g.arrows || []).filter(a => a.front).map(a => a.label), tip = st.lane.tip;
-        p.unselect(); p.bindings.pop(); p.redraw(); return [val, arrows.filter(l => l.includes('trace cut')), st.g.full, st.g.name];""")
-    check(inj[0].startswith('active') and len(inj[1]) == 1 and '… 21T (trace cut)' in inj[1] and inj[2] == 'probe' and inj[3] == '⚑ probe · 71 pass · 0 fail · 1 active',
-          f'a long active attempt behind 70 later ones shows in the value column; a truncated trace draws its cut; a top-scope name without "@" {inj}')
+        p.select(b, 0); v.draw(); const open = st.g.flow.filter(f => f.flag).map(f => f.flag);
+        p.unselect(); p.bindings.pop(); p.redraw(); return [val, arrows.filter(l => l.includes('trace cut')), st.g.full, st.g.name, open];""")
+    check(inj[0].startswith('active') and len(inj[1]) == 1 and '… 21T (trace cut)' in inj[1] and inj[2] == 'probe' and inj[3] == '⚑ probe · 71 pass · 0 fail · 1 active'
+          and inj[4] == ['▶ start', '… not ended'],
+          f'a long active attempt behind 70 later ones shows in the value column, its end flag "… not ended"; a truncated trace draws its cut; a top-scope name without "@" {inj}')
     # the whole hierarchy: bound to the slave, the group under u_regs, after its signals, also when sorted and folded
     page.goto(apb_all.as_uri()); page.wait_for_load_state('networkidle')
     page.evaluate("async () => { localStorage.clear(); await SVA.loadFiles([{ name: 'apb.sv', text: %s }]); await SVA.ready(); SVA.panels()[0].bind('apb_setup_access', 'apb_tb.u_regs'); await SVA.ready(); }" % json.dumps((ROOT / 'tests' / 'sva' / 'apb.sv').read_text()))
@@ -992,6 +1111,71 @@ def sva_waves(browser, build):
     check(gone[0] > 0 and gone[1:] == [0, None, 1] and clr[0] <= 2 and clr[1] <= 1, f'unbind of the selected binding: no picks left, its group gone from the model {gone}; Clear of 2 bindings: {clr[0]} renderNames, {clr[1]} report, {clr[2]} ms')
     page.evaluate('localStorage.clear()')
     check(not errs, 'no page errors (assertions on the waves)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
+    ctx.close()
+
+
+def sva_edit(browser, build):
+    """✎ and ⟳ on the APB page: an assertion edited in the page is parsed and evaluated again (only its bindings), kept
+    over a reload, marked, reverted; a text that does not parse changes nothing; ⟳ reads its file again (a picked file's
+    handle, faked here: the browser's picker cannot be driven), Watch reads it when it changes."""
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('assertions: edit in the page, read from the disk')
+    ctx = browser.new_context(viewport={'width': 1360, 'height': 1400})
+    page = ctx.new_page()
+    errs = []; page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle'); page.evaluate('SVA.ready()')
+    v = page.locator('.wv').first
+    st = lambda lab: page.evaluate(f"SVA.panels()[0].bindings.filter(b => b.assert === '{lab}').map(b => b.results ? [b.results.assertions[0].stats.pass, b.results.assertions[0].stats.fail] : null)")
+    others = page.evaluate("(window.__keep = SVA.panels()[0].bindings.filter(b => b.assert !== 'apb_demo_no_wait').map(b => b.results), window.__keep.length)")
+    li = v.locator('.sva li[data-a="apb_demo_no_wait"]')
+    li.locator('button[data-sv=edit]').click()
+    ta = li.locator('textarea.src'); text = ta.input_value()
+    check(text.strip().startswith('apb_demo_no_wait: assert property (`ACCESS |-> PREADY)') and text.strip().endswith('else $error("demo: a wait state");') and st('apb_demo_no_wait') == [[3, 2]],
+          f'✎ opens the statement with its action block {text.strip()[:60]!r}… (now {st("apb_demo_no_wait")})')
+    ta.fill(text.replace('|-> PREADY)', '|-> ##[0:2] PREADY)')); ta.press('Control+Enter')
+    page.wait_for_function("(() => { const b = SVA.panels()[0].bindings.find(b => b.assert === 'apb_demo_no_wait'); return b.results && !b.running; })()"); page.evaluate('SVA.ready()')
+    same = page.evaluate("SVA.panels()[0].bindings.filter(b => b.assert !== 'apb_demo_no_wait').every((b, i) => b.results === window.__keep[i])")
+    marked = [e.get_attribute('data-a') for e in v.locator('.sva li[data-a]').all() if e.locator('.ed').count()]
+    steps = page.evaluate("SVA.panels()[0].v.vis.filter(r => r.cls === 'sva-step').map(r => r.name)")
+    check(st('apb_demo_no_wait') == [[5, 0]] and same and marked == ['apb_demo_no_wait'] and '2. ##[0:2] PREADY' in steps and li.locator('textarea.src').count() == 0,
+          f'ctrl+Enter applies: only its binding evaluated again ({st("apb_demo_no_wait")}, the other {others} kept), only its line marked {marked}, its steps on the waves {[s for s in steps if "PREADY" in s][:2]}')
+    page.reload(); page.wait_for_load_state('networkidle'); page.evaluate('SVA.ready()')
+    page.wait_for_function("(() => { const b = SVA.panels()[0].bindings.find(b => b.assert === 'apb_demo_no_wait'); return b.results && !b.running; })()")
+    check(st('apb_demo_no_wait') == [[5, 0]] and page.evaluate("SVA.fileList().filter(f => f.origin === 'local').map(f => f.name)") == ['apb.sva'],
+          f'after a reload the edit is kept in this browser and evaluated, not the results built into the page ({st("apb_demo_no_wait")})')
+    li.locator('button[data-sv=edit]').click(); ta = li.locator('textarea.src'); good = ta.input_value()
+    ta.fill(good.replace('##[0:2] PREADY)', '##[0:2] PREADY')); li.locator('button[data-sv=apply]').click()
+    page.wait_for_function("document.querySelector('.wv .sva li[data-a=\"apb_demo_no_wait\"] .em') && document.querySelector('.wv .sva li[data-a=\"apb_demo_no_wait\"] .em').textContent")
+    em = li.locator('.em').inner_text()
+    check('apb.sva:' in em and li.locator('textarea.src').input_value().endswith('PREADY\n        else $error("demo: a wait state");') and st('apb_demo_no_wait') == [[5, 0]],
+          f'a text that does not parse is not applied: the editor keeps it and says why ({em[:70]!r}), the assertion stays as it was')
+    li.locator('button[data-sv=revert]').click()
+    page.wait_for_function("SVA.fileList().every(f => f.origin !== 'local')")
+    page.wait_for_function("(() => { const b = SVA.panels()[0].bindings.find(b => b.assert === 'apb_demo_no_wait'); return b.results && !b.running; })()"); page.evaluate('SVA.ready()')
+    check(st('apb_demo_no_wait') == [[3, 2]] and v.locator('.sva .ed').count() == 0, f'Revert: the file of the page and its counts are back ({st("apb_demo_no_wait")})')
+    # ⟳ and Watch with a picked file: the browser's picker returns a handle; here a fake one over a text the test changes
+    page.evaluate("""(() => { const f = SVA.statement('apb_demo_no_wait');
+        window.__disk = { text: null, t: 1, picks: 0 };
+        window.showOpenFilePicker = async () => { window.__disk.picks++; return [{ kind: 'file', name: 'apb.sva', queryPermission: async () => 'granted',
+          getFile: async () => new File([window.__disk.text], 'apb.sva', { lastModified: window.__disk.t }) }]; };
+        SVA.watchMs = 100; })()""")
+    disk = (ROOT / 'examples' / 'apb' / 'apb.sva').read_text()
+    page.evaluate(f"window.__disk.text = {json.dumps(disk.replace('|-> PREADY)', '|-> ##[0:1] PREADY)'))}")
+    li.locator('button[data-sv=reload]').click()
+    page.wait_for_function("SVA.fileList().some(f => f.origin === 'local')")
+    page.wait_for_function("(() => { const b = SVA.panels()[0].bindings.find(b => b.assert === 'apb_demo_no_wait'); return b.results && !b.running; })()"); page.evaluate('SVA.ready()')
+    r1 = st('apb_demo_no_wait'); mark = li.locator('.ed').inner_text() if li.locator('.ed').count() else ''
+    check(r1 != [[3, 2]] and page.evaluate('window.__disk.picks') == 1 and mark == 'changed', f'⟳: the file picked once is read and evaluated ({r1}), its changed assertion marked {mark!r}')
+    v.locator('.sva button[data-sv=watch]').click()
+    page.evaluate(f"(window.__disk.text = {json.dumps(disk)}, window.__disk.t = 2)")
+    page.wait_for_function("(() => { const b = SVA.panels()[0].bindings.find(b => b.assert === 'apb_demo_no_wait'); return b.results && !b.running && b.results.assertions[0].stats.fail === 2; })()", timeout=10000)
+    page.evaluate('SVA.ready()'); toast = v.locator('.bar .toast').inner_text()
+    check(st('apb_demo_no_wait') == [[3, 2]] and page.evaluate('window.__disk.picks') == 1 and 'changed on the disk' in toast,
+          f'Watch: a change of the file on the disk is read and evaluated without asking again ({st("apb_demo_no_wait")}, {toast!r})')
+    page.evaluate('SVA.watch(false)')
+    check(not errs, 'no page errors' + (': ' + ' | '.join(errs[:2]) if errs else ''))
     ctx.close()
 
 
@@ -1161,7 +1345,7 @@ def sva_report_hardening(browser, build):
 
 def sva_page(page, ex):
     page.evaluate('SVA.ready()')
-    p = page.evaluate("""SVA.panels().map(p => ({ key: p.v.root.dataset.wave, n: p.el.querySelectorAll('ol.asv > li').length, tv: p.v.M.rows.some(r => r.src && r.src.tv),
+    p = page.evaluate("""SVA.panels().map(p => ({ key: p.v.root.dataset.wave, n: p.el.querySelectorAll('ol.asv > li[data-a]').length, tv: p.v.M.rows.some(r => r.src && r.src.tv),
         binds: p.bindings.map(b => [b.assert, b.state, b.results ? b.results.assertions[0].kind : null, b.results ? b.results.assertions[0].stats.fail : null]) }))""")
     n = SVA_PAGE[ex]
     check(all(x['n'] == n and len(x['binds']) == n for x in p), f'{ex}: every viewer lists the {n} assertions of the config, all bound ({[(x["n"], len(x["binds"])) for x in p]})')
@@ -1214,9 +1398,9 @@ def sva_bind(browser, build):
     v = page.locator('.wv').first
     check(v.locator('.sva').is_hidden() and v.locator('button[data-sv=load]').count() == 1, 'apb_all: no assertion loaded: the panel is hidden, Load file… is in the bar')
     v.locator('input.svfile').set_input_files([str(ROOT / 'tests' / 'sva' / 'apb.sv'), str(ROOT / 'tests' / 'sva' / 'third_party' / 'saravana_apb_ahb' / 'apb_assertions.sv')])
-    page.wait_for_function("SVA.panels()[0].el.querySelectorAll('ol.asv > li').length > 0")
+    page.wait_for_function("SVA.panels()[0].el.querySelectorAll('ol.asv > li[data-a]').length > 0")
     page.evaluate('SVA.ready()')
-    n = v.locator('.sva ol.asv > li').count()
+    n = v.locator('.sva ol.asv > li[data-a]').count()
     check(n == 12 + 17 and 'apb.sv, apb_assertions.sv: 29 assertions' in v.locator('.bar .toast').inner_text(), f'Load file…: two files parsed in the page, {n} assertions ({v.locator(".bar .toast").inner_text()})')
     li = v.locator('.sva li[data-a="apb_setup_access"]')
     li.locator('button[data-sv=bind]').click()
@@ -1227,13 +1411,22 @@ def sva_bind(browser, build):
     page.evaluate('SVA.ready()')
     st = page.evaluate("SVA.panels()[0].bindings.map(b => [b.assert, b.scope, b.state, b.via, b.results && b.results.assertions[0].stats])")
     sva = build / 'sva-target' / 'release' / 'sva'
+    # the instance path in the Bound to column: wraps after its dots in a narrow column, copies as one line
+    sp = v.locator('.sva li[data-a="apb_setup_access"] .b1 b.sp')
+    cp = sp.evaluate("""e => { const h1 = e.getBoundingClientRect().height; e.style.display = 'inline-block'; e.style.width = '8ch'; const h2 = e.getBoundingClientRect().height;
+        e.style.display = e.style.width = ''; return [e.querySelectorAll('wbr').length, h2 > h1 * 1.5, getComputedStyle(e).userSelect]; }""")
+    sp.scroll_into_view_if_needed(); bb = sp.bounding_box(); page.mouse.move(bb['x'] + 1, bb['y'] + bb['height'] / 2); page.mouse.down()
+    page.mouse.move(bb['x'] + bb['width'] - 1, bb['y'] + bb['height'] / 2, steps=5); page.mouse.up()
+    cp += [page.evaluate('getSelection().toString()'), page.evaluate('SVA.panels()[0].selA')]
+    page.evaluate('getSelection().removeAllRanges()')
+    check(cp == [1, True, 'text', 'apb_tb.u_regs', None], f'Bound to: the instance path wraps after its dots in a narrow column, the mouse selects it in the draggable line and it copies as one line (no jump to the waves) {cp}')
     native = None
     if need(sva, how='make sva-build'):
         out = build / 'sva' / 'apb_regs.smoke.json'
         subprocess.run([str(sva), 'eval', '--waves', str(build / 'examples' / 'apb' / 'apb.vcd'), '--scope', 'apb_tb.u_regs', '--resolve', 'scope', '--sva', str(ROOT / 'tests' / 'sva' / 'apb.sv'),
                         '--assert', 'apb_setup_access', '--out', str(out)], capture_output=True)
         native = json.loads(out.read_text())['assertions'][0]['stats']
-    check(st[:1] == [['apb_setup_access', 'apb_tb.u_regs', 'bound', 'page', native or st[0][4]]] and 'bound to apb_tb.u_regs' in li.inner_text() and '3 pass' in li.inner_text(),
+    check(st[:1] == [['apb_setup_access', 'apb_tb.u_regs', 'bound', 'page', native or st[0][4]]] and 'apb_tb.u_regs' in li.inner_text() and '3 pass' in li.inner_text(),
           f'Bind… → u_regs: evaluated in the page, counts shown, equal to sva eval at that instance ({st[:1]}, native {native})')
     # dragging: the module rows that have the signals are drop targets, the others say what they miss
     marks = page.evaluate("""(() => { const li = document.querySelector('.wv .sva li[data-a="apb_enable_sel"]'), dt = new DataTransfer();
@@ -1248,23 +1441,23 @@ def sva_bind(browser, build):
     li2 = v.locator('.sva li[data-a="apb_enable_sel"]')
     li2.drag_to(v.locator('.names .row.grp', has_text='u_master'))
     page.evaluate('SVA.ready()')
-    check('bound to apb_tb.u_master' in li2.inner_text() and '5 pass' in li2.inner_text(), f'drop on the u_master row binds it there ({li2.inner_text()[:160]!r})')
+    check('apb_tb.u_master' in li2.inner_text() and '5 pass' in li2.inner_text(), f'drop on the u_master row binds it there ({li2.inner_text()[:160]!r})')
     li2.drag_to(v.locator('.names .row.grp', has_text='u_count'))
     settle(page)
     toast = v.locator('.bar .toast').inner_text()
     check('cannot bind apb_enable_sel to apb_tb.u_count: PENABLE, PSEL' in toast and page.evaluate("SVA.panels()[0].bindings.length") == 2, f'drop on u_count: not bound ({toast})')
     li2.drag_to(v.locator('.names .row:not(.grp)', has_text='PREADY').nth(2))   # a signal row: its module (u_regs)
     page.evaluate('SVA.ready()')
-    check(li2.locator('ul.bnd > li').count() == 2 and 'bound to apb_tb.u_regs' in li2.inner_text(), 'drop on a signal row binds to its module; two instances: one line each')
+    check(li2.locator('ul.bnd > li').count() == 2 and 'apb_tb.u_regs' in li2.inner_text(), 'drop on a signal row binds to its module; two instances: one line each')
     li2.locator('ul.bnd > li', has_text='u_master').locator('button[data-sv=unbind]').click()
-    check(li2.locator('ul.bnd > li').count() == 0 and 'bound to apb_tb.u_regs' in li2.inner_text(), 'Unbind removes that binding only')
+    check(li2.locator('ul.bnd > li').count() == 0 and 'apb_tb.u_regs' in li2.inner_text(), 'Unbind removes that binding only')
     v.locator('.sva button[data-sv=json]').click()
     js = v.locator('.sva textarea.json').input_value()
     binds = json.loads('{' + js + '}')['bind']
     check(binds == [{'assert': 'apb_setup_access', 'scope': 'apb_tb.u_regs'}, {'assert': 'apb_enable_sel', 'scope': 'apb_tb.u_regs'}], f'JSON: the bindings for the config {binds}')
     page.reload(); page.wait_for_load_state('networkidle'); page.evaluate('SVA.ready()')
     st = page.evaluate("SVA.panels()[0].bindings.map(b => [b.assert, b.scope, b.state, b.results && b.results.assertions[0].stats.pass])")
-    check(st == [['apb_setup_access', 'apb_tb.u_regs', 'bound', 3], ['apb_enable_sel', 'apb_tb.u_regs', 'bound', 5]] and v.locator('.sva ol.asv > li').count() == 29,
+    check(st == [['apb_setup_access', 'apb_tb.u_regs', 'bound', 3], ['apb_enable_sel', 'apb_tb.u_regs', 'bound', 5]] and v.locator('.sva ol.asv > li[data-a]').count() == 29,
           f'after a reload: the files and the bindings come back from this browser, evaluated again {st}')
     # the exported list through a config file and mkhtml.py: the page opens with them bound (results of sva eval)
     cfg = json.loads((build / 'examples' / 'apb' / 'apb_all.config.json').read_text())
@@ -1461,7 +1654,9 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'sva_bind': 'apb_all.html: Load file…, Bind…, drag and drop, reload, a config through mkhtml.py',
     'sva_hardening': 'stage 6.1 on the example pages',
     'sva_waves': 'stage 7: the assertion groups on the waves',
+    'sva_exprs': 'stage 10: expressions in the bar (search, rows ƒ, kept, JSON), names in a hierarchy',
     'sva_report': 'stage 8: the report against sva eval',
+    'sva_edit': 'an assertion edited in the page (✎, Apply, kept, Revert, a bad text) and read from the disk again (⟳, Watch)',
     'sva_report_hardening': 'stage 8.1: names, aliases, recovery, caps, print, mkconfig --update, make html SVA=',
     'sva_wasm': 'wavefw/sva.wasm.js is the module of the current build (make sva-build)',
     'sva_third_party': 'tests/sva/third_party over the example dumps (sva eval)',
@@ -1474,7 +1669,7 @@ VERSION = re.search(r"version: '([^']+)'", (ROOT / 'wavefw' / 'src' / 'boot.js')
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--build', default='/tmp/wavefw', help='the Makefile BUILD directory (demo.html, demo_fst.html)')
+    ap.add_argument('--build', default=str(ROOT / 'out'), help='the Makefile BUILD directory (demo.html, demo_fst.html)')
     ap.add_argument('--out', help='screenshots (default: BUILD/shots)')
     ap.add_argument('--strict', action='store_true', help='a skipped page or section fails the run (make check)')
     ap.add_argument('--only', help='comma-separated sections (--list)')
@@ -1570,7 +1765,9 @@ def main():
         run('sva_bind', sva_bind, b, build)
         run('sva_hardening', sva_hardening, b, build)
         run('sva_waves', sva_waves, b, build)
+        run('sva_exprs', sva_exprs, b, build)
         run('sva_report', sva_report, b, build)
+        run('sva_edit', sva_edit, b, build)
         run('sva_report_hardening', sva_report_hardening, b, build)
         b.close()
     run('sva_wasm', sva_wasm, build)

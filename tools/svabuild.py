@@ -9,14 +9,24 @@ mkhtml.py moves "files" and "notes" of every view into window.SVA (once per page
 and draws the bindings. Parse errors do not stop the build: they are printed and the page shows them. report() is the
 page's printable "Assertions" section: the bindings evaluated over the whole dump, `sva report --html`.
 
-The CLI: --sva-bin, else $WAVEFW_SVA, else `sva` on PATH, else the Makefile's build (/tmp/wavefw/sva-target/release/sva).
+The CLI: --sva-bin, else $WAVEFW_SVA, else the Makefile's build (out/sva-target/release/sva), else the prebuilt one of
+the repository (bin/linux-x86_64/sva, bin/windows-x86_64/sva.exe: make dist), else `sva` on PATH.
 Without it the sources go into the page unparsed and the page parses and evaluates them (WebAssembly).
 
   svabuild.py --waves dump.fst --sva checks.sv --bind a_req_ack@tb.dut [--from 0ns --to 2us] [--out sva.json]
 """
 import argparse, fnmatch, json, os, re, shutil, subprocess, sys, tempfile
 
-BUILD_BIN = '/tmp/wavefw/sva-target/release/sva'
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+EXE = '.exe' if os.name == 'nt' else ''
+BUILD_BIN = os.path.join(ROOT, 'out', 'sva-target', 'release', 'sva' + EXE)
+DIST_BIN = {('linux', 'x86_64'): 'linux-x86_64/sva', ('win32', 'amd64'): 'windows-x86_64/sva.exe', ('win32', 'x86_64'): 'windows-x86_64/sva.exe'}
+
+
+def dist_bin():
+    import platform
+    d = DIST_BIN.get((sys.platform if sys.platform != 'linux2' else 'linux', platform.machine().lower()))
+    return os.path.join(ROOT, 'bin', *d.split('/')) if d else None
 
 
 def find_bin(explicit=None):
@@ -25,7 +35,7 @@ def find_bin(explicit=None):
         if not ok(explicit):
             raise SystemExit(f'svabuild: no sva binary at {explicit}')
         return os.path.expanduser(explicit)
-    return next((os.path.expanduser(c) for c in (os.environ.get('WAVEFW_SVA'), shutil.which('sva'), BUILD_BIN) if ok(c)), None)
+    return next((os.path.expanduser(c) for c in (os.environ.get('WAVEFW_SVA'), BUILD_BIN, dist_bin(), shutil.which('sva')) if ok(c)), None)
 
 
 def bind_list(items):

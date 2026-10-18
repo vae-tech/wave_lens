@@ -22,6 +22,8 @@ Config file (--config cfg.json): every option can be a key (dashes or underscore
   "sva" ["checks.sv", …] SystemVerilog assertion files (parsed with the sva CLI, inlined for the page's assertions
   panel), "bind" [{"assert": "a_req_ack", "scope": "tb.dut"}] or ["a_req_ack@tb.dut"] (evaluated over the dump with
   sva eval; the page opens with them bound): the WaveJSON extension "sva" (tools/svabuild.py, docs/USAGE.md "Assertions").
+  "exprs" ["PSEL && !PREADY", "@(posedge PCLK) $rose(req)", {"expr": "…", "scope": "tb.dut"}] expressions of the signals the
+  page draws as rows "ƒ expressions" (valued in the page: names from the scope up, or full paths).
   Clock-sampled buses get "width" and, when their labels do not read back as values (bin signed oct ascii, x digits),
   "raw": the hex value of each label (the page's assertions sample them).
   Per-signal settings: show (false: left out), alias (displayed name), radix (auto hex dec signed bin oct ascii),
@@ -346,7 +348,7 @@ def nice_floor(x):
 
 
 # ---------------- options: command line + config file ----------------
-LIST_KEYS = ('signals', 'gap', 'enum', 'group', 'marker', 'sva', 'bind')
+LIST_KEYS = ('signals', 'gap', 'enum', 'group', 'marker', 'sva', 'bind', 'exprs')
 SKIP_KEYS = ('views', 'page', 'config', 'description', 'comment', 'render', 'note', 'select', 'rules')   # not converter options
 SIG_KEYS = ('show', 'alias', 'radix', 'color', 'fill', 'style', 'enum', 'width', 'changes')            # catalog entry keys
 
@@ -374,7 +376,8 @@ def parser():
     ap.add_argument('--arrows', help='JSON list [{"from", "to", "shape", "head", "line", "color", "label"}] between bookmarks')
     ap.add_argument('--sva', action='append', help='SystemVerilog assertion file for the page (repeatable; one compilation unit, in order)')
     ap.add_argument('--bind', action='append', help='NAME@SCOPE: bind assertion NAME to instance SCOPE, evaluated over the dump (repeatable)')
-    ap.add_argument('--sva-bin', help='the sva CLI (default: $WAVEFW_SVA, sva on PATH, /tmp/wavefw/sva-target/release/sva)')
+    ap.add_argument('--expr', dest='exprs', action='append', help='an expression of the signals the page draws as a row (ƒ expressions; repeatable), e.g. "PSEL && !PREADY"')
+    ap.add_argument('--sva-bin', help='the sva CLI (default: $WAVEFW_SVA, out/sva-target/release/sva, the prebuilt bin/<os>-x86_64/sva, sva on PATH)')
     ap.add_argument('--hscale', type=float)
     ap.add_argument('--reader', choices=('builtin', 'wavepeek'), help='how the dump is read: builtin (default: one pass in Python; '
                     'an FST through fst2vcd) or wavepeek (any --marker expression)')
@@ -682,6 +685,8 @@ def convert(a):
         pfx = getattr(a, 'sva_prefixes', None)
         pfx = (a.wave_config or {}).get('sortIgnore') if pfx is None else pfx   # names resolve as in the page
         doc['sva'] = svabuild.build(a.sva, a.bind, a.waves, a.sva_bin, t_from, t_to, [pfx] if isinstance(pfx, str) else pfx, a.sva_aliases)
+    if a.exprs:   # the page values them (the rows "ƒ expressions"); a scope: {"expr", "scope"}
+        doc.setdefault('sva', {})['exprs'] = a.exprs
     doc['meta'] = {'waves': os.path.basename(a.waves), 'tool': rd.tool, 'mode': 'clock' if a.clock else 'exact',
                    'from_ps': t_from, 'to_ps': t_to, **({'scope': a.scope} if a.scope else {})}
     return doc

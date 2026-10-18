@@ -11,7 +11,7 @@ drawn next to the signals.
 ## Quick start
 
 ```sh
-make examples                   # needs Verilator: APB, AXI-Lite and FSM pages in /tmp/wavefw/examples/<ex>/<ex>.html
+make examples                   # needs Verilator: APB, AXI-Lite and FSM pages in out/examples/<ex>/<ex>.html
 make html WAVES=work/my.vcd     # your dump -> work/my.config.json (every signal, editable) + work/my.html
 make html WAVES=work/my.fst SVA="checks/*.sv" BIND="a_req_ack@tb.dut"   # with assertions, evaluated and drawn
 ```
@@ -20,8 +20,17 @@ Open the `.html` in a browser from 2023 on (Chrome / Edge 111, Firefox 113, Safa
 `overflow: clip` and `WeakRef`). `make html` reads the dump with the built-in reader (Python 3.8+, standard library
 only). Optional: GTKWave's `fst2vcd` to read FST dumps, [wavepeek](https://github.com/kleverhq/wavepeek) as a second
 reader, cargo for the assertion engine (`make sva-build`), Python playwright for the tests and the screenshots. `make`
-alone lists the targets; build products go to `BUILD` (default `/tmp/wavefw`; `make BUILD=build …` keeps them in the
-repository).
+alone lists the targets; build products go to `BUILD` (default `out/` in the repository, git-ignored).
+
+**Without compiling anything.** A clone works as it is, on Linux and on Windows: the pages and `wavefw/` need no build,
+the tools are Python (standard library), the assertion engine is committed twice — `wavefw/sva.wasm.js` for the pages
+and the `sva` CLI for the tools, `bin/linux-x86_64/sva` (static, any distribution) and `bin/windows-x86_64/sva.exe`;
+`tools/*.py` find it by themselves (`make dist` rebuilds both, see [DEVELOPMENT](docs/DEVELOPMENT.md)). Without `make`:
+
+```sh
+python3 tools/mkconfig.py work/my.vcd --out work/my.config.json   # Windows: py tools\mkconfig.py work\my.vcd --out work\my.config.json
+python3 tools/mkhtml.py --config work/my.config.json --out work/my.html --sva checks/my.sva --bind "a_req_ack@tb.dut"
+```
 
 ## What it does
 
@@ -43,8 +52,11 @@ repository).
   prefixes ([USAGE § The viewer](docs/USAGE.md#the-viewer)).
 - **Assertions (SVA)**: bind an assertion to an instance of the waveform and it is evaluated over the dump (in the
   page as WebAssembly, or when the page is built by the Rust CLI); every attempt is a bar under that instance, every
-  sequence step a numbered circle, failures red with their reason; totals, a table, a failure list, and reports as
-  Markdown, JSON, JUnit XML or HTML for CI ([USAGE § Assertions](docs/USAGE.md#assertions-sva)).
+  sequence step a numbered circle — on its own row and, for the selected attempt, on the signals it reads, with
+  start and end flags (`▶ start`, `✓ pass` / `✕ fail` / `… not ended`) — failures red with their reason; totals, a table, a failure list, and reports as
+  Markdown, JSON, JUnit XML or HTML for CI ([USAGE § Assertions](docs/USAGE.md#assertions-sva)). **Why** takes the
+  selected attempt apart (every operand, cycle by cycle, the one that failed in red); **expressions** of the signals
+  (`PSEL && !PREADY`, `@(posedge clk) $rose(req)`) are searched (next / previous time true) and drawn as rows.
 
 ![An APB check bound to the testbench: the failing attempt selected, its steps, arrows and the signals it read](docs/img/sva.png)
 

@@ -133,7 +133,7 @@ def main():
     ap.add_argument('--reader', choices=('builtin', 'wavepeek'), help='how the dumps are read (default: the config\'s "reader", else builtin)')
     ap.add_argument('--title', help='page title')
     ap.add_argument('--render', choices=('view', 'svg', 'both'), help='renderer for every section')
-    ap.add_argument('--sva-bin', help='the sva CLI for "sva" / "bind" (default: $WAVEFW_SVA, sva on PATH, /tmp/wavefw/sva-target/release/sva)')
+    ap.add_argument('--sva-bin', help='the sva CLI for "sva" / "bind" (default: $WAVEFW_SVA, out/sva-target/release/sva, the prebuilt bin/<os>-x86_64/sva, sva on PATH)')
     ap.add_argument('--sva', action='append', metavar='FILE', help='assertion file for every view (repeatable; replaces the config\'s top-level "sva")')
     ap.add_argument('--bind', action='append', metavar='NAME@SCOPE', help='binding for every view (repeatable, NAME may be a pattern; replaces the top-level "bind")')
     ap.add_argument('--no-sva', action='store_true', help='leave the assertion engine (wavefw/sva.js + sva.wasm.js, ~330 kB) out of the page, and evaluate nothing')

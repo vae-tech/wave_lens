@@ -37,7 +37,9 @@ tests/
 work/                         your dumps and their configs: configs tracked, dumps and pages git-ignored
 sva/                          the SVA engine (Rust: core, native CLI, WebAssembly)
 prompts/                      the roadmap as a series of prompts
-Makefile                      make help lists the targets; build products go to BUILD (default /tmp/wavefw)
+bin/                          the prebuilt sva CLI, committed: linux-x86_64/sva (static), windows-x86_64/sva.exe (make dist)
+out/                          build products (make's BUILD, git-ignored): cargo target, example dumps and pages, shots
+Makefile                      make help lists the targets; build products go to BUILD (default out/)
 ```
 
 ## Build and test
@@ -46,10 +48,11 @@ Makefile                      make help lists the targets; build products go to 
 make check                  # the gate before a commit: wavefw.js current, sva-test, unit, every page smoke needs, smoke STRICT=1
 make wavefw                 # wavefw/wavefw.js from wavefw/src/*.js (after editing them; make html / example do it too)
 make demo examples html     # rebuild docs/demo_waves.js, the example pages, the demo page
-make smoke                  # tests/smoke.py: every page in light and dark, 400 checks on 26 pages, PNGs in BUILD/shots
+make smoke                  # tests/smoke.py: every page in light and dark, 408 checks on 26 pages, PNGs in BUILD/shots
 make smoke ONLY=find,sva_bind   # some sections (python3 tests/smoke.py --list); STRICT=1: a skip fails
 make shots                  # tests/shots.py: docs/img/*.png, dark theme (after make examples; ~10 s, see below)
 make sva-build              # the SVA engine (needs cargo + the wasm32 target): the sva CLI, wavefw/sva.wasm.js
+make dist                   # the committed CLI: bin/linux-x86_64/sva (musl, static) + bin/windows-x86_64/sva.exe (mingw-w64)
 make sva-test               # the SVA engine: unit tests, the corpus tests/sva (third_party too), the JSON schema, the CLI
 make sva-bless              # rewrite tests/sva/golden/*.txt after a reviewed change of the parser output
 make sva-examples sva-spike # sva parse + sva eval of examples/*/*.sva; the WebAssembly build in a page (wasm32 target)
@@ -58,10 +61,17 @@ make fmt lint               # verible-verilog-format (docs/SV_STYLE.md), verilat
 make clean                  # the build products under BUILD; clean-all: BUILD entirely, the cargo target included
 ```
 
-Build products go to `BUILD` (default `/tmp/wavefw`, because this repository lives on a slow Windows mount). `/tmp` is
-emptied on a reboot: the cargo target, the example dumps and the pages are rebuilt then, and `make smoke` reports what
-is missing as `SKIPPED n pages / n sections (run make examples, …)`. For a `BUILD` that survives, use
-`make BUILD=build …` (under the repository, git-ignored) or `export BUILD=~/.cache/wavefw`.
+Build products go to `BUILD`, default `out/` in the repository (git-ignored): the cargo target, the Verilator objects,
+the example dumps and pages, the smoke screenshots. `make clean` empties it but keeps the cargo target, `make clean-all`
+removes it. On a slow mount (this repository on `/mnt/c` under WSL) `make BUILD=/tmp/wavefw …` builds faster; `/tmp`
+is emptied on a reboot, and `make smoke` reports what is missing as `SKIPPED n pages / n sections (run make examples, …)`.
+
+**The prebuilt CLI.** `bin/linux-x86_64/sva` (`x86_64-unknown-linux-musl`, statically linked) and
+`bin/windows-x86_64/sva.exe` (`x86_64-pc-windows-gnu`, linked by mingw-w64) are committed, so a clone runs the tools
+with assertions without Rust; like `wavefw/sva.wasm.js` they are rebuilt (`make dist`) in the commit that changes the
+engine. One time: `rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu` and, for Windows,
+`sudo apt install mingw-w64`. The tools take the CLI from `--sva-bin`, else `$WAVEFW_SVA`, else `out/sva-target/release/sva`
+(`make sva-build`), else `bin/<os>-x86_64/`, else `sva` on PATH.
 
 `make check` is the gate for every change. `make smoke` opens `docs/index.html`, `tests/conformance.html`, every built
 page (demo, FST demo, examples) and the user's pages under `work/` when they are there, fails on console errors, and

@@ -1,10 +1,10 @@
 # wavefw — demo flow: Verilator VCD -> vcd2wavedrom.py -> WaveDrom JSON -> docs/demo_waves.js (loaded by docs/index.html)
-# Build products live under BUILD (default /tmp/wavefw: the project sits on /mnt/c, which is slow under WSL, and /tmp
-# is gone after a reboot: the cargo target, the example dumps and pages are rebuilt then). For a BUILD that survives,
-# make BUILD=build … (under the repository, git-ignored) or export BUILD=~/.cache/wavefw.
+# Build products live under BUILD (default out/ in the repository, git-ignored: the cargo target, the example dumps and
+# pages, the smoke shots). On a slow mount (the repository on /mnt/c under WSL) make BUILD=/tmp/wavefw … builds faster.
+# make dist: the prebuilt sva CLI for Linux and Windows under bin/ (committed: a clone works without Rust).
 # make check is the gate before a commit: the engine's tests, the unit tests, everything smoke needs, smoke --strict.
 # Converter settings (signals, enums, groups, markers, colours, sorting …) come from a JSON config file.
-BUILD ?= /tmp/wavefw
+BUILD ?= out
 B     := $(abspath $(BUILD))
 OBJ   ?= $(B)/obj
 VCD   ?= $(B)/demo.vcd
@@ -50,6 +50,7 @@ help:
 	@echo 'make config     WAVES=work/x.vcd: write or update work/x.config.json (every signal, your edits kept); SVA=…: "bind" lines'
 	@echo 'make wavefw     wavefw/wavefw.js from wavefw/src/*.js (the page needs one file: run it after editing the sources)'
 	@echo 'make sva-build  the SVA engine (sva/, Rust): native CLI $$(BUILD)/sva-target/release/sva + sva_wasm.wasm -> wavefw/sva.wasm.js'
+	@echo 'make dist       the prebuilt sva CLI (committed): bin/linux-x86_64/sva (static) and bin/windows-x86_64/sva.exe (mingw-w64)'
 	@echo 'make sva-test   cargo test of the SVA engine: unit tests, the corpus tests/sva (third_party too), the schema, the CLI'
 	@echo 'make sva-bless  rewrite tests/sva/golden/*.txt after a reviewed change of the parser output'
 	@echo 'make sva-examples  sva parse + sva eval of the assertion files of examples/ (apb, axi_lite, fsm; after make examples)'
@@ -156,7 +157,7 @@ $(CONFIG): | $(WAVES)   # only when missing: never overwrites an edited config
 endif
 
 # SVA engine (docs/sva/STACK.md): one Rust library, a native CLI over VCD / FST (wellen) and a WebAssembly module for
-# the page. Cargo builds under BUILD (not on the slow /mnt/c mount). Needs cargo and `rustup target add wasm32-unknown-unknown`.
+# the page. Cargo builds under BUILD. Needs cargo and `rustup target add wasm32-unknown-unknown`.
 CARGO := CARGO_TARGET_DIR=$(B)/sva-target cargo
 SVA_BIN  = $(B)/sva-target/release/sva
 SVA_WASM = $(B)/sva-target/wasm32-unknown-unknown/wasm/sva_wasm.wasm
@@ -167,6 +168,25 @@ sva-build:
 	cd sva && $(CARGO) build --profile wasm -p sva-wasm --target wasm32-unknown-unknown
 	$(PY) sva/wasm/pack.py $(SVA_WASM) wavefw/sva.wasm.js
 	@ls -l $(SVA_BIN) $(SVA_WASM) wavefw/sva.wasm.js
+
+# The prebuilt CLI for a clone without Rust, committed and rebuilt in the commit of an engine change (as
+# wavefw/sva.wasm.js): Linux static (musl: any distribution), Windows through mingw-w64. The tools find it by
+# themselves (tools/svabuild.py: --sva-bin, $$WAVEFW_SVA, out/sva-target, bin/<os>-x86_64, sva on PATH).
+# Needs rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu, and x86_64-w64-mingw32-gcc for Windows
+# (Ubuntu: sudo apt install mingw-w64).
+DIST_LINUX := bin/linux-x86_64/sva
+DIST_WIN   := bin/windows-x86_64/sva.exe
+MINGW_CC   := x86_64-w64-mingw32-gcc
+dist: dist-linux dist-windows
+dist-linux:
+	cd sva && $(CARGO) build --release -p sva-cli --target x86_64-unknown-linux-musl
+	mkdir -p $(dir $(DIST_LINUX)) && cp $(B)/sva-target/x86_64-unknown-linux-musl/release/sva $(DIST_LINUX)
+	$(DIST_LINUX) parse examples/axi_lite/axi_lite.sva > /dev/null && ls -l $(DIST_LINUX)
+dist-windows:
+	@command -v $(MINGW_CC) >/dev/null || { echo 'dist-windows: $(MINGW_CC) is not installed (Ubuntu: sudo apt install mingw-w64)'; exit 1; }
+	cd sva && CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=$(MINGW_CC) $(CARGO) build --release -p sva-cli --target x86_64-pc-windows-gnu
+	mkdir -p $(dir $(DIST_WIN)) && cp $(B)/sva-target/x86_64-pc-windows-gnu/release/sva.exe $(DIST_WIN)
+	@ls -l $(DIST_WIN)
 
 # unit tests (lexer, preprocessor, parser, expansion, evaluator), the corpus tests/sva/*.sv against its annotations
 # and golden files, docs/sva/ast.schema.json against the output, the sva binary end to end
@@ -248,4 +268,4 @@ clean-all:
 	$(if $(filter $(B),/ $(CURDIR) $(HOME) $(abspath $(HOME)/..)),$(error clean-all: BUILD=$(B) is not a build directory))
 	rm -rf $(B)
 
-.PHONY: wavefw help demo demo-fst example examples shots html config sva-build sva-test sva-bless sva-examples sva-eval sva-spike smoke unit check fmt lint clean clean-all
+.PHONY: wavefw help demo demo-fst example examples shots html config sva-build dist dist-linux dist-windows sva-test sva-bless sva-examples sva-eval sva-spike smoke unit check fmt lint clean clean-all

@@ -258,23 +258,28 @@ function pageFiles(models) {
   }
 }
 function localFiles() { for (const f of store.get(FILES_KEY) || []) addFile(f, 'local'); }
+// the files of the compilation unit: a page file is out while this browser has a file of its name (an edit in the page,
+// a reload from the disk: ✎ / ⟳ replace it; Revert or Clear bring it back)
+const shadowed = f => f.origin === 'page' && LIB.files.some(l => l.origin === 'local' && l.name === f.name);
+const active = () => LIB.files.filter(f => !shadowed(f));
+SVA.revertFile = async name => { LIB.files = LIB.files.filter(f => !(f.origin === 'local' && f.name === name)); saveLocal(); LIB.files.forEach(f => { f.parsed = null; }); await reparse(); };
 function saveLocal() { const l = LIB.files.filter(f => f.origin === 'local').map(({ name, hash, source }) => ({ name, hash, source })); store.set(FILES_KEY, l.length ? l : null); }
 // parse the files that need it (every file as one unit with the engine, when one is not parsed yet), then index them
 // When the engine stops on the unit (a trap), this browser's files are left out (and not kept) and the page's parse
 // alone: the page's assertions still work, the panel says why and keeps its Clear button.
 function reparse() {
-  const need = LIB.files.some(f => !f.parsed);
+  const need = active().some(f => !f.parsed);
   LIB.parsing = (!need ? Promise.resolve() : (async () => {
-    let out;
-    try { out = (await SVA.engine()).call({ files: LIB.files.map(f => f.source) }); }
+    let out, act = active();
+    try { out = (await SVA.engine()).call({ files: act.map(f => f.source) }); }
     catch (err) {
       if (/no SVA engine/.test(err.message)) throw err;
       const gone = LIB.files.filter(f => f.origin === 'local');
       LIB.loadError = `${gone.map(f => f.name).join(', ') || 'the files'}: the assertion engine stopped (${err.message}); ${gone.length ? 'left out, not kept' : 'not parsed'}`;
-      LIB.files = LIB.files.filter(f => f.origin !== 'local'); saveLocal();
-      try { out = (await SVA.engine()).call({ files: LIB.files.map(f => f.source) }); } catch (err2) { out = { files: [] }; }
+      LIB.files = LIB.files.filter(f => f.origin !== 'local'); saveLocal(); act = active();
+      try { out = (await SVA.engine()).call({ files: act.map(f => f.source) }); } catch (err2) { out = { files: [] }; }
     }
-    (out.files || []).forEach((p, i) => { if (LIB.files[i]) LIB.files[i].parsed = p; });
+    (out.files || []).forEach((p, i) => { if (act[i]) act[i].parsed = p; });
   })().catch(err => { LIB.engineError = err.message; })).then(index);
   return LIB.parsing;
 }
@@ -282,9 +287,11 @@ function index() {
   LIB.byLabel = new Map(); LIB.notes = DATA.notes.map(t => ({ text: t, err: true })); LIB.src = hash(SOURCES().join('\u0000'));
   if (LIB.engineError && LIB.files.some(f => !f.parsed)) LIB.notes.push({ text: 'assertions not parsed: ' + LIB.engineError, err: true });
   if (LIB.loadError) LIB.notes.push({ text: LIB.loadError, err: true });
-  for (const f of LIB.files) {
+  for (const f of active()) {
     const p = f.parsed;
     if (!p) continue;
+    const pg = f.origin === 'local' && LIB.files.find(x => x.origin === 'page' && x.name === f.name);
+    f.shadows = !!pg; if (pg && pg.owners) f.owners = pg.owners;   // in the viewers of the file it replaces
     for (const e of p.errors || []) LIB.notes.push({ text: `${f.name}:${e.line}:${e.col}: ${e.msg}`, err: true });
     for (const e of p.warnings || []) LIB.notes.push({ text: `${f.name}:${e.line}:${e.col}: ${e.msg}` });
     for (const a of p.assertions || []) {
@@ -294,6 +301,7 @@ function index() {
   }
   for (const p of [...LIB.panels]) {
     if (p.v.root.isConnected) p.sync(); else LIB.panels.delete(p);   // a viewer that is gone
+    const x = p.v.svaExprs; if (x && x.list.length) x.again();   // package constants may have come
   }
 }
 SVA.fileList = () => LIB.files.map(({ name, path, origin, hash }) => ({ name, path, origin, hash }));
@@ -307,6 +315,108 @@ SVA.loadFiles = async list => {
   await reparse();
   saveLocal();   // after parsing: a file the engine stopped on was left out and is not kept
 };
+
+/* ---------------- editing an assertion in the page, reading a file from the disk again ---------------- */
+// An assertion's statement in its file: from the start of the line of its label to the ';' that ends it (its action
+// block too: else $error(…);). The engine gives UTF-8 byte offsets (at.start / at.end): -> string indexes.
+function charAt(src, byte) {
+  if (!/[^\x00-\x7f]/.test(src)) return byte;
+  let b = 0, i = 0;
+  while (i < src.length && b < byte) { const c = src.codePointAt(i); b += c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4; i += c > 0xffff ? 2 : 1; }
+  return i;
+}
+function stmtRange(src, a) {
+  let s = charAt(src, a.at.start), depth = 0;
+  const e = charAt(src, a.at.end);
+  while (s > 0 && src[s - 1] !== '\n') s--;
+  for (let i = e; i < src.length; i++) {   // past strings and comments
+    const c = src[i];
+    if (c === '"') { for (i++; i < src.length && src[i] !== '"'; i++) if (src[i] === '\\') i++; }
+    else if (c === '/' && src[i + 1] === '/') { while (i < src.length && src[i] !== '\n') i++; }
+    else if (c === '/' && src[i + 1] === '*') { const k = src.indexOf('*/', i + 2); if (k < 0) break; i = k + 1; }
+    else if ('([{'.includes(c)) depth++;
+    else if (')]}'.includes(c)) depth--;
+    else if (c === ';' && depth <= 0) return { s, e: i + 1 };
+  }
+  return { s, e };
+}
+// an assertion whose statement is not in the page's file that its file replaces: edited here or changed on the disk
+const changedHere = (a, file) => { if (!file.shadows || !a.at) return false; const pg = LIB.files.find(x => x.origin === 'page' && x.name === file.name), r = stmtRange(file.source, a); return !!pg && !pg.source.includes(file.source.slice(r.s, r.e)); };
+SVA.statement = label => { const x = LIB.byLabel.get(label); if (!x || !x.a.at) return null; const r = stmtRange(x.file.source, x.a); return { file: x.file.name, text: x.file.source.slice(r.s, r.e), line: x.a.line }; };
+// What an evaluation of an assertion depends on (not where it is in its file): a binding evaluated for another one is
+// evaluated again (Panel.sync)
+const asig = a => JSON.stringify(a, (k, v) => (k === 'at' || k === 'line' ? undefined : v));
+// ✎ Apply: the statement of `label` replaced by `text` in its file, which becomes this browser's copy (it replaces the
+// page's file of that name); parsed as one unit. A text that does not parse leaves everything as it was: -> {ok, errors}
+SVA.edit = async (label, text) => {
+  const x = LIB.byLabel.get(label); if (!x || !x.a.at) return { ok: false, errors: [`no assertion '${label}'`] };
+  const f = x.file, r = stmtRange(f.source, x.a), was = LIB.files.find(l => l.origin === 'local' && l.name === f.name);
+  const src = f.source.slice(0, r.s) + text.replace(/\s+$/, '') + f.source.slice(r.e);
+  const errs = () => LIB.notes.filter(n => n.err && n.text.startsWith(f.name + ':')).map(n => n.text), before = new Set(errs());
+  await SVA.loadFiles([{ name: f.name, text: src }]);
+  const errors = errs().filter(t => !before.has(t));
+  if (errors.length || !LIB.byLabel.has(label)) {   // back to the file as it was
+    if (was) await SVA.loadFiles([{ name: f.name, text: was.source }]); else await SVA.revertFile(f.name);
+    return { ok: false, errors: errors.length ? errors : [`'${label}' is not in ${f.name} any more`] };
+  }
+  return { ok: true, errors: [] };
+};
+// ⟳ and Watch: a file read from the disk again. With the File System Access API (Chromium) the file is picked once and
+// its handle kept (here and in IndexedDB, so a reload of the page asks only for the permission); elsewhere ⟳ asks for
+// the file every time. The text replaces the file of that name (the page's or this browser's).
+const HANDLES = new Map(), MTIME = new Map();
+const idb = (mode, fn) => new Promise((ok, no) => {
+  if (!G.indexedDB) return no(new Error('no IndexedDB'));
+  const rq = G.indexedDB.open('wavefw-sva', 1);
+  rq.onupgradeneeded = () => rq.result.createObjectStore('handles');
+  rq.onerror = () => no(rq.error);
+  rq.onsuccess = () => { try { const t = rq.result.transaction('handles', mode), q = fn(t.objectStore('handles')); t.oncomplete = () => ok(q && q.result); t.onerror = () => no(t.error); } catch (e) { no(e); } };
+});
+const pickFile = name => G.showOpenFilePicker
+  ? G.showOpenFilePicker({ multiple: false, id: 'wavefw-sva', types: [{ description: 'SystemVerilog', accept: { 'text/plain': ['.sv', '.sva', '.svh', '.v', '.vh'] } }] }).then(([h]) => h)
+  : new Promise((ok, no) => {   // no handles in this browser: a file input, the file read once
+    const inp = Object.assign(document.createElement('input'), { type: 'file', accept: '.sv,.sva,.svh,.v,.vh,.txt' });
+    inp.addEventListener('change', () => inp.files[0] ? ok({ name: inp.files[0].name, getFile: async () => inp.files[0], once: true }) : no(new Error('no file chosen')));
+    inp.click();
+  });
+async function handleOf(name, pick) {
+  let h = HANDLES.get(name);
+  const key = (G.location ? G.location.pathname : '') + ':' + name;   // per page: another project's checks.sv is another file
+  if (!h) { try { h = await idb('readonly', st => st.get(key)); } catch (e) { h = null; } }
+  if (!h && pick) { h = await pickFile(name); if (!h.once) { try { await idb('readwrite', st => st.put(h, key)); } catch (e) { /* not kept: picked again after a reload */ } } }
+  if (h && h.queryPermission && (await h.queryPermission({ mode: 'read' })) !== 'granted' && (await h.requestPermission({ mode: 'read' })) !== 'granted') throw new Error(`no permission to read ${name}`);
+  if (h && !h.once) HANDLES.set(name, h);
+  return h;
+}
+// -> {changed, name}: the text of the file of `name` from the disk (picked when there is no handle yet), loaded when new
+SVA.reload = async (name, opt = {}) => {
+  const h = await handleOf(name, opt.pick !== false); if (!h) return { changed: false, name };
+  const f = await h.getFile(), text = await f.text(), cur = active().find(x => x.name === name);
+  MTIME.set(name, f.lastModified);
+  if (cur && cur.source === text && !opt.force) return { changed: false, name, picked: h.name };
+  await SVA.loadFiles([{ name, text }]);
+  return { changed: true, name, picked: h.name };
+};
+// Watch: every second the files with a handle; a newer one is read, parsed and its bindings evaluated again
+SVA.watch = on => {
+  clearInterval(LIB.watchT); LIB.watching = !!on;
+  if (on) LIB.watchT = setInterval(async () => {
+    if (LIB.watchBusy) return; LIB.watchBusy = true;
+    try {
+      for (const [name, h] of HANDLES) {
+        const f = await h.getFile();
+        if (MTIME.has(name) && f.lastModified !== MTIME.get(name)) {
+          const r = await SVA.reload(name, { pick: false });
+          if (r.changed) for (const p of LIB.panels) p.toast(`${name} changed on the disk: parsed and evaluated again`);
+        }
+        MTIME.set(name, f.lastModified);
+      }
+    } catch (e) { for (const p of LIB.panels) p.toast('watch: ' + e.message); }
+    LIB.watchBusy = false;
+  }, SVA.watchMs || 1000);
+  for (const p of LIB.panels) p.render();
+};
+SVA.handles = () => [...HANDLES.keys()];
 
 /* ---------------- scopes of a model and name resolution ---------------- */
 // the parts of a hierarchical name: split at the dots, not inside a select (a[1.2]) nor in an escaped identifier
@@ -391,7 +501,7 @@ const candidates = (v, a) => scopeInfo(v.M).scopes.filter(S => resolve(v, a, S).
 Object.assign(SVA, { scopeInfo, resolve, candidates });
 
 /* ---------------- bindings: assertion + scope of a viewer, their results ---------------- */
-const SOURCES = () => LIB.files.map(f => f.source);
+const SOURCES = () => active().map(f => f.source);
 const bkey = b => b.assert + '@' + b.scope;
 // The bindings of one scope in one evaluation: one request per clock with all their assertions (the files are parsed
 // once: the engine keeps the last unit). Each binding gets the results document of its assertion; progress(i, n) after
@@ -469,6 +579,35 @@ function why(a) {
   return t.length > 42 ? t.slice(0, 40) + '…' : t;
 }
 const cut = (t, n) => (t.length > n ? t.slice(0, n - 1) + '…' : t);
+// a property in parts that wrap as a whole: a part starts at a sequence or property operator (|-> |=> ## #-# #=#
+// intersect throughout within and or iff implies until …); an operator alone joins the part after it
+const PROP_OP = '\\|->|\\|=>|#-#|#=#|##\\S*|(?:intersect|throughout|within|and|or|iff|implies|s_until_with|until_with|s_until|until|s_eventually|eventually|s_nexttime|nexttime|s_always|always|not|if|else)\\b';
+const PROP_AT = new RegExp(` (?=(?:${PROP_OP}))`), PROP_ONLY = new RegExp(`^(?:${PROP_OP})$`);
+function propParts(text) {
+  const out = [];
+  for (const p of String(text).split(PROP_AT)) {
+    const L = out[out.length - 1];
+    if (L != null && PROP_ONLY.test(L)) out[out.length - 1] = L + ' ' + p; else out.push(p);
+  }
+  return out;
+}
+SVA.propParts = propParts;
+// the names of the assertion (a Set) that a step's label reads, in the order they come: strings, based literals and
+// system functions are no names; `a.b` is a.b or else a
+function stepSignals(label, names) {
+  const out = [], src = label.replace(/"(?:[^"\\]|\\.)*"/g, ' ').replace(/\d*'[sS]?[bodhBODH]\s*[\w?]+/g, ' ');
+  for (const w of src.matchAll(/\$?[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)*/g)) {
+    let t = w[0]; if (t[0] === '$') continue;
+    while (t && !names.has(t)) { const i = t.lastIndexOf('.'); t = i < 0 ? '' : t.slice(0, i); }
+    if (t && !out.includes(t)) out.push(t);
+  }
+  return out;
+}
+SVA.stepSignals = stepSignals;
+// the attempt a figure without a selection (the static SVG) shows on the signals: the first failure, else the first one
+const focusOf = o => { const as = o.attempts || [], f = o.kind !== 'cover' ? as.findIndex(a => a.result === 'fail') : -1; return f >= 0 ? f : as.length ? 0 : -1; };
+// the end flag of an attempt: did it end, and how
+const END = { pass: '✓ pass', fail: '✕ fail', active: '… not ended', disabled: '⊘ disabled', capped: '… capped' };
 // one results document -> what the rows draw: attempts with their times and sub-lane, trace points per step
 function shape(res, only) {
   const o = res.assertions[0], T = o.cycles || res.cycles || [], at = c => T[Math.min(Math.max(c, 0), T.length - 1)];
@@ -488,6 +627,7 @@ function shape(res, only) {
     if (x.r === 'fail') {
       const s = num.has(x.a.reason && x.a.reason.step) ? num.get(x.a.reason.step) : Math.max(lastCons, 0), c = x.a.failed_at ?? x.a.end;
       if (steps.length) { x.fail = { t: at(c), c, s, x, fail: true }; pts[s].push(x.fail); }
+      x.tf = at(c); x.tok = Math.min(x.pts.length ? x.pts[x.pts.length - 1].t : x.t0, x.tf);   // the last good step: red from there
     }
   }
   // the third sub-lane: the rest, merged where they overlap (a count on the bar)
@@ -506,6 +646,22 @@ function shape(res, only) {
 function hatch(P, x0, y0, w, h, col) {
   P.clip(x0, y0, w, h, () => { const d = []; for (let x = x0 - h; x < x0 + w; x += 4) d.push(['M', x, y0 + h], ['L', x + h, y0]); P.path(d, { stroke: col, w: 1, alpha: 0.9 }); });
 }
+// one attempt with room: a bracket from its start to its end (ticks at both ends; an active or capped one stays open),
+// over a light band; a failure green up to its last matched step, red from there to where it failed -> the split x
+function bracket(P, x, a, b, y, h, X, cell) {
+  const r = x.r, c = COL[r], th = Math.max(2, Math.min(3, Math.round(h / 3))), open = r === 'active' || r === 'capped';
+  let split = null;
+  if (r === 'fail') {
+    split = x.tok < x.tf ? X(x.tok) : X(x.tf) - cell / 2;   // the failing cycle at least: half a cycle before its edge
+    split = Math.min(Math.max(split, a), b);
+  }
+  const seg = (u, v, col) => { if (v - u > 0) { P.rect(u, y, v - u, h, col, 0.14); P.rect(u, y, v - u, th, col, open ? 0.6 : 0.95); } };
+  if (split == null) seg(a, b, c); else { seg(a, split, 'sva-pass'); seg(split, b, 'sva-fail'); }
+  if (open && b - a >= 6) hatch(P, a, y + th, b - a, h - th, c);
+  P.rect(a, y, 2, h, split != null && split <= a ? 'sva-fail' : split != null ? 'sva-pass' : c, 0.95);   // where it starts
+  if (!open) P.rect(b - 2, y, 2, h, c, 0.95);   // where it ends: an open one has no end
+  return split;
+}
 function bar(P, r, a, b, y, h) {
   const w = b - a, c = COL[r];
   if (r === 'active' || r === 'capped') { P.rect(a, y, w, h, c, 0.25); if (w >= 6) hatch(P, a, y, w, h, c); else P.rect(a, y, w, h, c, 0.6); }
@@ -520,7 +676,8 @@ function dot(P, x, y, p, small, sel) {
   else P.text(x, y + 0.5, String(p.s + 1), { anchor: 'middle', size: 9, weight: 700, fill: 'panel' });
 }
 // the rows of one binding. st: kept between calls (same row objects while the results stay); opt: {S, label, scope,
-// copies: [rows], sel() -> attempt index | -1, pick(i), view (null: static SVG), base: {anc, depth} of the place}
+// copies: [rows], map: {name: row} of the bound signals, sel() -> attempt index | -1, pick(i), focus: the attempt the
+// static SVG shows on the signals, view (null: static SVG), base: {anc, depth} of the place}
 function assertionRows(st, res, opt) {
   const S = opt.S, rh = S.rowHeight || 26, svg = !opt.view;
   if (st.res !== res || st.only !== opt.only) { st.res = res; st.only = opt.only; st.m = shape(res, opt.only); st.rows = null; }
@@ -540,7 +697,7 @@ function assertionRows(st, res, opt) {
   };
   // attempts lane
   const lane = st.lane || (st.lane = { type: 'sig' });
-  Object.assign(lane, kid, { name: opt.only ? `attempts: ${opt.only}` : 'attempts', full: `${g.full}/attempts`, cls: 'sva-lane', height: Math.max(32, rh + 6), hits: [], drawn: 0,
+  Object.assign(lane, kid, { name: opt.only ? `attempts: ${opt.only}` : 'attempts', full: `${g.full}/attempts`, cls: 'sva-lane', height: Math.max(44, rh + 18), hits: [], drawn: 0,
     draw(P, { y, h, X, tA, tB, xL, xR }) {
       const hits = this.hits = [], W = Math.ceil(xR - xL) + 2, cx = x => Math.min(Math.max(x, xL - 4), xR + 4);
       if (o.lane) {   // the per-cycle strip: the strongest event per pixel, failures at least 2 px wide
@@ -554,14 +711,16 @@ function assertionRows(st, res, opt) {
         for (let c = 0; c < W;) { const r = col[c]; let e = c + 1; while (e < W && col[e] === r) e++; if (r) P.rect(xL + c, y + 2, e - c, 3, STRIP_COL[r], r === 1 ? 0.5 : 0.95); c = e; }
       }
       const lh = Math.floor((h - 9) / 3), cell = m.T.length > 1 ? (X(m.T[m.T.length - 1]) - X(m.T[0])) / (m.T.length - 1) : 8;
-      const pad = Math.min(Math.max(cell / 2 - 1, 2), 6);   // a bar reaches a little past its first and last edge
+      const pad = Math.min(Math.max(cell / 2 - 2, 2), 16);   // a bar covers its first and last cycle (a gap to the next one)
+      const marks = this.marks = [];   // what was drawn: [result, a, b, split | null, bracket] (tests)
       let drawn = 0;
       m.lanes.forEach((items, k) => {
         const by = y + 7 + k * lh, bh = lh - 1;
         let run = null;
         const flush = () => {
           if (!run) return;
-          bar(P, run.r, run.a, run.b, by, bh);
+          const one = run.n === 1 && run.b - run.a >= 6;   // one attempt with room: a bracket; crowded ones: a bar
+          marks.push([run.r, run.a, run.b, one ? bracket(P, run.x, run.a, run.b, by, bh, X, cell) : (bar(P, run.r, run.a, run.b, by, bh), null), one]);
           if (run.sel) P.path([['M', run.a - 1, by - 1], ['L', run.b + 1, by - 1], ['L', run.b + 1, by + bh + 1], ['L', run.a - 1, by + bh + 1], ['Z']], { stroke: 'hl8', w: 1.5 });
           if (run.n > 1 && k === 2 && run.b - run.a > 16) P.text((run.a + run.b) / 2, by + bh / 2, '×' + run.n, { anchor: 'middle', size: 8.5, weight: 700, fill: 'panel' });
           hits.push([run.a, run.b, by - y, by - y + bh, run.x]); drawn += run.n; run = null;
@@ -616,15 +775,40 @@ function assertionRows(st, res, opt) {
     return Object.assign(r, kid, { name: src.name, full: src.full, tr: src.tr, gaps: src.gaps, width: src.width, enum: src.enum, radix: src.radix, style: src.style,
       stroke: src.stroke, fill: src.fill, tv: src.tv, end: src.end, src: src.src, cls: 'sva-copy', of: src });
   });
-  // arrows along the traces: every attempt on screen when there are few (the static SVG: all), the selected one in front
-  st.overlay = g.overlay = (P, { pos, X, tA, tB, xL, xR }) => {
+  // the rows each step reads, by name in its label: the bound signals (src) and their copies in the group (cp)
+  const map = opt.map || {}, names = new Set(Object.keys(map)), cpOf = new Map(copies.map(c => [c.of, c]));
+  const reads = m.steps.map(stp => { const rs = stepSignals(stp.label, names).map(n => map[n]); return { src: rs, cp: rs.map(r => cpOf.get(r)).filter(Boolean) }; });
+  const marked = [...new Set(reads.flatMap(x => x.src))];
+  // arrows along the traces: every attempt on screen when there are few (the static SVG: all), the selected one in front;
+  // the selected attempt (the static SVG: focusOf) also on the signals its steps read, its start and end as dashed lines
+  // across the rows with flags in the group's band: ▶ start, and how it ended (✓ pass, ✕ fail, … not ended)
+  st.overlay = g.overlay = (P, { pos, X, tA, tB, xL, xR, yA, yB }) => {
     const ym = r => { const q = pos.get(r); return q ? q.y + q.h / 2 : null; };
+    const seen = r => { const q = pos.get(r); return !!q && q.y + q.h > yA && q.y < yB; };
     if (ym(steps[0] || lane) == null) return;
-    const on = [];
-    for (const x of m.atts) { if (x.t0 > tB) break; if (x.t1 >= tA && x.pts.length + (x.fail ? 1 : 0) > 1) on.push(x); }
-    const sel = svg ? -1 : opt.sel(), list = svg || on.length < MANY ? on.filter(x => x.i !== sel) : [];
-    const s = m.atts.find(x => x.i === sel); if (s && s.pts.length + (s.fail ? 1 : 0) > 1) list.push(s);
-    const near = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]) < 0.5, labels = [], drawn = g.arrows = [];   // what was drawn (tests)
+    const sel = svg ? -1 : opt.sel(), fi = svg ? opt.focus ?? -1 : sel, fx = fi >= 0 ? m.atts.find(x => x.i === fi) : null;
+    const near = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]) < 0.5, labels = [], drawn = g.arrows = [], flow = g.flow = [];   // what was drawn (tests)
+    if (fx) {   // start and end: under everything else
+      const xs = X(fx.t0), xe = X(fx.t1), vl = (x, c) => { if (x >= xL - 2 && x <= xR + 2) P.path([['M', x, yA], ['L', x, yB]], { stroke: c, w: 1, dash: [4, 3] }); };
+      vl(xs, 'hl8'); if (xe - xs >= 1) vl(xe, COL[fx.r]);
+      const q = pos.get(g);
+      if (q) {
+        const yf = q.y + q.h / 2, flag = (x, text, col, anchor) => {
+          const tw = P.measure(text, { size: 10 }), bx = anchor === 'end' ? x - tw - 6 : x;
+          P.rect(bx, yf - 6.5, tw + 6, 13, 'panel'); P.path([['M', bx, yf - 6.5], ['L', bx + tw + 6, yf - 6.5], ['L', bx + tw + 6, yf + 6.5], ['L', bx, yf + 6.5], ['Z']], { stroke: col, w: 1 });
+          P.text(anchor === 'end' ? x - 3 : x + 3, yf + 0.5, text, { anchor, size: 10, weight: 600, fill: col });
+          flow.push({ flag: text });
+        };
+        const end = END[fx.r] || fx.r, ws = P.measure('▶ start', { size: 10 }) + 6, we = P.measure(end, { size: 10 }) + 6;
+        if (xe - xs < 2) flag(xs + 2, `▶ ${end}`, COL[fx.r], 'start');
+        else if (xe - xs >= ws + we + 8) { flag(xs + 2, '▶ start', 'hl8', 'start'); flag(xe - 2, end, COL[fx.r], 'end'); }
+        else { flag(xs - 2, '▶ start', 'hl8', 'end'); flag(xe + 2, end, COL[fx.r], 'start'); }
+      }
+    }
+    const stepsOn = [lane, ...steps].some(seen), on = [];
+    if (stepsOn) for (const x of m.atts) { if (x.t0 > tB) break; if (x.t1 >= tA && x.pts.length + (x.fail ? 1 : 0) > 1) on.push(x); }
+    const list = svg || on.length < MANY ? on.filter(x => x.i !== sel) : [];
+    const s = stepsOn && m.atts.find(x => x.i === sel); if (s && s.pts.length + (s.fail ? 1 : 0) > 1) list.push(s);
     const arrow = (A, B, col, w, dash, label, front) => {
       const g = G.WaveFW.paint.edgeGeom({ shape: A[1] === B[1] ? '-' : '-|-' }, A[0], A[1], B[0], B[1]);
       P.path(g.d, { stroke: col, w, dash }); drawn.push({ col, label, front: !!front });
@@ -647,6 +831,23 @@ function assertionRows(st, res, opt) {
       }
       for (const p of x.fail ? x.pts.concat(x.fail) : x.pts) { const q = at(p); if (q && q[0] >= xL - 8 && q[0] <= xR + 8) dot(P, q[0], q[1], p, !front && p.sm !== false, front); }   // in front of the lines, as the row drew them
     }
+    // the focused attempt on the signals: a numbered circle on every row its step reads, arrows from the first of one
+    // step to the first of the next (the bound signals and their copies in the group, each set on its own)
+    if (fx) for (const set of ['src', 'cp']) {
+      const pts = fx.fail ? fx.pts.concat(fx.fail) : fx.pts, dots = [];
+      let A = null;
+      for (const p of pts) {
+        const rs = reads[p.s][set].filter(r => pos.has(r)); if (!rs.length) continue;
+        const B = [X(p.t), ym(rs[0])];
+        if (A && !near(A, B)) {
+          if (p.fail) arrow(A, B, 'sva-fail', 1.6, [4, 3], why(fx.a), true);
+          else arrow(A, B, 'hl8', 1.6, p.cut ? [2, 3] : null, '', true);
+        }
+        A = B;
+        for (const r of rs) dots.push([B[0], ym(r), p]);
+      }
+      for (const [x, y, p] of dots) if (x >= xL - 8 && x <= xR + 8) { dot(P, x, y, p, false, true); flow.push({ on: set, s: p.s + 1, fail: !!p.fail, x, y }); }
+    }
     // labels last: the selected attempt's first, the others where no label is yet
     const boxes = [];
     for (const l of labels.sort((a, b) => b.front - a.front)) {
@@ -655,7 +856,8 @@ function assertionRows(st, res, opt) {
       boxes.push(bx); P.rect(bx[0], bx[2], tw + 6, 13, 'panel'); P.text(l.m[0], l.m[1], l.label, { anchor: 'middle', size: 10, fill: l.col, weight: 600 });
     }
   };
-  for (const r of [lane, ...steps]) r.overlay = st.overlay;   // drawn when any of its rows is on screen
+  for (const r of [lane, ...steps, ...copies]) r.overlay = st.overlay;   // drawn when any of its rows is on screen
+  st.overlay.rows = marked;   // or one of the signals it marks
   st.rows = [g, lane, ...steps, ...copies];
   return st.rows;
 }
@@ -675,7 +877,17 @@ class Panel {
       inp.addEventListener('change', () => { const fs = [...inp.files]; inp.value = ''; if (fs.length) this.load(fs); });
     }
     this.el.addEventListener('click', e => this.click(e));
+    this.el.addEventListener('keydown', e => {   // in the editor: ctrl+Enter applies, Esc cancels
+      const ta = e.target.closest && e.target.closest('textarea.src'); if (!ta) return;
+      const li = ta.closest('li[data-a]');
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this.applyEdit(li.dataset.a); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); this.editing = null; this.editText = this.editErr = null; this.render(); }
+    });
     this.el.addEventListener('dragstart', e => this.dragStart(e));
+    this.el.addEventListener('mousedown', e => {   // on a property or an instance path the mouse selects text: the line does not drag meanwhile
+      const li = e.target.closest && e.target.closest('b.sp, code.at') && e.target.closest('li[data-a]'); if (!li) return;
+      li.draggable = false; G.addEventListener('mouseup', () => { li.draggable = true; }, { once: true });
+    });
     this.el.addEventListener('dragend', () => this.dragEnd());
     // every module row takes the drop (one without the signals answers "cannot bind: …"), so the user always hears why
     v.listen('names', 'dragover', e => { const t = this.dropTarget(e); if (t) { e.preventDefault(); e.dataTransfer.dropEffect = 'link'; this.hover(t); } });
@@ -700,7 +912,7 @@ class Panel {
     for (const p of page) if (!this.removed.has(bkey(p)) && !list.some(b => bkey(b) === bkey(p))) list.push(p);
     for (const b of list) {
       const pb = page.find(p => bkey(p) === bkey(b));
-      this.bindings.push({ assert: b.assert, scope: b.scope, results: pb && pb.results ? pb.results : null, page: !!pb });
+      this.bindings.push({ assert: b.assert, scope: b.scope, results: pb && pb.results ? pb.results : null, page: !!pb, fromPage: !!(pb && pb.results) });
     }
     LIB.panels.add(this);
   }
@@ -719,6 +931,10 @@ class Panel {
   // after the files or the settings changed: resolve the bindings again, take kept results, evaluate the others
   sync() {
     for (const b of this.bindings) {
+      // results of another text of the assertion (an edit, a reload; the page's results of a file this browser replaced): gone
+      const x = LIB.byLabel.get(b.assert), sig = x ? asig(x.a) : null;
+      if (b.results && ((b.asig !== undefined && b.asig !== sig) || (b.fromPage && x && changedHere(x.a, x.file)))) { b.results = null; b.fromPage = false; this.dropSel(b); }
+      b.asig = sig;
       this.check(b);
       const kept = this.saved.results && this.saved.src === LIB.src && this.saved.results[bkey(b)];
       if (b.state === 'bound' && ((outcome(b) || {}).missing || []).length) b.results = null;   // the build did not find a name the page does: evaluated here
@@ -769,7 +985,7 @@ class Panel {
             for (const b of ok) { b.msg = (n > 1 ? `evaluating ${i + 1} / ${n}` : 'evaluating') + (useWorker(w) ? ` (${p.edges.length} cycles, in a worker)…` : '…'); this.renderB(b); }
           });
         } catch (err) { ok.forEach(b => { b.error = err.message; }); }
-        for (const b of ok) { b.running = false; b.msg = null; this.dropSel(b); this.renderB(b); this.changed(b, false); }
+        for (const b of ok) { b.running = false; b.msg = null; b.fromPage = false; this.dropSel(b); this.renderB(b); this.changed(b, false); }
         this.redraw();
         if (ok.length === 1 && outcome(ok[0])) this.toast(`${ok[0].assert}: ${plainCounts(outcome(ok[0]))}`);
       }
@@ -798,7 +1014,7 @@ class Panel {
     for (const b of list) {
       const g = b.group, k = g ? g.id : -1, st = b.draw || (b.draw = {}), first = !st.gid;
       const copies = S.svaSignals === false || !b.res ? [] : [...new Set(Object.values(b.res.map))];
-      const rows = assertionRows(st, b.results, { S, label: b.assert, scope: b.scope, copies, view: v, base: { anc: g ? g.anc.concat(g.id) : [], depth: g ? g.depth + 1 : 0 },
+      const rows = assertionRows(st, b.results, { S, label: b.assert, scope: b.scope, copies, map: b.res ? b.res.map : rowsOf(v.M, outcome(b)), view: v, base: { anc: g ? g.anc.concat(g.id) : [], depth: g ? g.depth + 1 : 0 },
         sel: () => (this.selA && this.selA.b === b ? this.selA.i : -1), pick: i => this.select(b, i), only: b.only || null });
       if (first && n.get(k) > 3 && !(outcome(b).stats.fail > 0 && outcome(b).kind !== 'cover')) v.collapsed.add(st.gid);   // many at one place: the passing ones folded
       if (!this.at.has(k)) this.at.set(k, []);
@@ -883,16 +1099,60 @@ class Panel {
     this.renderB(b);
     this.mark(b);
     this.toast(`${b.assert}: ${a.result} at ${v.fmt(ts, v.span / 1000, v.span)}${a.note ? ' — ' + a.note : ''}`);
+    this.explain();
     v.root.dispatchEvent(new CustomEvent('wavefw:sva-select', { detail: { binding: b, attempt: a } }));
   }
+  // Why: the selected attempt's booleans taken apart (the engine's explain), one column per cycle of the attempt; a
+  // cell where a step matched is ringed, the one where it failed red; a cycle's header puts the cursor there
+  async explain() {
+    const sel = this.selA, key = sel ? `${resultsId(sel.b.results)}:${bkey(sel.b)}:${sel.i}` : '';
+    if (key === this.whyKey) return;
+    this.whyKey = key;
+    if (!sel) { this.why = ''; this.fillWhy(); return; }
+    const { b, i } = sel, o = outcome(b), a = o.attempts[i], x = LIB.byLabel.get(b.assert), v = this.v;
+    const head = `<div class="wh"><b>Why</b> · ${esc(b.assert)} · attempt ${i + 1}: <span class="c-${a.result}">${esc(a.result)}</span>${a.note ? ' — ' + esc(a.note) : ''}<button type="button" class="ic" data-sv="nowhy" aria-label="close" title="Close (Esc on the waves)">✕</button></div>`;
+    const say = m => { if (this.whyKey === key) { this.why = head + `<p class="muted">${esc(m)}</p>`; this.fillWhy(); } };
+    if (!x || !b.res || !b.res.ok) { say('the signals of this binding are not in this view: nothing to take apart'); return; }
+    try {
+      const p = plan(SOURCES(), [x.a], rowSampler(b.res.map), v.M.timed ? 'ps' : 'cycles')[0], E = p.edges || [], T = o.cycles || b.results.cycles;
+      const last = Math.max(a.end, a.failed_at ?? a.end), t0 = T[a.start], from = E.indexOf(t0);
+      if (from < 0) { say('this attempt is outside the waves of this view'); return; }
+      const n = Math.min(last - a.start + 1, Panel.WHY_CYCLES), to = from + n - 1;
+      const req = { files: p.req.files, trace: p.req.trace, explain: { assert: x.a.label, from, to } };
+      const out = (await SVA.engine()).call(req);
+      if (this.whyKey !== key) return;
+      if (out.errors) { say(out.errors.map(e => e.msg).join('; ')); return; }
+      const num = new Map((o.steps || []).map((s, k) => [s.id, [k + 1, s.role]])), hit = new Set((a.trace || []).map(([id, c]) => `${id}@${c}`));
+      const miss = a.result === 'fail' && a.reason ? `${a.reason.step}@${a.failed_at ?? a.end}` : '';
+      const cell = (val, w, id, c) => {
+        const t = w === 1 ? (val === 1 ? 't' : val === 0 ? 'f' : 'x') : (typeof val === 'number' || /^h/.test(val) ? 'n' : 'x');
+        const txt = w === 1 ? String(val) : typeof val === 'number' ? (val < 10 ? String(val) : '0x' + val.toString(16)) : /^h/.test(val) ? '0x' + val.slice(1) : val;
+        const k = id ? `${id}@${c}` : '';
+        return `<td class="${t}${k && hit.has(k) ? ' hit' : ''}${k && k === miss ? ' miss' : ''}" title="${esc(String(txt))}">${esc(cut(String(txt), 10))}</td>`;
+      };
+      const rows = [];
+      const walk = (nd, depth, top) => {
+        const lab = top ? `${top.id && num.has(top.id) ? num.get(top.id)[0] + '. ' : ''}${nd.text}` : nd.text;
+        const role = top ? (top.id && num.has(top.id) ? num.get(top.id)[1] : top.what) : '';
+        rows.push(`<tr class="${top ? 'top' : ''}"><th scope="row" style="padding-left:${0.4 + depth * 1.1}em" title="${esc(nd.text)}">${esc(cut(lab, 60))}${role ? ` <span class="muted">${esc(role)}</span>` : ''}</th>${nd.values.map((val, k) => cell(val, nd.w, top && top.id, a.start + k)).join('')}</tr>`);
+        for (const kid of nd.kids || []) walk(kid, depth + 1, null);
+      };
+      for (const bl of out.explain) walk(bl.tree, 0, bl);
+      const cols = Array.from({ length: n }, (_, k) => `<th scope="col"><button type="button" data-sv="wt" data-t="${E[from + k]}" title="${esc(v.when(E[from + k]))}: the cursor there">${a.start + k}</button></th>`).join('');
+      this.why = head + `<div class="ww"><table class="svw-t"><thead><tr><th scope="col" class="muted">cycle</th>${cols}</tr></thead><tbody>${rows.join('')}</tbody></table></div>` +
+        (last - a.start + 1 > n ? `<p class="muted">the first ${n} of ${last - a.start + 1} cycles</p>` : '');
+      this.fillWhy();
+    } catch (err) { say(err.message); }
+  }
+  fillWhy() { const el = this.el.querySelector('.svw'); if (el) { el.innerHTML = this.why || ''; el.hidden = !this.why; } }
   // the selection is gone with its binding (b: only if it is b's): no attempt, no highlighted rows; the caller redraws
   dropSel(b) {
     if (!this.selA || (b && this.selA.b !== b)) return;
-    this.selA = null; this.v.extraPicks = new Map();
+    this.selA = null; this.v.extraPicks = new Map(); this.explain();
   }
   unselect(redraw = true) {
     const b = this.selA && this.selA.b; if (!b) return;
-    this.selA = null; this.renderB(b);
+    this.selA = null; this.renderB(b); this.explain();
     if (redraw) { this.v.extraPicks = new Map(); this.v.renderNames(); this.v.draw(); }
   }
   firstFail(b) {
@@ -922,18 +1182,18 @@ class Panel {
   }
   label(S) { return S || '(top)'; }
   state(b) {
-    const sc = esc(this.label(b.scope)), o = outcome(b);
+    const sc = esc(this.label(b.scope)), path = sc.replace(/\./g, '.<wbr>'), o = outcome(b);
     const how = [...((b.res && b.res.notes) || []), ...((b.res && b.res.errors) || [])];
     if (b.workerError) how.push(`the worker failed (${b.workerError}): evaluated in the page`);
     const info = how.length ? ` <button type="button" class="how" data-sv="how" aria-label="how ${esc(b.assert)} was bound" title="${esc(how.join('\n'))}">ⓘ</button>` : '';
-    if (b.running) return `<span class="st run">bound to <b>${sc}</b> · ${esc(b.msg || 'evaluating…')}</span>`;
-    if (b.error) return `<span class="st no">bound to <b>${sc}</b> · ${esc(b.error)}</span>`;
+    if (b.running) return `<span class="st run" title="bound to ${sc}"><b class="sp">${path}</b> · ${esc(b.msg || 'evaluating…')}</span>`;
+    if (b.error) return `<span class="st no" title="bound to ${sc}"><b class="sp">${path}</b> · ${esc(b.error)}</span>`;
     if (b.state === 'cannot') return `<span class="st no">cannot bind to <b>${sc}</b>: ${esc([...(b.res.missing.length ? ['missing ' + b.res.missing.join(', ')] : []), ...b.res.errors].join('; '))}</span>`;
     if (b.state === 'dump') {
       const not = [...b.res.missing, ...b.res.errors].join(', ');
-      return `<span class="st dump" title="${esc('results of sva eval at build time; this view does not show ' + not)}">bound to <b>${sc}</b> · from the dump, not in this view: ${esc(not)}${this.selHTML(b)}</span>` + (o ? `<span class="cn">${counts(o, b.only || null)}</span>` : '');
+      return `<span class="st dump" title="${esc('bound to ' + this.label(b.scope) + '; results of sva eval at build time; this view does not show ' + not)}"><b class="sp">${path}</b> · from the dump, not in this view: ${esc(not)}${this.selHTML(b)}</span>` + (o ? `<span class="cn">${counts(o, b.only || null)}</span>` : '');
     }
-    return `<span class="st ok">bound to <b>${sc}</b>${info}${this.selHTML(b)}</span>` + (o ? `<span class="cn">${counts(o, b.only || null)}</span>` : '');
+    return `<span class="st ok" title="bound to ${sc}"><b class="sp">${path}</b>${info}${this.selHTML(b)}</span>` + (o ? `<span class="cn">${counts(o, b.only || null)}</span>` : '');
   }
   selHTML(b) {
     const a = this.selA && this.selA.b === b && outcome(b) && outcome(b).attempts[this.selA.i];
@@ -950,6 +1210,32 @@ class Panel {
     const o = outcome(b);
     return `${this.state(b)}<span class="bb"><button type="button" data-sv="eval"${b.state === 'bound' && !b.running ? '' : ' disabled'} title="Run the assertion again over the waves of this view">Evaluate</button><button type="button" data-sv="fail"${o && o.stats.fail && o.kind !== 'cover' ? '' : ' disabled'} title="Show the first failing attempt">Go to first failure</button><button type="button" data-sv="unbind" title="Remove this binding">Unbind</button></span>${this.onlyHTML(b)}`;
   }
+  // ✎: the editor of an assertion under its line: its statement, Apply / Cancel / Revert, what went wrong
+  editHTML(a, file) {
+    const st = this.editText != null ? this.editText : (SVA.statement(a.label) || {}).text || '';
+    return `<div class="sve"><textarea class="src" spellcheck="false" rows="${Math.min(14, st.split('\n').length + 1)}" aria-label="the statement of ${esc(a.label)}">${esc(st)}</textarea>
+      <span class="eb"><button type="button" data-sv="apply" title="Parse it and evaluate its bindings again (ctrl+Enter); kept in this browser">Apply</button><button type="button" data-sv="noedit">Cancel</button>${file.shadows ? `<button type="button" data-sv="revert" title="Forget this browser's ${esc(file.name)}: the page's file comes back">Revert to the page's</button>` : ''}
+      <span class="muted">${esc(file.name)}:${a.line}</span><span class="em" role="alert">${esc(this.editErr || '')}</span></span></div>`;
+  }
+  async applyEdit(label) {
+    const ta = this.el.querySelector(`li[data-a="${CSS.escape(label)}"] textarea.src`); if (!ta) return;
+    const text = ta.value; this.toast('parsing…');
+    const r = await SVA.edit(label, text), x = LIB.byLabel.get(label);
+    if (!r.ok) { this.editText = text; this.editErr = r.errors.join(' · '); this.editing = label; this.render(); this.toast(`not applied: ${r.errors[0]}`); return; }
+    if (x) x.file.edited = true;
+    this.editing = null; this.editText = this.editErr = null; this.render();
+    const bs = this.bindings.filter(b => b.assert === label);
+    await this.queue;
+    this.toast(bs.length ? `${label}: ${bs.map(b => outcome(b) ? plainCounts(outcome(b)) : b.state).join(' · ')}` : `${label}: applied (not bound)`);
+  }
+  async reloadFile(name) {
+    try {
+      const r = await SVA.reload(name);
+      if (!r.changed) { this.toast(`${name}: no change on the disk`); return; }
+      const f = active().find(x => x.name === name); if (f) f.edited = false;
+      await this.queue; this.toast(`${name}: read again${r.picked && r.picked !== name ? ` (from ${r.picked})` : ''}, parsed and evaluated`);
+    } catch (e) { if (e.name !== 'AbortError') this.toast(`${name}: ${e.message}`); }
+  }
   // one binding's line in place (status, counts); the whole list only when it changes
   renderB(b) {
     const el = this.el.querySelector(`ol.asv [data-b="${this.bindings.indexOf(b)}"]`);
@@ -961,23 +1247,26 @@ class Panel {
     el.hidden = !list.length && !LIB.notes.length && !orphans.length;
     if (el.hidden) { el.innerHTML = ''; return; }
     const ol = el.querySelector('ol.asv'), keep = ol ? { top: ol.scrollTop, h: ol.style.height } : null;
-    // one binding: on the assertion's line; several: one line each under it
-    const line = ({ a, file }) => {
+    // a table: one line per assertion (#, name, kind, property, binding, results, buttons); one binding on the
+    // assertion's line, several: one line each under it, in the binding's columns
+    const line = ({ a, file }, k) => {
       const bs = this.bindings.filter(b => b.assert === a.label), sigs = a.signals.map(s => s.name);
       const pick = this.pick === a.label ? this.pickHTML(a) : '';
       return `<li data-a="${esc(a.label)}" draggable="true" title="click: go to it on the waves (again: its next attempt) · drag onto a module in the names column to bind it">
-        <span class="grip" aria-hidden="true">⠿</span><b class="al">${esc(a.label)}</b><span class="ak k-${a.kind}">${a.kind}</span>
-        <code class="at" title="${esc(a.text || '')}\n— ${esc(file.name)}:${a.line}">${esc(a.text || '')}</code>
-        <span class="sg" title="the signals it needs (the clock first): ${esc(sigs.join(' '))}">${esc(sigs.join(' '))}</span>
-        ${bs.length === 1 ? `<span class="b1" data-b="${this.bindings.indexOf(bs[0])}" aria-live="polite">${this.bindHTML(bs[0])}</span>` : bs.length ? '' : '<span class="st">unbound</span>'}
-        <span class="ab"><button type="button" data-sv="bind" title="Bind to an instance: the modules where all its signals are">Bind…</button><button type="button" class="ic" data-sv="del" aria-label="remove ${esc(a.label)}" title="Remove this assertion from the list (and its bindings)">✕</button></span>
-        ${pick}${bs.length > 1 ? `<ul class="bnd">${bs.map(b => `<li data-b="${this.bindings.indexOf(b)}" aria-live="polite">${this.bindHTML(b)}</li>`).join('')}</ul>` : ''}</li>`;
+        <span class="an"><span class="grip" aria-hidden="true">⠿</span>${k + 1}</span>
+        <span class="nm"><b class="al">${esc(a.label)}</b>${changedHere(a, file) ? `<span class="ed" title="its text differs from the page's ${esc(file.name)}: this browser's copy (${file.edited ? 'edited here' : 'read from the disk'}) replaces the page's file; Revert in the editor (✎) brings the page's back">${file.edited ? 'edited' : 'changed'}</span>` : ''}</span>
+        <span class="ak k-${a.kind}">${a.kind}</span>
+        <code class="at" title="${esc(a.text || '')}\n— ${esc(file.name)}:${a.line}\nsignals (the clock first): ${esc(sigs.join(' '))}">${propParts(a.text || '').map(t => `<span class="pp">${esc(t)}</span>`).join(' ')}</code>
+        ${bs.length === 1 ? `<span class="b1" data-b="${this.bindings.indexOf(bs[0])}" aria-live="polite">${this.bindHTML(bs[0])}</span>` : `<span class="b1"><span class="st">${bs.length ? `${bs.length} bindings ↓` : 'unbound'}</span></span>`}
+        <span class="ab"><button type="button" data-sv="bind" title="Bind to an instance: the modules where all its signals are">Bind…</button><button type="button" class="ic" data-sv="edit" aria-label="edit ${esc(a.label)}" title="Edit this assertion here: Apply parses it and evaluates its bindings again (ctrl+Enter)"${a.at ? '' : ' disabled'}>✎</button><button type="button" class="ic" data-sv="reload" aria-label="read ${esc(file.name)} again" title="Read ${esc(file.name)} from the disk again: its assertions are parsed and evaluated again (the first time: pick the file)">⟳</button><button type="button" class="ic" data-sv="del" aria-label="remove ${esc(a.label)}" title="Remove this assertion from the list (and its bindings)">✕</button></span>
+        ${pick}${this.editing === a.label ? this.editHTML(a, file) : ''}${bs.length > 1 ? `<ul class="bnd">${bs.map(b => `<li data-b="${this.bindings.indexOf(b)}" aria-live="polite">${this.bindHTML(b)}</li>`).join('')}</ul>` : ''}</li>`;
     };
     el.innerHTML = `<div class="nh"><button type="button" class="tw" data-sv="tw" aria-expanded="${this.open}" aria-label="${this.open ? 'fold' : 'open'} the assertions">${this.open ? '▾' : '▸'} <b>Assertions</b></button><span class="muted">${list.length} loaded · click a line to go to it on the waves · drag a line onto a module in the names to bind it, or Bind… · kept in this browser</span>
+      <button type="button" data-sv="watch" aria-pressed="${!!LIB.watching}" title="Watch the files read with ⟳: when one changes on the disk it is read, parsed and evaluated again (every second)${G.showOpenFilePicker ? '' : '; this browser cannot keep a file to watch'}"${G.showOpenFilePicker ? '' : ' disabled'}>Watch${LIB.watching && HANDLES.size ? ` (${HANDLES.size})` : ''}</button>
       <button type="button" data-sv="json" title="The bindings (and files) for the config file">JSON</button><button type="button" data-sv="clear" title="Forget this browser's files and bindings for this page (every viewer of it); the page's own come back">Clear</button>
       <span class="svx"><button type="button" data-sv="table" aria-pressed="${!!this.showTable}" title="One row per binding: counts, first and last failure, longest attempt, antecedent → consequent latency">Table</button><button type="button" data-sv="fails" aria-pressed="${!!this.showFails}" title="Every failed attempt by time; a row selects it on the waves">Failures</button><button type="button" data-sv="xmd" title="Download the report of this view's bindings as Markdown (the tables)">report.md</button><button type="button" data-sv="xjson" title="Download the results of this view's bindings with the page's meta (sva report reads it)">report.json</button></span></div>` +
-      (this.open ? `<div class="svr" aria-live="polite"></div>` + (LIB.notes.length ? `<ul class="svn">${LIB.notes.map(n => `<li class="${n.err ? 'err' : 'warn'}">${esc(n.text)}</li>`).join('')}</ul>` : '') +
-      `<ol class="asv">${list.map(line).join('')}</ol>` +
+      (this.open ? `<div class="svr" aria-live="polite"></div><div class="svw"${this.why ? '' : ' hidden'}>${this.why || ''}</div>` + (LIB.notes.length ? `<ul class="svn">${LIB.notes.map(n => `<li class="${n.err ? 'err' : 'warn'}">${esc(n.text)}</li>`).join('')}</ul>` : '') +
+      `<ol class="asv"><li class="hd" aria-hidden="true"><span>#</span><span>Assertion</span><span>Kind</span><span>Property</span><span>Bound to</span><span>Results</span><span></span><span></span></li>${list.map(line).join('')}</ol>` +
       (orphans.length ? `<ul class="svn">${orphans.map(b => `<li class="warn">bind: no assertion '${esc(b.assert)}' is loaded (${esc(this.label(b.scope))})</li>`).join('')}</ul>` : '') +
       `<textarea class="json" readonly${this.jsonOpen ? '' : ' hidden'} aria-label="assertion bindings as JSON"></textarea>` : '');
     const nol = el.querySelector('ol.asv');
@@ -1091,6 +1380,7 @@ class Panel {
     const btn = e.target.closest('button[data-sv]');
     if (!btn) {   // a click on an assertion's line, not on its controls: go to it on the waves
       if (e.target.closest('button, input, select, textarea, a, .pick')) return;
+      if (e.target.closest('b.sp, code.at') && String(G.getSelection && G.getSelection()).length) return;   // text selected to copy
       const li = e.target.closest('ol.asv li[data-a]'), one = e.target.closest('ul.bnd li[data-b]');
       if (!li) return;
       const b = one ? this.bindings[+one.dataset.b] : this.bindings.find(x => x.assert === li.dataset.a && outcome(x) && this.drawn().includes(x)) || this.bindings.find(x => x.assert === li.dataset.a);
@@ -1101,6 +1391,8 @@ class Panel {
     if (act === 'tw') { this.open = !this.open; this.render(); }
     else if (act === 'bind') { this.pick = this.pick === label ? null : label; this.render(); }
     else if (act === 'nopick') { this.pick = null; this.render(); }
+    else if (act === 'nowhy') this.unselect();
+    else if (act === 'wt') this.v.setCursor(+btn.dataset.t);
     else if (act === 'to') { this.pick = null; this.bind(label, btn.dataset.scope); }
     else if (act === 'del') {
       const gone = this.bindings.filter(x => x.assert === label);
@@ -1108,6 +1400,12 @@ class Panel {
       gone.filter(x => x.page).forEach(x => this.removed.add(bkey(x)));
       this.save(); this.render(); gone.forEach(x => this.changed(x, false)); this.redraw();
     }
+    else if (act === 'edit') { this.editing = this.editing === label ? null : label; this.editText = this.editErr = null; this.render(); if (this.editing) this.el.querySelector(`li[data-a="${CSS.escape(label)}"] textarea.src`)?.focus(); }
+    else if (act === 'noedit') { this.editing = null; this.editText = this.editErr = null; this.render(); }
+    else if (act === 'apply') this.applyEdit(label);
+    else if (act === 'revert') { const x = LIB.byLabel.get(label); this.editing = null; this.editText = this.editErr = null; if (x) SVA.revertFile(x.file.name).then(() => this.toast(`${x.file.name}: the page's file again`)); }
+    else if (act === 'reload') { const x = LIB.byLabel.get(label); if (x) this.reloadFile(x.file.name); }
+    else if (act === 'watch') { SVA.watch(!LIB.watching); this.toast(LIB.watching ? `watching ${HANDLES.size ? [...HANDLES.keys()].join(', ') : 'the files you read with ⟳'}` : 'not watching'); }
     else if (act === 'unbind' && b) this.unbind(b);
     else if (act === 'eval' && b) this.evaluate(b);
     else if (act === 'fail' && b) this.firstFail(b);
@@ -1127,6 +1425,7 @@ class Panel {
   }
   // drag and drop: an assertion line onto a module row (or a signal row: its module) of the names column
   dragStart(e) {
+    if (e.target.closest && e.target.closest('.sve')) return;   // text dragged in the editor
     const li = e.target.closest && e.target.closest('li[data-a]'); if (!li) return;
     const x = LIB.byLabel.get(li.dataset.a); if (!x) return;
     this.drag = { a: x.a, ok: new Map() };
@@ -1179,32 +1478,227 @@ function clearAll() {
   }
   reparse();
 }
+Panel.WHY_CYCLES = 64;   // columns of Why at most (a longer attempt: its first cycles)
 Panel.MAX_FAILS = 500;   // rows of the Failures list (the rest: the filter, report.md, report.json)
 SVA.panels = () => [...LIB.panels];
+
+/* ---------------- expressions: virtual signals and search (stage 10) ---------------- */
+// An expression of the waves ("PSEL && !PREADY", "@(posedge PCLK) $rose(req)") is parsed and valued by the engine
+// (`exprs` request): names from the scope it was written in up to the top (a full path too); with a clock it is
+// sampled at the clock's edges like an assertion, without one it is valued after every change of its signals.
+const CLOCKED = /^\s*@\s*\(\s*(posedge|negedge|edge)?\s*([A-Za-z_][\w$.]*)\s*\)\s*([\s\S]+)$/;
+function splitClock(text) {
+  const m = CLOCKED.exec(text);
+  return m ? { clock: { edge: m[1] || 'posedge', signal: m[2] }, body: m[3].trim() } : { clock: null, body: String(text).trim() };
+}
+// names in scope S of model M, each from S up to the root, else as a path from the top -> {map: {name: row}, missing, errors}
+function resolveUp(M, pfx, names, S) {
+  const I = scopeInfo(M), map = {}, missing = [], errors = [];
+  for (const n of names) {
+    let hit = null;
+    for (let s = S; ; s = parent(s)) { hit = lookup(I, s, n, pfx); if (hit || !s || s === I.root) break; }
+    hit = hit || lookup(I, I.root, n, pfx) || lookup(I, '', n, pfx);
+    if (!hit) missing.push(n);
+    else if (hit.many) errors.push(`${n} (ambiguous: ${hit.many.map(r => r.full).join(' or ')})`);
+    else map[n] = hit.row;
+  }
+  return { map, missing, errors };
+}
+// the value of row r after the changes at each time (the engine's columns: values just before are for a clock)
+function atColumn(r, times) {
+  const out = new Array(times.length), a = r.tr;
+  let k = -1;
+  for (let i = 0; i < times.length; i++) { while (k + 1 < a.length && a[k + 1].t <= times[i]) k++; out[i] = rowValue(r, a[k]); }
+  return out;
+}
+// an engine value (a number, "h…", binary digits with x) as a "tv" value of width w
+function tvValue(v, w) {
+  if (w === 1) return v === 1 || v === '1' ? '1' : v === 0 || v === '0' ? '0' : 'x';
+  if (typeof v === 'number') return v.toString(16);
+  const s = String(v);
+  if (/^h/i.test(s)) return s.slice(1).toLowerCase();
+  const b = s.padStart(Math.ceil(s.length / 4) * 4, s[0] === 'x' || s[0] === 'z' ? s[0] : '0');
+  let h = '';
+  for (let i = 0; i < b.length; i += 4) { const n = b.slice(i, i + 4); h += /[xz]/i.test(n) ? 'x' : parseInt(n, 2).toString(16); }
+  return h;
+}
+const truthy = v => (typeof v === 'number' ? v !== 0 : /^h/i.test(v) ? /[1-9a-f]/i.test(v) : /1/.test(String(v)));
+const MAX_TIMES = 2e6;
+// expression {text, scope} of model M -> {text, times, values, width, map} | {err}
+async function valueOf(M, pfx, x) {
+  const { clock, body } = splitClock(x.text), eng = await SVA.engine(), files = SOURCES();
+  const info = eng.call({ files, exprs: [body] });
+  const e = info.exprs ? info.exprs[0] : { errors: (info.errors || []).map(r => r.msg) };
+  if (e.errors) return { err: e.errors[0] };
+  const names = e.signals.map(s => s.name).concat(clock ? [clock.signal] : []);
+  const res = resolveUp(M, pfx, names, x.scope || '');
+  if (res.missing.length || res.errors.length) return { err: res.errors.concat(res.missing.length ? [`not found: ${res.missing.join(', ')}`] : []).join('; ') };
+  const rows = res.map, sm = rowSampler(rows);
+  let times, col;
+  if (clock) { times = sm.edges(clock.signal, clock.edge) || []; col = n => sm.column(n, times); }
+  else {
+    const all = new Set([M.t0]);
+    for (const s of e.signals) for (const o of rows[s.name].tr) all.add(o.t);
+    times = [...all].sort((a, b) => a - b); col = n => atColumn(rows[n], times);
+  }
+  if (times.length > MAX_TIMES) return { err: `${times.length} changes: give it a clock, @(posedge clk) …` };
+  const trace = { cycles: times.length, times: [], signals: {}, widths: {} };
+  for (const s of e.signals) { trace.signals[s.name] = col(s.name); const w = rowWidth(rows[s.name]); if (w) trace.widths[s.name] = w; }
+  const out = eng.call({ files, exprs: [body], trace }).exprs[0];
+  if (out.errors) return { err: out.errors[0] };
+  return { text: (clock ? `@(${clock.edge} ${clock.signal}) ` : '') + out.text, times, values: out.values, width: out.width || 1, map: rows };
+}
+// the times where it becomes true (a match of the search)
+function matches(res) {
+  const out = [];
+  let was = false;
+  res.values.forEach((v, i) => { const t = truthy(v); if (t && !was) out.push(res.times[i]); was = t; });
+  return out;
+}
+// a row that draws the values like a signal ("tv")
+function fillRow(row, res) {
+  const w = res.width, tv = res.values.map((v, i) => [res.times[i], tvValue(v, w)]);
+  const r0 = G.WaveFW.parse({ signal: [{ name: row.name, tv, width: w }] }).rows.find(r => r.type === 'sig');
+  Object.assign(row, { tr: r0.tr, gaps: r0.gaps, width: r0.width, tv: true });
+}
+// rows of a list of expressions under one group ("ƒ expressions"); st keeps the row objects between calls
+function exprRows(st, list, base = { anc: [], depth: 0 }) {
+  if (!list.length) return [];
+  const g = st.g || (st.g = { type: 'group', id: G.WaveFW.rowId() });
+  Object.assign(g, { name: `ƒ expressions (${list.length})`, full: 'ƒ', path: 'ƒ', anc: base.anc, depth: base.depth, cls: 'sva-xg',
+    title: 'Expressions of the waves (a name in the bar: ƒ); click one to put it in the field' });
+  st.rows = st.rows || new Map();
+  const rows = list.map(x => {
+    const r = st.rows.get(x) || { type: 'sig', tr: [], gaps: [], width: 1, x };
+    st.rows.set(x, r);
+    const err = x.res && x.res.err;
+    if (x.res && !err && r.res !== x.res) { fillRow(r, x.res); r.res = x.res; }
+    return Object.assign(r, { anc: base.anc.concat(g.id), depth: base.depth + 1, name: `ƒ ${x.text}${err ? '  ⚠ ' + err : ''}`, full: `ƒ ${x.text}`,
+      cls: 'sva-expr' + (err ? ' bad' : ''), title: `${x.res && x.res.text ? x.res.text : x.text}${x.scope ? '\nnames from ' + x.scope + ' up' : ''}${err ? '\n' + err : ''}` });
+  });
+  return [g, ...rows];
+}
+SVA.expressions = { splitClock, valueOf, matches, tvValue };
+
+/* ---------------- expressions in a viewer: the field in the bar, the rows, the search ---------------- */
+class Exprs {
+  constructor(v) {
+    this.v = v; v.svaExprs = this; this.list = []; this.st = {};
+    this.key = 'wavefw.sva-exprs:' + (v.storeId || G.location.pathname + ':' + (v.opts.key || v.root.id || v.root.dataset.wave || v.M.title));
+    const g = v.addTool('expression', `<input type="text" class="svq" spellcheck="false" placeholder="ƒ  PSEL && !PREADY" aria-label="an expression of the signals: Enter finds the next time it becomes true"
+      title="An expression of the signals (SystemVerilog, as in an assertion: && || ! == $rose(a) $past(a) a[3:0] pkg::NAME …); @(posedge clk) … samples it at the clock's edges.&#10;Names: from the selected signal's module up to the top, or a full path.&#10;Enter / shift+Enter: the next / previous time it becomes true. + Row: draw it as a signal (ƒ expressions).">` +
+      '<button type="button" data-x="prev" title="The previous time it becomes true (shift+Enter)">◀</button><button type="button" data-x="next" title="The next time it becomes true (Enter)">▶</button>' +
+      '<span class="svqn" aria-live="polite"></span><button type="button" data-x="add" title="Draw the expression as a signal in ƒ expressions (kept in this browser)">+ Row</button>' +
+      '<button type="button" data-x="del" title="Remove the expression in the field (or the selected ƒ row) from the rows">− Row</button>');
+    g.classList.add('svx-tool');
+    this.inp = g.querySelector('input.svq'); this.cnt = g.querySelector('.svqn');
+    this.inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); this.find(e.shiftKey ? -1 : 1); } else if (e.key === 'Escape') this.inp.blur(); });
+    this.inp.addEventListener('input', () => { this.cnt.textContent = ''; });
+    g.addEventListener('click', e => { const b = e.target.closest('button[data-x]'); if (!b) return; ({ prev: () => this.find(-1), next: () => this.find(1), add: () => this.add(), del: () => this.del() })[b.dataset.x](); });
+    v.listen('names', 'click', e => { const r = v.rowAt(e.target); if (r && r.x && this.list.includes(r.x)) { this.inp.value = r.x.text; this.cnt.textContent = ''; } }, { capture: true });   // before the names are drawn again
+    if (v.extraRows) v.extraRows.push(grp => (grp ? [] : exprRows(this.st, this.list)));
+    if (v.extraJSON) v.extraJSON.push(() => this.list.length ? `"exprs": [\n${this.list.map(x => '  ' + JSON.stringify(x.scope ? { expr: x.text, scope: x.scope } : x.text)).join(',\n')}\n]` : null);
+    v.root.addEventListener('wavefw:settings', () => this.again());
+    const page = (v.M.src.sva && v.M.src.sva.exprs) || [], kept = store.get(this.key);
+    this.list = (kept || page).map(x => (typeof x === 'string' ? { text: x, scope: '' } : { text: x.expr || x.text, scope: x.scope || '' })).filter(x => x.text);
+    this.cache = new Map();
+    if (this.list.length) this.again();
+  }
+  // the scope a new expression is written in: the selected signal's module, else the view's top ('')
+  scope() { const I = scopeInfo(this.v.M), r = this.v.sel, s = r && I.of.get(r); return s && s !== I.root ? s : ''; }   // '': the view's top
+  async value(x) {
+    const k = x.text + '\n' + x.scope;
+    if (!this.cache.has(k)) this.cache.set(k, valueOf(this.v.M, this.v.sortIgnore || [], x).catch(err => ({ err: err.message })));
+    return this.cache.get(k);
+  }
+  // every row again (the files or the name settings changed)
+  async again() {
+    this.cache.clear();
+    await Promise.all(this.list.map(async x => { x.res = await this.value(x); }));
+    this.v.renderNames(); this.v.draw();
+  }
+  save() { if (!store.set(this.key, this.list.map(x => (x.scope ? { expr: x.text, scope: x.scope } : x.text)))) this.v.toast('not kept in this browser'); }
+  text() { const t = this.inp.value.trim(); if (!t) { this.v.toast('type an expression of the signals, e.g. PSEL && !PREADY'); this.inp.focus(); } return t; }
+  async add() {
+    const t = this.text(); if (!t) return;
+    if (this.list.some(x => x.text === t)) { this.v.toast(`ƒ ${t} is there already`); return; }
+    const x = { text: t, scope: this.scope() };
+    x.res = await this.value(x);
+    if (x.res.err) { this.v.toast(`ƒ ${t}: ${x.res.err}`); this.inp.classList.add('bad'); setTimeout(() => this.inp.classList.remove('bad'), 900); return; }
+    this.list.push(x); this.save();
+    this.v.renderNames(); this.v.draw(); this.v.centerRow(this.st.rows.get(x));
+    this.v.root.dispatchEvent(new CustomEvent('wavefw:sva-exprs', { detail: { added: x.text } }));
+  }
+  del() {
+    const sel = this.v.sel && this.v.sel.x, t = this.inp.value.trim();
+    const x = this.list.find(x => x.text === t) || (this.list.includes(sel) ? sel : null);
+    if (!x) { this.v.toast(t ? `no ƒ row ${t}` : 'put a ƒ row in the field (click its name) to remove it'); return; }
+    this.list.splice(this.list.indexOf(x), 1); this.st.rows.delete(x); this.save();
+    if (this.v.sel === sel) this.v.select(null);
+    this.v.renderNames(); this.v.draw();
+  }
+  // the next / previous time the expression in the field becomes true, from the cursor (round the ends)
+  async find(dir) {
+    const t = this.text(); if (!t) return;
+    const x = this.list.find(x => x.text === t) || { text: t, scope: this.scope() }, res = await this.value(x), v = this.v;
+    if (res.err) { this.cnt.textContent = ''; v.toast(`ƒ ${t}: ${res.err}`); return; }
+    const ms = matches(res);
+    if (!ms.length) { this.cnt.textContent = '0'; v.toast(`ƒ ${t}: never true`); return; }
+    const eps = 1e-9 * Math.max(1, Math.abs(v.cursor));
+    let k = dir > 0 ? ms.findIndex(m => m > v.cursor + eps) : ms.map(m => m < v.cursor - eps).lastIndexOf(true);
+    if (k < 0) k = dir > 0 ? 0 : ms.length - 1;
+    v.setCursor(ms[k]);
+    this.cnt.textContent = `${k + 1}/${ms.length}`;
+    this.last = { text: t, k, n: ms.length, t: ms[k] };
+  }
+}
 
 /* ---------------- static SVG (WaveSVG): the same rows from the WaveJSON's "sva".bind[].results ---------------- */
 // A binding without results (a page built without the sva binary, a hand-made figure) is evaluated in the page through
 // the panel's path (evaluateScope) and the figure drawn again. The bound signals are not repeated unless svaSignals is
 // true (the figure shows them already).
-const SVGST = new WeakMap();   // WaveJSON -> {binds: [{assert, scope, results, draw}], wait}
+const SVGST = new WeakMap();
+// the rows of the results' own signals (name -> path in the dump): {name: row}; a figure without the hierarchy (a
+// clock-sampled view) has the path below the scope
+function rowsOf(M, o) {
+  const out = {}, pre = o && o.scope ? o.scope + '.' : null;
+  for (const [n, p] of Object.entries((o && o.signals) || {})) {
+    const rel = pre && p.startsWith(pre) ? p.slice(pre.length) : null;
+    const r = M.rows.find(r => r.type === 'sig' && !r.same && (r.full === p || (r.src && r.src.path === p))) || (rel && M.rows.find(r => r.type === 'sig' && !r.same && r.full === rel));
+    if (r) out[n] = r;
+  }
+  return out;
+}   // WaveJSON -> {binds: [{assert, scope, results, draw}], wait}
 function svgRows(M, S) {
-  const x = M.src.sva;
-  if (!x || !Array.isArray(x.bind) || !x.bind.length) return null;
+  const x = M.src.sva, binds = (x && Array.isArray(x.bind) && x.bind) || [], exprs = (x && Array.isArray(x.exprs) && x.exprs) || [];
+  if (!binds.length && !exprs.length) return null;
   let k = SVGST.get(M.src);
-  if (!k) SVGST.set(M.src, k = { binds: x.bind.map(b => ({ assert: b.assert, scope: b.scope || '', results: b.results || null, draw: {} })) });
+  if (!k) SVGST.set(M.src, k = { binds: binds.map(b => ({ assert: b.assert, scope: b.scope || '', results: b.results || null, draw: {} })), xst: {},
+    exprs: exprs.map(e => (typeof e === 'string' ? { text: e, scope: '' } : { text: e.expr || e.text, scope: e.scope || '' })).filter(e => e.text) });
   if (!k.wait && G.WAVEFW_SVA_WASM && k.binds.some(b => !b.results)) k.wait = svgEvaluate(M, S, k);
-  const ok = shown(S), I = scopeInfo(M), at = new Map();
+  if (!k.xwait && G.WAVEFW_SVA_WASM && k.exprs.length) k.xwait = svgExprs(M, S, k);
+  const ok = shown(S), I = scopeInfo(M), at = new Map([[-1, exprRows(k.xst, k.exprs.filter(e => e.res && !e.res.err))]]);
   for (const b of k.binds) {
     const o = outcome(b);
     if (!o || !ok(b.assert) || (o.missing || []).length) continue;
-    const g = I.group(b.scope), key = g ? g.id : -1, paths = Object.values(o.signals || {});
-    const copies = S.svaSignals === true ? paths.map(p => M.rows.find(r => r.type === 'sig' && (r.full === p || (r.src && r.src.path === p)))).filter(Boolean) : [];
-    const rows = assertionRows(b.draw, b.results, { S, label: b.assert, scope: b.scope, copies, view: null,
+    const g = I.group(b.scope), key = g ? g.id : -1, map = rowsOf(M, o);
+    const copies = S.svaSignals === true ? [...new Set(Object.values(map))] : [];
+    const rows = assertionRows(b.draw, b.results, { S, label: b.assert, scope: b.scope, copies, map, view: null, focus: focusOf(o),
       base: { anc: g ? g.anc.concat(g.id) : [], depth: g ? g.depth + 1 : 0 }, sel: () => -1, pick: () => {} });
     if (!at.has(key)) at.set(key, []);
     at.get(key).push(...rows);
   }
   return [g => at.get(g ? g.id : -1) || []];
+}
+// the expressions of a figure, valued in the page (the files of its "sva" for package constants), then drawn again
+function svgExprs(M, S, k) {
+  pageFiles([M]);
+  const p = (LIB.files.some(f => !f.parsed) ? reparse() : LIB.parsing || reparse()).then(async () => {
+    for (const e of k.exprs) { try { e.res = await valueOf(M, S.sortIgnore || [], e); } catch (err) { e.res = { err: err.message }; } }
+    G.WaveFW.redrawSvgs();
+  });
+  LIB.svgs.add(p);
+  return p;
 }
 function svgEvaluate(M, S, k) {
   pageFiles([M]);
@@ -1234,6 +1728,7 @@ function start() {
   G.WaveFW.plugin(v => {
     if (v.sva) return;
     pageFiles([v.M]);
+    if (G.WAVEFW_SVA_WASM) new Exprs(v);   // its rows first under the top, before the assertion groups
     new Panel(v);
     // one parse for all the viewers built in this task
     if (!pending) pending = Promise.resolve().then(() => { pending = null; return reparse(); });

@@ -383,6 +383,19 @@ impl<'u, 's> X<'u, 's> {
     }
 }
 
+/// An expression outside an assertion (the page's virtual signals and searches): names resolved in `$unit` (package
+/// constants as `pkg::NAME`, the unit's macros already applied), with the signals it reads.
+pub(crate) fn expression(u: &UnitState, e: &Expr) -> R<(Expr, Vec<SignalRef>)> {
+    let mut sh = Shared::default();
+    let mut x = X { u, scope: 0, env: HashMap::new(), sh: &mut sh };
+    let e = x.expr(e)?;
+    let mut sigs = Vec::new();
+    sig_expr(&e, &mut sigs);
+    sigs.retain(|(n, _)| !n.starts_with(SIGNED_LIT));
+    let signals = sigs.into_iter().map(|(name, width)| SignalRef { declared: u.find(0, |s| s.nets.get(&name).copied()).flatten(), name, width }).collect();
+    Ok((e, signals))
+}
+
 /// A sequence formal takes a sequence; a typed formal (`logic`, `int`, ...) an expression.
 fn check_kind(decl: &str, p: &Port, v: &Prop, at: Span) -> R<()> {
     match p.ty.as_str() {
