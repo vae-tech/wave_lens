@@ -1,0 +1,15 @@
+[package]
+name = "sva-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "sva: evaluate assertions over a VCD / FST dump"
+
+[[bin]]
+name = "sva"
+path = "src/main.rs"
+
+[dependencies]
+sva-core = { path = "../core" }
+wellen = "0.25"
+serde_json = "1"

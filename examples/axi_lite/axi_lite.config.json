@@ -1,6 +1,8 @@
 {
   "description": "make example EX=axi_lite: AXI4-Lite master + register slave (axi_lite_tb.sv). Hand-written: views, channel groups, bookmarks and arrows; the Makefile passes the dump with --waves.",
   "scope": "axi_lite_tb",
+  "sva": ["axi_lite.sva"],
+  "bind": [{ "assert": "*", "scope": "axi_lite_tb" }],
   "enum": { "BRESP": { "0": "OKAY", "2": "SLVERR" }, "RRESP": { "0": "OKAY", "2": "SLVERR" } },
   "group": { "aw": ["AWVALID", "AWREADY", "AWADDR"], "w": ["WVALID", "WREADY", "WDATA", "WSTRB"], "b": ["BVALID", "BREADY", "BRESP"],
              "ar": ["ARVALID", "ARREADY", "ARADDR"], "r": ["RVALID", "RREADY", "RDATA", "RRESP"] },

@@ -1,6 +1,6 @@
 // APB3 master + register-file slave for the wavefw APB example.
 // Three transfers: a write, a read with two wait states (the slave holds PREADY low), a write to an unmapped
-// address that the slave answers with PSLVERR.
+// address that the slave answers with PSLVERR. A passive counter (u_count) counts the finished and the failed transfers.
 `timescale 1ns/1ps
 package apb_pkg;
   typedef enum logic [1:0] {IDLE, SETUP, ACCESS} phase_t;   // FST dumps carry these labels
@@ -63,6 +63,15 @@ module apb_regs (                              // four registers at 0x00 … 0x0
     end
 endmodule
 
+module apb_count (                             // passive: counts the finished transfers and the failed ones
+  input  logic       PCLK, PRESETn, done, err,
+  output logic [7:0] n_done, n_err
+);
+  always_ff @(posedge PCLK or negedge PRESETn)
+    if (!PRESETn) begin n_done <= 0; n_err <= 0; end
+    else begin n_done <= n_done + 8'(done); n_err <= n_err + 8'(done && err); end
+endmodule
+
 module apb_tb;
   logic PCLK = 0, PRESETn = 0, req = 0, wr = 0;
   logic [7:0] addr = 0;  logic [31:0] wdata = 0;
@@ -72,6 +81,8 @@ module apb_tb;
   string dump = "apb.vcd";                     // +dump=FILE; the format (VCD / FST) is chosen when Verilator builds
   apb_master u_master (.*);
   apb_regs   u_regs (.*);
+  logic [7:0] n_done, n_err;
+  apb_count  u_count (.*);
   always #5 PCLK = ~PCLK;                      // 100 MHz
   initial begin
     void'($value$plusargs("dump=%s", dump));

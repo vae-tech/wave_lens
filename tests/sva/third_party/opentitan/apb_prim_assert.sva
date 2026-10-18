@@ -1,0 +1,22 @@
+// APB3 rules for examples/apb written with OpenTitan's assertion macros (prim_assert.sv and
+// prim_assert_standard_macros.svh, Apache-2.0: see LICENSE). This file is part of wavefw; it exercises the macro
+// library as OpenTitan designs use it: default macro arguments, macros that expand into other macros, `ifndef inside a
+// macro body, token pasting (ASSERT_KNOWN_IF makes <name>KnownEnable), `__FILE__ / `__LINE__ in the messages.
+//   sva parse prim_assert.sv prim_assert_standard_macros.svh apb_prim_assert.sva
+module apb_prim_assert (
+  input logic        PCLK, PRESETn, PSEL, PENABLE, PWRITE, PREADY, PSLVERR,
+  input logic [7:0]  PADDR,
+  input logic [31:0] PWDATA, PRDATA
+);
+  // the APB names instead of OpenTitan's clk_i / rst_ni
+  `ASSERT(SetupThenAccess_A, PSEL && !PENABLE |=> PSEL && PENABLE, PCLK, !PRESETn)
+  `ASSERT_IF(EnableNeedsSel_A, PSEL, PENABLE, PCLK, !PRESETn)
+  `ASSERT_NEVER(ErrWithoutReady_A, PSLVERR && !PREADY, PCLK, !PRESETn)
+  `ASSERT(AddrStable_A, PSEL && !(PENABLE && PREADY) |=> $stable(PADDR) && $stable(PWRITE), PCLK, !PRESETn)
+  `ASSERT_KNOWN_IF(PaddrKnown_A, PADDR, PSEL, PCLK, !PRESETn)
+  `ASSERT_KNOWN_IF(PrdataKnown_A, PRDATA, PENABLE && PREADY && !PWRITE, PCLK, !PRESETn)
+  `ASSERT_PULSE(EnablePulse_A, PENABLE && PREADY, PCLK, !PRESETn)
+  `ASSUME(NoReadOfUnmapped_M, PSEL && !PWRITE |-> PADDR[7:4] == 0, PCLK, !PRESETn)
+  `COVER(WaitState_C, PSEL && PENABLE && !PREADY, PCLK, !PRESETn)
+  `COVER(SlvErr_C, PENABLE && PREADY && PSLVERR, PCLK, !PRESETn)
+endmodule

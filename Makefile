@@ -11,6 +11,7 @@ READER ?=          # builtin (default: one pass in Python) | wavepeek
 DEMO_CONFIG := examples/demo/demo.config.json
 DEMO_TB     := examples/demo/demo_tb.sv
 DEMO_JS     := docs/demo_waves.js
+APB_JS      := docs/apb_waves.js
 V2W := $(PY) tools/vcd2wavedrom.py --config $(DEMO_CONFIG) --waves $(VCD) $(if $(READER),--reader $(READER))
 
 # Any dump, starting from the VCD alone (keep your own under work/: dumps and pages are git-ignored there):
@@ -18,6 +19,8 @@ V2W := $(PY) tools/vcd2wavedrom.py --config $(DEMO_CONFIG) --waves $(VCD) $(if $
 #                                   color, style …), settings from $(BASE). Run it again after the dump changed: new
 #                                   signals are added, gone ones dropped, your edits kept.
 #   make html WAVES=work/x.vcd   -> work/x.html (makes work/x.config.json first if it does not exist yet)
+#   make html WAVES=x.vcd SVA="checks/*.sv" BIND="a_req_ack@tb.dut,apb_*@tb.u_apb"   assertions bound and evaluated
+#   make config WAVES=x.vcd SVA="checks/*.sv"   the config gets "sva" and a "bind" line per matching instance
 #   WAVES may be a VCD or an FST (FST needs GTKWave's fst2vcd for order / change counts / enum labels).
 #   FSM state names: an FST brings its enum tables; for a VCD add SV="rtl/*.sv" (typedef enum in the sources).
 # make html: one self-contained page (wavefw.css/js + data inlined) from every view of CONFIG.
@@ -33,18 +36,31 @@ HTML   ?= $(if $(filter $(DEMO_CONFIG),$(CONFIG)),$(B)/demo.html,$(patsubst %.js
 HTML_WAVES = $(or $(WAVES),$(if $(filter $(DEMO_CONFIG),$(CONFIG)),$(VCD)))
 
 help:
-	@echo 'make demo       Verilator VCD of examples/demo -> $(DEMO_JS) (the data of docs/index.html)'
+	@echo 'make demo       Verilator VCD of examples/demo -> $(DEMO_JS), the APB example with its checks -> docs/apb_waves.js (docs/index.html)'
 	@echo 'make demo-fst   the same testbench as FST -> $$(BUILD)/demo_fst.config.json + demo_fst.html (FSM names from the dump)'
 	@echo 'make examples   every example (apb axi_lite fsm): VCD + FST, pages in $$(BUILD)/examples/<ex>/'
 	@echo 'make example    EX=apb|axi_lite|fsm: one of them'
 	@echo 'make shots      the README screenshots in docs/img/ (after make examples)'
-	@echo 'make html       one self-contained page: the demo, CONFIG=work/x.config.json, or WAVES=work/x.vcd (config made if missing)'
-	@echo 'make config     WAVES=work/x.vcd: write or update work/x.config.json (every signal, your edits kept)'
+	@echo 'make html       one self-contained page: the demo, CONFIG=work/x.config.json, or WAVES=work/x.vcd (config made if missing);'
+	@echo '                SVA="checks/*.sv" BIND="name@scope,…": assertions bound, evaluated, an Assertions section'
+	@echo 'make config     WAVES=work/x.vcd: write or update work/x.config.json (every signal, your edits kept); SVA=…: "bind" lines'
+	@echo 'make sva-build  the SVA engine (sva/, Rust): native CLI $$(BUILD)/sva-target/release/sva + sva_wasm.wasm -> wavefw/sva.wasm.js'
+	@echo 'make sva-test   cargo test of the SVA engine: unit tests, the corpus tests/sva (third_party too), the schema, the CLI'
+	@echo 'make sva-bless  rewrite tests/sva/golden/*.txt after a reviewed change of the parser output'
+	@echo 'make sva-examples  sva parse + sva eval of the assertion files of examples/ (apb, axi_lite, fsm; after make examples)'
+	@echo 'make sva-eval   WAVES=dump.vcd|fst SVA="pkg.sv checks.sva" SCOPE=tb.dut [OUT=results.json] [ARGS=...]: sva eval'
+	@echo 'make sva-spike  the spike page $$(BUILD)/sva/spike.html (the WebAssembly build and wavefw/sva.js in a page)'
 	@echo 'make smoke      headless Chromium checks of docs/index.html, tests/conformance.html and the built pages'
 	@echo 'make clean      remove the build products under $$(BUILD)'
 	@echo 'variables       BUILD=$(BUILD)  WAVES  CONFIG  HTML  BASE=$(BASE)  SV  READER=builtin|wavepeek'
 
-demo: $(DEMO_JS)
+demo: $(DEMO_JS) $(APB_JS)
+
+# docs/index.html's assertion example: the APB view "transfers" with the example's checks bound (results of sva eval)
+$(APB_JS): examples/apb/apb.config.json examples/apb/apb.sva examples/apb/apb_tb.sv tools/vcd2wavedrom.py tools/svabuild.py tools/embed.py
+	$(MAKE) example EX=apb
+	$(PY) tools/vcd2wavedrom.py --config examples/apb/apb.config.json --view transfers --waves $(B)/examples/apb/apb.fst $(SVA_OPT) --out $(B)/apb_transfers.json
+	$(PY) tools/embed.py --var APB_WAVES transfers=$(B)/apb_transfers.json --out $@
 
 # The same testbench dumped as FST (Verilator --trace-fst): FSM enum labels come from the dump itself.
 #   make demo-fst  -> $(BUILD)/demo_fst.config.json (mkconfig) + $(BUILD)/demo_fst.html
@@ -92,7 +108,7 @@ $(EXB)/$(EX).fst: $(EXB)/obj_fst/V$(EX)_tb
 	cd $(EXB)/obj_fst && ./V$(EX)_tb +trace +dump=$@
 
 example: $(EXB)/$(EX).vcd $(EXB)/$(EX).fst
-	$(PY) tools/mkhtml.py --config $(EXD)/$(EX).config.json --waves $(EXB)/$(EX).$(EX_DUMP) --out $(EXB)/$(EX).html
+	$(PY) tools/mkhtml.py --config $(EXD)/$(EX).config.json --waves $(EXB)/$(EX).$(EX_DUMP) $(SVA_OPT) --out $(EXB)/$(EX).html
 	$(PY) tools/mkconfig.py $(EXB)/$(EX).vcd --base $(BASE) --sv $(EX_SRC) --out $(EXB)/$(EX)_all.config.json --force
 	$(PY) tools/mkhtml.py --config $(EXB)/$(EX)_all.config.json --out $(EXB)/$(EX)_all.html
 
@@ -108,17 +124,69 @@ $(DEMO_JS): $(VCD) $(DEMO_CONFIG) tools/vcd2wavedrom.py tools/wavejson.py tools/
 	$(V2W) --view exact --out $(B)/exact.json
 	$(PY) tools/embed.py --var DEMO_WAVES cycle=$(B)/cyc.json exact=$(B)/exact.json --out $@
 
+comma := ,
+# SVA="checks/*.sv" (a typo is an error, not a page without checks); BIND="a@tb.dut,b_*@tb" (quoted: no shell globbing)
+SVA_GLOB = $(if $(SVA),$(or $(wildcard $(SVA)),$(error no file matches SVA=$(SVA))))
+SVA_FILES = $(foreach f,$(SVA_GLOB),--sva $(f))
+SVA_BINDS = $(foreach b,$(subst $(comma), ,$(BIND)),--bind '$(b)')
 html: $(CONFIG) $(if $(filter $(DEMO_CONFIG),$(CONFIG)),$(VCD))
-	$(PY) tools/mkhtml.py --config $(CONFIG) $(if $(HTML_WAVES),--waves $(HTML_WAVES)) $(if $(READER),--reader $(READER)) --out $(HTML)
+	$(PY) tools/mkhtml.py --config $(CONFIG) $(if $(HTML_WAVES),--waves $(HTML_WAVES)) $(if $(READER),--reader $(READER)) $(SVA_OPT) $(SVA_FILES) $(SVA_BINDS) --out $(HTML)
 
 config:
 	$(if $(WAVES),,$(error make config needs WAVES=dump.vcd))
-	$(PY) tools/mkconfig.py $(WAVES) --base $(BASE) --out $(CONFIG) --update $(if $(SV),--sv $(SV)) $(if $(READER),--reader $(READER))
+	$(PY) tools/mkconfig.py $(WAVES) --base $(BASE) --out $(CONFIG) --update $(if $(SV),--sv $(SV)) $(if $(READER),--reader $(READER)) $(if $(SVA),$(SVA_FILES) $(if $(wildcard $(SVA_BIN)),--sva-bin $(SVA_BIN)))
 
 ifdef WAVES
 $(CONFIG): | $(WAVES)   # only when missing: never overwrites an edited config
 	$(PY) tools/mkconfig.py $(WAVES) --base $(BASE) --out $@ $(if $(SV),--sv $(SV)) $(if $(READER),--reader $(READER))
 endif
+
+# SVA engine (docs/sva/STACK.md): one Rust library, a native CLI over VCD / FST (wellen) and a WebAssembly module for
+# the page. Cargo builds under BUILD (not on the slow /mnt/c mount). Needs cargo and `rustup target add wasm32-unknown-unknown`.
+CARGO := CARGO_TARGET_DIR=$(B)/sva-target cargo
+SVA_BIN  = $(B)/sva-target/release/sva
+SVA_WASM = $(B)/sva-target/wasm32-unknown-unknown/wasm/sva_wasm.wasm
+SVA_OPT  = $(if $(wildcard $(SVA_BIN)),--sva-bin $(SVA_BIN))   # mkhtml: "sva" / "bind" of a config through the CLI when built
+
+sva-build:
+	cd sva && $(CARGO) build --release -p sva-cli
+	cd sva && $(CARGO) build --profile wasm -p sva-wasm --target wasm32-unknown-unknown
+	$(PY) sva/wasm/pack.py $(SVA_WASM) wavefw/sva.wasm.js
+	@ls -l $(SVA_BIN) $(SVA_WASM) wavefw/sva.wasm.js
+
+# unit tests (lexer, preprocessor, parser, expansion, evaluator), the corpus tests/sva/*.sv against its annotations
+# and golden files, docs/sva/ast.schema.json against the output, the sva binary end to end
+sva-test:
+	cd sva && $(CARGO) test
+
+sva-bless:
+	cd sva && SVA_BLESS=1 $(CARGO) test --test corpus
+	git diff --stat -- tests/sva/golden
+
+# the assertion files of the examples, each after the file that declares its package; then over the dumps of make
+# examples (each has one deliberately wrong assertion: sva eval exits 1), results in $(BUILD)/sva/<ex>.results.json
+SVA_EX_apb      := --scope apb_tb --sva examples/apb/apb_tb.sv --sva examples/apb/apb.sva
+SVA_EX_axi_lite := --scope axi_lite_tb.u_slave --sva examples/axi_lite/axi_lite.sva
+SVA_EX_fsm      := --scope fsm_tb.u_rx --sva examples/fsm/uart_pkg.sv --sva examples/fsm/fsm.sva
+sva-examples: sva-build
+	$(SVA_BIN) parse examples/apb/apb_tb.sv examples/apb/apb.sva
+	$(SVA_BIN) parse examples/axi_lite/axi_lite.sva
+	$(SVA_BIN) parse examples/fsm/uart_pkg.sv examples/fsm/fsm.sva
+	mkdir -p $(B)/sva
+	@for ex in apb axi_lite fsm; do d=$(B)/examples/$$ex/$$ex.fst; \
+	  if [ -f $$d ]; then echo "== $$ex"; $(SVA_BIN) eval --waves $$d $(SVA_EX_$$ex) --out $(B)/sva/$$ex.results.json; \
+	  else echo "== $$ex: no $$d (make examples)"; fi; done; true
+
+# sva eval over any dump: make sva-eval WAVES=work/x.fst SVA="rtl/pkg.sv checks.sva" SCOPE=tb.dut [OUT=r.json]
+sva-eval: sva-build
+	$(if $(WAVES),,$(error make sva-eval needs WAVES=dump.vcd|fst))
+	$(if $(SVA),,$(error make sva-eval needs SVA=checks.sva (several: SVA="pkg.sv checks.sva")))
+	$(SVA_BIN) eval --waves $(WAVES) $(foreach f,$(SVA),--sva $(f)) $(if $(SCOPE),--scope $(SCOPE)) $(if $(OUT),--out $(OUT)) $(ARGS)
+
+sva-spike: sva-build $(VCD)
+	mkdir -p $(B)/sva
+	$(PY) sva/spike/mkspike.py $(SVA_WASM) $(B)/sva/spike.html
+	$(SVA_BIN) eval --waves $(VCD) --scope demo_tb --sva sva/spike/demo.sva || true   # a_start_done fails on purpose
 
 smoke:
 	python3 tests/smoke.py --build $(B) --out $(B)/shots   # not -I: playwright lives in the user site-packages
@@ -126,7 +194,7 @@ smoke:
 clean:
 	rm -rf $(OBJ) $(OBJ)_fst $(VCD) $(FST) $(B)/cyc.json $(B)/exact.json $(B)/demo.html $(B)/shots
 	rm -rf $(basename $(FST)).config.json $(basename $(FST)).html
-	rm -rf $(B)/examples
+	rm -rf $(B)/examples $(B)/sva
 	rmdir $(B) 2>/dev/null || true
 
-.PHONY: help demo demo-fst example examples shots html config smoke clean
+.PHONY: help demo demo-fst example examples shots html config sva-build sva-test sva-bless sva-examples sva-eval sva-spike smoke clean

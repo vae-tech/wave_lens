@@ -1,0 +1,80 @@
+property p_AW_payload_stable_while_stalled @(posedge ACLK) disable iff (!ARESETn): AWVALID && !AWREADY |=> $stable({AWADDR, AWPROT})
+property p_AW_valid_sticky_until_handshake @(posedge ACLK) disable iff (!ARESETn): AWVALID && !AWREADY |=> AWVALID
+property p_W_payload_stable_while_stalled @(posedge ACLK) disable iff (!ARESETn): WVALID && !WREADY |=> $stable({WDATA, WSTRB})
+property p_W_valid_sticky_until_handshake @(posedge ACLK) disable iff (!ARESETn): WVALID && !WREADY |=> WVALID
+property p_B_payload_stable_while_stalled @(posedge ACLK) disable iff (!ARESETn): BVALID && !BREADY |=> $stable({BRESP})
+property p_B_valid_sticky_until_handshake @(posedge ACLK) disable iff (!ARESETn): BVALID && !BREADY |=> BVALID
+property p_AR_payload_stable_while_stalled @(posedge ACLK) disable iff (!ARESETn): ARVALID && !ARREADY |=> $stable({ARADDR, ARPROT})
+property p_AR_valid_sticky_until_handshake @(posedge ACLK) disable iff (!ARESETn): ARVALID && !ARREADY |=> ARVALID
+property p_R_payload_stable_while_stalled @(posedge ACLK) disable iff (!ARESETn): RVALID && !RREADY |=> $stable({RDATA, RRESP})
+property p_R_valid_sticky_until_handshake @(posedge ACLK) disable iff (!ARESETn): RVALID && !RREADY |=> RVALID
+assert a_AW_payload_stable_while_stalled, line 11
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  p_AW_payload_stable_while_stalled
+  expr      p_AW_payload_stable_while_stalled
+  s1        AWVALID && !AWREADY
+  s2        $stable({AWADDR, AWPROT})
+  signals   ACLK ARESETn AWVALID AWREADY AWADDR AWPROT
+assert a_AW_valid_sticky_until_handshake, line 21
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  p_AW_valid_sticky_until_handshake
+  expr      p_AW_valid_sticky_until_handshake
+  s1        AWVALID && !AWREADY
+  s2        AWVALID
+  signals   ACLK ARESETn AWVALID AWREADY
+assert a_W_payload_stable_while_stalled, line 36
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  p_W_payload_stable_while_stalled
+  expr      p_W_payload_stable_while_stalled
+  s1        WVALID && !WREADY
+  s2        $stable({WDATA, WSTRB})
+  signals   ACLK ARESETn WVALID WREADY WDATA WSTRB
+assert a_W_valid_sticky_until_handshake, line 46
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  p_W_valid_sticky_until_handshake
+  expr      p_W_valid_sticky_until_handshake
+  s1        WVALID && !WREADY
+  s2        WVALID
+  signals   ACLK ARESETn WVALID WREADY
+assert a_B_payload_stable_while_stalled, line 61
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  p_B_payload_stable_while_stalled
+  expr      p_B_payload_stable_while_stalled
+  s1        BVALID && !BREADY
+  s2        $stable({BRESP})
+  signals   ACLK ARESETn BVALID BREADY BRESP
+assert a_B_valid_sticky_until_handshake, line 71
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  p_B_valid_sticky_until_handshake
+  expr      p_B_valid_sticky_until_handshake
+  s1        BVALID && !BREADY
+  s2        BVALID
+  signals   ACLK ARESETn BVALID BREADY
+assert a_AR_payload_stable_while_stalled, line 86
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  p_AR_payload_stable_while_stalled
+  expr      p_AR_payload_stable_while_stalled
+  s1        ARVALID && !ARREADY
+  s2        $stable({ARADDR, ARPROT})
+  signals   ACLK ARESETn ARVALID ARREADY ARADDR ARPROT
+assert a_AR_valid_sticky_until_handshake, line 96
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  p_AR_valid_sticky_until_handshake
+  expr      p_AR_valid_sticky_until_handshake
+  s1        ARVALID && !ARREADY
+  s2        ARVALID
+  signals   ACLK ARESETn ARVALID ARREADY
+assert a_R_payload_stable_while_stalled, line 111
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  p_R_payload_stable_while_stalled
+  expr      p_R_payload_stable_while_stalled
+  s1        RVALID && !RREADY
+  s2        $stable({RDATA, RRESP})
+  signals   ACLK ARESETn RVALID RREADY RDATA RRESP
+assert a_R_valid_sticky_until_handshake, line 121
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  p_R_valid_sticky_until_handshake
+  expr      p_R_valid_sticky_until_handshake
+  s1        RVALID && !RREADY
+  s2        RVALID
+  signals   ACLK ARESETn RVALID RREADY

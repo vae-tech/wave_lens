@@ -1,0 +1,14 @@
+{
+  "comment": "Third-party assertion files as regression inputs (README.md here). Each unit is parsed as one compilation unit (sva parse, in order) and must give exactly 'assertions' with no error; its description is golden/third_party/<name>.txt. 'eval': sva eval over the dump of an example (make examples: $(BUILD)/examples/<example>/<example>.fst) at 'scope'; every assertion is evaluated and none fails except the ones in 'fail' (name: [pass, fail]). make smoke runs the evaluations.",
+  "units": [
+    { "name": "saravana_apb", "files": ["saravana_apb_ahb/apb_assertions.sv"], "assertions": 17,
+      "eval": [ { "example": "apb", "scope": "apb_tb.u_regs" }, { "example": "apb", "scope": "apb_tb.u_master" } ] },
+    { "name": "saravana_ahb", "files": ["saravana_apb_ahb/ahb_assertions.sv"], "assertions": 16 },
+    { "name": "yosyshq_axi4_lite", "files": ["yosyshq_axi4/amba_axi4_single_interface_requirements.sv", "yosyshq_axi4/axi4_lite_monitor.sva"], "assertions": 29,
+      "eval": [ { "example": "axi_lite", "scope": "axi_lite_tb.u_slave" }, { "example": "axi_lite", "scope": "axi_lite_tb.u_master" } ] },
+    { "name": "opentitan_apb", "files": ["opentitan/prim_assert.sv", "opentitan/prim_assert_standard_macros.svh", "opentitan/apb_prim_assert.sva"], "assertions": 12,
+      "eval": [ { "example": "apb", "scope": "apb_tb.u_regs" } ] },
+    { "name": "sindhugd_axi4lite", "files": ["sindhugd_axi4lite/axi4lite_props.sv"], "assertions": 10,
+      "eval": [ { "example": "axi_lite", "scope": "axi_lite_tb.u_slave" } ] }
+  ]
+}

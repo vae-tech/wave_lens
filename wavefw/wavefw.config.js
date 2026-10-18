@@ -33,5 +33,7 @@ window.WAVEFW_CONFIG = {
   findHighlight: true,          // fuzzy find: found rows in front, the rest dimmed
   findOpen: true,               // fuzzy find: every module folded except the ones with a match
   moduleShading: true,          // signals of neighbouring modules on alternating backgrounds, a line where the module changes
+  svaSignals: 'view',           // assertion groups (sva.js): the bound signals again under the steps: 'view' (viewers), true (also static SVGs), false
+  svaShow: null,                // assertion groups drawn: null = all, or labels / * patterns ['apb_*']
   maxHeight: null,              // e.g. '80vh' or 600: the rows scroll inside the viewer (the bar stays in view); null = page scroll
 };

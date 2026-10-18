@@ -1,0 +1,128 @@
+module ieee16 ports clk:1 a:1 b:1 c:1 d:1 e:1 te1:1 te2:1 te3:1 te4:1 te5:1 req:1 ack:1 rst:1 start_transfer:1 end_transfer:1 trdy:1 irdy:1 frame:1 burst_mode:1 write_en:1 data_end:1 ready:1 enable:1 done:1
+cover e16_7a in ieee16, line 5
+  clock     @(posedge clk)
+  expr      a ##1 b ##1 c
+  s1        a
+  s2        ##1 b
+  s3        ##1 c
+  signals   clk:1 a:1 b:1 c:1
+assert e16_7b in ieee16, line 6
+  clock     @(posedge clk)
+  expr      req ##[4:32] ack
+  s1        req
+  s2        ##[4:32] ack
+  signals   clk:1 req:1 ack:1
+cover e16_9a in ieee16, line 8
+  clock     @(posedge clk)
+  expr      a ##1 b[*3:4] ##1 c
+  s1        a
+  s2        ##1 b[*3:4]
+  s3        ##1 c
+  signals   clk:1 a:1 b:1 c:1
+cover e16_9b in ieee16, line 9
+  clock     @(posedge clk)
+  expr      (a ##2 b)[*5]
+  s1        a
+  s2        ##2 b
+  signals   clk:1 a:1 b:1
+cover e16_9c in ieee16, line 10
+  clock     @(posedge clk)
+  expr      a ##1 b[->2] ##1 c
+  s1        a
+  s2        ##1 b[->2]
+  s3        ##1 c
+  signals   clk:1 a:1 b:1 c:1
+cover e16_9d in ieee16, line 11
+  clock     @(posedge clk)
+  expr      a ##1 b[=2] ##1 c
+  s1        a
+  s2        ##1 b[=2]
+  s3        ##1 c
+  signals   clk:1 a:1 b:1 c:1
+cover e16_9e in ieee16, line 13
+  clock     @(posedge clk)
+  expr      (te1 ##2 te2) and (te3 ##2 te4 ##2 te5)
+  s1        te1
+  s2        ##2 te2
+  s3        te3
+  s4        ##2 te4
+  s5        ##2 te5
+  signals   clk:1 te1:1 te2:1 te3:1 te4:1 te5:1
+cover e16_9f in ieee16, line 14
+  clock     @(posedge clk)
+  expr      (te1 ##[1:5] te2) intersect (te3 ##2 te4 ##2 te5)
+  s1        te1
+  s2        ##[1:5] te2
+  s3        te3
+  s4        ##2 te4
+  s5        ##2 te5
+  signals   clk:1 te1:1 te2:1 te3:1 te4:1 te5:1
+cover e16_9g in ieee16, line 15
+  clock     @(posedge clk)
+  expr      (te1 ##2 te2) or (te3 ##2 te4 ##2 te5)
+  s1        te1
+  s2        ##2 te2
+  s3        te3
+  s4        ##2 te4
+  s5        ##2 te5
+  signals   clk:1 te1:1 te2:1 te3:1 te4:1 te5:1
+cover e16_9h in ieee16, line 17
+  clock     @(posedge clk)
+  expr      first_match(te1 ##[2:5] te2)
+  s1        te1
+  s2        ##[2:5] te2
+  signals   clk:1 te1:1 te2:1
+assert e16_9i in ieee16, line 19
+  clock     @(posedge clk)
+  expr      $fell(burst_mode) ##0 (!burst_mode throughout ##2 (trdy == 0 && irdy == 0)[*7])
+  s1        $fell(burst_mode)
+  s2        !burst_mode
+  s3        ##2 (trdy == 0 && irdy == 0)[*7]
+  signals   clk:1 burst_mode:1 trdy:1 irdy:1
+assert e16_9j in ieee16, line 21
+  clock     @(posedge clk)
+  expr      $fell(frame) |-> (!trdy)[*7] within ($fell(irdy) ##1 (!irdy)[*8])
+  s1        $fell(frame)
+  s2        (!trdy)[*7]
+  s3        $fell(irdy)
+  s4        ##1 (!irdy)[*8]
+  signals   clk:1 frame:1 trdy:1 irdy:1
+assert e16_12a in ieee16, line 23
+  clock     @(posedge clk) disable iff (rst)
+  expr      req |-> ##[1:3] ack
+  s1        req
+  s2        ##[1:3] ack
+  signals   clk:1 rst:1 req:1 ack:1
+assert e16_12b in ieee16, line 24
+  clock     @(posedge clk)
+  expr      start_transfer |=> (!end_transfer)[*0:$] ##1 end_transfer
+  s1        start_transfer
+  s2        (!end_transfer)[*0:$]
+  s3        ##1 end_transfer
+  signals   clk:1 start_transfer:1 end_transfer:1
+assert e16_12c in ieee16, line 25
+  clock     @(posedge clk)
+  expr      write_en |-> ##1 data_end[->1] ##1 ready
+  s1        write_en
+  s2        ##1 data_end[->1]
+  s3        ##1 ready
+  signals   clk:1 write_en:1 data_end:1 ready:1
+assert e16_12d in ieee16, line 27
+  clock     @(posedge clk)
+  expr      a |-> if (b) ##1 c else ##2 d
+  s1        a
+  s2        ##1 c
+  s3        ##2 d
+  signals   clk:1 a:1 b:1 c:1 d:1
+assert e16_12e in ieee16, line 29
+  clock     @(posedge clk)
+  expr      enable |-> always [1:3] !done
+  s1        enable
+  s2        !done
+  signals   clk:1 enable:1 done:1
+assert e16_12f in ieee16, line 30
+  clock     @(posedge clk)
+  expr      enable |-> s_eventually done
+  s1        enable
+  s2        done
+  signals   clk:1 enable:1 done:1

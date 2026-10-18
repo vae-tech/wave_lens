@@ -4,8 +4,14 @@
     "select and rules only decide the starting per-signal settings of the generated file; edit that file afterwards.",
     "select: depth = scope levels below the top that start shown (99: all), constants = show signals that never change,",
     "  hide = full-path patterns left out, budget = most value changes on one page (deeper levels are dropped first).",
-    "rules: {match: pattern(s) on the full path, width: 8 | '>1' | '>=32', then show/radix/color/style/fill/alias/enum}; later rules win."
+    "rules: {match: pattern(s) on the full path, width: 8 | '>1' | '>=32', then show/radix/color/style/fill/alias/enum}; later rules win.",
+    "sva: SystemVerilog assertion files of the page (paths relative to the config; false: no assertion engine in the page).",
+    "bind: [{assert, scope, show?}] or \"name@scope\": assertions bound to instances, evaluated over the dump when the page is built;",
+    "  \"assert\" may be a pattern (\"apb_*\"), \"show\": false skips a line. mkconfig.py --sva fills it: one line per instance where",
+    "  every signal of an assertion resolves (README \"Assertions\")."
   ],
+  "sva": [],
+  "bind": [],
   "exact": true,
   "hierarchy": true,
   "config": {

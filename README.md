@@ -135,6 +135,7 @@ Colours, sizes, fonts, line widths, sorting, folding and highlight are *settings
 | `highlight`, `dim` | none, 0.3 | instances in front at start (paths, names, `*` patterns) and the opacity of the rest |
 | `findHighlight`, `findOpen` | true, true | starting state of the find options |
 | `arrowLabels`, `laneHeight` | `lane`, 16 | arrow labels in a lane of their own between the signals, or `overlay` |
+| `svaSignals`, `svaShow` | `view`, all | assertion groups: repeat the bound signals under the steps (`view`: in viewers, `true`: also in static SVGs, `false`); which assertions are drawn (labels, `*` patterns) |
 
 ### Themes
 
@@ -161,6 +162,106 @@ changing signal (1526 signals, all 9 scope levels) in 25 s and 6.3 MB; it opens 
 canvas only covers the visible rows, so any number of rows scrolls smoothly. Above `select.budget` value changes
 (6 M) `mkconfig.py` hides the deepest levels first and says which depth it kept.
 
+## Assertions (SVA)
+
+![An APB check bound to the testbench: the failing attempt selected, its steps, arrows and the signals it read](docs/img/sva.png)
+
+SystemVerilog assertions are checked against the waves of a page: bind an assertion to an instance of the waveform and
+it is evaluated over the dump, in the page (WebAssembly) or when the page is built (the `sva` CLI, Rust). Every attempt
+is drawn under that instance — a bar from its start to its end, a numbered circle per sequence step, arrows between the
+steps, a red ✕ where it failed — and the panel above the waves counts them. The same numbers come out as Markdown,
+JSON, JUnit XML or an HTML section for CI and documents.
+
+**The subset.** Concurrent `assert` / `assume` / `cover property` with clocking (`@(posedge clk)`, `default clocking`),
+`disable iff`, implications `|->` `|=>`, delays and ranges `##n` `##[m:n]` `##[m:$]`, repetitions `[*n]` `[*m:n]`
+`[->n]` `[=n]`, `and or intersect within throughout first_match`, `not`, `if`/`else`, `nexttime always eventually
+s_eventually`, the sampled-value functions (`$rose $fell $stable $past $changed`, `$onehot $onehot0 $isunknown
+$countones`), named `sequence` / `property` with arguments, packages, enums, parameters, macros, `` `ifdef `` — in
+modules, checkers, interfaces and programs. Values are 4-state; signedness is unsigned (with a warning). Not in it:
+`until` and friends, local variables, multi-clock properties, `accept_on` / `reject_on`, immediate assertions. The
+full list: [`docs/sva/LANGUAGE.md`](docs/sva/LANGUAGE.md); the evaluator:
+[`docs/sva/ENGINE.md`](docs/sva/ENGINE.md).
+
+**Load and bind.** List the files in the config and bind assertions to instances (`"assert"` may be a pattern):
+
+```json
+"sva": ["rtl/checks_pkg.sv", "checks/apb.sva"],
+"bind": [{ "assert": "a_req_ack", "scope": "tb.dut.u_apb" }, { "assert": "apb_*", "scope": "tb.dut.u_apb" }]
+```
+
+or on the command line: `make html WAVES=x.vcd SVA="checks/*.sv" BIND="a_req_ack@tb.dut,apb_*@tb.u_apb"`.
+`make config WAVES=x.vcd SVA="checks/*.sv"` (`mkconfig.py --sva`) writes the `"bind"` lines for you: one per assertion and
+instance in which every signal resolves, `"show": true` when there is only one such instance (else choose); run again,
+it keeps your choices, the lines and keys you wrote and the other files of `"sva"` (a mistyped `SVA=` stops `make`).
+`mkhtml.py` parses the files (`sva parse --json`; errors become a note in the page, not a failed build) and evaluates
+every binding over the dump, so the page opens with them bound and drawn. In the page every viewer has an **assertions**
+group in its bar (**Load file…** reads more `.sv` / `.sva` files into this browser) and a panel under the bar: one line
+per assertion with its label, kind, property, signals and binding — *unbound*, *bound to tb.dut.u_apb* with its counts,
+or *cannot bind* with what is missing. Drag a line onto a module in the names column (the modules that have all its
+signals turn green; the others fade and say what they miss), or press **Bind…** for the list. Names resolve by one rule
+everywhere (the page, `mkconfig.py --sva`, `sva eval --resolve scope`): the exact name in the instance, then the shown
+name (`alias`), then the name without the `sortIgnore` prefixes (`valid` finds `s_valid`), `u_fifo.full` below it; only
+the clock may come from a scope above; a select wider than the signal does not bind; two signals equal without the
+prefixes (`i_valid`, `o_valid` for `valid`) are an error naming both, not a guess (the build passes the view's shown
+names to `sva eval --alias`, so the three really agree). **Evaluate** runs it again (in a
+Web Worker when it is long), **Unbind** and **✕** remove things. Loaded files, bindings and small results are kept in this
+browser (**Clear** forgets them); the panel's **JSON** button gives the `"bind"` list for the config. `"sva": false` or
+`mkhtml.py --no-sva` leaves the engine (`sva.js` + `sva.wasm.js`, ~330 kB) out of a page and evaluates nothing. A
+loaded file the engine cannot read is an error line in the panel and is not kept; the page's own assertions go on.
+
+**On the waves**, every bound assertion is a group directly under its instance (the top of the diagram for the view's
+own scope): **⚑ a_req_ack · 40 pass · 2 fail**, red when it fails, foldable, found by its name and step labels,
+highlighted and copied (`a_req_ack@tb.dut`) like a module. Inside:
+
+- **attempts**: a bar per attempt — green pass, red fail, grey disabled, striped active, hatched grey capped (no
+  verdict); three rows, more merged with a count — under a thin strip with one mark per cycle, so failures are red
+  ticks even with the whole dump in view. The value column shows the attempt at the cursor; a tooltip its start → end times, cycles and note.
+- one row per **step** of the sequence (`1. req`, `2. ##[1:3] ack`): a numbered circle at every match (a dot where they crowd), a red ✕ where an
+  attempt failed. The step's role (antecedent, consequent, condition) is in the static figure's legend.
+- **arrows** along an attempt's steps with the cycles between them (`2T`), a dashed red one to the failure with the
+  reason (`no ack within [1:3]`): for every attempt on screen when there are fewer than 20, else for the selected one; a long trace kept in part
+  shows its cut as a grey dashed `… nT (trace cut)`.
+- the **bound signals** again (`= req`; `"svaSignals": false` leaves them out).
+
+**Click a line of the panel** to go to that assertion: its group opens on the waves with its first failure (else its
+first pass) selected at the zoom you have, the attempt in the middle of the window; click again for its next one,
+`a` / `A` on the waves for the next / previous assertion. Click a bar or a circle, a failure in the panel, one of the failure buttons in **go to** (at most six) or press `f` /
+`F`: the attempt is **selected** — the cursor at its start, the view moved to it at the same zoom, its circles and arrows in front, the
+signals it read highlighted; Esc clears it. With more than three assertions at one place the ones without failures
+start folded; `"svaShow": ["apb_*"]` limits which are drawn. A `"render": "svg"` view draws the same rows with every
+attempt's arrows and a legend of the steps.
+
+![The assertions panel: totals, one row per binding, the failures](docs/img/sva-table.png)
+
+**Numbers.** The panel's totals line counts the view's bindings (loaded, bound — evaluated ones, with the ones that
+cannot bind or failed —, with failures, attempts, pass, fail …).
+**Table**: one row per binding — attempts, pass, fail, vacuous, disabled, active, capped, first and last failure (links),
+the longest attempt and the antecedent → consequent latency (min / avg / max cycles over the passing attempts; what a
+handshake check is about), cover hits, the notes (thread limit, values cut to 64 bits). **Failures**: every failed attempt by the time it was
+found, with its reason, filtered by assertion, **Copy** as text; a row selects the attempt; the first 500 are listed
+(the filter and the downloads have the rest). A click on a count (*2 fail*) shows only those attempts in the lane and
+lists them under the line (the first 200). **report.md** and **report.json** download the tables and the results of every binding.
+
+**Reports.** The page built by `mkhtml.py` ends with a printable **Assertions** section (the bindings over the whole
+dump). From the command line:
+
+```sh
+sva eval --waves x.fst --scope tb.dut --sva checks.sva --report report.md --junit report.xml   # exit 1 on a failure
+sva eval --waves x.fst --scope tb.dut --sva checks.sva --report nightly.json                   # results + meta
+sva report report.json nightly.json --md report.md --junit report.xml --html report.html        # several runs
+make sva-eval WAVES=x.fst SVA="pkg.sv checks.sva" SCOPE=tb.dut ARGS="--junit report.xml"         # a CI gate
+```
+
+`--report` writes Markdown (`.md`), HTML (`.html`), JUnit (`.xml`) or the results with the meta (`.json`, the form of a
+page's report.json; `sva report --json` writes the summary) by its extension. JUnit has one test case per assertion:
+a failure, an error when attempts had no verdict (capped: the thread limit, `--max-threads N`), skipped when not
+evaluated or a cover never hit. The texts list at most 20 failures per assertion (`--max-failures N`, 0 = all; the
+JSON has every one); over several files a Source column tells the runs apart. Exit status: 0 everything evaluated
+passed, 1 a failure or an attempt without verdict, 2 nothing checked as asked (a syntax error, no assertion, a signal
+or a file that is not there). Colours of the
+drawing: `sva-pass`, `sva-fail`, `sva-disabled`, `sva-active`, `sva-capped`, `hl8` in `colors`. The results of a binding
+are in `view.sva.bindings[i].results` (the results JSON of [`docs/sva/ENGINE.md`](docs/sva/ENGINE.md)).
+
 ## The viewer
 
 ![The viewer bar with its groups](docs/img/bar.png)
@@ -179,6 +280,8 @@ waves or on a name):
 | `/`, `n N` | find, next / previous match | `m` | bookmark at the cursor |
 | `s` | sort off → A→Z → Z→A | ctrl+C | copy the selected / found / highlighted paths |
 | ○ or ctrl+click a name | highlight the signal or instance | Esc | reset: no search, highlight or selection |
+| `f F` | next / previous assertion failure (`sva.js`) | click a bar or circle | select an assertion attempt |
+| `a A` | next / previous assertion: its first failure, else its first pass | click a line of the assertions panel (again: its next attempt) | go to an assertion |
 
 **Hierarchy and module shading.** With `"hierarchy": true` (generated configs) every scope is a group: module rows are
 bold on a darker band, the signals of neighbouring modules alternate between two backgrounds, a click on a module folds
@@ -195,7 +298,7 @@ colour; the rest is dimmed but stays visible. Several instances at once; **Highl
 
 **Fuzzy find.** The find field (`/`) matches the typed letters in order anywhere in a name, as fzf does: `awvd` finds
 `AWVALID`. A word with a `.` runs over the full path (`dev.fifo`), words separated by spaces must all match. Matched
-letters are underlined; Enter, ‹ › or `n N` step through the matches. **Highlight** dims the rest, **Open** folds every
+letters are underlined; Enter, ‹ › or `n N` step through the matches, each scrolled to the middle of the waves. **Highlight** dims the rest, **Open** folds every
 module without a match, **Paint** colours the found signals (kept in the browser), **Copy** copies their paths.
 
 ![Fuzzy find "awvd" with Highlight and Open](docs/img/find.png)
@@ -244,9 +347,10 @@ All tools are `python3 -I tools/<tool>.py --help`; the Makefile calls them for y
 
 | Tool | Does | Main options |
 |---|---|---|
-| `mkconfig.py` | dump → editable config with every signal | `DUMP`, `--out`, `--update`, `--force`, `--base`, `--depth`, `--sv FILES` |
-| `mkhtml.py` | config (every view) or WaveJSON files → one self-contained page | `--config`, `--view`, `--waves`, `--render`, `--out` |
-| `vcd2wavedrom.py` | one window of a dump → WaveJSON | `--config` + `--view`, or `--waves --scope --signals --clock/--exact --from --to --marker --group --enum` |
+| `mkconfig.py` | dump → editable config with every signal | `DUMP`, `--out`, `--update`, `--force`, `--base`, `--depth`, `--sv FILES`, `--sva FILES`, `--sva-bin` |
+| `mkhtml.py` | config (every view) or WaveJSON files → one self-contained page | `--config`, `--view`, `--waves`, `--render`, `--out`, `--sva FILE`, `--bind NAME@SCOPE`, `--sva-bin`, `--no-sva` |
+| `vcd2wavedrom.py` | one window of a dump → WaveJSON | `--config` + `--view`, or `--waves --scope --signals --clock/--exact --from --to --marker --group --enum`; `--sva FILE --bind NAME@SCOPE` |
+| `svabuild.py` | the `"sva"` / `"bind"` of a config: files parsed, bindings evaluated with the `sva` CLI (used by the two above) | `--waves --sva --bind --out` |
 | `embed.py` | WaveJSON → `data.js` for `file://` pages, or into an HTML placeholder | `--var NAME key=file.json`, `--html --placeholder` |
 | `dumpscan.py`, `wavejson.py` | the built-in dump reader (VCD text, FST via `fst2vcd -e`) and the readable JSON writer | modules |
 
@@ -289,6 +393,12 @@ WaveDrom 3.5.0.
 | `arrows: [{from, to, shape, head, line, color, label}]` | arrows between bookmarks: shape `- ~ -~ ~- -\| \|- -\|-`, head `> <> <` or `""`, line `solid dashed dotted` |
 | `markers: [{t \| cycle, label}]` | dashed markers; they become jump buttons when there are ≤ 6 and no `jumps` |
 | `jumps: [{t \| cycle, span, label}]`, `cursor` | jump buttons and the initial cursor |
+| `sva: {files?, bind, notes?}` | assertions (`wavefw/sva.js`): `files: [{name, path, source, parsed?}]` (`parsed`: `sva parse --json`, else the page parses), `bind: [{assert, scope, results?}]` (`scope` an instance path, `""` the top of the diagram; `results` from `sva eval`, else evaluated when the page opens) |
+| `meta.scope` | the converter's `--scope`: the instance the top rows belong to |
+| `signal[i].width`, `raw` (clock-sampled) | a bus's width, and the hex value of each `data` label when the labels do not read back as values (`bin` `signed` `oct` `ascii` radix, x digits): what the page's assertions sample |
+
+A page made by `mkhtml.py` holds the assertion files once, in `window.SVA = {files: [...], notes: [...]}` (before
+`wavefw/sva.wasm.js` and `wavefw/sva.js`); each view keeps its own `sva.bind`.
 
 ## Project layout
 
@@ -296,10 +406,11 @@ WaveDrom 3.5.0.
 wavefw/                       what a page needs, nothing else
   wavefw.js / wavefw.css      framework (one <script> + one <link>)
   wavefw.config.js            global settings file (all keys, with defaults), loaded before wavefw.js
+  sva.js, sva.wasm.js         assertions in the page: the panel, binding, evaluation; the engine (generated, make sva-build)
 tools/                        what you run: python3 -I tools/<tool>.py
-  mkconfig.py vcd2wavedrom.py mkhtml.py embed.py dumpscan.py wavejson.py
+  mkconfig.py vcd2wavedrom.py mkhtml.py embed.py dumpscan.py wavejson.py svabuild.py
   base.config.json            base settings for generated configs (make config / make html WAVES=x.vcd)
-examples/                     apb/ axi_lite/ fsm/ demo/: testbench, config, README
+examples/                     apb/ axi_lite/ fsm/ demo/: testbench, config, README; *.sva: assertions for each
 docs/                         what you look at
   index.html                  the reference page with live examples (opens from file://)
   demo_waves.js               its data (make demo), tracked
@@ -307,9 +418,12 @@ docs/                         what you look at
   reference/template.html     the original visual reference (PSI5 datasheet)
 tests/
   smoke.py                    behaviour checks in headless Chromium (make smoke)
+  sva/                        the SVA corpus: *.sv with every construct, err_*.sv with annotated errors, golden/;
+                              third_party/: AXI4-Lite, APB, AHB checkers of others (licenses, units.json)
   shots.py                    the screenshots (make shots)
   conformance.html            every feature next to stock WaveDrom 3.5.0 (vendor/, test-only)
 work/                         your dumps and their configs: configs tracked, dumps and pages git-ignored
+sva/                          the SVA engine (Rust: core, native CLI, WebAssembly; docs/sva/STACK.md, LANGUAGE.md, ENGINE.md)
 prompts/                      the roadmap as a series of prompts
 Makefile                      make help lists the targets; build products go to BUILD (default /tmp/wavefw)
 ```
@@ -320,6 +434,10 @@ Makefile                      make help lists the targets; build products go to 
 make demo examples html     # rebuild docs/demo_waves.js, the example pages, the demo page
 make smoke                  # tests/smoke.py: every page in light and dark, ~200 behaviour checks, PNGs in BUILD/shots
 make shots                  # tests/shots.py: docs/img/*.png, dark theme (after make examples; ~10 s, same bytes every run)
+make sva-build              # the SVA engine (needs cargo + the wasm32 target): the sva CLI, wavefw/sva.wasm.js
+make sva-test               # the SVA engine: unit tests, the corpus tests/sva (third_party too), the JSON schema, the CLI
+make sva-examples sva-spike # sva parse + sva eval of examples/*/*.sva; the WebAssembly build in a page (wasm32 target)
+make sva-eval WAVES=work/x.fst SVA="pkg.sv checks.sva" SCOPE=tb.dut OUT=results.json   # assertions over any dump
 ```
 
 `make smoke` is the gate for every change: it opens `docs/index.html`, `tests/conformance.html` and every built page
@@ -339,6 +457,51 @@ The two dump readers, measured on this machine (16 CPUs), output byte-identical:
 
 ## Roadmap
 
-The next stages are prompts in [`prompts/`](prompts/00-roadmap.md); next is a SystemVerilog Assertion engine: parse
-`property` / `sequence` / `assert property`, bind an assertion to an instance of the waveform, evaluate it over the dump,
-and draw the attempts, steps and failures next to the signals, with statistics.
+The stages are prompts in [`prompts/`](prompts/00-roadmap.md); stages 1–8 are done: the restructure, the examples
+and screenshots, and a SystemVerilog Assertion engine (stack: [`docs/sva/STACK.md`](docs/sva/STACK.md) — Rust core,
+native CLI over VCD / FST, WebAssembly in the page) that binds assertions to instances of the waveform, evaluates them
+over the dump, draws attempts, steps and failures next to the signals and reports the numbers. What could come next is
+listed at the end of `prompts/00-roadmap.md`.
+
+Done so far: the language front end ([`docs/sva/LANGUAGE.md`](docs/sva/LANGUAGE.md)), the evaluator
+([`docs/sva/ENGINE.md`](docs/sva/ENGINE.md)) and the assertions in the page (*Assertions (SVA)* above: list,
+binding to instances, evaluation on demand; attempts, steps, arrows and failures drawn on the waves; statistics,
+the failure list and reports). Besides its
+own corpus, the engine is tested on checkers written by others for AXI4-Lite, APB and AHB (YosysHQ's AXI4 FVIP property
+library, OpenTitan's assertion macros and more: [`tests/sva/third_party`](tests/sva/third_party/README.md)), evaluated
+over the example dumps by `make smoke`. `sva parse FILE...` reads
+`property` / `sequence` declarations and `assert` / `assume` / `cover property` statements in modules, checkers,
+interfaces, programs and packages, with macros, `` `ifdef ``, parameters and enums, and prints each assertion expanded:
+its clock and reset, its sequence elements (the steps the viewer will draw), the signals it reads with their widths.
+Errors give line:column with the source line, and the rest of the file still loads:
+
+```
+$ sva parse examples/apb/apb_tb.sv examples/apb/apb.sva
+assert apb_read_waits in apb_checks, line 24
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      PSEL && !PENABLE && !PWRITE && PADDR[7:4] == 0 && PADDR[1:0] == 0 |=> (!PREADY)[*2] ##1 PREADY
+  s1        PSEL && !PENABLE && !PWRITE && PADDR[7:4] == 0 && PADDR[1:0] == 0
+  s2        (!PREADY)[*2]
+  s3        ##1 PREADY
+  signals   PCLK:1 PRESETn:1 PSEL:1 PENABLE:1 PWRITE:1 PADDR[>=8]:8 PREADY:1
+```
+
+`sva eval` runs them over a dump: signals resolve under `--scope` (then the scopes above it; `--resolve scope`: only the
+clock, as when the page binds), values are sampled just before each clock edge with x and z kept, every cycle starts an
+attempt, sequences run as threads (ranges, repetitions, `and` / `or` / `intersect` / `within` / `throughout` /
+`first_match`), `disable iff` ends the alive attempts. It prints
+one line per assertion and writes the results JSON the viewer will draw: per assertion the counts, every non-vacuous
+attempt with its steps (`[["s1", 52]]`), the cycle and reason of a failure, and a per-cycle lane. Each example has one
+deliberately wrong assertion, so the failure trace shows:
+
+```
+$ sva eval --waves BUILD/examples/apb/apb.fst --scope apb_tb --sva examples/apb/apb_tb.sv --sva examples/apb/apb.sva --out apb.json
+apb_setup_then_access assert 19 attempts: 3 pass, 0 fail, 16 vacuous, 0 active, 0 disabled
+apb_read_waits        assert 19 attempts: 1 pass, 0 fail, 18 vacuous, 0 active, 0 disabled
+apb_demo_no_wait      assert 19 attempts: 3 pass, 2 fail, 14 vacuous, 0 active, 0 disabled · first fail at cycle 10 (105 ns): expected PREADY at cycle 10
+apb_cov_read_wait     cover  1 match in 19 attempts · first at cycle 12 (125 ns)
+…
+```
+
+The same engine runs in the page as WebAssembly (`wavefw/sva.js`: `evaluate(parsed, sampler)` over the viewer's rows or
+WaveJSON `tv` transitions): one assertion over 32 768 clock edges in about 70 ms.

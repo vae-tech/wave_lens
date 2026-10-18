@@ -1,0 +1,40 @@
+err_semantic.sv:7:26: error: the property 'p_self' instantiates itself: recursion is outside the subset (in assertion 'e_recursive', line 26)
+    7 |   property p_self; a |-> p_self; endproperty
+      |                          ^^^^^^
+err_semantic.sv:9:40: error: expected an expression, found ';'
+    9 |   property p_bad; @(posedge clk) a |-> ; endproperty
+      |                                        ^
+err_semantic.sv:12:47: error: no sequence or property 's_nope'
+   12 |   e_unknown:  assert property (@(posedge clk) s_nope(a) |-> b);
+      |                                               ^^^^^^^^^
+err_semantic.sv:14:47: error: the argument 'y' of 's_two' is missing
+   14 |   e_missing:  assert property (@(posedge clk) s_two(a) |-> b);
+      |                                               ^^^^^^^^
+err_semantic.sv:16:47: error: too many arguments: 's_two' takes 2
+   16 |   e_toomany:  assert property (@(posedge clk) s_two(a, b, c));
+      |                                               ^^^^^^^^^^^^^^
+err_semantic.sv:18:3: error: the assertion has no clock: write @(posedge clk) or declare a default clocking
+   18 |   e_noclock:  assert property (a |-> b);
+      |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+err_semantic.sv:20:47: error: multi-clock: 'p_clk2' is clocked by @(posedge clk2), the assertion by @(posedge clk)
+   20 |   e_mclock:   assert property (@(posedge clk) p_clk2);
+      |                                               ^^^^^^
+err_semantic.sv:22:58: error: a delay or repetition count must be a constant: 'n' is not a constant
+   22 |   e_nonconst: assert property (@(posedge clk) a |-> ##[1:n] b);
+      |                                                          ^
+err_semantic.sv:24:51: error: a delay or repetition count must not be negative, got -2
+   24 |   e_negative: assert property (@(posedge clk) a ##NEG b);
+      |                                                   ^^^
+err_semantic.sv:27:32: error: 'p_bad' did not parse (line 9)
+   27 |   e_broken:   assert property (p_bad);
+      |                                ^^^^^
+err_semantic.sv:29:58: error: unknown package 'no_pkg': give its file to sva parse first
+   29 |   e_package:  assert property (@(posedge clk) a |-> n == no_pkg::IDLE);
+      |                                                          ^^^^^^^^^^^^
+err_semantic.sv:31:52: error: the sequence or property 's_two' is used inside an expression
+   31 |   e_seq_expr: assert property (@(posedge clk) a && s_two);
+      |                                                    ^^^^^
+module err_semantic ports clk:1 clk2:1 a:1 b:1 c:1 n:4
+sequence s_two(x, y): x ##1 y
+property p_clk2 @(posedge clk2): a |-> b
+property p_self: a |-> p_self

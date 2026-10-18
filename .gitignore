@@ -8,3 +8,6 @@ build/
 # Python caches
 __pycache__/
 *.pyc
+# Rust (make sva-build puts its target under BUILD; these catch a plain cargo build) and wasm-pack output
+target/
+pkg/

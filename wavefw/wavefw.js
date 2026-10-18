@@ -8,7 +8,8 @@
 const TOK = { fg: '--fg', muted: '--muted', line: '--line', panel: '--panel', panel2: '--panel-2', acc: '--accent',
   one: '--wave-1', bus: '--wave-bus', x: '--wave-x', xsoft: '--wave-x-soft', z: '--wave-z',
   c3: '--wave-c3', c4: '--wave-c4', c5: '--wave-c5', c6: '--wave-c6', c7: '--wave-c7', c8: '--wave-c8', c9: '--wave-c9',
-  hl1: '--wave-hl1', hl2: '--wave-hl2', hl3: '--wave-hl3', hl4: '--wave-hl4', hl5: '--wave-hl5', hl6: '--wave-hl6', hl7: '--accent' };   // hl7: find
+  hl1: '--wave-hl1', hl2: '--wave-hl2', hl3: '--wave-hl3', hl4: '--wave-hl4', hl5: '--wave-hl5', hl6: '--wave-hl6', hl7: '--accent', hl8: '--wave-hl8',   // hl7: find, hl8: plugins
+  'sva-pass': '--sva-pass', 'sva-fail': '--sva-fail', 'sva-disabled': '--sva-disabled', 'sva-active': '--sva-active', 'sva-capped': '--sva-capped' };   // assertions (sva.js)
 // Friendly names for colour maps (config.colors, data-colors, WaveFW.setColors) -> CSS custom properties.
 const CVAR = { trace: '--wave-1', one: '--wave-1', bus: '--wave-bus', x: '--wave-x', xfill: '--wave-x-soft', z: '--wave-z',
   bg: '--panel', panel: '--panel', header: '--panel-2', grid: '--line', text: '--fg', muted: '--muted', accent: '--accent', cursor: '--accent',
@@ -73,10 +74,10 @@ function hlPick(M, list) {
   return picks;
 }
 // picks -> { cover: Map(row -> colour) for picked rows and members of picked groups, on: rows drawn in front, dim }
-function hlState(M, picks, dim) {
+function hlState(M, picks, dim, rows = M.rows) {
   if (!picks || !picks.size) return null;
   const cover = new Map(), on = new Set();
-  for (const r of M.rows) {
+  for (const r of rows) {
     let c = picks.get(r);
     for (let i = r.anc.length - 1; c === undefined && i >= 0; i--) c = picks.get(M.groups[r.anc[i]]);
     if (c !== undefined) { cover.set(r, c); on.add(r); r.anc.forEach(id => on.add(M.groups[id])); }   // keep their group headers too
@@ -124,6 +125,46 @@ function orderRows(rows, dir, pfx, groupOrder) {
     flush();
   };
   emit(kids.get(null));
+  return out;
+}
+
+/* ---------------- rows of plugins (view.extraRows, WaveSVG opts.extraRows) ---------------- */
+// fn(group | null) -> [row] for every group of the diagram and its top (null); the rows go after the group's own signals
+// (as a block: sorting does not move them). A returned row without `anc` belongs to the group; a group row takes its
+// `id` from WaveFW.rowId() and joins the model's groups (folding, Expand / Collapse); a row with draw(P, {y, h, X, tA,
+// tB, xL, xR}) paints itself, a "sig" row with `tr` like a signal. Return the same objects while they stay: the viewer
+// keys its state (selection, highlight, folding) by them. More, all optional: `height` (px), `cls` (classes of its name),
+// `title` (of a group's name), `value(t)` (the value column), `overlay(P, {pos: Map(row -> {y, h}), X, tA, tB, xL, xR})`
+// (drawn once after all rows: arrows between rows), `click(x, y, view)` / `tip(x, y, view)` (a click / the tooltip on
+// the waves, y inside the row; click returns true when it handled it), `same: true` (a copy of a signal shown elsewhere:
+// bookmarks stay on the original), `legend: [{n?, text, color?, bold?}]` (lines under the static SVG).
+let XID = 1e6;
+const XGROUPS = new WeakMap();   // fns -> the ids of the groups they added to M.groups last time (gone ones leave)
+function withExtra(rows, fns, M) {
+  if (!fns || !fns.length) return rows;
+  const ids = new Set();
+  const extras = g => {
+    const out = [];
+    for (const f of fns) for (const r of f(g) || []) {
+      if (!r.anc) { r.anc = g ? g.anc.concat(g.id) : []; r.depth = g ? g.depth + 1 : 0; }
+      if (r.type === 'group' && r.id != null) { M.groups[r.id] = r; ids.add(r.id); }
+      out.push(r);
+    }
+    return out;
+  };
+  const at = new Map([['top', -1]]);   // where each group's rows go: after its last own row (or its header)
+  rows.forEach((r, i) => {
+    if (r.type === 'group') at.set(r.id, i);
+    else at.set(r.anc.length ? r.anc[r.anc.length - 1] : 'top', i);
+  });
+  const after = new Map();
+  for (const [k, i] of at) { if (!after.has(i)) after.set(i, []); after.get(i).push(k); }
+  const out = [];
+  const put = i => { for (const k of after.get(i) || []) out.push(...extras(k === 'top' ? null : M.groups[k])); };
+  put(-1);
+  rows.forEach((r, i) => { out.push(r); put(i); });
+  for (const id of XGROUPS.get(fns) || []) if (!ids.has(id) && M.groups[id] && M.groups[id].id === id) delete M.groups[id];
+  XGROUPS.set(fns, ids);
   return out;
 }
 
@@ -238,7 +279,7 @@ function parseWave(s, C) {
     if ('pnPN'.includes(ch)) { clk = ch; clock(c0, ch); }
     else if (ch === '0' || ch === '1' || ch === 'u' || ch === 'd' || ch === 'x' || ch === 'z') level(c0, ch, false, false);
     else if ('hlHL'.includes(ch)) level(c0, 'hH'.includes(ch) ? '1' : '0', true, ch === 'H' || ch === 'L');
-    else push(c0, { k: '=', v: data[di++] ?? '', c: ch === '=' ? 2 : +ch, s: false });
+    else { const k = di++; push(c0, { k: '=', v: data[k] ?? '', hex: Array.isArray(s.raw) ? s.raw[k] : undefined, c: ch === '=' ? 2 : +ch, s: false }); }
   }
   return { tr, gaps, end: wave.length * per - ph };
 }
@@ -439,7 +480,7 @@ function paintSig(P, s, y, h, X, tA, tB, xL, xR, tEnd) {
     pw = w;
   }
   flush(xe);
-  for (const g of s.gaps) { // WaveDrom '|' gap mark: a slanted break through the row
+  for (const g of s.gaps || []) { // WaveDrom '|' gap mark: a slanted break through the row
     if (g < tA || g > tB) continue;
     const x = X(g), y0 = y + 2, y1 = y + h - 2;
     P.path([['M', x - 5, y1], ['L', x - 1, y0], ['L', x + 3, y0], ['L', x - 1, y1], ['Z']], { fill: 'panel' });
@@ -495,8 +536,9 @@ function paintEdges(P, M, rowY, X) {
   }
 }
 // rows (signals, group bands, separators), gaps, edges and markers inside [xL, xR]
-function paintBody(P, M, lay, X, tA, tB, xL, xR, hl, sel, allLay, band) {   // allLay: every row (edges may end off screen)
-  const rowY = new Map(), sep = [], edge = [];
+// late: an array that takes the plugin overlays instead of drawing them (the viewer draws them over its cursor)
+function paintBody(P, M, lay, X, tA, tB, xL, xR, hl, sel, allLay, band, late) {   // allLay: every row (edges may end off screen)
+  const rowY = new Map(), sep = [], edge = [], over = new Set();
   let pb;
   if (allLay) for (const o of allLay) if (o.row.type === 'sig') rowY.set(o.row, o.y + o.h / 2);
   for (const { row, y, h } of lay) {
@@ -510,11 +552,17 @@ function paintBody(P, M, lay, X, tA, tB, xL, xR, hl, sel, allLay, band) {   // a
     if (c !== undefined) P.rect(xL, y, xR - xL, h, 'hl' + (c + 1), 0.1);
     if (row === sel) P.rect(xL, y, xR - xL, h, 'acc', 0.08);
     if (row.type !== 'space') sep.push(['M', xL, y + h - 0.5], ['L', xR, y + h - 0.5]);
-    if (row.type === 'sig') { paintSig(P, row, y, h, X, tA, tB, xL, xR, M.t1); rowY.set(row, y + h / 2); }
+    if (row.draw) row.draw(P, { y, h, X, tA, tB, xL, xR });
+    if (row.overlay) over.add(row.overlay);
+    if (row.type === 'sig') { if (row.tr) paintSig(P, row, y, h, X, tA, tB, xL, xR, M.t1); rowY.set(row, y + h / 2); }
   }
   P.fade = 1;
   P.path(sep, { stroke: 'line', w: 1, alpha: 0.5 });
   P.path(edge, { stroke: 'line', w: 1 });   // module borders
+  if (over.size) {
+    const pos = new Map((allLay || lay).map(o => [o.row, o])), go = () => { for (const f of over) f(P, { pos, X, tA, tB, xL, xR }); };
+    if (late) late.push(go); else go();
+  }
   paintEdges(P, M, rowY, X);
   return rowY;
 }
@@ -567,7 +615,8 @@ const circle = (x, y, r) => { const k = 0.5523 * r; return [['M', x - r, y], ['C
 // it; the top when an end is on the time axis), so the text never covers a signal. -> Map(row index it follows -> [arrow index])
 function arrowLanes(rows, bms, arrows) {
   const idx = new Map(), lanes = new Map(), has = n => bms.some(b => b.n === n);
-  rows.forEach((r, i) => { if (r.type === 'sig') idx.set(r.full, i); });
+  rows.forEach((r, i) => { if (r.type === 'sig' && !r.same) idx.set(r.full, i); });
+  rows.forEach((r, i) => { if (r.type === 'sig' && r.same && !idx.has(r.full)) idx.set(r.full, i); });   // copies: when the original is not shown
   const rowOf = n => { const b = bms.find(x => x.n === n); return b && b.signal != null && idx.has(b.signal) ? idx.get(b.signal) : -1; };
   arrows.forEach((a, i) => {
     if (!a.label || !has(a.from) || !has(a.to)) return;
@@ -597,7 +646,8 @@ const laneY = (lay, h) => { const m = new Map(); for (const o of lay) if (o.row.
 // rubber: {from, x, y} = an arrow being drawn. Returns {pos: n -> [x, y], mids: [[arrow index, x, y]]} for hit tests.
 function paintBookmarks(P, bms, arrows, X, tA, tB, rowY, y0, y1, yAxis, rubber, lanes) {
   const at = new Map(), pos = new Map(), mids = [];
-  for (const [r, y] of rowY) at.set(r.full, y);
+  for (const [r, y] of rowY) if (!r.same) at.set(r.full, y);
+  for (const [r, y] of rowY) if (r.same && !at.has(r.full)) at.set(r.full, y);
   for (const b of bms) pos.set(b.n, [X(b.t), b.signal != null && at.has(b.signal) ? at.get(b.signal) : yAxis]);
   for (const b of bms) if (b.t >= tA && b.t <= tB) { const x = X(b.t); P.path([['M', x, y0], ['L', x, y1]], { stroke: b.color || 'acc', w: 1, dash: [2, 3], alpha: 0.45 }); }
   const near = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]) < 0.5;
@@ -629,6 +679,7 @@ function paintBookmarks(P, bms, arrows, X, tA, tB, rowY, y0, y1, yAxis, rubber, 
 
 /* ---------------- interactive viewer ---------------- */
 const VIEWS = new Set(), ACTIVE = { view: null };   // ACTIVE.view: the viewer used last (Esc while the focus is on the page)
+const PLUGINS = [];   // WaveFW.plugin(fn): fn(viewer) for every viewer, now and later (wavefw/sva.js: the assertions panel)
 class WaveView {
   constructor(root, model, opts = {}) {
     this.root = root; this.M = parse(model); this.opts = opts;
@@ -646,6 +697,10 @@ class WaveView {
     this.jumps = opts.jumps || M.jumps || (this.markers.length && this.markers.length <= 6
       ? this.markers.map(m => ({ label: '→ ' + m.label, t: m.t, span: this.span / 5 })) : []);
     this.sel = null; this.edgeKind = 'any';   // selected signal row (edge search, bookmarks), edge kind
+    this.extraJSON = [];   // plugins: () -> '"key": …' lines for the bookmarks JSON (or null)
+    this.extraRows = [];   // plugins: rows under a group (withExtra)
+    this.extraPicks = new Map();   // plugins: rows highlighted in colour 7 (--wave-hl8), cleared by Esc (then wavefw:reset)
+    this.keys = {};   // plugins: key -> fn(event) on the waves (sva.js: f / F)
     this.bmKey = 'wavefw.bookmarks:' + location.pathname + ':' + (opts.key || root.id || root.dataset.wave || M.title);
     Object.assign(this, this.loadBookmarks()); root.waveView = this;   // this.bms, this.arrows
     this.build(); this.fit();
@@ -659,6 +714,7 @@ class WaveView {
     window.addEventListener('scroll', this.onScroll, { passive: true }); window.addEventListener('resize', this.onScroll);
     this.bodyEl.addEventListener('scroll', this.onScroll, { passive: true });
     VIEWS.add(this);
+    for (const p of PLUGINS) try { p(this); } catch (e) { console.error('wavefw plugin:', e); }
   }
   // settings from all layers; a global WaveFW.configure() calls this again on every viewer
   restyle(redraw = true) {
@@ -672,7 +728,7 @@ class WaveView {
     const hlFrom = JSON.stringify(S.highlight ?? null);   // a new "highlight" setting (configure) replaces the picks
     if (redraw && hlFrom !== this.hlFrom) { this.hlFrom = hlFrom; this.picks = hlPick(this.M, S.highlight); }
     if (redraw && this.qEl && this.q) this.find(this.q);
-    if (redraw) { const i = this.root.querySelector('input.pfx'); if (i) i.value = S.sortIgnore.join(','); this.fitPfx(); this.renderNames(); this.draw(); }
+    if (redraw) { const i = this.root.querySelector('input.pfx'); if (i) i.value = S.sortIgnore.join(','); this.fitPfx(); this.renderNames(); this.draw(); this.settingsChanged(); }
   }
   build() {
     const r = this.root, S = this.S, groups = Object.keys(this.M.groups).length > 0; r.classList.add('wv');
@@ -737,7 +793,7 @@ class WaveView {
       else if (b.dataset.act === 'cset') this.setCursor(this.ctEl.value);
       else if (b.dataset.act === 'cshow') this.showCursor(this.csEl.value);
       else if (b.dataset.act === 'fnext' || b.dataset.act === 'fprev') this.findStep(b.dataset.act === 'fnext' ? 1 : -1);
-      else if (b.dataset.act === 'fcopy') this.copyRows(orderRows(this.M.rows, this.sort, this.sortIgnore, this.S.groupOrder).filter(r => this.found.has(r)));
+      else if (b.dataset.act === 'fcopy') this.copyRows(this.allRows().filter(r => this.found.has(r)));
       else if (b.dataset.jump !== undefined) { const j = this.jumps[b.dataset.jump]; this.goto(j.t, j.span); }
     });
     const pfx = r.querySelector('input.pfx');
@@ -782,7 +838,10 @@ class WaveView {
     });
     c.addEventListener('pointermove', e => {
       const [x, y] = local(e);
-      if (!drag) { const bm = this.bmAt(x, y); c.style.cursor = bm ? 'grab' : ''; c.title = bm ? `Bookmark ${bm.n}: drag to move it, shift+drag to another bookmark for an arrow` : ''; return; }
+      if (!drag) {
+        const bm = this.bmAt(x, y), o = !bm && (this.lay || []).find(o => y >= o.y && y < o.y + o.h), tip = o && o.row.tip ? o.row.tip(x, y - o.y, this) : '';
+        c.style.cursor = bm ? 'grab' : tip ? 'pointer' : ''; c.title = bm ? `Bookmark ${bm.n}: drag to move it, shift+drag to another bookmark for an arrow` : tip || ''; return;
+      }
       const dx = e.clientX - drag.x, dy = e.clientY - drag.y; if (Math.hypot(dx, dy) > 3) drag.moved = true;
       if (!drag.moved) return;
       if (drag.arrow) { this.rubber = { from: drag.bm.n, x, y }; this.draw(); }
@@ -800,11 +859,13 @@ class WaveView {
         const hit = this.bmAt(x, y), mid = !hit && this.bmGeo && this.bmGeo.mids.find(([, mx, my]) => Math.hypot(mx - x, my - y) <= 10);
         if (hit) { this.cursor = hit.t; this.draw(); this.notesEl.querySelector(`li[data-n="${hit.n}"] input.txt`)?.focus(); }
         else if (mid) this.notesEl.querySelector(`li[data-a="${mid[0]}"] input.lab`)?.focus();
-        else {   // cursor here; the signal row under the pointer becomes the selected one
-          this.cursor = this.t0 + x / this.pxPerT();
+        else {   // cursor here; the signal row under the pointer becomes the selected one (a row of a plugin may take the click)
           const row = (this.lay || []).find(o => y >= o.y && y < o.y + o.h);
-          if (row && row.row.type === 'sig') this.sel = row.row;
-          this.renderNames(); this.draw();
+          if (!(row && row.row.click && row.row.click(x, y - row.y, this))) {
+            this.cursor = this.t0 + x / this.pxPerT();
+            if (row && row.row.type === 'sig' && row.row.tr) this.sel = row.row;
+            this.renderNames(); this.draw();
+          }
         }
       }
       drag = null;
@@ -826,11 +887,12 @@ class WaveView {
         const rows = this.sel ? [this.sel] : [...this.picks.keys()]; if (rows.length) this.copyRows(rows); else h = false;
       }
       else if (k === 'ArrowDown' || k === 'ArrowUp') {
-        const sigs = this.vis.filter(r => r.type === 'sig'), i = sigs.indexOf(this.sel);
+        const sigs = this.vis.filter(r => r.type === 'sig' && r.tr), i = sigs.indexOf(this.sel);
         this.select(sigs[Math.min(Math.max(i < 0 ? 0 : i + (k === 'ArrowDown' ? 1 : -1), 0), sigs.length - 1)] || null);
       }
       else if (k === 'ArrowLeft') { this.t0 = this.clamp(this.t0 - this.span * 0.2); this.draw(); }
       else if (k === 'ArrowRight') { this.t0 = this.clamp(this.t0 + this.span * 0.2); this.draw(); }
+      else if (this.keys[k] && !e.ctrlKey && !e.metaKey && !e.altKey) this.keys[k](e);
       else h = false;
       if (h) e.preventDefault();
     });
@@ -849,12 +911,15 @@ class WaveView {
     this.renderNames(); this.renderNotes();
   }
   fitPfx() { const i = this.root.querySelector('input.pfx'); if (i) i.style.width = Math.max(7, i.value.length + 2) + 'ch'; }
-  visible() { return orderRows(this.M.rows, this.sort, this.sortIgnore, this.S.groupOrder).filter(r => !r.anc.some(id => this.collapsed.has(id))); }
+  // every row in display order (the model's and the plugins'), and the ones not folded away
+  allRows() { return (this.rowsAll = withExtra(orderRows(this.M.rows, this.sort, this.sortIgnore, this.S.groupOrder), this.extraRows, this.M)); }
+  visible() { return this.allRows().filter(r => !r.anc.some(id => this.collapsed.has(id))); }
+  settingsChanged() { this.root.dispatchEvent(new CustomEvent('wavefw:settings')); }   // sort, prefixes, settings
   // dir: none | asc | desc; ignore: prefixes skipped when comparing names ("i_,o_" or an array)
   setSort(dir, ignore) {
     this.sort = sortDir(dir);
     if (ignore !== undefined) this.sortIgnore = prefixes(ignore).sort((a, b) => b.length - a.length);
-    this.renderNames(); this.draw(); return this;
+    this.renderNames(); this.draw(); this.settingsChanged(); return this;
   }
   // highlight: list of full paths / names / "*" patterns (one colour each), or null to clear; returns the viewer
   highlight(list) { this.picks = hlPick(this.M, list); this.renderNames(); this.draw(); return this; }
@@ -873,7 +938,7 @@ class WaveView {
     this.q = q;
     const terms = String(q || '').trim().split(/\s+/).filter(Boolean);
     this.found = new Map();
-    if (terms.length) for (const r of this.M.rows) { if (r.type !== 'space') { const m = findRow(r, terms); if (m) this.found.set(r, m); } }
+    if (terms.length) for (const r of this.allRows()) { if (r.type !== 'space') { const m = findRow(r, terms); if (m) this.found.set(r, m); } }
     if (terms.length && this.findOpen) {   // fold everything but the way to the matches
       if (!this.foldSaved) this.foldSaved = new Set(this.collapsed);
       const keep = new Set(); for (const r of this.found.keys()) r.anc.forEach(id => keep.add(id));
@@ -886,7 +951,8 @@ class WaveView {
   }
   reset() { // Esc: search, highlight and the selected signal go; folding, scroll and time stay
     if (this.qEl) this.qEl.value = '';
-    this.picks = new Map(); this.sel = null;
+    this.picks = new Map(); this.sel = null; this.extraPicks = new Map();
+    this.root.dispatchEvent(new CustomEvent('wavefw:reset'));
     return this.find('');
   }
   unit() { // the unit the cursor fields start in: the one of a tenth of the whole span
@@ -924,14 +990,23 @@ class WaveView {
     return this.find('');
   }
   findStep(dir) { // Enter / shift+Enter: the next / previous match in display order (its modules are opened)
-    const order = orderRows(this.M.rows, this.sort, this.sortIgnore, this.S.groupOrder).filter(r => this.found.has(r));
+    const order = this.allRows().filter(r => this.found.has(r));
     if (!order.length) return this;
     this.fi = ((this.fi ?? -1) + dir + order.length) % order.length;
     const r = order[this.fi];
     r.anc.forEach(id => this.collapsed.delete(id));
     if (r.type === 'sig') this.select(r); else { this.renderNames(); this.draw(); }
-    this.namesEl.querySelector(`.row[data-r="${this.vis.indexOf(r)}"]`)?.scrollIntoView({ block: 'nearest' });
+    this.centerRow(r);
     if (this.cntEl) this.cntEl.textContent = `${this.fi + 1} / ${order.length}`;
+    return this;
+  }
+  // a row in the middle of the waves under the axis (the viewer's own scroll box, else the page), as far as the scroll goes
+  centerRow(r) {
+    const el = this.namesEl.querySelector(`.row[data-r="${this.vis.indexOf(r)}"]`); if (!el) return this;
+    const own = this.root.classList.contains('wv-scroll'), box = own ? this.bodyEl.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+    const q = el.getBoundingClientRect(), d = q.top + q.height / 2 - (box.top + this.hdrH + box.bottom) / 2;
+    if (own) this.bodyEl.scrollTop += d; else window.scrollBy(0, d);
+    this.draw();
     return this;
   }
   copyRows(rows) { // full paths, one per line, to the clipboard
@@ -963,14 +1038,14 @@ class WaveView {
   collapseAll() { this.collapsed = new Set(Object.keys(this.M.groups).map(Number)); this.renderNames(); this.draw(); return this; }
   select(row) { // the signal for edge search and bookmarks: a row, a full path / name, or null
     if (typeof row === 'string') row = this.M.rows.find(r => r.type === 'sig' && r.full === row) || this.M.rows.find(r => r.type === 'sig' && r.name === row);
-    this.sel = row && row.type === 'sig' ? row : null; this.renderNames(); this.draw();
+    this.sel = row && row.type === 'sig' && row.tr ? row : null; this.renderNames(); this.draw();
     this.namesEl.querySelector('.row.sel')?.scrollIntoView({ block: 'nearest' });
     return this;
   }
   // cursor to the next (dir 1) / previous (-1) edge of the selected signal, or of any shown signal; the view follows
   edge(dir, kind = this.edgeKind) {
     let best = null;
-    for (const s of this.sel ? [this.sel] : this.vis.filter(r => r.type === 'sig')) {
+    for (const s of this.sel ? [this.sel] : this.vis.filter(r => r.type === 'sig' && r.tr)) {
       const t = findEdge(s, this.cursor, dir, kind);
       if (t != null && (best == null || (dir > 0 ? t < best : t > best))) best = t;
     }
@@ -981,7 +1056,7 @@ class WaveView {
   }
   // nearest edge of signal s within px pixels of t (the initial value is not an edge), else t
   snap(s, t, px = 6) {
-    if (!s) return t;
+    if (!s || !s.tr) return t;
     const tol = px / this.pxPerT(), i = lastLE(s.tr, t);
     const near = [i, i + 1].filter(k => k > 0 && k < s.tr.length && Math.abs(s.tr[k].t - t) <= tol).sort((a, b) => Math.abs(s.tr[a].t - t) - Math.abs(s.tr[b].t - t))[0];
     return near != null ? s.tr[near].t : t;
@@ -1067,8 +1142,8 @@ class WaveView {
     else if (act === 'clear') { this.bms = []; this.arrows = []; try { localStorage.removeItem(this.bmKey); } catch (err) { /* ignore */ } this.renderNotes(); this.draw(); }
     else if (act === 'json') {
       const ta = this.notesEl.querySelector('textarea.json'), rows = l => l.map(x => '  ' + JSON.stringify(x)).join(',\n');
-      const txt = `"bookmarks": [\n${rows(this.bookmarks())}\n],\n"arrows": [\n${rows(this.arrowList())}\n]`;
-      ta.hidden = !ta.hidden; ta.value = txt; ta.rows = this.bms.length + this.arrows.length + 5;
+      const txt = [`"bookmarks": [\n${rows(this.bookmarks())}\n]`, `"arrows": [\n${rows(this.arrowList())}\n]`, ...this.extraJSON.map(f => f()).filter(Boolean)].join(',\n');
+      ta.hidden = !ta.hidden; ta.value = txt; ta.rows = txt.split('\n').length + 1;
       if (!ta.hidden) { ta.select(); try { navigator.clipboard.writeText(txt).then(() => { b.textContent = 'JSON (copied)'; }, () => {}); } catch (err) { /* select only */ } }
     }
   }
@@ -1102,11 +1177,11 @@ class WaveView {
     this.laneSig = JSON.stringify([...this.lanes]); this.rowsL = withLanes(this.vis, this.lanes);
     this.band = this.S.moduleShading && Object.keys(this.M.groups).length ? bands(this.rowsL) : null;
     const alt = r => this.band && this.band.get(r) === 1 ? ' alt' : '';
-    const picks = this.findPicks && this.findPicks.size ? new Map([...this.findPicks, ...this.picks]) : this.picks;   // your own picks keep their colour
-    const hl = this.hl = hlState(this.M, picks, this.S.dim);
+    const picks = (this.findPicks && this.findPicks.size) || this.extraPicks.size ? new Map([...this.findPicks, ...this.extraPicks, ...this.picks]) : this.picks;   // your own picks keep their colour
+    const hl = this.hl = hlState(this.M, picks, this.S.dim, this.rowsAll || this.M.rows);
     if (this.hlBtn) { this.hlBtn.hidden = !this.picks.size; this.hlBtn.textContent = `Highlight: ${this.picks.size} ✕`; }
     const mark = r => { const c = hl ? hl.cover.get(r) : undefined, own = this.picks.has(r);
-      return [`${c !== undefined ? ' hl' : ''}${hl && !hl.on.has(r) ? ' dim' : ''}`, c !== undefined ? `--hl:${c === 6 ? 'var(--accent)' : `var(--wave-hl${c + 1})`};` : '',
+      return [`${c !== undefined ? ' hl' : ''}${hl && !hl.on.has(r) ? ' dim' : ''}${r.cls ? ' ' + r.cls : ''}`, c !== undefined ? `--hl:var(${TOK['hl' + (c + 1)]});` : '',
         `<span class="mk" role="checkbox" tabindex="0" aria-checked="${own}" aria-label="highlight ${esc(r.full || r.name)}" title="${own ? 'Remove the highlight' : 'Highlight (the other rows dim; several at once)'}"></span>`]; };
     if (this.sortBtn) { this.sortBtn.textContent = 'Sort: ' + { none: 'off', asc: 'A→Z', desc: 'Z→A' }[this.sort]; this.sortBtn.setAttribute('aria-pressed', this.sort !== 'none'); }
     const pad = r => `padding-left:${17 + r.depth * 12}px`, sorted = this.sort !== 'none';
@@ -1118,17 +1193,17 @@ class WaveView {
     let vi = -1;
     this.namesEl.innerHTML = `<div class="hdr" style="height:${this.hdrH}px"></div>` + this.rowsL.map(r => {
       if (r.type === 'lane') return `<div class="row lane${alt(r)}" style="height:${this.S.laneHeight * r.ids.length}px" title="arrow labels"></div>`;
-      const h = this.rowH[r.type], i = ++vi;
+      const h = r.height || this.rowH[r.type], i = ++vi;
       if (r.type === 'space') return `<div class="row space${alt(r)}${hl ? ' dim' : ''}" data-r="${i}" style="height:${h}px;${pad(r)}"><span class="n">${esc(r.name)}</span></div>`;
       const [cls, st, mk] = mark(r);
-      if (r.type === 'group') { const open = !this.collapsed.has(r.id); return `<div class="row grp${cls}" data-r="${i}" style="height:${h}px;${st}${pad(r)}" data-g="${r.id}" tabindex="0" role="button" aria-expanded="${open}" title="${esc(r.path)}">${mk}<span class="n"${r.stroke ? ` style="color:${esc(r.stroke)}"` : ''}>${open ? '▾' : '▸'} ${label(r)}</span></div>`; }
+      if (r.type === 'group') { const open = !this.collapsed.has(r.id); return `<div class="row grp${cls}" data-r="${i}" style="height:${h}px;${st}${pad(r)}" data-g="${r.id}" tabindex="0" role="button" aria-expanded="${open}" title="${esc(r.title || r.path)}">${mk}<span class="n"${r.stroke ? ` style="color:${esc(r.stroke)}"` : ''}>${open ? '▾' : '▸'} ${label(r)}</span></div>`; }
       return `<div class="row${cls}${alt(r)}${r === this.sel ? ' sel' : ''}" data-r="${i}" style="height:${h}px;${st}${pad(r)}">${mk}<span class="n" title="${esc(r.full || r.name)}"${r.stroke ? ` style="color:${esc(r.stroke)}"` : ''}>${label(r)}</span><span class="v"></span></div>`;
     }).join('');
     this.vals = [...this.namesEl.querySelectorAll('.row .v')];
   }
   layout() {
     let y = this.hdrH;
-    const lay = this.rowsL.map(row => { const h = row.type === 'lane' ? this.S.laneHeight * row.ids.length : this.rowH[row.type], o = { row, y, h }; y += h; return o; });
+    const lay = this.rowsL.map(row => { const h = row.type === 'lane' ? this.S.laneHeight * row.ids.length : row.height || this.rowH[row.type], o = { row, y, h }; y += h; return o; });
     lay.H = y; return lay;
   }
   frac(e) { const r = this.canvas.getBoundingClientRect(); return (e.clientX - r.left) / r.width; }
@@ -1143,6 +1218,8 @@ class WaveView {
   goto(t, span) { this.span = Math.min(Math.max(span, this.minSpan), this.M.t1 - this.M.t0); this.t0 = this.clamp(t - this.span * 0.1); this.cursor = t; this.draw(); }
   fmt(t, ref, unitRef) { return this.M.timed ? fmtTime(t, ref, unitRef) : 'cycle ' + (t + (this.M.tick || 0)).toFixed(Math.max(0, Math.min(2, Math.ceil(-Math.log10(ref))))); }
   valueAt(sig, t) {
+    if (sig.value) return sig.value(t);
+    if (!sig.tr) return '';
     const i = lastLE(sig.tr, t); if (i < 0) return '';
     const o = sig.tr[i]; return o.k === '=' ? vtext(sig, o, this.S.radix) : o.k;
   }
@@ -1164,10 +1241,11 @@ class WaveView {
     if (this.sel && !this.vis.includes(this.sel)) this.sel = null;   // folded away
     const shown = lay.filter(o => o.y + o.h > oy + hdr && o.y < oy + Hc);
     g.save(); g.beginPath(); g.rect(0, hdr, W, Hc - hdr); g.clip(); g.translate(0, -oy);   // rows: layout coordinates, under the axis
-    const rowY = paintBody(P, M, shown, X, this.t0, tB, 0, W, this.hl, this.sel, lay, this.band);
+    const late = [], rowY = paintBody(P, M, shown, X, this.t0, tB, 0, W, this.hl, this.sel, lay, this.band, late);
     paintMarkers(P, this.markers, X, this.t0, tB, oy + hdr, oy + Hc);
     g.restore();
     if (this.cursor >= this.t0 && this.cursor <= tB) P.path([['M', X(this.cursor), 0], ['L', X(this.cursor), Hc]], { stroke: 'acc', w: 1.2 });
+    if (late.length) { g.save(); g.beginPath(); g.rect(0, hdr, W, Hc - hdr); g.clip(); g.translate(0, -oy); late.forEach(f => f()); g.restore(); }   // plugin overlays over the cursor
     g.save(); g.translate(0, -oy);
     this.lay = lay; this.bmGeo = paintBookmarks(P, this.bms, this.arrows, X, this.t0, tB, rowY, oy + hdr, oy + Hc, oy + hdr / 2, this.rubber, laneY(lay, this.S.laneHeight));
     g.restore();
@@ -1199,6 +1277,8 @@ function setTheme(name, el = document.documentElement) { applyLook(el, name || '
 function setColors(map, el = document.documentElement) { applyLook(el, undefined, map); redrawAll(); }
 const redrawAll = () => VIEWS.forEach(v => { if (v.root.isConnected) v.draw(); else v.destroy(); });
 const SVGS = new Map();   // static SVG host -> [model, opts], re-rendered by configure()
+const SVG_PLUGINS = [];   // WaveFW.svgPlugin(fn): fn(model, settings, opts) -> [extraRows fn] for every static SVG
+const redrawSvgs = () => SVGS.forEach(([m, o], el) => { if (el.isConnected) WaveSVG.render(el, m, o); else SVGS.delete(el); });
 // Global settings, e.g. from a config file: { theme, colors, rowHeight, nameWidth, fontSize, traceWidth, sort, sortIgnore, … }.
 // theme/colors go to <html> like setTheme/setColors; the rest becomes the default for every wave (null removes a key).
 function configure(cfg = {}) {
@@ -1209,7 +1289,7 @@ function configure(cfg = {}) {
   if (theme !== undefined) applyLook(html, theme || 'auto', null);
   if (colors) applyLook(html, undefined, colors);
   VIEWS.forEach(v => { if (v.root.isConnected) v.restyle(); else v.destroy(); });
-  SVGS.forEach(([m, o], el) => { if (el.isConnected) WaveSVG.render(el, m, o); else SVGS.delete(el); });
+  redrawSvgs();
   return Object.assign({}, GLOBAL);
 }
 
@@ -1221,8 +1301,9 @@ const WaveSVG = {
     groupPaint(M, S.groupColors);
     const from = parseT(opts.from) ?? M.t0, to = parseT(opts.to) ?? M.t1, fs = S.fontSize;
     const sorted = orderRows(M.rows, S.sort, S.sortIgnore, S.groupOrder), rh = { sig: S.rowHeight, group: S.groupHeight, space: S.spaceHeight };
-    const rows = S.arrowLabels === 'lane' ? withLanes(sorted, arrowLanes(sorted, M.bookmarks, M.arrows)) : sorted;
-    const hl = hlState(M, hlPick(M, S.highlight), S.dim);
+    const all = withExtra(sorted, (opts.extraRows || []).concat(...SVG_PLUGINS.map(f => f(M, S, opts) || [])), M);
+    const rows = S.arrowLabels === 'lane' ? withLanes(all, arrowLanes(all, M.bookmarks, M.arrows)) : all;
+    const hl = hlState(M, hlPick(M, S.highlight), S.dim, rows);
     const nameW = Math.ceil(Math.max(40, ...rows.map(r => P.measure(r.name || '', { size: fs, weight: r.type === 'group' ? 600 : 400 }) + 22 + r.depth * 12)));
     let k = ((opts.cyclePx || 40) * M.hscale) / M.cycle;
     if (opts.width) k = (opts.width - nameW - 8) / (to - from);
@@ -1231,10 +1312,11 @@ const WaveSVG = {
     let y = 4;
     const titleY = y; if (M.title) y += 22;
     const axisY = y; if (showAxis) y += 20;
-    const lay = rows.map(row => { const h = row.type === 'lane' ? S.laneHeight * row.ids.length : rh[row.type], o = { row, y, h }; y += h; return o; });
+    const lay = rows.map(row => { const h = row.type === 'lane' ? S.laneHeight * row.ids.length : row.height || rh[row.type], o = { row, y, h }; y += h; return o; });
     const bodyEnd = y, tockY = y; if (showTock) y += 20;
     const footY = y; if (M.foot) y += 20;
     const notes = M.bookmarks.filter(b => b.text), notesY = y + 6; if (notes.length) y += 8 + notes.length * 20;   // bookmark legend
+    const legend = rows.flatMap(r => r.legend || []), legendY = y + 6; if (legend.length) y += 8 + legend.length * 18;   // rows of plugins
     const Ht = Math.ceil(y + 4), xL = nameW, xR = nameW + waveW, X = t => xL + (t - from) * k;
     const theme = opts.theme ?? M.theme, colors = Object.assign({}, M.colors, opts.colors);
     const bg = opts.bg || (theme && theme !== 'auto') || colors.bg ? opts.bg || 'panel' : null;
@@ -1269,6 +1351,11 @@ const WaveSVG = {
       const cy = notesY + i * 20 + 10;
       P.path(circle(14, cy, 8), { fill: b.color || 'acc' }); P.text(14, cy + 0.5, String(b.n), { anchor: 'middle', size: b.n > 9 ? 9 : 10.5, weight: 700, fill: 'panel' });
       P.text(28, cy, b.text, { size: 12, body: true });
+    });
+    legend.forEach((l, i) => {
+      const cy = legendY + i * 18 + 9;
+      if (l.n != null) { P.path(circle(14, cy, 7), { fill: l.color || 'acc' }); P.text(14, cy + 0.5, String(l.n), { anchor: 'middle', size: 9, weight: 700, fill: 'panel' }); }
+      P.text(l.n != null ? 28 : 6, cy, l.text, { size: l.bold ? 12 : 11.5, weight: l.bold ? 600 : 400, body: !l.mono, fill: l.fill || 'fg' });
     });
     const css = [lookCss(colors), ...styleVars(Object.assign({}, M.cfg, opts)).map(([n, v]) => `${n}:${v}`)].filter(Boolean).join(';');
     const look = (THEMES.includes(theme) ? ` data-theme="${theme}"` : '') + (css ? ` style="${esc(css)}"` : '');
@@ -1333,7 +1420,12 @@ if (G.WAVEFW_CONFIG) configure(G.WAVEFW_CONFIG);   // settings file loaded befor
 const manual = document.currentScript && document.currentScript.dataset.manual != null;
 if (!manual) { if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => upgrade()); else upgrade(); }
 
-G.WaveFW = { version: '1.5.0', parse, fromTV, WaveView, WaveSVG, upgrade, redrawAll, setTheme, setColors, configure, defaults: DEFAULTS,
+// plugins: fn(viewer) runs for every viewer already built and every later one
+const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavefw plugin:', e); } }); };
+// static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
+const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
+G.WaveFW = { version: '1.7.0', rowId: () => ++XID, parse, fromTV, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme, setColors, configure, plugin, svgPlugin, views: () => [...VIEWS], defaults: DEFAULTS,
+  paint: { circle, arrowHead, edgeGeom, lastLE },
   sortRows: (M, dir = 'asc', ignore = [], groupOrder = 'file') => orderRows(parse(M).rows, sortDir(dir), prefixes(ignore), groupOrder), fuzzy, themes: THEMES, colorNames: CVAR, styles: Object.keys(EDGES), radixes: RADIX, enums: ENUMS, decode, fmtTime, parseT };
 G.WaveView = WaveView; G.WaveSVG = WaveSVG;
 })(window);

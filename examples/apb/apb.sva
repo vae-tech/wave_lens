@@ -1,0 +1,37 @@
+// APB3 checks for this example: the protocol at the slave (apb_regs) and the master's phase FSM.
+//   sva parse examples/apb/apb_tb.sv examples/apb/apb.sva        (the testbench first: it declares apb_pkg)
+//   make sva-examples                                            (all three examples)
+`define SETUP  (PSEL && !PENABLE)
+`define ACCESS (PSEL && PENABLE)
+
+module apb_checks import apb_pkg::*; (
+  input logic        PCLK, PRESETn, PSEL, PENABLE, PWRITE, PREADY, PSLVERR,
+  input logic [7:0]  PADDR,
+  input logic [31:0] PWDATA, PRDATA,
+  input phase_t      phase
+);
+  default clocking @(posedge PCLK); endclocking
+  default disable iff (!PRESETn);
+
+  // protocol
+  apb_setup_then_access: assert property (`SETUP |=> `ACCESS) else $error("APB: SETUP not followed by ACCESS");
+  apb_enable_needs_sel:  assert property (PENABLE |-> PSEL) else $error("APB: PENABLE without PSEL");
+  apb_wait_holds:        assert property (`ACCESS && !PREADY |=> `ACCESS);
+  apb_addr_stable:       assert property (PSEL && !(PENABLE && PREADY) |=> $stable(PADDR) && $stable(PWRITE));
+  apb_wdata_stable:      assert property (PSEL && PWRITE && !(PENABLE && PREADY) |=> $stable(PWDATA));
+  apb_end_of_transfer:   assert property (`ACCESS && PREADY |=> !PENABLE);
+  // this slave: a read of a register takes two wait states, an unmapped address answers with PSLVERR
+  apb_read_waits:        assert property (`SETUP && !PWRITE && PADDR[7:4] == 0 && PADDR[1:0] == 0 |=> !PREADY[*2] ##1 PREADY);
+  apb_slverr_unmapped:   assert property (`ACCESS && PREADY && PADDR[7:4] != 0 |-> PSLVERR) else $error("APB: unmapped %h without PSLVERR", PADDR);
+  // the master's phases
+  apb_phase_order:       assert property (phase == SETUP |=> phase == ACCESS);
+  apb_phase_sel:         assert property ((phase == IDLE) == !PSEL);
+  // deliberately wrong (the slave has read wait states): shows a fail trace, sva eval exits 1
+  apb_demo_no_wait:      assert property (`ACCESS |-> PREADY) else $error("demo: a wait state");
+  // coverage
+  apb_cov_write:         cover property (`SETUP && PWRITE ##1 `ACCESS && PREADY);
+  apb_cov_read_wait:     cover property (`SETUP && !PWRITE ##1 (`ACCESS && !PREADY)[*2] ##1 PREADY);
+  apb_cov_error:         cover property (`ACCESS && PREADY && PSLVERR);
+endmodule
+
+bind apb_tb apb_checks u_apb_checks (.*);

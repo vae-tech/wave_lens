@@ -1,0 +1,225 @@
+package amba_axi4_single_interface_requirements
+property exit_from_reset(aresetn, valid): !aresetn || $rose(aresetn) |-> !valid
+property stable_before_handshake(valid, ready, control): valid && !ready |-> ##1 $stable(control)
+property valid_before_handshake(valid, ready): valid && !ready |-> ##1 valid
+property valid_before_ready(valid, ready): valid && !ready
+property ready_before_valid(valid, ready): ready && !valid
+property valid_with_ready(valid, ready): valid && ready
+property handshake_max_wait(valid, ready, timeout): valid & !ready |-> ##[1:timeout] ready
+property handshake_max_wait_R(valid, ready, timeout): valid & !ready |-> ##[1:timeout] !valid || ready
+property valid_information(valid, sig): valid |-> !$isunknown(sig)
+property start_address_align(valid, burst, address, size): valid && burst == amba_axi4_protocol_checker_pkg::WRAP |-> addr_align_check(address, size)
+property full_data_transaction(valid, default_strb_value): valid |-> default_strb_value
+property rdwr_response_okay(valid, ready, resp): valid && ready && resp == amba_axi4_protocol_checker_pkg::OKAY
+property rdwr_response_exokay(valid, ready, resp): valid && ready && resp == amba_axi4_protocol_checker_pkg::EXOKAY
+property rdwr_response_slverr(valid, ready, resp): valid && ready && resp == amba_axi4_protocol_checker_pkg::SLVERR
+property rdwr_response_decerr(valid, ready, resp): valid && ready && resp == amba_axi4_protocol_checker_pkg::DECERR
+property axi4_back_to_back(valid, ready): valid && ready ##1 valid
+property axi4_wait_state(valid, ready): valid && !ready ##1 ready
+property axi4_no_wait_state(valid, ready): !valid || ready ##1 valid && ready
+module yosyshq_axi4_lite_monitor ports ACLK:1 ARESETn:1 AWVALID:1 AWREADY:1 WVALID:1 WREADY:1 BVALID:1 BREADY:1 ARVALID:1 ARREADY:1 RVALID:1 RREADY:1 AWADDR:8 ARADDR:8 AWPROT:3 ARPROT:3 WDATA:32 RDATA:32 WSTRB:4 BRESP:2 RRESP:2 params MAXWAIT=16
+assert ap_AW_EXIT_RESET in yosyshq_axi4_lite_monitor, line 18
+  clock     @(posedge ACLK)
+  property  exit_from_reset
+  expr      exit_from_reset(ARESETn, AWVALID)
+  s1        !ARESETn || $rose(ARESETn)
+  s2        !AWVALID
+  signals   ACLK:1 ARESETn:1 AWVALID:1
+  message   error "Violation: AWVALID must be low in reset (A3.1.2)"
+assert ap_W_EXIT_RESET in yosyshq_axi4_lite_monitor, line 19
+  clock     @(posedge ACLK)
+  property  exit_from_reset
+  expr      exit_from_reset(ARESETn, WVALID)
+  s1        !ARESETn || $rose(ARESETn)
+  s2        !WVALID
+  signals   ACLK:1 ARESETn:1 WVALID:1
+assert ap_AR_EXIT_RESET in yosyshq_axi4_lite_monitor, line 20
+  clock     @(posedge ACLK)
+  property  exit_from_reset
+  expr      exit_from_reset(ARESETn, ARVALID)
+  s1        !ARESETn || $rose(ARESETn)
+  s2        !ARVALID
+  signals   ACLK:1 ARESETn:1 ARVALID:1
+assert ap_B_EXIT_RESET in yosyshq_axi4_lite_monitor, line 21
+  clock     @(posedge ACLK)
+  property  exit_from_reset
+  expr      exit_from_reset(ARESETn, BVALID)
+  s1        !ARESETn || $rose(ARESETn)
+  s2        !BVALID
+  signals   ACLK:1 ARESETn:1 BVALID:1
+assert ap_R_EXIT_RESET in yosyshq_axi4_lite_monitor, line 22
+  clock     @(posedge ACLK)
+  property  exit_from_reset
+  expr      exit_from_reset(ARESETn, RVALID)
+  s1        !ARESETn || $rose(ARESETn)
+  s2        !RVALID
+  signals   ACLK:1 ARESETn:1 RVALID:1
+assert ap_AW_STABLE_AWADDR in yosyshq_axi4_lite_monitor, line 25
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  stable_before_handshake
+  expr      stable_before_handshake(AWVALID, AWREADY, AWADDR)
+  s1        AWVALID && !AWREADY
+  s2        ##1 $stable(AWADDR)
+  signals   ACLK:1 ARESETn:1 AWVALID:1 AWREADY:1 AWADDR:8
+  message   error "Violation: AWADDR must remain stable when AWVALID is asserted and AWREADY low (A3.2.1)"
+assert ap_AW_STABLE_AWPROT in yosyshq_axi4_lite_monitor, line 27
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  stable_before_handshake
+  expr      stable_before_handshake(AWVALID, AWREADY, AWPROT)
+  s1        AWVALID && !AWREADY
+  s2        ##1 $stable(AWPROT)
+  signals   ACLK:1 ARESETn:1 AWVALID:1 AWREADY:1 AWPROT:3
+assert ap_AW_AWVALID_AWREADY in yosyshq_axi4_lite_monitor, line 28
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  valid_before_handshake
+  expr      valid_before_handshake(AWVALID, AWREADY)
+  s1        AWVALID && !AWREADY
+  s2        ##1 AWVALID
+  signals   ACLK:1 ARESETn:1 AWVALID:1 AWREADY:1
+assert ap_W_STABLE_WDATA in yosyshq_axi4_lite_monitor, line 29
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  stable_before_handshake
+  expr      stable_before_handshake(WVALID, WREADY, WDATA)
+  s1        WVALID && !WREADY
+  s2        ##1 $stable(WDATA)
+  signals   ACLK:1 ARESETn:1 WVALID:1 WREADY:1 WDATA:32
+assert ap_W_STABLE_WSTRB in yosyshq_axi4_lite_monitor, line 30
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  stable_before_handshake
+  expr      stable_before_handshake(WVALID, WREADY, WSTRB)
+  s1        WVALID && !WREADY
+  s2        ##1 $stable(WSTRB)
+  signals   ACLK:1 ARESETn:1 WVALID:1 WREADY:1 WSTRB:4
+assert ap_W_WVALID_WREADY in yosyshq_axi4_lite_monitor, line 31
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  valid_before_handshake
+  expr      valid_before_handshake(WVALID, WREADY)
+  s1        WVALID && !WREADY
+  s2        ##1 WVALID
+  signals   ACLK:1 ARESETn:1 WVALID:1 WREADY:1
+assert ap_B_STABLE_BRESP in yosyshq_axi4_lite_monitor, line 32
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  stable_before_handshake
+  expr      stable_before_handshake(BVALID, BREADY, BRESP)
+  s1        BVALID && !BREADY
+  s2        ##1 $stable(BRESP)
+  signals   ACLK:1 ARESETn:1 BVALID:1 BREADY:1 BRESP:2
+assert ap_B_BVALID_BREADY in yosyshq_axi4_lite_monitor, line 33
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  valid_before_handshake
+  expr      valid_before_handshake(BVALID, BREADY)
+  s1        BVALID && !BREADY
+  s2        ##1 BVALID
+  signals   ACLK:1 ARESETn:1 BVALID:1 BREADY:1
+assert ap_AR_STABLE_ARADDR in yosyshq_axi4_lite_monitor, line 34
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  stable_before_handshake
+  expr      stable_before_handshake(ARVALID, ARREADY, ARADDR)
+  s1        ARVALID && !ARREADY
+  s2        ##1 $stable(ARADDR)
+  signals   ACLK:1 ARESETn:1 ARVALID:1 ARREADY:1 ARADDR:8
+assert ap_AR_STABLE_ARPROT in yosyshq_axi4_lite_monitor, line 35
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  stable_before_handshake
+  expr      stable_before_handshake(ARVALID, ARREADY, ARPROT)
+  s1        ARVALID && !ARREADY
+  s2        ##1 $stable(ARPROT)
+  signals   ACLK:1 ARESETn:1 ARVALID:1 ARREADY:1 ARPROT:3
+assert ap_AR_ARVALID_ARREADY in yosyshq_axi4_lite_monitor, line 36
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  valid_before_handshake
+  expr      valid_before_handshake(ARVALID, ARREADY)
+  s1        ARVALID && !ARREADY
+  s2        ##1 ARVALID
+  signals   ACLK:1 ARESETn:1 ARVALID:1 ARREADY:1
+assert ap_R_STABLE_RDATA in yosyshq_axi4_lite_monitor, line 37
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  stable_before_handshake
+  expr      stable_before_handshake(RVALID, RREADY, RDATA)
+  s1        RVALID && !RREADY
+  s2        ##1 $stable(RDATA)
+  signals   ACLK:1 ARESETn:1 RVALID:1 RREADY:1 RDATA:32
+assert ap_R_STABLE_RRESP in yosyshq_axi4_lite_monitor, line 38
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  stable_before_handshake
+  expr      stable_before_handshake(RVALID, RREADY, RRESP)
+  s1        RVALID && !RREADY
+  s2        ##1 $stable(RRESP)
+  signals   ACLK:1 ARESETn:1 RVALID:1 RREADY:1 RRESP:2
+assert ap_R_RVALID_RREADY in yosyshq_axi4_lite_monitor, line 39
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  valid_before_handshake
+  expr      valid_before_handshake(RVALID, RREADY)
+  s1        RVALID && !RREADY
+  s2        ##1 RVALID
+  signals   ACLK:1 ARESETn:1 RVALID:1 RREADY:1
+assert ap_AW_AWADDR_X in yosyshq_axi4_lite_monitor, line 42
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  valid_information
+  expr      valid_information(AWVALID, AWADDR)
+  s1        AWVALID
+  s2        !$isunknown(AWADDR)
+  signals   ACLK:1 ARESETn:1 AWVALID:1 AWADDR:8
+assert ap_W_WDATA_X in yosyshq_axi4_lite_monitor, line 43
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  valid_information
+  expr      valid_information(WVALID, WDATA)
+  s1        WVALID
+  s2        !$isunknown(WDATA)
+  signals   ACLK:1 ARESETn:1 WVALID:1 WDATA:32
+assert ap_R_RDATA_X in yosyshq_axi4_lite_monitor, line 44
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  valid_information
+  expr      valid_information(RVALID, RDATA)
+  s1        RVALID
+  s2        !$isunknown(RDATA)
+  signals   ACLK:1 ARESETn:1 RVALID:1 RDATA:32
+assert ap_AW_MAX_WAIT in yosyshq_axi4_lite_monitor, line 47
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  handshake_max_wait
+  expr      handshake_max_wait(AWVALID, AWREADY, MAXWAIT)
+  s1        AWVALID & !AWREADY
+  s2        ##[1:16] AWREADY
+  signals   ACLK:1 ARESETn:1 AWVALID:1 AWREADY:1
+assert ap_W_MAX_WAIT in yosyshq_axi4_lite_monitor, line 48
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  handshake_max_wait
+  expr      handshake_max_wait(WVALID, WREADY, MAXWAIT)
+  s1        WVALID & !WREADY
+  s2        ##[1:16] WREADY
+  signals   ACLK:1 ARESETn:1 WVALID:1 WREADY:1
+assert ap_AR_MAX_WAIT in yosyshq_axi4_lite_monitor, line 49
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  handshake_max_wait
+  expr      handshake_max_wait(ARVALID, ARREADY, MAXWAIT)
+  s1        ARVALID & !ARREADY
+  s2        ##[1:16] ARREADY
+  signals   ACLK:1 ARESETn:1 ARVALID:1 ARREADY:1
+cover cp_AW_WAIT_STATE in yosyshq_axi4_lite_monitor, line 52
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  axi4_wait_state
+  expr      axi4_wait_state(AWVALID, AWREADY)
+  s1        AWVALID && !AWREADY
+  s2        ##1 AWREADY
+  signals   ACLK:1 ARESETn:1 AWVALID:1 AWREADY:1
+cover cp_W_WAIT_STATE in yosyshq_axi4_lite_monitor, line 53
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  axi4_wait_state
+  expr      axi4_wait_state(WVALID, WREADY)
+  s1        WVALID && !WREADY
+  s2        ##1 WREADY
+  signals   ACLK:1 ARESETn:1 WVALID:1 WREADY:1
+cover cp_AR_NO_WAIT_STATE in yosyshq_axi4_lite_monitor, line 54
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  axi4_no_wait_state
+  expr      axi4_no_wait_state(ARVALID, ARREADY)
+  s1        !ARVALID || ARREADY
+  s2        ##1 ARVALID && ARREADY
+  signals   ACLK:1 ARESETn:1 ARVALID:1 ARREADY:1
+cover cp_B_BACK_TO_BACK in yosyshq_axi4_lite_monitor, line 55
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  axi4_back_to_back
+  expr      axi4_back_to_back(BVALID, BREADY)
+  s1        BVALID && BREADY
+  s2        ##1 BVALID
+  signals   ACLK:1 ARESETn:1 BVALID:1 BREADY:1

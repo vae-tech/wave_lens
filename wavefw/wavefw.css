@@ -14,6 +14,9 @@
   --wave-c7: #d8efd4; --wave-c8: #eadcf6; --wave-c9: #f6d8d6;
   /* highlight colours, one per highlighted instance (cycled) */
   --wave-hl1: #1c7ed6; --wave-hl2: #ae3ec9; --wave-hl3: #0c8599; --wave-hl4: #d6336c; --wave-hl5: #5c940d; --wave-hl6: #e8590c;
+  --wave-hl8: #7048e8;    /* highlight of plugins (the rows of a selected assertion attempt) */
+  /* assertions on the waves (sva.js): attempt bars, step circles, the per-cycle strip */
+  --sva-pass: #2b7a3b; --sva-fail: #c92a2a; --sva-disabled: #6c757d; --sva-active: #1971c2; --sva-capped: #706b80;
   --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
   color-scheme: light;
@@ -24,21 +27,24 @@
   --wave-x-soft: #3f2321; --wave-z: #7fb0dd;
   --wave-c3: #3d3818; --wave-c4: #42301c; --wave-c5: #1f3247; --wave-c6: #1b3a3c;
   --wave-c7: #20391f; --wave-c8: #33264a; --wave-c9: #452423; color-scheme: dark;
-  --wave-hl1: #4dabf7; --wave-hl2: #da77f2; --wave-hl3: #3bc9db; --wave-hl4: #f783ac; --wave-hl5: #a9e34b; --wave-hl6: #ff922b; } }
+  --wave-hl1: #4dabf7; --wave-hl2: #da77f2; --wave-hl3: #3bc9db; --wave-hl4: #f783ac; --wave-hl5: #a9e34b; --wave-hl6: #ff922b;
+  --wave-hl8: #9775fa; --sva-pass: #51cf66; --sva-fail: #ff6b6b; --sva-disabled: #868e96; --sva-active: #4dabf7; --sva-capped: #adb5bd; } }
 [data-theme="dark"] {
   --bg: #16181d; --panel: #1f2229; --panel-2: #272b33; --fg: #e8e6df; --muted: #9aa0ab; --line: #363b45;
   --accent: #e4834a; --accent-soft: #3a2a1f; --wave-1: #e8e6df; --wave-bus: #7fb0dd; --wave-x: #e0665a;
   --wave-x-soft: #3f2321; --wave-z: #7fb0dd;
   --wave-c3: #3d3818; --wave-c4: #42301c; --wave-c5: #1f3247; --wave-c6: #1b3a3c;
   --wave-c7: #20391f; --wave-c8: #33264a; --wave-c9: #452423; color-scheme: dark;
-  --wave-hl1: #4dabf7; --wave-hl2: #da77f2; --wave-hl3: #3bc9db; --wave-hl4: #f783ac; --wave-hl5: #a9e34b; --wave-hl6: #ff922b; }
+  --wave-hl1: #4dabf7; --wave-hl2: #da77f2; --wave-hl3: #3bc9db; --wave-hl4: #f783ac; --wave-hl5: #a9e34b; --wave-hl6: #ff922b;
+  --wave-hl8: #9775fa; --sva-pass: #51cf66; --sva-fail: #ff6b6b; --sva-disabled: #868e96; --sva-active: #4dabf7; --sva-capped: #adb5bd; }
 /* white: pure white paper, black traces and stock-WaveDrom bus colours (good for print and slides) */
 [data-theme="white"] {
   --bg: #ffffff; --panel: #ffffff; --panel-2: #f3f4f6; --fg: #000000; --muted: #4b5563; --line: #d1d5db;
   --accent: #0041c4; --accent-soft: #e0e8fa; --wave-1: #000000; --wave-bus: #000000; --wave-x: #333333;
   --wave-x-soft: #ffffff; --wave-z: #0041c4;
   --wave-c3: #ffffb4; --wave-c4: #ffe0b9; --wave-c5: #b9e0ff; --wave-c6: #ccfdfe;
-  --wave-c7: #cdfdc5; --wave-c8: #f0c1fb; --wave-c9: #f5c2c0; color-scheme: light; }
+  --wave-c7: #cdfdc5; --wave-c8: #f0c1fb; --wave-c9: #f5c2c0; color-scheme: light;
+  --sva-pass: #2b7a3b; --sva-fail: #e03131; --sva-active: #1971c2; }
 
 /* ---------------- interactive viewer (WaveView) ---------------- */
 .wv { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); overflow: clip;   /* clip, not hidden: hidden would stop the sticky canvas */ color: var(--fg); font-family: var(--font-body); }
@@ -138,6 +144,86 @@
 .wv .notes button:disabled { opacity: 0.45; cursor: default; }
 .wv .notes select { border-radius: 4px; }
 .wv .notes textarea.json { display: block; width: 100%; margin-top: 6px; font: 11.5px/1.4 var(--font-mono); background: var(--panel-2); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 6px; resize: vertical; }
+/* assertions panel (wavefw/sva.js): under the bar, the look of the bookmarks; module rows as drop targets while dragging */
+.wv { --sva-ok: #37b24d; --sva-no: var(--wave-x); }
+.wv .sva { border-bottom: 1px solid var(--line); padding: 5px 10px 7px; font-size: 12.5px; background: var(--panel); }
+.wv .sva .nh { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.wv .sva .nh .muted { color: var(--muted); font-size: 11.5px; margin-right: auto; }
+.wv .sva button { font: inherit; font-size: 12px; padding: 1px 8px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); border-radius: 4px; cursor: pointer; }
+.wv .sva button:hover { border-color: var(--accent); color: var(--accent); }
+.wv .sva button:disabled { opacity: 0.45; cursor: default; border-color: var(--line); color: var(--fg); }
+.wv .sva button.tw { border: 0; padding: 0 4px 0 0; background: none; }
+.wv .sva .ic { padding: 1px 6px; }
+.wv .sva ol.asv { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 1px; max-height: min(15.5em, 30vh); overflow-y: auto; resize: vertical; }
+.wv .sva ol.asv > li { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: center; padding: 1px 4px; border-radius: 4px; cursor: grab; }
+.wv .sva .b1, .wv .sva .bb, .wv .sva .ab { display: inline-flex; flex-wrap: wrap; gap: 2px 8px; align-items: center; }
+.wv .sva .bb, .wv .sva .ab { gap: 4px; }
+.wv .sva ol.asv > li > .ab { margin-left: auto; }
+.wv .sva ol.asv > li:hover { background: var(--panel-2); }
+.wv .sva ol.asv > li.here, .wv .sva ul.bnd > li.here { background: var(--panel-2); box-shadow: inset 3px 0 0 var(--accent); }
+.wv .sva ol.asv > li { cursor: pointer; } .wv .sva ol.asv > li .grip { cursor: grab; }
+.wv .sva .grip { color: var(--muted); letter-spacing: -2px; }
+.wv .sva .al { font-family: var(--font-mono); font-size: 12px; }
+.wv .sva .ak { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; }
+.wv .sva .ak.k-cover { color: var(--accent); }
+.wv .sva code.at { flex: 1 1 14ch; min-width: 0; font-family: var(--font-mono); font-size: 11.5px; max-width: 48ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); opacity: 0.85; }
+.wv .sva .sg { flex: 0 1 12ch; min-width: 0; font-family: var(--font-mono); font-size: 11px; color: var(--muted); max-width: 26ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wv .sva .st { font-size: 11.5px; color: var(--muted); }
+.wv .sva .st.ok { color: var(--sva-ok); }
+.wv .sva .st.no { color: var(--sva-no); }
+.wv .sva .st.run { color: var(--accent); }
+.wv .sva .st b { font-family: var(--font-mono); font-weight: 600; }
+.wv .sva button.how { cursor: help; border: 0; background: none; padding: 0 2px; color: inherit; font-size: 12px; }
+.wv .sva .st.dump { color: var(--muted); }
+.wv .sva .st.dump b { color: var(--fg); }
+.wv .sva .cn { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+.wv .sva .cn .c-fail { color: var(--sva-no); font-weight: 600; }
+.wv .sva .cn .c-fail.zero { color: var(--muted); font-weight: 400; }
+.wv .sva ul.bnd { flex-basis: 100%; list-style: none; margin: 0 0 2px 22px; padding: 0; display: grid; gap: 2px; cursor: default; }
+.wv .sva ul.bnd > li { display: flex; flex-wrap: wrap; gap: 3px 8px; align-items: center; }
+.wv .sva .pick { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin-left: 22px; padding: 4px 6px; border: 1px dashed var(--line); border-radius: 4px; cursor: default; }
+.wv .sva .pick .muted { color: var(--muted); font-size: 11.5px; }
+.wv .sva .pick .no { color: var(--sva-no); font-size: 11.5px; }
+.wv .sva .pick button[data-sv="to"] { font-family: var(--font-mono); font-size: 11.5px; }
+.wv .sva ul.svn { list-style: none; margin: 4px 0 0; padding: 0; font-family: var(--font-mono); font-size: 11.5px; }
+.wv .sva ul.svn li.err { color: var(--sva-no); }
+.wv .sva ul.svn li.warn { color: var(--muted); }
+.wv .sva textarea.json { display: block; width: 100%; margin-top: 6px; font: 11.5px/1.4 var(--font-mono); background: var(--panel-2); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 6px; resize: vertical; }
+.wv .bar input.svfile { display: none; }
+.wv.sva-drag .names .row.sva-ok { box-shadow: inset 3px 0 0 var(--sva-ok); background-color: color-mix(in srgb, var(--sva-ok) 14%, transparent); }
+.wv.sva-drag .names .row.sva-no { opacity: 0.4; }
+.wv.sva-drag .names .row.sva-over { outline: 2px solid var(--sva-ok); outline-offset: -2px; }
+.wv.sva-drag .names .row.sva-no.sva-over { outline-color: var(--sva-no); }
+/* assertion groups on the waves: the group in the accent colour, its step rows and copied signals quieter */
+.wv .names .row.sva-g .n { color: var(--accent); }
+.wv .names .row.sva-g.fails .n { color: var(--sva-fail); }
+.wv .names .row.sva-lane .n, .wv .names .row.sva-step .n { color: var(--muted); }
+.wv .names .row.sva-step .n b.sn { display: inline-block; min-width: 1.6em; color: var(--fg); font-weight: 600; }
+.wv .names .row.sva-copy .n::before { content: "= "; color: var(--muted); }
+.wv .names .row.sva-lane .v.fail, .wv .names .row.sva-lane .v { font-weight: 600; }
+.wv .bar .svj button.fail { color: var(--sva-fail); }
+/* numbers of the assertions (stage 8): totals, the table, the failure list; a count is a filter button */
+.wv .sva .svx { display: inline-flex; gap: 4px; margin-left: 6px; padding-left: 10px; border-left: 1px solid var(--line); }
+.wv .sva .svx button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.wv .sva .svr .tot { margin: 4px 0 2px; font-size: 12px; color: var(--muted); }
+.wv .sva .svr .tot b { color: var(--fg); font-weight: 600; }
+.wv .sva .c-fail { color: var(--sva-no); font-weight: 600; }
+.wv .sva .c-fail.zero { color: var(--muted); font-weight: 400; }
+.wv .sva .svr .twr { max-height: min(22em, 40vh); overflow: auto; margin: 4px 0; border: 1px solid var(--line); border-radius: 4px; }
+.wv .sva table.svt { border-collapse: collapse; width: 100%; font-size: 11.5px; }
+.wv .sva table.svt th { position: sticky; top: 0; background: var(--panel-2); text-align: left; font-weight: 600; padding: 3px 6px; white-space: nowrap; }
+.wv .sva table.svt td { padding: 2px 6px; border-top: 1px solid var(--line); white-space: nowrap; font-family: var(--font-mono); }
+.wv .sva table.svt tr.bad td:first-child code { color: var(--sva-no); font-weight: 600; }
+.wv .sva .svf { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+.wv .sva .svf .tw { flex-basis: 100%; }
+.wv .sva .svf .muted, .wv .sva .svt .muted, .wv .sva .atl .muted { color: var(--muted); }
+.wv .sva .svf select { font: inherit; font-size: 12px; background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; }
+.wv .sva button.cnum, .wv .sva button.lnk { border: 0; background: none; padding: 0 1px; font: inherit; color: inherit; text-decoration: underline dotted; text-underline-offset: 2px; cursor: pointer; }
+.wv .sva button.cnum.on { color: var(--accent); text-decoration: underline solid; font-weight: 600; }
+.wv .sva button.lnk { color: var(--accent); }
+.wv .sva ol.atl { flex-basis: 100%; margin: 2px 0 2px 22px; padding: 0; list-style: none; font-family: var(--font-mono); font-size: 11px; max-height: 12em; overflow-y: auto; }
+.wv .sva ol.atl button { padding: 0 5px; font-size: 11px; }
+.wv .sva .st .sel { margin-left: 6px; color: var(--wave-hl8); font-weight: 600; }
 .wv canvas { display: block; width: 100%; cursor: crosshair; touch-action: none; position: sticky; top: 0; }
 .wv canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .wv .hint { font-size: 11.5px; color: var(--muted); padding: 4px 10px; border-top: 1px solid var(--line); }

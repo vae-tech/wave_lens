@@ -1,0 +1,105 @@
+module ahb_assertions ports HCLK:1 HRESETn:1 HADDR:32 HTRANS:2 HWRITE:1 HSIZE:3 HBURST:3 HSEL:1 HWDATA:32 HRDATA:32 HREADY:1 HRESP:2
+assert AHB_R01_SEQ_AFTER_NONSEQ in ahb_assertions, line 27
+  clock     @(posedge HCLK) disable iff (!HRESETn)
+  expr      HTRANS == SEQ |-> $past(HTRANS) == NONSEQ || $past(HTRANS) == SEQ
+  s1        HTRANS == SEQ
+  s2        $past(HTRANS) == NONSEQ || $past(HTRANS) == SEQ
+  signals   HCLK:1 HRESETn:1 HTRANS:2
+  message   error "VIOLATION R01: SEQ without prior NONSEQ/SEQ"
+assert AHB_R02_HTRANS_STABLE_WAIT in ahb_assertions, line 34
+  clock     @(posedge HCLK) disable iff (!HRESETn)
+  expr      !HREADY |=> $stable(HTRANS)
+  s1        !HREADY
+  s2        $stable(HTRANS)
+  signals   HCLK:1 HRESETn:1 HREADY:1 HTRANS:2
+  message   error "VIOLATION R02: HTRANS changed during wait state"
+assert AHB_R03_HADDR_STABLE_WAIT in ahb_assertions, line 40
+  clock     @(posedge HCLK) disable iff (!HRESETn)
+  expr      !HREADY |=> $stable(HADDR)
+  s1        !HREADY
+  s2        $stable(HADDR)
+  signals   HCLK:1 HRESETn:1 HREADY:1 HADDR:32
+  message   error "VIOLATION R03: HADDR changed during wait state"
+assert AHB_R04_HWDATA_STABLE_WAIT in ahb_assertions, line 46
+  clock     @(posedge HCLK) disable iff (!HRESETn)
+  expr      HWRITE && !HREADY |=> $stable(HWDATA)
+  s1        HWRITE && !HREADY
+  s2        $stable(HWDATA)
+  signals   HCLK:1 HRESETn:1 HWRITE:1 HREADY:1 HWDATA:32
+  message   error "VIOLATION R04: HWDATA changed during wait state"
+assert AHB_R05_HWRITE_STABLE_BURST in ahb_assertions, line 52
+  clock     @(posedge HCLK) disable iff (!HRESETn)
+  expr      HTRANS == SEQ |-> $stable(HWRITE)
+  s1        HTRANS == SEQ
+  s2        $stable(HWRITE)
+  signals   HCLK:1 HRESETn:1 HTRANS:2 HWRITE:1
+  message   error "VIOLATION R05: HWRITE changed during burst"
+assert AHB_R06_HSIZE_STABLE_BURST in ahb_assertions, line 58
+  clock     @(posedge HCLK) disable iff (!HRESETn)
+  expr      HTRANS == SEQ |-> $stable(HSIZE)
+  s1        HTRANS == SEQ
+  s2        $stable(HSIZE)
+  signals   HCLK:1 HRESETn:1 HTRANS:2 HSIZE:3
+  message   error "VIOLATION R06: HSIZE changed during burst"
+assert AHB_R07_RESET_IDLE in ahb_assertions, line 64
+  clock     @(posedge HCLK)
+  expr      !HRESETn |-> HTRANS == IDLE
+  s1        !HRESETn
+  s2        HTRANS == IDLE
+  signals   HCLK:1 HRESETn:1 HTRANS:2
+  message   error "VIOLATION R07: HTRANS not IDLE during reset"
+assert AHB_R08_HSEL_ACTIVE in ahb_assertions, line 70
+  clock     @(posedge HCLK) disable iff (!HRESETn)
+  expr      HTRANS == NONSEQ || HTRANS == SEQ |-> HSEL
+  s1        HTRANS == NONSEQ || HTRANS == SEQ
+  s2        HSEL
+  signals   HCLK:1 HRESETn:1 HTRANS:2 HSEL:1
+  message   error "VIOLATION R08: HSEL=0 during active transfer"
+assert AHB_R09_ADDR_INCREMENT in ahb_assertions, line 76
+  clock     @(posedge HCLK) disable iff (!HRESETn)
+  expr      HTRANS == SEQ && HREADY && HBURST == 3'b011 |-> HADDR == $past(HADDR) + 32'd4
+  s1        HTRANS == SEQ && HREADY && HBURST == 3'b011
+  s2        HADDR == $past(HADDR) + 32'd4
+  signals   HCLK:1 HRESETn:1 HTRANS:2 HREADY:1 HBURST:3 HADDR:32
+  message   error "VIOLATION R09: HADDR not incrementing in INCR4 burst"
+assert AHB_R10_NO_SEQ_IN_IDLE in ahb_assertions, line 83
+  clock     @(posedge HCLK) disable iff (!HRESETn)
+  expr      HTRANS == IDLE |=> HTRANS != SEQ
+  s1        HTRANS == IDLE
+  s2        HTRANS != SEQ
+  signals   HCLK:1 HRESETn:1 HTRANS:2
+  message   error "VIOLATION R10: SEQ follows IDLE"
+assert AHB_R11_HRESP_ERROR_2CYC in ahb_assertions, line 89
+  clock     @(posedge HCLK) disable iff (!HRESETn)
+  expr      HRESP == 2'b01 && !HREADY |=> HRESP == 2'b01
+  s1        HRESP == 2'b01 && !HREADY
+  s2        HRESP == 2'b01
+  signals   HCLK:1 HRESETn:1 HRESP:2 HREADY:1
+  message   error "VIOLATION R11: HRESP ERROR not held 2 cycles"
+assert AHB_R12_HBURST_STABLE in ahb_assertions, line 95
+  clock     @(posedge HCLK) disable iff (!HRESETn)
+  expr      HTRANS == SEQ |-> $stable(HBURST)
+  s1        HTRANS == SEQ
+  s2        $stable(HBURST)
+  signals   HCLK:1 HRESETn:1 HTRANS:2 HBURST:3
+  message   error "VIOLATION R12: HBURST changed during burst"
+cover AHB_COV_NONSEQ in ahb_assertions, line 101
+  clock     @(posedge HCLK)
+  expr      HTRANS == NONSEQ
+  s1        HTRANS == NONSEQ
+  signals   HCLK:1 HTRANS:2
+cover AHB_COV_SEQ in ahb_assertions, line 106
+  clock     @(posedge HCLK)
+  expr      HTRANS == SEQ
+  s1        HTRANS == SEQ
+  signals   HCLK:1 HTRANS:2
+cover AHB_COV_WAIT in ahb_assertions, line 111
+  clock     @(posedge HCLK)
+  expr      !HREADY
+  s1        !HREADY
+  signals   HCLK:1 HREADY:1
+cover AHB_COV_ERROR in ahb_assertions, line 116
+  clock     @(posedge HCLK)
+  expr      HRESP == 2'b01
+  s1        HRESP == 2'b01
+  signals   HCLK:1 HRESP:2

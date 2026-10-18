@@ -1,0 +1,112 @@
+module apb_assertions ports PCLK:1 PRESETn:1 PADDR:32 PSEL:1 PENABLE:1 PWRITE:1 PWDATA:32 PRDATA:32 PREADY:1 PSLVERR:1
+assert APB_R01_PENABLE_NEEDS_PSEL in apb_assertions, line 20
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      PENABLE |-> PSEL
+  s1        PENABLE
+  s2        PSEL
+  signals   PCLK:1 PRESETn:1 PENABLE:1 PSEL:1
+  message   error "VIOLATION R01: PENABLE=1 but PSEL=0"
+assert APB_R02_SETUP_TO_ENABLE in apb_assertions, line 26
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      PSEL && !PENABLE |=> PENABLE
+  s1        PSEL && !PENABLE
+  s2        PENABLE
+  signals   PCLK:1 PRESETn:1 PSEL:1 PENABLE:1
+  message   error "VIOLATION R02: SETUP phase not followed by ENABLE"
+assert APB_R03_PADDR_STABLE in apb_assertions, line 32
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      PENABLE |-> $stable(PADDR)
+  s1        PENABLE
+  s2        $stable(PADDR)
+  signals   PCLK:1 PRESETn:1 PENABLE:1 PADDR:32
+  message   error "VIOLATION R03: PADDR changed during ENABLE phase"
+assert APB_R04_PWRITE_STABLE in apb_assertions, line 38
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      PENABLE |-> $stable(PWRITE)
+  s1        PENABLE
+  s2        $stable(PWRITE)
+  signals   PCLK:1 PRESETn:1 PENABLE:1 PWRITE:1
+  message   error "VIOLATION R04: PWRITE changed during ENABLE phase"
+assert APB_R05_PWDATA_STABLE in apb_assertions, line 44
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      PENABLE && PWRITE |-> $stable(PWDATA)
+  s1        PENABLE && PWRITE
+  s2        $stable(PWDATA)
+  signals   PCLK:1 PRESETn:1 PENABLE:1 PWRITE:1 PWDATA:32
+  message   error "VIOLATION R05: PWDATA changed during ENABLE phase"
+assert APB_R06_PSEL_STABLE in apb_assertions, line 50
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      PENABLE |-> PSEL
+  s1        PENABLE
+  s2        PSEL
+  signals   PCLK:1 PRESETn:1 PENABLE:1 PSEL:1
+  message   error "VIOLATION R06: PSEL deasserted during ENABLE phase"
+assert APB_R07_PENABLE_CLEARS in apb_assertions, line 56
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      PENABLE && PREADY |=> !PENABLE
+  s1        PENABLE && PREADY
+  s2        !PENABLE
+  signals   PCLK:1 PRESETn:1 PENABLE:1 PREADY:1
+  message   error "VIOLATION R07: PENABLE did not clear after transfer"
+assert APB_R08_PSLVERR_WITH_PREADY in apb_assertions, line 62
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      PSLVERR |-> PREADY
+  s1        PSLVERR
+  s2        PREADY
+  signals   PCLK:1 PRESETn:1 PSLVERR:1 PREADY:1
+  message   error "VIOLATION R08: PSLVERR=1 without PREADY=1"
+assert APB_R09_RESET_CLEAR in apb_assertions, line 68
+  clock     @(posedge PCLK)
+  expr      !PRESETn |-> !PSEL && !PENABLE
+  s1        !PRESETn
+  s2        !PSEL && !PENABLE
+  signals   PCLK:1 PRESETn:1 PSEL:1 PENABLE:1
+  message   error "VIOLATION R09: Transfer active during reset"
+assert APB_R10_ADDR_ALIGNED in apb_assertions, line 74
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      PSEL |-> PADDR[1:0] == 2'b00
+  s1        PSEL
+  s2        PADDR[1:0] == 2'b00
+  signals   PCLK:1 PRESETn:1 PSEL:1 PADDR[>=2]:32
+  message   error "VIOLATION R10: PADDR not word-aligned"
+assert APB_R11_PSEL_BEFORE_PENABLE in apb_assertions, line 80
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      $rose(PENABLE) |-> $past(PSEL)
+  s1        $rose(PENABLE)
+  s2        $past(PSEL)
+  signals   PCLK:1 PRESETn:1 PENABLE:1 PSEL:1
+  message   error "VIOLATION R11: PENABLE rose without prior PSEL"
+assert APB_R12_PRDATA_VALID in apb_assertions, line 86
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      PENABLE && PREADY && !PWRITE |-> PRDATA !== 32'hX
+  s1        PENABLE && PREADY && !PWRITE
+  s2        PRDATA !== 32'hX
+  signals   PCLK:1 PRESETn:1 PENABLE:1 PREADY:1 PWRITE:1 PRDATA:32
+  message   error "VIOLATION R12: PRDATA unknown on read completion"
+assert APB_R13_PENABLE_FOLLOWS_PSEL in apb_assertions, line 93
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      $rose(PSEL) |=> PENABLE
+  s1        $rose(PSEL)
+  s2        PENABLE
+  signals   PCLK:1 PRESETn:1 PSEL:1 PENABLE:1
+  message   error "VIOLATION R13: PENABLE not asserted cycle after PSEL"
+cover APB_COV_WRITE in apb_assertions, line 99
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      PENABLE && PREADY && PWRITE
+  s1        PENABLE && PREADY && PWRITE
+  signals   PCLK:1 PRESETn:1 PENABLE:1 PREADY:1 PWRITE:1
+cover APB_COV_READ in apb_assertions, line 105
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      PENABLE && PREADY && !PWRITE
+  s1        PENABLE && PREADY && !PWRITE
+  signals   PCLK:1 PRESETn:1 PENABLE:1 PREADY:1 PWRITE:1
+cover APB_COV_SLVERR in apb_assertions, line 111
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      PSLVERR
+  s1        PSLVERR
+  signals   PCLK:1 PRESETn:1 PSLVERR:1
+cover APB_COV_WAIT in apb_assertions, line 117
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      PENABLE && !PREADY
+  s1        PENABLE && !PREADY
+  signals   PCLK:1 PRESETn:1 PENABLE:1 PREADY:1

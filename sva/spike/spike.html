@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>sva spike</title>
+<style>body { font: 14px/1.5 monospace; margin: 24px; } td, th { padding: 2px 10px; text-align: left; } .fail { color: #c92a2a; } .pass { color: #2b8a3e; }</style>
+</head>
+<body>
+<h1>sva spike: sva-core as WebAssembly, JSON in / out</h1>
+<pre id="src"></pre>
+<table id="out"><tr><th>attempt</th><th>result</th><th>trace</th><th>note</th></tr></table>
+<p id="stats"></p>
+<h2>evaluate(parsed, sampler) over WaveJSON "tv" transitions: a synthetic model, 32768 clock edges</h2>
+<p id="tv"></p>
+<script>/*SVA_JS*/</script>
+<script>
+const WASM = '/*WASM_BASE64*/';   // filled by mkspike.py: sva_wasm.wasm, base64
+const SOURCE = `property p_req_ack; @(posedge clk) disable iff (!rst_n) req |-> ##[1:3] ack; endproperty
+a_req_ack: assert property (p_req_ack);`;
+const TRACE = { signals: {   // the same toy trace as the unit test spike_trace in sva/core/src/engine_tests.rs
+  rst_n: [0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1], req: [0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1], ack: [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0] } };
+// clk period 10, values change at the falling edge; rst_n low for 4 cycles; req every 16 cycles, ack 2 later, except
+// every 1024 cycles (no ack: a fail)
+function model(n) {
+  const clk = [], req = [[0, '0']], ack = [[0, '0']], rst_n = [[0, '0'], [40, '1']];
+  for (let k = 0; k < n; k++) { clk.push([10 * k, '0'], [10 * k + 5, '1']); }
+  for (let k = 8; k < n; k += 16) {
+    req.push([10 * k, '1'], [10 * k + 10, '0']);
+    if (k % 1024 !== 8) ack.push([10 * k + 20, '1'], [10 * k + 30, '0']);
+  }
+  return { clk: { tv: clk }, rst_n: { tv: rst_n }, req: { tv: req }, ack: { tv: ack } };
+}
+(async () => {
+  const t0 = performance.now();
+  const bytes = Uint8Array.from(atob(WASM), c => c.charCodeAt(0));
+  const sva = await SVA.load(bytes);
+  const t1 = performance.now();
+  const res = sva.call({ source: SOURCE, trace: TRACE });
+  const n = 1000, t2 = performance.now();
+  for (let i = 0; i < n; i++) sva.call({ source: SOURCE, trace: TRACE });
+  const per = (performance.now() - t2) / n;
+  document.getElementById('src').textContent = SOURCE;
+  const rep = res.assertions[0];
+  for (const a of rep.attempts) {
+    const tr = document.getElementById('out').insertRow();
+    tr.innerHTML = `<td>@${a.start}..${a.end}</td><td class="${a.result}">${a.result}</td><td>${a.trace.map(s => s[0] + '@' + s[1]).join(' ')}</td><td>${a.note || ''}</td>`;
+  }
+  document.getElementById('stats').textContent = JSON.stringify(rep.stats) + ' lane ' + rep.lane +
+    ` · wasm ${bytes.length} B, base64 ${WASM.length} B · instantiate ${(t1 - t0).toFixed(1)} ms · one call ${(per * 1000).toFixed(0)} µs`;
+  const m = model(32768), t3 = performance.now();
+  const big = sva.evaluate(sva.parse(SOURCE), SVA.tvSampler(m));
+  const ms = performance.now() - t3, b = big.assertions[0];
+  document.getElementById('tv').textContent = `${big.cycles.length} cycles · ${JSON.stringify(b.stats)} · first fail @${b.attempts.find(a => a.result === 'fail').start} · ${ms.toFixed(0)} ms`;
+  window.SPIKE = { report: rep, wasm: bytes.length, base64: WASM.length, instantiateMs: t1 - t0, callUs: per * 1000,
+    tv: { cycles: big.cycles.length, clock: big.clock, stats: b.stats, ms } };
+})();
+</script>
+</body>
+</html>

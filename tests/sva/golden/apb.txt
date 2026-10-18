@@ -1,0 +1,75 @@
+module apb_checker ports PCLK:1 PRESETn:1 PSEL:1 PENABLE:1 PWRITE:1 PREADY:1 PSLVERR:1 PADDR:8 PWDATA:32 PRDATA:32 params MAX_WAIT=8
+assert apb_setup_access in apb_checker, line 17
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      PSEL && !PENABLE |=> PSEL && PENABLE
+  s1        PSEL && !PENABLE
+  s2        PSEL && PENABLE
+  signals   PCLK:1 PRESETn:1 PSEL:1 PENABLE:1
+  message   error "APB: SETUP not followed by ACCESS"
+assert apb_enable_sel in apb_checker, line 19
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      PENABLE |-> PSEL
+  s1        PENABLE
+  s2        PSEL
+  signals   PCLK:1 PRESETn:1 PENABLE:1 PSEL:1
+  message   error "APB: PENABLE without PSEL"
+assert apb_wait in apb_checker, line 21
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      PSEL && PENABLE && !PREADY |=> PSEL && PENABLE
+  s1        PSEL && PENABLE && !PREADY
+  s2        PSEL && PENABLE
+  signals   PCLK:1 PRESETn:1 PSEL:1 PENABLE:1 PREADY:1
+assert apb_stable_addr in apb_checker, line 23
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      PSEL && !(PENABLE && PREADY) |=> $stable(PADDR) && $stable(PWRITE)
+  s1        PSEL && !(PENABLE && PREADY)
+  s2        $stable(PADDR) && $stable(PWRITE)
+  signals   PCLK:1 PRESETn:1 PSEL:1 PENABLE:1 PREADY:1 PADDR:8 PWRITE:1
+assert apb_stable_wdata in apb_checker, line 24
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      PSEL && PWRITE && !(PENABLE && PREADY) |=> $stable(PWDATA)
+  s1        PSEL && PWRITE && !(PENABLE && PREADY)
+  s2        $stable(PWDATA)
+  signals   PCLK:1 PRESETn:1 PSEL:1 PWRITE:1 PENABLE:1 PREADY:1 PWDATA:32
+assert apb_enable_drop in apb_checker, line 26
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      PSEL && PENABLE && PREADY |=> !PENABLE
+  s1        PSEL && PENABLE && PREADY
+  s2        !PENABLE
+  signals   PCLK:1 PRESETn:1 PSEL:1 PENABLE:1 PREADY:1
+assert apb_timeout in apb_checker, line 28
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      $rose(PENABLE) |-> ##[0:8] PREADY
+  s1        $rose(PENABLE)
+  s2        ##[0:8] PREADY
+  signals   PCLK:1 PRESETn:1 PENABLE:1 PREADY:1
+  message   error "APB: no PREADY after %0d cycles"
+assert apb_slverr in apb_checker, line 30
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      PSLVERR |-> PSEL && PENABLE && PREADY
+  s1        PSLVERR
+  s2        PSEL && PENABLE && PREADY
+  signals   PCLK:1 PRESETn:1 PSLVERR:1 PSEL:1 PENABLE:1 PREADY:1
+assert apb_known in apb_checker, line 32
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      !$isunknown({PSEL, PENABLE, PWRITE})
+  s1        !$isunknown({PSEL, PENABLE, PWRITE})
+  signals   PCLK:1 PRESETn:1 PSEL:1 PENABLE:1 PWRITE:1
+cover apb_cov_write in apb_checker, line 34
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      PSEL && !PENABLE && PWRITE ##1 PSEL && PENABLE && PREADY
+  s1        PSEL && !PENABLE && PWRITE
+  s2        ##1 PSEL && PENABLE && PREADY
+  signals   PCLK:1 PRESETn:1 PSEL:1 PENABLE:1 PWRITE:1 PREADY:1
+cover apb_cov_wait_read in apb_checker, line 35
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      PSEL && !PENABLE && !PWRITE ##1 (PSEL && PENABLE && !PREADY)[*2] ##1 PREADY
+  s1        PSEL && !PENABLE && !PWRITE
+  s2        ##1 (PSEL && PENABLE && !PREADY)[*2]
+  s3        ##1 PREADY
+  signals   PCLK:1 PRESETn:1 PSEL:1 PENABLE:1 PWRITE:1 PREADY:1
+cover apb_cov_error in apb_checker, line 36
+  clock     @(posedge PCLK) disable iff (!PRESETn)
+  expr      PSEL && PENABLE && PREADY && PSLVERR
+  s1        PSEL && PENABLE && PREADY && PSLVERR
+  signals   PCLK:1 PRESETn:1 PSEL:1 PENABLE:1 PREADY:1 PSLVERR:1

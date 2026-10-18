@@ -1,6 +1,8 @@
 {
   "description": "make example EX=fsm: UART receiver whose state is a typedef enum (uart_pkg.sv). No enum here: the FST dump brings the state names. Hand-written views, bookmarks and arrows; the Makefile passes the dump with --waves.",
   "scope": "fsm_tb",
+  "sva": ["uart_pkg.sv", "fsm.sva"],
+  "bind": [{ "assert": "*", "scope": "fsm_tb" }],
   "config": { "style": "questa", "nameWidth": 120, "rowHeight": 26 },
   "page": { "title": "UART receiver FSM · state names from the dump",
             "intro": "An 8N1 receiver (4 clocks per bit) takes 0xA5, then a frame with a low stop bit that ends in ERROR. The state names come from the FST's enum table; edges are drawn in the questa style." },

@@ -1,6 +1,8 @@
 {
   "description": "make example EX=apb: APB3 master + register file (apb_tb.sv). Hand-written: views, signal lists, bookmarks and arrows; the Makefile passes the dump with --waves.",
   "scope": "apb_tb",
+  "sva": ["apb_tb.sv", "apb.sva"],
+  "bind": [{ "assert": "*", "scope": "apb_tb" }],
   "enum": { "phase": { "0": "IDLE", "1": "SETUP", "2": "ACCESS" } },
   "config": { "radix": "hex", "nameWidth": 170, "rowHeight": 26 },
   "page": { "title": "APB3 · write, read with wait states, slave error",
@@ -29,7 +31,8 @@
       "clock": "PCLK", "from": "30ns", "to": "80ns",
       "signals": ["PCLK", "PSEL", "PENABLE", "PWRITE", "PADDR", "PWDATA", "PREADY"],
       "title": "APB3 write · static SVG", "render": "svg",
-      "note": "the same data as a static figure, with the bookmark texts as a legend",
+      "note": "the same data as a static figure, with the bookmark texts as a legend; two of the bound assertions drawn under it (svaShow)",
+      "config": { "svaShow": ["apb_setup_then_access", "apb_end_of_transfer"] },
       "bookmarks": [
         { "n": 1, "t": "50ns", "signal": "PSEL", "text": "SETUP: address, direction and data valid" },
         { "n": 2, "t": "60ns", "signal": "PENABLE", "text": "ACCESS: PREADY completes the write" }

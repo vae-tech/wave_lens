@@ -1,0 +1,53 @@
+err_syntax.sv:5:53: error: expected an expression, found ')'
+    5 |   e_rhs:      assert property (@(posedge clk) a |-> );
+      |                                                     ^
+err_syntax.sv:7:58: error: the range ends before it starts (3:1)
+    7 |   e_range:    assert property (@(posedge clk) a |-> ##[3:1] b);
+      |                                                          ^
+err_syntax.sv:9:56: error: expected ')', found ';'
+    9 |   e_paren:    assert property (@(posedge clk) (a |-> b);
+      |                                                        ^
+err_syntax.sv:11:56: error: expected ']', found 'b'
+   11 |   e_bracket:  assert property (@(posedge clk) a ##[1:2 b);
+      |                                                        ^
+err_syntax.sv:13:52: error: a repetition of a repetition needs parentheses: (a[*2])[*3]
+   13 |   e_rep_rep:  assert property (@(posedge clk) a[*2][*3] |-> b);
+      |                                                    ^^
+err_syntax.sv:15:49: error: unexpected character '§'
+   15 |   e_char:     assert property (@(posedge clk) a § b);
+      |                                                 ^
+err_syntax.sv:17:57: error: the left side of |=> must be a sequence, found a property
+   17 |   e_ante:     assert property (@(posedge clk) (a |-> b) |=> c);
+      |                                                         ^^^
+err_syntax.sv:19:47: error: the left side of throughout must be a boolean expression
+   19 |   e_through:  assert property (@(posedge clk) a ##1 b throughout c);
+      |                                               ^^^^^^^^^^^^^^^^^^
+err_syntax.sv:22:3: error: expected ';' or an action block, found 'ok_kept'
+   22 |   ok_kept:    assert property (@(posedge clk) b |-> c);
+      |   ^^^^^^^
+err_syntax.sv:29:1: error: expected 'endproperty', found 'sequence'
+   29 | sequence s_next; a ##1 b; endsequence
+      | ^^^^^^^^
+err_syntax.sv:33:1: error: expected a declaration or an assertion, found 'garbage'
+   33 | garbage
+      | ^^^^^^^
+module err_syntax ports clk:1 a:1 b:1 c:1
+sequence s_next: a ##1 b
+assert ok_first in err_syntax, line 4
+  clock     @(posedge clk)
+  expr      a |-> b
+  s1        a
+  s2        b
+  signals   clk:1 a:1 b:1
+assert ok_kept in err_syntax, line 22
+  clock     @(posedge clk)
+  expr      b |-> c
+  s1        b
+  s2        c
+  signals   clk:1 b:1 c:1
+assert ok_last in err_syntax, line 24
+  clock     @(posedge clk)
+  expr      c |-> a
+  s1        c
+  s2        a
+  signals   clk:1 c:1 a:1

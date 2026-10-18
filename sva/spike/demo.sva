@@ -1,0 +1,6 @@
+// The same shape on the demo (examples/demo/demo_tb.sv): busy follows start within 1..3 clocks; done is a pulse.
+property p_start_busy; @(posedge clk) disable iff (!rst_n) start |-> ##[1:3] busy; endproperty
+a_start_busy: assert property (p_start_busy);
+
+property p_start_done; @(posedge clk) disable iff (!rst_n) start |-> ##[1:3] done; endproperty
+a_start_done: assert property (p_start_done);   // fails: done comes ~100 clocks later

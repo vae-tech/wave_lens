@@ -1,0 +1,103 @@
+module axi_lite_checker ports ACLK:1 ARESETn:1 AWVALID:1 AWREADY:1 WVALID:1 WREADY:1 BVALID:1 BREADY:1 ARVALID:1 ARREADY:1 RVALID:1 RREADY:1 AWADDR:8 ARADDR:8 WDATA:32 RDATA:32 WSTRB:4 BRESP:2 RRESP:2
+property p_hold(valid, ready) @(posedge ACLK) disable iff (!ARESETn): valid && !ready |=> valid
+property p_stable(valid, ready, payload) @(posedge ACLK) disable iff (!ARESETn): valid && !ready |=> $stable(payload)
+assert axi_aw_hold in axi_lite_checker, line 22
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  p_hold
+  expr      p_hold(AWVALID, AWREADY)
+  s1        AWVALID && !AWREADY
+  s2        AWVALID
+  signals   ACLK:1 ARESETn:1 AWVALID:1 AWREADY:1
+assert axi_w_hold in axi_lite_checker, line 23
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  p_hold
+  expr      p_hold(WVALID, WREADY)
+  s1        WVALID && !WREADY
+  s2        WVALID
+  signals   ACLK:1 ARESETn:1 WVALID:1 WREADY:1
+assert axi_b_hold in axi_lite_checker, line 24
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  p_hold
+  expr      p_hold(BVALID, BREADY)
+  s1        BVALID && !BREADY
+  s2        BVALID
+  signals   ACLK:1 ARESETn:1 BVALID:1 BREADY:1
+assert axi_ar_hold in axi_lite_checker, line 25
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  p_hold
+  expr      p_hold(ARVALID, ARREADY)
+  s1        ARVALID && !ARREADY
+  s2        ARVALID
+  signals   ACLK:1 ARESETn:1 ARVALID:1 ARREADY:1
+assert axi_r_hold in axi_lite_checker, line 26
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  p_hold
+  expr      p_hold(RVALID, RREADY)
+  s1        RVALID && !RREADY
+  s2        RVALID
+  signals   ACLK:1 ARESETn:1 RVALID:1 RREADY:1
+assert axi_aw_stable in axi_lite_checker, line 27
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  p_stable
+  expr      p_stable(AWVALID, AWREADY, AWADDR)
+  s1        AWVALID && !AWREADY
+  s2        $stable(AWADDR)
+  signals   ACLK:1 ARESETn:1 AWVALID:1 AWREADY:1 AWADDR:8
+assert axi_w_stable in axi_lite_checker, line 28
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  p_stable
+  expr      p_stable(WVALID, WREADY, {WDATA, WSTRB})
+  s1        WVALID && !WREADY
+  s2        $stable({WDATA, WSTRB})
+  signals   ACLK:1 ARESETn:1 WVALID:1 WREADY:1 WDATA:32 WSTRB:4
+assert axi_ar_stable in axi_lite_checker, line 29
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  property  p_stable
+  expr      p_stable(ARVALID, ARREADY, ARADDR)
+  s1        ARVALID && !ARREADY
+  s2        $stable(ARADDR)
+  signals   ACLK:1 ARESETn:1 ARVALID:1 ARREADY:1 ARADDR:8
+assert axi_b_after_w in axi_lite_checker, line 32
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  expr      (AWVALID && AWREADY)[->1] and (WVALID && WREADY)[->1] |-> ##[1:16] BVALID
+  s1        (AWVALID && AWREADY)[->1]
+  s2        (WVALID && WREADY)[->1]
+  s3        ##[1:16] BVALID
+  signals   ACLK:1 ARESETn:1 AWVALID:1 AWREADY:1 WVALID:1 WREADY:1 BVALID:1
+assert axi_r_latency in axi_lite_checker, line 35
+  clock     @(posedge ACLK) disable iff (!ARESETn)
+  expr      ARVALID && ARREADY |=> ##[0:16] RVALID
+  s1        ARVALID && ARREADY
+  s2        ##[0:16] RVALID
+  signals   ACLK:1 ARESETn:1 ARVALID:1 ARREADY:1 RVALID:1
+assert axi_bresp in axi_lite_checker, line 37
+  clock     @(posedge ACLK)
+  expr      BVALID |-> BRESP inside {OKAY, SLVERR}
+  s1        BVALID
+  s2        BRESP inside {OKAY, SLVERR}
+  signals   ACLK:1 BVALID:1 BRESP:2
+assert axi_rresp in axi_lite_checker, line 38
+  clock     @(posedge ACLK)
+  expr      RVALID |-> RRESP inside {OKAY, SLVERR}
+  s1        RVALID
+  s2        RRESP inside {OKAY, SLVERR}
+  signals   ACLK:1 RVALID:1 RRESP:2
+assert axi_reset in axi_lite_checker, line 40
+  clock     @(posedge ACLK)
+  expr      !ARESETn |-> !AWVALID && !WVALID && !ARVALID
+  s1        !ARESETn
+  s2        !AWVALID && !WVALID && !ARVALID
+  signals   ACLK:1 ARESETn:1 AWVALID:1 WVALID:1 ARVALID:1
+assert axi_wstrb in axi_lite_checker, line 42
+  clock     @(posedge ACLK)
+  expr      WVALID |-> WSTRB != 4'b0000
+  s1        WVALID
+  s2        WSTRB != 4'b0000
+  signals   ACLK:1 WVALID:1 WSTRB:4
+cover axi_cov_wait in axi_lite_checker, line 43
+  clock     @(posedge ACLK)
+  expr      ARVALID && !ARREADY ##1 ARVALID && ARREADY ##[1:4] RVALID && RREADY
+  s1        ARVALID && !ARREADY
+  s2        ##1 ARVALID && ARREADY
+  s3        ##[1:4] RVALID && RREADY
+  signals   ACLK:1 ARVALID:1 ARREADY:1 RVALID:1 RREADY:1

@@ -61,10 +61,24 @@ def _enum_table(tok):
     return handle, table
 
 
+def _commands(lines):
+    """The header one command per item (`$scope module tb $end`), however the lines break it: several on one line
+    (`$upscope $end $upscope $end`), one over several lines. Stops after $enddefinitions."""
+    buf = []
+    for line in lines:
+        for t in line.split():
+            buf.append(t)
+            if t == b'$end':
+                yield b' '.join(buf)
+                if buf[0] == b'$enddefinitions':
+                    return
+                buf = []
+
+
 def _header(lines, d):
     """Declarations up to $enddefinitions -> d.vars / d.alias / d.unit_ps."""
     scope, n, tables, pending, blasted, ts = [], 0, {}, None, {}, None
-    for line in lines:
+    for line in _commands(lines):
         tok = line.split()
         if not tok:
             continue

@@ -1,0 +1,88 @@
+opentitan/prim_assert.sv:110:2: warning: `include is not followed: give the included file to sva parse as well
+  110 |  `include "prim_assert_standard_macros.svh"
+      |  ^^^^^^^^
+opentitan/prim_assert.sv:187:1: warning: `include is not followed: give the included file to sva parse as well
+  187 | `include "prim_assert_sec_cm.svh"
+      | ^^^^^^^^
+opentitan/prim_assert.sv:188:1: warning: `include is not followed: give the included file to sva parse as well
+  188 | `include "prim_flop_macros.sv"
+      | ^^^^^^^^
+module apb_prim_assert ports PCLK:1 PRESETn:1 PSEL:1 PENABLE:1 PWRITE:1 PREADY:1 PSLVERR:1 PADDR:8 PWDATA:32 PRDATA:32
+assert SetupThenAccess_A in apb_prim_assert, line 12
+  clock     @(posedge PCLK) disable iff (!PRESETn !== '0)
+  expr      PSEL && !PENABLE |=> PSEL && PENABLE
+  s1        PSEL && !PENABLE
+  s2        PSEL && PENABLE
+  signals   PCLK:1 PRESETn:1 PSEL:1 PENABLE:1
+  message   error "%0t: (%0s:%0d) [%m] [ASSERT FAILED] %0s"
+assert EnableNeedsSel_A in apb_prim_assert, line 13
+  clock     @(posedge PCLK) disable iff (!PRESETn !== '0)
+  expr      PENABLE |-> PSEL
+  s1        PENABLE
+  s2        PSEL
+  signals   PCLK:1 PRESETn:1 PENABLE:1 PSEL:1
+  message   error "%0t: (%0s:%0d) [%m] [ASSERT FAILED] %0s"
+assert ErrWithoutReady_A in apb_prim_assert, line 14
+  clock     @(posedge PCLK) disable iff (!PRESETn !== '0)
+  expr      not PSLVERR && !PREADY
+  s1        PSLVERR && !PREADY
+  signals   PCLK:1 PRESETn:1 PSLVERR:1 PREADY:1
+  message   error "%0t: (%0s:%0d) [%m] [ASSERT FAILED] %0s"
+assert AddrStable_A in apb_prim_assert, line 15
+  clock     @(posedge PCLK) disable iff (!PRESETn !== '0)
+  expr      PSEL && !(PENABLE && PREADY) |=> $stable(PADDR) && $stable(PWRITE)
+  s1        PSEL && !(PENABLE && PREADY)
+  s2        $stable(PADDR) && $stable(PWRITE)
+  signals   PCLK:1 PRESETn:1 PSEL:1 PENABLE:1 PREADY:1 PADDR:8 PWRITE:1
+  message   error "%0t: (%0s:%0d) [%m] [ASSERT FAILED] %0s"
+assert PaddrKnown_AKnownEnable in apb_prim_assert, line 16
+  clock     @(posedge PCLK) disable iff (!PRESETn !== '0)
+  expr      !$isunknown(PSEL)
+  s1        !$isunknown(PSEL)
+  signals   PCLK:1 PRESETn:1 PSEL:1
+  message   error "%0t: (%0s:%0d) [%m] [ASSERT FAILED] %0s"
+assert PaddrKnown_A in apb_prim_assert, line 16
+  clock     @(posedge PCLK) disable iff (!PRESETn !== '0)
+  expr      PSEL |-> !$isunknown(PADDR)
+  s1        PSEL
+  s2        !$isunknown(PADDR)
+  signals   PCLK:1 PRESETn:1 PSEL:1 PADDR:8
+  message   error "%0t: (%0s:%0d) [%m] [ASSERT FAILED] %0s"
+assert PrdataKnown_AKnownEnable in apb_prim_assert, line 17
+  clock     @(posedge PCLK) disable iff (!PRESETn !== '0)
+  expr      !$isunknown(PENABLE && PREADY && !PWRITE)
+  s1        !$isunknown(PENABLE && PREADY && !PWRITE)
+  signals   PCLK:1 PRESETn:1 PENABLE:1 PREADY:1 PWRITE:1
+  message   error "%0t: (%0s:%0d) [%m] [ASSERT FAILED] %0s"
+assert PrdataKnown_A in apb_prim_assert, line 17
+  clock     @(posedge PCLK) disable iff (!PRESETn !== '0)
+  expr      PENABLE && PREADY && !PWRITE |-> !$isunknown(PRDATA)
+  s1        PENABLE && PREADY && !PWRITE
+  s2        !$isunknown(PRDATA)
+  signals   PCLK:1 PRESETn:1 PENABLE:1 PREADY:1 PWRITE:1 PRDATA:32
+  message   error "%0t: (%0s:%0d) [%m] [ASSERT FAILED] %0s"
+assert EnablePulse_A in apb_prim_assert, line 18
+  clock     @(posedge PCLK) disable iff (!PRESETn !== '0)
+  expr      $rose(PENABLE && PREADY) |=> !(PENABLE && PREADY)
+  s1        $rose(PENABLE && PREADY)
+  s2        !(PENABLE && PREADY)
+  signals   PCLK:1 PRESETn:1 PENABLE:1 PREADY:1
+  message   error "%0t: (%0s:%0d) [%m] [ASSERT FAILED] %0s"
+assume NoReadOfUnmapped_M in apb_prim_assert, line 19
+  clock     @(posedge PCLK) disable iff (!PRESETn !== '0)
+  expr      PSEL && !PWRITE |-> PADDR[7:4] == 0
+  s1        PSEL && !PWRITE
+  s2        PADDR[7:4] == 0
+  signals   PCLK:1 PRESETn:1 PSEL:1 PWRITE:1 PADDR[>=8]:8
+  message   error "%0t: (%0s:%0d) [%m] [ASSERT FAILED] %0s"
+  note      assume: checked like an assertion
+cover WaitState_C in apb_prim_assert, line 20
+  clock     @(posedge PCLK) disable iff (!PRESETn !== '0)
+  expr      PSEL && PENABLE && !PREADY
+  s1        PSEL && PENABLE && !PREADY
+  signals   PCLK:1 PRESETn:1 PSEL:1 PENABLE:1 PREADY:1
+cover SlvErr_C in apb_prim_assert, line 21
+  clock     @(posedge PCLK) disable iff (!PRESETn !== '0)
+  expr      PENABLE && PREADY && PSLVERR
+  s1        PENABLE && PREADY && PSLVERR
+  signals   PCLK:1 PRESETn:1 PENABLE:1 PREADY:1 PSLVERR:1

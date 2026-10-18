@@ -1,0 +1,56 @@
+// AXI4-Lite monitor for examples/axi_lite over the property library of YosysHQ's SVA-AXI4-FVIP
+// (amba_axi4_single_interface_requirements.sv, ISC: see LICENSE). The FVIP's channel files pick their checks with
+// generate blocks over a configuration struct, which the subset leaves out, so this file (part of wavefw, not of the
+// FVIP) instantiates the same library properties at module level, with the FVIP's labels, for an interface seen as a
+// monitor: every requirement on both sides is an assertion. Section numbers: AMBA AXI and ACE Protocol Specification.
+module yosyshq_axi4_lite_monitor import amba_axi4_single_interface_requirements::*; #(parameter int MAXWAIT = 16) (
+  input logic        ACLK, ARESETn,
+  input logic        AWVALID, AWREADY, WVALID, WREADY, BVALID, BREADY, ARVALID, ARREADY, RVALID, RREADY,
+  input logic [7:0]  AWADDR, ARADDR,
+  input logic [2:0]  AWPROT, ARPROT,
+  input logic [31:0] WDATA, RDATA,
+  input logic [3:0]  WSTRB,
+  input logic [1:0]  BRESP, RRESP
+);
+  default clocking axi4_aclk @(posedge ACLK); endclocking
+
+  // A3.1.2 Reset: no VALID during reset and in the first cycle after it
+  ap_AW_EXIT_RESET: assert property (exit_from_reset(ARESETn, AWVALID)) else $error("Violation: AWVALID must be low in reset (A3.1.2)");
+  ap_W_EXIT_RESET:  assert property (exit_from_reset(ARESETn, WVALID));
+  ap_AR_EXIT_RESET: assert property (exit_from_reset(ARESETn, ARVALID));
+  ap_B_EXIT_RESET:  assert property (exit_from_reset(ARESETn, BVALID));
+  ap_R_EXIT_RESET:  assert property (exit_from_reset(ARESETn, RVALID));
+
+  // A3.2.1 Handshake process: once VALID, the information stays until the handshake
+  ap_AW_STABLE_AWADDR: assert property (disable iff (!ARESETn) stable_before_handshake(AWVALID, AWREADY, AWADDR))
+    else $error("Violation: AWADDR must remain stable when AWVALID is asserted and AWREADY low (A3.2.1)");
+  ap_AW_STABLE_AWPROT:  assert property (disable iff (!ARESETn) stable_before_handshake(AWVALID, AWREADY, AWPROT));
+  ap_AW_AWVALID_AWREADY: assert property (disable iff (!ARESETn) valid_before_handshake(AWVALID, AWREADY));
+  ap_W_STABLE_WDATA:  assert property (disable iff (!ARESETn) stable_before_handshake(WVALID, WREADY, WDATA));
+  ap_W_STABLE_WSTRB:  assert property (disable iff (!ARESETn) stable_before_handshake(WVALID, WREADY, WSTRB));
+  ap_W_WVALID_WREADY: assert property (disable iff (!ARESETn) valid_before_handshake(WVALID, WREADY));
+  ap_B_STABLE_BRESP:  assert property (disable iff (!ARESETn) stable_before_handshake(BVALID, BREADY, BRESP));
+  ap_B_BVALID_BREADY: assert property (disable iff (!ARESETn) valid_before_handshake(BVALID, BREADY));
+  ap_AR_STABLE_ARADDR: assert property (disable iff (!ARESETn) stable_before_handshake(ARVALID, ARREADY, ARADDR));
+  ap_AR_STABLE_ARPROT: assert property (disable iff (!ARESETn) stable_before_handshake(ARVALID, ARREADY, ARPROT));
+  ap_AR_ARVALID_ARREADY: assert property (disable iff (!ARESETn) valid_before_handshake(ARVALID, ARREADY));
+  ap_R_STABLE_RDATA:  assert property (disable iff (!ARESETn) stable_before_handshake(RVALID, RREADY, RDATA));
+  ap_R_STABLE_RRESP:  assert property (disable iff (!ARESETn) stable_before_handshake(RVALID, RREADY, RRESP));
+  ap_R_RVALID_RREADY: assert property (disable iff (!ARESETn) valid_before_handshake(RVALID, RREADY));
+
+  // A3.1.2 / A3.2.2: no X on the information while VALID
+  ap_AW_AWADDR_X: assert property (disable iff (!ARESETn) valid_information(AWVALID, AWADDR));
+  ap_W_WDATA_X:   assert property (disable iff (!ARESETn) valid_information(WVALID, WDATA));
+  ap_R_RDATA_X:   assert property (disable iff (!ARESETn) valid_information(RVALID, RDATA));
+
+  // deadlock (ARM recommended): READY within MAXWAIT cycles of VALID
+  ap_AW_MAX_WAIT: assert property (disable iff (!ARESETn) handshake_max_wait(AWVALID, AWREADY, MAXWAIT));
+  ap_W_MAX_WAIT:  assert property (disable iff (!ARESETn) handshake_max_wait(WVALID, WREADY, MAXWAIT));
+  ap_AR_MAX_WAIT: assert property (disable iff (!ARESETn) handshake_max_wait(ARVALID, ARREADY, MAXWAIT));
+
+  // the FVIP's performance covers
+  cp_AW_WAIT_STATE:    cover property (disable iff (!ARESETn) axi4_wait_state(AWVALID, AWREADY));
+  cp_W_WAIT_STATE:     cover property (disable iff (!ARESETn) axi4_wait_state(WVALID, WREADY));
+  cp_AR_NO_WAIT_STATE: cover property (disable iff (!ARESETn) axi4_no_wait_state(ARVALID, ARREADY));
+  cp_B_BACK_TO_BACK:   cover property (disable iff (!ARESETn) axi4_back_to_back(BVALID, BREADY));
+endmodule

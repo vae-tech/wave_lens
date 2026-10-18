@@ -1,0 +1,74 @@
+module arbiter_checker ports clk:1 rst_n:1 req:4 gnt:4 lock:1 params N=4 MAX_WAIT=12
+property p_served(i): req[i] |-> ##[0:MAX_WAIT] gnt[i]
+property p_held(i): gnt[i] && lock |=> gnt[i]
+assert arb_onehot in arbiter_checker, line 17
+  clock     @(posedge clk) disable iff (!rst_n)
+  expr      $onehot0(gnt)
+  s1        $onehot0(gnt)
+  signals   clk:1 rst_n:1 gnt:4
+assert arb_only_req in arbiter_checker, line 18
+  clock     @(posedge clk) disable iff (!rst_n)
+  expr      (gnt & ~req) == 0
+  s1        (gnt & ~req) == 0
+  signals   clk:1 rst_n:1 gnt:4 req:4
+assert arb_served0 in arbiter_checker, line 19
+  clock     @(posedge clk) disable iff (!rst_n)
+  property  p_served
+  expr      p_served(0)
+  s1        req[0]
+  s2        ##[0:12] gnt[0]
+  signals   clk:1 rst_n:1 req[>=1]:4 gnt[>=1]:4
+assert arb_served1 in arbiter_checker, line 20
+  clock     @(posedge clk) disable iff (!rst_n)
+  property  p_served
+  expr      p_served(1)
+  s1        req[1]
+  s2        ##[0:12] gnt[1]
+  signals   clk:1 rst_n:1 req[>=2]:4 gnt[>=2]:4
+assert arb_served2 in arbiter_checker, line 21
+  clock     @(posedge clk) disable iff (!rst_n)
+  property  p_served
+  expr      p_served(2)
+  s1        req[2]
+  s2        ##[0:12] gnt[2]
+  signals   clk:1 rst_n:1 req[>=3]:4 gnt[>=3]:4
+assert arb_served3 in arbiter_checker, line 22
+  clock     @(posedge clk) disable iff (!rst_n)
+  property  p_served
+  expr      p_served(3)
+  s1        req[3]
+  s2        ##[0:12] gnt[3]
+  signals   clk:1 rst_n:1 req[>=4]:4 gnt[>=4]:4
+assert arb_lock in arbiter_checker, line 23
+  clock     @(posedge clk) disable iff (!rst_n)
+  expr      p_held(0) and p_held(1) and p_held(2) and p_held(3)
+  s1        gnt[0] && lock
+  s2        gnt[0]
+  s3        gnt[1] && lock
+  s4        gnt[1]
+  s5        gnt[2] && lock
+  s6        gnt[2]
+  s7        gnt[3] && lock
+  s8        gnt[3]
+  signals   clk:1 rst_n:1 gnt[>=4]:4 lock:1
+assert arb_idle in arbiter_checker, line 24
+  clock     @(posedge clk) disable iff (!rst_n)
+  expr      req == 0 |-> gnt == 0
+  s1        req == 0
+  s2        gnt == 0
+  signals   clk:1 rst_n:1 req:4 gnt:4
+assert arb_no_starve in arbiter_checker, line 25
+  clock     @(posedge clk) disable iff (!rst_n)
+  expr      req[0] && !gnt[0] throughout req[1][*2] |-> ##[0:4] gnt[0]
+  s1        req[0] && !gnt[0]
+  s2        req[1][*2]
+  s3        ##[0:4] gnt[0]
+  signals   clk:1 rst_n:1 req[>=2]:4 gnt[>=1]:4
+cover arb_fair in arbiter_checker, line 26
+  clock     @(posedge clk) disable iff (!rst_n)
+  expr      gnt[0] ##[1:$] gnt[1] ##[1:$] gnt[2] ##[1:$] gnt[3]
+  s1        gnt[0]
+  s2        ##[1:$] gnt[1]
+  s3        ##[1:$] gnt[2]
+  s4        ##[1:$] gnt[3]
+  signals   clk:1 rst_n:1 gnt[>=4]:4

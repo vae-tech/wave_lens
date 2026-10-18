@@ -1,0 +1,49 @@
+// AXI4-Lite handshake checks for this example: every VALID holds until its READY with a stable payload, the slave
+// (axil_regs) answers with its fixed latencies, responses are OKAY.
+//   sva parse examples/axi_lite/axi_lite.sva
+module axil_checks #(parameter int MAX_LAT = 8) (
+  input logic        ACLK, ARESETn,
+  input logic        AWVALID, AWREADY, WVALID, WREADY, BVALID, BREADY, ARVALID, ARREADY, RVALID, RREADY, done,
+  input logic [7:0]  AWADDR, ARADDR,
+  input logic [31:0] WDATA, RDATA,
+  input logic [3:0]  WSTRB,
+  input logic [1:0]  BRESP, RRESP
+);
+  localparam logic [1:0] OKAY = 2'b00;
+
+  property p_hold(valid, ready);
+    @(posedge ACLK) disable iff (!ARESETn) valid && !ready |=> valid;
+  endproperty
+  property p_stable(valid, ready, payload);
+    @(posedge ACLK) disable iff (!ARESETn) valid && !ready |=> $stable(payload);
+  endproperty
+  sequence s_hs(valid, ready); valid && ready; endsequence
+
+  // every channel
+  axi_aw_hold:     assert property (p_hold(AWVALID, AWREADY));
+  axi_w_hold:      assert property (p_hold(WVALID, WREADY));
+  axi_b_hold:      assert property (p_hold(BVALID, BREADY));
+  axi_ar_hold:     assert property (p_hold(ARVALID, ARREADY));
+  axi_r_hold:      assert property (p_hold(RVALID, RREADY));
+  axi_aw_stable:   assert property (p_stable(AWVALID, AWREADY, AWADDR));
+  axi_w_stable:    assert property (p_stable(WVALID, WREADY, {WDATA, WSTRB}));
+  axi_ar_stable:   assert property (p_stable(ARVALID, ARREADY, ARADDR));
+
+  default clocking @(posedge ACLK); endclocking
+  default disable iff (!ARESETn);
+  // this slave: AWREADY a cycle after AWVALID, the response two cycles after the data, read data two after the address
+  axi_awready_late: assert property ($rose(AWVALID) |=> AWREADY);
+  axi_w_after_aw:   assert property (s_hs(AWVALID, AWREADY) |=> WVALID);
+  axi_b_latency:    assert property (s_hs(WVALID, WREADY) |=> ##1 BVALID) else $error("AXI: no BVALID two cycles after the write data");
+  axi_r_latency:    assert property (s_hs(ARVALID, ARREADY) |=> ##[1:MAX_LAT] RVALID);
+  axi_bresp_okay:   assert property (BVALID |-> BRESP == OKAY);
+  axi_rresp_okay:   assert property (RVALID |-> RRESP == OKAY);
+  axi_wstrb:        assert property (WVALID |-> WSTRB != 4'b0000);
+  axi_done:         assert property (BVALID && BREADY or RVALID && RREADY |=> done);
+  // deliberately wrong (AWREADY comes a cycle later): shows a fail trace, sva eval exits 1
+  axi_demo_aw_at_once: assert property ($rose(AWVALID) |-> AWREADY);
+  axi_cov_write:    cover property (s_hs(AWVALID, AWREADY) ##[1:3] s_hs(WVALID, WREADY) ##[1:3] s_hs(BVALID, BREADY));
+  axi_cov_read:     cover property (s_hs(ARVALID, ARREADY) ##[1:MAX_LAT] s_hs(RVALID, RREADY));
+endmodule
+
+bind axil_regs axil_checks u_axil_checks (.*, .done(1'b1));

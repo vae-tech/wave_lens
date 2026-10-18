@@ -9,6 +9,7 @@ module axil_master (
   output logic        AWVALID, WVALID, BREADY, ARVALID, RREADY,
   input  logic        AWREADY, WREADY, BVALID, ARREADY, RVALID,
   output logic [7:0]  AWADDR, ARADDR,
+  output logic [2:0]  AWPROT, ARPROT,          // unprivileged, secure, data: 0
   output logic [31:0] WDATA,
   output logic [3:0]  WSTRB,
   input  logic [1:0]  BRESP, RRESP,
@@ -16,7 +17,7 @@ module axil_master (
   output logic        done,
   output logic [31:0] rdata
 );
-  assign BREADY = 1;  assign RREADY = 1;  assign WSTRB = 4'hF;
+  assign BREADY = 1;  assign RREADY = 1;  assign WSTRB = 4'hF;  assign AWPROT = 3'b000;  assign ARPROT = 3'b000;
   always_ff @(posedge ACLK or negedge ARESETn)
     if (!ARESETn) begin
       AWVALID <= 0; WVALID <= 0; ARVALID <= 0; AWADDR <= 0; ARADDR <= 0; WDATA <= 0; done <= 0; rdata <= 0;
@@ -43,6 +44,7 @@ module axil_regs (
   input  logic        AWVALID, WVALID, BREADY, ARVALID, RREADY,
   output logic        AWREADY, WREADY, BVALID, ARREADY, RVALID,
   input  logic [7:0]  AWADDR, ARADDR,
+  input  logic [2:0]  AWPROT, ARPROT,          // not used by this slave
   input  logic [31:0] WDATA,
   input  logic [3:0]  WSTRB,
   output logic [1:0]  BRESP, RRESP,
@@ -70,7 +72,7 @@ module axi_lite_tb;
   logic ACLK = 0, ARESETn = 0, cmd_wr = 0, cmd_rd = 0;
   logic [7:0] cmd_addr = 0;  logic [31:0] cmd_data = 0;
   logic AWVALID, WVALID, BREADY, ARVALID, RREADY, AWREADY, WREADY, BVALID, ARREADY, RVALID, done;
-  logic [7:0] AWADDR, ARADDR;  logic [31:0] WDATA, RDATA, rdata;  logic [3:0] WSTRB;  logic [1:0] BRESP, RRESP;
+  logic [7:0] AWADDR, ARADDR;  logic [2:0] AWPROT, ARPROT;  logic [31:0] WDATA, RDATA, rdata;  logic [3:0] WSTRB;  logic [1:0] BRESP, RRESP;
   string dump = "axi_lite.vcd";                 // +dump=FILE; the format (VCD / FST) is chosen when Verilator builds
   axil_master u_master (.*);
   axil_regs   u_slave (.*);

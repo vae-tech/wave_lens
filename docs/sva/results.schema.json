@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/wavefw/docs/sva/results.schema.json",
+  "title": "SVA results: sva eval --out, the page's evaluate(), run_json with a trace (docs/sva/ENGINE.md, Results JSON)",
+  "type": "object",
+  "required": ["clock", "unit", "cycles", "assertions"],
+  "additionalProperties": false,
+  "properties": {
+    "clock": { "type": "string", "description": "The clock of the first assertion (a dump path from sva eval)." },
+    "unit": { "type": "string", "description": "The unit of the times in cycles (ps from dumps)." },
+    "cycles": { "type": "array", "items": { "type": "integer" }, "description": "cycles[k]: the time of sampling point k (the k-th clock edge)." },
+    "assertions": { "type": "array", "items": { "$ref": "#/$defs/outcome" } }
+  },
+  "$defs": {
+    "outcome": {
+      "type": "object",
+      "required": ["name", "kind", "line", "text", "steps", "stats", "attempts"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "kind": { "enum": ["assert", "assume", "cover"] },
+        "file": { "type": "string" },
+        "line": { "type": "integer" },
+        "text": { "type": "string", "description": "The property on one line." },
+        "scope": { "type": "string", "description": "The instance it was evaluated in." },
+        "signals": { "type": "object", "description": "Name in the assertion -> path in the dump." },
+        "clock": { "type": "string", "description": "When another clock than the document's: its own." },
+        "cycles": { "type": "array", "items": { "type": "integer" }, "description": "With clock: its own sampling times." },
+        "steps": { "type": "array", "items": { "$ref": "#/$defs/step" } },
+        "stats": { "$ref": "#/$defs/stats" },
+        "attempts": { "type": "array", "items": { "$ref": "#/$defs/attempt" }, "description": "Every non-vacuous attempt by start (covers: the first cover_traces matches)." },
+        "lane": { "type": "string", "description": "One character per cycle, . S P C D F; derived from the attempts (a cache)." },
+        "missing": { "type": "array", "items": { "type": "string" }, "description": "Signals not in the trace: not evaluated." },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "step": {
+      "type": "object",
+      "required": ["id", "label", "role"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^s[1-9][0-9]*$" },
+        "label": { "type": "string" },
+        "role": { "enum": ["ante", "cons", "cond", "seq"], "description": "Antecedent / consequent of implication group, condition of a throughout, or a sequence property." },
+        "group": { "type": "integer", "minimum": 0, "description": "The implication (0, 1, … in source order)." }
+      }
+    },
+    "stats": {
+      "type": "object",
+      "required": ["attempts", "pass", "fail", "vacuous", "disabled", "active", "capped"],
+      "additionalProperties": false,
+      "properties": {
+        "attempts": { "type": "integer", "minimum": 0 },
+        "pass": { "type": "integer", "minimum": 0 },
+        "fail": { "type": "integer", "minimum": 0 },
+        "vacuous": { "type": "integer", "minimum": 0 },
+        "disabled": { "type": "integer", "minimum": 0 },
+        "active": { "type": "integer", "minimum": 0 },
+        "capped": { "type": "integer", "minimum": 0 },
+        "matches": { "type": "integer", "minimum": 0, "description": "Covers: every match." }
+      }
+    },
+    "attempt": {
+      "type": "object",
+      "required": ["start", "end", "result", "trace"],
+      "additionalProperties": false,
+      "properties": {
+        "start": { "type": "integer", "minimum": 0 },
+        "end": { "type": "integer", "minimum": 0 },
+        "result": { "enum": ["pass", "fail", "vacuous", "active", "disabled", "capped"] },
+        "trace": { "type": "array", "items": { "type": "array", "items": { "type": ["string", "integer"] } }, "description": "[step id, cycle] or [step id, cycle, value of a bus compare]." },
+        "truncated": { "type": "boolean", "description": "The first 16 and the last 47 steps of a longer trace." },
+        "failed_at": { "type": "integer", "minimum": 0 },
+        "note": { "type": "string" },
+        "reason": { "$ref": "#/$defs/reason" },
+        "ante_end": { "type": "array", "items": { "type": "integer" }, "description": "Implications: the cycles the antecedent matched at; of more than 64, the first 32 and the latest 32." },
+        "ante_truncated": { "type": "boolean", "description": "ante_end left matches out between its first 32 and its latest 32." }
+      }
+    },
+    "reason": {
+      "type": "object",
+      "required": ["kind", "cycle"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["no_match", "expected", "range", "unknown", "not_held", "strong_end", "capped"] },
+        "step": { "type": "string", "pattern": "^s[1-9][0-9]*$" },
+        "cycle": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

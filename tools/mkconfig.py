@@ -7,6 +7,7 @@ under its full hierarchical path, one line each, with per-signal settings to fil
   mkconfig.py dump.vcd --out dump.config.json --update # dump changed: add new signals, drop gone ones, keep all edits
   mkconfig.py dump.fst                                 # FST: read through GTKWave's fst2vcd, FSM enum labels included
   mkconfig.py dump.vcd --sv rtl/*.sv                   # VCD: enum labels from "typedef enum" in the sources
+  mkconfig.py dump.fst --sva checks/*.sva              # assertions: "sva" and a "bind" line per matching instance
 
 Per-signal entry ("" = the global setting from "config"):
   "tb.dut.state": {"show": true, "radix": "", "color": "", "style": "", "width": 3, "changes": 120}
@@ -22,13 +23,19 @@ Base file (--base, default tools/base.config.json beside this script): copied in
            in total (the deepest levels are dropped first)
   "rules"  [{"match": ["*clk", "*clk_i"], "width": 1, "color": "#2f9e44"}, …]  starting settings by full-path pattern
            ("*" and "?"; optional "width": 8 / ">1" / ">=32"); later rules win, and they may set "show" too.
+
+--sva FILE...: the files are parsed with the sva CLI and every assertion is matched against the instances of the dump
+with the page's rule for names (docs/sva/ENGINE.md *Name resolution*; the "sortIgnore" prefixes of "config"): "bind"
+gets one line per assertion and instance where all its signals resolve, "show": true when that instance is the only
+one (else false, with the number of candidates in "comment": set "show": true on the ones you want). --update keeps
+the "show" choices.
 """
 import argparse, collections, json, os, re, shutil, subprocess, sys
 
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)   # -I drops the script dir from sys.path
-import dumpscan, vcd2wavedrom  # noqa: E402
+import dumpscan, svabuild, vcd2wavedrom  # noqa: E402
 
 ROOT = os.path.dirname(HERE)
 BASE = os.path.join(HERE, 'base.config.json')
@@ -36,7 +43,6 @@ OLD_BASE = os.path.join(ROOT, 'wavefw.base.json')   # name before the restructur
 ENTRY = ('show', 'radix', 'color', 'style')          # keys every entry gets (empty = global setting)
 INFO = ('width', 'changes')
 GENERATOR_KEYS = ('select', 'rules')
-SPLIT = re.compile(r'\.(?![^\[]*\])')               # path separators, not dots inside [..]
 
 
 def die(msg):
@@ -118,7 +124,7 @@ def sv_enums(files):
 def build(sigs, base):
     sel = {'depth': 2, 'constants': False, 'hide': [], 'budget': 1500000, **(base.get('select') or {})}
     hide = [pattern(p) for p in ([sel['hide']] if isinstance(sel['hide'], str) else sel['hide'] or [])]
-    depth = lambda p: len(SPLIT.split(p)) - 2
+    depth = lambda p: len(svabuild.split_path(p)) - 2
     cat = {}
     for s in sigs:
         e = {k: '' for k in ENTRY}
@@ -181,7 +187,7 @@ def dumps(cfg):
         if k == 'signals' and isinstance(v, dict):
             rows, prev = [], None
             for p, e in v.items():
-                sc = SPLIT.split(p)[:-1]
+                sc = svabuild.split_path(p)[:-1]
                 if prev is not None and sc != prev:
                     rows.append('')
                 prev = sc
@@ -208,6 +214,39 @@ HELP = [
 ]
 
 
+def sva_binds(files, sigs, cat, prefixes, exe, old=()):
+    """--sva: the "bind" lines (see the module doc) -> (list, counts) | None when the files do not parse. A generated
+    line keeps the user's "show" and keys; what the user wrote that --sva does not make (a "NAME@PATH" string, a
+    pattern, an assertion of another file, another instance) stays as it is."""
+    fs = svabuild.parse_files([(f, f) for f in files], exe)
+    if any(f.get('parsed') is None for f in fs):
+        return None
+    names = svabuild.Names({s['path']: s['width'] for s in sigs}, {p: e['alias'] for p, e in cat.items() if e.get('alias')}, prefixes)
+    prev = {(b.get('assert'), b.get('scope') or ''): b for b in old if isinstance(b, dict)}
+    out, made, n = [], set(), {'assertions': 0, 'only': 0, 'chosen': 0, 'open': 0, 'none': 0}
+    for f in fs:
+        for x in (f.get('parsed') or {}).get('assertions', []):
+            n['assertions'] += 1
+            cands = names.candidates(x.get('signals') or [])
+            if not cands:
+                made.add((x['label'], ''))
+                out.append({'assert': x['label'], 'scope': '', 'show': False, 'comment': 'no instance of the dump has every signal: ' + ' '.join(s['name'] for s in x.get('signals') or [])})
+                n['none'] += 1
+            lines = []
+            for c in cands:
+                p = prev.get((x['label'], c), {})
+                made.add((x['label'], c))
+                b = {'assert': x['label'], 'scope': c, 'show': p.get('show', len(cands) == 1), **{k: v for k, v in p.items() if k not in ('assert', 'scope', 'show', 'comment')}}
+                if len(cands) > 1:
+                    b['comment'] = f'one of {len(cands)} instances'
+                lines.append(b)
+            out += lines
+            if cands:
+                n['only' if len(cands) == 1 and lines[0]['show'] else 'chosen' if any(b['show'] for b in lines) else 'open'] += 1
+    out += [b for b in old if not (isinstance(b, dict) and (b.get('assert'), b.get('scope') or '') in made)]
+    return out, n
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('waves', help='VCD or FST dump')
@@ -219,6 +258,8 @@ def main():
     ap.add_argument('--sv', nargs='+', metavar='FILE', help='SystemVerilog sources: enum labels for signals declared with an enum type (a VCD has none; an FST brings its own)')
     ap.add_argument('--reader', choices=('builtin', 'wavepeek'), default='builtin', help='list the signals with the built-in reader (default) or wavepeek')
     ap.add_argument('--wavepeek', help='wavepeek executable (default: on PATH or ~/.local/bin)')
+    ap.add_argument('--sva', nargs='+', action='extend', metavar='FILE', help='SystemVerilog assertion files: "sva" and a "bind" line per instance that has every signal of an assertion')
+    ap.add_argument('--sva-bin', help='the sva CLI (default: $WAVEFW_SVA, sva on PATH, /tmp/wavefw/sva-target/release/sva)')
     a = ap.parse_args()
     if not os.path.exists(a.waves):
         die(f'no such dump: {a.waves}')
@@ -253,7 +294,7 @@ def main():
     if a.sv:
         labels, n = sv_enums(a.sv), 0
         for s in sigs:
-            leaf = re.sub(r'\[\d+\]$', '', SPLIT.split(s['path'])[-1])
+            leaf = re.sub(r'\[\d+\]$', '', svabuild.split_path(s['path'])[-1])
             t = labels.get(leaf)
             if not s['enum'] and t and max(t) < 2 ** s['width']:
                 s['enum'] = t; n += 1
@@ -278,6 +319,21 @@ def main():
                 cfg[k] = v
         cfg['page'] = {'title': name, **(cfg.get('page') or {})}
         cfg['signals'] = cat
+    if a.sva:
+        exe = svabuild.find_bin(a.sva_bin)
+        if not exe:
+            die('--sva needs the sva CLI (make sva-build, or --sva-bin)')
+        here = os.path.dirname(os.path.abspath(out))
+        pfx = (cfg.get('config') or {}).get('sortIgnore') or []
+        got = sva_binds(a.sva, sigs, cat, [pfx] if isinstance(pfx, str) else pfx, exe, cfg.get('bind') or [])
+        had = cfg.get('sva') or []
+        cfg['sva'] = list(dict.fromkeys([*([had] if isinstance(had, str) else had), *(os.path.relpath(os.path.abspath(f), here) for f in a.sva)]))   # the files it had stay
+        if got is None:
+            print('mkconfig: --sva: the files do not parse (sva parse failed): "bind" is left as it was', file=sys.stderr)
+        else:
+            cfg['bind'], n = got
+            print(f'mkconfig: --sva: {n["assertions"]} assertions: {n["only"]} bound to their only instance, {n["chosen"]} chosen among several, '
+                  f'{n["open"]} with several candidates to choose ("show": false), {n["none"]} without an instance', file=sys.stderr)
     with open(out, 'w', encoding='utf-8') as f:
         f.write(dumps(cfg))
     shown = [e for e in cat.values() if e.get('show')]

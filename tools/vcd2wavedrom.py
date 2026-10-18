@@ -19,6 +19,11 @@ Config file (--config cfg.json): every option can be a key (dashes or underscore
   style, radix, fold, rowHeight, sort, …), "views" {key: {...}} named variants of the top-level settings (pick one
   with --view; mkhtml.py builds them all). With a catalog, a view's "signals" list selects from it ("*" and "?"
   patterns match full paths). Relative "waves" paths are relative to the config file.
+  "sva" ["checks.sv", …] SystemVerilog assertion files (parsed with the sva CLI, inlined for the page's assertions
+  panel), "bind" [{"assert": "a_req_ack", "scope": "tb.dut"}] or ["a_req_ack@tb.dut"] (evaluated over the dump with
+  sva eval; the page opens with them bound): the WaveJSON extension "sva" (tools/svabuild.py, README "Assertions").
+  Clock-sampled buses get "width" and, when their labels do not read back as values (bin signed oct ascii, x digits),
+  "raw": the hex value of each label (the page's assertions sample them).
   Per-signal settings: show (false: left out), alias (displayed name), radix (auto hex dec signed bin oct ascii),
   color (trace / outline / name), fill (bus fill), style (auto wavedrom questa square), enum {"0": "IDLE"};
   width and changes are information only.
@@ -34,7 +39,7 @@ import argparse, bisect, concurrent.futures, functools, heapq, json, os, re, shu
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
-import dumpscan, wavejson  # noqa: E402
+import dumpscan, svabuild, wavejson  # noqa: E402
 
 UNIT_PS = {'zs': 1e-9, 'as': 1e-6, 'fs': 1e-3, 'ps': 1, 'ns': 1e3, 'us': 1e6, 'ms': 1e9, 's': 1e12}
 
@@ -306,10 +311,10 @@ def label(v, width, enum=None, radix=None):
 
 
 def wave_of(items, width, enum, clock=False, radix=None):
-    """items: per-cycle normalised values, or None for a '|' gap cell -> (wave, data)."""
+    """items: per-cycle normalised values, or None for a '|' gap cell -> (wave, data, the hex value of each label)."""
     if clock:
-        return ''.join('|' if v is None else ('p' if i == 0 else '.') for i, v in enumerate(items)), []
-    out, data, prev = [], [], object()
+        return ''.join('|' if v is None else ('p' if i == 0 else '.') for i, v in enumerate(items)), [], []
+    out, data, raw, prev = [], [], [], object()
     for v in items:
         if v is None:
             out.append('|'); continue
@@ -326,7 +331,8 @@ def wave_of(items, width, enum, clock=False, radix=None):
             n = int(v, 16) if re.fullmatch('[0-9a-f]+', v) else None
             out.append(str(3 + n % 7) if enum is not None and n is not None else '=')
             data.append(label(v, width, enum, radix))
-    return ''.join(out), data
+            raw.append(v)
+    return ''.join(out), data, raw
 
 
 def nice_ceil(x):
@@ -340,7 +346,7 @@ def nice_floor(x):
 
 
 # ---------------- options: command line + config file ----------------
-LIST_KEYS = ('signals', 'gap', 'enum', 'group', 'marker')
+LIST_KEYS = ('signals', 'gap', 'enum', 'group', 'marker', 'sva', 'bind')
 SKIP_KEYS = ('views', 'page', 'config', 'description', 'comment', 'render', 'note', 'select', 'rules')   # not converter options
 SIG_KEYS = ('show', 'alias', 'radix', 'color', 'fill', 'style', 'enum', 'width', 'changes')            # catalog entry keys
 
@@ -366,6 +372,9 @@ def parser():
     ap.add_argument('--title', help='head.text')
     ap.add_argument('--bookmarks', help='JSON list [{"n", "t", "signal", "text", "color"}] (usually in the config file; the viewer\'s JSON button writes it)')
     ap.add_argument('--arrows', help='JSON list [{"from", "to", "shape", "head", "line", "color", "label"}] between bookmarks')
+    ap.add_argument('--sva', action='append', help='SystemVerilog assertion file for the page (repeatable; one compilation unit, in order)')
+    ap.add_argument('--bind', action='append', help='NAME@SCOPE: bind assertion NAME to instance SCOPE, evaluated over the dump (repeatable)')
+    ap.add_argument('--sva-bin', help='the sva CLI (default: $WAVEFW_SVA, sva on PATH, /tmp/wavefw/sva-target/release/sva)')
     ap.add_argument('--hscale', type=float)
     ap.add_argument('--reader', choices=('builtin', 'wavepeek'), help='how the dump is read: builtin (default: one pass in Python; '
                     'an FST through fst2vcd) or wavepeek (any --marker expression)')
@@ -430,15 +439,18 @@ def resolve(a, cfg, base='.'):
             continue
         if not hasattr(a, k) or k in ('config_file', 'view', 'out'):
             raise SystemExit(f'vcd2wavedrom: unknown config key "{k}"')
-        if getattr(a, k) not in (None, []):
-            continue                                   # the command line wins
+        if getattr(a, k) not in (None, []) or (k == 'sva' and v is False):
+            continue                                   # the command line wins; "sva": false is mkhtml.py's
         if k in LIST_KEYS:
             v = [v] if isinstance(v, (str, dict)) else list(v)
         elif k == 'waves':
             v = os.path.join(base, os.path.expanduser(v))
+        if k == 'sva':   # (path on disk, path as written); "sva": false is mkhtml.py's (no assertion engine)
+            v = [(os.path.join(base, os.path.expanduser(x)), x) for x in v if isinstance(x, str)]
         setattr(a, k, v)
     for k in LIST_KEYS:
         setattr(a, k, getattr(a, k) or [])
+    a.sva = [x if isinstance(x, tuple) else (x, x) for x in a.sva]
     if not a.waves or not a.signals:
         raise SystemExit('vcd2wavedrom: need --waves and --signals (on the command line or in the config)')
     if bool(a.clock) == bool(a.exact):
@@ -559,10 +571,16 @@ def convert(a):
         clk_abs = next((s['abs'] for s in specs if s['path'] == a.clock or s['name'] == a.clock), None)
         for s in specs:
             items = [None if c is None else vals[s['abs']][c] for c in cells]
-            wave, data = wave_of(items, s['width'], s['enum'], clock=s['abs'] == clk_abs, radix=s['radix'])
+            wave, data, raw = wave_of(items, s['width'], s['enum'], clock=s['abs'] == clk_abs, radix=s['radix'])
             j = {'name': s['name'], 'wave': wave}
             if data:
                 j['data'] = data
+            if s['width'] > 1:
+                j['width'] = s['width']
+            # the values next to labels that do not read back (the page's assertions sample them): binary, signed,
+            # octal and ascii labels, values with x / z digits
+            if data and (s['radix'] in ('bin', 'signed', 'sdec', 'oct', 'ascii') or any(re.search('[xz]', v) for v in raw)):
+                j['raw'] = raw
             sig_json[s['abs']] = j
         doc['head'] = {'text': a.title or f'{os.path.basename(a.waves)} @ posedge {a.clock}', 'tick': 0}
         doc['time'] = {'t0': times[0], 't1': times[0] + len(times) * cycle, 'cycle': cycle, 'unit': 'ps'}
@@ -592,7 +610,7 @@ def convert(a):
                 while k + 1 < len(seq) and seq[k + 1][0] <= g:
                     k += 1
                 items.append(seq[k][1])
-            wave, data = wave_of(items, s['width'], s['enum'], radix=s['radix'])
+            wave, data, _ = wave_of(items, s['width'], s['enum'], radix=s['radix'])
             j = {'name': s['name'], 'width': s['width'], 'wave': wave}
             if data:
                 j['data'] = data
@@ -659,8 +677,13 @@ def convert(a):
         v = getattr(a, k)
         if v:
             doc[k] = json.loads(v) if isinstance(v, str) else v
+    a.sva_aliases = {s['abs']: s['name'] for s in specs if s.get('abs') and s['name'] != leaf(s['path'])}   # shown names, for the assertions
+    if a.sva or a.bind:
+        pfx = getattr(a, 'sva_prefixes', None)
+        pfx = (a.wave_config or {}).get('sortIgnore') if pfx is None else pfx   # names resolve as in the page
+        doc['sva'] = svabuild.build(a.sva, a.bind, a.waves, a.sva_bin, t_from, t_to, [pfx] if isinstance(pfx, str) else pfx, a.sva_aliases)
     doc['meta'] = {'waves': os.path.basename(a.waves), 'tool': rd.tool, 'mode': 'clock' if a.clock else 'exact',
-                   'from_ps': t_from, 'to_ps': t_to}
+                   'from_ps': t_from, 'to_ps': t_to, **({'scope': a.scope} if a.scope else {})}
     return doc
 
 

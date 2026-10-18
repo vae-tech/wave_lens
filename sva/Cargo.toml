@@ -1,0 +1,22 @@
+# SVA engine (docs/sva/STACK.md): the language and its semantics in one library without I/O, used by a native CLI
+# (dumps through wellen) and by a WebAssembly module for the page. Build with `make sva-build`.
+[workspace]
+members = ["core", "cli", "wasm"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# the WebAssembly module is inlined into pages: size over speed (make sva-build: --profile wasm)
+[profile.wasm]
+inherits = "release"
+opt-level = "z"

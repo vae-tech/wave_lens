@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SVA review · stages 7–8</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+:root { --bg: #f6f5f2; --panel: #ffffff; --panel-2: #efede8; --line: #d9d6cf; --fg: #1d1f24; --muted: #6b6f78; --accent: #b5551b; --accent-soft: #f4e2d4;
+  --crit: #c92a2a; --crit-soft: #fde8e8; --mid: #e67700; --mid-soft: #fff1dc; --low: #2b8a3e; --low-soft: #e3f5e8; --keep: #1c7ed6; --keep-soft: #e1eefb;
+  --font-body: "IBM Plex Sans", system-ui, sans-serif; --font-mono: "IBM Plex Mono", ui-monospace, monospace; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #16181d; --panel: #1e2127; --panel-2: #262a31; --line: #343841; --fg: #e8e6df; --muted: #9a9ea8; --accent: #e4834a; --accent-soft: #3a2a1f;
+  --crit: #ff6b6b; --crit-soft: #3b2224; --mid: #ffa94d; --mid-soft: #3a2d1c; --low: #69db7c; --low-soft: #1f3324; --keep: #74c0fc; --keep-soft: #1d2d40; color-scheme: dark; } }
+:root[data-theme="dark"] { --bg: #16181d; --panel: #1e2127; --panel-2: #262a31; --line: #343841; --fg: #e8e6df; --muted: #9a9ea8; --accent: #e4834a; --accent-soft: #3a2a1f;
+  --crit: #ff6b6b; --crit-soft: #3b2224; --mid: #ffa94d; --mid-soft: #3a2d1c; --low: #69db7c; --low-soft: #1f3324; --keep: #74c0fc; --keep-soft: #1d2d40; color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.5; padding: 0 clamp(16px, 3vw, 40px) 60px; }
+header { padding: 26px 0 14px; border-bottom: 1px solid var(--line); display: grid; gap: 8px; }
+header .row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+h1 { font-size: clamp(22px, 3.5vw, 30px); margin: 0; line-height: 1.2; }
+h2 { font-size: 19px; font-weight: 600; margin: 30px 0 8px; padding-top: 10px; border-top: 2px solid var(--accent); }
+h3 { font-size: 15.5px; font-weight: 600; margin: 18px 0 6px; }
+p { max-width: 90ch; margin: 0 0 10px; }
+code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
+code { background: var(--panel-2); padding: 0 4px; border-radius: 3px; }
+a { color: var(--accent); }
+.muted { color: var(--muted); }
+button { font: inherit; font-size: 12.5px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); border-radius: 4px; padding: 3px 10px; cursor: pointer; }
+button:hover { border-color: var(--accent); color: var(--accent); }
+button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+nav.tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 14px; border-bottom: 1px solid var(--line); }
+nav.tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; font-size: 14px; padding: 6px 12px; }
+nav.tabs button[aria-selected="true"] { border-bottom-color: var(--accent); color: var(--accent); font-weight: 600; }
+section[hidden] { display: none; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 14px 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }
+.card b { display: block; font-size: 24px; font-weight: 700; line-height: 1.1; }
+.card span { font-size: 12.5px; color: var(--muted); }
+.card.crit b { color: var(--crit); } .card.mid b { color: var(--mid); } .card.low b { color: var(--low); } .card.keep b { color: var(--keep); }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { background: var(--panel-2); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+.tbl { overflow-x: auto; margin: 10px 0 16px; }
+.filters { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; margin: 12px 0; position: sticky; top: 0; z-index: 2; }
+.filters .grp { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.filters .lbl { font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-right: 2px; }
+.filters input[type=search] { font: inherit; font-size: 13px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); color: var(--fg); width: 22ch; }
+.filters label.chk { font-size: 12.5px; display: inline-flex; gap: 4px; align-items: center; }
+.progress { height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; flex: 1 1 120px; min-width: 80px; }
+.progress i { display: block; height: 100%; background: var(--low); width: 0; transition: width .2s; }
+ol.findings { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.f { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--muted); border-radius: 6px; padding: 8px 12px; }
+.f.crit { border-left-color: var(--crit); } .f.mid { border-left-color: var(--mid); } .f.low { border-left-color: var(--low); } .f.keep { border-left-color: var(--keep); }
+.f.done { opacity: 0.55; }
+.f .head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; cursor: pointer; }
+.f .head input { margin: 0; width: 16px; height: 16px; }
+.f .id { font-family: var(--font-mono); font-size: 12px; color: var(--muted); min-width: 3.5ch; }
+.f .ttl { font-weight: 600; flex: 1 1 30ch; }
+.tag { font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase; border-radius: 3px; padding: 1px 6px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.tag.crit { color: var(--crit); background: var(--crit-soft); border-color: transparent; } .tag.mid { color: var(--mid); background: var(--mid-soft); border-color: transparent; }
+.tag.low { color: var(--low); background: var(--low-soft); border-color: transparent; } .tag.keep { color: var(--keep); background: var(--keep-soft); border-color: transparent; }
+.tag.fix { color: var(--accent); background: var(--accent-soft); border-color: transparent; }
+.f .body { display: none; margin: 8px 0 2px 26px; font-size: 14px; }
+.f.open .body { display: block; }
+.f .body dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; }
+.f .body dt { color: var(--muted); font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.04em; padding-top: 2px; }
+.f .body dd { margin: 0; max-width: 95ch; }
+.loc code { display: inline-block; margin: 0 4px 2px 0; }
+.empty { color: var(--muted); padding: 20px; text-align: center; }
+textarea.out { display: block; width: 100%; margin-top: 8px; font: 12px/1.4 var(--font-mono); background: var(--panel-2); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 6px; min-height: 120px; }
+ul.plain { padding-left: 20px; max-width: 95ch; }
+ul.plain li { margin-bottom: 4px; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; font-size: 14px; max-width: 95ch; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; }
+.status { background: var(--low-soft); border: 1px solid var(--line); border-left: 4px solid var(--low); border-radius: 6px; padding: 8px 12px; max-width: none; }
+.tag.fixed { color: var(--low); background: var(--low-soft); border-color: transparent; font-family: var(--font-mono); text-transform: none; }
+.legend { font-size: 12.5px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 6px 0; }
+@media (max-width: 600px) { .f .body dl { grid-template-columns: 1fr; } .f .body { margin-left: 0; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="row"><h1>SVA в wavefw · ревью этапов 7–8</h1><div><button type="button" id="theme">Тема: авто</button></div></div>
+  <p class="status" id="statusline"><b>Обновлено после этапов 7.1 и 8.1:</b> <span id="nfixed"></span> из <span id="ntotal"></span> замечаний закрыты (коммит указан у каждого; 7.1 — <code>3ee1738</code>, 8.1 — <code>af1b00b</code> ядро и CLI, <code>555ad76</code> страница и инструменты, документация — <code>8034258</code>).</p>
+  <p class="muted">Ветка <code>sva-stack</code>, ревью по коммиту <code>0804a7a</code> (18 октября 2026). Три независимых прохода: рисование этапа 7 в браузере, отчёт этапа 8 в ядре и CLI, панель / инструменты / сборка / документация этапа 8. Пункты с пометкой <b>запуск</b> и <b>браузер</b> воспроизведены (Playwright, нативный <code>sva</code>, собственная сборка ядра), <b>чтение</b> — найдены по коду. Большая проверочная страница: <code>test_stream_video.fst</code> + проверки арбитра + открытая попытка, 16 061 цикл, 16 050 / 990 / 990 попыток, 10,3 МБ.</p>
+  <nav class="tabs" role="tablist">
+    <button role="tab" aria-selected="true" data-tab="overview">Что сделано</button>
+    <button role="tab" aria-selected="false" data-tab="findings">Замечания <span class="muted" id="fcount"></span></button>
+    <button role="tab" aria-selected="false" data-tab="keep">Оставить как есть</button>
+    <button role="tab" aria-selected="false" data-tab="prompts">Промпты 7.1 / 8.1</button>
+    <button role="tab" aria-selected="false" data-tab="next">Дальше</button>
+  </nav>
+</header>
+
+<section id="tab-overview">
+  <div class="cards">
+    <div class="card"><b>5</b><span>коммитов этапов 7–8 на <code>sva-stack</code></span></div>
+    <div class="card"><b>210</b><span>юнит-тестов ядра + 9 CLI + корпус + схема, все зелёные</span></div>
+    <div class="card"><b>295</b><span>проверок <code>make smoke</code>, все зелёные</span></div>
+    <div class="card"><b>4 мс</b><span>перерисовка 20 000 попыток (бюджет 20 мс)</span></div>
+    <div class="card"><b>251 кБ</b><span>движок в странице (<code>sva.wasm.js</code>)</span></div>
+    <div class="card crit"><b id="n-crit">0</b><span>критичных замечаний открыто</span></div>
+  </div>
+
+  <h2>Этапы</h2>
+  <div class="tbl"><table>
+    <tr><th>Этап</th><th>Что есть</th><th>Проверка ревью</th></tr>
+    <tr><td><b>7</b> · волны</td><td>Группа «⚑ имя · N pass · M fail» под модулем, полоса попыток (pass / fail / disabled / active / capped, три подполосы, затем слияние ×n), строки шагов с номерами в кружках, ✕ на шаге отказа, стрелки <code>-|-</code> с «nT», выбор попытки (клик, f / F, кнопки отказов), полоса отказов по циклам, копии привязанных сигналов, статический SVG с легендой шагов.</td><td>Геометрия баров и кружков совпала с результатами в обоих видах APB на всех масштабах (0 расхождений); 20 000 попыток — 4,1 мс; клиппинг больших попыток, нулевой длины, covers, экранирование, тёмная тема — верно. Сломаны подсказки кружков (W1), чистка выбора (W2), пакетные перерисовки (W6).</td></tr>
+    <tr><td><b>8</b> · отчёт</td><td>Одна реализация в <code>summary.rs</code>: числа по ассерту (первый / последний отказ, самая длинная попытка, задержка min / avg / max, covers, capped отдельно), итоги, список отказов; Markdown / JUnit / HTML; <code>sva eval --report/--junit</code>, <code>sva report</code>, выход 1 при отказе; панель Table / Failures / фильтр по счётчику / выгрузки; печатный раздел <code>mkhtml</code>; <code>mkconfig --sva</code>; одно правило имён.</td><td>Числа страницы, CLI и печатного раздела совпали байт в байт (APB и арбитр); задержка арбитра 3 / 54,0 / 71 пересчитана руками; правило имён совпало в трёх реализациях на 8 хитрых случаях. Один краш парсера (P1), масштаб на тысячах отказов (P2, R13), задержка при длинном антецеденте (R1), capped зелёный в CI (R3).</td></tr>
+  </table></div>
+
+  <h2>Требования промптов</h2>
+  <p><b>07</b>: все пункты выполнены, кроме двух. Подсказка бара без времени конца (W10). Подписи стрелок не разложены по полосам, а стоят в середине стрелки с пропуском при наложении (W7, предлагается оставить). «Одна точка входа оценки»: SVG и панель делят <code>evaluateScope / plan / assemble</code> — достаточно.</p>
+  <p><b>08</b>: всё выполнено функционально. Частично: итоги без результатов не показываются, «bound» считает непроверенные привязки (P4, P5); печатная таблица обрезается на A4 (P6); <code>--update</code> теряет ручные строки <code>bind</code> (T1); alias-привязка показывает нули (P3); замер сборки на арбитре воспроизвёлся (+1,15 с против заявленных +1,3 с).</p>
+
+  <h2>Что ревью подтвердило как верное</h2>
+  <ul class="plain">
+    <li>Бары от <code>X(cycles[start]) − pad</code> до <code>X(cycles[max(end, failed_at)]) + pad</code>, кружки на <code>X(cycles[c])</code> — 0 расхождений на масштабах 1 пс … fit, со сдвигами окна; попытки шире окна обрезаются, нулевой длины получают ширину 2·pad; слияние берёт самый сильный результат.</li>
+    <li>Clock-sampled вид: результаты сборки рисуются на своих фронтах, после Evaluate в странице — на тех же временах.</li>
+    <li>Выбор: клик по бару, f / F с переходом через край, кнопки отказов, Go to first failure, Esc; выбор в одном вьюере не трогает другой; фильтр по счётчику перестраивает полосу; привязки и результаты переживают перезагрузку.</li>
+    <li>Числа: страница = <code>sva eval --report</code> (md отличается только meta), <code>sva report</code> читает выгрузку страницы и даёт тот же md с выходом 1; печатный раздел = CLI (APB: 209 попыток, 47 pass, 2 fail).</li>
+    <li>Задержка: <code>|=&gt;</code> = 1, <code>|-&gt; !b</code> = 0, <code>##[0:3] b</code> 1 / 1,33 / 2, <code>s_eventually</code> 2 / 2,33 / 3, слитые попытки 1 / 50,5 / 100; вакуозные, fail, active, capped исключены.</li>
+    <li>Экранирование враждебных имён (<code>&lt;img onerror&gt;</code>, <code>|</code>, <code>`</code>, <code>&amp;</code>) в панели, SVG, статическом HTML, Markdown, JUnit; JUnit парсится ElementTree; <code>today()</code> совпал с календарём Python на 200 000 дней подряд.</li>
+    <li>Правило имён: точное имя бьёт префиксное, перекрывающиеся префиксы (длинный первым), иерархические имена, такт из области выше, выборка шире переменной не привязывается — одинаково в странице, <code>svabuild.Names</code> и <code>sva eval --resolve scope</code>.</li>
+    <li>Производительность ядра: арбитр eval + md + junit 0,08 с / 44 МБ; 17 000 отказов — все четыре формата 0,40 с.</li>
+  </ul>
+</section>
+
+<section id="tab-findings" hidden>
+  <div class="filters">
+    <span class="grp"><span class="lbl">серьёзность</span><button data-f="sev" data-v="crit" aria-pressed="true">критично</button><button data-f="sev" data-v="mid" aria-pressed="true">средне</button><button data-f="sev" data-v="low" aria-pressed="true">мелочь</button></span>
+    <span class="grp"><span class="lbl">где</span><button data-f="area" data-v="page" aria-pressed="true">страница</button><button data-f="area" data-v="engine" aria-pressed="true">ядро / CLI</button><button data-f="area" data-v="tools" aria-pressed="true">инструменты</button><button data-f="area" data-v="docs" aria-pressed="true">документация</button></span>
+    <span class="grp"><span class="lbl">чинить в</span><button data-f="fix" data-v="7.1" aria-pressed="true">7.1</button><button data-f="fix" data-v="8.1" aria-pressed="true">8.1</button></span>
+    <span class="grp"><span class="lbl">статус</span><button data-f="st" data-v="open" aria-pressed="true">открыто</button><button data-f="st" data-v="fixed" aria-pressed="true">закрыто</button></span>
+    <span class="grp"><span class="lbl">проверено</span><button data-f="how" data-v="run" aria-pressed="true">запуск</button><button data-f="how" data-v="browser" aria-pressed="true">браузер</button><button data-f="how" data-v="read" aria-pressed="true">чтение</button></span>
+    <input type="search" id="q" placeholder="поиск: текст, файл…" aria-label="поиск по замечаниям">
+    <label class="chk"><input type="checkbox" id="hidedone"> скрыть сделанные</label>
+    <span class="progress" title="сделано"><i id="bar"></i></span><span class="muted mono" id="pct">0 %</span>
+    <button type="button" id="expand">Раскрыть все</button>
+    <button type="button" id="copy">Скопировать открытые (Markdown)</button>
+    <button type="button" id="reset" title="Снять все отметки «сделано» в этом браузере">Сбросить отметки</button>
+  </div>
+  <div class="legend"><span>Клик по заголовку раскрывает детали; галочка слева — «сделано» (хранится в этом браузере).</span><span>file:line даны по коммиту <code>0804a7a</code>.</span></div>
+  <ol class="findings" id="list"></ol>
+  <div class="empty" id="none" hidden>Ничего не подходит под фильтр.</div>
+  <textarea class="out" id="out" readonly hidden aria-label="экспорт"></textarea>
+</section>
+
+<section id="tab-keep" hidden>
+  <p>Решения, которые стоит оставить; часть стоит записать в <code>docs/sva/ENGINE.md</code> как осознанные.</p>
+  <ol class="findings" id="keeplist"></ol>
+</section>
+
+<section id="tab-prompts" hidden>
+  <h2>Промежуточные промпты</h2>
+  <dl class="kv">
+    <dt><a href="../prompts/07.1-sva-waves-hardening.md"><code>prompts/07.1-sva-waves-hardening.md</code></a></dt>
+    <dd>Страница, рисование: подсказки кружков, чистка выбора при Unbind / Evaluate / ✕ / Clear, одна перерисовка на пакет и отложенная сводка, освобождение групп отвязанных привязок, значение полосы для длинных попыток, оверлеи поверх курсора, плотность кружков по месту, обрезанные трассы, время конца в подсказке, номера циклов после Evaluate в clock-sampled виде, имя без «@» на верхнем уровне, контраст цифр, общий поиск и хит-тест. Один коммит.</dd>
+    <dt><a href="../prompts/08.1-sva-report-hardening.md"><code>prompts/08.1-sva-report-hardening.md</code></a></dt>
+    <dd>Отчёт: краш парсера и восстановление страницы, задержка при длинном антецеденте, одно ассерт из нескольких файлов, capped и заметки видны в CI, <code>--report x.json</code> = формат страницы, коды выхода, первый отказ по времени обнаружения, точность времени, ограничение длины списков в текстах и в панели, alias до CLI, итоги без результатов, печать на A4, <code>mkconfig --update</code> сохраняет ручные строки, Makefile, документация. Несколько коммитов: ядро и CLI, страница и инструменты, документация.</dd>
+    <dt><a href="../prompts/00-roadmap.md"><code>prompts/00-roadmap.md</code></a></dt>
+    <dd>В таблице серии появились строки 7.1 и 8.1.</dd>
+  </dl>
+  <h3>Порядок</h3>
+  <p>7.1 → 8.1. Оба трогают <code>wavefw/sva.js</code>: 7.1 вводит одну перерисовку на пакет и версию результатов, 8.1 кэширует сводку по этой версии и ограничивает список отказов.</p>
+</section>
+
+<section id="tab-next" hidden>
+  <h2>После 8.1</h2>
+  <p>Список «What is left out» в конце <code>prompts/00-roadmap.md</code> остаётся следующей дорожной картой: <code>until</code>, локальные переменные, асинхронный <code>disable iff</code>, сверка с симулятором, компактное хранение попыток, отчёт по всей странице (сейчас итоги на вид), <code>bind</code> из SV-файлов. Ревью добавляет к нему:</p>
+  <ul class="plain">
+    <li><b>Отчёт по всей странице</b>: итоги «на вид» путают на страницах с несколькими видами одного дампа (APB: два вида по 14 привязок).</li>
+    <li><b>Подписи стрелок по полосам в статическом SVG</b> (W7) — если фигуры для документации будут плотными.</li>
+    <li><b>Компактные результаты</b>: страница арбитра с 16k отказов держит 225 МБ кучи и 10 МБ JSON; typed arrays вместо объектов попыток.</li>
+  </ul>
+</section>
+
+<script>
+const F = [
+  // ---- stage 7: waves ----
+  { id: 'W1', fixed: '3ee1738', sev: 'mid', area: 'page', fix: '7.1', how: 'browser', title: 'Подсказки кружков шагов показывают «undefined»',
+    loc: ['wavefw/sva.js:566-569'],
+    what: 'Параметр x у tip(x, y, view) (координата указателя) затеняет объект шага x из m.steps.map((x, k) => …), поэтому x.label = undefined. Все подсказки кружков на всех страницах: «step 1 undefined at cycle 6 — …»; у ✕ — «undefined: expected PREADY …», заметка повторяется дважды.',
+    why: 'Подсказка шага — основной способ прочитать, что проверяет кружок; сейчас она бесполезна везде.',
+    fixText: 'Переименовать параметр (tip(px, y, view)) или внешнюю переменную; у ✕ — «${stp.label}: …» без повтора заметки. Smoke: навести на кружок и проверить title.' },
+  { id: 'W2', fixed: '3ee1738', sev: 'mid', area: 'page', fix: '7.1', how: 'browser', title: 'Подсветка выбранной попытки остаётся после Unbind / Evaluate / ✕ / Clear',
+    loc: ['wavefw/sva.js:708', 'wavefw/sva.js:733', 'wavefw/sva.js:744', 'wavefw/sva.js:986-988', 'wavefw/sva.js:1046-1056'],
+    what: 'Эти пути ставят selA = null, но не трогают v.extraPicks: после выбора apb_demo_no_wait #2 (6 picks, 129 строк приглушены) и Unbind / Evaluate / ✕ остаются 6 picks и 129 приглушённых строк, после Clear — 28. Снимает только Esc.',
+    why: 'Вид остаётся в режиме подсветки и указывает на строки, которых может уже не быть.',
+    fixText: 'Один dropSel(): selA = null, v.extraPicks = new Map(), перерисовка; звать везде, где выбор теряет смысл.' },
+  { id: 'W6', fixed: '3ee1738', sev: 'mid', area: 'page', fix: '7.1', how: 'browser', title: 'Clear и ✕ перерисовывают и пересчитывают отчёт на каждую привязку',
+    loc: ['wavefw/sva.js:1055', 'wavefw/sva.js:988', 'wavefw/sva.js:748'],
+    what: 'На большой странице report() — 74 мс (2,7 МБ входа), redraw — 57 мс синхронно и 173 мс со сводкой. Clear: 5 привязок × (renderNames + draw + report) = 957 мс. Сводка пересчитывается и на каждый клик по счётчику и каждую оценку.',
+    why: 'Секундная задержка на одной кнопке; растёт линейно с числом привязок.',
+    fixText: 'В циклах changed(b, false) и одна redraw() в конце; сводка — один раз на задачу (queueMicrotask / setTimeout 0); версия результатов, по которой 8.1 кэширует отчёт.' },
+  { id: 'W3', fixed: '3ee1738', sev: 'low', area: 'page', fix: '7.1', how: 'browser', title: 'Значение полосы не видит длинную попытку за 64 более поздними',
+    loc: ['wavefw/sva.js:544-547'],
+    what: 'Поиск с конца останавливается после 64 попыток с t0 ≤ t; начавшаяся раньше и ещё идущая попытка пропускается. Синтетика: попытка 0 active на циклах 0–20 и 70 коротких pass — lane.value(195 нс) = "" вместо «active».',
+    why: 'Именно длинная открытая попытка — то, что хочется увидеть в колонке значений.',
+    fixText: 'Префиксный максимум t1 по atts; идти назад, пока prefixMaxT1 ≥ t.' },
+  { id: 'W4', fixed: '3ee1738', sev: 'low', area: 'page', fix: '7.1', how: 'browser', title: 'Линия курсора закрывает стрелку отказа выбранной попытки',
+    loc: ['wavefw/wavefw.js:1230', 'wavefw/sva.js:796'],
+    what: 'Курсор рисуется после paintBody и оверлеев; select ставит курсор на начало попытки. Для отказа в том же цикле (a |-> b, оба отказа APB) пунктирная красная стрелка вертикальна ровно под курсором — видны только наконечник и подпись.',
+    why: 'Выбор попытки как раз и должен показать эту стрелку.',
+    fixText: 'Второй проход оверлеев плагинов после курсора, либо сдвиг вертикальной стрелки отказа на несколько пикселей.' },
+  { id: 'W5', fixed: '3ee1738', sev: 'low', area: 'page', fix: '7.1', how: 'browser', title: 'Группы отвязанных привязок не освобождаются',
+    loc: ['wavefw/wavefw.js:148', 'wavefw/sva.js:582'],
+    what: 'withExtra регистрирует группы плагина в M.groups и не удаляет их; оверлей группы держит shape и результаты. 20 000 попыток: куча 5,44 → 11,13 МБ; после Unbind + Esc — 11,29 МБ, M.groups 15 (одна лишняя); удаление лишней — 2,14 МБ. Каждый Clear / rebind добавляет ещё одну.',
+    why: 'Утечка растёт при работе с большими результатами.',
+    fixText: 'withExtra помнит id добавленных групп и удаляет невозвращённые (и их v.collapsed).' },
+  { id: 'W7', fixed: '3ee1738', sev: 'low', area: 'page', fix: '7.1', how: 'browser', title: 'Подписи стрелок не по полосам; плотные места загромождены',
+    loc: ['wavefw/sva.js:589-617'],
+    what: 'Требование — «в полосы, как стрелки закладок». Подписи стоят в середине стрелки и пропускаются при наложении. arb_packet на fit (18 попыток в 20 % ширины): «3T 40T | 71T | 71T 48T 36T» поверх кружков.',
+    why: 'Отклонение от буквы промпта; на практике выбранная попытка всегда подписана.',
+    fixText: 'Оставить в интерактивном виде и записать в ENGINE.md (см. «Оставить»); полосы — только для статического SVG, если понадобится.' },
+  { id: 'W8', fixed: '3ee1738', sev: 'low', area: 'page', fix: '7.1', how: 'browser', title: 'Размер кружков выбирается по всей строке, а не по месту',
+    loc: ['wavefw/sva.js:557'],
+    what: 'small сравнивает число в окне × 16 px с шириной. 18 попыток в одной пятой вида дают крупные кружки с цифрами, слипшиеся в «1(((1».',
+    why: 'Нечитаемые места на реальных данных.',
+    fixText: 'Решать на кружок: маленький, если предыдущий нарисованный ближе 14 px (last уже есть).' },
+  { id: 'W9', fixed: '3ee1738', sev: 'low', area: 'page', fix: '7.1', how: 'read', title: 'Обрезанные трассы рисуются как сплошные',
+    loc: ['wavefw/sva.js:454', 'wavefw/sva.js:600-604'],
+    what: 'Трасса длиннее 63 шагов хранит первые 16 и последние 47 («truncated»: true). Рисунок соединяет шаг 16 со 17 обычной стрелкой с подписью на весь пропуск (например «4000T»), не показывая, что шаги выброшены. В sva.js truncated нигде не читается.',
+    why: 'Неверное прочтение трассы на длинных открытых попытках — сценарий E1 прошлого ревью.',
+    fixText: 'При a.truncated стрелка между pts[15] и pts[16] серая пунктирная, «… nT (trace cut)»; отметка в подсказке бара; smoke на синтетике.' },
+  { id: 'W10', fixed: '3ee1738', sev: 'low', area: 'page', fix: '7.1', how: 'browser', title: 'В подсказке бара нет времени конца',
+    loc: ['wavefw/sva.js:503'],
+    what: '«attempt 2: fail, cycles 6–9 (65.0 ns) — note»: промпт просит start / end / result / note; нет конца и failed_at, когда он отличается.',
+    why: 'Требование 07.',
+    fixText: '(${when(t0)} → ${when(t1)}), плюс «failed at …» при отличии.' },
+  { id: 'W11', fixed: '3ee1738', sev: 'low', area: 'engine', fix: '7.1', how: 'run', title: 'Clock-sampled: номера циклов меняются после Evaluate; CLI даёт лишний фронт',
+    loc: ['tools/svabuild.py:159-181', 'sva/cli/src/main.rs (cycles при --to)'],
+    what: 'С --to 200ns в cycles CLI 21 фронт, включая 205 000 пс за окном, а lane — 20 символов. Evaluate в странице даёт 19 циклов с 15 нс: тот же отказ — «cycle 9» вместо «cycle 10» в заметках и панели, попыток 18 → 17. Позиции верны, потому что времена из cycles самих результатов.',
+    why: 'Пользователь видит разные номера одного и того же отказа.',
+    fixText: 'CLI обрезает cycles по --to (lane и cycles одной длины); в тексте для людей — времена, а номера циклов помечать как «в этой оценке»; записать в ENGINE.md.' },
+  { id: 'W12', fixed: '3ee1738', sev: 'low', area: 'page', fix: '7.1', how: 'browser', title: 'На верхнем уровне имя получает хвостовой «@»',
+    loc: ['wavefw/sva.js:498'],
+    what: 'full = `${label}@${scope}`; для scope "" Copy даёт «a_req_ack@», шаги — «a_req_ack@/s1» (docs/index.html).',
+    why: 'Мелкая порча копирования и поиска.',
+    fixText: 'opt.scope ? label + "@" + scope : label.' },
+  { id: 'W13', fixed: '3ee1738', sev: 'low', area: 'page', fix: '7.1', how: 'run', title: 'Контраст цифр в кружках ниже 4,5:1',
+    loc: ['wavefw/sva.js:484', 'wavefw/wavefw.css:19', 'wavefw/wavefw.css:31', 'wavefw/wavefw.css:39', 'wavefw/wavefw.css:47'],
+    what: 'Цифра 9 px на цвете статуса: light pass 4,37, disabled / capped 3,32; white pass 3,45, disabled 3,32, active 4,2. Тёмная тема 4,8–7,9. Capped и disabled в light / white один цвет #868e96 (различает штриховка).',
+    why: 'Читаемость мелкого текста.',
+    fixText: 'Светлый pass ≈ #237032, disabled / capped ≈ #6c757d (capped чуть иным оттенком), или цифра цветом --fg на светлой заливке.' },
+  { id: 'W14', fixed: '3ee1738', sev: 'low', area: 'page', fix: '7.1', how: 'read', title: 'Дублирование кода рисования',
+    loc: ['wavefw/sva.js:139', 'wavefw/sva.js:432-434', 'wavefw/sva.js:542-547', 'wavefw/sva.js:565-567', 'wavefw/sva.js:494-495', 'wavefw/sva.js:937'],
+    what: 'Четыре копии нижней границы (lastBefore, firstEnd, firstT, firstAt); одинаковый хит-тест в click / tip у полосы и у шага; заголовок группы заново собирает строку счётчиков; lanes[0] и lanes[1] двумя одинаковыми лямбдами; мёртвый тернарник num(a.kind === "cover" ? "pass" : "pass").',
+    why: 'Каждое из исправлений выше иначе придётся делать в нескольких местах.',
+    fixText: 'Один lowerBound(n, at, t), один hitAt(hits, x, y) на вид строки, plainCounts в заголовке.' },
+
+  // ---- stage 8: core and CLI ----
+  { id: 'P1', fixed: 'af1b00b, 555ad76', sev: 'crit', area: 'engine', fix: '8.1', how: 'run', title: 'Одинокий идентификатор роняет парсер, а страница ломается насовсем',
+    loc: ['sva/core/src/parse.rs:165 (tok)', 'wavefw/sva.js:259-266 (reparse)', 'wavefw/sva.js:287-293 (loadFiles)', 'tools/mkconfig.py (--update)'],
+    what: 'sva parse на файле «a», «a b», «garbage», «x {{{» — exit 134: «index out of bounds: the len is 2 but the index is 2» (tok() индексирует t[i] за концом). В странице Load file… с «a» даёт «cannot load: unreachable», дальше каждый Evaluate — «unreachable»; файл уже в localStorage, после перезагрузки SVA.ready() отклоняется и все панели скрыты — 0 ассертов, даже свои 14 у страницы, кнопка Clear недоступна. mkconfig --sva пишет "bind": [], при --update стирая список.',
+    why: 'Одна опечатка в файле пользователя выключает проверки на странице без пути восстановления.',
+    fixText: 'tok() / at() безопасны на EOF (как tok_at) + случай в корпусе и фаззинг коротких входов; reparse ловит ошибку e.call, пересоздаёт экземпляр WASM после trap и показывает ошибку; локальный файл сохраняется после успешного разбора, панель с Clear видна всегда; mkconfig не трогает "bind" при ошибке разбора.' },
+  { id: 'R1', fixed: 'af1b00b', sev: 'mid', area: 'engine', fix: '8.1', how: 'run', title: 'Задержка неверна, если антецедент совпал больше 64 раз',
+    loc: ['sva/core/src/engine.rs:1068', 'sva/core/src/summary.rs:73'],
+    what: 'ante_end хранит ПЕРВЫЕ 64 совпадения, summary берёт последнее ante_end ≤ последнего шага консеквента. a[*1:200] |-> ##1 b при a=1 сто циклов и b=1: у каждого pass задержка 1, отчёт — 1 / 7,66 / 37 (100 − 63). Так же a[*1:$] |-> ##[1:$] b и любой req ##[0:$] busy |-> … с длинным busy. Предел нигде не описан.',
+    why: 'Неверные числа без предупреждения именно на длинных рукопожатиях.',
+    fixText: 'Хранить первые k и последние k (как трассу) с флагом ante_truncated, или хотя бы всегда последнее; описать предел в ENGINE.md и схеме; тест.' },
+  { id: 'R2', fixed: 'af1b00b', sev: 'mid', area: 'engine', fix: '8.1', how: 'run', title: 'Один ассерт из нескольких файлов результатов смешивается',
+    loc: ['sva/core/src/summary.rs:206', 'sva/core/src/summary.rs:162', 'sva/core/src/summary.rs:173', 'sva/cli/src/main.rs:571-575'],
+    what: 'sva report r1.json r2.json, a_same@tb по двум дампам (1 и 2 отказа): каждый testcase JUnit перечисляет все 3 отказа; строки Markdown не различить; meta берётся от последнего файла (заголовок и дамп B для A+B); --title игнорируется, если у входа есть meta.title.',
+    why: 'Ночной прогон по нескольким дампам — основной сценарий sva report.',
+    fixText: 'Индекс строки у каждого отказа, JUnit фильтрует по нему; колонка / classname-суффикс источника при нескольких документах; список meta; --title главнее.' },
+  { id: 'R3', fixed: 'af1b00b', sev: 'mid', area: 'engine', fix: '8.1', how: 'run', title: 'Ассерт только с capped-попытками зелёный в CI',
+    loc: ['sva/core/src/summary.rs:198-212', 'sva/cli/src/main.rs:442', 'sva/cli/src/main.rs:590'],
+    what: 'a |-> ##[1:300] b ##[1:300] c при c, которое не приходит: 1 capped, истинный ответ — fail. Exit 0, testcase проходит, capped виден только как property набора и в system-out (GitLab их не показывает). Поднять предел из CLI нельзя: Options.max_threads есть, флага нет.',
+    why: 'Непроверенное выдаётся за проверенное.',
+    fixText: 'testcase с capped > 0 — <error message="N attempts without verdict (thread limit)">, errors считается; выход 1 при capped (текст «not proven»); флаг --max-threads N.' },
+  { id: 'R4', fixed: 'af1b00b', sev: 'mid', area: 'engine', fix: '8.1', how: 'run', title: 'Заметки ассерта нигде не показываются',
+    loc: ['sva/core/src/summary.rs:91', 'sva/core/src/summary.rs:158-165', 'sva/core/src/summary.rs:211', 'sva/core/src/summary.rs:227-237'],
+    what: '«thread limit 256 reached at cycle 256 (attempt 0)» есть в results.json, но 0 раз в md и xml; так же «values cut to 64 bits», «short column».',
+    why: 'Причина capped и усечений теряется в отчёте.',
+    fixText: 'Строка Notes под строкой ассерта (md / html), в system-out (JUnit), в панели.' },
+  { id: 'R5', fixed: 'af1b00b', sev: 'mid', area: 'engine', fix: '8.1', how: 'run', title: '--report x.json пишет сводку, а sva report молча пересчитывает её',
+    loc: ['sva/cli/src/main.rs:523', 'sva/cli/src/main.rs:569-578'],
+    what: 'sva eval … --report report.json, затем sva report report.json: «2 fail», но «Failures (0) None.», первый / последний отказ «—». Имя совпадает с report.json страницы, который {meta, results}.',
+    why: 'Два файла с одним именем и разным содержимым; второй читается неверно.',
+    fixText: '--report *.json пишет {meta, results}, как страница; сводка — sva report --json; sva report отказывается от документа с totals с понятным сообщением.' },
+  { id: 'R6', fixed: 'af1b00b', sev: 'mid', area: 'engine', fix: '8.1', how: 'run', title: 'Отсутствующий дамп — abort вместо ошибки',
+    loc: ['sva/cli/src/main.rs:293'],
+    what: '--waves nofile.vcd: паника в wellen viewers.rs:157, exit 134 (core dump) вместо 2.',
+    why: 'CI получает падение процесса вместо сообщения.',
+    fixText: 'Проверить файл до wellen или взять API с Result; тест в cli.rs.' },
+  { id: 'R7', fixed: 'af1b00b', sev: 'low', area: 'engine', fix: '8.1', how: 'run', title: 'sva report и run_json принимают что угодно',
+    loc: ['sva/cli/src/main.rs:569-578', 'sva/core/src/summary.rs:60-61', 'sva/core/src/summary.rs:99', 'sva/core/src/lib.rs:236-243'],
+    what: '{}, [], 42, {"results":5} — пустой отчёт и exit 0. end < start даёт longest = 18446744073709551613 в release и панику в debug. Строковый stats.fail считается 0. {"format":"pdf"} — text: null молча; {"report": null} уходит в разбор.',
+    why: 'Мусор на входе даёт зелёный CI.',
+    fixText: 'Проверка на входе sva report (массивы assertions, иначе exit 2); saturating_sub / max; неизвестный формат — ошибка.' },
+  { id: 'R8', fixed: 'af1b00b', sev: 'low', area: 'engine', fix: '8.1', how: 'run', title: '«Первый отказ» — по началу попытки, CLI показывает цикл отказа',
+    loc: ['sva/core/src/summary.rs:51', 'sva/core/src/summary.rs:85-86', 'sva/core/src/summary.rs:124', 'sva/cli/src/main.rs:283-285'],
+    what: 'a |-> (##5 b and ##1 c), попытки на 0 и 2: CLI «first fail at cycle 5 (55 ns)», отчёт — First failure «5 ns (cycle 0)», Last «25 ns (cycle 2)»; самое раннее обнаружение — 35 нс (цикл 3). Тело JUnit без цикла отказа.',
+    why: 'CLI и отчёт называют разные моменты «первым отказом».',
+    fixText: 'Первый / последний и порядок списка — по failed_at (время $error в симуляторе), начало показывать рядом; CLI и отчёт согласовать.' },
+  { id: 'R9', fixed: 'af1b00b', sev: 'low', area: 'engine', fix: '8.1', how: 'run', title: 'Пробелы в кодах выхода',
+    loc: ['sva/cli/src/main.rs:333-335', 'sva/cli/src/main.rs:491-497', 'sva/cli/src/main.rs:590'],
+    what: 'Файл без ассертов (или всё отфильтровано) — exit 0 и «0 assertions»: CI зелёный без проверок. Синтаксическая ошибка — exit 1, как отказ, и отчёт не пишется. Missing-сигналы: 2 в sva eval, но 0 в sva report на тех же результатах.',
+    why: 'Код выхода должен различать «не проверено» и «проверено, упало».',
+    fixText: '2 = ошибка настройки (нет ассертов, ошибка разбора, missing), 1 = отказ или capped, 0 = всё проверено и прошло; одинаково в eval и report; описать в README.' },
+  { id: 'R10', fixed: 'af1b00b', sev: 'low', area: 'engine', fix: '8.1', how: 'run', title: 'Неполное экранирование Markdown',
+    loc: ['sva/core/src/summary.rs:120-122', 'sva/core/src/summary.rs:154', 'sva/core/src/summary.rs:162'],
+    what: 'md() экранирует только | и \\n. Экранированный идентификатор с обратной кавычкой ломает code span; <, *, _ в заметках и meta не экранируются (путь дампа с <img …> станет HTML в рендерах, которые его пропускают).',
+    why: 'Отчёт вставляют в MR и вики.',
+    fixText: 'Code span с ограничителем длиннее самой длинной серии `; & и < вне кода — сущностями; \\r тоже.' },
+  { id: 'R11', fixed: 'af1b00b', sev: 'low', area: 'engine', fix: '8.1', how: 'run', title: 'Строгость JUnit',
+    loc: ['sva/core/src/summary.rs:180-182', 'sva/core/src/summary.rs:190', 'sva/core/src/summary.rs:196'],
+    what: 'Управляющий символ в --title или пути — невалидный XML (ElementTree: not well-formed). Нет атрибутов time (строгий Ant XSD их требует; GitLab и Jenkins терпят). errors="0" зашит.',
+    why: 'Совместимость с CI.',
+    fixText: 'Выбрасывать символы < 0x20 кроме \\t\\n\\r; time="0"; errors из R3.' },
+  { id: 'R12', fixed: 'af1b00b, 555ad76', sev: 'low', area: 'engine', fix: '8.1', how: 'run', title: 'Расхождения правила имён',
+    loc: ['sva/cli/src/main.rs:208', 'sva/cli/src/main.rs:212', 'sva/cli/src/main.rs:356', 'wavefw/sva.js:339', 'tools/svabuild.py:78'],
+    what: 'Неоднозначность: valid при i_valid и o_valid с --ignore-prefix i_,o_ молча берёт o_valid (порядок объявления): 0 pass / 3 fail против 3 / 0 с i_valid; все три реализации берут «первое» в своём порядке. Верх: topc → i_topc находит Names, но не Rust (path.is_empty() пропускает шаг префикса). По умолчанию (--resolve up) data[7:4] у 4-битной data привязывается и падает 3 раза как «unknown (x)».',
+    why: 'Одно правило должно давать один ответ или одну ошибку.',
+    fixText: 'Неоднозначное совпадение по префиксу — ошибка привязки «valid: i_valid or o_valid» во всех трёх; убрать path.is_empty(); проверка ширины в обоих режимах; случаи в smoke sva_names.' },
+  { id: 'R13', fixed: 'af1b00b', sev: 'mid', area: 'engine', fix: '8.1', how: 'run', title: 'Тексты отчёта и печатный раздел растут с каждым отказом',
+    loc: ['sva/core/src/summary.rs:239-249', 'tools/mkhtml.py:205-212'],
+    what: '16 061 отказ: печатный раздел 4,4 МБ и 16 066 строк в странице 17,6 МБ (сотни печатных страниц); md 3,5 МБ, html 4,7 МБ, JSON сводки 4,9 МБ.',
+    why: 'Страница и отчёт для людей становятся непригодны ровно когда проверка нашла много.',
+    fixText: 'В md / html / печатном разделе — первые N отказов на ассерт (например 20) и «… и ещё M (report.json)»; полный список только в JSON; параметр в run_json и флаг CLI.' },
+  { id: 'R14', fixed: 'af1b00b', sev: 'low', area: 'engine', fix: '8.1', how: 'run', title: 'Точность и единицы time_text',
+    loc: ['sva/core/src/summary.rs:21-29', 'sva/cli/src/main.rs:270'],
+    what: 'От 1 мкс разрешение 1 нс (1 000 000 и 1 000 400 пс оба «1.000 us»); 2 мс — «2000.000 us». CLI печатает «3005 ns», отчёт — «3.005 us». Отказы разных документов с разными единицами сортируются числом (циклы против пс).',
+    why: 'Время отказа в отчёте нельзя найти в дампе точно.',
+    fixText: 'Столько цифр, сколько нужно для точности, без хвостовых нулей; ms и s; один форматтер для CLI и отчёта; сортировка с учётом единиц.' },
+  { id: 'R15', fixed: 'af1b00b', sev: 'low', area: 'engine', fix: '8.1', how: 'run', title: 'Две вводящие в заблуждение ячейки таблицы',
+    loc: ['sva/core/src/summary.rs:58-62', 'sva/core/src/summary.rs:162', 'sva/core/src/summary.rs:231', 'wavefw/sva.js:936-937'],
+    what: 'longest учитывает active-попытки, открытые до конца дампа (399 циклов), и capped (556). У cover в колонке Fail — несовпадения («cover: 2 hit | 19 | 2 | 17» читается как 17 отказов) — в md, html и панели.',
+    why: 'Числа таблицы читаются как вердикты.',
+    fixText: 'longest по решённым попыткам (открытую помечать «open»); у cover в Fail — «—».' },
+  { id: 'R16', fixed: 'af1b00b', sev: 'low', area: 'engine', fix: '8.1', how: 'run', title: 'Квадратичный JUnit и лишние копии',
+    loc: ['sva/core/src/summary.rs:206', 'sva/core/src/summary.rs:104'],
+    what: 'JUnit O(строки × отказы): 50 × 20 000 — 12 с. summarize глубоко копирует каждый отказ (.as_array().cloned()): 1 млн отказов — 12 с. markdown() и html() строят одну строку дважды.',
+    why: 'Масштаб ночных прогонов.',
+    fixText: 'take() вместо clone, группировка отказов по индексу строки; одна модель ячеек для md и html.' },
+  { id: 'P7', fixed: 'af1b00b', sev: 'low', area: 'engine', fix: '8.1', how: 'run', title: 'HTML-отчёт не пишет «not evaluated»',
+    loc: ['sva/core/src/summary.rs:227-237', 'sva/core/src/summary.rs:161'],
+    what: 'Markdown: «`a_al` (not evaluated: no rdy)»; html() — только нули. Печатный раздел не отличает непроверенный ассерт от несработавшего.',
+    why: 'Нули выдаются за результат.',
+    fixText: 'Тот же текст missing и класс строки в html().' },
+
+  // ---- stage 8: page ----
+  { id: 'P2', fixed: '555ad76', sev: 'mid', area: 'page', fix: '8.1', how: 'browser', title: 'Список Failures и сводка не масштабируются',
+    loc: ['wavefw/sva.js:903', 'wavefw/sva.js:917-950', 'wavefw/sva.js:748'],
+    what: 'Арбитр, 5 привязок, 16 061 отказ (17,6 МБ, 2 вида): клик Failures рисует все строки (6,2 МБ HTML панели) — ~1,2 с; затем Table — 2,8 с (перестраивает и Failures); report() — 220–300 мс синхронного WASM; сводка + заполнение до 8,6 с с раскладкой. Всё это на каждый render() / redraw(): фильтр, Bind…, Unbind, конец оценки. Список фильтра по счётчику ограничен 200, этот — нет.',
+    why: 'Страница замирает на секунды ровно тогда, когда отказов много.',
+    fixText: 'Первые 500 строк и «… ещё N · фильтр или report.md»; сводка кэшируется по версии результатов (W6); перестраивать только открытую таблицу.' },
+  { id: 'P3', fixed: '555ad76', sev: 'mid', area: 'page', fix: '8.1', how: 'run', title: 'Привязка через alias показывает 0 как проверенную',
+    loc: ['wavefw/sva.js:682-697', 'tools/svabuild.py:159', 'tools/mkconfig.py:221'],
+    what: 'mkconfig --sva привязывает both |-> rdy через alias rdy сигнала tb.dut.ready ("show": true). При сборке sva eval --resolve scope: «missing rdy», нулевые stats. Страница привязку разрешает (bound), но держит результат сборки и не оценивает: «bound to tb.dut · 0 pass · 0 fail · 0 vacuous», итоги «1 bound · 0 attempts».',
+    why: 'Выглядит как «проверено, всё хорошо», хотя не проверялось.',
+    fixText: 'CLI получает алиасы (--alias short=full.path, повторяемый) и svabuild передаёт алиасы вида — правило действительно одно; страница отбрасывает результат сборки с missing, если сама разрешила все имена, и оценивает.' },
+  { id: 'P4', fixed: '555ad76', sev: 'low', area: 'page', fix: '8.1', how: 'browser', title: 'Без результатов нет строки итогов',
+    loc: ['wavefw/sva.js:927'],
+    what: '12 загружено, 0 привязано (или только cannot / error) — .svr пуст, хотя report.md скачивается как отчёт по 0 ассертам.',
+    why: 'Требование «loaded / bound» в итогах.',
+    fixText: 'Строка итогов всегда, таблицы — только при данных.' },
+  { id: 'P5', fixed: '555ad76', sev: 'low', area: 'page', fix: '8.1', how: 'browser', title: '«N bound» считает непроверенные привязки',
+    loc: ['wavefw/sva.js:931'],
+    what: '«12 loaded · 3 bound · 0 with failures · 19 attempts» при одной оценённой, одной cannot и одной с ошибкой; после Unbind оценённой итоги исчезают, хотя 2 «bound».',
+    why: 'Итоги должны сходиться с таблицей.',
+    fixText: 'bound = оценённые; рядом «(1 cannot bind, 1 error)».' },
+  { id: 'P6', fixed: '555ad76', sev: 'mid', area: 'tools', fix: '8.1', how: 'browser', title: 'Печатный раздел обрезается на A4',
+    loc: ['tools/mkhtml.py:50-57'],
+    what: 'white-space: nowrap на всех td, print CSS ставит только break-before. page.pdf() у apb.html: таблица 1195 px, колонка Latency срезана краем даже с коротким scope apb_tb; длинные scope арбитра — хуже. Вьюеры печатаются с барами, панелями и кнопками; button.theme получает break-inside: avoid, где, видимо, нужен display: none.',
+    why: 'Печатный раздел и сделан ради бумаги / PDF.',
+    fixText: 'В @media print: перенос в Scope и Note (white-space: normal, word-break: break-all для scope), мельче шрифт; скрыть .wv .bar, .wv .sva, button.theme; smoke: ширина таблицы ≤ ширины страницы A4 в print media.' },
+  { id: 'P8', fixed: 'af1b00b, 555ad76', sev: 'low', area: 'page', fix: '8.1', how: 'read', title: 'Мелочи таблицы в панели',
+    loc: ['wavefw/sva.js:936-937'],
+    what: 'Задержка «1 / 1 / 1» в странице и «1 / 1.0 / 1» в md / html (JSON теряет «.0», видно на sva-table.png против report.md).',
+    why: 'Одна реализация должна выглядеть одинаково.',
+    fixText: 'Форматировать avg в summary.rs (строкой) или toFixed(1) в странице.' },
+
+  // ---- stage 8: tools and build ----
+  { id: 'T1', fixed: '555ad76', sev: 'mid', area: 'tools', fix: '8.1', how: 'run', title: 'mkconfig --update --sva выбрасывает ручные строки bind',
+    loc: ['tools/mkconfig.py:218-235', 'tools/mkconfig.py:310-321'],
+    what: 'После правки конфига и mkconfig --update --sva (что всегда делает make config SVA=) сохраняются только show у сгенерированных строк. Теряются: шаблон {"assert":"apb_cov_*","scope":"apb_tb"}, строка "apb_known@apb_tb", строка ассерта не из этих файлов, ключ пользователя "note", остальные файлы в "sva" (заменяются). Сообщение «2 bound to their only instance» считает выбор пользователя единственным совпадением.',
+    why: '--update обещает сохранить правки.',
+    fixText: 'Оставлять несгенерированные записи (строки, шаблоны, неизвестные ассерты, лишние ключи), "sva" объединять; сообщение — «N chosen».' },
+  { id: 'T2', fixed: '555ad76', sev: 'low', area: 'tools', fix: '8.1', how: 'run', title: 'Несуществующий --sva-bin молча заменяется',
+    loc: ['tools/svabuild.py:22-28'],
+    what: 'mkhtml --sva-bin /nonexist/sva собирает с /tmp/wavefw/sva-target/release/sva без сообщения.',
+    why: 'Явный параметр должен работать или падать.',
+    fixText: 'Явный и неверный путь — сразу ошибка.' },
+  { id: 'T3', fixed: '555ad76', sev: 'low', area: 'tools', fix: '8.1', how: 'read', title: 'Сборка оценивает каждую привязку дважды; report() берёт файлы первого вида',
+    loc: ['tools/mkhtml.py:147-154', 'tools/mkhtml.py:205-207', 'tools/svabuild.py:202-209'],
+    what: 'convert() каждого вида запускает sva parse + sva eval по scope, затем report() разбирает и оценивает заново по всему дампу — около половины +1,15 с на test_stream_video. report() берёт файлы, дамп и префиксы первого вида (sva_in): привязки другого вида со своими "sva" или дампом молча выпадают (quiet=True).',
+    why: 'Время сборки и неполный печатный раздел.',
+    fixText: 'Переиспользовать результаты вида, когда окно = весь дамп; файлы и дамп брать по виду; печатать заметки.' },
+  { id: 'T4', fixed: '555ad76', sev: 'low', area: 'tools', fix: '8.1', how: 'read', title: '--no-sva всё равно запускает sva eval',
+    loc: ['tools/mkhtml.py:147-154'],
+    what: 'Оценка выполняется при сборке, а результат выбрасывается.',
+    why: 'Лишнее время.',
+    fixText: 'Пропускать svabuild при a.no_sva.' },
+  { id: 'T5', fixed: '555ad76', sev: 'low', area: 'tools', fix: '8.1', how: 'run', title: 'Makefile: опечатка в SVA= теряется, шаблоны bind без кавычек',
+    loc: ['Makefile:128-131', 'Makefile:135'],
+    what: 'SVA_FILES через $(wildcard) молча выбрасывает несуществующий файл: make html SVA=nonexist.sva BIND="*@tb" запускает mkhtml с --bind *@tb и без --sva. make config SVA=nonexist.sva даёт «--sva --sva-bin …» — непонятная ошибка argparse. --bind arb_*@tb.x не в кавычках — шелл раскрывает его.',
+    why: 'Опечатка даёт страницу без проверок вместо ошибки.',
+    fixText: '$(error no file matches SVA=…) при пустом wildcard; кавычки \'$(b)\'.' },
+  { id: 'T6', fixed: '555ad76', sev: 'low', area: 'tools', fix: '8.1', how: 'run', title: 'Встроенный читатель VCD не понимает компактный заголовок',
+    loc: ['tools/dumpscan.py:70-95'],
+    what: 'Заголовок разбирается по одной команде на строку: «$upscope $end $upscope $end» в одной строке снимает один уровень, «… $enddefinitions $end» в той же строке пропускается — 0 изменений. mkconfig поставил tb.dut2 под tb.dut, а wellen / sva — под tb: правило имён разошлось. Ошибка старше этапа 8.',
+    why: 'Расхождение иерархии между инструментами.',
+    fixText: 'Токенизировать поток заголовка, а не строки; тест на однострочном VCD.' },
+  { id: 'T7', fixed: '555ad76', sev: 'low', area: 'tools', fix: '8.1', how: 'run', title: 'Экранированные идентификаторы режутся как иерархия',
+    loc: ['tools/svabuild.py:51', 'wavefw/sva.js:296'],
+    what: 'Сигнал \\esc.x  разбирается в имя «esc.x», которое страница, Names и CLI считают scope «esc» + «x»; страница и Names создают призрачный scope «tb.dut.\\esc». Все три согласны (никто не разрешает), но такой сигнал не привязать.',
+    why: 'Редко, но такие имена бывают в нетлистах.',
+    fixText: 'Сохранять экранирование в имени сигнала парсера и не резать экранированные имена по точкам (SPLIT).' },
+
+  // ---- docs ----
+  { id: 'D1', fixed: '8034258', sev: 'mid', area: 'docs', fix: '8.1', how: 'read', title: 'README преувеличивает «одно правило имён»',
+    loc: ['README.md:200-203', 'docs/sva/ENGINE.md:43'],
+    what: '«Names resolve by one rule everywhere (… sva eval --resolve scope): the exact name, then the shown name (alias) …» — у CLI нет алиасов (ENGINE.md сам это говорит), отсюда P3.',
+    why: 'Документация обещает то, чего нет.',
+    fixText: 'После P3 (алиасы в CLI) утверждение станет верным; иначе — оговорка.' },
+  { id: 'D2', fixed: '8034258', sev: 'low', area: 'docs', fix: '8.1', how: 'read', title: 'Размер движка назван тремя способами',
+    loc: ['README.md:206', 'tools/mkhtml.py:124'],
+    what: 'README «~250 kB», help mkhtml «~230 kB»; --no-sva на деле убирает sva.wasm.js (251 кБ) и sva.js (77 кБ) — около 328 кБ.',
+    why: 'Мелкая неточность.',
+    fixText: 'Одна цифра с обоими файлами.' },
+  { id: 'D3', fixed: '8034258', sev: 'low', area: 'docs', fix: '8.1', how: 'read', title: 'В таблице инструментов README нет опций 7–8',
+    loc: ['README.md:334-335'],
+    what: 'Строка mkconfig без --sva, --sva-bin; строка mkhtml без --sva, --bind.',
+    why: 'Таблица — справочник опций.',
+    fixText: 'Дописать.' },
+  { id: 'D4', fixed: '8034258', sev: 'low', area: 'docs', fix: '8.1', how: 'run', title: '«No counts» для отсутствующего сигнала неверно',
+    loc: ['docs/sva/ENGINE.md:30'],
+    what: 'В results JSON есть missing и нулевой объект stats, а не «нет счётчиков».',
+    why: 'Документ формата.',
+    fixText: 'Исправить формулировку (и P7: в html — «not evaluated»).' },
+  { id: 'D5', fixed: '8034258', sev: 'low', area: 'docs', fix: '8.1', how: 'read', title: 'Мелкие пропуски в README и ENGINE.md',
+    loc: ['README.md:233', 'README.md:245', 'docs/sva/ENGINE.md:16'],
+    what: '--report пишет JUnit и для .xml; у sva report в ENGINE.md нет --title; предел 200 строк у списка по счётчику не упомянут; не описаны предел ante_end и запасной путь задержки через end (вложенная |=> даёт 2, (x|=>y) and … — без задержки); форма JSON сводки описана частично.',
+    why: 'Справочник неполон.',
+    fixText: 'Дописать вместе с правками 8.1.' },
+  { id: 'D6', fixed: '8034258', sev: 'low', area: 'docs', fix: '8.1', how: 'read', title: 'В API docs/index.html нет поверхности отчёта',
+    loc: ['docs/index.html:316', 'docs/index.html:463-467'],
+    what: 'Нет строки view.sva.report(format) → {summary, text, bs, input}, нет панели Table / Failures / report.md / report.json; главный абзац SVA (316) их не упоминает.',
+    why: 'Страница документации — справочник API.',
+    fixText: 'Строки API и фраза в абзаце.' },
+];
+const K = [
+  { id: 'K1', title: 'Одна реализация отчёта в summary.rs', text: 'Страница, sva eval --report, sva report и mkhtml дают одни и те же числа байт в байт именно поэтому. Не переписывать на JS / Python; строгую проверку добавить только на входе sva report (R7).' },
+  { id: 'K2', title: 'report.json страницы = {meta, results}', text: 'Выгрузка страницы сразу становится артефактом CI без нового формата; --report x.json должен писать то же (R5).' },
+  { id: 'K3', title: 'Capped отдельно от fail в числах', text: 'Нет ложных отказов от предела потоков. Сделать их видимыми в CI (R3, R4), но не считать отказами.' },
+  { id: 'K4', title: 'Определение задержки', text: 'Последний cons-шаг группы 0 минус последнее ante_end перед ним: верно для рукопожатий и дёшево. Описать запасной путь через end и предел (R1, D5).' },
+  { id: 'K5', title: 'Cover без попаданий — skipped в JUnit, несовпадения — не отказы', text: 'Соответствует IEEE и ожиданиям CI.' },
+  { id: 'K6', title: 'Рукописные writer’ы XML / MD / HTML и today() без крейтов', text: 'Верны там, где проверены, и держат WASM маленьким.' },
+  { id: 'K7', title: 'Подписи стрелок в середине с пропуском при наложении (W7)', text: 'Полосы подписей в интерактивном виде добавили бы строки на привязку и меняли раскладку при каждом сдвиге. Выбранная попытка подписана всегда. Записать как осознанное отклонение.' },
+  { id: 'K8', title: 'Бары и полоса по циклам центрированы на фронте выборки', text: 'Согласуется с семантикой выборки SVA и с закладками на фронтах.' },
+  { id: 'K9', title: 'Три подполосы, затем слияние ×n', text: 'Ограниченная высота; подсказка, фильтр по счётчику и список попыток дают подробности.' },
+  { id: 'K10', title: 'Подсветка выбора через extraPicks / hl8', text: 'Переиспользует механизм подсветки вьюера, как просил промпт. Чинить только очистку (W2).' },
+  { id: 'K11', title: 'Проходящие группы свёрнуты, если больше трёх привязок в одном месте', text: 'Большие страницы остаются удобными (tsv: 3 из 5 свёрнуты).' },
+  { id: 'K12', title: 'Времена из cycles самих результатов', text: 'Поэтому результаты сборки верны поверх clock-sampled видов.' },
+  { id: 'K13', title: 'svaSignals = "view" по умолчанию', text: 'Копии сигналов во вьюерах, но не в SVG: нет дублей в фигурах; описано.' },
+  { id: 'K14', title: 'mkconfig: строка на кандидата с "show": false', text: 'Явно и удобно в diff; только сохранять ручные записи (T1).' },
+  { id: 'K15', title: 'Предел 200 у списка по счётчику, фильтр полосы по результату', text: 'Дёшево и полезно; тот же приём — для Failures (P2).' },
+  { id: 'K16', title: 'Печатный раздел — простой HTML на переменных страницы', text: 'Темы работают, JS не нужен; нужна только ширина для печати (P6) и предел строк (R13).' },
+];
+
+const SEV = { crit: 'критично', mid: 'средне', low: 'мелочь' }, AREA = { engine: 'ядро / CLI', page: 'страница', tools: 'инструменты', docs: 'документация' }, HOW = { run: 'запуск', browser: 'браузер', read: 'чтение' };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const KEY = 'wavefw.sva-review-78.done', OPEN = 'wavefw.sva-review-78.open';
+const store = { get(k) { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
+let done = new Set(store.get(KEY) || []), open = new Set(store.get(OPEN) || []);
+const filt = { st: new Set(['open', 'fixed']), sev: new Set(['crit', 'mid', 'low']), area: new Set(['engine', 'page', 'tools', 'docs']), fix: new Set(['7.1', '8.1']), how: new Set(['run', 'browser', 'read']) };
+
+document.getElementById('n-crit').textContent = F.filter(f => f.sev === 'crit' && !f.fixed).length;
+document.getElementById('nfixed').textContent = F.filter(f => f.fixed).length;
+document.getElementById('ntotal').textContent = F.length;
+document.getElementById('fcount').textContent = `(${F.length})`;
+
+function card(f) {
+  const li = document.createElement('li');
+  li.className = `f ${f.sev}${done.has(f.id) ? ' done' : ''}${open.has(f.id) ? ' open' : ''}`; li.dataset.id = f.id;
+  li.innerHTML = `<div class="head"><input type="checkbox" aria-label="сделано ${f.id}" ${done.has(f.id) ? 'checked' : ''}><span class="id">${f.id}</span><span class="ttl">${esc(f.title)}</span>
+    <span class="tag ${f.sev}">${SEV[f.sev]}</span><span class="tag">${AREA[f.area]}</span><span class="tag fix">→ ${f.fix}</span>${f.fixed ? `<span class="tag fixed" title="закрыто этим коммитом">✓ ${f.fixed}</span>` : ''}<span class="tag" title="как проверено">${HOW[f.how]}</span></div>
+    <div class="body"><dl><dt>где</dt><dd class="loc">${f.loc.map(l => `<code>${esc(l)}</code>`).join('')}</dd><dt>что</dt><dd>${esc(f.what)}</dd><dt>почему важно</dt><dd>${esc(f.why)}</dd><dt>что делать</dt><dd>${esc(f.fixText)}</dd>${f.fixed ? `<dt>закрыто</dt><dd>коммит <code>${f.fixed}</code> (этап ${f.fix})</dd>` : ''}</dl></div>`;
+  li.querySelector('.head').addEventListener('click', e => {
+    if (e.target.matches('input')) { if (e.target.checked) done.add(f.id); else done.delete(f.id); store.set(KEY, [...done]); li.classList.toggle('done', e.target.checked); progress(); return; }
+    li.classList.toggle('open'); if (li.classList.contains('open')) open.add(f.id); else open.delete(f.id); store.set(OPEN, [...open]);
+  });
+  return li;
+}
+function visible(f) {
+  const q = document.getElementById('q').value.trim().toLowerCase();
+  if (!filt.st.has(f.fixed ? 'fixed' : 'open') || !filt.sev.has(f.sev) || !filt.area.has(f.area) || !filt.fix.has(f.fix) || !filt.how.has(f.how)) return false;
+  if (document.getElementById('hidedone').checked && done.has(f.id)) return false;
+  if (q && !(f.id + ' ' + f.title + ' ' + f.what + ' ' + f.why + ' ' + f.fixText + ' ' + f.loc.join(' ')).toLowerCase().includes(q)) return false;
+  return true;
+}
+function render() {
+  const list = document.getElementById('list'); list.innerHTML = '';
+  const shown = F.filter(visible);
+  shown.forEach(f => list.appendChild(card(f)));
+  document.getElementById('none').hidden = shown.length > 0;
+  progress();
+}
+function progress() {
+  const n = F.length, d = F.filter(f => done.has(f.id)).length;
+  document.getElementById('bar').style.width = (100 * d / n) + '%'; document.getElementById('pct').textContent = `${d} / ${n}`;
+}
+document.querySelectorAll('.filters button[data-f]').forEach(b => b.addEventListener('click', () => {
+  const s = filt[b.dataset.f], v = b.dataset.v; if (s.has(v)) s.delete(v); else s.add(v); b.setAttribute('aria-pressed', s.has(v)); render();
+}));
+document.getElementById('q').addEventListener('input', render);
+document.getElementById('hidedone').addEventListener('change', render);
+document.getElementById('expand').addEventListener('click', e => {
+  const all = [...document.querySelectorAll('#list .f')], anyClosed = all.some(li => !li.classList.contains('open'));
+  all.forEach(li => { li.classList.toggle('open', anyClosed); if (anyClosed) open.add(li.dataset.id); else open.delete(li.dataset.id); });
+  store.set(OPEN, [...open]); e.target.textContent = anyClosed ? 'Свернуть все' : 'Раскрыть все';
+});
+document.getElementById('copy').addEventListener('click', () => {
+  const rows = F.filter(f => visible(f) && !done.has(f.id)).map(f => `- [ ] **${f.id} ${f.title}** (${SEV[f.sev]}, ${AREA[f.area]}, → ${f.fix}) — ${f.loc.map(l => '`' + l + '`').join(', ')}\n  ${f.what}\n  Fix: ${f.fixText}`);
+  const txt = rows.join('\n'), ta = document.getElementById('out'); ta.hidden = false; ta.value = txt || '(ничего не выбрано)'; ta.select();
+  try { navigator.clipboard.writeText(txt); } catch (e) {}
+});
+document.getElementById('reset').addEventListener('click', () => { done = new Set(); store.set(KEY, []); render(); });
+document.getElementById('keeplist').innerHTML = K.map(k => `<li class="f keep open"><div class="head"><span class="id">${k.id}</span><span class="ttl">${esc(k.title)}</span><span class="tag keep">оставить</span></div><div class="body"><p>${esc(k.text)}</p></div></li>`).join('');
+
+document.querySelectorAll('nav.tabs button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('nav.tabs button').forEach(x => x.setAttribute('aria-selected', x === b));
+  document.querySelectorAll('section[id^=tab-]').forEach(s => { s.hidden = s.id !== 'tab-' + b.dataset.tab; });
+  location.hash = b.dataset.tab;
+}));
+const h = location.hash.slice(1); if (h) { const b = document.querySelector(`nav.tabs button[data-tab="${h}"]`); if (b) b.click(); }
+(function () { const b = document.getElementById('theme'), modes = ['auto', 'light', 'dark'], names = { auto: 'авто', light: 'светлая', dark: 'тёмная' }; let i = 0;
+  const saved = store.get('wavefw.sva-review.theme'); if (saved && modes.includes(saved)) { i = modes.indexOf(saved); }
+  const apply = () => { if (modes[i] === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = modes[i]; b.textContent = 'Тема: ' + names[modes[i]]; store.set('wavefw.sva-review.theme', modes[i]); };
+  apply(); b.addEventListener('click', () => { i = (i + 1) % modes.length; apply(); }); })();
+render();
+</script>
+</body>
+</html>

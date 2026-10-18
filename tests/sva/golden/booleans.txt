@@ -1,0 +1,102 @@
+booleans.sv:6:3: warning: b_rel: compared as unsigned (no signed arithmetic in the engine): 8'sd1
+    6 |   b_rel:      assert property (@(posedge clk) data < 10 && addr <= 8'o377 || data > 'd3 && addr >= 8'sd1);
+      |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+module booleans ports clk:1 data:8 addr:8 be:4 st:2 v:1 w:1 x:1
+assert b_eq in booleans, line 4
+  clock     @(posedge clk)
+  expr      data == 8'hFF |-> addr != 8'd0
+  s1        data == 8'hFF
+  s2        addr != 8'd0
+  signals   clk:1 data:8 addr:8
+assert b_case_eq in booleans, line 5
+  clock     @(posedge clk)
+  expr      be === 4'b1x0z |-> data !== 'h0
+  s1        be === 4'b1x0z
+  s2        data !== 'h0
+  signals   clk:1 be:4 data:8
+assert b_rel in booleans, line 6
+  clock     @(posedge clk)
+  expr      data < 10 && addr <= 8'o377 || data > 'd3 && addr >= 8'sd1
+  s1        data < 10 && addr <= 8'o377 || data > 'd3 && addr >= 8'sd1
+  signals   clk:1 data:8 addr:8
+  note      compared as unsigned (no signed arithmetic in the engine): 8'sd1
+assert b_logic in booleans, line 7
+  clock     @(posedge clk)
+  expr      !v || w && !(x || v)
+  s1        !v || w && !(x || v)
+  signals   clk:1 v:1 w:1 x:1
+assert b_bitwise in booleans, line 8
+  clock     @(posedge clk)
+  expr      (data & 8'h0F) == (addr | 8'b1010_0000) ^ ~be
+  s1        (data & 8'h0F) == (addr | 8'b1010_0000) ^ ~be
+  signals   clk:1 data:8 addr:8 be:4
+assert b_xnor in booleans, line 9
+  clock     @(posedge clk)
+  expr      (be ~^ 4'hA) != (be ~^ 4'h5)
+  s1        (be ~^ 4'hA) != (be ~^ 4'h5)
+  signals   clk:1 be:4
+assert b_reduce in booleans, line 10
+  clock     @(posedge clk)
+  expr      &be || |data || ^addr || ~&be || ~|st || ~^data
+  s1        &be || |data || ^addr || ~&be || ~|st || ~^data
+  signals   clk:1 be:4 data:8 addr:8 st:2
+assert b_arith in booleans, line 11
+  clock     @(posedge clk)
+  expr      data + addr - 1 == data * 2 / 2 % 256
+  s1        data + addr - 1 == data * 2 / 2 % 256
+  signals   clk:1 data:8 addr:8
+assert b_shift in booleans, line 12
+  clock     @(posedge clk)
+  expr      data << 1 >> 1 == data >>> 0 <<< 0
+  s1        data << 1 >> 1 == data >>> 0 <<< 0
+  signals   clk:1 data:8
+assert b_power in booleans, line 13
+  clock     @(posedge clk)
+  expr      2 ** st <= 8
+  s1        2 ** st <= 8
+  signals   clk:1 st:2
+assert b_cond in booleans, line 14
+  clock     @(posedge clk)
+  expr      (v ? data : addr) != 0
+  s1        (v ? data : addr) != 0
+  signals   clk:1 v:1 data:8 addr:8
+assert b_select in booleans, line 15
+  clock     @(posedge clk)
+  expr      data[7] |-> data[3:0] == addr[7:4] && be[0+:2] == be[3-:2]
+  s1        data[7]
+  s2        data[3:0] == addr[7:4] && be[0+:2] == be[3-:2]
+  signals   clk:1 data[>=8]:8 addr[>=8]:8 be[>=4]:4
+assert b_concat in booleans, line 16
+  clock     @(posedge clk)
+  expr      {v, w, x} == 3'b101 |-> {2{be}} == {be, be}
+  s1        {v, w, x} == 3'b101
+  s2        {2{be}} == {be, be}
+  signals   clk:1 v:1 w:1 x:1 be:4
+assert b_inside in booleans, line 17
+  clock     @(posedge clk)
+  expr      st inside {0, [2:3]} |-> data inside {[8'h10:8'h1F], 8'hFF}
+  s1        st inside {0, [2:3]}
+  s2        data inside {[8'h10:8'h1F], 8'hFF}
+  signals   clk:1 st:2 data:8
+assert b_fill in booleans, line 18
+  clock     @(posedge clk)
+  expr      be == '1 |=> data != '0
+  s1        be == '1
+  s2        data != '0
+  signals   clk:1 be:4 data:8
+assert b_hier in booleans, line 19
+  clock     @(posedge clk)
+  expr      u_core.u_alu.busy |-> u_core.state != 0
+  s1        u_core.u_alu.busy
+  s2        u_core.state != 0
+  signals   clk:1 u_core.u_alu.busy u_core.state
+assert b_unary in booleans, line 20
+  clock     @(posedge clk)
+  expr      -data != +addr
+  s1        -data != +addr
+  signals   clk:1 data:8 addr:8
+assert b_cast in booleans, line 21
+  clock     @(posedge clk)
+  expr      4'(data) == be
+  s1        4'(data) == be
+  signals   clk:1 data:8 be:4
