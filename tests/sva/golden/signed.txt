@@ -1,31 +1,31 @@
-signed.sv:11:3: warning: cnt_positive: compared as unsigned (no signed arithmetic in the engine): cnt
-   11 |   cnt_positive: assert property (cnt >= 0);
-      |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-signed.sv:12:3: warning: u_not_five: compared as unsigned (no signed arithmetic in the engine): 8'sd5
-   12 |   u_not_five:   assert property (u != 8'sd5);
-      |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-signed.sv:14:3: warning: s_above_u: compared as unsigned (no signed arithmetic in the engine): s
-   14 |   s_above_u:    assert property (s > u);
-      |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+signed.sv:29:5: warning: cnt_positive: compared as unsigned (no signed arithmetic in the engine): cnt
+   29 |     cnt_positive: assert property (cnt >= 0);
+      |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+signed.sv:31:5: warning: u_not_five: compared as unsigned (no signed arithmetic in the engine): 8'sd5
+   31 |     u_not_five:   assert property (u != 8'sd5);
+      |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+signed.sv:35:5: warning: s_above_u: compared as unsigned (no signed arithmetic in the engine): s
+   35 |     s_above_u:    assert property (s > u);
+      |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 module signed_checks ports clk:1 cnt:32 s:8 u:8 ub:8
-assert cnt_positive in signed_checks, line 11
+assert cnt_positive in signed_checks, line 29
   clock     @(posedge clk)
   expr      cnt >= 0
   s1        cnt >= 0
   signals   clk:1 cnt:32
   note      compared as unsigned (no signed arithmetic in the engine): cnt
-assert u_not_five in signed_checks, line 12
+assert u_not_five in signed_checks, line 31
   clock     @(posedge clk)
   expr      u != 8'sd5
   s1        u != 8'sd5
   signals   clk:1 u:8
   note      compared as unsigned (no signed arithmetic in the engine): 8'sd5
-assert plain in signed_checks, line 13
+assert plain in signed_checks, line 33
   clock     @(posedge clk)
   expr      u == 3 && ub < 2
   s1        u == 3 && ub < 2
   signals   clk:1 u:8 ub:8
-assert s_above_u in signed_checks, line 14
+assert s_above_u in signed_checks, line 35
   clock     @(posedge clk)
   expr      s > u
   s1        s > u

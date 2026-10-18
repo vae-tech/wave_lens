@@ -3,6 +3,7 @@ name = "sva-wasm"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
 description = "sva-core for the page: JSON in, JSON out over a plain C ABI (no wasm-bindgen)"
 
 [lib]

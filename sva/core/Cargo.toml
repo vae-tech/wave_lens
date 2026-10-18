@@ -3,6 +3,7 @@ name = "sva-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
 description = "SystemVerilog Assertion subset: parser and evaluator over sampled signal values (no I/O)"
 
 [dependencies]

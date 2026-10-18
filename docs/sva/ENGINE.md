@@ -64,7 +64,7 @@ build passes the page's `sortIgnore` to `sva eval`, so a binding resolves in the
 ## In the page (stage 6)
 
 `wavefw/sva.js` (after `wavefw.js`; the module comes from `wavefw/sva.wasm.js`, deflate-raw + base64, unpacked with
-`DecompressionStream`) adds the assertions panel to every viewer (README *Assertions (SVA)*). A binding is an
+`DecompressionStream`) adds the assertions panel to every viewer (docs/USAGE.md *Assertions (SVA)*). A binding is an
 assertion and an instance path of the viewer's model: the *modules* are the groups that hold dump paths (`--hierarchy`
 pages), the top of a view is `meta.scope` (the converter's `--scope`). Each name of the assertion resolves in the
 instance by *Name resolution* above (a select wider than the row is a bind error). `SVA.rowSampler({name: row})`
@@ -213,7 +213,8 @@ give every result, reason and field against it).
   …, `inside`): the value of its left side (a number; a string of binary digits with x when unknown). A passing
   attempt shows the steps of every consequent (sorted by cycle, then element), so the trace covers `start..end`; a
   failed one the steps that matched, a disabled or active one how far it got, one failed by an unknown value ends with
-  the step that read it. A trace longer than 63 steps keeps its first 16 and last 47 (`"truncated": true`).
+  the step that read it. A trace is cut when its path grows past 96 steps: it keeps its first 16 and last 47
+  (`"truncated": true`); a trace of up to 96 steps is kept whole.
 - `failed_at` is the cycle where the attempt failed (for an unknown value: where it was read; `end` is where the
   attempt was decided), `note` says why in words: `no ack within [1:3]`, `expected ack at cycle 7`, `ack is unknown
   (x) at cycle 7`, `not seen before the end of the dump`, `the property under 'not' held`; `reason` says it for
@@ -263,8 +264,8 @@ relative to now and without paths. A group is stepped once per cycle and decides
 cycle, with the same result and note. Each attempt keeps its own steps up to the cycle it joined the group and shares
 the group's after it (exact unless a thread set held several paths before the merge: the trace then shows the longest
 one). Attempts that never end — `req |-> s_eventually ack` without the ack, `a |-> b[*1:$] ##1 c` — cost one group,
-not one attempt per cycle. Paths are linked lists of steps in an arena; a path longer than 96 steps keeps its first 16
-and last 47, and the arena is collected from the live groups when it doubles, so memory follows the live attempts.
+not one attempt per cycle. Paths are linked lists of steps in an arena; a path that reaches 96 steps is cut to its first
+16 and last 47 (it grows to 96 again before the next cut), and the arena is collected from the live groups when it doubles, so memory follows the live attempts.
 
 ## Decisions
 
@@ -343,7 +344,8 @@ and last 47, and the arena is collected from the live groups when it doubles, so
 | a deliberately wrong check on the same dump (`m_o.valid && m_o.sop && m_ready_i \|=> m_o.eop`) | the FST | 18 fails; the first, at 81.71 µs → 81.72 µs, checked by hand in the dump: `sop`, `valid`, `m_ready_i` high before the edge at 81.71 µs, `eop` low until 81.73 µs (3-beat packets) | 0.02 s |
 | unit test: 20 000 attempts that never end (`a \|-> b[*1:$] ##1 c`, `c` never) | hand-made | 20 000 active | well under 1 s; before 5.1, 4000 cycles took 3.3 s and 1.0 GB |
 
-The WebAssembly module is 515 kB, 251 kB in a page (stage 8: the report code and `serde_json::Value`; stage 5.1: 451 kB) (`wavefw/sva.wasm.js`, deflate-raw + base64; STACK.md). A call of
+The WebAssembly module is 546 kB, 265 kB in a page (546 051 B / 265 228 B, as `make smoke` prints them; stage 8: the
+report code and `serde_json::Value`; stage 5.1: 451 kB) (`wavefw/sva.wasm.js`, deflate-raw + base64; STACK.md). A call of
 the spike page (parse, evaluate 12 cycles, JSON both ways) takes about 110 µs.
 
 Most of the results JSON of a long dump is the passes of invariants (one per cycle); the counts are complete either

@@ -1,26 +1,26 @@
 module repetition ports clk:1 a:1 b:1 c:1 req:1 gnt:1 valid:1 last:1
-assert r_consec in repetition, line 3
+assert r_consec in repetition, line 26
   clock     @(posedge clk)
   expr      a |=> b[*3] ##1 c
   s1        a
   s2        b[*3]
   s3        ##1 c
   signals   clk:1 a:1 b:1 c:1
-assert r_range in repetition, line 4
+assert r_range in repetition, line 28
   clock     @(posedge clk)
   expr      a |=> b[*1:4] ##1 c
   s1        a
   s2        b[*1:4]
   s3        ##1 c
   signals   clk:1 a:1 b:1 c:1
-assert r_open in repetition, line 5
+assert r_open in repetition, line 30
   clock     @(posedge clk)
   expr      a |-> b[*2:$] ##1 c
   s1        a
   s2        b[*2:$]
   s3        ##1 c
   signals   clk:1 a:1 b:1 c:1
-assert r_star in repetition, line 6
+assert r_star in repetition, line 32
   clock     @(posedge clk)
   expr      a ##1 b[*0:$] ##1 c |-> ##1 !a
   s1        a
@@ -28,48 +28,48 @@ assert r_star in repetition, line 6
   s3        ##1 c
   s4        ##1 !a
   signals   clk:1 a:1 b:1 c:1
-assert r_plus in repetition, line 7
+assert r_plus in repetition, line 34
   clock     @(posedge clk)
   expr      a ##1 b[*1:$] ##1 c
   s1        a
   s2        ##1 b[*1:$]
   s3        ##1 c
   signals   clk:1 a:1 b:1 c:1
-assert r_goto in repetition, line 8
+assert r_goto in repetition, line 36
   clock     @(posedge clk)
   expr      req |-> gnt[->1]
   s1        req
   s2        gnt[->1]
   signals   clk:1 req:1 gnt:1
-assert r_goto_rng in repetition, line 9
+assert r_goto_rng in repetition, line 38
   clock     @(posedge clk)
   expr      $rose(valid) |-> last[->1:8] ##1 !valid
   s1        $rose(valid)
   s2        last[->1:8]
   s3        ##1 !valid
   signals   clk:1 valid:1 last:1
-assert r_nonconsec in repetition, line 10
+assert r_nonconsec in repetition, line 40
   clock     @(posedge clk)
   expr      req |=> gnt[=2] ##1 !req
   s1        req
   s2        gnt[=2]
   s3        ##1 !req
   signals   clk:1 req:1 gnt:1
-assert r_nc_open in repetition, line 11
+assert r_nc_open in repetition, line 42
   clock     @(posedge clk)
   expr      a |-> b[=1:$] ##1 c
   s1        a
   s2        b[=1:$]
   s3        ##1 c
   signals   clk:1 a:1 b:1 c:1
-assert r_seq in repetition, line 12
+assert r_seq in repetition, line 44
   clock     @(posedge clk)
   expr      (a ##1 b)[*2] |=> c
   s1        a
   s2        ##1 b
   s3        c
   signals   clk:1 a:1 b:1 c:1
-assert r_bool in repetition, line 13
+assert r_bool in repetition, line 46
   clock     @(posedge clk)
   expr      (a && !b)[*2] |-> c
   s1        (a && !b)[*2]

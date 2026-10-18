@@ -1,3 +1,28 @@
-// The stage-3 spike property, exactly as in prompts/03-sva-stack.md.
-property p_req_ack; @(posedge clk) disable iff (!rst_n) req |-> ##[1:3] ack; endproperty
+/*
+================================================================================
+  req_ack.sva
+  The stage-3 spike property: the property of prompts/03-sva-stack.md
+  (there, and in sva/spike/spike.html's SOURCE, on one line; here laid out
+  per docs/SV_STYLE.md, the same tokens).
+================================================================================
+
+    Description:
+      A request is acknowledged within 1..3 clocks.  The first property the
+      engine parsed and evaluated; the spike page and the engine's tests
+      (sva/core/src/tests.rs, engine_tests.rs) use the same text.
+
+    Use:    sva parse sva/spike/req_ack.sva
+*/
+
+//==============================================================================
+// req -> ack within 1..3 clocks
+//==============================================================================
+
+// a request is answered: ack within 1..3 clocks of req (reset disables it)
+property p_req_ack;
+    @(posedge clk) disable iff (!rst_n)
+    req |-> ##[1:3] ack;
+endproperty
+
+// every request gets its acknowledgment in time
 a_req_ack: assert property (p_req_ack);

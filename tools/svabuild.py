@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""svabuild.py — SystemVerilog assertions for a page (README "Assertions"), shared by vcd2wavedrom.py and mkhtml.py.
+"""svabuild.py — SystemVerilog assertions for a page (docs/USAGE.md "Assertions"), shared by vcd2wavedrom.py and mkhtml.py.
 
 The "sva" files of a config are parsed with the engine's CLI (`sva parse --json`, one compilation unit in the order
 given) and its "bind" list is evaluated over the dump (`sva eval`, one run per scope); the result is the WaveJSON

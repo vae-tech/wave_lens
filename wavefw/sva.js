@@ -1,4 +1,4 @@
-/* sva.js — SystemVerilog assertions in a wavefw page (README "Assertions", docs/sva/ENGINE.md). Loaded after wavefw.js.
+/* sva.js — SystemVerilog assertions in a wavefw page (docs/USAGE.md "Assertions", docs/sva/ENGINE.md). Loaded after wavefw.js.
 
    The engine: sva_wasm.wasm over its plain C ABI, JSON in and out (no fetch: the module comes inlined, from
    wavefw/sva.wasm.js = window.WAVEFW_SVA_WASM, deflate-raw + base64).
@@ -137,12 +137,14 @@ function trace(sampler, times, names, unit) {
   return { cycles: times.length, times, unit, signals, widths };
 }
 
+// the helpers of wavefw.js (WaveFW.util); the spike page loads sva.js alone and gets the same ones here
+const U = (G.WaveFW && G.WaveFW.util) || {
+  esc: s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
+  glob: p => new RegExp('^' + p.split('*').map(s => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$'),
+  lastBefore(n, at, t, strict) { let lo = 0, hi = n - 1, ans = -1; while (lo <= hi) { const m = (lo + hi) >> 1, a = at(m); if (strict ? a < t : a <= t) { ans = m; lo = m + 1; } else hi = m - 1; } return ans; },
+};
 // the index of the last item with time < t (-1: none); at(i) gives the time of item i
-function lastBefore(n, at, t) {
-  let lo = 0, hi = n;
-  while (lo < hi) { const m = (lo + hi) >> 1; if (at(m) < t) lo = m + 1; else hi = m; }
-  return lo - 1;
-}
+const lastBefore = (n, at, t) => U.lastBefore(n, at, t, true);
 const isEdge = (edge, prev, b) => prev !== null && b !== prev && (edge === 'posedge' ? b === '1' : edge === 'negedge' ? b === '0' : b === '1' || b === '0');
 
 // sampler over WaveJSON "tv" transitions: {name: {tv: [[t, v], …], width}} (bit values 0 1 x z, bus values hex)
@@ -176,7 +178,7 @@ function rowValue(r, o) {
   if (o.k !== '=') return rowWidth(r) > 1 ? 'hx' : 'x';
   if (o.raw != null) return 'h' + o.raw;   // "tv": hex
   if (o.hex != null) return 'h' + o.hex;   // a clock-sampled view with its values next to the labels ("raw")
-  const v = String(o.v).trim(), e = r.enum || (G.WaveFW && G.WaveFW.enums[r.name]);
+  const v = String(o.v).trim(), e = r.enum || (G.WaveFW && (G.WaveFW.enums[r.full] || G.WaveFW.enums[r.name]));
   if (e) for (const [n, l] of Object.entries(e)) if (l === v) return Number(n);
   return fromLabel(v, r.radix, rowWidth(r));
 }
@@ -231,7 +233,7 @@ Object.assign(SVA, { load, plan, assemble, tvSampler, rowSampler, fromLabel });
 // unit in that order; byLabel: label -> {a: assertion, file}
 const LIB = { files: [], byLabel: new Map(), notes: [], panels: new Set(), parsing: null, svgs: new Set() };
 const FILES_KEY = 'wavefw.sva.files:' + (G.location ? G.location.pathname : '');
-const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const esc = U.esc;
 const hash = s => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193); return (h >>> 0).toString(16).padStart(8, '0'); };
 // set() says whether it was kept (false: private mode or the storage is full)
 const store = {
@@ -453,7 +455,7 @@ const COL = { pass: 'sva-pass', fail: 'sva-fail', disabled: 'sva-disabled', acti
 const RANK = { vacuous: 0, pass: 1, active: 2, capped: 3, disabled: 4, fail: 5 };
 const STRIP = { S: 1, P: 2, C: 3, D: 4, F: 5 }, STRIP_COL = [null, 'muted', 'sva-pass', 'sva-capped', 'sva-disabled', 'sva-fail'];
 const MANY = 20;   // arrows of every attempt on screen below this many
-const globRx = p => new RegExp('^' + p.split('*').map(s => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$');
+const globRx = U.glob;
 const shown = S => { const l = S.svaShow == null ? null : (Array.isArray(S.svaShow) ? S.svaShow : String(S.svaShow).split(',')).map(s => s.trim()).filter(Boolean).map(globRx); return n => !l || l.some(rx => rx.test(n)); };
 // the index of the first item with time >= t (lastBefore + 1)
 const firstFrom = (n, at, t) => lastBefore(n, at, t) + 1;
@@ -509,7 +511,7 @@ function bar(P, r, a, b, y, h) {
   if (r === 'active' || r === 'capped') { P.rect(a, y, w, h, c, 0.25); if (w >= 6) hatch(P, a, y, w, h, c); else P.rect(a, y, w, h, c, 0.6); }
   else P.rect(a, y, w, h, c, r === 'disabled' ? 0.7 : 0.9);
 }
-const circlePath = (x, y, r) => G.WaveFW.paint.circle(x, y, r);
+const circlePath = (x, y, r) => G.WaveFW.util.circle(x, y, r);
 function dot(P, x, y, p, small, sel) {
   const c = p.fail ? 'sva-fail' : COL[p.x.r];
   if (small) { P.path(circlePath(x, y, p.fail ? 4 : 3), { fill: c }); return; }
@@ -662,34 +664,33 @@ function assertionRows(st, res, opt) {
 class Panel {
   constructor(v) {
     this.v = v; v.sva = this; this.bindings = []; this.pick = null; this.open = true; this.jsonOpen = false;
-    this.key = 'wavefw.sva:' + G.location.pathname + ':' + (v.opts.key || v.root.id || v.root.dataset.wave || v.M.title);
+    this.key = 'wavefw.sva:' + (v.storeId || G.location.pathname + ':' + (v.opts.key || v.root.id || v.root.dataset.wave || v.M.title));
     this.el = document.createElement('div'); this.el.className = 'sva'; this.el.hidden = true;
-    v.root.querySelector('.bar').after(this.el);
-    const tools = v.root.querySelector('.bar .tools');
-    if (tools && G.WAVEFW_SVA_WASM) {
-      tools.insertAdjacentHTML('beforeend', '<span class="tg sv"><span class="tl">assertions</span><button type="button" data-sv="load" title="Load SystemVerilog assertion files (.sv, .sva): parsed in the page, kept in this browser">Load file…</button><input type="file" class="svfile" multiple accept=".sv,.sva,.svh,.v,.vh,.txt" hidden></span>');
-      const inp = tools.querySelector('input.svfile');
-      tools.querySelector('button[data-sv=load]').addEventListener('click', () => inp.click());
+    v.addPanel(this.el);
+    if (G.WAVEFW_SVA_WASM) {
+      const g = v.addTool('assertions', '<button type="button" data-sv="load" title="Load SystemVerilog assertion files (.sv, .sva): parsed in the page, kept in this browser">Load file…</button><input type="file" class="svfile" multiple accept=".sv,.sva,.svh,.v,.vh,.txt" hidden>');
+      g.classList.add('sv');
+      const inp = g.querySelector('input.svfile');
+      g.querySelector('button[data-sv=load]').addEventListener('click', () => inp.click());
       inp.addEventListener('change', () => { const fs = [...inp.files]; inp.value = ''; if (fs.length) this.load(fs); });
     }
     this.el.addEventListener('click', e => this.click(e));
     this.el.addEventListener('dragstart', e => this.dragStart(e));
     this.el.addEventListener('dragend', () => this.dragEnd());
-    const names = v.namesEl;
     // every module row takes the drop (one without the signals answers "cannot bind: …"), so the user always hears why
-    names.addEventListener('dragover', e => { const t = this.dropTarget(e); if (t) { e.preventDefault(); e.dataTransfer.dropEffect = 'link'; this.hover(t); } });
-    names.addEventListener('dragleave', e => { if (!names.contains(e.relatedTarget)) this.hover(null); });
-    names.addEventListener('drop', e => { const t = this.dropTarget(e); if (!t) return; e.preventDefault(); this.dragEnd(); this.drop(t); });
+    v.listen('names', 'dragover', e => { const t = this.dropTarget(e); if (t) { e.preventDefault(); e.dataTransfer.dropEffect = 'link'; this.hover(t); } });
+    v.listen('names', 'dragleave', e => { if (!v.rowAt(e.relatedTarget)) this.hover(null); });
+    v.listen('names', 'drop', e => { const t = this.dropTarget(e); if (!t) return; e.preventDefault(); this.dragEnd(); this.drop(t); });
     v.root.addEventListener('wavefw:settings', () => this.sync());   // sortIgnore prefixes: the names resolve again
     if (v.extraJSON) v.extraJSON.push(() => this.bindings.length ? `"bind": [\n${this.bindJSON().map(x => '  ' + JSON.stringify(x)).join(',\n')}\n]` : null);
     // on the waves: the rows of the bindings, f / F through the failures, Esc unselects
     this.selA = null; this.dirty = true; this.at = new Map(); this.sumN = 0;
     this.el.addEventListener('change', e => { if (e.target.matches('select[data-sv=ffilter]')) { this.failFilter = e.target.value; this.fillSummary(this.el.querySelector('.svr'), 'fails'); } });
     if (v.extraRows) v.extraRows.push(g => this.rowsFor(g));
-    if (v.keys) { v.keys.f = () => this.step(1); v.keys.F = () => this.step(-1); v.keys.a = () => this.stepAssert(1); v.keys.A = () => this.stepAssert(-1); }
+    v.addKey('f', () => this.step(1), 'f F next / previous assertion failure').addKey('F', () => this.step(-1));
+    v.addKey('a', () => this.stepAssert(1), 'a A next / previous assertion').addKey('A', () => this.stepAssert(-1));
     v.root.addEventListener('wavefw:reset', () => this.unselect(false));
-    const hint = v.root.querySelector('.hint');
-    if (hint) hint.textContent += ' · f F next / previous assertion failure · a A next / previous assertion';
+    v.root.addEventListener('wavefw:destroy', () => { LIB.panels.delete(this); this.el.remove(); v.sva = null; }, { once: true });
     // this browser's bindings, with the page's that are new since (the ones the user unbound stay away)
     this.saved = store.get(this.key) || {};
     this.hidden = new Set(this.saved.hidden || []);
@@ -875,7 +876,7 @@ class Panel {
     v.t0 = v.clamp(w <= v.span ? ts - per / 2 - (v.span - w) / 2 : ts - per / 2 - v.span * 0.1); v.cursor = ts;
     const st = b.draw;
     if (st && st.g) [...st.g.anc, st.g.id].forEach(id => v.collapsed.delete(id));
-    v.extraPicks = new Map([...Object.values((b.res && b.res.map) || {}), ...(st && st.g ? [st.g] : [])].map(r => [r, 7]));   // the group covers its rows
+    v.extraPicks = new Map([...Object.values((b.res && b.res.map) || {}), ...(st && st.g ? [st.g] : [])].map(r => [r, 'hl8']));   // the group covers its rows
     this.dirty = true; v.renderNames(); v.draw();
     if (st && st.lane) v.centerRow(st.lane);   // the attempts lane in the middle of the waves
     if (prev && prev !== b) this.renderB(prev);
@@ -901,15 +902,12 @@ class Panel {
   }
   // at most six failures: jump buttons in the bar's "go to" group
   jumps() {
-    const tools = this.v.root.querySelector('.bar .tools'); if (!tools) return;
-    let el = tools.querySelector('.svj');
+    let el = this.jumpEl;
     const fs = this.failures(), show = fs.length > 0 && fs.length <= 6;
-    if (!show) { if (el) (el.parentElement.classList.contains('svgo') ? el.parentElement : el).remove(); return; }
+    if (!show) { if (el) { const g = el.parentElement; el.remove(); this.jumpEl = null; if (g && g.children.length === 1) g.remove(); } return; }   // a "go to" of its own goes too
     if (!el) {
-      const go = [...tools.querySelectorAll('.tg')].find(t => (t.querySelector('.tl') || {}).textContent === 'go to');
-      el = document.createElement('span'); el.className = 'svj';
-      if (go) go.appendChild(el);
-      else { const g = document.createElement('span'); g.className = 'tg svgo'; g.innerHTML = '<span class="tl">go to</span>'; g.appendChild(el); tools.appendChild(g); }
+      el = this.jumpEl = document.createElement('span'); el.className = 'svj';
+      this.v.addTool('go to', el);
       el.addEventListener('click', e => { const btn = e.target.closest('button[data-svj]'); if (!btn) return; const f = this.failures()[+btn.dataset.svj]; if (f) this.select(f.b, f.i); });
     }
     el.innerHTML = fs.map((f, k) => `<button type="button" class="fail" data-svj="${k}" title="${esc(`${f.b.assert}: ${f.a.note || 'fail'} (cycle ${f.a.start})`)}">✕ ${esc(f.b.assert)} ${esc(this.v.fmt(f.t, (this.v.M.t1 - this.v.M.t0) / 1000, this.v.M.t1 - this.v.M.t0))}</button>`).join('');
@@ -1135,30 +1133,32 @@ class Panel {
     e.dataTransfer.setData('text/plain', x.a.label); e.dataTransfer.effectAllowed = 'link';
     const I = scopeInfo(this.v.M);
     for (const S of I.scopes) this.drag.ok.set(S, resolve(this.v, x.a, S));
-    for (const row of this.v.namesEl.querySelectorAll('.row.grp')) {
-      const S = I.abs.get(this.v.M.groups[+row.dataset.g]); if (S == null) continue;
+    this.marked = [];
+    for (const g of this.v.vis) {
+      if (g.type !== 'group') continue;
+      const S = I.abs.get(g); if (S == null) continue;
       const r = this.drag.ok.get(S) || resolve(this.v, x.a, S);
-      row.classList.add(r.ok ? 'sva-ok' : 'sva-no');
-      row.dataset.svaTitle = row.title; row.title = r.ok ? `drop: bind ${x.a.label} to ${S}` : `cannot bind: ${[...r.missing, ...r.errors].join(', ')}`;
+      this.v.rowClass(g, r.ok ? 'sva-ok' : 'sva-no').rowTitle(g, r.ok ? `drop: bind ${x.a.label} to ${S}` : `cannot bind: ${[...r.missing, ...r.errors].join(', ')}`);
+      this.marked.push(g);
     }
     this.v.root.classList.add('sva-drag');
   }
   dragEnd() {
     if (!this.drag) return;
-    for (const row of this.v.namesEl.querySelectorAll('.row.sva-ok, .row.sva-no')) { row.classList.remove('sva-ok', 'sva-no', 'sva-over'); row.title = row.dataset.svaTitle || ''; delete row.dataset.svaTitle; }
-    this.v.root.classList.remove('sva-drag'); this.hoverEl = null;
+    for (const g of this.marked || []) this.v.rowClass(g, 'sva-ok', false).rowClass(g, 'sva-no', false).rowClass(g, 'sva-over', false).rowTitle(g, null);
+    this.marked = null; this.v.root.classList.remove('sva-drag'); this.hoverRow = null;
     setTimeout(() => { this.drag = null; }, 0);
   }
   dropTarget(e) {
     if (!this.drag) return null;
-    const row = e.target.closest && e.target.closest('.row[data-r]'); if (!row) return null;
-    const I = scopeInfo(this.v.M), r = this.v.vis[+row.dataset.r]; if (!r || r.type === 'space') return null;
+    const r = this.v.rowAt(e.target); if (!r || r.type === 'space') return null;
+    const I = scopeInfo(this.v.M);
     const S = r.type === 'group' ? I.abs.get(r) : I.of.get(r);
     if (S == null) return null;
     const res = this.drag.ok.get(S) || resolve(this.v, this.drag.a, S);
-    return { el: row, scope: S, ok: res.ok, res };
+    return { row: r, scope: S, ok: res.ok, res };
   }
-  hover(t) { if (this.hoverEl) this.hoverEl.classList.remove('sva-over'); this.hoverEl = t && t.el; if (t) t.el.classList.add('sva-over'); }
+  hover(t) { if (this.hoverRow) this.v.rowClass(this.hoverRow, 'sva-over', false); this.hoverRow = t && t.row; if (t) this.v.rowClass(t.row, 'sva-over'); }
   drop(t) {
     const a = this.drag ? this.drag.a : null; if (!a) return;
     if (!t.ok) { this.toast(`cannot bind ${a.label} to ${this.label(t.scope)}: ${[...t.res.missing, ...t.res.errors].join(', ')}`); return; }
@@ -1228,6 +1228,7 @@ function svgEvaluate(M, S, k) {
 /* ---------------- start ---------------- */
 function start() {
   if (!G.WaveFW || !G.WaveFW.plugin) return;
+  G.WaveFW.registerTokens({ 'sva-pass': '--sva-pass', 'sva-fail': '--sva-fail', 'sva-disabled': '--sva-disabled', 'sva-active': '--sva-active', 'sva-capped': '--sva-capped' });
   localFiles();
   let pending = null;
   G.WaveFW.plugin(v => {

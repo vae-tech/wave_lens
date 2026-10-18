@@ -1,37 +1,104 @@
-// FSM transition checks for the UART receiver of this example (uart_rx): the legal next states, the conditions of
-// the transitions, what valid / frame_err say about the state.
-//   sva parse examples/fsm/uart_pkg.sv examples/fsm/fsm.sva      (the package first: it declares the state names)
-module uart_rx_checks import uart_pkg::*; #(parameter int BIT = 4) (
-  input logic       clk, rst_n, rxd, valid, frame_err,
-  input logic [7:0] data,
-  input state_t     state,
-  input logic [2:0] bit_cnt
+/*
+================================================================================
+  fsm.sva
+  FSM transition checks for the UART receiver of examples/fsm (uart_rx in
+  fsm_tb.sv): the legal next states, the conditions of the transitions,
+  what valid / frame_err say about the state, coverage of both endings.
+================================================================================
+
+    Description:
+      uart_rx_checks is bound into every uart_rx with its ports by name.
+      All of it holds over the example's dump except fsm_demo_short_data,
+      which is wrong on purpose (8 data bits take 8 * BIT cycles): it fails
+      for both frames, shows a fail trace, and sva eval exits 1.
+
+    Use:    sva parse examples/fsm/uart_pkg.sv examples/fsm/fsm.sva
+            (the package first: it declares the state names);
+            make sva-examples also runs them over the dump
+            (sva eval --scope fsm_tb.u_rx); make example EX=fsm binds them
+            in the page (fsm.config.json)
+*/
+
+//==============================================================================
+// uart_rx_checks: the receiver's state, counters and flags
+//==============================================================================
+
+module uart_rx_checks import uart_pkg::*; #(
+    parameter int BIT = 4
+) (
+    input logic       clk,
+    input logic       rst_n,
+    input logic       rxd,
+    input logic       valid,
+    input logic       frame_err,
+    input logic [7:0] data,
+    input state_t     state,
+    input logic [2:0] bit_cnt
 );
-  localparam int FRAME = 10 * BIT;   // start, 8 data bits, stop
+    localparam int FRAME = 10 * BIT;                // start, 8 data bits, stop
 
-  default clocking @(posedge clk); endclocking
-  default disable iff (!rst_n);
+    default clocking @(posedge clk); endclocking
+    default disable iff (!rst_n);
 
-  // the legal next states
-  fsm_from_idle:  assert property (state == IDLE  |=> state inside {IDLE, START});
-  fsm_from_start: assert property (state == START |=> state inside {START, IDLE, DATA});
-  fsm_from_data:  assert property (state == DATA  |=> state inside {DATA, STOP});
-  fsm_from_stop:  assert property (state == STOP  |=> state inside {STOP, IDLE, ERROR});
-  fsm_from_error: assert property (state == ERROR |=> state inside {ERROR, IDLE});
-  // why the state changes
-  fsm_start_bit:  assert property (state == IDLE && !rxd |=> state == START);
-  fsm_error_exit: assert property (state == ERROR && rxd |=> state == IDLE);
-  fsm_data_bits:  assert property (state == DATA |-> bit_cnt <= 7);
-  fsm_frame_time: assert property ($rose(state == DATA) |-> ##[1:FRAME] state != DATA);
-  // deliberately wrong (8 data bits take 8 * BIT cycles): shows a fail trace, sva eval exits 1
-  fsm_demo_short_data: assert property ($rose(state == DATA) |-> ##[1:2*BIT] state != DATA);
-  // the outputs
-  fsm_valid:      assert property (valid |-> state == IDLE && $past(state) == STOP) else $error("valid outside the end of a frame");
-  fsm_frame_err:  assert property (frame_err |-> state == ERROR);
-  fsm_one_flag:   assert property (!(valid && frame_err));
-  // coverage: a good byte, a framing error
-  fsm_cov_byte:   cover property (state == START ##1 state == DATA [*1:$] ##1 state == STOP ##[1:$] valid);
-  fsm_cov_error:  cover property (state == STOP ##[1:$] state == ERROR ##[1:$] state == IDLE);
+    //--------------------------------------------------------------------------
+    // The legal next states
+    //--------------------------------------------------------------------------
+
+    // idle line: stay, or a falling edge begins a start bit
+    fsm_from_idle:  assert property (state == IDLE  |=> state inside {IDLE, START});
+    // half a start bit: wait, a glitch (line high again) back to IDLE, or the data bits
+    fsm_from_start: assert property (state == START |=> state inside {START, IDLE, DATA});
+    // 8N1: the data bits are always followed by the stop bit, never cut short
+    fsm_from_data:  assert property (state == DATA  |=> state inside {DATA, STOP});
+    // the stop bit ends the frame: high back to IDLE, low a framing error
+    fsm_from_stop:  assert property (state == STOP  |=> state inside {STOP, IDLE, ERROR});
+    // after a framing error the receiver only waits for the idle line
+    fsm_from_error: assert property (state == ERROR |=> state inside {ERROR, IDLE});
+
+    //--------------------------------------------------------------------------
+    // Why the state changes
+    //--------------------------------------------------------------------------
+
+    // a low line in IDLE is the leading edge of a start bit
+    fsm_start_bit:  assert property (state == IDLE && !rxd |=> state == START);
+    // a high line (idle level) ends the error state on the next clock
+    fsm_error_exit: assert property (state == ERROR && rxd |=> state == IDLE);
+    // 8 data bits: the bit counter never passes 7 while in DATA
+    fsm_data_bits:  assert property (state == DATA |-> bit_cnt <= 7);
+    // a frame is 10 bits (start, 8 data, stop): DATA always ends within one
+    fsm_frame_time: assert property ($rose(state == DATA) |-> ##[1:FRAME] state != DATA);
+
+    // Deliberately wrong (8 data bits take 8 * BIT cycles): shows a fail
+    // trace, and sva eval exits 1
+    fsm_demo_short_data: assert property ($rose(state == DATA) |-> ##[1:2*BIT] state != DATA);
+
+    //--------------------------------------------------------------------------
+    // The outputs
+    //--------------------------------------------------------------------------
+
+    // a byte is delivered only when a good stop bit took the receiver from STOP to IDLE
+    fsm_valid: assert property (
+        valid |-> state == IDLE && $past(state) == STOP
+    ) else $error("valid outside the end of a frame");
+    // a framing error is flagged together with the move to ERROR
+    fsm_frame_err:  assert property (frame_err |-> state == ERROR);
+    // a frame ends either good or in error, never both
+    fsm_one_flag:   assert property (!(valid && frame_err));
+
+    //--------------------------------------------------------------------------
+    // Coverage: a good byte, a framing error
+    //--------------------------------------------------------------------------
+
+    // a whole good frame: start bit, the data bits, the stop bit, then valid
+    fsm_cov_byte:   cover property (
+        state == START ##1 state == DATA [*1:$] ##1 state == STOP ##[1:$] valid
+    );
+    // a framing error and the way out of it: STOP -> ERROR -> IDLE
+    fsm_cov_error:  cover property (state == STOP ##[1:$] state == ERROR ##[1:$] state == IDLE);
 endmodule
+
+//==============================================================================
+// Bind: into every uart_rx, ports by name, the receiver's BIT
+//==============================================================================
 
 bind uart_rx uart_rx_checks #(.BIT(BIT)) u_checks (.*);

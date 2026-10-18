@@ -1,13 +1,41 @@
-// Attempts that never end (docs/sva/ENGINE.md, Performance): every cycle with the sink ready starts an attempt that
-// waits for a word the sink never takes while it is not ready, i.e. an open repetition that no cycle closes. Before
-// stage 5.1 this took cycles^2 memory (one path per attempt); attempts in the same state now step as one.
-//   sva eval --waves work/test_stream_video.fst --sva sva/bench/open_ended.sva \
-//     --scope tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_arbiter_i
-module cxp_tx_open_ended (input logic tx_clk, tx_rst_n, m_ready_i);
-  default clocking @(posedge tx_clk); endclocking
-  default disable iff (!tx_rst_n);
-  // never true: m_ready_i && !m_ready_i
-  arb_open:   assert property (m_ready_i |-> m_ready_i[*1:$] ##1 (m_ready_i && !m_ready_i));
-  // a strong one: every attempt fails at the end of the dump
-  arb_strong: assert property (m_ready_i |-> s_eventually (m_ready_i && !m_ready_i));
+/*
+================================================================================
+  open_ended.sva
+  Attempts that never end: a stress bench of the engine
+  (docs/sva/ENGINE.md, Performance).
+================================================================================
+
+    Description:
+      Every cycle with the sink ready starts an attempt that waits for a
+      word the sink never takes while it is not ready, i.e. an open
+      repetition that no cycle closes.  Before stage 5.1 this took
+      cycles^2 memory (one path per attempt); attempts in the same state
+      now step as one.  Both assertions fail by design (990 fails each over
+      work/test_stream_video.fst): what is measured is time and memory.
+
+    Use:    sva eval --waves work/test_stream_video.fst \
+                --sva sva/bench/open_ended.sva \
+                --scope tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.\
+                        cxp_tx_domain_i.cxp_tx_arbiter_i
+            (the scope is one word, split here to fit)
+*/
+
+//==============================================================================
+// cxp_tx_open_ended: two attempts per ready cycle that nothing closes
+//==============================================================================
+
+module cxp_tx_open_ended (
+    input logic tx_clk,
+    input logic tx_rst_n,
+    input logic m_ready_i
+);
+    default clocking @(posedge tx_clk); endclocking
+    default disable iff (!tx_rst_n);
+
+    // never true: m_ready_i && !m_ready_i, so the repetition stays open
+    // until m_ready_i drops (each attempt alive for the whole ready run)
+    arb_open: assert property (m_ready_i |-> m_ready_i[*1:$] ##1 (m_ready_i && !m_ready_i));
+
+    // a strong one: every attempt fails at the end of the dump (all open until then)
+    arb_strong: assert property (m_ready_i |-> s_eventually (m_ready_i && !m_ready_i));
 endmodule

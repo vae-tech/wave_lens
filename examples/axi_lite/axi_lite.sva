@@ -1,49 +1,167 @@
-// AXI4-Lite handshake checks for this example: every VALID holds until its READY with a stable payload, the slave
-// (axil_regs) answers with its fixed latencies, responses are OKAY.
-//   sva parse examples/axi_lite/axi_lite.sva
-module axil_checks #(parameter int MAX_LAT = 8) (
-  input logic        ACLK, ARESETn,
-  input logic        AWVALID, AWREADY, WVALID, WREADY, BVALID, BREADY, ARVALID, ARREADY, RVALID, RREADY, done,
-  input logic [7:0]  AWADDR, ARADDR,
-  input logic [31:0] WDATA, RDATA,
-  input logic [3:0]  WSTRB,
-  input logic [1:0]  BRESP, RRESP
+/*
+================================================================================
+  axi_lite.sva
+  AXI4-Lite handshake checks for the wavefw AXI-Lite example (axi_lite_tb.sv).
+================================================================================
+
+    Description:
+      One checker module, axil_checks, bound to the slave (axil_regs).  It
+      checks
+        - every channel: a VALID holds until its READY, with a stable
+          payload (AXI4 A3.2.1);
+        - this slave (axil_regs): it answers with its fixed latencies, and
+          every response is OKAY;
+        - one deliberate failure (axi_demo_aw_at_once) that shows a fail
+          trace: sva eval exits 1;
+        - covers of a whole write (AW, W, B) and of a read (AR, R).
+
+    Parse:  sva parse examples/axi_lite/axi_lite.sva
+            make sva-examples (all three examples, parse and eval)
+*/
+
+//==============================================================================
+// axil_checks: bound to axil_regs, the ports connect by name (.*)
+//==============================================================================
+
+module axil_checks #(
+    parameter int MAX_LAT = 8                   // the longest read latency allowed
+) (
+    input logic        ACLK,
+    input logic        ARESETn,
+    input logic        AWVALID,
+    input logic        AWREADY,
+    input logic        WVALID,
+    input logic        WREADY,
+    input logic        BVALID,
+    input logic        BREADY,
+    input logic        ARVALID,
+    input logic        ARREADY,
+    input logic        RVALID,
+    input logic        RREADY,
+    input logic        done,                    // the master's; tied to 1 by the bind
+    input logic [7:0]  AWADDR,
+    input logic [7:0]  ARADDR,
+    input logic [31:0] WDATA,
+    input logic [31:0] RDATA,
+    input logic [3:0]  WSTRB,
+    input logic [1:0]  BRESP,
+    input logic [1:0]  RRESP
 );
-  localparam logic [1:0] OKAY = 2'b00;
+    // AXI4 A3.4.4: BRESP / RRESP 2'b00 is OKAY, a normal access success.
+    localparam logic [1:0] OKAY = 2'b00;
 
-  property p_hold(valid, ready);
-    @(posedge ACLK) disable iff (!ARESETn) valid && !ready |=> valid;
-  endproperty
-  property p_stable(valid, ready, payload);
-    @(posedge ACLK) disable iff (!ARESETn) valid && !ready |=> $stable(payload);
-  endproperty
-  sequence s_hs(valid, ready); valid && ready; endsequence
+    //==========================================================================
+    // Properties and sequences of every channel
+    //==========================================================================
 
-  // every channel
-  axi_aw_hold:     assert property (p_hold(AWVALID, AWREADY));
-  axi_w_hold:      assert property (p_hold(WVALID, WREADY));
-  axi_b_hold:      assert property (p_hold(BVALID, BREADY));
-  axi_ar_hold:     assert property (p_hold(ARVALID, ARREADY));
-  axi_r_hold:      assert property (p_hold(RVALID, RREADY));
-  axi_aw_stable:   assert property (p_stable(AWVALID, AWREADY, AWADDR));
-  axi_w_stable:    assert property (p_stable(WVALID, WREADY, {WDATA, WSTRB}));
-  axi_ar_stable:   assert property (p_stable(ARVALID, ARREADY, ARADDR));
+    // AXI4 A3.2.1: once VALID is high it stays high until the handshake.
+    property p_hold(valid, ready);
+        @(posedge ACLK) disable iff (!ARESETn)
+        valid && !ready |=> valid;
+    endproperty
 
-  default clocking @(posedge ACLK); endclocking
-  default disable iff (!ARESETn);
-  // this slave: AWREADY a cycle after AWVALID, the response two cycles after the data, read data two after the address
-  axi_awready_late: assert property ($rose(AWVALID) |=> AWREADY);
-  axi_w_after_aw:   assert property (s_hs(AWVALID, AWREADY) |=> WVALID);
-  axi_b_latency:    assert property (s_hs(WVALID, WREADY) |=> ##1 BVALID) else $error("AXI: no BVALID two cycles after the write data");
-  axi_r_latency:    assert property (s_hs(ARVALID, ARREADY) |=> ##[1:MAX_LAT] RVALID);
-  axi_bresp_okay:   assert property (BVALID |-> BRESP == OKAY);
-  axi_rresp_okay:   assert property (RVALID |-> RRESP == OKAY);
-  axi_wstrb:        assert property (WVALID |-> WSTRB != 4'b0000);
-  axi_done:         assert property (BVALID && BREADY or RVALID && RREADY |=> done);
-  // deliberately wrong (AWREADY comes a cycle later): shows a fail trace, sva eval exits 1
-  axi_demo_aw_at_once: assert property ($rose(AWVALID) |-> AWREADY);
-  axi_cov_write:    cover property (s_hs(AWVALID, AWREADY) ##[1:3] s_hs(WVALID, WREADY) ##[1:3] s_hs(BVALID, BREADY));
-  axi_cov_read:     cover property (s_hs(ARVALID, ARREADY) ##[1:MAX_LAT] s_hs(RVALID, RREADY));
+    // AXI4 A3.2.1: the payload holds while VALID waits for READY.
+    property p_stable(valid, ready, payload);
+        @(posedge ACLK) disable iff (!ARESETn)
+        valid && !ready |=> $stable(payload);
+    endproperty
+
+    // A handshake: the transfer happens on the cycle where VALID and READY are both high.
+    sequence s_hs(valid, ready);
+        valid && ready;
+    endsequence
+
+    //==========================================================================
+    // Every channel (AXI4 A3.2.1)
+    //==========================================================================
+
+    // AW: the write address is held until AWREADY.
+    axi_aw_hold: assert property (p_hold(AWVALID, AWREADY));
+
+    // W: the write data is held until WREADY.
+    axi_w_hold: assert property (p_hold(WVALID, WREADY));
+
+    // B: the slave holds the write response until BREADY.
+    axi_b_hold: assert property (p_hold(BVALID, BREADY));
+
+    // AR: the read address is held until ARREADY.
+    axi_ar_hold: assert property (p_hold(ARVALID, ARREADY));
+
+    // R: the slave holds the read data until RREADY.
+    axi_r_hold: assert property (p_hold(RVALID, RREADY));
+
+    // AW: AWADDR does not change while AWVALID waits.
+    axi_aw_stable: assert property (p_stable(AWVALID, AWREADY, AWADDR));
+
+    // W: WDATA and WSTRB do not change while WVALID waits.
+    axi_w_stable: assert property (p_stable(WVALID, WREADY, {WDATA, WSTRB}));
+
+    // AR: ARADDR does not change while ARVALID waits.
+    axi_ar_stable: assert property (p_stable(ARVALID, ARREADY, ARADDR));
+
+    //==========================================================================
+    // This slave (axil_regs) and this master: fixed latencies, OKAY responses
+    //==========================================================================
+
+    default clocking @(posedge ACLK); endclocking
+    default disable iff (!ARESETn);
+
+    // This slave: AWREADY a cycle after AWVALID.
+    axi_awready_late: assert property ($rose(AWVALID) |=> AWREADY);
+
+    // This master: the write data comes after the address (AXI itself allows W
+    // before AW, A3.3.1).
+    axi_w_after_aw: assert property (s_hs(AWVALID, AWREADY) |=> WVALID);
+
+    // This slave: the response two cycles after the write data (A3.3.1: B only
+    // after the W handshake).
+    axi_b_latency: assert property (s_hs(WVALID, WREADY) |=> ##1 BVALID)
+        else $error("AXI: no BVALID two cycles after the write data");
+
+    // This slave: the read data two cycles after the address, at most MAX_LAT.
+    axi_r_latency: assert property (s_hs(ARVALID, ARREADY) |=> ##[1:MAX_LAT] RVALID);
+
+    // AXI4 A3.4.4: this slave answers every write with OKAY.
+    axi_bresp_okay: assert property (BVALID |-> BRESP == OKAY);
+
+    // AXI4 A3.4.4: this slave answers every read with OKAY.
+    axi_rresp_okay: assert property (RVALID |-> RRESP == OKAY);
+
+    // AXI4 A3.4.3: this master writes whole words, never with every strobe low.
+    axi_wstrb: assert property (WVALID |-> WSTRB != 4'b0000);
+
+    // The master's done follows a B or an R handshake (bound into the slave,
+    // which has no done, the bind ties it to 1).
+    axi_done: assert property (BVALID && BREADY or RVALID && RREADY |=> done);
+
+    //==========================================================================
+    // Deliberate failure
+    //==========================================================================
+
+    // Deliberately wrong (AWREADY comes a cycle later): shows a fail trace,
+    // sva eval exits 1.
+    axi_demo_aw_at_once: assert property ($rose(AWVALID) |-> AWREADY);
+
+    //==========================================================================
+    // Coverage
+    //==========================================================================
+
+    // A whole write: AW, W and B handshakes, each within 3 cycles of the last.
+    axi_cov_write: cover property (
+        s_hs(AWVALID, AWREADY) ##[1:3]
+        s_hs(WVALID, WREADY) ##[1:3]
+        s_hs(BVALID, BREADY)
+    );
+
+    // A read: the AR handshake, then the R handshake within MAX_LAT cycles.
+    axi_cov_read: cover property (
+        s_hs(ARVALID, ARREADY) ##[1:MAX_LAT]
+        s_hs(RVALID, RREADY)
+    );
 endmodule
+
+//==============================================================================
+// Bind: into the slave; it has no done, so done is tied to 1
+//==============================================================================
 
 bind axil_regs axil_checks u_axil_checks (.*, .done(1'b1));

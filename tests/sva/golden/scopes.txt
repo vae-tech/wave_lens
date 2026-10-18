@@ -7,38 +7,38 @@ module tb
 bind bus_master bus_checker u_chk (.clk(clk), .req(bus.req), .gnt(bus.gnt))
 bind bus_master: tb.u_master bus_checker u_chk2 (clk, bus.req, bus.gnt)
 sequence s_req_done(r, d): r ##[1:TIMEOUT] d
-assert i_gnt in bus_if, line 14
+assert i_gnt in bus_if, line 37
   clock     @(posedge clk)
   expr      gnt |-> phase != IDLE
   s1        gnt
   s2        phase != IDLE
   signals   clk:1 gnt:1 phase:2
-assert m_phase in bus_master, line 37
+assert m_phase in bus_master, line 70
   clock     @(posedge clk) disable iff (!rst_n)
   expr      phase == REQ |=> phase inside {WAIT, DONE}
   s1        phase == REQ
   s2        phase inside {WAIT, DONE}
   signals   clk:1 rst_n:1 phase:2
-assert m_done in bus_master, line 38
+assert m_done in bus_master, line 72
   clock     @(posedge clk) disable iff (!rst_n)
   expr      phase == REQ |-> bus_pkg::s_req_done(1'b1, phase == DONE)
   s1        phase == REQ
   s2        1'b1
   s3        ##[1:16] phase == DONE
   signals   clk:1 rst_n:1 phase:2
-assert m_tag in bus_master, line 39
+assert m_tag in bus_master, line 74
   clock     @(posedge clk) disable iff (!rst_n)
   expr      phase == IDLE |-> tag[3:0] == 4'(ID) && last != 8'hFF
   s1        phase == IDLE
   s2        tag[3:0] == 4'(ID) && last != 8'hFF
   signals   clk:1 rst_n:1 phase:2 tag[>=4]:4 last:8
-assert c_wait in bus_checker, line 43
+assert c_wait in bus_checker, line 88
   clock     @(posedge clk)
   expr      req |-> ##[0:4] gnt
   s1        req
   s2        ##[0:4] gnt
   signals   clk:1 req:1 gnt:1
-cover t_start in bus_test, line 47
+cover t_start in bus_test, line 100
   clock     @(posedge clk)
   expr      $rose(start)
   s1        $rose(start)

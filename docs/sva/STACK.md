@@ -133,7 +133,7 @@ per assertion `steps`, `stats`, `attempts` with `[id, cycle]` traces, `lane`), o
 - **Sampling in the page.** The page has `tv` transitions, not a dump. Stage 5 put the sampling behind a sampler
   (`edges`, `before`) on each side — wellen's changes natively, `SVA.tvSampler` in the page — with the same rule (the
   value before the edge; the first value is no edge); the spike page and `page_bench.py` check that both agree.
-- **Size.** The module is 515 kB (251 kB in a page) after stage 8. If it matters, drop `serde_json` for a small
-  hand-written JSON writer and run `wasm-opt -Oz` (binaryen) as an optional step.
+- **Size.** The module is 546 kB (265 kB in a page) after stage 8 (`make smoke` prints the bytes). If it matters,
+  drop `serde_json` for a small hand-written JSON writer and run `wasm-opt -Oz` (binaryen) as an optional step.
 - **Toolchain on other machines.** Building needs cargo and the wasm32 target; using does not, once the generated module
   is committed (see *Layout*). Python-only users keep every current feature.

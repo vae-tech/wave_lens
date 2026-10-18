@@ -3,6 +3,7 @@ name = "sva-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
 description = "sva: evaluate assertions over a VCD / FST dump"
 
 [[bin]]

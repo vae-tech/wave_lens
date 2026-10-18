@@ -1,66 +1,66 @@
 module fifo_checker ports clk:1 rst_n:1 push:1 pop:1 full:1 empty:1 count:4 wdata:16 rdata:16 params DEPTH=8 W=16
-assert fifo_no_overflow in fifo_checker, line 11
+assert fifo_no_overflow in fifo_checker, line 37
   clock     @(posedge clk) disable iff (!rst_n)
   expr      full |-> !push
   s1        full
   s2        !push
   signals   clk:1 rst_n:1 full:1 push:1
   message   error "push into a full FIFO"
-assert fifo_no_underflow in fifo_checker, line 12
+assert fifo_no_underflow in fifo_checker, line 39
   clock     @(posedge clk) disable iff (!rst_n)
   expr      empty |-> !pop
   s1        empty
   s2        !pop
   signals   clk:1 rst_n:1 empty:1 pop:1
   message   error "pop from an empty FIFO"
-assert fifo_full_flag in fifo_checker, line 13
+assert fifo_full_flag in fifo_checker, line 41
   clock     @(posedge clk) disable iff (!rst_n)
   expr      full == (count == DEPTH)
   s1        full == (count == DEPTH)
   signals   clk:1 rst_n:1 full:1 count:4
-assert fifo_empty_flag in fifo_checker, line 14
+assert fifo_empty_flag in fifo_checker, line 43
   clock     @(posedge clk) disable iff (!rst_n)
   expr      empty == (count == 0)
   s1        empty == (count == 0)
   signals   clk:1 rst_n:1 empty:1 count:4
-assert fifo_count_push in fifo_checker, line 15
+assert fifo_count_push in fifo_checker, line 45
   clock     @(posedge clk) disable iff (!rst_n)
   expr      push && !pop |=> count == $past(count) + 1
   s1        push && !pop
   s2        count == $past(count) + 1
   signals   clk:1 rst_n:1 push:1 pop:1 count:4
-assert fifo_count_pop in fifo_checker, line 16
+assert fifo_count_pop in fifo_checker, line 47
   clock     @(posedge clk) disable iff (!rst_n)
   expr      pop && !push |=> count == $past(count) - 1
   s1        pop && !push
   s2        count == $past(count) - 1
   signals   clk:1 rst_n:1 pop:1 push:1 count:4
-assert fifo_count_hold in fifo_checker, line 17
+assert fifo_count_hold in fifo_checker, line 49
   clock     @(posedge clk) disable iff (!rst_n)
   expr      push == pop |=> $stable(count)
   s1        push == pop
   s2        $stable(count)
   signals   clk:1 rst_n:1 push:1 pop:1 count:4
-assert fifo_reset in fifo_checker, line 18
+assert fifo_reset in fifo_checker, line 51
   clock     @(posedge clk) disable iff (!rst_n)
   expr      $rose(rst_n) |-> empty && count == 0
   s1        $rose(rst_n)
   s2        empty && count == 0
   signals   clk:1 rst_n:1 empty:1 count:4
-assert fifo_eventually in fifo_checker, line 19
+assert fifo_eventually in fifo_checker, line 53
   clock     @(posedge clk) disable iff (!rst_n)
   expr      push |-> s_eventually pop
   s1        push
   s2        pop
   signals   clk:1 rst_n:1 push:1 pop:1
-cover fifo_fill in fifo_checker, line 20
+cover fifo_fill in fifo_checker, line 55
   clock     @(posedge clk) disable iff (!rst_n)
   expr      empty ##1 (push && !pop)[*8] ##1 full
   s1        empty
   s2        ##1 (push && !pop)[*8]
   s3        ##1 full
   signals   clk:1 rst_n:1 empty:1 push:1 pop:1 full:1
-assert fifo_count_width in fifo_checker, line 21
+assert fifo_count_width in fifo_checker, line 57
   clock     @(posedge clk) disable iff (!rst_n)
   expr      $bits(count) == CW
   s1        $bits(count) == CW

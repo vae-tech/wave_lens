@@ -1,6 +1,44 @@
-// The same shape on the demo (examples/demo/demo_tb.sv): busy follows start within 1..3 clocks; done is a pulse.
-property p_start_busy; @(posedge clk) disable iff (!rst_n) start |-> ##[1:3] busy; endproperty
+/*
+================================================================================
+  demo.sva
+  The spike's property shape (req |-> ##[1:3] ack) on the demo
+  transmitter (examples/demo/demo_tb.sv): busy follows start within
+  1..3 clocks; done is a pulse.
+================================================================================
+
+    Description:
+      No module: the properties sit at the top and their signals resolve in
+      the scope given to sva eval (demo_tb).  a_start_busy holds;
+      a_start_done fails on purpose, so the run shows a failure and its
+      reason.
+
+    Use:    make sva-spike, which runs
+            sva eval --waves $(VCD) --scope demo_tb --sva sva/spike/demo.sva
+*/
+
+//==============================================================================
+// start -> busy: the transmitter leaves IDLE right after start
+//==============================================================================
+
+// mc_tx leaves IDLE on the clock that samples start, so busy
+// (state != IDLE) is high on the next one: within 1..3 clocks
+property p_start_busy;
+    @(posedge clk) disable iff (!rst_n)
+    start |-> ##[1:3] busy;
+endproperty
+
+// busy follows start: the transmitter accepts every byte it is given
 a_start_busy: assert property (p_start_busy);
 
-property p_start_done; @(posedge clk) disable iff (!rst_n) start |-> ##[1:3] done; endproperty
-a_start_done: assert property (p_start_done);   // fails: done comes ~100 clocks later
+//==============================================================================
+// start -> done: wrong on purpose
+//==============================================================================
+
+// done strobes at the end of the parity bit, 11 cells of 8 clocks after start
+property p_start_done;
+    @(posedge clk) disable iff (!rst_n)
+    start |-> ##[1:3] done;
+endproperty
+
+// deliberate failure, for the demo: done comes ~100 clocks later
+a_start_done: assert property (p_start_done);

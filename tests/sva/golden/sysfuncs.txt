@@ -1,64 +1,64 @@
 module sysfuncs ports clk:1 rst_n:1 valid:1 ready:1 grant:4 data:8 cnt:8 params DEPTH=16
-assert f_rose in sysfuncs, line 5
+assert f_rose in sysfuncs, line 29
   clock     @(posedge clk)
   expr      $rose(valid) |-> !$past(valid)
   s1        $rose(valid)
   s2        !$past(valid)
   signals   clk:1 valid:1
-assert f_fell in sysfuncs, line 6
+assert f_fell in sysfuncs, line 31
   clock     @(posedge clk)
   expr      $fell(rst_n) |=> grant == 0
   s1        $fell(rst_n)
   s2        grant == 0
   signals   clk:1 rst_n:1 grant:4
-assert f_stable in sysfuncs, line 7
+assert f_stable in sysfuncs, line 33
   clock     @(posedge clk)
   expr      valid && !ready |=> $stable(data)
   s1        valid && !ready
   s2        $stable(data)
   signals   clk:1 valid:1 ready:1 data:8
-assert f_changed in sysfuncs, line 8
+assert f_changed in sysfuncs, line 35
   clock     @(posedge clk)
   expr      $changed(data) |-> valid
   s1        $changed(data)
   s2        valid
   signals   clk:1 data:8 valid:1
-assert f_past_n in sysfuncs, line 9
+assert f_past_n in sysfuncs, line 37
   clock     @(posedge clk)
   expr      valid ##1 ready |-> data == $past(data, 2)
   s1        valid
   s2        ##1 ready
   s3        data == $past(data, 2)
   signals   clk:1 valid:1 ready:1 data:8
-assert f_onehot in sysfuncs, line 10
+assert f_onehot in sysfuncs, line 39
   clock     @(posedge clk)
   expr      |grant |-> $onehot(grant)
   s1        |grant
   s2        $onehot(grant)
   signals   clk:1 grant:4
-assert f_onehot0 in sysfuncs, line 11
+assert f_onehot0 in sysfuncs, line 41
   clock     @(posedge clk)
   expr      $onehot0(grant)
   s1        $onehot0(grant)
   signals   clk:1 grant:4
-assert f_count in sysfuncs, line 12
+assert f_count in sysfuncs, line 43
   clock     @(posedge clk)
   expr      $countones(grant) <= 1
   s1        $countones(grant) <= 1
   signals   clk:1 grant:4
-assert f_unknown in sysfuncs, line 13
+assert f_unknown in sysfuncs, line 45
   clock     @(posedge clk) disable iff (!rst_n)
   expr      valid |-> !$isunknown(data)
   s1        valid
   s2        !$isunknown(data)
   signals   clk:1 rst_n:1 valid:1 data:8
-assert f_sampled in sysfuncs, line 14
+assert f_sampled in sysfuncs, line 47
   clock     @(posedge clk)
   expr      $sampled(valid) |-> ready
   s1        $sampled(valid)
   s2        ready
   signals   clk:1 valid:1 ready:1
-assert f_bits in sysfuncs, line 15
+assert f_bits in sysfuncs, line 49
   clock     @(posedge clk)
   expr      cnt < 2 ** $bits(grant) + AW
   s1        cnt < 2 ** $bits(grant) + AW

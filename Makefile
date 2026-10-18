@@ -1,12 +1,15 @@
 # wavefw — demo flow: Verilator VCD -> vcd2wavedrom.py -> WaveDrom JSON -> docs/demo_waves.js (loaded by docs/index.html)
-# Build products live under BUILD (default /tmp/wavefw: the project sits on /mnt/c, which is slow under WSL);
-# make BUILD=build … puts them under the repository (build/ is git-ignored).
+# Build products live under BUILD (default /tmp/wavefw: the project sits on /mnt/c, which is slow under WSL, and /tmp
+# is gone after a reboot: the cargo target, the example dumps and pages are rebuilt then). For a BUILD that survives,
+# make BUILD=build … (under the repository, git-ignored) or export BUILD=~/.cache/wavefw.
+# make check is the gate before a commit: the engine's tests, the unit tests, everything smoke needs, smoke --strict.
 # Converter settings (signals, enums, groups, markers, colours, sorting …) come from a JSON config file.
 BUILD ?= /tmp/wavefw
 B     := $(abspath $(BUILD))
 OBJ   ?= $(B)/obj
 VCD   ?= $(B)/demo.vcd
 PY    := python3 -I
+PW    := PYTHONDONTWRITEBYTECODE=1 python3   # playwright scripts: not -I (a user-site install), no __pycache__
 READER ?=          # builtin (default: one pass in Python) | wavepeek
 DEMO_CONFIG := examples/demo/demo.config.json
 DEMO_TB     := examples/demo/demo_tb.sv
@@ -28,6 +31,7 @@ V2W := $(PY) tools/vcd2wavedrom.py --config $(DEMO_CONFIG) --waves $(VCD) $(if $
 #   make html CONFIG=work/dump.config.json   a hand-written config -> work/dump.html (or HTML=…)
 BASE ?= tools/base.config.json
 ifdef WAVES
+$(if $(wildcard $(WAVES)),,$(error no dump WAVES=$(WAVES)))
 CONFIG ?= $(basename $(WAVES)).config.json
 HTML   ?= $(basename $(WAVES)).html
 endif
@@ -44,15 +48,25 @@ help:
 	@echo 'make html       one self-contained page: the demo, CONFIG=work/x.config.json, or WAVES=work/x.vcd (config made if missing);'
 	@echo '                SVA="checks/*.sv" BIND="name@scope,…": assertions bound, evaluated, an Assertions section'
 	@echo 'make config     WAVES=work/x.vcd: write or update work/x.config.json (every signal, your edits kept); SVA=…: "bind" lines'
+	@echo 'make wavefw     wavefw/wavefw.js from wavefw/src/*.js (the page needs one file: run it after editing the sources)'
 	@echo 'make sva-build  the SVA engine (sva/, Rust): native CLI $$(BUILD)/sva-target/release/sva + sva_wasm.wasm -> wavefw/sva.wasm.js'
 	@echo 'make sva-test   cargo test of the SVA engine: unit tests, the corpus tests/sva (third_party too), the schema, the CLI'
 	@echo 'make sva-bless  rewrite tests/sva/golden/*.txt after a reviewed change of the parser output'
 	@echo 'make sva-examples  sva parse + sva eval of the assertion files of examples/ (apb, axi_lite, fsm; after make examples)'
 	@echo 'make sva-eval   WAVES=dump.vcd|fst SVA="pkg.sv checks.sva" SCOPE=tb.dut [OUT=results.json] [ARGS=...]: sva eval'
 	@echo 'make sva-spike  the spike page $$(BUILD)/sva/spike.html (the WebAssembly build and wavefw/sva.js in a page)'
-	@echo 'make smoke      headless Chromium checks of docs/index.html, tests/conformance.html and the built pages'
-	@echo 'make clean      remove the build products under $$(BUILD)'
-	@echo 'variables       BUILD=$(BUILD)  WAVES  CONFIG  HTML  BASE=$(BASE)  SV  READER=builtin|wavepeek'
+	@echo 'make smoke      headless Chromium checks of docs/index.html, tests/conformance.html and the built pages (needs'
+	@echo '                make examples demo demo-fst sva-build sva-spike html first; what is missing is reported as SKIPPED);'
+	@echo '                STRICT=1: a skip fails; ONLY=sec1,sec2: those sections only (smoke.py --list)'
+	@echo 'make unit       the Python unit tests (tests/unit, stage 9.2)'
+	@echo 'make check      the gate before a commit: sva-test, unit, the pages smoke needs, smoke STRICT=1'
+	@echo 'make fmt        verible-verilog-format of the project SystemVerilog (docs/SV_STYLE.md), when installed'
+	@echo 'make lint       verilator --lint-only -Wall on the example testbenches'
+	@echo 'make clean      remove the build products under $$(BUILD) (the cargo target stays: make clean-all)'
+	@echo 'make clean-all  remove $$(BUILD) entirely, the cargo target included'
+	@echo 'variables       BUILD=$(BUILD)  WAVES=dump.vcd|fst  CONFIG  HTML  BASE=$(BASE)  SV="rtl/*.sv"  READER=builtin|wavepeek'
+	@echo '                SVA="checks/*.sv"  BIND="name@scope,…"  EX=apb|axi_lite|fsm  SCOPE=tb.dut  OUT=results.json  ARGS=…'
+	@echo '                FST=$$(BUILD)/demo_fst.fst  STRICT=1  ONLY=sec,…'
 
 demo: $(DEMO_JS) $(APB_JS)
 
@@ -107,7 +121,7 @@ $(EXB)/$(EX).vcd: $(EXB)/obj/V$(EX)_tb
 $(EXB)/$(EX).fst: $(EXB)/obj_fst/V$(EX)_tb
 	cd $(EXB)/obj_fst && ./V$(EX)_tb +trace +dump=$@
 
-example: $(EXB)/$(EX).vcd $(EXB)/$(EX).fst
+example: wavefw/wavefw.js $(EXB)/$(EX).vcd $(EXB)/$(EX).fst
 	$(PY) tools/mkhtml.py --config $(EXD)/$(EX).config.json --waves $(EXB)/$(EX).$(EX_DUMP) $(SVA_OPT) --out $(EXB)/$(EX).html
 	$(PY) tools/mkconfig.py $(EXB)/$(EX).vcd --base $(BASE) --sv $(EX_SRC) --out $(EXB)/$(EX)_all.config.json --force
 	$(PY) tools/mkhtml.py --config $(EXB)/$(EX)_all.config.json --out $(EXB)/$(EX)_all.html
@@ -116,7 +130,7 @@ examples:
 	@for ex in $(EXAMPLES); do $(MAKE) --no-print-directory example EX=$$ex || exit 1; done
 
 shots:
-	python3 tests/shots.py --build $(B)   # not -I: playwright
+	$(PW) tests/shots.py --build $(B) $(if $(ONLY),--only $(ONLY))
 
 # Two views of one dump (see $(DEMO_CONFIG)): clock-sampled (real WaveDrom wave strings) and exact transitions ("tv").
 $(DEMO_JS): $(VCD) $(DEMO_CONFIG) tools/vcd2wavedrom.py tools/wavejson.py tools/embed.py
@@ -129,7 +143,7 @@ comma := ,
 SVA_GLOB = $(if $(SVA),$(or $(wildcard $(SVA)),$(error no file matches SVA=$(SVA))))
 SVA_FILES = $(foreach f,$(SVA_GLOB),--sva $(f))
 SVA_BINDS = $(foreach b,$(subst $(comma), ,$(BIND)),--bind '$(b)')
-html: $(CONFIG) $(if $(filter $(DEMO_CONFIG),$(CONFIG)),$(VCD))
+html: wavefw/wavefw.js $(CONFIG) $(if $(filter $(DEMO_CONFIG),$(CONFIG)),$(VCD))
 	$(PY) tools/mkhtml.py --config $(CONFIG) $(if $(HTML_WAVES),--waves $(HTML_WAVES)) $(if $(READER),--reader $(READER)) $(SVA_OPT) $(SVA_FILES) $(SVA_BINDS) --out $(HTML)
 
 config:
@@ -189,12 +203,49 @@ sva-spike: sva-build $(VCD)
 	$(SVA_BIN) eval --waves $(VCD) --scope demo_tb --sva sva/spike/demo.sva || true   # a_start_done fails on purpose
 
 smoke:
-	python3 tests/smoke.py --build $(B) --out $(B)/shots   # not -I: playwright lives in the user site-packages
+	$(PW) tests/smoke.py --build $(B) --out $(B)/shots $(if $(STRICT),--strict) $(if $(ONLY),--only $(ONLY))
+
+# wavefw/wavefw.js is the concatenation of wavefw/src/*.js (committed: a page needs one file and no build step)
+WAVEFW_SRC := $(addprefix wavefw/src/,model.js paint.js view.js svg.js boot.js)
+wavefw: wavefw/wavefw.js
+wavefw/wavefw.js: $(WAVEFW_SRC) tools/wavefwcat.py
+	$(PY) tools/wavefwcat.py
+
+# Python unit tests (tests/unit/test_*.py on unittest, no dependencies): stage 9.2 fills it; until then a note
+unit:
+	@if [ -d tests/unit ]; then $(PY) -m unittest discover -s tests/unit -t .; else echo 'unit: no tests/unit yet (stage 9.2)'; fi
+
+# The gate: the engine's tests, the unit tests, every page smoke checks (so it has nothing to skip), smoke --strict
+check:
+	$(PY) tools/wavefwcat.py --check
+	$(MAKE) sva-test unit
+	$(MAKE) sva-build
+	$(MAKE) examples demo demo-fst sva-spike html
+	$(MAKE) smoke STRICT=1
+
+# SystemVerilog of the project (docs/SV_STYLE.md); tests/sva/third_party is other people's code and stays as it is
+SV_OWN := $(wildcard examples/*/*.sv examples/*/*.sva sva/bench/*.sva sva/spike/*.sva) $(filter-out tests/sva/err_%,$(wildcard tests/sva/*.sv))
+VERIBLE_FMT := verible-verilog-format --indentation_spaces=4 --column_limit=100 --wrap_spaces=4
+fmt:
+	@if command -v verible-verilog-format >/dev/null; then $(VERIBLE_FMT) --inplace $(SV_OWN); git diff --stat; \
+	else echo 'fmt: verible-verilog-format is not installed: download a release from https://github.com/chipsalliance/verible/releases'; \
+	  echo '     and put verible-verilog-format on PATH (then: $(VERIBLE_FMT) --inplace FILES)'; fi
+	@echo 'fmt: tests/sva/err_*.sv by hand (the column of a //^ caret is the expectation); then make sva-bless and read the diff'
+
+# -Wall on the testbenches; DECLFILENAME off: a testbench file carries its package and its DUT next to the tb module
+lint:
+	@for ex in demo $(EXAMPLES); do d=examples/$$ex; echo "== $$ex"; \
+	  verilator --lint-only -Wall -Wno-DECLFILENAME --timing --top-module $${ex}_tb $$(ls $$d/*_pkg.sv 2>/dev/null) $$(ls $$d/*.sv | grep -v _pkg.sv) || exit 1; done
 
 clean:
-	rm -rf $(OBJ) $(OBJ)_fst $(VCD) $(FST) $(B)/cyc.json $(B)/exact.json $(B)/demo.html $(B)/shots
+	rm -rf $(OBJ) $(OBJ)_fst $(VCD) $(FST) $(B)/cyc.json $(B)/exact.json $(B)/demo.html $(B)/shots $(B)/apb_transfers.json $(B)/smoke
 	rm -rf $(basename $(FST)).config.json $(basename $(FST)).html
 	rm -rf $(B)/examples $(B)/sva
 	rmdir $(B) 2>/dev/null || true
 
-.PHONY: help demo demo-fst example examples shots html config sva-build sva-test sva-bless sva-examples sva-eval sva-spike smoke clean
+# everything under BUILD, the cargo target (gigabytes) included; refuses a BUILD that is the repository or a home
+clean-all:
+	$(if $(filter $(B),/ $(CURDIR) $(HOME) $(abspath $(HOME)/..)),$(error clean-all: BUILD=$(B) is not a build directory))
+	rm -rf $(B)
+
+.PHONY: wavefw help demo demo-fst example examples shots html config sva-build sva-test sva-bless sva-examples sva-eval sva-spike smoke unit check fmt lint clean clean-all

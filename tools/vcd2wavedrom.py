@@ -21,7 +21,7 @@ Config file (--config cfg.json): every option can be a key (dashes or underscore
   patterns match full paths). Relative "waves" paths are relative to the config file.
   "sva" ["checks.sv", …] SystemVerilog assertion files (parsed with the sva CLI, inlined for the page's assertions
   panel), "bind" [{"assert": "a_req_ack", "scope": "tb.dut"}] or ["a_req_ack@tb.dut"] (evaluated over the dump with
-  sva eval; the page opens with them bound): the WaveJSON extension "sva" (tools/svabuild.py, README "Assertions").
+  sva eval; the page opens with them bound): the WaveJSON extension "sva" (tools/svabuild.py, docs/USAGE.md "Assertions").
   Clock-sampled buses get "width" and, when their labels do not read back as values (bin signed oct ascii, x digits),
   "raw": the hex value of each label (the page's assertions sample them).
   Per-signal settings: show (false: left out), alias (displayed name), radix (auto hex dec signed bin oct ascii),

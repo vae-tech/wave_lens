@@ -1,23 +1,23 @@
 module preproc ports clk:1 rst_n:1 valid:1 ready:1 start:1 done:1 data:8 params W=8 N=4
-assert m_simple in preproc, line 18
+assert m_simple in preproc, line 52
   clock     @(posedge clk) disable iff (!rst_n)
   expr      start |-> ##[1:4] done
   s1        start
   s2        ##[1:4] done
   signals   clk:1 rst_n:1 start:1 done:1
-assert m_args in preproc, line 19
+assert m_args in preproc, line 54
   clock     @(posedge clk) disable iff (!rst_n)
   expr      start |-> ##[2:8] done
   s1        start
   s2        ##[2:8] done
   signals   clk:1 rst_n:1 start:1 done:1
-assert m_cont in preproc, line 20
+assert m_cont in preproc, line 56
   clock     @(posedge clk) disable iff (!rst_n)
   expr      valid && !ready |=> valid
   s1        valid && !ready
   s2        valid
   signals   clk:1 rst_n:1 valid:1 ready:1
-assert m_consts in preproc, line 21
+assert m_consts in preproc, line 58
   clock     @(posedge clk)
   expr      start |-> ##4 done ##2 !done ##[1:4] data != 0
   s1        start
@@ -25,13 +25,13 @@ assert m_consts in preproc, line 21
   s3        ##2 !done
   s4        ##[1:4] data != 0
   signals   clk:1 start:1 done:1 data:8
-assert m_default in preproc, line 28
+assert m_default in preproc, line 68
   clock     @(posedge clk)
   expr      start |-> ##[1:16] done
   s1        start
   s2        ##[1:16] done
   signals   clk:1 start:1 done:1
-assert m_x in preproc, line 31
+assert m_x in preproc, line 72
   clock     @(posedge clk)
   expr      valid |-> !$isunknown(data)
   s1        valid

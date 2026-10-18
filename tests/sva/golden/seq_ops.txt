@@ -2,7 +2,7 @@ module seq_ops ports clk:1 a:1 b:1 c:1 d:1 e:1 en:1 start:1 stop:1 busy:1 burst:
 sequence s_ab: a ##1 b
 sequence s_cd(x, y): x ##[1:2] y
 sequence s_burst(n): burst[*1:4] ##1 !burst
-assert q_and in seq_ops, line 7
+assert q_and in seq_ops, line 35
   clock     @(posedge clk)
   expr      start |-> (a ##2 b) and (c ##1 d)
   s1        start
@@ -11,7 +11,7 @@ assert q_and in seq_ops, line 7
   s4        c
   s5        ##1 d
   signals   clk:1 start:1 a:1 b:1 c:1 d:1
-assert q_or in seq_ops, line 8
+assert q_or in seq_ops, line 37
   clock     @(posedge clk)
   expr      start |-> s_ab or s_cd(c, d)
   s1        start
@@ -20,7 +20,7 @@ assert q_or in seq_ops, line 8
   s4        c
   s5        ##[1:2] d
   signals   clk:1 start:1 a:1 b:1 c:1 d:1
-assert q_intersect in seq_ops, line 9
+assert q_intersect in seq_ops, line 39
   clock     @(posedge clk)
   expr      start |-> (a ##[1:5] b) intersect c[*3]
   s1        start
@@ -28,7 +28,7 @@ assert q_intersect in seq_ops, line 9
   s3        ##[1:5] b
   s4        c[*3]
   signals   clk:1 start:1 a:1 b:1 c:1
-assert q_throughout in seq_ops, line 10
+assert q_throughout in seq_ops, line 41
   clock     @(posedge clk)
   expr      $rose(start) |-> en throughout busy[*1:$] ##1 stop
   s1        $rose(start)
@@ -36,7 +36,7 @@ assert q_throughout in seq_ops, line 10
   s3        busy[*1:$]
   s4        ##1 stop
   signals   clk:1 start:1 en:1 busy:1 stop:1
-assert q_within in seq_ops, line 11
+assert q_within in seq_ops, line 46
   clock     @(posedge clk)
   expr      start |-> s_cd(a, b) within (c ##[3:6] d)
   s1        start
@@ -45,14 +45,14 @@ assert q_within in seq_ops, line 11
   s4        c
   s5        ##[3:6] d
   signals   clk:1 start:1 a:1 b:1 c:1 d:1
-assert q_first in seq_ops, line 12
+assert q_first in seq_ops, line 48
   clock     @(posedge clk)
   expr      first_match(start ##[1:4] busy) |=> stop
   s1        start
   s2        ##[1:4] busy
   s3        stop
   signals   clk:1 start:1 busy:1 stop:1
-assert q_nested in seq_ops, line 13
+assert q_nested in seq_ops, line 50
   clock     @(posedge clk)
   expr      ((a ##1 b) or (c ##1 d)) ##1 e |=> !e
   s1        a
@@ -62,7 +62,7 @@ assert q_nested in seq_ops, line 13
   s5        ##1 e
   s6        !e
   signals   clk:1 a:1 b:1 c:1 d:1 e:1
-assert q_inst_args in seq_ops, line 14
+assert q_inst_args in seq_ops, line 52
   clock     @(posedge clk)
   expr      s_cd(.x(a), .y(b && c)) |=> s_burst(4)
   s1        a

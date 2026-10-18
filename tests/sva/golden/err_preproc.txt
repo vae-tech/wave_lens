@@ -1,38 +1,38 @@
-err_preproc.sv:3:1: error: 'endmodule' missing: module 'err_preproc' is not closed
-    3 | module err_preproc (input logic clk, a, b);
+err_preproc.sv:13:1: error: 'endmodule' missing: module 'err_preproc' is not closed
+   13 | module err_preproc (
       | ^^^^^^
-err_preproc.sv:5:53: error: undefined macro `NOPE
-    5 |   e_undef:    assert property (@(posedge clk) a |-> `NOPE b);
-      |                                                     ^^^^^
-err_preproc.sv:7:53: error: macro `DLY takes 1 argument(s), got 2
-    7 |   e_args:     assert property (@(posedge clk) a |-> `DLY(1, 2) b);
-      |                                                     ^^^^^^^^^^
-err_preproc.sv:9:53: error: macro `DLY needs arguments: `DLY(n)
-    9 |   e_noargs:   assert property (@(posedge clk) a |-> `DLY b);
-      |                                                     ^^^^
-err_preproc.sv:16:1: error: `ifdef without `endif
-   16 | `ifdef ALSO_NEVER
+err_preproc.sv:20:55: error: undefined macro `NOPE
+   20 |     e_undef:    assert property (@(posedge clk) a |-> `NOPE b);
+      |                                                       ^^^^^
+err_preproc.sv:23:55: error: macro `DLY takes 1 argument(s), got 2
+   23 |     e_args:     assert property (@(posedge clk) a |-> `DLY(1, 2) b);
+      |                                                       ^^^^^^^^^^
+err_preproc.sv:26:55: error: macro `DLY needs arguments: `DLY(n)
+   26 |     e_noargs:   assert property (@(posedge clk) a |-> `DLY b);
+      |                                                       ^^^^
+err_preproc.sv:37:1: error: `ifdef without `endif
+   37 | `ifdef ALSO_NEVER
       | ^^^^^^
 module err_preproc ports clk:1 a:1 b:1
-assert e_undef in err_preproc, line 5
+assert e_undef in err_preproc, line 20
   clock     @(posedge clk)
   expr      a |-> b
   s1        a
   s2        b
   signals   clk:1 a:1 b:1
-assert e_args in err_preproc, line 7
+assert e_args in err_preproc, line 23
   clock     @(posedge clk)
   expr      a |-> b
   s1        a
   s2        b
   signals   clk:1 a:1 b:1
-assert e_noargs in err_preproc, line 9
+assert e_noargs in err_preproc, line 26
   clock     @(posedge clk)
   expr      a |-> b
   s1        a
   s2        b
   signals   clk:1 a:1 b:1
-assert ok_else in err_preproc, line 14
+assert ok_else in err_preproc, line 33
   clock     @(posedge clk)
   expr      a |-> b
   s1        a

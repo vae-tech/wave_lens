@@ -1,13 +1,52 @@
-// Three checks of the CoaXPress TX arbiter of work/test_stream_video (the performance target of docs/sva/ENGINE.md):
-//   sva eval --waves work/test_stream_video.fst --sva sva/bench/cxp_tx_arbiter.sva \
-//     --scope tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_arbiter_i
-module cxp_tx_arbiter_checks (input logic tx_clk, tx_rst_n, m_ready_i, input logic [2:0] ready_o);
-  default clocking @(posedge tx_clk); endclocking
-  default disable iff (!tx_rst_n);
-  // one source at most is told it may send
-  arb_one_ready: assert property ($onehot0(ready_o));
-  // the output holds its word while the sink is not ready
-  arb_hold:      assert property (m_o.valid && !m_ready_i |=> m_o.valid && $stable(m_o.data) && $stable(m_o.kmask));
-  // a packet that starts ends (a strong eventually: every start waits for its end)
-  arb_packet:    assert property (m_o.valid && m_o.sop && m_ready_i |-> s_eventually (m_o.valid && m_o.eop && m_ready_i));
+/*
+================================================================================
+  cxp_tx_arbiter.sva
+  Three checks of the CoaXPress TX arbiter of work/test_stream_video: the
+  performance target of docs/sva/ENGINE.md (Performance).
+================================================================================
+
+    Description:
+      One of each kind of cost over a long dump (16 061 edges of tx_clk):
+      an invariant ($onehot0, one attempt per cycle), a hold with $stable
+      (a two-cycle attempt) and a packet with s_eventually (an attempt
+      open until the end of its packet).  All three hold; the timings and
+      counts are in ENGINE.md, and make html binds them in the page
+      (mkhtml.py --sva sva/bench/cxp_tx_arbiter.sva --bind '*@...').
+      m_o (the arbiter's output word) is not a port: the name resolves in
+      the scope given to sva eval.
+
+    Use:    sva eval --waves work/test_stream_video.fst \
+                --sva sva/bench/cxp_tx_arbiter.sva \
+                --scope tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.\
+                        cxp_tx_domain_i.cxp_tx_arbiter_i
+            (the scope is one word, split here to fit)
+*/
+
+//==============================================================================
+// cxp_tx_arbiter_checks: one grant, a held word, every packet closed
+//==============================================================================
+
+module cxp_tx_arbiter_checks (
+    input logic       tx_clk,
+    input logic       tx_rst_n,
+    input logic       m_ready_i,
+    input logic [2:0] ready_o
+);
+    default clocking @(posedge tx_clk); endclocking
+    default disable iff (!tx_rst_n);
+
+    // one source at most is told it may send: the arbiter grants one long packet per word
+    arb_one_ready: assert property ($onehot0(ready_o));
+
+    // the output holds its word while the sink is not ready (valid / ready handshake)
+    arb_hold: assert property (
+        m_o.valid && !m_ready_i |=>
+            m_o.valid && $stable(m_o.data) && $stable(m_o.kmask)
+    );
+
+    // a packet that starts ends (a strong eventually: every start waits for its end)
+    arb_packet: assert property (
+        m_o.valid && m_o.sop && m_ready_i |->
+            s_eventually (m_o.valid && m_o.eop && m_ready_i)
+    );
 endmodule

@@ -2,8 +2,10 @@
 """shots.py — the README screenshots (docs/img/*.png), built the same way every run (Python playwright).
 
 Viewport 1280 px, device scale 1, dark theme (light only for light.png and the static SVG), fonts loaded, then a fixed
-sequence of clicks and fields per shot, so an image only changes when the code or an example changes. Each image is
-one element of a page (a viewer, its bar, its bookmark list), not the page with its "Generated" time.
+sequence of clicks and fields per shot, each followed by two animation frames (no sleeps), so an image only changes when
+the code or an example changes. Each image is one element of a page (a viewer, its bar, its bookmark list), not the page
+with its "Generated" time. The pictures use IBM Plex (Google Fonts, or a local install such as the Debian / Ubuntu
+package fonts-ibm-plex when offline): without it every PNG would differ, so shots.py stops with a message instead.
 Needs `make examples` first (pages in BUILD/examples/) and docs/index.html with docs/demo_waves.js.
 
   python3 tests/shots.py [--build /tmp/wavefw] [--out docs/img] [--only hero,bar]   (no -I: playwright)
@@ -13,6 +15,14 @@ from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 errors = []
+# IBM Plex is there (from Google Fonts or installed) when its widths differ from the fallback's
+PLEX = '''(() => { const c = document.createElement('canvas').getContext('2d'), w = f => (c.font = f, c.measureText('mmmwwwiil 0O').width);
+    return ['IBM Plex Sans', 'IBM Plex Mono'].filter(n => w(`16px "${n}", serif`) === w('16px serif')); })()'''
+
+
+def settle(page):
+    """Two animation frames: the viewers draw in requestAnimationFrame, the shot comes after it."""
+    page.evaluate('new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))')
 
 
 def open_page(browser, path, scheme='dark', height=900):
@@ -24,14 +34,18 @@ def open_page(browser, path, scheme='dark', height=900):
     page.goto(path.as_uri())
     page.wait_for_load_state('networkidle')
     page.evaluate('document.fonts.ready')
-    page.wait_for_timeout(300)
+    missing = page.evaluate(PLEX)
+    if missing:
+        sys.exit(f'shots: {", ".join(missing)} not available (offline?): the PNGs would differ from the committed ones. '
+                 'Connect to the network (Google Fonts) or install the font (fonts-ibm-plex) and run again.')
+    settle(page)
     return page
 
 
 def no_sva(page):
     """The shots of the viewer itself: no assertion groups, no assertions panel (sva.png and sva-table.png have them)."""
     page.evaluate("(async () => { await SVA.ready(); WaveFW.configure({svaShow: []}); await SVA.ready(); SVA.panels().forEach(p => { p.el.hidden = true; }); })()")
-    page.wait_for_timeout(100)
+    settle(page)
 
 
 def view(page, i=0):
@@ -78,11 +92,11 @@ def main():
         page.evaluate("(async () => { await SVA.ready(); WaveFW.configure({svaShow: ['apb_demo_no_wait'], svaSignals: false}); await SVA.ready(); })()")
         p0 = 'SVA.panels()[0]'
         page.evaluate(f"(() => {{ const p = {p0}; p.open = false; p.render(); p.v.expandAll(); p.v.canvas.focus(); }})()")
-        page.keyboard.press('f'); page.wait_for_timeout(100)
+        page.keyboard.press('f'); settle(page)
         page.evaluate("window.scrollTo(0, 0)")
         shot('sva', page.locator('.bench').first, upto=view(page).locator('.notes'))
-        page.evaluate(f"(async () => {{ const p = {p0}; p.open = true; p.showTable = true; p.showFails = true; p.render(); await new Promise(r => setTimeout(r, 200)); p.el.querySelector('ol.asv').style.display = 'none'; }})()")
-        page.wait_for_timeout(250)
+        page.evaluate(f"(async () => {{ const p = {p0}; p.open = true; p.showTable = true; p.showFails = true; p.render(); p.el.querySelector('ol.asv').style.display = 'none'; }})()")
+        settle(page)
         shot('sva-table', view(page).locator('.sva'))
         page.evaluate('WaveFW.configure({svaShow: null, svaSignals: null})')
         page.close()
@@ -118,7 +132,7 @@ def main():
         js(page, 0, "(v.toggleHighlight('axi_lite_tb.u_master'), v.toggleHighlight('axi_lite_tb.u_slave'), 0)")
         shot('highlight', v)
         v.locator('canvas').focus(); page.keyboard.press('Escape')
-        v.locator('input.q').fill('awvd'); page.wait_for_timeout(150)
+        v.locator('input.q').fill('awvd'); settle(page)
         shot('find', v)
         page.close()
 

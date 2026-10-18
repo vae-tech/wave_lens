@@ -14,7 +14,7 @@ Config keys used here (the rest is vcd2wavedrom.py's, see its --help):
             compilation unit), inlined as window.SVA for the assertions panel; parse errors are shown in the page.
             false: no assertion engine in the page (also --no-sva). Without "sva" the page still has it ("Load file…").
   "bind"    [{"assert": "a_req_ack", "scope": "tb.dut"}] (top level: every view; or in a view) evaluated over the
-            dump with sva eval, so the page opens with them bound (README "Assertions"); the page also gets a printable
+            dump with sva eval, so the page opens with them bound (docs/USAGE.md "Assertions"); the page also gets a printable
             "Assertions" section: the bindings over the whole dump (totals, one row per assertion, the failures)
 """
 import argparse, datetime, html, json, os, sys
@@ -56,7 +56,7 @@ p {{ max-width: 80ch; margin: 0 0 10px; }}
 .sva-report .meta {{ font-size: 12.5px; color: var(--muted); }}
 .sva-report .notes, .sva-report .more {{ font-size: 12.5px; color: var(--muted); }}
 @media print {{
-  .wv, .bench {{ break-inside: avoid; }} button.theme, .wv .bar, .wv .sva {{ display: none; }}
+  h2, .note {{ break-after: avoid; }} button.theme, .wv .bar .tools, .wv .sva {{ display: none; }}   /* a tall viewer breaks over pages; its title and cursor stay */
   .sva-report {{ break-before: page; }} .sva-report table {{ font-size: 9.5px; width: 100%; table-layout: auto; }}
   .sva-report th, .sva-report td {{ white-space: normal; padding: 2px 4px; overflow-wrap: anywhere; }}
 }}
@@ -113,6 +113,16 @@ def section(key, doc, render, note):
     return '\n'.join(out)
 
 
+def generated(reproducible):
+    """The "Generated" fact: now, SOURCE_DATE_EPOCH (reproducible builds, UTC) or None (--reproducible: left out)."""
+    if reproducible:
+        return None
+    epoch = os.environ.get('SOURCE_DATE_EPOCH')
+    if epoch:
+        return datetime.datetime.fromtimestamp(int(epoch), datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+    return datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('files', nargs='*', help='key=file.json WaveJSON inputs (instead of --config views)')
@@ -127,6 +137,8 @@ def main():
     ap.add_argument('--sva', action='append', metavar='FILE', help='assertion file for every view (repeatable; replaces the config\'s top-level "sva")')
     ap.add_argument('--bind', action='append', metavar='NAME@SCOPE', help='binding for every view (repeatable, NAME may be a pattern; replaces the top-level "bind")')
     ap.add_argument('--no-sva', action='store_true', help='leave the assertion engine (wavefw/sva.js + sva.wasm.js, ~330 kB) out of the page, and evaluate nothing')
+    ap.add_argument('--reproducible', action='store_true', help='no "Generated" time in the page: the same inputs give the same bytes '
+                    '(or set SOURCE_DATE_EPOCH: that time, in UTC)')
     ap.add_argument('--out', required=True, help='output .html')
     a = ap.parse_args()
     if not a.config and not a.files:
@@ -184,7 +196,8 @@ def main():
     metas = [d.get('meta') or {} for d in docs.values()]
     facts = [('Dump', ', '.join(sorted({m['waves'] for m in metas if 'waves' in m})) or '—'),
              ('Wave tool', ', '.join(sorted({m['tool'] for m in metas if 'tool' in m})) or '—'),
-             ('Views', str(len(docs))), ('Generated', datetime.datetime.now().strftime('%Y-%m-%d %H:%M'))]
+             ('Views', str(len(docs))), ('Generated', generated(a.reproducible))]
+    facts = [f for f in facts if f[1] is not None]
     if sva_files:
         n = sum(len((f.get('parsed') or {}).get('assertions', [])) for f in sva_files)
         facts.insert(3, ('Assertions', f'{n} in {", ".join(f["name"] for f in sva_files)}' if n else ', '.join(f['name'] for f in sva_files)))

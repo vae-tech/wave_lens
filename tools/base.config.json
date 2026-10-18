@@ -8,7 +8,7 @@
     "sva: SystemVerilog assertion files of the page (paths relative to the config; false: no assertion engine in the page).",
     "bind: [{assert, scope, show?}] or \"name@scope\": assertions bound to instances, evaluated over the dump when the page is built;",
     "  \"assert\" may be a pattern (\"apb_*\"), \"show\": false skips a line. mkconfig.py --sva fills it: one line per instance where",
-    "  every signal of an assertion resolves (README \"Assertions\")."
+    "  every signal of an assertion resolves (docs/USAGE.md \"Assertions\")."
   ],
   "sva": [],
   "bind": [],

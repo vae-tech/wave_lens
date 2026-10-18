@@ -15,12 +15,14 @@
   /* highlight colours, one per highlighted instance (cycled) */
   --wave-hl1: #1c7ed6; --wave-hl2: #ae3ec9; --wave-hl3: #0c8599; --wave-hl4: #d6336c; --wave-hl5: #5c940d; --wave-hl6: #e8590c;
   --wave-hl8: #7048e8;    /* highlight of plugins (the rows of a selected assertion attempt) */
-  /* assertions on the waves (sva.js): attempt bars, step circles, the per-cycle strip */
-  --sva-pass: #2b7a3b; --sva-fail: #c92a2a; --sva-disabled: #6c757d; --sva-active: #1971c2; --sva-capped: #706b80;
+  --wave-paint: #d6336c;  /* the find group's Paint colour (its first value) */
+  /* assertions on the waves (sva.js): attempt bars, step circles, the per-cycle strip, a drop target */
+  --sva-pass: #2b7a3b; --sva-fail: #c92a2a; --sva-disabled: #6c757d; --sva-active: #1971c2; --sva-capped: #706b80; --sva-ok: #37b24d;
   --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
   color-scheme: light;
 }
+/* dark: twice the same tokens, for auto (the media query) and for data-theme="dark": keep the two blocks in sync */
 @media (prefers-color-scheme: dark) { :root:not([data-theme]) {
   --bg: #16181d; --panel: #1f2229; --panel-2: #272b33; --fg: #e8e6df; --muted: #9aa0ab; --line: #363b45;
   --accent: #e4834a; --accent-soft: #3a2a1f; --wave-1: #e8e6df; --wave-bus: #7fb0dd; --wave-x: #e0665a;
@@ -28,7 +30,7 @@
   --wave-c3: #3d3818; --wave-c4: #42301c; --wave-c5: #1f3247; --wave-c6: #1b3a3c;
   --wave-c7: #20391f; --wave-c8: #33264a; --wave-c9: #452423; color-scheme: dark;
   --wave-hl1: #4dabf7; --wave-hl2: #da77f2; --wave-hl3: #3bc9db; --wave-hl4: #f783ac; --wave-hl5: #a9e34b; --wave-hl6: #ff922b;
-  --wave-hl8: #9775fa; --sva-pass: #51cf66; --sva-fail: #ff6b6b; --sva-disabled: #868e96; --sva-active: #4dabf7; --sva-capped: #adb5bd; } }
+  --wave-hl8: #9775fa; --wave-paint: #f06595; --sva-pass: #51cf66; --sva-fail: #ff6b6b; --sva-disabled: #868e96; --sva-active: #4dabf7; --sva-capped: #adb5bd; --sva-ok: #69db7c; } }
 [data-theme="dark"] {
   --bg: #16181d; --panel: #1f2229; --panel-2: #272b33; --fg: #e8e6df; --muted: #9aa0ab; --line: #363b45;
   --accent: #e4834a; --accent-soft: #3a2a1f; --wave-1: #e8e6df; --wave-bus: #7fb0dd; --wave-x: #e0665a;
@@ -36,7 +38,7 @@
   --wave-c3: #3d3818; --wave-c4: #42301c; --wave-c5: #1f3247; --wave-c6: #1b3a3c;
   --wave-c7: #20391f; --wave-c8: #33264a; --wave-c9: #452423; color-scheme: dark;
   --wave-hl1: #4dabf7; --wave-hl2: #da77f2; --wave-hl3: #3bc9db; --wave-hl4: #f783ac; --wave-hl5: #a9e34b; --wave-hl6: #ff922b;
-  --wave-hl8: #9775fa; --sva-pass: #51cf66; --sva-fail: #ff6b6b; --sva-disabled: #868e96; --sva-active: #4dabf7; --sva-capped: #adb5bd; }
+  --wave-hl8: #9775fa; --wave-paint: #f06595; --sva-pass: #51cf66; --sva-fail: #ff6b6b; --sva-disabled: #868e96; --sva-active: #4dabf7; --sva-capped: #adb5bd; --sva-ok: #69db7c; }
 /* white: pure white paper, black traces and stock-WaveDrom bus colours (good for print and slides) */
 [data-theme="white"] {
   --bg: #ffffff; --panel: #ffffff; --panel-2: #f3f4f6; --fg: #000000; --muted: #4b5563; --line: #d1d5db;
@@ -79,7 +81,8 @@
 .wv .names .row { height: 26px; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 8px; border-bottom: 1px dotted var(--line); white-space: nowrap; }
 .wv .names .row .n { overflow: hidden; text-overflow: ellipsis; }
 .wv .names .row .n .pfx { color: var(--muted); opacity: 0.75; }
-.wv .names .row .v { color: var(--accent); font-weight: 600; flex-shrink: 0; }
+.wv .names .row .v { color: var(--accent); font-weight: 600; flex-shrink: 0; max-width: 50%; overflow: hidden; text-overflow: ellipsis; }   /* a long value (bin) leaves the name half the row; its title has it all */
+.wv .names .row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 /* modules (groups): bold, on a darker band with a border above, so they stand apart from the signals */
 .wv .names .row.grp { cursor: pointer; font-weight: 700; color: var(--fg); background: color-mix(in srgb, var(--panel-2) 92%, var(--fg)); border-top: 1px solid var(--line); user-select: none; }
 /* module shading: the signals of every other module on a light band (moduleShading) */
@@ -134,8 +137,8 @@
 .wv .notes .bn:hover { color: var(--panel); outline: 2px solid var(--accent-soft); }
 .wv .notes .nh + ol + .nh { margin-top: 8px; }
 .wv .notes input.tm { width: 12ch; font-family: var(--font-mono); font-size: 11.5px; border-radius: 4px; }
-.wv .notes input.tm.bad { outline: 2px solid var(--wave-x); }
-.wv .notes select.sig { max-width: 30ch; font-family: var(--font-mono); font-size: 11.5px; }
+.wv .notes input.tm.bad, .wv .notes input.sig.bad { outline: 2px solid var(--wave-x); }
+.wv .notes input.sig { width: 30ch; max-width: 40vw; font-family: var(--font-mono); font-size: 11.5px; }
 .wv .notes .eg { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); min-width: 2ch; }
 .wv .notes .ic { padding: 1px 6px; }
 .wv .notes input[type="color"] { width: 26px; height: 22px; padding: 1px; border-radius: 4px; cursor: pointer; }
@@ -145,7 +148,7 @@
 .wv .notes select { border-radius: 4px; }
 .wv .notes textarea.json { display: block; width: 100%; margin-top: 6px; font: 11.5px/1.4 var(--font-mono); background: var(--panel-2); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 6px; resize: vertical; }
 /* assertions panel (wavefw/sva.js): under the bar, the look of the bookmarks; module rows as drop targets while dragging */
-.wv { --sva-ok: #37b24d; --sva-no: var(--wave-x); }
+.wv { --sva-no: var(--wave-x); }
 .wv .sva { border-bottom: 1px solid var(--line); padding: 5px 10px 7px; font-size: 12.5px; background: var(--panel); }
 .wv .sva .nh { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
 .wv .sva .nh .muted { color: var(--muted); font-size: 11.5px; margin-right: auto; }
@@ -226,6 +229,13 @@
 .wv .sva .st .sel { margin-left: 6px; color: var(--wave-hl8); font-weight: 600; }
 .wv canvas { display: block; width: 100%; cursor: crosshair; touch-action: none; position: sticky; top: 0; }
 .wv canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.wv canvas.wv-print { position: absolute; left: 0; width: 100%; }   /* print: the rows in pages of canvases (paintPrint) */
+@media print {
+  .wv.wv-scroll .body { max-height: none; overflow: visible; }        /* every row, not the scroll box */
+  .wv .wcol > canvas:not(.wv-print) { display: none; }
+  .wv .bar .tools, .wv .hint { display: none; }                       /* the title and the cursor readout stay */
+  .wv, .wv .body { break-inside: auto; }
+}
 .wv .hint { font-size: 11.5px; color: var(--muted); padding: 4px 10px; border-top: 1px solid var(--line); }
 @media (max-width: 600px) { .wv .body { grid-template-columns: min(var(--wv-names, 200px), 130px) minmax(0, 1fr); } }
 
