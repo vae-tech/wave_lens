@@ -8,7 +8,8 @@ wavefw is [USAGE.md](USAGE.md).
 ```
 wavefw/                       what a page needs, nothing else
   wavefw.js / wavefw.css      framework (one <script> + one <link>); wavefw.js is made by make wavefw from src/
-  src/                        model.js (settings, sorting, find, time, values, the parser), paint.js (the two painters
+  src/                        model.js (settings, sorting, find, time, values, the parser), vcd.js (a VCD read in the
+                              page), paint.js (the two painters
                               and what they draw), view.js (WaveView and its parts Bar, Names, Notes), svg.js (WaveSVG),
                               boot.js (themes, configure, upgrade, exports): one scope, concatenated in this order
   wavefw.config.js            global settings file (all keys, with defaults), loaded before wavefw.js

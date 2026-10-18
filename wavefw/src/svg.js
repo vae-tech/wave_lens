@@ -58,10 +58,11 @@ const WaveSVG = {
       const step = M.timed ? null : Math.max(1, M.every);
       if (showAxis) paintAxis(P, { from, span: to - from, xL, xR, y: axisY, h: 20, yEnd: bodyEnd, X, timed: M.timed, tick: M.tick, every: M.every, step });
       if (showTock) paintAxis(P, { from, span: to - from, xL, xR, y: tockY, h: 20, yEnd: tockY, X, timed: M.timed, tick: M.tock, every: M.every, step, mid: true });
-      const rowY = paintBody(P, M, lay, X, from, to, xL, xR, hl, null, null, C.band, null, strokeOf), top = showAxis ? axisY + 20 : lay.length ? lay[0].y : y;
+      const rowY = paintBody(P, M, lay, X, from, to, xL, xR, hl, null, null, C.band, null, strokeOf, r => !(last[r.id] > rows.indexOf(r))), top = showAxis ? axisY + 20 : lay.length ? lay[0].y : y;
       paintMarkers(P, (opts.markers || []).concat(M.markers), X, from, to, top, bodyEnd);
       paintBookmarks(P, bms, ars, X, from, to, rowY, top, bodyEnd, showAxis ? axisY + 10 : top + 10, null, laneY(lay, S.laneHeight));
       if (V && V.cursor >= from && V.cursor <= to) P.path([['M', X(V.cursor), top], ['L', X(V.cursor), bodyEnd]], { stroke: 'acc', w: 1.2 });
+      if (V && V.cursor2 != null && V.cursor2 >= from && V.cursor2 <= to) P.path([['M', X(V.cursor2), top], ['L', X(V.cursor2), bodyEnd]], { stroke: 'cursor2', w: 1.2, dash: [5, 3] });
     });
     notes.forEach((b, i) => {
       const cy = notesY + i * 20 + 10;

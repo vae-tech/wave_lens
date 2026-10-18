@@ -27,7 +27,8 @@ Config file (--config cfg.json): every option can be a key (dashes or underscore
   Clock-sampled buses get "width" and, when their labels do not read back as values (bin signed oct ascii, x digits),
   "raw": the hex value of each label (the page's assertions sample them).
   Per-signal settings: show (false: left out), alias (displayed name), radix (auto hex dec signed bin oct ascii),
-  color (trace / outline / name), fill (bus fill), style (auto wavedrom questa square), enum {"0": "IDLE"};
+  color (trace / outline / name), fill (bus fill), style (auto wavedrom questa square), enum {"0": "IDLE"}, enumColors
+  {"IDLE": "#ffe066"}, analog true / rows (a bus as a step plot, that many rows high); radix also float, q8, sq15;
   width and changes are information only.
 
 Examples
@@ -37,7 +38,7 @@ Examples
       --signals clk,txd,state --group tx=state,txd --marker 'posedge done=done' --out exact.json
   python3 -I tools/vcd2wavedrom.py --config dump.config.json --view exact --out exact.json
 """
-import argparse, bisect, concurrent.futures, functools, heapq, json, os, re, shutil, statistics, subprocess, sys
+import argparse, bisect, concurrent.futures, decimal, functools, heapq, json, math, os, re, shutil, statistics, struct, subprocess, sys
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
@@ -289,13 +290,46 @@ def norm(value, width):
     return digits.rjust((width + 3) // 4, '0')
 
 
+def jsfmt(f, spec):
+    """format() of the exact binary value with JavaScript's ties (away from zero: toFixed, toExponential), not Python's."""
+    with decimal.localcontext() as c:
+        c.rounding = decimal.ROUND_HALF_UP
+        return format(decimal.Decimal(f), spec)
+
+
+def gfmt(f, p=7):
+    """A float as wavefw.js gfmt (C's %.<p>g with a two-digit exponent)."""
+    if f != f:
+        return 'nan'
+    if f in (float('inf'), float('-inf')):
+        return '-inf' if f < 0 else 'inf'
+    if f == 0:
+        return '-0' if math.copysign(1, f) < 0 else '0'
+    e = math.floor(math.log10(abs(float(jsfmt(f, f'.{p - 1}e')))))
+    trim = lambda s: s.rstrip('0').rstrip('.') if '.' in s else s
+    if -5 <= e < p:
+        return trim(jsfmt(f, f'.{max(0, p - 1 - e)}f'))
+    m, x = jsfmt(f, f'.{p - 1}e').lower().split('e')
+    return trim(m) + 'e' + ('-' if x[0] == '-' else '+') + x.lstrip('+-').rjust(2, '0')
+
+
 def label(v, width, enum=None, radix=None):
-    """Bus label, the same radixes as wavefw.js: auto (<=6 bits dec, else hex) hex dec signed bin oct ascii."""
+    """Bus label, the same radixes as wavefw.js: auto (<=6 bits dec, else hex) hex dec signed bin oct ascii float, fixed
+    point q<F> / sq<F>."""
     if enum is not None and re.fullmatch('[0-9a-f]+', v) and int(v, 16) in enum:
         return enum[int(v, 16)]
     if re.search('[xz]', v):
         return v
     n, r = int(v, 16), {'unsigned': 'dec', 'sdec': 'signed'}.get(radix, radix)
+    q = re.fullmatch(r'(s?)q(\d+)', r or '')
+    if q:
+        if q[1] and width > 1 and n >= 1 << (width - 1):
+            n -= 1 << width
+        d = min(math.ceil(int(q[2]) * 0.30103), 12)
+        s = jsfmt(n / 2 ** int(q[2]), f'.{d}f')
+        return s.rstrip('0').rstrip('.') if d else s
+    if r == 'float' and width in (16, 32, 64):
+        return gfmt(struct.unpack({16: '>e', 32: '>f', 64: '>d'}[width], n.to_bytes(width // 8, 'big'))[0], {16: 4, 32: 7, 64: 15}[width])
     if r == 'dec':
         return str(n)
     if r == 'signed':
@@ -350,7 +384,7 @@ def nice_floor(x):
 # ---------------- options: command line + config file ----------------
 LIST_KEYS = ('signals', 'gap', 'enum', 'group', 'marker', 'sva', 'bind', 'exprs')
 SKIP_KEYS = ('views', 'page', 'config', 'description', 'comment', 'render', 'note', 'select', 'rules')   # not converter options
-SIG_KEYS = ('show', 'alias', 'radix', 'color', 'fill', 'style', 'enum', 'width', 'changes')            # catalog entry keys
+SIG_KEYS = ('show', 'alias', 'radix', 'color', 'fill', 'style', 'enum', 'width', 'changes', 'enumColors', 'analog', 'height', 'fields')   # catalog entry keys
 
 
 def parser():
@@ -582,7 +616,7 @@ def convert(a):
                 j['width'] = s['width']
             # the values next to labels that do not read back (the page's assertions sample them): binary, signed,
             # octal and ascii labels, values with x / z digits
-            if data and (s['radix'] in ('bin', 'signed', 'sdec', 'oct', 'ascii') or any(re.search('[xz]', v) for v in raw)):
+            if data and (s['radix'] in ('bin', 'signed', 'sdec', 'oct', 'ascii', 'float') or re.fullmatch(r's?q\d+', s['radix'] or '') or any(re.search('[xz]', v) for v in raw)):
                 j['raw'] = raw
             sig_json[s['abs']] = j
         doc['head'] = {'text': a.title or f'{os.path.basename(a.waves)} @ posedge {a.clock}', 'tick': 0}
@@ -635,7 +669,7 @@ def convert(a):
         j = sig_json[s['abs']]
         if s['enum']:
             j['enum'] = {str(k): v for k, v in s['enum'].items()}
-        for k in ('radix', 'color', 'fill', 'style'):
+        for k in ('radix', 'color', 'fill', 'style', 'enumColors', 'analog', 'height', 'fields'):
             if s['set'].get(k) not in (None, ''):   # "" = the global setting
                 j[k] = s['set'][k]
         if a.hierarchy:
@@ -644,14 +678,21 @@ def convert(a):
     out = []
     if a.hierarchy:   # ---- groups = scopes: tb.dut.u_x.sig -> ["tb", ["dut", ["u_x", sig]]], in signal order ----
         root = (a.scope + '.') if a.scope else ''
-        node = {(): out}
+        node, kinds = {(): out}, {}
+        decl = getattr(rd, 'decl', None) or dumpscan.read(a.waves, None)
+        types = decl.scopes if decl else {}   # struct / union / interface scopes (an FST through fst2vcd; a VCD that says so)
         for s in specs:
             parts = re.split(r'\.(?![^\[]*\])', s['abs'][len(root):] if s['abs'].startswith(root) else s['abs'])[:-1]
             for i in range(len(parts)):
                 key = tuple(parts[:i + 1])
                 if key not in node:
                     node[key] = [parts[i]]; node[key[:-1]].append(node[key])
+                    t, at = types.get(root + '.'.join(key)), root + '.'.join(key)
+                    if t in ('struct', 'union', 'interface'):   # with its width in the dump: the page puts a whole value together only from all of it
+                        kinds['.'.join(key)] = {'kind': t, 'width': sum(v.width for p, v in decl.vars.items() if p.startswith(at + '.'))} if t != 'interface' else t
             node[tuple(parts)].append(sig_json[s['abs']])
+        if kinds:
+            doc['scopes'] = kinds
     else:   # ---- groups: nest members at the position of the first one ----
         member = {}
         for gname, members in parse_groups(a.group):

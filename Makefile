@@ -114,7 +114,7 @@ $(EXB)/obj/V$(EX)_tb: $(EX_SRC)
 
 $(EXB)/obj_fst/V$(EX)_tb: $(EX_SRC)
 	mkdir -p $(EXB)
-	verilator --binary --timing -Wno-fatal --trace-fst --top-module $(EX)_tb -Mdir $(EXB)/obj_fst $(EX_SRC)
+	verilator --binary --timing -Wno-fatal --trace-fst --trace-structs --top-module $(EX)_tb -Mdir $(EXB)/obj_fst $(EX_SRC)
 
 $(EXB)/$(EX).vcd: $(EXB)/obj/V$(EX)_tb
 	cd $(EXB)/obj && ./V$(EX)_tb +trace +dump=$@
@@ -226,7 +226,7 @@ smoke:
 	$(PW) tests/smoke.py --build $(B) --out $(B)/shots $(if $(STRICT),--strict) $(if $(ONLY),--only $(ONLY))
 
 # wavefw/wavefw.js is the concatenation of wavefw/src/*.js (committed: a page needs one file and no build step)
-WAVEFW_SRC := $(addprefix wavefw/src/,model.js paint.js view.js svg.js boot.js)
+WAVEFW_SRC := $(addprefix wavefw/src/,model.js vcd.js paint.js view.js svg.js boot.js)
 wavefw: wavefw/wavefw.js
 wavefw/wavefw.js: $(WAVEFW_SRC) tools/wavefwcat.py
 	$(PY) tools/wavefwcat.py

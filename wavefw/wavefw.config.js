@@ -22,7 +22,8 @@ window.WAVEFW_CONFIG = {
   sortButton: true,             // Sort button + prefix field in the viewer bar
   hint: true,                   // help line under the viewer
   style: 'auto',                // edges: 'auto' | 'wavedrom' (slanted) | 'questa' / 'square' (vertical, like a simulator)
-  radix: 'auto',                // bus values: 'auto' (≤6 bits dec, else hex) | 'hex' | 'dec' | 'signed' | 'bin' | 'oct' | 'ascii'
+  radix: 'auto',                // bus values: 'auto' (≤6 bits dec, else hex) | 'hex' | 'dec' | 'signed' | 'bin' | 'oct' | 'ascii' | 'float' | fixed point 'q8' / 'sq15'
+  enumColors: null,             // the fill of a bus value by its label or number: {"ACCESS": "#d0ebff", "3": "c5"}
   fold: null,                   // groups folded at start: true | depth (number) | ['group.path', …]
   highlight: null,              // instances highlighted at start: ['tb.dut.u_tx', '*.irq'] (paths, names, * patterns)
   dim: 0.3,                     // opacity of the rows that are not highlighted
@@ -32,7 +33,12 @@ window.WAVEFW_CONFIG = {
   groupOrder: 'file',           // inside every group: 'last' = signals first, then the sub-groups (modules); 'first'; 'file' = as given
   findHighlight: true,          // fuzzy find: found rows in front, the rest dimmed
   findOpen: true,               // fuzzy find: every module folded except the ones with a match
+  findCase: false,              // find options (Aa Full .* in the find group): the case matters,
+  findWord: false,              //   a word is the whole name (a.b: the end of the full path),
+  findRegex: false,             //   the query is a regular expression (grep -E, JavaScript RegExp; \< \> as in vim)
   wheel: 'scroll',              // the wheel scrolls the rows, ctrl+wheel zooms (as in Questa); 'zoom': the wheel zooms
+  dumpBudget: 3000000,          // a VCD opened in the page (Open…, dropped): the signals nearest the top up to this many value changes
+  svaOpen: false,               // sva.js: the assertion list open at start (false: folded, ▸ Assertions opens it)
   busDetect: true,              // bus.js: the bus ports found by their signal names (AXI, AXI-Stream, APB, AHB, Avalon, Wishbone, OBI) drawn as transactions
   buses: null,                  // bus.js: ports of your own [{protocol, scope, prefix?, map?: {role: name}, clock?, name?}] (busDetect: false: only these)
   contextMenu: true,            // the right button on the waves: a range and the viewer's menu (picture, colour, …); false: the browser's

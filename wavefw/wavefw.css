@@ -2,25 +2,26 @@
    Themes: data-theme="light | white | dark" works on <html> (page + all waves) and on any wave element (that wave only).
    No data-theme on <html> = auto (follows prefers-color-scheme). */
 :root, [data-theme="light"] {
-  --bg: #f7f6f2; --panel: #ffffff; --panel-2: #efede6; --fg: #1d1f24; --muted: #5e6472; --line: #d9d6cc;
-  --accent: #b5551b; --accent-soft: #f4e2d4;
+  /* a dimmed light: a step between white and dark, grey paper that does not glare (white: the pure white one) */
+  --bg: #d5d6d9; --panel: #e2e3e6; --panel-2: #d3d5d9; --fg: #17191e; --muted: #4d5361; --line: #b6bac2;
+  --accent: #a84c14; --accent-soft: #e8d2c2;
   --wave-1: #1d1f24;      /* single bit trace */
   --wave-bus: #2f5d8a;    /* bus outline */
   --wave-x: #c23a2b;      /* x hatch */
-  --wave-x-soft: #f6dcd9; /* x fill */
+  --wave-x-soft: #ebcfcb; /* x fill */
   --wave-z: #2f5d8a;      /* high-Z line */
   /* bus fills for WaveDrom colour chars 3..9 ('=' and '2' use --panel) */
-  --wave-c3: #fbf3c2; --wave-c4: #fbe2c8; --wave-c5: #d3e5f7; --wave-c6: #d2f1f1;
-  --wave-c7: #d8efd4; --wave-c8: #eadcf6; --wave-c9: #f6d8d6;
+  --wave-c3: #ede3ad; --wave-c4: #edd2b6; --wave-c5: #c4d8ec; --wave-c6: #c2e2e2;
+  --wave-c7: #c9e2c4; --wave-c8: #dccbec; --wave-c9: #ebc9c6;
   /* highlight colours, one per highlighted instance (cycled) */
   --wave-hl1: #1c7ed6; --wave-hl2: #ae3ec9; --wave-hl3: #0c8599; --wave-hl4: #d6336c; --wave-hl5: #5c940d; --wave-hl6: #e8590c;
   --wave-hl8: #7048e8;    /* highlight of plugins (the rows of a selected assertion attempt) */
-  --wave-band: #e6f2fd;   /* the second background of neighbouring instances (moduleShading): a pale blue */
-  --bus-write: #1c7ed6; --bus-read: #2b8a3e; --bus-error: #c92a2a; --bus-channel: #868e96;   /* bus transactions (bus.js) */
+  --wave-band: #d2dde9;   /* the second background of neighbouring instances (moduleShading): a pale blue */
   --bus-write: #1c7ed6; --bus-read: #2b8a3e; --bus-error: #c92a2a; --bus-channel: #868e96;   /* bus transactions (bus.js) */
   --wave-paint: #d6336c;  /* the find group's Paint colour (its first value) */
+  --wave-cursor2: #1864ab;   /* the second cursor (shift+click) */
   /* assertions on the waves (sva.js): attempt bars, step circles, the per-cycle strip, a drop target */
-  --sva-pass: #2b7a3b; --sva-fail: #c92a2a; --sva-disabled: #6c757d; --sva-active: #1971c2; --sva-capped: #706b80; --sva-ok: #37b24d;
+  --sva-pass: #22652f; --sva-fail: #a82020; --sva-disabled: #4f565d; --sva-active: #145a9a; --sva-capped: #56526a; --sva-ok: #37b24d;   /* >= 4.5:1 against the grey panel (the step digits) */
   --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
   color-scheme: light;
@@ -34,7 +35,7 @@
   --wave-c7: #20391f; --wave-c8: #33264a; --wave-c9: #452423; color-scheme: dark;
   --wave-hl1: #4dabf7; --wave-hl2: #da77f2; --wave-hl3: #3bc9db; --wave-hl4: #f783ac; --wave-hl5: #a9e34b; --wave-hl6: #ff922b;
   --wave-hl8: #9775fa; --wave-paint: #f06595; --sva-pass: #51cf66; --sva-fail: #ff6b6b; --sva-disabled: #868e96; --sva-active: #4dabf7; --sva-capped: #adb5bd; --sva-ok: #69db7c;
-  --wave-band: #1f2d39; --bus-write: #4dabf7; --bus-read: #69db7c; --bus-error: #ff6b6b; --bus-channel: #adb5bd; } }
+  --wave-band: #1f2d39; --wave-cursor2: #74c0fc; --bus-write: #4dabf7; --bus-read: #69db7c; --bus-error: #ff6b6b; --bus-channel: #adb5bd; } }
 [data-theme="dark"] {
   --bg: #16181d; --panel: #1f2229; --panel-2: #272b33; --fg: #e8e6df; --muted: #9aa0ab; --line: #363b45;
   --accent: #e4834a; --accent-soft: #3a2a1f; --wave-1: #e8e6df; --wave-bus: #7fb0dd; --wave-x: #e0665a;
@@ -43,7 +44,7 @@
   --wave-c7: #20391f; --wave-c8: #33264a; --wave-c9: #452423; color-scheme: dark;
   --wave-hl1: #4dabf7; --wave-hl2: #da77f2; --wave-hl3: #3bc9db; --wave-hl4: #f783ac; --wave-hl5: #a9e34b; --wave-hl6: #ff922b;
   --wave-hl8: #9775fa; --wave-paint: #f06595; --sva-pass: #51cf66; --sva-fail: #ff6b6b; --sva-disabled: #868e96; --sva-active: #4dabf7; --sva-capped: #adb5bd; --sva-ok: #69db7c;
-  --wave-band: #1f2d39; --bus-write: #4dabf7; --bus-read: #69db7c; --bus-error: #ff6b6b; --bus-channel: #adb5bd; }
+  --wave-band: #1f2d39; --wave-cursor2: #74c0fc; --bus-write: #4dabf7; --bus-read: #69db7c; --bus-error: #ff6b6b; --bus-channel: #adb5bd; }
 /* white: pure white paper, black traces and stock-WaveDrom bus colours (good for print and slides) */
 [data-theme="white"] {
   --bg: #ffffff; --panel: #ffffff; --panel-2: #f3f4f6; --fg: #000000; --muted: #4b5563; --line: #d1d5db;
@@ -52,14 +53,18 @@
   --wave-c3: #ffffb4; --wave-c4: #ffe0b9; --wave-c5: #b9e0ff; --wave-c6: #ccfdfe;
   --wave-c7: #cdfdc5; --wave-c8: #f0c1fb; --wave-c9: #f5c2c0; color-scheme: light;
   --sva-pass: #2b7a3b; --sva-fail: #e03131; --sva-active: #1971c2;
-  --wave-band: #e6f2fd; }
+  --wave-band: #e6f2fd; --wave-cursor2: #1971c2; }
 
 /* ---------------- interactive viewer (WaveView) ---------------- */
+.wv, .wv *, .wv *::before, .wv *::after { box-sizing: border-box; }   /* the rows' heights include their borders, whatever the page sets */
 .wv { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); overflow: clip;   /* clip, not hidden: hidden would stop the sticky canvas */ color: var(--fg); font-family: var(--font-body); }
 /* bar: title line (title, messages, cursor), then the tools in labelled groups; buttons of one control are joined */
 .wv .bar { border-bottom: 1px solid var(--line); background: var(--panel-2); font-size: 12.5px; }
 .wv .bar .head { display: flex; align-items: baseline; gap: 6px 12px; flex-wrap: wrap; padding: 6px 10px 2px; }
-.wv .bar .tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 0; padding: 3px 10px 6px; }
+.wv .bar .tools { display: flex; flex-direction: column; gap: 5px; padding: 3px 10px 7px; }
+.wv .bar .tln { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 0; }   /* a line per kind: time, find, expression, rows and files */
+.wv .bar .tln:empty { display: none; }
+.wv .bar .tln > .tg:first-child > .tl { min-width: 6.6em; }   /* the lines start in one column */
 .wv .bar .tg { display: inline-flex; align-items: center; gap: 6px; padding-right: 12px; margin-right: 12px; border-right: 1px solid var(--line); }
 .wv .bar .tg:last-child { border-right: 0; margin-right: 0; padding-right: 0; }
 .wv .bar .tl { font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
@@ -77,6 +82,12 @@
 .wv .bar button[data-act="sort"] { min-width: 8.5em; }
 .wv .bar input.pfx { font: inherit; font-family: var(--font-mono); font-size: 11.5px; width: 9ch; max-width: 24ch; padding: 2px 6px; border: 1px solid var(--line); border-left-style: dashed; background: var(--panel); color: var(--fg); }
 .wv .bar input.pfx:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.wv .bar .tg.find .fx { display: none; }
+.wv.wv-drop { outline: 2px dashed var(--accent); outline-offset: -2px; }   /* a dump dragged over the viewer */
+/* ctrl+F with the bar off the screen: the find group floats over the waves (focusFind) */
+.wv .bar .tg.find.float { position: fixed; z-index: 45; flex-wrap: wrap; max-width: calc(100vw - 12px); margin: 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--panel-2); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18); }
+.wv .bar .tg.find.float .fx { display: inline-block; padding: 2px 7px; }
 .wv .bar .eyebrow .mu { text-transform: none; }   /* uppercase would turn µs into ΜS */
 .wv .bar .cur { font-family: var(--font-mono); margin-left: 12px; color: var(--muted); }
 .wv .body { display: grid; grid-template-columns: var(--wv-names, 200px) minmax(0, 1fr); }
@@ -91,6 +102,7 @@
 .wv .names .row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 /* modules (groups): bold, on a darker band with a border above, so they stand apart from the signals */
 .wv .names .row.grp { cursor: pointer; font-weight: 700; color: var(--fg); background: color-mix(in srgb, var(--panel-2) 92%, var(--fg)); border-top: 1px solid var(--line); user-select: none; }
+.wv .names .row.grp[aria-expanded="false"]:not(.sel) { background-color: var(--panel); }   /* a folded module: the plain background */
 /* module shading: the signals of every other module on a light band (moduleShading) */
 /* fuzzy find: the field, its options, the matched letters in the names */
 .wv .bar input.q { font: inherit; font-family: var(--font-mono); font-size: 11.5px; width: 20ch; padding: 2px 6px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); }
@@ -98,6 +110,7 @@
 .wv .bar .cnt { font-family: var(--font-mono); font-size: 11px; color: var(--muted); padding: 2px 6px; border: 1px solid var(--line); background: var(--panel-2); white-space: nowrap; display: inline-flex; align-items: center; }
 .wv .bar .cnt:empty { display: none; }
 .wv .bar .cnt.none { color: var(--wave-x); }
+.wv .bar button.fo { font-family: var(--font-mono); font-size: 11.5px; padding: 2px 6px; min-width: 2.4em; }   /* find options: Aa Full .* */
 .wv .bar input.ct, .wv .bar input.cs { font: inherit; font-family: var(--font-mono); font-size: 11.5px; width: 9ch; padding: 2px 6px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); text-align: right; }
 .wv .bar input.ct:focus-visible, .wv .bar input.cs:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
 .wv .bar input.ct.bad, .wv .bar input.cs.bad { outline: 2px solid var(--wave-x); outline-offset: -1px; }
@@ -110,6 +123,7 @@
 .wv .bar .toast:empty + .cur { margin-left: auto; }
 .wv .names .row .n b.fm { color: var(--accent); font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
 .wv .names .row.alt { background-color: var(--wave-band); }
+.wv .names .row.grp .kd { font: 600 10.5px var(--font-mono); color: var(--muted); margin-right: 4px; }   /* {} struct, ∪ union, ⊟ interface */
 .wv .names .row.grp:hover, .wv .names .row.grp:focus-visible { color: var(--accent); outline: none; }
 .wv .names .row.space { border-bottom-color: transparent; }
 .wv .names .row.lane { padding: 0; border-bottom: 0; background: color-mix(in srgb, var(--panel-2) 45%, transparent); }   /* arrow labels */
@@ -146,7 +160,9 @@
 .wv .notes input.tm.bad, .wv .notes input.sig.bad { outline: 2px solid var(--wave-x); }
 .wv .notes input.sig { width: 30ch; max-width: 40vw; font-family: var(--font-mono); font-size: 11.5px; }
 .wv .notes .eg { font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); min-width: 2ch; }
+.wv .notes .dt { font-family: var(--font-mono); font-size: 11px; color: var(--muted); min-width: 9ch; text-align: right; white-space: nowrap; }   /* Δ from the cursor */
 .wv .notes .ic { padding: 1px 6px; }
+.wv .notes .ic.up[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }   /* the bookmark lifted above its signal */
 .wv .notes input[type="color"] { width: 26px; height: 22px; padding: 1px; border-radius: 4px; cursor: pointer; }
 .wv .notes input.txt { flex: 1 1 18ch; min-width: 12ch; border-radius: 4px; }
 .wv .notes input.lab { width: 14ch; border-radius: 4px; }
@@ -321,6 +337,7 @@
 .wv .wv-menu button, .wv .wv-menu .mi { all: unset; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 10px; border-radius: 4px; cursor: pointer; }
 .wv .wv-menu button:hover, .wv .wv-menu button:focus-visible, .wv .wv-menu .mi:hover { background: var(--accent-soft); }
 .wv .wv-menu .mi input { width: 34px; height: 18px; padding: 0; border: 1px solid var(--line); background: none; cursor: pointer; }
+.wv .wv-menu .mi input.qf { width: 4.5em; margin-left: 4px; padding: 0 3px; color: var(--fg); cursor: text; }   /* fixed point: fraction bits */
 .wv .wv-menu .mh { padding: 4px 10px 2px; font: 600 11px var(--font-mono); color: var(--muted); overflow-wrap: anywhere; }
 .wv .wv-menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 2px; }
 /* tooltips of the controls (what it does, its keys) and the help box (? in the bar) */

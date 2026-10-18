@@ -10,6 +10,16 @@ Contents: [Use cases](#use-cases) · [Assertions (SVA)](#assertions-sva) · [The
 
 ## Use cases
 
+### A dump straight in the browser
+
+Open `wavefw/viewer.html` from the repository (`file://`, no build) and drop a VCD on it, or **Open…** in the **dump**
+group of its bar (the last line; every viewer has it, a built page too). The VCD is read in the page: its signals by
+scope (struct / union / interface scopes marked), exact transitions; a big one is cut to the `dumpBudget` setting (3 M
+value changes: the scope levels nearest the top first; the toast says how many signals). **⟳** reads the file again
+after a new simulation and keeps the view (window, cursor, folding, highlight, bookmarks): in Chromium the file is
+picked through the File System Access API, so ⟳ reads what is on the disk now. An FST is binary: `fst2vcd x.fst >
+x.vcd`, or a page with `make html WAVES=x.fst`. A saved state (`.view.json`) dropped on a viewer is loaded.
+
 ### WaveDrom JSON in your own page
 
 ```html
@@ -53,8 +63,12 @@ every view of the config, each as a viewer or a static SVG; scopes become foldab
 }
 ```
 
-Edit `show` (false = left out), `radix` (`auto hex dec signed bin oct ascii`), `color`, `style`
-(`auto wavedrom questa square`), and add `alias`, `fill` or `enum` (`{"0": "IDLE"}`); `""` takes the global value from
+Edit `show` (false = left out), `radix` (`auto hex dec signed bin oct ascii float`, fixed point `q8` / `sq15`), `color`, `style`
+(`auto wavedrom questa square`), and add `alias`, `fill`, `enum` (`{"0": "IDLE"}`), `enumColors` (`{"IDLE": "#ffe066", "3": "c5"}`)
+or `analog` (`true` or a number of rows: the bus as a step plot), or `fields` (`[{"name": "state", "msb": 15, "lsb": 13, "enum": {…}}, …]`:
+a packed struct dumped as one vector, a row per field under a `{}` row with the whole value; `mkconfig.py --sv` writes
+them from `typedef struct packed`). A struct scope of the dump (an FST written with Verilator `--trace-structs`) is a
+`{}` group by itself, its row the whole value when every field is shown; `""` takes the global value from
 `"config"`. `width` and `changes` are information. Next to `signals`: `"config"` (page settings, below), `"page"` (title,
 intro), and `"views"` — named variants, each with its own `signals` (patterns such as `"tb.*_valid"`), `from` / `to`,
 `clock` (one cell per clock) or `exact`, `group`, `marker`, `bookmarks`, `arrows` and `render` (`view`, `svg`, `both`).
@@ -115,10 +129,13 @@ Colours, sizes, fonts, line widths, sorting, folding and highlight are *settings
 | `sortButton`, `hint` | true, true | show the Sort controls / the help line |
 | `style` | `auto` | edges: `wavedrom` (slanted), `questa` (vertical, narrow bus crossings), `square`; `auto` slants wave strings and draws exact `tv` transitions vertically; the viewer's list in **view** changes it (kept in the browser) |
 | `wheel` | `scroll` | the wheel scrolls the rows and ctrl+wheel zooms, as in Questa; `zoom`: the wheel zooms |
+| `svaOpen` | false | the assertion list (`sva.js`) open when the page opens; folded: ▸ Assertions opens it |
+| `dumpBudget` | 3000000 | a VCD opened in the page (Open…, dropped on a viewer): the signals nearest the top up to this many value changes |
 | `busDetect`, `buses` | true, none | bus transactions (`bus.js`): the ports found by their names; ports of your own `[{protocol, scope, prefix, map, clock, name}]` |
 | `contextMenu` | true | the right button on the waves: a range and the viewer's menu; false: the browser's |
 | `cursorSnap` | 8 | px: a click on the waves puts the cursor on an edge of the signal under the pointer this near (alt+click: not); 0 = off |
-| `radix` | `auto` | bus values from `tv`: `auto` (≤ 6 bits decimal, else hex) `hex dec signed bin oct ascii` |
+| `radix` | `auto` | bus values from `tv`: `auto` (≤ 6 bits decimal, else hex) `hex dec signed bin oct ascii`, `float` (IEEE 754 of a 16-, 32- or 64-bit bus), fixed point `q<F>` / `sq<F>` (unsigned / signed, F fraction bits: `q8`, `sq15`) |
+| `enumColors` | none | the fill of a bus value by its label or number, every signal: `{"ACCESS": "#d0ebff", "3": "c5"}` (a colour, a token, 3–9); a signal's own `enumColors` wins |
 | `fold` | none | groups folded at start: `true`, a nesting depth (`2`), or group paths |
 | `groupOrder` | `file` | inside a group: `last` = signals first, then sub-modules; `first`; `file` |
 | `moduleShading` | true | neighbouring instances alternate between two backgrounds, the panel and a pale blue (`band` in `colors`); module rows bold |
@@ -126,6 +143,7 @@ Colours, sizes, fonts, line widths, sorting, folding and highlight are *settings
 | `groupColors` | none | one colour per group: `{"aw": "#339af0", "tb.dut.u_rx": "#37b24d"}` (names, paths, `*` patterns) |
 | `highlight`, `dim` | none, 0.3 | instances in front at start (paths, names, `*` patterns) and the opacity of the rest |
 | `findHighlight`, `findOpen` | true, true | starting state of the find options |
+| `findCase`, `findWord`, `findRegex` | false | starting state of **Aa** (match case), **Full** (whole name; `a.b`: the end of the full path), **.\*** (a regular expression) |
 | `arrowLabels`, `laneHeight` | `lane`, 16 | arrow labels in a lane of their own between the signals, or `overlay` |
 | `svaSignals`, `svaShow` | `view`, all | assertion groups: repeat the bound signals under the steps (`view`: in viewers, `true`: also in static SVGs, `false`); which assertions are drawn (labels, `*` patterns) |
 
@@ -305,10 +323,12 @@ are in `view.sva.bindings[i].results` (the results JSON of [`docs/sva/ENGINE.md`
 
 ![The viewer bar with its groups](img/bar.png)
 
-The bar has a title line (title, short messages, cursor and view span) and the tools in groups: **cursor** (a time and
-its unit, **Set**; a span, **Show** = that window around the cursor), **view** (− + Fit, the edge style: auto, slanted, vertical, square), **find** (field, count, ‹ ›,
-Highlight / Open, colour + Paint, Copy), **list** (Sort and the ignored prefixes, Expand / Collapse, clear highlight, show the hidden rows),
-**edges** (◀ edge kind ▶, + Mark), **state** (Save, Load…) and **go to** (marker jumps). Keys work once the waves have the focus (a click on the
+The bar has a title line (title, short messages, cursor and view span) and the tools, one line per kind of work.
+Time: **cursor** (a time and its unit, **Set**; a span, **Show** = that window around the cursor), **view** (− + Fit),
+**edges** (◀ edge kind ▶, + Mark), **go to** (marker jumps, the assertions' failures). Find: the field, **Aa Full .\***,
+count, ‹ ›, Highlight / Open, colour + Paint, Copy. Expression (`sva.js`): the **ƒ** field and its rows. Rows and files:
+**list** (Sort and the ignored prefixes, Expand / Collapse, clear highlight, show the hidden rows), **style** (the edges:
+auto, slanted, vertical, square), **state** (Save, Load…), **assertions** (Load file…). Keys work once the waves have the focus (a click on the
 waves or on a name); with ctrl, alt or ⌘ held they stay the browser's (ctrl+S saves the page, it does not sort), except
 ctrl+C and ctrl+F. Hover any button, field or list for what it does and its keys; **?** at the right of the title line
 (key `?`) opens the box of all the keys and the mouse, the plugins' too. Navigation follows Questa's wave window, the lists and the text vim: a sequence (`gg`, `zM`, `yy`,
@@ -317,19 +337,22 @@ ctrl+C and ctrl+F. Hover any button, field or list for what it does and its keys
 | Key | Action | Key | Action |
 |---|---|---|---|
 | wheel | scroll the rows (as in Questa; `"wheel": "zoom"`: zoom) | ctrl+wheel, pinch | zoom at the pointer by how far it turned (a notch ×1.22) |
-| shift+wheel, a sideways swipe, drag, `← →` | pan | middle-button drag | zoom into the range dragged over |
-| shift+drag | measure a range: its ends on the edges of the signal under the pointer, Δ on the axis and in the readout | right button (drag or click) | the same range, then the menu: zoom, bookmarks at its ends, copy Δ, copy / save the picture (PNG, SVG); the colour, radix, highlight, hiding, folding of the row under it |
+| shift+wheel, a sideways swipe, drag, `← →` | pan | shift+drag, middle-button drag | zoom into the range dragged over |
+| ctrl+drag | measure a range: its ends on the edges of the signal under the pointer, Δ on the axis and in the readout; ctrl+click clears it | right button (drag or click) | the same range, then the menu: zoom, bookmarks at its ends, copy Δ, copy / save the picture (PNG, SVG); the colour, radix, highlight, hiding, folding of the row under it |
 | `i` `+` / `o` `-` | zoom in / out | `f` / `l` | zoom full / last (the window before the last zoom) |
-| `c` | window of the current span at the cursor | `Home` / `End` | the start / end of the dump |
+| `c` | zoom in on the cursor (half the span, the cursor in the middle) | `Home` / `End` | the start / end of the dump |
 | click | cursor (on an edge of that signal within 8 px, else a round time at the zoom; alt+click: no edge) + select the signal | `↑ ↓`, `j k` | select the previous / next signal (in the names column: the arrows) |
 | `gg` / `G` | select the first / last signal | `PgUp PgDn` | scroll the rows a page |
-| `Tab` / shift+`Tab` | the next / previous edge of the selected signal (as in Questa; ◀ ▶, `]e [e`) | `e` | edge kind (any, rising, falling) |
+| `Tab` / shift+`Tab` | the next / previous edge of the selected signal (as in Questa; ◀ ▶, `]e [e`) | `e` | edge kind (any, rising, falling, **= value**, **X / Z**) |
+| edge kind **= value** | a field: `0x40`, `'h40`, `8'd64`, `64`, `-3`, `'b101` or a text (an enum label: `ACCESS`); Enter / ◀ ▶ / Tab: the next / previous time the selected signal becomes it (none selected: any shown signal) | edge kind **X / Z** | the next / previous x or z (a bus with x / z bits too) of the selected signal or of any shown one: the first X after reset from the reset's edge |
 | shift+`← →` | move the cursor a hundredth of the view | the pointer on a signal | its value there, the change into it and the next one (tooltip) |
-| `/`, ctrl+F | find | `n N`, `*` | next / previous match; find the selected signal's name |
+| `/`, ctrl+F | find (the bar scrolled away: the find group floats over the waves; ✕ or Esc puts it back) | `n N`, `*` | next / previous match; find the selected signal's name |
 | `m` | bookmark at the cursor | `]m [m` | the next / previous bookmark |
+| shift+click the waves | a second cursor (dashed, on an edge): Δ to the cursor in time and in cycles of the clock (the selected signal's, else the nearest `*clk*`) on the axis and in the readout; `x` swaps the two; Esc clears it | `1` … `9` | go to that bookmark (each bookmark's line shows its Δ from the cursor) |
 | `zM` / `zR` | fold / open every module | `zc` / `zo` / `za` | fold / open / toggle the module of the selected signal |
 | `yy`, ctrl+C | copy the selected signal (or the highlighted ones); while searching ctrl+C ends the search | `s` | sort off → A→Z → Z→A |
-| ○ or ctrl+click a name | highlight the signal or instance | Esc | reset: no search, highlight or selection |
+| ○ or ctrl+click a name | highlight the signal or instance; ctrl+shift+click: every row from the last one to it | Esc | reset: no search, highlight or selection |
+| shift+click a name | select every signal from the last one clicked to it (selected, nothing dimmed; the tint inside bus values too) | alt+drag | a box: its time the range, the signals it touches selected, then the menu |
 | `]f [f` | next / previous assertion failure (`sva.js`) | click a bar or circle | select an assertion attempt |
 | `]a [a` | next / previous assertion: its first failure, else its first pass | click a line of the assertions panel (again: its next attempt) | go to an assertion |
 
@@ -347,7 +370,11 @@ filled, the background as it was); the rest is dimmed but stays visible. Several
 ![Two instances highlighted in two colours](img/highlight.png)
 
 **Fuzzy find.** The find field (`/`) matches the typed letters in order anywhere in a name, as fzf does: `awvd` finds
-`AWVALID`. A word with a `.` runs over the full path (`dev.fifo`), words separated by spaces must all match. Matched
+`AWVALID`. A word with a `.` runs over the full path (`dev.fifo`), words separated by spaces must all match. Three
+toggles next to the field change that, as in grep or VS Code: **Aa** (alt+C) the case matters; **Full** (alt+W) a word
+is the whole name (`PSEL` finds `PSEL`, not `PSELx`; `u_slave.ready`: the end of a full path); **.\*** (alt+R) the query is a
+regular expression (JavaScript, as `grep -E`: `^s_.*valid$`, `data\[3\]`, `\<ready\>` as in vim) tried on the name,
+the dump's leaf and the full path (`tx_.*\.valid`); a bad one says so in the count. Matched
 letters are underlined; Enter, ‹ › or `n N` step through the matches, each scrolled to the middle of the waves. **Highlight** dims the rest, **Open** folds every
 module without a match, **Paint** colours the found signals and the highlighted ones (ctrl+click or the mark; a highlighted module: its signals; neither: the selected signal; kept in the browser), **Copy** copies their paths.
 
@@ -363,7 +390,10 @@ that width around the cursor. Cycle diagrams count in cycles.
 **Bookmarks and arrows.** **+ Mark** (`m`) puts a numbered bookmark on the selected signal at the cursor, snapped to an
 edge. Below the waves each bookmark has a time, a signal, a colour and a text; drag a circle to move it, shift+drag from
 one circle to another to draw an arrow (shape `- ~ -~ ~- -| |- -|-`, head, line, colour, label). Labels get a thin
-lane of their own between the signals. Bookmarks are kept in the browser; **JSON** gives the `"bookmarks"` and
+lane of their own between the signals; an arrow between two bookmarks of one signal is a dimension line in that lane,
+above the signal. A circle dragged onto the top quarter of its row (or **↥** in its line) is **lifted** into such a lane
+above the signal, with a leader down to it, so it covers no value (`"lift": true` in the JSON); dragged lower, it is
+on the row again. Bookmarks are kept in the browser; **JSON** gives the `"bookmarks"` and
 `"arrows"` lists to paste into a config, so the built page (and its static SVG) carries them. The AXI-Lite picture
 above shows arrows between handshakes with the latency as the label.
 
@@ -374,17 +404,26 @@ cursor, the order and its prefixes, the folded modules, the highlight, the paint
 bookmarks and arrows, the assertions (the files loaded or edited in the page, with their text, and the bindings) and the
 ƒ rows. **Load…** reads it back into a viewer — after a reload, in another browser, or on other waves (what they lack is
 left out and counted in the bar). Its `"config"` (`sort`, `sortIgnore`, `fold`, `highlight`, `findHighlight`,
-`findOpen`) pastes into a config file as it is; times are model units (ps).
+`findOpen`, `findCase`, `findWord`, `findRegex`) pastes into a config file as it is; times are model units (ps).
 
-**Ranges and the menu.** Shift+drag on the waves measures a range (as in Vivado): its ends snap to the edges of the
-signal under the pointer (alt: not), it is shaded with its Δ on the axis — with the rising edges of the selected 1-bit
-signal in it, its cycles (`Δ 20 ns · 2 ↑ PCLK`) — and in the readout; a shift+click or Esc clears it. The right button
+**Ranges and the menu.** Shift+drag on the waves zooms into the range dragged over (as the middle button); ctrl+drag
+measures a range: its ends snap to the edges of the signal under the pointer (alt: not), it is shaded with its Δ on the
+axis and in the readout, counted on the signal it was measured on (else the selected one) — a bit: its rising edges, its
+cycles (`Δ 20 ns · 2 ↑ PCLK`); a bus: its changes and the values it took (`Δ 80 ns · 7 changes of PADDR (4 values)`); a
+ctrl+click or Esc clears it. The right button
 does the same and opens a menu: **Zoom to the range**, **Bookmarks at its ends** (an arrow with the Δ between them),
 **Copy Δ**; **Copy image** (PNG to the clipboard), **Save image as PNG / SVG** — the range (else the window) of the rows
-on the screen, drawn as the viewer shows them (folding, colours, bookmarks, cursor) with names and axis, the page's
-colours put in, so the SVG opens anywhere; for the signal under the pointer **Colour**, **Radix** (a bus of the dump:
-auto, hex, dec, signed, bin, oct, ascii), **Highlight**, **Hide**, **Fold its module**, **Bookmark here**, **Copy the
-path** (on a module: fold / open, highlight, hide it all); **Fold / Open every module** and **Show the hidden**. Hidden
+on the screen, or of the highlighted rows when there are some, drawn as the viewer shows them (folding, colours,
+bookmarks, cursor) with names and axis, the page's colours put in, so the SVG opens anywhere; **Save as WaveDrom** /
+**Copy WaveDrom** — the same signals over the range as WaveJSON (`<title>.wavedrom.json`): one cell per cycle of their
+clock (a 1-bit `*clk*` among them or in their modules, else the shortest time between changes), buses as `=` with
+their values in the radix shown, a group per module; for the signal under the pointer **Colour**, **Radix** (a bus of the dump:
+auto, hex, dec, signed, bin, oct, ascii, float, fixed q / sq with its fraction bits), **Analog** (the bus as a step plot
+three rows high between its smallest and largest value, in its radix: signed, float, fixed; **As a bus** back), **Highlight**, **Hide**, **Fold its module**, **Bookmark here**, **Copy the
+path** (on a module: fold / open, highlight, hide it all); **Fold / Open every module** and **Show the hidden**. On a
+highlighted row (ctrl+click, ctrl+shift+click) the colour, the radix and Hide go to every highlighted row, on a row of
+a selected run (shift+click a name, or **alt+drag** a box over time and rows) to every selected one; the picture and
+WaveDrom then take the selected run (else the highlighted rows, else the screen's). Hidden
 rows come back with **Hidden: N ✕** in the bar; the radix and the hidden rows are kept in the browser and in the saved
 state. `"contextMenu": false` leaves the right button to the browser.
 

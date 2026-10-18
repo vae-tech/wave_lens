@@ -20,6 +20,7 @@ class Dump:
     def __init__(self):
         self.vars, self.alias, self.unit_ps, self.t_start, self.t_end = {}, {}, 1, None, None
         self.changes, self.trans = {}, {}
+        self.scopes = {}   # path -> scope type other than module ($scope struct / union / interface …: an FST through fst2vcd)
 
     def find(self, path):
         return path if path in self.vars else self.alias.get(path)
@@ -103,6 +104,9 @@ def _header(lines, d):
                     ts = None
         elif t0 == b'$scope' and len(tok) > 2:
             scope.append(tok[2].decode(errors='replace'))
+            kind = tok[1].decode(errors='replace').lower()
+            if kind not in ('module', '$end'):
+                d.scopes['.'.join(scope)] = kind
         elif t0 == b'$upscope' and scope:
             scope.pop()
         elif t0 == b'$attrbegin' and len(tok) > 4 and tok[1] == b'misc' and tok[2] in (b'07', b'7'):

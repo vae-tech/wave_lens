@@ -47,10 +47,15 @@ python3 tools/mkhtml.py --config work/my.config.json --out work/my.html --sva ch
 - **Large dumps**: 3520 signals in 214 scopes, 4.9 M value changes — the config in 2.7 s, a page with the 1526 changing
   signals in 25 s, it opens in 2 s and redraws in 4 ms; scopes are foldable groups with module shading
   ([USAGE § Large dumps](docs/USAGE.md#large-dumps)).
-- **The viewer**: cursor and span fields, zoom and pan by wheel and keys, fuzzy find with highlight / open / paint,
-  edge search, highlight of instances, bookmarks and arrows that go back into the config, sorting with ignored
-  prefixes, a tooltip with the keys on every control and a **?** box of all the keys, a measured range (shift+drag, edges snapped) and the right button's menu (zoom, bookmarks, the picture as
-  PNG / SVG, a signal's colour); **Save / Load…** puts all of it (with the assertions and ƒ rows) in a file and back
+- **A dump in the browser**: `wavefw/viewer.html` (or **Open…** in any viewer) reads a VCD dropped on it, ⟳ reads it
+  again after a new simulation with the view kept ([USAGE § Use cases](docs/USAGE.md#a-dump-straight-in-the-browser)).
+- **The viewer**: cursor and span fields, a second cursor (Δ in time and clock cycles), zoom and pan by wheel and keys,
+  find (fuzzy, whole name, regular expression) with highlight / open / paint, edge, value and X / Z search, highlight
+  of instances, selection of runs and boxes, bookmarks and arrows that go back into the config, sorting with ignored
+  prefixes, a tooltip with the keys on every control and a **?** box of all the keys, a measured range (ctrl+drag, edges
+  snapped) and the right button's menu (zoom, bookmarks, the picture as PNG / SVG, WaveDrom, a signal's colour, radix —
+  float and fixed point too —, analog step plot); packed structs as a row of fields (an FST's struct scopes, or
+  `mkconfig --sv`); **Save / Load…** puts all of it (with the assertions and ƒ rows) in a file and back
   ([USAGE § The viewer](docs/USAGE.md#the-viewer)).
 - **Bus transactions**: the ports of AXI4 / AXI4-Lite / AXI3, AXI4-Stream, APB, AHB, Avalon-MM / ST, Wishbone and OBI
   found by their names and drawn as transfers (address to response, bursts, packets, errors) with a row per channel

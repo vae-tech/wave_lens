@@ -128,7 +128,12 @@ module fsm_tb;
     logic             frame_err;
     logic [2:0]       bit_cnt;
     uart_pkg::state_t state;
+    uart_pkg::rx_status_t status;                   // the same, packed: a struct row in the page
     // verilator lint_on UNUSEDSIGNAL
+
+    assign status = '{
+        state: state, bit_cnt: bit_cnt, valid: valid, frame_err: frame_err, data: data
+    };
 
     // +dump=FILE; the format (VCD / FST) is chosen when Verilator builds
     string dump = "fsm.vcd";

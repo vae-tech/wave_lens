@@ -1,5 +1,5 @@
 {
-  "description": "make example EX=fsm: UART receiver whose state is a typedef enum (uart_pkg.sv). No enum here: the FST dump brings the state names. Hand-written views, bookmarks and arrows; the Makefile passes the dump with --waves.",
+  "description": "make example EX=fsm: UART receiver whose state is a typedef enum (uart_pkg.sv), its outputs packed in a struct (status). No enum here: the FST dump brings the state names. Hand-written views, bookmarks and arrows; the Makefile passes the dump with --waves.",
   "scope": "fsm_tb",
   "sva": ["uart_pkg.sv", "fsm.sva"],
   "bind": [{ "assert": "*", "scope": "fsm_tb" }],
@@ -37,6 +37,12 @@
         { "from": 1, "to": 2, "shape": "-|-", "label": "STOP 4T" },
         { "from": 2, "to": 3, "shape": "-|-", "label": "ERROR 2T", "color": "#e03131" }
       ]
+    },
+    "status": {
+      "exact": true, "from": "0ns", "to": "1000ns", "hierarchy": true,
+      "signals": ["clk", "rxd", "status.state", "status.bit_cnt", "status.valid", "status.frame_err", "status.data"],
+      "title": "the outputs packed in a struct (uart_pkg::rx_status_t) · exact transitions",
+      "note": "the FST (Verilator --trace-structs) keeps the struct as a scope of fields: its row shows the whole 16-bit value, the fields below it"
     }
   }
 }

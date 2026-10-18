@@ -6,12 +6,12 @@ under its full hierarchical path, one line each, with per-signal settings to fil
   mkconfig.py dump.vcd --base my.base.json --out my.config.json
   mkconfig.py dump.vcd --out dump.config.json --update # dump changed: add new signals, drop gone ones, keep all edits
   mkconfig.py dump.fst                                 # FST: read through GTKWave's fst2vcd, FSM enum labels included
-  mkconfig.py dump.vcd --sv rtl/*.sv                   # VCD: enum labels from "typedef enum" in the sources
+  mkconfig.py dump.vcd --sv rtl/*.sv                   # VCD: enum labels from "typedef enum", fields of "typedef struct packed"
   mkconfig.py dump.fst --sva checks/*.sva              # assertions: "sva" and a "bind" line per matching instance
 
 Per-signal entry ("" = the global setting from "config"):
   "tb.dut.state": {"show": true, "radix": "", "color": "", "style": "", "width": 3, "changes": 120}
-  show   true/false (false: left out of the page)        radix  auto hex dec signed bin oct ascii
+  show   true/false (false: left out of the page)        radix  auto hex dec signed bin oct ascii float q8 sq15
   color  trace / outline / name colour, e.g. "#e03131"   style  auto wavedrom questa square
   also   "alias": "name shown", "fill": "#ffe066" (bus fill), "enum": {"0": "IDLE", "1": "RUN"}
   width and changes (value changes in the dump) are information only. "enum" is filled from the dump (FST enum tables)
@@ -89,6 +89,76 @@ def sv_value(v, prev):
     return int(v, 0) if re.fullmatch(r'\d+|0[xX][0-9a-fA-F]+', v) else prev + 1
 
 
+SV_BASE = {'logic': 1, 'bit': 1, 'reg': 1, 'wire': 1, 'byte': 8, 'shortint': 16, 'int': 32, 'integer': 32, 'longint': 64}
+
+
+def sv_dims(s):
+    """Packed dimensions "[7:0][1:0]" -> the number of bits they hold (1 for none), None when a bound is not a number."""
+    n = 1
+    for d in re.findall(r'\[([^\]]*)\]', s):
+        m = re.fullmatch(r'\s*(\d+)\s*:\s*(\d+)\s*', d)
+        if not m:
+            return None
+        n *= abs(int(m.group(1)) - int(m.group(2))) + 1
+    return n
+
+
+def sv_structs(files):
+    """typedef struct packed {…} name_t; + declarations "name_t status;" -> {variable name: [{name, msb, lsb, enum?}]}, the
+    fields MSB first. A member's type: logic / bit / reg [m:n] … int / byte …, or a typedef enum / struct of these files
+    (an enum's base type gives its width: "typedef enum logic [2:0]"; none: 32). A struct with a member of an unknown
+    width is left out."""
+    texts = []
+    for f in files:
+        with open(f, encoding='utf-8', errors='replace') as fh:
+            texts.append(re.sub(r'//[^\n]*|/\*.*?\*/', ' ', fh.read(), flags=re.S))
+    widths, labels, bodies = {}, {}, {}
+    for t in texts:
+        for m in re.finditer(r'\btypedef\s+enum\b\s*([^{;]*)\{([^}]*)\}\s*(\w+)\s*;', t):
+            base = m.group(1).strip()
+            bm = re.fullmatch(r'(\w+)?\s*(?:signed|unsigned)?\s*((?:\[[^\]]*\]\s*)*)', base)
+            w = (SV_BASE.get(bm.group(1), None) if bm and bm.group(1) else 32) if bm else None
+            d = sv_dims(bm.group(2)) if bm else None
+            if w is not None and d is not None:
+                widths[m.group(3)] = w * d
+            table, v = {}, -1
+            for it in m.group(2).split(','):
+                name, _, val = it.partition('=')
+                if re.fullmatch(r'\w+', name.strip()):
+                    v = sv_value(val, v); table[v] = name.strip()
+            labels[m.group(3)] = table
+        for m in re.finditer(r'\btypedef\s+struct\s+packed\b[^{;]*\{([^}]*)\}\s*(\w+)\s*;', t):
+            bodies[m.group(2)] = m.group(1)
+    fields = {}
+    for _ in range(len(bodies) + 1):   # nested typedefs: until nothing new resolves
+        for name, body in bodies.items():
+            if name in fields:
+                continue
+            members = []
+            for decl in filter(None, (x.strip() for x in body.split(';'))):
+                m = re.fullmatch(r'(?:\w+::)?(\w+)\s*(?:signed|unsigned)?\s*((?:\[[^\]]*\]\s*)*)(\w+(?:\s*,\s*\w+)*)', decl)
+                base = m and (SV_BASE.get(m.group(1)) or widths.get(m.group(1)))
+                d = m and sv_dims(m.group(2))
+                if not base or d is None:
+                    members = None
+                    break
+                members += [(n.strip(), base * d, labels.get(m.group(1))) for n in m.group(3).split(',')]
+            if members:
+                lsb, out = sum(w for _, w, _ in members), []
+                for n, w, e in members:
+                    lsb -= w
+                    out.append({'name': n, 'msb': lsb + w - 1, 'lsb': lsb, **({'enum': {str(k): v for k, v in sorted(e.items())}} if e else {})})
+                fields[name] = out; widths[name] = sum(w for _, w, _ in members)
+    out = {}
+    for t in texts:
+        for name, fl in fields.items():
+            for m in re.finditer(r'\b(?:\w+::)?' + re.escape(name) + r'\b\s+(\w+(?:\s*,\s*\w+)*)\s*[;=,)]', t):
+                for n in m.group(1).split(','):
+                    if n.strip() and n.strip() not in SV_WORDS:
+                        out[n.strip()] = fl
+    return out
+
+
 def sv_enums(files):
     """typedef enum … {A, B = 2'd3, …} name_t; + declarations "name_t state_q, state_d;" / "enum {…} st;" ->
     {variable name: {value: label}} (by name only: a variable with that name in any scope gets the labels)."""
@@ -135,6 +205,8 @@ def build(sigs, base):
             e['changes'] = s['changes']
         if s.get('enum'):
             e['enum'] = {str(k): v for k, v in sorted(s['enum'].items())}
+        if s.get('fields'):
+            e['fields'] = s['fields']
         cat[s['path']] = e
     total = lambda: sum(e.get('changes') or 0 for e in cat.values() if e['show'])
     budget, cut = sel.get('budget'), sel['depth']
@@ -161,7 +233,7 @@ def merge(old, new):
     out = {}
     for p, e in new.items():
         if p in old:
-            e = {**old[p], **{k: e[k] for k in INFO if k in e}, **({'enum': e['enum']} if 'enum' in e and 'enum' not in old[p] else {})}
+            e = {**old[p], **{k: e[k] for k in INFO if k in e}, **{k: e[k] for k in ('enum', 'fields') if k in e and k not in old[p]}}
         out[p] = e
     gone = [p for p in old if p not in new]
     if gone:
@@ -203,7 +275,7 @@ HELP = [
     'Made by tools/mkconfig.py from {waves} ({n} signals, {shown} shown). Edit freely: make html WAVES={waves} builds the page,',
     'make config WAVES={waves} later adds new signals of the dump and keeps every edit here.',
     'signals: one entry per signal under its full path. "" = the global setting from "config".',
-    '  show true/false · radix auto hex dec signed bin oct ascii · color "#e03131" (trace, outline, name) · style auto wavedrom questa square',
+    '  show true/false · radix auto hex dec signed bin oct ascii float q8 sq15 · color "#e03131" (trace, outline, name) · style auto wavedrom questa square',
     '  optional: "alias": "shown name", "fill": "#ffe066" (bus fill), "enum": {"0": "IDLE"}; width/changes are information only.',
     'config: page-wide wavefw settings — style (edges: auto | wavedrom slanted | questa / square vertical), radix, theme, colors,',
     '  fold (group depth folded at start, true/false or scope paths), highlight (instances in front at start, e.g. ["tb.dut.u_x"]),',
@@ -255,7 +327,7 @@ def main():
     ap.add_argument('--update', action='store_true', help='the output exists: sync its signals with the dump, keep all edits')
     ap.add_argument('--force', action='store_true', help='overwrite an existing output (edits are lost)')
     ap.add_argument('--depth', type=int, help='override select.depth of the base file')
-    ap.add_argument('--sv', nargs='+', metavar='FILE', help='SystemVerilog sources: enum labels for signals declared with an enum type (a VCD has none; an FST brings its own)')
+    ap.add_argument('--sv', nargs='+', metavar='FILE', help='SystemVerilog sources: enum labels for signals declared with an enum type (a VCD has none; an FST brings its own), "fields" for a packed struct dumped as one vector')
     ap.add_argument('--reader', choices=('builtin', 'wavepeek'), default='builtin', help='list the signals with the built-in reader (default) or wavepeek')
     ap.add_argument('--wavepeek', help='wavepeek executable (default: on PATH or ~/.local/bin)')
     ap.add_argument('--sva', nargs='+', action='extend', metavar='FILE', help='SystemVerilog assertion files: "sva" and a "bind" line per instance that has every signal of an assertion')
@@ -299,6 +371,13 @@ def main():
             if not s['enum'] and t and max(t) < 2 ** s['width']:
                 s['enum'] = t; n += 1
         print(f'mkconfig: --sv: {len(labels)} enum-typed names, labels for {n} signals', file=sys.stderr)
+        structs, n = sv_structs(a.sv), 0
+        for s in sigs:   # a packed struct dumped as one vector (a VCD; an FST without --trace-structs): its fields
+            fl = structs.get(re.sub(r'\[\d+\]$', '', svabuild.split_path(s['path'])[-1]))
+            if fl and fl[0]['msb'] + 1 == s['width']:
+                s['fields'] = fl; n += 1
+        if structs:
+            print(f'mkconfig: --sv: {len(structs)} struct-typed names, fields for {n} signals', file=sys.stderr)
     found = sum(1 for s in sigs if s['enum'])
     if found:
         print(f'mkconfig: {found} signals with enum labels (FSM states shown by name)', file=sys.stderr)

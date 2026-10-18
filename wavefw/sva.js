@@ -880,7 +880,7 @@ function assertionRows(st, res, opt) {
 /* ---------------- the panel ---------------- */
 class Panel {
   constructor(v) {
-    this.v = v; v.sva = this; this.bindings = []; this.pick = null; this.open = true; this.jsonOpen = false;
+    this.v = v; v.sva = this; this.bindings = []; this.pick = null; this.open = !!v.S.svaOpen; this.jsonOpen = false;   // the list folded unless svaOpen
     this.key = 'wavefw.sva:' + (v.storeId || G.location.pathname + ':' + (v.opts.key || v.root.id || v.root.dataset.wave || v.M.title));
     this.el = document.createElement('div'); this.el.className = 'sva'; this.el.hidden = true;
     v.addPanel(this.el);
