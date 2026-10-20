@@ -1,8 +1,9 @@
 # wavefw — demo flow: Verilator VCD -> vcd2wavedrom.py -> WaveDrom JSON -> docs/demo_waves.js (loaded by docs/index.html)
 # Build products live under BUILD (default out/ in the repository, git-ignored: the cargo target, the example dumps and
 # pages, the smoke shots). On a slow mount (the repository on /mnt/c under WSL) make BUILD=/tmp/wavefw … builds faster.
-# make dist: the prebuilt sva CLI for Linux and Windows under bin/ (committed: a clone works without Rust).
-# make check is the gate before a commit: the engine's tests, the unit tests, everything smoke needs, smoke --strict.
+# make dist: the prebuilt sva CLI under bin/ (Linux committed: a clone works without Rust; Windows needs mingw-w64).
+# make check is the gate before a commit: the engine's tests, the unit tests, everything smoke needs, smoke --strict,
+# the screenshots made again (a broken one fails).
 # Converter settings (signals, enums, groups, markers, colours, sorting …) come from a JSON config file.
 BUILD ?= out
 B     := $(abspath $(BUILD))
@@ -45,22 +46,26 @@ help:
 	@echo 'make examples   every example (apb axi_lite fsm): VCD + FST, pages in $$(BUILD)/examples/<ex>/'
 	@echo 'make example    EX=apb|axi_lite|fsm: one of them'
 	@echo 'make shots      the README screenshots in docs/img/ (after make examples)'
+	@echo 'make shots-check  the screenshots into $$(BUILD)/img, compared with docs/img (make check: a broken shot fails)'
 	@echo 'make html       one self-contained page: the demo, CONFIG=work/x.config.json, or WAVES=work/x.vcd (config made if missing);'
 	@echo '                SVA="checks/*.sv" BIND="name@scope,…": assertions bound, evaluated, an Assertions section'
 	@echo 'make config     WAVES=work/x.vcd: write or update work/x.config.json (every signal, your edits kept); SVA=…: "bind" lines'
 	@echo 'make wavefw     wavefw/wavefw.js from wavefw/src/*.js (the page needs one file: run it after editing the sources)'
 	@echo 'make sva-build  the SVA engine (sva/, Rust): native CLI $$(BUILD)/sva-target/release/sva + sva_wasm.wasm -> wavefw/sva.wasm.js'
-	@echo 'make dist       the prebuilt sva CLI (committed): bin/linux-x86_64/sva (static) and bin/windows-x86_64/sva.exe (mingw-w64)'
+	@echo 'make dist       the prebuilt sva CLI: dist-linux (bin/linux-x86_64/sva, static, committed) and dist-windows'
+	@echo 'make dist-linux    bin/linux-x86_64/sva (musl, static)'
+	@echo 'make dist-windows  bin/windows-x86_64/sva.exe (needs mingw-w64: sudo apt install mingw-w64)'
 	@echo 'make sva-test   cargo test of the SVA engine: unit tests, the corpus tests/sva (third_party too), the schema, the CLI'
 	@echo 'make sva-bless  rewrite tests/sva/golden/*.txt after a reviewed change of the parser output'
 	@echo 'make sva-examples  sva parse + sva eval of the assertion files of examples/ (apb, axi_lite, fsm; after make examples)'
+	@echo 'make sva-verify the checkers of the examples in Verilator --assert against sva eval (after make examples; skipped without verilator)'
 	@echo 'make sva-eval   WAVES=dump.vcd|fst SVA="pkg.sv checks.sva" SCOPE=tb.dut [OUT=results.json] [ARGS=...]: sva eval'
 	@echo 'make sva-spike  the spike page $$(BUILD)/sva/spike.html (the WebAssembly build and wavefw/sva.js in a page)'
 	@echo 'make smoke      headless Chromium checks of docs/index.html, tests/conformance.html and the built pages (needs'
 	@echo '                make examples demo demo-fst sva-build sva-spike html first; what is missing is reported as SKIPPED);'
 	@echo '                STRICT=1: a skip fails; ONLY=sec1,sec2: those sections only (smoke.py --list)'
-	@echo 'make unit       the Python unit tests (tests/unit, stage 9.2)'
-	@echo 'make check      the gate before a commit: sva-test, unit, the pages smoke needs, smoke STRICT=1'
+	@echo 'make unit       the Python unit tests of the tools (tests/unit: unittest, standard library, a few seconds)'
+	@echo 'make check      the gate before a commit: sva-test, unit, the pages smoke needs, smoke STRICT=1, shots-check'
 	@echo 'make fmt        verible-verilog-format of the project SystemVerilog (docs/SV_STYLE.md), when installed'
 	@echo 'make lint       verilator --lint-only -Wall on the example testbenches'
 	@echo 'make clean      remove the build products under $$(BUILD) (the cargo target stays: make clean-all)'
@@ -133,6 +138,14 @@ examples:
 shots:
 	$(PW) tests/shots.py --build $(B) $(if $(ONLY),--only $(ONLY))
 
+# every shot made again into BUILD/img: a shot that no longer builds fails; a picture that changed is listed (the look
+# changed: make shots and commit the PNGs with the change)
+shots-check:
+	$(PW) tests/shots.py --build $(B) --out $(B)/img > /dev/null
+	@d=$$(for f in docs/img/*.png; do cmp -s $$f $(B)/img/$$(basename $$f) || echo $$(basename $$f); done); \
+	  if [ -n "$$d" ]; then echo "shots-check: these pictures differ from docs/img (make shots, then commit them): $$d"; \
+	  else echo 'shots-check: docs/img is current'; fi
+
 # Two views of one dump (see $(DEMO_CONFIG)): clock-sampled (real WaveDrom wave strings) and exact transitions ("tv").
 $(DEMO_JS): $(VCD) $(DEMO_CONFIG) tools/vcd2wavedrom.py tools/wavejson.py tools/embed.py
 	$(V2W) --view cycle --out $(B)/cyc.json
@@ -191,10 +204,10 @@ dist-windows:
 # unit tests (lexer, preprocessor, parser, expansion, evaluator), the corpus tests/sva/*.sv against its annotations
 # and golden files, docs/sva/ast.schema.json against the output, the sva binary end to end
 sva-test:
-	cd sva && $(CARGO) test
+	cd sva && BUILD=$(B) $(CARGO) test
 
 sva-bless:
-	cd sva && SVA_BLESS=1 $(CARGO) test --test corpus
+	cd sva && SVA_BLESS=1 BUILD=$(B) $(CARGO) test --test corpus --test cli
 	git diff --stat -- tests/sva/golden
 
 # the assertion files of the examples, each after the file that declares its package; then over the dumps of make
@@ -202,6 +215,11 @@ sva-bless:
 SVA_EX_apb      := --scope apb_tb --sva examples/apb/apb_tb.sv --sva examples/apb/apb.sva
 SVA_EX_axi_lite := --scope axi_lite_tb.u_slave --sva examples/axi_lite/axi_lite.sva
 SVA_EX_fsm      := --scope fsm_tb.u_rx --sva examples/fsm/uart_pkg.sv --sva examples/fsm/fsm.sva
+# the reference: the examples' checkers built with the testbenches by Verilator --assert, the failures compared with
+# sva eval's on the dumps (the assertions Verilator does not take are listed, not compared)
+sva-verify: sva-build
+	$(PY) tools/svaverify.py --build $(B) --sva-bin $(SVA_BIN)
+
 sva-examples: sva-build
 	$(SVA_BIN) parse examples/apb/apb_tb.sv examples/apb/apb.sva
 	$(SVA_BIN) parse examples/axi_lite/axi_lite.sva
@@ -231,9 +249,9 @@ wavefw: wavefw/wavefw.js
 wavefw/wavefw.js: $(WAVEFW_SRC) tools/wavefwcat.py
 	$(PY) tools/wavefwcat.py
 
-# Python unit tests (tests/unit/test_*.py on unittest, no dependencies): stage 9.2 fills it; until then a note
+# Python unit tests of the tools (tests/unit/test_*.py on unittest, no dependencies; the fixtures in tests/unit/vcd)
 unit:
-	@if [ -d tests/unit ]; then $(PY) -m unittest discover -s tests/unit -t .; else echo 'unit: no tests/unit yet (stage 9.2)'; fi
+	BUILD=$(B) $(PY) -m unittest discover -s tests/unit -t .
 
 # The gate: the engine's tests, the unit tests, every page smoke checks (so it has nothing to skip), smoke --strict
 check:
@@ -241,7 +259,9 @@ check:
 	$(MAKE) sva-test unit
 	$(MAKE) sva-build
 	$(MAKE) examples demo demo-fst sva-spike html
+	$(MAKE) sva-verify
 	$(MAKE) smoke STRICT=1
+	$(MAKE) shots-check
 
 # SystemVerilog of the project (docs/SV_STYLE.md); tests/sva/third_party is other people's code and stays as it is
 SV_OWN := $(wildcard examples/*/*.sv examples/*/*.sva sva/bench/*.sva sva/spike/*.sva) $(filter-out tests/sva/err_%,$(wildcard tests/sva/*.sv))
@@ -258,7 +278,7 @@ lint:
 	  verilator --lint-only -Wall -Wno-DECLFILENAME --timing --top-module $${ex}_tb $$(ls $$d/*_pkg.sv 2>/dev/null) $$(ls $$d/*.sv | grep -v _pkg.sv) || exit 1; done
 
 clean:
-	rm -rf $(OBJ) $(OBJ)_fst $(VCD) $(FST) $(B)/cyc.json $(B)/exact.json $(B)/demo.html $(B)/shots $(B)/apb_transfers.json $(B)/smoke
+	rm -rf $(OBJ) $(OBJ)_fst $(VCD) $(FST) $(B)/cyc.json $(B)/exact.json $(B)/demo.html $(B)/shots $(B)/img $(B)/apb_transfers.json $(B)/smoke
 	rm -rf $(basename $(FST)).config.json $(basename $(FST)).html
 	rm -rf $(B)/examples $(B)/sva
 	rmdir $(B) 2>/dev/null || true
@@ -268,4 +288,4 @@ clean-all:
 	$(if $(filter $(B),/ $(CURDIR) $(HOME) $(abspath $(HOME)/..)),$(error clean-all: BUILD=$(B) is not a build directory))
 	rm -rf $(B)
 
-.PHONY: wavefw help demo demo-fst example examples shots html config sva-build dist dist-linux dist-windows sva-test sva-bless sva-examples sva-eval sva-spike smoke unit check fmt lint clean clean-all
+.PHONY: wavefw help demo demo-fst example examples shots html config sva-build dist dist-linux dist-windows sva-test sva-bless sva-examples sva-verify sva-eval sva-spike smoke shots-check unit check fmt lint clean clean-all

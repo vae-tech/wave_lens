@@ -3,12 +3,14 @@
 
 /* ---------------- painters: one drawing routine, two back-ends ---------------- */
 class CanvasPainter {
-  constructor(g, cs, S, dpr = 1) { this.g = g; this.cs = cs; this.S = S; this.dpr = dpr; this.cache = {}; this.fade = 1; this.mono = cs.getPropertyValue('--font-mono').trim() || 'monospace'; this.body = cs.getPropertyValue('--font-body').trim() || 'sans-serif'; }
+  constructor(g, cs, S, dpr = 1) { this.g = g; this.cs = cs; this.S = S; this.dpr = dpr; this.cache = {}; this.fade = 1;
+    this.mono = cs.getPropertyValue('--font-mono').trim() || 'monospace'; this.body = cs.getPropertyValue('--font-body').trim() || 'sans-serif'; }
   // a thin vertical segment (an axis tick, the cursor, a bus edge, a level change) on the middle of a device pixel: sharp
   snap(cmds, w) {
     if (w > 1.2) return cmds;
     const d = this.dpr, sx = x => (Math.round(x * d - 0.5) + 0.5) / d, line = c => c && (c[0] === 'M' || c[0] === 'L');
-    return cmds.map((c, i) => line(c) && ((cmds[i + 1] && cmds[i + 1][0] === 'L' && Math.abs(cmds[i + 1][1] - c[1]) < 1e-6) || (c[0] === 'L' && line(cmds[i - 1]) && Math.abs(cmds[i - 1][1] - c[1]) < 1e-6)) ? [c[0], sx(c[1]), c[2]] : c);
+    return cmds.map((c, i) => line(c) && ((cmds[i + 1] && cmds[i + 1][0] === 'L' && Math.abs(cmds[i + 1][1] - c[1]) < 1e-6) ||
+      (c[0] === 'L' && line(cmds[i - 1]) && Math.abs(cmds[i - 1][1] - c[1]) < 1e-6)) ? [c[0], sx(c[1]), c[2]] : c);
   }
   col(n) { // a token, "--x" / "var(--x)" (any custom property of the page), or a colour
     if (this.cache[n]) return this.cache[n];
@@ -27,7 +29,8 @@ class CanvasPainter {
     if (st.stroke) { g.strokeStyle = this.col(st.stroke); g.lineWidth = st.w || 1; g.setLineDash(st.dash || []); g.stroke(); g.setLineDash([]); }
     g.globalAlpha = 1;
   }
-  rect(x, y, w, h, fill, alpha = 1) { const g = this.g; g.globalAlpha = alpha * this.fade; g.fillStyle = this.col(fill); g.fillRect(x, y, w, h); g.globalAlpha = 1; }
+  rect(x, y, w, h, fill, alpha = 1) { const g = this.g; g.globalAlpha = alpha * this.fade; g.fillStyle = this.col(fill); g.fillRect(x, y, w, h);
+    g.globalAlpha = 1; }
   font(st) { return `${st.weight || 400} ${st.size || 11}px ${st.body ? this.body : this.mono}`; }
   text(x, y, s, st = {}) {
     const g = this.g; g.font = this.font(st); g.fillStyle = this.col(st.fill || 'fg');
@@ -42,7 +45,8 @@ class SvgPainter {
   constructor(S) {
     this.out = []; this.S = S; this.fade = 1;
     const cs = getComputedStyle(document.documentElement);
-    this.monoF = S.fontMono || cs.getPropertyValue('--font-mono').trim() || 'monospace'; this.bodyF = S.fontBody || cs.getPropertyValue('--font-body').trim() || 'sans-serif';
+    this.monoF = S.fontMono || cs.getPropertyValue('--font-mono').trim() || 'monospace'; this.bodyF = S.fontBody || cs.getPropertyValue('--font-body').trim() ||
+      'sans-serif';
     measureCtx = measureCtx || document.createElement('canvas').getContext('2d');
   }
   col(n) { return !n ? 'none' : TOK[n] ? `var(${TOK[n]})` : /^--[\w-]+$/.test(n) ? `var(${n})` : esc(n); }
@@ -55,12 +59,19 @@ class SvgPainter {
     if (op !== 1) css += `;opacity:${op}`;
     this.out.push(`<path d="${d}" style="${css}"/>`);
   }
-  rect(x, y, w, h, fill, alpha = 1) { const op = alpha * this.fade; this.out.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" style="fill:${this.col(fill)}${op !== 1 ? ';opacity:' + op : ''}"/>`); }
+  rect(x, y, w, h, fill, alpha = 1) { const op = alpha * this.fade;
+    this.out.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" style="fill:${this.col(fill)}${op !== 1 ? ';opacity:' + op : ''}"/>`); }
   text(x, y, s, st = {}) {
-    this.out.push(`<text x="${Math.round(x * 100) / 100}" y="${Math.round(y * 100) / 100}" dominant-baseline="central" text-anchor="${st.anchor || 'start'}" style="font-family:var(${st.body ? '--font-body' : '--font-mono'});font-size:${st.size || 11}px;font-weight:${st.weight || 400};fill:${this.col(st.fill || 'fg')}${this.fade !== 1 ? ';opacity:' + this.fade : ''}">${esc(s)}</text>`);
+    this.out.push((`<text x="${Math.round(x * 100) / 100}" y="${Math.round(y * 100) / 100}" dominant-baseline="central" ` +
+        `text-anchor="${st.anchor || 'start'}" ` +
+        `style="font-family:var(${st.body ? '--font-body' : '--font-mono'});font-size:${st.size || 11}px;font-weight:${st.weight || 400};` +
+        `fill:${this.col(st.fill || 'fg')}${this.fade !== 1 ? ';opacity:' + this.fade : ''}">${esc(s)}</text>`));
   }
-  measure(s, st = {}) { measureCtx.font = `${st.weight || 400} ${st.size || 11}px ${st.body ? this.bodyF : this.monoF}`; return measureCtx.measureText(s).width; }
-  clip(x, y, w, h, fn) { const id = 'wvfclip' + (++clipId); this.out.push(`<clipPath id="${id}"><rect x="${x}" y="${y}" width="${w}" height="${h}"/></clipPath><g clip-path="url(#${id})">`); fn(); this.out.push('</g>'); }
+  measure(s, st = {}) { measureCtx.font = `${st.weight || 400} ${st.size || 11}px ${st.body ? this.bodyF : this.monoF}`; return measureCtx.measureText(s).width;
+    }
+  clip(x, y, w, h, fn) { const id = 'wvfclip' + (++clipId);
+    this.out.push(`<clipPath id="${id}"><rect x="${x}" y="${y}" width="${w}" height="${h}"/></clipPath><g clip-path="url(#${id})">`); fn();
+    this.out.push('</g>'); }
 }
 
 /* ---------------- shared drawing ---------------- */
@@ -77,6 +88,12 @@ function enumColor(s, o, S) {
 }
 // a bus value as a number for the analog style (its radix: signed, float, fixed point; else unsigned), NaN for x / z
 function analogValue(s, o, radix) {
+  if (s.kind === 'real' && o.k === '=') return parseFloat(o.v);   // its number as text (inf, nan: a gap)
+  if (o.k === '=' && o.raw == null) {   // a WaveDrom cell: its hex ("raw" of the converter), else its label as a number
+    const h = o.hex ?? (/^0x[0-9a-f_]+$/i.test(o.v) ? o.v.slice(2).replace(/_/g, '') : null);
+    if (h != null) return /^[0-9a-f]+$/i.test(h) ? Number(BigInt('0x' + h)) : NaN;
+    return /^-?\d+(\.\d+)?(e[-+]?\d+)?$/i.test(o.v) ? Number(o.v) : NaN;
+  }
   if (o.k !== '=' || o.raw == null || /[xz]/i.test(o.raw)) return o.k === '0' ? 0 : o.k === '1' ? 1 : NaN;
   const r = s.radix || radix || 'auto';
   if (r === 'signed' || r === 'float' || /^s?q\d+$/.test(r)) return parseFloat(decode(s, o.raw, r));
@@ -86,7 +103,8 @@ function analogValue(s, o, radix) {
 // x / z as a gap with an x mark; its range at the left
 function paintAnalog(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk) {
   const a = s.tr, S = P.S, r = s.radix || S.radix || 'auto';
-  if (!s.an || s.an.r !== r) { let lo = Infinity, hi = -Infinity; for (const o of a) { const v = analogValue(s, o, S.radix); if (isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); } } s.an = { r, lo, hi }; }
+  if (!s.an || s.an.r !== r) { let lo = Infinity, hi = -Infinity; for (const o of a) { const v = analogValue(s, o, S.radix);
+    if (isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); } } s.an = { r, lo, hi }; }
   const { lo, hi } = s.an, yh = y + 6, yl = y + h - 6, span = hi > lo ? hi - lo : 1, Y = v => (hi > lo ? yl - (v - lo) / span * (yl - yh) : (yh + yl) / 2);
   const cl = x => Math.min(Math.max(x, xL - 8), xR + 8), col = sk || 'bus', line = [], fill = [];
   let pv = null;
@@ -99,10 +117,12 @@ function paintAnalog(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk) {
   }
   if (fill.length) P.path(fill, { fill: col, alpha: 0.14 });
   if (line.length) P.path(line, { stroke: col, w: S.traceWidth });
-  if (isFinite(lo)) { const f = v => (Math.abs(v) >= 1e6 || (v && Math.abs(v) < 1e-3) ? v.toExponential(2) : String(Number(v.toPrecision(6)))), lab = { size: S.labelSize - 1, fill: 'muted' };
+  if (isFinite(lo)) { const f = v => (Math.abs(v) >= 1e6 || (v && Math.abs(v) < 1e-3) ? v.toExponential(2) : String(Number(v.toPrecision(6)))),
+    lab = { size: S.labelSize - 1, fill: 'muted' };
     P.text(xL + 4, yh + 2, f(hi), lab); P.text(xL + 4, yl - 2, f(lo), lab); }
 }
-function paintSig(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk = s.stroke, bg = 'panel', tint = false) {   // sk: its colour (a viewer's paint), bg: the row's background (the module band), tint: selected (the bus values too)
+// sk: its colour (a viewer's paint), bg: the row's background (the module band), tint: selected (the bus values too)
+function paintSig(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk = s.stroke, bg = 'panel', tint = false) {
   const a = s.tr; if (!a.length) return;
   if (s.analog && s.width > 1) return paintAnalog(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk);
   const yh = y + 4, yl = y + h - 5, ym = (yh + yl) / 2;
@@ -184,12 +204,16 @@ function paintAxis(P, o) { // o: { from, span, xL, xR, y, h, yEnd, X, timed, tic
 function edgeGeom(e, x1, y1, x2, y2) { // WaveDrom edge shapes -> path, label point, arrow "from" points
   const dx = x2 - x1, dy = y2 - y1;
   switch (e.shape) {
-    case '~': return { d: [['M', x1, y1], ['C', x1 + 0.7 * dx, y1, x1 + 0.3 * dx, y2, x2, y2]], m: [x1 + dx / 2, y1 + dy / 2], s: [x1 + 0.7 * dx, y1], e: [x1 + 0.3 * dx, y2] };
-    case '-~': return { d: [['M', x1, y1], ['C', x1 + 0.7 * dx, y1, x2, y2, x2, y2]], m: [x1 + 0.66 * dx, y1 + 0.3 * dy], s: [x1 + 0.7 * dx, y1], e: [x1 + 0.7 * dx, y1] };
-    case '~-': return { d: [['M', x1, y1], ['C', x1, y1, x1 + 0.3 * dx, y2, x2, y2]], m: [x1 + 0.34 * dx, y1 + 0.7 * dy], s: [x1 + 0.3 * dx, y2], e: [x1 + 0.3 * dx, y2] };
+    case '~': return { d: [['M', x1, y1], ['C', x1 + 0.7 * dx, y1, x1 + 0.3 * dx, y2, x2, y2]], m: [x1 + dx / 2, y1 + dy / 2], s: [x1 + 0.7 * dx, y1],
+      e: [x1 + 0.3 * dx, y2] };
+    case '-~': return { d: [['M', x1, y1], ['C', x1 + 0.7 * dx, y1, x2, y2, x2, y2]], m: [x1 + 0.66 * dx, y1 + 0.3 * dy], s: [x1 + 0.7 * dx, y1],
+      e: [x1 + 0.7 * dx, y1] };
+    case '~-': return { d: [['M', x1, y1], ['C', x1, y1, x1 + 0.3 * dx, y2, x2, y2]], m: [x1 + 0.34 * dx, y1 + 0.7 * dy], s: [x1 + 0.3 * dx, y2],
+      e: [x1 + 0.3 * dx, y2] };
     case '-|': return { d: [['M', x1, y1], ['L', x2, y1], ['L', x2, y2]], m: [x1 + dx / 2, y1], s: [x2, y1], e: [x2, y1] };
     case '|-': return { d: [['M', x1, y1], ['L', x1, y2], ['L', x2, y2]], m: [x1 + dx / 2, y2], s: [x1, y2], e: [x1, y2] };
-    case '-|-': return { d: [['M', x1, y1], ['L', x1 + dx / 2, y1], ['L', x1 + dx / 2, y2], ['L', x2, y2]], m: [x1 + dx / 2, y1 + dy / 2], s: [x1 + dx / 2, y1], e: [x1 + dx / 2, y2] };
+    case '-|-': return { d: [['M', x1, y1], ['L', x1 + dx / 2, y1], ['L', x1 + dx / 2, y2], ['L', x2, y2]], m: [x1 + dx / 2, y1 + dy / 2], s: [x1 + dx / 2, y1],
+      e: [x1 + dx / 2, y2] };
     default: return { d: [['M', x1, y1], ['L', x2, y2]], m: [x1 + dx / 2, y1 + dy / 2], s: [x2, y2], e: [x1, y1] };
   }
 }
@@ -218,7 +242,8 @@ const SEL_ALPHA = 0.12;   // the accent over a selected row, its bus values incl
 // rows (signals, group bands, separators), gaps, edges and markers inside [xL, xR]
 // late: an array that takes the plugin overlays instead of drawing them (the viewer draws them over its cursor)
 // strokeOf: row -> its colour where a viewer or a figure changes it (paint, groupColors); default row.stroke
-function paintBody(P, M, lay, X, tA, tB, xL, xR, hl, sel, allLay, band, late, strokeOf = r => r.stroke, folded = () => false) {   // allLay: every row (edges may end off screen); folded(group row): no header shade
+// allLay: every row (edges may end off screen); folded(group row): no header shade
+function paintBody(P, M, lay, X, tA, tB, xL, xR, hl, sel, allLay, band, late, strokeOf = r => r.stroke, folded = () => false) {
   const rowY = new Map(), sep = [], edge = [], over = new Set();
   let pb;
   if (allLay) for (const o of allLay) if (o.row.type === 'sig') rowY.set(o.row, o.y + o.h / 2);
@@ -230,15 +255,19 @@ function paintBody(P, M, lay, X, tA, tB, xL, xR, hl, sel, allLay, band, late, st
     if (b === 1) P.rect(xL, y, xR - xL, h, 'band');
     P.fade = hl && row.type !== 'lane' && !hl.on.has(row) ? hl.dim : 1;
     if (row.type === 'lane') { P.rect(xL, y, xR - xL, h, 'panel2', 0.45); continue; }
-    if (row.type === 'group') { if (!folded(row)) { P.rect(xL, y, xR - xL, h, 'panel2'); P.rect(xL, y, xR - xL, h, 'fg', 0.08); } edge.push(['M', xL, y + 0.5], ['L', xR, y + 0.5]); pb = undefined; }   // a folded module: the plain background
-    if (row.type === 'group' && row.sig && row.sig.tr.length) paintSig(P, row.sig, y, h, X, tA, tB, xL, xR, M.t1, strokeOf(row.sig) || 'bus', 'panel');   // a struct: its whole value
+    // a folded module: the plain background
+    if (row.type === 'group') { if (!folded(row)) { P.rect(xL, y, xR - xL, h, 'panel2'); P.rect(xL, y, xR - xL, h, 'fg', 0.08); } edge.push(['M', xL, y + 0.5],
+      ['L', xR, y + 0.5]); pb = undefined; }
+    // a struct: its whole value
+    if (row.type === 'group' && row.sig && row.sig.tr.length) paintSig(P, row.sig, y, h, X, tA, tB, xL, xR, M.t1, strokeOf(row.sig) || 'bus', 'panel');
     if (typeof c === 'string') P.rect(xL, y, xR - xL, h, c, 0.1);   // a plugin's highlight
     const isSel = sel instanceof Set ? sel.has(row) : row === sel;   // sel: the selected row, or a Set (shift+click: a run)
     if (isSel) P.rect(xL, y, xR - xL, h, 'acc', SEL_ALPHA);
     if (row.type !== 'space') sep.push(['M', xL, y + h - 0.5], ['L', xR, y + h - 0.5]);
     if (row.draw) row.draw(P, { y, h, X, tA, tB, xL, xR });
     if (row.overlay) over.add(row.overlay);
-    if (row.type === 'sig') { if (row.tr) paintSig(P, row, y, h, X, tA, tB, xL, xR, M.t1, strokeOf(row), b === 1 ? 'band' : 'panel', isSel); rowY.set(row, y + h / 2); }
+    if (row.type === 'sig') { if (row.tr) paintSig(P, row, y, h, X, tA, tB, xL, xR, M.t1, strokeOf(row), b === 1 ? 'band' : 'panel', isSel);
+      rowY.set(row, y + h / 2); }
   }
   P.fade = 1;
   P.path(sep, { stroke: 'line', w: 1, alpha: 0.5 });
@@ -263,7 +292,8 @@ function paintMarkers(P, markers, X, tA, tB, y0, y1) {
   }
 }
 
-const circle = (x, y, r) => { const k = 0.5523 * r; return [['M', x - r, y], ['C', x - r, y - k, x - k, y - r, x, y - r], ['C', x + k, y - r, x + r, y - k, x + r, y],
+const circle = (x, y, r) => { const k = 0.5523 * r; return [['M', x - r, y], ['C', x - r, y - k, x - k, y - r, x, y - r],
+  ['C', x + k, y - r, x + r, y - k, x + r, y],
   ['C', x + r, y + k, x + k, y + r, x, y + r], ['C', x - k, y + r, x - r, y + k, x - r, y], ['Z']]; };
 // arrow labels in lanes: a thin row inserted under the upper end of a labelled arrow (above the row when both ends share
 // it; the top when an end is on the time axis), so the text never covers a signal; and the lifted bookmarks of a signal
@@ -311,14 +341,16 @@ function compose(M, S, rows, bms, arrows, picks, all) {
 // rows -> [{row, y, h}] from y down (rh: the height of a sig / group / space row, laneH: of one arrow label); .H: the end
 // a row's height: a lane of n labels, a plugin row's own, an analog signal "analog" rows high (true: 3), else its type's
 const analogRows = r => (r.analog === true ? 3 : Math.max(1, Math.min(12, +r.analog || 0)));
-const rowHeight = (row, rh, laneH) => (row.type === 'lane' ? laneH * row.ids.length : row.height || (row.type === 'sig' && row.analog ? rh.sig * analogRows(row) : rh[row.type]));
+const rowHeight = (row, rh, laneH) => (row.type === 'lane' ? laneH * row.ids.length : row.height ||
+  (row.type === 'sig' && row.analog ? rh.sig * analogRows(row) : rh[row.type]));
 function layoutRows(rows, rh, laneH, y = 0) {
   const lay = rows.map(row => { const h = rowHeight(row, rh, laneH), o = { row, y, h }; y += h; return o; });
   lay.H = y; return lay;
 }
 // the bookmarks and arrows as far as the lanes depend on them: the lanes are worked out again only when this changes
 const laneKey = (bms, arrows) => JSON.stringify([(bms || []).map(b => [b.n, b.signal, !!b.lift]), (arrows || []).map(a => [a.from, a.to, !!a.label])]);
-const laneY = (lay, h) => { const m = new Map(); for (const o of lay) if (o.row.type === 'lane') o.row.ids.forEach((a, k) => m.set(a, o.y + h * k + h / 2)); return m; };
+const laneY = (lay, h) => { const m = new Map(); for (const o of lay) if (o.row.type === 'lane') o.row.ids.forEach((a, k) => m.set(a, o.y + h * k + h / 2));
+  return m; };
 // numbered circles on their signal rows (on the axis when the row is not shown), guide lines, arrows between bookmarks;
 // rubber: {from, x, y} = an arrow being drawn. Returns {pos: n -> [x, y], mids: [[arrow index, x, y]]} for hit tests.
 function paintBookmarks(P, bms, arrows, X, tA, tB, rowY, y0, y1, yAxis, rubber, lanes) {
@@ -330,20 +362,25 @@ function paintBookmarks(P, bms, arrows, X, tA, tB, rowY, y0, y1, yAxis, rubber, 
     const y = b.signal != null && at.has(b.signal) ? at.get(b.signal) : yAxis, ly = b.lift && lanes && y !== yAxis ? lanes.get('b:' + b.signal) : null;
     pos.set(b.n, [X(b.t), ly ?? y]); if (ly != null) lifted.set(b.n, y);
   }
-  for (const b of bms) if (b.t >= tA && b.t <= tB) { const x = X(b.t); P.path([['M', x, y0], ['L', x, y1]], { stroke: b.color || 'acc', w: 1, dash: [2, 3], alpha: 0.45 }); }
+  for (const b of bms) if (b.t >= tA && b.t <= tB) { const x = X(b.t); P.path([['M', x, y0], ['L', x, y1]],
+    { stroke: b.color || 'acc', w: 1, dash: [2, 3], alpha: 0.45 }); }
   const near = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]) < 0.5;
-  const tip = (p, f) => { const L = Math.hypot(p[0] - f[0], p[1] - f[1]) || 1; return [p[0] - 9 * (p[0] - f[0]) / L, p[1] - 9 * (p[1] - f[1]) / L]; };   // on the circle
+  // on the circle
+  const tip = (p, f) => { const L = Math.hypot(p[0] - f[0], p[1] - f[1]) || 1; return [p[0] - 9 * (p[0] - f[0]) / L, p[1] - 9 * (p[1] - f[1]) / L]; };
   arrows.forEach((a, i) => {
     const A = pos.get(a.from), B = pos.get(a.to); if (!A || !B) return;
     const col = a.color || 'acc', ly0 = lanes && lanes.get(i);
-    if (ly0 != null && Math.abs(A[1] - B[1]) < 0.5 && Math.abs(ly0 - A[1]) > 9) {   // both ends on one row: a dimension line in its lane above the row, not through the signal
+    // both ends on one row: a dimension line in its lane above the row, not through the signal
+    if (ly0 != null && Math.abs(A[1] - B[1]) < 0.5 && Math.abs(ly0 - A[1]) > 9) {
       const up = ly0 < A[1] ? -1 : 1;
-      P.path([['M', A[0], A[1] + up * 9], ['L', A[0], ly0 - up * 4], ['M', B[0], B[1] + up * 9], ['L', B[0], ly0 - up * 4]], { stroke: col, w: 1, dash: [2, 2], alpha: 0.8 });
+      P.path([['M', A[0], A[1] + up * 9], ['L', A[0], ly0 - up * 4], ['M', B[0], B[1] + up * 9], ['L', B[0], ly0 - up * 4]],
+        { stroke: col, w: 1, dash: [2, 2], alpha: 0.8 });
       P.path([['M', A[0], ly0], ['L', B[0], ly0]], { stroke: col, w: 1.4, dash: AR_LINES[a.line] });
       if (a.head.includes('>')) arrowHead(P, B[0], ly0, A[0], ly0, col);
       if (a.head.includes('<')) arrowHead(P, A[0], ly0, B[0], ly0, col);
       const mx = (A[0] + B[0]) / 2;
-      if (a.label) { const tw = P.measure(a.label, { size: 10.5 }); P.rect(mx - tw / 2 - 3, ly0 - 7, tw + 6, 14, 'panel'); P.text(mx, ly0, a.label, { anchor: 'middle', size: 10.5, fill: col, weight: 600 }); }
+      if (a.label) { const tw = P.measure(a.label, { size: 10.5 }); P.rect(mx - tw / 2 - 3, ly0 - 7, tw + 6, 14, 'panel');
+        P.text(mx, ly0, a.label, { anchor: 'middle', size: 10.5, fill: col, weight: 600 }); }
       mids.push([i, mx, ly0]); return;
     }
     const g = edgeGeom({ shape: a.shape }, A[0], A[1], B[0], B[1]);
@@ -353,13 +390,15 @@ function paintBookmarks(P, bms, arrows, X, tA, tB, rowY, y0, y1, yAxis, rubber, 
     const ly = lanes && lanes.get(i), m = ly != null ? [g.m[0], ly] : g.m;   // in its lane, else on the arrow
     if (a.label) {
       const tw = P.measure(a.label, { size: 10.5 });
-      if (ly != null && Math.abs(g.m[1] - ly) > 9) P.path([['M', m[0], ly + (g.m[1] > ly ? 6 : -6)], ['L', g.m[0], g.m[1]]], { stroke: col, w: 1, dash: [1.5, 2.5], alpha: 0.7 });
+      if (ly != null && Math.abs(g.m[1] - ly) > 9) P.path([['M', m[0], ly + (g.m[1] > ly ? 6 : -6)], ['L', g.m[0], g.m[1]]],
+        { stroke: col, w: 1, dash: [1.5, 2.5], alpha: 0.7 });
       P.rect(m[0] - tw / 2 - 3, m[1] - 7, tw + 6, 14, 'panel'); P.text(m[0], m[1], a.label, { anchor: 'middle', size: 10.5, fill: col, weight: 600 });
     }
     mids.push([i, m[0], m[1]]);
   });
   const R = rubber && pos.get(rubber.from);
-  if (R) { P.path([['M', R[0], R[1]], ['L', rubber.x, rubber.y]], { stroke: 'acc', w: 1.4, dash: [4, 3] }); arrowHead(P, rubber.x, rubber.y, R[0], R[1], 'acc'); }
+  if (R) { P.path([['M', R[0], R[1]], ['L', rubber.x, rubber.y]], { stroke: 'acc', w: 1.4, dash: [4, 3] }); arrowHead(P, rubber.x, rubber.y, R[0], R[1], 'acc');
+    }
   for (const b of bms) {
     if (b.t < tA || b.t > tB) continue;
     const [x, y] = pos.get(b.n);

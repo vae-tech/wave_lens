@@ -2,8 +2,12 @@
 
 This is the part of SystemVerilog Assertions (IEEE 1800-2017 clause 16) that `sva-core` reads. The parser
 (`sva/core/src/`: `lex.rs`, `pre.rs`, `parse.rs`, `expr.rs`, `prop.rs`, `expand.rs`) follows this file; the corpus
-`tests/sva/*.sv` has an example of every construct, and the negative files `tests/sva/err_*.sv` show the errors.
-Anything not listed here is an error that names the construct and its position. The rest of the file still loads.
+`tests/sva/*.sv` has an example of the constructs of the table below (its second column names the file; `restrict`,
+`cover sequence`, packed-struct ports, token pasting and `` `__LINE__ `` are tested in the unit tests of `sva/core`
+instead), and the negative files `tests/sva/err_*.sv` show the errors. A construct outside the subset is an error that
+names it, its position and this file (`… is outside the subset (docs/sva/LANGUAGE.md)`); the few that are skipped
+without a word, or taken beyond the table, are listed under *Skipped, accepted, limited*. The rest of the file still
+loads.
 
 ```sh
 sva parse [--json] [--expand] [-D NAME[=VALUE]] FILE...   # one compilation unit: earlier files' macros, packages
@@ -227,6 +231,22 @@ concurrent assertions inside procedural code or generate blocks (written at modu
 `->` `<->` `++` `--`; strings outside messages; real numbers; type casts; assignment patterns `'{...}`; function calls
 in expressions; literals wider than 64 bits; more than 500 levels of operators and parentheses in one item (an error
 where it happens, instead of a stack overflow).
+
+## Skipped, accepted, limited
+
+**Skipped without a word** (no error, nothing in the output): `let` declarations; `parameter type` (a type
+parameter); `sequence` / `property` declarations inside `generate` blocks and procedural code (an assertion there is
+an error). `restrict property` is skipped with a warning (it only constrains formal tools).
+
+**Accepted beyond the table**: `` `undefineall ``; `$write` in action blocks (its text an `info` message);
+`modport` and `ref` ports (their names are signals); `^~` (read as `~^`); `a[b-:w]`; `@posedge clk` without
+parentheses (not SystemVerilog, taken for `@(posedge clk)`); `##0`, `[*0]`, `[->0]` and `[=0]` (empty matches,
+*Semantics*); `macromodule` (a module).
+
+**Limits**: the operand of `not`, `nexttime`, `and`, `or` and the like cannot start with `always`, `eventually`,
+`s_eventually` or `if` without parentheses (`not (always a)`); a clock with an index (`@(posedge g[0].clk)`) is not
+read; a `clocking` block is a default only for what comes after it; at most 256 threads per attempt
+(`--max-threads`, then `capped`), about 65 534 booleans in one assertion, 500 levels of operators and parentheses.
 
 ## Semantics the evaluator relies on
 

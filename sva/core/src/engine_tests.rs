@@ -568,3 +568,37 @@ fn reasons_name_the_kind_step_and_cycle() {
     assert_eq!(r("a |-> eventually [1:2] b", "a=1000 b=0000", &d), "range  2");
     assert_eq!(r("a |-> (b ##1 c) or (b ##2 d)", "a=100 b=100 c=000 d=001", &Options { max_threads: 1, ..d.clone() }), "capped  1");
 }
+
+#[test]
+fn throughout_condition_in_the_trace() {
+    // the condition of throughout is a step of the trace at every cycle it held (its row in the page is not empty)
+    let o = outcome("t: cover property (@(posedge clk) c throughout (a ##1 b));", "c=111 a=100 b=010", &Options::default());
+    let t: Vec<(String, usize)> = o.attempts[0].trace.iter().map(|s| (s.id.clone(), s.cycle)).collect();
+    assert!(t.contains(&("s1".into(), 0)) && t.contains(&("s1".into(), 1)), "{t:?}");
+    assert_eq!(o.steps.iter().find(|s| s.id == "s1").map(|s| s.role), Some("cond"));
+    // broken at cycle 1: the trace has the condition at 0, the failure names it
+    let o = outcome("a |-> b throughout (c ##1 d)", "a=10 b=10 c=10 d=01", &Options::default());
+    assert_eq!(summary(&o), "0-1F");
+    assert!(o.attempts[0].trace.iter().any(|s| s.id == "s2" && s.cycle == 0), "{:?}", o.attempts[0].trace);
+}
+
+#[test]
+fn repetition_of_a_sequence_that_can_match_empty() {
+    // (a[*0:1])[*2] is a[*0:2] (an iteration may be empty: IEEE 1800-2017 16.9.2), not an error and not a stricter rule
+    for prop in ["c |-> ##1 (a[*0:1])[*2] ##1 b", "c |-> ##1 a[*0:2] ##1 b"] {
+        check(prop, "c=1000 a=0100 b=0010", "0-2P");
+        check(prop, "c=1000 a=0000 b=0100", "0-1P");
+        check(prop, "c=1000 a=0110 b=0001", "0-3P");
+    }
+    check("c |-> (a[*0:1])[*3:4] ##1 b", "c=100 a=000 b=100", "0-0P");
+}
+
+#[test]
+fn a_pass_decided_by_an_unknown_has_a_note() {
+    // m is x at cycle 0: the if takes its else branch and c holds; the pass stands (the x policy) but says so
+    let o = outcome("a |-> if (m) b else c", "a=1 m=x b=0 c=1", &Options::default());
+    assert_eq!(summary(&o), "0-0P");
+    assert_eq!(o.attempts[0].note.as_deref(), Some("m is unknown (x) at cycle 0, read as false: the attempt passed with it"));
+    let o = outcome("a |-> if (m) b else c", "a=1 m=0 b=0 c=1", &Options::default());
+    assert_eq!(o.attempts[0].note, None);
+}

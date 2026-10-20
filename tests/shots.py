@@ -6,7 +6,9 @@ sequence of clicks and fields per shot, each followed by two animation frames (n
 the code or an example changes. Each image is one element of a page (a viewer, its bar, its bookmark list), not the page
 with its "Generated" time. The pictures use IBM Plex (Google Fonts, or a local install such as the Debian / Ubuntu
 package fonts-ibm-plex when offline): without it every PNG would differ, so shots.py stops with a message instead.
-Needs `make examples` first (pages in BUILD/examples/) and docs/index.html with docs/demo_waves.js.
+Needs `make examples` first (pages in BUILD/examples/) and docs/index.html with docs/demo_waves.js. A shot that
+cannot be made (a locator that matches nothing or two elements) stops the run with its name: make check runs this
+after smoke, so a picture that no longer builds fails the gate.
 
   python3 tests/shots.py [--build out] [--out docs/img] [--only hero,bar]   (no -I: playwright)
 """
@@ -15,6 +17,9 @@ from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 errors = []
+# software raster, one thread, no partial raster: the anti-aliasing of the form controls' borders is the same every run
+RASTER = ['--disable-gpu', '--disable-gpu-rasterization', '--disable-partial-raster', '--num-raster-threads=1',
+          '--force-color-profile=srgb', '--disable-lcd-text']
 # IBM Plex is there (from Google Fonts or installed) when its widths differ from the fallback's
 PLEX = '''(() => { const c = document.createElement('canvas').getContext('2d'), w = f => (c.font = f, c.measureText('mmmwwwiil 0O').width);
     return ['IBM Plex Sans', 'IBM Plex Mono'].filter(n => w(`16px "${n}", serif`) === w('16px serif')); })()'''
@@ -38,6 +43,7 @@ def open_page(browser, path, scheme='dark', height=900):
     if missing:
         sys.exit(f'shots: {", ".join(missing)} not available (offline?): the PNGs would differ from the committed ones. '
                  'Connect to the network (Google Fonts) or install the font (fonts-ibm-plex) and run again.')
+    page.add_style_tag(content='.wv-tip { display: none !important; }')   # a tooltip shows 350 ms after a hover: never in a shot
     settle(page)
     return page
 
@@ -65,8 +71,9 @@ def main():
     ap.add_argument('--out', default=str(ROOT / 'docs' / 'img'))
     ap.add_argument('--only', help='comma-separated shot names')
     a = ap.parse_args()
-    ex = pathlib.Path(a.build) / 'examples'
+    ex = pathlib.Path(a.build).resolve() / 'examples'   # as_uri() needs an absolute path
     apb, axi, axi_all, fsm = ex / 'apb' / 'apb.html', ex / 'axi_lite' / 'axi_lite.html', ex / 'axi_lite' / 'axi_lite_all.html', ex / 'fsm' / 'fsm.html'
+    fsm_all = ex / 'fsm' / 'fsm_all.html'
     index = ROOT / 'docs' / 'index.html'
     os.makedirs(a.out, exist_ok=True)
     only = set(a.only.split(',')) if a.only else None
@@ -77,6 +84,7 @@ def main():
             return
         path = os.path.join(a.out, name + '.png')
         loc.page.evaluate('document.activeElement && document.activeElement.blur()')   # no focus ring in the picture
+        loc.page.mouse.move(0, 0)                                                         # no hover
         if upto:   # from the top of loc down to the top of another element (the waves without the lists under them)
             loc.scroll_into_view_if_needed()
             box, end = loc.bounding_box(), upto.bounding_box()
@@ -86,7 +94,7 @@ def main():
         print(f'  {name}.png  {os.path.getsize(path) / 1e3:.0f} kB')
 
     with sync_playwright() as p:
-        b = p.chromium.launch()
+        b = p.chromium.launch(args=RASTER)
 
         page = open_page(b, apb, height=1100)                      # APB, dark: an assertion failure selected, the panel's numbers
         page.evaluate("(async () => { await SVA.ready(); WaveFW.configure({svaShow: ['apb_demo_no_wait'], svaSignals: false}); await SVA.ready(); })()")
@@ -108,6 +116,28 @@ def main():
         shot('bookmarks', view(page).locator('.notes'))
         page.close()
 
+        page = open_page(b, apb)                                   # APB, dark: measuring — a range and its menu, two cursors, a bus as a step plot
+        no_sva(page)
+        v = view(page)
+        js(page, 0, "(v.setRange(45000, 105000, v.M.rows.find(r => r.name === 'PADDR')), v.select('PADDR'), 0)")
+        bb = v.locator('canvas').bounding_box()
+        js(page, 0, f"(v.menu({bb['x'] + 640}, {bb['y'] + 30}, v.sel, v.range), 0)"); settle(page)
+        shot('range', v, upto=v.locator('.notes'))
+        js(page, 0, "(v.closeMenu(), v.setRange(null), v.select('PCLK'), v.cursor = 35000, v.setCursor2(115000), v.setAnalog(v.M.rows.find(r => r.name === 'PADDR'), 3), 0)")
+        settle(page)
+        shot('cursors', v, upto=v.locator('.notes'))
+        js(page, 0, "(v.setCursor2(null), v.setAnalog(v.M.rows.find(r => r.name === 'PADDR'), null), 0)")
+        page.close()
+
+        page = open_page(b, apb, height=1100)                      # APB: Why of the failed attempt, cycle by cycle
+        page.evaluate("(async () => { await SVA.ready(); WaveFW.configure({svaShow: ['apb_demo_no_wait'], svaSignals: false}); await SVA.ready(); })()")
+        page.evaluate(f"""(() => {{ const p = {p0}; p.open = true; p.render(); p.v.expandAll();
+            const b = p.bindings.find(b => b.assert === 'apb_demo_no_wait'); p.select(b, b.results.assertions[0].attempts.findIndex(a => a.result === 'fail')); }})()""")
+        page.locator('.wv .sva .svw table').first.wait_for()
+        shot('why', view(page).locator('.sva .svw'))
+        page.evaluate('WaveFW.configure({svaShow: null, svaSignals: null})')
+        page.close()
+
         page = open_page(b, apb, 'light')                          # the light ones: the same view, the static SVG
         no_sva(page)
         shot('light', page.locator('.bench').first, upto=view(page).locator('.notes'))
@@ -125,7 +155,7 @@ def main():
         v = view(page)
         page.evaluate("WaveFW.configure({groupColors: {u_master: '#339af0', u_slave: '#37b24d', u_regfile: '#f59f00'}})")
         js(page, 0, '(v.expandAll(), 0)')
-        v.locator('.names .row.grp', has_text='u_master').click()                 # one module folded, the rest open
+        v.locator('.names .row.grp[title="axi_lite_tb.u_master"]').click()      # one module folded, the rest open (not its bus port)
         shot('hierarchy', v)
         page.evaluate('WaveFW.configure({groupColors: null})')
         js(page, 0, '(v.expandAll(), 0)')
@@ -134,6 +164,21 @@ def main():
         v.locator('canvas').focus(); page.keyboard.press('Escape')
         v.locator('input.q').fill('awvd'); settle(page)
         shot('find', v)
+        page.close()
+
+        page = open_page(b, axi)                                   # AXI-Lite: its bus port found, one write selected
+        no_sva(page)
+        v = view(page)
+        js(page, 0, "(p => (v.buses.select(p, p.D.tx[0]), 0))(v.buses.list()[0])"); settle(page)
+        shot('buses', v, upto=v.locator('.notes'))
+        page.close()
+
+        page = open_page(b, fsm_all)                               # FSM, generated page: the packed struct status, its fields
+        no_sva(page)
+        v = view(page)
+        js(page, 0, "(v.collapseAll(), Object.entries(v.M.groups).forEach(([id, g]) => ['fsm_tb', 'fsm_tb.status'].includes(g.path) && v.collapsed.delete(+id)), v.cursor = 300000, v.renderNames(), v.draw(), 0)")
+        settle(page)
+        shot('struct', v)
         page.close()
 
         page = open_page(b, fsm)                                   # FSM: names from the FST, questa edges
@@ -149,6 +194,7 @@ def main():
         cv.scroll_into_view_if_needed()
         cv.locator('input.ct').fill('1.2us'); cv.locator('button[data-act=cset]').click()
         cv.locator('select.su').select_option('ns'); cv.locator('input.cs').fill('100'); cv.locator('button[data-act=cshow]').click()
+        settle(page)
         shot('cursor', cv)
         page.close()
         b.close()

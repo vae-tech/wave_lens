@@ -1,0 +1,67 @@
+apb_setup_then_access assert 19 attempts: 3 pass, 0 fail, 16 vacuous, 0 active, 0 disabled
+  @5..6 (55 ns) Pass [s1@5 s2@6]
+  @9..10 (95 ns) Pass [s1@9 s2@10]
+  @15..16 (155 ns) Pass [s1@15 s2@16]
+apb_enable_needs_sel  assert 19 attempts: 5 pass, 0 fail, 14 vacuous, 0 active, 0 disabled
+  @6..6 (65 ns) Pass [s1@6 s2@6]
+  @10..10 (105 ns) Pass [s1@10 s2@10]
+  @11..11 (115 ns) Pass [s1@11 s2@11]
+  @12..12 (125 ns) Pass [s1@12 s2@12]
+  @16..16 (165 ns) Pass [s1@16 s2@16]
+apb_wait_holds        assert 19 attempts: 2 pass, 0 fail, 17 vacuous, 0 active, 0 disabled
+  @10..11 (105 ns) Pass [s1@10 s2@11]
+  @11..12 (115 ns) Pass [s1@11 s2@12]
+apb_addr_stable       assert 19 attempts: 5 pass, 0 fail, 14 vacuous, 0 active, 0 disabled
+  @5..6 (55 ns) Pass [s1@5 s2@6]
+  @9..10 (95 ns) Pass [s1@9 s2@10]
+  @10..11 (105 ns) Pass [s1@10 s2@11]
+  @11..12 (115 ns) Pass [s1@11 s2@12]
+  @15..16 (155 ns) Pass [s1@15 s2@16]
+apb_wdata_stable      assert 19 attempts: 2 pass, 0 fail, 17 vacuous, 0 active, 0 disabled
+  @5..6 (55 ns) Pass [s1@5 s2@6]
+  @15..16 (155 ns) Pass [s1@15 s2@16]
+apb_end_of_transfer   assert 19 attempts: 3 pass, 0 fail, 16 vacuous, 0 active, 0 disabled
+  @6..7 (65 ns) Pass [s1@6 s2@7]
+  @12..13 (125 ns) Pass [s1@12 s2@13]
+  @16..17 (165 ns) Pass [s1@16 s2@17]
+apb_read_waits        assert 19 attempts: 1 pass, 0 fail, 18 vacuous, 0 active, 0 disabled
+  @9..12 (95 ns) Pass [s1@9 s2@10 s2@11 s3@12]
+apb_slverr_unmapped   assert 19 attempts: 1 pass, 0 fail, 18 vacuous, 0 active, 0 disabled
+  @16..16 (165 ns) Pass [s1@16 s2@16]
+apb_phase_order       assert 19 attempts: 3 pass, 0 fail, 16 vacuous, 0 active, 0 disabled
+  @5..6 (55 ns) Pass [s1@5 s2@6]
+  @9..10 (95 ns) Pass [s1@9 s2@10]
+  @15..16 (155 ns) Pass [s1@15 s2@16]
+apb_phase_sel         assert 19 attempts: 19 pass, 0 fail, 0 vacuous, 0 active, 0 disabled
+  @2..2 (25 ns) Pass [s1@2]
+  @3..3 (35 ns) Pass [s1@3]
+  @4..4 (45 ns) Pass [s1@4]
+  @5..5 (55 ns) Pass [s1@5]
+  @6..6 (65 ns) Pass [s1@6]
+  @7..7 (75 ns) Pass [s1@7]
+  @8..8 (85 ns) Pass [s1@8]
+  @9..9 (95 ns) Pass [s1@9]
+  @10..10 (105 ns) Pass [s1@10]
+  @11..11 (115 ns) Pass [s1@11]
+  @12..12 (125 ns) Pass [s1@12]
+  @13..13 (135 ns) Pass [s1@13]
+  @14..14 (145 ns) Pass [s1@14]
+  @15..15 (155 ns) Pass [s1@15]
+  @16..16 (165 ns) Pass [s1@16]
+  @17..17 (175 ns) Pass [s1@17]
+  @18..18 (185 ns) Pass [s1@18]
+  @19..19 (195 ns) Pass [s1@19]
+  @20..20 (205 ns) Pass [s1@20]
+apb_demo_no_wait      assert 19 attempts: 3 pass, 2 fail, 14 vacuous, 0 active, 0 disabled · first fail at cycle 10 (105 ns): expected PREADY at cycle 10
+  @6..6 (65 ns) Pass [s1@6 s2@6]
+  @10..10 (105 ns) Fail [s1@10]  -- expected PREADY at cycle 10
+  @11..11 (115 ns) Fail [s1@11]  -- expected PREADY at cycle 11
+  @12..12 (125 ns) Pass [s1@12 s2@12]
+  @16..16 (165 ns) Pass [s1@16 s2@16]
+apb_cov_write         cover  2 matches in 19 attempts · first at cycle 6 (65 ns)
+  @5..6 (55 ns) Pass [s1@5 s2@6]
+  @15..16 (155 ns) Pass [s1@15 s2@16]
+apb_cov_read_wait     cover  1 match in 19 attempts · first at cycle 12 (125 ns)
+  @9..12 (95 ns) Pass [s1@9 s2@10 s2@11 s3@12]
+apb_cov_error         cover  1 match in 19 attempts · first at cycle 16 (165 ns)
+  @16..16 (165 ns) Pass [s1@16]

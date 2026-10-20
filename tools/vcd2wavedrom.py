@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""vcd2wavedrom.py — convert a window of a VCD/FST dump into WaveDrom JSON, using wavepeek for every query.
+"""vcd2wavedrom.py — convert a window of a VCD/FST dump into WaveDrom JSON: the built-in reader (one pass over the dump
+as VCD text; an FST through GTKWave's fst2vcd) or wavepeek (--reader wavepeek: any --marker expression).
 Enum labels (FSM states) come from the config ("enum", per-signal "enum") or from the dump's own enum tables (FST).
 
 Modes
@@ -28,8 +29,9 @@ Config file (--config cfg.json): every option can be a key (dashes or underscore
   "raw": the hex value of each label (the page's assertions sample them).
   Per-signal settings: show (false: left out), alias (displayed name), radix (auto hex dec signed bin oct ascii),
   color (trace / outline / name), fill (bus fill), style (auto wavedrom questa square), enum {"0": "IDLE"}, enumColors
-  {"IDLE": "#ffe066"}, analog true / rows (a bus as a step plot, that many rows high); radix also float, q8, sq15;
-  width and changes are information only.
+  {"IDLE": "#ffe066"}, analog true / rows (a bus as a step plot, that many rows high), height (the row's px); radix also
+  float, q8, sq15; width and changes are information only. A real or string variable of the dump is written with
+  "kind": "real" / "string" and its values as texts (null: unknown); an event variable is not a signal to draw.
 
 Examples
   python3 -I tools/vcd2wavedrom.py --waves dump.vcd --scope tb --clock clk --from 0ns --to 400ns \
@@ -38,20 +40,21 @@ Examples
       --signals clk,txd,state --group tx=state,txd --marker 'posedge done=done' --out exact.json
   python3 -I tools/vcd2wavedrom.py --config dump.config.json --view exact --out exact.json
 """
-import argparse, bisect, concurrent.futures, decimal, functools, heapq, json, math, os, re, shutil, statistics, struct, subprocess, sys
+import argparse, bisect, concurrent.futures, decimal, functools, heapq, json, math, os, re, statistics, struct, subprocess, sys
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
 import dumpscan, svabuild, wavejson  # noqa: E402
+from common import UNIT_PS, WaveError, add_reader_args, add_sva_bin_arg, check_config, glob_re, run_main, wavepeek  # noqa: E402
 
-UNIT_PS = {'zs': 1e-9, 'as': 1e-6, 'fs': 1e-3, 'ps': 1, 'ns': 1e3, 'us': 1e6, 'ms': 1e9, 's': 1e12}
+X_TEXT = object()   # an unknown value of a "kind" real / string signal in a clock-sampled row (None there is a "|" gap)
 
 
 @functools.lru_cache(maxsize=1 << 16)   # wavepeek repeats the same time strings in every chunk
 def to_ps(s):
     m = re.fullmatch(r'\s*([\d.]+(?:e-?\d+)?)\s*(zs|as|fs|ps|ns|us|ms|s)\s*', str(s))
     if not m:
-        raise SystemExit(f'vcd2wavedrom: bad time "{s}" (need a unit, e.g. 250ns)')
+        raise WaveError(f'vcd2wavedrom: bad time "{s}" (need a unit, e.g. 250ns)')
     return float(m.group(1)) * UNIT_PS[m.group(2)]
 
 
@@ -103,9 +106,9 @@ class Peek:
         try:
             doc = json.loads(p.stdout)
         except json.JSONDecodeError:
-            raise SystemExit(f'vcd2wavedrom: wavepeek {cmd} failed:\n{p.stderr or p.stdout}')
+            raise WaveError(f'vcd2wavedrom: wavepeek {cmd} failed:\n{p.stderr or p.stdout}')
         if p.returncode or doc.get('type') != 'result':
-            raise SystemExit(f'vcd2wavedrom: wavepeek {cmd} failed: {json.dumps(doc.get("error", doc))}')
+            raise WaveError(f'vcd2wavedrom: wavepeek {cmd} failed: {json.dumps(doc.get("error", doc))}')
         for d in doc.get('diagnostics', []):
             print(f'wavepeek {d.get("kind")}: {d.get("message")}', file=sys.stderr)
         return doc
@@ -168,22 +171,26 @@ class Builtin:
         m = re.fullmatch(r'(.+)\[(\d+):(\d+)\]', q)
         if m and self.decl.find(m.group(1)):
             return self.decl.find(m.group(1)), (int(m.group(2)), int(m.group(3)))
-        raise SystemExit(f'vcd2wavedrom: no signal "{p}" in {os.path.basename(self.waves)}' + (f' (scope {self.scope})' if self.scope else ''))
+        raise WaveError(f'vcd2wavedrom: no signal "{p}" in {os.path.basename(self.waves)}' + (f' (scope {self.scope})' if self.scope else ''))
 
     def event_signal(self, expr):
         m = self.EVENT.fullmatch(expr)
         if not m:
-            raise SystemExit(f'vcd2wavedrom: the built-in reader takes markers "posedge X", "negedge X", "edge X" or "X" (any change); '
+            raise WaveError(f'vcd2wavedrom: the built-in reader takes markers "posedge X", "negedge X", "edge X" or "X" (any change); '
                              f'for "{expr}" use --reader wavepeek')
         return m.group(1) or 'change', m.group(2)
 
     def prepare(self, paths, clock=None, events=()):
         self.res = [self.resolve(p) for p in paths]
+        for p, (path, _) in zip(paths, self.res):
+            if self.decl.vars[path].kind == 'event':
+                raise WaveError(f'vcd2wavedrom: "{p}" is an event: it has no value to draw (leave it out)')
         extra = ([self.resolve(clock)] if clock else []) + [self.resolve(self.event_signal(e)[1]) for e in events]
         codes = {c for path, _ in self.res + extra for c, _ in self.decl.vars[path].members}
         self.d = dumpscan.read(self.waves, 'collect', codes)
         self.t_start, self.t_end = self.d.t_start, self.d.t_end
         self.specs = [(path + (f'[{sl[0]}:{sl[1]}]' if sl else ''), sl[0] - sl[1] + 1 if sl else self.decl.vars[path].width) for path, sl in self.res]
+        self.kinds = [self.decl.vars[path].kind if self.decl.vars[path].kind in dumpscan.TEXT_KINDS else None for path, _ in self.res]
         return self.specs
 
     def stream(self, path, sl=None):
@@ -192,8 +199,9 @@ class Builtin:
         if key not in self.streams:
             v, u, out = self.decl.vars[path], self.d.unit_ps, []
             w = v.width
-            if len(v.members) == 1 and v.members[0][1] is None:
-                for t, raw in self.d.trans[v.members[0][0]]:
+            if all(b is None for _, b in v.members):   # one id code, or the same path under several: their changes merged
+                ev = self.d.trans[v.members[0][0]] if len(v.members) == 1 else sorted((x for c, _ in v.members for x in self.d.trans[c]), key=lambda x: x[0])
+                for t, raw in ev:
                     val = bits(raw, w, sl)
                     if out and out[-1][0] == t * u:
                         out[-1] = (t * u, val)
@@ -213,8 +221,8 @@ class Builtin:
         i = bisect.bisect_right(st, (t, '\uffff')) - 1
         return st[i][1] if i >= 0 else None
 
-    def base(self, t):
-        return [self._at(self.stream(*r), t) or bits(b'x', w, None) for r, (_, w) in zip(self.res, self.specs)]
+    def base(self, t):   # an unknown value: x, or None for a real / string (its text could be "x")
+        return [self._at(self.stream(*r), t) or (None if k else bits(b'x', w, None)) for r, (_, w), k in zip(self.res, self.specs, self.kinds)]
 
     def changes(self, t0, t1):
         out = []
@@ -243,12 +251,21 @@ class Builtin:
         return self.edges(self.resolve(sig)[0], kind, t0, t1)
 
 
+VHDL = str.maketrans('uwhl-', 'xx10x')   # VHDL std_logic in a vector: U W - unknown, H L weak 1 / 0
+
+
 @functools.lru_cache(maxsize=1 << 18)
 def bits(raw, width, sl):
-    """VCD value bytes ("b10x1", "1", "r1.5") -> the normalised form of norm(); VCD left-extends with 0, or x / z."""
+    """VCD value bytes (vector digits "10x1", a bit "1", "r1.5", "sHello") -> the normalised form of norm(); VCD
+    left-extends with 0, or x / z. A real -> its number as wavefw.js prints it (gfmt, 15 digits), a string -> its text."""
     if raw[:1] == b'r':
-        return raw[1:].decode()
-    b = raw.decode().lower()
+        try:
+            return gfmt(float(raw[1:].decode()), 15)
+        except ValueError:
+            return raw[1:].decode(errors='replace')
+    if raw[:1] == b's':
+        return raw[1:].decode(errors='replace')
+    b = raw.decode().lower().translate(VHDL)
     b = b.rjust(width, b[0] if b[0] in 'xz' else '0')[-width:]
     if sl:
         b, width = b[len(b) - 1 - sl[0]:len(b) - sl[1]], sl[0] - sl[1] + 1
@@ -256,6 +273,8 @@ def bits(raw, width, sl):
 
 
 def open_reader(a):
+    if not os.path.isfile(a.waves):
+        raise WaveError(f'vcd2wavedrom: no such dump: {a.waves}')
     if a.reader == 'wavepeek':
         return Peek(a.wavepeek, a.waves, a.scope)
     if not dumpscan.available(a.waves):
@@ -275,11 +294,13 @@ def norm(value, width):
         bits = digits.rjust(width, '0')
         if width == 1:
             return bits[-1]
+        if set(bits) <= {'x'} or set(bits) <= {'z'}:   # all x / all z: one letter, as the page reads it
+            return bits[0]
         bits = bits.rjust((width + 3) // 4 * 4, '0')
         out = ''
-        for i in range(0, len(bits), 4):
+        for i in range(0, len(bits), 4):   # as GTKWave: a nibble all z is z, one with an x or a partial z is x
             nib = bits[i:i + 4]
-            out += 'x' if 'x' in nib else 'z' if 'z' in nib else format(int(nib, 2), 'x')
+            out += 'z' if nib == 'zzzz' else 'x' if 'x' in nib or 'z' in nib else format(int(nib, 2), 'x')
         return out
     if radix == 'd':
         digits = format(int(digits), 'x') if digits.isdigit() else digits
@@ -287,6 +308,8 @@ def norm(value, width):
         digits = format(int(digits, 8), 'x') if digits.isdigit() else digits
     if width == 1:
         return digits[-1] if digits[-1] in '01xz' else '1'
+    if set(digits) <= {'x'} or set(digits) <= {'z'}:
+        return digits[0]
     return digits.rjust((width + 3) // 4, '0')
 
 
@@ -307,7 +330,7 @@ def gfmt(f, p=7):
         return '-0' if math.copysign(1, f) < 0 else '0'
     e = math.floor(math.log10(abs(float(jsfmt(f, f'.{p - 1}e')))))
     trim = lambda s: s.rstrip('0').rstrip('.') if '.' in s else s
-    if -5 <= e < p:
+    if -4 <= e < p:   # C's %g: exponential below 1e-4
         return trim(jsfmt(f, f'.{max(0, p - 1 - e)}f'))
     m, x = jsfmt(f, f'.{p - 1}e').lower().split('e')
     return trim(m) + 'e' + ('-' if x[0] == '-' else '+') + x.lstrip('+-').rjust(2, '0')
@@ -322,12 +345,12 @@ def label(v, width, enum=None, radix=None):
         return v
     n, r = int(v, 16), {'unsigned': 'dec', 'sdec': 'signed'}.get(radix, radix)
     q = re.fullmatch(r'(s?)q(\d+)', r or '')
-    if q:
+    if q:   # fixed point: the value / 2^F exactly, as wavefw.js (the F decimals of 1/2^F: the fraction times 5^F)
         if q[1] and width > 1 and n >= 1 << (width - 1):
             n -= 1 << width
-        d = min(math.ceil(int(q[2]) * 0.30103), 12)
-        s = jsfmt(n / 2 ** int(q[2]), f'.{d}f')
-        return s.rstrip('0').rstrip('.') if d else s
+        f, a = int(q[2]), abs(n)
+        ip, fp = a >> f, a & ((1 << f) - 1)
+        return ('-' if n < 0 else '') + str(ip) + ('.' + str(fp * 5 ** f).rjust(f, '0').rstrip('0') if fp else '')
     if r == 'float' and width in (16, 32, 64):
         return gfmt(struct.unpack({16: '>e', 32: '>f', 64: '>d'}[width], n.to_bytes(width // 8, 'big'))[0], {16: 4, 32: 7, 64: 15}[width])
     if r == 'dec':
@@ -346,8 +369,9 @@ def label(v, width, enum=None, radix=None):
     return str(n) if width <= 6 else '0x' + v.upper()
 
 
-def wave_of(items, width, enum, clock=False, radix=None):
-    """items: per-cycle normalised values, or None for a '|' gap cell -> (wave, data, the hex value of each label)."""
+def wave_of(items, width, enum, clock=False, radix=None, kind=None):
+    """items: per-cycle normalised values, or None for a '|' gap cell -> (wave, data, the hex value of each label).
+    kind real / string: the values are texts, labelled as they are (X_TEXT: unknown)."""
     if clock:
         return ''.join('|' if v is None else ('p' if i == 0 else '.') for i, v in enumerate(items)), [], []
     out, data, raw, prev = [], [], [], object()
@@ -357,6 +381,11 @@ def wave_of(items, width, enum, clock=False, radix=None):
         if v == prev:
             out.append('.'); continue
         prev = v
+        if kind:
+            out.append('x' if v is X_TEXT else '=')
+            if v is not X_TEXT:
+                data.append(v)
+            continue
         if width == 1:
             out.append(v if v in ('0', '1', 'x', 'z') else 'x')
         elif set(v) == {'x'}:
@@ -411,21 +440,22 @@ def parser():
     ap.add_argument('--sva', action='append', help='SystemVerilog assertion file for the page (repeatable; one compilation unit, in order)')
     ap.add_argument('--bind', action='append', help='NAME@SCOPE: bind assertion NAME to instance SCOPE, evaluated over the dump (repeatable)')
     ap.add_argument('--expr', dest='exprs', action='append', help='an expression of the signals the page draws as a row (ƒ expressions; repeatable), e.g. "PSEL && !PREADY"')
-    ap.add_argument('--sva-bin', help='the sva CLI (default: $WAVEFW_SVA, out/sva-target/release/sva, the prebuilt bin/<os>-x86_64/sva, sva on PATH)')
+    add_sva_bin_arg(ap)
     ap.add_argument('--hscale', type=float)
-    ap.add_argument('--reader', choices=('builtin', 'wavepeek'), help='how the dump is read: builtin (default: one pass in Python; '
-                    'an FST through fst2vcd) or wavepeek (any --marker expression)')
-    ap.add_argument('--wavepeek', help='wavepeek executable (default: on PATH or ~/.local/bin)')
+    add_reader_args(ap)
     ap.add_argument('--out', help='output file (default: stdout)')
     return ap
 
 
 def load_config(path):
-    with open(path, encoding='utf-8') as f:
-        try:
+    """A JSON config file -> dict; a missing file or bad JSON is a WaveError (one line)."""
+    try:
+        with open(path, encoding='utf-8') as f:
             return json.load(f)
-        except json.JSONDecodeError as e:
-            raise SystemExit(f'vcd2wavedrom: {path}: {e}')
+    except FileNotFoundError:
+        raise WaveError(f'no such file: {path}') from None
+    except json.JSONDecodeError as e:
+        raise WaveError(f'{path}: {e}') from None
 
 
 def view_config(cfg, view=None):
@@ -435,7 +465,7 @@ def view_config(cfg, view=None):
         return top
     views = cfg.get('views') or {}
     if view not in views:
-        raise SystemExit(f'vcd2wavedrom: no view "{view}" in the config (have: {", ".join(views) or "none"})')
+        raise WaveError(f'vcd2wavedrom: no view "{view}" in the config (have: {", ".join(views) or "none"})')
     out = dict(top)
     if views[view].get('clock'):        # a view's mode replaces the top-level one
         out.pop('exact', None)
@@ -456,7 +486,7 @@ def select(catalog, items):
         for s in filter(None, (x.strip() for x in it.split(','))):
             path, _, alias = s.partition('=')
             if '*' in path or '?' in path:
-                rx = re.compile(''.join('.*' if c == '*' else '.' if c == '?' else re.escape(c) for c in path) + r'\Z')
+                rx = glob_re(path)
                 hits = [p for p in catalog if rx.match(p)]
                 if not hits:
                     print(f'vcd2wavedrom: pattern "{path}" matches no signal', file=sys.stderr)
@@ -469,13 +499,14 @@ def select(catalog, items):
 def resolve(a, cfg, base='.'):
     """Fill options not given on the command line from a config dict; then check and default them."""
     cli_mode = a.clock is not None or a.exact
+    check_config(cfg.get('config'), 'vcd2wavedrom: "config"')
     a.wave_config = dict(cfg.get('config') or {})
     for k, v in cfg.items():
         k = {'from': 't_from', 'to': 't_to'}.get(k, k.replace('-', '_'))
         if k in SKIP_KEYS or (k in ('clock', 'exact') and cli_mode):
             continue
         if not hasattr(a, k) or k in ('config_file', 'view', 'out'):
-            raise SystemExit(f'vcd2wavedrom: unknown config key "{k}"')
+            raise WaveError(f'vcd2wavedrom: unknown config key "{k}"')
         if getattr(a, k) not in (None, []) or (k == 'sva' and v is False):
             continue                                   # the command line wins; "sva": false is mkhtml.py's
         if k in LIST_KEYS:
@@ -489,14 +520,14 @@ def resolve(a, cfg, base='.'):
         setattr(a, k, getattr(a, k) or [])
     a.sva = [x if isinstance(x, tuple) else (x, x) for x in a.sva]
     if not a.waves or not a.signals:
-        raise SystemExit('vcd2wavedrom: need --waves and --signals (on the command line or in the config)')
+        raise WaveError('vcd2wavedrom: need --waves and --signals (on the command line or in the config)')
     if bool(a.clock) == bool(a.exact):
-        raise SystemExit('vcd2wavedrom: need exactly one of --clock CLK / --exact')
+        raise WaveError('vcd2wavedrom: need exactly one of --clock CLK / --exact')
     a.hscale = a.hscale or 1
     a.reader = a.reader or 'builtin'
-    a.wavepeek = os.path.expanduser(a.wavepeek or shutil.which('wavepeek') or '~/.local/bin/wavepeek')
+    a.wavepeek = wavepeek(a.wavepeek)
     if (a.reader == 'wavepeek' or not dumpscan.available(a.waves)) and not os.path.exists(a.wavepeek):
-        raise SystemExit('vcd2wavedrom: wavepeek not found (cargo build it, see README.md)')
+        raise WaveError('vcd2wavedrom: wavepeek not found (cargo build it, see README.md)')
     return a
 
 
@@ -506,7 +537,7 @@ def options(argv=None, cfg=None, base='.'):
     if a.config_file:
         file_cfg = load_config(a.config_file)
         if a.view is None and file_cfg.get('views') and not (file_cfg.get('clock') or file_cfg.get('exact')):
-            raise SystemExit(f'vcd2wavedrom: pick a view with --view ({", ".join(file_cfg["views"])})')
+            raise WaveError(f'vcd2wavedrom: pick a view with --view ({", ".join(file_cfg["views"])})')
         cfg, base = view_config(file_cfg, a.view), os.path.dirname(os.path.abspath(a.config_file))
     return resolve(a, cfg or {}, base)
 
@@ -544,21 +575,25 @@ def parse_markers(items):  # -> [(expr, label)]
 
 
 # ---------------- conversion ----------------
-def convert(a):
-    """Resolved options -> WaveJSON dict."""
-    rd = open_reader(a)
+def leaf_name(a, path):
+    """The name a signal is shown under: the path as given with --scope (and no hierarchy), else its last part."""
+    return path if a.scope and not a.hierarchy else (svabuild.split_path(path) or [path])[-1]
 
+
+def collect_specs(a, rd):
+    """The signals of the options (a list, or a catalog {path: settings}) -> (specs, markers, t_from, t_to): each spec
+    {path, name, set, abs, width, kind, base, enum, radix}, read through the reader rd."""
     # ---- signal list, widths (from the value literal, e.g. "7'h00", so nested scopes and bit selects work) ----
     specs = []
     chunks = a.signals if isinstance(a.signals, list) else [a.signals]
-    leaf = lambda p: p if a.scope and not a.hierarchy else re.split(r'\.(?![^\[]*\])', p)[-1]
+    leaf = lambda p: leaf_name(a, p)
     for chunk in chunks:
         if isinstance(chunk, dict):   # catalog {path: {show, alias, radix, color, fill, style, enum, …}}
             for path, st in chunk.items():
                 st = st or {}
                 bad = set(st) - set(SIG_KEYS)
                 if bad:
-                    raise SystemExit(f'vcd2wavedrom: {path}: unknown signal setting(s) {", ".join(sorted(bad))} (have: {", ".join(SIG_KEYS)})')
+                    raise WaveError(f'vcd2wavedrom: {path}: unknown signal setting(s) {", ".join(sorted(bad))} (have: {", ".join(SIG_KEYS)})')
                 if st.get('show', True) is not False:
                     specs.append({'path': path, 'name': st.get('alias') or leaf(path), 'set': st})
             continue
@@ -566,11 +601,11 @@ def convert(a):
             path, _, alias = s.partition('=')
             specs.append({'path': path, 'name': alias or leaf(path), 'set': {}})
     if not specs:
-        raise SystemExit('vcd2wavedrom: no signals to show (all "show": false?)')
+        raise WaveError('vcd2wavedrom: no signals to show (all "show": false?)')
     paths = [s['path'] for s in specs]
     marks = parse_markers(a.marker)
-    for s, (absp, w) in zip(specs, rd.prepare(paths, a.clock, [e for e, _ in marks])):
-        s['abs'], s['width'] = absp, w
+    for s, (absp, w), k in zip(specs, rd.prepare(paths, a.clock, [e for e, _ in marks]), getattr(rd, 'kinds', None) or [None] * len(specs)):
+        s['abs'], s['width'], s['kind'] = absp, w, k
     t_from = to_ps(a.t_from) if a.t_from else rd.t_start
     t_to = to_ps(a.t_to) if a.t_to else rd.t_end
     for s, b in zip(specs, rd.base(t_from)):
@@ -586,87 +621,103 @@ def convert(a):
             e = (decl.get(s['abs']) or {}).get('enum')
             if not s['enum'] and e:
                 s['enum'] = e
+    return specs, marks, t_from, t_to
 
-    doc = {}
-    sig_json = {}
-    if a.clock:
-        times, cols = rd.sampled(a.clock, t_from, t_to)
-        if len(times) < 2:
-            raise SystemExit('vcd2wavedrom: fewer than two clock edges in the window')
-        cycle = statistics.median(b - a_ for a_, b in zip(times, times[1:]))
-        gaps = [tuple(map(to_ps, g.split(':') if isinstance(g, str) else g)) for g in a.gap]
-        cells, skip = [], []   # cells: row index or None ('|'); skip: [[cell index, cycles it stands for]]
-        for i, t in enumerate(times):
-            g = next((g for g in gaps if g[0] <= t <= g[1]), None)
-            if g is None:
-                cells.append(i)
-            elif cells and cells[-1] is None and skip and skip[-1][2] is g:
-                skip[-1][1] += 1
-            else:
-                cells.append(None); skip.append([len(cells) - 1, 1, g])
-        vals = {s['abs']: cols[j] for j, s in enumerate(specs)}
-        clk_abs = next((s['abs'] for s in specs if s['path'] == a.clock or s['name'] == a.clock), None)
-        for s in specs:
-            items = [None if c is None else vals[s['abs']][c] for c in cells]
-            wave, data, raw = wave_of(items, s['width'], s['enum'], clock=s['abs'] == clk_abs, radix=s['radix'])
-            j = {'name': s['name'], 'wave': wave}
-            if data:
-                j['data'] = data
-            if s['width'] > 1:
-                j['width'] = s['width']
-            # the values next to labels that do not read back (the page's assertions sample them): binary, signed,
-            # octal and ascii labels, values with x / z digits
-            if data and (s['radix'] in ('bin', 'signed', 'sdec', 'oct', 'ascii', 'float') or re.fullmatch(r's?q\d+', s['radix'] or '') or any(re.search('[xz]', v) for v in raw)):
-                j['raw'] = raw
-            sig_json[s['abs']] = j
-        doc['head'] = {'text': a.title or f'{os.path.basename(a.waves)} @ posedge {a.clock}', 'tick': 0}
-        doc['time'] = {'t0': times[0], 't1': times[0] + len(times) * cycle, 'cycle': cycle, 'unit': 'ps'}
-        if skip:
-            doc['time']['skip'] = [[k, n] for k, n, _ in skip]
-    else:
-        tv = {s['abs']: [[t_from, s['base']]] for s in specs}
-        for s, ch in zip(specs, rd.changes(t_from, t_to)):
-            for t, val in ch:
-                q = tv[s['abs']]
-                if q[-1][0] == t:          # same timestamp (e.g. the baseline): keep the last value
-                    q[-1][1] = val
-                    if len(q) > 1 and q[-2][1] == val:
-                        q.pop()
-                elif q[-1][1] != val:      # dumps may repeat a value (initial $dumpvars, glitches): drop it
-                    q.append([t, val])
-        if a.cycle:
-            cycle = to_ps(a.cycle)
-        else:  # finest spacing between changes (so clocks don't alias), but at most ~2000 cells
-            dts = [b[0] - a_[0] for q in tv.values() for a_, b in zip(q, q[1:]) if b[0] > a_[0]]
-            cycle = max(nice_floor(min(dts)) if dts else t_to - t_from, nice_ceil((t_to - t_from) / 2000))
-        n = max(1, round((t_to - t_from) / cycle))
-        for s in specs:
-            seq, k, items = tv[s['abs']], 0, []
-            for i in range(n):          # quantised fallback: value at the start of each grid cell
-                g = t_from + i * cycle
-                while k + 1 < len(seq) and seq[k + 1][0] <= g:
-                    k += 1
-                items.append(seq[k][1])
-            wave, data, _ = wave_of(items, s['width'], s['enum'], radix=s['radix'])
-            j = {'name': s['name'], 'width': s['width'], 'wave': wave}
-            if data:
-                j['data'] = data
-            j['tv'] = seq
-            sig_json[s['abs']] = j
-        # the same net seen at several levels (tb.clk, tb.dut.clk, …): store its transitions once, the copies say "same"
-        first = {}
-        for s in specs:
-            j = sig_json[s['abs']]
-            key = (s['width'], json.dumps(j['tv']))
-            if key in first and len(j['tv']) > 2:
-                del j['tv']; j['same'] = first[key]
-                sig_json[first[key]]['path'] = first[key]
-            else:
-                first.setdefault(key, s['abs'])
-        doc['head'] = {'text': a.title or os.path.basename(a.waves)}
-        doc['time'] = {'t0': t_from, 't1': t_to, 'cycle': cycle, 'unit': 'ps'}
+
+def clock_mode(a, rd, specs, t_from, t_to):
+    """--clock: one WaveDrom cell per period of the clock -> ({abs path: signal JSON}, {head, time})."""
+    doc, sig_json = {}, {}
+    times, cols = rd.sampled(a.clock, t_from, t_to)
+    if len(times) < 2:
+        raise WaveError('vcd2wavedrom: fewer than two clock edges in the window')
+    cycle = statistics.median(b - a_ for a_, b in zip(times, times[1:]))
+    gaps = [tuple(map(to_ps, g.split(':') if isinstance(g, str) else g)) for g in a.gap]
+    cells, skip = [], []   # cells: row index or None ('|'); skip: [[cell index, cycles it stands for]]
+    for i, t in enumerate(times):
+        g = next((g for g in gaps if g[0] <= t <= g[1]), None)
+        if g is None:
+            cells.append(i)
+        elif cells and cells[-1] is None and skip and skip[-1][2] is g:
+            skip[-1][1] += 1
+        else:
+            cells.append(None); skip.append([len(cells) - 1, 1, g])
+    vals = {s['abs']: cols[j] for j, s in enumerate(specs)}
+    clk_abs = next((s['abs'] for s in specs if s['path'] == a.clock or s['name'] == a.clock), None)
+    for s in specs:
+        col = vals[s['abs']] if not s['kind'] else [X_TEXT if v is None else v for v in vals[s['abs']]]
+        items = [None if c is None else col[c] for c in cells]
+        wave, data, raw = wave_of(items, s['width'], s['enum'], clock=s['abs'] == clk_abs, radix=s['radix'], kind=s['kind'])
+        j = {'name': s['name'], 'wave': wave}
+        if data:
+            j['data'] = data
+        if s['width'] > 1:
+            j['width'] = s['width']
+        # the values next to labels that do not read back (the page's assertions sample them): binary, signed,
+        # octal and ascii labels, values with x / z digits
+        if data and not s['kind'] and (s['radix'] in ('bin', 'signed', 'sdec', 'oct', 'ascii', 'float') or re.fullmatch(r's?q\d+', s['radix'] or '') or any(re.search('[xz]', v) for v in raw)):
+            j['raw'] = raw
+        sig_json[s['abs']] = j
+    doc['head'] = {'text': a.title or f'{os.path.basename(a.waves)} @ posedge {a.clock}', 'tick': 0}
+    doc['time'] = {'t0': times[0], 't1': times[0] + len(times) * cycle, 'cycle': cycle, 'unit': 'ps'}
+    if skip:
+        doc['time']['skip'] = [[k, n] for k, n, _ in skip]
+    return sig_json, doc
+
+
+def exact_mode(a, rd, specs, t_from, t_to):
+    """--exact: the transitions of each signal ("tv") and a quantised wave string for stock WaveDrom -> ({abs path:
+    signal JSON}, {head, time})."""
+    doc, sig_json = {}, {}
+    tv = {s['abs']: [[t_from, s['base']]] for s in specs}
+    for s, ch in zip(specs, rd.changes(t_from, t_to)):
+        for t, val in ch:
+            q = tv[s['abs']]
+            if q[-1][0] == t:          # same timestamp (e.g. the baseline): keep the last value
+                q[-1][1] = val
+                if len(q) > 1 and q[-2][1] == val:
+                    q.pop()
+            elif q[-1][1] != val:      # dumps may repeat a value (initial $dumpvars, glitches): drop it
+                q.append([t, val])
+    if a.cycle:
+        cycle = to_ps(a.cycle)
+    else:  # finest spacing between changes (so clocks don't alias), but at most ~2000 cells
+        dts = [b[0] - a_[0] for q in tv.values() for a_, b in zip(q, q[1:]) if b[0] > a_[0]]
+        cycle = max(nice_floor(min(dts)) if dts else t_to - t_from, nice_ceil((t_to - t_from) / 2000))
+    n = max(1, round((t_to - t_from) / cycle))
+    for s in specs:
+        seq, k, items = tv[s['abs']], 0, []
+        for i in range(n):          # quantised fallback: value at the start of each grid cell
+            g = t_from + i * cycle
+            while k + 1 < len(seq) and seq[k + 1][0] <= g:
+                k += 1
+            items.append(X_TEXT if s['kind'] and seq[k][1] is None else seq[k][1])
+        wave, data, _ = wave_of(items, s['width'], s['enum'], radix=s['radix'], kind=s['kind'])
+        j = {'name': s['name'], 'width': s['width'], 'wave': wave}
+        if data:
+            j['data'] = data
+        j['tv'] = seq
+        sig_json[s['abs']] = j
+    # the same net seen at several levels (tb.clk, tb.dut.clk, …): store its transitions once, the copies say "same"
+    first = {}
     for s in specs:
         j = sig_json[s['abs']]
+        key = (s['width'], json.dumps(j['tv']))
+        if key in first and len(j['tv']) > 2:
+            del j['tv']; j['same'] = first[key]
+            sig_json[first[key]]['path'] = first[key]
+        else:
+            first.setdefault(key, s['abs'])
+    doc['head'] = {'text': a.title or os.path.basename(a.waves)}
+    doc['time'] = {'t0': t_from, 't1': t_to, 'cycle': cycle, 'unit': 'ps'}
+    return sig_json, doc
+
+
+def signal_settings(a, specs, sig_json):
+    """The per-signal settings of the config onto each signal's JSON (kind, enum, radix, colours, …, path)."""
+    for s in specs:
+        j = sig_json[s['abs']]
+        if s['kind']:
+            j['kind'] = s['kind']   # its values are texts (a real's number, a string), null: unknown
         if s['enum']:
             j['enum'] = {str(k): v for k, v in s['enum'].items()}
         for k in ('radix', 'color', 'fill', 'style', 'enumColors', 'analog', 'height', 'fields'):
@@ -675,14 +726,19 @@ def convert(a):
         if a.hierarchy:
             j['path'] = s['abs']
 
+
+def group(a, rd, specs, sig_json):
+    """The signals in groups -> (the WaveJSON "signal" list, {scope path: struct / union / interface}): the scopes with
+    --hierarchy, else the --group lists (members at the place of the first one)."""
+    kinds = {}
     out = []
     if a.hierarchy:   # ---- groups = scopes: tb.dut.u_x.sig -> ["tb", ["dut", ["u_x", sig]]], in signal order ----
         root = (a.scope + '.') if a.scope else ''
-        node, kinds = {(): out}, {}
+        node = {(): out}
         decl = getattr(rd, 'decl', None) or dumpscan.read(a.waves, None)
         types = decl.scopes if decl else {}   # struct / union / interface scopes (an FST through fst2vcd; a VCD that says so)
         for s in specs:
-            parts = re.split(r'\.(?![^\[]*\])', s['abs'][len(root):] if s['abs'].startswith(root) else s['abs'])[:-1]
+            parts = svabuild.split_path(s['abs'][len(root):] if s['abs'].startswith(root) else s['abs'])[:-1]
             for i in range(len(parts)):
                 key = tuple(parts[:i + 1])
                 if key not in node:
@@ -691,8 +747,6 @@ def convert(a):
                     if t in ('struct', 'union', 'interface'):   # with its width in the dump: the page puts a whole value together only from all of it
                         kinds['.'.join(key)] = {'kind': t, 'width': sum(v.width for p, v in decl.vars.items() if p.startswith(at + '.'))} if t != 'interface' else t
             node[tuple(parts)].append(sig_json[s['abs']])
-        if kinds:
-            doc['scopes'] = kinds
     else:   # ---- groups: nest members at the position of the first one ----
         member = {}
         for gname, members in parse_groups(a.group):
@@ -707,7 +761,11 @@ def convert(a):
                 placed[g].append(sig_json[s['abs']])
             else:
                 placed[g] = [g, sig_json[s['abs']]]; out.append(placed[g])
-    doc = {'signal': out, **doc, 'config': {'hscale': a.hscale, **a.wave_config}}
+    return out, kinds
+
+
+def finish(a, rd, doc, specs, marks, t_from, t_to):
+    """Markers, bookmarks, arrows, the assertions ("sva"), the expressions and "meta" onto the document."""
 
     # ---- markers from wavepeek event expressions ----
     markers = []
@@ -721,7 +779,7 @@ def convert(a):
         v = getattr(a, k)
         if v:
             doc[k] = json.loads(v) if isinstance(v, str) else v
-    a.sva_aliases = {s['abs']: s['name'] for s in specs if s.get('abs') and s['name'] != leaf(s['path'])}   # shown names, for the assertions
+    a.sva_aliases = {s['abs']: s['name'] for s in specs if s.get('abs') and s['name'] != leaf_name(a, s['path'])}   # shown names, for the assertions
     if a.sva or a.bind:
         pfx = getattr(a, 'sva_prefixes', None)
         pfx = (a.wave_config or {}).get('sortIgnore') if pfx is None else pfx   # names resolve as in the page
@@ -730,10 +788,24 @@ def convert(a):
         doc.setdefault('sva', {})['exprs'] = a.exprs
     doc['meta'] = {'waves': os.path.basename(a.waves), 'tool': rd.tool, 'mode': 'clock' if a.clock else 'exact',
                    'from_ps': t_from, 'to_ps': t_to, **({'scope': a.scope} if a.scope else {})}
+
+
+def convert(a: argparse.Namespace) -> dict:
+    """Resolved options -> WaveJSON dict: the signals read, clock-sampled or exact, grouped, then the extensions."""
+    rd = open_reader(a)
+    specs, marks, t_from, t_to = collect_specs(a, rd)
+    sig_json, doc = (clock_mode if a.clock else exact_mode)(a, rd, specs, t_from, t_to)
+    signal_settings(a, specs, sig_json)
+    out, scopes = group(a, rd, specs, sig_json)
+    if scopes:
+        doc['scopes'] = scopes
+    doc = {'signal': out, **doc, 'config': {'hscale': a.hscale, **a.wave_config}}
+    finish(a, rd, doc, specs, marks, t_from, t_to)
     return doc
 
 
 def main():
+    """The command line: options, conversion, the WaveJSON text to --out or stdout."""
     a = options()
     doc = convert(a)
     text = wavejson.dumps(doc) + '\n'
@@ -746,4 +818,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    run_main(main, 'vcd2wavedrom')

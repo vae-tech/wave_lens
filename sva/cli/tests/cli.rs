@@ -10,9 +10,13 @@ fn dir() -> PathBuf {
     d
 }
 
+/// A file of the tests' directory, written whole before it gets its name: tests run in parallel and some write the
+/// same file (a reader never sees it half written).
 fn write(name: &str, text: &str) -> String {
     let p = dir().join(name);
-    std::fs::write(&p, text).unwrap();
+    let tmp = dir().join(format!("{name}.{:?}.tmp", std::thread::current().id()));
+    std::fs::write(&tmp, text).unwrap();
+    std::fs::rename(&tmp, &p).unwrap();
     p.to_string_lossy().into_owned()
 }
 
@@ -83,6 +87,10 @@ fn usage_errors_exit_2() {
     assert_eq!(sva(&["parse", "/no/such/file.sv"]).status.code(), Some(2));
     assert_eq!(sva(&[]).status.code(), Some(2));
     assert!(out(&sva(&["parse", "--help"])).contains("usage: sva parse"));
+    for h in ["-h", "--help"] {
+        let r = sva(&["report", h]);
+        assert!(r.status.success() && out(&r).contains("sva report"), "sva report {h}");
+    }
 }
 
 const VCD: &str = "$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! clk $end\n$var wire 1 \" req $end\n$var wire 1 # ack $end\n\
@@ -283,4 +291,115 @@ fn aliases_ambiguous_prefixes_and_widths() {
     // a select wider than the variable does not bind with the default resolution either
     let o = sva(&["eval", "--waves", &vcd, "--scope", "tb", "--sva", &f, "--assert", "w"]);
     assert!(o.status.code() == Some(2) && err(&o).contains("a select needs 4 bits"), "{}", err(&o));
+}
+
+/// A clock and two signals; `body` the value changes.
+fn clock_dump(name: &str, timescale: &str, body: &str) -> String {
+    write(name, &format!("$timescale {timescale} $end\n$scope module tb $end\n$var wire 1 ! clk $end\n$var wire 1 \" req $end\n$var wire 1 # ack $end\n$upscope $end\n$enddefinitions $end\n{body}"))
+}
+
+fn checks() -> String {
+    write("edges.sv", "module tb;\n  a_req: assert property (@(posedge clk) req |-> ack);\n  a_neg: assert property (@(negedge clk) req |-> ack);\nendmodule\n")
+}
+
+fn cycles(o: &Output) -> Vec<u64> {
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap_or_default();
+    v["cycles"].as_array().map(|a| a.iter().filter_map(|x| x.as_u64()).collect()).unwrap_or_default()
+}
+
+#[test]
+fn one_edge_per_time_step() {
+    // a glitch written in one time step (1 0 1 at #5) is no edge of its own: one cycle there, not two
+    let d = clock_dump("glitch.vcd", "1ns", "#0\nx!\n1\"\n1#\n#5\n1!\n0!\n1!\n#10\n0!\n#15\n1!\n#20\n0!\n");
+    let o = sva(&["eval", "--waves", &d, "--scope", "tb", "--sva", &checks(), "--assert", "a_req", "--json"]);
+    assert_eq!(cycles(&o), [5000, 15000], "{}", err(&o));
+}
+
+#[test]
+fn edges_as_ieee_9_4_2() {
+    // posedge: 0->1, 0->x, 0->z, x->1, z->1 (not 1->x, x->z); negedge the mirror
+    let d = clock_dump("ieee.vcd", "1ns", "#0\n0!\n1\"\n1#\n#5\nx!\n#10\n1!\n#15\nz!\n#20\n0!\n#25\nz!\n#30\n1!\n");
+    let o = sva(&["eval", "--waves", &d, "--scope", "tb", "--sva", &checks(), "--assert", "a_req", "--json"]);
+    assert_eq!(cycles(&o), [5000, 10000, 25000, 30000], "{}", err(&o));
+    let o = sva(&["eval", "--waves", &d, "--scope", "tb", "--sva", &checks(), "--assert", "a_neg", "--json"]);
+    assert_eq!(cycles(&o), [15000, 20000], "{}", err(&o));
+}
+
+#[test]
+fn nothing_to_check_exits_2() {
+    let c = checks();
+    let d = clock_dump("noedge.vcd", "1ns", "#0\n0!\n1\"\n1#\n#10\n1\"\n");
+    let o = sva(&["eval", "--waves", &d, "--scope", "tb", "--sva", &c, "--assert", "a_req"]);
+    assert_eq!(o.status.code(), Some(2), "no edge of the clock: {}", err(&o));
+    assert!(err(&o).contains("tb.clk has no posedge in the dump"), "{}", err(&o));
+    let d = clock_dump("window.vcd", "1ns", "#0\n0!\n1\"\n1#\n#5\n1!\n#10\n0!\n");
+    for (args, msg) in [(["--from", "1ms"], "is after the last posedge"), (["--from", "-5ns"], "a time is a number of 0 or more")] {
+        let o = sva(&[&["eval", "--waves", &d, "--scope", "tb", "--sva", &c][..], &args[..]].concat());
+        assert_eq!(o.status.code(), Some(2), "{args:?}: {}", err(&o));
+        assert!(err(&o).contains(msg), "{args:?}: {}", err(&o));
+    }
+    let o = sva(&["eval", "--waves", &d, "--scope", "tb", "--sva", &c, "--from", "8ns", "--to", "2ns"]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(err(&o).contains("--to 2 ns is before --from 8 ns"), "{}", err(&o));
+}
+
+#[test]
+fn finer_than_ps_warns() {
+    let d = clock_dump("fs.vcd", "1fs", "#0\n0!\n1\"\n1#\n#5\n1!\n#10\n0!\n#15\n1!\n");
+    let o = sva(&["eval", "--waves", &d, "--scope", "tb", "--sva", &checks(), "--assert", "a_req", "--json"]);
+    assert!(err(&o).contains("finer than 1 ps"), "{}", err(&o));
+    assert_eq!(cycles(&o).len(), 2, "the edges are the cycles, whatever their rounded times");
+}
+
+#[test]
+fn a_closed_stdout_is_no_crash() {
+    // sva eval … | head -1: the rest of the output is dropped, the status is the evaluation's (no abort, no 134)
+    let d = clock_dump("pipe.vcd", "1ns", &(0..200).map(|t| format!("#{}\n{}!\n1\"\n1#\n", t * 5, t % 2)).collect::<String>());
+    let mut child = Command::new(env!("CARGO_BIN_EXE_sva"))
+        .args(["eval", "--waves", &d, "--scope", "tb", "--sva", &checks(), "--attempts"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    drop(child.stdout.take());   // the reader is gone before the first line
+    let o = child.wait_with_output().unwrap();
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    assert!(!err(&o).contains("panicked"), "{}", err(&o));
+}
+
+/// The evaluation goldens: `sva eval --attempts` over the example dumps of `make examples` (skipped, with a message,
+/// when they are not built), compared with tests/sva/golden/eval/<ex>.txt; `make sva-bless` (SVA_BLESS=1) rewrites
+/// them. The parse goldens (tests/corpus.rs) pin the parser, these the verdicts, the traces and the notes.
+#[test]
+fn examples_evaluation_goldens() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let build = std::env::var("BUILD").map(std::path::PathBuf::from).unwrap_or_else(|_| root.join("out"));
+    let cases: [(&str, &str, &[&str]); 3] = [
+        ("apb", "apb_tb", &["examples/apb/apb_tb.sv", "examples/apb/apb.sva"]),
+        ("axi_lite", "axi_lite_tb.u_slave", &["examples/axi_lite/axi_lite.sva"]),
+        ("fsm", "fsm_tb.u_rx", &["examples/fsm/uart_pkg.sv", "examples/fsm/fsm.sva"]),
+    ];
+    let mut differ = Vec::new();
+    for (ex, scope, files) in cases {
+        let dump = build.join(format!("examples/{ex}/{ex}.fst"));
+        if !dump.exists() {
+            eprintln!("examples_evaluation_goldens: {} is missing (make examples): {ex} skipped", dump.display());
+            continue;
+        }
+        let mut args = vec!["eval".to_string(), "--waves".into(), dump.to_string_lossy().into_owned(), "--scope".into(), scope.into(), "--attempts".into()];
+        for f in files {
+            args.extend(["--sva".into(), root.join(f).to_string_lossy().into_owned()]);
+        }
+        let o = Command::new(env!("CARGO_BIN_EXE_sva")).args(&args).output().unwrap();
+        assert!(matches!(o.status.code(), Some(0 | 1)), "{ex}: {}", err(&o));
+        let got = out(&o);
+        let golden = root.join(format!("tests/sva/golden/eval/{ex}.txt"));
+        if std::env::var("SVA_BLESS").is_ok() {
+            std::fs::create_dir_all(golden.parent().unwrap()).unwrap();
+            std::fs::write(&golden, &got).unwrap();
+        } else if std::fs::read_to_string(&golden).unwrap_or_default() != got {
+            differ.push(format!("{ex} (diff {} against the output; make sva-bless after a reviewed change)", golden.display()));
+        }
+    }
+    assert!(differ.is_empty(), "evaluation goldens differ: {differ:?}");
 }

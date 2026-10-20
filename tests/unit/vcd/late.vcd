@@ -1,0 +1,12 @@
+$timescale 1ns $end
+$scope module tb $end
+$var wire 1 ! s $end
+$var wire 4 " b [3:0] $end
+$upscope $end
+$enddefinitions $end
+#100
+0!
+b0011 "
+#200
+1!
+b1100 "

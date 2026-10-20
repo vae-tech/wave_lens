@@ -1,0 +1,44 @@
+$timescale 1ns $end
+$scope module tb $end
+$scope begin blk $end
+$var wire 1 ! a $end
+$upscope $end
+$scope fork fk $end
+$var wire 1 " b $end
+$upscope $end
+$scope function fn $end
+$var wire 1 # c $end
+$upscope $end
+$scope struct st $end
+$var wire 2 $ f0 [1:0] $end
+$var wire 1 % f1 $end
+$upscope $end
+$scope interface ifc $end
+$var wire 1 & d $end
+$upscope $end
+$scope package pk $end
+$var wire 1 ' e $end
+$upscope $end
+$scope task tk $end
+$var wire 1 ( g $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+#0
+0!
+0"
+0#
+b01 $
+0%
+0&
+0'
+0(
+#10
+1!
+1"
+1#
+b10 $
+1%
+1&
+1'
+1(

@@ -149,21 +149,21 @@ mod syntax {
         assert_eq!(eerr("a +"), "1:4 expected an expression, found the end of the file");
         assert_eq!(eerr("(a"), "1:3 expected ')', found the end of the file");
         assert_eq!(eerr("a b"), "1:3 expected the end of the text, found 'b'");
-        assert_eq!(eerr("$foo(a)"), "1:1 the system function $foo is outside the subset");
-        assert_eq!(eerr("$past(a, 1, en)"), "1:1 the gating and clock arguments of $past are outside the subset: $past(x [, n])");
-        assert_eq!(eerr("$past(a,, en)"), "1:9 $past with an empty argument is outside the subset");
+        assert_eq!(eerr("$foo(a)"), "1:1 the system function $foo is outside the subset (docs/sva/LANGUAGE.md)");
+        assert_eq!(eerr("$past(a, 1, en)"), "1:1 the gating and clock arguments of $past are outside the subset: $past(x [, n]) (docs/sva/LANGUAGE.md)");
+        assert_eq!(eerr("$past(a,, en)"), "1:9 $past with an empty argument is outside the subset (docs/sva/LANGUAGE.md)");
         assert_eq!(eerr("$rose()"), "1:1 $rose takes 1 argument, got 0");
         assert_eq!(eerr("$stable(a, b)"), "1:1 $stable takes 1 argument, got 2");
-        assert_eq!(eerr("$rose(a, @(posedge c))"), "1:10 a clock argument of $rose is outside the subset: the assertion's clock is used");
+        assert_eq!(eerr("$rose(a, @(posedge c))"), "1:10 a clock argument of $rose is outside the subset: the assertion's clock is used (docs/sva/LANGUAGE.md)");
         assert!(eerr("f(a)").starts_with("1:1 calls inside an expression (f(...)) are outside the subset"));
-        assert_eq!(eerr("a ==? b"), "1:3 the operator ==? is outside the subset");
-        assert_eq!(eerr("a -> b"), "1:3 the operator -> is outside the subset");
-        assert_eq!(eerr("a dist {1:=2}"), "1:3 dist is outside the subset");
-        assert_eq!(eerr("'{a}"), "1:1 assignment patterns '{...} are outside the subset");
-        assert_eq!(eerr("int'(a)"), "1:1 type casts (int'(...)) are outside the subset");
-        assert_eq!(eerr("\"s\""), "1:1 strings are outside the subset (except in action block messages)");
-        assert_eq!(eerr("1.5"), "1:1 real numbers are outside the subset");
-        assert_eq!(eerr("++a"), "1:1 ++ is outside the subset");
+        assert_eq!(eerr("a ==? b"), "1:3 the operator ==? is outside the subset (docs/sva/LANGUAGE.md)");
+        assert_eq!(eerr("a -> b"), "1:3 the operator -> is outside the subset (docs/sva/LANGUAGE.md)");
+        assert_eq!(eerr("a dist {1:=2}"), "1:3 dist is outside the subset (docs/sva/LANGUAGE.md)");
+        assert_eq!(eerr("'{a}"), "1:1 assignment patterns '{...} are outside the subset (docs/sva/LANGUAGE.md)");
+        assert_eq!(eerr("int'(a)"), "1:1 type casts (int'(...)) are outside the subset (docs/sva/LANGUAGE.md)");
+        assert_eq!(eerr("\"s\""), "1:1 strings are outside the subset (except in action block messages) (docs/sva/LANGUAGE.md)");
+        assert_eq!(eerr("1.5"), "1:1 real numbers are outside the subset (docs/sva/LANGUAGE.md)");
+        assert_eq!(eerr("++a"), "1:1 ++ is outside the subset (docs/sva/LANGUAGE.md)");
         assert_eq!(eerr("a++"), "1:2 expected the end of the text, found '++'");
         assert_eq!(eerr("a + endproperty"), "1:5 expected an expression, found 'endproperty'");
         assert_eq!(eerr("0'(a)"), "1:1 a size cast needs a positive decimal width: 8'(x)");
@@ -351,8 +351,8 @@ mod syntax {
         assert_eq!(perr("a intersect (b |-> c)"), "1:14 intersect needs a sequence, found a property");
         assert_eq!(perr("(a |-> b) within c"), "1:2 within needs a sequence, found a property");
         assert_eq!(perr("first_match(a |-> b)"), "1:13 first_match needs a sequence, found a property");
-        assert_eq!(perr("(a, v = b)"), "1:3 sequence match items (local variables) are outside the subset");
-        assert_eq!(perr("a ##1 @(posedge c) b"), "1:7 a clock inside a property (multi-clock) is outside the subset");
+        assert_eq!(perr("(a, v = b)"), "1:3 sequence match items (local variables) are outside the subset (docs/sva/LANGUAGE.md)");
+        assert_eq!(perr("a ##1 @(posedge c) b"), "1:7 a clock inside a property (multi-clock) is outside the subset (docs/sva/LANGUAGE.md)");
         assert_eq!(perr("(a ##1 )"), "1:8 expected an expression, found ')'");
         assert_eq!(perr("a ##4'bx b"), "1:5 a delay cannot have x / z bits");
         assert_eq!(perr("s(.a(x), y)"), "1:10 a positional argument after a named one");
@@ -381,6 +381,18 @@ mod syntax {
 
 mod files {
     use super::*;
+
+    #[test]
+    fn constant_boundaries() {
+        // the value after i64::MAX: an error at the label, not a panic (a debug build) or a wrap (release)
+        let p = parse("package p; typedef enum logic [63:0] {A = 64'h7fff_ffff_ffff_ffff, B} e_t; endpackage");
+        assert_eq!(p.errors.iter().map(|e| e.msg.as_str()).collect::<Vec<_>>(), ["enum label 'A': the next label's value would overflow"]);
+        let p = parse("package p; typedef enum logic [63:0] {A = 64'h7fff_ffff_ffff_ffff} e_t; endpackage");
+        assert!(p.errors.is_empty(), "{:?}", p.errors);
+        // a range whose bounds are the extremes: no width, no panic
+        let p = parse("module m; logic [9223372036854775807:-9223372036854775807] w; a: assert property (@(posedge c) w); endmodule");
+        let _ = p;
+    }
 
     const SPIKE: &str = "property p_req_ack; @(posedge clk) disable iff (!rst_n) req |-> ##[1:3] ack; endproperty\n\
                          a_req_ack: assert property (p_req_ack);";
@@ -433,13 +445,13 @@ mod files {
 
     #[test]
     fn statements_outside_the_subset() {
-        assert_eq!(errs("assert (a);"), ["1:1 immediate assertions (assert (expr)) are outside the subset: use assert property (...)"]);
-        assert_eq!(errs("assert final (a);"), ["1:1 immediate assertions (assert (expr)) are outside the subset: use assert property (...)"]);
-        assert_eq!(errs("expect (@(posedge c) a);"), ["1:1 expect statements are outside the subset"]);
+        assert_eq!(errs("assert (a);"), ["1:1 immediate assertions (assert (expr)) are outside the subset: use assert property (...) (docs/sva/LANGUAGE.md)"]);
+        assert_eq!(errs("assert final (a);"), ["1:1 immediate assertions (assert (expr)) are outside the subset: use assert property (...) (docs/sva/LANGUAGE.md)"]);
+        assert_eq!(errs("expect (@(posedge c) a);"), ["1:1 expect statements are outside the subset (docs/sva/LANGUAGE.md)"]);
         assert_eq!(errs("cover sequence (@(posedge c) a |-> b);"), ["1:30 cover sequence needs a sequence, found a property"]);
         assert_eq!(warns("restrict property (@(posedge c) a);"), ["1:1 restrict property is skipped: it only constrains formal tools"]);
         assert!(parse("restrict property (@(posedge c) a);").assertions.is_empty());
-        assert_eq!(errs("module m; always @(posedge c) begin assert property (a); end endmodule"), ["1:37 assert property inside a procedural block or generate is outside the subset: write it at module level"]);
+        assert_eq!(errs("module m; always @(posedge c) begin assert property (a); end endmodule"), ["1:37 assert property inside a procedural block or generate is outside the subset: write it at module level (docs/sva/LANGUAGE.md)"]);
         assert_eq!(errs("assrt property (@(posedge c) a);"), ["1:1 expected a declaration or an assertion, found 'assrt'"]);
     }
 
@@ -466,8 +478,8 @@ mod files {
     fn clock_errors() {
         assert_eq!(errs("a: assert property (x);"), ["1:1 the assertion has no clock: write @(posedge clk) or declare a default clocking"]);
         assert_eq!(errs("property p; @(posedge k) x; endproperty a: assert property (@(posedge j) p);"), ["1:74 multi-clock: 'p' is clocked by @(posedge k), the assertion by @(posedge j)"]);
-        assert_eq!(errs(&clocked("a").replace("posedge clk", "posedge clk iff en")), ["1:35 @(... iff ...) clock gating is outside the subset"]);
-        assert_eq!(errs(&clocked("a").replace("posedge clk", "posedge clk or negedge r")), ["1:35 clock events with several signals are outside the subset"]);
+        assert_eq!(errs(&clocked("a").replace("posedge clk", "posedge clk iff en")), ["1:35 @(... iff ...) clock gating is outside the subset (docs/sva/LANGUAGE.md)"]);
+        assert_eq!(errs(&clocked("a").replace("posedge clk", "posedge clk or negedge r")), ["1:35 clock events with several signals are outside the subset (docs/sva/LANGUAGE.md)"]);
         assert_eq!(errs("a: assert property (disable iff (r) @(posedge c) a);"), ["1:37 the clock goes before disable iff: @(posedge clk) disable iff (...) ..."]);
         assert_eq!(errs("a: assert property (@(posedge) a);"), ["1:30 expected a clock signal, found ')'"]);
         assert_eq!(errs("module m; default clocking cb; endmodule"), ["1:28 no clocking block 'cb'"]);
@@ -529,10 +541,10 @@ mod files {
         assert_eq!(e("s(x, y) ##1 s(p, z)"), ["3:50 the argument 'a' of 'p' is missing"]);
         assert_eq!(e("x ##1 p(a, b)"), ["3:42 the property 'p' is used where a sequence is needed"]);
         assert_eq!(e("x && s"), ["3:41 the sequence or property 's' is used inside an expression"]);
-        assert_eq!(e("s.triggered"), ["3:36 .triggered is outside the subset"]);
+        assert_eq!(e("s.triggered"), ["3:36 .triggered is outside the subset (docs/sva/LANGUAGE.md)"]);
         assert_eq!(e("p(, y)"), ["1:19 the argument 'a' is empty (in assertion 'a', line 3)"]);
-        assert_eq!(errs(&format!("property r; r; endproperty {}", clocked("r"))), ["1:13 the property 'r' instantiates itself: recursion is outside the subset (in assertion 'a', line 1)"]);
-        assert_eq!(errs(&format!("sequence t; a ##1 t; endsequence {}", clocked("t"))), ["1:19 the sequence 't' instantiates itself: recursion is outside the subset (in assertion 'a', line 1)"]);
+        assert_eq!(errs(&format!("property r; r; endproperty {}", clocked("r"))), ["1:13 the property 'r' instantiates itself: recursion is outside the subset (docs/sva/LANGUAGE.md) (in assertion 'a', line 1)"]);
+        assert_eq!(errs(&format!("sequence t; a ##1 t; endsequence {}", clocked("t"))), ["1:19 the sequence 't' instantiates itself: recursion is outside the subset (docs/sva/LANGUAGE.md) (in assertion 'a', line 1)"]);
         assert_eq!(errs(&format!("property u(x); x |-> b; endproperty {}", clocked("u(a ##1 b |-> c)"))), ["1:16 the argument 'x' is a property, used here as a sequence (in assertion 'a', line 1)"]);
         assert_eq!(errs(&format!("property u(x); x && b; endproperty {}", clocked("u(a ##1 b)"))), ["1:16 the argument 'x' is a sequence or a property, used here in an expression (in assertion 'a', line 1)"]);
     }
@@ -579,7 +591,7 @@ mod files {
         assert_eq!(errs(&format!("{pkg}{}", clocked("x == p::NOPE"))), ["2:41 package 'p' has no constant 'NOPE'"]);
         assert_eq!(errs(&clocked("x == q::A")), ["1:41 unknown package 'q': give its file to sva parse first"]);
         assert_eq!(warns("module m; import q::*; endmodule"), ["1:18 package 'q' is not loaded: its names are read as signals (give its file to sva parse first)"]);
-        assert_eq!(errs("typedef enum {A, B[2]} t;"), ["1:19 enum label ranges (A[3]) are outside the subset"]);
+        assert_eq!(errs("typedef enum {A, B[2]} t;"), ["1:19 enum label ranges (A[3]) are outside the subset (docs/sva/LANGUAGE.md)"]);
     }
 
     #[test]
@@ -688,10 +700,10 @@ mod files {
 
     #[test]
     fn local_variables_and_formals_outside_the_subset() {
-        assert_eq!(errs("property p; int x; @(posedge c) a; endproperty"), ["1:13 local variables in sequences and properties are outside the subset"]);
-        assert_eq!(errs("sequence s(local input int x); a; endsequence"), ["1:12 local and directional formal arguments are outside the subset"]);
-        assert_eq!(errs("property p(event e); a; endproperty"), ["1:12 event formal arguments are outside the subset"]);
-        assert_eq!(errs("property p(a[2]); a; endproperty"), ["1:13 unpacked dimensions of formal arguments are outside the subset"]);
+        assert_eq!(errs("property p; int x; @(posedge c) a; endproperty"), ["1:13 local variables in sequences and properties are outside the subset (docs/sva/LANGUAGE.md)"]);
+        assert_eq!(errs("sequence s(local input int x); a; endsequence"), ["1:12 local and directional formal arguments are outside the subset (docs/sva/LANGUAGE.md)"]);
+        assert_eq!(errs("property p(event e); a; endproperty"), ["1:12 event formal arguments are outside the subset (docs/sva/LANGUAGE.md)"]);
+        assert_eq!(errs("property p(a[2]); a; endproperty"), ["1:13 unpacked dimensions of formal arguments are outside the subset (docs/sva/LANGUAGE.md)"]);
         assert_eq!(errs("sequence s; a |-> b; endsequence"), ["1:13 a sequence declaration needs a sequence, found a property"]);
     }
 
@@ -741,6 +753,46 @@ mod files {
 mod json {
     use super::*;
 
+    fn errors(req: &str) -> Vec<String> {
+        let out: Value = serde_json::from_str(&run_json(req)).unwrap();
+        out["errors"].as_array().map(|e| e.iter().map(|x| x["msg"].as_str().unwrap_or("").to_string()).collect()).unwrap_or_default()
+    }
+    const SRC: &str = "a: assert property (@(posedge c) x); b: assert property (@(negedge c) x);";
+
+    #[test]
+    fn a_misspelt_key_is_an_error() {
+        // the page's requests change with every stage: a key the engine does not know is an error, not a run with defaults
+        let base = format!(r#""files": ["{SRC}"], "assert": ["a"], "trace": {{"signals": {{"c": [0, 1], "x": [1, 1]}}}}"#);
+        assert!(errors(&format!("{{{base}, \"optionz\": {{\"x\": \"false\"}}}}"))[0].contains("unknown field `optionz`"));
+        assert!(errors(&format!("{{{base}, \"options\": {{\"vacuos\": true}}}}"))[0].contains("unknown field `vacuos`"));
+        let t = format!(r#"{{"files": ["{SRC}"], "assert": ["a"], "trace": {{"signals": {{"c": [0, 1], "x": [1, 1]}}, "widht": {{}}}}}}"#);
+        assert!(errors(&t)[0].contains("unknown field `widht`"), "{:?}", errors(&t));
+        let t = format!(r#"{{"files": ["{SRC}"], "trace": {{"signals": {{"c": [0, 1], "x": [1, 1]}}}}, "explain": {{"assert": "a", "from": 0, "to": 1, "too": 2}}}}"#);
+        assert!(errors(&t)[0].contains("unknown field `too`"), "{:?}", errors(&t));
+    }
+
+    #[test]
+    fn meaningless_values_are_errors() {
+        let req = |extra: &str, trace: &str| format!(r#"{{"files": ["{SRC}"], "assert": ["a"], "trace": {{"signals": {{"c": [0, 1, 0], "x": [1, 1, 1]}}{trace}}}{extra}}}"#);
+        assert!(errors(&req(r#", "options": {"max_threads": 0}"#, ""))[0].contains("max_threads: at least 1"));
+        assert!(errors(&req(r#", "options": {"from": 2, "to": 1}"#, ""))[0].contains("options.to (1) is before options.from (2)"));
+        assert!(errors(&req("", r#", "widths": {"x": 0}"#))[0].contains("widths: x: a width is 1 or more"));
+        assert!(errors(&req("", r#", "times": [5, 15]"#))[0].contains("times: 2 for 3 cycles"));
+    }
+
+    #[test]
+    fn one_request_one_clock() {
+        let r = format!(r#"{{"files": ["{SRC}"], "trace": {{"signals": {{"c": [0, 1], "x": [1, 1]}}}}}}"#);
+        assert!(errors(&r)[0].starts_with("one request, one clock: a on @(posedge c), b on another"), "{:?}", errors(&r));
+    }
+
+    #[test]
+    fn cycles_of_the_window() {
+        let r = format!(r#"{{"files": ["{SRC}"], "assert": ["a"], "options": {{"to": 2}}, "trace": {{"times": [5, 15, 25, 35], "signals": {{"c": [1, 1, 1, 1], "x": [1, 1, 1, 1]}}}}}}"#);
+        let out: Value = serde_json::from_str(&run_json(&r)).unwrap();
+        assert_eq!(out["cycles"], serde_json::json!([5, 15]), "{out}");   // to: exclusive, as the attempts
+    }
+
     #[test]
     fn parse_only_request() {
         let out: Value = serde_json::from_str(&run_json(r#"{"source": "a: assert property (@(posedge c) x |=> y);"}"#)).unwrap();
@@ -760,7 +812,6 @@ mod json {
     fn text_is_the_property_with_instances_expanded() {
         let a = one("property p(x, y); x |-> ##[1:2] y; endproperty\na: assert property (@(posedge c) p(req, ack));");
         assert_eq!(a.text, "req |-> ##[1:2] ack");
-        assert_eq!(crate::text(&a), a.text);
     }
 
     #[test]

@@ -1,0 +1,33 @@
+$timescale 1ns $end
+$scope module tb $end
+$var wire 1 ! clk $end
+$scope module dut $end
+$var wire 1 " i_valid $end
+$var wire 1 # o_valid $end
+$var wire 1 $ i_ready $end
+$var wire 8 % data_q [7:0] $end
+$var wire 2 & state [1:0] $end
+$scope module u_fifo $end
+$var wire 1 ' full $end
+$upscope $end
+$upscope $end
+$scope module other $end
+$var wire 2 ( state [1:0] $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+#0
+0!
+0"
+0#
+0$
+b0 %
+b0 &
+0'
+b0 (
+#5
+1!
+#10
+0!
+#15
+1!

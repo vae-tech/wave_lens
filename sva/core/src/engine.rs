@@ -5,320 +5,32 @@
 //! Sequences run as sets of threads: a thread is a residual sequence (what is left to match from the next cycle) and
 //! the path of the booleans it matched. Residual sequences are hash-consed terms, so two threads that reached the same
 //! state are one thread (the first path is kept) and a thread set is bounded by the number of distinct states.
+//!
+//! The files: `results.rs` the inputs and outputs (`Trace`, `Options`, `Results` …), `seq.rs` the terms and one cycle of
+//! a sequence, this one the property states, the paths of the steps and the driver of the attempts.
+//!
+//! Glossary of the short names: `Eng` the evaluator of one assertion, its fields `a` the assertion, `c` the current
+//! cycle, `ar` the term arena, `cols` the sampled columns, `bools` the compiled booleans (`b`: a boolean's number),
+//! `props` the compiled property nodes; `CP` a compiled property node, `PS` the state of a property instance of one
+//! attempt, `CE` a compiled expression, `Tri` a 4-state truth; a term `t` (a residual sequence), a path `p` (the steps
+//! matched, a linked list in `paths`), `END` a term that matched, `DONE` an `and` side that matched, `NIL` no path; `k`
+//! the index of a property node in `props`.
 
 use crate::ast::{Assertion, Bound, Expr, ImpOp, Kind, Prop, PropOp, RepOp, Seq, SeqOp, BinOp};
 use crate::lex::Span;
 use crate::value::{CResult, Compiler, Samples, Tri, CE, V};
 use crate::{Printer, SvaError};
-use serde::ser::SerializeSeq;
-use serde::{Deserialize, Serialize, Serializer};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-// ---------------------------------------------------------------- input
+mod results;
+mod seq;
 
-/// The sampled values of one signal: `v[cycle]` / `x[cycle]` (`x` empty when every value is known). Cycles before the
-/// first read the initial value of the type: x for 4-state signals, 0 for 2-state ones (`bit`, `int`, ...).
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Column {
-    pub width: u32,
-    pub v: Vec<u64>,
-    pub x: Vec<u64>,
-    pub two_state: bool,
-}
-
-impl Column {
-    pub fn new(width: u32, vals: &[V]) -> Column {
-        let x: Vec<u64> = if vals.iter().any(|v| v.x != 0) { vals.iter().map(|v| v.x).collect() } else { Vec::new() };
-        Column { width: width.clamp(1, 64), v: vals.iter().map(|v| v.v).collect(), x, two_state: false }
-    }
-    pub fn known(width: u32, vals: &[u64]) -> Column {
-        Column { width: width.clamp(1, 64), v: vals.to_vec(), x: Vec::new(), two_state: false }
-    }
-    pub fn len(&self) -> usize {
-        self.v.len()
-    }
-    pub fn is_empty(&self) -> bool {
-        self.v.is_empty()
-    }
-    pub fn at(&self, c: i64) -> V {
-        if c < 0 || c as usize >= self.v.len() {
-            return if self.two_state { V::known(0) } else { V::unknown(self.width) };
-        }
-        V::new(self.v[c as usize], self.x.get(c as usize).copied().unwrap_or(0))
-    }
-}
-
-/// Signal values at the sampling points of one clock: `signals[name]` has one value per cycle, `times[cycle]` is the
-/// time of the clock edge (in `unit`, default ps) and goes into the results unchanged.
-#[derive(Clone, Debug, Default)]
-pub struct Trace {
-    pub cycles: usize,
-    pub times: Vec<u64>,
-    pub unit: Option<String>,
-    pub signals: BTreeMap<String, Column>,
-    /// What reading the JSON trace changed, per signal (values cut to 64 bits); the outcomes that read it say so.
-    pub warnings: BTreeMap<String, String>,
-}
-
-impl Trace {
-    pub fn add(&mut self, name: &str, col: Column) {
-        self.cycles = self.cycles.max(col.len());
-        self.signals.insert(name.to_string(), col);
-    }
-}
-
-/// JSON: `{"cycles"?: n, "times"?: [..], "unit"?: "ps", "signals": {"name": [values]}, "widths"?: {"name": w},
-/// "two_state"?: ["name"]}`; a value is a number, `null` (x), or a string of binary digits (`"10x1"`) or of hex
-/// digits after `h` (`"h1f"`).
-impl<'de> Deserialize<'de> for Trace {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Trace, D::Error> {
-        #[derive(Deserialize)]
-        struct Raw {
-            #[serde(default)]
-            cycles: Option<usize>,
-            #[serde(default)]
-            times: Vec<u64>,
-            #[serde(default)]
-            unit: Option<String>,
-            signals: BTreeMap<String, Vec<serde_json::Value>>,
-            #[serde(default)]
-            widths: BTreeMap<String, u32>,
-            #[serde(default)]
-            two_state: Vec<String>,
-        }
-        let r = Raw::deserialize(d)?;
-        let mut t = Trace { cycles: 0, times: r.times, unit: r.unit, signals: BTreeMap::new(), warnings: BTreeMap::new() };
-        for (name, vals) in r.signals {
-            let mut out = Vec::with_capacity(vals.len());
-            let mut w = 1u32;
-            for (k, v) in vals.iter().enumerate() {
-                let (val, vw) = match v {
-                    serde_json::Value::Null => (V::unknown(64), 0),
-                    serde_json::Value::Number(n) => match n.as_u64() {
-                        Some(n) => (V::known(n), (64 - n.leading_zeros()).max(1)),
-                        None => return Err(serde::de::Error::custom(format!("signal {name}, cycle {k}: {n} is not a value"))),
-                    },
-                    serde_json::Value::String(s) => match V::parse(s) {
-                        Some(x) => {
-                            let digits = s.trim().trim_start_matches(['h', 'H']).chars().filter(|c| *c != '_').count();
-                            let bits = if s.trim().starts_with(['h', 'H']) { 4 * digits } else { digits };
-                            if bits > 64 {
-                                t.warnings.insert(name.clone(), format!("{name}: values wider than 64 bits keep their low 64 bits (cycle {k})"));
-                            }
-                            x
-                        }
-                        None => return Err(serde::de::Error::custom(format!("signal {name}, cycle {k}: '{s}' is not a value"))),
-                    },
-                    other => return Err(serde::de::Error::custom(format!("signal {name}, cycle {k}: {other} is not a value"))),
-                };
-                w = w.max(vw);
-                out.push((val, vw));
-            }
-            let w = r.widths.get(&name).copied().unwrap_or(w).clamp(1, 64);
-            let m = crate::value::mask(w);
-            // a value written with fewer digits than the width: an unknown top digit fills the rest (like 'hx)
-            let fit = |(v, vw): &(V, u32)| {
-                let fill = if *vw == 0 || (*vw < w && v.x >> (vw - 1) & 1 == 1) { m & !crate::value::mask(*vw) } else { 0 };
-                V::new(v.v & m, (v.x | fill) & m)
-            };
-            let mut col = Column::new(w, &out.iter().map(fit).collect::<Vec<_>>());
-            col.two_state = r.two_state.contains(&name);
-            t.add(&name, col);
-        }
-        t.cycles = r.cycles.unwrap_or(t.cycles);
-        Ok(t)
-    }
-}
-
-/// What an unknown boolean does: `fail` the attempt (with a note naming it), or read as `false` (IEEE 1800-2017).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum XMode {
-    #[default]
-    Fail,
-    False,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(default)]
-pub struct Options {
-    /// List vacuous attempts too (debugging; they are always counted).
-    pub vacuous: bool,
-    /// The per-cycle lane string of every assertion.
-    pub lane: bool,
-    pub x: XMode,
-    /// Threads of one sequence of one attempt; more are dropped and the results say so.
-    pub max_threads: usize,
-    /// Matches of a cover listed with their traces (all are counted).
-    pub cover_traces: usize,
-    /// Attempts start at cycles `from .. to`; the evaluation ends at `to` (the end of the trace when absent).
-    pub from: usize,
-    pub to: Option<usize>,
-    /// Attempts in the same state are stepped once (default); false steps each one (for tests).
-    pub merge: bool,
-}
-
-impl Default for Options {
-    fn default() -> Self {
-        Options { vacuous: false, lane: true, x: XMode::Fail, max_threads: 256, cover_traces: 100, from: 0, to: None, merge: true }
-    }
-}
-
-// ---------------------------------------------------------------- output
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Status {
-    Pass,
-    Fail,
-    Vacuous,
-    Active,
-    Disabled,
-    /// The thread limit dropped threads of this attempt: its result is not known.
-    Capped,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
-pub struct Stats {
-    pub attempts: usize,
-    pub pass: usize,
-    pub fail: usize,
-    pub vacuous: usize,
-    pub disabled: usize,
-    pub active: usize,
-    pub capped: usize,
-    /// Covers: every match (a `cover sequence` can match several times in one attempt).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub matches: Option<usize>,
-}
-
-/// `[id, cycle]`, or `[id, cycle, value]` when the step compares a bus (the value of its left side).
-#[derive(Clone, Debug, PartialEq)]
-pub struct TraceStep {
-    pub id: String,
-    pub cycle: usize,
-    pub value: Option<serde_json::Value>,
-}
-
-impl Serialize for TraceStep {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        let mut q = s.serialize_seq(Some(2 + self.value.is_some() as usize))?;
-        q.serialize_element(&self.id)?;
-        q.serialize_element(&self.cycle)?;
-        if let Some(v) = &self.value {
-            q.serialize_element(v)?;
-        }
-        q.end()
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct Attempt {
-    pub start: usize,
-    pub end: usize,
-    pub result: Status,
-    pub trace: Vec<TraceStep>,
-    /// The trace keeps the first and the last steps of a long attempt; the ones between were dropped.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub truncated: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub failed_at: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub note: Option<String>,
-    /// Why it failed (or has no verdict), for grouping: `note` says the same in words.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reason: Option<Reason>,
-    /// Implications (the assertion's top property): the cycles at which the antecedent matched (of more than 64, the
-    /// first 32 and the latest 32: the latency takes the latest before the consequent).
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub ante_end: Vec<usize>,
-    /// `ante_end` left matches out between its first and its latest ones.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub ante_truncated: bool,
-}
+pub use results::*;
+use seq::*;
 
 /// The mark of the matches left out of an `ante_end` list while it is kept (never in the results).
 const CUT: usize = usize::MAX;
 
-/// `kind`: `no_match` (no thread of a sequence left), `expected` (a boolean that had to hold did not), `range` (not
-/// within a delay or `eventually` range), `unknown` (an x was read), `not_held` (the property under `not` held),
-/// `strong_end` (a strong operator at the end of the dump), `capped` (the thread limit: no verdict). `step`: the element
-/// it is about, `cycle`: where.
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct Reason {
-    pub kind: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub step: Option<String>,
-    pub cycle: usize,
-}
-
-/// A sequence element: `role` is `ante` / `cons` (the antecedent / consequent of implication `group`, counted from 0 in
-/// source order), `cond` (the condition of a `throughout`) or `seq` (a sequence property, a cover).
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct StepInfo {
-    pub id: String,
-    pub label: String,
-    pub role: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub group: Option<u32>,
-}
-
-/// The results of one assertion. `file`, `scope`, `signals` (name -> path in the dump) and, for an assertion on
-/// another clock than the document's, `clock` and `cycles` are filled in by the caller that knows the dump.
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct Outcome {
-    pub name: String,
-    pub kind: Kind,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub file: Option<String>,
-    pub line: usize,
-    pub text: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub scope: Option<String>,
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    pub signals: BTreeMap<String, String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub clock: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cycles: Option<Vec<u64>>,
-    pub steps: Vec<StepInfo>,
-    pub stats: Stats,
-    pub attempts: Vec<Attempt>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub lane: Option<String>,
-    /// Signals the trace does not have: the assertion was not evaluated.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub missing: Vec<String>,
-    /// Limits that were hit (thread caps).
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub notes: Vec<String>,
-}
-
-impl Outcome {
-    /// The first failing attempt.
-    pub fn first_fail(&self) -> Option<&Attempt> {
-        self.attempts.iter().find(|a| a.result == Status::Fail)
-    }
-}
-
-/// One evaluation: `cycles[k]` is the time of cycle k of `clock`; `unit` is the unit of the times.
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct Results {
-    pub clock: String,
-    pub unit: String,
-    pub cycles: Vec<u64>,
-    pub assertions: Vec<Outcome>,
-}
-
-// ---------------------------------------------------------------- sequence terms
-
-const INF: u32 = u32::MAX;
-/// A step output: the term matched at this cycle.
-const END: u32 = u32::MAX;
-/// A side of `and` that has matched.
-const DONE: u32 = u32::MAX - 1;
-const EMPTY: u32 = 0;
-const ANY: u32 = 1;
 /// A path with no steps.
 const NIL: u32 = u32::MAX;
 /// A boolean that is no element (an `if` condition).
@@ -329,94 +41,6 @@ const TRUNC: u16 = u16::MAX - 1;
 const PATH_MAX: u32 = 96;
 const HEAD: usize = 16;
 const TAIL: usize = 47;
-
-fn dec(n: u32) -> u32 {
-    if n == INF { INF } else { n - 1 }
-}
-fn sat(n: u32) -> u32 {
-    if n == INF { INF } else { n.saturating_sub(1) }
-}
-
-/// A sequence that starts at the cycle it is stepped at.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-enum Term {
-    /// Matches empty only.
-    Empty,
-    /// Matches any one cycle (`1`).
-    Any,
-    Bool(u16),
-    /// `l ##[lo:hi] r`.
-    Cat { l: u32, lo: u32, hi: u32, r: u32 },
-    /// `##[lo:hi] r`: `r` starts `lo` to `hi` cycles from now.
-    Del { lo: u32, hi: u32, r: u32 },
-    Rep { s: u32, lo: u32, hi: u32 },
-    Goto { b: u16, lo: u32, hi: u32 },
-    Non { b: u16, lo: u32, hi: u32 },
-    Or(u32, u32),
-    /// Either side may be [`DONE`].
-    And(u32, u32),
-    Isect(u32, u32),
-    Thr { b: u16, s: u32 },
-    /// The threads of one `first_match` (sorted).
-    First(Vec<u32>),
-}
-
-struct Arena {
-    terms: Vec<Term>,
-    nullable: Vec<bool>,
-    ids: HashMap<Term, u32>,
-}
-
-impl Arena {
-    fn new() -> Arena {
-        let mut a = Arena { terms: Vec::new(), nullable: Vec::new(), ids: HashMap::new() };
-        a.mk(Term::Empty);
-        a.mk(Term::Any);
-        a
-    }
-    fn null(&self, t: u32) -> bool {
-        t == DONE || self.nullable[t as usize]
-    }
-    fn mk(&mut self, t: Term) -> u32 {
-        if let Some(&i) = self.ids.get(&t) {
-            return i;
-        }
-        let n = match &t {
-            Term::Empty => true,
-            Term::Any | Term::Bool(_) => false,
-            Term::Cat { l, lo, hi, r } => self.null(*l) && self.null(*r) && *lo <= 1 && *hi >= 1,
-            Term::Del { lo, r, .. } => *lo == 0 && self.null(*r),
-            Term::Rep { lo, .. } | Term::Goto { lo, .. } | Term::Non { lo, .. } => *lo == 0,
-            Term::Or(a, b) => self.null(*a) || self.null(*b),
-            Term::And(a, b) | Term::Isect(a, b) => self.null(*a) && self.null(*b),
-            Term::Thr { s, .. } => self.null(*s),
-            Term::First(v) => v.iter().any(|x| self.null(*x)),
-        };
-        let i = self.terms.len() as u32;
-        self.terms.push(t.clone());
-        self.nullable.push(n);
-        self.ids.insert(t, i);
-        i
-    }
-    fn cat(&mut self, l: u32, lo: u32, hi: u32, r: u32) -> u32 {
-        if r == EMPTY && lo <= 1 && hi >= 1 {
-            return l; // `l ##1 empty` is `l`
-        }
-        self.mk(Term::Cat { l, lo, hi, r })
-    }
-    fn del(&mut self, lo: u32, hi: u32, r: u32) -> u32 {
-        if lo == 0 && hi == 0 {
-            return r;
-        }
-        self.mk(Term::Del { lo, hi, r })
-    }
-    fn rep(&mut self, s: u32, lo: u32, hi: u32) -> u32 {
-        if hi == 0 { EMPTY } else { self.mk(Term::Rep { s, lo, hi }) }
-    }
-    fn goto(&mut self, b: u16, lo: u32, hi: u32) -> u32 {
-        if hi == 0 { EMPTY } else { self.mk(Term::Goto { b, lo, hi }) }
-    }
-}
 
 // ---------------------------------------------------------------- properties
 
@@ -531,247 +155,7 @@ struct Eng<'a> {
     roles: Vec<Option<(&'static str, Option<u32>)>>,
 }
 
-fn merge_ids(a: &[u16], b: &[u16]) -> Vec<u16> {
-    let mut v = a.to_vec();
-    v.extend(b.iter().filter(|x| !a.contains(x)));
-    v
-}
-
 impl Eng<'_> {
-    fn test(&mut self, b: u16) -> bool {
-        let c = self.c as i64;
-        let slot = &mut self.cache[b as usize];
-        let t = if slot.0 == c {
-            slot.1
-        } else {
-            let t = self.bools[b as usize].e.eval(&self.cols, c).truth();
-            *slot = (c, t);
-            t
-        };
-        match t {
-            Tri::T => true,
-            Tri::F => {
-                self.fails.push(b);
-                false
-            }
-            Tri::X if self.xmode == XMode::False => {
-                self.fails.push(b);
-                false
-            }
-            Tri::X => {
-                self.xs.push(b);
-                false
-            }
-        }
-    }
-
-    fn ids(&self, b: u16) -> Vec<u16> {
-        if self.bools[b as usize].elem == NO_ELEM { Vec::new() } else { vec![b] }
-    }
-
-    // ---- one cycle of a term
-
-    fn step(&mut self, t: u32, out: &mut Out) {
-        let term = self.ar.terms[t as usize].clone();
-        match term {
-            Term::Empty => {}
-            Term::Any => out.push((END, Vec::new())),
-            Term::Bool(b) => {
-                if self.test(b) {
-                    out.push((END, self.ids(b)));
-                }
-            }
-            Term::Del { lo, hi, r } => {
-                if lo == 0 {
-                    self.step(r, out);
-                }
-                if hi >= 1 {
-                    if lo <= 1 && self.ar.null(r) {
-                        out.push((END, Vec::new()));
-                    }
-                    if r != EMPTY {
-                        let d = self.ar.del(sat(lo), dec(hi), r);
-                        out.push((d, Vec::new()));
-                    }
-                }
-            }
-            Term::Cat { l, lo, hi, r } => {
-                let mut tmp = Vec::new();
-                self.step(l, &mut tmp);
-                for (n, ids) in tmp {
-                    if n == END {
-                        self.then(lo, hi, r, ids, out);
-                    } else {
-                        let k = self.ar.cat(n, lo, hi, r);
-                        out.push((k, ids));
-                    }
-                }
-                // an empty match of `l`: `empty ##n r` is `##(n-1) r`
-                if hi >= 1 && self.ar.null(l) {
-                    let d = self.ar.del(lo.max(1) - 1, dec(hi), r);
-                    self.step(d, out);
-                }
-            }
-            Term::Rep { s, lo, hi } => {
-                let rest = self.ar.rep(s, sat(lo), dec(hi));
-                let mut tmp = Vec::new();
-                self.step(s, &mut tmp);
-                for (n, ids) in tmp {
-                    if n == END {
-                        if lo <= 1 {
-                            out.push((END, ids.clone()));
-                        }
-                        if rest != EMPTY {
-                            out.push((rest, ids));
-                        }
-                    } else {
-                        let k = self.ar.cat(n, 1, 1, rest);
-                        out.push((k, ids));
-                    }
-                }
-            }
-            Term::Goto { b, lo, hi } => {
-                if self.test(b) {
-                    let ids = self.ids(b);
-                    if lo <= 1 {
-                        out.push((END, ids.clone()));
-                    }
-                    let g = self.ar.goto(b, sat(lo), dec(hi));
-                    if g != EMPTY {
-                        out.push((g, ids));
-                    }
-                } else {
-                    out.push((t, Vec::new()));
-                }
-            }
-            Term::Non { b, lo, hi } => {
-                if self.test(b) {
-                    if hi >= 1 {
-                        let ids = self.ids(b);
-                        if lo <= 1 {
-                            out.push((END, ids.clone()));
-                        }
-                        let n = self.ar.mk(Term::Non { b, lo: sat(lo), hi: dec(hi) });
-                        out.push((n, ids));
-                    }
-                } else {
-                    if lo == 0 {
-                        out.push((END, Vec::new()));
-                    }
-                    out.push((t, Vec::new()));
-                }
-            }
-            Term::Or(a, b) => {
-                self.step(a, out);
-                self.step(b, out);
-            }
-            Term::And(a, b) => {
-                let sa = self.side(a);
-                let sb = self.side(b);
-                for (na, ia) in &sa {
-                    for (nb, ib) in &sb {
-                        let ids = merge_ids(ia, ib);
-                        if *na == DONE && *nb == DONE {
-                            out.push((END, ids));
-                        } else {
-                            let k = self.ar.mk(Term::And(*na, *nb));
-                            out.push((k, ids));
-                        }
-                    }
-                }
-            }
-            Term::Isect(a, b) => {
-                let (mut sa, mut sb) = (Vec::new(), Vec::new());
-                self.step(a, &mut sa);
-                if sa.is_empty() {
-                    return;
-                }
-                self.step(b, &mut sb);
-                for (na, ia) in &sa {
-                    for (nb, ib) in &sb {
-                        let ids = merge_ids(ia, ib);
-                        match (*na == END, *nb == END) {
-                            (true, true) => out.push((END, ids)),
-                            (false, false) => {
-                                let k = self.ar.mk(Term::Isect(*na, *nb));
-                                out.push((k, ids));
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-            Term::Thr { b, s } => {
-                if !self.test(b) {
-                    return;
-                }
-                let mut tmp = Vec::new();
-                self.step(s, &mut tmp);
-                for (n, ids) in tmp {
-                    let k = if n == END { END } else { self.ar.mk(Term::Thr { b, s: n }) };
-                    out.push((k, ids));
-                }
-            }
-            Term::First(v) => {
-                let mut tmp = Vec::new();
-                for x in v {
-                    self.step(x, &mut tmp);
-                }
-                if let Some(e) = tmp.iter().find(|o| o.0 == END) {
-                    out.push((END, e.1.clone()));
-                    return;
-                }
-                let mut set: Vec<u32> = tmp.iter().map(|o| o.0).collect();
-                set.sort_unstable();
-                set.dedup();
-                if set.len() > self.max_threads {
-                    set.truncate(self.max_threads);
-                    self.capped = true;
-                }
-                if !set.is_empty() {
-                    // the steps of every thread of the first_match: they all lead to its one match
-                    let ids = tmp.iter().fold(Vec::new(), |acc, o| merge_ids(&acc, &o.1));
-                    let k = self.ar.mk(Term::First(set));
-                    out.push((k, ids));
-                }
-            }
-        }
-    }
-
-    /// `l` matched at this cycle (with `ids`): `r` starts `lo` to `hi` cycles later.
-    fn then(&mut self, lo: u32, hi: u32, r: u32, ids: Vec<u16>, out: &mut Out) {
-        if lo == 0 {
-            let mut tmp = Vec::new();
-            self.step(r, &mut tmp);
-            for (n, more) in tmp {
-                out.push((n, merge_ids(&ids, &more)));
-            }
-        }
-        if hi >= 1 {
-            if lo <= 1 && self.ar.null(r) {
-                out.push((END, ids.clone()));
-            }
-            if r != EMPTY {
-                let d = self.ar.del(lo.max(1) - 1, dec(hi), r);
-                out.push((d, ids));
-            }
-        }
-    }
-
-    fn side(&mut self, t: u32) -> Out {
-        if t == DONE {
-            return vec![(DONE, Vec::new())];
-        }
-        let mut o = Vec::new();
-        self.step(t, &mut o);
-        for x in &mut o {
-            if x.0 == END {
-                x.0 = DONE;
-            }
-        }
-        o
-    }
-
     // ---- paths
 
     fn plen(&self, p: u32) -> u32 {
@@ -903,6 +287,38 @@ impl Eng<'_> {
             if let Some(x) = &mut g.x {
                 re(&mut x.2);
             }
+        }
+    }
+
+    /// The terms (the residual sequences): only the ones the compiled properties and the pending threads use are kept
+    /// (every residual ever made stayed before: 500 MB for 40 000 cycles of a wide intersect).
+    fn gc_terms(&mut self, groups: &mut [Group]) {
+        let mut roots = Vec::new();
+        for cp in &self.props {
+            match cp {
+                CP::Seq { s, .. } => roots.push(*s),
+                CP::Imp { ante, .. } => roots.push(*ante),
+                _ => {}
+            }
+        }
+        for g in groups.iter_mut() {
+            visit_terms(&mut g.ps, &mut |t| roots.push(*t));
+        }
+        let map = self.ar.compact(roots.into_iter());
+        let re = |t: &mut u32| {
+            if (*t as usize) < map.len() {
+                *t = map[*t as usize];
+            }
+        };
+        for cp in &mut self.props {
+            match cp {
+                CP::Seq { s, .. } => re(s),
+                CP::Imp { ante, .. } => re(ante),
+                _ => {}
+            }
+        }
+        for g in groups.iter_mut() {
+            visit_terms(&mut g.ps, &mut |t| re(t));
         }
     }
 
@@ -1508,6 +924,27 @@ impl Eng<'_> {
     }
 }
 
+/// The terms a pending instance holds (its threads), for the term arena's collection.
+fn visit_terms(ps: &mut PS, f: &mut dyn FnMut(&mut u32)) {
+    match ps {
+        PS::Seq { th, .. } => th.iter_mut().for_each(|t| f(&mut t.t)),
+        PS::Imp { ante, insts, .. } => {
+            ante.iter_mut().for_each(|t| f(&mut t.t));
+            insts.iter_mut().for_each(|(_, p)| visit_terms(p, f));
+        }
+        PS::Not(i) => visit_terms(i, f),
+        PS::Bin { a, b, .. } => {
+            for x in [a, b] {
+                if let Slot::Run(p) = &mut **x {
+                    visit_terms(p, f);
+                }
+            }
+        }
+        PS::If { .. } | PS::Next { .. } => {}
+        PS::Always { insts, .. } | PS::Event { insts, .. } => insts.iter_mut().for_each(|p| visit_terms(p, f)),
+    }
+}
+
 /// The paths a pending instance holds (threads, waiting consequents, decided sides), for the arena's collection.
 fn visit(ps: &mut PS, f: &mut dyn FnMut(&mut u32)) {
     match ps {
@@ -1571,11 +1008,6 @@ pub(crate) fn value_json(v: V, w: u32) -> serde_json::Value {
     }
 }
 
-/// The property as the results show it: the body of a named property, inline instances.
-pub fn text(a: &Assertion) -> String {
-    a.text.clone()
-}
-
 pub(crate) fn prop_text(mut p: &Prop) -> String {
     while let Prop::Instance { body: Some(b), .. } = p {
         p = b;
@@ -1622,7 +1054,7 @@ pub fn evaluate(a: &Assertion, tr: &Trace, opt: &Options) -> Result<Outcome, Sva
         kind: a.kind,
         file: None,
         line: a.line,
-        text: text(a),
+        text: a.text.clone(),
         scope: None,
         signals: BTreeMap::new(),
         clock: None,
@@ -1688,7 +1120,11 @@ pub fn evaluate(a: &Assertion, tr: &Trace, opt: &Options) -> Result<Outcome, Sva
     let mut cover_hits: Vec<(usize, usize, Steps)> = Vec::new();
     let mut matches = 0usize;
     let mut gc_at = 1usize << 16;
+    let mut term_gc_at = TERM_GC_FLOOR;
     let xnote = |e: &Eng, b: u16, at: usize| Note::new("unknown", format!("{} is unknown (x) at cycle {at}", e.bools[b as usize].text), Some(b));
+    let xpass = |e: &Eng, b: u16, at: usize| {
+        Note::new("unknown", format!("{} is unknown (x) at cycle {at}, read as false: the attempt passed with it", e.bools[b as usize].text), Some(b))
+    };
     let capped_note = |e: &Eng| Note::new("capped", format!("thread limit {} reached: some matches were not followed, the result is not known", e.max_threads), None);
     // the antecedent matches of one attempt of a group: its own, then the group's from `since` on
     let ante = |m: &Member, ps: &PS| {
@@ -1711,7 +1147,9 @@ pub fn evaluate(a: &Assertion, tr: &Trace, opt: &Options) -> Result<Outcome, Sva
                     };
                     r(Status::Capped, c, p, None, Some(capped_note(e)))
                 }
-                (Verdict::Pass { vac: false, end, path }, _) => r(Status::Pass, *end, *path, None, None),
+                // a pass that read an unknown (an x that chose the else branch of an if, an operand of an or …): it
+                // stands, with a note naming the unknown, so a pass decided by an x is not silent
+                (Verdict::Pass { vac: false, end, path }, x) => r(Status::Pass, *end, *path, None, x.map(|(b, at, _)| xpass(e, b, at))),
                 (_, Some((b, at, p))) => r(Status::Fail, c, p, Some(at), Some(xnote(e, b, at))),
                 (Verdict::Pass { end, .. }, None) => r(Status::Vacuous, *end, NIL, None, None),
                 (Verdict::Fail { at, note, path }, None) => r(Status::Fail, *at, *path, Some(*at), Some(note.clone())),
@@ -1802,12 +1240,16 @@ pub fn evaluate(a: &Assertion, tr: &Trace, opt: &Options) -> Result<Outcome, Sva
             e.gc(&mut groups);
             gc_at = (2 * e.paths.len()).max(1 << 16);
         }
+        if e.ar.terms.len() > term_gc_at {
+            e.gc_terms(&mut groups);
+            term_gc_at = (2 * e.ar.terms.len()).max(TERM_GC_FLOOR);
+        }
     }
     let last = end.saturating_sub(1);
     for g in std::mem::take(&mut groups).iter() {
         let p = e.progress(&g.ps);
         let strong = e.strong(&g.ps);
-        if e.strong(&g.ps).is_none() {
+        if strong.is_none() {
             if let Some(v) = e.settled(&g.ps) {
                 rec(&e, g, &v, last, &mut recs);
                 continue;
@@ -1901,14 +1343,34 @@ pub fn evaluate(a: &Assertion, tr: &Trace, opt: &Options) -> Result<Outcome, Sva
 
 /// Evaluate every assertion of `asserts` (or the ones named in `only`) over one trace.
 pub fn evaluate_all(asserts: &[Assertion], tr: &Trace, opt: &Options, only: &[String]) -> Result<Results, Vec<SvaError>> {
-    let mut res = Results { clock: String::new(), unit: tr.unit.clone().unwrap_or_else(|| "ps".into()), cycles: tr.times.clone(), assertions: Vec::new() };
+    // the cycles of the window (as the CLI's): a time after `to` is not one of them
+    let shown = tr.times[..opt.to.unwrap_or(tr.times.len()).min(tr.times.len())].to_vec();
+    let mut res = Results { clock: String::new(), unit: tr.unit.clone().unwrap_or_else(|| "ps".into()), cycles: shown, assertions: Vec::new() };
     let mut errors = Vec::new();
+    let mut bad = |m: String| errors.push(SvaError::new(Span::default(), m));
     for name in only {
         if !asserts.iter().any(|a| &a.label == name) {
-            errors.push(SvaError::new(Span::default(), format!("no assertion '{name}'")));
+            bad(format!("no assertion '{name}'"));
         }
     }
-    for a in asserts.iter().filter(|a| only.is_empty() || only.contains(&a.label)) {
+    if opt.max_threads == 0 {
+        bad("options.max_threads: at least 1".into());
+    }
+    if opt.to.is_some_and(|t| t < opt.from) {
+        bad(format!("options.to ({}) is before options.from ({}): nothing to check", opt.to.unwrap_or(0), opt.from));
+    }
+    let chosen: Vec<&Assertion> = asserts.iter().filter(|a| only.is_empty() || only.contains(&a.label)).collect();
+    // one trace is sampled at the edges of one clock: assertions on another clock need a request of their own
+    if let Some(a0) = chosen.first() {
+        let other: Vec<&str> = chosen.iter().filter(|a| a.clock.signal != a0.clock.signal || a.clock.edge != a0.clock.edge).map(|a| a.label.as_str()).collect();
+        if !other.is_empty() {
+            bad(format!("one request, one clock: {} on @({} {}), {} on another (one request per clock)", a0.label, a0.clock.edge, a0.clock.signal, other.join(", ")));
+        }
+    }
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+    for a in chosen {
         if res.clock.is_empty() {
             res.clock = a.clock.signal.clone();
         }

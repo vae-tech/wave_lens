@@ -20,11 +20,13 @@ const redrawAll = () => VIEWS.forEach(v => { if (v.root.isConnected) v.draw(); e
 // weak reference (a host that leaves the page and is collected takes its model with it)
 const SVGS = new WeakMap(), SVG_HOSTS = new Set();
 const SVG_PLUGINS = [];   // WaveFW.svgPlugin(fn): fn(model, settings, opts) -> [extraRows fn] for every static SVG
-const redrawSvgs = () => SVG_HOSTS.forEach(ref => { const el = ref.deref(), d = el && SVGS.get(el); if (d && el.isConnected) WaveSVG.render(el, d[0], d[1]); else SVG_HOSTS.delete(ref); });
+const redrawSvgs = () => SVG_HOSTS.forEach(ref => { const el = ref.deref(), d = el && SVGS.get(el); if (d && el.isConnected) WaveSVG.render(el, d[0], d[1]);
+  else SVG_HOSTS.delete(ref); });
 // Global settings, e.g. from a config file: { theme, colors, rowHeight, nameWidth, fontSize, traceWidth, sort, sortIgnore, … }.
 // theme/colors go to <html> like setTheme/setColors; the rest becomes the default for every wave (null removes a key).
 function configure(cfg = {}) {
   const { theme, colors, ...rest } = cfg || {}, html = document.documentElement;
+  warnKeys(rest, 'the global settings (wavefw.config.js, WaveFW.configure)');
   for (const [k, v] of Object.entries(rest)) { if (v == null) delete GLOBAL[k]; else GLOBAL[k] = v; }
   for (const [k, name] of Object.entries(STYLE_VAR)) if (k in rest && rest[k] == null) html.style.removeProperty(name);
   for (const [name, v] of styleVars(rest)) html.style.setProperty(name, v);
@@ -88,7 +90,8 @@ if (G.matchMedia) G.matchMedia('(prefers-color-scheme: dark)').addEventListener(
 G.addEventListener('beforeprint', () => VIEWS.forEach(v => { if (v.root.isConnected) v.print(true); }));
 G.addEventListener('afterprint', () => VIEWS.forEach(v => { if (v.printing) v.print(false); }));
 document.addEventListener('keydown', e => {   // Esc with nothing focused (after a click on text): reset the viewer used last
-  if (e.key === 'Escape' && (e.target === document.body || e.target === document.documentElement) && ACTIVE.view && ACTIVE.view.root.isConnected) ACTIVE.view.reset();
+  if (e.key === 'Escape' && (e.target === document.body || e.target === document.documentElement) && ACTIVE.view &&
+    ACTIVE.view.root.isConnected) ACTIVE.view.reset();
 });
 if (G.MutationObserver) {
   new MutationObserver(redrawAll).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class', 'style'] });
@@ -134,7 +137,8 @@ document.addEventListener('pointerover', e => {
   tipAt = el; tipT = setTimeout(() => tipShow(el), 350);
 });
 document.addEventListener('pointerout', e => { if (tipAt && !(e.relatedTarget && tipAt.contains(e.relatedTarget))) tipHide(); });
-document.addEventListener('focusin', e => { const el = e.target.closest && e.target.closest(TIP_SEL); tipHide(); if (el && el.matches(':focus-visible')) { tipAt = el; tipT = setTimeout(() => tipShow(el), 350); } });
+document.addEventListener('focusin', e => { const el = e.target.closest && e.target.closest(TIP_SEL); tipHide();
+  if (el && el.matches(':focus-visible')) { tipAt = el; tipT = setTimeout(() => tipShow(el), 350); } });
 for (const ev of ['pointerdown', 'keydown', 'wheel']) document.addEventListener(ev, e => { if (ev !== 'keydown' || e.key !== 'Tab') tipHide(); }, true);
 G.addEventListener('scroll', tipHide, true);
 const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
@@ -143,9 +147,17 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavefw plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveFW = { version: '1.9.0', rowId: () => ++XID, parse, fromTV, vcdToWave, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme, setColors, configure, plugin, svgPlugin, views: () => [...VIEWS], defaults: DEFAULTS,
+G.WaveFW = { version: '0.9',   // the project's version: VERSION (make check compares them)
+  rowId: () => ++XID, parse, fromTV, vcdToWave, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme, setColors, configure,
+  plugin, svgPlugin, views: () => [...VIEWS], defaults: DEFAULTS,
   paint: { circle, arrowHead, edgeGeom, lastLE },
-  sortRows: (M, dir = 'asc', ignore = [], groupOrder = 'file') => orderRows(parse(M).rows, sortDir(dir), prefixes(ignore), groupOrder), fuzzy, themes: THEMES, colorNames: CVAR, styles: Object.keys(EDGES), radixes: RADIX, enums: ENUMS, decode, fmtTime, fmtExact, parseT,
-  registerTokens, tips, util: { esc, glob, lastLE, lastBefore, circle } };
+  sortRows: (M, dir = 'asc', ignore = [], groupOrder = 'file') => orderRows(parse(M).rows, sortDir(dir), prefixes(ignore), groupOrder), fuzzy, themes: THEMES,
+    colorNames: CVAR, styles: Object.keys(EDGES), radixes: RADIX, enums: ENUMS, decode, fmtTime, fmtExact, parseT,
+  registerTokens, registerDefaults, tips, util: { esc, glob, lastLE, lastBefore, stepTo, isEdge, circle },
+  // unstable: the pure functions for the unit table of tests/smoke.py and peek(view), the fields the tests read; not an API
+  internal: { findRow, parseWant, valueIs, findEdge, edgeGlyph, bitsOf, hexOf, vcdHex, enumColor, analogValue, niceStep, cycMap, parseWave,
+    gfmt, toFloat, fieldRow, stripPfx, trimNum,
+    peek: v => ({ get lay() { return v.lay; }, get oy() { return v.oy; }, get vis() { return v.vis; }, get collapsed() { return v.collapsed; },
+      get rowEls() { return v.rowEls; }, get namesEl() { return v.namesEl; } }) } };
 G.WaveView = WaveView; G.WaveSVG = WaveSVG;
 })(window);

@@ -267,12 +267,6 @@ impl Serialize for Dollar {
 
 impl Bound {
     pub const INF: Bound = Bound::Inf(Dollar);
-    pub fn value(&self) -> Option<u32> {
-        match self {
-            Bound::Const(n) => Some(*n),
-            _ => None,
-        }
-    }
     pub fn is_inf(&self) -> bool {
         matches!(self, Bound::Inf(_))
     }
@@ -291,6 +285,13 @@ impl Range {
     }
     pub fn new(min: u32, max: Option<u32>) -> Range {
         Range { min: Bound::Const(min), max: max.map_or(Bound::INF, Bound::Const) }
+    }
+    /// Constant bounds in order, else an error at `at`.
+    pub fn check(&self, at: crate::lex::Span) -> Result<(), crate::SvaError> {
+        match (&self.min, &self.max) {
+            (Bound::Const(m), Bound::Const(n)) if n < m => Err(crate::SvaError::new(at, format!("the range ends before it starts ({m}:{n})"))),
+            _ => Ok(()),
+        }
     }
 }
 

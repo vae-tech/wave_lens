@@ -1,0 +1,13 @@
+$timescale 1ns $end
+$scope module tb $end
+$var integer 32 ! n $end
+$var parameter 32 " P $end
+$var time 64 # t $end
+$upscope $end
+$enddefinitions $end
+#0
+b101 !
+b1010 "
+b1 #
+#10
+b110 !

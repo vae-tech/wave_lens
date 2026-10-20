@@ -1,4 +1,4 @@
-err_semantic.sv:35:15: error: the property 'p_self' instantiates itself: recursion is outside the subset (in assertion 'e_recursive', line 82)
+err_semantic.sv:35:15: error: the property 'p_self' instantiates itself: recursion is outside the subset (docs/sva/LANGUAGE.md) (in assertion 'e_recursive', line 82)
    35 |         a |-> p_self;
       |               ^^^^^^
 err_semantic.sv:41:30: error: expected an expression, found ';'

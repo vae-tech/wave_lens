@@ -1,31 +1,31 @@
 err_subset.sv:19:51: error: until is outside the subset (docs/sva/LANGUAGE.md)
    19 |     e_until:    assert property (@(posedge clk) a until b);
       |                                                   ^^^^^
-err_subset.sv:22:49: error: the system function $countbits is outside the subset
+err_subset.sv:22:49: error: the system function $countbits is outside the subset (docs/sva/LANGUAGE.md)
    22 |     e_sysfunc:  assert property (@(posedge clk) $countbits(v, 1) == 2);
       |                                                 ^^^^^^^^^^
-err_subset.sv:25:48: error: @(... iff ...) clock gating is outside the subset
+err_subset.sv:25:48: error: @(... iff ...) clock gating is outside the subset (docs/sva/LANGUAGE.md)
    25 |     e_gated:    assert property (@(posedge clk iff en) a);
       |                                                ^^^
-err_subset.sv:28:55: error: a clock inside a property (multi-clock) is outside the subset
+err_subset.sv:28:55: error: a clock inside a property (multi-clock) is outside the subset (docs/sva/LANGUAGE.md)
    28 |     e_mclock:   assert property (@(posedge clk) a ##1 @(posedge clk2) b);
       |                                                       ^
 err_subset.sv:31:55: error: strong(...) is outside the subset (docs/sva/LANGUAGE.md)
    31 |     e_strong:   assert property (@(posedge clk) a |-> strong(b ##1 a));
       |                                                       ^^^^^^
-err_subset.sv:34:55: error: the gating and clock arguments of $past are outside the subset: $past(x [, n])
+err_subset.sv:34:55: error: the gating and clock arguments of $past are outside the subset: $past(x [, n]) (docs/sva/LANGUAGE.md)
    34 |     e_past:     assert property (@(posedge clk) a |-> $past(b, 1, en));
       |                                                       ^^^^^^^^^^^^^^^
-err_subset.sv:37:17: error: immediate assertions (assert (expr)) are outside the subset: use assert property (...)
+err_subset.sv:37:17: error: immediate assertions (assert (expr)) are outside the subset: use assert property (...) (docs/sva/LANGUAGE.md)
    37 |     e_immed:    assert (a || b);
       |                 ^^^^^^
 err_subset.sv:40:49: error: accept_on is outside the subset (docs/sva/LANGUAGE.md)
    40 |     e_accept:   assert property (@(posedge clk) accept_on (en) a |=> b);
       |                                                 ^^^^^^^^^
-err_subset.sv:45:17: error: assert property inside a procedural block or generate is outside the subset: write it at module level
+err_subset.sv:45:17: error: assert property inside a procedural block or generate is outside the subset: write it at module level (docs/sva/LANGUAGE.md)
    45 |         if (en) assert property (a |-> b);
       |                 ^^^^^^
-err_subset.sv:52:5: error: local variables in sequences and properties are outside the subset
+err_subset.sv:52:5: error: local variables in sequences and properties are outside the subset (docs/sva/LANGUAGE.md)
    52 |     int x;
       |     ^^^
 module err_subset ports clk:1 clk2:1 a:1 b:1 en:1 v:4

@@ -98,7 +98,7 @@ pub fn explain(a: &Assertion, tr: &Trace, from: usize, to: usize) -> Result<Vec<
     let cols = columns(tr, &names).map_err(|m| format!("not in the trace: {}", m.join(", ")))?;
     let sig = |n: &str| names.iter().position(|x| *x == n).map(|k| (k, cols.0[k].width));
     let cm = Compiler { sig: &sig };
-    let to = to.min(from + MAX_CYCLES - 1);
+    let to = to.min(from.saturating_add(MAX_CYCLES - 1));
     let mut bools: Vec<(Option<String>, &'static str, &Expr)> = Vec::new();
     prop_bools(&a.prop, &mut bools);
     if let Some(d) = &a.disable {
@@ -258,6 +258,8 @@ mod tests {
         let not_d = &x[1].tree.kids[1];
         assert_eq!((not_d.text.as_str(), &not_d.values, not_d.kids[0].text.as_str()), ("!d", &vec![json!(1), json!(0)], "d"));
         assert_eq!(explain(&a, &trace(&[("a", &[1])]), 0, 0).err().unwrap(), "not in the trace: b, c, d");
+        // a window starting far past the trace: no overflow (debug) and no wrap (release), an empty answer
+        let _ = explain(&a, &t, usize::MAX, usize::MAX);
     }
 
     #[test]

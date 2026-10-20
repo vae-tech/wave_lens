@@ -65,11 +65,17 @@ every view of the config, each as a viewer or a static SVG; scopes become foldab
 
 Edit `show` (false = left out), `radix` (`auto hex dec signed bin oct ascii float`, fixed point `q8` / `sq15`), `color`, `style`
 (`auto wavedrom questa square`), and add `alias`, `fill`, `enum` (`{"0": "IDLE"}`), `enumColors` (`{"IDLE": "#ffe066", "3": "c5"}`)
-or `analog` (`true` or a number of rows: the bus as a step plot), or `fields` (`[{"name": "state", "msb": 15, "lsb": 13, "enum": {…}}, …]`:
+or `analog` (`true` or a number of rows: the bus as a step plot), `height` (the row's own height in px), or `fields` (`[{"name": "state", "msb": 15, "lsb": 13, "enum": {…}}, …]`:
 a packed struct dumped as one vector, a row per field under a `{}` row with the whole value; `mkconfig.py --sv` writes
 them from `typedef struct packed`). A struct scope of the dump (an FST written with Verilator `--trace-structs`) is a
 `{}` group by itself, its row the whole value when every field is shown; `""` takes the global value from
-`"config"`. `width` and `changes` are information. Next to `signals`: `"config"` (page settings, below), `"page"` (title,
+`"config"`. `width` and `changes` are information. A VCD's `real` and `string` variables become rows of texts (their
+numbers, their strings; a real can be `analog`), `event` variables are left out (no value to draw); VHDL's nine values
+are folded into `0 1 x z`.
+
+![The FSM's generated page: the packed struct status as a {} row with its whole value, a row per field under it](img/struct.png)
+
+Next to `signals`: `"config"` (page settings, below), `"page"` (title,
 intro), and `"views"` — named variants, each with its own `signals` (patterns such as `"tb.*_valid"`), `from` / `to`,
 `clock` (one cell per clock) or `exact`, `group`, `marker`, `bookmarks`, `arrows` and `render` (`view`, `svg`, `both`).
 The starting values come from `tools/base.config.json` (`BASE=`): which scope depth starts shown, which paths are hidden,
@@ -117,6 +123,11 @@ Colours, sizes, fonts, line widths, sorting, folding and highlight are *settings
    or `WaveFW.configure({…})` at run time; for a generated page, the top-level `"config"` of the config file
 3. the diagram's `"config"` object in the WaveJSON (a view's `"config"`)
 4. the element: `data-config='{…}'`, `data-sort`, `data-theme`, `data-colors`, …, or the constructor options
+5. the viewer's own: the edge style picked in its bar, kept in this browser for that viewer (picking the style the
+   settings give drops it)
+
+A key that is no setting (a typo: `rowHeigth`) is an error in the tools and a console warning in the page; the plugins
+add theirs (`WaveFW.registerDefaults`).
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -220,7 +231,7 @@ prefixes (`i_valid`, `o_valid` for `valid`) are an error naming both, not a gues
 names to `sva eval --alias`, so the three really agree). **Evaluate** runs it again (in a
 Web Worker when it is long), **Unbind** and **✕** remove things. Loaded files, bindings and small results are kept in this
 browser (**Clear** forgets them); the panel's **JSON** button gives the `"bind"` list for the config. `"sva": false` or
-`mkhtml.py --no-sva` leaves the engine (`sva.js` + `sva.wasm.js`, ~330 kB) out of a page and evaluates nothing. A
+`mkhtml.py --no-sva` leaves the engine (`sva.js` + `sva.wasm.js`, ~410 kB) out of a page and evaluates nothing. A
 loaded file the engine cannot read is an error line in the panel and is not kept; the page's own assertions go on.
 
 **Edit and run again.** Every line of the panel has **✎** and **⟳**, so you can change a check and see it on the waves
@@ -275,6 +286,8 @@ signals with its start and end flags.
 column per cycle of the attempt (at most 64) with the value of every part — 1 green, 0 grey, x red, buses in hex. A
 cell where a step matched is ringed, the one where the attempt failed is red, so the operand that broke it is read off
 directly. A cycle's header puts the cursor there; ✕ or Esc closes it.
+
+![Why of a failed APB attempt: the antecedent matched at cycle 10, PREADY red](img/why.png)
 
 **Expressions** (the **expression** field in the bar). Any expression of the signals, written as in an assertion —
 `PSEL && !PREADY`, `state == pkg::WAIT && timeout`, `addr[7:4] == 4'h3`, `$rose(req)`; `@(posedge PCLK) …` samples it
@@ -346,7 +359,7 @@ ctrl+C and ctrl+F. Hover any button, field or list for what it does and its keys
 | `Tab` / shift+`Tab` | the next / previous edge of the selected signal (as in Questa; ◀ ▶, `]e [e`) | `e` | edge kind (any, rising, falling, **= value**, **X / Z**) |
 | edge kind **= value** | a field: `0x40`, `'h40`, `8'd64`, `64`, `-3`, `'b101` or a text (an enum label: `ACCESS`); Enter / ◀ ▶ / Tab: the next / previous time the selected signal becomes it (none selected: any shown signal) | edge kind **X / Z** | the next / previous x or z (a bus with x / z bits too) of the selected signal or of any shown one: the first X after reset from the reset's edge |
 | shift+`← →` | move the cursor a hundredth of the view | the pointer on a signal | its value there, the change into it and the next one (tooltip) |
-| `/`, ctrl+F | find (the bar scrolled away: the find group floats over the waves; ✕ or Esc puts it back) | `n N`, `*` | next / previous match; find the selected signal's name |
+| `/`, ctrl+F | find (the bar scrolled away: the find group floats over the waves; ✕ or Esc puts it back) | `n N`, `*` `#` | next / previous match; find the selected signal's name and go to its next / previous match |
 | `m` | bookmark at the cursor | `]m [m` | the next / previous bookmark |
 | shift+click the waves | a second cursor (dashed, on an edge): Δ to the cursor in time and in cycles of the clock (the selected signal's, else the nearest `*clk*`) on the axis and in the readout; `x` swaps the two; Esc clears it | `1` … `9` | go to that bookmark (each bookmark's line shows its Δ from the cursor) |
 | `zM` / `zR` | fold / open every module | `zc` / `zo` / `za` | fold / open / toggle the module of the selected signal |
@@ -416,19 +429,27 @@ does the same and opens a menu: **Zoom to the range**, **Bookmarks at its ends**
 on the screen, or of the highlighted rows when there are some, drawn as the viewer shows them (folding, colours,
 bookmarks, cursor) with names and axis, the page's colours put in, so the SVG opens anywhere; **Save as WaveDrom** /
 **Copy WaveDrom** — the same signals over the range as WaveJSON (`<title>.wavedrom.json`): one cell per cycle of their
-clock (a 1-bit `*clk*` among them or in their modules, else the shortest time between changes), buses as `=` with
-their values in the radix shown, a group per module; for the signal under the pointer **Colour**, **Radix** (a bus of the dump:
+clock (a 1-bit `*clk*` among them or in their modules, else the shortest time between changes), each cell the value
+after the cycle's edge — what holds during the cycle, as `vcd2wavedrom.py --clock` writes it (the assertions and the
+bus decoders read the value just before the edge, as a simulator samples: the same data, one cycle apart at a change
+on the edge), buses as `=` with
+their values in the radix shown, a group per module; for the signal under the pointer **Colour** (**Its own colour**: the
+paint taken off), **Radix** (a bus of the dump:
 auto, hex, dec, signed, bin, oct, ascii, float, fixed q / sq with its fraction bits), **Analog** (the bus as a step plot
-three rows high between its smallest and largest value, in its radix: signed, float, fixed; **As a bus** back), **Highlight**, **Hide**, **Fold its module**, **Bookmark here**, **Copy the
-path** (on a module: fold / open, highlight, hide it all); **Fold / Open every module** and **Show the hidden**. On a
+three rows high between its smallest and largest value, in its radix: signed, float, fixed; **As a bus** back), **Highlight**, **Hide**, **Fold its module**, **Bookmark here**,
+**Second cursor here** (and **Clear the second cursor** when there is one), **Copy the path** (on a module: fold / open, highlight, hide it all); **Fold / Open every module** and **Show the hidden**. On a
 highlighted row (ctrl+click, ctrl+shift+click) the colour, the radix and Hide go to every highlighted row, on a row of
 a selected run (shift+click a name, or **alt+drag** a box over time and rows) to every selected one; the picture and
 WaveDrom then take the selected run (else the highlighted rows, else the screen's). Hidden
 rows come back with **Hidden: N ✕** in the bar; the radix and the hidden rows are kept in the browser and in the saved
 state. `"contextMenu": false` leaves the right button to the browser.
 
+![A measured range over two APB transfers and the right button's menu](img/range.png)
+
+![The cursor and a second cursor 80 ns later: Δ in time and in cycles of PCLK on the axis and in the readout](img/cursors.png)
+
 **Bus transactions.** The page finds the bus ports of every module by their signal names — the signals of one port share
-a prefix (`s_axi_awvalid`, `m_axis_tdata`, `wb_cyc_o`; none: `PSEL`), a trailing `_i` / `_o` is ignored — and takes them
+a prefix (`s_axi_awvalid`, `m_axis_tdata`, `wb_cyc_o`; none: `PSEL`), a trailing `_i` / `_o` / `_in` / `_out` is ignored — and takes them
 apart into transfers, sampled at the rising edges of the port's clock (its prefix + `aclk` / `hclk` / `pclk` / `clk`, else
 a clock of the module or above): **AXI4 / AXI4-Lite / AXI3** (a write is AW + its W burst + B, matched by ID; a read AR +
 its R beats to `rlast`; reads answered out of order by ID; SLVERR / DECERR red), **AXI4-Stream** (packets to `tlast`),
@@ -444,6 +465,8 @@ measured, the port's signals highlighted —, `]t` / `[t` go to the next / previ
 `"buses": [{"protocol": "axis", "scope": "tb.dut", "map": {"tvalid": "pix_valid", "tready": "pix_ready", "tdata":
 "pix_data", "tlast": "pix_eol"}}]` (protocols `axi axis apb ahb avmm avst wb obi`; or a `prefix`; `clock`, `name`);
 `"busDetect": false` keeps only those. The static SVG draws the groups with their transfers.
+
+![AXI-Lite: the port found by its names, the first write selected — its range measured, its signals highlighted](img/buses.png)
 
 **Sorting.** **Sort** (`s`) cycles off → A→Z → Z→A; the prefixes in the field next to it (`i_,o_`) are skipped when
 names are compared and drawn dimmed. Groups move as a block and are sorted inside.
@@ -471,9 +494,9 @@ from the dump (the whole hierarchy).
 
 | Example | What it shows | Picture |
 |---|---|---|
-| [`apb`](../examples/apb) | APB3 write, read with two wait states, `PSLVERR` on an unmapped address; enum `phase`; a static-SVG view | [hero](img/hero.png), [light](img/light.png), [svg](img/svg.png) |
-| [`axi_lite`](../examples/axi_lite) | AXI4-Lite write (`AWREADY` a cycle late) and read; channel groups with a colour each, highlight from the config, latency arrows; three module levels in `_all` | [axi](img/axi.png), [hierarchy](img/hierarchy.png) |
-| [`fsm`](../examples/fsm) | UART receiver with `typedef enum` states in a package: names from the FST and, for the VCD, from the sources; questa edges | [fsm](img/fsm.png) |
+| [`apb`](../examples/apb) | APB3 write, read with two wait states, `PSLVERR` on an unmapped address; enum `phase`; a static-SVG view | [hero](img/hero.png), [light](img/light.png), [svg](img/svg.png), [range](img/range.png), [cursors](img/cursors.png), [why](img/why.png) |
+| [`axi_lite`](../examples/axi_lite) | AXI4-Lite write (`AWREADY` a cycle late) and read; channel groups with a colour each, highlight from the config, latency arrows; three module levels in `_all` | [axi](img/axi.png), [hierarchy](img/hierarchy.png), [buses](img/buses.png) |
+| [`fsm`](../examples/fsm) | UART receiver with `typedef enum` states in a package: names from the FST and, for the VCD, from the sources; questa edges | [fsm](img/fsm.png), [struct](img/struct.png) |
 | [`demo`](../examples/demo) | the Manchester transmitter behind [`docs/index.html`](index.html) (`make demo`) | [cursor](img/cursor.png) |
 
 ## Tools
@@ -488,6 +511,17 @@ All tools are `python3 -I tools/<tool>.py --help`; the Makefile calls them for y
 | `svabuild.py` | the `"sva"` / `"bind"` of a config: files parsed, bindings evaluated with the `sva` CLI (used by the two above) | `--waves --sva --bind --out` |
 | `embed.py` | WaveJSON → `data.js` for `file://` pages, or into an HTML placeholder | `--var NAME key=file.json`, `--html --placeholder` |
 | `dumpscan.py`, `wavejson.py` | the built-in dump reader (VCD text, FST via `fst2vcd -e`) and the readable JSON writer | modules |
+| `svaverify.py` | the examples' checkers in Verilator `--assert` against `sva eval` (`make sva-verify`) | `--build`, `--only`, `--keep`, `--sva-bin` |
+| `sva` (the engine's CLI, Rust: `make sva-build`, or `bin/linux-x86_64/sva`) | `sva parse` an assertion file, `sva eval` assertions over a dump, `sva report` results, `sva --waves DUMP --info` a dump's scopes and variables | `sva <command> --help`; eval: `--waves --scope --sva [--assert NAME] [--from --to] [--out] [--json] [--attempts] [--x fail\|false] [--vacuous] [--no-lane] [--resolve up\|scope] [--ignore-prefix] [--alias] [--max-threads] [--report] [--junit] [-D]`; parse: `--json --expand -D` |
+
+`sva eval --attempts` adds a line per attempt under an assertion's summary: its cycles, the time it started, the result
+and its trace (the elements `s1`, `s2` … and the cycle each matched at), a failure's reason after `--`:
+
+```
+apb_demo_no_wait assert 19 attempts: 3 pass, 2 fail, 14 vacuous, 0 active, 0 disabled · first fail at cycle 10 (105 ns): expected PREADY at cycle 10
+  @6..6 (65 ns) Pass [s1@6 s2@6]
+  @10..10 (105 ns) Fail [s1@10]  -- expected PREADY at cycle 10
+```
 
 `vcd2wavedrom.py` has two readers with byte-identical output: the built-in one (default) and wavepeek
 (`--reader wavepeek`, `READER=wavepeek`), which also takes any wavepeek `--on` expression as a marker.

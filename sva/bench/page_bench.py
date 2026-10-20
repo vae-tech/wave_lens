@@ -5,11 +5,20 @@ of make sva-spike) in headless Chromium, evaluate(parsed, tvSampler) over WaveJS
   python3 tools/vcd2wavedrom.py --waves work/test_stream_video.vcd --exact --scope SCOPE --signals a,b,... --out tv.json
   python3 sva/bench/page_bench.py SPIKE.html tv.json checks.sva      (docs/sva/ENGINE.md, Performance)
 """
-import json, pathlib, sys
+import argparse, json, pathlib, sys
 from playwright.sync_api import sync_playwright
 
-spike, tvfile, sva = sys.argv[1:4]
-j = json.load(open(tvfile))
+ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+ap.add_argument('spike', help='the spike page (make sva-spike: BUILD/sva/spike.html)')
+ap.add_argument('tv', help='WaveJSON with exact transitions (vcd2wavedrom.py --exact)')
+ap.add_argument('sva', help='the assertion file')
+a = ap.parse_args()
+spike, tvfile, sva = a.spike, a.tv, a.sva
+for p in (spike, tvfile, sva):
+    if not pathlib.Path(p).is_file():
+        ap.error(f'no such file: {p}')
+with open(tvfile, encoding='utf-8') as f:
+    j = json.load(f)
 items = []
 def walk(a):
     for it in a:
@@ -19,6 +28,9 @@ def walk(a):
             items.append(it)
 walk(j['signal'])
 by_path = {it['path']: it['tv'] for it in items if it.get('path') and it.get('tv')}
+lost = [it['name'] for it in items if not it.get('tv') and it.get('same') not in by_path]
+if lost:   # "same" points at a signal the converter left out of this file
+    sys.exit(f'page_bench: no transitions for {", ".join(lost[:5])} in {tvfile} (convert with --hierarchy so "same" resolves)')
 sigs = {it['name']: {'tv': it.get('tv') or by_path[it['same']], 'width': it.get('width', 1)} for it in items}
 source = pathlib.Path(sva).read_text()
 with sync_playwright() as p:

@@ -20,6 +20,31 @@ use std::process::ExitCode;
 use sva_core::{check_report_input, describe, diagnostic, evaluate, report_html, report_junit, report_markdown, summarize, time_text, Assertion, Column, Kind, Options, Outcome, Results, Trace, Unit, XMode, V};
 use wellen::{simple, Hierarchy, SignalRef, TimeTableIdx, VarRef, VarType};
 
+/// Set when stdout is closed (`sva eval … | head -1`): the rest of the output is dropped, the exit status stays the
+/// evaluation's (println! would panic there).
+static STDOUT_GONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn write_out(args: std::fmt::Arguments, newline: bool) {
+    use std::io::Write;
+    use std::sync::atomic::Ordering::Relaxed;
+    if STDOUT_GONE.load(Relaxed) {
+        return;
+    }
+    let mut o = std::io::stdout().lock();
+    let r = o.write_fmt(args).and_then(|_| if newline { o.write_all(b"\n") } else { Ok(()) });
+    if r.is_err() {
+        STDOUT_GONE.store(true, Relaxed);
+    }
+}
+
+macro_rules! outln {
+    () => { write_out(format_args!(""), true) };
+    ($($t:tt)*) => { write_out(format_args!($($t)*), true) };
+}
+macro_rules! out {
+    ($($t:tt)*) => { write_out(format_args!($($t)*), false) };
+}
+
 const USAGE: &str = "usage: sva parse [--json] [--expand] [-D NAME[=VALUE]] FILE...
        sva eval --waves DUMP [--scope tb.dut] --sva FILE [--sva FILE ...] [FILE ...] [--assert NAME ...]
                 [--from TIME] [--to TIME] [--out results.json] [--json] [--attempts] [--x fail|false] [--vacuous]
@@ -65,6 +90,9 @@ fn time(s: &str) -> Result<u64, String> {
     let k = s.find(|c: char| c.is_ascii_alphabetic()).unwrap_or(s.len());
     let (n, unit) = s.split_at(k);
     let n: f64 = n.trim().parse().map_err(|_| format!("'{s}' is not a time"))?;
+    if !n.is_finite() || n < 0.0 {
+        return Err(format!("'{s}': a time is a number of 0 or more"));
+    }
     let f = match unit.trim() {
         "fs" => 1e-3,
         "" | "ps" => 1.0,
@@ -136,6 +164,11 @@ fn args(argv: &[String]) -> Result<Args, String> {
     if a.waves.is_empty() || (a.files.is_empty() && !a.info) {
         return Err(USAGE.into());
     }
+    if let (Some(f), Some(t)) = (a.from, a.to) {
+        if t < f {
+            return Err(format!("--to {} is before --from {}: nothing to check", ns(t), ns(f)));
+        }
+    }
     Ok(a)
 }
 
@@ -148,7 +181,7 @@ fn parse_cmd(args: &[String]) -> ExitCode {
             "--json" => json = true,
             "--expand" => expand = true,
             "-h" | "--help" => {
-                println!("{USAGE}");
+                outln!("{USAGE}");
                 return ExitCode::SUCCESS;
             }
             "-D" => match it.next() {
@@ -187,11 +220,11 @@ fn parse_cmd(args: &[String]) -> ExitCode {
             v.as_object_mut().unwrap().insert("file".into(), f.clone().into());
             out.push(v);
         } else {
-            print!("{}", describe(&p, &src, f, expand));
+            out!("{}", describe(&p, &src, f, expand));
         }
     }
     if json {
-        println!("{}", serde_json::to_string_pretty(&serde_json::json!({ "files": out })).unwrap());
+        outln!("{}", serde_json::to_string_pretty(&serde_json::json!({ "files": out })).unwrap());
     }
     if failed { ExitCode::from(1) } else { ExitCode::SUCCESS }
 }
@@ -203,11 +236,11 @@ fn define(unit: &mut Unit, d: &str) {
 
 fn walk(h: &Hierarchy, s: wellen::ScopeRef, depth: usize) {
     let sc = &h[s];
-    println!("{}{} ({:?})", "  ".repeat(depth), sc.name(h), sc.scope_type());
+    outln!("{}{} ({:?})", "  ".repeat(depth), sc.name(h), sc.scope_type());
     for v in sc.vars(h) {
         let var = &h[v];
         let en = var.enum_type(h).map(|(n, vals)| format!("  enum {n}: {}", vals.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(" ")));
-        println!("{}{} [{}] {:?}{}", "  ".repeat(depth + 1), var.name(h), var.length(h).map_or("?".into(), |l| l.to_string()), var.var_type(), en.unwrap_or_default());
+        outln!("{}{} [{}] {:?}{}", "  ".repeat(depth + 1), var.name(h), var.length(h).map_or("?".into(), |l| l.to_string()), var.var_type(), en.unwrap_or_default());
     }
     for c in sc.scopes(h) {
         walk(h, c, depth + 1);
@@ -308,26 +341,49 @@ fn sample(w: &simple::Waveform, s: SignalRef, edges: &[TimeTableIdx], width: u32
     c
 }
 
-/// The time-table indexes of the edges of a clock (`posedge`: to 1 from 0 / x / z; the first value is no edge).
+/// The level of a clock bit: 0, 1, z, or x for anything else (nine-valued `h` / `l` are 1 / 0).
+fn level(v: wellen::SignalValueRef) -> char {
+    match v.to_bit_string().and_then(|s| s.chars().last()) {
+        Some('1' | 'h' | 'H') => '1',
+        Some('0' | 'l' | 'L') => '0',
+        Some('z' | 'Z') => 'z',
+        _ => 'x',
+    }
+}
+
+/// Is `p` -> `b` an edge of that kind (IEEE 1800-2017 9.4.2: posedge 0->1, 0->x, 0->z, x->1, z->1; negedge the mirror)?
+fn is_edge(p: char, b: char, edge: &str) -> bool {
+    let rise = (p == '0' && b != '0') || (matches!(p, 'x' | 'z') && b == '1');
+    let fall = (p == '1' && b != '1') || (matches!(p, 'x' | 'z') && b == '0');
+    match edge {
+        "posedge" => rise,
+        "negedge" => fall,
+        _ => rise || fall,
+    }
+}
+
+/// The time-table indexes of the edges of a clock: one per time step, its last value against the step before (a glitch
+/// written in one time step, 1 0 1, is no edge; the first value is none).
 fn edges(w: &simple::Waveform, clk: SignalRef, edge: &str) -> Vec<TimeTableIdx> {
     let sig = w.get_signal(clk).unwrap();
     let mut out = Vec::new();
     let mut prev: Option<char> = None;
-    for (ti, v) in sig.iter_changes() {
-        let b = v.to_bit_string().and_then(|s| s.chars().last()).unwrap_or('x');
-        if let Some(p) = prev {
-            let rise = p != '1' && b == '1';
-            let fall = p != '0' && b == '0';
-            if match edge {
-                "posedge" => rise,
-                "negedge" => fall,
-                _ => rise || fall,
-            } {
+    let mut step: Option<(TimeTableIdx, char)> = None;
+    let mut close = |s: Option<(TimeTableIdx, char)>, prev: &mut Option<char>| {
+        if let Some((ti, b)) = s {
+            if prev.is_some_and(|p| is_edge(p, b, edge)) {
                 out.push(ti);
             }
+            *prev = Some(b);
         }
-        prev = Some(b);
+    };
+    for (ti, v) in sig.iter_changes() {
+        if step.is_some_and(|(t, _)| t != ti) {
+            close(step, &mut prev);
+        }
+        step = Some((ti, level(v)));
     }
+    close(step, &mut prev);
     out
 }
 
@@ -354,7 +410,7 @@ fn summary(o: &Outcome, times: &[u64], width: usize) -> String {
 
 fn eval_cmd(a: Args) -> ExitCode {
     let t0 = std::time::Instant::now();
-    if let Err(e) = std::fs::File::open(&a.waves) {   // wellen aborts on a file it cannot open
+    if let Err(e) = std::fs::File::open(&a.waves) {   // a one-line message with the path (wellen's error does not name the file)
         eprintln!("sva: {}: {e}", a.waves);
         return ExitCode::from(2);
     }
@@ -367,7 +423,7 @@ fn eval_cmd(a: Args) -> ExitCode {
     };
     let h = w.hierarchy();
     if a.info {
-        println!("{:?}, timescale {:?}, {} time points", h.file_format(), h.timescale(), w.time_table().len());
+        outln!("{:?}, timescale {:?}, {} time points", h.file_format(), h.timescale(), w.time_table().len());
         for s in h.scopes() {
             walk(h, s, 0);
         }
@@ -413,6 +469,9 @@ fn eval_cmd(a: Args) -> ExitCode {
         return ExitCode::from(2);
     }
     let ps = h.timescale().and_then(|t| t.unit.to_exponent().map(|e| t.factor as f64 * 10f64.powi(e as i32 + 12))).unwrap_or(1.0);
+    if ps < 1.0 {
+        eprintln!("sva: the dump's timescale is finer than 1 ps: the cycles are its edges, their times are rounded to ps in the results");
+    }
     let read_s = t0.elapsed().as_secs_f64();
 
     // resolve the signals; group the assertions by clock
@@ -474,6 +533,14 @@ fn eval_cmd(a: Args) -> ExitCode {
         w.load_signals(&sigs);
         let ed = edges(&w, clk_sig, edge);
         let times: Vec<u64> = ed.iter().map(|&ti| (w.time_table()[ti as usize] as f64 * ps).round() as u64).collect();
+        // nothing to check is not a pass: no edge of the clock, or a window after the last one (exit 2)
+        if ed.is_empty() {
+            eprintln!("sva: {clk_name} has no {edge} in the dump: {} not evaluated", members.iter().map(|&k| asserts[k].0.label.as_str()).collect::<Vec<_>>().join(", "));
+            bad = true;
+        } else if a.from.is_some_and(|f| f > times[times.len() - 1]) {
+            eprintln!("sva: --from {} is after the last {edge} of {clk_name} ({}): nothing to check", ns(a.from.unwrap()), ns(times[times.len() - 1]));
+            bad = true;
+        }
         let mut tr = Trace { cycles: ed.len(), times: times.clone(), unit: Some("ps".into()), ..Default::default() };
         for ((name, _), (sig, (width, two))) in refs.iter().zip(sigs.iter().zip(&info)) {
             tr.signals.insert(name.clone(), sample(&w, *sig, &ed, *width, *two));
@@ -514,15 +581,16 @@ fn eval_cmd(a: Args) -> ExitCode {
     let width = outs.iter().map(|o| o.1.name.len()).max().unwrap_or(0);
     let mut failed = false;
     for (_, o, times) in &outs {
-        failed |= o.kind != Kind::Cover && o.stats.fail > 0 || o.stats.capped > 0;
+        // a failure of an assert / assume, or an attempt without verdict (capped) of any kind, a cover too: exit 1
+        failed |= (o.kind != Kind::Cover && o.stats.fail > 0) || o.stats.capped > 0;
         if !a.json {
-            println!("{}", summary(o, times, width));
+            outln!("{}", summary(o, times, width));
             if a.attempts {
                 for x in &o.attempts {
                     let steps: Vec<String> = x.trace.iter().map(|s| format!("{}@{}", s.id, s.cycle)).collect();
                     let note = x.note.as_ref().map_or(String::new(), |n| format!("  -- {n}"));
                     let t = times.get(x.start).map_or(String::new(), |t| format!(" ({})", ns(*t)));
-                    println!("  @{}..{}{t} {:?} [{}]{note}", x.start, x.end, x.result, steps.join(" "));
+                    outln!("  @{}..{}{t} {:?} [{}]{note}", x.start, x.end, x.result, steps.join(" "));
                 }
             }
         }
@@ -542,7 +610,7 @@ fn eval_cmd(a: Args) -> ExitCode {
     outs.sort_by_key(|o| o.0);
     doc.assertions = outs.into_iter().map(|o| o.1).collect();
     if a.json {
-        println!("{}", serde_json::to_string_pretty(&doc).unwrap());
+        outln!("{}", serde_json::to_string_pretty(&doc).unwrap());
     }
     if let Some(f) = &a.out {
         if let Err(e) = std::fs::write(f, serde_json::to_string(&doc).unwrap()) {
@@ -551,7 +619,7 @@ fn eval_cmd(a: Args) -> ExitCode {
         }
     }
     if a.report.is_some() || a.junit.is_some() {
-        let meta = serde_json::json!({ "title": "Assertions", "dump": a.waves, "scope": a.scope, "tool": format!("sva eval {}", env!("CARGO_PKG_VERSION")), "date": today() });
+        let meta = serde_json::json!({ "title": "Assertions", "dump": a.waves, "scope": a.scope, "tool": format!("sva eval {}", version()), "date": today() });
         let input = serde_json::json!({ "meta": meta, "results": [serde_json::to_value(&doc).unwrap()], "max_failures": a.max_failures });
         let sum = summarize(&input);
         for (f, fmt) in [(&a.report, None), (&a.junit, Some("junit"))] {
@@ -576,6 +644,11 @@ fn eval_cmd(a: Args) -> ExitCode {
 }
 
 /// The date (UTC) as yyyy-mm-dd, for the report's meta.
+/// The project's version (the file VERSION at the top of the repository; the crates keep their own semver).
+fn version() -> &'static str {
+    include_str!("../../../VERSION").trim()
+}
+
 fn today() -> String {
     let d = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |x| x.as_secs() / 86400) as i64;
     // days since 1970-01-01 -> civil date (H. Hinnant)
@@ -604,7 +677,7 @@ fn write_report(sum: &serde_json::Value, f: &str, fmt: Option<&str>) -> std::io:
 }
 fn write_text(text: &str, f: &str) -> std::io::Result<()> {
     if f == "-" {
-        print!("{text}");
+        out!("{text}");
         Ok(())
     } else {
         std::fs::write(f, text)
@@ -625,6 +698,10 @@ fn report_cmd(argv: &[String]) -> ExitCode {
                 }
             },
             "--title" => title = it.next().cloned(),
+            "-h" | "--help" => {
+                outln!("{USAGE}");
+                return ExitCode::SUCCESS;
+            }
             "--max-failures" => match it.next().map(|v| count(v, "--max-failures")) {
                 Some(Ok(n)) => max = Some(n),
                 Some(Err(e)) => {
@@ -648,7 +725,7 @@ fn report_cmd(argv: &[String]) -> ExitCode {
         return ExitCode::from(2);
     }
     let (mut results, mut sources, mut dumps) = (Vec::new(), Vec::new(), Vec::<String>::new());
-    let mut meta = serde_json::json!({ "title": "Assertions", "tool": format!("sva report {}", env!("CARGO_PKG_VERSION")), "date": today() });
+    let mut meta = serde_json::json!({ "title": "Assertions", "tool": format!("sva report {}", version()), "date": today() });
     let mut titled = false;
     for f in &ins {
         let v: serde_json::Value = match std::fs::read_to_string(f).map_err(|e| e.to_string()).and_then(|t| serde_json::from_str(&t).map_err(|e| e.to_string())) {
@@ -715,6 +792,12 @@ fn report_cmd(argv: &[String]) -> ExitCode {
 }
 
 fn main() -> ExitCode {
+    // a panic is a bug of the engine: one line that says so and exit 2 ("nothing checked as asked"), not a core dump
+    std::panic::set_hook(Box::new(|info| eprintln!("sva: internal error, please report it with the input that caused it: {info}")));
+    std::panic::catch_unwind(run).unwrap_or(ExitCode::from(2))
+}
+
+fn run() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let rest = match argv.first().map(String::as_str) {
         Some("parse") => return parse_cmd(&argv[1..]),
@@ -726,7 +809,7 @@ fn main() -> ExitCode {
         Ok(a) => eval_cmd(a),
         Err(e) => {
             if e == USAGE && rest.iter().any(|x| x == "-h" || x == "--help") {
-                println!("{e}");
+                outln!("{e}");
                 return ExitCode::SUCCESS;
             }
             eprintln!("{e}");

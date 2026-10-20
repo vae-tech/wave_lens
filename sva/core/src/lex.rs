@@ -92,6 +92,9 @@ struct Lexer<'a> {
     end: usize,
     line: u32,
     ls: usize,
+    /// The column of the last token (a byte offset and its column), so the next one counts only the characters
+    /// between them: O(the line) once per line, not per token (a generated one-line file).
+    col: std::cell::Cell<(usize, u32)>,
 }
 
 fn ident_char(c: u8) -> bool {
@@ -100,7 +103,13 @@ fn ident_char(c: u8) -> bool {
 
 impl<'a> Lexer<'a> {
     fn span(&self, start: usize, line: u32, ls: usize) -> Span {
-        let col = self.src[ls..start].chars().count() as u32 + 1;
+        let (from, c0) = match self.col.get() {
+            (p, c) if p >= ls && p <= start => (p, c),
+            _ => (ls, 0),
+        };
+        let c = c0 + self.src[from..start].chars().count() as u32;
+        self.col.set((start, c));
+        let col = c + 1;
         Span { line, col, start: start as u32, end: self.i as u32 }
     }
     fn at(&self, k: usize) -> u8 {
@@ -188,6 +197,9 @@ impl<'a> Lexer<'a> {
             // one that would read as a hierarchical name (`\esc.x `) keeps its backslash: a dump names it so (`\bus[0] `
             // stays the select of a bit-blasted vector, as dumps have it)
             let name = &self.src[s..self.i];
+            if name.is_empty() {
+                return Some(Tok::Bad("empty escaped identifier (a \\ must be followed by the name)".into()));
+            }
             return Some(Tok::Id(if name.contains('.') { self.src[s - 1..self.i].into() } else { name.into() }));
         }
         if c == b'$' {
@@ -234,16 +246,24 @@ impl<'a> Lexer<'a> {
                 }
                 b'\n' => break,
                 b'\\' if self.i + 1 < self.end => {
-                    let e = self.b[self.i + 1];
+                    // \n \t \\ \" \ddd (octal, up to three digits); any other character stands for itself. The
+                    // next character may be several bytes long: the walk goes by characters, never into one.
+                    let e = self.src[self.i + 1..self.end].chars().next().unwrap_or('\\');
+                    let oct: String = self.src[self.i + 1..self.end].chars().take(3).take_while(|c| ('0'..='7').contains(c)).collect();
+                    if !oct.is_empty() {
+                        s.push(char::from((u32::from_str_radix(&oct, 8).unwrap_or(0) & 0xff) as u8));
+                        self.i += 1 + oct.len();
+                        continue;
+                    }
                     s.push(match e {
-                        b'n' => '\n',
-                        b't' => '\t',
-                        _ => e as char,
+                        'n' => '\n',
+                        't' => '\t',
+                        _ => e,
                     });
-                    self.i += 2;
+                    self.i += 1 + e.len_utf8();
                 }
                 _ => {
-                    let ch = self.src[self.i..].chars().next().unwrap();
+                    let ch = self.src[self.i..self.end].chars().next().unwrap_or('\u{fffd}');
                     s.push(ch);
                     self.i += ch.len_utf8();
                 }
@@ -262,7 +282,7 @@ impl<'a> Lexer<'a> {
         if name.is_empty() {
             // inside a macro body: `` pastes two tokens, `" ... `" makes a string of the text between them
             let c = if self.i < self.end { self.b[self.i] } else { 0 };
-            self.i = (self.i + 1).min(self.end);
+            self.i = (self.i + self.src[self.i..self.end].chars().next().map_or(1, char::len_utf8)).min(self.end);
             return Some(match c {
                 b'`' => Tok::Sym("``"),
                 b'"' => Tok::Sym("`\""),
@@ -319,7 +339,7 @@ impl<'a> Lexer<'a> {
         while self.i < from {
             self.bump();
         }
-        let mut l = Lexer { src: self.src, b: self.b, i: from, end: to, line: self.line, ls: self.ls };
+        let mut l = Lexer { src: self.src, b: self.b, i: from, end: to, line: self.line, ls: self.ls, col: std::cell::Cell::new((0, 0)) };
         let t = l.run();
         self.i = to;
         self.line = l.line;
@@ -420,9 +440,9 @@ impl<'a> Lexer<'a> {
             let k = j + 1 + (j + 1 < self.end && (self.b[j + 1] | 0x20) == b's') as usize;
             if k < self.end && matches!(self.b[k] | 0x20, b'b' | b'o' | b'd' | b'h') {
                 let width = match dec.parse::<u32>() {
-                    Ok(0) => return self.bad_literal(s, "a literal cannot have size 0"),
+                    Ok(0) => return self.bad_literal("a literal cannot have size 0"),
                     Ok(w) => w,
-                    Err(_) => return self.bad_literal(s, "literal size too large"),
+                    Err(_) => return self.bad_literal("literal size too large"),
                 };
                 self.i = j + 1;
                 return self.based(s, Some(width));
@@ -434,7 +454,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn bad_literal(&mut self, _s: usize, msg: &str) -> Tok {
+    fn bad_literal(&mut self, msg: &str) -> Tok {
         while self.i < self.end && (self.b[self.i].is_ascii_alphanumeric() || b"_'?".contains(&self.b[self.i])) {
             self.i += 1;
         }
@@ -468,11 +488,9 @@ impl<'a> Lexer<'a> {
         }
         let xz = |c: u8| matches!(c | 0x20, b'x' | b'z') || c == b'?';
         let (mut value, mut unknown): (u128, u128) = (0, 0);
-        let mut bits = 0u32;
         if base == 10 {
             if digits.len() == 1 && xz(digits[0]) {
                 unknown = u64::MAX as u128;
-                bits = 64;
             } else {
                 for &d in &digits {
                     if !d.is_ascii_digit() {
@@ -483,9 +501,9 @@ impl<'a> Lexer<'a> {
                         None => return Tok::Bad("literal wider than 64 bits".into()),
                     };
                 }
-                bits = 128 - value.leading_zeros();
             }
         } else {
+            let mut bits = 0u32;   // the significant bits so far: the shifts below stay inside u128
             let bpd = match base {
                 2 => 1,
                 8 => 3,
@@ -524,7 +542,6 @@ impl<'a> Lexer<'a> {
         if value >> 64 != 0 || unknown >> 64 != 0 {
             return Tok::Bad("literal wider than 64 bits".into());
         }
-        let _ = bits;
         Tok::Num(Num { value: value as u64, unknown: unknown as u64, width, signed, base, text })
     }
 
@@ -574,7 +591,7 @@ fn mask128(w: u32) -> u128 {
 
 /// Tokens of `src`, ending with [`Tok::End`].
 pub fn lex(src: &str) -> Vec<Token> {
-    let mut l = Lexer { src, b: src.as_bytes(), i: 0, end: src.len(), line: 1, ls: 0 };
+    let mut l = Lexer { src, b: src.as_bytes(), i: 0, end: src.len(), line: 1, ls: 0, col: std::cell::Cell::new((0, 0)) };
     let mut out = l.run();
     let at = l.span(src.len(), l.line, l.ls);
     out.push(Token { tok: Tok::End, at, depth: 0 });
@@ -724,5 +741,72 @@ mod tests {
         let Tok::Define(d) = &t[0].tok else { panic!() };
         assert_eq!((d.params.is_none(), d.body.len()), (true, 3));
         assert_eq!(bad("`define 3x"), "`define needs a macro name");
+    }
+    #[test]
+    fn non_ascii_never_splits_a_character() {
+        // after a backslash in a string, after a backquote, inside an escaped name, in a macro body and in `"…`": a
+        // token or an error, never a byte index inside a character (a panic: E1, E2 of the first review)
+        assert_eq!(toks("\"x\\é\""), [Tok::Str("xé".into())]);
+        assert_eq!(bad("`é"), "a lone ` (a directive or macro name must follow it)");
+        assert_eq!(toks("\\aé.b c"), [id("\\aé.b"), id("c")]);
+        let t = lex("`define M \"é\\é\" `é\nM");
+        assert!(matches!(t[0].tok, Tok::Define(_)), "{:?}", t[0]);
+        assert_eq!(toks("`\"é`\""), [Tok::Sym("`\""), Tok::Bad("unexpected character 'é'".into()), Tok::Sym("`\"")]);
+        assert_eq!(toks("é"), [Tok::Bad("unexpected character 'é'".into())]);
+    }
+
+    #[test]
+    fn string_escapes() {
+        assert_eq!(toks(r#""\101\"\\\t""#), [Tok::Str("A\"\\\t".into())]);
+        assert_eq!(toks(r#""\0x""#), [Tok::Str("\0x".into())]);
+    }
+
+    #[test]
+    fn empty_escaped_identifier() {
+        assert_eq!(bad("\\ x"), "empty escaped identifier (a \\ must be followed by the name)");
+    }
+
+    #[test]
+    fn columns_on_a_long_line() {
+        // counted from the previous token, not from the start of the line for each one (a generated one-line file)
+        let src = "a ".repeat(5000) + "é b";
+        let t = lex(&src);
+        let last = &t[t.len() - 2];
+        assert_eq!((last.tok.clone(), last.at.line, last.at.col), (id("b"), 1, 10003));
+    }
+
+    #[test]
+    fn crlf_lines() {
+        let t = lex("a\r\nb");
+        assert_eq!((t[1].tok.clone(), t[1].at.line, t[1].at.col), (id("b"), 2, 1));
+    }
+
+    #[test]
+    fn fuzz_utf8_never_panics() {
+        // random strings of 1-64 bytes of keywords, operators, backslashes, quotes, backquotes and multi-byte
+        // characters: the lexer, the preprocessor and the parser give tokens and errors with positions, never a panic
+        let parts = ["assert", "property", "`define", "`", "\\", "\"", "é", "ж", "€", "𝄞", " ", "\n", "(", ")", "##", "[*", "'", "8'h", "x", "//", "/*", "*/", "$rose", "`\"", "``", "\r\n", ";", "module", "endmodule"];
+        let mut seed: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        for _ in 0..20_000 {
+            let mut src = String::new();
+            let n = 1 + next() % 16;
+            for _ in 0..n {
+                src.push_str(parts[(next() % parts.len() as u64) as usize]);
+                if src.len() > 64 {
+                    break;
+                }
+            }
+            let t = lex(&src);
+            for tk in &t {
+                assert!(src.is_char_boundary(tk.at.start as usize) && src.is_char_boundary(tk.at.end as usize), "{src:?}: {tk:?}");
+            }
+            let _ = crate::parse(&src);
+        }
     }
 }

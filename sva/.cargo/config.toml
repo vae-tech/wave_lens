@@ -1,0 +1,5 @@
+# The WebAssembly module's stack (Rust's shadow stack, in the module's linear memory): 1 MB by default, where the
+# parser and the engine overflow before their nesting limit (500 levels, docs/sva/ENGINE.md) and the overflow corrupts
+# memory (the page's tab crashed at 499 parentheses). 8 MB holds 499 levels of every form (make smoke: sva_nesting).
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-arg=-zstack-size=8388608"]

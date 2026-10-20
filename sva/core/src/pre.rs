@@ -20,6 +20,9 @@ pub struct Diag {
 }
 
 const MAX_DEPTH: u16 = 32;
+/// Tokens all the macro uses of a file may expand to: a macro that doubles itself 24 times would make 16 M tokens and
+/// gigabytes before MAX_DEPTH stops it (a page would hang); a real file stays far below.
+const MAX_EXPANDED: usize = 1_000_000;
 
 struct Cond {
     active: bool,
@@ -34,6 +37,7 @@ pub fn preprocess(toks: Vec<Token>, macros: &mut HashMap<String, Macro>, diag: &
     let mut out = Vec::new();
     let mut conds: Vec<Cond> = Vec::new();
     let mut end = None;
+    let mut expanded = 0usize;
     while let Some(t) = input.pop_front() {
         let active = conds.last().is_none_or(|c| c.active);
         let name = |input: &mut VecDeque<Token>, d: &str, diag: &mut Diag| -> Option<String> {
@@ -105,7 +109,7 @@ pub fn preprocess(toks: Vec<Token>, macros: &mut HashMap<String, Macro>, diag: &
                 "begin_keywords" | "unconnected_drive" => {
                     input.pop_front();
                 }
-                _ => expand(&t, d, &mut input, macros, diag),
+                _ => expand(&t, d, &mut input, macros, diag, &mut expanded),
             },
             _ => out.push(t),
         }
@@ -118,7 +122,7 @@ pub fn preprocess(toks: Vec<Token>, macros: &mut HashMap<String, Macro>, diag: &
 }
 
 /// A macro use `t` (`` `name `` or `` `name(args) ``): its expansion goes to the front of `input`, to be scanned again.
-fn expand(t: &Token, name: &str, input: &mut VecDeque<Token>, macros: &HashMap<String, Macro>, diag: &mut Diag) {
+fn expand(t: &Token, name: &str, input: &mut VecDeque<Token>, macros: &HashMap<String, Macro>, diag: &mut Diag, expanded: &mut usize) {
     // the predefined `__FILE__ (the core does not know file names: "") and `__LINE__ (the line of the use)
     let builtin = match name {
         "__FILE__" if !macros.contains_key(name) => Some(Tok::Str(String::new())),
@@ -210,6 +214,16 @@ fn expand(t: &Token, name: &str, input: &mut VecDeque<Token>, macros: &HashMap<S
         }
     }
     let body = paste(body, t.at, diag);
+    *expanded = expanded.saturating_add(body.len());
+    if *expanded > MAX_EXPANDED {
+        if *expanded - body.len() <= MAX_EXPANDED {   // the first use over the budget: one error, the pending expansions dropped
+            diag.errors.push(SvaError::new(t.at, format!("macro expansion too large: more than {MAX_EXPANDED} tokens (`{name})")));
+        }
+        while input.front().is_some_and(|x| x.depth > 0) {
+            input.pop_front();
+        }
+        return;
+    }
     for b in body.into_iter().rev() {
         input.push_front(Token { tok: b.tok, at, depth: t.depth + 1 });
     }
@@ -262,11 +276,29 @@ fn tok_text(t: &Tok) -> String {
         Tok::Id(s) | Tok::Sys(s) => s.clone(),
         Tok::Num(n) => n.text.clone(),
         Tok::Fill(c) => format!("'{c}"),
-        Tok::Str(s) => format!("{s:?}"),
+        Tok::Str(s) => sv_quote(s),
         Tok::Sym(s) => s.to_string(),
         Tok::Directive(d) => format!("`{d}"),
         _ => String::new(),
     }
+}
+
+/// A string as SystemVerilog writes it: quotes, \\ \" \n \t, other control characters as \ooo (Rust's {:?} would
+/// write \u{1} or escape non-ASCII, which SystemVerilog does not read).
+fn sv_quote(s: &str) -> String {
+    let mut out = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\{:03o}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 fn names(params: &[(String, Option<Vec<Token>>)]) -> String {
@@ -387,5 +419,24 @@ mod tests {
         let t = preprocess(lex("`W"), &mut m, &mut d);
         assert_eq!(t[0].tok, Tok::Num(crate::lex::Num { value: 8, unknown: 0, width: None, signed: true, base: 10, text: "8".into() }));
         assert!(d.errors.is_empty());
+    }
+    #[test]
+    fn expansion_budget() {
+        // 24 levels of a macro that doubles: 16 M tokens without a budget (gigabytes, a hung page); one error instead
+        let mut src = String::from("`define L0 a\n");
+        for i in 1..=24 {
+            src += &format!("`define L{i} `L{} + `L{}\n", i - 1, i - 1);
+        }
+        src += "`L24 z";
+        let t0 = std::time::Instant::now();
+        let (t, d) = run(&src);
+        assert!(t0.elapsed().as_secs_f64() < 5.0, "{:?}", t0.elapsed());
+        assert_eq!(d.errors.len(), 1, "{:?}", d.errors);
+        assert!(d.errors[0].msg.starts_with("macro expansion too large: more than 1000000 tokens"), "{}", d.errors[0].msg);
+        assert!(matches!(&t[t.len() - 2].tok, Tok::Id(z) if z == "z"));   // the file goes on after the use
+    }
+    #[test]
+    fn strings_quoted_as_systemverilog() {
+        assert_eq!(sv_quote("a\"b\\c\nd\u{1}é"), r#""a\"b\\c\nd\001é""#);
     }
 }

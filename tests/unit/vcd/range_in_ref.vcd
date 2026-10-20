@@ -1,0 +1,15 @@
+$timescale 1ns $end
+$scope module tb $end
+$var wire 8 ! data[7:0] $end
+$var wire 1 " mem[1] $end
+$var wire 1 # mem[0] $end
+$upscope $end
+$enddefinitions $end
+#0
+b1 !
+0"
+1#
+#10
+b10 !
+1"
+0#

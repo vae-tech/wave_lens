@@ -1,7 +1,7 @@
 //! The tree back to SystemVerilog text, with the fewest parentheses that keep its structure: printing and parsing
 //! again gives the same tree (the round-trip tests rely on it). Element labels and `sva parse` use this text.
-//! [`Printer::full`] parenthesises every compound node (tests of precedence); [`Printer::inline`] prints the bodies of
-//! instances instead of their names.
+//! [`Printer::full`] parenthesises every compound node (tests of precedence); a printer with `inline: true` prints the
+//! bodies of instances instead of their names (the text of the results).
 
 use crate::ast::*;
 use std::fmt;

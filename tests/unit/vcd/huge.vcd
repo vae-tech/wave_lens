@@ -1,0 +1,11 @@
+$timescale 1fs $end
+$scope module tb $end
+$var wire 1 ! s $end
+$upscope $end
+$enddefinitions $end
+#0
+0!
+#9007199254740993
+1!
+#18014398509481985
+0!

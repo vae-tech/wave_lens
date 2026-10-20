@@ -15,7 +15,8 @@ Per-signal entry ("" = the global setting from "config"):
   color  trace / outline / name colour, e.g. "#e03131"   style  auto wavedrom questa square
   also   "alias": "name shown", "fill": "#ffe066" (bus fill), "enum": {"0": "IDLE", "1": "RUN"}
   width and changes (value changes in the dump) are information only. "enum" is filled from the dump (FST enum tables)
-  or from --sv sources, so FSM states show by name.
+  or from --sv sources, so FSM states show by name. A $dumpoff block (every value x) counts as changes; event
+  variables are left out (no value to draw), real and string ones are labelled with their texts.
 
 Base file (--base, default tools/base.config.json beside this script): copied into the new config, except two generator keys
   "select" {"depth": 2, "constants": false, "hide": ["$rootio.*"], "budget": 1500000}  which signals start with
@@ -29,13 +30,17 @@ with the page's rule for names (docs/sva/ENGINE.md *Name resolution*; the "sortI
 gets one line per assertion and instance where all its signals resolve, "show": true when that instance is the only
 one (else false, with the number of candidates in "comment": set "show": true on the ones you want). --update keeps
 the "show" choices.
+
+--update refuses a dump that lost more than half of the config's signals (another design?) unless --force, and points
+"waves" at the dump it read.
 """
-import argparse, collections, json, os, re, shutil, subprocess, sys
+import argparse, json, os, re, sys
 
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)   # -I drops the script dir from sys.path
 import dumpscan, svabuild, vcd2wavedrom  # noqa: E402
+from common import SELECT_KEYS, WaveError, add_reader_args, add_sva_bin_arg, check_config, glob_re, run_main, wavepeek  # noqa: E402
 
 ROOT = os.path.dirname(HERE)
 BASE = os.path.join(HERE, 'base.config.json')
@@ -46,11 +51,10 @@ GENERATOR_KEYS = ('select', 'rules')
 
 
 def die(msg):
-    raise SystemExit('mkconfig: ' + msg)
+    raise WaveError('mkconfig: ' + msg)
 
 
-def pattern(p):
-    return re.compile(''.join('.*' if c == '*' else '.' if c == '?' else re.escape(c) for c in p) + r'\Z')
+pattern = glob_re
 
 
 def width_ok(rule, w):
@@ -191,7 +195,12 @@ def sv_enums(files):
 
 
 # ---------------- catalog ----------------
-def build(sigs, base):
+def build(sigs: list, base: dict) -> dict:
+    """The signals of a dump [{path, width, changes, enum?, fields?}] and a base file -> the catalog {path: entry}:
+    "show" by select (depth, constants, hide, budget), then the rules in order."""
+    bad = set(base.get('select') or {}) - set(SELECT_KEYS)
+    if bad:
+        die(f'"select": unknown key(s) {", ".join(sorted(bad))} (have: {", ".join(SELECT_KEYS)})')
     sel = {'depth': 2, 'constants': False, 'hide': [], 'budget': 1500000, **(base.get('select') or {})}
     hide = [pattern(p) for p in ([sel['hide']] if isinstance(sel['hide'], str) else sel['hide'] or [])]
     depth = lambda p: len(svabuild.split_path(p)) - 2
@@ -228,8 +237,13 @@ def build(sigs, base):
     return cat
 
 
-def merge(old, new):
-    """Keep every edit of an existing catalog; take paths, order, width and changes from the dump."""
+def merge(old: dict, new: dict) -> dict:
+    """Keep every edit of an existing catalog; take paths, order, width and changes from the dump. A per-signal key
+    the converter does not know (a typo) is an error now, not when the page is built."""
+    for p, e in old.items():
+        bad = set(e or {}) - set(vcd2wavedrom.SIG_KEYS)
+        if bad:
+            die(f'{p}: unknown signal setting(s) {", ".join(sorted(bad))} (have: {", ".join(vcd2wavedrom.SIG_KEYS)})')
     out = {}
     for p, e in new.items():
         if p in old:
@@ -319,25 +333,62 @@ def sva_binds(files, sigs, cat, prefixes, exe, old=()):
     return out, n
 
 
+def read_signals(a):
+    """The variables of the dump -> [{path, width, order, changes, enum}] (the built-in reader, or wavepeek)."""
+    info = dumpscan.scan(a.waves)   # VCD text, or FST through fst2vcd: signals, order, change counts, FST enum tables
+    if a.reader == 'wavepeek' or not info:
+        exe = wavepeek(a.wavepeek)
+        if not os.path.exists(exe):
+            die('wavepeek not found (cargo build it, see README.md)' if info else 'cannot read the dump: no fst2vcd for an FST and no wavepeek')
+        sigs = list_signals(exe, a.waves)
+    else:   # the same paths and widths as wavepeek lists them
+        decl = dumpscan.read(a.waves, None)
+        events = [p for p, v in decl.vars.items() if v.kind == 'event']
+        if events:
+            print(f'mkconfig: {len(events)} event variable(s) left out (no value to draw): {", ".join(events[:5])}{" …" if len(events) > 5 else ""}', file=sys.stderr)
+        sigs = [{'path': p, 'width': v.width} for p, v in decl.vars.items() if v.kind != 'event']
+    for i, s in enumerate(sigs):
+        d = info.get(s['path']) or {'order': len(info) + i, 'changes': None, 'enum': None}
+        s.update(order=d['order'], changes=d['changes'], enum=d['enum'])
+    return sigs
+
+
+def apply_sv(files, sigs):
+    """--sv: enum labels and packed-struct fields from the SystemVerilog sources onto the signals of their names."""
+    labels, n = sv_enums(files), 0
+    for s in sigs:
+        leaf = re.sub(r'\[\d+\]$', '', svabuild.split_path(s['path'])[-1])
+        t = labels.get(leaf)
+        if not s['enum'] and t and max(t) < 2 ** s['width']:
+            s['enum'] = t; n += 1
+    print(f'mkconfig: --sv: {len(labels)} enum-typed names, labels for {n} signals', file=sys.stderr)
+    structs, n = sv_structs(files), 0
+    for s in sigs:   # a packed struct dumped as one vector (a VCD; an FST without --trace-structs): its fields
+        fl = structs.get(re.sub(r'\[\d+\]$', '', svabuild.split_path(s['path'])[-1]))
+        if fl and fl[0]['msb'] + 1 == s['width']:
+            s['fields'] = fl; n += 1
+    if structs:
+        print(f'mkconfig: --sv: {len(structs)} struct-typed names, fields for {n} signals', file=sys.stderr)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('waves', help='VCD or FST dump')
     ap.add_argument('--base', help='base settings (default: tools/base.config.json, if present)')
     ap.add_argument('--out', help='config file to write (default: <dump>.config.json next to the dump)')
     ap.add_argument('--update', action='store_true', help='the output exists: sync its signals with the dump, keep all edits')
-    ap.add_argument('--force', action='store_true', help='overwrite an existing output (edits are lost)')
+    ap.add_argument('--force', action='store_true', help='overwrite an existing output (edits are lost); with --update: update even when most signals are gone')
     ap.add_argument('--depth', type=int, help='override select.depth of the base file')
     ap.add_argument('--sv', nargs='+', metavar='FILE', help='SystemVerilog sources: enum labels for signals declared with an enum type (a VCD has none; an FST brings its own), "fields" for a packed struct dumped as one vector')
-    ap.add_argument('--reader', choices=('builtin', 'wavepeek'), default='builtin', help='list the signals with the built-in reader (default) or wavepeek')
-    ap.add_argument('--wavepeek', help='wavepeek executable (default: on PATH or ~/.local/bin)')
+    add_reader_args(ap, 'builtin')
     ap.add_argument('--sva', nargs='+', action='extend', metavar='FILE', help='SystemVerilog assertion files: "sva" and a "bind" line per instance that has every signal of an assertion')
-    ap.add_argument('--sva-bin', help='the sva CLI (default: $WAVEFW_SVA, out/sva-target/release/sva, the prebuilt bin/<os>-x86_64/sva, sva on PATH)')
+    add_sva_bin_arg(ap)
     a = ap.parse_args()
     if not os.path.exists(a.waves):
         die(f'no such dump: {a.waves}')
     out = a.out or re.sub(r'\.(vcd|fst|fsdb)$', '', a.waves, flags=re.I) + '.config.json'
     old = None
-    if os.path.exists(out) and not a.force:
+    if os.path.exists(out) and (a.update or not a.force):   # --update --force: an update past the guard below
         if not a.update:
             die(f'{out} exists: --update keeps your edits and syncs the signals, --force overwrites it')
         old = vcd2wavedrom.load_config(out)
@@ -348,48 +399,32 @@ def main():
         print(f'mkconfig: {OLD_BASE} is deprecated and used instead of {BASE}: move it there', file=sys.stderr)
         base_path = OLD_BASE
     base = vcd2wavedrom.load_config(base_path) if (a.base or os.path.exists(base_path)) else {}
+    check_config(base.get('config'), f'mkconfig: {base_path}: "config"')
     if a.depth is not None:
         base['select'] = {**(base.get('select') or {}), 'depth': a.depth}
 
-    info = dumpscan.scan(a.waves)   # VCD text, or FST through fst2vcd: signals, order, change counts, FST enum tables
-    if a.reader == 'wavepeek' or not info:
-        exe = os.path.expanduser(a.wavepeek or shutil.which('wavepeek') or '~/.local/bin/wavepeek')
-        if not os.path.exists(exe):
-            die('wavepeek not found (cargo build it, see README.md)' if info else 'cannot read the dump: no fst2vcd for an FST and no wavepeek')
-        sigs = list_signals(exe, a.waves)
-    else:   # the same paths and widths as wavepeek lists them
-        decl = dumpscan.read(a.waves, None)
-        sigs = [{'path': p, 'width': v.width} for p, v in decl.vars.items()]
-    for i, s in enumerate(sigs):
-        d = info.get(s['path']) or {'order': len(info) + i, 'changes': None, 'enum': None}
-        s.update(order=d['order'], changes=d['changes'], enum=d['enum'])
+    sigs = read_signals(a)
     if a.sv:
-        labels, n = sv_enums(a.sv), 0
-        for s in sigs:
-            leaf = re.sub(r'\[\d+\]$', '', svabuild.split_path(s['path'])[-1])
-            t = labels.get(leaf)
-            if not s['enum'] and t and max(t) < 2 ** s['width']:
-                s['enum'] = t; n += 1
-        print(f'mkconfig: --sv: {len(labels)} enum-typed names, labels for {n} signals', file=sys.stderr)
-        structs, n = sv_structs(a.sv), 0
-        for s in sigs:   # a packed struct dumped as one vector (a VCD; an FST without --trace-structs): its fields
-            fl = structs.get(re.sub(r'\[\d+\]$', '', svabuild.split_path(s['path'])[-1]))
-            if fl and fl[0]['msb'] + 1 == s['width']:
-                s['fields'] = fl; n += 1
-        if structs:
-            print(f'mkconfig: --sv: {len(structs)} struct-typed names, fields for {n} signals', file=sys.stderr)
+        apply_sv(a.sv, sigs)
     found = sum(1 for s in sigs if s['enum'])
     if found:
         print(f'mkconfig: {found} signals with enum labels (FSM states shown by name)', file=sys.stderr)
     sigs.sort(key=lambda s: s['order'])   # declaration order of the dump (wavepeek lists alphabetically)
     cat = build(sigs, base)
     if old is not None:
+        gone = [p for p in old['signals'] if p not in cat]
+        if len(gone) * 2 > len(old['signals']) and not a.force:
+            die(f'{len(gone)} of the {len(old["signals"])} signals of {out} are not in {a.waves}: another design? '
+                '(--force updates it anyway, keeping the edits of the signals that are still there)')
         cat = merge(old['signals'], cat)
 
     rel = os.path.relpath(os.path.abspath(a.waves), os.path.dirname(os.path.abspath(out)))
     name = os.path.basename(a.waves)
     if old is not None:
         cfg = {**old, 'signals': cat}
+        if cfg.get('waves') != rel:   # the config points at the dump it was updated from
+            print(f'mkconfig: "waves": {cfg.get("waves")} -> {rel}', file=sys.stderr)
+            cfg['waves'] = rel
     else:
         shown = sum(1 for e in cat.values() if e['show'])
         cfg = {'comment': [h.replace('{waves}', a.waves).replace('{n}', str(len(cat))).replace('{shown}', str(shown)) for h in HELP], 'waves': rel}
@@ -420,4 +455,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    run_main(main, 'mkconfig')

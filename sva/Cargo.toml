@@ -14,10 +14,11 @@ rust-version = "1.82"   # Option::is_none_or
 opt-level = "s"
 lto = true
 codegen-units = 1
-panic = "abort"
+panic = "unwind"   # the CLI: an internal error is a message and exit 2 (catch_unwind in main), not a core dump
 strip = true
 
 # the WebAssembly module is inlined into pages: size over speed (make sva-build: --profile wasm)
 [profile.wasm]
 inherits = "release"
 opt-level = "z"
+panic = "abort"

@@ -362,17 +362,13 @@ impl<'u, 's> X<'u, 's> {
     }
 
     fn range(&mut self, r: &Range) -> R<Range> {
-        let (min, max) = (self.bound(&r.min)?, self.bound(&r.max)?);
-        if let (Bound::Const(m), Bound::Const(n)) = (&min, &max) {
-            if n < m {
-                let at = match (&r.max, &r.min) {
-                    (Bound::Expr(e), _) | (_, Bound::Expr(e)) => e.at(),
-                    _ => Span::default(),
-                };
-                return err(at, format!("the range ends before it starts ({m}:{n})"));
-            }
-        }
-        Ok(Range { min, max })
+        let out = Range { min: self.bound(&r.min)?, max: self.bound(&r.max)? };
+        let at = match (&r.max, &r.min) {
+            (Bound::Expr(e), _) | (_, Bound::Expr(e)) => e.at(),
+            _ => Span::default(),
+        };
+        out.check(at)?;
+        Ok(out)
     }
 
     fn opt_range(&mut self, r: &Option<Range>) -> R<Option<Range>> {

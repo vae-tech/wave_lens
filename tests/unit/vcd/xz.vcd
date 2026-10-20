@@ -1,0 +1,13 @@
+$timescale 1ns $end
+$scope module tb $end
+$var wire 8 ! b [7:0] $end
+$upscope $end
+$enddefinitions $end
+#0
+b1x0z1z0x !
+#10
+bz !
+#20
+bx1 !
+#30
+b101 !

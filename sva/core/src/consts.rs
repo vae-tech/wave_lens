@@ -75,7 +75,7 @@ pub fn eval(e: &Expr, lookup: &dyn Fn(&str) -> Option<Result<i64, String>>) -> R
             if *width >= 64 {
                 v
             } else {
-                v & ((1i64 << width) - 1)
+                (v as u64 & ((1u64 << width) - 1)) as i64   // 63'(x): 1 << 63 as i64 would overflow
             }
         }
         Expr::Call { func, args, .. } if func == "$clog2" => {
@@ -152,5 +152,13 @@ mod tests {
         assert_eq!(val("$rose(N)"), Err("$rose is not constant".into()));
         assert_eq!(val("'1"), Err("'1 has no fixed width".into()));
         assert_eq!(val("'0"), Ok(0));
+    }
+    #[test]
+    fn boundaries_do_not_overflow() {
+        assert_eq!(val("63'(-1)"), Ok(i64::MAX));
+        assert_eq!(val("63'(1)"), Ok(1));
+        assert_eq!(val("64'(-1)"), Ok(-1));
+        assert_eq!(val("9223372036854775807 + 1"), Ok(i64::MIN));   // 64-bit arithmetic wraps, as in SystemVerilog
+        assert_eq!(val("1 << 64"), Ok(0));
     }
 }

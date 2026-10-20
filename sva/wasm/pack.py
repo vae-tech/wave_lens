@@ -5,9 +5,15 @@ make sva-build writes wavefw/sva.wasm.js with it; the file is committed, so page
 
   pack.py sva_wasm.wasm wavefw/sva.wasm.js
 """
-import base64, sys, zlib
+import argparse, base64, os, sys, zlib
 
-wasm, out = sys.argv[1:3]
+ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+ap.add_argument('wasm', help='sva_wasm.wasm (make sva-build: BUILD/sva-target/wasm32-unknown-unknown/wasm/)')
+ap.add_argument('out', help='the script to write (wavefw/sva.wasm.js)')
+a = ap.parse_args()
+wasm, out = a.wasm, a.out
+if not os.path.isfile(wasm):
+    ap.error(f'no such file: {wasm} (make sva-build)')
 with open(wasm, 'rb') as f:
     raw = f.read()
 z = zlib.compressobj(9, zlib.DEFLATED, -15, 9)

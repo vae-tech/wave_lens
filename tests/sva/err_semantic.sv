@@ -33,7 +33,7 @@ module err_semantic (
     // instantiates itself: the error names the assertion that expands it
     property p_self;
         a |-> p_self;
-            //^ recursion is outside the subset (in assertion 'e_recursive', line 82)
+            //^ recursion is outside the subset (docs/sva/LANGUAGE.md)
     endproperty
 
     // does not parse: the assertions that use it say so with its line

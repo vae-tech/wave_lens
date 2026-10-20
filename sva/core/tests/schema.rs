@@ -168,6 +168,7 @@ fn results_validate() {
           r_long:   assert property (a |-> e[*1:$] ##1 (c && !c));
           r_open:   assert property (a |-> ##[1:$] (c && !c));
           r_range:  assert property (a |-> eventually [1:2] (c && !c));
+          r_follow: assert property (a ##1 a #-# b);
           c_seq:    cover sequence (a ##1 b);
           c_prop:   cover property (a ##1 b);
           r_miss:   assert property (a |-> nope);
@@ -199,8 +200,8 @@ fn results_validate() {
             fields.extend(a.as_object().unwrap().keys().cloned());
         }
     }
-    let want = ["active", "capped", "disabled", "fail", "pass", "vacuous", "reason capped", "reason expected", "reason not_held", "reason range",
-                "reason strong_end", "reason unknown"];
+    let want = ["active", "capped", "disabled", "fail", "pass", "vacuous", "reason capped", "reason expected", "reason no_match", "reason not_held",
+                "reason range", "reason strong_end", "reason unknown"];
     for w in want {
         assert!(kinds.contains(w), "no {w} in {kinds:?}");
     }

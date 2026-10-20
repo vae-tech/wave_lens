@@ -22,10 +22,18 @@ only). Optional: GTKWave's `fst2vcd` to read FST dumps, [wavepeek](https://githu
 reader, cargo for the assertion engine (`make sva-build`), Python playwright for the tests and the screenshots. `make`
 alone lists the targets; build products go to `BUILD` (default `out/` in the repository, git-ignored).
 
-**Without compiling anything.** A clone works as it is, on Linux and on Windows: the pages and `wavefw/` need no build,
-the tools are Python (standard library), the assertion engine is committed twice — `wavefw/sva.wasm.js` for the pages
-and the `sva` CLI for the tools, `bin/linux-x86_64/sva` (static, any distribution) and `bin/windows-x86_64/sva.exe`;
-`tools/*.py` find it by themselves (`make dist` rebuilds both, see [DEVELOPMENT](docs/DEVELOPMENT.md)). Without `make`:
+**Prerequisites**, by what you do (details in [DEVELOPMENT](docs/DEVELOPMENT.md)): pages and tools — python3 ≥ 3.8
+(standard library) and a browser; the examples — Verilator ≥ 5 (`make examples`), GTKWave's `fst2vcd` for FST dumps,
+optionally wavepeek; the engine — cargo ≥ 1.82 and `rustup target add wasm32-unknown-unknown` (`make sva-build`), musl
+for `make dist-linux`, mingw-w64 for `make dist-windows`; the tests — `pip install playwright` and `python3 -m
+playwright install chromium` (`make smoke`, `make check`), `fonts-ibm-plex` for `make shots`; the SystemVerilog style
+— verible (`make fmt`) and Verilator (`make lint`).
+
+**Without compiling anything.** A clone works as it is: the pages and `wavefw/` need no build, the tools are Python
+(standard library), the assertion engine is committed twice — `wavefw/sva.wasm.js` for the pages and the `sva` CLI for
+the tools, `bin/linux-x86_64/sva` (static, any distribution); `tools/*.py` find it by themselves. On Windows the pages
+and the tools work as they are; the CLI is built there by `make dist-windows` (needs mingw-w64, see
+[DEVELOPMENT](docs/DEVELOPMENT.md)), without it the assertions are evaluated in the page. Without `make`:
 
 ```sh
 python3 tools/mkconfig.py work/my.vcd --out work/my.config.json   # Windows: py tools\mkconfig.py work\my.vcd --out work\my.config.json
@@ -60,6 +68,10 @@ python3 tools/mkhtml.py --config work/my.config.json --out work/my.html --sva ch
 - **Bus transactions**: the ports of AXI4 / AXI4-Lite / AXI3, AXI4-Stream, APB, AHB, Avalon-MM / ST, Wishbone and OBI
   found by their names and drawn as transfers (address to response, bursts, packets, errors) with a row per channel
   where every beat shows its stall ([USAGE § The viewer](docs/USAGE.md#the-viewer)).
+
+![AXI-Lite: the bus port found by its names, the first write selected](docs/img/buses.png)
+
+![A measured range and the right button's menu](docs/img/range.png)
 - **Assertions (SVA)**: bind an assertion to an instance of the waveform and it is evaluated over the dump (in the
   page as WebAssembly, or when the page is built by the Rust CLI); every attempt is a bar under that instance, every
   sequence step a numbered circle — on its own row and, for the selected attempt, on the signals it reads, with
@@ -93,16 +105,17 @@ make sva-eval WAVES=x.fst SVA="pkg.sv checks.sva" SCOPE=tb.dut ARGS="--junit rep
 
 ## Examples
 
-Each directory in [`examples/`](examples) has a testbench, a hand-written config and a README; `make example EX=<ex>`
-builds its VCD, FST and two pages: `<ex>.html` from the config and `<ex>_all.html` from a config that `mkconfig.py` makes
+[`apb`](examples/apb), [`axi_lite`](examples/axi_lite) and [`fsm`](examples/fsm) each have a testbench, a
+hand-written config, assertions and a README; `make example EX=<ex>` (or `make examples`, all three) builds its VCD,
+FST and two pages: `<ex>.html` from the config and `<ex>_all.html` from a config that `mkconfig.py` makes
 from the dump (the whole hierarchy).
 
 | Example | What it shows | Picture |
 |---|---|---|
-| [`apb`](examples/apb) | APB3 write, read with two wait states, `PSLVERR` on an unmapped address; enum `phase`; a static-SVG view | [hero](docs/img/hero.png), [light](docs/img/light.png), [svg](docs/img/svg.png) |
-| [`axi_lite`](examples/axi_lite) | AXI4-Lite write (`AWREADY` a cycle late) and read; channel groups with a colour each, highlight from the config, latency arrows; three module levels in `_all` | [axi](docs/img/axi.png), [hierarchy](docs/img/hierarchy.png) |
-| [`fsm`](examples/fsm) | UART receiver with `typedef enum` states in a package: names from the FST and, for the VCD, from the sources; questa edges | [fsm](docs/img/fsm.png) |
-| [`demo`](examples/demo) | the Manchester transmitter behind [`docs/index.html`](docs/index.html) (`make demo`) | [cursor](docs/img/cursor.png) |
+| [`apb`](examples/apb) | APB3 write, read with two wait states, `PSLVERR` on an unmapped address; enum `phase`; a static-SVG view | [hero](docs/img/hero.png), [light](docs/img/light.png), [svg](docs/img/svg.png), [range](docs/img/range.png), [cursors](docs/img/cursors.png), [why](docs/img/why.png) |
+| [`axi_lite`](examples/axi_lite) | AXI4-Lite write (`AWREADY` a cycle late) and read; channel groups with a colour each, highlight from the config, latency arrows; three module levels in `_all` | [axi](docs/img/axi.png), [hierarchy](docs/img/hierarchy.png), [buses](docs/img/buses.png) |
+| [`fsm`](examples/fsm) | UART receiver with `typedef enum` states in a package: names from the FST and, for the VCD, from the sources; questa edges | [fsm](docs/img/fsm.png), [struct](docs/img/struct.png) |
+| [`demo`](examples/demo) | the Manchester transmitter behind [`docs/index.html`](docs/index.html) (`make demo`; a testbench and a config, no README) | [cursor](docs/img/cursor.png) |
 | [`test_video`](examples/test_video) | a real design: the CoaXPress device's bound checkers (12 modules, 26 assertions) over its stream-video dump (the dump is not in git) | — |
 
 Every example has its assertions (`*.sva`) with one deliberately wrong, so a failure trace shows.
@@ -128,6 +141,11 @@ make shots                  # the screenshots of docs/img (after make examples)
 ```
 
 Layout, tools, measurements and conventions: [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).
+
+## Versions
+
+0.9 — [`CHANGELOG.md`](CHANGELOG.md) lists every version (two numbers; each a tagged merge into `main`, `v0.1` …
+`v0.9`).
 
 ## License
 

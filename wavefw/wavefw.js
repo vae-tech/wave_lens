@@ -11,7 +11,8 @@ const TOK = { fg: '--fg', muted: '--muted', line: '--line', panel: '--panel', pa
   one: '--wave-1', bus: '--wave-bus', x: '--wave-x', xsoft: '--wave-x-soft', z: '--wave-z',
   c3: '--wave-c3', c4: '--wave-c4', c5: '--wave-c5', c6: '--wave-c6', c7: '--wave-c7', c8: '--wave-c8', c9: '--wave-c9',
   band: '--wave-band', cursor2: '--wave-cursor2',
-  hl1: '--wave-hl1', hl2: '--wave-hl2', hl3: '--wave-hl3', hl4: '--wave-hl4', hl5: '--wave-hl5', hl6: '--wave-hl6', hl7: '--accent', hl8: '--wave-hl8',   // hl7: find, hl8: plugins
+  // hl7: find, hl8: plugins
+  hl1: '--wave-hl1', hl2: '--wave-hl2', hl3: '--wave-hl3', hl4: '--wave-hl4', hl5: '--wave-hl5', hl6: '--wave-hl6', hl7: '--accent', hl8: '--wave-hl8',
   paint: '--wave-paint' };   // the find group's Paint colour; plugins add their own (WaveFW.registerTokens)
 // a colour name of the painters: a token, a CSS custom property ("--x", "var(--x)") or a colour as it is
 const registerTokens = map => { for (const [k, v] of Object.entries(map || {})) TOK[k] = v; return Object.assign({}, TOK); };
@@ -33,7 +34,25 @@ function lastBefore(n, at, t, strict = false) {
   return ans;
 }
 const lastLE = (a, t) => lastBefore(a.length, i => a[i].t, t);   // the last transition with time <= t
-const flatText = t => Array.isArray(t) ? t.slice(typeof t[1] === 'object' && !Array.isArray(t[1]) ? 2 : 1).map(flatText).join('') : (t == null ? '' : String(t));
+// the index of the next (dir > 0) or previous item of the sorted times beyond t by more than a rounding step, round
+// the ends; -1: no item. ]m [m, ]t [t, ]f [f and the ƒ expression's ◀ ▶ step by it
+function stepTo(times, t, dir) {
+  const n = times.length, eps = 1e-9 * Math.max(1, Math.abs(t));
+  if (!n) return -1;
+  if (dir > 0) { for (let i = 0; i < n; i++) if (times[i] > t + eps) return i; return 0; }
+  for (let i = n - 1; i >= 0; i--) if (times[i] < t - eps) return i;
+  return n - 1;
+}
+// an edge as IEEE 1800-2017 9.4.2 (and the sva CLI) between two bit levels 0 1 x z: posedge 0->1 0->x 0->z x->1 z->1,
+// negedge the mirror, edge either; prev null: the first value, no edge. The bus decoders and the assertions use it
+function isEdge(edge, prev, b) {
+  if (prev === null) return false;
+  const u = v => v === 'x' || v === 'z', rise = (prev === '0' && b !== '0') || (u(prev) && b === '1'),
+    fall = (prev === '1' && b !== '1') || (u(prev) && b === '0');
+  return edge === 'posedge' ? rise : edge === 'negedge' ? fall : rise || fall;
+}
+const flatText = t => Array.isArray(t) ? t.slice(typeof t[1] === 'object' && !Array.isArray(t[1]) ? 2 : 1).map(flatText).join('') : (t == null ? '' :
+  String(t));
 
 /* ---------------- settings (config file / WaveFW.configure / config in the JSON / data-* / opts) ---------------- */
 // Layers, later wins: DEFAULTS < global (window.WAVEFW_CONFIG, WaveFW.configure) < WaveJSON "config" < element / opts.
@@ -41,7 +60,11 @@ const flatText = t => Array.isArray(t) ? t.slice(typeof t[1] === 'object' && !Ar
 const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight: 24, traceWidth: 1.4, busWidth: 1.2,
   labelSize: 11, fontSize: 11.5, sort: 'none', sortIgnore: [], sortButton: true, hint: true, style: 'auto', radix: 'auto', fold: null,
   highlight: null, dim: 0.3, groupColors: null, arrowLabels: 'lane', laneHeight: 16, maxHeight: null,
-  groupOrder: 'file', moduleShading: true, findHighlight: true, findOpen: true, findCase: false, findWord: false, findRegex: false, cursorSnap: 8, wheel: 'scroll', contextMenu: true, busDetect: true, buses: null, svaOpen: false, enumColors: null, dumpBudget: 3000000 };
+  groupOrder: 'file', moduleShading: true, findHighlight: true, findOpen: true, findCase: false, findWord: false, findRegex: false, cursorSnap: 8,
+    wheel: 'scroll', contextMenu: true, enumColors: null, dumpBudget: 3000000 };
+// a plugin's settings with their defaults (bus.js: busDetect, buses; sva.js: svaOpen, svaShow, svaSignals): in every
+// layer like the framework's own, listed in WaveFW.defaults, known to the warning on unknown keys
+const registerDefaults = map => { Object.assign(DEFAULTS, map || {}); return Object.assign({}, DEFAULTS); };
 const SVG_DEFAULTS = { groupHeight: 20, spaceHeight: 12 };   // the static figure is a little denser
 const GLOBAL = {};
 // settings that live in CSS (so the names column, fonts and static SVG text follow them too); numbers are px
@@ -50,11 +73,23 @@ const prefixes = v => (Array.isArray(v) ? v : String(v ?? '').split(',')).map(s 
 function settings(...layers) {
   const S = Object.assign({}, DEFAULTS);
   for (const l of layers) for (const [k, v] of Object.entries(l || {})) if (v != null && k !== 'theme' && k !== 'colors') S[k] = v;
-  for (const k of ['rowHeight', 'groupHeight', 'spaceHeight', 'headerHeight', 'traceWidth', 'busWidth', 'labelSize', 'fontSize', 'dim', 'laneHeight']) S[k] = num(S[k]) || DEFAULTS[k];
+  for (const k of ['rowHeight', 'groupHeight', 'spaceHeight', 'headerHeight', 'traceWidth', 'busWidth', 'labelSize', 'fontSize', 'dim',
+    'laneHeight']) S[k] = num(S[k]) || DEFAULTS[k];
   S.sort = sortDir(S.sort); S.sortIgnore = prefixes(S.sortIgnore).sort((a, b) => b.length - a.length);
   if (!EDGES[S.style]) S.style = 'auto';
   if (S.groupsFirst && S.groupOrder === 'file') S.groupOrder = 'first';   // older setting
   return S;
+}
+// a setting the framework does not know (a typo in a config file, "rowHeigth"): a warning in the console, once per key;
+// the plugins' keys and WaveDrom's own are known too (the tools refuse such a key: tools/common.py check_config)
+const KNOWN_KEYS = new Set(['theme', 'colors', 'groupsFirst', 'hscale', 'skin']), WARNED = new Set();
+function warnKeys(cfg, where) {
+  const keys = Object.keys(cfg || {});
+  const run = () => { for (const k of keys) if (!(k in DEFAULTS) && !(k in STYLE_VAR) && !KNOWN_KEYS.has(k) && !WARNED.has(k)) {
+    WARNED.add(k); console.warn(`wavefw: ${where}: unknown setting "${k}" (the settings are the keys of wavefw.config.js)`);
+  } };
+  // while the page loads, the plugins' scripts (registerDefaults) may come after this: checked when they are all there
+  if (typeof document !== 'undefined' && document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run, { once: true }); else run();
 }
 const styleVars = cfg => Object.entries(STYLE_VAR).filter(([k]) => cfg && cfg[k] != null && cfg[k] !== '')
   .map(([k, name]) => [name, typeof cfg[k] === 'number' ? cfg[k] + 'px' : String(cfg[k])]);
@@ -214,7 +249,8 @@ function findRow(r, terms, M, o = {}) {
   for (const w of terms) {
     if (o.full) {
       const eq = (a, b) => (o.cs ? a === b : a.toLowerCase() === b.toLowerCase());
-      if (w.includes('.') ? !(eq(full, w) || (full.length > w.length && eq(full.slice(-w.length - 1), '.' + w))) : !(eq(name, w) || (leaf && eq(leaf, w)))) return null;
+      if (w.includes('.') ? !(eq(full, w) || (full.length > w.length && eq(full.slice(-w.length - 1), '.' + w))) : !(eq(name, w) ||
+        (leaf && eq(leaf, w)))) return null;
       score += 10; if (w.includes('.') || eq(name, w)) idx.push(...span(0, name.length));   // the whole name marked
       continue;
     }
@@ -271,7 +307,7 @@ function gfmt(f, p = 7) {
   if (f === 0) return Object.is(f, -0) ? '-0' : '0';
   const e = Math.floor(Math.log10(Math.abs(Number(f.toPrecision(p)))));
   const trim = s => (s.includes('.') ? s.replace(/0+$/, '').replace(/\.$/, '') : s);
-  if (e >= -5 && e < p) return trim(f.toFixed(Math.max(0, p - 1 - e)));
+  if (e >= -4 && e < p) return trim(f.toFixed(Math.max(0, p - 1 - e)));   // C's %g: exponential below 1e-4
   const [m, x] = f.toExponential(p - 1).split('e');
   return trim(m) + 'e' + (x[0] === '-' ? '-' : '+') + x.replace(/^[+-]/, '').padStart(2, '0');
 }
@@ -288,12 +324,13 @@ function decode(sig, v, radix) {
   if (/[xz]/i.test(v)) return v;
   const e = sig.enum || ENUMS[sig.full] || ENUMS[sig.name];
   if (e) { const n = parseInt(v, 16); if (e[n] !== undefined) return e[n]; }
-  const big = () => BigInt('0x' + (v || '0')), w = sig.width || 1;
+  const w = sig.width || 1, big = () => BigInt('0x' + (v || '0')) & ((1n << BigInt(w)) - 1n);   // a value wider than the signal: its low bits
   const r = sig.radix || radix, q = /^(s?)q(\d+)$/.exec(r || '');
-  if (q) {   // fixed point: the value / 2^F, as many decimals as F bits need (at most 12)
+  if (q) {   // fixed point: the value / 2^F exactly (the F decimals of 1/2^F: the fraction times 5^F), trailing zeros left out
     let n = big(); const m = 1n << BigInt(w); if (q[1] && w > 1 && n >= m >> 1n) n -= m;
-    const F = +q[2], d = Math.min(Math.ceil(F * 0.30103), 12), s = (Number(n) / 2 ** F).toFixed(d);
-    return d ? s.replace(/0+$/, '').replace(/\.$/, '') : s;
+    const F = BigInt(q[2]), neg = n < 0n, a = neg ? -n : n, ip = a >> F, fp = a & ((1n << F) - 1n);
+    const frac = fp ? '.' + (fp * 5n ** F).toString().padStart(Number(F), '0').replace(/0+$/, '') : '';
+    return (neg ? '-' : '') + ip + frac;
   }
   switch ({ unsigned: 'dec', sdec: 'signed' }[r] || r) {
     case 'float': { const f = toFloat(big(), w); if (f != null) return gfmt(f, w === 64 ? 15 : w === 16 ? 4 : 7); break; }
@@ -302,14 +339,16 @@ function decode(sig, v, radix) {
     case 'bin': return big().toString(2).padStart(w, '0');
     case 'oct': return '0o' + big().toString(8);
     case 'hex': return '0x' + v.toUpperCase();
-    case 'ascii': return '"' + (v.length % 2 ? '0' + v : v).match(/../g).map(h => parseInt(h, 16)).filter((c, i, a) => c || i === a.length - 1)
+    case 'ascii': if (!v) return '""'; return '"' + (v.length % 2 ? '0' + v : v).match(/../g).map(h => parseInt(h, 16)).filter((c, i, a) => c ||
+      i === a.length - 1)
       .map(c => (c >= 32 && c < 127 ? String.fromCharCode(c) : '.')).join('') + '"';
   }
   if (w <= 6) return String(parseInt(v, 16));
   return '0x' + v.toUpperCase();
 }
 // bus label of transition o with the radix in effect (re-decoded only when the radix changes)
-const vtext = (s, o, radix) => o.raw == null ? o.v : (s.radix || radix || 'auto') === o.rk ? o.vr : (o.rk = s.radix || radix || 'auto', o.vr = decode(s, o.raw, o.rk));
+const vtext = (s, o, radix) => o.raw == null ? o.v : (s.radix || radix || 'auto') === o.rk ? o.vr : (o.rk = s.radix || radix || 'auto',
+  o.vr = decode(s, o.raw, o.rk));
 
 /* ---------------- parser: WaveJSON -> model ---------------- */
 function parseText(txt) {
@@ -356,13 +395,16 @@ function parseWave(s, C) {
 function bitsOf(o, w) {
   if (!o) return 'x'.repeat(w);
   if (o.k !== '=') return (o.k === '0' || o.k === '1' || o.k === 'z' ? o.k : 'x').repeat(w);
-  const v = String(o.v ?? ''), h = String(o.raw ?? (/^0x[0-9a-f_]+$/i.test(v) ? v.slice(2).replace(/_/g, '') : /^\d+$/.test(v) ? BigInt(v).toString(16) : '')).toLowerCase();   // WaveDrom data: 0x.. or a number
+  // WaveDrom data: 0x.. or a number
+  const v = String(o.v ?? ''), h = String(o.raw ?? (/^0x[0-9a-f_]+$/i.test(v) ? v.slice(2).replace(/_/g,
+    '') : /^\d+$/.test(v) ? BigInt(v).toString(16) : '')).toLowerCase();
   if (!/^[0-9a-fxz]+$/.test(h)) return 'x'.repeat(w);
   const b = [...h].map(c => (c === 'x' || c === 'z' ? c.repeat(4) : parseInt(c, 16).toString(2).padStart(4, '0'))).join('');
   return b.length >= w ? b.slice(b.length - w) : b.padStart(w, b[0] === 'x' || b[0] === 'z' ? b[0] : '0');
 }
 const hexOf = bits => { const p = bits.padStart(Math.ceil(bits.length / 4) * 4, '0'); let out = '';
-  for (let i = 0; i < p.length; i += 4) { const n = p.slice(i, i + 4); out += /x/.test(n) ? 'x' : /z/.test(n) ? (n === 'zzzz' ? 'z' : 'x') : parseInt(n, 2).toString(16); }
+  for (let i = 0; i < p.length; i += 4) { const n = p.slice(i, i + 4); out += /x/.test(n) ? 'x' : /z/.test(n) ? (n === 'zzzz' ? 'z' : 'x') : parseInt(n,
+    2).toString(16); }
   return out; };
 // a struct's whole value: its parts' bits put together (the first part the MSB) at every change of any of them
 function joinBits(g, parts) {
@@ -379,24 +421,32 @@ function joinBits(g, parts) {
 }
 // a field [msb:lsb] of a packed vector as a row of its own (its name under the vector's, its radix, its labels)
 function fieldRow(sig, f, depth, anc) {
-  const msb = num(f.msb), lsb = num(f.lsb ?? f.msb); if (!f || !f.name || !isFinite(msb) || !isFinite(lsb) || msb < lsb) return null;
-  const w = msb - lsb + 1, r = { type: 'sig', name: String(f.name), depth, anc, width: w, enum: f.enum, radix: f.radix, path: null, src: f, full: sig.full + '.' + f.name, field: [msb, lsb], tr: [], gaps: [] };
+  const msb = num(f && f.msb), lsb = num(f && (f.lsb ?? f.msb)); if (!f || !f.name || !isFinite(msb) || !isFinite(lsb)) return null;
+  if (msb < lsb || lsb < 0 || msb >= (sig.width || 1)) {   // outside the vector: said, and left out (it would read past it: NaN)
+    console.warn(`wavefw: ${sig.full}: field ${f.name} [${msb}:${lsb}] is not inside the ${sig.width || 1}-bit vector (msb first, lsb 0): left out`);
+    return null;
+  }
+  const w = msb - lsb + 1, r = { type: 'sig', name: String(f.name), depth, anc, width: w, enum: f.enum, radix: f.radix, path: null, src: f,
+    full: sig.full + '.' + f.name, field: [msb, lsb], tr: [], gaps: [] };
   for (const o of sig.tr) {
     const b = bitsOf(o, sig.width), fb = b.slice(b.length - 1 - msb, b.length - lsb);
     const n = w === 1 ? { k: /^[01z]$/.test(fb) ? fb : 'x' } : /^x+$/.test(fb) ? { k: 'x' } : /^z+$/.test(fb) ? { k: 'z' } : { k: '=', raw: hexOf(fb) };
-    if (n.k === '=') { n.v = decode(r, n.raw); n.bad = /[xz]/.test(n.raw); const e = r.enum || ENUMS[r.full] || ENUMS[r.name], k = parseInt(n.raw, 16); n.c = e && !isNaN(k) ? 3 + (k % 7) : 2; }
+    if (n.k === '=') { n.v = decode(r, n.raw); n.bad = /[xz]/.test(n.raw); const e = r.enum || ENUMS[r.full] || ENUMS[r.name], k = parseInt(n.raw, 16);
+      n.c = e && !isNaN(k) ? 3 + (k % 7) : 2; }
     const L = r.tr[r.tr.length - 1]; if (L && L.k === n.k && L.raw === n.raw) continue;
     n.t = o.t; r.tr.push(n);
   }
   return r;
 }
-function parseTV(s, sig) { // extension: exact transitions [[time, value], …]; bit values 0/1/x/z, bus values hex
-  const tv = s.tv || [];
-  sig.width = num(s.width) || (tv.every(([, v]) => /^[01xz]$/i.test(String(v))) ? 1 : 8); sig.tv = true;
+function parseTV(s, sig) { // extension: exact transitions [[time, value], …]; bit values 0/1/x/z, bus values hex;
+  // "kind": "real" / "string": the values are texts shown as they are (a real's number, a string), null unknown
+  const tv = s.tv || [], text = s.kind === 'real' || s.kind === 'string';
+  sig.width = num(s.width) || (!text && tv.every(([, v]) => /^[01xz]$/i.test(String(v))) ? 1 : 8); sig.tv = true;
   const tr = [];
   for (const [t, v0] of tv) {
     const v = String(v0).toLowerCase(); let o;
-    if (sig.width === 1) o = { k: v === '1' ? '1' : v === '0' ? '0' : v === 'z' ? 'z' : 'x' };
+    if (text) o = v0 == null ? { k: 'x' } : { k: '=', v: String(v0), c: 2 };
+    else if (sig.width === 1) o = { k: v === '1' ? '1' : v === '0' ? '0' : v === 'z' ? 'z' : 'x' };
     else if (/^x+$/.test(v)) o = { k: 'x' };
     else if (/^z+$/.test(v)) o = { k: 'z' };
     else {
@@ -405,7 +455,7 @@ function parseTV(s, sig) { // extension: exact transitions [[time, value], …];
         c: /^[2-9]$/.test(String(s.color)) ? +s.color : (e && !isNaN(n) ? 3 + (n % 7) : 2) };
     }
     const L = tr[tr.length - 1];
-    if (L && L.k === o.k && L.raw === o.raw) continue;
+    if (L && L.k === o.k && L.raw === o.raw && L.v === o.v) continue;
     o.t = num(t); tr.push(o);
   }
   return { tr, gaps: [] };
@@ -427,6 +477,7 @@ function parse(src) {
     tick: j.head && j.head.tick != null ? num(j.head.tick) : null, every: (j.head && num(j.head.every)) || 1,
     tock: j.foot && j.foot.tock != null ? num(j.foot.tock) : null, hscale: (j.config && num(j.config.hscale)) || 1,
     theme: j.config && j.config.theme, colors: (j.config && j.config.colors) || null, cfg: j.config || {} };
+  warnKeys(M.cfg, 'WaveJSON "config"');
   let cyc = 0, tmin = Infinity, tmax = -Infinity, gid = 0;
   // extension "same": "path" = the transitions of the signal with that "path" (one net seen at several levels)
   const byPath = {}, collect = a => a.forEach(it => { if (Array.isArray(it)) collect(it); else if (it && it.path && it.tv) byPath[it.path] = it.tv; });
@@ -443,10 +494,14 @@ function parse(src) {
         } else walk(named ? it.slice(1) : it, depth, anc);
       } else if (it && typeof it === 'object' && (it.wave != null || it.tv || it.same)) {
         if (!it.tv && it.same && byPath[it.same]) it = Object.assign({}, it, { tv: byPath[it.same] });
-        const sig = { type: 'sig', name: flatText(it.name), depth, anc, width: 1, enum: it.enum, radix: it.radix || it.fmt, style: it.style, path: it.path, src: it,
-          stroke: it.stroke || (typeof it.color === 'string' && !/^[2-9]$/.test(it.color) ? it.color : undefined), fill: it.fill, enumColors: it.enumColors, analog: it.analog };
+        const sig = { type: 'sig', name: flatText(it.name), depth, anc, width: 1, enum: it.enum, radix: it.radix || it.fmt, style: it.style, path: it.path,
+          src: it,
+          stroke: it.stroke || (typeof it.color === 'string' && !/^[2-9]$/.test(it.color) ? it.color : undefined), fill: it.fill, enumColors: it.enumColors,
+            analog: it.analog,
+          kind: it.kind, height: num(it.height) || undefined };
         sig.full = it.path || anc.map(id => M.groups[id].name).concat(sig.name).join('.');
         const r = it.tv ? parseTV(it, sig) : parseWave(it, C);
+        if (!it.tv && num(it.width) > 1) sig.width = num(it.width);   // a clock-sampled bus: its width (signed search, analog, fields)
         sig.tr = r.tr; sig.gaps = r.gaps;
         if (r.end != null) { cyc = Math.max(cyc, r.end); sig.end = C(r.end); }
         if (sig.tr.length) { if (it.tv) tmin = Math.min(tmin, sig.tr[0].t); tmax = Math.max(tmax, sig.tr[sig.tr.length - 1].t); }
@@ -467,11 +522,13 @@ function parse(src) {
   // extension "scopes": {group path: "struct" | "union" | "interface"} (vcd2wavedrom.py from the dump's scope types): the
   // group says so; a struct's (union's) row carries its whole value, its fields put together in their order (MSB first)
   const kinds = j.scopes || {};   // a value: "struct" or {kind, width} (its width in the dump: a whole value only from every bit)
-  for (const g of Object.values(M.groups)) { const k = kinds[g.path]; if (!g.kind && k) { g.kind = typeof k === 'string' ? k : k.kind; if (k.width) g.bits = num(k.width); } }
+  for (const g of Object.values(M.groups)) { const k = kinds[g.path]; if (!g.kind && k) { g.kind = typeof k === 'string' ? k : k.kind;
+    if (k.width) g.bits = num(k.width); } }
   const done = new Set(), whole = g => {
     if (done.has(g) || g.sig) return g.sig; done.add(g);
     if (g.kind !== 'struct' && g.kind !== 'union') return null;
-    const parts = M.rows.filter(r => r.anc.length === g.anc.length + 1 && r.anc[g.anc.length] === g.id && (r.type === 'sig' ? r.tr && !r.same : r.type === 'group'))
+    const parts = M.rows.filter(r => r.anc.length === g.anc.length + 1 && r.anc[g.anc.length] === g.id &&
+      (r.type === 'sig' ? r.tr && !r.same : r.type === 'group'))
       .map(r => (r.type === 'group' ? whole(r) : r)).filter(Boolean);
     const w = parts.reduce((n, p) => n + (p.width || 1), 0);
     if (g.kind === 'struct' && parts.length && (!g.bits || w === g.bits)) g.sig = joinBits(g, parts);
@@ -508,7 +565,8 @@ function parseWant(str) {
   const m = /^(-)?(?:\d*'s?([hdbo])|0([xbo]))?([0-9a-f_]+)$/i.exec(s);
   if (m && !(m[2] || m[3] ? false : /[a-f]/i.test(m[4]))) {
     const base = { h: 16, x: 16, d: 10, b: 2, o: 8 }[(m[2] || m[3] || 'd').toLowerCase()], digits = m[4].replace(/_/g, '');
-    try { const n = [...digits.toLowerCase()].reduce((acc, ch) => acc * BigInt(base) + BigInt(parseInt(ch, base)), 0n); if (!digits.split('').some(ch => isNaN(parseInt(ch, base)))) return { n, neg: !!m[1], text: s }; } catch (e) { /* a text */ }
+    try { const n = [...digits.toLowerCase()].reduce((acc, ch) => acc * BigInt(base) + BigInt(parseInt(ch, base)), 0n);
+      if (!digits.split('').some(ch => isNaN(parseInt(ch, base)))) return { n, neg: !!m[1], text: s }; } catch (e) { /* a text */ }
   }
   return { n: null, neg: false, text: s.replace(/^"|"$/g, '') };
 }
@@ -552,7 +610,8 @@ function bmNorm(list) {
     color: b.color || null, lift: !!b.lift && !!b.signal })).filter(b => isFinite(b.t));   // lift: in the lane above its signal
 }
 function arNorm(list, bms) {
-  const old = (Array.isArray(bms) ? bms : []).map((b, i) => b && b.to != null && b.to !== '' ? { from: +b.n || i + 1, to: +b.to, shape: b.shape, label: b.label } : null);
+  const old = (Array.isArray(bms) ? bms : []).map((b, i) => b && b.to != null && b.to !== '' ? { from: +b.n || i + 1, to: +b.to, shape: b.shape,
+    label: b.label } : null);
   return old.filter(Boolean).concat(Array.isArray(list) ? list : []).map(a => ({ from: +a.from, to: +a.to, shape: AR_SHAPES[a.shape] ? a.shape : '~',
     head: AR_HEADS[a.head] !== undefined ? a.head : '>', line: a.line in AR_LINES ? a.line : 'solid', color: a.color || null, label: a.label || '' }))
     .filter(a => a.from && a.to && a.from !== a.to);
@@ -561,67 +620,115 @@ function arNorm(list, bms) {
 /* ---------------- VCD -> WaveJSON ---------------- */
 // The signals of a VCD as WaveJSON groups by scope (the "tv" extension: [[ps, value]], a bus's value in hex, x / z
 // kept), "time" in ps, "scopes" with the struct / union / interface scopes. A big dump is cut to fit a page: the
-// signals nearest the top first, until `budget` value changes (opts.depth: scope levels below the top, all when
-// null); -> {doc, shown, total, changes}. An FST is binary: fst2vcd (GTKWave) or make html.
-const VCD_UNIT = { s: 1e12, ms: 1e9, us: 1e6, ns: 1e3, ps: 1, fs: 1e-3 };
+// signals nearest the top first, until `budget` value changes; -> {doc, shown, total, changes}. An FST is binary:
+// fst2vcd (GTKWave) or make html. The rules are tools/dumpscan.py's (its tests in tests/unit compare the two): the
+// reference of a $var (parse_ref: an escaped \name whole, a range glued or apart is the vector's, a 1-bit "err[3]" a
+// bit of "err", "mem[1]" an element "mem.[1]"), the same path under two id codes merged, real and string variables
+// as texts ("kind"), events left out, $comment … $end skipped in the body, VHDL's U W H L - folded, time in order.
+const VCD_UNIT = { s: 1e12, ms: 1e9, us: 1e6, ns: 1e3, ps: 1, fs: 1e-3, as: 1e-6, zs: 1e-9 };
+const VCD_TEXT = { real: 1, string: 1 };
+function vcdRef(toks) {   // the words of a $var after its code -> [name, range]
+  let ref = toks[0] || '', rng = toks.length > 1 && toks[1][0] === '[' ? toks[1] : '';
+  if (ref[0] !== '\\' && !rng) { const m = /^(.+?)(\[\d+:\d+\])$/.exec(ref); if (m) { ref = m[1]; rng = m[2]; } }
+  return [ref, rng];
+}
 function vcdToWave(text, opts = {}) {
   const budget = opts.budget ?? 3e6, name = opts.name || 'dump.vcd';
   let i = 0, unit = 1;
-  const word = () => { while (i < text.length && text.charCodeAt(i) <= 32) i++; const s = i; while (i < text.length && text.charCodeAt(i) > 32) i++; return text.slice(s, i); };
-  const vars = [], byCode = new Map(), scope = [], kinds = {};
+  const word = () => { while (i < text.length && text.charCodeAt(i) <= 32) i++; const s = i; while (i < text.length && text.charCodeAt(i) > 32) i++;
+    return text.slice(s, i); };
+  const vars = [], byPath = new Map(), byCode = new Map(), scope = [], kinds = {}, blasted = new Map();
+  const own = (code, v, bit) => { if (!byCode.has(code)) byCode.set(code, []); byCode.get(code).push([v, bit]); };
   // the header: $scope / $var / $upscope / $timescale up to $enddefinitions
   for (;;) {
-    const w = word(); if (!w) throw new Error('no $enddefinitions: not a VCD');
+    const w = word(); if (!w) throw new Error('no $enddefinitions: not a VCD, or its header is cut off');
     if (w === '$enddefinitions') { word(); break; }
     if (w === '$scope') { const kind = word(), n = word(); word(); scope.push(n); if (kind !== 'module') kinds[scope.join('.')] = kind; }
     else if (w === '$upscope') { word(); scope.pop(); }
-    else if (w === '$timescale') { let t = ''; for (let x = word(); x && x !== '$end'; x = word()) t += x; const m = /^(\d+)(s|ms|us|ns|ps|fs)$/.exec(t); unit = m ? +m[1] * VCD_UNIT[m[2]] : 1; }
+    else if (w === '$timescale') { let t = ''; for (let x = word(); x && x !== '$end'; x = word()) t += x; const m = /^(\d+)(s|ms|us|ns|ps|fs|as|zs)$/.exec(t);
+      unit = m ? +m[1] * VCD_UNIT[m[2]] : 1; }
     else if (w === '$var') {
-      const type = word(), size = +word(), code = word(); let ref = word(), x = word();
-      while (x && x !== '$end') x = word();   // the range ([7:0]) is the width's
-      const r = ref.replace(/\s+/g, ''), el = r.includes('[') ? r.replace('[', '.[') : r;   // an array element regs[1]: "[1]" under regs (dumpscan's spelling)
-      const v = { path: scope.concat(el).join('.'), name: el.split('.').pop(), width: size || 1, code, real: type === 'real', depth: scope.length };
-      vars.push(v); if (!byCode.has(code)) byCode.set(code, []); byCode.get(code).push(v);
+      const kind = word().toLowerCase(), size = +word() || 1, code = word(), toks = [];
+      for (let x = word(); x && x !== '$end'; x = word()) toks.push(x);
+      if (kind === 'event') continue;   // no value to draw
+      const [ref, rng] = vcdRef(toks), esc = ref[0] === '\\', m = esc ? null : /^(.+)\[(\d+)\]$/.exec(ref);
+      if (m && !rng && size === 1 && !VCD_TEXT[kind]) {   // one bit of a bit-blasted vector: the vector under its name
+        const path = scope.concat(m[1]).join('.');
+        let v = blasted.get(path);
+        if (!v) { v = { path, name: m[1], scope: scope.slice(), width: 0, bits: [], depth: scope.length }; blasted.set(path, v); vars.push(v); }
+        v.width = Math.max(v.width, +m[2] + 1); v.bits.push(code); own(code, v, +m[2]);
+        continue;
+      }
+      const leaf = !esc && ref.includes('[') ? ref.replace('[', '.[') : ref, path = scope.concat(leaf).join('.');
+      let v = byPath.get(path);
+      if (v) { if (!v.codes.includes(code)) { v.codes.push(code); own(code, v, null); } continue; }   // the same path again: merged
+      v = { path, name: leaf.split('.').pop(), scope: !esc && leaf.includes('.') ? scope.concat(leaf.split('.').slice(0, -1)) : scope.slice(),
+        width: size, kind: VCD_TEXT[kind] ? kind : null, codes: [code], depth: scope.length };
+      if (esc) v.name = leaf;
+      byPath.set(path, v); vars.push(v); own(code, v, null);
     }
     else if (w[0] === '$') { for (let x = word(); x && x !== '$end'; x = word()); }   // $date $version $comment …
   }
-  // the value changes, token by token (one per line or several on a line): #time, 0! 1! x! z!, b0101 !, r1.5 !
+  // the value changes, token by token (one per line or several on a line): #time, 0! 1! x! z!, b0101 !, r1.5 !, sText !
   const body = i, count = new Map();
   const scan = fn => {
-    let p = body, t = 0; const n = text.length;
+    let p = body, t = 0, first = true; const n = text.length;
     while (p < n) {
       while (p < n && text.charCodeAt(p) <= 32) p++; if (p >= n) break;
       const s0 = p; while (p < n && text.charCodeAt(p) > 32) p++;
-      const c = text.charCodeAt(s0);
-      if (c === 35) { t = Number(text.slice(s0 + 1, p)) * unit; fn(null, t); }   // #time
-      else if (c === 98 || c === 66 || c === 114 || c === 82) {   // b… / r… then its code
-        while (p < n && text.charCodeAt(p) <= 32) p++; const k0 = p; while (p < n && text.charCodeAt(p) > 32) p++;
-        fn(text.slice(k0, p), t, c === 98 || c === 66 ? text.slice(s0 + 1, k0).trim().toLowerCase() : null);
+      const c = text[s0];
+      if (c === '#') {
+        const tn = Number(text.slice(s0 + 1, p)) * unit;
+        if (!first && tn < t) throw new Error(`time goes back: #${text.slice(s0 + 1, p)} after #${t / unit} (a VCD lists its times in order)`);
+        t = tn; first = false; fn(null, t);
       }
-      else if (c === 48 || c === 49 || c === 120 || c === 88 || c === 122 || c === 90) fn(text.slice(s0 + 1, p), t, text[s0].toLowerCase(), true);
+      else if (c === '$') {   // $dumpvars $dumpall $dumpon $dumpoff $end: nothing; $comment and the like: to their $end
+        const kw = text.slice(s0, p);
+        if (!/^\$(dumpvars|dumpall|dumpon|dumpoff|end)$/.test(kw)) { const e = text.indexOf('$end', p); p = e < 0 ? n : e + 4; }
+      }
+      else if ('bBrRsS'.includes(c)) {   // b… / r… / s… then its code
+        while (p < n && text.charCodeAt(p) <= 32) p++; const k0 = p; while (p < n && text.charCodeAt(p) > 32) p++;
+        const v = text.slice(s0 + 1, k0).trim();
+        fn(text.slice(k0, p), t, c === 'b' || c === 'B' ? vcdBits(v.toLowerCase()) : v, c === 'r' || c === 'R' ? 'real' : c === 's' ||
+          c === 'S' ? 'string' : 'b');
+      }
+      else if ('01xzXZuUwWhHlL-'.includes(c)) fn(text.slice(s0 + 1, p), t, vcdBits(c.toLowerCase()), 'b');
     }
   };
   scan(k => { if (k != null) count.set(k, (count.get(k) || 0) + 1); });
-  const order = [...new Set(vars.filter(v => !v.real && (opts.depth == null || v.depth <= opts.depth + 1)).sort((a, b) => a.depth - b.depth).map(v => v.code))];
+  const changes = v => (v.codes || v.bits).reduce((s, k) => s + (count.get(k) || 0), 0);
+  const order = vars.slice().sort((a, b) => a.depth - b.depth);   // stable: declaration order inside a level
   const keep = new Set(); let used = 0;
-  for (const k of order) { const n = count.get(k) || 0; if (used + n > budget && keep.size) continue; keep.add(k); used += n; }
-  // the transitions of the codes kept
-  const tv = new Map([...keep].map(k => [k, []])), w1 = new Map(vars.map(v => [v.code, v.width]));
+  // the levels nearest the top, as many as fit
+  for (const v of order) { const n = changes(v); if (used + n > budget && keep.size) break; keep.add(v); used += n; }
+  // the transitions of the variables kept: per id code, then per variable (codes merged, bits put together)
+  const raw = new Map(); for (const v of keep) for (const k of v.codes || v.bits) raw.set(k, []);
   let t0 = null, t1 = 0;
-  scan((k, t, val, bit) => {
+  scan((k, t, val) => {
     if (k == null) { if (t0 == null) t0 = t; t1 = Math.max(t1, t); return; }
-    const a = tv.get(k); if (!a || val == null) return;
-    const w = w1.get(k), x = bit ? (w > 1 ? vcdHex(val, w) : val) : vcdHex(val, w);
-    const L = a[a.length - 1]; if (L && L[1] === x) return; if (L && L[0] === t) L[1] = x; else a.push([t, x]);
+    if (t0 == null) t0 = t;   // values before the first time (a $dumpvars block): the dump starts at 0
+    const a = raw.get(k); if (a && val != null) a.push([t, val]);
   });
+  const tvOf = v => {
+    const out = [], put = (t, x) => { const L = out[out.length - 1]; if (L && L[0] === t) { L[1] = x;
+      if (out.length > 1 && out[out.length - 2][1] === x) out.pop(); } else if (!L || L[1] !== x) out.push([t, x]); };
+    if (v.bits) {   // a bit-blasted vector: its bits after every time step with a change of any of them
+      const st = new Array(v.width).fill('x'), ev = v.bits.flatMap(k => raw.get(k).map(([t, x]) => [t, byCode.get(k).find(o => o[0] === v)[1], x]));
+      ev.sort((a, b) => a[0] - b[0]);
+      ev.forEach(([t, b, x], j) => { st[v.width - 1 - b] = x.slice(-1); if (j + 1 === ev.length || ev[j + 1][0] !== t) put(t, vcdHex(st.join(''), v.width)); });
+      return out;
+    }
+    const ev = v.codes.length === 1 ? raw.get(v.codes[0]) : v.codes.flatMap(k => raw.get(k)).sort((a, b) => a[0] - b[0]);
+    for (const [t, x] of ev) put(t, v.kind === 'real' ? gfmt(parseFloat(x), 15) : v.kind === 'string' ? x : vcdHex(x, v.width));
+    return out;
+  };
   // WaveJSON: groups by scope in declaration order
   const out = [], node = new Map([['', out]]);
-  const shownVars = vars.filter(v => keep.has(v.code));
+  const shownVars = vars.filter(v => keep.has(v));
   for (const v of shownVars) {
-    const parts = v.path.split('.'); parts.pop();
     let key = '';
-    for (const p of parts) { const k2 = key ? key + '.' + p : p; if (!node.has(k2)) { const g = [p]; node.get(key).push(g); node.set(k2, g); } key = k2; }
-    const s = { name: v.name, path: v.path, tv: tv.get(v.code) }; if (v.width > 1) s.width = v.width;
+    for (const p of v.scope) { const k2 = key ? key + '.' + p : p; if (!node.has(k2)) { const g = [p]; node.get(key).push(g); node.set(k2, g); } key = k2; }
+    const s = { name: v.name, path: v.path, tv: tvOf(v) }; if (v.width > 1) s.width = v.width; if (v.kind) s.kind = v.kind;
     node.get(key).push(s);
   }
   const scopes = {};
@@ -630,25 +737,30 @@ function vcdToWave(text, opts = {}) {
   const end = Math.max(t1, (t0 ?? 0) + 1);
   const doc = { signal: out, head: { text: name }, time: { t0: t0 ?? 0, t1: end, cycle: (end - (t0 ?? 0)) / 40, unit: 'ps' }, config: {} };
   if (Object.keys(scopes).length) doc.scopes = scopes;
-  return { doc, shown: shownVars.length, total: vars.filter(v => !v.real).length, changes: used };
+  return { doc, shown: shownVars.length, total: vars.length, changes: used };
 }
-// a VCD vector value (binary, maybe shorter than the width: extended with 0, or x / z) -> hex, x / z digits kept
+// VHDL's nine values in VCD digits: U W - unknown, H L weak 1 / 0
+const vcdBits = b => b.replace(/[uw-]/g, 'x').replace(/h/g, '1').replace(/l/g, '0');
+// a VCD vector value (binary, maybe shorter than the width: extended with 0, or x / z) -> hex as GTKWave shows it
+// (hexOf: a nibble all z is z, one with an x or a partial z is x); all x / all z one letter; a bit its level
 function vcdHex(b, w) {
   if (b.length < w) b = (b[0] === 'x' || b[0] === 'z' ? b[0] : '0').repeat(w - b.length) + b;
+  else if (b.length > w) b = b.slice(b.length - w);
+  if (w === 1) return b;
   if (/^x+$/.test(b)) return 'x'; if (/^z+$/.test(b)) return 'z';
-  const p = b.padStart(Math.ceil(b.length / 4) * 4, '0'); let h = '';
-  for (let k = 0; k < p.length; k += 4) { const n = p.slice(k, k + 4); h += /x/.test(n) ? 'x' : /z/.test(n) ? 'z' : parseInt(n, 2).toString(16); }
-  return h;
+  return hexOf(b);
 }
 /* ======================== src/paint.js ======================== */
 /* ---------------- painters: one drawing routine, two back-ends ---------------- */
 class CanvasPainter {
-  constructor(g, cs, S, dpr = 1) { this.g = g; this.cs = cs; this.S = S; this.dpr = dpr; this.cache = {}; this.fade = 1; this.mono = cs.getPropertyValue('--font-mono').trim() || 'monospace'; this.body = cs.getPropertyValue('--font-body').trim() || 'sans-serif'; }
+  constructor(g, cs, S, dpr = 1) { this.g = g; this.cs = cs; this.S = S; this.dpr = dpr; this.cache = {}; this.fade = 1;
+    this.mono = cs.getPropertyValue('--font-mono').trim() || 'monospace'; this.body = cs.getPropertyValue('--font-body').trim() || 'sans-serif'; }
   // a thin vertical segment (an axis tick, the cursor, a bus edge, a level change) on the middle of a device pixel: sharp
   snap(cmds, w) {
     if (w > 1.2) return cmds;
     const d = this.dpr, sx = x => (Math.round(x * d - 0.5) + 0.5) / d, line = c => c && (c[0] === 'M' || c[0] === 'L');
-    return cmds.map((c, i) => line(c) && ((cmds[i + 1] && cmds[i + 1][0] === 'L' && Math.abs(cmds[i + 1][1] - c[1]) < 1e-6) || (c[0] === 'L' && line(cmds[i - 1]) && Math.abs(cmds[i - 1][1] - c[1]) < 1e-6)) ? [c[0], sx(c[1]), c[2]] : c);
+    return cmds.map((c, i) => line(c) && ((cmds[i + 1] && cmds[i + 1][0] === 'L' && Math.abs(cmds[i + 1][1] - c[1]) < 1e-6) ||
+      (c[0] === 'L' && line(cmds[i - 1]) && Math.abs(cmds[i - 1][1] - c[1]) < 1e-6)) ? [c[0], sx(c[1]), c[2]] : c);
   }
   col(n) { // a token, "--x" / "var(--x)" (any custom property of the page), or a colour
     if (this.cache[n]) return this.cache[n];
@@ -667,7 +779,8 @@ class CanvasPainter {
     if (st.stroke) { g.strokeStyle = this.col(st.stroke); g.lineWidth = st.w || 1; g.setLineDash(st.dash || []); g.stroke(); g.setLineDash([]); }
     g.globalAlpha = 1;
   }
-  rect(x, y, w, h, fill, alpha = 1) { const g = this.g; g.globalAlpha = alpha * this.fade; g.fillStyle = this.col(fill); g.fillRect(x, y, w, h); g.globalAlpha = 1; }
+  rect(x, y, w, h, fill, alpha = 1) { const g = this.g; g.globalAlpha = alpha * this.fade; g.fillStyle = this.col(fill); g.fillRect(x, y, w, h);
+    g.globalAlpha = 1; }
   font(st) { return `${st.weight || 400} ${st.size || 11}px ${st.body ? this.body : this.mono}`; }
   text(x, y, s, st = {}) {
     const g = this.g; g.font = this.font(st); g.fillStyle = this.col(st.fill || 'fg');
@@ -682,7 +795,8 @@ class SvgPainter {
   constructor(S) {
     this.out = []; this.S = S; this.fade = 1;
     const cs = getComputedStyle(document.documentElement);
-    this.monoF = S.fontMono || cs.getPropertyValue('--font-mono').trim() || 'monospace'; this.bodyF = S.fontBody || cs.getPropertyValue('--font-body').trim() || 'sans-serif';
+    this.monoF = S.fontMono || cs.getPropertyValue('--font-mono').trim() || 'monospace'; this.bodyF = S.fontBody || cs.getPropertyValue('--font-body').trim() ||
+      'sans-serif';
     measureCtx = measureCtx || document.createElement('canvas').getContext('2d');
   }
   col(n) { return !n ? 'none' : TOK[n] ? `var(${TOK[n]})` : /^--[\w-]+$/.test(n) ? `var(${n})` : esc(n); }
@@ -695,12 +809,19 @@ class SvgPainter {
     if (op !== 1) css += `;opacity:${op}`;
     this.out.push(`<path d="${d}" style="${css}"/>`);
   }
-  rect(x, y, w, h, fill, alpha = 1) { const op = alpha * this.fade; this.out.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" style="fill:${this.col(fill)}${op !== 1 ? ';opacity:' + op : ''}"/>`); }
+  rect(x, y, w, h, fill, alpha = 1) { const op = alpha * this.fade;
+    this.out.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" style="fill:${this.col(fill)}${op !== 1 ? ';opacity:' + op : ''}"/>`); }
   text(x, y, s, st = {}) {
-    this.out.push(`<text x="${Math.round(x * 100) / 100}" y="${Math.round(y * 100) / 100}" dominant-baseline="central" text-anchor="${st.anchor || 'start'}" style="font-family:var(${st.body ? '--font-body' : '--font-mono'});font-size:${st.size || 11}px;font-weight:${st.weight || 400};fill:${this.col(st.fill || 'fg')}${this.fade !== 1 ? ';opacity:' + this.fade : ''}">${esc(s)}</text>`);
+    this.out.push((`<text x="${Math.round(x * 100) / 100}" y="${Math.round(y * 100) / 100}" dominant-baseline="central" ` +
+        `text-anchor="${st.anchor || 'start'}" ` +
+        `style="font-family:var(${st.body ? '--font-body' : '--font-mono'});font-size:${st.size || 11}px;font-weight:${st.weight || 400};` +
+        `fill:${this.col(st.fill || 'fg')}${this.fade !== 1 ? ';opacity:' + this.fade : ''}">${esc(s)}</text>`));
   }
-  measure(s, st = {}) { measureCtx.font = `${st.weight || 400} ${st.size || 11}px ${st.body ? this.bodyF : this.monoF}`; return measureCtx.measureText(s).width; }
-  clip(x, y, w, h, fn) { const id = 'wvfclip' + (++clipId); this.out.push(`<clipPath id="${id}"><rect x="${x}" y="${y}" width="${w}" height="${h}"/></clipPath><g clip-path="url(#${id})">`); fn(); this.out.push('</g>'); }
+  measure(s, st = {}) { measureCtx.font = `${st.weight || 400} ${st.size || 11}px ${st.body ? this.bodyF : this.monoF}`; return measureCtx.measureText(s).width;
+    }
+  clip(x, y, w, h, fn) { const id = 'wvfclip' + (++clipId);
+    this.out.push(`<clipPath id="${id}"><rect x="${x}" y="${y}" width="${w}" height="${h}"/></clipPath><g clip-path="url(#${id})">`); fn();
+    this.out.push('</g>'); }
 }
 
 /* ---------------- shared drawing ---------------- */
@@ -717,6 +838,12 @@ function enumColor(s, o, S) {
 }
 // a bus value as a number for the analog style (its radix: signed, float, fixed point; else unsigned), NaN for x / z
 function analogValue(s, o, radix) {
+  if (s.kind === 'real' && o.k === '=') return parseFloat(o.v);   // its number as text (inf, nan: a gap)
+  if (o.k === '=' && o.raw == null) {   // a WaveDrom cell: its hex ("raw" of the converter), else its label as a number
+    const h = o.hex ?? (/^0x[0-9a-f_]+$/i.test(o.v) ? o.v.slice(2).replace(/_/g, '') : null);
+    if (h != null) return /^[0-9a-f]+$/i.test(h) ? Number(BigInt('0x' + h)) : NaN;
+    return /^-?\d+(\.\d+)?(e[-+]?\d+)?$/i.test(o.v) ? Number(o.v) : NaN;
+  }
   if (o.k !== '=' || o.raw == null || /[xz]/i.test(o.raw)) return o.k === '0' ? 0 : o.k === '1' ? 1 : NaN;
   const r = s.radix || radix || 'auto';
   if (r === 'signed' || r === 'float' || /^s?q\d+$/.test(r)) return parseFloat(decode(s, o.raw, r));
@@ -726,7 +853,8 @@ function analogValue(s, o, radix) {
 // x / z as a gap with an x mark; its range at the left
 function paintAnalog(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk) {
   const a = s.tr, S = P.S, r = s.radix || S.radix || 'auto';
-  if (!s.an || s.an.r !== r) { let lo = Infinity, hi = -Infinity; for (const o of a) { const v = analogValue(s, o, S.radix); if (isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); } } s.an = { r, lo, hi }; }
+  if (!s.an || s.an.r !== r) { let lo = Infinity, hi = -Infinity; for (const o of a) { const v = analogValue(s, o, S.radix);
+    if (isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); } } s.an = { r, lo, hi }; }
   const { lo, hi } = s.an, yh = y + 6, yl = y + h - 6, span = hi > lo ? hi - lo : 1, Y = v => (hi > lo ? yl - (v - lo) / span * (yl - yh) : (yh + yl) / 2);
   const cl = x => Math.min(Math.max(x, xL - 8), xR + 8), col = sk || 'bus', line = [], fill = [];
   let pv = null;
@@ -739,10 +867,12 @@ function paintAnalog(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk) {
   }
   if (fill.length) P.path(fill, { fill: col, alpha: 0.14 });
   if (line.length) P.path(line, { stroke: col, w: S.traceWidth });
-  if (isFinite(lo)) { const f = v => (Math.abs(v) >= 1e6 || (v && Math.abs(v) < 1e-3) ? v.toExponential(2) : String(Number(v.toPrecision(6)))), lab = { size: S.labelSize - 1, fill: 'muted' };
+  if (isFinite(lo)) { const f = v => (Math.abs(v) >= 1e6 || (v && Math.abs(v) < 1e-3) ? v.toExponential(2) : String(Number(v.toPrecision(6)))),
+    lab = { size: S.labelSize - 1, fill: 'muted' };
     P.text(xL + 4, yh + 2, f(hi), lab); P.text(xL + 4, yl - 2, f(lo), lab); }
 }
-function paintSig(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk = s.stroke, bg = 'panel', tint = false) {   // sk: its colour (a viewer's paint), bg: the row's background (the module band), tint: selected (the bus values too)
+// sk: its colour (a viewer's paint), bg: the row's background (the module band), tint: selected (the bus values too)
+function paintSig(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk = s.stroke, bg = 'panel', tint = false) {
   const a = s.tr; if (!a.length) return;
   if (s.analog && s.width > 1) return paintAnalog(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk);
   const yh = y + 4, yl = y + h - 5, ym = (yh + yl) / 2;
@@ -824,12 +954,16 @@ function paintAxis(P, o) { // o: { from, span, xL, xR, y, h, yEnd, X, timed, tic
 function edgeGeom(e, x1, y1, x2, y2) { // WaveDrom edge shapes -> path, label point, arrow "from" points
   const dx = x2 - x1, dy = y2 - y1;
   switch (e.shape) {
-    case '~': return { d: [['M', x1, y1], ['C', x1 + 0.7 * dx, y1, x1 + 0.3 * dx, y2, x2, y2]], m: [x1 + dx / 2, y1 + dy / 2], s: [x1 + 0.7 * dx, y1], e: [x1 + 0.3 * dx, y2] };
-    case '-~': return { d: [['M', x1, y1], ['C', x1 + 0.7 * dx, y1, x2, y2, x2, y2]], m: [x1 + 0.66 * dx, y1 + 0.3 * dy], s: [x1 + 0.7 * dx, y1], e: [x1 + 0.7 * dx, y1] };
-    case '~-': return { d: [['M', x1, y1], ['C', x1, y1, x1 + 0.3 * dx, y2, x2, y2]], m: [x1 + 0.34 * dx, y1 + 0.7 * dy], s: [x1 + 0.3 * dx, y2], e: [x1 + 0.3 * dx, y2] };
+    case '~': return { d: [['M', x1, y1], ['C', x1 + 0.7 * dx, y1, x1 + 0.3 * dx, y2, x2, y2]], m: [x1 + dx / 2, y1 + dy / 2], s: [x1 + 0.7 * dx, y1],
+      e: [x1 + 0.3 * dx, y2] };
+    case '-~': return { d: [['M', x1, y1], ['C', x1 + 0.7 * dx, y1, x2, y2, x2, y2]], m: [x1 + 0.66 * dx, y1 + 0.3 * dy], s: [x1 + 0.7 * dx, y1],
+      e: [x1 + 0.7 * dx, y1] };
+    case '~-': return { d: [['M', x1, y1], ['C', x1, y1, x1 + 0.3 * dx, y2, x2, y2]], m: [x1 + 0.34 * dx, y1 + 0.7 * dy], s: [x1 + 0.3 * dx, y2],
+      e: [x1 + 0.3 * dx, y2] };
     case '-|': return { d: [['M', x1, y1], ['L', x2, y1], ['L', x2, y2]], m: [x1 + dx / 2, y1], s: [x2, y1], e: [x2, y1] };
     case '|-': return { d: [['M', x1, y1], ['L', x1, y2], ['L', x2, y2]], m: [x1 + dx / 2, y2], s: [x1, y2], e: [x1, y2] };
-    case '-|-': return { d: [['M', x1, y1], ['L', x1 + dx / 2, y1], ['L', x1 + dx / 2, y2], ['L', x2, y2]], m: [x1 + dx / 2, y1 + dy / 2], s: [x1 + dx / 2, y1], e: [x1 + dx / 2, y2] };
+    case '-|-': return { d: [['M', x1, y1], ['L', x1 + dx / 2, y1], ['L', x1 + dx / 2, y2], ['L', x2, y2]], m: [x1 + dx / 2, y1 + dy / 2], s: [x1 + dx / 2, y1],
+      e: [x1 + dx / 2, y2] };
     default: return { d: [['M', x1, y1], ['L', x2, y2]], m: [x1 + dx / 2, y1 + dy / 2], s: [x2, y2], e: [x1, y1] };
   }
 }
@@ -858,7 +992,8 @@ const SEL_ALPHA = 0.12;   // the accent over a selected row, its bus values incl
 // rows (signals, group bands, separators), gaps, edges and markers inside [xL, xR]
 // late: an array that takes the plugin overlays instead of drawing them (the viewer draws them over its cursor)
 // strokeOf: row -> its colour where a viewer or a figure changes it (paint, groupColors); default row.stroke
-function paintBody(P, M, lay, X, tA, tB, xL, xR, hl, sel, allLay, band, late, strokeOf = r => r.stroke, folded = () => false) {   // allLay: every row (edges may end off screen); folded(group row): no header shade
+// allLay: every row (edges may end off screen); folded(group row): no header shade
+function paintBody(P, M, lay, X, tA, tB, xL, xR, hl, sel, allLay, band, late, strokeOf = r => r.stroke, folded = () => false) {
   const rowY = new Map(), sep = [], edge = [], over = new Set();
   let pb;
   if (allLay) for (const o of allLay) if (o.row.type === 'sig') rowY.set(o.row, o.y + o.h / 2);
@@ -870,15 +1005,19 @@ function paintBody(P, M, lay, X, tA, tB, xL, xR, hl, sel, allLay, band, late, st
     if (b === 1) P.rect(xL, y, xR - xL, h, 'band');
     P.fade = hl && row.type !== 'lane' && !hl.on.has(row) ? hl.dim : 1;
     if (row.type === 'lane') { P.rect(xL, y, xR - xL, h, 'panel2', 0.45); continue; }
-    if (row.type === 'group') { if (!folded(row)) { P.rect(xL, y, xR - xL, h, 'panel2'); P.rect(xL, y, xR - xL, h, 'fg', 0.08); } edge.push(['M', xL, y + 0.5], ['L', xR, y + 0.5]); pb = undefined; }   // a folded module: the plain background
-    if (row.type === 'group' && row.sig && row.sig.tr.length) paintSig(P, row.sig, y, h, X, tA, tB, xL, xR, M.t1, strokeOf(row.sig) || 'bus', 'panel');   // a struct: its whole value
+    // a folded module: the plain background
+    if (row.type === 'group') { if (!folded(row)) { P.rect(xL, y, xR - xL, h, 'panel2'); P.rect(xL, y, xR - xL, h, 'fg', 0.08); } edge.push(['M', xL, y + 0.5],
+      ['L', xR, y + 0.5]); pb = undefined; }
+    // a struct: its whole value
+    if (row.type === 'group' && row.sig && row.sig.tr.length) paintSig(P, row.sig, y, h, X, tA, tB, xL, xR, M.t1, strokeOf(row.sig) || 'bus', 'panel');
     if (typeof c === 'string') P.rect(xL, y, xR - xL, h, c, 0.1);   // a plugin's highlight
     const isSel = sel instanceof Set ? sel.has(row) : row === sel;   // sel: the selected row, or a Set (shift+click: a run)
     if (isSel) P.rect(xL, y, xR - xL, h, 'acc', SEL_ALPHA);
     if (row.type !== 'space') sep.push(['M', xL, y + h - 0.5], ['L', xR, y + h - 0.5]);
     if (row.draw) row.draw(P, { y, h, X, tA, tB, xL, xR });
     if (row.overlay) over.add(row.overlay);
-    if (row.type === 'sig') { if (row.tr) paintSig(P, row, y, h, X, tA, tB, xL, xR, M.t1, strokeOf(row), b === 1 ? 'band' : 'panel', isSel); rowY.set(row, y + h / 2); }
+    if (row.type === 'sig') { if (row.tr) paintSig(P, row, y, h, X, tA, tB, xL, xR, M.t1, strokeOf(row), b === 1 ? 'band' : 'panel', isSel);
+      rowY.set(row, y + h / 2); }
   }
   P.fade = 1;
   P.path(sep, { stroke: 'line', w: 1, alpha: 0.5 });
@@ -903,7 +1042,8 @@ function paintMarkers(P, markers, X, tA, tB, y0, y1) {
   }
 }
 
-const circle = (x, y, r) => { const k = 0.5523 * r; return [['M', x - r, y], ['C', x - r, y - k, x - k, y - r, x, y - r], ['C', x + k, y - r, x + r, y - k, x + r, y],
+const circle = (x, y, r) => { const k = 0.5523 * r; return [['M', x - r, y], ['C', x - r, y - k, x - k, y - r, x, y - r],
+  ['C', x + k, y - r, x + r, y - k, x + r, y],
   ['C', x + r, y + k, x + k, y + r, x, y + r], ['C', x - k, y + r, x - r, y + k, x - r, y], ['Z']]; };
 // arrow labels in lanes: a thin row inserted under the upper end of a labelled arrow (above the row when both ends share
 // it; the top when an end is on the time axis), so the text never covers a signal; and the lifted bookmarks of a signal
@@ -951,14 +1091,16 @@ function compose(M, S, rows, bms, arrows, picks, all) {
 // rows -> [{row, y, h}] from y down (rh: the height of a sig / group / space row, laneH: of one arrow label); .H: the end
 // a row's height: a lane of n labels, a plugin row's own, an analog signal "analog" rows high (true: 3), else its type's
 const analogRows = r => (r.analog === true ? 3 : Math.max(1, Math.min(12, +r.analog || 0)));
-const rowHeight = (row, rh, laneH) => (row.type === 'lane' ? laneH * row.ids.length : row.height || (row.type === 'sig' && row.analog ? rh.sig * analogRows(row) : rh[row.type]));
+const rowHeight = (row, rh, laneH) => (row.type === 'lane' ? laneH * row.ids.length : row.height ||
+  (row.type === 'sig' && row.analog ? rh.sig * analogRows(row) : rh[row.type]));
 function layoutRows(rows, rh, laneH, y = 0) {
   const lay = rows.map(row => { const h = rowHeight(row, rh, laneH), o = { row, y, h }; y += h; return o; });
   lay.H = y; return lay;
 }
 // the bookmarks and arrows as far as the lanes depend on them: the lanes are worked out again only when this changes
 const laneKey = (bms, arrows) => JSON.stringify([(bms || []).map(b => [b.n, b.signal, !!b.lift]), (arrows || []).map(a => [a.from, a.to, !!a.label])]);
-const laneY = (lay, h) => { const m = new Map(); for (const o of lay) if (o.row.type === 'lane') o.row.ids.forEach((a, k) => m.set(a, o.y + h * k + h / 2)); return m; };
+const laneY = (lay, h) => { const m = new Map(); for (const o of lay) if (o.row.type === 'lane') o.row.ids.forEach((a, k) => m.set(a, o.y + h * k + h / 2));
+  return m; };
 // numbered circles on their signal rows (on the axis when the row is not shown), guide lines, arrows between bookmarks;
 // rubber: {from, x, y} = an arrow being drawn. Returns {pos: n -> [x, y], mids: [[arrow index, x, y]]} for hit tests.
 function paintBookmarks(P, bms, arrows, X, tA, tB, rowY, y0, y1, yAxis, rubber, lanes) {
@@ -970,20 +1112,25 @@ function paintBookmarks(P, bms, arrows, X, tA, tB, rowY, y0, y1, yAxis, rubber, 
     const y = b.signal != null && at.has(b.signal) ? at.get(b.signal) : yAxis, ly = b.lift && lanes && y !== yAxis ? lanes.get('b:' + b.signal) : null;
     pos.set(b.n, [X(b.t), ly ?? y]); if (ly != null) lifted.set(b.n, y);
   }
-  for (const b of bms) if (b.t >= tA && b.t <= tB) { const x = X(b.t); P.path([['M', x, y0], ['L', x, y1]], { stroke: b.color || 'acc', w: 1, dash: [2, 3], alpha: 0.45 }); }
+  for (const b of bms) if (b.t >= tA && b.t <= tB) { const x = X(b.t); P.path([['M', x, y0], ['L', x, y1]],
+    { stroke: b.color || 'acc', w: 1, dash: [2, 3], alpha: 0.45 }); }
   const near = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]) < 0.5;
-  const tip = (p, f) => { const L = Math.hypot(p[0] - f[0], p[1] - f[1]) || 1; return [p[0] - 9 * (p[0] - f[0]) / L, p[1] - 9 * (p[1] - f[1]) / L]; };   // on the circle
+  // on the circle
+  const tip = (p, f) => { const L = Math.hypot(p[0] - f[0], p[1] - f[1]) || 1; return [p[0] - 9 * (p[0] - f[0]) / L, p[1] - 9 * (p[1] - f[1]) / L]; };
   arrows.forEach((a, i) => {
     const A = pos.get(a.from), B = pos.get(a.to); if (!A || !B) return;
     const col = a.color || 'acc', ly0 = lanes && lanes.get(i);
-    if (ly0 != null && Math.abs(A[1] - B[1]) < 0.5 && Math.abs(ly0 - A[1]) > 9) {   // both ends on one row: a dimension line in its lane above the row, not through the signal
+    // both ends on one row: a dimension line in its lane above the row, not through the signal
+    if (ly0 != null && Math.abs(A[1] - B[1]) < 0.5 && Math.abs(ly0 - A[1]) > 9) {
       const up = ly0 < A[1] ? -1 : 1;
-      P.path([['M', A[0], A[1] + up * 9], ['L', A[0], ly0 - up * 4], ['M', B[0], B[1] + up * 9], ['L', B[0], ly0 - up * 4]], { stroke: col, w: 1, dash: [2, 2], alpha: 0.8 });
+      P.path([['M', A[0], A[1] + up * 9], ['L', A[0], ly0 - up * 4], ['M', B[0], B[1] + up * 9], ['L', B[0], ly0 - up * 4]],
+        { stroke: col, w: 1, dash: [2, 2], alpha: 0.8 });
       P.path([['M', A[0], ly0], ['L', B[0], ly0]], { stroke: col, w: 1.4, dash: AR_LINES[a.line] });
       if (a.head.includes('>')) arrowHead(P, B[0], ly0, A[0], ly0, col);
       if (a.head.includes('<')) arrowHead(P, A[0], ly0, B[0], ly0, col);
       const mx = (A[0] + B[0]) / 2;
-      if (a.label) { const tw = P.measure(a.label, { size: 10.5 }); P.rect(mx - tw / 2 - 3, ly0 - 7, tw + 6, 14, 'panel'); P.text(mx, ly0, a.label, { anchor: 'middle', size: 10.5, fill: col, weight: 600 }); }
+      if (a.label) { const tw = P.measure(a.label, { size: 10.5 }); P.rect(mx - tw / 2 - 3, ly0 - 7, tw + 6, 14, 'panel');
+        P.text(mx, ly0, a.label, { anchor: 'middle', size: 10.5, fill: col, weight: 600 }); }
       mids.push([i, mx, ly0]); return;
     }
     const g = edgeGeom({ shape: a.shape }, A[0], A[1], B[0], B[1]);
@@ -993,13 +1140,15 @@ function paintBookmarks(P, bms, arrows, X, tA, tB, rowY, y0, y1, yAxis, rubber, 
     const ly = lanes && lanes.get(i), m = ly != null ? [g.m[0], ly] : g.m;   // in its lane, else on the arrow
     if (a.label) {
       const tw = P.measure(a.label, { size: 10.5 });
-      if (ly != null && Math.abs(g.m[1] - ly) > 9) P.path([['M', m[0], ly + (g.m[1] > ly ? 6 : -6)], ['L', g.m[0], g.m[1]]], { stroke: col, w: 1, dash: [1.5, 2.5], alpha: 0.7 });
+      if (ly != null && Math.abs(g.m[1] - ly) > 9) P.path([['M', m[0], ly + (g.m[1] > ly ? 6 : -6)], ['L', g.m[0], g.m[1]]],
+        { stroke: col, w: 1, dash: [1.5, 2.5], alpha: 0.7 });
       P.rect(m[0] - tw / 2 - 3, m[1] - 7, tw + 6, 14, 'panel'); P.text(m[0], m[1], a.label, { anchor: 'middle', size: 10.5, fill: col, weight: 600 });
     }
     mids.push([i, m[0], m[1]]);
   });
   const R = rubber && pos.get(rubber.from);
-  if (R) { P.path([['M', R[0], R[1]], ['L', rubber.x, rubber.y]], { stroke: 'acc', w: 1.4, dash: [4, 3] }); arrowHead(P, rubber.x, rubber.y, R[0], R[1], 'acc'); }
+  if (R) { P.path([['M', R[0], R[1]], ['L', rubber.x, rubber.y]], { stroke: 'acc', w: 1.4, dash: [4, 3] }); arrowHead(P, rubber.x, rubber.y, R[0], R[1], 'acc');
+    }
   for (const b of bms) {
     if (b.t < tA || b.t > tB) continue;
     const [x, y] = pos.get(b.n);
@@ -1034,7 +1183,8 @@ const TIPS = {
   'act:out': ['Zoom out', ['o', '-', 'ctrl+wheel']], 'act:in': ['Zoom in', ['i', '+', 'ctrl+wheel']], 'act:fit': ['Show everything', ['f']],
   '.ws': ['Edge style: auto, slanted (WaveDrom), vertical (simulator), square'],
   '.q': ['Fuzzy find: letters in order, a.b for paths', ['/', 'ctrl+F', 'Enter', 'Esc']], 'act:fdock': ['Back into the bar', ['Esc']],
-  'act:fcase': ['Match case', ['alt+C']], 'act:fword': ['Full match: the whole name (a.b: the end of the path)', ['alt+W']], 'act:fre': ['Regular expression (as grep -E; \\< \\> as in vim)', ['alt+R']],
+  'act:fcase': ['Match case', ['alt+C']], 'act:fword': ['Full match: the whole name (a.b: the end of the path)', ['alt+W']],
+    'act:fre': ['Regular expression (as grep -E; \\< \\> as in vim)', ['alt+R']],
   '.ev': ['The value to find (0x40, \'h40, 64, -3, IDLE)', ['Enter', 'shift+Enter']],
   'act:dopen': ['Open a VCD dump here (or drop it on the viewer)'], 'act:dreload': ['Read the dump again, the view kept'],
   'act:fprev': ['Previous match', ['N', 'shift+Enter']], 'act:fnext': ['Next match', ['n', 'Enter']],
@@ -1050,15 +1200,19 @@ const TIPS = {
   'act:help': ['Keys and mouse', ['?']], 'jump': ['Go to this marker'],
   '.mk': ['Highlight: in front, the rest dimmed', ['ctrl+click', 'ctrl+shift+click: every row to here']],
   'bm:json': ['The bookmarks and arrows as JSON for a config'], 'bm:clear': ['Remove this browser\'s bookmarks'],
-  'bm:go': ['Go to this bookmark', [']m', '[m']], 'bm:here': ['Move it to the cursor'], 'bm:lift': ['Above its signal, in a lane (or drag the circle up)'], 'bm:del': ['Delete the bookmark and its arrows'],
+  'bm:go': ['Go to this bookmark', [']m', '[m']], 'bm:here': ['Move it to the cursor'], 'bm:lift': ['Above its signal, in a lane (or drag the circle up)'],
+    'bm:del': ['Delete the bookmark and its arrows'],
   'bm:addar': ['Arrow between the last two bookmarks', ['shift+drag a circle']], 'bm:adel': ['Delete the arrow'],
   '.tm': ['Bookmark time: 250ns, 85.12us', ['Enter']], '.sig': ['Its signal (empty: the time axis)', ['Enter']], '.txt': ['What happens here'],
-  '.col': ['Colour'], '.lab': ['Arrow label'], '.from': ['From bookmark'], '.to': ['To bookmark'], '.shape': ['Arrow shape'], '.head': ['Arrow head'], '.line': ['Line'],
+  '.col': ['Colour'], '.lab': ['Arrow label'], '.from': ['From bookmark'], '.to': ['To bookmark'], '.shape': ['Arrow shape'], '.head': ['Arrow head'],
+    '.line': ['Line'],
   'm:zoom': ['Zoom to the range', ['shift+drag', 'middle drag']], 'm:marks': ['Bookmarks at its ends, an arrow with Δ'], 'm:copyd': ['Copy Δ'],
-  'm:copyimg': ['The range (else the window) as PNG to the clipboard: the highlighted rows, else the ones on the screen'], 'm:png': ['Save the picture as PNG'], 'm:svg': ['Save the picture as SVG'],
+  'm:copyimg': ['The range (else the window) as PNG to the clipboard: the highlighted rows, else the ones on the screen'], 'm:png': ['Save the picture as PNG'],
+    'm:svg': ['Save the picture as SVG'],
   'm:c2': ['A second cursor: Δ to the cursor in time and clock cycles', ['shift+click']], 'm:c2x': ['No second cursor', ['Esc']],
   'm:analog': ['The bus as a step plot, three rows high (its radix: signed, float, fixed)'],
-  'm:wdjson': ['The range as a WaveDrom file (.json): the highlighted signals, else the ones on the screen, a cell per clock cycle'], 'm:wdcopy': ['The same WaveDrom to the clipboard'],
+  'm:wdjson': ['The range as a WaveDrom file (.json): the highlighted signals, else the ones on the screen, a cell per clock cycle'],
+    'm:wdcopy': ['The same WaveDrom to the clipboard'],
   'm:hl': ['Highlight', ['ctrl+click']], 'm:hide': ['Leave it out of the view'], 'm:unhide': ['Show the hidden rows'],
   'm:fold': ['Fold / open this module'], 'm:foldup': ['Fold its module', ['zc']], 'm:zM': ['Fold every module', ['zM']], 'm:zR': ['Open every module', ['zR']],
   'm:mark': ['Bookmark on this signal here', ['m']], 'm:copyname': ['Copy the path', ['yy']], 'm:clear': ['Clear the range', ['Esc', 'ctrl+click']],
@@ -1066,13 +1220,24 @@ const TIPS = {
 };
 // the help (? in the bar, key ?): the keys and the mouse by what they do; plugins' keys come from their addKey help
 const HELP = [
-  ['Zoom and move', [[['i', '+'], 'zoom in'], [['o', '-'], 'zoom out'], [['f'], 'show everything'], [['l'], 'the window before the last zoom'], [['c'], 'zoom in on the cursor'],
-    [['ctrl+wheel', 'pinch'], 'zoom at the pointer'], [['wheel'], 'scroll the rows'], [['shift+wheel', 'drag', '←', '→'], 'pan'], [['shift+drag', 'middle drag'], 'zoom into a range'], [['Home', 'End'], 'the start / end'], [['PgUp', 'PgDn'], 'a page of rows']]],
-  ['Cursor and edges', [[['click'], 'cursor on a near edge (alt: not) + select the signal'], [['shift+←', 'shift+→'], 'move the cursor'], [['Tab', 'shift+Tab'], 'next / previous edge'], [[']e', '[e'], 'next / previous edge'], [['e'], 'edge kind']]],
-  ['Signals', [[['↑', '↓', 'j', 'k'], 'select the next / previous'], [['shift+click a name'], 'select every signal from the last clicked one'], [['gg', 'G'], 'the first / last'], [['ctrl+click', '○'], 'highlight'], [['ctrl+shift+click'], 'highlight every row from the last one to it'], [['zM', 'zR'], 'fold / open every module'],
-    [['zc', 'zo', 'za'], 'the selected signal\'s module'], [['s'], 'sort'], [['yy', 'ctrl+C'], 'copy the path'], [['Esc'], 'reset: search, highlight, selection']]],
-  ['Find', [[['/', 'ctrl+F'], 'find (the bar scrolled away: it floats over the waves)'], [['alt+C', 'alt+W', 'alt+R'], 'in the field: match case, full match, regular expression'], [['n', 'N', 'Enter'], 'next / previous match'], [['*'], 'find the selected name']]],
-  ['Measure and mark', [[['shift+click'], 'a second cursor: Δ to the cursor, in cycles of the clock'], [['x'], 'swap the cursors'], [['1', '…', '9'], 'go to bookmark 1 … 9'], [['ctrl+drag'], 'measure a range: Δ, the edges or changes of that signal'], [['alt+drag'], 'a box: its time and its signals, then the menu (picture, WaveDrom, colour)'], [['ctrl+click'], 'clear the range'], [['right button'], 'a range and the menu: picture, colour, radix, hide'], [['m'], 'bookmark at the cursor'],
+  ['Zoom and move', [[['i', '+'], 'zoom in'], [['o', '-'], 'zoom out'], [['f'], 'show everything'], [['l'], 'the window before the last zoom'],
+    [['c'], 'zoom in on the cursor'],
+    [['ctrl+wheel', 'pinch'], 'zoom at the pointer'], [['wheel'], 'scroll the rows'], [['shift+wheel', 'drag', '←', '→'], 'pan'],
+      [['shift+drag', 'middle drag'], 'zoom into a range'], [['Home', 'End'], 'the start / end'], [['PgUp', 'PgDn'], 'a page of rows']]],
+  ['Cursor and edges', [[['click'], 'cursor on a near edge (alt: not) + select the signal'], [['shift+←', 'shift+→'], 'move the cursor'],
+    [['Tab', 'shift+Tab'], 'next / previous edge (no signal selected: the focus moves on)'], [[']e', '[e'], 'next / previous edge'], [['e'], 'edge kind']]],
+  ['Signals', [[['↑', '↓', 'j', 'k'], 'select the next / previous'], [['shift+click a name'], 'select every signal from the last clicked one'],
+    [['gg', 'G'], 'the first / last'], [['ctrl+click', '○'], 'highlight'], [['ctrl+shift+click'], 'highlight every row from the last one to it'],
+    [['zM', 'zR'], 'fold / open every module'],
+    [['zc', 'zo', 'za'], 'the selected signal\'s module'], [['s'], 'sort'], [['yy', 'ctrl+C'], 'copy the path'],
+      [['Esc'], 'reset: search, highlight, selection']]],
+  ['Find', [[['/', 'ctrl+F'], 'find (the bar scrolled away: it floats over the waves)'],
+    [['alt+C', 'alt+W', 'alt+R'], 'in the field: match case, full match, regular expression'], [['n', 'N', 'Enter'], 'next / previous match'],
+    [['*', '#'], 'find the selected name: its next / previous match']]],
+  ['Measure and mark', [[['shift+click'], 'a second cursor: Δ to the cursor, in cycles of the clock'], [['x'], 'swap the cursors'],
+    [['1', '…', '9'], 'go to bookmark 1 … 9'], [['ctrl+drag'], 'measure a range: Δ, the edges or changes of that signal'],
+    [['alt+drag'], 'a box: its time and its signals, then the menu (picture, WaveDrom, colour)'], [['ctrl+click'], 'clear the range'],
+    [['right button'], 'a range and the menu: picture, colour, radix, hide'], [['m'], 'bookmark at the cursor'],
     [[']m', '[m'], 'next / previous bookmark'], [['drag a bookmark'], 'move it'], [['shift+drag a bookmark'], 'an arrow to another one']]],
   ['Help', [[['?'], 'this box'], [['hover a button'], 'what it does, its keys']]],
 ];
@@ -1087,7 +1252,8 @@ const FIND_OPTS = [
 
 // the bar's tools, one line per kind of work: where you are in time (cursor, zoom, edges, jumps), the signals by name
 // (find), times by a condition (sva.js: ƒ expression), the rows and the files (list, edge style, state, assertions)
-const TOOL_LINES = { cursor: 'time', view: 'time', edges: 'time', 'go to': 'time', find: 'find', expression: 'expr', list: 'rows', style: 'rows', state: 'rows', dump: 'rows', assertions: 'rows' };
+const TOOL_LINES = { cursor: 'time', view: 'time', edges: 'time', 'go to': 'time', find: 'find', expression: 'expr', list: 'rows', style: 'rows', state: 'rows',
+  dump: 'rows', assertions: 'rows' };
 const toolLine = (ln, html) => `<div class="tln" data-ln="${ln}">${html}</div>`;
 
 // a WaveDrom document as text: a signal (or a group) per line, as hand-written WaveJSON looks
@@ -1101,44 +1267,94 @@ class Bar {
     const r = v.root, S = v.S, groups = Object.keys(v.M.groups).length > 0;
     const paint = getComputedStyle(r).getPropertyValue('--wave-paint').trim();   // a token, so a theme may change it
     const jumps = v.jumps.map((j, i) => `<button type="button" data-jump="${i}">${esc(j.label)}</button>`).join('');
-    const sort = S.sortButton ? `<button type="button" data-act="sort" title="Sort signals by name (key: s)"></button><input type="text" class="pfx" spellcheck="false" size="8" value="${esc(v.sortIgnore.join(','))}" placeholder="i_,o_" title="Name prefixes ignored when sorting (comma-separated)" aria-label="prefixes ignored when sorting">` : '';
-    const seg = (...parts) => `<span class="seg">${parts.join('')}</span>`, grp = (label, ...parts) => `<span class="tg" data-tg="${label}"><span class="tl">${label}</span>${parts.join('')}</span>`;
+    const sort = S.sortButton ?
+      (`<button type="button" data-act="sort" title="Sort signals by name (key: s)"></button><input type="text" class="pfx" spellcheck="false" size="8" ` +
+        `value="${esc(v.sortIgnore.join(','))}" placeholder="i_,o_" title="Name prefixes ignored when sorting (comma-separated)" aria-label="prefixes ` +
+        `ignored when sorting">`) : '';
+    const seg = (...parts) => `<span class="seg">${parts.join('')}</span>`, grp = (label, ...parts) =>
+      `<span class="tg" data-tg="${label}"><span class="tl">${label}</span>${parts.join('')}</span>`;
     const find = grp('find',
-      seg(`<input type="search" class="q" spellcheck="false" autocomplete="off" placeholder="find  /" aria-label="fuzzy find signals" title="Fuzzy find: the letters in order (pxvd finds s_pix_valid); a word with '.' searches full paths (dev.fifo); words separated by spaces must all match. Enter / n: next, shift+Enter / N: previous, Esc: reset">`,
-        '<span class="cnt"></span><button type="button" data-act="fprev" title="Previous match (N, shift+Enter)">‹</button><button type="button" data-act="fnext" title="Next match (n, Enter)">›</button>'),
-      seg(...FIND_OPTS.map(([act, k, label, t]) => `<button type="button" class="fo" data-act="${act}" aria-pressed="${!!S[k]}" title="${esc(t)}">${esc(label)}</button>`)),
-      seg(`<button type="button" data-act="fhl" aria-pressed="${!!S.findHighlight}" title="Found rows in front, the rest dimmed">Highlight</button>`, `<button type="button" data-act="fopen" aria-pressed="${!!S.findOpen}" title="Every module folded except the ones with a match">Open</button>`),
-      seg(`<input type="color" class="fcol" value="${/^#[0-9a-f]{6}$/i.test(paint) ? paint : '#d6336c'}" aria-label="paint colour" title="Colour for Paint">`, '<button type="button" data-act="fpaint" title="Paint the found and the highlighted signals in this colour (none: the selected one; kept in this browser)">Paint</button>'),
-      `<button type="button" data-act="funpaint" title="Back to the signals' own colours" hidden>Unpaint</button><button type="button" data-act="fcopy" title="Copy the full paths of the found rows, one per line">Copy</button><button type="button" class="fx" data-act="fdock" title="Back into the bar (Esc: and reset the search)" aria-label="close">✕</button>`).replace('class="tg"', 'class="tg find"');
+      seg((`<input type="search" class="q" spellcheck="false" autocomplete="off" placeholder="find  /" aria-label="fuzzy find signals" title="Fuzzy find: ` +
+          `the letters in order (pxvd finds s_pix_valid); a word with '.' searches full paths (dev.fifo); words separated by spaces must all match. Enter ` +
+          `/ n: next, shift+Enter / N: previous, Esc: reset">`),
+        ('<span class="cnt"></span><button type="button" data-act="fprev" title="Previous match (N, shift+Enter)">‹</button><button type="button" ' +
+            'data-act="fnext" title="Next match (n, Enter)">›</button>')),
+      seg(...FIND_OPTS.map(([act, k, label, t]) =>
+        `<button type="button" class="fo" data-act="${act}" aria-pressed="${!!S[k]}" title="${esc(t)}">${esc(label)}</button>`)),
+      seg(`<button type="button" data-act="fhl" aria-pressed="${!!S.findHighlight}" title="Found rows in front, the rest dimmed">Highlight</button>`,
+        `<button type="button" data-act="fopen" aria-pressed="${!!S.findOpen}" title="Every module folded except the ones with a match">Open</button>`),
+      seg(`<input type="color" class="fcol" value="${/^#[0-9a-f]{6}$/i.test(paint) ? paint : '#d6336c'}" aria-label="paint colour" title="Colour for Paint">`,
+        ('<button type="button" data-act="fpaint" title="Paint the found and the highlighted signals in this colour (none: the selected one; kept in this ' +
+          'browser)">Paint</button>')),
+      (`<button type="button" data-act="funpaint" title="Back to the signals' own colours" hidden>Unpaint</button><button type="button" data-act="fcopy" ` +
+          `title="Copy the full paths of the found rows, one per line">Copy</button><button type="button" class="fx" data-act="fdock" title="Back into the ` +
+          `bar (Esc: and reset the search)" aria-label="close">✕</button>`)).replace('class="tg"', 'class="tg find"');
     // cursor: type a time (in the unit chosen, or with its own: 85.12us) and Set; a span and Show: the window around the cursor
     // the edge style of the waves (the "style" setting): kept in this browser; a signal with a style of its own keeps it
-    const wstyle = `<select class="ws" aria-label="edge style" title="Edges: auto (wave strings slanted, exact transitions vertical) · slanted (WaveDrom) · vertical (a simulator: narrow bus crossings) · square (no bevel). Kept in this browser; a signal with its own style keeps it">${Object.entries(STYLE_NAMES).map(([k, n]) => `<option value="${k}"${k === S.style ? ' selected' : ''}>${n}</option>`).join('')}</select>`;
-    const units = v.M.timed ? `<select class="cu" aria-label="time unit" title="Unit of the two fields">${['ps', 'ns', 'µs', 'ms', 's'].map(u => `<option${u === v.unit() ? ' selected' : ''}>${u}</option>`).join('')}</select>` : '<span class="cyc">cyc</span>';
-    const cursor = seg('<input type="text" class="ct" inputmode="decimal" spellcheck="false" aria-label="cursor time" title="Cursor time: a number in the unit shown, or with a unit (85.12us); Enter or Set">',
+    const wstyle =
+      (`<select class="ws" aria-label="edge style" title="Edges: auto (wave strings slanted, exact transitions vertical) · slanted (WaveDrom) · vertical (a ` +
+        `simulator: narrow bus crossings) · square (no bevel). Kept in this browser; a signal with its own style keeps ` +
+        `it">${Object.entries(STYLE_NAMES).map(([k, n]) => `<option value="${k}"${k === S.style ? ' selected' : ''}>${n}</option>`).join('')}</select>`);
+    const units = v.M.timed ?
+      (`<select class="cu" aria-label="time unit" title="Unit of the two ` +
+        `fields">${['ps', 'ns', 'µs', 'ms', 's'].map(u => `<option${u === v.unit() ? ' selected' : ''}>${u}</option>`).join('')}</select>`) :
+      '<span class="cyc">cyc</span>';
+    const cursor =
+      seg(('<input type="text" class="ct" inputmode="decimal" spellcheck="false" aria-label="cursor time" title="Cursor time: a number in the unit shown, or ' +
+        'with a unit (85.12us); Enter or Set">'),
         units, '<button type="button" data-act="cset" title="Put the cursor at this time">Set</button>') +
-      seg('<span class="lbl">span</span><input type="text" class="cs" inputmode="decimal" spellcheck="false" aria-label="view span" title="Width of the window; Enter or Show">',
-        units.replace('class="cu"', 'class="su"'), '<button type="button" data-act="cshow" title="Window of this span centred on the cursor (key: c)">Show</button>');
-    const list = grp('list', sort ? seg(sort) : '', groups ? seg('<button type="button" data-act="expand" title="Expand all groups">Expand</button>', '<button type="button" data-act="collapse" title="Collapse all groups">Collapse</button>') : '',
-      '<button type="button" data-act="hl" title="Clear the highlight (Esc)" hidden></button>', '<button type="button" data-act="unhide" title="Show the rows hidden with the right button\'s menu again" hidden></button>');
+      seg(('<span class="lbl">span</span><input type="text" class="cs" inputmode="decimal" spellcheck="false" aria-label="view span" title="Width of the ' +
+          'window; Enter or Show">'),
+        units.replace('class="cu"', 'class="su"'),
+          '<button type="button" data-act="cshow" title="Window of this span centred on the cursor (key: c)">Show</button>');
+    const list = grp('list', sort ? seg(sort) : '', groups ? seg('<button type="button" data-act="expand" title="Expand all groups">Expand</button>',
+      '<button type="button" data-act="collapse" title="Collapse all groups">Collapse</button>') : '',
+      '<button type="button" data-act="hl" title="Clear the highlight (Esc)" hidden></button>',
+        '<button type="button" data-act="unhide" title="Show the rows hidden with the right button\'s menu again" hidden></button>');
     const edges = grp('edges', seg('<button type="button" data-act="prev" title="Previous edge of the selected signal, or of any shown signal ([)">◀</button>',
-      `<select class="edge" aria-label="edge kind" title="Edge kind (e): any, rise, fall, a value, X / Z">${Object.entries(EDGE_KINDS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select>`,
-      '<input type="text" class="ev" spellcheck="false" hidden placeholder="0x40, \'h40, 64, IDLE" aria-label="value to find" title="The value to find: 0x40, \'h40, 8\'d64, 64, -3, \'b101, or a text (an enum label); Enter / shift+Enter: the next / previous time the selected signal (none: any shown) becomes it">',
-      '<button type="button" data-act="next" title="Next edge (])">▶</button>'), '<button type="button" data-act="mark" title="Bookmark at the cursor, on the selected signal (m)">+ Mark</button>');
-    const state = grp('state', '<button type="button" data-act="ssave" title="Save what you did in this viewer to a file: the window, the cursor, the order, the folding, the highlight, the paint, the bookmarks and arrows, the search, the assertions and the ƒ rows">Save</button>',
-      '<button type="button" data-act="sload" title="Load a saved file into this viewer (what is not in these waves is left out)">Load…</button><input type="file" class="sfile" accept=".json,application/json" hidden>');
+      (`<select class="edge" aria-label="edge kind" title="Edge kind (e): any, rise, fall, a value, X / ` +
+          `Z">${Object.entries(EDGE_KINDS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select>`),
+      ('<input type="text" class="ev" spellcheck="false" hidden placeholder="0x40, \'h40, 64, IDLE" aria-label="value to find" title="The value to find: ' +
+          ('0x40, \'h40, 8\'d64, 64, -3, \'b101, or a text (an enum label); Enter / shift+Enter: the next / previous time the selected signal (none: any ' +
+          'shown) becomes it">')),
+      '<button type="button" data-act="next" title="Next edge (])">▶</button>'),
+        '<button type="button" data-act="mark" title="Bookmark at the cursor, on the selected signal (m)">+ Mark</button>');
+    const state = grp('state',
+      ('<button type="button" data-act="ssave" title="Save what you did in this viewer to a file: the window, the cursor, the order, the folding, the ' +
+        'highlight, the paint, the bookmarks and arrows, the search, the assertions and the ƒ rows">Save</button>'),
+      ('<button type="button" data-act="sload" title="Load a saved file into this viewer (what is not in these waves is left out)">Load…</button><input ' +
+          'type="file" class="sfile" accept=".json,application/json" hidden>'));
     // dump: a VCD read in the page (Open…, or a file dropped on the viewer), ⟳ reads it again from the disk keeping the view
-    const dump = grp('dump', '<button type="button" data-act="dopen" title="Open a VCD dump in this viewer (or drop one on it): its signals by scope, exact transitions">Open…</button>',
-      '<button type="button" data-act="dreload" title="Read the dump again from the disk; the view, the folding and the bookmarks stay" hidden>⟳</button><input type="file" class="dfile" accept=".vcd,.fst" hidden>');
-    return `<div class="bar"><div class="head"><span class="eyebrow">${esc(v.opts.title || v.M.title || 'Waveform').replace(/µ/g, '<span class="mu">µ</span>')}</span><span class="toast" role="status" aria-live="polite"></span><span class="cur"></span><button type="button" class="hb" data-act="help" aria-label="keys and mouse">?</button></div>
-      <div class="tools">${toolLine('time', grp('cursor', cursor) + grp('view', seg('<button type="button" data-act="out" title="Zoom out (−)">−</button>', '<button type="button" data-act="in" title="Zoom in (+)">+</button>', '<button type="button" data-act="fit" title="Show everything (0)">Fit</button>')) + edges + (jumps ? grp('go to', jumps) : ''))}${toolLine('find', find)}${toolLine('expr', '')}${toolLine('rows', list + grp('style', wstyle) + state + dump)}</div></div>
-      <div class="body"><div class="names"></div><div class="wcol"><canvas tabindex="0" role="application" aria-roledescription="waveform" aria-label="waveform: + − zoom, ← → pan, shift+← → move the cursor, ↑ ↓ select a signal, [ ] edges"></canvas></div></div>
+    const dump = grp('dump',
+      ('<button type="button" data-act="dopen" title="Open a VCD dump in this viewer (or drop one on it): its signals by scope, exact ' +
+        'transitions">Open…</button>'),
+      ('<button type="button" data-act="dreload" title="Read the dump again from the disk; the view, the folding and the bookmarks stay" ' +
+          'hidden>⟳</button><input type="file" class="dfile" accept=".vcd,.fst" hidden>'));
+    const zoom = seg('<button type="button" data-act="out" title="Zoom out (−)">−</button>',
+      '<button type="button" data-act="in" title="Zoom in (+)">+</button>', '<button type="button" data-act="fit" title="Show everything (0)">Fit</button>');
+    const hint = 'Wheel: scroll · ctrl+wheel: zoom · shift+wheel / drag: pan · shift or middle drag: zoom to a range · ctrl+drag: measure · ' +
+      'alt+drag: a box of time and signals · click: cursor (on a near edge; alt: not) + select a signal · keys on the waves (as in Questa): ' +
+      'i o zoom in / out, f full, l last, c in on the cursor · ← → pan, Home End · shift+← → cursor · ↑ ↓ (j k) select, gg G first / last · ' +
+      'Tab shift+Tab next / previous edge, e edge kind · / ctrl+F find, n N next / previous match, * # the selected name · ' +
+      `m bookmark, ]m [m next / previous · zM zR fold / open all, zc zo the selected module · yy ctrl+C copy${S.sortButton ? ' · s sort' : ''} · ` +
+      `Esc reset${groups ? ' · click a module to fold it' : ''} · shift+click a name: select every signal to it · ` +
+      '○ or ctrl+click a name: highlight, ctrl+shift+click: every row to it';
+    return `<div class="bar"><div class="head"><span
+      class="eyebrow">${esc(v.opts.title || v.M.title || 'Waveform').replace(/µ/g, '<span class="mu">µ</span>')}</span><span class="toast" role="status"
+        aria-live="polite"></span><span class="cur"></span><button type="button" class="hb" data-act="help" aria-label="keys and mouse">?</button></div>
+      <div class="tools">${toolLine('time', grp('cursor', cursor) + grp('view', zoom) + edges + (jumps ? grp('go to', jumps) : ''))}${toolLine('find', find)}${
+        toolLine('expr', '')}${toolLine('rows', list + grp('style', wstyle) + state + dump)}</div></div>
+      <div class="body"><div class="names"></div><div class="wcol"><canvas tabindex="0" role="application" aria-roledescription="waveform"
+        aria-label="waveform: + − zoom, ← → pan, shift+← → move the cursor, ↑ ↓ select a signal, [ ] edges"></canvas></div></div>
       <div class="notes" hidden></div>
-      ${S.hint ? `<div class="hint">${esc(v.hintBase = `Wheel: scroll · ctrl+wheel: zoom · shift+wheel / drag: pan · shift or middle drag: zoom to a range · ctrl+drag: measure · alt+drag: a box of time and signals · click: cursor (on a near edge; alt: not) + select a signal · keys on the waves (as in Questa): i o zoom in / out, f full, l last, c in on the cursor · ← → pan, Home End · shift+← → cursor · ↑ ↓ (j k) select, gg G first / last · Tab shift+Tab next / previous edge, e edge kind · / ctrl+F find, n N next / previous match, * the selected name · m bookmark, ]m [m next / previous · zM zR fold / open all, zc zo the selected module · yy ctrl+C copy${S.sortButton ? ' · s sort' : ''} · Esc reset${groups ? ' · click a module to fold it' : ''} · shift+click a name: select every signal to it · ○ or ctrl+click a name: highlight, ctrl+shift+click: every row to it`)}</div>` : ''}`;
+      ${S.hint ? `<div class="hint">${esc(v.hintBase = hint)}</div>` : ''}`;
   }
   constructor(v) {
     this.v = v; const r = v.root;
-    v.canvas = r.querySelector('canvas'); v.wcol = r.querySelector('.wcol'); v.bodyEl = r.querySelector('.body'); v.namesEl = r.querySelector('.names'); v.curEl = r.querySelector('.cur');
-    v.sortBtn = r.querySelector('button[data-act=sort]'); v.hlBtn = r.querySelector('button[data-act=hl]'); v.unhideBtn = r.querySelector('button[data-act=unhide]');
+    v.canvas = r.querySelector('canvas'); v.wcol = r.querySelector('.wcol'); v.bodyEl = r.querySelector('.body'); v.namesEl = r.querySelector('.names');
+      v.curEl = r.querySelector('.cur');
+    v.sortBtn = r.querySelector('button[data-act=sort]'); v.hlBtn = r.querySelector('button[data-act=hl]');
+      v.unhideBtn = r.querySelector('button[data-act=unhide]');
     v.notesEl = r.querySelector('.notes'); v.edgeSel = r.querySelector('select.edge');
     v.ctEl = r.querySelector('input.ct'); v.csEl = r.querySelector('input.cs');
     v.cuEl = r.querySelector('select.cu'); v.suEl = r.querySelector('select.su');
@@ -1193,13 +1409,17 @@ class Bar {
     v.dfile.addEventListener('change', () => { const f = v.dfile.files[0]; v.dfile.value = ''; if (f) v.openDump(f); });
     v.reloadBtn = r.querySelector('button[data-act=dreload]'); v.reloadBtn.hidden = !v.opts.dumpSrc;
     // a file dropped on the viewer: a VCD replaces its waves, a saved state (.json) is loaded
-    r.addEventListener('dragover', e => { if ([...(e.dataTransfer.items || [])].some(it => it.kind === 'file') && !e.target.closest('.names, .sva')) { e.preventDefault(); r.classList.add('wv-drop'); } });
-    r.addEventListener('dragleave', e => { if (!r.contains(e.relatedTarget)) r.classList.remove('wv-drop'); });
+    // (on the viewer's element, which outlives this viewer when a dump replaces it: removed by destroy() through v.ac)
+    const own = { signal: v.ac.signal };
+    r.addEventListener('dragover', e => { if ([...(e.dataTransfer.items || [])].some(it => it.kind === 'file') &&
+      !e.target.closest('.names, .sva')) { e.preventDefault(); r.classList.add('wv-drop'); } }, own);
+    r.addEventListener('dragleave', e => { if (!r.contains(e.relatedTarget)) r.classList.remove('wv-drop'); }, own);
     r.addEventListener('drop', e => {
-      r.classList.remove('wv-drop'); const it = [...(e.dataTransfer.items || [])].find(x => x.kind === 'file'); if (!it || e.target.closest('.names, .sva')) return;
+      r.classList.remove('wv-drop'); const it = [...(e.dataTransfer.items || [])].find(x => x.kind === 'file');
+        if (!it || e.target.closest('.names, .sva')) return;
       e.preventDefault(); const f = it.getAsFile(), h = it.getAsFileSystemHandle ? it.getAsFileSystemHandle() : null;
       if (f && /\.json$/i.test(f.name)) v.loadState(f); else if (f) v.openDump(f, h);
-    });
+    }, own);
     v.sfile = r.querySelector('input.sfile');
     v.sfile.addEventListener('change', () => { const f = v.sfile.files[0]; v.sfile.value = ''; if (f) v.loadState(f); });
     const pfx = r.querySelector('input.pfx');
@@ -1210,7 +1430,8 @@ class Bar {
 class Names {
   constructor(v) {
     this.v = v;
-    const toggle = el => { const id = +el.dataset.g; v.collapsed.has(id) ? v.collapsed.delete(id) : v.collapsed.add(id); v.foldTouched = true; this.render(); v.draw(); };
+    const toggle = el => { const id = +el.dataset.g; v.collapsed.has(id) ? v.collapsed.delete(id) : v.collapsed.add(id); v.foldTouched = true; this.render();
+      v.draw(); };
     const rowOf = el => v.vis[+el.closest('.row').dataset.r];
     // copying from the names column gives the full paths of the selected rows, one per line (no values, no marks)
     v.namesEl.addEventListener('copy', e => {
@@ -1229,7 +1450,8 @@ class Names {
         v.canvas.focus({ preventScroll: true }); return;
       }
       if (row.classList.contains('grp')) toggle(row);
-      else if (e.shiftKey && v.selAnchor && v.vis.includes(v.selAnchor)) v.selectRun(v.selAnchor, rowOf(row));   // shift+click: every signal from the last one clicked to it, selected
+      // shift+click: every signal from the last one clicked to it, selected
+      else if (e.shiftKey && v.selAnchor && v.vis.includes(v.selAnchor)) v.selectRun(v.selAnchor, rowOf(row));
       else { const s = rowOf(row); v.select(v.sel === s && !v.selRun.size ? null : s); }   // a signal name: select it (again: unselect)
       v.canvas.focus({ preventScroll: true });   // the keys (Esc, arrows, n, m …) act on this viewer
     });
@@ -1244,7 +1466,8 @@ class Names {
         return;
       }
       if (e.key !== 'Enter' && e.key !== ' ') return;
-      if (at && !at.classList.contains('grp') && !e.target.closest('.mk')) { e.preventDefault(); const r = rowOf(at); v.select(v.sel === r ? null : r); return; }
+      if (at && !at.classList.contains('grp') && !e.target.closest('.mk')) { e.preventDefault(); const r = rowOf(at); v.select(v.sel === r ? null : r); return;
+        }
       const mk = e.target.closest('.mk'), g = e.target.closest('.grp');
       if (mk) { e.preventDefault(); v.toggleHighlight(rowOf(mk)); v.namesEl.querySelector(`.row[data-r="${mk.closest('.row').dataset.r}"] .mk`)?.focus(); }
       else if (g) { e.preventDefault(); toggle(g); }
@@ -1255,13 +1478,15 @@ class Names {
   render() {
     const v = this.v;
     v.vis = v.visible();
-    const picks = (v.findPicks && v.findPicks.size) || v.extraPicks.size ? new Map([...v.findPicks, ...v.extraPicks, ...v.picks]) : v.picks;   // your own picks keep their colour
+    // your own picks keep their colour
+    const picks = (v.findPicks && v.findPicks.size) || v.extraPicks.size ? new Map([...v.findPicks, ...v.extraPicks, ...v.picks]) : v.picks;
     const C = compose(v.M, v.S, v.vis, v.bms, v.arrows, picks, v.rowsAll || v.M.rows);
     v.lanes = C.lanes; v.rowsL = C.rows; v.band = C.band; v.hl = C.hl;
     v.laneSig = JSON.stringify([...v.lanes]); v.laneKey = laneKey(v.bms, v.arrows);
     if (v.hlBtn) { v.hlBtn.hidden = !v.picks.size; v.hlBtn.textContent = `Highlight: ${v.picks.size} ✕`; }
     if (v.unhideBtn) { v.unhideBtn.hidden = !v.hiddenRows.size; v.unhideBtn.textContent = `Hidden: ${v.hiddenRows.size} ✕`; }
-    if (v.sortBtn) { v.sortBtn.textContent = 'Sort: ' + { none: 'off', asc: 'A→Z', desc: 'Z→A' }[v.sort]; v.sortBtn.setAttribute('aria-pressed', v.sort !== 'none'); }
+    if (v.sortBtn) { v.sortBtn.textContent = 'Sort: ' + { none: 'off', asc: 'A→Z', desc: 'Z→A' }[v.sort];
+      v.sortBtn.setAttribute('aria-pressed', v.sort !== 'none'); }
     const shape = [v.sort, v.sortIgnore.join(','), v.hdrH, JSON.stringify(v.rowH), v.S.laneHeight, [...v.analogs].join()].join('|');
     v.labGen = v.q || '';   // the marks of a search are in the labels
     const prev = v.rowsShown, same = prev && v.shape === shape && prev.length === v.rowsL.length && v.rowsL.every((r, k) => r === prev[k]);
@@ -1274,8 +1499,12 @@ class Names {
   label(r) {
     const v = this.v;
     const [p, rest] = v.sort !== 'none' ? stripPfx(r.name, v.sortIgnore) : ['', r.name], m = v.found && v.found.get(r);
-    const at = m ? new Set(m.idx) : null, txt = (s, off) => at ? [...s].map((ch, i) => at.has(off + i) ? `<b class="fm">${esc(ch)}</b>` : esc(ch)).join('') : esc(s);
-    const kd = r.type === 'group' && KIND_MARK[r.kind] ? `<span class="kd" title="${r.kind}${r.partial ? `: ${r.partial[0]} of its ${r.partial[1]} bits shown, no whole value` : r.sig ? `, ${r.sig.width} bits: its whole value on this row` : ''}">${KIND_MARK[r.kind]}</span>` : '';   // a struct, union, interface scope
+    const at = m ? new Set(m.idx) : null, txt = (s, off) => at ? [...s].map((ch, i) =>
+      at.has(off + i) ? `<b class="fm">${esc(ch)}</b>` : esc(ch)).join('') : esc(s);
+    // a struct, union, interface scope
+    const kdTitle = r.partial ? `: ${r.partial[0]} of its ${r.partial[1]} bits shown, no whole value` :
+      r.sig ? `, ${r.sig.width} bits: its whole value on this row` : '';
+    const kd = r.type === 'group' && KIND_MARK[r.kind] ? `<span class="kd" title="${r.kind}${kdTitle}">${KIND_MARK[r.kind]}</span>` : '';
     return kd + (p ? `<span class="pfx">${txt(p, 0)}</span>` : '') + txt(rest, p.length);
   }
   build() {
@@ -1283,16 +1512,22 @@ class Names {
     const alt = r => v.band && v.band.get(r) === 1 ? ' alt' : '', pad = r => `padding-left:${17 + r.depth * 12}px`;
     const mk = '<span class="mk" role="checkbox" tabindex="0" aria-checked="false"></span>';
     v.rowLab = new Map(); v.rowCol = new Map(); v.rowKey = new Map();
-    const lab = r => { const t = (r.type === 'group' ? (v.collapsed.has(r.id) ? '▸ ' : '▾ ') : '') + this.label(r); v.rowLab.set(r, t); v.rowCol.set(r, v.strokeOf(r) || ''); return t; };
+    const lab = r => { const t = (r.type === 'group' ? (v.collapsed.has(r.id) ? '▸ ' : '▾ ') : '') + this.label(r); v.rowLab.set(r, t);
+      v.rowCol.set(r, v.strokeOf(r) || ''); return t; };
     const col = r => v.strokeOf(r) ? ` style="color:${esc(v.strokeOf(r))}"` : '';
     let vi = -1;
     v.namesEl.setAttribute('role', 'listbox'); v.namesEl.setAttribute('aria-label', 'signals');
     v.namesEl.innerHTML = `<div class="hdr" style="height:${v.hdrH}px"></div>` + v.rowsL.map(r => {
-      if (r.type === 'lane') return `<div class="row lane${alt(r)}" style="height:${v.S.laneHeight * r.ids.length}px" title="arrow labels, lifted bookmarks"></div>`;
+      if (r.type === 'lane') return (`<div class="row lane${alt(r)}" style="height:${v.S.laneHeight * r.ids.length}px" title="arrow labels, lifted ` +
+          `bookmarks"></div>`);
       const h = rowHeight(r, v.rowH, v.S.laneHeight), i = ++vi, cls = r.cls ? ' ' + r.cls : '';
-      if (r.type === 'space') return `<div class="row space${alt(r)}" data-r="${i}" style="height:${h}px;${pad(r)}"><span class="n">${esc(r.name)}</span></div>`;
-      if (r.type === 'group') return `<div class="row grp${cls}" data-r="${i}" style="height:${h}px;${pad(r)}" data-g="${r.id}" tabindex="0" role="button" aria-expanded="true" title="${esc(r.title || r.path)}">${mk}<span class="n"${col(r)}>${lab(r)}</span>${r.sig ? '<span class="v"></span>' : ''}</div>`;
-      return `<div class="row${cls}${alt(r)}" data-r="${i}" role="option" aria-selected="false" tabindex="-1" style="height:${h}px;${pad(r)}">${mk}<span class="n" title="${esc(r.full || r.name)}"${col(r)}>${lab(r)}</span><span class="v"></span></div>`;
+      if (r.type === 'space') return `<div class="row space${alt(r)}" data-r="${i}" style="height:${h}px;${pad(r)}"><span
+        class="n">${esc(r.name)}</span></div>`;
+      if (r.type === 'group') return (`<div class="row grp${cls}" data-r="${i}" style="height:${h}px;${pad(r)}" data-g="${r.id}" tabindex="0" role="button" ` +
+          `aria-expanded="true" title="${esc(r.title || r.path)}">${mk}<span ` +
+          `class="n"${col(r)}>${lab(r)}</span>${r.sig ? '<span class="v"></span>' : ''}</div>`);
+      return (`<div class="row${cls}${alt(r)}" data-r="${i}" role="option" aria-selected="false" tabindex="-1" style="height:${h}px;${pad(r)}">${mk}<span ` +
+          `class="n" title="${esc(r.full || r.name)}"${col(r)}>${lab(r)}</span><span class="v"></span></div>`);
     }).join('');
     v.rowEls = [...v.namesEl.children].slice(1);
     for (const [r, set] of v.rowMarks) { const el = v.rowEl(r); if (el) el.classList.add(...set); }   // the plugins' marks stay
@@ -1304,7 +1539,8 @@ class Names {
     const v = this.v;
     if (r.type === 'lane') return;
     const hl = v.hl, c = hl ? hl.cover.get(r) : undefined, dim = !!hl && !hl.on.has(r);
-    const key = `${+dim}${c ?? '-'}${+v.picks.has(r)}${v.strokeOf(r) || ''}${+v.collapsed.has(r.id)}${+v.isSel(r)}${+(r === v.tabRow)}${v.found.has(r) ? 'f' : ''}${v.labGen}`;
+    const key = `${+dim}${c ?? '-'}${+v.picks.has(r)}${v.strokeOf(r) || ''}${+v.collapsed.has(r.id)}${+v.isSel(r)}${+(r === v.tabRow)}` +
+      `${v.found.has(r) ? 'f' : ''}${v.labGen}`;
     if (v.rowKey.get(r) === key) return;   // nothing of this row changed
     v.rowKey.set(r, key);
     el.classList.toggle('dim', dim);
@@ -1335,7 +1571,8 @@ class Notes {
     v.notesEl.addEventListener('click', e => this.click(e));
     v.notesEl.addEventListener('input', e => this.input(e));
     v.notesEl.addEventListener('change', e => this.change(e));
-    v.notesEl.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.matches('input')) { e.preventDefault(); v.canvas.focus({ preventScroll: true }); } });
+    v.notesEl.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.matches('input')) { e.preventDefault();
+      v.canvas.focus({ preventScroll: true }); } });
   }
   render() {
     const v = this.v;
@@ -1343,24 +1580,33 @@ class Notes {
     if (!v.bms.length) { el.innerHTML = ''; return; }
     const sigs = M.rows.filter(r => r.type === 'sig'), byFull = new Map(sigs.map(r => [r.full, r]));
     v.sigList = v.sigList || 'wvf-sigs-' + (++LIST_ID);   // one list of the signals for every bookmark's field
-    const acc = getComputedStyle(v.root).getPropertyValue('--accent').trim(), hex = c => /^#[0-9a-f]{6}$/i.test(c || '') ? c : /^#[0-9a-f]{6}$/i.test(acc) ? acc : '#b5551b';
+    const acc = getComputedStyle(v.root).getPropertyValue('--accent').trim(), hex = c =>
+      /^#[0-9a-f]{6}$/i.test(c || '') ? c : /^#[0-9a-f]{6}$/i.test(acc) ? acc : '#b5551b';
     const opt = (v, label, cur) => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(label)}</option>`;
     const nums = cur => v.bms.map(o => opt(String(o.n), String(o.n), String(cur))).join('');
-    el.innerHTML = `<div class="nh"><b>Bookmarks</b><span class="muted">click a number to go there · drag a circle on the waves to move it, shift+drag to another one for an arrow · kept in this browser</span>
-      <button type="button" data-bm="json">JSON</button><button type="button" data-bm="clear" title="Remove the bookmarks of this browser (the page's own come back on reload)">Clear</button></div><ol class="bms">` +
+    el.innerHTML = `<div class="nh"><b>Bookmarks</b><span
+      class="muted">click a number to go there · drag a circle on the waves to move it, shift+drag to another one for an arrow · kept in this browser</span>
+      <button type="button" data-bm="json">JSON</button><button type="button" data-bm="clear"
+        title="Remove the bookmarks of this browser (the page's own come back on reload)">Clear</button></div><ol class="bms">` +
       v.bms.map(b => { const s = byFull.get(b.signal);
-        return `<li data-n="${b.n}"><button type="button" class="bn" data-bm="go" title="Go to bookmark ${b.n}"${b.color ? ` style="background:${esc(b.color)}"` : ''}>${b.n}</button>
-        <input type="text" class="tm" value="${esc(v.when(b.t))}" spellcheck="false" aria-label="bookmark ${b.n} time" title="Time: 250ns, 85.12us, or a number in the unit shown">
+        return `<li data-n="${b.n}"><button type="button" class="bn" data-bm="go"
+          title="Go to bookmark ${b.n}"${b.color ? ` style="background:${esc(b.color)}"` : ''}>${b.n}</button>
+        <input type="text" class="tm" value="${esc(v.when(b.t))}" spellcheck="false" aria-label="bookmark ${b.n} time"
+          title="Time: 250ns, 85.12us, or a number in the unit shown">
         <button type="button" class="ic" data-bm="here" title="Move the bookmark to the cursor">cursor</button>
-        <input type="text" class="sig" list="${v.sigList}" value="${esc(b.signal || '')}" placeholder="— axis" spellcheck="false" aria-label="bookmark ${b.n} signal" title="${esc(b.signal || 'time axis')}: a full path or a name (the list has them all), empty for the time axis">
+        <input type="text" class="sig" list="${v.sigList}" value="${esc(b.signal || '')}" placeholder="— axis" spellcheck="false"
+          aria-label="bookmark ${b.n} signal" title="${esc(b.signal || 'time axis')}: a full path or a name (the list has them all), empty for the time axis">
         <span class="eg">${esc(edgeGlyph(s, b.t))}</span>
         <span class="dt" title="Δ from the cursor (keys 1–9: go to the bookmark)"></span>
-        <button type="button" class="ic up" data-bm="lift" aria-pressed="${!!b.lift}" title="Above the signal, in the lane over its row (or drag the circle up there)"${b.signal ? '' : ' disabled'}>↥</button>
+        <button type="button" class="ic up" data-bm="lift" aria-pressed="${!!b.lift}"
+          title="Above the signal, in the lane over its row (or drag the circle up there)"${b.signal ? '' : ' disabled'}>↥</button>
         <input type="color" class="col" value="${hex(b.color)}" aria-label="bookmark ${b.n} colour" title="Colour">
         <input type="text" class="txt" value="${esc(b.text)}" placeholder="describe the event" aria-label="bookmark ${b.n} text">
         <button type="button" class="ic" data-bm="del" title="Delete bookmark ${b.n} (and its arrows)">✕</button></li>`; }).join('') +
-      `</ol><div class="nh"><b>Arrows</b><span class="muted">from → to · shape · head · line · colour · label</span><button type="button" data-bm="addar"${v.bms.length < 2 ? ' disabled' : ''}>+ Arrow</button></div><ol class="ars">` +
-      v.arrows.map((a, i) => `<li data-a="${i}"><select class="from" aria-label="arrow ${i + 1} from">${nums(a.from)}</select>→<select class="to" aria-label="arrow ${i + 1} to">${nums(a.to)}</select>
+      (`</ol><div class="nh"><b>Arrows</b><span class="muted">from → to · shape · head · line · colour · label</span><button type="button" ` +
+          `data-bm="addar"${v.bms.length < 2 ? ' disabled' : ''}>+ Arrow</button></div><ol class="ars">`) +
+      v.arrows.map((a, i) => `<li data-a="${i}"><select class="from" aria-label="arrow ${i + 1} from">${nums(a.from)}</select>→<select class="to"
+        aria-label="arrow ${i + 1} to">${nums(a.to)}</select>
         <select class="shape" aria-label="arrow shape">${Object.entries(AR_SHAPES).map(([k, v]) => opt(k, `${k}  ${v}`, a.shape)).join('')}</select>
         <select class="head" aria-label="arrow head">${Object.entries(AR_HEADS).map(([k, v]) => opt(k, v, a.head)).join('')}</select>
         <select class="line" aria-label="arrow line">${Object.keys(AR_LINES).map(k => opt(k, k, a.line)).join('')}</select>
@@ -1374,7 +1620,8 @@ class Notes {
     const v = this.v;
     const b = e.target.closest('button[data-bm]'); if (!b) return;
     const li = b.closest('li'), n = li ? +li.dataset.n : NaN, bm = v.bms.find(x => x.n === n), act = b.dataset.bm;
-    if (act === 'go' && bm) { v.cursor = bm.t; if (bm.t < v.t0 || bm.t > v.t0 + v.span) v.t0 = v.clamp(bm.t - v.span / 2); if (bm.signal) v.sel = v.M.rows.find(r => r.full === bm.signal) || v.sel; v.renderNames(); v.draw(); }
+    if (act === 'go' && bm) { v.cursor = bm.t; if (bm.t < v.t0 || bm.t > v.t0 + v.span) v.t0 = v.clamp(bm.t - v.span / 2);
+      if (bm.signal) v.sel = v.M.rows.find(r => r.full === bm.signal) || v.sel; v.renderNames(); v.draw(); }
     else if (act === 'here' && bm) { bm.t = v.cursor; v.changed(true); }
     else if (act === 'lift' && bm) { bm.lift = !bm.lift && !!bm.signal; v.changed(true); }
     else if (act === 'del') { v.bms = v.bms.filter(x => x.n !== n); v.arrows = v.arrows.filter(a => a.from !== n && a.to !== n); v.changed(true); }
@@ -1383,9 +1630,11 @@ class Notes {
     else if (act === 'clear') { v.bms = []; v.arrows = []; try { localStorage.removeItem(v.bmKey); } catch (err) { /* ignore */ } this.render(); v.draw(); }
     else if (act === 'json') {
       const ta = v.notesEl.querySelector('textarea.json'), rows = l => l.map(x => '  ' + JSON.stringify(x)).join(',\n');
-      const txt = [`"bookmarks": [\n${rows(v.bookmarks())}\n]`, `"arrows": [\n${rows(v.arrowList())}\n]`, ...v.extraJSON.map(f => f()).filter(Boolean)].join(',\n');
+      const txt = [`"bookmarks": [\n${rows(v.bookmarks())}\n]`, `"arrows": [\n${rows(v.arrowList())}\n]`,
+        ...v.extraJSON.map(f => f()).filter(Boolean)].join(',\n');
       ta.hidden = !ta.hidden; ta.value = txt; ta.rows = txt.split('\n').length + 1;
-      if (!ta.hidden) { ta.select(); try { navigator.clipboard.writeText(txt).then(() => { b.textContent = 'JSON (copied)'; }, () => {}); } catch (err) { /* select only */ } }
+      if (!ta.hidden) { ta.select(); try { navigator.clipboard.writeText(txt).then(() => { b.textContent = 'JSON (copied)'; }, () => {});
+        } catch (err) { /* select only */ } }
     }
   }
   input(e) {
@@ -1423,6 +1672,8 @@ class Notes {
 /* ---------------- interactive viewer ---------------- */
 const VIEWS = new Set(), ACTIVE = { view: null };   // ACTIVE.view: the viewer used last (Esc while the focus is on the page)
 const PLUGINS = [];   // WaveFW.plugin(fn): fn(viewer) for every viewer, now and later (wavefw/sva.js: the assertions panel)
+const STATE_VERSION = 2;   // a saved viewer state (state()): 2 has range and edge
+const RISES = new WeakMap();   // a clock row -> the times it rises (the second cursor counts cycles with it)
 class WaveView {
   constructor(root, model, opts = {}) {
     this.root = root; this.M = parse(model); this.opts = opts;
@@ -1437,7 +1688,8 @@ class WaveView {
     for (const [, k] of FIND_OPTS) this[k] = !!this.S[k];   // its options: the case, the whole name, a regular expression
     this.paintKey = 'wavefw.paint:' + this.storeId;
     this.painted = new Map(); this.loadPaint();
-    this.rowsKey = 'wavefw.rows:' + this.storeId; this.radixes = new Map(); this.analogs = new Map(); this.hiddenRows = new Set(); this.loadRows();   // the menu's radix per signal, hidden rows
+    // the menu's radix per signal, hidden rows
+    this.rowsKey = 'wavefw.rows:' + this.storeId; this.radixes = new Map(); this.analogs = new Map(); this.hiddenRows = new Set(); this.loadRows();
     this.t0 = M.t0; this.span = M.t1 - M.t0;
     this.minSpan = opts.minSpan ?? (M.timed ? Math.max(this.span / 1e6, 10) : 0.5);
     this.cursor = opts.cursor ?? M.cursor ?? M.t0;
@@ -1454,6 +1706,9 @@ class WaveView {
     const hints = this.hints = [];   // plugins: lines of the hint under the waves; hints.push() shows them
     hints.push = (...a) => { const n = Array.prototype.push.apply(hints, a); this.renderHint(); return n; };
     this.bmKey = 'wavefw.bookmarks:' + this.storeId;
+    // every listener outside the viewer's own child elements (its root, the window, the document) is registered with
+    // this signal: destroy() removes them all (a dump opened again on the same element left the old ones running)
+    this.ac = new AbortController();
     Object.assign(this, this.loadBookmarks()); root.waveView = this;   // this.bms, this.arrows
     this.build(); this.fit();
     if (opts.from != null || opts.to != null) { // initial view window (Fit still shows everything)
@@ -1462,9 +1717,11 @@ class WaveView {
     }
     this.ro = new ResizeObserver(() => this.draw()); this.ro.observe(this.wcol);
     // the canvas is only as tall as the visible part of the rows (sticky in its column): redraw when that part moves
-    this.onScroll = () => { if (!this.raf && this.lay && this.lay.H > this.hc + 1) this.raf = requestAnimationFrame(() => { this.raf = 0; if (this.root.isConnected) this.draw(); }); };
-    window.addEventListener('scroll', this.onScroll, { passive: true }); window.addEventListener('resize', this.onScroll);
-    this.bodyEl.addEventListener('scroll', this.onScroll, { passive: true });
+    this.onScroll = () => { if (!this.raf && this.lay && this.lay.H > this.hc + 1) this.raf = requestAnimationFrame(() =>
+      { this.raf = 0; if (this.root.isConnected) this.draw(); }); };
+    const own = { signal: this.ac.signal };
+    window.addEventListener('scroll', this.onScroll, { passive: true, ...own }); window.addEventListener('resize', this.onScroll, own);
+    this.bodyEl.addEventListener('scroll', this.onScroll, { passive: true, ...own });
     VIEWS.add(this);
     for (const p of PLUGINS) try { p(this); } catch (e) { console.error('wavefw plugin:', e); }
   }
@@ -1474,8 +1731,10 @@ class WaveView {
   storeName() {
     const r = this.root, o = this.opts, ref = r.dataset.wave;
     let id = location.pathname + ':' + (o.key || r.id || ref || this.M.title);
-    if (!o.key && !r.id && ref) { const k = [...document.querySelectorAll('[data-wave]')].filter(e => e.dataset.wave === ref).indexOf(r); if (k > 0) id += '#' + (k + 1); }
-    for (const v of VIEWS) if (v.storeId === id && v.root.isConnected) console.warn(`wavefw: two viewers store their bookmarks as "${id}": give one an id or opts.key`);
+    if (!o.key && !r.id && ref) { const k = [...document.querySelectorAll('[data-wave]')].filter(e => e.dataset.wave === ref).indexOf(r);
+      if (k > 0) id += '#' + (k + 1); }
+    for (const v of VIEWS) if (v.storeId === id &&
+      v.root.isConnected) console.warn(`wavefw: two viewers store their bookmarks as "${id}": give one an id or opts.key`);
     return id;
   }
   // settings from all layers; a global WaveFW.configure() calls this again on every viewer
@@ -1491,14 +1750,28 @@ class WaveView {
     if (redraw && hlFrom !== this.hlFrom) { this.hlFrom = hlFrom; this.picks = hlPick(this.M, S.highlight); }
     if (redraw && this.qEl && this.q) this.find(this.q);
     if (this.wsEl) this.wsEl.value = S.style;
-    if (redraw) { const i = this.root.querySelector('input.pfx'); if (i) i.value = S.sortIgnore.join(','); this.fitPfx(); this.renderNames(); this.draw(); this.settingsChanged(); }
+    if (redraw) { const i = this.root.querySelector('input.pfx'); if (i) i.value = S.sortIgnore.join(','); this.fitPfx(); this.renderNames(); this.draw();
+      this.settingsChanged(); }
   }
   build() {
     const r = this.root; r.classList.add('wv');
     r.innerHTML = Bar.html(this);
     this.bar = new Bar(this);
     this.names = new Names(this);
-    const c = this.canvas;
+    this.wheelInput(this.canvas); this.pointerInput(this.canvas); this.keyInput(this.canvas);
+    // Esc anywhere in the viewer (waves, find field, names) except the bookmark fields: back to no search, no highlight,
+    // no selected signal; the view (opened modules, scroll, time) stays
+    this.onActive = () => { ACTIVE.view = this; };
+    r.addEventListener('pointerdown', this.onActive, { capture: true, signal: this.ac.signal });
+    r.addEventListener('keydown', e => {
+      if (e.key !== 'Escape' || e.target.closest('.notes')) return;
+      e.preventDefault(); this.reset(); this.floatFind(false);
+      if (e.target === this.qEl) this.canvas.focus({ preventScroll: true });
+    }, { signal: this.ac.signal });
+    this.notes = new Notes(this);
+    this.renderNames(); this.renderNotes();
+  }
+  wheelInput(c) {
     // wheel by its size: a mouse notch (100 px) zooms ×1.22, a trackpad's small steps zoom smoothly, ctrl+wheel (a pinch)
     // zooms faster; a horizontal swipe or shift+wheel pans by the pixels moved. deltaMode: lines (16 px) or pages.
     // the wheel as in Questa: it scrolls the rows (the page, or the viewer's own scroll bar), ctrl+wheel (a pinch) zooms
@@ -1514,6 +1787,9 @@ class WaveView {
         this.zoom(Math.exp(dy * (pinch ? 0.01 : 0.002)), this.frac(e), true);
       }
     }, { passive: false });
+  }
+  // the pointer on the waves: the cursor, a pan, a zoom range, a measured range, a box, a bookmark moved or an arrow drawn
+  pointerInput(c) {
     // the middle button (Questa): drag over a time range to zoom into it
     c.addEventListener('mousedown', e => { if (e.button === 1) e.preventDefault(); });   // no autoscroll, no paste
     let drag = null;
@@ -1524,7 +1800,8 @@ class WaveView {
       if (e.button === 1) { const [x] = local(e); drag = { zoom: x, x: e.clientX, y: e.clientY }; c.setPointerCapture(e.pointerId); return; }
       const [x, y] = local(e), bm = e.button === 0 && this.bmAt(x, y);
       // shift+drag (not from a bookmark: that draws an arrow): zoom into the range dragged over, as the middle button
-      if (e.button === 0 && e.shiftKey && !bm && !e.ctrlKey && !e.metaKey) { drag = { zoom: x, x: e.clientX, y: e.clientY, c2: [x, y, e.altKey] }; c.setPointerCapture(e.pointerId); return; }
+      if (e.button === 0 && e.shiftKey && !bm && !e.ctrlKey && !e.metaKey) { drag = { zoom: x, x: e.clientX, y: e.clientY, c2: [x, y, e.altKey] };
+        c.setPointerCapture(e.pointerId); return; }
       // a measured range: ctrl+drag or the right button (then the menu), its ends on the edges of the signal under the
       // pointer (alt: not), its Δ counted on that signal
       if ((e.button === 2 && this.S.contextMenu) || (e.button === 0 && (e.ctrlKey || e.metaKey) && !bm)) {
@@ -1534,16 +1811,20 @@ class WaveView {
       if (e.button !== 0) return;
       // alt+drag: a box over time and rows — its time is the range, its signals the selection; then the menu (the picture,
       // WaveDrom, colour … of those signals); alt+click: the cursor without the snap
-      if (e.altKey && !bm && !e.shiftKey && !e.ctrlKey && !e.metaKey) { drag = { box: [x, y], x: e.clientX, y: e.clientY, moved: false }; c.setPointerCapture(e.pointerId); return; }
-      drag = { x: e.clientX, y: e.clientY, t0: this.t0, moved: false, bm, arrow: bm && e.shiftKey, free: e.altKey, lay: this.lay };   // lay: the rows as they were (a lane coming or going does not move them under the pointer)
+      if (e.altKey && !bm && !e.shiftKey && !e.ctrlKey && !e.metaKey) { drag = { box: [x, y], x: e.clientX, y: e.clientY, moved: false };
+        c.setPointerCapture(e.pointerId); return; }
+      // lay: the rows as they were (a lane coming or going does not move them under the pointer)
+      drag = { x: e.clientX, y: e.clientY, t0: this.t0, moved: false, bm, arrow: bm && e.shiftKey, free: e.altKey, lay: this.lay };
       c.setPointerCapture(e.pointerId);
     });
     c.addEventListener('pointermove', e => {
       const [x, y] = local(e);
       if (!drag) {
         const bm = this.bmAt(x, y), o = !bm && (this.lay || []).find(o => y >= o.y && y < o.y + o.h), tip = o && o.row.tip ? o.row.tip(x, y - o.y, this) : '';
-        const vr = o && (o.row.sig || o.row), val = !bm && !tip && vr && vr.type === 'sig' && vr.tr ? this.valueTip(vr, this.t0 + x / this.pxPerT()) : '';   // the value under the pointer (a struct's row: its whole value)
-        c.style.cursor = bm ? 'grab' : tip ? 'pointer' : ''; c.title = bm ? `Bookmark ${bm.n}: drag to move it, shift+drag to another bookmark for an arrow` : tip || val; return;
+        // the value under the pointer (a struct's row: its whole value)
+        const vr = o && (o.row.sig || o.row), val = !bm && !tip && vr && vr.type === 'sig' && vr.tr ? this.valueTip(vr, this.t0 + x / this.pxPerT()) : '';
+        c.style.cursor = bm ? 'grab' : tip ? 'pointer' : ''; c.title = bm ? `Bookmark ${bm.n}: drag to move it, shift+drag to another bookmark for an arrow` :
+          tip || val; return;
       }
       if (drag.zoom != null) { this.zband = [drag.zoom, x].map(px => this.t0 + px / this.pxPerT()); this.draw(); return; }
       if (drag.box) {
@@ -1560,7 +1841,7 @@ class WaveView {
       if (!drag.moved) return;
       if (drag.arrow) { this.rubber = { from: drag.bm.n, x, y }; this.draw(); }
       else if (drag.bm) { c.style.cursor = 'grabbing'; this.moveBookmark(drag.bm, x, y, drag.lay); }
-      else { this.t0 = this.clamp(drag.t0 - dx / this.pxPerT()); this.draw(); }
+      else { this.t0 = this.clamp(drag.t0 - dx / this.pxPerT()); this.invalidate(); }   // a pan: one draw per frame, not per move event
     });
     c.addEventListener('pointerup', e => {
       const [x, y] = local(e);
@@ -1606,24 +1887,30 @@ class WaveView {
       }
       drag = null;
     });
-    c.addEventListener('pointercancel', () => { drag = null; if (this.rubber || this.zband || this.box) { this.rubber = this.zband = this.box = null; this.draw(); } });
+    c.addEventListener('pointercancel', () => { drag = null; if (this.rubber || this.zband || this.box) { this.rubber = this.zband = this.box = null;
+      this.draw(); } });
+  }
+  keyInput(c) {
     // The keys on the waves: navigation as in Questa's wave window, the lists and the text as in vim. Two-key sequences
     // (gg, zR, yy, ]f …) start with g z y [ ]: the second key within a second
     c.addEventListener('keydown', e => {
       const k = e.key, ctl = e.ctrlKey || e.metaKey; let h = true;
       if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock'].includes(k)) return;   // a modifier alone: a sequence goes on (z, shift+M)
       if (e.altKey || (ctl && !['c', 'C', 'f', 'F'].includes(k))) return;   // ctrl+S, ctrl+M … stay the browser's
-      if (ctl) { if (k === 'f' || k === 'F' ? (this.focusFind(), true) : this.copyKey()) e.preventDefault(); return; }   // ctrl+F: find (Questa), ctrl+C: copy (nothing to copy: the browser's)
+      // ctrl+F: find (Questa), ctrl+C: copy (nothing to copy: the browser's)
+      if (ctl) { if (k === 'f' || k === 'F' ? (this.focusFind(), true) : this.copyKey()) e.preventDefault(); return; }
       const pre = this.kpre && Date.now() - this.kpre.t < 1000 ? this.kpre.k : ''; this.kpre = null;
       if (pre && this.seq(pre + k)) { e.preventDefault(); return; }
       if (!pre && 'gzy[]'.includes(k) && k.length === 1) { this.kpre = { k, t: Date.now() }; e.preventDefault(); return; }
-      const sigStep = d => { const sigs = this.vis.filter(r => r.type === 'sig' && r.tr), i = sigs.indexOf(this.sel); this.select(sigs[Math.min(Math.max(i < 0 ? 0 : i + d, 0), sigs.length - 1)] || null); };
+      const sigStep = d => { const sigs = this.vis.filter(r => r.type === 'sig' && r.tr), i = sigs.indexOf(this.sel);
+        this.select(sigs[Math.min(Math.max(i < 0 ? 0 : i + d, 0), sigs.length - 1)] || null); };
       if (k === 'i' || k === 'I' || k === '+' || k === '=') { this.markView(); this.zoom(0.5, 0.5); }
       else if (k === 'o' || k === 'O' || k === '-') { this.markView(); this.zoom(2, 0.5); }
       else if (k === 'f' || k === 'F') { this.markView(); this.fit(); }
       else if (k === 'l' || k === 'L') this.zoomLast();
       else if (k === 'c' || k === 'C') { this.markView(); this.showCursor(Math.max(this.span / 2, this.minSpan)); }   // zoom in on the cursor (Questa)
-      else if (k === 'Tab') this.edge(e.shiftKey ? -1 : 1);   // the next / previous transition of the selected signal (Questa)
+      // the next / previous transition of the selected signal (Questa); none selected (Esc): the focus moves on
+      else if (k === 'Tab' && this.sel) this.edge(e.shiftKey ? -1 : 1);
       else if (k === 'e') { const ks = Object.keys(EDGE_KINDS); this.setEdgeKind(ks[(ks.indexOf(this.edgeKind) + 1) % ks.length]); }
       else if (k === 'Home' || k === 'End') { this.markView(); this.t0 = this.clamp(k === 'Home' ? this.M.t0 : this.M.t1); this.draw(); }
       else if (k === 'PageDown' || k === 'PageUp') this.pageRows(k === 'PageDown' ? 1 : -1);
@@ -1634,7 +1921,8 @@ class WaveView {
       else if (k === 'ArrowLeft' || k === 'ArrowRight') { this.t0 = this.clamp(this.t0 + this.span * (k === 'ArrowRight' ? 0.2 : -0.2)); this.invalidate(); }
       else if (k === '/') this.focusFind();
       else if ((k === 'n' || k === 'N') && this.found.size) this.findStep(k === 'n' ? 1 : -1);   // like vim
-      else if (k === '*' || k === '#') { if (this.sel) { this.qEl.value = this.sel.name; this.find(this.sel.name); this.findStep(k === '*' ? 1 : -1); } }   // the selected name (vim: the word under the cursor)
+      // the selected name (vim: the word under the cursor)
+      else if (k === '*' || k === '#') { if (this.sel) { this.qEl.value = this.sel.name; this.find(this.sel.name); this.findStep(k === '*' ? 1 : -1); } }
       else if (k === 'm') this.mark();
       else if (/^[1-9]$/.test(k)) this.goMark(+k);   // the bookmark of that number
       else if (k === 'x' && this.cursor2 != null) { [this.cursor, this.cursor2] = [this.cursor2, this.cursor]; this.draw(); }   // swap the cursors
@@ -1645,17 +1933,6 @@ class WaveView {
       else h = false;
       if (h) e.preventDefault();
     });
-    // Esc anywhere in the viewer (waves, find field, names) except the bookmark fields: back to no search, no highlight,
-    // no selected signal; the view (opened modules, scroll, time) stays
-    this.onActive = () => { ACTIVE.view = this; };
-    r.addEventListener('pointerdown', this.onActive, true);
-    r.addEventListener('keydown', e => {
-      if (e.key !== 'Escape' || e.target.closest('.notes')) return;
-      e.preventDefault(); this.reset(); this.floatFind(false);
-      if (e.target === this.qEl) this.canvas.focus({ preventScroll: true });
-    });
-    this.notes = new Notes(this);
-    this.renderNames(); this.renderNotes();
   }
   fitPfx() { const i = this.root.querySelector('input.pfx'); if (i) i.style.width = Math.max(7, i.value.length + 2) + 'ch'; }
   // every row in display order (the model's and the plugins'), and the ones not folded away
@@ -1705,7 +1982,8 @@ class WaveView {
   highlightRun(a, b) {
     if (typeof a === 'string') a = this.vis.find(r => r.full === a); if (typeof b === 'string') b = this.vis.find(r => r.full === b);
     const i = this.vis.indexOf(a), j = this.vis.indexOf(b); if (i < 0 || j < 0) return this;
-    for (const r of this.vis.slice(Math.min(i, j), Math.max(i, j) + 1)) if ((r.type === 'sig' || r.type === 'group') && !this.picks.has(r)) this.picks.set(r, this.picks.size % HL_N);
+    for (const r of this.vis.slice(Math.min(i, j), Math.max(i, j) + 1)) if ((r.type === 'sig' || r.type === 'group') && !this.picks.has(r)) this.picks.set(r,
+      this.picks.size % HL_N);
     this.renderNames(); this.draw(); return this;
   }
   // fuzzy find: rows matching every word; options: found rows in front (findHl), only their modules open (findOpen)
@@ -1736,9 +2014,11 @@ class WaveView {
     }
     this.findPicks = terms.length && this.findHl ? new Map([...this.found.keys()].map(r => [r, 6])) : new Map();
     this.fi = -1; this.fiRow = null;
-    if (this.cntEl) { const n = this.found.size; this.cntEl.textContent = badRe ? 'bad regex' : terms.length ? (n ? `${n} found` : 'no match') : ''; this.cntEl.classList.toggle('none', badRe || (!!terms.length && !n)); }
+    if (this.cntEl) { const n = this.found.size; this.cntEl.textContent = badRe ? 'bad regex' : terms.length ? (n ? `${n} found` : 'no match') : '';
+      this.cntEl.classList.toggle('none', badRe || (!!terms.length && !n)); }
     this.renderNames(); this.draw();
-    if (moved) { const d = this.rowTop(moved[0]) - moved[1]; if (d) { if (this.root.classList.contains('wv-scroll')) this.bodyEl.scrollTop += d; else window.scrollBy(0, d); this.draw(); } }
+    if (moved) { const d = this.rowTop(moved[0]) - moved[1]; if (d) { if (this.root.classList.contains('wv-scroll')) this.bodyEl.scrollTop += d;
+      else window.scrollBy(0, d); this.draw(); } }
     return this;
   }
   // the .* option: the query as a JavaScript RegExp, vim's \< \> as \b, anchored with Full, the case as Aa; bad: null
@@ -1751,7 +2031,8 @@ class WaveView {
     this[k] = !!on; this.root.querySelector(`button[data-act=${FIND_OPTS.find(o => o[1] === k)[0]}]`)?.setAttribute('aria-pressed', this[k]);
     return this.find(this.q || '');
   }
-  rowTop(r) { const k = this.vis ? this.vis.indexOf(r) : -1, el = k >= 0 && this.namesEl.querySelector(`.row[data-r="${k}"]`); return el ? el.getBoundingClientRect().top : null; }
+  rowTop(r) { const k = this.vis ? this.vis.indexOf(r) : -1, el = k >= 0 && this.namesEl.querySelector(`.row[data-r="${k}"]`);
+    return el ? el.getBoundingClientRect().top : null; }
   reset() { // Esc: search, highlight and the selected signal go; scroll and time stay, the folding from before the search is back
     const keep = this.fiRow || this.sel;
     if (this.qEl) this.qEl.value = '';
@@ -1786,7 +2067,8 @@ class WaveView {
   }
   syncCursorFields(force) { // the fields show the cursor and the span, except while one is being typed in
     if (!this.ctEl) return;
-    const show = (inp, sel, t) => { if (force || document.activeElement !== inp) inp.value = String(Number((t / (this.M.timed && sel ? UNIT_PS[sel.value] : 1)).toPrecision(7))); };
+    const show = (inp, sel, t) => { if (force || document.activeElement !== inp) inp.value = String(Number((t / (this.M.timed &&
+      sel ? UNIT_PS[sel.value] : 1)).toPrecision(7))); };
     show(this.ctEl, this.cuEl, this.cursor); show(this.csEl, this.suEl, this.span);
   }
   clearFind() { // the search ends; the selection and time stay, the folding from before it (the way to the selection open)
@@ -1817,36 +2099,41 @@ class WaveView {
     const text = rows.map(r => r.full || r.name).join('\n'), done = () => this.toast(`copied ${rows.length}`);
     if (!rows.length) return this.toast('nothing to copy');
     const fallback = () => { const ta = document.createElement('textarea'); ta.value = text; ta.style.cssText = 'position:fixed;opacity:0;top:0';
-      document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); done(); } catch (e) { /* no clipboard */ } ta.remove(); this.canvas.focus({ preventScroll: true }); };
+      document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); done(); } catch (e) { /* no clipboard */ } ta.remove();
+        this.canvas.focus({ preventScroll: true }); };
     try { navigator.clipboard.writeText(text).then(done, fallback); } catch (e) { fallback(); }
     this.copied = text; return this;
   }
-  toast(msg) { const t = this.root.querySelector('.bar .toast'); if (!t) return; t.textContent = msg; clearTimeout(this.toastT); this.toastT = setTimeout(() => { t.textContent = ''; }, 1600); }
-  paint(color) { // the found and the highlighted signals (a highlighted module: its signals; neither: the selected one) take this colour (trace, outline, name); kept in this browser
+  toast(msg) { const t = this.root.querySelector('.bar .toast'); if (!t) return; t.textContent = msg; clearTimeout(this.toastT);
+    this.toastT = setTimeout(() => { t.textContent = ''; }, 1600); }
+  // the found and the highlighted signals (a highlighted module: its signals; neither: the selected one) take this colour
+  // (trace, outline, name); kept in this browser
+  paint(color) {
     this.paintRows().forEach(r => this.painted.set(r.full, color));
     this.savePaint(); this.renderNames(); this.draw(); return this;
   }
   paintRows() {
-    const rows = this.M.rows.filter(r => r.type === 'sig' && (this.found.has(r) || this.picks.has(r) || this.selRun.has(r) || r.anc.some(id => this.picks.has(this.M.groups[id]))));
+    const rows = this.M.rows.filter(r => r.type === 'sig' && (this.found.has(r) || this.picks.has(r) || this.selRun.has(r) ||
+      r.anc.some(id => this.picks.has(this.M.groups[id]))));
     return rows.length ? rows : this.sel && this.sel.type === 'sig' ? [this.sel] : [];
   }
   unpaint() { this.painted.clear(); this.savePaint(); this.renderNames(); this.draw(); return this; }
   // the radix of a signal (a row or its path; one of RADIX, null: the page's) and hidden rows (signals, modules: all of
   // them), from the right button's menu; kept in this browser and in the saved state
-  setRadix(row, radix) {
+  setRadix(row, radix, quiet = false) {   // quiet: no save / render / draw (a loop that does them once after)
     if (typeof row === 'string') row = this.M.rows.find(r => r.type === 'sig' && r.full === row);
     if (!row || row.type !== 'sig') return this;
     if (!('radix0' in row)) row.radix0 = row.radix;
     if (isRadix(radix)) { row.radix = radix; this.radixes.set(row.full, radix); } else { row.radix = row.radix0; this.radixes.delete(row.full); }
-    this.valsAt = null; this.saveRows(); this.renderNames(); this.draw(); return this;
+    this.valsAt = null; if (!quiet) { this.saveRows(); this.renderNames(); this.draw(); } return this;
   }
   // a bus drawn analog (a step plot, n rows high; true: 3, 0 / false: as a bus; null: the page's own), kept like the radix
-  setAnalog(row, n) {
+  setAnalog(row, n, quiet = false) {   // a bus only: a 1-bit signal has no values to plot (null: back to its own)
     if (typeof row === 'string') row = this.M.rows.find(r => r.type === 'sig' && r.full === row);
-    if (!row || row.type !== 'sig') return this;
+    if (!row || row.type !== 'sig' || (n && (row.width || 1) < 2 && row.kind !== 'real')) return this;
     if (!('analog0' in row)) row.analog0 = row.analog;
     if (n == null) { row.analog = row.analog0; this.analogs.delete(row.full); } else { row.analog = n || false; this.analogs.set(row.full, n || false); }
-    this.saveRows(); this.renderNames(); this.draw(); return this;
+    if (!quiet) { this.saveRows(); this.renderNames(); this.draw(); } return this;
   }
   hide(rows) {   // rows or paths
     for (const r of [].concat(rows)) { const p = typeof r === 'string' ? r : r && (r.full || r.path); if (p) this.hiddenRows.add(p); }
@@ -1861,12 +2148,15 @@ class WaveView {
     let o = {};
     try { o = JSON.parse(localStorage.getItem(this.rowsKey) || '{}') || {}; } catch (e) { /* no storage */ }
     this.hiddenRows = new Set(Array.isArray(o.hidden) ? o.hidden : []);
-    for (const [p, n] of Object.entries(o.analog || {})) { const r = this.M.rows.find(x => x.type === 'sig' && x.full === p); if (r) { if (!('analog0' in r)) r.analog0 = r.analog; r.analog = n || false; this.analogs.set(p, n); } }
-    for (const [p, rx] of Object.entries(o.radix || {})) { const r = this.M.rows.find(x => x.type === 'sig' && x.full === p); if (r && isRadix(rx)) { r.radix0 = r.radix; r.radix = rx; this.radixes.set(p, rx); } }
+    for (const [p, n] of Object.entries(o.analog || {})) { const r = this.M.rows.find(x => x.type === 'sig' && x.full === p);
+      if (r) { if (!('analog0' in r)) r.analog0 = r.analog; r.analog = n || false; this.analogs.set(p, n); } }
+    for (const [p, rx] of Object.entries(o.radix || {})) { const r = this.M.rows.find(x => x.type === 'sig' && x.full === p);
+      if (r && isRadix(rx)) { r.radix0 = r.radix; r.radix = rx; this.radixes.set(p, rx); } }
   }
   saveRows() {
     try {
-      if (this.radixes.size || this.hiddenRows.size || this.analogs.size) localStorage.setItem(this.rowsKey, JSON.stringify({ radix: Object.fromEntries(this.radixes), hidden: [...this.hiddenRows], analog: Object.fromEntries(this.analogs) }));
+      if (this.radixes.size || this.hiddenRows.size || this.analogs.size) localStorage.setItem(this.rowsKey,
+        JSON.stringify({ radix: Object.fromEntries(this.radixes), hidden: [...this.hiddenRows], analog: Object.fromEntries(this.analogs) }));
       else localStorage.removeItem(this.rowsKey);
     } catch (e) { /* private mode */ }
   }
@@ -1876,32 +2166,43 @@ class WaveView {
   }
   // the edge style of the waves ("auto" | "wavedrom" | "questa" | "square"; null: the settings' again), from the bar's list;
   // kept in this browser. Signals with a style of their own keep it
-  setStyle(name) {
-    if (EDGES[name]) this.local.style = name; else delete this.local.style;
-    try { if (this.local.style) localStorage.setItem(this.lookKey, JSON.stringify(this.local)); else localStorage.removeItem(this.lookKey); } catch (e) { /* private mode */ }
+  setStyle(name) {   // the bar's own layer: kept only when it differs from the settings (their style comes back with them)
+    const base = settings(GLOBAL, this.M.cfg, this.opts).style;
+    if (EDGES[name] && name !== base) this.local.style = name; else delete this.local.style;
+    try { if (this.local.style) localStorage.setItem(this.lookKey, JSON.stringify(this.local)); else localStorage.removeItem(this.lookKey);
+      } catch (e) { /* private mode */ }
     this.S.style = this.local.style || settings(GLOBAL, this.M.cfg, this.opts).style;
     if (this.wsEl) this.wsEl.value = this.S.style;
     this.draw(); this.settingsChanged(); return this;
   }
-  loadLook() { try { const o = JSON.parse(localStorage.getItem(this.lookKey) || '{}'); return o && EDGES[o.style] ? { style: o.style } : {}; } catch (e) { return {}; } }
+  loadLook() { try { const o = JSON.parse(localStorage.getItem(this.lookKey) || '{}'); return o && EDGES[o.style] ? { style: o.style } : {};
+    } catch (e) { return {}; } }
   // what you did in this viewer as one JSON object (Save / Load… in the bar): the window, the cursor, the order and its
   // prefixes, the folding, the highlight (in its colours' order), the paint, the selected signal, the search, the
   // bookmarks and arrows, and the plugins' parts (extraState). The keys of "config" are settings: they paste into a
   // config file as they are. Paths are full paths; times are model units.
   state() {
     const M = this.M, folded = this.foldSaved || this.collapsed;   // during a search: the folding from before it
-    const st = { wavefw: 'state', version: 1, title: this.opts.title || M.title || '', from: this.t0, to: this.t0 + this.span, cursor: this.cursor,
-      config: { style: this.S.style, sort: this.sort, sortIgnore: [...this.sortIgnore], fold: [...folded].map(id => M.groups[id] && M.groups[id].path).filter(Boolean),
-        highlight: [...this.picks].sort((a, b) => a[1] - b[1]).map(([r]) => r.full).filter(Boolean), findHighlight: !!this.findHl, findOpen: !!this.findOpen, ...Object.fromEntries(FIND_OPTS.map(o => [o[1], !!this[o[1]]])) },
-      paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs), hidden: [...this.hiddenRows], select: (this.sel && this.sel.full) || null, find: this.q || '', bookmarks: this.bookmarks(), arrows: this.arrowList() };
+    const st = { wavefw: 'state', version: STATE_VERSION, title: this.opts.title || M.title || '', from: this.t0, to: this.t0 + this.span, cursor: this.cursor,
+      config: { style: this.S.style, sort: this.sort, sortIgnore: [...this.sortIgnore],
+        fold: [...folded].map(id => M.groups[id] && M.groups[id].path).filter(Boolean),
+        highlight: [...this.picks].sort((a, b) => a[1] - b[1]).map(([r]) => r.full).filter(Boolean), findHighlight: !!this.findHl, findOpen: !!this.findOpen,
+          ...Object.fromEntries(FIND_OPTS.map(o => [o[1], !!this[o[1]]])) },
+      paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs), hidden: [...this.hiddenRows],
+        select: (this.sel && this.sel.full) || null, find: this.q || '', bookmarks: this.bookmarks(), arrows: this.arrowList() };
     if (this.cursor2 != null) st.cursor2 = this.cursor2;
+    if (this.range) st.range = { from: this.range[0], to: this.range[1], signal: (this.rangeRow && this.rangeRow.full) || null };
+    if (this.edgeKind !== 'any' || (this.evEl && this.evEl.value)) st.edge = { kind: this.edgeKind, value: (this.evEl && this.evEl.value) || '' };
     for (const x of this.extraState) { try { const val = x.get(); if (val !== undefined) st[x.key] = val; } catch (e) { console.error('wavefw state:', e); } }
     return st;
   }
   // a state (state()) back: every key it has replaces this viewer's; the plugins' parts first (their rows may come).
   // -> the paths it names that these waves do not have (left out)
   async setState(st) {
-    if (!st || typeof st !== 'object' || Array.isArray(st)) throw new Error('not a saved viewer state');
+    if (!st || typeof st !== 'object' || Array.isArray(st) || st.wavefw !== 'state') throw new Error(st &&
+      st.signal ? 'WaveDrom waves, not a saved viewer state (open them as a page)' : 'not a saved viewer state');
+    if (!(st.version <= STATE_VERSION)) console.warn((`wavefw: a state of version ${st.version} (this viewer reads ${STATE_VERSION}): what it does not know ` +
+        `is left out`));
     const M = this.M, C = st.config || {}, miss = new Set();
     for (const x of this.extraState) if (st[x.key] !== undefined) { try { await x.set(st[x.key]); } catch (e) { this.toast(`${x.key}: ${e.message}`); } }
     this.allRows();   // the plugins' groups are there now (their folding)
@@ -1915,27 +2216,38 @@ class WaveView {
     for (const [k, own] of [['findHighlight', 'findHl'], ['findOpen', 'findOpen']]) if (C[k] !== undefined) {
       this[own] = !!C[k]; this.root.querySelector(`button[data-act=${k === 'findOpen' ? 'fopen' : 'fhl'}]`)?.setAttribute('aria-pressed', this[own]);
     }
-    for (const [act, k] of FIND_OPTS) if (C[k] !== undefined) { this[k] = !!C[k]; this.root.querySelector(`button[data-act=${act}]`)?.setAttribute('aria-pressed', this[k]); }
-    if (C.fold !== undefined) { (Array.isArray(C.fold) ? C.fold : []).forEach(p => seen(p)); this.foldSaved = null; this.collapsed = foldSet(M, C.fold); this.foldTouched = true; }
+    for (const [act, k] of FIND_OPTS) if (C[k] !== undefined) { this[k] = !!C[k];
+      this.root.querySelector(`button[data-act=${act}]`)?.setAttribute('aria-pressed', this[k]); }
+    if (C.fold !== undefined) { (Array.isArray(C.fold) ? C.fold : []).forEach(p => seen(p)); this.foldSaved = null; this.collapsed = foldSet(M, C.fold);
+      this.foldTouched = true; }
     if (C.highlight !== undefined) { prefixes(C.highlight).filter(p => !p.includes('*')).forEach(p => seen(p)); this.picks = hlPick(M, C.highlight); }
-    if (st.paint !== undefined) { this.painted = new Map(Object.entries(st.paint || {}).filter(([p, c]) => typeof c === 'string' && seen(p))); this.savePaint(); }
+    if (st.paint !== undefined) { this.painted = new Map(Object.entries(st.paint || {}).filter(([p, c]) => typeof c === 'string' && seen(p))); this.savePaint();
+      }
     if (st.radix !== undefined) {
-      for (const p of [...this.radixes.keys()]) this.setRadix(p, null);
-      for (const [p, rx] of Object.entries(st.radix || {})) if (seen(p)) this.setRadix(p, rx);
+      for (const p of [...this.radixes.keys()]) this.setRadix(p, null, true);
+      for (const [p, rx] of Object.entries(st.radix || {})) if (seen(p)) this.setRadix(p, rx, true);
     }
     if (st.analog !== undefined) {
-      for (const p of [...this.analogs.keys()]) this.setAnalog(p, null);
-      for (const [p, n] of Object.entries(st.analog || {})) if (seen(p)) this.setAnalog(p, n);
+      for (const p of [...this.analogs.keys()]) this.setAnalog(p, null, true);
+      for (const [p, n] of Object.entries(st.analog || {})) if (seen(p)) this.setAnalog(p, n, true);
     }
+    if (st.radix !== undefined || st.analog !== undefined) this.saveRows();   // once (renderNames and draw: find() below)
     if (st.hidden !== undefined) { this.hiddenRows = new Set((st.hidden || []).filter(p => seen(p))); this.saveRows(); }
     if (st.bookmarks !== undefined || st.arrows !== undefined) {
       const bms = (st.bookmarks || []).filter(b => !b.signal || seen(b.signal) || (b.signal = null, true));   // on the time axis when its signal is not here
       this.bms = bmNorm(bms); this.arrows = arNorm(st.arrows || [], bms); this.saveBookmarks(); this.renderNotes();
     }
     if (st.select !== undefined) this.sel = (st.select && seen(st.select) && M.rows.find(r => r.type === 'sig' && r.tr && r.full === st.select)) || null;
-    if (st.from != null && st.to != null && isFinite(st.from) && isFinite(st.to)) { this.span = Math.min(Math.max(st.to - st.from, this.minSpan), M.t1 - M.t0); this.t0 = this.clamp(st.from); }
+    if (st.from != null && st.to != null && isFinite(st.from) && isFinite(st.to)) { this.span = Math.min(Math.max(st.to - st.from, this.minSpan), M.t1 - M.t0);
+      this.t0 = this.clamp(st.from); }
     if (st.cursor != null && isFinite(st.cursor)) this.cursor = Math.min(Math.max(st.cursor, M.t0), M.t1);
     if (st.cursor2 !== undefined) this.cursor2 = st.cursor2 != null && isFinite(st.cursor2) ? Math.min(Math.max(st.cursor2, M.t0), M.t1) : null;
+    if (st.range !== undefined) {
+      const g = st.range, row = g && g.signal ? (seen(g.signal) && M.rows.find(r => r.type === 'sig' && r.full === g.signal)) || null : null;
+      if (g && isFinite(g.from) && isFinite(g.to)) { this.range = [Math.max(Math.min(g.from, g.to), M.t0), Math.min(Math.max(g.from, g.to), M.t1)];
+        this.rangeRow = row; this.rangeKey = null; } else this.range = null;
+    }
+    if (st.edge !== undefined) { this.setEdgeKind((st.edge && st.edge.kind) || 'any'); if (this.evEl) this.evEl.value = (st.edge && st.edge.value) || ''; }
     if (st.find !== undefined && this.qEl) this.qEl.value = st.find || '';
     this.find(st.find !== undefined ? st.find || '' : this.q || '');   // draws; with Open the folding above is the one from before the search
     this.settingsChanged();
@@ -1952,7 +2264,8 @@ class WaveView {
   async loadState(file) {
     try {
       const text = typeof file === 'string' ? file : await file.text(), miss = await this.setState(JSON.parse(text));
-      this.toast(`${file.name || 'state'} loaded${miss.length ? ` · not in these waves: ${miss.length} (${miss.slice(0, 3).join(', ')}${miss.length > 3 ? ', …' : ''})` : ''}`);
+      this.toast((`${file.name || 'state'} ` +
+          `loaded${miss.length ? ` · not in these waves: ${miss.length} (${miss.slice(0, 3).join(', ')}${miss.length > 3 ? ', …' : ''})` : ''}`));
       return miss;
     } catch (e) { this.toast(`${file.name || 'state'}: ${e.message}`); return null; }
   }
@@ -1965,18 +2278,21 @@ class WaveView {
   // take it as any other); keep: the view of these waves stays (⟳)
   async openDump(file, handle = null, keep = false) {
     try {
-      if (!file && G.showOpenFilePicker) { const [h] = await G.showOpenFilePicker({ id: 'wavefw-dump', types: [{ description: 'VCD dump', accept: { 'text/plain': ['.vcd'] } }] }); handle = h; file = await h.getFile(); }
+      if (!file && G.showOpenFilePicker) { const [h] = await G.showOpenFilePicker({ id: 'wavefw-dump',
+        types: [{ description: 'VCD dump', accept: { 'text/plain': ['.vcd'] } }] }); handle = h; file = await h.getFile(); }
       else if (!file) { this.dfile.click(); return this; }
       if (handle && handle.then) handle = await handle.catch(() => null);
       if (/\.fst$/i.test(file.name)) { this.toast('an FST is binary: fst2vcd x.fst > x.vcd, or make html WAVES=x.fst'); return this; }
       this.toast(`reading ${file.name}…`);
       const text = await file.text(), r = vcdToWave(text, { name: file.name, budget: this.S.dumpBudget });
       if (!r.shown) { this.toast(`${file.name}: no signals`); return this; }
-      const st = keep ? this.state() : null, root = this.root, opts = Object.assign({}, this.opts, { title: file.name, dumpSrc: { name: file.name, handle, file } });
+      const st = keep ? this.state() : null, root = this.root, opts = Object.assign({}, this.opts,
+        { title: file.name, dumpSrc: { name: file.name, handle, file } });
       this.destroy(); root.innerHTML = '';
       const v = new WaveView(root, r.doc, opts);
       if (st) { delete st.title; await v.setState(st); }
-      v.toast(`${file.name}: ${r.shown} of ${r.total} signals${r.shown < r.total ? ` (dumpBudget ${this.S.dumpBudget} changes: the levels nearest the top)` : ''}`);
+      v.toast((`${file.name}: ${r.shown} of ${r.total} ` +
+          `signals${r.shown < r.total ? ` (dumpBudget ${this.S.dumpBudget} changes: the levels nearest the top)` : ''}`));
       root.dispatchEvent(new CustomEvent('wavefw:dump', { detail: { name: file.name, shown: r.shown, total: r.total } }));
       return v;
     } catch (e) { if (e && e.name !== 'AbortError') this.toast('cannot open: ' + e.message); return this; }
@@ -2022,8 +2338,24 @@ class WaveView {
     return this;
   }
   // an event listener on a part of the viewer: 'names' (the names column), 'waves' (the canvas), 'bar', 'lists'
-  listen(part, type, fn, o) { ({ names: this.namesEl, waves: this.canvas, bar: this.root.querySelector('.bar'), lists: this.notesEl })[part].addEventListener(type, fn, o); return this; }
+  listen(part, type, fn, o) { ({ names: this.namesEl, waves: this.canvas, bar: this.root.querySelector('.bar'),
+    lists: this.notesEl })[part].addEventListener(type, fn, o); return this; }
   // a key on the waves (without ctrl / alt / meta) and its line in the hint ("f F next / previous failure")
+  // the cursor to time t and the window to show it: `left` puts the window's start there, `center` the time in the
+  // middle, else the window moves only when t is outside it; "l" goes back to the window before (plugins: ]t ]f …)
+  moveTo(t, { left = null, center = false, cursor = true } = {}) {
+    this.markView();
+    if (left != null) this.t0 = this.clamp(left);
+    else if (center || t < this.t0 || t > this.t0 + this.span) this.t0 = this.clamp(t - this.span / 2);
+    if (cursor) this.cursor = Math.min(Math.max(t, this.M.t0), this.M.t1);
+    this.draw(); return this;
+  }
+  // fold (on) or open a group by its id; quiet: no render (a plugin building its rows)
+  fold(id, on, quiet = false) {
+    if (on) this.collapsed.add(id); else this.collapsed.delete(id);
+    if (!quiet) { this.foldTouched = true; this.renderNames(); this.draw(); }
+    return this;
+  }
   addKey(key, fn, help) { this.keys[key] = fn; if (help) { this.hints.push(help); this.keyHelp = (this.keyHelp || []).concat([help]); } return this; }
   // ? : the keys and the mouse in a box over the viewer (Esc, ? or a click outside closes it)
   help(on = !this.helpEl) {
@@ -2031,21 +2363,27 @@ class WaveView {
     if (!on) return this;
     const kb = ks => ks.map(x => `<kbd>${esc(x)}</kbd>`).join(' ');
     const plug = (this.keyHelp || []).map(h => { const m = h.match(/^((?:\S{1,3}\s+)+?)([a-z(].*)$/); return m ? [m[1].trim().split(/\s+/), m[2]] : [[], h]; });
-    const sec = ([title, rows]) => `<section><h4>${esc(title)}</h4><table>${rows.map(([k, t]) => `<tr><td>${kb(k)}</td><td>${esc(t)}</td></tr>`).join('')}</table></section>`;
-    const el = this.helpEl = document.createElement('div'); el.className = 'wv-help'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'keys and mouse');
-    el.innerHTML = `<div class="hh"><b>Keys and mouse</b><span class="muted">on the waves (a click there gives them the keys); hover a button for what it does</span><button type="button" class="ic" aria-label="close">✕</button></div>` +
+    const sec = ([title, rows]) =>
+      `<section><h4>${esc(title)}</h4><table>${rows.map(([k, t]) => `<tr><td>${kb(k)}</td><td>${esc(t)}</td></tr>`).join('')}</table></section>`;
+    const el = this.helpEl = document.createElement('div'); el.className = 'wv-help'; el.setAttribute('role', 'dialog');
+      el.setAttribute('aria-label', 'keys and mouse');
+    el.innerHTML =
+      (`<div class="hh"><b>Keys and mouse</b><span class="muted">on the waves (a click there gives them the keys); hover a button for what it ` +
+        `does</span><button type="button" class="ic" aria-label="close">✕</button></div>`) +
       `<div class="hg">${HELP.concat(plug.length ? [['Plugins', plug]] : []).map(sec).join('')}</div>`;
     this.root.append(el);
     el.querySelector('button').addEventListener('click', () => this.help(false));
-    el.addEventListener('keydown', e => { if (e.key === 'Escape' || e.key === '?') { e.preventDefault(); e.stopPropagation(); this.help(false); this.canvas.focus({ preventScroll: true }); } });
+    el.addEventListener('keydown', e => { if (e.key === 'Escape' || e.key === '?') { e.preventDefault(); e.stopPropagation(); this.help(false);
+      this.canvas.focus({ preventScroll: true }); } });
     this.offHelp = e => { if (!el.contains(e.target) && !e.target.closest('[data-act=help]')) this.help(false); };
-    document.addEventListener('pointerdown', this.offHelp, true);   // the click that opened it is on the ? button: ignored
+    document.addEventListener('pointerdown', this.offHelp, { capture: true, signal: this.ac.signal });   // the click that opened it is on the ? button: ignored
     el.tabIndex = -1; el.focus({ preventScroll: true });
     return this;
   }
   renderHint() { const h = this.root.querySelector('.hint'); if (h) h.textContent = [this.hintBase, ...this.hints].join(' · '); }
   savePaint() {
-    try { if (this.painted.size) localStorage.setItem(this.paintKey, JSON.stringify(Object.fromEntries(this.painted))); else localStorage.removeItem(this.paintKey); } catch (e) { /* private mode */ }
+    try { if (this.painted.size) localStorage.setItem(this.paintKey, JSON.stringify(Object.fromEntries(this.painted)));
+      else localStorage.removeItem(this.paintKey); } catch (e) { /* private mode */ }
     if (this.unpaintBtn) this.unpaintBtn.hidden = !this.painted.size;
   }
   expandAll() { this.collapsed = new Set(); this.foldTouched = true; this.renderNames(); this.draw(); return this; }
@@ -2074,7 +2412,9 @@ class WaveView {
       const t = findEdge(s, this.cursor, dir, kind, w, this.S.radix);
       if (t != null && (best == null || (dir > 0 ? t < best : t > best))) { best = t; at = s; }
     }
-    if (best == null) { if (kind === 'value' || kind === 'xz') this.toast(`no ${kind === 'xz' ? 'X / Z' : w.text} ${dir > 0 ? 'after' : 'before'} the cursor${this.sel ? ' on ' + this.sel.name : ''}`); return this; }
+    if (best == null) { if (kind === 'value' ||
+      kind === 'xz') this.toast(`no ${kind === 'xz' ? 'X / Z' : w.text} ${dir > 0 ? 'after' : 'before'} the cursor${this.sel ? ' on ' + this.sel.name : ''}`);
+      return this; }
     if ((kind === 'value' || kind === 'xz') && !this.sel && at) this.toast(`${at.name} ${kind === 'xz' ? 'goes X / Z' : '= ' + w.text}`);
     this.cursor = best;
     if (best < this.t0 || best > this.t0 + this.span) this.t0 = this.clamp(best - this.span / 2);
@@ -2084,10 +2424,12 @@ class WaveView {
   snap(s, t, px = 6) {
     if (!s || !s.tr) return t;
     const tol = px / this.pxPerT(), i = lastLE(s.tr, t);
-    const near = [i, i + 1].filter(k => k > 0 && k < s.tr.length && Math.abs(s.tr[k].t - t) <= tol).sort((a, b) => Math.abs(s.tr[a].t - t) - Math.abs(s.tr[b].t - t))[0];
+    const near = [i, i + 1].filter(k => k > 0 && k < s.tr.length && Math.abs(s.tr[k].t - t) <= tol).sort((a, b) =>
+      Math.abs(s.tr[a].t - t) - Math.abs(s.tr[b].t - t))[0];
     return near != null ? s.tr[near].t : t;
   }
-  bmAt(x, y) { const pos = this.bmGeo && this.bmGeo.pos; return pos && this.bms.find(b => { const p = pos.get(b.n); return p && Math.hypot(p[0] - x, p[1] - y) <= 9; }); }
+  bmAt(x, y) { const pos = this.bmGeo && this.bmGeo.pos; return pos && this.bms.find(b =>
+    { const p = pos.get(b.n); return p && Math.hypot(p[0] - x, p[1] - y) <= 9; }); }
   // drag on the waves: time from x (snapped to an edge of the row), signal from the row under y (the time axis: no signal)
   // dragged: the time (snapped to an edge of its row), the row under the pointer, or the axis; on the top quarter of a
   // signal row, or in the lane above it, lifted into that lane (a leader down to the signal), lower down on the row again
@@ -2096,7 +2438,8 @@ class WaveView {
     if (y < (this.oy || 0) + this.hdrH) { b.signal = null; b.lift = false; }
     else if (o && o.row.type === 'sig') { b.signal = o.row.full; b.lift = this.S.arrowLabels === 'lane' && y < o.y + o.h / 4; }
     else if (o && o.row.type === 'lane' && o.row.ids.includes('b:' + b.signal)) b.lift = true;
-    else if (o && o.row.type === 'lane') { const r = lay.slice(k + 1).find(q => q.row.type !== 'lane'); if (r && r.row.type === 'sig') { b.signal = r.row.full; b.lift = this.S.arrowLabels === 'lane'; } }
+    else if (o && o.row.type === 'lane') { const r = lay.slice(k + 1).find(q => q.row.type !== 'lane');
+      if (r && r.row.type === 'sig') { b.signal = r.row.full; b.lift = this.S.arrowLabels === 'lane'; } }
     const s = b.signal != null ? this.M.rows.find(r => r.type === 'sig' && r.full === b.signal) : null;
     b.t = Math.min(Math.max(this.snap(s, this.t0 + x / this.pxPerT()), this.M.t0), this.M.t1);
     this.draw();
@@ -2110,14 +2453,18 @@ class WaveView {
     if (!text) this.notesEl.querySelector(`li[data-n="${n}"] input.txt`)?.focus();
     return n;
   }
-  arrow(from, to, opts = {}) { this.arrows.push(...arNorm([Object.assign({ from, to }, opts)])); this.saveBookmarks(); this.renderNotes(); this.draw(); return this; }
+  arrow(from, to, opts = {}) { this.arrows.push(...arNorm([Object.assign({ from, to }, opts)])); this.saveBookmarks(); this.renderNotes(); this.draw();
+    return this; }
   // JSON for a config file / WaveJSON (t in model units: ps for timed waves, else cycles); defaults are left out
-  bookmarks() { return this.bms.map(b => Object.fromEntries(Object.entries({ n: b.n, t: b.t, signal: b.signal, text: b.text, color: b.color, lift: b.lift || null }).filter(([, v]) => v != null && v !== ''))); }
+  bookmarks() { return this.bms.map(b => Object.fromEntries(Object.entries({ n: b.n, t: b.t, signal: b.signal, text: b.text, color: b.color, lift: b.lift ||
+    null }).filter(([, v]) => v != null && v !== ''))); }
   arrowList() {
-    return this.arrows.map(a => Object.fromEntries(Object.entries({ from: a.from, to: a.to, shape: a.shape, head: a.head === '>' ? null : a.head, line: a.line === 'solid' ? null : a.line,
+    return this.arrows.map(a => Object.fromEntries(Object.entries({ from: a.from, to: a.to, shape: a.shape, head: a.head === '>' ? null : a.head,
+      line: a.line === 'solid' ? null : a.line,
       color: a.color, label: a.label }).filter(([k, v]) => v != null && (v !== '' || k === 'head'))));   // head "" = no head
   }
-  setBookmarks(list, arrows = []) { this.bms = bmNorm(list); this.arrows = arNorm(arrows, list); this.saveBookmarks(); this.renderNotes(); this.draw(); return this; }
+  setBookmarks(list, arrows = []) { this.bms = bmNorm(list); this.arrows = arNorm(arrows, list); this.saveBookmarks(); this.renderNotes(); this.draw();
+    return this; }
   loadBookmarks() { // this browser's copy (localStorage) wins over the page's "bookmarks" / "arrows"
     try {
       const v = localStorage.getItem(this.bmKey);
@@ -2125,7 +2472,8 @@ class WaveView {
     } catch (e) { /* no storage: page bookmarks */ }
     return { bms: this.M.bookmarks.map(b => Object.assign({}, b)), arrows: this.M.arrows.map(a => Object.assign({}, a)) };
   }
-  saveBookmarks() { try { localStorage.setItem(this.bmKey, JSON.stringify({ bookmarks: this.bookmarks(), arrows: this.arrowList() })); } catch (e) { /* private mode */ } }
+  saveBookmarks() { try { localStorage.setItem(this.bmKey, JSON.stringify({ bookmarks: this.bookmarks(), arrows: this.arrowList() }));
+    } catch (e) { /* private mode */ } }
   when(t) { return this.M.timed ? fmtExact(t) : trimNum(t); }
   // typed time: "250ns", "85.12us"; a plain number is in the unit shown (µs for "85.120 µs"), or cycles
   parseWhen(str, ref) {
@@ -2153,8 +2501,11 @@ class WaveView {
     if (!burst || now - (this.viewT || 0) > 500) this.lastView = { t0: this.t0, span: this.span };
     this.viewT = burst ? now : 0;
   }
-  zoomLast() { const b = this.lastView; if (!b) return this; this.lastView = { t0: this.t0, span: this.span }; this.span = b.span; this.t0 = this.clamp(b.t0); this.draw(); return this; }
-  zoomTo(a, b) { this.markView(); this.span = Math.min(Math.max(b - a, this.minSpan), this.M.t1 - this.M.t0); this.t0 = this.clamp(a); this.draw(); return this; }   // the window [a, b]
+  zoomLast() { const b = this.lastView; if (!b) return this; this.lastView = { t0: this.t0, span: this.span }; this.span = b.span; this.t0 = this.clamp(b.t0);
+    this.draw(); return this; }
+  // the window [a, b]
+  zoomTo(a, b) { this.markView(); this.span = Math.min(Math.max(b - a, this.minSpan), this.M.t1 - this.M.t0); this.t0 = this.clamp(a); this.draw(); return this;
+    }
   // a two-key sequence (vim): gg first signal, zR / zM open / fold every module, zc fold / zo open the selected signal's
   // module, yy copy, ]m [m next / previous bookmark, ]e [e next / previous edge; plugins add theirs (addKey(']f', …)).
   // -> whether it was one
@@ -2186,11 +2537,22 @@ class WaveView {
   setCursor2(t) { this.cursor2 = t == null || !isFinite(t) ? null : Math.min(Math.max(t, this.M.t0), this.M.t1); this.draw(); return this; }
   // a clock for counting cycles: the selected signal when it is one, else a 1-bit *clk* / *clock* nearest to the rows
   clockFor(rows = this.sel ? [this.sel] : []) {
+    const key = rows.length === 1 ? rows[0] : rows.length ? null : 'none';   // one row or none: remembered (a draw asks twice)
+    if (key && this.clkMemo && this.clkMemo[0] === key) return this.clkMemo[1];
     const isClk = r => r.type === 'sig' && r.width === 1 && r.tr && r.tr.length > 4 && /clk|clock/i.test(r.name);
-    const near = r => rows.length ? Math.max(...rows.map(s => { let k = 0; while (k < r.anc.length && r.anc[k] === s.anc[k]) k++; return k - (r.anc.length - k); })) : 0;
-    return rows.find(isClk) || this.M.rows.filter(isClk).sort((x, y) => near(y) - near(x))[0] || null;
+    const near = r => rows.length ? Math.max(...rows.map(s => { let k = 0; while (k < r.anc.length && r.anc[k] === s.anc[k]) k++; return k - (r.anc.length - k);
+      })) : 0;
+    const c = rows.find(isClk) || this.M.rows.filter(isClk).sort((x, y) => near(y) - near(x))[0] || null;
+    if (key) this.clkMemo = [key, c];
+    return c;
   }
-  cycles(clk, a, b) { if (!clk) return null; const lo = Math.min(a, b), hi = Math.max(a, b); return clk.tr.filter(o => o.k === '1' && o.t > lo && o.t <= hi).length; }   // rising edges in (a, b]
+  // the rising edges of clk in (a, b]: two searches in its (cached) list of rise times, not a pass over all its changes
+  cycles(clk, a, b) {
+    if (!clk) return null;
+    const ups = RISES.get(clk) || (RISES.set(clk, clk.tr.filter(o => o.k === '1').map(o => o.t)), RISES.get(clk));
+    const le = t => { let lo = 0, hi = ups.length; while (lo < hi) { const m = (lo + hi) >> 1; if (ups[m] <= t) lo = m + 1; else hi = m; } return lo; };
+    return le(Math.max(a, b)) - le(Math.min(a, b));
+  }
   delta2() {   // "Δ 40 ns · 4 clk" between the cursors, or ''
     if (this.cursor2 == null) return '';
     const d = this.cursor2 - this.cursor, clk = this.clockFor(), n = this.cycles(clk, this.cursor, this.cursor2);
@@ -2198,9 +2560,7 @@ class WaveView {
   }
   stepMark(dir) {   // the cursor to the next / previous bookmark in time (round the ends)
     const bs = [...this.bms].sort((a, b) => a.t - b.t); if (!bs.length) return this;
-    const eps = 1e-9 * Math.max(1, Math.abs(this.cursor));
-    let b = dir > 0 ? bs.find(x => x.t > this.cursor + eps) : [...bs].reverse().find(x => x.t < this.cursor - eps);
-    if (!b) b = dir > 0 ? bs[0] : bs[bs.length - 1];
+    const b = bs[stepTo(bs.map(x => x.t), this.cursor, dir)];
     this.cursor = b.t; if (b.t < this.t0 || b.t > this.t0 + this.span) this.t0 = this.clamp(b.t - this.span / 2);
     if (b.signal) this.sel = this.M.rows.find(r => r.full === b.signal) || this.sel;
     this.renderNames(); this.draw(); return this;
@@ -2251,7 +2611,8 @@ class WaveView {
     if (s && s.tr && s.tr.length) {
       const tr = s.tr, i0 = lastLE(tr, a) + 1, i1 = lastLE(tr, b), bus = s.width > 1 || tr.some(o => o.k === '=');
       if (!bus) { let n = 0; for (let i = Math.max(i0, 1); i <= i1; i++) if (tr[i].k === '1' && tr[i - 1].k === '0') n++; if (n) more = ` · ${n} ↑ ${s.name}`; }
-      else if (i1 >= i0) { const vals = new Set(); for (let i = Math.max(i0 - 1, 0); i <= i1; i++) vals.add(tr[i].raw ?? tr[i].v ?? tr[i].k); const n = i1 - i0 + 1; more = ` · ${n} change${n === 1 ? '' : 's'} of ${s.name} (${vals.size} value${vals.size === 1 ? '' : 's'})`; }
+      else if (i1 >= i0) { const vals = new Set(); for (let i = Math.max(i0 - 1, 0); i <= i1; i++) vals.add(tr[i].raw ?? tr[i].v ?? tr[i].k);
+        const n = i1 - i0 + 1; more = ` · ${n} change${n === 1 ? '' : 's'} of ${s.name} (${vals.size} value${vals.size === 1 ? '' : 's'})`; }
     }
     this.rangeKey = key; this.rangeTxt = 'Δ ' + (this.M.timed ? fmtExact(b - a) : trimNum(b - a) + ' cycles') + more;
     return this.rangeTxt;
@@ -2265,7 +2626,8 @@ class WaveView {
   // a clock — a 1-bit *clk* / *clock* among them, else in their modules —, else of the shortest time between changes;
   // the values at the start of each cell (as vcd2wavedrom.py samples), buses as "=" with their text in the radix shown
   toWaveDrom(a = this.t0, b = this.t0 + this.span, rows = null) {
-    const picked = this.selRun.size > 1 ? this.M.rows.filter(r => this.selRun.has(r)) : this.picks.size ? this.M.rows.filter(r => this.picks.has(r) || r.anc.some(id => this.picks.has(this.M.groups[id]))) : this.screenRows();
+    const picked = this.selRun.size > 1 ? this.M.rows.filter(r => this.selRun.has(r)) : this.picks.size ? this.M.rows.filter(r => this.picks.has(r) ||
+      r.anc.some(id => this.picks.has(this.M.groups[id]))) : this.screenRows();
     const sigs = (rows || picked).filter(r => r.type === 'sig' && r.tr && r.tr.length);
     const clk = this.clockFor(sigs);
     let cells = clk ? clk.tr.filter(o => o.k === '1' && o.t >= a && o.t < b).map(o => o.t) : [];
@@ -2282,15 +2644,20 @@ class WaveView {
         const i = lastLE(r.tr, t), o = i < 0 ? { k: 'x' } : r.tr[i], key = o.k === '=' ? '=' + (o.raw ?? o.v) : o.k;
         if (key === prev) { wave += '.'; continue; }
         prev = key;
-        if (o.k === '=') { wave += '='; data.push(vtext(r, o, this.S.radix)); } else wave += 'udhlHL'.includes(o.k) ? o.k : o.k === '1' || o.k === '0' || o.k === 'z' ? o.k : 'x';
+        if (o.k === '=') { wave += '='; data.push(vtext(r, o, this.S.radix)); } else wave += 'udhlHL'.includes(o.k) ? o.k : o.k === '1' || o.k === '0' ||
+          o.k === 'z' ? o.k : 'x';
       }
       return data.length ? { name: r.name, wave, data } : { name: r.name, wave };
     };
-    const scopes = [...new Set(sigs.map(r => (r.anc.length ? r.anc[r.anc.length - 1] : -1)))], label = id => (id < 0 ? '' : this.M.groups[id].path || this.M.groups[id].name);
-    const signal = scopes.length > 1 ? scopes.map(id => [label(id), ...sigs.filter(r => (r.anc.length ? r.anc[r.anc.length - 1] : -1) === id).map(one)]) : sigs.map(one);
+    const scopes = [...new Set(sigs.map(r => (r.anc.length ? r.anc[r.anc.length - 1] : -1)))], label = id =>
+      (id < 0 ? '' : this.M.groups[id].path || this.M.groups[id].name);
+    const signal = scopes.length > 1 ? scopes.map(id => [label(id), ...sigs.filter(r =>
+      (r.anc.length ? r.anc[r.anc.length - 1] : -1) === id).map(one)]) : sigs.map(one);
     if (clk && !sigs.includes(clk) && cells.length > 1) signal.unshift(one(clk));
     const title = String(this.opts.title || this.M.title || 'waves');
-    return { signal, head: { text: `${title}: ${this.fmt(a, (b - a) / 1000, b - a)} … ${this.fmt(b, (b - a) / 1000, b - a)}` }, foot: { text: clk && cells.length > 1 ? `one cell per ${clk.full || clk.name} cycle` : `one cell per ${this.fmt(cells[1] - cells[0] || 0, 1, cells[1] - cells[0] || 1)}` }, config: { hscale: 1 } };
+    return { signal, head: { text: `${title}: ${this.fmt(a, (b - a) / 1000, b - a)} … ${this.fmt(b, (b - a) / 1000, b - a)}` },
+      foot: { text: clk && cells.length > 1 ? `one cell per ${clk.full || clk.name} cycle` :
+      `one cell per ${this.fmt(cells[1] - cells[0] || 0, 1, cells[1] - cells[0] || 1)}` }, config: { hscale: 1 } };
   }
   screenRows() {
     const top = this.oy || 0, h = this.hc || 0, hdr = this.hdrH;
@@ -2328,7 +2695,8 @@ class WaveView {
   // PNG, SVG), the signal under the pointer (colour, highlight, copy its path); Esc, a click elsewhere or a choice closes it
   menu(cx, cy, row, at = this.cursor) {
     this.closeMenu();
-    const r = this.range, sig = row && row.type === 'sig' && row.tr ? row : null, grp = row && row.type === 'group' && this.M.groups[row.id] === row ? row : null, it = row && (sig || grp);
+    const r = this.range, sig = row && row.type === 'sig' && row.tr ? row : null, grp = row && row.type === 'group' &&
+      this.M.groups[row.id] === row ? row : null, it = row && (sig || grp);
     const up = sig && sig.anc.length ? sig.anc[sig.anc.length - 1] : null, nh = this.hiddenRows.size, ng = Object.keys(this.M.groups).length;
     // a highlighted row clicked: colour, radix and hide go to every highlighted one (a highlighted module: its signals)
     const picked = r => this.picks.has(r) || r.anc.some(id => this.picks.has(this.M.groups[id]));
@@ -2336,24 +2704,43 @@ class WaveView {
     const run = !!sig && this.selRun.size > 1 && this.selRun.has(sig);
     const many = run || (it && (this.picks.has(it) || sig && picked(sig)) && this.picks.size > 1);
     const sigs = run ? [...this.selRun] : many ? this.M.rows.filter(r => r.type === 'sig' && r.tr && picked(r)) : sig ? [sig] : [];
-    const buses = sigs.filter(r => r.width > 1 && r.tr.some(o => o.raw != null)), rows = run ? sigs : many ? [...this.picks.keys()].filter(r => r.full && (r.type === 'sig' || this.M.groups[r.id] === r)) : [it];
-    const acc = getComputedStyle(this.root).getPropertyValue('--wave-paint').trim(), col = sig && this.painted.get(sig.full) || (/^#[0-9a-f]{6}$/i.test(acc) ? acc : '#d6336c');
-    const of = many ? `the ${sigs.length} ${run ? 'selected' : 'highlighted'}` : sig ? sig.name : '', rx = sig && (sig.radix0 !== undefined ? sig.radix0 || this.S.radix : sig.radix || this.S.radix);
-    const q0 = /^(s?q)(\d+)$/.exec((sig && this.radixes.get(sig.full)) || ''), qk = q0 ? q0[1] : '', qf = q0 ? +q0[2] : 8;   // a fixed-point radix: its kind and fraction bits
-    const np = this.exportRows().length, pic = np ? { rows: this.exportRows() } : {};   // the picture and WaveDrom: the selected run, the highlighted rows, else the screen's
-    const b = (m, label) => { const k = (TIPS['m:' + m] || [])[1]; return `<button type="button" role="menuitem" data-m="${m}"><span>${label}</span>${k ? `<span class="kk">${esc(k[0])}</span>` : ''}</button>`; };
+    const buses = sigs.filter(r => r.width > 1 && r.tr.some(o => o.raw != null)),
+      rows = run ? sigs : many ? [...this.picks.keys()].filter(r => r.full && (r.type === 'sig' || this.M.groups[r.id] === r)) : [it];
+    const acc = getComputedStyle(this.root).getPropertyValue('--wave-paint').trim(), col = sig && this.painted.get(sig.full) ||
+      (/^#[0-9a-f]{6}$/i.test(acc) ? acc : '#d6336c');
+    const of = many ? `the ${sigs.length} ${run ? 'selected' : 'highlighted'}` : sig ? sig.name : '', rx = sig &&
+      (sig.radix0 !== undefined ? sig.radix0 || this.S.radix : sig.radix || this.S.radix);
+    // a fixed-point radix: its kind and fraction bits
+    const q0 = /^(s?q)(\d+)$/.exec((sig && this.radixes.get(sig.full)) || ''), qk = q0 ? q0[1] : '', qf = q0 ? +q0[2] : 8;
+    // the picture and WaveDrom: the selected run, the highlighted rows, else the screen's
+    const np = this.exportRows().length, pic = np ? { rows: this.exportRows() } : {};
+    const b = (m, label) => { const k = (TIPS['m:' + m] || [])[1];
+      return `<button type="button" role="menuitem" data-m="${m}"><span>${label}</span>${k ? `<span class="kk">${esc(k[0])}</span>` : ''}</button>`; };
     const el = document.createElement('div'); el.className = 'wv-menu'; el.setAttribute('role', 'menu');
-    el.innerHTML = (r ? `<div class="mh">${esc(this.rangeText())}</div>` + b('zoom', 'Zoom to the range') + b('marks', 'Bookmarks at its ends', 'Two bookmarks and an arrow with the Δ between them') + b('copyd', 'Copy Δ') + '<hr>' : '') +
-      (np ? `<div class="mh">${np} ${this.selRun.size > 1 ? 'selected' : 'highlighted'} rows</div>` : '') + b('copyimg', 'Copy image') + b('png', 'Save image as PNG') + b('svg', 'Save image as SVG') + b('wdjson', 'Save as WaveDrom') + b('wdcopy', 'Copy WaveDrom') +
+    el.innerHTML = (r ? `<div class="mh">${esc(this.rangeText())}</div>` + b('zoom', 'Zoom to the range') + b('marks', 'Bookmarks at its ends',
+      'Two bookmarks and an arrow with the Δ between them') + b('copyd', 'Copy Δ') + '<hr>' : '') +
+      (np ? `<div class="mh">${np} ${this.selRun.size > 1 ? 'selected' : 'highlighted'} rows</div>` : '') + b('copyimg', 'Copy image') + b('png',
+        'Save image as PNG') + b('svg', 'Save image as SVG') + b('wdjson', 'Save as WaveDrom') + b('wdcopy', 'Copy WaveDrom') +
       (it ? `<hr><div class="mh">${esc(it.full || it.name)}${many ? `<br>+ every ${run ? 'selected' : 'highlighted'} row: ${sigs.length} signals` : ''}</div>` +
-        (sigs.length ? `<label class="mi">${many ? `Colour of ${sigs.length}` : 'Colour'} <input type="color" value="${esc(col)}" aria-label="colour of ${esc(of)}"></label>` + (sigs.some(r => this.painted.has(r.full)) ? b('unpaint', many ? 'Their own colours' : 'Its own colour') : '') : '') +
-        (sig && buses.length ? `<label class="mi">${many ? `Radix of ${buses.length}` : 'Radix'} <span><select aria-label="radix of ${esc(of)}"><option value="">the page's${many ? '' : ` (${esc(rx)})`}</option>${RADIX.map(x => `<option${buses.every(r => this.radixes.get(r.full) === x) ? ' selected' : ''}>${x}</option>`).join('')}` +
-          `<option value="q"${qk === 'q' ? ' selected' : ''}>fixed q (unsigned)</option><option value="sq"${qk === 'sq' ? ' selected' : ''}>fixed sq (signed)</option></select>` +
-          `<input type="number" class="qf" min="0" max="128" value="${qf}" aria-label="fraction bits" title="Fraction bits of the fixed-point value"${qk ? '' : ' hidden'}></span></label>` : '') +
+        (sigs.length ?
+          `<label class="mi">${many ? `Colour of ${sigs.length}` : 'Colour'} <input type="color" value="${esc(col)}"
+            aria-label="colour of ${esc(of)}"></label>` +
+            (sigs.some(r => this.painted.has(r.full)) ? b('unpaint', many ? 'Their own colours' : 'Its own colour') : '') : '') +
+        (sig && buses.length ?
+          (`<label class="mi">${many ? `Radix of ${buses.length}` : 'Radix'} <span><select aria-label="radix of ${esc(of)}"><option value="">the ` +
+            `page's${many ? '' : ` (${esc(rx)})`}</option>` +
+            RADIX.map(x => `<option${buses.every(r => this.radixes.get(r.full) === x) ? ' selected' : ''}>${x}</option>`).join('')) +
+          (`<option value="q"${qk === 'q' ? ' selected' : ''}>fixed q (unsigned)</option><option value="sq"${qk === 'sq' ? ' selected' : ''}>fixed sq ` +
+              `(signed)</option></select>`) +
+          (`<input type="number" class="qf" min="0" max="128" value="${qf}" aria-label="fraction bits" title="Fraction bits of the fixed-point ` +
+              `value"${qk ? '' : ' hidden'}></span></label>`) : '') +
         (sig && buses.length ? b('analog', buses.every(r => r.analog) ? 'As a bus' : many ? `Analog: ${buses.length}` : 'Analog (step plot)') : '') +
-        b('hl', this.picks.has(it) ? 'Remove the highlight' : 'Highlight') + b('hide', many ? `Hide the ${rows.length} ${run ? 'selected' : 'highlighted'}` : grp ? 'Hide this module' : 'Hide', 'Leave it out of the view (Hidden: N ✕ in the bar shows it again)') +
+        b('hl', this.picks.has(it) ? 'Remove the highlight' : 'Highlight') + b('hide',
+          many ? `Hide the ${rows.length} ${run ? 'selected' : 'highlighted'}` : grp ? 'Hide this module' : 'Hide',
+          'Leave it out of the view (Hidden: N ✕ in the bar shows it again)') +
         (grp ? b('fold', this.collapsed.has(grp.id) ? 'Open this module' : 'Fold this module') : up != null ? b('foldup', 'Fold its module') : '') +
-        (sig ? b('mark', 'Bookmark here', 'A bookmark on this signal at the time clicked') : '') + b('c2', 'Second cursor here') + (this.cursor2 != null ? b('c2x', 'Clear the second cursor') : '') + b('copyname', 'Copy the path') : '') +
+        (sig ? b('mark', 'Bookmark here', 'A bookmark on this signal at the time clicked') : '') + b('c2',
+          'Second cursor here') + (this.cursor2 != null ? b('c2x', 'Clear the second cursor') : '') + b('copyname', 'Copy the path') : '') +
       (ng || nh ? '<hr>' + (ng ? b('zM', 'Fold every module') + b('zR', 'Open every module') : '') + (nh ? b('unhide', `Show the hidden (${nh})`) : '') : '') +
       (r ? '<hr>' + b('clear', 'Clear the range') : '');
     this.root.append(el); this.menuEl = el;
@@ -2372,25 +2759,34 @@ class WaveView {
       else if (act === 'copyd') this.copyText(this.rangeText().replace(/^Δ /, '').split(' · ')[0]);
       else if (act === 'copyimg') {
         const png = this.toPNG(pic);
-        try { navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]).then(() => this.toast('image copied'), err => this.toast('not copied: ' + err.message)); }
+        try { navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]).then(() => this.toast('image copied'), err =>
+          this.toast('not copied: ' + err.message)); }
         catch (err) { this.toast('this browser cannot copy an image: Save image as PNG'); }
       }
-      else if (act === 'png') this.toPNG(pic).then(bl => { this.download(bl, this.picName('png')); this.toast('saved ' + this.picName('png')); }, err => this.toast(err.message));
-      else if (act === 'svg') { this.download(new Blob([this.toSVG(pic)], { type: 'image/svg+xml' }), this.picName('svg')); this.toast('saved ' + this.picName('svg')); }
+      else if (act === 'png') this.toPNG(pic).then(bl => { this.download(bl, this.picName('png')); this.toast('saved ' + this.picName('png')); }, err =>
+        this.toast(err.message));
+      else if (act === 'svg') { this.download(new Blob([this.toSVG(pic)], { type: 'image/svg+xml' }), this.picName('svg'));
+        this.toast('saved ' + this.picName('svg')); }
       else if (act === 'wdjson' || act === 'wdcopy') {
         const [ta, tb] = r || [this.t0, this.t0 + this.span], text = wdText(this.toWaveDrom(ta, tb));
-        if (act === 'wdcopy') { try { navigator.clipboard.writeText(text).then(() => this.toast('WaveDrom copied'), () => this.toast('not copied')); } catch (e) { this.toast('not copied'); } }
-        else { this.download(new Blob([text + '\n'], { type: 'application/json' }), this.picName('wavedrom.json')); this.toast('saved ' + this.picName('wavedrom.json')); }
+        if (act === 'wdcopy') { try { navigator.clipboard.writeText(text).then(() => this.toast('WaveDrom copied'), () => this.toast('not copied'));
+          } catch (e) { this.toast('not copied'); } }
+        else { this.download(new Blob([text + '\n'], { type: 'application/json' }), this.picName('wavedrom.json'));
+          this.toast('saved ' + this.picName('wavedrom.json')); }
       }
       else if (act === 'unpaint') { sigs.forEach(r => this.painted.delete(r.full)); this.savePaint(); this.renderNames(); this.draw(); }
       else if (act === 'hl') this.toggleHighlight(it);
       else if (act === 'analog') { const on = !buses.every(r => r.analog); buses.forEach(r => this.setAnalog(r, on ? 3 : false)); }
       else if (act === 'hide') this.hide(rows);
       else if (act === 'unhide') this.unhide();
-      else if (act === 'fold') { if (this.collapsed.has(grp.id)) this.collapsed.delete(grp.id); else this.collapsed.add(grp.id); this.foldTouched = true; this.renderNames(); this.draw(); }
-      else if (act === 'foldup') { this.collapsed.add(up); if (this.sel && this.sel.anc.includes(up)) this.sel = null; this.foldTouched = true; this.renderNames(); this.draw(); }
+      else if (act === 'fold') { if (this.collapsed.has(grp.id)) this.collapsed.delete(grp.id); else this.collapsed.add(grp.id); this.foldTouched = true;
+        this.renderNames(); this.draw(); }
+      else if (act === 'foldup') { this.collapsed.add(up); if (this.sel && this.sel.anc.includes(up)) this.sel = null; this.foldTouched = true;
+        this.renderNames(); this.draw(); }
       else if (act === 'zM' || act === 'zR') this.seq(act);
-      else if (act === 'mark') { const t = this.snap(sig, at), n = Math.max(0, ...this.bms.map(x => x.n)) + 1; this.bms.push({ n, t, signal: sig.full, text: '', color: null }); this.changed(true); this.notesEl.querySelector(`li[data-n="${n}"] input.txt`)?.focus(); return this.closeMenu(); }
+      else if (act === 'mark') { const t = this.snap(sig, at), n = Math.max(0, ...this.bms.map(x => x.n)) + 1;
+        this.bms.push({ n, t, signal: sig.full, text: '', color: null }); this.changed(true);
+        this.notesEl.querySelector(`li[data-n="${n}"] input.txt`)?.focus(); return this.closeMenu(); }
       else if (act === 'copyname') this.copyRows([it]);
       else if (act === 'c2') this.setCursor2(sig ? this.snap(sig, at) : at);
       else if (act === 'c2x') this.setCursor2(null);
@@ -2400,15 +2796,18 @@ class WaveView {
     const qfEl = el.querySelector('input.qf'), fixed = k => buses.forEach(r => this.setRadix(r, k + Math.max(0, Math.min(128, Math.round(+qfEl.value || 0)))));
     el.addEventListener('change', e => {
       if (e.target.tagName !== 'SELECT' || !buses.length) return;
-      if (e.target.value === 'q' || e.target.value === 'sq') { qfEl.hidden = false; fixed(e.target.value); qfEl.focus(); return; }   // stays open for the fraction bits
+      // stays open for the fraction bits
+      if (e.target.value === 'q' || e.target.value === 'sq') { qfEl.hidden = false; fixed(e.target.value); qfEl.focus(); return; }
       buses.forEach(r => this.setRadix(r, e.target.value || null)); done();
     });
     if (qfEl) qfEl.addEventListener('input', () => { const k = el.querySelector('select').value; if (k === 'q' || k === 'sq') fixed(k); });
-    el.addEventListener('input', e => { if (e.target.type === 'color' && sigs.length) { sigs.forEach(r => this.painted.set(r.full, e.target.value)); this.savePaint(); this.renderNames(); this.draw(); } });
+    el.addEventListener('input', e => { if (e.target.type === 'color' && sigs.length) { sigs.forEach(r => this.painted.set(r.full, e.target.value));
+      this.savePaint(); this.renderNames(); this.draw(); } });
     el.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); done(); } });
     const off = this.offMenu = e => { if (!el.contains(e.target)) this.closeMenu(); };
     // after the click that opened it; not for a menu closed meanwhile (its listener would close the next one)
-    setTimeout(() => { if (this.menuEl !== el) return; document.addEventListener('pointerdown', off, true); window.addEventListener('blur', off); }, 0);
+    setTimeout(() => { if (this.menuEl !== el) return; document.addEventListener('pointerdown', off, { capture: true, signal: this.ac.signal });
+      window.addEventListener('blur', off, { signal: this.ac.signal }); }, 0);
     (el.querySelector('button') || el).focus({ preventScroll: true });
     return el;
   }
@@ -2423,8 +2822,10 @@ class WaveView {
     const rows = this.sel ? [this.sel] : [...this.picks.keys()]; if (rows.length) this.copyRows(rows);
     return rows.length > 0;
   }
-  goto(t, span) { this.markView(); this.span = Math.min(Math.max(span, this.minSpan), this.M.t1 - this.M.t0); this.t0 = this.clamp(t - this.span * 0.1); this.cursor = t; this.draw(); }
-  fmt(t, ref, unitRef) { return this.M.timed ? fmtTime(t, ref, unitRef) : 'cycle ' + (t + (this.M.tick || 0)).toFixed(Math.max(0, Math.min(2, Math.ceil(-Math.log10(ref))))); }
+  goto(t, span) { this.markView(); this.span = Math.min(Math.max(span, this.minSpan), this.M.t1 - this.M.t0); this.t0 = this.clamp(t - this.span * 0.1);
+    this.cursor = t; this.draw(); }
+  fmt(t, ref, unitRef) { return this.M.timed ? fmtTime(t, ref, unitRef) : 'cycle ' + (t + (this.M.tick || 0)).toFixed(Math.max(0,
+    Math.min(2, Math.ceil(-Math.log10(ref))))); }
   // the cursor as typed or clicked: exact (fmtExact), in the unit of the view span
   fmtCursor(t) { return this.M.timed ? fmtExact(t, this.span) : 'cycle ' + trimNum(t + (this.M.tick || 0)); }
   // a time from a click at x: rounded to a 1-2-5 step of about a pixel, so the cursor reads as a short exact number
@@ -2473,7 +2874,8 @@ class WaveView {
     const c = this.canvas, dpr = window.devicePixelRatio || 1, H = lay.H, hdr = this.hdrH;
     const W = c.getBoundingClientRect().width || 600, view = this.root.classList.contains('wv-scroll') ? this.bodyEl.clientHeight : window.innerHeight;
     const Hc = this.hc = Math.max(Math.min(H, hdr + 40), Math.min(H, view || H));
-    if (c.width !== Math.round(W * dpr) || c.height !== Math.round(Hc * dpr)) { c.width = Math.round(W * dpr); c.height = Math.round(Hc * dpr); c.style.height = Hc + 'px'; }
+    if (c.width !== Math.round(W * dpr) || c.height !== Math.round(Hc * dpr)) { c.width = Math.round(W * dpr); c.height = Math.round(Hc * dpr);
+      c.style.height = Hc + 'px'; }
     const oy = this.oy = Math.max(0, Math.min(H - Hc, c.getBoundingClientRect().top - this.wcol.getBoundingClientRect().top));
     return { W, Hc, oy, dpr };
   }
@@ -2488,27 +2890,43 @@ class WaveView {
     if (top) paintAxis(P, { from: this.t0, span: this.span, xL: 0, xR: W, y: 0, h: hdr, yEnd: Hc, X, timed: M.timed, tick: M.tick, every: 1 });
     const shown = lay.filter(o => o.y + o.h > oy + hdr && o.y < oy + Hc);
     g.save(); g.beginPath(); g.rect(0, hdr, W, Hc - hdr); g.clip(); g.translate(0, -oy);   // rows: layout coordinates, under the axis
-    const late = [], rowY = paintBody(P, M, shown, X, this.t0, tB, 0, W, this.hl, this.selRun && this.selRun.size ? new Set([...this.selRun, this.sel]) : this.sel, lay, this.band, late, r => this.strokeOf(r), r => this.collapsed.has(r.id));
+    const late = [], rowY = paintBody(P, M, shown, X, this.t0, tB, 0, W, this.hl, this.selRun &&
+      this.selRun.size ? new Set([...this.selRun, this.sel]) : this.sel, lay, this.band, late, r => this.strokeOf(r), r => this.collapsed.has(r.id));
     paintMarkers(P, this.markers, X, this.t0, tB, oy + hdr, oy + Hc);
     g.restore();
     if (this.cursor >= this.t0 && this.cursor <= tB) P.path([['M', X(this.cursor), 0], ['L', X(this.cursor), Hc]], { stroke: 'acc', w: 1.2 });
-    if (this.cursor2 != null && this.cursor2 >= this.t0 && this.cursor2 <= tB) {   // the second cursor: dashed, its Δ on a tag in the axis band
-      const x2 = X(this.cursor2), t = this.delta2(), tw = P.measure(t, { size: 10.5 }) + 10, lx = Math.min(Math.max(x2 + 4, 2), W - tw - 2);
-      P.path([['M', x2, 0], ['L', x2, Hc]], { stroke: 'cursor2', w: 1.2, dash: [5, 3] });
-      if (top && !this.range) { P.rect(lx, 3, tw, hdr - 6, 'panel'); P.path([['M', lx, 3], ['L', lx + tw, 3], ['L', lx + tw, hdr - 3], ['L', lx, hdr - 3], ['Z']], { stroke: 'cursor2', w: 1 }); P.text(lx + tw / 2, hdr / 2, t, { anchor: 'middle', size: 10.5, fill: 'cursor2' }); }
-    }
-    if (this.range) {   // the measured range: shaded, its ends dashed, its Δ in the axis band
-      const [a, b] = this.range.map(X), mid = (a + b) / 2, t = this.rangeText(), tw = P.measure(t, { size: 11 }) + 10;
-      P.rect(a, 0, b - a, Hc, 'acc', 0.1); P.path([['M', a, 0], ['L', a, Hc], ['M', b, 0], ['L', b, Hc]], { stroke: 'acc', w: 1, dash: [4, 3] });
-      if (top) { const lx = Math.min(Math.max(mid, tw / 2 + 2), W - tw / 2 - 2); P.rect(lx - tw / 2, 3, tw, hdr - 6, 'panel'); P.path([['M', lx - tw / 2, 3], ['L', lx + tw / 2, 3], ['L', lx + tw / 2, hdr - 3], ['L', lx - tw / 2, hdr - 3], ['Z']], { stroke: 'acc', w: 1 }); P.text(lx, hdr / 2, t, { anchor: 'middle', size: 11, fill: 'acc' }); }
-    }
-    if (this.box) { const [a, ya, b, yb] = this.box; P.path([['M', a, ya - oy], ['L', b, ya - oy], ['L', b, yb - oy], ['L', a, yb - oy], ['Z']], { stroke: 'acc', w: 1.2, dash: [4, 3] }); }   // alt+drag
-    if (this.zband) { const [a, b] = this.zband.map(X).sort((p, q) => p - q); P.rect(a, 0, b - a, Hc, 'acc', 0.15); P.path([['M', a, 0], ['L', a, Hc], ['M', b, 0], ['L', b, Hc]], { stroke: 'acc', w: 1 }); }   // middle-button drag
-    if (late.length) { g.save(); g.beginPath(); g.rect(0, hdr, W, Hc - hdr); g.clip(); g.translate(0, -oy); late.forEach(f => f()); g.restore(); }   // plugin overlays over the cursor
+    this.paintMeasures(P, X, this.t0, tB, 0, W, 0, Hc, top ? [0, hdr] : null);
+    // alt+drag
+    if (this.box) { const [a, ya, b, yb] = this.box; P.path([['M', a, ya - oy], ['L', b, ya - oy], ['L', b, yb - oy], ['L', a, yb - oy], ['Z']],
+      { stroke: 'acc', w: 1.2, dash: [4, 3] }); }
+    // middle-button drag
+    if (this.zband) { const [a, b] = this.zband.map(X).sort((p, q) => p - q); P.rect(a, 0, b - a, Hc, 'acc', 0.15);
+      P.path([['M', a, 0], ['L', a, Hc], ['M', b, 0], ['L', b, Hc]], { stroke: 'acc', w: 1 }); }
+    // plugin overlays over the cursor
+    if (late.length) { g.save(); g.beginPath(); g.rect(0, hdr, W, Hc - hdr); g.clip(); g.translate(0, -oy); late.forEach(f => f()); g.restore(); }
     g.save(); g.translate(0, -oy);
-    const geo = paintBookmarks(P, this.bms, this.arrows, X, this.t0, tB, rowY, oy + hdr, oy + Hc, oy + this.hdrH / 2, this.rubber, laneY(lay, this.S.laneHeight));
+    const geo = paintBookmarks(P, this.bms, this.arrows, X, this.t0, tB, rowY, oy + hdr, oy + Hc, oy + this.hdrH / 2, this.rubber,
+      laneY(lay, this.S.laneHeight));
     g.restore();
     return geo;
+  }
+  // the second cursor (dashed, its Δ on a tag) and the measured range (shaded, its ends dashed, its Δ on a tag): on the
+  // screen and in the picture (toSVG); X: time -> x, the waves from xL to xR and yA to yB, tag: [y, h] of the axis band
+  paintMeasures(P, X, t0, t1, xL, xR, yA, yB, tag, picture = false) {   // picture: a range that is the whole picture is not shaded
+    const box = (lx, tw, t, col, size) => { const [ty, th] = tag; P.rect(lx, ty + 3, tw, th - 6, 'panel');
+      P.path([['M', lx, ty + 3], ['L', lx + tw, ty + 3], ['L', lx + tw, ty + th - 3], ['L', lx, ty + th - 3], ['Z']], { stroke: col, w: 1 });
+        P.text(lx + tw / 2, ty + th / 2, t, { anchor: 'middle', size, fill: col }); };
+    if (this.cursor2 != null && this.cursor2 >= t0 && this.cursor2 <= t1) {
+      const x2 = X(this.cursor2), t = this.delta2(), tw = P.measure(t, { size: 10.5 }) + 10;
+      P.path([['M', x2, yA], ['L', x2, yB]], { stroke: 'cursor2', w: 1.2, dash: [5, 3] });
+      if (tag && !this.range) box(Math.min(Math.max(x2 + 4, xL + 2), xR - tw - 2), tw, t, 'cursor2', 10.5);
+    }
+    if (this.range && this.range[1] >= t0 && this.range[0] <= t1) {
+      const [a, b] = this.range.map(t => Math.min(Math.max(X(t), xL - 1), xR + 1)), t = this.rangeText(), tw = P.measure(t, { size: 11 }) + 10;
+      if (!(picture && this.range[0] <= t0 && this.range[1] >= t1)) { P.rect(a, yA, b - a, yB - yA, 'acc', 0.1);
+        P.path([['M', a, yA], ['L', a, yB], ['M', b, yA], ['L', b, yB]], { stroke: 'acc', w: 1, dash: [4, 3] }); }
+      if (tag) box(Math.min(Math.max((a + b) / 2, xL + tw / 2 + 2), xR - tw / 2 - 2) - tw / 2, tw, t, 'acc', 11);
+    }
   }
   // print: every row, not only the ones in view — the layout in pages of canvases (at most 8000 px each) over the
   // column, at twice the screen's resolution; afterprint gives the screen canvas back
@@ -2529,10 +2947,13 @@ class WaveView {
     if (this.evT0 !== this.t0 || this.evSpan !== this.span) { this.evT0 = this.t0; this.evSpan = this.span; fire('view', { t0: this.t0, span: this.span }); }
     if (this.evSel !== this.sel) { this.evSel = this.sel; fire('select', { row: this.sel }); }
     this.syncCursorFields();
-    this.curEl.textContent = 'cursor ' + this.fmtCursor(this.cursor) + ' · view ' + (M.timed ? fmtTime(this.span, this.span / 10, this.span) : this.span.toFixed(1) + ' cycles') + (this.cursor2 != null ? ' · cursor 2 ' + this.fmtCursor(this.cursor2) + ' · ' + this.delta2() : '') + (this.range ? ' · ' + this.rangeText() : '');
+    this.curEl.textContent = 'cursor ' + this.fmtCursor(this.cursor) + ' · view ' + (M.timed ? fmtTime(this.span, this.span / 10,
+      this.span) : this.span.toFixed(1) + ' cycles') + (this.cursor2 != null ? ' · cursor 2 ' + this.fmtCursor(this.cursor2) + ' · ' + this.delta2() : '') +
+      (this.range ? ' · ' + this.rangeText() : '');
     if (this.bms.length && (this.dtAt !== this.cursor || this.dtGen !== this.notesGen)) {   // the bookmarks' Δ to the cursor
       this.dtAt = this.cursor; this.dtGen = this.notesGen;
-      for (const el of this.notesEl.querySelectorAll('li[data-n] .dt')) { const b = this.bms.find(x => x.n === +el.closest('li').dataset.n); if (!b) continue; const d = b.t - this.cursor;
+      for (const el of this.notesEl.querySelectorAll('li[data-n] .dt')) { const b = this.bms.find(x => x.n === +el.closest('li').dataset.n); if (!b) continue;
+        const d = b.t - this.cursor;
         el.textContent = d === 0 ? 'at the cursor' : `${d < 0 ? '−' : '+'}${this.fmt(Math.abs(d), Math.abs(d) / 1000 || 1, Math.abs(d) || 1)}`; }
     }
     if (this.valsAt !== this.cursor || this.valsGen !== this.namesGen || this.valsRadix !== this.S.radix) {   // value column: only when it changes
@@ -2549,8 +2970,8 @@ class WaveView {
   // the viewer leaves: observers, window listeners and pending frames go; plugins hear wavefw:destroy and take their part
   destroy() {
     if (!VIEWS.has(this)) return;
-    this.ro.disconnect(); window.removeEventListener('scroll', this.onScroll); window.removeEventListener('resize', this.onScroll);
-    this.bodyEl.removeEventListener('scroll', this.onScroll); this.root.removeEventListener('pointerdown', this.onActive, true);
+    this.ro.disconnect(); this.ac.abort();   // every listener on the root, the window and the document
+    this.help(false);
     cancelAnimationFrame(this.raf); cancelAnimationFrame(this.inv); clearTimeout(this.toastT);
     if (ACTIVE.view === this) ACTIVE.view = null;
     this.closeMenu(); VIEWS.delete(this);
@@ -2589,7 +3010,9 @@ const WaveSVG = {
     const bodyEnd = y, tockY = y; if (showTock) y += 20;
     const footY = y; if (M.foot) y += 20;
     const notes = bms.filter(b => b.text && b.t >= from && b.t <= to), notesY = y + 6; if (notes.length) y += 8 + notes.length * 20;   // bookmark legend
-    const legend = rows.flatMap(r => (V && r.type === 'group' && V.collapsed.has(r.id) ? [] : r.legend || [])), legendY = y + 6; if (legend.length) y += 8 + legend.length * 18;   // rows of plugins
+    // rows of plugins
+    const legend = rows.flatMap(r => (V && r.type === 'group' && V.collapsed.has(r.id) ? [] : r.legend || [])), legendY = y + 6;
+      if (legend.length) y += 8 + legend.length * 18;
     const Ht = Math.ceil(y + 4), xL = nameW, xR = nameW + waveW, X = t => xL + (t - from) * k;
     const theme = V ? null : opts.theme ?? M.theme, colors = V ? {} : Object.assign({}, M.colors, opts.colors);
     const bg = V || opts.bg || (theme && theme !== 'auto') || colors.bg ? opts.bg || 'panel' : null;
@@ -2616,26 +3039,32 @@ const WaveSVG = {
     P.clip(xL, 0, waveW, Ht, () => {
       const step = M.timed ? null : Math.max(1, M.every);
       if (showAxis) paintAxis(P, { from, span: to - from, xL, xR, y: axisY, h: 20, yEnd: bodyEnd, X, timed: M.timed, tick: M.tick, every: M.every, step });
-      if (showTock) paintAxis(P, { from, span: to - from, xL, xR, y: tockY, h: 20, yEnd: tockY, X, timed: M.timed, tick: M.tock, every: M.every, step, mid: true });
-      const rowY = paintBody(P, M, lay, X, from, to, xL, xR, hl, null, null, C.band, null, strokeOf, r => !(last[r.id] > rows.indexOf(r))), top = showAxis ? axisY + 20 : lay.length ? lay[0].y : y;
+      if (showTock) paintAxis(P, { from, span: to - from, xL, xR, y: tockY, h: 20, yEnd: tockY, X, timed: M.timed, tick: M.tock, every: M.every, step,
+        mid: true });
+      const sel = V ? (V.selRun && V.selRun.size ? new Set([...V.selRun, V.sel]) : V.sel) : null;   // the viewer's selection: tinted as on the screen
+      const rowY = paintBody(P, M, lay, X, from, to, xL, xR, hl, sel, null, C.band, null, strokeOf, r => !(last[r.id] > rows.indexOf(r))),
+        top = showAxis ? axisY + 20 : lay.length ? lay[0].y : y;
       paintMarkers(P, (opts.markers || []).concat(M.markers), X, from, to, top, bodyEnd);
       paintBookmarks(P, bms, ars, X, from, to, rowY, top, bodyEnd, showAxis ? axisY + 10 : top + 10, null, laneY(lay, S.laneHeight));
       if (V && V.cursor >= from && V.cursor <= to) P.path([['M', X(V.cursor), top], ['L', X(V.cursor), bodyEnd]], { stroke: 'acc', w: 1.2 });
-      if (V && V.cursor2 != null && V.cursor2 >= from && V.cursor2 <= to) P.path([['M', X(V.cursor2), top], ['L', X(V.cursor2), bodyEnd]], { stroke: 'cursor2', w: 1.2, dash: [5, 3] });
+      if (V) V.paintMeasures(P, X, from, to, xL, xR, top, bodyEnd, showAxis ? [axisY, 20] : null, true);   // the second cursor, the measured range
     });
     notes.forEach((b, i) => {
       const cy = notesY + i * 20 + 10;
-      P.path(circle(14, cy, 8), { fill: b.color || 'acc' }); P.text(14, cy + 0.5, String(b.n), { anchor: 'middle', size: b.n > 9 ? 9 : 10.5, weight: 700, fill: 'panel' });
+      P.path(circle(14, cy, 8), { fill: b.color || 'acc' }); P.text(14, cy + 0.5, String(b.n),
+        { anchor: 'middle', size: b.n > 9 ? 9 : 10.5, weight: 700, fill: 'panel' });
       P.text(28, cy, b.text, { size: 12, body: true });
     });
     legend.forEach((l, i) => {
       const cy = legendY + i * 18 + 9;
-      if (l.n != null) { P.path(circle(14, cy, 7), { fill: l.color || 'acc' }); P.text(14, cy + 0.5, String(l.n), { anchor: 'middle', size: 9, weight: 700, fill: 'panel' }); }
+      if (l.n != null) { P.path(circle(14, cy, 7), { fill: l.color || 'acc' }); P.text(14, cy + 0.5, String(l.n),
+        { anchor: 'middle', size: 9, weight: 700, fill: 'panel' }); }
       P.text(l.n != null ? 28 : 6, cy, l.text, { size: l.bold ? 12 : 11.5, weight: l.bold ? 600 : 400, body: !l.mono, fill: l.fill || 'fg' });
     });
     const css = [lookCss(colors), ...styleVars(V ? {} : Object.assign({}, M.cfg, opts)).map(([n, v]) => `${n}:${v}`)].filter(Boolean).join(';');
     const look = (THEMES.includes(theme) ? ` data-theme="${theme}"` : '') + (css ? ` style="${esc(css)}"` : '');
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${Wt} ${Ht}" width="${Wt}" height="${Ht}" role="img" aria-label="${esc(M.title || 'waveform')}"${look}>${P.out.join('')}</svg>`;
+    return (`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${Wt} ${Ht}" width="${Wt}" height="${Ht}" role="img" ` +
+        `aria-label="${esc(M.title || 'waveform')}"${look}>${P.out.join('')}</svg>`);
   },
   render(el, model, opts = {}) {
     el.classList.add('wvs'); if (opts.fit) el.classList.add('fit'); el.innerHTML = this.toString(model, Object.assign({ owner: el }, opts));
@@ -2663,11 +3092,13 @@ const redrawAll = () => VIEWS.forEach(v => { if (v.root.isConnected) v.draw(); e
 // weak reference (a host that leaves the page and is collected takes its model with it)
 const SVGS = new WeakMap(), SVG_HOSTS = new Set();
 const SVG_PLUGINS = [];   // WaveFW.svgPlugin(fn): fn(model, settings, opts) -> [extraRows fn] for every static SVG
-const redrawSvgs = () => SVG_HOSTS.forEach(ref => { const el = ref.deref(), d = el && SVGS.get(el); if (d && el.isConnected) WaveSVG.render(el, d[0], d[1]); else SVG_HOSTS.delete(ref); });
+const redrawSvgs = () => SVG_HOSTS.forEach(ref => { const el = ref.deref(), d = el && SVGS.get(el); if (d && el.isConnected) WaveSVG.render(el, d[0], d[1]);
+  else SVG_HOSTS.delete(ref); });
 // Global settings, e.g. from a config file: { theme, colors, rowHeight, nameWidth, fontSize, traceWidth, sort, sortIgnore, … }.
 // theme/colors go to <html> like setTheme/setColors; the rest becomes the default for every wave (null removes a key).
 function configure(cfg = {}) {
   const { theme, colors, ...rest } = cfg || {}, html = document.documentElement;
+  warnKeys(rest, 'the global settings (wavefw.config.js, WaveFW.configure)');
   for (const [k, v] of Object.entries(rest)) { if (v == null) delete GLOBAL[k]; else GLOBAL[k] = v; }
   for (const [k, name] of Object.entries(STYLE_VAR)) if (k in rest && rest[k] == null) html.style.removeProperty(name);
   for (const [name, v] of styleVars(rest)) html.style.setProperty(name, v);
@@ -2731,7 +3162,8 @@ if (G.matchMedia) G.matchMedia('(prefers-color-scheme: dark)').addEventListener(
 G.addEventListener('beforeprint', () => VIEWS.forEach(v => { if (v.root.isConnected) v.print(true); }));
 G.addEventListener('afterprint', () => VIEWS.forEach(v => { if (v.printing) v.print(false); }));
 document.addEventListener('keydown', e => {   // Esc with nothing focused (after a click on text): reset the viewer used last
-  if (e.key === 'Escape' && (e.target === document.body || e.target === document.documentElement) && ACTIVE.view && ACTIVE.view.root.isConnected) ACTIVE.view.reset();
+  if (e.key === 'Escape' && (e.target === document.body || e.target === document.documentElement) && ACTIVE.view &&
+    ACTIVE.view.root.isConnected) ACTIVE.view.reset();
 });
 if (G.MutationObserver) {
   new MutationObserver(redrawAll).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class', 'style'] });
@@ -2777,7 +3209,8 @@ document.addEventListener('pointerover', e => {
   tipAt = el; tipT = setTimeout(() => tipShow(el), 350);
 });
 document.addEventListener('pointerout', e => { if (tipAt && !(e.relatedTarget && tipAt.contains(e.relatedTarget))) tipHide(); });
-document.addEventListener('focusin', e => { const el = e.target.closest && e.target.closest(TIP_SEL); tipHide(); if (el && el.matches(':focus-visible')) { tipAt = el; tipT = setTimeout(() => tipShow(el), 350); } });
+document.addEventListener('focusin', e => { const el = e.target.closest && e.target.closest(TIP_SEL); tipHide();
+  if (el && el.matches(':focus-visible')) { tipAt = el; tipT = setTimeout(() => tipShow(el), 350); } });
 for (const ev of ['pointerdown', 'keydown', 'wheel']) document.addEventListener(ev, e => { if (ev !== 'keydown' || e.key !== 'Tab') tipHide(); }, true);
 G.addEventListener('scroll', tipHide, true);
 const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
@@ -2786,9 +3219,17 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavefw plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveFW = { version: '1.9.0', rowId: () => ++XID, parse, fromTV, vcdToWave, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme, setColors, configure, plugin, svgPlugin, views: () => [...VIEWS], defaults: DEFAULTS,
+G.WaveFW = { version: '0.9',   // the project's version: VERSION (make check compares them)
+  rowId: () => ++XID, parse, fromTV, vcdToWave, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme, setColors, configure,
+  plugin, svgPlugin, views: () => [...VIEWS], defaults: DEFAULTS,
   paint: { circle, arrowHead, edgeGeom, lastLE },
-  sortRows: (M, dir = 'asc', ignore = [], groupOrder = 'file') => orderRows(parse(M).rows, sortDir(dir), prefixes(ignore), groupOrder), fuzzy, themes: THEMES, colorNames: CVAR, styles: Object.keys(EDGES), radixes: RADIX, enums: ENUMS, decode, fmtTime, fmtExact, parseT,
-  registerTokens, tips, util: { esc, glob, lastLE, lastBefore, circle } };
+  sortRows: (M, dir = 'asc', ignore = [], groupOrder = 'file') => orderRows(parse(M).rows, sortDir(dir), prefixes(ignore), groupOrder), fuzzy, themes: THEMES,
+    colorNames: CVAR, styles: Object.keys(EDGES), radixes: RADIX, enums: ENUMS, decode, fmtTime, fmtExact, parseT,
+  registerTokens, registerDefaults, tips, util: { esc, glob, lastLE, lastBefore, stepTo, isEdge, circle },
+  // unstable: the pure functions for the unit table of tests/smoke.py and peek(view), the fields the tests read; not an API
+  internal: { findRow, parseWant, valueIs, findEdge, edgeGlyph, bitsOf, hexOf, vcdHex, enumColor, analogValue, niceStep, cycMap, parseWave,
+    gfmt, toFloat, fieldRow, stripPfx, trimNum,
+    peek: v => ({ get lay() { return v.lay; }, get oy() { return v.oy; }, get vis() { return v.vis; }, get collapsed() { return v.collapsed; },
+      get rowEls() { return v.rowEls; }, get namesEl() { return v.namesEl; } }) } };
 G.WaveView = WaveView; G.WaveSVG = WaveSVG;
 })(window);

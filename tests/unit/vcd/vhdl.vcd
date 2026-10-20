@@ -1,0 +1,15 @@
+$timescale 1ns $end
+$scope module top $end
+$var wire 1 ! s $end
+$var wire 4 " v [3:0] $end
+$upscope $end
+$enddefinitions $end
+#0
+U!
+bUUUU "
+#10
+H!
+b01HL "
+#20
+L!
+b1W-0 "

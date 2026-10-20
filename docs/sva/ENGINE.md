@@ -13,7 +13,7 @@ for the subset; where this document makes a choice, the choice is listed under *
 | Rust | `sva_core::evaluate(&Assertion, &Trace, &Options) -> Outcome`, `evaluate_all`, `run(source, …) -> Results` | a `Trace`: one `Column` (4-state values) per signal name, one value per cycle |
 | JSON / WASM | `run_json({"source" \| "files": [...], "trace", "options"?, "assert"?})` -> the results document; `run_json({"report": {meta, results}, "format"?})` -> `{summary, text}` (*Report*) | the trace as JSON (below); `files`: several sources as one compilation unit |
 | page | `SVA.load(wasmBytes)` -> `{parse, evaluate}`; `evaluate(parsed, sampler, options)` | a *sampler*: `edges(name, edge)` -> clock edge times, `before(name, t)` -> the value just before `t`; `SVA.tvSampler({name: {tv, width}})` builds one from WaveJSON `tv` arrays |
-| shell | `sva eval --waves dump.vcd\|fst --scope tb.dut --sva checks.sv [--sva …] [--assert NAME …] [--from T --to T] [--out results.json] [--json] [--attempts] [--x fail\|false] [--vacuous] [--no-lane] [--resolve up\|scope] [--ignore-prefix i_,o_] [--alias NAME=PATH …] [--max-threads N] [--report r.md\|.html\|.xml\|.json] [--junit r.xml] [--max-failures N] [-D NAME[=V]]`; `sva report RESULTS.json… [--title T] [--md F] [--junit F] [--html F] [--json F] [--max-failures N]` | the dump, read with wellen |
+| shell | `sva eval --waves dump.vcd\|fst --scope tb.dut --sva checks.sv [--sva …] [--assert NAME …] [--from T --to T] [--out results.json] [--json] [--attempts] [--x fail\|false] [--vacuous] [--no-lane] [--resolve up\|scope] [--ignore-prefix i_,o_] [--alias NAME=PATH …] [--max-threads N] [--report r.md\|.html\|.xml\|.json] [--junit r.xml] [--max-failures N] [-D NAME[=V]]`; `sva report RESULTS.json… [--title T] [--md F] [--junit F] [--html F] [--json F] [--max-failures N]`; `sva --waves DUMP --info` (the scopes, variables, widths and enum tables of a dump); `sva parse [--json] [--expand] [-D NAME[=V]] FILE…` (`--expand`: the assertions after expansion); every command takes `-h` / `--help` | the dump, read with wellen |
 | make | `make sva-eval WAVES=… SVA="pkg.sv checks.sva" SCOPE=… [OUT=…] [ARGS=…]`, `make sva-examples`, `make sva-test` | |
 
 `sva eval` resolves every signal name in `--scope`, then in the scopes above it (so a checker bound into `tb.dut` can
@@ -29,9 +29,12 @@ apb_cov_write         cover  2 matches in 19 attempts · first at cycle 6 (65 ns
 A signal that is not in the dump is listed (`sva: a: no nope, gone in scope 'tb' (not evaluated)`), that assertion is
 not evaluated (it is in the results JSON with `missing` and a `stats` object of zeros). Exit status, the same for
 `sva eval` and `sva report`: 2 when something was not checked as asked (a usage error, a syntax error, no assertion in
-the files, a missing signal, a dump or results file that does not read: 2 wins over a verdict); else 1 when an
-`assert` / `assume` failed or an attempt has no verdict (`capped`: the thread limit, raised with `--max-threads`;
-covers never fail); 0 else.
+the files, a missing signal, a dump or results file that does not read, a clock without an edge in the dump, a
+`--from` after its last edge, a `--to` before `--from`, a negative time, an internal error: 2 wins over a verdict);
+else 1 when an `assert` / `assume` failed or an attempt has no verdict (`capped`: the thread limit, raised with
+`--max-threads`; a capped cover too, though a cover never fails); 0 else. A closed standard output (`sva eval … |
+head -1`) drops the rest of the output and keeps that status; an internal error prints one line ("please report it
+with the input") instead of a core dump.
 The old form `sva FILE... --waves DUMP` is the same command. `--attempts` prints every listed attempt with its trace.
 
 The page builds its sampler from the WaveJSON it already has (`tv`: `[[time, value], …]`, bit values `0 1 x z`, bus
@@ -145,7 +148,8 @@ the model through `extraRows` leave `M.groups` when the plugin no longer returns
 Two more requests of `run_json` (`sva-core/src/explain.rs`), both in the unit of the page's files:
 
 - `{"files"?, "exprs": ["a && !b", ...], "trace"?}` → `{"exprs": [{"text", "signals": [{name, width?}], "width"?,
-  "values"?} | {"text", "errors"}]}`. An expression is parsed and expanded in `$unit` (macros, `pkg::NAME` constants);
+  "values"?} | {"text", "errors"} | {"text", "signals", "errors"}]}` (the last: it parsed, but its values could not be
+  computed over the trace). An expression is parsed and expanded in `$unit` (macros, `pkg::NAME` constants);
   without a trace the answer is its signals (the page resolves them and samples them), with one its width and its value
   at every cycle (the forms of the results: a number, `"h…"` past 2^53, binary digits with x; at most 4 M values).
   `sva.js` builds the trace itself: with a clock prefix `@(edge clk)` (cut off in the page) the values just before each
@@ -231,8 +235,12 @@ keeps its low 64 bits; both give a note on the assertions that read the signal.
       "lane": "…S.P…S..F…" } ] }
 ```
 
-`docs/sva/results.schema.json` is the schema of this document (`sva/core/tests/schema.rs` validates evaluations that
-give every result, reason and field against it).
+`docs/sva/results.schema.json` is the schema of this document. `sva/core/tests/schema.rs` validates what `run_json`
+gives (the page's results) for assertions that give every result (`pass fail vacuous active disabled capped`), every
+reason (`no_match expected range unknown not_held strong_end capped`) and the fields `truncated ante_end reason
+failed_at note missing notes lane`, in both option sets, and that a result it does not know is rejected. The fields
+the CLI adds to each assertion (`file`, `scope`, `signals` with the paths) are in the schema too, but no test feeds
+the CLI's output to it.
 
 - `cycles[k]` is the time of cycle k (the k-th clock edge); attempts and traces refer to cycles. An assertion on another
   clock than the document's first one carries its own `clock` and `cycles`.
@@ -305,9 +313,13 @@ not one attempt per cycle. Paths are linked lists of steps in an arena; a path t
 
 ## Decisions
 
-- **Sampling.** Cycle k is the k-th clock edge in the dump (`posedge`: a change to 1 from 0, x or z; the dump's first
-  value is not an edge). Every value is the one holding just before the edge time (the preponed region); a value
-  written at the edge counts from the next cycle. The page's sampler does the same over `tv`.
+- **Sampling.** Cycle k is the k-th clock edge in the dump, as IEEE 1800-2017 9.4.2 defines them: `posedge` 0 -> 1,
+  0 -> x, 0 -> z, x -> 1, z -> 1, `negedge` the mirror, `edge` either; the dump's first value is not an edge. The edges
+  are taken per time step: the clock's last value in a time step against the one before (a glitch written in one time
+  step, `1 0 1`, is no edge; before, it was two cycles at the same time). Every value is the one holding just before
+  the edge time (the preponed region); a value written at the edge counts from the next cycle. The page's sampler does
+  the same over `tv`. A dump with a timescale finer than 1 ps: its edges are the cycles, their times in the results are
+  rounded to ps (a warning).
 - **Before the first cycle** (`$past(x, n)` at cycle k < n, and the previous value of `$rose` … at cycle 0) every
   signal has the initial value of its type: x for 4-state signals (logic, reg, wire: everything a VCD has), 0 for
   2-state ones (`bit`, `int`, `byte`, `shortint`, `longint`: from the FST's variable types, `two_state` in the trace
@@ -331,7 +343,8 @@ not one attempt per cycle. Paths are linked lists of steps in an arena; a path t
   `disable iff` condition does not disable (as in IEEE), so before reset, with `rst_n` itself x, attempts that read x
   fail by this rule: write the reset into `disable iff` as `!rst_n` and dump from time 0, or evaluate `--from` after
   reset. The rule judges the attempt as a whole: an unknown that decided a `not` (`not (a ##1 b)` with `a` x) gives a
-  pass, as in IEEE.
+  pass, as in IEEE. A pass that read an unknown carries a note naming it (`m is unknown (x) at cycle 0, read as false:
+  the attempt passed with it`): an `if (m)` with `m` x takes the `else` branch, and the pass says why.
 - **Signed values.** Everything is compared and shifted as unsigned. A signal of a signed type (`int`, `byte`,
   `logic signed`, …) or a signed literal (`8'sd5`) read by an assertion gives a parse warning and a note
   ("compared as unsigned"); plain numbers and unsigned types do not.
@@ -346,25 +359,45 @@ not one attempt per cycle. Paths are linked lists of steps in an arena; a path t
   (`a ##[1:$] b |-> c`) is never decided before the end: write `first_match(a ##[1:$] b) |-> c`.
 - **Empty matches** (`[*0]`, `[*0:n]`, `[->0]`, `[=0]`): `empty ##n s` is `##(n-1) s`, `s ##n empty` is
   `s ##(n-1) 1`, `empty ##0 s` and `s ##0 empty` do not match; an empty match is no match of an antecedent or of a
-  sequence property; inside `[*n]` an empty match of the repeated sequence is ignored; `and` / `intersect` /
+  sequence property; a repeated sequence that can match empty may match empty in any iteration (IEEE 16.9.2):
+  `(a[*0:1])[*2]` is `a[*0:2]` (until stage 12 its empty matches were ignored, so the first one failed where the second
+  passed); `and` / `intersect` /
   `within` need both operands to match at least one cycle. This deviates from the letter of IEEE 1800-2017 for an
   antecedent that can match empty: by 16.12.7 (`s |=> p` is `s ##1 1 |-> p`) and 16.9.2 (`empty ##1 s` is `s`),
   `a[*0:1] |=> b` would check `b` at the start cycle when `a` is false; here that attempt is vacuous. Nobody writes it
   on purpose; the choice keeps "the antecedent matched" meaning "a cycle of it matched".
 - **Several antecedent matches ending at the same cycle** share one consequent instance (the first path is shown).
 - **`first_match`**: the trace of its match shows the steps of every thread it ran (they share the start).
+- **`throughout`**: its condition is a step of the trace at every cycle it held (role `cond`; the page draws it on a
+  row of its own).
+- **Requests are checked.** A key `run_json` does not know (in the request, `options`, `trace` or `explain`) is an
+  error, not a run with defaults; so are `max_threads` 0, `to` before `from`, a width of 0, fewer `times` than
+  `cycles`. One request is one clock: assertions on another clock or edge in the same request are an error (the page
+  sends one request per clock). The results' `cycles` are those of the window (`to` exclusive), as in the CLI.
 - **Thread limit.** One sequence of one attempt keeps at most `max_threads` (256) distinct residuals; more are dropped,
   the assertion gets a note `thread limit 256 reached at cycle C (attempt S): some matches were not followed`, and the
   attempt ends as `capped` whatever it would have given (a fail or a pass found without the dropped threads may be
   wrong). With hash-consing the limit is reached only by genuinely different states (e.g. long `intersect`s of ranges).
 - **`inside`** compares like `==?` (IEEE 11.4.13): x / z bits of a set item match anything (`2'b10 inside {2'b1x}`),
   unknown bits of the tested value make the result unknown where they matter.
-- **Nesting.** More than 500 levels of operators and parentheses is a parse error (no stage can overflow its stack);
-  499 levels of each form (`##0` chains, parentheses, `not`, `&&`, implications) evaluate in the WebAssembly build
-  with its 1 MB stack.
+- **Nesting.** More than 500 levels of operators and parentheses is a parse error (no stage can overflow its stack). An
+  expression of the page 499 parentheses deep, an assertion 498 deep (its property takes two levels) parse, explain
+  and evaluate in the WebAssembly build; the module has an 8 MB stack (`sva/.cargo/config.toml`): with the default
+  1 MB the shadow stack overflowed into the module's memory and the tab crashed at 499 (make smoke: `sva_nesting`).
+- **Macros.** A file's macro uses expand to at most 1 000 000 tokens (a macro that doubles itself 24 times would make
+  16 M tokens and gigabytes before the recursion limit of 32 stops it): one error, the rest of the file goes on.
+- **Terms.** Residual sequences are hash-consed in an arena; the arena is collected (marked from the compiled
+  properties and the pending threads, compacted in order) when it has twice the terms of the last collection, at
+  least 65 536. On the review's worst case it never grew (414 terms over 40 000 cycles of a capped `intersect`): the
+  500 MB of that run are its results (39 900 capped attempts, 2.8 M trace steps), which stage 9.6's compact results
+  address.
 - **Covers** count every attempt that matches non-vacuously (`cover property`), or every match (`cover sequence`).
 
 ## Performance (October 2026, this machine: WSL2, 16 CPUs)
+
+The rows on `work/test_stream_video.*` and `sva/bench/*.sva` used the user's dump, which is not in git: they are a
+record of those runs, not something a clone can repeat; the example and unit-test rows are (`make sva-examples`,
+`make smoke`, `make sva-test`).
 
 | run | data | result | time |
 |---|---|---|---|
@@ -375,13 +408,15 @@ not one attempt per cycle. Paths are linked lists of steps in an arena; a path t
 | `sva eval` over the examples (`make sva-examples`) | APB 21, AXI-Lite 19, FSM 107 cycles | only the deliberate failures fail | 4–6 ms each |
 | `sva eval`, `sva/bench/open_ended.sva`: `m_ready_i \|-> m_ready_i[*1:$] ##1 never` and `m_ready_i \|-> s_eventually never` (stage 5.1) | the same FST, 16 061 edges | 990 fails each (every attempt open until it breaks / the end) | 0.02 s and 0.02 s, 7–12 MB (before 5.1: 2.9 s for the `s_eventually`) |
 | `make html WAVES=work/test_stream_video.vcd` (1 view, 1526 signals) with the three arbiter assertions bound (`mkhtml.py --sva sva/bench/cxp_tx_arbiter.sva --bind '*@…cxp_tx_arbiter_i'`, stage 8) | the VCD, 16 061 edges; the views' results plus the whole-dump report | 16 050 / 0 / 18 pass; page 6.7 → 8.5 MB (the results JSON of the invariant's passes), 1.5 GB peak either way | 14.9 s → 16.2 s (+1.3 s); stage 8.1 (the printable section reuses the view's whole-dump results): 14.5 s → 15.6 s (+1.0 s); the page draws the three groups under `cxp_tx_arbiter_i`, a redraw 74 ms with everything expanded |
-| the user's checkers `cxp_sva.sv` (12 checker modules, 22 assertions; `cxp_pkg` stubbed with the dump's values), each bound to its checker instance in the dump (`…cxp_tx_owner_sva_i` etc., 15 instances, 32 bindings) | `test_stream_video.fst`, 16 050 – 16 061 edges per clock | no failure; `a_owner_valid` 16 050 attempts, 972 pass, 15 078 vacuous — the same counted by hand from the VCD (posedges of `tx_clk` with `rst_n` high, `owner != 0`, the owner's `valid`); 8 assertions never leave vacuity in this bench (backpressure, trigger, I/O-ack, Wait, resync are not exercised) | one binding 0.02 s / 8 MB; `make html` with all 32: 18 s, page 26 MB |
+| the user's checkers `cxp_sva.sv` (12 checker modules, 22 assertions at the time, 26 now; `cxp_pkg` stubbed with the dump's values), each bound to its checker instance in the dump (`…cxp_tx_owner_sva_i` etc., 15 instances, 32 bindings) | `test_stream_video.fst`, 16 050 – 16 061 edges per clock | no failure; `a_owner_valid` 16 050 attempts, 972 pass, 15 078 vacuous — the same counted by hand from the VCD (posedges of `tx_clk` with `rst_n` high, `owner != 0`, the owner's `valid`); 8 assertions never leave vacuity in this bench (backpressure, trigger, I/O-ack, Wait, resync are not exercised) | one binding 0.02 s / 8 MB; `make html` with all 32: 18 s, page 26 MB |
 | the arbiter page with 16 061 failures (5 bindings, `many.sva`), stage 8.1 | 2 views, 13.2 MB (17.6 before: the printable section lists 20 failures per assertion) | Failures shows 500 rows (16 066 before) | Failures 3.2 s → 83 ms, Table 2.5 s → 21 ms, a redraw with the summary 2.8 s → 10 ms (report cached by results) |
 | a deliberately wrong check on the same dump (`m_o.valid && m_o.sop && m_ready_i \|=> m_o.eop`) | the FST | 18 fails; the first, at 81.71 µs → 81.72 µs, checked by hand in the dump: `sop`, `valid`, `m_ready_i` high before the edge at 81.71 µs, `eop` low until 81.73 µs (3-beat packets) | 0.02 s |
 | unit test: 20 000 attempts that never end (`a \|-> b[*1:$] ##1 c`, `c` never) | hand-made | 20 000 active | well under 1 s; before 5.1, 4000 cycles took 3.3 s and 1.0 GB |
+| a wide delay window, `(a ##[1:200] b) \|-> a` with `b` never (stage 12) | a hand-made VCD, 40 000 cycles | 39 800 vacuous, 200 active | 3.0 s, 13 MB: one group per age of the window (their countdowns differ, so they do not merge); a representation by deadline would make it one group — left for later |
+| a capped `intersect`, `a \|-> (a[*1:$] intersect (a ##[1:100] b)) and (a ##[2:150] b)` (stage 12) | the same, 40 000 cycles | 39 900 capped | 4.0 s, 506 MB: the results (2.8 M trace steps), not the terms (414) |
 
-The WebAssembly module is 546 kB, 265 kB in a page (546 051 B / 265 228 B, as `make smoke` prints them; stage 8: the
-report code and `serde_json::Value`; stage 5.1: 451 kB) (`wavefw/sva.wasm.js`, deflate-raw + base64; STACK.md). A call of
+The WebAssembly module is 571 kB, 278 kB in a page (570 957 B / 277 560 B, stage 12; stage 8: 546 kB, the report code
+and `serde_json::Value`; stage 5.1: 451 kB) (`wavefw/sva.wasm.js`, deflate-raw + base64; STACK.md). A call of
 the spike page (parse, evaluate 12 cycles, JSON both ways) takes about 110 µs.
 
 Most of the results JSON of a long dump is the passes of invariants (one per cycle); the counts are complete either
@@ -398,7 +433,22 @@ the trace and results JSON; merged attempts against unmerged ones (results, stat
 traces), long truncated traces, 20 000 open attempts, the arena under load; `tests/schema.rs` validates the results
 against `docs/sva/results.schema.json`; `value.rs` tests widths, unknown bits and the sampled-value functions;
 `sva/cli/tests/cli.rs` runs `sva eval` over a small VCD (summaries, JSON, `--out`, `--assert`, `--from/--to`, missing
-signals in the JSON, upward name resolution and `--resolve scope`, x, exit codes). `tests/sva/third_party` (checkers of
+signals in the JSON, upward name resolution and `--resolve scope`, x, exit codes, the edges of IEEE 9.4.2 one per time
+step, nothing to check is exit 2, a closed stdout, a timescale finer than ps) and keeps the evaluation goldens:
+`sva eval --attempts` over the example dumps against `tests/sva/golden/eval/<ex>.txt` (`make sva-bless` rewrites
+them with the parse goldens). The lexer has a fuzz test (20 000 random strings of keywords, operators and multi-byte
+characters: tokens and errors, never a split character), the preprocessor a test of its expansion budget, `run_json`
+tests of every request check, `sva/wasm` a round trip of its C ABI on the host. `tests/sva/third_party` (checkers of
 others for AXI4-Lite, APB and AHB) is parsed by `make sva-test` and evaluated over the example dumps by `make smoke`. `make smoke` checks the spike page (the WebAssembly results equal the
 native ones; `evaluate()` over 32 768 edges in under a second) and `sva eval` over the three example dumps (each
 testbench has one deliberately wrong assertion, which must be the only failure, with a trace).
+
+The reference (`make sva-verify`, `tools/svaverify.py`; part of `make check`, skipped without Verilator): each
+example's testbench is built with its `.sva` files (their checkers and `bind` statements) by `verilator --binary
+--assert` and run, and every `Assertion failed` of the simulation (the file and line of its action, its time) is
+compared with the failures `sva eval` finds in the example's dump. What Verilator 5.046 does not take — an `%Error`
+inside an assertion or a declaration: `[*n]` on a boolean, `##[m:n]` ranges, `or` of sequences, sequences with
+arguments, `!` inside a cover's sequence — is blanked in a copy of the file (the line numbers kept), with every
+assertion that uses it, and listed. October 2026: 26 assertions compared (APB 10, AXI-Lite 5, FSM 11), all agree,
+the deliberate failures among them at the same times (`apb_demo_no_wait` twice, `axi_demo_aw_at_once` once);
+not compared: 3 of APB, 14 of AXI-Lite (most use the sequence `s_hs(valid, ready)`), 4 of the FSM.

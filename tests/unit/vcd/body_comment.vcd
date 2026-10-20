@@ -1,0 +1,18 @@
+$timescale 1ns $end
+$scope module tb $end
+$var wire 1 ! s $end
+$var wire 2 " v [1:0] $end
+$upscope $end
+$enddefinitions $end
+$comment #500 b11 " $end
+#0
+$dumpvars
+0!
+b01 "
+$end
+$comment
+  #700 1!
+$end
+#10
+1!
+b10 "

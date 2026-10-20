@@ -23,6 +23,7 @@ sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)   # -I drops the script dir from sys.path
 import svabuild, vcd2wavedrom, wavejson  # noqa: E402
+from common import WaveError, add_sva_bin_arg, check_config, run_main  # noqa: E402
 
 FW = os.path.join(os.path.dirname(HERE), 'wavefw')   # the framework files inlined into the page
 
@@ -123,33 +124,9 @@ def generated(reproducible):
     return datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('files', nargs='*', help='key=file.json WaveJSON inputs (instead of --config views)')
-    ap.add_argument('--config', help='settings file with "views" (each is converted with vcd2wavedrom.py)')
-    ap.add_argument('--settings', help='settings file used only for "config"/"page" (with WaveJSON inputs)')
-    ap.add_argument('--view', action='append', help='only these views (repeatable)')
-    ap.add_argument('--waves', help='override the dump file of every view')
-    ap.add_argument('--reader', choices=('builtin', 'wavepeek'), help='how the dumps are read (default: the config\'s "reader", else builtin)')
-    ap.add_argument('--title', help='page title')
-    ap.add_argument('--render', choices=('view', 'svg', 'both'), help='renderer for every section')
-    ap.add_argument('--sva-bin', help='the sva CLI for "sva" / "bind" (default: $WAVEFW_SVA, out/sva-target/release/sva, the prebuilt bin/<os>-x86_64/sva, sva on PATH)')
-    ap.add_argument('--sva', action='append', metavar='FILE', help='assertion file for every view (repeatable; replaces the config\'s top-level "sva")')
-    ap.add_argument('--bind', action='append', metavar='NAME@SCOPE', help='binding for every view (repeatable, NAME may be a pattern; replaces the top-level "bind")')
-    ap.add_argument('--no-sva', action='store_true', help='leave the assertion engine (wavefw/sva.js + sva.wasm.js, ~330 kB) out of the page, and evaluate nothing')
-    ap.add_argument('--reproducible', action='store_true', help='no "Generated" time in the page: the same inputs give the same bytes '
-                    '(or set SOURCE_DATE_EPOCH: that time, in UTC)')
-    ap.add_argument('--out', required=True, help='output .html')
-    a = ap.parse_args()
-    if not a.config and not a.files:
-        ap.error('need --config or WaveJSON files')
-
-    cfg = vcd2wavedrom.load_config(a.config or a.settings) if (a.config or a.settings) else {}
-    base = os.path.dirname(os.path.abspath(a.config or a.settings or '.'))
-    if a.sva:
-        cfg['sva'] = [os.path.abspath(f) for f in a.sva]
-    if a.bind:
-        cfg['bind'] = a.bind
+def build_views(a, cfg, base):
+    """Every view of the config converted (vcd2wavedrom.convert), or the WaveJSON files read -> (docs, renders,
+    sva_views: the views with bindings, for the printable section)."""
     docs, renders, sva_views = {}, {}, []   # the views with bindings (for the printable section)
     if a.config:
         views = cfg.get('views') or {}
@@ -174,10 +151,14 @@ def main():
     for spec in a.files:
         key, _, path = spec.rpartition('=')
         key = key or os.path.splitext(os.path.basename(path))[0]
-        with open(path, encoding='utf-8') as f:
-            docs[key] = json.load(f)
+        docs[key] = vcd2wavedrom.load_config(path)
         renders[key] = (a.render or 'view', None)
+    return docs, renders, sva_views
 
+
+def collect_sva(a, cfg, docs):
+    """The assertion files and notes of every view, once for the page (window.SVA); each view keeps its bindings ->
+    (with_sva, files, notes)."""
     # assertions: the files and notes of every view once in window.SVA, each view keeps its bindings (WaveJSON "sva")
     with_sva = not a.no_sva and cfg.get('sva') is not False
     sva_files, sva_notes = [], []
@@ -191,6 +172,11 @@ def main():
         sva_notes += [n for n in x.pop('notes', []) if n not in sva_notes]
         if not x.get('bind'):
             del d['sva']
+    return with_sva, sva_files, sva_notes
+
+
+def render_page(a, cfg, docs, renders, sva_views, with_sva, sva_files, sva_notes):
+    """The page: the framework and the data inlined, the facts, the sections, the printable assertions section."""
     page, settings = cfg.get('page') or {}, cfg.get('config') or {}
     title = a.title or page.get('title') or ', '.join(sorted({(d.get('meta') or {}).get('waves', k) for k, d in docs.items()}))
     metas = [d.get('meta') or {} for d in docs.values()]
@@ -256,5 +242,38 @@ def main():
     print(f'mkhtml: {len(docs)} views -> {a.out} ({len(text.encode()) / 1e6:.2f} MB)', file=sys.stderr)
 
 
+def main():
+    """The command line: every view converted (or the WaveJSON files read), the assertions, one page written."""
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('files', nargs='*', help='key=file.json WaveJSON inputs (instead of --config views)')
+    ap.add_argument('--config', help='settings file with "views" (each is converted with vcd2wavedrom.py)')
+    ap.add_argument('--settings', help='settings file used only for "config"/"page" (with WaveJSON inputs)')
+    ap.add_argument('--view', action='append', help='only these views (repeatable)')
+    ap.add_argument('--waves', help='override the dump file of every view')
+    ap.add_argument('--reader', choices=('builtin', 'wavepeek'), help='how the dumps are read (default: the config\'s "reader", else builtin)')
+    ap.add_argument('--title', help='page title')
+    ap.add_argument('--render', choices=('view', 'svg', 'both'), help='renderer for every section')
+    add_sva_bin_arg(ap)
+    ap.add_argument('--sva', action='append', metavar='FILE', help='assertion file for every view (repeatable; replaces the config\'s top-level "sva")')
+    ap.add_argument('--bind', action='append', metavar='NAME@SCOPE', help='binding for every view (repeatable, NAME may be a pattern; replaces the top-level "bind")')
+    ap.add_argument('--no-sva', action='store_true', help='leave the assertion engine (wavefw/sva.js + sva.wasm.js, ~410 kB) out of the page, and evaluate nothing')
+    ap.add_argument('--reproducible', action='store_true', help='no "Generated" time in the page: the same inputs give the same bytes '
+                    '(or set SOURCE_DATE_EPOCH: that time, in UTC)')
+    ap.add_argument('--out', required=True, help='output .html')
+    a = ap.parse_args()
+    if not a.config and not a.files:
+        ap.error('need --config or WaveJSON files')
+
+    cfg = vcd2wavedrom.load_config(a.config or a.settings) if (a.config or a.settings) else {}
+    check_config(cfg.get('config'), f'mkhtml: {a.config or a.settings}: "config"')
+    base = os.path.dirname(os.path.abspath(a.config or a.settings or '.'))
+    if a.sva:
+        cfg['sva'] = [os.path.abspath(f) for f in a.sva]
+    if a.bind:
+        cfg['bind'] = a.bind
+    docs, renders, sva_views = build_views(a, cfg, base)
+    with_sva, sva_files, sva_notes = collect_sva(a, cfg, docs)
+    render_page(a, cfg, docs, renders, sva_views, with_sva, sva_files, sva_notes)
+
 if __name__ == '__main__':
-    main()
+    run_main(main, 'mkhtml')

@@ -105,13 +105,9 @@ impl<'a> Parser<'a> {
         let min = self.bound(false)?;
         self.expect(":")?;
         let max_at = self.at();
-        let max = self.bound(true)?;
-        if let (Bound::Const(m), Bound::Const(n)) = (&min, &max) {
-            if n < m {
-                return Err(SvaError::new(max_at, format!("the range ends before it starts ({m}:{n})")));
-            }
-        }
-        Ok(Range { min, max })
+        let r = Range { min, max: self.bound(true)? };
+        r.check(max_at)?;
+        Ok(r)
     }
 
     /// A constant bound: a number, `$` (when `dollar`), or an expression folded later (parameters, formal arguments).
@@ -150,8 +146,7 @@ impl<'a> Parser<'a> {
         let op_at = self.at();
         let ante = match lhs {
             Prop::Seq { seq } => seq,
-            p => {
-                let _ = p;
+            _ => {
                 return Err(SvaError::new(op_at, format!("the left side of {} must be a sequence, found a property", op.sym())));
             }
         };
@@ -345,13 +340,9 @@ impl<'a> Parser<'a> {
             let min = self.bound(false)?;
             let r = if self.eat(":") {
                 let max_at = self.at();
-                let max = self.bound(true)?;
-                if let (Bound::Const(m), Bound::Const(n)) = (&min, &max) {
-                    if n < m {
-                        return Err(SvaError::new(max_at, format!("the range ends before it starts ({m}:{n})")));
-                    }
-                }
-                Range { min, max }
+                let r = Range { min, max: self.bound(true)? };
+                r.check(max_at)?;
+                r
             } else {
                 Range { min: min.clone(), max: min }
             };

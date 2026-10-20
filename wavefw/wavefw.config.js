@@ -2,7 +2,10 @@
      <script src="wavefw.config.js"></script> <script src="wavefw.js"></script>
    The same keys work in a WaveJSON "config" object (one diagram), in data-config='{…}' on one element, in the
    "config" section of a vcd2wavedrom.py / mkhtml.py config file, and in WaveFW.configure({…}) at run time
-   (null removes a key). Values here are the built-in defaults, except sortIgnore. */
+   (null removes a key). Values here are the built-in defaults, except sortIgnore. Layers, later wins: these, the
+   diagram's "config", the element's data-* / options, and one of the viewer's own: the edge style picked in its bar,
+   kept in this browser for that viewer (the bar's "auto" gives the setting back). An unknown key is a console warning
+   in the page and an error in the tools. */
 window.WAVEFW_CONFIG = {
   theme: null,                  // 'light' | 'white' | 'dark'; null = auto (prefers-color-scheme)
   colors: {},                   // trace bus x xfill z bg header grid text muted accent page c3…c9 band, or any --css-var

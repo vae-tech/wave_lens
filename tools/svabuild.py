@@ -10,12 +10,16 @@ and draws the bindings. Parse errors do not stop the build: they are printed and
 page's printable "Assertions" section: the bindings evaluated over the whole dump, `sva report --html`.
 
 The CLI: --sva-bin, else $WAVEFW_SVA, else the Makefile's build (out/sva-target/release/sva), else the prebuilt one of
-the repository (bin/linux-x86_64/sva, bin/windows-x86_64/sva.exe: make dist), else `sva` on PATH.
+the repository (bin/linux-x86_64/sva: make dist-linux; bin/windows-x86_64/sva.exe when made by make dist-windows), else
+`sva` on PATH.
 Without it the sources go into the page unparsed and the page parses and evaluates them (WebAssembly).
 
   svabuild.py --waves dump.fst --sva checks.sv --bind a_req_ack@tb.dut [--from 0ns --to 2us] [--out sva.json]
 """
 import argparse, fnmatch, json, os, re, shutil, subprocess, sys, tempfile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
+from common import WaveError, add_sva_bin_arg, run_main  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXE = '.exe' if os.name == 'nt' else ''
@@ -33,7 +37,7 @@ def find_bin(explicit=None):
     ok = lambda c: c and os.path.isfile(os.path.expanduser(c)) and os.access(os.path.expanduser(c), os.X_OK)
     if explicit:   # given: that one or an error, never another one
         if not ok(explicit):
-            raise SystemExit(f'svabuild: no sva binary at {explicit}')
+            raise WaveError(f'svabuild: no sva binary at {explicit}')
         return os.path.expanduser(explicit)
     return next((os.path.expanduser(c) for c in (os.environ.get('WAVEFW_SVA'), BUILD_BIN, dist_bin(), shutil.which('sva')) if ok(c)), None)
 
@@ -48,7 +52,7 @@ def bind_list(items):
             name, _, scope = b.partition('@')
             b = {'assert': name.strip(), 'scope': scope.strip()}
         if not isinstance(b, dict) or not b.get('assert'):
-            raise SystemExit(f'svabuild: bad "bind" entry {b!r} (need {{"assert": NAME, "scope": PATH}} or "NAME@PATH")')
+            raise WaveError(f'svabuild: bad "bind" entry {b!r} (need {{"assert": NAME, "scope": PATH}} or "NAME@PATH")')
         if b.get('show') is False:   # mkconfig.py --sva: a candidate the user has not chosen
             continue
         out.append({'assert': str(b['assert']), 'scope': str(b.get('scope') or '')})
@@ -58,7 +62,7 @@ def bind_list(items):
 # ---------------- names of an assertion in an instance: the rule of docs/sva/ENGINE.md *Name resolution* ----------------
 # (the same in wavefw/sva.js lookup() / candidates() and in `sva eval --resolve scope --ignore-prefix`; make smoke compares
 # the three on the APB example)
-def split_path(p):
+def split_path(p: str) -> list:
     """The parts of a hierarchical name: split at the dots, not inside a select (a[1.2]) nor in an escaped
     identifier (\\esc.x, to the end: a dump drops the space that ends it)."""
     out, start, depth = [], 0, 0
@@ -80,7 +84,7 @@ def _strip(n, pfx):
 class Names:
     """The variables of a dump, {full path: width}, with the shown names ("alias") of a config and the ignored
     prefixes (the page's sortIgnore)."""
-    def __init__(self, widths, aliases=None, prefixes=()):
+    def __init__(self, widths: dict, aliases: dict = None, prefixes=()):
         self.widths, self.aliases = widths, aliases or {}
         self.pfx = sorted(prefixes or [], key=len, reverse=True)
         self.by = {}
@@ -101,7 +105,7 @@ class Names:
         hits = [p for leaf, p in rows if _strip(leaf, self.pfx) == b or _strip(self.aliases.get(p, ''), self.pfx) == b]
         return hits if len(hits) > 1 else hits[0] if hits else None
 
-    def resolve(self, scope, signals):
+    def resolve(self, scope: str, signals: list) -> tuple:
         """signals [{name, width?}] (the clock first) -> ({name: path}, [problems]); the clock also above the scope"""
         got, bad = {}, []
         for i, s in enumerate(signals):
@@ -132,7 +136,7 @@ def parse_files(files, exe, quiet=False):
             with open(p, encoding='utf-8', errors='replace') as f:
                 src = f.read()
         except OSError as e:
-            raise SystemExit(f'svabuild: {e}')
+            raise WaveError(f'svabuild: {e}')
         out.append({'name': os.path.basename(p), 'path': shown, 'source': src, 'parsed': None})
     if exe and out:
         r = subprocess.run([exe, 'parse', '--json', *[p for p, _ in files]], capture_output=True, text=True)
@@ -141,6 +145,8 @@ def parse_files(files, exe, quiet=False):
         except json.JSONDecodeError:
             print(f'svabuild: sva parse failed: {(r.stderr or r.stdout).strip()[:400]}', file=sys.stderr)
             return out
+        if len(doc.get('files', [])) != len(out):
+            raise WaveError(f'svabuild: sva parse gave {len(doc.get("files", []))} results for {len(out)} files ({", ".join(f["path"] for f in out)})')
         for f, p in zip(out, doc.get('files', [])):
             p.pop('file', None)
             f['parsed'] = p
@@ -196,20 +202,38 @@ def evaluate(binds, files, waves, exe, t_from=None, t_to=None, parsed=(), quiet=
             if os.path.exists(res):
                 with open(res, encoding='utf-8') as f:
                     doc = json.load(f)
-        if doc is None:
-            notes.append(f'bind {scope}: sva eval failed: {(r.stderr or r.stdout).strip()[:300]}')
-            continue
+        if doc is None:   # exit 2 without results: nothing was checked (a syntax error, a dump that does not read)
+            raise WaveError(f'svabuild: bind {scope or "(top)"}: sva eval failed (exit {r.returncode}): {(r.stderr or r.stdout).strip()[:300]}')
         for b in bs:
             o = next((o for o in doc['assertions'] if o['name'] == b['assert']), None)
             if o is None:
                 notes.append(f"bind: no assertion '{b['assert']}' in the sva files")
                 continue
+            if o.get('missing') and scope and not _has_scope(waves, scope):   # a typo in the scope: an error, not a note in the page
+                raise WaveError(f"svabuild: bind {b['assert']}@{scope}: the dump has no scope {scope} "
+                                f"(missing {', '.join(o['missing'])})")
             b['results'] = {'clock': o.pop('clock', None) or doc['clock'], 'unit': doc['unit'], 'cycles': o.pop('cycles', None) or doc['cycles'], 'assertions': [o]}
             s = o['stats']
             if not quiet:
                 print(f'svabuild: {b["assert"]} @ {scope or "(top)"}: ' + (f'missing {", ".join(o["missing"])}' if o.get('missing') else
                       f'{s["attempts"]} attempts, {s["pass"]} pass, {s["fail"]} fail'), file=sys.stderr)
     return out, notes
+
+
+_SCOPES = {}
+
+
+def _has_scope(waves, scope):
+    """Is scope a scope of the dump (a variable under it)? True when the dump's header cannot be read here (an FST
+    without fst2vcd): the CLI's note then stands."""
+    if waves not in _SCOPES:
+        import dumpscan
+        try:
+            d = dumpscan.read(waves, None)
+        except WaveError:
+            d = None
+        _SCOPES[waves] = None if d is None else {'.'.join(split_path(p)[:k]) for p in d.vars for k in range(1, len(split_path(p)))}
+    return _SCOPES[waves] is None or scope in _SCOPES[waves]
 
 
 def build(files, binds, waves, exe=None, t_from=None, t_to=None, prefixes=None, aliases=None):
@@ -263,7 +287,7 @@ def main():
     ap.add_argument('--bind', action='append', default=[], help='NAME@SCOPE (repeatable)')
     ap.add_argument('--from', dest='t_from', type=float, help='window start in ps')
     ap.add_argument('--to', dest='t_to', type=float, help='window end in ps')
-    ap.add_argument('--sva-bin', help='the sva CLI')
+    add_sva_bin_arg(ap)
     ap.add_argument('--out', help='output JSON (default: stdout)')
     a = ap.parse_args()
     doc = build([(p, p) for p in a.sva], a.bind, a.waves, a.sva_bin, a.t_from, a.t_to)
@@ -276,4 +300,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    run_main(main, 'svabuild')

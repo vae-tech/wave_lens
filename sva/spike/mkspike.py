@@ -3,9 +3,15 @@
 
   mkspike.py WASM OUT.html
 """
-import base64, os, sys
+import argparse, base64, os, sys
 
-wasm, out = sys.argv[1:3]
+ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+ap.add_argument('wasm', help='sva_wasm.wasm (make sva-build)')
+ap.add_argument('out', help='the page to write')
+a = ap.parse_args()
+wasm, out = a.wasm, a.out
+if not os.path.isfile(wasm):
+    ap.error(f'no such file: {wasm} (make sva-build)')
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'spike.html'), encoding='utf-8') as f:
     page = f.read()
 here = os.path.dirname(os.path.abspath(__file__))

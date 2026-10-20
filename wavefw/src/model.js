@@ -9,7 +9,8 @@ const TOK = { fg: '--fg', muted: '--muted', line: '--line', panel: '--panel', pa
   one: '--wave-1', bus: '--wave-bus', x: '--wave-x', xsoft: '--wave-x-soft', z: '--wave-z',
   c3: '--wave-c3', c4: '--wave-c4', c5: '--wave-c5', c6: '--wave-c6', c7: '--wave-c7', c8: '--wave-c8', c9: '--wave-c9',
   band: '--wave-band', cursor2: '--wave-cursor2',
-  hl1: '--wave-hl1', hl2: '--wave-hl2', hl3: '--wave-hl3', hl4: '--wave-hl4', hl5: '--wave-hl5', hl6: '--wave-hl6', hl7: '--accent', hl8: '--wave-hl8',   // hl7: find, hl8: plugins
+  // hl7: find, hl8: plugins
+  hl1: '--wave-hl1', hl2: '--wave-hl2', hl3: '--wave-hl3', hl4: '--wave-hl4', hl5: '--wave-hl5', hl6: '--wave-hl6', hl7: '--accent', hl8: '--wave-hl8',
   paint: '--wave-paint' };   // the find group's Paint colour; plugins add their own (WaveFW.registerTokens)
 // a colour name of the painters: a token, a CSS custom property ("--x", "var(--x)") or a colour as it is
 const registerTokens = map => { for (const [k, v] of Object.entries(map || {})) TOK[k] = v; return Object.assign({}, TOK); };
@@ -31,7 +32,25 @@ function lastBefore(n, at, t, strict = false) {
   return ans;
 }
 const lastLE = (a, t) => lastBefore(a.length, i => a[i].t, t);   // the last transition with time <= t
-const flatText = t => Array.isArray(t) ? t.slice(typeof t[1] === 'object' && !Array.isArray(t[1]) ? 2 : 1).map(flatText).join('') : (t == null ? '' : String(t));
+// the index of the next (dir > 0) or previous item of the sorted times beyond t by more than a rounding step, round
+// the ends; -1: no item. ]m [m, ]t [t, ]f [f and the ƒ expression's ◀ ▶ step by it
+function stepTo(times, t, dir) {
+  const n = times.length, eps = 1e-9 * Math.max(1, Math.abs(t));
+  if (!n) return -1;
+  if (dir > 0) { for (let i = 0; i < n; i++) if (times[i] > t + eps) return i; return 0; }
+  for (let i = n - 1; i >= 0; i--) if (times[i] < t - eps) return i;
+  return n - 1;
+}
+// an edge as IEEE 1800-2017 9.4.2 (and the sva CLI) between two bit levels 0 1 x z: posedge 0->1 0->x 0->z x->1 z->1,
+// negedge the mirror, edge either; prev null: the first value, no edge. The bus decoders and the assertions use it
+function isEdge(edge, prev, b) {
+  if (prev === null) return false;
+  const u = v => v === 'x' || v === 'z', rise = (prev === '0' && b !== '0') || (u(prev) && b === '1'),
+    fall = (prev === '1' && b !== '1') || (u(prev) && b === '0');
+  return edge === 'posedge' ? rise : edge === 'negedge' ? fall : rise || fall;
+}
+const flatText = t => Array.isArray(t) ? t.slice(typeof t[1] === 'object' && !Array.isArray(t[1]) ? 2 : 1).map(flatText).join('') : (t == null ? '' :
+  String(t));
 
 /* ---------------- settings (config file / WaveFW.configure / config in the JSON / data-* / opts) ---------------- */
 // Layers, later wins: DEFAULTS < global (window.WAVEFW_CONFIG, WaveFW.configure) < WaveJSON "config" < element / opts.
@@ -39,7 +58,11 @@ const flatText = t => Array.isArray(t) ? t.slice(typeof t[1] === 'object' && !Ar
 const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight: 24, traceWidth: 1.4, busWidth: 1.2,
   labelSize: 11, fontSize: 11.5, sort: 'none', sortIgnore: [], sortButton: true, hint: true, style: 'auto', radix: 'auto', fold: null,
   highlight: null, dim: 0.3, groupColors: null, arrowLabels: 'lane', laneHeight: 16, maxHeight: null,
-  groupOrder: 'file', moduleShading: true, findHighlight: true, findOpen: true, findCase: false, findWord: false, findRegex: false, cursorSnap: 8, wheel: 'scroll', contextMenu: true, busDetect: true, buses: null, svaOpen: false, enumColors: null, dumpBudget: 3000000 };
+  groupOrder: 'file', moduleShading: true, findHighlight: true, findOpen: true, findCase: false, findWord: false, findRegex: false, cursorSnap: 8,
+    wheel: 'scroll', contextMenu: true, enumColors: null, dumpBudget: 3000000 };
+// a plugin's settings with their defaults (bus.js: busDetect, buses; sva.js: svaOpen, svaShow, svaSignals): in every
+// layer like the framework's own, listed in WaveFW.defaults, known to the warning on unknown keys
+const registerDefaults = map => { Object.assign(DEFAULTS, map || {}); return Object.assign({}, DEFAULTS); };
 const SVG_DEFAULTS = { groupHeight: 20, spaceHeight: 12 };   // the static figure is a little denser
 const GLOBAL = {};
 // settings that live in CSS (so the names column, fonts and static SVG text follow them too); numbers are px
@@ -48,11 +71,23 @@ const prefixes = v => (Array.isArray(v) ? v : String(v ?? '').split(',')).map(s 
 function settings(...layers) {
   const S = Object.assign({}, DEFAULTS);
   for (const l of layers) for (const [k, v] of Object.entries(l || {})) if (v != null && k !== 'theme' && k !== 'colors') S[k] = v;
-  for (const k of ['rowHeight', 'groupHeight', 'spaceHeight', 'headerHeight', 'traceWidth', 'busWidth', 'labelSize', 'fontSize', 'dim', 'laneHeight']) S[k] = num(S[k]) || DEFAULTS[k];
+  for (const k of ['rowHeight', 'groupHeight', 'spaceHeight', 'headerHeight', 'traceWidth', 'busWidth', 'labelSize', 'fontSize', 'dim',
+    'laneHeight']) S[k] = num(S[k]) || DEFAULTS[k];
   S.sort = sortDir(S.sort); S.sortIgnore = prefixes(S.sortIgnore).sort((a, b) => b.length - a.length);
   if (!EDGES[S.style]) S.style = 'auto';
   if (S.groupsFirst && S.groupOrder === 'file') S.groupOrder = 'first';   // older setting
   return S;
+}
+// a setting the framework does not know (a typo in a config file, "rowHeigth"): a warning in the console, once per key;
+// the plugins' keys and WaveDrom's own are known too (the tools refuse such a key: tools/common.py check_config)
+const KNOWN_KEYS = new Set(['theme', 'colors', 'groupsFirst', 'hscale', 'skin']), WARNED = new Set();
+function warnKeys(cfg, where) {
+  const keys = Object.keys(cfg || {});
+  const run = () => { for (const k of keys) if (!(k in DEFAULTS) && !(k in STYLE_VAR) && !KNOWN_KEYS.has(k) && !WARNED.has(k)) {
+    WARNED.add(k); console.warn(`wavefw: ${where}: unknown setting "${k}" (the settings are the keys of wavefw.config.js)`);
+  } };
+  // while the page loads, the plugins' scripts (registerDefaults) may come after this: checked when they are all there
+  if (typeof document !== 'undefined' && document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run, { once: true }); else run();
 }
 const styleVars = cfg => Object.entries(STYLE_VAR).filter(([k]) => cfg && cfg[k] != null && cfg[k] !== '')
   .map(([k, name]) => [name, typeof cfg[k] === 'number' ? cfg[k] + 'px' : String(cfg[k])]);
@@ -212,7 +247,8 @@ function findRow(r, terms, M, o = {}) {
   for (const w of terms) {
     if (o.full) {
       const eq = (a, b) => (o.cs ? a === b : a.toLowerCase() === b.toLowerCase());
-      if (w.includes('.') ? !(eq(full, w) || (full.length > w.length && eq(full.slice(-w.length - 1), '.' + w))) : !(eq(name, w) || (leaf && eq(leaf, w)))) return null;
+      if (w.includes('.') ? !(eq(full, w) || (full.length > w.length && eq(full.slice(-w.length - 1), '.' + w))) : !(eq(name, w) ||
+        (leaf && eq(leaf, w)))) return null;
       score += 10; if (w.includes('.') || eq(name, w)) idx.push(...span(0, name.length));   // the whole name marked
       continue;
     }
@@ -269,7 +305,7 @@ function gfmt(f, p = 7) {
   if (f === 0) return Object.is(f, -0) ? '-0' : '0';
   const e = Math.floor(Math.log10(Math.abs(Number(f.toPrecision(p)))));
   const trim = s => (s.includes('.') ? s.replace(/0+$/, '').replace(/\.$/, '') : s);
-  if (e >= -5 && e < p) return trim(f.toFixed(Math.max(0, p - 1 - e)));
+  if (e >= -4 && e < p) return trim(f.toFixed(Math.max(0, p - 1 - e)));   // C's %g: exponential below 1e-4
   const [m, x] = f.toExponential(p - 1).split('e');
   return trim(m) + 'e' + (x[0] === '-' ? '-' : '+') + x.replace(/^[+-]/, '').padStart(2, '0');
 }
@@ -286,12 +322,13 @@ function decode(sig, v, radix) {
   if (/[xz]/i.test(v)) return v;
   const e = sig.enum || ENUMS[sig.full] || ENUMS[sig.name];
   if (e) { const n = parseInt(v, 16); if (e[n] !== undefined) return e[n]; }
-  const big = () => BigInt('0x' + (v || '0')), w = sig.width || 1;
+  const w = sig.width || 1, big = () => BigInt('0x' + (v || '0')) & ((1n << BigInt(w)) - 1n);   // a value wider than the signal: its low bits
   const r = sig.radix || radix, q = /^(s?)q(\d+)$/.exec(r || '');
-  if (q) {   // fixed point: the value / 2^F, as many decimals as F bits need (at most 12)
+  if (q) {   // fixed point: the value / 2^F exactly (the F decimals of 1/2^F: the fraction times 5^F), trailing zeros left out
     let n = big(); const m = 1n << BigInt(w); if (q[1] && w > 1 && n >= m >> 1n) n -= m;
-    const F = +q[2], d = Math.min(Math.ceil(F * 0.30103), 12), s = (Number(n) / 2 ** F).toFixed(d);
-    return d ? s.replace(/0+$/, '').replace(/\.$/, '') : s;
+    const F = BigInt(q[2]), neg = n < 0n, a = neg ? -n : n, ip = a >> F, fp = a & ((1n << F) - 1n);
+    const frac = fp ? '.' + (fp * 5n ** F).toString().padStart(Number(F), '0').replace(/0+$/, '') : '';
+    return (neg ? '-' : '') + ip + frac;
   }
   switch ({ unsigned: 'dec', sdec: 'signed' }[r] || r) {
     case 'float': { const f = toFloat(big(), w); if (f != null) return gfmt(f, w === 64 ? 15 : w === 16 ? 4 : 7); break; }
@@ -300,14 +337,16 @@ function decode(sig, v, radix) {
     case 'bin': return big().toString(2).padStart(w, '0');
     case 'oct': return '0o' + big().toString(8);
     case 'hex': return '0x' + v.toUpperCase();
-    case 'ascii': return '"' + (v.length % 2 ? '0' + v : v).match(/../g).map(h => parseInt(h, 16)).filter((c, i, a) => c || i === a.length - 1)
+    case 'ascii': if (!v) return '""'; return '"' + (v.length % 2 ? '0' + v : v).match(/../g).map(h => parseInt(h, 16)).filter((c, i, a) => c ||
+      i === a.length - 1)
       .map(c => (c >= 32 && c < 127 ? String.fromCharCode(c) : '.')).join('') + '"';
   }
   if (w <= 6) return String(parseInt(v, 16));
   return '0x' + v.toUpperCase();
 }
 // bus label of transition o with the radix in effect (re-decoded only when the radix changes)
-const vtext = (s, o, radix) => o.raw == null ? o.v : (s.radix || radix || 'auto') === o.rk ? o.vr : (o.rk = s.radix || radix || 'auto', o.vr = decode(s, o.raw, o.rk));
+const vtext = (s, o, radix) => o.raw == null ? o.v : (s.radix || radix || 'auto') === o.rk ? o.vr : (o.rk = s.radix || radix || 'auto',
+  o.vr = decode(s, o.raw, o.rk));
 
 /* ---------------- parser: WaveJSON -> model ---------------- */
 function parseText(txt) {
@@ -354,13 +393,16 @@ function parseWave(s, C) {
 function bitsOf(o, w) {
   if (!o) return 'x'.repeat(w);
   if (o.k !== '=') return (o.k === '0' || o.k === '1' || o.k === 'z' ? o.k : 'x').repeat(w);
-  const v = String(o.v ?? ''), h = String(o.raw ?? (/^0x[0-9a-f_]+$/i.test(v) ? v.slice(2).replace(/_/g, '') : /^\d+$/.test(v) ? BigInt(v).toString(16) : '')).toLowerCase();   // WaveDrom data: 0x.. or a number
+  // WaveDrom data: 0x.. or a number
+  const v = String(o.v ?? ''), h = String(o.raw ?? (/^0x[0-9a-f_]+$/i.test(v) ? v.slice(2).replace(/_/g,
+    '') : /^\d+$/.test(v) ? BigInt(v).toString(16) : '')).toLowerCase();
   if (!/^[0-9a-fxz]+$/.test(h)) return 'x'.repeat(w);
   const b = [...h].map(c => (c === 'x' || c === 'z' ? c.repeat(4) : parseInt(c, 16).toString(2).padStart(4, '0'))).join('');
   return b.length >= w ? b.slice(b.length - w) : b.padStart(w, b[0] === 'x' || b[0] === 'z' ? b[0] : '0');
 }
 const hexOf = bits => { const p = bits.padStart(Math.ceil(bits.length / 4) * 4, '0'); let out = '';
-  for (let i = 0; i < p.length; i += 4) { const n = p.slice(i, i + 4); out += /x/.test(n) ? 'x' : /z/.test(n) ? (n === 'zzzz' ? 'z' : 'x') : parseInt(n, 2).toString(16); }
+  for (let i = 0; i < p.length; i += 4) { const n = p.slice(i, i + 4); out += /x/.test(n) ? 'x' : /z/.test(n) ? (n === 'zzzz' ? 'z' : 'x') : parseInt(n,
+    2).toString(16); }
   return out; };
 // a struct's whole value: its parts' bits put together (the first part the MSB) at every change of any of them
 function joinBits(g, parts) {
@@ -377,24 +419,32 @@ function joinBits(g, parts) {
 }
 // a field [msb:lsb] of a packed vector as a row of its own (its name under the vector's, its radix, its labels)
 function fieldRow(sig, f, depth, anc) {
-  const msb = num(f.msb), lsb = num(f.lsb ?? f.msb); if (!f || !f.name || !isFinite(msb) || !isFinite(lsb) || msb < lsb) return null;
-  const w = msb - lsb + 1, r = { type: 'sig', name: String(f.name), depth, anc, width: w, enum: f.enum, radix: f.radix, path: null, src: f, full: sig.full + '.' + f.name, field: [msb, lsb], tr: [], gaps: [] };
+  const msb = num(f && f.msb), lsb = num(f && (f.lsb ?? f.msb)); if (!f || !f.name || !isFinite(msb) || !isFinite(lsb)) return null;
+  if (msb < lsb || lsb < 0 || msb >= (sig.width || 1)) {   // outside the vector: said, and left out (it would read past it: NaN)
+    console.warn(`wavefw: ${sig.full}: field ${f.name} [${msb}:${lsb}] is not inside the ${sig.width || 1}-bit vector (msb first, lsb 0): left out`);
+    return null;
+  }
+  const w = msb - lsb + 1, r = { type: 'sig', name: String(f.name), depth, anc, width: w, enum: f.enum, radix: f.radix, path: null, src: f,
+    full: sig.full + '.' + f.name, field: [msb, lsb], tr: [], gaps: [] };
   for (const o of sig.tr) {
     const b = bitsOf(o, sig.width), fb = b.slice(b.length - 1 - msb, b.length - lsb);
     const n = w === 1 ? { k: /^[01z]$/.test(fb) ? fb : 'x' } : /^x+$/.test(fb) ? { k: 'x' } : /^z+$/.test(fb) ? { k: 'z' } : { k: '=', raw: hexOf(fb) };
-    if (n.k === '=') { n.v = decode(r, n.raw); n.bad = /[xz]/.test(n.raw); const e = r.enum || ENUMS[r.full] || ENUMS[r.name], k = parseInt(n.raw, 16); n.c = e && !isNaN(k) ? 3 + (k % 7) : 2; }
+    if (n.k === '=') { n.v = decode(r, n.raw); n.bad = /[xz]/.test(n.raw); const e = r.enum || ENUMS[r.full] || ENUMS[r.name], k = parseInt(n.raw, 16);
+      n.c = e && !isNaN(k) ? 3 + (k % 7) : 2; }
     const L = r.tr[r.tr.length - 1]; if (L && L.k === n.k && L.raw === n.raw) continue;
     n.t = o.t; r.tr.push(n);
   }
   return r;
 }
-function parseTV(s, sig) { // extension: exact transitions [[time, value], …]; bit values 0/1/x/z, bus values hex
-  const tv = s.tv || [];
-  sig.width = num(s.width) || (tv.every(([, v]) => /^[01xz]$/i.test(String(v))) ? 1 : 8); sig.tv = true;
+function parseTV(s, sig) { // extension: exact transitions [[time, value], …]; bit values 0/1/x/z, bus values hex;
+  // "kind": "real" / "string": the values are texts shown as they are (a real's number, a string), null unknown
+  const tv = s.tv || [], text = s.kind === 'real' || s.kind === 'string';
+  sig.width = num(s.width) || (!text && tv.every(([, v]) => /^[01xz]$/i.test(String(v))) ? 1 : 8); sig.tv = true;
   const tr = [];
   for (const [t, v0] of tv) {
     const v = String(v0).toLowerCase(); let o;
-    if (sig.width === 1) o = { k: v === '1' ? '1' : v === '0' ? '0' : v === 'z' ? 'z' : 'x' };
+    if (text) o = v0 == null ? { k: 'x' } : { k: '=', v: String(v0), c: 2 };
+    else if (sig.width === 1) o = { k: v === '1' ? '1' : v === '0' ? '0' : v === 'z' ? 'z' : 'x' };
     else if (/^x+$/.test(v)) o = { k: 'x' };
     else if (/^z+$/.test(v)) o = { k: 'z' };
     else {
@@ -403,7 +453,7 @@ function parseTV(s, sig) { // extension: exact transitions [[time, value], …];
         c: /^[2-9]$/.test(String(s.color)) ? +s.color : (e && !isNaN(n) ? 3 + (n % 7) : 2) };
     }
     const L = tr[tr.length - 1];
-    if (L && L.k === o.k && L.raw === o.raw) continue;
+    if (L && L.k === o.k && L.raw === o.raw && L.v === o.v) continue;
     o.t = num(t); tr.push(o);
   }
   return { tr, gaps: [] };
@@ -425,6 +475,7 @@ function parse(src) {
     tick: j.head && j.head.tick != null ? num(j.head.tick) : null, every: (j.head && num(j.head.every)) || 1,
     tock: j.foot && j.foot.tock != null ? num(j.foot.tock) : null, hscale: (j.config && num(j.config.hscale)) || 1,
     theme: j.config && j.config.theme, colors: (j.config && j.config.colors) || null, cfg: j.config || {} };
+  warnKeys(M.cfg, 'WaveJSON "config"');
   let cyc = 0, tmin = Infinity, tmax = -Infinity, gid = 0;
   // extension "same": "path" = the transitions of the signal with that "path" (one net seen at several levels)
   const byPath = {}, collect = a => a.forEach(it => { if (Array.isArray(it)) collect(it); else if (it && it.path && it.tv) byPath[it.path] = it.tv; });
@@ -441,10 +492,14 @@ function parse(src) {
         } else walk(named ? it.slice(1) : it, depth, anc);
       } else if (it && typeof it === 'object' && (it.wave != null || it.tv || it.same)) {
         if (!it.tv && it.same && byPath[it.same]) it = Object.assign({}, it, { tv: byPath[it.same] });
-        const sig = { type: 'sig', name: flatText(it.name), depth, anc, width: 1, enum: it.enum, radix: it.radix || it.fmt, style: it.style, path: it.path, src: it,
-          stroke: it.stroke || (typeof it.color === 'string' && !/^[2-9]$/.test(it.color) ? it.color : undefined), fill: it.fill, enumColors: it.enumColors, analog: it.analog };
+        const sig = { type: 'sig', name: flatText(it.name), depth, anc, width: 1, enum: it.enum, radix: it.radix || it.fmt, style: it.style, path: it.path,
+          src: it,
+          stroke: it.stroke || (typeof it.color === 'string' && !/^[2-9]$/.test(it.color) ? it.color : undefined), fill: it.fill, enumColors: it.enumColors,
+            analog: it.analog,
+          kind: it.kind, height: num(it.height) || undefined };
         sig.full = it.path || anc.map(id => M.groups[id].name).concat(sig.name).join('.');
         const r = it.tv ? parseTV(it, sig) : parseWave(it, C);
+        if (!it.tv && num(it.width) > 1) sig.width = num(it.width);   // a clock-sampled bus: its width (signed search, analog, fields)
         sig.tr = r.tr; sig.gaps = r.gaps;
         if (r.end != null) { cyc = Math.max(cyc, r.end); sig.end = C(r.end); }
         if (sig.tr.length) { if (it.tv) tmin = Math.min(tmin, sig.tr[0].t); tmax = Math.max(tmax, sig.tr[sig.tr.length - 1].t); }
@@ -465,11 +520,13 @@ function parse(src) {
   // extension "scopes": {group path: "struct" | "union" | "interface"} (vcd2wavedrom.py from the dump's scope types): the
   // group says so; a struct's (union's) row carries its whole value, its fields put together in their order (MSB first)
   const kinds = j.scopes || {};   // a value: "struct" or {kind, width} (its width in the dump: a whole value only from every bit)
-  for (const g of Object.values(M.groups)) { const k = kinds[g.path]; if (!g.kind && k) { g.kind = typeof k === 'string' ? k : k.kind; if (k.width) g.bits = num(k.width); } }
+  for (const g of Object.values(M.groups)) { const k = kinds[g.path]; if (!g.kind && k) { g.kind = typeof k === 'string' ? k : k.kind;
+    if (k.width) g.bits = num(k.width); } }
   const done = new Set(), whole = g => {
     if (done.has(g) || g.sig) return g.sig; done.add(g);
     if (g.kind !== 'struct' && g.kind !== 'union') return null;
-    const parts = M.rows.filter(r => r.anc.length === g.anc.length + 1 && r.anc[g.anc.length] === g.id && (r.type === 'sig' ? r.tr && !r.same : r.type === 'group'))
+    const parts = M.rows.filter(r => r.anc.length === g.anc.length + 1 && r.anc[g.anc.length] === g.id &&
+      (r.type === 'sig' ? r.tr && !r.same : r.type === 'group'))
       .map(r => (r.type === 'group' ? whole(r) : r)).filter(Boolean);
     const w = parts.reduce((n, p) => n + (p.width || 1), 0);
     if (g.kind === 'struct' && parts.length && (!g.bits || w === g.bits)) g.sig = joinBits(g, parts);
@@ -506,7 +563,8 @@ function parseWant(str) {
   const m = /^(-)?(?:\d*'s?([hdbo])|0([xbo]))?([0-9a-f_]+)$/i.exec(s);
   if (m && !(m[2] || m[3] ? false : /[a-f]/i.test(m[4]))) {
     const base = { h: 16, x: 16, d: 10, b: 2, o: 8 }[(m[2] || m[3] || 'd').toLowerCase()], digits = m[4].replace(/_/g, '');
-    try { const n = [...digits.toLowerCase()].reduce((acc, ch) => acc * BigInt(base) + BigInt(parseInt(ch, base)), 0n); if (!digits.split('').some(ch => isNaN(parseInt(ch, base)))) return { n, neg: !!m[1], text: s }; } catch (e) { /* a text */ }
+    try { const n = [...digits.toLowerCase()].reduce((acc, ch) => acc * BigInt(base) + BigInt(parseInt(ch, base)), 0n);
+      if (!digits.split('').some(ch => isNaN(parseInt(ch, base)))) return { n, neg: !!m[1], text: s }; } catch (e) { /* a text */ }
   }
   return { n: null, neg: false, text: s.replace(/^"|"$/g, '') };
 }
@@ -550,7 +608,8 @@ function bmNorm(list) {
     color: b.color || null, lift: !!b.lift && !!b.signal })).filter(b => isFinite(b.t));   // lift: in the lane above its signal
 }
 function arNorm(list, bms) {
-  const old = (Array.isArray(bms) ? bms : []).map((b, i) => b && b.to != null && b.to !== '' ? { from: +b.n || i + 1, to: +b.to, shape: b.shape, label: b.label } : null);
+  const old = (Array.isArray(bms) ? bms : []).map((b, i) => b && b.to != null && b.to !== '' ? { from: +b.n || i + 1, to: +b.to, shape: b.shape,
+    label: b.label } : null);
   return old.filter(Boolean).concat(Array.isArray(list) ? list : []).map(a => ({ from: +a.from, to: +a.to, shape: AR_SHAPES[a.shape] ? a.shape : '~',
     head: AR_HEADS[a.head] !== undefined ? a.head : '>', line: a.line in AR_LINES ? a.line : 'solid', color: a.color || null, label: a.label || '' }))
     .filter(a => a.from && a.to && a.from !== a.to);

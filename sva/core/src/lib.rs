@@ -11,6 +11,7 @@
 
 mod ast;
 mod consts;
+mod decl;
 mod engine;
 mod expand;
 mod explain;
@@ -24,9 +25,12 @@ mod report;
 mod summary;
 mod value;
 
-pub use ast::*;
+// the API (docs/sva/ENGINE.md *Entry points*): what the CLI, the WebAssembly module and the integration tests use; the
+// rest of the tree is reachable through these types' fields
+use ast::*;
+pub use ast::{Assertion, Kind, Prop};
 pub use explain::{explain, expressions};
-pub use engine::{evaluate, evaluate_all, text, Attempt, Column, Options, Outcome, Results, StepInfo, Stats, Status, Trace, TraceStep, XMode};
+pub use engine::{evaluate, evaluate_all, Attempt, Column, Options, Outcome, Results, StepInfo, Stats, Status, Trace, TraceStep, XMode};
 pub use value::V;
 pub use lex::Span;
 pub use print::Printer;
@@ -51,9 +55,17 @@ pub struct SvaError {
     pub expected: Option<String>,
 }
 
+/// The file that lists the subset, named by every error of a construct outside it.
+pub const LANGUAGE_MD: &str = "docs/sva/LANGUAGE.md";
+
 impl SvaError {
+    /// A construct outside the subset says where the subset is written down (one rule for every such error).
     pub fn new(at: Span, msg: impl Into<String>) -> Self {
-        SvaError { line: at.line as usize, col: at.col as usize, start: at.start as usize, end: at.end as usize, msg: msg.into(), found: None, expected: None }
+        let mut msg = msg.into();
+        if msg.contains("outside the subset") && !msg.contains(LANGUAGE_MD) {
+            msg = format!("{msg} ({LANGUAGE_MD})");
+        }
+        SvaError { line: at.line as usize, col: at.col as usize, start: at.start as usize, end: at.end as usize, msg, found: None, expected: None }
     }
 }
 
@@ -208,13 +220,10 @@ pub fn run_unit(sources: &[String], trace: &Trace, opt: &Options, only: &[String
     evaluate_all(&unit_assertions(sources)?, trace, opt, only)
 }
 
-/// The assertions of the files read as one unit, from the cache when the files are the last ones read.
+/// The assertions of the files read as one unit, from the cache when the files are the last ones read (compared whole:
+/// a hash alone could give the assertions of other files on a collision).
 fn unit_assertions(sources: &[String]) -> Result<std::rc::Rc<Vec<Assertion>>, Vec<SvaError>> {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    sources.hash(&mut h);
-    let key = h.finish();
-    let cached = LAST_UNIT.with(|c| c.borrow().as_ref().filter(|(k, _)| *k == key).map(|(_, a)| a.clone()));
+    let cached = LAST_UNIT.with(|c| c.borrow().as_ref().filter(|(k, _)| k.as_slice() == sources).map(|(_, a)| a.clone()));
     let asserts = match cached {
         Some(a) => a,
         None => {
@@ -224,15 +233,18 @@ fn unit_assertions(sources: &[String]) -> Result<std::rc::Rc<Vec<Assertion>>, Ve
                 asserts.extend(unit.parse(s).into_result()?);
             }
             let a = std::rc::Rc::new(asserts);
-            LAST_UNIT.with(|c| *c.borrow_mut() = Some((key, a.clone())));
+            LAST_UNIT.with(|c| *c.borrow_mut() = Some((sources.to_vec(), a.clone())));
             a
         }
     };
     Ok(asserts)
 }
 
+/// The sources of the last unit read and its assertions.
+type UnitCache = Option<(Vec<String>, std::rc::Rc<Vec<Assertion>>)>;
+
 thread_local! {
-    static LAST_UNIT: std::cell::RefCell<Option<(u64, std::rc::Rc<Vec<Assertion>>)>> = const { std::cell::RefCell::new(None) };
+    static LAST_UNIT: std::cell::RefCell<UnitCache> = const { std::cell::RefCell::new(None) };
 }
 
 /// A key that is there (null too) is `Some`: `{"report": null}` is a report request with a bad input, not a parse.
@@ -240,7 +252,9 @@ fn present<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<serde_json::
     serde_json::Value::deserialize(d).map(Some)
 }
 
+/// A key the engine does not know (a typo of the page or of a script) is an error, not a request run with defaults.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Request {
     #[serde(default)]
     source: Option<String>,
@@ -267,6 +281,7 @@ struct Request {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ExplainReq {
     assert: String,
     from: usize,

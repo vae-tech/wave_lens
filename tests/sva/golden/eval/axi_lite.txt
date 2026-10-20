@@ -1,0 +1,36 @@
+axi_aw_hold         assert 18 attempts: 1 pass, 0 fail, 17 vacuous, 0 active, 0 disabled
+  @4..5 (45 ns) Pass [s1@4 s2@5]
+axi_w_hold          assert 18 attempts: 1 pass, 0 fail, 17 vacuous, 0 active, 0 disabled
+  @6..7 (65 ns) Pass [s1@6 s2@7]
+axi_b_hold          assert 18 attempts: 0 pass, 0 fail, 18 vacuous, 0 active, 0 disabled
+axi_ar_hold         assert 18 attempts: 0 pass, 0 fail, 18 vacuous, 0 active, 0 disabled
+axi_r_hold          assert 18 attempts: 0 pass, 0 fail, 18 vacuous, 0 active, 0 disabled
+axi_aw_stable       assert 18 attempts: 1 pass, 0 fail, 17 vacuous, 0 active, 0 disabled
+  @4..5 (45 ns) Pass [s1@4 s2@5]
+axi_w_stable        assert 18 attempts: 1 pass, 0 fail, 17 vacuous, 0 active, 0 disabled
+  @6..7 (65 ns) Pass [s1@6 s2@7]
+axi_ar_stable       assert 18 attempts: 0 pass, 0 fail, 18 vacuous, 0 active, 0 disabled
+axi_awready_late    assert 18 attempts: 1 pass, 0 fail, 17 vacuous, 0 active, 0 disabled
+  @4..5 (45 ns) Pass [s1@4 s2@5]
+axi_w_after_aw      assert 18 attempts: 1 pass, 0 fail, 17 vacuous, 0 active, 0 disabled
+  @5..6 (55 ns) Pass [s1@5 s2@6]
+axi_b_latency       assert 18 attempts: 1 pass, 0 fail, 17 vacuous, 0 active, 0 disabled
+  @7..9 (75 ns) Pass [s1@7 s2@9]
+axi_r_latency       assert 18 attempts: 1 pass, 0 fail, 17 vacuous, 0 active, 0 disabled
+  @13..15 (135 ns) Pass [s1@13 s2@15]
+axi_bresp_okay      assert 18 attempts: 1 pass, 0 fail, 17 vacuous, 0 active, 0 disabled
+  @9..9 (95 ns) Pass [s1@9 s2@9]
+axi_rresp_okay      assert 18 attempts: 1 pass, 0 fail, 17 vacuous, 0 active, 0 disabled
+  @15..15 (155 ns) Pass [s1@15 s2@15]
+axi_wstrb           assert 18 attempts: 2 pass, 0 fail, 16 vacuous, 0 active, 0 disabled
+  @6..6 (65 ns) Pass [s1@6 s2@6]
+  @7..7 (75 ns) Pass [s1@7 s2@7]
+axi_done            assert 18 attempts: 2 pass, 0 fail, 16 vacuous, 0 active, 0 disabled
+  @9..10 (95 ns) Pass [s1@9 s3@10]
+  @15..16 (155 ns) Pass [s2@15 s3@16]
+axi_demo_aw_at_once assert 18 attempts: 0 pass, 1 fail, 17 vacuous, 0 active, 0 disabled · first fail at cycle 4 (45 ns): expected AWREADY at cycle 4
+  @4..4 (45 ns) Fail [s1@4]  -- expected AWREADY at cycle 4
+axi_cov_write       cover  1 match in 18 attempts · first at cycle 9 (95 ns)
+  @5..9 (55 ns) Pass [s1@5 s2@7 s3@9]
+axi_cov_read        cover  1 match in 18 attempts · first at cycle 15 (155 ns)
+  @13..15 (135 ns) Pass [s1@13 s2@15]

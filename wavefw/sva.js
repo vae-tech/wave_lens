@@ -31,7 +31,8 @@ async function inflate(u8) {
   return new Uint8Array(await r.arrayBuffer());
 }
 async function instantiate(bytes) { // -> call(request) -> response, both plain objects
-  if (bytes && !(bytes instanceof ArrayBuffer) && !ArrayBuffer.isView(bytes)) bytes = bytes.deflate ? await inflate(b64bytes(bytes.deflate)) : b64bytes(bytes.base64);
+  if (bytes && !(bytes instanceof ArrayBuffer) && !ArrayBuffer.isView(bytes)) bytes = bytes.deflate ? await inflate(b64bytes(bytes.deflate)) :
+    b64bytes(bytes.base64);
   const x = (await WebAssembly.instantiate(bytes, {})).instance.exports, enc = new TextEncoder(), dec = new TextDecoder();
   return req => {
     const b = enc.encode(JSON.stringify(req)), p = x.sva_alloc(b.length);
@@ -100,7 +101,8 @@ async function load(bytes) {
   return { parse, evaluate, call };
 }
 let ENGINE = null;
-SVA.engine = () => ENGINE || (ENGINE = G.WAVEFW_SVA_WASM ? load(G.WAVEFW_SVA_WASM) : Promise.reject(new Error('no SVA engine in this page (wavefw/sva.wasm.js)')));
+SVA.engine = () => ENGINE || (ENGINE = G.WAVEFW_SVA_WASM ? load(G.WAVEFW_SVA_WASM) :
+  Promise.reject(new Error('no SVA engine in this page (wavefw/sva.wasm.js)')));
 // A request that would take more than ~300 ms in the page goes to a Web Worker: its work is cycles × assertions, the rate
 // (work per ms) is measured on the requests run in the page. SVA.syncLimit (work units), when set, decides instead.
 SVA.rate = 450;
@@ -113,8 +115,10 @@ function worker() {
   const src = [b64bytes, inflate, instantiate, workerMain].map(String).join('\n') + '\nworkerMain();\n';
   const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' })), w = new Worker(url), wait = new Map();
   let n = 0;
-  const fail = err => { for (const [, p] of wait) p[1](err); wait.clear(); w.terminate(); URL.revokeObjectURL(url); if (WORKER && WORKER.w === w) WORKER = null; };
-  w.onmessage = e => { const p = wait.get(e.data.id); if (!p) return; wait.delete(e.data.id); if (e.data.error) p[1](new Error(e.data.error)); else p[0](e.data.out); };
+  const fail = err => { for (const [, p] of wait) p[1](err); wait.clear(); w.terminate(); URL.revokeObjectURL(url); if (WORKER && WORKER.w === w) WORKER = null;
+    };
+  w.onmessage = e => { const p = wait.get(e.data.id); if (!p) return; wait.delete(e.data.id); if (e.data.error) p[1](new Error(e.data.error));
+    else p[0](e.data.out); };
   w.onerror = e => { e.preventDefault(); fail(new Error(e.message || 'the worker failed')); };
   const send = m => new Promise((ok, no) => { m.id = ++n; wait.set(m.id, [ok, no]); w.postMessage(m); });
   const ready = send({ wasm: G.WAVEFW_SVA_WASM });
@@ -137,15 +141,22 @@ function trace(sampler, times, names, unit) {
   return { cycles: times.length, times, unit, signals, widths };
 }
 
-// the helpers of wavefw.js (WaveFW.util); the spike page loads sva.js alone and gets the same ones here
+// today as yyyy-mm-dd in the viewer's time zone (toISOString is UTC: after 21:00 in UTC+3 it says yesterday)
+const localDate = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+// the helpers of wavefw.js (WaveFW.util: model.js); the spike page loads sva.js alone and gets copies of the ones it
+// uses here (its tvSampler: isEdge)
 const U = (G.WaveFW && G.WaveFW.util) || {
   esc: s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
   glob: p => new RegExp('^' + p.split('*').map(s => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$'),
-  lastBefore(n, at, t, strict) { let lo = 0, hi = n - 1, ans = -1; while (lo <= hi) { const m = (lo + hi) >> 1, a = at(m); if (strict ? a < t : a <= t) { ans = m; lo = m + 1; } else hi = m - 1; } return ans; },
+  lastBefore(n, at, t, strict) { let lo = 0, hi = n - 1, ans = -1; while (lo <= hi) { const m = (lo + hi) >> 1, a = at(m);
+    if (strict ? a < t : a <= t) { ans = m; lo = m + 1; } else hi = m - 1; } return ans; },
+  isEdge(edge, prev, b) { if (prev === null) return false; const u = v => v === 'x' || v === 'z';
+    const rise = (prev === '0' && b !== '0') || (u(prev) && b === '1'), fall = (prev === '1' && b !== '1') || (u(prev) && b === '0');
+    return edge === 'posedge' ? rise : edge === 'negedge' ? fall : rise || fall; },
 };
 // the index of the last item with time < t (-1: none); at(i) gives the time of item i
 const lastBefore = (n, at, t) => U.lastBefore(n, at, t, true);
-const isEdge = (edge, prev, b) => prev !== null && b !== prev && (edge === 'posedge' ? b === '1' : edge === 'negedge' ? b === '0' : b === '1' || b === '0');
+const isEdge = U.isEdge;
 
 // sampler over WaveJSON "tv" transitions: {name: {tv: [[t, v], …], width}} (bit values 0 1 x z, bus values hex)
 function tvSampler(sigs) {
@@ -249,7 +260,8 @@ if (G.WaveFW && G.WaveFW.tips) G.WaveFW.tips.add({
 const LIB = { files: [], byLabel: new Map(), notes: [], panels: new Set(), parsing: null, svgs: new Set() };
 const FILES_KEY = 'wavefw.sva.files:' + (G.location ? G.location.pathname : '');
 const esc = U.esc;
-const hash = s => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193); return (h >>> 0).toString(16).padStart(8, '0'); };
+const hash = s => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193);
+  return (h >>> 0).toString(16).padStart(8, '0'); };
 // set() says whether it was kept (false: private mode or the storage is full)
 const store = {
   get(k) { try { const v = localStorage.getItem(k); return v == null ? null : JSON.parse(v); } catch (e) { return null; } },
@@ -258,7 +270,8 @@ const store = {
 // a file of this browser replaces the one of the same name; the page's are told apart by their content. The page's files
 // come first in the compilation unit (a loaded file may use their packages and macros).
 function addFile(f, origin, owner) {
-  const file = { name: f.name, path: f.path || f.name, source: f.source || '', parsed: f.parsed || null, hash: f.hash || hash(f.source || ''), origin, owners: null };
+  const file = { name: f.name, path: f.path || f.name, source: f.source || '', parsed: f.parsed || null, hash: f.hash || hash(f.source || ''), origin,
+    owners: null };
   if (owner) file.owners = new Set([owner]);   // a diagram's own file ("sva" in its WaveJSON): listed in its viewer only
   const i = LIB.files.findIndex(x => x.name === f.name && x.origin === origin && (origin === 'local' || x.hash === file.hash));
   if (i >= 0) LIB.files[i] = file; else LIB.files.push(file);
@@ -277,8 +290,10 @@ function localFiles() { for (const f of store.get(FILES_KEY) || []) addFile(f, '
 // a reload from the disk: ✎ / ⟳ replace it; Revert or Clear bring it back)
 const shadowed = f => f.origin === 'page' && LIB.files.some(l => l.origin === 'local' && l.name === f.name);
 const active = () => LIB.files.filter(f => !shadowed(f));
-SVA.revertFile = async name => { LIB.files = LIB.files.filter(f => !(f.origin === 'local' && f.name === name)); saveLocal(); LIB.files.forEach(f => { f.parsed = null; }); await reparse(); };
-function saveLocal() { const l = LIB.files.filter(f => f.origin === 'local').map(({ name, hash, source }) => ({ name, hash, source })); store.set(FILES_KEY, l.length ? l : null); }
+SVA.revertFile = async name => { LIB.files = LIB.files.filter(f => !(f.origin === 'local' && f.name === name)); saveLocal();
+  LIB.files.forEach(f => { f.parsed = null; }); await reparse(); };
+function saveLocal() { const l = LIB.files.filter(f => f.origin === 'local').map(({ name, hash, source }) => ({ name, hash, source }));
+  store.set(FILES_KEY, l.length ? l : null); }
 // parse the files that need it (every file as one unit with the engine, when one is not parsed yet), then index them
 // When the engine stops on the unit (a trap), this browser's files are left out (and not kept) and the page's parse
 // alone: the page's assertions still work, the panel says why and keeps its Clear button.
@@ -290,7 +305,9 @@ function reparse() {
     catch (err) {
       if (/no SVA engine/.test(err.message)) throw err;
       const gone = LIB.files.filter(f => f.origin === 'local');
-      LIB.loadError = `${gone.map(f => f.name).join(', ') || 'the files'}: the assertion engine stopped (${err.message}); ${gone.length ? 'left out, not kept' : 'not parsed'}`;
+      LIB.loadError =
+        (`${gone.map(f => f.name).join(', ') || 'the files'}: the assertion engine stopped (${err.message}); ` +
+          `${gone.length ? 'left out, not kept' : 'not parsed'}`);
       LIB.files = LIB.files.filter(f => f.origin !== 'local'); saveLocal(); act = active();
       try { out = (await SVA.engine()).call({ files: act.map(f => f.source) }); } catch (err2) { out = { files: [] }; }
     }
@@ -310,7 +327,8 @@ function index() {
     for (const e of p.errors || []) LIB.notes.push({ text: `${f.name}:${e.line}:${e.col}: ${e.msg}`, err: true });
     for (const e of p.warnings || []) LIB.notes.push({ text: `${f.name}:${e.line}:${e.col}: ${e.msg}` });
     for (const a of p.assertions || []) {
-      if (LIB.byLabel.has(a.label)) { LIB.notes.push({ text: `${f.name}:${a.line}: '${a.label}' is also in ${LIB.byLabel.get(a.label).file.name} (that one is used)` }); continue; }
+      if (LIB.byLabel.has(a.label)) { LIB.notes.push({ text:
+        `${f.name}:${a.line}: '${a.label}' is also in ${LIB.byLabel.get(a.label).file.name} (that one is used)` }); continue; }
       LIB.byLabel.set(a.label, { a, file: f });
     }
   }
@@ -323,7 +341,8 @@ SVA.fileList = () => LIB.files.map(({ name, path, origin, hash }) => ({ name, pa
 SVA.assertions = () => [...LIB.byLabel.values()].map(x => x.a);
 // Load file…: File objects (or {name, text}) -> parsed and kept in this browser (by name; new content replaces the old)
 SVA.loadFiles = async list => {
-  for (const f of list) { const source = typeof f.text === 'function' ? await f.text() : f.text; addFile({ name: f.name, source, hash: hash(source) }, 'local'); }
+  for (const f of list) { const source = typeof f.text === 'function' ? await f.text() : f.text; addFile({ name: f.name, source, hash: hash(source) }, 'local');
+    }
   LIB.files.filter(f => f.origin === 'local').forEach(f => { f.parsed = null; });
   if (LIB.files.some(f => f.origin === 'page')) LIB.files.forEach(f => { f.parsed = null; });   // one unit: the page's files first
   LIB.loadError = null;
@@ -356,8 +375,10 @@ function stmtRange(src, a) {
   return { s, e };
 }
 // an assertion whose statement is not in the page's file that its file replaces: edited here or changed on the disk
-const changedHere = (a, file) => { if (!file.shadows || !a.at) return false; const pg = LIB.files.find(x => x.origin === 'page' && x.name === file.name), r = stmtRange(file.source, a); return !!pg && !pg.source.includes(file.source.slice(r.s, r.e)); };
-SVA.statement = label => { const x = LIB.byLabel.get(label); if (!x || !x.a.at) return null; const r = stmtRange(x.file.source, x.a); return { file: x.file.name, text: x.file.source.slice(r.s, r.e), line: x.a.line }; };
+const changedHere = (a, file) => { if (!file.shadows || !a.at) return false; const pg = LIB.files.find(x => x.origin === 'page' && x.name === file.name),
+  r = stmtRange(file.source, a); return !!pg && !pg.source.includes(file.source.slice(r.s, r.e)); };
+SVA.statement = label => { const x = LIB.byLabel.get(label); if (!x || !x.a.at) return null; const r = stmtRange(x.file.source, x.a);
+  return { file: x.file.name, text: x.file.source.slice(r.s, r.e), line: x.a.line }; };
 // What an evaluation of an assertion depends on (not where it is in its file): a binding evaluated for another one is
 // evaluated again (Panel.sync)
 const asig = a => JSON.stringify(a, (k, v) => (k === 'at' || k === 'line' ? undefined : v));
@@ -385,21 +406,26 @@ const idb = (mode, fn) => new Promise((ok, no) => {
   const rq = G.indexedDB.open('wavefw-sva', 1);
   rq.onupgradeneeded = () => rq.result.createObjectStore('handles');
   rq.onerror = () => no(rq.error);
-  rq.onsuccess = () => { try { const t = rq.result.transaction('handles', mode), q = fn(t.objectStore('handles')); t.oncomplete = () => ok(q && q.result); t.onerror = () => no(t.error); } catch (e) { no(e); } };
+  rq.onsuccess = () => { try { const t = rq.result.transaction('handles', mode), q = fn(t.objectStore('handles')); t.oncomplete = () => ok(q && q.result);
+    t.onerror = () => no(t.error); } catch (e) { no(e); } };
 });
 const pickFile = name => G.showOpenFilePicker
-  ? G.showOpenFilePicker({ multiple: false, id: 'wavefw-sva', types: [{ description: 'SystemVerilog', accept: { 'text/plain': ['.sv', '.sva', '.svh', '.v', '.vh'] } }] }).then(([h]) => h)
+  ? G.showOpenFilePicker({ multiple: false, id: 'wavefw-sva', types: [{ description: 'SystemVerilog',
+    accept: { 'text/plain': ['.sv', '.sva', '.svh', '.v', '.vh'] } }] }).then(([h]) => h)
   : new Promise((ok, no) => {   // no handles in this browser: a file input, the file read once
     const inp = Object.assign(document.createElement('input'), { type: 'file', accept: '.sv,.sva,.svh,.v,.vh,.txt' });
-    inp.addEventListener('change', () => inp.files[0] ? ok({ name: inp.files[0].name, getFile: async () => inp.files[0], once: true }) : no(new Error('no file chosen')));
+    inp.addEventListener('change', () => inp.files[0] ? ok({ name: inp.files[0].name, getFile: async () => inp.files[0],
+      once: true }) : no(new Error('no file chosen')));
     inp.click();
   });
 async function handleOf(name, pick) {
   let h = HANDLES.get(name);
   const key = (G.location ? G.location.pathname : '') + ':' + name;   // per page: another project's checks.sv is another file
   if (!h) { try { h = await idb('readonly', st => st.get(key)); } catch (e) { h = null; } }
-  if (!h && pick) { h = await pickFile(name); if (!h.once) { try { await idb('readwrite', st => st.put(h, key)); } catch (e) { /* not kept: picked again after a reload */ } } }
-  if (h && h.queryPermission && (await h.queryPermission({ mode: 'read' })) !== 'granted' && (await h.requestPermission({ mode: 'read' })) !== 'granted') throw new Error(`no permission to read ${name}`);
+  if (!h && pick) { h = await pickFile(name); if (!h.once) { try { await idb('readwrite', st => st.put(h, key));
+    } catch (e) { /* not kept: picked again after a reload */ } } }
+  if (h && h.queryPermission && (await h.queryPermission({ mode: 'read' })) !== 'granted' &&
+    (await h.requestPermission({ mode: 'read' })) !== 'granted') throw new Error(`no permission to read ${name}`);
   if (h && !h.once) HANDLES.set(name, h);
   return h;
 }
@@ -561,11 +587,13 @@ const resultsId = r => RID.get(r) || (RID.set(r, ++ridN), ridN);
 function counts(o, only) {
   const s = o.stats, btn = only !== undefined;
   const c = (k, text, cls = '') => btn && s[k] && k !== 'vacuous'
-    ? `<button type="button" class="cnum c-${k}${cls}${only === k ? ' on' : ''}" data-sv="only" data-k="${k}" aria-pressed="${only === k}" title="${only === k ? 'Show every attempt again' : `Only the ${k} attempts: in the lane and listed here`}">${text}</button>`
+    ? (`<button type="button" class="cnum c-${k}${cls}${only === k ? ' on' : ''}" data-sv="only" data-k="${k}" aria-pressed="${only === k}" ` +
+        `title="${only === k ? 'Show every attempt again' : `Only the ${k} attempts: in the lane and listed here`}">${text}</button>`)
     : `<span class="c-${k}${cls}">${text}</span>`;
   const n = k => s[k] ? [c(k, `${s[k]} ${k}`)] : [];
   if (o.kind === 'cover') { const m = s.matches ?? s.pass; return `${c('pass', `${m} match${m === 1 ? '' : 'es'}`)} in ${s.attempts} attempts`; }
-  return [c('pass', `${s.pass} pass`), c('fail', `${s.fail} fail`, s.fail ? '' : ' zero'), `${s.vacuous} vacuous`, ...n('active'), ...n('disabled'), ...n('capped')].join(' · ');
+  return [c('pass', `${s.pass} pass`), c('fail', `${s.fail} fail`, s.fail ? '' : ' zero'), `${s.vacuous} vacuous`, ...n('active'), ...n('disabled'),
+    ...n('capped')].join(' · ');
 }
 const plainCounts = o => counts(o).replace(/<[^>]+>/g, '');
 
@@ -581,7 +609,8 @@ const RANK = { vacuous: 0, pass: 1, active: 2, capped: 3, disabled: 4, fail: 5 }
 const STRIP = { S: 1, P: 2, C: 3, D: 4, F: 5 }, STRIP_COL = [null, 'muted', 'sva-pass', 'sva-capped', 'sva-disabled', 'sva-fail'];
 const MANY = 20;   // arrows of every attempt on screen below this many
 const globRx = U.glob;
-const shown = S => { const l = S.svaShow == null ? null : (Array.isArray(S.svaShow) ? S.svaShow : String(S.svaShow).split(',')).map(s => s.trim()).filter(Boolean).map(globRx); return n => !l || l.some(rx => rx.test(n)); };
+const shown = S => { const l = S.svaShow == null ? null : (Array.isArray(S.svaShow) ? S.svaShow : String(S.svaShow).split(',')).map(s =>
+  s.trim()).filter(Boolean).map(globRx); return n => !l || l.some(rx => rx.test(n)); };
 // the index of the first item with time >= t (lastBefore + 1)
 const firstFrom = (n, at, t) => lastBefore(n, at, t) + 1;
 // the hit under (x, y) of a lane's bars [a, b, y0, y1, x] / of a step row's circles [x, p]
@@ -590,13 +619,16 @@ const dotAt = (hits, x) => hits.filter(([hx]) => Math.abs(hx - x) <= 8).sort((a,
 // the failure arrow's label from reason.kind (the note is the tooltip)
 function why(a) {
   const k = a.reason && a.reason.kind, n = String(a.note || '').replace(/ at cycle \d+/, '');
-  const t = { unknown: n.replace(/ is unknown \(x\)/, ' is x'), strong_end: 'not before the end', not_held: "'not' held", capped: 'thread limit' }[k] || n || k || 'fail';
+  const t = { unknown: n.replace(/ is unknown \(x\)/, ' is x'), strong_end: 'not before the end', not_held: "'not' held", capped: 'thread limit' }[k] || n ||
+    k || 'fail';
   return t.length > 42 ? t.slice(0, 40) + '…' : t;
 }
 const cut = (t, n) => (t.length > n ? t.slice(0, n - 1) + '…' : t);
 // a property in parts that wrap as a whole: a part starts at a sequence or property operator (|-> |=> ## #-# #=#
 // intersect throughout within and or iff implies until …); an operator alone joins the part after it
-const PROP_OP = '\\|->|\\|=>|#-#|#=#|##\\S*|(?:intersect|throughout|within|and|or|iff|implies|s_until_with|until_with|s_until|until|s_eventually|eventually|s_nexttime|nexttime|s_always|always|not|if|else)\\b';
+const PROP_OP =
+  ('\\|->|\\|=>|#-#|#=#|##\\S*|(?:intersect|throughout|within|and|or|iff|implies|s_until_with|until_with|s_until|until|s_eventually|eventually|s_nexttime|nex' +
+    'ttime|s_always|always|not|if|else)\\b');
 const PROP_AT = new RegExp(` (?=(?:${PROP_OP}))`), PROP_ONLY = new RegExp(`^(?:${PROP_OP})$`);
 function propParts(text) {
   const out = [];
@@ -620,7 +652,8 @@ function stepSignals(label, names) {
 }
 SVA.stepSignals = stepSignals;
 // the attempt a figure without a selection (the static SVG) shows on the signals: the first failure, else the first one
-const focusOf = o => { const as = o.attempts || [], f = o.kind !== 'cover' ? as.findIndex(a => a.result === 'fail') : -1; return f >= 0 ? f : as.length ? 0 : -1; };
+const focusOf = o => { const as = o.attempts || [], f = o.kind !== 'cover' ? as.findIndex(a => a.result === 'fail') : -1;
+  return f >= 0 ? f : as.length ? 0 : -1; };
 // the end flag of an attempt: did it end, and how
 const END = { pass: '✓ pass', fail: '✕ fail', active: '… not ended', disabled: '⊘ disabled', capped: '… capped' };
 // one results document -> what the rows draw: attempts with their times and sub-lane, trace points per step
@@ -629,7 +662,8 @@ function shape(res, only) {
   const steps = o.steps || [], num = new Map(steps.map((s, k) => [s.id, k]));
   let lastCons = steps.length - 1;
   while (lastCons > 0 && steps[lastCons].role !== 'cons' && steps[lastCons].role !== 'seq') lastCons--;
-  const atts = (o.attempts || []).map((a, i) => ({ a, i, r: a.result, t0: at(a.start), t1: at(Math.max(a.end, a.failed_at ?? a.end)), pts: [] })).filter(x => !only || x.r === only);
+  const atts = (o.attempts || []).map((a, i) => ({ a, i, r: a.result, t0: at(a.start), t1: at(Math.max(a.end, a.failed_at ?? a.end)), pts: [] })).filter(x =>
+    !only || x.r === only);
   const lanes = [[], []], rest = [], ends = [-1, -1];
   const pts = steps.map(() => []);
   for (const x of atts) {
@@ -659,7 +693,8 @@ function shape(res, only) {
   return { o, T, steps, atts, lanes: [lanes[0].map(one), lanes[1].map(one), third], pts };
 }
 function hatch(P, x0, y0, w, h, col) {
-  P.clip(x0, y0, w, h, () => { const d = []; for (let x = x0 - h; x < x0 + w; x += 4) d.push(['M', x, y0 + h], ['L', x + h, y0]); P.path(d, { stroke: col, w: 1, alpha: 0.9 }); });
+  P.clip(x0, y0, w, h, () => { const d = []; for (let x = x0 - h; x < x0 + w; x += 4) d.push(['M', x, y0 + h], ['L', x + h, y0]);
+    P.path(d, { stroke: col, w: 1, alpha: 0.9 }); });
 }
 // one attempt with room: a bracket from its start to its end (ticks at both ends; an active or capped one stays open),
 // over a light band; a failure green up to its last matched step, red from there to where it failed -> the split x
@@ -702,28 +737,34 @@ function assertionRows(st, res, opt) {
   const sc = opt.scope || '(top)', fails = !cover && s.fail > 0, full = opt.scope ? `${opt.label}@${opt.scope}` : opt.label;
   const g = st.g || (st.g = { type: 'group', id: st.gid });
   Object.assign(g, { name: `⚑ ${opt.label} · ${plainCounts(o).replace(/ in \d+ attempts$/, '').replace(/ · \d+ vacuous/, '')}`, full, path: full, anc, depth,
-    title: `${opt.label} bound to ${sc}: ${o.text || ''}`, stroke: fails ? 'var(--sva-fail)' : 'var(--accent)', cls: 'sva-g' + (fails ? ' fails' : ''), sva: opt.label,
-    legend: [{ text: cut(`⚑ ${opt.label} @ ${sc}: ${o.text || ''}`, 110), bold: true }, ...m.steps.map((x, k) => ({ n: k + 1, text: `${x.label}  (${x.role})`, color: 'muted' }))] });
+    title: `${opt.label} bound to ${sc}: ${o.text || ''}`, stroke: fails ? 'var(--sva-fail)' : 'var(--accent)', cls: 'sva-g' + (fails ? ' fails' : ''),
+      sva: opt.label,
+    legend: [{ text: cut(`⚑ ${opt.label} @ ${sc}: ${o.text || ''}`, 110), bold: true },
+      ...m.steps.map((x, k) => ({ n: k + 1, text: `${x.label}  (${x.role})`, color: 'muted' }))] });
   const kid = { anc: anc.concat(st.gid), depth: depth + 1 };
   const isSel = x => !svg && opt.sel() === x.i;
   const tip = (x, view, note = true) => {
     const a = x.a, fa = a.failed_at != null && a.failed_at !== a.end ? `, failed at ${view.when(m.T[Math.min(a.failed_at, m.T.length - 1)])}` : '';
-    return `attempt ${x.i + 1}: ${x.r}, ${view.when(x.t0)}${a.start === a.end ? '' : ` → ${view.when(m.T[Math.min(a.end, m.T.length - 1)])}`}${fa} (cycle${a.start === a.end ? ' ' + a.start : `s ${a.start}–${a.end}`})${a.truncated ? ', trace cut' : ''}${a.note && note ? ' — ' + a.note : ''}`;
+    return (`attempt ${x.i + 1}: ${x.r}, ${view.when(x.t0)}${a.start === a.end ? '' : ` → ${view.when(m.T[Math.min(a.end, m.T.length - 1)])}`}${fa} ` +
+        `(cycle${a.start === a.end ? ' ' + a.start : `s ${a.start}–${a.end}`})${a.truncated ? ', trace cut' : ''}${a.note && note ? ' — ' + a.note : ''}`);
   };
   // attempts lane
   const lane = st.lane || (st.lane = { type: 'sig' });
-  Object.assign(lane, kid, { name: opt.only ? `attempts: ${opt.only}` : 'attempts', full: `${g.full}/attempts`, cls: 'sva-lane', height: Math.max(44, rh + 18), hits: [], drawn: 0,
+  Object.assign(lane, kid, { name: opt.only ? `attempts: ${opt.only}` : 'attempts', full: `${g.full}/attempts`, cls: 'sva-lane', height: Math.max(44, rh + 18),
+    hits: [], drawn: 0,
     draw(P, { y, h, X, tA, tB, xL, xR }) {
       const hits = this.hits = [], W = Math.ceil(xR - xL) + 2, cx = x => Math.min(Math.max(x, xL - 4), xR + 4);
       if (o.lane) {   // the per-cycle strip: the strongest event per pixel, failures at least 2 px wide
         const col = new Uint8Array(W), lane = o.lane, T = m.T;
-        for (let k = Math.max(0, firstFrom(T.length, i => T[i], tA) - 1); k < T.length && (k === 0 || T[k - 1] <= tB); k++) {   // one cycle wide, centred on its edge
+        // one cycle wide, centred on its edge
+        for (let k = Math.max(0, firstFrom(T.length, i => T[i], tA) - 1); k < T.length && (k === 0 || T[k - 1] <= tB); k++) {
           const r = STRIP[lane[k]]; if (!r) continue;
           const xe = X(T[k]) - xL, half = (k + 1 < T.length ? X(T[k + 1]) - xL - xe : k > 0 ? xe - X(T[k - 1]) + xL : 2) / 2, x0 = xe - half, x1 = xe + half;
           const c0 = Math.max(0, Math.floor(x0)), c1 = Math.min(W, Math.max(c0 + (r === 5 ? 2 : 1), Math.ceil(x1)));
           for (let c = c0; c < c1; c++) if (col[c] < r) col[c] = r;
         }
-        for (let c = 0; c < W;) { const r = col[c]; let e = c + 1; while (e < W && col[e] === r) e++; if (r) P.rect(xL + c, y + 2, e - c, 3, STRIP_COL[r], r === 1 ? 0.5 : 0.95); c = e; }
+        for (let c = 0; c < W;) { const r = col[c]; let e = c + 1; while (e < W && col[e] === r) e++;
+          if (r) P.rect(xL + c, y + 2, e - c, 3, STRIP_COL[r], r === 1 ? 0.5 : 0.95); c = e; }
       }
       const lh = Math.floor((h - 9) / 3), cell = m.T.length > 1 ? (X(m.T[m.T.length - 1]) - X(m.T[0])) / (m.T.length - 1) : 8;
       const pad = Math.min(Math.max(cell / 2 - 2, 2), 16);   // a bar covers its first and last cycle (a gap to the next one)
@@ -736,14 +777,17 @@ function assertionRows(st, res, opt) {
           if (!run) return;
           const one = run.n === 1 && run.b - run.a >= 6;   // one attempt with room: a bracket; crowded ones: a bar
           marks.push([run.r, run.a, run.b, one ? bracket(P, run.x, run.a, run.b, by, bh, X, cell) : (bar(P, run.r, run.a, run.b, by, bh), null), one]);
-          if (run.sel) P.path([['M', run.a - 1, by - 1], ['L', run.b + 1, by - 1], ['L', run.b + 1, by + bh + 1], ['L', run.a - 1, by + bh + 1], ['Z']], { stroke: 'hl8', w: 1.5 });
-          if (run.n > 1 && k === 2 && run.b - run.a > 16) P.text((run.a + run.b) / 2, by + bh / 2, '×' + run.n, { anchor: 'middle', size: 8.5, weight: 700, fill: 'panel' });
+          if (run.sel) P.path([['M', run.a - 1, by - 1], ['L', run.b + 1, by - 1], ['L', run.b + 1, by + bh + 1], ['L', run.a - 1, by + bh + 1], ['Z']],
+            { stroke: 'hl8', w: 1.5 });
+          if (run.n > 1 && k === 2 && run.b - run.a > 16) P.text((run.a + run.b) / 2, by + bh / 2, '×' + run.n,
+            { anchor: 'middle', size: 8.5, weight: 700, fill: 'panel' });
           hits.push([run.a, run.b, by - y, by - y + bh, run.x]); drawn += run.n; run = null;
         };
         for (let i = firstFrom(items.length, j => items[j].t1, tA); i < items.length && items[i].t0 <= tB; i++) {
           const it = items[i];
           const a = cx(X(it.t0) - pad), b = cx(X(it.t1) + pad);
-          if (run && a <= run.b + 0.5) { run.b = Math.max(run.b, b); run.n += it.n; if (RANK[it.r] > RANK[run.r]) { run.r = it.r; run.x = it.x; } run.sel = run.sel || isSel(it.x); continue; }
+          if (run && a <= run.b + 0.5) { run.b = Math.max(run.b, b); run.n += it.n;
+            if (RANK[it.r] > RANK[run.r]) { run.r = it.r; run.x = it.x; } run.sel = run.sel || isSel(it.x); continue; }
           flush(); run = { a, b, n: it.n, r: it.r, x: it.x, sel: isSel(it.x) };
         }
         flush();
@@ -754,7 +798,8 @@ function assertionRows(st, res, opt) {
     tip(x, y, view) { const h = barAt(this.hits, x, y); return h ? tip(h[4], view) : ''; },
     value(t) {   // the attempts at the cursor: the strongest result (and how many more)
       let best = null, n = 0;
-      for (let i = lastBefore(m.atts.length, j => m.atts[j].t0, t + 1e-9 * Math.max(1, Math.abs(t))); i >= 0 && m.atts[i].mt1 >= t; i--) { const x = m.atts[i]; if (x.t1 >= t) { n++; if (!best || RANK[x.r] > RANK[best.r]) best = x; } }
+      for (let i = lastBefore(m.atts.length, j => m.atts[j].t0, t + 1e-9 * Math.max(1, Math.abs(t))); i >= 0 && m.atts[i].mt1 >= t; i--) { const x = m.atts[i];
+        if (x.t1 >= t) { n++; if (!best || RANK[x.r] > RANK[best.r]) best = x; } }
       return best ? best.r + (n > 1 ? ` +${n - 1}` : '') : '';
     } });
   // step rows
@@ -778,7 +823,8 @@ function assertionRows(st, res, opt) {
       tip(px, y, view) {
         const h = dotAt(this.hits, px); if (!h) return '';
         const p = h[1], v = p.v != null ? ` = ${typeof p.v === 'number' ? '0x' + p.v.toString(16) : p.v}` : '';
-        return p.fail ? `${stp.label}: ${p.x.a.note || why(p.x.a)} — ${tip(p.x, view, false)}` : `step ${k + 1} ${stp.label} at cycle ${p.c}${v} — ${tip(p.x, view)}`;
+        return p.fail ? `${stp.label}: ${p.x.a.note || why(p.x.a)} — ${tip(p.x, view, false)}` :
+          `step ${k + 1} ${stp.label} at cycle ${p.c}${v} — ${tip(p.x, view)}`;
       },
       value: () => '' });
   });
@@ -787,12 +833,14 @@ function assertionRows(st, res, opt) {
   const copies = opt.copies.map(src => {
     const r = st.cp.get(src) || { type: 'sig', same: true };
     st.cp.set(src, r);
-    return Object.assign(r, kid, { name: src.name, full: src.full, tr: src.tr, gaps: src.gaps, width: src.width, enum: src.enum, radix: src.radix, style: src.style,
+    return Object.assign(r, kid, { name: src.name, full: src.full, tr: src.tr, gaps: src.gaps, width: src.width, enum: src.enum, radix: src.radix,
+      style: src.style,
       stroke: src.stroke, fill: src.fill, tv: src.tv, end: src.end, src: src.src, cls: 'sva-copy', of: src });
   });
   // the rows each step reads, by name in its label: the bound signals (src) and their copies in the group (cp)
   const map = opt.map || {}, names = new Set(Object.keys(map)), cpOf = new Map(copies.map(c => [c.of, c]));
-  const reads = m.steps.map(stp => { const rs = stepSignals(stp.label, names).map(n => map[n]); return { src: rs, cp: rs.map(r => cpOf.get(r)).filter(Boolean) }; });
+  const reads = m.steps.map(stp => { const rs = stepSignals(stp.label, names).map(n => map[n]);
+    return { src: rs, cp: rs.map(r => cpOf.get(r)).filter(Boolean) }; });
   const marked = [...new Set(reads.flatMap(x => x.src))];
   // arrows along the traces: every attempt on screen when there are few (the static SVG: all), the selected one in front;
   // the selected attempt (the static SVG: focusOf) also on the signals its steps read, its start and end as dashed lines
@@ -804,13 +852,15 @@ function assertionRows(st, res, opt) {
     const sel = svg ? -1 : opt.sel(), fi = svg ? opt.focus ?? -1 : sel, fx = fi >= 0 ? m.atts.find(x => x.i === fi) : null;
     const near = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]) < 0.5, labels = [], drawn = g.arrows = [], flow = g.flow = [];   // what was drawn (tests)
     if (fx) {   // start and end: under everything else
-      const xs = X(fx.t0), xe = X(fx.t1), vl = (x, c) => { if (x >= xL - 2 && x <= xR + 2) P.path([['M', x, yA], ['L', x, yB]], { stroke: c, w: 1, dash: [4, 3] }); };
+      const xs = X(fx.t0), xe = X(fx.t1), vl = (x, c) => { if (x >= xL - 2 && x <= xR + 2) P.path([['M', x, yA], ['L', x, yB]],
+        { stroke: c, w: 1, dash: [4, 3] }); };
       vl(xs, 'hl8'); if (xe - xs >= 1) vl(xe, COL[fx.r]);
       const q = pos.get(g);
       if (q) {
         const yf = q.y + q.h / 2, flag = (x, text, col, anchor) => {
           const tw = P.measure(text, { size: 10 }), bx = anchor === 'end' ? x - tw - 6 : x;
-          P.rect(bx, yf - 6.5, tw + 6, 13, 'panel'); P.path([['M', bx, yf - 6.5], ['L', bx + tw + 6, yf - 6.5], ['L', bx + tw + 6, yf + 6.5], ['L', bx, yf + 6.5], ['Z']], { stroke: col, w: 1 });
+          P.rect(bx, yf - 6.5, tw + 6, 13, 'panel'); P.path([['M', bx, yf - 6.5], ['L', bx + tw + 6, yf - 6.5], ['L', bx + tw + 6, yf + 6.5],
+            ['L', bx, yf + 6.5], ['Z']], { stroke: col, w: 1 });
           P.text(anchor === 'end' ? x - 3 : x + 3, yf + 0.5, text, { anchor, size: 10, weight: 600, fill: col });
           flow.push({ flag: text });
         };
@@ -844,7 +894,9 @@ function assertionRows(st, res, opt) {
         const A = x.pts.length ? at(x.pts[x.pts.length - 1]) : null, B = at(x.fail);
         if (A && B && !near(A, B)) arrow(A, B, 'sva-fail', front ? 1.6 : 1.2, [4, 3], why(x.a), front);
       }
-      for (const p of x.fail ? x.pts.concat(x.fail) : x.pts) { const q = at(p); if (q && q[0] >= xL - 8 && q[0] <= xR + 8) dot(P, q[0], q[1], p, !front && p.sm !== false, front); }   // in front of the lines, as the row drew them
+      // in front of the lines, as the row drew them
+      for (const p of x.fail ? x.pts.concat(x.fail) : x.pts) { const q = at(p); if (q && q[0] >= xL - 8 && q[0] <= xR + 8) dot(P, q[0], q[1], p, !front &&
+        p.sm !== false, front); }
     }
     // the focused attempt on the signals: a numbered circle on every row its step reads, arrows from the first of one
     // step to the first of the next (the bound signals and their copies in the group, each set on its own)
@@ -885,7 +937,9 @@ class Panel {
     this.el = document.createElement('div'); this.el.className = 'sva'; this.el.hidden = true;
     v.addPanel(this.el);
     if (G.WAVEFW_SVA_WASM) {
-      const g = v.addTool('assertions', '<button type="button" data-sv="load" title="Load SystemVerilog assertion files (.sv, .sva): parsed in the page, kept in this browser">Load file…</button><input type="file" class="svfile" multiple accept=".sv,.sva,.svh,.v,.vh,.txt" hidden>');
+      const g = v.addTool('assertions',
+        ('<button type="button" data-sv="load" title="Load SystemVerilog assertion files (.sv, .sva): parsed in the page, kept in this browser">Load ' +
+          'file…</button><input type="file" class="svfile" multiple accept=".sv,.sva,.svh,.v,.vh,.txt" hidden>'));
       g.classList.add('sv');
       const inp = g.querySelector('input.svfile');
       g.querySelector('button[data-sv=load]').addEventListener('click', () => inp.click());
@@ -913,7 +967,8 @@ class Panel {
     if (v.extraState) v.extraState.push({ key: 'sva', get: () => this.snapshot(), set: s => this.restore(s) });
     // on the waves: the rows of the bindings, f / F through the failures, Esc unselects
     this.selA = null; this.dirty = true; this.at = new Map(); this.sumN = 0;
-    this.el.addEventListener('change', e => { if (e.target.matches('select[data-sv=ffilter]')) { this.failFilter = e.target.value; this.fillSummary(this.el.querySelector('.svr'), 'fails'); } });
+    this.el.addEventListener('change', e => { if (e.target.matches('select[data-sv=ffilter]')) { this.failFilter = e.target.value;
+      this.fillSummary(this.el.querySelector('.svr'), 'fails'); } });
     if (v.extraRows) v.extraRows.push(g => this.rowsFor(g));
     v.addKey(']f', () => this.step(1), ']f [f next / previous assertion failure').addKey('[f', () => this.step(-1));
     v.addKey(']a', () => this.stepAssert(1), ']a [a next / previous assertion').addKey('[a', () => this.stepAssert(-1));
@@ -945,22 +1000,35 @@ class Panel {
   bindJSON() { return this.bindings.map(b => ({ assert: b.assert, scope: b.scope })); }
   // the viewer's saved state (Save / Load…): this browser's files (loaded, edited, read from the disk: their text), the
   // bindings and the assertions taken off the list. Loading replaces the bindings; the page's come back with their results
-  snapshot() { return { files: LIB.files.filter(f => f.origin === 'local').map(({ name, source }) => ({ name, source })), bind: this.bindJSON(), hidden: [...this.hidden] }; }
+  snapshot() {
+    const s = { files: LIB.files.filter(f => f.origin === 'local').map(({ name, source }) => ({ name, source })), bind: this.bindJSON(),
+      hidden: [...this.hidden] };
+    // what the panel shows: its table and failure list, the selected attempt (its binding and number)
+    s.view = { table: !!this.showTable, fails: !!this.showFails, ...(this.selA ? { sel: { assert: this.selA.b.assert, scope: this.selA.b.scope || '',
+      i: this.selA.i } } : {}) };
+    return s;
+  }
   async restore(s) {
     const files = (s.files || []).filter(f => f && f.name && typeof f.source === 'string' && !active().some(x => x.name === f.name && x.source === f.source));
     if (files.length) await SVA.loadFiles(files.map(f => ({ name: f.name, text: f.source }))); else await LIB.parsing;
-    if (s.bind === undefined && s.hidden === undefined) return;
-    const list = (s.bind || []).filter(b => b && b.assert).map(b => ({ assert: b.assert, scope: b.scope || '' })), want = new Set(list.map(bkey));
-    const old = this.bindings, page = (this.v.M.src.sva && this.v.M.src.sva.bind) || [];
-    for (const b of old) if (!want.has(bkey(b))) { this.dropSel(b); if (b.page) this.removed.add(bkey(b)); }
-    this.bindings = list.map(x => {
-      const b = old.find(o => bkey(o) === bkey(x)); if (b) return b;
-      const pb = page.find(p => bkey(p) === bkey(x)); this.removed.delete(bkey(x));
-      return { assert: x.assert, scope: x.scope, results: pb && pb.results ? pb.results : null, page: !!pb, fromPage: !!(pb && pb.results) };
-    });
-    if (s.hidden !== undefined) this.hidden = new Set(s.hidden || []);
-    old.filter(b => !this.bindings.includes(b)).forEach(b => this.changed(b, false));
-    this.save(); this.sync(); await this.queue;
+    if (s.bind !== undefined || s.hidden !== undefined) {
+      const list = (s.bind || []).filter(b => b && b.assert).map(b => ({ assert: b.assert, scope: b.scope || '' })), want = new Set(list.map(bkey));
+      const old = this.bindings, page = (this.v.M.src.sva && this.v.M.src.sva.bind) || [];
+      for (const b of old) if (!want.has(bkey(b))) { this.dropSel(b); if (b.page) this.removed.add(bkey(b)); }
+      this.bindings = list.map(x => {
+        const b = old.find(o => bkey(o) === bkey(x)); if (b) return b;
+        const pb = page.find(p => bkey(p) === bkey(x)); this.removed.delete(bkey(x));
+        return { assert: x.assert, scope: x.scope, results: pb && pb.results ? pb.results : null, page: !!pb, fromPage: !!(pb && pb.results) };
+      });
+      if (s.hidden !== undefined) this.hidden = new Set(s.hidden || []);
+      old.filter(b => !this.bindings.includes(b)).forEach(b => this.changed(b, false));
+      this.save(); this.sync(); await this.queue;
+    }
+    if (s.view) {
+      this.showTable = !!s.view.table; this.showFails = !!s.view.fails; this.render();
+      const w = s.view.sel, b = w && this.bindings.find(x => x.assert === w.assert && (x.scope || '') === w.scope);
+      if (b && b.results) this.select(b, w.i);
+    }
   }
   toast(m) { this.v.toast(m); }
   // after the files or the settings changed: resolve the bindings again, take kept results, evaluate the others
@@ -968,7 +1036,8 @@ class Panel {
     for (const b of this.bindings) {
       // results of another text of the assertion (an edit, a reload; the page's results of a file this browser replaced): gone
       const x = LIB.byLabel.get(b.assert), sig = x ? asig(x.a) : null;
-      if (b.results && ((b.asig !== undefined && b.asig !== sig) || (b.fromPage && x && changedHere(x.a, x.file)))) { b.results = null; b.fromPage = false; this.dropSel(b); }
+      if (b.results && ((b.asig !== undefined && b.asig !== sig) || (b.fromPage && x && changedHere(x.a, x.file)))) { b.results = null; b.fromPage = false;
+        this.dropSel(b); }
       b.asig = sig;
       this.check(b);
       const kept = this.saved.results && this.saved.src === LIB.src && this.saved.results[bkey(b)];
@@ -1017,7 +1086,8 @@ class Panel {
         try {
           await evaluateScope(this.v, ok, (i, n, p) => {
             const w = p.edges ? p.edges.length * p.n : 0;
-            for (const b of ok) { b.msg = (n > 1 ? `evaluating ${i + 1} / ${n}` : 'evaluating') + (useWorker(w) ? ` (${p.edges.length} cycles, in a worker)…` : '…'); this.renderB(b); }
+            for (const b of ok) { b.msg = (n > 1 ? `evaluating ${i + 1} / ${n}` : 'evaluating') + (useWorker(w) ? ` (${p.edges.length} cycles, in a worker)…` :
+              '…'); this.renderB(b); }
           });
         } catch (err) { ok.forEach(b => { b.error = err.message; }); }
         for (const b of ok) { b.running = false; b.msg = null; b.fromPage = false; this.dropSel(b); this.renderB(b); this.changed(b, false); }
@@ -1049,9 +1119,11 @@ class Panel {
     for (const b of list) {
       const g = b.group, k = g ? g.id : -1, st = b.draw || (b.draw = {}), first = !st.gid;
       const copies = S.svaSignals === false || !b.res ? [] : [...new Set(Object.values(b.res.map))];
-      const rows = assertionRows(st, b.results, { S, label: b.assert, scope: b.scope, copies, map: b.res ? b.res.map : rowsOf(v.M, outcome(b)), view: v, base: { anc: g ? g.anc.concat(g.id) : [], depth: g ? g.depth + 1 : 0 },
+      const rows = assertionRows(st, b.results, { S, label: b.assert, scope: b.scope, copies, map: b.res ? b.res.map : rowsOf(v.M, outcome(b)), view: v,
+        base: { anc: g ? g.anc.concat(g.id) : [], depth: g ? g.depth + 1 : 0 },
         sel: () => (this.selA && this.selA.b === b ? this.selA.i : -1), pick: i => this.select(b, i), only: b.only || null });
-      if (first && n.get(k) > 3 && !(outcome(b).stats.fail > 0 && outcome(b).kind !== 'cover')) v.collapsed.add(st.gid);   // many at one place: the passing ones folded
+      // many at one place: the passing ones folded
+      if (first && n.get(k) > 3 && !(outcome(b).stats.fail > 0 && outcome(b).kind !== 'cover')) v.fold(st.gid, true, true);
       if (!this.at.has(k)) this.at.set(k, []);
       this.at.get(k).push(...rows);
     }
@@ -1079,11 +1151,12 @@ class Panel {
   // window; clicked again, the next such attempt
   reveal(b) {
     const v = this.v;
-    if (!outcome(b) || !this.drawn().includes(b)) { this.toast(`${b.assert}: ${b.state === 'cannot' ? 'cannot bind here' : b.running ? 'evaluating…' : 'not drawn in this view'}`); return; }
+    if (!outcome(b) || !this.drawn().includes(b)) {
+      this.toast(`${b.assert}: ${b.state === 'cannot' ? 'cannot bind here' : b.running ? 'evaluating…' : 'not drawn in this view'}`); return; }
     const i = this.attemptOf(b, this.selA && this.selA.b === b ? this.selA.i + 1 : 0);
     if (i >= 0) { this.select(b, i); return; }
     // nothing but vacuous attempts: the group, the time as it is
-    const st = b.draw; if (st && st.g) [...st.g.anc, st.g.id].forEach(id => v.collapsed.delete(id));
+    const st = b.draw; if (st && st.g) [...st.g.anc, st.g.id].forEach(id => v.fold(id, false, true));
     this.dropSel(); this.dirty = true; v.renderNames(); v.draw(); this.mark(b);
     if (st && st.g) v.centerRow(st.g);
     this.toast(`${b.assert}: only vacuous attempts`);
@@ -1111,7 +1184,7 @@ class Panel {
     if (!fs.length) { this.toast('no assertion failure'); return; }
     let k = this.selA ? fs.findIndex(f => f.b === this.selA.b && f.i === this.selA.i) : -1;
     if (k >= 0) k = (k + dir + fs.length) % fs.length;
-    else { const eps = 1e-9 * Math.max(1, Math.abs(v.cursor)); k = dir > 0 ? fs.findIndex(f => f.t > v.cursor + eps) : fs.map(f => f.t < v.cursor - eps).lastIndexOf(true); if (k < 0) k = dir > 0 ? 0 : fs.length - 1; }
+    else k = U.stepTo(fs.map(f => f.t), v.cursor, dir);
     this.select(fs[k].b, fs[k].i);
   }
   // select attempt i of binding b: the cursor at its start, the view around it, its rows open and in front, the bound
@@ -1124,9 +1197,9 @@ class Panel {
     // the zoom stays: the attempt (its bar reaches half a cycle past its edges) in the middle of the window, or its start
     // near the left edge when it is longer than the window
     const w = te - ts + per;
-    v.t0 = v.clamp(w <= v.span ? ts - per / 2 - (v.span - w) / 2 : ts - per / 2 - v.span * 0.1); v.cursor = ts;
     const st = b.draw;
-    if (st && st.g) [...st.g.anc, st.g.id].forEach(id => v.collapsed.delete(id));
+    if (st && st.g) [...st.g.anc, st.g.id].forEach(id => v.fold(id, false, true));
+    v.moveTo(ts, { left: w <= v.span ? ts - per / 2 - (v.span - w) / 2 : ts - per / 2 - v.span * 0.1 });
     v.extraPicks = new Map([...Object.values((b.res && b.res.map) || {}), ...(st && st.g ? [st.g] : [])].map(r => [r, 'hl8']));   // the group covers its rows
     this.dirty = true; v.renderNames(); v.draw();
     if (st && st.lane) v.centerRow(st.lane);   // the attempts lane in the middle of the waves
@@ -1145,7 +1218,10 @@ class Panel {
     this.whyKey = key;
     if (!sel) { this.why = ''; this.fillWhy(); return; }
     const { b, i } = sel, o = outcome(b), a = o.attempts[i], x = LIB.byLabel.get(b.assert), v = this.v;
-    const head = `<div class="wh"><b>Why</b> · ${esc(b.assert)} · attempt ${i + 1}: <span class="c-${a.result}">${esc(a.result)}</span>${a.note ? ' — ' + esc(a.note) : ''}<button type="button" class="ic" data-sv="nowhy" aria-label="close" title="Close (Esc on the waves)">✕</button></div>`;
+    const head =
+      (`<div class="wh"><b>Why</b> · ${esc(b.assert)} · attempt ${i + 1}: <span ` +
+        `class="c-${a.result}">${esc(a.result)}</span>${a.note ? ' — ' + esc(a.note) : ''}<button type="button" class="ic" data-sv="nowhy" ` +
+        `aria-label="close" title="Close (Esc on the waves)">✕</button></div>`);
     const say = m => { if (this.whyKey === key) { this.why = head + `<p class="muted">${esc(m)}</p>`; this.fillWhy(); } };
     if (!x || !b.res || !b.res.ok) { say('the signals of this binding are not in this view: nothing to take apart'); return; }
     try {
@@ -1161,20 +1237,28 @@ class Panel {
       const miss = a.result === 'fail' && a.reason ? `${a.reason.step}@${a.failed_at ?? a.end}` : '';
       const cell = (val, w, id, c) => {
         const t = w === 1 ? (val === 1 ? 't' : val === 0 ? 'f' : 'x') : (typeof val === 'number' || /^h/.test(val) ? 'n' : 'x');
-        const txt = w === 1 ? String(val) : typeof val === 'number' ? (val < 10 ? String(val) : '0x' + val.toString(16)) : /^h/.test(val) ? '0x' + val.slice(1) : val;
+        const txt = w === 1 ? String(val) : typeof val === 'number' ? (val < 10 ? String(val) : '0x' + val.toString(16)) : /^h/.test(val) ? '0x' +
+          val.slice(1) : val;
         const k = id ? `${id}@${c}` : '';
-        return `<td class="${t}${k && hit.has(k) ? ' hit' : ''}${k && k === miss ? ' miss' : ''}" title="${esc(String(txt))}">${esc(cut(String(txt), 10))}</td>`;
+        return `<td class="${t}${k && hit.has(k) ? ' hit' : ''}${k && k === miss ? ' miss' : ''}"
+          title="${esc(String(txt))}">${esc(cut(String(txt), 10))}</td>`;
       };
       const rows = [];
       const walk = (nd, depth, top) => {
         const lab = top ? `${top.id && num.has(top.id) ? num.get(top.id)[0] + '. ' : ''}${nd.text}` : nd.text;
         const role = top ? (top.id && num.has(top.id) ? num.get(top.id)[1] : top.what) : '';
-        rows.push(`<tr class="${top ? 'top' : ''}"><th scope="row" style="padding-left:${0.4 + depth * 1.1}em" title="${esc(nd.text)}">${esc(cut(lab, 60))}${role ? ` <span class="muted">${esc(role)}</span>` : ''}</th>${nd.values.map((val, k) => cell(val, nd.w, top && top.id, a.start + k)).join('')}</tr>`);
+        rows.push((`<tr class="${top ? 'top' : ''}"><th scope="row" style="padding-left:${0.4 + depth * 1.1}em" ` +
+            `title="${esc(nd.text)}">${esc(cut(lab, 60))}${role ? ` <span
+              class="muted">${esc(role)}</span>` : ''}</th>${nd.values.map((val, k) => cell(val, nd.w, top && top.id, a.start + k)).join('')}</tr>`));
         for (const kid of nd.kids || []) walk(kid, depth + 1, null);
       };
       for (const bl of out.explain) walk(bl.tree, 0, bl);
-      const cols = Array.from({ length: n }, (_, k) => `<th scope="col"><button type="button" data-sv="wt" data-t="${E[from + k]}" title="${esc(v.when(E[from + k]))}: the cursor there">${a.start + k}</button></th>`).join('');
-      this.why = head + `<div class="ww"><table class="svw-t"><thead><tr><th scope="col" class="muted">cycle</th>${cols}</tr></thead><tbody>${rows.join('')}</tbody></table></div>` +
+      const cols = Array.from({ length: n }, (_, k) =>
+        (`<th scope="col"><button type="button" data-sv="wt" data-t="${E[from + k]}" title="${esc(v.when(E[from + k]))}: the cursor ` +
+          `there">${a.start + k}</button></th>`)).join('');
+      this.why = head +
+        (`<div class="ww"><table class="svw-t"><thead><tr><th scope="col" ` +
+          `class="muted">cycle</th>${cols}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`) +
         (last - a.start + 1 > n ? `<p class="muted">the first ${n} of ${last - a.start + 1} cycles</p>` : '');
       this.fillWhy();
     } catch (err) { say(err.message); }
@@ -1199,20 +1283,25 @@ class Panel {
   jumps() {
     let el = this.jumpEl;
     const fs = this.failures(), show = fs.length > 0 && fs.length <= 6;
-    if (!show) { if (el) { const g = el.parentElement; el.remove(); this.jumpEl = null; if (g && g.children.length === 1) g.remove(); } return; }   // a "go to" of its own goes too
+    // a "go to" of its own goes too
+    if (!show) { if (el) { const g = el.parentElement; el.remove(); this.jumpEl = null; if (g && g.children.length === 1) g.remove(); } return; }
     if (!el) {
       el = this.jumpEl = document.createElement('span'); el.className = 'svj';
       this.v.addTool('go to', el);
-      el.addEventListener('click', e => { const btn = e.target.closest('button[data-svj]'); if (!btn) return; const f = this.failures()[+btn.dataset.svj]; if (f) this.select(f.b, f.i); });
+      el.addEventListener('click', e => { const btn = e.target.closest('button[data-svj]'); if (!btn) return; const f = this.failures()[+btn.dataset.svj];
+        if (f) this.select(f.b, f.i); });
     }
-    el.innerHTML = fs.map((f, k) => `<button type="button" class="fail" data-svj="${k}" title="${esc(`${f.b.assert}: ${f.a.note || 'fail'} (cycle ${f.a.start})`)}">✕ ${esc(f.b.assert)} ${esc(this.v.fmt(f.t, (this.v.M.t1 - this.v.M.t0) / 1000, this.v.M.t1 - this.v.M.t0))}</button>`).join('');
+    el.innerHTML = fs.map((f, k) =>
+      (`<button type="button" class="fail" data-svj="${k}" title="${esc(`${f.b.assert}: ${f.a.note || 'fail'} (cycle ${f.a.start})`)}">✕ ${esc(f.b.assert)} ` +
+        `${esc(this.v.fmt(f.t, (this.v.M.t1 - this.v.M.t0) / 1000, this.v.M.t1 - this.v.M.t0))}</button>`)).join('');
   }
   async load(files) {
     this.toast('parsing…');
     try { await SVA.loadFiles(files); } catch (err) { this.toast('cannot load: ' + err.message); return; }
     if (LIB.loadError) { this.open = true; this.render(); this.toast(LIB.loadError); return; }
     if (!store.get(FILES_KEY) && LIB.files.some(f => f.origin === 'local')) this.toast('loaded, but not kept in this browser: its storage is full or off');
-    const n = files.map(f => { const lf = LIB.files.find(x => x.origin === 'local' && x.name === f.name); return lf && lf.parsed ? (lf.parsed.assertions || []).length : 0; }).reduce((a, b) => a + b, 0);
+    const n = files.map(f => { const lf = LIB.files.find(x => x.origin === 'local' && x.name === f.name); return lf &&
+      lf.parsed ? (lf.parsed.assertions || []).length : 0; }).reduce((a, b) => a + b, 0);
     this.open = true; this.render(); this.toast(`${files.map(f => f.name).join(', ')}: ${n} assertion${n === 1 ? '' : 's'}`);
   }
   label(S) { return S || '(top)'; }
@@ -1222,45 +1311,65 @@ class Panel {
     const sc = esc(this.label(b.scope)), path = sc.replace(/\./g, '.<wbr>'), o = outcome(b);
     const how = [...((b.res && b.res.notes) || []), ...((b.res && b.res.errors) || [])];
     if (b.workerError) how.push(`the worker failed (${b.workerError}): evaluated in the page`);
-    const info = how.length ? ` <button type="button" class="how" data-sv="how" aria-label="how ${esc(b.assert)} was bound" title="${esc(how.join('\n'))}">ⓘ</button>` : '';
+    const info = how.length ?
+      ` <button type="button" class="how" data-sv="how" aria-label="how ${esc(b.assert)} was bound" title="${esc(how.join('\n'))}">ⓘ</button>` : '';
     const two = (cls, tip, msg, cn) => `<span class="st bp ${cls}" title="${esc(tip)}"><b class="sp">${path}</b>${info}</span>` +
-      `<span class="bs">${msg ? `<span class="st ${cls}">${msg}</span>` : ''}${cn && o ? `<span class="cn">${counts(o, b.only || null)}</span>` : ''}${cn ? this.selHTML(b) : ''}</span>`;
+      (`<span ` +
+          `class="bs">${msg ? `<span class="st ${cls}">${msg}</span>` : ''}${cn && o ? `<span
+            class="cn">${counts(o, b.only || null)}</span>` : ''}${cn ? this.selHTML(b) : ''}</span>`);
     if (b.running) return two('run', 'bound to ' + this.label(b.scope), esc(b.msg || 'evaluating…'));
     if (b.error) return two('no', 'bound to ' + this.label(b.scope), esc(b.error));
-    if (b.state === 'cannot') return two('no', 'cannot bind to ' + this.label(b.scope), `cannot bind: ${esc([...(b.res.missing.length ? ['missing ' + b.res.missing.join(', ')] : []), ...b.res.errors].join('; '))}`);
+    if (b.state === 'cannot') return two('no', 'cannot bind to ' + this.label(b.scope),
+      `cannot bind: ${esc([...(b.res.missing.length ? ['missing ' + b.res.missing.join(', ')] : []), ...b.res.errors].join('; '))}`);
     if (b.state === 'dump') {
       const not = [...b.res.missing, ...b.res.errors].join(', ');
-      return two('dump', 'bound to ' + this.label(b.scope) + '; results of sva eval at build time; this view does not show ' + not, `from the dump, not in this view: ${esc(not)}`, true);
+      return two('dump', 'bound to ' + this.label(b.scope) + '; results of sva eval at build time; this view does not show ' + not,
+        `from the dump, not in this view: ${esc(not)}`, true);
     }
     return two('ok', 'bound to ' + this.label(b.scope), '', true);
   }
   selHTML(b) {
     const a = this.selA && this.selA.b === b && outcome(b) && outcome(b).attempts[this.selA.i];
     const T = a && (outcome(b).cycles || b.results.cycles);
-    return a ? `<span class="sel">attempt ${this.selA.i + 1}: ${esc(a.result)}, ${esc(this.v.when(T[a.start]))} (cycle${a.start === a.end ? ' ' + a.start : `s ${a.start}–${a.end}`})</span>` : '';
+    return a ?
+      (`<span class="sel">attempt ${this.selA.i + 1}: ${esc(a.result)}, ${esc(this.v.when(T[a.start]))} ` +
+        `(cycle${a.start === a.end ? ' ' + a.start : `s ${a.start}–${a.end}`})</span>`) : '';
   }
   // the attempts of a count the user clicked (b.only), each a link to it on the waves
   onlyHTML(b) {
     const o = outcome(b); if (!o || !b.only) return '';
     const T = o.cycles || b.results.cycles, v = this.v, list = o.attempts.map((a, i) => [a, i]).filter(([a]) => a.result === b.only), max = 200;
-    return `<ol class="atl">${list.slice(0, max).map(([a, i]) => `<li><button type="button" data-sv="go" data-i="${i}">#${i + 1}</button> cycle${a.start === a.end ? ' ' + a.start : `s ${a.start}–${a.end}`} · ${esc(v.when(T[a.start]))}${a.note ? ' — ' + esc(a.note) : ''}</li>`).join('')}${list.length > max ? `<li class="muted">… ${list.length - max} more</li>` : ''}</ol>`;
+    return (`<ol ` +
+        `class="atl">${list.slice(0, max).map(([a, i]) => `<li><button type="button" data-sv="go"
+          data-i="${i}">#${i + 1}` +
+            `</button> cycle${a.start === a.end ? ' ' + a.start : `s ${a.start}–${a.end}`}` +
+            ` · ${esc(v.when(T[a.start]))}${a.note ? ' — ' + esc(a.note) : ''}</li>`).join('')}` +
+            `${list.length > max ? `<li class="muted">… ${list.length - max} more</li>` : ''}</ol>`);
   }
   bindHTML(b) {
     const o = outcome(b);
-    return `${this.state(b)}<span class="bb"><button type="button" data-sv="eval"${b.state === 'bound' && !b.running ? '' : ' disabled'} title="Run the assertion again over the waves of this view">Evaluate</button><button type="button" data-sv="fail"${o && o.stats.fail && o.kind !== 'cover' ? '' : ' disabled'} title="Show the first failing attempt">Go to first failure</button><button type="button" data-sv="unbind" title="Remove this binding">Unbind</button></span>${this.onlyHTML(b)}`;
+    return (`${this.state(b)}<span class="bb"><button type="button" data-sv="eval"${b.state === 'bound' && !b.running ? '' : ' disabled'} title="Run the ` +
+        `assertion again over the waves of this view">Evaluate</button><button type="button" ` +
+        `data-sv="fail"${o && o.stats.fail && o.kind !== 'cover' ? '' : ' disabled'} title="Show the first failing attempt">Go to first ` +
+        `failure</button><button type="button" data-sv="unbind" title="Remove this binding">Unbind</button></span>${this.onlyHTML(b)}`);
   }
   // ✎: the editor of an assertion under its line: its statement, Apply / Cancel / Revert, what went wrong
   editHTML(a, file) {
     const st = this.editText != null ? this.editText : (SVA.statement(a.label) || {}).text || '';
-    return `<div class="sve"><textarea class="src" spellcheck="false" rows="${Math.min(14, st.split('\n').length + 1)}" aria-label="the statement of ${esc(a.label)}">${esc(st)}</textarea>
-      <span class="eb"><button type="button" data-sv="apply" title="Parse it and evaluate its bindings again (ctrl+Enter); kept in this browser">Apply</button><button type="button" data-sv="noedit">Cancel</button>${file.shadows ? `<button type="button" data-sv="revert" title="Forget this browser's ${esc(file.name)}: the page's file comes back">Revert to the page's</button>` : ''}
+    return `<div class="sve"><textarea class="src" spellcheck="false" rows="${Math.min(14, st.split('\n').length + 1)}"
+      aria-label="the statement of ${esc(a.label)}">${esc(st)}</textarea>
+      <span class="eb"><button type="button" data-sv="apply"
+        title="Parse it and evaluate its bindings again (ctrl+Enter); kept in this browser">Apply</button><button type="button"
+          data-sv="noedit">Cancel</button>${file.shadows ? `<button type="button" data-sv="revert"
+            title="Forget this browser's ${esc(file.name)}: the page's file comes back">Revert to the page's</button>` : ''}
       <span class="muted">${esc(file.name)}:${a.line}</span><span class="em" role="alert">${esc(this.editErr || '')}</span></span></div>`;
   }
   async applyEdit(label) {
     const ta = this.el.querySelector(`li[data-a="${CSS.escape(label)}"] textarea.src`); if (!ta) return;
     const text = ta.value; this.toast('parsing…');
     const r = await SVA.edit(label, text), x = LIB.byLabel.get(label);
-    if (!r.ok) { this.editText = text; this.editErr = r.errors.join(' · '); this.editing = label; this.render(); this.toast(`not applied: ${r.errors[0]}`); return; }
+    if (!r.ok) { this.editText = text; this.editErr = r.errors.join(' · '); this.editing = label; this.render(); this.toast(`not applied: ${r.errors[0]}`);
+      return; }
     if (x) x.file.edited = true;
     this.editing = null; this.editText = this.editErr = null; this.render();
     const bs = this.bindings.filter(b => b.assert === label);
@@ -1291,21 +1400,57 @@ class Panel {
     const line = ({ a, file }, k) => {
       const bs = this.bindings.filter(b => b.assert === a.label), sigs = a.signals.map(s => s.name);
       const pick = this.pick === a.label ? this.pickHTML(a) : '';
-      return `<li data-a="${esc(a.label)}" draggable="true" title="click: go to it on the waves (again: its next attempt) · drag onto a module in the names column to bind it">
+      return `<li data-a="${esc(a.label)}" draggable="true"
+        title="click: go to it on the waves (again: its next attempt) · drag onto a module in the names column to bind it">
         <span class="an"><span class="grip" aria-hidden="true">⠿</span>${k + 1}</span>
-        <span class="nm"><b class="al">${esc(a.label)}</b>${changedHere(a, file) ? `<span class="ed" title="its text differs from the page's ${esc(file.name)}: this browser's copy (${file.edited ? 'edited here' : 'read from the disk'}) replaces the page's file; Revert in the editor (✎) brings the page's back">${file.edited ? 'edited' : 'changed'}</span>` : ''}</span>
-        <span class="pr"><span class="ak k-${a.kind}">${a.kind}</span><code class="at" title="${esc(a.text || '')}\n— ${esc(file.name)}:${a.line}\nsignals (the clock first): ${esc(sigs.join(' '))}">${propParts(a.text || '').map(t => `<span class="pp">${esc(t)}</span>`).join(' ')}</code></span>
-        ${bs.length === 1 ? `<span class="b1" data-b="${this.bindings.indexOf(bs[0])}" aria-live="polite">${this.bindHTML(bs[0])}</span>` : `<span class="b1"><span class="st bp">${bs.length ? `${bs.length} bindings ↓` : 'unbound'}</span></span>`}
-        <span class="ab"><button type="button" data-sv="bind" title="Bind to an instance: the modules where all its signals are">Bind…</button><button type="button" class="ic" data-sv="edit" aria-label="edit ${esc(a.label)}" title="Edit this assertion here: Apply parses it and evaluates its bindings again (ctrl+Enter)"${a.at ? '' : ' disabled'}>✎</button><button type="button" class="ic" data-sv="reload" aria-label="read ${esc(file.name)} again" title="Read ${esc(file.name)} from the disk again: its assertions are parsed and evaluated again (the first time: pick the file)">⟳</button><button type="button" class="ic" data-sv="del" aria-label="remove ${esc(a.label)}" title="Remove this assertion from the list (and its bindings)">✕</button></span>
-        ${pick}${this.editing === a.label ? this.editHTML(a, file) : ''}${bs.length > 1 ? `<ul class="bnd">${bs.map(b => `<li data-b="${this.bindings.indexOf(b)}" aria-live="polite">${this.bindHTML(b)}</li>`).join('')}</ul>` : ''}</li>`;
+        <span class="nm"><b class="al">${esc(a.label)}</b>${changedHere(a, file) ? `<span class="ed"
+          title="its text differs from the page's ${esc(file.name)}: this browser's copy (${file.edited ? 'edited here' : 'read from the disk'})` +
+            ` replaces the page's file; Revert in the editor (✎) brings the page's back` +
+            `">${file.edited ? 'edited' : 'changed'}</span>` : ''}</span>
+        <span class="pr"><span class="ak k-${a.kind}">${a.kind}</span><code class="at"
+          title="${esc(a.text || '')}\n— ${esc(file.name)}:${a.line}` +
+            `\nsignals (the clock first): ${esc(sigs.join(' '))}` +
+            `">${propParts(a.text || '').map(t => `<span class="pp">${esc(t)}</span>`).join(' ')}</code></span>
+        ${bs.length === 1 ? `<span class="b1" data-b="${this.bindings.indexOf(bs[0])}" aria-live="polite">${this.bindHTML(bs[0])}</span>` : `<span
+          class="b1"><span class="st bp">${bs.length ? `${bs.length} bindings ↓` : 'unbound'}</span></span>`}
+        <span class="ab"><button type="button" data-sv="bind" title="Bind to an instance: the modules where all its signals are">Bind…</button><button
+          type="button" class="ic" data-sv="edit" aria-label="edit ${esc(a.label)}"
+            title="Edit this assertion here: Apply parses it and evaluates its bindings again (ctrl+Enter)"${a.at ? '' : ' disabled'}>✎</button><button
+              type="button" class="ic" data-sv="reload" aria-label="read ${esc(file.name)} again"
+                title="Read ${esc(file.name)}` +
+                  ` from the disk again: its assertions are parsed and evaluated again (the first time: pick the file)` +
+                  `">⟳</button><button type="button" class="ic" data-sv="del"` +
+                  ` aria-label="remove ${esc(a.label)}"` +
+                  ` title="Remove this assertion from the list (and its bindings)">✕</button></span>
+        ${pick}${this.editing === a.label ? this.editHTML(a, file) : ''}${bs.length > 1 ? `<ul class="bnd">${bs.map(b => `<li
+          data-b="${this.bindings.indexOf(b)}" aria-live="polite">${this.bindHTML(b)}</li>`).join('')}</ul>` : ''}</li>`;
     };
-    el.innerHTML = `<div class="nh"><button type="button" class="tw" data-sv="tw" aria-expanded="${this.open}" aria-label="${this.open ? 'fold' : 'open'} the assertions">${this.open ? '▾' : '▸'} <b>Assertions</b></button><span class="muted">${list.length} loaded · click a line to go to it on the waves · drag a line onto a module in the names to bind it, or Bind… · kept in this browser</span>
-      <button type="button" data-sv="watch" aria-pressed="${!!LIB.watching}" title="Watch the files read with ⟳: when one changes on the disk it is read, parsed and evaluated again (every second)${G.showOpenFilePicker ? '' : '; this browser cannot keep a file to watch'}"${G.showOpenFilePicker ? '' : ' disabled'}>Watch${LIB.watching && HANDLES.size ? ` (${HANDLES.size})` : ''}</button>
-      <button type="button" data-sv="json" title="The bindings (and files) for the config file">JSON</button><button type="button" data-sv="clear" title="Forget this browser's files and bindings for this page (every viewer of it); the page's own come back">Clear</button>
-      <span class="svx"><button type="button" data-sv="table" aria-pressed="${!!this.showTable}" title="One row per binding: counts, first and last failure, longest attempt, antecedent → consequent latency">Table</button><button type="button" data-sv="fails" aria-pressed="${!!this.showFails}" title="Every failed attempt by time; a row selects it on the waves">Failures</button><button type="button" data-sv="xmd" title="Download the report of this view's bindings as Markdown (the tables)">report.md</button><button type="button" data-sv="xjson" title="Download the results of this view's bindings with the page's meta (sva report reads it)">report.json</button></span></div>` +
-      (this.open ? `<div class="svr" aria-live="polite"></div><div class="svw"${this.why ? '' : ' hidden'}>${this.why || ''}</div>` + (LIB.notes.length ? `<ul class="svn">${LIB.notes.map(n => `<li class="${n.err ? 'err' : 'warn'}">${esc(n.text)}</li>`).join('')}</ul>` : '') +
-      `<ol class="asv"><li class="hd" aria-hidden="true"><span>#</span><span>Assertion · property</span><span>Bound to · results</span><span></span></li>${list.map(line).join('')}</ol>` +
-      (orphans.length ? `<ul class="svn">${orphans.map(b => `<li class="warn">bind: no assertion '${esc(b.assert)}' is loaded (${esc(this.label(b.scope))})</li>`).join('')}</ul>` : '') +
+    el.innerHTML = `<div class="nh"><button type="button" class="tw" data-sv="tw" aria-expanded="${this.open}"
+      aria-label="${this.open ? 'fold' : 'open'} the assertions">${this.open ? '▾' : '▸'} <b>Assertions</b></button><span
+        class="muted">${list.length} loaded · click a line to go to it on the waves` +
+          ` · drag a line onto a module in the names to bind it, or Bind…` +
+          ` · kept in this browser</span>
+      <button type="button" data-sv="watch" aria-pressed="${!!LIB.watching}"
+        title="Watch the files read with ⟳: when one changes on the disk it is read, parsed and evaluated again` +
+          ` (every second)${G.showOpenFilePicker ? '' : '; this browser cannot keep a file to watch'}` +
+          `"${G.showOpenFilePicker ? '' : ' disabled'}` +
+          `>Watch${LIB.watching && HANDLES.size ? ` (${HANDLES.size})` : ''}</button>
+      <button type="button" data-sv="json" title="The bindings (and files) for the config file">JSON</button><button type="button" data-sv="clear"
+        title="Forget this browser's files and bindings for this page (every viewer of it); the page's own come back">Clear</button>
+      <span class="svx"><button type="button" data-sv="table" aria-pressed="${!!this.showTable}"
+        title="One row per binding: counts, first and last failure, longest attempt, antecedent → consequent latency">Table</button><button type="button"
+          data-sv="fails" aria-pressed="${!!this.showFails}" title="Every failed attempt by time; a row selects it on the waves">Failures</button><button
+            type="button" data-sv="xmd" title="Download the report of this view's bindings as Markdown (the tables)">report.md</button><button type="button"
+              data-sv="xjson" title="Download the results of this view's bindings with the page's meta` +
+                ` (sva report reads it)">report.json</button></span></div>` +
+      (this.open ? `<div class="svr" aria-live="polite"></div><div class="svw"${this.why ? '' : ' hidden'}>${this.why || ''}</div>` + (LIB.notes.length ?
+        `<ul class="svn">${LIB.notes.map(n => `<li class="${n.err ? 'err' : 'warn'}">${esc(n.text)}</li>`).join('')}</ul>` : '') +
+      (`<ol class="asv"><li class="hd" aria-hidden="true"><span>#</span><span>Assertion · property</span><span>Bound to · ` +
+          `results</span><span></span></li>${list.map(line).join('')}</ol>`) +
+      (orphans.length ?
+        (`<ul ` +
+          `class="svn">${orphans.map(b => `<li
+            class="warn">bind: no assertion '${esc(b.assert)}' is loaded (${esc(this.label(b.scope))})</li>`).join('')}</ul>`) : '') +
       `<textarea class="json" readonly${this.jsonOpen ? '' : ' hidden'} aria-label="assertion bindings as JSON"></textarea>` : '');
     const nol = el.querySelector('ol.asv');
     if (nol && keep) { nol.style.height = keep.h; nol.scrollTop = keep.top; }
@@ -1317,8 +1462,9 @@ class Panel {
   // the report of this view's bindings (summary.rs through the engine): {meta, results} and the bindings in that order
   reportInput() {
     const bs = this.bindings.filter(b => outcome(b)), M = this.v.M;
-    const meta = { title: `Assertions · ${this.v.opts.title || M.title || document.title || 'waveform'}`, dump: (M.src.meta && M.src.meta.waves) || '', page: G.location ? G.location.pathname.split('/').pop() : '',
-      tool: `wavefw sva.js ${(G.WaveFW && G.WaveFW.version) || ''}`, date: new Date().toISOString().slice(0, 10) };
+    const meta = { title: `Assertions · ${this.v.opts.title || M.title || document.title || 'waveform'}`, dump: (M.src.meta && M.src.meta.waves) || '',
+      page: G.location ? G.location.pathname.split('/').pop() : '',
+      tool: `wavefw sva.js ${(G.WaveFW && G.WaveFW.version) || ''}`, date: localDate() };
     return { bs, input: { meta, results: bs.map(b => b.results) } };
   }
   async report(format) {
@@ -1350,29 +1496,50 @@ class Panel {
     if (!el.querySelector(':scope > .tot')) { el.innerHTML = '<p class="tot"></p><div class="svx-t"></div><div class="svx-f"></div>'; which = undefined; }
     const r = this.sum, v = this.v, bs = this.bindings;
     const loaded = [...LIB.byLabel.values()].filter(x => !this.hidden.has(x.a.label) && (!x.file.owners || x.file.owners.has(v.M.src))).length;
-    const ev = bs.filter(b => outcome(b) && (b.state === 'bound' || b.state === 'dump')).length, cannot = bs.filter(b => b.state === 'cannot').length, bad = bs.filter(b => b.error).length;
+    const ev = bs.filter(b => outcome(b) && (b.state === 'bound' || b.state === 'dump')).length, cannot = bs.filter(b => b.state === 'cannot').length,
+      bad = bs.filter(b => b.error).length;
     const not = [cannot && `${cannot} cannot bind`, bad && `${bad} error${bad === 1 ? '' : 's'}`].filter(Boolean).join(', ');
     let tot = `${loaded} loaded · ${ev} bound${not ? ` (${not})` : ''}`;
     const t = r && r.summary.assertions.length ? r.summary.totals : null;
-    if (t) tot += ` · <b class="${t.with_failures ? 'c-fail' : ''}">${t.with_failures} with failures</b> · ${t.attempts} attempts: ${t.pass} pass, <span class="c-fail${t.fail ? '' : ' zero'}">${t.fail} fail</span>, ${t.vacuous} vacuous${t.disabled ? `, ${t.disabled} disabled` : ''}${t.active ? `, ${t.active} active` : ''}${t.capped ? `, ${t.capped} capped (no verdict)` : ''}${t.covers ? ` · ${t.covered} of ${t.covers} covers hit` : ''}`;
+    if (t) tot += (` · <b class="${t.with_failures ? 'c-fail' : ''}">${t.with_failures} with failures</b> · ${t.attempts} attempts: ${t.pass} pass, <span ` +
+        `class="c-fail${t.fail ? '' : ' zero'}">${t.fail} fail</span>, ${t.vacuous} ` +
+        `vacuous${t.disabled ? `, ${t.disabled} disabled` : ''}` +
+          `${t.active ? `, ${t.active} active` : ''}${t.capped ? `, ${t.capped} capped (no verdict)` : ''}` +
+          `${t.covers ? ` · ${t.covered} of ${t.covers} covers hit` : ''}`);
     el.querySelector(':scope > .tot').innerHTML = tot;
     const rows = t ? r.summary.assertions : [];
     const bi = k => bs.indexOf(r.bs[k]);
     // the attempt of a failure by its start: one map per binding, made when asked
     const at = new Map(), att = (k, start) => {
-      if (!at.has(k)) { const m = new Map(); outcome(r.bs[k]).attempts.forEach((a, i) => { if (a.result === 'fail' && !m.has(a.start)) m.set(a.start, i); }); at.set(k, m); }
+      if (!at.has(k)) { const m = new Map(); outcome(r.bs[k]).attempts.forEach((a, i) => { if (a.result === 'fail' && !m.has(a.start)) m.set(a.start, i); });
+        at.set(k, m); }
       return at.get(k).get(start) ?? -1;
     };
     if (which !== 'fails') {
       const box = el.querySelector(':scope > .svx-t');
       if (!this.showTable || !rows.length) box.innerHTML = '';
       else {
-        const go = (k, e) => e ? `<button type="button" class="lnk" data-sv="go" data-b="${bi(k)}" data-i="${att(k, e.start)}" title="${esc(e.note)}">${esc(e.time_fail || '')}</button>` : '—';
+        const go = (k, e) => e ?
+          (`<button type="button" class="lnk" data-sv="go" data-b="${bi(k)}" data-i="${att(k, e.start)}" ` +
+            `title="${esc(e.note)}">${esc(e.time_fail || '')}</button>`) : '—';
         const notes = rows.flatMap(a => (a.notes || []).map(n => `<li class="warn"><code>${esc(a.name)}</code> ${esc(this.label(a.scope))}: ${esc(n)}</li>`));
-        box.innerHTML = `<div class="twr"><table class="svt"><thead><tr><th>Assertion</th><th>Scope</th><th>Attempts</th><th>Pass</th><th>Fail</th><th>Vacuous</th><th>Disabled</th><th>Active</th><th>Capped</th><th>First failure</th><th>Last failure</th><th>Longest</th><th title="antecedent → consequent, cycles, passing attempts">Latency min / avg / max</th></tr></thead><tbody>` +
+        box.innerHTML =
+          (`<div class="twr"><table ` +
+            `class="svt"><thead><tr><th>Assertion</th><th>Scope</th><th>Attempts</th><th>Pass</th><th>Fail</th>` +
+              `<th>Vacuous</th><th>Disabled</th><th>Active</th><th>Capped</th>` +
+              `<th>First failure</th><th>Last failure</th><th>Longest</th>` +
+              `<th title="antecedent → consequent, cycles, passing attempts">Latency min / avg / max</th></tr></thead><tbody>`) +
           rows.map((a, k) => {
-            const s = a.stats, b = r.bs[k], cover = a.kind === 'cover', num = key => s[key] && key !== 'vacuous' ? `<button type="button" class="cnum${b.only === key ? ' on' : ''}" data-sv="only" data-k="${key}">${s[key]}</button>` : String(s[key] ?? 0);
-            return `<tr data-b="${bi(k)}" class="${!cover && s.fail ? 'bad' : ''}"><td><code title="${esc(a.text)}">${esc(a.name)}</code>${cover ? ` <span class="ak k-cover">cover: ${a.covered}</span>` : ''}</td><td>${esc(this.label(a.scope))}</td><td>${s.attempts}</td><td>${num('pass')}</td><td>${cover ? '—' : num('fail')}</td><td>${s.vacuous}</td><td>${num('disabled')}</td><td>${num('active')}</td><td>${num('capped')}</td><td>${go(k, a.first_fail)}</td><td>${go(k, a.last_fail)}</td><td>${a.longest ? a.longest.cycles : '—'}</td><td>${a.latency ? esc(a.latency.text) : '—'}</td></tr>`;
+            const s = a.stats, b = r.bs[k], cover = a.kind === 'cover', num = key => s[key] &&
+              key !== 'vacuous' ? `<button type="button" class="cnum${b.only === key ? ' on' : ''}" data-sv="only" data-k="${key}">${s[key]}</button>` :
+              String(s[key] ?? 0);
+            return (`<tr data-b="${bi(k)}" class="${!cover && s.fail ? 'bad' : ''}"><td><code ` +
+                `title="${esc(a.text)}">${esc(a.name)}</code>${cover ? ` <span
+                  class="ak k-cover">cover: ${a.covered}</span>` : ''}</td><td>${esc(this.label(a.scope))}</td>` +
+                    `<td>${s.attempts}</td><td>${num('pass')}</td><td>${cover ? '—' : num('fail')}</td>` +
+                    `<td>${s.vacuous}</td><td>${num('disabled')}</td><td>${num('active')}</td><td>${num('capped')}</td>` +
+                    `<td>${go(k, a.first_fail)}</td><td>${go(k, a.last_fail)}</td>` +
+                    `<td>${a.longest ? a.longest.cycles : '—'}</td><td>${a.latency ? esc(a.latency.text) : '—'}</td></tr>`);
           }).join('') + `</tbody></table></div>${notes.length ? `<ul class="svn">${notes.join('')}</ul>` : ''}`;
       }
     }
@@ -1381,16 +1548,30 @@ class Panel {
       if (!this.showFails || !t) { box.innerHTML = ''; return; }
       const fs = r.summary.failures, names = [...new Set(fs.map(f => f.name))], keep = this.failFilter || '';
       const shown = keep ? fs.filter(f => f.name === keep) : fs, max = Panel.MAX_FAILS, list = shown.slice(0, max);
-      box.innerHTML = `<div class="svf"><b>Failures</b> <span class="muted">${shown.length}${keep ? ` of ${fs.length}` : ''}, by the time they were found · a row selects the attempt</span>
-        <select data-sv="ffilter" aria-label="failures of"><option value="">every assertion</option>${names.map(n => `<option${n === keep ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select><button type="button" data-sv="fcopy" title="The rows as text, one per line (tab-separated)">Copy</button>` +
-        (list.length ? `<div class="twr"><table class="svt"><thead><tr><th>#</th><th>Assertion</th><th>Scope</th><th>Failed at</th><th>Start</th><th>Reason</th><th>Note</th></tr></thead><tbody>${list.map((f, j) =>
-          `<tr data-b="${bi(f.row)}"><td>${j + 1}</td><td><button type="button" class="lnk" data-sv="go" data-i="${att(f.row, f.start)}">${esc(f.name)}</button></td><td>${esc(this.label(f.scope))}</td><td>${esc(f.time_fail || '')} <span class="muted">(cycle ${f.failed_at})</span></td><td>${esc(f.time || '')} <span class="muted">(cycle ${f.start})</span></td><td>${esc(f.kind)}</td><td>${esc(f.note)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">none</p>') +
-        (shown.length > max ? `<p class="muted more">… ${shown.length - max} more · narrow the list with the filter, or download report.md / report.json</p>` : '') + '</div>';
+      box.innerHTML = `<div class="svf"><b>Failures</b> <span
+        class="muted">${shown.length}${keep ? ` of ${fs.length}` : ''}, by the time they were found · a row selects the attempt</span>
+        <select data-sv="ffilter" aria-label="failures of"><option
+          value="">every assertion</option>${names.map(n => `<option${n === keep ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select><button
+            type="button" data-sv="fcopy" title="The rows as text, one per line (tab-separated)">Copy</button>` +
+        (list.length ? `<div class="twr"><table
+          class="svt"><thead><tr><th>#</th><th>Assertion</th>` +
+            `<th>Scope</th><th>Failed at</th><th>Start</th>` +
+            `<th>Reason</th><th>Note</th></tr></thead><tbody>` +
+            `${list.map((f, j) =>
+          `<tr data-b="${bi(f.row)}"><td>${j + 1}</td><td><button type="button" class="lnk" data-sv="go"
+            data-i="${att(f.row, f.start)}">${esc(f.name)}</button></td><td>${esc(this.label(f.scope))}</td><td>${esc(f.time_fail || '')} <span
+              class="muted">(cycle ${f.failed_at})</span></td><td>${esc(f.time || '')} <span
+                class="muted">(cycle ${f.start})</span></td>` +
+                  `<td>${esc(f.kind)}</td><td>${esc(f.note)}</td></tr>`).join('')}` +
+                  `</tbody></table></div>` : '<p class="muted">none</p>') +
+        (shown.length > max ? `<p class="muted more">… ${shown.length - max} more · narrow the list with the filter, or download report.md / report.json</p>` :
+          '') + '</div>';
     }
   }
   failText() {
     const fs = (this.sum ? this.sum.summary.failures : []).filter(f => !this.failFilter || f.name === this.failFilter);
-    return ['assertion\tscope\tfailed at\tstart\treason\tnote', ...fs.map(f => [f.name, f.scope || '(top)', `${f.time_fail} (cycle ${f.failed_at})`, `${f.time} (cycle ${f.start})`, f.kind, f.note].join('\t'))].join('\n');
+    return ['assertion\tscope\tfailed at\tstart\treason\tnote', ...fs.map(f => [f.name, f.scope || '(top)', `${f.time_fail} (cycle ${f.failed_at})`,
+      `${f.time} (cycle ${f.start})`, f.kind, f.note].join('\t'))].join('\n');
   }
   async download(kind) {
     try {
@@ -1411,8 +1592,10 @@ class Panel {
   fillJSON() { const ta = this.el.querySelector('textarea.json'); if (ta) { ta.value = this.jsonText(); ta.rows = this.bindings.length + 4; } }
   pickHTML(a) {
     const cs = candidates(this.v, a);
-    return `<div class="pick">${cs.length ? '<span class="muted">bind to</span>' + cs.map(S => `<button type="button" data-sv="to" data-scope="${esc(S)}">${esc(this.label(S))}</button>`).join('')
-      : `<span class="no">no instance has ${esc(a.signals.map(s => s.name).join(', '))}</span>`}<button type="button" class="ic" data-sv="nopick" aria-label="close" title="Close">✕</button></div>`;
+    return `<div class="pick">${cs.length ? '<span class="muted">bind to</span>' + cs.map(S => `<button type="button" data-sv="to"
+      data-scope="${esc(S)}">${esc(this.label(S))}</button>`).join('')
+      : `<span class="no">no instance has ${esc(a.signals.map(s => s.name).join(', '))}</span>`}<button type="button" class="ic" data-sv="nopick"
+        aria-label="close" title="Close">✕</button></div>`;
   }
   click(e) {
     const btn = e.target.closest('button[data-sv]');
@@ -1421,11 +1604,13 @@ class Panel {
       if (e.target.closest('b.sp, code.at') && String(G.getSelection && G.getSelection()).length) return;   // text selected to copy
       const li = e.target.closest('ol.asv li[data-a]'), one = e.target.closest('ul.bnd li[data-b]');
       if (!li) return;
-      const b = one ? this.bindings[+one.dataset.b] : this.bindings.find(x => x.assert === li.dataset.a && outcome(x) && this.drawn().includes(x)) || this.bindings.find(x => x.assert === li.dataset.a);
+      const b = one ? this.bindings[+one.dataset.b] : this.bindings.find(x => x.assert === li.dataset.a && outcome(x) && this.drawn().includes(x)) ||
+        this.bindings.find(x => x.assert === li.dataset.a);
       if (b) this.reveal(b); else this.toast(`${li.dataset.a} is not bound: drag it onto a module, or Bind…`);
       return;
     }
-    const act = btn.dataset.sv, li = btn.closest('li[data-a]'), label = li && li.dataset.a, bl = btn.closest('[data-b]'), b = bl && this.bindings[+bl.dataset.b];
+    const act = btn.dataset.sv, li = btn.closest('li[data-a]'), label = li && li.dataset.a, bl = btn.closest('[data-b]'), b = bl &&
+      this.bindings[+bl.dataset.b];
     if (act === 'tw') { this.open = !this.open; this.render(); }
     else if (act === 'bind') { this.pick = this.pick === label ? null : label; this.render(); }
     else if (act === 'nopick') { this.pick = null; this.render(); }
@@ -1438,27 +1623,34 @@ class Panel {
       gone.filter(x => x.page).forEach(x => this.removed.add(bkey(x)));
       this.save(); this.render(); gone.forEach(x => this.changed(x, false)); this.redraw();
     }
-    else if (act === 'edit') { this.editing = this.editing === label ? null : label; this.editText = this.editErr = null; this.render(); if (this.editing) this.el.querySelector(`li[data-a="${CSS.escape(label)}"] textarea.src`)?.focus(); }
+    else if (act === 'edit') { this.editing = this.editing === label ? null : label; this.editText = this.editErr = null; this.render();
+      if (this.editing) this.el.querySelector(`li[data-a="${CSS.escape(label)}"] textarea.src`)?.focus(); }
     else if (act === 'noedit') { this.editing = null; this.editText = this.editErr = null; this.render(); }
     else if (act === 'apply') this.applyEdit(label);
-    else if (act === 'revert') { const x = LIB.byLabel.get(label); this.editing = null; this.editText = this.editErr = null; if (x) SVA.revertFile(x.file.name).then(() => this.toast(`${x.file.name}: the page's file again`)); }
+    else if (act === 'revert') { const x = LIB.byLabel.get(label); this.editing = null; this.editText = this.editErr = null;
+      if (x) SVA.revertFile(x.file.name).then(() => this.toast(`${x.file.name}: the page's file again`)); }
     else if (act === 'reload') { const x = LIB.byLabel.get(label); if (x) this.reloadFile(x.file.name); }
-    else if (act === 'watch') { SVA.watch(!LIB.watching); this.toast(LIB.watching ? `watching ${HANDLES.size ? [...HANDLES.keys()].join(', ') : 'the files you read with ⟳'}` : 'not watching'); }
+    else if (act === 'watch') { SVA.watch(!LIB.watching); this.toast(LIB.watching ?
+      `watching ${HANDLES.size ? [...HANDLES.keys()].join(', ') : 'the files you read with ⟳'}` : 'not watching'); }
     else if (act === 'unbind' && b) this.unbind(b);
     else if (act === 'eval' && b) this.evaluate(b);
     else if (act === 'fail' && b) this.firstFail(b);
     else if (act === 'how' && b) this.toast(btn.title.replace(/\n/g, ' · '));
     else if (act === 'clear') clearAll();
-    else if (act === 'table' || act === 'fails') { const k = act === 'table' ? 'showTable' : 'showFails'; this[k] = !this[k]; btn.setAttribute('aria-pressed', this[k]); this.fillSummary(this.el.querySelector('.svr'), act); if (!this.sum) this.summary(); }
-    else if (act === 'only' && b) { b.only = b.only === btn.dataset.k ? null : btn.dataset.k; this.renderB(b); this.redraw(); this.fillSummary(this.el.querySelector('.svr'), 'table'); }
+    else if (act === 'table' || act === 'fails') { const k = act === 'table' ? 'showTable' : 'showFails'; this[k] = !this[k];
+      btn.setAttribute('aria-pressed', this[k]); this.fillSummary(this.el.querySelector('.svr'), act); if (!this.sum) this.summary(); }
+    else if (act === 'only' && b) { b.only = b.only === btn.dataset.k ? null : btn.dataset.k; this.renderB(b); this.redraw();
+      this.fillSummary(this.el.querySelector('.svr'), 'table'); }
     else if (act === 'go' && b) this.select(b, +btn.dataset.i);
-    else if (act === 'fcopy') { const t = this.failText(); try { navigator.clipboard.writeText(t).then(() => this.toast('failures copied'), () => {}); } catch (err) { /* no clipboard */ } this.copied = t; }
+    else if (act === 'fcopy') { const t = this.failText(); try { navigator.clipboard.writeText(t).then(() => this.toast('failures copied'), () => {});
+      } catch (err) { /* no clipboard */ } this.copied = t; }
     else if (act === 'xmd' || act === 'xjson') this.download(act === 'xmd' ? 'md' : 'json');
     else if (act === 'json') {
       this.jsonOpen = !this.jsonOpen;
       const ta = this.el.querySelector('textarea.json');
       ta.hidden = !this.jsonOpen; this.fillJSON();
-      if (this.jsonOpen) { ta.select(); try { navigator.clipboard.writeText(ta.value).then(() => this.toast('JSON copied'), () => {}); } catch (err) { /* select only */ } }
+      if (this.jsonOpen) { ta.select(); try { navigator.clipboard.writeText(ta.value).then(() => this.toast('JSON copied'), () => {});
+        } catch (err) { /* select only */ } }
     }
   }
   // drag and drop: an assertion line onto a module row (or a signal row: its module) of the names column
@@ -1475,7 +1667,8 @@ class Panel {
       if (g.type !== 'group') continue;
       const S = I.abs.get(g); if (S == null) continue;
       const r = this.drag.ok.get(S) || resolve(this.v, x.a, S);
-      this.v.rowClass(g, r.ok ? 'sva-ok' : 'sva-no').rowTitle(g, r.ok ? `drop: bind ${x.a.label} to ${S}` : `cannot bind: ${[...r.missing, ...r.errors].join(', ')}`);
+      this.v.rowClass(g, r.ok ? 'sva-ok' : 'sva-no').rowTitle(g, r.ok ? `drop: bind ${x.a.label} to ${S}` :
+        `cannot bind: ${[...r.missing, ...r.errors].join(', ')}`);
       this.marked.push(g);
     }
     this.v.root.classList.add('sva-drag');
@@ -1557,7 +1750,8 @@ function tvValue(v, w) {
   if (/^h/i.test(s)) return s.slice(1).toLowerCase();
   const b = s.padStart(Math.ceil(s.length / 4) * 4, s[0] === 'x' || s[0] === 'z' ? s[0] : '0');
   let h = '';
-  for (let i = 0; i < b.length; i += 4) { const n = b.slice(i, i + 4); h += /[xz]/i.test(n) ? 'x' : parseInt(n, 2).toString(16); }
+  // a nibble all z is z, one with an x or a partial z is x (hexOf of wavefw.js, as GTKWave)
+  for (let i = 0; i < b.length; i += 4) { const n = b.slice(i, i + 4); h += /^z{4}$/i.test(n) ? 'z' : /[xz]/i.test(n) ? 'x' : parseInt(n, 2).toString(16); }
   return h;
 }
 const truthy = v => (typeof v === 'number' ? v !== 0 : /^h/i.test(v) ? /[1-9a-f]/i.test(v) : /1/.test(String(v)));
@@ -1612,7 +1806,8 @@ function exprRows(st, list, base = { anc: [], depth: 0 }) {
     const err = x.res && x.res.err;
     if (x.res && !err && r.res !== x.res) { fillRow(r, x.res); r.res = x.res; }
     return Object.assign(r, { anc: base.anc.concat(g.id), depth: base.depth + 1, name: `ƒ ${x.text}${err ? '  ⚠ ' + err : ''}`, full: `ƒ ${x.text}`,
-      cls: 'sva-expr' + (err ? ' bad' : ''), title: `${x.res && x.res.text ? x.res.text : x.text}${x.scope ? '\nnames from ' + x.scope + ' up' : ''}${err ? '\n' + err : ''}` });
+      cls: 'sva-expr' + (err ? ' bad' : ''), title:
+        `${x.res && x.res.text ? x.res.text : x.text}${x.scope ? '\nnames from ' + x.scope + ' up' : ''}${err ? '\n' + err : ''}` });
   });
   return [g, ...rows];
 }
@@ -1623,23 +1818,36 @@ class Exprs {
   constructor(v) {
     this.v = v; v.svaExprs = this; this.list = []; this.st = {};
     this.key = 'wavefw.sva-exprs:' + (v.storeId || G.location.pathname + ':' + (v.opts.key || v.root.id || v.root.dataset.wave || v.M.title));
-    const g = v.addTool('expression', `<input type="text" class="svq" spellcheck="false" placeholder="ƒ  PSEL && !PREADY" aria-label="an expression of the signals: Enter finds the next time it becomes true"
-      title="An expression of the signals (SystemVerilog, as in an assertion: && || ! == $rose(a) $past(a) a[3:0] pkg::NAME …); @(posedge clk) … samples it at the clock's edges.&#10;Names: from the selected signal's module up to the top, or a full path.&#10;Enter / shift+Enter: the next / previous time it becomes true. + Row: draw it as a signal (ƒ expressions).">` +
-      '<button type="button" data-x="prev" title="The previous time it becomes true (shift+Enter)">◀</button><button type="button" data-x="next" title="The next time it becomes true (Enter)">▶</button>' +
-      '<span class="svqn" aria-live="polite"></span><button type="button" data-x="add" title="Draw the expression as a signal in ƒ expressions (kept in this browser)">+ Row</button>' +
+    const g = v.addTool('expression', `<input type="text" class="svq" spellcheck="false" placeholder="ƒ  PSEL && !PREADY"
+      aria-label="an expression of the signals: Enter finds the next time it becomes true"
+      title="An expression of the signals (SystemVerilog, as in an assertion: && || ! == $rose(a) $past(a) a[3:0]` +
+        ` pkg::NAME …); @(posedge clk) … samples it at the clock's edges` +
+        `.&#10;Names: from the selected signal's module up to the top, or a full path` +
+        `.&#10;Enter / shift+Enter: the next / previous time it becomes true.` +
+        ` + Row: draw it as a signal (ƒ expressions).">` +
+      ('<button type="button" data-x="prev" title="The previous time it becomes true (shift+Enter)">◀</button><button type="button" data-x="next" title="The ' +
+          'next time it becomes true (Enter)">▶</button>') +
+      ('<span class="svqn" aria-live="polite"></span><button type="button" data-x="add" title="Draw the expression as a signal in ƒ expressions (kept in ' +
+          'this browser)">+ Row</button>') +
       '<button type="button" data-x="del" title="Remove the expression in the field (or the selected ƒ row) from the rows">− Row</button>');
     g.classList.add('svx-tool');
     this.inp = g.querySelector('input.svq'); this.cnt = g.querySelector('.svqn');
-    this.inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); this.find(e.shiftKey ? -1 : 1); } else if (e.key === 'Escape') this.inp.blur(); });
+    this.inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); this.find(e.shiftKey ? -1 : 1);
+      } else if (e.key === 'Escape') this.inp.blur(); });
     this.inp.addEventListener('input', () => { this.cnt.textContent = ''; });
-    g.addEventListener('click', e => { const b = e.target.closest('button[data-x]'); if (!b) return; ({ prev: () => this.find(-1), next: () => this.find(1), add: () => this.add(), del: () => this.del() })[b.dataset.x](); });
-    v.listen('names', 'click', e => { const r = v.rowAt(e.target); if (r && r.x && this.list.includes(r.x)) { this.inp.value = r.x.text; this.cnt.textContent = ''; } }, { capture: true });   // before the names are drawn again
+    g.addEventListener('click', e => { const b = e.target.closest('button[data-x]'); if (!b) return;
+      ({ prev: () => this.find(-1), next: () => this.find(1), add: () => this.add(), del: () => this.del() })[b.dataset.x](); });
+    // before the names are drawn again
+    v.listen('names', 'click', e => { const r = v.rowAt(e.target); if (r && r.x && this.list.includes(r.x)) { this.inp.value = r.x.text;
+      this.cnt.textContent = ''; } }, { capture: true });
     if (v.extraRows) v.extraRows.push(grp => (grp ? [] : exprRows(this.st, this.list)));
     if (v.extraState) v.extraState.push({ key: 'exprs', get: () => this.json(), set: l => this.setList(l) });
-    if (v.extraJSON) v.extraJSON.push(() => this.list.length ? `"exprs": [\n${this.list.map(x => '  ' + JSON.stringify(x.scope ? { expr: x.text, scope: x.scope } : x.text)).join(',\n')}\n]` : null);
+    if (v.extraJSON) v.extraJSON.push(() => this.list.length ?
+      `"exprs": [\n${this.list.map(x => '  ' + JSON.stringify(x.scope ? { expr: x.text, scope: x.scope } : x.text)).join(',\n')}\n]` : null);
     v.root.addEventListener('wavefw:settings', () => this.again());
     const page = (v.M.src.sva && v.M.src.sva.exprs) || [], kept = store.get(this.key);
-    this.list = (kept || page).map(x => (typeof x === 'string' ? { text: x, scope: '' } : { text: x.expr || x.text, scope: x.scope || '' })).filter(x => x.text);
+    this.list = (kept || page).map(x => (typeof x === 'string' ? { text: x, scope: '' } : { text: x.expr || x.text, scope: x.scope || '' })).filter(x =>
+      x.text);
     this.cache = new Map();
     if (this.list.length) this.again();
   }
@@ -1660,8 +1868,9 @@ class Exprs {
   save() { if (!store.set(this.key, this.json())) this.v.toast('not kept in this browser'); }
   // a saved list (Load… of the viewer's state): the rows of these expressions
   async setList(l) {
-    this.list = (Array.isArray(l) ? l : []).map(x => (typeof x === 'string' ? { text: x, scope: '' } : { text: x.expr || x.text, scope: x.scope || '' })).filter(x => x.text);
-    if (this.v.sel && this.v.sel.x && !this.list.includes(this.v.sel.x)) this.v.sel = null;
+    this.list = (Array.isArray(l) ? l : []).map(x => (typeof x === 'string' ? { text: x, scope: '' } : { text: x.expr || x.text, scope: x.scope ||
+      '' })).filter(x => x.text);
+    if (this.v.sel && this.v.sel.x && !this.list.includes(this.v.sel.x)) this.v.select(null);
     this.save(); await this.again();
   }
   text() { const t = this.inp.value.trim(); if (!t) { this.v.toast('type an expression of the signals, e.g. PSEL && !PREADY'); this.inp.focus(); } return t; }
@@ -1690,9 +1899,7 @@ class Exprs {
     if (res.err) { this.cnt.textContent = ''; v.toast(`ƒ ${t}: ${res.err}`); return; }
     const ms = matches(res);
     if (!ms.length) { this.cnt.textContent = '0'; v.toast(`ƒ ${t}: never true`); return; }
-    const eps = 1e-9 * Math.max(1, Math.abs(v.cursor));
-    let k = dir > 0 ? ms.findIndex(m => m > v.cursor + eps) : ms.map(m => m < v.cursor - eps).lastIndexOf(true);
-    if (k < 0) k = dir > 0 ? 0 : ms.length - 1;
+    const k = U.stepTo(ms, v.cursor, dir);
     v.setCursor(ms[k]);
     this.cnt.textContent = `${k + 1}/${ms.length}`;
     this.last = { text: t, k, n: ms.length, t: ms[k] };
@@ -1710,7 +1917,8 @@ function rowsOf(M, o) {
   const out = {}, pre = o && o.scope ? o.scope + '.' : null;
   for (const [n, p] of Object.entries((o && o.signals) || {})) {
     const rel = pre && p.startsWith(pre) ? p.slice(pre.length) : null;
-    const r = M.rows.find(r => r.type === 'sig' && !r.same && (r.full === p || (r.src && r.src.path === p))) || (rel && M.rows.find(r => r.type === 'sig' && !r.same && r.full === rel));
+    const r = M.rows.find(r => r.type === 'sig' && !r.same && (r.full === p || (r.src && r.src.path === p))) ||
+      (rel && M.rows.find(r => r.type === 'sig' && !r.same && r.full === rel));
     if (r) out[n] = r;
   }
   return out;
@@ -1768,7 +1976,10 @@ function svgEvaluate(M, S, k) {
 /* ---------------- start ---------------- */
 function start() {
   if (!G.WaveFW || !G.WaveFW.plugin) return;
-  G.WaveFW.registerTokens({ 'sva-pass': '--sva-pass', 'sva-fail': '--sva-fail', 'sva-disabled': '--sva-disabled', 'sva-active': '--sva-active', 'sva-capped': '--sva-capped' });
+  // the settings of this plugin (wavefw.config.js lists them): the list open at start, which groups, the signals again
+  if (G.WaveFW.registerDefaults) G.WaveFW.registerDefaults({ svaOpen: false, svaShow: null, svaSignals: 'view' });
+  G.WaveFW.registerTokens({ 'sva-pass': '--sva-pass', 'sva-fail': '--sva-fail', 'sva-disabled': '--sva-disabled', 'sva-active': '--sva-active',
+    'sva-capped': '--sva-capped' });
   localFiles();
   let pending = null;
   G.WaveFW.plugin(v => {

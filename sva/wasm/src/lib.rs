@@ -45,3 +45,41 @@ pub unsafe extern "C" fn sva_run(ptr: *const u8, len: usize) -> *const u8 {
 pub extern "C" fn sva_result_len() -> usize {
     OUT.with(|o| o.borrow().len())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What wavefw/sva.js does: allocate, copy the request in, run, read the result, free. The answer as text (this
+    /// crate has no JSON parser of its own: string checks do).
+    fn call(req: &[u8]) -> String {
+        let p = sva_alloc(req.len());
+        unsafe {
+            std::ptr::copy_nonoverlapping(req.as_ptr(), p, req.len());
+            let r = sva_run(p, req.len());
+            let out = std::slice::from_raw_parts(r, sva_result_len()).to_vec();
+            sva_free(p, req.len());
+            String::from_utf8(out).unwrap()
+        }
+    }
+
+    #[test]
+    fn parse_request_round_trip() {
+        let v = call(br#"{"source": "a: assert property (@(posedge c) x |=> y);"}"#);
+        assert!(v.contains(r#""label":"a""#) && v.contains(r#""errors":[]"#), "{v}");
+    }
+
+    #[test]
+    fn eval_request_round_trip() {
+        let v = call(br#"{"files": ["a: assert property (@(posedge c) x);"], "trace": {"signals": {"c": [0, 1], "x": [1, 0]}}}"#);
+        assert!(v.contains(r#""pass":1"#) && v.contains(r#""fail":1"#), "{v}");
+    }
+
+    #[test]
+    fn not_utf8_and_empty_requests() {
+        assert!(call(&[0xff, 0xfe, b'{']).contains("request is not UTF-8"));
+        assert!(call(b"").contains(r#""errors""#));
+        let v = call(b"{}");
+        assert_eq!(sva_result_len(), v.len(), "the result of the last call is what sva_result_len measures");
+    }
+}

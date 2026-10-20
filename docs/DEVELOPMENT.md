@@ -31,6 +31,8 @@ docs/                         what you look at
   reviews/                    the reviews of the stages, each finding with file:line, probe, fix and the closing commit
   reference/template.html     the original visual reference (PSI5 datasheet)
 tests/
+  unit/                       the Python unit tests of the tools (make unit: unittest, standard library); vcd/: small VCDs
+                              of what simulators write (real, string, event, escaped names, VHDL values, comments …)
   smoke.py                    behaviour checks in headless Chromium (make smoke)
   sva/                        the SVA corpus: *.sv with every construct, err_*.sv with annotated errors, golden/;
                               third_party/: AXI4-Lite, APB, AHB checkers of others (licenses, units.json)
@@ -39,7 +41,7 @@ tests/
 work/                         your dumps and their configs: configs tracked, dumps and pages git-ignored
 sva/                          the SVA engine (Rust: core, native CLI, WebAssembly)
 prompts/                      the roadmap as a series of prompts
-bin/                          the prebuilt sva CLI, committed: linux-x86_64/sva (static), windows-x86_64/sva.exe (make dist)
+bin/                          the prebuilt sva CLI, committed: linux-x86_64/sva (static); windows-x86_64/sva.exe by make dist-windows
 out/                          build products (make's BUILD, git-ignored): cargo target, example dumps and pages, shots
 Makefile                      make help lists the targets; build products go to BUILD (default out/)
 ```
@@ -47,17 +49,20 @@ Makefile                      make help lists the targets; build products go to 
 ## Build and test
 
 ```sh
-make check                  # the gate before a commit: wavefw.js current, sva-test, unit, every page smoke needs, smoke STRICT=1
-make wavefw                 # wavefw/wavefw.js from wavefw/src/*.js (after editing them; make html / example do it too)
+make check                  # the gate before a commit: wavefw.js current and its sources ≤ 160 columns, sva-test, unit, every page smoke needs, sva-verify, smoke STRICT=1, shots-check
+make unit                   # tests/unit: the tools on small VCDs of what simulators write (117 tests, ~12 s, standard library)
+make wavefw                 # wavefw/wavefw.js from wavefw/src/*.js (after editing them; make html / example do it too; lines ≤ 160 columns)
 make demo examples html     # rebuild docs/demo_waves.js, the example pages, the demo page
-make smoke                  # tests/smoke.py: every page in light and dark, 408 checks on 26 pages, PNGs in BUILD/shots
+make smoke                  # tests/smoke.py: every page in light and dark, 470 checks on 26 pages, PNGs in BUILD/shots
 make smoke ONLY=find,sva_bind   # some sections (python3 tests/smoke.py --list); STRICT=1: a skip fails
-make shots                  # tests/shots.py: docs/img/*.png, dark theme (after make examples; ~10 s, see below)
+make shots                  # tests/shots.py: docs/img/*.png, dark theme (after make examples; ~20 s, see below)
+make shots-check            # the same into BUILD/img, compared with docs/img: a shot that no longer builds fails
 make sva-build              # the SVA engine (needs cargo + the wasm32 target): the sva CLI, wavefw/sva.wasm.js
-make dist                   # the committed CLI: bin/linux-x86_64/sva (musl, static) + bin/windows-x86_64/sva.exe (mingw-w64)
+make dist                   # the CLI: bin/linux-x86_64/sva (musl, static, committed) + bin/windows-x86_64/sva.exe (mingw-w64)
 make sva-test               # the SVA engine: unit tests, the corpus tests/sva (third_party too), the JSON schema, the CLI
 make sva-bless              # rewrite tests/sva/golden/*.txt after a reviewed change of the parser output
 make sva-examples sva-spike # sva parse + sva eval of examples/*/*.sva; the WebAssembly build in a page (wasm32 target)
+make sva-verify             # the examples' checkers in Verilator --assert against sva eval (sva/ENGINE.md § Tests)
 make sva-eval WAVES=work/x.fst SVA="pkg.sv checks.sva" SCOPE=tb.dut OUT=results.json   # assertions over any dump
 make fmt lint               # verible-verilog-format (docs/SV_STYLE.md), verilator --lint-only -Wall on the testbenches
 make clean                  # the build products under BUILD; clean-all: BUILD entirely, the cargo target included
@@ -68,10 +73,10 @@ the example dumps and pages, the smoke screenshots. `make clean` empties it but 
 removes it. On a slow mount (this repository on `/mnt/c` under WSL) `make BUILD=/tmp/wavefw …` builds faster; `/tmp`
 is emptied on a reboot, and `make smoke` reports what is missing as `SKIPPED n pages / n sections (run make examples, …)`.
 
-**The prebuilt CLI.** `bin/linux-x86_64/sva` (`x86_64-unknown-linux-musl`, statically linked) and
-`bin/windows-x86_64/sva.exe` (`x86_64-pc-windows-gnu`, linked by mingw-w64) are committed, so a clone runs the tools
-with assertions without Rust; like `wavefw/sva.wasm.js` they are rebuilt (`make dist`) in the commit that changes the
-engine. One time: `rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu` and, for Windows,
+**The prebuilt CLI.** `bin/linux-x86_64/sva` (`x86_64-unknown-linux-musl`, statically linked) is committed, so a
+clone runs the tools with assertions without Rust; like `wavefw/sva.wasm.js` it is rebuilt (`make dist-linux`) in the
+commit that changes the engine. `bin/windows-x86_64/sva.exe` (`x86_64-pc-windows-gnu`, linked by mingw-w64) is not
+committed yet: `make dist-windows` builds it where mingw-w64 is installed (commit it then, with every engine change). One time: `rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu` and, for Windows,
 `sudo apt install mingw-w64`. The tools take the CLI from `--sva-bin`, else `$WAVEFW_SVA`, else `out/sva-target/release/sva`
 (`make sva-build`), else `bin/<os>-x86_64/`, else `sva` on PATH.
 
@@ -81,12 +86,25 @@ runs interaction checks per page (cursor, zoom, sort, settings layers, highlight
 names, the assertions). The hierarchy, find and virtualisation checks run on a synthetic page smoke builds itself
 (2060 signals in 255 scopes, 8 levels), so a fresh clone runs them. `tests/conformance.html` is compared with stock
 WaveDrom: the lanes and the texts of every case. Every check belongs to a section; a FAIL names it. Time limits are for
-a desktop machine: `SMOKE_TIME_SCALE=3` allows three times as much on a loaded one. `make shots` checks looks rather than
+a desktop machine: `SMOKE_TIME_SCALE=3` allows three times as much on a loaded one. An exception in a section is a FAIL of
+that section with a PNG under `BUILD/smoke/<section>-error.png`; the other sections still run. The section `units` is
+a table of JavaScript expressions and their values on a blank page (`UNITS` in `tests/smoke.py`, ~200 cases: decode,
+bits, struct fields, the value search, times, analog values, edges, the page's VCD reader, the bus decoders, the
+expressions of `sva.js`); it calls the pure functions through `WaveFW.internal`, not an API, and the other sections
+read the fields of a viewer through `WaveFW.internal.peek(v)` only (`plugin_api` checks it), so a refactoring of
+`view.js` changes one place of the tests.
+
+`make unit` (`tests/unit/`, unittest, standard library only) tests the tools function by function on the fixtures in
+`tests/unit/vcd/` — each a few lines of what a simulator writes: `real`, `string` and `event` variables, escaped names,
+a range glued to the name, the same path under two id codes, several changes on one line, `$comment` in the body, VHDL
+values, time going back, a header without `$enddefinitions`, times above 2^53 ps. The smoke section `readers` feeds the
+same files to the page's own VCD reader (`wavefw/src/vcd.js`) and demands the transitions of the tools; `test_svabuild`
+compares the name rule of `svabuild.Names` with `sva eval --resolve` case by case. `make shots` checks looks rather than
 behaviour: fixed viewport, fixed clicks, two animation frames after each, one element per image; it stops when IBM Plex
 is not available (offline without `fonts-ibm-plex`) instead of writing PNGs that differ. The same code gives the same
-bytes, except that `hero.png` and `sva.png` (the first shot of their page) now and then differ in a few anti-aliased
-pixels at the top left (about one run in five; open, not yet explained): compare with `git diff --stat docs/img` and
-run again before you commit a changed picture. Both need Python playwright (a
+bytes: Chromium rasterises in software, in one thread (`RASTER` in `tests/shots.py`: the borders of the form controls
+were anti-aliased differently run after run), tooltips are hidden and the pointer moved away before a shot. Both need
+Python playwright (a
 user-site install, so they run without `-I`, with `PYTHONDONTWRITEBYTECODE=1`). Environment used: Verilator 5.046,
 wavepeek 3.1.0, GTKWave fst2vcd, cargo 1.98 (the engine needs Rust ≥ 1.82).
 
@@ -116,7 +134,22 @@ Chromium, before / after stage 9.4; the arbiter page: the same dump with five bi
 | 20 wheel events and the frame after them | 66.7 ms | 35 ms (one draw per frame; most of it is the two frames waited for) |
 | Clear on the arbiter page | 28.4 ms | 22.5–30.8 ms |
 
+The second cursor (step 12.4: the rising edges of a clock indexed once, the cycles between the cursors by two binary
+searches): a clock of 400 000 changes and 20 buses, 100 ns of 2 ms shown, `draw()` 0.89 ms without the second cursor
+and 0.93 ms with it (8000 cycles between them); before, 1.55 → 8.14 ms.
+
 The SVA engine's numbers are in [`sva/ENGINE.md`](sva/ENGINE.md) *Performance*.
+
+## Versions
+
+Two numbers, `MAJOR.MINOR` (0.9 now; [`CHANGELOG.md`](../CHANGELOG.md) lists them all). The work goes on a branch;
+a version is a merge into `main` (`git merge --no-ff`) tagged `vMAJOR.MINOR` (an annotated tag, its message the
+changelog entry). One commit on the branch before the merge raises the version in four places: `VERSION`,
+`version:` in `wavefw/src/boot.js` (then `make wavefw`), a new top entry in `CHANGELOG.md`, and the committed builds
+that carry it (`make sva-build dist-linux`: the `sva` CLI writes the version into a report's meta through
+`include_str!` of `VERSION`); `make unit` fails when they disagree. The Rust crates keep their own semver in
+`sva/Cargo.toml`. A page tells its version in `WaveFW.version`; `make smoke` names a page under `work/` built with
+another one.
 
 ## Roadmap and reviews
 
@@ -124,9 +157,13 @@ The stages are prompts in [`prompts/`](../prompts/00-roadmap.md); stages 1–8 a
 and screenshots, and a SystemVerilog Assertion engine (stack: [`sva/STACK.md`](sva/STACK.md) — Rust core,
 native CLI over VCD / FST, WebAssembly in the page) that binds assertions to instances of the waveform, evaluates them
 over the dump, draws attempts, steps and failures next to the signals and reports the numbers. The global review of
-October 2026 ([`reviews/global-review-2026-10.html`](reviews/global-review-2026-10.html)) is worked off by stage 9
-(`prompts/09-refactor-cycle.md`, steps 9.1–9.6); what could come after is listed at the end of
-`prompts/00-roadmap.md`.
+October 2026 ([`reviews/global-review-2026-10.html`](reviews/global-review-2026-10.html)) drove stage 9
+(`prompts/09-refactor-cycle.md`: 9.1 hygiene and 9.4 the viewer done, the viewer features of 9.5 landed); stages 10
+(expressions, Why) and 11 (bus transactions) followed. The second review
+([`reviews/global-review-2026-10-19.html`](reviews/global-review-2026-10-19.html)) drives stage 12
+(`prompts/12-review-cycle.md`, steps 12.1–12.6: gates, the Python unit layer — the former 9.2 —, the engine's
+robustness — the former 9.3 —, the viewer, tests, docs); 9.6 (the real project) comes after it. What could come later
+is listed at the end of `prompts/00-roadmap.md`.
 
 Done so far: the language front end ([`sva/LANGUAGE.md`](sva/LANGUAGE.md)), the evaluator
 ([`sva/ENGINE.md`](sva/ENGINE.md)) and the assertions in the page ([USAGE.md § Assertions](USAGE.md#assertions-sva):
@@ -141,6 +178,7 @@ with their widths. Errors give line:column with the source line, and the rest of
 
 ```
 $ sva parse examples/apb/apb_tb.sv examples/apb/apb.sva
+…
 assert apb_read_waits in apb_checks, line 83
   clock     @(posedge PCLK) disable iff (!PRESETn)
   expr      PSEL && !PENABLE && !PWRITE && PADDR[7:4] == 0 && PADDR[1:0] == 0 |=> (!PREADY)[*2] ##1 PREADY
@@ -148,6 +186,7 @@ assert apb_read_waits in apb_checks, line 83
   s2        (!PREADY)[*2]
   s3        ##1 PREADY
   signals   PCLK:1 PRESETn:1 PSEL:1 PENABLE:1 PWRITE:1 PADDR[>=8]:8 PREADY:1
+…
 ```
 
 `sva eval` runs them over a dump: signals resolve under `--scope` (then the scopes above it; `--resolve scope`: only the
@@ -156,16 +195,18 @@ attempt, sequences run as threads (ranges, repetitions, `and` / `or` / `intersec
 `first_match`), `disable iff` ends the alive attempts. It prints one line per assertion and writes the results JSON the
 viewer will draw: per assertion the counts, every non-vacuous attempt with its steps (`[["s1", 52]]`), the cycle and
 reason of a failure, and a per-cycle lane. Each example has one deliberately wrong assertion, so the failure trace
-shows:
+shows (`…`: lines left out; `--attempts` adds a line per attempt, USAGE.md § Tools):
 
 ```
 $ sva eval --waves BUILD/examples/apb/apb.fst --scope apb_tb --sva examples/apb/apb_tb.sv --sva examples/apb/apb.sva --out apb.json
 apb_setup_then_access assert 19 attempts: 3 pass, 0 fail, 16 vacuous, 0 active, 0 disabled
+…
 apb_read_waits        assert 19 attempts: 1 pass, 0 fail, 18 vacuous, 0 active, 0 disabled
 apb_demo_no_wait      assert 19 attempts: 3 pass, 2 fail, 14 vacuous, 0 active, 0 disabled · first fail at cycle 10 (105 ns): expected PREADY at cycle 10
+…
 apb_cov_read_wait     cover  1 match in 19 attempts · first at cycle 12 (125 ns)
 …
 ```
 
 The same engine runs in the page as WebAssembly (`wavefw/sva.js`: `evaluate(parsed, sampler)` over the viewer's rows or
-WaveJSON `tv` transitions): one assertion over 32 768 clock edges in about 70 ms.
+WaveJSON `tv` transitions): one assertion over 32 768 clock edges in about 73 ms.

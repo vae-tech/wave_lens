@@ -30,7 +30,9 @@ const WaveSVG = {
     const bodyEnd = y, tockY = y; if (showTock) y += 20;
     const footY = y; if (M.foot) y += 20;
     const notes = bms.filter(b => b.text && b.t >= from && b.t <= to), notesY = y + 6; if (notes.length) y += 8 + notes.length * 20;   // bookmark legend
-    const legend = rows.flatMap(r => (V && r.type === 'group' && V.collapsed.has(r.id) ? [] : r.legend || [])), legendY = y + 6; if (legend.length) y += 8 + legend.length * 18;   // rows of plugins
+    // rows of plugins
+    const legend = rows.flatMap(r => (V && r.type === 'group' && V.collapsed.has(r.id) ? [] : r.legend || [])), legendY = y + 6;
+      if (legend.length) y += 8 + legend.length * 18;
     const Ht = Math.ceil(y + 4), xL = nameW, xR = nameW + waveW, X = t => xL + (t - from) * k;
     const theme = V ? null : opts.theme ?? M.theme, colors = V ? {} : Object.assign({}, M.colors, opts.colors);
     const bg = V || opts.bg || (theme && theme !== 'auto') || colors.bg ? opts.bg || 'panel' : null;
@@ -57,26 +59,32 @@ const WaveSVG = {
     P.clip(xL, 0, waveW, Ht, () => {
       const step = M.timed ? null : Math.max(1, M.every);
       if (showAxis) paintAxis(P, { from, span: to - from, xL, xR, y: axisY, h: 20, yEnd: bodyEnd, X, timed: M.timed, tick: M.tick, every: M.every, step });
-      if (showTock) paintAxis(P, { from, span: to - from, xL, xR, y: tockY, h: 20, yEnd: tockY, X, timed: M.timed, tick: M.tock, every: M.every, step, mid: true });
-      const rowY = paintBody(P, M, lay, X, from, to, xL, xR, hl, null, null, C.band, null, strokeOf, r => !(last[r.id] > rows.indexOf(r))), top = showAxis ? axisY + 20 : lay.length ? lay[0].y : y;
+      if (showTock) paintAxis(P, { from, span: to - from, xL, xR, y: tockY, h: 20, yEnd: tockY, X, timed: M.timed, tick: M.tock, every: M.every, step,
+        mid: true });
+      const sel = V ? (V.selRun && V.selRun.size ? new Set([...V.selRun, V.sel]) : V.sel) : null;   // the viewer's selection: tinted as on the screen
+      const rowY = paintBody(P, M, lay, X, from, to, xL, xR, hl, sel, null, C.band, null, strokeOf, r => !(last[r.id] > rows.indexOf(r))),
+        top = showAxis ? axisY + 20 : lay.length ? lay[0].y : y;
       paintMarkers(P, (opts.markers || []).concat(M.markers), X, from, to, top, bodyEnd);
       paintBookmarks(P, bms, ars, X, from, to, rowY, top, bodyEnd, showAxis ? axisY + 10 : top + 10, null, laneY(lay, S.laneHeight));
       if (V && V.cursor >= from && V.cursor <= to) P.path([['M', X(V.cursor), top], ['L', X(V.cursor), bodyEnd]], { stroke: 'acc', w: 1.2 });
-      if (V && V.cursor2 != null && V.cursor2 >= from && V.cursor2 <= to) P.path([['M', X(V.cursor2), top], ['L', X(V.cursor2), bodyEnd]], { stroke: 'cursor2', w: 1.2, dash: [5, 3] });
+      if (V) V.paintMeasures(P, X, from, to, xL, xR, top, bodyEnd, showAxis ? [axisY, 20] : null, true);   // the second cursor, the measured range
     });
     notes.forEach((b, i) => {
       const cy = notesY + i * 20 + 10;
-      P.path(circle(14, cy, 8), { fill: b.color || 'acc' }); P.text(14, cy + 0.5, String(b.n), { anchor: 'middle', size: b.n > 9 ? 9 : 10.5, weight: 700, fill: 'panel' });
+      P.path(circle(14, cy, 8), { fill: b.color || 'acc' }); P.text(14, cy + 0.5, String(b.n),
+        { anchor: 'middle', size: b.n > 9 ? 9 : 10.5, weight: 700, fill: 'panel' });
       P.text(28, cy, b.text, { size: 12, body: true });
     });
     legend.forEach((l, i) => {
       const cy = legendY + i * 18 + 9;
-      if (l.n != null) { P.path(circle(14, cy, 7), { fill: l.color || 'acc' }); P.text(14, cy + 0.5, String(l.n), { anchor: 'middle', size: 9, weight: 700, fill: 'panel' }); }
+      if (l.n != null) { P.path(circle(14, cy, 7), { fill: l.color || 'acc' }); P.text(14, cy + 0.5, String(l.n),
+        { anchor: 'middle', size: 9, weight: 700, fill: 'panel' }); }
       P.text(l.n != null ? 28 : 6, cy, l.text, { size: l.bold ? 12 : 11.5, weight: l.bold ? 600 : 400, body: !l.mono, fill: l.fill || 'fg' });
     });
     const css = [lookCss(colors), ...styleVars(V ? {} : Object.assign({}, M.cfg, opts)).map(([n, v]) => `${n}:${v}`)].filter(Boolean).join(';');
     const look = (THEMES.includes(theme) ? ` data-theme="${theme}"` : '') + (css ? ` style="${esc(css)}"` : '');
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${Wt} ${Ht}" width="${Wt}" height="${Ht}" role="img" aria-label="${esc(M.title || 'waveform')}"${look}>${P.out.join('')}</svg>`;
+    return (`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${Wt} ${Ht}" width="${Wt}" height="${Ht}" role="img" ` +
+        `aria-label="${esc(M.title || 'waveform')}"${look}>${P.out.join('')}</svg>`);
   },
   render(el, model, opts = {}) {
     el.classList.add('wvs'); if (opts.fit) el.classList.add('fit'); el.innerHTML = this.toString(model, Object.assign({ owner: el }, opts));
