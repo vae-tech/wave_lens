@@ -13,12 +13,12 @@
     "  \"bookmarks\": [...], \"arrows\": [...] (numbered events with text, arrows between them: the viewer's Bookmarks › JSON button writes both)."
   ],
   "waves": "test_stream_video.fst",
-  "sva": ["cxp_pkg_stub.sv", "cxp_sva.sv"],
+  "sva": ["cxp_pkg_stub.sv", "cxp_sva.sv", "cxp_sva_demo.sv"],
   "bind": [
     {
       "assert": "a_one_grant",
       "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_arbiter_i.cxp_arbiter_sva_i",
-      "show": true,
+      "show": false,
       "comment": "one of 6 instances"
     },
     {
@@ -85,19 +85,19 @@
     {
       "assert": "a_flags_on_valid",
       "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_ctrl_ack_i.cxp_tx_pkt_framer_i.cxp_framer_sva_i",
-      "show": true,
+      "show": false,
       "comment": "one of 4 instances"
     },
     {
       "assert": "a_flags_on_valid",
       "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_linktest_i.cxp_tx_pkt_framer_i.cxp_framer_sva_i",
-      "show": true,
+      "show": false,
       "comment": "one of 4 instances"
     },
     {
       "assert": "a_flags_on_valid",
       "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_stream_pkt_i.cxp_tx_pkt_framer_i.cxp_framer_sva_i",
-      "show": true,
+      "show": false,
       "comment": "one of 4 instances"
     },
     {
@@ -109,37 +109,37 @@
     {
       "assert": "a_no_sop_in_packet",
       "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_ctrl_ack_i.cxp_tx_pkt_framer_i.cxp_framer_sva_i",
-      "show": true,
+      "show": false,
       "comment": "one of 4 instances"
     },
     {
       "assert": "a_no_sop_in_packet",
       "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_linktest_i.cxp_tx_pkt_framer_i.cxp_framer_sva_i",
-      "show": true,
+      "show": false,
       "comment": "one of 4 instances"
     },
     {
       "assert": "a_no_sop_in_packet",
       "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_stream_pkt_i.cxp_tx_pkt_framer_i.cxp_framer_sva_i",
-      "show": true,
+      "show": false,
       "comment": "one of 4 instances"
     },
     {
       "assert": "a_hold_until_ready",
       "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_ctrl_ack_i.cxp_tx_pkt_framer_i.cxp_framer_sva_i",
-      "show": true,
+      "show": false,
       "comment": "one of 3 instances"
     },
     {
       "assert": "a_hold_until_ready",
       "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_linktest_i.cxp_tx_pkt_framer_i.cxp_framer_sva_i",
-      "show": true,
+      "show": false,
       "comment": "one of 3 instances"
     },
     {
       "assert": "a_hold_until_ready",
       "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_stream_pkt_i.cxp_tx_pkt_framer_i.cxp_framer_sva_i",
-      "show": true,
+      "show": false,
       "comment": "one of 3 instances"
     },
     {
@@ -151,7 +151,7 @@
     {
       "assert": "cxp_short_pkt_sva.a_hold_until_ready",
       "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_io_ack_i.cxp_tx_short_pkt_i.cxp_short_pkt_sva_i",
-      "show": true,
+      "show": false,
       "comment": "one of 5 instances"
     },
     {
@@ -169,7 +169,7 @@
     {
       "assert": "cxp_short_pkt_sva.a_hold_until_ready",
       "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_trigger_hs_i.cxp_tx_short_pkt_i.cxp_short_pkt_sva_i",
-      "show": true,
+      "show": false,
       "comment": "one of 5 instances"
     },
     {
@@ -181,7 +181,7 @@
     {
       "assert": "a_idle_interval",
       "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_idle_rule_sva_i",
-      "show": true,
+      "show": false,
       "comment": "one of 2 instances"
     },
     {
@@ -193,7 +193,7 @@
     {
       "assert": "a_no_overflow",
       "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_cdc_layer_i.cxp_cdc_stream_fifo_i.cxp_cdc_stream_fifo_sva_i",
-      "show": true,
+      "show": false,
       "comment": "one of 2 instances"
     },
     {
@@ -205,7 +205,7 @@
     {
       "assert": "a_no_underflow",
       "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_cdc_layer_i.cxp_cdc_stream_fifo_i.cxp_cdc_stream_fifo_sva_i",
-      "show": true,
+      "show": false,
       "comment": "one of 2 instances"
     },
     {
@@ -221,7 +221,7 @@
     {
       "assert": "a_sop_outside",
       "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_rx_domain_i.cxp_rx_link_i.cxp_rx_packet_parser_i.cxp_rxlong_sva_i",
-      "show": true,
+      "show": false,
       "comment": "one of 4 instances"
     },
     {
@@ -245,7 +245,7 @@
     {
       "assert": "a_eop_inside",
       "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_rx_domain_i.cxp_rx_link_i.cxp_rx_packet_parser_i.cxp_rxlong_sva_i",
-      "show": true,
+      "show": false,
       "comment": "one of 4 instances"
     },
     {
@@ -300,7 +300,7 @@
     {
       "assert": "a_crst_bounded",
       "scope": "tb_cxp_top.cxp_device_top_i.cxp_ctrl_bootstrap_regs_i.cxp_conn_reset_sva_i",
-      "show": true,
+      "show": false,
       "comment": "one of 2 instances"
     },
     {
@@ -320,16 +320,196 @@
       "show": true
     },
     {
-      "assert": "a_hold_until_ready",
-      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_io_ack_i.cxp_tx_short_pkt_i.cxp_short_pkt_sva_i",
-      "show": false,
-      "comment": "one of 5 instances"
+      "assert": "d_valid_through_packet",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_stream_pkt_i.cxp_tx_pkt_framer_i.cxp_framer_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
     },
     {
-      "assert": "a_hold_until_ready",
-      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_trigger_hs_i.cxp_tx_short_pkt_i.cxp_short_pkt_sva_i",
-      "show": false,
-      "comment": "one of 5 instances"
+      "assert": "d_packet_length",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_stream_pkt_i.cxp_tx_pkt_framer_i.cxp_framer_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_header_words",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_stream_pkt_i.cxp_tx_pkt_framer_i.cxp_framer_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_payload_inside",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_stream_pkt_i.cxp_tx_pkt_framer_i.cxp_framer_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_crc_then_eop",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_stream_pkt_i.cxp_tx_pkt_framer_i.cxp_framer_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_kmask_whole",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_stream_pkt_i.cxp_tx_pkt_framer_i.cxp_framer_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_k_words",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_stream_pkt_i.cxp_tx_pkt_framer_i.cxp_framer_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_gap_after_eop",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_stream_pkt_i.cxp_tx_pkt_framer_i.cxp_framer_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_ready_with_sop",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_stream_pkt_i.cxp_tx_pkt_framer_i.cxp_framer_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_packet_ends",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_stream_pkt_i.cxp_tx_pkt_framer_i.cxp_framer_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_packet_seq",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_stream_pkt_i.cxp_tx_pkt_framer_i.cxp_framer_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_ready_held",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_stream_pkt_i.cxp_tx_pkt_framer_i.cxp_framer_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_fail_short_packets",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_stream_pkt_i.cxp_tx_pkt_framer_i.cxp_framer_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_fail_back_to_back",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_stream_pkt_i.cxp_tx_pkt_framer_i.cxp_framer_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_fail_no_k_in_payload",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_stream_pkt_i.cxp_tx_pkt_framer_i.cxp_framer_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_cov_long_packet",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_stream_pkt_i.cxp_tx_pkt_framer_i.cxp_framer_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_cov_back_to_back",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_stream_pkt_i.cxp_tx_pkt_framer_i.cxp_framer_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_cov_k_insert",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_tx_domain_i.cxp_tx_stream_pkt_i.cxp_tx_pkt_framer_i.cxp_framer_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_rsp_latency",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_rx_domain_i.cxp_ctrl_plane_i.cxp_ctrl_bus_master_i.cxp_ctrl_exec_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_busy_then_rsp",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_rx_domain_i.cxp_ctrl_plane_i.cxp_ctrl_bus_master_i.cxp_ctrl_exec_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_no_start_while_rsp",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_rx_domain_i.cxp_ctrl_plane_i.cxp_ctrl_bus_master_i.cxp_ctrl_exec_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_rsp_held",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_rx_domain_i.cxp_ctrl_plane_i.cxp_ctrl_bus_master_i.cxp_ctrl_exec_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_start_from_idle",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_rx_domain_i.cxp_ctrl_plane_i.cxp_ctrl_bus_master_i.cxp_ctrl_exec_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_both_within_8",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_rx_domain_i.cxp_ctrl_plane_i.cxp_ctrl_bus_master_i.cxp_ctrl_exec_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_fail_rsp_at_once",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_rx_domain_i.cxp_ctrl_plane_i.cxp_ctrl_bus_master_i.cxp_ctrl_exec_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_fail_busy_one_cycle",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_rx_domain_i.cxp_ctrl_plane_i.cxp_ctrl_bus_master_i.cxp_ctrl_exec_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_cov_command",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_rx_domain_i.cxp_ctrl_plane_i.cxp_ctrl_bus_master_i.cxp_ctrl_exec_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_four_middle_words",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_rx_domain_i.cxp_rx_link_i.cxp_rx_packet_parser_i.cxp_rxlong_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_eop_inside",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_rx_domain_i.cxp_rx_link_i.cxp_rx_packet_parser_i.cxp_rxlong_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_next_or_end",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_rx_domain_i.cxp_rx_link_i.cxp_rx_packet_parser_i.cxp_rxlong_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_state_between_words",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_rx_domain_i.cxp_rx_link_i.cxp_rx_packet_parser_i.cxp_rxlong_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
+    },
+    {
+      "assert": "d_fail_word_gap",
+      "scope": "tb_cxp_top.cxp_device_top_i.cxp_interface_top_i.cxp_rx_domain_i.cxp_rx_link_i.cxp_rx_packet_parser_i.cxp_rxlong_sva_i",
+      "show": true,
+      "comment": "demo (cxp_sva_demo.sv)"
     }
   ],
   "exact": true,

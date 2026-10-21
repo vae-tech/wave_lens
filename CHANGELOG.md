@@ -5,6 +5,20 @@ lives on a branch. The version is in `VERSION`, in `wavefw.js` (`WaveFW.version`
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.14 — 21 October 2026
+
+Fixes from a review by Codex: what a page shows is what the dump holds.
+
+- **Known bits among x / z are kept.** A bus value whose nibble mixes x / z with known bits (`10x1`) was x in the
+  page: its fields, radix `bin`, the page's assertions (which could disagree with `sva eval`) lost bit 0. It is now
+  written in `tv` as `'b` and its bits; every other value stays hex, so the pages of clean dumps are unchanged. The
+  value search and `wave_find` take a four-state literal bit for bit (`'b10x1`, `8'hx5`, `4'bx1`).
+- **Save / Copy WaveDrom** keep at most 2048 cycles and say where they stop (head, foot, toast; `view.run`'s `cut`).
+- **Steps on long runs** (edges, bookmarks, values) no longer skip events next to the cursor: the rounding step was
+  1 ps at 1 ms of simulated time.
+- **Signals left out of a page are named**: `meta.omitted` lists the dump's signals the config hid (`"show": false`) or
+  the `dumpBudget` of a VCD opened in the page cut; the find says `no match · 1 not in the page` and how to add them.
+
 ## 0.13 — 21 October 2026
 
 Where the rows scroll, switched on the fly; your groups one key away.

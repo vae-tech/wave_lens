@@ -83,7 +83,8 @@ function arrowHead(P, x, y, fx, fy, fill) { // filled arrow with its tip at (x, 
 // "3": "c5"}: a colour, a token or c3..c9), else null
 function enumColor(s, o, S) {
   const m = s.enumColors || S.enumColors; if (!m || o.k !== '=') return null;
-  const n = o.raw != null && /^[0-9a-f]+$/i.test(o.raw) ? String(parseInt(o.raw, 16)) : null, c = m[o.v] ?? (n != null ? m[n] : undefined);
+  const n = o.raw != null && /^[0-9a-f]+$/i.test(o.raw) ? String(parseInt(o.raw, 16)) : null, c = m[vtext(s, o, S.radix)] ?? m[o.v] ?? (n != null ? m[n] :
+    undefined);   // the label drawn first (radix bin: the bits of "'b10x1")
   return c == null || c === '' ? null : /^[2-9]$/.test(String(c)) ? 'c' + c : String(c);
 }
 // a bus value as a number for the analog style (its radix: signed, float, fixed point; else unsigned), NaN for x / z

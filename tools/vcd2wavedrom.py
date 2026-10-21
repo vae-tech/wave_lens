@@ -25,7 +25,7 @@ Config file (--config cfg.json): every option can be a key (dashes or underscore
   "exprs" ["PSEL && !PREADY", "@(posedge PCLK) $rose(req)", {"expr": "…", "scope": "tb.dut"}] expressions of the signals the
   page draws as rows "ƒ expressions" (valued in the page: names from the scope up, or full paths).
   Clock-sampled buses get "width" and, when their labels do not read back as values (bin signed oct ascii, x digits),
-  "raw": the hex value of each label (the page's assertions sample them).
+  "raw": the hex value of each label (the page's assertions sample them); "'b" and the bits when hex would lose some.
   Per-signal settings: show (false: left out), alias (displayed name), radix (auto hex dec signed bin oct ascii),
   color (trace / outline / name), fill (bus fill), style (auto wavedrom questa square), enum {"0": "IDLE"}, enumColors
   {"IDLE": "#ffe066"}, analog true / rows (a bus as a step plot, that many rows high), height (the row's px); radix also
@@ -183,9 +183,26 @@ def open_reader(a):
     return Builtin(a.waves, a.scope)
 
 
+def hex_of(bits):
+    """Binary digits -> lower-case hex, as GTKWave: a nibble all z is z, one with an x or a partial z is x."""
+    bits = bits.rjust((len(bits) + 3) // 4 * 4, '0')
+    out = ''
+    for i in range(0, len(bits), 4):
+        nib = bits[i:i + 4]
+        out += 'z' if nib == 'zzzz' else 'x' if 'x' in nib or 'z' in nib else format(int(nib, 2), 'x')
+    return out
+
+
+def mixed(bits):
+    """True when hex would lose bits: a nibble with an x or z that is not all x or all z ("10x1")."""
+    bits = bits.rjust((len(bits) + 3) // 4 * 4, '0')
+    return any(set(n) & {'x', 'z'} and n not in ('xxxx', 'zzzz') for n in (bits[i:i + 4] for i in range(0, len(bits), 4)))
+
+
 @functools.lru_cache(maxsize=1 << 18)   # values repeat a lot (clocks, flags)
 def norm(value, width):
-    """Verilog literal ("8'ha5", "1'h1", "4'bxx01") -> '0'/'1'/'x'/'z' (1 bit) or lower-case hex."""
+    """Verilog literal ("8'ha5", "1'h1", "4'bxx01") -> '0'/'1'/'x'/'z' (1 bit), lower-case hex, or "'b" and the
+    width's binary digits when a nibble mixes x / z with known bits ("4'b10x1" -> "'b10x1": hex would make it x)."""
     m = re.fullmatch(r"(\d+)'([hbdo])([0-9a-fA-FxXzZ_]+)", value)
     if not m:
         return value.lower()
@@ -196,12 +213,7 @@ def norm(value, width):
             return bits[-1]
         if set(bits) <= {'x'} or set(bits) <= {'z'}:   # all x / all z: one letter, as the page reads it
             return bits[0]
-        bits = bits.rjust((width + 3) // 4 * 4, '0')
-        out = ''
-        for i in range(0, len(bits), 4):   # as GTKWave: a nibble all z is z, one with an x or a partial z is x
-            nib = bits[i:i + 4]
-            out += 'z' if nib == 'zzzz' else 'x' if 'x' in nib or 'z' in nib else format(int(nib, 2), 'x')
-        return out
+        return "'b" + bits[-width:] if mixed(bits) else hex_of(bits)
     if radix == 'd':
         digits = format(int(digits), 'x') if digits.isdigit() else digits
     if radix == 'o':
@@ -241,8 +253,10 @@ def label(v, width, enum=None, radix=None):
     point q<F> / sq<F>."""
     if enum is not None and re.fullmatch('[0-9a-f]+', v) and int(v, 16) in enum:
         return enum[int(v, 16)]
-    if re.search('[xz]', v):
-        return v
+    if v[:2] == "'b":   # known bits among x / z: binary digits in bin, else the hex of GTKWave (x for a mixed nibble)
+        return v[2:] if radix == 'bin' else hex_of(v[2:])
+    if re.search('[xz]', v):   # whole nibbles x / z: bin spells them out
+        return ''.join(c * 4 if c in 'xz' else format(int(c, 16), '04b') for c in v)[-width:] if radix == 'bin' else v
     n, r = int(v, 16), {'unsigned': 'dec', 'sdec': 'signed'}.get(radix, radix)
     q = re.fullmatch(r'(s?)q(\d+)', r or '')
     if q:   # fixed point: the value / 2^F exactly, as wavefw.js (the F decimals of 1/2^F: the fraction times 5^F)
@@ -704,6 +718,18 @@ def finish(a, rd, doc, specs, marks, t_from, t_to):
         doc.setdefault('sva', {})['exprs'] = a.exprs
     doc['meta'] = {'waves': os.path.basename(a.waves), 'tool': rd.tool, 'mode': 'clock' if a.clock else 'exact',
                    'from_ps': t_from, 'to_ps': t_to, **({'scope': a.scope} if a.scope else {})}
+    omitted = {}   # the catalog's "show": false: in the dump, not in the page (its find says so), by scope
+    for chunk in (a.signals if isinstance(a.signals, list) else [a.signals]):
+        for path, st in (chunk.items() if isinstance(chunk, dict) else ()):
+            if (st or {}).get('show', True) is False:
+                try:
+                    path = rd.resolve(path)[0]   # the dump's own path (a --scope put in front); one not in the dump is not said to be
+                except WaveError:
+                    continue
+                lf = (svabuild.split_path(path) or [path])[-1]
+                omitted.setdefault(path[:max(0, len(path) - len(lf) - 1)], []).append(lf)
+    if omitted:
+        doc['meta']['omitted'] = {'why': 'config', 'paths': omitted}
 
 
 def convert(a: argparse.Namespace) -> dict:

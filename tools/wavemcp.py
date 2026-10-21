@@ -380,6 +380,14 @@ def bits_value(want, width):
     digits = m.group(4)
     if digits in ('x', 'z'):
         return digits
+    if re.search('[xz]', digits) and base in ('b', 'h'):   # four-state: the stream's form of those bits ("'b10x1", or hex)
+        bits = digits if base == 'b' else ''.join(c * 4 if c in 'xz' else format(int(c, 16), '04b') for c in digits)
+        if not re.fullmatch('[01xz]+', bits):
+            return None
+        if m.group(1):   # sized (4'bx1): x / z extended to its size, then 0s to the signal's width
+            n = int(m.group(1))
+            bits = bits.rjust(n, bits[0] if bits[0] in 'xz' else '0')[-n:].rjust(width, '0')
+        return vcd2wavedrom.norm(f"{width}'b{bits.rjust(width, bits[0] if bits[0] in 'xz' else '0')[-width:]}", width)
     try:
         n = int(digits, {'h': 16, 'd': 10, 'b': 2, 'o': 8}[base])
     except ValueError:

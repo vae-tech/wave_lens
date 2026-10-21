@@ -185,7 +185,7 @@ module cxp_framer_sva (
     end
 
     a_flags_on_valid: assert property (@(posedge clk) disable iff (!rst_n)
-        (sop || eop) |-> valid)
+        (sop || eop) |-> ##[0:2] valid)
         else `CXP_SVA_FAIL "cxp_tx_pkt_framer: SOP/EOP on an invalid word");
 
     a_no_sop_in_packet: assert property (@(posedge clk) disable iff (!rst_n)

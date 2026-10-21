@@ -770,6 +770,25 @@ def viewer_big(page, P):
     page.evaluate("dispatchEvent(new Event('afterprint'))"); page.emulate_media(media='screen'); settle(page)
     check(abs(pr[0] - pr[1]) < 1 and pr[2] == 'visible' and pr[3] >= 2 and js("v.wcol.querySelectorAll('canvas.wv-print').length") == 0,
           f'print: every row on {pr[3]} canvases ({pr[0]:.0f} of {pr[1]} px), no scroll box; afterprint gives the screen canvas back')
+    wd = page.evaluate("""(() => { const ck = [], d8 = []; for (let c = 0; c < 3000; c++) { ck.push([10 * c, '0'], [10 * c + 5, '1']); d8.push([10 * c, (c % 256).toString(16)]); }
+        const el = document.body.appendChild(document.createElement('div')), w = new WaveFW.WaveView(el, { signal: [{ name: 'clk', tv: ck },
+          { name: 'd', width: 8, tv: d8 }], time: { t0: 0, unit: 'ps' }, meta: { omitted: { why: 'config', paths: { 'tb.u': ['rd_ptr', 'wr_ptr'] } } } }, {}), d = w.toWaveDrom(0, 30000, w.M.rows.filter(r => r.type === 'sig'));
+        const out = [Math.max(...d.signal.map(s => s.wave.length)), w.wdCut && w.wdCut.cells, w.wdCut && w.wdCut.to, d.foot.text, d.head.text];
+        w.find('rd_ptr'); out.push(w.cntEl ? [w.cntEl.textContent, w.cntEl.dataset.ttl] : null); w.find('');
+        out.push([20470, 20480, 20490].map(b => { const x = w.toWaveDrom(0, b, w.M.rows.filter(r => r.type === 'sig')); return [x.signal[1].wave.length, !!w.wdCut]; }));
+        w.destroy(); el.remove(); return out; })()""")
+    check(wd[0] == 2048 and wd[6] == [[2047, False], [2048, False], [2048, True]] and wd[1] == 2048 and wd[2] == 20485 and 'the first 2048 cycles of a range to 30' in wd[3] and wd[4].endswith('20.48 ns') and wd[5] and
+          wd[5][0] == 'no match · 1 not in the page' and 'tb.u.rd_ptr' in wd[5][1] and '"show": false' in wd[5][1],
+          f'WaveDrom of 3000 cycles: 2048 kept, the cut said in the foot and v.wdCut, the head ends where the cycles end {wd[3]!r} {wd[4]!r}; find: a name the config left out is said {wd[5]}; 2047 / 2048 / 2049 cycles {wd[6]}')
+    g = page.evaluate("""(() => [2040, 2047].map(last => { const ck = [], d8 = [];   // the data idle from cycle last to 2900: a gap
+        for (let c = 0; c < 3000; c++) { ck.push([10 * c, '0'], [10 * c + 5, '1']); if (c < last || c > 2900) d8.push([10 * c, (c % 256).toString(16)]); }
+        const el = document.body.appendChild(document.createElement('div')), w = new WaveFW.WaveView(el, { signal: [{ name: 'clk', tv: ck },
+          { name: 'd', width: 8, tv: d8 }], time: { t0: 0, unit: 'ps' } }, {});
+        w.setGaps({ gaps: true }); const x = w.toWaveDrom(0, 30000, w.M.rows.filter(r => r.type === 'sig')), wv = x.signal[1].wave;
+        const out = [wv.replace(/[|]/g, '').length, (wv.match(/[|]/g) || []).length, w.wdCut && w.wdCut.to, /idle/.test(x.foot.text)];
+        w.setGaps(null); w.destroy(); el.remove(); return out; }))()""")
+    check(g == [[2048, 1, 29055, True], [2048, 0, 20485, False]], f'WaveDrom cut by cycles next to a gap: one inside the 2048 cycles is kept and said; '
+          f'one right after them is not taken in, the range ends at the last cycle {g}')
     js('(v.collapseAll(), 0)')
 
 
@@ -1012,6 +1031,16 @@ def readers(browser, build):
         extra = set(got['sigs']) - set(tools)
         (differ if bad or extra else same).append(f.stem + (f' ({bad[:2]} {sorted(extra)[:3]})' if bad or extra else ''))
     check(not differ and len(same) == len(fixtures), f'the page and the tools read {len(same)} of {len(fixtures)} fixtures the same' + (f'; differ: {differ}' if differ else ''))
+    # known bits among x / z reach the page's engine as bits (they were x by the hex: the page and sva eval disagreed)
+    for f in ('wavefw.config.js', 'sva.wasm.js', 'sva.js'):
+        page.add_script_tag(path=str(ROOT / 'wavefw' / f))
+    got = page.evaluate("""async t => { const M = WaveFW.parse(WaveFW.vcdToWave(t).doc), X = SVA.expressions, out = [];
+        for (const text of ['b[0]', 'b[3:0] == 4\\'b0z0x', 'b[7:4] === 4\\'b1x0z']) { const r = await X.valueOf(M, [], { text, scope: 'tb' });
+          out.push(r.err || r.times.map((t, i) => [t, String(r.values[i])])); }
+        return out; }""", (ROOT / 'tests' / 'unit' / 'vcd' / 'xz.vcd').read_text())
+    check(got == [[[0, 'x'], [10000, 'x'], [20000, '1'], [30000, '1']], [[0, '0'], [10000, 'x'], [20000, 'x'], [30000, 'x']],
+                  [[0, '1'], [10000, '0'], [20000, '0'], [30000, '0']]],
+          f'xz.vcd in the page\'s engine: bit 0 of bx1 is 1 (not x), 1x0z1z0x keeps its known bits (== on a known bit that differs: 0, not x) {got}')
     page.close()
 
 
@@ -1663,7 +1692,7 @@ def sva_units(page):
       const r = e.call({ files: ['package p; localparam int TWO = 2; endpackage'], exprs: ['a && !b', 'd == p::TWO', 'a +', '$rose(a)'], trace: { signals: { a: [0, 1, 1, 0], b: [1, 1, 0, 0], d: [2, 2, 3, 2] }, widths: { d: 4 } } });
       return [r.exprs.map(x => x.values || x.errors), r.exprs[1].signals, X.splitClock('@( negedge clk_i ) a ##1 b'), X.splitClock(' a'), [X.tvValue(1, 1), X.tvValue('x', 1), X.tvValue(300, 12), X.tvValue('hABC', 12), X.tvValue('1x0101', 6)]]; })()""")
     check(ex[0][:2] == [[0, 0, 1, 0], [1, 1, 0, 1]] and '1:4' in ex[0][2][0] and ex[0][3] == [0, 1, 0, 0] and ex[1] == [{'name': 'd'}]
-          and ex[2] == {'clock': {'edge': 'negedge', 'signal': 'clk_i'}, 'body': 'a ##1 b'} and ex[3]['clock'] is None and ex[4] == ['1', 'x', '12c', 'abc', 'x5'],
+          and ex[2] == {'clock': {'edge': 'negedge', 'signal': 'clk_i'}, 'body': 'a ##1 b'} and ex[3]['clock'] is None and ex[4] == ['1', 'x', '12c', 'abc', "'b1x0101"],
           f'sva.js: expressions through the engine (values per cycle, package constants, errors with line:col), the clock prefix, values as "tv" {ex}')
     pp = page.evaluate("SVA.propParts('a && b |-> ##[1:3] c intersect (d ##1 e) or f throughout g iff error_or')")
     check(pp == ['a && b', '|-> ##[1:3] c', 'intersect (d', '##1 e)', 'or f', 'throughout g', 'iff error_or'],
@@ -1688,6 +1717,11 @@ const FR = (n, f) => { const r = I.fieldRow(R(n), f, 1, []); return r && r.tr.ma
 const FIND = (n, q, o) => { const m = I.findRow(R(n), q.split(' '), UM, o || {}); return m && m.idx; };
 const AV = (o, w, r, extra) => I.analogValue(Object.assign({ width: w }, extra || {}), o, r);
 const VW = (text, o) => F.vcdToWave(text, o);
+const XZ = F.parse(F.vcdToWave(`$timescale 1ns $end $scope module tb $end $var wire 8 ! b [7:0] $end $upscope $end $enddefinitions $end
+#0 b1x0z1z0x ! #10 bz ! #20 bx1 ! #30 b101 !`).doc);
+const MX = F.parse({ signal: [{ name: 'v', width: 4, tv: [[0, "'b10x1"], [1, "'b10z1"], [2, "'b11x1"], [3, "'b11x1"]] }] });
+const RT = (b, w) => I.bitsOf(F.parse({ signal: [{ name: 'v', width: w, tv: [[0, I.vcdHex(b, w)]] }] }).rows[0].tr[0], w);
+const XT = F.parse({ signal: [{ name: 'e', tv: [[0, '0'], [1e12, '1'], [1e12 + 1, '0'], [1e12 + 2, '1']] }] }).rows[0];
 const vcd = (vars, body) => `$timescale 1ns $end $scope module tb $end ${vars} $upscope $end $enddefinitions $end ${body}`;
 const tvOf = (doc, name) => { const walk = a => { for (const x of a) { if (Array.isArray(x)) { const r = walk(x.slice(1)); if (r) return r; }
   else if (x && x.name === name) return x; } return null; }; const s = walk(doc.signal); return s && s.tv; };
@@ -1731,10 +1765,37 @@ UNITS = [   # (JavaScript expression, its JSON value); NaN / ±Infinity / undefi
     ("I.toFloat(1n, 16)", 5.960464477539063e-8), ("I.toFloat(0x40490fdbn, 32)", 3.1415927410125732), ("I.toFloat(0n, 8)", None),
     # bits and hex: GTKWave's z policy (a nibble all z: z, with an x or a partial z: x)
     ("I.hexOf('1010')", 'a'), ("I.hexOf('zzzz')", 'z'), ("I.hexOf('zz10')", 'x'), ("I.hexOf('x000')", 'x'), ("I.hexOf('110100')", '34'),
-    ("I.hexOf('zzzz0001')", 'z1'), ("I.vcdHex('101', 8)", '05'), ("I.vcdHex('x', 8)", 'x'), ("I.vcdHex('z01', 8)", 'zx'),
+    ("I.hexOf('zzzz0001')", 'z1'), ("I.vcdHex('101', 8)", '05'), ("I.vcdHex('x', 8)", 'x'), ("I.vcdHex('z01', 8)", "'bzzzzzz01"),
     ("I.vcdHex('1', 1)", '1'), ("I.vcdHex('111111111', 8)", 'ff'), ("I.vcdHex('zzzz', 4)", 'z'),
     ("I.bitsOf({ k: '=', raw: 'a' }, 4)", '1010'), ("I.bitsOf({ k: '=', v: '0x1F' }, 8)", '00011111'), ("I.bitsOf({ k: '=', v: '12' }, 6)", '001100'),
     ("I.bitsOf({ k: 'z' }, 3)", 'zzz'), ("I.bitsOf(null, 2)", 'xx'), ("I.bitsOf({ k: '=', v: 'IDLE' }, 4)", 'xxxx'), ("I.bitsOf({ k: '=', raw: 'x1' }, 6)", 'xx0001'),
+    # known bits among x / z: kept ("'b" and the bits in "tv"), hex only for the label
+    ("I.vcdHex('10x1', 4)", "'b10x1"), ("I.vcdHex('x1', 8)", "'bxxxxxxx1"), ("I.vcdHex('1010xxxx', 8)", 'ax'), ("I.mixedBits('zzzz0001')", False),
+    ("I.bitsVal('10x1')", {'k': '=', 'raw': 'x', 'bits': '10x1'}), ("I.bitsVal('xxxx')", {'k': 'x'}), ("I.bitsOf({ k: '=', raw: 'x', bits: '10x1' }, 4)", '10x1'),
+    ("XZ.rows.find(r => r.name === 'b').tr.map(o => [o.t, o.k, o.raw || null, o.bits || null])", [[0, '=', 'xx', '1x0z1z0x'], [10000, 'z', None, None],
+      [20000, '=', 'xx', 'xxxxxxx1'], [30000, '=', '05', None]]),
+    ("I.fieldRow(XZ.rows.find(r => r.name === 'b'), { name: 'b0', msb: 0 }, 1, []).tr.map(o => o.k)", ['x', 'z', '1']),
+    # a step from the cursor on a long run: the event 1 ps away is next (1e-9 · t jumped over it at 1 s)
+    ("F.util.stepTo([1e12 + 1, 1e12 + 500, 1e12 + 2000], 1e12, 1)", 0), ("F.util.stepTo([1e12 - 2000, 1e12 - 1], 1e12, -1)", 1),
+    ("F.util.stepTo([1e12, 1e12 + 1, 1e12 + 2], 1e12, 1)", 1), ("F.util.stepTo([1e12, 1e12 + 1, 1e12 + 2], 1e12 + 2, -1)", 1),
+    ("F.util.stepTo([10, F.parseT('85.12us'), 9e7], F.parseT('85.12us'), 1)", 2), ("F.util.stepTo([10, F.parseT('85.12us'), 9e7], F.parseT('85.12us'), -1)", 0),
+    ("I.edgeGlyph(XT, 1e12 + 1)", '↓'), ("I.findEdge(XT, 1e12, 1, 'any')", 1e12 + 1), ("I.findEdge(XT, 1e12 + 2, -1, 'any')", 1e12 + 1),
+    ("VW(vcd('$var wire 1 ! a $end $scope module u $end $var wire 1 \" b $end $upscope $end', '#0 0! 0\" #1 1! 1\"'), { budget: 2 }).doc.meta",
+     {'omitted': {'why': 'dumpBudget', 'paths': {'tb.u': ['b']}}}),
+    ("F.decode({ width: 8 }, 'xz', 'bin')", 'xxxxzzzz'),
+    # "'b" values: transitions by their bits (x and z apart), any width, clock-sampled "raw", the samplers, the value search, enum colours
+    ("MX.rows[0].tr.map(o => o.bits)", ['10x1', '10z1', '11x1']), ("I.fieldRow(MX.rows[0], { name: 'lo', msb: 1, lsb: 0 }, 1, []).tr.map(o => o.bits)",
+     ['x1', 'z1', 'x1']),
+    ("[['z01', 3], ['z0001', 5], ['zz0001', 6], ['z00000001', 9], ['1x0101', 6]].map(([b, w]) => RT(b, w))", ['z01', 'z0001', 'zz0001', 'z00000001', '1x0101']),
+    ("I.bitsOf(F.parse({ signal: [{ name: 'v', width: 4, wave: '=', data: ['x'], raw: [\"'b10x1\"] }] }).rows[0].tr[0], 4)", '10x1'),
+    ("SVA.tvSampler({ b: { width: 4, tv: [[0, \"'b10x1\"]] } }).before('b', 1)", '10x1'),
+    ("[\"'b10x1\", \"4'b10x1\", \"'b10z1\", \"4'hx\"].map(q => MX.rows[0].tr.map(o => I.valueIs(MX.rows[0], o, I.parseWant(q), 'hex')))",
+     [[True, False, False], [True, False, False], [False, True, False], [False, False, False]]),
+    ("I.enumColor({ width: 4, radix: 'bin', enumColors: { '10x1': 'red' } }, MX.rows[0].tr[0], {})", 'red'),
+    ("[\"8'hx5\", \"8'hxx\"].map(q => { const r = F.parse({ signal: [{ name: 'v', width: 8, wave: '=', data: ['x5'], raw: ['x5'] }] }).rows[0];\n"
+     "  return I.valueIs(r, r.tr[0], I.parseWant(q)); })", [True, False]),
+    ("[\"4'bx1\", \"'bx1\"].map(q => { const r = F.parse({ signal: [{ name: 'v', width: 8, tv: [[0, \"'b0000xxx1\"]] }] }).rows[0];\n"
+     "  return I.valueIs(r, r.tr[0], I.parseWant(q)); })", [True, False]), ("SVA.expressions.tvValue('10x1', 4)", "'b10x1"),
     # fieldRow: in range, one bit, outside the vector (left out, never NaN)
     ("FR('d', { name: 'hi', msb: 7, lsb: 4 })", ['0', 'f', 'x', '0', 'f']), ("FR('d', { name: 'b0', msb: 0 })", ['0', '1', 'x', '1']),
     ("FR('d', { name: 'bad', msb: 11, lsb: 8 })", None), ("FR('d', { name: 'rev', msb: 2, lsb: 5 })", None), ("FR('d', { msb: 1, lsb: 0 })", None),
@@ -1793,7 +1854,7 @@ UNITS = [   # (JavaScript expression, its JSON value); NaN / ±Infinity / undefi
     ("I.stripPfx('i_data', ['i_', 'o_'])", ['i_', 'data']), ("I.stripPfx('i_', ['i_'])", ['', 'i_']),
     # the page's VCD reader
     ("tvOf(VW(vcd('$var wire 1 ! clk $end $var wire 4 \" d [3:0] $end', '#0 0! b0 \" #5 1! b101 \" #10 0! bz1 \"')).doc, 'd')",
-     [[0, '0'], [5000, '5'], [10000, 'x']]),
+     [[0, '0'], [5000, '5'], [10000, "'bzzz1"]]),
     ("VW(vcd('$var wire 1 ! clk $end', '#0 0! #5 1!')).doc.time", {'t0': 0, 't1': 5000, 'cycle': 125, 'unit': 'ps'}),
     ("tvOf(VW(vcd('$var wire 1 ! s $end', '#0 0! $comment #99 $end #10 1!')).doc, 's')", [[0, '0'], [10000, '1']]),
     ("tvOf(VW(vcd('$var wire 4 ! v $end', '#0 bUUUU ! #10 b01HL !')).doc, 'v')", [[0, 'x'], [10000, '6']]),
@@ -1817,7 +1878,7 @@ UNITS = [   # (JavaScript expression, its JSON value); NaN / ±Infinity / undefi
     # the expressions of sva.js
     ("SVA.expressions.splitClock('@(posedge clk) a ##1 b')", {'clock': {'edge': 'posedge', 'signal': 'clk'}, 'body': 'a ##1 b'}),
     ("SVA.expressions.splitClock('a && b').clock", None), ("SVA.expressions.tvValue(5, 4)", '5'), ("SVA.expressions.tvValue('hz', 4)", 'z'),
-    ("SVA.expressions.tvValue('zzzz0001', 8)", 'z1'), ("SVA.expressions.tvValue('zz01', 4)", 'x'), ("I.gfmt(0.0001234)", '0.0001234'),
+    ("SVA.expressions.tvValue('zzzz0001', 8)", 'z1'), ("SVA.expressions.tvValue('zz01', 4)", "'bzz01"), ("I.gfmt(0.0001234)", '0.0001234'),
     ("SVA.stepSignals('a && $past(b) == 4\\'hc', new Set(['a', 'b']))", ['a', 'b']), ("SVA.propParts('a |-> b')", ['a', '|-> b']),
 ]
 

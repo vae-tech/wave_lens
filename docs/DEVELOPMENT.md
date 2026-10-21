@@ -22,7 +22,10 @@ tools/                        what you run: python3 -I tools/<tool>.py
   viewedit.py                 the viewer's commands on a page's edits or a saved state (USAGE § Commands and edits)
   base.config.json            base settings for generated configs (make config / make html WAVES=x.vcd)
 examples/                     apb/ axi_lite/ fsm/ demo/: testbench, config, README; *.sva: assertions for each;
-                              test_video/: the CoaXPress checkers over a real dump (the dump and page not in git)
+                              test_video/: the CoaXPress checkers (cxp_sva.sv) and a demo of the operators with
+                              deliberate failures (cxp_sva_demo.sv) over a real dump; the dump and page are not in
+                              git: put your test_stream_video.fst there, make html
+                              WAVES=examples/test_video/test_stream_video.fst (its config, ~20 s, a 27 MB page)
 docs/                         what you look at
   index.html                  the reference page with live examples (opens from file://)
   USAGE.md, DEVELOPMENT.md    the user's guide; this file
@@ -183,7 +186,7 @@ approval"): the agent falls back to its shell. The runs, their transcripts and a
 
 ## Versions
 
-Two numbers, `MAJOR.MINOR` (0.13 now; [`CHANGELOG.md`](../CHANGELOG.md) lists them all). The work goes on a branch;
+Two numbers, `MAJOR.MINOR` (0.14 now; [`CHANGELOG.md`](../CHANGELOG.md) lists them all). The work goes on a branch;
 a version is a merge into `main` (`git merge --no-ff`) tagged `vMAJOR.MINOR` (an annotated tag, its message the
 changelog entry). One commit on the branch before the merge raises the version in four places: `VERSION`,
 `version:` in `wavefw/src/boot.js` (then `make wavefw`), a new top entry in `CHANGELOG.md`, and the committed builds

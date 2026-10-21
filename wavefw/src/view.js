@@ -108,6 +108,7 @@ const HELP = [
   ['Help', [[['?'], 'this box'], [['hover a button'], 'what it does, its keys']]],
 ];
 
+const WD_CELLS = 2048;   // the cycles a WaveDrom export keeps at most (the rest of the range is said, not dropped silently)
 const KIND_MARK = { struct: '{}', union: '∪', interface: '⊟' };
 // the find group's options: [button, viewer property = setting, label, title, alt+ key code]
 const FIND_OPTS = [
@@ -915,8 +916,15 @@ class WaveView {
     }
     this.findPicks = terms.length && this.findHl ? new Map([...this.found.keys()].map(r => [r, 6])) : new Map();
     this.fi = -1; this.fiRow = null;
-    if (this.cntEl) { const n = this.found.size; this.cntEl.textContent = badRe ? 'bad regex' : terms.length ? (n ? `${n} found` : 'no match') : '';
-      this.cntEl.classList.toggle('none', badRe || (!!terms.length && !n)); }
+    if (this.cntEl) { const n = this.found.size, miss = terms.length ? this.omitRows().filter(r => findRow(r, terms, this.M, o)) : [];
+      this.cntEl.textContent = badRe ? 'bad regex' : terms.length ? (n ? `${n} found` : 'no match') +
+        (miss.length ? ` · ${miss.length} not in the page` : '') : '';
+      this.cntEl.classList.toggle('none', badRe || (!!terms.length && !n));
+      if (miss.length) { const why = this.M.src.meta.omitted.why === 'dumpBudget' ? `past the dumpBudget (${this.S.dumpBudget} changes) of the page's ` +
+          'reader: open the dump with a larger budget' : '"show": false in the config: set it true and make html again';
+        this.cntEl.dataset.tip = ''; this.cntEl.dataset.ttl = `In the dump, not in this page (${why}):\n` + miss.slice(0, 12).map(r => r.full).join('\n') +
+          (miss.length > 12 ? `\n… ${miss.length - 12} more` : ''); }
+      else { delete this.cntEl.dataset.tip; delete this.cntEl.dataset.ttl; } }
     this.renderNames(); this.draw();
     if (moved) { const d = this.rowTop(moved[0]) - moved[1]; if (d) { if (this.root.classList.contains('wv-scroll')) this.bodyEl.scrollTop += d;
       else window.scrollBy(0, d); this.draw(); } }
@@ -1622,7 +1630,7 @@ class WaveView {
     if (s && s.tr && s.tr.length) {
       const tr = s.tr, i0 = lastLE(tr, a) + 1, i1 = lastLE(tr, b), bus = s.width > 1 || tr.some(o => o.k === '=');
       if (!bus) { let n = 0; for (let i = Math.max(i0, 1); i <= i1; i++) if (tr[i].k === '1' && tr[i - 1].k === '0') n++; if (n) more = ` · ${n} ↑ ${s.name}`; }
-      else if (i1 >= i0) { const vals = new Set(); for (let i = Math.max(i0 - 1, 0); i <= i1; i++) vals.add(tr[i].raw ?? tr[i].v ?? tr[i].k);
+      else if (i1 >= i0) { const vals = new Set(); for (let i = Math.max(i0 - 1, 0); i <= i1; i++) vals.add(tr[i].bits ?? tr[i].raw ?? tr[i].v ?? tr[i].k);
         const n = i1 - i0 + 1; more = ` · ${n} change${n === 1 ? '' : 's'} of ${s.name} (${vals.size} value${vals.size === 1 ? '' : 's'})`; }
     }
     this.rangeKey = key;
@@ -1633,6 +1641,11 @@ class WaveView {
   // the highlighted rows as laid out (a highlighted module: it and its rows shown), for the picture and WaveDrom
   // the rows the picture and WaveDrom take: a run of selected signals (shift+click, alt+drag), else the highlighted rows
   // (gaps "only them": the signals the gaps follow)
+  // the dump's signals the page left out (meta.omitted: the config's "show": false, the page reader's dumpBudget), as rows find() matches
+  omitRows() { if (this.omitL) return this.omitL; const o = ((this.M.src && this.M.src.meta) || {}).omitted, out = [];
+    if (o && o.paths) for (const [sc, names] of Object.entries(o.paths)) for (const n of names) out.push({ type: 'sig', name: n, full: sc ? sc + '.' + n : n,
+      path: sc ? sc + '.' + n : n, scope: sc, anc: [] });
+    return (this.omitL = out); }
   exportRows() { const m = this.gapMask(); if (m && m.length) return m;
     return this.selRun.size > 1 ? (this.rowsL || []).filter(r => this.selRun.has(r)) : this.picks.size ? this.pickedRows() : []; }
   pickedRows() { return (this.rowsL || []).filter(r => this.picks.has(r) || (r.anc || []).some(id => this.picks.has(this.M.groups[id]))); }
@@ -1644,8 +1657,10 @@ class WaveView {
     const picked = mask || (this.selRun.size > 1 ? this.M.rows.filter(r => this.selRun.has(r)) : this.picks.size ? this.M.rows.filter(r => this.picks.has(r) ||
       r.anc.some(id => this.picks.has(this.M.groups[id]))) : this.screenRows());
     const sigs = (rows || picked).filter(r => r.type === 'sig' && r.tr && r.tr.length);
-    const clk = (this.gapOpt().gaps && this.gapClockRow()) || this.clockFor(sigs), cuts = this.cutsOf(a, b, sigs), ng = cuts.length - 1,
-      kept = cuts.reduce((n, [p, q]) => n + q - p, 0);
+    this.wdCut = null;
+    const clk = (this.gapOpt().gaps && this.gapClockRow()) || this.clockFor(sigs);
+    let cuts = this.cutsOf(a, b, sigs), ng = cuts.length - 1;
+    const kept = cuts.reduce((n, [p, q]) => n + q - p, 0);
     let cells = clk ? clk.tr.filter(o => o.k === '1' && o.t >= a && o.t < b).map(o => o.t) : [], cellT = 0;
     if (cells.length < 2) {   // no clock here: a grid of the shortest step between changes, at most 512 cells (a gap: one null)
       const ts = [...new Set(sigs.flatMap(r => r.tr.filter(o => o.t > a && o.t < b).map(o => o.t)))].sort((x, y) => x - y);
@@ -1655,7 +1670,14 @@ class WaveView {
     } else {   // the cells in a stretch left out (gaps): one null, a '|'
       let j = 0; cells = cells.reduce((out, t) => { while (j < ng && t >= cuts[j + 1][0]) j++;
         if (j < ng && t >= cuts[j][1]) { if (out[out.length - 1] !== null) out.push(null); } else out.push(t); return out; }, []);
-      if (cells.length > 2048) cells = cells.slice(0, 2048);
+      let i = 0; for (let k = 0; i < cells.length && k < WD_CELLS; i++) if (cells[i] !== null) k++;
+      const more = cells.slice(i).some(t => t !== null), last = cells[i - 1];
+      // the end: the next cycle when it follows at once, else where the stretch of the last cycle ends (a gap after it is not taken in)
+      const end = !more ? null : cells[i] != null ? cells[i] : (cuts.find(([p, q]) => last >= p && last < q) || [0, cells.slice(i).find(t => t !== null)])[1];
+      if (end != null) {   // the first WD_CELLS cycles: the range ends where the next one starts (its gaps only), said in the foot and this.wdCut
+        cells = cells.slice(0, i); this.wdCut = { cells: WD_CELLS, to: end, asked: b }; b = end;
+        cuts = cuts.filter(([p]) => p < end).map(([p, q]) => [p, Math.min(q, end)]); ng = cuts.length - 1;
+      }
     }
     const one = r => {
       if (r === clk && cells.length > 1 && clk.tr.some(o => o.t === cells[0])) {
@@ -1664,7 +1686,7 @@ class WaveView {
       let wave = '', prev = null; const data = [];
       for (const t of cells) {
         if (t === null) { wave += '|'; continue; }   // a gap: the value goes on
-        const i = lastLE(r.tr, t), o = i < 0 ? { k: 'x' } : r.tr[i], key = o.k === '=' ? '=' + (o.raw ?? o.v) : o.k;
+        const i = lastLE(r.tr, t), o = i < 0 ? { k: 'x' } : r.tr[i], key = o.k === '=' ? '=' + (o.bits ?? o.raw ?? o.v) : o.k;
         if (key === prev) { wave += '.'; continue; }
         prev = key;
         if (o.k === '=') { wave += '='; data.push(vtext(r, o, this.S.radix)); } else wave += 'udhlHL'.includes(o.k) ? o.k : o.k === '1' || o.k === '0' ||
@@ -1681,7 +1703,8 @@ class WaveView {
     return { signal, head: { text: `${title}: ${this.fmt(a, (b - a) / 1000, b - a)} … ${this.fmt(b, (b - a) / 1000, b - a)}` },
       foot: { text: (clk && !cellT ? `one cell per ${clk.full || clk.name} cycle` : `one cell per ${this.fmt(cellT, 1, cellT || 1)}`) +
         (ng ? `, | : ${ng} idle stretch${ng === 1 ? '' : 'es'} left out (` + cuts.slice(1).map(([q], i) => this.fmt(q - cuts[i][1], (q - cuts[i][1]) / 100,
-          q - cuts[i][1])).join(', ') + ')' : '') }, config: { hscale: 1 } };
+          q - cuts[i][1])).join(', ') + ')' : '') + (this.wdCut ? `; the first ${WD_CELLS} cycles of a range to ${this.fmt(this.wdCut.asked,
+          (this.wdCut.asked - a) / 1000, this.wdCut.asked - a)}` : '') }, config: { hscale: 1 } };
   }
   screenRows() {
     const top = this.oy || 0, h = this.hc || 0, hdr = this.hdrH;
@@ -1845,11 +1868,12 @@ class WaveView {
       else if (act === 'svg') { this.download(new Blob([this.toSVG(pic)], { type: 'image/svg+xml' }), this.picName('svg'));
         this.toast('saved ' + this.picName('svg')); }
       else if (act === 'wdjson' || act === 'wdcopy') {
-        const [ta, tb] = r || [this.t0, this.t0 + this.span], text = wdText(this.toWaveDrom(ta, tb));
-        if (act === 'wdcopy') { try { navigator.clipboard.writeText(text).then(() => this.toast('WaveDrom copied'), () => this.toast('not copied'));
+        const [ta, tb] = r || [this.t0, this.t0 + this.span], text = wdText(this.toWaveDrom(ta, tb)), cut = this.wdCut ? ` — the first ${WD_CELLS} ` +
+          `cycles only, to ${this.fmt(this.wdCut.to, (this.wdCut.to - ta) / 1000, this.wdCut.to - ta)}` : '';
+        if (act === 'wdcopy') { try { navigator.clipboard.writeText(text).then(() => this.toast('WaveDrom copied' + cut), () => this.toast('not copied'));
           } catch (e) { this.toast('not copied'); } }
         else { this.download(new Blob([text + '\n'], { type: 'application/json' }), this.picName('wavedrom.json'));
-          this.toast('saved ' + this.picName('wavedrom.json')); }
+          this.toast('saved ' + this.picName('wavedrom.json') + cut); }
       }
       else if (act === 'unpaint') { sigs.forEach(r => this.painted.delete(r.full)); this.savePaint(); this.renderNames(); this.draw(); }
       else if (act === 'hl') this.toggleHighlight(it);

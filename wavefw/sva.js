@@ -176,7 +176,7 @@ function tvSampler(sigs) {
       const tv = s.tv || [], k = lastBefore(tv.length, i => +tv[i][0], t);
       if (k < 0) return 'x';
       const v = bit(tv[k][1]);
-      return (s.width || 1) === 1 ? v : 'h' + v;
+      return (s.width || 1) === 1 ? v : v.startsWith("'b") ? v.slice(2) : 'h' + v;   // "'b10x1": its bits (known ones among x / z)
     },
     width: name => sigs[name] && sigs[name].width,
   };
@@ -187,6 +187,7 @@ function rowValue(r, o) {
   if (!o) return 'x';
   if (o.k === '0' || o.k === '1') return o.k;
   if (o.k !== '=') return rowWidth(r) > 1 ? 'hx' : 'x';
+  if (o.bits) return o.bits;   // known bits among x / z: binary digits (its hex would make them x)
   if (o.raw != null) return 'h' + o.raw;   // "tv": hex
   if (o.hex != null) return 'h' + o.hex;   // a clock-sampled view with its values next to the labels ("raw")
   const v = String(o.v).trim(), e = r.enum || (G.WaveFW && (G.WaveFW.enums[r.full] || G.WaveFW.enums[r.name]));
@@ -798,7 +799,7 @@ function assertionRows(st, res, opt) {
     tip(x, y, view) { const h = barAt(this.hits, x, y); return h ? tip(h[4], view) : ''; },
     value(t) {   // the attempts at the cursor: the strongest result (and how many more)
       let best = null, n = 0;
-      for (let i = lastBefore(m.atts.length, j => m.atts[j].t0, t + 1e-9 * Math.max(1, Math.abs(t))); i >= 0 && m.atts[i].mt1 >= t; i--) { const x = m.atts[i];
+      for (let i = lastBefore(m.atts.length, j => m.atts[j].t0, t + G.WaveFW.util.timeEps(t)); i >= 0 && m.atts[i].mt1 >= t; i--) { const x = m.atts[i];
         if (x.t1 >= t) { n++; if (!best || RANK[x.r] > RANK[best.r]) best = x; } }
       return best ? best.r + (n > 1 ? ` +${n - 1}` : '') : '';
     } });
@@ -1752,7 +1753,9 @@ function tvValue(v, w) {
   let h = '';
   // a nibble all z is z, one with an x or a partial z is x (hexOf of wavefw.js, as GTKWave)
   for (let i = 0; i < b.length; i += 4) { const n = b.slice(i, i + 4); h += /^z{4}$/i.test(n) ? 'z' : /[xz]/i.test(n) ? 'x' : parseInt(n, 2).toString(16); }
-  return h;
+  // a nibble of known bits and x / z: "'b" and the w bits, as the readers write it (vcdHex), so no known bit becomes x
+  const bw = (s.length >= w ? s.slice(s.length - w) : s.padStart(w, b[0])).toLowerCase(), I = G.WaveFW && G.WaveFW.internal;
+  return w > 1 && !/^x+$|^z+$/.test(bw) && I && I.mixedBits(bw) ? "'b" + bw : h;
 }
 const truthy = v => (typeof v === 'number' ? v !== 0 : /^h/i.test(v) ? /[1-9a-f]/i.test(v) : /1/.test(String(v)));
 const MAX_TIMES = 2e6;

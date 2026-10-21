@@ -287,7 +287,8 @@ command('picture', 'format? from? to? rows?', 'the waves as a picture: png (base
   if (a.to != null) o.to = cmdTime(v, a.to, 'to');
   if (a.rows != null) o.rows = ['screen', 'all', 'picked'].includes(a.rows) ? (a.rows === 'screen' ? undefined : a.rows) : sigsOf(v, pickRows(v, a.rows,
     { groups: true })).map(r => v.rowsL.find(x => x === r) || r);
-  if (f === 'wavedrom') return { wavedrom: v.toWaveDrom(o.from, o.to, Array.isArray(o.rows) ? o.rows : null) };
+  if (f === 'wavedrom') { const wavedrom = v.toWaveDrom(o.from, o.to, Array.isArray(o.rows) ? o.rows : null);   // cut: the first cycles only
+    return v.wdCut ? { wavedrom, cut: { cycles: v.wdCut.cells, to: v.wdCut.to } } : { wavedrom }; }
   if (f === 'svg') return { svg: v.toSVG(o) };
   if (f !== 'png') fail('format: png, svg or wavedrom');
   const bl = await v.toPNG(o, 1), buf = new Uint8Array(await bl.arrayBuffer());

@@ -369,7 +369,7 @@ field. Navigation follows Questa's wave window, the lists and the text vim: a se
 | click | cursor (on an edge of that signal within 8 px, else a round time at the zoom; alt+click: no edge) + select the signal | `↑ ↓`, `j k` | select the previous / next signal (in the names column: the arrows) |
 | `gg` / `G` | select the first / last signal | `PgUp PgDn` | scroll the rows a page |
 | `Tab` / shift+`Tab` | the next / previous edge of the selected signal (as in Questa; ◀ ▶, `]e [e`) | `e` | edge kind (any, rising, falling, **= value**, **X / Z**) |
-| edge kind **= value** | a field: `0x40`, `'h40`, `8'd64`, `64`, `-3`, `'b101` or a text (an enum label: `ACCESS`); Enter / ◀ ▶ / Tab: the next / previous time the selected signal becomes it (none selected: any shown signal) | edge kind **X / Z** | the next / previous x or z (a bus with x / z bits too) of the selected signal or of any shown one: the first X after reset from the reset's edge |
+| edge kind **= value** | a field: `0x40`, `'h40`, `8'd64`, `64`, `-3`, `'b101`, a literal with x / z compared bit for bit (`'b10x1`, `8'hx5`: x and z apart) or a text (an enum label: `ACCESS`); Enter / ◀ ▶ / Tab: the next / previous time the selected signal becomes it (none selected: any shown signal) | edge kind **X / Z** | the next / previous x or z (a bus with x / z bits too) of the selected signal or of any shown one: the first X after reset from the reset's edge |
 | shift+`← →` | move the cursor a hundredth of the view | the pointer on a signal | its value there, the change into it and the next one (tooltip) |
 | `/`, ctrl+F | find (the bar scrolled away: the find group floats over the waves; ✕ or Esc puts it back) | `n N`, `*` `#` | next / previous match; find the selected signal's name and go to its next / previous match |
 | `m` | bookmark at the cursor | `]m [m` | the next / previous bookmark |
@@ -399,7 +399,9 @@ filled, the background as it was); the rest is dimmed but stays visible. Several
 toggles next to the field change that, as in grep or VS Code: **Aa** (alt+C) the case matters; **Full** (alt+W) a word
 is the whole name (`PSEL` finds `PSEL`, not `PSELx`; `u_slave.ready`: the end of a full path); **.\*** (alt+R) the query is a
 regular expression (JavaScript, as `grep -E`: `^s_.*valid$`, `data\[3\]`, `\<ready\>` as in vim) tried on the name,
-the dump's leaf and the full path (`tx_.*\.valid`); a bad one says so in the count. Matched
+the dump's leaf and the full path (`tx_.*\.valid`); a bad one says so in the count. A signal of the dump the page left out
+(`"show": false` in the config, or past the `dumpBudget` of a VCD opened in the page) is not lost silently: the count says
+**no match · 1 not in the page**, and its tooltip names them and how to bring them in. Matched
 letters are underlined; Enter, ‹ › or `n N` step through the matches, each scrolled to the middle of the waves. **Highlight** dims the rest, **Open** folds every
 module without a match, **Paint** colours the found signals and the highlighted ones (ctrl+click or the mark; a highlighted module: its signals; neither: the selected signal; kept in the browser), **Copy** copies their paths.
 
@@ -452,7 +454,8 @@ does the same and opens a menu: **Zoom to the range**, **Bookmarks at its ends**
 on the screen, or of the highlighted rows when there are some, drawn as the viewer shows them (folding, colours,
 bookmarks, cursor) with names and axis, the page's colours put in, so the SVG opens anywhere; **Save as WaveDrom** /
 **Copy WaveDrom** — the same signals over the range as WaveJSON (`<title>.wavedrom.json`): one cell per cycle of their
-clock (a 1-bit `*clk*` among them or in their modules, else the shortest time between changes), each cell the value
+clock (a 1-bit `*clk*` among them or in their modules, else the shortest time between changes; at most 2048 cycles —
+a longer range is cut there, and the head, the foot and the toast say where), each cell the value
 after the cycle's edge — what holds during the cycle, as `vcd2wavedrom.py --clock` writes it (the assertions and the
 bus decoders read the value just before the edge, as a simulator samples: the same data, one cycle apart at a change
 on the edge), buses as `=` with
@@ -635,7 +638,7 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
 | `wave_values` | the values of signals at one or more times (after the changes at that time, or `side: "before"`) |
 | `wave_changes` | the value at the start of a window and the changes in it, `limit` per signal (`more`, `next_from`: how to go on) |
 | `wave_sample` | a table per clock cycle (`cycle`, `t`, the values sampled just before the edge, as SVA samples), by default only the cycles where a value changes |
-| `wave_find` | `expr`: an SV expression or sequence matched on every clock cycle by the sva engine (`req && !ack`, `req ##[1:3] ack`, `$rose(x)`); or a signal's edges (`rise`, `fall`, `change`) or value (a number, `'h40`, an enum label) at their exact times; the count and the first matches |
+| `wave_find` | `expr`: an SV expression or sequence matched on every clock cycle by the sva engine (`req && !ack`, `req ##[1:3] ack`, `$rose(x)`); or a signal's edges (`rise`, `fall`, `change`) or value (a number, `'h40`, `'b10x1` bit for bit, an enum label) at their exact times; the count and the first matches |
 | `wave_stats` | over a window: a bit's rises, falls, high time, pulse widths and period; a bus's changes, distinct values, the longest-held ones, minimum and maximum |
 | `sva_check` | assertion files and / or text evaluated over the dump in a scope: the failed ones with their first failures (`cycle`, `t`, `start_cycle`, `start_t`, the reason), passed, vacuous, not evaluated (names missing), the covers |
 | `wave_page` | a viewer page (`out` `.html`) or WaveJSON (`.json`) of signals over a window, assertions bound, to show a person |
@@ -738,7 +741,7 @@ WaveDrom 3.5.0.
 | Key | Meaning |
 |---|---|
 | `time: {t0, cycle, t1?, skip?}` | cycle *c* starts at `t0 + c·cycle` ps, so the axis shows real time; `skip: [[k, n]]` = the `\|` cell at index *k* stands for *n* cycles |
-| `signal[i].tv: [[t, v], …]` | exact transitions in model time (ps when `time` is set). 1-bit: `0 1 x z`; bus: hex. Takes precedence over `wave` |
+| `signal[i].tv: [[t, v], …]` | exact transitions in model time (ps when `time` is set). 1-bit: `0 1 x z`; bus: hex (`x` / `z` a nibble all unknown, one letter the whole bus), or `'b` and the bus's binary digits when a nibble mixes x / z with known bits (`'b10x1`: hex would make bit 0 unknown; labels still show the hex, `x` for that nibble, and radix `bin` the bits). Takes precedence over `wave` |
 | `signal[i].width / enum / radix / style / color / fill` | bus width, value labels (`{"0": "IDLE"}`), radix, edge style, colours |
 | `signal[i].path`, `same` | full hierarchical path (the name's tooltip); `"same": "tb.clk"` = the `tv` of the signal with that `path` (one net seen at several levels is stored once) |
 | `config: {…}` | the settings of this diagram (see *Settings*) |
@@ -748,7 +751,8 @@ WaveDrom 3.5.0.
 | `jumps: [{t \| cycle, span, label}]`, `cursor` | jump buttons and the initial cursor |
 | `sva: {files?, bind, notes?, exprs?}` | assertions (`wavefw/sva.js`): `files: [{name, path, source, parsed?}]` (`parsed`: `sva parse --json`, else the page parses), `bind: [{assert, scope, results?}]` (`scope` an instance path, `""` the top of the diagram; `results` from `sva eval`, else evaluated when the page opens), `exprs: ["expr" \| {expr, scope}]` (rows ƒ, valued in the page) |
 | `meta.scope` | the converter's `--scope`: the instance the top rows belong to |
-| `signal[i].width`, `raw` (clock-sampled) | a bus's width, and the hex value of each `data` label when the labels do not read back as values (`bin` `signed` `oct` `ascii` radix, x digits): what the page's assertions sample |
+| `meta.omitted` | `{why, paths: {scope: [names]}}`: the dump's signals not in the page (`why`: `config`, its `"show": false`; `dumpBudget`, a VCD opened in the page); the find names them |
+| `signal[i].width`, `raw` (clock-sampled) | a bus's width, and the hex value (or `'b` and the bits, as in `tv`) of each `data` label when the labels do not read back as values (`bin` `signed` `oct` `ascii` radix, x digits): what the page's assertions sample |
 
 A page made by `mkhtml.py` holds the assertion files once, in `window.SVA = {files: [...], notes: [...]}` (before
 `wavefw/sva.wasm.js` and `wavefw/sva.js`); each view keeps its own `sva.bind`.

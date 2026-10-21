@@ -32,10 +32,13 @@ function lastBefore(n, at, t, strict = false) {
   return ans;
 }
 const lastLE = (a, t) => lastBefore(a.length, i => a[i].t, t);   // the last transition with time <= t
+// the rounding step of a time t in ps: a few hundred ulps of a double (0.01 ps at 1 s), so a step from the cursor never
+// jumps over an event a picosecond away on a long run (1e-9 · t was 1 ps at 1 ms)
+const timeEps = t => Math.max(1e-10, 1e-14 * Math.abs(t));   // 1e-10 ps: under a zeptosecond, the finest VCD unit
 // the index of the next (dir > 0) or previous item of the sorted times beyond t by more than a rounding step, round
 // the ends; -1: no item. ]m [m, ]t [t, ]f [f and the ƒ expression's ◀ ▶ step by it
 function stepTo(times, t, dir) {
-  const n = times.length, eps = 1e-9 * Math.max(1, Math.abs(t));
+  const n = times.length, eps = timeEps(t);
   if (!n) return -1;
   if (dir > 0) { for (let i = 0; i < n; i++) if (times[i] > t + eps) return i; return 0; }
   for (let i = n - 1; i >= 0; i--) if (times[i] < t - eps) return i;
@@ -237,7 +240,8 @@ function fuzzy(q, s, cs = false) {   // cs: the case matters
 // of the full path at a dot (Full); re a RegExp instead of the words (.*), tried on the shown name, the leaf, the full path.
 function findRow(r, terms, M, o = {}) {
   const name = r.name, full = r.full || name;
-  const scope = r.anc.length ? r.anc.map(id => (M.groups[id] || {}).name || '').join('.') : full.includes('.') ? full.slice(0, full.lastIndexOf('.')) : '';
+  const scope = r.anc.length ? r.anc.map(id => (M.groups[id] || {}).name || '').join('.') : r.scope != null ? r.scope : full.includes('.') ?
+    full.slice(0, full.lastIndexOf('.')) : '';
   const leaf = r.path ? r.path.slice(r.path.lastIndexOf('.') + 1) : '';
   const span = (a, n) => Array.from({ length: n }, (_, i) => a + i);
   if (o.re) {
@@ -326,7 +330,8 @@ function toFloat(n, w) {
 }
 function decode(sig, v, radix) {
   if (v === undefined) return '?';
-  if (/[xz]/i.test(v)) return v;
+  if (/[xz]/i.test(v)) return (sig.radix || radix) === 'bin' ? [...v].map(c => (/[xz]/i.test(c) ? c.repeat(4) : parseInt(c, 16).toString(2)
+    .padStart(4, '0'))).join('').slice(-(sig.width || 1)) : v;   // whole nibbles x / z: bin spells them out
   const e = sig.enum || ENUMS[sig.full] || ENUMS[sig.name];
   if (e) { const n = parseInt(v, 16); if (e[n] !== undefined) return e[n]; }
   const w = sig.width || 1, big = () => BigInt('0x' + (v || '0')) & ((1n << BigInt(w)) - 1n);   // a value wider than the signal: its low bits
@@ -353,7 +358,7 @@ function decode(sig, v, radix) {
 }
 // bus label of transition o with the radix in effect (re-decoded only when the radix changes)
 const vtext = (s, o, radix) => o.raw == null ? o.v : (s.radix || radix || 'auto') === o.rk ? o.vr : (o.rk = s.radix || radix || 'auto',
-  o.vr = decode(s, o.raw, o.rk));
+  o.vr = o.bits && o.rk === 'bin' ? o.bits : decode(s, o.raw, o.rk));
 
 /* ---------------- parser: WaveJSON -> model ---------------- */
 function parseText(txt) {
@@ -392,7 +397,10 @@ function parseWave(s, C) {
     if ('pnPN'.includes(ch)) { clk = ch; clock(c0, ch); }
     else if (ch === '0' || ch === '1' || ch === 'u' || ch === 'd' || ch === 'x' || ch === 'z') level(c0, ch, false, false);
     else if ('hlHL'.includes(ch)) level(c0, 'hH'.includes(ch) ? '1' : '0', true, ch === 'H' || ch === 'L');
-    else { const k = di++; push(c0, { k: '=', v: data[k] ?? '', hex: Array.isArray(s.raw) ? s.raw[k] : undefined, c: ch === '=' ? 2 : +ch, s: false }); }
+    else {
+      const k = di++, hx = Array.isArray(s.raw) ? s.raw[k] : undefined, b = typeof hx === 'string' && hx.startsWith("'b") ? hx.slice(2) : null;
+      push(c0, Object.assign({ k: '=', v: data[k] ?? '', hex: b ? hexOf(b) : hx, c: ch === '=' ? 2 : +ch, s: false }, b ? { bits: b } : {}));
+    }
   }
   return { tr, gaps, end: wave.length * per - ph };
 }
@@ -400,8 +408,9 @@ function parseWave(s, C) {
 function bitsOf(o, w) {
   if (!o) return 'x'.repeat(w);
   if (o.k !== '=') return (o.k === '0' || o.k === '1' || o.k === 'z' ? o.k : 'x').repeat(w);
+  if (o.bits) return o.bits.length >= w ? o.bits.slice(o.bits.length - w) : o.bits.padStart(w, '0');   // known bits among x / z
   // WaveDrom data: 0x.. or a number
-  const v = String(o.v ?? ''), h = String(o.raw ?? (/^0x[0-9a-f_]+$/i.test(v) ? v.slice(2).replace(/_/g,
+  const v = String(o.v ?? ''), h = String(o.raw ?? o.hex ?? (/^0x[0-9a-f_]+$/i.test(v) ? v.slice(2).replace(/_/g,
     '') : /^\d+$/.test(v) ? BigInt(v).toString(16) : '')).toLowerCase();
   if (!/^[0-9a-fxz]+$/.test(h)) return 'x'.repeat(w);
   const b = [...h].map(c => (c === 'x' || c === 'z' ? c.repeat(4) : parseInt(c, 16).toString(2).padStart(4, '0'))).join('');
@@ -411,15 +420,22 @@ const hexOf = bits => { const p = bits.padStart(Math.ceil(bits.length / 4) * 4, 
   for (let i = 0; i < p.length; i += 4) { const n = p.slice(i, i + 4); out += /x/.test(n) ? 'x' : /z/.test(n) ? (n === 'zzzz' ? 'z' : 'x') : parseInt(n,
     2).toString(16); }
   return out; };
+// true when hex would lose bits: a nibble with an x or z that is not all x or all z ("10x1": hex x)
+const mixedBits = bits => { const p = bits.padStart(Math.ceil(bits.length / 4) * 4, '0');
+  for (let i = 0; i < p.length; i += 4) { const n = p.slice(i, i + 4); if (/[xz]/.test(n) && n !== 'xxxx' && n !== 'zzzz') return true; }
+  return false; };
+// a vector's value from its bits: x / z when all of them are, else its hex, the bits kept too when the hex loses some
+const bitsVal = bits => (/^x+$/.test(bits) ? { k: 'x' } : /^z+$/.test(bits) ? { k: 'z' } : Object.assign({ k: '=', raw: hexOf(bits) },
+  mixedBits(bits) ? { bits } : {}));
 // a struct's whole value: its parts' bits put together (the first part the MSB) at every change of any of them
 function joinBits(g, parts) {
   const w = parts.reduce((n, p) => n + (p.width || 1), 0), ts = [...new Set(parts.flatMap(p => p.tr.map(o => o.t)))].sort((a, b) => a - b), tr = [];
   const sig = { type: 'sig', name: g.name, full: g.path, path: g.path, depth: g.depth, anc: g.anc, width: w, tr, gaps: [], struct: true, src: {} };
   for (const t of ts) {
     const bits = parts.map(p => bitsOf(p.tr[lastLE(p.tr, t)], p.width || 1)).join('');
-    const o = /^x+$/.test(bits) ? { k: 'x' } : /^z+$/.test(bits) ? { k: 'z' } : { k: '=', raw: hexOf(bits), c: 2 };
-    if (o.k === '=') { o.v = decode(sig, o.raw); o.bad = /[xz]/.test(o.raw); }
-    const L = tr[tr.length - 1]; if (L && L.k === o.k && L.raw === o.raw) continue;
+    const o = bitsVal(bits);
+    if (o.k === '=') { o.c = 2; o.v = decode(sig, o.raw); o.bad = /[xz]/.test(o.raw); }
+    const L = tr[tr.length - 1]; if (L && L.k === o.k && L.raw === o.raw && L.bits === o.bits) continue;
     o.t = t; tr.push(o);
   }
   return sig;
@@ -435,15 +451,15 @@ function fieldRow(sig, f, depth, anc) {
     full: sig.full + '.' + f.name, field: [msb, lsb], tr: [], gaps: [] };
   for (const o of sig.tr) {
     const b = bitsOf(o, sig.width), fb = b.slice(b.length - 1 - msb, b.length - lsb);
-    const n = w === 1 ? { k: /^[01z]$/.test(fb) ? fb : 'x' } : /^x+$/.test(fb) ? { k: 'x' } : /^z+$/.test(fb) ? { k: 'z' } : { k: '=', raw: hexOf(fb) };
+    const n = w === 1 ? { k: /^[01z]$/.test(fb) ? fb : 'x' } : bitsVal(fb);
     if (n.k === '=') { n.v = decode(r, n.raw); n.bad = /[xz]/.test(n.raw); const e = r.enum || ENUMS[r.full] || ENUMS[r.name], k = parseInt(n.raw, 16);
       n.c = e && !isNaN(k) ? 3 + (k % 7) : 2; }
-    const L = r.tr[r.tr.length - 1]; if (L && L.k === n.k && L.raw === n.raw) continue;
+    const L = r.tr[r.tr.length - 1]; if (L && L.k === n.k && L.raw === n.raw && L.bits === n.bits) continue;
     n.t = o.t; r.tr.push(n);
   }
   return r;
 }
-function parseTV(s, sig) { // extension: exact transitions [[time, value], …]; bit values 0/1/x/z, bus values hex;
+function parseTV(s, sig) { // extension: exact transitions [[time, value], …]; bit values 0/1/x/z, bus values hex or "'b" + bits;
   // "kind": "real" / "string": the values are texts shown as they are (a real's number, a string), null unknown
   const tv = s.tv || [], text = s.kind === 'real' || s.kind === 'string';
   sig.width = num(s.width) || (!text && tv.every(([, v]) => /^[01xz]$/i.test(String(v))) ? 1 : 8); sig.tv = true;
@@ -454,13 +470,14 @@ function parseTV(s, sig) { // extension: exact transitions [[time, value], …];
     else if (sig.width === 1) o = { k: v === '1' ? '1' : v === '0' ? '0' : v === 'z' ? 'z' : 'x' };
     else if (/^x+$/.test(v)) o = { k: 'x' };
     else if (/^z+$/.test(v)) o = { k: 'z' };
-    else {
-      const e = sig.enum || ENUMS[sig.full] || ENUMS[sig.name], n = parseInt(v, 16);
-      o = { k: '=', raw: v, v: decode(sig, v), bad: /[xz]/.test(v),
+    else {   // hex, or "'b" and binary digits: known bits among x / z (vcdHex)
+      const b = /^'b[01xz]+$/.test(v) ? v.slice(2) : null, h = b ? hexOf(b) : v, e = sig.enum || ENUMS[sig.full] || ENUMS[sig.name], n = parseInt(h, 16);
+      o = { k: '=', raw: h, v: decode(sig, h), bad: /[xz]/.test(h),
         c: /^[2-9]$/.test(String(s.color)) ? +s.color : (e && !isNaN(n) ? 3 + (n % 7) : 2) };
+      if (b) o.bits = b;
     }
     const L = tr[tr.length - 1];
-    if (L && L.k === o.k && L.raw === o.raw && L.v === o.v) continue;
+    if (L && L.k === o.k && L.raw === o.raw && L.v === o.v && L.bits === o.bits) continue;
     o.t = num(t); tr.push(o);
   }
   return { tr, gaps: [] };
@@ -567,6 +584,12 @@ const EDGE_KINDS = { any: '↕ edge', rise: '↑ rise', fall: '↓ fall', value:
 // | null, neg, text}
 function parseWant(str) {
   const s = String(str ?? '').trim(); if (!s) return null;
+  const q = /^(\d*)'([bh])([0-9a-fxz_]+)$/i.exec(s), d = q && q[3].replace(/_/g, '').toLowerCase();   // 'b10x1, 8'hx5: the exact bits, x and z apart
+  if (q && /[xz]/.test(d) && (q[2].toLowerCase() === 'h' || /^[01xz]+$/.test(d))) {
+    let b = q[2].toLowerCase() === 'b' ? d : [...d].map(c => (/[xz]/.test(c) ? c.repeat(4) : parseInt(c, 16).toString(2).padStart(4, '0'))).join('');
+    const n = +q[1]; if (n) b = b.length >= n ? b.slice(b.length - n) : b.padStart(n, /[xz]/.test(b[0]) ? b[0] : '0');   // 4'bx1: xxx1, then 0s to the bus
+    return { n: null, neg: false, text: s, bits: b, sized: !!n };
+  }
   const m = /^(-)?(?:\d*'s?([hdbo])|0([xbo]))?([0-9a-f_]+)$/i.exec(s);
   if (m && !(m[2] || m[3] ? false : /[a-f]/i.test(m[4]))) {
     const base = { h: 16, x: 16, d: 10, b: 2, o: 8 }[(m[2] || m[3] || 'd').toLowerCase()], digits = m[4].replace(/_/g, '');
@@ -576,6 +599,8 @@ function parseWant(str) {
   return { n: null, neg: false, text: s.replace(/^"|"$/g, '') };
 }
 function valueIs(s, o, want, radix) {   // transition o of signal s holds the value searched for
+  if (want && want.bits) { const w = s.width || 1, b = want.bits, e = !want.sized && /[xz]/.test(b[0]) ? b[0] : '0';   // a four-state literal: bit for bit
+    return bitsOf(o, w) === (b.length >= w ? b.slice(b.length - w) : b.padStart(w, e)); }
   if (!want || o.k === 'x' || o.k === 'z') return false;
   if (want.n != null) {
     const w = BigInt(s.width || 1), n = want.neg ? ((1n << w) - want.n) & ((1n << w) - 1n) : want.n;   // -3: two's complement in the signal's width
@@ -594,15 +619,15 @@ function edgeOk(s, a, i, kind, want, radix) {
   return kind === 'rise' ? a[i].k === '1' && a[i - 1].k !== '1' : a[i].k === '0' && a[i - 1].k !== '0';
 }
 function findEdge(s, t, dir, kind, want, radix) { // time of the next (dir 1) / previous (-1) edge of s strictly after / before t, or null
-  const a = s.tr, eps = 1e-9 * Math.max(1, Math.abs(t));
+  const a = s.tr, eps = timeEps(t);
   if (dir > 0) { for (let i = lastLE(a, t + eps) + 1; i < a.length; i++) if (edgeOk(s, a, i, kind, want, radix)) return a[i].t; }
   else for (let i = lastLE(a, t - eps); i >= 0; i--) if (a[i].t < t - eps && edgeOk(s, a, i, kind, want, radix)) return a[i].t;
   return null;
 }
 function edgeGlyph(s, t) { // ↑ / ↓ / value of the transition of s exactly at t ('' if there is none)
   if (!s) return '';
-  const a = s.tr, i = lastLE(a, t + 1e-9 * Math.max(1, Math.abs(t))), o = a[i];
-  if (!o || i === 0 || Math.abs(o.t - t) > 1e-9 * Math.max(1, Math.abs(t))) return '';
+  const a = s.tr, i = lastLE(a, t + timeEps(t)), o = a[i];
+  if (!o || i === 0 || Math.abs(o.t - t) > timeEps(t)) return '';
   return o.k === '=' ? '= ' + o.v : o.k === '1' ? '↑' : o.k === '0' ? '↓' : o.k;
 }
 // a clock by its name: a 1-bit *clk* / *clock* that toggles; the times it rises (cached per row)

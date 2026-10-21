@@ -10,8 +10,9 @@ class Values(unittest.TestCase):
     def test_norm_literals(self):
         self.assertEqual(V.norm("8'ha5", 8), 'a5')
         self.assertEqual(V.norm("1'h1", 1), '1')
-        self.assertEqual(V.norm("4'b0x01", 4), 'x')
-        self.assertEqual(V.norm("8'b0000x001", 8), '0x')
+        self.assertEqual(V.norm("4'b0x01", 4), "'b0x01")          # a nibble of known bits and x: its binary digits
+        self.assertEqual(V.norm("8'b0000x001", 8), "'b0000x001")
+        self.assertEqual(V.norm("8'b1010xxxx", 8), 'ax')            # whole nibbles x: hex loses nothing
         self.assertEqual(V.norm("8'd64", 8), '40')
         self.assertEqual(V.norm("6'o17", 6), '0f')
 
@@ -19,16 +20,16 @@ class Values(unittest.TestCase):
         self.assertEqual(V.norm("8'bxxxxxxxx", 8), 'x')            # all x: one letter, as the page reads it
         self.assertEqual(V.norm("12'bzzzzzzzzzzzz", 12), 'z')
         self.assertEqual(V.norm("8'bzzzz0000", 8), 'z0')            # a nibble all z: z
-        self.assertEqual(V.norm("8'bzz000000", 8), 'x0')            # a partial z: x
+        self.assertEqual(V.norm("8'bzz000000", 8), "'bzz000000")   # a partial z: the bits (GTKWave's hex: x0)
         self.assertEqual(V.norm("8'hxx", 8), 'x')                    # in hex, the same
 
     def test_bits_extension_and_slice(self):
         self.assertEqual(V.bits(b'1', 8, None), '01')
-        self.assertEqual(V.bits(b'x1', 8, None), 'xx')               # left-extended with x
+        self.assertEqual(V.bits(b'x1', 8, None), "'bxxxxxxx1")       # left-extended with x; bit 0 known
         self.assertEqual(V.bits(b'z', 12, None), 'z')
-        self.assertEqual(V.bits(b'zz1', 12, None), 'zzx')
+        self.assertEqual(V.bits(b'zz1', 12, None), "'bzzzzzzzzzzz1")
         self.assertEqual(V.bits(b'10100101', 8, (5, 2)), '9')
-        self.assertEqual(V.bits(b'1u0h', 4, None), 'x')             # VHDL U: unknown
+        self.assertEqual(V.bits(b'1u0h', 4, None), "'b1x01")         # VHDL U: unknown
         self.assertEqual(V.bits(b'01hl', 4, None), '6')
 
     def test_bits_texts(self):
@@ -41,7 +42,9 @@ class Values(unittest.TestCase):
                  (('05', 8, None, 'bin'), '00000101'), (('08', 8, None, 'oct'), '0o10'), (('4142', 16, None, 'ascii'), '"AB"'),
                  (('3c00', 16, None, 'float'), '1'), (('3fc00000', 32, None, 'float'), '1.5'), (('80', 8, None, 'sq4'), '-8'),
                  (('18', 8, None, 'q4'), '1.5'), (('ff', 8, None, 'sq4'), '-0.0625'), (('f' * 15, 60, None, 'q4'), '72057594037927935.9375'), (('05', 4, None, None), '5'),
-                 (('5', 4, {5: 'IDLE'}, None), 'IDLE'), (('x1', 8, None, 'hex'), 'x1'), (('ff', 8, None, 'unsigned'), '255')]
+                 (('5', 4, {5: 'IDLE'}, None), 'IDLE'), (('x1', 8, None, 'hex'), 'x1'), (('ff', 8, None, 'unsigned'), '255'),
+                 (("'b10x1", 4, None, None), 'x'), (("'b10x1", 4, None, 'bin'), '10x1'), (("'b1x0101", 6, None, 'hex'), 'x5'),
+                 (('xz', 8, None, 'bin'), 'xxxxzzzz'), (('x1', 6, None, 'bin'), 'xx0001')]
         for args, want in cases:
             with self.subTest(args):
                 self.assertEqual(V.label(*args), want)
@@ -146,7 +149,7 @@ class Convert(unittest.TestCase):
 
     def test_vhdl_and_body_comment(self):
         v = H.wavejson_of(H.fixture('vhdl'))
-        self.assertEqual(v['top.v']['tv'], [[0, 'x'], [10000, '6'], [20000, 'x']])
+        self.assertEqual(v['top.v']['tv'], [[0, 'x'], [10000, '6'], [20000, "'b1xx0"]])   # VHDL U W - unknown, the rest kept
         c = H.wavejson_of(H.fixture('body_comment'))
         self.assertEqual(c['tb.s']['tv'], [[0, '0'], [10000, '1']])
 
@@ -220,6 +223,25 @@ class Convert(unittest.TestCase):
     def test_huge_time_written_as_int(self):
         s = H.wavejson_of(H.fixture('huge2'))['tb.s']
         self.assertEqual(s['tv'][1][0], 9007199254740993)
+
+    def test_omitted_signals_in_meta(self):
+        """A catalog's "show": false: in the dump, not in the page; meta.omitted names them by scope (the page's find says so)."""
+        with H.tmp() as d:
+            cfg = os.path.join(d, 'c.json')
+            with open(cfg, 'w') as f:
+                json.dump({'waves': H.fixture('scopes'), 'exact': True, 'signals': {'tb.blk.a': {}, 'tb.fk.b': {'show': False},
+                                                                                    'tb.fn.c': {'show': False}}}, f)
+            rc, out, err = H.run_tool('vcd2wavedrom', '--config', cfg)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out)['meta']['omitted'], {'why': 'config', 'paths': {'tb.fk': ['b'], 'tb.fn': ['c']}})
+        with H.tmp() as d:   # paths under --scope: the dump's own; one the dump does not have is not said to be in it
+            cfg = os.path.join(d, 'c.json')
+            with open(cfg, 'w') as f:
+                json.dump({'waves': H.fixture('scopes'), 'exact': True, 'scope': 'tb', 'hierarchy': True,
+                           'signals': {'blk.a': {}, 'fk.b': {'show': False}, 'not_in_dump': {'show': False}}}, f)
+            rc, out, err = H.run_tool('vcd2wavedrom', '--config', cfg)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out)['meta']['omitted'], {'why': 'config', 'paths': {'tb.fk': ['b']}})
 
     def test_wide_vector(self):
         self.assertEqual(H.wavejson_of(H.fixture('wide'))['tb.w']['tv'][0][1], 'f' * 24)

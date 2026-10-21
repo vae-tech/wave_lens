@@ -112,6 +112,18 @@ class Dump(unittest.TestCase):
         self.assertIn('did not evaluate', self.error('wave_find', expr='s_tvalid &&', scope='tb.dut'))
 
 
+class Values(unittest.TestCase):
+    def test_bits_value_four_state(self):
+        """A literal with x / z: the stream's form of those bits (hex when no nibble mixes them), as the converter writes it."""
+        self.assertEqual(W.bits_value("'b10x1", 4), "'b10x1")
+        self.assertEqual(W.bits_value("4'b10z1", 4), "'b10z1")
+        self.assertEqual(W.bits_value("8'hx5", 8), 'x5')
+        self.assertEqual(W.bits_value("'bx1", 4), "'bxxx1")
+        self.assertEqual(W.bits_value("'h1f", 8), '1f')
+        self.assertIsNone(W.bits_value("'b10q1", 4))
+        self.assertEqual(W.bits_value("4'bx1", 8), "'b0000xxx1")   # sized: x to its size, then 0s
+
+
 class Views(unittest.TestCase):
     """view_edit / view_get on a page's file, and live through the bridge with a page played here (its stream, hello,
     replies): the token, the Origin, a page that goes."""

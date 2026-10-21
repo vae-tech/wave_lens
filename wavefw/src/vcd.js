@@ -120,6 +120,9 @@ function vcdToWave(text, opts = {}) {
   const end = Math.max(t1, (t0 ?? 0) + 1);
   const doc = { signal: out, head: { text: name }, time: { t0: t0 ?? 0, t1: end, cycle: (end - (t0 ?? 0)) / 40, unit: 'ps' }, config: {} };
   if (Object.keys(scopes).length) doc.scopes = scopes;
+  const omitted = {};   // past the budget: in the dump, not in the page (its find says so), by scope
+  for (const v of vars) if (!keep.has(v)) (omitted[v.scope.join('.')] ||= []).push(v.name);
+  if (Object.keys(omitted).length) doc.meta = { omitted: { why: 'dumpBudget', paths: omitted } };
   return { doc, shown: shownVars.length, total: vars.length, changes: used };
 }
 // VHDL's nine values in VCD digits: U W - unknown, H L weak 1 / 0
@@ -131,5 +134,5 @@ function vcdHex(b, w) {
   else if (b.length > w) b = b.slice(b.length - w);
   if (w === 1) return b;
   if (/^x+$/.test(b)) return 'x'; if (/^z+$/.test(b)) return 'z';
-  return hexOf(b);
+  return mixedBits(b) ? "'b" + b : hexOf(b);   // a nibble of known bits and x / z: its binary digits (hex would make it x)
 }

@@ -39,7 +39,8 @@
   in the last line of the bar.</figcaption></figure>
 <p>The VCD is read in the browser: its signals grouped by scope (struct, union and interface scopes marked), with their exact
   transitions. A large dump is cut to the <code>dumpBudget</code> setting (3 000 000 value changes by default): the scope levels nearest the
-  top are kept first, and the toast in the title line says how many signals came in. An FST is binary and is not read in the page: convert
+  top are kept first, and the toast in the title line says how many signals came in; the find counts the ones left out
+  (<b>no match · 1 not in the page</b>, their names in its tooltip), so a missing signal is not taken for one the simulator did not dump. An FST is binary and is not read in the page: convert
   it with <code>sva vcd x.fst --out x.vcd</code> (the CLI in <code>bin/</code>, or GTKWave's <code>fst2vcd x.fst &gt; x.vcd</code>), or build a page
   with <code>make html WAVES=x.fst</code>.</p>
 <figure><img src="img/viewer-open-vcd.png" alt="The APB example's VCD opened in viewer.html: the apb_tb scope as a group, ⟳ next to Open…"
@@ -162,7 +163,8 @@
   <li>The list between ◀ and ▶ picks the kind (<kbd>e</kbd> cycles it): <b>↕ edge</b> (any change; every value change on a bus),
     <b>↑ rise</b>, <b>↓ fall</b>, <b>= value</b>, <b>✕ X / Z</b>.</li>
   <li><b>= value</b> opens a field: <code>0x40</code>, <code>'h40</code>, <code>8'd64</code>, <code>64</code>, <code>-3</code>,
-    <code>'b101</code>, or a text such as an enum label (<code>ACCESS</code>). <kbd>Enter</kbd> / <kbd>shift+Enter</kbd> (or ▶ ◀) go to the
+    <code>'b101</code>, a literal with x / z compared bit for bit (<code>'b10x1</code>, <code>8'hx5</code>), or a text such as an enum
+    label (<code>ACCESS</code>). <kbd>Enter</kbd> / <kbd>shift+Enter</kbd> (or ▶ ◀) go to the
     next / previous time the selected signal becomes that value (none selected: any shown signal).</li>
   <li><b>X / Z</b> finds the next / previous x or z of the selected signal (a bus with x or z bits too) or of any shown one: the first X
     after reset, from the reset's edge.</li>
@@ -201,7 +203,8 @@
   <tr><td>Save image as PNG / SVG</td><td>a file named after the view's title. Drawn as the viewer shows the waves (folding, colours,
     bookmarks, cursor) with the names and the axis, the page's colours written in, so the SVG opens anywhere</td></tr>
   <tr><td>Save as WaveDrom / Copy WaveDrom</td><td>the same signals over the range as WaveJSON (<code>&lt;title&gt;.wavedrom.json</code>):
-    one cell per cycle of their clock, buses as <code>=</code> with their values in the radix shown, a group per module; see
+    one cell per cycle of their clock (at most 2048: a longer range is cut there, said in the foot and the toast), buses as
+    <code>=</code> with their values in the radix shown, a group per module; see
     <a href="wavedrom.html">WaveDrom</a></td></tr>
   <tr><td>Gaps ▸</td><td>a submenu: the picture and WaveDrom leave out the idle stretches of a long range. The whole story with pictures
     is in <a href="gaps.html">Gaps</a></td></tr>

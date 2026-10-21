@@ -104,6 +104,9 @@ hand-written config, assertions (one deliberately wrong, so a failure trace show
 (or `make examples`, all three) builds its VCD, FST and two pages: `<ex>.html` from the config and `<ex>_all.html` from
 a config that `mkconfig.py` makes from the dump (the whole hierarchy). [`demo`](examples/demo) is the Manchester
 transmitter behind [`docs/index.html`](docs/index.html) (`make demo`).
+[`test_video`](examples/test_video) binds the checkers of a CoaXPress device IP (and a demo of the operators, with
+deliberate failures) to its stream-video dump, which is not in git: with your `test_stream_video.fst` next to the
+config, `make html WAVES=examples/test_video/test_stream_video.fst`.
 
 ## Documentation
 
@@ -117,7 +120,7 @@ transmitter behind [`docs/index.html`](docs/index.html) (`make demo`).
 | [`docs/SV_STYLE.md`](docs/SV_STYLE.md) | the SystemVerilog style of the project |
 | [`docs/reviews/`](docs/reviews) | the reviews of the stages with their findings and the commits that closed them |
 | [`prompts/`](prompts/00-roadmap.md) | the roadmap as a series of prompts |
-| [`CHANGELOG.md`](CHANGELOG.md) | every version (0.13 now; two numbers, each a tagged merge into `main`) |
+| [`CHANGELOG.md`](CHANGELOG.md) | every version (0.14 now; two numbers, each a tagged merge into `main`) |
 
 ## License
 
