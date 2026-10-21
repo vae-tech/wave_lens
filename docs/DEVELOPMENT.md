@@ -183,7 +183,7 @@ approval"): the agent falls back to its shell. The runs, their transcripts and a
 
 ## Versions
 
-Two numbers, `MAJOR.MINOR` (0.12 now; [`CHANGELOG.md`](../CHANGELOG.md) lists them all). The work goes on a branch;
+Two numbers, `MAJOR.MINOR` (0.13 now; [`CHANGELOG.md`](../CHANGELOG.md) lists them all). The work goes on a branch;
 a version is a merge into `main` (`git merge --no-ff`) tagged `vMAJOR.MINOR` (an annotated tag, its message the
 changelog entry). One commit on the branch before the merge raises the version in four places: `VERSION`,
 `version:` in `wavefw/src/boot.js` (then `make wavefw`), a new top entry in `CHANGELOG.md`, and the committed builds

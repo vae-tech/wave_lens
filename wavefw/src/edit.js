@@ -46,7 +46,11 @@ function pickRows(v, spec, o = {}) {
       const low = s.toLowerCase().replace(/\*/g, ''), near = low ? pool.filter(r => r.name.toLowerCase().includes(low)).slice(0, 5).map(r => r.full) : [];
       fail(`no ${o.groups ? 'signal or module' : 'signal'} "${s}"${near.length ? '; similar: ' + near.join(', ') : ''}`);
     }
-    const fulls = [...new Set(hit.map(r => r.full))];
+    let fulls = [...new Set(hit.map(r => r.full))];
+    if (!s.includes('*') && fulls.length > 1) {   // one net at several levels: the one nearest the top, when it is one (as wavemcp.py)
+      const dots = f => f.split('.').length, top = Math.min(...fulls.map(dots)), near = fulls.filter(f => dots(f) === top);
+      if (near.length === 1) { hit = hit.filter(r => r.full === near[0]); fulls = near; }
+    }
     if (!s.includes('*') && fulls.length > 1) fail(`"${s}" is ambiguous: ${fulls.slice(0, 6).join(', ')}${fulls.length > 6 ? ` (+${fulls.length - 6})` : ''}` +
       ' — give more of its path, or a * pattern for all of them');
     for (const r of hit) if (!out.includes(r)) out.push(r);
@@ -148,8 +152,9 @@ command('marker', 'id? t? label? color? delete?', 'a marker: a dashed line acros
   if (a.color !== undefined) m.color = a.color || null;
   v.setMarks(); return { id: v.umarks.indexOf(m) + 1 };
 });
-command('group', 'name signals? add? remove? color? rename? delete?', 'your group of signals, a folder at the top of the names (the signals stay ' +
-  'where they are too): made or changed — signals: its signals in this order, add, remove, color, rename; delete', (v, a) => {
+command('group', 'name signals? add? remove? color? rename? delete? go?', 'your group of signals, a folder at the top of the names (the signals ' +
+  'stay where they are too): made or changed — signals: its signals in this order, add, remove, color, rename; delete; go: opened, shown, its first ' +
+  'signal selected (ctrl+G)', (v, a) => {
   const name = String(a.name ?? '').trim(); if (!name) fail('group: a name');
   let g = v.ugroups.find(x => x.name === name);
   if (a.delete) { if (!g) fail(`no group "${name}"`); v.ugroups = v.ugroups.filter(x => x !== g); v.setGroups(); return { name, deleted: true }; }
@@ -163,7 +168,9 @@ command('group', 'name signals? add? remove? color? rename? delete?', 'your grou
   if (rm.length) g.signals = g.signals.filter(f => !rm.includes(f));
   if (a.color !== undefined) g.color = a.color || null;
   if (to) g.name = to;
-  v.setGroups(); return { name: g.name, signals: g.signals.length };
+  v.setGroups();
+  if (a.go) { v.held.names = false; v.renderNamesNow(); v.goGroup(g.name); }
+  return { name: g.name, signals: g.signals.length };
 });
 command('highlight', 'add? remove? set? clear?', 'signals and modules in front, each in its colour, the rest dimmed: add, remove, set (the ' +
   'list), clear', (v, a) => {
@@ -224,6 +231,16 @@ command('sort', 'dir ignore?', 'the order of the names: none, asc, desc; ignore:
 command('style', 'name', `the edge style: ${Object.keys(EDGES).join(' ')} (null: the settings')`, (v, a) => {
   if (a.name != null && !EDGES[a.name]) fail(`name: one of ${Object.keys(EDGES).join(' ')}`);
   v.setStyle(a.name); return { style: v.S.style };
+});
+command('layout', 'scroll? height? tools?', 'where the rows scroll: window (in the viewer, height: "80vh", 600) or page (with the page, the ' +
+  'bar sticking to the top); tools: fold or open (the bar\'s tools to its title line)', (v, a) => {
+  if (a.scroll != null && !['window', 'page'].includes(a.scroll)) fail('scroll: window or page');
+  if (a.tools != null && !['fold', 'open'].includes(a.tools)) fail('tools: fold or open');
+  const hOk = h => (typeof h === 'number' ? h > 0 : /^\s*[\d.]+\s*(px|vh|em|rem|%)?\s*$/.test(h));
+  if (a.height != null && !hOk(a.height)) fail('height: 600 (px) or "80vh"');
+  if (a.scroll != null || a.height != null) v.setScroll(a.scroll || 'window', a.height ?? undefined);
+  if (a.tools != null) v.setTools(a.tools === 'fold');
+  return { scroll: v.S.maxHeight != null && v.S.maxHeight !== '' ? 'window' : 'page', height: v.S.maxHeight || null, tools: v.S.toolsFolded ? 'fold' : 'open' };
 });
 command('find', 'query case? word? regex? highlight? open?', 'the find field: rows by a fuzzy query ("" ends it); its options as the bar\'s buttons',
   (v, a) => {
@@ -338,7 +355,7 @@ Object.assign(WaveView.prototype, {
 // (wavefw.edits:<page>), so what you change here afterwards stays until a newer one (Save keeps yours in a file). The
 // rest (cursor, window, highlight, selection, folding, order, search), which a page opened again starts from anyway,
 // is applied every time, as the page's own settings are.
-const KEPT = ['bookmarks', 'arrows', 'markers', 'groups', 'paint', 'radix', 'analog', 'hidden'], KEPT_CFG = ['style', ...GAP_KEYS];
+const KEPT = ['bookmarks', 'arrows', 'markers', 'groups', 'paint', 'radix', 'analog', 'hidden'], KEPT_CFG = ['style', 'maxHeight', 'toolsFolded', ...GAP_KEYS];
 let EDITS;
 function pageEdits() {
   if (EDITS !== undefined) return EDITS;

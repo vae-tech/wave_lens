@@ -154,7 +154,8 @@ add theirs (`WaveFW.registerDefaults`).
 | `fold` | none | groups folded at start: `true`, a nesting depth (`2`), or group paths |
 | `groupOrder` | `file` | inside a group: `last` = signals first, then sub-modules; `first`; `file` |
 | `moduleShading` | true | neighbouring instances alternate between two backgrounds, the panel and a pale blue (`band` in `colors`); module rows bold |
-| `maxHeight` | none | e.g. `"80vh"`: the rows scroll inside the viewer (any number of rows) |
+| `maxHeight` | none | e.g. `"80vh"`: the rows scroll inside the viewer (any number of rows); none: with the page, the bar sticking to the top (generated configs: `"80vh"`; the bar's **Scroll** button switches) |
+| `toolsFolded` | false | the bar's tools folded to its title line (**▴** / **▾ tools** in the bar) |
 | `groupColors` | none | one colour per group: `{"aw": "#339af0", "tb.dut.u_rx": "#37b24d"}` (names, paths, `*` patterns) |
 | `highlight`, `dim` | none, 0.3 | instances in front at start (paths, names, `*` patterns) and the opacity of the rest |
 | `findHighlight`, `findOpen` | true, true | starting state of the find options |
@@ -348,7 +349,14 @@ count, ‹ ›, Highlight / Open, colour + Paint, Copy. Expression (`sva.js`): t
 auto, slanted, vertical, square), **state** (Save, Load…), **assertions** (Load file…). Keys work once the waves have the focus (a click on the
 waves or on a name); with ctrl, alt or ⌘ held they stay the browser's (ctrl+S saves the page, it does not sort), except
 ctrl+C and ctrl+F. Hover any button, field or list for what it does and its keys; **?** at the right of the title line
-(key `?`) opens the box of all the keys and the mouse, the plugins' too. Navigation follows Questa's wave window, the lists and the text vim: a sequence (`gg`, `zM`, `yy`,
+(key `?`) opens the box of all the keys and the mouse, the plugins' too.
+
+**Scroll: window / page** in the title line switches where the rows scroll, on the fly (kept in this browser; the
+`maxHeight` setting is the start): in a **window** of their own (`80vh` high unless the settings say otherwise), the bar
+above them; or with the **page**, the browser's scroll bar — the bar then sticks to the top of the window while its rows
+go by, the time axis and the names' header right under it, and leaves with the viewer's end. **▴** folds the tools to
+the title line (title, cursor, the buttons), **▾ tools** opens them again; `/` and ctrl+F open them for the find
+field. Navigation follows Questa's wave window, the lists and the text vim: a sequence (`gg`, `zM`, `yy`,
 `]f` …) is two keys within a second.
 
 | Key | Action | Key | Action |
@@ -417,10 +425,12 @@ above shows arrows between handshakes with the latency as the label.
 ![The bookmark and arrow lists under the waves](img/bookmarks.png)
 
 **Markers and your groups.** The right button's **Marker here** draws a dashed line across every row with a label at
-the top (yours, next to the page's own markers); **To group …** / **New group with it** puts the signal (the
-highlighted or selected ones) into a group of your own: a folder at the top of the names with its signals in your order
-(they stay in their modules too; their radix, colour and values are the signal's). **Out of group** and **Delete this
-group** on its rows take them out. Under the waves the **Markers** list has each marker's time, label and colour, the
+the top (yours, next to the page's own markers); its **Groups ▸** submenu puts the signal (the highlighted or selected
+ones) **Into** a group of your own or a **New group** — a folder at the top of the names with its signals in your order
+(they stay in their modules too; their radix, colour and values are the signal's; bookmarks and highlight of a signal
+show on its row in the group) —, takes them **Out**, **Deletes** the group on its header, and **Go to** any group.
+**ctrl+G** on the waves lists your groups the same way: a click or Enter opens one, brings it to the middle and
+selects its first signal. Under the waves the **Markers** list has each marker's time, label and colour, the
 **Groups** list each group's name and colour (its signals get the colour). Both are kept in this browser and in a saved
 state, as the bookmarks are; [commands](#commands-and-edits) make them too.
 
@@ -561,7 +571,8 @@ await v.run([
 | `bookmark` | `n? t? signal? text? color? lift? delete?` | a numbered circle on a signal (none: the time axis) with its text: a new one (`n` free or left out, `t` the cursor by default) or bookmark `n` changed; `lift`: above its signal, in a lane; `delete`: `n` or `"all"` (its arrows go too) |
 | `arrow` | `id? from? to? shape? head? line? color? label? delete?` | an arrow between bookmarks `from` → `to` with its label: new, or arrow `id` (1, 2 … as listed; or the one from → to) changed; shape `~ - -~ ~- -\| \|- -\|-`, head `> <> < ""`, line `solid dashed dotted` |
 | `marker` | `id? t? label? color? delete?` | a dashed line across the rows with its label |
-| `group` | `name signals? add? remove? color? rename? delete?` | your group: `signals` sets its signals (a module: its signals), `add`, `remove`, `rename`, `delete` |
+| `group` | `name signals? add? remove? color? rename? delete? go?` | your group: `signals` sets its signals (a module: its signals), `add`, `remove`, `rename`, `delete`; `go`: opened, in the middle, its first signal selected (ctrl+G) |
+| `layout` | `scroll? height? tools?` | where the rows scroll: `window` (`height`: `"80vh"`, `600`) or `page`; the bar's tools `fold` or `open` |
 | `highlight` | `add? remove? set? clear?` | signals and modules (and your groups) in front in their colours, the rest dimmed |
 | `paint` | `signals? color? clear?` | a colour (trace, outline, name) for signals; `color: null` their own again |
 | `select` | `signal? signals?` | the selected signal (edges, new bookmarks), or several |
@@ -574,8 +585,10 @@ await v.run([
 | `state`, `set_state`, `rows`, `picture` | / `state` / `pattern? limit? offset?` / `format? from? to? rows?` | read: the state (Save), a state back (Load…), the signals of the page, the screen as PNG (base64), SVG or WaveDrom |
 
 Times are model units (ps of timed waves, else cycles) or a text with a unit (`"2.5us"`). A signal is its full path,
-its name, the end of its path (`u_regs.PSEL`) or a `*` pattern, alone, in a list or a text with commas; a name that
-matches nothing (the answer names similar ones), or several signals without a pattern, is an error.
+its name, the end of its path (`u_regs.PSEL`), the dump's longer path of a row the page names shorter, or a `*`
+pattern, alone, in a list or a text with commas. A name of several signals takes the one nearest the top when that is
+one (one net seen at several levels), else it is an error, as is a name that matches nothing (the answer names similar
+ones).
 
 **The same commands on a file.** `tools/viewedit.py` runs them on a page made by `mkhtml.py` (`make html`, `wave_page`)
 or on a saved state (`.view.json`): from a shell, a script, a CI job.

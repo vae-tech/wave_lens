@@ -59,7 +59,7 @@ const flatText = t => Array.isArray(t) ? t.slice(typeof t[1] === 'object' && !Ar
 // theme and colors are not merged here: they become data-theme / CSS custom properties (see applyLook).
 const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight: 24, traceWidth: 1.4, busWidth: 1.2,
   labelSize: 11, fontSize: 11.5, sort: 'none', sortIgnore: [], sortButton: true, hint: true, style: 'auto', radix: 'auto', fold: null,
-  highlight: null, dim: 0.3, groupColors: null, arrowLabels: 'lane', laneHeight: 16, maxHeight: null,
+  highlight: null, dim: 0.3, groupColors: null, arrowLabels: 'lane', laneHeight: 16, maxHeight: null, toolsFolded: false,
   groupOrder: 'file', moduleShading: true, findHighlight: true, findOpen: true, findCase: false, findWord: false, findRegex: false, cursorSnap: 8,
     wheel: 'scroll', contextMenu: true, enumColors: null, dumpBudget: 3000000, gaps: false, gapIdle: 16, gapKeep: 2,
     gapSignals: null, gapClock: null, gapAux: null, gapOnly: false, gapCount: 'clock', gapLine: 'dashdot', menuTipDelay: 2000 };
@@ -1297,7 +1297,9 @@ const TIPS = {
   'act:prev': ['Previous edge of the selected signal', ['shift+Tab', '[e']], '.edge': ['Edge kind: any, rising, falling, a value, X / Z', ['e']],
   'act:next': ['Next edge of the selected signal', ['Tab', ']e']], 'act:mark': ['Bookmark at the cursor', ['m']],
   'act:ssave': ['Save the view to a file (.view.json)'], 'act:sload': ['Load a saved view'],
-  'act:help': ['Keys and mouse', ['?']], 'jump': ['Go to this marker'],
+  'act:help': ['Keys and mouse', ['?']],
+  'act:scroll': ['The rows scroll in a window of their own (the bar above them), or with the page (the bar sticks to the top); kept in this browser'],
+  'act:tools': ['Fold the tools to this line, or open them (/ opens them for the find field)'], 'jump': ['Go to this marker'],
   '.mk': ['Highlight: in front, the rest dimmed', ['ctrl+click', 'ctrl+shift+click: every row to here']],
   'bm:json': ['The bookmarks and arrows as JSON for a config'], 'bm:clear': ['Remove this browser\'s bookmarks'],
   'bm:go': ['Go to this bookmark', [']m', '[m']], 'bm:here': ['Move it to the cursor'], 'bm:lift': ['Above its signal, in a lane (or drag the circle up)'],
@@ -1337,7 +1339,9 @@ const TIPS = {
   '.ml': ['Marker label'], '.ugn': ['Group name', ['Enter']],
   'act:live': ['Driven by an agent (tools/wavemcp.py view_live): its edits come in as you watch; click: disconnect'],
 };
-for (let i = 0; i < 6; i++) TIPS['m:ugto' + i] = ['Into your group (a folder at the top of the names)'];
+TIPS['.subg'] = ['Your groups: put the signals into one, a new one, go to one', ['ctrl+G']];
+TIPS['m:ugto'] = ['Into your group (a folder at the top of the names)']; TIPS['m:ugoff'] = ['Out of this group of yours'];
+TIPS['m:ugo'] = ['Go to the group: opened, in the middle, its first signal selected', ['ctrl+G']];
 // the help (? in the bar, key ?): the keys and the mouse by what they do; plugins' keys come from their addKey help
 const HELP = [
   ['Zoom and move', [[['i', '+'], 'zoom in'], [['o', '-'], 'zoom out'], [['f'], 'show everything'], [['l'], 'the window before the last zoom'],
@@ -1347,7 +1351,8 @@ const HELP = [
   ['Cursor and edges', [[['click'], 'cursor on a near edge (alt: not) + select the signal'], [['shift+←', 'shift+→'], 'move the cursor'],
     [['Tab', 'shift+Tab'], 'next / previous edge (no signal selected: the focus moves on)'], [[']e', '[e'], 'next / previous edge'], [['e'], 'edge kind']]],
   ['Signals', [[['↑', '↓', 'j', 'k'], 'select the next / previous'], [['shift+click a name'], 'select every signal from the last clicked one'],
-    [['gg', 'G'], 'the first / last'], [['ctrl+click', '○'], 'highlight'], [['ctrl+shift+click'], 'highlight every row from the last one to it'],
+    [['gg', 'G'], 'the first / last'], [['ctrl+G'], 'your groups: a list, a click goes there'],
+    [['ctrl+click', '○'], 'highlight'], [['ctrl+shift+click'], 'highlight every row from the last one to it'],
     [['zM', 'zR'], 'fold / open every module'],
     [['zc', 'zo', 'za'], 'the selected signal\'s module'], [['s'], 'sort'], [['yy', 'ctrl+C'], 'copy the path'],
       [['Esc'], 'reset: search, highlight, selection']]],
@@ -1462,7 +1467,9 @@ class Bar {
       '○ or ctrl+click a name: highlight, ctrl+shift+click: every row to it';
     return `<div class="bar"><div class="head"><span
       class="eyebrow">${esc(v.opts.title || v.M.title || 'Waveform').replace(/µ/g, '<span class="mu">µ</span>')}</span><span class="toast" role="status"
-        aria-live="polite"></span><span class="cur"></span><button type="button" class="hb" data-act="help" aria-label="keys and mouse">?</button></div>
+        aria-live="polite"></span><span class="cur"></span><button type="button" class="lay" data-act="scroll"></button><button type="button"
+        class="lay" data-act="tools" aria-label="fold the tools"></button><button type="button" class="hb" data-act="help"
+        aria-label="keys and mouse">?</button></div>
       <div class="tools">${toolLine('time', grp('cursor', cursor) + grp('view', zoom) + edges + (jumps ? grp('go to', jumps) : ''))}${toolLine('find', find)}${
         toolLine('expr', '')}${toolLine('rows', list + grp('style', wstyle) + state + dump)}</div></div>
       <div class="body"><div class="names"></div><div class="wcol"><canvas tabindex="0" role="application" aria-roledescription="waveform"
@@ -1521,6 +1528,8 @@ class Bar {
       else if (b.dataset.act === 'fcopy') v.copyRows(v.allRows().filter(r => v.found.has(r)));
       else if (b.dataset.act === 'ssave') v.saveState();
       else if (b.dataset.act === 'help') v.help();
+      else if (b.dataset.act === 'scroll') v.setScroll(v.S.maxHeight != null && v.S.maxHeight !== '' ? 'page' : 'window');
+      else if (b.dataset.act === 'tools') v.setTools(!v.S.toolsFolded);
       else if (b.dataset.act === 'sload') v.sfile.click();
       else if (b.dataset.act === 'dopen') v.openDump();
       else if (b.dataset.act === 'dreload') v.reloadDump();
@@ -1864,7 +1873,7 @@ class WaveView {
       const a = opts.from ?? M.t0, b = opts.to ?? M.t1;
       this.span = Math.min(Math.max(b - a, this.minSpan), M.t1 - M.t0); this.t0 = this.clamp(a); this.draw();
     }
-    this.ro = new ResizeObserver(() => this.draw()); this.ro.observe(this.wcol);
+    this.ro = new ResizeObserver(() => this.draw()); this.ro.observe(this.wcol); this.ro.observe(this.root.querySelector('.bar'));
     // the canvas is only as tall as the visible part of the rows (sticky in its column): redraw when that part moves
     this.onScroll = () => { if (!this.raf && this.lay && this.lay.H > this.hc + 1) this.raf = requestAnimationFrame(() =>
       { this.raf = 0; if (this.root.isConnected) this.draw(); }); };
@@ -1895,7 +1904,7 @@ class WaveView {
     this.rowH = { sig: S.rowHeight, group: S.groupHeight, space: S.spaceHeight }; this.hdrH = S.headerHeight;
     this.sort = S.sort; this.sortIgnore = S.sortIgnore;
     this.root.style.setProperty('--wv-dim', S.dim);
-    this.root.classList.toggle('wv-scroll', S.maxHeight != null && S.maxHeight !== '');   // own scroll bar, bar stays in view
+    this.layoutShow();
     const hlFrom = JSON.stringify(S.highlight ?? null);   // a new "highlight" setting (configure) replaces the picks
     if (redraw && hlFrom !== this.hlFrom) { this.hlFrom = hlFrom; this.picks = hlPick(this.M, S.highlight); }
     if (redraw && this.qEl && this.q) this.find(this.q);
@@ -1906,7 +1915,7 @@ class WaveView {
   build() {
     const r = this.root; r.classList.add('wv');
     r.innerHTML = Bar.html(this);
-    this.bar = new Bar(this);
+    this.bar = new Bar(this); this.layoutShow();
     this.names = new Names(this);
     this.wheelInput(this.canvas); this.pointerInput(this.canvas); this.keyInput(this.canvas);
     // Esc anywhere in the viewer (waves, find field, names) except the bookmark fields: back to no search, no highlight,
@@ -2046,8 +2055,9 @@ class WaveView {
     c.addEventListener('keydown', e => {
       const k = e.key, ctl = e.ctrlKey || e.metaKey; let h = true;
       if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock'].includes(k)) return;   // a modifier alone: a sequence goes on (z, shift+M)
-      if (e.altKey || (ctl && !['c', 'C', 'f', 'F'].includes(k))) return;   // ctrl+S, ctrl+M … stay the browser's
-      // ctrl+F: find (Questa), ctrl+C: copy (nothing to copy: the browser's)
+      if (e.altKey || (ctl && !['c', 'C', 'f', 'F', 'g', 'G'].includes(k))) return;   // ctrl+S, ctrl+M … stay the browser's
+      // ctrl+F: find (Questa), ctrl+C: copy (nothing to copy: the browser's), ctrl+G: the list of your groups
+      if (ctl && (k === 'g' || k === 'G')) { e.preventDefault(); this.groupsMenu(); return; }
       if (ctl) { if (k === 'f' || k === 'F' ? (this.focusFind(), true) : this.copyKey()) e.preventDefault(); return; }
       const pre = this.kpre && Date.now() - this.kpre.t < 1000 ? this.kpre.k : ''; this.kpre = null;
       if (pre && this.seq(pre + k)) { e.preventDefault(); return; }
@@ -2330,7 +2340,38 @@ class WaveView {
     this.draw(); this.settingsChanged(); return this;
   }
   loadLook() { try { const o = JSON.parse(localStorage.getItem(this.lookKey) || '{}'), L = {}; if (o && EDGES[o.style]) L.style = o.style;
-      if (o && o.gap && typeof o.gap === 'object') L.gap = o.gap; return L; } catch (e) { return {}; } }
+      if (o && o.gap && typeof o.gap === 'object') L.gap = o.gap;
+      if (o && (typeof o.maxHeight === 'string' || typeof o.maxHeight === 'number')) L.maxHeight = o.maxHeight;
+      if (o && typeof o.toolsFolded === 'boolean') L.toolsFolded = o.toolsFolded; return L; } catch (e) { return {}; } }
+  // where the rows scroll: 'window' (in the viewer, maxHeight high: height, else the settings', else 80vh; the bar above
+  // them) or 'page' (with the page; the bar sticks to the top while the rows go by); null: the settings' again. Kept in
+  // this browser (the bar's own layer), as the edge style
+  setScroll(mode, height) {
+    const base = settings(GLOBAL, this.M.cfg, this.opts).maxHeight, win = base != null && base !== '';
+    if (mode === 'page') { if (win) this.local.maxHeight = ''; else delete this.local.maxHeight; }
+    else if (mode === 'window') { const h = height ?? (win ? base : '80vh');
+      if (win && h === base) delete this.local.maxHeight; else this.local.maxHeight = h; }
+    else delete this.local.maxHeight;
+    this.saveLook(); this.S.maxHeight = 'maxHeight' in this.local ? this.local.maxHeight : base;   // this setting only (restyle: the sort too)
+    this.layoutShow(); this.draw(); this.settingsChanged(); return this;
+  }
+  // the bar's tools folded to its title line (true) or open; null: the settings' again
+  setTools(fold) {
+    const base = !!settings(GLOBAL, this.M.cfg, this.opts).toolsFolded;
+    if (fold == null || !!fold === base) delete this.local.toolsFolded; else this.local.toolsFolded = !!fold;
+    this.saveLook(); this.S.toolsFolded = 'toolsFolded' in this.local ? this.local.toolsFolded : base;
+    this.layoutShow(); this.draw(); return this;
+  }
+  // the classes and the buttons of the two: the rows' scroll box, the sticky bar's height (the canvas and the names' header under it)
+  layoutShow() {
+    const S = this.S, r = this.root, win = S.maxHeight != null && S.maxHeight !== '';
+    r.classList.toggle('wv-scroll', win); r.classList.toggle('wv-tools-folded', !!S.toolsFolded);
+    if (win) r.style.setProperty('--wv-max-h', typeof S.maxHeight === 'number' ? S.maxHeight + 'px' : String(S.maxHeight));
+    const s = r.querySelector('.bar button[data-act=scroll]'), t = r.querySelector('.bar button[data-act=tools]');
+    if (s) { s.textContent = win ? 'Scroll: window' : 'Scroll: page'; s.setAttribute('aria-pressed', win); }
+    if (t) { t.textContent = S.toolsFolded ? '▾ tools' : '▴'; t.setAttribute('aria-expanded', !S.toolsFolded);
+      t.setAttribute('aria-label', S.toolsFolded ? 'open the tools' : 'fold the tools'); }
+  }
   saveLook() {
     try { if (Object.keys(this.local).length) localStorage.setItem(this.lookKey, JSON.stringify(this.local)); else localStorage.removeItem(this.lookKey);
       } catch (e) { /* private mode */ }
@@ -2386,7 +2427,7 @@ class WaveView {
   state() {
     const M = this.M, folded = this.foldSaved || this.collapsed;   // during a search: the folding from before it
     const st = { wavefw: 'state', version: STATE_VERSION, title: this.opts.title || M.title || '', from: this.t0, to: this.t0 + this.span, cursor: this.cursor,
-      config: { style: this.S.style, sort: this.sort, sortIgnore: [...this.sortIgnore],
+      config: { style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded, sort: this.sort, sortIgnore: [...this.sortIgnore],
         fold: [...folded].map(id => M.groups[id] && M.groups[id].path).filter(Boolean),
         highlight: [...this.picks].sort((a, b) => a[1] - b[1]).map(([r]) => r.full).filter(Boolean), findHighlight: !!this.findHl, findOpen: !!this.findOpen,
           ...Object.fromEntries(FIND_OPTS.map(o => [o[1], !!this[o[1]]])), ...this.gapOpt() },
@@ -2414,6 +2455,8 @@ class WaveView {
     this.allRows();   // the plugins' groups and yours are there now (their folding)
     const paths = new Set([...M.rows.map(r => r.full), ...Object.values(M.groups).map(g => g.path)]), seen = p => paths.has(p) || (miss.add(p), false);
     if (C.style !== undefined) this.setStyle(C.style);
+    if (C.maxHeight !== undefined) this.setScroll(C.maxHeight == null || C.maxHeight === '' ? 'page' : 'window', C.maxHeight || undefined);
+    if (C.toolsFolded !== undefined) this.setTools(!!C.toolsFolded);
     const gk = GAP_KEYS.filter(k => C[k] !== undefined);
     if (gk.length) this.setGaps(Object.fromEntries(gk.map(k => [k, C[k] ?? this.S[k]])));
     if (C.sort !== undefined || C.sortIgnore !== undefined) {
@@ -2708,6 +2751,7 @@ class WaveView {
   // works (held), once at its end
   renderNotes() { if (this.held) this.held.notes = true; else this.notes.render(); }
   renderNames() { if (this.held) this.held.names = true; else this.names.render(); }
+  renderNamesNow() { this.names.render(); }   // in a run too (going to a row needs the rows laid out)
   rowState(el, r) { this.names.state(el, r); }
   changed(list) { this.saveBookmarks(); if (list) this.renderNotes(); this.draw(); }
   layout() { return layoutRows(this.rowsL, this.rowH, this.S.laneHeight, this.hdrH); }
@@ -2797,6 +2841,7 @@ class WaveView {
   // ctrl+F, /: the find field; with the bar off the screen (a long page scrolled down) the find group floats over the
   // waves where you are, at the top right of what you see of them, until ✕ or Esc puts it back
   focusFind() {
+    if (this.S.toolsFolded) this.setTools(false);   // the field is in the tools
     const g = this.qEl.closest('.find'), b = g.getBoundingClientRect();
     if (!g.classList.contains('float') && (b.top < 0 || b.bottom > innerHeight)) this.floatFind(true);
     this.qEl.focus({ preventScroll: true }); this.qEl.select();
@@ -2966,6 +3011,7 @@ class WaveView {
       this.setGaps(o); };
     const b = (m, label) => { const k = (TIPS['m:' + m] || [])[1];
       return `<button type="button" role="menuitem" data-m="${m}"><span>${label}</span>${k ? `<span class="kk">${esc(k[0])}</span>` : ''}</button>`; };
+    const ugb = (m, i, label) => b(m, label).replace('data-m=', `data-g="${i}" data-m=`);   // an item of your group i
     const el = document.createElement('div'); el.className = 'wv-menu'; el.setAttribute('role', 'menu');
     el.innerHTML = (r ? `<div class="mh">${esc(this.rangeText())}</div>` + b('zoom', 'Zoom to the range') + b('marks', 'Bookmarks at its ends',
       'Two bookmarks and an arrow with the Δ between them') + b('copyd', 'Copy Δ') + '<hr>' : '') +
@@ -3008,9 +3054,14 @@ class WaveView {
           'Leave it out of the view (Hidden: N ✕ in the bar shows it again)') +
         (grp ? b('fold', this.collapsed.has(grp.id) ? 'Open this module' : 'Fold this module') : up != null ? b('foldup', 'Fold its module') : '') +
         (sig ? b('mark', 'Bookmark here', 'A bookmark on this signal at the time clicked') : '') +
-        (sigs.length ? this.ugroups.slice(0, 6).map((g, i) => (sigs.every(r => g.signals.includes((r.orig || r).full)) ? '' :
-          b('ugto' + i, `To group “${g.name}”`))).join('') + b('ugnew', many ? `New group of the ${sigs.length}` : 'New group with it') : '') +
-        (sig && sig.ug ? b('ugout', `Out of group “${sig.ug.name}”`) : '') + (grp && grp.user ? b('ugdel', 'Delete this group') : '') +
+        // your groups: a submenu (into / out of a group, a new one, delete; go to any of them)
+        (`<div class="msub"><button type="button" role="menuitem" class="subg" aria-haspopup="menu" aria-expanded="false">` +
+          `<span>Groups${this.ugroups.length ? ` (${this.ugroups.length})` : ''}</span><span class="kk">▸</span></button><div class="sub" role="menu" hidden>` +
+          (sigs.length ? this.ugroups.map((g, i) => (sigs.every(r => g.signals.includes((r.orig || r).full)) ? ugb('ugoff', i, `Out of “${g.name}”`) :
+            ugb('ugto', i, `Into “${g.name}”`))).join('') + b('ugnew', many ? `New group of the ${sigs.length}` : 'New group with it') : '') +
+          (sig && sig.ug ? b('ugout', `Out of “${sig.ug.name}” (this row)`) : '') + (grp && grp.user ? b('ugdel', 'Delete this group') : '') +
+          (this.ugroups.length ? '<hr><div class="mh">Go to</div>' + this.ugroups.map((g, i) => ugb('ugo', i, `${g.name} · ${g.signals.length}`)).join('') :
+            '<div class="mh">no groups yet</div>') + '</div></div>') +
         b('umark', 'Marker here') + b('c2',
           'Second cursor here') + (this.cursor2 != null ? b('c2x', 'Clear the second cursor') : '') + b('copyname', 'Copy the path') : '') +
       (ng || nh ? '<hr>' + (ng ? b('zM', 'Fold every module') + b('zR', 'Open every module') : '') + (nh ? b('unhide', `Show the hidden (${nh})`) : '') : '') +
@@ -3020,16 +3071,18 @@ class WaveView {
     el.style.left = Math.max(4, Math.min(cx, innerWidth - box.width - 4)) + 'px'; el.style.top = Math.max(4, Math.min(cy, innerHeight - box.height - 4)) + 'px';
     const done = () => { this.closeMenu(); this.canvas.focus({ preventScroll: true }); };
     // the submenu: open on the pointer or a click, beside the menu (the left side when the right has no room)
-    const msub = el.querySelector('.msub'), sub = msub.querySelector('.sub'), subh = msub.querySelector('.subh');
-    const subOpen = on => {
-      sub.hidden = !on; subh.setAttribute('aria-expanded', on); if (!on) return;
-      Object.assign(sub.style, { left: '100%', right: 'auto', top: '-5px' }); const s = sub.getBoundingClientRect();
-      if (s.right > innerWidth - 4) Object.assign(sub.style, { left: 'auto', right: '100%' });
-      if (s.bottom > innerHeight - 4) sub.style.top = -5 - (s.bottom - innerHeight + 4) + 'px';
-    };
-    msub.addEventListener('mouseenter', () => subOpen(true));
-    msub.addEventListener('mouseleave', () => { if (!sub.contains(document.activeElement)) subOpen(false); });   // not while typing in it
-    subh.addEventListener('click', () => subOpen(true));   // (the pointer opened it already: stays open)
+    for (const msub of el.querySelectorAll('.msub')) {   // the gaps, your groups
+      const sub = msub.querySelector('.sub'), subh = msub.querySelector('.subh, .subg');
+      const subOpen = on => {
+        sub.hidden = !on; subh.setAttribute('aria-expanded', on); if (!on) return;
+        Object.assign(sub.style, { left: '100%', right: 'auto', top: '-5px' }); const s = sub.getBoundingClientRect();
+        if (s.right > innerWidth - 4) Object.assign(sub.style, { left: 'auto', right: '100%' });
+        if (s.bottom > innerHeight - 4) sub.style.top = -5 - (s.bottom - innerHeight + 4) + 'px';
+      };
+      msub.addEventListener('mouseenter', () => subOpen(true));
+      msub.addEventListener('mouseleave', () => { if (!sub.contains(document.activeElement)) subOpen(false); });   // not while typing in it
+      subh.addEventListener('click', () => subOpen(true));   // (the pointer opened it already: stays open)
+    }
     el.addEventListener('click', e => {
       const m = e.target.closest('button[data-m]'); if (!m) return;
       const act = m.dataset.m;
@@ -3074,7 +3127,9 @@ class WaveView {
       else if (act === 'umark') { this.run({ op: 'marker', t: at }).then(() =>
           this.notesEl.querySelector(`li[data-k="${this.umarks.length - 1}"] input.ml`)?.focus());
         return this.closeMenu(); }
-      else if (act.startsWith('ugto')) this.toGroup(this.ugroups[+act.slice(4)].name, sigs);
+      else if (act === 'ugto') this.toGroup(this.ugroups[+m.dataset.g].name, sigs);
+      else if (act === 'ugoff') this.run({ op: 'group', name: this.ugroups[+m.dataset.g].name, remove: sigs.map(x => (x.orig || x).full) });
+      else if (act === 'ugo') { this.closeMenu(); return this.goGroup(this.ugroups[+m.dataset.g].name); }
       else if (act === 'ugnew') { let k = this.ugroups.length + 1; while (this.ugroups.some(g => g.name === `group ${k}`)) k++;
         this.toGroup(`group ${k}`, sigs); }
       else if (act === 'ugout') this.hide([sig]);
@@ -3121,6 +3176,39 @@ class WaveView {
       window.addEventListener('blur', off, { signal: this.ac.signal }); }, 0);
     (el.querySelector('button') || el).focus({ preventScroll: true });
     return el;
+  }
+  // ctrl+G: your groups in a list over the names (as the right button's menu); a click or Enter goes there
+  groupsMenu() {
+    this.closeMenu();
+    const el = document.createElement('div'); el.className = 'wv-menu wv-groups'; el.setAttribute('role', 'menu');
+    const item = (g, i) => `<button type="button" role="menuitem" data-m="ugo" data-g="${i}"><span><i class="sw" style="background:${
+      esc(g.color || 'var(--accent)')}"></i>${esc(g.name)}</span><span class="kk">${g.signals.length}</span></button>`;
+    el.innerHTML = '<div class="mh">Your groups</div>' + (this.ugroups.length ? this.ugroups.map(item).join('') :
+      '<div class="mh">none yet: the right button on a signal, Groups ▸ New group</div>');
+    this.root.append(el); this.menuEl = el;
+    const n = this.namesEl.getBoundingClientRect(), box = el.getBoundingClientRect();
+    el.style.left = Math.max(4, Math.min(n.left + 12, innerWidth - box.width - 4)) + 'px';
+    el.style.top = Math.max(4, Math.min(Math.max(n.top, 0) + this.hdrH + 8, innerHeight - box.height - 4)) + 'px';
+    el.addEventListener('click', e => { const m = e.target.closest('button[data-g]'); if (!m) return; this.closeMenu();
+      this.goGroup(this.ugroups[+m.dataset.g].name); });
+    el.addEventListener('keydown', e => {
+      const bs = [...el.querySelectorAll('button')], k = bs.indexOf(document.activeElement);
+      if (e.key === 'Escape') { e.stopPropagation(); this.closeMenu(); this.canvas.focus({ preventScroll: true }); }
+      else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault();
+        bs[(k + (e.key === 'ArrowDown' ? 1 : -1) + bs.length) % bs.length]?.focus(); }
+    });
+    const off = this.offMenu = e => { if (!el.contains(e.target)) this.closeMenu(); };
+    setTimeout(() => { if (this.menuEl !== el) return; document.addEventListener('pointerdown', off, { capture: true, signal: this.ac.signal });
+      window.addEventListener('blur', off, { signal: this.ac.signal }); }, 0);
+    (el.querySelector('button') || el).focus({ preventScroll: true });
+    return el;
+  }
+  // your group by its name: opened (and shown when hidden), in the middle of the waves, its first signal selected
+  goGroup(name) {
+    const g = this.ugRows().find(r => r.type === 'group' && r.name === name); if (!g) { this.toast(`no group "${name}"`); return this; }
+    this.collapsed.delete(g.id); if (this.hiddenRows.delete(g.path)) this.saveRows(); this.foldTouched = true; this.renderNamesNow();
+    const first = this.vis.find(r => r.ug === g); if (first) this.select(first); else this.draw();
+    this.centerRow(g); this.toast(name); return this;
   }
   closeMenu() {
     if (!this.menuEl) return;
@@ -3184,7 +3272,9 @@ class WaveView {
   }
   size(lay) { // the canvas: as wide as its column, as tall as the rows in view (at least the axis and a little more)
     const c = this.canvas, dpr = window.devicePixelRatio || 1, H = lay.H, hdr = this.hdrH;
-    const W = c.getBoundingClientRect().width || 600, view = this.root.classList.contains('wv-scroll') ? this.bodyEl.clientHeight : window.innerHeight;
+    const own = this.root.classList.contains('wv-scroll'), bh = own ? 0 : this.root.querySelector('.bar').offsetHeight;   // the sticky bar over the rows
+    if (this.barH !== bh) { this.barH = bh; this.root.style.setProperty('--wv-bar-h', bh + 'px'); }
+    const W = c.getBoundingClientRect().width || 600, view = own ? this.bodyEl.clientHeight : window.innerHeight - bh;
     const Hc = this.hc = Math.max(Math.min(H, hdr + 40), Math.min(H, view || H));
     if (c.width !== Math.round(W * dpr) || c.height !== Math.round(Hc * dpr)) { c.width = Math.round(W * dpr); c.height = Math.round(Hc * dpr);
       c.style.height = Hc + 'px'; }
@@ -3337,7 +3427,11 @@ function pickRows(v, spec, o = {}) {
       const low = s.toLowerCase().replace(/\*/g, ''), near = low ? pool.filter(r => r.name.toLowerCase().includes(low)).slice(0, 5).map(r => r.full) : [];
       fail(`no ${o.groups ? 'signal or module' : 'signal'} "${s}"${near.length ? '; similar: ' + near.join(', ') : ''}`);
     }
-    const fulls = [...new Set(hit.map(r => r.full))];
+    let fulls = [...new Set(hit.map(r => r.full))];
+    if (!s.includes('*') && fulls.length > 1) {   // one net at several levels: the one nearest the top, when it is one (as wavemcp.py)
+      const dots = f => f.split('.').length, top = Math.min(...fulls.map(dots)), near = fulls.filter(f => dots(f) === top);
+      if (near.length === 1) { hit = hit.filter(r => r.full === near[0]); fulls = near; }
+    }
     if (!s.includes('*') && fulls.length > 1) fail(`"${s}" is ambiguous: ${fulls.slice(0, 6).join(', ')}${fulls.length > 6 ? ` (+${fulls.length - 6})` : ''}` +
       ' — give more of its path, or a * pattern for all of them');
     for (const r of hit) if (!out.includes(r)) out.push(r);
@@ -3439,8 +3533,9 @@ command('marker', 'id? t? label? color? delete?', 'a marker: a dashed line acros
   if (a.color !== undefined) m.color = a.color || null;
   v.setMarks(); return { id: v.umarks.indexOf(m) + 1 };
 });
-command('group', 'name signals? add? remove? color? rename? delete?', 'your group of signals, a folder at the top of the names (the signals stay ' +
-  'where they are too): made or changed — signals: its signals in this order, add, remove, color, rename; delete', (v, a) => {
+command('group', 'name signals? add? remove? color? rename? delete? go?', 'your group of signals, a folder at the top of the names (the signals ' +
+  'stay where they are too): made or changed — signals: its signals in this order, add, remove, color, rename; delete; go: opened, shown, its first ' +
+  'signal selected (ctrl+G)', (v, a) => {
   const name = String(a.name ?? '').trim(); if (!name) fail('group: a name');
   let g = v.ugroups.find(x => x.name === name);
   if (a.delete) { if (!g) fail(`no group "${name}"`); v.ugroups = v.ugroups.filter(x => x !== g); v.setGroups(); return { name, deleted: true }; }
@@ -3454,7 +3549,9 @@ command('group', 'name signals? add? remove? color? rename? delete?', 'your grou
   if (rm.length) g.signals = g.signals.filter(f => !rm.includes(f));
   if (a.color !== undefined) g.color = a.color || null;
   if (to) g.name = to;
-  v.setGroups(); return { name: g.name, signals: g.signals.length };
+  v.setGroups();
+  if (a.go) { v.held.names = false; v.renderNamesNow(); v.goGroup(g.name); }
+  return { name: g.name, signals: g.signals.length };
 });
 command('highlight', 'add? remove? set? clear?', 'signals and modules in front, each in its colour, the rest dimmed: add, remove, set (the ' +
   'list), clear', (v, a) => {
@@ -3515,6 +3612,16 @@ command('sort', 'dir ignore?', 'the order of the names: none, asc, desc; ignore:
 command('style', 'name', `the edge style: ${Object.keys(EDGES).join(' ')} (null: the settings')`, (v, a) => {
   if (a.name != null && !EDGES[a.name]) fail(`name: one of ${Object.keys(EDGES).join(' ')}`);
   v.setStyle(a.name); return { style: v.S.style };
+});
+command('layout', 'scroll? height? tools?', 'where the rows scroll: window (in the viewer, height: "80vh", 600) or page (with the page, the ' +
+  'bar sticking to the top); tools: fold or open (the bar\'s tools to its title line)', (v, a) => {
+  if (a.scroll != null && !['window', 'page'].includes(a.scroll)) fail('scroll: window or page');
+  if (a.tools != null && !['fold', 'open'].includes(a.tools)) fail('tools: fold or open');
+  const hOk = h => (typeof h === 'number' ? h > 0 : /^\s*[\d.]+\s*(px|vh|em|rem|%)?\s*$/.test(h));
+  if (a.height != null && !hOk(a.height)) fail('height: 600 (px) or "80vh"');
+  if (a.scroll != null || a.height != null) v.setScroll(a.scroll || 'window', a.height ?? undefined);
+  if (a.tools != null) v.setTools(a.tools === 'fold');
+  return { scroll: v.S.maxHeight != null && v.S.maxHeight !== '' ? 'window' : 'page', height: v.S.maxHeight || null, tools: v.S.toolsFolded ? 'fold' : 'open' };
 });
 command('find', 'query case? word? regex? highlight? open?', 'the find field: rows by a fuzzy query ("" ends it); its options as the bar\'s buttons',
   (v, a) => {
@@ -3629,7 +3736,7 @@ Object.assign(WaveView.prototype, {
 // (wavefw.edits:<page>), so what you change here afterwards stays until a newer one (Save keeps yours in a file). The
 // rest (cursor, window, highlight, selection, folding, order, search), which a page opened again starts from anyway,
 // is applied every time, as the page's own settings are.
-const KEPT = ['bookmarks', 'arrows', 'markers', 'groups', 'paint', 'radix', 'analog', 'hidden'], KEPT_CFG = ['style', ...GAP_KEYS];
+const KEPT = ['bookmarks', 'arrows', 'markers', 'groups', 'paint', 'radix', 'analog', 'hidden'], KEPT_CFG = ['style', 'maxHeight', 'toolsFolded', ...GAP_KEYS];
 let EDITS;
 function pageEdits() {
   if (EDITS !== undefined) return EDITS;
@@ -4042,7 +4149,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavefw plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveFW = { version: '0.12',   // the project's version: VERSION (make check compares them)
+G.WaveFW = { version: '0.13',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme, setColors, configure,
   plugin, svgPlugin, views: () => [...VIEWS], defaults: DEFAULTS, live,
   commands: () => Object.fromEntries(Object.entries(CMDS).map(([k, c]) => [k, { args: c.args, doc: c.doc }])),

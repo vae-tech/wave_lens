@@ -46,10 +46,10 @@ ALL_GAP_KEYS = ['gaps', 'gapIdle', 'gapKeep', 'gapSignals', 'gapClock', 'gapAux'
 COMMANDS = {
     'cursor': 't', 'cursor2': 't', 'view': 'from? to? at? span?', 'fit': '', 'range': 'from? to? signal?',
     'bookmark': 'n? t? signal? text? color? lift? delete?', 'arrow': 'id? from? to? shape? head? line? color? label? delete?',
-    'marker': 'id? t? label? color? delete?', 'group': 'name signals? add? remove? color? rename? delete?',
+    'marker': 'id? t? label? color? delete?', 'group': 'name signals? add? remove? color? rename? delete? go?',
     'highlight': 'add? remove? set? clear?', 'paint': 'signals? color? clear?', 'select': 'signal? signals?', 'hide': 'signals', 'show': 'signals?',
     'fold': 'groups? all?', 'unfold': 'groups? all?', 'radix': 'signals radix', 'analog': 'signals rows', 'sort': 'dir ignore?', 'style': 'name',
-    'find': 'query case? word? regex? highlight? open?', 'gaps': 'on? idle? keep? signals? clock? aux? only? count? reset?',
+    'layout': 'scroll? height? tools?', 'find': 'query case? word? regex? highlight? open?', 'gaps': 'on? idle? keep? signals? clock? aux? only? count? reset?',
     'edge': 'dir? kind? value? signal?', 'reset': '', 'state': '', 'set_state': 'state', 'rows': 'pattern? limit? offset?',
     'picture': 'format? from? to? rows?',
 }
@@ -231,6 +231,11 @@ class Model:
                 near = [r['full'] for r in pool if low and low in r['name'].lower()][:5]
                 fail(f'no {"signal or module" if groups else "signal"} "{s}"' + (f'; similar: {", ".join(near)}' if near else ''))
             fulls = list(dict.fromkeys(r['full'] for r in hit))
+            if '*' not in s and len(fulls) > 1:   # one net at several levels: the one nearest the top, when it is one (as wavemcp.py)
+                top = min(f.count('.') for f in fulls)
+                near = [f for f in fulls if f.count('.') == top]
+                if len(near) == 1:
+                    hit, fulls = [r for r in hit if r['full'] == near[0]], near
             if '*' not in s and len(fulls) > 1:
                 fail(f'"{s}" is ambiguous: {", ".join(fulls[:6])}' + (f' (+{len(fulls) - 6})' if len(fulls) > 6 else '') +
                      ' — give more of its path, or a * pattern for all of them')
@@ -622,6 +627,16 @@ class Editor:
         if to:
             g['name'] = to
         self.st['groups'] = group_list(gs)
+        if a.get('go'):   # opened, shown, its first signal selected (view.js goGroup)
+            path = '@' + g['name']
+            f = dict(self.st.get('folds') or {})
+            f.pop(path, None)
+            f[path] = False
+            self.st['folds'] = f
+            if path in (self.st.get('hidden') or []):
+                self.st['hidden'] = [p for p in self.st['hidden'] if p != path]
+            if g['signals']:
+                self.st['select'] = g['signals'][0]
         return {'name': g['name'], 'signals': len(g['signals'])}
 
     def c_highlight(self, a):
@@ -762,6 +777,24 @@ class Editor:
             fail(f'name: one of {" ".join(STYLES)}')
         self.config()['style'] = a.get('name')
         return {'style': a.get('name')}
+
+    def c_layout(self, a):
+        """Where the rows scroll and the bar's tools folded (view.js setScroll, setTools): as the state's maxHeight, toolsFolded."""
+        if a.get('scroll') is not None and a['scroll'] not in ('window', 'page'):
+            fail('scroll: window or page')
+        if a.get('tools') is not None and a['tools'] not in ('fold', 'open'):
+            fail('tools: fold or open')
+        h = a.get('height')
+        if h is not None and not (h > 0 if isinstance(h, (int, float)) and not isinstance(h, bool) else
+                                  isinstance(h, str) and re.fullmatch(r'\s*[\d.]+\s*(px|vh|em|rem|%)?\s*', h)):
+            fail('height: 600 (px) or "80vh"')
+        c, base = self.config(), self.m.cfg.get('maxHeight')
+        win = base is not None and base != ''
+        if a.get('scroll') is not None or h is not None:
+            c['maxHeight'] = ('' if win else None) if a.get('scroll') == 'page' else h if h is not None else base if win else '80vh'
+        if a.get('tools') is not None:
+            c['toolsFolded'] = a['tools'] == 'fold'
+        return {}
 
     def c_find(self, a):
         c = self.config()

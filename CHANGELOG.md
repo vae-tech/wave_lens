@@ -5,6 +5,19 @@ lives on a branch. The version is in `VERSION`, in `wavefw.js` (`WaveFW.version`
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.13 — 21 October 2026
+
+Where the rows scroll, switched on the fly; your groups one key away.
+
+- **Scroll: window / page** in the bar's title line: the rows in a window of their own, or with the page — then the
+  bar sticks to the top while its rows go by, the time axis under it; **▴** folds the tools to the title line (setting
+  `toolsFolded`). Both kept in this browser, in the saved state, and the command `layout` (`view.run`, `viewedit.py`,
+  `view_edit`).
+- Your groups: the right button's **Groups ▸** (into a group, a new one, out, delete, go to one); **ctrl+G** lists them
+  and goes to one (opened, in the middle, its first signal selected); `group … go` does it by command.
+- A name of several signals takes the one nearest the top when that is one (as the MCP tools); switching the scroll no
+  longer resets the sort.
+
 ## 0.12 — 21 October 2026
 
 The viewer's commands: what its buttons do, a script, a file or an AI agent does by name — live in an open page.

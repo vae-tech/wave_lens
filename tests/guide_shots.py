@@ -195,7 +195,7 @@ def gaps(S, ex, build):
     js("(v.select('valid'), 0)")
     js(f"(v.menu({bb['x'] + 260}, {bb['y'] + 70}, v.M.rows.find(r => r.name === 'valid')), 0)")
     page.locator('.wv-menu .subh').hover(); shots.settle(page)
-    S.save('gaps-menu', clip=union(page.locator('.wv-menu').bounding_box(), page.locator('.wv-menu .sub').bounding_box()), page=page, pad=6)
+    S.save('gaps-menu', clip=union(page.locator('.wv-menu').bounding_box(), page.locator('.wv-menu .sub').first.bounding_box()), page=page, pad=6)
     S.save('gaps-menu-viewer', v, upto=v.locator('.notes'))
     js("(v.closeMenu(), 0)")
     # roles in the names column: // the gaps follow, ↑ the clock counted, + counted in a gap

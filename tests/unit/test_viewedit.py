@@ -41,6 +41,8 @@ class Names(unittest.TestCase):
         self.assertEqual(self.full('valid'), ['tb.dut.valid'])           # a name
         self.assertEqual(self.full('other.state'), ['tb.other.state'])   # the end of a path
         self.assertEqual(self.full('top.tb.dut.valid'), ['tb.dut.valid'])   # a longer path (the dump's) of a row the page names shorter
+        net = V.Model({'signal': [{'name': 'clk', 'wave': 'p.'}, ['u', {'name': 'clk', 'wave': 'p.'}]]})
+        self.assertEqual([r['full'] for r in net.pick({}, 'clk')], ['clk'])   # one net at several levels: the one nearest the top
         self.assertEqual(self.full('tb.dut.*'), ['tb.dut.state', 'tb.dut.valid', 'tb.dut.data'])
         self.assertEqual(self.full('clk, valid'), ['clk', 'tb.dut.valid'])
         self.assertEqual(self.full('dut', groups=True), ['tb.dut'])
@@ -101,6 +103,12 @@ class Commands(unittest.TestCase):
                                           {'name': 'fields', 'signals': ['tb.other.reg.lo', 'tb.other.reg.hi'], 'color': '#08f'}])
         self.assertEqual(e.st['config']['highlight'], ['tb.dut.valid', '@mine', '@fields'])   # after the page's own
         self.assertEqual(e.st['paint'], {'tb.other.reg.lo': '#123', 'tb.other.reg.hi': '#123'})
+        self.run_ok(e, {'op': 'fold', 'groups': 'fields'}, {'op': 'group', 'name': 'fields', 'go': True}, {'op': 'layout', 'scroll': 'page', 'tools': 'fold'})
+        self.assertEqual((e.st['folds'], e.st['select'], e.st['config']['maxHeight'], e.st['config']['toolsFolded']),
+                         ({'@fields': False}, 'tb.other.reg.lo', None, True))   # the page's maxHeight is none: "page" is none
+        self.run_ok(e, {'op': 'layout', 'scroll': 'window'})
+        self.assertEqual(e.st['config']['maxHeight'], '80vh')
+        self.assertEqual(e.run([{'op': 'layout', 'height': 'tall'}])[0]['error'], 'height: 600 (px) or "80vh"')
         self.run_ok(e, {'op': 'marker', 'id': 1, 'delete': True}, {'op': 'group', 'name': 'mine', 'delete': True})
         self.assertEqual((len(e.st['markers']), [g['name'] for g in e.st['groups']]), (1, ['fields']))
         bad = e.run([{'op': 'group', 'name': 'fields', 'rename': ''}, {'op': 'group', 'name': 'x', 'delete': True}, {'op': 'marker', 'id': 4},

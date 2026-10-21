@@ -57,7 +57,7 @@ const flatText = t => Array.isArray(t) ? t.slice(typeof t[1] === 'object' && !Ar
 // theme and colors are not merged here: they become data-theme / CSS custom properties (see applyLook).
 const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight: 24, traceWidth: 1.4, busWidth: 1.2,
   labelSize: 11, fontSize: 11.5, sort: 'none', sortIgnore: [], sortButton: true, hint: true, style: 'auto', radix: 'auto', fold: null,
-  highlight: null, dim: 0.3, groupColors: null, arrowLabels: 'lane', laneHeight: 16, maxHeight: null,
+  highlight: null, dim: 0.3, groupColors: null, arrowLabels: 'lane', laneHeight: 16, maxHeight: null, toolsFolded: false,
   groupOrder: 'file', moduleShading: true, findHighlight: true, findOpen: true, findCase: false, findWord: false, findRegex: false, cursorSnap: 8,
     wheel: 'scroll', contextMenu: true, enumColors: null, dumpBudget: 3000000, gaps: false, gapIdle: 16, gapKeep: 2,
     gapSignals: null, gapClock: null, gapAux: null, gapOnly: false, gapCount: 'clock', gapLine: 'dashdot', menuTipDelay: 2000 };

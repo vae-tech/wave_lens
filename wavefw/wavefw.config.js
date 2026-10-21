@@ -62,4 +62,6 @@ window.WAVEFW_CONFIG = {
                                 //   each signal counted with its rising / falling edges in the stretch left out, a bus its changes), 'off'
   gapLine: 'dashdot',           //   the line of a gap: 'dashdot' | 'wave' | 'waves' | 'zigzag' | 'double'
   maxHeight: null,              // e.g. '80vh' or 600: the rows scroll inside the viewer (the bar stays in view); null = page scroll
+                                //   (the bar sticks to the top while its rows go by); the bar's Scroll button switches on the fly
+  toolsFolded: false,           // the bar's tools folded to its title line (▴ / ▾ in the bar)
 };

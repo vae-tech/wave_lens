@@ -1147,6 +1147,7 @@ EDIT_OPS = [   # every command that changes a state, with the arguments in their
     {'op': 'view', 'from': '40ns', 'to': '180ns'}, {'op': 'range', 'from': '100ns', 'to': '60ns', 'signal': 'PCLK'},
     {'op': 'sort', 'dir': 'desc', 'ignore': 'P'}, {'op': 'style', 'name': 'questa'}, {'op': 'fold', 'groups': 'ctl'},
     {'op': 'find', 'query': 'pw', 'case': True, 'open': False}, {'op': 'gaps', 'on': True, 'idle': 8},
+    {'op': 'layout', 'scroll': 'page', 'tools': 'fold'}, {'op': 'group', 'name': 'ctl', 'go': True},
 ]
 
 
@@ -1190,6 +1191,8 @@ def edit(browser, build):
     for x in (run['st'], st):
         x['config']['fold'] = sorted(x['config']['fold'])   # the ids of the groups made: in another order, the same set
     diff = sorted(k for k in set(run['st']) | set(st) if run['st'].get(k) != st.get(k))
+    diff += [f'config.{k}: {run["st"]["config"].get(k)!r} / {st["config"].get(k)!r}' for k in sorted(set(run['st']['config']) | set(st['config']))
+             if run['st']['config'].get(k) != st['config'].get(k)]
     check(not diff and 'edits applied (r1)' in page.evaluate(f"{V}.root.querySelector('.toast').textContent"),
           f'a page with these edits opens with the state the commands give in the page (differs: {diff})')
     # the person changes what the browser keeps; a reload keeps it, and the edits' cursor, window, highlight again
@@ -1227,13 +1230,48 @@ def edit(browser, build):
           f'your group: the bookmark on its row, the highlight on its row; the dump\'s path of a signal; an id that is a name said {got}')
     # the menu: a new group, a marker here, the group deleted from its header
     page.evaluate(f"(v => v.menu(200, 200, v.M.rows.find(r => r.name === 'PWRITE'), 70000))({V})")
-    page.locator('.wv-menu button[data-m=ugnew]').click()
+    page.locator('.wv-menu .subg').hover(); page.locator('.wv-menu button[data-m=ugnew]').click()
     page.evaluate(f"(v => v.menu(200, 200, WaveFW.internal.peek(v).vis.find(r => r.user && r.name === 'group 2'), 70000))({V})")
-    page.locator('.wv-menu button[data-m=ugdel]').click()
+    page.locator('.wv-menu .subg').hover(); page.locator('.wv-menu button[data-m=ugdel]').click()
     page.evaluate(f"(v => v.menu(200, 200, v.M.rows.find(r => r.name === 'PWRITE'), 70000))({V})")
     page.locator('.wv-menu button[data-m=umark]').click()
     got = page.evaluate(f"(v => [v.ugroups.map(g => g.name), v.markList().map(m => m.t)])({V})")
     check(got == [['g1'], [90000, 70000]], f'the menu: New group with it, Delete this group, Marker here {got}')
+    # where the rows scroll: the bar's buttons, the bar sticking to the top with the page, folded; kept after a reload
+    page.evaluate('localStorage.clear()'); open_(pb)
+    page.set_viewport_size({'width': 1300, 'height': 600})
+    w = page.locator('.wv').nth(page.evaluate(f"WaveFW.views().indexOf({V})"))
+    lay = lambda: page.evaluate(f"""(v => {{ const b = v.root.querySelector('.bar').getBoundingClientRect(), c = v.canvas.getBoundingClientRect();
+        return [v.root.classList.contains('wv-scroll'), v.root.querySelector('[data-act=scroll]').textContent, Math.round(b.top), Math.round(c.top - b.bottom),
+          v.root.querySelector('.bar .tools').offsetHeight > 0]; }})({V})""")
+    first = lay()
+    w.locator('button[data-act=scroll]').click(); flip = lay()
+    if not flip[0]:   # now with the page: back to a window and again, the button both ways
+        w.locator('button[data-act=scroll]').click(); flip = lay()
+    w.locator('button[data-act=scroll]').click()
+    into = f"(v => window.scrollTo(0, v.bodyEl.getBoundingClientRect().top + scrollY + 150))({V})"   # among its rows
+    page.evaluate(into); page.wait_for_timeout(200 * SCALE); paged = lay()
+    w.locator('button[data-act=tools]').click(); page.evaluate(into); page.wait_for_timeout(200 * SCALE); folded = lay()
+    open_(pb); kept = lay()
+    check(flip[:2] == [True, 'Scroll: window'] and paged[:2] == [False, 'Scroll: page'] and abs(paged[2]) <= 1 and abs(paged[3]) <= 1 and folded[4] is False
+          and abs(folded[2]) <= 1 and abs(folded[3]) <= 1
+          and kept[1] == 'Scroll: page' and kept[4] is False, f'Scroll: window / page; with the page the bar sticks to the top over its rows (the canvas '
+          f'under it), ▴ folds the tools; kept after a reload {first} {flip} {paged} {folded} {kept}')
+    got = page.evaluate(f"{V}.run({{op: 'layout', scroll: 'window', height: 300, tools: 'open'}}).then(r => [r[0], {V}.bodyEl.clientHeight])")
+    check(got[0].get('scroll') == 'window' and got[0].get('tools') == 'open' and got[1] <= 300, f'layout: the rows in a window 300 px high again {got}')
+    # ctrl+G: your groups in a list, Enter goes there; the right button's Groups ▸
+    page.evaluate(f"{V}.run([{{op: 'group', name: 'gA', signals: 'PSEL'}}, {{op: 'group', name: 'gB', signals: 'PWDATA,PRDATA'}}])")
+    w.locator('canvas').click(position={'x': 300, 'y': 80}); page.keyboard.press('Control+g')
+    items = page.locator('.wv-groups button').all_inner_texts()
+    page.keyboard.press('ArrowDown'); page.keyboard.press('Enter')
+    went = page.evaluate(f"(v => [v.sel && v.sel.full, !!(v.sel && v.sel.ug)])({V})")
+    page.evaluate(f"(v => v.menu(200, 200, v.M.rows.find(r => r.name === 'PWRITE'), 70000))({V})")
+    page.locator('.wv-menu .subg').hover()
+    sub_ = page.locator('.wv-menu .msub .sub').nth(1).inner_text()
+    page.locator('.wv-menu button[data-m=ugto][data-g="0"]').click()
+    into = page.evaluate(f"{V}.ugroups[0].signals")
+    check([x.split('\n')[0] for x in items] == ['gA', 'gB'] and went == ['PWDATA', True] and 'Into “gA”' in sub_ and 'Go to' in sub_ and into == ['PSEL', 'PWRITE'],
+          f'ctrl+G: the list of your groups, Enter goes to one; Groups ▸ in the menu: into a group, go to {items} {went} {into}')
     pic = page.evaluate(f"{V}.run({{op: 'picture', format: 'png'}}).then(r => r[0])")
     check(pic.get('bytes', 0) > 2000 and pic.get('png', '').startswith('iVBOR'), f'picture: a PNG of the screen, base64 ({pic.get("bytes")} bytes)')
     check(not errs, 'no page errors (edit)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
@@ -1397,7 +1435,7 @@ def ranges(browser, build):
     # a highlighted row clicked: the colour, the radix and Hide of the menu go to every highlighted row
     js("(v.highlight(null), ['PADDR', 'PWDATA', 'PSEL'].forEach(n => v.toggleHighlight(v.M.rows.find(r => r.full === 'apb_tb.' + n))), 0)")
     page.mouse.click(box['x'] + 300, box['y'] + yb('PADDR'), button='right')
-    head = menu.locator('.mh').last.inner_text(); menu.locator('select:not(.gcnt)').select_option('bin')
+    head = menu.locator(':scope > .mh').last.inner_text(); menu.locator('select:not(.gcnt)').select_option('bin')
     page.mouse.click(box['x'] + 300, box['y'] + yb('PADDR'), button='right')
     menu.locator('input[type=color]').evaluate("i => { i.value = '#2f9e44'; i.dispatchEvent(new Event('input', { bubbles: true })); }"); page.keyboard.press('Escape')
     many = js("['PADDR', 'PWDATA', 'PSEL', 'PENABLE'].map(n => [v.painted.get('apb_tb.' + n) || '', v.M.rows.find(r => r.full === 'apb_tb.' + n).radix || ''])")
