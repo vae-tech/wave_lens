@@ -430,6 +430,8 @@ def parser():
     ap.add_argument('--to', dest='t_to', help='window end (default: dump end)')
     ap.add_argument('--cycle', help='grid for the quantised wave string in --exact mode (default: finest change spacing, at most ~2000 cells)')
     ap.add_argument('--gap', action='append', help='FROM:TO window collapsed into one "|" cell (--clock mode)')
+    ap.add_argument('--auto-gap', help='IDLE[:KEEP] clock cycles: where no signal but a clock changes for IDLE cycles, all but KEEP (default 2) '
+                    'after the last change and before the next one collapsed into one "|" cell (--clock mode)')
     ap.add_argument('--enum', action='append', help='sig=0:IDLE,1:RUN (sig = path or alias)')
     ap.add_argument('--group', action='append', help='name=sig1,sig2: nest these signals in a WaveDrom group')
     ap.add_argument('--hierarchy', action='store_true', default=None, help='nest signals in groups by their scope path (instead of --group)')
@@ -624,6 +626,23 @@ def collect_specs(a, rd):
     return specs, marks, t_from, t_to
 
 
+def is_clock(s):
+    """A clock by its name, as the page's isClkRow: a 1-bit *clk* / *clock*."""
+    return s['width'] == 1 and re.search('clk|clock', s['name'], re.I) is not None
+
+
+def auto_gaps(spec, times, cols):
+    """--auto-gap IDLE[:KEEP] over the sampled columns: where none changes for IDLE cycles or more (between two changes,
+    or a change and an end of the window), the cycles between them but the first one and KEEP after it and KEEP before
+    the other, two at least -> [(from, to)] times of the --gap kind. The page's gaps (wavefw.js gapCuts) cut the same way."""
+    m = re.fullmatch(r'\s*(\d+)\s*(?::\s*(\d+)\s*)?', str(spec))
+    if not m or int(m.group(1)) < 1:
+        raise WaveError(f'vcd2wavedrom: --auto-gap {spec}: IDLE[:KEEP] in clock cycles, IDLE 1 at least (16:2)')
+    idle, keep, n = int(m.group(1)), int(m.group(2) or 2), len(times)
+    pts = [0] + [i for i in range(1, n) if any(c[i] != c[i - 1] for c in cols)] + [n]
+    return [(times[p + 1 + keep], times[q - keep - 1]) for p, q in zip(pts, pts[1:]) if q - p >= idle and q - p - 1 - 2 * keep >= 2]
+
+
 def clock_mode(a, rd, specs, t_from, t_to):
     """--clock: one WaveDrom cell per period of the clock -> ({abs path: signal JSON}, {head, time})."""
     doc, sig_json = {}, {}
@@ -632,6 +651,9 @@ def clock_mode(a, rd, specs, t_from, t_to):
         raise WaveError('vcd2wavedrom: fewer than two clock edges in the window')
     cycle = statistics.median(b - a_ for a_, b in zip(times, times[1:]))
     gaps = [tuple(map(to_ps, g.split(':') if isinstance(g, str) else g)) for g in a.gap]
+    clk_abs = next((s['abs'] for s in specs if s['path'] == a.clock or s['name'] == a.clock), None)
+    if a.auto_gap:
+        gaps += auto_gaps(a.auto_gap, times, [cols[j] for j, s in enumerate(specs) if s['abs'] != clk_abs and not is_clock(s)])
     cells, skip = [], []   # cells: row index or None ('|'); skip: [[cell index, cycles it stands for]]
     for i, t in enumerate(times):
         g = next((g for g in gaps if g[0] <= t <= g[1]), None)
@@ -642,7 +664,6 @@ def clock_mode(a, rd, specs, t_from, t_to):
         else:
             cells.append(None); skip.append([len(cells) - 1, 1, g])
     vals = {s['abs']: cols[j] for j, s in enumerate(specs)}
-    clk_abs = next((s['abs'] for s in specs if s['path'] == a.clock or s['name'] == a.clock), None)
     for s in specs:
         col = vals[s['abs']] if not s['kind'] else [X_TEXT if v is None else v for v in vals[s['abs']]]
         items = [None if c is None else col[c] for c in cells]

@@ -144,7 +144,10 @@ add theirs (`WaveFW.registerDefaults`).
 | `dumpBudget` | 3000000 | a VCD opened in the page (Open…, dropped on a viewer): the signals nearest the top up to this many value changes |
 | `busDetect`, `buses` | true, none | bus transactions (`bus.js`): the ports found by their names; ports of your own `[{protocol, scope, prefix, map, clock, name}]` |
 | `contextMenu` | true | the right button on the waves: a range and the viewer's menu; false: the browser's |
+| `menuTipDelay` | 2000 | ms before a tooltip in that menu shows (the bar's: 350 ms) |
 | `cursorSnap` | 8 | px: a click on the waves puts the cursor on an edge of the signal under the pointer this near (alt+click: not); 0 = off |
+| `gaps`, `gapIdle`, `gapKeep` | false, 16, 2 | the pictures and WaveDrom saved from the viewer's menu (and static SVGs) leave out the stretches where no signal but a clock changes for `gapIdle`, all but `gapKeep` after the last change and before the next one, a break `\|` in their place; lengths in clock cycles (`16`) or a time (`"2us"`); the menu's **Gaps** rows change them (kept in the browser) |
+| `gapSignals`, `gapClock`, `gapAux`, `gapOnly`, `gapCount`, `gapLine` | none, none, none, false, `clock`, `dashdot` | the signals the gaps follow (paths, names, `*` patterns; none: every signal drawn); the clock whose cycles `gapIdle`, `gapKeep` and the texts count (none: the selected clock, else the nearest `*clk*`); the signals counted in a gap (none: every one but those and the clock); the viewer's picture and WaveDrom of those three kinds alone; the texts of a gap: `clock` (under the axis the time left out and the clock's cycles), `edges` (also a thin row under each signal counted with its rising and falling edges in the stretch left out, a bus its changes), `off`; the line of a gap: `dashdot`, `wave`, `waves`, `zigzag`, `double` |
 | `radix` | `auto` | bus values from `tv`: `auto` (≤ 6 bits decimal, else hex) `hex dec signed bin oct ascii`, `float` (IEEE 754 of a 16-, 32- or 64-bit bus), fixed point `q<F>` / `sq<F>` (unsigned / signed, F fraction bits: `q8`, `sq15`) |
 | `enumColors` | none | the fill of a bus value by its label or number, every signal: `{"ACCESS": "#d0ebff", "3": "c5"}` (a colour, a token, 3–9); a signal's own `enumColors` wins |
 | `fold` | none | groups folded at start: `true`, a nesting depth (`2`), or group paths |
@@ -361,7 +364,7 @@ ctrl+C and ctrl+F. Hover any button, field or list for what it does and its keys
 | shift+`← →` | move the cursor a hundredth of the view | the pointer on a signal | its value there, the change into it and the next one (tooltip) |
 | `/`, ctrl+F | find (the bar scrolled away: the find group floats over the waves; ✕ or Esc puts it back) | `n N`, `*` `#` | next / previous match; find the selected signal's name and go to its next / previous match |
 | `m` | bookmark at the cursor | `]m [m` | the next / previous bookmark |
-| shift+click the waves | a second cursor (dashed, on an edge): Δ to the cursor in time and in cycles of the clock (the selected signal's, else the nearest `*clk*`) on the axis and in the readout; `x` swaps the two; Esc clears it | `1` … `9` | go to that bookmark (each bookmark's line shows its Δ from the cursor) |
+| shift+click the waves | a second cursor (dashed, on an edge): Δ to the cursor in time, its frequency (`Δ 40 ns / 25 MHz`) and in cycles of the clock (the selected signal's, else the nearest `*clk*`) on the axis and in the readout; `x` swaps the two; Esc clears it | `1` … `9` | go to that bookmark (each bookmark's line shows its Δ from the cursor) |
 | `zM` / `zR` | fold / open every module | `zc` / `zo` / `za` | fold / open / toggle the module of the selected signal |
 | `yy`, ctrl+C | copy the selected signal (or the highlighted ones); while searching ctrl+C ends the search | `s` | sort off → A→Z → Z→A |
 | ○ or ctrl+click a name | highlight the signal or instance; ctrl+shift+click: every row from the last one to it | Esc | reset: no search, highlight or selection |
@@ -422,7 +425,8 @@ left out and counted in the bar). Its `"config"` (`sort`, `sortIgnore`, `fold`, 
 **Ranges and the menu.** Shift+drag on the waves zooms into the range dragged over (as the middle button); ctrl+drag
 measures a range: its ends snap to the edges of the signal under the pointer (alt: not), it is shaded with its Δ on the
 axis and in the readout, counted on the signal it was measured on (else the selected one) — a bit: its rising edges, its
-cycles (`Δ 20 ns · 2 ↑ PCLK`); a bus: its changes and the values it took (`Δ 80 ns · 7 changes of PADDR (4 values)`); a
+cycles (`Δ 20 ns / 50 MHz · 2 ↑ PCLK`: the length and the frequency of a period that long); a bus: its changes and the
+values it took (`Δ 80 ns / 12.5 MHz · 7 changes of PADDR (4 values)`); a
 ctrl+click or Esc clears it. The right button
 does the same and opens a menu: **Zoom to the range**, **Bookmarks at its ends** (an arrow with the Δ between them),
 **Copy Δ**; **Copy image** (PNG to the clipboard), **Save image as PNG / SVG** — the range (else the window) of the rows
@@ -433,7 +437,31 @@ clock (a 1-bit `*clk*` among them or in their modules, else the shortest time be
 after the cycle's edge — what holds during the cycle, as `vcd2wavedrom.py --clock` writes it (the assertions and the
 bus decoders read the value just before the edge, as a simulator samples: the same data, one cycle apart at a change
 on the edge), buses as `=` with
-their values in the radix shown, a group per module; for the signal under the pointer **Colour** (**Its own colour**: the
+their values in the radix shown, a group per module; **Gaps ▸** (a submenu: a check box, *idle*, *keep*) — the picture and WaveDrom
+leave out the stretches where none of their signals (the clocks aside) changes for *idle*, all but *keep* after the
+last change and before the next one: a long range of rare transfers becomes its transfers side by side with a break
+`//` between them (the time axis goes on with the real time after each break), and in WaveDrom one `|` cell per break
+in every wave, as stock WaveDrom draws its gaps; *idle* and *keep* are cycles of their clock (`16`, `2`) or times
+(`2us`), the cycle of a change and the bookmarks are always kept, the row shows how many breaks the window has. The
+gaps follow the changes of every signal drawn, or of the ones you pick: **By this signal** in the submenu (on a
+selected run or the highlighted rows: all of them; again: **Not by this signal**) marks it `//` in the names, the second
+row reads **by N signals ✕** (✕: every signal again) and offers **only them** — the picture and WaveDrom of those
+signals alone, else of the rows as usual with the gaps by those few. **Count in cycles of this clock** on a 1-bit
+signal makes it the clock the gaps count (`↑` in the names; one of several clocks, its own edges no change; **↑ name
+✕** in the second row gives the clock found back). The break is a narrow column with a thin dash-dot line (a
+bookmark's is dotted; `gapLine`), the rows'
+backgrounds go on through it; under the axis a thin row says the time each gap leaves out and the clock's cycles in it
+(`+89.0 ns · 89 clk`); with **+ changes in a gap** a signal counted gets a thin row under it with, over each gap,
+what it did in the stretch left out (`6↑ 7↓`; a bus its changes, `2×`): **Count its changes in a gap** marks it `+`
+(the signals the gaps follow are the ones they keep, the clock is only counted, these are the ones watched along;
+none marked: every signal but those two kinds); **no texts** leaves them out. Each signal has one role; **only
+them** takes the three kinds. Under the axis each part between the gaps has its clock cycles in its middle (`8 clk`,
+when it has room). **Reset the gaps** at the bottom of the submenu puts every gap setting of the viewer back to the
+settings (by default: no gaps). Bookmarks
+and arrows draw over the parts as usual (an arrow across a gap: the latency with the idle time cut out); a bookmark's
+time is never cut out (settings `gaps`, `gapIdle`, `gapKeep`, `gapSignals`, `gapClock`, `gapAux`, `gapOnly`,
+`gapCount`, `gapLine`; kept in the browser and in the saved state); for the signal under the pointer
+**Colour** (**Its own colour**: the
 paint taken off), **Radix** (a bus of the dump:
 auto, hex, dec, signed, bin, oct, ascii, float, fixed q / sq with its fraction bits), **Analog** (the bus as a step plot
 three rows high between its smallest and largest value, in its radix: signed, float, fixed; **As a bus** back), **Highlight**, **Hide**, **Fold its module**, **Bookmark here**,
@@ -507,7 +535,7 @@ All tools are `python3 -I tools/<tool>.py --help`; the Makefile calls them for y
 |---|---|---|
 | `mkconfig.py` | dump → editable config with every signal | `DUMP`, `--out`, `--update`, `--force`, `--base`, `--depth`, `--sv FILES`, `--sva FILES`, `--sva-bin` |
 | `mkhtml.py` | config (every view) or WaveJSON files → one self-contained page | `--config`, `--view`, `--waves`, `--render`, `--out`, `--sva FILE`, `--bind NAME@SCOPE`, `--sva-bin`, `--no-sva`, `--reproducible` |
-| `vcd2wavedrom.py` | one window of a dump → WaveJSON | `--config` + `--view`, or `--waves --scope --signals --clock/--exact --from --to --marker --group --enum`; `--sva FILE --bind NAME@SCOPE` |
+| `vcd2wavedrom.py` | one window of a dump → WaveJSON | `--config` + `--view`, or `--waves --scope --signals --clock/--exact --from --to --marker --group --enum`; `--gap A:B` / `--auto-gap IDLE[:KEEP]` (`--clock`: a window, or every stretch of IDLE cycles where nothing but a clock changes, as one `\|` cell); `--sva FILE --bind NAME@SCOPE` |
 | `svabuild.py` | the `"sva"` / `"bind"` of a config: files parsed, bindings evaluated with the `sva` CLI (used by the two above) | `--waves --sva --bind --out` |
 | `embed.py` | WaveJSON → `data.js` for `file://` pages, or into an HTML placeholder | `--var NAME key=file.json`, `--html --placeholder` |
 | `dumpscan.py`, `wavejson.py` | the built-in dump reader (VCD text, FST via `fst2vcd -e`) and the readable JSON writer | modules |

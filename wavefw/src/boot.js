@@ -129,16 +129,19 @@ function tipShow(el) {
   tipEl.style.left = Math.max(4, Math.min(r.left + r.width / 2 - b.width / 2, innerWidth - b.width - 4)) + 'px';
   tipEl.style.top = (below ? r.bottom + 6 : r.top - b.height - 6) + 'px';
 }
+// the wait before a tooltip: 350 ms, in the right button's menu menuTipDelay (2 s: it reads, it is not in the way)
+const tipWait = el => { const v = el.closest('.wv-menu') && el.closest('.wv'), S = v && v.waveView && v.waveView.S;
+  return S ? Math.max(0, +S.menuTipDelay || 0) : 350; };
 document.addEventListener('pointerover', e => {
   const el = e.target.closest && e.target.closest(TIP_SEL);
   if (el === tipAt) return;
   tipHide(); if (!el) return;
   if (el.title) { el.dataset.ttl = el.title; el.removeAttribute('title'); }   // no browser tooltip while ours waits
-  tipAt = el; tipT = setTimeout(() => tipShow(el), 350);
+  tipAt = el; tipT = setTimeout(() => tipShow(el), tipWait(el));
 });
 document.addEventListener('pointerout', e => { if (tipAt && !(e.relatedTarget && tipAt.contains(e.relatedTarget))) tipHide(); });
 document.addEventListener('focusin', e => { const el = e.target.closest && e.target.closest(TIP_SEL); tipHide();
-  if (el && el.matches(':focus-visible')) { tipAt = el; tipT = setTimeout(() => tipShow(el), 350); } });
+  if (el && el.matches(':focus-visible')) { tipAt = el; tipT = setTimeout(() => tipShow(el), tipWait(el)); } });
 for (const ev of ['pointerdown', 'keydown', 'wheel']) document.addEventListener(ev, e => { if (ev !== 'keydown' || e.key !== 'Tab') tipHide(); }, true);
 G.addEventListener('scroll', tipHide, true);
 const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
@@ -147,7 +150,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavefw plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveFW = { version: '0.9',   // the project's version: VERSION (make check compares them)
+G.WaveFW = { version: '0.10',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme, setColors, configure,
   plugin, svgPlugin, views: () => [...VIEWS], defaults: DEFAULTS,
   paint: { circle, arrowHead, edgeGeom, lastLE },
@@ -156,7 +159,7 @@ G.WaveFW = { version: '0.9',   // the project's version: VERSION (make check com
   registerTokens, registerDefaults, tips, util: { esc, glob, lastLE, lastBefore, stepTo, isEdge, circle },
   // unstable: the pure functions for the unit table of tests/smoke.py and peek(view), the fields the tests read; not an API
   internal: { findRow, parseWant, valueIs, findEdge, edgeGlyph, bitsOf, hexOf, vcdHex, enumColor, analogValue, niceStep, cycMap, parseWave,
-    gfmt, toFloat, fieldRow, stripPfx, trimNum,
+    idleCuts, gapLen, gapText, gapRefs, fmtFreq, gfmt, toFloat, fieldRow, stripPfx, trimNum,
     peek: v => ({ get lay() { return v.lay; }, get oy() { return v.oy; }, get vis() { return v.vis; }, get collapsed() { return v.collapsed; },
       get rowEls() { return v.rowEls; }, get namesEl() { return v.namesEl; } }) } };
 G.WaveView = WaveView; G.WaveSVG = WaveSVG;

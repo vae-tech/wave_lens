@@ -337,6 +337,24 @@
 .wv .wv-menu button, .wv .wv-menu .mi { all: unset; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 10px; border-radius: 4px; cursor: pointer; }
 .wv .wv-menu button:hover, .wv .wv-menu button:focus-visible, .wv .wv-menu .mi:hover { background: var(--accent-soft); }
 .wv .wv-menu .mi input { width: 34px; height: 18px; padding: 0; border: 1px solid var(--line); background: none; cursor: pointer; }
+/* the gaps of the picture and WaveDrom (a submenu): on / off, idle, keep (clock cycles or a time), the roles, a reset */
+.wv .wv-menu .msub { position: relative; display: flex; flex-direction: column; }
+.wv .wv-menu .sub { position: absolute; left: 100%; top: -5px; min-width: 330px; padding: 4px; display: flex; flex-direction: column; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18); }
+.wv .wv-menu .sub[hidden] { display: none; }
+.wv .wv-menu .subh[aria-expanded=true] { background: var(--accent-soft); }
+.wv .wv-menu .mi.gp { cursor: default; }
+.wv .wv-menu .mi.gp label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.wv .wv-menu .mi.gp input[type=checkbox] { width: auto; height: auto; margin: 0; border: 0; }
+.wv .wv-menu .mi.gp > span { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.wv .wv-menu .mi.gp select { max-width: 9em; }
+.wv .wv-menu .mi.gp input.gi, .wv .wv-menu .mi.gp input.gk { width: 4em; padding: 0 3px; color: var(--fg); cursor: text; }
+.wv .wv-menu .mi.gp button.gx { display: inline; padding: 0 4px; margin-left: 2px; color: var(--muted); }
+.wv .wv-menu .mi.gp button.gx:hover { color: var(--fg); }
+.wv .names .row.gref .n::after { content: ' //'; color: var(--accent); font-weight: 600; }   /* the gaps follow this signal */
+.wv .names .row.gclk .n::after { content: ' ↑'; color: var(--accent); font-weight: 600; }   /* the gaps count its cycles */
+.wv .names .row.gaux .n::after { content: ' +'; color: var(--muted); font-weight: 600; }   /* the gaps count its changes */
+.wv .wv-menu .mi.gp input.bad { outline: 2px solid var(--wave-x); outline-offset: -1px; }
 .wv .wv-menu .mi input.qf { width: 4.5em; margin-left: 4px; padding: 0 3px; color: var(--fg); cursor: text; }   /* fixed point: fraction bits */
 .wv .wv-menu .mh { padding: 4px 10px 2px; font: 600 11px var(--font-mono); color: var(--muted); overflow-wrap: anywhere; }
 .wv .wv-menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 2px; }

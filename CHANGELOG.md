@@ -5,6 +5,18 @@ lives on a branch. The version is in `VERSION`, in `wavefw.js` (`WaveFW.version`
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.10 — 21 October 2026
+
+Gaps: a long range of rare transfers as its transfers side by side.
+
+- The pictures (PNG / SVG) and WaveDrom saved from the viewer's menu, and static SVGs, leave out the idle stretches
+  where no signal but a clock changes (`gaps`, `gapIdle`, `gapKeep`; the signals they follow, the clock they count,
+  the signals counted in a gap, the texts and the line of a break: `gapSignals`, `gapClock`, `gapAux`, `gapOnly`,
+  `gapCount`, `gapLine`); the menu's **Gaps ▸** submenu; kept in the browser and the saved state.
+- `vcd2wavedrom.py --auto-gap IDLE[:KEEP]`: the same cut in `--clock` mode, one `|` cell per gap.
+- A measured range and the second cursor show the frequency of a period that long (`Δ 40 ns / 25 MHz`);
+  `menuTipDelay`.
+
 ## 0.9 — 20 October 2026
 
 The second global review and its cycle (stage 12): 71 of its 75 findings fixed.

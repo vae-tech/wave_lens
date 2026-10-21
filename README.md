@@ -61,7 +61,8 @@ python3 tools/mkhtml.py --config work/my.config.json --out work/my.html --sva ch
   find (fuzzy, whole name, regular expression) with highlight / open / paint, edge, value and X / Z search, highlight
   of instances, selection of runs and boxes, bookmarks and arrows that go back into the config, sorting with ignored
   prefixes, a tooltip with the keys on every control and a **?** box of all the keys, a measured range (ctrl+drag, edges
-  snapped) and the right button's menu (zoom, bookmarks, the picture as PNG / SVG, WaveDrom, a signal's colour, radix —
+  snapped) and the right button's menu (zoom, bookmarks, the picture as PNG / SVG and WaveDrom — with the idle stretches
+  of a long range cut out as breaks if you like —, a signal's colour, radix —
   float and fixed point too —, analog step plot); packed structs as a row of fields (an FST's struct scopes, or
   `mkconfig --sv`); **Save / Load…** puts all of it (with the assertions and ƒ rows) in a file and back
   ([USAGE § The viewer](docs/USAGE.md#the-viewer)).
@@ -144,8 +145,8 @@ Layout, tools, measurements and conventions: [`docs/DEVELOPMENT.md`](docs/DEVELO
 
 ## Versions
 
-0.9 — [`CHANGELOG.md`](CHANGELOG.md) lists every version (two numbers; each a tagged merge into `main`, `v0.1` …
-`v0.9`).
+0.10 — [`CHANGELOG.md`](CHANGELOG.md) lists every version (two numbers; each a tagged merge into `main`, `v0.1` …
+`v0.10`).
 
 ## License
 

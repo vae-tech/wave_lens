@@ -44,10 +44,22 @@ window.WAVEFW_CONFIG = {
   svaOpen: false,               // sva.js: the assertion list open at start (false: folded, ▸ Assertions opens it)
   busDetect: true,              // bus.js: the bus ports found by their signal names (AXI, AXI-Stream, APB, AHB, Avalon, Wishbone, OBI) drawn as transactions
   buses: null,                  // bus.js: ports of your own [{protocol, scope, prefix?, map?: {role: name}, clock?, name?}] (busDetect: false: only these)
+  menuTipDelay: 2000,           // ms: the wait before a tooltip in that menu (the bar's: 350 ms)
   contextMenu: true,            // the right button on the waves: a range and the viewer's menu (picture, colour, …); false: the browser's
   cursorSnap: 8,                // px: a click on the waves puts the cursor on an edge of that signal this near (alt+click: not); 0 = off
   moduleShading: true,          // signals of neighbouring modules on alternating backgrounds, a line where the module changes
   svaSignals: 'view',           // assertion groups (sva.js): the bound signals again under the steps: 'view' (viewers), true (also static SVGs), false
   svaShow: null,                // assertion groups drawn: null = all, or labels / * patterns ['apb_*']
+  gaps: false,                  // the pictures and WaveDrom saved (menu of the right button; static SVGs too): stretches where no signal but a clock
+                                //   changes left out, a break "|" in their place (the viewer's menu turns it on and off)
+  gapIdle: 16,                  //   a gap where nothing changes this long: clock cycles (16) or a time ('2us')
+  gapKeep: 2,                   //   kept after the last change and before the next one: cycles or a time
+  gapSignals: null,             //   the signals the gaps follow (paths, names, * patterns; the menu's "Gaps ▸ By this signal"); null: every one drawn
+  gapClock: null,               //   the clock whose cycles gapIdle, gapKeep and the texts count ("Gaps ▸ Count in cycles of this clock"); null: the one found
+  gapAux: null,                 //   the signals counted in a gap ("Gaps ▸ Count its changes in a gap"); null: every one but the gapSignals and the clock
+  gapOnly: false,               //   the viewer's picture and WaveDrom: only the gapSignals, the clock and the gapAux ("only them")
+  gapCount: 'clock',            //   texts: 'clock' (under the axis the time left out and the clock cycles), 'edges' (also a thin row under
+                                //   each signal counted with its rising / falling edges in the stretch left out, a bus its changes), 'off'
+  gapLine: 'dashdot',           //   the line of a gap: 'dashdot' | 'wave' | 'waves' | 'zigzag' | 'double'
   maxHeight: null,              // e.g. '80vh' or 600: the rows scroll inside the viewer (the bar stays in view); null = page scroll
 };

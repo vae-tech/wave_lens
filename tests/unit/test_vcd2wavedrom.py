@@ -191,6 +191,28 @@ class Convert(unittest.TestCase):
         self.assertIn('|', doc['signal'][0]['wave'])
         self.assertEqual(doc['time']['skip'], [[3, 3]])   # the edges at 35, 45 and 55 ns in one "|" cell
 
+    def test_auto_gaps(self):
+        times = list(range(0, 200, 10))
+        col = ['a'] * 5 + ['b'] * 15            # a change in cycle 5, none after: cycles 6 … 7 kept, 8 … 17 one gap, 18 19 kept
+        self.assertEqual(V.auto_gaps('8:2', times, [col]), [(80, 170)])
+        self.assertEqual(V.auto_gaps('16', times, [col]), [])            # 15 cycles idle: no gap
+        self.assertEqual(V.auto_gaps('3:0', times, [['a'] * 20]), [(10, 190)])   # the first cycle stays
+        for bad in ('0', 'x', '4:'):
+            with self.assertRaises(WaveError):
+                V.auto_gaps(bad, times, [col])
+
+    def test_clock_auto_gap(self):
+        with H.tmp() as d:
+            ev = sorted([(t, f'{t // 5 % 2}!') for t in range(0, 205, 5)] + [(0, '0"'), (52, '1"')])
+            body = ''.join(f'#{t}\n{v}\n' for t, v in ev)
+            hdr = '$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! clk $end\n$var wire 1 " en $end\n$upscope $end\n$enddefinitions $end\n'
+            p = H.vcd(d, body, header=hdr)
+            rc, out, err = H.run_tool('vcd2wavedrom', '--waves', p, '--clock', 'tb.clk', '--signals', 'tb.clk,tb.en', '--auto-gap', '6:1')
+            doc = json.loads(out)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual([s['wave'] for s in doc['signal']], ['p......|.', '0....1.|.'])   # en rises in cycle 5; cycles 7 … 18 left out
+        self.assertEqual(doc['time']['skip'], [[7, 12]])
+
     def test_hierarchy_scopes_struct_width(self):
         _, out, _ = H.run_tool('vcd2wavedrom', '--waves', H.fixture('scopes'), '--exact', '--hierarchy', '--signals', 'tb.st.f0,tb.st.f1,tb.ifc.d')
         self.assertEqual(json.loads(out)['scopes'], {'tb.st': {'kind': 'struct', 'width': 3}, 'tb.ifc': 'interface'})

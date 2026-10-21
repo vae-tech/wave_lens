@@ -59,7 +59,8 @@ const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight
   labelSize: 11, fontSize: 11.5, sort: 'none', sortIgnore: [], sortButton: true, hint: true, style: 'auto', radix: 'auto', fold: null,
   highlight: null, dim: 0.3, groupColors: null, arrowLabels: 'lane', laneHeight: 16, maxHeight: null,
   groupOrder: 'file', moduleShading: true, findHighlight: true, findOpen: true, findCase: false, findWord: false, findRegex: false, cursorSnap: 8,
-    wheel: 'scroll', contextMenu: true, enumColors: null, dumpBudget: 3000000 };
+    wheel: 'scroll', contextMenu: true, enumColors: null, dumpBudget: 3000000, gaps: false, gapIdle: 16, gapKeep: 2,
+    gapSignals: null, gapClock: null, gapAux: null, gapOnly: false, gapCount: 'clock', gapLine: 'dashdot', menuTipDelay: 2000 };
 // a plugin's settings with their defaults (bus.js: busDetect, buses; sva.js: svaOpen, svaShow, svaSignals): in every
 // layer like the framework's own, listed in WaveFW.defaults, known to the warning on unknown keys
 const registerDefaults = map => { Object.assign(DEFAULTS, map || {}); return Object.assign({}, DEFAULTS); };
@@ -281,6 +282,11 @@ function fmtExact(ps, unitRef) {
   return s + ' ' + u;
 }
 const trimNum = (v, d = 3) => String(Math.round(v * 10 ** d) / 10 ** d);
+// a period (ps) as its frequency, four digits: 40000 -> "25 MHz", 6400 -> "156.3 MHz"
+function fmtFreq(ps) {
+  const f = 1e12 / ps, [m, u] = [[1e9, 'GHz'], [1e6, 'MHz'], [1e3, 'kHz']].find(([m]) => f >= m) || [1, 'Hz'], v = f / m;
+  return trimNum(v, v >= 100 ? 1 : v >= 10 ? 2 : 3) + ' ' + u;
+}
 function parseT(v) { // "1.5us" -> 1.5e6 (ps); plain numbers are model units
   if (v == null || v === '') return undefined;
   const m = /^\s*(-?[\d.]+(?:e-?\d+)?)\s*(fs|ps|ns|us|µs|ms|s)?\s*$/i.exec(String(v));
@@ -597,6 +603,64 @@ function edgeGlyph(s, t) { // ↑ / ↓ / value of the transition of s exactly a
   const a = s.tr, i = lastLE(a, t + 1e-9 * Math.max(1, Math.abs(t))), o = a[i];
   if (!o || i === 0 || Math.abs(o.t - t) > 1e-9 * Math.max(1, Math.abs(t))) return '';
   return o.k === '=' ? '= ' + o.v : o.k === '1' ? '↑' : o.k === '0' ? '↓' : o.k;
+}
+// a clock by its name: a 1-bit *clk* / *clock* that toggles; the times it rises (cached per row)
+const isClkRow = r => r.type === 'sig' && r.width === 1 && r.tr && r.tr.length > 4 && /clk|clock/i.test(r.name);
+const RISES = new WeakMap();
+const riseTimes = clk => RISES.get(clk) || (RISES.set(clk, clk.tr.filter(o => o.k === '1').map(o => o.t)), RISES.get(clk));
+// gaps in a figure (settings gaps, gapIdle, gapKeep): where nothing changes in [p, q] for idle or longer (p, q: the changes
+// and the ends a, b of the range, ts their sorted times), the stretch from keep after p to keep before q is left out, min
+// long at least; its ends on the rising edges ups (sorted, if any): the cycle of p and keep more kept, keep before the cycle
+// of q -> the parts kept, [[from, to], …] ([[a, b]]: no gap)
+function idleCuts(ts, a, b, idle, keep, ups = [], min = 0) {
+  const out = [], pts = [a, ...ts.filter(t => t > a && t < b), b];
+  let from = a;
+  for (let i = 1; i < pts.length; i++) {
+    const p = pts[i - 1], q = pts[i];
+    if (!(q - p >= idle)) continue;
+    let hs = p + keep, he = q - keep;
+    if (ups.length) { const j = lastBefore(ups.length, k => ups[k], hs) + 1, k = lastBefore(ups.length, k => ups[k], he);
+      hs = j < ups.length ? ups[j] : Infinity; he = k >= 0 ? ups[k] : -Infinity; }
+    if (he - hs > 0 && he - hs >= min && hs > from) { out.push([from, hs]); from = he; }
+  }
+  out.push([from, b]);
+  return out;
+}
+// a gap's length: clock cycles (a number, "16") or a time ("2us"; model units when the waves have no time)
+const gapLen = (v, cyc) => (/^\s*[\d.]+(e[-+]?\d+)?\s*$/i.test(String(v ?? '')) ? +v * cyc : parseT(v));
+// the signals the gaps follow (setting gapSignals: full paths, names or * patterns; none: []), one row per path (the first);
+// the clock they count cycles of (gapClock): gapRefs(rows, gapClock)[0]
+function gapRefs(rows, list) {
+  const ps = prefixes(list), rx = ps.filter(p => p.includes('*')).map(glob), at = new Set(ps.filter(p => !p.includes('*'))), seen = new Set();
+  return ps.length ? rows.filter(r => r.type === 'sig' && r.tr && (at.has(r.full) || at.has(r.name) || rx.some(x => x.test(r.full))) &&
+    !seen.has(r.full) && seen.add(r.full)) : [];
+}
+// a signal in a gap [p, q): its rising edges (kind "rise"), falling ("fall"), both ("edges"), or changes ("any"; a bus: its
+// changes) -> "12↑", "3↓", "12↑ 11↓", "5↕", "4×"; '' for none
+function gapText(s, p, q, kind) {
+  const a = s.tr, i0 = lastBefore(a.length, j => a[j].t, p, true) + 1, i1 = lastBefore(a.length, j => a[j].t, q, true), bus = s.width > 1 ||
+    (a.length > 0 && (a[0].k === '=' || a[a.length - 1].k === '='));
+  if (kind === 'edges' && !bus) return [gapText(s, p, q, 'rise'), gapText(s, p, q, 'fall')].filter(Boolean).join(' ');
+  let n = 0;
+  if (bus || kind === 'any' || kind === 'edges') n = Math.max(0, i1 - Math.max(i0, 1) + 1);   // the first value is no change
+  else for (let i = Math.max(i0, 1); i <= i1; i++) if (kind === 'rise' ? a[i].k === '1' && a[i - 1].k !== '1' : a[i].k === '0' && a[i - 1].k !== '0') n++;
+  return n ? n + (bus ? '×' : kind === 'any' ? '↕' : kind === 'rise' ? '↑' : '↓') : '';
+}
+// the parts of [a, b] a figure of these rows keeps (S: gaps, gapIdle, gapKeep): the changes of their signals but clk's
+// (and the other clocks', unless the rows were picked: picked), and the times of also (bookmarks), counted; the lengths in
+// cycles of clk (the step of its rising edges in the range), else of the model's cycle; a gap at least two cycles long
+function gapCuts(rows, a, b, S, clk, cycle = 1, also = [], picked = false) {
+  if (!S.gaps || !(b > a)) return [[a, b]];
+  const ups = clk ? riseTimes(clk) : [], u = ups.filter(t => t >= a && t <= b), d = u.slice(1).map((t, i) => t - u[i]).sort((x, y) => x - y);
+  const cyc = d.length ? d[d.length >> 1] : cycle, idle = gapLen(S.gapIdle, cyc), keep = Math.max(0, gapLen(S.gapKeep, cyc) || 0);
+  if (!(idle > 0)) return [[a, b]];
+  const ts = new Set(also.filter(t => t > a && t < b));
+  for (const r of rows) {
+    const s = r.type === 'group' ? r.sig : r;
+    if (!s || !s.tr || !s.tr.length || s === clk || (!picked && isClkRow(s))) continue;
+    for (let i = lastLE(s.tr, a) + 1; i < s.tr.length && s.tr[i].t < b; i++) if (s.tr[i].t > a) ts.add(s.tr[i].t);
+  }
+  return idleCuts([...ts].sort((x, y) => x - y), a, b, idle, keep, d.length ? ups : [], d.length ? 2 * cyc : 0);
 }
 // extension "bookmarks": [{n, t, signal (full path), text, color}] and "arrows": [{from, to, shape, head, line, color, label}]
 // (from / to = bookmark numbers). An old bookmark with "to" / "shape" / "label" becomes an arrow.

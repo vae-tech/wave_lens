@@ -17,15 +17,38 @@ const WaveSVG = {
       const all = withExtra(sorted, (opts.extraRows || []).concat(...SVG_PLUGINS.map(f => f(M, S, opts) || [])), M, opts.owner || M);
       C = compose(M, S, all, M.bookmarks, M.arrows, hlPick(M, S.highlight));
     }
-    const rows = C.rows, hl = C.hl;
+    const hl = C.hl;
+    // gaps (opts.cuts, else the settings gaps, gapIdle, gapKeep, gapSignals): the parts of [from, to] kept, side by side, a
+    // narrow column GAP px wide between; their texts (gapCount) in thin rows over each gap: under the axis the time it
+    // leaves out and the cycles of the clock in it; with "edges" under each signal counted (gapAux; none: every one but the
+    // ones the gaps follow and the clock) what it did in the stretch left out (its rising and falling edges, a bus its changes)
+    const G = V ? V.gapOpt() : S, ref = gapRefs(M.rows, G.gapSignals);
+    const clk = V ? V.gapClockFor(C.rows) : gapRefs(M.rows, G.gapClock)[0] || M.rows.find(isClkRow);   // the cycles counted: gapClock, else a clock
+    const cuts = opts.cuts || (V ? [[from, to]] : gapCuts(ref.length ? ref : C.rows, from, to, S, clk, M.cycle, bms.map(b => b.t), ref.length > 0));
+    const ng = cuts.length - 1, kept = cuts.reduce((n, [p, q]) => n + q - p, 0), gapLab = { size: 9.5 }, gc = G.gapCount || 'clock';
+    const aux = new Set(V ? V.gapRows().aux : gapRefs(M.rows, G.gapAux)), refs = new Set(V ? V.gapRefSet() : ref);
+    const counted = r => r.type === 'sig' && r.tr && r !== clk && (aux.size ? aux.has(r) : !refs.has(r));
+    const ups = clk ? riseTimes(clk) : [], cyc = (p, q) => lastBefore(ups.length, j => ups[j], q, true) - lastBefore(ups.length, j => ups[j], p, true);
+    const holes = cuts.slice(1).map(([q], i) => {   // cyc: the clock's cycles that start in [p, q)
+      const p = cuts[i][1], d = q - p, nc = cyc(p, q), text = new Map();
+      if (gc === 'edges') for (const r of C.rows) if (counted(r)) { const t = gapText(r, p, q, gc); if (t) text.set(r, t); }
+      return { p, q, w: GAP, text, info: '+' + (M.timed ? fmtTime(d, d / 100, d) : trimNum(d)) + (nc ? ` · ${nc} ${clk.name}` : '') };
+    });
+    // a thin row under each signal with a text, on its module's background
+    const band = ng && gc === 'edges' ? new Map(C.band || []) : C.band;
+    const rows = band === C.band ? C.rows : C.rows.flatMap(r => { if (!holes.some(h => h.text.has(r))) return [r];
+      const sub = { type: 'space', name: '', depth: r.depth, anc: r.anc, height: 12, gapOf: r };
+      if (band.has(r)) band.set(sub, band.get(r));
+      return [r, sub]; });
     const nameW = Math.ceil(Math.max(40, ...rows.map(r => P.measure(r.name || '', { size: fs, weight: r.type === 'group' ? 600 : 400 }) + 22 + r.depth * 12)));
     let k = ((opts.cyclePx || 40) * M.hscale) / M.cycle;
-    if (opts.width) k = (opts.width - nameW - 8) / (to - from);
-    const waveW = (to - from) * k, Wt = Math.ceil(nameW + waveW + 8);
+    if (opts.width) k = (opts.width - nameW - 8 - ng * GAP) / kept;
+    const waveW = kept * k + ng * GAP, Wt = Math.ceil(nameW + waveW + 8);
     const showAxis = opts.axis ?? (M.timed || M.tick != null), showTock = M.tock != null;
     let y = 4;
     const titleY = y; if (V ? V.opts.title || M.title : M.title) y += 22;
     const axisY = y; if (showAxis) y += 20;
+    const infoY = y; if (ng && gc !== 'off') y += 14;   // the gaps' times and cycles
     const lay = layoutRows(rows, rh, S.laneHeight, y); y = lay.H;
     const bodyEnd = y, tockY = y; if (showTock) y += 20;
     const footY = y; if (M.foot) y += 20;
@@ -33,7 +56,12 @@ const WaveSVG = {
     // rows of plugins
     const legend = rows.flatMap(r => (V && r.type === 'group' && V.collapsed.has(r.id) ? [] : r.legend || [])), legendY = y + 6;
       if (legend.length) y += 8 + legend.length * 18;
-    const Ht = Math.ceil(y + 4), xL = nameW, xR = nameW + waveW, X = t => xL + (t - from) * k;
+    const Ht = Math.ceil(y + 4), xL = nameW, xR = nameW + waveW;
+    const segX = cuts.map((c, i) => xL + cuts.slice(0, i).reduce((x, [p, q], j) => x + (q - p) * k + holes[j].w, 0));   // where each part starts
+    const X = !ng ? t => xL + (t - from) * k : t => {
+      const i = Math.max(0, lastBefore(cuts.length, j => cuts[j][0], t)), [p, q] = cuts[i];
+      return t <= q || i === ng ? segX[i] + (t - p) * k : segX[i] + (q - p) * k + (t - q) / (cuts[i + 1][0] - q) * holes[i].w;   // in a part, in a gap
+    };
     const theme = V ? null : opts.theme ?? M.theme, colors = V ? {} : Object.assign({}, M.colors, opts.colors);
     const bg = V || opts.bg || (theme && theme !== 'auto') || colors.bg ? opts.bg || 'panel' : null;
     if (bg) P.rect(0, 0, Wt, Ht, bg);
@@ -58,12 +86,40 @@ const WaveSVG = {
     P.fade = 1;
     P.clip(xL, 0, waveW, Ht, () => {
       const step = M.timed ? null : Math.max(1, M.every);
-      if (showAxis) paintAxis(P, { from, span: to - from, xL, xR, y: axisY, h: 20, yEnd: bodyEnd, X, timed: M.timed, tick: M.tick, every: M.every, step });
-      if (showTock) paintAxis(P, { from, span: to - from, xL, xR, y: tockY, h: 20, yEnd: tockY, X, timed: M.timed, tick: M.tock, every: M.every, step,
-        mid: true });
       const sel = V ? (V.selRun && V.selRun.size ? new Set([...V.selRun, V.sel]) : V.sel) : null;   // the viewer's selection: tinted as on the screen
-      const rowY = paintBody(P, M, lay, X, from, to, xL, xR, hl, sel, null, C.band, null, strokeOf, r => !(last[r.id] > rows.indexOf(r))),
-        top = showAxis ? axisY + 20 : lay.length ? lay[0].y : y;
+      let rowY;
+      cuts.forEach(([p, q], i) => {   // each part: its axis and rows, inside it
+        const xa = segX[i], xb = xa + (q - p) * k, go = () => {
+          if (showAxis) paintAxis(P, { from: p, span: q - p, xL: xa, xR: xb, y: axisY, h: 20, yEnd: bodyEnd, X, timed: M.timed, tick: M.tick, every: M.every,
+            step });
+          if (showTock) paintAxis(P, { from: p, span: q - p, xL: xa, xR: xb, y: tockY, h: 20, yEnd: tockY, X, timed: M.timed, tick: M.tock, every: M.every,
+            step, mid: true });
+          rowY = paintBody(P, M, lay, X, p, q, xa, xb, hl, sel, null, band, null, strokeOf, r => !(last[r.id] > rows.indexOf(r)));
+        };
+        if (ng) P.clip(xa, 0, xb - xa, Ht, go); else go();
+        if (i < ng) P.clip(xb, 0, GAP, Ht, () => {   // the gap: the rows' backgrounds go on, no waves; a double dashed line
+          const x0 = xb, x1 = xb + GAP, yA = gc !== 'off' ? infoY + 14 : showAxis ? axisY : lay.length ? lay[0].y : y;
+          for (const ya of [showAxis && axisY, showTock && tockY]) if (ya !== false) P.rect(x0, ya, GAP, 20, 'panel2');
+          paintBody(P, M, lay, X, holes[i].p, holes[i].q, x0, x1, hl, sel, null, band, null, strokeOf, r => !(last[r.id] > rows.indexOf(r)), true);
+          paintGapLine(P, (x0 + x1) / 2, yA, bodyEnd, G.gapLine);
+        });
+      });
+      // the texts over each gap: the time and the cycles under the axis, a counted signal's under it
+      const lab = Object.assign({ anchor: 'middle', fill: 'muted' }, gapLab);
+      if (ng && gc !== 'off') { P.rect(xL, infoY, waveW, 14, 'panel2', 0.6); for (const o of lay) if (o.row.gapOf) P.rect(xL, o.y, waveW, o.h, 'panel2', 0.6); }
+      // in the middle of each part its cycles (from the gap before to the gap after), where the gaps' texts leave room
+      const used = holes.map((h, i) => { const w = P.measure(h.info, gapLab) / 2 + 6, x = segX[i + 1] - GAP / 2; return [x - w, x + w]; });
+      if (ng && gc !== 'off') cuts.forEach(([p, q], i) => {
+        const nc = cyc(p, q), t = nc ? `${nc} ${clk.name}` : M.timed ? fmtTime(q - p, (q - p) / 100, q - p) : trimNum(q - p);
+        const x = segX[i] + (q - p) * k / 2, w = P.measure(t, gapLab) / 2;
+        if (x - w > segX[i] + 2 && x + w < segX[i] + (q - p) * k - 2 && !used.some(([a, b]) => x + w > a && x - w < b)) P.text(x, infoY + 7, t, lab);
+      });
+      if (ng && gc !== 'off') holes.forEach((h, i) => { const xm = segX[i + 1] - GAP / 2;
+        P.text(xm, infoY + 7, h.info, lab);
+        for (const { row, y: ry, h: rh } of lay) { const t = row.gapOf && h.text.get(row.gapOf), tw = t && P.measure(t, gapLab) + 6;
+          if (t) { P.rect(xm - tw / 2, ry + 1, tw, rh - 2, 'panel2'); P.text(xm, ry + rh / 2, t, lab); } }   // over the gap's line
+      });
+      const top = showAxis ? axisY + 20 : lay.length ? lay[0].y : y;
       paintMarkers(P, (opts.markers || []).concat(M.markers), X, from, to, top, bodyEnd);
       paintBookmarks(P, bms, ars, X, from, to, rowY, top, bodyEnd, showAxis ? axisY + 10 : top + 10, null, laneY(lay, S.laneHeight));
       if (V && V.cursor >= from && V.cursor <= to) P.path([['M', X(V.cursor), top], ['L', X(V.cursor), bodyEnd]], { stroke: 'acc', w: 1.2 });

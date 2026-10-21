@@ -1185,7 +1185,7 @@ def ranges(browser, build):
     menu.locator('input[type=color]').evaluate("i => { i.value = '#2f9e44'; i.dispatchEvent(new Event('input', { bubbles: true })); }")
     page.keyboard.press('Escape'); col = js("v.strokeOf(v.M.rows.find(r => r.name === 'PSEL'))")
     page.mouse.click(box['x'] + 5, box['y'] + r[0], button='right'); menu.locator('button[data-m=zoom]').click(); z = js('[v.t0, v.t0 + v.span]')
-    check(mk == [nb + 2, [[r[3], 'PSEL'], [r[4], 'PSEL']], '20 ns'] and col == '#2f9e44' and menu.count() == 0 and z == [r[3], r[4]],
+    check(mk == [nb + 2, [[r[3], 'PSEL'], [r[4], 'PSEL']], '20 ns / 50 MHz'] and col == '#2f9e44' and menu.count() == 0 and z == [r[3], r[4]],
           f'the menu: bookmarks at the ends with an arrow "Δ", the colour of PSEL, Esc closes it, zoom to the range {mk} {col} {z}')
     c.focus(); page.keyboard.press('Escape'); js('(v.setRange(1, 2), 0)'); page.keyboard.down('Control'); page.mouse.click(box['x'] + 50, box['y'] + r[0]); page.keyboard.up('Control')
     check(js('v.range') is None, 'Esc, or a ctrl+click, clears the range')
@@ -1196,11 +1196,53 @@ def ranges(browser, build):
     w1 = js('[v.t0, v.span, v.range]'); c.focus(); page.keyboard.press('l')
     check(band and abs(w1[0] - want[0]) <= want[1] * 0.02 and abs(w1[1] - want[1]) <= want[1] * 0.02 and w1[2] is None and js('[v.t0, v.span]') == w0,
           f'shift+drag zooms into the range dragged over (as the middle button), no measured range; l: back {w0} -> {w1}')
+    # gaps: the menu's row turns them on (kept in this browser, in the state); the picture and WaveDrom leave out the idle stretches
+    page.mouse.click(box['x'] + 5, box['y'] + r[0], button='right')
+    sub = [menu.locator('.sub').is_hidden()]; menu.locator('.subh').hover(); sub.append(menu.locator('.sub').is_visible())
+    check(sub == [True, True], f'the gaps are a submenu: hidden, open on the pointer {sub}')
+    menu.locator('input.gi').fill('3'); menu.locator('input.gk').fill('0'); menu.locator('input.gk').dispatch_event('change'); menu.locator('input.gon').check()
+    g = js("""(() => { const S = v.M.rows.find(r => r.name === 'PSEL'), a = v.M.t0, b = v.M.t1, cuts = v.cutsOf(a, b, [S]), wd = v.toWaveDrom(a, b, [S]).signal.map(s => s.wave);
+        const n = v.cutsOf(v.t0, v.t0 + v.span, v.screenRows()).length - 1, on = v.toSVG(); v.setGaps({ gaps: false }); const off = v.toSVG(), wd0 = v.toWaveDrom(a, b, [S]).signal[0].wave;
+        v.setGaps({ gaps: true }); return [cuts.length - 1, wd, wd0.length, n, on !== off, v.state().config.gapIdle, (localStorage.getItem(v.lookKey) || '').includes('"gap"')]; })()""")
+    gaps = lambda w: [i for i, ch in enumerate(w) if ch == '|']
+    check(g[0] >= 1 and len(g[1]) == 2 and len(gaps(g[1][0])) == g[0] and gaps(g[1][0]) == gaps(g[1][1]) and len(g[1][0]) < g[2] and g[4] and g[5] == 3 and g[6]
+          and menu.locator('.gn').inner_text() == f'Gaps: {g[3]}', f'the menu\'s gaps (idle 3, keep 0): "|" in every WaveDrom wave at the same cells, the picture '
+          f'shorter, kept in this browser and in the state {g} {menu.locator(".gn").inner_text()!r}')
+    cm = menu.evaluate("m => !m.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))")
+    check(cm, 'a contextmenu on the open menu (Windows: the release of the right button) opens no browser menu over it')
+    page.keyboard.press('Escape')
+    # the signals the gaps follow: Gaps by this signal (// in the names), only them in the picture, ✕: every signal again
+    page.mouse.click(box['x'] + 5, box['y'] + y2, button='right'); menu.locator('.subh').click(); menu.locator('button[data-m=gref]').click()
+    ref = js("[[...v.gapRefSet()].map(r => r.name), v.gapOpt().gaps, [...WaveFW.internal.peek(v).namesEl.querySelectorAll('.row.gref .n')].map(e => e.textContent)]")
+    page.mouse.click(box['x'] + 5, box['y'] + y2, button='right'); menu.locator('.subh').click(); by = menu.locator('.gp').nth(1).inner_text()
+    menu.locator('input.gonly').check(); only = js("[v.exportRows().filter(r => r.type !== 'lane').map(r => r.name), v.toWaveDrom(v.M.t0, v.M.t1).signal.map(s => s.name)]")
+    menu.locator('button[data-m=grefx]').click(); after = js('[v.gapRefSet().size, v.exportRows().length]')
+    check(ref[0] == ['PSEL'] and ref[1] and ref[2] == ['PSEL'] and 'by 1 signal' in by and only == [['PSEL'], ['PCLK', 'PSEL']] and after == [0, 0],
+          f'Gaps by this signal: the gaps follow PSEL (// in the names), "only them": the picture and WaveDrom take PSEL alone; ✕: every signal again {ref} {by!r} {only} {after}')
+    # the clock the gaps count: Gaps: cycles of this clock (↑ in the names), the cycles under the axis in its name
+    ck = js("""(() => { const C = v.M.rows.find(r => r.name === 'PCLK' && r.tr), P = v.M.rows.find(r => r.name === 'PSEL' && r.tr);
+        v.menu(10, 10, C); const item = v.menuEl.querySelector('button[data-m=gclk]').textContent; v.menuEl.querySelector('button[data-m=gclk]').click();
+        v.setGaps({ gapIdle: 3, gapKeep: 0, gapSignals: [P.full] }); const svg = v.toSVG({ from: v.M.t0, to: v.M.t1 });
+        return [item, v.gapClockRow() === C, [...WaveFW.internal.peek(v).namesEl.querySelectorAll('.row.gclk .n')].map(e => e.textContent), /· \\d+ PCLK/.test(svg),
+          v.cutsOf(v.M.t0, v.M.t1, [P]).length > 1]; })()""")
+    aux = js("""(() => { const A = v.M.rows.find(r => r.name === 'PENABLE' && r.tr), P = v.M.rows.find(r => r.name === 'PSEL' && r.tr);
+        v.menu(10, 10, A); v.menuEl.querySelector('button[data-m=gaux]').click(); v.setGaps({ gapOnly: true, gapCount: 'edges' });
+        const rows = v.exportRows().filter(r => r.type !== 'lane').map(r => r.name), names = [...WaveFW.internal.peek(v).namesEl.querySelectorAll('.row.gaux .n')].map(e => e.textContent);
+        v.menu(10, 10, P); v.menuEl.querySelector('button[data-m=gaux]').click();   // one role per signal: PSEL leaves the ones the gaps follow
+        const moved = [v.gapRefSet().size, v.gapRows().aux.size]; v.setGaps({ gapOnly: false }); return [rows, names, moved]; })()""")
+    check(aux == [['PCLK', 'PSEL', 'PENABLE'], ['PENABLE'], [0, 2]],
+          f'Gaps: count its changes: PENABLE counted (+ in the names), "only them" takes the three kinds; one role per signal {aux}')
+    check(ck[0] == 'Count in cycles of this clock' and ck[1] and ck[2] == ['PCLK'] and ck[3] and ck[4],
+          f'Gaps: cycles of this clock: the gaps count PCLK (↑ in the names), "· N PCLK" under the axis of the picture {ck}')
+    rs = js("""(() => { v.setGaps({ gaps: true, gapIdle: 5, gapAux: ['x'] }); v.menu(10, 10, null); v.menuEl.querySelector('button[data-m=greset]').click();
+        const g = v.gapOpt(); return [g.gaps, g.gapIdle, g.gapAux.length, g.gapSignals.length, g.gapClock, !!v.local.gap, v.menuEl]; })()""")
+    check(rs == [False, 16, 0, 0, None, False, None], f'Reset the gaps: every gap setting of the viewer back to the settings, the menu closed {rs}')
+    js('(v.setGaps(null), 0)')
     # radix and hide from the menu (a bus of the dump: apb_tb.PADDR), the Hidden button, kept over a reload and in the state
     page.goto((build / 'examples' / 'apb' / 'apb_all.html').as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
     c.scroll_into_view_if_needed(); box = c.bounding_box()
     yb = lambda n: js(f"(o => o.y + o.h / 2 - (WaveFW.internal.peek(v).oy || 0))(WaveFW.internal.peek(v).lay.find(o => o.row.full === 'apb_tb.{n}'))")
-    page.mouse.click(box['x'] + 300, box['y'] + yb('PADDR'), button='right'); menu.locator('select').select_option('bin')
+    page.mouse.click(box['x'] + 300, box['y'] + yb('PADDR'), button='right'); menu.locator('select:not(.gcnt)').select_option('bin')
     rx = [js("v.valueAt(v.M.rows.find(r => r.full === 'apb_tb.PADDR'), v.cursor)"), menu.count()]
     page.mouse.click(box['x'] + 300, box['y'] + yb('PWDATA'), button='right'); menu.locator('button[data-m=hide]').click()
     hid = [js("WaveFW.internal.peek(v).vis.some(r => r.full === 'apb_tb.PWDATA')"), page.locator('.wv button[data-act=unhide]').first.inner_text(), js('v.state().hidden'), js('v.state().radix')]
@@ -1214,7 +1256,7 @@ def ranges(browser, build):
     # a highlighted row clicked: the colour, the radix and Hide of the menu go to every highlighted row
     js("(v.highlight(null), ['PADDR', 'PWDATA', 'PSEL'].forEach(n => v.toggleHighlight(v.M.rows.find(r => r.full === 'apb_tb.' + n))), 0)")
     page.mouse.click(box['x'] + 300, box['y'] + yb('PADDR'), button='right')
-    head = menu.locator('.mh').last.inner_text(); menu.locator('select').select_option('bin')
+    head = menu.locator('.mh').last.inner_text(); menu.locator('select:not(.gcnt)').select_option('bin')
     page.mouse.click(box['x'] + 300, box['y'] + yb('PADDR'), button='right')
     menu.locator('input[type=color]').evaluate("i => { i.value = '#2f9e44'; i.dispatchEvent(new Event('input', { bubbles: true })); }"); page.keyboard.press('Escape')
     many = js("['PADDR', 'PWDATA', 'PSEL', 'PENABLE'].map(n => [v.painted.get('apb_tb.' + n) || '', v.M.rows.find(r => r.full === 'apb_tb.' + n).radix || ''])")
@@ -1250,7 +1292,7 @@ def ranges(browser, build):
           f'= value: the selected signal becomes 0x40 / 8\'h40 / 64 (shift+Enter: before), an enum label (ACCESS); none: said; X / Z: the first one of any signal {[f1, f2, f3, back, f4]} {want} {none!r} {xz}')
     # the menu's Radix: fixed point (sq and its fraction bits), float; enumColors: a state's own fill
     js("(v.reset(), 0)"); page.mouse.click(box['x'] + 300, box['y'] + yb('PWDATA'), button='right')
-    menu.locator('select').select_option('sq'); qf = menu.locator('input.qf'); qopen = [qf.is_visible(), menu.count()]
+    menu.locator('select:not(.gcnt)').select_option('sq'); qf = menu.locator('input.qf'); qopen = [qf.is_visible(), menu.count()]
     qf.fill('16'); qf.dispatch_event('input'); fx = js("[v.M.rows.find(r => r.full === 'apb_tb.PWDATA').radix, v.valueAt(v.M.rows.find(r => r.full === 'apb_tb.PWDATA'), 60000)]")
     page.keyboard.press('Escape'); js("(v.setRadix('apb_tb.PWDATA', 'float'), 0)"); fl = js("v.valueAt(v.M.rows.find(r => r.full === 'apb_tb.PWDATA'), 60000)")
     js("(v.setRadix('apb_tb.PWDATA', null), 0)")
@@ -1540,6 +1582,19 @@ UNITS = [   # (JavaScript expression, its JSON value); NaN / ±Infinity / undefi
     ("I.niceStep(3)", 5), ("I.niceStep(0.3)", 1), ("I.niceStep(12)", 20), ("I.niceStep(51)", 100), ("I.niceStep(7, true)", 10),
     ("I.cycMap({ t0: 5, cycle: 10 })(3)", 35), ("I.cycMap(null)(4)", 4), ("I.cycMap({ cycle: 10, skip: [[2, 5]] })(3)", 70),
     ("I.cycMap({ cycle: 10, skip: [[2, 5]] })(2.5)", 45),
+    # gaps: the parts kept, a gap's ends on the rising edges (the cycle of a change and keep more kept), a gap's length
+    ("I.idleCuts([50, 60, 1000], 0, 2000, 160, 20, Array.from({ length: 200 }, (_, i) => i * 10), 20)", [[0, 90], [980, 1030], [1980, 2000]]),
+    ("I.idleCuts([50], 0, 1000, 200, 10)", [[0, 60], [990, 1000]]), ("I.idleCuts([50], 0, 100, 200, 10)", [[0, 100]]),
+    ("I.idleCuts([], 0, 100, 50, 45, [], 20)", [[0, 100]]), ("I.idleCuts([], 0, 100, 50, 0)", [[0, 100]]),
+    ("['rise', 'fall', 'any'].map(k => I.gapText(R('b'), 5, 45, k))", ['2↑', '1↓', '4↕']), ("I.gapText(R('d'), 5, 45, 'rise')", '4×'),
+    ("I.gapText(R('b'), 41, 50, 'rise')", ''), ("[I.gapText(R('b'), 5, 45, 'edges'), I.gapText(R('d'), 5, 45, 'edges')]", ['2↑ 1↓', '4×']), ("I.gapRefs(UM.rows, 'tb.b, st, *pix*').map(r => r.name)", ['b', 'st', 's_pix_valid']),
+    ("I.gapRefs(UM.rows, null).length", 0),
+    ("[40000, 6400, 1000, 3e6, 7e11, 3e13].map(I.fmtFreq)", ['25 MHz', '156.3 MHz', '1 GHz', '333.3 kHz', '1.429 Hz', '0.033 Hz']),
+    ("I.gapLen('16', 10)", 160), ("I.gapLen(2, 10)", 20), ("I.gapLen('2ns', 10)", 2000), ("I.gapLen('x', 10)", 'undefined'),
+    ("(M => [M({}), M({ gaps: true }), M({ gaps: true, gapIdle: 12 }), M({ gaps: true, gapIdle: '600ps', gapKeep: 1 })])(o => +WaveSVG.toString({ signal: "
+     "[{ name: 'clk', wave: 'p' + '.'.repeat(99) }, { name: 'd', wave: '=' + '.'.repeat(60) + '=', data: 'A B' }], time: { t0: 0, cycle: 10 } }, "
+     "Object.assign({ cyclePx: 10 }, o)).match(/width=\"(\\d+)\"/)[1])", [1051, 167, 167, 479]),   # 1000 px of waves; 100 px kept and two gaps of 8 px; 420 px and one
+
     ("I.parseWave({ wave: 'p..' }, c => c).tr.map(o => [o.t, o.k])", [[0, '1'], [0.5, '0'], [1, '1'], [1.5, '0'], [2, '1'], [2.5, '0']]),
     ("I.parseWave({ wave: '0=.x', data: 'A' }, c => 10 * c).tr.map(o => [o.t, o.k, o.v ?? null])", [[0, '0', None], [10, '=', 'A'], [30, 'x', None]]),
     ("I.parseWave({ wave: '0|1' }, c => c).gaps", [1.5]),
@@ -2537,6 +2592,11 @@ def tips(browser, build):
     got = [tip.count() == 1 and tip.locator('span').first.inner_text(), tip.locator('kbd').all_inner_texts(), b.get_attribute('title')]
     page.mouse.move(5, 5); until(page, "!document.querySelector('.wv-tip')"); got.append(tip.count())
     check(got == ['Zoom in', ['i', '+', 'ctrl+wheel'], None, 0], f'hover: "Zoom in" and its keys after a moment, no browser tooltip, gone when the pointer leaves {got}')
+    # in the right button's menu a tooltip waits menuTipDelay (2 s)
+    c = page.locator('.wv canvas').first; c.scroll_into_view_if_needed(); cb = c.bounding_box(); page.mouse.click(cb['x'] + 200, cb['y'] + 60, button='right')
+    page.locator('.wv-menu button[data-m=png]').hover(); page.wait_for_timeout(800); early = page.locator('.wv-tip').count()
+    until(page, "!!document.querySelector('.wv-tip')", 4000); late = page.locator('.wv-tip').count(); page.keyboard.press('Escape')
+    check([early, late] == [0, 1], f'a tooltip in the menu waits menuTipDelay: none after 0.8 s, there after 2 s {[early, late]}')
     page.locator('.wv canvas').first.click(); page.keyboard.press('?')
     hl = page.locator('.wv-help')
     hk = [hl.count(), hl.locator('h4').all_inner_texts(), ']f' in hl.inner_text() and ']t' in hl.inner_text()]

@@ -243,7 +243,8 @@ const SEL_ALPHA = 0.12;   // the accent over a selected row, its bus values incl
 // late: an array that takes the plugin overlays instead of drawing them (the viewer draws them over its cursor)
 // strokeOf: row -> its colour where a viewer or a figure changes it (paint, groupColors); default row.stroke
 // allLay: every row (edges may end off screen); folded(group row): no header shade
-function paintBody(P, M, lay, X, tA, tB, xL, xR, hl, sel, allLay, band, late, strokeOf = r => r.stroke, folded = () => false) {
+// bgOnly: the backgrounds, the selection and the separators only (the column of a gap in a figure)
+function paintBody(P, M, lay, X, tA, tB, xL, xR, hl, sel, allLay, band, late, strokeOf = r => r.stroke, folded = () => false, bgOnly = false) {
   const rowY = new Map(), sep = [], edge = [], over = new Set();
   let pb;
   if (allLay) for (const o of allLay) if (o.row.type === 'sig') rowY.set(o.row, o.y + o.h / 2);
@@ -259,11 +260,14 @@ function paintBody(P, M, lay, X, tA, tB, xL, xR, hl, sel, allLay, band, late, st
     if (row.type === 'group') { if (!folded(row)) { P.rect(xL, y, xR - xL, h, 'panel2'); P.rect(xL, y, xR - xL, h, 'fg', 0.08); } edge.push(['M', xL, y + 0.5],
       ['L', xR, y + 0.5]); pb = undefined; }
     // a struct: its whole value
-    if (row.type === 'group' && row.sig && row.sig.tr.length) paintSig(P, row.sig, y, h, X, tA, tB, xL, xR, M.t1, strokeOf(row.sig) || 'bus', 'panel');
+    if (row.type === 'group' && row.sig && row.sig.tr.length && !bgOnly) {
+      paintSig(P, row.sig, y, h, X, tA, tB, xL, xR, M.t1, strokeOf(row.sig) || 'bus', 'panel');
+    }
     if (typeof c === 'string') P.rect(xL, y, xR - xL, h, c, 0.1);   // a plugin's highlight
     const isSel = sel instanceof Set ? sel.has(row) : row === sel;   // sel: the selected row, or a Set (shift+click: a run)
     if (isSel) P.rect(xL, y, xR - xL, h, 'acc', SEL_ALPHA);
     if (row.type !== 'space') sep.push(['M', xL, y + h - 0.5], ['L', xR, y + h - 0.5]);
+    if (bgOnly) continue;
     if (row.draw) row.draw(P, { y, h, X, tA, tB, xL, xR });
     if (row.overlay) over.add(row.overlay);
     if (row.type === 'sig') { if (row.tr) paintSig(P, row, y, h, X, tA, tB, xL, xR, M.t1, strokeOf(row), b === 1 ? 'band' : 'panel', isSel);
@@ -272,6 +276,7 @@ function paintBody(P, M, lay, X, tA, tB, xL, xR, hl, sel, allLay, band, late, st
   P.fade = 1;
   P.path(sep, { stroke: 'line', w: 1, alpha: 0.5 });
   P.path(edge, { stroke: 'line', w: 1 });   // module borders
+  if (bgOnly) return rowY;
   if (allLay) {   // an overlay that also draws on other rows (f.rows: the signals it marks) runs when one of those is shown
     const on = new Set(lay.map(o => o.row));
     for (const o of allLay) { const f = o.row.overlay; if (f && f.rows && !over.has(f) && f.rows.some(r => on.has(r))) over.add(f); }
@@ -283,6 +288,24 @@ function paintBody(P, M, lay, X, tA, tB, xL, xR, hl, sel, allLay, band, late, st
   }
   paintEdges(P, M, rowY, X);
   return rowY;
+}
+const GAP = 8;   // px: the column of a gap in a figure
+// the line of a gap at xm from y0 to y1 (setting gapLine): "dashdot" a thin straight dash-dot line (unlike a bookmark's
+// dotted one), "wave" a wavy one, "waves" two thin wavy lines, "zigzag", "double" two straight dashed lines
+function paintGapLine(P, xm, y0, y1, style) {
+  const wavy = (x, a, h) => { const d = [['M', x, y0]]; let k = 0;
+    for (let y = y0; y < y1; y += h, k++) {
+      const s = k % 2 ? -a : a, ye = Math.min(y + h, y1);
+      d.push(['C', x + s, y + (ye - y) / 3, x + s, y + 2 * (ye - y) / 3, x, ye]);
+    }
+    return d; };
+  if (style === 'double') return P.path([['M', xm - 1.5, y0], ['L', xm - 1.5, y1], ['M', xm + 1.5, y0], ['L', xm + 1.5, y1]], { stroke: 'muted', w: 1,
+    dash: [6, 3] });
+  if (style === 'zigzag') { const d = [['M', xm, y0]]; let k = 0; for (let y = y0 + 3; y < y1; y += 3, k++) d.push(['L', xm + (k % 2 ? -1.8 : 1.8), y]);
+    return P.path(d, { stroke: 'muted', w: 0.8 }); }
+  if (style === 'waves') return P.path([...wavy(xm - 1.6, 1.6, 5), ...wavy(xm + 1.6, 1.6, 5)], { stroke: 'muted', w: 0.8 });
+  if (style === 'wave') return P.path(wavy(xm, 2, 6), { stroke: 'muted', w: 0.9, dash: [5, 2, 1.5, 2] });
+  return P.path([['M', xm, y0], ['L', xm, y1]], { stroke: 'muted', w: 0.9, dash: [6, 2, 1.5, 2] });
 }
 function paintMarkers(P, markers, X, tA, tB, y0, y1) {
   for (const m of markers) {
