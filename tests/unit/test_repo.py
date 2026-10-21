@@ -68,7 +68,7 @@ class Docs(unittest.TestCase):
         self.assertEqual([k for k in vcd2wavedrom.SIG_KEYS if k not in info and f'it.{k}' not in model], [])
 
     def test_tools_help(self):
-        for t in ('vcd2wavedrom', 'mkconfig', 'mkhtml', 'embed', 'svabuild', 'wavefwcat'):
+        for t in ('vcd2wavedrom', 'mkconfig', 'mkhtml', 'embed', 'svabuild', 'wavefwcat', 'wavemcp'):
             with self.subTest(t):
                 rc, out, _ = H.run_tool(t, '--help')
                 self.assertEqual(rc, 0)

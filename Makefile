@@ -61,18 +61,21 @@ help:
 	@echo 'make sva-verify the checkers of the examples in Verilator --assert against sva eval (after make examples; skipped without verilator)'
 	@echo 'make sva-eval   WAVES=dump.vcd|fst SVA="pkg.sv checks.sva" SCOPE=tb.dut [OUT=results.json] [ARGS=...]: sva eval'
 	@echo 'make sva-spike  the spike page $$(BUILD)/sva/spike.html (the WebAssembly build and wavefw/sva.js in a page)'
+	@echo 'make mcp-bench  the MCP server for AI agents (tools/wavemcp.py) on the benchmark tasks by a script: answers checked, bytes'
+	@echo '                returned (no agent); AGENT=claude|codex [MODEL=sonnet] [REPS=2] [TASKS=a1,b3]: agents with and without'
+	@echo '                it, tokens counted (costs tokens; tests/mcp_bench.py, the runs in $$(BUILD)/mcp_bench/runs.jsonl)'
 	@echo 'make smoke      headless Chromium checks of docs/index.html, tests/conformance.html and the built pages (needs'
 	@echo '                make examples demo demo-fst sva-build sva-spike html first; what is missing is reported as SKIPPED);'
 	@echo '                STRICT=1: a skip fails; ONLY=sec1,sec2: those sections only (smoke.py --list)'
 	@echo 'make unit       the Python unit tests of the tools (tests/unit: unittest, standard library, a few seconds)'
-	@echo 'make check      the gate before a commit: sva-test, unit, the pages smoke needs, smoke STRICT=1, shots-check'
+	@echo 'make check      the gate before a commit: sva-test, unit, the pages smoke needs, mcp-bench, smoke STRICT=1, shots-check'
 	@echo 'make fmt        verible-verilog-format of the project SystemVerilog (docs/SV_STYLE.md), when installed'
 	@echo 'make lint       verilator --lint-only -Wall on the example testbenches'
 	@echo 'make clean      remove the build products under $$(BUILD) (the cargo target stays: make clean-all)'
 	@echo 'make clean-all  remove $$(BUILD) entirely, the cargo target included'
 	@echo 'variables       BUILD=$(BUILD)  WAVES=dump.vcd|fst  CONFIG  HTML  BASE=$(BASE)  SV="rtl/*.sv"  READER=builtin|wavepeek'
 	@echo '                SVA="checks/*.sv"  BIND="name@scope,…"  EX=apb|axi_lite|fsm  SCOPE=tb.dut  OUT=results.json  ARGS=…'
-	@echo '                FST=$$(BUILD)/demo_fst.fst  STRICT=1  ONLY=sec,…'
+	@echo '                FST=$$(BUILD)/demo_fst.fst  STRICT=1  ONLY=sec,…  AGENT=claude|codex  MODEL  REPS  TASKS'
 
 demo: $(DEMO_JS) $(APB_JS)
 
@@ -240,6 +243,13 @@ sva-spike: sva-build $(VCD)
 	$(PY) sva/spike/mkspike.py $(SVA_WASM) $(B)/sva/spike.html
 	$(SVA_BIN) eval --waves $(VCD) --scope demo_tb --sva sva/spike/demo.sva || true   # a_start_done fails on purpose
 
+# The MCP server (tools/wavemcp.py) and what it saves an agent (tests/mcp_bench.py): a generated dump with known answers
+# and the APB / FSM examples; without AGENT the tasks are solved through the tools by a script (make check runs it)
+mcp-bench:
+	@test -f $(B)/examples/apb/apb.vcd -a -f $(B)/examples/fsm/fsm.fst || { $(MAKE) example EX=apb && $(MAKE) example EX=fsm; }
+	$(PY) tests/mcp_bench.py --build $(B) $(if $(AGENT),--agent $(AGENT) $(if $(MODEL),--model $(MODEL)) $(if $(REPS),--reps $(REPS)) \
+	  $(if $(TASKS),--tasks $(TASKS)),--scripted)
+
 smoke:
 	$(PW) tests/smoke.py --build $(B) --out $(B)/shots $(if $(STRICT),--strict) $(if $(ONLY),--only $(ONLY))
 
@@ -259,7 +269,7 @@ check:
 	$(MAKE) sva-test unit
 	$(MAKE) sva-build
 	$(MAKE) examples demo demo-fst sva-spike html
-	$(MAKE) sva-verify
+	$(MAKE) sva-verify mcp-bench
 	$(MAKE) smoke STRICT=1
 	$(MAKE) shots-check
 
@@ -288,4 +298,4 @@ clean-all:
 	$(if $(filter $(B),/ $(CURDIR) $(HOME) $(abspath $(HOME)/..)),$(error clean-all: BUILD=$(B) is not a build directory))
 	rm -rf $(B)
 
-.PHONY: wavefw help demo demo-fst example examples shots html config sva-build dist dist-linux dist-windows sva-test sva-bless sva-examples sva-verify sva-eval sva-spike smoke shots-check unit check fmt lint clean clean-all
+.PHONY: wavefw help demo demo-fst example examples shots html config sva-build dist dist-linux dist-windows sva-test sva-bless sva-examples sva-verify sva-eval sva-spike mcp-bench smoke shots-check unit check fmt lint clean clean-all

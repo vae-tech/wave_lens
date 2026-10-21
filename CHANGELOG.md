@@ -5,6 +5,22 @@ lives on a branch. The version is in `VERSION`, in `wavefw.js` (`WaveFW.version`
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.11 — 21 October 2026
+
+An MCP server: the tools of wavefw for an AI agent.
+
+- `tools/wavemcp.py` (standard library, stdio): `wave_info`, `wave_signals`, `wave_values`, `wave_changes`,
+  `wave_sample` (a row per clock cycle, sampled as SVA samples), `wave_find` (an SV expression or sequence per cycle
+  through the sva engine, or a signal's edges and values), `wave_stats`, `sva_check` (failures with their cycles and
+  times), `wave_page` (a viewer page or WaveJSON to show a person); names by a tail of the path, times in ns, answers
+  cut at a limit with how to go on; `--call TOOL JSON` from the shell. Claude Code: `claude mcp add wavefw -- python3
+  -I tools/wavemcp.py`; Codex: `codex mcp add …`.
+- `tests/mcp_bench.py`, `make mcp-bench`: eight tasks with known answers (the APB and FSM examples, a generated 3.5 MB
+  dump) solved through the tools by a script (in `make check`), or by `claude -p` / `codex exec` agents with the server
+  and without it, tokens counted: Claude Code (Sonnet 5.5) −24 % tokens and −28 % cost with the server, every answer
+  right; Codex +33 % through MCP (it defers MCP tools), −3 % through `wavemcp.py --call` in its shell; the big savings
+  on assertions and FST dumps, none on one number a short parser gets.
+
 ## 0.10 — 21 October 2026
 
 Gaps: a long range of rare transfers as its transfers side by side.

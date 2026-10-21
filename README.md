@@ -55,6 +55,9 @@ python3 tools/mkhtml.py --config work/my.config.json --out work/my.html --sva ch
 - **Large dumps**: 3520 signals in 214 scopes, 4.9 M value changes — the config in 2.7 s, a page with the 1526 changing
   signals in 25 s, it opens in 2 s and redraws in 4 ms; scopes are foldable groups with module shading
   ([USAGE § Large dumps](docs/USAGE.md#large-dumps)).
+- **AI agents**: `tools/wavemcp.py` is an MCP server (Claude Code, Codex, any MCP client): a dump's signals, values,
+  changes, clock-sampled tables, searches by an SV expression or sequence, aggregates and assertions as short JSON
+  answers, and a page to show a person ([USAGE § AI agents](docs/USAGE.md#ai-agents-mcp)).
 - **A dump in the browser**: `wavefw/viewer.html` (or **Open…** in any viewer) reads a VCD dropped on it, ⟳ reads it
   again after a new simulation with the view kept ([USAGE § Use cases](docs/USAGE.md#a-dump-straight-in-the-browser)).
 - **The viewer**: cursor and span fields, a second cursor (Δ in time and clock cycles), zoom and pan by wheel and keys,
@@ -125,7 +128,7 @@ Every example has its assertions (`*.sva`) with one deliberately wrong, so a fai
 
 | Document | What is in it |
 |---|---|
-| [`docs/USAGE.md`](docs/USAGE.md) | the user's guide: use cases, the config, settings, themes, static SVG, assertions, the viewer and its keys, the tools, the formats |
+| [`docs/USAGE.md`](docs/USAGE.md) | the user's guide: use cases, the config, settings, themes, static SVG, assertions, the viewer and its keys, AI agents (MCP), the tools, the formats |
 | [`docs/index.html`](docs/index.html) | the reference with live examples (open from `file://`): every attribute, setting and API function |
 | [`docs/sva/LANGUAGE.md`](docs/sva/LANGUAGE.md), [`ENGINE.md`](docs/sva/ENGINE.md), [`STACK.md`](docs/sva/STACK.md) | the SVA subset, the evaluator's semantics and results JSON, the technology choice |
 | [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) | the project layout, build and test (`make check`), measurements, the roadmap |
@@ -145,8 +148,8 @@ Layout, tools, measurements and conventions: [`docs/DEVELOPMENT.md`](docs/DEVELO
 
 ## Versions
 
-0.10 — [`CHANGELOG.md`](CHANGELOG.md) lists every version (two numbers; each a tagged merge into `main`, `v0.1` …
-`v0.10`).
+0.11 — [`CHANGELOG.md`](CHANGELOG.md) lists every version (two numbers; each a tagged merge into `main`, `v0.1` …
+`v0.11`).
 
 ## License
 

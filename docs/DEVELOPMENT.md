@@ -17,6 +17,7 @@ wavefw/                       what a page needs, nothing else
   bus.js                      bus transactions: ports found by their names, decoders (AXI, AXI-Stream, APB, AHB, Avalon, Wishbone, OBI), rows
 tools/                        what you run: python3 -I tools/<tool>.py
   mkconfig.py vcd2wavedrom.py mkhtml.py embed.py dumpscan.py wavejson.py svabuild.py
+  wavemcp.py                  the tools as an MCP server for AI agents (stdio; USAGE § AI agents)
   base.config.json            base settings for generated configs (make config / make html WAVES=x.vcd)
 examples/                     apb/ axi_lite/ fsm/ demo/: testbench, config, README; *.sva: assertions for each;
                               test_video/: the CoaXPress checkers over a real dump (the dump and page not in git)
@@ -34,6 +35,7 @@ tests/
   unit/                       the Python unit tests of the tools (make unit: unittest, standard library); vcd/: small VCDs
                               of what simulators write (real, string, event, escaped names, VHDL values, comments …)
   smoke.py                    behaviour checks in headless Chromium (make smoke)
+  mcp_bench.py                what the MCP server saves an agent: tasks with known answers, agents with and without it
   sva/                        the SVA corpus: *.sv with every construct, err_*.sv with annotated errors, golden/;
                               third_party/: AXI4-Lite, APB, AHB checkers of others (licenses, units.json)
   shots.py                    the screenshots (make shots)
@@ -49,8 +51,9 @@ Makefile                      make help lists the targets; build products go to 
 ## Build and test
 
 ```sh
-make check                  # the gate before a commit: wavefw.js current and its sources ≤ 160 columns, sva-test, unit, every page smoke needs, sva-verify, smoke STRICT=1, shots-check
-make unit                   # tests/unit: the tools on small VCDs of what simulators write (117 tests, ~12 s, standard library)
+make check                  # the gate before a commit: wavefw.js current and its sources ≤ 160 columns, sva-test, unit, every page smoke needs, sva-verify, mcp-bench, smoke STRICT=1, shots-check
+make unit                   # tests/unit: the tools on small VCDs of what simulators write (130 tests, ~10 s, standard library)
+make mcp-bench              # tools/wavemcp.py on the benchmark tasks by a script (answers checked); AGENT=claude|codex: agents
 make wavefw                 # wavefw/wavefw.js from wavefw/src/*.js (after editing them; make html / example do it too; lines ≤ 160 columns)
 make demo examples html     # rebuild docs/demo_waves.js, the example pages, the demo page
 make smoke                  # tests/smoke.py: every page in light and dark, 470 checks on 26 pages, PNGs in BUILD/shots
@@ -140,9 +143,34 @@ and 0.93 ms with it (8000 cycles between them); before, 1.55 → 8.14 ms.
 
 The SVA engine's numbers are in [`sva/ENGINE.md`](sva/ENGINE.md) *Performance*.
 
+The MCP server (`make mcp-bench AGENT=claude MODEL=sonnet REPS=2`, `AGENT=codex`; 21 October 2026, the tool list of
+5036 characters): every token per task, the median of two runs without the tools → with them (saved). Every one of the
+128 answers was right. The tasks: a1 the APB checkers (which fails, when), a2 APB wait states, read data and the
+error, b1–b5 the generated dump (clock and reset, frames, a req / ack rule with one late ack, the error pulse and the
+FIFO level then, the FIFO's maximum), c1 the FSM's states by name from the FST.
+
+| Task | Claude, MCP | Claude, `--call` | Codex, MCP | Codex, `--call` |
+|---|---|---|---|---|
+| a1 | 72k → 21k (+71%) | 72k → 77k (−8%) | 102k → 94k (+9%) | 102k → 61k (+41%) |
+| a2 | 40k → 36k (+10%) | 40k → 29k (+28%) | 66k → 99k (−50%) | 66k → 54k (+18%) |
+| b1 | 30k → 31k (−5%) | 30k → 30k (−2%) | 58k → 75k (−29%) | 58k → 82k (−40%) |
+| b2 | 48k → 41k (+16%) | 48k → 57k (−18%) | 67k → 87k (−31%) | 67k → 53k (+20%) |
+| b3 | 39k → 28k (+27%) | 39k → 51k (−31%) | 67k → 109k (−63%) | 67k → 83k (−24%) |
+| b4 | 44k → 50k (−14%) | 44k → 40k (+9%) | 50k → 97k (−93%) | 50k → 72k (−43%) |
+| b5 | 28k → 32k (−13%) | 28k → 33k (−19%) | 47k → 103k (−121%) | 47k → 72k (−54%) |
+| c1 | 43k → 22k (+49%) | 43k → 22k (+49%) | 101k → 77k (+24%) | 101k → 64k (+37%) |
+| sum | 343k → 261k (+24%) | 343k → 339k (+1%) | 558k → 741k (−33%) | 558k → 540k (+3%) |
+
+What changed the numbers on the way: the first tool list (8354 characters, ten tools) cost Claude about 3.7 k tokens
+more per request (a request of "OK" with and without it); cut to 5036 (the conventions once in the server's
+instructions, `wave_wavedrom` folded into `wave_page`), Claude's tokens saved stayed at 24 % while its cost per run went
+from 7 % more than without the tools to 28 % less (the first round: one run per task, without c1). Without `readOnlyHint` on the tools `codex exec` refuses to call them ("requires
+approval"): the agent falls back to its shell. The runs, their transcripts and answers: `BUILD/mcp_bench/runs.jsonl`,
+`BUILD/mcp_bench/runs/*/transcript.jsonl`.
+
 ## Versions
 
-Two numbers, `MAJOR.MINOR` (0.10 now; [`CHANGELOG.md`](../CHANGELOG.md) lists them all). The work goes on a branch;
+Two numbers, `MAJOR.MINOR` (0.11 now; [`CHANGELOG.md`](../CHANGELOG.md) lists them all). The work goes on a branch;
 a version is a merge into `main` (`git merge --no-ff`) tagged `vMAJOR.MINOR` (an annotated tag, its message the
 changelog entry). One commit on the branch before the merge raises the version in four places: `VERSION`,
 `version:` in `wavefw/src/boot.js` (then `make wavefw`), a new top entry in `CHANGELOG.md`, and the committed builds

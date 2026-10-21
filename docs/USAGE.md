@@ -527,6 +527,59 @@ from the dump (the whole hierarchy).
 | [`fsm`](../examples/fsm) | UART receiver with `typedef enum` states in a package: names from the FST and, for the VCD, from the sources; questa edges | [fsm](img/fsm.png), [struct](img/struct.png) |
 | [`demo`](../examples/demo) | the Manchester transmitter behind [`docs/index.html`](index.html) (`make demo`) | [cursor](img/cursor.png) |
 
+## AI agents (MCP)
+
+`tools/wavemcp.py` gives an AI agent (Claude Code, Codex, any MCP client) the tools of wavefw as an MCP server over
+stdio: it asks questions of a dump and gets short JSON answers instead of reading the dump or writing a parser for it.
+Standard library only; the assertions and the expression search need the `sva` CLI (found as `svabuild.py` finds it),
+an FST needs `fst2vcd`.
+
+```sh
+claude mcp add wavefw -- python3 -I /path/to/wavefw/tools/wavemcp.py     # Claude Code (--scope user: every project)
+codex mcp add wavefw -- python3 -I /path/to/wavefw/tools/wavemcp.py      # Codex CLI
+python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd"}'   # one tool from the shell
+```
+
+| Tool | Answers |
+|---|---|
+| `wave_info` | the time span, the number of signals and changes, the scopes (three levels), the clocks with their period, the resets |
+| `wave_signals` | the signals by a substring or a `*` / `?` pattern, under a scope, to a depth: path, width, number of changes |
+| `wave_values` | the values of signals at one or more times (after the changes at that time, or `side: "before"`) |
+| `wave_changes` | the value at the start of a window and the changes in it, `limit` per signal (`more`, `next_from`: how to go on) |
+| `wave_sample` | a table per clock cycle (`cycle`, `t`, the values sampled just before the edge, as SVA samples), by default only the cycles where a value changes |
+| `wave_find` | `expr`: an SV expression or sequence matched on every clock cycle by the sva engine (`req && !ack`, `req ##[1:3] ack`, `$rose(x)`); or a signal's edges (`rise`, `fall`, `change`) or value (a number, `'h40`, an enum label) at their exact times; the count and the first matches |
+| `wave_stats` | over a window: a bit's rises, falls, high time, pulse widths and period; a bus's changes, distinct values, the longest-held ones, minimum and maximum |
+| `sva_check` | assertion files and / or text evaluated over the dump in a scope: the failed ones with their first failures (`cycle`, `t`, `start_cycle`, `start_t`, the reason), passed, vacuous, not evaluated (names missing), the covers |
+| `wave_page` | a viewer page (`out` `.html`) or WaveJSON (`.json`) of signals over a window, assertions bound, to show a person |
+
+The conventions are in the server's `instructions`: times are ns (a number) or a text with a unit (`"2.5us"`); a
+signal is its full path, its path under `scope`, or the unique tail of a path (`PSEL`, `u_regs.PSEL`; of several
+matches the one nearest the top is taken and named in `notes`, two at the same depth are an error naming them; of
+several signals asked for, one not found is left out and named in `missing`); `x[7:4]` and `x[3]` select bits; the cycle numbers are the clock's rising edges from the start of the dump, as `sva_check`
+counts them. A dump is read once per server and kept (again when the file changes); the transitions of a signal when a
+tool first needs it.
+
+**What it saves.** `make mcp-bench AGENT=claude MODEL=sonnet REPS=2` (or `AGENT=codex`) runs eight tasks with known
+answers — two on the APB example, one on the FSM example's FST, five on a generated 3.5 MB dump of 40 000 cycles — by
+an agent with the server and without it (the shell and the wavefw command-line tools, named in the same prompt), and
+counts the tokens; `make mcp-bench` alone solves them through the tools by a script (16 calls, 3.3 KB returned, every
+answer right). Measured on 21 October 2026, two runs of each task in each mode, every one of the 128 answers right
+(the tokens are every token the model read or wrote, the context read again from the cache included; the medians per
+task summed):
+
+| Agent | without the tools | with the MCP server | the same tools from the shell (`wavemcp.py --call`) |
+|---|---:|---:|---:|
+| Claude Code, Sonnet 5.5 | 343 k tokens, $0.53, 147 s | 261 k (−24 %), $0.38 (−28 %), 96 s | 339 k (−1 %), $0.49 (−8 %), 170 s |
+| Codex CLI, its default model | 558 k tokens, 232 s | 741 k (+33 %), 179 s | 540 k (−3 %), 159 s |
+
+Where it saves: assertions (`sva_check`: one call instead of reading the CLI's help and its JSON — Claude −71 %) and
+an FST with enum names (−49 %, Codex −37 % through the shell); a question answered by a few searches on a dump too big
+to read. Where it does not: one number from a dump whose signals the task names, which the agent gets by writing one
+Python parser — the tools' schemas, read again with every request, cost more than the parser. Codex defers MCP tools
+(it looks them up while it works), about 5 k tokens more per request: for Codex the same tools through `--call` in its
+shell are the cheaper way. Answers came faster with the tools (the sums of the medians above). The per-task numbers are
+in [DEVELOPMENT.md § Measured](DEVELOPMENT.md#measured).
+
 ## Tools
 
 All tools are `python3 -I tools/<tool>.py --help`; the Makefile calls them for you.
@@ -539,6 +592,7 @@ All tools are `python3 -I tools/<tool>.py --help`; the Makefile calls them for y
 | `svabuild.py` | the `"sva"` / `"bind"` of a config: files parsed, bindings evaluated with the `sva` CLI (used by the two above) | `--waves --sva --bind --out` |
 | `embed.py` | WaveJSON → `data.js` for `file://` pages, or into an HTML placeholder | `--var NAME key=file.json`, `--html --placeholder` |
 | `dumpscan.py`, `wavejson.py` | the built-in dump reader (VCD text, FST via `fst2vcd -e`) and the readable JSON writer | modules |
+| `wavemcp.py` | the tools as an MCP server for an AI agent (stdio), or one tool from the shell ([§ AI agents](#ai-agents-mcp)) | `--list`, `--call TOOL JSON` |
 | `svaverify.py` | the examples' checkers in Verilator `--assert` against `sva eval` (`make sva-verify`) | `--build`, `--only`, `--keep`, `--sva-bin` |
 | `sva` (the engine's CLI, Rust: `make sva-build`, or `bin/linux-x86_64/sva`) | `sva parse` an assertion file, `sva eval` assertions over a dump, `sva report` results, `sva --waves DUMP --info` a dump's scopes and variables | `sva <command> --help`; eval: `--waves --scope --sva [--assert NAME] [--from --to] [--out] [--json] [--attempts] [--x fail\|false] [--vacuous] [--no-lane] [--resolve up\|scope] [--ignore-prefix] [--alias] [--max-threads] [--report] [--junit] [-D]`; parse: `--json --expand -D` |
 

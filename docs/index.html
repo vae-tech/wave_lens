@@ -431,6 +431,9 @@ button.theme:hover { border-color: var(--accent); color: var(--accent); }
 <div class="bench"><div data-wave="DEMO_WAVES.cycle" data-mode="svg"></div></div>
 <details class="bench" style="padding:10px 14px"><summary class="muted" style="cursor:pointer">Generated WaveJSON (clock-sampled)</summary><pre id="cyc-src"></pre></details>
 
+<h3 id="mcp">For an AI agent: the MCP server</h3>
+<p><code>tools/wavemcp.py</code> serves the same reader and the assertion engine to an AI agent over MCP (stdio): <code>claude mcp add wavefw -- python3 -I tools/wavemcp.py</code> (or <code>codex mcp add …</code>). Its tools answer in short JSON: <code>wave_info</code>, <code>wave_signals</code>, <code>wave_values</code>, <code>wave_changes</code>, <code>wave_sample</code> (a row per clock cycle, sampled before the edge), <code>wave_find</code> (an SV expression or sequence per cycle, or a signal's edges and values), <code>wave_stats</code>, <code>sva_check</code>, <code>wave_page</code> (this viewer, or WaveJSON, to show a person). <code>make mcp-bench</code> measures what it saves an agent (docs/USAGE.md § AI agents).</p>
+
 <!-- ============================================================ -->
 <h2 id="cards">7. Lazy cards</h2>
 <p>A viewer marked <code>data-lazy</code> is built only when its <code>&lt;details&gt;</code> opens or its button is pressed, as in the test-scenario cards of the datasheet. The first card starts open.</p>
