@@ -1177,7 +1177,407 @@ EDIT_OPS = [   # every command that changes a state, with the arguments in their
     {'op': 'sort', 'dir': 'desc', 'ignore': 'P'}, {'op': 'style', 'name': 'questa'}, {'op': 'fold', 'groups': 'ctl'},
     {'op': 'find', 'query': 'pw', 'case': True, 'open': False}, {'op': 'gaps', 'on': True, 'idle': 8},
     {'op': 'layout', 'scroll': 'page', 'tools': 'fold'}, {'op': 'group', 'name': 'ctl', 'go': True},
+    {'op': 'cycles', 'on': True, 'clock': 'PCLK', 'zero': '50ns'}, {'op': 'group', 'name': 'payload', 'move': 1},
 ]
+
+
+def cycles(browser, build):
+    """V5: the cycles of a clock in a band under the time axis — numbered from cycle 0, the cursor's in the title, c147 in
+    the cursor field, Δ of the second cursor in them, the menu's Cycles ▸, the pictures (toSVG, WaveSVG), kept in the browser."""
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('viewer: clock cycles')
+    ctx = browser.new_context(viewport={'width': 1400, 'height': 1000})
+    page = ctx.new_page()
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+    js = lambda e: page.evaluate(f"(async () => {{ const v = document.querySelector('.wv').waveView; {e} }})()")
+    got = js("""const h0 = v.hdrH, r = await v.run([{ op: 'cycles', on: true }]), ups = WaveFW.views()[0] && v.cycData().ups;
+        v.setCursor(ups[2] + 1); const t = v.curEl.textContent, lab = WaveFW.internal.peek(v).namesEl.querySelector('.hdr .cyc')?.textContent;
+        v.setCursor('c5'); const c5 = v.cursor === ups[5];
+        return [v.hdrH - h0, r[0].clock, r[0].cycle, / · cycle 2 ↑PCLK/.test(t), lab, c5, ups.length > 10];""")
+    check(got[0] == 16 and got[1] == 'PCLK' and got[3] and got[4] == 'cycles ↑ PCLK' and got[5] and got[6],
+          f'cycles on: a 16 px band, the clock found (PCLK) named in the names\' header, the cursor\'s cycle in the title, c5 goes to edge 5 {got}')
+    got = js("""const ups = v.cycData().ups; await v.run([{ op: 'cycles', zero: ups[3] }]); v.setCursor(ups[5]); const a = v.cycText();
+        v.setCursor('c-1'); const b = v.cursor === ups[2]; v.setCursor2(ups[9]); const d = v.delta2(); v.setCursor2(null);
+        const bad = v.parseIn('c99999', v.cuEl, true);
+        return [a, b, / · 7 PCLK$/.test(d), bad === undefined, v.state().config.cycleZero === ups[3]];""")
+    check(got == [' · cycle 2 ↑PCLK', True, True, True, True], f'cycle 0 at edge 3: edge 5 is cycle 2, c-1 is edge 2, Δ of the cursors in cycles, '
+          f'past the last edge refused, kept in the state {got}')
+    svg = js("return [v.toSVG(), WaveFW.WaveSVG.toString(v.M.src, { cycles: true }), WaveFW.WaveSVG.toString(v.M.src, {})];")
+    check('cycles ↑ PCLK' in svg[0] and 'cycles ↑ PCLK' in svg[1] and 'cycles ↑' not in svg[2],
+          'the picture of the viewer and a static WaveSVG with cycles: true draw the band; without it, none')
+    page.reload(); page.wait_for_load_state('networkidle')
+    got = js("const o = v.cycOpt(), u = v.cycData().ups; v.setCursor('c0'); return [o.cycles, o.cycleClock, v.hdrH, o.cycleZero === u[3], v.cursor === u[3]];")
+    check(got == [True, None, 40, True, True], f'kept in this browser over a reload (the clock found: none set), cycle 0 and c0 too {got}')
+    got = js("""const ups = v.cycData().ups, c = v.cursor; return [v.parseIn('c2', v.suEl), v.parseIn('c2', v.cuEl, true) === ups[5],
+        (await v.run([{ op: 'cycles', on: false, clock: 'PADDR' }]))[0].error, v.cycOpt().cycles];""")
+    check(got[0] is None and got[1] and 'not a 1-bit signal' in (got[2] or '') and got[3] is True,
+          f'c2 is a time on the waves (cursor), not a span; a bad command changes nothing {got}')
+    # a state with null (the clock found, the first edge) over a page that sets both: null stays
+    got = js("""WaveFW.configure({ cycleClock: 'PSEL', cycleZero: 20000 }); await v.run([{ op: 'cycles', clock: null, zero: null }]); const st = v.state();
+        v.setCycles(null); const page = [v.cycOpt().cycleClock, v.cycOpt().cycleZero]; await v.setState(st); const back = [v.cycOpt().cycleClock, v.cycOpt().cycleZero];
+        v.setCycles(null); WaveFW.configure({ cycleClock: null, cycleZero: null }); return [page, back];""")
+    check(got == [['PSEL', 20000], [None, None]], f'a saved null (the clock found, the first edge) comes back null over the page\'s settings {got}')
+    # two clocks of other periods: the band's one counts the Δ and c3, a name that is also a path's tail takes the exact path
+    got = page.evaluate("""(() => { const ck = (p, n) => { const tv = []; for (let i = 0; i < n; i++) tv.push([i * p, '0'], [i * p + p / 2, '1']); return tv; };
+        const el = document.body.appendChild(document.createElement('div')), w = new WaveFW.WaveView(el, { signal: [['tb', { name: 'clk', path: 'tb.clk',
+          tv: ck(10, 30) }], { name: 'clk', path: 'clk', tv: ck(30, 10) }], time: { t0: 0, unit: 'ps' } }, {});
+        return w.run([{ op: 'cycles', on: true, clock: 'clk' }]).then(r => { w.select(w.M.rows.find(x => x.full === 'tb.clk')); w.setCursor(15); w.setCursor2(105);
+          const out = [r[0].clock, w.cycData().clk.full, w.delta2().endsWith('· 3 clk'), (w.setCursor('c3'), w.cursor)]; w.destroy(); el.remove(); return out; }); })()""")
+    check(got == ['clk', 'clk', True, 105], f'clock "clk" over tb.clk: the exact path; Δ in its cycles (3 of 30 ps), c3 its edge {got}')
+    # the menu: Cycles ▸ on a 1-bit row; "Cycle 0 at this edge" at the time clicked
+    got = js("""const r = v.M.rows.find(x => x.name === 'PSEL'), ups = v.cycData(true).ups; v.menu(200, 300, r, ups[7] + 2);
+        const m = document.querySelector('.wv-menu'), items = [...m.querySelectorAll('.subc + .sub button[data-m]')].map(b => b.dataset.m);
+        m.querySelector('button[data-m=cyc0]').click(); const z = v.cycOpt().cycleZero === ups[7];
+        v.menu(200, 300, r, ups[1]); document.querySelector('.wv-menu button[data-m=cyclk]').click(); const c = v.cycOpt().cycleClock;
+        v.menu(200, 300, r, ups[1]); document.querySelector('.wv-menu button[data-m=cycx]').click();
+        return [items, z, c, v.cycOpt().cycles, v.hdrH === v.S.headerHeight];""")
+    check(got == [['cycon', 'cyclk', 'cyc0', 'cycx'], True, 'PSEL', False, True],
+          f'the menu: on / off, this clock, cycle 0 at the edge clicked, reset (the band gone) {got}')
+    page.evaluate('localStorage.clear()')
+    check(not errs, 'no page errors (cycles)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
+    ctx.close()
+
+
+def undo(browser, build):
+    """V7: undo / redo of the edits — a batch of commands, a menu action, a field — by ctrl+Z, ctrl+shift+Z / ctrl+Y and
+    the bar's ↶ ↷; the cursor and the window are not steps; a new edit after an undo drops the redo; a text field keeps
+    its own ctrl+Z."""
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('viewer: undo')
+    ctx = browser.new_context(viewport={'width': 1400, 'height': 1000})
+    page = ctx.new_page()
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+    js = lambda e: page.evaluate(f"(async () => {{ const v = document.querySelector('.wv').waveView; {e} }})()")
+    w = page.locator('.wv').first
+    st = lambda: js("const s = v.state(); return [s.bookmarks.length, s.radix.PADDR || null, s.hidden.length, s.config.highlight.length];")
+    s0 = st()
+    js("await v.run([{ op: 'bookmark', t: '30ns', signal: 'PSEL', text: 'x' }]); await v.run([{ op: 'radix', signals: 'PADDR', radix: 'dec' }, "
+       "{ op: 'hide', signals: 'PSLVERR' }]); await v.run([{ op: 'cursor', t: '90ns' }, { op: 'view', from: '20ns', to: '120ns' }]); return 0;")
+    s1, n1 = st(), js("return v.undoS.length;")
+    w.locator('canvas').click(position={'x': 300, 'y': 120}); page.wait_for_timeout(50)
+    cur0 = js("return [v.cursor, v.t0, v.span];")
+    page.keyboard.press('Control+z'); page.wait_for_timeout(100)
+    s2, toast, cur = st(), w.locator('.bar .toast').inner_text(), js("return [v.cursor, v.t0, v.span];")
+    page.keyboard.press('Control+z'); page.wait_for_timeout(100); s3 = st()
+    page.keyboard.press('Control+Shift+z'); page.wait_for_timeout(100); s4 = st()
+    dis = js("return [...v.root.querySelectorAll('button.undo')].map(b => b.disabled);")
+    check(n1 == 2 and s1 != s0 and s2[1:3] == s0[1:3] and s2[0] == s1[0] and 'radix' in toast and 'hidden' in toast and s3 == s0 and s4 == s2
+          and dis == [False, False] and cur == cur0,
+          f'two batches, two steps (the cursor and the window none): ctrl+Z takes back radix + hide, then the bookmark; ctrl+shift+Z gives one '
+          f'back; ↶ ↷ enabled {s0} {s1} {s2} {s3} {s4} {toast!r} {dis}')
+    # the menu: a colour by the colour field is a step; a new edit drops the redo; ↶ in the bar
+    js("v.menu(200, 300, v.M.rows.find(r => r.name === 'PADDR'), 50000); const i = document.querySelector('.wv-menu input[type=color]'); i.value = '#ff0000'; "
+       "i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new Event('change', { bubbles: true })); return 0;")
+    page.wait_for_timeout(100)
+    got = js("return [v.state().paint.PADDR || null, v.redoS.length];")
+    w.locator('button[data-act=undo]').click(); page.wait_for_timeout(100)
+    got.append(js("return v.state().paint.PADDR || null;"))
+    check(got == ['#ff0000', 0, None], f'the menu\'s colour is a step, a new edit drops the redo, ↶ in the bar takes it back {got}')
+    # a text field keeps its own ctrl+Z; a bookmark's text typed is one step when the field is left
+    w.locator('input.q').fill('PSEL'); n = js("return v.undoS.length;"); w.locator('input.q').press('Control+z'); page.wait_for_timeout(100)
+    check(js("return v.undoS.length;") == n, 'ctrl+Z in a text field is the field\'s, not the viewer\'s')
+    w.locator('input.q').fill(''); w.locator('input.q').press('Enter')
+    t0 = js("return v.bms[0].text;"); n = js("return v.undoS.length;")
+    tx = w.locator('.notes li[data-n="1"] input.txt'); tx.click(); page.wait_for_timeout(50)   # a person types after the click's look
+    page.keyboard.press('End'); page.keyboard.type(' abc'); tx.blur(); page.wait_for_timeout(100)
+    got = [js("return v.undoS.length;") - n, js("return v.bms[0].text;")]
+    w.locator('canvas').click(position={'x': 600, 'y': 150}); page.keyboard.press('Control+z'); page.wait_for_timeout(100)
+    got.append(js("return v.bms[0].text;") == t0)
+    check(got[0] == 1 and got[1] == t0 + ' abc' and got[2], f'a bookmark\'s text typed: one step when the field is left, undone whole {got}')
+    # a real drag of a bookmark: one step, undone to its time and signal
+    box = w.locator('canvas').bounding_box(); p = js("return v.bmGeo.pos.get(2);"); b0 = js("return [v.bms[1].t, v.bms[1].signal];"); n = js("return v.undoS.length;")
+    page.mouse.move(box['x'] + p[0], box['y'] + p[1]); page.mouse.down(); page.mouse.move(box['x'] + p[0] + 120, box['y'] + p[1] + 40, steps=8); page.mouse.up()
+    page.wait_for_timeout(100); b1 = js("return [v.bms[1].t, v.bms[1].signal];"); d = js("return v.undoS.length;") - n
+    page.keyboard.press('Control+z'); page.wait_for_timeout(100)
+    check(b1 != b0 and d == 1 and js("return [v.bms[1].t, v.bms[1].signal];") == b0, f'a bookmark dragged: one step, undone to where it was {b0} {b1} {d}')
+    # a folded group of yours and the selection in it stay through an undo of something else; a highlight keeps its colours
+    got = js("""await v.run([{ op: 'group', name: 'gv', signals: 'PREADY' }, { op: 'group', name: 'gu', signals: 'PSEL,PENABLE' }]);
+        const f = v.ugRows().find(r => r.name === 'gv'), g = v.ugRows().find(r => r.name === 'gu'); WaveFW.internal.peek(v).collapsed.add(f.id);
+        v.select(v.ugRows().find(r => r.ug === g)); v.draw();
+        await v.run([{ op: 'highlight', add: ['PSEL', 'PWRITE'] }]); await v.run([{ op: 'highlight', remove: 'PSEL' }]); const c0 = [...v.picks.values()];
+        await v.run([{ op: 'paint', signals: 'PADDR', color: '#00ff00' }]); await v.undo(); return [v.ugRows().includes(g), WaveFW.internal.peek(v).collapsed.has(f.id),
+        !!v.sel && v.sel.ug === g, JSON.stringify([...v.picks.values()]) === JSON.stringify(c0), v.state().paint.PADDR || null];""")
+    check(got == [True, True, True, True, None], f'undo of a paint: your group (its row, folded), the selection in it, the highlight\'s colours stay {got}')
+    # the Russian layout (ctrl+Я is ctrl+Z by its place), ctrl+Y, a viewer by the focus, two undos at once, the gaps' clock null
+    got = js("""await v.run([{ op: 'hide', signals: 'PRESETn' }]); v.canvas.focus();
+        v.canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'я', code: 'KeyZ', ctrlKey: true, bubbles: true, cancelable: true }));
+        await new Promise(r => setTimeout(r, 50)); const a = v.state().hidden.length;
+        v.canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'y', code: 'KeyY', ctrlKey: true, bubbles: true, cancelable: true }));
+        await new Promise(r => setTimeout(r, 50)); const b = v.state().hidden.length;
+        await v.run([{ op: 'hide', signals: 'PREADY' }]); const r = await Promise.all([v.undo(), v.undo()]); const c = v.state().hidden.length;
+        WaveFW.configure({ gapClock: 'PCLK' }); v.setGaps({ gapClock: null }); await v.run([{ op: 'paint', signals: 'PADDR', color: '#0000ff' }]); await v.undo();
+        const d = v.gapOpt().gapClock; v.setGaps(null); WaveFW.configure({ gapClock: null }); return [a, b, r.filter(Boolean).length, c, d];""")
+    check(got == [0, 1, 1, 1, None], f'ctrl+Я undoes, ctrl+Y redoes; two undos at once: one; a cleared gaps\' clock stays cleared over the page\'s {got}')
+    # Load…: one step of its own, the next edit another
+    got = js("""const s = v.state(); s.radix = { PADDR: 'bin' }; const n = v.undoS.length; await v.loadState(JSON.stringify(s));
+        await v.run([{ op: 'paint', signals: 'PWDATA', color: '#123456' }]); const k = v.undoS.length - n; await v.undo();
+        return [k, v.state().radix.PADDR, v.state().paint.PWDATA || null];""")
+    check(got == [2, 'bin', None], f'a load is a step of its own: an undo after a paint keeps the load {got}')
+    got = js("""const n = v.undoS.length, pr = v.run([{ op: 'paint', signals: 'PSEL', color: '#abcdef' }, { op: 'picture', format: 'png' },
+        { op: 'hide', signals: 'PWRITE' }]); document.dispatchEvent(new PointerEvent('pointerdown')); document.dispatchEvent(new PointerEvent('pointerup'));
+        await new Promise(r => setTimeout(r, 0)); await pr; const k = v.undoS.length - n; await v.undo();
+        return [k, v.state().paint.PSEL || null, v.state().hidden.includes('PWRITE')];""")
+    check(got == [1, None, False], f'a batch with a picture to wait for and a click meanwhile: one step {got}')
+    # Codex, second look: the arrows stay when a bookmark's text is undone; the highlight's colours on the screen; no undo in a
+    # batch not done; a group renamed and undone is the same group, folded as it was
+    got = js("""const na = v.arrowList().length; await v.run([{ op: 'bookmark', n: 1, text: 'changed' }]); await v.undo();
+        const a = v.arrowList().length === na;
+        await v.run([{ op: 'highlight', set: ['PSEL', 'PWRITE'] }]); await v.run([{ op: 'highlight', remove: 'PSEL' }]); const h0 = v.highlighted();
+        await v.run([{ op: 'highlight', clear: true }]); await v.undo(); const h = JSON.stringify(v.highlighted()) === JSON.stringify(h0);
+        const pr = v.run([{ op: 'paint', signals: 'PSEL', color: '#ff00ff' }, { op: 'picture', format: 'png' }]); const busy = await v.undo(); await pr;
+        await v.run([{ op: 'group', name: 'gr', signals: 'PCLK' }]); const g = v.ugRows().find(r => r.name === 'gr'); WaveFW.internal.peek(v).collapsed.add(g.id);
+        await v.run([{ op: 'group', name: 'gr', rename: 'gs' }]); await v.undo(); const g2 = v.ugRows().find(r => r.name === 'gr');
+        return [a, h, busy, g2 === g, WaveFW.internal.peek(v).collapsed.has(g.id), v.state().paint.PSEL];""")
+    check(got == [True, True, '', True, True, '#ff00ff'], f'arrows kept, highlight colours, no undo in a batch not done, a rename undone: the same group {got}')
+    page.evaluate('localStorage.clear()')
+    check(not errs, 'no page errors (undo)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
+    ctx.close()
+
+
+def order(browser, build):
+    """V6: the order of your groups' rows — alt+↑ / alt+↓ move the selected signal in its group, alt+shift the group among
+    yours, a drag in the names moves a signal (to another group too) or a group; one step to undo each; a drag over the
+    other names still selects their text."""
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('viewer: the order of your groups')
+    ctx = browser.new_context(viewport={'width': 1400, 'height': 1000})
+    page = ctx.new_page()
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+    js = lambda e: page.evaluate(f"(async () => {{ const v = document.querySelector('.wv').waveView; {e} }})()")
+    w = page.locator('.wv').first
+    groups = lambda: js("return v.ugroups.map(g => [g.name, ...g.signals]);")
+    js("await v.run([{ op: 'group', name: 'gA', signals: 'PSEL,PENABLE,PWRITE' }, { op: 'group', name: 'gB', signals: 'PADDR' }]); "
+       "v.select(v.ugRows().find(r => r.ug && r.ug.name === 'gA' && r.orig.name === 'PENABLE')); v.canvas.focus(); return 0;")
+    page.keyboard.press('Alt+ArrowUp'); page.wait_for_timeout(50); a = groups(); s1 = js("return v.sel && v.sel.ug && [v.sel.ug.name, v.sel.orig.name];")
+    page.keyboard.press('Alt+ArrowDown'); page.keyboard.press('Alt+ArrowDown'); page.keyboard.press('Alt+ArrowDown'); page.wait_for_timeout(50); b = groups()
+    page.keyboard.press('Alt+Shift+ArrowDown'); page.wait_for_timeout(50); c = groups()
+    page.keyboard.press('Control+z'); page.wait_for_timeout(100); d = groups()
+    check(a[0] == ['gA', 'PENABLE', 'PSEL', 'PWRITE'] and s1 == ['gA', 'PENABLE'] and b[0] == ['gA', 'PSEL', 'PWRITE', 'PENABLE'] and [g[0] for g in c] == ['gB', 'gA']
+          and [g[0] for g in d] == ['gA', 'gB'], f'alt+↑ / alt+↓: the signal in its group (kept selected, at the end it stays); alt+shift+↓ the group; '
+          f'ctrl+Z one step {a} {s1} {b} {c} {d}')
+    # a drag in the names: PSEL of gA onto PADDR of gB (below its middle): out of gA, after PADDR in gB, one step
+    idx = lambda g, n: js(f"return WaveFW.internal.peek(v).vis.findIndex(r => r.ug && r.ug.name === '{g}' && r.orig.name === '{n}');")
+    hdr = lambda g: js(f"return WaveFW.internal.peek(v).vis.findIndex(r => r.user && r.name === '{g}');")
+    box = lambda i: w.locator(f'.names .row[data-r="{i}"]').bounding_box()
+    n0 = js("return v.undoS.length;")
+    p, q = box(idx('gA', 'PSEL')), box(idx('gB', 'PADDR'))
+    page.mouse.move(p['x'] + 30, p['y'] + p['height'] / 2); page.mouse.down(); page.mouse.move(q['x'] + 30, q['y'] + q['height'] * 0.8, steps=8)
+    line = js("return !!WaveFW.internal.peek(v).namesEl.querySelector('.row.drop-a');"); page.mouse.up(); page.wait_for_timeout(100)
+    e, n1 = groups(), js("return v.undoS.length;") - n0
+    check(line and e == [['gA', 'PWRITE', 'PENABLE'], ['gB', 'PADDR', 'PSEL']] and n1 == 1, f'a drag: a line where it goes; the signal into the other group after '
+          f'the row dropped on; one step {line} {e} {n1}')
+    # a group's header dragged above the other's; a drag over the dump's names selects their text (no move)
+    p, q = box(hdr('gB')), box(hdr('gA'))
+    page.mouse.move(p['x'] + 30, p['y'] + p['height'] / 2); page.mouse.down(); page.mouse.move(q['x'] + 30, q['y'] + 3, steps=8); page.mouse.up(); page.wait_for_timeout(100)
+    f = [g[0] for g in groups()]
+    r1, r2 = box(js("return WaveFW.internal.peek(v).vis.findIndex(r => !r.ug && r.name === 'PSEL');")), box(js("return WaveFW.internal.peek(v).vis.findIndex(r => !r.ug && r.name === 'PRDATA');"))
+    page.mouse.move(r1['x'] + 20, r1['y'] + r1['height'] / 2); page.mouse.down(); page.mouse.move(r2['x'] + 60, r2['y'] + r2['height'] / 2, steps=8); page.mouse.up()
+    sel = page.evaluate("String(getSelection())")
+    check(f == ['gB', 'gA'] and groups()[0][0] == 'gB' and 'PSEL' in sel, f'a header dragged over the other: the group before it; a drag over the dump\'s '
+          f'names selects text {f} {sel[:40]!r}')
+    # cross-group drag undone and redone: both lists back; onto itself: nothing, no step
+    page.keyboard.press('Escape'); w.locator('canvas').click(position={'x': 600, 'y': 150})
+    g0 = groups(); page.keyboard.press('Control+z'); page.wait_for_timeout(100); g1 = groups(); page.keyboard.press('Control+Shift+z'); page.wait_for_timeout(100)
+    n0 = js("return v.undoS.length;"); p = box(idx('gA', 'PWRITE'))
+    page.mouse.move(p['x'] + 30, p['y'] + 5); page.mouse.down(); page.mouse.move(p['x'] + 30, p['y'] + 15, steps=4); page.mouse.up(); page.wait_for_timeout(100)
+    check(groups() == g0 and g1 != g0 and js("return v.undoS.length;") == n0, f'a drag undone and redone (both groups); dropped onto itself: nothing {g0} {g1}')
+    # let go outside the names: the drag ends there (nothing moved), the next click on a name selects it
+    p = box(idx('gA', 'PWRITE')); cb = w.locator('canvas').bounding_box()
+    page.mouse.move(p['x'] + 30, p['y'] + 5); page.mouse.down(); page.mouse.move(cb['x'] + 300, cb['y'] + 200, steps=6); page.mouse.up(); page.wait_for_timeout(100)
+    left = js("return WaveFW.internal.peek(v).namesEl.classList.contains('wv-drag');"); g2 = groups()
+    w.locator(f'.names .row[data-r="{idx("gA", "PENABLE")}"] .n').click(); page.wait_for_timeout(50)
+    check(not left and g2 == g0 and js("return v.sel && v.sel.ug && v.sel.orig.name;") == 'PENABLE', f'let go over the waves: no move, the drag over, a click selects {left} {g2}')
+    # from the names: the focused row moves and keeps the focus (twice); a header with the focus moves its group
+    w.locator(f'.names .row[data-r="{idx("gB", "PADDR")}"]').focus(); page.keyboard.press('Alt+ArrowDown'); page.wait_for_timeout(80)
+    page.keyboard.press('Alt+ArrowUp'); page.wait_for_timeout(80); page.keyboard.press('Alt+ArrowDown'); page.wait_for_timeout(80)
+    foc = js("const a = document.activeElement, r = a && a.dataset.r != null && WaveFW.internal.peek(v).vis[+a.dataset.r]; return r && r.ug && [r.ug.name, r.orig.name];")
+    gb = [g for g in groups() if g[0] == 'gB'][0]; second = groups()[1][0]
+    w.locator(f'.names .row[data-r="{hdr(second)}"]').focus(); page.keyboard.press('Alt+ArrowUp'); page.wait_for_timeout(80)
+    check(foc == ['gB', 'PADDR'] and gb == ['gB', 'PSEL', 'PADDR'] and groups()[0][0] == second, f'alt+arrows in the names: the focus stays on the row moved; '
+          f'a header with the focus moves its group {foc} {gb} {groups()}')
+    # the focus on a module of the dump (not one of yours): nothing moves, though a signal of a group of yours is selected
+    js("v.select(v.ugRows().find(r => r.ug)); return 0;"); g3 = groups()
+    mod = js("return WaveFW.internal.peek(v).vis.findIndex(r => r.type === 'group' && !r.user);")
+    w.locator(f'.names .row[data-r="{mod}"]').focus()
+    page.keyboard.press('Alt+Shift+ArrowDown'); page.wait_for_timeout(80)
+    check(groups() == g3, f'alt+shift+↓ on a module of the dump: none of your groups moves {g3} {groups()}')
+    # a run picked in two groups to a third: each loses only the rows picked in it
+    got = js("""await v.run([{ op: 'group', name: 'gA', signals: 'PSEL,PWRITE' }, { op: 'group', name: 'gB', signals: 'PSEL' }, { op: 'group', name: 'gC', signals: 'PADDR' }]);
+        const R = (g, n) => v.ugRows().find(r => r.ug && r.ug.name === g && r.orig.name === n); v.selRun = new Set([R('gA', 'PWRITE'), R('gB', 'PSEL')]);
+        await v.moveRows([...v.selRun], v.ugRows().find(r => r.user && r.name === 'gC')); v.selRun = new Set();
+        return v.ugroups.map(g => [g.name, ...g.signals.map(f => f.split('.').pop())]);""")
+    check(got[:3] == [['gA', 'PSEL'], ['gB'], ['gC', 'PADDR', 'PWRITE', 'PSEL']], f'a run from two groups: PSEL stays in gA where it was not picked {got}')
+    got = js("return [(await v.run([{ op: 'group', name: 'gA', move: 1 }]))[0].at, (await v.run([{ op: 'group', name: 'gA', move: 'sideways' }]))[0].error];")
+    check(got[0] == 1 and 'move: up, down, top, bottom' in got[1], f'group move: a number, a bad one said {got}')
+    page.evaluate('localStorage.clear()')
+    check(not errs, 'no page errors (order)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
+    ctx.close()
+
+
+def savepage(browser, build):
+    """V2: Save page writes the page as it was read with every viewer's state in its edits (tools/viewedit.py's block):
+    opened in another browser it shows what you saw; its waves byte for byte the page's; the live link's token left out;
+    savePage: false hides the button."""
+    import re as _re
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('viewer: Save page')
+    d = build / 'smoke' / 'savepage'
+    d.mkdir(parents=True, exist_ok=True)
+    src = apb.read_text(encoding='utf-8')
+    live = '  <script id="wavefw-live" data-x="1" type="application/json">{"port": 8742, "token": "SECRET-TOKEN"}</script>\n'   # not as viewedit writes it
+    pa, pb = d / 'a.html', d / 'b.view.html'
+    pa.write_text(src.replace('<script>window.WAVEFW_CONFIG', live + '<script>window.WAVEFW_CONFIG', 1), encoding='utf-8')
+    ctx = browser.new_context(viewport={'width': 1400, 'height': 1000})
+    page = ctx.new_page()
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.route('http://127.0.0.1:8742/**', lambda r: r.abort())   # the live link of the copy: no agent here
+    page.goto(pa.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()')
+    V = "WaveFW.views().find(v => v.editKey() === 'exact')"
+    keys = ['bookmarks', 'arrows', 'groups', 'paint', 'radix', 'hidden', 'cursor', 'from', 'to']
+    pick = lambda st: {k: st.get(k) for k in keys} | {'highlight': st['config']['highlight'], 'cycles': st['config']['cycles']}
+    want = page.evaluate(f"""(async () => {{ const v = {V}; await v.run([{{ op: 'bookmark', t: '75ns', signal: 'PSEL', text: 'mine <!--<script> </script>' }},
+        {{ op: 'group', name: 'ctl', signals: 'PSEL,PENABLE' }}, {{ op: 'paint', signals: 'PADDR', color: '#ff8800' }}, {{ op: 'radix', signals: 'PWDATA', radix: 'dec' }},
+        {{ op: 'hide', signals: 'PSLVERR' }}, {{ op: 'highlight', set: 'PREADY' }}, {{ op: 'cycles', on: true }}, {{ op: 'cursor', t: '95ns' }},
+        {{ op: 'view', from: '30ns', to: '150ns' }}]); return v.state(); }})()""")
+    text = page.evaluate('WaveFW.pageText()')
+    again = page.evaluate('WaveFW.pageText()')   # twice: one block of edits, the next revision of nothing new
+    blocks = lambda t: len(_re.findall(r'^<script type="application/json" id="wavefw-edits">', t, _re.M))
+    shown = page.locator('.wv button[data-act=spage]').first.is_visible()
+    pb.write_text(text, encoding='utf-8')
+    data = lambda t: _re.search(r'<script>\nwindow\.WAVES = (.*?)\n</script>', t, _re.S).group(1)
+    same = data(text) == data(src)
+    ctx.close()
+    ctx = browser.new_context(viewport={'width': 1400, 'height': 1000})   # another browser: nothing kept
+    page = ctx.new_page(); page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(pb.as_uri()); page.wait_for_load_state('networkidle'); page.wait_for_timeout(200 * SCALE)
+    got = page.evaluate(f"{V}.state()")
+    toast = page.evaluate(f"{V}.root.querySelector('.toast').textContent")
+    diff = {k: (pick(want)[k], pick(got)[k]) for k in pick(want) if pick(want)[k] != pick(got)[k]}
+    check(not diff and 'edits applied' in toast and same and shown, f'the saved page opens in another browser as it was left (differs: {diff}), '
+          f'its waves byte for byte the page\'s ({same}), the button there ({shown}) {toast!r}')
+    check('SECRET-TOKEN' not in text and 'id="wavefw-live"' not in text.split('<script>\n')[0] and blocks(text) == 1 and blocks(again) == 1,
+          'the live link (its block written another way, its token) is not in the saved page; one block of edits, saved twice too')
+    # the person who opens it: a ƒ row and a bookmark text of theirs stay over a reload (the page's revision is applied once)
+    page.evaluate(f"(v => {{ v.root.querySelector('input.svq').value = 'PSEL && PENABLE'; v.root.querySelector('button[data-x=add]').click(); }})({V})")
+    page.evaluate(f"{V}.run([{{ op: 'bookmark', n: 1, text: 'theirs' }}])"); page.wait_for_timeout(300 * SCALE)
+    page.reload(); page.wait_for_load_state('networkidle'); page.wait_for_timeout(300 * SCALE)
+    kept = page.evaluate(f"""(v => [v.bms[0].text, v.svaExprs ? JSON.stringify(v.extraJSON.map(f => f()).filter(Boolean)).includes('PSEL && PENABLE') : null])({V})""")
+    check(kept == ['theirs', True], f'the person\'s own edits (a bookmark, a ƒ row) stay over a reload: the page\'s are applied once {kept}')
+    # a page that is not all in itself (docs/index.html: wavefw.js beside it): no button, Save page says why
+    page.goto((ROOT / 'docs' / 'index.html').as_uri()); page.wait_for_load_state('networkidle')
+    why = page.evaluate("(() => { try { WaveFW.pageText(); return 'saved'; } catch (e) { return e.message; } })()")
+    hid = page.locator('.wv button[data-act=spage]').first.is_hidden()
+    check(hid and 'all in itself' in why, f'docs/index.html (wavefw.js beside it): no Save page, it says why {why!r}')
+    page.goto((ROOT / 'tests' / 'conformance.html').as_uri()); page.wait_for_load_state('networkidle')   # its viewers built before the page was read
+    vis = page.locator('.wv button[data-act=spage]').evaluate_all('bs => bs.filter(b => !b.hidden).length')
+    check(vis == 0, f'tests/conformance.html (its viewers built early, wavefw.js beside it): no Save page on any viewer ({vis} shown)')
+    page.evaluate("WaveFW.configure({ savePage: false })")
+    check(page.locator('.wv button[data-act=spage]').first.is_hidden(), 'savePage: false hides the button')
+    page.evaluate("WaveFW.configure({ savePage: true })")
+    check(not errs, 'no page errors (save page)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
+    ctx.close()
+
+
+def compare(browser, build):
+    """V1: a second dump over the waves (Compare…): the APB example's VCD with one change of PREADY made later and PSLVERR
+    left out — ≠ on PREADY, PSLVERR struck, a red band where they differ (on the screen and in the picture), ]d [d to it;
+    a clock-sampled view refuses; ✕ compares no more."""
+    apb, vcd = build / 'examples' / 'apb' / 'apb.html', build / 'examples' / 'apb' / 'apb.vcd'
+    if not need(apb, vcd, how='make examples'):
+        return
+    print('viewer: compare with a second dump')
+    lines, out, moved = vcd.read_text().split('\n'), [], None
+    for ln in lines:
+        if ln.strip().startswith('$var') and ln.split()[3] == '&':   # PSLVERR: not in B
+            continue
+        if ln in ('0&', '1&'):
+            continue
+        out.append(ln)
+    t, k = 0, None
+    for i, ln in enumerate(out):   # B: the first rise of PREADY after 100 ns happens 10 ns later
+        if ln.startswith('#'):
+            t = int(ln[1:])
+        elif ln == '1%' and t > 100000 and k is None:
+            k, moved = i, t
+    out.pop(k); j = next(i for i in range(k, len(out)) if out[i].startswith('#') and int(out[i][1:]) >= moved + 10000)
+    out.insert(j + 1, '1%')
+    b = build / 'smoke' / 'compare'; b.mkdir(parents=True, exist_ok=True); bv = b / 'b.vcd'; bv.write_text('\n'.join(out))
+    ctx = browser.new_context(viewport={'width': 1400, 'height': 1000})
+    page = ctx.new_page()
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()')
+    V = "WaveFW.views().find(v => v.editKey() === 'exact')"
+    w = page.locator('.wv').nth(page.evaluate(f"WaveFW.views().indexOf({V})"))
+    w.locator('input.cfile').set_input_files(str(bv)); page.wait_for_timeout(300 * SCALE)
+    got = page.evaluate(f"""(v => {{ const c = v.cmp, R = n => v.M.rows.find(r => r.name === n);
+        const el = n => WaveFW.internal.peek(v).rowEls[WaveFW.internal.peek(v).vis.indexOf(R(n))]; return c && [c.differ, c.missing, c.first, el('PREADY').classList.contains('cmpd'),
+        el('PSLVERR').classList.contains('cmpm'), el('PSEL').classList.contains('cmpd'), v.root.querySelector('button[data-act=dcmpx]').textContent,
+        c.rows.get(R('PREADY')).spans]; }})({V})""")
+    check(got and got[0] == 1 and got[1] == 1 and got[2] == moved and got[3] and got[4] and not got[5] and got[6] == '≠ 1 ✕' and got[7] == [[moved, moved + 10000]],
+          f'B ({bv.name}): PREADY ≠ from {moved} for 10 ns, PSLVERR struck (not in B), PSEL the same; ≠ 1 ✕ in the bar {got}')
+    page.evaluate(f"(v => {{ v.cursor = 0; v.canvas.focus(); }})({V})")
+    page.keyboard.press(']'); page.keyboard.press('d'); page.wait_for_timeout(50); c1 = page.evaluate(f"{V}.cursor")
+    page.keyboard.press('['); page.keyboard.press('d'); page.wait_for_timeout(50); c2 = page.evaluate(f"{V}.cursor")
+    pic1 = page.evaluate(f"(v => (v.zoomTo(v.M.t0, v.M.t1), v.toSVG()))({V})")
+    pic2 = page.evaluate(f"(v => {{ const c = v.cmp; v.cmp = null; const s = v.toSVG(); v.cmp = c; return s; }})({V})")
+    check(c1 == moved and c2 == moved and pic1.count('<rect') == pic2.count('<rect') + 2, f']d to the difference (round the ends with [d); the picture '
+          f'has its band (2 more rects: the shade and the line) {c1} {c2} {pic1.count("<rect")} {pic2.count("<rect")}')
+    ref = page.evaluate("WaveFW.views()[0].compare('$timescale 1ns $end $scope module t $end $var wire 1 ! a $end $upscope $end $enddefinitions $end #0 0!', 'x.vcd')")
+    toast = page.evaluate("WaveFW.views()[0].root.querySelector('.toast').textContent")
+    w.locator('button[data-act=dcmpx]').click()
+    gone = page.evaluate(f"(v => [v.cmp, WaveFW.internal.peek(v).namesEl.querySelectorAll('.cmpd, .cmpm').length, v.root.querySelector('button[data-act=dcmpx]').hidden])({V})")
+    check(ref is None and 'clock-sampled' in toast and gone == [None, 0, True], f'a clock-sampled view refuses; ✕ compares no more {toast!r} {gone}')
+    # Codex's cases: a packed struct by its vector (its group marked), a string the same as itself, the time both dumps
+    # cover, a signal B's reader left out (dumpBudget) apart from one B lacks, a newer compare or none meanwhile, a group
+    # of yours made after the compare marked
+    got = page.evaluate("""(async () => {
+      const mk = doc => { const el = document.body.appendChild(document.createElement('div')); return new WaveFW.WaveView(el, doc, {}); };
+      const vcd = (vars, body) => `$timescale 1ps $end $scope module tb $end ${vars} $upscope $end $enddefinitions $end ${body}`;
+      const w = mk({ signal: [['tb', { name: 'st', path: 'tb.st', width: 8, tv: [[0, '00'], [10, '12']], fields: [{ name: 'hi', msb: 7, lsb: 4 },
+          { name: 'lo', msb: 3, lsb: 0 }] }, { name: 's', path: 'tb.s', kind: 'string', tv: [[0, 'Hello']] },
+          { name: 'a', path: 'tb.a', tv: [[0, '0'], [30, '1']] }, { name: 'q', path: 'tb.q', tv: [[0, '0']] }]], time: { t0: 0, t1: 40, unit: 'ps' } });
+      const B = vcd('$var wire 8 ! st [7:0] $end $var string 1 \" s $end $var wire 1 # a $end $var wire 1 $ q $end',
+        '#0 b0 ! sHello \" 0# 0$ #10 b00010011 ! #20 1# #40');
+      const r = await w.compare(B, 'b.vcd'), g = Object.values(w.M.groups).find(x => x.name === 'st');
+      const marked = WaveFW.internal.peek(w).rowEls[WaveFW.internal.peek(w).vis.indexOf(g)].classList.contains('cmpd');
+      const sp = w.cmp.rows.get(w.M.rows.find(x => x.name === 'a')).spans;
+      WaveFW.configure({ dumpBudget: 3 }); const r2 = await w.compare(B, 'b.vcd'); WaveFW.configure({ dumpBudget: 3000000 });
+      const slow = { name: 'slow.vcd', text: () => new Promise(res => setTimeout(() => res(B), 80)) }, pr = w.compare(slow); await w.compare(null);
+      const r3 = await pr, gone = w.cmp;
+      await w.compare(B, 'b.vcd'); await w.run([{ op: 'group', name: 'mine', signals: 'tb.a' }]);
+      const k = WaveFW.internal.peek(w).vis.find(x => x.ug && x.orig.name === 'a');
+      const kmark = WaveFW.internal.peek(w).rowEls[WaveFW.internal.peek(w).vis.indexOf(k)].classList.contains('cmpd');
+      // a path B's reader left out is not matched to another signal of the same name; no time in common: nothing compared
+      const u = mk({ signal: [['tb', ['u', { name: 'a', path: 'tb.u.a', tv: [[0, '0']] }]]], time: { t0: 0, t1: 40, unit: 'ps' } });
+      WaveFW.configure({ dumpBudget: 1 });
+      const r4 = await u.compare('$timescale 1ps $end $scope module tb $end $var wire 1 ! a $end $scope module u $end $var wire 1 " a $end $upscope $end ' +
+        '$upscope $end $enddefinitions $end #0 0! 1" #40', 'b2.vcd');
+      WaveFW.configure({ dumpBudget: 3000000 });
+      const r5 = await u.compare('$timescale 1ps $end $scope module tb $end $scope module u $end $var wire 1 ! a $end $upscope $end $upscope $end ' +
+        '$enddefinitions $end #100 0! #140', 'late.vcd'), t5 = u.root.querySelector('.toast').textContent;
+      u.destroy(); w.destroy();
+      return [r.differ, r.compared, marked, sp, r.to, [r2.missing, r2.omitted > 0], r3, gone, kmark, [r4.omitted, r4.differ], r5, /no time in common/.test(t5)]; })()""")
+    check(got == [2, 4, True, [[20, 30]], 40, [0, True], None, None, True, [1, 0], None, True], f'a struct by its vector (its group ≠), a string the '
+          f'same as itself, [from, to) both cover, dumpBudget apart (not matched to another tb.a), a compare superseded is dropped, a new group of '
+          f'yours marked, no time in common said {got}')
+    check(not errs, 'no page errors (compare)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
+    ctx.close()
 
 
 def edit(browser, build):
@@ -1296,7 +1696,7 @@ def edit(browser, build):
     went = page.evaluate(f"(v => [v.sel && v.sel.full, !!(v.sel && v.sel.ug)])({V})")
     page.evaluate(f"(v => v.menu(200, 200, v.M.rows.find(r => r.name === 'PWRITE'), 70000))({V})")
     page.locator('.wv-menu .subg').hover()
-    sub_ = page.locator('.wv-menu .msub .sub').nth(1).inner_text()
+    sub_ = page.locator('.wv-menu .subg + .sub').inner_text()
     page.locator('.wv-menu button[data-m=ugto][data-g="0"]').click()
     into = page.evaluate(f"{V}.ugroups[0].signals")
     check([x.split('\n')[0] for x in items] == ['gA', 'gB'] and went == ['PWDATA', True] and 'Into “gA”' in sub_ and 'Go to' in sub_ and into == ['PSEL', 'PWRITE'],
@@ -1406,7 +1806,7 @@ def ranges(browser, build):
           f'shift+drag zooms into the range dragged over (as the middle button), no measured range; l: back {w0} -> {w1}')
     # gaps: the menu's row turns them on (kept in this browser, in the state); the picture and WaveDrom leave out the idle stretches
     page.mouse.click(box['x'] + 5, box['y'] + r[0], button='right')
-    sub = [menu.locator('.sub').is_hidden()]; menu.locator('.subh').hover(); sub.append(menu.locator('.sub').is_visible())
+    sub = [menu.locator('.subh + .sub').is_hidden()]; menu.locator('.subh').hover(); sub.append(menu.locator('.subh + .sub').is_visible())
     check(sub == [True, True], f'the gaps are a submenu: hidden, open on the pointer {sub}')
     menu.locator('input.gi').fill('3'); menu.locator('input.gk').fill('0'); menu.locator('input.gk').dispatch_event('change'); menu.locator('input.gon').check()
     g = js("""(() => { const S = v.M.rows.find(r => r.name === 'PSEL'), a = v.M.t0, b = v.M.t1, cuts = v.cutsOf(a, b, [S]), wd = v.toWaveDrom(a, b, [S]).signal.map(s => s.wave);
@@ -1450,9 +1850,12 @@ def ranges(browser, build):
     page.goto((build / 'examples' / 'apb' / 'apb_all.html').as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
     c.scroll_into_view_if_needed(); box = c.bounding_box()
     yb = lambda n: js(f"(o => o.y + o.h / 2 - (WaveFW.internal.peek(v).oy || 0))(WaveFW.internal.peek(v).lay.find(o => o.row.full === 'apb_tb.{n}'))")
-    page.mouse.click(box['x'] + 300, box['y'] + yb('PADDR'), button='right'); menu.locator('select:not(.gcnt)').select_option('bin')
+    # the rows the clicks go to in view (the bar may wrap to more lines and the rows' window be shorter)
+    js("(o => { if (v.root.classList.contains('wv-scroll')) v.bodyEl.scrollTop = Math.max(0, o.y - 60); v.draw(); })(WaveFW.internal.peek(v).lay.find(o => o.row.full === 'apb_tb.PADDR'))")
+    page.wait_for_timeout(100); box = c.bounding_box()
+    page.mouse.click(box['x'] + 300, c.bounding_box()['y'] + yb('PADDR'), button='right'); menu.locator('select:not(.gcnt)').select_option('bin')
     rx = [js("v.valueAt(v.M.rows.find(r => r.full === 'apb_tb.PADDR'), v.cursor)"), menu.count()]
-    page.mouse.click(box['x'] + 300, box['y'] + yb('PWDATA'), button='right'); menu.locator('button[data-m=hide]').click()
+    page.mouse.click(box['x'] + 300, c.bounding_box()['y'] + yb('PWDATA'), button='right'); menu.locator('button[data-m=hide]').click()
     hid = [js("WaveFW.internal.peek(v).vis.some(r => r.full === 'apb_tb.PWDATA')"), page.locator('.wv button[data-act=unhide]').first.inner_text(), js('v.state().hidden'), js('v.state().radix')]
     page.reload(); page.wait_for_load_state('networkidle')
     kept = [js("WaveFW.internal.peek(v).vis.some(r => r.full === 'apb_tb.PWDATA')"), js("v.M.rows.find(r => r.full === 'apb_tb.PADDR').radix")]
@@ -1463,9 +1866,10 @@ def ranges(browser, build):
           f'the menu: Radix bin on PADDR, Hide PWDATA, Hidden: 1 ✕ in the bar; kept over a reload and in the state; shown again, the page\'s radix back {rx} {hid} {kept} {back}')
     # a highlighted row clicked: the colour, the radix and Hide of the menu go to every highlighted row
     js("(v.highlight(null), ['PADDR', 'PWDATA', 'PSEL'].forEach(n => v.toggleHighlight(v.M.rows.find(r => r.full === 'apb_tb.' + n))), 0)")
-    page.mouse.click(box['x'] + 300, box['y'] + yb('PADDR'), button='right')
+    page.wait_for_timeout(50); box = c.bounding_box()   # Highlight: 3 ✕ came into the bar: it may wrap and move the waves
+    page.mouse.click(box['x'] + 300, c.bounding_box()['y'] + yb('PADDR'), button='right')
     head = menu.locator(':scope > .mh').last.inner_text(); menu.locator('select:not(.gcnt)').select_option('bin')
-    page.mouse.click(box['x'] + 300, box['y'] + yb('PADDR'), button='right')
+    page.mouse.click(box['x'] + 300, c.bounding_box()['y'] + yb('PADDR'), button='right')
     menu.locator('input[type=color]').evaluate("i => { i.value = '#2f9e44'; i.dispatchEvent(new Event('input', { bubbles: true })); }"); page.keyboard.press('Escape')
     many = js("['PADDR', 'PWDATA', 'PSEL', 'PENABLE'].map(n => [v.painted.get('apb_tb.' + n) || '', v.M.rows.find(r => r.full === 'apb_tb.' + n).radix || ''])")
     js("(v.highlight(null), v.unpaint(), ['PADDR', 'PWDATA'].forEach(n => v.setRadix('apb_tb.' + n, null)), 0)")
@@ -1499,7 +1903,7 @@ def ranges(browser, build):
     check(shown and f1 == want[0] and f2 == want[0] and f3 == want[0] and back == want[0] and f4 == want[1] and 'no 0x99 after the cursor' in none and xz == [33000, 33000] and hid,
           f'= value: the selected signal becomes 0x40 / 8\'h40 / 64 (shift+Enter: before), an enum label (ACCESS); none: said; X / Z: the first one of any signal {[f1, f2, f3, back, f4]} {want} {none!r} {xz}')
     # the menu's Radix: fixed point (sq and its fraction bits), float; enumColors: a state's own fill
-    js("(v.reset(), 0)"); page.mouse.click(box['x'] + 300, box['y'] + yb('PWDATA'), button='right')
+    js("(v.reset(), 0)"); page.mouse.click(box['x'] + 300, c.bounding_box()['y'] + yb('PWDATA'), button='right')
     menu.locator('select:not(.gcnt)').select_option('sq'); qf = menu.locator('input.qf'); qopen = [qf.is_visible(), menu.count()]
     qf.fill('16'); qf.dispatch_event('input'); fx = js("[v.M.rows.find(r => r.full === 'apb_tb.PWDATA').radix, v.valueAt(v.M.rows.find(r => r.full === 'apb_tb.PWDATA'), 60000)]")
     page.keyboard.press('Escape'); js("(v.setRadix('apb_tb.PWDATA', 'float'), 0)"); fl = js("v.valueAt(v.M.rows.find(r => r.full === 'apb_tb.PWDATA'), 60000)")
@@ -1508,11 +1912,11 @@ def ranges(browser, build):
     check(qopen == [True, 1] and fx == ['sq16', '-13569.9999847412109375'] and fl == '-8323073' and '#ff00aa' in esvg,
           f'Radix: fixed sq with 16 fraction bits (the menu stays open for them), float; enumColors fill the ACCESS state {fx} {fl}')
     # Analog from the menu: the bus as a step plot three rows high, kept over a reload and in the state; As a bus: back
-    page.mouse.click(box['x'] + 300, box['y'] + yb('n_done'), button='right'); menu.locator('button[data-m=analog]').click()
+    page.mouse.click(box['x'] + 300, c.bounding_box()['y'] + yb('n_done'), button='right'); menu.locator('button[data-m=analog]').click()
     an = js("[(o => [o.h, v.rowH.sig])(WaveFW.internal.peek(v).lay.find(o => o.row.full === 'apb_tb.n_done')), v.state().analog, Math.round(v.rowEl(v.M.rows.find(r => r.full === 'apb_tb.n_done')).getBoundingClientRect().height)]")
     page.reload(); page.wait_for_load_state('networkidle'); c.scroll_into_view_if_needed(); box = c.bounding_box()
     kept = js("v.M.rows.find(r => r.full === 'apb_tb.n_done').analog")
-    page.mouse.click(box['x'] + 300, box['y'] + yb('n_done'), button='right'); label = menu.locator('button[data-m=analog]').inner_text(); menu.locator('button[data-m=analog]').click()
+    page.mouse.click(box['x'] + 300, c.bounding_box()['y'] + yb('n_done'), button='right'); label = menu.locator('button[data-m=analog]').inner_text(); menu.locator('button[data-m=analog]').click()
     off = js("[v.M.rows.find(r => r.full === 'apb_tb.n_done').analog, (o => o.h)(WaveFW.internal.peek(v).lay.find(o => o.row.full === 'apb_tb.n_done'))]")
     parsed = page.evaluate("WaveFW.parse({ signal: [{ name: 'lvl', wave: '=.=', data: ['1', '9'], analog: 2 }] }).rows[0].analog")
     check(an[0] == [3 * an[0][1], an[0][1]] and an[1] == {'apb_tb.n_done': 3} and an[2] == 3 * an[0][1] and kept == 3 and label == 'As a bus' and off == [False, an[0][1]] and parsed == 2,
@@ -1528,7 +1932,7 @@ def ranges(browser, build):
     names.locator('.row:not(.grp)', has_text='PWDATA').first.locator('.n').click(modifiers=['Shift'])
     run = js("[[...v.selRun].map(r => r.name), v.sel && v.sel.name, v.picks.size, document.querySelectorAll('.wv .names .row.dim').length, String(getSelection()), v.root.querySelectorAll('.names .row.sel').length]")
     p1 = px('PADDR')
-    page.mouse.click(box['x'] + 300, box['y'] + yb('PADDR'), button='right'); menu.locator('input[type=color]').evaluate("i => { i.value = '#2f9e44'; i.dispatchEvent(new Event('input', { bubbles: true })); }"); page.keyboard.press('Escape')
+    page.mouse.click(box['x'] + 300, c.bounding_box()['y'] + yb('PADDR'), button='right'); menu.locator('input[type=color]').evaluate("i => { i.value = '#2f9e44'; i.dispatchEvent(new Event('input', { bubbles: true })); }"); page.keyboard.press('Escape')
     col = js("['PREADY', 'PADDR', 'PWDATA', 'PRDATA'].map(n => v.painted.get('apb_tb.' + n) || '')")
     js("(v.unpaint(), 0)"); names.locator('.row:not(.grp)', has_text='PSEL').first.locator('.n').click(); one = js('[v.selRun.size, v.sel.name]')
     check(run[0][0] == 'PREADY' and run[0][-1] == 'PWDATA' and len(run[0]) >= 4 and run[1] == 'PWDATA' and run[2:] == [0, 0, '', len(run[0])] and p1 != p0
@@ -1783,6 +2187,33 @@ UNITS = [   # (JavaScript expression, its JSON value); NaN / ±Infinity / undefi
     ("VW(vcd('$var wire 1 ! a $end $scope module u $end $var wire 1 \" b $end $upscope $end', '#0 0! 0\" #1 1! 1\"'), { budget: 2 }).doc.meta",
      {'omitted': {'why': 'dumpBudget', 'paths': {'tb.u': ['b']}}}),
     ("F.decode({ width: 8 }, 'xz', 'bin')", 'xxxxzzzz'),
+    # a second dump compared: values as values (bits, a real's number, a string's text), the stretches that differ in one pass
+    ("(r => [\"1\", \"'b00000001\", '01'].map(v => I.cmpKey(r, F.parse({ signal: [{ name: 'v', width: 8, tv: [[0, v]] }] }).rows[0].tr[0])))({ width: 8 })",
+     ['00000001', '00000001', '00000001']),
+    ("[I.cmpKey({ width: 8 }, null) === I.cmpKey({ width: 8 }, { k: 'x' }), I.cmpKey({ kind: 'string' }, { k: 'x' }) === I.cmpKey({ kind: 'string' }, "
+     "{ k: '=', v: 'x' })]", [True, False]),
+    ("[['1.0', '1'], ['Hello', 'Hello']].map(([p, q], i) => I.cmpKey({ kind: ['real', 'string'][i] }, { k: '=', v: p }) === "
+     "I.cmpKey({ kind: ['real', 'string'][i] }, { k: '=', v: q }))", [True, True]),
+    ("(P => I.diffSpans(P([[0, '0'], [10, '1'], [20, '0'], [40, '1']]), P([[0, '0'], [12, '1'], [20, '0'], [35, '1'], [40, '0']]), 0, 50))"
+     "(tv => F.parse({ signal: [{ name: 'a', tv }] }).rows[0])", [[10, 12], [35, 50]]),
+    ("(P => I.diffSpans(P([[0, '0'], [10, '1']]), P([[0, '0'], [10, '1']]), 0, 20))(tv => F.parse({ signal: [{ name: 'a', tv }] }).rows[0])", []),
+    # the clock cycles: cycle 0, the cycle at a time, the time of a cycle, the edges counted, the clock by a name, the band's marks
+    ("[null, 20, 21, 35].map(z => I.cycZero([10, 20, 30], z))", [0, 1, 2, 3]), ("[5, 10, 25, 30].map(t => I.cycAt([10, 20, 30], 1, t))", [-2, -1, 0, 1]),
+    ("[-1, -2, 1, 2].map(n => I.cycTime([10, 20, 30], 1, n))", [10, None, 30, None]),
+    ("[[[0, '1'], [5, '0'], [10, '1']], [[0, '1']], [[0, '0'], [5, '1']]].map(tv => I.cycUps(F.parse({ signal: [{ name: 'c', tv }] }).rows[0]))",
+     [[10], [], [5]]),
+    ("I.cycUps(F.parse({ signal: [{ name: 'clk', wave: 'p..' }] }).rows[0]).length", 3),
+    ("(M => [I.cycClock(M.rows, 'clk').full, I.cycClock(M.rows, null).full, I.cycClock(M.rows, 'nope')])(F.parse({ signal: [['tb', { name: 'clk', "
+     "path: 'tb.clk', tv: [[0, '0'], [5, '1'], [10, '0'], [15, '1']] }], { name: 'clk', path: 'clk', tv: [[0, '0'], [7, '1']] }] }))", ['clk', 'tb.clk', None]),
+    ("I.cycClock(F.parse({ signal: [{ name: 'clk', wave: 'p.' }] }).rows, null).name", 'clk'),
+    ("I.cycMarks({ ups: [0, 1, 2, 3, 1000], iz: 0, from: 0, to: 1000, X: t => t, xR: 1100 }, t => 6 * t.length)",
+     {'ticks': [0, 3, 1000], 'labels': [[0, '0'], [1000, '4']]}),
+    ("I.cycMarks({ ups: [0, 10, 20, 30, 40, 50], iz: 2, from: 0, to: 50, X: t => 5 * t, xR: 120 }, t => 6 * t.length).labels",
+     [[0, '-2'], [50, '-1'], [100, '0']]),
+    ("I.cycMarks({ ups: [0, 100, 200], iz: 0, from: 99, to: 200, X: t => t - 99, xL: 0, xR: 300 }, t => 6 * t.length).labels", [[-99, '0'], [101, '2']]),
+    ("(r => I.cycUps(I.fieldRow(r, { name: 'c', msb: 0 }, 1, [])))(F.parse({ signal: [{ name: 'reg', width: 2, tv: [[0, '1'], [5, '0'], [10, '1']] }] }).rows[0])",
+     [10]),
+    ("I.cycMarks({ ups: [0, 10, 20, 30, 40, 50], iz: 2, from: 0, to: 50, X: t => 2 * t, xR: 200 }, t => 6 * t.length).labels", [[40, '0']]),
     # "'b" values: transitions by their bits (x and z apart), any width, clock-sampled "raw", the samplers, the value search, enum colours
     ("MX.rows[0].tr.map(o => o.bits)", ['10x1', '10z1', '11x1']), ("I.fieldRow(MX.rows[0], { name: 'lo', msb: 1, lsb: 0 }, 1, []).tr.map(o => o.bits)",
      ['x1', 'z1', 'x1']),
@@ -2899,6 +3330,11 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'dump': 'a VCD opened in the page (Open…, dropped on a viewer), ⟳, wavefw/viewer.html',
     'state': 'Save / Load… of a viewer (the APB and AXI-Lite pages): its state to a file and back, on other waves',
     'edit': 'the viewer\'s commands, a page\'s edits (tools/viewedit.py) with the same state, your groups and markers, a page live through wavemcp.py',
+    'compare': 'a second dump compared: ≠ on the names that differ, struck when it lacks them, red bands, ]d [d, in the picture; clock-sampled refused',
+    'savepage': 'Save page: the page with your view in its edits opens elsewhere as you left it; its waves as they were; the live token left out',
+    'order': 'your groups\' rows in another order: alt+↑ / alt+↓ (shift: the group), a drag in the names, group move; one step each',
+    'undo': 'ctrl+Z / ctrl+shift+Z and ↶ ↷: the edits undone and redone a step at a time (a batch of commands, a menu action), not the cursor',
+    'cycles': 'the clock cycles under the time axis: numbers, the cursor\'s cycle, c147, cycle 0, Δ, the menu, the pictures, kept',
     'ranges': 'a range on the waves (shift+drag, the right button) and its menu: zoom, bookmarks, the picture, a colour',
     'tips': 'every control has a tooltip with its keys; ? shows the keys and the mouse',
     'buses': 'stage 11: bus transactions (AXI4, AXI4-Stream, APB, AHB, Avalon-MM / ST, Wishbone, OBI) on a dump of every protocol and the examples',
@@ -3020,6 +3456,11 @@ def main():
         run('sva_exprs', sva_exprs, b, build)
         run('state', state, b, build)
         run('edit', edit, b, build)
+        run('cycles', cycles, b, build)
+        run('undo', undo, b, build)
+        run('order', order, b, build)
+        run('savepage', savepage, b, build)
+        run('compare', compare, b, build)
         run('dump', dump, b, build)
         run('readers', readers, b, build)
         run('ranges', ranges, b, build)

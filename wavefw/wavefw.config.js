@@ -64,4 +64,9 @@ window.WAVEFW_CONFIG = {
   maxHeight: null,              // e.g. '80vh' or 600: the rows scroll inside the viewer (the bar stays in view); null = page scroll
                                 //   (the bar sticks to the top while its rows go by); the bar's Scroll button switches on the fly
   toolsFolded: false,           // the bar's tools folded to its title line (▴ / ▾ in the bar)
+  // the clock cycles in a band under the time axis (the right button's Cycles ▸; kept in the browser, the saved state):
+  cycles: false,                //   the band of cycle numbers on; the cursor's cycle in the title, Δ of the second cursor in them
+  cycleClock: null,             //   the clock counted (a full path or a name); null: the clock found (a 1-bit *clk* / *clock*)
+  cycleZero: null,              //   the time of cycle 0 (its rising edge at or after it); null: the clock's first rising edge
+  savePage: true,               // the bar's Save page: this page as a file with your view in it (false: off; the page's text is kept for it)
 };

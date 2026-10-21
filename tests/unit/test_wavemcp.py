@@ -123,6 +123,12 @@ class Values(unittest.TestCase):
         self.assertIsNone(W.bits_value("'b10q1", 4))
         self.assertEqual(W.bits_value("4'bx1", 8), "'b0000xxx1")   # sized: x to its size, then 0s
 
+    def test_cycles_zero_in_ns(self):
+        """The cycles' zero: a command's answer and a state's config in ns, as every other time the agent reads."""
+        got = W.ns_out([{'op': 'cycles', 'cycles': {'cycles': True, 'cycleClock': 'clk', 'cycleZero': 50000}}], True)
+        self.assertEqual(got[0]['cycles']['cycleZero'], 50)
+        self.assertEqual(W.state_ns({'config': {'cycleZero': 50000, 'cycles': True}})['config']['cycleZero'], 50)
+
 
 class Views(unittest.TestCase):
     """view_edit / view_get on a page's file, and live through the bridge with a page played here (its stream, hello,

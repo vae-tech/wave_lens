@@ -42,21 +42,23 @@ HL_N = 6
 GAP_KEYS = {'on': 'gaps', 'idle': 'gapIdle', 'keep': 'gapKeep', 'signals': 'gapSignals', 'clock': 'gapClock', 'aux': 'gapAux', 'only': 'gapOnly',
             'count': 'gapCount'}
 ALL_GAP_KEYS = ['gaps', 'gapIdle', 'gapKeep', 'gapSignals', 'gapClock', 'gapAux', 'gapOnly', 'gapCount', 'gapLine']   # view.js GAP_KEYS
+CYC_KEYS = ['cycles', 'cycleClock', 'cycleZero']   # view.js CYC_KEYS
 # the commands: name -> arguments (? optional), as WaveFW.commands() gives them (the smoke test compares the two)
 COMMANDS = {
     'cursor': 't', 'cursor2': 't', 'view': 'from? to? at? span?', 'fit': '', 'range': 'from? to? signal?',
     'bookmark': 'n? t? signal? text? color? lift? delete?', 'arrow': 'id? from? to? shape? head? line? color? label? delete?',
-    'marker': 'id? t? label? color? delete?', 'group': 'name signals? add? remove? color? rename? delete? go?',
+    'marker': 'id? t? label? color? delete?', 'group': 'name signals? add? remove? color? rename? delete? go? move?',
     'highlight': 'add? remove? set? clear?', 'paint': 'signals? color? clear?', 'select': 'signal? signals?', 'hide': 'signals', 'show': 'signals?',
     'fold': 'groups? all?', 'unfold': 'groups? all?', 'radix': 'signals radix', 'analog': 'signals rows', 'sort': 'dir ignore?', 'style': 'name',
     'layout': 'scroll? height? tools?', 'find': 'query case? word? regex? highlight? open?', 'gaps': 'on? idle? keep? signals? clock? aux? only? count? reset?',
+    'cycles': 'on? clock? zero? reset?',
     'edge': 'dir? kind? value? signal?', 'reset': '', 'state': '', 'set_state': 'state', 'rows': 'pattern? limit? offset?',
     'picture': 'format? from? to? rows?',
 }
 LIVE_ONLY = {'fit': 'the time of the waves', 'edge': 'the values of the signals', 'picture': 'the screen'}
 # the arguments of each command that are times (wavemcp.py turns its ns into "…ns" for these)
 TIME_ARGS = {'cursor': ('t',), 'cursor2': ('t',), 'view': ('from', 'to', 'at', 'span'), 'range': ('from', 'to'), 'bookmark': ('t',), 'marker': ('t',),
-             'picture': ('from', 'to')}
+             'picture': ('from', 'to'), 'cycles': ('zero',)}
 def block_re(name):
     """A JSON block of the page (<script type="application/json" id="wavefw-…">), at a line's start: not the text of it in
     the comments of the inlined wavefw.js."""
@@ -71,7 +73,7 @@ def put_block(text, name, obj):
     framework, so it is there when the viewers are built."""
     rx = block_re(name)
     block = '' if obj is None else (f'<script type="application/json" id="wavefw-{name}">' +
-                                    json.dumps(obj, ensure_ascii=False, separators=(',', ':')).replace('</', '<\\/') + '</script>\n')
+                                    json.dumps(obj, ensure_ascii=False, separators=(',', ':')).replace('<', '\\u003c') + '</script>\n')   # no < in it
     if rx.search(text):
         return rx.sub(lambda _: block, text, count=1)
     if obj is None:
@@ -612,9 +614,19 @@ class Editor:
         to = str(a['rename']).strip() if a.get('rename') is not None else None
         if to == '' or (to and to != name and any(x['name'] == to for x in gs)):
             fail(f'rename: a group "{to}" is there' if to else 'rename: a name')
+        mv = a.get('move')
+        if isinstance(mv, float) and mv.is_integer():   # 1.0, 1e0: a number as JavaScript has it
+            mv = int(mv)
+        if mv is not None and mv not in ('up', 'down', 'top', 'bottom') and not (isinstance(mv, int) and not isinstance(mv, bool) and mv >= 1):
+            fail('move: up, down, top, bottom or a number (1: the first)')
         if not g:
             g = {'name': name, 'signals': [], 'color': None}
             gs.append(g)
+        if mv is not None:   # its place among your groups (edit.js)
+            i, n = gs.index(g), len(gs)
+            j = i - 1 if mv == 'up' else i + 1 if mv == 'down' else 0 if mv == 'top' else n - 1 if mv == 'bottom' else mv - 1
+            gs.remove(g)
+            gs.insert(min(max(j, 0), n - 1), g)
         if new is not None:
             g['signals'] = new
         for f in add:
@@ -637,7 +649,7 @@ class Editor:
                 self.st['hidden'] = [p for p in self.st['hidden'] if p != path]
             if g['signals']:
                 self.st['select'] = g['signals'][0]
-        return {'name': g['name'], 'signals': len(g['signals'])}
+        return {'name': g['name'], 'signals': len(g['signals']), 'at': gs.index(g) + 1}
 
     def c_highlight(self, a):
         lst = [] if a.get('clear') else self.highlight()
@@ -813,6 +825,26 @@ class Editor:
             if k in a:
                 c[g] = a[k]
         return {'gaps': {k: c[k] for k in ALL_GAP_KEYS if k in c}}
+
+    def c_cycles(self, a):
+        """The clock cycles under the time axis (view.js setCycles): as the state's cycles, cycleClock (a full path), cycleZero."""
+        o = {}   # every argument checked before anything changes
+        if a.get('on') is not None:
+            o['cycles'] = bool(a['on'])
+        if 'clock' in a:
+            r = None if a['clock'] is None else self.m.pick(self.st, a['clock'], one=True)[0]
+            if r and self.m.doc and r.get('width', 1) != 1:   # a state without its page: the width is not known
+                fail(f'clock: {r["full"]} is not a 1-bit signal')
+            o['cycleClock'] = r['full'] if r else None
+        if 'zero' in a:
+            o['cycleZero'] = None if a['zero'] is None else self.time(a['zero'], 'zero')
+        c = self.config()
+        if a.get('reset'):   # the page's settings again (null in a state is the clock found, the first edge)
+            base = {'cycles': False, 'cycleClock': None, 'cycleZero': None}
+            c.update({k: self.m.cfg.get(k, base[k]) for k in CYC_KEYS})
+            c['cycles'] = bool(c['cycles'])
+        c.update(o)
+        return {'cycles': {k: c[k] for k in CYC_KEYS if k in c}}
 
     def c_reset(self, a):
         self.config()['highlight'] = []

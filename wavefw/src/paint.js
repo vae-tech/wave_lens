@@ -202,6 +202,15 @@ function paintAxis(P, o) { // o: { from, span, xL, xR, y, h, yEnd, X, timed, tic
     P.text(Math.min(Math.max(x, o.xL + hw), o.xR - hw), o.y + o.h / 2, s, { anchor: 'middle', size: 10.5, fill: 'muted' });
   }
 }
+// the cycles of a clock in a band under the time axis: a tick at each rising edge when they are 3 px apart, every k-th
+// edge numbered (k 1 2 5 10 20 50 …, the numbers 44 px apart at least); cycle 0 is the edge iz of ups
+function paintCycles(P, o) { // o: { xL, xR, y, h, X, from, to, ups, iz }
+  P.rect(o.xL, o.y, o.xR - o.xL, o.h, 'panel2');
+  P.path([['M', o.xL, o.y + o.h - 0.5], ['L', o.xR, o.y + o.h - 0.5]], { stroke: 'line', w: 1, alpha: 0.6 });
+  const m = cycMarks(o, t => P.measure(t, { size: 10 })), y1 = o.y + o.h, d = m.ticks.flatMap(x => [['M', x, y1 - 4], ['L', x, y1]]);
+  for (const [x, t] of m.labels) { d.push(['M', x, o.y + 2], ['L', x, y1]); P.text(Math.max(x + 3, o.xL + 2), o.y + o.h / 2, t, { size: 10, fill: 'muted' }); }
+  P.path(d, { stroke: 'line', w: 1, alpha: 0.8 });
+}
 function edgeGeom(e, x1, y1, x2, y2) { // WaveDrom edge shapes -> path, label point, arrow "from" points
   const dx = x2 - x1, dy = y2 - y1;
   switch (e.shape) {

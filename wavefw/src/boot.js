@@ -102,6 +102,7 @@ if (G.MutationObserver) {
   }).observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ['data-theme'] });
 }
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(redrawAll);
+const HTML_STYLE = document.documentElement.getAttribute('style');   // the page's own, before the settings' variables go on it (Save page)
 if (G.WAVEFW_CONFIG) configure(G.WAVEFW_CONFIG);   // settings file loaded before wavefw.js (see docs/USAGE.md "Settings")
 const manual = document.currentScript && document.currentScript.dataset.manual != null;
 // a page that carries the live link (tools/wavemcp.py view_live) or is opened with #wavefw-live=<port>:<token> connects to the
@@ -111,7 +112,23 @@ const liveHash = () => {
   try { const o = !m && el ? JSON.parse(el.textContent) : null; if (m || o) live(m ? decodeURIComponent(m[1]) : `${o.port}:${o.token}`); }
   catch (e) { console.error('wavefw live: ' + e.message); }
 };
-const start = () => { if (!manual) upgrade(); liveHash(); };
+// Save page: the page as it was read, taken before a viewer is built; only a page that is all in itself (no script or
+// stylesheet of its own beside it: a page of mkhtml.py) and whose viewers are not built yet (else PAGE.why says why);
+// savePage: false leaves it (a big page: one more copy of its text)
+const takeSrc = () => {
+  if (PAGE.src != null || PAGE.why || settings(GLOBAL).savePage === false) return;
+  const own = [...document.querySelectorAll('script[src], link[rel~=stylesheet][href]')].find(e => !/^(https?:)?\/\//i.test(e.getAttribute('src') ||
+    e.getAttribute('href') || ''));
+  if (own) { PAGE.why = `this page needs ${own.getAttribute('src') || own.getAttribute('href')} beside it: Save page is for a page that is all in ` +
+    'itself (make html, mkhtml.py); Save keeps the view'; return; }
+  if (VIEWS.size || document.querySelector('[data-wvf-done]')) { PAGE.why = 'the viewers of this page were built before it was read: Save keeps the ' +
+    'view'; return; }
+  const d = document.doctype;
+  PAGE.src = document.documentElement.outerHTML; PAGE.style = HTML_STYLE;
+  const ids = d && (d.publicId ? ` PUBLIC "${d.publicId}"` : d.systemId ? ' SYSTEM' : '') + (d.systemId ? ` "${d.systemId}"` : '');
+  PAGE.doctype = d ? `<!DOCTYPE ${d.name}${ids}>\n` : '';
+};
+const start = () => { takeSrc(); if (PAGE.why) VIEWS.forEach(v => v.layoutShow()); if (!manual) upgrade(); liveHash(); };   // built already: no Save page
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 
 /* ---------------- tooltips: what a control of a viewer does and its keys ---------------- */
@@ -158,8 +175,8 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavefw plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveFW = { version: '0.14',   // the project's version: VERSION (make check compares them)
-  rowId: () => ++XID, parse, fromTV, vcdToWave, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme, setColors, configure,
+G.WaveFW = { version: '0.15',   // the project's version: VERSION (make check compares them)
+  rowId: () => ++XID, parse, fromTV, vcdToWave, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme, setColors, configure, savePage, pageText,
   plugin, svgPlugin, views: () => [...VIEWS], defaults: DEFAULTS, live,
   commands: () => Object.fromEntries(Object.entries(CMDS).map(([k, c]) => [k, { args: c.args, doc: c.doc }])),
   paint: { circle, arrowHead, edgeGeom, lastLE },
@@ -167,7 +184,9 @@ G.WaveFW = { version: '0.14',   // the project's version: VERSION (make check co
     colorNames: CVAR, styles: Object.keys(EDGES), radixes: RADIX, enums: ENUMS, decode, fmtTime, fmtExact, parseT,
   registerTokens, registerDefaults, tips, util: { esc, glob, lastLE, lastBefore, stepTo, isEdge, circle, timeEps },
   // unstable: the pure functions for the unit table of tests/smoke.py and peek(view), the fields the tests read; not an API
-  internal: { findRow, parseWant, valueIs, findEdge, edgeGlyph, bitsOf, hexOf, mixedBits, bitsVal, vcdHex, enumColor, analogValue, niceStep, cycMap, parseWave,
+  internal: { findRow, parseWant, valueIs, findEdge, edgeGlyph, bitsOf, hexOf, mixedBits, bitsVal, vcdHex, cycZero, cycAt, cycTime, cycUps, cycClock,
+    diffSpans, cmpKey,
+    cycMarks, enumColor, analogValue, niceStep, cycMap, parseWave,
     idleCuts, gapLen, gapText, gapRefs, fmtFreq, gfmt, toFloat, fieldRow, stripPfx, trimNum,
     peek: v => ({ get lay() { return v.lay; }, get oy() { return v.oy; }, get vis() { return v.vis; }, get collapsed() { return v.collapsed; },
       get rowEls() { return v.rowEls; }, get namesEl() { return v.namesEl; } }) } };

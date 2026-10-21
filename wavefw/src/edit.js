@@ -152,9 +152,9 @@ command('marker', 'id? t? label? color? delete?', 'a marker: a dashed line acros
   if (a.color !== undefined) m.color = a.color || null;
   v.setMarks(); return { id: v.umarks.indexOf(m) + 1 };
 });
-command('group', 'name signals? add? remove? color? rename? delete? go?', 'your group of signals, a folder at the top of the names (the signals ' +
-  'stay where they are too): made or changed — signals: its signals in this order, add, remove, color, rename; delete; go: opened, shown, its first ' +
-  'signal selected (ctrl+G)', (v, a) => {
+command('group', 'name signals? add? remove? color? rename? delete? go? move?', 'your group of signals, a folder at the top of the names (the ' +
+  'signals stay where they are too): made or changed — signals: its signals in this order, add, remove, color, rename; delete; go: opened, shown, ' +
+  'its first signal selected (ctrl+G); move: its place among your groups, up, down, top, bottom or a number (1: the first)', (v, a) => {
   const name = String(a.name ?? '').trim(); if (!name) fail('group: a name');
   let g = v.ugroups.find(x => x.name === name);
   if (a.delete) { if (!g) fail(`no group "${name}"`); v.ugroups = v.ugroups.filter(x => x !== g); v.setGroups(); return { name, deleted: true }; }
@@ -162,7 +162,14 @@ command('group', 'name signals? add? remove? color? rename? delete? go?', 'your 
   const set = a.signals != null ? fulls(a.signals) : null, add = a.add != null ? fulls(a.add) : [], rm = a.remove != null ? fulls(a.remove) : [];
   const to = a.rename != null ? String(a.rename).trim() : null;
   if (to === '' || (to && to !== name && v.ugroups.some(x => x.name === to))) fail(`rename: ${to ? `a group "${to}" is there` : 'a name'}`);
+  const mv = a.move;
+  if (mv != null && !['up', 'down', 'top', 'bottom'].includes(mv) && !(Number.isInteger(mv) && mv >= 1)) {
+    fail('move: up, down, top, bottom or a number (1: the first)'); }
   if (!g) { g = { name, signals: [], color: null }; v.ugroups.push(g); }
+  if (mv != null) {   // its place among your groups
+    const i = v.ugroups.indexOf(g), n = v.ugroups.length, j = mv === 'up' ? i - 1 : mv === 'down' ? i + 1 : mv === 'top' ? 0 : mv === 'bottom' ? n - 1 : mv - 1;
+    v.ugroups.splice(i, 1); v.ugroups.splice(Math.min(Math.max(j, 0), n - 1), 0, g);
+  }
   if (set) g.signals = set;
   for (const f of add) if (!g.signals.includes(f)) g.signals.push(f);
   if (rm.length) g.signals = g.signals.filter(f => !rm.includes(f));
@@ -170,7 +177,7 @@ command('group', 'name signals? add? remove? color? rename? delete? go?', 'your 
   if (to) g.name = to;
   v.setGroups();
   if (a.go) { v.held.names = false; v.renderNamesNow(); v.goGroup(g.name); }
-  return { name: g.name, signals: g.signals.length };
+  return { name: g.name, signals: g.signals.length, at: v.ugroups.indexOf(g) + 1 };
 });
 command('highlight', 'add? remove? set? clear?', 'signals and modules in front, each in its colour, the rest dimmed: add, remove, set (the ' +
   'list), clear', (v, a) => {
@@ -259,6 +266,18 @@ command('gaps', 'on? idle? keep? signals? clock? aux? only? count? reset?', 'the
   if (Object.keys(o).length) v.setGaps(o);
   return { gaps: v.gapOpt() };
 });
+command('cycles', 'on? clock? zero? reset?', 'the clock cycles in a band under the time axis (the menu\'s Cycles): on, the clock counted (a ' +
+  '1-bit signal), zero: the time of cycle 0 (the rising edge at or after it), null the first edge; reset: as the page sets them', (v, a) => {
+  const o = {};   // every argument checked before anything changes
+  if (a.on != null) o.cycles = !!a.on;
+  if (a.clock !== undefined) { const r = a.clock == null ? null : pickRows(v, a.clock, { one: true })[0];
+    if (r && r.width !== 1) fail(`clock: ${r.full} is not a 1-bit signal`); o.cycleClock = r ? r.full : null; }
+  if (a.zero !== undefined) o.cycleZero = a.zero == null ? null : cmdTime(v, a.zero, 'zero');
+  if (a.reset) v.setCycles(null);
+  if (Object.keys(o).length) v.setCycles(o);
+  const d = v.cycData(true);
+  return { cycles: v.cycOpt(), clock: d ? d.clk.full : null, cycle: d ? cycAt(d.ups, d.iz, v.cursor) : null };
+});
 command('edge', 'dir? kind? value? signal?', 'the cursor to the next (dir 1) or previous (-1) edge of the selected signal (signal: that one, ' +
   `selected), kind: ${Object.keys(EDGE_KINDS).join(' ')}; value: the value to become`, (v, a) => {
   if (a.kind != null && !EDGE_KINDS[a.kind]) fail(`kind: one of ${Object.keys(EDGE_KINDS).join(' ')}`);
@@ -316,13 +335,150 @@ Object.assign(WaveView.prototype, {
       if (own) { const h = this.held; this.held = null; if (h.names) this.renderNames(); if (h.notes) this.renderNotes(); if (h.draw || h.names) this.draw(); }
     }
     this.root.dispatchEvent(new CustomEvent('wavefw:edit', { detail: { ops: list, results: out } }));
+    if (own && !list.every(o => o && READ_CMDS.has(o.op))) this.undoTick();   // a batch that changes something (yours, a script's, an agent's) is one step
     return out;
+  },
+  // undo / redo: snapshots of what is edits (KEPT, KEPT_CFG) and the highlight with its colours — not the cursor, the
+  // window, the selection, the search or the plugins' parts — taken when it changed: after a batch of commands, once the
+  // pointer is up (a drag is one step), a key that is not typing, a field changed (a text: when it is left), a load
+  undoPart() {
+    const groups = this.groupList().map((g, i) => Object.assign(g, { uid: this.ugroups[i].uid || (this.ugroups[i].uid = ++XID) }));   // a group over a rename
+    return JSON.stringify({ bookmarks: this.bookmarks(), arrows: this.arrowList(), markers: this.markList(), groups,
+      paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs), hidden: [...this.hiddenRows],
+      config: Object.assign({ style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded }, this.gapOpt(), this.cycOpt()),
+      hl: [...this.picks].map(([r, i]) => [r.full, i]).sort((a, b) => a[1] - b[1]) });
+  },
+  undoTick(base = false) {
+    if (!base && (this.undoCur == null || this.undoing || this.held || PTR.down)) return;   // no history yet, or a step not done
+    const p = this.undoPart();
+    if (base) { this.undoCur = p; this.undoS = []; this.redoS = []; this.undoShow(); return; }
+    if (p === this.undoCur) return;
+    this.undoS.push(this.undoCur); if (this.undoS.length > UNDO_N) this.undoS.shift();
+    this.redoS = []; this.undoCur = p; this.undoShow();
+  },
+  async undo(dir = -1) {   // -1: undo, 1: redo -> what changed back ('' nothing done)
+    if (this.undoCur == null || this.undoing) return '';
+    if (this.held || PTR.down) { this.toast('a change is not done yet: undo after it'); return ''; }   // a batch waiting, a drag
+    this.undoTick();
+    const from = dir < 0 ? this.undoS : this.redoS, to = dir < 0 ? this.redoS : this.undoS;
+    if (!from.length) { this.toast(dir < 0 ? 'nothing to undo' : 'nothing to redo'); return ''; }
+    const p = from.pop(), cur = this.undoCur;
+    to.push(cur); this.undoing = true;
+    let what;
+    try { what = await this.undoApply(JSON.parse(p), JSON.parse(cur)); } finally { this.undoing = false; }
+    this.undoCur = this.undoPart(); this.undoShow();
+    const text = what.join(', ') || 'the view'; this.toast(`${dir < 0 ? 'undone' : 'redone'}: ${text}`); return text;
+  },
+  // a snapshot A back over the current one B: only what differs (the rest is not touched); the highlight with its colours;
+  // the place in the find's matches kept -> what changed
+  async undoApply(A, B) {
+    const diff = (a, b) => JSON.stringify(a) !== JSON.stringify(b), st = { wavefw: 'state', version: STATE_VERSION, config: {} };
+    for (const k of KEPT) if (diff(A[k], B[k])) st[k] = A[k];
+    if ('bookmarks' in st || 'arrows' in st) { st.bookmarks = A.bookmarks; st.arrows = A.arrows; }   // setState takes the two together
+    for (const k of Object.keys(A.config)) if (diff(A.config[k], B.config[k])) st.config[k] = A.config[k];
+    const hl = diff(A.hl, B.hl), fi = this.fi, fiRow = this.fiRow;
+    if (hl) st.config.highlight = A.hl.map(([f]) => f);
+    await this.setState(st);
+    if (hl) { const at = new Map(A.hl); this.picks = new Map([...this.picks.keys()].map(r => [r, at.get(r.full) ?? this.picks.get(r)]));
+      this.renderNames(); this.draw(); }   // the highlight's colours worked out again
+    if (fiRow && this.found.has(fiRow)) { this.fi = fi; this.fiRow = fiRow; }
+    return [...new Set([...KEPT.filter(k => k in st), ...Object.keys(st.config).map(k => (GAP_KEYS.includes(k) ? 'gaps' : CYC_KEYS.includes(k) ? 'cycles' :
+      k))])];
+  },
+  undoShow() { for (const [act, s] of [['undo', this.undoS], ['redo', this.redoS]]) { const b = this.root.querySelector(`button[data-act=${act}]`);
+    if (b) b.disabled = !(s && s.length); } },
+  // the order of your groups' rows (alt+↑ / alt+↓, a drag in the names): one batch of group commands, one step to undo, said
+  // in the toast. rows: signals of your groups (a run: as one block, in the group's order) or a group's header; to: the row
+  // dropped on — a signal of a group of yours (before it; after: after it), a group's header (signals: at the end of that
+  // group; a header: before / after it). Onto a row that moves itself: nothing
+  async moveRows(rows, to, after = false) {
+    const T = to && (to.user ? to : to.ug), ug = n => this.ugroups.find(g => g.name === n);
+    if (!T) { this.toast('drop onto one of your groups (the right button: Groups ▸)'); return false; }
+    if (rows[0] && rows[0].type === 'group') {   // a group among your groups
+      const G = rows[0]; if (!G.user || G.name === T.name) return false;
+      const rest = this.ugroups.filter(g => g.name !== G.name), k = rest.findIndex(g => g.name === T.name) + (after ? 1 : 0);
+      if (this.ugroups.indexOf(ug(G.name)) === k) return false;
+      await this.run({ op: 'group', name: G.name, move: k + 1 });
+      this.toast(`${G.name}: group ${k + 1} of ${this.ugroups.length}`); return true;
+    }
+    const sigs = rows.filter(r => r.type === 'sig' && r.tr && r.ug), fulls = [...new Set(sigs.map(r => r.orig.full))]; if (!fulls.length) return false;
+    if (!to.user && sigs.includes(to)) return false;   // onto itself
+    const list = ug(T.name).signals.filter(f => !fulls.includes(f));
+    const at = to.user ? -1 : list.indexOf(to.orig.full);
+    list.splice(at < 0 ? list.length : at + (after ? 1 : 0), 0, ...fulls);
+    // from each other group: the rows picked in it (a signal also in a group not picked stays there)
+    const from = [...new Set(sigs.filter(r => r.ug.name !== T.name).map(r => r.ug.name))];
+    const ops = from.map(n => ({ op: 'group', name: n, remove: sigs.filter(r => r.ug.name === n).map(r => r.orig.full) }))
+      .concat([{ op: 'group', name: T.name, signals: list }]);
+    if (JSON.stringify(list) === JSON.stringify(ug(T.name).signals) && !from.length) return false;
+    await this.run(ops);
+    const s = this.ugRows().find(r => r.ug && r.ug.name === T.name && r.orig.full === fulls[0]); if (s) this.select(s);
+    this.toast(`${fulls.length === 1 ? sigs[0].orig.name : fulls.length + ' signals'} → ${T.name}, ${list.indexOf(fulls[0]) + 1} of ${list.length}`);
+    return true;
+  },
+  // alt+↑ / alt+↓: the selected signal (a selected run in the same group: as one block) one place up / down in its group;
+  // with shift its group among yours. row: the row of the names with the focus (a group's header: that group moves)
+  async moveKey(dir, whole = false, row = null) {
+    if (row && row.user) { const g = this.ugroups.find(x => x.name === row.name), i = this.ugroups.indexOf(g), n = this.ugroups.length;
+      if (!g || i + dir < 0 || i + dir >= n) return false;
+      await this.run({ op: 'group', name: g.name, move: dir < 0 ? 'up' : 'down' }); this.toast(`${g.name}: group ${i + dir + 1} of ${n}`); return true; }
+    const s = row && row.ug ? row : this.sel;
+    if (!s || !s.ug) { this.toast('alt+↑ / alt+↓ order the rows of your groups (the right button: Groups ▸)'); return false; }
+    if (whole) return this.moveKey(dir, false, s.ug);
+    const g = this.ugroups.find(x => x.name === s.ug.name), run = this.selRun.size > 1 && this.selRun.has(s) ? [...this.selRun].filter(r => r.ug === s.ug) :
+      [s];
+    const block = g.signals.filter(f => run.some(r => r.orig.full === f)), i0 = g.signals.indexOf(block[0]), rest = g.signals.filter(f => !block.includes(f));
+    const pos = Math.min(Math.max(i0 + dir, 0), rest.length); rest.splice(pos, 0, ...block);
+    if (JSON.stringify(rest) === JSON.stringify(g.signals)) return false;
+    await this.run({ op: 'group', name: g.name, signals: rest });
+    this.toast(`${block.length === 1 ? s.orig.name : block.length + ' signals'}: ${pos + 1} of ${rest.length} in ${g.name}`); return true;
+  },
+  // a drag in the names: the rows of your groups (a signal, a run of selected ones, a group's header) to another place in
+  // them or another group of yours; a line where they go; 6 px before it starts (a click stays a click); the pointer
+  // captured (let go anywhere), the place found again where it is let go (the names may have scrolled)
+  namesDrag() {
+    const el = this.namesEl; let d = null;
+    const clear = () => el.querySelectorAll('.row.drop-b, .row.drop-a').forEach(x => x.classList.remove('drop-b', 'drop-a'));
+    const rowEl = r => { const i = this.vis.indexOf(r); return i < 0 ? null : el.querySelector(`.row[data-r="${i}"]`); };
+    const lastOf = T => [...this.vis].reverse().find(r => r === T || r.ug === T);   // the last row of a group drawn (its header when folded)
+    // where it goes at (x, y): {to, after, line: [row element, 'drop-b' | 'drop-a']} or null
+    const place = (x, y, dr) => {
+      const k = document.elementFromPoint(x, y)?.closest('.names .row[data-r]'), r = k && el.contains(k) && this.vis[+k.dataset.r];
+      const T = r && (r.user ? r : r.ug); if (!T) return null;
+      const b = k.getBoundingClientRect(), low = y > b.top + b.height / 2;
+      if (dr.user) { const aft = r.user ? low : true; return { to: T, after: aft, line: aft ? [rowEl(lastOf(T)), 'drop-a'] : [rowEl(T), 'drop-b'] }; }
+      if (r.user) return { to: T, after: false, line: [rowEl(lastOf(T)), 'drop-a'] };   // a signal onto a header: at the end of that group
+      return { to: r, after: low, line: [k, low ? 'drop-a' : 'drop-b'] };
+    };
+    const end = (e, drop) => {
+      if (!d) return; const x = d; d = null; clear(); el.classList.remove('wv-drag');
+      try { if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId); } catch (err) { /* gone */ }
+      if (!x.on || !drop) return;
+      el.addEventListener('click', ev => ev.stopPropagation(), { capture: true, once: true });   // the drop is not a click on a name
+      const p = place(e.clientX, e.clientY, x.r), rows = x.r.user ? [x.r] : this.selRun.size > 1 && this.selRun.has(x.r) ? [...this.selRun] : [x.r];
+      if (p) this.moveRows(rows, p.to, p.after); else this.toast('drop onto one of your groups (the right button: Groups ▸)');
+    };
+    el.addEventListener('pointerdown', e => {
+      const k = e.button === 0 && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && !e.target.closest('.mk') && e.target.closest('.row[data-r]');
+      const r = k && this.vis[+k.dataset.r]; d = r && (r.user || r.ug) ? { r, y: e.clientY, on: false, id: e.pointerId } : null;   // other names: text
+    });
+    el.addEventListener('pointermove', e => {
+      if (!d || e.pointerId !== d.id) return;
+      if (!(e.buttons & 1)) { end(e, false); return; }   // the button went up where nobody heard it
+      if (!d.on && Math.abs(e.clientY - d.y) < 6) return;
+      if (!d.on) { d.on = true; el.classList.add('wv-drag'); try { el.setPointerCapture(e.pointerId); } catch (err) { /* no capture */ } }
+      getSelection()?.removeAllRanges(); clear();
+      const p = place(e.clientX, e.clientY, d.r); if (p && p.line[0]) p.line[0].classList.add(p.line[1]);
+    });
+    el.addEventListener('pointerup', e => end(e, true)); el.addEventListener('pointercancel', e => end(e, false));
+    el.addEventListener('lostpointercapture', e => { if (d && d.on) end(e, false); });
   },
   // your markers (the marker command, the menu's Marker here, the Markers list) over the page's own: drawn, kept in this browser
   setMarks() { this.markers = this.pageMarks.concat(this.umarks); this.saveBookmarks(); this.renderNotes(); this.draw(); return this; },
   // your groups: a folder per group at the top of the names, its signals (the model's rows under them, live: radix,
   // values) in your order; the same objects while the group stays (its folding, a highlight)
-  setGroups() { this.ugMemo = null; this.saveRows(); this.renderNames(); this.draw(); return this; },
+  // your groups changed: their rows again (a compare's marks on the new ones), kept, drawn
+  setGroups() { this.ugMemo = null; this.saveRows(); if (this.cmp) this.cmpMarks(); this.renderNames(); this.draw(); return this; },
   ugRows() {
     if (this.ugMemo) return this.ugMemo;
     const by = new Map(this.M.rows.filter(r => r.type === 'sig' && r.tr).map(r => [r.full, r])), cache = this.ugCache = this.ugCache || new Map(), out = [];
@@ -356,7 +512,35 @@ Object.assign(WaveView.prototype, {
 // (wavefw.edits:<page>), so what you change here afterwards stays until a newer one (Save keeps yours in a file). The
 // rest (cursor, window, highlight, selection, folding, order, search), which a page opened again starts from anyway,
 // is applied every time, as the page's own settings are.
-const KEPT = ['bookmarks', 'arrows', 'markers', 'groups', 'paint', 'radix', 'analog', 'hidden'], KEPT_CFG = ['style', 'maxHeight', 'toolsFolded', ...GAP_KEYS];
+const KEPT = ['bookmarks', 'arrows', 'markers', 'groups', 'paint', 'radix', 'analog', 'hidden'];
+const KEPT_CFG = ['style', 'maxHeight', 'toolsFolded', ...GAP_KEYS, ...CYC_KEYS];
+const UNDO_N = 100;   // the steps undo keeps
+// a click, a key or a field changed anywhere: the viewers' edits looked at once it is done (one look per burst of events);
+// not while a button is down (a drag ends as one step) or a key types in a text field (it ends when the field is left)
+const PTR = { down: false };
+let undoT = 0;
+const undoLater = e => {
+  if (e.type === 'pointerdown') { PTR.down = true; return; }
+  if (e.type === 'pointerup' || e.type === 'pointercancel') PTR.down = false;
+  const typing = 'input:not([type=checkbox]):not([type=radio]), textarea, [contenteditable]';
+  if (e.type === 'keyup' && e.target && e.target.closest && e.target.closest(typing)) return;
+  if (!undoT) undoT = setTimeout(() => { undoT = 0; VIEWS.forEach(v => { if (v.root.isConnected) v.undoTick(); }); }, 0);
+};
+// ctrl+Z, ctrl+shift+Z / ctrl+Y (not cmd+Y: Chrome's history on a Mac) in the viewer of the focus, else the one used last;
+// the letter by the key, or by its place when the layout's letter is not a latin one (ctrl+Я); a text field keeps its own
+function undoKey(e) {
+  if (e.defaultPrevented || e.altKey || !(e.ctrlKey || e.metaKey)) return;
+  const k = /^[a-z]$/i.test(e.key) ? e.key.toLowerCase() : e.code === 'KeyZ' ? 'z' : e.code === 'KeyY' ? 'y' : '';
+  if (!(k === 'z' || (k === 'y' && e.ctrlKey && !e.metaKey))) return;
+  const t = e.target && e.target.closest ? e.target : null;
+  if (t && t.closest('input:not([type=checkbox]):not([type=radio]):not([type=button]), textarea, select, [contenteditable]')) return;
+  const root = t && t.closest('.wv'), v = (root && root.waveView) || ACTIVE.view; if (!v) return;
+  e.preventDefault(); v.undo(k === 'y' || e.shiftKey ? 1 : -1);
+}
+if (typeof document !== 'undefined') {
+  for (const ev of ['pointerdown', 'pointerup', 'pointercancel', 'keyup', 'change']) document.addEventListener(ev, undoLater, true);
+  document.addEventListener('keydown', undoKey);
+}
 let EDITS;
 function pageEdits() {
   if (EDITS !== undefined) return EDITS;
@@ -364,6 +548,36 @@ function pageEdits() {
   try { EDITS = el ? JSON.parse(el.textContent).views || {} : null; }
   catch (e) { console.error('wavefw: the page\'s edits are not JSON: ' + e.message); EDITS = null; }
   return EDITS;
+}
+// Save page (the bar's, WaveFW.savePage): the page as it was read (PAGE.src, boot.js) with every viewer's state in its
+// edits — the block tools/viewedit.py writes, a new revision per viewer — so whoever opens the file sees what you see. Done
+// on the page parsed again (its elements, not its text): the live link and its token out, the edits one block at the top
+// of <head> (there before any viewer asks), <html>'s own style back. A viewer of a dump opened in the page is not in it
+const PAGE = { src: null, why: '', style: null, doctype: '' };
+const jsonBlock = o => JSON.stringify(o).replace(/</g, '\\u003c');   // no "<" in a script's JSON: a closing tag or a comment opener would end it
+function pageText() {
+  if (PAGE.src == null) fail(PAGE.why || 'this page\'s text was not kept (savePage: false)');
+  const views = Object.assign({}, (pageEdits() || {})), when = new Date().toISOString(), seen = new Set();
+  for (const v of [...VIEWS].filter(x => x.root.isConnected && !x.opts.dumpSrc)) {
+    const key = v.editKey(); if (seen.has(key)) fail(`two viewers of the same waves (${key}): the page keeps one state for them`); seen.add(key);
+    const old = String((views[key] || {}).rev || ''), m = /^r(\d+)@/.exec(old), st = v.state();
+    delete st.wavefw; delete st.version; delete st.title;
+    views[key] = { rev: `r${m ? +m[1] + 1 : 1}@${when}`, state: st };
+  }
+  if (!seen.size) fail('no viewer of this page\'s own waves (a dump opened in it is not in the page: Save keeps its view)');
+  const doc = new DOMParser().parseFromString(PAGE.src, 'text/html'), h = doc.documentElement;
+  doc.querySelectorAll('[id="wavefw-live"], [id="wavefw-edits"]').forEach(e => e.remove());
+  const el = doc.createElement('script'); el.type = 'application/json'; el.id = 'wavefw-edits'; el.textContent = jsonBlock({ views });
+  doc.head.prepend(doc.createTextNode('\n'), el, doc.createTextNode('\n'));   // on a line of its own: viewedit.py finds it there
+  if (PAGE.style == null) h.removeAttribute('style'); else h.setAttribute('style', PAGE.style);
+  return PAGE.doctype + h.outerHTML + '\n';
+}
+function savePage(name) {
+  const text = pageText(), a = document.createElement('a'), base = (location.pathname.split('/').pop() || 'waves.html').replace(/\.html?$/i, '');
+  a.download = name || base + '.view.html';
+  a.href = URL.createObjectURL(new Blob([text], { type: 'text/html' }));
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  return a.download;
 }
 Object.assign(WaveView.prototype, {
   editKey() {
@@ -375,8 +589,9 @@ Object.assign(WaveView.prototype, {
     if (!e || !e.state) return null;
     let st = e.state, seen = false;
     try { seen = localStorage.getItem(key) === String(e.rev); } catch (err) { /* no storage: all of it every time */ }
-    if (seen) {   // applied before: only what this browser does not keep
-      st = Object.fromEntries(Object.entries(st).filter(([k]) => !KEPT.includes(k)));
+    if (seen) {   // applied before: only what this browser does not keep (the plugins' parts too: assertions, ƒ rows)
+      const plug = this.extraState.map(x => x.key);
+      st = Object.fromEntries(Object.entries(st).filter(([k]) => !KEPT.includes(k) && !plug.includes(k)));
       if (st.config) st.config = Object.fromEntries(Object.entries(st.config).filter(([k]) => !KEPT_CFG.includes(k)));
       if (!Object.keys(st).length) return null;
     }

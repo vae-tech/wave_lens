@@ -11,8 +11,9 @@ wavefw/                       what a page needs, nothing else
   src/                        model.js (settings, sorting, find, time, values, the parser), vcd.js (a VCD read in the
                               page), paint.js (the two painters
                               and what they draw), view.js (WaveView and its parts Bar, Names, Notes), edit.js (the
-                              viewer's commands view.run, your groups and markers, a page's edits, the live link),
-                              svg.js (WaveSVG), boot.js (themes, configure, upgrade, exports): one scope, in this order
+                              viewer's commands view.run, your groups and markers, undo, Save page, the live link),
+                              diff.js (a second dump compared), svg.js (WaveSVG), boot.js (themes, configure, upgrade,
+                              exports): one scope, in this order
   wavefw.config.js            global settings file (all keys, with defaults), loaded before wavefw.js
   sva.js, sva.wasm.js         assertions in the page: the panel, binding, evaluation; the engine (generated, make sva-build)
   bus.js                      bus transactions: ports found by their names, decoders (AXI, AXI-Stream, APB, AHB, Avalon, Wishbone, OBI), rows
@@ -186,7 +187,7 @@ approval"): the agent falls back to its shell. The runs, their transcripts and a
 
 ## Versions
 
-Two numbers, `MAJOR.MINOR` (0.14 now; [`CHANGELOG.md`](../CHANGELOG.md) lists them all). The work goes on a branch;
+Two numbers, `MAJOR.MINOR` (0.15 now; [`CHANGELOG.md`](../CHANGELOG.md) lists them all). The work goes on a branch;
 a version is a merge into `main` (`git merge --no-ff`) tagged `vMAJOR.MINOR` (an annotated tag, its message the
 changelog entry). One commit on the branch before the merge raises the version in four places: `VERSION`,
 `version:` in `wavefw/src/boot.js` (then `make wavefw`), a new top entry in `CHANGELOG.md`, and the committed builds

@@ -165,6 +165,35 @@ class Commands(unittest.TestCase):
         rc, out, _ = H.run_tool('viewedit', '--commands')
         self.assertEqual((rc, out.split()[0]), (0, 'cursor'))
 
+    def test_group_move(self):
+        """A group's place among yours (edit.js): up, down, top, bottom, a number; a bad one said, nothing changed."""
+        e = ed()
+        self.run_ok(e, {'op': 'group', 'name': 'a', 'signals': 'clk'}, {'op': 'group', 'name': 'b', 'signals': 'valid'},
+                    {'op': 'group', 'name': 'c', 'signals': 'data'})
+        self.assertEqual(e.run([{'op': 'group', 'name': 'c', 'move': 1}])[0]['at'], 1)
+        self.run_ok(e, {'op': 'group', 'name': 'a', 'move': 'down'}, {'op': 'group', 'name': 'b', 'move': 'top'})
+        self.assertEqual([g['name'] for g in e.st['groups']], ['b', 'c', 'a'])
+        for bad in (0, 1.5, True, 'left'):   # as edit.js: a whole number from 1, or a word
+            self.assertIn('move: up, down', e.run([{'op': 'group', 'name': 'a', 'move': bad}])[0]['error'])
+        self.assertEqual([g['name'] for g in e.st['groups']], ['b', 'c', 'a'])
+        self.assertEqual(e.run([{'op': 'group', 'name': 'a', 'move': 1.0}, {'op': 'group', 'name': 'c', 'move': 'bottom'},
+                                {'op': 'group', 'name': 'b', 'move': 'up'}])[0]['at'], 1)   # 1.0: JSON's 1 in JavaScript
+        self.assertEqual([g['name'] for g in e.st['groups']], ['b', 'a', 'c'])
+
+    def test_cycles(self):
+        """The clock cycles (view.js setCycles): the clock by its path, a time for cycle 0, a bad argument changes nothing,
+        reset gives the page's settings back (null in a state: the clock found), a saved state alone keeps the name."""
+        e = ed(settings={'cycleClock': 'tb.dut.valid', 'cycleZero': 20000})
+        self.assertEqual(e.run([{'op': 'cycles', 'on': True, 'clock': 'clk', 'zero': '30ns'}])[0]['cycles'],
+                         {'cycles': True, 'cycleClock': 'clk', 'cycleZero': 30000})
+        bad = e.run([{'op': 'cycles', 'on': False, 'clock': 'data'}])[0]
+        self.assertIn('not a 1-bit signal', bad['error'])
+        self.assertTrue(e.st['config']['cycles'])                              # nothing changed by the bad command
+        self.assertEqual(e.run([{'op': 'cycles', 'clock': None, 'zero': None}])[0]['cycles'], {'cycles': True, 'cycleClock': None, 'cycleZero': None})
+        self.assertEqual(e.run([{'op': 'cycles', 'reset': True}])[0]['cycles'], {'cycles': False, 'cycleClock': 'tb.dut.valid', 'cycleZero': 20000})
+        alone = V.Editor(V.Model(), {})
+        self.assertEqual(alone.run([{'op': 'cycles', 'clock': 'tb.clk'}])[0]['cycles']['cycleClock'], 'tb.clk')   # no page: the width unknown
+
 
 class Pages(unittest.TestCase):
     def setUp(self):
@@ -188,7 +217,7 @@ class Pages(unittest.TestCase):
         self.assertEqual((res, key, rev[:3]), ([{'op': 'bookmark', 'n': 2}], 'one', 'r1@'))
         t = self.text()
         self.assertEqual(t.count('<script type="application/json" id="wavefw-edits">'), 2)   # the block, and the comment in wavefw.js
-        self.assertIn('a <\\/script> b', t)
+        self.assertIn('a \\u003c/script> b', t)   # no < in the block: </script> and <!--<script> do not end or swallow it
         self.assertLess(t.index('id="wavefw-edits">{'), t.index('<script>window.WAVEFW_CONFIG'))
         _, _, rev2 = V.edit_page(self.page, [{'op': 'marker', 't': 1000}])
         self.assertTrue(rev2.startswith('r2@'))
@@ -206,7 +235,7 @@ class Pages(unittest.TestCase):
             json.dump([{'op': 'group', 'name': 'g', 'signals': 'dut'}, {'op': 'hide', 'signals': 'nosuch'}], f)
         rc, out, err = H.run_tool('viewedit', self.page, '--ops', '@' + ops)
         self.assertEqual(rc, 1)   # one failed: said, the other done
-        self.assertEqual(json.loads(out)[0], {'op': 'group', 'name': 'g', 'signals': 3})
+        self.assertEqual(json.loads(out)[0], {'op': 'group', 'name': 'g', 'signals': 3, 'at': 1})
         self.assertIn('one: revision r1@', err)
         rc, out, _ = H.run_tool('viewedit', self.page, '--get')
         self.assertEqual(json.loads(out)['one']['state']['groups'][0]['name'], 'g')

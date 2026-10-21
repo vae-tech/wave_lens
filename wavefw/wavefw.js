@@ -65,7 +65,8 @@ const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight
   highlight: null, dim: 0.3, groupColors: null, arrowLabels: 'lane', laneHeight: 16, maxHeight: null, toolsFolded: false,
   groupOrder: 'file', moduleShading: true, findHighlight: true, findOpen: true, findCase: false, findWord: false, findRegex: false, cursorSnap: 8,
     wheel: 'scroll', contextMenu: true, enumColors: null, dumpBudget: 3000000, gaps: false, gapIdle: 16, gapKeep: 2,
-    gapSignals: null, gapClock: null, gapAux: null, gapOnly: false, gapCount: 'clock', gapLine: 'dashdot', menuTipDelay: 2000 };
+    gapSignals: null, gapClock: null, gapAux: null, gapOnly: false, gapCount: 'clock', gapLine: 'dashdot', menuTipDelay: 2000, cycles: false,
+    cycleClock: null, cycleZero: null, savePage: true };
 // a plugin's settings with their defaults (bus.js: busDetect, buses; sva.js: svaOpen, svaShow, svaSignals): in every
 // layer like the framework's own, listed in WaveFW.defaults, known to the warning on unknown keys
 const registerDefaults = map => { Object.assign(DEFAULTS, map || {}); return Object.assign({}, DEFAULTS); };
@@ -449,7 +450,7 @@ function fieldRow(sig, f, depth, anc) {
     console.warn(`wavefw: ${sig.full}: field ${f.name} [${msb}:${lsb}] is not inside the ${sig.width || 1}-bit vector (msb first, lsb 0): left out`);
     return null;
   }
-  const w = msb - lsb + 1, r = { type: 'sig', name: String(f.name), depth, anc, width: w, enum: f.enum, radix: f.radix, path: null, src: f,
+  const w = msb - lsb + 1, r = { type: 'sig', name: String(f.name), depth, anc, width: w, enum: f.enum, radix: f.radix, path: null, src: f, fromTv: !!sig.tv,
     full: sig.full + '.' + f.name, field: [msb, lsb], tr: [], gaps: [] };
   for (const o of sig.tr) {
     const b = bitsOf(o, sig.width), fb = b.slice(b.length - 1 - msb, b.length - lsb);
@@ -636,6 +637,33 @@ function edgeGlyph(s, t) { // ↑ / ↓ / value of the transition of s exactly a
 const isClkRow = r => r.type === 'sig' && r.width === 1 && r.tr && r.tr.length > 4 && /clk|clock/i.test(r.name);
 const RISES = new WeakMap();
 const riseTimes = clk => RISES.get(clk) || (RISES.set(clk, clk.tr.filter(o => o.k === '1').map(o => o.t)), RISES.get(clk));
+// the cycles of a clock (its rising edges ups): the index of cycle 0, the first edge at or after zero (null: the first edge);
+// the cycle at t, the last edge at or before t (negative before cycle 0); the time of cycle n, or null past the ends
+const cycZero = (ups, zero) => (zero == null || !isFinite(zero) ? 0 : lastBefore(ups.length, j => ups[j], zero - timeEps(zero), true) + 1);
+const cycAt = (ups, iz, t) => lastBefore(ups.length, j => ups[j], t + timeEps(t)) - iz;
+// the rising edges the cycles count: a dump's first value 1 ("tv") is its level at the start, not an edge (a wave's p is one)
+const cycUps = clk => ((clk.tv || clk.fromTv) && clk.tr[0] && clk.tr[0].k === '1' ? riseTimes(clk).slice(1) : riseTimes(clk));
+// the clock of the cycles: a path exactly, else a name (gapRefs); none given: a 1-bit *clk* / *clock* with rising edges
+const cycClock = (rows, name) => (name ? rows.find(r => r.type === 'sig' && r.tr && r.full === name) || gapRefs(rows, name)[0] || null :
+  rows.find(r => isClkRow(r) && cycUps(r).length) || rows.find(r => r.type === 'sig' && r.width === 1 && r.tr && /clk|clock/i.test(r.name) &&
+    cycUps(r).length) || null);
+// the ticks and numbers of a cycles band: the edges in [from, to] at x (X), a tick when 3 px from the last one, a number
+// every k-th cycle (1 2 5 10 …) where its text (at x + 3, at least xL + 2) fits after the last one's (its width + 6 px)
+// -> { ticks: [x], labels: [[x, text]] }
+function cycMarks(o, measure) {
+  const ups = o.ups, a = Math.max(0, lastBefore(ups.length, j => ups[j], o.from)), b = lastBefore(ups.length, j => ups[j], o.to), ticks = [], labels = [];
+  if (b < 0) return { ticks, labels };
+  const px = b > a ? (o.X(ups[b]) - o.X(ups[a])) / (b - a) : Infinity;
+  let k = 1; for (let m = 1, j = 0; k * px < 44 && m < 1e15;) { j = (j + 1) % 3; if (!j) m *= 10; k = [1, 2, 5][j] * m; }
+  if (px >= 3) { let last = -Infinity; for (let i = a; i <= b; i++) { const x = o.X(ups[i]); if (x - last >= 3) { ticks.push(x); last = x; } } }
+  let end = -Infinity;
+  for (let i = a + (((o.iz - a) % k) + k) % k; i <= b; i += k) {
+    const x = o.X(ups[i]), t = String(i - o.iz), w = measure(t), tx = Math.max(x + 3, (o.xL || 0) + 2);
+    if (tx >= end && x + 3 < o.xR) { labels.push([x, t]); end = tx + w + 6; }
+  }
+  return { ticks, labels };
+}
+const cycTime = (ups, iz, n) => (Number.isInteger(n) && iz + n >= 0 && iz + n < ups.length ? ups[iz + n] : null);
 // gaps in a figure (settings gaps, gapIdle, gapKeep): where nothing changes in [p, q] for idle or longer (p, q: the changes
 // and the ends a, b of the range, ts their sorted times), the stretch from keep after p to keep before q is left out, min
 // long at least; its ends on the rising edges ups (sorted, if any): the cycle of p and keep more kept, keep before the cycle
@@ -714,7 +742,7 @@ function markNorm(list) {
 function groupNorm(list) {
   const seen = new Set();
   return (Array.isArray(list) ? list : []).filter(g => g && String(g.name ?? '').trim() && !seen.has(String(g.name).trim()) && seen.add(String(g.name).trim()))
-    .map(g => ({ name: String(g.name).trim(), signals: [...new Set(prefixes(g.signals))], color: g.color || null }));
+    .map(g => Object.assign({ name: String(g.name).trim(), signals: [...new Set(prefixes(g.signals))], color: g.color || null }, g.uid ? { uid: g.uid } : {}));
 }
 /* ======================== src/vcd.js ======================== */
 /* ---------------- VCD -> WaveJSON ---------------- */
@@ -1055,6 +1083,15 @@ function paintAxis(P, o) { // o: { from, span, xL, xR, y, h, yEnd, X, timed, tic
     P.text(Math.min(Math.max(x, o.xL + hw), o.xR - hw), o.y + o.h / 2, s, { anchor: 'middle', size: 10.5, fill: 'muted' });
   }
 }
+// the cycles of a clock in a band under the time axis: a tick at each rising edge when they are 3 px apart, every k-th
+// edge numbered (k 1 2 5 10 20 50 …, the numbers 44 px apart at least); cycle 0 is the edge iz of ups
+function paintCycles(P, o) { // o: { xL, xR, y, h, X, from, to, ups, iz }
+  P.rect(o.xL, o.y, o.xR - o.xL, o.h, 'panel2');
+  P.path([['M', o.xL, o.y + o.h - 0.5], ['L', o.xR, o.y + o.h - 0.5]], { stroke: 'line', w: 1, alpha: 0.6 });
+  const m = cycMarks(o, t => P.measure(t, { size: 10 })), y1 = o.y + o.h, d = m.ticks.flatMap(x => [['M', x, y1 - 4], ['L', x, y1]]);
+  for (const [x, t] of m.labels) { d.push(['M', x, o.y + 2], ['L', x, y1]); P.text(Math.max(x + 3, o.xL + 2), o.y + o.h / 2, t, { size: 10, fill: 'muted' }); }
+  P.path(d, { stroke: 'line', w: 1, alpha: 0.8 });
+}
 function edgeGeom(e, x1, y1, x2, y2) { // WaveDrom edge shapes -> path, label point, arrow "from" points
   const dx = x2 - x1, dy = y2 - y1;
   switch (e.shape) {
@@ -1316,6 +1353,8 @@ const TIPS = {
     'act:fre': ['Regular expression (as grep -E; \\< \\> as in vim)', ['alt+R']],
   '.ev': ['The value to find (0x40, \'h40, 64, -3, IDLE)', ['Enter', 'shift+Enter']],
   'act:dopen': ['Open a VCD dump here (or drop it on the viewer)'], 'act:dreload': ['Read the dump again, the view kept'],
+  'act:dcmp': ['Compare with a second dump (a VCD of another run): where its values differ, a red band on the row, ≠ on the name', [']d', '[d']],
+  'act:dcmpx': ['Compare no more'],
   'act:fprev': ['Previous match', ['N', 'shift+Enter']], 'act:fnext': ['Next match', ['n', 'Enter']],
   'act:fhl': ['Found rows in front, the rest dimmed'], 'act:fopen': ['Fold the modules without a match'],
   '.fcol': ['Colour for Paint'], 'act:fpaint': ['Paint the found and highlighted signals'], 'act:funpaint': ['Their own colours back'],
@@ -1326,6 +1365,10 @@ const TIPS = {
   'act:prev': ['Previous edge of the selected signal', ['shift+Tab', '[e']], '.edge': ['Edge kind: any, rising, falling, a value, X / Z', ['e']],
   'act:next': ['Next edge of the selected signal', ['Tab', ']e']], 'act:mark': ['Bookmark at the cursor', ['m']],
   'act:ssave': ['Save the view to a file (.view.json)'], 'act:sload': ['Load a saved view'],
+  'act:spage': ['This page as a file (.view.html) with your view in it — bookmarks, groups, colours, cursor, window, assertions: whoever opens ' +
+    'it sees what you see, no other file needed'],
+  'act:undo': ['Undo the last change of bookmarks, arrows, markers, your groups, colours, radix, analog, hidden rows, the highlight, the edge ' +
+    'style, the gaps or the cycles (not the cursor or the window)', ['ctrl+Z']], 'act:redo': ['Redo what was undone', ['ctrl+shift+Z', 'ctrl+Y']],
   'act:help': ['Keys and mouse', ['?']],
   'act:scroll': ['The rows scroll in a window of their own (the bar above them), or with the page (the bar sticks to the top); kept in this browser'],
   'act:tools': ['Fold the tools to this line, or open them (/ opens them for the find field)'], 'jump': ['Go to this marker'],
@@ -1369,6 +1412,10 @@ const TIPS = {
   'act:live': ['Driven by an agent (tools/wavemcp.py view_live): its edits come in as you watch; click: disconnect'],
 };
 TIPS['.subg'] = ['Your groups: put the signals into one, a new one, go to one', ['ctrl+G']];
+Object.assign(TIPS, { '.subc': ['The clock cycles in a band under the time axis: numbered from cycle 0, the cursor\'s in the title, Δ in them; ' +
+  'c147 in the cursor field goes to cycle 147'], 'm:cycon': ['The band of cycle numbers under the time axis'],
+  'm:cyclk': ['Count the cycles of this clock (its rising edges)'], 'm:cyc0': ['The rising edge at or before the time clicked is cycle 0'],
+  'm:cycx': ['The cycles as the page sets them (cycles, cycleClock, cycleZero)'] });
 TIPS['m:ugto'] = ['Into your group (a folder at the top of the names)']; TIPS['m:ugoff'] = ['Out of this group of yours'];
 TIPS['m:ugo'] = ['Go to the group: opened, in the middle, its first signal selected', ['ctrl+G']];
 // the help (? in the bar, key ?): the keys and the mouse by what they do; plugins' keys come from their addKey help
@@ -1381,6 +1428,7 @@ const HELP = [
     [['Tab', 'shift+Tab'], 'next / previous edge (no signal selected: the focus moves on)'], [[']e', '[e'], 'next / previous edge'], [['e'], 'edge kind']]],
   ['Signals', [[['↑', '↓', 'j', 'k'], 'select the next / previous'], [['shift+click a name'], 'select every signal from the last clicked one'],
     [['gg', 'G'], 'the first / last'], [['ctrl+G'], 'your groups: a list, a click goes there'],
+    [['alt+↑', 'alt+↓'], 'the selected signal up / down in your group (shift: the group); or drag it in the names'],
     [['ctrl+click', '○'], 'highlight'], [['ctrl+shift+click'], 'highlight every row from the last one to it'],
     [['zM', 'zR'], 'fold / open every module'],
     [['zc', 'zo', 'za'], 'the selected signal\'s module'], [['s'], 'sort'], [['yy', 'ctrl+C'], 'copy the path'],
@@ -1389,10 +1437,14 @@ const HELP = [
     [['alt+C', 'alt+W', 'alt+R'], 'in the field: match case, full match, regular expression'], [['n', 'N', 'Enter'], 'next / previous match'],
     [['*', '#'], 'find the selected name: its next / previous match']]],
   ['Measure and mark', [[['shift+click'], 'a second cursor: Δ to the cursor, in cycles of the clock'], [['x'], 'swap the cursors'],
+    [['c147'], 'in the cursor field: cycle 147 of the clock (right button: Cycles ▸, a band of them under the axis)'],
+    [[']d', '[d'], 'next / previous difference from a dump compared (Compare… in the bar)'],
     [['1', '…', '9'], 'go to bookmark 1 … 9'], [['ctrl+drag'], 'measure a range: Δ, the edges or changes of that signal'],
     [['alt+drag'], 'a box: its time and its signals, then the menu (picture, WaveDrom, colour)'], [['ctrl+click'], 'clear the range'],
     [['right button'], 'a range and the menu: picture, colour, radix, hide'], [['m'], 'bookmark at the cursor'],
     [[']m', '[m'], 'next / previous bookmark'], [['drag a bookmark'], 'move it'], [['shift+drag a bookmark'], 'an arrow to another one']]],
+  ['Undo', [[['ctrl+Z'], 'undo the last change of bookmarks, arrows, groups, colours, radix, hidden rows, highlight'],
+    [['ctrl+shift+Z', 'ctrl+Y'], 'redo']]],
   ['Help', [[['?'], 'this box'], [['hover a button'], 'what it does, its keys']]],
 ];
 
@@ -1479,13 +1531,16 @@ class Bar {
         'highlight, the paint, the bookmarks and arrows, the search, the assertions and the ƒ rows">Save</button>'),
       ('<button type="button" data-act="sload" title="Load a saved file into this viewer (what is not in these waves is left out)">Load…</button><input ' +
           'type="file" class="sfile" accept=".json,application/json" hidden>'),
+      '<button type="button" data-act="spage" class="spage">Save page</button>',
       '<button type="button" class="live" data-act="live" hidden></button>');
     // dump: a VCD read in the page (Open…, or a file dropped on the viewer), ⟳ reads it again from the disk keeping the view
     const dump = grp('dump',
       ('<button type="button" data-act="dopen" title="Open a VCD dump in this viewer (or drop one on it): its signals by scope, exact ' +
         'transitions">Open…</button>'),
       ('<button type="button" data-act="dreload" title="Read the dump again from the disk; the view, the folding and the bookmarks stay" ' +
-          'hidden>⟳</button><input type="file" class="dfile" accept=".vcd,.fst" hidden>'));
+          'hidden>⟳</button><input type="file" class="dfile" accept=".vcd,.fst" hidden>'),
+      ('<button type="button" data-act="dcmp">Compare…</button><button type="button" data-act="dcmpx" class="cmpx" hidden></button>' +
+        '<input type="file" class="cfile" accept=".vcd" hidden>'));
     const zoom = seg('<button type="button" data-act="out" title="Zoom out (−)">−</button>',
       '<button type="button" data-act="in" title="Zoom in (+)">+</button>', '<button type="button" data-act="fit" title="Show everything (0)">Fit</button>');
     const hint = 'Wheel: scroll · ctrl+wheel: zoom · shift+wheel / drag: pan · shift or middle drag: zoom to a range · ctrl+drag: measure · ' +
@@ -1497,8 +1552,9 @@ class Bar {
       '○ or ctrl+click a name: highlight, ctrl+shift+click: every row to it';
     return `<div class="bar"><div class="head"><span
       class="eyebrow">${esc(v.opts.title || v.M.title || 'Waveform').replace(/µ/g, '<span class="mu">µ</span>')}</span><span class="toast" role="status"
-        aria-live="polite"></span><span class="cur"></span><button type="button" class="lay" data-act="scroll"></button><button type="button"
-        class="lay" data-act="tools" aria-label="fold the tools"></button><button type="button" class="hb" data-act="help"
+        aria-live="polite"></span><span class="cur"></span><button type="button" data-act="undo" class="lay undo" disabled aria-label="undo">↶</button><button
+        type="button" data-act="redo" class="lay undo" disabled aria-label="redo">↷</button><button type="button" class="lay" data-act="scroll"></button><button
+        type="button" class="lay" data-act="tools" aria-label="fold the tools"></button><button type="button" class="hb" data-act="help"
         aria-label="keys and mouse">?</button></div>
       <div class="tools">${toolLine('time', grp('cursor', cursor) + grp('view', zoom) + edges + (jumps ? grp('go to', jumps) : ''))}${toolLine('find', find)}${
         toolLine('expr', '')}${toolLine('rows', list + grp('style', wstyle) + state + dump)}</div></div>
@@ -1557,17 +1613,23 @@ class Bar {
       else if (b.dataset.act === 'fdock') { v.floatFind(false); v.canvas.focus({ preventScroll: true }); }
       else if (b.dataset.act === 'fcopy') v.copyRows(v.allRows().filter(r => v.found.has(r)));
       else if (b.dataset.act === 'ssave') v.saveState();
+      else if (b.dataset.act === 'spage') { try { v.toast('saved ' + savePage()); } catch (e) { v.toast(e.message); } }
+      else if (b.dataset.act === 'undo' || b.dataset.act === 'redo') v.undo(b.dataset.act === 'undo' ? -1 : 1);
       else if (b.dataset.act === 'help') v.help();
       else if (b.dataset.act === 'scroll') v.setScroll(v.S.maxHeight != null && v.S.maxHeight !== '' ? 'page' : 'window');
       else if (b.dataset.act === 'tools') v.setTools(!v.S.toolsFolded);
       else if (b.dataset.act === 'sload') v.sfile.click();
       else if (b.dataset.act === 'dopen') v.openDump();
+      else if (b.dataset.act === 'dcmp') v.cfile.click();
+      else if (b.dataset.act === 'dcmpx') v.compare(null);
       else if (b.dataset.act === 'dreload') v.reloadDump();
       else if (b.dataset.act === 'live') liveClick();
       else if (b.dataset.jump !== undefined) { const j = v.jumps[b.dataset.jump]; v.goto(j.t, j.span); }
     });
     v.dfile = r.querySelector('input.dfile');
     v.dfile.addEventListener('change', () => { const f = v.dfile.files[0]; v.dfile.value = ''; if (f) v.openDump(f); });
+    v.cfile = r.querySelector('input.cfile');
+    v.cfile.addEventListener('change', () => { const f = v.cfile.files[0]; v.cfile.value = ''; if (f) v.compare(f); });
     v.reloadBtn = r.querySelector('button[data-act=dreload]'); v.reloadBtn.hidden = !v.opts.dumpSrc;
     // a file dropped on the viewer: a VCD replaces its waves, a saved state (.json) is loaded
     // (on the viewer's element, which outlives this viewer when a dump replaces it: removed by destroy() through v.ac)
@@ -1594,6 +1656,7 @@ class Names {
     const toggle = el => { const id = +el.dataset.g; v.collapsed.has(id) ? v.collapsed.delete(id) : v.collapsed.add(id); v.foldTouched = true; this.render();
       v.draw(); };
     const rowOf = el => v.vis[+el.closest('.row').dataset.r];
+    v.namesDrag();   // the rows of your groups dragged into another order (edit.js)
     // copying from the names column gives the full paths of the selected rows, one per line (no values, no marks)
     v.namesEl.addEventListener('copy', e => {
       const s = getSelection(); if (!s || s.isCollapsed) return;
@@ -1618,6 +1681,13 @@ class Names {
     });
     v.namesEl.addEventListener('keydown', e => {
       const at = e.target.closest('.row[data-r]');
+      if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && e.altKey && !e.ctrlKey && !e.metaKey) {   // the row with the focus moves; the focus stays on it
+        e.preventDefault(); const r = at && rowOf(at);
+        if (!r || !(r.user || r.ug)) { v.toast('alt+↑ / alt+↓ order the rows of your groups (the right button: Groups ▸)'); return; }   // not the selection's
+        v.moveKey(e.key === 'ArrowUp' ? -1 : 1, e.shiftKey, r).then(() => { const i = v.vis.indexOf(r || v.sel);
+          const k = i >= 0 && v.namesEl.querySelector(`.row[data-r="${i}"]`); if (k) k.focus({ preventScroll: false }); });
+        return;
+      }
       if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && at && !e.target.closest('.mk')) {   // the focus walks the rows; a signal is selected
         e.preventDefault();
         const rows = [...v.namesEl.querySelectorAll('.row[data-r]:not(.space)')], k = rows.indexOf(at) + (e.key === 'ArrowDown' ? 1 : -1);
@@ -1678,7 +1748,9 @@ class Names {
     const col = r => v.strokeOf(r) ? ` style="color:${esc(v.strokeOf(r))}"` : '';
     let vi = -1;
     v.namesEl.setAttribute('role', 'listbox'); v.namesEl.setAttribute('aria-label', 'signals');
-    v.namesEl.innerHTML = `<div class="hdr" style="height:${v.hdrH}px"></div>` + v.rowsL.map(r => {
+    const cy = v.cycData();   // the cycles' band: its clock named in the header of the names
+    v.namesEl.innerHTML = `<div class="hdr" style="height:${v.hdrH}px">${cy ? `<span class="cyc" style="height:${CYC_H}px" title="the cycles under the ` +
+      `time axis: rising edges of ${esc(cy.clk.full || cy.clk.name)}">cycles ↑ ${esc(cy.clk.name)}</span>` : ''}</div>` + v.rowsL.map(r => {
       if (r.type === 'lane') return (`<div class="row lane${alt(r)}" style="height:${v.S.laneHeight * r.ids.length}px" title="arrow labels, lifted ` +
           `bookmarks"></div>`);
       const h = rowHeight(r, v.rowH, v.S.laneHeight), i = ++vi, cls = r.cls ? ' ' + r.cls : '';
@@ -1861,6 +1933,7 @@ const PLUGINS = [];   // WaveFW.plugin(fn): fn(viewer) for every viewer, now and
 const STATE_VERSION = 3;   // a saved viewer state (state()): 2 has range and edge, 3 your markers and groups
 // the settings of the gaps (the menu's Gaps rows)
 const GAP_KEYS = ['gaps', 'gapIdle', 'gapKeep', 'gapSignals', 'gapClock', 'gapAux', 'gapOnly', 'gapCount', 'gapLine'];
+const CYC_KEYS = ['cycles', 'cycleClock', 'cycleZero'], CYC_H = 16;   // the band of clock cycles under the time axis, its height
 class WaveView {
   constructor(root, model, opts = {}) {
     this.root = root; this.M = parse(model); this.opts = opts;
@@ -1912,7 +1985,8 @@ class WaveView {
     this.bodyEl.addEventListener('scroll', this.onScroll, { passive: true, ...own });
     VIEWS.add(this);
     for (const p of PLUGINS) try { p(this); } catch (e) { console.error('wavefw plugin:', e); }
-    this.applyEdits(); liveHello(); liveShow();   // the page's edits (tools/viewedit.py); a live page: the agent hears of this viewer
+    // the page's edits (tools/viewedit.py), then undo starts from the page as it opens; a live page: the agent hears of this viewer
+    this.applyEdits().finally(() => this.undoTick(true)); liveHello(); liveShow();
   }
   // what this viewer's bookmarks, paint and bindings are stored under in this browser: the page, then opts.key, the id,
   // the data-wave reference or the title; several viewers of one data-wave (a bench and its lazy cards) are told apart by
@@ -1931,7 +2005,8 @@ class WaveView {
     const S = this.S = settings(GLOBAL, this.M.cfg, this.opts, this.local);
     this.groupStroke = groupPaint(this.M, S.groupColors);
     for (const [name, v] of styleVars(Object.assign({}, this.M.cfg, this.opts))) this.root.style.setProperty(name, v);
-    this.rowH = { sig: S.rowHeight, group: S.groupHeight, space: S.spaceHeight }; this.hdrH = S.headerHeight;
+    this.rowH = { sig: S.rowHeight, group: S.groupHeight, space: S.spaceHeight }; this.cycMemo = null;
+    this.hdrH = S.headerHeight + (this.cycData() ? CYC_H : 0);
     this.sort = S.sort; this.sortIgnore = S.sortIgnore;
     this.root.style.setProperty('--wv-dim', S.dim);
     this.layoutShow();
@@ -2085,6 +2160,7 @@ class WaveView {
     c.addEventListener('keydown', e => {
       const k = e.key, ctl = e.ctrlKey || e.metaKey; let h = true;
       if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock'].includes(k)) return;   // a modifier alone: a sequence goes on (z, shift+M)
+      if (e.altKey && !ctl && (k === 'ArrowUp' || k === 'ArrowDown')) { e.preventDefault(); this.moveKey(k === 'ArrowUp' ? -1 : 1, e.shiftKey); return; }
       if (e.altKey || (ctl && !['c', 'C', 'f', 'F', 'g', 'G'].includes(k))) return;   // ctrl+S, ctrl+M … stay the browser's
       // ctrl+F: find (Questa), ctrl+C: copy (nothing to copy: the browser's), ctrl+G: the list of your groups
       if (ctl && (k === 'g' || k === 'G')) { e.preventDefault(); this.groupsMenu(); return; }
@@ -2242,15 +2318,17 @@ class WaveView {
     return u[1];
   }
   // "250" in the unit chosen (cycles for an untimed diagram), or "85.12us" with its own unit -> model time
-  parseIn(v, sel) {
+  parseIn(v, sel, at = false) {   // at: a time on the waves (the cursor), where c147 is cycle 147's edge
     v = String(v ?? '').trim();
     if (!v) return undefined;
     if (/^-?[\d.]+(e-?\d+)?$/i.test(v)) return parseFloat(v) * (this.M.timed && sel ? UNIT_PS[sel.value] : 1);
+    const c = /^(?:c|cycle\s*)(-?\d+)$/i.exec(v);   // c147: the rising edge of cycle 147 of the cycles' clock (the band off: the clock found)
+    if (c) { const d = at && this.cycData(true); return d ? cycTime(d.ups, d.iz, +c[1]) ?? undefined : undefined; }
     return this.M.timed ? parseT(v) : undefined;
   }
   bad(inp) { inp.classList.add('bad'); setTimeout(() => inp.classList.remove('bad'), 900); }
   setCursor(v) { // cursor at a typed time; the view follows when it is outside
-    const t = typeof v === 'number' ? v : this.parseIn(v, this.cuEl);
+    const t = typeof v === 'number' ? v : this.parseIn(v, this.cuEl, true);
     if (t == null || !isFinite(t)) { this.bad(this.ctEl); return this; }
     this.cursor = Math.min(Math.max(t, this.M.t0), this.M.t1);
     if (this.cursor < this.t0 || this.cursor > this.t0 + this.span) this.t0 = this.clamp(this.cursor - this.span / 2);
@@ -2378,6 +2456,7 @@ class WaveView {
   }
   loadLook() { try { const o = JSON.parse(localStorage.getItem(this.lookKey) || '{}'), L = {}; if (o && EDGES[o.style]) L.style = o.style;
       if (o && o.gap && typeof o.gap === 'object') L.gap = o.gap;
+      if (o && o.cyc && typeof o.cyc === 'object') L.cyc = o.cyc;
       if (o && (typeof o.maxHeight === 'string' || typeof o.maxHeight === 'number')) L.maxHeight = o.maxHeight;
       if (o && typeof o.toolsFolded === 'boolean') L.toolsFolded = o.toolsFolded; return L; } catch (e) { return {}; } }
   // where the rows scroll: 'window' (in the viewer, maxHeight high: height, else the settings', else 80vh; the bar above
@@ -2403,6 +2482,8 @@ class WaveView {
   layoutShow() {
     const S = this.S, r = this.root, win = S.maxHeight != null && S.maxHeight !== '';
     r.classList.toggle('wv-scroll', win); r.classList.toggle('wv-tools-folded', !!S.toolsFolded);
+    const sp = r.querySelector('button[data-act=spage]');   // a page that is not all in itself, a dump opened in it: Save keeps the view
+    if (sp) sp.hidden = S.savePage === false || !!this.opts.dumpSrc || !!PAGE.why;
     if (win) r.style.setProperty('--wv-max-h', typeof S.maxHeight === 'number' ? S.maxHeight + 'px' : String(S.maxHeight));
     const s = r.querySelector('.bar button[data-act=scroll]'), t = r.querySelector('.bar button[data-act=tools]');
     if (s) { s.textContent = win ? 'Scroll: window' : 'Scroll: page'; s.setAttribute('aria-pressed', win); }
@@ -2443,6 +2524,33 @@ class WaveView {
   // the clock the gaps count cycles of: gapClock (the menu's "Gaps: cycles of this clock"), else clockFor(rows)
   gapClockRow() { return this.gapRows().clk; }
   gapClockFor(rows) { return this.gapClockRow() || this.clockFor(rows.filter(r => r.type === 'sig')); }
+  // the clock cycles (settings cycles, cycleClock, cycleZero; the menu's Cycles over them, kept in this browser where they
+  // differ from the settings; null: the settings' again)
+  cycOpt() {
+    const L = this.local.cyc || {}, o = {};
+    for (const k of CYC_KEYS) o[k] = L[k] !== undefined ? L[k] : this.S[k];
+    o.cycles = !!o.cycles; o.cycleClock = o.cycleClock || null; o.cycleZero = o.cycleZero == null || o.cycleZero === '' ? null : num(o.cycleZero);
+    if (o.cycleZero != null && !isFinite(o.cycleZero)) o.cycleZero = null;
+    return o;
+  }
+  setCycles(o) {
+    const own = Object.entries(Object.assign({}, this.local.cyc, o)).filter(([k, v]) => o && CYC_KEYS.includes(k) && JSON.stringify(v ?? null) !==
+      JSON.stringify(this.S[k] ?? null));
+    if (own.length) this.local.cyc = Object.fromEntries(own); else delete this.local.cyc;
+    this.saveLook(); this.cycMemo = null; this.hdrH = this.S.headerHeight + (this.cycData() ? CYC_H : 0);
+    this.renderNames(); this.draw(); this.settingsChanged(); return this;
+  }
+  // the clock the cycles count (cycleClock, else the clock found) and its rising edges, cycle 0 at iz; null: no band (off,
+  // or no clock); any: the clock even with the band off (the cursor field's c147)
+  cycData(any = false) {
+    const o = this.cycOpt(); if (!o.cycles && !any) return null;
+    const key = JSON.stringify(o);
+    if (!this.cycMemo || this.cycMemo.key !== key) {
+      const clk = cycClock(this.M.rows, o.cycleClock), ups = clk ? cycUps(clk) : [];
+      this.cycMemo = { key, d: clk && ups.length ? { clk, ups, iz: cycZero(ups, o.cycleZero) } : null };
+    }
+    return this.cycMemo.d;
+  }
   // the rows a picture takes with gapOnly ("only them"): the signals the gaps follow, as laid out; null: not so
   // (and the clock they count, the signals counted in them)
   gapMask() {
@@ -2467,7 +2575,7 @@ class WaveView {
       config: { style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded, sort: this.sort, sortIgnore: [...this.sortIgnore],
         fold: [...folded].map(id => M.groups[id] && M.groups[id].path).filter(Boolean),
         highlight: [...this.picks].sort((a, b) => a[1] - b[1]).map(([r]) => r.full).filter(Boolean), findHighlight: !!this.findHl, findOpen: !!this.findOpen,
-          ...Object.fromEntries(FIND_OPTS.map(o => [o[1], !!this[o[1]]])), ...this.gapOpt() },
+          ...Object.fromEntries(FIND_OPTS.map(o => [o[1], !!this[o[1]]])), ...this.gapOpt(), ...this.cycOpt() },
       paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs), hidden: [...this.hiddenRows],
         select: (this.sel && this.sel.full) || null, find: this.q || '', bookmarks: this.bookmarks(), arrows: this.arrowList(), markers: this.markList(),
         groups: this.groupList() };
@@ -2487,15 +2595,23 @@ class WaveView {
     const M = this.M, C = st.config || {}, miss = new Set();
     for (const x of this.extraState) if (st[x.key] !== undefined) { try { await x.set(st[x.key]); } catch (e) { this.toast(`${x.key}: ${e.message}`); } }
     const sigs = new Set(M.rows.map(r => r.full));
-    if (st.groups !== undefined) { this.ugroups = groupNorm(st.groups).map(g => Object.assign(g, { signals: g.signals.filter(p => sigs.has(p) ||
-      (miss.add(p), false)) })); this.setGroups(); }
+    if (st.groups !== undefined) {   // a group of the same name stays the same object: its rows, folding and selection stay
+      // a group found by its uid (undo's, over a rename), else by its name
+      const old = new Map(this.ugroups.map(g => [g.name, g])), byUid = new Map(this.ugroups.filter(g => g.uid).map(g => [g.uid, g]));
+      this.ugroups = groupNorm(st.groups).map(g => { const o = (g.uid && byUid.get(g.uid)) || old.get(g.name) || g;
+        if (o !== g) { if (o.uid && !g.uid) g.uid = o.uid; for (const k of Object.keys(o)) if (!(k in g)) delete o[k]; Object.assign(o, g); }
+        o.signals = o.signals.filter(p => sigs.has(p) || (miss.add(p), false)); return o; });
+      this.setGroups();
+    }
     this.allRows();   // the plugins' groups and yours are there now (their folding)
     const paths = new Set([...M.rows.map(r => r.full), ...Object.values(M.groups).map(g => g.path)]), seen = p => paths.has(p) || (miss.add(p), false);
     if (C.style !== undefined) this.setStyle(C.style);
     if (C.maxHeight !== undefined) this.setScroll(C.maxHeight == null || C.maxHeight === '' ? 'page' : 'window', C.maxHeight || undefined);
     if (C.toolsFolded !== undefined) this.setTools(!!C.toolsFolded);
     const gk = GAP_KEYS.filter(k => C[k] !== undefined);
-    if (gk.length) this.setGaps(Object.fromEntries(gk.map(k => [k, C[k] ?? this.S[k]])));
+    if (gk.length) this.setGaps(Object.fromEntries(gk.map(k => [k, C[k]])));   // null: the clock found (not the page's)
+    const ck = CYC_KEYS.filter(k => C[k] !== undefined);
+    if (ck.length) this.setCycles(Object.fromEntries(ck.map(k => [k, C[k]])));   // null: the clock found, the first edge (not the page's)
     if (C.sort !== undefined || C.sortIgnore !== undefined) {
       const pfx = this.root.querySelector('input.pfx');
       this.sort = sortDir(C.sort ?? this.sort); if (C.sortIgnore !== undefined) this.sortIgnore = prefixes(C.sortIgnore).sort((a, b) => b.length - a.length);
@@ -2561,6 +2677,7 @@ class WaveView {
   async loadState(file) {
     try {
       const text = typeof file === 'string' ? file : await file.text(), miss = await this.setState(JSON.parse(text));
+      this.undoTick();   // the load is one step to undo
       this.toast((`${file.name || 'state'} ` +
           `loaded${miss.length ? ` · not in these waves: ${miss.length} (${miss.slice(0, 3).join(', ')}${miss.length > 3 ? ', …' : ''})` : ''}`));
       return miss;
@@ -2858,9 +2975,12 @@ class WaveView {
     const le = t => { let lo = 0, hi = ups.length; while (lo < hi) { const m = (lo + hi) >> 1; if (ups[m] <= t) lo = m + 1; else hi = m; } return lo; };
     return le(Math.max(a, b)) - le(Math.min(a, b));
   }
+  cycText() {   // " · cycle 147 ↑clk": the cursor's cycle when the cycles are shown, or ''
+    const d = this.cycData(); return d ? ` · cycle ${cycAt(d.ups, d.iz, this.cursor)} ↑${d.clk.name}` : '';
+  }
   delta2() {   // "Δ 40 ns / 25 MHz · 4 clk" between the cursors, or ''
     if (this.cursor2 == null) return '';
-    const d = this.cursor2 - this.cursor, clk = this.clockFor(), n = this.cycles(clk, this.cursor, this.cursor2);
+    const cy = this.cycData(), d = this.cursor2 - this.cursor, clk = cy ? cy.clk : this.clockFor(), n = this.cycles(clk, this.cursor, this.cursor2);
     return `Δ ${d < 0 ? '−' : ''}${this.fmt(Math.abs(d), Math.abs(d) / 1000 || 1, Math.abs(d) || 1)}` +
       (this.M.timed && d ? ' / ' + fmtFreq(Math.abs(d)) : '') + (clk && n != null ? ` · ${n} ${clk.name}` : '');
   }
@@ -3055,6 +3175,7 @@ class WaveView {
     const gn = () => (this.gapOpt().gaps ? `Gaps: ${gaps()}` : 'Gaps'), nref = this.gapRefSet().size;
     const gref = sigs.length && sigs.every(x => this.gapRefSet().has(x));   // the signals clicked: the gaps follow them already
     const gck = this.gapClockRow(), isGck = !!sig && sig === gck;   // the clock the gaps count cycles of
+    const co = this.cycOpt(), cd = this.cycData(), cda = this.cycData(true), isCyc = !!sig && co.cycles && co.cycleClock === sig.full;   // the cycles
     const gaux = sigs.length && sigs.every(x => this.gapRows().aux.has(x)), naux = this.gapRows().aux.size;   // the signals counted in the gaps
     // one role per signal: the gaps follow it (gapSignals), count its changes (gapAux) or count its cycles (gapClock)
     const role = (key, on) => { const fs = sigs.map(x => x.full).filter(Boolean), g = this.gapOpt(), o = { gaps: true };
@@ -3087,6 +3208,13 @@ class WaveView {
         b('gaux', gaux ? 'Do not count it' : many ? `Count the changes of the ${sigs.length} in a gap` : 'Count its changes in a gap') +
         (sig && sig.width === 1 ? b('gclk', isGck ? 'Not by its cycles' : 'Count in cycles of this clock') : '') : '') +
       '<hr>' + b('greset', 'Reset the gaps') + '</div></div>' +
+      // the clock cycles under the time axis: a submenu (on / off, this clock, cycle 0 here, a reset)
+      (`<div class="msub"><button type="button" role="menuitem" class="subc" aria-haspopup="menu" aria-expanded="false"><span>${co.cycles ? 'Cycles: ' +
+        (cd ? esc(cd.clk.name) : 'no clock') : 'Cycles'}</span><span class="kk">▸</span></button><div class="sub" role="menu" hidden>`) +
+      (cda ? b('cycon', co.cycles ? 'Hide the cycles' : `Show the cycles of ${esc(cda.clk.name)}`) : '<div class="mh">no clock found: pick a 1-bit one</div>') +
+      (sig && sig.width === 1 ? b('cyclk', isCyc ? 'Not by this clock' : `Cycles of ${esc(sig.name)}`) : '') +
+      (cda ? b('cyc0', at < cda.ups[0] ? `Cycle 0 at the first edge of ${esc(cda.clk.name)}` : `Cycle 0 at this edge of ${esc(cda.clk.name)}`) : '') +
+      '<hr>' + b('cycx', 'Reset the cycles') + '</div></div>' +
       (it ? `<hr><div class="mh">${esc(it.full || it.name)}${many ? `<br>+ every ${run ? 'selected' : 'highlighted'} row: ${sigs.length} signals` : ''}</div>` +
         (sigs.length ?
           `<label class="mi">${many ? `Colour of ${sigs.length}` : 'Colour'} <input type="color" value="${esc(col)}"
@@ -3123,8 +3251,8 @@ class WaveView {
     el.style.left = Math.max(4, Math.min(cx, innerWidth - box.width - 4)) + 'px'; el.style.top = Math.max(4, Math.min(cy, innerHeight - box.height - 4)) + 'px';
     const done = () => { this.closeMenu(); this.canvas.focus({ preventScroll: true }); };
     // the submenu: open on the pointer or a click, beside the menu (the left side when the right has no room)
-    for (const msub of el.querySelectorAll('.msub')) {   // the gaps, your groups
-      const sub = msub.querySelector('.sub'), subh = msub.querySelector('.subh, .subg');
+    for (const msub of el.querySelectorAll('.msub')) {   // the gaps, the cycles, your groups
+      const sub = msub.querySelector('.sub'), subh = msub.querySelector('.subh, .subc, .subg');
       const subOpen = on => {
         sub.hidden = !on; subh.setAttribute('aria-expanded', on); if (!on) return;
         Object.assign(sub.style, { left: '100%', right: 'auto', top: '-5px' }); const s = sub.getBoundingClientRect();
@@ -3193,6 +3321,11 @@ class WaveView {
       else if (act === 'grefx') this.setGaps({ gapSignals: null });
       else if (act === 'gauxx') this.setGaps({ gapAux: null });
       else if (act === 'gclk') role('gapClock', !isGck);
+      else if (act === 'cycon') this.setCycles({ cycles: !co.cycles });
+      else if (act === 'cyclk') this.setCycles(isCyc ? { cycleClock: null } : { cycles: true, cycleClock: sig.full, cycleZero: null });
+      else if (act === 'cyc0') { const u = cda.ups, i = Math.max(0, lastBefore(u.length, j => u[j], at + timeEps(at)));   // the edge at or before
+        this.setCycles({ cycles: true, cycleZero: u[i] }); }
+      else if (act === 'cycx') this.setCycles(null);
       else if (act === 'greset') { this.setGaps(null); this.toast('the gaps: the settings again'); }
       else if (act === 'gclkx') this.setGaps({ gapClock: null });
       else if (act === 'c2x') this.setCursor2(null);
@@ -3342,15 +3475,18 @@ class WaveView {
     const P = new CanvasPainter(g, getComputedStyle(this.root), this.S, dpr);
     P.rect(0, 0, W, Hc, 'panel');
     const k = W / this.span, X = t => (t - this.t0) * k, tB = this.t0 + this.span;
-    if (top) paintAxis(P, { from: this.t0, span: this.span, xL: 0, xR: W, y: 0, h: hdr, yEnd: Hc, X, timed: M.timed, tick: M.tick, every: 1 });
+    const ah = this.S.headerHeight, cy = top && this.cycData();   // the time axis, the cycles' band under it
+    if (top) paintAxis(P, { from: this.t0, span: this.span, xL: 0, xR: W, y: 0, h: ah, yEnd: Hc, X, timed: M.timed, tick: M.tick, every: 1 });
+    if (cy) paintCycles(P, { xL: 0, xR: W, y: ah, h: CYC_H, X, from: this.t0, to: tB, ups: cy.ups, iz: cy.iz });
     const shown = lay.filter(o => o.y + o.h > oy + hdr && o.y < oy + Hc);
     g.save(); g.beginPath(); g.rect(0, hdr, W, Hc - hdr); g.clip(); g.translate(0, -oy);   // rows: layout coordinates, under the axis
     const late = [], rowY = paintBody(P, M, shown, X, this.t0, tB, 0, W, this.hl, this.selRun &&
       this.selRun.size ? new Set([...this.selRun, this.sel]) : this.sel, lay, this.band, late, r => this.strokeOf(r), r => this.collapsed.has(r.id));
     paintMarkers(P, this.markers, X, this.t0, tB, oy + hdr, oy + Hc);
+    this.paintDiff(P, shown, X, this.t0, tB);   // a second dump compared (diff.js): where it differs
     g.restore();
     if (this.cursor >= this.t0 && this.cursor <= tB) P.path([['M', X(this.cursor), 0], ['L', X(this.cursor), Hc]], { stroke: 'acc', w: 1.2 });
-    this.paintMeasures(P, X, this.t0, tB, 0, W, 0, Hc, top ? [0, hdr] : null);
+    this.paintMeasures(P, X, this.t0, tB, 0, W, 0, Hc, top ? [0, ah] : null);
     // alt+drag
     if (this.box) { const [a, ya, b, yb] = this.box; P.path([['M', a, ya - oy], ['L', b, ya - oy], ['L', b, yb - oy], ['L', a, yb - oy], ['Z']],
       { stroke: 'acc', w: 1.2, dash: [4, 3] }); }
@@ -3360,7 +3496,7 @@ class WaveView {
     // plugin overlays over the cursor
     if (late.length) { g.save(); g.beginPath(); g.rect(0, hdr, W, Hc - hdr); g.clip(); g.translate(0, -oy); late.forEach(f => f()); g.restore(); }
     g.save(); g.translate(0, -oy);
-    const geo = paintBookmarks(P, this.bms, this.arrows, X, this.t0, tB, rowY, oy + hdr, oy + Hc, oy + this.hdrH / 2, this.rubber,
+    const geo = paintBookmarks(P, this.bms, this.arrows, X, this.t0, tB, rowY, oy + hdr, oy + Hc, oy + this.S.headerHeight / 2, this.rubber,
       laneY(lay, this.S.laneHeight));
     g.restore();
     return geo;
@@ -3404,7 +3540,7 @@ class WaveView {
     this.syncCursorFields();
     this.curEl.textContent = 'cursor ' + this.fmtCursor(this.cursor) + ' · view ' + (M.timed ? fmtTime(this.span, this.span / 10,
       this.span) : this.span.toFixed(1) + ' cycles') + (this.cursor2 != null ? ' · cursor 2 ' + this.fmtCursor(this.cursor2) + ' · ' + this.delta2() : '') +
-      (this.range ? ' · ' + this.rangeText() : '');
+      (this.range ? ' · ' + this.rangeText() : '') + this.cycText();
     if (this.bms.length && (this.dtAt !== this.cursor || this.dtGen !== this.notesGen)) {   // the bookmarks' Δ to the cursor
       this.dtAt = this.cursor; this.dtGen = this.notesGen;
       for (const el of this.notesEl.querySelectorAll('li[data-n] .dt')) { const b = this.bms.find(x => x.n === +el.closest('li').dataset.n); if (!b) continue;
@@ -3586,9 +3722,9 @@ command('marker', 'id? t? label? color? delete?', 'a marker: a dashed line acros
   if (a.color !== undefined) m.color = a.color || null;
   v.setMarks(); return { id: v.umarks.indexOf(m) + 1 };
 });
-command('group', 'name signals? add? remove? color? rename? delete? go?', 'your group of signals, a folder at the top of the names (the signals ' +
-  'stay where they are too): made or changed — signals: its signals in this order, add, remove, color, rename; delete; go: opened, shown, its first ' +
-  'signal selected (ctrl+G)', (v, a) => {
+command('group', 'name signals? add? remove? color? rename? delete? go? move?', 'your group of signals, a folder at the top of the names (the ' +
+  'signals stay where they are too): made or changed — signals: its signals in this order, add, remove, color, rename; delete; go: opened, shown, ' +
+  'its first signal selected (ctrl+G); move: its place among your groups, up, down, top, bottom or a number (1: the first)', (v, a) => {
   const name = String(a.name ?? '').trim(); if (!name) fail('group: a name');
   let g = v.ugroups.find(x => x.name === name);
   if (a.delete) { if (!g) fail(`no group "${name}"`); v.ugroups = v.ugroups.filter(x => x !== g); v.setGroups(); return { name, deleted: true }; }
@@ -3596,7 +3732,14 @@ command('group', 'name signals? add? remove? color? rename? delete? go?', 'your 
   const set = a.signals != null ? fulls(a.signals) : null, add = a.add != null ? fulls(a.add) : [], rm = a.remove != null ? fulls(a.remove) : [];
   const to = a.rename != null ? String(a.rename).trim() : null;
   if (to === '' || (to && to !== name && v.ugroups.some(x => x.name === to))) fail(`rename: ${to ? `a group "${to}" is there` : 'a name'}`);
+  const mv = a.move;
+  if (mv != null && !['up', 'down', 'top', 'bottom'].includes(mv) && !(Number.isInteger(mv) && mv >= 1)) {
+    fail('move: up, down, top, bottom or a number (1: the first)'); }
   if (!g) { g = { name, signals: [], color: null }; v.ugroups.push(g); }
+  if (mv != null) {   // its place among your groups
+    const i = v.ugroups.indexOf(g), n = v.ugroups.length, j = mv === 'up' ? i - 1 : mv === 'down' ? i + 1 : mv === 'top' ? 0 : mv === 'bottom' ? n - 1 : mv - 1;
+    v.ugroups.splice(i, 1); v.ugroups.splice(Math.min(Math.max(j, 0), n - 1), 0, g);
+  }
   if (set) g.signals = set;
   for (const f of add) if (!g.signals.includes(f)) g.signals.push(f);
   if (rm.length) g.signals = g.signals.filter(f => !rm.includes(f));
@@ -3604,7 +3747,7 @@ command('group', 'name signals? add? remove? color? rename? delete? go?', 'your 
   if (to) g.name = to;
   v.setGroups();
   if (a.go) { v.held.names = false; v.renderNamesNow(); v.goGroup(g.name); }
-  return { name: g.name, signals: g.signals.length };
+  return { name: g.name, signals: g.signals.length, at: v.ugroups.indexOf(g) + 1 };
 });
 command('highlight', 'add? remove? set? clear?', 'signals and modules in front, each in its colour, the rest dimmed: add, remove, set (the ' +
   'list), clear', (v, a) => {
@@ -3693,6 +3836,18 @@ command('gaps', 'on? idle? keep? signals? clock? aux? only? count? reset?', 'the
   if (Object.keys(o).length) v.setGaps(o);
   return { gaps: v.gapOpt() };
 });
+command('cycles', 'on? clock? zero? reset?', 'the clock cycles in a band under the time axis (the menu\'s Cycles): on, the clock counted (a ' +
+  '1-bit signal), zero: the time of cycle 0 (the rising edge at or after it), null the first edge; reset: as the page sets them', (v, a) => {
+  const o = {};   // every argument checked before anything changes
+  if (a.on != null) o.cycles = !!a.on;
+  if (a.clock !== undefined) { const r = a.clock == null ? null : pickRows(v, a.clock, { one: true })[0];
+    if (r && r.width !== 1) fail(`clock: ${r.full} is not a 1-bit signal`); o.cycleClock = r ? r.full : null; }
+  if (a.zero !== undefined) o.cycleZero = a.zero == null ? null : cmdTime(v, a.zero, 'zero');
+  if (a.reset) v.setCycles(null);
+  if (Object.keys(o).length) v.setCycles(o);
+  const d = v.cycData(true);
+  return { cycles: v.cycOpt(), clock: d ? d.clk.full : null, cycle: d ? cycAt(d.ups, d.iz, v.cursor) : null };
+});
 command('edge', 'dir? kind? value? signal?', 'the cursor to the next (dir 1) or previous (-1) edge of the selected signal (signal: that one, ' +
   `selected), kind: ${Object.keys(EDGE_KINDS).join(' ')}; value: the value to become`, (v, a) => {
   if (a.kind != null && !EDGE_KINDS[a.kind]) fail(`kind: one of ${Object.keys(EDGE_KINDS).join(' ')}`);
@@ -3750,13 +3905,150 @@ Object.assign(WaveView.prototype, {
       if (own) { const h = this.held; this.held = null; if (h.names) this.renderNames(); if (h.notes) this.renderNotes(); if (h.draw || h.names) this.draw(); }
     }
     this.root.dispatchEvent(new CustomEvent('wavefw:edit', { detail: { ops: list, results: out } }));
+    if (own && !list.every(o => o && READ_CMDS.has(o.op))) this.undoTick();   // a batch that changes something (yours, a script's, an agent's) is one step
     return out;
+  },
+  // undo / redo: snapshots of what is edits (KEPT, KEPT_CFG) and the highlight with its colours — not the cursor, the
+  // window, the selection, the search or the plugins' parts — taken when it changed: after a batch of commands, once the
+  // pointer is up (a drag is one step), a key that is not typing, a field changed (a text: when it is left), a load
+  undoPart() {
+    const groups = this.groupList().map((g, i) => Object.assign(g, { uid: this.ugroups[i].uid || (this.ugroups[i].uid = ++XID) }));   // a group over a rename
+    return JSON.stringify({ bookmarks: this.bookmarks(), arrows: this.arrowList(), markers: this.markList(), groups,
+      paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs), hidden: [...this.hiddenRows],
+      config: Object.assign({ style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded }, this.gapOpt(), this.cycOpt()),
+      hl: [...this.picks].map(([r, i]) => [r.full, i]).sort((a, b) => a[1] - b[1]) });
+  },
+  undoTick(base = false) {
+    if (!base && (this.undoCur == null || this.undoing || this.held || PTR.down)) return;   // no history yet, or a step not done
+    const p = this.undoPart();
+    if (base) { this.undoCur = p; this.undoS = []; this.redoS = []; this.undoShow(); return; }
+    if (p === this.undoCur) return;
+    this.undoS.push(this.undoCur); if (this.undoS.length > UNDO_N) this.undoS.shift();
+    this.redoS = []; this.undoCur = p; this.undoShow();
+  },
+  async undo(dir = -1) {   // -1: undo, 1: redo -> what changed back ('' nothing done)
+    if (this.undoCur == null || this.undoing) return '';
+    if (this.held || PTR.down) { this.toast('a change is not done yet: undo after it'); return ''; }   // a batch waiting, a drag
+    this.undoTick();
+    const from = dir < 0 ? this.undoS : this.redoS, to = dir < 0 ? this.redoS : this.undoS;
+    if (!from.length) { this.toast(dir < 0 ? 'nothing to undo' : 'nothing to redo'); return ''; }
+    const p = from.pop(), cur = this.undoCur;
+    to.push(cur); this.undoing = true;
+    let what;
+    try { what = await this.undoApply(JSON.parse(p), JSON.parse(cur)); } finally { this.undoing = false; }
+    this.undoCur = this.undoPart(); this.undoShow();
+    const text = what.join(', ') || 'the view'; this.toast(`${dir < 0 ? 'undone' : 'redone'}: ${text}`); return text;
+  },
+  // a snapshot A back over the current one B: only what differs (the rest is not touched); the highlight with its colours;
+  // the place in the find's matches kept -> what changed
+  async undoApply(A, B) {
+    const diff = (a, b) => JSON.stringify(a) !== JSON.stringify(b), st = { wavefw: 'state', version: STATE_VERSION, config: {} };
+    for (const k of KEPT) if (diff(A[k], B[k])) st[k] = A[k];
+    if ('bookmarks' in st || 'arrows' in st) { st.bookmarks = A.bookmarks; st.arrows = A.arrows; }   // setState takes the two together
+    for (const k of Object.keys(A.config)) if (diff(A.config[k], B.config[k])) st.config[k] = A.config[k];
+    const hl = diff(A.hl, B.hl), fi = this.fi, fiRow = this.fiRow;
+    if (hl) st.config.highlight = A.hl.map(([f]) => f);
+    await this.setState(st);
+    if (hl) { const at = new Map(A.hl); this.picks = new Map([...this.picks.keys()].map(r => [r, at.get(r.full) ?? this.picks.get(r)]));
+      this.renderNames(); this.draw(); }   // the highlight's colours worked out again
+    if (fiRow && this.found.has(fiRow)) { this.fi = fi; this.fiRow = fiRow; }
+    return [...new Set([...KEPT.filter(k => k in st), ...Object.keys(st.config).map(k => (GAP_KEYS.includes(k) ? 'gaps' : CYC_KEYS.includes(k) ? 'cycles' :
+      k))])];
+  },
+  undoShow() { for (const [act, s] of [['undo', this.undoS], ['redo', this.redoS]]) { const b = this.root.querySelector(`button[data-act=${act}]`);
+    if (b) b.disabled = !(s && s.length); } },
+  // the order of your groups' rows (alt+↑ / alt+↓, a drag in the names): one batch of group commands, one step to undo, said
+  // in the toast. rows: signals of your groups (a run: as one block, in the group's order) or a group's header; to: the row
+  // dropped on — a signal of a group of yours (before it; after: after it), a group's header (signals: at the end of that
+  // group; a header: before / after it). Onto a row that moves itself: nothing
+  async moveRows(rows, to, after = false) {
+    const T = to && (to.user ? to : to.ug), ug = n => this.ugroups.find(g => g.name === n);
+    if (!T) { this.toast('drop onto one of your groups (the right button: Groups ▸)'); return false; }
+    if (rows[0] && rows[0].type === 'group') {   // a group among your groups
+      const G = rows[0]; if (!G.user || G.name === T.name) return false;
+      const rest = this.ugroups.filter(g => g.name !== G.name), k = rest.findIndex(g => g.name === T.name) + (after ? 1 : 0);
+      if (this.ugroups.indexOf(ug(G.name)) === k) return false;
+      await this.run({ op: 'group', name: G.name, move: k + 1 });
+      this.toast(`${G.name}: group ${k + 1} of ${this.ugroups.length}`); return true;
+    }
+    const sigs = rows.filter(r => r.type === 'sig' && r.tr && r.ug), fulls = [...new Set(sigs.map(r => r.orig.full))]; if (!fulls.length) return false;
+    if (!to.user && sigs.includes(to)) return false;   // onto itself
+    const list = ug(T.name).signals.filter(f => !fulls.includes(f));
+    const at = to.user ? -1 : list.indexOf(to.orig.full);
+    list.splice(at < 0 ? list.length : at + (after ? 1 : 0), 0, ...fulls);
+    // from each other group: the rows picked in it (a signal also in a group not picked stays there)
+    const from = [...new Set(sigs.filter(r => r.ug.name !== T.name).map(r => r.ug.name))];
+    const ops = from.map(n => ({ op: 'group', name: n, remove: sigs.filter(r => r.ug.name === n).map(r => r.orig.full) }))
+      .concat([{ op: 'group', name: T.name, signals: list }]);
+    if (JSON.stringify(list) === JSON.stringify(ug(T.name).signals) && !from.length) return false;
+    await this.run(ops);
+    const s = this.ugRows().find(r => r.ug && r.ug.name === T.name && r.orig.full === fulls[0]); if (s) this.select(s);
+    this.toast(`${fulls.length === 1 ? sigs[0].orig.name : fulls.length + ' signals'} → ${T.name}, ${list.indexOf(fulls[0]) + 1} of ${list.length}`);
+    return true;
+  },
+  // alt+↑ / alt+↓: the selected signal (a selected run in the same group: as one block) one place up / down in its group;
+  // with shift its group among yours. row: the row of the names with the focus (a group's header: that group moves)
+  async moveKey(dir, whole = false, row = null) {
+    if (row && row.user) { const g = this.ugroups.find(x => x.name === row.name), i = this.ugroups.indexOf(g), n = this.ugroups.length;
+      if (!g || i + dir < 0 || i + dir >= n) return false;
+      await this.run({ op: 'group', name: g.name, move: dir < 0 ? 'up' : 'down' }); this.toast(`${g.name}: group ${i + dir + 1} of ${n}`); return true; }
+    const s = row && row.ug ? row : this.sel;
+    if (!s || !s.ug) { this.toast('alt+↑ / alt+↓ order the rows of your groups (the right button: Groups ▸)'); return false; }
+    if (whole) return this.moveKey(dir, false, s.ug);
+    const g = this.ugroups.find(x => x.name === s.ug.name), run = this.selRun.size > 1 && this.selRun.has(s) ? [...this.selRun].filter(r => r.ug === s.ug) :
+      [s];
+    const block = g.signals.filter(f => run.some(r => r.orig.full === f)), i0 = g.signals.indexOf(block[0]), rest = g.signals.filter(f => !block.includes(f));
+    const pos = Math.min(Math.max(i0 + dir, 0), rest.length); rest.splice(pos, 0, ...block);
+    if (JSON.stringify(rest) === JSON.stringify(g.signals)) return false;
+    await this.run({ op: 'group', name: g.name, signals: rest });
+    this.toast(`${block.length === 1 ? s.orig.name : block.length + ' signals'}: ${pos + 1} of ${rest.length} in ${g.name}`); return true;
+  },
+  // a drag in the names: the rows of your groups (a signal, a run of selected ones, a group's header) to another place in
+  // them or another group of yours; a line where they go; 6 px before it starts (a click stays a click); the pointer
+  // captured (let go anywhere), the place found again where it is let go (the names may have scrolled)
+  namesDrag() {
+    const el = this.namesEl; let d = null;
+    const clear = () => el.querySelectorAll('.row.drop-b, .row.drop-a').forEach(x => x.classList.remove('drop-b', 'drop-a'));
+    const rowEl = r => { const i = this.vis.indexOf(r); return i < 0 ? null : el.querySelector(`.row[data-r="${i}"]`); };
+    const lastOf = T => [...this.vis].reverse().find(r => r === T || r.ug === T);   // the last row of a group drawn (its header when folded)
+    // where it goes at (x, y): {to, after, line: [row element, 'drop-b' | 'drop-a']} or null
+    const place = (x, y, dr) => {
+      const k = document.elementFromPoint(x, y)?.closest('.names .row[data-r]'), r = k && el.contains(k) && this.vis[+k.dataset.r];
+      const T = r && (r.user ? r : r.ug); if (!T) return null;
+      const b = k.getBoundingClientRect(), low = y > b.top + b.height / 2;
+      if (dr.user) { const aft = r.user ? low : true; return { to: T, after: aft, line: aft ? [rowEl(lastOf(T)), 'drop-a'] : [rowEl(T), 'drop-b'] }; }
+      if (r.user) return { to: T, after: false, line: [rowEl(lastOf(T)), 'drop-a'] };   // a signal onto a header: at the end of that group
+      return { to: r, after: low, line: [k, low ? 'drop-a' : 'drop-b'] };
+    };
+    const end = (e, drop) => {
+      if (!d) return; const x = d; d = null; clear(); el.classList.remove('wv-drag');
+      try { if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId); } catch (err) { /* gone */ }
+      if (!x.on || !drop) return;
+      el.addEventListener('click', ev => ev.stopPropagation(), { capture: true, once: true });   // the drop is not a click on a name
+      const p = place(e.clientX, e.clientY, x.r), rows = x.r.user ? [x.r] : this.selRun.size > 1 && this.selRun.has(x.r) ? [...this.selRun] : [x.r];
+      if (p) this.moveRows(rows, p.to, p.after); else this.toast('drop onto one of your groups (the right button: Groups ▸)');
+    };
+    el.addEventListener('pointerdown', e => {
+      const k = e.button === 0 && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && !e.target.closest('.mk') && e.target.closest('.row[data-r]');
+      const r = k && this.vis[+k.dataset.r]; d = r && (r.user || r.ug) ? { r, y: e.clientY, on: false, id: e.pointerId } : null;   // other names: text
+    });
+    el.addEventListener('pointermove', e => {
+      if (!d || e.pointerId !== d.id) return;
+      if (!(e.buttons & 1)) { end(e, false); return; }   // the button went up where nobody heard it
+      if (!d.on && Math.abs(e.clientY - d.y) < 6) return;
+      if (!d.on) { d.on = true; el.classList.add('wv-drag'); try { el.setPointerCapture(e.pointerId); } catch (err) { /* no capture */ } }
+      getSelection()?.removeAllRanges(); clear();
+      const p = place(e.clientX, e.clientY, d.r); if (p && p.line[0]) p.line[0].classList.add(p.line[1]);
+    });
+    el.addEventListener('pointerup', e => end(e, true)); el.addEventListener('pointercancel', e => end(e, false));
+    el.addEventListener('lostpointercapture', e => { if (d && d.on) end(e, false); });
   },
   // your markers (the marker command, the menu's Marker here, the Markers list) over the page's own: drawn, kept in this browser
   setMarks() { this.markers = this.pageMarks.concat(this.umarks); this.saveBookmarks(); this.renderNotes(); this.draw(); return this; },
   // your groups: a folder per group at the top of the names, its signals (the model's rows under them, live: radix,
   // values) in your order; the same objects while the group stays (its folding, a highlight)
-  setGroups() { this.ugMemo = null; this.saveRows(); this.renderNames(); this.draw(); return this; },
+  // your groups changed: their rows again (a compare's marks on the new ones), kept, drawn
+  setGroups() { this.ugMemo = null; this.saveRows(); if (this.cmp) this.cmpMarks(); this.renderNames(); this.draw(); return this; },
   ugRows() {
     if (this.ugMemo) return this.ugMemo;
     const by = new Map(this.M.rows.filter(r => r.type === 'sig' && r.tr).map(r => [r.full, r])), cache = this.ugCache = this.ugCache || new Map(), out = [];
@@ -3790,7 +4082,35 @@ Object.assign(WaveView.prototype, {
 // (wavefw.edits:<page>), so what you change here afterwards stays until a newer one (Save keeps yours in a file). The
 // rest (cursor, window, highlight, selection, folding, order, search), which a page opened again starts from anyway,
 // is applied every time, as the page's own settings are.
-const KEPT = ['bookmarks', 'arrows', 'markers', 'groups', 'paint', 'radix', 'analog', 'hidden'], KEPT_CFG = ['style', 'maxHeight', 'toolsFolded', ...GAP_KEYS];
+const KEPT = ['bookmarks', 'arrows', 'markers', 'groups', 'paint', 'radix', 'analog', 'hidden'];
+const KEPT_CFG = ['style', 'maxHeight', 'toolsFolded', ...GAP_KEYS, ...CYC_KEYS];
+const UNDO_N = 100;   // the steps undo keeps
+// a click, a key or a field changed anywhere: the viewers' edits looked at once it is done (one look per burst of events);
+// not while a button is down (a drag ends as one step) or a key types in a text field (it ends when the field is left)
+const PTR = { down: false };
+let undoT = 0;
+const undoLater = e => {
+  if (e.type === 'pointerdown') { PTR.down = true; return; }
+  if (e.type === 'pointerup' || e.type === 'pointercancel') PTR.down = false;
+  const typing = 'input:not([type=checkbox]):not([type=radio]), textarea, [contenteditable]';
+  if (e.type === 'keyup' && e.target && e.target.closest && e.target.closest(typing)) return;
+  if (!undoT) undoT = setTimeout(() => { undoT = 0; VIEWS.forEach(v => { if (v.root.isConnected) v.undoTick(); }); }, 0);
+};
+// ctrl+Z, ctrl+shift+Z / ctrl+Y (not cmd+Y: Chrome's history on a Mac) in the viewer of the focus, else the one used last;
+// the letter by the key, or by its place when the layout's letter is not a latin one (ctrl+Я); a text field keeps its own
+function undoKey(e) {
+  if (e.defaultPrevented || e.altKey || !(e.ctrlKey || e.metaKey)) return;
+  const k = /^[a-z]$/i.test(e.key) ? e.key.toLowerCase() : e.code === 'KeyZ' ? 'z' : e.code === 'KeyY' ? 'y' : '';
+  if (!(k === 'z' || (k === 'y' && e.ctrlKey && !e.metaKey))) return;
+  const t = e.target && e.target.closest ? e.target : null;
+  if (t && t.closest('input:not([type=checkbox]):not([type=radio]):not([type=button]), textarea, select, [contenteditable]')) return;
+  const root = t && t.closest('.wv'), v = (root && root.waveView) || ACTIVE.view; if (!v) return;
+  e.preventDefault(); v.undo(k === 'y' || e.shiftKey ? 1 : -1);
+}
+if (typeof document !== 'undefined') {
+  for (const ev of ['pointerdown', 'pointerup', 'pointercancel', 'keyup', 'change']) document.addEventListener(ev, undoLater, true);
+  document.addEventListener('keydown', undoKey);
+}
 let EDITS;
 function pageEdits() {
   if (EDITS !== undefined) return EDITS;
@@ -3798,6 +4118,36 @@ function pageEdits() {
   try { EDITS = el ? JSON.parse(el.textContent).views || {} : null; }
   catch (e) { console.error('wavefw: the page\'s edits are not JSON: ' + e.message); EDITS = null; }
   return EDITS;
+}
+// Save page (the bar's, WaveFW.savePage): the page as it was read (PAGE.src, boot.js) with every viewer's state in its
+// edits — the block tools/viewedit.py writes, a new revision per viewer — so whoever opens the file sees what you see. Done
+// on the page parsed again (its elements, not its text): the live link and its token out, the edits one block at the top
+// of <head> (there before any viewer asks), <html>'s own style back. A viewer of a dump opened in the page is not in it
+const PAGE = { src: null, why: '', style: null, doctype: '' };
+const jsonBlock = o => JSON.stringify(o).replace(/</g, '\\u003c');   // no "<" in a script's JSON: a closing tag or a comment opener would end it
+function pageText() {
+  if (PAGE.src == null) fail(PAGE.why || 'this page\'s text was not kept (savePage: false)');
+  const views = Object.assign({}, (pageEdits() || {})), when = new Date().toISOString(), seen = new Set();
+  for (const v of [...VIEWS].filter(x => x.root.isConnected && !x.opts.dumpSrc)) {
+    const key = v.editKey(); if (seen.has(key)) fail(`two viewers of the same waves (${key}): the page keeps one state for them`); seen.add(key);
+    const old = String((views[key] || {}).rev || ''), m = /^r(\d+)@/.exec(old), st = v.state();
+    delete st.wavefw; delete st.version; delete st.title;
+    views[key] = { rev: `r${m ? +m[1] + 1 : 1}@${when}`, state: st };
+  }
+  if (!seen.size) fail('no viewer of this page\'s own waves (a dump opened in it is not in the page: Save keeps its view)');
+  const doc = new DOMParser().parseFromString(PAGE.src, 'text/html'), h = doc.documentElement;
+  doc.querySelectorAll('[id="wavefw-live"], [id="wavefw-edits"]').forEach(e => e.remove());
+  const el = doc.createElement('script'); el.type = 'application/json'; el.id = 'wavefw-edits'; el.textContent = jsonBlock({ views });
+  doc.head.prepend(doc.createTextNode('\n'), el, doc.createTextNode('\n'));   // on a line of its own: viewedit.py finds it there
+  if (PAGE.style == null) h.removeAttribute('style'); else h.setAttribute('style', PAGE.style);
+  return PAGE.doctype + h.outerHTML + '\n';
+}
+function savePage(name) {
+  const text = pageText(), a = document.createElement('a'), base = (location.pathname.split('/').pop() || 'waves.html').replace(/\.html?$/i, '');
+  a.download = name || base + '.view.html';
+  a.href = URL.createObjectURL(new Blob([text], { type: 'text/html' }));
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  return a.download;
 }
 Object.assign(WaveView.prototype, {
   editKey() {
@@ -3809,8 +4159,9 @@ Object.assign(WaveView.prototype, {
     if (!e || !e.state) return null;
     let st = e.state, seen = false;
     try { seen = localStorage.getItem(key) === String(e.rev); } catch (err) { /* no storage: all of it every time */ }
-    if (seen) {   // applied before: only what this browser does not keep
-      st = Object.fromEntries(Object.entries(st).filter(([k]) => !KEPT.includes(k)));
+    if (seen) {   // applied before: only what this browser does not keep (the plugins' parts too: assertions, ƒ rows)
+      const plug = this.extraState.map(x => x.key);
+      st = Object.fromEntries(Object.entries(st).filter(([k]) => !KEPT.includes(k) && !plug.includes(k)));
       if (st.config) st.config = Object.fromEntries(Object.entries(st.config).filter(([k]) => !KEPT_CFG.includes(k)));
       if (!Object.keys(st).length) return null;
     }
@@ -3896,6 +4247,143 @@ function live(url) {
   liveShow();
   return url ? LIVE.base : null;
 }
+/* ======================== src/diff.js ======================== */
+/* ---------------- compare with a second dump ---------------- */
+// The same test before and after a change of the RTL, two seeds: the second dump (B, a VCD read by the page's reader)
+// over these waves on the same time scale, signal by signal (by path; else by name under the page's scope; else the one
+// path of B that ends with the name). Where B's value differs, a red band on the row; the names of the signals that
+// differ get ≠, the ones B has not got are struck (the ones its reader left out for dumpBudget: said apart); ]d [d step
+// through the differences (of the selected signal when it has some, else of all). Compared over the time both dumps
+// cover; values as values: bits ("'b" bits, x and z apart, a bus of another width differs everywhere), a real as a
+// number, a string as text. A packed struct by its whole vector. Not in the saved state: a session's look.
+
+// a value of row r at transition o as compared (o null: before its first change, unknown): a text or a real unknown is
+// none of its values ("x" is a text); a bus unknown is its width of x
+const cmpKey = (r, o) => (r.kind === 'string' || r.kind === 'real' ? (o && o.k === '=' ? (r.kind === 'real' ? 'r' + Number(o.v) : 's' + o.v) : '\u0000?') :
+  (r.width || 1) === 1 ? (o ? o.k : 'x') : bitsOf(o, r.width));
+// the stretches [t, u) of [from, to) where rows a and b hold different values: their changes merged in one pass
+function diffSpans(a, b, from, to) {
+  const A = a.tr, B = b.tr, out = [];
+  let i = lastLE(A, from), j = lastLE(B, from), t = from, open = null;
+  while (t < to) {
+    const d = cmpKey(a, i < 0 ? null : A[i]) !== cmpKey(b, j < 0 ? null : B[j]);
+    if (d && open == null) open = t; else if (!d && open != null) { out.push([open, t]); open = null; }
+    const na = i + 1 < A.length ? A[i + 1].t : Infinity, nb = j + 1 < B.length ? B[j + 1].t : Infinity, n = Math.min(na, nb);
+    if (n >= to) break;
+    if (na === n) i++;
+    if (nb === n) j++;
+    t = n;
+  }
+  if (open != null) out.push([open, to]);
+  return out;
+}
+// row a of these waves in B (bs: B's rows by path, byLeaf: by the last part of the path): its path in the dump, else its
+// name (full, then short) under the page's --scope or as it is, else the one path of B ending with it
+function cmpFind(bs, byLeaf, a, scope) {
+  const p = (a.src && a.src.path) || a.path; if (p && bs.has(p)) return bs.get(p);
+  for (const n of [...new Set([a.full, a.name].filter(Boolean))]) {
+    const hit = (scope && bs.get(scope + '.' + n)) || bs.get(n); if (hit) return hit;
+    const c = (byLeaf.get(n.split('.').pop()) || []).filter(r => (r.path || r.full).endsWith('.' + n)); if (c.length === 1) return c[0];
+  }
+  return null;
+}
+const cmpText = r => (r.kind === 'real' || r.kind === 'string');
+Object.assign(WaveView.prototype, {
+  // the rows these waves compare: the signals of exact transitions (not a struct's fields: its whole vector instead, on its group)
+  cmpRows() {
+    return [...this.M.rows.filter(r => r.type === 'sig' && r.tr && r.tv && !r.field), ...Object.values(this.M.groups).filter(g => g.sig && g.sig.tv)
+      .map(g => g.sig)];
+  },
+  // a second dump (a File, or a VCD's text and its name) over these waves; null: none again -> { name, compared, differ,
+  // missing, omitted, first, from, to } (null: nothing compared; a newer call or the viewer gone meanwhile: null)
+  async compare(file, name) {
+    const req = this.cmpReq = (this.cmpReq || 0) + 1;
+    if (file == null) { this.cmp = null; this.cmpMarks(); this.cmpShow(); this.draw(); return null; }
+    const mine = this.cmpRows();
+    if (!this.M.timed || !mine.length) {
+      this.toast('compare: these waves are clock-sampled (one cell per cycle): open the dump itself (Open…) and compare that'); return null; }
+    const nm = name || file.name || 'B';
+    let doc;
+    try { const text = typeof file === 'string' ? file : await file.text(); doc = vcdToWave(text, { name: nm, budget: this.S.dumpBudget }).doc; }
+    catch (e) { if (req === this.cmpReq && this.root.isConnected && VIEWS.has(this)) this.toast(`${nm}: ${e.message}`); return null; }
+    if (req !== this.cmpReq || !this.root.isConnected || !VIEWS.has(this)) return null;   // compared again, or no more, meanwhile
+    const brows = parse(doc).rows.filter(r => r.type === 'sig' && r.tr), bs = new Map(brows.map(r => [r.path || r.full, r])), byLeaf = new Map();
+    for (const r of brows) { const k = (r.path || r.full).split('.').pop(); byLeaf.set(k, (byLeaf.get(k) || []).concat([r])); }
+    const om = (doc.meta && doc.meta.omitted && doc.meta.omitted.paths) || {}, left = new Set(), leftLeaf = new Map();   // left out by B's reader
+    for (const [sc, ns] of Object.entries(om)) {
+      for (const n of ns) { const p = sc ? sc + '.' + n : n; left.add(p); leftLeaf.set(n, (leftLeaf.get(n) || []).concat([p])); }
+    }
+    const scope = (this.M.src && this.M.src.meta && this.M.src.meta.scope) || '';
+    const from = Math.max(this.M.t0, doc.time.t0 ?? 0), to = Math.min(this.M.t1, doc.time.t1 ?? this.M.t1), rows = new Map();
+    const f = t => this.fmt(t, (this.M.t1 - this.M.t0) / 1000, this.M.t1 - this.M.t0);
+    if (to <= from) { this.toast(`${nm}: no time in common (these waves ${f(this.M.t0)} … ${f(this.M.t1)}, ${nm} ${f(doc.time.t0 ?? 0)} … ` +
+      `${f(doc.time.t1)}): nothing compared`); return null; }
+    let differ = 0, missing = 0, omitted = 0;
+    for (const a of mine) {
+      // left out of B by its reader: under any name it could have there (then not looked for under another one)
+      const ns = [(a.src && a.src.path) || a.path, scope && scope + '.' + a.full, scope && scope + '.' + a.name, a.full, a.name].filter(Boolean);
+      const out = ns.some(n => left.has(n) && !bs.has(n)) || (!ns.some(n => bs.has(n)) && (leftLeaf.get(String(a.name).split('.').pop()) || [])
+        .some(p => p.endsWith('.' + a.name) || p.endsWith('.' + a.full)));
+      const b = out ? null : cmpFind(bs, byLeaf, a, scope);
+      if (!b) { rows.set(a, { missing: !out, omitted: out, spans: [] }); if (out) omitted++; else missing++; continue; }
+      const other = cmpText(a) !== cmpText(b) || (!cmpText(a) && (a.width || 1) !== (b.width || 1));
+      const spans = other ? [[from, to]] : diffSpans(a, b, from, to);
+      rows.set(a, { spans, other: other ? (cmpText(b) ? b.kind : `${b.width || 1} bits`) : null });
+      if (spans.length) differ++;
+    }
+    const starts = [...new Set([...rows.values()].flatMap(c => c.spans.map(([s]) => s)))].sort((x, y) => x - y);
+    this.cmp = { name: nm, rows, differ, missing, omitted, compared: rows.size - missing - omitted, from, to, starts, first: starts.length ? starts[0] : null };
+    this.cmpMarks(); this.cmpShow(); this.draw();
+    const c = this.cmp;
+    this.toast(`${nm}: ${differ} of ${c.compared} signals differ${c.first == null ? '' : `, the first at ${f(c.first)}`}` +
+      (missing ? ` · ${missing} not in it` : '') + (omitted ? ` · ${omitted} not read (dumpBudget)` : '') +
+      (from > this.M.t0 || to < this.M.t1 ? ` · compared ${f(from)} … ${f(to)} (both dumps)` : '') + (differ ? ' · ]d [d go to them' : ''));
+    return { name: nm, compared: c.compared, differ, missing, omitted, first: c.first, from, to };
+  },
+  // the compare result of a row: a struct's group row its vector, a row of your groups its signal
+  cmpOf(r) { return this.cmp ? this.cmp.rows.get(r.sig || r.orig || r) : null; },
+  // the rows' marks in the names (≠ differs, struck: not in B; your groups' rows too) and their tooltips
+  cmpMarks() {
+    const all = [...this.M.rows, ...Object.values(this.M.groups), ...this.ugRows()];
+    for (const r of all) {
+      const c = this.cmpOf(r), d = !!(c && c.spans.length), m = !!(c && (c.missing || c.omitted));
+      this.rowClass(r, 'cmpd', d).rowClass(r, 'cmpm', m);
+      if (d || m) { this.rowTitle(r, `${r.full || r.name} — ${c.missing ? `not in ${this.cmp.name}` : c.omitted ? `not read from ${this.cmp.name} ` +
+        `(dumpBudget ${this.S.dumpBudget} changes)` : c.other ? `${this.cmp.name}: ${c.other}` : `${c.spans.length} stretch${c.spans.length === 1 ? '' :
+        'es'} other in ${this.cmp.name}`}`); (this.cmpTitled ||= new Set()).add(r); }
+      else if (this.cmpTitled && this.cmpTitled.delete(r)) this.rowTitle(r, null);
+    }
+  },
+  cmpShow() {   // the bar's ≠ N ✕ (no compare: hidden)
+    const b = this.root.querySelector('button[data-act=dcmpx]'); if (!b) return;
+    b.hidden = !this.cmp; if (this.cmp) b.textContent = `≠ ${this.cmp.differ} ✕`;
+    b.title = this.cmp ? `${this.cmp.name}: ${this.cmp.differ} of ${this.cmp.compared} signals differ${this.cmp.missing ? `, ${this.cmp.missing} not in it` :
+      ''}; ]d [d go to the differences; click: compare no more` : '';
+  },
+  // the red bands of the stretches that differ, on the rows laid out (lay entries), over [t0, t1): the first one in view
+  // found by a binary search, none past t1
+  paintDiff(P, lay, X, t0, t1) {
+    if (!this.cmp) return;
+    for (const o of lay) {
+      const c = this.cmpOf(o.row); if (!c || !c.spans.length) continue;
+      for (let i = Math.max(0, lastBefore(c.spans.length, j => c.spans[j][0], t0)); i < c.spans.length; i++) {
+        const [a, b] = c.spans[i]; if (a >= t1) break; if (b <= t0) continue;
+        const x0 = X(Math.max(a, t0)), x1 = Math.max(X(Math.min(b, t1)), x0 + 1.5);
+        P.rect(x0, o.y + 1, x1 - x0, o.h - 2, 'x', 0.16); P.rect(x0, o.y + o.h - 3, x1 - x0, 2, 'x', 0.85);
+      }
+    }
+  },
+  // ]d [d: the cursor to the next / previous start of a difference: of the selected signal when it has some, else of all
+  diffStep(dir) {
+    if (!this.cmp) { this.toast(']d [d: compare with a second dump first (Compare… in the bar)'); return this; }
+    const s = this.sel && this.cmpOf(this.sel), ts = s && s.spans.length ? s.spans.map(([a]) => a) : this.cmp.starts;
+    if (!ts.length) { this.toast(`no difference from ${this.cmp.name}`); return this; }
+    const t = ts[stepTo(ts, this.cursor, dir)];
+    this.cursor = t; if (t < this.t0 || t > this.t0 + this.span) this.t0 = this.clamp(t - this.span / 2);
+    this.draw(); this.syncCursorFields(true); return this;
+  },
+});
+PLUGINS.push(v => v.addKey(']d', () => v.diffStep(1)).addKey('[d', () => v.diffStep(-1)));
 /* ======================== src/svg.js ======================== */
 /* ---------------- static SVG ---------------- */
 const WaveSVG = {
@@ -3937,7 +4425,11 @@ const WaveSVG = {
       const sub = { type: 'space', name: '', depth: r.depth, anc: r.anc, height: 12, gapOf: r };
       if (band.has(r)) band.set(sub, band.get(r));
       return [r, sub]; });
-    const nameW = Math.ceil(Math.max(40, ...rows.map(r => P.measure(r.name || '', { size: fs, weight: r.type === 'group' ? 600 : 400 }) + 22 + r.depth * 12)));
+    // the clock cycles under the axis (the viewer's Cycles, else the settings cycles, cycleClock, cycleZero); its clock under the names
+    const cy = V ? V.cycData() : S.cycles ? (c => { const ups = c ? cycUps(c) : []; return ups.length ? { clk: c, ups, iz: cycZero(ups,
+      S.cycleZero == null ? null : num(S.cycleZero)) } : null; })(cycClock(M.rows, S.cycleClock)) : null, cyLab = cy && `cycles ↑ ${cy.clk.name}`;
+    const nameW = Math.ceil(Math.max(40, cy ? P.measure(cyLab, { size: 10 }) + 12 : 0, ...rows.map(r => P.measure(r.name || '', { size: fs,
+      weight: r.type === 'group' ? 600 : 400 }) + 22 + r.depth * 12)));
     let k = ((opts.cyclePx || 40) * M.hscale) / M.cycle;
     if (opts.width) k = (opts.width - nameW - 8 - ng * GAP) / kept;
     const waveW = kept * k + ng * GAP, Wt = Math.ceil(nameW + waveW + 8);
@@ -3945,6 +4437,8 @@ const WaveSVG = {
     let y = 4;
     const titleY = y; if (V ? V.opts.title || M.title : M.title) y += 22;
     const axisY = y; if (showAxis) y += 20;
+    // the clock cycles under the axis (the viewer's Cycles, else the settings cycles, cycleClock, cycleZero)
+    const cycY = y; if (cy) y += CYC_H;
     const infoY = y; if (ng && gc !== 'off') y += 14;   // the gaps' times and cycles
     const lay = layoutRows(rows, rh, S.laneHeight, y); y = lay.H;
     const bodyEnd = y, tockY = y; if (showTock) y += 20;
@@ -3981,6 +4475,7 @@ const WaveSVG = {
       }
     });
     P.fade = 1;
+    if (cy) P.text(6, cycY + CYC_H / 2, cyLab, { size: 10, fill: 'muted' });   // the band's clock, under the names
     P.clip(xL, 0, waveW, Ht, () => {
       const step = M.timed ? null : Math.max(1, M.every);
       const sel = V ? (V.selRun && V.selRun.size ? new Set([...V.selRun, V.sel]) : V.sel) : null;   // the viewer's selection: tinted as on the screen
@@ -3991,12 +4486,15 @@ const WaveSVG = {
             step });
           if (showTock) paintAxis(P, { from: p, span: q - p, xL: xa, xR: xb, y: tockY, h: 20, yEnd: tockY, X, timed: M.timed, tick: M.tock, every: M.every,
             step, mid: true });
+          if (cy) paintCycles(P, { xL: xa, xR: xb, y: cycY, h: CYC_H, X, from: p, to: q, ups: cy.ups, iz: cy.iz });
           rowY = paintBody(P, M, lay, X, p, q, xa, xb, hl, sel, null, band, null, strokeOf, r => !(last[r.id] > rows.indexOf(r)));
+          if (V) V.paintDiff(P, lay, X, p, q);   // the viewer's picture: a dump compared, where it differs
         };
         if (ng) P.clip(xa, 0, xb - xa, Ht, go); else go();
         if (i < ng) P.clip(xb, 0, GAP, Ht, () => {   // the gap: the rows' backgrounds go on, no waves; a double dashed line
           const x0 = xb, x1 = xb + GAP, yA = gc !== 'off' ? infoY + 14 : showAxis ? axisY : lay.length ? lay[0].y : y;
           for (const ya of [showAxis && axisY, showTock && tockY]) if (ya !== false) P.rect(x0, ya, GAP, 20, 'panel2');
+          if (cy) P.rect(x0, cycY, GAP, CYC_H, 'panel2');
           paintBody(P, M, lay, X, holes[i].p, holes[i].q, x0, x1, hl, sel, null, band, null, strokeOf, r => !(last[r.id] > rows.indexOf(r)), true);
           paintGapLine(P, (x0 + x1) / 2, yA, bodyEnd, G.gapLine);
         });
@@ -4147,6 +4645,7 @@ if (G.MutationObserver) {
   }).observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ['data-theme'] });
 }
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(redrawAll);
+const HTML_STYLE = document.documentElement.getAttribute('style');   // the page's own, before the settings' variables go on it (Save page)
 if (G.WAVEFW_CONFIG) configure(G.WAVEFW_CONFIG);   // settings file loaded before wavefw.js (see docs/USAGE.md "Settings")
 const manual = document.currentScript && document.currentScript.dataset.manual != null;
 // a page that carries the live link (tools/wavemcp.py view_live) or is opened with #wavefw-live=<port>:<token> connects to the
@@ -4156,7 +4655,23 @@ const liveHash = () => {
   try { const o = !m && el ? JSON.parse(el.textContent) : null; if (m || o) live(m ? decodeURIComponent(m[1]) : `${o.port}:${o.token}`); }
   catch (e) { console.error('wavefw live: ' + e.message); }
 };
-const start = () => { if (!manual) upgrade(); liveHash(); };
+// Save page: the page as it was read, taken before a viewer is built; only a page that is all in itself (no script or
+// stylesheet of its own beside it: a page of mkhtml.py) and whose viewers are not built yet (else PAGE.why says why);
+// savePage: false leaves it (a big page: one more copy of its text)
+const takeSrc = () => {
+  if (PAGE.src != null || PAGE.why || settings(GLOBAL).savePage === false) return;
+  const own = [...document.querySelectorAll('script[src], link[rel~=stylesheet][href]')].find(e => !/^(https?:)?\/\//i.test(e.getAttribute('src') ||
+    e.getAttribute('href') || ''));
+  if (own) { PAGE.why = `this page needs ${own.getAttribute('src') || own.getAttribute('href')} beside it: Save page is for a page that is all in ` +
+    'itself (make html, mkhtml.py); Save keeps the view'; return; }
+  if (VIEWS.size || document.querySelector('[data-wvf-done]')) { PAGE.why = 'the viewers of this page were built before it was read: Save keeps the ' +
+    'view'; return; }
+  const d = document.doctype;
+  PAGE.src = document.documentElement.outerHTML; PAGE.style = HTML_STYLE;
+  const ids = d && (d.publicId ? ` PUBLIC "${d.publicId}"` : d.systemId ? ' SYSTEM' : '') + (d.systemId ? ` "${d.systemId}"` : '');
+  PAGE.doctype = d ? `<!DOCTYPE ${d.name}${ids}>\n` : '';
+};
+const start = () => { takeSrc(); if (PAGE.why) VIEWS.forEach(v => v.layoutShow()); if (!manual) upgrade(); liveHash(); };   // built already: no Save page
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 
 /* ---------------- tooltips: what a control of a viewer does and its keys ---------------- */
@@ -4203,8 +4718,8 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavefw plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveFW = { version: '0.14',   // the project's version: VERSION (make check compares them)
-  rowId: () => ++XID, parse, fromTV, vcdToWave, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme, setColors, configure,
+G.WaveFW = { version: '0.15',   // the project's version: VERSION (make check compares them)
+  rowId: () => ++XID, parse, fromTV, vcdToWave, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme, setColors, configure, savePage, pageText,
   plugin, svgPlugin, views: () => [...VIEWS], defaults: DEFAULTS, live,
   commands: () => Object.fromEntries(Object.entries(CMDS).map(([k, c]) => [k, { args: c.args, doc: c.doc }])),
   paint: { circle, arrowHead, edgeGeom, lastLE },
@@ -4212,7 +4727,9 @@ G.WaveFW = { version: '0.14',   // the project's version: VERSION (make check co
     colorNames: CVAR, styles: Object.keys(EDGES), radixes: RADIX, enums: ENUMS, decode, fmtTime, fmtExact, parseT,
   registerTokens, registerDefaults, tips, util: { esc, glob, lastLE, lastBefore, stepTo, isEdge, circle, timeEps },
   // unstable: the pure functions for the unit table of tests/smoke.py and peek(view), the fields the tests read; not an API
-  internal: { findRow, parseWant, valueIs, findEdge, edgeGlyph, bitsOf, hexOf, mixedBits, bitsVal, vcdHex, enumColor, analogValue, niceStep, cycMap, parseWave,
+  internal: { findRow, parseWant, valueIs, findEdge, edgeGlyph, bitsOf, hexOf, mixedBits, bitsVal, vcdHex, cycZero, cycAt, cycTime, cycUps, cycClock,
+    diffSpans, cmpKey,
+    cycMarks, enumColor, analogValue, niceStep, cycMap, parseWave,
     idleCuts, gapLen, gapText, gapRefs, fmtFreq, gfmt, toFloat, fieldRow, stripPfx, trimNum,
     peek: v => ({ get lay() { return v.lay; }, get oy() { return v.oy; }, get vis() { return v.vis; }, get collapsed() { return v.collapsed; },
       get rowEls() { return v.rowEls; }, get namesEl() { return v.namesEl; } }) } };

@@ -156,6 +156,8 @@ add theirs (`WaveFW.registerDefaults`).
 | `moduleShading` | true | neighbouring instances alternate between two backgrounds, the panel and a pale blue (`band` in `colors`); module rows bold |
 | `maxHeight` | none | e.g. `"80vh"`: the rows scroll inside the viewer (any number of rows); none: with the page, the bar sticking to the top (generated configs: `"80vh"`; the bar's **Scroll** button switches) |
 | `toolsFolded` | false | the bar's tools folded to its title line (**▴** / **▾ tools** in the bar) |
+| `savePage` | true | the bar's **Save page**: this page as a `.view.html` with your view in it (§ Save and Load); false hides it and keeps no copy of the page's text |
+| `cycles`, `cycleClock`, `cycleZero` | false, null, null | the clock cycles in a band under the time axis (§ Clock cycles): on, the clock counted (null: the `*clk*` found), the time of cycle 0 (null: the first rising edge) |
 | `groupColors` | none | one colour per group: `{"aw": "#339af0", "tb.dut.u_rx": "#37b24d"}` (names, paths, `*` patterns) |
 | `highlight`, `dim` | none, 0.3 | instances in front at start (paths, names, `*` patterns) and the opacity of the rest |
 | `findHighlight`, `findOpen` | true, true | starting state of the find options |
@@ -373,7 +375,7 @@ field. Navigation follows Questa's wave window, the lists and the text vim: a se
 | shift+`← →` | move the cursor a hundredth of the view | the pointer on a signal | its value there, the change into it and the next one (tooltip) |
 | `/`, ctrl+F | find (the bar scrolled away: the find group floats over the waves; ✕ or Esc puts it back) | `n N`, `*` `#` | next / previous match; find the selected signal's name and go to its next / previous match |
 | `m` | bookmark at the cursor | `]m [m` | the next / previous bookmark |
-| shift+click the waves | a second cursor (dashed, on an edge): Δ to the cursor in time, its frequency (`Δ 40 ns / 25 MHz`) and in cycles of the clock (the selected signal's, else the nearest `*clk*`) on the axis and in the readout; `x` swaps the two; Esc clears it | `1` … `9` | go to that bookmark (each bookmark's line shows its Δ from the cursor) |
+| shift+click the waves | a second cursor (dashed, on an edge): Δ to the cursor in time, its frequency (`Δ 40 ns / 25 MHz`) and in cycles of the clock (the cycles band's when it is on, else the selected signal's, else the nearest `*clk*`) on the axis and in the readout; `x` swaps the two; Esc clears it | `1` … `9` | go to that bookmark (each bookmark's line shows its Δ from the cursor) |
 | `zM` / `zR` | fold / open every module | `zc` / `zo` / `za` | fold / open / toggle the module of the selected signal |
 | `yy`, ctrl+C | copy the selected signal (or the highlighted ones); while searching ctrl+C ends the search | `s` | sort off → A→Z → Z→A |
 | ○ or ctrl+click a name | highlight the signal or instance; ctrl+shift+click: every row from the last one to it | Esc | reset: no search, highlight or selection |
@@ -432,7 +434,9 @@ ones) **Into** a group of your own or a **New group** — a folder at the top of
 (they stay in their modules too; their radix, colour and values are the signal's; bookmarks and highlight of a signal
 show on its row in the group) —, takes them **Out**, **Deletes** the group on its header, and **Go to** any group.
 **ctrl+G** on the waves lists your groups the same way: a click or Enter opens one, brings it to the middle and
-selects its first signal. Under the waves the **Markers** list has each marker's time, label and colour, the
+selects its first signal. Their order is yours: **alt+↑ / alt+↓** move the selected signal (a run of them) one place
+in its group, **alt+shift+↑ / ↓** the group among yours; a signal of a group, or a group's header, **dragged** in the
+names goes where the line shows (into another group of yours too) — each one step to undo. Under the waves the **Markers** list has each marker's time, label and colour, the
 **Groups** list each group's name and colour (its signals get the colour). Both are kept in this browser and in a saved
 state, as the bookmarks are; [commands](#commands-and-edits) make them too.
 
@@ -442,6 +446,33 @@ bookmarks and arrows, your markers and groups, the assertions (the files loaded 
 and the bindings) and the ƒ rows. **Load…** reads it back into a viewer — after a reload, in another browser, or on other waves (what they lack is
 left out and counted in the bar). Its `"config"` (`sort`, `sortIgnore`, `fold`, `highlight`, `findHighlight`,
 `findOpen`, `findCase`, `findWord`, `findRegex`) pastes into a config file as it is; times are model units (ps).
+**Save page** downloads the page itself as `<page>.view.html` with your view in it: every viewer's state goes into the
+page's edits (the block `tools/viewedit.py` writes, a new revision), so whoever opens that one file — another browser,
+a colleague — sees your bookmarks, groups, colours, highlight, cursor and window, the assertions you loaded; the waves
+are the page's as they were; the live link and its token are left out. It is there on a page that is all in itself (`make
+html`, `mkhtml.py`); a page with `wavefw.js` beside it (`docs/index.html`), a dump opened in a page: Save keeps the view.
+What you send has what you did in it — your assertion files' text, your notes, the search. The person who opens it gets
+your revision once: what they change then stays theirs. `savePage: false` hides the button (and the page keeps no copy
+of its text). `WaveFW.savePage()` / `WaveFW.pageText()` from a script.
+
+**Compare two runs.** **Compare…** in the bar's dump group reads a second VCD — the same test after a change of the
+RTL, another seed — over these waves, on the same time scale, signal by signal of the same path (else the same name under
+the page's scope): where its value differs, a red band on the row; the name gets **≠**, a signal it lacks is struck; the
+title line says how many differ and where the first one is; **]d / [d** step to the next / previous difference (of the
+selected signal when it has some, else of all); **≠ N ✕** in the bar compares no more. Values are compared as values:
+bit for bit (x and z apart; a bus of another width differs everywhere), a real as a number, a string as text; a packed
+struct by its whole vector (≠ on its group). Over the time both dumps cover (the toast says it when that is less); a
+signal B's reader left out for `dumpBudget` is said apart from one B has not got. The picture (PNG, SVG) draws the bands. It works on exact
+waves (a page of `--exact`, a dump opened in the page), not on a clock-sampled view; an FST: `sva vcd x.fst --out x.vcd`.
+Not kept in the saved state.
+
+**Undo and redo.** **ctrl+Z** (or **↶** in the bar's title line) takes back the last change of what you edit: bookmarks, arrows,
+markers, your groups, colours, radix, analog and hidden rows, the highlight, the edge style, the scroll and the folded
+tools, the gaps and the cycles; **ctrl+shift+Z** / **ctrl+Y** (**↷**) redo. A step is what one action changed (a menu
+item, a colour, a dragged bookmark, a batch of commands from a script or a live agent); the toast names it. The cursor,
+the window, the selection and the search are not steps; a text typed is one step when its field is left, and in a text
+field ctrl+Z is the field's. The keys go by their place on other layouts (ctrl+Я); cmd+Z / cmd+shift+Z on a Mac. 100
+steps from the page as it opens; `view.undo(-1 | 1)` from a script.
 
 **Ranges and the menu.** Shift+drag on the waves zooms into the range dragged over (as the middle button); ctrl+drag
 measures a range: its ends snap to the edges of the signal under the pointer (alt: not), it is shaded with its Δ on the
@@ -497,6 +528,18 @@ state. `"contextMenu": false` leaves the right button to the browser.
 ![A measured range over two APB transfers and the right button's menu](img/range.png)
 
 ![The cursor and a second cursor 80 ns later: Δ in time and in cycles of PCLK on the axis and in the readout](img/cursors.png)
+
+### Clock cycles
+
+**Cycles ▸** in the right button's menu draws the cycles of a clock in a band under the time axis: a tick at each rising
+edge, numbered from cycle 0 (every 1st, 2nd, 5th, 10th … as the zoom leaves room), the clock named in the header of the
+names. **Show the cycles** counts the 1-bit `*clk*` / `*clock*` found, **Cycles of X** on a 1-bit row counts X, **Cycle 0 at
+this edge** makes the rising edge at or before the time clicked cycle 0, **Reset the cycles** gives back the page's
+settings (`cycles`, `cycleClock`, `cycleZero`). With the band on, the readout says the cursor's cycle (`cycle 6 ↑PCLK`, negative
+before cycle 0) and the second cursor's Δ counts that clock. `c147`, `cycle 147` or `c-3` in the cursor field go to that
+cycle's rising edge (the band off: of the clock found). Kept in the browser and the saved state; the pictures and a static
+SVG with `"cycles": true` draw the band; the command `{"op": "cycles", "on": true, "clock": "PCLK", "zero": "50ns"}`
+(`view.run`, `viewedit.py`, `view_edit`).
 
 **Bus transactions.** The page finds the bus ports of every module by their signal names — the signals of one port share
 a prefix (`s_axi_awvalid`, `m_axis_tdata`, `wb_cyc_o`; none: `PSEL`), a trailing `_i` / `_o` / `_in` / `_out` is ignored — and takes them
@@ -574,7 +617,7 @@ await v.run([
 | `bookmark` | `n? t? signal? text? color? lift? delete?` | a numbered circle on a signal (none: the time axis) with its text: a new one (`n` free or left out, `t` the cursor by default) or bookmark `n` changed; `lift`: above its signal, in a lane; `delete`: `n` or `"all"` (its arrows go too) |
 | `arrow` | `id? from? to? shape? head? line? color? label? delete?` | an arrow between bookmarks `from` → `to` with its label: new, or arrow `id` (1, 2 … as listed; or the one from → to) changed; shape `~ - -~ ~- -\| \|- -\|-`, head `> <> < ""`, line `solid dashed dotted` |
 | `marker` | `id? t? label? color? delete?` | a dashed line across the rows with its label |
-| `group` | `name signals? add? remove? color? rename? delete? go?` | your group: `signals` sets its signals (a module: its signals), `add`, `remove`, `rename`, `delete`; `go`: opened, in the middle, its first signal selected (ctrl+G) |
+| `group` | `name signals? add? remove? color? rename? delete? go? move?` | your group: `signals` sets its signals in this order (a module: its signals), `add`, `remove`, `rename`, `delete`; `go`: opened, in the middle, its first signal selected (ctrl+G); `move`: its place among your groups (`up`, `down`, `top`, `bottom`, a number) |
 | `layout` | `scroll? height? tools?` | where the rows scroll: `window` (`height`: `"80vh"`, `600`) or `page`; the bar's tools `fold` or `open` |
 | `highlight` | `add? remove? set? clear?` | signals and modules (and your groups) in front in their colours, the rest dimmed |
 | `paint` | `signals? color? clear?` | a colour (trace, outline, name) for signals; `color: null` their own again |
@@ -584,6 +627,7 @@ await v.run([
 | `radix`, `analog` | `signals radix` / `signals rows` | the radix of buses (`null`: the page's), a bus as a step plot |
 | `cursor`, `cursor2`, `view`, `fit`, `range` | `t` / `t` / `from? to? at? span?` / — / `from? to? signal?` | the cursors, the window, the measured range |
 | `sort`, `style`, `find`, `gaps` | | the order of the names, the edge style, the find field and its options, the gaps of the picture |
+| `cycles` | `on? clock? zero? reset?` | the clock cycles under the time axis: on, the clock counted (a 1-bit signal), the time of cycle 0 (`null`: the first edge), `reset`: the page's; answers the clock and the cursor's cycle |
 | `edge`, `reset` | `dir? kind? value? signal?` / — | the cursor to the next / previous edge; what Esc does |
 | `state`, `set_state`, `rows`, `picture` | / `state` / `pattern? limit? offset?` / `format? from? to? rows?` | read: the state (Save), a state back (Load…), the signals of the page, the screen as PNG (base64), SVG or WaveDrom |
 

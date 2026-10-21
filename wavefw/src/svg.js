@@ -40,7 +40,11 @@ const WaveSVG = {
       const sub = { type: 'space', name: '', depth: r.depth, anc: r.anc, height: 12, gapOf: r };
       if (band.has(r)) band.set(sub, band.get(r));
       return [r, sub]; });
-    const nameW = Math.ceil(Math.max(40, ...rows.map(r => P.measure(r.name || '', { size: fs, weight: r.type === 'group' ? 600 : 400 }) + 22 + r.depth * 12)));
+    // the clock cycles under the axis (the viewer's Cycles, else the settings cycles, cycleClock, cycleZero); its clock under the names
+    const cy = V ? V.cycData() : S.cycles ? (c => { const ups = c ? cycUps(c) : []; return ups.length ? { clk: c, ups, iz: cycZero(ups,
+      S.cycleZero == null ? null : num(S.cycleZero)) } : null; })(cycClock(M.rows, S.cycleClock)) : null, cyLab = cy && `cycles ↑ ${cy.clk.name}`;
+    const nameW = Math.ceil(Math.max(40, cy ? P.measure(cyLab, { size: 10 }) + 12 : 0, ...rows.map(r => P.measure(r.name || '', { size: fs,
+      weight: r.type === 'group' ? 600 : 400 }) + 22 + r.depth * 12)));
     let k = ((opts.cyclePx || 40) * M.hscale) / M.cycle;
     if (opts.width) k = (opts.width - nameW - 8 - ng * GAP) / kept;
     const waveW = kept * k + ng * GAP, Wt = Math.ceil(nameW + waveW + 8);
@@ -48,6 +52,8 @@ const WaveSVG = {
     let y = 4;
     const titleY = y; if (V ? V.opts.title || M.title : M.title) y += 22;
     const axisY = y; if (showAxis) y += 20;
+    // the clock cycles under the axis (the viewer's Cycles, else the settings cycles, cycleClock, cycleZero)
+    const cycY = y; if (cy) y += CYC_H;
     const infoY = y; if (ng && gc !== 'off') y += 14;   // the gaps' times and cycles
     const lay = layoutRows(rows, rh, S.laneHeight, y); y = lay.H;
     const bodyEnd = y, tockY = y; if (showTock) y += 20;
@@ -84,6 +90,7 @@ const WaveSVG = {
       }
     });
     P.fade = 1;
+    if (cy) P.text(6, cycY + CYC_H / 2, cyLab, { size: 10, fill: 'muted' });   // the band's clock, under the names
     P.clip(xL, 0, waveW, Ht, () => {
       const step = M.timed ? null : Math.max(1, M.every);
       const sel = V ? (V.selRun && V.selRun.size ? new Set([...V.selRun, V.sel]) : V.sel) : null;   // the viewer's selection: tinted as on the screen
@@ -94,12 +101,15 @@ const WaveSVG = {
             step });
           if (showTock) paintAxis(P, { from: p, span: q - p, xL: xa, xR: xb, y: tockY, h: 20, yEnd: tockY, X, timed: M.timed, tick: M.tock, every: M.every,
             step, mid: true });
+          if (cy) paintCycles(P, { xL: xa, xR: xb, y: cycY, h: CYC_H, X, from: p, to: q, ups: cy.ups, iz: cy.iz });
           rowY = paintBody(P, M, lay, X, p, q, xa, xb, hl, sel, null, band, null, strokeOf, r => !(last[r.id] > rows.indexOf(r)));
+          if (V) V.paintDiff(P, lay, X, p, q);   // the viewer's picture: a dump compared, where it differs
         };
         if (ng) P.clip(xa, 0, xb - xa, Ht, go); else go();
         if (i < ng) P.clip(xb, 0, GAP, Ht, () => {   // the gap: the rows' backgrounds go on, no waves; a double dashed line
           const x0 = xb, x1 = xb + GAP, yA = gc !== 'off' ? infoY + 14 : showAxis ? axisY : lay.length ? lay[0].y : y;
           for (const ya of [showAxis && axisY, showTock && tockY]) if (ya !== false) P.rect(x0, ya, GAP, 20, 'panel2');
+          if (cy) P.rect(x0, cycY, GAP, CYC_H, 'panel2');
           paintBody(P, M, lay, X, holes[i].p, holes[i].q, x0, x1, hl, sel, null, band, null, strokeOf, r => !(last[r.id] > rows.indexOf(r)), true);
           paintGapLine(P, (x0 + x1) / 2, yA, bodyEnd, G.gapLine);
         });

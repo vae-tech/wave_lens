@@ -148,11 +148,38 @@
 <h3 id="cursor2">A second cursor</h3>
 <p><kbd>shift+click</kbd> on the waves (or <span class="ui">Second cursor here</span> in the right button's menu) puts a dashed second
   cursor, snapped to an edge like the first. The axis and the title line then show the distance to the cursor in time, its frequency, and
-  in cycles of a clock: the selected signal's when it is a clock, else the nearest <code>*clk*</code>. <kbd>x</kbd> swaps the two
+  in cycles of a clock: the clock of the <a href="#cycles">cycles band</a> when it is on, else the selected signal's when it is a clock, else
+  the nearest <code>*clk*</code>. <kbd>x</kbd> swaps the two
   cursors; <kbd>Esc</kbd> clears the second one.</p>
 <figure><img src="img/viewer-cursors.png" alt="Cursor at 35 ns, second cursor at 115 ns: Δ 80.00 ns / 12.5 MHz · 8 PCLK on the axis" loading="lazy">
   <figcaption><b>Two cursors.</b> PCLK selected, the cursor at 35 ns, the second at 115 ns: <code>Δ 80.00 ns / 12.5 MHz · 8 PCLK</code>
   on the axis and in the title line.</figcaption></figure>
+
+<h3 id="cycles">Clock cycles</h3>
+<p>A failure is often told as <i>“cycle 147 after reset”</i>, not as a time. <span class="ui">Cycles ▸</span> in the right button's menu
+  shows the cycles of a clock in a band under the time axis: every rising edge a tick, numbered from cycle 0 (as many numbers as fit), the
+  clock named in the header of the names. <span class="ui">Show the cycles</span> counts the 1-bit <code>*clk*</code> / <code>*clock*</code>
+  found, <span class="ui">Cycles of PCLK</span> on a 1-bit row counts that one, <span class="ui">Cycle 0 at this edge</span> makes the rising
+  edge at or before the time clicked cycle 0 (the end of reset, a trigger), <span class="ui">Reset the cycles</span> gives back the page's
+  settings. With the band on, the title line says the cursor's cycle (<code>cycle 6 ↑PCLK</code>) and the second cursor's Δ counts that
+  clock. Type <code>c147</code> (or <code>cycle 147</code>, <code>c-3</code>) in the cursor field to go to that cycle's edge; it works with
+  the band off too. The pictures (PNG, SVG) draw the band; the settings are <code>cycles</code>, <code>cycleClock</code>,
+  <code>cycleZero</code>, and the command is <code>{"op": "cycles", "on": true, "clock": "PCLK", "zero": "50ns"}</code>.</p>
+<figure><img src="img/viewer-cycles.png" alt="The cycles of PCLK under the time axis, cycle 0 at the fifth rising edge" loading="lazy">
+  <figcaption><b>Clock cycles.</b> Cycle 0 at the fifth rising edge of PCLK: the band numbers the edges, the title line says the cursor's
+  cycle, the Δ of the two cursors is in PCLK cycles.</figcaption></figure>
+
+<h3 id="compare">Compare two runs</h3>
+<p>The same test before and after a change of the RTL, or with two seeds: <span class="ui">Compare…</span> in the bar's
+  <b>dump</b> group reads the second run's VCD over these waves, on the same time scale, signal by signal of the same path. Where its value
+  differs, the row gets a red band (the stretch shaded, a line under it); the name gets <b>≠</b>; a signal the second dump lacks is struck
+  (one its reader left out for <code>dumpBudget</code> is said so in its tooltip). A packed struct compares by its whole vector, a real as a
+  number, a string as text; only the time both dumps cover is compared.
+  The title line says how many signals differ and where the first difference is; <kbd>]d</kbd> / <kbd>[d</kbd> go to the next / previous
+  difference — of the selected signal when it has some, else of all; <span class="ui">≠ N ✕</span> compares no more. Values compare bit for
+  bit, x and z apart; a bus of another width differs everywhere. The picture (PNG, SVG) has the bands. It works on exact waves (a page made
+  with <code>--exact</code>, a dump opened in the page); a clock-sampled view refuses (one cell per cycle is another time scale). An FST:
+  <code>sva vcd x.fst --out x.vcd</code> first.</p>
 
 <h2 id="edges">Edges and values</h2>
 <p>Select a signal (click its name or its row; <kbd>↑</kbd> <kbd>↓</kbd> or <kbd>j</kbd> <kbd>k</kbd> select the previous / next one,
@@ -310,6 +337,20 @@
   sub-modules first, or the file's order) and <code>groupColors</code> (one colour per module or channel) shape this further; see
   <a href="pages.html">Dump → page</a>.</p>
 
+<h2 id="groups">Your groups</h2>
+<p>The right button's <span class="ui">Groups ▸</span> puts the signal clicked (or the highlighted, the selected ones) <span class="ui">Into</span>
+  a group of your own or a <span class="ui">New group</span>: a folder at the top of the names with its signals in your order. They stay in
+  their modules too; radix, colour, bookmarks and highlight are the signal's. <span class="ui">Out</span> takes them out, the header's
+  <span class="ui">Delete this group</span> removes it, <span class="ui">Go to</span> (or <kbd>ctrl+G</kbd>) opens one, brings it to the middle and
+  selects its first signal.</p>
+<p>The order is yours. <kbd>alt+↑</kbd> / <kbd>alt+↓</kbd> move the selected signal (a selected run of them, as one block) one place in
+  its group, or the row of the names with the focus (a group's header: its group);
+  <kbd>alt+shift+↑</kbd> / <kbd>alt+shift+↓</kbd> move the whole group among yours. Drag a signal of a group, or a group's header, in
+  the names: a line shows where it goes — between two signals, at the end of another group of yours (it moves there), or before another
+  group. Each move is one step to <a href="#undo">undo</a>. A drag over the other names selects their text, as before (ctrl+C copies the
+  paths). The groups are kept in this browser and the saved state; the command is <code>{"op": "group", "name": "ctl", "signals":
+  ["PSEL", "PENABLE"]}</code>, <code>"move": "up"</code> for its place.</p>
+
 <h2 id="sort">Sorting</h2>
 <p><span class="ui">Sort</span> (<kbd>s</kbd>) cycles off → A→Z → Z→A. The prefixes in the field next to it (<code>i_,o_</code>) are skipped
   when names are compared and drawn dimmed, so <code>i_data</code> sorts under <code>d</code>. Groups move as a block and are sorted inside.
@@ -357,6 +398,22 @@
   back — after a reload, in another browser, or on other waves: what they lack is left out and counted in the title line.</p>
 <p>The file's <code>"config"</code> (<code>sort</code>, <code>sortIgnore</code>, <code>fold</code>, <code>highlight</code>, the find
   toggles …) pastes into a config file as it is; times are in model units (ps).</p>
+<p><span class="ui">Save page</span> downloads the page itself, <code>&lt;page&gt;.view.html</code>, with your view written into it:
+  one file to send. Whoever opens it — in another browser, on another machine — sees the bookmarks, arrows, groups, colours, highlight,
+  cursor and window, the assertions and ƒ rows you had; the waves are the page's as they were, the live link to an agent and its token
+  are left out. It is the page's edits block that <code>tools/viewedit.py</code> writes, a new revision: what the person then changes
+  stays theirs. It is there on a page that is all in itself (<code>make html</code>, <code>mkhtml.py</code>); a page with
+  <code>wavefw.js</code> beside it, or a dump opened in the page (<span class="ui">Open…</span>), keeps its view with
+  <span class="ui">Save</span>. The file carries what you did: your assertion files' text, notes, the search.</p>
+<h3 id="undo">Undo and redo</h3>
+<p><kbd>ctrl+Z</kbd> (or <span class="ui">↶</span> in the bar's title line, there with the tools folded too) takes back the last change of what you edit in a viewer: bookmarks and
+  arrows, markers, your groups, colours, radix, analog and hidden rows, the highlight, the edge style, the scroll and the folded tools,
+  the gaps and the cycles. <kbd>ctrl+shift+Z</kbd> or <kbd>ctrl+Y</kbd> (<span class="ui">↷</span>) does it again. A step is what one
+  action changed: a menu item, a colour picked, a bookmark dragged, a batch of commands from a script or a live agent; the toast names
+  it (<code>undone: radix, hidden</code>). The cursor, the window, the selection and the search are not steps (move them back with
+  <kbd>l</kbd>, the bookmarks, <kbd>Esc</kbd>). A text typed (a bookmark's, an arrow's label) is one step when its field is left; in a
+  text field ctrl+Z is the field's own. On another keyboard layout the keys go by their place (<kbd>ctrl+Я</kbd> is ctrl+Z). The history starts when the page opens (with
+  the page's edits in) and keeps 100 steps; a new change after an undo drops what could be redone.</p>
 
 <h2 id="themes">Themes</h2>
 <p>Three themes: <b>light</b> (warm paper), <b>white</b> (black traces, for print and slides) and <b>dark</b>. They follow the system

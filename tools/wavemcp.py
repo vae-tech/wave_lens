@@ -990,6 +990,8 @@ def ns_out(results, timed):
                 r['range'] = [t(x) for x in r['range']]
             if r.get('op') == 'state' and isinstance(r.get('state'), dict):
                 r['state'] = state_ns(r['state'])
+            if r.get('op') == 'cycles' and isinstance(r.get('cycles'), dict):
+                r['cycles'] = dict(r['cycles'], cycleZero=t(r['cycles'].get('cycleZero')))
         out.append(r)
     return out
 
@@ -1006,6 +1008,8 @@ def state_ns(st):
     for k in ('bookmarks', 'markers'):
         if isinstance(st.get(k), list):
             st[k] = [dict(x, t=t(x.get('t'))) if isinstance(x, dict) else x for x in st[k]]
+    if isinstance(st.get('config'), dict) and st['config'].get('cycleZero') is not None:
+        st['config'] = dict(st['config'], cycleZero=t(st['config']['cycleZero']))
     return st
 
 
@@ -1052,6 +1056,8 @@ def summary(st, timed, base=None):
         out['sort'] = c['sort']
     if c.get('style') not in (None, 'auto'):
         out['style'] = c['style']
+    if c.get('cycles'):
+        out['cycles'] = {'clock': c.get('cycleClock'), 'zero': t(c['cycleZero']) if c.get('cycleZero') is not None else None}
     return out
 
 

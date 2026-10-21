@@ -12,7 +12,7 @@ import argparse, os, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FW = os.path.join(os.path.dirname(HERE), 'wavefw')
-PARTS = ['model', 'vcd', 'paint', 'view', 'edit', 'svg', 'boot']
+PARTS = ['model', 'vcd', 'paint', 'view', 'edit', 'diff', 'svg', 'boot']
 PLUGINS = ['sva.js', 'bus.js']
 WIDTH = 160
 HEAD = ('/* wavefw.js — WaveDrom-format waveform framework: parser, interactive canvas viewer (WaveView), static SVG (WaveSVG).\n'
@@ -33,11 +33,14 @@ def build() -> str:
 
 
 def too_long() -> list:
-    """'file:line: N columns' of every line of the sources and the plugins longer than WIDTH."""
+    """'file:line: N columns' of every line of the sources and the plugins longer than WIDTH, or with a comment opener."""
     out = []
     for rel in [os.path.join('src', n + '.js') for n in PARTS] + PLUGINS:
         with open(os.path.join(FW, rel), encoding='utf-8') as f:
-            out += [f'wavefw/{rel}:{i}: {len(ln)} columns' for i, ln in enumerate(f.read().split('\n'), 1) if len(ln) > WIDTH]
+            lines = f.read().split('\n')
+        out += [f'wavefw/{rel}:{i}: {len(ln)} columns' for i, ln in enumerate(lines, 1) if len(ln) > WIDTH]
+        # inlined in a page's <script> (mkhtml.py), a comment opener there makes the HTML parser read past the script's end
+        out += [f'wavefw/{rel}:{i}: "<' + '!--" in it (it breaks the page it is inlined in)' for i, ln in enumerate(lines, 1) if '<' + '!--' in ln]
     return out
 
 

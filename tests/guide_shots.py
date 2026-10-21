@@ -264,6 +264,9 @@ def viewer(S, ex, build):
     js('(v.closeMenu(), v.setRange(null), 0)')
     js("(v.select('PCLK'), v.cursor = 35000, v.setCursor2(115000), 0)"); shots.settle(page)
     S.save('viewer-cursors', v, upto=v.locator('.notes'))
+    js("(v.setCycles({ cycles: true, cycleZero: v.cycData(true).ups[4] }), 0)"); shots.settle(page)   # the clock cycles: cycle 0 at the 5th edge
+    S.save('viewer-cycles', v, upto=v.locator('.notes'))
+    js("(v.setCycles(null), 0)")
     js("(v.setCursor2(null), v.setAnalog(v.M.rows.find(r => r.name === 'PADDR'), 3), v.setAnalog(v.M.rows.find(r => r.name === 'PWDATA'), 3), 0)")
     S.save('viewer-analog', v, upto=v.locator('.notes'))
     js("(v.setAnalog(v.M.rows.find(r => r.name === 'PADDR'), null), v.setAnalog(v.M.rows.find(r => r.name === 'PWDATA'), null), 0)")

@@ -95,8 +95,17 @@
 .wv .wcol { position: relative; min-width: 0; }                         /* as tall as all rows; the canvas sticks in view */
 .wv .names { border-right: 1px solid var(--line); font-family: var(--font-mono); font-size: var(--wv-font-size, 11.5px); overflow: clip; }
 .wv .names .hdr { height: 24px; border-bottom: 1px solid var(--line); background: var(--panel-2); position: sticky; top: 0; z-index: 1; }
+.wv .names .hdr .cyc { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; padding: 0 8px; font-size: 10px;
+  color: var(--muted); border-top: 1px solid var(--line); white-space: nowrap; overflow: hidden; }   /* the cycles' band: its clock */
 .wv .names .row { height: 26px; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 8px; border-bottom: 1px dotted var(--line); white-space: nowrap; }
 .wv .names .row .n { overflow: hidden; text-overflow: ellipsis; }
+/* a drag in the names (your groups' order): where the rows go */
+.wv .names.wv-drag { cursor: grabbing; user-select: none; }
+.wv .names .row.drop-b { box-shadow: inset 0 2px 0 var(--accent); }
+.wv .names .row.drop-a { box-shadow: inset 0 -2px 0 var(--accent); }
+/* a second dump compared (Compare…): ≠ on a name that differs, struck when the dump has not got it */
+.wv .names .row.cmpd .n::after { content: ' ≠'; color: var(--wave-x); font-weight: 700; }
+.wv .names .row.cmpm .n { text-decoration: line-through; text-decoration-color: var(--muted); opacity: 0.75; }
 .wv .names .row .n .pfx { color: var(--muted); opacity: 0.75; }
 .wv .names .row .v { color: var(--accent); font-weight: 600; flex-shrink: 0; max-width: 50%; overflow: hidden; text-overflow: ellipsis; }   /* a long value (bin) leaves the name half the row; its title has it all */
 .wv .names .row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }

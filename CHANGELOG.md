@@ -5,6 +5,24 @@ lives on a branch. The version is in `VERSION`, in `wavefw.js` (`WaveFW.version`
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.15 — 21 October 2026
+
+Five features from a review by Codex, each reviewed again by it: cycles, undo, your order, a page to send, two runs side by side.
+
+- **Clock cycles.** The right button's **Cycles ▸**: a clock's rising edges numbered from cycle 0 in a band under the time
+  axis; the cursor's cycle in the title (`cycle 147 ↑clk`), the second cursor's Δ in that clock, `c147` in the cursor
+  field; cycle 0 at any edge. Settings `cycles`, `cycleClock`, `cycleZero`; the command `cycles`; drawn in the pictures.
+- **Undo and redo** of what you edit — bookmarks, arrows, markers, groups, colours, radix, analog, hidden rows,
+  highlight, gaps, cycles: **ctrl+Z**, **ctrl+shift+Z** / **ctrl+Y** (ctrl+Я on a Russian layout), **↶ ↷** in the
+  bar's title line. A step is one action (a batch of commands, a drag, a field left); the cursor and the window are not
+  steps.
+- **Your groups in your order**: **alt+↑ / alt+↓** move a signal in its group (alt+shift: the group), a drag in the
+  names moves signals and groups; `group … move`.
+- **Save page**: the page as one file with your view in it (every viewer's state in its edits, the live link left
+  out): whoever opens it sees what you saw. On a page that is all in itself (`make html`); setting `savePage`.
+- **Compare two runs**: **Compare…** reads a second VCD over the waves; where it differs a red band and ≠, a signal it
+  lacks struck; **]d / [d** to the differences.
+
 ## 0.14 — 21 October 2026
 
 Fixes from a review by Codex: what a page shows is what the dump holds.

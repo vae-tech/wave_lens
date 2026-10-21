@@ -120,7 +120,7 @@ config, `make html WAVES=examples/test_video/test_stream_video.fst`.
 | [`docs/SV_STYLE.md`](docs/SV_STYLE.md) | the SystemVerilog style of the project |
 | [`docs/reviews/`](docs/reviews) | the reviews of the stages with their findings and the commits that closed them |
 | [`prompts/`](prompts/00-roadmap.md) | the roadmap as a series of prompts |
-| [`CHANGELOG.md`](CHANGELOG.md) | every version (0.14 now; two numbers, each a tagged merge into `main`) |
+| [`CHANGELOG.md`](CHANGELOG.md) | every version (0.15 now; two numbers, each a tagged merge into `main`) |
 
 ## License
 

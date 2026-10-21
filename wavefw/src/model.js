@@ -63,7 +63,8 @@ const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight
   highlight: null, dim: 0.3, groupColors: null, arrowLabels: 'lane', laneHeight: 16, maxHeight: null, toolsFolded: false,
   groupOrder: 'file', moduleShading: true, findHighlight: true, findOpen: true, findCase: false, findWord: false, findRegex: false, cursorSnap: 8,
     wheel: 'scroll', contextMenu: true, enumColors: null, dumpBudget: 3000000, gaps: false, gapIdle: 16, gapKeep: 2,
-    gapSignals: null, gapClock: null, gapAux: null, gapOnly: false, gapCount: 'clock', gapLine: 'dashdot', menuTipDelay: 2000 };
+    gapSignals: null, gapClock: null, gapAux: null, gapOnly: false, gapCount: 'clock', gapLine: 'dashdot', menuTipDelay: 2000, cycles: false,
+    cycleClock: null, cycleZero: null, savePage: true };
 // a plugin's settings with their defaults (bus.js: busDetect, buses; sva.js: svaOpen, svaShow, svaSignals): in every
 // layer like the framework's own, listed in WaveFW.defaults, known to the warning on unknown keys
 const registerDefaults = map => { Object.assign(DEFAULTS, map || {}); return Object.assign({}, DEFAULTS); };
@@ -447,7 +448,7 @@ function fieldRow(sig, f, depth, anc) {
     console.warn(`wavefw: ${sig.full}: field ${f.name} [${msb}:${lsb}] is not inside the ${sig.width || 1}-bit vector (msb first, lsb 0): left out`);
     return null;
   }
-  const w = msb - lsb + 1, r = { type: 'sig', name: String(f.name), depth, anc, width: w, enum: f.enum, radix: f.radix, path: null, src: f,
+  const w = msb - lsb + 1, r = { type: 'sig', name: String(f.name), depth, anc, width: w, enum: f.enum, radix: f.radix, path: null, src: f, fromTv: !!sig.tv,
     full: sig.full + '.' + f.name, field: [msb, lsb], tr: [], gaps: [] };
   for (const o of sig.tr) {
     const b = bitsOf(o, sig.width), fb = b.slice(b.length - 1 - msb, b.length - lsb);
@@ -634,6 +635,33 @@ function edgeGlyph(s, t) { // ↑ / ↓ / value of the transition of s exactly a
 const isClkRow = r => r.type === 'sig' && r.width === 1 && r.tr && r.tr.length > 4 && /clk|clock/i.test(r.name);
 const RISES = new WeakMap();
 const riseTimes = clk => RISES.get(clk) || (RISES.set(clk, clk.tr.filter(o => o.k === '1').map(o => o.t)), RISES.get(clk));
+// the cycles of a clock (its rising edges ups): the index of cycle 0, the first edge at or after zero (null: the first edge);
+// the cycle at t, the last edge at or before t (negative before cycle 0); the time of cycle n, or null past the ends
+const cycZero = (ups, zero) => (zero == null || !isFinite(zero) ? 0 : lastBefore(ups.length, j => ups[j], zero - timeEps(zero), true) + 1);
+const cycAt = (ups, iz, t) => lastBefore(ups.length, j => ups[j], t + timeEps(t)) - iz;
+// the rising edges the cycles count: a dump's first value 1 ("tv") is its level at the start, not an edge (a wave's p is one)
+const cycUps = clk => ((clk.tv || clk.fromTv) && clk.tr[0] && clk.tr[0].k === '1' ? riseTimes(clk).slice(1) : riseTimes(clk));
+// the clock of the cycles: a path exactly, else a name (gapRefs); none given: a 1-bit *clk* / *clock* with rising edges
+const cycClock = (rows, name) => (name ? rows.find(r => r.type === 'sig' && r.tr && r.full === name) || gapRefs(rows, name)[0] || null :
+  rows.find(r => isClkRow(r) && cycUps(r).length) || rows.find(r => r.type === 'sig' && r.width === 1 && r.tr && /clk|clock/i.test(r.name) &&
+    cycUps(r).length) || null);
+// the ticks and numbers of a cycles band: the edges in [from, to] at x (X), a tick when 3 px from the last one, a number
+// every k-th cycle (1 2 5 10 …) where its text (at x + 3, at least xL + 2) fits after the last one's (its width + 6 px)
+// -> { ticks: [x], labels: [[x, text]] }
+function cycMarks(o, measure) {
+  const ups = o.ups, a = Math.max(0, lastBefore(ups.length, j => ups[j], o.from)), b = lastBefore(ups.length, j => ups[j], o.to), ticks = [], labels = [];
+  if (b < 0) return { ticks, labels };
+  const px = b > a ? (o.X(ups[b]) - o.X(ups[a])) / (b - a) : Infinity;
+  let k = 1; for (let m = 1, j = 0; k * px < 44 && m < 1e15;) { j = (j + 1) % 3; if (!j) m *= 10; k = [1, 2, 5][j] * m; }
+  if (px >= 3) { let last = -Infinity; for (let i = a; i <= b; i++) { const x = o.X(ups[i]); if (x - last >= 3) { ticks.push(x); last = x; } } }
+  let end = -Infinity;
+  for (let i = a + (((o.iz - a) % k) + k) % k; i <= b; i += k) {
+    const x = o.X(ups[i]), t = String(i - o.iz), w = measure(t), tx = Math.max(x + 3, (o.xL || 0) + 2);
+    if (tx >= end && x + 3 < o.xR) { labels.push([x, t]); end = tx + w + 6; }
+  }
+  return { ticks, labels };
+}
+const cycTime = (ups, iz, n) => (Number.isInteger(n) && iz + n >= 0 && iz + n < ups.length ? ups[iz + n] : null);
 // gaps in a figure (settings gaps, gapIdle, gapKeep): where nothing changes in [p, q] for idle or longer (p, q: the changes
 // and the ends a, b of the range, ts their sorted times), the stretch from keep after p to keep before q is left out, min
 // long at least; its ends on the rising edges ups (sorted, if any): the cycle of p and keep more kept, keep before the cycle
@@ -712,5 +740,5 @@ function markNorm(list) {
 function groupNorm(list) {
   const seen = new Set();
   return (Array.isArray(list) ? list : []).filter(g => g && String(g.name ?? '').trim() && !seen.has(String(g.name).trim()) && seen.add(String(g.name).trim()))
-    .map(g => ({ name: String(g.name).trim(), signals: [...new Set(prefixes(g.signals))], color: g.color || null }));
+    .map(g => Object.assign({ name: String(g.name).trim(), signals: [...new Set(prefixes(g.signals))], color: g.color || null }, g.uid ? { uid: g.uid } : {}));
 }
