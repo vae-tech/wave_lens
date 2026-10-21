@@ -85,7 +85,7 @@ button.theme:hover { border-color: var(--accent); color: var(--accent); }
 <header class="top">
   <div class="row1"><div class="eyebrow">Framework demo &amp; reference</div><button type="button" class="theme" id="theme">Theme: auto</button></div>
   <h1>wavefw <span class="mono muted" style="font-weight:400;font-size:0.6em">WaveDrom JSON → interactive waves</span></h1>
-  <p class="sub">A dependency-free renderer for the WaveDrom format with two outputs from one model: the interactive canvas viewer of the PSI5 datasheet (<code>docs/reference/template.html</code>) and a static WaveDrom-style SVG for figures. Waves are written by hand or converted from a simulator dump with <a href="https://github.com/kleverhq/wavepeek">wavepeek</a>. Everything on this page renders from <code>file://</code> with one script and one stylesheet.</p>
+  <p class="sub">A dependency-free renderer for the WaveDrom format with two outputs from one model: the interactive canvas viewer of the PSI5 datasheet (<code>docs/reference/template.html</code>) and a static WaveDrom-style SVG for figures. Waves are written by hand or converted from a simulator dump (VCD or FST) by the tools in <code>tools/</code>. Everything on this page renders from <code>file://</code> with one script and one stylesheet. Step by step, with pictures: the <a href="guides/index.html">guides</a>.</p>
   <div class="facts" id="facts"></div>
 </header>
 
@@ -413,10 +413,10 @@ button.theme:hover { border-color: var(--accent); color: var(--accent); }
 
 <!-- ============================================================ -->
 <h2 id="vcd">6. From a simulator dump</h2>
-<p>The data below comes from <code>examples/demo/demo_tb.sv</code>, a small Manchester transmitter (2 start bits, 8 data bits LSB first, even parity, 100 MHz clock, 8 clocks per bit). Verilator writes the VCD, <code>tools/vcd2wavedrom.py</code> reads it (built-in reader, or wavepeek), and <code>tools/embed.py</code> packs the JSON into <code>docs/demo_waves.js</code>. <code>make demo</code> runs the whole chain.</p>
+<p>The data below comes from <code>examples/demo/demo_tb.sv</code>, a small Manchester transmitter (2 start bits, 8 data bits LSB first, even parity, 100 MHz clock, 8 clocks per bit). Verilator writes the VCD, <code>tools/vcd2wavedrom.py</code> reads it, and <code>tools/embed.py</code> packs the JSON into <code>docs/demo_waves.js</code>. <code>make demo</code> runs the whole chain.</p>
 
 <h3>Exact transitions, interactive</h3>
-<p>Every edge is drawn at its real timestamp (the <code>tv</code> extension). The markers are the results of <code>wavepeek change --on 'posedge start'</code> and <code>'posedge done'</code>, and the viewer turns each marker into a jump button.</p>
+<p>Every edge is drawn at its real timestamp (the <code>tv</code> extension). The markers are the times of <code>posedge start</code> and <code>posedge done</code> (the config's <code>"marker"</code>), and the viewer turns each marker into a jump button.</p>
 <div class="bench"><div data-wave="DEMO_WAVES.exact"></div></div>
 
 <h3>Same dump, one byte as a static figure</h3>
@@ -464,6 +464,9 @@ button.theme:hover { border-color: var(--accent); color: var(--accent); }
 <h4>A viewer: <code>new WaveView(el, model, opts)</code></h4>
 <p><code>opts</code>: <code>title, cursor, markers, jumps, from, to, minSpan, key</code> (the name its bookmarks, paint and bindings are kept under in this browser; default the element's id or <code>data-wave</code>), <code>theme, colors</code>, and any setting (the element layer, see <i>Settings</i>). Methods return the viewer where nothing else is said.</p>
 <div class="tbl"><table id="api-view"><tr><th>Method</th><th>Description</th></tr></table></div>
+<h4>Commands of a viewer: <code>view.run([{op, …}])</code></h4>
+<p>What the buttons, the menus and the lists of a viewer do, by name, for a script, the console, <code>tools/viewedit.py</code> (the same commands on a page's file or a saved <code>.view.json</code>) and an agent through <code>tools/wavemcp.py</code> (<code>view_edit</code>, live in the browser after <code>view_live</code>). <code>run</code> takes one command or a list and returns a Promise of their results in order: <code>{op, …}</code>, or <code>{op, error}</code> for one that could not run (the others still do). Times are model units (ps of timed waves, else cycles) or a text with a unit (<code>"2.5us"</code>); signals a full path, a name, the end of a path (<code>"u_regs.PSEL"</code>) or a <code>*</code> pattern, alone or in a list; a name that matches nothing, or several signals without a pattern, is an error. The table is made from <code>WaveFW.commands()</code>.</p>
+<div class="tbl"><table id="api-cmds"><tr><th>Command</th><th>Arguments (? optional)</th><th>What it does</th></tr></table></div>
 <h4>Events of a viewer (on its element)</h4>
 <div class="tbl"><table id="api-events"><tr><th>Event</th><th>When; <code>detail</code></th></tr></table></div>
 <h4>The model: <code>WaveFW.parse(json | text)</code></h4>
@@ -554,6 +557,7 @@ make demo-fst    # the demo as FST (verilator --trace-fst): FSM states named fro
 make html WAVES=x.vcd SV="rtl/*.sv"                  # VCD: enum labels from typedef enum in the sources
 make smoke       # headless Chromium (playwright): no console errors, interaction checks, screenshots
 make shots       # the README screenshots in docs/img/ (tests/shots.py)
+make guide-shots # the pictures of the guides in docs/guides/img/ (tests/guide_shots.py)
 
 python3 -I tools/vcd2wavedrom.py --waves dump.vcd --scope tb.u_dut --exact \
     --from 896us --to 1155us --signals i_sat_rxd_comp,r_state,o_sat_data \
@@ -587,6 +591,8 @@ const WAVEFW_API = {
   plugin: '<code>plugin(fn)</code>: <code>fn(viewer)</code> for every viewer, now and later (how <code>sva.js</code> adds its panel).',
   svgPlugin: '<code>svgPlugin(fn)</code>: <code>fn(model, settings, opts)</code> returns <code>extraRows</code> functions for every static SVG.',
   views: '<code>views()</code>: the live viewers.',
+  commands: '<code>commands()</code>: the commands of <code>view.run</code>, <code>{name: {args, doc}}</code> (the table below).',
+  live: '<code>live("8742:token" | url | null)</code>: this page\'s viewers driven by an agent (<code>tools/wavemcp.py view_live</code>): commands come as server-sent events from 127.0.0.1, the results go back; a page that carries the link connects by itself. <code>null</code>: off.',
   defaults: 'The built-in settings (the first layer), the plugins\' too.',
   registerDefaults: '<code>registerDefaults({key: value})</code>: a plugin\'s settings with their defaults (<code>bus.js</code>: busDetect, buses; <code>sva.js</code>: svaOpen, svaShow, svaSignals): in every layer like the built-in ones, in <code>defaults</code>. Returns the defaults.',
   rowId: 'A new id for a group row of a plugin.',
@@ -635,7 +641,7 @@ const VIEW_API = {
   help: '<code>help(on?)</code>: the box of the keys and the mouse (<b>?</b> in the bar, key <kbd>?</kbd>).',
   setStyle: '<code>setStyle("auto | wavedrom | questa | square" | null)</code>: the edge style of this viewer (the bar\'s list; kept in this browser; null: the settings\' again).',
   setTheme: '<code>setTheme(name)</code> of this viewer.', setColors: '<code>setColors(map)</code> of this viewer.',
-  state: 'What you did in this viewer as JSON (what <b>Save</b> writes): window, cursor, <code>config</code> (sort, prefixes, fold, highlight, find options), paint, selection, search, bookmarks, arrows and the plugins\' parts.',
+  state: 'What you did in this viewer as JSON (what <b>Save</b> writes): window, cursor, <code>config</code> (sort, prefixes, fold, highlight, find options), paint, selection, search, bookmarks, arrows, your markers and groups (version 3) and the plugins\' parts.',
   setState: '<code>setState(state)</code>: that state back (async); returns the paths these waves do not have.', saveState: '<code>saveState(name?)</code>: downloads it (<code>&lt;title&gt;.view.json</code>).',
   loadState: '<code>loadState(file | text)</code>: <b>Load…</b>: reads and applies one, says the result in the bar.',
   draw: 'Draws now.', invalidate: 'Draws in the next frame (once, however often it is asked).', print: '<code>print(on)</code>: every row on the canvases (what <code>beforeprint</code> does).',
@@ -646,12 +652,20 @@ const VIEW_API = {
   rowAt: '<code>rowAt(element | y)</code>: the row of an element of the names column (an event\'s target) or at a y of the layout.', rowEl: '<code>rowEl(row)</code>: its element in the names column.',
   rowClass: '<code>rowClass(row, cls, on)</code>: a class of a row\'s name, kept when the column is built again.', rowTitle: '<code>rowTitle(row, text | null)</code>: its tooltip.',
   listen: '<code>listen("names | waves | bar | lists", type, fn)</code>: an event listener on that part.',
+  run: '<code>run(command | [commands])</code>: the viewer\'s commands (the table below), one redraw at the end; a Promise of their results.',
+  editKey: 'The name of this viewer in a page\'s edits and the live link: its <code>data-wave</code> name under <code>WAVES</code>, else its id or title.',
+  applyEdits: 'The page\'s edits for this viewer (<code>tools/viewedit.py</code>), applied when it is built: what this browser keeps once per revision, the rest every time.',
+  setMarks: 'Your markers (<code>umarks</code>: <code>{t, label, color}</code>) drawn and kept after a change.', markList: 'Your markers as a state has them.',
+  setGroups: 'Your groups (<code>ugroups</code>: <code>{name, signals, color}</code>) built again and kept after a change.', groupList: 'Your groups as a state has them.',
+  ugRows: 'The rows of your groups at the top of the names: a group row each, its signals as rows that read through to the signal.',
+  toGroup: '<code>toGroup(name, rows)</code>: the rows into your group (made when missing), as the right button\'s menu does.',
 };
 const VIEW_EVENTS = {
   'wavefw:cursor': 'The cursor moved; <code>{t}</code>.', 'wavefw:view': 'The window moved or zoomed; <code>{t0, span}</code>.', 'wavefw:select': 'Another signal is selected; <code>{row}</code>.',
   'wavefw:range': 'The measured range changed; <code>{range: [a, b] | null}</code>.',
   'wavefw:dump': 'A dump was opened in the viewer (Open…, dropped, ⟳; on the new viewer\'s element); <code>{name, shown, total}</code>.',
-  'wavefw:settings': 'The sorting, the prefixes or the settings changed.', 'wavefw:reset': 'Esc (after the viewer reset its search, highlight and selection).',
+  'wavefw:settings': 'The sorting, the prefixes or the settings changed.',
+  'wavefw:edit': '<code>view.run</code> ran commands (a script, the lists, an agent); <code>{ops, results}</code>.', 'wavefw:reset': 'Esc (after the viewer reset its search, highlight and selection).',
   'wavefw:destroy': 'The viewer leaves (<code>destroy()</code>, or its element left the page).', 'wavefw:sva': 'With <code>sva.js</code>: a binding came, went or has new results; <code>detail</code> the binding.',
   'wavefw:sva-select': 'With <code>sva.js</code>: an attempt was selected; <code>{binding, attempt}</code>.',
 };
@@ -668,6 +682,8 @@ const MODEL_API = {
   const order = Object.keys(WaveFW);   // in the order wavefw.js exports them; a key without a line says so
   fill('api-wavefw', Object.fromEntries(order.map(k => [k, WAVEFW_API[k] || '<b>not described yet</b>'])));
   fill('api-view', VIEW_API); fill('api-events', VIEW_EVENTS); fill('api-model', MODEL_API);
+  const cmds = document.getElementById('api-cmds');
+  for (const [k, c] of Object.entries(WaveFW.commands())) cmds.insertAdjacentHTML('beforeend', `<tr data-cmd="${k}"><td class="mono">${k}</td><td class="mono">${c.args}</td><td>${WaveFW.util.esc(c.doc)}</td></tr>`);
 })();
 </script>
 <script>

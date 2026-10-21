@@ -1,0 +1,52 @@
+{
+ "signal": [
+  {
+   "name": "PCLK",
+   "wave": "p................"
+  },
+  {
+   "name": "PSEL",
+   "wave": "01.0.1...0.1.0..."
+  },
+  {
+   "name": "PENABLE",
+   "wave": "0.10..1..0..10..."
+  },
+  {
+   "name": "PWRITE",
+   "wave": "01...0.....1....."
+  },
+  {
+   "name": "PADDR",
+   "wave": "==.........=.....",
+   "data": [
+    "0x00",
+    "0x04",
+    "0x40"
+   ]
+  },
+  {
+   "name": "PWDATA",
+   "wave": "==...=.....=.....",
+   "data": [
+    "0x00000000",
+    "0xCAFE0001",
+    "0x00000000",
+    "0xDEADBEEF"
+   ]
+  },
+  {
+   "name": "PREADY",
+   "wave": "0.10....10..10..."
+  }
+ ],
+ "head": {
+  "text": "APB3 \u00b7 three transfers \u00b7 clock-sampled: 30.0 ns \u2026 200.0 ns"
+ },
+ "foot": {
+  "text": "one cell per PCLK cycle"
+ },
+ "config": {
+  "hscale": 1
+ }
+}

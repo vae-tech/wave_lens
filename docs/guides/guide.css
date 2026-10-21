@@ -1,0 +1,112 @@
+/* docs/guides/guide.css — the look of the guides (docs/guides/*.html): one column, figures, keys, notes; light and dark. */
+:root {
+  --bg: #f7f5f0; --panel: #fffdf8; --fg: #1f2328; --muted: #5f6670; --line: #ddd8cc; --acc: #c2410c; --acc2: #1c6dd0;
+  --code: #efebe2; --note: #e7f0fb; --note-line: #1c6dd0; --warn: #fdf0e1; --warn-line: #c2410c; --shadow: 0 1px 3px rgb(0 0 0 / 0.12);
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #16181c; --panel: #1d2026; --fg: #e3e5e8; --muted: #9aa1ab; --line: #30343c; --acc: #f08c4a; --acc2: #6aa8ff;
+    --code: #23272e; --note: #18273a; --note-line: #4c8fe0; --warn: #33241a; --warn-line: #e07a3a; --shadow: 0 1px 3px rgb(0 0 0 / 0.5);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #16181c; --panel: #1d2026; --fg: #e3e5e8; --muted: #9aa1ab; --line: #30343c; --acc: #f08c4a; --acc2: #6aa8ff;
+  --code: #23272e; --note: #18273a; --note-line: #4c8fe0; --warn: #33241a; --warn-line: #e07a3a; --shadow: 0 1px 3px rgb(0 0 0 / 0.5);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-padding-top: 64px; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 var(--body); }
+a { color: var(--acc2); text-underline-offset: 2px; }
+a:hover { color: var(--acc); }
+
+/* the bar on top: every guide */
+.top { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--line); }
+.top nav { max-width: 1120px; margin: 0 auto; padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline;
+  font-size: 14px; }
+.top nav .home { font: 600 15px var(--mono); color: var(--fg); text-decoration: none; margin-right: 8px; }
+.top nav a { text-decoration: none; color: var(--muted); }
+.top nav a:hover, .top nav a[aria-current] { color: var(--acc); }
+
+/* the column, and the contents at the side on a wide screen */
+.page { max-width: 1120px; margin: 0 auto; padding: 0 16px 80px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 40px; }
+@media (min-width: 1100px) { .page.toc-side { grid-template-columns: minmax(0, 1fr) 220px; } }
+main { min-width: 0; }
+.toc { font-size: 14px; }
+.toc h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0 0 8px; border: 0; padding: 0; }
+.toc ol { list-style: none; margin: 0; padding: 0; }
+.toc li { margin: 3px 0; }
+.toc a { color: var(--muted); text-decoration: none; }
+.toc a:hover { color: var(--acc); }
+@media (min-width: 1100px) {
+  .toc { position: sticky; top: 72px; align-self: start; max-height: calc(100vh - 90px); overflow: auto; padding-top: 40px; order: 2; }
+}
+@media (max-width: 1099px) { .toc { border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; background: var(--panel); margin-top: 24px; }
+  .toc ol { columns: 2 220px; } }
+
+header.hero { padding: 40px 0 8px; }
+header.hero .kicker { font: 600 12px var(--mono); text-transform: uppercase; letter-spacing: 0.1em; color: var(--acc); }
+h1 { font-size: 34px; line-height: 1.2; margin: 6px 0 12px; letter-spacing: -0.01em; }
+.lead { font-size: 18px; color: var(--muted); max-width: 760px; margin: 0; }
+h2 { font-size: 24px; margin: 56px 0 12px; padding-top: 16px; border-top: 1px solid var(--line); }
+h3 { font-size: 18px; margin: 32px 0 8px; }
+h4 { font-size: 15px; margin: 24px 0 6px; }
+p, ul, ol, table, pre, figure, .note { max-width: 860px; }
+li { margin: 4px 0; }
+
+code, kbd, pre { font-family: var(--mono); font-size: 0.88em; }
+code { background: var(--code); padding: 1px 5px; border-radius: 4px; }
+pre { background: var(--code); padding: 12px 14px; border-radius: 8px; overflow-x: auto; line-height: 1.45; border: 1px solid var(--line); }
+pre code { background: none; padding: 0; font-size: 1em; }
+pre .c { color: var(--muted); }
+kbd { display: inline-block; min-width: 1.6em; text-align: center; padding: 0 5px; border: 1px solid var(--line); border-bottom-width: 2px;
+  border-radius: 5px; background: var(--panel); font-size: 0.82em; line-height: 1.6; }
+.ui { font-weight: 600; white-space: nowrap; }   /* a button or a menu item as it reads in the page */
+
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; margin: 12px 0; display: block; overflow-x: auto; }
+th, td { border-bottom: 1px solid var(--line); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 600; }
+td:first-child { white-space: nowrap; }
+
+figure { margin: 20px 0 28px; max-width: 100%; }
+figure img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow);
+  background: var(--panel); }
+figure img.w { cursor: zoom-in; }
+figcaption { font-size: 14px; color: var(--muted); margin-top: 8px; max-width: 860px; }
+figcaption b { color: var(--fg); }
+.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; max-width: 100%; }
+.pair figure { margin: 0; }
+
+.note, .warn { border-left: 3px solid var(--note-line); background: var(--note); padding: 10px 14px; border-radius: 0 8px 8px 0; margin: 16px 0; }
+.warn { border-color: var(--warn-line); background: var(--warn); }
+.note > :first-child, .warn > :first-child { margin-top: 0; } .note > :last-child, .warn > :last-child { margin-bottom: 0; }
+.steps { counter-reset: s; list-style: none; padding-left: 0; }
+.steps > li { counter-increment: s; position: relative; padding-left: 38px; margin: 10px 0; }
+.steps > li::before { content: counter(s); position: absolute; left: 0; top: 1px; width: 26px; height: 26px; border-radius: 50%; background: var(--acc);
+  color: var(--panel); font: 600 13px/26px var(--mono); text-align: center; }
+
+/* the index: a card per guide */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; margin: 24px 0; }
+.card { display: block; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; color: var(--fg);
+  text-decoration: none; box-shadow: var(--shadow); transition: border-color 0.15s; }
+.card:hover { border-color: var(--acc); color: var(--fg); }
+.card img { display: block; width: 100%; height: 170px; object-fit: cover; object-position: left top; border-bottom: 1px solid var(--line); }
+.card div { padding: 12px 16px 16px; }
+.card h3 { margin: 0 0 6px; font-size: 17px; }
+.card p { margin: 0; font-size: 14.5px; color: var(--muted); }
+
+/* a picture opened large (a click on a figure) */
+.zoom { position: fixed; inset: 0; z-index: 10; background: rgb(0 0 0 / 0.8); display: flex; align-items: center; justify-content: center;
+  padding: 16px; cursor: zoom-out; }
+.zoom img { max-width: 100%; max-height: 100%; border-radius: 6px; }
+
+/* live examples (wavefw itself in the guide) */
+.live { border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: var(--panel); margin: 16px 0; max-width: 100%; overflow-x: auto; }
+footer { max-width: 1120px; margin: 0 auto; padding: 24px 16px 40px; color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); }
+@media (max-width: 640px) { h1 { font-size: 28px; } h2 { font-size: 21px; } body { font-size: 15.5px; } }
+@media print { .top, .toc { display: none; } body { background: #fff; color: #000; } }

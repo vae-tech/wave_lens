@@ -27,7 +27,7 @@ when the user binds interactively, and produce a results JSON that the viewer dr
 
 ## Spike results (October 2026, this machine: WSL2, 16 CPUs)
 
-**Toolchain.** rustc / cargo 1.98.1 (stable, already installed for wavepeek) plus one command:
+**Toolchain.** rustc / cargo 1.98.1 (stable) plus one command:
 `rustup target add wasm32-unknown-unknown`. No wasm-bindgen-cli, no wasm-pack, no wasm-opt. Crates: `serde` 1,
 `serde_json` 1 (core), `wellen` 0.25.7 (CLI only). Cargo's target directory is `$(BUILD)/sva-target` (the repository sits
 on a slow Windows mount). Cold builds: native CLI 16 s (wellen and its dependencies), WASM 5.6 s; incremental about 1 s.
@@ -73,7 +73,7 @@ just before each clock edge, as in the preponed region; stage-5 numbers in docs/
   `test_stream_video.fst`. A VCD has none (as with our Python reader); stage 6 can take names from the page's `enum`.
 - `$rootio`: a normal top-level scope named `$rootio`, like in our reader (mkconfig hides it by default).
 - Unpacked arrays: one scope per array with the elements as variables `[0]`, `[1]` — the path `mem.[0]`, the same
-  spelling as wavepeek and `dumpscan.py`.
+  spelling as `dumpscan.py`.
 - Bit-blasted vectors: Verilator writes whole vectors, so not exercised; other simulators' dumps are still unchecked.
 - Timescale and time table are exposed; times are converted to ps for the report.
 

@@ -1,10 +1,10 @@
-"""common.py — what the tools share: time units, * / ? patterns, the wavepeek and sva command-line options, the settings
+"""common.py — what the tools share: time units, * / ? patterns, the sva command-line option, the settings
 keys of wavefw/wavefw.config.js, and WaveError.
 
 A library function raises WaveError with a one-line message; each tool's main() catches it once (run_main) and exits
 with that message, so a mistake in a config or a missing file is one line, not a traceback. Python >= 3.8.
 """
-import os, re, shutil, sys
+import os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -32,17 +32,6 @@ def run_main(main, tool):
 def glob_re(pattern):
     """A full-path pattern with * (any run) and ? (one character) -> compiled regex that must match the whole path."""
     return re.compile(''.join('.*' if c == '*' else '.' if c == '?' else re.escape(c) for c in pattern) + r'\Z')
-
-
-def wavepeek(explicit=None):
-    """The wavepeek executable: the given one, else on PATH, else ~/.local/bin/wavepeek (may not exist)."""
-    return os.path.expanduser(explicit or shutil.which('wavepeek') or '~/.local/bin/wavepeek')
-
-
-def add_reader_args(ap, default=None):
-    ap.add_argument('--reader', choices=('builtin', 'wavepeek'), default=default, help='how the dump is read: builtin (default: one pass in '
-                    'Python; an FST through fst2vcd) or wavepeek (any --marker expression)')
-    ap.add_argument('--wavepeek', help='wavepeek executable (default: on PATH or ~/.local/bin)')
 
 
 def add_sva_bin_arg(ap):

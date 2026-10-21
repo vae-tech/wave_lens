@@ -5,6 +5,20 @@ lives on a branch. The version is in `VERSION`, in `wavefw.js` (`WaveFW.version`
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.12 — 21 October 2026
+
+The viewer's commands: what its buttons do, a script, a file or an AI agent does by name — live in an open page.
+
+- `view.run([{op, …}])` (`wavefw/src/edit.js`): bookmarks with their texts, arrows, markers, your groups, highlight,
+  paint, selection, hidden and folded rows, radix, analog, cursors, window, range, order, style, find, gaps, edges;
+  read: state, rows, a picture. Names by path, name, path tail or `*`; a bad command says why, the rest run.
+- Your markers (a dashed line with a label) and your groups (a folder of signals at the top of the names) in the menu,
+  the lists under the waves and the saved state (version 3).
+- `tools/viewedit.py`: the same commands on a page's edits (a revision the viewer applies when it opens) or a
+  `.view.json`; the smoke test holds the two to the same state.
+- `tools/wavemcp.py`: `view_edit`, `view_get` (a PNG of the screen too), `view_live` — a page connected on 127.0.0.1
+  shows the agent's edits at once and the person's go back to the agent; a closed page: its file.
+
 ## 0.11 — 21 October 2026
 
 An MCP server: the tools of wavefw for an AI agent.

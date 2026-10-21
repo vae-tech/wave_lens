@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The viewer · wavefw guides</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="guide.css">
+</head>
+<body>
+<header class="top"><nav>
+  <a class="home" href="index.html">wavefw guides</a>
+  <a href="pages.html">Dump → page</a> <a href="viewer.html" aria-current="page">Viewer</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
+  <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
+</nav></header>
+<div class="page toc-side">
+<main>
+<header class="hero"><div class="kicker">Guide</div><h1>The viewer in the browser</h1>
+<p class="lead">Every interactive waveform of wavefw — a page built from a dump, a WaveDrom block in your own page, a VCD dropped on
+  <code>wavefw/viewer.html</code> — is the same viewer: a bar of tools, a names column, the waves on a canvas, the bookmark lists under
+  them. This guide goes through it part by part: how to move in time, put cursors, measure, find and highlight signals, mark events,
+  and take pictures out of it. Navigation follows Questa's wave window; the keys of the lists and the text follow vim.</p></header>
+
+<h2 id="open">Opening waves</h2>
+<p>There are three ways to get waves into a viewer:</p>
+<ul>
+  <li><b>A page built from a dump.</b> <code>make html WAVES=work/my.vcd</code> (or an FST) writes <code>work/my.config.json</code> and
+    <code>work/my.html</code>: one self-contained file with every view of the config, each a viewer. How the page and its config are made is
+    the subject of <a href="pages.html">Dump → page</a>.</li>
+  <li><b>A dump read in the page.</b> Open <code>wavefw/viewer.html</code> from the repository (<code>file://</code>, nothing to build) and drop a
+    VCD on it, or press <span class="ui">Open…</span> in the <b>dump</b> group of its bar. Every viewer has that group, a built page too, so
+    you can load another dump into any of them.</li>
+  <li><b>WaveDrom JSON in your own page.</b> A <code>&lt;script type="application/wavedrom"&gt;</code> block becomes a viewer; see
+    <a href="wavedrom.html">WaveDrom</a>.</li>
+</ul>
+<figure><img src="img/viewer-open-empty.png" alt="wavefw/viewer.html before a dump: an empty viewer with a 'drop a VCD here' row" loading="lazy">
+  <figcaption><b>wavefw/viewer.html, empty.</b> One viewer and a line of help; drop a VCD anywhere on it or use <span class="ui">Open…</span>
+  in the last line of the bar.</figcaption></figure>
+<p>The VCD is read in the browser: its signals grouped by scope (struct, union and interface scopes marked), with their exact
+  transitions. A large dump is cut to the <code>dumpBudget</code> setting (3 000 000 value changes by default): the scope levels nearest the
+  top are kept first, and the toast in the title line says how many signals came in. An FST is binary and is not read in the page: convert
+  it with <code>sva vcd x.fst --out x.vcd</code> (the CLI in <code>bin/</code>, or GTKWave's <code>fst2vcd x.fst &gt; x.vcd</code>), or build a page
+  with <code>make html WAVES=x.fst</code>.</p>
+<figure><img src="img/viewer-open-vcd.png" alt="The APB example's VCD opened in viewer.html: the apb_tb scope as a group, ⟳ next to Open…"
+  loading="lazy">
+  <figcaption><b>A VCD read in the page.</b> The scope <code>apb_tb</code> is a foldable group; <span class="ui">⟳</span> appeared next to
+  <span class="ui">Open…</span>.</figcaption></figure>
+<p><span class="ui">⟳</span> reads the same file again after a new simulation and keeps the view: the window, the cursor, the folding, the
+  highlight and the bookmarks. In Chrome and Edge the file is picked through the File System Access API, so ⟳ reads what is on the disk
+  now; other browsers ask for the file again. A saved viewer state (<code>.view.json</code>, see <a href="#state">Save and Load</a>)
+  dropped on a viewer is loaded instead of read as a dump.</p>
+
+<h2 id="anatomy">Anatomy of a viewer</h2>
+<figure><img src="img/viewer-overview.png" loading="lazy"
+  alt="The APB example's viewer: bar, names, values, waves with bookmarks and arrows, bookmark and arrow lists, hint line">
+  <figcaption><b>The APB example, top to bottom.</b> The title line, the bar's tool lines, the names column with the values at the
+  cursor, the waves with numbered bookmarks and labelled arrows, the bookmark and arrow lists, the line of hints.</figcaption></figure>
+<ol>
+  <li><b>The title line</b>: the view's title, short messages (toasts: what a click did, a transfer selected, a dump read), at the right the
+    cursor and the width of the view (<code>cursor 5 ns · view 200 ns</code>; with a range or a second cursor also its Δ) and the
+    <span class="ui">?</span> button.</li>
+  <li><b>The bar</b>: one line per kind of work, the groups described <a href="#bar">below</a>.</li>
+  <li><b>The names column</b>: one row per signal, groups (modules, protocol channels, assertion groups, bus ports) as foldable header
+    rows. The ○ mark in front of a name highlights it. Hover a name for its full path.</li>
+  <li><b>The value column</b> next to the names: each signal's value at the cursor, in its radix (a long value cut to half the column, its
+    tooltip has all of it).</li>
+  <li><b>The waves</b>: the time axis on top, the cursor as a solid orange line, markers dashed, bookmarks as numbered circles and arrows
+    between them. The pointer over a signal shows its value there, the change into it and the next one.</li>
+  <li><b>The lists</b> of bookmarks and arrows, when the view has some (<a href="#bookmarks">Bookmarks and arrows</a>).</li>
+  <li><b>The hint line</b>: the mouse and the keys in one paragraph (<code>"hint": false</code> leaves it out).</li>
+</ol>
+<div class="note"><p>The keys work once the waves have the focus: click the waves or a name first. With ctrl, alt or ⌘ held the keys stay
+  the browser's (ctrl+S saves the page, it does not sort), except <kbd>ctrl+C</kbd> and <kbd>ctrl+F</kbd>. A two-key sequence
+  (<kbd>gg</kbd>, <kbd>zM</kbd>, <kbd>yy</kbd>, <kbd>]m</kbd> …) is two keys within a second.</p></div>
+
+<h2 id="bar">The bar, group by group</h2>
+<figure><img src="img/viewer-bar.png" alt="The bar: cursor, view, edges; find; expression; list, style, state, dump, assertions" loading="lazy">
+  <figcaption><b>The bar of the APB example.</b> Time on the first line, find on the second, the expression of signals on the third, the
+  rows and the files on the last.</figcaption></figure>
+<table>
+  <tr><th>Group</th><th>What it does</th></tr>
+  <tr><td>cursor</td><td>A time and its unit, <span class="ui">Set</span> puts the cursor there; a span and its unit,
+    <span class="ui">Show</span> makes a window that wide around the cursor (<a href="#cursor">The cursor</a>).</td></tr>
+  <tr><td>view</td><td><span class="ui">−</span> <span class="ui">+</span> zoom out / in, <span class="ui">Fit</span> shows everything.</td></tr>
+  <tr><td>edges</td><td>◀ and ▶ step to the previous / next edge of the selected signal, of the kind picked between them;
+    <span class="ui">+ Mark</span> puts a bookmark at the cursor (<a href="#edges">Edges</a>).</td></tr>
+  <tr><td>go to</td><td>Jump buttons: the view's markers (when there are at most six) and, with assertions, their failures. Only when there
+    is something to jump to (the exact APB view has <span class="ui">→ done 1</span>, <span class="ui">→ error</span> …).</td></tr>
+  <tr><td>find</td><td>The find field, ‹ ›, <span class="ui">Aa</span> <span class="ui">Full</span> <span class="ui">.*</span>,
+    <span class="ui">Highlight</span>, <span class="ui">Open</span>, the colour and <span class="ui">Paint</span>,
+    <span class="ui">Copy</span> (<a href="#find">Find</a>).</td></tr>
+  <tr><td>expression</td><td>The ƒ field: an expression of the signals (<code>PSEL &amp;&amp; !PREADY</code>), ◀ ▶ to the times it becomes
+    true, <span class="ui">+ Row</span> / <span class="ui">− Row</span>. It belongs to the assertions: <a href="sva.html">Assertions</a>.</td></tr>
+  <tr><td>list</td><td><span class="ui">Sort</span> and the ignored prefixes (<a href="#sort">Sorting</a>),
+    <span class="ui">Expand</span> / <span class="ui">Collapse</span> every module, <span class="ui">Highlight: N ✕</span> and
+    <span class="ui">Hidden: N ✕</span> when there are such rows.</td></tr>
+  <tr><td>style</td><td>The edges: <code>auto</code>, slanted (WaveDrom), vertical (a simulator's), square; kept in this browser for this
+    viewer.</td></tr>
+  <tr><td>state</td><td><span class="ui">Save</span> and <span class="ui">Load…</span> what you did in the viewer
+    (<a href="#state">Save and Load</a>).</td></tr>
+  <tr><td>dump</td><td><span class="ui">Open…</span> a VCD, <span class="ui">⟳</span> read it again (<a href="#open">Opening waves</a>).</td></tr>
+  <tr><td>assertions</td><td><span class="ui">Load file…</span> reads <code>.sv</code> / <code>.sva</code> files; see
+    <a href="sva.html">Assertions</a>.</td></tr>
+</table>
+<h3 id="tips">Tooltips and the keys box</h3>
+<p>Hover any button, field or list of the bar for what it does and its keys; the tooltip shows after 350 ms (in the right button's menu
+  after 2 s, the <code>menuTipDelay</code> setting, so that it does not get in the way while you read the menu).</p>
+<figure><img src="img/viewer-tip.png" alt="The tooltip of the ▶ button: Next edge of the selected signal, Tab, ]e" loading="lazy">
+  <figcaption><b>A tooltip.</b> ▶ in the edges group: what it does and its keys, <kbd>Tab</kbd> and <kbd>]e</kbd>.</figcaption></figure>
+<p><span class="ui">?</span> at the right of the title line (key <kbd>?</kbd>) opens the box of every key and mouse action, the plugins'
+  too (bus transactions, assertions). <kbd>Esc</kbd>, <kbd>?</kbd> or ✕ close it.</p>
+<figure><img src="img/viewer-help.png" alt="The keys and mouse box: zoom and move, cursor and edges, signals, find, measure and mark, help" loading="lazy">
+  <figcaption><b>The keys box.</b> Grouped by what they do: zoom and move, cursor and edges, signals, find, measure and mark.</figcaption></figure>
+
+<h2 id="navigate">Moving in time</h2>
+<p>The wheel scrolls the rows, as in Questa; zooming needs ctrl. Set <code>"wheel": "zoom"</code> in the settings if you want the plain
+  wheel to zoom.</p>
+<table>
+  <tr><th>Do</th><th>Mouse</th><th>Keys</th></tr>
+  <tr><td>zoom in / out</td><td><kbd>ctrl+wheel</kbd> or a pinch, at the pointer (a notch ×1.22)</td><td><kbd>i</kbd> <kbd>+</kbd> /
+    <kbd>o</kbd> <kbd>-</kbd>, at the middle</td></tr>
+  <tr><td>zoom into a range</td><td><kbd>shift+drag</kbd> or a middle-button drag over it</td><td></td></tr>
+  <tr><td>show everything</td><td><span class="ui">Fit</span></td><td><kbd>f</kbd></td></tr>
+  <tr><td>the window before the last zoom</td><td></td><td><kbd>l</kbd></td></tr>
+  <tr><td>zoom in on the cursor</td><td></td><td><kbd>c</kbd> (half the span, the cursor in the middle)</td></tr>
+  <tr><td>pan</td><td><kbd>shift+wheel</kbd>, a sideways swipe, a drag</td><td><kbd>←</kbd> <kbd>→</kbd> (a fifth of the view)</td></tr>
+  <tr><td>the start / end of the dump</td><td></td><td><kbd>Home</kbd> / <kbd>End</kbd></td></tr>
+  <tr><td>scroll the rows</td><td>the wheel</td><td><kbd>PgUp</kbd> <kbd>PgDn</kbd></td></tr>
+</table>
+<p>With many rows, <code>"maxHeight": "80vh"</code> makes them scroll inside the viewer; the canvas only covers the rows in view, so
+  any number of rows scrolls smoothly.</p>
+
+<h2 id="cursor">The cursor</h2>
+<p>A click on the waves puts the cursor there and selects the signal under the pointer. When an edge of that signal is within 8 px of the
+  click (<code>cursorSnap</code>), the cursor lands exactly on the edge; else on a round time of about a pixel at the zoom you have.
+  <kbd>alt+click</kbd> never snaps. The cursor reads exactly at any zoom (<code>cursor 1.234567 µs</code>), and the value column shows
+  every signal's value there. <kbd>shift+←</kbd> / <kbd>shift+→</kbd> move the cursor a hundredth of the view.</p>
+<p>The <b>cursor</b> group places it by number: type a time (<code>1.2us</code>: a unit typed wins over the unit list, or a number in the
+  listed unit) and press <span class="ui">Set</span> or <kbd>Enter</kbd>. The span field and <span class="ui">Show</span> give a window that
+  wide centred on the cursor. A cycle diagram (clock-sampled without time) counts in cycles.</p>
+<figure><img src="../img/cursor.png" alt="The demo's exact view with the cursor at 1.2 µs and a 100 ns window around it" loading="lazy">
+  <figcaption><b>The cursor fields.</b> Cursor set to 1.2 µs, span 100 ns, <span class="ui">Show</span>: a 100 ns window around it.</figcaption></figure>
+<h3 id="cursor2">A second cursor</h3>
+<p><kbd>shift+click</kbd> on the waves (or <span class="ui">Second cursor here</span> in the right button's menu) puts a dashed second
+  cursor, snapped to an edge like the first. The axis and the title line then show the distance to the cursor in time, its frequency, and
+  in cycles of a clock: the selected signal's when it is a clock, else the nearest <code>*clk*</code>. <kbd>x</kbd> swaps the two
+  cursors; <kbd>Esc</kbd> clears the second one.</p>
+<figure><img src="img/viewer-cursors.png" alt="Cursor at 35 ns, second cursor at 115 ns: Δ 80.00 ns / 12.5 MHz · 8 PCLK on the axis" loading="lazy">
+  <figcaption><b>Two cursors.</b> PCLK selected, the cursor at 35 ns, the second at 115 ns: <code>Δ 80.00 ns / 12.5 MHz · 8 PCLK</code>
+  on the axis and in the title line.</figcaption></figure>
+
+<h2 id="edges">Edges and values</h2>
+<p>Select a signal (click its name or its row; <kbd>↑</kbd> <kbd>↓</kbd> or <kbd>j</kbd> <kbd>k</kbd> select the previous / next one,
+  <kbd>gg</kbd> / <kbd>G</kbd> the first / last). Then step through its edges, as in Questa:</p>
+<ul>
+  <li><kbd>Tab</kbd> / <kbd>shift+Tab</kbd>, ▶ / ◀, or <kbd>]e</kbd> / <kbd>[e</kbd>: the cursor to its next / previous edge, the view
+    follows. With no signal selected, ◀ ▶ take the edges of every shown signal (and <kbd>Tab</kbd> moves the focus on, as usual).</li>
+  <li>The list between ◀ and ▶ picks the kind (<kbd>e</kbd> cycles it): <b>↕ edge</b> (any change; every value change on a bus),
+    <b>↑ rise</b>, <b>↓ fall</b>, <b>= value</b>, <b>✕ X / Z</b>.</li>
+  <li><b>= value</b> opens a field: <code>0x40</code>, <code>'h40</code>, <code>8'd64</code>, <code>64</code>, <code>-3</code>,
+    <code>'b101</code>, or a text such as an enum label (<code>ACCESS</code>). <kbd>Enter</kbd> / <kbd>shift+Enter</kbd> (or ▶ ◀) go to the
+    next / previous time the selected signal becomes that value (none selected: any shown signal).</li>
+  <li><b>X / Z</b> finds the next / previous x or z of the selected signal (a bus with x or z bits too) or of any shown one: the first X
+    after reset, from the reset's edge.</li>
+</ul>
+<figure><img src="img/viewer-edges.png" alt="The bar with the edge kind = value and 0x40 typed in its field" loading="lazy">
+  <figcaption><b>Edge kind = value.</b> PADDR selected, <code>0x40</code> in the field: ▶ goes to the next time PADDR becomes 0x40.</figcaption></figure>
+
+<h2 id="measure">Measuring a range</h2>
+<p><kbd>ctrl+drag</kbd> on the waves measures: the range's ends snap to the edges of the signal under the pointer (hold alt: they do not),
+  the range is shaded, and its Δ shows on the axis and in the title line, with what the signal did in it:</p>
+<ul>
+  <li>a bit: its rising edges and the frequency of a period that long (<code>Δ 20 ns / 50 MHz · 2 ↑ PCLK</code>);</li>
+  <li>a bus: its changes and the number of values it took (<code>Δ 80 ns / 12.5 MHz · 7 changes of PADDR (4 values)</code>).</li>
+</ul>
+<p>The signal is the one the range was measured on, else the selected one. <kbd>ctrl+click</kbd> or <kbd>Esc</kbd> clears it.</p>
+<figure><img src="img/viewer-range.png" alt="A measured range from 45 to 105 ns on PADDR, Δ 60 ns / 16.67 MHz on the axis" loading="lazy">
+  <figcaption><b>A measured range.</b> From 45 to 105 ns on PADDR: shaded, <code>Δ 60 ns / 16.67 MHz</code> on the axis.</figcaption></figure>
+
+<h2 id="menu">The right button's menu</h2>
+<p>The right button does what ctrl+drag does — a drag measures a range, a click takes none — and then opens a menu for the range, the
+  picture and the row under the pointer. <kbd>Esc</kbd>, a click elsewhere or a choice closes it; <code>"contextMenu": false</code> leaves
+  the right button to the browser.</p>
+<figure><img src="img/viewer-menu.png" loading="lazy"
+  alt="The right button's menu over PADDR with a range: range items, picture items, Gaps, PADDR's items, module items">
+  <figcaption><b>The menu on PADDR with a range.</b> The range's Δ on top, then the picture, the gaps submenu, the signal, the modules,
+  and <span class="ui">Clear the range</span>.</figcaption></figure>
+<table>
+  <tr><th>Item</th><th>What it does</th></tr>
+  <tr><td colspan="2"><b>The range</b> (when there is one)</td></tr>
+  <tr><td>Zoom to the range</td><td>the window becomes the range (<kbd>shift+drag</kbd> does it directly)</td></tr>
+  <tr><td>Bookmarks at its ends</td><td>two bookmarks and a ↔ arrow labelled with the Δ</td></tr>
+  <tr><td>Copy Δ</td><td>the length of the range to the clipboard</td></tr>
+  <tr><td colspan="2"><b>The picture</b> — the range (else the window) of the rows: a selected run, else the highlighted rows, else the
+    ones on the screen</td></tr>
+  <tr><td>Copy image</td><td>a PNG to the clipboard</td></tr>
+  <tr><td>Save image as PNG / SVG</td><td>a file named after the view's title. Drawn as the viewer shows the waves (folding, colours,
+    bookmarks, cursor) with the names and the axis, the page's colours written in, so the SVG opens anywhere</td></tr>
+  <tr><td>Save as WaveDrom / Copy WaveDrom</td><td>the same signals over the range as WaveJSON (<code>&lt;title&gt;.wavedrom.json</code>):
+    one cell per cycle of their clock, buses as <code>=</code> with their values in the radix shown, a group per module; see
+    <a href="wavedrom.html">WaveDrom</a></td></tr>
+  <tr><td>Gaps ▸</td><td>a submenu: the picture and WaveDrom leave out the idle stretches of a long range. The whole story with pictures
+    is in <a href="gaps.html">Gaps</a></td></tr>
+  <tr><td colspan="2"><b>The row under the pointer</b></td></tr>
+  <tr><td>Colour</td><td>a colour picker: the trace, the bus outline and the name; <span class="ui">Its own colour</span> takes the paint off</td></tr>
+  <tr><td>Radix</td><td>a bus with the dump's values: the page's, <code>auto hex dec signed bin oct ascii float</code>, fixed q (unsigned) and
+    fixed sq (signed) with a field for the fraction bits</td></tr>
+  <tr><td>Analog (step plot)</td><td>the bus as a step plot three rows high, between its smallest and largest value in its radix (signed,
+    float, fixed); <span class="ui">As a bus</span> turns it back</td></tr>
+  <tr><td>Highlight</td><td>as ctrl+click (<a href="#highlight">Highlight</a>)</td></tr>
+  <tr><td>Hide</td><td>leaves the row out; <span class="ui">Hidden: N ✕</span> in the bar, or <span class="ui">Show the hidden</span> in this
+    menu, brings it back</td></tr>
+  <tr><td>Fold its module</td><td>on a signal; on a module row: <span class="ui">Fold this module</span> / <span class="ui">Open this module</span>
+    (and Highlight, Hide it all)</td></tr>
+  <tr><td>Bookmark here</td><td>a bookmark on this signal at the time clicked</td></tr>
+  <tr><td>Second cursor here</td><td>as shift+click; <span class="ui">Clear the second cursor</span> when there is one</td></tr>
+  <tr><td>Copy the path</td><td>the full hierarchical path</td></tr>
+  <tr><td colspan="2"><b>Every row</b></td></tr>
+  <tr><td>Fold / Open every module</td><td><kbd>zM</kbd> / <kbd>zR</kbd></td></tr>
+  <tr><td>Show the hidden (N)</td><td>every hidden row back</td></tr>
+  <tr><td>Clear the range</td><td><kbd>Esc</kbd></td></tr>
+</table>
+<p>On a highlighted row, the colour, the radix and Hide go to every highlighted row; on a row of a selected run, to every selected one.
+  The radix, the paint and the hidden rows are kept in this browser and in a saved state.</p>
+<div class="pair">
+  <figure><img src="img/viewer-radix.png" alt="The exact APB view with PWDATA in dec, PRDATA in bin and PADDR in dec" loading="lazy">
+    <figcaption><b>Radix per signal.</b> The exact view: PADDR and PWDATA decimal, PRDATA binary (cut to the column; the tooltip has all
+    of it).</figcaption></figure>
+  <figure><img src="img/viewer-analog.png" alt="PADDR and PWDATA drawn as analog step plots three rows high" loading="lazy">
+    <figcaption><b>Analog.</b> PADDR and PWDATA as step plots, their smallest and largest values at the side.</figcaption></figure>
+</div>
+<div class="note"><p>A picture or a WaveDrom file is what the viewer shows: fold a module, hide rows, highlight the few you want or select a
+  run, measure the range — then save. The static SVG of a page draws the same way.</p></div>
+
+<h2 id="select">Selecting and highlighting rows</h2>
+<h3 id="run">A run of rows</h3>
+<p><kbd>shift+click</kbd> a name: every signal from the last one clicked to it is selected (tinted, nothing dimmed, the tint inside bus
+  values too). <kbd>alt+drag</kbd> on the waves draws a box: its time becomes the range, the signals it touches are selected, and the menu
+  opens. The menu's colour, radix and Hide then apply to the whole run, and the picture and WaveDrom take it.</p>
+<figure><img src="img/viewer-run.png" alt="PSEL, PENABLE and PWRITE selected as a run" loading="lazy">
+  <figcaption><b>A selected run.</b> PSEL to PWRITE, shift+click on the names.</figcaption></figure>
+<h3 id="highlight">Highlight</h3>
+<p>The ○ mark in front of a name, or <kbd>ctrl+click</kbd> on it, puts that signal — or a whole instance, on a module row — in front: the mark
+  fills, the rest is dimmed (<code>dim</code>, 0.3) but stays readable. <kbd>ctrl+shift+click</kbd> highlights every row from the last one to
+  it. Several instances at once take different colours. <span class="ui">Highlight: N ✕</span> in the bar or <kbd>Esc</kbd> clears it;
+  <code>"highlight": ["tb.dut.u_tx"]</code> in the config starts a page that way.</p>
+<figure><img src="img/viewer-highlight-rows.png" alt="PADDR, PWDATA and PRDATA highlighted, the rest dimmed, Highlight: 3 ✕ in the bar" loading="lazy">
+  <figcaption><b>Three signals highlighted.</b> The marks filled, the rest dimmed, <span class="ui">Highlight: 3 ✕</span> in the list
+  group.</figcaption></figure>
+<figure><img src="img/viewer-highlight.png" alt="The AXI-Lite generated page with u_master and u_slave highlighted" loading="lazy">
+  <figcaption><b>Two instances highlighted.</b> The generated AXI-Lite page: <code>u_master</code> and <code>u_slave</code> in front,
+  the testbench's own signals dimmed.</figcaption></figure>
+
+<h2 id="find">Find</h2>
+<p>The find field (<kbd>/</kbd> or <kbd>ctrl+F</kbd>) matches the typed letters <b>in order</b> anywhere in a name, as fzf does:
+  <code>awvd</code> finds <code>AWVALID</code>. A word with a <code>.</code> runs over the full path (<code>dev.fifo</code>); words
+  separated by spaces must all match. Matched letters are underlined and the count shows next to the field.</p>
+<ol class="steps">
+  <li>Type the query; <kbd>Enter</kbd>, › or <kbd>n</kbd> go to the next match, <kbd>shift+Enter</kbd>, ‹ or <kbd>N</kbd> to the previous
+    one, each scrolled to the middle of the waves.</li>
+  <li><span class="ui">Highlight</span> (on by default) dims the rows without a match; <span class="ui">Open</span> (on by default) folds
+    every module without one.</li>
+  <li><span class="ui">Paint</span> colours the found signals (and the highlighted ones) in the colour next to it — kept in this browser;
+    <span class="ui">Unpaint</span> takes it off. <span class="ui">Copy</span> copies the found rows' full paths, one per line.</li>
+  <li><kbd>Esc</kbd> ends the search; the folding from before it comes back, with the way to the match you stepped to kept open.</li>
+</ol>
+<figure><img src="img/viewer-find.png" alt="Fuzzy find 'awvd': AWVALID underlined, the rest dimmed, modules without a match folded" loading="lazy">
+  <figcaption><b>Fuzzy find.</b> <code>awvd</code> on the generated AXI-Lite page: 3 found, the letters underlined in each
+  <code>AWVALID</code>, the rest dimmed.</figcaption></figure>
+<p>Three toggles change how a word matches, as in grep or VS Code:</p>
+<table>
+  <tr><th>Toggle</th><th>Key in the field</th><th>Meaning</th></tr>
+  <tr><td><span class="ui">Aa</span></td><td><kbd>alt+C</kbd></td><td>the case matters</td></tr>
+  <tr><td><span class="ui">Full</span></td><td><kbd>alt+W</kbd></td><td>a word is the whole name (<code>PSEL</code> finds <code>PSEL</code>,
+    not <code>PSELx</code>; <code>u_slave.ready</code>: the end of a full path)</td></tr>
+  <tr><td><span class="ui">.*</span></td><td><kbd>alt+R</kbd></td><td>a regular expression (JavaScript, as <code>grep -E</code>;
+    <code>\&lt;ready\&gt;</code> as in vim) tried on the name, the dump's leaf name and the full path; a bad one says so in the count</td></tr>
+</table>
+<figure><img src="img/viewer-find-regex.png" alt="Regular expression ^[aw].*valid$: 15 found" loading="lazy">
+  <figcaption><b>A regular expression.</b> <code>^[aw].*valid$</code>, case ignored: AWVALID, WVALID, ARVALID match by name; BVALID and
+  RVALID match too, by their full path <code>axi_lite_tb.BVALID</code>.</figcaption></figure>
+<figure><img src="img/viewer-paint.png" alt="The found signals painted orange" loading="lazy">
+  <figcaption><b>Paint.</b> The same 15 found signals painted orange, the search ended: the colour stays.</figcaption></figure>
+<p><kbd>*</kbd> / <kbd>#</kbd> search for the selected signal's name and go to its next / previous match (vim's word under the cursor).
+  When the bar has scrolled out of sight, <kbd>/</kbd> floats the find group over the waves; ✕ or <kbd>Esc</kbd> puts it back. The starting
+  state of the toggles comes from the settings <code>findHighlight</code>, <code>findOpen</code>, <code>findCase</code>,
+  <code>findWord</code>, <code>findRegex</code>.</p>
+
+<h2 id="hierarchy">Hierarchy and folding</h2>
+<p>In a page made from a whole dump (<code>"hierarchy": true</code>, what <code>mkconfig.py</code> writes) every scope is a group: module rows
+  are bold on a darker band, and neighbouring modules alternate between two backgrounds (<code>moduleShading</code>), so you see where one
+  instance ends. A click on a module row folds or opens it; <span class="ui">Expand</span> / <span class="ui">Collapse</span> in the list group
+  open or fold all of them.</p>
+<table>
+  <tr><th>Keys</th><th>Fold</th></tr>
+  <tr><td><kbd>zM</kbd> / <kbd>zR</kbd></td><td>fold / open every module</td></tr>
+  <tr><td><kbd>zc</kbd> / <kbd>zo</kbd> / <kbd>za</kbd></td><td>fold / open / toggle the module of the selected signal</td></tr>
+</table>
+<figure><img src="img/viewer-hierarchy.png" alt="The generated AXI-Lite page: axi_lite_tb open, u_master folded, u_slave open" loading="lazy">
+  <figcaption><b>Hierarchy.</b> The generated AXI-Lite page: the testbench and <code>u_slave</code> open, <code>u_master</code> folded to its
+  one row, the bus port <code>⇄ AXI4-Lite</code> among the testbench's rows.</figcaption></figure>
+<p>The settings <code>fold</code> (groups folded at start: <code>true</code>, a depth, or paths), <code>groupOrder</code> (signals first,
+  sub-modules first, or the file's order) and <code>groupColors</code> (one colour per module or channel) shape this further; see
+  <a href="pages.html">Dump → page</a>.</p>
+
+<h2 id="sort">Sorting</h2>
+<p><span class="ui">Sort</span> (<kbd>s</kbd>) cycles off → A→Z → Z→A. The prefixes in the field next to it (<code>i_,o_</code>) are skipped
+  when names are compared and drawn dimmed, so <code>i_data</code> sorts under <code>d</code>. Groups move as a block and are sorted inside.
+  The settings: <code>sort</code>, <code>sortIgnore</code>, <code>sortButton</code>.</p>
+<figure><img src="img/viewer-sort.png" alt="Sort A→Z with i_ and o_ ignored: clk, i_data, o_data, o_ready, rst_n, i_valid" loading="lazy">
+  <figcaption><b>Sort A→Z, i_ and o_ ignored.</b> clk, (i_)data, (o_)data, (o_)ready, rst_n, (i_)valid.</figcaption></figure>
+
+<h2 id="struct">Packed structs</h2>
+<p>A packed struct is one row <code>{}</code> with its whole value and a row per field under it. It comes from an FST written by Verilator
+  with <code>--trace-structs</code> (a struct scope of the dump), or from <code>mkconfig.py --sv</code>, which reads
+  <code>typedef struct packed</code> from the sources and writes the <code>"fields"</code> of a vector.</p>
+<figure><img src="img/viewer-struct.png" alt="The FSM's generated page: the packed struct status as a {} row with its fields under it" loading="lazy">
+  <figcaption><b>A packed struct.</b> <code>{} status</code> = 0x5400 at the cursor, its fields <code>state</code>, <code>bit_cnt</code>,
+  <code>valid</code>, <code>frame_err</code>, <code>data</code> under it.</figcaption></figure>
+
+<h2 id="bookmarks">Bookmarks and arrows</h2>
+<p>A bookmark is a numbered circle on a signal at a time, with a colour and a text: the event you want someone to look at. An arrow joins
+  two bookmarks with a label — a latency, a cause and its effect.</p>
+<ol class="steps">
+  <li>Select a signal, put the cursor near the event and press <span class="ui">+ Mark</span> or <kbd>m</kbd>: a bookmark, snapped to an
+    edge of that signal. <span class="ui">Bookmark here</span> in the right button's menu puts one where you clicked.</li>
+  <li>Type its text in the list under the waves; change its time (<code>250ns</code>, <code>85.12us</code>), its signal (empty: the time axis)
+    or its colour there. <span class="ui">cursor</span> moves it to the cursor; the Δ column shows its distance from the cursor.</li>
+  <li>Drag a circle on the waves to move it. <kbd>shift+drag</kbd> from one circle to another draws an arrow; or
+    <span class="ui">+ Arrow</span> joins the last two.</li>
+  <li>Pick the arrow's shape (<code>- ~ -~ ~- -| |- -|-</code>: straight, curve, curve late / early, corner, step), head (→ end, ↔ both,
+    ← start, none), line (solid, dashed, dotted), colour and label.</li>
+</ol>
+<figure><img src="img/viewer-notes.png" alt="The bookmark list (number, time, cursor, signal, Δ, lift, colour, text) and the arrow list" loading="lazy">
+  <figcaption><b>The lists.</b> Six bookmarks of the APB example with their Δ from the cursor and their texts; three arrows, two of them
+  steps (<code>-|-</code>) and one a curve.</figcaption></figure>
+<p>Arrow labels get a thin lane of their own between the signals, so they cover no value; an arrow between two bookmarks of one signal is a
+  dimension line in that lane. A circle dragged onto the top quarter of its row (or ↥ in its line) is <b>lifted</b> into the lane above the
+  signal with a leader down to it (<code>"lift": true</code> in the JSON).</p>
+<p><kbd>1</kbd> … <kbd>9</kbd> go to that bookmark (its signal selected), <kbd>]m</kbd> / <kbd>[m</kbd> to the next / previous one in time;
+  a click on a number in the list does the same. The bookmarks are kept in this browser; <span class="ui">JSON</span> gives the
+  <code>"bookmarks"</code> and <code>"arrows"</code> lists to paste into a view of the config, so the built page — and its static SVG — carries
+  them. <span class="ui">Clear</span> forgets this browser's (the page's own come back on reload).</p>
+
+<h2 id="state">Save and Load</h2>
+<p><span class="ui">Save</span> downloads what you did in the viewer as <code>&lt;title&gt;.view.json</code>: the time window and the
+  cursor, the order and its prefixes, the folded modules, the highlight, the paint, the selected signal, the search, the bookmarks and
+  arrows, the radix, analog and hidden rows, the second cursor and the range, the gap settings, the assertions (files loaded or edited in
+  the page, with their text, and the bindings) and the ƒ rows. <span class="ui">Load…</span> (or dropping the file on a viewer) reads it
+  back — after a reload, in another browser, or on other waves: what they lack is left out and counted in the title line.</p>
+<p>The file's <code>"config"</code> (<code>sort</code>, <code>sortIgnore</code>, <code>fold</code>, <code>highlight</code>, the find
+  toggles …) pastes into a config file as it is; times are in model units (ps).</p>
+
+<h2 id="themes">Themes</h2>
+<p>Three themes: <b>light</b> (warm paper), <b>white</b> (black traces, for print and slides) and <b>dark</b>. They follow the system
+  (<code>prefers-color-scheme</code>) unless set: the theme button in a generated page's header, <code>&lt;html data-theme="white"&gt;</code>,
+  <code>WaveFW.setTheme('dark')</code>, or <code>"config": {"theme": …}</code>. Every colour is a CSS custom property; see
+  <a href="pages.html">Dump → page</a> for colours per signal, group and module.</p>
+<div class="pair">
+  <figure><img src="img/theme-light.png" alt="The APB viewer in the light theme" loading="lazy"><figcaption><b>light</b></figcaption></figure>
+  <figure><img src="img/theme-white.png" alt="The APB viewer in the white theme" loading="lazy"><figcaption><b>white</b></figcaption></figure>
+  <figure><img src="img/theme-dark.png" alt="The APB viewer in the dark theme" loading="lazy"><figcaption><b>dark</b></figcaption></figure>
+</div>
+
+<h2 id="copy">Copying, Esc and printing</h2>
+<ul>
+  <li><kbd>yy</kbd> or <kbd>ctrl+C</kbd> on the waves copies the selected signal's full path (or the highlighted ones'); during a search
+    <kbd>ctrl+C</kbd> ends the search instead. Names selected with the mouse copy as full paths, one per line.</li>
+  <li><kbd>Esc</kbd> anywhere in the viewer clears the search, the highlight and the selection (and a range, a second cursor, a menu); the
+    time window stays.</li>
+  <li>The browser's print (<kbd>ctrl+P</kbd>) draws every row of every viewer — not only the part in view — with its title and cursor
+    readout; the bar's tools are left out.</li>
+</ul>
+
+<h2 id="keys">All the keys</h2>
+<table>
+  <tr><th>Key</th><th>Action</th><th>Key</th><th>Action</th></tr>
+  <tr><td><kbd>wheel</kbd></td><td>scroll the rows</td><td><kbd>ctrl+wheel</kbd>, pinch</td><td>zoom at the pointer</td></tr>
+  <tr><td><kbd>shift+wheel</kbd>, drag, <kbd>←</kbd> <kbd>→</kbd></td><td>pan</td><td><kbd>shift+drag</kbd>, middle drag</td>
+    <td>zoom into a range</td></tr>
+  <tr><td><kbd>i</kbd> <kbd>+</kbd> / <kbd>o</kbd> <kbd>-</kbd></td><td>zoom in / out</td><td><kbd>f</kbd> / <kbd>l</kbd></td>
+    <td>show everything / the window before the last zoom</td></tr>
+  <tr><td><kbd>c</kbd></td><td>zoom in on the cursor</td><td><kbd>Home</kbd> / <kbd>End</kbd></td><td>the start / end</td></tr>
+  <tr><td>click</td><td>cursor (on a near edge; alt: not) + select the signal</td><td><kbd>shift+←</kbd> <kbd>shift+→</kbd></td>
+    <td>move the cursor</td></tr>
+  <tr><td><kbd>Tab</kbd> / <kbd>shift+Tab</kbd>, <kbd>]e</kbd> / <kbd>[e</kbd></td><td>next / previous edge</td><td><kbd>e</kbd></td>
+    <td>edge kind</td></tr>
+  <tr><td><kbd>↑</kbd> <kbd>↓</kbd>, <kbd>j</kbd> <kbd>k</kbd></td><td>select the previous / next signal</td><td><kbd>gg</kbd> / <kbd>G</kbd></td>
+    <td>the first / last signal</td></tr>
+  <tr><td><kbd>PgUp</kbd> <kbd>PgDn</kbd></td><td>a page of rows</td><td><kbd>s</kbd></td><td>sort off → A→Z → Z→A</td></tr>
+  <tr><td><kbd>/</kbd>, <kbd>ctrl+F</kbd></td><td>find</td><td><kbd>n</kbd> <kbd>N</kbd>, <kbd>*</kbd> <kbd>#</kbd></td>
+    <td>next / previous match; find the selected name</td></tr>
+  <tr><td><kbd>shift+click</kbd> the waves</td><td>a second cursor</td><td><kbd>x</kbd></td><td>swap the cursors</td></tr>
+  <tr><td><kbd>ctrl+drag</kbd></td><td>measure a range (<kbd>ctrl+click</kbd>: clear it)</td><td>right button</td><td>a range and the menu</td></tr>
+  <tr><td><kbd>alt+drag</kbd></td><td>a box: time range and signals, then the menu</td><td><kbd>shift+click</kbd> a name</td>
+    <td>select a run of signals</td></tr>
+  <tr><td>○, <kbd>ctrl+click</kbd> a name</td><td>highlight</td><td><kbd>ctrl+shift+click</kbd></td><td>highlight every row to here</td></tr>
+  <tr><td><kbd>m</kbd></td><td>bookmark at the cursor</td><td><kbd>]m</kbd> <kbd>[m</kbd>, <kbd>1</kbd> … <kbd>9</kbd></td>
+    <td>next / previous bookmark, bookmark n</td></tr>
+  <tr><td><kbd>zM</kbd> / <kbd>zR</kbd></td><td>fold / open every module</td><td><kbd>zc</kbd> <kbd>zo</kbd> <kbd>za</kbd></td>
+    <td>the selected signal's module</td></tr>
+  <tr><td><kbd>yy</kbd>, <kbd>ctrl+C</kbd></td><td>copy the path</td><td><kbd>Esc</kbd></td><td>reset: search, highlight, selection</td></tr>
+  <tr><td><kbd>]t</kbd> <kbd>[t</kbd></td><td>next / previous bus transaction (<a href="buses.html">Bus transactions</a>)</td>
+    <td><kbd>]f</kbd> <kbd>[f</kbd>, <kbd>]a</kbd> <kbd>[a</kbd></td><td>next / previous assertion failure, assertion
+    (<a href="sva.html">Assertions</a>)</td></tr>
+  <tr><td><kbd>?</kbd></td><td>the keys box</td><td>hover a control</td><td>what it does, its keys</td></tr>
+</table>
+</main>
+<nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
+</div>
+<footer>wavefw 0.11 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+  <a href="../index.html">docs/index.html</a></footer>
+<script src="guide.js"></script>
+</body>
+</html>

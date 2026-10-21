@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """vcd2wavedrom.py — convert a window of a VCD/FST dump into WaveDrom JSON: the built-in reader (one pass over the dump
-as VCD text; an FST through GTKWave's fst2vcd) or wavepeek (--reader wavepeek: any --marker expression).
+as VCD text; an FST through GTKWave's fst2vcd, else the sva CLI's `sva vcd`).
 Enum labels (FSM states) come from the config ("enum", per-signal "enum") or from the dump's own enum tables (FST).
 
 Modes
-  --clock CLK   one WaveDrom cycle per period of CLK. Values are sampled with
-                `wavepeek change --on 'posedge CLK' --sample-mode native` (the value after the edge, i.e. what
-                holds during the cycle). Output is plain WaveDrom (wave strings + data) plus the "time"
+  --clock CLK   one WaveDrom cycle per period of CLK. Values are sampled at each rising edge of CLK (the value
+                after the edge, i.e. what holds during the cycle). Output is plain WaveDrom (wave strings + data) plus the "time"
                 extension, so it renders in stock WaveDrom too.
-  --exact       exact transitions per signal in the "tv" extension (`--on '*' --row-mode sparse`), which
+  --exact       exact transitions per signal in the "tv" extension (every change), which
                 wavefw.js draws at their real timestamps. A wave string quantised to a --cycle grid is added
                 as a fallback for stock WaveDrom.
 
@@ -40,17 +39,16 @@ Examples
       --signals clk,txd,state --group tx=state,txd --marker 'posedge done=done' --out exact.json
   python3 -I tools/vcd2wavedrom.py --config dump.config.json --view exact --out exact.json
 """
-import argparse, bisect, concurrent.futures, decimal, functools, heapq, json, math, os, re, statistics, struct, subprocess, sys
+import argparse, bisect, decimal, functools, json, math, os, re, statistics, struct, sys
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
 import dumpscan, svabuild, wavejson  # noqa: E402
-from common import UNIT_PS, WaveError, add_reader_args, add_sva_bin_arg, check_config, glob_re, run_main, wavepeek  # noqa: E402
+from common import UNIT_PS, WaveError, add_sva_bin_arg, check_config, glob_re, run_main  # noqa: E402
 
 X_TEXT = object()   # an unknown value of a "kind" real / string signal in a clock-sampled row (None there is a "|" gap)
 
 
-@functools.lru_cache(maxsize=1 << 16)   # wavepeek repeats the same time strings in every chunk
 def to_ps(s):
     m = re.fullmatch(r'\s*([\d.]+(?:e-?\d+)?)\s*(zs|as|fs|ps|ns|us|ms|s)\s*', str(s))
     if not m:
@@ -58,109 +56,15 @@ def to_ps(s):
     return float(m.group(1)) * UNIT_PS[m.group(2)]
 
 
-class Peek:
-    """Thin wrapper around the wavepeek CLI (--json output)."""
-    def __init__(self, exe, waves, scope):
-        self.exe, self.waves, self.scope = exe, waves, scope
-        info = self.run('info')['data'][0]
-        m = re.fullmatch(r'(\d+)(zs|as|fs|ps|ns|us|ms|s)', info['time_unit'])
-        self.unit = (int(m.group(1)), m.group(2))
-        self.unit_ps = int(m.group(1)) * UNIT_PS[m.group(2)]
-        self.t_start, self.t_end = to_ps(info['time_start']), to_ps(info['time_end'])
-        self.version = subprocess.run([exe, '-V'], capture_output=True, text=True).stdout.strip()
-
-    def t(self, ps):  # ps -> wavepeek time literal in dump units (times must align with the dump resolution)
-        n = round(ps / self.unit_ps)
-        return f'{n * self.unit[0]}{self.unit[1]}'
-
-    def chunks(self, paths, parts=1, limit=100000):   # one argv string must stay below the OS limit (128 KiB on Linux)
-        out, cur, n, size = [], [], 0, max(1, -(-len(paths) // parts))
-        for p in paths:
-            if cur and (n + len(p) + 1 > limit or len(cur) >= size):
-                out.append(cur); cur, n = [], 0
-            cur.append(p); n += len(p) + 1
-        return out + [cur] if cur else out
-
-    def run_signals(self, cmd, paths, *args):
-        """`wavepeek cmd ... --signals paths`, split into several calls for long lists (run in parallel: each call reads
-        the whole dump, so a long "change" query is spread over the CPUs); results merged per row."""
-        parts = min(os.cpu_count() or 1, 8, max(1, len(paths) // 40)) if cmd == 'change' else 1
-        cs = self.chunks(paths, parts)
-        with concurrent.futures.ThreadPoolExecutor(len(cs)) as ex:
-            docs = list(ex.map(lambda c: self.run(cmd, *args, '--signals', ','.join(c), scoped=True)['data'], cs))
-        if len(docs) == 1:
-            return docs[0]
-        if cmd == 'value' or '--row-mode' in args and args[args.index('--row-mode') + 1] == 'dense':
-            rows = docs[0]
-            for d in docs[1:]:
-                for r, r2 in zip(rows, d):
-                    r['signals'] += r2['signals']
-            return rows
-        return list(heapq.merge(*docs, key=lambda r: to_ps(r['time'])))   # sparse rows, each chunk already in time order
-
-    def run(self, cmd, *args, scoped=False):
-        argv = [self.exe, cmd, '--waves', self.waves, *args, '--json']
-        if scoped and self.scope:
-            argv += ['--scope', self.scope]
-        p = subprocess.run(argv, capture_output=True, text=True)
-        try:
-            doc = json.loads(p.stdout)
-        except json.JSONDecodeError:
-            raise WaveError(f'vcd2wavedrom: wavepeek {cmd} failed:\n{p.stderr or p.stdout}')
-        if p.returncode or doc.get('type') != 'result':
-            raise WaveError(f'vcd2wavedrom: wavepeek {cmd} failed: {json.dumps(doc.get("error", doc))}')
-        for d in doc.get('diagnostics', []):
-            print(f'wavepeek {d.get("kind")}: {d.get("message")}', file=sys.stderr)
-        return doc
-
-
-    # ---- reader interface (shared with Builtin): prepare, base, changes, sampled, events ----
-    tool = property(lambda self: 'wavepeek ' + self.version)
-
-    def prepare(self, paths, clock=None, events=()):
-        """-> [(canonical path, width)]; the width comes from the value literal ("7'h00"), so bit selects work too."""
-        self.paths = paths
-        b = self.run_signals('value', paths, '--at', self.t(self.t_start))[0]['signals']
-        self.specs = []
-        for p, x in zip(paths, b):
-            lit, sel = re.match(r"(\d+)'", x['value']), re.search(r'\[(\d+):(\d+)\]$', p)
-            self.specs.append((x['path'], int(lit.group(1)) if lit else abs(int(sel.group(1)) - int(sel.group(2))) + 1 if sel else 1))
-        return self.specs
-
-    def base(self, t):
-        b = self.run_signals('value', self.paths, '--at', self.t(t))[0]['signals']
-        return [norm(x['value'], w) for x, (_, w) in zip(b, self.specs)]
-
-    def changes(self, t0, t1):   # -> per path [(t, value)] in [t0, t1]
-        rows = self.run_signals('change', self.paths, '--from', self.t(t0), '--to', self.t(t1), '--on', '*', '--sample-mode', 'native',
-                                '--row-mode', 'sparse', '--row-values', 'delta', '--max', 'unlimited')
-        idx = {pa: i for i, (pa, _) in enumerate(self.specs)}
-        out = [[] for _ in self.specs]
-        for r in rows:
-            t = to_ps(r['time'])
-            for v in r['signals']:
-                i = idx[v['path']]; out[i].append((t, norm(v['value'], self.specs[i][1])))
-        return out
-
-    def sampled(self, clock, t0, t1):   # -> (posedge times, per path [value after each edge])
-        rows = self.run_signals('change', self.paths, '--from', self.t(t0), '--to', self.t(t1), '--on', f'posedge {clock}',
-                                '--sample-mode', 'native', '--row-mode', 'dense', '--row-values', 'full', '--max', 'unlimited')
-        return [to_ps(r['time']) for r in rows], [[norm(r['signals'][j]['value'], w) for r in rows] for j, (_, w) in enumerate(self.specs)]
-
-    def events(self, expr, t0, t1):   # any wavepeek --on expression
-        return [to_ps(r['time']) for r in self.run('change', '--from', self.t(t0), '--to', self.t(t1), '--on', expr, '--sample-mode', 'native',
-                                                    '--max', 'unlimited', '--signals', self.paths[0], scoped=True)['data']]
-
-
 class Builtin:
-    """The built-in reader: one pass over the dump as VCD text (an FST through fst2vcd), keeping only the requested
-    signals; the window, clock sampling and markers are then computed in memory. Paths as wavepeek spells them."""
+    """The built-in reader: one pass over the dump as VCD text (an FST through fst2vcd or sva vcd), keeping only the requested
+    signals; the window, clock sampling and markers are then computed in memory."""
     EVENT = re.compile(r'\s*(?:(posedge|negedge|edge)\s+)?([^\s()|&!=<>~^*]+)\s*')
 
     def __init__(self, waves, scope):
         self.waves, self.scope = waves, scope
         self.decl = dumpscan.read(waves, None)
-        self.tool = 'wavefw reader' + ('' if waves.lower().endswith('.vcd') else ' (fst2vcd)')
+        self.tool = 'wavefw reader' + ('' if waves.lower().endswith('.vcd') else f' ({dumpscan.fst_tool()})')
         self.streams = {}
 
     def resolve(self, p):
@@ -176,8 +80,7 @@ class Builtin:
     def event_signal(self, expr):
         m = self.EVENT.fullmatch(expr)
         if not m:
-            raise WaveError(f'vcd2wavedrom: the built-in reader takes markers "posedge X", "negedge X", "edge X" or "X" (any change); '
-                             f'for "{expr}" use --reader wavepeek')
+            raise WaveError(f'vcd2wavedrom: a marker is "posedge X", "negedge X", "edge X" or "X" (any change), not "{expr}"')
         return m.group(1) or 'change', m.group(2)
 
     def prepare(self, paths, clock=None, events=()):
@@ -275,17 +178,14 @@ def bits(raw, width, sl):
 def open_reader(a):
     if not os.path.isfile(a.waves):
         raise WaveError(f'vcd2wavedrom: no such dump: {a.waves}')
-    if a.reader == 'wavepeek':
-        return Peek(a.wavepeek, a.waves, a.scope)
     if not dumpscan.available(a.waves):
-        print('vcd2wavedrom: cannot read the FST as text (no fst2vcd): using wavepeek', file=sys.stderr)
-        return Peek(a.wavepeek, a.waves, a.scope)
+        raise WaveError(f'vcd2wavedrom: cannot read {a.waves}: an FST is read through fst2vcd (GTKWave) or the sva CLI, and neither is there')
     return Builtin(a.waves, a.scope)
 
 
 @functools.lru_cache(maxsize=1 << 18)   # values repeat a lot (clocks, flags)
 def norm(value, width):
-    """Verilog literal from wavepeek ("8'ha5", "1'h1", "4'bxx01") -> '0'/'1'/'x'/'z' (1 bit) or lower-case hex."""
+    """Verilog literal ("8'ha5", "1'h1", "4'bxx01") -> '0'/'1'/'x'/'z' (1 bit) or lower-case hex."""
     m = re.fullmatch(r"(\d+)'([hbdo])([0-9a-fA-FxXzZ_]+)", value)
     if not m:
         return value.lower()
@@ -435,7 +335,7 @@ def parser():
     ap.add_argument('--enum', action='append', help='sig=0:IDLE,1:RUN (sig = path or alias)')
     ap.add_argument('--group', action='append', help='name=sig1,sig2: nest these signals in a WaveDrom group')
     ap.add_argument('--hierarchy', action='store_true', default=None, help='nest signals in groups by their scope path (instead of --group)')
-    ap.add_argument('--marker', action='append', help="'EVENT=label', EVENT is a wavepeek --on expression")
+    ap.add_argument('--marker', action='append', help="'EVENT=label', EVENT is 'posedge X', 'negedge X', 'edge X' or 'X' (any change)")
     ap.add_argument('--title', help='head.text')
     ap.add_argument('--bookmarks', help='JSON list [{"n", "t", "signal", "text", "color"}] (usually in the config file; the viewer\'s JSON button writes it)')
     ap.add_argument('--arrows', help='JSON list [{"from", "to", "shape", "head", "line", "color", "label"}] between bookmarks')
@@ -444,7 +344,6 @@ def parser():
     ap.add_argument('--expr', dest='exprs', action='append', help='an expression of the signals the page draws as a row (ƒ expressions; repeatable), e.g. "PSEL && !PREADY"')
     add_sva_bin_arg(ap)
     ap.add_argument('--hscale', type=float)
-    add_reader_args(ap)
     ap.add_argument('--out', help='output file (default: stdout)')
     return ap
 
@@ -526,10 +425,6 @@ def resolve(a, cfg, base='.'):
     if bool(a.clock) == bool(a.exact):
         raise WaveError('vcd2wavedrom: need exactly one of --clock CLK / --exact')
     a.hscale = a.hscale or 1
-    a.reader = a.reader or 'builtin'
-    a.wavepeek = wavepeek(a.wavepeek)
-    if (a.reader == 'wavepeek' or not dumpscan.available(a.waves)) and not os.path.exists(a.wavepeek):
-        raise WaveError('vcd2wavedrom: wavepeek not found (cargo build it, see README.md)')
     return a
 
 
@@ -617,7 +512,7 @@ def collect_specs(a, rd):
         e = s['set'].get('enum')
         s['enum'] = parse_enums([{s['path']: e}])[s['path']] if e else enums.get(s['name'], enums.get(s['path']))
         s['radix'] = s['set'].get('radix') or None
-    if any(not s['enum'] for s in specs):   # FSM states by name: enum tables of the dump (FST; VCD written by fst2vcd -e)
+    if any(not s['enum'] for s in specs):   # FSM states by name: enum tables of the dump (FST; VCD written by fst2vcd -e or sva vcd)
         decl = dumpscan.scan(a.waves, body=False)
         for s in specs:
             e = (decl.get(s['abs']) or {}).get('enum')
@@ -757,7 +652,7 @@ def group(a, rd, specs, sig_json):
         root = (a.scope + '.') if a.scope else ''
         node = {(): out}
         decl = getattr(rd, 'decl', None) or dumpscan.read(a.waves, None)
-        types = decl.scopes if decl else {}   # struct / union / interface scopes (an FST through fst2vcd; a VCD that says so)
+        types = decl.scopes if decl else {}   # struct / union / interface scopes (an FST through fst2vcd or sva vcd; a VCD that says so)
         for s in specs:
             parts = svabuild.split_path(s['abs'][len(root):] if s['abs'].startswith(root) else s['abs'])[:-1]
             for i in range(len(parts)):
@@ -788,7 +683,7 @@ def group(a, rd, specs, sig_json):
 def finish(a, rd, doc, specs, marks, t_from, t_to):
     """Markers, bookmarks, arrows, the assertions ("sva"), the expressions and "meta" onto the document."""
 
-    # ---- markers from wavepeek event expressions ----
+    # ---- markers from event expressions (posedge / negedge / edge / any change of a signal) ----
     markers = []
     for expr, lab in marks:
         hits = rd.events(expr, t_from, t_to)

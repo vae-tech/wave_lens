@@ -20,7 +20,7 @@ class Values(unittest.TestCase):
         self.assertEqual(V.norm("12'bzzzzzzzzzzzz", 12), 'z')
         self.assertEqual(V.norm("8'bzzzz0000", 8), 'z0')            # a nibble all z: z
         self.assertEqual(V.norm("8'bzz000000", 8), 'x0')            # a partial z: x
-        self.assertEqual(V.norm("8'hxx", 8), 'x')                    # wavepeek's spelling, the same
+        self.assertEqual(V.norm("8'hxx", 8), 'x')                    # in hex, the same
 
     def test_bits_extension_and_slice(self):
         self.assertEqual(V.bits(b'1', 8, None), '01')
@@ -224,36 +224,46 @@ class Convert(unittest.TestCase):
     def test_wide_vector(self):
         self.assertEqual(H.wavejson_of(H.fixture('wide'))['tb.w']['tv'][0][1], 'f' * 24)
 
-    @unittest.skipUnless(shutil.which('wavepeek') or os.path.exists(os.path.expanduser('~/.local/bin/wavepeek')), 'wavepeek')
-    def test_builtin_vs_wavepeek_identical(self):
-        dump = os.path.join(H.BUILD, 'demo.vcd')
-        if not os.path.exists(dump):
-            self.skipTest('make demo')
-        cfg = os.path.join(H.ROOT, 'examples', 'demo', 'demo.config.json')
-        for view in ('cycle', 'exact'):
-            with self.subTest(view):
-                docs = []
-                for reader in ('builtin', 'wavepeek'):
-                    rc, out, err = H.run_tool('vcd2wavedrom', '--config', cfg, '--view', view, '--waves', dump, '--reader', reader)
-                    self.assertEqual(rc, 0, err)
-                    d = json.loads(out); d['meta'].pop('tool')
-                    docs.append(d)
-                self.assertEqual(docs[0], docs[1])
+    def readers(self):
+        """The FST readers here: fst2vcd (GTKWave) and the sva CLI's `sva vcd` (WAVEFW_FST picks one)."""
+        import svabuild
+        return [r for r, ok in (('fst2vcd', shutil.which('fst2vcd')), ('sva', svabuild.find_bin())) if ok]
 
-    @unittest.skipUnless(shutil.which('fst2vcd'), 'fst2vcd')
+    def convert(self, reader, cfg, view, waves):
+        old = os.environ.get('WAVEFW_FST')
+        os.environ['WAVEFW_FST'] = reader
+        try:
+            rc, out, err = H.run_tool('vcd2wavedrom', '--config', cfg, '--view', view, '--waves', waves)
+        finally:
+            os.environ.pop('WAVEFW_FST') if old is None else os.environ.__setitem__('WAVEFW_FST', old)
+        self.assertEqual(rc, 0, err)
+        d = json.loads(out)
+        return d, d['meta'].pop('tool'), d['meta'].pop('waves')
+
     def test_vcd_vs_fst_identical(self):
+        """The APB example's VCD and its FST, the FST read by each reader there is: the same WaveJSON."""
         ex = os.path.join(H.BUILD, 'examples', 'apb')
         if not os.path.exists(os.path.join(ex, 'apb.fst')):
             self.skipTest('make examples')
+        if not self.readers():
+            self.skipTest('neither fst2vcd nor the sva CLI')
         cfg = os.path.join(H.ROOT, 'examples', 'apb', 'apb.config.json')
-        docs = []
-        for ext in ('vcd', 'fst'):
-            rc, out, err = H.run_tool('vcd2wavedrom', '--config', cfg, '--view', 'transfers', '--waves', os.path.join(ex, 'apb.' + ext))
-            self.assertEqual(rc, 0, err)
-            d = json.loads(out); d['meta'].pop('tool'); d['meta'].pop('waves')
-            docs.append(d)
-        self.assertEqual(docs[0], docs[1])
+        vcd = self.convert('', cfg, 'transfers', os.path.join(ex, 'apb.vcd'))[0]
+        for r in self.readers():
+            with self.subTest(r):
+                doc, tool, _ = self.convert(r, cfg, 'transfers', os.path.join(ex, 'apb.fst'))
+                self.assertEqual(tool, 'wavefw reader (' + ('fst2vcd' if r == 'fst2vcd' else 'sva vcd') + ')')
+                self.assertEqual(doc, vcd)
 
+    def test_fst_readers_identical(self):
+        """The FSM example's FST (enum tables, a struct scope) through fst2vcd and through sva vcd: the same WaveJSON."""
+        fst = os.path.join(H.BUILD, 'examples', 'fsm', 'fsm.fst')
+        if not os.path.exists(fst) or len(self.readers()) < 2:
+            self.skipTest('make examples, fst2vcd and the sva CLI')
+        cfg = os.path.join(H.ROOT, 'examples', 'fsm', 'fsm.config.json')
+        for view in ('run', 'status'):
+            with self.subTest(view):
+                self.assertEqual(self.convert('fst2vcd', cfg, view, fst)[0], self.convert('sva', cfg, view, fst)[0])
 
 if __name__ == '__main__':
     unittest.main()

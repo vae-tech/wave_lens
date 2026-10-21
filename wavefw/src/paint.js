@@ -310,8 +310,8 @@ function paintGapLine(P, xm, y0, y1, style) {
 function paintMarkers(P, markers, X, tA, tB, y0, y1) {
   for (const m of markers) {
     if (m.t < tA || m.t > tB) continue;
-    const x = X(m.t); P.path([['M', x, y0], ['L', x, y1]], { stroke: 'muted', w: 1, dash: [3, 3] });
-    if (m.label) { P.rect(x + 1, y0 + 2, P.measure(m.label, { size: 10 }) + 4, 12, 'panel'); P.text(x + 3, y0 + 8, m.label, { size: 10, fill: 'muted' }); }
+    const x = X(m.t), c = m.color || 'muted'; P.path([['M', x, y0], ['L', x, y1]], { stroke: c, w: m.color ? 1.2 : 1, dash: [3, 3] });
+    if (m.label) { P.rect(x + 1, y0 + 2, P.measure(m.label, { size: 10 }) + 4, 12, 'panel'); P.text(x + 3, y0 + 8, m.label, { size: 10, fill: c }); }
   }
 }
 
@@ -324,7 +324,8 @@ const circle = (x, y, r) => { const k = 0.5523 * r; return [['M', x - r, y], ['C
 // -> Map(row index it follows -> [arrow index | "b:" + path])
 function arrowLanes(rows, bms, arrows) {
   const idx = new Map(), lanes = new Map(), has = n => bms.some(b => b.n === n);
-  rows.forEach((r, i) => { if (r.type === 'sig' && !r.same) idx.set(r.full, i); });
+  rows.forEach((r, i) => { if (r.type === 'sig' && r.ug && !idx.has(r.full)) idx.set(r.full, i); });   // in your group first (paintBookmarks)
+  rows.forEach((r, i) => { if (r.type === 'sig' && !r.same && !idx.has(r.full)) idx.set(r.full, i); });
   rows.forEach((r, i) => { if (r.type === 'sig' && r.same && !idx.has(r.full)) idx.set(r.full, i); });   // copies: when the original is not shown
   const rowOf = n => { const b = bms.find(x => x.n === n); return b && b.signal != null && idx.has(b.signal) ? idx.get(b.signal) : -1; };
   arrows.forEach((a, i) => {
@@ -378,7 +379,8 @@ const laneY = (lay, h) => { const m = new Map(); for (const o of lay) if (o.row.
 // rubber: {from, x, y} = an arrow being drawn. Returns {pos: n -> [x, y], mids: [[arrow index, x, y]]} for hit tests.
 function paintBookmarks(P, bms, arrows, X, tA, tB, rowY, y0, y1, yAxis, rubber, lanes) {
   const at = new Map(), pos = new Map(), mids = [];
-  for (const [r, y] of rowY) if (!r.same) at.set(r.full, y);
+  for (const [r, y] of rowY) if (r.ug && !at.has(r.full)) at.set(r.full, y);   // in your group (where you look) first, then the signal
+  for (const [r, y] of rowY) if (!r.same && !at.has(r.full)) at.set(r.full, y);
   for (const [r, y] of rowY) if (r.same && !at.has(r.full)) at.set(r.full, y);
   const lifted = new Map();   // n -> the y of its signal row, under the circle in the lane
   for (const b of bms) {

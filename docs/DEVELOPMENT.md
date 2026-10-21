@@ -10,20 +10,24 @@ wavefw/                       what a page needs, nothing else
   wavefw.js / wavefw.css      framework (one <script> + one <link>); wavefw.js is made by make wavefw from src/
   src/                        model.js (settings, sorting, find, time, values, the parser), vcd.js (a VCD read in the
                               page), paint.js (the two painters
-                              and what they draw), view.js (WaveView and its parts Bar, Names, Notes), svg.js (WaveSVG),
-                              boot.js (themes, configure, upgrade, exports): one scope, concatenated in this order
+                              and what they draw), view.js (WaveView and its parts Bar, Names, Notes), edit.js (the
+                              viewer's commands view.run, your groups and markers, a page's edits, the live link),
+                              svg.js (WaveSVG), boot.js (themes, configure, upgrade, exports): one scope, in this order
   wavefw.config.js            global settings file (all keys, with defaults), loaded before wavefw.js
   sva.js, sva.wasm.js         assertions in the page: the panel, binding, evaluation; the engine (generated, make sva-build)
   bus.js                      bus transactions: ports found by their names, decoders (AXI, AXI-Stream, APB, AHB, Avalon, Wishbone, OBI), rows
 tools/                        what you run: python3 -I tools/<tool>.py
   mkconfig.py vcd2wavedrom.py mkhtml.py embed.py dumpscan.py wavejson.py svabuild.py
-  wavemcp.py                  the tools as an MCP server for AI agents (stdio; USAGE § AI agents)
+  wavemcp.py                  the tools as an MCP server for AI agents (stdio; USAGE § AI agents); the live link to a page
+  viewedit.py                 the viewer's commands on a page's edits or a saved state (USAGE § Commands and edits)
   base.config.json            base settings for generated configs (make config / make html WAVES=x.vcd)
 examples/                     apb/ axi_lite/ fsm/ demo/: testbench, config, README; *.sva: assertions for each;
                               test_video/: the CoaXPress checkers over a real dump (the dump and page not in git)
 docs/                         what you look at
   index.html                  the reference page with live examples (opens from file://)
   USAGE.md, DEVELOPMENT.md    the user's guide; this file
+  guides/                     the guides as HTML with pictures (index.html first; guide.css, guide.js; img/ by make
+                              guide-shots)
   SV_STYLE.md                 the SystemVerilog style of the project
   demo_waves.js, apb_waves.js its data (make demo), tracked
   img/                        the README screenshots (make shots)
@@ -39,6 +43,7 @@ tests/
   sva/                        the SVA corpus: *.sv with every construct, err_*.sv with annotated errors, golden/;
                               third_party/: AXI4-Lite, APB, AHB checkers of others (licenses, units.json)
   shots.py                    the screenshots (make shots)
+  guide_shots.py              the pictures of docs/guides (make guide-shots; writes the gaps guide's dump into BUILD/guides)
   conformance.html            every feature next to stock WaveDrom 3.5.0 (vendor/, test-only)
 work/                         your dumps and their configs: configs tracked, dumps and pages git-ignored
 sva/                          the SVA engine (Rust: core, native CLI, WebAssembly)
@@ -60,6 +65,7 @@ make smoke                  # tests/smoke.py: every page in light and dark, 470 
 make smoke ONLY=find,sva_bind   # some sections (python3 tests/smoke.py --list); STRICT=1: a skip fails
 make shots                  # tests/shots.py: docs/img/*.png, dark theme (after make examples; ~20 s, see below)
 make shots-check            # the same into BUILD/img, compared with docs/img: a shot that no longer builds fails
+make guide-shots            # tests/guide_shots.py: docs/guides/img/*.png (after make examples; ONLY=gaps,sva: those guides)
 make sva-build              # the SVA engine (needs cargo + the wasm32 target): the sva CLI, wavefw/sva.wasm.js
 make dist                   # the CLI: bin/linux-x86_64/sva (musl, static, committed) + bin/windows-x86_64/sva.exe (mingw-w64)
 make sva-test               # the SVA engine: unit tests, the corpus tests/sva (third_party too), the JSON schema, the CLI
@@ -97,6 +103,13 @@ expressions of `sva.js`); it calls the pure functions through `WaveFW.internal`,
 read the fields of a viewer through `WaveFW.internal.peek(v)` only (`plugin_api` checks it), so a refactoring of
 `view.js` changes one place of the tests.
 
+The viewer's commands live twice: in the page (`wavefw/src/edit.js`, `view.run`) and in `tools/viewedit.py`, which
+writes a page's edits without a browser. The section `edit` holds them together: the two lists of commands and their
+arguments are one (`WaveFW.commands()` against `COMMANDS`), and a list of every command that changes a state
+(`EDIT_OPS`), written into a page by `viewedit.py`, opens with the state that the same list run in the page gives —
+a command added to one side only, or one that differs, fails there. It also runs `wavemcp.py` as an agent's MCP
+server with a page connected live (`WAVEFW_LIVE_PORT=0`: a free port; its key in a scratch `XDG_CACHE_HOME`).
+
 `make unit` (`tests/unit/`, unittest, standard library only) tests the tools function by function on the fixtures in
 `tests/unit/vcd/` — each a few lines of what a simulator writes: `real`, `string` and `event` variables, escaped names,
 a range glued to the name, the same path under two id codes, several changes on one line, `$comment` in the body, VHDL
@@ -109,21 +122,21 @@ bytes: Chromium rasterises in software, in one thread (`RASTER` in `tests/shots.
 were anti-aliased differently run after run), tooltips are hidden and the pointer moved away before a shot. Both need
 Python playwright (a
 user-site install, so they run without `-I`, with `PYTHONDONTWRITEBYTECODE=1`). Environment used: Verilator 5.046,
-wavepeek 3.1.0, GTKWave fst2vcd, cargo 1.98 (the engine needs Rust ≥ 1.82).
+GTKWave fst2vcd, cargo 1.98 (the engine needs Rust ≥ 1.82).
 
 SystemVerilog follows [SV_STYLE.md](SV_STYLE.md). Reformatting `tests/sva/*.sv` moves the line numbers in the golden
 files: `make sva-bless`, then the diff must show nothing but `line N`; the carets of `tests/sva/err_*.sv` move by hand.
 
 ## Measured
 
-The two dump readers, measured on this machine (16 CPUs), output byte-identical:
+The dump reader (`tools/dumpscan.py`, `vcd2wavedrom.py`), measured on this machine (16 CPUs):
 
-| Job | builtin | wavepeek |
-|---|---|---|
-| `test_stream_video.vcd` (24 MB), every changing signal: 1526 signals, 4.8 M changes | 25 s, 1.5 GB | 45 s, 2.9 GB |
-| `mkconfig.py test_stream_video.vcd` (3520 signals listed, changes counted) | 2.7 s, 26 MB | 12 s |
-| `dump.vcd` (14 MB), view `full` (15 signals, exact, markers) | 2.0 s | 7.0 s |
-| demo (25 signals) | 0.15 s | 0.19 s |
+| Job | time, memory |
+|---|---|
+| `test_stream_video.vcd` (24 MB), every changing signal: 1526 signals, 4.8 M changes | 25 s, 1.5 GB |
+| `mkconfig.py test_stream_video.vcd` (3520 signals listed, changes counted) | 2.7 s, 26 MB |
+| `dump.vcd` (14 MB), view `full` (15 signals, exact, markers) | 2.0 s |
+| demo (25 signals) | 0.15 s |
 
 The viewer on the page of `test_stream_video` (1526 signals, every group open: 1731 rows; median of 5 in headless
 Chromium, before / after stage 9.4; the arbiter page: the same dump with five bindings, 16 068 failures):
@@ -170,7 +183,7 @@ approval"): the agent falls back to its shell. The runs, their transcripts and a
 
 ## Versions
 
-Two numbers, `MAJOR.MINOR` (0.11 now; [`CHANGELOG.md`](../CHANGELOG.md) lists them all). The work goes on a branch;
+Two numbers, `MAJOR.MINOR` (0.12 now; [`CHANGELOG.md`](../CHANGELOG.md) lists them all). The work goes on a branch;
 a version is a merge into `main` (`git merge --no-ff`) tagged `vMAJOR.MINOR` (an annotated tag, its message the
 changelog entry). One commit on the branch before the merge raises the version in four places: `VERSION`,
 `version:` in `wavefw/src/boot.js` (then `make wavefw`), a new top entry in `CHANGELOG.md`, and the committed builds

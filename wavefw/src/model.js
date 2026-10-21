@@ -109,11 +109,11 @@ function foldSet(M, f) {
 const HL_N = 6;   // colours --wave-hl1…6, one per picked instance
 const glob = p => new RegExp('^' + p.split('*').map(s => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$');
 // "highlight" setting -> Map(row -> colour index): each entry (full path, name or "*" pattern) is one instance / colour
-function hlPick(M, list) {
+function hlPick(M, list, rows = M.rows) {   // rows: where to look (a viewer: its own groups too)
   const picks = new Map();
   prefixes(list).forEach((p, i) => {
     const rx = p.includes('*') ? glob(p) : null;
-    for (const r of M.rows) if (r.type !== 'space' && !picks.has(r) && (rx ? rx.test(r.full) : r.full === p || r.name === p)) picks.set(r, i % HL_N);
+    for (const r of rows) if (r.type !== 'space' && !picks.has(r) && (rx ? rx.test(r.full) : r.full === p || r.name === p)) picks.set(r, i % HL_N);
   });
   return picks;
 }
@@ -123,7 +123,7 @@ function hlState(M, picks, dim, rows = M.rows) {
   if (!picks || !picks.size) return null;
   const cover = new Map(), on = new Set();
   for (const r of rows) {
-    let c = picks.get(r);
+    let c = picks.get(r) ?? (r.orig && picks.get(r.orig));   // a signal highlighted: its row in your group too
     for (let i = r.anc.length - 1; c === undefined && i >= 0; i--) c = picks.get(M.groups[r.anc[i]]);
     if (c !== undefined) { cover.set(r, c); on.add(r); r.anc.forEach(id => on.add(M.groups[id])); }   // keep their group headers too
   }
@@ -184,15 +184,16 @@ function orderRows(rows, dir, pfx, groupOrder) {
 // (drawn once after all rows: arrows between rows; yA–yB the rows drawn; `overlay.rows`: other rows it draws on, it runs
 // when one of those is on screen too), `click(x, y, view)` / `tip(x, y, view)` (a click / the tooltip on
 // the waves, y inside the row; click returns true when it handled it), `same: true` (a copy of a signal shown elsewhere:
-// bookmarks stay on the original), `legend: [{n?, text, color?, bold?}]` (lines under the static SVG).
+// bookmarks stay on the original), `legend: [{n?, text, color?, bold?}]` (lines under the static SVG). A function with
+// `head: true` puts its top rows (group null) before every other row (the viewer's own groups), not after the top's signals.
 let XID = 1e6;
 const XGROUPS = new WeakMap();   // owner (a viewer, an SVG host, a model) -> the ids of the groups its plugins added last time
 function withExtra(rows, fns, M, owner = M) {
   if (!fns || !fns.length) return rows;
   const ids = new Set();
-  const extras = g => {
+  const extras = (g, head = false) => {
     const out = [];
-    for (const f of fns) for (const r of f(g) || []) {
+    for (const f of fns) if (!!f.head === head) for (const r of f(g) || []) {
       if (!r.anc) { r.anc = g ? g.anc.concat(g.id) : []; r.depth = g ? g.depth + 1 : 0; }
       if (r.type === 'group' && r.id != null) { M.groups[r.id] = r; ids.add(r.id); }
       out.push(r);
@@ -206,7 +207,7 @@ function withExtra(rows, fns, M, owner = M) {
   });
   const after = new Map();
   for (const [k, i] of at) { if (!after.has(i)) after.set(i, []); after.get(i).push(k); }
-  const out = [];
+  const out = extras(null, true);
   const put = i => { for (const k of after.get(i) || []) out.push(...extras(k === 'top' ? null : M.groups[k])); };
   put(-1);
   rows.forEach((r, i) => { out.push(r); put(i); });
@@ -677,4 +678,14 @@ function arNorm(list, bms) {
   return old.filter(Boolean).concat(Array.isArray(list) ? list : []).map(a => ({ from: +a.from, to: +a.to, shape: AR_SHAPES[a.shape] ? a.shape : '~',
     head: AR_HEADS[a.head] !== undefined ? a.head : '>', line: a.line in AR_LINES ? a.line : 'solid', color: a.color || null, label: a.label || '' }))
     .filter(a => a.from && a.to && a.from !== a.to);
+}
+// your markers [{t, label, color}] (a saved state, this browser) and groups [{name, signals: [full path], color}]: normalised
+function markNorm(list) {
+  return (Array.isArray(list) ? list : []).map(m => ({ t: num(parseT(m && m.t)), label: m && m.label != null ? String(m.label) : '',
+    color: (m && m.color) || null })).filter(m => isFinite(m.t));
+}
+function groupNorm(list) {
+  const seen = new Set();
+  return (Array.isArray(list) ? list : []).filter(g => g && String(g.name ?? '').trim() && !seen.has(String(g.name).trim()) && seen.add(String(g.name).trim()))
+    .map(g => ({ name: String(g.name).trim(), signals: [...new Set(prefixes(g.signals))], color: g.color || null }));
 }

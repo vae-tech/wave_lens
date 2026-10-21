@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """wavemcp.py — the wavefw tools as an MCP server (Model Context Protocol, JSON-RPC over stdio) for an AI agent.
 
-An agent asks questions of a dump (VCD, or FST through fst2vcd) and gets short answers instead of reading the dump:
+An agent asks questions of a dump (VCD, or FST through fst2vcd or the sva CLI) and gets short answers instead of reading the dump:
 the signals, values at a time, changes in a window, a clock-sampled table, searches by an SV expression or sequence
 (the sva engine), aggregates, SystemVerilog assertions checked over the dump with their first failures, and a viewer
 page (or the WaveJSON) of a window for a person. The dump is read once per server (the declarations and the change counts); a
-signal's transitions when a tool first needs it, then kept. Times are ns in and out (a number), or a text with a unit
+signal's transitions when a tool first needs it, then kept. The agent marks a page up for the person with the viewer's
+commands (view_edit: bookmarks with a text, arrows, markers, groups, highlight, colours, cursor, window; tools/viewedit.py
+has them) and reads what is there (view_get): live in their browser once view_live has connected the page (an HTTP
+server of this process on 127.0.0.1, from port 8742 or WAVEFW_LIVE_PORT on, its key in ~/.cache/wavefw/live-token),
+else in the page's file. Times are ns in and out (a number), or a text with a unit
 ("2.5us"); signal names are full paths, paths under "scope", or a unique tail of a path ("PSEL", "u_regs.PSEL").
 
   claude mcp add wavefw -- python3 -I /path/to/wavefw/tools/wavemcp.py      # Claude Code
@@ -16,10 +20,11 @@ signal's transitions when a tool first needs it, then kept. Times are ns in and 
 Standard library only; the sva CLI as svabuild.py finds it (--sva-bin, $WAVEFW_SVA, the build, bin/<os>/sva, PATH).
 docs/USAGE.md § "AI agents (MCP)" has the tools; tests/mcp_bench.py measures what they save.
 """
-import argparse, bisect, collections, contextlib, fnmatch, json, os, re, statistics, subprocess, sys, tempfile
+import argparse, bisect, collections, contextlib, fnmatch, hmac, http.server, json, os, queue, re, secrets, shutil, statistics, subprocess, sys
+import tempfile, threading, time, urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
-import dumpscan, svabuild, vcd2wavedrom  # noqa: E402
+import dumpscan, svabuild, vcd2wavedrom, viewedit  # noqa: E402
 from common import ROOT, UNIT_PS, WaveError  # noqa: E402
 
 PROTOCOLS = ('2025-06-18', '2025-03-26', '2024-11-05')
@@ -33,7 +38,9 @@ INSTRUCTIONS = (
     'or a value / edge of one signal), count with wave_stats, check SystemVerilog assertions with sva_check. Sampled '
     'values are the ones just before the clock edge, as SVA samples; cycle numbers are the clock\'s rising edges from '
     'the start of the dump (the same as sva_check\'s). Long answers are cut at "limit" ("more", "next_from" / '
-    '"next_offset" say how to go on). wave_page writes a viewer page to show a person.')
+    '"next_offset" say how to go on). wave_page writes a viewer page to show a person; view_edit marks it up for them '
+    '(bookmarks with a text, arrows, markers, groups, highlight, colours, cursor, window), live in their browser after '
+    'view_live, else in the page\'s file (they reload it); view_get reads what is there, their own edits too.')
 
 
 def version():
@@ -75,7 +82,7 @@ class Wave(vcd2wavedrom.Builtin):
         if not os.path.isfile(path):
             raise WaveError(f'no such dump: {path}')
         if not dumpscan.available(path):
-            raise WaveError(f'{os.path.basename(path)}: an FST is read through fst2vcd (GTKWave), which is not on PATH')
+            raise WaveError(f'{os.path.basename(path)}: an FST is read through fst2vcd (GTKWave) or the sva CLI, and neither is there')
         self.waves, self.scope, self.streams = path, '', {}
         self.stamp = (os.path.getmtime(path), os.path.getsize(path))
         self.decl = dumpscan.read(path, 'count')
@@ -665,6 +672,539 @@ def t_page(a):
     return {'page': out, 'bytes': os.path.getsize(out)}
 
 
+# ---------------- the views a person looks at: their edits and the live link ----------------
+# view_edit runs the viewer's commands (wavefw/src/edit.js, tools/viewedit.py) on a page: live, when the page is open in a
+# browser and connected (view_live), else on the page's file (the edits it carries; the viewer applies them when it is
+# opened or reloaded). The live link: an HTTP server of this process on 127.0.0.1 that a page connects to (EventSource);
+# it needs the token of this user (~/.cache/wavefw/live-token), which view_live writes into the page.
+LIVE_PORT = 8742   # the first port tried (WAVEFW_LIVE_PORT), then the next nine
+BRIDGE = []   # the one Bridge of this process, once a view tool started it
+
+
+def live_token():
+    """This user's token of the live link (made once, kept: a page that has it reconnects after a restart)."""
+    d = os.path.join(os.environ.get('XDG_CACHE_HOME') or os.path.expanduser('~/.cache'), 'wavefw')
+    p = os.path.join(d, 'live-token')
+    try:
+        with open(p, encoding='utf-8') as f:
+            t = f.read().strip()
+        if len(t) >= 16:
+            return t
+    except OSError:
+        pass
+    os.makedirs(d, exist_ok=True)
+    t = secrets.token_urlsafe(18)
+    fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w') as f:
+        f.write(t + '\n')
+    return t
+
+
+class LiveHandler(http.server.BaseHTTPRequestHandler):
+    """GET /events (server-sent events: the commands for the page), POST /hello (its viewers), POST /reply (the results);
+    the token in every request, an Origin of a file:// page ("null") or this machine only."""
+    bridge = None
+
+    def log_message(self, *a):   # stdout is the protocol, stderr is the agent's log: quiet
+        pass
+
+    def head(self, code, ctype='application/json', length=None):
+        self.send_response(code)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('Content-Type', ctype)
+        if length is not None:
+            self.send_header('Content-Length', str(length))
+        self.end_headers()
+
+    def answer(self, code, obj):
+        body = json.dumps(obj).encode()
+        self.head(code, length=len(body))
+        self.wfile.write(body)
+
+    def query(self):
+        return urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+
+    def allowed(self):
+        o = self.headers.get('Origin')
+        if o not in (None, 'null') and not re.fullmatch(r'https?://(127\.0\.0\.1|localhost|\[::1\])(:\d+)?', o):
+            return False
+        return hmac.compare_digest((self.query().get('token') or [''])[0].encode(), self.bridge.token.encode())
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
+
+    def do_GET(self):
+        path = urllib.parse.urlsplit(self.path).path
+        if path == '/':
+            return self.answer(200, {'wavefw': 'live'})
+        if path != '/events':
+            return self.answer(404, {'error': 'no such place'})
+        cid = (self.query().get('cid') or [''])[0]
+        if not self.allowed() or not re.fullmatch(r'[0-9a-z]{4,32}', cid):
+            return self.answer(403, {'error': 'not allowed'})
+        q = self.bridge.attach(cid)
+        self.head(200, 'text/event-stream')
+        try:
+            self.wfile.write(b'retry: 2000\n\n')
+            self.wfile.flush()
+            while not self.bridge.closed:
+                try:
+                    m = q.get(timeout=15)
+                except queue.Empty:
+                    self.wfile.write(b': ping\n\n')
+                    self.wfile.flush()
+                    continue
+                if m is None:
+                    break
+                self.wfile.write(('event: cmd\ndata: ' + json.dumps(m, ensure_ascii=False) + '\n\n').encode())
+                self.wfile.flush()
+        except OSError:   # the page went (closed, reloaded)
+            pass
+        finally:
+            self.bridge.detach(cid, q)
+
+    def do_POST(self):
+        path = urllib.parse.urlsplit(self.path).path
+        cid = (self.query().get('cid') or [''])[0]
+        if not self.allowed():
+            return self.answer(403, {'error': 'not allowed'})
+        try:
+            data = json.loads(self.rfile.read(min(int(self.headers.get('Content-Length') or 0), 64 << 20)) or b'{}')
+        except ValueError:
+            return self.answer(400, {'error': 'not JSON'})
+        if path == '/hello':
+            self.bridge.hello(cid, data)
+        elif path == '/bye':   # the page leaves (closed, reloaded)
+            self.bridge.drop(cid)
+        elif path == '/reply':
+            self.bridge.resolve(data.get('rid'), data.get('results'))
+        else:
+            return self.answer(404, {'error': 'no such place'})
+        self.answer(200, {})
+
+
+class Bridge:
+    """The live link of this process: the pages connected (by their cid: path, title, viewers, a queue of commands) and
+    the commands waiting for their answer."""
+
+    def __init__(self, port=None, token=None):
+        self.token, self.closed, self.clients, self.pending, self.rid = token or live_token(), False, {}, {}, 0
+        self.lock, self.changed = threading.Lock(), threading.Condition()
+        handler = type('Handler', (LiveHandler,), {'bridge': self})
+        first = port if port is not None else int(os.environ.get('WAVEFW_LIVE_PORT') or LIVE_PORT)
+        for p in [first] if port is not None else range(first, first + 10):
+            try:
+                self.httpd = http.server.ThreadingHTTPServer(('127.0.0.1', p), handler)
+                break
+            except OSError:
+                continue
+        else:
+            raise WaveError(f'the live link: no free port from {first} on (WAVEFW_LIVE_PORT)')
+        self.httpd.daemon_threads = True
+        self.port, self.started = self.httpd.server_address[1], time.monotonic()
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.closed = True
+        for c in list(self.clients.values()):
+            c['q'].put(None)
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+    def attach(self, cid):
+        with self.lock:
+            old = self.clients.get(cid)
+            if old:
+                old['q'].put(None)
+            self.clients[cid] = {'cid': cid, 'q': queue.Queue(), 'path': (old or {}).get('path'), 'title': (old or {}).get('title', ''),
+                                 'url': (old or {}).get('url', ''), 'views': (old or {}).get('views', []), 'at': time.monotonic()}
+            return self.clients[cid]['q']
+
+    def detach(self, cid, q):
+        with self.lock:
+            if cid in self.clients and self.clients[cid]['q'] is q:
+                del self.clients[cid]
+        with self.changed:
+            self.changed.notify_all()
+
+    def drop(self, cid):
+        with self.lock:
+            c = self.clients.pop(cid, None)
+        if c:
+            c['q'].put(None)
+        with self.changed:
+            self.changed.notify_all()
+
+    def hello(self, cid, data):
+        with self.lock:
+            c = self.clients.get(cid)
+            if c:
+                c.update(path=str(data.get('path') or ''), url=str(data.get('url') or ''), title=str(data.get('title') or ''),
+                         views=[v for v in data.get('views') or [] if isinstance(v, dict)], at=time.monotonic())
+        with self.changed:
+            self.changed.notify_all()
+
+    def pages(self):
+        """The connected pages that said who they are, the latest first."""
+        with self.lock:
+            return sorted((dict(c) for c in self.clients.values() if c.get('path') is not None), key=lambda c: -c['at'])
+
+    def wait(self, test, timeout):
+        """Until test() is true (a page connected), at most timeout s -> its value."""
+        end = time.monotonic() + timeout
+        with self.changed:
+            while True:
+                got = test()
+                left = end - time.monotonic()
+                if got or left <= 0:
+                    return got
+                self.changed.wait(left)
+
+    def send(self, cid, view, ops, timeout=10):
+        """The commands to a page's viewer -> their results (view.run), or a WaveError (LiveGone: no answer, the page is
+        taken for gone)."""
+        with self.lock:
+            c = self.clients.get(cid)
+            if not c:
+                raise WaveError('the page went (closed or reloaded): view_get lists the pages connected')
+            self.rid += 1
+            rid, ev = self.rid, threading.Event()
+            self.pending[rid] = [ev, None]
+            c['q'].put({'rid': rid, 'view': view, 'ops': ops})
+        if not ev.wait(timeout):
+            self.pending.pop(rid, None)
+            self.drop(cid)
+            raise LiveGone(f'the live page did not answer in {timeout} s (its tab closed?)')
+        got = self.pending.pop(rid)[1]
+        if isinstance(got, dict) and got.get('error'):
+            raise WaveError(got['error'])
+        return got
+
+    def resolve(self, rid, results):
+        p = self.pending.get(rid)
+        if p:
+            p[1] = results
+            p[0].set()
+
+
+class LiveGone(WaveError):
+    pass
+
+
+def bridge():
+    if not BRIDGE:
+        BRIDGE.append(Bridge())
+    return BRIDGE[0]
+
+
+def same_file(page_path, browser_path):
+    """A page's path here and the path a browser has of it (file:///C:/…, /mnt/c/…, //wsl.localhost/<distro>/…)."""
+    def norm(p):
+        p = urllib.parse.unquote(str(p)).replace('\\', '/')
+        m = re.match(r'^/?([a-zA-Z]):/(.*)$', p)
+        if m:
+            p = f'/mnt/{m.group(1).lower()}/{m.group(2)}'
+        d = os.environ.get('WSL_DISTRO_NAME')
+        if d and p.lower().startswith(f'/{d.lower()}/'):
+            p = p[len(d) + 1:]
+        return os.path.normcase(os.path.normpath(p)).lower()
+    return norm(page_path) == norm(browser_path)
+
+
+def page_arg(a):
+    p = a.get('page')
+    return os.path.abspath(os.path.expanduser(str(p))) if p else None
+
+
+def live_page(a, wait=0.0):
+    """The connected page the arguments name (page: its file; none: the only one) -> its client, or None."""
+    if not BRIDGE:
+        return None
+    path = page_arg(a)
+    pick = lambda: [c for c in BRIDGE[0].pages() if same_file(path, c['path'])] if path else BRIDGE[0].pages()
+    got = BRIDGE[0].wait(pick, wait) if wait else pick()
+    if not got:
+        return None
+    if not path and len({c['path'] for c in got}) > 1:
+        raise WaveError('several pages are live: give "page" (' + ', '.join(sorted({os.path.basename(c['path']) for c in got})) + ')')
+    return got[0]
+
+
+def live_view(c, view):
+    """The viewer of a live page: the one named, else the only one -> its {key, timed, …}."""
+    vs = c.get('views') or []
+    if view:
+        v = next((v for v in vs if v.get('key') == view), None)
+        if not v:
+            raise WaveError(f'no view "{view}" in the live page ({", ".join(x.get("key", "") for x in vs)})')
+        return v
+    if len(vs) != 1:
+        raise WaveError(f'the live page has {len(vs)} views: give "view" (' + ', '.join(x.get('key', '') for x in vs) + ')')
+    return vs[0]
+
+
+def ops_in(ops, timed):
+    """The agent's commands for a viewer: a time given as a number (ns) as a text in ns for timed waves."""
+    if isinstance(ops, dict):
+        ops = [ops]
+    if not isinstance(ops, list) or not ops:
+        raise WaveError('"ops": a list of commands, each {"op": name, …} (the list is in the tool\'s description)')
+    out = []
+    for o in ops:
+        if isinstance(o, dict) and timed:
+            o = dict(o)
+            for k in viewedit.TIME_ARGS.get(o.get('op'), ()):
+                if isinstance(o.get(k), (int, float)) and not isinstance(o.get(k), bool):
+                    o[k] = f'{o[k]}ns'
+        out.append(o)
+    return out
+
+
+def ns_out(results, timed):
+    """The results of the commands with the viewer's model times (ps) as ns: per command, the keys that are times."""
+    if not timed or not isinstance(results, list):
+        return results
+    t = lambda v: ns(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else v
+    keys = {'cursor': ('t',), 'cursor2': ('t',), 'edge': ('t',), 'view': ('from', 'to'), 'fit': ('from', 'to')}
+    out = []
+    for r in results:
+        if isinstance(r, dict) and 'error' not in r:
+            r = dict(r)
+            for k in keys.get(r.get('op'), ()):
+                if k in r:
+                    r[k] = t(r[k])
+            if r.get('op') == 'range' and isinstance(r.get('range'), list):
+                r['range'] = [t(x) for x in r['range']]
+            if r.get('op') == 'state' and isinstance(r.get('state'), dict):
+                r['state'] = state_ns(r['state'])
+        out.append(r)
+    return out
+
+
+def state_ns(st):
+    """A state's times (cursor, window, range, bookmarks, markers) as ns."""
+    t = lambda v: ns(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else v
+    st = dict(st)
+    for k in ('cursor', 'cursor2', 'from', 'to'):
+        if k in st:
+            st[k] = t(st[k])
+    if isinstance(st.get('range'), dict):
+        st['range'] = dict(st['range'], **{k: t(st['range'].get(k)) for k in ('from', 'to')})
+    for k in ('bookmarks', 'markers'):
+        if isinstance(st.get(k), list):
+            st[k] = [dict(x, t=t(x.get('t'))) if isinstance(x, dict) else x for x in st[k]]
+    return st
+
+
+def summary(st, timed, base=None):
+    """A viewer's state (a page's edits over its own, or a live viewer's) as the agent reads it: times in ns, what is
+    empty or default left out."""
+    ed = base or viewedit.Editor(viewedit.Model(), st)
+    t = (lambda v: ns(v) if isinstance(v, (int, float)) else v) if timed else (lambda v: v)
+    out, c = {}, st.get('config') or {}
+    if st.get('cursor') is not None:
+        out['cursor'] = t(st['cursor'])
+    if st.get('from') is not None and st.get('to') is not None:
+        out['window'] = [t(st['from']), t(st['to'])]
+    if st.get('cursor2') is not None:
+        out['cursor2'] = t(st['cursor2'])
+    if st.get('range'):
+        out['range'] = [t(st['range'].get('from')), t(st['range'].get('to'))] + ([st['range']['signal']] if st['range'].get('signal') else [])
+    bms = viewedit.bm_list(ed.bms())
+    if bms:
+        out['bookmarks'] = [dict(b, t=t(b['t'])) for b in bms]
+    ars = viewedit.ar_list(ed.ars())
+    if ars:
+        out['arrows'] = [dict(a, id=i + 1) for i, a in enumerate(ars)]
+    ms = st.get('markers') or []
+    if ms:
+        out['markers'] = [dict(m, id=i + 1, t=t(m.get('t'))) for i, m in enumerate(ms)]
+    if st.get('groups'):
+        out['groups'] = st['groups']
+    hl = ed.highlight()
+    if hl:
+        out['highlight'] = hl
+    for k in ('paint', 'radix', 'analog'):
+        if st.get(k):
+            out[k] = st[k]
+    if st.get('hidden'):
+        out['hidden'] = st['hidden']
+    fold = ed.fold()
+    if fold:
+        out['folded'] = fold
+    for k in ('select', 'find'):
+        if st.get(k):
+            out[k] = st[k]
+    if c.get('sort') not in (None, 'none'):
+        out['sort'] = c['sort']
+    if c.get('style') not in (None, 'auto'):
+        out['style'] = c['style']
+    return out
+
+
+def t_view_live(a):
+    b = bridge()
+    out = {'link': f'http://127.0.0.1:{b.port}'}
+    path = page_arg(a)
+    if path:
+        pg = viewedit.Page(path)
+        text = viewedit.put_block(pg.text, 'live', None if a.get('off') else {'port': b.port, 'token': b.token})
+        if text != pg.text:
+            viewedit.write_text(path, text)
+        out['page'] = path
+        if a.get('off'):
+            out['note'] = 'the page no longer connects (reload it)'
+        else:
+            url = 'file://' + urllib.parse.quote(path)
+            out['note'] = ('the page connects when opened or reloaded (it carries the key of this link: view_live off before you send it '
+                           'to anyone)')
+            if a.get('open'):
+                out['opened'] = open_browser(path)
+            got = live_page({'page': path}, wait=float(a.get('wait', 3 if a.get('open') else 0) or 0))
+            out['url'] = url
+            if not got:
+                out['note'] += '; not connected yet: ask the person to open or reload it'
+    out['pages'] = [{'page': c['path'], 'title': c['title'], 'views': [v.get('key') for v in c['views']]} for c in b.pages()]
+    return out
+
+
+def open_browser(path):
+    """The page in the person's browser (WSL: the Windows one) -> whether it was handed over."""
+    cands = []
+    if shutil.which('wslview'):
+        cands.append(['wslview', path])
+    if shutil.which('explorer.exe') and shutil.which('wslpath'):
+        try:
+            cands.append(['explorer.exe', subprocess.run(['wslpath', '-w', path], capture_output=True, text=True, timeout=5).stdout.strip()])
+        except (OSError, subprocess.SubprocessError):
+            pass
+    for opener in ('xdg-open', 'open'):
+        if shutil.which(opener):
+            cands.append([opener, path])
+    for cmd in cands:
+        try:
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        except OSError:
+            continue
+    return False
+
+
+def has_live_block(path):
+    try:
+        with open(path, encoding='utf-8') as f:
+            return bool(viewedit.LIVE_RE.search(f.read()))
+    except OSError:
+        return False
+
+
+def target(a):
+    """Where the view tools work: ('live', client, viewer) or ('file', path, None). A page that carries the live link
+    gets a moment to connect when the link has just started (with the first view tool of this server)."""
+    path = page_arg(a)
+    if path and not os.path.isfile(path):
+        raise WaveError(f'no such page: {path}')
+    linked = bool(path) and has_live_block(path)
+    if linked and not BRIDGE:
+        bridge()
+    c = live_page(a, wait=max(0.0, 3 - (time.monotonic() - BRIDGE[0].started)) if linked else 0)
+    if c:
+        return 'live', c, live_view(c, a.get('view'))
+    if not path:
+        raise WaveError('"page" is required: the .html (wave_page, make html) — no page is live (view_live connects one)')
+    return 'file', path, None
+
+
+def t_view_edit(a):
+    mode, where, v = target(a)
+    note = ''
+    if mode == 'live':
+        try:
+            return live_edit(a, where, v)
+        except LiveGone as e:   # the tab went: the file, when there is one
+            if not page_arg(a):
+                raise
+            where, note = page_arg(a), f' ({e})'
+    pg = viewedit.Page(where)
+    key = pg.view(a.get('view'))
+    timed = 'time' in pg.waves[key]
+    res, key, rev = viewedit.edit_page(where, ops_in(a.get('ops'), timed), key)
+    out = {'page': where, 'view': key, 'results': ns_out(res, timed),
+           'note': ('written into the page: the person sees it when they open or reload it' if rev else 'nothing changed') + note}
+    errs = sum(1 for r in out['results'] if isinstance(r, dict) and 'error' in r)
+    if errs:
+        out['errors'] = errs
+    return out
+
+
+def live_edit(a, where, v):
+    res = BRIDGE[0].send(where['cid'], v.get('key'), ops_in(a.get('ops'), v.get('timed')))
+    out = {'live': where['path'], 'view': v.get('key'), 'results': ns_out(res, v.get('timed'))}
+    if a.get('save'):
+        st = BRIDGE[0].send(where['cid'], v.get('key'), [{'op': 'state'}])[0]['state']
+        pg = viewedit.Page(where['path'] if os.path.isfile(where['path']) else page_arg(a))
+        key = pg.view(v.get('key'))
+        pg.put(key, {k: x for k, x in st.items() if k not in ('wavefw', 'version', 'title')})
+        pg.save()
+        out['saved'] = pg.path
+    errs = sum(1 for r in out['results'] if isinstance(r, dict) and 'error' in r)
+    if errs:
+        out['errors'] = errs
+    return out
+
+
+def t_view_get(a):
+    mode, where, v = target(a)
+    if mode == 'live':
+        try:
+            return live_get(a, where, v)
+        except LiveGone:
+            if not page_arg(a):
+                raise
+            where = page_arg(a)
+    pg = viewedit.Page(where)
+    key = pg.view(a.get('view'))
+    m = pg.model(key)
+    ed = viewedit.Editor(m, pg.state(key))
+    out = {'page': where, 'view': key, 'views': list(pg.waves), 'edits': pg.rev(key)}
+    out.update((state_ns(ed.st) if m.timed else ed.st) if a.get('full') else summary(ed.st, m.timed, ed))
+    if a.get('rows') is not None:
+        out['rows'] = ed.c_rows({'pattern': a['rows'] or '', 'limit': a.get('limit') or 200})
+    if a.get('picture'):
+        out['note'] = 'a picture needs the page live (view_live)'
+    return out
+
+
+def live_get(a, where, v):
+    ops = [{'op': 'state'}]
+    if a.get('rows') is not None:
+        ops.append({'op': 'rows', 'pattern': a['rows'] or '', 'limit': a.get('limit') or 200})
+    res = BRIDGE[0].send(where['cid'], v.get('key'), ops)
+    st = res[0]['state']
+    out = {'live': where['path'], 'view': v.get('key'), 'views': [x.get('key') for x in where['views']]}
+    out.update((state_ns(st) if v.get('timed') else st) if a.get('full') else summary(st, v.get('timed')))
+    if a.get('rows') is not None:
+        out['rows'] = {k: x for k, x in res[1].items() if k != 'op'}
+    if a.get('picture'):
+        pic = BRIDGE[0].send(where['cid'], v.get('key'), [{'op': 'picture', 'format': 'png'}])[0]
+        if pic.get('error'):
+            raise WaveError(pic['error'])
+        return Image(pic['png'], out)
+    return out
+
+
+class Image:
+    """A tool's answer with a picture (MCP image content) and its JSON."""
+
+    def __init__(self, png, data):
+        self.png, self.data = png, data
+
+
 # ---------------- the tool list ----------------
 # The schemas go into the agent's context on every request: short, the conventions (names, times, sampling) once in
 # INSTRUCTIONS; a parameter described only where its name does not say it (tests/mcp_bench.py measures the cost).
@@ -710,6 +1250,18 @@ TOOLS = [
          '(name or "auto"): a cell per cycle, auto_gap "16:2" folds idle cycles; sva files + bind ["name@scope"].',
          {'dump': None, 'signals': None, 'out': S, 'clock': S, 'from': None, 'to': None, 'scope': None, 'auto_gap': S, 'sva': L,
           'bind': L, 'title': S}, ('dump', 'signals', 'out'), ro=False),
+    tool('view_edit', t_view_edit, 'Mark up a wavefw page for a person (live in their browser when connected by view_live, else in the '
+         'page file: they reload it). ops in order, each {op, …}: ' + ' '.join(f'{k}({v})' for k, v in viewedit.COMMANDS.items()
+                                                                                  if k not in ('state', 'set_state', 'rows', 'picture')) +
+         '. t/from/to in ns; signals: path, name, path tail or * pattern; bookmark: a numbered circle with a text (no signal: on the time '
+         'axis); arrow from/to: bookmark numbers; group: a folder of signals at the top; edge (live): the cursor to the next edge.',
+         {'page': S, 'view': S, 'ops': {'type': 'array', 'items': {'type': 'object'}}, 'save': B}, ('ops',), ro=False),
+    tool('view_get', t_view_get, 'What a page shows: bookmarks, arrows, markers, groups, highlight, colours, hidden, cursor, window (live: '
+         'with the person\'s own edits). rows: list its signals (a pattern, "" all); picture: a PNG of the screen (live).',
+         {'page': S, 'view': S, 'rows': S, 'limit': N, 'picture': B, 'full': B}, ()),
+    tool('view_live', t_view_live, 'Connect a page to this server: it is written into the page (open or reload it), then view_edit and '
+         'view_get work on it live; open: open it in the browser; off: disconnect. Without page: the pages connected.',
+         {'page': S, 'open': B, 'off': B}, (), ro=False),
 ]
 BY_NAME = {t['name']: t for t in TOOLS}
 
@@ -722,8 +1274,9 @@ def compact(obj):
     return json.dumps(obj, separators=(',', ':'), ensure_ascii=False)
 
 
-def call(name, args):
-    """A tool by name -> (text, is error). Everything the libraries print goes to stderr (stdout is the protocol)."""
+def call(name, args, images=None):
+    """A tool by name -> (text, is error); a picture it gives goes to images (a list; none: left out). Everything the
+    libraries print goes to stderr (stdout is the protocol)."""
     t = BY_NAME.get(name)
     if not t:
         return f'unknown tool {name}; the tools: {", ".join(BY_NAME)}', True
@@ -732,6 +1285,10 @@ def call(name, args):
     try:
         with contextlib.redirect_stdout(sys.stderr):
             got = t['fn'](args or {})
+            if isinstance(got, Image):
+                if images is not None:
+                    images.append(got.png)
+                got = got.data
             if NOTES and isinstance(got, dict):
                 got['notes'] = sorted(set(NOTES))
             if MISSING and isinstance(got, dict):
@@ -766,8 +1323,9 @@ def handle(msg):
     if method == 'tools/list':
         return ok({'tools': listing()})
     if method == 'tools/call':
-        text, err = call(p.get('name'), p.get('arguments'))
-        return ok({'content': [{'type': 'text', 'text': text}], 'isError': err})
+        png = []
+        text, err = call(p.get('name'), p.get('arguments'), png)
+        return ok({'content': [{'type': 'text', 'text': text}] + [{'type': 'image', 'data': x, 'mimeType': 'image/png'} for x in png], 'isError': err})
     return {'jsonrpc': '2.0', 'id': mid, 'error': {'code': -32601, 'message': f'method not found: {method}'}}
 
 

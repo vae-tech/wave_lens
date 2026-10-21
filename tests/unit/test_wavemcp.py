@@ -112,6 +112,94 @@ class Dump(unittest.TestCase):
         self.assertIn('did not evaluate', self.error('wave_find', expr='s_tvalid &&', scope='tb.dut'))
 
 
+class Views(unittest.TestCase):
+    """view_edit / view_get on a page's file, and live through the bridge with a page played here (its stream, hello,
+    replies): the token, the Origin, a page that goes."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.d = H.tmp()
+        cls.page = os.path.join(cls.d.name, 'p.html')
+        j = os.path.join(cls.d.name, 'v.json')
+        with open(j, 'w', encoding='utf-8') as f:
+            json.dump({'signal': [{'name': 'clk', 'wave': 'p.......'}, ['tb', {'name': 'valid', 'wave': '0.1.0...'}]],
+                       'time': {'t0': 0, 't1': 80000, 'cycle': 10000, 'unit': 'ps'}}, f)
+        rc, _, err = H.run_tool('mkhtml', f'one={j}', '--no-sva', '--out', cls.page)
+        assert rc == 0, err
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.d.cleanup()
+
+    def tearDown(self):
+        for b in W.BRIDGE:
+            b.close()
+        W.BRIDGE.clear()
+
+    def call(self, tool, **a):
+        text, err = W.call(tool, a)
+        self.assertFalse(err, text)
+        return json.loads(text)
+
+    def test_file(self):
+        r = self.call('view_edit', page=self.page, ops=[{'op': 'bookmark', 't': 25, 'signal': 'valid', 'text': 'see'},
+                                                        {'op': 'view', 'from': 10, 'to': '0.05us'}, {'op': 'cursor', 't': 'x'}])
+        self.assertEqual((r['view'], r['results'][:2], r['errors']), ('one', [{'op': 'bookmark', 'n': 1}, {'op': 'view', 'from': 10, 'to': 50}], 1))
+        g = self.call('view_get', page=self.page, rows='')
+        self.assertEqual((g['bookmarks'], g['window'], g['rows']['total']), ([{'n': 1, 't': 25, 'signal': 'tb.valid', 'text': 'see'}], [10, 50], 3))
+        self.assertTrue(g['edits'].startswith('r1@'))
+        self.assertIn('"page" is required', W.call('view_edit', {'ops': [{'op': 'fit'}]})[0])
+        self.assertIn('"ops": a list of commands', W.call('view_edit', {'page': self.page, 'ops': []})[0])
+
+    def fake_page(self, b, path, cid='abcd1234', answer=True):
+        """A page as a browser has it: the stream of commands, its hello, an answer (the ops echoed) to each command."""
+        import threading, urllib.request
+        base, q = f'http://127.0.0.1:{b.port}', f'token={b.token}&cid={cid}'
+        stream = urllib.request.urlopen(f'{base}/events?{q}', timeout=10)
+        post = lambda where, body: urllib.request.urlopen(urllib.request.Request(f'{base}/{where}?{q}', data=json.dumps(body).encode()), timeout=5).read()
+        post('hello', {'path': path, 'title': 't', 'views': [{'key': 'one', 'timed': True}]})
+        def run():
+            for line in stream:
+                if line.startswith(b'data: ') and answer:
+                    m = json.loads(line[6:])
+                    post('reply', {'rid': m['rid'], 'results': [dict(o, seen=True) for o in m['ops']]})
+        threading.Thread(target=run, daemon=True).start()
+        return post
+
+    def test_live(self):
+        import urllib.error, urllib.request
+        b = W.Bridge(port=0, token='t' * 20)
+        W.BRIDGE.append(b)
+        post = self.fake_page(b, self.page)
+        r = self.call('view_edit', page=self.page, ops=[{'op': 'cursor', 't': 30}, {'op': 'arrow', 'from': 1, 'to': 2}])
+        self.assertEqual(r['results'], [{'op': 'cursor', 't': '30ns', 'seen': True}, {'op': 'arrow', 'from': 1, 'to': 2, 'seen': True}])   # ns as text
+        self.assertEqual(r['live'], self.page)
+        self.assertEqual(self.call('view_live')['pages'], [{'page': self.page, 'title': 't', 'views': ['one']}])
+        for url, hdr in ((f'http://127.0.0.1:{b.port}/events?token=wrong&cid=abcd', {}),
+                         (f'http://127.0.0.1:{b.port}/events?token={b.token}&cid=abcd', {'Origin': 'https://evil.example'})):
+            with self.assertRaises(urllib.error.HTTPError) as e:
+                urllib.request.urlopen(urllib.request.Request(url, headers=hdr), timeout=5)
+            self.assertEqual(e.exception.code, 403)
+        post('bye', {})   # the page leaves: the file again
+        self.assertEqual(self.call('view_live')['pages'], [])
+        r = self.call('view_edit', page=self.page, ops=[{'op': 'marker', 't': 5}])
+        self.assertEqual((r['page'], r['results']), (self.page, [{'op': 'marker', 'id': 1}]))
+
+    def test_live_gone(self):
+        b = W.Bridge(port=0, token='t' * 20)
+        W.BRIDGE.append(b)
+        self.fake_page(b, self.page, answer=False)
+        with self.assertRaisesRegex(W.LiveGone, 'did not answer in 0.3 s'):
+            b.send('abcd1234', 'one', [{'op': 'state'}], timeout=0.3)
+        self.assertEqual(b.pages(), [])   # taken for gone
+
+    def test_paths(self):
+        self.assertTrue(W.same_file('/mnt/c/Users/x/p.html', '/C:/Users/x/p.html'))
+        self.assertTrue(W.same_file('/mnt/c/Users/x/p.html', 'C:\\Users\\x\\p.html'))
+        self.assertTrue(W.same_file('/tmp/a b.html', '/tmp/a%20b.html'))
+        self.assertFalse(W.same_file('/tmp/a.html', '/tmp/b.html'))
+
+
 class Protocol(unittest.TestCase):
     def talk(self, *msgs):
         out = io.StringIO()
@@ -131,8 +219,8 @@ class Protocol(unittest.TestCase):
         names = [t['name'] for t in r[1]['result']['tools']]
         self.assertEqual(names[0], 'wave_info')
         self.assertTrue(all('fn' not in t and t['inputSchema']['type'] == 'object' for t in r[1]['result']['tools']))
-        # codex exec calls a tool without approval only when it says it reads: every tool but wave_page (it writes a file)
-        self.assertEqual([t['name'] for t in r[1]['result']['tools'] if not t['annotations']['readOnlyHint']], ['wave_page'])
+        # codex exec calls a tool without approval only when it says it reads: every tool but the ones that write a file
+        self.assertEqual([t['name'] for t in r[1]['result']['tools'] if not t['annotations']['readOnlyHint']], ['wave_page', 'view_edit', 'view_live'])
         arrays = [(t['name'], k) for t in r[1]['result']['tools'] for k, v in t['inputSchema']['properties'].items()
                   if 'array' in str(v.get('type')) and 'items' not in v]
         self.assertEqual(arrays, [])   # an array without items is refused by OpenAI's function schemas

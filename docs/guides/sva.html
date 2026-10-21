@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Assertions · wavefw guides</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="guide.css">
+</head>
+<body>
+<header class="top"><nav>
+  <a class="home" href="index.html">wavefw guides</a>
+  <a href="pages.html">Dump → page</a> <a href="viewer.html">Viewer</a> <a href="gaps.html">Gaps</a> <a href="sva.html" aria-current="page">Assertions</a>
+  <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
+</nav></header>
+<div class="page toc-side">
+<main>
+<header class="hero"><div class="kicker">Guide</div><h1>Assertions (SVA)</h1>
+<p class="lead">Write SystemVerilog assertions, bind them to an instance of the waveform and see every attempt on the waves: where it
+  started, which steps matched, where and why it failed. The same results come out of the command line as Markdown, JSON, JUnit
+  XML or HTML for CI.</p></header>
+
+<figure><img src="img/sva-attempt.png" alt="The APB example with the failing attempt of apb_demo_no_wait selected" loading="lazy">
+<figcaption><b>A failure on the waves.</b> <code>apb_demo_no_wait</code> (<code>PSEL &amp;&amp; PENABLE |-&gt; PREADY</code>, wrong on
+  purpose) is bound to <code>apb_tb</code>; its failing attempt at 105 ns is selected: the cursor is on it, its numbered circles sit on
+  <code>PSEL</code>, <code>PENABLE</code> and <code>PREADY</code>, the flag <code>▶ ✕ fail</code> marks its start and end, the red
+  <code>expected PREADY</code> is the reason. Under the signals the assertion's own group: the attempts and a row per step.</figcaption></figure>
+
+<h2 id="what">What it does</h2>
+<p>An assertion is checked over a dump, not in a simulator. You load assertion files (any SystemVerilog: checker modules, packages,
+  <code>bind</code> statements; the parser takes what assertions need and skips the rest) and <em>bind</em> an assertion to an
+  instance of the waveform — a scope path such as <code>apb_tb</code> or <code>tb.dut.u_fifo</code>. Its signal names are looked up
+  in that instance, it is evaluated on every edge of its clock, and every <em>attempt</em> (one per clock tick where it starts) gets
+  a result:</p>
+<table>
+  <tr><th>Result</th><th>Meaning</th></tr>
+  <tr><td>pass</td><td>the property held for this attempt</td></tr>
+  <tr><td>fail</td><td>it did not; the attempt carries the cycle where it failed and a reason (<code>expected PREADY at cycle 10</code>,
+    <code>no ack within [1:3]</code>)</td></tr>
+  <tr><td>vacuous</td><td>the antecedent of an implication did not match, so there was nothing to check (counted, not drawn)</td></tr>
+  <tr><td>disabled</td><td>the <code>disable iff</code> condition was true during the attempt</td></tr>
+  <tr><td>active</td><td>not ended: the dump ended before a verdict</td></tr>
+  <tr><td>capped</td><td>no verdict: the thread limit dropped some of its threads (<code>--max-threads</code>, default 256)</td></tr>
+</table>
+<p>Two engines give the same results from one Rust code base: in the page as WebAssembly (<code>wavefw/sva.js</code> +
+  <code>wavefw/sva.wasm.js</code>), and the <code>sva</code> command line (<code>bin/linux-x86_64/sva</code>, or <code>make
+  sva-build</code>), which <code>mkhtml.py</code> uses when it builds a page, so the page opens with the results already there.</p>
+
+<h3 id="subset">The subset</h3>
+<p>Concurrent <code>assert</code> / <code>assume</code> / <code>cover property</code> with clocking (<code>@(posedge clk)</code>,
+  <code>default clocking</code>), <code>disable iff</code> (and <code>default disable iff</code>), <code>|-&gt;</code> <code>|=&gt;</code>,
+  <code>##n</code> <code>##[m:n]</code> <code>##[m:$]</code>, <code>[*n]</code> <code>[*m:n]</code> <code>[-&gt;n]</code>
+  <code>[=n]</code>, <code>and or intersect within throughout first_match not</code>, <code>if</code>/<code>else</code>,
+  <code>nexttime always eventually s_eventually</code>, <code>$rose $fell $stable $past $changed</code>, <code>$onehot $onehot0
+  $isunknown $countones</code>, named <code>sequence</code> / <code>property</code> with arguments, packages, enums, parameters, macros,
+  <code>`ifdef</code> — in modules, checkers, interfaces and programs. Values are 4-state. Not in it: <code>until</code> and friends,
+  local variables, multi-clock properties, <code>accept_on</code> / <code>reject_on</code>, immediate assertions. A construct outside
+  the subset is an error that names it and its position; the rest of the file still loads. The full grammar:
+  <a href="../sva/LANGUAGE.md">docs/sva/LANGUAGE.md</a>; how attempts are evaluated: <a href="../sva/ENGINE.md">docs/sva/ENGINE.md</a>.</p>
+
+<h2 id="write">Writing a checker</h2>
+<p>The APB example (<code>examples/apb/apb.sva</code>) is a checker module whose ports connect by name to the testbench, with one
+  assertion that is wrong on purpose so a failure shows. An excerpt:</p>
+<pre><code><span class="c">// The two bus phases of APB3, as seen on PSEL / PENABLE.</span>
+`define SETUP  (PSEL &amp;&amp; !PENABLE)
+`define ACCESS (PSEL &amp;&amp; PENABLE)
+
+module apb_checks import apb_pkg::*; (
+    input logic        PCLK,
+    input logic        PRESETn,
+    input logic        PSEL,
+    input logic        PENABLE,
+    input logic        PREADY,
+    input logic [7:0]  PADDR,
+    input phase_t      phase
+    <span class="c">// …</span>
+);
+    default clocking @(posedge PCLK); endclocking
+    default disable iff (!PRESETn);
+
+    <span class="c">// Operating states: SETUP lasts one cycle and always moves to ACCESS.</span>
+    apb_setup_then_access: assert property (`SETUP |=&gt; `ACCESS)
+        else $error("APB: SETUP not followed by ACCESS");
+
+    <span class="c">// A read of a mapped register takes two wait states, then PREADY.</span>
+    apb_read_waits: assert property (
+        `SETUP &amp;&amp; !PWRITE &amp;&amp; PADDR[7:4] == 0 &amp;&amp; PADDR[1:0] == 0 |=&gt;
+            !PREADY[*2] ##1 PREADY
+    );
+
+    <span class="c">// Deliberately wrong (the slave has read wait states): shows a fail trace.</span>
+    apb_demo_no_wait: assert property (`ACCESS |-&gt; PREADY)
+        else $error("demo: a wait state");
+
+    <span class="c">// A read with its two wait states.</span>
+    apb_cov_read_wait: cover property (
+        `SETUP &amp;&amp; !PWRITE ##1
+        (`ACCESS &amp;&amp; !PREADY)[*2] ##1
+        PREADY
+    );
+endmodule
+
+bind apb_tb apb_checks u_apb_checks (.*);</code></pre>
+<p>Check that it parses before you go further: <code>sva parse examples/apb/apb_tb.sv examples/apb/apb.sva</code>. The files are one
+  compilation unit, in order: the testbench comes first because it declares <code>apb_pkg</code> (the enum <code>phase_t</code>).</p>
+<div class="note"><p>Each assertion needs a label (<code>apb_read_waits:</code>): it is the name you bind, search and see in the panel. The
+  labels of every loaded file share one list; the same label in a second module becomes <code>module.label</code>.</p></div>
+
+<h2 id="bind">Loading and binding</h2>
+<h3>In the config</h3>
+<p>List the files and the bindings in the config file; <code>"assert"</code> may be a <code>*</code> pattern, <code>"scope"</code> is
+  an instance path (<code>""</code>: the top of the view):</p>
+<pre><code>"sva":  ["apb_tb.sv", "apb.sva"],
+"bind": [{ "assert": "*", "scope": "apb_tb" }]</code></pre>
+<p>That is what <code>examples/apb/apb.config.json</code> has. <code>mkhtml.py</code> parses the files (<code>sva parse --json</code>; a
+  parse error becomes a note in the page, not a failed build) and evaluates every binding over the dump, so the page opens with the
+  assertions bound and drawn. <code>"sva": false</code> (or <code>mkhtml.py --no-sva</code>) leaves the engine out of the page
+  (about 410 kB).</p>
+
+<h3>On the command line</h3>
+<pre><code>make html WAVES=work/x.vcd SVA="checks/*.sv" BIND="a_req_ack@tb.dut,apb_*@tb.u_apb"   <span class="c"># bound and evaluated</span>
+make config WAVES=work/x.vcd SVA="checks/*.sv"                                       <span class="c"># writes "sva" and "bind" lines</span></code></pre>
+<p><code>make config … SVA=</code> (<code>mkconfig.py --sva</code>) matches every assertion against every instance of the dump and
+  writes one <code>"bind"</code> line per assertion and instance where all its signals resolve; <code>"show": true</code> when that
+  instance is the only one, else <code>false</code> with the number of candidates in a <code>"comment"</code> — set
+  <code>"show": true</code> on the ones you want. Run it again and your choices, your own lines and keys stay.</p>
+
+<h3>In the page</h3>
+<p>Every viewer has an <span class="ui">assertions</span> group in its bar: <span class="ui">Load file…</span> reads more
+  <code>.sv</code> / <code>.sva</code> files into this browser. Then bind a loaded assertion in one of two ways:</p>
+<ul>
+  <li><b>Drag</b> its line from the panel onto a module in the names column. While you drag, the modules that have all its signals turn
+    green; the others fade and say what they miss.</li>
+  <li><b>Bind…</b> on its line lists those instances; click one.</li>
+</ul>
+<figure><img src="img/sva-bind.png" alt="Bind… open under apb_setup_then_access: bind to apb_tb" loading="lazy">
+<figcaption><b>Bind….</b> Under the assertion the instances where every signal of it resolves (here only <code>apb_tb</code>); ✕
+  closes the list. When no instance has them, it says so: <code>no instance has PSEL, PENABLE</code>.</figcaption></figure>
+
+<h3 id="names">How names resolve</h3>
+<p>One rule everywhere — the page, <code>mkconfig.py --sva</code> and <code>sva eval --resolve scope</code> — so a binding that works
+  in one works in the others. A name <code>n</code> of an assertion bound to instance <code>S</code> is, in this order:</p>
+<ol>
+  <li>the variable <code>S.n</code>;</li>
+  <li>the signal shown as <code>n</code> (an <code>"alias"</code> of the config);</li>
+  <li>the variable whose name without the ignored prefixes (<code>sortIgnore</code>, e.g. <code>["i_", "o_", "s_"]</code>) equals
+    <code>n</code> without them: <code>valid</code> finds <code>s_valid</code>. Two candidates (<code>i_valid</code> and
+    <code>o_valid</code>) are an error naming both, never a guess.</li>
+</ol>
+<p><code>u_fifo.full</code> is looked up below <code>S</code>. Only the clock may come from a scope above. A select wider than the
+  signal (<code>data[15:8]</code> of an 8-bit <code>data</code>) does not bind. A binding that cannot resolve shows <i>cannot bind:
+  missing …</i> on its line.</p>
+
+<h2 id="panel">The assertions panel</h2>
+<p>The panel sits under the bar. Folded it is one line, <span class="ui">▸ Assertions</span> with the number loaded (setting
+  <code>svaOpen</code>: open when the page opens); the bar's <span class="ui">go to</span> group has a button per failure (at most
+  six).</p>
+<figure><img src="img/sva-page.png" alt="The viewer bar with the go to failure buttons and the folded assertions panel" loading="lazy">
+<figcaption><b>Folded.</b> <span class="ui">go to</span>: the two failures of <code>apb_demo_no_wait</code> (105 ns, 115 ns); the
+  <span class="ui">expression</span> field; <span class="ui">Load file…</span> in <span class="ui">assertions</span>; the panel's
+  header with <span class="ui">Watch</span>, <span class="ui">JSON</span>, <span class="ui">Clear</span>, <span class="ui">Table</span>,
+  <span class="ui">Failures</span>, <span class="ui">report.md</span>, <span class="ui">report.json</span>.</figcaption></figure>
+<figure><img src="img/sva-panel.png" alt="The assertions panel open: a totals line and one entry per assertion" loading="lazy">
+<figcaption><b>Open.</b> The totals of the view, then two lines per numbered assertion: its name and the instance it is bound to
+  with its buttons; under them its kind, its property (wrapped at its operators) and the results.</figcaption></figure>
+
+<table>
+  <tr><th>Part</th><th>What it is</th></tr>
+  <tr><td>totals</td><td><code>14 loaded · 14 bound · 1 with failures · 198 attempts: 46 pass, 2 fail, 150 vacuous · 3 of 3 covers
+    hit</code> — over this view's waves (here 0–200 ns; the command line counts the whole dump)</td></tr>
+  <tr><td>⠿ #</td><td>the grip to drag the line onto a module, and its number</td></tr>
+  <tr><td>name, kind, property</td><td>the label, <code>ASSERT</code> / <code>ASSUME</code> / <code>COVER</code>, the property text; the
+    tooltip of the property gives the file, the line and the signals it needs</td></tr>
+  <tr><td>bound to</td><td>the instance path (green when bound), <i>unbound</i>, or <i>cannot bind</i> with what is missing; ⓘ when the
+    binding has notes</td></tr>
+  <tr><td>results</td><td><code>3 pass · 2 fail · 13 vacuous</code> (covers: their hits). A count is a link: click
+    <code>2 fail</code> to show only those attempts on the waves and list them under the line (the first 200)</td></tr>
+  <tr><td><span class="ui">Bind…</span></td><td>the instances where all its signals are (above)</td></tr>
+  <tr><td><span class="ui">✎</span></td><td>edit the assertion here (see <a href="#edit">Edit and run again</a>)</td></tr>
+  <tr><td><span class="ui">⟳</span></td><td>read its file from the disk again</td></tr>
+  <tr><td><span class="ui">✕</span></td><td>remove the assertion from the list, with its bindings</td></tr>
+  <tr><td><span class="ui">Evaluate</span></td><td>run the binding again over the waves of this view (in a Web Worker when it is long)</td></tr>
+  <tr><td><span class="ui">Go to first failure</span></td><td>select its first failing attempt</td></tr>
+  <tr><td><span class="ui">Unbind</span></td><td>remove this binding; the assertion stays loaded</td></tr>
+  <tr><td><span class="ui">Watch</span></td><td>check every second the files read with ⟳ and evaluate them again when one changes (Chrome /
+    Edge: the File System Access API)</td></tr>
+  <tr><td><span class="ui">JSON</span></td><td>the <code>"bind"</code> list (and the <code>"exprs"</code>) to paste into the config;
+    copied to the clipboard</td></tr>
+  <tr><td><span class="ui">Clear</span></td><td>forget this browser's files and bindings for the page; the page's own come back</td></tr>
+  <tr><td><span class="ui">Table</span>, <span class="ui">Failures</span></td><td>the numbers (see <a href="#numbers">Numbers</a>)</td></tr>
+  <tr><td><span class="ui">report.md</span>, <span class="ui">report.json</span></td><td>download the report of this view's bindings: the
+    tables as Markdown, or the results with the page's meta (what <code>sva report</code> reads)</td></tr>
+</table>
+<p>With several bindings of one assertion, each gets a line of its own under it (instance, results, buttons). Loaded files, bindings and
+  small results are kept in this browser over a reload.</p>
+
+<h2 id="waves">On the waves</h2>
+<p>Every bound assertion is a group directly under the instance it is bound to: <b>⚑ name · 3 pass · 2 fail</b>, red when it fails,
+  foldable, found by <span class="ui">find</span> like a module. Inside:</p>
+<ul>
+  <li><b>attempts</b> — a bracket per attempt from its first to its last cycle: green pass; a failure green up to its last matched step
+    and red from there to where it failed; grey disabled; an active (not ended) or capped one open at its end, striped. Where attempts
+    crowd they become bars; three rows, more merged with a count. A thin strip above has one mark per cycle, so a failure is a red tick
+    even with the whole dump in view. The value column shows the attempt at the cursor.</li>
+  <li><b>a row per step</b> of the sequence (<code>1. PSEL &amp;&amp; PENABLE</code>, <code>2. PREADY</code>): a numbered circle at every
+    match, a red ✕ where an attempt failed.</li>
+  <li><b>arrows</b> along an attempt's steps with the cycles between them (<code>2T</code>), and a dashed red one to the failure with its
+    reason. Drawn for every attempt on screen when there are fewer than 20, else for the selected one.</li>
+  <li><b>the bound signals again</b> (<code>= PCLK</code>, <code>= PSEL</code> …), so the steps and the signals they read are side by side;
+    setting <code>svaSignals</code>: <code>"view"</code> (default, in viewers), <code>true</code> (also static SVGs), <code>false</code>.</li>
+</ul>
+<figure><img src="img/sva-group.png" alt="The group of apb_demo_no_wait with its attempts, steps and the bound signals repeated" loading="lazy">
+<figcaption><b>The assertion's group.</b> <code>⚑ apb_demo_no_wait</code> under <code>apb_tb</code>: attempts (green passes, the two red
+  failures), the steps <code>1. PSEL &amp;&amp; PENABLE</code> and <code>2. PREADY</code> with their circles and ✕, then
+  <code>= PCLK</code>, <code>= PRESETn</code>, <code>= PSEL</code>, <code>= PENABLE</code>, <code>= PREADY</code>.</figcaption></figure>
+
+<h3 id="select">Selecting an attempt</h3>
+<p>Click a bracket or a circle (or a failure in the panel, a <span class="ui">go to</span> button, <kbd>]f</kbd>): the attempt is
+  <b>selected</b>. The cursor goes to its start and the view moves to it at the same zoom; its circles and arrows come to the front,
+  the signals it read are highlighted, and its circles are drawn on those signals too — the names in the step's label, so
+  <code>1. PSEL &amp;&amp; PENABLE</code> puts a <b>1</b> on <code>PSEL</code> and on <code>PENABLE</code>. Its start and end are dashed
+  lines across the rows with flags in the group's band: <code>▶ start</code> and how it ended — <code>✓ pass</code>,
+  <code>✕ fail</code>, <code>… not ended</code>, <code>⊘ disabled</code>, <code>… capped</code> (one flag, <code>▶ ✕ fail</code>, when it
+  starts and ends in one cycle, as in the first picture). The title line says it in words: <code>apb_demo_no_wait: fail at 105.0 ns —
+  expected PREADY at cycle 10</code>. <kbd>Esc</kbd> clears it.</p>
+
+<h3 id="navigate">Going from one to the next</h3>
+<table>
+  <tr><th>Do</th><th>Goes to</th></tr>
+  <tr><td>click a line of the panel</td><td>that assertion: its group opens with its first failure (else its first pass) selected, the
+    attempt in the middle of the window; click again for its next attempt</td></tr>
+  <tr><td><kbd>]a</kbd> / <kbd>[a</kbd></td><td>the next / previous assertion (its first failure, else its first pass)</td></tr>
+  <tr><td><kbd>]f</kbd> / <kbd>[f</kbd></td><td>the next / previous failure of any assertion</td></tr>
+  <tr><td><span class="ui">go to</span> buttons</td><td>a failure each (at most six)</td></tr>
+  <tr><td><kbd>Esc</kbd></td><td>clears the selection (and the search, the highlight)</td></tr>
+</table>
+<p>The keys work once the waves have the focus (click the waves or a name). With more than three assertions on one instance the ones
+  without failures start folded; <code>"svaShow": ["apb_*"]</code> limits which are drawn at all.</p>
+
+<h2 id="why">Why: an attempt taken apart</h2>
+<p>With an attempt selected the panel shows <b>Why</b>: the assertion's booleans — its steps, an <code>if</code> condition,
+  <code>disable iff</code> — each taken apart into its operands (<code>PSEL &amp;&amp; PENABLE</code> → <code>PSEL</code>,
+  <code>PENABLE</code>; <code>$rose(req)</code> → <code>req</code>), one column per cycle of the attempt (at most 64). 1 is green, 0
+  grey, x red, buses in hex. A ringed cell is where a step matched, the red one is where the attempt failed: the operand that broke
+  it is read off directly. Click a cycle's header to put the cursor there; ✕ or <kbd>Esc</kbd> closes it.</p>
+<figure><img src="img/sva-why.png" alt="Why of attempt 2 of apb_demo_no_wait: PREADY 0 at cycle 10" loading="lazy">
+<figcaption><b>Why.</b> Attempt 2 of <code>apb_demo_no_wait</code>, one cycle (10): the antecedent <code>PSEL &amp;&amp; PENABLE</code>
+  matched (ringed 1, both operands 1), the consequent <code>PREADY</code> is 0 (red), <code>!PRESETn</code> of <code>disable iff</code> is
+  0, so the attempt was not disabled — the slave is in a wait state.</figcaption></figure>
+
+<h2 id="edit">Edit and run again</h2>
+<p>You do not need to rebuild the page to change a check.</p>
+<ol class="steps">
+  <li>Press <span class="ui">✎</span> on the assertion's line. Its statement opens under the line — from its label to the
+    <code>;</code>, with the <code>else $error(…)</code>.</li>
+  <li>Change it and press <span class="ui">Apply</span> (<kbd>ctrl</kbd>+<kbd>Enter</kbd>). Its file is parsed again in the page and
+    only the bindings of the assertions whose text changed are evaluated again; the others keep their results. The attempts, steps and
+    arrows on the waves follow.</li>
+  <li>A text that does not parse is not applied: the editor keeps it and says where it stops.</li>
+  <li>The edited file is this browser's copy, kept over a reload; the lines that differ from the page's file are marked
+    <b>edited</b>. <span class="ui">Revert to the page's</span> in the editor (or <span class="ui">Clear</span>) brings the page's file
+    back. Copy the text into your source when you are happy with it.</li>
+</ol>
+<figure><img src="img/sva-edit.png" alt="The editor of apb_demo_no_wait open under its line" loading="lazy">
+<figcaption><b>✎ open.</b> The statement of <code>apb_demo_no_wait</code> in a text box, <span class="ui">Apply</span>,
+  <span class="ui">Cancel</span>, and where it comes from: <code>apb.sva:110</code>.</figcaption></figure>
+<p>To work in your own editor instead: <span class="ui">⟳</span> reads the assertion's file from the disk again. The first time the
+  browser asks you to pick the file (Chrome and Edge keep it: after a reload only the permission is asked again; Firefox and Safari ask
+  every time). Changed assertions are marked <b>changed</b> and evaluated again. <span class="ui">Watch</span> in the panel's header
+  (Chrome / Edge) checks those files every second: save in the editor and the page follows by itself.</p>
+<div class="note"><p>The static SVG figures of a page keep the results the page was built with; editing in the page changes the
+  viewers.</p></div>
+
+<h2 id="expressions">Expressions</h2>
+<p>The <span class="ui">expression</span> field in the bar takes any expression of the signals, written as in an assertion:
+  <code>PSEL &amp;&amp; !PREADY</code>, <code>state == pkg::WAIT &amp;&amp; timeout</code>, <code>addr[7:4] == 4'h3</code>,
+  <code>$rose(req)</code>. Without a clock it is valued after every change of its signals; <code>@(posedge PCLK) …</code> samples it at
+  the clock's edges like an assertion. Names are looked up from the selected signal's module up to the top (or give a full path);
+  package constants come from the loaded files.</p>
+<ul>
+  <li><kbd>Enter</kbd> / <kbd>shift</kbd>+<kbd>Enter</kbd> (or ◀ ▶) — the cursor to the next / previous time it becomes true, round the
+    ends; the field says which one of how many (<code>3/3</code>).</li>
+  <li><span class="ui">+ Row</span> — draw it as a signal in the group <b>ƒ expressions</b> under the top (a bus when it is wider than a
+    bit). Click a row's name to put it back in the field; <span class="ui">− Row</span> removes it.</li>
+  <li>The rows are kept in this browser; <span class="ui">JSON</span> lists them as <code>"exprs"</code>. In a config,
+    <code>"exprs": ["PSEL &amp;&amp; !PREADY", {"expr": "…", "scope": "tb.dut"}]</code> (or <code>vcd2wavedrom.py --expr</code>) puts them
+    in the page, its static SVG included.</li>
+</ul>
+<figure><img src="img/sva-expr.png" alt="Two expression rows under the APB signals, the cursor on the third time PSEL && !PREADY becomes true"
+  loading="lazy">
+<figcaption><b>ƒ rows.</b> <code>PSEL &amp;&amp; !PREADY</code> (true in every SETUP and wait state; <kbd>Enter</kbd> stepped to the
+  third, 145 ns, <code>3/3</code>) and <code>@(posedge PCLK) $rose(PENABLE)</code>, sampled at the clock's edges, in the group
+  <b>ƒ expressions (2)</b>.</figcaption></figure>
+
+<h2 id="numbers">Numbers</h2>
+<p><span class="ui">Table</span>: one row per binding — attempts, pass, fail, vacuous, disabled, active, capped, the first and last
+  failure (links), the longest attempt and the antecedent → consequent latency (min / avg / max cycles over the passing attempts: what a
+  handshake check is about), the cover hits, the notes. <span class="ui">Failures</span>: every failed attempt by the time it was found,
+  with its reason, filtered by assertion, <span class="ui">Copy</span> as text; a row selects the attempt (the first 500 are listed, the
+  downloads have the rest).</p>
+<figure><img src="img/sva-table.png" alt="The table of the APB bindings and the list of the two failures" loading="lazy">
+<figcaption><b>Table and Failures.</b> <code>apb_read_waits</code>: latency 3 / 3.0 / 3 (two wait states, then PREADY);
+  <code>apb_demo_no_wait</code>: first failure 105 ns, last 115 ns; below, both failures with <code>expected PREADY at cycle 10</code> /
+  <code>11</code>.</figcaption></figure>
+<p>A page built by <code>mkhtml.py</code> also ends with a printable <b>Assertions</b> section: the bindings over the whole dump, the
+  same columns, the failures.</p>
+<figure><img src="img/sva-report.png" alt="The Assertions section at the end of the generated APB page" loading="lazy">
+<figcaption><b>The page's report.</b> 14 assertions over the whole dump: 209 attempts, 47 pass, 2 fail, 160 vacuous; the three covers
+  with their hits; the two failures.</figcaption></figure>
+
+<h2 id="cli">From the command line (CI)</h2>
+<p>The same engine runs without a browser. <code>sva eval</code> prints a line per assertion and exits with a status a CI job can use:</p>
+<pre><code>$ bin/linux-x86_64/sva eval --waves out/examples/apb/apb.vcd --scope apb_tb \
+      --sva examples/apb/apb_tb.sv --sva examples/apb/apb.sva
+apb_setup_then_access assert 19 attempts: 3 pass, 0 fail, 16 vacuous, 0 active, 0 disabled
+<span class="c">…</span>
+apb_read_waits        assert 19 attempts: 1 pass, 0 fail, 18 vacuous, 0 active, 0 disabled
+apb_demo_no_wait      assert 19 attempts: 3 pass, 2 fail, 14 vacuous, 0 active, 0 disabled · first fail at cycle 10 (105 ns): expected PREADY at cycle 10
+apb_cov_write         cover  2 matches in 19 attempts · first at cycle 6 (65 ns)
+apb_cov_read_wait     cover  1 match in 19 attempts · first at cycle 12 (125 ns)
+apb_cov_error         cover  1 match in 19 attempts · first at cycle 16 (165 ns)
+sva: 14 assertions over 21 cycles; read 0.018 s, total 0.020 s
+$ echo $?
+1</code></pre>
+<p><code>--attempts</code> adds a line per attempt: its cycles, the time it started, the result and its trace (the elements
+  <code>s1</code>, <code>s2</code> … and the cycle each matched at), a failure's reason after <code>--</code>:</p>
+<pre><code>$ sva eval … --assert apb_read_waits --assert apb_demo_no_wait --attempts
+apb_read_waits   assert 19 attempts: 1 pass, 0 fail, 18 vacuous, 0 active, 0 disabled
+  @9..12 (95 ns) Pass [s1@9 s2@10 s2@11 s3@12]
+apb_demo_no_wait assert 19 attempts: 3 pass, 2 fail, 14 vacuous, 0 active, 0 disabled · first fail at cycle 10 (105 ns): expected PREADY at cycle 10
+  @6..6 (65 ns) Pass [s1@6 s2@6]
+  @10..10 (105 ns) Fail [s1@10]  -- expected PREADY at cycle 10
+  @11..11 (115 ns) Fail [s1@11]  -- expected PREADY at cycle 11
+  @12..12 (125 ns) Pass [s1@12 s2@12]
+  @16..16 (165 ns) Pass [s1@16 s2@16]</code></pre>
+<h3>Reports</h3>
+<pre><code>sva eval --waves x.fst --scope tb.dut --sva checks.sva --report report.md --junit report.xml   <span class="c"># exit 1 on a failure</span>
+sva eval --waves x.fst --scope tb.dut --sva checks.sva --report nightly.json                   <span class="c"># results + meta</span>
+sva report report.json nightly.json --md report.md --junit report.xml --html report.html        <span class="c"># several runs</span>
+make sva-eval WAVES=x.fst SVA="pkg.sv checks.sva" SCOPE=tb.dut ARGS="--junit report.xml"         <span class="c"># the same through make</span></code></pre>
+<p><code>--report</code> picks the format by the extension: <code>.md</code>, <code>.html</code>, <code>.xml</code> (JUnit) or
+  <code>.json</code> (the results with the meta — the same form as the page's <span class="ui">report.json</span>, so a run in CI and a
+  report downloaded from a page merge with <code>sva report</code>; over several files a Source column tells the runs apart). JUnit has
+  one test case per assertion: a failure; an error when attempts had no verdict (capped); skipped when not evaluated or a cover never
+  hit. The texts list at most 20 failures per assertion (<code>--max-failures N</code>, 0 = all; the JSON has every one).</p>
+<table>
+  <tr><th>Exit</th><th>Means</th></tr>
+  <tr><td>0</td><td>everything evaluated passed</td></tr>
+  <tr><td>1</td><td>a failure, or an attempt without a verdict (capped)</td></tr>
+  <tr><td>2</td><td>nothing checked as asked: a usage or syntax error, a signal not in the dump, no assertion, a file that does not
+    read</td></tr>
+</table>
+<p>Other options of <code>sva eval</code>: <code>--assert NAME</code> (some only), <code>--from</code> / <code>--to</code> (a window),
+  <code>--x fail|false</code> (how an x is taken), <code>--vacuous</code> (list vacuous attempts too), <code>--resolve up|scope</code>,
+  <code>--ignore-prefix i_,o_</code>, <code>--alias NAME=PATH</code>, <code>-D NAME[=VALUE]</code>, <code>--max-threads N</code>,
+  <code>--out results.json</code>; <code>sva --waves DUMP --info</code> lists a dump's scopes, variables, widths and enum tables. <code>sva vcd x.fst --out x.vcd</code> writes an FST
+  as VCD text (enum tables included), for a tool that reads only VCD.
+  <code>sva &lt;command&gt; --help</code> has them all.</p>
+
+<h2 id="static">In a static SVG</h2>
+<p>A <code>"render": "svg"</code> view draws the same groups with every attempt's arrows, a legend of the steps (with their role:
+  antecedent, consequent, condition) and the first failure (else the first attempt) of each assertion on its signals with its start and
+  end flags. <code>"config": {"svaShow": [...]}</code> in the view picks which assertions it draws.</p>
+<figure><img src="../img/svg.png" alt="The APB write as a static SVG with two assertions drawn under it" loading="lazy">
+<figcaption><b>Static figure.</b> The APB write with <code>apb_setup_then_access</code> and <code>apb_end_of_transfer</code>
+  (<code>svaShow</code>): their attempts, steps, <code>▶ start</code> / <code>✓ pass</code> flags and the legend of the steps under the
+  bookmark texts.</figcaption></figure>
+
+<h2 id="settings">Settings</h2>
+<table>
+  <tr><th>Key</th><th>Default</th><th>Meaning</th></tr>
+  <tr><td><code>svaOpen</code></td><td>false</td><td>the assertion list open when the page opens</td></tr>
+  <tr><td><code>svaShow</code></td><td>all</td><td>which assertions are drawn on the waves (labels, <code>*</code> patterns)</td></tr>
+  <tr><td><code>svaSignals</code></td><td><code>view</code></td><td>repeat the bound signals under the steps: in viewers
+    (<code>view</code>), also in static SVGs (<code>true</code>), never (<code>false</code>)</td></tr>
+</table>
+<p>The colours are tokens of the theme: <code>sva-pass</code>, <code>sva-fail</code>, <code>sva-disabled</code>,
+  <code>sva-active</code>, <code>sva-capped</code>, <code>hl8</code> in <code>colors</code>. The results of a binding are in
+  <code>view.sva.bindings[i].results</code>, the results JSON of <a href="../sva/ENGINE.md">ENGINE.md</a>.</p>
+<p>Next: <a href="viewer.html">the viewer</a> for the rest of the tools on the waves, <a href="mcp.html">AI agents</a> for
+  <code>sva_check</code> asked by an agent.</p>
+</main>
+<nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
+</div>
+<footer>wavefw 0.11 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+  <a href="../index.html">docs/index.html</a></footer>
+<script src="guide.js"></script>
+</body>
+</html>

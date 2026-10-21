@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wavefw guides</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="guide.css">
+</head>
+<body>
+<header class="top"><nav>
+  <a class="home" href="index.html" aria-current="page">wavefw guides</a>
+  <a href="pages.html">Dump → page</a> <a href="viewer.html">Viewer</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
+  <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
+</nav></header>
+<div class="page">
+<main>
+<header class="hero">
+  <div class="kicker">wavefw 0.11</div>
+  <h1>Guides</h1>
+  <p class="lead">wavefw turns a simulator dump (VCD or FST) or a
+    <a href="https://wavedrom.com">WaveDrom</a> diagram into one self-contained HTML page: an interactive wave viewer,
+    static WaveDrom-style figures, SystemVerilog assertions checked over the waves. These guides walk through each part with pictures; open them
+    from <code>file://</code>, nothing to build.</p>
+</header>
+
+<div class="cards">
+  <a class="card" href="pages.html"><img src="img/pages-head.png" alt="" loading="lazy"><div>
+    <h3>1 · From a dump to a page</h3>
+    <p><code>make html WAVES=…</code>, the generated config and what to edit in it, views, colours, FSM names, structs, settings, themes.</p></div></a>
+  <a class="card" href="viewer.html"><img src="img/viewer-overview.png" alt="" loading="lazy"><div>
+    <h3>2 · The viewer in the browser</h3>
+    <p>The bar, zoom and pan, the cursor and a second one, edges, ranges, the right button's menu, find, highlight, hierarchy, bookmarks and
+      arrows, save and load.</p></div></a>
+  <a class="card" href="gaps.html"><img src="img/gaps-by-signals.png" alt="" loading="lazy"><div>
+    <h3>3 · Gaps</h3>
+    <p>The idle stretches cut out of a saved picture or WaveDrom: <i>idle</i>, <i>keep</i>, the signals the gaps follow, the clock they count,
+      the texts, the command line.</p></div></a>
+  <a class="card" href="sva.html"><img src="img/sva-attempt.png" alt="" loading="lazy"><div>
+    <h3>4 · Assertions (SVA)</h3>
+    <p>Bind an assertion to an instance, read its attempts on the waves, take a failure apart with Why, edit and run again, reports for CI.</p>
+    </div></a>
+  <a class="card" href="buses.html"><img src="img/buses-open.png" alt="" loading="lazy"><div>
+    <h3>5 · Bus transactions</h3>
+    <p>AXI, AXI-Stream, APB, AHB, Avalon, Wishbone and OBI ports found by their names and drawn as transfers, a row per channel.</p></div></a>
+  <a class="card" href="wavedrom.html"><img src="img/wavedrom-svg.png" alt="" loading="lazy"><div>
+    <h3>6 · WaveDrom</h3>
+    <p>Diagrams in your own page (viewer or static SVG), the supported subset and the extensions, WaveJSON from a dump and from the viewer.</p>
+    </div></a>
+  <a class="card" href="mcp.html"><img src="img/mcp-page.png" alt="" loading="lazy"><div>
+    <h3>7 · AI agents (MCP)</h3>
+    <p>The MCP server for Claude Code, Codex or any client: questions about a dump as short JSON answers, assertions, a page to show a person.</p>
+    </div></a>
+</div>
+
+<h2 id="start">Where to start</h2>
+<ul>
+  <li>You have a dump and want to look at it: <a href="pages.html">From a dump to a page</a>, then <a href="viewer.html">The viewer</a>.</li>
+  <li>You want a picture of a long run for a document or a review: <a href="viewer.html#menu">the right button's menu</a> and
+    <a href="gaps.html">Gaps</a>.</li>
+  <li>You write assertions and want to see why one fails: <a href="sva.html">Assertions</a>.</li>
+  <li>You write documentation with timing diagrams: <a href="wavedrom.html">WaveDrom</a>.</li>
+  <li>You let an AI agent debug a simulation: <a href="mcp.html">AI agents</a>.</li>
+</ul>
+<p>The complete lists — every setting, key and option — are in <a href="../USAGE.md">USAGE.md</a>; the reference with live examples is
+  <a href="../index.html">docs/index.html</a>; the SVA subset and the evaluator are in <a href="../sva/LANGUAGE.md">LANGUAGE.md</a> and
+  <a href="../sva/ENGINE.md">ENGINE.md</a>. The pictures of these guides are made by <code>make guide-shots</code>
+  (<code>tests/guide_shots.py</code>) from the examples' pages.</p>
+</main>
+</div>
+<footer>wavefw 0.11 · <a href="../../README.md">README</a> · <a href="../USAGE.md">USAGE.md</a> · <a href="../index.html">docs/index.html</a></footer>
+<script src="guide.js"></script>
+</body>
+</html>

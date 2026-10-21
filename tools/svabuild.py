@@ -225,7 +225,7 @@ _SCOPES = {}
 
 def _has_scope(waves, scope):
     """Is scope a scope of the dump (a variable under it)? True when the dump's header cannot be read here (an FST
-    without fst2vcd): the CLI's note then stands."""
+    without fst2vcd or sva vcd): the CLI's note then stands."""
     if waves not in _SCOPES:
         import dumpscan
         try:

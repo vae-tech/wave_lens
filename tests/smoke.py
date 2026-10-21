@@ -1123,11 +1123,152 @@ def state(browser, build):
     page.evaluate('localStorage.clear()')
     js2("(v.setStyle('questa'), v.setStyle(v.S.style === 'questa' ? 'auto' : v.S.style), 0)")
     pinned = page.evaluate("Object.keys(localStorage).filter(k => k.startsWith('wavefw.look:'))")
-    want = [[st['range']['from'], st['range']['to']], st['range']['signal'], 'value', '0x40', 2]
+    want = [[st['range']['from'], st['range']['to']], st['range']['signal'], 'value', '0x40', 3]
     check(wd[0] is None and 'WaveDrom waves, not a saved viewer state' in wd[1] and back == want and not pinned,
           f"a WaveDrom file is no state; the range and the edge kind come back (state v2); the settings' own style pins nothing {wd} {back} {pinned}")
     page.evaluate('localStorage.clear()')
     check(not errs, 'no page errors (state)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
+    ctx.close()
+
+
+EDIT_OPS = [   # every command that changes a state, with the arguments in their forms (the APB example, its view "exact")
+    {'op': 'bookmark', 't': '60ns', 'signal': 'PSEL', 'text': 'setup'},
+    {'op': 'bookmark', 't': 80000, 'signal': 'PENABLE', 'text': 'access', 'color': '#0a0', 'lift': True},
+    {'op': 'bookmark', 'n': 1, 'text': 'setup (edited)'}, {'op': 'arrow', 'from': 1, 'to': 2, 'label': 'Δ 20ns', 'shape': '-|-', 'head': '<>'},
+    {'op': 'bookmark', 't': '120ns', 'text': 'axis'}, {'op': 'arrow', 'from': 2, 'to': 3, 'line': 'dashed'}, {'op': 'arrow', 'id': 2, 'color': '#f00'},
+    {'op': 'bookmark', 't': '130ns'}, {'op': 'bookmark', 'n': 4, 'delete': True},
+    {'op': 'marker', 't': '100ns', 'label': 'M', 'color': '#c00'}, {'op': 'marker', 't': '140ns'}, {'op': 'marker', 'id': 2, 'label': 'second'},
+    {'op': 'group', 'name': 'ctl', 'signals': ['PSEL', 'PENABLE'], 'color': '#08f'}, {'op': 'group', 'name': 'ctl', 'add': 'PWRITE'},
+    {'op': 'group', 'name': 'data', 'signals': 'P*DATA'}, {'op': 'group', 'name': 'data', 'rename': 'payload'},
+    {'op': 'highlight', 'add': ['PSEL', 'payload']}, {'op': 'highlight', 'add': 'PREADY', 'remove': 'PSEL'},
+    {'op': 'paint', 'signals': 'PADDR', 'color': '#123456'}, {'op': 'paint', 'signals': ['PWDATA', 'PRDATA'], 'color': '#654321'},
+    {'op': 'paint', 'signals': 'PRDATA', 'color': None}, {'op': 'hide', 'signals': 'PSLVERR'}, {'op': 'radix', 'signals': 'PADDR', 'radix': 'dec'},
+    {'op': 'analog', 'signals': 'PWDATA', 'rows': 2}, {'op': 'select', 'signal': 'PENABLE'}, {'op': 'cursor', 't': '150ns'}, {'op': 'cursor2', 't': '170ns'},
+    {'op': 'view', 'from': '40ns', 'to': '180ns'}, {'op': 'range', 'from': '100ns', 'to': '60ns', 'signal': 'PCLK'},
+    {'op': 'sort', 'dir': 'desc', 'ignore': 'P'}, {'op': 'style', 'name': 'questa'}, {'op': 'fold', 'groups': 'ctl'},
+    {'op': 'find', 'query': 'pw', 'case': True, 'open': False}, {'op': 'gaps', 'on': True, 'idle': 8},
+]
+
+
+def edit(browser, build):
+    """The viewer's commands (view.run, wavefw/src/edit.js) and their twin tools/viewedit.py: the same list of commands,
+    the same state from a page's edits as from the commands run in it, the edits applied once (what the browser keeps
+    stays yours after a reload), errors said; your groups and markers in the lists and the menu; a page live through
+    tools/wavemcp.py (view_live, view_edit, view_get with a picture)."""
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('viewer: commands, page edits, live')
+    sys.path.insert(0, str(ROOT / 'tools'))
+    import viewedit
+    d = build / 'smoke' / 'edit'
+    d.mkdir(parents=True, exist_ok=True)
+    pa, pb, pl = d / 'edited.html', d / 'fresh.html', d / 'live.html'
+    for x in (pa, pb, pl):
+        x.write_bytes(apb.read_bytes())
+    ctx = browser.new_context(viewport={'width': 1400, 'height': 1000})
+    page = ctx.new_page()
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.on('console', lambda m: errs.append(m.text) if m.type == 'error' and 'fonts.g' not in m.text else None)
+    V = "WaveFW.views().find(v => v.editKey() === 'exact')"
+    def open_(path, idle=True):
+        page.goto(path.as_uri()); page.wait_for_load_state('networkidle' if idle else 'load'); page.evaluate('SVA.ready()'); page.wait_for_timeout(200 * SCALE)
+    open_(pb); page.evaluate('localStorage.clear()'); open_(pb)
+    cmds = page.evaluate("Object.fromEntries(Object.entries(WaveFW.commands()).map(([k, c]) => [k, c.args]))")
+    check(cmds == viewedit.COMMANDS, f'WaveFW.commands() and tools/viewedit.py COMMANDS: one list (differ: '
+          f'{sorted(set(cmds.items()) ^ set(viewedit.COMMANDS.items()))})')
+    run = page.evaluate(f"ops => {V}.run(ops).then(res => ({{res, st: {V}.state()}}))", EDIT_OPS)
+    check(not [r for r in run['res'] if 'error' in r], f'every command runs in the page ({[r for r in run["res"] if "error" in r][:2]})')
+    r = subprocess.run([sys.executable, '-I', str(ROOT / 'tools' / 'viewedit.py'), str(pa), '--view', 'exact', '--ops', json.dumps(EDIT_OPS)],
+                       capture_output=True, text=True)
+    py = json.loads(r.stdout or '[]')
+    check(r.returncode == 0 and len(py) == len(EDIT_OPS) and not [x for x in py if 'error' in x], f'viewedit.py: the same commands on the page\'s file {r.stderr.strip()}')
+    open_(pa)
+    page.wait_for_function(f"localStorage.getItem('wavefw.edits:' + {V}.storeId)")
+    st = page.evaluate(f"{V}.state()")
+    for x in (run['st'], st):
+        x['config']['fold'] = sorted(x['config']['fold'])   # the ids of the groups made: in another order, the same set
+    diff = sorted(k for k in set(run['st']) | set(st) if run['st'].get(k) != st.get(k))
+    check(not diff and 'edits applied (r1)' in page.evaluate(f"{V}.root.querySelector('.toast').textContent"),
+          f'a page with these edits opens with the state the commands give in the page (differs: {diff})')
+    # the person changes what the browser keeps; a reload keeps it, and the edits' cursor, window, highlight again
+    page.evaluate(f"{V}.run([{{op: 'bookmark', n: 1, text: 'mine'}}, {{op: 'highlight', clear: true}}, {{op: 'cursor', t: 5000}}])")
+    open_(pa)
+    got = page.evaluate(f"(v => [v.bms[0].text, v.highlighted(), v.cursor, v.umarks.length])({V})")
+    check(got == ['mine', ['@payload', 'PREADY'], 150000, 2], f'reloaded: your bookmark text stays, the edits\' highlight and cursor come again {got}')
+    viewedit.edit_page(str(pa), [{'op': 'bookmark', 'n': 1, 'text': 'agent again'}], 'exact')
+    open_(pa)
+    check(page.evaluate(f"{V}.bms[0].text") == 'agent again', 'a newer revision of the edits replaces what it names')
+    # errors: said, the rest done; names
+    bad = page.evaluate(f"{V}.run([{{op: 'nope'}}, {{op: 'cursor', t: 1, x: 2}}, {{op: 'bookmark', signal: 'P'}}, {{op: 'hide', signals: 'PRESETn'}}])")
+    check([('error' in x) for x in bad] == [True, True, True, False] and 'no signal "P"' in bad[2]['error'],
+          f'a bad command is said, the others run {[x.get("error", "ok")[:40] for x in bad]}')
+    # your groups: at the top, their rows read through to the signal (radix), out of the group by the menu; markers drawn in the picture
+    page.evaluate('localStorage.clear()'); open_(pb)
+    ui = page.evaluate(f"""(async v => {{
+        await v.run([{{op: 'group', name: 'g1', signals: ['PADDR', 'PSEL']}}, {{op: 'marker', t: 90000, label: 'mk'}}]);
+        const vis = WaveFW.internal.peek(v).vis, top = vis.slice(0, 3).map(r => r.name), copy = vis[1];
+        v.setRadix(copy, 'bin'); const rx = v.M.rows.find(r => r.full === 'PADDR').radix;
+        v.hide([copy]); const left = v.ugroups[0].signals;
+        const lists = [...v.notesEl.querySelectorAll('.nh b')].map(b => b.textContent);
+        return [top, rx, left, lists, v.toSVG().includes('>mk<')]; }})({V})""")
+    check(ui == [['g1', 'PADDR', 'PSEL'], 'bin', ['PSEL'], ['Markers', 'Groups'], True],   # no bookmarks: their lists not there
+          f'your group at the top (its rows are the signals: radix), Hide takes a row out of the group, the lists, a marker in the picture {ui}')
+    # a bookmark of a signal in your group is drawn there (where you look), a highlight of it lights its row there too, a
+    # name of the dump's longer path (apb_tb.PSEL) is the page's PSEL; an id that is a name: said, the others run
+    got = page.evaluate(f"""(async v => {{
+        const r = await v.run([{{op: 'bookmark', t: 60000, signal: 'apb_tb.PSEL', text: 'in g1'}}, {{op: 'highlight', set: 'PSEL'}},
+          {{op: 'arrow', id: 'my-arrow', from: 1, to: 2}}]);
+        v.draw(); const o = WaveFW.internal.peek(v).lay.find(o => o.row.ug && o.row.name === 'PSEL'), y = v.bmGeo.pos.get(r[0].n)[1];
+        return [r[0].n > 0, Math.abs(y - (o.y + o.h / 2)) < o.h, v.hl.on.has(o.row), r[2].error || ''];
+      }})({V})""")
+    check(got[:3] == [True, True, True] and got[3].startswith('id: the number of the arrow'),
+          f'your group: the bookmark on its row, the highlight on its row; the dump\'s path of a signal; an id that is a name said {got}')
+    # the menu: a new group, a marker here, the group deleted from its header
+    page.evaluate(f"(v => v.menu(200, 200, v.M.rows.find(r => r.name === 'PWRITE'), 70000))({V})")
+    page.locator('.wv-menu button[data-m=ugnew]').click()
+    page.evaluate(f"(v => v.menu(200, 200, WaveFW.internal.peek(v).vis.find(r => r.user && r.name === 'group 2'), 70000))({V})")
+    page.locator('.wv-menu button[data-m=ugdel]').click()
+    page.evaluate(f"(v => v.menu(200, 200, v.M.rows.find(r => r.name === 'PWRITE'), 70000))({V})")
+    page.locator('.wv-menu button[data-m=umark]').click()
+    got = page.evaluate(f"(v => [v.ugroups.map(g => g.name), v.markList().map(m => m.t)])({V})")
+    check(got == [['g1'], [90000, 70000]], f'the menu: New group with it, Delete this group, Marker here {got}')
+    pic = page.evaluate(f"{V}.run({{op: 'picture', format: 'png'}}).then(r => r[0])")
+    check(pic.get('bytes', 0) > 2000 and pic.get('png', '').startswith('iVBOR'), f'picture: a PNG of the screen, base64 ({pic.get("bytes")} bytes)')
+    check(not errs, 'no page errors (edit)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
+    # live: wavemcp.py as an agent's MCP server, the page connected to it
+    env = dict(os.environ, WAVEFW_LIVE_PORT='0', XDG_CACHE_HOME=str(d / 'cache'))
+    mcp = subprocess.Popen([sys.executable, '-I', str(ROOT / 'tools' / 'wavemcp.py')], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, env=env)
+    n = [0]
+    def tool(name, **a):
+        n[0] += 1
+        mcp.stdin.write(json.dumps({'jsonrpc': '2.0', 'id': n[0], 'method': 'tools/call', 'params': {'name': name, 'arguments': a}}) + '\n')
+        mcp.stdin.flush()
+        res = json.loads(mcp.stdout.readline())['result']
+        try:
+            body = json.loads(res['content'][0]['text'])
+        except ValueError:
+            body = res['content'][0]['text']
+        return body, res['isError'], [c for c in res['content'] if c['type'] == 'image']
+    try:
+        tool('view_live', page=str(pl))
+        page.evaluate('localStorage.clear()'); open_(pl, idle=False)
+        page.wait_for_function("[...document.querySelectorAll('.wv button[data-act=live]')].every(b => b.textContent === '● live')", timeout=8000 * SCALE)
+        r = tool('view_edit', page=str(pl), view='exact', ops=[{'op': 'bookmark', 't': 60, 'signal': 'PSEL', 'text': 'agent'},
+                                                                {'op': 'highlight', 'add': 'PSEL'}, {'op': 'cursor', 't': 75}])[0]
+        seen = page.evaluate(f"(v => [v.bms.map(b => [b.t, b.text]), v.highlighted(), v.cursor])({V})")
+        check(r.get('live') == str(pl) and seen == [[[60000, 'agent']], ['PSEL'], 75000] and r['results'][2] == {'op': 'cursor', 't': 75},
+              f'view_edit on a live page: in the browser at once, times in ns {seen} {r.get("results")}')
+        page.evaluate(f"{V}.run({{op: 'bookmark', n: 1, text: 'person'}})")
+        g, err, img = tool('view_get', page=str(pl), view='exact', picture=True)
+        check(not err and g['bookmarks'] == [{'n': 1, 't': 60, 'signal': 'PSEL', 'text': 'person'}] and g['cursor'] == 75 and len(img) == 1,
+              f'view_get on a live page: the person\'s edits, a picture {g if err else g.get("bookmarks")}')
+        page.goto('about:blank'); page.wait_for_timeout(300 * SCALE)
+        r = tool('view_edit', page=str(pl), view='exact', ops=[{'op': 'marker', 't': 10}])[0]
+        check(r.get('page') == str(pl) and 'written into the page' in r.get('note', ''), f'the page closed: the edit goes into its file {r}')
+    finally:
+        mcp.stdin.close(); mcp.wait(10)
     ctx.close()
 
 
@@ -2658,6 +2799,7 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'sva_exprs': 'stage 10: expressions in the bar (search, rows ƒ, kept, JSON), names in a hierarchy',
     'dump': 'a VCD opened in the page (Open…, dropped on a viewer), ⟳, wavefw/viewer.html',
     'state': 'Save / Load… of a viewer (the APB and AXI-Lite pages): its state to a file and back, on other waves',
+    'edit': 'the viewer\'s commands, a page\'s edits (tools/viewedit.py) with the same state, your groups and markers, a page live through wavemcp.py',
     'ranges': 'a range on the waves (shift+drag, the right button) and its menu: zoom, bookmarks, the picture, a colour',
     'tips': 'every control has a tooltip with its keys; ? shows the keys and the mouse',
     'buses': 'stage 11: bus transactions (AXI4, AXI4-Stream, APB, AHB, Avalon-MM / ST, Wishbone, OBI) on a dump of every protocol and the examples',
@@ -2778,6 +2920,7 @@ def main():
         run('sva_waves', sva_waves, b, build)
         run('sva_exprs', sva_exprs, b, build)
         run('state', state, b, build)
+        run('edit', edit, b, build)
         run('dump', dump, b, build)
         run('readers', readers, b, build)
         run('ranges', ranges, b, build)

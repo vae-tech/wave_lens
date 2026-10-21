@@ -403,3 +403,40 @@ fn examples_evaluation_goldens() {
     }
     assert!(differ.is_empty(), "evaluation goldens differ: {differ:?}");
 }
+
+/// `sva vcd`: a dump written back as VCD text, as fst2vcd -e writes it — the declarations with their ranges, an array
+/// element under its own name, a real, the changes in time order; the FSM example's FST with its enum table, the
+/// reference before the variable and the struct scope (when `make examples` built it); a missing dump is exit 2.
+#[test]
+fn vcd_writes_a_dump_as_vcd_text() {
+    let src = write("conv.vcd", "$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! clk $end\n$var wire 4 \" d [3:0] $end\n\
+        $var reg 8 # mem[1] [7:0] $end\n$var real 64 $ r $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\nb0000 \"\nb00000001 #\nr0.5 $\n\
+        #10\n1!\nb1010 \"\nr1e+20 $\n#20\n0!\nbx01z \"\n");
+    let o = sva(&["vcd", &src]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    let t = out(&o);
+    for line in ["$timescale\n\t1ns\n$end", "$scope module tb $end", "$var wire 4 \" d [3:0] $end", "$var reg 8 # mem[1] [7:0] $end",
+                 "$enddefinitions $end\n#0\n", "#10\n1!\nb1010 \"\nr1e+20 $\n#20\n0!\nbx01z \"\n"] {
+        assert!(t.contains(line), "{line:?} not in:\n{t}");
+    }
+    let to = dir().join("conv.out.vcd");
+    let o = sva(&["vcd", "--waves", &src, "--out", &to.to_string_lossy()]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    assert_eq!(std::fs::read_to_string(&to).unwrap(), t, "--out writes what stdout gets");
+    let o = sva(&["vcd", "no_such.fst"]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(err(&o).contains("no_such.fst"), "{}", err(&o));
+
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let build = std::env::var("BUILD").map(std::path::PathBuf::from).unwrap_or_else(|_| root.join("out"));
+    let fst = build.join("examples/fsm/fsm.fst");
+    if !fst.exists() {
+        eprintln!("vcd_writes_a_dump_as_vcd_text: {} is missing (make examples): the FST part skipped", fst.display());
+        return;
+    }
+    let t = out(&sva(&["vcd", &fst.to_string_lossy()]));
+    for line in ["$attrbegin misc 07 uart_pkg::state_t 5 IDLE START DATA STOP ERROR 000 001 010 011 100 1 $end\n$scope module fsm_tb $end",
+                 "$attrbegin misc 07 \"\" 1 $end\n$var logic 3 ) state [2:0] $end", "$scope struct status $end"] {
+        assert!(t.contains(line), "{line:?} not in the FSM example's VCD text");
+    }
+}

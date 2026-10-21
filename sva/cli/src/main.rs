@@ -4,6 +4,7 @@
 //!   sva eval --waves DUMP [--scope tb.dut] --sva FILE... [...]     attempts and counts of every assertion, results JSON
 //!   sva FILE... --waves DUMP [...]                                 the same as `sva eval`
 //!   sva --waves DUMP --info                                        scopes, variables, widths, enum tables
+//!   sva vcd DUMP [--out FILE.vcd]                                  the dump (FST) as VCD text, as fst2vcd -e writes it
 //!   sva report [--md F] [--junit F] [--html F] [--json F] RESULTS.json...   the report of results documents
 //!
 //! Exit status: 0 everything evaluated passed; 1 a failure, or an attempt without verdict (capped: the thread limit);
@@ -14,6 +15,8 @@
 //! when the page binds an assertion to an instance; the rule of docs/sva/ENGINE.md *Name resolution*, with
 //! --ignore-prefix for the names without those prefixes, and a select wider than the variable does not resolve). Values are sampled just before each clock edge
 //! (the preponed region), so a value written at the edge counts from the next sampling point, as in a simulator.
+
+mod vcd;
 
 use std::collections::BTreeMap;
 use std::process::ExitCode;
@@ -52,6 +55,7 @@ const USAGE: &str = "usage: sva parse [--json] [--expand] [-D NAME[=VALUE]] FILE
                 [--max-threads N] [--report report.md|.html|.json|.xml] [--junit report.xml] [--max-failures N]
        sva FILE... --waves DUMP [...]          (the same as sva eval)
        sva --waves DUMP --info
+       sva vcd DUMP [--out FILE.vcd]          (an FST as VCD text, enum tables included, as fst2vcd -e writes it)
        sva report [--title T] [--md F] [--junit F] [--html F] [--json F] [--max-failures N] RESULTS.json...   (- for stdout)
 TIME is a number with a unit (100ns, 2.5us; ps without one). --alias: a shown name of a config (the page's alias) for
 the variable at PATH. --report: .md, .html, .xml (JUnit), .json (the results with the meta, as a page's report.json;
@@ -802,6 +806,7 @@ fn run() -> ExitCode {
     let rest = match argv.first().map(String::as_str) {
         Some("parse") => return parse_cmd(&argv[1..]),
         Some("report") => return report_cmd(&argv[1..]),
+        Some("vcd") => return vcd::vcd_cmd(&argv[1..]),
         Some("eval") => &argv[1..],
         _ => &argv[..],
     };

@@ -16,7 +16,7 @@
 </head>
 <body>
 <h1>Wave viewer</h1>
-<p>Drop a VCD on the viewer, or Open… in its bar (the last line); ⟳ reads it again after a new simulation, the view kept. An FST: <code>fst2vcd x.fst &gt; x.vcd</code>, or <code>make html WAVES=x.fst</code>.</p>
+<p>Drop a VCD on the viewer, or Open… in its bar (the last line); ⟳ reads it again after a new simulation, the view kept. An FST: <code>sva vcd x.fst --out x.vcd</code> (the CLI in <code>bin/</code>; or GTKWave's <code>fst2vcd x.fst &gt; x.vcd</code>), or <code>make html WAVES=x.fst</code>.</p>
 <script type="application/wavedrom" data-title="no dump yet">
 { "signal": [{ "name": "drop a VCD here", "wave": "x..." }], "head": { "text": "no dump yet · Open… or drop a VCD" } }
 </script>

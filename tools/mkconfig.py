@@ -5,7 +5,7 @@ under its full hierarchical path, one line each, with per-signal settings to fil
   mkconfig.py test_stream_video.vcd                    -> test_stream_video.config.json (next to the dump)
   mkconfig.py dump.vcd --base my.base.json --out my.config.json
   mkconfig.py dump.vcd --out dump.config.json --update # dump changed: add new signals, drop gone ones, keep all edits
-  mkconfig.py dump.fst                                 # FST: read through GTKWave's fst2vcd, FSM enum labels included
+  mkconfig.py dump.fst                                 # FST: read through GTKWave's fst2vcd (or sva vcd), FSM enum labels included
   mkconfig.py dump.vcd --sv rtl/*.sv                   # VCD: enum labels from "typedef enum", fields of "typedef struct packed"
   mkconfig.py dump.fst --sva checks/*.sva              # assertions: "sva" and a "bind" line per matching instance
 
@@ -40,7 +40,7 @@ sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)   # -I drops the script dir from sys.path
 import dumpscan, svabuild, vcd2wavedrom  # noqa: E402
-from common import SELECT_KEYS, WaveError, add_reader_args, add_sva_bin_arg, check_config, glob_re, run_main, wavepeek  # noqa: E402
+from common import SELECT_KEYS, WaveError, add_sva_bin_arg, check_config, glob_re, run_main  # noqa: E402
 
 ROOT = os.path.dirname(HERE)
 BASE = os.path.join(HERE, 'base.config.json')
@@ -65,18 +65,6 @@ def width_ok(rule, w):
         die(f'bad rule width "{rule}" (use 8, ">1", ">=32")')
     op, n = m.group(1) or '=', int(m.group(2))
     return {'=': w == n, '>': w > n, '<': w < n, '>=': w >= n, '<=': w <= n}[op]
-
-
-# ---------------- the dump: signals (wavepeek) + declaration order and change counts (VCD text) ----------------
-def list_signals(exe, waves):
-    """[{'path', 'width'}] for every signal of the dump (wavepeek: works for VCD and FST)."""
-    run = vcd2wavedrom.Peek(exe, waves, None).run
-    scopes = [s['path'] for s in run('scope', '--max-depth', '0', '--max', 'unlimited')['data']]
-    out = []
-    for sc in scopes:
-        out += [{'path': s['path'], 'width': s.get('width') or 1}
-                for s in run('signal', '--scope', sc, '--recursive', '--max-depth', 'unlimited', '--max', 'unlimited', '--abs')['data']]
-    return out
 
 
 # ---------------- enum labels from SystemVerilog sources (VCD has none; FST carries its own tables) ----------------
@@ -334,19 +322,15 @@ def sva_binds(files, sigs, cat, prefixes, exe, old=()):
 
 
 def read_signals(a):
-    """The variables of the dump -> [{path, width, order, changes, enum}] (the built-in reader, or wavepeek)."""
-    info = dumpscan.scan(a.waves)   # VCD text, or FST through fst2vcd: signals, order, change counts, FST enum tables
-    if a.reader == 'wavepeek' or not info:
-        exe = wavepeek(a.wavepeek)
-        if not os.path.exists(exe):
-            die('wavepeek not found (cargo build it, see README.md)' if info else 'cannot read the dump: no fst2vcd for an FST and no wavepeek')
-        sigs = list_signals(exe, a.waves)
-    else:   # the same paths and widths as wavepeek lists them
-        decl = dumpscan.read(a.waves, None)
-        events = [p for p, v in decl.vars.items() if v.kind == 'event']
-        if events:
-            print(f'mkconfig: {len(events)} event variable(s) left out (no value to draw): {", ".join(events[:5])}{" …" if len(events) > 5 else ""}', file=sys.stderr)
-        sigs = [{'path': p, 'width': v.width} for p, v in decl.vars.items() if v.kind != 'event']
+    """The variables of the dump -> [{path, width, order, changes, enum}] (the built-in reader)."""
+    info = dumpscan.scan(a.waves)   # VCD text, or FST through fst2vcd / sva vcd: signals, order, change counts, FST enum tables
+    if not info:
+        die(f'cannot read {a.waves}: an FST is read through fst2vcd (GTKWave) or the sva CLI, and neither is there')
+    decl = dumpscan.read(a.waves, None)
+    events = [p for p, v in decl.vars.items() if v.kind == 'event']
+    if events:
+        print(f'mkconfig: {len(events)} event variable(s) left out (no value to draw): {", ".join(events[:5])}{" …" if len(events) > 5 else ""}', file=sys.stderr)
+    sigs = [{'path': p, 'width': v.width} for p, v in decl.vars.items() if v.kind != 'event']
     for i, s in enumerate(sigs):
         d = info.get(s['path']) or {'order': len(info) + i, 'changes': None, 'enum': None}
         s.update(order=d['order'], changes=d['changes'], enum=d['enum'])
@@ -380,7 +364,6 @@ def main():
     ap.add_argument('--force', action='store_true', help='overwrite an existing output (edits are lost); with --update: update even when most signals are gone')
     ap.add_argument('--depth', type=int, help='override select.depth of the base file')
     ap.add_argument('--sv', nargs='+', metavar='FILE', help='SystemVerilog sources: enum labels for signals declared with an enum type (a VCD has none; an FST brings its own), "fields" for a packed struct dumped as one vector')
-    add_reader_args(ap, 'builtin')
     ap.add_argument('--sva', nargs='+', action='extend', metavar='FILE', help='SystemVerilog assertion files: "sva" and a "bind" line per instance that has every signal of an assertion')
     add_sva_bin_arg(ap)
     a = ap.parse_args()
@@ -409,7 +392,7 @@ def main():
     found = sum(1 for s in sigs if s['enum'])
     if found:
         print(f'mkconfig: {found} signals with enum labels (FSM states shown by name)', file=sys.stderr)
-    sigs.sort(key=lambda s: s['order'])   # declaration order of the dump (wavepeek lists alphabetically)
+    sigs.sort(key=lambda s: s['order'])   # declaration order of the dump
     cat = build(sigs, base)
     if old is not None:
         gone = [p for p in old['signals'] if p not in cat]

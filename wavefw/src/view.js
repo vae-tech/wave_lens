@@ -72,7 +72,13 @@ const TIPS = {
   'm:fold': ['Fold / open this module'], 'm:foldup': ['Fold its module', ['zc']], 'm:zM': ['Fold every module', ['zM']], 'm:zR': ['Open every module', ['zR']],
   'm:mark': ['Bookmark on this signal here', ['m']], 'm:copyname': ['Copy the path', ['yy']], 'm:clear': ['Clear the range', ['Esc', 'ctrl+click']],
   'm:unpaint': ['Its own colour back'],
+  'm:umark': ['A marker here: a dashed line across the rows with a label (the Markers list)'], 'm:ugnew': ['A group of your own at the top of the names'],
+  'm:ugout': ['Out of your group (the signal stays in its module)'], 'm:ugdel': ['Delete your group; its signals stay where they are'],
+  'bm:mdel': ['Delete the marker'], 'bm:gdel': ['Delete your group; its signals stay where they are'], '.mt': ['Marker time: 250ns, 85.12us', ['Enter']],
+  '.ml': ['Marker label'], '.ugn': ['Group name', ['Enter']],
+  'act:live': ['Driven by an agent (tools/wavemcp.py view_live): its edits come in as you watch; click: disconnect'],
 };
+for (let i = 0; i < 6; i++) TIPS['m:ugto' + i] = ['Into your group (a folder at the top of the names)'];
 // the help (? in the bar, key ?): the keys and the mouse by what they do; plugins' keys come from their addKey help
 const HELP = [
   ['Zoom and move', [[['i', '+'], 'zoom in'], [['o', '-'], 'zoom out'], [['f'], 'show everything'], [['l'], 'the window before the last zoom'],
@@ -178,7 +184,8 @@ class Bar {
       ('<button type="button" data-act="ssave" title="Save what you did in this viewer to a file: the window, the cursor, the order, the folding, the ' +
         'highlight, the paint, the bookmarks and arrows, the search, the assertions and the ƒ rows">Save</button>'),
       ('<button type="button" data-act="sload" title="Load a saved file into this viewer (what is not in these waves is left out)">Load…</button><input ' +
-          'type="file" class="sfile" accept=".json,application/json" hidden>'));
+          'type="file" class="sfile" accept=".json,application/json" hidden>'),
+      '<button type="button" class="live" data-act="live" hidden></button>');
     // dump: a VCD read in the page (Open…, or a file dropped on the viewer), ⟳ reads it again from the disk keeping the view
     const dump = grp('dump',
       ('<button type="button" data-act="dopen" title="Open a VCD dump in this viewer (or drop one on it): its signals by scope, exact ' +
@@ -258,6 +265,7 @@ class Bar {
       else if (b.dataset.act === 'sload') v.sfile.click();
       else if (b.dataset.act === 'dopen') v.openDump();
       else if (b.dataset.act === 'dreload') v.reloadDump();
+      else if (b.dataset.act === 'live') liveClick();
       else if (b.dataset.jump !== undefined) { const j = v.jumps[b.dataset.jump]; v.goto(j.t, j.span); }
     });
     v.dfile = r.querySelector('input.dfile');
@@ -433,15 +441,15 @@ class Notes {
   }
   render() {
     const v = this.v;
-    const el = v.notesEl, M = v.M; el.hidden = !v.bms.length; v.notesGen = (v.notesGen || 0) + 1;
-    if (!v.bms.length) { el.innerHTML = ''; return; }
+    const el = v.notesEl, M = v.M, any = v.bms.length || v.umarks.length || v.ugroups.length; el.hidden = !any; v.notesGen = (v.notesGen || 0) + 1;
+    if (!any) { el.innerHTML = ''; return; }
     const sigs = M.rows.filter(r => r.type === 'sig'), byFull = new Map(sigs.map(r => [r.full, r]));
     v.sigList = v.sigList || 'wvf-sigs-' + (++LIST_ID);   // one list of the signals for every bookmark's field
-    const acc = getComputedStyle(v.root).getPropertyValue('--accent').trim(), hex = c =>
-      /^#[0-9a-f]{6}$/i.test(c || '') ? c : /^#[0-9a-f]{6}$/i.test(acc) ? acc : '#b5551b';
+    const acc = getComputedStyle(v.root).getPropertyValue('--accent').trim(), six = c => String(c || '').replace(/^#([0-9a-f])([0-9a-f])([0-9a-f])$/i,
+      '#$1$1$2$2$3$3'), hex = c => /^#[0-9a-f]{6}$/i.test(six(c)) ? six(c) : /^#[0-9a-f]{6}$/i.test(acc) ? acc : '#b5551b';
     const opt = (v, label, cur) => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(label)}</option>`;
     const nums = cur => v.bms.map(o => opt(String(o.n), String(o.n), String(cur))).join('');
-    el.innerHTML = `<div class="nh"><b>Bookmarks</b><span
+    el.innerHTML = (v.bms.length ? `<div class="nh"><b>Bookmarks</b><span
       class="muted">click a number to go there · drag a circle on the waves to move it, shift+drag to another one for an arrow · kept in this browser</span>
       <button type="button" data-bm="json">JSON</button><button type="button" data-bm="clear"
         title="Remove the bookmarks of this browser (the page's own come back on reload)">Clear</button></div><ol class="bms">` +
@@ -470,13 +478,27 @@ class Notes {
         <input type="color" class="col" value="${hex(a.color)}" aria-label="arrow colour" title="Colour">
         <input type="text" class="lab" value="${esc(a.label)}" placeholder="label" aria-label="arrow label">
         <button type="button" class="ic" data-bm="adel" title="Delete this arrow">✕</button></li>`).join('') +
-      '</ol><textarea class="json" readonly hidden aria-label="bookmarks as JSON"></textarea>' +
+      '</ol><textarea class="json" readonly hidden aria-label="bookmarks as JSON"></textarea>' : '') +
+      // your markers: a dashed line across the rows with its label; your groups: a folder of signals at the top of the names
+      (v.umarks.length ? `<div class="nh"><b>Markers</b><span class="muted">time · label · colour</span></div><ol class="mks">` +
+        v.umarks.map((m, i) => `<li data-k="${i}"><span class="mn">${i + 1}</span>
+        <input type="text" class="mt" value="${esc(v.when(m.t))}" spellcheck="false" aria-label="marker ${i + 1} time" title="Time: 250ns, 85.12us">
+        <input type="text" class="ml" value="${esc(m.label)}" placeholder="label" aria-label="marker ${i + 1} label">
+        <input type="color" class="col" value="${hex(m.color)}" aria-label="marker ${i + 1} colour" title="Colour">
+        <button type="button" class="ic" data-bm="mdel" title="Delete marker ${i + 1}">✕</button></li>`).join('') + '</ol>' : '') +
+      (v.ugroups.length ? `<div class="nh"><b>Groups</b><span class="muted">yours, at the top of the names · name · colour</span></div><ol class="ugs">` +
+        v.ugroups.map((g, i) => `<li data-g="${i}"><input type="text" class="ugn" value="${esc(g.name)}" spellcheck="false" aria-label="group ${i + 1} name"
+          title="The group's name (Enter)"><span class="muted">${g.signals.length} signal${g.signals.length === 1 ? '' : 's'}</span>
+        <input type="color" class="col" value="${hex(g.color)}" aria-label="group ${i + 1} colour" title="Colour of its signals">
+        <button type="button" class="ic" data-bm="gdel" title="Delete the group (its signals stay where they are)">✕</button></li>`).join('') + '</ol>' : '') +
       `<datalist id="${v.sigList}">${sigs.map(r => `<option value="${esc(r.full)}">`).join('')}</datalist>`;
   }
   click(e) {
     const v = this.v;
     const b = e.target.closest('button[data-bm]'); if (!b) return;
     const li = b.closest('li'), n = li ? +li.dataset.n : NaN, bm = v.bms.find(x => x.n === n), act = b.dataset.bm;
+    if (act === 'mdel') return v.run({ op: 'marker', id: +li.dataset.k + 1, delete: true });
+    if (act === 'gdel') return v.run({ op: 'group', name: v.ugroups[+li.dataset.g].name, delete: true });
     if (act === 'go' && bm) { v.cursor = bm.t; if (bm.t < v.t0 || bm.t > v.t0 + v.span) v.t0 = v.clamp(bm.t - v.span / 2);
       if (bm.signal) v.sel = v.M.rows.find(r => r.full === bm.signal) || v.sel; v.renderNames(); v.draw(); }
     else if (act === 'here' && bm) { bm.t = v.cursor; v.changed(true); }
@@ -497,6 +519,10 @@ class Notes {
   input(e) {
     const v = this.v; // text, colours, arrow settings: live
     const T = e.target, li = T.closest('li'); if (!li) return;
+    if (li.dataset.k != null) { const m = v.umarks[+li.dataset.k]; if (!m) return;
+      if (T.matches('input.ml')) m.label = T.value; else if (T.matches('input.col')) m.color = T.value; else return;
+      v.markers = v.pageMarks.concat(v.umarks); v.saveBookmarks(); return v.draw(); }
+    if (li.dataset.g != null) { const g = v.ugroups[+li.dataset.g]; if (g && T.matches('input.col')) { g.color = T.value; v.setGroups(); } return; }
     if (li.dataset.a != null) {
       const a = v.arrows[+li.dataset.a]; if (!a) return;
       if (T.matches('select.from, select.to')) { a[T.className] = +T.value; }
@@ -510,8 +536,13 @@ class Notes {
     else if (T.matches('input.col')) { bm.color = T.value; li.querySelector('.bn').style.background = T.value; v.changed(false); }
   }
   change(e) {
-    const v = this.v; // time and signal of a bookmark: on Enter / leaving the field
-    const T = e.target, li = T.closest('li'), bm = li && v.bms.find(x => x.n === +li.dataset.n); if (!bm) return;
+    const v = this.v; // time and signal of a bookmark (a marker's time, a group's name): on Enter / leaving the field
+    const T = e.target, li = T.closest('li'), bm = li && v.bms.find(x => x.n === +li.dataset.n);
+    if (li && li.dataset.k != null && T.matches('input.mt')) { const m = v.umarks[+li.dataset.k], t = m && v.parseWhen(T.value, m.t);
+      if (!m) return; if (t == null || !isFinite(t)) { T.value = v.when(m.t); v.bad(T); return; } m.t = t; v.setMarks(); return; }
+    if (li && li.dataset.g != null && T.matches('input.ugn')) { const g = v.ugroups[+li.dataset.g]; if (!g) return;
+      v.run({ op: 'group', name: g.name, rename: T.value }).then(r => { if (r[0].error) { T.value = g.name; v.bad(T); v.toast(r[0].error); } }); return; }
+    if (!bm) return;
     if (T.matches('input.tm')) {
       const t = v.parseWhen(T.value, bm.t);
       if (t == null || !isFinite(t)) { T.value = v.when(bm.t); T.classList.add('bad'); setTimeout(() => T.classList.remove('bad'), 900); return; }
@@ -529,7 +560,7 @@ class Notes {
 /* ---------------- interactive viewer ---------------- */
 const VIEWS = new Set(), ACTIVE = { view: null };   // ACTIVE.view: the viewer used last (Esc while the focus is on the page)
 const PLUGINS = [];   // WaveFW.plugin(fn): fn(viewer) for every viewer, now and later (wavefw/sva.js: the assertions panel)
-const STATE_VERSION = 2;   // a saved viewer state (state()): 2 has range and edge
+const STATE_VERSION = 3;   // a saved viewer state (state()): 2 has range and edge, 3 your markers and groups
 // the settings of the gaps (the menu's Gaps rows)
 const GAP_KEYS = ['gaps', 'gapIdle', 'gapKeep', 'gapSignals', 'gapClock', 'gapAux', 'gapOnly', 'gapCount', 'gapLine'];
 class WaveView {
@@ -551,13 +582,13 @@ class WaveView {
     this.t0 = M.t0; this.span = M.t1 - M.t0;
     this.minSpan = opts.minSpan ?? (M.timed ? Math.max(this.span / 1e6, 10) : 0.5);
     this.cursor = opts.cursor ?? M.cursor ?? M.t0;
-    this.markers = (opts.markers || []).concat(M.markers);
-    this.jumps = opts.jumps || M.jumps || (this.markers.length && this.markers.length <= 6
-      ? this.markers.map(m => ({ label: '→ ' + m.label, t: m.t, span: this.span / 5 })) : []);
+    this.pageMarks = (opts.markers || []).concat(M.markers);   // the page's markers; yours (umarks, the marker command) after them
+    this.jumps = opts.jumps || M.jumps || (this.pageMarks.length && this.pageMarks.length <= 6
+      ? this.pageMarks.map(m => ({ label: '→ ' + m.label, t: m.t, span: this.span / 5 })) : []);
     this.sel = null; this.edgeKind = 'any';   // selected signal row (edge search, bookmarks), edge kind
     this.extraJSON = [];   // plugins: () -> '"key": …' lines for the bookmarks JSON (or null)
     this.extraState = [];   // plugins: {key, get() -> a JSON value, set(value) (may be async)}: their part of the saved state
-    this.extraRows = [];   // plugins: rows under a group (withExtra)
+    this.extraRows = [Object.assign(g => (g ? [] : this.ugRows()), { head: true })];   // plugins: rows under a group (withExtra); yours at the top
     this.extraPicks = new Map();   // plugins: rows highlighted, row -> a token ('hl8': --wave-hl8) or a colour index; Esc clears (then wavefw:reset)
     this.keys = {};   // plugins: key -> fn(event) on the waves (addKey)
     this.rowMarks = new Map(); this.rowTitles = new Map();   // plugins: classes and tooltips of name rows (rowClass, rowTitle)
@@ -567,7 +598,8 @@ class WaveView {
     // every listener outside the viewer's own child elements (its root, the window, the document) is registered with
     // this signal: destroy() removes them all (a dump opened again on the same element left the old ones running)
     this.ac = new AbortController();
-    Object.assign(this, this.loadBookmarks()); root.waveView = this;   // this.bms, this.arrows
+    Object.assign(this, this.loadBookmarks()); root.waveView = this;   // this.bms, this.arrows, this.umarks
+    this.markers = this.pageMarks.concat(this.umarks);
     this.build(); this.fit();
     if (opts.from != null || opts.to != null) { // initial view window (Fit still shows everything)
       const a = opts.from ?? M.t0, b = opts.to ?? M.t1;
@@ -582,6 +614,7 @@ class WaveView {
     this.bodyEl.addEventListener('scroll', this.onScroll, { passive: true, ...own });
     VIEWS.add(this);
     for (const p of PLUGINS) try { p(this); } catch (e) { console.error('wavefw plugin:', e); }
+    this.applyEdits(); liveHello(); liveShow();   // the page's edits (tools/viewedit.py); a live page: the agent hears of this viewer
   }
   // what this viewer's bookmarks, paint and bindings are stored under in this browser: the page, then opts.key, the id,
   // the data-wave reference or the title; several viewers of one data-wave (a bench and its lazy cards) are told apart by
@@ -798,7 +831,7 @@ class WaveView {
     const rows = withExtra(orderRows(this.M.rows, this.sort, this.sortIgnore, this.S.groupOrder), this.extraRows, this.M, this);
     if (!this.hiddenRows.size) return (this.rowsAll = rows);
     const H = this.hiddenRows, ids = new Set(Object.values(this.M.groups).filter(g => H.has(g.path)).map(g => g.id));   // a hidden module: all of it
-    return (this.rowsAll = rows.filter(r => !(r.type !== 'space' && r.type !== 'lane' && r.full && H.has(r.full)) && !r.anc.some(id => ids.has(id))));
+    return (this.rowsAll = rows.filter(r => !(r.type !== 'space' && r.type !== 'lane' && r.full && !r.ug && H.has(r.full)) && !r.anc.some(id => ids.has(id))));
   }
   visible() { return this.allRows().filter(r => !r.anc.some(id => this.collapsed.has(id))); }
   settingsChanged() { this.root.dispatchEvent(new CustomEvent('wavefw:settings')); }   // sort, prefixes, settings
@@ -979,7 +1012,7 @@ class WaveView {
   // the radix of a signal (a row or its path; one of RADIX, null: the page's) and hidden rows (signals, modules: all of
   // them), from the right button's menu; kept in this browser and in the saved state
   setRadix(row, radix, quiet = false) {   // quiet: no save / render / draw (a loop that does them once after)
-    if (typeof row === 'string') row = this.M.rows.find(r => r.type === 'sig' && r.full === row);
+    if (typeof row === 'string') row = this.M.rows.find(r => r.type === 'sig' && r.full === row); else if (row && row.orig) row = row.orig;
     if (!row || row.type !== 'sig') return this;
     if (!('radix0' in row)) row.radix0 = row.radix;
     if (isRadix(radix)) { row.radix = radix; this.radixes.set(row.full, radix); } else { row.radix = row.radix0; this.radixes.delete(row.full); }
@@ -987,14 +1020,18 @@ class WaveView {
   }
   // a bus drawn analog (a step plot, n rows high; true: 3, 0 / false: as a bus; null: the page's own), kept like the radix
   setAnalog(row, n, quiet = false) {   // a bus only: a 1-bit signal has no values to plot (null: back to its own)
-    if (typeof row === 'string') row = this.M.rows.find(r => r.type === 'sig' && r.full === row);
+    if (typeof row === 'string') row = this.M.rows.find(r => r.type === 'sig' && r.full === row); else if (row && row.orig) row = row.orig;
     if (!row || row.type !== 'sig' || (n && (row.width || 1) < 2 && row.kind !== 'real')) return this;
     if (!('analog0' in row)) row.analog0 = row.analog;
     if (n == null) { row.analog = row.analog0; this.analogs.delete(row.full); } else { row.analog = n || false; this.analogs.set(row.full, n || false); }
     if (!quiet) { this.saveRows(); this.renderNames(); this.draw(); } return this;
   }
-  hide(rows) {   // rows or paths
-    for (const r of [].concat(rows)) { const p = typeof r === 'string' ? r : r && (r.full || r.path); if (p) this.hiddenRows.add(p); }
+  hide(rows) {   // rows or paths (a signal of your group: out of the group)
+    const out = [].concat(rows).filter(r => r && r.ug);
+    for (const g of this.ugroups) { const rm = out.filter(r => r.ug.name === g.name).map(r => r.full);
+      if (rm.length) g.signals = g.signals.filter(f => !rm.includes(f)); }
+    if (out.length) this.ugMemo = null;
+    for (const r of [].concat(rows)) { const p = typeof r === 'string' ? r : r && !r.ug && (r.full || r.path); if (p) this.hiddenRows.add(p); }
     if (this.sel && !this.allRows().includes(this.sel)) this.sel = null;
     this.saveRows(); this.renderNames(); this.draw(); return this;
   }
@@ -1005,7 +1042,7 @@ class WaveView {
   loadRows() {
     let o = {};
     try { o = JSON.parse(localStorage.getItem(this.rowsKey) || '{}') || {}; } catch (e) { /* no storage */ }
-    this.hiddenRows = new Set(Array.isArray(o.hidden) ? o.hidden : []);
+    this.hiddenRows = new Set(Array.isArray(o.hidden) ? o.hidden : []); this.ugroups = groupNorm(o.groups);
     for (const [p, n] of Object.entries(o.analog || {})) { const r = this.M.rows.find(x => x.type === 'sig' && x.full === p);
       if (r) { if (!('analog0' in r)) r.analog0 = r.analog; r.analog = n || false; this.analogs.set(p, n); } }
     for (const [p, rx] of Object.entries(o.radix || {})) { const r = this.M.rows.find(x => x.type === 'sig' && x.full === p);
@@ -1013,8 +1050,9 @@ class WaveView {
   }
   saveRows() {
     try {
-      if (this.radixes.size || this.hiddenRows.size || this.analogs.size) localStorage.setItem(this.rowsKey,
-        JSON.stringify({ radix: Object.fromEntries(this.radixes), hidden: [...this.hiddenRows], analog: Object.fromEntries(this.analogs) }));
+      if (this.radixes.size || this.hiddenRows.size || this.analogs.size || this.ugroups.length) localStorage.setItem(this.rowsKey,
+        JSON.stringify({ radix: Object.fromEntries(this.radixes), hidden: [...this.hiddenRows], analog: Object.fromEntries(this.analogs),
+          groups: this.groupList() }));
       else localStorage.removeItem(this.rowsKey);
     } catch (e) { /* private mode */ }
   }
@@ -1094,7 +1132,8 @@ class WaveView {
         highlight: [...this.picks].sort((a, b) => a[1] - b[1]).map(([r]) => r.full).filter(Boolean), findHighlight: !!this.findHl, findOpen: !!this.findOpen,
           ...Object.fromEntries(FIND_OPTS.map(o => [o[1], !!this[o[1]]])), ...this.gapOpt() },
       paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs), hidden: [...this.hiddenRows],
-        select: (this.sel && this.sel.full) || null, find: this.q || '', bookmarks: this.bookmarks(), arrows: this.arrowList() };
+        select: (this.sel && this.sel.full) || null, find: this.q || '', bookmarks: this.bookmarks(), arrows: this.arrowList(), markers: this.markList(),
+        groups: this.groupList() };
     if (this.cursor2 != null) st.cursor2 = this.cursor2;
     if (this.range) st.range = { from: this.range[0], to: this.range[1], signal: (this.rangeRow && this.rangeRow.full) || null };
     if (this.edgeKind !== 'any' || (this.evEl && this.evEl.value)) st.edge = { kind: this.edgeKind, value: (this.evEl && this.evEl.value) || '' };
@@ -1110,7 +1149,10 @@ class WaveView {
         `is left out`));
     const M = this.M, C = st.config || {}, miss = new Set();
     for (const x of this.extraState) if (st[x.key] !== undefined) { try { await x.set(st[x.key]); } catch (e) { this.toast(`${x.key}: ${e.message}`); } }
-    this.allRows();   // the plugins' groups are there now (their folding)
+    const sigs = new Set(M.rows.map(r => r.full));
+    if (st.groups !== undefined) { this.ugroups = groupNorm(st.groups).map(g => Object.assign(g, { signals: g.signals.filter(p => sigs.has(p) ||
+      (miss.add(p), false)) })); this.setGroups(); }
+    this.allRows();   // the plugins' groups and yours are there now (their folding)
     const paths = new Set([...M.rows.map(r => r.full), ...Object.values(M.groups).map(g => g.path)]), seen = p => paths.has(p) || (miss.add(p), false);
     if (C.style !== undefined) this.setStyle(C.style);
     const gk = GAP_KEYS.filter(k => C[k] !== undefined);
@@ -1127,7 +1169,14 @@ class WaveView {
       this.root.querySelector(`button[data-act=${act}]`)?.setAttribute('aria-pressed', this[k]); }
     if (C.fold !== undefined) { (Array.isArray(C.fold) ? C.fold : []).forEach(p => seen(p)); this.foldSaved = null; this.collapsed = foldSet(M, C.fold);
       this.foldTouched = true; }
-    if (C.highlight !== undefined) { prefixes(C.highlight).filter(p => !p.includes('*')).forEach(p => seen(p)); this.picks = hlPick(M, C.highlight); }
+    // "folds": {path: true | false, "*": every group}: the groups the page's edits folded or opened (tools/viewedit.py), the rest as they are
+    if (st.folds && typeof st.folds === 'object') { this.foldSaved = null; this.foldTouched = true;
+      for (const [p, on] of Object.entries(st.folds)) {
+        if (p === '*') { this.collapsed = on ? new Set(Object.keys(M.groups).map(Number)) : new Set(); continue; }
+        const g = seen(p) && Object.values(M.groups).find(x => x.path === p); if (g) { if (on) this.collapsed.add(g.id); else this.collapsed.delete(g.id); } }
+      this.collapsed = new Set([...this.collapsed].sort((x, y) => x - y)); }
+    if (C.highlight !== undefined) { prefixes(C.highlight).filter(p => !p.includes('*')).forEach(p => seen(p));
+      this.picks = hlPick(M, C.highlight, M.rows.concat(this.ugRows().filter(r => r.type === 'group'))); }
     if (st.paint !== undefined) { this.painted = new Map(Object.entries(st.paint || {}).filter(([p, c]) => typeof c === 'string' && seen(p))); this.savePaint();
       }
     if (st.radix !== undefined) {
@@ -1144,6 +1193,8 @@ class WaveView {
       const bms = (st.bookmarks || []).filter(b => !b.signal || seen(b.signal) || (b.signal = null, true));   // on the time axis when its signal is not here
       this.bms = bmNorm(bms); this.arrows = arNorm(st.arrows || [], bms); this.saveBookmarks(); this.renderNotes();
     }
+    if (st.markers !== undefined) { this.umarks = markNorm(st.markers); this.setMarks(); }
+
     if (st.select !== undefined) this.sel = (st.select && seen(st.select) && M.rows.find(r => r.type === 'sig' && r.tr && r.full === st.select)) || null;
     if (st.from != null && st.to != null && isFinite(st.from) && isFinite(st.to)) { this.span = Math.min(Math.max(st.to - st.from, this.minSpan), M.t1 - M.t0);
       this.t0 = this.clamp(st.from); }
@@ -1177,7 +1228,7 @@ class WaveView {
     } catch (e) { this.toast(`${file.name || 'state'}: ${e.message}`); return null; }
   }
   // the colour a row is drawn in here: your paint, its own colour, its group's (groupColors); the model is not changed
-  strokeOf(r) { return (r.type === 'sig' && this.painted.get(r.full)) || r.stroke || (this.groupStroke && this.groupStroke.get(r)) || undefined; }
+  strokeOf(r) { return (r.type === 'sig' && this.painted.get(r.full)) || r.stroke || (this.groupStroke && this.groupStroke.get(r.orig || r)) || undefined; }
 
   /* ---------------- the plugin API (wavefw/sva.js uses only this, the rows of view.extraRows and the events) ---------------- */
   // Open… a dump: picked (with a handle where the browser keeps one: ⟳ reads the file again), a File, or a dropped one
@@ -1189,7 +1240,7 @@ class WaveView {
         types: [{ description: 'VCD dump', accept: { 'text/plain': ['.vcd'] } }] }); handle = h; file = await h.getFile(); }
       else if (!file) { this.dfile.click(); return this; }
       if (handle && handle.then) handle = await handle.catch(() => null);
-      if (/\.fst$/i.test(file.name)) { this.toast('an FST is binary: fst2vcd x.fst > x.vcd, or make html WAVES=x.fst'); return this; }
+      if (/\.fst$/i.test(file.name)) { this.toast('an FST is binary: sva vcd x.fst --out x.vcd (or fst2vcd), or make html WAVES=x.fst'); return this; }
       this.toast(`reading ${file.name}…`);
       const text = await file.text(), r = vcdToWave(text, { name: file.name, budget: this.S.dumpBudget });
       if (!r.shown) { this.toast(`${file.name}: no signals`); return this; }
@@ -1370,16 +1421,22 @@ class WaveView {
       line: a.line === 'solid' ? null : a.line,
       color: a.color, label: a.label }).filter(([k, v]) => v != null && (v !== '' || k === 'head'))));   // head "" = no head
   }
+  // your markers and groups as a state has them (empty and null left out)
+  markList() { return this.umarks.map(m => Object.fromEntries(Object.entries({ t: m.t, label: m.label, color: m.color })
+    .filter(([, x]) => x != null && x !== ''))); }
+  groupList() { return this.ugroups.map(g => Object.fromEntries(Object.entries({ name: g.name, signals: [...g.signals], color: g.color })
+    .filter(([, x]) => x != null))); }
   setBookmarks(list, arrows = []) { this.bms = bmNorm(list); this.arrows = arNorm(arrows, list); this.saveBookmarks(); this.renderNotes(); this.draw();
     return this; }
   loadBookmarks() { // this browser's copy (localStorage) wins over the page's "bookmarks" / "arrows"
     try {
       const v = localStorage.getItem(this.bmKey);
-      if (v != null) { const o = JSON.parse(v), list = Array.isArray(o) ? o : o.bookmarks; return { bms: bmNorm(list), arrows: arNorm(o.arrows, list) }; }
+      if (v != null) { const o = JSON.parse(v), list = Array.isArray(o) ? o : o.bookmarks;
+        return { bms: bmNorm(list), arrows: arNorm(o.arrows, list), umarks: markNorm(o.markers) }; }
     } catch (e) { /* no storage: page bookmarks */ }
-    return { bms: this.M.bookmarks.map(b => Object.assign({}, b)), arrows: this.M.arrows.map(a => Object.assign({}, a)) };
+    return { bms: this.M.bookmarks.map(b => Object.assign({}, b)), arrows: this.M.arrows.map(a => Object.assign({}, a)), umarks: [] };
   }
-  saveBookmarks() { try { localStorage.setItem(this.bmKey, JSON.stringify({ bookmarks: this.bookmarks(), arrows: this.arrowList() }));
+  saveBookmarks() { try { localStorage.setItem(this.bmKey, JSON.stringify({ bookmarks: this.bookmarks(), arrows: this.arrowList(), markers: this.markList() }));
     } catch (e) { /* private mode */ } }
   when(t) { return this.M.timed ? fmtExact(t) : trimNum(t); }
   // typed time: "250ns", "85.12us"; a plain number is in the unit shown (µs for "85.120 µs"), or cycles
@@ -1388,8 +1445,10 @@ class WaveView {
     if (this.M.timed && /^-?[\d.]+(e-?\d+)?$/i.test(v)) return parseFloat(v) * (UNITS.find(([f]) => Math.abs(ref) >= f) || UNITS[UNITS.length - 1])[0];
     return parseT(v);
   }
-  renderNotes() { this.notes.render(); }   // the bookmark and arrow lists under the waves (Notes)
-  renderNames() { this.names.render(); }   // the names column (Names)
+  // the bookmark, arrow, marker and group lists under the waves (Notes), the names column (Names); while view.run
+  // works (held), once at its end
+  renderNotes() { if (this.held) this.held.notes = true; else this.notes.render(); }
+  renderNames() { if (this.held) this.held.names = true; else this.names.render(); }
   rowState(el, r) { this.names.state(el, r); }
   changed(list) { this.saveBookmarks(); if (list) this.renderNotes(); this.draw(); }
   layout() { return layoutRows(this.rowsL, this.rowH, this.S.laneHeight, this.hdrH); }
@@ -1690,7 +1749,10 @@ class WaveView {
           'Leave it out of the view (Hidden: N ✕ in the bar shows it again)') +
         (grp ? b('fold', this.collapsed.has(grp.id) ? 'Open this module' : 'Fold this module') : up != null ? b('foldup', 'Fold its module') : '') +
         (sig ? b('mark', 'Bookmark here', 'A bookmark on this signal at the time clicked') : '') +
-        b('c2',
+        (sigs.length ? this.ugroups.slice(0, 6).map((g, i) => (sigs.every(r => g.signals.includes((r.orig || r).full)) ? '' :
+          b('ugto' + i, `To group “${g.name}”`))).join('') + b('ugnew', many ? `New group of the ${sigs.length}` : 'New group with it') : '') +
+        (sig && sig.ug ? b('ugout', `Out of group “${sig.ug.name}”`) : '') + (grp && grp.user ? b('ugdel', 'Delete this group') : '') +
+        b('umark', 'Marker here') + b('c2',
           'Second cursor here') + (this.cursor2 != null ? b('c2x', 'Clear the second cursor') : '') + b('copyname', 'Copy the path') : '') +
       (ng || nh ? '<hr>' + (ng ? b('zM', 'Fold every module') + b('zR', 'Open every module') : '') + (nh ? b('unhide', `Show the hidden (${nh})`) : '') : '') +
       (r ? '<hr>' + b('clear', 'Clear the range') : '');
@@ -1750,6 +1812,14 @@ class WaveView {
         this.bms.push({ n, t, signal: sig.full, text: '', color: null }); this.changed(true);
         this.notesEl.querySelector(`li[data-n="${n}"] input.txt`)?.focus(); return this.closeMenu(); }
       else if (act === 'copyname') this.copyRows([it]);
+      else if (act === 'umark') { this.run({ op: 'marker', t: at }).then(() =>
+          this.notesEl.querySelector(`li[data-k="${this.umarks.length - 1}"] input.ml`)?.focus());
+        return this.closeMenu(); }
+      else if (act.startsWith('ugto')) this.toGroup(this.ugroups[+act.slice(4)].name, sigs);
+      else if (act === 'ugnew') { let k = this.ugroups.length + 1; while (this.ugroups.some(g => g.name === `group ${k}`)) k++;
+        this.toGroup(`group ${k}`, sigs); }
+      else if (act === 'ugout') this.hide([sig]);
+      else if (act === 'ugdel') this.run({ op: 'group', name: grp.name, delete: true });
       else if (act === 'c2') this.setCursor2(sig ? this.snap(sig, at) : at);
       else if (act === 'gref') role('gapSignals', !gref);
       else if (act === 'gaux') role('gapAux', !gaux);
@@ -1841,6 +1911,7 @@ class WaveView {
   // in a column as tall as all rows, and draws the layout shifted by oy = its offset in that column. The axis stays on top.
   // draw = size (the canvas and its offset) + paintFrame (the pixels) + syncReadouts (the cursor line, fields, values).
   draw() {
+    if (this.held) { this.held.draw = true; return; }
     if (this.S.arrowLabels === 'lane' && this.laneKey !== laneKey(this.bms, this.arrows)) {   // a bookmark or an arrow label changed: its lane?
       this.laneKey = laneKey(this.bms, this.arrows);
       if (this.laneSig !== JSON.stringify([...arrowLanes(this.vis, this.bms, this.arrows)])) this.renderNames();

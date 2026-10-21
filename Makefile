@@ -11,12 +11,11 @@ OBJ   ?= $(B)/obj
 VCD   ?= $(B)/demo.vcd
 PY    := python3 -I
 PW    := PYTHONDONTWRITEBYTECODE=1 python3   # playwright scripts: not -I (a user-site install), no __pycache__
-READER ?=          # builtin (default: one pass in Python) | wavepeek
 DEMO_CONFIG := examples/demo/demo.config.json
 DEMO_TB     := examples/demo/demo_tb.sv
 DEMO_JS     := docs/demo_waves.js
 APB_JS      := docs/apb_waves.js
-V2W := $(PY) tools/vcd2wavedrom.py --config $(DEMO_CONFIG) --waves $(VCD) $(if $(READER),--reader $(READER))
+V2W := $(PY) tools/vcd2wavedrom.py --config $(DEMO_CONFIG) --waves $(VCD)
 
 # Any dump, starting from the VCD alone (keep your own under work/: dumps and pages are git-ignored there):
 #   make config WAVES=work/x.vcd -> work/x.config.json: every signal under its full path, one line each (show, radix,
@@ -47,6 +46,7 @@ help:
 	@echo 'make example    EX=apb|axi_lite|fsm: one of them'
 	@echo 'make shots      the README screenshots in docs/img/ (after make examples)'
 	@echo 'make shots-check  the screenshots into $$(BUILD)/img, compared with docs/img (make check: a broken shot fails)'
+	@echo 'make guide-shots  the pictures of the guides in docs/guides/img (after make examples; ONLY=gaps,sva: those guides)'
 	@echo 'make html       one self-contained page: the demo, CONFIG=work/x.config.json, or WAVES=work/x.vcd (config made if missing);'
 	@echo '                SVA="checks/*.sv" BIND="name@scope,…": assertions bound, evaluated, an Assertions section'
 	@echo 'make config     WAVES=work/x.vcd: write or update work/x.config.json (every signal, your edits kept); SVA=…: "bind" lines'
@@ -73,7 +73,7 @@ help:
 	@echo 'make lint       verilator --lint-only -Wall on the example testbenches'
 	@echo 'make clean      remove the build products under $$(BUILD) (the cargo target stays: make clean-all)'
 	@echo 'make clean-all  remove $$(BUILD) entirely, the cargo target included'
-	@echo 'variables       BUILD=$(BUILD)  WAVES=dump.vcd|fst  CONFIG  HTML  BASE=$(BASE)  SV="rtl/*.sv"  READER=builtin|wavepeek'
+	@echo 'variables       BUILD=$(BUILD)  WAVES=dump.vcd|fst  CONFIG  HTML  BASE=$(BASE)  SV="rtl/*.sv"'
 	@echo '                SVA="checks/*.sv"  BIND="name@scope,…"  EX=apb|axi_lite|fsm  SCOPE=tb.dut  OUT=results.json  ARGS=…'
 	@echo '                FST=$$(BUILD)/demo_fst.fst  STRICT=1  ONLY=sec,…  AGENT=claude|codex  MODEL  REPS  TASKS'
 
@@ -141,6 +141,10 @@ examples:
 shots:
 	$(PW) tests/shots.py --build $(B) $(if $(ONLY),--only $(ONLY))
 
+# the pictures of the guides (docs/guides/*.html): docs/guides/img/*.png; the gaps guide's dump is made in BUILD/guides
+guide-shots:
+	$(PW) tests/guide_shots.py --build $(B) $(if $(ONLY),--only $(ONLY))
+
 # every shot made again into BUILD/img: a shot that no longer builds fails; a picture that changed is listed (the look
 # changed: make shots and commit the PNGs with the change)
 shots-check:
@@ -161,15 +165,15 @@ SVA_GLOB = $(if $(SVA),$(or $(wildcard $(SVA)),$(error no file matches SVA=$(SVA
 SVA_FILES = $(foreach f,$(SVA_GLOB),--sva $(f))
 SVA_BINDS = $(foreach b,$(subst $(comma), ,$(BIND)),--bind '$(b)')
 html: wavefw/wavefw.js $(CONFIG) $(if $(filter $(DEMO_CONFIG),$(CONFIG)),$(VCD))
-	$(PY) tools/mkhtml.py --config $(CONFIG) $(if $(HTML_WAVES),--waves $(HTML_WAVES)) $(if $(READER),--reader $(READER)) $(SVA_OPT) $(SVA_FILES) $(SVA_BINDS) --out $(HTML)
+	$(PY) tools/mkhtml.py --config $(CONFIG) $(if $(HTML_WAVES),--waves $(HTML_WAVES)) $(SVA_OPT) $(SVA_FILES) $(SVA_BINDS) --out $(HTML)
 
 config:
 	$(if $(WAVES),,$(error make config needs WAVES=dump.vcd))
-	$(PY) tools/mkconfig.py $(WAVES) --base $(BASE) --out $(CONFIG) --update $(if $(SV),--sv $(SV)) $(if $(READER),--reader $(READER)) $(if $(SVA),$(SVA_FILES) $(if $(wildcard $(SVA_BIN)),--sva-bin $(SVA_BIN)))
+	$(PY) tools/mkconfig.py $(WAVES) --base $(BASE) --out $(CONFIG) --update $(if $(SV),--sv $(SV)) $(if $(SVA),$(SVA_FILES) $(if $(wildcard $(SVA_BIN)),--sva-bin $(SVA_BIN)))
 
 ifdef WAVES
 $(CONFIG): | $(WAVES)   # only when missing: never overwrites an edited config
-	$(PY) tools/mkconfig.py $(WAVES) --base $(BASE) --out $@ $(if $(SV),--sv $(SV)) $(if $(READER),--reader $(READER))
+	$(PY) tools/mkconfig.py $(WAVES) --base $(BASE) --out $@ $(if $(SV),--sv $(SV))
 endif
 
 # SVA engine (docs/sva/STACK.md): one Rust library, a native CLI over VCD / FST (wellen) and a WebAssembly module for
@@ -254,7 +258,7 @@ smoke:
 	$(PW) tests/smoke.py --build $(B) --out $(B)/shots $(if $(STRICT),--strict) $(if $(ONLY),--only $(ONLY))
 
 # wavefw/wavefw.js is the concatenation of wavefw/src/*.js (committed: a page needs one file and no build step)
-WAVEFW_SRC := $(addprefix wavefw/src/,model.js vcd.js paint.js view.js svg.js boot.js)
+WAVEFW_SRC := $(addprefix wavefw/src/,model.js vcd.js paint.js view.js edit.js svg.js boot.js)
 wavefw: wavefw/wavefw.js
 wavefw/wavefw.js: $(WAVEFW_SRC) tools/wavefwcat.py
 	$(PY) tools/wavefwcat.py
@@ -298,4 +302,4 @@ clean-all:
 	$(if $(filter $(B),/ $(CURDIR) $(HOME) $(abspath $(HOME)/..)),$(error clean-all: BUILD=$(B) is not a build directory))
 	rm -rf $(B)
 
-.PHONY: wavefw help demo demo-fst example examples shots html config sva-build dist dist-linux dist-windows sva-test sva-bless sva-examples sva-verify sva-eval sva-spike mcp-bench smoke shots-check unit check fmt lint clean clean-all
+.PHONY: wavefw help demo demo-fst example examples shots guide-shots html config sva-build dist dist-linux dist-windows sva-test sva-bless sva-examples sva-verify sva-eval sva-spike mcp-bench smoke shots-check unit check fmt lint clean clean-all

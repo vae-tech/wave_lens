@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI agents (MCP) · wavefw guides</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="guide.css">
+</head>
+<body>
+<header class="top"><nav>
+  <a class="home" href="index.html">wavefw guides</a>
+  <a href="pages.html">Dump → page</a> <a href="viewer.html">Viewer</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
+  <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="mcp.html" aria-current="page">AI agents (MCP)</a>
+  <a href="../index.html">Reference</a>
+</nav></header>
+<div class="page toc-side">
+<main>
+<header class="hero"><div class="kicker">Guide</div><h1>AI agents (MCP)</h1>
+<p class="lead">Give an AI agent — Claude Code, Codex, any MCP client — the tools of wavefw: it asks questions of a dump and gets short
+  JSON answers instead of reading the dump or writing a parser for it, checks SystemVerilog assertions in one call, and writes a viewer
+  page when it wants to show you something.</p></header>
+
+<h2 id="what">What it is</h2>
+<p><code>tools/wavemcp.py</code> is an MCP server (Model Context Protocol, JSON-RPC over stdio). Python standard library only, like the
+  other tools. It reads a VCD, or an FST through GTKWave's <code>fst2vcd</code> or the <code>sva</code> CLI. Two tools need the <code>sva</code> engine's CLI —
+  <code>sva_check</code> and <code>wave_find</code> with an expression — and find it the way <code>svabuild.py</code> does:
+  <code>$WAVEFW_SVA</code>, the build (<code>make sva-build</code>), the committed <code>bin/&lt;os&gt;-x86_64/sva</code>, the
+  <code>PATH</code>.</p>
+<p>A dump is read once per server (its declarations and the change counts) and kept; the transitions of a signal are read when a tool
+  first needs them, and read again when the file changes — so a long session over a big dump stays fast, and a new simulation is seen.</p>
+
+<h2 id="setup">Setting it up</h2>
+<pre><code>claude mcp add wavefw -- python3 -I /path/to/wavefw/tools/wavemcp.py     <span class="c"># Claude Code (add --scope user: every project)</span>
+codex mcp add wavefw -- python3 -I /path/to/wavefw/tools/wavemcp.py      <span class="c"># Codex CLI</span></code></pre>
+<p>Any other MCP client: run <code>python3 -I tools/wavemcp.py</code> as a stdio server. The server tells the agent its conventions in
+  its <code>instructions</code> (start with <code>wave_info</code>, then <code>wave_signals</code> to find names …), so the agent needs no
+  prompt of yours to use it. The tools that only read are marked read-only (<code>readOnlyHint</code>); <code>wave_page</code>,
+  <code>view_edit</code> and <code>view_live</code> write only the page you name (<code>destructiveHint: false</code>).</p>
+<h3>From the shell</h3>
+<p>The same tools work without an agent — for a script, a test, or an agent that prefers its shell:</p>
+<pre><code>python3 -I tools/wavemcp.py --list                                                  <span class="c"># the tools and their input schemas</span>
+python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd"}'   <span class="c"># one tool, its answer on stdout</span></code></pre>
+<p>The examples below are real answers of <code>--call</code> on the APB example's dump (<code>make example EX=apb</code> →
+  <code>out/examples/apb/apb.vcd</code>: an APB3 write, a read with two wait states and a write to an unmapped address).</p>
+
+<h2 id="tools">The tools</h2>
+<table>
+  <tr><th>Tool</th><th>Answers</th></tr>
+  <tr><td><code>wave_info</code></td><td>the time span, the number of signals and changes, the scopes (three levels), the clocks with their
+    period, the resets</td></tr>
+  <tr><td><code>wave_signals</code></td><td>the signals by a substring or a <code>*</code> / <code>?</code> pattern, under a scope, to a
+    depth: path, width, number of changes</td></tr>
+  <tr><td><code>wave_values</code></td><td>the values of signals at one or more times (after the changes at that time, or
+    <code>side: "before"</code>)</td></tr>
+  <tr><td><code>wave_changes</code></td><td>the value at the start of a window and the changes in it, <code>limit</code> per signal</td></tr>
+  <tr><td><code>wave_sample</code></td><td>a table per clock cycle, the values sampled just before the edge (as SVA samples), by default only
+    the cycles where a value changes</td></tr>
+  <tr><td><code>wave_find</code></td><td>an SV expression or sequence matched on every clock cycle; or a signal's edges or value at their
+    exact times: the count and the first matches</td></tr>
+  <tr><td><code>wave_stats</code></td><td>over a window: a bit's rises, falls, high time, pulse widths and period; a bus's changes, distinct
+    values, the longest-held ones, minimum and maximum</td></tr>
+  <tr><td><code>sva_check</code></td><td>assertion files and / or text evaluated over the dump in a scope: the failed ones with their first
+    failures, passed, vacuous, not evaluated, the covers</td></tr>
+  <tr><td><code>wave_page</code></td><td>a viewer page (<code>.html</code>) or WaveJSON (<code>.json</code>) of signals over a window, with
+    assertions bound, to show a person</td></tr>
+  <tr><td><code>view_edit</code></td><td>marks a page up for a person: bookmarks with an explanation, arrows between them, markers, a group
+    of the signals that matter, highlight, colours, the cursor and the window — live in their browser, else in the page's file</td></tr>
+  <tr><td><code>view_get</code></td><td>what a page shows, the person's own edits too; its signals; a picture of the screen (live)</td></tr>
+  <tr><td><code>view_live</code></td><td>connects a page to the agent: what it does there appears as it happens</td></tr>
+</table>
+
+<h3 id="wave-info">wave_info — the dump at a glance</h3>
+<pre><code>--call wave_info '{"dump": "out/examples/apb/apb.vcd"}'
+{"file":"apb.vcd","unit":"ns","resolution_ns":0.001,"start":0,"end":205,"signals":61,"changes":346,
+ "scopes":[["apb_tb",61],["apb_tb.u_count",6],["apb_tb.u_master",18],["apb_tb.u_regs",17],["apb_tb.u_regs.regs",4]],
+ "clocks":[{"name":"apb_tb.PCLK","period":10,"mhz":100.0,"first_rise":5,"rises":21}],
+ "resets":["apb_tb.PRESETn","apb_tb.u_count.PRESETn","apb_tb.u_master.PRESETn","apb_tb.u_regs.PRESETn"]}</code></pre>
+
+<h3 id="wave-signals">wave_signals — find the names</h3>
+<pre><code>--call wave_signals '{"dump": "…/apb.vcd", "pattern": "PADDR"}'
+{"total":3,"scope":null,"columns":["path","width","changes"],
+ "signals":[["apb_tb.PADDR",8,2],["apb_tb.u_master.PADDR",8,2],["apb_tb.u_regs.PADDR",8,2]]}</code></pre>
+<p>Also <code>scope</code>, <code>depth</code> (levels under it), <code>active</code> (only signals that change), <code>limit</code> /
+  <code>offset</code> for long lists.</p>
+
+<h3 id="wave-values">wave_values — values at times</h3>
+<pre><code>--call wave_values '{"dump": "…/apb.vcd", "signals": ["PSEL", "PADDR", "PWDATA"], "at": ["55ns", 105]}'
+{"unit":"ns","side":"after","columns":["t","PSEL","PADDR","PWDATA"],
+ "rows":[[55,"1","0x04","0xCAFE0001"],[105,"1","0x04","0x00000000"]],
+ "notes":["PADDR = apb_tb.PADDR (+2 deeper)","PSEL = apb_tb.PSEL (+2 deeper)","PWDATA = apb_tb.PWDATA (+2 deeper)"]}</code></pre>
+<p>The <code>notes</code> say which signal a short name was taken for: <code>PADDR</code> is in three scopes, the one nearest the top
+  wins and the answer says so.</p>
+
+<h3 id="wave-changes">wave_changes — what happened in a window</h3>
+<pre><code>--call wave_changes '{"dump": "…/apb.vcd", "signals": ["PREADY", "PADDR"], "from": "40ns", "to": "170ns"}'
+{"unit":"ns","from":40,"to":170,"signals":{
+  "PREADY":{"initial":"0","count":6,"changes":[[55,"1"],[65,"0"],[115,"1"],[125,"0"],[155,"1"],[165,"0"]]},
+  "PADDR":{"initial":"0x00","count":2,"changes":[[45,"0x04"],[145,"0x40"]]}}, "notes":[…]}</code></pre>
+<p>Long answers are cut at <code>limit</code>; <code>more</code> and <code>next_from</code> say how to go on.</p>
+
+<h3 id="wave-sample">wave_sample — a table per clock cycle</h3>
+<pre><code>--call wave_sample '{"dump": "…/apb.vcd", "signals": ["PSEL", "PENABLE", "PREADY", "PADDR"], "clock": "PCLK"}'
+{"unit":"ns","clock":"apb_tb.PCLK","edge":"posedge","sampled":"just before the edge","cycles":21,"first_cycle":0,
+ "columns":["cycle","t","PSEL","PENABLE","PREADY","PADDR"],
+ "rows":[[0,5,"0","0","0","0x00"],[5,55,"1","0","0","0x04"],[6,65,"1","1","1","0x04"],[7,75,"0","0","0","0x04"],
+         [9,95,"1","0","0","0x04"],[10,105,"1","1","0","0x04"],[12,125,"1","1","1","0x04"],[13,135,"0","0","0","0x04"],
+         [15,155,"1","0","0","0x40"],[16,165,"1","1","1","0x40"],[17,175,"0","0","0","0x40"]],"only_changes":true, …}</code></pre>
+<p>Only the cycles where a value changed (<code>only_changes</code>, default true): cycle 11, the second wait state, equals cycle 10 and
+  is left out. The values are the ones just before the edge, what an assertion sees.</p>
+
+<h3 id="wave-find">wave_find — search</h3>
+<p>By an expression or a sequence, evaluated on every cycle of the clock by the sva engine:</p>
+<pre><code>--call wave_find '{"dump": "…/apb.vcd", "expr": "PSEL &amp;&amp; PENABLE &amp;&amp; !PREADY"}'
+{"unit":"ns","expr":"PSEL &amp;&amp; PENABLE &amp;&amp; !PREADY","clock":"apb_tb.PCLK","scope":"apb_tb","sampled":"just before the edge",
+ "cycles":21,"matches":2,"columns":["cycle","t","end_cycle","end_t"],"rows":[[10,105],[11,115]]}
+
+--call wave_find '{"dump": "…/apb.vcd", "expr": "PSEL &amp;&amp; !PENABLE ##1 PENABLE ##[0:3] PREADY"}'
+{… "matches":3,"columns":["cycle","t","end_cycle","end_t"],"rows":[[5,55,6,65],[9,95,12,125],[15,155,16,165]]}</code></pre>
+<p>Or by one signal's edges (<code>rise</code>, <code>fall</code>, <code>change</code>) or value (a number, <code>'h40</code>, an enum
+  label) at their exact times:</p>
+<pre><code>--call wave_find '{"dump": "…/apb.vcd", "signal": "PSLVERR", "edge": "rise"}'
+{"unit":"ns","signal":"PSLVERR","edge":"rise","matches":1,"times":[155], …}
+
+--call wave_find '{"dump": "…/apb.vcd", "signal": "PADDR", "value": "'h40"}'
+{"unit":"ns","signal":"PADDR","value":"'h40","matches":1,"columns":["t","lasts"],"rows":[[145,null]], …}</code></pre>
+
+<h3 id="wave-stats">wave_stats — aggregates</h3>
+<pre><code>--call wave_stats '{"dump": "…/apb.vcd", "signals": ["PREADY", "PADDR"]}'
+{"unit":"ns","from":0,"to":205,"signals":{
+  "PREADY":{"changes":6,"rises":3,"falls":3,"high_pct":14.63,"high":{"min":10,"max":10,"count":3},
+            "low":{"min":30,"max":50,"count":2},"period":{"median":50,"min":40,"max":60}},
+  "PADDR":{"changes":2,"distinct":3,"values":[["0x04",1,48.78],["0x40",1,29.27],["0x00",1,21.95]],
+           "values_columns":["value","times","pct_of_time"],"min":"0x00","max":"0x40"}}, …}</code></pre>
+
+<h3 id="sva-check">sva_check — assertions in one call</h3>
+<pre><code>--call sva_check '{"dump": "…/apb.vcd", "files": ["examples/apb/apb_tb.sv", "examples/apb/apb.sva"], "scope": "apb_tb"}'
+{"unit":"ns","scope":"apb_tb","clock":"apb_tb.PCLK","cycles":21,
+ "failed":[{"name":"apb_demo_no_wait","line":110,"text":"PSEL &amp;&amp; PENABLE |-&gt; PREADY",
+            "stats":{"attempts":19,"pass":3,"fail":2,"vacuous":14},
+            "failures":[[10,105,10,105,"expected PREADY at cycle 10"],[11,115,11,115,"expected PREADY at cycle 11"]],
+            "columns":["cycle","t","start_cycle","start_t","note"]}],
+ "passed":["apb_setup_then_access","apb_enable_needs_sel","apb_wait_holds","apb_addr_stable","apb_wdata_stable",
+           "apb_end_of_transfer","apb_read_waits","apb_slverr_unmapped","apb_phase_order","apb_phase_sel"],
+ "covered":[["apb_cov_write",2,55],["apb_cov_read_wait",1,95],["apb_cov_error",1,165]]}</code></pre>
+<p>Files go packages first. An agent can also write a check on the spot as <code>source</code> text:</p>
+<pre><code>--call sva_check '{"dump": "…/apb.vcd", "scope": "apb_tb",
+                   "source": "a_ack: assert property (@(posedge PCLK) PSEL &amp;&amp; PENABLE |-&gt; ##[0:2] PREADY);"}'
+{"unit":"ns","scope":"apb_tb","clock":"apb_tb.PCLK","cycles":21,"passed":["a_ack"]}</code></pre>
+<p>Assertions whose names do not resolve in the scope are listed as not evaluated, with the names missing. More arguments:
+  <code>assertions</code> (some only), <code>from</code> / <code>to</code>, <code>max_failures</code>, <code>details</code>,
+  <code>defines</code>. The language and the results are those of the <a href="sva.html">assertions guide</a>.</p>
+
+<h3 id="wave-page">wave_page — a page to show a person</h3>
+<pre><code>--call wave_page '{"dump": "…/apb.vcd", "out": "apb_page.html", "title": "APB transfers (wave_page)",
+                   "signals": ["PCLK", "PSEL", "PENABLE", "PWRITE", "PADDR", "PWDATA", "PRDATA", "PREADY", "PSLVERR"],
+                   "from": "30ns", "to": "200ns"}'
+{"page":"…/apb_page.html","bytes":751439,"notes":["PADDR = apb_tb.PADDR (+2 deeper)", …]}</code></pre>
+<figure><img src="img/mcp-page.png" alt="The viewer page written by wave_page: the APB signals from 30 to 200 ns" loading="lazy">
+<figcaption><b>What the agent hands you.</b> The page of that call: a full viewer (cursor, find, bookmarks, the menu) over the nine
+  signals, the APB port found by its names under them. Open it and look for yourself.</figcaption></figure>
+<p><code>out</code> ending in <code>.json</code> writes the WaveJSON instead. <code>clock</code> (a name or <code>"auto"</code>) gives
+  one cell per cycle; <code>auto_gap: "16:2"</code> folds idle cycles out of a long window (see <a href="gaps.html">Gaps</a>);
+  <code>sva</code> files and <code>bind: ["name@scope"]</code> put the assertions on the page.</p>
+
+<h2 id="markup">view_edit — marking a page up for a person</h2>
+<p>A page is for a person to look at; the agent can point at what matters on it, the way you would with the viewer's buttons: a
+  numbered circle on a signal with an explanation, an arrow between two of them with a label, a marker across every row, a group of the
+  signals that matter at the top, a highlight, a colour. <code>view_edit</code> takes the viewer's
+  <a href="../USAGE.md#commands-and-edits">commands</a> — the same ones a script runs in the page with <code>view.run</code> — in
+  order; times are ns, signals as everywhere here:</p>
+<pre><code>--call view_edit '{"page": "apb_page.html", "ops": [
+  {"op": "bookmark", "t": 85,  "signal": "PSEL",    "text": "read of 0x04: SETUP"},
+  {"op": "bookmark", "t": 95,  "signal": "PENABLE", "text": "ACCESS, but PREADY is low: the slave waits"},
+  {"op": "bookmark", "t": 115, "signal": "PREADY",  "text": "PREADY: the read ends at the next edge (125 ns)"},
+  {"op": "arrow", "from": 2, "to": 3, "label": "2 wait states", "shape": "-|"},
+  {"op": "bookmark", "t": 155, "signal": "PSLVERR", "text": "write to an unmapped address: PSLVERR"},
+  {"op": "marker", "t": 125, "label": "read done", "color": "#2f9e44"},
+  {"op": "group", "name": "handshake", "signals": ["PSEL", "PENABLE", "PREADY", "PSLVERR"], "color": "#4dabf7"},
+  {"op": "highlight", "add": ["handshake", "PADDR", "PRDATA"]}, {"op": "cursor", "t": 115}]}'
+{"page":"…/apb_page.html","view":"view","results":[{"op":"bookmark","n":1},{"op":"bookmark","n":2},…,{"op":"cursor","t":115}],
+ "note":"written into the page: the person sees it when they open or reload it"}</code></pre>
+<figure><img src="img/mcp-markup.png" alt="The page of wave_page with the agent's bookmarks, arrow, marker, group and highlight" loading="lazy">
+<figcaption><b>The agent's explanation, on the waves.</b> The read with its two wait states: three bookmarks with their texts in the
+  list under the waves, the arrow with its label in a lane of its own, the marker where the read is done, the handshake signals as a
+  group at the top, the address and the data highlighted. Everything stays editable: the person moves a circle, changes a text, adds
+  their own.</figcaption></figure>
+<p>A command that cannot run says why in its result (<code>no signal "PSELL"; similar: apb_tb.PSEL</code>) and the others still run.
+  Without a live page the edits go into the page's file, and the person sees them when they open or reload it; what they changed in
+  their browser meanwhile in the same parts gives way, the rest stays.</p>
+<h3 id="live">view_live — as it happens</h3>
+<pre><code>view_live {"page": "apb_page.html", "open": true}     <span class="c"># the link written into the page, the page opened</span>
+view_edit {"page": "apb_page.html", "ops": […]}       <span class="c"># appears on the person's screen at once</span>
+view_get  {"page": "apb_page.html", "picture": true}  <span class="c"># what is there now, their own bookmarks too, and a picture of it</span></code></pre>
+<p>The page connects to the server on <code>127.0.0.1</code> with a key that only the pages written by <code>view_live</code> carry;
+  <b>● live</b> in its bar says so (a click disconnects). The person and the agent work on the same waves: the agent puts a bookmark,
+  the person moves it or answers in its text, <code>view_get</code> reads it back. <code>save</code> in <code>view_edit</code> writes the
+  live page's state into its file too; <code>off</code> in <code>view_live</code> takes the link out of the page before it goes to anyone
+  else.</p>
+
+<h2 id="conventions">Conventions</h2>
+<ul>
+  <li><b>Times</b> are ns: a number, or a text with a unit (<code>"2.5us"</code>, <code>"55ns"</code>). Answers give
+    <code>"unit":"ns"</code>.</li>
+  <li><b>A signal</b> is its full path, its path under <code>scope</code>, or the unique tail of a path (<code>PSEL</code>,
+    <code>u_regs.PSEL</code>). Of several matches the one nearest the top is taken and named in <code>notes</code>; two at the same
+    depth are an error naming both. Of several signals asked for, one not found is left out and named in <code>missing</code>.</li>
+  <li><b>Bits</b>: <code>x[7:4]</code> and <code>x[3]</code> select bits.</li>
+  <li><b>Cycles</b> are the clock's rising edges from the start of the dump, numbered from 0 — the same numbers in
+    <code>wave_sample</code>, <code>wave_find</code> and <code>sva_check</code>. Sampled values are the ones just before the edge.</li>
+  <li><b>Long answers</b> stop at <code>limit</code>; <code>more</code>, <code>next_from</code> / <code>next_offset</code> say how to
+    continue.</li>
+</ul>
+
+<h2 id="session">What a session looks like</h2>
+<p>You ask in plain words; the agent picks the tools. For example, <i>“In out/examples/apb/apb.vcd, which APB transfers had wait states,
+  and does any assertion of examples/apb fail?”</i> becomes:</p>
+<ol class="steps">
+  <li><code>wave_info</code> — one clock, <code>apb_tb.PCLK</code> at 100 MHz, 21 cycles; the scopes.</li>
+  <li><code>wave_find</code> with <code>PSEL &amp;&amp; PENABLE &amp;&amp; !PREADY</code> — wait states at cycles 10 and 11 (105, 115
+    ns).</li>
+  <li><code>wave_sample</code> of <code>PSEL PENABLE PWRITE PADDR PREADY</code> around them — the read of <code>0x04</code> that started at
+    cycle 9.</li>
+  <li><code>sva_check</code> with the two files in <code>apb_tb</code> — only <code>apb_demo_no_wait</code> fails, at exactly those two
+    cycles: it forbids wait states, and the slave has them.</li>
+  <li><code>wave_page</code> of the window — a page you open to see it.</li>
+</ol>
+<p>Five calls, a few hundred bytes each, instead of reading 346 value changes — or, on a real dump, millions.</p>
+
+<h2 id="measured">What it saves</h2>
+<p><code>make mcp-bench AGENT=claude MODEL=sonnet REPS=2</code> (or <code>AGENT=codex</code>) runs eight tasks with known answers — two on
+  the APB example, one on the FSM example's FST, five on a generated 3.5 MB dump of 40 000 cycles — by an agent with the server and
+  without it (the shell and the wavefw command-line tools, named in the same prompt), and counts the tokens. Measured on 21 October
+  2026, two runs of each task in each mode, every one of the 128 answers right (every token the model read or wrote, the context read
+  again from the cache included; the medians per task summed):</p>
+<table>
+  <tr><th>Agent</th><th>without the tools</th><th>with the MCP server</th>
+    <th>the same tools from the shell (<code>--call</code>)</th></tr>
+  <tr><td>Claude Code, Sonnet 5.5</td><td>343 k tokens, $0.53, 147 s</td><td>261 k (−24 %), $0.38 (−28 %), 96 s</td>
+    <td>339 k (−1 %), $0.49 (−8 %), 170 s</td></tr>
+  <tr><td>Codex CLI, its default model</td><td>558 k tokens, 232 s</td><td>741 k (+33 %), 179 s</td><td>540 k (−3 %), 159 s</td></tr>
+</table>
+<ul>
+  <li><b>Where it saves</b>: assertions (<code>sva_check</code>: one call instead of reading the CLI's help and its JSON — Claude −71 %
+    on that task) and an FST with enum names (−49 %, Codex −37 % through the shell); a question answered by a few searches on a dump too
+    big to read.</li>
+  <li><b>Where it does not</b>: one number from a dump whose signals the task names, which the agent gets by writing one Python parser —
+    the tools' schemas, read again with every request, cost more than the parser.</li>
+  <li><b>Codex</b> defers MCP tools (it looks them up while it works), about 5 k tokens more per request: for Codex the same tools
+    through <code>--call</code> in its shell are the cheaper way.</li>
+  <li>Answers came faster with the tools.</li>
+</ul>
+<p>The per-task numbers are in <a href="../DEVELOPMENT.md#measured">DEVELOPMENT.md § Measured</a>.</p>
+<h3>The benchmark without an agent</h3>
+<pre><code>make mcp-bench                                         <span class="c"># the tasks solved through the tools by a script: answers, bytes</span>
+make mcp-bench AGENT=claude MODEL=sonnet REPS=2        <span class="c"># agents with and without the server: costs tokens</span>
+make mcp-bench AGENT=codex TASKS=a1,b3                 <span class="c"># some tasks only</span></code></pre>
+<p><code>make mcp-bench</code> alone is part of <code>make check</code>: it solves every task through the tools by a script (16 calls,
+  3.3 KB returned, every answer right). With <code>AGENT=</code> it runs the agents; the runs and transcripts go to
+  <code>BUILD/mcp_bench/</code>.</p>
+</main>
+<nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
+</div>
+<footer>wavefw 0.11 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+  <a href="../index.html">docs/index.html</a></footer>
+<script src="guide.js"></script>
+</body>
+</html>

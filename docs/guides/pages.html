@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dump → page · wavefw guides</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="guide.css">
+</head>
+<body>
+<header class="top"><nav>
+  <a class="home" href="index.html">wavefw guides</a>
+  <a href="pages.html" aria-current="page">Dump → page</a> <a href="viewer.html">Viewer</a> <a href="gaps.html">Gaps</a>
+  <a href="sva.html">Assertions</a> <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a>
+  <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
+</nav></header>
+<div class="page toc-side">
+<main>
+<header class="hero"><div class="kicker">Guide</div><h1>From a dump to a page</h1>
+<p class="lead">A simulator dump (VCD or FST) becomes one self-contained HTML page: the viewer, the data and the assertion engine
+inlined, so the file opens from <code>file://</code>, can be mailed or archived, and needs nothing installed. This guide walks
+through the one-command path, the config file you edit to shape the page, views, colours, FSM names, structs, settings and big
+dumps.</p></header>
+
+<h2 id="quick">The quick path</h2>
+<ol class="steps">
+  <li>Put your dump under <code>work/</code> (the configs there are tracked by git, the dumps and pages are ignored).</li>
+  <li>Build the page:
+<pre><code>make html WAVES=work/my.vcd          <span class="c"># work/my.config.json if missing, then work/my.html</span>
+make html WAVES=work/my.fst          <span class="c"># FST (read through fst2vcd or sva vcd): FSM states named from the dump</span></code></pre></li>
+  <li>Open <code>work/my.html</code> in a browser from 2023 on (Chrome / Edge 111, Firefox 113, Safari 16.2).</li>
+  <li>Edit <code>work/my.config.json</code> (hide signals, colour them, add views, bookmarks …) and run <code>make html
+    WAVES=work/my.vcd</code> again.</li>
+  <li>After a new simulation changed the dump's signals: <code>make config WAVES=work/my.vcd</code> — new signals are added, gone ones
+    dropped, your edits kept.</li>
+</ol>
+<p>Behind <code>make html</code> are two tools, Python 3.8+ with the standard library only. Without <code>make</code> (and on
+Windows, with <code>py</code> for <code>python3</code>):</p>
+<pre><code>python3 tools/mkconfig.py work/my.vcd --out work/my.config.json     <span class="c"># every signal of the dump, one line each</span>
+python3 tools/mkhtml.py --config work/my.config.json --out work/my.html   <span class="c"># every view of the config -> one page</span></code></pre>
+<table>
+<tr><th>Make variable</th><th>Does</th></tr>
+<tr><td><code>WAVES=x.vcd|x.fst</code></td><td>the dump; the config and the page are named after it</td></tr>
+<tr><td><code>CONFIG=work/x.config.json</code></td><td>build from a config written by hand (<code>HTML=</code> names the page)</td></tr>
+<tr><td><code>SV="rtl/*.sv"</code></td><td>enum labels and struct fields from the sources (for a VCD)</td></tr>
+<tr><td><code>SVA="checks/*.sv" BIND="name@scope,…"</code></td><td>assertions bound and evaluated (<a href="sva.html">Assertions</a>)</td></tr>
+<tr><td><code>BASE=my.base.json</code></td><td>the starting settings of a new config (default <code>tools/base.config.json</code>)</td></tr>
+</table>
+
+<h2 id="the-page">What the page contains</h2>
+<figure><img src="img/pages-head.png"
+  alt="The top of the APB example page: title, intro, a table of dump, wave tool, views, assertions, checks, generated, then the first view" loading="lazy">
+<figcaption><b>The top of a generated page</b> (<code>make example EX=apb</code>). The title and the intro from the config's
+<code>"page"</code>, a line of facts — the dump, the reader, the number of views, the assertion files and how the checks went, the
+time it was generated —, the <span class="ui">Theme</span> button, then every view with its title, its note and its viewer (or
+static SVG).</figcaption></figure>
+<ul>
+<li>One section per view of the config, each a viewer, a static SVG or both. Scopes are foldable groups.</li>
+<li>With assertions (<code>"sva"</code> and <code>"bind"</code>): the assertions panel in every viewer and, at the end, a printable
+  <b>Assertions</b> section with the results over the whole dump.</li>
+<li>Everything inline but the fonts: the page asks Google Fonts for IBM Plex Sans and Mono; offline it uses a local IBM Plex
+  (Debian / Ubuntu: <code>fonts-ibm-plex</code>), else <code>Segoe UI</code> / <code>system-ui</code> and the system monospace. It works
+  the same, only the letters differ.</li>
+<li>The <b>Generated</b> time makes every build a different file. <code>mkhtml.py --reproducible</code> leaves it out,
+  <code>SOURCE_DATE_EPOCH</code> (seconds, UTC) sets it: the same inputs give the same bytes.</li>
+</ul>
+
+<h2 id="config">The generated config</h2>
+<p><code>tools/mkconfig.py</code> writes every signal of the dump under its full path, one line each. A real one, from the FSM
+example's VCD with its sources (<code>--sv</code>):</p>
+<pre><code>"signals": {
+  "fsm_tb.clk":       {"show": true,  "radix": "", "color": "#2f9e44", "style": "", "width": 1, "changes": 213},
+  "fsm_tb.rst_n":     {"show": true,  "radix": "", "color": "#e8590c", "style": "", "width": 1, "changes": 1},
+  "fsm_tb.rxd":       {"show": true,  "radix": "", "color": "", "style": "", "width": 1, "changes": 12},
+  "fsm_tb.state":     {"show": true,  "radix": "", "color": "", "style": "", "width": 3, "changes": 9,
+                       "enum": {"0": "IDLE", "1": "START", "2": "DATA", "3": "STOP", "4": "ERROR"}},
+  "fsm_tb.status":    {"show": true,  "radix": "", "color": "", "style": "", "width": 16, "changes": 25,
+                       "fields": [{"name": "state", "msb": 15, "lsb": 13, "enum": {…}}, {"name": "bit_cnt", "msb": 12, "lsb": 10}, …]},
+  "fsm_tb.u_rx.MID":  {"show": false, "radix": "", "color": "", "style": "", "width": 2, "changes": 0},
+  …
+}</code></pre>
+<p>Edit the entries; <code>""</code> means the global value from the config's <code>"config"</code>.</p>
+<table>
+<tr><th>Key</th><th>Values</th></tr>
+<tr><td><code>show</code></td><td><code>false</code>: left out of the page (constants start hidden)</td></tr>
+<tr><td><code>radix</code></td><td><code>auto hex dec signed bin oct ascii float</code>, fixed point <code>q8</code> / <code>sq15</code></td></tr>
+<tr><td><code>color</code>, <code>fill</code></td><td>the trace / outline / name colour; a bus's fill</td></tr>
+<tr><td><code>style</code></td><td><code>auto wavedrom questa square</code></td></tr>
+<tr><td><code>alias</code></td><td>the name shown</td></tr>
+<tr><td><code>enum</code>, <code>enumColors</code></td><td>value labels <code>{"0": "IDLE"}</code>; the fill by label or number
+  <code>{"IDLE": "#ffe066", "3": "c5"}</code></td></tr>
+<tr><td><code>analog</code></td><td><code>true</code> or a number of rows: the bus as a step plot</td></tr>
+<tr><td><code>height</code></td><td>the row's own height in px</td></tr>
+<tr><td><code>fields</code></td><td>a packed struct dumped as one vector: a <code>{}</code> row with the whole value, a row per field under it</td></tr>
+<tr><td><code>width</code>, <code>changes</code></td><td>information only (the bus width, the value changes in the dump)</td></tr>
+</table>
+<p>A VCD's <code>real</code> and <code>string</code> variables become rows of texts, <code>event</code> variables are left out, VHDL's nine
+values are folded into <code>0 1 x z</code>. Run <code>make config</code> (<code>mkconfig.py --update</code>) again after the dump
+changed: your edits stay; it refuses a dump that lost more than half of the config's signals (another design?) unless
+<code>--force</code>.</p>
+
+<h3 id="base">The starting values: base.config.json</h3>
+<p>A new config starts from <code>tools/base.config.json</code> (<code>BASE=</code> for your own). Two keys only decide the starting
+per-signal settings:</p>
+<ul>
+<li><code>"select"</code>: which signals start shown — scope <code>depth</code> below the top (99: all), <code>constants</code>,
+  <code>hide</code> patterns (<code>$rootio.*</code>), and a <code>budget</code> of value changes for one page (6 M; above it the
+  deepest levels are dropped first and the tool says which depth it kept).</li>
+<li><code>"rules"</code>: settings by full-path pattern and width, later rules win:
+<pre><code>"rules": [
+  { "match": ["*clk", "*clk_i", "*clk_in", "*clock"], "width": 1, "color": "#2f9e44" },
+  { "match": ["*rst", "*rst_n", "*rst_ni", "*reset", "*reset_n"], "width": 1, "color": "#e8590c" },
+  { "match": ["*_valid", "*_ready"], "width": 1, "color": "#f59f00" }        <span class="c">// one of your own</span>
+]</code></pre></li>
+</ul>
+<p>The rest is copied into the new config: <code>"exact": true</code>, <code>"hierarchy": true</code> (every scope a group), page
+settings (<code>fold: 2</code>, <code>maxHeight: "80vh"</code>, <code>groupOrder: "last"</code>, <code>sortIgnore</code> …) and one
+view <code>"all"</code>.</p>
+
+<h2 id="views">Views: several pictures of one dump</h2>
+<p><code>"views"</code> are named variants; <code>mkhtml.py</code> builds each one as a section of the page. A view takes any top-level
+key and adds its own. The APB example's config, written by hand:</p>
+<pre><code>{
+  "scope": "apb_tb",                                           <span class="c">// names below are relative to it</span>
+  "sva": ["apb_tb.sv", "apb.sva"],                             <span class="c">// assertion files (Assertions guide)</span>
+  "bind": [{ "assert": "*", "scope": "apb_tb" }],
+  "enum": { "phase": { "0": "IDLE", "1": "SETUP", "2": "ACCESS" } },
+  "config": { "radix": "hex", "nameWidth": 170, "rowHeight": 26 },   <span class="c">// settings of the whole page</span>
+  "page": { "title": "APB3 · write, read with wait states, slave error", "intro": "An APB3 master drives …" },
+  "views": {
+    "transfers": {
+      "clock": "PCLK", "from": "0ns", "to": "200ns",           <span class="c">// one cell per PCLK cycle</span>
+      "signals": ["PCLK", "PRESETn", "phase", "PSEL", "PENABLE", "PWRITE", "PADDR", "PWDATA", "PRDATA", "PREADY", "PSLVERR"],
+      "title": "APB3 · three transfers · clock-sampled",
+      "note": "one cell per PCLK; the numbered bookmarks explain the transfers, the arrows join cause and effect",
+      "bookmarks": [
+        { "n": 1, "t": "50ns", "signal": "PSEL", "text": "SETUP: PSEL high, PADDR / PWRITE / PWDATA valid for the whole transfer" },
+        { "n": 2, "t": "60ns", "signal": "PENABLE", "text": "ACCESS: PENABLE high; PREADY high ends the write in this cycle" }, …
+      ],
+      "arrows": [ { "from": 1, "to": 2, "shape": "-|-", "label": "setup → access" }, … ]
+    },
+    "write": {
+      "clock": "PCLK", "from": "30ns", "to": "80ns", "render": "svg",   <span class="c">// a static figure</span>
+      "signals": ["PCLK", "PSEL", "PENABLE", "PWRITE", "PADDR", "PWDATA", "PREADY"],
+      "title": "APB3 write · static SVG",
+      "config": { "svaShow": ["apb_setup_then_access", "apb_end_of_transfer"] }
+    },
+    "exact": {
+      "exact": true, "from": "0ns", "to": "205ns",             <span class="c">// every transition at its time</span>
+      "signals": ["PCLK", "PRESETn", "phase", "PSEL", "PENABLE", "PWRITE", "PADDR", "PWDATA", "PRDATA", "PREADY", "PSLVERR", "done", "err", "rdata"],
+      "marker": ["posedge done=done", "posedge PSLVERR=error"],
+      "title": "APB3 · the whole run · exact transitions"
+    }
+  }
+}</code></pre>
+<p>(JSON has no comments: the <code>//</code> notes are for this guide only.)</p>
+<table>
+<tr><th>View key</th><th>Meaning</th></tr>
+<tr><td><code>signals</code></td><td>the rows, in order: names under <code>scope</code>, full paths, or <code>*</code> / <code>?</code> patterns over
+  the full paths of a generated config (<code>"tb.*_valid"</code>); <code>"PADDR=addr"</code> shows it as <code>addr</code></td></tr>
+<tr><td><code>from</code>, <code>to</code></td><td>the window (<code>"120ns"</code>); default the whole dump</td></tr>
+<tr><td><code>clock</code> / <code>exact</code></td><td>one cell per clock cycle (plain WaveDrom, the value after the edge) / every
+  transition at its time (<a href="wavedrom.html#from-a-dump">WaveDrom guide</a>)</td></tr>
+<tr><td><code>group</code>, <code>hierarchy</code></td><td>named groups <code>{"aw": ["AWVALID", …]}</code>; or every scope a group</td></tr>
+<tr><td><code>marker</code></td><td><code>"posedge done=done"</code>: dashed markers, the <span class="ui">go to</span> buttons</td></tr>
+<tr><td><code>bookmarks</code>, <code>arrows</code></td><td>numbered notes and arrows (the viewer's <span class="ui">JSON</span> button writes
+  them for you)</td></tr>
+<tr><td><code>render</code></td><td><code>view</code> (default), <code>svg</code> (a static figure), <code>both</code></td></tr>
+<tr><td><code>title</code>, <code>note</code></td><td>the section heading and the line under it</td></tr>
+<tr><td><code>config</code></td><td>settings of this view only (layer 3 below)</td></tr>
+<tr><td><code>gap</code>, <code>auto-gap</code></td><td>clock views: windows or idle stretches as one <code>|</code> cell
+  (<a href="gaps.html">Gaps</a>)</td></tr>
+<tr><td><code>sva</code>, <code>bind</code>, <code>exprs</code></td><td>assertions and expression rows of this view</td></tr>
+</table>
+<p><code>mkhtml.py --view transfers</code> builds some views only; <code>--waves other.vcd</code> runs the same config on another dump.</p>
+
+<h2 id="hierarchy">Hierarchy and module shading</h2>
+<p>A generated config has <code>"hierarchy": true</code>: every scope is a group, module rows bold on a darker band, the signals of
+neighbouring modules alternating between two backgrounds (<code>moduleShading</code>). A click on a module folds it; <code>fold</code>
+sets what starts folded (<code>true</code>, a depth, or paths), <code>groupOrder: "last"</code> lists a module's signals before its
+sub-modules. Hover a name for its full path.</p>
+<figure><img src="img/pages-all.png"
+  alt="apb_all.html: apb_tb with its signals, the APB bus port group, u_count and u_master modules open" loading="lazy">
+<figcaption><b><code>apb_all.html</code>, made by <code>mkconfig.py</code> from the dump.</b> <code>apb_tb</code> on top with its
+signals (<code>phase</code> labelled from the sources, <code>--sv</code>), the APB port that the
+viewer found by its names (<code>⇄ apb_tb.APB</code>), then the modules <code>u_count</code> and <code>u_master</code>, each on its own
+background.</figcaption></figure>
+
+<h2 id="colours">Groups and colours</h2>
+<p>Colour is the quickest way to read a bus. Give every channel of a protocol its own group and colour; a group's colour goes to its
+signals (trace, bus outline, name) and to its name, a signal with its own colour keeps it:</p>
+<pre><code>"group":  { "aw": ["AWVALID", "AWREADY", "AWADDR"], "w": ["WVALID", "WREADY", "WDATA", "WSTRB"], "b": ["BVALID", "BREADY", "BRESP"],
+            "ar": ["ARVALID", "ARREADY", "ARADDR"], "r": ["RVALID", "RREADY", "RDATA", "RRESP"] },
+"config": { "groupColors": { "aw": "#339af0", "w": "#37b24d", "b": "#f59f00", "ar": "#ae3ec9", "r": "#1098ad" } }</code></pre>
+<figure><img src="img/pages-groups.png"
+  alt="AXI-Lite handshakes: groups aw w b ar r in blue, green, orange, purple, teal; bookmarks on each handshake, 2T arrows" loading="lazy">
+<figcaption><b>The AXI-Lite example.</b> One colour per channel group, the bus port found by its names on the folded
+<code>⇄ AXI4-Lite</code> row, a bookmark on every VALID &amp; READY handshake and <code>-|-</code> arrows with the latency
+(<code>2T</code>).</figcaption></figure>
+<p><code>groupColors</code> keys are group names, full paths or <code>*</code> patterns, and the nearest matching group wins:
+<code>{"tb.dut.u_rx": "#37b24d", "*fifo*": "#f59f00"}</code> colours modules of a generated config.</p>
+<figure><img src="../img/hierarchy.png"
+  alt="The generated AXI-Lite page: u_master folded, u_slave and u_regfile open, one colour per module" loading="lazy">
+<figcaption><b>One colour per module</b> (<code>groupColors</code> on <code>u_master</code>, <code>u_slave</code>,
+<code>u_regfile</code>); <code>u_master</code> folded. The clocks keep the green of the <code>*clk</code> rule.</figcaption></figure>
+<p>Other ways to colour: <code>"color"</code> in one signal's entry; a <code>"rules"</code> line of the base file for many signals by
+name; interactively, <span class="ui">Paint</span> in the viewer's find group (<a href="viewer.html">Viewer</a>).</p>
+
+<h2 id="fsm">FSM state names</h2>
+<p>A state bus shows <code>IDLE</code>, <code>START</code> … instead of numbers when the page knows the enum:</p>
+<ul>
+<li><b>FST</b> written by Verilator (<code>--trace-fst</code>) carries the enum tables of the design: <code>make html WAVES=x.fst</code>
+  labels the states by itself.</li>
+<li><b>VCD</b> has none: <code>make html WAVES=x.vcd SV="rtl/*.sv"</code> (<code>mkconfig.py --sv</code>) reads
+  <code>typedef enum {…} name_t;</code> from the sources and labels the signals declared with those types.</li>
+<li>By hand: <code>"enum": {"0": "IDLE", …}</code> in the signal's entry, or a top-level <code>"enum": {"phase": {…}}</code>.</li>
+</ul>
+<figure><img src="img/pages-fsm.png"
+  alt="The FSM example's frame view: state IDLE START DATA STOP IDLE, questa edges, bookmarks 1-4 with START 2T, DATA 32T, STOP 4T arrows" loading="lazy">
+<figcaption><b>The FSM example</b> (a UART receiver; its config has no <code>enum</code>: the names come from the FST). Edges in the
+<code>questa</code> style (the bar's <span class="ui">style</span> shows <i>vertical</i>), a bookmark at every state change and
+<code>-|-</code> arrows with the time spent in each state.</figcaption></figure>
+
+<h2 id="structs">Packed structs</h2>
+<p>A packed struct is shown as a <code>{}</code> row with its whole value and a row per field under it. Two sources:</p>
+<ul>
+<li>an FST written with Verilator <code>--trace-structs</code> has struct scopes: each is a <code>{}</code> group by itself;</li>
+<li>a struct dumped as one vector: <code>mkconfig.py --sv</code> (<code>SV=</code>) writes its <code>"fields"</code> from
+  <code>typedef struct packed</code> (see <code>fsm_tb.status</code> in the config above), or write them yourself:
+  <code>[{"name": "state", "msb": 15, "lsb": 13, "enum": {…}}, …]</code>, MSB first.</li>
+</ul>
+<figure><img src="../img/struct.png"
+  alt="The FSM's generated page: status as a {} row with its whole value, a row per field under it" loading="lazy">
+<figcaption><b><code>status</code></b>, a 16-bit packed struct: its whole value on the <code>{}</code> row, then <code>state</code> (by
+name), <code>bit_cnt</code>, <code>valid</code>, <code>frame_err</code>, <code>data</code>.</figcaption></figure>
+
+<h2 id="settings">Settings in layers</h2>
+<p>Colours, sizes, fonts, sorting, folding and highlight are settings, merged in this order (later wins):</p>
+<ol>
+<li>the built-in defaults;</li>
+<li>global: for a generated page the config's top-level <code>"config"</code> (in your own pages
+  <code>wavefw/wavefw.config.js</code> or <code>WaveFW.configure</code>);</li>
+<li>a view's <code>"config"</code> (the diagram's own);</li>
+<li>the element (<code>data-config</code> …, your own pages);</li>
+<li>the viewer's own choices, kept in the browser (the edge style of its bar).</li>
+</ol>
+<p>A key that is no setting (a typo: <code>rowHeigth</code>) stops the tools with an error. The keys you will use most:</p>
+<table>
+<tr><th>Key</th><th>Default</th><th>Meaning</th></tr>
+<tr><td><code>radix</code></td><td><code>auto</code></td><td>bus values: ≤ 6 bits decimal, else hex; or <code>hex dec signed bin oct ascii float
+  q8 sq15</code></td></tr>
+<tr><td><code>style</code></td><td><code>auto</code></td><td><code>wavedrom</code> slanted, <code>questa</code> vertical, <code>square</code></td></tr>
+<tr><td><code>nameWidth</code>, <code>rowHeight</code></td><td>200, 26</td><td>the name column and a row, px</td></tr>
+<tr><td><code>sort</code>, <code>sortIgnore</code></td><td><code>none</code>, <code>[]</code></td><td>the order; prefixes skipped when sorting
+  (<code>["i_", "o_"]</code>)</td></tr>
+<tr><td><code>fold</code>, <code>groupOrder</code>, <code>moduleShading</code></td><td>none, <code>file</code>, true</td><td>what starts
+  folded; signals before sub-modules; alternating module backgrounds</td></tr>
+<tr><td><code>maxHeight</code></td><td>none</td><td><code>"80vh"</code>: the rows scroll inside the viewer</td></tr>
+<tr><td><code>groupColors</code>, <code>enumColors</code></td><td>none</td><td>a colour per group; a fill per value</td></tr>
+<tr><td><code>highlight</code>, <code>dim</code></td><td>none, 0.3</td><td>instances in front at start, the opacity of the rest</td></tr>
+<tr><td><code>theme</code>, <code>colors</code></td><td>auto, <code>{}</code></td><td><code>light white dark</code>; colour tokens</td></tr>
+<tr><td><code>gaps</code>, <code>gapIdle</code>, <code>gapKeep</code></td><td>false, 16, 2</td><td>idle stretches left out of pictures and
+  static SVGs (<a href="gaps.html">Gaps</a>)</td></tr>
+<tr><td><code>svaOpen</code>, <code>svaShow</code></td><td>false, all</td><td>the assertion list open at start; which assertions are drawn</td></tr>
+</table>
+<p>Every key with its default: <a href="../USAGE.md#settings">USAGE § Settings</a> and <code>wavefw/wavefw.config.js</code>.</p>
+
+<h2 id="themes">Themes</h2>
+<p>Three themes — <code>light</code> (warm paper), <code>white</code> (black traces, for print and slides) and <code>dark</code> — follow
+the system's <code>prefers-color-scheme</code>; the page's <span class="ui">Theme</span> button switches them, <code>"config": {"theme":
+"white"}</code> fixes one. The pictures of these guides are dark; the APB page in <code>light</code>:</p>
+<figure><img src="../img/light.png"
+  alt="The APB example in the light theme" loading="lazy">
+<figcaption><b>The light theme.</b> Every colour is a CSS custom property: <code>"colors": {"trace": "#c00"}</code> in
+<code>"config"</code> changes it for the page.</figcaption></figure>
+<p><b>Print</b> (ctrl+P) draws every row of every viewer, not only the part in view, with its title and cursor readout; the bar's tools
+are left out.</p>
+
+<h2 id="large">Large dumps</h2>
+<p>A real design's dump — <code>test_stream_video.vcd</code>, 24 MB, 3520 signals in 214 scopes, 4.9 M value changes: the config in
+2.7 s, a page with every changing signal (1526 signals, all 9 scope levels) in 25 s and 6.3 MB; it opens in 2 s and redraws in 4 ms.
+The viewer's canvas covers only the visible rows, so any number of rows scrolls smoothly.</p>
+<ul>
+<li>Above the base file's <code>select.budget</code> (6 M value changes) <code>mkconfig.py</code> hides the deepest levels first and says
+  which depth it kept; show more by hand or raise the budget.</li>
+<li>A view's <code>from</code> / <code>to</code> and a short <code>signals</code> list keep a page small; several views of one dump cost
+  only what each one shows.</li>
+<li>Keep the dump and the page out of git: under <code>work/</code> only the configs are tracked.</li>
+</ul>
+
+<h2 id="readers">The dump reader</h2>
+<p>The tools read a VCD in one pass in Python (standard library only), an FST through GTKWave's <code>fst2vcd</code> when it is installed,
+else through the <code>sva</code> CLI's <code>sva vcd</code> (<code>WAVEFW_FST=sva</code> or <code>fst2vcd</code> picks one); a VCD and its FST
+give byte-identical WaveJSON. A view's <code>marker</code> is <code>posedge X</code>, <code>negedge X</code>, <code>edge X</code> or
+<code>X</code> (any change).</p>
+<div class="note"><p>No page at all: <code>wavefw/viewer.html</code> (or <span class="ui">Open…</span> in any viewer's bar) reads a VCD
+dropped on it straight in the browser, and ⟳ reads it again after the next simulation with the view kept
+(<a href="viewer.html">Viewer</a>).</p></div>
+
+<h2 id="examples">The examples</h2>
+<p><code>make examples</code> (needs Verilator ≥ 5) builds each example's VCD, FST and two pages into
+<code>out/examples/&lt;ex&gt;/</code>: <code>&lt;ex&gt;.html</code> from its hand-written config and <code>&lt;ex&gt;_all.html</code> from a
+config <code>mkconfig.py</code> makes from the dump (the whole hierarchy). <code>make example EX=apb</code> builds one.</p>
+<table>
+<tr><th>Example</th><th>Shows</th></tr>
+<tr><td><code>apb</code></td><td>APB3 write, read with two wait states, <code>PSLVERR</code> on an unmapped address; enum <code>phase</code>; a
+  static-SVG view; three views (clock, svg, exact); assertions with one failing on purpose</td></tr>
+<tr><td><code>axi_lite</code></td><td>AXI4-Lite write (<code>AWREADY</code> a cycle late) and read; channel groups with a colour each, highlight
+  from the config, latency arrows; three module levels in <code>_all</code></td></tr>
+<tr><td><code>fsm</code></td><td>UART receiver with <code>typedef enum</code> states in a package: names from the FST and, for the VCD, from the
+  sources; a packed struct; questa edges</td></tr>
+<tr><td><code>demo</code></td><td>the Manchester transmitter behind <code>docs/index.html</code> (<code>make demo</code>)</td></tr>
+</table>
+<p>Each example directory has a README and its config: the configs show every key in use.</p>
+</main>
+<nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
+</div>
+<footer>wavefw 0.11 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live
+reference: <a href="../index.html">docs/index.html</a></footer>
+<script src="guide.js"></script>
+</body>
+</html>

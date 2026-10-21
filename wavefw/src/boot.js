@@ -104,7 +104,15 @@ if (G.MutationObserver) {
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(redrawAll);
 if (G.WAVEFW_CONFIG) configure(G.WAVEFW_CONFIG);   // settings file loaded before wavefw.js (see docs/USAGE.md "Settings")
 const manual = document.currentScript && document.currentScript.dataset.manual != null;
-if (!manual) { if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => upgrade()); else upgrade(); }
+// a page that carries the live link (tools/wavemcp.py view_live) or is opened with #wavefw-live=<port>:<token> connects to the
+// agent once its viewers are there
+const liveHash = () => {
+  const m = /[#&]wavefw-live=([^&]+)/.exec(location.hash), el = document.getElementById('wavefw-live');
+  try { const o = !m && el ? JSON.parse(el.textContent) : null; if (m || o) live(m ? decodeURIComponent(m[1]) : `${o.port}:${o.token}`); }
+  catch (e) { console.error('wavefw live: ' + e.message); }
+};
+const start = () => { if (!manual) upgrade(); liveHash(); };
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 
 /* ---------------- tooltips: what a control of a viewer does and its keys ---------------- */
 // [text, keys] of a control: TIPS by its data-act / -sv / -x / -bm / -m / -jump value or a class, else its own title
@@ -150,9 +158,10 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavefw plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveFW = { version: '0.11',   // the project's version: VERSION (make check compares them)
+G.WaveFW = { version: '0.12',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme, setColors, configure,
-  plugin, svgPlugin, views: () => [...VIEWS], defaults: DEFAULTS,
+  plugin, svgPlugin, views: () => [...VIEWS], defaults: DEFAULTS, live,
+  commands: () => Object.fromEntries(Object.entries(CMDS).map(([k, c]) => [k, { args: c.args, doc: c.doc }])),
   paint: { circle, arrowHead, edgeGeom, lastLE },
   sortRows: (M, dir = 'asc', ignore = [], groupOrder = 'file') => orderRows(parse(M).rows, sortDir(dir), prefixes(ignore), groupOrder), fuzzy, themes: THEMES,
     colorNames: CVAR, styles: Object.keys(EDGES), radixes: RADIX, enums: ENUMS, decode, fmtTime, fmtExact, parseT,

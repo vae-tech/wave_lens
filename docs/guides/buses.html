@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bus transactions · wavefw guides</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="guide.css">
+</head>
+<body>
+<header class="top"><nav>
+  <a class="home" href="index.html">wavefw guides</a>
+  <a href="pages.html">Dump → page</a> <a href="viewer.html">Viewer</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
+  <a href="buses.html" aria-current="page">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="mcp.html">AI agents (MCP)</a>
+  <a href="../index.html">Reference</a>
+</nav></header>
+<div class="page toc-side">
+<main>
+<header class="hero"><div class="kicker">Guide</div><h1>Bus transactions</h1>
+<p class="lead">A bus is read as transfers, not as forty wiggling signals: <i>write 0x40 ← 0xCAFE, 3 cycles</i>. The viewer finds the bus
+  ports of every module by the names of their signals — AXI4, AXI4-Lite, AXI3, AXI4-Stream, APB, AHB, Avalon-MM, Avalon-ST, Wishbone,
+  OBI — takes them apart at the clock edges and draws each port as a group of transfers and channel beats, where a stall is plain to see.
+  Nothing to configure for the usual names; a setting for your own.</p></header>
+
+<h2 id="what">What it looks like</h2>
+<p>Each port found is a group <b>⇄ name · protocol · counts</b> (<code>⇄ APB · APB · 1 R · 2 W · 1 err</code>) under its module.
+  It starts <b>folded</b>: its transfers sit on the header row itself, one box each, so a folded port costs one row and
+  still shows when something happens on the bus.</p>
+<figure><img src="img/buses-folded.png" alt="The AXI-Lite example: the port folded, a write box and a read box on its header row" loading="lazy">
+  <figcaption><b>A port, folded.</b> The AXI-Lite example: on the header row <code>⇄ … AXI4-Lite</code>, the write
+  <code>W 0x8 ← 0x1234abcd</code> (blue) and the read <code>R 0x8 → 0x1234abcd</code> (green), each from its first cycle to its
+  response.</figcaption></figure>
+<p>Open it (a click on its name, or <span class="ui">Expand</span>) and it has:</p>
+<ul>
+  <li><b>transactions</b>: the transfers again, stacked in up to three lanes where they overlap, with their labels;</li>
+  <li>one row <b>per channel</b> — AW, W, B, AR, R for AXI; address / data for AHB; … — where every beat is a box from the cycle its valid
+    came to the edge of its handshake. A beat that waits for ready is a long box: the stall is its length.</li>
+</ul>
+<figure><img src="img/buses-open.png" alt="The AXI-Lite port open: transactions row, AW W B AR R rows with their beats" loading="lazy">
+  <figcaption><b>A port, open.</b> The AW beat is two cycles long — AWREADY came a cycle late — while W and B take one each; AR and R
+  follow for the read.</figcaption></figure>
+<table>
+  <tr><th>Colour</th><th>Means</th></tr>
+  <tr><td>blue</td><td>a write (and an AXI4-Stream or Avalon-ST packet)</td></tr>
+  <tr><td>green</td><td>a read</td></tr>
+  <tr><td>red</td><td>an error: SLVERR / DECERR, PSLVERR, AHB ERROR, a Wishbone err or rty, an OBI err</td></tr>
+  <tr><td>dashed outline</td><td>not ended: no response by the end of the dump</td></tr>
+  <tr><td>grey</td><td>a channel beat</td></tr>
+</table>
+<p>The colours are the CSS custom properties <code>--bus-write</code>, <code>--bus-read</code>, <code>--bus-error</code>,
+  <code>--bus-channel</code>, one set per theme. The value column shows the transfer — or the beat — at the
+  cursor.</p>
+
+<h2 id="select">Going through the transfers</h2>
+<p>Hover a transfer for its fields, its cycles and its times
+  (<code>write 0x8: 0x1234abcd → OKAY · 6 cycles, 35 ns → 95 ns</code>; a beat: its channel, its label and its two times).
+
+  Click it to <b>select</b> it:</p>
+<ul>
+  <li>the cursor goes to its start (the view moves when it is out of sight);</li>
+  <li>its range from start to end is measured: shaded, its Δ on the axis;</li>
+  <li>the port's signals and its clock are highlighted, everything else dimmed;</li>
+  <li>the title line says what it was: <code>AXI4-Lite: W 0x8 ← 0x1234abcd · 6 cycles</code>, with <code>· error</code> for a failed
+    one.</li>
+</ul>
+<figure><img src="img/buses-selected.png" alt="The AXI-Lite write selected: cursor at 35 ns, range 60 ns shaded, the port's signals highlighted" loading="lazy">
+  <figcaption><b>The write selected.</b> Cursor at its start (35 ns), its 60 ns measured, every AXI signal in front; the toast reads
+  <code>W 0x8 ← 0x1234abcd · 6 cycles</code>.</figcaption></figure>
+<p><kbd>]t</kbd> / <kbd>[t</kbd> on the waves select the next / previous transfer of any port from the cursor, round the ends, and scroll
+  its row into view. <kbd>Esc</kbd> clears the selection with the rest. A saved viewer state (<span class="ui">Save</span>) keeps the
+  selected transfer.</p>
+<figure><img src="img/buses-apb.png" alt="The APB example: the third transfer, a write to 0x40 with PSLVERR, selected" loading="lazy">
+  <figcaption><b>An APB error.</b> <kbd>]t</kbd> to the third transfer: <code>APB: W 0x40 ← 0xdeadbeef · 2 cycles · error</code>; the port's
+  phase row shows <code>setup</code> and <code>access</code> of each transfer (<code>access +2</code>: two wait states).</figcaption></figure>
+
+<h2 id="detect">How a port is found</h2>
+<p>For every scope of the dump (every module instance), the viewer looks at its signals' names, lower-cased:</p>
+<ol class="steps">
+  <li><b>A prefix.</b> The signals of one port share a prefix that ends with <code>_</code>, or have none: <code>s_axi_awvalid</code>,
+    <code>m_axis_tdata</code>, <code>wb_cyc_o</code>, or plain <code>PSEL</code>. Two ports in one module (<code>s_axi_</code>,
+    <code>m_axi_</code>) are two groups.</li>
+  <li><b>A direction suffix</b> <code>_i</code>, <code>_o</code>, <code>_in</code>, <code>_out</code> is ignored
+    (<code>awvalid_i</code> is <code>awvalid</code>).</li>
+  <li><b>The signals that make the protocol.</b> One of the sets in the table below must be there whole; the rest of the roles are taken
+    when they exist.</li>
+  <li><b>The clock</b>: the prefix with the protocol's clock name (<code>s_axi_aclk</code>), else that name in the module, else in the
+    modules above, else a 1-bit <code>*clk</code> of the module. No clock, no port.</li>
+</ol>
+<p>Values are sampled just before each rising edge of that clock — what a flop samples, as the assertions and the <code>sva</code> CLI
+  do. A port seen again at another level of the hierarchy (the same nets) is drawn once.</p>
+<table>
+  <tr><th>Protocol</th><th>Found by</th><th>Clock names</th><th>Transfers</th><th>Channel rows</th></tr>
+  <tr><td>AXI4, AXI4-Lite, AXI3</td><td><code>awvalid awready bvalid</code> or <code>arvalid arready rvalid</code></td>
+    <td><code>aclk</code>, <code>clk</code></td>
+    <td>a write = AW + its W burst (to <code>wlast</code>, or <code>awlen</code> + 1 beats) + the B with its ID; a read = AR + its R beats to
+    <code>rlast</code>, matched by ID so out-of-order reads come apart; SLVERR / DECERR red. No <code>awlen</code> / <code>arlen</code>:
+    AXI4-Lite; a <code>wid</code>: AXI3</td><td>AW W B AR R</td></tr>
+  <tr><td>AXI4-Stream</td><td><code>tvalid tdata</code> or <code>tvalid tlast</code></td><td><code>aclk</code>, <code>clk</code></td>
+    <td>packets to <code>tlast</code> (<code>4 beats 0x11</code>; no <code>tlast</code>: every beat a packet)</td><td>beats</td></tr>
+  <tr><td>APB</td><td><code>psel penable</code></td><td><code>pclk</code>, <code>clk</code></td>
+    <td>setup, wait states, access; PSLVERR red</td><td>phase (<code>setup</code>, <code>access +N</code>)</td></tr>
+  <tr><td>AHB, AHB-Lite</td><td><code>htrans haddr</code></td><td><code>hclk</code>, <code>clk</code></td>
+    <td>pipelined address and data phases, NONSEQ + SEQ bursts (<code>×4</code>), <code>hready</code> waits, ERROR red</td>
+    <td>address, data</td></tr>
+  <tr><td>Avalon-MM</td><td><code>address waitrequest</code> or <code>address readdatavalid</code></td><td><code>clk</code></td>
+    <td>read / write held by <code>waitrequest</code>; pipelined reads answered by <code>readdatavalid</code>, <code>burstcount</code>
+    beats</td><td>command, response</td></tr>
+  <tr><td>Avalon-ST</td><td><code>valid data startofpacket endofpacket</code></td><td><code>clk</code></td>
+    <td>packets from <code>startofpacket</code> to <code>endofpacket</code></td><td>beats</td></tr>
+  <tr><td>Wishbone</td><td><code>cyc stb ack</code></td><td><code>clk</code>, <code>clk_i</code></td>
+    <td>classic: the strobe to <code>ack</code> / <code>err</code> / <code>rty</code>; pipelined (a <code>stall</code>): requests and their
+    acks in order; err and rty red</td><td>request, ack</td></tr>
+  <tr><td>OBI</td><td><code>req gnt rvalid</code></td><td><code>clk</code></td>
+    <td><code>req</code> / <code>gnt</code>, the responses by <code>rvalid</code> in order; <code>err</code> red</td>
+    <td>request, response</td></tr>
+</table>
+<p>The labels read the same in every protocol: <code>W 0x40 ← 0xCAFE</code> a write of that data to that address, <code>R 0x8 → 0x12</code>
+  a read and its data, <code>×4</code> a burst of four beats.</p>
+
+<h2 id="own">Ports with other names</h2>
+<p>When your signals are not named after the protocol, list the port in the <code>buses</code> setting (in the config's
+  <code>"config"</code>, a view's <code>"config"</code>, or <code>wavefw.config.js</code>):</p>
+<pre><code>"config": {
+  "buses": [
+    { "protocol": "axis", "scope": "tb.dut", "name": "pixels",
+      "map": { "tvalid": "pix_valid", "tready": "pix_ready", "tdata": "pix_data", "tlast": "pix_eol" } },
+    { "protocol": "apb", "scope": "tb.dut.u_cfg", "prefix": "cfg_", "clock": "pclk_cfg" }
+  ]
+}</code></pre>
+<table>
+  <tr><th>Key</th><th>Meaning</th></tr>
+  <tr><td><code>protocol</code></td><td><code>axi axis apb ahb avmm avst wb obi</code></td></tr>
+  <tr><td><code>scope</code></td><td>the instance whose signals they are (the dump's path, e.g. <code>tb.dut</code>)</td></tr>
+  <tr><td><code>prefix</code></td><td>the common prefix of standard role names (<code>cfg_</code> + <code>psel</code> …)</td></tr>
+  <tr><td><code>map</code></td><td>instead of a prefix: role → the signal's name in the scope (<code>"tlast": "pix_eol"</code>)</td></tr>
+  <tr><td><code>clock</code></td><td>the clock's name in the scope or its full path (default: found as above)</td></tr>
+  <tr><td><code>name</code></td><td>the group's name (default: the module and the prefix)</td></tr>
+</table>
+<p>A listed port must still have one of the protocol's sets of signals (the "Found by" column). The listed ports come first, so their names
+  win over the ones found. <code>"busDetect": false</code> turns the search by names off and keeps only the listed ports — useful when a
+  name collides with a protocol's (a <code>valid</code> / <code>data</code> pair that is no bus).</p>
+<div class="note"><p>A port is looked for among the signals of one scope of the dump, whatever groups a view puts them in: the
+  AXI-Lite example draws its channels in groups <code>aw</code>, <code>w</code>, <code>b</code>, <code>ar</code>, <code>r</code> and still
+  has one port. In hand-written WaveJSON, signals without a path belong to the whole diagram, one scope.</p></div>
+
+<h2 id="svg">In the static SVG</h2>
+<p>A static figure (<code>"render": "svg"</code>, see <a href="wavedrom.html">WaveDrom</a>) draws each port as its group with the
+  transactions row (no channel rows) and adds a legend line <code>⇄ name (protocol): counts</code> under the figure. The APB example's
+  static view of the write:</p>
+<figure><img src="img/wavedrom-svg.png" alt="The APB write as a static SVG with the APB port group, one W transfer, and its legend" loading="lazy">
+  <figcaption><b>A port in a static SVG.</b> <code>⇄ APB · APB · 1 W</code> with the transfer <code>W 0x4 ← 0xca…</code>; the legend
+  under the figure repeats it.</figcaption></figure>
+</main>
+<nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
+</div>
+<footer>wavefw 0.11 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+  <a href="../index.html">docs/index.html</a></footer>
+<script src="guide.js"></script>
+</body>
+</html>

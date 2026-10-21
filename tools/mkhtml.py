@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """mkhtml.py — build one self-contained HTML page (wavefw.css + wavefw.js + data inlined) that opens anywhere.
 
-  mkhtml.py --config dump.config.json --out dump.html            # run every view of the config (wavepeek) -> page
+  mkhtml.py --config dump.config.json --out dump.html            # run every view of the config -> page
   mkhtml.py --config cfg.json --view exact --waves other.vcd ...  # some views only, another dump
   mkhtml.py cyc=cyc.json exact=exact.json --settings cfg.json --out page.html   # from WaveJSON files
   mkhtml.py --config x.config.json --sva checks.sv --bind a_req_ack@tb.dut --out x.html   # assertions bound (make html SVA= BIND=)
@@ -135,7 +135,7 @@ def build_views(a, cfg, base):
             vcfg = vcd2wavedrom.view_config(cfg, key)
             own = (views.get(key) or {}) if key else {}
             vcfg['config'] = own.get('config') or {}   # the top-level "config" is the page's global setting
-            argv = (['--waves', a.waves] if a.waves else []) + (['--reader', a.reader] if a.reader else []) + (['--sva-bin', a.sva_bin] if a.sva_bin else [])
+            argv = (['--waves', a.waves] if a.waves else []) + (['--sva-bin', a.sva_bin] if a.sva_bin else [])
             if vcfg.get('sva') is False:
                 vcfg.pop('sva')
             o = vcd2wavedrom.resolve(vcd2wavedrom.parser().parse_args(argv), vcfg, base)
@@ -250,7 +250,6 @@ def main():
     ap.add_argument('--settings', help='settings file used only for "config"/"page" (with WaveJSON inputs)')
     ap.add_argument('--view', action='append', help='only these views (repeatable)')
     ap.add_argument('--waves', help='override the dump file of every view')
-    ap.add_argument('--reader', choices=('builtin', 'wavepeek'), help='how the dumps are read (default: the config\'s "reader", else builtin)')
     ap.add_argument('--title', help='page title')
     ap.add_argument('--render', choices=('view', 'svg', 'both'), help='renderer for every section')
     add_sva_bin_arg(ap)

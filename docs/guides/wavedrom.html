@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WaveDrom · wavefw guides</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="guide.css">
+<link rel="stylesheet" href="../../wavefw/wavefw.css">
+<style>
+  /* a live example: its source (copied from the script block that is drawn, so the two cannot differ) and the result */
+  .ex pre { margin: 0 0 10px; max-height: 340px; }
+  .live .wv, .live .wvs { margin: 0; }
+</style>
+</head>
+<body>
+<header class="top"><nav>
+  <a class="home" href="index.html">wavefw guides</a>
+  <a href="pages.html">Dump → page</a> <a href="viewer.html">Viewer</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
+  <a href="buses.html">Bus transactions</a> <a href="wavedrom.html" aria-current="page">WaveDrom</a> <a href="mcp.html">AI agents (MCP)</a>
+  <a href="../index.html">Reference</a>
+</nav></header>
+<div class="page toc-side">
+<main>
+<header class="hero"><div class="kicker">Guide</div><h1>WaveDrom: diagrams in your own pages</h1>
+<p class="lead">wavefw reads <a href="https://wavedrom.com">WaveDrom</a> JSON (the format of the
+<a href="https://github.com/wavedrom/wavedrom">WaveDrom</a> timing-diagram editor) and draws it two ways from one model: an interactive viewer (zoom, cursor, find, bookmarks)
+and a static WaveDrom-style SVG for documents. This guide shows how to put both in a page of your own, what of WaveDrom is
+supported, what wavefw adds to the format, and how WaveJSON comes out of a simulator dump or out of the viewer. The diagrams
+below are live: this page loads <code>wavefw/wavefw.js</code> itself.</p></header>
+
+<h2 id="two-renderers">Two renderers, one model</h2>
+<p>A diagram is a WaveJSON object (<code>{"signal": […]}</code>). wavefw parses it once and hands the model to one of two
+renderers:</p>
+<table>
+<tr><th>Renderer</th><th>Markup</th><th>Use it for</th></tr>
+<tr><td>Viewer (<code>WaveView</code>)</td><td><code>&lt;script type="application/wavedrom"&gt;</code>, <code>data-mode="view"</code></td>
+  <td>reading waves: zoom and pan, a cursor and a second cursor, edge and value search, fuzzy find, highlight, bookmarks and arrows,
+  the right button's menu (picture, WaveDrom). Drawn on a canvas, any number of rows.</td></tr>
+<tr><td>Static SVG (<code>WaveSVG</code>)</td><td><code>&lt;script type="WaveDrom"&gt;</code>, <code>data-mode="svg"</code></td>
+  <td>documents, specifications, slides and print: a WaveDrom-looking inline SVG with the same bookmarks and arrows and a legend of
+  the bookmark texts. Text in the SVG stays selectable; the figure follows the page theme.</td></tr>
+</table>
+<p>Both read the same keys and the same settings, so a diagram you tuned in the viewer looks the same as a figure. What the viewer
+draws, the static SVG draws too where it makes sense (bookmarks, arrows, groups, assertions, bus transactions, gaps).</p>
+
+<h2 id="first-page">Your first page</h2>
+<ol class="steps">
+  <li>Copy <code>wavefw/wavefw.css</code> and <code>wavefw/wavefw.js</code> next to your page (or point at the repository's
+    <code>wavefw/</code>). No build step, no other dependency; the page works from <code>file://</code>.</li>
+  <li>Link both in the page and write a diagram in a script block:
+<pre><code>&lt;link rel="stylesheet" href="wavefw/wavefw.css"&gt;
+&lt;script src="wavefw/wavefw.js"&gt;&lt;/script&gt;
+
+&lt;script type="application/wavedrom"&gt;          <span class="c">&lt;!-- interactive viewer --&gt;</span>
+{ "signal": [ { "name": "clk", "wave": "p....." }, { "name": "d", "wave": "x.34.x", "data": ["A", "B"] } ] }
+&lt;/script&gt;
+&lt;script type="WaveDrom"&gt; {signal: [{name: 'req', wave: '01..0'}]} &lt;/script&gt;   <span class="c">&lt;!-- static SVG --&gt;</span></code></pre></li>
+  <li>Open it. When the page loads, every <code>script[type="application/wavedrom"]</code>, <code>script[type="WaveDrom"]</code> and
+    element with <code>data-wave</code> is upgraded: a script block gets a <code>&lt;div&gt;</code> right after it with the viewer or
+    the SVG in it.</li>
+</ol>
+<p>The same two blocks, live:</p>
+<div class="live ex"><pre></pre>
+<script type="application/wavedrom">
+{ "signal": [ { "name": "clk", "wave": "p....." }, { "name": "d", "wave": "x.34.x", "data": ["A", "B"] } ] }
+</script>
+</div>
+<div class="live ex"><pre></pre>
+<script type="WaveDrom"> {signal: [{name: 'req', wave: '01..0'}]} </script>
+</div>
+<div class="note"><p>The body of a script block is JSON or the WaveDrom editor's relaxed syntax (unquoted keys, single quotes,
+trailing commas). Like stock WaveDrom, the relaxed form is evaluated as JavaScript: put only diagrams you trust in a page. A
+<code>data-wave</code> reference to a data file is plain data.</p></div>
+<p>Turn the automatic upgrade off with <code>&lt;script src="wavefw.js" data-manual&gt;</code> and call
+<code>WaveFW.upgrade(root)</code> yourself (for content you add later).</p>
+
+<h2 id="attributes">Attributes: window, mode, settings</h2>
+<p>Every upgraded element takes <code>data-*</code> attributes. Times are model units as plain numbers (cycles without the
+<code>time</code> extension, ps with it) or a time with a unit (<code>120ns</code>, <code>1.5us</code>).</p>
+<table>
+<tr><th>Attribute</th><th>Effect</th></tr>
+<tr><td><code>data-mode="svg | view"</code></td><td>pick the renderer (default: <code>view</code> for <code>application/wavedrom</code>
+  and <code>data-wave</code>, <code>svg</code> for <code>WaveDrom</code>)</td></tr>
+<tr><td><code>data-from</code>, <code>data-to</code></td><td>viewer: the window it opens with; SVG: the window that is drawn</td></tr>
+<tr><td><code>data-cursor</code>, <code>data-title</code></td><td>the cursor at start; the title in the viewer's bar</td></tr>
+<tr><td><code>data-width</code>, <code>data-fit</code></td><td>SVG width in px; scale the SVG to its container</td></tr>
+<tr><td><code>data-theme</code>, <code>data-colors</code></td><td>the theme (<code>light white dark</code>) and palette of this wave only</td></tr>
+<tr><td><code>data-sort</code>, <code>data-sort-ignore</code>, <code>data-highlight</code></td><td>starting order, prefixes skipped
+  when sorting (<code>i_,o_</code>), instances highlighted at start</td></tr>
+<tr><td><code>data-config='{"rowHeight": 30}'</code></td><td>any setting, for this wave only</td></tr>
+<tr><td><code>data-lazy</code></td><td>built on a click of <span class="ui">Load waveform</span>, or when the enclosing
+  <code>&lt;details&gt;</code> opens: for pages with many diagrams</td></tr>
+<tr><td><code>data-wave="#id"</code> / <code>data-wave="VAR.key"</code></td><td>the model from another script element, or from a global
+  loaded with <code>&lt;script src&gt;</code></td></tr>
+</table>
+<p>One source, drawn twice: a JSON block referred to by id, as a viewer with a narrower window and as a figure with its own row
+height.</p>
+<div class="live ex"><pre></pre>
+<script type="application/json" id="g-src">
+{ "signal": [
+  { "name": "clk", "wave": "p.........." },
+  ["bus",
+   { "name": "req",  "wave": "0.1...0..1." },
+   { "name": "ack",  "wave": "0...1.0...." },
+   { "name": "data", "wave": "x.3...x..4.", "data": ["A1", "B2"] }
+  ]
+ ],
+ "head": { "text": "one source, two renderers" } }
+</script>
+<div data-wave="#g-src" data-from="1" data-to="8" data-cursor="4" data-title="viewer · data-from 1 · data-to 8"></div>
+<div data-wave="#g-src" data-mode="svg" data-config='{"rowHeight": 22}'></div>
+</div>
+
+<h3 id="lazy">Data files and lazy diagrams</h3>
+<p>A page opened from <code>file://</code> cannot <code>fetch()</code> a JSON file next to it. Put the WaveJSON into a data script
+with <code>tools/embed.py</code>, load it, and refer to a model by <code>VAR.key</code>:</p>
+<pre><code>python3 -I tools/embed.py --var MY_WAVES cyc=cyc.json exact=exact.json --out data.js
+
+&lt;script src="data.js"&gt;&lt;/script&gt;            <span class="c">&lt;!-- window.MY_WAVES = {"cyc": {…}, "exact": {…}} --&gt;</span>
+&lt;div data-wave="MY_WAVES.exact" data-lazy&gt;&lt;/div&gt;</code></pre>
+<p><code>embed.py --html page.html --placeholder '/*WAVE_DATA*/' a.json --out out.html</code> puts the JSON into a placeholder
+instead (the flow of <code>docs/reference/template.html</code>). With many diagrams in one page, <code>data-lazy</code> inside a
+<code>&lt;details&gt;</code> builds each one only when its card is opened:</p>
+<div class="live">
+<details><summary>A lazy card: open it to build the viewer</summary>
+<div data-wave="#g-src" data-lazy></div>
+</details>
+</div>
+
+<h2 id="subset">The supported WaveDrom</h2>
+<p>wavefw draws the WaveDrom format most diagrams use. <code>tests/conformance.html</code> draws every case three times — wavefw's
+static SVG, stock WaveDrom 3.5.0 (vendored in <code>tests/vendor/</code>, only used there) and the wavefw viewer — so a difference
+shows at a glance.</p>
+<figure><img src="img/wavedrom-conformance.png"
+  alt="tests/conformance.html: clocks p n P N drawn by wavefw's SVG, by stock WaveDrom and by the viewer" loading="lazy">
+<figcaption><b>tests/conformance.html.</b> Each case: wavefw's SVG on the left, stock WaveDrom 3.5.0 on the right, the
+interactive viewer under them. Here clocks <code>p n P N</code> with a period of 2, then levels.</figcaption></figure>
+<table>
+<tr><th>Feature</th><th>Notes</th></tr>
+<tr><td><code>0 1</code></td><td>levels with soft (slanted) edges</td></tr>
+<tr><td><code>h l</code> / <code>H L</code></td><td>levels with sharp edges / plus an edge arrow</td></tr>
+<tr><td><code>p n</code> / <code>P N</code></td><td>clocks (rising / falling at the cell start) / plus an arrow</td></tr>
+<tr><td><code>x</code></td><td>hatched, drawn in <code>--wave-x</code> (stock WaveDrom uses black)</td></tr>
+<tr><td><code>z</code></td><td>a mid-level line in <code>--wave-z</code></td></tr>
+<tr><td><code>u d</code></td><td>pull-up / pull-down, dashed</td></tr>
+<tr><td><code>=</code> <code>2</code>–<code>9</code></td><td>bus segments with <code>data</code> labels (an array or a space-separated string);
+  3–9 take the fill tokens <code>--wave-c3…c9</code></td></tr>
+<tr><td><code>.</code> <code>|</code></td><td>extend; extend with a gap mark</td></tr>
+<tr><td><code>period</code>, <code>phase</code></td><td>per signal; a positive phase is clipped at cycle 0 as in stock</td></tr>
+<tr><td><code>node</code>, <code>edge</code></td><td>shapes <code>- ~ -~ ~- -| |- -|-</code>, arrows <code>&lt;</code> <code>&gt;</code>,
+  <code>+</code>; labels; lowercase nodes are labelled</td></tr>
+<tr><td>groups <code>["name", …]</code>, <code>{}</code></td><td>nested groups are header rows (foldable in the viewer, bracketed in the
+  SVG) rather than stock's rotated labels; <code>{}</code> is a spacer</td></tr>
+<tr><td><code>head.text/tick/every</code>, <code>foot.text/tock</code>, <code>config.hscale</code></td><td></td></tr>
+</table>
+<p><b>Not supported:</b> <code>&lt;…&gt;</code> sub-cycles, <code>reg</code> diagrams, skins, JsonML styling inside texts (only the
+text is used). An unknown wave character is taken as <code>.</code>.</p>
+<div class="live ex"><pre></pre>
+<script type="application/wavedrom" data-mode="svg">
+{ "signal": [
+  { "name": "clk",  "wave": "p.....|..." },
+  { "name": "req",  "wave": "0.1..0|1.0", "node": "..a..." },
+  { "name": "ack",  "wave": "0...10|.10", "node": "....b." },
+  { "name": "data", "wave": "x.3.4x|5x.", "data": "HEAD BODY CRC" },
+  { "name": "oe",   "wave": "z.1..z|0.z" }
+ ],
+ "edge": ["a~>b 2T"],
+ "head": { "text": "wave characters, a node edge, a gap |", "tick": 0 } }
+</script>
+</div>
+
+<h2 id="extensions">What wavefw adds to the format</h2>
+<p>Stock WaveDrom ignores these keys, so a file with them still draws there (without them). They are what lets a diagram come
+from a real dump: real time, exact transitions, value labels, notes.</p>
+<table>
+<tr><th>Key</th><th>Meaning</th></tr>
+<tr><td><code>time: {t0, cycle, t1?, skip?}</code></td><td>cycle <i>c</i> starts at <code>t0 + c·cycle</code> ps, so the axis shows
+  real time; <code>skip: [[k, n]]</code>: the <code>|</code> cell at index <i>k</i> stands for <i>n</i> cycles</td></tr>
+<tr><td><code>signal[i].tv: [[t, v], …]</code></td><td>exact transitions in model time (ps with <code>time</code>); 1-bit
+  <code>0 1 x z</code>, a bus hex; wins over <code>wave</code></td></tr>
+<tr><td><code>width</code>, <code>enum</code>, <code>radix</code>, <code>style</code>, <code>color</code>/<code>stroke</code>,
+  <code>fill</code></td><td>a bus's width, value labels (<code>{"0": "IDLE"}</code>), radix, edge style, trace and fill colours</td></tr>
+<tr><td><code>enumColors</code>, <code>analog</code>, <code>fields</code>, <code>height</code>, <code>kind</code></td><td>fill by
+  value, a bus as a step plot, a packed struct as rows of fields, the row's height, <code>real</code> / <code>string</code> texts</td></tr>
+<tr><td><code>path</code>, <code>same</code></td><td>the full hierarchical path (the name's tooltip); <code>"same": "tb.clk"</code>: the
+  <code>tv</code> of the signal with that path, stored once</td></tr>
+<tr><td><code>config: {…}</code></td><td>the settings of this diagram (theme, colours, sizes, sort, gaps …)</td></tr>
+<tr><td><code>bookmarks</code>, <code>arrows</code></td><td>numbered notes on signal rows and arrows between them</td></tr>
+<tr><td><code>markers</code>, <code>jumps</code>, <code>cursor</code></td><td>dashed markers, jump buttons, the initial cursor</td></tr>
+<tr><td><code>sva: {files?, bind, notes?, exprs?}</code></td><td>assertions bound to the diagram (<a href="sva.html">Assertions</a>)</td></tr>
+<tr><td><code>meta.scope</code></td><td>the instance the top rows belong to (for binding)</td></tr>
+</table>
+
+<h3 id="time-tv">Real time and exact transitions</h3>
+<p>With <code>time</code> the axis is in ns, and <code>tv</code> puts each change at its own time instead of a cell boundary. Here the
+clock is a wave string (10 ns cells), <code>req</code> rises at 23 ns, between two clock edges, and <code>state</code> is a 2-bit bus
+labelled by <code>enum</code>; <code>count</code> is shown in decimal.</p>
+<div class="live ex"><pre></pre>
+<script type="application/wavedrom">
+{ "signal": [
+  { "name": "clk",   "wave": "p.........." },
+  { "name": "req",   "tv": [[0, "0"], [23000, "1"], [61000, "0"]] },
+  { "name": "state", "width": 2, "enum": { "0": "IDLE", "1": "RUN", "2": "DONE" },
+    "tv": [[0, "0"], [30000, "1"], [70000, "2"], [90000, "0"]] },
+  { "name": "count", "width": 8, "radix": "dec", "tv": [[0, "00"], [30000, "01"], [40000, "02"], [50000, "03"], [60000, "04"]] }
+ ],
+ "time": { "t0": 0, "cycle": 10000 },
+ "head": { "text": "time + tv: req at 23 ns, an enum, a decimal bus" } }
+</script>
+</div>
+
+<h3 id="notes">Bookmarks, arrows, markers, jumps</h3>
+<p><code>bookmarks</code> are numbered notes on a row (<code>t</code> in model units or a time such as <code>"25ns"</code>,
+<code>signal</code> the row's path, <code>group.name</code> inside a group); <code>arrows</code> join two of them (shape
+<code>- ~ -~ ~- -| |- -|-</code>, head <code>&gt; &lt;&gt; &lt;</code> or <code>""</code>, line <code>solid dashed dotted</code>, a
+colour, a label). <code>markers</code> are dashed lines; up to six of them become <span class="ui">go to</span> buttons when there are
+no <code>jumps</code>. The static SVG puts the bookmark texts in a legend under the figure.</p>
+<div class="live ex"><pre></pre>
+<script type="application/json" id="bm-src">
+{ "signal": [
+  { "name": "clk", "wave": "p..........." },
+  ["bus",
+   { "name": "req",  "wave": "0.1...0..1.0" },
+   { "name": "ack",  "wave": "0...1.0....1" },
+   { "name": "data", "wave": "x.3...x..4.x", "data": ["A1", "B2"] }
+  ],
+  { "name": "irq", "wave": "0.....1.0..." }
+ ],
+ "bookmarks": [
+  { "n": 1, "t": 2, "signal": "bus.req", "text": "request raised with data A1" },
+  { "n": 2, "t": 4, "signal": "bus.ack", "text": "acknowledged two cycles later" },
+  { "n": 3, "t": 6, "signal": "irq", "text": "interrupt when the transfer ends", "color": "#1c7ed6" }
+ ],
+ "arrows": [
+  { "from": 1, "to": 2, "shape": "-|-", "label": "2T" },
+  { "from": 2, "to": 3, "shape": "~", "line": "dashed", "color": "#1c7ed6", "label": "irq" }
+ ],
+ "markers": [ { "cycle": 9, "label": "second request" } ],
+ "cursor": 4 }
+</script>
+<div data-wave="#bm-src" data-title="bookmarks, arrows and a marker"></div>
+<div data-wave="#bm-src" data-mode="svg"></div>
+</div>
+<p>You rarely type bookmarks by hand: put them on in the viewer (<kbd>m</kbd>, drag, shift+drag for an arrow) and press
+<span class="ui">JSON</span> under the waves; it gives the <code>"bookmarks"</code> and <code>"arrows"</code> lists to paste
+(<a href="viewer.html">Viewer</a>).</p>
+
+<h3 id="look-per-signal">Colours, styles and plots per signal</h3>
+<p><code>style</code> draws the edges slanted (<code>wavedrom</code>), vertical with narrow bus crossings like a simulator
+(<code>questa</code>) or <code>square</code>; <code>auto</code> slants wave strings and draws <code>tv</code> edges vertically.
+<code>color</code> / <code>stroke</code> colour a trace and its name, <code>fill</code> a bus, <code>enumColors</code> fill by value
+(a CSS colour, or a token <code>c3</code>…<code>c9</code> that
+follows the theme),
+<code>analog</code> draws a bus as a step plot that many rows high.</p>
+<div class="live ex"><pre></pre>
+<script type="application/wavedrom" data-mode="svg">
+{ "signal": [
+  { "name": "clk",   "wave": "p.......", "style": "questa" },
+  { "name": "valid", "wave": "01..0.1.", "color": "#e8590c", "style": "questa" },
+  { "name": "phase", "wave": "=.==.=.=", "data": "IDLE SETUP ACCESS IDLE SETUP ACCESS",
+    "enumColors": { "SETUP": "c4", "ACCESS": "c6" } },
+  { "name": "level", "width": 8, "radix": "dec", "analog": 3,
+    "tv": [[0, "10"], [1, "40"], [2, "80"], [3, "c0"], [4, "a0"], [5, "60"], [6, "20"], [7, "08"]] }
+ ],
+ "head": { "text": "style, color, enumColors, analog" } }
+</script>
+</div>
+
+<h2 id="static-svg">Static SVG for documents</h2>
+<p>For a document, a slide or a printed specification use the static renderer: <code>&lt;script type="WaveDrom"&gt;</code>,
+<code>data-mode="svg"</code>, a view with <code>"render": "svg"</code> in a page config (<a href="pages.html#views">Dump → page</a>),
+or from a script:</p>
+<pre><code>const svg = WaveSVG.toString(model, { from: '30ns', to: '80ns', width: 900 });   <span class="c">// a string: write it to a file</span>
+WaveSVG.render(el, model, { fit: true });                                       <span class="c">// into an element</span></code></pre>
+<p>The figure follows the page theme (or paints its own background when it has a theme or a <code>bg</code> colour), keeps the
+bookmarks and arrows, and lists the bookmark texts as a legend. With assertions it draws each one's steps and the first failure on
+its signals; with <code>gaps</code> in its settings it leaves out the idle stretches (<a href="gaps.html">Gaps</a>).</p>
+<figure><img src="img/wavedrom-svg.png"
+  alt="The APB write as a static SVG: bookmarks 1 and 2 with a setup→access arrow, the APB bus group, two assertion groups, a legend" loading="lazy">
+<figcaption><b>A <code>"render": "svg"</code> view of the APB example.</b> The write from 30 to 80 ns with bookmarks 1–2 and the
+<i>setup → access</i> arrow, the APB port found by its names (<code>⇄ APB</code>), two bound assertions with their attempts and
+steps (<code>svaShow</code>), and under the figure the legends of the bookmarks, the bus and the assertion steps.</figcaption></figure>
+<p>A picture of what a viewer shows right now is the right button's <span class="ui">Save image as SVG</span> /
+<span class="ui">PNG</span> (<a href="viewer.html">Viewer</a>): the same renderer with the viewer's folding, colours, cursor and
+highlight, the page's colours put in so the file opens anywhere.</p>
+
+<h2 id="from-a-dump">WaveJSON from a simulator dump</h2>
+<p><code>tools/vcd2wavedrom.py</code> turns a window of a VCD or FST into WaveJSON. It has two modes:</p>
+<table>
+<tr><th>Mode</th><th>Output</th><th>When</th></tr>
+<tr><td><code>--clock CLK</code></td><td>one WaveDrom cell per period of <code>CLK</code>, the value after its rising edge (what holds
+  during the cycle); plain <code>wave</code> strings and <code>data</code>, plus <code>time</code>: draws in stock WaveDrom too</td>
+  <td>synchronous logic, a document, a short window</td></tr>
+<tr><td><code>--exact</code></td><td>every transition at its own time in <code>tv</code>, with a quantised <code>wave</code> string as
+  a fallback for stock WaveDrom</td><td>asynchronous signals, several clocks, glitches, a long window in the viewer</td></tr>
+</table>
+<pre><code>python3 -I tools/vcd2wavedrom.py --waves out/examples/apb/apb.vcd --scope apb_tb --clock PCLK \
+    --from 30ns --to 110ns --signals PCLK,PSEL,PENABLE,PADDR=addr --out cyc.json</code></pre>
+<pre><code>{
+ "signal": [
+  {"name": "PCLK", "wave": "p......."},
+  {"name": "PSEL", "wave": "01.0.1.."},
+  {"name": "PENABLE", "wave": "0.10..1."},
+  {"name": "addr", "wave": "==......", "data": ["0x00", "0x04"], "width": 8}
+ ],
+ "head": {"text": "apb.vcd @ posedge PCLK", "tick": 0},
+ "time": {"t0": 35000, "t1": 115000, "cycle": 10000, "unit": "ps"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "apb.vcd", "tool": "wavefw reader", "mode": "clock", "from_ps": 30000, "to_ps": 110000, "scope": "apb_tb"}
+}</code></pre>
+<p>The same window with <code>--exact</code> gives every edge in <code>tv</code>
+(<code>{"name": "PSEL", "wave": "0..1...0...1....", "tv": [[30000, "0"], [45000, "1"], [65000, "0"], [85000, "1"]]}</code>). The
+other options: <code>--signals a,b=alias</code>, <code>--enum state=0:IDLE,1:RUN</code>, <code>--group tx=state,txd</code> or
+<code>--hierarchy</code>, <code>--marker 'posedge done=done'</code> (<code>posedge X</code>,
+<code>negedge X</code>, <code>edge X</code> or <code>X</code>: any change), <code>--title</code>, <code>--bookmarks</code>, <code>--arrows</code>, <code>--sva</code> / <code>--bind</code>,
+<code>--expr</code>. Every option can also be a key of a config file (<code>--config x.config.json --view exact</code>), which is
+how pages are built (<a href="pages.html">Dump → page</a>).</p>
+<figure><img src="img/wavedrom-exact.png"
+  alt="The APB example's exact view: every transition at its time, markers done 1, done 2, error, done 3 as go-to buttons" loading="lazy">
+<figcaption><b>An <code>--exact</code> view in a viewer.</b> The APB run with every transition at its own time; the
+<code>marker</code> list (<code>posedge done=done</code>, <code>posedge PSLVERR=error</code>) became the dashed lines and the
+<span class="ui">go to</span> buttons <i>done 1 … done 3</i>, <i>error</i>.</figcaption></figure>
+<h3 id="gaps-in-wavejson">Idle stretches as <code>|</code> cells</h3>
+<p>In clock mode, <code>--gap 200ns:300ns</code> collapses a window into one <code>|</code> cell, and <code>--auto-gap 16:2</code>
+does it by itself wherever no signal but a clock changes for 16 cycles, keeping 2 cycles after the last change and before the next.
+The cell's real length goes into <code>time.skip</code>, so the wavefw axis keeps the real time. The viewer's pictures and the MCP
+server's <code>wave_page</code> cut the same way; the whole story is in <a href="gaps.html">Gaps</a>.</p>
+
+<h2 id="export">WaveDrom out of the viewer</h2>
+<p>The right button on the waves of any viewer has <span class="ui">Save as WaveDrom</span> (a <code>&lt;title&gt;.wavedrom.json</code>
+file) and <span class="ui">Copy WaveDrom</span> (the clipboard). They take the same signals as the picture would — the selected run,
+else the highlighted rows, else the rows on the screen — over the measured range, else the window:</p>
+<ul>
+<li>one cell per cycle of their clock (a 1-bit <code>*clk*</code> among them or in their modules; none: the shortest time between
+  changes);</li>
+<li>each cell the value after the cycle's edge — what holds during the cycle, as <code>vcd2wavedrom.py --clock</code> writes it;</li>
+<li>buses as <code>=</code> with their values in <code>data</code>, in the radix shown; a group per module;</li>
+<li>with <span class="ui">Gaps</span> on, one <code>|</code> cell per idle stretch in every wave.</li>
+</ul>
+<p>The output is plain WaveDrom, so it opens in the WaveDrom editor or any tool that draws WaveDrom. An excerpt of the export of the
+APB transfers (30–200 ns, seven signals; the whole file:
+<a href="img/wavedrom-export.json">wavedrom-export.json</a>):</p>
+<pre><code>{
+ "signal": [
+  { "name": "PCLK", "wave": "p................" },
+  { "name": "PSEL", "wave": "01.0.1...0.1.0..." },
+  { "name": "PENABLE", "wave": "0.10..1..0..10..." },
+  { "name": "PADDR", "wave": "==.........=.....", "data": ["0x00", "0x04", "0x40"] },
+  …
+ ],
+ "head": { "text": "APB3 · three transfers · clock-sampled: 30.0 ns … 200.0 ns" },
+ "foot": { "text": "one cell per PCLK cycle" },
+ "config": { "hscale": 1 }
+}</code></pre>
+<figure><img src="img/wavedrom-stock.png"
+  alt="The exported WaveJSON drawn by stock WaveDrom 3.5: PCLK, PSEL, PENABLE, PWRITE, PADDR, PWDATA, PREADY" loading="lazy">
+<figcaption><b>The export drawn by stock WaveDrom 3.5.</b> The same seven signals, one cell per PCLK cycle, the title and the foot
+written by the viewer. (Stock WaveDrom does not shorten a label that is wider than its cell: <code>PWDATA</code>'s first value runs
+into its name.)</figcaption></figure>
+
+<h2 id="settings">Settings and themes for diagrams</h2>
+<p>Sizes, fonts, colours, sorting, folding and the rest are settings, merged in layers (later wins):</p>
+<ol>
+<li>the built-in defaults (<code>WaveFW.defaults</code>);</li>
+<li>global: <code>wavefw/wavefw.config.js</code> loaded before <code>wavefw.js</code> (it lists every key with its default), or
+  <code>WaveFW.configure({…})</code> at run time (<code>null</code> removes a key);</li>
+<li>the diagram's own <code>"config"</code> in the WaveJSON;</li>
+<li>the element: <code>data-config</code>, <code>data-sort</code>, <code>data-theme</code>, <code>data-colors</code> …;</li>
+<li>the viewer's own: the edge style picked in its bar (kept in this browser).</li>
+</ol>
+<p>A key that is not a setting (a typo: <code>rowHeigth</code>) is a console warning in the page. Three themes — <code>light</code>,
+<code>white</code> (black traces, for print and slides) and <code>dark</code> — follow <code>prefers-color-scheme</code> unless set
+by <code>&lt;html data-theme="white"&gt;</code>, <code>WaveFW.setTheme('dark')</code>, or <code>"config": {"theme": …}</code>. Every
+colour is a CSS custom property: <code>WaveFW.setColors({trace: '#c00', bus: 'navy'})</code> for all waves, <code>data-colors</code>
+or <code>"config": {"colors": …}</code> for one, <code>color</code> / <code>fill</code> for one signal. Two copies of one source,
+one in <code>white</code> with a red trace, one in <code>dark</code>:</p>
+<div class="live ex"><pre></pre>
+<script type="application/json" id="th-src">
+{ "signal": [
+  { "name": "clk",  "wave": "p......." },
+  { "name": "req",  "wave": "01..0..." },
+  { "name": "data", "wave": "x.34.5x.", "data": "A B C" }
+ ] }
+</script>
+<div data-wave="#th-src" data-mode="svg" data-theme="white" data-colors='{"trace": "#c92a2a"}'></div>
+<div data-wave="#th-src" data-mode="svg" data-theme="dark"></div>
+</div>
+<p>The full list of keys is in <a href="../USAGE.md#settings">USAGE § Settings</a>; the colour tokens and a palette to play with in
+<a href="../index.html#themes">docs/index.html § Themes</a>.</p>
+
+<h2 id="api">The JavaScript API in brief</h2>
+<table>
+<tr><th>Call</th><th>Does</th></tr>
+<tr><td><code>WaveFW.parse(json | text)</code></td><td>the model of a diagram</td></tr>
+<tr><td><code>new WaveView(el, model, opts)</code></td><td>a viewer in <code>el</code>; <code>el.waveView</code> is the viewer object
+  (<code>zoomTo</code>, <code>select</code>, <code>setGaps</code>, <code>toSVG</code>, <code>toWaveDrom</code>, <code>state</code> …)</td></tr>
+<tr><td><code>WaveSVG.toString(model, opts)</code>, <code>WaveSVG.render(el, model, opts)</code></td><td>the static SVG as a string, or
+  into an element</td></tr>
+<tr><td><code>WaveFW.upgrade(root)</code></td><td>upgrade the script blocks and <code>data-wave</code> elements under <code>root</code></td></tr>
+<tr><td><code>WaveFW.configure({…})</code></td><td>global settings at run time; viewers and SVGs are drawn again</td></tr>
+<tr><td><code>WaveFW.setTheme(name, el?)</code>, <code>WaveFW.setColors(map, el?)</code></td><td>theme and palette of the page or of one
+  element</td></tr>
+<tr><td><code>WaveFW.plugin(fn)</code>, <code>WaveFW.svgPlugin(fn)</code></td><td>rows, tools and keys of your own in every viewer / SVG</td></tr>
+</table>
+<p>Every function, every viewer method, the events and the plugin protocol: <a href="../index.html#api">docs/index.html § API</a>
+(its tables are made from what <code>wavefw.js</code> exports, so they cannot drift from the code).</p>
+</main>
+<nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
+</div>
+<footer>wavefw 0.11 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live
+reference: <a href="../index.html">docs/index.html</a></footer>
+<script src="../../wavefw/wavefw.js"></script>
+<script>
+  // each live example shows the source of the script block it draws
+  for (const ex of document.querySelectorAll('.ex')) {
+    const s = ex.querySelector('script[type="application/wavedrom"], script[type="WaveDrom"], script[type="application/json"]');
+    if (s) ex.querySelector('pre').textContent = s.textContent.trim();
+  }
+</script>
+<script src="guide.js"></script>
+</body>
+</html>

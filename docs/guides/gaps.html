@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gaps · wavefw guides</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="guide.css">
+<style>
+  /* the diagram of how a gap is cut */
+  .dia { width: 100%; max-width: 860px; height: auto; display: block; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  .dia text { font: 12px var(--mono); fill: var(--fg); }
+  .dia .m { fill: var(--muted); }
+  .dia .ln { stroke: var(--fg); stroke-width: 1.4; fill: none; }
+  .dia .ck { stroke: var(--muted); stroke-width: 1; fill: none; }
+  .dia .ch { stroke: var(--acc); stroke-width: 2; }
+  .dia .keep { fill: var(--acc2); opacity: 0.25; }
+  .dia .cut { fill: var(--acc); opacity: 0.16; }
+  .dia .dim { stroke: var(--muted); stroke-width: 1; fill: none; marker-start: url(#ah); marker-end: url(#ah); }
+  .dia .brk { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 6 2 1.5 2; }
+  .dia #ah path { fill: var(--muted); }
+</style>
+</head>
+<body>
+<header class="top"><nav>
+  <a class="home" href="index.html">wavefw guides</a>
+  <a href="pages.html">Dump → page</a> <a href="viewer.html">Viewer</a> <a href="gaps.html" aria-current="page">Gaps</a> <a href="sva.html">Assertions</a>
+  <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
+</nav></header>
+<div class="page toc-side">
+<main>
+<header class="hero">
+  <div class="kicker">Guide</div>
+  <h1>Gaps: the idle stretches cut out of a picture</h1>
+  <p class="lead">A long range with a few rare transfers makes a useless picture: thin needles on a flat line. With gaps on, the picture and the
+    WaveDrom you save from the viewer leave out the stretches where nothing happens, and put the transfers side by side with a break between them.
+    A small feature with a few knobs — <i>idle</i>, <i>keep</i>, the signals the gaps follow, the clock they count — explained here one by one.</p>
+</header>
+
+<h2 id="what">What a gap is, and where it applies</h2>
+<p>A <b>gap</b> is a stretch of time where none of the signals the gaps follow changes for at least <i>idle</i>; all of it but <i>keep</i> after
+  the last change and <i>keep</i> before the next one is left out, and a narrow break column takes its place. The time axis goes on with the real
+  time after each break, so every value under the axis is still a true time of the dump.</p>
+<p>Gaps change <b>what you save</b>, never what you look at:</p>
+<ul>
+  <li>the pictures of the right button's menu — <span class="ui">Copy image</span>, <span class="ui">Save image as PNG</span>,
+    <span class="ui">Save image as SVG</span>;</li>
+  <li>the WaveJSON of <span class="ui">Save as WaveDrom</span> / <span class="ui">Copy WaveDrom</span> — one <code>|</code> cell per break, in
+    every wave at the same cell, as stock WaveDrom draws its gaps;</li>
+  <li>the static SVG figures of a page (<code>"render": "svg"</code> views, <code>&lt;script type="WaveDrom"&gt;</code>), when their settings
+    turn gaps on;</li>
+  <li>on the command line, <code>vcd2wavedrom.py --auto-gap</code> and the MCP tool <code>wave_page</code> (<code>auto_gap</code>) cut the
+    same way when they write WaveJSON.</li>
+</ul>
+<p>The viewer itself always shows continuous time: zoom, cursor and measurements stay exact.</p>
+
+<p>The example in this guide is a 100 MHz stream with five rare packets in 10 µs (<code>valid</code>, <code>ready</code>, <code>data</code>,
+  <code>last</code>), the sender's <code>state</code>, an <code>irq</code> after each packet, a packet counter <code>frames</code> and a slow
+  heartbeat <code>hb</code> that toggles every 64 cycles. <code>make guide-shots</code> writes the dump and its page to
+  <code>out/guides/stream.html</code>. In the viewer, the whole run:</p>
+<figure>
+  <img src="img/gaps-viewer.png" alt="The stream page in the viewer: 10 µs, five packets as thin pulses" loading="lazy">
+  <figcaption><b>The whole run in the viewer.</b> Five packets in 10 µs: at this zoom each one is a needle, and <code>hb</code> is the only signal
+    that looks busy.</figcaption>
+</figure>
+<figure>
+  <img src="img/gaps-off.png" alt="The picture of the whole run without gaps" loading="lazy">
+  <figcaption><b>The picture without gaps</b> (<span class="ui">Save image as SVG</span> over the whole run): what the viewer shows — nothing can
+    be read in the packets.</figcaption>
+</figure>
+<figure>
+  <img src="img/gaps-by-signals.png" alt="The picture of the whole run with gaps: the packets side by side" loading="lazy">
+  <figcaption><b>The same picture with gaps</b> (idle 16, keep 2, the gaps following the stream's signals): the packets side by side, a dash-dot
+    break between the parts, under the axis the time each break leaves out (<code>+1.25 µs · 125 clk</code>) and the clock cycles of each part
+    (<code>23 clk</code>). The bookmarks and the arrow between packets 2 and 4 are drawn across the breaks.</figcaption>
+</figure>
+
+<h2 id="quick">Quick start</h2>
+<ol class="steps">
+  <li>Open a page and set the window (or ctrl+drag a range, or highlight / select the rows) you want in the picture: the picture takes the
+    measured range, else the window; the selected run of rows, else the highlighted rows, else the rows on the screen.</li>
+  <li>Right-click on the waves and hover <span class="ui">Gaps ▸</span>: a submenu opens.</li>
+  <li>Tick the check box. The label becomes <span class="ui">Gaps: N</span> — the number of breaks the current range would get.</li>
+  <li>Adjust <i>idle</i> and <i>keep</i> if needed (clock cycles, <code>16</code>, or a time, <code>2us</code>).</li>
+  <li>If a slow or free-running signal keeps every stretch busy, right-click the signals that matter and pick
+    <span class="ui">By this signal: its changes kept</span>.</li>
+  <li>Pick <span class="ui">Save image as PNG</span> / <span class="ui">SVG</span> or <span class="ui">Save as WaveDrom</span> in the main menu.</li>
+</ol>
+<figure>
+  <img src="img/gaps-menu.png" alt="The right button's menu with the Gaps submenu open" loading="lazy">
+  <figcaption><b>The Gaps submenu</b>, opened on the row <code>valid</code>. First row: on / off with the number of breaks, <i>idle</i> and
+    <i>keep</i>. Second row: which signals the gaps follow (<code>by 7 signals ✕</code>; with no pick: <code>by the signals drawn</code>), the
+    clock and the counted signals when set, <span class="ui">only them</span>, and the texts (<span class="ui">time, cycles</span> /
+    <span class="ui">+ changes in a gap</span> / <span class="ui">no texts</span>). Then the role of the signal clicked, and
+    <span class="ui">Reset the gaps</span>.</figcaption>
+</figure>
+<figure>
+  <img src="img/gaps-menu-viewer.png" alt="The viewer with the menu open; the signals the gaps follow marked // in the names" loading="lazy">
+  <figcaption><b>The menu in its place.</b> The signals the gaps follow carry <code>//</code> after their names in the names column.</figcaption>
+</figure>
+
+<h2 id="how">How a gap is found</h2>
+<svg class="dia" viewBox="0 0 860 210" role="img" aria-label="A stretch between two changes longer than idle: keep after the first change and
+  before the second kept, the rest left out and replaced by a break">
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+  <text x="10" y="22" class="m">clk</text>
+  <path class="ck" d="M60,30 l0,-14 l10,0 l0,14 l10,0 l0,-14 l10,0 l0,14 l10,0 l0,-14 l10,0 l0,14 l10,0 l0,-14 l10,0 l0,14 l10,0 l0,-14 l10,0 l0,14
+    l10,0 l0,-14 l10,0 l0,14 l10,0 l0,-14 l10,0 l0,14 l10,0 l0,-14 l10,0 l0,14 l10,0 l0,-14 l10,0 l0,14 l10,0 l0,-14 l10,0 l0,14 l10,0 l0,-14
+    l10,0 l0,14 l10,0 l0,-14 l10,0 l0,14 l10,0 l0,-14 l10,0 l0,14 l10,0 l0,-14 l10,0 l0,14 l10,0 l0,-14 l10,0 l0,14 l10,0 l0,-14 l10,0 l0,14
+    l10,0 l0,-14 l10,0 l0,14 l10,0 l0,-14 l10,0 l0,14 l10,0 l0,-14 l10,0 l0,14 l10,0 l0,-14 l10,0 l0,14 l10,0 l0,-14 l10,0 l0,14 l10,0 l0,-14
+    l10,0 l0,14 l10,0 l0,-14 l10,0 l0,14 l10,0 l0,-14 l10,0 l0,14 l10,0 l0,-14 l10,0 l0,14 l10,0 l0,-14 l10,0 l0,14 l10,0 l0,-14 l10,0 l0,14
+    l10,0 l0,-14 l10,0 l0,14 l10,0 l0,-14 l10,0 l0,14 l10,0 l0,-14 l10,0 l0,14 l10,0 l0,-14 l10,0 l0,14 l10,0 l0,-14 l10,0 l0,14 l10,0 l0,-14
+    l10,0 l0,14 l10,0 l0,-14 l10,0 l0,14"/>
+  <text x="10" y="62" class="m">valid</text>
+  <rect class="keep" x="140" y="40" width="80" height="120"/>
+  <rect class="cut" x="220" y="40" width="380" height="120"/>
+  <rect class="keep" x="600" y="40" width="80" height="120"/>
+  <path class="ln" d="M60,64 L100,64 L100,48 L140,48 L140,64 L680,64 L680,48 L720,48 L720,64 L800,64"/>
+  <path class="ch" d="M140,40 L140,160 M680,40 L680,160"/>
+  <text x="410" y="96" text-anchor="middle">no change for ≥ idle: left out</text>
+  <text x="180" y="96" text-anchor="middle" class="m">keep</text>
+  <text x="640" y="96" text-anchor="middle" class="m">keep</text>
+  <path class="dim" d="M144,124 L676,124"/>
+  <text x="410" y="118" text-anchor="middle" class="m">the stretch between two changes</text>
+  <text x="140" y="178" text-anchor="middle" class="m">last change</text>
+  <text x="680" y="178" text-anchor="middle" class="m">next change</text>
+  <text x="10" y="202" class="m">picture:</text>
+  <path class="ln" d="M80,200 L100,200 L100,186 L140,186 L140,200 L216,200 M226,200 L262,200 L262,186 L302,186 L302,200 L380,200"/>
+  <path class="brk" d="M221,182 L221,206"/>
+</svg>
+<p>For the range of the picture and its rows:</p>
+<ol>
+  <li><b>The changes.</b> Every value change of the signals the gaps follow — by default every signal drawn, a group's own value too — is a
+    point in time. The clock that the gaps count is never a change; with no signals picked, no other clock is either (a 1-bit
+    <code>*clk*</code> / <code>*clock*</code> that toggles). The times of the bookmarks count as changes, so <b>a bookmark is never cut out</b>.</li>
+  <li><b>The stretches.</b> Between two neighbouring changes (and between the ends of the range and the first / last change), a stretch at least
+    <i>idle</i> long is a candidate.</li>
+  <li><b>What stays.</b> <i>keep</i> after the earlier change and <i>keep</i> before the later one stay. With a clock, the ends of the cut are put
+    on its rising edges, so the cycle of a change and <i>keep</i> more stay whole.</li>
+  <li><b>Too short.</b> A cut shorter than two clock cycles is not made.</li>
+</ol>
+<p>All the rows of the picture are cut at the same times: one cut for every signal, so the parts line up and every column of the picture is one
+  moment. The axis restarts with the real time after each break; the arrows still join their bookmarks, and an arrow across a break shows the
+  latency with the idle time cut out of its length (its label is yours).</p>
+
+<h2 id="idle">idle: how long nothing must change</h2>
+<p><i>idle</i> is the shortest stretch that is cut. A number is clock cycles (<code>16</code>), a text with a unit is a time
+  (<code>2us</code>, <code>500ns</code>). The default is 16 cycles. A larger <i>idle</i> keeps the shorter pauses as they are, so the rhythm of
+  close transfers stays visible and only the long silences go.</p>
+<div class="pair">
+  <figure>
+    <img src="img/gaps-by-signals.png" alt="idle 16: four breaks" loading="lazy">
+    <figcaption><b>idle 16</b> — four breaks: every pause between packets is cut.</figcaption>
+  </figure>
+  <figure>
+    <img src="img/gaps-idle200.png" alt="idle 200: two breaks, the first pause kept" loading="lazy">
+    <figcaption><b>idle 200</b> — the 125 cycles between packets 1 and 2 are shorter than idle and stay; only the two long silences (≈ 360
+      cycles) are cut.</figcaption>
+  </figure>
+</div>
+
+<h2 id="keep">keep: how much stays around each change</h2>
+<p><i>keep</i> is what stays after the last change before a gap and before the first change after it: a little context so a pulse does not
+  touch the break. Cycles or a time, as <i>idle</i>; the default is 2 cycles, <code>0</code> cuts right at the cycle of the change.</p>
+<div class="pair">
+  <figure>
+    <img src="img/gaps-keep0.png" alt="keep 0" loading="lazy">
+    <figcaption><b>keep 0</b> — the parts end right after the cycle of their last change.</figcaption>
+  </figure>
+  <figure>
+    <img src="img/gaps-keep8.png" alt="keep 8" loading="lazy">
+    <figcaption><b>keep 8</b> — eight idle cycles on each side of every break: the parts are wider, the picture has more room around each
+      packet.</figcaption>
+  </figure>
+</div>
+<figure>
+  <img src="img/gaps-times.png" alt="idle 1us, keep 200ns" loading="lazy">
+  <figcaption><b>Times instead of cycles:</b> idle <code>1us</code>, keep <code>200ns</code>. With these values the 1.2 µs between packets 1 and 2 is
+    cut too (it is longer than 1 µs), and each part keeps 200 ns of quiet on both sides.</figcaption>
+</figure>
+<div class="note">
+  <p>What is cut is the stretch minus <i>keep</i> on both sides, and at least two cycles: a pause shorter than 2 × <i>keep</i> + 2 cycles stays
+    whole, however long <i>idle</i> allows. With idle 16 and keep 8 a 16-cycle pause has nothing left to cut. If the menu says
+    <span class="ui">Gaps: 0</span>, lower <i>keep</i> (or <i>idle</i>).</p>
+</div>
+
+<h2 id="follow">The signals the gaps follow</h2>
+<p>By default every signal drawn counts. That is right for a handful of handshake signals, and wrong as soon as one signal changes all the time:
+  a slow heartbeat, a free-running counter, a timestamp, a second clock domain's data. Here <code>hb</code> toggles every 64 cycles and chops every
+  pause into small pieces:</p>
+<figure>
+  <img src="img/gaps-on-all.png" alt="Gaps by every signal: hb keeps cutting the pauses into pieces" loading="lazy">
+  <figcaption><b>Gaps by every signal drawn:</b> each toggle of <code>hb</code> is a change, so a pause becomes several parts with a break between
+    each; the texts under the axis crowd.</figcaption>
+</figure>
+<p>Pick the signals that matter instead. Right-click a row and choose <span class="ui">By this signal: its changes kept</span>; on a selected
+  run (shift+click names) or the highlighted rows (ctrl+click), the item reads <span class="ui">By the N: their changes kept</span> and takes them all.
+  The picked signals are marked <code>//</code> in the names column, and the second row of the submenu reads <code>by N signals ✕</code>; ✕ goes back
+  to every signal. <span class="ui">Not by this signal</span> removes one.</p>
+<p>The other rows of the picture are still drawn, cut at the same times — <code>hb</code> is drawn above, with its toggles in the left-out
+  stretches simply not shown (see <a href="#texts">the texts</a> to count them).</p>
+<h3 id="only">only them</h3>
+<p>Once some signals are picked, the submenu offers <span class="ui">only them</span>: the picture and WaveDrom take only the signals the gaps
+  follow (plus the clock and the counted signals, when you set them) — a quick way to a clean protocol figure out of a crowded view.</p>
+<figure>
+  <img src="img/gaps-only.png" alt="only them: valid, ready, data, last alone" loading="lazy">
+  <figcaption><b>only them</b> with the gaps by <code>valid ready data last</code>: four rows, cut by those four alone (the <code>irq</code> after
+    each packet no longer keeps a stretch).</figcaption>
+</figure>
+
+<h2 id="clock">The clock the gaps count</h2>
+<p><i>idle</i> and <i>keep</i> in cycles, the cut ends on rising edges and the <code>N clk</code> texts all use one clock. Unless you choose, it is
+  the clock of the rows: the selected signal's clock, else the nearest 1-bit <code>*clk*</code>; its cycle is the median distance between its rising
+  edges in the range. To choose, right-click a 1-bit signal and pick <span class="ui">Count in cycles of this clock</span>: it is marked
+  <code>↑</code> in the names and named in the submenu (<code>↑ clk ✕</code>; ✕ returns to the clock found). Its own edges are no change, even when
+  the gaps follow every signal. Without any clock, a cycle is the model's cycle and the ends are not snapped.</p>
+<div class="note"><p>With two clock domains in the picture, count in the clock of the domain whose transfers you want to show, and let the gaps
+  follow that domain's signals.</p></div>
+
+<h2 id="roles">One role per signal</h2>
+<p>A signal has one of three roles in the gaps, set from its menu, shown in the names column:</p>
+<table>
+  <tr><th>Mark</th><th>Role</th><th>Menu item</th><th>Setting</th></tr>
+  <tr><td><code>//</code></td><td>the gaps follow its changes (keep them)</td><td><span class="ui">By this signal: its changes kept</span></td>
+    <td><code>gapSignals</code></td></tr>
+  <tr><td><code>↑</code></td><td>the clock whose cycles are counted</td><td><span class="ui">Count in cycles of this clock</span> (1-bit)</td>
+    <td><code>gapClock</code></td></tr>
+  <tr><td><code>+</code></td><td>counted in a gap: what it did in the stretch left out</td><td><span class="ui">Count its changes in a gap</span></td>
+    <td><code>gapAux</code></td></tr>
+</table>
+<p>Giving a signal a new role takes the old one away. <span class="ui">only them</span> takes all three kinds.</p>
+<figure>
+  <img src="img/gaps-roles.png" alt="The names column: clk ↑, the stream's signals //, hb +" loading="lazy">
+  <figcaption><b>The roles in the names column:</b> <code>clk ↑</code> counted, the stream's signals <code>//</code>, <code>hb +</code> counted in
+    the gaps.</figcaption>
+</figure>
+
+<h2 id="texts">The texts of a gap</h2>
+<p>The select in the second row of the submenu (setting <code>gapCount</code>) chooses what a picture says about its gaps:</p>
+<ul>
+  <li><span class="ui">time, cycles</span> (default, <code>clock</code>): a thin row under the axis with, over each break, the time it leaves out
+    and the clock's cycles in it (<code>+89.0 ns · 89 clk</code>), and in the middle of each part its own cycles (<code>8 clk</code>) when there is
+    room.</li>
+  <li><span class="ui">+ changes in a gap</span> (<code>edges</code>): the same, plus a thin row under each counted signal with, over each break,
+    what it did in the stretch left out — a bit its rising and falling edges (<code>6↑ 7↓</code>), a bus its changes (<code>2×</code>). Counted are
+    the signals marked <code>+</code>; none marked: every signal but the ones the gaps follow and the clock.</li>
+  <li><span class="ui">no texts</span> (<code>off</code>): only the breaks.</li>
+</ul>
+<figure>
+  <img src="img/gaps-aux.png" alt="+ changes in a gap: hb counted, 1↑ 1↓ and 3↑ 3↓ over the breaks" loading="lazy">
+  <figcaption><b>+ changes in a gap</b> with <code>hb</code> counted: under its row, over each break, how often it toggled in the time left out
+    (<code>1↑ 1↓</code>, <code>3↑ 3↓</code>). Nothing of <code>hb</code>'s activity is lost, though its waves are cut.</figcaption>
+</figure>
+<figure>
+  <img src="img/gaps-notext.png" alt="no texts: only the breaks" loading="lazy">
+  <figcaption><b>no texts:</b> the breaks alone, for a figure in a document where the axis says enough.</figcaption>
+</figure>
+
+<h2 id="line">The line of a break</h2>
+<p>A break is a narrow column (8 px) across the rows; the rows' backgrounds go on through it. Its line is the setting <code>gapLine</code> (no menu
+  item; set it in the settings or the config):</p>
+<div class="pair">
+  <figure><img src="img/gaps-line-dashdot.png" alt="dashdot" loading="lazy"><figcaption><b><code>dashdot</code></b> (default) — a thin straight
+    dash-dot line, unlike a bookmark's dotted one.</figcaption></figure>
+  <figure><img src="img/gaps-line-wave.png" alt="wave" loading="lazy"><figcaption><b><code>wave</code></b> — one wavy line.</figcaption></figure>
+  <figure><img src="img/gaps-line-waves.png" alt="waves" loading="lazy"><figcaption><b><code>waves</code></b> — two thin wavy lines.</figcaption>
+  </figure>
+  <figure><img src="img/gaps-line-zigzag.png" alt="zigzag" loading="lazy"><figcaption><b><code>zigzag</code></b>.</figcaption></figure>
+  <figure><img src="img/gaps-line-double.png" alt="double" loading="lazy"><figcaption><b><code>double</code></b> — two straight dashed lines, as a
+    break in a drawing.</figcaption></figure>
+</div>
+
+<h2 id="bookmarks">Bookmarks and arrows across gaps</h2>
+<p>A bookmark's time counts as a change, so it is never cut out — even where nothing happens. Arrows between bookmarks are drawn over the parts,
+  across the breaks.</p>
+<figure>
+  <img src="img/gaps-bookmark.png" alt="A bookmark at 3.5 µs in an idle stretch keeps a small part around it" loading="lazy">
+  <figcaption><b>Bookmark 4 at 3.5 µs</b>, where nothing changes: a small part around it is kept (keep on each side), with a break before and after
+    it.</figcaption>
+</figure>
+
+<h2 id="wavedrom">Gaps in the saved WaveDrom</h2>
+<p><span class="ui">Save as WaveDrom</span> / <span class="ui">Copy WaveDrom</span> write one cell per clock cycle; with gaps on, every stretch left
+  out becomes one <code>|</code> cell in every wave, at the same index, and the foot says what was cut. The signals and the range are those of the
+  picture. An excerpt of the export of the run (five rows; the whole file: <a href="img/gaps-wavedrom.json">gaps-wavedrom.json</a>):</p>
+<pre><code>{ "head": { "text": "five packets in 10 µs · exact: 0.00 µs … 10.01 µs" },
+  "foot": { "text": "one cell per clk cycle, | : 4 idle stretches left out (1.25 µs, 3.66 µs, 3.49 µs, 830 ns)" },
+  "signal": [
+    { "name": "clk",   "wave": "p......................|........................|................|............|..." },
+    { "name": "valid", "wave": "0...........1...0......|..1..0........1..0......|..1......0......|..1..0......|..." },
+    { "name": "ready", "wave": "1......................|...01...................|....0.1.........|............|..." },
+    { "name": "data",  "wave": "=...........====.......|..==..........===.......|..===..==.......|..===.......|...",
+      "data": ["0x00", "0x11", "0x22", "0x33", "0x44", "0xA0", "0xA1", …] },
+    …</code></pre>
+<figure>
+  <img src="img/gaps-wavedrom.png" alt="The exported WaveJSON drawn by wavefw's static SVG" loading="lazy">
+  <figcaption><b>The export drawn by wavefw</b> (<code>WaveSVG</code>): each <code>|</code> cell is a break.</figcaption>
+</figure>
+<figure>
+  <img src="img/gaps-stock.png" alt="The first 2.3 µs of the export drawn by stock WaveDrom 3.5" loading="lazy">
+  <figcaption><b>Stock WaveDrom 3.5</b> on the export of the first 2.3 µs: its own gap marks <code>//</code> where the cells are <code>|</code>. The
+    file opens in any WaveDrom editor.</figcaption>
+</figure>
+<div class="note"><p>The viewer's WaveJSON has no time axis: the foot lists what each break left out. <code>vcd2wavedrom.py</code> writes the
+  <code>"time"</code> extension with <code>"skip": [[k, n]]</code> instead (the <code>|</code> cell at index <i>k</i> stands for <i>n</i> cycles), so
+  wavefw draws its axis in real time; stock WaveDrom ignores it.</p></div>
+
+<h2 id="static">Gaps in the static SVG of a page</h2>
+<p>A static figure (<code>"render": "svg"</code> view, <code>data-mode="svg"</code>, <code>&lt;script type="WaveDrom"&gt;</code>) cuts its gaps
+  when its settings say so. Put them in the view's <code>"config"</code> (or the config file's top-level <code>"config"</code> for every view):</p>
+<pre><code>"views": {
+  "figure": {
+    "exact": true, "render": "svg",
+    "signals": ["clk", "state", "valid", "ready", "data", "last", "irq"],
+    "title": "the same run as a static SVG with gaps",
+    "config": { "gaps": true, "gapIdle": 16, "gapKeep": 2, "hscale": 0.35 }
+  }
+}</code></pre>
+<figure>
+  <img src="img/gaps-static.png" alt="The static SVG view of the page with gaps" loading="lazy">
+  <figcaption><b>The <code>figure</code> view</b> of the page: drawn by <code>mkhtml.py</code>'s page as a static SVG with the gaps of its
+    settings.</figcaption>
+</figure>
+<p>In your own page, the same keys go into <code>data-config</code>: <code>&lt;div data-wave="…" data-mode="svg"
+  data-config='{"gaps": true, "gapIdle": "1us"}'&gt;</code>. Without a picked list, a static figure follows every row it draws, the clocks
+  aside.</p>
+
+<h2 id="cli">From the command line</h2>
+<p><code>vcd2wavedrom.py --clock</code> cuts the same idle stretches when it writes WaveJSON (one cell per clock cycle):</p>
+<pre><code>python3 -I tools/vcd2wavedrom.py --waves out/guides/stream.vcd --scope tb --clock clk \
+    --signals clk,valid,ready,data,last --auto-gap 16:2 --out stream.json</code></pre>
+<pre><code>clk   p.................|....................|............|........|..
+valid 0..........1...0..|..1..0........1..0..|..1......0..|..1..0..|..
+ready 1.................|...01...............|....0.1.....|........|..
+data  =..........====...|..==..........===...|..===..==...|..===...|..
+last  0.............10..|...1.0..........10..|........10..|....10..|..
+"time": {"t0": 10000, "t1": 10010000, "cycle": 10000, "unit": "ps", "skip": [[18, 129], [39, 370], [52, 353], [61, 88]]}</code></pre>
+<ul>
+  <li><code>--auto-gap IDLE[:KEEP]</code> — clock cycles; where no signal but a clock changes for IDLE cycles, all but KEEP (default 2) collapse
+    into one <code>|</code> cell.</li>
+  <li><code>--gap FROM:TO</code> — one window by hand (<code>--gap 200ns:300ns</code>); repeatable, or <code>"gap": ["A:B"]</code> in a config.</li>
+  <li>The MCP server's <code>wave_page</code> takes <code>"auto_gap": "16:2"</code> with a clock (see <a href="mcp.html">AI agents</a>).</li>
+</ul>
+
+<h2 id="state">Where the gap settings live</h2>
+<ul>
+  <li><b>The settings</b> (global <code>wavefw.config.js</code>, a config's <code>"config"</code>, a view's <code>"config"</code>, the element's
+    <code>data-config</code>) give the starting values — by default no gaps.</li>
+  <li><b>The menu</b> changes them for this viewer only; they are kept in this browser (with the viewer's look) and come back after a reload.</li>
+  <li><b>Save</b> in the bar writes them into the viewer's state (<code>.view.json</code>, its <code>"config"</code>), <b>Load…</b> reads them back;
+    that <code>"config"</code> pastes into a config file as it is.</li>
+  <li><span class="ui">Reset the gaps</span> at the bottom of the submenu drops every gap setting of the viewer (roles, counts, idle, keep) back to
+    the settings.</li>
+</ul>
+
+<h2 id="settings">Settings</h2>
+<table>
+  <tr><th>Key</th><th>Default</th><th>Meaning</th></tr>
+  <tr><td><code>gaps</code></td><td><code>false</code></td><td>cut the idle stretches out of the pictures and WaveDrom (and static SVGs)</td></tr>
+  <tr><td><code>gapIdle</code></td><td><code>16</code></td><td>a gap where nothing changes this long: clock cycles (<code>16</code>) or a time
+    (<code>"2us"</code>)</td></tr>
+  <tr><td><code>gapKeep</code></td><td><code>2</code></td><td>kept after the last change and before the next one: cycles or a time</td></tr>
+  <tr><td><code>gapSignals</code></td><td>none</td><td>the signals the gaps follow (full paths, names, <code>*</code> patterns); none: every signal
+    drawn</td></tr>
+  <tr><td><code>gapClock</code></td><td>none</td><td>the clock whose cycles <i>idle</i>, <i>keep</i> and the texts count; none: the selected clock, else
+    the nearest <code>*clk*</code></td></tr>
+  <tr><td><code>gapAux</code></td><td>none</td><td>the signals counted in a gap (with <code>gapCount: "edges"</code>); none: every one but the
+    followed signals and the clock</td></tr>
+  <tr><td><code>gapOnly</code></td><td><code>false</code></td><td>the viewer's picture and WaveDrom of those three kinds alone</td></tr>
+  <tr><td><code>gapCount</code></td><td><code>"clock"</code></td><td>the texts: <code>clock</code> (time and cycles under the axis), <code>edges</code>
+    (also the counts under the counted signals), <code>off</code></td></tr>
+  <tr><td><code>gapLine</code></td><td><code>"dashdot"</code></td><td>the line of a break: <code>dashdot</code>, <code>wave</code>, <code>waves</code>,
+    <code>zigzag</code>, <code>double</code></td></tr>
+</table>
+<p>A page that starts with gaps on for every viewer, following the handshakes of every stream port:</p>
+<pre><code>"config": { "gaps": true, "gapIdle": "1us", "gapKeep": 4, "gapSignals": ["*_tvalid", "*_tready", "*_tlast"], "gapClock": "tb.aclk" }</code></pre>
+
+<h2 id="trouble">When the gaps do not come</h2>
+<table>
+  <tr><th>You see</th><th>Why, and what to do</th></tr>
+  <tr><td><span class="ui">Gaps: 0</span></td><td>Some row changes in every stretch — a counter, a heartbeat, a timestamp, a clock of another domain.
+    Pick the signals that matter with <span class="ui">By this signal</span>. Or <i>idle</i> is longer than the pauses: lower it.</td></tr>
+  <tr><td>Many small parts</td><td>A slow signal splits the pauses (<a href="#follow">above</a>): pick the signals, or count it
+    (<span class="ui">Count its changes in a gap</span>) after picking the others.</td></tr>
+  <tr><td>Breaks in the wrong place</td><td>The picture takes the measured range, else the window; the selected run, else the highlighted rows,
+    else the screen's rows — a hidden or folded row does not count. Check which rows the picture takes.</td></tr>
+  <tr><td>The cycles look wrong</td><td>The gaps count the wrong clock: <span class="ui">Count in cycles of this clock</span> on the right
+    one.</td></tr>
+  <tr><td>A pause you wanted cut stays</td><td>A bookmark sits in it (its time is always kept), or <i>keep</i> is too large for it.</td></tr>
+</table>
+</main>
+<nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
+</div>
+<footer>wavefw 0.11 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+  <a href="../index.html">docs/index.html</a></footer>
+<script src="guide.js"></script>
+</body>
+</html>

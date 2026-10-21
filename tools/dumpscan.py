@@ -1,9 +1,10 @@
-"""dumpscan.py — read a dump as VCD text: a VCD directly, an FST through GTKWave's `fst2vcd -e` (which also writes the FST
-enum tables as `$attrbegin misc 07 …`). Used by vcd2wavedrom.py (the built-in reader, enum labels) and mkconfig.py
+"""dumpscan.py — read a dump as VCD text: a VCD directly, an FST through GTKWave's `fst2vcd -e`, else through the sva
+CLI's `sva vcd` (the same text; both write the FST enum tables as `$attrbegin misc 07 …`). WAVEFW_FST=sva or fst2vcd
+picks one. Used by vcd2wavedrom.py (the built-in reader, enum labels) and mkconfig.py
 (signal list, declaration order, change counts, enums).
 
 read(path, body=…, want=…) -> Dump with
-  vars   {path: Var}  every signal under the path wavepeek uses: "mem[1] [7:0]" is "mem.[1]", bit-blasted 1-bit
+  vars   {path: Var}  every signal under its full path: "mem[1] [7:0]" is "mem.[1]", bit-blasted 1-bit
                       "err[0]".."err[3]" are one vector "err"; Var = width, members [(id code, bit or None)], enum,
                       order, kind (the $var type: wire reg integer … real string event)
   alias  {other spelling: path}  ("mem[1]", "sig[7:0]")
@@ -37,14 +38,35 @@ class Dump:
     def __init__(self):
         self.vars, self.alias, self.unit_ps, self.t_start, self.t_end = {}, {}, 1, None, None
         self.changes, self.trans = {}, {}
-        self.scopes = {}   # path -> scope type other than module ($scope struct / union / interface …: an FST through fst2vcd)
+        self.scopes = {}   # path -> scope type other than module ($scope struct / union / interface …: an FST as VCD text)
 
     def find(self, path):
         return path if path in self.vars else self.alias.get(path)
 
 
+def fst_reader():
+    """The command that writes an FST as VCD text: [fst2vcd, -e], else [sva, vcd] (the CLI of this repository), or None.
+    WAVEFW_FST=sva / fst2vcd: that one only."""
+    want = os.environ.get('WAVEFW_FST', '')
+    exe = shutil.which('fst2vcd') if want in ('', 'fst2vcd') else None
+    if exe:
+        return [exe, '-e']
+    if want in ('', 'sva'):
+        import svabuild   # here: svabuild imports this module
+        sva = svabuild.find_bin()
+        if sva:
+            return [sva, 'vcd']
+    return None
+
+
+def fst_tool():
+    """The name of fst_reader() for the WaveJSON's "meta": 'fst2vcd', 'sva vcd' or ''."""
+    r = fst_reader()
+    return '' if not r else 'fst2vcd' if os.path.basename(r[0]).startswith('fst2vcd') else 'sva vcd'
+
+
 def available(path):
-    return path.lower().endswith('.vcd') or bool(shutil.which('fst2vcd'))
+    return path.lower().endswith('.vcd') or fst_reader() is not None
 
 
 def _lines(path):
@@ -54,11 +76,11 @@ def _lines(path):
     if path.lower().endswith('.vcd'):
         f = open(path, 'rb', buffering=1 << 20)
         return f, f.close
-    exe = shutil.which('fst2vcd')
-    if not exe:
-        print('dumpscan: fst2vcd (GTKWave) not on PATH: cannot read ' + os.path.basename(path) + ' as text', file=sys.stderr)
+    argv = fst_reader()
+    if not argv:
+        print('dumpscan: neither fst2vcd (GTKWave) nor the sva CLI found: cannot read ' + os.path.basename(path) + ' as text', file=sys.stderr)
         return None
-    p = subprocess.Popen([exe, '-e', path], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=1 << 20)
+    p = subprocess.Popen(argv + [path], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=1 << 20)
     return p.stdout, lambda: (p.stdout.close(), p.kill(), p.wait())
 
 

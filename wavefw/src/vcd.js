@@ -4,7 +4,7 @@
 // The signals of a VCD as WaveJSON groups by scope (the "tv" extension: [[ps, value]], a bus's value in hex, x / z
 // kept), "time" in ps, "scopes" with the struct / union / interface scopes. A big dump is cut to fit a page: the
 // signals nearest the top first, until `budget` value changes; -> {doc, shown, total, changes}. An FST is binary:
-// fst2vcd (GTKWave) or make html. The rules are tools/dumpscan.py's (its tests in tests/unit compare the two): the
+// sva vcd, fst2vcd (GTKWave) or make html. The rules are tools/dumpscan.py's (its tests in tests/unit compare the two): the
 // reference of a $var (parse_ref: an escaped \name whole, a range glued or apart is the vector's, a 1-bit "err[3]" a
 // bit of "err", "mem[1]" an element "mem.[1]"), the same path under two id codes merged, real and string variables
 // as texts ("kind"), events left out, $comment … $end skipped in the body, VHDL's U W H L - folded, time in order.
