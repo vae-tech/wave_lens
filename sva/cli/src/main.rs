@@ -418,6 +418,7 @@ fn eval_cmd(a: Args) -> ExitCode {
         eprintln!("sva: {}: {e}", a.waves);
         return ExitCode::from(2);
     }
+    reading(&a.waves);
     let mut w = match simple::read(&a.waves) {
         Ok(w) => w,
         Err(e) => {
@@ -795,9 +796,31 @@ fn report_cmd(argv: &[String]) -> ExitCode {
     }
 }
 
+/// The dump being read, for the message of a panic in its reader.
+static READING: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+/// `path` is the dump read from now on: a panic of its reader (wellen, fst-reader) is about that file.
+pub(crate) fn reading(path: &str) {
+    if let Ok(mut r) = READING.lock() {
+        path.clone_into(&mut r);
+    }
+}
+
 fn main() -> ExitCode {
-    // a panic is a bug of the engine: one line that says so and exit 2 ("nothing checked as asked"), not a core dump
-    std::panic::set_hook(Box::new(|info| eprintln!("sva: internal error, please report it with the input that caused it: {info}")));
+    // a panic is a bug of the engine: one line that says so and exit 2 ("nothing checked as asked"), not a core dump;
+    // one in the dump's reader is a dump it cannot read (a value longer than its variable: wellen asserts), named so
+    std::panic::set_hook(Box::new(|info| {
+        let dump = READING.lock().map(|r| r.clone()).unwrap_or_default();
+        let file = info.location().map_or("", |l| l.file());
+        let p = info.payload();
+        let msg = p.downcast_ref::<&str>().copied().or_else(|| p.downcast_ref::<String>().map(String::as_str));
+        match msg {
+            Some(m) if !dump.is_empty() && (file.contains("wellen") || file.contains("fst-reader")) => {
+                eprintln!("sva: {dump}: the dump does not read: {}", m.lines().next().unwrap_or(""));
+            }
+            _ => eprintln!("sva: internal error, please report it with the input that caused it: {info}"),
+        }
+    }));
     std::panic::catch_unwind(run).unwrap_or(ExitCode::from(2))
 }
 

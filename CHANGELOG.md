@@ -5,6 +5,24 @@ lives on a branch. The version is in `VERSION`, in `wavefw.js` (`WaveFW.version`
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.16 — 22 October 2026
+
+Fixes from the third review with Codex: the dumps read as a simulator wrote them, the SVA core, the viewer at scale, MCP.
+
+- **Dump readers.** A value change on an indented line, after a tab or on the next line is no longer lost; `realtime`,
+  `shortreal` and `real_parameter` are reals; a vector declared in parts (`data [7:0]` + `data [15:8]`, bit selects)
+  is one vector merged bit by bit; two bits under one id code both follow it.
+- **FST as fst2vcd writes it.** `sva vcd` reads an FST with fst-reader: the FST's names (bit selects glued, ranges
+  apart, escaped names), every time of its table to the end of the dump, strings escaped as fstapi does. A VCD and
+  its FST give the same WaveJSON again.
+- **SVA:** `$past(e)` and `$sampled(e)` take the width of their argument, as a simulator does (`$past(a + b)` of two
+  8-bit signals no longer keeps the carry).
+- **Viewer:** compare, analog and the ≠ marks fast on thousands of signals and million-toggle clocks; Clear of the
+  bookmarks keeps your markers; a batch of commands lays out what it hid before a picture; `cycleZero` a time.
+- **MCP and tools:** `wavemcp.py` answers every request and checks the arguments against the schemas; a bus select
+  has its own edges; pagination keeps every change; `view_get` → `set_state` keeps the times. A value saying
+  `<!--<script>` no longer swallows the page.
+
 ## 0.15 — 21 October 2026
 
 Five features from a review by Codex, each reviewed again by it: cycles, undo, your order, a page to send, two runs side by side.

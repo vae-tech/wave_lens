@@ -16,6 +16,7 @@ function command(name, args, doc, run) {
 }
 const fail = msg => { throw new Error(msg); };
 const READ_CMDS = new Set(['state', 'rows', 'picture']);   // they change nothing (no toast in a live page)
+const LAY_CMDS = new Set(['picture', 'edge', 'rows']);   // they read the rows laid out: what the run held back is done before them
 // a time of a command: a number (model units) or a text with a unit; untimed waves take cycles only
 function cmdTime(v, x, what = 't') {
   if (!v.M.timed && typeof x === 'string' && /[a-zµ]/i.test(x)) fail(`${what}: these waves have no time, give cycles (a number)`);
@@ -63,8 +64,10 @@ const sigsOf = (v, rows) => [...new Set(rows.flatMap(r => (r.type !== 'group' ? 
   ? (v.ugroups.find(g => '@' + g.name === r.full) || { signals: [] }).signals.map(f => v.M.rows.find(x => x.type === 'sig' && x.full === f)).filter(Boolean)
   : v.M.rows.filter(x => x.type === 'sig' && x.tr && x.anc.includes(r.id)))))];
 const nums = v => v.bms.map(b => b.n).join(', ') || 'none';
+// a number as listed (1, 2 …): a positive integer (2.0 is 2) or its digits as a text; not true, not 1.5 (as viewedit.py)
+const isNum = x => (typeof x === 'number' ? Number.isInteger(x) && x > 0 : typeof x === 'string' && /^\d+$/.test(x) && +x > 0);
 // the id of an arrow or a marker: its number as listed (1, 2 …), not a name
-const idOk = (x, what) => { if (x != null && x !== 'all' && !(Number.isInteger(+x) && +x > 0)) fail(`id: the number of the ${what} as listed (1, 2 …), ` +
+const idOk = (x, what) => { if (x != null && x !== 'all' && !isNum(x)) fail(`id: the number of the ${what} as listed (1, 2 …), ` +
   `not ${JSON.stringify(x)}; a new one: no id`); };
 
 command('cursor', 't', 'the cursor to t; the window follows', (v, a) => { v.setCursor(cmdTime(v, a.t)); return { t: v.cursor }; });
@@ -87,12 +90,14 @@ command('fit', '', 'the whole time in the window', v => { v.markView(); v.fit();
 command('range', 'from? to? signal?', 'the measured range (Δ, the edges or changes of the signal); from null: none', (v, a) => {
   if (a.from == null && a.to == null) { v.setRange(null); return { range: null }; }
   const p = cmdTime(v, a.from, 'from'), q = cmdTime(v, a.to, 'to'), row = a.signal ? pickRows(v, a.signal, { one: true })[0] : null;
+  if (Math.max(p, q) < v.M.t0 || Math.min(p, q) > v.M.t1) fail(`range: ${v.when(Math.min(p, q))} … ${v.when(Math.max(p, q))} is outside these waves ` +
+    `(${v.when(v.M.t0)} … ${v.when(v.M.t1)})`);
   v.setRange(Math.max(Math.min(p, q), v.M.t0), Math.min(Math.max(p, q), v.M.t1), row);
   return { range: v.range, text: v.rangeText() };
 });
 command('bookmark', 'n? t? signal? text? color? lift? delete?', 'a numbered circle on a signal (none: the time axis) with its text: a new one ' +
   '(n free or left out, t default the cursor) or bookmark n changed; lift: above its signal in a lane; delete: n or "all" (their arrows go too)', (v, a) => {
-  if (a.n != null && !(a.n === 'all' && a.delete) && !(Number.isInteger(+a.n) && +a.n > 0)) fail('n: a bookmark number (1, 2 …)');
+  if (a.n != null && !(a.n === 'all' && a.delete) && !isNum(a.n)) fail(`n: a bookmark number (1, 2 …), not ${JSON.stringify(a.n)}`);
   if (a.delete) {
     if (a.n === 'all') { v.bms = []; v.arrows = []; v.changed(true); return { deleted: 'all' }; }
     const b = v.bms.find(x => x.n === +a.n); if (!b) fail(`no bookmark ${a.n} (there are: ${nums(v)})`);
@@ -122,8 +127,9 @@ command('arrow', 'id? from? to? shape? head? line? color? label? delete?', 'an a
     if (i < 0) fail(a.from != null && a.to != null ? `no arrow ${a.from} → ${a.to}` : 'arrow: delete takes id, or from and to');
     v.arrows.splice(i, 1); v.changed(true); return { id: i + 1, deleted: true };
   }
+  for (const k of ['from', 'to']) if (a[k] != null && !isNum(a[k])) fail(`${k}: a bookmark number (1, 2 …), not ${JSON.stringify(a[k])}`);
   for (const k of ['from', 'to']) if (a[k] != null && !has(+a[k])) fail(`${k}: no bookmark ${a[k]} (there are: ${nums(v)})`);
-  for (const [k, set] of [['shape', AR_SHAPES], ['head', AR_HEADS], ['line', AR_LINES]]) if (a[k] != null && !(a[k] in set)) fail(`${k}: one of ` +
+  for (const [k, set] of [['shape', AR_SHAPES], ['head', AR_HEADS], ['line', AR_LINES]]) if (a[k] != null && !hasKey(set, a[k])) fail(`${k}: one of ` +
     Object.keys(set).map(x => JSON.stringify(x)).join(' '));
   const from = a.from != null ? +a.from : i >= 0 ? v.arrows[i].from : null, to = a.to != null ? +a.to : i >= 0 ? v.arrows[i].to : null;
   if (from == null || to == null) fail('arrow: from and to (bookmark numbers)');
@@ -138,6 +144,7 @@ command('arrow', 'id? from? to? shape? head? line? color? label? delete?', 'an a
 command('marker', 'id? t? label? color? delete?', 'a marker: a dashed line across every row with its label at the top: a new one (t default ' +
   'the cursor), or marker id (1, 2 … as listed) changed; delete: id or "all"', (v, a) => {
   idOk(a.id, 'marker');
+  if (a.id === 'all' && !a.delete) fail('marker: id "all" is for delete (a new one: no id)');
   if (a.id != null && a.id !== 'all' && !v.umarks[+a.id - 1]) fail(`no marker ${a.id} (there are ${v.umarks.length})`);
   if (a.delete) {
     if (a.id == null) fail('marker: delete takes id or "all"');
@@ -236,7 +243,7 @@ command('sort', 'dir ignore?', 'the order of the names: none, asc, desc; ignore:
   v.setSort(a.dir, a.ignore ?? undefined); return { sort: v.sort, ignore: v.sortIgnore };
 });
 command('style', 'name', `the edge style: ${Object.keys(EDGES).join(' ')} (null: the settings')`, (v, a) => {
-  if (a.name != null && !EDGES[a.name]) fail(`name: one of ${Object.keys(EDGES).join(' ')}`);
+  if (a.name != null && !hasKey(EDGES, a.name)) fail(`name: one of ${Object.keys(EDGES).join(' ')}`);
   v.setStyle(a.name); return { style: v.S.style };
 });
 command('layout', 'scroll? height? tools?', 'where the rows scroll: window (in the viewer, height: "80vh", 600) or page (with the page, the ' +
@@ -280,7 +287,7 @@ command('cycles', 'on? clock? zero? reset?', 'the clock cycles in a band under t
 });
 command('edge', 'dir? kind? value? signal?', 'the cursor to the next (dir 1) or previous (-1) edge of the selected signal (signal: that one, ' +
   `selected), kind: ${Object.keys(EDGE_KINDS).join(' ')}; value: the value to become`, (v, a) => {
-  if (a.kind != null && !EDGE_KINDS[a.kind]) fail(`kind: one of ${Object.keys(EDGE_KINDS).join(' ')}`);
+  if (a.kind != null && !hasKey(EDGE_KINDS, a.kind)) fail(`kind: one of ${Object.keys(EDGE_KINDS).join(' ')}`);
   if (a.signal) v.select(pickRows(v, a.signal, { one: true })[0]);
   const at = v.cursor; v.edge(a.dir === -1 || a.dir === '-1' ? -1 : 1, a.kind || (a.value != null ? 'value' : v.edgeKind), a.value ?? null);
   return { t: v.cursor, moved: v.cursor !== at };
@@ -292,7 +299,7 @@ command('set_state', 'state', 'a state back (what Load… does); every key it ha
 command('rows', 'pattern? limit? offset?', 'the signals and modules of the page in display order: [full path, width | "module" | "group"], ' +
   'hidden and folded ones too', (v, a) => {
   const rx = a.pattern ? (String(a.pattern).includes('*') ? glob(String(a.pattern)) : null) : null, low = String(a.pattern || '').toLowerCase();
-  const all = v.allRows().concat(v.M.rows.filter(r => r.full && v.hiddenRows.has(r.full)))
+  const all = v.allRows(true)   // the hidden ones too (a signal under a hidden module), where they would be
     .filter(r => (r.type === 'sig' && r.tr && !r.ug) || (r.type === 'group' && r.full))
     .filter(r => !a.pattern || (rx ? rx.test(r.full) : r.full.toLowerCase().includes(low)));
   const off = Math.max(0, +a.offset || 0), n = Math.max(1, +a.limit || 200), page = all.slice(off, off + n);
@@ -323,11 +330,12 @@ Object.assign(WaveView.prototype, {
     if (own) this.held = {};
     try {
       for (const o of list) {
-        const c = o && typeof o === 'object' && CMDS[o.op];
+        const c = o && typeof o === 'object' && hasKey(CMDS, o.op) && CMDS[o.op];
         try {
           if (!c) fail(o && o.op ? `no command "${o.op}"; the commands: ${Object.keys(CMDS).join(' ')}` : 'a command is {op: name, …arguments}');
           const bad = Object.keys(o).filter(k => k !== 'op' && !c.keys.includes(k));
           if (bad.length) fail(`${o.op} takes ${c.args || 'no arguments'}, not ${bad.join(', ')}`);
+          if (LAY_CMDS.has(o.op)) this.flushHeld();   // a picture after a hide in the same run: without that row
           out.push(Object.assign({ op: o.op }, await c.run(this, o)));
         } catch (e) { out.push({ op: o && o.op, error: e.message }); }
       }
@@ -516,12 +524,15 @@ const KEPT = ['bookmarks', 'arrows', 'markers', 'groups', 'paint', 'radix', 'ana
 const KEPT_CFG = ['style', 'maxHeight', 'toolsFolded', ...GAP_KEYS, ...CYC_KEYS];
 const UNDO_N = 100;   // the steps undo keeps
 // a click, a key or a field changed anywhere: the viewers' edits looked at once it is done (one look per burst of events);
-// not while a button is down (a drag ends as one step) or a key types in a text field (it ends when the field is left)
+// not while a button is down (a drag ends as one step) or a key types in a text field (it ends when the field is left).
+// A button's release can go unheard (the browser's own menu, a drag that leaves the window, a tab left): a context menu,
+// a native drag, the window losing the focus or hidden, a move with no button down end it too
 const PTR = { down: false };
 let undoT = 0;
 const undoLater = e => {
   if (e.type === 'pointerdown') { PTR.down = true; return; }
-  if (e.type === 'pointerup' || e.type === 'pointercancel') PTR.down = false;
+  if (e.type === 'pointermove' && (!PTR.down || e.buttons)) return;
+  if (e.type !== 'keyup' && e.type !== 'change') PTR.down = false;
   const typing = 'input:not([type=checkbox]):not([type=radio]), textarea, [contenteditable]';
   if (e.type === 'keyup' && e.target && e.target.closest && e.target.closest(typing)) return;
   if (!undoT) undoT = setTimeout(() => { undoT = 0; VIEWS.forEach(v => { if (v.root.isConnected) v.undoTick(); }); }, 0);
@@ -538,7 +549,9 @@ function undoKey(e) {
   e.preventDefault(); v.undo(k === 'y' || e.shiftKey ? 1 : -1);
 }
 if (typeof document !== 'undefined') {
-  for (const ev of ['pointerdown', 'pointerup', 'pointercancel', 'keyup', 'change']) document.addEventListener(ev, undoLater, true);
+  for (const ev of ['pointerdown', 'pointerup', 'pointercancel', 'pointermove', 'contextmenu', 'dragstart', 'visibilitychange', 'keyup', 'change']) {
+    document.addEventListener(ev, undoLater, true); }
+  window.addEventListener('blur', undoLater);
   document.addEventListener('keydown', undoKey);
 }
 let EDITS;

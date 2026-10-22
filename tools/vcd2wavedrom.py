@@ -29,8 +29,10 @@ Config file (--config cfg.json): every option can be a key (dashes or underscore
   Per-signal settings: show (false: left out), alias (displayed name), radix (auto hex dec signed bin oct ascii),
   color (trace / outline / name), fill (bus fill), style (auto wavedrom questa square), enum {"0": "IDLE"}, enumColors
   {"IDLE": "#ffe066"}, analog true / rows (a bus as a step plot, that many rows high), height (the row's px); radix also
-  float, q8, sq15; width and changes are information only. A real or string variable of the dump is written with
-  "kind": "real" / "string" and its values as texts (null: unknown); an event variable is not a signal to draw.
+  float, q8, sq15; width and changes are information only. A real (also realtime, shortreal, real_parameter) or string
+  variable of the dump is written with "kind": "real" / "string" and its values as texts (null: unknown); an event
+  variable is not a signal to draw. A vector dumped in parts (bit by bit "err[0]" "err[1]", or ranges apart
+  "data [7:0]" "data [15:8]" under several id codes) is one signal: its lowest declared index to its highest.
 
 Examples
   python3 -I tools/vcd2wavedrom.py --waves dump.vcd --scope tb --clock clk --from 0ns --to 400ns \
@@ -93,7 +95,7 @@ class Builtin:
         self.d = dumpscan.read(self.waves, 'collect', codes)
         self.t_start, self.t_end = self.d.t_start, self.d.t_end
         self.specs = [(path + (f'[{sl[0]}:{sl[1]}]' if sl else ''), sl[0] - sl[1] + 1 if sl else self.decl.vars[path].width) for path, sl in self.res]
-        self.kinds = [self.decl.vars[path].kind if self.decl.vars[path].kind in dumpscan.TEXT_KINDS else None for path, _ in self.res]
+        self.kinds = [dumpscan.TEXT_KINDS.get(self.decl.vars[path].kind) for path, _ in self.res]   # realtime … -> real
         return self.specs
 
     def stream(self, path, sl=None):
@@ -110,11 +112,14 @@ class Builtin:
                         out[-1] = (t * u, val)
                     else:
                         out.append((t * u, val))
-            else:   # bit-blasted vector: rebuild it from its 1-bit members
-                state = ['x'] * w
-                ev = sorted((t, b, raw) for code, b in v.members for t, raw in self.d.trans[code])
-                for i, (t, b, raw) in enumerate(ev):
-                    state[b] = raw.decode().lower()
+            else:   # a vector in parts (bit-blasted, or ranges declared apart): rebuild it bit by bit
+                state = ['x'] * w   # state[0]: bit 0, the last digit
+                ev = sorted(((t, part, raw) for code, part in v.members for t, raw in self.d.trans[code]), key=lambda e: e[0])
+                for i, (t, (hi, lo), raw) in enumerate(ev):
+                    n, step = abs(hi - lo) + 1, -1 if hi >= lo else 1
+                    b = raw.decode(errors='replace').lower().translate(VHDL) or 'x'   # b01 for a 1-bit part: its last digit
+                    for j, ch in enumerate(b.rjust(n, b[0] if b[0] in 'xz' else '0')[-n:]):
+                        state[hi + j * step] = ch
                     if i + 1 == len(ev) or ev[i + 1][0] != t:
                         out.append((t * u, bits(''.join(reversed(state)).encode(), w, sl)))
             self.streams[key] = out

@@ -13,4 +13,5 @@ path = "src/main.rs"
 [dependencies]
 sva-core = { path = "../core" }
 wellen = "0.25"
+fst-reader = "0.17"   # `sva vcd` of an FST: the names and the end time as fstapi gives them (wellen merges bit selects)
 serde_json = "1"

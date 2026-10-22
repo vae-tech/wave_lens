@@ -1,0 +1,25 @@
+$timescale 1ns $end
+$scope module tb $end
+$var real 64 ! r $end
+$var realtime 64 " rt $end
+$var shortreal 32 # sr $end
+$var real_parameter 64 $ rp $end
+$var string 0 % msg $end
+$upscope $end
+$enddefinitions $end
+#0
+r1.25 !
+r7 "
+r0.5 #
+r3 $
+sHi %
+#10
+rinf !
+r2.5e-9 "
+#20
+r-inf !
+#30
+rnan !
+r-Infinity #
+#40
+r0 !

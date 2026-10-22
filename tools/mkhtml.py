@@ -92,6 +92,13 @@ window.WAVES = {data};
 '''
 
 
+def script_json(text):
+    """JSON text to put inside a <script>: no "<" in it (\\u003c is the same string to JSON and JavaScript), so a value with
+    "</script>" or "<!--<script>" (a signal's text, an enum label, a title, an assertion's source) cannot end the script or
+    make the HTML parser swallow the rest of the page."""
+    return text.replace('<', '\\u003c')
+
+
 def fmt_ps(ps):
     for f, u in ((1e12, 's'), (1e9, 'ms'), (1e6, 'µs'), (1e3, 'ns')):
         if abs(ps) >= f:
@@ -192,7 +199,7 @@ def render_page(a, cfg, docs, renders, sva_views, with_sva, sva_files, sva_notes
         css = f.read()
     with open(os.path.join(FW, 'wavefw.js'), encoding='utf-8') as f:
         js = f.read()
-    safe = lambda t: t.replace('</', '<\\/')
+    safe = script_json   # every "<" of the data as <: "</script>" and "<!--<script>" in a value do not end or swallow the page
     with open(os.path.join(FW, 'bus.js'), encoding='utf-8') as f:   # bus transactions: always (a few kB)
         bus = '<script>\n' + f.read().replace('</script', '<\\/script') + '\n</script>\n'
     sva = ''

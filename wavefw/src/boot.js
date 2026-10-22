@@ -175,7 +175,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavefw plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveFW = { version: '0.15',   // the project's version: VERSION (make check compares them)
+G.WaveFW = { version: '0.16',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme, setColors, configure, savePage, pageText,
   plugin, svgPlugin, views: () => [...VIEWS], defaults: DEFAULTS, live,
   commands: () => Object.fromEntries(Object.entries(CMDS).map(([k, c]) => [k, { args: c.args, doc: c.doc }])),

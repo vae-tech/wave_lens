@@ -1,5 +1,5 @@
 """tools/vcd2wavedrom.py: values, labels, options and the conversion of the fixtures (exact and clock-sampled)."""
-import json, os, shutil, unittest
+import json, os, shutil, subprocess, unittest
 
 from tests.unit import helpers as H
 import vcd2wavedrom as V
@@ -123,6 +123,13 @@ class Convert(unittest.TestCase):
         self.assertEqual(s['kind'], 'real')
         self.assertEqual(s['tv'], [[0, '1.5'], [10000, '2.25'], [20000, '-0.03']])
 
+    def test_real_kinds_and_non_finite(self):
+        s = H.wavejson_of(H.fixture('realkinds'))
+        self.assertEqual({p: x.get('kind') for p, x in s.items()}, {'tb.r': 'real', 'tb.rt': 'real', 'tb.sr': 'real', 'tb.rp': 'real', 'tb.msg': 'string'})
+        self.assertEqual(s['tb.r']['tv'], [[0, '1.25'], [10000, 'inf'], [20000, '-inf'], [30000, 'nan'], [40000, '0']])
+        self.assertEqual(s['tb.rt']['tv'], [[0, '7'], [10000, '2.5e-09']])
+        self.assertEqual(s['tb.sr']['tv'], [[0, '0.5'], [30000, '-inf']])
+
     def test_real_clock_sampled(self):
         with H.tmp() as d:
             body = ''.join(f'#{t}\n{t // 5 % 2}"\nr{t / 10} !\n' for t in range(0, 40, 5))
@@ -142,6 +149,24 @@ class Convert(unittest.TestCase):
 
     def test_merged_duplicate_codes(self):
         self.assertEqual(H.wavejson_of(H.fixture('dup'))['tb.s']['tv'], [[0, '0'], [10000, '1'], [30000, '0']])
+
+    def test_vector_in_parts(self):
+        s = H.wavejson_of(H.fixture('split'))
+        self.assertEqual({p: (x.get('width', 1), x['tv']) for p, x in s.items()}, {
+            'tb.err': (2, [[0, '1'], [5000, '0'], [6000, '2']]), 'tb.data': (16, [[0, '0201'], [5000, '0203']]),
+            'tb.e': (2, [[0, '1']]), 'tb.x': (8, [[0, '3a']]), 'tb.y': (8, [[0, '81']]), 'tb.q': (3, [[0, "'b1x0"], [5000, "'b1x1"]])})
+        part = H.wavejson_of(H.fixture('split'), '--exact', '--signals', 'tb.data[15:8]')['data[15:8]']   # a part's own slice
+        self.assertEqual(part['tv'], [[0, '02']])
+
+    def test_bit_blasted_shared_code_and_vector_value(self):
+        s = H.wavejson_of(H.fixture('blasted'))
+        self.assertEqual(s['tb.flags']['tv'], [[0, '4'], [5000, '7'], [7000, '3']])   # flags[0] flags[1] both !
+        self.assertEqual(s['tb.e']['tv'], [[0, '1'], [5000, '0'], [7000, '2']])       # b01 for one bit: its last digit
+
+    def test_tokens_apart_by_any_white_space(self):
+        s = H.wavejson_of(H.fixture('spaces'))
+        self.assertEqual((s['tb.s']['tv'], s['tb.bus']['tv']), ([[0, '0'], [5000, '1'], [9000, '0'], [12000, '1']],
+                                                               [[0, '2'], [5000, '3'], [7000, '4'], [12000, 'f']]))
 
     def test_several_tokens_per_line(self):
         sigs = H.wavejson_of(H.fixture('oneline'))
@@ -286,6 +311,54 @@ class Convert(unittest.TestCase):
         for view in ('run', 'status'):
             with self.subTest(view):
                 self.assertEqual(self.convert('fst2vcd', cfg, view, fst)[0], self.convert('sva', cfg, view, fst)[0])
+
+    # small dumps made FST by vcd2fst: what the two FST readers once told apart
+    FST_PROBES = {
+        # bit selects glued and apart: not adjacent (err[0], err[2]), a lone one, a vector bit by bit, a range in two
+        # parts, escaped names with brackets (wellen merges \e[0] \e[1]: sva vcd reads the FST's names itself)
+        'selects': ('$var wire 1 ! err[0] $end\n$var wire 1 " err[2] $end\n$var wire 1 # mem[3] $end\n'
+                    '$var wire 1 $ d[4] $end\n$var wire 1 % d[5] $end\n$var wire 1 & d[6] $end\n$var wire 1 \' d[7] $end\n'
+                    '$var wire 8 ( data [7:0] $end\n$var wire 8 ) data [15:8] $end\n$var wire 1 * q [3] $end\n'
+                    '$var wire 1 + \\e[0] $end\n$var wire 1 , \\e[1] $end\n',
+                    '#0\n1!\n0"\n1#\n0$\n1%\n0&\n1\'\nb1 (\nb10 )\n1*\n0+\n1,\n#5\n0!\n1"\nb11 (\n0,\n#7\n1$\n0#\n'),
+        # strings with a tab, a newline, a space, quotes, a backslash, a byte above 127: one token each in the text, no
+        # change of another signal made up from what follows a raw newline
+        'strings': ('$var string 1 ! s $end\n$var wire 1 " a $end\n',
+                    '#0\nsx !\n0"\n#1\nsa\\x09b\\x20c !\n#2\nsq\\x0a1"\\x3f\\x27\\x5c\\x01\\xc3\\xa9 !\n#3\n1"\n#4\ns\\x5c040 !\n'),
+        # changes at 0 and 5, the dump ends at 10: the idle stretch is part of the dump
+        'idle_tail': ('$var wire 1 ! a $end\n$var wire 4 " b $end\n', '#0\n0!\nb0 "\n#5\n1!\nb101 "\n#10\n'),
+    }
+
+    def read_all(self, reader, fst):
+        """The FST through `reader` (WAVEFW_FST): every variable, exact, with the hierarchy -> the WaveJSON, the reader's
+        name and the dump's path left out of its meta."""
+        import dumpscan
+        old = os.environ.get('WAVEFW_FST')
+        os.environ['WAVEFW_FST'] = reader
+        try:
+            d = dumpscan.read(fst, None)
+            sigs = ','.join(p for p, v in d.vars.items() if v.kind != 'event')
+            rc, out, err = H.run_tool('vcd2wavedrom', '--waves', fst, '--exact', '--hierarchy', '--signals', sigs)
+        finally:
+            os.environ.pop('WAVEFW_FST') if old is None else os.environ.__setitem__('WAVEFW_FST', old)
+        self.assertEqual(rc, 0, err)
+        doc = json.loads(out)
+        doc['meta'].pop('tool')
+        doc['meta'].pop('waves')
+        return sorted(d.vars), doc
+
+    def test_fst_readers_identical_on_probes(self):
+        """FST_PROBES through fst2vcd and through sva vcd: the same variables, the same WaveJSON."""
+        if not shutil.which('vcd2fst') or len(self.readers()) < 2:
+            self.skipTest('vcd2fst, fst2vcd and the sva CLI')
+        with H.tmp() as d:
+            for name, (decl, body) in self.FST_PROBES.items():
+                with self.subTest(name):
+                    vcd = H.vcd(d, body, '$timescale 1ns $end\n$scope module tb $end\n' + decl + '$upscope $end\n$enddefinitions $end\n',
+                                name + '.vcd')
+                    fst = os.path.join(d, name + '.fst')
+                    subprocess.run(['vcd2fst', vcd, fst], capture_output=True, check=True)
+                    self.assertEqual(self.read_all('sva', fst), self.read_all('fst2vcd', fst))
 
 if __name__ == '__main__':
     unittest.main()

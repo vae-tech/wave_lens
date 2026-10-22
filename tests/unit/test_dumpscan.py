@@ -44,7 +44,7 @@ class Header(unittest.TestCase):
     def test_bit_blasted_vector(self):
         d = read('range_in_ref', None)
         self.assertEqual(d.vars['tb.mem'].width, 2)
-        self.assertEqual(sorted(b for _, b in d.vars['tb.mem'].members), [0, 1])
+        self.assertEqual(sorted(b for _, b in d.vars['tb.mem'].members), [(0, 0), (1, 1)])
         self.assertEqual(d.find('tb.mem[1]'), 'tb.mem')
 
     def test_id_reused_across_scopes(self):
@@ -71,6 +71,27 @@ class Header(unittest.TestCase):
     def test_duplicate_path_merges_codes(self):
         d = read('dup')
         self.assertEqual(d.vars['tb.s'].members, [(b'!', None), (b'"', None)])
+
+    def test_real_kinds_and_string_size_0(self):
+        d = read('realkinds', None)
+        self.assertEqual({p: dumpscan.TEXT_KINDS.get(v.kind) for p, v in d.vars.items()},
+                         {'tb.r': 'real', 'tb.rt': 'real', 'tb.sr': 'real', 'tb.rp': 'real', 'tb.msg': 'string'})
+        self.assertEqual(d.vars['tb.msg'].width, 1)   # declared with size 0 (fst2vcd, sva vcd): one value, as in the page
+
+    def test_ranges_apart_merged_by_bit(self):
+        d = read('split', None)
+        self.assertEqual({p: v.width for p, v in d.vars.items()}, {'tb.err': 2, 'tb.data': 16, 'tb.e': 2, 'tb.x': 8, 'tb.y': 8, 'tb.q': 3})
+        self.assertEqual(d.vars['tb.err'].members, [(b'!', (0, 0)), (b'"', (1, 1))])   # err [0], err [1]: not one bit twice
+        self.assertEqual(d.vars['tb.data'].members, [(b'#', (7, 0)), (b'$', (15, 8))])
+        self.assertEqual(d.vars['tb.x'].members, [(b"'", (3, 0)), (b'(', (7, 4))])      # [11:8] [15:12]: from bit 8, as wellen
+        self.assertEqual(d.vars['tb.y'].members, [(b')', (7, 4)), (b'*', (3, 0))])      # [0:3] [4:7]: index 0 on the left
+        self.assertEqual(d.vars['tb.q'].members, [(b'+', (2, 2)), (b',', (0, 0))])      # q[3] q[1]: q[2] not declared
+        self.assertEqual((d.find('tb.x[15:8]'), d.find('tb.e[0]'), d.find('tb.data[7:0]')), ('tb.x', 'tb.e', None))   # a part: a slice
+
+    def test_two_bits_one_code(self):
+        d = read('blasted', 'count')
+        self.assertEqual(d.vars['tb.flags'].members, [(b'!', (0, 0)), (b'!', (1, 1)), (b'"', (2, 2))])
+        self.assertEqual(d.changes['tb.flags'], 2)   # the code ! once
 
     def test_missing_enddefinitions_raises(self):
         with self.assertRaisesRegex(WaveError, 'no \\$enddefinitions'):
@@ -108,6 +129,21 @@ class Body(unittest.TestCase):
         self.assertEqual(d.trans[b'!'], [(0, b'0'), (10, b'1')])
         self.assertEqual(d.trans[b'"'], [(0, b'01'), (10, b'10')])
         self.assertEqual(read('oneline', 'count').changes, {'tb.s': 1, 'tb.v': 1})
+
+    def test_tokens_apart_by_any_white_space(self):
+        # indented, tabs, a vector's code on the next line, a time inside a line: the page's token rule
+        d = read('spaces')
+        self.assertEqual(d.trans[b'!'], [(0, b'0'), (5, b'1'), (9, b'0'), (12, b'1')])
+        self.assertEqual(d.trans[b'"'], [(0, b'0010'), (5, b'0011'), (7, b'0100'), (12, b'1111')])
+        self.assertEqual(d.trans[b'#'], [(0, b'0'), (7, b'1')])
+        c = read('spaces', 'count')
+        self.assertEqual((c.changes, c.t_end), ({'tb.s': 3, 'tb.bus': 3, 'tb.t': 1}, 12000))
+
+    def test_time_inside_a_change_line(self):
+        c = read('inline_time', 'count')
+        self.assertEqual((c.changes, c.t_start, c.t_end), ({'tb.s': 2, 'tb.v': 1}, 0, 8000))
+        d = read('inline_time')
+        self.assertEqual((d.trans[b'!'], d.trans[b'"'], d.t_end), ([(0, b'0'), (5, b'1'), (8, b'0')], [(0, b'00'), (8, b'11')], 8000))
 
     def test_comment_in_body_skipped(self):
         d = read('body_comment')

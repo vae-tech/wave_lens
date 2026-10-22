@@ -1,7 +1,7 @@
 """tools/viewedit.py: the viewer's commands on a state (names, every command, its errors), a page's edits (the block,
 revisions), a saved state and the command line. That the browser gets the same state from them as from view.run is
 the smoke test's (section edit)."""
-import json, os, unittest
+import json, os, re, unittest
 
 from tests.unit import helpers as H
 import viewedit as V
@@ -136,7 +136,7 @@ class Commands(unittest.TestCase):
                     {'op': 'gaps', 'on': True, 'idle': 8}, {'op': 'gaps', 'reset': True})
         self.assertEqual((st['from'], st['to'], st['hidden'], st['folds'], st['select'], st['find'], st['range']),
                          (15000, 35000, [], {'*': True}, None, '', None))
-        self.assertTrue(all(st['config'][k] is None for k in V.ALL_GAP_KEYS))
+        self.assertEqual({k: st['config'][k] for k in V.ALL_GAP_KEYS}, V.GAP_DEFAULTS)   # the page's own (no override), not null
         bad = e.run([{'op': 'radix', 'signals': 'data', 'radix': 'roman'}, {'op': 'analog', 'signals': 'clk', 'rows': 2}, {'op': 'sort', 'dir': 'up'},
                      {'op': 'fold', 'groups': 'clk'}, {'op': 'cursor', 't': 'soon'}, {'op': 'edge'}, {'op': 'nope'}, {'op': 'cursor', 'at': 1},
                      {'op': 'view', 'from': 5}])
@@ -155,7 +155,7 @@ class Commands(unittest.TestCase):
         self.run_ok(e, {'op': 'cursor', 't': 1.5})
         st = {'wavefw': 'state', 'version': 3, 'bookmarks': [{'n': 4, 't': 7}], 'paint': {'gone': '#fff'}}
         r = self.run_ok(e, {'op': 'set_state', 'state': st}, {'op': 'state'})
-        self.assertEqual((r[0]['missing'], r[1]['state']), (['gone'], {'bookmarks': [{'n': 4, 't': 7}], 'paint': {'gone': '#fff'}}))
+        self.assertEqual((r[0]['missing'], r[1]['state']), (['gone'], {'cursor': 1.5, 'bookmarks': [{'n': 4, 't': 7}], 'paint': {'gone': '#fff'}}))
         self.assertEqual(e.run([{'op': 'set_state', 'state': [1]}])[0]['error'], 'set_state: not a saved viewer state ({"wavefw": "state", …})')
         rows = self.run_ok(ed(), {'op': 'group', 'name': 'g', 'signals': 'clk'}, {'op': 'rows', 'pattern': 'st', 'limit': 1})[1]
         self.assertEqual(rows, {'op': 'rows', 'total': 2, 'rows': [['tb.dut.state', 2]], 'next_offset': 1})
@@ -193,6 +193,100 @@ class Commands(unittest.TestCase):
         self.assertEqual(e.run([{'op': 'cycles', 'reset': True}])[0]['cycles'], {'cycles': False, 'cycleClock': 'tb.dut.valid', 'cycleZero': 20000})
         alone = V.Editor(V.Model(), {})
         self.assertEqual(alone.run([{'op': 'cycles', 'clock': 'tb.clk'}])[0]['cycles']['cycleClock'], 'tb.clk')   # no page: the width unknown
+
+
+class Twin(unittest.TestCase):
+    """What edit.js does, the same here (review 2026-10-22: A9/B4, M4, B13, B14, B15)."""
+
+    def test_set_state_merges(self):
+        """set_state as view.js setState: a key the state has replaces this one's (config key by key), a key it does not
+        have stays, null clears."""
+        e = ed()
+        r = e.run([{'op': 'bookmark', 't': '60ns', 'signal': 'valid', 'text': 'a'}, {'op': 'style', 'name': 'questa'}, {'op': 'cursor2', 't': 30000},
+                   {'op': 'range', 'from': 10000, 'to': 20000},
+                   {'op': 'set_state', 'state': {'wavefw': 'state', 'cursor': 70000, 'config': {'sort': 'asc'}, 'range': None, 'cursor2': None}}])
+        self.assertEqual(r[-1], {'op': 'set_state', 'missing': []})
+        st = e.st
+        self.assertEqual([b['n'] for b in st['bookmarks']], [1, 2])   # kept
+        self.assertEqual(st['config'], {'style': 'questa', 'sort': 'asc'})
+        self.assertEqual((st['cursor'], st['cursor2'], st['range']), (70000, None, None))
+        e.run([{'op': 'set_state', 'state': {'wavefw': 'state', 'config': None, 'title': 'x', 'version': 3}}])
+        self.assertEqual(st['config'], {'style': 'questa', 'sort': 'asc'})   # config null: nothing (as view.js)
+        miss = e.run([{'op': 'set_state', 'state': {'wavefw': 'state', 'groups': [{'name': 'g', 'signals': ['clk', 'gone.a']}], 'hidden': ['gone.b'],
+                                                    'select': 'gone.c', 'config': {'highlight': ['gone.d', 'x*']}}}])[0]
+        self.assertEqual(miss['missing'], ['gone.a', 'gone.d', 'gone.b', 'gone.c'])   # in view.js's order
+
+    def test_gaps_reset(self):
+        """gaps reset: the page's own settings (view.js setGaps(null)), not null for each (null: no clock, no signals)."""
+        e = ed(settings={'gapIdle': 8})
+        r = e.run([{'op': 'gaps', 'on': True, 'idle': 4, 'signals': 'valid'}, {'op': 'gaps', 'reset': True}])
+        self.assertEqual(r[0]['gaps'], dict(V.GAP_DEFAULTS, gaps=True, gapIdle=4, gapSignals=['valid'], gapAux=[]))   # every key, as gapOpt
+        self.assertEqual(r[1]['gaps'], dict(V.GAP_DEFAULTS, gapIdle=8, gapSignals=[], gapAux=[]))
+        self.assertEqual({k: e.st['config'][k] for k in ('gaps', 'gapIdle', 'gapSignals')}, {'gaps': False, 'gapIdle': 8, 'gapSignals': None})
+
+    def test_gap_defaults_are_the_config_files(self):
+        with open(os.path.join(H.ROOT, 'wavefw', 'wavefw.config.js'), encoding='utf-8') as f:
+            text = f.read()
+        js = lambda k: json.loads(re.search(rf'^ {{2}}{k}: ([^,]+),', text, re.M).group(1).replace("'", '"'))
+        self.assertEqual({k: js(k) for k in V.GAP_DEFAULTS}, V.GAP_DEFAULTS)
+        self.assertEqual({k: js(k) for k in V.CYC_DEFAULTS}, V.CYC_DEFAULTS)
+
+    def test_ids(self):
+        """A bookmark's n, an arrow's or a marker's id and an arrow's ends: a whole number (2, 2.0, "2"); true, 1.5, a name:
+        an error, nothing made."""
+        e = ed()
+        ok = e.run([{'op': 'bookmark', 'n': 2.0, 't': 50000}, {'op': 'bookmark', 'n': '3', 't': 60000}, {'op': 'arrow', 'from': 2.0, 'to': '3'},
+                    {'op': 'marker', 't': 5000}, {'op': 'marker', 'id': 1.0, 'label': 'm'}, {'op': 'arrow', 'id': 1.0, 'label': 'x'}])
+        self.assertEqual([r.get('n') or r.get('id') for r in ok], [2, 3, 1, 1, 1, 1])
+        bad = e.run([{'op': 'bookmark', 'n': True, 't': 1}, {'op': 'bookmark', 'n': 1.5, 't': 1}, {'op': 'arrow', 'from': 1.5, 'to': 2},
+                     {'op': 'arrow', 'from': 2, 'to': True}, {'op': 'arrow', 'id': True, 'label': 'y'}, {'op': 'marker', 'id': 1.5},
+                     {'op': 'marker', 'id': 'all', 't': '50ns'}])
+        self.assertEqual([r['error'] for r in bad], ['n: a bookmark number (1, 2 …)', 'n: a bookmark number (1, 2 …)',
+                                                     'from: a bookmark number (1, 2 …), not 1.5', 'to: a bookmark number (1, 2 …), not true',
+                                                     'id: the number of the arrow as listed (1, 2 …), not true; a new one: no id',
+                                                     'id: the number of the marker as listed (1, 2 …), not 1.5; a new one: no id',
+                                                     'marker: id "all" goes with delete (every marker deleted); one to change: its number'])
+        self.assertEqual((len(e.st['markers']), len(e.st['arrows']), [b['n'] for b in e.st['bookmarks']]), (1, 1, [1, 2, 3]))
+        self.assertEqual(e.run([{'op': 'analog', 'signals': 'data', 'rows': 2.0}])[0], {'op': 'analog', 'signals': 1})
+        self.assertEqual(e.st['analog'], {'tb.dut.data': 2})
+
+    def test_range_outside(self):
+        """A range is cut to the waves (view.js setRange); one wholly outside them is an error."""
+        e = ed()
+        self.assertEqual(e.run([{'op': 'range', 'from': '-10ns', 'to': '30ns'}])[0]['range'], [0, 30000])
+        bad = e.run([{'op': 'range', 'from': '1ms', 'to': '2ms'}, {'op': 'range', 'from': -5000, 'to': -1000}])
+        self.assertEqual(bad[0]['error'], 'range: 1e+06ns … 2e+06ns is outside the waves (0ns … 80ns)')
+        self.assertIn('outside the waves', bad[1]['error'])
+        self.assertEqual(e.st['range'], {'from': 0, 'to': 30000, 'signal': None})
+
+    def test_result_shapes(self):
+        """layout, find, cycles answer what edit.js answers."""
+        e = ed()
+        r = e.run([{'op': 'layout', 'height': 400}, {'op': 'layout', 'scroll': 'page', 'tools': 'fold'}, {'op': 'find', 'query': 'dut.st'},
+                   {'op': 'find', 'query': 'val|clk', 'regex': True}, {'op': 'find', 'query': 'state', 'word': True, 'regex': False},
+                   {'op': 'cycles', 'on': True}])
+        self.assertEqual(r[0], {'op': 'layout', 'scroll': 'window', 'height': 400, 'tools': 'open'})
+        self.assertEqual(r[1], {'op': 'layout', 'scroll': 'page', 'height': None, 'tools': 'fold'})
+        self.assertEqual(r[2], {'op': 'find', 'found': ['tb.dut.state'], 'count': 1})
+        self.assertEqual(r[3], {'op': 'find', 'found': ['clk', 'tb.dut.valid'], 'count': 2})
+        self.assertEqual(r[4], {'op': 'find', 'found': ['tb.dut.state', 'tb.other.state'], 'count': 2})
+        self.assertEqual(r[5], {'op': 'cycles', 'cycles': {'cycles': True, 'cycleClock': None, 'cycleZero': None}, 'clock': 'clk', 'cycle': None})
+
+    def test_rows_order(self):
+        """rows in the order the names column shows them (sort, ignored prefixes), your groups first, the hidden at the end."""
+        doc = {'signal': [{'name': 'b10', 'wave': '01'}, {'name': 'i_b2', 'wave': '01'}, {'name': 'a', 'wave': '01'}, ['m', {'name': 'z', 'wave': '0'}]]}
+        e = ed(doc=doc)
+        r = e.run([{'op': 'group', 'name': 'g', 'signals': 'a'}, {'op': 'sort', 'dir': 'asc', 'ignore': 'i_'}, {'op': 'hide', 'signals': 'b10'},
+                   {'op': 'rows'}])[-1]
+        self.assertEqual(r['rows'], [['@g', 'group'], ['a', 1], ['i_b2', 1], ['m', 'module'], ['m.z', 1], ['b10', 1]])
+
+    def test_times(self):
+        """One time parser (model.js parseT) for viewedit.py and wavemcp.py: units in any case, µs, an exponent."""
+        for text, ps in (('100NS', 1e5), ('1E2', 100), ('0.1µs', 1e5), (' -5 ns ', -5000), ('2.5us', 2.5e6), ('1e-3ns', 1)):
+            self.assertAlmostEqual(V.parse_t(text), ps)
+        for text in ('5 parsecs', '1.2.3ns', 'ns', ''):
+            self.assertIsNone(V.parse_t(text))
+        self.assertEqual(V.parse_time('3', plain=1000), 3000)   # wavemcp.py: a plain number is ns
 
 
 class Pages(unittest.TestCase):

@@ -14,7 +14,10 @@ const TOK = { fg: '--fg', muted: '--muted', line: '--line', panel: '--panel', pa
   paint: '--wave-paint' };   // the find group's Paint colour; plugins add their own (WaveFW.registerTokens)
 // a colour name of the painters: a token, a CSS custom property ("--x", "var(--x)") or a colour as it is
 const registerTokens = map => { for (const [k, v] of Object.entries(map || {})) TOK[k] = v; return Object.assign({}, TOK); };
-const tokVar = n => TOK[n] ? `var(${TOK[n]})` : /^--[\w-]+$/.test(n) ? `var(${n})` : n;   // a colour name as CSS
+// a key a table has of its own, not one every object inherits ("constructor", "toString"): what a command, a setting or
+// this browser's storage names is looked up so
+const hasKey = (o, k) => k != null && Object.prototype.hasOwnProperty.call(o, k);
+const tokVar = n => hasKey(TOK, n) ? `var(${TOK[n]})` : /^--[\w-]+$/.test(n) ? `var(${n})` : n;   // a colour name as CSS
 // Friendly names for colour maps (config.colors, data-colors, WaveFW.setColors) -> CSS custom properties.
 const CVAR = { trace: '--wave-1', one: '--wave-1', bus: '--wave-bus', x: '--wave-x', xfill: '--wave-x-soft', z: '--wave-z',
   bg: '--panel', panel: '--panel', header: '--panel-2', grid: '--line', text: '--fg', muted: '--muted', accent: '--accent', cursor: '--accent',
@@ -79,7 +82,7 @@ function settings(...layers) {
   for (const k of ['rowHeight', 'groupHeight', 'spaceHeight', 'headerHeight', 'traceWidth', 'busWidth', 'labelSize', 'fontSize', 'dim',
     'laneHeight']) S[k] = num(S[k]) || DEFAULTS[k];
   S.sort = sortDir(S.sort); S.sortIgnore = prefixes(S.sortIgnore).sort((a, b) => b.length - a.length);
-  if (!EDGES[S.style]) S.style = 'auto';
+  if (!hasKey(EDGES, S.style)) S.style = 'auto';
   if (S.groupsFirst && S.groupOrder === 'file') S.groupOrder = 'first';   // older setting
   return S;
 }
@@ -637,6 +640,8 @@ const RISES = new WeakMap();
 const riseTimes = clk => RISES.get(clk) || (RISES.set(clk, clk.tr.filter(o => o.k === '1').map(o => o.t)), RISES.get(clk));
 // the cycles of a clock (its rising edges ups): the index of cycle 0, the first edge at or after zero (null: the first edge);
 // the cycle at t, the last edge at or before t (negative before cycle 0); the time of cycle n, or null past the ends
+// the setting cycleZero: a time ("50ns", as gapIdle and the cursor take it) or model units; null / "": the first edge
+const zeroTime = z => (z == null || z === '' ? null : typeof z === 'number' ? z : num(parseT(z)));
 const cycZero = (ups, zero) => (zero == null || !isFinite(zero) ? 0 : lastBefore(ups.length, j => ups[j], zero - timeEps(zero), true) + 1);
 const cycAt = (ups, iz, t) => lastBefore(ups.length, j => ups[j], t + timeEps(t)) - iz;
 // the rising edges the cycles count: a dump's first value 1 ("tv") is its level at the start, not an edge (a wave's p is one)
@@ -722,14 +727,17 @@ const AR_SHAPES = { '~': 'curve', '-': 'straight', '-~': 'curve, late', '~-': 'c
 const AR_HEADS = { '>': '→ end', '<>': '↔ both', '<': '← start', '': '— none' };
 const AR_LINES = { solid: null, dashed: [6, 4], dotted: [1.5, 3] };
 function bmNorm(list) {
-  return (Array.isArray(list) ? list : []).map((b, i) => ({ n: +b.n || i + 1, t: num(parseT(b.t)), signal: b.signal || null, text: b.text || '',
-    color: b.color || null, lift: !!b.lift && !!b.signal })).filter(b => isFinite(b.t));   // lift: in the lane above its signal
+  const obj = x => x && typeof x === 'object';   // an entry that is no object (a bad copy in this browser): left out
+  return (Array.isArray(list) ? list : []).filter(obj).map((b, i) => ({ n: +b.n || i + 1, t: num(parseT(b.t)), signal: b.signal || null,
+    text: b.text || '', color: b.color || null, lift: !!b.lift && !!b.signal })).filter(b => isFinite(b.t));   // lift: in the lane above its signal
 }
 function arNorm(list, bms) {
   const old = (Array.isArray(bms) ? bms : []).map((b, i) => b && b.to != null && b.to !== '' ? { from: +b.n || i + 1, to: +b.to, shape: b.shape,
     label: b.label } : null);
-  return old.filter(Boolean).concat(Array.isArray(list) ? list : []).map(a => ({ from: +a.from, to: +a.to, shape: AR_SHAPES[a.shape] ? a.shape : '~',
-    head: AR_HEADS[a.head] !== undefined ? a.head : '>', line: a.line in AR_LINES ? a.line : 'solid', color: a.color || null, label: a.label || '' }))
+  // a shape, head or line of no table of its own ("constructor", a typo): the default one
+  return old.filter(Boolean).concat(Array.isArray(list) ? list.filter(a => a && typeof a === 'object') : []).map(a => ({ from: +a.from, to: +a.to,
+    shape: hasKey(AR_SHAPES, a.shape) ? a.shape : '~', head: hasKey(AR_HEADS, a.head) ? a.head : '>', line: hasKey(AR_LINES, a.line) ? a.line : 'solid',
+    color: a.color || null, label: a.label || '' }))
     .filter(a => a.from && a.to && a.from !== a.to);
 }
 // your markers [{t, label, color}] (a saved state, this browser) and groups [{name, signals: [full path], color}]: normalised

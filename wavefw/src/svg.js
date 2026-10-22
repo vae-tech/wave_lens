@@ -42,7 +42,7 @@ const WaveSVG = {
       return [r, sub]; });
     // the clock cycles under the axis (the viewer's Cycles, else the settings cycles, cycleClock, cycleZero); its clock under the names
     const cy = V ? V.cycData() : S.cycles ? (c => { const ups = c ? cycUps(c) : []; return ups.length ? { clk: c, ups, iz: cycZero(ups,
-      S.cycleZero == null ? null : num(S.cycleZero)) } : null; })(cycClock(M.rows, S.cycleClock)) : null, cyLab = cy && `cycles ↑ ${cy.clk.name}`;
+      zeroTime(S.cycleZero)) } : null; })(cycClock(M.rows, S.cycleClock)) : null, cyLab = cy && `cycles ↑ ${cy.clk.name}`;
     const nameW = Math.ceil(Math.max(40, cy ? P.measure(cyLab, { size: 10 }) + 12 : 0, ...rows.map(r => P.measure(r.name || '', { size: fs,
       weight: r.type === 'group' ? 600 : 400 }) + 22 + r.depth * 12)));
     let k = ((opts.cyclePx || 40) * M.hscale) / M.cycle;

@@ -440,3 +440,50 @@ fn vcd_writes_a_dump_as_vcd_text() {
         assert!(t.contains(line), "{line:?} not in the FSM example's VCD text");
     }
 }
+
+/// `sva vcd` of an FST writes what fst2vcd writes: the names as the FST holds them (bit selects glued or apart, not
+/// merged into vectors; escaped names with brackets), strings escaped as fstapi does (a tab, a newline, a space: one
+/// token each), the end of the dump after the last change. A VCD goes through wellen: a lone bit select glued, the
+/// strings escaped the same way. The FST is made by vcd2fst (GTKWave) when it is installed, else that part is skipped.
+#[test]
+fn vcd_of_an_fst_keeps_names_strings_and_the_end() {
+    let src = write("sel.vcd", "$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! err[0] $end\n$var wire 1 \" err[2] $end\n\
+        $var wire 1 # d[4] $end\n$var wire 1 $ d[5] $end\n$var wire 8 % data [7:0] $end\n$var wire 1 & \\e[0] $end\n\
+        $var wire 1 ' \\e[1] $end\n$var string 1 ( s $end\n$upscope $end\n$enddefinitions $end\n\
+        #0\n1!\n0\"\n0#\n1$\nb1 %\n0&\n1'\nsx (\n#1\nsa\\x09b\\x20c (\n#2\nsq\\x0a1\\x22 (\n#5\n0!\n#10\n");
+    let o = sva(&["vcd", &src]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    let t = out(&o);
+    for line in ["$var wire 1 \" err[2] $end\n", " d [5:4] $end\n", "sa\\tb\\040c (\n", "sq\\n1\\\" (\n"] {
+        assert!(t.contains(line), "{line:?} not in:\n{t}");
+    }
+
+    let fst = dir().join(format!("sel.{:?}.fst", std::thread::current().id()));
+    if !Command::new("vcd2fst").arg(&src).arg(&fst).output().is_ok_and(|o| o.status.success()) {
+        eprintln!("vcd_of_an_fst_keeps_names_strings_and_the_end: no vcd2fst (GTKWave): the FST part skipped");
+        return;
+    }
+    let o = sva(&["vcd", &fst.to_string_lossy()]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    let t = out(&o);
+    for line in ["$var wire 1 ! err[0] $end\n$var wire 1 \" err[2] $end\n$var wire 1 # d[4] $end\n$var wire 1 $ d[5] $end\n\
+                  $var wire 8 % data [7:0] $end\n$var wire 1 & \\e[0] $end\n$var wire 1 ' \\e[1] $end\n$var string 0 ( s $end\n",
+                 "#1\nsa\\tb\\040c (\n#2\nsq\\n1\\\" (\n#5\n0!\n#10\n"] {
+        assert!(t.contains(line), "{line:?} not in:\n{t}");
+    }
+    assert!(t.ends_with("#5\n0!\n#10\n"), "the end of the dump is the last line:\n{t}");
+}
+
+/// A dump its reader cannot take (a value longer than its variable: wellen asserts) is one line naming the file, exit
+/// 2, not an internal error.
+#[test]
+fn a_dump_that_does_not_read_is_named() {
+    let bad = write("long.vcd", "$timescale 1ns $end\n$scope module tb $end\n$var wire 2 % m $end\n$upscope $end\n\
+        $enddefinitions $end\n#0\nb101 %\n#1\nb1 %\n");
+    for args in [&["vcd", &bad][..], &["--waves", &bad, "--info"][..]] {
+        let o = sva(args);
+        assert_eq!(o.status.code(), Some(2), "{args:?}");
+        let e = err(&o);
+        assert!(e.contains("long.vcd") && !e.contains("internal error") && e.trim_end().lines().count() == 1, "{args:?}: {e}");
+    }
+}

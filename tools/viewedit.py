@@ -19,12 +19,14 @@ view_live); here they change the file:
   viewedit.py --commands                                     # the commands and their arguments
 
 Each command is {"op": name, …arguments}; the list runs in order, a bad one is said (exit 1) and the rest still run.
-Times: model units (ps of timed waves, else cycles) or a text with a unit ("2.5us"). Signals: a full path, a name,
+Times: model units (ps of timed waves, else cycles) or a text with a unit ("2.5us", "100NS"). Numbers of bookmarks,
+arrows and markers are whole (2, 2.0, "2"). set_state keeps what the state it is given does not have (null clears).
+Signals: a full path, a name,
 the end of a path ("u_regs.PSEL") or a * pattern. The commands that need the waves' values or the screen (edge,
 picture, fit) run only in a page (live). docs/USAGE.md § "Editing the views" has them all; the smoke test checks that a
 page with these edits and the same commands run in it give the same state.
 """
-import argparse, datetime, json, os, re, sys
+import argparse, datetime, functools, json, os, re, sys, unicodedata
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
 from common import WaveError, run_main  # noqa: E402
@@ -43,6 +45,10 @@ GAP_KEYS = {'on': 'gaps', 'idle': 'gapIdle', 'keep': 'gapKeep', 'signals': 'gapS
             'count': 'gapCount'}
 ALL_GAP_KEYS = ['gaps', 'gapIdle', 'gapKeep', 'gapSignals', 'gapClock', 'gapAux', 'gapOnly', 'gapCount', 'gapLine']   # view.js GAP_KEYS
 CYC_KEYS = ['cycles', 'cycleClock', 'cycleZero']   # view.js CYC_KEYS
+# their defaults, as wavefw/wavefw.config.js has them (tests/unit/test_viewedit.py reads them there)
+GAP_DEFAULTS = {'gaps': False, 'gapIdle': 16, 'gapKeep': 2, 'gapSignals': None, 'gapClock': None, 'gapAux': None, 'gapOnly': False,
+                'gapCount': 'clock', 'gapLine': 'dashdot'}
+CYC_DEFAULTS = {'cycles': False, 'cycleClock': None, 'cycleZero': None}
 # the commands: name -> arguments (? optional), as WaveFW.commands() gives them (the smoke test compares the two)
 COMMANDS = {
     'cursor': 't', 'cursor2': 't', 'view': 'from? to? at? span?', 'fit': '', 'range': 'from? to? signal?',
@@ -96,22 +102,46 @@ def fail(msg):
     raise WaveError(msg)
 
 
-def parse_t(v):
-    """model.js parseT: "1.5us" -> 1.5e6 (ps); a plain number is in model units; else None."""
-    if v is None or v == '':
-        return None
-    if isinstance(v, bool):
+TIME_UNITS = dict(UNIT_PS, zs=1e-9, **{'as': 1e-6})   # what wavemcp.py takes too (a dump's resolution may be below fs)
+
+
+def parse_time(v, plain=1, units=None):
+    """A time as a person writes it -> a number, or None: a number is in plain units (model units here, ns for
+    wavemcp.py), a text a number with a unit or none ("1.5us", "100NS", "1E2", "0.1µs", "-5ns"), case-insensitive as the
+    viewer's parseT. units: the units known (default the viewer's: fs ps ns us µs ms s)."""
+    if v is None or v == '' or isinstance(v, bool):
         return None
     if isinstance(v, (int, float)):
-        return v
-    m = re.fullmatch(r'\s*(-?[\d.]+(?:e-?\d+)?)\s*(fs|ps|ns|us|µs|ms|s)?\s*', str(v), re.I)
-    if not m:
+        return v * plain
+    units = units or UNIT_PS
+    m = re.fullmatch(r'\s*(-?[\d.]+(?:e-?\d+)?)\s*([a-zµ]+)?\s*', str(v), re.I)
+    if not m or (m.group(2) and m.group(2).lower() not in units):
         return None
     try:
         x = float(m.group(1))
     except ValueError:
         return None
-    return x * (UNIT_PS[m.group(2).lower()] if m.group(2) else 1)
+    return x * (units[m.group(2).lower()] if m.group(2) else plain)
+
+
+def parse_t(v):
+    """model.js parseT: "1.5us" -> 1.5e6 (ps); a plain number is in model units; else None."""
+    return parse_time(v)
+
+
+def finite(x):
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and x == x and x not in (float('inf'), float('-inf'))
+
+
+def whole(x):
+    """A number as JavaScript's Number.isInteger takes it (1, 1.0, "1"; not true, 1.5, "x") -> the int, or None."""
+    if isinstance(x, bool):
+        return None
+    if isinstance(x, str) and re.fullmatch(r'\s*\d+\s*', x):
+        return int(x)
+    if isinstance(x, float) and finite(x) and x.is_integer():
+        return int(x)
+    return x if isinstance(x, int) else None
 
 
 def tidy(x):
@@ -152,8 +182,29 @@ class Model:
         cfg = dict(settings or {})
         cfg.update({k: v for k, v in (self.doc.get('config') or {}).items() if v is not None})
         self.cfg = cfg
+        self.t0 = self.t1 = None   # the time of the waves (model.js M.t0, M.t1), known with the page
+        self._tv, self._sigs_raw = [], []
         if doc:
             self._walk(doc.get('signal') or [], 0, [])
+            self._span()
+
+    def _span(self):
+        """model.js parse: M.t0 = min(C(0), the first "tv" time), M.t1 = max(C(cycles), time.t1, the last change)."""
+        tm = self.doc.get('time') if isinstance(self.doc.get('time'), dict) else None
+        num = lambda x, d=0: parse_time(x) if finite(parse_time(x)) else d
+        c0, cy = (num(tm.get('t0')), num(tm.get('cycle'), 1) or 1) if tm else (0, 1)
+        cyc = max([len(str(s.get('wave') or '')) * (num(s.get('period'), 1) or 1) for s in self._sigs_raw] or [0])
+        firsts, lasts = [], []
+        for tv in self._tv:
+            ts = [parse_time(x[0]) for x in tv if isinstance(x, list) and x]
+            ts = [t for t in ts if finite(t)]
+            if ts:
+                firsts.append(ts[0])
+                lasts.append(ts[-1])
+        self.t0 = min([c0] + firsts)
+        self.t1 = max([c0 + cyc * cy] + ([num(tm['t1'])] if tm and tm.get('t1') is not None else []) + lasts)
+        if not self.t1 > self.t0:
+            self.t1 = self.t0 + (cy if tm else 1)
 
     def _walk(self, arr, depth, anc):
         for it in arr:
@@ -169,6 +220,10 @@ class Model:
                 else:
                     self._walk(it[1:] if named else it, depth, anc)
             elif isinstance(it, dict) and (it.get('wave') is not None or it.get('tv') or it.get('same')):
+                if it.get('tv'):
+                    self._tv.append(it['tv'])
+                elif it.get('wave') is not None:
+                    self._sigs_raw.append(it)
                 name = flat_text(it.get('name'))
                 full = it.get('path') or '.'.join([self.groups[i]['name'] for i in anc] + [name])
                 tv, text = it.get('tv') or [], it.get('kind') in ('real', 'string')
@@ -180,7 +235,7 @@ class Model:
                     width = int(w) if w else (1 if not text and all(re.fullmatch(r'[01xz]', str(v), re.I) for _, v in tv) else 8)
                 else:
                     width = int(w) if w > 1 else 1
-                sig = {'type': 'sig', 'name': name, 'full': full, 'anc': anc, 'width': width, 'kind': it.get('kind')}
+                sig = {'type': 'sig', 'name': name, 'full': full, 'anc': anc, 'width': width, 'kind': it.get('kind'), 'path': it.get('path')}
                 fields = it.get('fields')
                 if isinstance(fields, list) and fields and width > 1:   # a packed struct: a group of its fields
                     g = {'type': 'group', 'name': name, 'id': len(self.groups), 'anc': anc, 'depth': depth, 'path': full, 'full': full, 'kind': 'struct'}
@@ -468,32 +523,39 @@ class Editor:
             return {'range': None}
         p, q = self.time(a.get('from'), 'from'), self.time(a.get('to'), 'to')
         sig = self.m.pick(self.st, a['signal'], one=True)[0]['full'] if a.get('signal') else None
-        self.st['range'] = None if p == q else {'from': min(p, q), 'to': max(p, q), 'signal': sig}
-        return {'range': None if p == q else [min(p, q), max(p, q)]}
+        lo, hi = min(p, q), max(p, q)
+        if p != q and self.m.t0 is not None:   # cut to the waves (view.js setRange); wholly outside them: said
+            lo, hi = max(lo, self.m.t0), min(hi, self.m.t1)
+            if not lo < hi:
+                ft = (lambda x: f'{x / 1000:g}ns') if self.m.timed else (lambda x: f'{x:g}')
+                fail(f'range: {ft(min(p, q))} … {ft(max(p, q))} is outside the waves ({ft(self.m.t0)} … {ft(self.m.t1)})')
+        self.st['range'] = None if p == q else {'from': lo, 'to': hi, 'signal': sig}
+        return {'range': None if p == q else [lo, hi]}
 
     def c_bookmark(self, a):
         n = a.get('n')
-        if n is not None and not (n == 'all' and a.get('delete')) and not (isinstance(n, int) and not isinstance(n, bool) and n > 0 or
-                                                                           isinstance(n, str) and n.isdigit() and int(n) > 0):
-            fail('n: a bookmark number (1, 2 …)')
+        if n is not None and not (n == 'all' and a.get('delete')):
+            n = whole(n)
+            if n is None or n < 1:
+                fail('n: a bookmark number (1, 2 …)')
         bms = self.bms()
         nums = ', '.join(str(b['n']) for b in bms) or 'none'
         if a.get('delete'):
             if n == 'all':
                 self.put_marks([], [])
                 return {'deleted': 'all'}
-            b = next((b for b in bms if b['n'] == int(n or 0)), None)
+            b = next((b for b in bms if b['n'] == (n or 0)), None)
             if not b:
                 fail(f'no bookmark {n} (there are: {nums})')
             self.put_marks([x for x in bms if x is not b], [x for x in self.ars() if b['n'] not in (x['from'], x['to'])])
             return {'n': b['n'], 'deleted': True}
         t = self.time(a['t']) if a.get('t') is not None else None
         sig = self.m.pick(self.st, a['signal'], one=True)[0]['full'] if a.get('signal') else None
-        b = next((b for b in bms if n is not None and b['n'] == int(n)), None)
+        b = next((b for b in bms if n is not None and b['n'] == n), None)
         if not b:
             if t is None and self.st.get('cursor') is None:
                 fail('bookmark: t (the cursor here is not known)')
-            b = {'n': int(n) if n is not None else max([0] + [x['n'] for x in bms]) + 1, 't': self.st.get('cursor'), 'signal': None, 'text': '',
+            b = {'n': n if n is not None else max([0] + [x['n'] for x in bms]) + 1, 't': self.st.get('cursor'), 'signal': None, 'text': '',
                  'color': None, 'lift': False}
             bms.append(b)
         if t is not None:
@@ -512,24 +574,28 @@ class Editor:
 
     @staticmethod
     def id_ok(x, what):
-        """The id of an arrow or a marker: its number as listed, not a name."""
-        if x is not None and x != 'all' and not (isinstance(x, int) and not isinstance(x, bool) and x > 0 or isinstance(x, str) and x.isdigit() and int(x) > 0):
+        """The id of an arrow or a marker: its number as listed (1, 1.0, "1"; not true, 1.5, a name) -> the int, None or "all"."""
+        if x is None or x == 'all':
+            return x
+        i = whole(x)
+        if i is None or i < 1:
             fail(f'id: the number of the {what} as listed (1, 2 …), not {json.dumps(x, ensure_ascii=False)}; a new one: no id')
+        return i
 
     def c_arrow(self, a):
         if a.get('id') == 'all':
             fail('arrow: one at a time (bookmark n "all" deletes every arrow)')
-        self.id_ok(a.get('id'), 'arrow')
+        aid = self.id_ok(a.get('id'), 'arrow')
         bms, ars = self.bms(), self.ars()
         has = lambda n: any(b['n'] == n for b in bms)
         nums = ', '.join(str(b['n']) for b in bms) or 'none'
         def num(k):
-            try:
-                return int(float(a[k]))
-            except (TypeError, ValueError):
-                fail(f'{k}: a bookmark number, not {json.dumps(a[k])}')
-        if a.get('id') is not None:
-            i = int(a['id']) - 1
+            n = whole(a[k])
+            if n is None:
+                fail(f'{k}: a bookmark number (1, 2 …), not {json.dumps(a[k], ensure_ascii=False)}')
+            return n
+        if aid is not None:
+            i = aid - 1
             if not 0 <= i < len(ars):
                 fail(f'no arrow {a["id"]} (there are {len(ars)})')
         elif a.get('from') is not None and a.get('to') is not None:
@@ -570,18 +636,19 @@ class Editor:
         return {'id': i + 1}
 
     def c_marker(self, a):
-        self.id_ok(a.get('id'), 'marker')
-        ms, mid = self.marks(), a.get('id')
-        if mid is not None and mid != 'all' and not (str(mid).isdigit() and 0 < int(mid) <= len(ms)):
-            fail(f'no marker {mid} (there are {len(ms)})')
+        mid, ms = self.id_ok(a.get('id'), 'marker'), self.marks()
+        if mid not in (None, 'all') and not mid <= len(ms):
+            fail(f'no marker {a["id"]} (there are {len(ms)})')
         if a.get('delete'):
             if mid is None:
                 fail('marker: delete takes id or "all"')
-            ms = [] if mid == 'all' else ms[:int(mid) - 1] + ms[int(mid):]
+            ms = [] if mid == 'all' else ms[:mid - 1] + ms[mid:]
             self.st['markers'] = mark_list(ms)
             return {'id': mid, 'deleted': True}
+        if mid == 'all':
+            fail('marker: id "all" goes with delete (every marker deleted); one to change: its number')
         t = self.time(a['t']) if a.get('t') is not None else None
-        m = ms[int(mid) - 1] if mid is not None else None
+        m = ms[mid - 1] if mid is not None else None
         if not m:
             if t is None and self.st.get('cursor') is None:
                 fail('marker: t (the cursor here is not known)')
@@ -761,6 +828,8 @@ class Editor:
     def c_analog(self, a):
         rows = self.m.pick(self.st, a.get('signals'))
         n = 3 if a.get('rows') is True else a.get('rows')
+        if isinstance(n, float) and finite(n) and n.is_integer():   # 2.0: a number as JavaScript has it
+            n = int(n)
         bad = [r['full'] for r in rows if (r.get('width') or 1) < 2 and r.get('kind') != 'real']
         if bad and n:
             fail(f'not a bus: {", ".join(bad)}')
@@ -806,7 +875,14 @@ class Editor:
             c['maxHeight'] = ('' if win else None) if a.get('scroll') == 'page' else h if h is not None else base if win else '80vh'
         if a.get('tools') is not None:
             c['toolsFolded'] = a['tools'] == 'fold'
-        return {}
+        mh = c['maxHeight'] if 'maxHeight' in c else base
+        tf = c['toolsFolded'] if 'toolsFolded' in c else self.m.cfg.get('toolsFolded')
+        return {'scroll': 'window' if mh is not None and mh != '' else 'page', 'height': mh or None, 'tools': 'fold' if tf else 'open'}
+
+    def opt(self, k, default=None):
+        """A setting as the viewer has it: the state's config, else the page's, else the default (wavefw.config.js)."""
+        c = self.st.get('config') or {}
+        return c[k] if k in c else self.m.cfg.get(k, default)
 
     def c_find(self, a):
         c = self.config()
@@ -814,17 +890,45 @@ class Editor:
             if a.get(k) is not None:
                 c[key] = bool(a[k])
         self.st['find'] = str(a.get('query') if a.get('query') is not None else '')
-        return {'find': self.st['find']}
+        found = self.found(self.st['find'])
+        return {'found': [r['full'] or r['name'] for r in found][:50], 'count': len(found)}
+
+    def found(self, q):
+        """view.js find: the rows the query matches, in display order (the rows of plugins, not known here, left out)."""
+        s, rx = str(q or '').strip(), None
+        if self.opt('findRegex'):
+            try:
+                src = re.sub(r'\\([<>])', r'\\b', s)
+                rx = re.compile(f'^(?:{src})$' if self.opt('findWord') else src, 0 if self.opt('findCase') else re.I) if s else None
+            except re.error:
+                rx = None
+            terms = [s] if rx else []
+        else:
+            terms = [w for w in s.split() if w.replace('.', '')]
+        if not terms:
+            return []
+        groups = {g['id']: g for g in self.m.groups}
+        groups.update({r['id']: r for r in self.user_rows() if r['type'] == 'group'})
+        cs, word = bool(self.opt('findCase')), bool(self.opt('findWord'))
+        return [r for r in self.ordered() if r['type'] != 'space' and find_row(r, terms, groups, cs, word, rx)]
 
     def c_gaps(self, a):
         c = self.config()
-        if a.get('reset'):
-            for k in ALL_GAP_KEYS:
-                c[k] = None
+        if a.get('reset'):   # the page's own again (view.js setGaps(null)): a value equal to the page's setting is no override
+            c.update({k: self.m.cfg.get(k, GAP_DEFAULTS[k]) for k in ALL_GAP_KEYS})
         for k, g in GAP_KEYS.items():
             if k in a:
                 c[g] = a[k]
-        return {'gaps': {k: c[k] for k in ALL_GAP_KEYS if k in c}}
+        return {'gaps': self.gap_opt()}
+
+    def gap_opt(self):
+        """view.js gapOpt: the gaps' settings as they are now."""
+        o = {k: self.opt(k, GAP_DEFAULTS[k]) for k in ALL_GAP_KEYS}
+        o['gaps'], o['gapOnly'] = bool(o['gaps']), bool(o['gapOnly'])
+        o['gapSignals'], o['gapAux'], o['gapClock'] = prefixes(o['gapSignals']), prefixes(o['gapAux']), o['gapClock'] or None
+        if o['gapCount'] not in ('off', 'clock', 'edges', 'rise', 'fall', 'any'):
+            o['gapCount'] = 'clock'
+        return o
 
     def c_cycles(self, a):
         """The clock cycles under the time axis (view.js setCycles): as the state's cycles, cycleClock (a full path), cycleZero."""
@@ -840,11 +944,14 @@ class Editor:
             o['cycleZero'] = None if a['zero'] is None else self.time(a['zero'], 'zero')
         c = self.config()
         if a.get('reset'):   # the page's settings again (null in a state is the clock found, the first edge)
-            base = {'cycles': False, 'cycleClock': None, 'cycleZero': None}
-            c.update({k: self.m.cfg.get(k, base[k]) for k in CYC_KEYS})
+            c.update({k: self.m.cfg.get(k, CYC_DEFAULTS[k]) for k in CYC_KEYS})
             c['cycles'] = bool(c['cycles'])
         c.update(o)
-        return {'cycles': {k: c[k] for k in CYC_KEYS if k in c}}
+        cy = {k: self.opt(k, CYC_DEFAULTS[k]) for k in CYC_KEYS}
+        z = parse_t(cy['cycleZero'])
+        cy.update(cycles=bool(cy['cycles']), cycleClock=cy['cycleClock'] or None, cycleZero=z if finite(z) else None)
+        clk = cy['cycleClock'] or next((r['full'] for r in self.m.sigs() if r['width'] == 1 and re.search('clk|clock', r['name'], re.I)), None)
+        return {'cycles': cy, 'clock': clk, 'cycle': None}   # the cursor's cycle: from the clock's edges, in the page (live) only
 
     def c_reset(self, a):
         self.config()['highlight'] = []
@@ -855,24 +962,167 @@ class Editor:
         return {'state': self.st}
 
     def c_set_state(self, a):
+        """A state back (Load…): every key it has replaces this one's, the keys of its config one by one; a key it does not
+        have stays (null: none, or the page's own)."""
         s = a.get('state')
         if not isinstance(s, dict) or s.get('wavefw') != 'state':
             fail('set_state: not a saved viewer state ({"wavefw": "state", …})')
-        self.st = {k: v for k, v in s.items() if k not in ('wavefw', 'version', 'title')}
-        sigs = {r['full'] for r in self.m.sigs()} | {g['path'] for g in self.m.groups}
-        return {'missing': sorted({p for p in list((s.get('paint') or {}).keys()) + list(s.get('hidden') or []) if self.m.doc and p not in sigs})}
+        for k, v in s.items():
+            if k == 'config':
+                if isinstance(v, dict):
+                    self.config().update(v)
+            elif k not in ('wavefw', 'version', 'title'):
+                self.st[k] = v
+        return {'missing': self.missing(s)}
+
+    def missing(self, s):
+        """view.js setState: the paths a state names that these waves do not have."""
+        if not self.m.doc:
+            return []
+        sigs = {r['full'] for r in self.m.sigs()}
+        paths, out = sigs | {g['path'] for g in self.m.groups}, []
+        c = s['config'] if isinstance(s.get('config'), dict) else {}
+        lst = lambda x: x if isinstance(x, list) else []
+        def see(p, pool=paths):
+            if isinstance(p, str) and p and not p.startswith('@') and p not in pool and p not in out:
+                out.append(p)
+        for g in lst(s.get('groups')):
+            for p in lst(g.get('signals')) if isinstance(g, dict) else []:
+                see(p, sigs)
+        for p in lst(c.get('fold')) + [p for p in (s['folds'] if isinstance(s.get('folds'), dict) else {}) if p != '*']:
+            see(p)
+        for p in prefixes(c['highlight']) if c.get('highlight') is not None else []:
+            if '*' not in p:
+                see(p)
+        for k in ('paint', 'radix', 'analog'):
+            for p in s[k] if isinstance(s.get(k), dict) else {}:
+                see(p)
+        for p in lst(s.get('hidden')):
+            see(p)
+        for b in lst(s.get('bookmarks')):
+            see(b.get('signal') if isinstance(b, dict) else None)
+        see(s.get('select'))
+        see(s['range'].get('signal') if isinstance(s.get('range'), dict) else None)
+        return out
+
+    def user_rows(self):
+        """Your groups as the viewer shows them (edit.js ugRows): a header "@name", then its signals."""
+        by, out = {r['full']: r for r in self.m.sigs()}, []
+        for i, g in enumerate(self.groups()):
+            gid = -1 - i
+            out.append({'type': 'group', 'user': True, 'id': gid, 'name': g['name'], 'full': '@' + g['name'], 'path': '@' + g['name'], 'anc': []})
+            out += [dict(by[f], anc=[gid], ug=True) for f in g['signals'] if f in by]
+        return out
+
+    def ordered(self):
+        """view.js allRows: your groups at the top, then the rows in the order of "sort"; hidden rows and what is under a
+        hidden module left out."""
+        sort, ign = self.opt('sort', 'none'), sorted(prefixes(self.opt('sortIgnore')), key=lambda p: -len(p))
+        rows = self.user_rows() + order_rows(self.m.rows, sort, ign, self.m.cfg.get('groupOrder', 'file'))
+        h = set(self.st.get('hidden') or [])
+        ids = {g['id'] for g in self.m.groups if g['path'] in h}
+        return [r for r in rows if not (r['type'] != 'space' and r.get('full') and not r.get('ug') and r['full'] in h) and not ids & set(r['anc'])]
 
     def c_rows(self, a):
+        """edit.js rows: in display order, the hidden ones at the end."""
         pat = str(a.get('pattern') or '')
         rx = glob_re(pat) if '*' in pat else None
-        rows = [['@' + g['name'], 'group'] for g in self.st.get('groups') or []] + \
-            [[r['full'], 'module' if r['type'] == 'group' else r['width']] for r in self.m.rows if r['type'] != 'space']
+        h = set(self.st.get('hidden') or [])
+        shown = [r for r in self.ordered() if (r['type'] == 'sig' and not r.get('ug')) or (r['type'] == 'group' and r.get('full'))]
+        rows = [[r['full'], 'group' if r.get('user') else 'module' if r['type'] == 'group' else r['width']]
+                for r in shown + [r for r in self.m.rows if r.get('full') and r['full'] in h]]
         rows = [r for r in rows if not pat or (rx.match(r[0]) if rx else pat.lower() in r[0].lower())]
         off, n = max(0, int(a.get('offset') or 0)), max(1, int(a.get('limit') or 200))
         out = {'total': len(rows), 'rows': rows[off:off + n]}
         if off + n < len(rows):
             out['next_offset'] = off + n
         return out
+
+
+def collate(s):
+    """A sort key as Intl.Collator(numeric, sensitivity base) gives the order: marks, then numbers by value, then letters
+    without case or accents."""
+    out = []
+    for part in re.findall(r'\d+|\D', unicodedata.normalize('NFKD', s)):
+        if part.isdigit():
+            out.append((1, int(part), ''))
+        elif not unicodedata.combining(part):
+            out.append((2, 0, part.lower()) if part.isalpha() else (0, 0, part))
+    return out
+
+
+def order_rows(rows, sort, pfx, group_order):
+    """model.js orderRows: siblings (between spacers) sorted by name without the ignored prefixes; groups move as a block."""
+    sorting, gs = sort in ('asc', 'desc'), -1 if group_order == 'first' else 1 if group_order == 'last' else 0
+    if not sorting and not gs:
+        return list(rows)
+    kids = {None: []}
+    for r in rows:
+        kids.setdefault(r['anc'][-1] if r['anc'] else None, []).append(r)
+        if r['type'] == 'group':
+            kids.setdefault(r['id'], [])
+    strip = lambda n: next((n[len(p):] for p in pfx if n.startswith(p) and len(n) > len(p)), n)
+    c = lambda x, y: (collate(x) > collate(y)) - (collate(x) < collate(y))
+    sgn = -1 if sort == 'desc' else 1
+    def cmp(a, b):
+        g = gs * ((a['type'] == 'group') - (b['type'] == 'group'))
+        return g or (sgn * (c(strip(a['name']), strip(b['name'])) or c(a['name'], b['name'])) if sorting else 0)
+    out = []
+    def emit(lst):
+        run = []
+        def flush():
+            for r in sorted(run, key=functools.cmp_to_key(cmp)):
+                out.append(r)
+                if r['type'] == 'group':
+                    emit(kids.get(r['id'], []))
+            run.clear()
+        for r in lst:
+            if r['type'] == 'space':
+                flush()
+                out.append(r)
+            else:
+                run.append(r)
+        flush()
+    emit(kids[None])
+    return out
+
+
+def fuzzy(q, s, cs=False):
+    """model.js fuzzy: the letters of q in order in s -> a score, or None."""
+    t, q = (s, q) if cs else (s.lower(), q.lower())
+    j, score, prev = 0, 0, -2
+    for i, ch in enumerate(t):
+        if j >= len(q):
+            break
+        if ch == q[j]:
+            score += (6 if i == prev + 1 else 1) + (4 if i == 0 or t[i - 1] in '._[/ ' else 0)
+            prev, j = i, j + 1
+    return score - len(t) / 100 if j == len(q) else None
+
+
+def find_row(r, terms, groups, cs, word, rx):
+    """model.js findRow: a row against the query's words (every one), or against the regex -> whether it matches."""
+    name, path = r['name'], r.get('full') or r['name']
+    scope = '.'.join((groups.get(i) or {}).get('name', '') for i in r['anc']) if r['anc'] else path.rsplit('.', 1)[0] if '.' in path else ''
+    leaf = r['path'].rsplit('.', 1)[-1] if r.get('path') else ''
+    if rx:
+        return bool(rx.search(name) or (leaf and rx.search(leaf)) or rx.search(path))
+    eq = (lambda x, y: x == y) if cs else (lambda x, y: x.lower() == y.lower())
+    for w in terms:
+        if word:
+            hit = (eq(path, w) or (len(path) > len(w) and eq(path[-len(w) - 1:], '.' + w))) if '.' in w else (eq(name, w) or (leaf and eq(leaf, w)))
+            if not hit:
+                return False
+            continue
+        k = w.rfind('.')
+        sq, nq = (w[:k].replace('.', ''), w[k + 1:]) if k >= 0 else ('', w)
+        ms = fuzzy(sq, scope, cs) if sq else 0
+        mn = fuzzy(nq, name, cs) if nq else 0
+        if mn is None and leaf and leaf != name:
+            mn = fuzzy(nq, leaf, cs)
+        if ms is None or mn is None:
+            return False
+    return True
 
 
 # ---------------- pages and state files ----------------
@@ -940,10 +1190,10 @@ def edit_page(path, ops, view=None):
     p = Page(path)
     key = p.view(view)
     ed = Editor(p.model(key), p.state(key))
-    before = json.dumps(ed.st, sort_keys=True)
+    before = json.dumps(tidy(ed.st), sort_keys=True)   # 30000.0 is 30000
     res = ed.run(ops)
     rev = None
-    if json.dumps(ed.st, sort_keys=True) != before:
+    if json.dumps(tidy(ed.st), sort_keys=True) != before:
         rev = p.put(key, ed.st)
         p.save()
     return res, key, rev

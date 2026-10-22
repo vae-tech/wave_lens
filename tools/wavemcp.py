@@ -9,8 +9,10 @@ signal's transitions when a tool first needs it, then kept. The agent marks a pa
 commands (view_edit: bookmarks with a text, arrows, markers, groups, highlight, colours, cursor, window; tools/viewedit.py
 has them) and reads what is there (view_get): live in their browser once view_live has connected the page (an HTTP
 server of this process on 127.0.0.1, from port 8742 or WAVEFW_LIVE_PORT on, its key in ~/.cache/wavefw/live-token),
-else in the page's file. Times are ns in and out (a number), or a text with a unit
-("2.5us"); signal names are full paths, paths under "scope", or a unique tail of a path ("PSEL", "u_regs.PSEL").
+else in the page's file. Times are ns in and out (a number), or a text with a unit as the viewer reads one
+("2.5us", "100NS"); signal names are full paths, paths under "scope", or a unique tail of a path ("PSEL", "u_regs.PSEL").
+A request or an argument of a wrong shape gets an error answer and the session goes on; the programs the server starts
+get /dev/null as stdin (stdin and stdout are the protocol).
 
   claude mcp add wavefw -- python3 -I /path/to/wavefw/tools/wavemcp.py      # Claude Code
   codex mcp add wavefw -- python3 -I /path/to/wavefw/tools/wavemcp.py       # Codex CLI
@@ -21,7 +23,7 @@ Standard library only; the sva CLI as svabuild.py finds it (--sva-bin, $WAVEFW_S
 docs/USAGE.md § "AI agents (MCP)" has the tools; tests/mcp_bench.py measures what they save.
 """
 import argparse, bisect, collections, contextlib, fnmatch, hmac, http.server, json, os, queue, re, secrets, shutil, statistics, subprocess, sys
-import tempfile, threading, time, urllib.parse
+import tempfile, threading, time, traceback, urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
 import dumpscan, svabuild, vcd2wavedrom, viewedit  # noqa: E402
@@ -53,18 +55,13 @@ def version():
 
 # ---------------- times ----------------
 def ps_of(v, what='time'):
-    """A time from the agent: a number (ns) or a text with a unit -> ps."""
+    """A time from the agent: a number (ns) or a text with a unit, as the viewer reads one (viewedit.parse_time) -> ps."""
     if v is None or v == '':
         return None
-    if isinstance(v, (int, float)) and not isinstance(v, bool):
-        return float(v) * 1000
-    s = str(v).strip()
-    if re.fullmatch(r'-?[\d.]+(?:e-?\d+)?', s):
-        return float(s) * 1000
-    m = re.fullmatch(r'([\d.]+(?:e-?\d+)?)\s*(zs|as|fs|ps|ns|us|ms|s)', s)
-    if not m:
-        raise WaveError(f'bad {what} "{v}": a number of ns or a text with a unit ("250ns", "2.5us")')
-    return float(m.group(1)) * UNIT_PS[m.group(2)]
+    t = viewedit.parse_time(v, 1000, viewedit.TIME_UNITS) if isinstance(v, (str, int, float)) else None
+    if t is None or not viewedit.finite(t):
+        raise WaveError(f'bad {what} {json.dumps(v, ensure_ascii=False)}: a finite number of ns or a text with a unit ("250ns", "2.5us")')
+    return float(t)
 
 
 def ns(ps):
@@ -114,7 +111,12 @@ class Wave(vcd2wavedrom.Builtin):
                 path = None
             if path:
                 hi = int(m.group(2))
-                return path, (hi, int(m.group(3)) if m.group(3) is not None else hi)
+                lo = int(m.group(3)) if m.group(3) is not None else hi
+                w = self.decl.vars[path].width
+                if self.decl.vars[path].kind in dumpscan.TEXT_KINDS or lo > hi or hi >= w:
+                    raise WaveError(f'"{name}": {path} has bits [{w - 1}:0]' if self.decl.vars[path].kind not in dumpscan.TEXT_KINDS
+                                    else f'"{name}": {path} is a {self.decl.vars[path].kind}, it has no bits to select')
+                return path, (hi, lo)
         under = [p for p in self.decl.vars if not scope or p.startswith(scope.rstrip('.') + '.')]
         tails = sorted((p for p in under if p.endswith('.' + name)), key=lambda p: (p.count('.'), p))
         if len(tails) == 1:
@@ -132,6 +134,39 @@ class Wave(vcd2wavedrom.Builtin):
 
     def width(self, path, sl):
         return sl[0] - sl[1] + 1 if sl else self.decl.vars[path].width
+
+    def stream(self, path, sl=None):
+        """The converter's stream with a value that did not change left out: a select of a bus changes when its bits do,
+        not when the others do (and a dump that writes a value again has no change there)."""
+        key = ('wavemcp', path, sl)
+        if key not in self.streams:
+            out = []
+            for t, v in super().stream(path, sl):
+                if not out or out[-1][1] != v:
+                    out.append((t, v))
+            self.streams[key] = out
+        return self.streams[key]
+
+    def edges(self, path, kind, t0, t1, sl=None):
+        """The times of the edges (posedge negedge edge) or changes of a signal or a select of it in [t0, t1]."""
+        st, out, prev = self.stream(path, sl), [], None
+        for t, v in st:
+            if prev is not None and t0 <= t <= t1:
+                rise = (prev == '0' and v in '1xz') or (prev in 'xz' and v == '1')
+                fall = (prev == '1' and v in '0xz') or (prev in 'xz' and v == '0')
+                if (kind == 'posedge' and rise) or (kind == 'negedge' and fall) or (kind == 'edge' and (rise or fall)) or (kind == 'change' and v != prev):
+                    out.append(t)
+            prev = v
+        return out
+
+    def snap(self, t):
+        """A time given (ns, rounded) -> the dump's own time when it is one (within a millionth of a step): a page of an
+        answer goes on exactly where the last one stopped."""
+        u = self.decl.unit_ps
+        if t is None or not u:
+            return t
+        k = round(t / u)
+        return k * u if abs(t - k * u) <= u * 1e-6 else t
 
     def text(self, path, sl, v, radix=None):
         """A normalised value (stream()) -> what the agent reads: 0 1 x z for a bit, the label of a bus (enum, radix)."""
@@ -166,7 +201,8 @@ class Wave(vcd2wavedrom.Builtin):
 
     def clocks(self):
         """[(path, period ps, first rising edge ps, rising edges)] of the 1-bit *clk* / *clock* signals that toggle, one
-        per net (the same clock in several scopes is listed once, at its shortest path)."""
+        per net: the same id code in several scopes (one net) is listed once, at its shortest path; two clocks with edges
+        alike are two."""
         if self._clocks is None:
             cand = [p for p, v in self.decl.vars.items() if v.width == 1 and v.kind != 'event' and CLOCK_RE.search(p.rsplit('.', 1)[-1])
                     and (self.decl.changes.get(p) or 0) >= 3]
@@ -178,7 +214,7 @@ class Wave(vcd2wavedrom.Builtin):
                 rises = self.edges(p, 'posedge', float('-inf'), float('inf'))
                 if len(rises) < 2:
                     continue
-                key = (len(rises), rises[0], rises[-1])
+                key = tuple(self.decl.vars[p].members)   # the dump's id codes: an alias is the same net
                 if key in seen:
                     continue
                 seen[key] = p
@@ -230,8 +266,8 @@ def wave(path):
 
 
 def window(w, a):
-    t0 = ps_of(a.get('from'), 'from')
-    t1 = ps_of(a.get('to'), 'to')
+    t0 = w.snap(ps_of(a.get('from'), 'from'))
+    t1 = w.snap(ps_of(a.get('to'), 'to'))
     t0 = w.t_start if t0 is None else t0
     t1 = w.t_end if t1 is None else t1
     if t1 < t0:
@@ -287,7 +323,7 @@ def t_signals(a):
         if a.get('active') and not w.decl.changes.get(p):
             continue
         items.append((rel, v, w.decl.changes.get(p) or 0))
-    off = int(a.get('offset') or 0)
+    off = max(0, a.get('offset') or 0)
     n = limit(a, 200)
     page = items[off:off + n]
     out = {'total': len(items), 'scope': scope or None, 'columns': ['path', 'width', 'changes'],
@@ -311,7 +347,7 @@ def t_values(a):
     before = a.get('side') == 'before'
     rows = []
     for t in times:
-        tp = ps_of(t)
+        tp = w.snap(ps_of(t))
         rows.append([ns(tp)] + [w.text(p, sl, w.at(w.stream(p, sl), tp, before), radix) for p, sl in res])
     return {'unit': 'ns', 'side': 'before' if before else 'after', 'columns': ['t'] + list(names), 'rows': rows}
 
@@ -329,9 +365,9 @@ def t_changes(a):
         ch = st[lo:hi]
         e = {'initial': w.text(p, sl, w.at(st, t0), radix), 'count': len(ch),
              'changes': [[ns(t), w.text(p, sl, v, radix)] for t, v in ch[:n]]}
-        if len(ch) > n:
+        if len(ch) > n:   # "from" is the value after the changes at that time: the next page from the last change given
             e['more'] = len(ch) - n
-            e['next_from'] = ns(ch[n][0])
+            e['next_from'] = ns(ch[n - 1][0])
         out['signals'][name] = e
     return out
 
@@ -350,7 +386,7 @@ def t_sample(a):
     lo, hi = bisect.bisect_left(allt, t0), bisect.bisect_right(allt, t1)
     only = a.get('only_changes', True)
     sts = [w.stream(p, sl) for p, sl in res]
-    rows, prev, kept = [], None, 0
+    rows, prev, kept, nxt = [], None, 0, None
     for c in range(lo, hi):
         t = allt[c]
         vals = [w.text(p, sl, w.at(st, t, True), radix) for (p, sl), st in zip(res, sts)]
@@ -360,13 +396,15 @@ def t_sample(a):
         kept += 1
         if len(rows) < n:
             rows.append([c, ns(t)] + vals)
+        elif nxt is None:
+            nxt = t   # the first row left out: the next page starts with it (it differs from the row before it)
     out = {'unit': 'ns', 'clock': clk, 'edge': edge, 'sampled': 'just before the edge', 'cycles': hi - lo,
            'first_cycle': lo, 'columns': ['cycle', 't'] + list(names), 'rows': rows}
     if only:
         out['only_changes'] = True
     if kept > len(rows):
         out['more'] = kept - len(rows)
-        out['next_from'] = rows[-1][1] + 1e-3 if rows else None
+        out['next_from'] = ns(nxt)
     return out
 
 
@@ -434,7 +472,7 @@ def t_find(a):
                 'negedge': 'negedge', 'edge': 'edge'}.get(a.get('edge') or 'change')
         if not edge:
             raise WaveError('"edge" is rise, fall or change')
-        ts = w.edges(p, edge, t0, t1)
+        ts = w.edges(p, edge, t0, t1, sl)
         out = {'unit': 'ns', 'signal': a['signal'], 'edge': a.get('edge') or 'change', 'matches': len(ts), 'times': [ns(t) for t in ts[:n]]}
         hits = ts
     if len(hits) > n:
@@ -471,11 +509,12 @@ def run_sva(w, files, extra, scope, a, t0=None, t1=None):
             cmd += ['--from', f'{ns(t0)}ns']
         if t1 is not None and t1 < w.t_end:
             cmd += ['--to', f'{ns(t1)}ns']
-        for k, v in (a.get('defines') or {}).items():
+        defs = a.get('defines') or {}
+        for k, v in defs.items() if isinstance(defs, dict) else [(d, None) for d in defs]:   # {"X": 1} or ["X=1", "Y"]
             cmd += ['-D', f'{k}={v}' if v not in (None, '') else str(k)]
         if a.get('resolve'):
             cmd += ['--resolve', a['resolve']]
-        r = subprocess.run(cmd, capture_output=True, text=True)
+        r = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL)   # stdin is the protocol
         msgs = [l.replace(d + os.sep, '') for l in r.stderr.splitlines() if l.strip() and not re.match(r'sva: \d+ assertions over', l)]
         res = None
         if os.path.isfile(out):
@@ -544,8 +583,8 @@ def t_stats(a):
         changes = len(segs) - 1
         e = {'changes': changes}
         if w.width(p, sl) == 1 and w.decl.vars[p].kind not in dumpscan.TEXT_KINDS:
-            rises = w.edges(p, 'posedge', t0, t1)
-            falls = w.edges(p, 'negedge', t0, t1)
+            rises = w.edges(p, 'posedge', t0, t1, sl)
+            falls = w.edges(p, 'negedge', t0, t1, sl)
             dur = collections.Counter()
             for v, s, t in segs:
                 dur[v] += t - s
@@ -594,7 +633,7 @@ def t_sva(a):
         raise WaveError('nothing evaluated: ' + ' | '.join(msgs[:10]))
     cyc = res.get('cycles') or []
     tm = lambda c: ns(cyc[c] * UNIT_PS.get(res.get('unit', 'ps'), 1)) if isinstance(c, int) and 0 <= c < len(cyc) else None
-    mf = a.get('max_failures', 3)
+    mf = max(0, a.get('max_failures') if a.get('max_failures') is not None else 3)
     out = {'unit': 'ns', 'scope': scope or None, 'clock': res.get('clock'), 'cycles': len(cyc), 'failed': [], 'passed': [],
            'vacuous': [], 'not_evaluated': [], 'covered': [], 'not_covered': []}
     for r in res.get('assertions', []):
@@ -641,7 +680,10 @@ def converter_args(w, a, scope):
         clk = w.clock_for(clk, scope)
     argv += ['--clock', clk] if clk else ['--exact']
     t0, t1 = window(w, a)
-    argv += ['--from', f'{ns(t0)}ns', '--to', f'{ns(t1)}ns']
+    t0, t1 = max(t0, w.t_start), min(t1, w.t_end)   # a window past the dump's ends: the dump's
+    if t1 < t0:
+        raise WaveError(f'the window is outside the dump ({ns(w.t_start)} … {ns(w.t_end)} ns)')
+    argv += [f'--from={ns(t0)}ns', f'--to={ns(t1)}ns']   # with "=": a time below 0 is not an option
     if a.get('auto_gap') and clk:
         argv += ['--auto-gap', str(a['auto_gap'])]
     if a.get('hierarchy'):
@@ -662,7 +704,10 @@ def t_page(a):
         argv += ['--bind', b]
     if a.get('title'):
         argv += ['--title', a['title']]
-    doc = vcd2wavedrom.convert(vcd2wavedrom.options(argv))
+    try:
+        doc = vcd2wavedrom.convert(vcd2wavedrom.options(argv))
+    except SystemExit as e:   # argparse of the converter in this process: its message is on stderr, the server goes on
+        raise WaveError(f'the converter refused its arguments ({e.code}): {" ".join(argv[2:])}') from None
     if out.lower().endswith('.json'):   # the WaveJSON itself (WaveDrom, mkhtml.py, embed.py)
         with open(out, 'w', encoding='utf-8') as f:
             json.dump(doc, f, ensure_ascii=False)
@@ -674,7 +719,7 @@ def t_page(a):
         cmd = [sys.executable, '-I', os.path.join(ROOT, 'tools', 'mkhtml.py'), f'view={j}', '--out', out]
         if a.get('title'):
             cmd += ['--title', a['title']]
-        r = subprocess.run(cmd, capture_output=True, text=True)
+        r = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     if r.returncode:
         raise WaveError('mkhtml: ' + r.stderr.strip()[-400:])
     return {'page': out, 'bytes': os.path.getsize(out)}
@@ -708,6 +753,10 @@ def live_token():
     return t
 
 
+CID_RE = re.compile(r'[0-9a-z]{4,32}')   # a page's id on the link (edit.js: 8 letters and digits)
+MAX_BODY = 64 << 20   # bytes of a page's answer (a picture)
+
+
 class LiveHandler(http.server.BaseHTTPRequestHandler):
     """GET /events (server-sent events: the commands for the page), POST /hello (its viewers), POST /reply (the results);
     the token in every request, an Origin of a file:// page ("null") or this machine only."""
@@ -733,9 +782,13 @@ class LiveHandler(http.server.BaseHTTPRequestHandler):
     def query(self):
         return urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
 
+    def local(self):
+        """The Host of the request is this server by a local name (not a name of another site sent here: DNS rebinding)."""
+        return bool(re.fullmatch(rf'(127\.0\.0\.1|localhost|\[::1\]):{self.bridge.port}', self.headers.get('Host') or '', re.I))
+
     def allowed(self):
         o = self.headers.get('Origin')
-        if o not in (None, 'null') and not re.fullmatch(r'https?://(127\.0\.0\.1|localhost|\[::1\])(:\d+)?', o):
+        if not self.local() or o not in (None, 'null') and not re.fullmatch(r'https?://(127\.0\.0\.1|localhost|\[::1\])(:\d+)?', o):
             return False
         return hmac.compare_digest((self.query().get('token') or [''])[0].encode(), self.bridge.token.encode())
 
@@ -749,11 +802,11 @@ class LiveHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         path = urllib.parse.urlsplit(self.path).path
         if path == '/':
-            return self.answer(200, {'wavefw': 'live'})
+            return self.answer(200, {'wavefw': 'live'}) if self.local() else self.answer(403, {'error': 'not allowed'})
         if path != '/events':
             return self.answer(404, {'error': 'no such place'})
         cid = (self.query().get('cid') or [''])[0]
-        if not self.allowed() or not re.fullmatch(r'[0-9a-z]{4,32}', cid):
+        if not self.allowed() or not CID_RE.fullmatch(cid):
             return self.answer(403, {'error': 'not allowed'})
         q = self.bridge.attach(cid)
         self.head(200, 'text/event-stream')
@@ -779,20 +832,25 @@ class LiveHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         path = urllib.parse.urlsplit(self.path).path
         cid = (self.query().get('cid') or [''])[0]
-        if not self.allowed():
+        if path not in ('/hello', '/bye', '/reply'):
+            return self.answer(404, {'error': 'no such place'})
+        if not self.allowed() or not CID_RE.fullmatch(cid):
             return self.answer(403, {'error': 'not allowed'})
-        try:
-            data = json.loads(self.rfile.read(min(int(self.headers.get('Content-Length') or 0), 64 << 20)) or b'{}')
-        except ValueError:
+        try:   # a body that is not one JSON object: said, nothing done (no traceback of the server's thread)
+            n = int(self.headers.get('Content-Length') or 0)
+            if not 0 <= n <= MAX_BODY:
+                return self.answer(413 if n > 0 else 400, {'error': f'a body of 0 to {MAX_BODY} bytes'})
+            data = json.loads(self.rfile.read(n) or b'{}')
+        except (ValueError, RecursionError):
             return self.answer(400, {'error': 'not JSON'})
+        if not isinstance(data, dict):
+            return self.answer(400, {'error': 'not a JSON object'})
         if path == '/hello':
             self.bridge.hello(cid, data)
         elif path == '/bye':   # the page leaves (closed, reloaded)
             self.bridge.drop(cid)
-        elif path == '/reply':
-            self.bridge.resolve(data.get('rid'), data.get('results'))
-        else:
-            return self.answer(404, {'error': 'no such place'})
+        elif not self.bridge.resolve(cid, data.get('rid'), data.get('results')):   # /reply: to a command sent to this page
+            return self.answer(409, {'error': 'no command of this page is waiting for that answer'})
         self.answer(200, {})
 
 
@@ -814,6 +872,7 @@ class Bridge:
         else:
             raise WaveError(f'the live link: no free port from {first} on (WAVEFW_LIVE_PORT)')
         self.httpd.daemon_threads = True
+        self.httpd.handle_error = lambda request, addr: print(f'wavemcp: the live link: {sys.exc_info()[1]!r} ({addr[0]})', file=sys.stderr)
         self.port, self.started = self.httpd.server_address[1], time.monotonic()
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
 
@@ -853,7 +912,7 @@ class Bridge:
             c = self.clients.get(cid)
             if c:
                 c.update(path=str(data.get('path') or ''), url=str(data.get('url') or ''), title=str(data.get('title') or ''),
-                         views=[v for v in data.get('views') or [] if isinstance(v, dict)], at=time.monotonic())
+                         views=[v for v in data['views'] if isinstance(v, dict)] if isinstance(data.get('views'), list) else [], at=time.monotonic())
         with self.changed:
             self.changed.notify_all()
 
@@ -882,7 +941,7 @@ class Bridge:
                 raise WaveError('the page went (closed or reloaded): view_get lists the pages connected')
             self.rid += 1
             rid, ev = self.rid, threading.Event()
-            self.pending[rid] = [ev, None]
+            self.pending[rid] = [ev, None, cid]   # answered by this page only
             c['q'].put({'rid': rid, 'view': view, 'ops': ops})
         if not ev.wait(timeout):
             self.pending.pop(rid, None)
@@ -890,14 +949,20 @@ class Bridge:
             raise LiveGone(f'the live page did not answer in {timeout} s (its tab closed?)')
         got = self.pending.pop(rid)[1]
         if isinstance(got, dict) and got.get('error'):
-            raise WaveError(got['error'])
+            raise WaveError(str(got['error']))
+        if not isinstance(got, list) or len(got) != len(ops):
+            raise WaveError(f'the live page answered {json.dumps(got)[:200]}, not a result per command')
         return got
 
-    def resolve(self, rid, results):
-        p = self.pending.get(rid)
-        if p:
+    def resolve(self, cid, rid, results):
+        """A page's answer to command rid -> whether it was one sent to that page and not answered yet."""
+        with self.lock:
+            p = self.pending.get(rid) if isinstance(rid, int) and not isinstance(rid, bool) else None
+            if not p or p[2] != cid or p[0].is_set():
+                return False
             p[1] = results
             p[0].set()
+        return True
 
 
 class LiveGone(WaveError):
@@ -957,7 +1022,8 @@ def live_view(c, view):
 
 
 def ops_in(ops, timed):
-    """The agent's commands for a viewer: a time given as a number (ns) as a text in ns for timed waves."""
+    """The agent's commands for a viewer: a time given as a number (ns) as a text in ns for timed waves; the times of a
+    state given back (set_state: what view_get full gave, in ns) in the viewer's ps."""
     if isinstance(ops, dict):
         ops = [ops]
     if not isinstance(ops, list) or not ops:
@@ -969,6 +1035,8 @@ def ops_in(ops, timed):
             for k in viewedit.TIME_ARGS.get(o.get('op'), ()):
                 if isinstance(o.get(k), (int, float)) and not isinstance(o.get(k), bool):
                     o[k] = f'{o[k]}ns'
+            if o.get('op') == 'set_state' and isinstance(o.get('state'), dict):
+                o['state'] = state_ps(o['state'])
         out.append(o)
     return out
 
@@ -996,21 +1064,37 @@ def ns_out(results, timed):
     return out
 
 
-def state_ns(st):
-    """A state's times (cursor, window, range, bookmarks, markers) as ns."""
-    t = lambda v: ns(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else v
+def state_conv(st, f):
+    """A state with f applied to each of its times (cursor, cursor2, window, range, bookmarks, markers, the cycles' zero)
+    that is there and not null."""
+    t = lambda v: v if v is None or isinstance(v, bool) else f(v)
     st = dict(st)
     for k in ('cursor', 'cursor2', 'from', 'to'):
         if k in st:
             st[k] = t(st[k])
     if isinstance(st.get('range'), dict):
-        st['range'] = dict(st['range'], **{k: t(st['range'].get(k)) for k in ('from', 'to')})
+        st['range'] = dict(st['range'], **{k: t(st['range'][k]) for k in ('from', 'to') if k in st['range']})
     for k in ('bookmarks', 'markers'):
         if isinstance(st.get(k), list):
-            st[k] = [dict(x, t=t(x.get('t'))) if isinstance(x, dict) else x for x in st[k]]
+            st[k] = [dict(x, t=t(x['t'])) if isinstance(x, dict) and 't' in x else x for x in st[k]]
     if isinstance(st.get('config'), dict) and st['config'].get('cycleZero') is not None:
         st['config'] = dict(st['config'], cycleZero=t(st['config']['cycleZero']))
     return st
+
+
+def state_ns(st):
+    """A state's times as ns (view_get, the state command)."""
+    return state_conv(st, lambda v: ns(v) if isinstance(v, (int, float)) else v)
+
+
+def state_ps(st):
+    """A state from the agent (set_state), its times ns or a text with a unit -> the viewer's ps (a text it cannot read: as it is)."""
+    def ps(v):
+        try:
+            return round(ps_of(v), 3) if isinstance(v, (int, float, str)) else v
+        except WaveError:
+            return v
+    return state_conv(st, ps)
 
 
 def summary(st, timed, base=None):
@@ -1079,7 +1163,9 @@ def t_view_live(a):
                            'to anyone)')
             if a.get('open'):
                 out['opened'] = open_browser(path)
-            got = live_page({'page': path}, wait=float(a.get('wait', 3 if a.get('open') else 0) or 0))
+            wait = a.get('wait', 3 if a.get('open') else 0)
+            wait = min(max(float(wait), 0.0), 30.0) if viewedit.finite(wait) else 0.0
+            got = live_page({'page': path}, wait=wait)
             out['url'] = url
             if not got:
                 out['note'] += '; not connected yet: ask the person to open or reload it'
@@ -1094,7 +1180,8 @@ def open_browser(path):
         cands.append(['wslview', path])
     if shutil.which('explorer.exe') and shutil.which('wslpath'):
         try:
-            cands.append(['explorer.exe', subprocess.run(['wslpath', '-w', path], capture_output=True, text=True, timeout=5).stdout.strip()])
+            cands.append(['explorer.exe', subprocess.run(['wslpath', '-w', path], capture_output=True, text=True, timeout=5,
+                                                         stdin=subprocess.DEVNULL).stdout.strip()])
         except (OSError, subprocess.SubprocessError):
             pass
     for opener in ('xdg-open', 'open'):
@@ -1102,7 +1189,7 @@ def open_browser(path):
             cands.append([opener, path])
     for cmd in cands:
         try:
-            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)   # not the protocol's stdin
             return True
         except OSError:
             continue
@@ -1140,7 +1227,7 @@ def t_view_edit(a):
     if mode == 'live':
         try:
             return live_edit(a, where, v)
-        except LiveGone as e:   # the tab went: the file, when there is one
+        except LiveGone as e:   # the tab went before it answered the edit: the file, when there is one
             if not page_arg(a):
                 raise
             where, note = page_arg(a), f' ({e})'
@@ -1159,13 +1246,21 @@ def t_view_edit(a):
 def live_edit(a, where, v):
     res = BRIDGE[0].send(where['cid'], v.get('key'), ops_in(a.get('ops'), v.get('timed')))
     out = {'live': where['path'], 'view': v.get('key'), 'results': ns_out(res, v.get('timed'))}
-    if a.get('save'):
-        st = BRIDGE[0].send(where['cid'], v.get('key'), [{'op': 'state'}])[0]['state']
-        pg = viewedit.Page(where['path'] if os.path.isfile(where['path']) else page_arg(a))
-        key = pg.view(v.get('key'))
-        pg.put(key, {k: x for k, x in st.items() if k not in ('wavefw', 'version', 'title')})
-        pg.save()
-        out['saved'] = pg.path
+    if a.get('save'):   # the page answered: the edit is done there; never done again on the file (the person's own would go)
+        try:
+            st = BRIDGE[0].send(where['cid'], v.get('key'), [{'op': 'state'}])[0]
+            st = st.get('state') if isinstance(st, dict) else None
+            if not isinstance(st, dict):
+                raise WaveError(f'the live page gave no state ({json.dumps(st)[:100]})')
+        except WaveError as e:
+            out['saved'] = None
+            out['note'] = f'applied live, not saved into the page\'s file: {e}'
+        else:
+            pg = viewedit.Page(where['path'] if os.path.isfile(where['path']) else page_arg(a))
+            key = pg.view(v.get('key'))
+            pg.put(key, {k: x for k, x in st.items() if k not in ('wavefw', 'version', 'title')})
+            pg.save()
+            out['saved'] = pg.path
     errs = sum(1 for r in out['results'] if isinstance(r, dict) and 'error' in r)
     if errs:
         out['errors'] = errs
@@ -1199,17 +1294,20 @@ def live_get(a, where, v):
     if a.get('rows') is not None:
         ops.append({'op': 'rows', 'pattern': a['rows'] or '', 'limit': a.get('limit') or 200})
     res = BRIDGE[0].send(where['cid'], v.get('key'), ops)
-    st = res[0]['state']
+    got = lambda r, k: r[k] if isinstance(r, dict) and isinstance(r.get(k), (dict, str)) else fail_live(r)
+    st = got(res[0], 'state')
     out = {'live': where['path'], 'view': v.get('key'), 'views': [x.get('key') for x in where['views']]}
     out.update((state_ns(st) if v.get('timed') else st) if a.get('full') else summary(st, v.get('timed')))
     if a.get('rows') is not None:
-        out['rows'] = {k: x for k, x in res[1].items() if k != 'op'}
+        out['rows'] = {k: x for k, x in res[1].items() if k != 'op'} if isinstance(res[1], dict) and 'error' not in res[1] else fail_live(res[1])
     if a.get('picture'):
         pic = BRIDGE[0].send(where['cid'], v.get('key'), [{'op': 'picture', 'format': 'png'}])[0]
-        if pic.get('error'):
-            raise WaveError(pic['error'])
-        return Image(pic['png'], out)
+        return Image(got(pic, 'png'), out)
     return out
+
+
+def fail_live(r):
+    raise WaveError(str(r['error']) if isinstance(r, dict) and r.get('error') else f'the live page answered {json.dumps(r)[:200]}')
 
 
 class Image:
@@ -1259,7 +1357,7 @@ TOOLS = [
     tool('sva_check', t_sva, 'Evaluate SystemVerilog assertions (files, packages first, and/or source text) over the dump in scope -> '
          'failed with first failures [cycle, t, start_cycle, start_t, note], passed, vacuous, not_evaluated, covers.',
          {'dump': None, 'files': L, 'source': S, 'scope': None, 'assertions': L, 'from': None, 'to': None, 'max_failures': N,
-          'details': B, 'defines': {'type': 'object'}}),
+          'details': B, 'defines': {'type': ['object', 'array'], 'items': S}}),
     tool('wave_page', t_page, 'Write a wavefw viewer page (out .html) or WaveJSON (out .json) of signals to show a person; clock '
          '(name or "auto"): a cell per cycle, auto_gap "16:2" folds idle cycles; sva files + bind ["name@scope"].',
          {'dump': None, 'signals': None, 'out': S, 'clock': S, 'from': None, 'to': None, 'scope': None, 'auto_gap': S, 'sva': L,
@@ -1285,20 +1383,53 @@ def listing():
 
 
 def compact(obj):
-    return json.dumps(obj, separators=(',', ':'), ensure_ascii=False)
+    return json.dumps(obj, separators=(',', ':'), ensure_ascii=False, allow_nan=False)
+
+
+def fits(v, sch):
+    """A value against a property's schema (the types of TOOLS: string, integer, number, boolean, array, object); an
+    array takes one item alone too ("signals": "PSEL"), an integer 5.0."""
+    for ty in sch['type'] if isinstance(sch['type'], list) else [sch['type']]:
+        if ty == 'string' and isinstance(v, str) or ty == 'boolean' and isinstance(v, bool) or ty == 'object' and isinstance(v, dict):
+            return True
+        if ty in ('number', 'integer') and isinstance(v, (int, float)) and not isinstance(v, bool) and viewedit.finite(v) and (
+                ty == 'number' or float(v).is_integer()):
+            return True
+        if ty == 'array' and (all(fits(x, sch['items']) for x in v) if isinstance(v, list) else fits(v, sch['items'])):
+            return True
+    return False
+
+
+def check_args(t, a):
+    """A tool's arguments against its schema -> them (an integer as an int); one of a wrong kind is an error that says
+    what it takes. Arguments not in the schema are left to the tool."""
+    props, out = t['inputSchema']['properties'], dict(a)
+    for k, v in a.items():
+        sch = props.get(k)
+        if sch is None or v is None:
+            continue
+        if not fits(v, sch):
+            want = '/'.join(sch['type'] if isinstance(sch['type'], list) else [sch['type']])
+            want += f' of {sch["items"]["type"] if isinstance(sch["items"]["type"], str) else "/".join(sch["items"]["type"])}' if 'items' in sch else ''
+            raise WaveError(f'"{k}": a {want}, not {json.dumps(v, ensure_ascii=False)[:80]}')
+        if sch.get('type') == 'integer':
+            out[k] = int(v)
+    return out
 
 
 def call(name, args, images=None):
     """A tool by name -> (text, is error); a picture it gives goes to images (a list; none: left out). Everything the
     libraries print goes to stderr (stdout is the protocol)."""
-    t = BY_NAME.get(name)
+    t = BY_NAME.get(name) if isinstance(name, str) else None
     if not t:
-        return f'unknown tool {name}; the tools: {", ".join(BY_NAME)}', True
+        return f'unknown tool {json.dumps(name, ensure_ascii=False)[:80]}; the tools: {", ".join(BY_NAME)}', True
+    if args is not None and not isinstance(args, dict):
+        return f'the arguments of {name} are an object ({{"dump": …}}), not {json.dumps(args, ensure_ascii=False)[:80]}', True
     NOTES.clear()
     MISSING.clear()
     try:
         with contextlib.redirect_stdout(sys.stderr):
-            got = t['fn'](args or {})
+            got = t['fn'](check_args(t, args or {}))
             if isinstance(got, Image):
                 if images is not None:
                     images.append(got.png)
@@ -1310,7 +1441,10 @@ def call(name, args, images=None):
             text = compact(got)
     except WaveError as e:
         return str(e), True
-    except (OSError, ValueError, KeyError, TypeError) as e:
+    except SystemExit as e:   # a library that meant to end a program of its own: this tool's error, the server goes on
+        return f'{name} stopped ({e.code})', True
+    except Exception as e:   # noqa: BLE001 — anything else: this call's error (and its trace in the agent's log), not the session's end
+        print(f'wavemcp: {name}: ' + ''.join(traceback.format_exception(type(e), e, e.__traceback__)).rstrip(), file=sys.stderr)
         return f'{type(e).__name__}: {e}', True
     if len(text) > MAX_TEXT:
         return (f'the answer is {len(text)} characters (more than {MAX_TEXT}): narrow the window (from / to), the signals, '
@@ -1319,28 +1453,67 @@ def call(name, args, images=None):
 
 
 # ---------------- JSON-RPC over stdio ----------------
+def rpc_error(mid, code, message):
+    return {'jsonrpc': '2.0', 'id': mid, 'error': {'code': code, 'message': message}}
+
+
 def handle(msg):
-    """One JSON-RPC message -> the response dict, or None for a notification."""
+    """One JSON-RPC message -> the response dict, or None for a notification. A message of a wrong shape gets its error
+    (-32600 invalid request, -32602 invalid params), anything that goes wrong in it -32603: the session goes on."""
     if not isinstance(msg, dict) or msg.get('jsonrpc') != '2.0':
-        return {'jsonrpc': '2.0', 'id': None, 'error': {'code': -32600, 'message': 'invalid request'}}
-    mid, method, p = msg.get('id'), msg.get('method'), msg.get('params') or {}
+        return rpc_error(None, -32600, 'invalid request: a JSON-RPC 2.0 object')
+    mid, method, p = msg.get('id'), msg.get('method'), msg.get('params')
+    if mid is not None and (isinstance(mid, bool) or not isinstance(mid, (str, int, float))):
+        return rpc_error(None, -32600, 'invalid request: "id" is a string or a number')
+    if not isinstance(method, str):
+        return rpc_error(mid, -32600, 'invalid request: "method" is a string')
     if mid is None:   # a notification (initialized, cancelled): nothing to answer
         return None
+    if p is not None and not isinstance(p, dict):
+        return rpc_error(mid, -32602, f'invalid params: an object, not {json.dumps(p)[:60]}')
+    p = p or {}
     ok = lambda r: {'jsonrpc': '2.0', 'id': mid, 'result': r}
-    if method == 'initialize':
-        want = p.get('protocolVersion')
-        return ok({'protocolVersion': want if want in PROTOCOLS else PROTOCOLS[0],
-                   'capabilities': {'tools': {'listChanged': False}},
-                   'serverInfo': {'name': 'wavefw', 'version': version()}, 'instructions': INSTRUCTIONS})
-    if method == 'ping':
-        return ok({})
-    if method == 'tools/list':
-        return ok({'tools': listing()})
-    if method == 'tools/call':
-        png = []
-        text, err = call(p.get('name'), p.get('arguments'), png)
-        return ok({'content': [{'type': 'text', 'text': text}] + [{'type': 'image', 'data': x, 'mimeType': 'image/png'} for x in png], 'isError': err})
-    return {'jsonrpc': '2.0', 'id': mid, 'error': {'code': -32601, 'message': f'method not found: {method}'}}
+    try:
+        if method == 'initialize':
+            want = p.get('protocolVersion')
+            return ok({'protocolVersion': want if isinstance(want, str) and want in PROTOCOLS else PROTOCOLS[0],
+                       'capabilities': {'tools': {'listChanged': False}},
+                       'serverInfo': {'name': 'wavefw', 'version': version()}, 'instructions': INSTRUCTIONS})
+        if method == 'ping':
+            return ok({})
+        if method == 'tools/list':
+            return ok({'tools': listing()})
+        if method == 'tools/call':
+            if not isinstance(p.get('name'), str):
+                return rpc_error(mid, -32602, 'invalid params: "name", the tool, is a string')
+            if p.get('arguments') is not None and not isinstance(p['arguments'], dict):
+                return rpc_error(mid, -32602, f'invalid params: "arguments" is an object, not {json.dumps(p["arguments"])[:60]}')
+            png = []
+            text, err = call(p['name'], p.get('arguments'), png)
+            return ok({'content': [{'type': 'text', 'text': text}] + [{'type': 'image', 'data': x, 'mimeType': 'image/png'} for x in png],
+                       'isError': err})
+    except Exception as e:   # noqa: BLE001 — the request's error, not the server's end
+        print('wavemcp: ' + ''.join(traceback.format_exception(type(e), e, e.__traceback__)).rstrip(), file=sys.stderr)
+        return rpc_error(mid, -32603, f'internal error: {type(e).__name__}: {e}')
+    return rpc_error(mid, -32601, f'method not found: {method}')
+
+
+def respond(line):
+    """One line of the protocol -> the text of its answer ('' for none)."""
+    try:
+        msg = json.loads(line)
+    except (ValueError, RecursionError):
+        return compact(rpc_error(None, -32700, 'parse error'))
+    try:
+        if isinstance(msg, list):
+            resp = [r for r in map(handle, msg) if r] if msg else rpc_error(None, -32600, 'invalid request: an empty batch')
+        else:
+            resp = handle(msg)
+        return compact(resp) if resp else ''
+    except Exception as e:   # noqa: BLE001 — an answer that is not JSON (or anything not foreseen): said, the session goes on
+        print(f'wavemcp: {type(e).__name__}: {e}', file=sys.stderr)
+        mid = msg.get('id') if isinstance(msg, dict) and isinstance(msg.get('id'), (str, int)) else None
+        return compact(rpc_error(mid, -32603, f'internal error: {type(e).__name__}: {e}'))
 
 
 def serve(inp=None, out=None):
@@ -1349,15 +1522,23 @@ def serve(inp=None, out=None):
     for line in inp:
         if not line.strip():
             continue
-        try:
-            msg = json.loads(line)
-        except ValueError:
-            resp = {'jsonrpc': '2.0', 'id': None, 'error': {'code': -32700, 'message': 'parse error'}}
-        else:
-            resp = [r for r in map(handle, msg) if r] if isinstance(msg, list) else handle(msg)
-        if resp:
-            out.write(compact(resp) + '\n')
+        text = respond(line)
+        if text:
+            out.write(text + '\n')
             out.flush()
+
+
+def protocol_streams():
+    """stdin and stdout are the protocol: this process keeps them as its own, and the descriptors 0 and 1 every program
+    it starts inherits become /dev/null and stderr (a browser, fst2vcd, the sva CLI never read a request or write into an
+    answer) -> (input, output)."""
+    inp = os.fdopen(os.dup(0), 'r', encoding='utf-8', errors='replace')
+    out = os.fdopen(os.dup(1), 'w', encoding='utf-8')
+    nul = os.open(os.devnull, os.O_RDONLY)
+    os.dup2(nul, 0)
+    os.close(nul)
+    os.dup2(2, 1)
+    return inp, out
 
 
 def main():
@@ -1376,7 +1557,7 @@ def main():
         text, err = call(a.call[0], args)
         print(text)
         return 1 if err else 0
-    serve()
+    serve(*protocol_streams())
     return 0
 
 

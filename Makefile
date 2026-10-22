@@ -263,15 +263,17 @@ wavefw: wavefw/wavefw.js
 wavefw/wavefw.js: $(WAVEFW_SRC) tools/wavefwcat.py
 	$(PY) tools/wavefwcat.py
 
-# Python unit tests of the tools (tests/unit/test_*.py on unittest, no dependencies; the fixtures in tests/unit/vcd)
+# Python unit tests of the tools (tests/unit/test_*.py on unittest, no dependencies; the fixtures in tests/unit/vcd).
+# The sva CLI of this BUILD when it is built (else svabuild finds one: an older out/ build would test stale code)
 unit:
-	BUILD=$(B) $(PY) -m unittest discover -s tests/unit -t .
+	BUILD=$(B) $(if $(WAVEFW_SVA),,$(if $(wildcard $(SVA_BIN)),WAVEFW_SVA=$(abspath $(SVA_BIN)))) $(PY) -m unittest discover -s tests/unit -t .
 
 # The gate: the engine's tests, the unit tests, every page smoke checks (so it has nothing to skip), smoke --strict
 check:
 	$(PY) tools/wavefwcat.py --check
-	$(MAKE) sva-test unit
+	$(MAKE) sva-test
 	$(MAKE) sva-build
+	$(MAKE) unit
 	$(MAKE) examples demo demo-fst sva-spike html
 	$(MAKE) sva-verify mcp-bench
 	$(MAKE) smoke STRICT=1

@@ -981,8 +981,10 @@ READERS_BAD = {'backwards': 'time goes back', 'unsorted': 'time goes back', 'noe
 
 def readers(browser, build):
     """The page's VCD reader (WaveFW.vcdToWave, wavefw/src/vcd.js) and the tools' (vcd2wavedrom.py --exact over
-    dumpscan.py) give the same transitions for every fixture of tests/unit/vcd: one rule for references, merged codes,
-    texts, VHDL values, comments in the body, x / z; the dumps the tools refuse the page refuses too."""
+    dumpscan.py) give the same transitions, kinds and widths for every fixture of tests/unit/vcd: one rule for
+    references, merged codes, vectors in parts (bits, ranges apart, two bits under one code), texts (realtime …, inf,
+    nan), VHDL values, tokens apart by any white space, comments in the body, x / z; the dumps the tools refuse the
+    page refuses too."""
     import json
     sys.path.insert(0, str(ROOT / 'tools'))
     import dumpscan
@@ -1026,8 +1028,8 @@ def readers(browser, build):
             if not tv or tv[0][0] > it['tv'][0][0]:   # the page starts at the first change, the tools at the window's start
                 tv = [[it['tv'][0][0], None if pg['kind'] else 'x']] + tv
             fl = lambda q: [[float(t), v] for t, v in q]   # times above 2^53 ps: JavaScript numbers round them (dumpscan warns)
-            if fl(tv) != fl(it['tv']) or pg['kind'] != it.get('kind'):
-                bad.append(f'{p}: page {tv[:4]} {pg["kind"]}, tools {it["tv"][:4]} {it.get("kind")}')
+            if fl(tv) != fl(it['tv']) or pg['kind'] != it.get('kind') or pg['width'] != it.get('width', 1):
+                bad.append(f'{p}: page {tv[:4]} {pg["kind"]} w{pg["width"]}, tools {it["tv"][:4]} {it.get("kind")} w{it.get("width", 1)}')
         extra = set(got['sigs']) - set(tools)
         (differ if bad or extra else same).append(f.stem + (f' ({bad[:2]} {sorted(extra)[:3]})' if bad or extra else ''))
     check(not differ and len(same) == len(fixtures), f'the page and the tools read {len(same)} of {len(fixtures)} fixtures the same' + (f'; differ: {differ}' if differ else ''))
@@ -1580,6 +1582,138 @@ def compare(browser, build):
     ctx.close()
 
 
+def view_review(browser, build):
+    """The review of 0.15, the viewer: Clear keeps your markers, cycleZero a time, a run lays its rows out before a
+    picture or an edge, undo after a button's release nobody heard, the rows of a hidden module, a state that clears what
+    it has not, a match by name said, ±inf and nan apart, names every object inherits refused, ids and ranges checked;
+    compare and analog at scale (the marks, the bands a pixel apart one, a busy bus one bar per pixel)."""
+    print('viewer: the review of 0.15')
+    d = build / 'smoke' / 'view_review'
+    d.mkdir(parents=True, exist_ok=True)
+    pg = d / 'review.html'
+    pg.write_text(f'''<!doctype html><html><head><meta charset="utf-8"><title>review</title>
+<link rel="stylesheet" href="{(ROOT / 'wavefw' / 'wavefw.css').as_uri()}"></head><body><div id="w"></div>
+<script src="{(ROOT / 'wavefw' / 'wavefw.js').as_uri()}"></script></body></html>''', encoding='utf-8')
+    ctx = browser.new_context(viewport={'width': 1400, 'height': 1000})
+    page = ctx.new_page()
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    # the helpers of every check: a viewer of its own (opts.key: its own storage), a small hierarchy, a VCD of B
+    helpers = """() => {
+      window.mk = (doc, o = {}) => { const el = document.body.appendChild(document.createElement('div')); return new WaveFW.WaveView(el, doc, o); };
+      window.small = cfg => ({ signal: [['tb', { name: 'clk', path: 'tb.clk', tv: Array.from({ length: 40 }, (_, i) => [i * 5000, i % 2 ? '1' : '0']) },
+        ['u', { name: 'a', path: 'tb.u.a', tv: [[0, '0'], [1000, '1']] }, { name: 'data', path: 'tb.u.data', width: 8, tv: [[0, '00'], [20000, '3a']] }]]],
+        time: { t0: 0, t1: 200000, unit: 'ps' }, config: cfg || {} });
+      window.sleep = ms => new Promise(r => setTimeout(r, ms));
+      window.vcd = (vars, body) => `$timescale 1ps $end ${vars} $enddefinitions $end ${body}`; }"""
+    page.goto(pg.as_uri()); page.wait_for_load_state('load'); page.evaluate('localStorage.clear()'); page.evaluate(helpers)
+    js = lambda e: page.evaluate(f"(async () => {{ {e} }})()")
+    # V1: Clear takes the bookmarks and arrows, not your markers (they share this browser's copy); the page's come back
+    page.evaluate("""async () => { const v = mk(small(), { key: 'v1' }); await v.run([{ op: 'bookmark', t: 1000 }, { op: 'bookmark', t: 6000 },
+        { op: 'arrow', from: 1, to: 2 }, { op: 'marker', t: 2000, label: 'M' }]); v.notesEl.querySelector('button[data-bm=clear]').click(); }""")
+    page.reload(); page.wait_for_load_state('load'); page.evaluate(helpers)
+    got = js("""const doc = { signal: [{ name: 'a', path: 'a', tv: [[0, '0'], [10, '1']] }], time: { t0: 0, t1: 100, unit: 'ps' } };
+        const v = mk(doc, { key: 'v1' }); return [v.umarks.map(m => m.label), v.bms.length, v.arrows.length];""")
+    check(got == [['M'], 0, 0], f'Clear: the bookmarks and arrows gone, your markers kept over a reload {got}')
+    page.evaluate('localStorage.clear()')
+    # V2: cycleZero "50ns" is 50 ns (as gapIdle and the cursor read a time), in the viewer and in a static SVG
+    got = js("""const v = mk(small({ cycles: true, cycleZero: '50ns' }), { key: 'v2' }), d = v.cycData();
+        const svg = z => WaveFW.WaveSVG.toString(small({ cycles: true, cycleZero: z }), {}).replace(/wvfclip\\d+/g, '');
+        return [v.cycOpt().cycleZero, d.ups[d.iz], svg('50ns') === svg(50000), svg('50ns') !== svg(50)];""")
+    check(got == [50000, 55000, True, True], f'cycleZero "50ns": 50 000 ps, cycle 0 the edge at 55 ns, the static SVG the same as 50000 {got}')
+    # V3: a run lays its rows out before a command that reads them: a picture after a hide, an edge of the shown signals
+    got = js("""const v = mk(small(), { key: 'v3' }), names = s => [...s.matchAll(/>(clk|a|data)<\\/text>/g)].map(m => m[1]);
+        const r = await v.run([{ op: 'hide', signals: 'tb.u.a' }, { op: 'picture', format: 'svg' }]);
+        await v.run({ op: 'show' }); v.select(null); v.setCursor(0);
+        const e = await v.run([{ op: 'hide', signals: 'tb.u.a' }, { op: 'edge', dir: 1, kind: 'any' }]);
+        return [names(r[1].svg), e[1].t];""")
+    check(got[0] == ['clk', 'data'] and got[1] == 5000, f'in one run: the picture after a hide has no hidden row, an edge after it is of a shown signal {got}')
+    # V4: a button down whose release nobody heard (the browser's menu, the window left): undo still records and undoes
+    got = js("""const v = mk(small(), { key: 'v4' }); await sleep(30);
+        const row = () => WaveFW.internal.peek(v).namesEl.querySelector('.row[data-r="1"]'), out = [];
+        for (const end of [el => el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 })),
+          () => window.dispatchEvent(new Event('blur'))]) {
+          row().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 2 })); end(row()); v.closeMenu();
+          await v.run({ op: 'bookmark', t: 5000 }); await sleep(30); out.push([(await v.undo(-1)).split(',')[0], v.bms.length]);
+        }
+        return out;""")
+    check(got == [['bookmarks', 0], ['bookmarks', 0]], f'a press ended by the context menu, by the window losing the focus: the next edit is a step, undone {got}')
+    # V5: rows lists the signals of a hidden module too, where they stand
+    got = js("""const v = mk(small(), { key: 'v5' }), r = await v.run([{ op: 'hide', signals: 'tb.u' }, { op: 'rows' }]); return r[1].rows.map(x => x[0]);""")
+    check(got == ['tb', 'tb.clk', 'tb.u', 'tb.u.a', 'tb.u.data'], f'rows: a hidden module\'s signals too, in their place {got}')
+    # A10: a state says no second cursor, no range, the edge kind: loaded over a viewer that has them, it clears them
+    got = js("""const v = mk(small(), { key: 'a10' }), st = v.state(); v.setCursor2(30000); v.setRange(10000, 20000); v.setEdgeKind('rise');
+        await v.setState(st); return [st.cursor2, st.range, st.edge, v.cursor2, v.range, v.edgeKind];""")
+    check(got == [None, None, {'kind': 'any', 'value': ''}, None, None, 'any'],
+          f'state(): cursor2 null, range null, the edge kind; set_state clears what was set after it {got}')
+    # A8, A5: a signal found by its short name only is said (toast, its tooltip, the bar); reals inf, -inf and nan apart
+    got = js("""const v = mk({ signal: [['tb', ['a', { name: 'ready', path: 'tb.a.ready', tv: [[0, '0'], [10, '1']] }], { name: 'q', path: 'tb.q', tv: [[0, '0']] },
+          { name: 'r1', path: 'tb.r1', kind: 'real', tv: [[0, 'inf']] }, { name: 'r2', path: 'tb.r2', kind: 'real', tv: [[0, 'nan']] },
+          { name: 'r3', path: 'tb.r3', kind: 'real', tv: [[0, '-inf']] }]], time: { t0: 0, t1: 40, unit: 'ps' } }, { key: 'a8' });
+        const B = vcd('$scope module tb $end $scope module b $end $var wire 1 ! ready $end $upscope $end $var wire 1 " q $end $var real 64 # r1 $end ' +
+          '$var real 64 $ r2 $end $var real 64 % r3 $end $upscope $end', '#0 0! 0" r-Infinity # rNaN $ r-Infinity % #10 1! #40');
+        const r = await v.compare(B, 'b.vcd'), toast = v.root.querySelector('.toast').textContent, row = v.M.rows.find(x => x.full === 'tb.a.ready');
+        const reals = ['r1', 'r2', 'r3'].map(n => v.cmp.rows.get(v.M.rows.find(x => x.name === n)).spans.length);
+        return [r.byName, toast.includes('matched by name: tb.a.ready → tb.b.ready'), (v.rowEl(row).title || '').includes('matched by name'),
+          v.root.querySelector('button[data-act=dcmpx]').title.includes('matched by name'), (v.rowEl(v.M.rows.find(x => x.full === 'tb.q')).title || ''), reals];""")
+    check(got == [1, True, True, True, '', [1, 0, 0]], f'tb.a.ready compared with tb.b.ready by its name: said in the toast, its tooltip and the bar, '
+          f'an exact match not; a real inf / -inf differs, nan / nan and -inf / -inf do not {got}')
+    # M6: names every object has ("constructor", "toString") are no shape, line, style, kind or command; in this browser's copy, the default
+    got = js("""const v = mk(small(), { key: 'm6' }), key = v.bmKey;
+        const r = await v.run([{ op: 'bookmark', t: 1000 }, { op: 'bookmark', t: 6000 }, { op: 'arrow', from: 1, to: 2, line: 'constructor' },
+          { op: 'arrow', from: 1, to: 2, shape: 'toString' }, { op: 'style', name: 'constructor' }, { op: 'edge', kind: 'constructor' }, { op: 'constructor' }]);
+        v.destroy(); localStorage.setItem(key, JSON.stringify({ bookmarks: [{ n: 1, t: 1000 }, null, { n: 2, t: 6000 }],
+          arrows: [{ from: 1, to: 2, line: 'constructor', shape: 'toString', head: 'valueOf' }, null] }));
+        let w = null, err = ''; try { w = mk(small(), { key: 'm6' }); w.draw(); } catch (e) { err = e.message; }
+        const st = w && await w.setState({ wavefw: 'state', version: 3, arrows: [{ from: 1, to: 2, line: 'hasOwnProperty' }], bookmarks: [{ n: 1, t: 1 }, { n: 2, t: 9 }] });
+        return [r.slice(2).map(x => (x.error || '').split(':')[0].slice(0, 12)), err, w && w.arrows.map(a => [a.shape, a.head, a.line]), w && w.bms.length, !!st];""")
+    check(got == [['line', 'shape', 'name', 'kind', 'no command "'], '', [['~', '>', 'solid']], 2, True],
+          f'"constructor" / "toString": refused by the commands; a copy in this browser with them (and a null) opens, the defaults taken {got}')
+    # B13 / B14: ids are numbers (2.0 is 2; true and 1.5 are not), marker id "all" only deletes, a range outside the waves is refused
+    got = js("""const v = mk(small(), { key: 'b13' });
+        const r = await v.run([{ op: 'bookmark', t: 1000 }, { op: 'bookmark', t: 6000 }, { op: 'bookmark', n: true, text: 'x' }, { op: 'bookmark', n: 1.5 },
+          { op: 'arrow', from: true, to: 2 }, { op: 'arrow', from: 1.5, to: 2 }, { op: 'marker', t: 1000 }, { op: 'marker', id: true, label: 'y' },
+          { op: 'marker', id: 'all', label: 'oops' }, { op: 'bookmark', n: 2.0, text: 'two' }, { op: 'range', from: 300000, to: 400000 },
+          { op: 'range', from: 150000, to: 400000 }]);
+        await v.setState({ wavefw: 'state', version: 3, range: { from: 300000, to: 400000, signal: null } });
+        return [r.map(x => (x.error ? 'error' : 'ok')), v.umarks.length, v.arrows.length, v.bms.find(b => b.n === 2).text, v.range];""")
+    check(got == [['ok', 'ok', 'error', 'error', 'error', 'error', 'ok', 'error', 'error', 'ok', 'error', 'ok'], 1, 0, 'two', None],
+          f'n / id / from true or 1.5: refused, 2.0 taken; marker id "all" without delete refused; a range past the end refused, one that '
+          f'reaches into the waves cut to them; a state\'s range outside them none, not the wrong way round {got}')
+    # V7: compare at scale — the marks of 6000 signals (a map of the rows, not a search per row), the bands of a clock a
+    # picosecond late (a band per pixel at most), the analog plot of a busy bus (a bar per pixel column)
+    got = js("""const sig = [], vars = [], b0 = [], b1 = [];
+        for (let m = 0; m < 120; m++) { const mod = ['m' + m]; vars.push(`$scope module m${m} $end`);
+          for (let k = 0; k < 50; k++) { const i = m * 50 + k; mod.push({ name: 's' + k, path: `top.m${m}.s${k}`, width: 8, tv: [[0, '00'], [100, i % 2 ? '01' : '02']] });
+            vars.push(`$var wire 8 v${i} s${k} $end`); b0.push(`b0 v${i}`); b1.push(`b1 v${i}`); }
+          sig.push(mod); vars.push('$upscope $end'); }
+        const v = mk({ signal: [['top', ...sig]], time: { t0: 0, t1: 1000, unit: 'ps' } }, { key: 'v7a' });
+        const r = await v.compare(vcd('$scope module top $end ' + vars.join(' ') + ' $upscope $end', '#0 ' + b0.join(' ') + ' #100 ' + b1.join(' ') + ' #1000'), 'b.vcd');
+        let t = performance.now(); v.cmpMarks(); const marks = performance.now() - t;
+        t = performance.now(); await v.compare(null); const clear = performance.now() - t; v.destroy(); return [r.differ, marks, clear];""")
+    check(got[0] == 3000 and got[1] < 300 * SCALE and got[2] < 600 * SCALE, f'6000 signals compared: their marks in {got[1]:.0f} ms, compared no '
+          f'more in {got[2]:.0f} ms ({got[0]} differ; it took 941 / 1068 ms)')
+    got = js("""const N = 100000, tv = [], body = [];
+        for (let i = 0; i < N; i++) { tv.push([i * 10, i % 2 ? '1' : '0']); body.push(`#${i ? i * 10 + 1 : 0} ${i % 2 ? 1 : 0}!`); }
+        const v = mk({ signal: [{ name: 'clk', path: 'clk', tv }], time: { t0: 0, t1: N * 10, unit: 'ps' } }, { key: 'v7b' });
+        const r = await v.compare(vcd('$var wire 1 ! clk $end', body.join(' ') + ` #${N * 10}`), 'b.vcd'); v.fit();
+        let t = performance.now(); v.draw(); const draw = performance.now() - t;
+        const pic = v.toSVG(), c = v.cmp; v.cmp = null; const pic0 = v.toSVG(); v.cmp = c;
+        const n = s => s.split('<rect').length - 1, w = v.canvas.getBoundingClientRect().width; v.destroy();
+        return [r.differ, c.rows.values().next().value.spans.length, n(pic) - n(pic0), draw, Math.ceil(2 * w)];""")
+    check(got[0] == 1 and got[1] == 99999 and 0 < got[2] <= 2 * got[4] and got[3] < 250 * SCALE, f'a clock 1 ps late, {got[1]} stretches: '
+          f'{got[2]} rects in the picture (2 per band, a band per pixel at most), drawn in {got[3]:.0f} ms (it took 2.6 s at a million)')
+    got = js("""const N = 40000, tv = []; for (let i = 0; i < N; i++) tv.push([i * 20, ((i * 7919) % 65536).toString(16)]);
+        const v = mk({ signal: [{ name: 'bus', path: 'bus', width: 16, tv, analog: 3 }], time: { t0: 0, t1: N * 20, unit: 'ps' } }, { key: 'v7c' }); v.fit();
+        let t = performance.now(); v.draw(); const draw = performance.now() - t, svg = v.toSVG({ rows: 'all' });
+        const d = [...svg.matchAll(/<path d="([^"]*)"/g)].map(m => m[1].length).sort((a, b) => b - a)[0]; v.destroy(); return [draw, svg.length, d];""")
+    check(got[0] < 200 * SCALE and got[1] < 400000, f'a bus of 40 000 changes as a step plot: drawn in {got[0]:.0f} ms, its picture {got[1] // 1024} KB '
+          f'(the longest path {got[2] // 1024} KB; it took 2.5 s and 3 MB at 40 000)')
+    page.evaluate('localStorage.clear()')
+    check(not errs, 'no page errors (view_review)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
+    ctx.close()
+
+
 def edit(browser, build):
     """The viewer's commands (view.run, wavefw/src/edit.js) and their twin tools/viewedit.py: the same list of commands,
     the same state from a page's edits as from the commands run in it, the edits applied once (what the browser keeps
@@ -1604,6 +1738,16 @@ def edit(browser, build):
     V = "WaveFW.views().find(v => v.editKey() === 'exact')"
     def open_(path, idle=True):
         page.goto(path.as_uri()); page.wait_for_load_state('networkidle' if idle else 'load'); page.evaluate('SVA.ready()'); page.wait_for_timeout(200 * SCALE)
+    # a page whose data says "<!--<script>" and "</script>" (a name, a value, the title, an edit's text): it opens whole
+    hj, hp = d / 'hostile.json', d / 'hostile.html'
+    hj.write_text(json.dumps({'signal': [{'name': '<!--<script>', 'wave': '==', 'data': ['</script><b>', 'x<!--y']}], 'head': {'text': '<!--<script>'}}))
+    r = subprocess.run([sys.executable, '-I', str(ROOT / 'tools' / 'mkhtml.py'), f'k={hj}', '--title', '<!--<script> t', '--out', str(hp)],
+                       capture_output=True, text=True)
+    viewedit.edit_page(str(hp), [{'op': 'marker', 't': 1, 'label': '<!--<script>'}])
+    open_(hp)
+    got = page.evaluate("[WaveFW.views().length, WaveFW.views()[0].M.rows[0].name, WaveFW.views()[0].markList()[0].label, "
+                        "typeof WaveBus !== 'undefined']")   # bus.js: a script after the data
+    check(r.returncode == 0 and got == [1, '<!--<script>', '<!--<script>', True], f'a page with "<!--<script>" in its data opens whole {got} {r.stderr[-200:]}')
     open_(pb); page.evaluate('localStorage.clear()'); open_(pb)
     cmds = page.evaluate("Object.fromEntries(Object.entries(WaveFW.commands()).map(([k, c]) => [k, c.args]))")
     check(cmds == viewedit.COMMANDS, f'WaveFW.commands() and tools/viewedit.py COMMANDS: one list (differ: '
@@ -3330,6 +3474,8 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'dump': 'a VCD opened in the page (Open…, dropped on a viewer), ⟳, wavefw/viewer.html',
     'state': 'Save / Load… of a viewer (the APB and AXI-Lite pages): its state to a file and back, on other waves',
     'edit': 'the viewer\'s commands, a page\'s edits (tools/viewedit.py) with the same state, your groups and markers, a page live through wavemcp.py',
+    'view_review': 'the review of 0.15: Clear keeps markers, cycleZero a time, a run lays out before a picture, undo after a lost release, rows of '
+                   'hidden modules, states clear, matched by name, ±inf, inherited names, ids and ranges; compare and analog at scale',
     'compare': 'a second dump compared: ≠ on the names that differ, struck when it lacks them, red bands, ]d [d, in the picture; clock-sampled refused',
     'savepage': 'Save page: the page with your view in its edits opens elsewhere as you left it; its waves as they were; the live token left out',
     'order': 'your groups\' rows in another order: alt+↑ / alt+↓ (shift: the group), a drag in the names, group move; one step each',
@@ -3461,6 +3607,7 @@ def main():
         run('order', order, b, build)
         run('savepage', savepage, b, build)
         run('compare', compare, b, build)
+        run('view_review', view_review, b, build)
         run('dump', dump, b, build)
         run('readers', readers, b, build)
         run('ranges', ranges, b, build)

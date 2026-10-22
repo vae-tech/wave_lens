@@ -16,6 +16,12 @@ for the subset; where this document makes a choice, the choice is listed under *
 | shell | `sva eval --waves dump.vcd\|fst --scope tb.dut --sva checks.sv [--sva …] [--assert NAME …] [--from T --to T] [--out results.json] [--json] [--attempts] [--x fail\|false] [--vacuous] [--no-lane] [--resolve up\|scope] [--ignore-prefix i_,o_] [--alias NAME=PATH …] [--max-threads N] [--report r.md\|.html\|.xml\|.json] [--junit r.xml] [--max-failures N] [-D NAME[=V]]`; `sva report RESULTS.json… [--title T] [--md F] [--junit F] [--html F] [--json F] [--max-failures N]`; `sva --waves DUMP --info` (the scopes, variables, widths and enum tables of a dump); `sva parse [--json] [--expand] [-D NAME[=V]] FILE…` (`--expand`: the assertions after expansion); every command takes `-h` / `--help` | the dump, read with wellen |
 | make | `make sva-eval WAVES=… SVA="pkg.sv checks.sva" SCOPE=… [OUT=…] [ARGS=…]`, `make sva-examples`, `make sva-test` | |
 
+The shell reads a dump with wellen, which merges the adjacent one-bit selects of a vector into the vector, as ModelSim
+writes one bit by bit (`d[4]` … `d[7]` → `d [7:4]`: an assertion names `d`); escaped names that end in a select are
+merged the same way (`\e[0]` `\e[1]` → `\e [1:0]`), a known limitation of the reader (not patched here). `sva vcd`
+does not go through wellen for an FST: it writes the names as the FST holds them, as `fst2vcd -e` does (USAGE.md §
+*An FST as VCD text*). A dump wellen cannot read (a value longer than its variable) is one line naming the file, exit 2.
+
 `sva eval` resolves every signal name in `--scope`, then in the scopes above it (so a checker bound into `tb.dut` can
 read `tb.clk`; `--resolve scope` is the page's binding rule of *Name resolution* below, which `mkhtml.py` uses for a
 config's `"bind"`), samples at the clock edges of the dump, prints one line
@@ -332,8 +338,10 @@ not one attempt per cycle. Paths are linked lists of steps in an arena; a path t
   rules (`0 && x` is 0, `1 || x` is 1, `==` is 0 when known bits differ and x when unknown bits could decide, `===` /
   `!==` compare exactly); arithmetic and shifts by an unknown amount give all x; division by 0 gives x; a select outside
   the vector reads x. Widths: context-determined operators take the larger of their operands and the context (so
-  `a + b == 9'h100` keeps the carry and `a + b == 8'h00` drops it), comparisons extend both sides, everything is
-  unsigned, selects assume `[N-1:0]` vectors.
+  `a + b == 9'h100` keeps the carry and `a + b == 8'h00` drops it), comparisons extend both sides; the argument of
+  `$past` / `$sampled` is self-determined (the type of `$past(e)` is the type of `e`: with 8-bit `a` and `b`,
+  `$past(a + b) == 9'h000` holds for `8'h80 + 8'h80`, as in a simulator), then extended; everything is unsigned,
+  selects assume `[N-1:0]` vectors.
 - **An unknown boolean** (one that is x as a whole: no bit known 1 and some unknown) reads as false (the IEEE rule)
   and the attempt remembers the first one it read. When the attempt is decided, a non-vacuous pass stands (the unknown
   was in a branch that did not decide: `(b ##1 b) or (d ##1 e)` with `d` x, `b[->1]` with one x cycle before the

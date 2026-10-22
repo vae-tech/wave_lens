@@ -1,10 +1,11 @@
 """tools/wavemcp.py: the MCP protocol over stdio, the tools against a generated dump whose answers are known
 (tests/mcp_bench.py gen_vcd), names, errors."""
-import io, json, os, unittest
+import io, json, os, shutil, subprocess, sys, threading, time, unittest
 
 from tests.unit import helpers as H
 from tests import mcp_bench as B
 import svabuild
+import viewedit as E
 import wavemcp as W
 
 
@@ -211,11 +212,189 @@ class Views(unittest.TestCase):
             b.send('abcd1234', 'one', [{'op': 'state'}], timeout=0.3)
         self.assertEqual(b.pages(), [])   # taken for gone
 
+    def test_state_times_both_ways(self):
+        """M5: a state the agent read (view_get full: ns) and gives back (set_state) is in ns too: the same times again."""
+        page = os.path.join(self.d.name, 'times.html')
+        shutil.copy(self.page, page)
+        r = self.call('view_edit', page=page, ops=[{'op': 'set_state', 'state': {
+            'wavefw': 'state', 'cursor': 30, 'cursor2': '0.04us', 'from': 10, 'to': 70, 'range': {'from': 20, 'to': 50, 'signal': None},
+            'bookmarks': [{'n': 1, 't': 25}], 'markers': [{'t': 35, 'label': 'm'}], 'config': {'cycleZero': 5}}}])
+        self.assertNotIn('errors', r)
+        self.assertEqual(E.Page(page).state('one')['cursor'], 30000)   # the viewer's ps in the page
+        g = self.call('view_get', page=page, full=True)
+        self.assertEqual((g['cursor'], g['cursor2'], g['from'], g['to'], g['range'], g['bookmarks'], g['markers'], g['config']['cycleZero']),
+                         (30, 40, 10, 70, {'from': 20, 'to': 50, 'signal': None}, [{'n': 1, 't': 25}], [{'t': 35, 'label': 'm'}], 5))
+        st = {k: v for k, v in g.items() if k not in ('page', 'view', 'views', 'edits')}
+        again = self.call('view_edit', page=page, ops=[{'op': 'set_state', 'state': dict(st, wavefw='state')}])
+        self.assertEqual(again['note'], 'nothing changed')   # given back as read: the same state
+
+    def test_no_replay_after_ack(self):
+        """A11: the page answered the edit, the state for "save" did not come: applied live, not saved, the file as it was."""
+        class Late:
+            def __init__(self):
+                self.calls = 0
+
+            def send(self, cid, view, ops):
+                self.calls += 1
+                if self.calls == 1:
+                    return [{'op': 'bookmark', 'n': 2}]
+                raise W.LiveGone('the live page did not answer in 10 s')
+        before = E.Page(self.page).text
+        W.BRIDGE[:] = [Late()]
+        r = W.live_edit({'page': self.page, 'view': 'one', 'save': True, 'ops': [{'op': 'bookmark', 'n': 2, 't': 2}]},
+                        {'cid': 'demo', 'path': self.page}, {'key': 'one', 'timed': True})
+        W.BRIDGE.clear()
+        self.assertEqual((r['results'], r['saved']), ([{'op': 'bookmark', 'n': 2}], None))
+        self.assertIn('applied live, not saved', r['note'])
+        self.assertEqual(E.Page(self.page).text, before)
+
+    def test_bridge_guards(self):
+        """M8: the Host must be this server; an answer counts for the command sent to that page only; a body that is not one
+        JSON object, or of a wrong length, is refused; the link goes on."""
+        import http.client
+        b = W.Bridge(port=0, token='t' * 20)
+        W.BRIDGE.append(b)
+        self.fake_page(b, self.page, cid='page1aaa', answer=False)
+        def req(path, body=b'{}', host=None, length=None):
+            c = http.client.HTTPConnection('127.0.0.1', b.port, timeout=5)
+            c.putrequest('POST' if body is not None else 'GET', path, skip_host=True)
+            c.putheader('Host', host or f'127.0.0.1:{b.port}')
+            if body is not None:
+                c.putheader('Content-Length', str(len(body) if length is None else length))
+            c.endheaders(body if body is not None and length is None else None)
+            r = c.getresponse()
+            r.read()
+            c.close()
+            return r.status
+        q = f'token={b.token}&cid=other111'
+        self.assertEqual(req('/', None, host=f'evil.example:{b.port}'), 403)
+        self.assertEqual(req(f'/hello?{q}', host=f'evil.example:{b.port}'), 403)   # DNS rebinding: a name of another site
+        self.assertEqual(req(f'/hello?{q}', b'[1, 2]'), 400)
+        self.assertEqual(req(f'/reply?{q}', b'"x"'), 400)
+        self.assertEqual(req(f'/reply?{q}', b'{"rid": 1}', length=-5), 400)
+        self.assertEqual(req(f'/reply?token={b.token}&cid=BAD!'), 403)
+        got = {}
+        t = threading.Thread(target=lambda: got.update(r=b.send('page1aaa', 'one', [{'op': 'state'}], timeout=5)))
+        t.start()
+        while not b.pending:
+            time.sleep(0.01)
+        rid = next(iter(b.pending))
+        self.assertEqual(req(f'/reply?{q}', json.dumps({'rid': rid, 'results': [{'op': 'state', 'state': {'forged': 1}}]}).encode()), 409)
+        self.assertEqual(req(f'/reply?token={b.token}&cid=page1aaa', json.dumps({'rid': rid, 'results': [{'op': 'state', 'state': {}}]}).encode()), 200)
+        t.join(5)
+        self.assertEqual(got['r'], [{'op': 'state', 'state': {}}])
+        self.assertEqual(req(f'/reply?token={b.token}&cid=page1aaa', json.dumps({'rid': rid, 'results': []}).encode()), 409)   # once
+        self.assertEqual(req('/', None), 200)
+
     def test_paths(self):
         self.assertTrue(W.same_file('/mnt/c/Users/x/p.html', '/C:/Users/x/p.html'))
         self.assertTrue(W.same_file('/mnt/c/Users/x/p.html', 'C:\\Users\\x\\p.html'))
         self.assertTrue(W.same_file('/tmp/a b.html', '/tmp/a%20b.html'))
         self.assertFalse(W.same_file('/tmp/a.html', '/tmp/b.html'))
+
+
+class Review(unittest.TestCase):
+    """The findings of the review of 2026-10-22 on the dump tools (M3, A6, A7/B11, B15)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.d = H.tmp()
+        # 1 fs steps: a clock every 2 fs, d and a 4-bit bus that changes (sometimes to the value it had) at known times
+        body, bus = ['#0', '0!', '0"', 'b0000 #'], {3: '0001', 7: '0011', 8: '0011', 11: '0111', 15: '0100', 19: '0100', 22: '1100', 27: '0000'}
+        d = {4: '1', 9: '0', 13: '1', 21: '0', 30: '1', 31: '1'}
+        for t in range(1, 41):
+            body.append(f'#{t}')
+            body.append(f'{t % 2}!')
+            if t in d:
+                body.append(f'{d[t]}"')
+            if t in bus:
+                body.append(f'b{bus[t]} #')
+        cls.fs = H.vcd(cls.d.name, '\n'.join(body) + '\n', header='$timescale 1fs $end\n$scope module tb $end\n$var wire 1 ! clk $end\n'
+                       '$var wire 1 " d $end\n$var wire 4 # bus [3:0] $end\n$upscope $end\n$enddefinitions $end\n', name='fs.vcd')
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.d.cleanup()
+
+    def call(self, tool, **a):
+        text, err = W.call(tool, a)
+        self.assertFalse(err, text)
+        return json.loads(text)
+
+    def test_bit_select(self):
+        """M3: a select of a bus changes when its bits do: edges, changes, stats of the select; one outside the bus said."""
+        p = H.vcd(self.d.name, '#0\nb000 !\n#1\nb001 !\n#2\nb010 !\n#3\nb011 !\n#4\nb000 !\n#5\n',
+                  header='$timescale 1ns $end\n$scope module tb $end\n$var wire 3 ! data [2:0] $end\n$upscope $end\n$enddefinitions $end\n', name='sel.vcd')
+        self.assertEqual(self.call('wave_find', dump=p, signal='data[1]', edge='change')['times'], [2, 4])
+        self.assertEqual(self.call('wave_find', dump=p, signal='data[1]', edge='rise')['times'], [2])
+        self.assertEqual(self.call('wave_changes', dump=p, signals=['data[1]'])['signals']['data[1]']['changes'], [[2, '1'], [4, '0']])
+        s = self.call('wave_stats', dump=p, signals=['data[1]'])['signals']['data[1]']
+        self.assertEqual((s['changes'], s['rises'], s['falls']), (2, 1, 1))
+        self.assertEqual(self.call('wave_changes', dump=p, signals=['data[2:1]'])['signals']['data[2:1]']['count'], 2)
+        for bad in ('data[3]', 'data[40:33]', 'data[0:1]'):
+            text, err = W.call('wave_values', {'dump': p, 'signals': [bad], 'at': 1})
+            self.assertTrue(err)
+            self.assertIn('has bits [2:0]', text)
+
+    def test_clock_domains(self):
+        """A6: two clocks whose edges are alike in count, first and last are two clocks; one net under two scopes is one."""
+        clocks = os.path.join(self.d.name, 'clocks.vcd')
+        H.vcd(self.d.name, '#0\n0!\n0"\n#1\n1!\n1"\n#2\n0!\n0"\n#3\n1!\n#4\n0!\n1"\n#5\n0"\n#6\n1!\n1"\n#7\n0!\n0"\n#10\n',
+              header='$timescale 1ns $end\n$scope module tb $end\n$scope module a $end\n$var wire 1 ! clk $end\n$upscope $end\n'
+              '$scope module b $end\n$var wire 1 " clk $end\n$upscope $end\n$scope module c $end\n$var wire 1 ! clk $end\n$upscope $end\n'
+              '$upscope $end\n$enddefinitions $end\n', name='clocks.vcd')
+        self.assertEqual([c['name'] for c in self.call('wave_info', dump=clocks)['clocks']], ['tb.a.clk', 'tb.b.clk'])
+
+    def pages(self, tool, key, **a):
+        """Every page of an answer, each from the "next_from" / "next_offset" of the one before."""
+        out, more = [], {}
+        while True:
+            r = self.call(tool, dump=self.fs, **a, **more)
+            if tool == 'wave_changes':
+                e = r['signals'][a['signals'][0]]
+                out += e['changes']
+                if 'next_from' not in e:
+                    return out
+                more = {'from': e['next_from']}
+            else:
+                out += r[key]
+                if tool == 'wave_signals':
+                    if 'next_offset' not in r:
+                        return out
+                    more = {'offset': r['next_offset']}
+                elif 'next_from' not in r:
+                    return out
+                else:
+                    more = {'from': r['next_from']}
+            self.assertLess(len(out), 1000)
+
+    def test_pages(self):
+        """A7/B11: the pages of an answer (limit 1, 2, 3, all) put together are the answer without a limit."""
+        with H.stderr():   # dumpscan's word on the fs timescale
+            self.pages_of_each()
+
+    def pages_of_each(self):
+        for sig in ('tb.d', 'tb.bus'):
+            whole = self.call('wave_changes', dump=self.fs, signals=[sig])['signals'][sig]['changes']
+            self.assertEqual(len(whole), 5 if sig == 'tb.d' else 6)   # the bus written with its value again: no change
+            for n in (1, 2, 3):
+                self.assertEqual(self.pages('wave_changes', None, signals=[sig], limit=n), whole, (sig, n))
+        for only in (True, False):
+            whole = self.call('wave_sample', dump=self.fs, signals=['tb.d', 'tb.bus'], clock='tb.clk', only_changes=only, limit=1000)['rows']
+            for n in (1, 2, 3):
+                got = self.pages('wave_sample', 'rows', signals=['tb.d', 'tb.bus'], clock='tb.clk', only_changes=only, limit=n)
+                self.assertEqual(got, whole, (only, n))
+        whole = self.call('wave_signals', dump=self.fs)['signals']
+        for n in (1, 2):
+            self.assertEqual(self.pages('wave_signals', 'signals', limit=n), whole)
+
+    def test_times(self):
+        """B15: the times the viewer reads, read here too."""
+        for text, ps in (('100NS', 1e5), ('1E2', 1e5), ('0.1µs', 1e5), ('2 us', 2e6), ('5', 5000), ('3fs', 3e-3), ('-5ns', -5000)):
+            self.assertAlmostEqual(W.ps_of(text), ps)
+        for bad in ('1e999', 'nan', '5 parsecs', [1], {'t': 1}, True, float('inf')):
+            with self.assertRaises(W.WaveError):
+                W.ps_of(bad)
 
 
 class Protocol(unittest.TestCase):
@@ -247,6 +426,83 @@ class Protocol(unittest.TestCase):
         self.assertTrue(r[3]['result']['isError'])
         self.assertEqual((r[4]['error']['code'], r[5]['error']['code']), (-32700, -32601))
         self.assertEqual(r[6]['result'], {})
+
+    def test_malformed(self):
+        """M1, M2: a request of a wrong shape, arguments of a wrong kind, a tool that fails as nobody foresaw: each gets an
+        answer (an error of JSON-RPC or of the tool), and the session goes on (the ping at the end is answered)."""
+        short = H.fixture('short')
+        call = lambda i, name, args: {'jsonrpc': '2.0', 'id': i, 'method': 'tools/call', 'params': {'name': name, 'arguments': args}}
+        with H.tmp() as d:
+            table = [   # (request, JSON-RPC error code or (isError, a piece of the text))
+                (call(1, 'wave_info', 'x'), -32602),
+                ({'jsonrpc': '2.0', 'id': 2, 'method': 'initialize', 'params': [1]}, -32602),
+                (call(3, 'sva_check', {'dump': short, 'defines': ['X=1'], 'source': 'a: assert property (@(posedge b[0]) 1);',
+                                       'sva_bin': '/nonexistent/sva'}), (True, 'no sva binary')),
+                (call(4, 'sva_check', {'dump': short, 'defines': 5}), (True, '"defines": a object/array of string, not 5')),
+                (call(5, 'wave_signals', {'dump': short, 'scope': 5}), (True, '"scope": a string, not 5')),
+                (call(6, 'wave_values', {'dump': short, 'signals': ['b'], 'at': '1e999'}), (True, 'bad time "1e999"')),
+                ('{"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "wave_values", "arguments": '
+                 f'{{"dump": {json.dumps(short)}, "signals": ["b"], "at": 1e999}}}}}}', (True, '"at": a number/string/array')),
+                ('{"jsonrpc": "2.0", "id": 8, "method": "tools/call", "params": {"name": "wave_values", "arguments": '
+                 f'{{"dump": {json.dumps(short)}, "signals": ["b"], "at": NaN}}}}}}', (True, '"at": a number/string/array')),
+                (call(9, 'wave_page', {'dump': short, 'signals': ['b'], 'from': -5, 'out': os.path.join(d, 'w.json')}), (False, '"wavejson"')),
+                (call(10, 'wave_signals', {'dump': short, 'limit': 2.0}), (False, '"total"')),
+                (call(11, 'wave_signals', {'dump': short, 'limit': 'many'}), (True, '"limit": a integer')),
+                (call(12, 5, {}), -32602),
+                ({'jsonrpc': '2.0', 'id': {'a': 1}, 'method': 'ping'}, -32600),
+                ({'jsonrpc': '2.0', 'id': 14, 'method': 5}, -32600),
+                ({'jsonrpc': '2.0', 'id': 15, 'method': 'tools/list', 'params': 'x'}, -32602),
+                ([], -32600),
+                ('[' * 100000, -32700),
+                (call(18, 'boom', {}), (True, 'ZeroDivisionError')),
+                (call(19, 'quit', {}), (True, 'quit stopped (3)')),
+                (call(20, 'view_live', {'wait': 'x'}), (False, '"link"')),
+            ]
+            tools = dict(W.BY_NAME)
+            W.BY_NAME['boom'] = dict(W.BY_NAME['wave_info'], fn=lambda a: 1 / 0)
+            W.BY_NAME['quit'] = dict(W.BY_NAME['wave_info'], fn=lambda a: sys.exit(3))
+            try:
+                with H.stderr():
+                    r = self.talk(*[m for m, _ in table], {'jsonrpc': '2.0', 'id': 99, 'method': 'ping'})
+            finally:
+                W.BY_NAME.clear()
+                W.BY_NAME.update(tools)
+                for b in W.BRIDGE:
+                    b.close()
+                W.BRIDGE.clear()
+        self.assertEqual(len(r), len(table) + 1)
+        for (msg, want), got in zip(table, r):
+            if isinstance(want, int):
+                self.assertEqual(got.get('error', {}).get('code'), want, (msg if len(str(msg)) < 300 else str(msg)[:80], got))
+            else:
+                self.assertEqual(got['result']['isError'], want[0], got)
+                self.assertIn(want[1], got['result']['content'][0]['text'])
+        self.assertEqual(r[-1], {'jsonrpc': '2.0', 'id': 99, 'result': {}})
+
+    def test_stdin_is_not_lent(self):
+        """M9: a program the server starts (here a "sva" that reads its stdin) does not read the protocol's requests."""
+        with H.tmp() as d:
+            fake = os.path.join(d, 'sva')
+            with open(fake, 'w') as f:
+                f.write('#!/bin/sh\ncat > /dev/null\necho "sva: read" >&2\nexit 1\n')
+            os.chmod(fake, 0o755)
+            p = subprocess.Popen([sys.executable, '-I', os.path.join(H.TOOLS, 'wavemcp.py')], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                 stderr=subprocess.DEVNULL, text=True, env=dict(os.environ, WAVEFW_SVA=fake))
+            got = []
+            reader = threading.Thread(target=lambda: got.extend(json.loads(p.stdout.readline()) for _ in range(2)), daemon=True)
+            reader.start()
+            p.stdin.write(json.dumps({'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {
+                'name': 'sva_check', 'arguments': {'dump': H.fixture('short'), 'source': 'a: assert property (@(posedge b[0]) 1);'}}}) + '\n')
+            p.stdin.flush()
+            time.sleep(0.5)
+            p.stdin.write(json.dumps({'jsonrpc': '2.0', 'id': 2, 'method': 'ping'}) + '\n')
+            p.stdin.flush()
+            reader.join(15)
+            p.stdin.close()
+            p.wait(10)
+            p.stdout.close()
+        self.assertEqual([m.get('id') for m in got], [1, 2])
+        self.assertEqual(got[1]['result'], {})
 
     def test_unknown_version_gets_ours(self):
         r = self.talk({'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '1999-01-01'}})

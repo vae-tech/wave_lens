@@ -3,7 +3,7 @@
 
 /* ---------------- painters: one drawing routine, two back-ends ---------------- */
 class CanvasPainter {
-  constructor(g, cs, S, dpr = 1) { this.g = g; this.cs = cs; this.S = S; this.dpr = dpr; this.cache = {}; this.fade = 1;
+  constructor(g, cs, S, dpr = 1) { this.g = g; this.cs = cs; this.S = S; this.dpr = dpr; this.cache = Object.create(null); this.fade = 1;
     this.mono = cs.getPropertyValue('--font-mono').trim() || 'monospace'; this.body = cs.getPropertyValue('--font-body').trim() || 'sans-serif'; }
   // a thin vertical segment (an axis tick, the cursor, a bus edge, a level change) on the middle of a device pixel: sharp
   snap(cmds, w) {
@@ -14,7 +14,7 @@ class CanvasPainter {
   }
   col(n) { // a token, "--x" / "var(--x)" (any custom property of the page), or a colour
     if (this.cache[n]) return this.cache[n];
-    const p = TOK[n] || (/^--[\w-]+$/.test(n) ? n : (/^var\((--[\w-]+)\)$/.exec(n) || [])[1]);
+    const p = (hasKey(TOK, n) && TOK[n]) || (/^--[\w-]+$/.test(n) ? n : (/^var\((--[\w-]+)\)$/.exec(n) || [])[1]);
     return (this.cache[n] = p ? this.cs.getPropertyValue(p).trim() || '#888' : n);
   }
   path(cmds, st) {
@@ -49,7 +49,7 @@ class SvgPainter {
       'sans-serif';
     measureCtx = measureCtx || document.createElement('canvas').getContext('2d');
   }
-  col(n) { return !n ? 'none' : TOK[n] ? `var(${TOK[n]})` : /^--[\w-]+$/.test(n) ? `var(${n})` : esc(n); }
+  col(n) { return !n ? 'none' : hasKey(TOK, n) ? `var(${TOK[n]})` : /^--[\w-]+$/.test(n) ? `var(${n})` : esc(n); }
   path(cmds, st) {
     const f = v => Math.round(v * 100) / 100;
     const d = cmds.map(c => c[0] + c.slice(1).map(f).join(' ')).join('');
@@ -109,7 +109,30 @@ function paintAnalog(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk) {
   const { lo, hi } = s.an, yh = y + 6, yl = y + h - 6, span = hi > lo ? hi - lo : 1, Y = v => (hi > lo ? yl - (v - lo) / span * (yl - yh) : (yh + yl) / 2);
   const cl = x => Math.min(Math.max(x, xL - 8), xR + 8), col = sk || 'bus', line = [], fill = [];
   let pv = null;
-  for (let i = Math.max(lastLE(a, tA), 0); i < a.length && a[i].t <= tB; i++) {
+  const i0 = Math.max(lastLE(a, tA), 0), i1 = lastLE(a, tB);
+  if (i1 - i0 > xR - xL) {   // more changes than pixels (a busy bus zoomed out): per pixel column the smallest and largest value, as a bar
+    const xs = [], cols = (yv, x0, x1) => fill.push(['M', x0, yl], ['L', x0, yv], ['L', x1, yv], ['L', x1, yl], ['Z']);
+    let c = null, lo1, hi1, last = NaN;   // the column, the values it takes (the one carried into it too), the one it ends with
+    const put = () => {
+      if (c == null) return;
+      if (!(lo1 <= hi1)) { pv = null; xs.push(['M', c, (yh + yl) / 2], ['L', c + 1, (yh + yl) / 2]); return; }   // x / z all through it
+      const yt = Y(hi1), yb = Y(lo1);
+      line.push(pv == null ? ['M', c, yt] : ['L', c, pv], ['L', c, yt], ['L', c, yb]);
+      if (isFinite(last)) { line.push(['L', c, Y(last)], ['L', c + 1, Y(last)]); pv = Y(last); } else pv = null;
+      cols(yt, c, c + 1);
+    };
+    for (let i = i0; i <= i1; i++) {
+      const x = Math.floor(cl(X(a[i].t))), v = analogValue(s, a[i], S.radix);
+      if (x !== c) { put(); if (pv != null && c != null && x > c + 1) cols(pv, c + 1, x);   // the value held between the columns
+        c = x; lo1 = isFinite(last) ? last : Infinity; hi1 = isFinite(last) ? last : -Infinity; }
+      if (isFinite(v)) { lo1 = Math.min(lo1, v); hi1 = Math.max(hi1, v); }
+      last = v;
+    }
+    put();
+    const xe = cl(X(i1 + 1 < a.length ? a[i1 + 1].t : tEnd));   // the last value on to the next change (or the end)
+    if (pv != null && xe > c + 1) { line.push(['L', xe, pv]); cols(pv, c + 1, xe); }
+    if (xs.length) P.path(xs, { stroke: 'x', w: 1, dash: [3, 3] });
+  } else for (let i = i0; i < a.length && a[i].t <= tB; i++) {
     const o = a[i], x0 = cl(X(o.t)), x1 = cl(X(i + 1 < a.length ? a[i + 1].t : tEnd)), v = analogValue(s, o, S.radix);
     if (!isFinite(v)) { pv = null; P.path([['M', x0, (yh + yl) / 2], ['L', x1, (yh + yl) / 2]], { stroke: 'x', w: 1, dash: [3, 3] }); continue; }
     const yv = Y(v);
@@ -130,7 +153,7 @@ function paintSig(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk = s.stroke, bg = 'pane
   const cl = x => Math.min(Math.max(x, xL - 8), xR + 8);
   let lv = null, lvDash = null, pk = null, py = ym, pw = Infinity, xe = 0;
   const trace = sk || 'one', S = P.S, lab = { anchor: 'middle', size: S.labelSize };
-  const E = EDGES[s.style] || EDGES[S.style] || EDGES.auto, slope = E.slope ?? (s.tv ? 0 : 2.5);
+  const E = (hasKey(EDGES, s.style) && EDGES[s.style]) || (hasKey(EDGES, S.style) && EDGES[S.style]) || EDGES.auto, slope = E.slope ?? (s.tv ? 0 : 2.5);
   const flush = x => { if (lv) { lv.push(['L', cl(x), py]); P.path(lv, { stroke: trace, w: S.traceWidth, dash: lvDash }); lv = null; } };
   for (let i = Math.max(lastLE(a, tA), 0); i < a.length && a[i].t <= tB; i++) {
     const o = a[i], xs = X(o.t);

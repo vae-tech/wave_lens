@@ -174,7 +174,9 @@
   <b>dump</b> group reads the second run's VCD over these waves, on the same time scale, signal by signal of the same path. Where its value
   differs, the row gets a red band (the stretch shaded, a line under it); the name gets <b>≠</b>; a signal the second dump lacks is struck
   (one its reader left out for <code>dumpBudget</code> is said so in its tooltip). A packed struct compares by its whole vector, a real as a
-  number, a string as text; only the time both dumps cover is compared.
+  number (<code>inf</code>, <code>-inf</code> and <code>nan</code> three values apart), a string as text; only the time both dumps cover
+  is compared. A signal found in the second dump by its short name only (<code>tb.a.ready</code> as <code>tb.b.ready</code>) is compared
+  but said: <i>matched by name: tb.a.ready → tb.b.ready</i> in the title line, on <span class="ui">≠ N ✕</span> and in its tooltip.
   The title line says how many signals differ and where the first difference is; <kbd>]d</kbd> / <kbd>[d</kbd> go to the next / previous
   difference — of the selected signal when it has some, else of all; <span class="ui">≠ N ✕</span> compares no more. Values compare bit for
   bit, x and z apart; a bus of another width differs everywhere. The picture (PNG, SVG) has the bands. It works on exact waves (a page made
@@ -388,14 +390,17 @@
 <p><kbd>1</kbd> … <kbd>9</kbd> go to that bookmark (its signal selected), <kbd>]m</kbd> / <kbd>[m</kbd> to the next / previous one in time;
   a click on a number in the list does the same. The bookmarks are kept in this browser; <span class="ui">JSON</span> gives the
   <code>"bookmarks"</code> and <code>"arrows"</code> lists to paste into a view of the config, so the built page — and its static SVG — carries
-  them. <span class="ui">Clear</span> forgets this browser's (the page's own come back on reload).</p>
+  them. <span class="ui">Clear</span> forgets this browser's bookmarks and arrows (the page's own come back on reload; your markers
+  stay).</p>
 
 <h2 id="state">Save and Load</h2>
 <p><span class="ui">Save</span> downloads what you did in the viewer as <code>&lt;title&gt;.view.json</code>: the time window and the
   cursor, the order and its prefixes, the folded modules, the highlight, the paint, the selected signal, the search, the bookmarks and
   arrows, the radix, analog and hidden rows, the second cursor and the range, the gap settings, the assertions (files loaded or edited in
   the page, with their text, and the bindings) and the ƒ rows. <span class="ui">Load…</span> (or dropping the file on a viewer) reads it
-  back — after a reload, in another browser, or on other waves: what they lack is left out and counted in the title line.</p>
+  back — after a reload, in another browser, or on other waves: what they lack is left out and counted in the title line. A state says
+  what is not there too (<code>"cursor2": null</code>, <code>"range": null</code>, the edge kind): loaded, it clears them; a key a
+  state leaves out (an older one, one written by hand) keeps what the viewer has.</p>
 <p>The file's <code>"config"</code> (<code>sort</code>, <code>sortIgnore</code>, <code>fold</code>, <code>highlight</code>, the find
   toggles …) pastes into a config file as it is; times are in model units (ps).</p>
 <p><span class="ui">Save page</span> downloads the page itself, <code>&lt;page&gt;.view.html</code>, with your view written into it:

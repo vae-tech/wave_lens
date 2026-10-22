@@ -164,6 +164,12 @@ cases! {
     past: "a |-> d == $past(d) + 1", "a=0111 d=1,2,3,5" => "1-1P 2-2P 3-3F";
     past_before_the_dump_is_x: "a |-> $past(b) == 0", "a=11 b=00" => "0-0F 1-1P";
     past_of_a_2_state_signal: "a |-> $past(b) == 0", "a=11 @b=00" => "0-0P 1-1P";
+    // $past(e) and $sampled(e) have the width of e: 8'h80 + 8'h80 is 8'h00 before the 9-bit compare (Verilator agrees)
+    past_is_self_determined: "a |-> $past(d + e) == 9'h000", "a=01 d:8=128,128 e:8=128,128" => "1-1P";
+    past_is_self_determined_inverted: "a |-> $past(d + e) == 9'h100", "a=01 d:8=128,128 e:8=128,128" => "1-1F";
+    past_without_carry: "a |-> $past(d + e) == 9'h0ff", "a=01 d:8=127,127 e:8=128,128" => "1-1P";
+    sampled_is_self_determined: "$sampled(d + e) == 9'h000", "d:8=128,127 e:8=128,128" => "0-0P 1-1F";
+    sampled_is_self_determined_inverted: "$sampled(d + e) != 9'h000", "d:8=128,127 e:8=128,128" => "0-0F 1-1P";
     onehot: "$onehot(d)", "d=1,3,4,0" => "0-0P 1-1F 2-2P 3-3F";
     isunknown: "a |-> !$isunknown(d)", "a=11 d=x,1" => "0-0F 1-1P";
     case_equality_sees_x: "a |-> b === 1'bx", "a=11 b=x0" => "0-0P 1-1F";

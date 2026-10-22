@@ -61,7 +61,7 @@ Makefile                      make help lists the targets; build products go to 
 
 ```sh
 make check                  # the gate before a commit: wavefw.js current and its sources ≤ 160 columns, sva-test, unit, every page smoke needs, sva-verify, mcp-bench, smoke STRICT=1, shots-check
-make unit                   # tests/unit: the tools on small VCDs of what simulators write (130 tests, ~10 s, standard library)
+make unit                   # tests/unit: the tools on small VCDs of what simulators write (168 tests, ~20 s, standard library)
 make mcp-bench              # tools/wavemcp.py on the benchmark tasks by a script (answers checked); AGENT=claude|codex: agents
 make wavefw                 # wavefw/wavefw.js from wavefw/src/*.js (after editing them; make html / example do it too; lines ≤ 160 columns)
 make demo examples html     # rebuild docs/demo_waves.js, the example pages, the demo page
@@ -91,7 +91,8 @@ clone runs the tools with assertions without Rust; like `wavefw/sva.wasm.js` it 
 commit that changes the engine. `bin/windows-x86_64/sva.exe` (`x86_64-pc-windows-gnu`, linked by mingw-w64) is not
 committed yet: `make dist-windows` builds it where mingw-w64 is installed (commit it then, with every engine change). One time: `rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu` and, for Windows,
 `sudo apt install mingw-w64`. The tools take the CLI from `--sva-bin`, else `$WAVEFW_SVA`, else `out/sva-target/release/sva`
-(`make sva-build`), else `bin/<os>-x86_64/`, else `sva` on PATH.
+(`make sva-build`), else `bin/<os>-x86_64/`, else `sva` on PATH. `make unit` gives them the CLI of its `BUILD` when
+that is built, and `make check` builds it first: an older `out/` build would test stale code.
 
 `make check` is the gate for every change. `make smoke` opens `docs/index.html`, `tests/conformance.html`, every built
 page (demo, FST demo, examples) and the user's pages under `work/` when they are there, fails on console errors, and
@@ -115,9 +116,10 @@ a command added to one side only, or one that differs, fails there. It also runs
 server with a page connected live (`WAVEFW_LIVE_PORT=0`: a free port; its key in a scratch `XDG_CACHE_HOME`).
 
 `make unit` (`tests/unit/`, unittest, standard library only) tests the tools function by function on the fixtures in
-`tests/unit/vcd/` — each a few lines of what a simulator writes: `real`, `string` and `event` variables, escaped names,
-a range glued to the name, the same path under two id codes, several changes on one line, `$comment` in the body, VHDL
-values, time going back, a header without `$enddefinitions`, times above 2^53 ps. The smoke section `readers` feeds the
+`tests/unit/vcd/` — each a few lines of what a simulator writes: `real` (`realtime`, `shortreal`, `inf`, `nan`), `string`
+and `event` variables, escaped names, a range glued to the name, the same path under two id codes, a vector in parts
+(bits, ranges apart, two bits under one code), several changes on one line, tabs, indents and a time inside a line,
+`$comment` in the body, VHDL values, time going back, a header without `$enddefinitions`, times above 2^53 ps. The smoke section `readers` feeds the
 same files to the page's own VCD reader (`wavefw/src/vcd.js`) and demands the transitions of the tools; `test_svabuild`
 compares the name rule of `svabuild.Names` with `sva eval --resolve` case by case. `make shots` checks looks rather than
 behaviour: fixed viewport, fixed clicks, two animation frames after each, one element per image; it stops when IBM Plex
@@ -158,6 +160,14 @@ The second cursor (step 12.4: the rising edges of a clock indexed once, the cycl
 searches): a clock of 400 000 changes and 20 buses, 100 ns of 2 ms shown, `draw()` 0.89 ms without the second cursor
 and 0.93 ms with it (8000 cycles between them); before, 1.55 → 8.14 ms.
 
+A second dump compared and a busy bus drawn analog (the review of 0.15; smoke section `view_review` keeps a check of
+each): 6000 signals, the names' ≠ marks 941 → 10 ms (each row's element from a map built with the names column, not a
+search per row), compared no more 1068 → 84 ms, alt+↓ in a group of yours 2.3 → 0.33 s; a clock of a million toggles
+a picosecond late in B, a redraw at Fit 2.6 s → 37 ms and `]d` 2.5 s → 36 ms (the stretches less than a pixel apart one
+band, the next one by a binary search: a band per pixel at most; the SVG the same); a 16-bit bus of 20 000 changes as a
+step plot, a redraw at Fit 1050 → 9 ms and its SVG 1.5 MB → 120 KB (one bar per pixel column, its smallest and largest
+value), 500 000 changes 97 ms (before: the page did not open in 30 s).
+
 The SVA engine's numbers are in [`sva/ENGINE.md`](sva/ENGINE.md) *Performance*.
 
 The MCP server (`make mcp-bench AGENT=claude MODEL=sonnet REPS=2`, `AGENT=codex`; 21 October 2026, the tool list of
@@ -187,7 +197,7 @@ approval"): the agent falls back to its shell. The runs, their transcripts and a
 
 ## Versions
 
-Two numbers, `MAJOR.MINOR` (0.15 now; [`CHANGELOG.md`](../CHANGELOG.md) lists them all). The work goes on a branch;
+Two numbers, `MAJOR.MINOR` (0.16 now; [`CHANGELOG.md`](../CHANGELOG.md) lists them all). The work goes on a branch;
 a version is a merge into `main` (`git merge --no-ff`) tagged `vMAJOR.MINOR` (an annotated tag, its message the
 changelog entry). One commit on the branch before the merge raises the version in four places: `VERSION`,
 `version:` in `wavefw/src/boot.js` (then `make wavefw`), a new top entry in `CHANGELOG.md`, and the committed builds

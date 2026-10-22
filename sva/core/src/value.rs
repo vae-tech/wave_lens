@@ -533,9 +533,14 @@ impl Compiler<'_> {
                         if n == 0 || n > 1 << 20 {
                             return Err((*at, format!("$past of {n} cycles (1 to {} are evaluated)", 1 << 20)));
                         }
-                        Op::Past(bx(self.compile(&args[0], w)?), n as u32)
+                        // self-determined: the type of $past(e) is the type of e, widened (zero-filled) after
+                        let p = CE { w: own, op: Op::Past(bx(self.compile(&args[0], 0)?), n as u32) };
+                        return Ok(if w == own { p } else { CE { w, op: Op::Resize(bx(p)) } });
                     }
-                    "$sampled" => return self.compile(&args[0], w),
+                    "$sampled" => {
+                        let s = self.compile(&args[0], 0)?;
+                        return Ok(if w == own { s } else { CE { w, op: Op::Resize(bx(s)) } });
+                    }
                     "$rose" => Op::Rose(a0()?),
                     "$fell" => Op::Fell(a0()?),
                     "$stable" => Op::Stable(a0()?),
@@ -634,6 +639,29 @@ mod tests {
         assert_eq!(ev("$past(a) == 0 && a == 5", k(5), k(0), k(0)), k(1));
         assert_eq!(ev("$past(a, 2)", k(5), k(0), k(0)), X, "before the dump: the initial value x");
         assert_eq!(ev("$rose(a[0])", k(1), k(0), k(0)), k(1));
+    }
+
+    /// `src` at cycle 1 over a, b (8 bits) holding `ab` at both cycles 0 and 1.
+    fn ev_held(src: &str, ab: (u64, u64)) -> V {
+        let sig = |n: &str| ["a", "b"].iter().position(|x| *x == n).map(|k| (k, 8));
+        let cols = Cols(vec![(8, vec![k(ab.0), k(ab.0)]), (8, vec![k(ab.1), k(ab.1)])]);
+        let e = crate::parse_expr(src).unwrap();
+        Compiler { sig: &sig }.compile(&e, 0).unwrap().eval(&cols, 1)
+    }
+
+    #[test]
+    fn past_and_sampled_take_their_own_width() {
+        // the type of $past(e) and $sampled(e) is the type of e: 8 bits, the carry of a + b lost before the compare
+        // widens it to 9 (as in Verilator 5.046)
+        for f in ["$past(a + b)", "$sampled(a + b)", "$past(a + b, 1)"] {
+            assert_eq!(ev_held(&format!("{f} == 9'h000"), (0x80, 0x80)), k(1), "{f}: the carry is lost");
+            assert_eq!(ev_held(&format!("{f} == 9'h100"), (0x80, 0x80)), k(0), "{f}: no false pass");
+            assert_eq!(ev_held(&format!("{f} == 9'h0FF"), (0x7F, 0x80)), k(1), "{f}: no carry, the value kept");
+            assert_eq!(ev_held(&format!("{f} != 9'h0FF"), (0x7F, 0x80)), k(0), "{f}: no false pass");
+        }
+        // the context still widens the 8-bit result (zero-extended), as for a signal
+        assert_eq!(ev_held("$past(a + b) + 9'h100 == 9'h100", (0x80, 0x80)), k(1));
+        assert_eq!(ev_held("$past({a, b}) == 16'h8001", (0x80, 0x01)), k(1));
     }
 
     #[test]

@@ -410,7 +410,7 @@ class Names {
     // a struct, union, interface scope
     const kdTitle = r.partial ? `: ${r.partial[0]} of its ${r.partial[1]} bits shown, no whole value` :
       r.sig ? `, ${r.sig.width} bits: its whole value on this row` : '';
-    const kd = r.type === 'group' && KIND_MARK[r.kind] ? `<span class="kd" title="${r.kind}${kdTitle}">${KIND_MARK[r.kind]}</span>` : '';
+    const kd = r.type === 'group' && hasKey(KIND_MARK, r.kind) ? `<span class="kd" title="${r.kind}${kdTitle}">${KIND_MARK[r.kind]}</span>` : '';
     return kd + (p ? `<span class="pfx">${txt(p, 0)}</span>` : '') + txt(rest, p.length);
   }
   build() {
@@ -438,6 +438,7 @@ class Names {
           `class="n" title="${esc(r.full || r.name)}"${col(r)}>${lab(r)}</span><span class="v"></span></div>`);
     }).join('');
     v.rowEls = [...v.namesEl.children].slice(1);
+    v.rowElOf = new Map(); v.rowsL.forEach((r, k) => { if (r.type !== 'lane' && !v.rowElOf.has(r)) v.rowElOf.set(r, v.rowEls[k]); });   // rowEl: no search
     for (const [r, set] of v.rowMarks) { const el = v.rowEl(r); if (el) el.classList.add(...set); }   // the plugins' marks stay
     for (const [r, t] of v.rowTitles) { const el = v.rowEl(r); if (el) el.title = t; }
     v.vals = [...v.namesEl.querySelectorAll('.row .v')]; v.namesGen = (v.namesGen || 0) + 1;
@@ -497,7 +498,7 @@ class Notes {
     el.innerHTML = (v.bms.length ? `<div class="nh"><b>Bookmarks</b><span
       class="muted">click a number to go there · drag a circle on the waves to move it, shift+drag to another one for an arrow · kept in this browser</span>
       <button type="button" data-bm="json">JSON</button><button type="button" data-bm="clear"
-        title="Remove the bookmarks of this browser (the page's own come back on reload)">Clear</button></div><ol class="bms">` +
+        title="Remove the bookmarks and arrows of this browser (the page's own come back on reload; your markers stay)">Clear</button></div><ol class="bms">` +
       v.bms.map(b => { const s = byFull.get(b.signal);
         return `<li data-n="${b.n}"><button type="button" class="bn" data-bm="go"
           title="Go to bookmark ${b.n}"${b.color ? ` style="background:${esc(b.color)}"` : ''}>${b.n}</button>
@@ -551,7 +552,7 @@ class Notes {
     else if (act === 'del') { v.bms = v.bms.filter(x => x.n !== n); v.arrows = v.arrows.filter(a => a.from !== n && a.to !== n); v.changed(true); }
     else if (act === 'adel') { v.arrows.splice(+li.dataset.a, 1); v.changed(true); }
     else if (act === 'addar') { const k = v.bms.length; v.arrows.push(arNorm([{ from: v.bms[k - 2].n, to: v.bms[k - 1].n }])[0]); v.changed(true); }
-    else if (act === 'clear') { v.bms = []; v.arrows = []; try { localStorage.removeItem(v.bmKey); } catch (err) { /* ignore */ } this.render(); v.draw(); }
+    else if (act === 'clear') { v.bms = []; v.arrows = []; v.saveBookmarks(false); this.render(); v.draw(); }   // your markers stay
     else if (act === 'json') {
       const ta = v.notesEl.querySelector('textarea.json'), rows = l => l.map(x => '  ' + JSON.stringify(x)).join(',\n');
       const txt = [`"bookmarks": [\n${rows(v.bookmarks())}\n]`, `"arrows": [\n${rows(v.arrowList())}\n]`,
@@ -877,8 +878,9 @@ class WaveView {
   }
   fitPfx() { const i = this.root.querySelector('input.pfx'); if (i) i.style.width = Math.max(7, i.value.length + 2) + 'ch'; }
   // every row in display order (the model's and the plugins'), and the ones not folded away
-  allRows() {
+  allRows(hidden = false) {   // hidden: the hidden rows too, where they would be (the command rows)
     const rows = withExtra(orderRows(this.M.rows, this.sort, this.sortIgnore, this.S.groupOrder), this.extraRows, this.M, this);
+    if (hidden) return rows;
     if (!this.hiddenRows.size) return (this.rowsAll = rows);
     const H = this.hiddenRows, ids = new Set(Object.values(this.M.groups).filter(g => H.has(g.path)).map(g => g.id));   // a hidden module: all of it
     return (this.rowsAll = rows.filter(r => !(r.type !== 'space' && r.type !== 'lane' && r.full && !r.ug && H.has(r.full)) && !r.anc.some(id => ids.has(id))));
@@ -1123,13 +1125,13 @@ class WaveView {
   // kept in this browser. Signals with a style of their own keep it
   setStyle(name) {   // the bar's own layer: kept only when it differs from the settings (their style comes back with them)
     const base = settings(GLOBAL, this.M.cfg, this.opts).style;
-    if (EDGES[name] && name !== base) this.local.style = name; else delete this.local.style;
+    if (hasKey(EDGES, name) && name !== base) this.local.style = name; else delete this.local.style;
     this.saveLook();
     this.S.style = this.local.style || settings(GLOBAL, this.M.cfg, this.opts).style;
     if (this.wsEl) this.wsEl.value = this.S.style;
     this.draw(); this.settingsChanged(); return this;
   }
-  loadLook() { try { const o = JSON.parse(localStorage.getItem(this.lookKey) || '{}'), L = {}; if (o && EDGES[o.style]) L.style = o.style;
+  loadLook() { try { const o = JSON.parse(localStorage.getItem(this.lookKey) || '{}'), L = {}; if (o && hasKey(EDGES, o.style)) L.style = o.style;
       if (o && o.gap && typeof o.gap === 'object') L.gap = o.gap;
       if (o && o.cyc && typeof o.cyc === 'object') L.cyc = o.cyc;
       if (o && (typeof o.maxHeight === 'string' || typeof o.maxHeight === 'number')) L.maxHeight = o.maxHeight;
@@ -1204,7 +1206,7 @@ class WaveView {
   cycOpt() {
     const L = this.local.cyc || {}, o = {};
     for (const k of CYC_KEYS) o[k] = L[k] !== undefined ? L[k] : this.S[k];
-    o.cycles = !!o.cycles; o.cycleClock = o.cycleClock || null; o.cycleZero = o.cycleZero == null || o.cycleZero === '' ? null : num(o.cycleZero);
+    o.cycles = !!o.cycles; o.cycleClock = o.cycleClock || null; o.cycleZero = zeroTime(o.cycleZero);
     if (o.cycleZero != null && !isFinite(o.cycleZero)) o.cycleZero = null;
     return o;
   }
@@ -1254,9 +1256,10 @@ class WaveView {
       paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs), hidden: [...this.hiddenRows],
         select: (this.sel && this.sel.full) || null, find: this.q || '', bookmarks: this.bookmarks(), arrows: this.arrowList(), markers: this.markList(),
         groups: this.groupList() };
-    if (this.cursor2 != null) st.cursor2 = this.cursor2;
-    if (this.range) st.range = { from: this.range[0], to: this.range[1], signal: (this.rangeRow && this.rangeRow.full) || null };
-    if (this.edgeKind !== 'any' || (this.evEl && this.evEl.value)) st.edge = { kind: this.edgeKind, value: (this.evEl && this.evEl.value) || '' };
+    // none is said (null, the kind "any"): a state loaded later clears what is there then (a key left out keeps it)
+    st.cursor2 = this.cursor2 ?? null;
+    st.range = this.range ? { from: this.range[0], to: this.range[1], signal: (this.rangeRow && this.rangeRow.full) || null } : null;
+    st.edge = { kind: this.edgeKind, value: (this.evEl && this.evEl.value) || '' };
     for (const x of this.extraState) { try { const val = x.get(); if (val !== undefined) st[x.key] = val; } catch (e) { console.error('wavefw state:', e); } }
     return st;
   }
@@ -1332,8 +1335,9 @@ class WaveView {
     if (st.cursor2 !== undefined) this.cursor2 = st.cursor2 != null && isFinite(st.cursor2) ? Math.min(Math.max(st.cursor2, M.t0), M.t1) : null;
     if (st.range !== undefined) {
       const g = st.range, row = g && g.signal ? (seen(g.signal) && M.rows.find(r => r.type === 'sig' && r.full === g.signal)) || null : null;
-      if (g && isFinite(g.from) && isFinite(g.to)) { this.range = [Math.max(Math.min(g.from, g.to), M.t0), Math.min(Math.max(g.from, g.to), M.t1)];
-        this.rangeRow = row; this.rangeKey = null; } else this.range = null;
+      const cl = x => Math.min(Math.max(x, M.t0), M.t1), a = g && cl(Math.min(g.from, g.to)), b = g && cl(Math.max(g.from, g.to));
+      if (g && isFinite(g.from) && isFinite(g.to) && b > a) { this.range = [a, b]; this.rangeRow = row; this.rangeKey = null; }
+      else this.range = null;   // none, or outside these waves: never one the wrong way round
     }
     if (st.edge !== undefined) { this.setEdgeKind((st.edge && st.edge.kind) || 'any'); if (this.evEl) this.evEl.value = (st.edge && st.edge.value) || ''; }
     if (st.find !== undefined && this.qEl) this.qEl.value = st.find || '';
@@ -1412,7 +1416,7 @@ class WaveView {
     if (typeof x === 'number') { const o = (this.lay || []).find(o => x >= o.y && x < o.y + o.h); return o ? o.row : null; }
     const el = x && x.closest && x.closest('.row[data-r]'); return el && el.closest('.names') === this.namesEl ? this.vis[+el.dataset.r] || null : null;
   }
-  rowEl(r) { const k = this.vis ? this.vis.indexOf(r) : -1; return k < 0 ? null : this.namesEl.querySelector(`.row[data-r="${k}"]`); }   // its name row
+  rowEl(r) { return (this.rowElOf && this.rowElOf.get(r)) || null; }   // its name row (as the names column was built last)
   // a class of a row's name (kept while the names column is built again: folding, sorting); on false: removed
   rowClass(r, cls, on = true) {
     const set = this.rowMarks.get(r) || new Set(); if (on) set.add(cls); else set.delete(cls);
@@ -1486,7 +1490,7 @@ class WaveView {
   // cursor to the next (dir 1) / previous (-1) edge of the selected signal, or of any shown signal; the view follows
   // the edge kind of ◀ ▶ / Tab (EDGE_KINDS); "value" shows the value field (focus: the field gets the keys)
   setEdgeKind(kind, focus = false) {
-    if (!EDGE_KINDS[kind]) return this;
+    if (!hasKey(EDGE_KINDS, kind)) return this;
     this.edgeKind = kind; if (this.edgeSel) this.edgeSel.value = kind;
     if (this.evEl) { this.evEl.hidden = kind !== 'value'; if (focus && kind === 'value') this.evEl.focus(); }
     return this;
@@ -1559,16 +1563,22 @@ class WaveView {
     .filter(([, x]) => x != null))); }
   setBookmarks(list, arrows = []) { this.bms = bmNorm(list); this.arrows = arNorm(arrows, list); this.saveBookmarks(); this.renderNotes(); this.draw();
     return this; }
-  loadBookmarks() { // this browser's copy (localStorage) wins over the page's "bookmarks" / "arrows"
+  loadBookmarks() { // this browser's copy (localStorage) wins over the page's "bookmarks" / "arrows"; a copy of the markers only (Clear): the page's
+    const page = { bms: this.M.bookmarks.map(b => Object.assign({}, b)), arrows: this.M.arrows.map(a => Object.assign({}, a)), umarks: [] };
     try {
-      const v = localStorage.getItem(this.bmKey);
-      if (v != null) { const o = JSON.parse(v), list = Array.isArray(o) ? o : o.bookmarks;
-        return { bms: bmNorm(list), arrows: arNorm(o.arrows, list), umarks: markNorm(o.markers) }; }
+      const v = localStorage.getItem(this.bmKey), o = v == null ? null : JSON.parse(v);
+      if (Array.isArray(o)) return { bms: bmNorm(o), arrows: arNorm([], o), umarks: [] };
+      if (o && typeof o === 'object') return o.bookmarks === undefined ? Object.assign(page, { umarks: markNorm(o.markers) }) : { bms: bmNorm(o.bookmarks),
+        arrows: arNorm(o.arrows, o.bookmarks), umarks: markNorm(o.markers) };
     } catch (e) { /* no storage: page bookmarks */ }
-    return { bms: this.M.bookmarks.map(b => Object.assign({}, b)), arrows: this.M.arrows.map(a => Object.assign({}, a)), umarks: [] };
+    return page;
   }
-  saveBookmarks() { try { localStorage.setItem(this.bmKey, JSON.stringify({ bookmarks: this.bookmarks(), arrows: this.arrowList(), markers: this.markList() }));
-    } catch (e) { /* private mode */ } }
+  // this browser's copy; bms false (Clear): the markers only, so the page's bookmarks come back on reload
+  saveBookmarks(bms = true) {
+    try { const o = bms ? { bookmarks: this.bookmarks(), arrows: this.arrowList(), markers: this.markList() } : { markers: this.markList() };
+      if (!bms && !o.markers.length) localStorage.removeItem(this.bmKey); else localStorage.setItem(this.bmKey, JSON.stringify(o));
+    } catch (e) { /* private mode */ }
+  }
   when(t) { return this.M.timed ? fmtExact(t) : trimNum(t); }
   // typed time: "250ns", "85.12us"; a plain number is in the unit shown (µs for "85.120 µs"), or cycles
   parseWhen(str, ref) {
@@ -1581,6 +1591,12 @@ class WaveView {
   renderNotes() { if (this.held) this.held.notes = true; else this.notes.render(); }
   renderNames() { if (this.held) this.held.names = true; else this.names.render(); }
   renderNamesNow() { this.names.render(); }   // in a run too (going to a row needs the rows laid out)
+  // in a run: what it has held back done now (the names, the lists, the layout), the rest of it still held (one step to undo)
+  flushHeld() {
+    const h = this.held; if (!h || !(h.names || h.notes || h.draw)) return;
+    this.held = null;
+    try { if (h.names) this.names.render(); if (h.notes) this.notes.render(); this.draw(); } finally { h.names = h.notes = h.draw = false; this.held = h; }
+  }
   rowState(el, r) { this.names.state(el, r); }
   changed(list) { this.saveBookmarks(); if (list) this.renderNotes(); this.draw(); }
   layout() { return layoutRows(this.rowsL, this.rowH, this.S.laneHeight, this.hdrH); }

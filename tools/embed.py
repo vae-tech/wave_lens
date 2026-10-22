@@ -56,7 +56,9 @@ def main():
     ap.add_argument('--compact', action='store_true', help='one line, no spaces (smallest output)')
     ap.add_argument('--out', help='output file (default: stdout)')
     a = ap.parse_args()
-    text = text_of(*load(a.files), a.compact).replace('</', '<\\/')
+    # every "<" as < (the same string to JSON and JavaScript): "</script>" or "<!--<script>" in a value cannot end the
+    # script it goes into or make the HTML parser swallow the rest of the page
+    text = text_of(*load(a.files), a.compact).replace('<', '\\u003c')
     if a.html:
         with open(a.html, encoding='utf-8') as f:
             page = f.read()
