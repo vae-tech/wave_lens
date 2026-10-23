@@ -3,17 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Dump → page · wavefw guides</title>
+<title>Dump → page · WaveLens guides</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap">
 <link rel="stylesheet" href="guide.css">
 </head>
 <body>
 <header class="top"><nav>
-  <a class="home" href="index.html">wavefw guides</a>
-  <a href="pages.html" aria-current="page">Dump → page</a> <a href="viewer.html">Viewer</a> <a href="gaps.html">Gaps</a>
-  <a href="sva.html">Assertions</a> <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a>
-  <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
+  <a class="home" href="index.html">WaveLens guides</a>
+  <a href="pages.html" aria-current="page">Dump → page</a> <a href="viewer.html">Viewer</a> <a href="modules.html">Modules</a>
+  <a href="compare.html">Compare</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
+  <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="vscode.html">VS Code</a>
+  <a href="commands.html">Commands</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
 </nav></header>
 <div class="page toc-side">
 <main>
@@ -240,7 +241,7 @@ name), <code>bit_cnt</code>, <code>valid</code>, <code>frame_err</code>, <code>d
 <ol>
 <li>the built-in defaults;</li>
 <li>global: for a generated page the config's top-level <code>"config"</code> (in your own pages
-  <code>wavefw/wavefw.config.js</code> or <code>WaveFW.configure</code>);</li>
+  <code>wavelens/wavelens.config.js</code> or <code>WaveLens.configure</code>);</li>
 <li>a view's <code>"config"</code> (the diagram's own);</li>
 <li>the element (<code>data-config</code> …, your own pages);</li>
 <li>the viewer's own choices, kept in the browser (the edge style of its bar).</li>
@@ -268,7 +269,7 @@ name), <code>bit_cnt</code>, <code>valid</code>, <code>frame_err</code>, <code>d
   band under the time axis, the clock counted, the time of cycle 0 (<code>"50ns"</code>, or ps) (<a href="viewer.html#cycles">Clock cycles</a>)</td></tr>
 <tr><td><code>svaOpen</code>, <code>svaShow</code></td><td>false, all</td><td>the assertion list open at start; which assertions are drawn</td></tr>
 </table>
-<p>Every key with its default: <a href="../USAGE.md#settings">USAGE § Settings</a> and <code>wavefw/wavefw.config.js</code>.</p>
+<p>Every key with its default: <a href="../USAGE.md#settings">USAGE § Settings</a> and <code>wavelens/wavelens.config.js</code>.</p>
 
 <h2 id="themes">Themes</h2>
 <p>Three themes — <code>light</code> (warm paper), <code>white</code> (black traces, for print and slides) and <code>dark</code> — follow
@@ -295,10 +296,10 @@ The viewer's canvas covers only the visible rows, so any number of rows scrolls 
 
 <h2 id="readers">The dump reader</h2>
 <p>The tools read a VCD in one pass in Python (standard library only), an FST through GTKWave's <code>fst2vcd</code> when it is installed,
-else through the <code>sva</code> CLI's <code>sva vcd</code> (<code>WAVEFW_FST=sva</code> or <code>fst2vcd</code> picks one); a VCD and its FST
+else through the <code>sva</code> CLI's <code>sva vcd</code> (<code>WAVELENS_FST=sva</code> or <code>fst2vcd</code> picks one); a VCD and its FST
 give byte-identical WaveJSON. A view's <code>marker</code> is <code>posedge X</code>, <code>negedge X</code>, <code>edge X</code> or
 <code>X</code> (any change).</p>
-<div class="note"><p>No page at all: <code>wavefw/viewer.html</code> (or <span class="ui">Open…</span> in any viewer's bar) reads a VCD
+<div class="note"><p>No page at all: <code>wavelens/viewer.html</code> (or <span class="ui">Open…</span> in any viewer's bar) reads a VCD
 dropped on it straight in the browser, and ⟳ reads it again after the next simulation with the view kept
 (<a href="viewer.html">Viewer</a>).</p></div>
 
@@ -320,7 +321,7 @@ config <code>mkconfig.py</code> makes from the dump (the whole hierarchy). <code
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>wavefw 0.11 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live
+<footer>WaveLens 0.18 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live
 reference: <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

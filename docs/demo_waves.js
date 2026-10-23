@@ -16,7 +16,7 @@ window.DEMO_WAVES = {
   "head": {"text": "mc_tx · first byte 0xA5 · clock-sampled", "tick": 0},
   "time": {"t0": 25000, "t1": 375000, "cycle": 10000, "unit": "ps", "skip": [[8, 15]]},
   "config": {"hscale": 1, "sortIgnore": ["rx_", "bit_"], "rowHeight": 26},
-  "meta": {"waves": "demo.vcd", "tool": "wavefw reader", "mode": "clock", "from_ps": 20000, "to_ps": 370000, "scope": "demo_tb"}
+  "meta": {"waves": "demo.vcd", "tool": "wavelens reader", "mode": "clock", "from_ps": 20000, "to_ps": 370000, "scope": "demo_tb"}
  },
 "exact": {
   "signal": [
@@ -72,6 +72,6 @@ window.DEMO_WAVES = {
   "time": {"t0": 0, "t1": 2100000, "cycle": 5000, "unit": "ps"},
   "config": {"hscale": 1, "sortIgnore": ["rx_", "bit_"], "rowHeight": 26},
   "markers": [{"t": 25000, "label": "start 1"}, {"t": 905000, "label": "done 1"}, {"t": 1035000, "label": "start 2"}, {"t": 1915000, "label": "done 2"}],
-  "meta": {"waves": "demo.vcd", "tool": "wavefw reader", "mode": "exact", "from_ps": 0, "to_ps": 2100000, "scope": "demo_tb"}
+  "meta": {"waves": "demo.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 0, "to_ps": 2100000, "scope": "demo_tb"}
  }
 };

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compare two runs · WaveLens guides</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="guide.css">
+</head>
+<body>
+<header class="top"><nav>
+  <a class="home" href="index.html">WaveLens guides</a>
+  <a href="pages.html">Dump → page</a> <a href="viewer.html">Viewer</a> <a href="modules.html">Modules</a>
+  <a href="compare.html" aria-current="page">Compare</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
+  <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="vscode.html">VS Code</a>
+  <a href="commands.html">Commands</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
+</nav></header>
+<div class="page toc-side">
+<main>
+<header class="hero"><div class="kicker">Guide</div><h1>Compare two runs</h1>
+<p class="lead">The same test before and after a change of the RTL, or with another seed: <span class="ui">Compare…</span> reads the
+  second run's dump over the waves you have open and marks, signal by signal, where the two differ. A red band on the row, ≠ on the
+  name, and <kbd>]d</kbd> to go from one difference to the next.</p></header>
+
+<h2 id="example">The example: run B of the APB testbench</h2>
+<p>The pictures compare the APB example (<code>make examples</code>, the view <i>the whole run · exact transitions</i> of
+  <code>out/examples/apb/apb.html</code>) with a run B made from its VCD by <code>tests/guide_shots.py</code>: in B the read at 115 ns
+  returns <code>0xDEADBEEF</code>, the slave's <code>PREADY</code> for the write at 155 ns comes 10 ns later, and <code>PSLVERR</code>
+  is not in the dump at all. Three kinds of difference, each the way a real regression shows.</p>
+
+<h2 id="load">Loading the second dump</h2>
+<ol class="steps">
+  <li>Open the page with the first run (A). The compare works on <b>exact</b> waves — a page made with <code>--exact</code>, the exact
+    view of an example, a dump opened in <code>wavelens/viewer.html</code>. A clock-sampled view refuses: one cell per cycle is
+    another time scale.</li>
+  <li><span class="ui">Compare…</span> in the bar's <b>dump</b> group, then pick B's VCD. An FST: turn it into VCD text first,
+    <code>bin/linux-x86_64/sva vcd b.fst --out b.vcd</code> (in VS Code the extension does that for you).</li>
+  <li>The signals are matched by their path; else by their name under the page's scope; else by the one path of B that ends with the
+    name. One found by its short name only (<code>tb.a.ready</code> as <code>tb.b.ready</code>) is still compared but said:
+    <i>matched by name: tb.a.ready → tb.b.ready</i> in the toast and in the tooltip of <span class="ui">≠ N ✕</span>.</li>
+</ol>
+
+<h2 id="read">Reading the differences</h2>
+<figure><img src="img/compare-bands.png" alt="APB run A with run B over it: PRDATA ≠ with a red band at 115 ns, PREADY ≠ at 155 ns, PSLVERR struck" loading="lazy">
+  <figcaption><b>Run B over run A.</b> <code>PRDATA ≠</code>: a band where B read another value; <code>PREADY ≠</code>: a band
+  of 10 ns where B's ready was still low; <code>PSLVERR</code> struck: B has no such signal. The bar says
+  <span class="ui">≠ 2 ✕</span>.</figcaption></figure>
+<table>
+  <tr><th>On the waves</th><th>Means</th></tr>
+  <tr><td>a red band on a row</td><td>over that stretch B holds another value (the stretch shaded, a line under it)</td></tr>
+  <tr><td><b>≠</b> after a name</td><td>the signal differs somewhere in the time both dumps cover</td></tr>
+  <tr><td>a struck name</td><td>B has no such signal (one B's reader left out for <code>dumpBudget</code> is said apart in its tooltip)</td></tr>
+  <tr><td><span class="ui">≠ N ✕</span> in the bar</td><td>N signals differ (the title line says where the first one is); ✕ compares no more</td></tr>
+</table>
+<p>Values are compared as values, not as text: bit for bit, <code>x</code> and <code>z</code> apart, so an unknown that became known
+  is a difference; a bus of another width differs everywhere; a real as a number (<code>inf</code>, <code>-inf</code>, <code>nan</code>
+  are three values); a string as text; a packed struct by its whole vector (≠ on its group). Only the time both dumps cover is compared;
+  the toast says so when B is shorter.</p>
+
+<h2 id="step">Going through them</h2>
+<p><kbd>]d</kbd> / <kbd>[d</kbd> move the cursor to the next / previous difference: of the selected signal when it has some, else of
+  every signal.</p>
+<figure><img src="img/compare-next.png" alt="After ]d: the cursor at 115 ns, the first difference" loading="lazy">
+  <figcaption><b><kbd>]d</kbd> from the start.</b> The cursor lands on 115 ns, where <code>PRDATA</code> first differs; the value
+  column shows A's value there.</figcaption></figure>
+
+<h2 id="export">Pictures and what is kept</h2>
+<p>The picture of the view (the right button's PNG / SVG, the <code>picture</code> command) draws the bands, so a regression can go
+  into a review as it is:</p>
+<figure><img src="img/compare-svg.png" alt="The SVG of 40–200 ns with the red bands of PRDATA and PREADY" loading="lazy">
+  <figcaption><b>The SVG of the window.</b> The same bands as on the screen (the names plain: no ≠, no strike).</figcaption></figure>
+<div class="note"><p>A compare is a look at the waves for this session: it is <b>not</b> in the saved state nor in
+  <span class="ui">Save page</span> — the page does not carry dump B. Keep the picture, or B's VCD next to the page, to show it
+  again.</p></div>
+</main>
+<nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
+</div>
+<footer>WaveLens 0.18 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+  <a href="../index.html">docs/index.html</a></footer>
+<script src="guide.js"></script>
+</body>
+</html>

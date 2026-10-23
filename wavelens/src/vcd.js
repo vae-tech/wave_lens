@@ -1,4 +1,4 @@
-/* wavefw src/vcd.js — a VCD read in the page (Open… / a file dropped on a viewer): WaveJSON with exact transitions */
+/* wavelens src/vcd.js — a VCD read in the page (Open… / a file dropped on a viewer): WaveJSON with exact transitions */
 
 /* ---------------- VCD -> WaveJSON ---------------- */
 // The signals of a VCD as WaveJSON groups by scope (the "tv" extension: [[ps, value]], a bus's value in hex, x / z

@@ -2,8 +2,8 @@
 """vscode_e2e.py — the VS Code extension (vscode/) end to end in a real VS Code: in WSL, the VS Code of Windows connected
 to this distribution (Remote - WSL, the same split as Remote-SSH: the extension on Linux, the tab on Windows); elsewhere
 a local `code`. A window of its own (its own user data under BUILD/vscode-e2e) runs vscode/test/e2e.js: each dump
-opens in a wavefw tab, a picture of it is written, the store and the reload are checked; the results and the pictures
-in BUILD/vscode-e2e. Needs VS Code (WAVEFW_CODE: its Code.exe or code) and, in WSL, its Remote - WSL extension.
+opens in a wavelens tab, a picture of it is written, the store and the reload are checked; the results and the pictures
+in BUILD/vscode-e2e. Needs VS Code (WAVELENS_CODE: its Code.exe or code) and, in WSL, its Remote - WSL extension.
 
   vscode_e2e.py [--build out] [--installed] [DUMP …]   (default: the FSM example's VCD and FST, test_stream_video.fst)
 
@@ -17,8 +17,8 @@ WIN_CODE = '/mnt/c/Program Files/Microsoft VS Code/Code.exe'
 
 
 def find_code():
-    if os.environ.get('WAVEFW_CODE'):
-        return os.environ['WAVEFW_CODE']
+    if os.environ.get('WAVELENS_CODE'):
+        return os.environ['WAVELENS_CODE']
     if os.environ.get('WSL_DISTRO_NAME'):
         user = subprocess.run(['cmd.exe', '/c', 'echo %USERNAME%'], capture_output=True, text=True, cwd='/mnt/c').stdout.strip()
         for p in (f'/mnt/c/Users/{user}/AppData/Local/Programs/Microsoft VS Code/Code.exe', WIN_CODE):
@@ -47,25 +47,25 @@ def main():
         sys.exit('vscode_e2e: no dumps (make examples)')
     code = find_code()
     if not code:
-        sys.exit('vscode_e2e: no VS Code (WAVEFW_CODE)')
+        sys.exit('vscode_e2e: no VS Code (WAVELENS_CODE)')
     out = os.path.join(b, 'vscode-e2e')
     os.makedirs(out, exist_ok=True)
     if os.path.exists(os.path.join(out, 'result.json')):
         os.remove(os.path.join(out, 'result.json'))
     distro = os.environ.get('WSL_DISTRO_NAME')
     # what to do, for e2e.js on the side of the extension (the environment of Code.exe does not reach the WSL side)
-    cfg = os.path.join(os.environ.get('XDG_CACHE_HOME') or os.path.expanduser('~/.cache'), 'wavefw', 'e2e.json')
+    cfg = os.path.join(os.environ.get('XDG_CACHE_HOME') or os.path.expanduser('~/.cache'), 'wavelens', 'e2e.json')
     os.makedirs(os.path.dirname(cfg), exist_ok=True)
     with open(cfg, 'w', encoding='utf-8') as f:
         json.dump({'out': out, 'dumps': dumps}, f)
     env = dict(os.environ)
     env.pop('ELECTRON_RUN_AS_NODE', None)
     dev = os.path.join(ROOT, 'vscode')
-    if a.installed:   # an extension that is not wavefw for the development path: the installed wavefw stays
+    if a.installed:   # an extension that is not wavelens for the development path: the installed wavelens stays
         dev = os.path.join(out, 'empty')
         os.makedirs(dev, exist_ok=True)
         with open(os.path.join(dev, 'package.json'), 'w', encoding='utf-8') as f:
-            json.dump({'name': 'wavefw-e2e', 'publisher': 'wavefw', 'version': '0.0.0', 'engines': {'vscode': '^1.80.0'}}, f)
+            json.dump({'name': 'wavelens-e2e', 'publisher': 'wavelens', 'version': '0.0.0', 'engines': {'vscode': '^1.80.0'}}, f)
     if distro:   # Code.exe of Windows, the extension and the tests on this side (vscode-remote URIs)
         rem = lambda p: f'vscode-remote://wsl+{distro}{p}'
         ud = winpath(os.path.join(out, 'user-data'))

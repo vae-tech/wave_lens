@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "wavefw/sva/ast.schema.json",
-  "title": "wavefw SVA: a parsed file",
+  "$id": "https://raw.githubusercontent.com/vae-tech/wavelens/master/docs/sva/ast.schema.json",
+  "title": "WaveLens SVA: a parsed file",
   "description": "The output of `sva parse --json` (an object {files: [Parsed + file]}) and of the WebAssembly call run_json({source}) (one Parsed). docs/sva/LANGUAGE.md has the language; sva/core/src/ast.rs the types. sva/core/tests/schema.rs checks every corpus file against this schema.",
   "type": "object",
   "oneOf": [

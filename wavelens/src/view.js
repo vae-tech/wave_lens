@@ -1,4 +1,4 @@
-/* wavefw/src/view.js — the interactive viewer (WaveView). */
+/* wavelens/src/view.js — the interactive viewer (WaveView). */
 
 // The short names used here and in paint.js:
 //   M      the model (parse): rows, groups, t0 / t1, markers …        S   the settings of all layers (settings())
@@ -16,7 +16,7 @@
 // a piece of the page lives; the viewer is the one object that plugins and tests talk to.
 /* ---------------- tooltips and help ---------------- */
 // A control's tooltip: [what it does, in a few words, its keys]; found by its data-act / -sv / -x / -bm / -m value or a
-// class (".q"); plugins add theirs (WaveFW.tips.add). A control without one shows its title the same way (boot.js).
+// class (".q"); plugins add theirs (WaveLens.tips.add). A control without one shows its title the same way (boot.js).
 const TIPS = {
   '.ct': ['Cursor time: 85.12us, or a number in the unit', ['Enter']], 'act:cset': ['Put the cursor at this time', ['Enter']],
   '.cs': ['Window span around the cursor', ['Enter']], 'act:cshow': ['The window of this span at the cursor'],
@@ -209,13 +209,13 @@ class Bar {
         '<button type="button" data-act="unhide" title="Show the rows hidden with the right button\'s menu again" hidden></button>',
       '<button type="button" data-act="onlyp" title="Only these modules: a click pauses it" hidden></button><button type="button" data-act="onlyx" ' +
         'title="Every module again" aria-label="clear Only" hidden>✕</button>');
-    const edges = grp('edges', seg('<button type="button" data-act="prev" title="Previous edge of the selected signal, or of any shown signal ([)">◀</button>',
+    const edges = grp('edges', seg('<button type="button" data-act="prev" title="Previous edge of the selected signal, or of any shown signal ([e)">◀</button>',
       (`<select class="edge" aria-label="edge kind" title="Edge kind (e): any, rise, fall, a value, X / ` +
           `Z">${Object.entries(EDGE_KINDS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select>`),
       ('<input type="text" class="ev" spellcheck="false" hidden placeholder="0x40, \'h40, 64, IDLE" aria-label="value to find" title="The value to find: ' +
           ('0x40, \'h40, 8\'d64, 64, -3, \'b101, or a text (an enum label); Enter / shift+Enter: the next / previous time the selected signal (none: any ' +
           'shown) becomes it">')),
-      '<button type="button" data-act="next" title="Next edge (])">▶</button>'),
+      '<button type="button" data-act="next" title="Next edge (]e)">▶</button>'),
         '<button type="button" data-act="mark" title="Bookmark at the cursor, on the selected signal (m)">+ Mark</button>');
     const state = grp('state',
       ('<button type="button" data-act="ssave" title="Save what you did in this viewer to a file: the window, the cursor, the order, the folding, the ' +
@@ -251,7 +251,7 @@ class Bar {
       <div class="tools">${toolLine('time', grp('cursor', cursor) + grp('view', zoom) + edges + (jumps ? grp('go to', jumps) : ''))}${toolLine('find', find)}${
         toolLine('expr', '')}${toolLine('rows', list + grp('style', wstyle) + state + dump)}</div></div>
       <div class="body"><div class="names"></div><div class="wcol"><canvas tabindex="0" role="application" aria-roledescription="waveform"
-        aria-label="waveform: + − zoom, ← → pan, shift+← → move the cursor, ↑ ↓ select a signal, [ ] edges"></canvas></div></div>
+        aria-label="waveform: + − zoom, ← → pan, shift+← → move the cursor, ↑ ↓ select a signal, [e ]e or Tab edges"></canvas></div></div>
       <div class="notes" hidden></div>
       ${S.hint ? `<div class="hint">${esc(v.hintBase = hint)}</div>` : ''}`;
   }
@@ -629,7 +629,7 @@ class Notes {
 
 /* ---------------- interactive viewer ---------------- */
 const VIEWS = new Set(), ACTIVE = { view: null };   // ACTIVE.view: the viewer used last (Esc while the focus is on the page)
-const PLUGINS = [];   // WaveFW.plugin(fn): fn(viewer) for every viewer, now and later (wavefw/sva.js: the assertions panel)
+const PLUGINS = [];   // WaveLens.plugin(fn): fn(viewer) for every viewer, now and later (wavelens/sva.js: the assertions panel)
 const STATE_VERSION = 3;   // a saved viewer state (state()): 2 has range and edge, 3 your markers and groups
 // the settings of the gaps (the menu's Gaps rows)
 const GAP_KEYS = ['gaps', 'gapIdle', 'gapKeep', 'gapSignals', 'gapClock', 'gapAux', 'gapOnly', 'gapCount', 'gapLine'];
@@ -640,7 +640,7 @@ class WaveView {
     const M = this.M;
     applyLook(root, opts.theme ?? M.theme, Object.assign({}, M.colors, opts.colors));
     this.storeId = this.storeName();
-    this.lookKey = 'wavefw.look:' + this.storeId; this.local = this.loadLook();   // the bar's own layer of the settings (the edge style)
+    this.lookKey = 'wavelens.look:' + this.storeId; this.local = this.loadLook();   // the bar's own layer of the settings (the edge style)
     this.restyle(false); this.collapsed = foldSet(M, this.S.fold);
     this.picks = hlPick(M, this.S.highlight); this.hlFrom = JSON.stringify(this.S.highlight ?? null);
     this.selRun = new Set(); this.selAnchor = null;   // shift+click: a run of selected signals (selectRun)
@@ -648,10 +648,10 @@ class WaveView {
     this.findMask = this.S.findMask;
     this.only = null;   // Only: {modules: [paths], on} (modules.js)
     for (const [, k] of FIND_OPTS) this[k] = !!this.S[k];   // its options: the case, the whole name, a regular expression
-    this.paintKey = 'wavefw.paint:' + this.storeId;
+    this.paintKey = 'wavelens.paint:' + this.storeId;
     this.painted = new Map(); this.loadPaint();
     // the menu's radix per signal, hidden rows
-    this.rowsKey = 'wavefw.rows:' + this.storeId; this.radixes = new Map(); this.analogs = new Map(); this.hiddenRows = new Set(); this.loadRows();
+    this.rowsKey = 'wavelens.rows:' + this.storeId; this.radixes = new Map(); this.analogs = new Map(); this.hiddenRows = new Set(); this.loadRows();
     this.t0 = M.t0; this.span = M.t1 - M.t0;
     this.minSpan = opts.minSpan ?? (M.timed ? Math.max(this.span / 1e6, 10) : 0.5);
     this.cursor = opts.cursor ?? M.cursor ?? M.t0;
@@ -662,12 +662,12 @@ class WaveView {
     this.extraJSON = [];   // plugins: () -> '"key": …' lines for the bookmarks JSON (or null)
     this.extraState = [];   // plugins: {key, get() -> a JSON value, set(value) (may be async)}: their part of the saved state
     this.extraRows = [Object.assign(g => (g ? [] : this.ugRows()), { head: true })];   // plugins: rows under a group (withExtra); yours at the top
-    this.extraPicks = new Map();   // plugins: rows highlighted, row -> a token ('hl8': --wave-hl8) or a colour index; Esc clears (then wavefw:reset)
+    this.extraPicks = new Map();   // plugins: rows highlighted, row -> a token ('hl8': --wave-hl8) or a colour index; Esc clears (then wavelens:reset)
     this.keys = {};   // plugins: key -> fn(event) on the waves (addKey)
     this.rowMarks = new Map(); this.rowTitles = new Map();   // plugins: classes and tooltips of name rows (rowClass, rowTitle)
     const hints = this.hints = [];   // plugins: lines of the hint under the waves; hints.push() shows them
     hints.push = (...a) => { const n = Array.prototype.push.apply(hints, a); this.renderHint(); return n; };
-    this.bmKey = 'wavefw.bookmarks:' + this.storeId;
+    this.bmKey = 'wavelens.bookmarks:' + this.storeId;
     // every listener outside the viewer's own child elements (its root, the window, the document) is registered with
     // this signal: destroy() removes them all (a dump opened again on the same element left the old ones running)
     this.ac = new AbortController();
@@ -686,7 +686,7 @@ class WaveView {
     window.addEventListener('scroll', this.onScroll, { passive: true, ...own }); window.addEventListener('resize', this.onScroll, own);
     this.bodyEl.addEventListener('scroll', this.onScroll, { passive: true, ...own });
     VIEWS.add(this);
-    for (const p of PLUGINS) try { p(this); } catch (e) { console.error('wavefw plugin:', e); }
+    for (const p of PLUGINS) try { p(this); } catch (e) { console.error('wavelens plugin:', e); }
     // the page's edits (tools/viewedit.py), then undo starts from the page as it opens; a live page: the agent hears of this viewer
     this.applyEdits().finally(() => this.undoTick(true)); liveHello(); liveShow();
   }
@@ -699,10 +699,10 @@ class WaveView {
     if (!o.key && !r.id && ref) { const k = [...document.querySelectorAll('[data-wave]')].filter(e => e.dataset.wave === ref).indexOf(r);
       if (k > 0) id += '#' + (k + 1); }
     for (const v of VIEWS) if (v.storeId === id &&
-      v.root.isConnected) console.warn(`wavefw: two viewers store their bookmarks as "${id}": give one an id or opts.key`);
+      v.root.isConnected) console.warn(`wavelens: two viewers store their bookmarks as "${id}": give one an id or opts.key`);
     return id;
   }
-  // settings from all layers; a global WaveFW.configure() calls this again on every viewer
+  // settings from all layers; a global WaveLens.configure() calls this again on every viewer
   restyle(redraw = true) {
     const S = this.S = settings(GLOBAL, this.M.cfg, this.opts, this.local);
     this.groupStroke = groupPaint(this.M, S.groupColors);
@@ -924,7 +924,7 @@ class WaveView {
     return rows.filter(r => this.found.has(r) || (r.type === 'group' && way.has(r.id)) || r.anc.some(id => inn.has(id)));
   }
   visible() { return this.allRows().filter(r => !r.anc.some(id => this.collapsed.has(id))); }
-  settingsChanged() { this.root.dispatchEvent(new CustomEvent('wavefw:settings')); }   // sort, prefixes, settings
+  settingsChanged() { this.root.dispatchEvent(new CustomEvent('wavelens:settings')); }   // sort, prefixes, settings
   // dir: none | asc | desc; ignore: prefixes skipped when comparing names ("i_,o_" or an array)
   setSort(dir, ignore) {
     this.sort = sortDir(dir);
@@ -1036,7 +1036,7 @@ class WaveView {
     const keep = this.fiRow || this.sel;
     if (this.qEl) this.qEl.value = '';
     this.picks = new Map(); this.sel = null; this.selRun = new Set(); this.extraPicks = new Map(); this.range = null; this.cursor2 = null; this.closeMenu();
-    this.root.dispatchEvent(new CustomEvent('wavefw:reset'));
+    this.root.dispatchEvent(new CustomEvent('wavelens:reset'));
     return this.find('', false, keep);
   }
   unit() { // the unit the cursor fields start in: the one of a tenth of the whole span
@@ -1313,8 +1313,8 @@ class WaveView {
   // config file as they are. Paths are full paths; times are model units.
   state() {
     const M = this.M, folded = this.foldSaved || this.collapsed;   // during a search: the folding from before it
-    const st = { wavefw: 'state', version: STATE_VERSION, title: this.opts.title || M.title || '', from: this.t0, to: this.t0 + this.span, cursor: this.cursor,
-      config: { style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded,
+    const st = { wavelens: 'state', version: STATE_VERSION, title: this.opts.title || M.title || '', from: this.t0, to: this.t0 + this.span,
+      cursor: this.cursor, config: { style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded,
         toolsHidden: toolNames(this.S.toolsHidden), sort: this.sort, sortIgnore: [...this.sortIgnore],
         fold: [...folded].map(id => M.groups[id] && M.groups[id].path).filter(Boolean),
         highlight: [...this.picks].sort((a, b) => a[1] - b[1]).map(([r]) => r.full).filter(Boolean), findHighlight: !!this.findHl, findOpen: !!this.findOpen,
@@ -1327,16 +1327,16 @@ class WaveView {
     st.cursor2 = this.cursor2 ?? null;
     st.range = this.range ? { from: this.range[0], to: this.range[1], signal: (this.rangeRow && this.rangeRow.full) || null } : null;
     st.edge = { kind: this.edgeKind, value: (this.evEl && this.evEl.value) || '' };
-    for (const x of this.extraState) { try { const val = x.get(); if (val !== undefined) st[x.key] = val; } catch (e) { console.error('wavefw state:', e); } }
+    for (const x of this.extraState) { try { const val = x.get(); if (val !== undefined) st[x.key] = val; } catch (e) { console.error('wavelens state:', e); } }
     return st;
   }
   // a state (state()) back: every key it has replaces this viewer's; the plugins' parts first (their rows may come).
   // -> the paths it names that these waves do not have (left out)
   async setState(st) {
-    if (!st || typeof st !== 'object' || Array.isArray(st) || st.wavefw !== 'state') throw new Error(st &&
+    if (!st || typeof st !== 'object' || Array.isArray(st) || st.wavelens !== 'state') throw new Error(st &&
       st.signal ? 'WaveDrom waves, not a saved viewer state (open them as a page)' : 'not a saved viewer state');
-    if (!(st.version <= STATE_VERSION)) console.warn((`wavefw: a state of version ${st.version} (this viewer reads ${STATE_VERSION}): what it does not know ` +
-        `is left out`));
+    if (!(st.version <= STATE_VERSION)) console.warn((`wavelens: a state of version ${st.version} (this viewer reads ${STATE_VERSION}): ` +
+        `what it does not know is left out`));
     const M = this.M, C = st.config || {}, miss = new Set();
     for (const x of this.extraState) if (st[x.key] !== undefined) { try { await x.set(st[x.key]); } catch (e) { this.toast(`${x.key}: ${e.message}`); } }
     const sigs = new Set(M.rows.map(r => r.full));
@@ -1438,13 +1438,13 @@ class WaveView {
   // the colour a row is drawn in here: your paint, its own colour, its group's (groupColors); the model is not changed
   strokeOf(r) { return (r.type === 'sig' && this.painted.get(r.full)) || r.stroke || (this.groupStroke && this.groupStroke.get(r.orig || r)) || undefined; }
 
-  /* ---------------- the plugin API (wavefw/sva.js uses only this, the rows of view.extraRows and the events) ---------------- */
+  /* ---------------- the plugin API (wavelens/sva.js uses only this, the rows of view.extraRows and the events) ---------------- */
   // Open… a dump: picked (with a handle where the browser keeps one: ⟳ reads the file again), a File, or a dropped one
   // (handle: a Promise of its handle) -> this viewer's waves replaced (a new viewer on the same element: the plugins
   // take it as any other); keep: the view of these waves stays (⟳)
   async openDump(file, handle = null, keep = false) {
     try {
-      if (!file && G.showOpenFilePicker) { const [h] = await G.showOpenFilePicker({ id: 'wavefw-dump',
+      if (!file && G.showOpenFilePicker) { const [h] = await G.showOpenFilePicker({ id: 'wavelens-dump',
         types: [{ description: 'VCD dump', accept: { 'text/plain': ['.vcd'] } }] }); handle = h; file = await h.getFile(); }
       else if (!file) { this.dfile.click(); return this; }
       if (handle && handle.then) handle = await handle.catch(() => null);
@@ -1461,7 +1461,7 @@ class WaveView {
       if (st) { delete st.title; await v.setState(st); }
       v.toast((`${file.name}: ${r.shown} of ${r.total} ` +
           `signals${r.shown < r.total ? ` (dumpBudget ${this.S.dumpBudget} changes: the levels nearest the top)` : ''}`));
-      root.dispatchEvent(new CustomEvent('wavefw:dump', { detail: { name: file.name, shown: r.shown, total: r.total } }));
+      root.dispatchEvent(new CustomEvent('wavelens:dump', { detail: { name: file.name, shown: r.shown, total: r.total } }));
       return v;
     } catch (e) { if (e && e.name !== 'AbortError') this.toast('cannot open: ' + e.message); return this; }
   }
@@ -1794,7 +1794,7 @@ class WaveView {
     this.range = a == null || b == null || a === b ? null : [Math.min(a, b), Math.max(a, b)];
     if (row !== undefined) this.rangeRow = row && row.type === 'sig' && row.tr ? row : null;
     this.rangeKey = null;
-    this.draw(); this.root.dispatchEvent(new CustomEvent('wavefw:range', { detail: { range: this.range } })); return this;
+    this.draw(); this.root.dispatchEvent(new CustomEvent('wavelens:range', { detail: { range: this.range } })); return this;
   }
   // "Δ 20 ns / 50 MHz · 2 ↑ PCLK" / "Δ 80 ns / 12.5 MHz · 7 changes of PADDR (4 values)": the range's length (and its
   // frequency, a period that long) and, on the signal it was
@@ -2345,7 +2345,7 @@ class WaveView {
   }
   print(on) { this.printing = on; if (!on) this.wcol.querySelectorAll('canvas.wv-print').forEach(c => c.remove()); this.draw(); }
   syncReadouts() { // the cursor fields, the cursor and span readout, the value column; the events of what changed
-    const M = this.M, fire = (name, detail) => this.root.dispatchEvent(new CustomEvent('wavefw:' + name, { detail }));
+    const M = this.M, fire = (name, detail) => this.root.dispatchEvent(new CustomEvent('wavelens:' + name, { detail }));
     if (this.evCursor !== this.cursor) { this.evCursor = this.cursor; fire('cursor', { t: this.cursor }); }
     if (this.evT0 !== this.t0 || this.evSpan !== this.span) { this.evT0 = this.t0; this.evSpan = this.span; fire('view', { t0: this.t0, span: this.span }); }
     if (this.evSel !== this.sel) { this.evSel = this.sel; fire('select', { row: this.sel }); }
@@ -2370,7 +2370,7 @@ class WaveView {
   }
   setTheme(name) { applyLook(this.root, name || 'auto', null); this.draw(); return this; }
   setColors(map) { applyLook(this.root, undefined, map); this.draw(); return this; }
-  // the viewer leaves: observers, window listeners and pending frames go; plugins hear wavefw:destroy and take their part
+  // the viewer leaves: observers, window listeners and pending frames go; plugins hear wavelens:destroy and take their part
   destroy() {
     if (!VIEWS.has(this)) return;
     this.ro.disconnect(); this.ac.abort();   // every listener on the root, the window and the document
@@ -2378,7 +2378,7 @@ class WaveView {
     cancelAnimationFrame(this.raf); cancelAnimationFrame(this.inv); clearTimeout(this.toastT);
     if (ACTIVE.view === this) ACTIVE.view = null;
     this.closeMenu(); if (this.mods) { this.mods.ac.abort(); this.mods.el.remove(); } VIEWS.delete(this);
-    this.root.dispatchEvent(new CustomEvent('wavefw:destroy'));
+    this.root.dispatchEvent(new CustomEvent('wavelens:destroy'));
     if (this.root.waveView === this) delete this.root.waveView;
   }
 }

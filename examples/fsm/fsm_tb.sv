@@ -1,7 +1,7 @@
 /*
 ================================================================================
   fsm_tb
-  UART receiver (8N1, BIT clocks per bit) and its testbench: the wavefw FSM
+  UART receiver (8N1, BIT clocks per bit) and its testbench: the WaveLens FSM
   example, a state register of an enum type (uart_pkg::state_t).
 ================================================================================
 

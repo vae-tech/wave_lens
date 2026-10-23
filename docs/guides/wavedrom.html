@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>WaveDrom · wavefw guides</title>
+<title>WaveDrom · WaveLens guides</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap">
 <link rel="stylesheet" href="guide.css">
-<link rel="stylesheet" href="../../wavefw/wavefw.css">
+<link rel="stylesheet" href="../../wavelens/wavelens.css">
 <style>
   /* a live example: its source (copied from the script block that is drawn, so the two cannot differ) and the result */
   .ex pre { margin: 0 0 10px; max-height: 340px; }
@@ -16,22 +16,23 @@
 </head>
 <body>
 <header class="top"><nav>
-  <a class="home" href="index.html">wavefw guides</a>
-  <a href="pages.html">Dump → page</a> <a href="viewer.html">Viewer</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
-  <a href="buses.html">Bus transactions</a> <a href="wavedrom.html" aria-current="page">WaveDrom</a> <a href="mcp.html">AI agents (MCP)</a>
-  <a href="../index.html">Reference</a>
+  <a class="home" href="index.html">WaveLens guides</a>
+  <a href="pages.html">Dump → page</a> <a href="viewer.html">Viewer</a> <a href="modules.html">Modules</a>
+  <a href="compare.html">Compare</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
+  <a href="buses.html">Bus transactions</a> <a href="wavedrom.html" aria-current="page">WaveDrom</a> <a href="vscode.html">VS Code</a>
+  <a href="commands.html">Commands</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
 </nav></header>
 <div class="page toc-side">
 <main>
 <header class="hero"><div class="kicker">Guide</div><h1>WaveDrom: diagrams in your own pages</h1>
-<p class="lead">wavefw reads <a href="https://wavedrom.com">WaveDrom</a> JSON (the format of the
+<p class="lead">WaveLens reads <a href="https://wavedrom.com">WaveDrom</a> JSON (the format of the
 <a href="https://github.com/wavedrom/wavedrom">WaveDrom</a> timing-diagram editor) and draws it two ways from one model: an interactive viewer (zoom, cursor, find, bookmarks)
 and a static WaveDrom-style SVG for documents. This guide shows how to put both in a page of your own, what of WaveDrom is
-supported, what wavefw adds to the format, and how WaveJSON comes out of a simulator dump or out of the viewer. The diagrams
-below are live: this page loads <code>wavefw/wavefw.js</code> itself.</p></header>
+supported, what WaveLens adds to the format, and how WaveJSON comes out of a simulator dump or out of the viewer. The diagrams
+below are live: this page loads <code>wavelens/wavelens.js</code> itself.</p></header>
 
 <h2 id="two-renderers">Two renderers, one model</h2>
-<p>A diagram is a WaveJSON object (<code>{"signal": […]}</code>). wavefw parses it once and hands the model to one of two
+<p>A diagram is a WaveJSON object (<code>{"signal": […]}</code>). WaveLens parses it once and hands the model to one of two
 renderers:</p>
 <table>
 <tr><th>Renderer</th><th>Markup</th><th>Use it for</th></tr>
@@ -47,11 +48,12 @@ draws, the static SVG draws too where it makes sense (bookmarks, arrows, groups,
 
 <h2 id="first-page">Your first page</h2>
 <ol class="steps">
-  <li>Copy <code>wavefw/wavefw.css</code> and <code>wavefw/wavefw.js</code> next to your page (or point at the repository's
-    <code>wavefw/</code>). No build step, no other dependency; the page works from <code>file://</code>.</li>
+  <li>Copy the folder <code>wavelens/</code> of the repository next to your page (or point at it where it is). No build step,
+    no other dependency; the page works from <code>file://</code>. The two files below are the viewer and the static SVG;
+    the rest of the folder are plugins you add when you want them (next step).</li>
   <li>Link both in the page and write a diagram in a script block:
-<pre><code>&lt;link rel="stylesheet" href="wavefw/wavefw.css"&gt;
-&lt;script src="wavefw/wavefw.js"&gt;&lt;/script&gt;
+<pre><code>&lt;link rel="stylesheet" href="wavelens/wavelens.css"&gt;
+&lt;script src="wavelens/wavelens.js"&gt;&lt;/script&gt;
 
 &lt;script type="application/wavedrom"&gt;          <span class="c">&lt;!-- interactive viewer --&gt;</span>
 { "signal": [ { "name": "clk", "wave": "p....." }, { "name": "d", "wave": "x.34.x", "data": ["A", "B"] } ] }
@@ -60,6 +62,14 @@ draws, the static SVG draws too where it makes sense (bookmarks, arrows, groups,
   <li>Open it. When the page loads, every <code>script[type="application/wavedrom"]</code>, <code>script[type="WaveDrom"]</code> and
     element with <code>data-wave</code> is upgraded: a script block gets a <code>&lt;div&gt;</code> right after it with the viewer or
     the SVG in it.</li>
+  <li>For assertions, expressions and bus transactions, add the plugins after <code>wavelens.js</code>, as
+    <code>wavelens/viewer.html</code> does (a page of <code>make html</code> has them inlined; <code>mkhtml.py --no-sva</code> leaves
+    the assertions out):
+<pre><code>&lt;script src="wavelens/wavelens.config.js"&gt;&lt;/script&gt;   <span class="c">&lt;!-- optional: your global settings, before wavelens.js --&gt;</span>
+&lt;script src="wavelens/wavelens.js"&gt;&lt;/script&gt;
+&lt;script src="wavelens/sva.wasm.js"&gt;&lt;/script&gt;          <span class="c">&lt;!-- the assertion engine (~400 kB) … --&gt;</span>
+&lt;script src="wavelens/sva.js"&gt;&lt;/script&gt;               <span class="c">&lt;!-- … and its panel, the ƒ expressions --&gt;</span>
+&lt;script src="wavelens/bus.js"&gt;&lt;/script&gt;               <span class="c">&lt;!-- bus transactions --&gt;</span></code></pre></li>
 </ol>
 <p>The same two blocks, live:</p>
 <div class="live ex"><pre></pre>
@@ -71,10 +81,12 @@ draws, the static SVG draws too where it makes sense (bookmarks, arrows, groups,
 <script type="WaveDrom"> {signal: [{name: 'req', wave: '01..0'}]} </script>
 </div>
 <div class="note"><p>The body of a script block is JSON or the WaveDrom editor's relaxed syntax (unquoted keys, single quotes,
-trailing commas). Like stock WaveDrom, the relaxed form is evaluated as JavaScript: put only diagrams you trust in a page. A
-<code>data-wave</code> reference to a data file is plain data.</p></div>
-<p>Turn the automatic upgrade off with <code>&lt;script src="wavefw.js" data-manual&gt;</code> and call
-<code>WaveFW.upgrade(root)</code> yourself (for content you add later).</p>
+trailing commas). Like stock WaveDrom, the relaxed form is evaluated as JavaScript: put only diagrams you trust in a page. An element's
+<code>data-wave</code> names its data instead: <code>"#id"</code> (the JSON of the element with that id) or a global
+(<code>"DEMO_WAVES.exact"</code>: an object a script of yours defined, e.g. a <code>.js</code> file of <code>embed.py</code> loaded
+with <code>&lt;script src&gt;</code>, which runs as any script does).</p></div>
+<p>Turn the automatic upgrade off with <code>&lt;script src="wavelens.js" data-manual&gt;</code> and call
+<code>WaveLens.upgrade(root)</code> yourself (for content you add later).</p>
 
 <h2 id="attributes">Attributes: window, mode, settings</h2>
 <p>Every upgraded element takes <code>data-*</code> attributes. Times are model units as plain numbers (cycles without the
@@ -130,12 +142,12 @@ instead (the flow of <code>docs/reference/template.html</code>). With many diagr
 </div>
 
 <h2 id="subset">The supported WaveDrom</h2>
-<p>wavefw draws the WaveDrom format most diagrams use. <code>tests/conformance.html</code> draws every case three times — wavefw's
-static SVG, stock WaveDrom 3.5.0 (vendored in <code>tests/vendor/</code>, only used there) and the wavefw viewer — so a difference
+<p>WaveLens draws the WaveDrom format most diagrams use. <code>tests/conformance.html</code> draws every case three times — WaveLens's
+static SVG, stock WaveDrom 3.5.0 (vendored in <code>tests/vendor/</code>, only used there) and the WaveLens viewer — so a difference
 shows at a glance.</p>
 <figure><img src="img/wavedrom-conformance.png"
-  alt="tests/conformance.html: clocks p n P N drawn by wavefw's SVG, by stock WaveDrom and by the viewer" loading="lazy">
-<figcaption><b>tests/conformance.html.</b> Each case: wavefw's SVG on the left, stock WaveDrom 3.5.0 on the right, the
+  alt="tests/conformance.html: clocks p n P N drawn by WaveLens's SVG, by stock WaveDrom and by the viewer" loading="lazy">
+<figcaption><b>tests/conformance.html.</b> Each case: WaveLens's SVG on the left, stock WaveDrom 3.5.0 on the right, the
 interactive viewer under them. Here clocks <code>p n P N</code> with a period of 2, then levels.</figcaption></figure>
 <table>
 <tr><th>Feature</th><th>Notes</th></tr>
@@ -171,7 +183,7 @@ text is used). An unknown wave character is taken as <code>.</code>.</p>
 </script>
 </div>
 
-<h2 id="extensions">What wavefw adds to the format</h2>
+<h2 id="extensions">What WaveLens adds to the format</h2>
 <p>Stock WaveDrom ignores these keys, so a file with them still draws there (without them). They are what lets a diagram come
 from a real dump: real time, exact transitions, value labels, notes.</p>
 <table>
@@ -179,7 +191,9 @@ from a real dump: real time, exact transitions, value labels, notes.</p>
 <tr><td><code>time: {t0, cycle, t1?, skip?}</code></td><td>cycle <i>c</i> starts at <code>t0 + c·cycle</code> ps, so the axis shows
   real time; <code>skip: [[k, n]]</code>: the <code>|</code> cell at index <i>k</i> stands for <i>n</i> cycles</td></tr>
 <tr><td><code>signal[i].tv: [[t, v], …]</code></td><td>exact transitions in model time (ps with <code>time</code>); 1-bit
-  <code>0 1 x z</code>, a bus hex; wins over <code>wave</code></td></tr>
+  <code>0 1 x z</code>; a bus hex (an <code>x</code> / <code>z</code> nibble all unknown), or <code>'b10x1</code> for single unknown
+  bits; a real a number, a string its text (<code>kind</code>); wins over <code>wave</code> (all of it:
+  <a href="../USAGE.md#extensions-stock-wavedrom-ignores-them">USAGE.md § Extensions</a>)</td></tr>
 <tr><td><code>width</code>, <code>enum</code>, <code>radix</code>, <code>style</code>, <code>color</code>/<code>stroke</code>,
   <code>fill</code></td><td>a bus's width, value labels (<code>{"0": "IDLE"}</code>), radix, edge style, trace and fill colours</td></tr>
 <tr><td><code>enumColors</code>, <code>analog</code>, <code>fields</code>, <code>height</code>, <code>kind</code></td><td>fill by
@@ -309,7 +323,7 @@ highlight, the page's colours put in so the file opens anywhere.</p>
  "head": {"text": "apb.vcd @ posedge PCLK", "tick": 0},
  "time": {"t0": 35000, "t1": 115000, "cycle": 10000, "unit": "ps"},
  "config": {"hscale": 1},
- "meta": {"waves": "apb.vcd", "tool": "wavefw reader", "mode": "clock", "from_ps": 30000, "to_ps": 110000, "scope": "apb_tb"}
+ "meta": {"waves": "apb.vcd", "tool": "wavelens reader", "mode": "clock", "from_ps": 30000, "to_ps": 110000, "scope": "apb_tb"}
 }</code></pre>
 <p>The same window with <code>--exact</code> gives every edge in <code>tv</code>
 (<code>{"name": "PSEL", "wave": "0..1...0...1....", "tv": [[30000, "0"], [45000, "1"], [65000, "0"], [85000, "1"]]}</code>). The
@@ -326,7 +340,7 @@ how pages are built (<a href="pages.html">Dump → page</a>).</p>
 <h3 id="gaps-in-wavejson">Idle stretches as <code>|</code> cells</h3>
 <p>In clock mode, <code>--gap 200ns:300ns</code> collapses a window into one <code>|</code> cell, and <code>--auto-gap 16:2</code>
 does it by itself wherever no signal but a clock changes for 16 cycles, keeping 2 cycles after the last change and before the next.
-The cell's real length goes into <code>time.skip</code>, so the wavefw axis keeps the real time. The viewer's pictures and the MCP
+The cell's real length goes into <code>time.skip</code>, so the WaveLens axis keeps the real time. The viewer's pictures and the MCP
 server's <code>wave_page</code> cut the same way; the whole story is in <a href="gaps.html">Gaps</a>.</p>
 
 <h2 id="export">WaveDrom out of the viewer</h2>
@@ -364,17 +378,17 @@ into its name.)</figcaption></figure>
 <h2 id="settings">Settings and themes for diagrams</h2>
 <p>Sizes, fonts, colours, sorting, folding and the rest are settings, merged in layers (later wins):</p>
 <ol>
-<li>the built-in defaults (<code>WaveFW.defaults</code>);</li>
-<li>global: <code>wavefw/wavefw.config.js</code> loaded before <code>wavefw.js</code> (it lists every key with its default), or
-  <code>WaveFW.configure({…})</code> at run time (<code>null</code> removes a key);</li>
+<li>the built-in defaults (<code>WaveLens.defaults</code>);</li>
+<li>global: <code>wavelens/wavelens.config.js</code> loaded before <code>wavelens.js</code> (it lists every key with its default), or
+  <code>WaveLens.configure({…})</code> at run time (<code>null</code> removes a key);</li>
 <li>the diagram's own <code>"config"</code> in the WaveJSON;</li>
 <li>the element: <code>data-config</code>, <code>data-sort</code>, <code>data-theme</code>, <code>data-colors</code> …;</li>
 <li>the viewer's own: the edge style picked in its bar (kept in this browser).</li>
 </ol>
 <p>A key that is not a setting (a typo: <code>rowHeigth</code>) is a console warning in the page. Three themes — <code>light</code>,
 <code>white</code> (black traces, for print and slides) and <code>dark</code> — follow <code>prefers-color-scheme</code> unless set
-by <code>&lt;html data-theme="white"&gt;</code>, <code>WaveFW.setTheme('dark')</code>, or <code>"config": {"theme": …}</code>. Every
-colour is a CSS custom property: <code>WaveFW.setColors({trace: '#c00', bus: 'navy'})</code> for all waves, <code>data-colors</code>
+by <code>&lt;html data-theme="white"&gt;</code>, <code>WaveLens.setTheme('dark')</code>, or <code>"config": {"theme": …}</code>. Every
+colour is a CSS custom property: <code>WaveLens.setColors({trace: '#c00', bus: 'navy'})</code> for all waves, <code>data-colors</code>
 or <code>"config": {"colors": …}</code> for one, <code>color</code> / <code>fill</code> for one signal. Two copies of one source,
 one in <code>white</code> with a red trace, one in <code>dark</code>:</p>
 <div class="live ex"><pre></pre>
@@ -394,25 +408,26 @@ one in <code>white</code> with a red trace, one in <code>dark</code>:</p>
 <h2 id="api">The JavaScript API in brief</h2>
 <table>
 <tr><th>Call</th><th>Does</th></tr>
-<tr><td><code>WaveFW.parse(json | text)</code></td><td>the model of a diagram</td></tr>
+<tr><td><code>WaveLens.parse(json | text)</code></td><td>the model of a diagram</td></tr>
 <tr><td><code>new WaveView(el, model, opts)</code></td><td>a viewer in <code>el</code>; <code>el.waveView</code> is the viewer object
   (<code>zoomTo</code>, <code>select</code>, <code>setGaps</code>, <code>toSVG</code>, <code>toWaveDrom</code>, <code>state</code> …)</td></tr>
 <tr><td><code>WaveSVG.toString(model, opts)</code>, <code>WaveSVG.render(el, model, opts)</code></td><td>the static SVG as a string, or
   into an element</td></tr>
-<tr><td><code>WaveFW.upgrade(root)</code></td><td>upgrade the script blocks and <code>data-wave</code> elements under <code>root</code></td></tr>
-<tr><td><code>WaveFW.configure({…})</code></td><td>global settings at run time; viewers and SVGs are drawn again</td></tr>
-<tr><td><code>WaveFW.setTheme(name, el?)</code>, <code>WaveFW.setColors(map, el?)</code></td><td>theme and palette of the page or of one
+<tr><td><code>WaveLens.upgrade(root)</code></td><td>upgrade the script blocks and <code>data-wave</code> elements under <code>root</code></td></tr>
+<tr><td><code>WaveLens.configure({…})</code></td><td>global settings at run time; viewers and SVGs are drawn again</td></tr>
+<tr><td><code>WaveLens.setTheme(name, el?)</code>, <code>WaveLens.setColors(map, el?)</code></td><td>theme and palette of the page or of one
   element</td></tr>
-<tr><td><code>WaveFW.plugin(fn)</code>, <code>WaveFW.svgPlugin(fn)</code></td><td>rows, tools and keys of your own in every viewer / SVG</td></tr>
+<tr><td><code>WaveLens.plugin(fn)</code>, <code>WaveLens.svgPlugin(fn)</code></td><td>rows, tools and keys of your own in every viewer / SVG</td></tr>
 </table>
 <p>Every function, every viewer method, the events and the plugin protocol: <a href="../index.html#api">docs/index.html § API</a>
-(its tables are made from what <code>wavefw.js</code> exports, so they cannot drift from the code).</p>
+(its lists of names come from what <code>wavelens.js</code> exports and a check compares them with the code; the texts
+are written by hand).</p>
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>wavefw 0.11 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live
+<footer>WaveLens 0.18 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live
 reference: <a href="../index.html">docs/index.html</a></footer>
-<script src="../../wavefw/wavefw.js"></script>
+<script src="../../wavelens/wavelens.js"></script>
 <script>
   // each live example shows the source of the script block it draws
   for (const ex of document.querySelectorAll('.ex')) {

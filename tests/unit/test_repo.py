@@ -1,4 +1,4 @@
-"""The repository's promises: one version (VERSION, wavefw.js, CHANGELOG.md, the CLI), make help lists every target, the docs' settings table is the settings file's keys, the
+"""The repository's promises: one version (VERSION, wavelens.js, CHANGELOG.md, the CLI), make help lists every target, the docs' settings table is the settings file's keys, the
 tools answer --help, the converter's per-signal keys are documented and read by the page."""
 import os, re, subprocess, unittest
 
@@ -34,9 +34,14 @@ class Version(unittest.TestCase):
     def test_one_version_everywhere(self):
         v = read('VERSION').strip()
         self.assertRegex(v, r'^\d+\.\d+$')                                          # two numbers: MAJOR.MINOR
-        self.assertEqual(re.search(r"version: '([^']+)'", read('wavefw', 'src', 'boot.js')).group(1), v)
+        self.assertEqual(re.search(r"version: '([^']+)'", read('wavelens', 'src', 'boot.js')).group(1), v)
         self.assertEqual(re.search(r'^## (\S+)', read('CHANGELOG.md'), re.M).group(1), v)   # the top entry
         self.assertIn('include_str!("../../../VERSION")', read('sva', 'cli', 'src', 'main.rs'))
+        guides = os.path.join(H.ROOT, 'docs', 'guides')
+        for f in sorted(os.listdir(guides)):   # the guides' footers (and the index's kicker) name the version
+            if f.endswith('.html'):
+                said = set(re.findall(r'WaveLens (\d+\.\d+)', read('docs', 'guides', f)))
+                self.assertEqual(said, {v}, f'docs/guides/{f}')
 
 
 class Docs(unittest.TestCase):
@@ -48,13 +53,13 @@ class Docs(unittest.TestCase):
         self.assertEqual(documented ^ (common.config_keys() - set(common.CONFIG_EXTRA)), set())
 
     def test_model_defaults_are_the_settings_file(self):
-        js = read('wavefw', 'wavefw.config.js')
-        model = read('wavefw', 'src', 'model.js')
+        js = read('wavelens', 'wavelens.config.js')
+        model = read('wavelens', 'src', 'model.js')
         body = re.search(r'const DEFAULTS = \{(.*?)\};', model, re.S).group(1)
         for k, v in re.findall(r'(\w+): ([^,]+?)(?=, \w+:|\s*$)', body.replace('\n', ' ')):
             with self.subTest(k):
                 m = re.search(r'^ {2}%s: ([^,]+),' % k, js, re.M)
-                self.assertIsNotNone(m, f'{k} of DEFAULTS is not in wavefw.config.js')
+                self.assertIsNotNone(m, f'{k} of DEFAULTS is not in wavelens.config.js')
                 if k != 'sortIgnore':   # the settings file sets i_, o_ (said in its header)
                     self.assertEqual(m.group(1).strip(), v.strip())
 
@@ -63,12 +68,12 @@ class Docs(unittest.TestCase):
         self.assertEqual([k for k in vcd2wavedrom.SIG_KEYS if f'`{k}`' not in usage], [])
 
     def test_page_reads_the_signal_keys(self):
-        model = read('wavefw', 'src', 'model.js')
+        model = read('wavelens', 'src', 'model.js')
         info = {'show', 'alias', 'changes'}   # the converter's own: a row left out, its name, information
         self.assertEqual([k for k in vcd2wavedrom.SIG_KEYS if k not in info and f'it.{k}' not in model], [])
 
     def test_tools_help(self):
-        for t in ('vcd2wavedrom', 'mkconfig', 'mkhtml', 'embed', 'svabuild', 'wavefwcat', 'wavemcp'):
+        for t in ('vcd2wavedrom', 'mkconfig', 'mkhtml', 'embed', 'svabuild', 'wavelenscat', 'wavemcp'):
             with self.subTest(t):
                 rc, out, _ = H.run_tool(t, '--help')
                 self.assertEqual(rc, 0)

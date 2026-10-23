@@ -1,6 +1,6 @@
-/* wavefw for VS Code — the webview's half, loaded before wavefw.js. The viewer stays as it is in a browser; what a
+/* wavelens for VS Code — the webview's half, loaded before wavelens.js. The viewer stays as it is in a browser; what a
    browser does by itself and a webview cannot (or does on the wrong machine) goes to the extension host by postMessage:
-   - localStorage: this dump's store, given in the page (#wavefw-host) and kept by the extension (workspaceState);
+   - localStorage: this dump's store, given in the page (#wavelens-host) and kept by the extension (workspaceState);
    - a download (an <a download> clicked: Save state, PNG, SVG, WaveDrom, the report) -> a save dialog on the host;
    - a file picker (an <input type=file> clicked: Load state, the .sv files, Compare, Open…) -> an open dialog on the
      host (Open… a dump: a tab of its own); no showOpenFilePicker (a handle of the client's disk);
@@ -12,8 +12,8 @@
 (() => {
   'use strict';
   const vscode = acquireVsCodeApi(), G = window;
-  const H = JSON.parse(document.getElementById('wavefw-host').textContent);
-  G.WAVEFW_PATH = H.path;   // the page's path for the live link (edit.js liveHello): the dump's, as the agent names it
+  const H = JSON.parse(document.getElementById('wavelens-host').textContent);
+  G.WAVELENS_PATH = H.path;   // the page's path for the live link (edit.js liveHello): the dump's, as the agent names it
 
   /* ---- messages: a request and its answer by id, or a message of the host ---- */
   let seq = 0; const wait = new Map(), on = {};
@@ -23,7 +23,7 @@
     if (m.id && wait.has(m.id)) { const ok = wait.get(m.id); wait.delete(m.id); ok(m); return; }
     if (on[m.type]) on[m.type](m);
   });
-  const view = () => (G.WaveFW ? WaveFW.views().find(v => v.root.isConnected) : null);
+  const view = () => (G.WaveLens ? WaveLens.views().find(v => v.root.isConnected) : null);
   const toast = s => { const v = view(); if (v) v.toast(s); };
   const b64 = buf => { const u = new Uint8Array(buf); let s = '';
     for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
@@ -48,7 +48,7 @@
   const aclick = HTMLAnchorElement.prototype.click;
   HTMLAnchorElement.prototype.click = function () {
     if (!this.hasAttribute('download')) return aclick.call(this);
-    const name = this.download || 'wavefw.out';
+    const name = this.download || 'wavelens.out';
     fetch(this.href).then(r => r.arrayBuffer()).then(buf => call('save', { name, b64: b64(buf) }))
       .then(m => toast(m.path ? 'saved ' + m.path : m.error ? 'not saved: ' + m.error : 'not saved'), e => toast('not saved: ' + e.message));
   };
@@ -100,8 +100,8 @@
       body: body == null ? null : String(body) }), true) : beacon(url, body));
   }
   let link = null;
-  on.live = m => { if (m.link === link || !G.WaveFW) return; link = m.link;
-    try { WaveFW.live(link); } catch (e) { vscode.postMessage({ type: 'log', text: 'live: ' + e.message }); } };
+  on.live = m => { if (m.link === link || !G.WaveLens) return; link = m.link;
+    try { WaveLens.live(link); } catch (e) { vscode.postMessage({ type: 'log', text: 'live: ' + e.message }); } };
 
   /* ---- the theme ---- */
   const theme = () => { const c = document.body.classList;
@@ -118,7 +118,7 @@
   };
   const handle = { kind: 'file', name: H.name, getFile: fetchDump };   // what reloadDump (⟳) reads again
   let last = {};   // the last dump read: {name, shown, total}
-  document.addEventListener('wavefw:dump', e => { last = e.detail || {}; vscode.postMessage(Object.assign({ type: 'loaded' }, last)); },
+  document.addEventListener('wavelens:dump', e => { last = e.detail || {}; vscode.postMessage(Object.assign({ type: 'loaded' }, last)); },
     true);   // capture: it does not bubble
   // one read again at a time, of the viewer that is there then (the one before is gone once it read); one asked meanwhile: once more after
   let busy = null, again = false;
@@ -129,19 +129,19 @@
   };
   let RELOAD = null;
   on.changed = m => { const v = view(); if (!v) return;
-    if (m.auto) reload(); else v.toast(`${H.name} changed on the disk: ⟳ (or wavefw: Read the dump again) reads it, the view kept`); };
+    if (m.auto) reload(); else v.toast(`${H.name} changed on the disk: ⟳ (or wavelens: Read the dump again) reads it, the view kept`); };
   on.reload = () => reload();
   on.run = async m => { let results; const v = view();
     try { results = v ? await v.run(m.ops || []) : { error: 'no viewer' }; } catch (e) { results = { error: e.message }; }
     vscode.postMessage({ type: 'result', rid: m.rid, results }); };
   G.addEventListener('load', async () => {
-    theme();   // again: wavefw.config.js (its "theme") came after
+    theme();   // again: wavelens.config.js (its "theme") came after
     // VS Code's webview sends every keydown that reaches its window to the workbench (ctrl+G would open Go to Line too):
     // a key the viewer took (preventDefault) stops here, after the viewer's own listeners on the document
     // (the viewer's ctrl keys do not look at shift: ctrl+shift+F / G / C stay VS Code's, ctrl+shift+Z is the viewer's redo)
     document.addEventListener('keydown', e => {
       if (e.defaultPrevented && !((e.ctrlKey || e.metaKey) && e.shiftKey && e.code !== 'KeyZ')) e.stopPropagation(); });
-    const P = WaveFW.WaveView.prototype; RELOAD = P.reloadDump; P.reloadDump = function () { return reload(); };   // ⟳ of the bar too
+    const P = WaveLens.WaveView.prototype; RELOAD = P.reloadDump; P.reloadDump = function () { return reload(); };   // ⟳ of the bar too
     const v = view(); let nv = v;
     try { nv = await v.openDump(await fetchDump(), handle); }
     catch (e) { if (v) v.toast('cannot read ' + H.name + ': ' + e.message); vscode.postMessage({ type: 'log', text: String(e.stack || e) }); }
@@ -151,7 +151,7 @@
   document.addEventListener('drop', e => {
     const fs = [...((e.dataTransfer && e.dataTransfer.files) || [])];
     if (!fs.some(f => /\.(vcd|fst)$/i.test(f.name))) return;
-    e.preventDefault(); e.stopPropagation(); toast('open a dump from the Explorer: Open in wavefw (a tab of its own)');
+    e.preventDefault(); e.stopPropagation(); toast('open a dump from the Explorer: Open in WaveLens (a tab of its own)');
   }, true);
   G.addEventListener('error', e => vscode.postMessage({ type: 'log', text: `${e.message} (${e.filename}:${e.lineno})` }));
 })();

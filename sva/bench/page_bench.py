@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""page_bench.py — the engine in a page over real "tv" transitions: wavefw/sva.js + the WebAssembly build (the spike page
+"""page_bench.py — the engine in a page over real "tv" transitions: wavelens/sva.js + the WebAssembly build (the spike page
 of make sva-spike) in headless Chromium, evaluate(parsed, tvSampler) over WaveJSON from tools/vcd2wavedrom.py --exact.
 
   python3 tools/vcd2wavedrom.py --waves work/test_stream_video.vcd --exact --scope SCOPE --signals a,b,... --out tv.json

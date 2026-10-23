@@ -1,7 +1,7 @@
 /*
 ================================================================================
   apb_tb
-  APB3 master and a four-register slave for the wavefw APB example.
+  APB3 master and a four-register slave for the WaveLens APB example.
 ================================================================================
 
     Description:

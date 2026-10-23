@@ -50,7 +50,7 @@ pub extern "C" fn sva_result_len() -> usize {
 mod tests {
     use super::*;
 
-    /// What wavefw/sva.js does: allocate, copy the request in, run, read the result, free. The answer as text (this
+    /// What wavelens/sva.js does: allocate, copy the request in, run, read the result, free. The answer as text (this
     /// crate has no JSON parser of its own: string checks do).
     fn call(req: &[u8]) -> String {
         let p = sva_alloc(req.len());

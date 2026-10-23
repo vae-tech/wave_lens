@@ -50,7 +50,7 @@ def open_page(browser, path, scheme='dark', height=900):
 
 def no_sva(page):
     """The shots of the viewer itself: no assertion groups, no assertions panel (sva.png and sva-table.png have them)."""
-    page.evaluate("(async () => { await SVA.ready(); WaveFW.configure({svaShow: []}); await SVA.ready(); SVA.panels().forEach(p => { p.el.hidden = true; }); })()")
+    page.evaluate("(async () => { await SVA.ready(); WaveLens.configure({svaShow: []}); await SVA.ready(); SVA.panels().forEach(p => { p.el.hidden = true; }); })()")
     settle(page)
 
 
@@ -97,7 +97,7 @@ def main():
         b = p.chromium.launch(args=RASTER)
 
         page = open_page(b, apb, height=1100)                      # APB, dark: an assertion failure selected, the panel's numbers
-        page.evaluate("(async () => { await SVA.ready(); WaveFW.configure({svaShow: ['apb_demo_no_wait'], svaSignals: false}); await SVA.ready(); })()")
+        page.evaluate("(async () => { await SVA.ready(); WaveLens.configure({svaShow: ['apb_demo_no_wait'], svaSignals: false}); await SVA.ready(); })()")
         p0 = 'SVA.panels()[0]'
         page.evaluate(f"(() => {{ const p = {p0}; p.open = false; p.render(); p.v.expandAll(); p.v.canvas.focus(); }})()")
         page.keyboard.press('f'); settle(page)
@@ -106,7 +106,7 @@ def main():
         page.evaluate(f"(async () => {{ const p = {p0}; p.open = true; p.showTable = true; p.showFails = true; p.render(); p.el.querySelector('ol.asv').style.display = 'none'; }})()")
         settle(page)
         shot('sva-table', view(page).locator('.sva'))
-        page.evaluate('WaveFW.configure({svaShow: null, svaSignals: null})')
+        page.evaluate('WaveLens.configure({svaShow: null, svaSignals: null})')
         page.close()
 
         page = open_page(b, apb)                                   # APB, dark: hero, bar, bookmarks
@@ -130,12 +130,12 @@ def main():
         page.close()
 
         page = open_page(b, apb, height=1100)                      # APB: Why of the failed attempt, cycle by cycle
-        page.evaluate("(async () => { await SVA.ready(); WaveFW.configure({svaShow: ['apb_demo_no_wait'], svaSignals: false}); await SVA.ready(); })()")
+        page.evaluate("(async () => { await SVA.ready(); WaveLens.configure({svaShow: ['apb_demo_no_wait'], svaSignals: false}); await SVA.ready(); })()")
         page.evaluate(f"""(() => {{ const p = {p0}; p.open = true; p.render(); p.v.expandAll();
             const b = p.bindings.find(b => b.assert === 'apb_demo_no_wait'); p.select(b, b.results.assertions[0].attempts.findIndex(a => a.result === 'fail')); }})()""")
         page.locator('.wv .sva .svw table').first.wait_for()
         shot('why', view(page).locator('.sva .svw'))
-        page.evaluate('WaveFW.configure({svaShow: null, svaSignals: null})')
+        page.evaluate('WaveLens.configure({svaShow: null, svaSignals: null})')
         page.close()
 
         page = open_page(b, apb, 'light')                          # the light ones: the same view, the static SVG
@@ -153,11 +153,11 @@ def main():
         page = open_page(b, axi_all, height=1500)                  # generated page: hierarchy, highlight, find (80vh rows)
         no_sva(page)
         v = view(page)
-        page.evaluate("WaveFW.configure({groupColors: {u_master: '#339af0', u_slave: '#37b24d', u_regfile: '#f59f00'}})")
+        page.evaluate("WaveLens.configure({groupColors: {u_master: '#339af0', u_slave: '#37b24d', u_regfile: '#f59f00'}})")
         js(page, 0, '(v.expandAll(), 0)')
         v.locator('.names .row.grp[title="axi_lite_tb.u_master"]').click()      # one module folded, the rest open (not its bus port)
         shot('hierarchy', v)
-        page.evaluate('WaveFW.configure({groupColors: null})')
+        page.evaluate('WaveLens.configure({groupColors: null})')
         js(page, 0, '(v.expandAll(), 0)')
         js(page, 0, "(v.toggleHighlight('axi_lite_tb.u_master'), v.toggleHighlight('axi_lite_tb.u_slave'), 0)")
         shot('highlight', v)

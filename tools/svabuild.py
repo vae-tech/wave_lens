@@ -5,11 +5,11 @@ The "sva" files of a config are parsed with the engine's CLI (`sva parse --json`
 given) and its "bind" list is evaluated over the dump (`sva eval`, one run per scope); the result is the WaveJSON
 extension "sva" of a view:
   {"files": [{"name", "path", "source", "parsed"}], "bind": [{"assert", "scope", "results"}], "notes": ["…"]}
-mkhtml.py moves "files" and "notes" of every view into window.SVA (once per page); wavefw/sva.js lists the assertions
+mkhtml.py moves "files" and "notes" of every view into window.SVA (once per page); wavelens/sva.js lists the assertions
 and draws the bindings. Parse errors do not stop the build: they are printed and the page shows them. report() is the
 page's printable "Assertions" section: the bindings evaluated over the whole dump, `sva report --html`.
 
-The CLI: --sva-bin, else $WAVEFW_SVA, else the Makefile's build (out/sva-target/release/sva), else the prebuilt one of
+The CLI: --sva-bin, else $WAVELENS_SVA, else the Makefile's build (out/sva-target/release/sva), else the prebuilt one of
 the repository (bin/linux-x86_64/sva: make dist-linux; bin/windows-x86_64/sva.exe when made by make dist-windows), else
 `sva` on PATH.
 Without it the sources go into the page unparsed and the page parses and evaluates them (WebAssembly).
@@ -39,7 +39,7 @@ def find_bin(explicit=None):
         if not ok(explicit):
             raise WaveError(f'svabuild: no sva binary at {explicit}')
         return os.path.expanduser(explicit)
-    return next((os.path.expanduser(c) for c in (os.environ.get('WAVEFW_SVA'), BUILD_BIN, dist_bin(), shutil.which('sva')) if ok(c)), None)
+    return next((os.path.expanduser(c) for c in (os.environ.get('WAVELENS_SVA'), BUILD_BIN, dist_bin(), shutil.which('sva')) if ok(c)), None)
 
 
 def bind_list(items):
@@ -60,7 +60,7 @@ def bind_list(items):
 
 
 # ---------------- names of an assertion in an instance: the rule of docs/sva/ENGINE.md *Name resolution* ----------------
-# (the same in wavefw/sva.js lookup() / candidates() and in `sva eval --resolve scope --ignore-prefix`; make smoke compares
+# (the same in wavelens/sva.js lookup() / candidates() and in `sva eval --resolve scope --ignore-prefix`; make smoke compares
 # the three on the APB example)
 def split_path(p: str) -> list:
     """The parts of a hierarchical name: split at the dots, not inside a select (a[1.2]) nor in an escaped

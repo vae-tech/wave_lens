@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """smoke.py — headless Chromium check of docs/index.html and tests/conformance.html (Python playwright).
 
-For each page and colour scheme: no console errors / page errors / wavefw error boxes, every viewer has a
+For each page and colour scheme: no console errors / page errors / wavelens error boxes, every viewer has a
 drawn canvas, and on docs/index.html the viewer interaction works (cursor click updates the value column, wheel
 zoom changes the view span, Fit restores it, jump buttons move the cursor, group folding hides rows, a lazy
 card builds its viewer when opened, Sort with ignored prefixes, settings layers, edge styles and radix). Pages built by
@@ -9,10 +9,10 @@ card builds its viewer when opened, Sort with ignored prefixes, settings layers,
 <ex>_all.html, work/dump.html, work/test_stream_video.html: scope hierarchy, folding, "same", bookmarks and arrows of the
 examples, FSM state names) and BUILD/sva/spike.html (make sva-spike: the WebAssembly engine, evaluate() over a synthetic
 32k-edge "tv" model in under a second) are checked too when they exist, and `sva eval` over the example dumps (only the
-deliberate failures fail). Assertions in pages (wavefw/sva.js): the section of docs/index.html, the example pages (bound from
+deliberate failures fail). Assertions in pages (wavelens/sva.js): the section of docs/index.html, the example pages (bound from
 their configs; evaluated again in the page they give the native counts, also through the Web Worker), the binding flow on
 apb_all.html (Load file…, Bind…, "cannot bind", drag and drop, several instances, reload, the JSON through a config and
-mkhtml.py), wavefw/sva.wasm.js against the build, and the third-party checkers of tests/sva/third_party over the example
+mkhtml.py), wavelens/sva.wasm.js against the build, and the third-party checkers of tests/sva/third_party over the example
 dumps. Full-page PNGs go to --out.
 
 The hierarchy, find and virtualisation checks run on a synthetic page (BUILD/smoke/synth.html: a VCD of 2060 signals
@@ -181,7 +181,7 @@ def sorting(page):
     # demo viewer: a group is sorted as a block; the demo config's sortIgnore (rx_, bit_) beats the global i_,o_
     ex = page.locator('.bench > div.wv[data-wave="DEMO_WAVES.exact"]')
     pfx = ex.locator('input.pfx').input_value()
-    check(pfx == 'bit_,rx_', f'JSON config beats wavefw.config.js ({pfx!r})')
+    check(pfx == 'bit_,rx_', f'JSON config beats wavelens.config.js ({pfx!r})')
     ex.locator('button[data-act=sort]').click()
     en = [x.strip() for x in ex.locator('.names .row .n').all_inner_texts()]
     check(en == ['clk', 'data', '▾ mc_tx', 'busy', 'bit_cnt', 'done', 'state', 'txd', 'rst_n', 'rx_sr', 'start'], f'group sorted as a block, members inside {en}')
@@ -192,13 +192,13 @@ def settings(page):
     js = page.evaluate
     v = '#ex-handshake-view'
     canvas_h = lambda: js(f"document.querySelector('{v} canvas').getBoundingClientRect().height")
-    check(js("WaveFW.configure({}).sortIgnore.join(',')") == 'i_,o_', 'wavefw.config.js loaded as global settings')
+    check(js("WaveLens.configure({}).sortIgnore.join(',')") == 'i_,o_', 'wavelens.config.js loaded as global settings')
     h0, svg_h = canvas_h(), js("document.querySelector('.wvs svg').getAttribute('height')")
-    js("WaveFW.configure({rowHeight: 34, nameWidth: 260, traceWidth: 2})")
+    js("WaveLens.configure({rowHeight: 34, nameWidth: 260, traceWidth: 2})")
     h1, w = canvas_h(), js(f"document.querySelector('{v} .names').getBoundingClientRect().width")
     check(h1 > h0 + 20 and abs(w - 260) < 2, f'configure(rowHeight, nameWidth) restyles viewers (canvas {h0:.0f}->{h1:.0f}px, names {w:.0f}px)')
     check(js("document.querySelector('.wvs svg').getAttribute('height')") != svg_h, 'static SVGs are re-rendered by configure()')
-    js("WaveFW.configure({rowHeight: null, nameWidth: 200, traceWidth: null})")
+    js("WaveLens.configure({rowHeight: null, nameWidth: 200, traceWidth: null})")
     check(canvas_h() == h0, 'null restores the default')
 
 
@@ -208,21 +208,21 @@ def styles(page):
     check(all(t in texts for t in ('0x41', '-128', '01000001', '"A"')), f'per-signal radix hex/signed/bin/ascii {texts}')
     html = {st: svg(st).inner_html() for st in ('wavedrom', 'questa', 'square')}
     check(len(set(html.values())) == 3, 'styles wavedrom / questa / square draw different edges')
-    dec = page.evaluate("[WaveFW.decode({width: 8}, 'a5', 'signed'), WaveFW.decode({width: 12}, 'a5', 'oct'), WaveFW.decode({width: 4, enum: {5: 'RUN'}}, '5', 'bin')]")
+    dec = page.evaluate("[WaveLens.decode({width: 8}, 'a5', 'signed'), WaveLens.decode({width: 12}, 'a5', 'oct'), WaveLens.decode({width: 4, enum: {5: 'RUN'}}, '5', 'bin')]")
     check(dec == ['-91', '0o245', 'RUN'], f'decode radixes, enum first {dec}')
     # float (IEEE 754 of 16 / 32 / 64 bits) and fixed point q<F> / sq<F>: the page and vcd2wavedrom.py write the same text
     cases = [('3f800000', 32, 'float'), ('c0490fdb', 32, 'float'), ('3c00', 16, 'float'), ('400921fb54442d18', 64, 'float'), ('00000001', 32, 'float'),
              ('cafe0001', 32, 'float'), ('7f800000', 32, 'float'), ('4b189680', 32, 'float'), ('0180', 16, 'q8'), ('ff80', 16, 'sq8'), ('0001', 16, 'sq15'), ('fffe', 16, 'q1'), ('12', 8, 'float')]
-    jsv = page.evaluate("cs => cs.map(([v, w, r]) => WaveFW.decode({ width: w }, v, r))", cases)
+    jsv = page.evaluate("cs => cs.map(([v, w, r]) => WaveLens.decode({ width: w }, v, r))", cases)
     sys.path.insert(0, str(ROOT / 'tools')); import vcd2wavedrom as v2w
     pyv = [v2w.label(v, w, None, r) for v, w, r in cases]
     check(jsv == pyv and jsv[:4] == ['1', '-3.141593', '1', '3.14159265358979'] and jsv[8:11] == ['1.5', '-0.5', '0.000030517578125'] and jsv[-1] == '0x12',
           f'radix float and fixed point (q8, sq15, exact): the page and vcd2wavedrom.py agree {jsv}')
     ex = page.locator('.bench > div.wv[data-wave="DEMO_WAVES.exact"]')
     data = ex.locator('.names .row', has_text='data').first.locator('.v')
-    page.evaluate("WaveFW.configure({radix: 'bin'})")
+    page.evaluate("WaveLens.configure({radix: 'bin'})")
     check(data.inner_text() == '00000000', f'configure({{radix: "bin"}}) changes the value column ({data.inner_text()!r})')
-    page.evaluate("WaveFW.configure({radix: null})")
+    page.evaluate("WaveLens.configure({radix: null})")
     check(data.inner_text() == '0x00', 'radix null restores auto')
 
 
@@ -242,12 +242,12 @@ def highlight(page):
           f'a second instance: no tint, no bar, no colour per instance: the marks of both in one colour {look}')
     rows.filter(has_text='clk').locator('.n').click(modifiers=['Control'])
     check(n('hl') == 6 and btn.inner_text() == 'Highlight: 3 ✕', 'ctrl+click a name highlights it too')
-    run0 = page.evaluate("(() => { const v = document.getElementById('ex-hl-view').waveView; return [v.picks.size, WaveFW.internal.peek(v).vis.filter(r => r.type === 'sig').map(r => r.name)]; })()")
+    run0 = page.evaluate("(() => { const v = document.getElementById('ex-hl-view').waveView; return [v.picks.size, WaveLens.internal.peek(v).vis.filter(r => r.type === 'sig').map(r => r.name)]; })()")
     sig = run0[1]; first, last = sig[0], sig[3]
     page.evaluate("(() => { document.getElementById('ex-hl-view').waveView.highlight(null); })()")
     rows.filter(has_text=first).first.locator('.n').click(modifiers=['Control']); rows.filter(has_text=last).first.locator('.n').click(modifiers=['Control', 'Shift'])
-    run = page.evaluate(f"""(() => {{ const v = document.getElementById('ex-hl-view').waveView, i = WaveFW.internal.peek(v).vis.findIndex(r => r.name === {json.dumps(first)}), j = WaveFW.internal.peek(v).vis.findIndex(r => r.name === {json.dumps(last)});
-        return [WaveFW.internal.peek(v).vis.slice(i, j + 1).filter(r => r.type === 'sig').every(r => v.picks.has(r)), v.picks.size, String(getSelection())]; }})()""")
+    run = page.evaluate(f"""(() => {{ const v = document.getElementById('ex-hl-view').waveView, i = WaveLens.internal.peek(v).vis.findIndex(r => r.name === {json.dumps(first)}), j = WaveLens.internal.peek(v).vis.findIndex(r => r.name === {json.dumps(last)});
+        return [WaveLens.internal.peek(v).vis.slice(i, j + 1).filter(r => r.type === 'sig').every(r => v.picks.has(r)), v.picks.size, String(getSelection())]; }})()""")
     check(run[0] and run[1] >= 4 and run[2] == '', f'ctrl+shift+click: every row from the last ctrl+clicked name to this one highlighted, no text selected ({first} … {last}: {run})')
     page.evaluate("(() => { const v = document.getElementById('ex-hl-view').waveView; v.highlight(null); ['tx', 'irq', 'clk'].forEach(n => v.toggleHighlight(n)); })()")
     rx = v.locator('.names .row.grp', has_text='rx')
@@ -256,13 +256,13 @@ def highlight(page):
     rx.locator('.mk').click()
     v.locator('canvas').focus(); page.keyboard.press('Escape')
     check(n('hl') == 0 and n('dim') == 0 and not btn.is_visible(), 'Esc clears the highlight')
-    svg = page.evaluate("WaveFW.WaveSVG.toString(document.getElementById('ex-hl').textContent, {highlight: 'rx'})")
+    svg = page.evaluate("WaveLens.WaveSVG.toString(document.getElementById('ex-hl').textContent, {highlight: 'rx'})")
     check('opacity:0.3' in svg and 'var(--wave-hl1)' not in svg, 'static SVG dims the rows the highlight setting leaves out, no tint')
-    page.evaluate("WaveFW.configure({highlight: ['state']})")
+    page.evaluate("WaveLens.configure({highlight: ['state']})")
     ex = page.locator('.bench > div.wv[data-wave="DEMO_WAVES.exact"]')
     check(ex.locator('.names .row.hl').count() == 1 and v.locator('.names .row.hl').count() == 0,
           'configure({highlight}) picks in every viewer without its own setting')
-    page.evaluate("WaveFW.configure({highlight: null})")
+    page.evaluate("WaveLens.configure({highlight: null})")
     check(ex.locator('.names .row.hl').count() == 0, 'highlight null clears it')
 
 
@@ -303,15 +303,15 @@ def bookmarks(page):
     lanes = v.locator('.names .row.lane')
     order = v.locator('.names .row').evaluate_all("els => els.map(e => e.classList.contains('lane') ? '|' : e.querySelector('.n').textContent.trim())")
     check(order == ['clk', '▾ bus', 'req', '|', 'ack', '|', 'data', 'irq'], f'arrow labels get lanes under the upper end of their arrows {order}')
-    ly, ry = js("[v.bmGeo.mids[0][2], ...(o => [o.y, o.y + o.h])(WaveFW.internal.peek(v).lay.find(o => o.row.type === 'lane'))]"), None
+    ly, ry = js("[v.bmGeo.mids[0][2], ...(o => [o.y, o.y + o.h])(WaveLens.internal.peek(v).lay.find(o => o.row.type === 'lane'))]"), None
     check(ly[1] <= ly[0] <= ly[2] and lanes.first.bounding_box()['height'] == 16, f'label 2T is drawn inside its 16 px lane ({ly})')
-    page.evaluate("WaveFW.configure({laneHeight: 24})")
+    page.evaluate("WaveLens.configure({laneHeight: 24})")
     h24 = lanes.first.bounding_box()['height']
-    page.evaluate("WaveFW.configure({arrowLabels: 'overlay'})")
+    page.evaluate("WaveLens.configure({arrowLabels: 'overlay'})")
     check(h24 == 24 and lanes.count() == 0, f'laneHeight sets the lane height ({h24}); arrowLabels "overlay" removes the lanes')
-    page.evaluate("WaveFW.configure({laneHeight: null, arrowLabels: null})")
+    page.evaluate("WaveLens.configure({laneHeight: null, arrowLabels: null})")
     svg = page.locator('#ex-bm-svg svg').get_attribute('height')
-    check(int(svg) == int(page.evaluate("WaveFW.WaveSVG.toString(document.getElementById('ex-bm-src').textContent, {arrowLabels: 'overlay'})").split('height="')[1].split('"')[0]) + 32, 'static SVG adds the same lanes (2 × 16 px)')
+    check(int(svg) == int(page.evaluate("WaveLens.WaveSVG.toString(document.getElementById('ex-bm-src').textContent, {arrowLabels: 'overlay'})").split('height="')[1].split('"')[0]) + 32, 'static SVG adds the same lanes (2 × 16 px)')
     v.locator('.names .row', has_text='req').locator('.n').click()
     check(v.locator('.names .row.sel').inner_text().startswith('req'), 'clicking a name selects the signal')
     v.locator('select.edge').select_option('rise')
@@ -337,18 +337,18 @@ def bookmarks(page):
     check(js('v.bms[3].color') == '#2f9e44' and 'rgb(47, 158, 68)' in b4.locator('.bn').get_attribute('style').replace('#2f9e44', 'rgb(47, 158, 68)'), 'colour picker colours the bookmark')
     box = v.locator('canvas').bounding_box()
     pos = lambda n: js(f'v.bmGeo.pos.get({n})')
-    rowy = lambda name: js(f"(o => o.y + o.h / 2)(WaveFW.internal.peek(v).lay.find(o => o.row.name === '{name}'))")
+    rowy = lambda name: js(f"(o => o.y + o.h / 2)(WaveLens.internal.peek(v).lay.find(o => o.row.name === '{name}'))")
     xof = lambda t: js(f'({t} - v.t0) * v.canvas.getBoundingClientRect().width / v.span')
     p2 = pos(2); page.mouse.move(box['x'] + p2[0], box['y'] + p2[1]); page.mouse.down()
     page.mouse.move(box['x'] + xof(9.05), box['y'] + rowy('data'), steps=6); page.mouse.up()
     check(js('[v.bms[1].t, v.bms[1].signal]') == [9, 'bus.data'], f'dragging circle 2 moves it to another row and time, snapped to the edge ({js("[v.bms[1].t, v.bms[1].signal]")})')
     # lifted: dragged onto the top quarter of its row, the circle goes into a lane above the signal (a leader down to it)
-    top = js("(o => o.y + 2)(WaveFW.internal.peek(v).lay.find(o => o.row.name === 'data'))"); p2 = pos(2)
+    top = js("(o => o.y + 2)(WaveLens.internal.peek(v).lay.find(o => o.row.name === 'data'))"); p2 = pos(2)
     page.mouse.move(box['x'] + p2[0], box['y'] + p2[1]); page.mouse.down(); page.mouse.move(box['x'] + p2[0], box['y'] + top, steps=6); page.mouse.up()
-    up = js("[v.bms[1].lift, v.bmGeo.pos.get(2)[1], (o => [o.y, o.y + o.h / 2])(WaveFW.internal.peek(v).lay.find(o => o.row.name === 'data')), v.rowsL.some(r => r.type === 'lane' && r.ids.includes('b:bus.data')), v.bookmarks()[1].lift]")
+    up = js("[v.bms[1].lift, v.bmGeo.pos.get(2)[1], (o => [o.y, o.y + o.h / 2])(WaveLens.internal.peek(v).lay.find(o => o.row.name === 'data')), v.rowsL.some(r => r.type === 'lane' && r.ids.includes('b:bus.data')), v.bookmarks()[1].lift]")
     p2 = pos(2); page.mouse.move(box['x'] + p2[0], box['y'] + p2[1]); page.mouse.down(); page.mouse.move(box['x'] + p2[0], box['y'] + rowy('data') + 4, steps=6); page.mouse.up()
     down = js("[v.bms[1].lift, v.rowsL.some(r => r.type === 'lane' && r.ids.includes('b:bus.data'))]")
-    bl.nth(1).locator('button[data-bm=lift]').click(); btn = js("[v.bms[1].lift, v.bmGeo.pos.get(2)[1] < (o => o.y)(WaveFW.internal.peek(v).lay.find(o => o.row.name === 'data'))]")
+    bl.nth(1).locator('button[data-bm=lift]').click(); btn = js("[v.bms[1].lift, v.bmGeo.pos.get(2)[1] < (o => o.y)(WaveLens.internal.peek(v).lay.find(o => o.row.name === 'data'))]")
     bl.nth(1).locator('button[data-bm=lift]').click()
     check(up[0] is True and up[1] < up[2][0] and up[3] and up[4] is True and down == [False, False] and btn == [True, True] and not js('v.bms[1].lift'),
           f'a circle dragged to the top of its row goes into a lane above the signal (kept in the JSON), lower down back on the row; ↥ does the same {up} {down} {btn}')
@@ -366,7 +366,7 @@ def bookmarks(page):
     v.locator('.notes button[data-bm=json]').click()
     txt = v.locator('.notes textarea.json').input_value()
     check(txt.startswith('"bookmarks": [\n  {"n":1,') and '"arrows": [\n  {"from":1,"to":2,"shape":"-|-","label":"2T"}' in txt, 'JSON shows both lists for a config file')
-    leg = page.evaluate("WaveFW.parse({signal: [{name: 'a', wave: '01'}], bookmarks: [{n: 1, t: 0}, {n: 2, t: 1, to: 1, label: 'x'}]}).arrows")
+    leg = page.evaluate("WaveLens.parse({signal: [{name: 'a', wave: '01'}], bookmarks: [{n: 1, t: 0}, {n: 2, t: 1, to: 1, label: 'x'}]}).arrows")
     check(leg == [{'from': 2, 'to': 1, 'shape': '~', 'head': '>', 'line': 'solid', 'color': None, 'label': 'x'}], 'an old bookmark "to" still becomes an arrow')
     o = rowy('ack'); v.locator('canvas').scroll_into_view_if_needed(); box = v.locator('canvas').bounding_box()
     page.mouse.click(box['x'] + box['width'] * 0.97, box['y'] + o)
@@ -399,16 +399,16 @@ def find(page, P):
     v = page.locator('.wv').first
     q, cnt = v.locator('input.q'), v.locator('.find .cnt')
     js = lambda e: page.evaluate(f"(() => {{ const v = document.querySelector('.wv').waveView; return {e}; }})()")
-    pre = js('[...WaveFW.internal.peek(v).collapsed].sort((a, b) => a - b)')   # the folding before the search
+    pre = js('[...WaveLens.internal.peek(v).collapsed].sort((a, b) => a - b)')   # the folding before the search
     q.fill(P['fuzzy']); settle(page)
     names = js("[...v.found.keys()].map(r => r.name)")
     sub = lambda n: re.search('.*'.join(P['fuzzy']), n) is not None
-    check(P['hit'] in names and all(sub(n) for n in names) and cnt.inner_text() == f'{len(names)} found',
+    check(P['hit'] in names and all(sub(n) for n in names) and cnt.inner_text().startswith(f'{len(names)} found'),   # "· k not in the page" may follow
           f'fuzzy "{P["fuzzy"]}": letters in order, not contiguous {sorted(set(names))[:8]} ({cnt.inner_text()})')
     nf = len(names)
     marks = v.locator('.names .row .n b.fm').first.evaluate("b => b.closest('.n').innerHTML")
     check('<b class="fm">p</b>' in marks and '<b class="fm">v</b>' in marks, 'matched letters are marked in the names')
-    folded = js("Object.keys(v.M.groups).length - WaveFW.internal.peek(v).collapsed.size")
+    folded = js("Object.keys(v.M.groups).length - WaveLens.internal.peek(v).collapsed.size")
     need = js("new Set([...v.found.keys()].flatMap(r => r.anc)).size")
     check(folded == need and v.locator('.names .row.hl').count() >= len(names) and v.locator('.names .row.dim').count() > 0,
           f'Open: only the {need} modules on the way to a match are open; Highlight: found rows in front')
@@ -423,7 +423,7 @@ def find(page, P):
     mid = []
     for _ in range(4):
         page.keyboard.press('n')
-        mid.append(js("""(() => { const q = WaveFW.internal.peek(v).namesEl.querySelector('.row.sel').getBoundingClientRect(), own = v.root.classList.contains('wv-scroll'),
+        mid.append(js("""(() => { const q = WaveLens.internal.peek(v).namesEl.querySelector('.row.sel').getBoundingClientRect(), own = v.root.classList.contains('wv-scroll'),
             box = own ? v.bodyEl.getBoundingClientRect() : { top: 0, bottom: innerHeight }, d = q.top + q.height / 2 - (box.top + v.hdrH + box.bottom) / 2,
             end = own ? (v.bodyEl.scrollTop <= 0 || v.bodyEl.scrollTop + v.bodyEl.clientHeight >= v.bodyEl.scrollHeight - 1) : (scrollY <= 0 || scrollY + innerHeight >= document.documentElement.scrollHeight - 1);
             return [Math.round(d), end]; })()"""))
@@ -438,13 +438,14 @@ def find(page, P):
         v.paint('#1971c2'); const out = [v.strokeOf(r), [...v.found.keys()].every(f => v.strokeOf(f) === '#1971c2')]; v.picks = was; return out; })()""")
     check(hp == ['#1971c2', True], f'Paint recolours the highlighted signals too (ctrl+click, the mark), not only the found ones {hp}')
     v.locator('button[data-act=fopen]').click()
-    check(js('[...WaveFW.internal.peek(v).collapsed].sort((a, b) => a - b)') == pre, f'Open off: the folding from before the search is back ({len(pre)} folded)')
+    check(js('[...WaveLens.internal.peek(v).collapsed].sort((a, b) => a - b)') == pre, f'Open off: the folding from before the search is back ({len(pre)} folded)')
     v.locator('button[data-act=fopen]').click()
     v.locator('button[data-act=fselect]').click(); settle(page)
     fs = js("[[...v.selRun].every(r => v.found.has(r)), v.selRun.size, [...v.found.keys()].filter(r => r.type === 'sig' && r.tr && v.shown(r)).length, v.found.has(v.sel)]")
     mh, ug = js("(v.menu(300, 300, v.sel), ['.mh', 'button[data-m=ugnew]'].map(q => (document.querySelector('.wv-menu ' + q) || {}).textContent))")
     js('(v.closeMenu(), 0)')
-    check(fs[0] and fs[1] == fs[2] > 1 and fs[3] and f'{fs[1]} selected' in mh and f'New group of the {fs[1]}' in ug,
+    one = fs[1] == 1   # a page where the path finds one signal: the menu names it
+    check(fs[0] and fs[1] == fs[2] >= 1 and fs[3] and (one and ug == 'New group with it' or f'{fs[1]} selected' in mh and f'New group of the {fs[1]}' in ug),
           f'Select: the found signals selected, the right button takes them all ({fs[1]}: "{mh}", "{ug}")')
     other = js("v.M.rows.find(r => r.type === 'sig' && r.tr && !v.found.has(r)).full")
     js(f"(v.select('{other}'), 0)"); v.locator('button[data-act=fselect]').click(modifiers=['Control']); settle(page)
@@ -468,7 +469,7 @@ def find(page, P):
     want = sorted(set(pre) - set(way)); y1 = js(f"v.rowTop(v.M.rows.find(r => r.full === '{row}'))")
     end = js("(() => { const own = v.root.classList.contains('wv-scroll'), e = own ? v.bodyEl : document.documentElement, top = own ? e.scrollTop : scrollY; return top <= 0 || top + e.clientHeight >= e.scrollHeight - 1; })()")
     check(js('[v.found.size, v.picks.size, v.sel]') == [0, 0, None] and v.locator('.names .row.dim, .names .row.hl, .names .row.sel').count() == 0
-          and js('[...WaveFW.internal.peek(v).collapsed].sort((a, b) => a - b)') == want and js('v.t0') == t0 and y1 is not None and (abs(y1 - y0) <= 1 or end),
+          and js('[...WaveLens.internal.peek(v).collapsed].sort((a, b) => a - b)') == want and js('v.t0') == t0 and y1 is not None and (abs(y1 - y0) <= 1 or end),
           f'Esc resets search, highlight and selection; the folding from before the search is back but the way to {row} ({len(want)} folded), the time stays, the row as far as the scroll goes ({y0:.0f} -> {y1:.0f} px)')
     js(f'(v.toggleHighlight("{P["top"]}"), 0)'); js(f'(v.select("{picked}"), 0)')
     v.locator('canvas').evaluate('c => c.focus({ preventScroll: true })'); page.keyboard.press('Escape')
@@ -522,7 +523,7 @@ def hierarchy(page, P):
         return [bg(n.querySelector('.row.grp[aria-expanded=false]:not(.sel)')), bg(n.querySelector('.row.grp[aria-expanded=true]')), getComputedStyle(n.closest('.wv')).backgroundColor]; }""")
     check(bgs[0] == bgs[2] and bgs[1] != bgs[2], f'a folded module on the plain background, an open one shaded {bgs}')
     late = page.evaluate("""(() => { const v = document.querySelector('.wv').waveView, seen = new Set(), bad = [];
-        for (const r of WaveFW.internal.peek(v).vis) { const p = r.anc.length ? r.anc[r.anc.length - 1] : -1;
+        for (const r of WaveLens.internal.peek(v).vis) { const p = r.anc.length ? r.anc[r.anc.length - 1] : -1;
           if (r.type === 'group') seen.add(p); else if (r.type === 'sig' && seen.has(p)) bad.push(r.full); }
         return bad; })()""")
     check(late == [], f'groupOrder "last": in every module its signals come before its sub-modules {late[:3]}')
@@ -534,7 +535,7 @@ def hierarchy(page, P):
     check(t and t.startswith(P['top'] + '.'), f'names carry the full path as tooltip ({t})')
     dev = v.locator('.names .row.grp', has_text=P['inst']).first
     dev.hover(); dev.locator('.mk').click()
-    covered = page.evaluate(f"(() => {{ const M = WaveFW.parse(WAVES.{P['view']}); return M.rows.filter(r => r.type === 'sig' && r.full.includes('.{P['inst']}.')).length; }})()")
+    covered = page.evaluate(f"(() => {{ const M = WaveLens.parse(WAVES.{P['view']}); return M.rows.filter(r => r.type === 'sig' && r.full.includes('.{P['inst']}.')).length; }})()")
     check(v.locator('.names .row.hl').count() > 10 and v.locator('.names .row.dim').count() > 10, f'highlighting the instance {P["inst"]} ({covered} signals in it) dims the other rows')
     dev.locator('.mk').click()
     n0 = v.locator('.names .row').count()
@@ -543,7 +544,7 @@ def hierarchy(page, P):
     v.locator('button[data-act=expand]').click()
     n2 = v.locator('.names .row').count()
     check(n1 == 1 and n2 > n0, f'Collapse folds every instance, Expand opens all ({n0} -> {n1} -> {n2} rows)')
-    same = page.evaluate(f"(() => {{ const M = WaveFW.parse(WAVES.{P['view']}), s = M.rows.filter(r => r.src && r.src.same); return [s.length, s.filter(r => r.tr.length > 2).length]; }})()")
+    same = page.evaluate(f"(() => {{ const M = WaveLens.parse(WAVES.{P['view']}), s = M.rows.filter(r => r.src && r.src.same); return [s.length, s.filter(r => r.tr.length > 2).length]; }})()")
     check(same[0] > 0 and same[0] == same[1], f'"same" signals take the transitions of their net ({same[1]}/{same[0]})')
 
 
@@ -573,7 +574,7 @@ def example(page, ex):
         col = lambda n: v.locator('.names .row:not(.sva-g):not(.sva-step):not(.sva-copy)', has_text=n).first.locator('.n').evaluate('e => getComputedStyle(e).color')
         check([col('AWVALID'), col('WDATA'), col('RRESP')] == ['rgb(51, 154, 240)', 'rgb(55, 178, 77)', 'rgb(16, 152, 173)'],
               f'axi_lite: groupColors give every channel its colour ({col("AWVALID")}, {col("WDATA")}, {col("RRESP")})')
-        svg = page.evaluate("""WaveFW.WaveSVG.toString({signal: [['g', {name: 'a', wave: '01'}, {name: 'b', wave: '10', color: '#ff0000'}], {name: 'c', wave: '01'}]},
+        svg = page.evaluate("""WaveLens.WaveSVG.toString({signal: [['g', {name: 'a', wave: '01'}, {name: 'b', wave: '10', color: '#ff0000'}], {name: 'c', wave: '01'}]},
             {groupColors: {g: '#00ff00'}})""")
         check(svg.count('#00ff00') >= 2 and '#ff0000' in svg, 'groupColors in the static SVG; a signal with its own colour keeps it')
     if ex == 'fsm':
@@ -604,7 +605,7 @@ def fsm_vcd(page):
     check(st.locator('.v').inner_text() == 'START', f'fsm_all (VCD + mkconfig --sv): state names from the SV package ({st.locator(".v").inner_text()})')
     # the VCD has status as one 16-bit vector: mkconfig --sv gave it the fields of uart_pkg::rx_status_t
     fv = page.evaluate("""(() => { const v = document.querySelector('.wv').waveView, g = Object.values(v.M.groups).find(g => g.kind === 'struct');
-        if (g) { g.anc.forEach(id => WaveFW.internal.peek(v).collapsed.delete(id)); v.renderNames(); v.cursor = 420000; v.draw(); }
+        if (g) { g.anc.forEach(id => WaveLens.internal.peek(v).collapsed.delete(id)); v.renderNames(); v.cursor = 420000; v.draw(); }
         return g && [g.path, g.sig.width, v.M.rows.filter(r => r.anc.includes(g.id)).map(r => [r.name, r.width]), [100000, 420000, 905000].map(t => v.valueAt(g.sig, t)),
           v.valueAt(v.M.rows.find(r => r.full === 'fsm_tb.status.state'), 420000), v.vals && v.rowEl(g).querySelector('.v').textContent]; })()""")
     check(fv and fv[0] == 'fsm_tb.status' and fv[1] == 16 and [n for n, _ in fv[2]] == ['state', 'bit_cnt', 'valid', 'frame_err', 'data'] and [w for _, w in fv[2]] == [3, 3, 1, 1, 8]
@@ -616,18 +617,18 @@ def deep(page, P):
     js = lambda e: page.evaluate(f"(() => {{ const v = document.querySelector('.wv').waveView; return {e}; }})()")
     check(js('Math.max(...v.M.rows.map(r => r.depth))') >= 8 and js('Object.keys(v.M.groups).length') > 200, 'every level of the hierarchy is on the page')
     js('(v.expandAll(), 0)')
-    n, H, hc, ch = js('[WaveFW.internal.peek(v).vis.length, WaveFW.internal.peek(v).lay.H, v.hc, v.canvas.getBoundingClientRect().height]')
+    n, H, hc, ch = js('[WaveLens.internal.peek(v).vis.length, WaveLens.internal.peek(v).lay.H, v.hc, v.canvas.getBoundingClientRect().height]')
     check(n > 1700 and H > 32767 and hc == ch and hc < 1000, f'Expand: {n} rows, {H} px of rows, canvas only {ch:.0f} px (the visible part)')
     page.locator('.wv .body').first.evaluate('e => e.scrollTop = 20000'); settle(page)
-    oy = js('WaveFW.internal.peek(v).oy')
-    row = js(f"WaveFW.internal.peek(v).lay.find(o => o.row.type === 'sig' && o.y > {oy} + 100).row.full")
+    oy = js('WaveLens.internal.peek(v).oy')
+    row = js(f"WaveLens.internal.peek(v).lay.find(o => o.row.type === 'sig' && o.y > {oy} + 100).row.full")
     check(oy == 20000 and js("document.querySelector('.wv canvas').getBoundingClientRect().top - document.querySelector('.wv .body').getBoundingClientRect().top") == 0,
           f'rows scroll under a canvas that stays in view (offset {oy}, first row {row})')
     js('(v.collapseAll(), 0)')
 
 
 def modules(page, P):
-    """The Modules panel (t, wavefw/src/modules.js) on the synthetic page: the tree of its 255 modules, a click goes to a
+    """The Modules panel (t, wavelens/src/modules.js) on the synthetic page: the tree of its 255 modules, a click goes to a
     module (opened, unhidden, its first signal in the middle), a box over names keeps Only those (the way to them as
     headers), ctrl / shift+click, Space, Only matches, pause and clear, the find outside Only, exports, undo, the state,
     the twin in tools/viewedit.py; then a tree of 10 000 modules against the clock."""
@@ -635,14 +636,14 @@ def modules(page, P):
     rows = page.locator('.wv-mods .mn')
     name = lambda n: page.locator('.wv-mods .mn', has_text=n).first.locator('.nm')
     toast = lambda: js("v.root.querySelector('.bar .toast').textContent")
-    vis = lambda: js("WaveFW.internal.peek(v).vis.map(r => r.full || r.name)")
+    vis = lambda: js("WaveLens.internal.peek(v).vis.map(r => r.full || r.name)")
     page.locator('.wv canvas').first.click(); page.keyboard.press('t'); settle(page)
     first = [rows.nth(i).locator('.nm').inner_text() for i in range(rows.count())]
     check(page.locator('.wv-mods').count() == 1 and first == ['tb_top', 'dut_i', 'dev0_i', 'dev1_i'] and rows.nth(0).locator('.ct').inner_text() == '12 / 2060',
           f't opens the Modules panel: the modules two levels deep, the counts own / with the submodules {first} {rows.nth(0).locator(".ct").inner_text()}')
     js("(v.hide(['tb_top.dut_i.dev1_i']), 0)")
     name('dev1_i').click(); settle(page)
-    got = js("[v.sel && v.sel.full, v.hiddenRows.size, WaveFW.internal.peek(v).vis.includes(v.sel)]")
+    got = js("[v.sel && v.sel.full, v.hiddenRows.size, WaveLens.internal.peek(v).vis.includes(v.sel)]")
     check(got == ['tb_top.dut_i.dev1_i.clk', 0, True] and toast().startswith('tb_top.dut_i.dev1_i'),
           f'a click on a module goes there: shown again (Hide), opened, its first signal selected {got} {toast()!r}')
     # a box over two names: Only those; the way to them stays as headers, their own signals go
@@ -675,7 +676,7 @@ def modules(page, P):
     check(got == [{'modules': ['tb_top.dut_i.dev0_i'], 'on': False}, 'tb_top.dut_i.dev1_i.clk'] and 'Only paused' in toast() and
           chip.inner_text() == 'Only paused: 1 module ▶', f'a click on a module outside Only pauses it (the set kept) and goes there {got} {chip.inner_text()!r}')
     chip.click(); settle(page)
-    check(js("v.onlyState().on") and not js("WaveFW.internal.peek(v).vis.some(r => r.full && r.full.startsWith('tb_top.dut_i.dev1_i'))"),
+    check(js("v.onlyState().on") and not js("WaveLens.internal.peek(v).vis.some(r => r.full && r.full.startsWith('tb_top.dut_i.dev1_i'))"),
           'the bar\'s Only ▶ resumes it')
     page.keyboard.press('Control+z'); settle(page)
     check(js("v.onlyState().on") is False, f'ctrl+Z takes Only back a step ({js("v.onlyState()")})')
@@ -703,7 +704,7 @@ def modules(page, P):
           'Esc in the panel closes it: no reset of the viewer, Only stays')
     # the state, the command, the twin
     st = js("v.state().only")
-    miss = page.evaluate("(async () => { const v = document.querySelector('.wv').waveView; return v.setState({wavefw: 'state', version: 3, "
+    miss = page.evaluate("(async () => { const v = document.querySelector('.wv').waveView; return v.setState({wavelens: 'state', version: 3, "
                          "only: {modules: ['tb_top.dut_i.dev1_i', 'tb_top.nope'], on: true}}); })()")
     check(st == got and miss == ['tb_top.nope'] and js("v.onlyState().modules") == ['tb_top.dut_i.dev1_i'],
           f'Only in the saved state and back (a path not of a module: said) {st} {miss}')
@@ -772,7 +773,7 @@ def modules(page, P):
           f'a box over no name, a box cancelled by Esc (the focus in the filter): Only as it was {js("JSON.stringify(v.onlyState())")}')
     page.locator('.wv-mods .mq').fill(''); settle(page)
     js(f"(v.hide(['{D0}']), 0)"); settle(page)
-    js(f"(v.setState({{wavefw: 'state', version: 3, hidden: ['{D1}']}}), 0)"); settle(page)
+    js(f"(v.setState({{wavelens: 'state', version: 3, hidden: ['{D1}']}}), 0)"); settle(page)
     struck = [rows.nth(i).locator('.nm').inner_text() for i in range(rows.count()) if 'hid' in (rows.nth(i).get_attribute('class') or '')]
     check(struck == ['dev1_i'], f'a hidden module replaced by another: the tree strikes the new one ({struck})')
     js("(v.unhide(), v.setOnly(null), v.modules(false), 0)")
@@ -781,20 +782,20 @@ def modules(page, P):
     js("(v.setOnly(null), v.modules(true), v.collapseAll(), v.mods.subtree(v.mods.roots[0], true), 0)"); settle(page)
     a, b = rows.nth(2).bounding_box(), rows.nth(5).bounding_box()   # dev0_i core0_i pipe0_i stage0_i
     page.mouse.move(a['x'] + 150, a['y'] + 6); page.mouse.down(); page.mouse.move(b['x'] + 150, b['y'] + 12, steps=4); page.mouse.up(); settle(page)
-    got = js("[v.onlyState().modules, WaveFW.internal.peek(v).vis.filter(r => r.type === 'group' && !WaveFW.internal.peek(v).collapsed.has(r.id)).map(r => r.name), "
-             "WaveFW.internal.peek(v).vis.filter(r => r.type === 'group' && WaveFW.internal.peek(v).collapsed.has(r.id)).map(r => r.name)]")
+    got = js("[v.onlyState().modules, WaveLens.internal.peek(v).vis.filter(r => r.type === 'group' && !WaveLens.internal.peek(v).collapsed.has(r.id)).map(r => r.name), "
+             "WaveLens.internal.peek(v).vis.filter(r => r.type === 'group' && WaveLens.internal.peek(v).collapsed.has(r.id)).map(r => r.name)]")
     check(got[0] == ['tb_top.dut_i.dev0_i'] and got[1] == ['tb_top', 'dut_i', 'dev0_i', 'core0_i', 'pipe0_i', 'stage0_i'] and
           got[2] == ['unit0_i', 'unit1_i', 'stage1_i', 'pipe1_i', 'core1_i'], f'a box opens every module it names and the way to them, the others stay folded {got}')
     r = page.evaluate("document.querySelector('.wv').waveView.run([{op: 'fold', all: true}, {op: 'only', modules: ['core1_i', 'core2_i']}])")
-    got = js("[WaveFW.internal.peek(v).vis.filter(r => r.type === 'group' && !WaveFW.internal.peek(v).collapsed.has(r.id)).map(r => r.name), "
-             "WaveFW.internal.peek(v).vis.filter(r => r.type === 'sig').map(r => r.full.split('.').slice(-2, -1)[0])]")
+    got = js("[WaveLens.internal.peek(v).vis.filter(r => r.type === 'group' && !WaveLens.internal.peek(v).collapsed.has(r.id)).map(r => r.name), "
+             "WaveLens.internal.peek(v).vis.filter(r => r.type === 'sig').map(r => r.full.split('.').slice(-2, -1)[0])]")
     check(got[0] == ['tb_top', 'dut_i', 'dev0_i', 'core1_i', 'dev1_i', 'core2_i'] and set(got[1]) == {'core1_i', 'core2_i'},
           f'two subtrees: the modules between them open as headers only, the signals of the two picked {got}')
     # with the find and its Open on: Open goes off, so the next search does not fold the module again
     page.evaluate("document.querySelector('.wv').waveView.run([{op: 'find', query: 'cnt', open: true}, {op: 'only', modules: 'stage4_i'}])"); settle(page)
-    got = js("[v.findOpen, WaveFW.internal.peek(v).collapsed.has(v.scopeOf(v.onlyState().modules[0]).id), v.q]")
+    got = js("[v.findOpen, WaveLens.internal.peek(v).collapsed.has(v.scopeOf(v.onlyState().modules[0]).id), v.q]")
     page.locator('.wv input.q').first.fill('cnt '); settle(page)
-    got.append(js("WaveFW.internal.peek(v).collapsed.has(v.scopeOf(v.onlyState().modules[0]).id)"))
+    got.append(js("WaveLens.internal.peek(v).collapsed.has(v.scopeOf(v.onlyState().modules[0]).id)"))
     check(got == [False, False, 'cnt', False], f'with the find\'s Open on: Open switched off, the module stays open while the query changes {got}')
     page.locator('.wv input.q').first.fill(''); settle(page)
     # the find's Open on when Only opens: the folding from before the search back (as the twin has it), then the picked opened;
@@ -803,22 +804,22 @@ def modules(page, P):
             {'op': 'find', 'query': 'stage5_i', 'open': True}, {'op': 'only', 'modules': 'dev0_i'}]
     page.evaluate("ops => document.querySelector('.wv').waveView.run(ops)", ops2); settle(page)
     tw = viewedit.Editor(viewedit.Model(page.evaluate("WAVES.all"))); tw.run(ops2)
-    got = [sorted(js("v.state().config.fold")) == sorted(tw.fold()), js("WaveFW.internal.peek(v).collapsed.has(v.scopeOf('tb_top.dut_i.dev0_i.core0_i').id)"), js('v.findOpen')]
+    got = [sorted(js("v.state().config.fold")) == sorted(tw.fold()), js("WaveLens.internal.peek(v).collapsed.has(v.scopeOf('tb_top.dut_i.dev0_i.core0_i').id)"), js('v.findOpen')]
     check(got == [True, False, False], f'the find\'s Open on: the folding from before the search back, the modules picked open, as the twin has it {got}')
     page.evaluate("document.querySelector('.wv').waveView.run([{op: 'only', clear: true}, {op: 'find', query: 'stage5_i', open: true}])"); settle(page)
-    before = js("[...WaveFW.internal.peek(v).collapsed].sort((a, b) => a - b).join()")
+    before = js("[...WaveLens.internal.peek(v).collapsed].sort((a, b) => a - b).join()")
     page.evaluate("document.querySelector('.wv').waveView.run({op: 'only', modules: 'dev0_i', open: false})"); settle(page)
-    check(js("[...WaveFW.internal.peek(v).collapsed].sort((a, b) => a - b).join()") == before and js('v.findOpen'), 'only … open: false with the find\'s Open on: the folding as it was')
+    check(js("[...WaveLens.internal.peek(v).collapsed].sort((a, b) => a - b).join()") == before and js('v.findOpen'), 'only … open: false with the find\'s Open on: the folding as it was')
     page.evaluate("document.querySelector('.wv').waveView.run([{op: 'find', query: ''}, {op: 'only', clear: true}])"); settle(page)
-    folded = js("[...WaveFW.internal.peek(v).collapsed].length")
+    folded = js("[...WaveLens.internal.peek(v).collapsed].length")
     page.evaluate("document.querySelector('.wv').waveView.run([{op: 'only', on: false}, {op: 'only', on: true}, {op: 'only', clear: true}])")
-    check(js("[...WaveFW.internal.peek(v).collapsed].length") == folded, 'pause, resume and clear fold or open nothing')
+    check(js("[...WaveLens.internal.peek(v).collapsed].length") == folded, 'pause, resume and clear fold or open nothing')
     js("(v.expandAll(), 0)")
     js("(v.modules(false), 0)")
     # 10 000 modules: the panel opens, every one open, a filter
     t = page.evaluate("""(() => { const el = document.createElement('div'); document.body.append(el);
         const mk = (d, k) => d === 0 ? [`m${k}`, {name: 'a', wave: '01'}] : [`m${k}`, {name: 'a', wave: '01'}, ...Array.from({length: 10}, (_, i) => mk(d - 1, i))];
-        const v = new WaveFW.WaveView(el, {signal: [mk(4, 0)]}), T = performance.now();
+        const v = new WaveLens.WaveView(el, {signal: [mk(4, 0)]}), T = performance.now();
         v.modules(true); const t1 = performance.now(); v.mods.subtree(v.mods.roots[0], true); const t2 = performance.now();
         const n = [v.scopes().length, v.mods.rows.length, v.mods.el.querySelectorAll('.mn').length];
         v.mods.qEl.value = v.mods.q = 'm7 m3'; v.mods.render(); const t3 = performance.now();
@@ -828,7 +829,7 @@ def modules(page, P):
 
 
 def big(page):
-    t = page.evaluate('() => { const t0 = performance.now(); WaveFW.redrawAll(); return performance.now() - t0; }')
+    t = page.evaluate('() => { const t0 = performance.now(); WaveLens.redrawAll(); return performance.now() - t0; }')
     check(t < 1500 * SCALE, f'redraw of all viewers takes {t:.0f} ms (< {1500 * SCALE:.0f})')
     v = page.locator('.wv').last
     v.locator('button[data-act=sort]').click()
@@ -868,7 +869,7 @@ def viewer(page):
     q = js('(() => { const tpp = 1 / v.pxPerT(), e = 10 ** Math.floor(Math.log10(tpp)); return [1, 2, 5, 10].find(m => m * e >= tpp) * e; })()')
     check(abs(cur / q - round(cur / q)) < 1e-6, f'alt+click puts the cursor on a 1-2-5 step of a pixel ({cur} ps, step {q} ps)')
     # a click near an edge of a signal: the cursor on that edge (cursorSnap px); farther, or alt+click: a round time
-    near = js("""(() => { const k = v.pxPerT(), o = WaveFW.internal.peek(v).lay.find(o => o.row.type === 'sig' && o.row.tr && o.row.tr.some((e, i) => i && e.t > v.t0 + v.span * 0.1 && e.t < v.t0 + v.span * 0.9));
+    near = js("""(() => { const k = v.pxPerT(), o = WaveLens.internal.peek(v).lay.find(o => o.row.type === 'sig' && o.row.tr && o.row.tr.some((e, i) => i && e.t > v.t0 + v.span * 0.1 && e.t < v.t0 + v.span * 0.9));
         const e = o.row.tr.find((e, i) => i && e.t > v.t0 + v.span * 0.1 && e.t < v.t0 + v.span * 0.9); return [(e.t - v.t0) * k, o.y + o.h / 2, e.t, v.S.cursorSnap]; })()""")
     got = []
     for dx, alt in ((5, False), (5, True), (near[3] + 6, False)):
@@ -906,8 +907,8 @@ def viewer(page):
     press('i', 'i', 'l'); keys.append(round(js('v.span') / s1, 3)); press('l')
     press('End'); keys.append(abs(js('v.t0 + v.span') - js('v.M.t1')) < 1e-6); press('Home'); keys.append(js('v.t0') == js('v.M.t0'))
     press('j', 'j'); a = js('v.sel && v.sel.full'); press('k'); b = js('v.sel && v.sel.full'); press('g', 'g'); g1 = js('v.sel && v.sel.full'); press('Shift+G'); g2 = js('v.sel && v.sel.full')
-    sigs = js("WaveFW.internal.peek(v).vis.filter(r => r.type === 'sig' && r.tr).map(r => r.full)"); keys.append([a == sigs[1], b == sigs[0], g1 == sigs[0], g2 == sigs[-1]])
-    js('(v.select(WaveFW.internal.peek(v).vis.filter(r => r.type === "sig" && r.tr && r.tr.length > 3)[0]), v.cursor = v.M.t0, v.draw(), 0)')
+    sigs = js("WaveLens.internal.peek(v).vis.filter(r => r.type === 'sig' && r.tr).map(r => r.full)"); keys.append([a == sigs[1], b == sigs[0], g1 == sigs[0], g2 == sigs[-1]])
+    js('(v.select(WaveLens.internal.peek(v).vis.filter(r => r.type === "sig" && r.tr && r.tr.length > 3)[0]), v.cursor = v.M.t0, v.draw(), 0)')
     press('Tab'); e1 = js('v.cursor'); press('Tab'); e2 = js('v.cursor'); press('Shift+Tab'); keys.append([e1 > js('v.M.t0'), e2 > e1, js('v.cursor') == e1])
     keys.append(js('document.activeElement === v.canvas'))
     press('Escape'); press('Tab'); keys.append(js('document.activeElement !== v.canvas'))   # nothing selected: Tab leaves the waves (no focus trap)
@@ -923,14 +924,14 @@ def viewer(page):
     page.evaluate("window.__c = null; navigator.clipboard.writeText = t => (window.__c = t, Promise.resolve())")
     press('g', 'g', 'y', 'y'); vk.append(page.evaluate('window.__c') == js('v.sel && v.sel.full'))
     ng = js('Object.keys(v.M.groups).length')
-    press('z', 'Shift+M'); vk.append(js('WaveFW.internal.peek(v).collapsed.size') == ng); press('z', 'Shift+R'); vk.append(js('WaveFW.internal.peek(v).collapsed.size') == 0)
-    press('g', 'x'); vk.append(js('WaveFW.internal.peek(v).collapsed.size') == 0)   # an unknown sequence does nothing
+    press('z', 'Shift+M'); vk.append(js('WaveLens.internal.peek(v).collapsed.size') == ng); press('z', 'Shift+R'); vk.append(js('WaveLens.internal.peek(v).collapsed.size') == 0)
+    press('g', 'x'); vk.append(js('WaveLens.internal.peek(v).collapsed.size') == 0)   # an unknown sequence does nothing
     check(all(vk), f'vim: ]m [m next / previous bookmark round the ends, * finds the selected name, yy copies it, zM / zR fold / open every group ({ng}) {vk}')
     check(keys[:6] == [0.5, 0.5, True, 0.5, True, True] and all(keys[6]) and all(keys[7]) and keys[8] and keys[9],
           f'keys as in Questa: i o zoom in / out, f full, l the window before the last zoom (i i l: x0.5), End / Home, Tab / shift+Tab the next / previous edge (the focus stays; nothing selected: Tab leaves the waves); vim: j k, gg, G {keys}')
     # the value under the pointer
     c.scroll_into_view_if_needed(); box = c.bounding_box()
-    y = js("(o => o.y + o.h / 2 - WaveFW.internal.peek(v).oy)(WaveFW.internal.peek(v).lay.find(o => o.row.name === 'state'))")
+    y = js("(o => o.y + o.h / 2 - WaveLens.internal.peek(v).oy)(WaveLens.internal.peek(v).lay.find(o => o.row.name === 'state'))")
     page.mouse.move(box['x'] + box['width'] * 0.5, box['y'] + y); tip = c.get_attribute('title') or ''
     check(tip.startswith('state = ') and '→' in tip and '@' in tip, f'the value under the pointer: {tip!r}')
     # storage keys: the bench and its lazy cards of one data-wave are told apart
@@ -950,8 +951,8 @@ def viewer(page):
     f1 = t("(v.find('.'), [v.found.size, v.cntEl.textContent])"); f2 = t("(v.find('PSEL'), [...v.found.keys()].map(r => r.full))"); f3 = t("(v.find('u.sel'), v.found.size)")
     check(f1 == [0, ''] and f2 == ['tb.u.PSEL'] and f3 == 0 and t("(v.find('tb.sel'), v.found.size)") == 1,
           f'find: "." alone is no query {f1}, a signal shown as an alias is found by its leaf {f2}, the scope is the groups above (u.sel {f3})')
-    n = page.evaluate("""(() => { let n = 0; const d = document.querySelector('#wv-t94'); d.addEventListener('wavefw:destroy', () => n++); d.remove(); WaveFW.upgrade(); return [n, WaveFW.views().includes(window.__t94)]; })()""")
-    check(n == [1, False], f'a viewer whose element left the page is destroyed by the next upgrade (wavefw:destroy once, out of WaveFW.views()) {n}')
+    n = page.evaluate("""(() => { let n = 0; const d = document.querySelector('#wv-t94'); d.addEventListener('wavelens:destroy', () => n++); d.remove(); WaveLens.upgrade(); return [n, WaveLens.views().includes(window.__t94)]; })()""")
+    check(n == [1, False], f'a viewer whose element left the page is destroyed by the next upgrade (wavelens:destroy once, out of WaveLens.views()) {n}')
     # the keyboard: roles, one tab stop in the names, arrows walk and select, shift+→ moves the cursor
     roles = page.evaluate(f"""(() => {{ const r = document.querySelector('{ex}'); return [r.querySelector('canvas').getAttribute('role'), r.querySelector('.names').getAttribute('role'),
         r.querySelectorAll('.names .row[role=option]').length, r.querySelectorAll('.names .row[role=option][tabindex="0"]').length]; }})()""")
@@ -969,25 +970,25 @@ def viewer_big(page, P):
     folding from before it with the stepped row in place, print draws every row."""
     js = lambda e: page.evaluate(f"(() => {{ const v = document.querySelector('.wv').waveView; return {e}; }})()")
     js('(v.expandAll(), 0)'); settle(page)
-    el0 = js('WaveFW.internal.peek(v).namesEl.children[5] === WaveFW.internal.peek(v).rowEls[4]')
-    t = page.evaluate("""(async () => { const v = document.querySelector('.wv').waveView, t = [], keep = WaveFW.internal.peek(v).rowEls[10];
-        for (let i = 0; i < 5; i++) { const n = WaveFW.internal.peek(v).namesEl.querySelectorAll('.row:not(.grp) .n')[3 + i], t0 = performance.now(); n.click(); t.push(performance.now() - t0);
+    el0 = js('WaveLens.internal.peek(v).namesEl.children[5] === WaveLens.internal.peek(v).rowEls[4]')
+    t = page.evaluate("""(async () => { const v = document.querySelector('.wv').waveView, t = [], keep = WaveLens.internal.peek(v).rowEls[10];
+        for (let i = 0; i < 5; i++) { const n = WaveLens.internal.peek(v).namesEl.querySelectorAll('.row:not(.grp) .n')[3 + i], t0 = performance.now(); n.click(); t.push(performance.now() - t0);
           await new Promise(r => requestAnimationFrame(r)); }
-        t.sort((a, b) => a - b); return [t[2], WaveFW.internal.peek(v).rowEls[10] === keep, WaveFW.internal.peek(v).vis.length]; })()""")
+        t.sort((a, b) => a - b); return [t[2], WaveLens.internal.peek(v).rowEls[10] === keep, WaveLens.internal.peek(v).vis.length]; })()""")
     check(el0 and t[1] and t[0] < 10 * SCALE, f'a click on a name with {t[2]} rows takes {t[0]:.1f} ms (< {10 * SCALE:.0f}) and keeps the rows of the names column')
     q, body = page.locator('.wv').first.locator('input.q'), page.locator('.wv .body').first
     q.fill(P['fuzzy']); settle(page); q.press('Enter'); q.press('Enter'); settle(page)
     row = js('v.fiRow && v.fiRow.full'); y0 = js('v.rowTop(v.fiRow)')
     q.press('Escape'); settle(page)
-    after = js('[WaveFW.internal.peek(v).collapsed.size, v.found.size]'); r = js(f"v.M.rows.find(x => x.full === '{row}')"); y1 = js(f"v.rowTop(v.M.rows.find(x => x.full === '{row}'))")
+    after = js('[WaveLens.internal.peek(v).collapsed.size, v.found.size]'); r = js(f"v.M.rows.find(x => x.full === '{row}')"); y1 = js(f"v.rowTop(v.M.rows.find(x => x.full === '{row}'))")
     check(after == [0, 0] and y0 is not None and y1 is not None and abs(y1 - y0) <= 1, f'Esc after find + Open: every module open again as before the search {after}; the row stepped to stays in place ({y0:.0f} -> {y1:.0f} px)')
     page.emulate_media(media='print'); page.evaluate("dispatchEvent(new Event('beforeprint'))")
-    pr = js("[[...v.wcol.querySelectorAll('canvas.wv-print')].reduce((s, c) => s + c.getBoundingClientRect().height, 0), WaveFW.internal.peek(v).lay.H, getComputedStyle(v.bodyEl).overflowY, v.wcol.querySelectorAll('canvas.wv-print').length]")
+    pr = js("[[...v.wcol.querySelectorAll('canvas.wv-print')].reduce((s, c) => s + c.getBoundingClientRect().height, 0), WaveLens.internal.peek(v).lay.H, getComputedStyle(v.bodyEl).overflowY, v.wcol.querySelectorAll('canvas.wv-print').length]")
     page.evaluate("dispatchEvent(new Event('afterprint'))"); page.emulate_media(media='screen'); settle(page)
     check(abs(pr[0] - pr[1]) < 1 and pr[2] == 'visible' and pr[3] >= 2 and js("v.wcol.querySelectorAll('canvas.wv-print').length") == 0,
           f'print: every row on {pr[3]} canvases ({pr[0]:.0f} of {pr[1]} px), no scroll box; afterprint gives the screen canvas back')
     wd = page.evaluate("""(() => { const ck = [], d8 = []; for (let c = 0; c < 3000; c++) { ck.push([10 * c, '0'], [10 * c + 5, '1']); d8.push([10 * c, (c % 256).toString(16)]); }
-        const el = document.body.appendChild(document.createElement('div')), w = new WaveFW.WaveView(el, { signal: [{ name: 'clk', tv: ck },
+        const el = document.body.appendChild(document.createElement('div')), w = new WaveLens.WaveView(el, { signal: [{ name: 'clk', tv: ck },
           { name: 'd', width: 8, tv: d8 }], time: { t0: 0, unit: 'ps' }, meta: { omitted: { why: 'config', paths: { 'tb.u': ['rd_ptr', 'wr_ptr'] } } } }, {}), d = w.toWaveDrom(0, 30000, w.M.rows.filter(r => r.type === 'sig'));
         const out = [Math.max(...d.signal.map(s => s.wave.length)), w.wdCut && w.wdCut.cells, w.wdCut && w.wdCut.to, d.foot.text, d.head.text];
         w.find('rd_ptr'); out.push(w.cntEl ? [w.cntEl.textContent, w.cntEl.dataset.ttl] : null); w.find('');
@@ -998,7 +999,7 @@ def viewer_big(page, P):
           f'WaveDrom of 3000 cycles: 2048 kept, the cut said in the foot and v.wdCut, the head ends where the cycles end {wd[3]!r} {wd[4]!r}; find: a name the config left out is said {wd[5]}; 2047 / 2048 / 2049 cycles {wd[6]}')
     g = page.evaluate("""(() => [2040, 2047].map(last => { const ck = [], d8 = [];   // the data idle from cycle last to 2900: a gap
         for (let c = 0; c < 3000; c++) { ck.push([10 * c, '0'], [10 * c + 5, '1']); if (c < last || c > 2900) d8.push([10 * c, (c % 256).toString(16)]); }
-        const el = document.body.appendChild(document.createElement('div')), w = new WaveFW.WaveView(el, { signal: [{ name: 'clk', tv: ck },
+        const el = document.body.appendChild(document.createElement('div')), w = new WaveLens.WaveView(el, { signal: [{ name: 'clk', tv: ck },
           { name: 'd', width: 8, tv: d8 }], time: { t0: 0, unit: 'ps' } }, {});
         w.setGaps({ gaps: true }); const x = w.toWaveDrom(0, 30000, w.M.rows.filter(r => r.type === 'sig')), wv = x.signal[1].wave;
         const out = [wv.replace(/[|]/g, '').length, (wv.match(/[|]/g) || []).length, w.wdCut && w.wdCut.to, /idle/.test(x.foot.text)];
@@ -1011,7 +1012,7 @@ def viewer_big(page, P):
 def viewer_fixes(page):
     """Review II, step 12.4: decode masks to the width, an empty ASCII value, a field outside its vector, analog refused
     on a bit, moveTo and l, the measured range and the second cursor in the picture (toSVG)."""
-    r = page.evaluate("""(() => { const F = WaveFW, D = F.decode, warn = console.warn, warned = [];
+    r = page.evaluate("""(() => { const F = WaveLens, D = F.decode, warn = console.warn, warned = [];
       console.warn = (...a) => warned.push(a.join(' '));
       const M = F.parse({ signal: [{ name: 'v', width: 8, tv: [[0, 'ff']], fields: [{ name: 'hi', msb: 11, lsb: 8 }, { name: 'lo', msb: 3, lsb: 0 }] }] });
       console.warn = warn;
@@ -1031,11 +1032,11 @@ def viewer_fixes(page):
     check(r['svgRange'] and r['svgDash'], f'the picture (toSVG) has the measured range with its Δ and the dashed second cursor {r}')
 
 
-def wavefw_units(page):
-    """wavefw/wavefw.js is the concatenation of wavefw/src/*.js (make wavefw), and the pure functions of the model."""
-    r = subprocess.run([sys.executable, '-I', str(ROOT / 'tools' / 'wavefwcat.py'), '--check'], capture_output=True, text=True)
-    check(r.returncode == 0, 'wavefw/wavefw.js is the concatenation of wavefw/src/*.js' + (': ' + r.stderr.strip() if r.returncode else ''))
-    got = page.evaluate("""(() => { const F = WaveFW, M = F.parse({ signal: [{ name: 'clk', wave: 'p..' }, ['g', { name: 'b', wave: '=.=', data: 'A B' }, {}, { name: 'a', tv: [[0, '0'], [5, '1']] }]],
+def wavelens_units(page):
+    """wavelens/wavelens.js is the concatenation of wavelens/src/*.js (make wavelens), and the pure functions of the model."""
+    r = subprocess.run([sys.executable, '-I', str(ROOT / 'tools' / 'wavelenscat.py'), '--check'], capture_output=True, text=True)
+    check(r.returncode == 0, 'wavelens/wavelens.js is the concatenation of wavelens/src/*.js' + (': ' + r.stderr.strip() if r.returncode else ''))
+    got = page.evaluate("""(() => { const F = WaveLens, M = F.parse({ signal: [{ name: 'clk', wave: 'p..' }, ['g', { name: 'b', wave: '=.=', data: 'A B' }, {}, { name: 'a', tv: [[0, '0'], [5, '1']] }]],
         time: { t0: 0, cycle: 10 } });
       return { rows: M.rows.map(r => r.type + ':' + r.name), groups: Object.values(M.groups).map(g => g.path), t: [M.t0, M.t1, M.cycle], btr: M.rows[2].tr.map(o => [o.t, o.v]),
         fuzzy: [F.fuzzy('pxvd', 's_pix_valid') && F.fuzzy('pxvd', 's_pix_valid').idx, F.fuzzy('dvp', 's_pix_valid')],
@@ -1046,7 +1047,7 @@ def wavefw_units(page):
             'fuzzy': [[2, 4, 6, 10], None], 'decode': ['-1', '1010', '"A"', '5', 'x1'], 'sort': ['i_a', 'o_b', 'c9', 'c10'],
             'time': ['1235 ns', '0.002 µs', '1.234567 µs', '0.0015 µs', 1500000, 250, None]}
     for k in want:
-        check(got[k] == want[k], f'WaveFW pure functions, {k}: {got[k]}' + ('' if got[k] == want[k] else f' (want {want[k]})'))
+        check(got[k] == want[k], f'WaveLens pure functions, {k}: {got[k]}' + ('' if got[k] == want[k] else f' (want {want[k]})'))
 
 
 def plugin_api(page):
@@ -1055,37 +1056,37 @@ def plugin_api(page):
     import re as _re
     bad = []
     for f in ('sva.js', 'bus.js'):   # the two plugins: the API, not the viewer's fields (moveTo, fold, select, setCursor …)
-        src = (ROOT / 'wavefw' / f).read_text()
+        src = (ROOT / 'wavelens' / f).read_text()
         bad += [f'{f}: {p}' for p in ('.namesEl', ".bar .tools", "textContent === 'go to'", 'v.keys.', '.vis[+') if p in src]
         bad += [f'{f}: {m}' for m in _re.findall(r'\bv\.(?:t0|cursor|span|sel) = |\bv\.collapsed\.(?:add|delete)\(', src)]
     import re as _re2
-    cfg_keys = set(_re2.findall(r'^ {2}(\w+):', (ROOT / 'wavefw' / 'wavefw.config.js').read_text(), _re2.M))
-    lacking = sorted(cfg_keys - set(page.evaluate('Object.keys(WaveFW.defaults)')) - {'theme', 'colors', 'nameWidth', 'fontMono', 'fontBody'} - ({'busDetect', 'buses'} if not page.evaluate('!!window.WaveBus') else set()))
-    check(not lacking, f'WaveFW.defaults has every setting of wavefw.config.js (the plugins register theirs: registerDefaults) {lacking}')
+    cfg_keys = set(_re2.findall(r'^ {2}(\w+):', (ROOT / 'wavelens' / 'wavelens.config.js').read_text(), _re2.M))
+    lacking = sorted(cfg_keys - set(page.evaluate('Object.keys(WaveLens.defaults)')) - {'theme', 'colors', 'nameWidth', 'fontMono', 'fontBody'} - ({'busDetect', 'buses'} if not page.evaluate('!!window.WaveBus') else set()))
+    check(not lacking, f'WaveLens.defaults has every setting of wavelens.config.js (the plugins register theirs: registerDefaults) {lacking}')
     own = sorted(set(_re.findall(r'\b\w+\.(?:lay|oy|vis|collapsed|rowEls|namesEl)\b', pathlib.Path(__file__).read_text())))
-    check(not own, f'tests/smoke.py reads the fields of a viewer through WaveFW.internal.peek(v) only (one place to change) {own or ""}')
-    check(not bad, f'sva.js and bus.js use the API only (none of {bad or "namesEl, .bar .tools, the go-to label, v.keys, vis[data-r], v.t0 / cursor / span / sel =, WaveFW.internal.peek(v).collapsed.add / delete"})')
+    check(not own, f'tests/smoke.py reads the fields of a viewer through WaveLens.internal.peek(v) only (one place to change) {own or ""}')
+    check(not bad, f'sva.js and bus.js use the API only (none of {bad or "namesEl, .bar .tools, the go-to label, v.keys, vis[data-r], v.t0 / cursor / span / sel =, WaveLens.internal.peek(v).collapsed.add / delete"})')
     page.evaluate("""(() => { const d = document.createElement('div'); d.id = 'wv-api'; d.style.cssText = '--my-col: #123456; width: 900px'; document.body.appendChild(d);
         const M = { signal: [['tb', ['u', { name: 'state', path: 'tb.u.state', width: 2, tv: [[0, '0'], [10, '1']] }], ['w', { name: 'state', path: 'tb.w.state', width: 2, tv: [[0, '0'], [10, '1']] }]]],
           time: { t0: 0, cycle: 10, t1: 40 } };
-        WaveFW.enums['tb.u.state'] = { 0: 'IDLE', 1: 'RUN' };
+        WaveLens.enums['tb.u.state'] = { 0: 'IDLE', 1: 'RUN' };
         const v = window.__api = new WaveView(d, M, { cursor: 20 }), ev = window.__ev = [];
-        for (const n of ['cursor', 'view', 'select']) d.addEventListener('wavefw:' + n, () => ev.push(n));
+        for (const n of ['cursor', 'view', 'select']) d.addEventListener('wavelens:' + n, () => ev.push(n));
         const row = { type: 'sig', name: 'plugin row', height: 20, draw: (P, o) => P.rect(o.xL, o.y, o.xR - o.xL, o.h, '--my-col') };
         v.extraRows.push(g => g && g.name === 'u' ? [row] : []); v.renderNames(); v.draw(); window.__row = row; })()""")
     t = lambda e: page.evaluate(f'(() => {{ const v = window.__api, row = window.__row; return {e}; }})()')
-    px = page.evaluate("""(() => { const v = window.__api, o = WaveFW.internal.peek(v).lay.find(o => o.row === window.__row), d = devicePixelRatio || 1, c = v.canvas;
-        return [...c.getContext('2d').getImageData(Math.round(c.width * 0.27), Math.round((o.y + o.h / 2 - WaveFW.internal.peek(v).oy) * d), 1, 1).data].slice(0, 3); })()""")
+    px = page.evaluate("""(() => { const v = window.__api, o = WaveLens.internal.peek(v).lay.find(o => o.row === window.__row), d = devicePixelRatio || 1, c = v.canvas;
+        return [...c.getContext('2d').getImageData(Math.round(c.width * 0.27), Math.round((o.y + o.h / 2 - WaveLens.internal.peek(v).oy) * d), 1, 1).data].slice(0, 3); })()""")
     check(px == [0x12, 0x34, 0x56], f'a plugin row paints in any custom property of the page ("--my-col"): {px}')
-    reg = page.evaluate("(WaveFW.registerTokens({'my-tok': '--my-col'}), [WaveFW.registerTokens({})['my-tok'], 'sva-pass' in WaveFW.registerTokens({})])")
-    check(reg == ['--my-col', True], f'WaveFW.registerTokens adds a colour name (sva.js registers its own) {reg}')
+    reg = page.evaluate("(WaveLens.registerTokens({'my-tok': '--my-col'}), [WaveLens.registerTokens({})['my-tok'], 'sva-pass' in WaveLens.registerTokens({})])")
+    check(reg == ['--my-col', True], f'WaveLens.registerTokens adds a colour name (sva.js registers its own) {reg}')
     hv = t("(v.extraPicks = new Map([[row, 'hl3']]), v.renderNames(), v.rowEl(row).style.getPropertyValue('--hl'))")
     check(hv == 'var(--wave-hl3)', f'extraPicks takes a token per row ({hv})')
     tools = t("""(() => { const a = v.addTool('go to', '<button type="button" class="t1">x</button>'), b = v.addTool('go to', '<button type="button" class="t2">y</button>');
         return [a === b, a.dataset.tg, a.querySelectorAll('button').length, a.querySelector('.tl').textContent]; })()""")
     panel = t("(() => { const p = document.createElement('div'); v.addPanel(p); return p.previousElementSibling === v.root.querySelector('.bar'); })()")
     check(tools == [True, 'go to', 2, 'go to'] and panel, f'addTool finds or makes a tool group by its label {tools}; addPanel puts a panel under the bar {panel}')
-    rows = t("""(() => { const el = v.rowEl(row), y = WaveFW.internal.peek(v).lay.find(o => o.row === row).y + 2; return [v.rowAt(el) === row, v.rowAt(el.firstChild) === row, v.rowAt(y) === row, v.rowAt(document.body)]; })()""")
+    rows = t("""(() => { const el = v.rowEl(row), y = WaveLens.internal.peek(v).lay.find(o => o.row === row).y + 2; return [v.rowAt(el) === row, v.rowAt(el.firstChild) === row, v.rowAt(y) === row, v.rowAt(document.body)]; })()""")
     check(rows == [True, True, True, None], f'rowAt(an element or a y) and rowEl(row) find each other {rows}')
     marks = t("""(() => { v.rowClass(row, 'my-mark').rowTitle(row, 'my title'); v.collapseAll(); v.expandAll();
         const el = v.rowEl(row), a = [el.classList.contains('my-mark'), el.title]; v.rowClass(row, 'my-mark', false).rowTitle(row, null);
@@ -1096,26 +1097,26 @@ def plugin_api(page):
         k({}); k({ ctrlKey: true }); return [n, v.root.querySelector('.hint').textContent.includes('q quit nothing'), window.__n]; })()""")
     check(k == [1, True, 1], f'addKey: the key on the waves (not with ctrl), its line in the hint; listen on the names column {k}')
     ev = t("(window.__ev.length = 0, v.setCursor(30), v.zoom(0.5, 0.5), v.select('tb.w.state'), v.select('tb.w.state'), window.__ev.slice())")
-    check(ev == ['cursor', 'view', 'select'], f'events wavefw:cursor, wavefw:view, wavefw:select, once per change {ev}')
+    check(ev == ['cursor', 'view', 'select'], f'events wavelens:cursor, wavelens:view, wavelens:select, once per change {ev}')
     en = t("[v.valueAt(v.M.rows.find(r => r.full === 'tb.u.state'), 15), v.valueAt(v.M.rows.find(r => r.full === 'tb.w.state'), 15)]")
-    check(en == ['RUN', '1'], f'WaveFW.enums by full path: only tb.u.state gets the names {en}')
+    check(en == ['RUN', '1'], f'WaveLens.enums by full path: only tb.u.state gets the names {en}')
     gh = page.evaluate("""(() => { const d = document.createElement('div'); document.body.appendChild(d);
-        const M = WaveFW.parse({ signal: [['g', { name: 'a', wave: '01' }]] }), mk = () => [{ type: 'group', name: 'p', id: WaveFW.rowId() }];
-        const n = []; for (let i = 0; i < 3; i++) { WaveFW.WaveSVG.render(d, M, { extraRows: [g => g && g.name === 'g' ? mk() : []] }); n.push(Object.keys(M.groups).length); }
-        d.remove(); delete WaveFW.enums['tb.u.state']; return n; })()""")
+        const M = WaveLens.parse({ signal: [['g', { name: 'a', wave: '01' }]] }), mk = () => [{ type: 'group', name: 'p', id: WaveLens.rowId() }];
+        const n = []; for (let i = 0; i < 3; i++) { WaveLens.WaveSVG.render(d, M, { extraRows: [g => g && g.name === 'g' ? mk() : []] }); n.push(Object.keys(M.groups).length); }
+        d.remove(); delete WaveLens.enums['tb.u.state']; return n; })()""")
     check(gh == [2, 2, 2], f'the groups of SVG plugins leave the model when the figure is drawn again (groups after 3 renders {gh})')
-    page.evaluate("(() => { const d = document.querySelector('#wv-api'); d.remove(); WaveFW.upgrade(); })()")
+    page.evaluate("(() => { const d = document.querySelector('#wv-api'); d.remove(); WaveLens.upgrade(); })()")
 
 
 def api_docs(page):
-    """docs/index.html § API is made from the exports: a line for every key of WaveFW and no line for a key that is not
+    """docs/index.html § API is made from the exports: a line for every key of WaveLens and no line for a key that is not
     there; the viewer methods it lists exist; the settings table names every default."""
-    got = page.evaluate("""(() => ({ keys: Object.keys(WaveFW).sort(), doc: Object.keys(WAVEFW_API).sort(),
-        rows: document.querySelectorAll('#api-wavefw tr[data-api]').length, todo: document.querySelector('#api-wavefw').textContent.includes('not described yet'),
+    got = page.evaluate("""(() => ({ keys: Object.keys(WaveLens).sort(), doc: Object.keys(WAVELENS_API).sort(),
+        rows: document.querySelectorAll('#api-wavelens tr[data-api]').length, todo: document.querySelector('#api-wavelens').textContent.includes('not described yet'),
         view: Object.keys(VIEW_API).filter(k => typeof WaveView.prototype[k] !== 'function'),
-        settings: Object.keys(WaveFW.defaults).filter(k => !document.querySelector('#api').parentElement.textContent.includes(k)) }))()""")
+        settings: Object.keys(WaveLens.defaults).filter(k => !document.querySelector('#api').parentElement.textContent.includes(k)) }))()""")
     check(got['keys'] == got['doc'] and got['rows'] == len(got['keys']) and not got['todo'],
-          f'docs § API: one line per export of WaveFW ({len(got["keys"])}; not described: {sorted(set(got["keys"]) - set(got["doc"]))}, gone: {sorted(set(got["doc"]) - set(got["keys"]))})')
+          f'docs § API: one line per export of WaveLens ({len(got["keys"])}; not described: {sorted(set(got["keys"]) - set(got["doc"]))}, gone: {sorted(set(got["doc"]) - set(got["keys"]))})')
     check(not got['view'], f'docs § API: every viewer method it lists exists (missing: {got["view"]})')
     check(not got['settings'], f'docs § Settings names every default setting (missing: {got["settings"]})')
 
@@ -1130,13 +1131,13 @@ def themes(page):
     check(page.locator('svg path[style*="#d6336c"]').count() > 0, 'per-signal stroke reaches the SVG')
     check(page.locator('svg[data-theme="dark"]').count() == 1, 'per-element dark SVG carries data-theme')
     ex = 'div.wv[data-wave="DEMO_WAVES.exact"]'
-    page.evaluate("WaveFW.setTheme('white')")
-    check(css('html', '--bg') == '#ffffff' and css(ex, '--wave-bus') == '#000000', 'WaveFW.setTheme("white") themes the page and all waves')
+    page.evaluate("WaveLens.setTheme('white')")
+    check(css('html', '--bg') == '#ffffff' and css(ex, '--wave-bus') == '#000000', 'WaveLens.setTheme("white") themes the page and all waves')
     check(px(ex, 5, 5) == [243, 244, 246], 'global white theme redraws existing viewers')
-    page.evaluate("WaveFW.setColors({trace: '#ff0000'})")
-    check(css(ex, '--wave-1') == '#ff0000', 'WaveFW.setColors applies to all waves')
+    page.evaluate("WaveLens.setColors({trace: '#ff0000'})")
+    check(css(ex, '--wave-1') == '#ff0000', 'WaveLens.setColors applies to all waves')
     check(css('#ex-palette-view', '--wave-1') == '#7ee787', 'a wave with its own palette keeps it')
-    page.evaluate("WaveFW.setColors({trace: null}); WaveFW.setTheme('auto')")
+    page.evaluate("WaveLens.setColors({trace: null}); WaveLens.setTheme('auto')")
     check(css(ex, '--wave-1') == '#1d1f24', 'null colour and theme "auto" restore the defaults')
 
 
@@ -1166,18 +1167,18 @@ def sva_exprs(browser, build):
     v.locator('button[data-x=add]').click()
     inp.fill('@(posedge PCLK) PSEL && PENABLE && !PREADY'); v.locator('button[data-x=add]').click()
     inp.fill('PSEL && nope'); v.locator('button[data-x=add]').click()
-    page.wait_for_function("WaveFW.internal.peek(document.querySelector('.wv').waveView).vis.filter(r => (r.cls || '').startsWith('sva-expr')).length === 2")
+    page.wait_for_function("WaveLens.internal.peek(document.querySelector('.wv').waveView).vis.filter(r => (r.cls || '').startsWith('sva-expr')).length === 2")
     toast = v.locator('.bar .toast').inner_text()
-    rows = js("return WaveFW.internal.peek(v).vis.filter(r => (r.cls || '').startsWith('sva-expr')).map(r => [r.name, r.tr.filter(o => o.k === '1').map(o => o.t)]);")
+    rows = js("return WaveLens.internal.peek(v).vis.filter(r => (r.cls || '').startsWith('sva-expr')).map(r => [r.name, r.tr.filter(o => o.k === '1').map(o => o.t)]);")
     check(rows == [['ƒ PSEL && !PREADY', [45000, 85000, 145000]], ['ƒ @(posedge PCLK) PSEL && PENABLE && !PREADY', [105000]]] and 'not found: nope' in toast,
           f'+ Row: two rows ƒ (the clocked one at the edge after its cycle); a name that is not there is said, no row {rows} {toast!r}')
     jtxt = page.evaluate("document.querySelector('.wv').waveView.extraJSON.map(f => f()).filter(Boolean).join('\\n')")
     page.reload(); page.wait_for_load_state('networkidle'); page.evaluate('SVA.ready()')
-    page.wait_for_function("WaveFW.internal.peek(document.querySelector('.wv').waveView).vis.filter(r => (r.cls || '').startsWith('sva-expr') && r.tr.length).length === 2")
+    page.wait_for_function("WaveLens.internal.peek(document.querySelector('.wv').waveView).vis.filter(r => (r.cls || '').startsWith('sva-expr') && r.tr.length).length === 2")
     v.locator('.names .row', has_text='ƒ PSEL && !PREADY').first.click()
     got = [inp.input_value()]
     v.locator('button[data-x=del]').click()
-    got.append(js("return WaveFW.internal.peek(v).vis.filter(r => (r.cls || '').startsWith('sva-expr')).map(r => r.name);"))
+    got.append(js("return WaveLens.internal.peek(v).vis.filter(r => (r.cls || '').startsWith('sva-expr')).map(r => r.name);"))
     check('"exprs": [\n  "PSEL && !PREADY",' in jtxt and got == ['PSEL && !PREADY', ['ƒ @(posedge PCLK) PSEL && PENABLE && !PREADY']],
           f'the rows are kept over a reload and in the JSON ("exprs"); a click on a row puts it in the field, − Row removes it {got}')
     # a hierarchy: names from the selected signal's module up, or a full path
@@ -1203,18 +1204,18 @@ def vscode_tab(browser, build):
     itself, the live link's EventSource and POSTs relayed with the dump's path; no CSP violation."""
     import base64, json, time, urllib.parse
     print('vscode: the extension\'s tab (host.js) with a fake VS Code')
-    src = 'https://wavefw.test'
+    src = 'https://wavelens.test'
     files = {'/host.js': ROOT / 'vscode' / 'media' / 'host.js', '/dump.vcd': ROOT / 'tests' / 'unit' / 'vcd' / 'enum.vcd'}
-    files.update({'/media/' + f: ROOT / 'wavefw' / f for f in ('wavefw.css', 'wavefw.config.js', 'wavefw.js', 'sva.wasm.js', 'bus.js', 'sva.js')})
+    files.update({'/media/' + f: ROOT / 'wavelens' / f for f in ('wavelens.css', 'wavelens.config.js', 'wavelens.js', 'sva.wasm.js', 'bus.js', 'sva.js')})
     ext = (ROOT / 'vscode' / 'extension.js').read_text(encoding='utf-8')
     csp = re.search(r'content="(default-src[^"]+)"', ext).group(1).replace('${src}', src).replace('${nonce}', 'N0NCE')
-    host = {'name': 'enum.vcd', 'path': '/host/dumps/enum.vcd', 'store': {'wavefw.given': 'yes'}, 'autoReload': False}
-    scripts = ''.join(f'<script nonce="N0NCE" src="{src}/media/{f}"></script>' for f in ('wavefw.config.js', 'wavefw.js', 'sva.wasm.js', 'bus.js', 'sva.js'))
+    host = {'name': 'enum.vcd', 'path': '/host/dumps/enum.vcd', 'store': {'wavelens.given': 'yes'}, 'autoReload': False}
+    scripts = ''.join(f'<script nonce="N0NCE" src="{src}/media/{f}"></script>' for f in ('wavelens.config.js', 'wavelens.js', 'sva.wasm.js', 'bus.js', 'sva.js'))
     html = (f'<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="{csp}">'
             '<style>kbd { color: #ccc; background-color: rgba(128, 128, 128, 0.17); padding: 1px 3px; }'   # VS Code's webview styles
             ' code { color: #d7ba7d; background-color: rgba(10, 10, 10, 0.4); padding: 1px 3px; }</style>'
-            f'<link rel="stylesheet" href="{src}/media/wavefw.css"></head><body class="vscode-light">'
-            f'<script type="application/json" id="wavefw-host">{json.dumps(host)}</script>'
+            f'<link rel="stylesheet" href="{src}/media/wavelens.css"></head><body class="vscode-light">'
+            f'<script type="application/json" id="wavelens-host">{json.dumps(host)}</script>'
             '<script type="application/wavedrom">{ "signal": [{ "name": "reading…", "wave": "x..." }] }</script>'
             f'<script nonce="N0NCE" src="{src}/host.js"></script>{scripts}</body></html>')
     fake = """(() => { window.__sent = []; const reply = m => setTimeout(() => window.postMessage(m, '*'), 0);
@@ -1243,18 +1244,18 @@ def vscode_tab(browser, build):
     until("window.__sent && window.__sent.some(m => m.type === 'ready')", timeout=15000)
     sent = lambda t: page.evaluate(f"window.__sent.filter(m => m.type === '{t}')")
     ready = sent('ready')[0]
-    js = lambda e: page.evaluate(f"(async () => {{ const v = WaveFW.views().find(x => x.root.isConnected); return {e}; }})()")
+    js = lambda e: page.evaluate(f"(async () => {{ const v = WaveLens.views().find(x => x.root.isConnected); return {e}; }})()")
     check(ready.get('shown') == 4 and ready.get('name') == 'enum.vcd', f'the dump fetched and opened: {ready}')
-    check(js("WaveFW.internal.peek(v).vis.filter(r => r.enum).map(r => r.full).join(',')") == 'tb.state,tb.st.s', 'its enum tables on the rows')
-    check(js("localStorage.getItem('wavefw.given')") == 'yes' and js("(localStorage.setItem('wavefw.k', 'v'), localStorage.getItem('wavefw.k'))") == 'v' and
-          any(m['key'] == 'wavefw.k' and m['value'] == 'v' for m in sent('store')), 'localStorage: the store given, a write posted')
+    check(js("WaveLens.internal.peek(v).vis.filter(r => r.enum).map(r => r.full).join(',')") == 'tb.state,tb.st.s', 'its enum tables on the rows')
+    check(js("localStorage.getItem('wavelens.given')") == 'yes' and js("(localStorage.setItem('wavelens.k', 'v'), localStorage.getItem('wavelens.k'))") == 'v' and
+          any(m['key'] == 'wavelens.k' and m['value'] == 'v' for m in sent('store')), 'localStorage: the store given, a write posted')
     js("(v.saveState(), 0)"); until("window.__sent.some(m => m.type === 'save')", timeout=5000); settle(page)
     sv = sent('save')[0]
-    check(sv['name'].endswith('.view.json') and 'wavefw' in json.loads(base64.b64decode(sv['b64'])), f'Save state: a save of {sv["name"]} with the state')
+    check(sv['name'].endswith('.view.json') and 'wavelens' in json.loads(base64.b64decode(sv['b64'])), f'Save state: a save of {sv["name"]} with the state')
     st = json.loads(base64.b64decode(sv['b64']))
     st['bookmarks'] = [{'n': 4, 't': 10000, 'text': 'from the file'}]
     page.evaluate('s => { window.__S = s; }', st)
-    js("(v.sfile.click(), 0)"); until("WaveFW.views().find(x => x.root.isConnected).state().bookmarks.some(b => b.text === 'from the file')", timeout=5000)
+    js("(v.sfile.click(), 0)"); until("WaveLens.views().find(x => x.root.isConnected).state().bookmarks.some(b => b.text === 'from the file')", timeout=5000)
     check(sent('pick')[0]['accept'].startswith('.json'), 'Load…: a pick of a .json, its state loaded (a bookmark from the file)')
     n = len(sent('pick'))
     js("(v.openDump(), 0)"); until(f"window.__sent.filter(m => m.type === 'pick').length > {n}", timeout=5000)
@@ -1310,7 +1311,7 @@ def vscode_tab(browser, build):
 
 
 def readers(browser, build):
-    """The page's VCD reader (WaveFW.vcdToWave, wavefw/src/vcd.js) and the tools' (vcd2wavedrom.py --exact over
+    """The page's VCD reader (WaveLens.vcdToWave, wavelens/src/vcd.js) and the tools' (vcd2wavedrom.py --exact over
     dumpscan.py) give the same transitions, kinds and widths for every fixture of tests/unit/vcd: one rule for
     references, merged codes, vectors in parts (bits, ranges apart, two bits under one code), texts (realtime …, inf,
     nan), VHDL values, tokens apart by any white space, comments in the body, x / z, enum tables; the dumps the tools refuse the
@@ -1320,12 +1321,12 @@ def readers(browser, build):
     import dumpscan
     print('readers: the page\'s VCD reader against the tools\'')
     page = browser.new_page()
-    page.goto('about:blank'); page.add_script_tag(path=str(ROOT / 'wavefw' / 'wavefw.js'))
+    page.goto('about:blank'); page.add_script_tag(path=str(ROOT / 'wavelens' / 'wavelens.js'))
     fixtures = sorted((ROOT / 'tests' / 'unit' / 'vcd').glob('*.vcd'))
     same, differ = [], []
     for f in fixtures:
         text = f.read_text(encoding='utf-8', errors='replace')
-        got = page.evaluate("""t => { try { const r = WaveFW.vcdToWave(t), out = {};
+        got = page.evaluate("""t => { try { const r = WaveLens.vcdToWave(t), out = {};
             const walk = a => a.forEach(x => Array.isArray(x) ? walk(x.slice(1)) : (out[x.path] = { tv: x.tv, kind: x.kind || null, width: x.width || 1,
               enum: x.enum || null }));
             walk(r.doc.signal); return { sigs: out, t0: r.doc.time.t0 }; } catch (e) { return { err: String(e.message || e) }; } }""", text)
@@ -1365,9 +1366,9 @@ def readers(browser, build):
         (differ if bad or extra else same).append(f.stem + (f' ({bad[:2]} {sorted(extra)[:3]})' if bad or extra else ''))
     check(not differ and len(same) == len(fixtures), f'the page and the tools read {len(same)} of {len(fixtures)} fixtures the same' + (f'; differ: {differ}' if differ else ''))
     # known bits among x / z reach the page's engine as bits (they were x by the hex: the page and sva eval disagreed)
-    for f in ('wavefw.config.js', 'sva.wasm.js', 'sva.js'):
-        page.add_script_tag(path=str(ROOT / 'wavefw' / f))
-    got = page.evaluate("""async t => { const M = WaveFW.parse(WaveFW.vcdToWave(t).doc), X = SVA.expressions, out = [];
+    for f in ('wavelens.config.js', 'sva.wasm.js', 'sva.js'):
+        page.add_script_tag(path=str(ROOT / 'wavelens' / f))
+    got = page.evaluate("""async t => { const M = WaveLens.parse(WaveLens.vcdToWave(t).doc), X = SVA.expressions, out = [];
         for (const text of ['b[0]', 'b[3:0] == 4\\'b0z0x', 'b[7:4] === 4\\'b1x0z']) { const r = await X.valueOf(M, [], { text, scope: 'tb' });
           out.push(r.err || r.times.map((t, i) => [t, String(r.values[i])])); }
         return out; }""", (ROOT / 'tests' / 'unit' / 'vcd' / 'xz.vcd').read_text())
@@ -1379,7 +1380,7 @@ def readers(browser, build):
 
 def dump(browser, build):
     """A VCD opened in the page (Open…, a file dropped on the viewer): the same waves as mkhtml.py builds from it; ⟳ reads
-    it again with the view kept; wavefw/viewer.html starts empty; an FST is refused with what to do."""
+    it again with the view kept; wavelens/viewer.html starts empty; an FST is refused with what to do."""
     allp, vcd = build / 'examples' / 'apb' / 'apb_all.html', build / 'examples' / 'apb' / 'apb.vcd'
     if not need(allp, vcd, how='make examples'):
         return
@@ -1390,7 +1391,7 @@ def dump(browser, build):
     page.goto(allp.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()')
     js = lambda e: page.evaluate(f"(() => {{ const v = document.querySelector('.wv').waveView; return {e}; }})()")
     # the values as the dump has them (raw hex, a bit's level): the built page's enum labels come from the SV sources
-    vals = "(ts => Object.fromEntries(v.M.rows.filter(r => r.type === 'sig' && r.tr).map(r => [r.full, ts.map(t => (o => o ? o.raw ?? o.k : '')(r.tr[WaveFW.lastLE ? WaveFW.lastLE(r.tr, t) : r.tr.filter(o => o.t <= t).length - 1]))])))([0, 33000, 95000, 150000, 190000])"
+    vals = "(ts => Object.fromEntries(v.M.rows.filter(r => r.type === 'sig' && r.tr).map(r => [r.full, ts.map(t => (o => o ? o.raw ?? o.k : '')(r.tr[WaveLens.lastLE ? WaveLens.lastLE(r.tr, t) : r.tr.filter(o => o.t <= t).length - 1]))])))([0, 33000, 95000, 150000, 190000])"
     before = js(vals)
     page.locator('.wv input.dfile').first.set_input_files(str(vcd))
     page.wait_for_function("document.querySelector('.wv').waveView && document.querySelector('.wv').waveView.opts.dumpSrc", timeout=60000)
@@ -1398,33 +1399,33 @@ def dump(browser, build):
     same = [p for p in before if before[p] != after.get(p)]
     check(not same and set(before) <= set(after) and info[0] == 'apb.vcd' and 'signals' in info[1] and info[2] and info[3] > 0,
           f'Open… a VCD: the values of mkhtml.py\'s {len(before)} signals (it leaves constants out: {len(after)} here), the bus port found again; ⟳ shown {info} {same[:3]}')
-    js("(v.cursor = 95000, v.t0 = 20000, v.span = 100000, WaveFW.internal.peek(v).collapsed.add(Object.values(v.M.groups).find(g => g.name === 'u_count').id), v.draw(), 0)")
+    js("(v.cursor = 95000, v.t0 = 20000, v.span = 100000, WaveLens.internal.peek(v).collapsed.add(Object.values(v.M.groups).find(g => g.name === 'u_count').id), v.draw(), 0)")
     page.locator('.wv button[data-act=dreload]').first.click()
     page.wait_for_function("document.querySelector('.wv').waveView.root.querySelector('.bar .toast').textContent.includes('signals')", timeout=60000)
-    kept = js("[v.cursor, v.t0, v.span, [...WaveFW.internal.peek(v).collapsed].map(id => v.M.groups[id].name)]")
+    kept = js("[v.cursor, v.t0, v.span, [...WaveLens.internal.peek(v).collapsed].map(id => v.M.groups[id].name)]")
     check(kept[:3] == [95000, 20000, 100000] and 'u_count' in kept[3], f'⟳: the dump read again, the cursor, the window and the folding kept {kept}')
     fst = vcd.with_suffix('.fst')
     if fst.exists():
         page.locator('.wv input.dfile').first.set_input_files(str(fst))
         until(page, "document.querySelector('.wv').waveView.root.querySelector('.bar .toast').textContent.includes('fst2vcd')")
         check('fst2vcd' in js("v.root.querySelector('.bar .toast').textContent") and js('v.M.title') == 'apb.vcd', 'an FST is not read in the page: the toast says fst2vcd / make html, the waves stay')
-    page.goto((ROOT / 'wavefw' / 'viewer.html').as_uri()); page.wait_for_load_state('networkidle')
+    page.goto((ROOT / 'wavelens' / 'viewer.html').as_uri()); page.wait_for_load_state('networkidle')
     page.locator('.wv input.dfile').first.set_input_files(str(vcd))
     page.wait_for_function("document.querySelector('.wv').waveView && document.querySelector('.wv').waveView.opts.dumpSrc", timeout=60000)
-    rows = page.evaluate("(() => { const v = document.querySelector('.wv').waveView, n = WaveFW.internal.peek(v).namesEl.querySelectorAll('.row[data-r]'), o = WaveFW.internal.peek(v).lay; return [v.M.rows.filter(r => r.type === 'sig').length, [...n].slice(0, 12).every((el, i) => Math.abs(el.getBoundingClientRect().height - o[i].h) < 0.5)]; })()")
-    check(rows[0] == len(after) and rows[1], f'wavefw/viewer.html: empty, a VCD opened in it, its names column as tall as the waves\' rows (no page box-sizing needed) {rows}')
+    rows = page.evaluate("(() => { const v = document.querySelector('.wv').waveView, n = WaveLens.internal.peek(v).namesEl.querySelectorAll('.row[data-r]'), o = WaveLens.internal.peek(v).lay; return [v.M.rows.filter(r => r.type === 'sig').length, [...n].slice(0, 12).every((el, i) => Math.abs(el.getBoundingClientRect().height - o[i].h) < 0.5)]; })()")
+    check(rows[0] == len(after) and rows[1], f'wavelens/viewer.html: empty, a VCD opened in it, its names column as tall as the waves\' rows (no page box-sizing needed) {rows}')
     dropped = page.evaluate("""(() => { const r = document.querySelector('.wv'), text = '$timescale 1ns $end $scope module t $end $var wire 1 ! a $end $upscope $end $enddefinitions $end #0 0! #5 1! #9 0!';
         const dt = new DataTransfer(); dt.items.add(new File([text.replace(/ #/g, '\\n#')], 'drop.vcd')); r.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true })); return 0; })()""")
     page.wait_for_function("document.querySelector('.wv').waveView.M.title === 'drop.vcd'", timeout=30000)
     d = page.evaluate("(v => [v.M.rows.filter(r => r.type === 'sig').map(r => r.full), v.valueAt(v.M.rows.find(r => r.full === 't.a'), 7000)])(document.querySelector('.wv').waveView)")
     check(d == [['t.a'], '1'], f'a VCD dropped on the viewer replaces its waves {d}')
-    # dropped again: one live viewer, one wavefw:dump per drop (the old viewer's listeners on the element are gone)
-    two = page.evaluate(r"""(async () => { const r = document.querySelector('.wv'); let n = 0; r.addEventListener('wavefw:dump', () => n++);
+    # dropped again: one live viewer, one wavelens:dump per drop (the old viewer's listeners on the element are gone)
+    two = page.evaluate(r"""(async () => { const r = document.querySelector('.wv'); let n = 0; r.addEventListener('wavelens:dump', () => n++);
         const vcd = '$timescale 1ns $end\n$scope module t $end\n$var wire 1 ! b $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\n#5\n1!\n';
         const drop = name => { const dt = new DataTransfer(); dt.items.add(new File([vcd], name)); r.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true })); };
         drop('d2.vcd'); await new Promise(f => setTimeout(f, 300)); drop('d3.vcd'); await new Promise(f => setTimeout(f, 300));
-        return [n, WaveFW.views().filter(v => v.root === r).length, r.waveView.M.title, r.waveView.canvas.isConnected]; })()""")
-    check(two == [2, 1, 'd3.vcd', True], f'dropped twice: one live viewer, one wavefw:dump each, its canvas in the page {two}')
+        return [n, WaveLens.views().filter(v => v.root === r).length, r.waveView.M.title, r.waveView.canvas.isConnected]; })()""")
+    check(two == [2, 1, 'd3.vcd', True], f'dropped twice: one live viewer, one wavelens:dump each, its canvas in the page {two}')
     check(not errs, 'no page errors (dump)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
     page.close()
 
@@ -1461,7 +1462,7 @@ def state(browser, build):
     diff = [k for k in st if st[k] != back.get(k)]
     shown = page.evaluate("""(() => { const v = document.querySelector('.wv').waveView;
         return [v.sortBtn.textContent, v.root.querySelector('input.pfx').value, v.qEl.value, v.sva.bindings.find(b => b.scope === 'apb_tb.u_regs').state,
-            WaveFW.internal.peek(v).vis.some(r => (r.cls || '').startsWith('sva-expr')), [...v.notesEl.querySelectorAll('input.txt')].some(i => i.value === 'saved here')]; })()""")
+            WaveLens.internal.peek(v).vis.some(r => (r.cls || '').startsWith('sva-expr')), [...v.notesEl.querySelectorAll('input.txt')].some(i => i.value === 'saved here')]; })()""")
     check(not diff and shown == ['Sort: Z→A', 'P', 'pready', 'cannot', True, True],
           f'Load… after a reload with nothing kept: the same state, the bar and the lists show it (differs: {diff}) {shown}')
     page.goto(axi.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('SVA.ready()')
@@ -1484,7 +1485,7 @@ def state(browser, build):
     back = js2("[v.range, v.rangeRow && v.rangeRow.full, v.edgeKind, v.evEl.value, v.state().version]")
     page.evaluate('localStorage.clear()')
     js2("(v.setStyle('questa'), v.setStyle(v.S.style === 'questa' ? 'auto' : v.S.style), 0)")
-    pinned = page.evaluate("Object.keys(localStorage).filter(k => k.startsWith('wavefw.look:'))")
+    pinned = page.evaluate("Object.keys(localStorage).filter(k => k.startsWith('wavelens.look:'))")
     want = [[st['range']['from'], st['range']['to']], st['range']['signal'], 'value', '0x40', 3]
     check(wd[0] is None and 'WaveDrom waves, not a saved viewer state' in wd[1] and back == want and not pinned,
           f"a WaveDrom file is no state; the range and the edge kind come back (state v2); the settings' own style pins nothing {wd} {back} {pinned}")
@@ -1527,8 +1528,8 @@ def cycles(browser, build):
     page.on('pageerror', lambda e: errs.append(str(e)))
     page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
     js = lambda e: page.evaluate(f"(async () => {{ const v = document.querySelector('.wv').waveView; {e} }})()")
-    got = js("""const h0 = v.hdrH, r = await v.run([{ op: 'cycles', on: true }]), ups = WaveFW.views()[0] && v.cycData().ups;
-        v.setCursor(ups[2] + 1); const t = v.curEl.textContent, lab = WaveFW.internal.peek(v).namesEl.querySelector('.hdr .cyc')?.textContent;
+    got = js("""const h0 = v.hdrH, r = await v.run([{ op: 'cycles', on: true }]), ups = WaveLens.views()[0] && v.cycData().ups;
+        v.setCursor(ups[2] + 1); const t = v.curEl.textContent, lab = WaveLens.internal.peek(v).namesEl.querySelector('.hdr .cyc')?.textContent;
         v.setCursor('c5'); const c5 = v.cursor === ups[5];
         return [v.hdrH - h0, r[0].clock, r[0].cycle, / · cycle 2 ↑PCLK/.test(t), lab, c5, ups.length > 10];""")
     check(got[0] == 16 and got[1] == 'PCLK' and got[3] and got[4] == 'cycles ↑ PCLK' and got[5] and got[6],
@@ -1539,7 +1540,7 @@ def cycles(browser, build):
         return [a, b, / · 7 PCLK$/.test(d), bad === undefined, v.state().config.cycleZero === ups[3]];""")
     check(got == [' · cycle 2 ↑PCLK', True, True, True, True], f'cycle 0 at edge 3: edge 5 is cycle 2, c-1 is edge 2, Δ of the cursors in cycles, '
           f'past the last edge refused, kept in the state {got}')
-    svg = js("return [v.toSVG(), WaveFW.WaveSVG.toString(v.M.src, { cycles: true }), WaveFW.WaveSVG.toString(v.M.src, {})];")
+    svg = js("return [v.toSVG(), WaveLens.WaveSVG.toString(v.M.src, { cycles: true }), WaveLens.WaveSVG.toString(v.M.src, {})];")
     check('cycles ↑ PCLK' in svg[0] and 'cycles ↑ PCLK' in svg[1] and 'cycles ↑' not in svg[2],
           'the picture of the viewer and a static WaveSVG with cycles: true draw the band; without it, none')
     page.reload(); page.wait_for_load_state('networkidle')
@@ -1550,13 +1551,13 @@ def cycles(browser, build):
     check(got[0] is None and got[1] and 'not a 1-bit signal' in (got[2] or '') and got[3] is True,
           f'c2 is a time on the waves (cursor), not a span; a bad command changes nothing {got}')
     # a state with null (the clock found, the first edge) over a page that sets both: null stays
-    got = js("""WaveFW.configure({ cycleClock: 'PSEL', cycleZero: 20000 }); await v.run([{ op: 'cycles', clock: null, zero: null }]); const st = v.state();
+    got = js("""WaveLens.configure({ cycleClock: 'PSEL', cycleZero: 20000 }); await v.run([{ op: 'cycles', clock: null, zero: null }]); const st = v.state();
         v.setCycles(null); const page = [v.cycOpt().cycleClock, v.cycOpt().cycleZero]; await v.setState(st); const back = [v.cycOpt().cycleClock, v.cycOpt().cycleZero];
-        v.setCycles(null); WaveFW.configure({ cycleClock: null, cycleZero: null }); return [page, back];""")
+        v.setCycles(null); WaveLens.configure({ cycleClock: null, cycleZero: null }); return [page, back];""")
     check(got == [['PSEL', 20000], [None, None]], f'a saved null (the clock found, the first edge) comes back null over the page\'s settings {got}')
     # two clocks of other periods: the band's one counts the Δ and c3, a name that is also a path's tail takes the exact path
     got = page.evaluate("""(() => { const ck = (p, n) => { const tv = []; for (let i = 0; i < n; i++) tv.push([i * p, '0'], [i * p + p / 2, '1']); return tv; };
-        const el = document.body.appendChild(document.createElement('div')), w = new WaveFW.WaveView(el, { signal: [['tb', { name: 'clk', path: 'tb.clk',
+        const el = document.body.appendChild(document.createElement('div')), w = new WaveLens.WaveView(el, { signal: [['tb', { name: 'clk', path: 'tb.clk',
           tv: ck(10, 30) }], { name: 'clk', path: 'clk', tv: ck(30, 10) }], time: { t0: 0, unit: 'ps' } }, {});
         return w.run([{ op: 'cycles', on: true, clock: 'clk' }]).then(r => { w.select(w.M.rows.find(x => x.full === 'tb.clk')); w.setCursor(15); w.setCursor2(105);
           const out = [r[0].clock, w.cycData().clk.full, w.delta2().endsWith('· 3 clk'), (w.setCursor('c3'), w.cursor)]; w.destroy(); el.remove(); return out; }); })()""")
@@ -1633,10 +1634,10 @@ def undo(browser, build):
     check(b1 != b0 and d == 1 and js("return [v.bms[1].t, v.bms[1].signal];") == b0, f'a bookmark dragged: one step, undone to where it was {b0} {b1} {d}')
     # a folded group of yours and the selection in it stay through an undo of something else; a highlight keeps its colours
     got = js("""await v.run([{ op: 'group', name: 'gv', signals: 'PREADY' }, { op: 'group', name: 'gu', signals: 'PSEL,PENABLE' }]);
-        const f = v.ugRows().find(r => r.name === 'gv'), g = v.ugRows().find(r => r.name === 'gu'); WaveFW.internal.peek(v).collapsed.add(f.id);
+        const f = v.ugRows().find(r => r.name === 'gv'), g = v.ugRows().find(r => r.name === 'gu'); WaveLens.internal.peek(v).collapsed.add(f.id);
         v.select(v.ugRows().find(r => r.ug === g)); v.draw();
         await v.run([{ op: 'highlight', add: ['PSEL', 'PWRITE'] }]); await v.run([{ op: 'highlight', remove: 'PSEL' }]); const c0 = [...v.picks.values()];
-        await v.run([{ op: 'paint', signals: 'PADDR', color: '#00ff00' }]); await v.undo(); return [v.ugRows().includes(g), WaveFW.internal.peek(v).collapsed.has(f.id),
+        await v.run([{ op: 'paint', signals: 'PADDR', color: '#00ff00' }]); await v.undo(); return [v.ugRows().includes(g), WaveLens.internal.peek(v).collapsed.has(f.id),
         !!v.sel && v.sel.ug === g, JSON.stringify([...v.picks.values()]) === JSON.stringify(c0), v.state().paint.PADDR || null];""")
     check(got == [True, True, True, True, None], f'undo of a paint: your group (its row, folded), the selection in it, the highlight\'s colours stay {got}')
     # the Russian layout (ctrl+Я is ctrl+Z by its place), ctrl+Y, a viewer by the focus, two undos at once, the gaps' clock null
@@ -1646,8 +1647,8 @@ def undo(browser, build):
         v.canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'y', code: 'KeyY', ctrlKey: true, bubbles: true, cancelable: true }));
         await new Promise(r => setTimeout(r, 50)); const b = v.state().hidden.length;
         await v.run([{ op: 'hide', signals: 'PREADY' }]); const r = await Promise.all([v.undo(), v.undo()]); const c = v.state().hidden.length;
-        WaveFW.configure({ gapClock: 'PCLK' }); v.setGaps({ gapClock: null }); await v.run([{ op: 'paint', signals: 'PADDR', color: '#0000ff' }]); await v.undo();
-        const d = v.gapOpt().gapClock; v.setGaps(null); WaveFW.configure({ gapClock: null }); return [a, b, r.filter(Boolean).length, c, d];""")
+        WaveLens.configure({ gapClock: 'PCLK' }); v.setGaps({ gapClock: null }); await v.run([{ op: 'paint', signals: 'PADDR', color: '#0000ff' }]); await v.undo();
+        const d = v.gapOpt().gapClock; v.setGaps(null); WaveLens.configure({ gapClock: null }); return [a, b, r.filter(Boolean).length, c, d];""")
     check(got == [0, 1, 1, 1, None], f'ctrl+Я undoes, ctrl+Y redoes; two undos at once: one; a cleared gaps\' clock stays cleared over the page\'s {got}')
     # Load…: one step of its own, the next edit another
     got = js("""const s = v.state(); s.radix = { PADDR: 'bin' }; const n = v.undoS.length; await v.loadState(JSON.stringify(s));
@@ -1666,9 +1667,9 @@ def undo(browser, build):
         await v.run([{ op: 'highlight', set: ['PSEL', 'PWRITE'] }]); await v.run([{ op: 'highlight', remove: 'PSEL' }]); const h0 = v.highlighted();
         await v.run([{ op: 'highlight', clear: true }]); await v.undo(); const h = JSON.stringify(v.highlighted()) === JSON.stringify(h0);
         const pr = v.run([{ op: 'paint', signals: 'PSEL', color: '#ff00ff' }, { op: 'picture', format: 'png' }]); const busy = await v.undo(); await pr;
-        await v.run([{ op: 'group', name: 'gr', signals: 'PCLK' }]); const g = v.ugRows().find(r => r.name === 'gr'); WaveFW.internal.peek(v).collapsed.add(g.id);
+        await v.run([{ op: 'group', name: 'gr', signals: 'PCLK' }]); const g = v.ugRows().find(r => r.name === 'gr'); WaveLens.internal.peek(v).collapsed.add(g.id);
         await v.run([{ op: 'group', name: 'gr', rename: 'gs' }]); await v.undo(); const g2 = v.ugRows().find(r => r.name === 'gr');
-        return [a, h, busy, g2 === g, WaveFW.internal.peek(v).collapsed.has(g.id), v.state().paint.PSEL];""")
+        return [a, h, busy, g2 === g, WaveLens.internal.peek(v).collapsed.has(g.id), v.state().paint.PSEL];""")
     check(got == [True, True, '', True, True, '#ff00ff'], f'arrows kept, highlight colours, no undo in a batch not done, a rename undone: the same group {got}')
     page.evaluate('localStorage.clear()')
     check(not errs, 'no page errors (undo)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
@@ -1701,13 +1702,13 @@ def order(browser, build):
           and [g[0] for g in d] == ['gA', 'gB'], f'alt+↑ / alt+↓: the signal in its group (kept selected, at the end it stays); alt+shift+↓ the group; '
           f'ctrl+Z one step {a} {s1} {b} {c} {d}')
     # a drag in the names: PSEL of gA onto PADDR of gB (below its middle): out of gA, after PADDR in gB, one step
-    idx = lambda g, n: js(f"return WaveFW.internal.peek(v).vis.findIndex(r => r.ug && r.ug.name === '{g}' && r.orig.name === '{n}');")
-    hdr = lambda g: js(f"return WaveFW.internal.peek(v).vis.findIndex(r => r.user && r.name === '{g}');")
+    idx = lambda g, n: js(f"return WaveLens.internal.peek(v).vis.findIndex(r => r.ug && r.ug.name === '{g}' && r.orig.name === '{n}');")
+    hdr = lambda g: js(f"return WaveLens.internal.peek(v).vis.findIndex(r => r.user && r.name === '{g}');")
     box = lambda i: w.locator(f'.names .row[data-r="{i}"]').bounding_box()
     n0 = js("return v.undoS.length;")
     p, q = box(idx('gA', 'PSEL')), box(idx('gB', 'PADDR'))
     page.mouse.move(p['x'] + 30, p['y'] + p['height'] / 2); page.mouse.down(); page.mouse.move(q['x'] + 30, q['y'] + q['height'] * 0.8, steps=8)
-    line = js("return !!WaveFW.internal.peek(v).namesEl.querySelector('.row.drop-a');"); page.mouse.up(); page.wait_for_timeout(100)
+    line = js("return !!WaveLens.internal.peek(v).namesEl.querySelector('.row.drop-a');"); page.mouse.up(); page.wait_for_timeout(100)
     e, n1 = groups(), js("return v.undoS.length;") - n0
     check(line and e == [['gA', 'PWRITE', 'PENABLE'], ['gB', 'PADDR', 'PSEL']] and n1 == 1, f'a drag: a line where it goes; the signal into the other group after '
           f'the row dropped on; one step {line} {e} {n1}')
@@ -1715,7 +1716,7 @@ def order(browser, build):
     p, q = box(hdr('gB')), box(hdr('gA'))
     page.mouse.move(p['x'] + 30, p['y'] + p['height'] / 2); page.mouse.down(); page.mouse.move(q['x'] + 30, q['y'] + 3, steps=8); page.mouse.up(); page.wait_for_timeout(100)
     f = [g[0] for g in groups()]
-    r1, r2 = box(js("return WaveFW.internal.peek(v).vis.findIndex(r => !r.ug && r.name === 'PSEL');")), box(js("return WaveFW.internal.peek(v).vis.findIndex(r => !r.ug && r.name === 'PRDATA');"))
+    r1, r2 = box(js("return WaveLens.internal.peek(v).vis.findIndex(r => !r.ug && r.name === 'PSEL');")), box(js("return WaveLens.internal.peek(v).vis.findIndex(r => !r.ug && r.name === 'PRDATA');"))
     page.mouse.move(r1['x'] + 20, r1['y'] + r1['height'] / 2); page.mouse.down(); page.mouse.move(r2['x'] + 60, r2['y'] + r2['height'] / 2, steps=8); page.mouse.up()
     sel = page.evaluate("String(getSelection())")
     check(f == ['gB', 'gA'] and groups()[0][0] == 'gB' and 'PSEL' in sel, f'a header dragged over the other: the group before it; a drag over the dump\'s '
@@ -1729,20 +1730,20 @@ def order(browser, build):
     # let go outside the names: the drag ends there (nothing moved), the next click on a name selects it
     p = box(idx('gA', 'PWRITE')); cb = w.locator('canvas').bounding_box()
     page.mouse.move(p['x'] + 30, p['y'] + 5); page.mouse.down(); page.mouse.move(cb['x'] + 300, cb['y'] + 200, steps=6); page.mouse.up(); page.wait_for_timeout(100)
-    left = js("return WaveFW.internal.peek(v).namesEl.classList.contains('wv-drag');"); g2 = groups()
+    left = js("return WaveLens.internal.peek(v).namesEl.classList.contains('wv-drag');"); g2 = groups()
     w.locator(f'.names .row[data-r="{idx("gA", "PENABLE")}"] .n').click(); page.wait_for_timeout(50)
     check(not left and g2 == g0 and js("return v.sel && v.sel.ug && v.sel.orig.name;") == 'PENABLE', f'let go over the waves: no move, the drag over, a click selects {left} {g2}')
     # from the names: the focused row moves and keeps the focus (twice); a header with the focus moves its group
     w.locator(f'.names .row[data-r="{idx("gB", "PADDR")}"]').focus(); page.keyboard.press('Alt+ArrowDown'); page.wait_for_timeout(80)
     page.keyboard.press('Alt+ArrowUp'); page.wait_for_timeout(80); page.keyboard.press('Alt+ArrowDown'); page.wait_for_timeout(80)
-    foc = js("const a = document.activeElement, r = a && a.dataset.r != null && WaveFW.internal.peek(v).vis[+a.dataset.r]; return r && r.ug && [r.ug.name, r.orig.name];")
+    foc = js("const a = document.activeElement, r = a && a.dataset.r != null && WaveLens.internal.peek(v).vis[+a.dataset.r]; return r && r.ug && [r.ug.name, r.orig.name];")
     gb = [g for g in groups() if g[0] == 'gB'][0]; second = groups()[1][0]
     w.locator(f'.names .row[data-r="{hdr(second)}"]').focus(); page.keyboard.press('Alt+ArrowUp'); page.wait_for_timeout(80)
     check(foc == ['gB', 'PADDR'] and gb == ['gB', 'PSEL', 'PADDR'] and groups()[0][0] == second, f'alt+arrows in the names: the focus stays on the row moved; '
           f'a header with the focus moves its group {foc} {gb} {groups()}')
     # the focus on a module of the dump (not one of yours): nothing moves, though a signal of a group of yours is selected
     js("v.select(v.ugRows().find(r => r.ug)); return 0;"); g3 = groups()
-    mod = js("return WaveFW.internal.peek(v).vis.findIndex(r => r.type === 'group' && !r.user);")
+    mod = js("return WaveLens.internal.peek(v).vis.findIndex(r => r.type === 'group' && !r.user);")
     w.locator(f'.names .row[data-r="{mod}"]').focus()
     page.keyboard.press('Alt+Shift+ArrowDown'); page.wait_for_timeout(80)
     check(groups() == g3, f'alt+shift+↓ on a module of the dump: none of your groups moves {g3} {groups()}')
@@ -1771,25 +1772,25 @@ def savepage(browser, build):
     d = build / 'smoke' / 'savepage'
     d.mkdir(parents=True, exist_ok=True)
     src = apb.read_text(encoding='utf-8')
-    live = '  <script id="wavefw-live" data-x="1" type="application/json">{"port": 8742, "token": "SECRET-TOKEN"}</script>\n'   # not as viewedit writes it
+    live = '  <script id="wavelens-live" data-x="1" type="application/json">{"port": 8742, "token": "SECRET-TOKEN"}</script>\n'   # not as viewedit writes it
     pa, pb = d / 'a.html', d / 'b.view.html'
-    pa.write_text(src.replace('<script>window.WAVEFW_CONFIG', live + '<script>window.WAVEFW_CONFIG', 1), encoding='utf-8')
+    pa.write_text(src.replace('<script>window.WAVELENS_CONFIG', live + '<script>window.WAVELENS_CONFIG', 1), encoding='utf-8')
     ctx = browser.new_context(viewport={'width': 1400, 'height': 1000})
     page = ctx.new_page()
     errs = []
     page.on('pageerror', lambda e: errs.append(str(e)))
     page.route('http://127.0.0.1:8742/**', lambda r: r.abort())   # the live link of the copy: no agent here
     page.goto(pa.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()')
-    V = "WaveFW.views().find(v => v.editKey() === 'exact')"
+    V = "WaveLens.views().find(v => v.editKey() === 'exact')"
     keys = ['bookmarks', 'arrows', 'groups', 'paint', 'radix', 'hidden', 'cursor', 'from', 'to']
     pick = lambda st: {k: st.get(k) for k in keys} | {'highlight': st['config']['highlight'], 'cycles': st['config']['cycles']}
     want = page.evaluate(f"""(async () => {{ const v = {V}; await v.run([{{ op: 'bookmark', t: '75ns', signal: 'PSEL', text: 'mine <!--<script> </script>' }},
         {{ op: 'group', name: 'ctl', signals: 'PSEL,PENABLE' }}, {{ op: 'paint', signals: 'PADDR', color: '#ff8800' }}, {{ op: 'radix', signals: 'PWDATA', radix: 'dec' }},
         {{ op: 'hide', signals: 'PSLVERR' }}, {{ op: 'highlight', set: 'PREADY' }}, {{ op: 'cycles', on: true }}, {{ op: 'cursor', t: '95ns' }},
         {{ op: 'view', from: '30ns', to: '150ns' }}]); return v.state(); }})()""")
-    text = page.evaluate('WaveFW.pageText()')
-    again = page.evaluate('WaveFW.pageText()')   # twice: one block of edits, the next revision of nothing new
-    blocks = lambda t: len(_re.findall(r'^<script type="application/json" id="wavefw-edits">', t, _re.M))
+    text = page.evaluate('WaveLens.pageText()')
+    again = page.evaluate('WaveLens.pageText()')   # twice: one block of edits, the next revision of nothing new
+    blocks = lambda t: len(_re.findall(r'^<script type="application/json" id="wavelens-edits">', t, _re.M))
     shown = page.locator('.wv button[data-act=spage]').first.is_visible()
     pb.write_text(text, encoding='utf-8')
     data = lambda t: _re.search(r'<script>\nwindow\.WAVES = (.*?)\n</script>', t, _re.S).group(1)
@@ -1803,7 +1804,7 @@ def savepage(browser, build):
     diff = {k: (pick(want)[k], pick(got)[k]) for k in pick(want) if pick(want)[k] != pick(got)[k]}
     check(not diff and 'edits applied' in toast and same and shown, f'the saved page opens in another browser as it was left (differs: {diff}), '
           f'its waves byte for byte the page\'s ({same}), the button there ({shown}) {toast!r}')
-    check('SECRET-TOKEN' not in text and 'id="wavefw-live"' not in text.split('<script>\n')[0] and blocks(text) == 1 and blocks(again) == 1,
+    check('SECRET-TOKEN' not in text and 'id="wavelens-live"' not in text.split('<script>\n')[0] and blocks(text) == 1 and blocks(again) == 1,
           'the live link (its block written another way, its token) is not in the saved page; one block of edits, saved twice too')
     # the person who opens it: a ƒ row and a bookmark text of theirs stay over a reload (the page's revision is applied once)
     page.evaluate(f"(v => {{ v.root.querySelector('input.svq').value = 'PSEL && PENABLE'; v.root.querySelector('button[data-x=add]').click(); }})({V})")
@@ -1811,17 +1812,17 @@ def savepage(browser, build):
     page.reload(); page.wait_for_load_state('networkidle'); page.wait_for_timeout(300 * SCALE)
     kept = page.evaluate(f"""(v => [v.bms[0].text, v.svaExprs ? JSON.stringify(v.extraJSON.map(f => f()).filter(Boolean)).includes('PSEL && PENABLE') : null])({V})""")
     check(kept == ['theirs', True], f'the person\'s own edits (a bookmark, a ƒ row) stay over a reload: the page\'s are applied once {kept}')
-    # a page that is not all in itself (docs/index.html: wavefw.js beside it): no button, Save page says why
+    # a page that is not all in itself (docs/index.html: wavelens.js beside it): no button, Save page says why
     page.goto((ROOT / 'docs' / 'index.html').as_uri()); page.wait_for_load_state('networkidle')
-    why = page.evaluate("(() => { try { WaveFW.pageText(); return 'saved'; } catch (e) { return e.message; } })()")
+    why = page.evaluate("(() => { try { WaveLens.pageText(); return 'saved'; } catch (e) { return e.message; } })()")
     hid = page.locator('.wv button[data-act=spage]').first.is_hidden()
-    check(hid and 'all in itself' in why, f'docs/index.html (wavefw.js beside it): no Save page, it says why {why!r}')
+    check(hid and 'all in itself' in why, f'docs/index.html (wavelens.js beside it): no Save page, it says why {why!r}')
     page.goto((ROOT / 'tests' / 'conformance.html').as_uri()); page.wait_for_load_state('networkidle')   # its viewers built before the page was read
     vis = page.locator('.wv button[data-act=spage]').evaluate_all('bs => bs.filter(b => !b.hidden).length')
-    check(vis == 0, f'tests/conformance.html (its viewers built early, wavefw.js beside it): no Save page on any viewer ({vis} shown)')
-    page.evaluate("WaveFW.configure({ savePage: false })")
+    check(vis == 0, f'tests/conformance.html (its viewers built early, wavelens.js beside it): no Save page on any viewer ({vis} shown)')
+    page.evaluate("WaveLens.configure({ savePage: false })")
     check(page.locator('.wv button[data-act=spage]').first.is_hidden(), 'savePage: false hides the button')
-    page.evaluate("WaveFW.configure({ savePage: true })")
+    page.evaluate("WaveLens.configure({ savePage: true })")
     check(not errs, 'no page errors (save page)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
     ctx.close()
 
@@ -1855,11 +1856,11 @@ def compare(browser, build):
     errs = []
     page.on('pageerror', lambda e: errs.append(str(e)))
     page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()')
-    V = "WaveFW.views().find(v => v.editKey() === 'exact')"
-    w = page.locator('.wv').nth(page.evaluate(f"WaveFW.views().indexOf({V})"))
+    V = "WaveLens.views().find(v => v.editKey() === 'exact')"
+    w = page.locator('.wv').nth(page.evaluate(f"WaveLens.views().indexOf({V})"))
     w.locator('input.cfile').set_input_files(str(bv)); page.wait_for_timeout(300 * SCALE)
     got = page.evaluate(f"""(v => {{ const c = v.cmp, R = n => v.M.rows.find(r => r.name === n);
-        const el = n => WaveFW.internal.peek(v).rowEls[WaveFW.internal.peek(v).vis.indexOf(R(n))]; return c && [c.differ, c.missing, c.first, el('PREADY').classList.contains('cmpd'),
+        const el = n => WaveLens.internal.peek(v).rowEls[WaveLens.internal.peek(v).vis.indexOf(R(n))]; return c && [c.differ, c.missing, c.first, el('PREADY').classList.contains('cmpd'),
         el('PSLVERR').classList.contains('cmpm'), el('PSEL').classList.contains('cmpd'), v.root.querySelector('button[data-act=dcmpx]').textContent,
         c.rows.get(R('PREADY')).spans]; }})({V})""")
     check(got and got[0] == 1 and got[1] == 1 and got[2] == moved and got[3] and got[4] and not got[5] and got[6] == '≠ 1 ✕' and got[7] == [[moved, moved + 10000]],
@@ -1871,16 +1872,16 @@ def compare(browser, build):
     pic2 = page.evaluate(f"(v => {{ const c = v.cmp; v.cmp = null; const s = v.toSVG(); v.cmp = c; return s; }})({V})")
     check(c1 == moved and c2 == moved and pic1.count('<rect') == pic2.count('<rect') + 2, f']d to the difference (round the ends with [d); the picture '
           f'has its band (2 more rects: the shade and the line) {c1} {c2} {pic1.count("<rect")} {pic2.count("<rect")}')
-    ref = page.evaluate("WaveFW.views()[0].compare('$timescale 1ns $end $scope module t $end $var wire 1 ! a $end $upscope $end $enddefinitions $end #0 0!', 'x.vcd')")
-    toast = page.evaluate("WaveFW.views()[0].root.querySelector('.toast').textContent")
+    ref = page.evaluate("WaveLens.views()[0].compare('$timescale 1ns $end $scope module t $end $var wire 1 ! a $end $upscope $end $enddefinitions $end #0 0!', 'x.vcd')")
+    toast = page.evaluate("WaveLens.views()[0].root.querySelector('.toast').textContent")
     w.locator('button[data-act=dcmpx]').click()
-    gone = page.evaluate(f"(v => [v.cmp, WaveFW.internal.peek(v).namesEl.querySelectorAll('.cmpd, .cmpm').length, v.root.querySelector('button[data-act=dcmpx]').hidden])({V})")
+    gone = page.evaluate(f"(v => [v.cmp, WaveLens.internal.peek(v).namesEl.querySelectorAll('.cmpd, .cmpm').length, v.root.querySelector('button[data-act=dcmpx]').hidden])({V})")
     check(ref is None and 'clock-sampled' in toast and gone == [None, 0, True], f'a clock-sampled view refuses; ✕ compares no more {toast!r} {gone}')
     # Codex's cases: a packed struct by its vector (its group marked), a string the same as itself, the time both dumps
     # cover, a signal B's reader left out (dumpBudget) apart from one B lacks, a newer compare or none meanwhile, a group
     # of yours made after the compare marked
     got = page.evaluate("""(async () => {
-      const mk = doc => { const el = document.body.appendChild(document.createElement('div')); return new WaveFW.WaveView(el, doc, {}); };
+      const mk = doc => { const el = document.body.appendChild(document.createElement('div')); return new WaveLens.WaveView(el, doc, {}); };
       const vcd = (vars, body) => `$timescale 1ps $end $scope module tb $end ${vars} $upscope $end $enddefinitions $end ${body}`;
       const w = mk({ signal: [['tb', { name: 'st', path: 'tb.st', width: 8, tv: [[0, '00'], [10, '12']], fields: [{ name: 'hi', msb: 7, lsb: 4 },
           { name: 'lo', msb: 3, lsb: 0 }] }, { name: 's', path: 'tb.s', kind: 'string', tv: [[0, 'Hello']] },
@@ -1888,20 +1889,20 @@ def compare(browser, build):
       const B = vcd('$var wire 8 ! st [7:0] $end $var string 1 \" s $end $var wire 1 # a $end $var wire 1 $ q $end',
         '#0 b0 ! sHello \" 0# 0$ #10 b00010011 ! #20 1# #40');
       const r = await w.compare(B, 'b.vcd'), g = Object.values(w.M.groups).find(x => x.name === 'st');
-      const marked = WaveFW.internal.peek(w).rowEls[WaveFW.internal.peek(w).vis.indexOf(g)].classList.contains('cmpd');
+      const marked = WaveLens.internal.peek(w).rowEls[WaveLens.internal.peek(w).vis.indexOf(g)].classList.contains('cmpd');
       const sp = w.cmp.rows.get(w.M.rows.find(x => x.name === 'a')).spans;
-      WaveFW.configure({ dumpBudget: 3 }); const r2 = await w.compare(B, 'b.vcd'); WaveFW.configure({ dumpBudget: 3000000 });
+      WaveLens.configure({ dumpBudget: 3 }); const r2 = await w.compare(B, 'b.vcd'); WaveLens.configure({ dumpBudget: 3000000 });
       const slow = { name: 'slow.vcd', text: () => new Promise(res => setTimeout(() => res(B), 80)) }, pr = w.compare(slow); await w.compare(null);
       const r3 = await pr, gone = w.cmp;
       await w.compare(B, 'b.vcd'); await w.run([{ op: 'group', name: 'mine', signals: 'tb.a' }]);
-      const k = WaveFW.internal.peek(w).vis.find(x => x.ug && x.orig.name === 'a');
-      const kmark = WaveFW.internal.peek(w).rowEls[WaveFW.internal.peek(w).vis.indexOf(k)].classList.contains('cmpd');
+      const k = WaveLens.internal.peek(w).vis.find(x => x.ug && x.orig.name === 'a');
+      const kmark = WaveLens.internal.peek(w).rowEls[WaveLens.internal.peek(w).vis.indexOf(k)].classList.contains('cmpd');
       // a path B's reader left out is not matched to another signal of the same name; no time in common: nothing compared
       const u = mk({ signal: [['tb', ['u', { name: 'a', path: 'tb.u.a', tv: [[0, '0']] }]]], time: { t0: 0, t1: 40, unit: 'ps' } });
-      WaveFW.configure({ dumpBudget: 1 });
+      WaveLens.configure({ dumpBudget: 1 });
       const r4 = await u.compare('$timescale 1ps $end $scope module tb $end $var wire 1 ! a $end $scope module u $end $var wire 1 " a $end $upscope $end ' +
         '$upscope $end $enddefinitions $end #0 0! 1" #40', 'b2.vcd');
-      WaveFW.configure({ dumpBudget: 3000000 });
+      WaveLens.configure({ dumpBudget: 3000000 });
       const r5 = await u.compare('$timescale 1ps $end $scope module tb $end $scope module u $end $var wire 1 ! a $end $upscope $end $upscope $end ' +
         '$enddefinitions $end #100 0! #140', 'late.vcd'), t5 = u.root.querySelector('.toast').textContent;
       u.destroy(); w.destroy();
@@ -1923,15 +1924,15 @@ def view_review(browser, build):
     d.mkdir(parents=True, exist_ok=True)
     pg = d / 'review.html'
     pg.write_text(f'''<!doctype html><html><head><meta charset="utf-8"><title>review</title>
-<link rel="stylesheet" href="{(ROOT / 'wavefw' / 'wavefw.css').as_uri()}"></head><body><div id="w"></div>
-<script src="{(ROOT / 'wavefw' / 'wavefw.js').as_uri()}"></script></body></html>''', encoding='utf-8')
+<link rel="stylesheet" href="{(ROOT / 'wavelens' / 'wavelens.css').as_uri()}"></head><body><div id="w"></div>
+<script src="{(ROOT / 'wavelens' / 'wavelens.js').as_uri()}"></script></body></html>''', encoding='utf-8')
     ctx = browser.new_context(viewport={'width': 1400, 'height': 1000})
     page = ctx.new_page()
     errs = []
     page.on('pageerror', lambda e: errs.append(str(e)))
     # the helpers of every check: a viewer of its own (opts.key: its own storage), a small hierarchy, a VCD of B
     helpers = """() => {
-      window.mk = (doc, o = {}) => { const el = document.body.appendChild(document.createElement('div')); return new WaveFW.WaveView(el, doc, o); };
+      window.mk = (doc, o = {}) => { const el = document.body.appendChild(document.createElement('div')); return new WaveLens.WaveView(el, doc, o); };
       window.small = cfg => ({ signal: [['tb', { name: 'clk', path: 'tb.clk', tv: Array.from({ length: 40 }, (_, i) => [i * 5000, i % 2 ? '1' : '0']) },
         ['u', { name: 'a', path: 'tb.u.a', tv: [[0, '0'], [1000, '1']] }, { name: 'data', path: 'tb.u.data', width: 8, tv: [[0, '00'], [20000, '3a']] }]]],
         time: { t0: 0, t1: 200000, unit: 'ps' }, config: cfg || {} });
@@ -1949,7 +1950,7 @@ def view_review(browser, build):
     page.evaluate('localStorage.clear()')
     # V2: cycleZero "50ns" is 50 ns (as gapIdle and the cursor read a time), in the viewer and in a static SVG
     got = js("""const v = mk(small({ cycles: true, cycleZero: '50ns' }), { key: 'v2' }), d = v.cycData();
-        const svg = z => WaveFW.WaveSVG.toString(small({ cycles: true, cycleZero: z }), {}).replace(/wvfclip\\d+/g, '');
+        const svg = z => WaveLens.WaveSVG.toString(small({ cycles: true, cycleZero: z }), {}).replace(/wvfclip\\d+/g, '');
         return [v.cycOpt().cycleZero, d.ups[d.iz], svg('50ns') === svg(50000), svg('50ns') !== svg(50)];""")
     check(got == [50000, 55000, True, True], f'cycleZero "50ns": 50 000 ps, cycle 0 the edge at 55 ns, the static SVG the same as 50000 {got}')
     # V3: a run lays its rows out before a command that reads them: a picture after a hide, an edge of the shown signals
@@ -1961,7 +1962,7 @@ def view_review(browser, build):
     check(got[0] == ['clk', 'data'] and got[1] == 5000, f'in one run: the picture after a hide has no hidden row, an edge after it is of a shown signal {got}')
     # V4: a button down whose release nobody heard (the browser's menu, the window left): undo still records and undoes
     got = js("""const v = mk(small(), { key: 'v4' }); await sleep(30);
-        const row = () => WaveFW.internal.peek(v).namesEl.querySelector('.row[data-r="1"]'), out = [];
+        const row = () => WaveLens.internal.peek(v).namesEl.querySelector('.row[data-r="1"]'), out = [];
         for (const end of [el => el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 })),
           () => window.dispatchEvent(new Event('blur'))]) {
           row().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 2 })); end(row()); v.closeMenu();
@@ -1996,7 +1997,7 @@ def view_review(browser, build):
         v.destroy(); localStorage.setItem(key, JSON.stringify({ bookmarks: [{ n: 1, t: 1000 }, null, { n: 2, t: 6000 }],
           arrows: [{ from: 1, to: 2, line: 'constructor', shape: 'toString', head: 'valueOf' }, null] }));
         let w = null, err = ''; try { w = mk(small(), { key: 'm6' }); w.draw(); } catch (e) { err = e.message; }
-        const st = w && await w.setState({ wavefw: 'state', version: 3, arrows: [{ from: 1, to: 2, line: 'hasOwnProperty' }], bookmarks: [{ n: 1, t: 1 }, { n: 2, t: 9 }] });
+        const st = w && await w.setState({ wavelens: 'state', version: 3, arrows: [{ from: 1, to: 2, line: 'hasOwnProperty' }], bookmarks: [{ n: 1, t: 1 }, { n: 2, t: 9 }] });
         return [r.slice(2).map(x => (x.error || '').split(':')[0].slice(0, 12)), err, w && w.arrows.map(a => [a.shape, a.head, a.line]), w && w.bms.length, !!st];""")
     check(got == [['line', 'shape', 'name', 'kind', 'no command "'], '', [['~', '>', 'solid']], 2, True],
           f'"constructor" / "toString": refused by the commands; a copy in this browser with them (and a null) opens, the defaults taken {got}')
@@ -2006,7 +2007,7 @@ def view_review(browser, build):
           { op: 'arrow', from: true, to: 2 }, { op: 'arrow', from: 1.5, to: 2 }, { op: 'marker', t: 1000 }, { op: 'marker', id: true, label: 'y' },
           { op: 'marker', id: 'all', label: 'oops' }, { op: 'bookmark', n: 2.0, text: 'two' }, { op: 'range', from: 300000, to: 400000 },
           { op: 'range', from: 150000, to: 400000 }]);
-        await v.setState({ wavefw: 'state', version: 3, range: { from: 300000, to: 400000, signal: null } });
+        await v.setState({ wavelens: 'state', version: 3, range: { from: 300000, to: 400000, signal: null } });
         return [r.map(x => (x.error ? 'error' : 'ok')), v.umarks.length, v.arrows.length, v.bms.find(b => b.n === 2).text, v.range];""")
     check(got == [['ok', 'ok', 'error', 'error', 'error', 'error', 'ok', 'error', 'error', 'ok', 'error', 'ok'], 1, 0, 'two', None],
           f'n / id / from true or 1.5: refused, 2.0 taken; marker id "all" without delete refused; a range past the end refused, one that '
@@ -2046,7 +2047,7 @@ def view_review(browser, build):
 
 
 def edit(browser, build):
-    """The viewer's commands (view.run, wavefw/src/edit.js) and their twin tools/viewedit.py: the same list of commands,
+    """The viewer's commands (view.run, wavelens/src/edit.js) and their twin tools/viewedit.py: the same list of commands,
     the same state from a page's edits as from the commands run in it, the edits applied once (what the browser keeps
     stays yours after a reload), errors said; your groups and markers in the lists and the menu; a page live through
     tools/wavemcp.py (view_live, view_edit, view_get with a picture)."""
@@ -2066,7 +2067,7 @@ def edit(browser, build):
     errs = []
     page.on('pageerror', lambda e: errs.append(str(e)))
     page.on('console', lambda m: errs.append(m.text) if m.type == 'error' and 'fonts.g' not in m.text else None)
-    V = "WaveFW.views().find(v => v.editKey() === 'exact')"
+    V = "WaveLens.views().find(v => v.editKey() === 'exact')"
     def open_(path, idle=True):
         page.goto(path.as_uri()); page.wait_for_load_state('networkidle' if idle else 'load'); page.evaluate('SVA.ready()'); page.wait_for_timeout(200 * SCALE)
     # a page whose data says "<!--<script>" and "</script>" (a name, a value, the title, an edit's text): it opens whole
@@ -2076,12 +2077,12 @@ def edit(browser, build):
                        capture_output=True, text=True)
     viewedit.edit_page(str(hp), [{'op': 'marker', 't': 1, 'label': '<!--<script>'}])
     open_(hp)
-    got = page.evaluate("[WaveFW.views().length, WaveFW.views()[0].M.rows[0].name, WaveFW.views()[0].markList()[0].label, "
+    got = page.evaluate("[WaveLens.views().length, WaveLens.views()[0].M.rows[0].name, WaveLens.views()[0].markList()[0].label, "
                         "typeof WaveBus !== 'undefined']")   # bus.js: a script after the data
     check(r.returncode == 0 and got == [1, '<!--<script>', '<!--<script>', True], f'a page with "<!--<script>" in its data opens whole {got} {r.stderr[-200:]}')
     open_(pb); page.evaluate('localStorage.clear()'); open_(pb)
-    cmds = page.evaluate("Object.fromEntries(Object.entries(WaveFW.commands()).map(([k, c]) => [k, c.args]))")
-    check(cmds == viewedit.COMMANDS, f'WaveFW.commands() and tools/viewedit.py COMMANDS: one list (differ: '
+    cmds = page.evaluate("Object.fromEntries(Object.entries(WaveLens.commands()).map(([k, c]) => [k, c.args]))")
+    check(cmds == viewedit.COMMANDS, f'WaveLens.commands() and tools/viewedit.py COMMANDS: one list (differ: '
           f'{sorted(set(cmds.items()) ^ set(viewedit.COMMANDS.items()))})')
     run = page.evaluate(f"ops => {V}.run(ops).then(res => ({{res, st: {V}.state()}}))", EDIT_OPS)
     check(not [r for r in run['res'] if 'error' in r], f'every command runs in the page ({[r for r in run["res"] if "error" in r][:2]})')
@@ -2090,7 +2091,7 @@ def edit(browser, build):
     py = json.loads(r.stdout or '[]')
     check(r.returncode == 0 and len(py) == len(EDIT_OPS) and not [x for x in py if 'error' in x], f'viewedit.py: the same commands on the page\'s file {r.stderr.strip()}')
     open_(pa)
-    page.wait_for_function(f"localStorage.getItem('wavefw.edits:' + {V}.storeId)")
+    page.wait_for_function(f"localStorage.getItem('wavelens.edits:' + {V}.storeId)")
     st = page.evaluate(f"{V}.state()")
     for x in (run['st'], st):
         x['config']['fold'] = sorted(x['config']['fold'])   # the ids of the groups made: in another order, the same set
@@ -2115,7 +2116,7 @@ def edit(browser, build):
     page.evaluate('localStorage.clear()'); open_(pb)
     ui = page.evaluate(f"""(async v => {{
         await v.run([{{op: 'group', name: 'g1', signals: ['PADDR', 'PSEL']}}, {{op: 'marker', t: 90000, label: 'mk'}}]);
-        const vis = WaveFW.internal.peek(v).vis, top = vis.slice(0, 3).map(r => r.name), copy = vis[1];
+        const vis = WaveLens.internal.peek(v).vis, top = vis.slice(0, 3).map(r => r.name), copy = vis[1];
         v.setRadix(copy, 'bin'); const rx = v.M.rows.find(r => r.full === 'PADDR').radix;
         v.hide([copy]); const left = v.ugroups[0].signals;
         const lists = [...v.notesEl.querySelectorAll('.nh b')].map(b => b.textContent);
@@ -2127,7 +2128,7 @@ def edit(browser, build):
     got = page.evaluate(f"""(async v => {{
         const r = await v.run([{{op: 'bookmark', t: 60000, signal: 'apb_tb.PSEL', text: 'in g1'}}, {{op: 'highlight', set: 'PSEL'}},
           {{op: 'arrow', id: 'my-arrow', from: 1, to: 2}}]);
-        v.draw(); const o = WaveFW.internal.peek(v).lay.find(o => o.row.ug && o.row.name === 'PSEL'), y = v.bmGeo.pos.get(r[0].n)[1];
+        v.draw(); const o = WaveLens.internal.peek(v).lay.find(o => o.row.ug && o.row.name === 'PSEL'), y = v.bmGeo.pos.get(r[0].n)[1];
         return [r[0].n > 0, Math.abs(y - (o.y + o.h / 2)) < o.h, v.hl.on.has(o.row), r[2].error || ''];
       }})({V})""")
     check(got[:3] == [True, True, True] and got[3].startswith('id: the number of the arrow'),
@@ -2135,7 +2136,7 @@ def edit(browser, build):
     # the menu: a new group, a marker here, the group deleted from its header
     page.evaluate(f"(v => v.menu(200, 200, v.M.rows.find(r => r.name === 'PWRITE'), 70000))({V})")
     page.locator('.wv-menu .subg').hover(); page.locator('.wv-menu button[data-m=ugnew]').click()
-    page.evaluate(f"(v => v.menu(200, 200, WaveFW.internal.peek(v).vis.find(r => r.user && r.name === 'group 2'), 70000))({V})")
+    page.evaluate(f"(v => v.menu(200, 200, WaveLens.internal.peek(v).vis.find(r => r.user && r.name === 'group 2'), 70000))({V})")
     page.locator('.wv-menu .subg').hover(); page.locator('.wv-menu button[data-m=ugdel]').click()
     page.evaluate(f"(v => v.menu(200, 200, v.M.rows.find(r => r.name === 'PWRITE'), 70000))({V})")
     page.locator('.wv-menu button[data-m=umark]').click()
@@ -2144,7 +2145,7 @@ def edit(browser, build):
     # where the rows scroll: the bar's buttons, the bar sticking to the top with the page, folded; kept after a reload
     page.evaluate('localStorage.clear()'); open_(pb)
     page.set_viewport_size({'width': 1300, 'height': 600})
-    w = page.locator('.wv').nth(page.evaluate(f"WaveFW.views().indexOf({V})"))
+    w = page.locator('.wv').nth(page.evaluate(f"WaveLens.views().indexOf({V})"))
     lay = lambda: page.evaluate(f"""(v => {{ const b = v.root.querySelector('.bar').getBoundingClientRect(), c = v.canvas.getBoundingClientRect();
         return [v.root.classList.contains('wv-scroll'), v.root.querySelector('[data-act=scroll]').textContent, Math.round(b.top), Math.round(c.top - b.bottom),
           v.root.querySelector('.bar .tools').offsetHeight > 0]; }})({V})""")
@@ -2180,7 +2181,7 @@ def edit(browser, build):
     check(pic.get('bytes', 0) > 2000 and pic.get('png', '').startswith('iVBOR'), f'picture: a PNG of the screen, base64 ({pic.get("bytes")} bytes)')
     check(not errs, 'no page errors (edit)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
     # live: wavemcp.py as an agent's MCP server, the page connected to it
-    env = dict(os.environ, WAVEFW_LIVE_PORT='0', XDG_CACHE_HOME=str(d / 'cache'))
+    env = dict(os.environ, WAVELENS_LIVE_PORT='0', XDG_CACHE_HOME=str(d / 'cache'))
     mcp = subprocess.Popen([sys.executable, '-I', str(ROOT / 'tools' / 'wavemcp.py')], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, env=env)
     n = [0]
     def tool(name, **a):
@@ -2228,8 +2229,8 @@ def ranges(browser, build):
     page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('SVA.ready()'); page.evaluate('localStorage.clear()')
     js = lambda e: page.evaluate(f"(() => {{ const v = document.querySelector('.wv').waveView; return {e}; }})()")
     c = page.locator('.wv canvas').first; c.scroll_into_view_if_needed(); box = c.bounding_box()
-    r = js("""(() => { const o = WaveFW.internal.peek(v).lay.find(o => o.row.name === 'PSEL'), k = v.pxPerT(), e = o.row.tr.filter((e, i) => i && e.t > v.t0 && e.t < v.t0 + v.span);
-        return [o.y + o.h / 2 - (WaveFW.internal.peek(v).oy || 0), (e[0].t - v.t0) * k, (e[1].t - v.t0) * k, e[0].t, e[1].t]; })()""")
+    r = js("""(() => { const o = WaveLens.internal.peek(v).lay.find(o => o.row.name === 'PSEL'), k = v.pxPerT(), e = o.row.tr.filter((e, i) => i && e.t > v.t0 && e.t < v.t0 + v.span);
+        return [o.y + o.h / 2 - (WaveLens.internal.peek(v).oy || 0), (e[0].t - v.t0) * k, (e[1].t - v.t0) * k, e[0].t, e[1].t]; })()""")
     cur0 = js('v.cursor')
     page.keyboard.down('Control'); page.mouse.move(box['x'] + r[1] + 4, box['y'] + r[0]); page.mouse.down()
     page.mouse.move(box['x'] + r[2] - 3, box['y'] + r[0], steps=5); page.mouse.up(); page.keyboard.up('Control')
@@ -2261,9 +2262,9 @@ def ranges(browser, build):
           f'Save image as PNG ({len(png)} bytes), Copy image: a PNG to the clipboard')
     nb = js('v.bms.length'); page.mouse.click(box['x'] + 5, box['y'] + r[0], button='right'); menu.locator('button[data-m=marks]').click()
     mk = js("[v.bms.length, v.bms.slice(-2).map(b => [b.t, b.signal]), v.arrows[v.arrows.length - 1].label]")
-    lane = js("(() => { v.draw(); const m = v.bmGeo.mids.find(x => x[0] === v.arrows.length - 1), o = WaveFW.internal.peek(v).lay.find(o => o.row.name === 'PSEL'); return [m[2] < o.y, o.y]; })()")
+    lane = js("(() => { v.draw(); const m = v.bmGeo.mids.find(x => x[0] === v.arrows.length - 1), o = WaveLens.internal.peek(v).lay.find(o => o.row.name === 'PSEL'); return [m[2] < o.y, o.y]; })()")
     check(lane[0], f'the arrow between the two bookmarks of one signal runs in its label lane above the row, not through the signal {lane}')
-    y2 = js("(o => o.y + o.h / 2 - (WaveFW.internal.peek(v).oy || 0))(WaveFW.internal.peek(v).lay.find(o => o.row.name === 'PSEL'))")   # the arrow's label lane moved it
+    y2 = js("(o => o.y + o.h / 2 - (WaveLens.internal.peek(v).oy || 0))(WaveLens.internal.peek(v).lay.find(o => o.row.name === 'PSEL'))")   # the arrow's label lane moved it
     page.mouse.click(box['x'] + 5, box['y'] + y2, button='right')
     menu.locator('input[type=color]').evaluate("i => { i.value = '#2f9e44'; i.dispatchEvent(new Event('input', { bubbles: true })); }")
     page.keyboard.press('Escape'); col = js("v.strokeOf(v.M.rows.find(r => r.name === 'PSEL'))")
@@ -2296,7 +2297,7 @@ def ranges(browser, build):
     page.keyboard.press('Escape')
     # the signals the gaps follow: Gaps by this signal (// in the names), only them in the picture, ✕: every signal again
     page.mouse.click(box['x'] + 5, box['y'] + y2, button='right'); menu.locator('.subh').click(); menu.locator('button[data-m=gref]').click()
-    ref = js("[[...v.gapRefSet()].map(r => r.name), v.gapOpt().gaps, [...WaveFW.internal.peek(v).namesEl.querySelectorAll('.row.gref .n')].map(e => e.textContent)]")
+    ref = js("[[...v.gapRefSet()].map(r => r.name), v.gapOpt().gaps, [...WaveLens.internal.peek(v).namesEl.querySelectorAll('.row.gref .n')].map(e => e.textContent)]")
     page.mouse.click(box['x'] + 5, box['y'] + y2, button='right'); menu.locator('.subh').click(); by = menu.locator('.gp').nth(1).inner_text()
     menu.locator('input.gonly').check(); only = js("[v.exportRows().filter(r => r.type !== 'lane').map(r => r.name), v.toWaveDrom(v.M.t0, v.M.t1).signal.map(s => s.name)]")
     menu.locator('button[data-m=grefx]').click(); after = js('[v.gapRefSet().size, (v.exportRows() || []).length]')
@@ -2306,11 +2307,11 @@ def ranges(browser, build):
     ck = js("""(() => { const C = v.M.rows.find(r => r.name === 'PCLK' && r.tr), P = v.M.rows.find(r => r.name === 'PSEL' && r.tr);
         v.menu(10, 10, C); const item = v.menuEl.querySelector('button[data-m=gclk]').textContent; v.menuEl.querySelector('button[data-m=gclk]').click();
         v.setGaps({ gapIdle: 3, gapKeep: 0, gapSignals: [P.full] }); const svg = v.toSVG({ from: v.M.t0, to: v.M.t1 });
-        return [item, v.gapClockRow() === C, [...WaveFW.internal.peek(v).namesEl.querySelectorAll('.row.gclk .n')].map(e => e.textContent), /· \\d+ PCLK/.test(svg),
+        return [item, v.gapClockRow() === C, [...WaveLens.internal.peek(v).namesEl.querySelectorAll('.row.gclk .n')].map(e => e.textContent), /· \\d+ PCLK/.test(svg),
           v.cutsOf(v.M.t0, v.M.t1, [P]).length > 1]; })()""")
     aux = js("""(() => { const A = v.M.rows.find(r => r.name === 'PENABLE' && r.tr), P = v.M.rows.find(r => r.name === 'PSEL' && r.tr);
         v.menu(10, 10, A); v.menuEl.querySelector('button[data-m=gaux]').click(); v.setGaps({ gapOnly: true, gapCount: 'edges' });
-        const rows = v.exportRows().filter(r => r.type !== 'lane').map(r => r.name), names = [...WaveFW.internal.peek(v).namesEl.querySelectorAll('.row.gaux .n')].map(e => e.textContent);
+        const rows = v.exportRows().filter(r => r.type !== 'lane').map(r => r.name), names = [...WaveLens.internal.peek(v).namesEl.querySelectorAll('.row.gaux .n')].map(e => e.textContent);
         v.menu(10, 10, P); v.menuEl.querySelector('button[data-m=gaux]').click();   // one role per signal: PSEL leaves the ones the gaps follow
         const moved = [v.gapRefSet().size, v.gapRows().aux.size]; v.setGaps({ gapOnly: false }); return [rows, names, moved]; })()""")
     check(aux == [['PCLK', 'PSEL', 'PENABLE'], ['PENABLE'], [0, 2]],
@@ -2324,18 +2325,18 @@ def ranges(browser, build):
     # radix and hide from the menu (a bus of the dump: apb_tb.PADDR), the Hidden button, kept over a reload and in the state
     page.goto((build / 'examples' / 'apb' / 'apb_all.html').as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
     c.scroll_into_view_if_needed(); box = c.bounding_box()
-    yb = lambda n: js(f"(o => o.y + o.h / 2 - (WaveFW.internal.peek(v).oy || 0))(WaveFW.internal.peek(v).lay.find(o => o.row.full === 'apb_tb.{n}'))")
+    yb = lambda n: js(f"(o => o.y + o.h / 2 - (WaveLens.internal.peek(v).oy || 0))(WaveLens.internal.peek(v).lay.find(o => o.row.full === 'apb_tb.{n}'))")
     # the rows the clicks go to in view (the bar may wrap to more lines and the rows' window be shorter)
-    js("(o => { if (v.root.classList.contains('wv-scroll')) v.bodyEl.scrollTop = Math.max(0, o.y - 60); v.draw(); })(WaveFW.internal.peek(v).lay.find(o => o.row.full === 'apb_tb.PADDR'))")
+    js("(o => { if (v.root.classList.contains('wv-scroll')) v.bodyEl.scrollTop = Math.max(0, o.y - 60); v.draw(); })(WaveLens.internal.peek(v).lay.find(o => o.row.full === 'apb_tb.PADDR'))")
     page.wait_for_timeout(100); box = c.bounding_box()
     page.mouse.click(box['x'] + 300, c.bounding_box()['y'] + yb('PADDR'), button='right'); menu.locator('select:not(.gcnt)').select_option('bin')
     rx = [js("v.valueAt(v.M.rows.find(r => r.full === 'apb_tb.PADDR'), v.cursor)"), menu.count()]
     page.mouse.click(box['x'] + 300, c.bounding_box()['y'] + yb('PWDATA'), button='right'); menu.locator('button[data-m=hide]').click()
-    hid = [js("WaveFW.internal.peek(v).vis.some(r => r.full === 'apb_tb.PWDATA')"), page.locator('.wv button[data-act=unhide]').first.inner_text(), js('v.state().hidden'), js('v.state().radix')]
+    hid = [js("WaveLens.internal.peek(v).vis.some(r => r.full === 'apb_tb.PWDATA')"), page.locator('.wv button[data-act=unhide]').first.inner_text(), js('v.state().hidden'), js('v.state().radix')]
     page.reload(); page.wait_for_load_state('networkidle')
-    kept = [js("WaveFW.internal.peek(v).vis.some(r => r.full === 'apb_tb.PWDATA')"), js("v.M.rows.find(r => r.full === 'apb_tb.PADDR').radix")]
+    kept = [js("WaveLens.internal.peek(v).vis.some(r => r.full === 'apb_tb.PWDATA')"), js("v.M.rows.find(r => r.full === 'apb_tb.PADDR').radix")]
     page.locator('.wv button[data-act=unhide]').first.click(); js("(v.setRadix('apb_tb.PADDR', null), 0)")
-    back = [js("WaveFW.internal.peek(v).vis.some(r => r.full === 'apb_tb.PWDATA')"), js("v.M.rows.find(r => r.full === 'apb_tb.PADDR').radix || ''"), js('localStorage.getItem(v.rowsKey)')]
+    back = [js("WaveLens.internal.peek(v).vis.some(r => r.full === 'apb_tb.PWDATA')"), js("v.M.rows.find(r => r.full === 'apb_tb.PADDR').radix || ''"), js('localStorage.getItem(v.rowsKey)')]
     check((rx[0].startswith('0b') or set(rx[0]) <= set('01_')) and rx[1] == 0 and hid[:2] == [False, 'Hidden: 1 ✕'] and hid[2] == ['apb_tb.PWDATA'] and hid[3] == {'apb_tb.PADDR': 'bin'}
           and kept == [False, 'bin'] and back == [True, '', None],
           f'the menu: Radix bin on PADDR, Hide PWDATA, Hidden: 1 ✕ in the bar; kept over a reload and in the state; shown again, the page\'s radix back {rx} {hid} {kept} {back}')
@@ -2372,7 +2373,7 @@ def ranges(browser, build):
     js("(v.select('apb_tb.phase'), v.cursor = 0, 0)"); ev.fill('access'); ev.press('Enter'); f4 = js('v.cursor')
     ev.fill('0x99'); ev.press('Enter'); none = page.locator('.wv .bar .toast').first.inner_text()
     xz = js("""(() => { const r = v.M.rows.find(r => r.full === 'apb_tb.PSLVERR'), keep = r.tr; r.tr = [...keep.filter(o => o.t < 33000), { t: 33000, k: 'x' }, { t: 34000, k: '0' }, ...keep.filter(o => o.t > 34000)];   // an X to find
-        v.select(null); v.cursor = v.M.t0; v.setEdgeKind('xz'); const xs = WaveFW.internal.peek(v).vis.filter(r => r.type === 'sig' && r.tr).flatMap(r => r.tr.filter((o, i) => (o.k === 'x' || o.k === 'z' || (o.raw && /[xz]/i.test(o.raw))) && o.t > v.cursor && !(i && (r.tr[i - 1].k === 'x' || r.tr[i - 1].k === 'z'))).map(o => o.t));
+        v.select(null); v.cursor = v.M.t0; v.setEdgeKind('xz'); const xs = WaveLens.internal.peek(v).vis.filter(r => r.type === 'sig' && r.tr).flatMap(r => r.tr.filter((o, i) => (o.k === 'x' || o.k === 'z' || (o.raw && /[xz]/i.test(o.raw))) && o.t > v.cursor && !(i && (r.tr[i - 1].k === 'x' || r.tr[i - 1].k === 'z'))).map(o => o.t));
         const exp = xs.length ? Math.min(...xs) : null; v.edge(1); const got = v.cursor; r.tr = keep; v.draw(); return [exp, got]; })()""")
     js("(v.setEdgeKind('any'), 0)"); hid = not ev.is_visible()
     check(shown and f1 == want[0] and f2 == want[0] and f3 == want[0] and back == want[0] and f4 == want[1] and 'no 0x99 after the cursor' in none and xz == [33000, 33000] and hid,
@@ -2383,24 +2384,24 @@ def ranges(browser, build):
     qf.fill('16'); qf.dispatch_event('input'); fx = js("[v.M.rows.find(r => r.full === 'apb_tb.PWDATA').radix, v.valueAt(v.M.rows.find(r => r.full === 'apb_tb.PWDATA'), 60000)]")
     page.keyboard.press('Escape'); js("(v.setRadix('apb_tb.PWDATA', 'float'), 0)"); fl = js("v.valueAt(v.M.rows.find(r => r.full === 'apb_tb.PWDATA'), 60000)")
     js("(v.setRadix('apb_tb.PWDATA', null), 0)")
-    page.evaluate("WaveFW.configure({enumColors: {ACCESS: '#ff00aa', 1: 'c8'}})"); esvg = js('v.toSVG()'); page.evaluate("WaveFW.configure({enumColors: null})")
+    page.evaluate("WaveLens.configure({enumColors: {ACCESS: '#ff00aa', 1: 'c8'}})"); esvg = js('v.toSVG()'); page.evaluate("WaveLens.configure({enumColors: null})")
     check(qopen == [True, 1] and fx == ['sq16', '-13569.9999847412109375'] and fl == '-8323073' and '#ff00aa' in esvg,
           f'Radix: fixed sq with 16 fraction bits (the menu stays open for them), float; enumColors fill the ACCESS state {fx} {fl}')
     # Analog from the menu: the bus as a step plot three rows high, kept over a reload and in the state; As a bus: back
     page.mouse.click(box['x'] + 300, c.bounding_box()['y'] + yb('n_done'), button='right'); menu.locator('button[data-m=analog]').click()
-    an = js("[(o => [o.h, v.rowH.sig])(WaveFW.internal.peek(v).lay.find(o => o.row.full === 'apb_tb.n_done')), v.state().analog, Math.round(v.rowEl(v.M.rows.find(r => r.full === 'apb_tb.n_done')).getBoundingClientRect().height)]")
+    an = js("[(o => [o.h, v.rowH.sig])(WaveLens.internal.peek(v).lay.find(o => o.row.full === 'apb_tb.n_done')), v.state().analog, Math.round(v.rowEl(v.M.rows.find(r => r.full === 'apb_tb.n_done')).getBoundingClientRect().height)]")
     page.reload(); page.wait_for_load_state('networkidle'); c.scroll_into_view_if_needed(); box = c.bounding_box()
     kept = js("v.M.rows.find(r => r.full === 'apb_tb.n_done').analog")
     page.mouse.click(box['x'] + 300, c.bounding_box()['y'] + yb('n_done'), button='right'); label = menu.locator('button[data-m=analog]').inner_text(); menu.locator('button[data-m=analog]').click()
-    off = js("[v.M.rows.find(r => r.full === 'apb_tb.n_done').analog, (o => o.h)(WaveFW.internal.peek(v).lay.find(o => o.row.full === 'apb_tb.n_done'))]")
-    parsed = page.evaluate("WaveFW.parse({ signal: [{ name: 'lvl', wave: '=.=', data: ['1', '9'], analog: 2 }] }).rows[0].analog")
+    off = js("[v.M.rows.find(r => r.full === 'apb_tb.n_done').analog, (o => o.h)(WaveLens.internal.peek(v).lay.find(o => o.row.full === 'apb_tb.n_done'))]")
+    parsed = page.evaluate("WaveLens.parse({ signal: [{ name: 'lvl', wave: '=.=', data: ['1', '9'], analog: 2 }] }).rows[0].analog")
     check(an[0] == [3 * an[0][1], an[0][1]] and an[1] == {'apb_tb.n_done': 3} and an[2] == 3 * an[0][1] and kept == 3 and label == 'As a bus' and off == [False, an[0][1]] and parsed == 2,
           f'Analog: a step plot three rows high (names too), kept over a reload and in the state; As a bus: back; "analog" in the WaveJSON {an} {kept} {off}')
     js("(v.setAnalog('apb_tb.n_done', null), localStorage.clear(), 0)")
     # a click on a name selects it, shift+click every signal from it to the clicked one: selected, nothing dimmed, the
     # selection's tint inside the bus values too
-    px = lambda n: js(f"""(() => {{ v.draw(); const o = WaveFW.internal.peek(v).lay.find(o => o.row.full === 'apb_tb.{n}'), r = window.devicePixelRatio || 1, x = Math.round(v.canvas.width / 2 / r);
-        return [...v.canvas.getContext('2d').getImageData(Math.round(x * r), Math.round((o.y + o.h / 2 + 5 - (WaveFW.internal.peek(v).oy || 0)) * r), 1, 1).data].slice(0, 3); }})()""")
+    px = lambda n: js(f"""(() => {{ v.draw(); const o = WaveLens.internal.peek(v).lay.find(o => o.row.full === 'apb_tb.{n}'), r = window.devicePixelRatio || 1, x = Math.round(v.canvas.width / 2 / r);
+        return [...v.canvas.getContext('2d').getImageData(Math.round(x * r), Math.round((o.y + o.h / 2 + 5 - (WaveLens.internal.peek(v).oy || 0)) * r), 1, 1).data].slice(0, 3); }})()""")
     names = page.locator('.wv .names').first
     p0 = px('PADDR'); js("(v.highlight(null), 0)")
     names.locator('.row:not(.grp)', has_text='PREADY').first.locator('.n').click()
@@ -2440,13 +2441,13 @@ def ranges(browser, build):
         pick('wdjson')
     wd = json.loads(pathlib.Path(dl.value.path()).read_text(encoding='utf-8')); name = dl.value.suggested_filename
     sig = {x['name']: x for x in wd['signal']}
-    back = page.evaluate("d => { const M = WaveFW.parse(d); return M.rows.filter(r => r.type === 'sig').map(r => r.name); }", wd)
+    back = page.evaluate("d => { const M = WaveLens.parse(d); return M.rows.filter(r => r.type === 'sig').map(r => r.name); }", wd)
     js("(v.highlight(null), v.setRange(null), 0)")
     check('>PADDR<' in svg and '>PWDATA<' in svg and '>PRDATA<' not in svg and '>PREADY<' not in svg,
           'with rows highlighted, Save image draws those rows only')
     check(name.endswith('.wavedrom.json') and list(sig) == ['PCLK', 'PSEL', 'PADDR', 'PWDATA'] and set(sig['PCLK']['wave'][1:]) == {'.'} and sig['PCLK']['wave'][0] == 'p'
           and len({len(x['wave']) for x in wd['signal']}) == 1 and sig['PADDR']['data'][:3] == ['0x00', '0x04', '0x40'] and back == list(sig),
-          f'Save as WaveDrom: the highlighted signals and their clock (p...), a cell per cycle, bus values as data; WaveFW reads it back {name} {[(k, x["wave"][:24]) for k, x in sig.items()]}')
+          f'Save as WaveDrom: the highlighted signals and their clock (p...), a cell per cycle, bus values as data; WaveLens reads it back {name} {[(k, x["wave"][:24]) for k, x in sig.items()]}')
     # ctrl+F with the bar scrolled away: the find group floats over the waves, in the window; Esc puts it back
     js("(document.body.style.paddingBottom = '3000px', scrollTo(0, scrollY + v.root.querySelector('.bar').getBoundingClientRect().bottom + 40), v.canvas.focus({ preventScroll: true }), 0)")
     page.keyboard.press('Control+f')
@@ -2470,7 +2471,7 @@ def sva_docs(page):
     shown = page.evaluate("SVA.panels().filter(p => !p.el.hidden).map(p => p.v.root.id)")
     check(shown == ['ex-sva', 'ex-apb'] and page.locator('.wv .tg.sv button[data-sv=load]').count() == page.locator('.wv').count(),
           f'docs: only the viewers with assertions list them ({shown}); every viewer has Load file…')
-    apb = page.evaluate("(() => { const v = document.querySelector('#ex-apb').waveView; return [v.sva.bindings.filter(b => b.state === 'bound' && b.results).length, WaveFW.internal.peek(v).vis.filter(r => r.sva).length]; })()")
+    apb = page.evaluate("(() => { const v = document.querySelector('#ex-apb').waveView; return [v.sva.bindings.filter(b => b.state === 'bound' && b.results).length, WaveLens.internal.peek(v).vis.filter(r => r.sva).length]; })()")
     leg = page.locator('#ex-apb-svg svg').inner_html() if page.locator('#ex-apb-svg svg').count() else ''
     check(apb == [14, 14] and '(!PREADY)[*2]  (cons)' in leg and '##1 PREADY  (cons)' in leg and '(ante)' in leg,
           f'docs: the APB example with its 14 checks bound and drawn {apb}; the SVG of apb_read_waits with the legend of its steps')
@@ -2481,12 +2482,12 @@ def sva_docs(page):
     check(['fail', True, True] in mk and ['pass', False, True] in mk,
           f'docs: an attempt is a bracket from its start to its end; the failure green up to its last good step, then red {mk}')
     page.keyboard.press('Escape')
-    rows = page.evaluate("WaveFW.internal.peek(document.querySelector('#ex-sva').waveView).vis.filter(r => r.cls && !/^sva-x|^sva-expr/.test(r.cls)).map(r => [r.cls, r.name])")
+    rows = page.evaluate("WaveLens.internal.peek(document.querySelector('#ex-sva').waveView).vis.filter(r => r.cls && !/^sva-x|^sva-expr/.test(r.cls)).map(r => [r.cls, r.name])")
     check(rows[:4] == [['sva-g fails', '⚑ a_req_ack · 2 pass · 1 fail'], ['sva-lane', 'attempts'], ['sva-step', '1. req'], ['sva-step', '2. ##[1:3] ack']]
           and [r[1] for r in rows if r[0] == 'sva-copy'][:4] == ['clk', 'rst_n', 'req', 'ack'], f'docs: the assertion group under the top: lane, steps, the bound signals {rows[:6]}')
-    page.wait_for_function("WaveFW.internal.peek(document.querySelector('#ex-sva').waveView).vis.filter(r => (r.cls || '').startsWith('sva-expr') && r.tr.length).length === 2")
-    xr = page.evaluate("""(() => { const v = document.querySelector('#ex-sva').waveView, rs = WaveFW.internal.peek(v).vis.filter(r => (r.cls || '').startsWith('sva-expr'));
-      return [WaveFW.internal.peek(v).vis[WaveFW.internal.peek(v).vis.findIndex(r => r.cls === 'sva-xg') - 1].name, rs.map(r => [r.name, r.tr.filter(o => o.k === '1').map(o => o.t)])]; })()""")
+    page.wait_for_function("WaveLens.internal.peek(document.querySelector('#ex-sva').waveView).vis.filter(r => (r.cls || '').startsWith('sva-expr') && r.tr.length).length === 2")
+    xr = page.evaluate("""(() => { const v = document.querySelector('#ex-sva').waveView, rs = WaveLens.internal.peek(v).vis.filter(r => (r.cls || '').startsWith('sva-expr'));
+      return [WaveLens.internal.peek(v).vis[WaveLens.internal.peek(v).vis.findIndex(r => r.cls === 'sva-xg') - 1].name, rs.map(r => [r.name, r.tr.filter(o => o.k === '1').map(o => o.t)])]; })()""")
     check(xr[0] == 'ack' and xr[1] == [['ƒ req && !ack', [2, 6, 11]], ['ƒ @(posedge clk) $past(req) && !ack', [8, 13]]],
           f'docs: the WaveJSON\'s "exprs" are rows ƒ under the top\'s signals: after every change of their signals, or sampled at the clock {xr}')
     svg = page.locator('#ex-sva-svg svg')
@@ -2526,10 +2527,10 @@ def sva_nesting(browser, build):
 
 
 def sva_units(page):
-    """wavefw/sva.js on hand-made models: scopes, the name rules, samplers."""
+    """wavelens/sva.js on hand-made models: scopes, the name rules, samplers."""
     r = page.evaluate("""(() => {
       const tv = (...p) => p.map(([t, v]) => [t, v]);
-      const M = WaveFW.parse({ signal: [['tb', { name: 'clk', path: 'tb.clk', tv: tv([0, '0'], [5, '1'], [10, '0'], [15, '1']) },
+      const M = WaveLens.parse({ signal: [['tb', { name: 'clk', path: 'tb.clk', tv: tv([0, '0'], [5, '1'], [10, '0'], [15, '1']) },
         ['dut', { name: 'VALID', path: 'tb.dut.s_valid', tv: tv([0, '0']) }, { name: 'data', path: 'tb.dut.data', width: 8, tv: tv([0, '00'], [7, 'ab']) },
           { name: 'ready', path: 'tb.dut.ready', tv: tv([0, '1']) }, ['u_fifo', { name: 'full', path: 'tb.dut.u_fifo.full', tv: tv([0, '0']) }]]]] });
       const v = { M, sortIgnore: ['s_', 'i_'] }, I = SVA.scopeInfo(M);
@@ -2538,7 +2539,7 @@ def sva_units(page):
       const map = Object.fromEntries(Object.entries(res.map).map(([n, r]) => [n, r.full]));
       const cand = SVA.candidates(v, { signals: [{ name: 'clk' }, { name: 'ready' }] });
       const strict = SVA.resolve({ M, sortIgnore: [] }, { signals: [{ name: 'clk' }, { name: 'valid' }] }, 'tb.dut');
-      const W = WaveFW.parse({ signal: [{ name: 'clk', wave: 'p...' }, { name: 'st', wave: '3.4.', data: ['IDLE', 'RUN'], enum: { 0: 'IDLE', 1: 'RUN' } },
+      const W = WaveLens.parse({ signal: [{ name: 'clk', wave: 'p...' }, { name: 'st', wave: '3.4.', data: ['IDLE', 'RUN'], enum: { 0: 'IDLE', 1: 'RUN' } },
         { name: 'b', wave: '01x0' }], time: { t0: 0, cycle: 10 } });
       const rows = Object.fromEntries(W.rows.map(r => [r.name, r])), ws = SVA.rowSampler(rows);
       const ts = SVA.tvSampler({ a: { tv: tv([0, '0'], [10, '1'], [20, 'x'], [30, '1']) }, d: { tv: tv([0, 'ff']), width: 8 } });
@@ -2560,7 +2561,7 @@ def sva_units(page):
     lb = page.evaluate("""[SVA.fromLabel('0x1F'), SVA.fromLabel('0101', 'bin'), SVA.fromLabel('-3', 'signed', 8), SVA.fromLabel('0o17'),
         SVA.fromLabel('"AB"', 'ascii'), SVA.fromLabel('12'), SVA.fromLabel('0x1x'), SVA.fromLabel('IDLE')]""")
     check(lb == ['h1F', '0101', 253, 15, 'h4142', 12, 'h1x', 'x'], f'sva.js: bus labels back to values (hex, bin, signed, oct, ascii, dec, x) {lb}')
-    raw = page.evaluate("""(() => { const W = WaveFW.parse({ signal: [{ name: 'clk', wave: 'p...' }, { name: 'd', wave: '=.=.', data: ['0101', '0011'], radix: 'bin', width: 4 },
+    raw = page.evaluate("""(() => { const W = WaveLens.parse({ signal: [{ name: 'clk', wave: 'p...' }, { name: 'd', wave: '=.=.', data: ['0101', '0011'], radix: 'bin', width: 4 },
         { name: 'e', wave: '=.=.', data: ['?', '?'], raw: ['a', '5'], width: 4 }], time: { t0: 0, cycle: 10 } });
       const rows = Object.fromEntries(W.rows.map(r => [r.name, r])), s = SVA.rowSampler(rows); return [s.column('d', [15, 25]), s.column('e', [15, 25]), s.width('e')]; })()""")
     check(raw == [['0101', '0011'], ['ha', 'h5'], 4], f'sva.js: a clock-sampled bus: its label by radix, or its "raw" value; "width" {raw}')
@@ -2581,7 +2582,7 @@ def sva_units(page):
 
 
 UNITS_SETUP = r"""
-const I = WaveFW.internal, F = WaveFW;
+const I = WaveLens.internal, F = WaveLens;
 const D = (w, v, r, extra) => F.decode(Object.assign({ width: w }, extra || {}), v, r);
 const UM = F.parse({ signal: [['tb',
   { name: 'b', path: 'tb.b', tv: [[0, '0'], [10, '1'], [20, 'x'], [30, '1'], [40, '0']] },
@@ -2790,12 +2791,12 @@ UNITS = [   # (JavaScript expression, its JSON value); NaN / ±Infinity / undefi
 
 
 def units(browser, build):
-    """The pure functions of the viewer (WaveFW.internal, unstable), the page's VCD reader, the bus decoders and the
+    """The pure functions of the viewer (WaveLens.internal, unstable), the page's VCD reader, the bus decoders and the
     expressions of sva.js on a blank page: one case per line of UNITS, all in one evaluate."""
     page = browser.new_page()
     page.goto('about:blank')
-    for f in ('wavefw.config.js', 'wavefw.js', 'sva.wasm.js', 'bus.js', 'sva.js'):
-        page.add_script_tag(path=str(ROOT / 'wavefw' / f))
+    for f in ('wavelens.config.js', 'wavelens.js', 'sva.wasm.js', 'bus.js', 'sva.js'):
+        page.add_script_tag(path=str(ROOT / 'wavelens' / f))
     page.add_script_tag(content=UNITS_SETUP)
     got = page.evaluate("""cases => cases.map(c => { try { return JSON.stringify((0, eval)(c), (k, x) => typeof x === 'number' && !isFinite(x) ? String(x) :
         typeof x === 'bigint' ? x + 'n' : x === undefined ? 'undefined' : x); } catch (e) { return JSON.stringify('ERR ' + e.message); } })""", [c for c, _ in UNITS])
@@ -2837,10 +2838,10 @@ def sva_hardening(browser, build):
     page.evaluate('SVA.ready()')
     top1 = page.evaluate("document.querySelector('.wv .sva ol.asv').scrollTop")
     check(top0 > 0 and top1 == top0, f'evaluating a binding keeps the list where it was (scrollTop {top0} -> {top1})')
-    # ✕ fires wavefw:sva for the bindings it removes
-    n = page.evaluate("""(() => { let n = 0; const r = document.querySelector('.wv'); r.addEventListener('wavefw:sva', () => n++);
+    # ✕ fires wavelens:sva for the bindings it removes
+    n = page.evaluate("""(() => { let n = 0; const r = document.querySelector('.wv'); r.addEventListener('wavelens:sva', () => n++);
         document.querySelector('.wv .sva li[data-a="m7"] button[data-sv=del]').click(); return n; })()""")
-    check(n == 1, f'✕ on a bound assertion fires wavefw:sva ({n})')
+    check(n == 1, f'✕ on a bound assertion fires wavelens:sva ({n})')
     # the sort prefixes are re-read: x_PSEL resolves once "x_" is ignored
     page.evaluate("""async () => { await SVA.loadFiles([{ name: 'pfx.sva', text: 'module pfx (input logic PCLK, x_PSEL, PENABLE); a_pfx: assert property (@(posedge PCLK) PENABLE |-> x_PSEL); endmodule' }]); }""")
     page.evaluate('SVA.ready()')
@@ -2854,13 +2855,13 @@ def sva_hardening(browser, build):
     hook = page.evaluate("""(() => { const v = document.querySelector('.wv').waveView, g = Object.values(v.M.groups).find(g => g.name === 'u_regs');
         const src = v.M.rows.find(r => r.full === 'apb_tb.u_regs.PSEL'), row = { type: 'sig', name: 'probe_row', full: 'apb_tb.u_regs.probe_row', tr: src.tr, width: 1 };
         v.extraRows.push(x => (x === g ? [row] : [])); v.expandAll();
-        const at = () => WaveFW.internal.peek(v).vis.indexOf(row), kids = () => WaveFW.internal.peek(v).vis.filter(r => r.anc.includes(g.id));
-        const H0 = WaveFW.internal.peek(v).lay.H, pos = [at(), kids().indexOf(row), kids().length];
+        const at = () => WaveLens.internal.peek(v).vis.indexOf(row), kids = () => WaveLens.internal.peek(v).vis.filter(r => r.anc.includes(g.id));
+        const H0 = WaveLens.internal.peek(v).lay.H, pos = [at(), kids().indexOf(row), kids().length];
         const own = () => kids().filter(r => r.anc[r.anc.length - 1] === g.id && r.type === 'sig' && !r.cls && r !== row);
         v.setSort('desc'); const sorted = kids().indexOf(row) > Math.max(...own().map(r => kids().indexOf(r)));
         v.setSort('none'); v.find('probe'); const found = v.found.has(row); v.clearFind();
-        WaveFW.internal.peek(v).collapsed.add(g.id); v.renderNames(); v.draw(); const folded = at() === -1;
-        WaveFW.internal.peek(v).collapsed.delete(g.id); v.renderNames(); v.draw();
+        WaveLens.internal.peek(v).collapsed.add(g.id); v.renderNames(); v.draw(); const folded = at() === -1;
+        WaveLens.internal.peek(v).collapsed.delete(g.id); v.renderNames(); v.draw();
         const shown = at() >= 0 && H0 > 0; v.extraRows.length = 0; v.renderNames(); v.draw();
         return { pos, sorted, found, folded, shown }; })()""")
     check(hook['pos'][0] > 0 and hook['sorted'] and hook['found'] and hook['folded'] and hook['shown'],
@@ -2901,15 +2902,15 @@ def sva_waves(browser, build):
     js('v.expandAll(); v.fit();')
     # every drawn binding: its group with the counts, as many bars as listed attempts (pass + fail here)
     g = js("""return p.bindings.map(b => { const o = b.results.assertions[0], st = b.draw;
-        WaveFW.internal.peek(v).namesEl.querySelector(`.row[data-r="${WaveFW.internal.peek(v).vis.indexOf(st.lane)}"]`).scrollIntoView({ block: 'center' }); v.draw();
-        return [b.assert, st.g.name, st.lane.drawn, o.kind === 'cover' ? o.attempts.length : o.stats.pass + o.stats.fail + o.stats.active + o.stats.disabled + o.stats.capped, WaveFW.internal.peek(v).vis.includes(st.lane), st.g.anc.length]; });""")
+        WaveLens.internal.peek(v).namesEl.querySelector(`.row[data-r="${WaveLens.internal.peek(v).vis.indexOf(st.lane)}"]`).scrollIntoView({ block: 'center' }); v.draw();
+        return [b.assert, st.g.name, st.lane.drawn, o.kind === 'cover' ? o.attempts.length : o.stats.pass + o.stats.fail + o.stats.active + o.stats.disabled + o.stats.capped, WaveLens.internal.peek(v).vis.includes(st.lane), st.g.anc.length]; });""")
     bad = [x for x in g if x[2] != x[3] or not x[4] or x[5] != 0]
     check(len(g) == 14 and not bad and g[10][1] == '⚑ apb_demo_no_wait · 3 pass · 2 fail', f'apb: 14 assertion groups at the top of the view with their counts, bars = attempts listed {bad[:3]} {g[10][:2]}')
     # a click on the first failing bar: the attempt is selected, the cursor at its start, a red arrow with the reason
     hit = js("""const b = p.bindings.find(b => b.assert === 'apb_demo_no_wait'), st = b.draw;
-        WaveFW.internal.peek(v).namesEl.querySelector(`.row[data-r="${WaveFW.internal.peek(v).vis.indexOf(st.lane)}"]`).scrollIntoView({ block: 'center' }); v.draw();
-        const o = WaveFW.internal.peek(v).lay.find(o => o.row === st.lane), h = st.lane.hits.find(h => h[4].r === 'fail'), r = v.canvas.getBoundingClientRect();
-        return [r.left + (h[0] + h[1]) / 2, r.top + o.y - WaveFW.internal.peek(v).oy + (h[2] + h[3]) / 2, b.results.cycles[h[4].a.start]];""")
+        WaveLens.internal.peek(v).namesEl.querySelector(`.row[data-r="${WaveLens.internal.peek(v).vis.indexOf(st.lane)}"]`).scrollIntoView({ block: 'center' }); v.draw();
+        const o = WaveLens.internal.peek(v).lay.find(o => o.row === st.lane), h = st.lane.hits.find(h => h[4].r === 'fail'), r = v.canvas.getBoundingClientRect();
+        return [r.left + (h[0] + h[1]) / 2, r.top + o.y - WaveLens.internal.peek(v).oy + (h[2] + h[3]) / 2, b.results.cycles[h[4].a.start]];""")
     page.mouse.click(hit[0], hit[1])
     sel = js("""const st = p.selA.b.draw; return [p.selA.b.assert, p.selA.i, v.cursor, (st.g.arrows || []).filter(a => a.col === 'sva-fail').map(a => [a.label, a.front]),
         v.extraPicks.size, document.querySelectorAll('.wv .names .row.hl').length, p.el.querySelector('li[data-a="apb_demo_no_wait"]').innerText];""")
@@ -2920,7 +2921,7 @@ def sva_waves(browser, build):
         const out = [g.flow.filter(f => f.flag).map(f => f.flag), g.flow.filter(f => f.on === 'src').map(f => [f.s, f.fail])];
         const w = p.bindings.find(b => b.assert === 'apb_read_waits'); p.select(w, 0); v.draw();
         out.push(w.draw.g.flow.filter(f => f.flag).map(f => f.flag), w.draw.g.flow.filter(f => f.on === 'src').map(f => f.s), w.draw.g.flow.filter(f => f.on === 'cp').map(f => f.s));
-        const row = n => WaveFW.internal.peek(v).lay.find(o => o.row === w.res.map[n]), y = n => row(n).y + row(n).h / 2;
+        const row = n => WaveLens.internal.peek(v).lay.find(o => o.row === w.res.map[n]), y = n => row(n).y + row(n).h / 2;
         out.push(['PSEL', 'PREADY'].map(n => w.draw.g.flow.some(f => f.on === 'src' && Math.abs(f.y - y(n)) < 0.5)));
         out.push(w.draw.lane.marks.map(k => [k[0], k[3], k[4]]));
         p.select(b, 1); v.draw(); return out;""")
@@ -2971,7 +2972,7 @@ def sva_waves(browser, build):
     check(esc == [None, 0, False, True] and js('return p.selA && p.selA.i;') == 2, f'Esc clears the selection and Why {esc}; the second failure button selects that attempt')
     # tooltips: a circle names its step, the ✕ its reason once; a bar gives start → end
     tips = js("""const st = p.bindings.find(b => b.assert === 'apb_demo_no_wait').draw;
-        WaveFW.internal.peek(v).namesEl.querySelector(`.row[data-r="${WaveFW.internal.peek(v).vis.indexOf(st.lane)}"]`).scrollIntoView({ block: 'start' }); v.draw();
+        WaveLens.internal.peek(v).namesEl.querySelector(`.row[data-r="${WaveLens.internal.peek(v).vis.indexOf(st.lane)}"]`).scrollIntoView({ block: 'start' }); v.draw();
         const r = st.steps.find(r => r.hits.some(h => !h[1].fail)), c = r.hits.find(h => !h[1].fail), f = st.steps.map(r => r.hits.find(h => h[1].fail)).find(Boolean);
         const bar = Object.values(p.bindings).map(b => b.draw && b.draw.lane).filter(Boolean).flatMap(l => l.hits.map(h => [l, h])).find(([l, h]) => h[4].a.start !== h[4].a.end);
         return [r.tip(c[0], 0, v), f ? st.steps.find(r => r.hits.includes(f)).tip(f[0], 0, v) : '', bar ? bar[0].tip((bar[1][0] + bar[1][1]) / 2, (bar[1][2] + bar[1][3]) / 2, v) : 'no bar'];""")
@@ -3006,16 +3007,16 @@ def sva_waves(browser, build):
     page.keyboard.press('Escape')
     # sorting, find, Expand / Collapse keep the groups where they are
     js("v.setSort('desc');")
-    pos = js("""const top = WaveFW.internal.peek(v).vis.filter(r => r.type === 'sig' && !r.anc.length && !r.cls), gs = WaveFW.internal.peek(v).vis.filter(r => r.sva);
-        return [Math.max(...top.map(r => WaveFW.internal.peek(v).vis.indexOf(r))) < Math.min(...gs.map(r => WaveFW.internal.peek(v).vis.indexOf(r))), gs.length];""")
+    pos = js("""const top = WaveLens.internal.peek(v).vis.filter(r => r.type === 'sig' && !r.anc.length && !r.cls), gs = WaveLens.internal.peek(v).vis.filter(r => r.sva);
+        return [Math.max(...top.map(r => WaveLens.internal.peek(v).vis.indexOf(r))) < Math.min(...gs.map(r => WaveLens.internal.peek(v).vis.indexOf(r))), gs.length];""")
     js("v.setSort('none'); v.find('demo_no_wait');")
     found = js("return [...v.found.keys()].filter(r => r.sva).map(r => r.sva);")
     js("v.find('PREADY');")
     found += js("return [...v.found.keys()].filter(r => r.cls === 'sva-step').map(r => r.name);")
     js('v.clearFind(); v.collapseAll();')
-    col = js("return [WaveFW.internal.peek(v).vis.filter(r => r.sva).length, WaveFW.internal.peek(v).vis.filter(r => r.cls === 'sva-lane').length];")
+    col = js("return [WaveLens.internal.peek(v).vis.filter(r => r.sva).length, WaveLens.internal.peek(v).vis.filter(r => r.cls === 'sva-lane').length];")
     js('v.expandAll();')
-    exp = js("return WaveFW.internal.peek(v).vis.filter(r => r.cls === 'sva-lane').length;")
+    exp = js("return WaveLens.internal.peek(v).vis.filter(r => r.cls === 'sva-lane').length;")
     check(pos == [True, 14] and found[0] == 'apb_demo_no_wait' and '2. PREADY' in found and col == [14, 0] and exp == 14, f'sorted: the groups stay after the signals {pos}; found by step label {found}; Collapse / Expand {col} {exp}')
     # the static SVG view: two assertions (svaShow), arrows of every attempt, the legend of the steps
     svg = page.locator('.wvs svg').first.inner_html()
@@ -3031,7 +3032,7 @@ def sva_waves(browser, build):
         p.bindings.push({ assert: 'perf', scope: 'apb_tb', state: 'dump', results: { clock: 'PCLK', unit: 'ps', cycles: T, assertions: [{ name: 'perf', kind: 'assert', text: 'a |-> ##[0:2] b',
           steps: [{ id: 's1', label: 'a', role: 'ante' }, { id: 's2', label: '##[0:2] b', role: 'cons' }], stats: { attempts: n, pass: n - 172, fail: 172, vacuous: 0, active: 0, disabled: 0, capped: 0 }, attempts: at, lane: 'S'.repeat(n) }] } });
         p.redraw(); v.expandAll(); v.fit();
-        const b = p.bindings[p.bindings.length - 1]; WaveFW.internal.peek(v).namesEl.querySelector(`.row[data-r="${WaveFW.internal.peek(v).vis.indexOf(b.draw.lane)}"]`).scrollIntoView({ block: 'center' }); v.draw();
+        const b = p.bindings[p.bindings.length - 1]; WaveLens.internal.peek(v).namesEl.querySelector(`.row[data-r="${WaveLens.internal.peek(v).vis.indexOf(b.draw.lane)}"]`).scrollIntoView({ block: 'center' }); v.draw();
         const t0 = performance.now(); for (let i = 0; i < 5; i++) v.draw(); const ms = (performance.now() - t0) / 5;
         p.bindings.pop(); p.redraw(); return [ms, b.draw.lane.drawn];""")
     check(t[0] < 20 and 0 < t[1] <= 1200, f'1200 attempts on screen: a redraw in {t[0]:.1f} ms (< 20 ms), bars binned by pixel ({t[1]} attempts drawn)')
@@ -3055,10 +3056,10 @@ def sva_waves(browser, build):
     page.goto(apb_all.as_uri()); page.wait_for_load_state('networkidle')
     page.evaluate("async () => { localStorage.clear(); await SVA.loadFiles([{ name: 'apb.sv', text: %s }]); await SVA.ready(); SVA.panels()[0].bind('apb_setup_access', 'apb_tb.u_regs'); await SVA.ready(); }" % json.dumps((ROOT / 'tests' / 'sva' / 'apb.sv').read_text()))
     u = js("""const g = Object.values(v.M.groups).find(g => g.name === 'u_regs'), b = p.bindings[0], st = b.draw;
-        v.expandAll(); const kids = () => WaveFW.internal.peek(v).vis.filter(r => r.anc.includes(g.id)), own = () => kids().filter(r => r.anc[r.anc.length - 1] === g.id && r.type === 'sig' && !r.cls);
+        v.expandAll(); const kids = () => WaveLens.internal.peek(v).vis.filter(r => r.anc.includes(g.id)), own = () => kids().filter(r => r.anc[r.anc.length - 1] === g.id && r.type === 'sig' && !r.cls);
         const after = () => kids().indexOf(st.g) > Math.max(...own().map(r => kids().indexOf(r)));
         const a = [st.g.anc[st.g.anc.length - 1] === g.id, after(), st.g.name]; v.setSort('asc'); a.push(after()); v.setSort('none');
-        WaveFW.internal.peek(v).collapsed.add(g.id); v.renderNames(); a.push(WaveFW.internal.peek(v).vis.includes(st.g)); WaveFW.internal.peek(v).collapsed.delete(g.id); v.renderNames(); v.draw(); return a;""")
+        WaveLens.internal.peek(v).collapsed.add(g.id); v.renderNames(); a.push(WaveLens.internal.peek(v).vis.includes(st.g)); WaveLens.internal.peek(v).collapsed.delete(g.id); v.renderNames(); v.draw(); return a;""")
     check(u == [True, True, '⚑ apb_setup_access · 3 pass · 0 fail', True, False], f'apb_all: bound to u_regs, the group directly under the slave after its signals, also sorted; folded with it {u}')
     # the selection goes with its binding (no highlighted rows left), the group leaves the model; Clear redraws once
     gone = js("""const b = p.bindings[0], n0 = Object.keys(v.M.groups).length; p.select(b, 0); const on = v.extraPicks.size;
@@ -3098,7 +3099,7 @@ def sva_edit(browser, build):
     page.wait_for_function("(() => { const b = SVA.panels()[0].bindings.find(b => b.assert === 'apb_demo_no_wait'); return b.results && !b.running; })()"); page.evaluate('SVA.ready()')
     same = page.evaluate("SVA.panels()[0].bindings.filter(b => b.assert !== 'apb_demo_no_wait').every((b, i) => b.results === window.__keep[i])")
     marked = [e.get_attribute('data-a') for e in v.locator('.sva li[data-a]').all() if e.locator('.ed').count()]
-    steps = page.evaluate("WaveFW.internal.peek(SVA.panels()[0].v).vis.filter(r => r.cls === 'sva-step').map(r => r.name)")
+    steps = page.evaluate("WaveLens.internal.peek(SVA.panels()[0].v).vis.filter(r => r.cls === 'sva-step').map(r => r.name)")
     check(st('apb_demo_no_wait') == [[5, 0]] and same and marked == ['apb_demo_no_wait'] and '2. ##[0:2] PREADY' in steps and li.locator('textarea.src').count() == 0,
           f'ctrl+Enter applies: only its binding evaluated again ({st("apb_demo_no_wait")}, the other {others} kept), only its line marked {marked}, its steps on the waves {[s for s in steps if "PREADY" in s][:2]}')
     page.reload(); page.wait_for_load_state('networkidle'); page.evaluate('SVA.ready()')
@@ -3174,7 +3175,7 @@ def sva_report(browser, build):
     check(sel == ['apb_demo_no_wait', 2, 115000], f'the second row of the failure list selects that attempt on the waves {sel}')
     v.locator('.sva li[data-a="apb_demo_no_wait"] button[data-sv=only][data-k=pass]').click()
     flt = page.evaluate("""k => { const p = SVA.panels()[k], b = p.bindings.find(b => b.assert === 'apb_demo_no_wait'); p.v.expandAll(); p.v.fit();
-        WaveFW.internal.peek(p.v).namesEl.querySelector(`.row[data-r="${WaveFW.internal.peek(p.v).vis.indexOf(b.draw.lane)}"]`).scrollIntoView({ block: 'center' }); p.v.draw();
+        WaveLens.internal.peek(p.v).namesEl.querySelector(`.row[data-r="${WaveLens.internal.peek(p.v).vis.indexOf(b.draw.lane)}"]`).scrollIntoView({ block: 'center' }); p.v.draw();
         return [b.draw.lane.name, b.draw.lane.drawn, p.el.querySelectorAll('li[data-a="apb_demo_no_wait"] ol.atl li').length]; }""", k)
     check(flt == ['attempts: pass', 3, 3], f'a click on "3 pass": the lane shows only those attempts, listed under the line {flt}')
     v.locator('.sva li[data-a="apb_demo_no_wait"] button[data-sv=only][data-k=pass]').click()
@@ -3442,15 +3443,15 @@ def sva_bind(browser, build):
 
 
 def sva_wasm(build):
-    """wavefw/sva.wasm.js (committed) is the packed module of the current build."""
+    """wavelens/sva.wasm.js (committed) is the packed module of the current build."""
     import base64, zlib
     wasm = build / 'sva-target' / 'wasm32-unknown-unknown' / 'wasm' / 'sva_wasm.wasm'
-    js = (ROOT / 'wavefw' / 'sva.wasm.js').read_text()
+    js = (ROOT / 'wavelens' / 'sva.wasm.js').read_text()
     m = re.search(r'"size": (\d+), "deflate": "([^"]+)"', js)
     raw = zlib.decompress(base64.b64decode(m.group(2)), -15) if m else b''
-    check(m and len(raw) == int(m.group(1)) and raw[:4] == b'\0asm', f'wavefw/sva.wasm.js: a WebAssembly module, {len(raw)} B ({len(js)} B in the page)')
+    check(m and len(raw) == int(m.group(1)) and raw[:4] == b'\0asm', f'wavelens/sva.wasm.js: a WebAssembly module, {len(raw)} B ({len(js)} B in the page)')
     if need(wasm, how='make sva-build'):
-        check(raw == wasm.read_bytes(), 'wavefw/sva.wasm.js is the module of the current build (make sva-build writes it)')
+        check(raw == wasm.read_bytes(), 'wavelens/sva.wasm.js is the module of the current build (make sva-build writes it)')
 
 
 # sva eval over the example dumps (make sva-build, make examples): (pass, fail) per assertion where they are not
@@ -3511,10 +3512,10 @@ def conformance(page):
     got = page.evaluate("""[...document.querySelectorAll('.case')].map((c, i) => { const st = c.querySelector('.stock svg'), mine = c.querySelector('.mine svg'),
         tx = s => s ? [...s.querySelectorAll('text')].map(t => t.textContent.trim()).filter(Boolean).sort() : [];
         return [c.querySelector('h2').firstChild.textContent.trim(), st ? st.querySelectorAll('[id^=wavelane_draw_]').length : -1,
-                WaveFW.parse(CASES[i][1]).rows.filter(r => r.type !== 'group').length, tx(st), tx(mine)]; })""")
+                WaveLens.parse(CASES[i][1]).rows.filter(r => r.type !== 'group').length, tx(st), tx(mine)]; })""")
     check(len(got) == 11, f'conformance: {len(got)} cases')
     for title, lanes, rows, stock, mine in got:
-        diff = '' if stock == mine else f': only in stock {sorted(set(stock) - set(mine))}, only in wavefw {sorted(set(mine) - set(stock))}, {len(stock)} / {len(mine)} texts'
+        diff = '' if stock == mine else f': only in stock {sorted(set(stock) - set(mine))}, only in wavelens {sorted(set(mine) - set(stock))}, {len(stock)} / {len(mine)} texts'
         check(lanes == rows and stock == mine, f'conformance "{title}": {rows} lanes ({lanes} in stock WaveDrom), the same texts{diff}')
 
 
@@ -3709,11 +3710,11 @@ def buses(browser, build):
         check(got.get(k) == w, f'{k}: {w[0]}: the transfers, their errors and cycles {got.get(k)}')
     # a click on a transaction (on the folded group's header): the cursor at its start, its range, its signals highlighted
     sel = page.evaluate("""(() => { const v = document.querySelector('.wv').waveView, p = v.buses.list().find(p => p.proto === 'apb'), x = p.D.tx[1];
-        v.buses.select(p, x); return [v.cursor === x.t0, v.range && v.range[0] === x.t0 && v.range[1] === x.t1, v.extraPicks.size, WaveFW.internal.peek(v).vis.some(r => r === v.buses.st.get(p.key).g)]; })()""")
+        v.buses.select(p, x); return [v.cursor === x.t0, v.range && v.range[0] === x.t0 && v.range[1] === x.t1, v.extraPicks.size, WaveLens.internal.peek(v).vis.some(r => r === v.buses.st.get(p.key).g)]; })()""")
     c = page.locator('.wv canvas').first; c.focus(); page.evaluate("document.querySelector('.wv').waveView.cursor = 0")
     page.keyboard.press(']'); page.keyboard.press('t'); t1 = page.evaluate("document.querySelector('.wv').waveView.cursor")
     check(sel[:2] == [True, True] and sel[2] >= 8 and sel[3] and t1 == 20000, f'a transaction selected: the cursor at its start, its range measured, its signals highlighted; ]t: the first one {sel} {t1}')
-    svg = page.evaluate("WaveFW.WaveSVG.toString(WAVES[Object.keys(WAVES)[0]])")
+    svg = page.evaluate("WaveLens.WaveSVG.toString(WAVES[Object.keys(WAVES)[0]])")
     check(svg.count('⇄') >= 9 and 'W 0x100' in svg, f'the static SVG draws the ports and their transactions ({svg.count("⇄")} ports)')
     check(not errs, 'no page errors (buses)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
     for ex, want2 in (('apb/apb.html', ['W 0x4 ← 0xcafe0001', 'R 0x4 → 0xcafe0001', 'W 0x40 ← 0xdeadbeef !']), ('axi_lite/axi_lite.html', ['W 0x8 ← 0x1234abcd', 'R 0x8 → 0x1234abcd'])):
@@ -3726,8 +3727,8 @@ def buses(browser, build):
 
 
 # the assertion list starts folded (svaOpen: false); the sections that work in it open it through the settings file
-# hook (window.WAVEFW_CONFIG, as a page's wavefw.config.js would): every page of these contexts gets svaOpen: true
-SVA_OPEN = """(() => { let c = { svaOpen: true }; Object.defineProperty(window, 'WAVEFW_CONFIG', { configurable: true,
+# hook (window.WAVELENS_CONFIG, as a page's wavelens.config.js would): every page of these contexts gets svaOpen: true
+SVA_OPEN = """(() => { let c = { svaOpen: true }; Object.defineProperty(window, 'WAVELENS_CONFIG', { configurable: true,
     get: () => c, set: v => { c = Object.assign({}, v, { svaOpen: true }); } }); })()"""
 PLAIN = {}
 
@@ -3766,7 +3767,7 @@ def tips(browser, build):
     check([l[0] for l in lines] == ['time', 'find', 'expr', 'rows'] and got['time'][:3] == ['cursor', 'view', 'edges'] and got['find'] == ['find'] and got['expr'] == ['expression']
           and got['rows'] == ['list', 'style', 'state', 'dump', 'assertions'] and len({l[2] for l in lines}) == 4,
           f'the bar: one line per kind (time, find, expression, rows and files), the plugins\' groups on theirs {lines}')
-    miss = page.evaluate("""[...document.querySelector('.wv').querySelectorAll('button, input:not([type=file]), select, .mk')].filter(e => !WaveFW.tips.of(e)).map(e => e.outerHTML.slice(0, 80))""")
+    miss = page.evaluate("""[...document.querySelector('.wv').querySelectorAll('button, input:not([type=file]), select, .mk')].filter(e => !WaveLens.tips.of(e)).map(e => e.outerHTML.slice(0, 80))""")
     check(not miss, f'every button, field and list of a viewer (bar, assertions, bookmarks) has a tooltip (missing: {miss[:5]})')
     b = page.locator('.wv button[data-act=in]').first; b.hover(); until(page, "!!document.querySelector('.wv-tip')")
     tip = page.locator('.wv-tip')
@@ -3817,11 +3818,11 @@ def spike(browser, build):
 
 SECTIONS = {   # section: what it checks (smoke.py --list)
     'pages': 'every page in both schemes: no console errors, no error boxes, drawn canvases, static SVGs, a PNG',
-    'units': 'the pure functions of the viewer (WaveFW.internal), the VCD reader, the bus decoders, sva.js expressions: a table of cases',
+    'units': 'the pure functions of the viewer (WaveLens.internal), the VCD reader, the bus decoders, sva.js expressions: a table of cases',
     'readers': 'the page\'s VCD reader against the tools\' on every fixture of tests/unit/vcd (one rule, the same transitions)',
     'vscode': 'the VS Code extension\'s tab (host.js, its CSP) with a fake VS Code: the dump, the store, save, pick, clipboard, reload, live',
     'docs': 'docs/index.html: cursor, zoom, sorting, settings, styles, highlight, cursor fields, themes, bookmarks',
-    'sva_docs': 'docs/index.html: the assertions section and the unit checks of wavefw/sva.js',
+    'sva_docs': 'docs/index.html: the assertions section and the unit checks of wavelens/sva.js',
     'conformance': 'tests/conformance.html against stock WaveDrom: lanes and texts per case',
     'hierarchy': 'the synthetic page (and work/test_stream_video.html): scopes as groups, highlight, Collapse / Expand, "same"',
     'find': 'the synthetic page (and work/test_stream_video.html): fuzzy find, Open, Paint, Copy, Esc, n / N',
@@ -3831,8 +3832,8 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'fst': 'BUILD/demo_fst.html (make demo-fst): FSM state names and hierarchy from the FST',
     'examples': 'the example pages (make examples): bookmarks, arrows, colours, state names, their assertions',
     'big': 'every built page: redraw time, Sort',
-    'wavefw': 'wavefw.js is the concatenation of wavefw/src/*.js; the pure functions (parse, fuzzy, decode, sortRows, fmtTime, parseT)',
-    'api_docs': 'docs/index.html § API made from the exports of WaveFW, the viewer methods, every default setting',
+    'wavelens': 'wavelens.js is the concatenation of wavelens/src/*.js; the pure functions (parse, fuzzy, decode, sortRows, fmtTime, parseT)',
+    'api_docs': 'docs/index.html § API made from the exports of WaveLens, the viewer methods, every default setting',
     'plugin_api': 'the plugin API: tokens, tools, panels, rows, marks, listeners, keys, events, plugin groups, enums by path; sva.js on it only',
     'viewer': 'stage 9.4: keys, wheel, exact cursor, buttons, value tip, storage keys, data-theme, long values, find, destroy, keyboard, click time, Esc folding, print',
     'spike': 'BUILD/sva/spike.html (make sva-spike): the WebAssembly engine in a page',
@@ -3840,7 +3841,7 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'sva_hardening': 'stage 6.1 on the example pages',
     'sva_waves': 'stage 7: the assertion groups on the waves',
     'sva_exprs': 'stage 10: expressions in the bar (search, rows ƒ, kept, JSON), names in a hierarchy',
-    'dump': 'a VCD opened in the page (Open…, dropped on a viewer), ⟳, wavefw/viewer.html',
+    'dump': 'a VCD opened in the page (Open…, dropped on a viewer), ⟳, wavelens/viewer.html',
     'state': 'Save / Load… of a viewer (the APB and AXI-Lite pages): its state to a file and back, on other waves',
     'edit': 'the viewer\'s commands, a page\'s edits (tools/viewedit.py) with the same state, your groups and markers, a page live through wavemcp.py',
     'view_review': 'the review of 0.15: Clear keeps markers, cycleZero a time, a run lays out before a picture, undo after a lost release, rows of '
@@ -3856,13 +3857,13 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'sva_report': 'stage 8: the report against sva eval',
     'sva_edit': 'an assertion edited in the page (✎, Apply, kept, Revert, a bad text) and read from the disk again (⟳, Watch)',
     'sva_report_hardening': 'stage 8.1: names, aliases, recovery, caps, print, mkconfig --update, make html SVA=',
-    'sva_wasm': 'wavefw/sva.wasm.js is the module of the current build (make sva-build)',
+    'sva_wasm': 'wavelens/sva.wasm.js is the module of the current build (make sva-build)',
     'sva_third_party': 'tests/sva/third_party over the example dumps (sva eval)',
     'sva_eval': 'sva eval over the example dumps: only the deliberate failures fail',
 }
 
 
-VERSION = re.search(r"version: '([^']+)'", (ROOT / 'wavefw' / 'src' / 'boot.js').read_text()).group(1)
+VERSION = re.search(r"version: '([^']+)'", (ROOT / 'wavelens' / 'src' / 'boot.js').read_text()).group(1)
 
 
 def main():
@@ -3899,7 +3900,7 @@ def main():
         sva_open(b)
         for path in PAGES + BUILT:
             tsv = path.name == 'test_stream_video.html'
-            own = (['docs', 'sva_docs', 'viewer', 'wavefw', 'plugin_api', 'api_docs'] if path == PAGES[0] else ['conformance'] if path == PAGES[1] else
+            own = (['docs', 'sva_docs', 'viewer', 'wavelens', 'plugin_api', 'api_docs'] if path == PAGES[0] else ['conformance'] if path == PAGES[1] else
                    ['hierarchy', 'find', 'deep', 'viewer'] + (['modules', 'bar_tools'] if path == synth else []) if path == synth or tsv else ['fst'] if path.name == 'demo_fst.html' else
                    ['examples'] if path.stem in EXAMPLES or path.stem == 'fsm_all' else [])
             own += ['big'] if path in BUILT else []
@@ -3919,15 +3920,15 @@ def main():
                 errs = [e for e in errs if 'fonts.g' not in e]   # offline Google Fonts is not a page error
                 if want('pages'):
                     check(not errs, 'no console/page errors' + (': ' + ' | '.join(errs[:3]) if errs else ''))
-                    check(page.locator('.wvf-err').count() == 0, 'no wavefw error boxes')
+                    check(page.locator('.wvf-err').count() == 0, 'no wavelens error boxes')
                     n = page.locator('.wv canvas').count()
                     blank = page.evaluate('''() => [...document.querySelectorAll('.wv canvas')].filter(c => c.width === 0 || c.height === 0).length''')
                     check(n > 0 and blank == 0, f'{n} viewers, all canvases drawn')
                     if path not in BUILT:
                         check(page.locator('.wvs svg').count() > 0, f'{page.locator(".wvs svg").count()} static SVGs')
-                stale = path in user and page.evaluate('window.WaveFW && WaveFW.version') != VERSION
-                if stale:   # the user's page, built with another wavefw.js: the general checks only
-                    print(f'  note: {path.name} was built with wavefw {page.evaluate("window.WaveFW && WaveFW.version")}, this is {VERSION}: rebuild it (make html WAVES=…) for the rest')
+                stale = path in user and page.evaluate('window.WaveLens && WaveLens.version') != VERSION
+                if stale:   # the user's page, built with another wavelens.js: the general checks only
+                    print(f'  note: {path.name} was built with wavelens {page.evaluate("window.WaveLens && WaveLens.version")}, this is {VERSION}: rebuild it (make html WAVES=…) for the rest')
                 if scheme == 'light' and not stale:
                     if path == PAGES[0]:
                         for fn in (interact, sorting, settings, styles, highlight, cursor, themes, bookmarks):
@@ -3935,7 +3936,7 @@ def main():
                         run('sva_docs', sva_docs, page)
                         run('sva_docs', sva_units, page)
                         run('viewer', viewer, page)
-                        run('wavefw', wavefw_units, page)
+                        run('wavelens', wavelens_units, page)
                         run('viewer', viewer_fixes, page)
                         run('plugin_api', plugin_api, page)
                         run('api_docs', api_docs, page)

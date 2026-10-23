@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Gaps · wavefw guides</title>
+<title>Gaps · WaveLens guides</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap">
 <link rel="stylesheet" href="guide.css">
@@ -24,9 +24,11 @@
 </head>
 <body>
 <header class="top"><nav>
-  <a class="home" href="index.html">wavefw guides</a>
-  <a href="pages.html">Dump → page</a> <a href="viewer.html">Viewer</a> <a href="gaps.html" aria-current="page">Gaps</a> <a href="sva.html">Assertions</a>
-  <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
+  <a class="home" href="index.html">WaveLens guides</a>
+  <a href="pages.html">Dump → page</a> <a href="viewer.html">Viewer</a> <a href="modules.html">Modules</a>
+  <a href="compare.html">Compare</a> <a href="gaps.html" aria-current="page">Gaps</a> <a href="sva.html">Assertions</a>
+  <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="vscode.html">VS Code</a>
+  <a href="commands.html">Commands</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
 </nav></header>
 <div class="page toc-side">
 <main>
@@ -295,8 +297,8 @@
       "data": ["0x00", "0x11", "0x22", "0x33", "0x44", "0xA0", "0xA1", …] },
     …</code></pre>
 <figure>
-  <img src="img/gaps-wavedrom.png" alt="The exported WaveJSON drawn by wavefw's static SVG" loading="lazy">
-  <figcaption><b>The export drawn by wavefw</b> (<code>WaveSVG</code>): each <code>|</code> cell is a break.</figcaption>
+  <img src="img/gaps-wavedrom.png" alt="The exported WaveJSON drawn by WaveLens's static SVG" loading="lazy">
+  <figcaption><b>The export drawn by WaveLens</b> (<code>WaveSVG</code>): each <code>|</code> cell is a break.</figcaption>
 </figure>
 <figure>
   <img src="img/gaps-stock.png" alt="The first 2.3 µs of the export drawn by stock WaveDrom 3.5" loading="lazy">
@@ -305,7 +307,7 @@
 </figure>
 <div class="note"><p>The viewer's WaveJSON has no time axis: the foot lists what each break left out. <code>vcd2wavedrom.py</code> writes the
   <code>"time"</code> extension with <code>"skip": [[k, n]]</code> instead (the <code>|</code> cell at index <i>k</i> stands for <i>n</i> cycles), so
-  wavefw draws its axis in real time; stock WaveDrom ignores it.</p></div>
+  WaveLens draws its axis in real time; stock WaveDrom ignores it.</p></div>
 
 <h2 id="static">Gaps in the static SVG of a page</h2>
 <p>A static figure (<code>"render": "svg"</code> view, <code>data-mode="svg"</code>, <code>&lt;script type="WaveDrom"&gt;</code>) cuts its gaps
@@ -346,7 +348,7 @@ last  0.............10..|...1.0..........10..|........10..|....10..|..
 
 <h2 id="state">Where the gap settings live</h2>
 <ul>
-  <li><b>The settings</b> (global <code>wavefw.config.js</code>, a config's <code>"config"</code>, a view's <code>"config"</code>, the element's
+  <li><b>The settings</b> (global <code>wavelens.config.js</code>, a config's <code>"config"</code>, a view's <code>"config"</code>, the element's
     <code>data-config</code>) give the starting values — by default no gaps.</li>
   <li><b>The menu</b> changes them for this viewer only; they are kept in this browser (with the viewer's look) and come back after a reload.</li>
   <li><b>Save</b> in the bar writes them into the viewer's state (<code>.view.json</code>, its <code>"config"</code>), <b>Load…</b> reads them back;
@@ -393,7 +395,7 @@ last  0.............10..|...1.0..........10..|........10..|....10..|..
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>wavefw 0.11 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.18 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

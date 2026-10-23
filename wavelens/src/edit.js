@@ -1,4 +1,4 @@
-/* wavefw/src/edit.js — the viewer's commands (view.run: what its buttons, menus and lists do, by name), your groups and
+/* wavelens/src/edit.js — the viewer's commands (view.run: what its buttons, menus and lists do, by name), your groups and
    markers, the edits a page carries (tools/viewedit.py) and the live link to an agent (tools/wavemcp.py view_live). */
 
 /* ---------------- commands ---------------- */
@@ -10,7 +10,7 @@
 // pattern, alone, in a list or as a text with commas. A name that matches nothing, or several signals where no pattern
 // says so, is an error.
 const CMDS = {};
-// args: "name? other": the arguments (? optional), for the list (WaveFW.commands()) and the check of unknown ones
+// args: "name? other": the arguments (? optional), for the list (WaveLens.commands()) and the check of unknown ones
 function command(name, args, doc, run) {
   CMDS[name] = { args, keys: args.split(/\s+/).filter(Boolean).map(k => k.replace(/\?$/, '')), doc, run };
 }
@@ -97,7 +97,8 @@ command('range', 'from? to? signal?', 'the measured range (Δ, the edges or chan
   return { range: v.range, text: v.rangeText() };
 });
 command('bookmark', 'n? t? signal? text? color? lift? delete?', 'a numbered circle on a signal (none: the time axis) with its text: a new one ' +
-  '(n free or left out, t default the cursor) or bookmark n changed; lift: above its signal in a lane; delete: n or "all" (their arrows go too)', (v, a) => {
+  '(n free or left out, t default the cursor) or bookmark n changed; lift: above its signal in a lane; delete: bookmark n goes ' +
+  '(n "all": every one, with the arrows)', (v, a) => {
   if (a.n != null && !(a.n === 'all' && a.delete) && !isNum(a.n)) fail(`n: a bookmark number (1, 2 …), not ${JSON.stringify(a.n)}`);
   if (a.delete) {
     if (a.n === 'all') { v.bms = []; v.arrows = []; v.changed(true); return { deleted: 'all' }; }
@@ -356,7 +357,7 @@ Object.assign(WaveView.prototype, {
     } finally {
       if (own) { const h = this.held; this.held = null; if (h.names) this.renderNames(); if (h.notes) this.renderNotes(); if (h.draw || h.names) this.draw(); }
     }
-    this.root.dispatchEvent(new CustomEvent('wavefw:edit', { detail: { ops: list, results: out } }));
+    this.root.dispatchEvent(new CustomEvent('wavelens:edit', { detail: { ops: list, results: out } }));
     if (own && !list.every(o => o && READ_CMDS.has(o.op))) this.undoTick();   // a batch that changes something (yours, a script's, an agent's) is one step
     return out;
   },
@@ -396,7 +397,7 @@ Object.assign(WaveView.prototype, {
   // a snapshot A back over the current one B: only what differs (the rest is not touched); the highlight with its colours;
   // the place in the find's matches kept -> what changed
   async undoApply(A, B) {
-    const diff = (a, b) => JSON.stringify(a) !== JSON.stringify(b), st = { wavefw: 'state', version: STATE_VERSION, config: {} };
+    const diff = (a, b) => JSON.stringify(a) !== JSON.stringify(b), st = { wavelens: 'state', version: STATE_VERSION, config: {} };
     for (const k of UNDO_KEYS) if (diff(A[k], B[k])) st[k] = A[k];
     if ('bookmarks' in st || 'arrows' in st) { st.bookmarks = A.bookmarks; st.arrows = A.arrows; }   // setState takes the two together
     for (const k of Object.keys(A.config)) if (diff(A.config[k], B.config[k])) st.config[k] = A.config[k];
@@ -529,11 +530,11 @@ Object.assign(WaveView.prototype, {
 });
 
 /* ---------------- the edits a page carries (tools/viewedit.py; wavemcp.py view_edit on a page that is not live) ---------------- */
-// <script type="application/json" id="wavefw-edits">{"views": {"<key>": {"rev": "…", "state": {…}}}}</script>: per viewer
+// <script type="application/json" id="wavelens-edits">{"views": {"<key>": {"rev": "…", "state": {…}}}}</script>: per viewer
 // (its key: the data-wave name under WAVES, else its id or title) a state of the keys the edits touched ("folds": the
 // groups they folded or opened). What this browser keeps of a viewer (bookmarks, arrows, markers, groups, colours,
 // radix, hidden rows, the edge style, the gaps) a revision replaces once: the browser keeps the revision it applied
-// (wavefw.edits:<page>), so what you change here afterwards stays until a newer one (Save keeps yours in a file). The
+// (wavelens.edits:<page>), so what you change here afterwards stays until a newer one (Save keeps yours in a file). The
 // rest (cursor, window, highlight, selection, folding, order, search), which a page opened again starts from anyway,
 // is applied every time, as the page's own settings are.
 const KEPT = ['bookmarks', 'arrows', 'markers', 'groups', 'paint', 'radix', 'analog', 'hidden'];
@@ -575,12 +576,12 @@ if (typeof document !== 'undefined') {
 let EDITS;
 function pageEdits() {
   if (EDITS !== undefined) return EDITS;
-  const el = typeof document !== 'undefined' && document.getElementById('wavefw-edits');
+  const el = typeof document !== 'undefined' && document.getElementById('wavelens-edits');
   try { EDITS = el ? JSON.parse(el.textContent).views || {} : null; }
-  catch (e) { console.error('wavefw: the page\'s edits are not JSON: ' + e.message); EDITS = null; }
+  catch (e) { console.error('wavelens: the page\'s edits are not JSON: ' + e.message); EDITS = null; }
   return EDITS;
 }
-// Save page (the bar's, WaveFW.savePage): the page as it was read (PAGE.src, boot.js) with every viewer's state in its
+// Save page (the bar's, WaveLens.savePage): the page as it was read (PAGE.src, boot.js) with every viewer's state in its
 // edits — the block tools/viewedit.py writes, a new revision per viewer — so whoever opens the file sees what you see. Done
 // on the page parsed again (its elements, not its text): the live link and its token out, the edits one block at the top
 // of <head> (there before any viewer asks), <html>'s own style back. A viewer of a dump opened in the page is not in it
@@ -592,13 +593,13 @@ function pageText() {
   for (const v of [...VIEWS].filter(x => x.root.isConnected && !x.opts.dumpSrc)) {
     const key = v.editKey(); if (seen.has(key)) fail(`two viewers of the same waves (${key}): the page keeps one state for them`); seen.add(key);
     const old = String((views[key] || {}).rev || ''), m = /^r(\d+)@/.exec(old), st = v.state();
-    delete st.wavefw; delete st.version; delete st.title;
+    delete st.wavelens; delete st.version; delete st.title;
     views[key] = { rev: `r${m ? +m[1] + 1 : 1}@${when}`, state: st };
   }
   if (!seen.size) fail('no viewer of this page\'s own waves (a dump opened in it is not in the page: Save keeps its view)');
   const doc = new DOMParser().parseFromString(PAGE.src, 'text/html'), h = doc.documentElement;
-  doc.querySelectorAll('[id="wavefw-live"], [id="wavefw-edits"]').forEach(e => e.remove());
-  const el = doc.createElement('script'); el.type = 'application/json'; el.id = 'wavefw-edits'; el.textContent = jsonBlock({ views });
+  doc.querySelectorAll('[id="wavelens-live"], [id="wavelens-edits"]').forEach(e => e.remove());
+  const el = doc.createElement('script'); el.type = 'application/json'; el.id = 'wavelens-edits'; el.textContent = jsonBlock({ views });
   doc.head.prepend(doc.createTextNode('\n'), el, doc.createTextNode('\n'));   // on a line of its own: viewedit.py finds it there
   if (PAGE.style == null) h.removeAttribute('style'); else h.setAttribute('style', PAGE.style);
   return PAGE.doctype + h.outerHTML + '\n';
@@ -616,7 +617,7 @@ Object.assign(WaveView.prototype, {
     return ref ? ref.replace(/^WAVES\[(".*")\]$/, (m, s) => JSON.parse(s)).replace(/^WAVES\./, '') : this.opts.key || this.root.id || this.M.title || '';
   },
   async applyEdits() {
-    const E = pageEdits(), e = E && E[this.editKey()], key = 'wavefw.edits:' + this.storeId;
+    const E = pageEdits(), e = E && E[this.editKey()], key = 'wavelens.edits:' + this.storeId;
     if (!e || !e.state) return null;
     let st = e.state, seen = false;
     try { seen = localStorage.getItem(key) === String(e.rev); } catch (err) { /* no storage: all of it every time */ }
@@ -627,7 +628,7 @@ Object.assign(WaveView.prototype, {
       if (!Object.keys(st).length) return null;
     }
     try {
-      const miss = await this.setState(Object.assign({ wavefw: 'state', version: STATE_VERSION }, st));
+      const miss = await this.setState(Object.assign({ wavelens: 'state', version: STATE_VERSION }, st));
       const c = st.cursor;   // a cursor the edits put outside the window: the window follows (as the cursor command)
       if (c != null && st.from == null && (this.cursor < this.t0 || this.cursor > this.t0 + this.span)) {
         this.t0 = this.clamp(this.cursor - this.span / 2); this.draw(); }
@@ -640,12 +641,12 @@ Object.assign(WaveView.prototype, {
 });
 
 /* ---------------- live: this page's viewers driven by an agent (tools/wavemcp.py view_live) ---------------- */
-// WaveFW.live('8742:<token>' or 'http://127.0.0.1:8742/?token=…'); a page that carries the link (view_live writes
-// <script type="application/json" id="wavefw-live">{"port", "token"}</script>) or is opened with #wavefw-live=8742:<token>
+// WaveLens.live('8742:<token>' or 'http://127.0.0.1:8742/?token=…'); a page that carries the link (view_live writes
+// <script type="application/json" id="wavelens-live">{"port", "token"}</script>) or is opened with #wavelens-live=8742:<token>
 // connects by itself. The page says which viewers it has (POST /hello), takes commands as server-sent events (GET
 // /events: {rid, view, ops}) and answers each with the results of view.run (POST /reply). Plain-text bodies (no CORS
 // preflight), the token in every request; the server listens on 127.0.0.1 only. No agent there: five tries, then the
-// button in the bar (○ live) tries again. WaveFW.live(null): off. The page's path is its file's, or WAVEFW_PATH (the VS Code
+// button in the bar (○ live) tries again. WaveLens.live(null): off. The page's path is its file's, or WAVELENS_PATH (the VS Code
 // extension's tab: the dump's path on the host).
 const LIVE = { es: null, base: '', q: '', on: false, url: null, fails: 0 };
 function liveUrl(s) {
@@ -664,7 +665,7 @@ function liveViews() {
 let liveT = 0;
 function liveHello() {   // the viewers again (a lazy one built, a dump opened): once per frame
   if (!LIVE.es || liveT) return;
-  liveT = setTimeout(() => { liveT = 0; if (LIVE.es) livePost('hello', { path: G.WAVEFW_PATH || decodeURIComponent(location.pathname),
+  liveT = setTimeout(() => { liveT = 0; if (LIVE.es) livePost('hello', { path: G.WAVELENS_PATH || decodeURIComponent(location.pathname),
     url: location.href.split('#')[0], title: document.title, views: liveViews() }); }, 0);
 }
 function liveShow() {

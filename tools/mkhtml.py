@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""mkhtml.py — build one self-contained HTML page (wavefw.css + wavefw.js + data inlined) that opens anywhere.
+"""mkhtml.py — build one self-contained HTML page (wavelens.css + wavelens.js + data inlined) that opens anywhere.
 
   mkhtml.py --config dump.config.json --out dump.html            # run every view of the config -> page
   mkhtml.py --config cfg.json --view exact --waves other.vcd ...  # some views only, another dump
@@ -7,7 +7,7 @@
   mkhtml.py --config x.config.json --sva checks.sv --bind a_req_ack@tb.dut --out x.html   # assertions bound (make html SVA= BIND=)
 
 Config keys used here (the rest is vcd2wavedrom.py's, see its --help):
-  "config"  global wavefw settings for the page: theme, colors, rowHeight, nameWidth, fontSize, sort, sortIgnore, …
+  "config"  global wavelens settings for the page: theme, colors, rowHeight, nameWidth, fontSize, sort, sortIgnore, …
   "page"    {"title": "...", "intro": "..."}
   views[k]  "render": "view" (interactive, default) | "svg" (static figure) | "both"; "note": text under the heading
   "sva"     ["checks.sv", …] (top level or in a view) SystemVerilog assertion files: parsed with the sva CLI (one
@@ -25,7 +25,7 @@ sys.path.insert(0, HERE)   # -I drops the script dir from sys.path
 import svabuild, vcd2wavedrom, wavejson  # noqa: E402
 from common import WaveError, add_sva_bin_arg, check_config, run_main  # noqa: E402
 
-FW = os.path.join(os.path.dirname(HERE), 'wavefw')   # the framework files inlined into the page
+FW = os.path.join(os.path.dirname(HERE), 'wavelens')   # the framework files inlined into the page
 
 PAGE = '''<!doctype html>
 <html lang="en"{theme}>
@@ -73,7 +73,7 @@ button.theme:hover {{ border-color: var(--accent); color: var(--accent); }}
   <div class="facts">{facts}</div>
 </header>
 {sections}
-<script>window.WAVEFW_CONFIG = {settings};</script>
+<script>window.WAVELENS_CONFIG = {settings};</script>
 <script>
 window.WAVES = {data};
 </script>
@@ -84,7 +84,7 @@ window.WAVES = {data};
 (function () {{ // page theme button: auto -> light -> white -> dark
   const b = document.getElementById('theme'), modes = ['auto', 'light', 'white', 'dark'];
   let i = Math.max(0, modes.indexOf(document.documentElement.dataset.theme || 'auto'));
-  b.addEventListener('click', () => {{ i = (i + 1) % modes.length; WaveFW.setTheme(modes[i]); b.textContent = 'Theme: ' + modes[i]; }});
+  b.addEventListener('click', () => {{ i = (i + 1) % modes.length; WaveLens.setTheme(modes[i]); b.textContent = 'Theme: ' + modes[i]; }});
 }})();
 </script>
 </body>
@@ -195,9 +195,9 @@ def render_page(a, cfg, docs, renders, sva_views, with_sva, sva_files, sva_notes
         n = sum(len((f.get('parsed') or {}).get('assertions', [])) for f in sva_files)
         facts.insert(3, ('Assertions', f'{n} in {", ".join(f["name"] for f in sva_files)}' if n else ', '.join(f['name'] for f in sva_files)))
     theme = settings.get('theme')
-    with open(os.path.join(FW, 'wavefw.css'), encoding='utf-8') as f:
+    with open(os.path.join(FW, 'wavelens.css'), encoding='utf-8') as f:
         css = f.read()
-    with open(os.path.join(FW, 'wavefw.js'), encoding='utf-8') as f:
+    with open(os.path.join(FW, 'wavelens.js'), encoding='utf-8') as f:
         js = f.read()
     safe = script_json   # every "<" of the data as <: "</script>" and "<!--<script>" in a value do not end or swallow the page
     with open(os.path.join(FW, 'bus.js'), encoding='utf-8') as f:   # bus transactions: always (a few kB)
@@ -262,7 +262,7 @@ def main():
     add_sva_bin_arg(ap)
     ap.add_argument('--sva', action='append', metavar='FILE', help='assertion file for every view (repeatable; replaces the config\'s top-level "sva")')
     ap.add_argument('--bind', action='append', metavar='NAME@SCOPE', help='binding for every view (repeatable, NAME may be a pattern; replaces the top-level "bind")')
-    ap.add_argument('--no-sva', action='store_true', help='leave the assertion engine (wavefw/sva.js + sva.wasm.js, ~410 kB) out of the page, and evaluate nothing')
+    ap.add_argument('--no-sva', action='store_true', help='leave the assertion engine (wavelens/sva.js + sva.wasm.js, ~410 kB) out of the page, and evaluate nothing')
     ap.add_argument('--reproducible', action='store_true', help='no "Generated" time in the page: the same inputs give the same bytes '
                     '(or set SOURCE_DATE_EPOCH: that time, in UTC)')
     ap.add_argument('--out', required=True, help='output .html')

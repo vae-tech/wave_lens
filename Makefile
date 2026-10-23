@@ -1,6 +1,6 @@
-# wavefw — demo flow: Verilator VCD -> vcd2wavedrom.py -> WaveDrom JSON -> docs/demo_waves.js (loaded by docs/index.html)
+# wavelens — demo flow: Verilator VCD -> vcd2wavedrom.py -> WaveDrom JSON -> docs/demo_waves.js (loaded by docs/index.html)
 # Build products live under BUILD (default out/ in the repository, git-ignored: the cargo target, the example dumps and
-# pages, the smoke shots). On a slow mount (the repository on /mnt/c under WSL) make BUILD=/tmp/wavefw … builds faster.
+# pages, the smoke shots). On a slow mount (the repository on /mnt/c under WSL) make BUILD=/tmp/wavelens … builds faster.
 # make dist: the prebuilt sva CLI under bin/ (Linux committed: a clone works without Rust; Windows needs mingw-w64).
 # make check is the gate before a commit: the engine's tests, the unit tests, everything smoke needs, smoke --strict,
 # the screenshots made again (a broken one fails).
@@ -24,9 +24,9 @@ V2W := $(PY) tools/vcd2wavedrom.py --config $(DEMO_CONFIG) --waves $(VCD)
 #   make html WAVES=work/x.vcd   -> work/x.html (makes work/x.config.json first if it does not exist yet)
 #   make html WAVES=x.vcd SVA="checks/*.sv" BIND="a_req_ack@tb.dut,apb_*@tb.u_apb"   assertions bound and evaluated
 #   make config WAVES=x.vcd SVA="checks/*.sv"   the config gets "sva" and a "bind" line per matching instance
-#   WAVES may be a VCD or an FST (FST needs GTKWave's fst2vcd for order / change counts / enum labels).
+#   WAVES may be a VCD or an FST (read by GTKWave's fst2vcd, else by the sva CLI of bin/: the same text, enums too).
 #   FSM state names: an FST brings its enum tables; for a VCD add SV="rtl/*.sv" (typedef enum in the sources).
-# make html: one self-contained page (wavefw.css/js + data inlined) from every view of CONFIG.
+# make html: one self-contained page (wavelens.css/js + data inlined) from every view of CONFIG.
 #   make html                                demo dump -> $(BUILD)/demo.html
 #   make html CONFIG=work/dump.config.json   a hand-written config -> work/dump.html (or HTML=…)
 BASE ?= tools/base.config.json
@@ -50,8 +50,8 @@ help:
 	@echo 'make html       one self-contained page: the demo, CONFIG=work/x.config.json, or WAVES=work/x.vcd (config made if missing);'
 	@echo '                SVA="checks/*.sv" BIND="name@scope,…": assertions bound, evaluated, an Assertions section'
 	@echo 'make config     WAVES=work/x.vcd: write or update work/x.config.json (every signal, your edits kept); SVA=…: "bind" lines'
-	@echo 'make wavefw     wavefw/wavefw.js from wavefw/src/*.js (the page needs one file: run it after editing the sources)'
-	@echo 'make sva-build  the SVA engine (sva/, Rust): native CLI $$(BUILD)/sva-target/release/sva + sva_wasm.wasm -> wavefw/sva.wasm.js'
+	@echo 'make wavelens   wavelens/wavelens.js from wavelens/src/*.js (the page needs one file: run it after editing the sources)'
+	@echo 'make sva-build  the SVA engine (sva/, Rust): native CLI $$(BUILD)/sva-target/release/sva + sva_wasm.wasm -> wavelens/sva.wasm.js'
 	@echo 'make dist       the prebuilt sva CLI: dist-linux (bin/linux-x86_64/sva, static, committed) and dist-windows'
 	@echo 'make dist-linux    bin/linux-x86_64/sva (musl, static)'
 	@echo 'make dist-windows  bin/windows-x86_64/sva.exe (needs mingw-w64: sudo apt install mingw-w64)'
@@ -60,8 +60,8 @@ help:
 	@echo 'make sva-examples  sva parse + sva eval of the assertion files of examples/ (apb, axi_lite, fsm; after make examples)'
 	@echo 'make sva-verify the checkers of the examples in Verilator --assert against sva eval (after make examples; skipped without verilator)'
 	@echo 'make sva-eval   WAVES=dump.vcd|fst SVA="pkg.sv checks.sva" SCOPE=tb.dut [OUT=results.json] [ARGS=...]: sva eval'
-	@echo 'make sva-spike  the spike page $$(BUILD)/sva/spike.html (the WebAssembly build and wavefw/sva.js in a page)'
-	@echo 'make vsix       the VS Code extension (vscode/) -> $$(BUILD)/wavefw-<version>.vsix: the viewer and the static sva, for the'
+	@echo 'make sva-spike  the spike page $$(BUILD)/sva/spike.html (the WebAssembly build and wavelens/sva.js in a page)'
+	@echo 'make vsix       the VS Code extension (vscode/) -> $$(BUILD)/wavelens-<version>.vsix: the viewer and the static sva, for the'
 	@echo '                Linux host of Remote-SSH / WSL (nothing else installed there; code --install-extension FILE there)'
 	@echo 'make vscode-e2e the extension (vscode/) in a real VS Code (tests/vscode_e2e.py; WSL: the VS Code of Windows, Remote - WSL)'
 	@echo 'make mcp-bench  the MCP server for AI agents (tools/wavemcp.py) on the benchmark tasks by a script: answers checked, bytes'
@@ -111,13 +111,13 @@ $(VCD): $(OBJ)/Vdemo_tb
 # Examples (examples/<ex>/: testbench, hand-written <ex>.config.json, README.md). make example EX=apb builds into
 # $(BUILD)/examples/<ex>/: the dump as VCD and as FST, <ex>.html from the example config, and <ex>_all.html from a
 # config that mkconfig.py makes from the VCD (the whole hierarchy; --sv gives enum names). The FSM page reads the FST
-# (state names from the dump) when fst2vcd is there; the others read the VCD.
+# (state names and structs from the dump: fst2vcd, else the sva CLI); the others read the VCD.
 EXAMPLES := apb axi_lite fsm
 EX  ?= apb
 EXD := examples/$(EX)
 EXB := $(B)/examples/$(EX)
 EX_SRC  = $(wildcard $(EXD)/*_pkg.sv) $(filter-out %_pkg.sv,$(wildcard $(EXD)/*.sv))
-EX_DUMP = $(if $(and $(filter fsm,$(EX)),$(shell command -v fst2vcd)),fst,vcd)
+EX_DUMP = $(if $(filter fsm,$(EX)),fst,vcd)
 
 $(EXB)/obj/V$(EX)_tb: $(EX_SRC)
 	mkdir -p $(EXB)
@@ -133,7 +133,7 @@ $(EXB)/$(EX).vcd: $(EXB)/obj/V$(EX)_tb
 $(EXB)/$(EX).fst: $(EXB)/obj_fst/V$(EX)_tb
 	cd $(EXB)/obj_fst && ./V$(EX)_tb +trace +dump=$@
 
-example: wavefw/wavefw.js $(EXB)/$(EX).vcd $(EXB)/$(EX).fst
+example: wavelens/wavelens.js $(EXB)/$(EX).vcd $(EXB)/$(EX).fst
 	$(PY) tools/mkhtml.py --config $(EXD)/$(EX).config.json --waves $(EXB)/$(EX).$(EX_DUMP) $(SVA_OPT) --out $(EXB)/$(EX).html
 	$(PY) tools/mkconfig.py $(EXB)/$(EX).vcd --base $(BASE) --sv $(EX_SRC) --out $(EXB)/$(EX)_all.config.json --force
 	$(PY) tools/mkhtml.py --config $(EXB)/$(EX)_all.config.json --out $(EXB)/$(EX)_all.html
@@ -167,7 +167,7 @@ comma := ,
 SVA_GLOB = $(if $(SVA),$(or $(wildcard $(SVA)),$(error no file matches SVA=$(SVA))))
 SVA_FILES = $(foreach f,$(SVA_GLOB),--sva $(f))
 SVA_BINDS = $(foreach b,$(subst $(comma), ,$(BIND)),--bind '$(b)')
-html: wavefw/wavefw.js $(CONFIG) $(if $(filter $(DEMO_CONFIG),$(CONFIG)),$(VCD))
+html: wavelens/wavelens.js $(CONFIG) $(if $(filter $(DEMO_CONFIG),$(CONFIG)),$(VCD))
 	$(PY) tools/mkhtml.py --config $(CONFIG) $(if $(HTML_WAVES),--waves $(HTML_WAVES)) $(SVA_OPT) $(SVA_FILES) $(SVA_BINDS) --out $(HTML)
 
 config:
@@ -189,12 +189,12 @@ SVA_OPT  = $(if $(wildcard $(SVA_BIN)),--sva-bin $(SVA_BIN))   # mkhtml: "sva" /
 sva-build:
 	cd sva && $(CARGO) build --release -p sva-cli
 	cd sva && $(CARGO) build --profile wasm -p sva-wasm --target wasm32-unknown-unknown
-	$(PY) sva/wasm/pack.py $(SVA_WASM) wavefw/sva.wasm.js
-	@ls -l $(SVA_BIN) $(SVA_WASM) wavefw/sva.wasm.js
+	$(PY) sva/wasm/pack.py $(SVA_WASM) wavelens/sva.wasm.js
+	@ls -l $(SVA_BIN) $(SVA_WASM) wavelens/sva.wasm.js
 
 # The prebuilt CLI for a clone without Rust, committed and rebuilt in the commit of an engine change (as
-# wavefw/sva.wasm.js): Linux static (musl: any distribution), Windows through mingw-w64. The tools find it by
-# themselves (tools/svabuild.py: --sva-bin, $$WAVEFW_SVA, out/sva-target, bin/<os>-x86_64, sva on PATH).
+# wavelens/sva.wasm.js): Linux static (musl: any distribution), Windows through mingw-w64. The tools find it by
+# themselves (tools/svabuild.py: --sva-bin, $$WAVELENS_SVA, out/sva-target, bin/<os>-x86_64, sva on PATH).
 # Needs rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu, and x86_64-w64-mingw32-gcc for Windows
 # (Ubuntu: sudo apt install mingw-w64).
 DIST_LINUX := bin/linux-x86_64/sva
@@ -253,10 +253,10 @@ sva-spike: sva-build $(VCD)
 # The VS Code extension (vscode/): one .vsix with the viewer's files and the static sva CLI (tools/mkvsix.py, no node /
 # npm; install it into the Remote-SSH / WSL host); vscode-e2e runs it in a real VS Code (tests/vscode_e2e.py: in WSL the
 # VS Code of Windows connected to this distribution)
-VSIX := $(B)/wavefw-$(shell cat VERSION).0.vsix
+VSIX := $(B)/wavelens-$(shell cat VERSION).0.vsix
 vsix: $(VSIX)
 $(VSIX): VERSION tools/mkvsix.py $(wildcard vscode/*.js vscode/*.json vscode/*.md vscode/media/*.js) $(DIST_LINUX) \
-    $(addprefix wavefw/,wavefw.css wavefw.config.js wavefw.js sva.wasm.js bus.js sva.js)
+    $(addprefix wavelens/,wavelens.css wavelens.config.js wavelens.js sva.wasm.js bus.js sva.js)
 	$(PY) tools/mkvsix.py --out $@
 vscode-e2e:
 	@test -f $(B)/examples/fsm/fsm.fst || $(MAKE) example EX=fsm
@@ -272,20 +272,20 @@ mcp-bench:
 smoke:
 	$(PW) tests/smoke.py --build $(B) --out $(B)/shots $(if $(STRICT),--strict) $(if $(ONLY),--only $(ONLY))
 
-# wavefw/wavefw.js is the concatenation of wavefw/src/*.js (committed: a page needs one file and no build step)
-WAVEFW_SRC := $(addprefix wavefw/src/,model.js vcd.js paint.js view.js edit.js diff.js modules.js svg.js boot.js)
-wavefw: wavefw/wavefw.js
-wavefw/wavefw.js: $(WAVEFW_SRC) tools/wavefwcat.py
-	$(PY) tools/wavefwcat.py
+# wavelens/wavelens.js is the concatenation of wavelens/src/*.js (committed: a page needs one file and no build step)
+WAVELENS_SRC := $(addprefix wavelens/src/,model.js vcd.js paint.js view.js edit.js diff.js modules.js svg.js boot.js)
+wavelens: wavelens/wavelens.js
+wavelens/wavelens.js: $(WAVELENS_SRC) tools/wavelenscat.py
+	$(PY) tools/wavelenscat.py
 
 # Python unit tests of the tools (tests/unit/test_*.py on unittest, no dependencies; the fixtures in tests/unit/vcd).
 # The sva CLI of this BUILD when it is built (else svabuild finds one: an older out/ build would test stale code)
 unit:
-	BUILD=$(B) $(if $(WAVEFW_SVA),,$(if $(wildcard $(SVA_BIN)),WAVEFW_SVA=$(abspath $(SVA_BIN)))) $(PY) -m unittest discover -s tests/unit -t .
+	BUILD=$(B) $(if $(WAVELENS_SVA),,$(if $(wildcard $(SVA_BIN)),WAVELENS_SVA=$(abspath $(SVA_BIN)))) $(PY) -m unittest discover -s tests/unit -t .
 
 # The gate: the engine's tests, the unit tests, every page smoke checks (so it has nothing to skip), smoke --strict
 check:
-	$(PY) tools/wavefwcat.py --check
+	$(PY) tools/wavelenscat.py --check
 	$(MAKE) sva-test
 	$(MAKE) sva-build
 	$(MAKE) unit
@@ -319,4 +319,4 @@ clean-all:
 	$(if $(filter $(B),/ $(CURDIR) $(HOME) $(abspath $(HOME)/..)),$(error clean-all: BUILD=$(B) is not a build directory))
 	rm -rf $(B)
 
-.PHONY: vsix vscode-e2e wavefw help demo demo-fst example examples shots guide-shots html config sva-build dist dist-linux dist-windows sva-test sva-bless sva-examples sva-verify sva-eval sva-spike mcp-bench smoke shots-check unit check fmt lint clean clean-all
+.PHONY: vsix vscode-e2e wavelens help demo demo-fst example examples shots guide-shots html config sva-build dist dist-linux dist-windows sva-test sva-bless sva-examples sva-verify sva-eval sva-spike mcp-bench smoke shots-check unit check fmt lint clean clean-all

@@ -1,8 +1,9 @@
 {
-  "name": "wavefw",
-  "displayName": "wavefw — waves",
-  "description": "VCD and FST dumps in a tab: the wavefw viewer with assertions, bus transactions and the agent's live link; works over Remote-SSH / WSL with nothing installed on the host",
-  "publisher": "wavefw",
+  "name": "wavelens",
+  "displayName": "WaveLens — waves",
+  "description": "VCD and FST dumps in a tab: the WaveLens viewer with assertions, bus transactions and the agent's live link; works over Remote-SSH / WSL with nothing installed on the host",
+  "publisher": "vae-tech",
+  "repository": { "type": "git", "url": "https://github.com/vae-tech/wavelens" },
   "version": "0.0.0",
   "license": "MIT",
   "engines": { "vscode": "^1.80.0" },
@@ -18,43 +19,43 @@
   "contributes": {
     "customEditors": [
       {
-        "viewType": "wavefw.waves",
-        "displayName": "wavefw",
+        "viewType": "wavelens.waves",
+        "displayName": "WaveLens",
         "selector": [{ "filenamePattern": "*.vcd" }, { "filenamePattern": "*.fst" }],
         "priority": "option"
       }
     ],
     "commands": [
-      { "command": "wavefw.open", "title": "Open in wavefw", "category": "wavefw" },
-      { "command": "wavefw.reload", "title": "Read the dump again", "category": "wavefw", "icon": "$(refresh)" },
-      { "command": "wavefw.live", "title": "Connect to the agent (tools/wavemcp.py)", "category": "wavefw" }
+      { "command": "wavelens.open", "title": "Open in WaveLens", "category": "WaveLens" },
+      { "command": "wavelens.reload", "title": "Read the dump again", "category": "WaveLens", "icon": "$(refresh)" },
+      { "command": "wavelens.live", "title": "Connect to the agent (tools/wavemcp.py)", "category": "WaveLens" }
     ],
     "menus": {
       "explorer/context": [
-        { "command": "wavefw.open", "when": "resourceExtname =~ /^\\.(vcd|fst)$/i", "group": "navigation@9" }
+        { "command": "wavelens.open", "when": "resourceExtname =~ /^\\.(vcd|fst)$/i", "group": "navigation@9" }
       ],
       "editor/title": [
-        { "command": "wavefw.reload", "when": "activeCustomEditorId == wavefw.waves", "group": "navigation" }
+        { "command": "wavelens.reload", "when": "activeCustomEditorId == wavelens.waves", "group": "navigation" }
       ],
       "commandPalette": [
-        { "command": "wavefw.reload", "when": "activeCustomEditorId == wavefw.waves" },
-        { "command": "wavefw.live", "when": "activeCustomEditorId == wavefw.waves" }
+        { "command": "wavelens.reload", "when": "activeCustomEditorId == wavelens.waves" },
+        { "command": "wavelens.live", "when": "activeCustomEditorId == wavelens.waves" }
       ]
     },
     "configuration": {
-      "title": "wavefw",
+      "title": "WaveLens",
       "properties": {
-        "wavefw.autoReload": {
+        "wavelens.autoReload": {
           "type": "boolean",
           "default": false,
           "description": "When the dump changes on the disk (a new simulation), read it again at once, the view kept. Off: the tab says so and ⟳ reads it."
         },
-        "wavefw.live": {
+        "wavelens.live": {
           "type": "boolean",
           "default": true,
           "description": "Connect the open tabs to an agent's tools/wavemcp.py of this user when it starts its live link (view_live), and let it open dumps here."
         },
-        "wavefw.sva": {
+        "wavelens.sva": {
           "type": "string",
           "default": "",
           "description": "The sva program that turns an FST into VCD text (empty: the one inside the extension)."

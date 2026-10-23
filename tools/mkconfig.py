@@ -44,7 +44,7 @@ from common import SELECT_KEYS, WaveError, add_sva_bin_arg, check_config, glob_r
 
 ROOT = os.path.dirname(HERE)
 BASE = os.path.join(HERE, 'base.config.json')
-OLD_BASE = os.path.join(ROOT, 'wavefw.base.json')   # name before the restructure, read with a warning
+OLD_BASE = os.path.join(ROOT, 'wavelens.base.json')   # name before the restructure, read with a warning
 ENTRY = ('show', 'radix', 'color', 'style')          # keys every entry gets (empty = global setting)
 INFO = ('width', 'changes')
 GENERATOR_KEYS = ('select', 'rules')
@@ -279,7 +279,7 @@ HELP = [
     'signals: one entry per signal under its full path. "" = the global setting from "config".',
     '  show true/false · radix auto hex dec signed bin oct ascii float q8 sq15 · color "#e03131" (trace, outline, name) · style auto wavedrom questa square',
     '  optional: "alias": "shown name", "fill": "#ffe066" (bus fill), "enum": {"0": "IDLE"}; width/changes are information only.',
-    'config: page-wide wavefw settings — style (edges: auto | wavedrom slanted | questa / square vertical), radix, theme, colors,',
+    'config: page-wide WaveLens settings — style (edges: auto | wavedrom slanted | questa / square vertical), radix, theme, colors,',
     '  fold (group depth folded at start, true/false or scope paths), highlight (instances in front at start, e.g. ["tb.dut.u_x"]),',
     '  dim (opacity of the other rows), rowHeight, nameWidth, fontSize, sort, sortIgnore …',
     'views: one section of the page each; a view may set "signals": ["tb.dut.*", "tb.clk"] (patterns over the paths below),',

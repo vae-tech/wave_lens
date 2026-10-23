@@ -1,6 +1,6 @@
 // AXI4-Lite monitor for examples/axi_lite over the property library of YosysHQ's SVA-AXI4-FVIP
 // (amba_axi4_single_interface_requirements.sv, ISC: see LICENSE). The FVIP's channel files pick their checks with
-// generate blocks over a configuration struct, which the subset leaves out, so this file (part of wavefw, not of the
+// generate blocks over a configuration struct, which the subset leaves out, so this file (part of WaveLens, not of the
 // FVIP) instantiates the same library properties at module level, with the FVIP's labels, for an interface seen as a
 // monitor: every requirement on both sides is an assertion. Section numbers: AMBA AXI and ACE Protocol Specification.
 module yosyshq_axi4_lite_monitor import amba_axi4_single_interface_requirements::*; #(parameter int MAXWAIT = 16) (

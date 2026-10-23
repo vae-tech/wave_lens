@@ -1,4 +1,4 @@
-# Using wavefw
+# Using WaveLens
 
 The user's guide: WaveDrom JSON in your own page, a dump to a page, the generated config, settings, themes, the static
 SVG, assertions, the viewer's tools and keys, the command-line tools and the formats. The short overview is the
@@ -13,7 +13,7 @@ Contents: [Use cases](#use-cases) · [Assertions (SVA)](#assertions-sva) · [The
 
 ### A dump straight in the browser
 
-Open `wavefw/viewer.html` from the repository (`file://`, no build) and drop a VCD on it, or **Open…** in the **dump**
+Open `wavelens/viewer.html` from the repository (`file://`, no build) and drop a VCD on it, or **Open…** in the **dump**
 group of its bar (the last line; every viewer has it, a built page too). The VCD is read in the page: its signals by
 scope (struct / union / interface scopes marked), exact transitions; a big one is cut to the `dumpBudget` setting (3 M
 value changes: the scope levels nearest the top first; the toast says how many signals). **⟳** reads the file again
@@ -25,21 +25,21 @@ x.vcd` (or GTKWave's `fst2vcd x.fst > x.vcd`), or a page with `make html WAVES=x
 
 The VS Code extension (`vscode/`) opens a dump in a tab with this viewer. It is a *workspace* extension: with Remote-SSH
 or WSL it runs on the Linux host, where the dumps, the simulator and the agents are; the tab is drawn on your machine.
-Nothing is installed on the host: the package carries the viewer's files and the static `sva` (an FST is turned into
+Nothing else is needed on the host: the package carries the viewer's files and the static `sva` (an FST is turned into
 VCD text with it, kept in the extension's storage, 16 at most), and the extension runs in VS Code's own node.
 
 ```sh
-make vsix                                         # out/wavefw-<version>.vsix (tools/mkvsix.py: no node, no npm)
-code --install-extension out/wavefw-0.17.0.vsix   # in a terminal of the remote window: installed on the host
+make vsix                                         # out/wavelens-<version>.vsix (tools/mkvsix.py: no node, no npm)
+code --install-extension out/wavelens-*.vsix        # in a terminal of the remote window: installed on the host
 ```
 
 (or Extensions → … → *Install from VSIX…* while connected). A `.vcd` / `.fst` in the Explorer → right click → *Open in
-wavefw*, or *Open With… → wavefw* (where you can make it the default for these files; it is an option, another viewer
+WaveLens*, or *Open With… → WaveLens* (where you can make it the default for these files; it is an option, another viewer
 may be the default). What the tab does differently from a page in a browser:
 
 - **A new simulation.** The tab says when the dump changed on the disk (its size and time still for a second: polled,
-  so an NFS home of the host works too); ⟳ in the bar, or *wavefw: Read the dump again* (the editor's title), reads it
-  with the view kept. `wavefw.autoReload`: at once.
+  so an NFS home of the host works too); ⟳ in the bar, or *WaveLens: Read the dump again* (the editor's title), reads it
+  with the view kept. `wavelens.autoReload`: at once.
 - **Files are on the host.** Save state, PNG / SVG / WaveDrom and the assertions' report ask where to save on the host;
   Load…, the `.sv` files and Compare pick there (an FST to compare is converted too); Open… a dump opens a tab of its
   own. Bookmarks, groups, colours, radix, hidden rows and the assertion bindings are kept per dump in the workspace
@@ -49,17 +49,17 @@ may be the default). What the tab does differently from a page in a browser:
 - **An agent** on the host (`tools/wavemcp.py`, below): when it starts its live link, every open tab connects (**●
   live**); `view_live` with `page` a `.vcd` / `.fst` and `open: true` opens it in the VS Code window that has the file
   in its folders, and `view_edit` / `view_get` with that `page` work on its tab (the tab only: a dump has no file to
-  write the edits into). `wavefw.live: false`: tabs do not connect. The extension relays the link (the tab cannot
+  write the edits into). `wavelens.live: false`: tabs do not connect. The extension relays the link (the tab cannot
   reach the host's 127.0.0.1); nothing is forwarded.
 
-Settings: `wavefw.autoReload`, `wavefw.live`, `wavefw.sva` (another sva program). The output channel *wavefw* logs
+Settings: `wavelens.autoReload`, `wavelens.live`, `wavelens.sva` (another sva program). The output channel *WaveLens* logs
 what went wrong. The cut of a big dump (`dumpBudget`) applies; the whole VCD text crosses to your machine once per read.
 
 ### WaveDrom JSON in your own page
 
 ```html
-<link rel="stylesheet" href="wavefw/wavefw.css">
-<script src="wavefw/wavefw.js"></script>
+<link rel="stylesheet" href="wavelens/wavelens.css">
+<script src="wavelens/wavelens.js"></script>
 
 <script type="application/wavedrom">          <!-- interactive viewer -->
 { "signal": [ { "name": "clk", "wave": "p....." }, { "name": "d", "wave": "x.34.x", "data": ["A", "B"] } ] }
@@ -157,16 +157,16 @@ Interactively: find the signals and **Paint** them (see *Fuzzy find*).
 
 Colours, sizes, fonts, line widths, sorting, folding and highlight are *settings*, merged in this order (later wins):
 
-1. built-in defaults (`WaveFW.defaults`)
-2. global: [`wavefw/wavefw.config.js`](../wavefw/wavefw.config.js) loaded before `wavefw.js` (every key with its default),
-   or `WaveFW.configure({…})` at run time; for a generated page, the top-level `"config"` of the config file
+1. built-in defaults (`WaveLens.defaults`)
+2. global: [`wavelens/wavelens.config.js`](../wavelens/wavelens.config.js) loaded before `wavelens.js` (every key with its default),
+   or `WaveLens.configure({…})` at run time; for a generated page, the top-level `"config"` of the config file
 3. the diagram's `"config"` object in the WaveJSON (a view's `"config"`)
 4. the element: `data-config='{…}'`, `data-sort`, `data-theme`, `data-colors`, …, or the constructor options
 5. the viewer's own: the edge style picked in its bar, kept in this browser for that viewer (picking the style the
    settings give drops it)
 
 A key that is no setting (a typo: `rowHeigth`) is an error in the tools and a console warning in the page; the plugins
-add theirs (`WaveFW.registerDefaults`).
+add theirs (`WaveLens.registerDefaults`).
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -177,7 +177,7 @@ add theirs (`WaveFW.registerDefaults`).
 | `traceWidth`, `busWidth` | 1.4, 1.2 | line widths, px |
 | `sort`, `sortIgnore` | `none`, `[]` | `none \| asc \| desc`; name prefixes skipped when sorting (`["i_", "o_"]`) |
 | `sortButton`, `hint` | true, true | show the Sort controls / the help line |
-| `style` | `auto` | edges: `wavedrom` (slanted), `questa` (vertical, narrow bus crossings), `square`; `auto` slants wave strings and draws exact `tv` transitions vertically; the viewer's list in **view** changes it (kept in the browser) |
+| `style` | `auto` | edges: `wavedrom` (slanted), `questa` (vertical, narrow bus crossings), `square`; `auto` slants wave strings and draws exact `tv` transitions vertically; the viewer's list in **style** changes it (kept in the browser) |
 | `wheel` | `scroll` | the wheel scrolls the rows and ctrl+wheel zooms, as in Questa; `zoom`: the wheel zooms |
 | `svaOpen` | false | the assertion list (`sva.js`) open when the page opens; folded: ▸ Assertions opens it |
 | `dumpBudget` | 3000000 | a VCD opened in the page (Open…, dropped on a viewer): the signals nearest the top up to this many value changes |
@@ -207,8 +207,8 @@ add theirs (`WaveFW.registerDefaults`).
 ### Themes
 
 Three themes — `light` (warm paper), `white` (black traces, for print and slides) and `dark` — chosen by
-`prefers-color-scheme` or set with `<html data-theme="white">`, `WaveFW.setTheme('dark')`, the page's theme button, or
-`"config": {"theme": …}`. Every colour is a CSS custom property: `WaveFW.setColors({trace: '#c00', bus: 'navy'})` for all
+`prefers-color-scheme` or set with `<html data-theme="white">`, `WaveLens.setTheme('dark')`, the page's theme button, or
+`"config": {"theme": …}`. Every colour is a CSS custom property: `WaveLens.setColors({trace: '#c00', bus: 'navy'})` for all
 waves, `data-colors` / `"config": {"colors": …}` for one wave, `"color"` / `"fill"` for one signal. Details:
 [`docs/index.html` § Themes](index.html#themes). The pictures in this guide are dark; the same APB view in `light`:
 
@@ -389,7 +389,7 @@ count, ‹ ›, Highlight / Open, colour + Paint, Copy. Expression (`sva.js`): t
 **list** (Sort and the ignored prefixes, Expand / Collapse, clear highlight, show the hidden rows), **style** (the edges:
 auto, slanted, vertical, square), **state** (Save, Load…), **assertions** (Load file…). Keys work once the waves have the focus (a click on the
 waves or on a name); with ctrl, alt or ⌘ held they stay the browser's (ctrl+S saves the page, it does not sort), except
-ctrl+C and ctrl+F. Hover any button, field or list for what it does and its keys; **?** at the right of the title line
+ctrl+C, ctrl+F, ctrl+G, ctrl+Z / ctrl+shift+Z / ctrl+Y (undo, redo), alt+↑ ↓ and alt+shift+↑ ↓ (the order of your groups). Hover any button, field or list for what it does and its keys; **?** at the right of the title line
 (key `?`) opens the box of all the keys and the mouse, the plugins' too.
 
 **Scroll: window / page** in the title line switches where the rows scroll, on the fly (kept in this browser; the
@@ -482,7 +482,7 @@ them all (**New group of the N**, colour, radix, hide, the picture …), **Paint
 
 ![Fuzzy find "awvd" with Highlight and Open](img/find.png)
 
-**Edges and the cursor fields.** Select a signal (click its name or its row), then ◀ ▶ (`[ ]`) jump to its previous /
+**Edges and the cursor fields.** Select a signal (click its name or its row), then ◀ ▶ (`[e ]e`, shift+Tab / Tab) jump to its previous /
 next edge of the kind chosen between them (any, rising, falling; every value change on a bus). The cursor field takes a
 time (`1.2us` wins over the unit list) and **Set** moves the cursor there; the span field and **Show** give a window of
 that width around the cursor. Cycle diagrams count in cycles.
@@ -526,10 +526,10 @@ config file as it is; times are model units (ps).
 page's edits (the block `tools/viewedit.py` writes, a new revision), so whoever opens that one file — another browser,
 a colleague — sees your bookmarks, groups, colours, highlight, cursor and window, the assertions you loaded; the waves
 are the page's as they were; the live link and its token are left out. It is there on a page that is all in itself (`make
-html`, `mkhtml.py`); a page with `wavefw.js` beside it (`docs/index.html`), a dump opened in a page: Save keeps the view.
+html`, `mkhtml.py`); a page with `wavelens.js` beside it (`docs/index.html`), a dump opened in a page: Save keeps the view.
 What you send has what you did in it — your assertion files' text, your notes, the search. The person who opens it gets
 your revision once: what they change then stays theirs. `savePage: false` hides the button (and the page keeps no copy
-of its text). `WaveFW.savePage()` / `WaveFW.pageText()` from a script.
+of its text). `WaveLens.savePage()` / `WaveLens.pageText()` from a script.
 
 **Compare two runs.** **Compare…** in the bar's dump group reads a second VCD — the same test after a change of the
 RTL, another seed — over these waves, on the same time scale, signal by signal of the same path (else the same name under
@@ -677,11 +677,11 @@ name: `view.run([{op, …}, …])` runs commands in order and returns a Promise 
 error}` for one that could not run; the others still do), one redraw at the end (a command that reads the rows laid out —
 `picture`, `edge`, `rows` — sees what the ones before it in the list did: a picture after a `hide` is without that row), one
 step to undo. The viewer of an element is
-`element.waveView`, every viewer `WaveFW.views()`, the list of commands `WaveFW.commands()` (also the table in
+`element.waveView`, every viewer `WaveLens.views()`, the list of commands `WaveLens.commands()` (also the table in
 [`docs/index.html` § API](index.html#api)).
 
 ```js
-const v = WaveFW.views()[0];
+const v = WaveLens.views()[0];
 await v.run([
   {op: 'bookmark', t: '60ns', signal: 'PSEL', text: 'SETUP: address and data valid'},
   {op: 'bookmark', t: '80ns', signal: 'PREADY', text: 'the slave is ready', color: '#2f9e44'},
@@ -694,7 +694,7 @@ await v.run([
 
 | Command | Arguments (`?` optional) | Does |
 |---|---|---|
-| `bookmark` | `n? t? signal? text? color? lift? delete?` | a numbered circle on a signal (none: the time axis) with its text: a new one (`n` free or left out, `t` the cursor by default) or bookmark `n` changed; `lift`: above its signal, in a lane; `delete`: `n` or `"all"` (its arrows go too) |
+| `bookmark` | `n? t? signal? text? color? lift? delete?` | a numbered circle on a signal (none: the time axis) with its text: a new one (`n` free or left out, `t` the cursor by default) or bookmark `n` changed; `lift`: above its signal, in a lane; `delete: true`: bookmark `n` goes (`n: "all"`: every one; its arrows go too) |
 | `arrow` | `id? from? to? shape? head? line? color? label? delete?` | an arrow between bookmarks `from` → `to` with its label: new, or arrow `id` (1, 2 … as listed; or the one from → to) changed; shape `~ - -~ ~- -\| \|- -\|-`, head `> <> < ""`, line `solid dashed dotted` |
 | `marker` | `id? t? label? color? delete?` | a dashed line across the rows with its label: new, or marker `id` changed; `delete`: `id` or `"all"` (`"all"` without `delete` is an error) |
 | `group` | `name signals? add? remove? color? rename? delete? go? move?` | your group: `signals` sets its signals in this order (a module: its signals), `add`, `remove`, `rename`, `delete`; `go`: opened, in the middle, its first signal selected (ctrl+G); `move`: its place among your groups (`up`, `down`, `top`, `bottom`, a number) |
@@ -741,21 +741,21 @@ page. The smoke test checks that a page with these edits and the same commands r
 **Live.** A page connected to an agent's `tools/wavemcp.py` (below) takes its commands as they come: a bookmark the
 agent puts appears on the waves at once, and what you change is what the agent reads next. The page connects to the
 server on `127.0.0.1` (server-sent events; the commands' results go back), with a key the server keeps in
-`~/.cache/wavefw/live-token`: only pages that have it (written into them by `view_live`, or opened with
-`#wavefw-live=<port>:<key>`) are let in, by the server's address (`127.0.0.1`, `localhost` and its port in the `Host`: a
+`~/.cache/wavelens/live-token`: only pages that have it (written into them by `view_live`, or opened with
+`#wavelens-live=<port>:<key>`) are let in, by the server's address (`127.0.0.1`, `localhost` and its port in the `Host`: a
 name of another site pointed here is refused), and a page's answer counts for the command sent to that page only. **● live** in the bar's state group: connected (a click disconnects); **○
-live**: no agent there (a click tries again). From the console: `WaveFW.live('8742:<key>')`, `WaveFW.live(null)`.
+live**: no agent there (a click tries again). From the console: `WaveLens.live('8742:<key>')`, `WaveLens.live(null)`.
 
 ## AI agents (MCP)
 
-`tools/wavemcp.py` gives an AI agent (Claude Code, Codex, any MCP client) the tools of wavefw as an MCP server over
+`tools/wavemcp.py` gives an AI agent (Claude Code, Codex, any MCP client) the tools of WaveLens as an MCP server over
 stdio: it asks questions of a dump and gets short JSON answers instead of reading the dump or writing a parser for it.
 Standard library only; the assertions and the expression search need the `sva` CLI (found as `svabuild.py` finds it),
 an FST needs `fst2vcd` or the `sva` CLI.
 
 ```sh
-claude mcp add wavefw -- python3 -I /path/to/wavefw/tools/wavemcp.py     # Claude Code (--scope user: every project)
-codex mcp add wavefw -- python3 -I /path/to/wavefw/tools/wavemcp.py      # Codex CLI
+claude mcp add wavelens -- python3 -I /path/to/wavelens/tools/wavemcp.py     # Claude Code (--scope user: every project)
+codex mcp add wavelens -- python3 -I /path/to/wavelens/tools/wavemcp.py      # Codex CLI
 python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd"}'   # one tool from the shell
 ```
 
@@ -802,11 +802,11 @@ page's file. Times are ns here too (the tools turn them into the viewer's units)
 `set_state` as well (what `view_get` with `full` read). `save` with a live edit writes the page's state into its file;
 when the page answered the edit but not the question for its state, the answer says `applied live, not saved` (the edit
 is never done again on the file: what the person changed there would go). The link listens on 127.0.0.1 from
-port 8742 on (`WAVEFW_LIVE_PORT`); a page that carries it can be handed to no one else before `view_live` with `off`.
+port 8742 on (`WAVELENS_LIVE_PORT`); a page that carries it can be handed to no one else before `view_live` with `off`.
 
 **What it saves.** `make mcp-bench AGENT=claude MODEL=sonnet REPS=2` (or `AGENT=codex`) runs eight tasks with known
 answers — two on the APB example, one on the FSM example's FST, five on a generated 3.5 MB dump of 40 000 cycles — by
-an agent with the server and without it (the shell and the wavefw command-line tools, named in the same prompt), and
+an agent with the server and without it (the shell and the WaveLens command-line tools, named in the same prompt), and
 counts the tokens; `make mcp-bench` alone solves them through the tools by a script (16 calls, 3.3 KB returned, every
 answer right). Measured on 21 October 2026, two runs of each task in each mode, every one of the 128 answers right
 (the tokens are every token the model read or wrote, the context read again from the cache included; the medians per
@@ -836,7 +836,7 @@ All tools are `python3 -I tools/<tool>.py --help`; the Makefile calls them for y
 | `vcd2wavedrom.py` | one window of a dump → WaveJSON | `--config` + `--view`, or `--waves --scope --signals --clock/--exact --from --to --marker --group --enum`; `--gap A:B` / `--auto-gap IDLE[:KEEP]` (`--clock`: a window, or every stretch of IDLE cycles where nothing but a clock changes, as one `\|` cell); `--sva FILE --bind NAME@SCOPE` |
 | `svabuild.py` | the `"sva"` / `"bind"` of a config: files parsed, bindings evaluated with the `sva` CLI (used by the two above) | `--waves --sva --bind --out` |
 | `embed.py` | WaveJSON → `data.js` for `file://` pages, or into an HTML placeholder | `--var NAME key=file.json`, `--html --placeholder` |
-| `dumpscan.py`, `wavejson.py` | the built-in dump reader (VCD text, FST via `fst2vcd -e` or `sva vcd`; `WAVEFW_FST=sva` / `fst2vcd` picks one) and the readable JSON writer | modules |
+| `dumpscan.py`, `wavejson.py` | the built-in dump reader (VCD text, FST via `fst2vcd -e` or `sva vcd`; `WAVELENS_FST=sva` / `fst2vcd` picks one) and the readable JSON writer | modules |
 | `wavemcp.py` | the tools as an MCP server for an AI agent (stdio), or one tool from the shell ([§ AI agents](#ai-agents-mcp)) | `--list`, `--call TOOL JSON` |
 | `mkvsix.py` | the VS Code extension as one `.vsix` ([§ In VS Code](#in-vs-code-over-remote-ssh-or-wsl)) | `--out`, `--sva`, `--target` |
 | `viewedit.py` | the viewer's [commands](#commands-and-edits) on a page's edits or a saved state (`.view.json`) | `PAGE --ops JSON\|@file`, `--view`, `--get`, `--views`, `--model`, `--commands` |
@@ -894,13 +894,13 @@ WaveDrom 3.5.0.
 | `arrows: [{from, to, shape, head, line, color, label}]` | arrows between bookmarks: shape `- ~ -~ ~- -\| \|- -\|-`, head `> <> <` or `""`, line `solid dashed dotted` |
 | `markers: [{t \| cycle, label}]` | dashed markers; they become jump buttons when there are ≤ 6 and no `jumps` |
 | `jumps: [{t \| cycle, span, label}]`, `cursor` | jump buttons and the initial cursor |
-| `sva: {files?, bind, notes?, exprs?}` | assertions (`wavefw/sva.js`): `files: [{name, path, source, parsed?}]` (`parsed`: `sva parse --json`, else the page parses), `bind: [{assert, scope, results?}]` (`scope` an instance path, `""` the top of the diagram; `results` from `sva eval`, else evaluated when the page opens), `exprs: ["expr" \| {expr, scope}]` (rows ƒ, valued in the page) |
+| `sva: {files?, bind, notes?, exprs?}` | assertions (`wavelens/sva.js`): `files: [{name, path, source, parsed?}]` (`parsed`: `sva parse --json`, else the page parses), `bind: [{assert, scope, results?}]` (`scope` an instance path, `""` the top of the diagram; `results` from `sva eval`, else evaluated when the page opens), `exprs: ["expr" \| {expr, scope}]` (rows ƒ, valued in the page) |
 | `meta.scope` | the converter's `--scope`: the instance the top rows belong to |
 | `meta.omitted` | `{why, paths: {scope: [names]}}`: the dump's signals not in the page (`why`: `config`, its `"show": false`; `dumpBudget`, a VCD opened in the page); the find names them |
 | `signal[i].width`, `raw` (clock-sampled) | a bus's width, and the hex value (or `'b` and the bits, as in `tv`) of each `data` label when the labels do not read back as values (`bin` `signed` `oct` `ascii` radix, x digits): what the page's assertions sample |
 
 A page made by `mkhtml.py` holds the assertion files once, in `window.SVA = {files: [...], notes: [...]}` (before
-`wavefw/sva.wasm.js` and `wavefw/sva.js`); each view keeps its own `sva.bind`.
+`wavelens/sva.wasm.js` and `wavelens/sva.js`); each view keeps its own `sva.bind`.
 
 ### An FST as VCD text
 

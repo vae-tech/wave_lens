@@ -1,4 +1,4 @@
-//! sva-core — the SystemVerilog Assertion engine of wavefw, without I/O.
+//! sva-core — the SystemVerilog Assertion engine of wavelens, without I/O.
 //!
 //! Front end (stage 4, docs/sva/LANGUAGE.md): [`lex`](crate::lex) -> preprocessor (`` `define ``, `` `ifdef ``) ->
 //! parser (items, expressions, sequences, properties) -> expansion of every assertion (instances, constants, clock,

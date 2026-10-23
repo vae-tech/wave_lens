@@ -1,4 +1,4 @@
-/* wavefw/src/paint.js — drawing: the canvas and SVG painters, signals, axis, edges, rows, markers, bookmarks and
+/* wavelens/src/paint.js — drawing: the canvas and SVG painters, signals, axis, edges, rows, markers, bookmarks and
    arrows, the arrow-label lanes and module bands. */
 
 /* ---------------- painters: one drawing routine, two back-ends ---------------- */

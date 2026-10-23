@@ -8,7 +8,7 @@ import svabuild
 import viewedit as E
 import wavemcp as W
 
-CACHE = H.tmp()   # the bridges of these tests announce themselves here, not in ~/.cache/wavefw/live (a VS Code there would connect)
+CACHE = H.tmp()   # the bridges of these tests announce themselves here, not in ~/.cache/wavelens/live (a VS Code there would connect)
 
 
 def setUpModule():
@@ -227,7 +227,7 @@ class Views(unittest.TestCase):
         page = os.path.join(self.d.name, 'times.html')
         shutil.copy(self.page, page)
         r = self.call('view_edit', page=page, ops=[{'op': 'set_state', 'state': {
-            'wavefw': 'state', 'cursor': 30, 'cursor2': '0.04us', 'from': 10, 'to': 70, 'range': {'from': 20, 'to': 50, 'signal': None},
+            'wavelens': 'state', 'cursor': 30, 'cursor2': '0.04us', 'from': 10, 'to': 70, 'range': {'from': 20, 'to': 50, 'signal': None},
             'bookmarks': [{'n': 1, 't': 25}], 'markers': [{'t': 35, 'label': 'm'}], 'config': {'cycleZero': 5}}}])
         self.assertNotIn('errors', r)
         self.assertEqual(E.Page(page).state('one')['cursor'], 30000)   # the viewer's ps in the page
@@ -235,7 +235,7 @@ class Views(unittest.TestCase):
         self.assertEqual((g['cursor'], g['cursor2'], g['from'], g['to'], g['range'], g['bookmarks'], g['markers'], g['config']['cycleZero']),
                          (30, 40, 10, 70, {'from': 20, 'to': 50, 'signal': None}, [{'n': 1, 't': 25}], [{'t': 35, 'label': 'm'}], 5))
         st = {k: v for k, v in g.items() if k not in ('page', 'view', 'views', 'edits')}
-        again = self.call('view_edit', page=page, ops=[{'op': 'set_state', 'state': dict(st, wavefw='state')}])
+        again = self.call('view_edit', page=page, ops=[{'op': 'set_state', 'state': dict(st, wavelens='state')}])
         self.assertEqual(again['note'], 'nothing changed')   # given back as read: the same state
 
     def test_no_replay_after_ack(self):
@@ -310,7 +310,7 @@ class Views(unittest.TestCase):
         dump = H.fixture('enum')
         b = W.Bridge(port=0, token='t' * 20)
         W.BRIDGE.append(b)
-        live = os.path.join(CACHE.name, 'wavefw', 'live')
+        live = os.path.join(CACHE.name, 'wavelens', 'live')
         with open(os.path.join(live, f'{b.port}.json'), encoding='utf-8') as f:
             self.assertEqual(json.load(f)['pid'], os.getpid())
         r = self.call('view_live', page=dump, open=True, wait=0)
@@ -453,7 +453,7 @@ class Protocol(unittest.TestCase):
                       'not json', {'jsonrpc': '2.0', 'id': 5, 'method': 'resources/list'}, {'jsonrpc': '2.0', 'id': 6, 'method': 'ping'})
         self.assertEqual([m.get('id') for m in r], [1, 2, 3, 4, None, 5, 6])   # no answer to the notification
         self.assertEqual(r[0]['result']['protocolVersion'], '2025-03-26')
-        self.assertEqual(r[0]['result']['serverInfo']['name'], 'wavefw')
+        self.assertEqual(r[0]['result']['serverInfo']['name'], 'wavelens')
         names = [t['name'] for t in r[1]['result']['tools']]
         self.assertEqual(names[0], 'wave_info')
         self.assertTrue(all('fn' not in t and t['inputSchema']['type'] == 'object' for t in r[1]['result']['tools']))
@@ -528,7 +528,7 @@ class Protocol(unittest.TestCase):
                 f.write('#!/bin/sh\ncat > /dev/null\necho "sva: read" >&2\nexit 1\n')
             os.chmod(fake, 0o755)
             p = subprocess.Popen([sys.executable, '-I', os.path.join(H.TOOLS, 'wavemcp.py')], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                 stderr=subprocess.DEVNULL, text=True, env=dict(os.environ, WAVEFW_SVA=fake))
+                                 stderr=subprocess.DEVNULL, text=True, env=dict(os.environ, WAVELENS_SVA=fake))
             got = []
             reader = threading.Thread(target=lambda: got.extend(json.loads(p.stdout.readline()) for _ in range(2)), daemon=True)
             reader.start()

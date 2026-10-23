@@ -1,4 +1,4 @@
-/* wavefw/src/diff.js — a second dump over the waves (Compare… in the bar's dump group): where its values differ. */
+/* wavelens/src/diff.js — a second dump over the waves (Compare… in the bar's dump group): where its values differ. */
 
 /* ---------------- compare with a second dump ---------------- */
 // The same test before and after a change of the RTL, two seeds: the second dump (B, a VCD read by the page's reader)

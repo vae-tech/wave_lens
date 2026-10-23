@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Commands and scripts · WaveLens guides</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="guide.css">
+</head>
+<body>
+<header class="top"><nav>
+  <a class="home" href="index.html">WaveLens guides</a>
+  <a href="pages.html">Dump → page</a> <a href="viewer.html">Viewer</a> <a href="modules.html">Modules</a>
+  <a href="compare.html">Compare</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
+  <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="vscode.html">VS Code</a>
+  <a href="commands.html" aria-current="page">Commands</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
+</nav></header>
+<div class="page toc-side">
+<main>
+<header class="hero"><div class="kicker">Guide</div><h1>Commands and scripts</h1>
+<p class="lead">Whatever the buttons, the menus and the lists of a viewer do, a command does by name:
+  <code>{op: 'bookmark', t: '85ns', signal: 'PSEL', text: 'SETUP'}</code>. The same commands run in three places — the browser's
+  console on an open page, <code>tools/viewedit.py</code> on a page's file, and an AI agent over MCP, live in the page a person has
+  open. This guide marks up one APB read all three ways.</p></header>
+
+<h2 id="three">One set of commands, three places</h2>
+<table>
+  <tr><th>Where</th><th>Runs on</th><th>Good for</th></tr>
+  <tr><td>the console: <code>view.run([…])</code></td><td>a viewer of an open page</td><td>trying a command, a bookmarklet, your own page's script</td></tr>
+  <tr><td><code>tools/viewedit.py</code></td><td>a page's file (<code>make html</code>, <code>mkhtml.py</code>) or a saved
+    <code>.view.json</code></td><td>a shell, a CI job: a page that opens already marked up</td></tr>
+  <tr><td>MCP: <code>view_edit</code>, <code>view_get</code></td><td>a page's file, or live the page in a browser or a VS Code tab</td>
+    <td>an agent that explains a failure to a person (<a href="mcp.html">AI agents</a>)</td></tr>
+</table>
+<p>Every command and its arguments are listed by <code>WaveLens.commands()</code>, in the table of
+  <a href="../USAGE.md#commands-and-edits">USAGE.md § Commands and edits</a> and in <a href="../index.html#api">docs/index.html § API</a>.</p>
+
+<h2 id="console">In the console</h2>
+<p>Open <code>out/examples/apb/apb.html</code> (after <code>make examples</code>) and its exact view, the one the pictures show:</p>
+<figure><img src="img/commands-before.png" alt="The exact APB view from 40 to 200 ns, nothing marked" loading="lazy">
+  <figcaption><b>Before.</b> The APB example's exact view, 40–200 ns: a read of <code>0x04</code> with two wait states, then a write
+  to an unmapped address.</figcaption></figure>
+<p>In the browser's console (F12), take the viewer and run a list of commands:</p>
+<pre><code>const v = WaveLens.views().find(v =&gt; v.editKey() === 'exact');   <span class="c">// or element.waveView, WaveLens.views()[i]</span>
+await v.run([
+  {op: 'bookmark', t: '85ns', signal: 'PSEL', text: 'read of 0x04: SETUP'},
+  {op: 'bookmark', t: '95ns', signal: 'PENABLE', text: 'ACCESS, PREADY low: the slave waits'},
+  {op: 'bookmark', t: '115ns', signal: 'PREADY', text: 'PREADY: the read ends at the next edge'},
+  {op: 'arrow', from: 2, to: 3, label: '2 wait states', shape: '-|'},
+  {op: 'marker', t: '125ns', label: 'read done', color: '#2f9e44'},
+  {op: 'group', name: 'handshake', signals: ['PSEL', 'PENABLE', 'PREADY'], color: '#4dabf7'},
+  {op: 'highlight', add: ['handshake', 'PRDATA']},
+  {op: 'cursor', t: '115ns'}]);</code></pre>
+<figure><img src="img/commands-after.png" alt="The same view with three bookmarks, an arrow '2 wait states', a marker 'read done', the group handshake and PRDATA highlighted" loading="lazy">
+  <figcaption><b>After.</b> Three numbered bookmarks with their notes in the list under the waves, the arrow between 2 and 3, the
+  marker <i>read done</i>, your group <code>handshake</code> at the top of the names, the rest dimmed but <code>PRDATA</code>.</figcaption></figure>
+<p><code>run</code> returns the results in order — <code>{op: 'bookmark', n: 1}</code>, <code>{op: 'group', name: 'handshake',
+  signals: 3, at: 1}</code> … — and <code>{op, error}</code> for a command that could not run (the others still do; a name that
+  matches nothing names the similar ones). The whole list is redrawn once and is <b>one step to undo</b>: <kbd>ctrl+Z</kbd> takes it
+  all back (the cursor and the window are not steps: the cursor stays at 115 ns), <kbd>ctrl+shift+Z</kbd> brings it again.</p>
+
+<h2 id="names">Times and signals</h2>
+<ul>
+  <li><b>Times</b> are a text with a unit — <code>'85ns'</code>, <code>'2.5us'</code>, <code>'0.1µs'</code> — or a number. A number
+    is in model units in the console and in <code>viewedit.py</code>: ps on the waves of a dump, cycles on a hand-written WaveDrom
+    diagram without <code>time</code> (a state read back with <code>{op: 'state'}</code> has the same units). Over MCP a number is
+    in <b>ns</b>, and so are the times <code>view_get</code> gives back. A text with a unit means the same everywhere.</li>
+  <li><b>A signal</b> is its full path, its name, the end of its path (<code>u_regs.PSEL</code>), or a <code>*</code> pattern
+    (<code>'P*DATA'</code>), alone, in a list or as a text with commas. A name that several signals have takes the one nearest the
+    top when only one is there (a net seen at several levels); else it is an error that names them — give more of the path, or a
+    <code>*</code> pattern for all of them.</li>
+  <li><b>Bookmarks</b> are numbered 1, 2, …; arrows go <code>from</code> one number <code>to</code> another; markers and arrows have
+    an <code>id</code> as listed. Change one by naming it (<code>{op: 'bookmark', n: 2, text: '…'}</code>), delete one with
+    <code>{op: 'bookmark', n: 2, delete: true}</code> (<code>n: 'all'</code>: every one; its arrows go too); a marker with
+    <code>{op: 'marker', id: 1, delete: true}</code>.</li>
+</ul>
+<p>The commands that only read: <code>state</code> (what <span class="ui">Save</span> writes), <code>rows</code> (the signals in
+  display order), <code>picture</code> (PNG as base64, SVG or WaveDrom). <code>find</code> answers its matches too, but it sets the
+  find field and its options as typing there does. A command that reads the rows as laid
+  out sees what the ones before it in the list did: a <code>picture</code> after a <code>hide</code> is without that row.</p>
+
+<h2 id="file">On a page's file: viewedit.py</h2>
+<p>The same list, run on the file instead of an open page — from a shell, a script or a CI job:</p>
+<pre><code>python3 -I tools/viewedit.py out/examples/apb/apb.html --views        <span class="c"># the views of the page, their keys and the revision of their edits</span>
+python3 -I tools/viewedit.py out/examples/apb/apb.html --view exact --ops @read.json
+python3 -I tools/viewedit.py out/examples/apb/apb.html --get          <span class="c"># the edits as JSON</span>
+python3 -I tools/viewedit.py saved.view.json --model page.html --ops '[{"op": "bookmark", "t": "60ns", "signal": "PSEL"}]'</code></pre>
+<p><code>read.json</code> is the list above as JSON. The page keeps its edits per view in a JSON block next to its data, with a new
+  revision each time. Whoever opens the file sees the marks; what this browser keeps of a viewer (bookmarks, groups, colours …) is
+  replaced once per revision, so what a person changes afterwards stays theirs until a newer revision comes. The commands that need the
+  values or the screen (<code>edge</code>, <code>fit</code>, <code>picture</code>) run only in a page.</p>
+<div class="note"><p>A page made before the project was renamed to WaveLens (0.18) is refused: make it again with
+  <code>make html</code> or <code>mkhtml.py</code>.</p></div>
+
+<h2 id="live">Live, in a page someone has open</h2>
+<p>A page connected to an agent's MCP server (<code>tools/wavemcp.py</code>) takes the commands as they come: the agent's
+  <code>view_edit</code> puts a bookmark and it appears on the person's waves at once; what the person changes is what the agent reads
+  next with <code>view_get</code>. <b>● live</b> in the bar's state group says the page is connected (a click disconnects). The link
+  stays on the machine (<code>127.0.0.1</code>, a key the server keeps in <code>~/.cache/wavelens/live-token</code>). In VS Code the
+  same works for a dump open in a tab (<a href="vscode.html">VS Code</a>). The details: <a href="mcp.html">AI agents (MCP)</a>.</p>
+
+<h2 id="state">A state, saved and loaded</h2>
+<p><code>{op: 'state'}</code> returns what <span class="ui">Save</span> downloads as <code>.view.json</code>;
+  <code>{op: 'set_state', state}</code> puts one back as <span class="ui">Load…</span> does — a key it has replaces the viewer's
+  (<code>null</code> clears it), a key it leaves out stays. With <span class="ui">Save page</span> the whole page with every viewer's
+  state is one file to send (<a href="viewer.html#state">The viewer § Save and Load</a>).</p>
+</main>
+<nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
+</div>
+<footer>WaveLens 0.18 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+  <a href="../index.html">docs/index.html</a></footer>
+<script src="guide.js"></script>
+</body>
+</html>

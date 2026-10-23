@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/wavefw/docs/sva/results.schema.json",
+  "$id": "https://raw.githubusercontent.com/vae-tech/wavelens/master/docs/sva/results.schema.json",
   "title": "SVA results: sva eval --out, the page's evaluate(), run_json with a trace (docs/sva/ENGINE.md, Results JSON)",
   "type": "object",
   "required": ["clock", "unit", "cycles", "assertions"],

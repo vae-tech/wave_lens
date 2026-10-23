@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """mcp_bench.py — what the MCP server (tools/wavemcp.py) saves an AI agent: the same waveform tasks solved by an agent
-with the wavefw MCP tools and without them (the shell and the wavefw command-line tools only), tokens counted.
+with the wavelens MCP tools and without them (the shell and the wavelens command-line tools only), tokens counted.
 
 The tasks have answers known in advance: two on the APB example (a 3.6 KB VCD, make example EX=apb), one on the FSM
 example's FST (enum state names in the dump, make example EX=fsm) and five on a generated dump (bench.vcd, 40 000 cycles, ~170 signals, ~4 MB: a stream with frames and backpressure, a FIFO level, a
@@ -14,7 +14,7 @@ req / ack handshake with one late ack, an error pulse; gen_vcd() knows the answe
   python3 -I tests/mcp_bench.py --build out --report            # the table of every run so far (BUILD/mcp_bench/runs.jsonl)
 
 An agent run: a fresh directory under BUILD/mcp_bench/runs/ with the task's files, the same prompt in both modes (it
-names the wavefw command-line tools), the MCP server attached or not; claude -p (--strict-mcp-config, no settings,
+names the wavelens command-line tools), the MCP server attached or not; claude -p (--strict-mcp-config, no settings,
 the tools Bash Read Grep Glob Write) or codex exec (sandbox workspace-write). Tokens: claude's usage (input + cache
 writes + cache reads + output) and cost; codex's turn usage (input incl. cached + output).
 """
@@ -320,7 +320,7 @@ def scripted(dumps, truth):
 
 # ---------------- agents ----------------
 PROMPT = """You are analysing simulation waveforms. The files are in the current directory: {files}.
-The wavefw project at {root} has command-line tools for dumps: python3 {root}/tools/vcd2wavedrom.py --help (a window of a dump as
+The wavelens project at {root} has command-line tools for dumps: python3 {root}/tools/vcd2wavedrom.py --help (a window of a dump as
 WaveJSON), {root}/bin/linux-x86_64/sva --help (SystemVerilog assertions evaluated over a dump), python3 {root}/tools/mkconfig.py --help.
 {extra}
 Task: {task}
@@ -354,10 +354,10 @@ def keep(d, p):
 def run_claude(d, prompt, mcp, model, timeout):
     cfg = os.path.join(d, '.mcp.json')
     with open(cfg, 'w') as f:
-        json.dump({'mcpServers': {'wavefw': {'command': sys.executable, 'args': ['-I', SERVER]}} if mcp else {}}, f)
+        json.dump({'mcpServers': {'wavelens': {'command': sys.executable, 'args': ['-I', SERVER]}} if mcp else {}}, f)
     cmd = ['claude', '-p', prompt, '--output-format', 'stream-json', '--verbose', '--strict-mcp-config', '--mcp-config', cfg,
            '--setting-sources', '', '--no-session-persistence', '--tools', 'Bash,Read,Grep,Glob,Write',
-           '--allowedTools', 'Bash Read Grep Glob Write' + (' mcp__wavefw' if mcp else '')]
+           '--allowedTools', 'Bash Read Grep Glob Write' + (' mcp__wavelens' if mcp else '')]
     if model:
         cmd += ['--model', model]
     t0 = time.time()
@@ -379,13 +379,13 @@ def run_claude(d, prompt, mcp, model, timeout):
     return {'text': res.get('result', ''), 'secs': round(time.time() - t0, 1), 'turns': res.get('num_turns'),
             'cost_usd': res.get('total_cost_usd'), 'input': u.get('input_tokens', 0), 'cache_write': u.get('cache_creation_input_tokens', 0),
             'cache_read': u.get('cache_read_input_tokens', 0), 'output': u.get('output_tokens', 0), 'calls': calls,
-            'mcp_tools': sum(t.startswith('mcp__wavefw') for t in tools), 'rc': p.returncode, 'stderr': p.stderr[-500:]}
+            'mcp_tools': sum(t.startswith('mcp__wavelens') for t in tools), 'rc': p.returncode, 'stderr': p.stderr[-500:]}
 
 
 def run_codex(d, prompt, mcp, model, timeout):
     cmd = ['codex', 'exec', '--json', '--skip-git-repo-check', '--ephemeral', '-s', 'workspace-write', '-C', d]
     if mcp:
-        cmd += ['-c', f'mcp_servers.wavefw.command="{sys.executable}"', '-c', f'mcp_servers.wavefw.args=["-I","{SERVER}"]']
+        cmd += ['-c', f'mcp_servers.wavelens.command="{sys.executable}"', '-c', f'mcp_servers.wavelens.args=["-I","{SERVER}"]']
     if model:
         cmd += ['-m', model]
     cmd.append(prompt)
@@ -434,7 +434,7 @@ def schema_size():
 def one(base, dumps, truth, agent, model, mode, task, rep, timeout):
     name = f'{agent}-{mode}-{task["id"]}-{rep}'
     d, files = workdir(base, name, task, dumps)
-    extra = {'mcp': 'The wavefw MCP server is attached (tools wave_info, wave_signals, wave_values, wave_changes, wave_sample, '
+    extra = {'mcp': 'The wavelens MCP server is attached (tools wave_info, wave_signals, wave_values, wave_changes, wave_sample, '
                     'wave_find, wave_stats, sva_check, wave_page): prefer it.',
              'call': f'The same tools answer from the shell in short JSON: python3 {ROOT}/tools/wavemcp.py --list (the tools: wave_info, '
                      'wave_signals, wave_values, wave_changes, wave_sample, wave_find, wave_stats, sva_check, wave_page; their '

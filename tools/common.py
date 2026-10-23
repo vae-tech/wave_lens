@@ -1,5 +1,5 @@
 """common.py — what the tools share: time units, * / ? patterns, the sva command-line option, the settings
-keys of wavefw/wavefw.config.js, and WaveError.
+keys of wavelens/wavelens.config.js, and WaveError.
 
 A library function raises WaveError with a one-line message; each tool's main() catches it once (run_main) and exits
 with that message, so a mistake in a config or a missing file is one line, not a traceback. Python >= 3.8.
@@ -10,8 +10,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 UNIT_PS = {'zs': 1e-9, 'as': 1e-6, 'fs': 1e-3, 'ps': 1, 'ns': 1e3, 'us': 1e6, 'ms': 1e9, 's': 1e12}
 TS_RE = re.compile(rb'(\d+)\s*(zs|as|fs|ps|ns|us|ms|s)\b')   # the value of a $timescale command
-CONFIG_JS = os.path.join(ROOT, 'wavefw', 'wavefw.config.js')
-# keys of a "config" object that are not in wavefw.config.js: WaveDrom's own, and an older name the viewer still reads
+CONFIG_JS = os.path.join(ROOT, 'wavelens', 'wavelens.config.js')
+# keys of a "config" object that are not in wavelens.config.js: WaveDrom's own, and an older name the viewer still reads
 CONFIG_EXTRA = ('hscale', 'skin', 'groupsFirst')
 SELECT_KEYS = ('depth', 'constants', 'hide', 'budget')   # mkconfig.py's "select" in a base file
 
@@ -35,12 +35,12 @@ def glob_re(pattern):
 
 
 def add_sva_bin_arg(ap):
-    ap.add_argument('--sva-bin', help='the sva CLI (default: $WAVEFW_SVA, out/sva-target/release/sva, the prebuilt '
+    ap.add_argument('--sva-bin', help='the sva CLI (default: $WAVELENS_SVA, out/sva-target/release/sva, the prebuilt '
                     'bin/<os>-x86_64/sva, sva on PATH)')
 
 
 def config_keys():
-    """The settings a "config" object may hold: the keys of wavefw/wavefw.config.js (read now, so a new setting needs no
+    """The settings a "config" object may hold: the keys of wavelens/wavelens.config.js (read now, so a new setting needs no
     change here) and CONFIG_EXTRA."""
     try:
         with open(CONFIG_JS, encoding='utf-8') as f:
@@ -59,4 +59,4 @@ def check_config(cfg, where):
     if bad:
         near = lambda k: [x for x in sorted(keys) if x.lower() == k.lower() or (len(k) > 3 and (x.lower().startswith(k.lower()[:4])))]
         hint = '; '.join(f'{k} (did you mean {" or ".join(near(k)[:3])}?)' if near(k) else k for k in bad)
-        raise WaveError(f'{where}: unknown setting(s) {hint} — the settings are the keys of wavefw/wavefw.config.js')
+        raise WaveError(f'{where}: unknown setting(s) {hint} — the settings are the keys of wavelens/wavelens.config.js')

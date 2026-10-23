@@ -19,7 +19,7 @@ when the user binds interactively, and produce a results JSON that the viewer dr
 
 | Stack | Where it runs | For | Against | Spike / verdict |
 |---|---|---|---|---|
-| **A. Pure JavaScript** (`wavefw/sva.js`) | page; offline only through a browser | no toolchain, one language with the viewer | no Node here: tests and offline runs through playwright; the dump reader would be JS too (or Python → JSON → JS) | not needed: C works without its costs |
+| **A. Pure JavaScript** (`wavelens/sva.js`) | page; offline only through a browser | no toolchain, one language with the viewer | no Node here: tests and offline runs through playwright; the dump reader would be JS too (or Python → JSON → JS) | not needed: C works without its costs |
 | **B. Python** (`tools/sva/`) | offline only | fastest to write, reuses `dumpscan` | no interactive binding without a second engine; the built-in reader needs 4.8 s just to read the 24 MB VCD | rejected: one engine must serve both places |
 | **C. Rust core → native CLI + WASM** | both, one implementation | `cargo test`; typed AST; wellen is fast and reads FST enum tables; the user already builds Rust tools | a toolchain to build it; a base64 blob in the page | **chosen** — numbers below |
 | **D. C++ with slang** | both (Emscripten) | the most faithful front end | tens of MB, minutes to build, evaluator still to write | rejected (weight) |
@@ -46,9 +46,9 @@ instead of `serde_json` (the two remedies under *Risks*).
 over 32 768 clock edges of one assertion 73 ms, over the real `tv` of `test_stream_video` 31–50 ms per assertion.
 
 **Stage 6 decision on size:** neither `wasm-opt` nor a hand-written JSON writer. The module (423 kB after stage 6) goes
-into a page deflate-raw compressed and base64 encoded, `wavefw/sva.wasm.js`: 206 kB, inside the budget for what a page
+into a page deflate-raw compressed and base64 encoded, `wavelens/sva.wasm.js`: 206 kB, inside the budget for what a page
 carries (`DecompressionStream`, in every current browser, unpacks it in a few ms; `sva/wasm/pack.py`, Python's zlib).
-`serde_json` stays: replacing it would save about 100 kB raw for a rewrite of every serialised type. With `wavefw/sva.js`
+`serde_json` stays: replacing it would save about 100 kB raw for a rewrite of every serialised type. With `wavelens/sva.js`
 (~30 kB) a page grows by about 240 kB; `mkhtml.py --no-sva` leaves both out. After stage 5.1 (merged attempts, reasons,
 step roles, the nesting limit) the module is 451 kB, 220 kB in a page.
 
@@ -90,22 +90,22 @@ sva/                    Cargo workspace (make sva-build / sva-test / sva-bless /
   cli/                  sva: native CLI — sva parse FILE...; sva eval --waves DUMP --sva FILE... [--report --junit] (dumps
                         through wellen); sva report RESULTS.json...; tests/
   wasm/                 sva-wasm: cdylib, C ABI — sva_alloc / sva_run / sva_result_len / sva_free, JSON in and out
-  wasm/pack.py          the module for pages: wavefw/sva.wasm.js (deflate-raw + base64), written by make sva-build
+  wasm/pack.py          the module for pages: wavelens/sva.wasm.js (deflate-raw + base64), written by make sva-build
   spike/                the stage-3 property, the demo properties, the spike page and its generator
   bench/                the performance checks of docs/sva/ENGINE.md (test_stream_video's arbiter, the page bench)
 tests/sva/              the corpus: one file per group of constructs and per protocol, err_*.sv, golden/;
                         third_party/: checkers of others (YosysHQ AXI4 FVIP library, OpenTitan macros, APB / AHB / AXI-Lite)
-wavefw/sva.js           the engine in a page (SVA.load -> parse / evaluate(parsed, sampler); tvSampler, rowSampler), the
+wavelens/sva.js           the engine in a page (SVA.load -> parse / evaluate(parsed, sampler); tvSampler, rowSampler), the
                         assertions panel (list, binding, evaluation, numbers, failures, exports: stages 6, 8) and the
                         assertion groups on the waves and in static SVGs (stage 7)
-wavefw/sva.wasm.js      the generated module, committed (pages build without Rust)
+wavelens/sva.wasm.js      the generated module, committed (pages build without Rust)
 tools/svabuild.py       a config's "sva" / "bind" through the CLI, for mkhtml.py and vcd2wavedrom.py; the name rule
                         (Names) for mkconfig.py --sva; the page's printable report (sva report --html)
 docs/sva/               STACK.md (this), LANGUAGE.md (the subset), ENGINE.md (evaluation, results JSON),
                         ast.schema.json (the parsed file as JSON)
 ```
 
-The page loads the module from `wavefw/sva.wasm.js` (`window.WAVEFW_SVA_WASM = {size, deflate}`), inlined by mkhtml or
+The page loads the module from `wavelens/sva.wasm.js` (`window.WAVELENS_SVA_WASM = {size, deflate}`), inlined by mkhtml or
 loaded with `<script src>` (`docs/index.html`); it is committed, so pages and `docs/index.html` work without Rust, and
 `make sva-build` rewrites it (`make smoke` checks that it is the module of the current build).
 
@@ -115,7 +115,7 @@ Request (page → WASM, `run_json`): `{"source": "..."}` gives the parsed file o
 declarations, scopes, errors with line, column, byte offsets, found / expected); with `"trace"` (4-state values per
 cycle), `"options"` and `"assert"` it gives the results document of docs/sva/ENGINE.md (`clock`, `unit`, `cycles`,
 per assertion `steps`, `stats`, `attempts` with `[id, cycle]` traces, `lane`), or `{"errors": [{line, col, msg}]}`.
-`sva eval --out` writes the same document from a dump, `wavefw/sva.js` builds it in the page from a sampler. `{"files":
+`sva eval --out` writes the same document from a dump, `wavelens/sva.js` builds it in the page from a sampler. `{"files":
 ["…", "…"]}` parses (and evaluates) several sources as one compilation unit. `{"report": {"meta", "results": [...]},
 "format": "md" | "junit" | "html"}` gives the report's summary and text (ENGINE.md *Report*).
 

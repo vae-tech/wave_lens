@@ -1,4 +1,4 @@
-/* wavefw.css — tokens and viewer styles for wavefw.js (same tokens as template.html; pages may override after this file).
+/* wavelens.css — tokens and viewer styles for wavelens.js (same tokens as template.html; pages may override after this file).
    Themes: data-theme="light | white | dark" works on <html> (page + all waves) and on any wave element (that wave only).
    No data-theme on <html> = auto (follows prefers-color-scheme). */
 :root, [data-theme="light"] {
@@ -181,7 +181,7 @@
 .wv .notes button:disabled { opacity: 0.45; cursor: default; }
 .wv .notes select { border-radius: 4px; }
 .wv .notes textarea.json { display: block; width: 100%; margin-top: 6px; font: 11.5px/1.4 var(--font-mono); background: var(--panel-2); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 6px; resize: vertical; }
-/* assertions panel (wavefw/sva.js): under the bar, the look of the bookmarks; module rows as drop targets while dragging */
+/* assertions panel (wavelens/sva.js): under the bar, the look of the bookmarks; module rows as drop targets while dragging */
 .wv { --sva-no: var(--wave-x); }
 .wv .sva { border-bottom: 1px solid var(--line); padding: 5px 10px 7px; font-size: 12.5px; background: var(--panel); }
 .wv .sva .nh { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }

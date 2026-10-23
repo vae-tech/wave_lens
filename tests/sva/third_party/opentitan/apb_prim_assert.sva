@@ -1,5 +1,5 @@
 // APB3 rules for examples/apb written with OpenTitan's assertion macros (prim_assert.sv and
-// prim_assert_standard_macros.svh, Apache-2.0: see LICENSE). This file is part of wavefw; it exercises the macro
+// prim_assert_standard_macros.svh, Apache-2.0: see LICENSE). This file is part of WaveLens; it exercises the macro
 // library as OpenTitan designs use it: default macro arguments, macros that expand into other macros, `ifndef inside a
 // macro body, token pasting (ASSERT_KNOWN_IF makes <name>KnownEnable), `__FILE__ / `__LINE__ in the messages.
 //   sva parse prim_assert.sv prim_assert_standard_macros.svh apb_prim_assert.sva

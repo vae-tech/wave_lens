@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""viewedit.py — the viewer's commands (view.run of wavefw/src/edit.js) on a page's edits or a saved state, from the shell.
+"""viewedit.py — the viewer's commands (view.run of wavelens/src/edit.js) on a page's edits or a saved state, from the shell.
 
 What a person does with the buttons of a viewer — bookmarks (numbered circles with a text), arrows between them, markers,
 groups of their own, highlight, colours, the selection, hidden and folded rows, the modules kept (Only), the radix, the
@@ -8,7 +8,7 @@ script or an agent does with the same commands by name. In the page they run liv
 view_live); here they change the file:
 
   a page (mkhtml.py, make html, wavemcp.py wave_page): it carries per viewer a state of what the edits touched
-     (<script type="application/json" id="wavefw-edits">); the viewer applies a new revision once, when the page is
+     (<script type="application/json" id="wavelens-edits">); the viewer applies a new revision once, when the page is
      opened or reloaded — over what was changed in that browser in the same parts (the rest stays)
   a saved state (.view.json, the viewer's Save): changed in place; Load… in the viewer takes it
 
@@ -32,7 +32,7 @@ import argparse, datetime, functools, json, os, re, sys, unicodedata
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
 from common import WaveError, run_main  # noqa: E402
 
-STATE_VERSION = 3   # wavefw/src/view.js STATE_VERSION
+STATE_VERSION = 3   # wavelens/src/view.js STATE_VERSION
 UNIT_PS = {'fs': 1e-3, 'ps': 1, 'ns': 1e3, 'us': 1e6, 'µs': 1e6, 'ms': 1e9, 's': 1e12}
 RADIX = ['auto', 'hex', 'dec', 'signed', 'bin', 'oct', 'ascii', 'float']   # model.js RADIX
 SORTS = ['none', 'asc', 'desc']
@@ -46,11 +46,11 @@ GAP_KEYS = {'on': 'gaps', 'idle': 'gapIdle', 'keep': 'gapKeep', 'signals': 'gapS
             'count': 'gapCount'}
 ALL_GAP_KEYS = ['gaps', 'gapIdle', 'gapKeep', 'gapSignals', 'gapClock', 'gapAux', 'gapOnly', 'gapCount', 'gapLine']   # view.js GAP_KEYS
 CYC_KEYS = ['cycles', 'cycleClock', 'cycleZero']   # view.js CYC_KEYS
-# their defaults, as wavefw/wavefw.config.js has them (tests/unit/test_viewedit.py reads them there)
+# their defaults, as wavelens/wavelens.config.js has them (tests/unit/test_viewedit.py reads them there)
 GAP_DEFAULTS = {'gaps': False, 'gapIdle': 16, 'gapKeep': 2, 'gapSignals': None, 'gapClock': None, 'gapAux': None, 'gapOnly': False,
                 'gapCount': 'clock', 'gapLine': 'dashdot'}
 CYC_DEFAULTS = {'cycles': False, 'cycleClock': None, 'cycleZero': None}
-# the commands: name -> arguments (? optional), as WaveFW.commands() gives them (the smoke test compares the two)
+# the commands: name -> arguments (? optional), as WaveLens.commands() gives them (the smoke test compares the two)
 COMMANDS = {
     'cursor': 't', 'cursor2': 't', 'view': 'from? to? at? span?', 'fit': '', 'range': 'from? to? signal?',
     'bookmark': 'n? t? signal? text? color? lift? delete?', 'arrow': 'id? from? to? shape? head? line? color? label? delete?',
@@ -67,9 +67,9 @@ LIVE_ONLY = {'fit': 'the time of the waves', 'edge': 'the values of the signals'
 TIME_ARGS = {'cursor': ('t',), 'cursor2': ('t',), 'view': ('from', 'to', 'at', 'span'), 'range': ('from', 'to'), 'bookmark': ('t',), 'marker': ('t',),
              'picture': ('from', 'to'), 'cycles': ('zero',)}
 def block_re(name):
-    """A JSON block of the page (<script type="application/json" id="wavefw-…">), at a line's start: not the text of it in
-    the comments of the inlined wavefw.js."""
-    return re.compile(r'^<script type="application/json" id="wavefw-' + name + r'">(.*?)</script>\n?', re.S | re.M)
+    """A JSON block of the page (<script type="application/json" id="wavelens-…">), at a line's start: not the text of it in
+    the comments of the inlined wavelens.js."""
+    return re.compile(r'^<script type="application/json" id="wavelens-' + name + r'">(.*?)</script>\n?', re.S | re.M)
 
 
 EDITS_RE, LIVE_RE = block_re('edits'), block_re('live')
@@ -79,13 +79,13 @@ def put_block(text, name, obj):
     """The page's text with its block `name` set to obj (None: removed); a new one goes before the settings and the
     framework, so it is there when the viewers are built."""
     rx = block_re(name)
-    block = '' if obj is None else (f'<script type="application/json" id="wavefw-{name}">' +
+    block = '' if obj is None else (f'<script type="application/json" id="wavelens-{name}">' +
                                     json.dumps(obj, ensure_ascii=False, separators=(',', ':')).replace('<', '\\u003c') + '</script>\n')   # no < in it
     if rx.search(text):
         return rx.sub(lambda _: block, text, count=1)
     if obj is None:
         return text
-    at = text.find('<script>window.WAVEFW_CONFIG')
+    at = text.find('<script>window.WAVELENS_CONFIG')
     at = at if at >= 0 else text.rfind('</body>')
     if at < 0:
         fail('no place for it in the page (no </body>)')
@@ -962,7 +962,7 @@ class Editor:
         return {'scroll': 'window' if mh is not None and mh != '' else 'page', 'height': mh or None, 'tools': 'fold' if tf else 'open'}
 
     def opt(self, k, default=None):
-        """A setting as the viewer has it: the state's config, else the page's, else the default (wavefw.config.js)."""
+        """A setting as the viewer has it: the state's config, else the page's, else the default (wavelens.config.js)."""
         c = self.st.get('config') or {}
         return c[k] if k in c else self.m.cfg.get(k, default)
 
@@ -1048,13 +1048,13 @@ class Editor:
         """A state back (Load…): every key it has replaces this one's, the keys of its config one by one; a key it does not
         have stays (null: none, or the page's own)."""
         s = a.get('state')
-        if not isinstance(s, dict) or s.get('wavefw') != 'state':
-            fail('set_state: not a saved viewer state ({"wavefw": "state", …})')
+        if not isinstance(s, dict) or s.get('wavelens') != 'state':
+            fail('set_state: not a saved viewer state ({"wavelens": "state", …})')
         for k, v in s.items():
             if k == 'config':
                 if isinstance(v, dict):
                     self.config().update(v)
-            elif k not in ('wavefw', 'version', 'title'):
+            elif k not in ('wavelens', 'version', 'title'):
                 self.st[k] = v
         if 'only' in s:   # as the viewer keeps it: its known modules, on unless false; a selection it leaves out goes
             self.st['only'] = self.only()
@@ -1217,8 +1217,11 @@ def find_row(r, terms, groups, cs, word, rx):
 
 
 # ---------------- pages and state files ----------------
+OLD_PAGE_RE = re.compile(r'window\.WAVEFW_CONFIG|id="wavefw-edits"|\bWaveFW\.')
+
+
 class Page:
-    """A page made by mkhtml.py: its views (window.WAVES), its settings (window.WAVEFW_CONFIG) and its edits."""
+    """A page made by mkhtml.py: its views (window.WAVES), its settings (window.WAVELENS_CONFIG) and its edits."""
 
     def __init__(self, path):
         self.path = path
@@ -1230,17 +1233,19 @@ class Page:
         m = re.search(r'<script>\s*window\.WAVES = (.*?);\s*</script>', self.text, re.S)
         if not m:
             fail(f'{path}: not a page of mkhtml.py (no window.WAVES): make it with make html, mkhtml.py or wavemcp.py wave_page')
+        if OLD_PAGE_RE.search(self.text):   # the project's name before 0.18: its settings and edits are not read here
+            fail(f'{path}: a page made before the rename to WaveLens (0.18): make it again with make html or mkhtml.py')
         try:
             self.waves = json.loads(m.group(1))
         except ValueError as e:
             fail(f'{path}: its waves are not JSON ({e})')
-        s = re.search(r'<script>window\.WAVEFW_CONFIG = (.*?);</script>', self.text, re.S)
+        s = re.search(r'<script>window\.WAVELENS_CONFIG = (.*?);</script>', self.text, re.S)
         self.settings = json.loads(s.group(1)) if s else {}
         e = EDITS_RE.search(self.text)
         try:
             self.edits = json.loads(e.group(1)) if e else {}
         except ValueError:
-            fail(f'{path}: its edits are not JSON (the wavefw-edits script)')
+            fail(f'{path}: its edits are not JSON (the wavelens-edits script)')
         self.edits.setdefault('views', {})
 
     def view(self, key=None):
@@ -1299,9 +1304,9 @@ def edit_state(path, ops, model=None):
         fail(f'cannot read {path}: {e.strerror}')
     except ValueError as e:
         fail(f'{path}: not JSON ({e})')
-    if not isinstance(st, dict) or st.get('wavefw') != 'state':
+    if not isinstance(st, dict) or st.get('wavelens') != 'state':
         fail(f'{path}: not a saved viewer state (the viewer\'s Save writes one)')
-    head = {k: st[k] for k in ('wavefw', 'version', 'title') if k in st}
+    head = {k: st[k] for k in ('wavelens', 'version', 'title') if k in st}
     ed = Editor(model or Model(), {k: v for k, v in st.items() if k not in head})
     res = ed.run(ops)
     out = dict(head, **tidy(ed.st))

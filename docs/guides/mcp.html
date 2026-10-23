@@ -3,22 +3,23 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AI agents (MCP) · wavefw guides</title>
+<title>AI agents (MCP) · WaveLens guides</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap">
 <link rel="stylesheet" href="guide.css">
 </head>
 <body>
 <header class="top"><nav>
-  <a class="home" href="index.html">wavefw guides</a>
-  <a href="pages.html">Dump → page</a> <a href="viewer.html">Viewer</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
-  <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="mcp.html" aria-current="page">AI agents (MCP)</a>
-  <a href="../index.html">Reference</a>
+  <a class="home" href="index.html">WaveLens guides</a>
+  <a href="pages.html">Dump → page</a> <a href="viewer.html">Viewer</a> <a href="modules.html">Modules</a>
+  <a href="compare.html">Compare</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
+  <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="vscode.html">VS Code</a>
+  <a href="commands.html">Commands</a> <a href="mcp.html" aria-current="page">AI agents (MCP)</a> <a href="../index.html">Reference</a>
 </nav></header>
 <div class="page toc-side">
 <main>
 <header class="hero"><div class="kicker">Guide</div><h1>AI agents (MCP)</h1>
-<p class="lead">Give an AI agent — Claude Code, Codex, any MCP client — the tools of wavefw: it asks questions of a dump and gets short
+<p class="lead">Give an AI agent — Claude Code, Codex, any MCP client — the tools of wavelens: it asks questions of a dump and gets short
   JSON answers instead of reading the dump or writing a parser for it, checks SystemVerilog assertions in one call, and writes a viewer
   page when it wants to show you something.</p></header>
 
@@ -26,14 +27,14 @@
 <p><code>tools/wavemcp.py</code> is an MCP server (Model Context Protocol, JSON-RPC over stdio). Python standard library only, like the
   other tools. It reads a VCD, or an FST through GTKWave's <code>fst2vcd</code> or the <code>sva</code> CLI. Two tools need the <code>sva</code> engine's CLI —
   <code>sva_check</code> and <code>wave_find</code> with an expression — and find it the way <code>svabuild.py</code> does:
-  <code>$WAVEFW_SVA</code>, the build (<code>make sva-build</code>), the committed <code>bin/&lt;os&gt;-x86_64/sva</code>, the
+  <code>$WAVELENS_SVA</code>, the build (<code>make sva-build</code>), the committed <code>bin/&lt;os&gt;-x86_64/sva</code>, the
   <code>PATH</code>.</p>
 <p>A dump is read once per server (its declarations and the change counts) and kept; the transitions of a signal are read when a tool
   first needs them, and read again when the file changes — so a long session over a big dump stays fast, and a new simulation is seen.</p>
 
 <h2 id="setup">Setting it up</h2>
-<pre><code>claude mcp add wavefw -- python3 -I /path/to/wavefw/tools/wavemcp.py     <span class="c"># Claude Code (add --scope user: every project)</span>
-codex mcp add wavefw -- python3 -I /path/to/wavefw/tools/wavemcp.py      <span class="c"># Codex CLI</span></code></pre>
+<pre><code>claude mcp add wavelens -- python3 -I /path/to/wavelens/tools/wavemcp.py     <span class="c"># Claude Code (add --scope user: every project)</span>
+codex mcp add wavelens -- python3 -I /path/to/wavelens/tools/wavemcp.py      <span class="c"># Codex CLI</span></code></pre>
 <p>Any other MCP client: run <code>python3 -I tools/wavemcp.py</code> as a stdio server. The server tells the agent its conventions in
   its <code>instructions</code> (start with <code>wave_info</code>, then <code>wave_signals</code> to find names …), so the agent needs no
   prompt of yours to use it. The tools that only read are marked read-only (<code>readOnlyHint</code>); <code>wave_page</code>,
@@ -42,7 +43,7 @@ codex mcp add wavefw -- python3 -I /path/to/wavefw/tools/wavemcp.py      <span c
 <p>The same tools work without an agent — for a script, a test, or an agent that prefers its shell:</p>
 <pre><code>python3 -I tools/wavemcp.py --list                                                  <span class="c"># the tools and their input schemas</span>
 python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd"}'   <span class="c"># one tool, its answer on stdout</span></code></pre>
-<p>The examples below are real answers of <code>--call</code> on the APB example's dump (<code>make example EX=apb</code> →
+<p>The examples below are answers of <code>--call</code> (shortened where they say …; sizes change with the version) on the APB example's dump (<code>make example EX=apb</code> →
   <code>out/examples/apb/apb.vcd</code>: an APB3 write, a read with two wait states and a write to an unmapped address).</p>
 
 <h2 id="tools">The tools</h2>
@@ -156,7 +157,7 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
 <pre><code>--call wave_page '{"dump": "…/apb.vcd", "out": "apb_page.html", "title": "APB transfers (wave_page)",
                    "signals": ["PCLK", "PSEL", "PENABLE", "PWRITE", "PADDR", "PWDATA", "PRDATA", "PREADY", "PSLVERR"],
                    "from": "30ns", "to": "200ns"}'
-{"page":"…/apb_page.html","bytes":751439,"notes":["PADDR = apb_tb.PADDR (+2 deeper)", …]}</code></pre>
+{"page":"…/apb_page.html","bytes":910944,"notes":["PADDR = apb_tb.PADDR (+2 deeper)", …]}</code></pre>
 <figure><img src="img/mcp-page.png" alt="The viewer page written by wave_page: the APB signals from 30 to 200 ns" loading="lazy">
 <figcaption><b>What the agent hands you.</b> The page of that call: a full viewer (cursor, find, bookmarks, the menu) over the nine
   signals, the APB port found by its names under them. Open it and look for yourself.</figcaption></figure>
@@ -231,7 +232,7 @@ view_get  {"page": "apb_page.html", "picture": true}  <span class="c"># what is 
 <h2 id="measured">What it saves</h2>
 <p><code>make mcp-bench AGENT=claude MODEL=sonnet REPS=2</code> (or <code>AGENT=codex</code>) runs eight tasks with known answers — two on
   the APB example, one on the FSM example's FST, five on a generated 3.5 MB dump of 40 000 cycles — by an agent with the server and
-  without it (the shell and the wavefw command-line tools, named in the same prompt), and counts the tokens. Measured on 21 October
+  without it (the shell and the WaveLens command-line tools, named in the same prompt), and counts the tokens. Measured on 21 October
   2026, two runs of each task in each mode, every one of the 128 answers right (every token the model read or wrote, the context read
   again from the cache included; the medians per task summed):</p>
 <table>
@@ -262,7 +263,7 @@ make mcp-bench AGENT=codex TASKS=a1,b3                 <span class="c"># some ta
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>wavefw 0.11 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.18 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

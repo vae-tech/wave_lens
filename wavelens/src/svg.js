@@ -1,4 +1,4 @@
-/* wavefw/src/svg.js — the static SVG figure (WaveSVG). */
+/* wavelens/src/svg.js — the static SVG figure (WaveSVG). */
 
 /* ---------------- static SVG ---------------- */
 const WaveSVG = {

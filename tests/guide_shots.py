@@ -4,7 +4,7 @@
 Viewport 1280 px, device scale 1, dark theme unless a shot says otherwise, IBM Plex (shots.py stops without it), a fixed
 sequence of calls per shot. Each shot belongs to a guide (--only viewer,gaps,…: those guides). The gaps guide reads a
 dump made here: a stream with five rare packets in 10 µs and a slow heartbeat (BUILD/guides/stream.vcd, its config and
-page); the others read the examples' pages (make examples demo first), wavefw/viewer.html, docs/index.html and
+page); the others read the examples' pages (make examples demo first), wavelens/viewer.html, docs/index.html and
 tests/conformance.html.
 
   python3 tests/guide_shots.py [--build out] [--out docs/guides/img] [--only gaps,sva]   (no -I: playwright)
@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import shots  # noqa: E402  (its raster flags, the page opener, settle, js)
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-GUIDES = ['viewer', 'gaps', 'sva', 'wavedrom', 'pages', 'buses', 'mcp']
+GUIDES = ['viewer', 'modules', 'compare', 'commands', 'gaps', 'sva', 'wavedrom', 'pages', 'buses', 'mcp']
 
 # the gaps guide's dump: clk 100 MHz for 1000 cycles; packets of a valid / ready stream (start cycle, beats, cycles of
 # the packet with ready low), the state of the sender, an irq two cycles after each packet, a packet counter, and a
@@ -125,8 +125,8 @@ class Shots:
         self.n += 1
         print(f'  {name}.png  {os.path.getsize(path) / 1e3:.0f} kB')
 
-    def quiet(self, page):
-        page.evaluate('document.activeElement && document.activeElement.blur()')
+    def quiet(self, page):   # no focus ring, no hover, no toast of the step before
+        page.evaluate("document.activeElement && document.activeElement.blur(), document.querySelectorAll('.wv .bar .toast').forEach(t => t.textContent = '')")
         page.mouse.move(0, 0)
 
 
@@ -239,6 +239,15 @@ def viewer(S, ex, build):
     S.quiet(page)
     S.save('viewer-overview', v)
     S.save('viewer-bar', v.locator('.bar'))
+    # the right button on the bar: its tool groups to show or hide; then a bar with the time and the find only
+    bar = v.locator('.bar').bounding_box()
+    js(f"(v.toolsMenu({bar['x'] + 420}, {bar['y'] + 24}), 0)"); shots.settle(page)
+    S.save('viewer-bar-tools', clip=union(page.locator('.wv-menu').bounding_box(), bar), page=page, pad=6)
+    js('(v.closeMenu(), 0)')
+    js("(v.setToolsHidden(['edges', 'go to', 'list', 'style', 'state', 'dump']), 0)"); shots.settle(page)
+    S.quiet(page)
+    S.save('viewer-bar-compact', v, upto=v.locator('.notes'))
+    js('(v.setToolsHidden(null), 0)')
     S.save('viewer-notes', v.locator('.notes'))
     # the box of the keys (?)
     js('(v.help(true), 0)'); shots.settle(page)
@@ -291,9 +300,9 @@ def viewer(S, ex, build):
     js('(v.reset(), 0)')
     # themes: the same viewer in light, white and dark
     for th in ['light', 'white', 'dark']:
-        page.evaluate(f"WaveFW.setTheme('{th}')"); shots.settle(page)
+        page.evaluate(f"WaveLens.setTheme('{th}')"); shots.settle(page)
         S.save('theme-' + th, v, upto=v.locator('.notes'))
-    page.evaluate("WaveFW.setTheme('dark')")
+    page.evaluate("WaveLens.setTheme('dark')")
     page.close()
 
     # a generated page: hierarchy, module shading, highlight, find, paint
@@ -323,11 +332,20 @@ def viewer(S, ex, build):
     S.quiet(page)
     S.save('viewer-paint', v, clip=dict(v.bounding_box(), height=720))
     js('(v.unpaint(), 0)')
-    # the Modules panel: Only u_slave and what is under it, the way to it as a header
-    js("(v.modules(true), v.setOnly({modules: ['axi_lite_tb.u_slave']}), v.mods.locate(v.scopeOf('axi_lite_tb.u_slave')), 0)"); shots.settle(page)
+    # Mask: only the found rows (and the modules on the way to them); Select: the found signals selected, the menu takes them all
+    js('(v.expandAll(), 0)')
+    v.locator('input.q').fill('ready'); shots.settle(page)
+    v.locator('button[data-act=fmask]').click(); shots.settle(page)
     S.quiet(page)
-    S.save('viewer-modules', v, clip=dict(v.bounding_box(), height=720))
-    js('(v.setOnly(null), v.modules(false), 0)')
+    S.save('viewer-find-mask', v, clip=dict(v.bounding_box(), height=520))
+    v.locator('button[data-act=fmask]').click(); shots.settle(page)
+    v.locator('button[data-act=fselect]').click(); shots.settle(page)
+    cb = v.locator('canvas').bounding_box()
+    y = js("(o => o ? o.y + o.h / 2 : 60)((v.lay || []).find(o => o.row === v.sel))")
+    js(f"(v.menu({cb['x'] + 380}, {cb['y'] + y}, v.sel), 0)"); shots.settle(page)
+    S.save('viewer-find-select', clip=union(page.locator('.wv-menu').bounding_box(), dict(v.bounding_box(), height=560)), page=page)
+    js('(v.closeMenu(), 0)')
+    v.locator('canvas').focus(); page.keyboard.press('Escape'); page.keyboard.press('Escape')
     page.close()
 
     # a packed struct as a row of fields
@@ -348,8 +366,8 @@ def viewer(S, ex, build):
     S.save('viewer-sort', sv)
     page.close()
 
-    # a dump opened in the browser: wavefw/viewer.html, empty, then a VCD read
-    page = S.page(ROOT / 'wavefw' / 'viewer.html', height=700)
+    # a dump opened in the browser: wavelens/viewer.html, empty, then a VCD read
+    page = S.page(ROOT / 'wavelens' / 'viewer.html', height=700)
     S.quiet(page)
     S.save('viewer-open-empty', page.locator('body'), clip={'x': 0, 'y': 0, 'width': 1280, 'height': 420}, page=page)
     vcd = ex / 'apb' / 'apb.vcd'
@@ -360,6 +378,115 @@ def viewer(S, ex, build):
     S.quiet(page)
     page.evaluate('window.scrollTo(0, 0)')
     S.save('viewer-open-vcd', clip=dict(page.locator('.wv').first.bounding_box(), height=640), page=page)
+    page.close()
+
+
+# ---------------------------------------------------------------- the Modules guide
+def modules(S, ex, build):
+    page = S.page(ex / 'axi_lite' / 'axi_lite_all.html', height=1100)
+    shots.no_sva(page)
+    v = shots.view(page)
+    js = lambda e: shots.js(page, 0, e)   # noqa: E731
+    node = lambda p: f"v.mods.nodes.get(v.scopeOf('{p}').id)"   # noqa: E731
+    # the panel over the waves, the module of the selected signal (●) found in it
+    js("(v.select(v.M.rows.find(r => r.type === 'sig' && r.tr && (r.full || '').startsWith('axi_lite_tb.u_slave.u_regfile.'))), v.modules(true, true), 0)")
+    shots.settle(page); S.quiet(page)
+    S.save('modules-panel', v, clip=dict(v.bounding_box(), height=640))
+    # the filter: fuzzy, as the find
+    page.locator('.wv-mods .mq').fill('regf'); shots.settle(page); S.quiet(page)
+    S.save('modules-filter', page.locator('.wv-mods'), pad=4)
+    page.locator('.wv-mods .mq').fill(''); shots.settle(page)
+    # a click goes there: u_master opened, its first signal selected in the middle
+    js("(v.collapseAll(), v.goScope('axi_lite_tb.u_master'), 0)"); shots.settle(page); S.quiet(page)
+    S.save('modules-goto', v, clip=dict(v.bounding_box(), height=640))
+    # Only u_slave: the testbench a header on the way to it, u_master gone
+    js("(v.expandAll(), v.setOnly({modules: ['axi_lite_tb.u_slave'], open: ['axi_lite_tb.u_slave']}), v.bodyEl.scrollTop = 0, v.draw(), 0)")
+    shots.settle(page); S.quiet(page)
+    S.save('modules-only', v, clip=dict(v.bounding_box(), height=640))
+    # the right button on a module of the tree
+    mb = page.locator('.wv-mods').bounding_box()
+    js(f"(v.mods.menu({node('axi_lite_tb.u_master')}, {mb['x'] + 150}, {mb['y'] + 150}), 0)"); shots.settle(page)
+    S.save('modules-menu', clip=union(page.locator('.wv-menu').bounding_box(), mb), page=page, pad=6)
+    js('(v.closeMenu(), 0)')
+    # the find counts what Only leaves out; Only paused: every module again, the set kept (the panel closed: the bar in sight)
+    js('(v.modules(false), 0)')
+    v.locator('input.q').fill('awvalid'); shots.settle(page); S.quiet(page)
+    S.save('modules-outside', v.locator('.bar'))
+    v.locator('canvas').focus(); page.keyboard.press('Escape')
+    js("(v.setOnly({on: false}), 0)"); shots.settle(page); S.quiet(page)
+    S.save('modules-paused', v.locator('.bar'))
+    js('(v.setOnly(null), v.modules(false), 0)')
+    page.close()
+
+
+# ---------------------------------------------------------------- the compare guide
+def b_dump(vcd):
+    """Run B of the APB example: the data of the first read after 100 ns other, PREADY of the next one 10 ns later,
+    PSLVERR left out (a signal B has not got)."""
+    lines, ids = vcd.read_text().split('\n'), {}
+    for ln in lines:
+        w = ln.split()
+        if ln.strip().startswith('$var') and len(w) > 4:
+            ids.setdefault(w[4], w[3])
+    err, rd, rdy = ids['PSLVERR'], ids['PRDATA'], ids['PREADY']
+    out = [ln for ln in lines if not (ln.strip().startswith('$var') and ln.split()[3] == err) and ln not in ('0' + err, '1' + err)]
+    t, data, k, moved = 0, None, None, None
+    for i, ln in enumerate(out):
+        if ln.startswith('#'):
+            t = int(ln[1:])
+        elif data is None and t > 100000 and ln.endswith(' ' + rd) and ln.startswith('b') and int(ln[1:].split()[0], 2):
+            out[i], data = f'b{0xdeadbeef:b} {rd}', t
+        elif k is None and data is not None and t > data and ln == '1' + rdy:
+            k, moved = i, t
+    out.pop(k)
+    j = next(i for i in range(k, len(out)) if out[i].startswith('#') and int(out[i][1:]) >= moved + 10000)
+    out.insert(j + 1, '1' + rdy)
+    return '\n'.join(out), data, moved
+
+
+def compare(S, ex, build):
+    d = build / 'guides'
+    d.mkdir(parents=True, exist_ok=True)
+    text, data, moved = b_dump(ex / 'apb' / 'apb.vcd')
+    (d / 'apb_b.vcd').write_text(text)
+    page = S.page(ex / 'apb' / 'apb.html', height=1000)
+    shots.no_sva(page)
+    i = page.evaluate("WaveLens.views().findIndex(v => v.editKey() === 'exact')")
+    v = shots.view(page, i)
+    js = lambda e: shots.js(page, i, e)   # noqa: E731
+    v.scroll_into_view_if_needed()
+    v.locator('input.cfile').set_input_files(str(d / 'apb_b.vcd')); page.wait_for_timeout(400); shots.settle(page)
+    print('    compare:', js("v.cmp && [v.cmp.differ, v.cmp.missing, v.cmp.first]"), 'data at', data, 'PREADY moved at', moved)
+    js("(v.zoomTo(40000, 200000), v.cursor = 40000, 0)"); shots.settle(page); S.quiet(page)
+    S.save('compare-bands', v, upto=v.locator('.notes'))
+    js("(v.select(null), v.diffStep(1), 0)"); shots.settle(page); S.quiet(page)
+    S.save('compare-next', v, upto=v.locator('.notes'))
+    S.save('compare-svg', picture(page, js("v.toSVG({from: 40000, to: 200000, width: 1180})")))
+    page.evaluate("document.getElementById('pic')?.remove()")
+    page.close()
+
+
+# ---------------------------------------------------------------- the commands guide
+def commands(S, ex, build):
+    page = S.page(ex / 'apb' / 'apb.html', height=1000)
+    shots.no_sva(page)
+    i = page.evaluate("WaveLens.views().findIndex(v => v.editKey() === 'exact')")
+    v = shots.view(page, i)
+    js = lambda e: shots.js(page, i, e)   # noqa: E731
+    v.scroll_into_view_if_needed()
+    js("(v.zoomTo(40000, 200000), v.cursor = 40000, v.draw(), 0)"); shots.settle(page); S.quiet(page)
+    S.save('commands-before', v, upto=v.locator('.notes'))
+    ops = [{'op': 'bookmark', 't': '85ns', 'signal': 'PSEL', 'text': 'read of 0x04: SETUP'},
+           {'op': 'bookmark', 't': '95ns', 'signal': 'PENABLE', 'text': 'ACCESS, PREADY low: the slave waits'},
+           {'op': 'bookmark', 't': '115ns', 'signal': 'PREADY', 'text': 'PREADY: the read ends at the next edge'},
+           {'op': 'arrow', 'from': 2, 'to': 3, 'label': '2 wait states', 'shape': '-|'},
+           {'op': 'marker', 't': '125ns', 'label': 'read done', 'color': '#2f9e44'},
+           {'op': 'group', 'name': 'handshake', 'signals': ['PSEL', 'PENABLE', 'PREADY'], 'color': '#4dabf7'},
+           {'op': 'highlight', 'add': ['handshake', 'PRDATA']}, {'op': 'cursor', 't': '115ns'}]
+    page.evaluate(f"(async () => {{ const v = WaveLens.views()[{i}]; window.__r = await v.run({json.dumps(ops)}); }})()")
+    shots.settle(page); S.quiet(page)
+    print('    run:', page.evaluate("JSON.stringify(window.__r).slice(0, 300)"))
+    S.save('commands-after', v)
     page.close()
 
 
@@ -377,7 +504,7 @@ def sva(S, ex, build):
     S.quiet(page)
     S.save('sva-panel', v.locator('.sva'))
     # one assertion on the waves, its failing attempt selected
-    page.evaluate("(async () => { WaveFW.configure({svaShow: ['apb_demo_no_wait'], svaSignals: false}); await SVA.ready(); })()")
+    page.evaluate("(async () => { WaveLens.configure({svaShow: ['apb_demo_no_wait'], svaSignals: false}); await SVA.ready(); })()")
     page.evaluate(f"""(() => {{ const p = {p0}; p.open = false; p.render(); p.v.expandAll();
         const b = p.bindings.find(b => b.assert === 'apb_demo_no_wait');
         p.select(b, b.results.assertions[0].attempts.findIndex(a => a.result === 'fail')); }})()""")
@@ -385,7 +512,7 @@ def sva(S, ex, build):
     S.quiet(page)
     S.save('sva-attempt', v, upto=v.locator('.notes'))
     # with the bound signals repeated in the group
-    page.evaluate("(async () => { WaveFW.configure({svaShow: ['apb_demo_no_wait'], svaSignals: true}); await SVA.ready(); })()")
+    page.evaluate("(async () => { WaveLens.configure({svaShow: ['apb_demo_no_wait'], svaSignals: true}); await SVA.ready(); })()")
     shots.settle(page)
     S.quiet(page)
     S.save('sva-group', v.locator('.wrap, .body').first if v.locator('.wrap').count() else v, upto=v.locator('.notes'))
@@ -412,9 +539,9 @@ def sva(S, ex, build):
     li.locator('button[data-sv=bind]').click(); shots.settle(page)
     S.quiet(page)
     S.save('sva-bind', li)
-    page.evaluate("WaveFW.configure({svaShow: null, svaSignals: null})")
+    page.evaluate("WaveLens.configure({svaShow: null, svaSignals: null})")
     # the expression field and a row ƒ (no assertion groups on the waves)
-    page.evaluate("(async () => { WaveFW.configure({svaShow: []}); await SVA.ready(); })()")
+    page.evaluate("(async () => { WaveLens.configure({svaShow: []}); await SVA.ready(); })()")
     page.evaluate(f"(() => {{ const p = {p0}; p.open = false; p.render(); }})()")
     q = v.locator('input.svq')
     q.fill('PSEL && !PREADY'); v.locator('button[data-x=add]').click(); shots.settle(page)

@@ -1,4 +1,4 @@
-/* wavefw/src/modules.js — the Modules panel (t): the page's modules as a tree, without signals. A click goes to a
+/* wavelens/src/modules.js — the Modules panel (t): the page's modules as a tree, without signals. A click goes to a
    module's signals; a box over the tree (ctrl / shift+click, Space, Only matches) keeps Only those modules on the waves. */
 
 /* ---------------- Only: the modules kept on the waves ---------------- */

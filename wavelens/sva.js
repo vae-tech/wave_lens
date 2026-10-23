@@ -1,14 +1,14 @@
-/* sva.js — SystemVerilog assertions in a wavefw page (docs/USAGE.md "Assertions", docs/sva/ENGINE.md). Loaded after wavefw.js.
+/* sva.js — SystemVerilog assertions in a wavelens page (docs/USAGE.md "Assertions", docs/sva/ENGINE.md). Loaded after wavelens.js.
 
    The engine: sva_wasm.wasm over its plain C ABI, JSON in and out (no fetch: the module comes inlined, from
-   wavefw/sva.wasm.js = window.WAVEFW_SVA_WASM, deflate-raw + base64).
+   wavelens/sva.wasm.js = window.WAVELENS_SVA_WASM, deflate-raw + base64).
      const sva = await SVA.load(bytes)                  // or await SVA.engine() for the inlined module
      sva.parse(source) | sva.parse([src1, src2])         // the parsed file(s) (docs/sva/ast.schema.json)
      sva.evaluate(parsed, sampler, options)              // the results document of docs/sva/ENGINE.md
      SVA.tvSampler({name: {tv, width}}), SVA.rowSampler({name: model row})   samplers over WaveJSON "tv" / a viewer's rows
    sampler: { edges(name, edge) -> [time, …] | null, before(name, time) -> value | null, width(name) -> bits }.
 
-   The assertions panel of every viewer (WaveFW.plugin): the loaded assertions, one line each (label, kind, property,
+   The assertions panel of every viewer (WaveLens.plugin): the loaded assertions, one line each (label, kind, property,
    signals, binding state), binding to an instance of the waveform (drag a line onto a module row, Bind…, the config's
    "bind"), evaluation on demand; each binding keeps its results document in binding.results (view.sva.bindings).
    Page data: window.SVA = { files: [{name, path, source, parsed?}], notes: [...] } (mkhtml.py) and per WaveJSON
@@ -85,7 +85,7 @@ function assemble(steps, outs, unit) {
   return doc;
 }
 
-// bytes: an ArrayBuffer / Uint8Array of sva_wasm.wasm, or {deflate: base64} / {base64} (wavefw/sva.wasm.js)
+// bytes: an ArrayBuffer / Uint8Array of sva_wasm.wasm, or {deflate: base64} / {base64} (wavelens/sva.wasm.js)
 async function load(bytes) {
   const raw = await instantiate(bytes);
   // a trap leaves the instance unusable: the next SVA.engine() makes a new one
@@ -101,13 +101,13 @@ async function load(bytes) {
   return { parse, evaluate, call };
 }
 let ENGINE = null;
-SVA.engine = () => ENGINE || (ENGINE = G.WAVEFW_SVA_WASM ? load(G.WAVEFW_SVA_WASM) :
-  Promise.reject(new Error('no SVA engine in this page (wavefw/sva.wasm.js)')));
+SVA.engine = () => ENGINE || (ENGINE = G.WAVELENS_SVA_WASM ? load(G.WAVELENS_SVA_WASM) :
+  Promise.reject(new Error('no SVA engine in this page (wavelens/sva.wasm.js)')));
 // A request that would take more than ~300 ms in the page goes to a Web Worker: its work is cycles × assertions, the rate
 // (work per ms) is measured on the requests run in the page. SVA.syncLimit (work units), when set, decides instead.
 SVA.rate = 450;
 SVA.syncLimit = null;
-const useWorker = work => typeof Worker !== 'undefined' && !!G.WAVEFW_SVA_WASM && (SVA.syncLimit != null ? work > SVA.syncLimit : work / SVA.rate > 300);
+const useWorker = work => typeof Worker !== 'undefined' && !!G.WAVELENS_SVA_WASM && (SVA.syncLimit != null ? work > SVA.syncLimit : work / SVA.rate > 300);
 const calibrate = (work, ms) => { if (ms > 20) SVA.rate = Math.max(50, (SVA.rate + work / ms) / 2); };
 let WORKER = null;
 function worker() {
@@ -121,7 +121,7 @@ function worker() {
     else p[0](e.data.out); };
   w.onerror = e => { e.preventDefault(); fail(new Error(e.message || 'the worker failed')); };
   const send = m => new Promise((ok, no) => { m.id = ++n; wait.set(m.id, [ok, no]); w.postMessage(m); });
-  const ready = send({ wasm: G.WAVEFW_SVA_WASM });
+  const ready = send({ wasm: G.WAVELENS_SVA_WASM });
   ready.catch(fail);
   WORKER = { w, call: req => ready.then(() => send({ req })) };
   return WORKER;
@@ -143,9 +143,9 @@ function trace(sampler, times, names, unit) {
 
 // today as yyyy-mm-dd in the viewer's time zone (toISOString is UTC: after 21:00 in UTC+3 it says yesterday)
 const localDate = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-// the helpers of wavefw.js (WaveFW.util: model.js); the spike page loads sva.js alone and gets copies of the ones it
+// the helpers of wavelens.js (WaveLens.util: model.js); the spike page loads sva.js alone and gets copies of the ones it
 // uses here (its tvSampler: isEdge)
-const U = (G.WaveFW && G.WaveFW.util) || {
+const U = (G.WaveLens && G.WaveLens.util) || {
   esc: s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
   glob: p => new RegExp('^' + p.split('*').map(s => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$'),
   lastBefore(n, at, t, strict) { let lo = 0, hi = n - 1, ans = -1; while (lo <= hi) { const m = (lo + hi) >> 1, a = at(m);
@@ -190,7 +190,7 @@ function rowValue(r, o) {
   if (o.bits) return o.bits;   // known bits among x / z: binary digits (its hex would make them x)
   if (o.raw != null) return 'h' + o.raw;   // "tv": hex
   if (o.hex != null) return 'h' + o.hex;   // a clock-sampled view with its values next to the labels ("raw")
-  const v = String(o.v).trim(), e = r.enum || (G.WaveFW && (G.WaveFW.enums[r.full] || G.WaveFW.enums[r.name]));
+  const v = String(o.v).trim(), e = r.enum || (G.WaveLens && (G.WaveLens.enums[r.full] || G.WaveLens.enums[r.name]));
   if (e) for (const [n, l] of Object.entries(e)) if (l === v) return Number(n);
   return fromLabel(v, r.radix, rowWidth(r));
 }
@@ -210,7 +210,7 @@ function fromLabel(v, radix, w) {
 }
 // the width of a row: "tv" rows know it, a wave-string row only from "width" (vcd2wavedrom.py writes it for buses)
 const rowWidth = r => (r.src && r.src.tv ? r.width : r.src && r.src.width ? +r.src.width : null);
-// sampler over the parsed rows of a viewer (WaveFW model rows: tr = [{t, k, raw | hex | v}]): {name: row}; a label is read
+// sampler over the parsed rows of a viewer (WaveLens model rows: tr = [{t, k, raw | hex | v}]): {name: row}; a label is read
 // back with the row's own radix (vcd2wavedrom.py makes the labels with it)
 function rowSampler(rows) {
   return {
@@ -240,8 +240,8 @@ function rowSampler(rows) {
 }
 Object.assign(SVA, { load, plan, assemble, tvSampler, rowSampler, fromLabel });
 
-// the tooltips of the panel's and the bar's controls (WaveFW.tips): what each does, its keys
-if (G.WaveFW && G.WaveFW.tips) G.WaveFW.tips.add({
+// the tooltips of the panel's and the bar's controls (WaveLens.tips): what each does, its keys
+if (G.WaveLens && G.WaveLens.tips) G.WaveLens.tips.add({
   'sv:load': ['Load .sv / .sva files (kept in this browser)'], 'sv:tw': ['Fold / open the assertions'],
   'sv:watch': ['Read the files again when they change on the disk'], 'sv:json': ['The bindings (and files) as JSON for a config'],
   'sv:clear': ['Forget this browser\'s files and bindings'], 'sv:table': ['One row per binding: counts, failures, latency'],
@@ -259,7 +259,7 @@ if (G.WaveFW && G.WaveFW.tips) G.WaveFW.tips.add({
 // files: the page's (window.SVA.files, WaveJSON "sva".files) and this browser's (Load file…), parsed as one compilation
 // unit in that order; byLabel: label -> {a: assertion, file}
 const LIB = { files: [], byLabel: new Map(), notes: [], panels: new Set(), parsing: null, svgs: new Set() };
-const FILES_KEY = 'wavefw.sva.files:' + (G.location ? G.location.pathname : '');
+const FILES_KEY = 'wavelens.sva.files:' + (G.location ? G.location.pathname : '');
 const esc = U.esc;
 const hash = s => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193);
   return (h >>> 0).toString(16).padStart(8, '0'); };
@@ -404,14 +404,14 @@ SVA.edit = async (label, text) => {
 const HANDLES = new Map(), MTIME = new Map();
 const idb = (mode, fn) => new Promise((ok, no) => {
   if (!G.indexedDB) return no(new Error('no IndexedDB'));
-  const rq = G.indexedDB.open('wavefw-sva', 1);
+  const rq = G.indexedDB.open('wavelens-sva', 1);
   rq.onupgradeneeded = () => rq.result.createObjectStore('handles');
   rq.onerror = () => no(rq.error);
   rq.onsuccess = () => { try { const t = rq.result.transaction('handles', mode), q = fn(t.objectStore('handles')); t.oncomplete = () => ok(q && q.result);
     t.onerror = () => no(t.error); } catch (e) { no(e); } };
 });
 const pickFile = name => G.showOpenFilePicker
-  ? G.showOpenFilePicker({ multiple: false, id: 'wavefw-sva', types: [{ description: 'SystemVerilog',
+  ? G.showOpenFilePicker({ multiple: false, id: 'wavelens-sva', types: [{ description: 'SystemVerilog',
     accept: { 'text/plain': ['.sv', '.sva', '.svh', '.v', '.vh'] } }] }).then(([h]) => h)
   : new Promise((ok, no) => {   // no handles in this browser: a file input, the file read once
     const inp = Object.assign(document.createElement('input'), { type: 'file', accept: '.sv,.sva,.svh,.v,.vh,.txt' });
@@ -718,7 +718,7 @@ function bar(P, r, a, b, y, h) {
   if (r === 'active' || r === 'capped') { P.rect(a, y, w, h, c, 0.25); if (w >= 6) hatch(P, a, y, w, h, c); else P.rect(a, y, w, h, c, 0.6); }
   else P.rect(a, y, w, h, c, r === 'disabled' ? 0.7 : 0.9);
 }
-const circlePath = (x, y, r) => G.WaveFW.util.circle(x, y, r);
+const circlePath = (x, y, r) => G.WaveLens.util.circle(x, y, r);
 function dot(P, x, y, p, small, sel) {
   const c = p.fail ? 'sva-fail' : COL[p.x.r];
   if (small) { P.path(circlePath(x, y, p.fail ? 4 : 3), { fill: c }); return; }
@@ -733,7 +733,7 @@ function assertionRows(st, res, opt) {
   const S = opt.S, rh = S.rowHeight || 26, svg = !opt.view;
   if (st.res !== res || st.only !== opt.only) { st.res = res; st.only = opt.only; st.m = shape(res, opt.only); st.rows = null; }
   const m = st.m, o = m.o, { anc, depth } = opt.base;
-  if (!st.gid) st.gid = G.WaveFW.rowId();
+  if (!st.gid) st.gid = G.WaveLens.rowId();
   const s = o.stats || {}, cover = o.kind === 'cover';
   const sc = opt.scope || '(top)', fails = !cover && s.fail > 0, full = opt.scope ? `${opt.label}@${opt.scope}` : opt.label;
   const g = st.g || (st.g = { type: 'group', id: st.gid });
@@ -799,7 +799,7 @@ function assertionRows(st, res, opt) {
     tip(x, y, view) { const h = barAt(this.hits, x, y); return h ? tip(h[4], view) : ''; },
     value(t) {   // the attempts at the cursor: the strongest result (and how many more)
       let best = null, n = 0;
-      for (let i = lastBefore(m.atts.length, j => m.atts[j].t0, t + G.WaveFW.util.timeEps(t)); i >= 0 && m.atts[i].mt1 >= t; i--) { const x = m.atts[i];
+      for (let i = lastBefore(m.atts.length, j => m.atts[j].t0, t + G.WaveLens.util.timeEps(t)); i >= 0 && m.atts[i].mt1 >= t; i--) { const x = m.atts[i];
         if (x.t1 >= t) { n++; if (!best || RANK[x.r] > RANK[best.r]) best = x; } }
       return best ? best.r + (n > 1 ? ` +${n - 1}` : '') : '';
     } });
@@ -876,10 +876,10 @@ function assertionRows(st, res, opt) {
     const list = svg || on.length < MANY ? on.filter(x => x.i !== sel) : [];
     const s = stepsOn && m.atts.find(x => x.i === sel); if (s && s.pts.length + (s.fail ? 1 : 0) > 1) list.push(s);
     const arrow = (A, B, col, w, dash, label, front) => {
-      const g = G.WaveFW.paint.edgeGeom({ shape: A[1] === B[1] ? '-' : '-|-' }, A[0], A[1], B[0], B[1]);
+      const g = G.WaveLens.paint.edgeGeom({ shape: A[1] === B[1] ? '-' : '-|-' }, A[0], A[1], B[0], B[1]);
       P.path(g.d, { stroke: col, w, dash }); drawn.push({ col, label, front: !!front });
       const f = near(g.e, B) ? A : g.e, L = Math.hypot(B[0] - f[0], B[1] - f[1]) || 1, tipP = [B[0] - 8 * (B[0] - f[0]) / L, B[1] - 8 * (B[1] - f[1]) / L];
-      if (L > 9) G.WaveFW.paint.arrowHead(P, tipP[0], tipP[1], f[0], f[1], col);
+      if (L > 9) G.WaveLens.paint.arrowHead(P, tipP[0], tipP[1], f[0], f[1], col);
       if (label) labels.push({ m: g.m, label, col, front });
     };
     for (const x of list) {
@@ -934,10 +934,10 @@ function assertionRows(st, res, opt) {
 class Panel {
   constructor(v) {
     this.v = v; v.sva = this; this.bindings = []; this.pick = null; this.open = !!v.S.svaOpen; this.jsonOpen = false;   // the list folded unless svaOpen
-    this.key = 'wavefw.sva:' + (v.storeId || G.location.pathname + ':' + (v.opts.key || v.root.id || v.root.dataset.wave || v.M.title));
+    this.key = 'wavelens.sva:' + (v.storeId || G.location.pathname + ':' + (v.opts.key || v.root.id || v.root.dataset.wave || v.M.title));
     this.el = document.createElement('div'); this.el.className = 'sva'; this.el.hidden = true;
     v.addPanel(this.el);
-    if (G.WAVEFW_SVA_WASM) {
+    if (G.WAVELENS_SVA_WASM) {
       const g = v.addTool('assertions',
         ('<button type="button" data-sv="load" title="Load SystemVerilog assertion files (.sv, .sva): parsed in the page, kept in this browser">Load ' +
           'file…</button><input type="file" class="svfile" multiple accept=".sv,.sva,.svh,.v,.vh,.txt" hidden>'));
@@ -963,7 +963,7 @@ class Panel {
     v.listen('names', 'dragover', e => { const t = this.dropTarget(e); if (t) { e.preventDefault(); e.dataTransfer.dropEffect = 'link'; this.hover(t); } });
     v.listen('names', 'dragleave', e => { if (!v.rowAt(e.relatedTarget)) this.hover(null); });
     v.listen('names', 'drop', e => { const t = this.dropTarget(e); if (!t) return; e.preventDefault(); this.dragEnd(); this.drop(t); });
-    v.root.addEventListener('wavefw:settings', () => this.sync());   // sortIgnore prefixes: the names resolve again
+    v.root.addEventListener('wavelens:settings', () => this.sync());   // sortIgnore prefixes: the names resolve again
     if (v.extraJSON) v.extraJSON.push(() => this.bindings.length ? `"bind": [\n${this.bindJSON().map(x => '  ' + JSON.stringify(x)).join(',\n')}\n]` : null);
     if (v.extraState) v.extraState.push({ key: 'sva', get: () => this.snapshot(), set: s => this.restore(s) });
     // on the waves: the rows of the bindings, f / F through the failures, Esc unselects
@@ -973,8 +973,8 @@ class Panel {
     if (v.extraRows) v.extraRows.push(g => this.rowsFor(g));
     v.addKey(']f', () => this.step(1), ']f [f next / previous assertion failure').addKey('[f', () => this.step(-1));
     v.addKey(']a', () => this.stepAssert(1), ']a [a next / previous assertion').addKey('[a', () => this.stepAssert(-1));
-    v.root.addEventListener('wavefw:reset', () => this.unselect(false));
-    v.root.addEventListener('wavefw:destroy', () => { LIB.panels.delete(this); this.el.remove(); v.sva = null; }, { once: true });
+    v.root.addEventListener('wavelens:reset', () => this.unselect(false));
+    v.root.addEventListener('wavelens:destroy', () => { LIB.panels.delete(this); this.el.remove(); v.sva = null; }, { once: true });
     // this browser's bindings, with the page's that are new since (the ones the user unbound stay away)
     this.saved = store.get(this.key) || {};
     this.hidden = new Set(this.saved.hidden || []);
@@ -1100,10 +1100,10 @@ class Panel {
     this.queue = (this.queue || Promise.resolve()).then(go);
     return this.queue;
   }
-  // a binding came, went or has new results: wavefw:sva, and the rows on the waves again (redraw: false = the caller does)
+  // a binding came, went or has new results: wavelens:sva, and the rows on the waves again (redraw: false = the caller does)
   changed(b, redraw = true) {
     if (this.selA && !this.bindings.includes(this.selA.b)) this.dropSel();
-    this.v.root.dispatchEvent(new CustomEvent('wavefw:sva', { detail: b }));
+    this.v.root.dispatchEvent(new CustomEvent('wavelens:sva', { detail: b }));
     if (redraw) this.redraw();
   }
   redraw() { this.dirty = true; this.v.renderNames(); this.v.draw(); this.jumps(); this.summary(); }
@@ -1215,7 +1215,7 @@ class Panel {
     this.mark(b);
     this.toast(`${b.assert}: ${a.result} at ${v.fmt(ts, v.span / 1000, v.span)}${a.note ? ' — ' + a.note : ''}`);
     this.explain();
-    v.root.dispatchEvent(new CustomEvent('wavefw:sva-select', { detail: { binding: b, attempt: a } }));
+    v.root.dispatchEvent(new CustomEvent('wavelens:sva-select', { detail: { binding: b, attempt: a } }));
   }
   // Why: the selected attempt's booleans taken apart (the engine's explain), one column per cycle of the attempt; a
   // cell where a step matched is ringed, the one where it failed red; a cycle's header puts the cursor there
@@ -1471,7 +1471,7 @@ class Panel {
     const bs = this.bindings.filter(b => outcome(b)), M = this.v.M;
     const meta = { title: `Assertions · ${this.v.opts.title || M.title || document.title || 'waveform'}`, dump: (M.src.meta && M.src.meta.waves) || '',
       page: G.location ? G.location.pathname.split('/').pop() : '',
-      tool: `wavefw sva.js ${(G.WaveFW && G.WaveFW.version) || ''}`, date: localDate() };
+      tool: `wavelens sva.js ${(G.WaveLens && G.WaveLens.version) || ''}`, date: localDate() };
     return { bs, input: { meta, results: bs.map(b => b.results) } };
   }
   async report(format) {
@@ -1757,10 +1757,10 @@ function tvValue(v, w) {
   if (/^h/i.test(s)) return s.slice(1).toLowerCase();
   const b = s.padStart(Math.ceil(s.length / 4) * 4, s[0] === 'x' || s[0] === 'z' ? s[0] : '0');
   let h = '';
-  // a nibble all z is z, one with an x or a partial z is x (hexOf of wavefw.js, as GTKWave)
+  // a nibble all z is z, one with an x or a partial z is x (hexOf of wavelens.js, as GTKWave)
   for (let i = 0; i < b.length; i += 4) { const n = b.slice(i, i + 4); h += /^z{4}$/i.test(n) ? 'z' : /[xz]/i.test(n) ? 'x' : parseInt(n, 2).toString(16); }
   // a nibble of known bits and x / z: "'b" and the w bits, as the readers write it (vcdHex), so no known bit becomes x
-  const bw = (s.length >= w ? s.slice(s.length - w) : s.padStart(w, b[0])).toLowerCase(), I = G.WaveFW && G.WaveFW.internal;
+  const bw = (s.length >= w ? s.slice(s.length - w) : s.padStart(w, b[0])).toLowerCase(), I = G.WaveLens && G.WaveLens.internal;
   return w > 1 && !/^x+$|^z+$/.test(bw) && I && I.mixedBits(bw) ? "'b" + bw : h;
 }
 const truthy = v => (typeof v === 'number' ? v !== 0 : /^h/i.test(v) ? /[1-9a-f]/i.test(v) : /1/.test(String(v)));
@@ -1799,13 +1799,13 @@ function matches(res) {
 // a row that draws the values like a signal ("tv")
 function fillRow(row, res) {
   const w = res.width, tv = res.values.map((v, i) => [res.times[i], tvValue(v, w)]);
-  const r0 = G.WaveFW.parse({ signal: [{ name: row.name, tv, width: w }] }).rows.find(r => r.type === 'sig');
+  const r0 = G.WaveLens.parse({ signal: [{ name: row.name, tv, width: w }] }).rows.find(r => r.type === 'sig');
   Object.assign(row, { tr: r0.tr, gaps: r0.gaps, width: r0.width, tv: true });
 }
 // rows of a list of expressions under one group ("ƒ expressions"); st keeps the row objects between calls
 function exprRows(st, list, base = { anc: [], depth: 0 }) {
   if (!list.length) return [];
-  const g = st.g || (st.g = { type: 'group', id: G.WaveFW.rowId() });
+  const g = st.g || (st.g = { type: 'group', id: G.WaveLens.rowId() });
   Object.assign(g, { name: `ƒ expressions (${list.length})`, full: 'ƒ', path: 'ƒ', anc: base.anc, depth: base.depth, cls: 'sva-xg',
     title: 'Expressions of the waves (a name in the bar: ƒ); click one to put it in the field' });
   st.rows = st.rows || new Map();
@@ -1826,7 +1826,7 @@ SVA.expressions = { splitClock, valueOf, matches, tvValue };
 class Exprs {
   constructor(v) {
     this.v = v; v.svaExprs = this; this.list = []; this.st = {};
-    this.key = 'wavefw.sva-exprs:' + (v.storeId || G.location.pathname + ':' + (v.opts.key || v.root.id || v.root.dataset.wave || v.M.title));
+    this.key = 'wavelens.sva-exprs:' + (v.storeId || G.location.pathname + ':' + (v.opts.key || v.root.id || v.root.dataset.wave || v.M.title));
     const g = v.addTool('expression', `<input type="text" class="svq" spellcheck="false" placeholder="ƒ  PSEL && !PREADY"
       aria-label="an expression of the signals: Enter finds the next time it becomes true"
       title="An expression of the signals (SystemVerilog, as in an assertion: && || ! == $rose(a) $past(a) a[3:0]` +
@@ -1853,7 +1853,7 @@ class Exprs {
     if (v.extraState) v.extraState.push({ key: 'exprs', get: () => this.json(), set: l => this.setList(l) });
     if (v.extraJSON) v.extraJSON.push(() => this.list.length ?
       `"exprs": [\n${this.list.map(x => '  ' + JSON.stringify(x.scope ? { expr: x.text, scope: x.scope } : x.text)).join(',\n')}\n]` : null);
-    v.root.addEventListener('wavefw:settings', () => this.again());
+    v.root.addEventListener('wavelens:settings', () => this.again());
     const page = (v.M.src.sva && v.M.src.sva.exprs) || [], kept = store.get(this.key);
     this.list = (kept || page).map(x => (typeof x === 'string' ? { text: x, scope: '' } : { text: x.expr || x.text, scope: x.scope || '' })).filter(x =>
       x.text);
@@ -1891,7 +1891,7 @@ class Exprs {
     if (x.res.err) { this.v.toast(`ƒ ${t}: ${x.res.err}`); this.inp.classList.add('bad'); setTimeout(() => this.inp.classList.remove('bad'), 900); return; }
     this.list.push(x); this.save();
     this.v.renderNames(); this.v.draw(); this.v.centerRow(this.st.rows.get(x));
-    this.v.root.dispatchEvent(new CustomEvent('wavefw:sva-exprs', { detail: { added: x.text } }));
+    this.v.root.dispatchEvent(new CustomEvent('wavelens:sva-exprs', { detail: { added: x.text } }));
   }
   del() {
     const sel = this.v.sel && this.v.sel.x, t = this.inp.value.trim();
@@ -1938,8 +1938,8 @@ function svgRows(M, S) {
   let k = SVGST.get(M.src);
   if (!k) SVGST.set(M.src, k = { binds: binds.map(b => ({ assert: b.assert, scope: b.scope || '', results: b.results || null, draw: {} })), xst: {},
     exprs: exprs.map(e => (typeof e === 'string' ? { text: e, scope: '' } : { text: e.expr || e.text, scope: e.scope || '' })).filter(e => e.text) });
-  if (!k.wait && G.WAVEFW_SVA_WASM && k.binds.some(b => !b.results)) k.wait = svgEvaluate(M, S, k);
-  if (!k.xwait && G.WAVEFW_SVA_WASM && k.exprs.length) k.xwait = svgExprs(M, S, k);
+  if (!k.wait && G.WAVELENS_SVA_WASM && k.binds.some(b => !b.results)) k.wait = svgEvaluate(M, S, k);
+  if (!k.xwait && G.WAVELENS_SVA_WASM && k.exprs.length) k.xwait = svgExprs(M, S, k);
   const ok = shown(S), I = scopeInfo(M), at = new Map([[-1, exprRows(k.xst, k.exprs.filter(e => e.res && !e.res.err))]]);
   for (const b of k.binds) {
     const o = outcome(b);
@@ -1958,7 +1958,7 @@ function svgExprs(M, S, k) {
   pageFiles([M]);
   const p = (LIB.files.some(f => !f.parsed) ? reparse() : LIB.parsing || reparse()).then(async () => {
     for (const e of k.exprs) { try { e.res = await valueOf(M, S.sortIgnore || [], e); } catch (err) { e.res = { err: err.message }; } }
-    G.WaveFW.redrawSvgs();
+    G.WaveLens.redrawSvgs();
   });
   LIB.svgs.add(p);
   return p;
@@ -1976,7 +1976,7 @@ function svgEvaluate(M, S, k) {
       by.get(b.scope).push(b);
     }
     for (const bs of by.values()) { try { await evaluateScope(fake, bs, () => {}); } catch (err) { /* the figure stays without them */ } }
-    G.WaveFW.redrawSvgs();
+    G.WaveLens.redrawSvgs();
   });
   LIB.svgs.add(p);
   return p;
@@ -1984,22 +1984,22 @@ function svgEvaluate(M, S, k) {
 
 /* ---------------- start ---------------- */
 function start() {
-  if (!G.WaveFW || !G.WaveFW.plugin) return;
-  // the settings of this plugin (wavefw.config.js lists them): the list open at start, which groups, the signals again
-  if (G.WaveFW.registerDefaults) G.WaveFW.registerDefaults({ svaOpen: false, svaShow: null, svaSignals: 'view' });
-  G.WaveFW.registerTokens({ 'sva-pass': '--sva-pass', 'sva-fail': '--sva-fail', 'sva-disabled': '--sva-disabled', 'sva-active': '--sva-active',
+  if (!G.WaveLens || !G.WaveLens.plugin) return;
+  // the settings of this plugin (wavelens.config.js lists them): the list open at start, which groups, the signals again
+  if (G.WaveLens.registerDefaults) G.WaveLens.registerDefaults({ svaOpen: false, svaShow: null, svaSignals: 'view' });
+  G.WaveLens.registerTokens({ 'sva-pass': '--sva-pass', 'sva-fail': '--sva-fail', 'sva-disabled': '--sva-disabled', 'sva-active': '--sva-active',
     'sva-capped': '--sva-capped' });
   localFiles();
   let pending = null;
-  G.WaveFW.plugin(v => {
+  G.WaveLens.plugin(v => {
     if (v.sva) return;
     pageFiles([v.M]);
-    if (G.WAVEFW_SVA_WASM) new Exprs(v);   // its rows first under the top, before the assertion groups
+    if (G.WAVELENS_SVA_WASM) new Exprs(v);   // its rows first under the top, before the assertion groups
     new Panel(v);
     // one parse for all the viewers built in this task
     if (!pending) pending = Promise.resolve().then(() => { pending = null; return reparse(); });
   });
-  if (G.WaveFW.svgPlugin) G.WaveFW.svgPlugin(svgRows);
+  if (G.WaveLens.svgPlugin) G.WaveLens.svgPlugin(svgRows);
   SVA.ready = () => (pending || Promise.resolve()).then(() => LIB.parsing).then(() => Promise.all([...LIB.panels].map(p => p.queue).concat([...LIB.svgs])));
 }
 start();

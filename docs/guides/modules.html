@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Modules · WaveLens guides</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="guide.css">
+</head>
+<body>
+<header class="top"><nav>
+  <a class="home" href="index.html">WaveLens guides</a>
+  <a href="pages.html">Dump → page</a> <a href="viewer.html">Viewer</a> <a href="modules.html" aria-current="page">Modules</a>
+  <a href="compare.html">Compare</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
+  <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="vscode.html">VS Code</a>
+  <a href="commands.html">Commands</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
+</nav></header>
+<div class="page toc-side">
+<main>
+<header class="hero"><div class="kicker">Guide</div><h1>Modules</h1>
+<p class="lead">A dump of a whole design has hundreds of instances. The <b>Modules</b> panel shows them as a tree, without the
+  signals, next to the waves. A click on a module goes to its signals; a box drawn over a few modules keeps <b>Only</b> those on
+  the waves, with the hierarchy around them as it is built. The pictures are of the AXI-Lite example's whole dump
+  (<code>make examples</code>, <code>out/examples/axi_lite/axi_lite_all.html</code>).</p></header>
+
+<h2 id="open">Opening the panel</h2>
+<p><kbd>t</kbd> on the waves, <span class="ui">Modules</span> in the bar's list group, or <span class="ui">Modules…</span> in the right
+  button's menu. The panel floats over the waves at their right, so the names stay in sight: its header moves it, its corner sizes it,
+  <kbd>Esc</kbd> or ✕ closes it (<kbd>Esc</kbd> in the filter empties it first; on a narrow screen it is a drawer at the side). Per module it shows the number of its own signals and,
+  after the slash, of those with its submodules; ● marks the module of the selected signal. <span class="ui">Locate</span> (or
+  <kbd>t</kbd> in the panel) finds that module in the tree.</p>
+<figure><img src="img/modules-panel.png" alt="The Modules panel over the AXI-Lite page: axi_lite_tb, u_master, u_slave and u_regfile with their counts" loading="lazy">
+  <figcaption><b>The panel.</b> <code>axi_lite_tb</code> has 20 signals of its own and 66 with its submodules;
+  the tree opens two levels at first, <code>u_regfile</code> under <code>u_slave</code> stays folded.</figcaption></figure>
+<p>The tree folds on its own: folding a module there does not fold it on the waves. A page has one panel per viewer; the panel is not
+  printed and not in a picture.</p>
+
+<h2 id="filter">Finding a module</h2>
+<p>The field on top filters the tree the way the find field filters the names: the typed letters in order anywhere in a module's name
+  (<code>regf</code> finds <code>u_regfile</code>), a word with a <code>.</code> over the full path. The modules on the way to a match
+  stay as its context. <kbd>Enter</kbd> goes to the first match, <kbd>↓</kbd> moves into the tree,
+  <span class="ui">Only matches</span> (<kbd>shift+Enter</kbd>) keeps every module the filter found.</p>
+<figure><img src="img/modules-filter.png" alt="The filter 'regf': u_regfile found, axi_lite_tb and u_slave kept as the way to it" loading="lazy">
+  <figcaption><b>The filter.</b> <code>regf</code>: one match, its name in the accent colour, the two modules above it kept.</figcaption></figure>
+
+<h2 id="go">A click goes there</h2>
+<p>A click on a name (or <kbd>Enter</kbd>) opens that module and the ones above it in the names column — a module you hid is shown
+  again — and selects its first signal (its own, else one of a submodule) in the middle of the waves. The rest of the folding stays as
+  it was, so you can jump between distant instances without losing your place.</p>
+<figure><img src="img/modules-goto.png" alt="u_master opened in the names, its first signal selected, the other modules folded" loading="lazy">
+  <figcaption><b>Go to <code>u_master</code>.</b> Everything else was folded; the click opened the way to it and selected its
+  first signal.</figcaption></figure>
+
+<h2 id="only">Only the modules you pick</h2>
+<p>Drag a box over one or more names in the tree (4 px is enough to start one): from then on the waves show <b>only those modules</b>,
+  their submodules included. The modules on the way to them stay as headers — their own signals go, the hierarchy stays as it is
+  built — and every other module leaves the waves; the tree still lists them all. The modules you named open on the waves with the
+  ones above them; the ones under them keep the folding they had.</p>
+<figure><img src="img/modules-only.png" alt="Only u_slave: axi_lite_tb a header, u_slave's signals, u_master gone; the bar says Only: 1 module" loading="lazy">
+  <figcaption><b>Only <code>u_slave</code>.</b> In the tree it is marked, <code>u_regfile</code> under it lighter, the testbench
+  in italics (on the way); on the waves the testbench is a header without its own signals and <code>u_master</code> is gone. The bar
+  says <span class="ui">Only: 1 module ‖</span>.</figcaption></figure>
+<table>
+  <tr><th>In the tree</th><th>Does</th></tr>
+  <tr><td>a box over names, <kbd>shift+click</kbd>, <kbd>shift+↑</kbd> <kbd>↓</kbd></td><td>Only those modules (a run)</td></tr>
+  <tr><td><kbd>ctrl+click</kbd>, <kbd>Space</kbd></td><td>one module into the set, or a picked one out of it (one under a picked
+    module is in by its parent: it opens)</td></tr>
+  <tr><td><span class="ui">Only matches</span>, <kbd>shift+Enter</kbd> in the filter</td><td>every module the filter finds</td></tr>
+  <tr><td>click, <kbd>Enter</kbd></td><td>go to the module (outside Only: Only is paused to show it)</td></tr>
+  <tr><td><kbd>↑</kbd> <kbd>↓</kbd> <kbd>Home</kbd> <kbd>End</kbd>, <kbd>←</kbd> <kbd>→</kbd></td><td>move; fold / open (the parent / the first child)</td></tr>
+  <tr><td><kbd>/</kbd>, <kbd>t</kbd>, <kbd>Esc</kbd></td><td>the filter; the selected signal's module; close the panel</td></tr>
+</table>
+<p>The right button on a module of the tree has the same as a menu, and two more: <span class="ui">Expand / Collapse subtree</span> in
+  the tree and <span class="ui">Copy scope path</span>.</p>
+<figure><img src="img/modules-menu.png" alt="The menu of axi_lite_tb.u_master: Go to waves, Only this subtree, Also include this subtree, Copy scope path" loading="lazy">
+  <figcaption><b>The menu of a module.</b> With Only on, a module outside the set offers <span class="ui">Also include this
+  subtree</span>; a picked one, <span class="ui">Remove this subtree from Only</span>; one under a picked module says
+  <i>included by …</i>.</figcaption></figure>
+
+<h2 id="pause">Pause, resume, clear</h2>
+<p><span class="ui">Only: N modules ‖</span> in the bar pauses it: every module is back, the set is kept, and the button turns into
+  <span class="ui">Only paused: N modules ▶</span>, which resumes it. ✕ next to it clears the set. A click in the tree on a module Only
+  leaves out pauses it too, and goes there. Pausing, resuming and clearing fold or open nothing.</p>
+<figure><img src="img/modules-paused.png" alt="The bar with Only paused: 1 module ▶ and its ✕" loading="lazy">
+  <figcaption><b>Paused.</b> The waves have every module again; ▶ brings the set back.</figcaption></figure>
+
+<h2 id="layers">With Hide, find and the pictures</h2>
+<ul>
+  <li><b>Hide</b> stays as it is under Only: a row you hid is not shown again by Only, and Only does not hide rows for good.</li>
+  <li><b>Find</b> still searches every row and counts what Only leaves out: <code>1 found · 2 outside Only</code>. Only paused (or a
+    click on their module) brings them in.</li>
+  <li><b>Highlight</b> of a row Only takes away comes back with it; the <b>selection</b> it takes away goes.</li>
+  <li>The <b>picture</b> (PNG, SVG), <b>WaveDrom</b>, <span class="ui">Paint</span>, the compare's <kbd>]d</kbd> <kbd>[d</kbd> and the
+    assertions' steps take only what is in the view.</li>
+</ul>
+<figure><img src="img/modules-outside.png" alt="The find field with awvalid: 1 found · 2 outside Only" loading="lazy">
+  <figcaption><b>The find under Only.</b> <code>awvalid</code> is in all three modules; Only <code>u_slave</code> shows one, the count
+  says the other two.</figcaption></figure>
+
+<h2 id="kept">What is kept</h2>
+<p>Only is part of what you do with the waves, not a setting of the page: it is in the saved state
+  (<span class="ui">Save</span>: <code>"only": {"modules": [...], "on": true}</code>), in <span class="ui">Save page</span> and in undo
+  (<kbd>ctrl+Z</kbd>), but this browser does not keep it: a page opened again starts with every module, unless the page itself
+  carries an Only (a page saved with <span class="ui">Save page</span> while Only was on, or edits that set it). The command
+  <code>only</code> does the same from a script or an agent (<a href="commands.html">Commands and scripts</a>):</p>
+<pre><code>await v.run([{op: 'only', modules: ['axi_lite_tb.u_slave']}]);   <span class="c">// on; {op: 'only', on: false} pauses, {op: 'only', clear: true} clears</span></code></pre>
+</main>
+<nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
+</div>
+<footer>WaveLens 0.18 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+  <a href="../index.html">docs/index.html</a></footer>
+<script src="guide.js"></script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 /*
 ================================================================================
   axi_lite.sva
-  AXI4-Lite handshake checks for the wavefw AXI-Lite example (axi_lite_tb.sv).
+  AXI4-Lite handshake checks for the WaveLens AXI-Lite example (axi_lite_tb.sv).
 ================================================================================
 
     Description:

@@ -1,4 +1,4 @@
-/* wavefw/src/boot.js — themes and colours, global settings, the declarative upgrade, the page hooks, the exports.
+/* wavelens/src/boot.js — themes and colours, global settings, the declarative upgrade, the page hooks, the exports.
    Closes the scope opened in model.js. */
 
 /* ---------------- themes & colours ---------------- */
@@ -19,14 +19,14 @@ const redrawAll = () => VIEWS.forEach(v => { if (v.root.isConnected) v.draw(); e
 // the static SVG hosts, re-rendered by configure(): their model and options by the element (WeakMap), the elements by
 // weak reference (a host that leaves the page and is collected takes its model with it)
 const SVGS = new WeakMap(), SVG_HOSTS = new Set();
-const SVG_PLUGINS = [];   // WaveFW.svgPlugin(fn): fn(model, settings, opts) -> [extraRows fn] for every static SVG
+const SVG_PLUGINS = [];   // WaveLens.svgPlugin(fn): fn(model, settings, opts) -> [extraRows fn] for every static SVG
 const redrawSvgs = () => SVG_HOSTS.forEach(ref => { const el = ref.deref(), d = el && SVGS.get(el); if (d && el.isConnected) WaveSVG.render(el, d[0], d[1]);
   else SVG_HOSTS.delete(ref); });
 // Global settings, e.g. from a config file: { theme, colors, rowHeight, nameWidth, fontSize, traceWidth, sort, sortIgnore, … }.
 // theme/colors go to <html> like setTheme/setColors; the rest becomes the default for every wave (null removes a key).
 function configure(cfg = {}) {
   const { theme, colors, ...rest } = cfg || {}, html = document.documentElement;
-  warnKeys(rest, 'the global settings (wavefw.config.js, WaveFW.configure)');
+  warnKeys(rest, 'the global settings (wavelens.config.js, WaveLens.configure)');
   for (const [k, v] of Object.entries(rest)) { if (v == null) delete GLOBAL[k]; else GLOBAL[k] = v; }
   for (const [k, name] of Object.entries(STYLE_VAR)) if (k in rest && rest[k] == null) html.style.removeProperty(name);
   for (const [name, v] of styleVars(rest)) html.style.setProperty(name, v);
@@ -64,7 +64,7 @@ function mount(host, el, mode, opts) {
     const M = parse(resolveSrc(el));
     if (host.waveView) host.waveView.destroy();   // built again (upgrade of a host that had a viewer)
     if (mode === 'svg') WaveSVG.render(host, M, opts); else new WaveView(host, M, opts);
-  } catch (e) { host.className = 'wvf-err'; host.textContent = 'wavefw: ' + e.message; }
+  } catch (e) { host.className = 'wvf-err'; host.textContent = 'wavelens: ' + e.message; }
 }
 function upgrade(root = document) {
   VIEWS.forEach(v => { if (!v.root.isConnected) v.destroy(); });   // viewers whose element left the page
@@ -103,14 +103,14 @@ if (G.MutationObserver) {
 }
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(redrawAll);
 const HTML_STYLE = document.documentElement.getAttribute('style');   // the page's own, before the settings' variables go on it (Save page)
-if (G.WAVEFW_CONFIG) configure(G.WAVEFW_CONFIG);   // settings file loaded before wavefw.js (see docs/USAGE.md "Settings")
+if (G.WAVELENS_CONFIG) configure(G.WAVELENS_CONFIG);   // settings file loaded before wavelens.js (see docs/USAGE.md "Settings")
 const manual = document.currentScript && document.currentScript.dataset.manual != null;
-// a page that carries the live link (tools/wavemcp.py view_live) or is opened with #wavefw-live=<port>:<token> connects to the
+// a page that carries the live link (tools/wavemcp.py view_live) or is opened with #wavelens-live=<port>:<token> connects to the
 // agent once its viewers are there
 const liveHash = () => {
-  const m = /[#&]wavefw-live=([^&]+)/.exec(location.hash), el = document.getElementById('wavefw-live');
+  const m = /[#&]wavelens-live=([^&]+)/.exec(location.hash), el = document.getElementById('wavelens-live');
   try { const o = !m && el ? JSON.parse(el.textContent) : null; if (m || o) live(m ? decodeURIComponent(m[1]) : `${o.port}:${o.token}`); }
-  catch (e) { console.error('wavefw live: ' + e.message); }
+  catch (e) { console.error('wavelens live: ' + e.message); }
 };
 // Save page: the page as it was read, taken before a viewer is built; only a page that is all in itself (no script or
 // stylesheet of its own beside it: a page of mkhtml.py) and whose viewers are not built yet (else PAGE.why says why);
@@ -172,10 +172,10 @@ G.addEventListener('scroll', tipHide, true);
 const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 
 // plugins: fn(viewer) runs for every viewer already built and every later one
-const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavefw plugin:', e); } }); };
+const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveFW = { version: '0.17',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.18',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme, setColors, configure, savePage, pageText,
   plugin, svgPlugin, views: () => [...VIEWS], defaults: DEFAULTS, live,
   commands: () => Object.fromEntries(Object.entries(CMDS).map(([k, c]) => [k, { args: c.args, doc: c.doc }])),

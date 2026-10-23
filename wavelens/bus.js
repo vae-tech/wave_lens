@@ -1,5 +1,5 @@
-/* wavefw/bus.js — bus transactions on the waves (stage 11): AXI4 / AXI4-Lite / AXI3, AXI4-Stream, APB, AHB, Avalon-MM,
-   Avalon-ST, Wishbone (classic and pipelined), OBI. A plugin of wavefw.js, on its plugin API only.
+/* wavelens/bus.js — bus transactions on the waves (stage 11): AXI4 / AXI4-Lite / AXI3, AXI4-Stream, APB, AHB, Avalon-MM,
+   Avalon-ST, Wishbone (classic and pipelined), OBI. A plugin of wavelens.js, on its plugin API only.
 
    The interfaces of a viewer are found by the names of their signals in each module (the signals of one port share a
    prefix: s_axi_awvalid, m_axi_awvalid; a trailing _i / _o is ignored) or listed in the setting "buses"; each is
@@ -8,7 +8,7 @@
    with the transactions on its header row; open, a row of transactions and one row per channel. A click on a
    transaction: the cursor at its start, its range measured, its signals highlighted. */
 (() => {
-const G = window, W = G.WaveFW;
+const G = window, W = G.WaveLens;
 if (!W || !W.plugin) return;
 const U = W.util, esc = U.esc;
 
@@ -114,7 +114,7 @@ function findPorts(M, S) {
 const join = (a, b) => (a && b ? a + '.' + b : a || b);
 
 /* ---------------- sampling ---------------- */
-// the rising edges of a clock row (WaveFW.util.isEdge: IEEE 1800-2017 9.4.2, as sva.js and the sva CLI)
+// the rising edges of a clock row (WaveLens.util.isEdge: IEEE 1800-2017 9.4.2, as sva.js and the sva CLI)
 function edges(r) {
   const out = []; let prev = null;
   for (const o of r.tr) { const k = o.k === '0' || o.k === '1' || o.k === 'z' ? o.k : 'x'; if (U.isEdge('posedge', prev, k)) out.push(o.t); prev = k; }
@@ -345,7 +345,7 @@ const summary = D => {
 /* ---------------- drawing ---------------- */
 const COL = { W: 'bus-w', R: 'bus-r', P: 'bus-w', T: 'bus-r' };
 W.registerTokens && W.registerTokens({ 'bus-w': '--bus-write', 'bus-r': '--bus-read', 'bus-e': '--bus-error', 'bus-ch': '--bus-channel' });
-// the settings of this plugin (wavefw.config.js lists them): the ports found by their names, ports of your own
+// the settings of this plugin (wavelens.config.js lists them): the ports found by their names, ports of your own
 W.registerDefaults && W.registerDefaults({ busDetect: true, buses: null });
 // boxes from t0 to t1 in [y, y + h], a label inside when it fits; -> hits [x0, x1, y0, y1, item]
 function boxes(P, items, { y, h, X, tA, tB, xL, xR }, maxDur, colOf, sel) {
@@ -411,11 +411,11 @@ class Buses {
     this.v = v; v.buses = this; this.st = new Map(); this.sel = null;
     v.extraRows.push(g => this.rowsFor(g));
     v.addKey(']t', () => this.step(1), ']t [t next / previous bus transaction').addKey('[t', () => this.step(-1));
-    v.root.addEventListener('wavefw:reset', () => { this.sel = null; });
+    v.root.addEventListener('wavelens:reset', () => { this.sel = null; });
     // the selected transaction in a saved viewer state: its port and its start
     v.extraState.push({ key: 'bus', get: () => (this.sel && this.selPort ? { port: this.selPort.key, t0: this.sel.t0 } : undefined),
       set: s => { const p = s && this.list().find(q => q.key === s.port), x = p && p.D.tx.find(q => q.t0 === s.t0); if (x) this.select(p, x); } });
-    v.root.addEventListener('wavefw:settings', () => { this.ports = null; });
+    v.root.addEventListener('wavelens:settings', () => { this.ports = null; });
   }
   // the ports and their transactions, found once (again when the settings change)
   list() {

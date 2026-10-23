@@ -22,7 +22,7 @@ def vcd(tmp, body, header='$timescale 1ns $end\n$scope module tb $end\n$var wire
 
 def tmp():
     """with tmp() as d: a scratch directory removed afterwards."""
-    return tempfile.TemporaryDirectory(prefix='wavefw-unit-')
+    return tempfile.TemporaryDirectory(prefix='wavelens-unit-')
 
 
 def run_tool(name, *args, cwd=ROOT):

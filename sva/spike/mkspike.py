@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""mkspike.py — the spike page: spike.html with wavefw/sva.js and sva_wasm.wasm (base64) inlined (opens from file://).
+"""mkspike.py — the spike page: spike.html with wavelens/sva.js and sva_wasm.wasm (base64) inlined (opens from file://).
 
   mkspike.py WASM OUT.html
 """
@@ -15,7 +15,7 @@ if not os.path.isfile(wasm):
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'spike.html'), encoding='utf-8') as f:
     page = f.read()
 here = os.path.dirname(os.path.abspath(__file__))
-with open(os.path.join(here, '..', '..', 'wavefw', 'sva.js'), encoding='utf-8') as f:
+with open(os.path.join(here, '..', '..', 'wavelens', 'sva.js'), encoding='utf-8') as f:
     page = page.replace('/*SVA_JS*/', f.read())
 with open(wasm, 'rb') as f:
     b64 = base64.b64encode(f.read()).decode()

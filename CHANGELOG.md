@@ -1,9 +1,30 @@
 # Changelog
 
-Versions have two numbers, `MAJOR.MINOR`. A version is a merge into `main` tagged `vMAJOR.MINOR`; the work in between
-lives on a branch. The version is in `VERSION`, in `wavefw.js` (`WaveFW.version`) and in what the `sva` CLI writes
+Versions have two numbers, `MAJOR.MINOR`. A version is a merge into `main` (tagged `main/vMAJOR.MINOR` there),
+published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the work in between lives on a branch. The version is in `VERSION`, in `wavelens.js` (`WaveLens.version`) and in what the `sva` CLI writes
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
+
+## 0.18 — 23 October 2026
+
+The project renamed to WaveLens; the guides for the first public release.
+
+- **WaveLens.** The folder `wavelens/` (`wavelens.js`, `wavelens.css`, `wavelens.config.js`), the JS global `WaveLens`,
+  `WAVELENS_*`, the localStorage keys `wavelens.*`, the saved state's marker `{"wavelens": "state"}`, the VS Code
+  extension `vae-tech.wavelens` (commands and settings `wavelens.*`), the MCP server `wavelens`. No aliases: a page made
+  before is refused by `viewedit.py` (make it again), a saved `.view.json` needs its marker renamed, the MCP client and
+  the extension are registered again (uninstall the old `wavefw.wavefw`).
+- **Guides.** New: [Modules](docs/guides/modules.html), [Compare two runs](docs/guides/compare.html),
+  [Commands and scripts](docs/guides/commands.html), [VS Code](docs/guides/vscode.html). The viewer guide shows the
+  bar's tools menu, the find's Mask and Select, the newer menu items and keys; every picture made again. The README
+  for a first visit: what it does, a minute to try it, what each part needs.
+- **Fixes in the docs.** The edge keys are `[e ]e` (or shift+Tab / Tab), not `[ ]`; the keys that ctrl or alt keep
+  (ctrl+G, undo, alt+↑ ↓); a measured range is ctrl+drag; the edge style is in the style group; what a page needs for
+  assertions and bus transactions (`sva.wasm.js`, `sva.js`, `bus.js`); the `sva` CLI's path in the repository; the VS
+  Code settings' defaults.
+- The FSM example reads its FST also without GTKWave's `fst2vcd` (through the `sva` CLI), so its states have names.
+- `tools/publish.py`: a version as one commit of the public branch `master`, without the internal `prompts/` and
+  `docs/reviews/` (DEVELOPMENT.md § Versions).
 
 ## 0.17 — 23 October 2026
 
@@ -20,14 +41,13 @@ Remote-SSH / WSL, the bar's tools to taste, the find's Mask and Select.
   ▶ resumes, ✕ clears; a click on a module outside it pauses it. A layer over Hide: the find counts what it leaves
   out, the picture, WaveDrom, Paint, `]d` and the assertions' steps take only what is in the view; in the saved state,
   Save page and undo. The command `only modules? on? clear? open?` (page, `viewedit.py`, MCP `view_edit`).
-- Designed and reviewed with Codex in six rounds (`docs/reviews/module-explorer-2026-10-22.html`).
+- Designed and reviewed with Codex in six rounds.
 - **VS Code over Remote-SSH / WSL** (`vscode/`, `make vsix`): a `.vcd` / `.fst` on the Linux host opens in a tab with
-  the viewer (Open in wavefw / Open With); nothing installed on the host (the static sva turns an FST into VCD text).
+  the viewer (Open in WaveLens / Open With); nothing installed on the host (the static sva turns an FST into VCD text).
   Saving and picking files on the host, the view kept per dump, ⟳ after a new simulation (or at once), VS Code's
   theme, the viewer's keys kept from VS Code, the clipboard; an agent's `wavemcp.py` connects the tabs, `view_live`
   with a dump opens it in VS Code. The page's VCD reader reads the FST enum tables (FSM states by name). Tested in a
-  real VS Code of Windows connected to WSL (`make vscode-e2e`); the plan reviewed with Codex
-  (`docs/reviews/vscode-remote-2026-10-22/`).
+  real VS Code of Windows connected to WSL (`make vscode-e2e`); the plan reviewed with Codex.
 - **The bar's tools to taste.** The right button on the bar: its tool groups (cursor, find, expression, list …) with
   a tick each, **Show all**, **Hide all**; a line with none left goes, `/` still floats the find (`toolsHidden`, kept
   in this browser and in the state).
@@ -103,7 +123,7 @@ Where the rows scroll, switched on the fly; your groups one key away.
 
 The viewer's commands: what its buttons do, a script, a file or an AI agent does by name — live in an open page.
 
-- `view.run([{op, …}])` (`wavefw/src/edit.js`): bookmarks with their texts, arrows, markers, your groups, highlight,
+- `view.run([{op, …}])` (`wavelens/src/edit.js`): bookmarks with their texts, arrows, markers, your groups, highlight,
   paint, selection, hidden and folded rows, radix, analog, cursors, window, range, order, style, find, gaps, edges;
   read: state, rows, a picture. Names by path, name, path tail or `*`; a bad command says why, the rest run.
 - Your markers (a dashed line with a label) and your groups (a folder of signals at the top of the names) in the menu,
@@ -115,13 +135,13 @@ The viewer's commands: what its buttons do, a script, a file or an AI agent does
 
 ## 0.11 — 21 October 2026
 
-An MCP server: the tools of wavefw for an AI agent.
+An MCP server: the tools of WaveLens for an AI agent.
 
 - `tools/wavemcp.py` (standard library, stdio): `wave_info`, `wave_signals`, `wave_values`, `wave_changes`,
   `wave_sample` (a row per clock cycle, sampled as SVA samples), `wave_find` (an SV expression or sequence per cycle
   through the sva engine, or a signal's edges and values), `wave_stats`, `sva_check` (failures with their cycles and
   times), `wave_page` (a viewer page or WaveJSON to show a person); names by a tail of the path, times in ns, answers
-  cut at a limit with how to go on; `--call TOOL JSON` from the shell. Claude Code: `claude mcp add wavefw -- python3
+  cut at a limit with how to go on; `--call TOOL JSON` from the shell. Claude Code: `claude mcp add wavelens -- python3
   -I tools/wavemcp.py`; Codex: `codex mcp add …`.
 - `tests/mcp_bench.py`, `make mcp-bench`: eight tasks with known answers (the APB and FSM examples, a generated 3.5 MB
   dump) solved through the tools by a script (in `make check`), or by `claude -p` / `codex exec` agents with the server
@@ -157,17 +177,17 @@ The second global review and its cycle (stage 12): 71 of its 75 findings fixed.
   400 000 clock changes), exact fixed point, the saved state checked and complete, the plugin API (`moveTo`, `fold`,
   `registerDefaults`) used by `bus.js` and `sva.js`, one `isEdge` and `stepTo`, ranges and Δ in the SVG; JS lines
   ≤ 160 columns.
-- Tests: a smoke table of 206 unit cases (`WaveFW.internal`), `make sva-verify` (the examples' checkers in Verilator
+- Tests: a smoke table of 206 unit cases (`WaveLens.internal`), `make sva-verify` (the examples' checkers in Verilator
   `--assert` against `sva eval`: 26 assertions agree).
 - Docs: the SVA subset's skipped, accepted and limited constructs; ENGINE.md by the code; prerequisites; licences.
-- `VERSION` and this changelog; `WaveFW.version` follows the project (it counted 1.x on its own before).
+- `VERSION` and this changelog; `WaveLens.version` follows the project (it counted 1.x on its own before).
 
 ## 0.8 — 18 October 2026
 
-The viewer as a wave window (`wavefw.js` 1.9 at the time): find options (Aa, Full, `.*`), ctrl+F, the menu on the
+The viewer as a wave window (`wavelens.js` 1.9 at the time): find options (Aa, Full, `.*`), ctrl+F, the menu on the
 highlighted rows; the bar's tools one line per kind of work and a grey light theme; Save as WaveDrom; a run of
 signals and a box of time and signals; a second cursor, value and X / Z search, float and fixed-point radixes, enum
-colours; the analog style; packed structs as rows; a VCD opened in the page (Open…, drop, ⟳) and `wavefw/viewer.html`.
+colours; the analog style; packed structs as rows; a VCD opened in the page (Open…, drop, ⟳) and `wavelens/viewer.html`.
 
 ## 0.7 — 18 October 2026
 
@@ -188,7 +208,7 @@ and the prebuilt `sva` CLI in `bin/` (`make dist`).
 The first refactoring cycle (stage 9.1, 9.4) after the first global review: repository hygiene, LICENSE,
 `make check / clean-all / fmt / lint`; smoke with skip accounting, `--strict`, `--only` and a synthetic big page;
 conformance against stock WaveDrom; the SystemVerilog style guide; README split into USAGE and DEVELOPMENT;
-`wavefw.js` split into `src/*.js`; the viewer's plugin API (tokens, tools, events) with `sva.js` on it only.
+`wavelens.js` split into `src/*.js`; the viewer's plugin API (tokens, tools, events) with `sva.js` on it only.
 
 ## 0.4 — 18 October 2026
 
@@ -199,7 +219,7 @@ steps and failures drawn on the waves, statistics, the failure list, reports; tw
 
 ## 0.3 — 17 October 2026
 
-The project's shape (stages 1–2): `wavefw/ tools/ examples/ docs/ tests/ work/`; the APB, AXI-Lite and FSM examples
+The project's shape (stages 1–2): `wavelens/ tools/ examples/ docs/ tests/ work/`; the APB, AXI-Lite and FSM examples
 with Verilator testbenches (`make examples`); README with screenshots (`make shots`); colours per group.
 
 ## 0.2 — 17 October 2026
@@ -210,5 +230,5 @@ highlight / open / paint, Esc everywhere, the cursor group (a time, a span aroun
 
 ## 0.1 — 17 October 2026
 
-The first version: `wavefw.js`, a WaveDrom-format canvas viewer and static SVG, the VCD → WaveJSON tools and config
+The first version: `wavelens.js`, a WaveDrom-format canvas viewer and static SVG, the VCD → WaveJSON tools and config
 files.

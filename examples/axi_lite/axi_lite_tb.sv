@@ -1,7 +1,7 @@
 /*
 ================================================================================
   axi_lite_tb
-  AXI4-Lite master and a register slave for the wavefw AXI-Lite example.
+  AXI4-Lite master and a register slave for the WaveLens AXI-Lite example.
 ================================================================================
 
     Description:

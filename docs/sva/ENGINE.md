@@ -3,7 +3,7 @@
 The evaluator of `sva-core` (`sva/core/src/engine.rs`, 4-state values and expressions in `value.rs`). It takes the
 expanded assertions of docs/sva/LANGUAGE.md and the values of their signals at the sampling points of the clock, and
 gives every assertion's attempts with their results and step traces. The same code runs natively (`sva eval` over a
-VCD / FST) and in the page (the WebAssembly build behind `wavefw/sva.js`). The semantics follow IEEE 1800-2017 §16
+VCD / FST) and in the page (the WebAssembly build behind `wavelens/sva.js`). The semantics follow IEEE 1800-2017 §16
 for the subset; where this document makes a choice, the choice is listed under *Decisions*.
 
 ## Entry points
@@ -65,14 +65,14 @@ steps. A name that a select reads wider than the variable (`data[15:8]` of an 8-
 `--resolve up` too). A path splits at its dots, not inside a select nor in an escaped identifier: `\esc.x` (the parser
 keeps the backslash of an escaped name that holds a dot) is one name to the end of the path. An
 instance is a *candidate* for an assertion when all its names resolve. The three implementations: `lookup()` /
-`resolve()` / `candidates()` in `wavefw/sva.js`, `svabuild.Names` in `tools/svabuild.py` (used by `mkconfig.py --sva`),
+`resolve()` / `candidates()` in `wavelens/sva.js`, `svabuild.Names` in `tools/svabuild.py` (used by `mkconfig.py --sva`),
 `lookup()` with `--resolve scope` in `sva/cli/src/main.rs`; `make smoke` checks that they give the same candidates for
 `apb_setup_access` on the APB example (`apb_tb`, `apb_tb.u_master`, `apb_tb.u_regs`, not `apb_tb.u_count`), and the
 build passes the page's `sortIgnore` to `sva eval`, so a binding resolves in the build as in the page.
 
 ## In the page (stage 6)
 
-`wavefw/sva.js` (after `wavefw.js`; the module comes from `wavefw/sva.wasm.js`, deflate-raw + base64, unpacked with
+`wavelens/sva.js` (after `wavelens.js`; the module comes from `wavelens/sva.wasm.js`, deflate-raw + base64, unpacked with
 `DecompressionStream`) adds the assertions panel to every viewer (docs/USAGE.md *Assertions (SVA)*). A binding is an
 assertion and an instance path of the viewer's model: the *modules* are the groups that hold dump paths (`--hierarchy`
 pages), the top of a view is `meta.scope` (the converter's `--scope`). Each name of the assertion resolves in the
@@ -80,7 +80,7 @@ instance by *Name resolution* above (a select wider than the row is a bind error
 samples the bound rows (their transitions `tr`: `tv` values; in a clock-sampled view the `raw` hex values that
 `vcd2wavedrom.py` writes next to labels that do not read back, else the labels read back through the enum or the row's
 radix), and the results document of each assertion is stored on its binding (`view.sva.bindings[i].results`, with
-`scope` and `signals` the bound paths); the viewer fires `wavefw:sva`.
+`scope` and `signals` the bound paths); the viewer fires `wavelens:sva`.
 
 The bindings of one scope are evaluated together through the same `plan` / `assemble` as `SVA.evaluate`: one request
 per clock with all their assertions and every file of the page as one unit (the engine keeps the last parsed unit, so the
@@ -103,14 +103,14 @@ page. Bindings whose signals the view does not show keep their build-time result
 view". A label is unique in its module (as in SystemVerilog): the same label in another module of the unit is named
 `module.label` (`cxp_short_pkt_sva.a_hold_until_ready`; the first keeps the plain label) — in the page, the CLI's
 `--assert` and `mkconfig.py --sva` alike. A second assertion with the same label in the same module (a file loaded
-twice) is listed as a note and cannot be bound. A change of the sort prefixes binds again (`wavefw:settings`).
+twice) is listed as a note and cannot be bound. A change of the sort prefixes binds again (`wavelens:settings`).
 After the files change (✎ Apply, ⟳, Watch, Load file…) a binding keeps its results only while its assertion is the
 same: the parsed assertion without its position (`asig`) is compared, and the page's build-time results of an assertion
 whose statement differs from the page's file are dropped; the others are evaluated again. ✎ replaces the statement
 from the start of the label's line to the `;` that ends it (`at.start` / `at.end` are UTF-8 byte offsets); a text with
 a new parse error in that file is not applied.
 
-`view.extraRows` (wavefw.js) lets a plugin put rows under a group: they fold, sort as a block after the group's
+`view.extraRows` (wavelens.js) lets a plugin put rows under a group: they fold, sort as a block after the group's
 signals, are found and highlighted, may draw themselves, and reach the static SVG through `opts.extraRows`.
 
 On the waves (stage 7) every binding with results is such a block under the group of its scope (`b.group`; the top
@@ -162,7 +162,7 @@ Two more requests of `run_json` (`sva-core/src/explain.rs`), both in the unit of
   edge, as for an assertion; without one, the value after the changes at each time any of its signals changes. Names
   resolve from the scope the expression was written in up to the top, then as a path from the top. A match of the
   search is a time where the value becomes true (a nonzero known bit). Rows are plugin `sig` rows made through
-  `WaveFW.parse` of a `tv` list, so they draw, sort and show values like signals.
+  `WaveLens.parse` of a `tv` list, so they draw, sort and show values like signals.
 - `{"files", "trace", "explain": {"assert", "from", "to"}}` → `{"explain": [{"id"?, "what", "tree"}]}`: the booleans
   of the assertion in source order (sequence elements with their `steps` id, `if` conditions, `disable iff`), each a
   tree `{text, w, values, kids?}` of its sub-expressions (operands; a chain of `&&` / `||` as one list; the arguments of
@@ -424,7 +424,7 @@ record of those runs, not something a clone can repeat; the example and unit-tes
 | a capped `intersect`, `a \|-> (a[*1:$] intersect (a ##[1:100] b)) and (a ##[2:150] b)` (stage 12) | the same, 40 000 cycles | 39 900 capped | 4.0 s, 506 MB: the results (2.8 M trace steps), not the terms (414) |
 
 The WebAssembly module is 571 kB, 278 kB in a page (570 957 B / 277 560 B, stage 12; stage 8: 546 kB, the report code
-and `serde_json::Value`; stage 5.1: 451 kB) (`wavefw/sva.wasm.js`, deflate-raw + base64; STACK.md). A call of
+and `serde_json::Value`; stage 5.1: 451 kB) (`wavelens/sva.wasm.js`, deflate-raw + base64; STACK.md). A call of
 the spike page (parse, evaluate 12 cycles, JSON both ways) takes about 110 µs.
 
 Most of the results JSON of a long dump is the passes of invariants (one per cycle); the counts are complete either

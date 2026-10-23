@@ -1,13 +1,13 @@
 'use strict';
 /* The extension end to end in a real VS Code: run by tests/vscode_e2e.py (VS Code of Windows connected to WSL, or a local
-   one) as --extensionTestsPath, told what to do by ~/.cache/wavefw/e2e.json {out, dumps} (paths on the host). Every dump
-   opens in a wavefw tab: it answers ready with its signals, a picture of it (PNG) is written to out; then a bookmark
+   one) as --extensionTestsPath, told what to do by ~/.cache/wavelens/e2e.json {out, dumps} (paths on the host). Every dump
+   opens in a wavelens tab: it answers ready with its signals, a picture of it (PNG) is written to out; then a bookmark
    is kept over closing and opening the tab again (the store), and a new write of a copy of the first dump is read again
-   by itself (wavefw.autoReload). The results: out/result.json; the process exits 0 when all passed. */
+   by itself (wavelens.autoReload). The results: out/result.json; the process exits 0 when all passed. */
 const vscode = require('vscode'), fs = require('fs'), path = require('path');
 
 const os = require('os');
-const CFG = JSON.parse(fs.readFileSync(path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'wavefw', 'e2e.json'), 'utf8'));
+const CFG = JSON.parse(fs.readFileSync(path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'wavelens', 'e2e.json'), 'utf8'));
 const OUT = CFG.out, DUMPS = CFG.dumps;
 const results = [], ok = (name, pass, info) => { results.push({ name, pass: !!pass, info }); };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -21,14 +21,14 @@ function waitEvent(api, test, ms) {
 async function open(api, file) {
   const uri = vscode.Uri.file(file), t0 = Date.now();
   const got = waitEvent(api, e => e.type === 'ready' && e.tab.file === file, 180000);
-  await vscode.commands.executeCommand('vscode.openWith', uri, 'wavefw.waves');
+  await vscode.commands.executeCommand('vscode.openWith', uri, 'wavelens.waves');
   const e = await got;
   return { tab: e.tab, ms: Date.now() - t0, shown: e.shown, total: e.total };
 }
 async function closeAll() { await vscode.commands.executeCommand('workbench.action.closeAllEditors'); await sleep(500); }
 
 // an agent: tools/wavemcp.py of the repository as an MCP server over stdio; view_live with the dump and open: VS Code opens
-// its tab, which connects; view_edit puts a bookmark there; view_get reads it; the link's note in ~/.cache/wavefw/live goes
+// its tab, which connects; view_edit puts a bookmark there; view_get reads it; the link's note in ~/.cache/wavelens/live goes
 async function agent(api, file) {
   const cp = require('child_process'), root = path.join(__dirname, '..', '..');
   const p = cp.spawn('python3', ['-I', path.join(root, 'tools', 'wavemcp.py')], { stdio: ['pipe', 'pipe', 'inherit'] });
@@ -58,14 +58,14 @@ async function agent(api, file) {
   p.stdin.end();
   await new Promise(r => p.on('close', r));
   let left = [];
-  try { left = fs.readdirSync(path.join(os.homedir(), '.cache', 'wavefw', 'live')).filter(f => /^\d+\.json$/.test(f)); } catch (e) { /* none */ }
+  try { left = fs.readdirSync(path.join(os.homedir(), '.cache', 'wavelens', 'live')).filter(f => /^\d+\.json$/.test(f)); } catch (e) { /* none */ }
   ok('agent: its link note removed on exit', !left.length, { left });
   await closeAll();
 }
 
 async function run() {
   fs.mkdirSync(OUT, { recursive: true });
-  const ext = vscode.extensions.getExtension('wavefw.wavefw');
+  const ext = vscode.extensions.getExtension('vae-tech.wavelens');
   for (let i = 0; i < 100 && !ext.isActive; i++) await sleep(100);   // onStartupFinished: an agent's open works in a fresh window
   ok('active at startup', ext.isActive, {});
   const api = await ext.activate();
@@ -97,7 +97,7 @@ async function run() {
       await closeAll();
     } catch (e) { ok('store over reopening', false, { error: e.message }); }
     // a new simulation: a copy of the first dump written again is read by itself
-    const cfg = vscode.workspace.getConfiguration('wavefw');
+    const cfg = vscode.workspace.getConfiguration('wavelens');
     try {
       await cfg.update('autoReload', true, vscode.ConfigurationTarget.Global);
       const copy = path.join(OUT, 'reload' + path.extname(f));

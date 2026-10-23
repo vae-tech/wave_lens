@@ -1,29 +1,29 @@
-# Developing wavefw
+# Developing WaveLens
 
 How the project is laid out, built and tested, what was measured, and where the roadmap and the reviews live. Using
-wavefw is [USAGE.md](USAGE.md).
+WaveLens is [USAGE.md](USAGE.md).
 
 ## Project layout
 
 ```
-wavefw/                       what a page needs, nothing else
-  wavefw.js / wavefw.css      framework (one <script> + one <link>); wavefw.js is made by make wavefw from src/
+wavelens/                     what a page needs, nothing else
+  wavelens.js / wavelens.css  framework (one <script> + one <link>); wavelens.js is made by make wavelens from src/
   src/                        model.js (settings, sorting, find, time, values, the parser), vcd.js (a VCD read in the
                               page), paint.js (the two painters
                               and what they draw), view.js (WaveView and its parts Bar, Names, Notes), edit.js (the
                               viewer's commands view.run, your groups and markers, undo, Save page, the live link),
                               diff.js (a second dump compared), modules.js (the Modules panel and Only), svg.js
                               (WaveSVG), boot.js (themes, configure, upgrade, exports): one scope, in this order
-  wavefw.config.js            global settings file (all keys, with defaults), loaded before wavefw.js
+  wavelens.config.js          global settings file (all keys, with defaults), loaded before wavelens.js
   sva.js, sva.wasm.js         assertions in the page: the panel, binding, evaluation; the engine (generated, make sva-build)
   bus.js                      bus transactions: ports found by their names, decoders (AXI, AXI-Stream, APB, AHB, Avalon, Wishbone, OBI), rows
 vscode/                       the VS Code extension (a workspace extension: Remote-SSH / WSL host): extension.js (the
                               custom editor of .vcd / .fst, FST -> VCD by the bundled sva, the store, dialogs, the
-                              live relay), media/host.js (the tab's half, before wavefw.js: localStorage, downloads,
+                              live relay), media/host.js (the tab's half, before wavelens.js: localStorage, downloads,
                               pickers, clipboard, keys, theme, live link to the host), test/e2e.js (in a real VS Code)
 tools/                        what you run: python3 -I tools/<tool>.py
   mkconfig.py vcd2wavedrom.py mkhtml.py embed.py dumpscan.py wavejson.py svabuild.py
-  mkvsix.py                   vscode/ + wavefw/ + the static sva -> one .vsix (a zip: no node, no npm)
+  mkvsix.py                   vscode/ + wavelens/ + the static sva -> one .vsix (a zip: no node, no npm)
   wavemcp.py                  the tools as an MCP server for AI agents (stdio; USAGE § AI agents); the live link to a page
   viewedit.py                 the viewer's commands on a page's edits or a saved state (USAGE § Commands and edits)
   base.config.json            base settings for generated configs (make config / make html WAVES=x.vcd)
@@ -42,7 +42,7 @@ docs/                         what you look at
   img/                        the README screenshots (make shots)
   sva/                        the SVA engine: STACK.md (technology), LANGUAGE.md (the subset), ENGINE.md (semantics,
                               results JSON, performance), the JSON schemas
-  reviews/                    the reviews of the stages, each finding with file:line, probe, fix and the closing commit
+  reviews/                    the reviews of the stages with their findings (on main only, not in the public branch)
   reference/template.html     the original visual reference (PSI5 datasheet)
 tests/
   unit/                       the Python unit tests of the tools (make unit: unittest, standard library); vcd/: small VCDs
@@ -57,7 +57,7 @@ tests/
   conformance.html            every feature next to stock WaveDrom 3.5.0 (vendor/, test-only)
 work/                         your dumps and their configs: configs tracked, dumps and pages git-ignored
 sva/                          the SVA engine (Rust: core, native CLI, WebAssembly)
-prompts/                      the roadmap as a series of prompts
+prompts/                      the roadmap as a series of prompts (on main only)
 bin/                          the prebuilt sva CLI, committed: linux-x86_64/sva (static); windows-x86_64/sva.exe by make dist-windows
 out/                          build products (make's BUILD, git-ignored): cargo target, example dumps and pages, shots
 Makefile                      make help lists the targets; build products go to BUILD (default out/)
@@ -65,20 +65,31 @@ Makefile                      make help lists the targets; build products go to 
 
 ## Build and test
 
+What each part needs:
+
+| To | You need |
+|---|---|
+| open the pages | a browser |
+| the tools | python3 ≥ 3.8 (standard library only) |
+| the examples | Verilator ≥ 5 (`make examples`) |
+| the assertion engine | cargo ≥ 1.82 and `rustup target add wasm32-unknown-unknown` (`make sva-build`); musl for `make dist-linux`, mingw-w64 for `make dist-windows` |
+| the tests and the pictures | `pip install playwright`, `python3 -m playwright install chromium` (`make smoke`, `make check`); `fonts-ibm-plex` (or the network) for `make shots`, `make guide-shots` |
+| the SystemVerilog style | verible (`make fmt`) and Verilator (`make lint`) |
+
 ```sh
-make check                  # the gate before a commit: wavefw.js current and its sources ≤ 160 columns, sva-test, unit, every page smoke needs, sva-verify, mcp-bench, smoke STRICT=1, shots-check
+make check                  # the gate before a commit: wavelens.js current and its sources ≤ 160 columns, sva-test, unit, every page smoke needs, sva-verify, mcp-bench, smoke STRICT=1, shots-check
 make unit                   # tests/unit: the tools on small VCDs of what simulators write (168 tests, ~20 s, standard library)
 make mcp-bench              # tools/wavemcp.py on the benchmark tasks by a script (answers checked); AGENT=claude|codex: agents
-make wavefw                 # wavefw/wavefw.js from wavefw/src/*.js (after editing them; make html / example do it too; lines ≤ 160 columns)
+make wavelens               # wavelens/wavelens.js from wavelens/src/*.js (after editing them; make html / example do it too; lines ≤ 160 columns)
 make demo examples html     # rebuild docs/demo_waves.js, the example pages, the demo page
 make smoke                  # tests/smoke.py: every page in light and dark, 470 checks on 26 pages, PNGs in BUILD/shots
 make smoke ONLY=find,sva_bind   # some sections (python3 tests/smoke.py --list); STRICT=1: a skip fails
 make shots                  # tests/shots.py: docs/img/*.png, dark theme (after make examples; ~20 s, see below)
 make shots-check            # the same into BUILD/img, compared with docs/img: a shot that no longer builds fails
 make guide-shots            # tests/guide_shots.py: docs/guides/img/*.png (after make examples; ONLY=gaps,sva: those guides)
-make vsix                   # tools/mkvsix.py: BUILD/wavefw-<version>.vsix (the extension, the viewer, the static sva)
+make vsix                   # tools/mkvsix.py: BUILD/wavelens-<version>.vsix (the extension, the viewer, the static sva)
 make vscode-e2e             # tests/vscode_e2e.py: the extension in a real VS Code (INSTALLED: python3 tests/vscode_e2e.py --installed)
-make sva-build              # the SVA engine (needs cargo + the wasm32 target): the sva CLI, wavefw/sva.wasm.js
+make sva-build              # the SVA engine (needs cargo + the wasm32 target): the sva CLI, wavelens/sva.wasm.js
 make dist                   # the CLI: bin/linux-x86_64/sva (musl, static, committed) + bin/windows-x86_64/sva.exe (mingw-w64)
 make sva-test               # the SVA engine: unit tests, the corpus tests/sva (third_party too), the JSON schema, the CLI
 make sva-bless              # rewrite tests/sva/golden/*.txt after a reviewed change of the parser output
@@ -91,14 +102,14 @@ make clean                  # the build products under BUILD; clean-all: BUILD e
 
 Build products go to `BUILD`, default `out/` in the repository (git-ignored): the cargo target, the Verilator objects,
 the example dumps and pages, the smoke screenshots. `make clean` empties it but keeps the cargo target, `make clean-all`
-removes it. On a slow mount (this repository on `/mnt/c` under WSL) `make BUILD=/tmp/wavefw …` builds faster; `/tmp`
+removes it. On a slow mount (this repository on `/mnt/c` under WSL) `make BUILD=/tmp/wavelens …` builds faster; `/tmp`
 is emptied on a reboot, and `make smoke` reports what is missing as `SKIPPED n pages / n sections (run make examples, …)`.
 
 **The prebuilt CLI.** `bin/linux-x86_64/sva` (`x86_64-unknown-linux-musl`, statically linked) is committed, so a
-clone runs the tools with assertions without Rust; like `wavefw/sva.wasm.js` it is rebuilt (`make dist-linux`) in the
+clone runs the tools with assertions without Rust; like `wavelens/sva.wasm.js` it is rebuilt (`make dist-linux`) in the
 commit that changes the engine. `bin/windows-x86_64/sva.exe` (`x86_64-pc-windows-gnu`, linked by mingw-w64) is not
 committed yet: `make dist-windows` builds it where mingw-w64 is installed (commit it then, with every engine change). One time: `rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu` and, for Windows,
-`sudo apt install mingw-w64`. The tools take the CLI from `--sva-bin`, else `$WAVEFW_SVA`, else `out/sva-target/release/sva`
+`sudo apt install mingw-w64`. The tools take the CLI from `--sva-bin`, else `$WAVELENS_SVA`, else `out/sva-target/release/sva`
 (`make sva-build`), else `bin/<os>-x86_64/`, else `sva` on PATH. `make unit` gives them the CLI of its `BUILD` when
 that is built, and `make check` builds it first: an older `out/` build would test stale code.
 
@@ -112,12 +123,12 @@ a desktop machine: `SMOKE_TIME_SCALE=3` allows three times as much on a loaded o
 that section with a PNG under `BUILD/smoke/<section>-error.png`; the other sections still run. The section `units` is
 a table of JavaScript expressions and their values on a blank page (`UNITS` in `tests/smoke.py`, ~200 cases: decode,
 bits, struct fields, the value search, times, analog values, edges, the page's VCD reader, the bus decoders, the
-expressions of `sva.js`); it calls the pure functions through `WaveFW.internal`, not an API, and the other sections
-read the fields of a viewer through `WaveFW.internal.peek(v)` only (`plugin_api` checks it), so a refactoring of
+expressions of `sva.js`); it calls the pure functions through `WaveLens.internal`, not an API, and the other sections
+read the fields of a viewer through `WaveLens.internal.peek(v)` only (`plugin_api` checks it), so a refactoring of
 `view.js` changes one place of the tests.
 
 **The VS Code extension** (`vscode/`) keeps the viewer as it is in a browser: `media/host.js`, loaded before
-`wavefw.js` in the tab, replaces what a webview cannot do or does on the wrong machine (the tab runs on the client,
+`wavelens.js` in the tab, replaces what a webview cannot do or does on the wrong machine (the tab runs on the client,
 the extension and the files on the host) — `localStorage` (the dump's store in `workspaceState`, given in the page),
 an `<a download>` clicked (a save dialog on the host), an `<input type=file>` clicked (an open dialog on the host),
 `navigator.clipboard.writeText`, `EventSource` / `fetch` / `sendBeacon` to `127.0.0.1` (relayed to the host's: the
@@ -130,19 +141,19 @@ over reopening, a new write read again, an agent's `wavemcp.py` opening a dump w
 `--installed` runs the `.vsix` installed into the host (`code --install-extension`) instead of `vscode/`. Not
 automated: the save / open dialogs themselves and keys through Windows (checked by hand).
 
-The viewer's commands live twice: in the page (`wavefw/src/edit.js`, `view.run`) and in `tools/viewedit.py`, which
+The viewer's commands live twice: in the page (`wavelens/src/edit.js`, `view.run`) and in `tools/viewedit.py`, which
 writes a page's edits without a browser. The section `edit` holds them together: the two lists of commands and their
-arguments are one (`WaveFW.commands()` against `COMMANDS`), and a list of every command that changes a state
+arguments are one (`WaveLens.commands()` against `COMMANDS`), and a list of every command that changes a state
 (`EDIT_OPS`), written into a page by `viewedit.py`, opens with the state that the same list run in the page gives —
 a command added to one side only, or one that differs, fails there. It also runs `wavemcp.py` as an agent's MCP
-server with a page connected live (`WAVEFW_LIVE_PORT=0`: a free port; its key in a scratch `XDG_CACHE_HOME`).
+server with a page connected live (`WAVELENS_LIVE_PORT=0`: a free port; its key in a scratch `XDG_CACHE_HOME`).
 
 `make unit` (`tests/unit/`, unittest, standard library only) tests the tools function by function on the fixtures in
 `tests/unit/vcd/` — each a few lines of what a simulator writes: `real` (`realtime`, `shortreal`, `inf`, `nan`), `string`
 and `event` variables, escaped names, a range glued to the name, the same path under two id codes, a vector in parts
 (bits, ranges apart, two bits under one code), several changes on one line, tabs, indents and a time inside a line,
 `$comment` in the body, VHDL values, time going back, a header without `$enddefinitions`, times above 2^53 ps. The smoke section `readers` feeds the
-same files to the page's own VCD reader (`wavefw/src/vcd.js`) and demands the transitions of the tools; `test_svabuild`
+same files to the page's own VCD reader (`wavelens/src/vcd.js`) and demands the transitions of the tools; `test_svabuild`
 compares the name rule of `svabuild.Names` with `sva eval --resolve` case by case. `make shots` checks looks rather than
 behaviour: fixed viewport, fixed clicks, two animation frames after each, one element per image; it stops when IBM Plex
 is not available (offline without `fonts-ibm-plex`) instead of writing PNGs that differ. The same code gives the same
@@ -219,28 +230,25 @@ approval"): the agent falls back to its shell. The runs, their transcripts and a
 
 ## Versions
 
-Two numbers, `MAJOR.MINOR` (0.17 now; [`CHANGELOG.md`](../CHANGELOG.md) lists them all). The work goes on a branch;
-a version is a merge into `main` (`git merge --no-ff`) tagged `vMAJOR.MINOR` (an annotated tag, its message the
-changelog entry). One commit on the branch before the merge raises the version in four places: `VERSION`,
-`version:` in `wavefw/src/boot.js` (then `make wavefw`), a new top entry in `CHANGELOG.md`, and the committed builds
+Two numbers, `MAJOR.MINOR` (0.18 now; [`CHANGELOG.md`](../CHANGELOG.md) lists them all). The work goes on a branch;
+a version is a merge into `main` (`git merge --no-ff`) tagged `main/vMAJOR.MINOR` (an annotated tag, its message the
+changelog entry). The public branch `master` then gets the version as one commit: `python3 -I tools/publish.py
+MAJOR.MINOR "what it brings"` writes the tree of `main/vMAJOR.MINOR` less the internal `prompts/` and `docs/reviews/`
+with that one line as its message, and tags it `vMAJOR.MINOR`. Only `master` and the `v*` tags go to GitHub. One commit on the branch before the merge raises the version in four places: `VERSION`,
+`version:` in `wavelens/src/boot.js` (then `make wavelens`), a new top entry in `CHANGELOG.md`, and the committed builds
 that carry it (`make sva-build dist-linux`: the `sva` CLI writes the version into a report's meta through
 `include_str!` of `VERSION`); `make unit` fails when they disagree. The Rust crates keep their own semver in
-`sva/Cargo.toml`. A page tells its version in `WaveFW.version`; `make smoke` names a page under `work/` built with
+`sva/Cargo.toml`. A page tells its version in `WaveLens.version`; `make smoke` names a page under `work/` built with
 another one.
 
-## Roadmap and reviews
+## Where it stands
 
-The stages are prompts in [`prompts/`](../prompts/00-roadmap.md); stages 1–8 are done: the restructure, the examples
-and screenshots, and a SystemVerilog Assertion engine (stack: [`sva/STACK.md`](sva/STACK.md) — Rust core,
-native CLI over VCD / FST, WebAssembly in the page) that binds assertions to instances of the waveform, evaluates them
-over the dump, draws attempts, steps and failures next to the signals and reports the numbers. The global review of
-October 2026 ([`reviews/global-review-2026-10.html`](reviews/global-review-2026-10.html)) drove stage 9
-(`prompts/09-refactor-cycle.md`: 9.1 hygiene and 9.4 the viewer done, the viewer features of 9.5 landed); stages 10
-(expressions, Why) and 11 (bus transactions) followed. The second review
-([`reviews/global-review-2026-10-19.html`](reviews/global-review-2026-10-19.html)) drives stage 12
-(`prompts/12-review-cycle.md`, steps 12.1–12.6: gates, the Python unit layer — the former 9.2 —, the engine's
-robustness — the former 9.3 —, the viewer, tests, docs); 9.6 (the real project) comes after it. What could come later
-is listed at the end of `prompts/00-roadmap.md`.
+The viewer, the tools, the SystemVerilog Assertion engine (stack: [`sva/STACK.md`](sva/STACK.md) — Rust core, native
+CLI over VCD / FST, WebAssembly in the page), expressions and Why, bus transactions, gaps, the MCP server, the viewer's
+commands, the Modules panel and the VS Code extension are done; [`CHANGELOG.md`](../CHANGELOG.md) says what came in
+each version. The work was planned as a series of stage prompts and checked by reviews with their findings and the
+commits that closed them; both live on the development branch `main` only (`prompts/`, `docs/reviews/`), not in the
+public branch.
 
 Done so far: the language front end ([`sva/LANGUAGE.md`](sva/LANGUAGE.md)), the evaluator
 ([`sva/ENGINE.md`](sva/ENGINE.md)) and the assertions in the page ([USAGE.md § Assertions](USAGE.md#assertions-sva):
@@ -285,5 +293,5 @@ apb_cov_read_wait     cover  1 match in 19 attempts · first at cycle 12 (125 ns
 …
 ```
 
-The same engine runs in the page as WebAssembly (`wavefw/sva.js`: `evaluate(parsed, sampler)` over the viewer's rows or
+The same engine runs in the page as WebAssembly (`wavelens/sva.js`: `evaluate(parsed, sampler)` over the viewer's rows or
 WaveJSON `tv` transitions): one assertion over 32 768 clock edges in about 73 ms.

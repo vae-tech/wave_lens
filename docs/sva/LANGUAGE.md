@@ -1,4 +1,4 @@
-# SVA subset of wavefw (v1) — the single source of truth
+# SVA subset of WaveLens (v1) — the single source of truth
 
 This is the part of SystemVerilog Assertions (IEEE 1800-2017 clause 16) that `sva-core` reads. The parser
 (`sva/core/src/`: `lex.rs`, `pre.rs`, `parse.rs`, `expr.rs`, `prop.rs`, `expand.rs`) follows this file; the corpus

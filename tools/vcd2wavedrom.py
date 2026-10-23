@@ -8,7 +8,7 @@ Modes
                 after the edge, i.e. what holds during the cycle). Output is plain WaveDrom (wave strings + data) plus the "time"
                 extension, so it renders in stock WaveDrom too.
   --exact       exact transitions per signal in the "tv" extension (every change), which
-                wavefw.js draws at their real timestamps. A wave string quantised to a --cycle grid is added
+                wavelens.js draws at their real timestamps. A wave string quantised to a --cycle grid is added
                 as a fallback for stock WaveDrom.
 
 Config file (--config cfg.json): every option can be a key (dashes or underscores), command-line options win.
@@ -66,7 +66,7 @@ class Builtin:
     def __init__(self, waves, scope):
         self.waves, self.scope = waves, scope
         self.decl = dumpscan.read(waves, None)
-        self.tool = 'wavefw reader' + ('' if waves.lower().endswith('.vcd') else f' ({dumpscan.fst_tool()})')
+        self.tool = 'wavelens reader' + ('' if waves.lower().endswith('.vcd') else f' ({dumpscan.fst_tool()})')
         self.streams = {}
 
     def resolve(self, p):
@@ -165,7 +165,7 @@ VHDL = str.maketrans('uwhl-', 'xx10x')   # VHDL std_logic in a vector: U W - unk
 @functools.lru_cache(maxsize=1 << 18)
 def bits(raw, width, sl):
     """VCD value bytes (vector digits "10x1", a bit "1", "r1.5", "sHello") -> the normalised form of norm(); VCD
-    left-extends with 0, or x / z. A real -> its number as wavefw.js prints it (gfmt, 15 digits), a string -> its text."""
+    left-extends with 0, or x / z. A real -> its number as wavelens.js prints it (gfmt, 15 digits), a string -> its text."""
     if raw[:1] == b'r':
         try:
             return gfmt(float(raw[1:].decode()), 15)
@@ -238,7 +238,7 @@ def jsfmt(f, spec):
 
 
 def gfmt(f, p=7):
-    """A float as wavefw.js gfmt (C's %.<p>g with a two-digit exponent)."""
+    """A float as wavelens.js gfmt (C's %.<p>g with a two-digit exponent)."""
     if f != f:
         return 'nan'
     if f in (float('inf'), float('-inf')):
@@ -254,7 +254,7 @@ def gfmt(f, p=7):
 
 
 def label(v, width, enum=None, radix=None):
-    """Bus label, the same radixes as wavefw.js: auto (<=6 bits dec, else hex) hex dec signed bin oct ascii float, fixed
+    """Bus label, the same radixes as wavelens.js: auto (<=6 bits dec, else hex) hex dec signed bin oct ascii float, fixed
     point q<F> / sq<F>."""
     if enum is not None and re.fullmatch('[0-9a-f]+', v) and int(v, 16) in enum:
         return enum[int(v, 16)]
@@ -264,7 +264,7 @@ def label(v, width, enum=None, radix=None):
         return ''.join(c * 4 if c in 'xz' else format(int(c, 16), '04b') for c in v)[-width:] if radix == 'bin' else v
     n, r = int(v, 16), {'unsigned': 'dec', 'sdec': 'signed'}.get(radix, radix)
     q = re.fullmatch(r'(s?)q(\d+)', r or '')
-    if q:   # fixed point: the value / 2^F exactly, as wavefw.js (the F decimals of 1/2^F: the fraction times 5^F)
+    if q:   # fixed point: the value / 2^F exactly, as wavelens.js (the F decimals of 1/2^F: the fraction times 5^F)
         if q[1] and width > 1 and n >= 1 << (width - 1):
             n -= 1 << width
         f, a = int(q[2]), abs(n)
@@ -548,7 +548,7 @@ def is_clock(s):
 def auto_gaps(spec, times, cols):
     """--auto-gap IDLE[:KEEP] over the sampled columns: where none changes for IDLE cycles or more (between two changes,
     or a change and an end of the window), the cycles between them but the first one and KEEP after it and KEEP before
-    the other, two at least -> [(from, to)] times of the --gap kind. The page's gaps (wavefw.js gapCuts) cut the same way."""
+    the other, two at least -> [(from, to)] times of the --gap kind. The page's gaps (wavelens.js gapCuts) cut the same way."""
     m = re.fullmatch(r'\s*(\d+)\s*(?::\s*(\d+)\s*)?', str(spec))
     if not m or int(m.group(1)) < 1:
         raise WaveError(f'vcd2wavedrom: --auto-gap {spec}: IDLE[:KEEP] in clock cycles, IDLE 1 at least (16:2)')

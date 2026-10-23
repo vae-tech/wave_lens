@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""wavemcp.py — the wavefw tools as an MCP server (Model Context Protocol, JSON-RPC over stdio) for an AI agent.
+"""wavemcp.py — the WaveLens tools as an MCP server (Model Context Protocol, JSON-RPC over stdio) for an AI agent.
 
 An agent asks questions of a dump (VCD, or FST through fst2vcd or the sva CLI) and gets short answers instead of reading the dump:
 the signals, values at a time, changes in a window, a clock-sampled table, searches by an SV expression or sequence
@@ -8,19 +8,19 @@ page (or the WaveJSON) of a window for a person. The dump is read once per serve
 signal's transitions when a tool first needs it, then kept. The agent marks a page up for the person with the viewer's
 commands (view_edit: bookmarks with a text, arrows, markers, groups, highlight, colours, cursor, window; tools/viewedit.py
 has them) and reads what is there (view_get): live in their browser once view_live has connected the page (an HTTP
-server of this process on 127.0.0.1, from port 8742 or WAVEFW_LIVE_PORT on, its key in ~/.cache/wavefw/live-token),
+server of this process on 127.0.0.1, from port 8742 or WAVELENS_LIVE_PORT on, its key in ~/.cache/wavelens/live-token),
 else in the page's file; a .vcd / .fst open in VS Code (the extension in vscode/ connects its tabs to the link that
-~/.cache/wavefw/live/<port>.json announces, and opens a dump that view_live asks for) is live only. Times are ns in and out (a number), or a text with a unit as the viewer reads one
+~/.cache/wavelens/live/<port>.json announces, and opens a dump that view_live asks for) is live only. Times are ns in and out (a number), or a text with a unit as the viewer reads one
 ("2.5us", "100NS"); signal names are full paths, paths under "scope", or a unique tail of a path ("PSEL", "u_regs.PSEL").
 A request or an argument of a wrong shape gets an error answer and the session goes on; the programs the server starts
 get /dev/null as stdin (stdin and stdout are the protocol).
 
-  claude mcp add wavefw -- python3 -I /path/to/wavefw/tools/wavemcp.py      # Claude Code
-  codex mcp add wavefw -- python3 -I /path/to/wavefw/tools/wavemcp.py       # Codex CLI
+  claude mcp add wavelens -- python3 -I /path/to/wavelens/tools/wavemcp.py      # Claude Code
+  codex mcp add wavelens -- python3 -I /path/to/wavelens/tools/wavemcp.py       # Codex CLI
   wavemcp.py --list                                     # the tools and their input schemas
   wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd"}'   # one tool from the shell (tests, the benchmark)
 
-Standard library only; the sva CLI as svabuild.py finds it (--sva-bin, $WAVEFW_SVA, the build, bin/<os>/sva, PATH).
+Standard library only; the sva CLI as svabuild.py finds it (--sva-bin, $WAVELENS_SVA, the build, bin/<os>/sva, PATH).
 docs/USAGE.md § "AI agents (MCP)" has the tools; tests/mcp_bench.py measures what they save.
 """
 import argparse, atexit, bisect, collections, contextlib, fnmatch, hmac, http.server, json, os, queue, re, secrets, shutil, socket, statistics, subprocess, sys
@@ -727,16 +727,16 @@ def t_page(a):
 
 
 # ---------------- the views a person looks at: their edits and the live link ----------------
-# view_edit runs the viewer's commands (wavefw/src/edit.js, tools/viewedit.py) on a page: live, when the page is open in a
+# view_edit runs the viewer's commands (wavelens/src/edit.js, tools/viewedit.py) on a page: live, when the page is open in a
 # browser and connected (view_live), else on the page's file (the edits it carries; the viewer applies them when it is
 # opened or reloaded). The live link: an HTTP server of this process on 127.0.0.1 that a page connects to (EventSource);
-# it needs the token of this user (~/.cache/wavefw/live-token), which view_live writes into the page.
-LIVE_PORT = 8742   # the first port tried (WAVEFW_LIVE_PORT), then the next nine
+# it needs the token of this user (~/.cache/wavelens/live-token), which view_live writes into the page.
+LIVE_PORT = 8742   # the first port tried (WAVELENS_LIVE_PORT), then the next nine
 BRIDGE = []   # the one Bridge of this process, once a view tool started it
 
 
 def cache_dir():
-    return os.path.join(os.environ.get('XDG_CACHE_HOME') or os.path.expanduser('~/.cache'), 'wavefw')
+    return os.path.join(os.environ.get('XDG_CACHE_HOME') or os.path.expanduser('~/.cache'), 'wavelens')
 
 
 def live_token():
@@ -807,7 +807,7 @@ class LiveHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         path = urllib.parse.urlsplit(self.path).path
         if path == '/':
-            return self.answer(200, {'wavefw': 'live'}) if self.local() else self.answer(403, {'error': 'not allowed'})
+            return self.answer(200, {'wavelens': 'live'}) if self.local() else self.answer(403, {'error': 'not allowed'})
         if path != '/events':
             return self.answer(404, {'error': 'no such place'})
         cid = (self.query().get('cid') or [''])[0]
@@ -867,7 +867,7 @@ class Bridge:
         self.token, self.closed, self.clients, self.pending, self.rid = token or live_token(), False, {}, {}, 0
         self.lock, self.changed = threading.Lock(), threading.Condition()
         handler = type('Handler', (LiveHandler,), {'bridge': self})
-        first = port if port is not None else int(os.environ.get('WAVEFW_LIVE_PORT') or LIVE_PORT)
+        first = port if port is not None else int(os.environ.get('WAVELENS_LIVE_PORT') or LIVE_PORT)
         for p in [first] if port is not None else range(first, first + 10):
             try:
                 self.httpd = http.server.ThreadingHTTPServer(('127.0.0.1', p), handler)
@@ -875,7 +875,7 @@ class Bridge:
             except OSError:
                 continue
         else:
-            raise WaveError(f'the live link: no free port from {first} on (WAVEFW_LIVE_PORT)')
+            raise WaveError(f'the live link: no free port from {first} on (WAVELENS_LIVE_PORT)')
         self.httpd.daemon_threads = True
         self.httpd.handle_error = lambda request, addr: print(f'wavemcp: the live link: {sys.exc_info()[1]!r} ({addr[0]})', file=sys.stderr)
         self.port, self.started = self.httpd.server_address[1], time.monotonic()
@@ -883,7 +883,7 @@ class Bridge:
         self.announce()
 
     def announce(self):
-        """~/.cache/wavefw/live/<port>.json while this link runs: the VS Code extension's tabs connect to it (vscode/)."""
+        """~/.cache/wavelens/live/<port>.json while this link runs: the VS Code extension's tabs connect to it (vscode/)."""
         d = os.path.join(cache_dir(), 'live')
         self.note = os.path.join(d, f'{self.port}.json')
         try:
@@ -1183,7 +1183,7 @@ def t_view_live(a):
             raise WaveError(f'no such dump: {path}')
         out['page'] = path
         if a.get('off'):
-            out['note'] = 'a dump in VS Code: close its tab, or turn the setting wavefw.live off there'
+            out['note'] = 'a dump in VS Code: close its tab, or turn the setting wavelens.live off there'
         else:
             if a.get('open'):
                 out['opened'] = vscode_open(path, b.port)
@@ -1191,7 +1191,7 @@ def t_view_live(a):
             wait = min(max(float(wait), 0.0), 30.0) if viewedit.finite(wait) else 0.0
             got = live_page({'page': path}, wait=wait)
             out['note'] = ('its tab in VS Code is connected' if got else
-                           'not connected: the person opens it in VS Code with the wavefw extension (open: true asks VS Code to)')
+                           'not connected: the person opens it in VS Code with the WaveLens extension (open: true asks VS Code to)')
     elif path:
         pg = viewedit.Page(path)
         text = viewedit.put_block(pg.text, 'live', None if a.get('off') else {'port': b.port, 'token': b.token})
@@ -1217,7 +1217,7 @@ def t_view_live(a):
 
 
 def vscode_open(path, port):
-    """A dump in a wavefw tab of the VS Code windows of this host (vscode/ watches ~/.cache/wavefw/live), connected to
+    """A dump in a wavelens tab of the VS Code windows of this host (vscode/ watches ~/.cache/wavelens/live), connected to
     the bridge on port -> asked."""
     d = os.path.join(cache_dir(), 'live')
     try:
@@ -1272,7 +1272,7 @@ def target(a):
         b = bridge()   # the extension's tabs connect within a few seconds of its start
         c = live_page(a, wait=max(0.0, 5 - (time.monotonic() - b.started)))
         if not c:
-            raise WaveError(f'{os.path.basename(path)} is not open in VS Code (wavefw): view_live with page and open: true opens it there')
+            raise WaveError(f'{os.path.basename(path)} is not open in VS Code (WaveLens): view_live with page and open: true opens it there')
         return 'live', c, live_view(c, a.get('view'))
     linked = bool(path) and has_live_block(path)
     if linked and not BRIDGE:
@@ -1324,7 +1324,7 @@ def live_edit(a, where, v):
         else:
             pg = viewedit.Page(where['path'] if os.path.isfile(where['path']) else page_arg(a))
             key = pg.view(v.get('key'))
-            pg.put(key, {k: x for k, x in st.items() if k not in ('wavefw', 'version', 'title')})
+            pg.put(key, {k: x for k, x in st.items() if k not in ('wavelens', 'version', 'title')})
             pg.save()
             out['saved'] = pg.path
     errs = sum(1 for r in out['results'] if isinstance(r, dict) and 'error' in r)
@@ -1424,11 +1424,11 @@ TOOLS = [
          'failed with first failures [cycle, t, start_cycle, start_t, note], passed, vacuous, not_evaluated, covers.',
          {'dump': None, 'files': L, 'source': S, 'scope': None, 'assertions': L, 'from': None, 'to': None, 'max_failures': N,
           'details': B, 'defines': {'type': ['object', 'array'], 'items': S}}),
-    tool('wave_page', t_page, 'Write a wavefw viewer page (out .html) or WaveJSON (out .json) of signals to show a person; clock '
+    tool('wave_page', t_page, 'Write a WaveLens viewer page (out .html) or WaveJSON (out .json) of signals to show a person; clock '
          '(name or "auto"): a cell per cycle, auto_gap "16:2" folds idle cycles; sva files + bind ["name@scope"].',
          {'dump': None, 'signals': None, 'out': S, 'clock': S, 'from': None, 'to': None, 'scope': None, 'auto_gap': S, 'sva': L,
           'bind': L, 'title': S}, ('dump', 'signals', 'out'), ro=False),
-    tool('view_edit', t_view_edit, 'Mark up a wavefw page for a person (live in their browser when connected by view_live, else in the '
+    tool('view_edit', t_view_edit, 'Mark up a WaveLens page for a person (live in their browser when connected by view_live, else in the '
          'page file: they reload it). ops in order, each {op, …}: ' + ' '.join(f'{k}({v})' for k, v in viewedit.COMMANDS.items()
                                                                                   if k not in ('state', 'set_state', 'rows', 'picture')) +
          '. t/from/to in ns; signals: path, name, path tail or * pattern; bookmark: a numbered circle with a text (no signal: on the time '
@@ -1439,7 +1439,7 @@ TOOLS = [
          'with the person\'s own edits). rows: list its signals (a pattern, "" all); picture: a PNG of the screen (live).',
          {'page': S, 'view': S, 'rows': S, 'limit': N, 'picture': B, 'full': B}, ()),
     tool('view_live', t_view_live, 'Connect a page to this server: it is written into the page (open or reload it), then view_edit and '
-         'view_get work on it live; open: open it in the browser; off: disconnect. page a .vcd / .fst: its tab in VS Code (the wavefw '
+         'view_get work on it live; open: open it in the browser; off: disconnect. page a .vcd / .fst: its tab in VS Code (the WaveLens '
          'extension connects by itself; open: VS Code opens it). Without page: the pages connected.',
          {'page': S, 'open': B, 'off': B}, (), ro=False),
 ]
@@ -1546,7 +1546,7 @@ def handle(msg):
             want = p.get('protocolVersion')
             return ok({'protocolVersion': want if isinstance(want, str) and want in PROTOCOLS else PROTOCOLS[0],
                        'capabilities': {'tools': {'listChanged': False}},
-                       'serverInfo': {'name': 'wavefw', 'version': version()}, 'instructions': INSTRUCTIONS})
+                       'serverInfo': {'name': 'wavelens', 'version': version()}, 'instructions': INSTRUCTIONS})
         if method == 'ping':
             return ok({})
         if method == 'tools/list':

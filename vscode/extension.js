@@ -1,7 +1,7 @@
 'use strict';
-/* wavefw for VS Code — the extension host's half. It runs where the files are (extensionKind "workspace": the Linux
+/* wavelens for VS Code — the extension host's half. It runs where the files are (extensionKind "workspace": the Linux
    host of Remote-SSH or WSL); the tab's webview runs on the client (Windows). A dump (.vcd, .fst) opens in a custom
-   editor: the wavefw viewer (media/, or ../wavefw in the repository) that fetches the dump through its webview URI (an
+   editor: the wavelens viewer (media/, or ../wavelens in the repository) that fetches the dump through its webview URI (an
    FST turned into VCD text first by the bundled sva, kept in the extension's storage). media/host.js brings here what a
    browser would do itself: the downloads (a save dialog on the host), the file pickers, the clipboard, localStorage
    (this dump's store in workspaceState), the agent's live link (tools/wavemcp.py listens on the host's 127.0.0.1, which
@@ -9,8 +9,8 @@
 const vscode = require('vscode'), fs = require('fs'), path = require('path'), os = require('os'), crypto = require('crypto');
 const http = require('http'), cp = require('child_process');
 
-const VIEW = 'wavefw.waves';
-const MEDIA = ['wavefw.css', 'wavefw.config.js', 'wavefw.js', 'sva.wasm.js', 'bus.js', 'sva.js'];
+const VIEW = 'wavelens.waves';
+const MEDIA = ['wavelens.css', 'wavelens.config.js', 'wavelens.js', 'sva.wasm.js', 'bus.js', 'sva.js'];
 const TABS = new Set();
 const EVENTS = new vscode.EventEmitter();   // {type, tab, …} from the webviews (ready, loaded): the tests listen
 let CTX, OUT;
@@ -18,15 +18,15 @@ let CTX, OUT;
 const log = s => OUT && OUT.appendLine(`[${new Date().toISOString().slice(11, 19)}] ${s}`);
 const exists = p => { try { fs.accessSync(p); return true; } catch (e) { return false; } };
 const sha = s => crypto.createHash('sha1').update(s).digest('hex').slice(0, 16);
-const cacheDir = () => path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'wavefw');
+const cacheDir = () => path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'wavelens');
 
 // where the viewer's files are: inside the package (make vsix), else the repository around vscode/ (development)
 function roots() {
   const ext = CTX.extensionPath, inside = path.join(ext, 'media');
-  return { host: inside, wavefw: exists(path.join(inside, 'wavefw.js')) ? inside : path.join(ext, '..', 'wavefw') };
+  return { host: inside, wavelens: exists(path.join(inside, 'wavelens.js')) ? inside : path.join(ext, '..', 'wavelens') };
 }
 function svaBin() {
-  const set = vscode.workspace.getConfiguration('wavefw').get('sva');
+  const set = vscode.workspace.getConfiguration('wavelens').get('sva');
   if (set) return set;
   const ext = CTX.extensionPath;
   for (const p of [path.join(ext, 'bin', 'sva'), path.join(ext, '..', 'bin', `${process.platform}-x86_64`, 'sva')]) {
@@ -51,7 +51,7 @@ async function vcdOf(file) {
     await fs.promises.mkdir(dir, { recursive: true });
     const tmp = `${out}.${process.pid}.${Date.now()}.part`;
     try {
-      await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `wavefw: ${path.basename(file)} → VCD text` }, () =>
+      await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `WaveLens: ${path.basename(file)} → VCD text` }, () =>
         new Promise((ok, no) => {
           const p = cp.spawn(bin, ['vcd', file, '--out', tmp], { stdio: ['ignore', 'ignore', 'pipe'] });
           let err = ''; p.stderr.on('data', d => { err += d; });
@@ -84,7 +84,7 @@ class Tab {
     this.uri = uri; this.file = uri.fsPath; this.panel = panel; this.wait = new Map(); this.rid = 0; this.streams = new Map();
     this.storeKey = 'store:' + uri.toString(); this.store = Object.assign({}, CTX.workspaceState.get(this.storeKey) || {}); this.changed = new Map();
     const r = roots();
-    panel.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.file(r.host), vscode.Uri.file(r.wavefw),
+    panel.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.file(r.host), vscode.Uri.file(r.wavelens),
       vscode.Uri.file(path.dirname(this.file)), vscode.Uri.file(path.join(CTX.globalStorageUri.fsPath, 'fst'))] };
     panel.webview.onDidReceiveMessage(m => this.message(m).catch(e => { log(`${path.basename(this.file)}: ${e.stack || e}`);
       if (m && m.id) this.post({ id: m.id, error: e.message }); }));
@@ -99,8 +99,8 @@ class Tab {
     const u = (root, f) => w.asWebviewUri(vscode.Uri.file(path.join(root, f))).toString();
     const name = path.basename(this.file), esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
     const json = s => JSON.stringify(s).replace(/</g, '\\u003c');
-    const host = { name, path: this.file, store: this.store, autoReload: !!vscode.workspace.getConfiguration('wavefw').get('autoReload') };
-    const scripts = MEDIA.filter(f => f.endsWith('.js')).map(f => `<script nonce="${nonce}" src="${u(r.wavefw, f)}"></script>`).join('\n');
+    const host = { name, path: this.file, store: this.store, autoReload: !!vscode.workspace.getConfiguration('wavelens').get('autoReload') };
+    const scripts = MEDIA.filter(f => f.endsWith('.js')).map(f => `<script nonce="${nonce}" src="${u(r.wavelens, f)}"></script>`).join('\n');
     return `<!doctype html>
 <html lang="en">
 <head>
@@ -109,13 +109,13 @@ class Tab {
   font-src ${src}; script-src 'nonce-${nonce}' 'wasm-unsafe-eval'; worker-src blob:; connect-src ${src} blob: data:;">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(name)}</title>
-<link rel="stylesheet" href="${u(r.wavefw, 'wavefw.css')}">
+<link rel="stylesheet" href="${u(r.wavelens, 'wavelens.css')}">
 <style>
   body { margin: 0; padding: 8px 10px; background: var(--bg); color: var(--fg); font-family: var(--font-body); }
 </style>
 </head>
 <body>
-<script type="application/json" id="wavefw-host">${json(host)}</script>
+<script type="application/json" id="wavelens-host">${json(host)}</script>
 <script type="application/wavedrom" data-title="${esc(name)}">
 { "signal": [{ "name": "reading…", "wave": "x..." }], "head": { "text": ${json('reading ' + name + '…')} } }
 </script>
@@ -139,7 +139,7 @@ ${scripts}
         clearTimeout(this.storeT); this.storeT = setTimeout(() => this.flush(), 300);
         return;
       }
-      case 'save': return reply(await this.save(String(m.name || 'wavefw.out'), Buffer.from(String(m.b64 || ''), 'base64')));
+      case 'save': return reply(await this.save(String(m.name || 'wavelens.out'), Buffer.from(String(m.b64 || ''), 'base64')));
       case 'pick': return reply(await this.pick(String(m.accept || ''), !!m.multiple));
       case 'clip': await vscode.env.clipboard.writeText(String(m.text ?? '')); return reply({ ok: true });
       case 'result': { const w = this.wait.get(m.rid); if (w) { this.wait.delete(m.rid); w(m.results); } return; }
@@ -164,7 +164,7 @@ ${scripts}
   }
   async save(name, data) {
     const to = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(path.join(path.dirname(this.file), path.basename(name))),
-      saveLabel: 'Save', title: `wavefw: save ${name} on ${vscode.env.remoteName ? 'the host' : 'this machine'}` });
+      saveLabel: 'Save', title: `WaveLens: save ${name} on ${vscode.env.remoteName ? 'the host' : 'this machine'}` });
     if (!to) return { cancel: true };
     await vscode.workspace.fs.writeFile(to, data);
     return { path: to.fsPath };
@@ -195,7 +195,7 @@ ${scripts}
         if (err || !now.size) return;
         if (now.size !== cur.size || now.mtimeMs !== cur.mtimeMs) { quiet(now); return; }
         const sig = `${now.size}:${now.mtimeMs}`; if (sig === last) return; last = sig;
-        this.post({ type: 'changed', auto: !!vscode.workspace.getConfiguration('wavefw').get('autoReload') });
+        this.post({ type: 'changed', auto: !!vscode.workspace.getConfiguration('wavelens').get('autoReload') });
       }), 1200);
     };
     this.onStat = (cur, prev) => { if (cur.mtimeMs !== prev.mtimeMs || cur.size !== prev.size) quiet(cur); };
@@ -249,13 +249,13 @@ ${scripts}
 }
 
 /* ---------------- the agent's live link (tools/wavemcp.py) ---------------- */
-// The bridge of an agent's wavemcp.py listens on 127.0.0.1 of this host and writes ~/.cache/wavefw/live/<port>.json
-// (port, pid, host) while it runs; the key is the user's ~/.cache/wavefw/live-token. A tab is given "port:key"
-// (WaveFW.live): the newest bridge, or the one that asked to open it; its EventSource and POSTs to that bridge, and to
+// The bridge of an agent's wavemcp.py listens on 127.0.0.1 of this host and writes ~/.cache/wavelens/live/<port>.json
+// (port, pid, host) while it runs; the key is the user's ~/.cache/wavelens/live-token. A tab is given "port:key"
+// (WaveLens.live): the newest bridge, or the one that asked to open it; its EventSource and POSTs to that bridge, and to
 // nothing else, come here (media/host.js). view_live with a dump writes open-*.json there: the window that has the file
 // in its folders opens it first, another after a few seconds; the request goes once its tab is open.
 const LIVE_PATHS = { events: 'GET', hello: 'POST', reply: 'POST', bye: 'POST' };
-const liveOn = () => !!vscode.workspace.getConfiguration('wavefw').get('live');
+const liveOn = () => !!vscode.workspace.getConfiguration('wavelens').get('live');
 function liveUrlOk(tab, url, want) {
   try {
     const u = new URL(url), name = u.pathname.slice(1), [port, token] = (tab.link || '').split(/:(.*)/s);
@@ -345,24 +345,24 @@ async function liveOpens() {   // view_live {page: a dump, open: true}: the tab 
 
 /* ---------------- activation ---------------- */
 function activate(ctx) {
-  CTX = ctx; OUT = vscode.window.createOutputChannel('wavefw'); ctx.subscriptions.push(OUT, EVENTS);
+  CTX = ctx; OUT = vscode.window.createOutputChannel('WaveLens'); ctx.subscriptions.push(OUT, EVENTS);
   ctx.subscriptions.push(vscode.window.registerCustomEditorProvider(VIEW, {
     openCustomDocument: uri => ({ uri, dispose() {} }),
     resolveCustomEditor: (doc, panel) => { new Tab(doc.uri, panel); },
   }, { webviewOptions: { retainContextWhenHidden: true }, supportsMultipleEditorsPerDocument: false }));
   const active = () => [...TABS].find(t => t.panel.active) || [...TABS].find(t => t.panel.visible);
   ctx.subscriptions.push(
-    vscode.commands.registerCommand('wavefw.open', uri => {
+    vscode.commands.registerCommand('wavelens.open', uri => {
       uri = uri || (vscode.window.activeTextEditor && vscode.window.activeTextEditor.document.uri);
       if (uri) return vscode.commands.executeCommand('vscode.openWith', uri, VIEW);
       return vscode.window.showOpenDialog({ filters: { dumps: ['vcd', 'fst'] } })
         .then(u => u && u[0] && vscode.commands.executeCommand('vscode.openWith', u[0], VIEW));
     }),
-    vscode.commands.registerCommand('wavefw.reload', () => { const t = active(); if (t) t.post({ type: 'reload' }); }),
-    vscode.commands.registerCommand('wavefw.live', () => {
+    vscode.commands.registerCommand('wavelens.reload', () => { const t = active(); if (t) t.post({ type: 'reload' }); }),
+    vscode.commands.registerCommand('wavelens.live', () => {
       liveCheck(); const t = active();
-      if (!liveOn()) vscode.window.showInformationMessage('wavefw: the setting wavefw.live is off');
-      else if (!LIVE_NOW) vscode.window.showInformationMessage('wavefw: no agent\'s live link on this host (the agent starts it with view_live)');
+      if (!liveOn()) vscode.window.showInformationMessage('WaveLens: the setting wavelens.live is off');
+      else if (!LIVE_NOW) vscode.window.showInformationMessage('WaveLens: no agent\'s live link on this host (the agent starts it with view_live)');
       else if (t) { t.sent = false; liveTo(t); }
     }));
   const timer = setInterval(liveCheck, 1500); ctx.subscriptions.push({ dispose: () => clearInterval(timer) });

@@ -1,24 +1,24 @@
-/* wavefw/src/model.js — the model: tokens, settings, highlight, sorting, plugin rows, find, time, values, the WaveJSON
-   parser, edge search and the bookmark lists. Opens the one scope of wavefw.js (closed in boot.js). */
+/* wavelens/src/model.js — the model: tokens, settings, highlight, sorting, plugin rows, find, time, values, the WaveJSON
+   parser, edge search and the bookmark lists. Opens the one scope of wavelens.js (closed in boot.js). */
 (function (G) {
 'use strict';
 
 /* ---------------- tokens & helpers ---------------- */
-// Colour names used by the painters -> CSS custom properties (defined in wavefw.css, overridable by the page).
+// Colour names used by the painters -> CSS custom properties (defined in wavelens.css, overridable by the page).
 const TOK = { fg: '--fg', muted: '--muted', line: '--line', panel: '--panel', panel2: '--panel-2', acc: '--accent',
   one: '--wave-1', bus: '--wave-bus', x: '--wave-x', xsoft: '--wave-x-soft', z: '--wave-z',
   c3: '--wave-c3', c4: '--wave-c4', c5: '--wave-c5', c6: '--wave-c6', c7: '--wave-c7', c8: '--wave-c8', c9: '--wave-c9',
   band: '--wave-band', cursor2: '--wave-cursor2',
   // hl7: find, hl8: plugins
   hl1: '--wave-hl1', hl2: '--wave-hl2', hl3: '--wave-hl3', hl4: '--wave-hl4', hl5: '--wave-hl5', hl6: '--wave-hl6', hl7: '--accent', hl8: '--wave-hl8',
-  paint: '--wave-paint' };   // the find group's Paint colour; plugins add their own (WaveFW.registerTokens)
+  paint: '--wave-paint' };   // the find group's Paint colour; plugins add their own (WaveLens.registerTokens)
 // a colour name of the painters: a token, a CSS custom property ("--x", "var(--x)") or a colour as it is
 const registerTokens = map => { for (const [k, v] of Object.entries(map || {})) TOK[k] = v; return Object.assign({}, TOK); };
 // a key a table has of its own, not one every object inherits ("constructor", "toString"): what a command, a setting or
 // this browser's storage names is looked up so
 const hasKey = (o, k) => k != null && Object.prototype.hasOwnProperty.call(o, k);
 const tokVar = n => hasKey(TOK, n) ? `var(${TOK[n]})` : /^--[\w-]+$/.test(n) ? `var(${n})` : n;   // a colour name as CSS
-// Friendly names for colour maps (config.colors, data-colors, WaveFW.setColors) -> CSS custom properties.
+// Friendly names for colour maps (config.colors, data-colors, WaveLens.setColors) -> CSS custom properties.
 const CVAR = { trace: '--wave-1', one: '--wave-1', bus: '--wave-bus', x: '--wave-x', xfill: '--wave-x-soft', z: '--wave-z',
   bg: '--panel', panel: '--panel', header: '--panel-2', grid: '--line', text: '--fg', muted: '--muted', accent: '--accent', cursor: '--accent',
   page: '--bg', c3: '--wave-c3', c4: '--wave-c4', c5: '--wave-c5', c6: '--wave-c6', c7: '--wave-c7', c8: '--wave-c8', c9: '--wave-c9',
@@ -58,8 +58,8 @@ function isEdge(edge, prev, b) {
 const flatText = t => Array.isArray(t) ? t.slice(typeof t[1] === 'object' && !Array.isArray(t[1]) ? 2 : 1).map(flatText).join('') : (t == null ? '' :
   String(t));
 
-/* ---------------- settings (config file / WaveFW.configure / config in the JSON / data-* / opts) ---------------- */
-// Layers, later wins: DEFAULTS < global (window.WAVEFW_CONFIG, WaveFW.configure) < WaveJSON "config" < element / opts.
+/* ---------------- settings (config file / WaveLens.configure / config in the JSON / data-* / opts) ---------------- */
+// Layers, later wins: DEFAULTS < global (window.WAVELENS_CONFIG, WaveLens.configure) < WaveJSON "config" < element / opts.
 // theme and colors are not merged here: they become data-theme / CSS custom properties (see applyLook).
 const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight: 24, traceWidth: 1.4, busWidth: 1.2,
   labelSize: 11, fontSize: 11.5, sort: 'none', sortIgnore: [], sortButton: true, hint: true, style: 'auto', radix: 'auto', fold: null,
@@ -70,7 +70,7 @@ const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight
     gapSignals: null, gapClock: null, gapAux: null, gapOnly: false, gapCount: 'clock', gapLine: 'dashdot', menuTipDelay: 2000, cycles: false,
     cycleClock: null, cycleZero: null, savePage: true };
 // a plugin's settings with their defaults (bus.js: busDetect, buses; sva.js: svaOpen, svaShow, svaSignals): in every
-// layer like the framework's own, listed in WaveFW.defaults, known to the warning on unknown keys
+// layer like the framework's own, listed in WaveLens.defaults, known to the warning on unknown keys
 const registerDefaults = map => { Object.assign(DEFAULTS, map || {}); return Object.assign({}, DEFAULTS); };
 const SVG_DEFAULTS = { groupHeight: 20, spaceHeight: 12 };   // the static figure is a little denser
 const GLOBAL = {};
@@ -95,7 +95,7 @@ const KNOWN_KEYS = new Set(['theme', 'colors', 'groupsFirst', 'hscale', 'skin'])
 function warnKeys(cfg, where) {
   const keys = Object.keys(cfg || {});
   const run = () => { for (const k of keys) if (!(k in DEFAULTS) && !(k in STYLE_VAR) && !KNOWN_KEYS.has(k) && !WARNED.has(k)) {
-    WARNED.add(k); console.warn(`wavefw: ${where}: unknown setting "${k}" (the settings are the keys of wavefw.config.js)`);
+    WARNED.add(k); console.warn(`wavelens: ${where}: unknown setting "${k}" (the settings are the keys of wavelens.config.js)`);
   } };
   // while the page loads, the plugins' scripts (registerDefaults) may come after this: checked when they are all there
   if (typeof document !== 'undefined' && document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run, { once: true }); else run();
@@ -187,7 +187,7 @@ function orderRows(rows, dir, pfx, groupOrder) {
 /* ---------------- rows of plugins (view.extraRows, WaveSVG opts.extraRows) ---------------- */
 // fn(group | null) -> [row] for every group of the diagram and its top (null); the rows go after the group's own signals
 // (as a block: sorting does not move them). A returned row without `anc` belongs to the group; a group row takes its
-// `id` from WaveFW.rowId() and joins the model's groups (folding, Expand / Collapse); a row with draw(P, {y, h, X, tA,
+// `id` from WaveLens.rowId() and joins the model's groups (folding, Expand / Collapse); a row with draw(P, {y, h, X, tA,
 // tB, xL, xR}) paints itself, a "sig" row with `tr` like a signal. Return the same objects while they stay: the viewer
 // keys its state (selection, highlight, folding) by them. More, all optional: `height` (px), `cls` (classes of its name),
 // `title` (of a group's name), `value(t)` (the value column), `overlay(P, {pos: Map(row -> {y, h}), X, tA, tB, xL, xR, yA, yB})`
@@ -451,7 +451,7 @@ function joinBits(g, parts) {
 function fieldRow(sig, f, depth, anc) {
   const msb = num(f && f.msb), lsb = num(f && (f.lsb ?? f.msb)); if (!f || !f.name || !isFinite(msb) || !isFinite(lsb)) return null;
   if (msb < lsb || lsb < 0 || msb >= (sig.width || 1)) {   // outside the vector: said, and left out (it would read past it: NaN)
-    console.warn(`wavefw: ${sig.full}: field ${f.name} [${msb}:${lsb}] is not inside the ${sig.width || 1}-bit vector (msb first, lsb 0): left out`);
+    console.warn(`wavelens: ${sig.full}: field ${f.name} [${msb}:${lsb}] is not inside the ${sig.width || 1}-bit vector (msb first, lsb 0): left out`);
     return null;
   }
   const w = msb - lsb + 1, r = { type: 'sig', name: String(f.name), depth, anc, width: w, enum: f.enum, radix: f.radix, path: null, src: f, fromTv: !!sig.tv,
@@ -497,11 +497,11 @@ function parseEdge(str) { // "a~>b label": from node, shape, to node, label
     shape: plus ? '-' : (sh.replace(/^</, '').replace(/>$/, '') || '-') };
 }
 function parse(src) {
-  if (src && src.__wavefw) return src;
+  if (src && src.__wavelens) return src;
   const j = typeof src === 'string' ? parseText(src) : src;
   if (!j || !Array.isArray(j.signal)) throw new Error('WaveJSON needs a "signal" array');
   const tm = j.time || null, C = cycMap(tm);
-  const M = { __wavefw: true, src: j, timed: !!tm, rows: [], groups: {}, nodes: {}, edges: [],
+  const M = { __wavelens: true, src: j, timed: !!tm, rows: [], groups: {}, nodes: {}, edges: [],
     title: flatText(j.head && j.head.text), foot: flatText(j.foot && j.foot.text),
     tick: j.head && j.head.tick != null ? num(j.head.tick) : null, every: (j.head && num(j.head.every)) || 1,
     tock: j.foot && j.foot.tock != null ? num(j.foot.tock) : null, hscale: (j.config && num(j.config.hscale)) || 1,

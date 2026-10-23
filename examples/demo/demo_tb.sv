@@ -1,7 +1,7 @@
 /*
 ================================================================================
   demo_tb
-  A tiny Manchester transmitter and its testbench: the wavefw demo
+  A tiny Manchester transmitter and its testbench: the WaveLens demo
   (docs/index.html) and the dump of the SVA spike (sva/spike/demo.sva).
 ================================================================================
 

@@ -3,16 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Assertions · wavefw guides</title>
+<title>Assertions · WaveLens guides</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap">
 <link rel="stylesheet" href="guide.css">
 </head>
 <body>
 <header class="top"><nav>
-  <a class="home" href="index.html">wavefw guides</a>
-  <a href="pages.html">Dump → page</a> <a href="viewer.html">Viewer</a> <a href="gaps.html">Gaps</a> <a href="sva.html" aria-current="page">Assertions</a>
-  <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
+  <a class="home" href="index.html">WaveLens guides</a>
+  <a href="pages.html">Dump → page</a> <a href="viewer.html">Viewer</a> <a href="modules.html">Modules</a>
+  <a href="compare.html">Compare</a> <a href="gaps.html">Gaps</a> <a href="sva.html" aria-current="page">Assertions</a>
+  <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="vscode.html">VS Code</a>
+  <a href="commands.html">Commands</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
 </nav></header>
 <div class="page toc-side">
 <main>
@@ -43,8 +45,8 @@
   <tr><td>active</td><td>not ended: the dump ended before a verdict</td></tr>
   <tr><td>capped</td><td>no verdict: the thread limit dropped some of its threads (<code>--max-threads</code>, default 256)</td></tr>
 </table>
-<p>Two engines give the same results from one Rust code base: in the page as WebAssembly (<code>wavefw/sva.js</code> +
-  <code>wavefw/sva.wasm.js</code>), and the <code>sva</code> command line (<code>bin/linux-x86_64/sva</code>, or <code>make
+<p>Two engines give the same results from one Rust code base: in the page as WebAssembly (<code>wavelens/sva.js</code> +
+  <code>wavelens/sva.wasm.js</code>), and the <code>sva</code> command line (<code>bin/linux-x86_64/sva</code>, or <code>make
   sva-build</code>), which <code>mkhtml.py</code> uses when it builds a page, so the page opens with the results already there.</p>
 
 <h3 id="subset">The subset</h3>
@@ -102,7 +104,9 @@ module apb_checks import apb_pkg::*; (
 endmodule
 
 bind apb_tb apb_checks u_apb_checks (.*);</code></pre>
-<p>Check that it parses before you go further: <code>sva parse examples/apb/apb_tb.sv examples/apb/apb.sva</code>. The files are one
+<p>Check that it parses before you go further: <code>bin/linux-x86_64/sva parse examples/apb/apb_tb.sv examples/apb/apb.sva</code>
+  (the CLI committed in the repository; the examples below write <code>sva</code> for it — put <code>bin/linux-x86_64</code> on your
+  <code>PATH</code>, or <code>make sva-build</code> builds one from the sources). The files are one
   compilation unit, in order: the testbench comes first because it declares <code>apb_pkg</code> (the enum <code>phase_t</code>).</p>
 <div class="note"><p>Each assertion needs a label (<code>apb_read_waits:</code>): it is the name you bind, search and see in the panel. The
   labels of every loaded file share one list; the same label in a second module becomes <code>module.label</code>.</p></div>
@@ -127,7 +131,8 @@ make config WAVES=work/x.vcd SVA="checks/*.sv"                                  
   <code>"show": true</code> on the ones you want. Run it again and your choices, your own lines and keys stay.</p>
 
 <h3>In the page</h3>
-<p>Every viewer has an <span class="ui">assertions</span> group in its bar: <span class="ui">Load file…</span> reads more
+<p>A viewer with the engine (every page of <code>make html</code>, <code>wavelens/viewer.html</code>; in your own page the scripts
+  <code>sva.wasm.js</code> and <code>sva.js</code>) has an <span class="ui">assertions</span> group in its bar: <span class="ui">Load file…</span> reads more
   <code>.sv</code> / <code>.sva</code> files into this browser. Then bind a loaded assertion in one of two ways:</p>
 <ul>
   <li><b>Drag</b> its line from the panel onto a module in the names column. While you drag, the modules that have all its signals turn
@@ -338,7 +343,7 @@ apb_demo_no_wait assert 19 attempts: 3 pass, 2 fail, 14 vacuous, 0 active, 0 dis
 <pre><code>sva eval --waves x.fst --scope tb.dut --sva checks.sva --report report.md --junit report.xml   <span class="c"># exit 1 on a failure</span>
 sva eval --waves x.fst --scope tb.dut --sva checks.sva --report nightly.json                   <span class="c"># results + meta</span>
 sva report report.json nightly.json --md report.md --junit report.xml --html report.html        <span class="c"># several runs</span>
-make sva-eval WAVES=x.fst SVA="pkg.sv checks.sva" SCOPE=tb.dut ARGS="--junit report.xml"         <span class="c"># the same through make</span></code></pre>
+make sva-eval WAVES=x.fst SVA="pkg.sv checks.sva" SCOPE=tb.dut ARGS="--junit report.xml"         <span class="c"># the same through make (builds the CLI first: Rust)</span></code></pre>
 <p><code>--report</code> picks the format by the extension: <code>.md</code>, <code>.html</code>, <code>.xml</code> (JUnit) or
   <code>.json</code> (the results with the meta — the same form as the page's <span class="ui">report.json</span>, so a run in CI and a
   report downloaded from a page merge with <code>sva report</code>; over several files a Source column tells the runs apart). JUnit has
@@ -383,7 +388,7 @@ make sva-eval WAVES=x.fst SVA="pkg.sv checks.sva" SCOPE=tb.dut ARGS="--junit rep
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>wavefw 0.11 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.18 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

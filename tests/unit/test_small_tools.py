@@ -1,9 +1,9 @@
-"""tools/wavejson.py, embed.py, wavefwcat.py, mkhtml.py: the readable JSON, the data files, wavefw.js, the page."""
+"""tools/wavejson.py, embed.py, wavelenscat.py, mkhtml.py: the readable JSON, the data files, wavelens.js, the page."""
 import json, os, re, unittest
 
 from tests.unit import helpers as H
 import wavejson as WJ
-import wavefwcat
+import wavelenscat
 
 
 class WaveJson(unittest.TestCase):
@@ -70,13 +70,13 @@ class Embed(unittest.TestCase):
         self.assertEqual((rc, err.strip()), (1, 'embed: no such file: nope.json'))
 
 
-class WavefwCat(unittest.TestCase):
+class WavelensCat(unittest.TestCase):
     def test_build_matches_committed(self):
-        with open(os.path.join(H.ROOT, 'wavefw', 'wavefw.js'), encoding='utf-8') as f:
-            self.assertEqual(wavefwcat.build(), f.read(), 'make wavefw')
+        with open(os.path.join(H.ROOT, 'wavelens', 'wavelens.js'), encoding='utf-8') as f:
+            self.assertEqual(wavelenscat.build(), f.read(), 'make wavelens')
 
     def test_check_exit_code(self):
-        self.assertEqual(H.run_tool('wavefwcat', '--check')[0], 0)
+        self.assertEqual(H.run_tool('wavelenscat', '--check')[0], 0)
 
 
 class MkHtml(unittest.TestCase):
@@ -95,7 +95,7 @@ class MkHtml(unittest.TestCase):
         rc, err, text = self.page(self.CFG, '--no-sva')
         self.assertEqual(rc, 0, err)
         self.assertIn('<html lang="en" data-theme="dark">', text)
-        self.assertIn('window.WAVEFW_CONFIG = {"sort": "asc"};', text)              # the global layer, without the theme
+        self.assertIn('window.WAVELENS_CONFIG = {"sort": "asc"};', text)              # the global layer, without the theme
         waves = json.loads(re.search(r'window\.WAVES = (\{.*?\n\});', text, re.S).group(1).replace('<\\/', '</'))
         self.assertEqual(waves['v']['config'], {'hscale': 1, 'dim': 0.5})           # the view's own layer
 

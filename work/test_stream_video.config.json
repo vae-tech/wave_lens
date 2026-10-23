@@ -5,7 +5,7 @@
     "signals: one entry per signal under its full path. \"\" = the global setting from \"config\".",
     "  show true/false · radix auto hex dec signed bin oct ascii · color \"#e03131\" (trace, outline, name) · style auto wavedrom questa square",
     "  optional: \"alias\": \"shown name\", \"fill\": \"#ffe066\" (bus fill), \"enum\": {\"0\": \"IDLE\"}; width/changes are information only.",
-    "config: page-wide wavefw settings — style (edges: auto | wavedrom slanted | questa / square vertical), radix, theme, colors,",
+    "config: page-wide wavelens settings — style (edges: auto | wavedrom slanted | questa / square vertical), radix, theme, colors,",
     "  fold (group depth folded at start, true/false or scope paths), highlight (instances in front at start, e.g. [\"tb.dut.u_x\"]),",
     "  dim (opacity of the other rows), rowHeight, nameWidth, fontSize, sort, sortIgnore …",
     "views: one section of the page each; a view may set \"signals\": [\"tb.dut.*\", \"tb.clk\"] (patterns over the paths below),",

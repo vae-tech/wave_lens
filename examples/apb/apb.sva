@@ -1,7 +1,7 @@
 /*
 ================================================================================
   apb.sva
-  APB3 checks for the wavefw APB example (apb_tb.sv).
+  APB3 checks for the WaveLens APB example (apb_tb.sv).
 ================================================================================
 
     Description:

@@ -1,4 +1,4 @@
-"""tools/svabuild.py: the name rule (the same in Python, the sva CLI and wavefw/sva.js), bindings, the CLI driver."""
+"""tools/svabuild.py: the name rule (the same in Python, the sva CLI and wavelens/sva.js), bindings, the CLI driver."""
 import json, os, subprocess, unittest
 
 from tests.unit import helpers as H
@@ -50,7 +50,7 @@ class Rule(unittest.TestCase):
     @unittest.skipUnless(SB.find_bin(), 'the sva CLI (make sva-build)')
     def test_cross_check_cli(self):
         """sva eval --resolve scope gives the same names and the same problems as Names.resolve (T8: three implementations
-        of one rule; wavefw/sva.js is compared with them in make smoke)."""
+        of one rule; wavelens/sva.js is compared with them in make smoke)."""
         exe = SB.find_bin()
         parsed = json.loads(subprocess.run([exe, 'parse', '--json', SV], capture_output=True, text=True).stdout)['files'][0]['assertions']
         with H.tmp() as d:

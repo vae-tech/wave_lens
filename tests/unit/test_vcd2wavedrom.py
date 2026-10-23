@@ -272,17 +272,17 @@ class Convert(unittest.TestCase):
         self.assertEqual(H.wavejson_of(H.fixture('wide'))['tb.w']['tv'][0][1], 'f' * 24)
 
     def readers(self):
-        """The FST readers here: fst2vcd (GTKWave) and the sva CLI's `sva vcd` (WAVEFW_FST picks one)."""
+        """The FST readers here: fst2vcd (GTKWave) and the sva CLI's `sva vcd` (WAVELENS_FST picks one)."""
         import svabuild
         return [r for r, ok in (('fst2vcd', shutil.which('fst2vcd')), ('sva', svabuild.find_bin())) if ok]
 
     def convert(self, reader, cfg, view, waves):
-        old = os.environ.get('WAVEFW_FST')
-        os.environ['WAVEFW_FST'] = reader
+        old = os.environ.get('WAVELENS_FST')
+        os.environ['WAVELENS_FST'] = reader
         try:
             rc, out, err = H.run_tool('vcd2wavedrom', '--config', cfg, '--view', view, '--waves', waves)
         finally:
-            os.environ.pop('WAVEFW_FST') if old is None else os.environ.__setitem__('WAVEFW_FST', old)
+            os.environ.pop('WAVELENS_FST') if old is None else os.environ.__setitem__('WAVELENS_FST', old)
         self.assertEqual(rc, 0, err)
         d = json.loads(out)
         return d, d['meta'].pop('tool'), d['meta'].pop('waves')
@@ -299,7 +299,7 @@ class Convert(unittest.TestCase):
         for r in self.readers():
             with self.subTest(r):
                 doc, tool, _ = self.convert(r, cfg, 'transfers', os.path.join(ex, 'apb.fst'))
-                self.assertEqual(tool, 'wavefw reader (' + ('fst2vcd' if r == 'fst2vcd' else 'sva vcd') + ')')
+                self.assertEqual(tool, 'wavelens reader (' + ('fst2vcd' if r == 'fst2vcd' else 'sva vcd') + ')')
                 self.assertEqual(doc, vcd)
 
     def test_fst_readers_identical(self):
@@ -330,17 +330,17 @@ class Convert(unittest.TestCase):
     }
 
     def read_all(self, reader, fst):
-        """The FST through `reader` (WAVEFW_FST): every variable, exact, with the hierarchy -> the WaveJSON, the reader's
+        """The FST through `reader` (WAVELENS_FST): every variable, exact, with the hierarchy -> the WaveJSON, the reader's
         name and the dump's path left out of its meta."""
         import dumpscan
-        old = os.environ.get('WAVEFW_FST')
-        os.environ['WAVEFW_FST'] = reader
+        old = os.environ.get('WAVELENS_FST')
+        os.environ['WAVELENS_FST'] = reader
         try:
             d = dumpscan.read(fst, None)
             sigs = ','.join(p for p, v in d.vars.items() if v.kind != 'event')
             rc, out, err = H.run_tool('vcd2wavedrom', '--waves', fst, '--exact', '--hierarchy', '--signals', sigs)
         finally:
-            os.environ.pop('WAVEFW_FST') if old is None else os.environ.__setitem__('WAVEFW_FST', old)
+            os.environ.pop('WAVELENS_FST') if old is None else os.environ.__setitem__('WAVELENS_FST', old)
         self.assertEqual(rc, 0, err)
         doc = json.loads(out)
         doc['meta'].pop('tool')

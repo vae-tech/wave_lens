@@ -153,10 +153,10 @@ class Commands(unittest.TestCase):
         e = ed(doc=doc)
         self.assertEqual(e.run([{'op': 'cursor', 't': '5ns'}])[0]['error'], 't: these waves have no time, give cycles (a number)')
         self.run_ok(e, {'op': 'cursor', 't': 1.5})
-        st = {'wavefw': 'state', 'version': 3, 'bookmarks': [{'n': 4, 't': 7}], 'paint': {'gone': '#fff'}}
+        st = {'wavelens': 'state', 'version': 3, 'bookmarks': [{'n': 4, 't': 7}], 'paint': {'gone': '#fff'}}
         r = self.run_ok(e, {'op': 'set_state', 'state': st}, {'op': 'state'})
         self.assertEqual((r[0]['missing'], r[1]['state']), (['gone'], {'cursor': 1.5, 'bookmarks': [{'n': 4, 't': 7}], 'paint': {'gone': '#fff'}}))
-        self.assertEqual(e.run([{'op': 'set_state', 'state': [1]}])[0]['error'], 'set_state: not a saved viewer state ({"wavefw": "state", …})')
+        self.assertEqual(e.run([{'op': 'set_state', 'state': [1]}])[0]['error'], 'set_state: not a saved viewer state ({"wavelens": "state", …})')
         rows = self.run_ok(ed(), {'op': 'group', 'name': 'g', 'signals': 'clk'}, {'op': 'rows', 'pattern': 'st', 'limit': 1})[1]
         self.assertEqual(rows, {'op': 'rows', 'total': 2, 'rows': [['tb.dut.state', 2]], 'next_offset': 1})
 
@@ -218,7 +218,7 @@ class Commands(unittest.TestCase):
         self.assertEqual(e.run([{'op': 'only', 'clear': True}])[0]['only'], None)
         self.assertIn('no set to pause', e.run([{'op': 'only', 'on': True}])[0]['error'])
         e.run([{'op': 'select', 'signal': 'tb.other.state'}])
-        miss = e.run([{'op': 'set_state', 'state': {'wavefw': 'state', 'only': {'modules': ['tb.dut', 'tb.nope', 'tb.other.reg']}}}])[0]
+        miss = e.run([{'op': 'set_state', 'state': {'wavelens': 'state', 'only': {'modules': ['tb.dut', 'tb.nope', 'tb.other.reg']}}}])[0]
         self.assertEqual(miss['missing'], ['tb.nope', 'tb.other.reg'])
         self.assertEqual(e.st['only'], {'modules': ['tb.dut'], 'on': True})            # kept as the viewer keeps it
         self.assertIsNone(e.st['select'])                                               # a selection it leaves out goes
@@ -252,15 +252,15 @@ class Twin(unittest.TestCase):
         e = ed()
         r = e.run([{'op': 'bookmark', 't': '60ns', 'signal': 'valid', 'text': 'a'}, {'op': 'style', 'name': 'questa'}, {'op': 'cursor2', 't': 30000},
                    {'op': 'range', 'from': 10000, 'to': 20000},
-                   {'op': 'set_state', 'state': {'wavefw': 'state', 'cursor': 70000, 'config': {'sort': 'asc'}, 'range': None, 'cursor2': None}}])
+                   {'op': 'set_state', 'state': {'wavelens': 'state', 'cursor': 70000, 'config': {'sort': 'asc'}, 'range': None, 'cursor2': None}}])
         self.assertEqual(r[-1], {'op': 'set_state', 'missing': []})
         st = e.st
         self.assertEqual([b['n'] for b in st['bookmarks']], [1, 2])   # kept
         self.assertEqual(st['config'], {'style': 'questa', 'sort': 'asc'})
         self.assertEqual((st['cursor'], st['cursor2'], st['range']), (70000, None, None))
-        e.run([{'op': 'set_state', 'state': {'wavefw': 'state', 'config': None, 'title': 'x', 'version': 3}}])
+        e.run([{'op': 'set_state', 'state': {'wavelens': 'state', 'config': None, 'title': 'x', 'version': 3}}])
         self.assertEqual(st['config'], {'style': 'questa', 'sort': 'asc'})   # config null: nothing (as view.js)
-        miss = e.run([{'op': 'set_state', 'state': {'wavefw': 'state', 'groups': [{'name': 'g', 'signals': ['clk', 'gone.a']}], 'hidden': ['gone.b'],
+        miss = e.run([{'op': 'set_state', 'state': {'wavelens': 'state', 'groups': [{'name': 'g', 'signals': ['clk', 'gone.a']}], 'hidden': ['gone.b'],
                                                     'select': 'gone.c', 'config': {'highlight': ['gone.d', 'x*']}}}])[0]
         self.assertEqual(miss['missing'], ['gone.a', 'gone.d', 'gone.b', 'gone.c'])   # in view.js's order
 
@@ -273,7 +273,7 @@ class Twin(unittest.TestCase):
         self.assertEqual({k: e.st['config'][k] for k in ('gaps', 'gapIdle', 'gapSignals')}, {'gaps': False, 'gapIdle': 8, 'gapSignals': None})
 
     def test_gap_defaults_are_the_config_files(self):
-        with open(os.path.join(H.ROOT, 'wavefw', 'wavefw.config.js'), encoding='utf-8') as f:
+        with open(os.path.join(H.ROOT, 'wavelens', 'wavelens.config.js'), encoding='utf-8') as f:
             text = f.read()
         js = lambda k: json.loads(re.search(rf'^ {{2}}{k}: ([^,]+),', text, re.M).group(1).replace("'", '"'))
         self.assertEqual({k: js(k) for k in V.GAP_DEFAULTS}, V.GAP_DEFAULTS)
@@ -358,9 +358,9 @@ class Pages(unittest.TestCase):
         res, key, rev = V.edit_page(self.page, [{'op': 'bookmark', 't': '30ns', 'text': 'a </script> b'}])
         self.assertEqual((res, key, rev[:3]), ([{'op': 'bookmark', 'n': 2}], 'one', 'r1@'))
         t = self.text()
-        self.assertEqual(t.count('<script type="application/json" id="wavefw-edits">'), 2)   # the block, and the comment in wavefw.js
+        self.assertEqual(t.count('<script type="application/json" id="wavelens-edits">'), 2)   # the block, and the comment in wavelens.js
         self.assertIn('a \\u003c/script> b', t)   # no < in the block: </script> and <!--<script> do not end or swallow it
-        self.assertLess(t.index('id="wavefw-edits">{'), t.index('<script>window.WAVEFW_CONFIG'))
+        self.assertLess(t.index('id="wavelens-edits">{'), t.index('<script>window.WAVELENS_CONFIG'))
         _, _, rev2 = V.edit_page(self.page, [{'op': 'marker', 't': 1000}])
         self.assertTrue(rev2.startswith('r2@'))
         _, _, rev3 = V.edit_page(self.page, [{'op': 'paint', 'signals': 'clk', 'color': None}])
@@ -385,14 +385,20 @@ class Pages(unittest.TestCase):
         self.assertRegex(out, r'^one\s+7 signals\s+—\s+edits r1@')
         st = os.path.join(self.d.name, 's.view.json')
         with open(st, 'w', encoding='utf-8') as f:
-            json.dump({'wavefw': 'state', 'version': 2, 'title': 't', 'bookmarks': []}, f)
+            json.dump({'wavelens': 'state', 'version': 2, 'title': 't', 'bookmarks': []}, f)
         rc, out, err = H.run_tool('viewedit', st, '--model', self.page, '--ops', '{"op": "bookmark", "t": 5, "signal": "valid"}')
         self.assertEqual(rc, 0, err)
         with open(st, encoding='utf-8') as f:
-            self.assertEqual(json.load(f), {'wavefw': 'state', 'version': 3, 'title': 't', 'bookmarks': [{'n': 1, 't': 5, 'signal': 'tb.dut.valid'}],
+            self.assertEqual(json.load(f), {'wavelens': 'state', 'version': 3, 'title': 't', 'bookmarks': [{'n': 1, 't': 5, 'signal': 'tb.dut.valid'}],
                                             'arrows': []})
         rc, _, err = H.run_tool('viewedit', os.path.join(H.ROOT, 'docs', 'index.html'), '--get')
         self.assertIn('not a page of mkhtml.py', err)
+        old = os.path.join(self.d.name, 'old.html')   # a page from before the rename: refused, not read with no settings
+        with open(self.page, encoding='utf-8') as f, open(old, 'w', encoding='utf-8') as g:
+            g.write(f.read().replace('window.WAVELENS_CONFIG', 'window.WAVEFW_CONFIG'))
+        rc, _, err = H.run_tool('viewedit', old, '--get')
+        self.assertNotEqual(rc, 0)
+        self.assertIn('before the rename to WaveLens', err)
 
 
 if __name__ == '__main__':

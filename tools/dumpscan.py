@@ -1,5 +1,5 @@
 """dumpscan.py — read a dump as VCD text: a VCD directly, an FST through GTKWave's `fst2vcd -e`, else through the sva
-CLI's `sva vcd` (the same text; both write the FST enum tables as `$attrbegin misc 07 …`). WAVEFW_FST=sva or fst2vcd
+CLI's `sva vcd` (the same text; both write the FST enum tables as `$attrbegin misc 07 …`). WAVELENS_FST=sva or fst2vcd
 picks one. Used by vcd2wavedrom.py (the built-in reader, enum labels) and mkconfig.py
 (signal list, declaration order, change counts, enums).
 
@@ -13,7 +13,7 @@ read(path, body=…, want=…) -> Dump with
   trans  {id code: [(time in dump units, raw value bytes)]} for the id codes in `want` (body='collect')
 scan(path, body=True) -> {path or alias: {'order', 'changes', 'enum', 'width', 'kind'}} (mkconfig.py, enum lookup).
 
-The reference of a $var (parse_ref, the same rule as the page's wavefw/src/vcd.js): an escaped identifier (\\a.b) is a
+The reference of a $var (parse_ref, the same rule as the page's wavelens/src/vcd.js): an escaped identifier (\\a.b) is a
 name as it is, to its end; a range glued to the name (data[7:0]) or given apart (data [7:0]) is the vector's, not a
 child; a 1-bit "err[3]" is a bit of the vector "err"; another "mem[1]" an element of the array "mem" (path "mem.[1]").
 The same path under two id codes with the same range (a simulator declares some nets twice) is one signal whose changes
@@ -53,8 +53,8 @@ class Dump:
 
 def fst_reader():
     """The command that writes an FST as VCD text: [fst2vcd, -e], else [sva, vcd] (the CLI of this repository), or None.
-    WAVEFW_FST=sva / fst2vcd: that one only."""
-    want = os.environ.get('WAVEFW_FST', '')
+    WAVELENS_FST=sva / fst2vcd: that one only."""
+    want = os.environ.get('WAVELENS_FST', '')
     exe = shutil.which('fst2vcd') if want in ('', 'fst2vcd') else None
     if exe:
         return [exe, '-e']
