@@ -323,6 +323,11 @@ def viewer(S, ex, build):
     S.quiet(page)
     S.save('viewer-paint', v, clip=dict(v.bounding_box(), height=720))
     js('(v.unpaint(), 0)')
+    # the Modules panel: Only u_slave and what is under it, the way to it as a header
+    js("(v.modules(true), v.setOnly({modules: ['axi_lite_tb.u_slave']}), v.mods.locate(v.scopeOf('axi_lite_tb.u_slave')), 0)"); shots.settle(page)
+    S.quiet(page)
+    S.save('viewer-modules', v, clip=dict(v.bounding_box(), height=720))
+    js('(v.setOnly(null), v.modules(false), 0)')
     page.close()
 
     # a packed struct as a row of fields

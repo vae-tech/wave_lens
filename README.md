@@ -12,7 +12,7 @@
 
 wavefw draws **[WaveDrom](https://wavedrom.com) JSON** (the timing-diagram format of
 [WaveDrom](https://github.com/wavedrom/wavedrom)) in two ways from one model: as an interactive canvas viewer (zoom,
-cursors, find, bookmarks, bus transactions) and as a static WaveDrom-style SVG for documents. A few Python tools turn a
+cursors, find, a tree of the modules that keeps only the ones you pick, bookmarks, bus transactions) and as a static WaveDrom-style SVG for documents. A few Python tools turn a
 simulator dump (VCD or FST) into one self-contained HTML page that you can mail or archive. One JavaScript file, one
 stylesheet, no build step, no dependencies: the pages open from `file://`. SystemVerilog assertions bound to the waves
 are checked over the dump and drawn next to the signals; an MCP server lets an AI agent ask questions of a dump and
@@ -29,6 +29,10 @@ make examples                   # needs Verilator: APB, AXI-Lite and FSM pages i
 make html WAVES=work/my.vcd     # your dump -> work/my.config.json (every signal, editable) + work/my.html
 make html WAVES=work/my.fst SVA="checks/*.sv" BIND="a_req_ack@tb.dut"   # with assertions, evaluated and drawn
 ```
+
+**In VS Code over Remote-SSH or WSL** (the dumps on a Linux host, VS Code on Windows): `make vsix`, then in a terminal
+of the remote window `code --install-extension out/wavefw-*.vsix`; a `.vcd` / `.fst` → right click → *Open in wavefw*.
+The extension carries the viewer and a static `sva`: nothing else is installed on the host ([USAGE](docs/USAGE.md#in-vs-code-over-remote-ssh-or-wsl)).
 
 Open the `.html` in a browser from 2023 on (Chrome / Edge 111, Firefox 113, Safari 16.2). A VCD can also be opened
 straight in the browser: `wavefw/viewer.html`, then drop the file on it. `make` alone lists the targets; build products
@@ -92,6 +96,7 @@ python3 tools/mkhtml.py --config work/my.config.json --out work/my.html --sva ch
 make wavefw          # wavefw/wavefw.js from wavefw/src/*.js (after editing them)
 make sva-build       # the SVA engine: the native CLI and wavefw/sva.wasm.js
 make dist            # the prebuilt sva CLI: bin/linux-x86_64/sva (committed) and bin/windows-x86_64/sva.exe
+make vsix            # the VS Code extension: out/wavefw-<version>.vsix (no node / npm needed)
 make examples demo   # the example pages and the data of docs/index.html
 make check           # the gate before a commit: the engine's tests, the unit tests, every page, smoke with nothing skipped
 make shots guide-shots   # the pictures of this README (docs/img) and of the guides (docs/guides/img)
@@ -120,7 +125,7 @@ config, `make html WAVES=examples/test_video/test_stream_video.fst`.
 | [`docs/SV_STYLE.md`](docs/SV_STYLE.md) | the SystemVerilog style of the project |
 | [`docs/reviews/`](docs/reviews) | the reviews of the stages with their findings and the commits that closed them |
 | [`prompts/`](prompts/00-roadmap.md) | the roadmap as a series of prompts |
-| [`CHANGELOG.md`](CHANGELOG.md) | every version (0.16 now; two numbers, each a tagged merge into `main`) |
+| [`CHANGELOG.md`](CHANGELOG.md) | every version (0.17 now; two numbers, each a tagged merge into `main`) |
 
 ## License
 

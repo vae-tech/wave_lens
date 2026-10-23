@@ -24,13 +24,14 @@ function cmdTime(v, x, what = 't') {
   if (t == null || !isFinite(t)) fail(`${what}: "${x}" is not a time (a number in ${v.M.timed ? 'ps' : 'cycles'}, or "250ns")`);
   return t;
 }
-// rows by what a person or an agent writes (see above); o.groups: modules and your groups too; o.one: exactly one
+// rows by what a person or an agent writes (see above); o.groups: modules and your groups too; o.scopes: the modules
+// only (not a struct, your groups or a plugin's); o.one: exactly one
 function pickRows(v, spec, o = {}) {
-  const list = prefixes(spec), M = v.M;
-  if (!list.length) fail(`no ${o.groups ? 'signals or modules' : 'signals'} given`);
+  const list = prefixes(spec), M = v.M, what = o.scopes ? 'module' : o.groups ? 'signal or module' : 'signal';
+  if (!list.length) fail(`no ${o.scopes ? 'modules' : o.groups ? 'signals or modules' : 'signals'} given`);
   // your groups as they are now (one made by a command before this one in the same run is there too)
-  const pool = M.rows.filter(r => r.type === 'sig' && r.tr).concat(o.groups ? Object.values(M.groups).filter(g => g.full && !g.user) : [],
-    o.groups ? v.ugRows().filter(r => r.type === 'group') : []);
+  const pool = o.scopes ? v.scopes() : M.rows.filter(r => r.type === 'sig' && r.tr).concat(o.groups ? Object.values(M.groups).filter(g => g.full && !g.user) :
+    [], o.groups ? v.ugRows().filter(r => r.type === 'group') : []);
   const out = [];
   for (const s of list) {
     let hit;
@@ -45,7 +46,7 @@ function pickRows(v, spec, o = {}) {
     }
     if (!hit.length) {
       const low = s.toLowerCase().replace(/\*/g, ''), near = low ? pool.filter(r => r.name.toLowerCase().includes(low)).slice(0, 5).map(r => r.full) : [];
-      fail(`no ${o.groups ? 'signal or module' : 'signal'} "${s}"${near.length ? '; similar: ' + near.join(', ') : ''}`);
+      fail(`no ${what} "${s}"${near.length ? '; similar: ' + near.join(', ') : ''}`);
     }
     let fulls = [...new Set(hit.map(r => r.full))];
     if (!s.includes('*') && fulls.length > 1) {   // one net at several levels: the one nearest the top, when it is one (as wavemcp.py)
@@ -205,9 +206,21 @@ command('paint', 'signals? color? clear?', 'signals (a module: its signals) in a
 });
 command('select', 'signal? signals?', 'the selected signal (edge search, new bookmarks; null: none), or several (the right button and Paint ' +
   'take them all)', (v, a) => {
-  if (a.signals != null) { const rows = pickRows(v, a.signals); v.select(rows[rows.length - 1]); v.selRun = new Set(rows); v.selAnchor = rows[0]; }
+  if (a.signals != null) { const rows = pickRows(v, a.signals).filter(r => v.shown(r) || !(v.onlyOn() || v.hiddenRows.size));   // the ones in the view
+    v.select(rows[rows.length - 1] || null); v.selRun = new Set(rows); v.selAnchor = rows[0] || null; }
   else v.select(a.signal ? pickRows(v, a.signal, { one: true })[0] : null);
   return { select: v.sel ? v.sel.full : null };
+});
+command('only', 'modules? on? clear? open?', 'only these modules on the waves, with their submodules (the way to them as headers; the ' +
+  'Modules panel\'s box): modules replaces the set and turns it on, [] keeps none, and opens the modules named with the ones above them (open ' +
+  'false: the folding as it is); on false pauses it (every module), true resumes it; clear: every module; none given: the set as it is', (v, a) => {
+  if (a.clear) v.setOnly(null);
+  else if (a.modules !== undefined) {
+    if (a.modules == null) fail('modules: a list of modules (clear: every module again)');
+    const ms = Array.isArray(a.modules) && !a.modules.length ? [] : pickRows(v, a.modules, { scopes: true }).map(g => g.path);
+    v.setOnly({ modules: ms, on: a.on == null ? true : !!a.on, open: a.open === false || a.on === false ? null : ms });
+  } else if (a.on != null) { if (!v.only) fail('only: no set to pause or resume (modules: […] first)'); v.setOnly({ on: !!a.on }); }
+  return { only: v.onlyState() };
 });
 command('hide', 'signals', 'signals, modules or your groups out of the view', (v, a) => { v.hide(pickRows(v, a.signals, { groups: true }));
   return { hidden: v.hiddenRows.size }; });
@@ -256,12 +269,13 @@ command('layout', 'scroll? height? tools?', 'where the rows scroll: window (in t
   if (a.tools != null) v.setTools(a.tools === 'fold');
   return { scroll: v.S.maxHeight != null && v.S.maxHeight !== '' ? 'window' : 'page', height: v.S.maxHeight || null, tools: v.S.toolsFolded ? 'fold' : 'open' };
 });
-command('find', 'query case? word? regex? highlight? open?', 'the find field: rows by a fuzzy query ("" ends it); its options as the bar\'s buttons',
+command('find', 'query case? word? regex? highlight? open? mask?', 'the find field: rows by a fuzzy query ("" ends it); its options as the bar\'s ' +
+  'buttons',
   (v, a) => {
     for (const [k, own] of [['case', 'findCase'], ['word', 'findWord'], ['regex', 'findRegex']]) if (a[k] != null) { v[own] = !!a[k];
       v.root.querySelector(`button[data-act=${FIND_OPTS.find(o => o[1] === own)[0]}]`)?.setAttribute('aria-pressed', v[own]); }
-    for (const [k, own, act] of [['highlight', 'findHl', 'fhl'], ['open', 'findOpen', 'fopen']]) if (a[k] != null) { v[own] = !!a[k];
-      v.root.querySelector(`button[data-act=${act}]`)?.setAttribute('aria-pressed', v[own]); }
+    for (const [k, act] of [['highlight', 'fhl'], ['open', 'fopen'], ['mask', 'fmask']]) if (a[k] != null) { const own = FIND_VIEW[act][0];
+      v[own] = !!a[k]; v.root.querySelector(`button[data-act=${act}]`)?.setAttribute('aria-pressed', v[own]); }
     if (v.qEl) v.qEl.value = String(a.query ?? '');
     v.find(String(a.query ?? '')); return { found: [...v.found.keys()].map(r => r.full || r.name).slice(0, 50), count: v.found.size };
   });
@@ -312,7 +326,7 @@ command('picture', 'format? from? to? rows?', 'the waves as a picture: png (base
   if (a.from != null) o.from = cmdTime(v, a.from, 'from');
   if (a.to != null) o.to = cmdTime(v, a.to, 'to');
   if (a.rows != null) o.rows = ['screen', 'all', 'picked'].includes(a.rows) ? (a.rows === 'screen' ? undefined : a.rows) : sigsOf(v, pickRows(v, a.rows,
-    { groups: true })).map(r => v.rowsL.find(x => x === r) || r);
+    { groups: true })).map(r => v.rowsL.find(x => x === r) || r).filter(r => v.shown(r));   // the ones in the view (Hide, Only)
   if (f === 'wavedrom') { const wavedrom = v.toWaveDrom(o.from, o.to, Array.isArray(o.rows) ? o.rows : null);   // cut: the first cycles only
     return v.wdCut ? { wavedrom, cut: { cycles: v.wdCut.cells, to: v.wdCut.to } } : { wavedrom }; }
   if (f === 'svg') return { svg: v.toSVG(o) };
@@ -346,14 +360,16 @@ Object.assign(WaveView.prototype, {
     if (own && !list.every(o => o && READ_CMDS.has(o.op))) this.undoTick();   // a batch that changes something (yours, a script's, an agent's) is one step
     return out;
   },
-  // undo / redo: snapshots of what is edits (KEPT, KEPT_CFG) and the highlight with its colours — not the cursor, the
+  // undo / redo: snapshots of what is edits (UNDO_KEYS, KEPT_CFG) and the highlight with its colours — not the cursor, the
   // window, the selection, the search or the plugins' parts — taken when it changed: after a batch of commands, once the
   // pointer is up (a drag is one step), a key that is not typing, a field changed (a text: when it is left), a load
   undoPart() {
     const groups = this.groupList().map((g, i) => Object.assign(g, { uid: this.ugroups[i].uid || (this.ugroups[i].uid = ++XID) }));   // a group over a rename
     return JSON.stringify({ bookmarks: this.bookmarks(), arrows: this.arrowList(), markers: this.markList(), groups,
       paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs), hidden: [...this.hiddenRows],
-      config: Object.assign({ style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded }, this.gapOpt(), this.cycOpt()),
+      only: this.onlyState(),
+      config: Object.assign({ style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded,
+        toolsHidden: toolNames(this.S.toolsHidden) }, this.gapOpt(), this.cycOpt()),
       hl: [...this.picks].map(([r, i]) => [r.full, i]).sort((a, b) => a[1] - b[1]) });
   },
   undoTick(base = false) {
@@ -381,7 +397,7 @@ Object.assign(WaveView.prototype, {
   // the place in the find's matches kept -> what changed
   async undoApply(A, B) {
     const diff = (a, b) => JSON.stringify(a) !== JSON.stringify(b), st = { wavefw: 'state', version: STATE_VERSION, config: {} };
-    for (const k of KEPT) if (diff(A[k], B[k])) st[k] = A[k];
+    for (const k of UNDO_KEYS) if (diff(A[k], B[k])) st[k] = A[k];
     if ('bookmarks' in st || 'arrows' in st) { st.bookmarks = A.bookmarks; st.arrows = A.arrows; }   // setState takes the two together
     for (const k of Object.keys(A.config)) if (diff(A.config[k], B.config[k])) st.config[k] = A.config[k];
     const hl = diff(A.hl, B.hl), fi = this.fi, fiRow = this.fiRow;
@@ -390,7 +406,7 @@ Object.assign(WaveView.prototype, {
     if (hl) { const at = new Map(A.hl); this.picks = new Map([...this.picks.keys()].map(r => [r, at.get(r.full) ?? this.picks.get(r)]));
       this.renderNames(); this.draw(); }   // the highlight's colours worked out again
     if (fiRow && this.found.has(fiRow)) { this.fi = fi; this.fiRow = fiRow; }
-    return [...new Set([...KEPT.filter(k => k in st), ...Object.keys(st.config).map(k => (GAP_KEYS.includes(k) ? 'gaps' : CYC_KEYS.includes(k) ? 'cycles' :
+    return [...new Set([...UNDO_KEYS.filter(k => k in st), ...Object.keys(st.config).map(k => (GAP_KEYS.includes(k) ? 'gaps' : CYC_KEYS.includes(k) ? 'cycles' :
       k))])];
   },
   undoShow() { for (const [act, s] of [['undo', this.undoS], ['redo', this.redoS]]) { const b = this.root.querySelector(`button[data-act=${act}]`);
@@ -521,7 +537,9 @@ Object.assign(WaveView.prototype, {
 // rest (cursor, window, highlight, selection, folding, order, search), which a page opened again starts from anyway,
 // is applied every time, as the page's own settings are.
 const KEPT = ['bookmarks', 'arrows', 'markers', 'groups', 'paint', 'radix', 'analog', 'hidden'];
-const KEPT_CFG = ['style', 'maxHeight', 'toolsFolded', ...GAP_KEYS, ...CYC_KEYS];
+const KEPT_CFG = ['style', 'maxHeight', 'toolsFolded', 'toolsHidden', ...GAP_KEYS, ...CYC_KEYS];
+// what undo takes back: the above and Only (not kept in this browser: a page opened again applies a revision's Only anew)
+const UNDO_KEYS = [...KEPT, 'only'];
 const UNDO_N = 100;   // the steps undo keeps
 // a click, a key or a field changed anywhere: the viewers' edits looked at once it is done (one look per burst of events);
 // not while a button is down (a drag ends as one step) or a key types in a text field (it ends when the field is left).
@@ -627,7 +645,8 @@ Object.assign(WaveView.prototype, {
 // connects by itself. The page says which viewers it has (POST /hello), takes commands as server-sent events (GET
 // /events: {rid, view, ops}) and answers each with the results of view.run (POST /reply). Plain-text bodies (no CORS
 // preflight), the token in every request; the server listens on 127.0.0.1 only. No agent there: five tries, then the
-// button in the bar (○ live) tries again. WaveFW.live(null): off.
+// button in the bar (○ live) tries again. WaveFW.live(null): off. The page's path is its file's, or WAVEFW_PATH (the VS Code
+// extension's tab: the dump's path on the host).
 const LIVE = { es: null, base: '', q: '', on: false, url: null, fails: 0 };
 function liveUrl(s) {
   const m = /^(\d+):(.+)$/.exec(String(s).trim());
@@ -645,8 +664,8 @@ function liveViews() {
 let liveT = 0;
 function liveHello() {   // the viewers again (a lazy one built, a dump opened): once per frame
   if (!LIVE.es || liveT) return;
-  liveT = setTimeout(() => { liveT = 0; if (LIVE.es) livePost('hello', { path: decodeURIComponent(location.pathname), url: location.href.split('#')[0],
-    title: document.title, views: liveViews() }); }, 0);
+  liveT = setTimeout(() => { liveT = 0; if (LIVE.es) livePost('hello', { path: G.WAVEFW_PATH || decodeURIComponent(location.pathname),
+    url: location.href.split('#')[0], title: document.title, views: liveViews() }); }, 0);
 }
 function liveShow() {
   for (const v of VIEWS) {

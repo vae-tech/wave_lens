@@ -16,7 +16,7 @@
   /* highlight colours, one per highlighted instance (cycled) */
   --wave-hl1: #1c7ed6; --wave-hl2: #ae3ec9; --wave-hl3: #0c8599; --wave-hl4: #d6336c; --wave-hl5: #5c940d; --wave-hl6: #e8590c;
   --wave-hl8: #7048e8;    /* highlight of plugins (the rows of a selected assertion attempt) */
-  --wave-band: #d2dde9;   /* the second background of neighbouring instances (moduleShading): a pale blue */
+  --wave-band: #d8dfe8;   /* the second background of neighbouring instances (moduleShading): a pale blue (60% of #d2dde9 over the panel) */
   --bus-write: #1c7ed6; --bus-read: #2b8a3e; --bus-error: #c92a2a; --bus-channel: #868e96;   /* bus transactions (bus.js) */
   --wave-paint: #d6336c;  /* the find group's Paint colour (its first value) */
   --wave-cursor2: #1864ab;   /* the second cursor (shift+click) */
@@ -35,7 +35,7 @@
   --wave-c7: #20391f; --wave-c8: #33264a; --wave-c9: #452423; color-scheme: dark;
   --wave-hl1: #4dabf7; --wave-hl2: #da77f2; --wave-hl3: #3bc9db; --wave-hl4: #f783ac; --wave-hl5: #a9e34b; --wave-hl6: #ff922b;
   --wave-hl8: #9775fa; --wave-paint: #f06595; --sva-pass: #51cf66; --sva-fail: #ff6b6b; --sva-disabled: #868e96; --sva-active: #4dabf7; --sva-capped: #adb5bd; --sva-ok: #69db7c;
-  --wave-band: #1f2d39; --wave-cursor2: #74c0fc; --bus-write: #4dabf7; --bus-read: #69db7c; --bus-error: #ff6b6b; --bus-channel: #adb5bd; } }
+  --wave-band: #1f2933; --wave-cursor2: #74c0fc; --bus-write: #4dabf7; --bus-read: #69db7c; --bus-error: #ff6b6b; --bus-channel: #adb5bd; } }
 [data-theme="dark"] {
   --bg: #16181d; --panel: #1f2229; --panel-2: #272b33; --fg: #e8e6df; --muted: #9aa0ab; --line: #363b45;
   --accent: #e4834a; --accent-soft: #3a2a1f; --wave-1: #e8e6df; --wave-bus: #7fb0dd; --wave-x: #e0665a;
@@ -44,7 +44,7 @@
   --wave-c7: #20391f; --wave-c8: #33264a; --wave-c9: #452423; color-scheme: dark;
   --wave-hl1: #4dabf7; --wave-hl2: #da77f2; --wave-hl3: #3bc9db; --wave-hl4: #f783ac; --wave-hl5: #a9e34b; --wave-hl6: #ff922b;
   --wave-hl8: #9775fa; --wave-paint: #f06595; --sva-pass: #51cf66; --sva-fail: #ff6b6b; --sva-disabled: #868e96; --sva-active: #4dabf7; --sva-capped: #adb5bd; --sva-ok: #69db7c;
-  --wave-band: #1f2d39; --wave-cursor2: #74c0fc; --bus-write: #4dabf7; --bus-read: #69db7c; --bus-error: #ff6b6b; --bus-channel: #adb5bd; }
+  --wave-band: #1f2933; --wave-cursor2: #74c0fc; --bus-write: #4dabf7; --bus-read: #69db7c; --bus-error: #ff6b6b; --bus-channel: #adb5bd; }
 /* white: pure white paper, black traces and stock-WaveDrom bus colours (good for print and slides) */
 [data-theme="white"] {
   --bg: #ffffff; --panel: #ffffff; --panel-2: #f3f4f6; --fg: #000000; --muted: #4b5563; --line: #d1d5db;
@@ -53,10 +53,11 @@
   --wave-c3: #ffffb4; --wave-c4: #ffe0b9; --wave-c5: #b9e0ff; --wave-c6: #ccfdfe;
   --wave-c7: #cdfdc5; --wave-c8: #f0c1fb; --wave-c9: #f5c2c0; color-scheme: light;
   --sva-pass: #2b7a3b; --sva-fail: #e03131; --sva-active: #1971c2;
-  --wave-band: #e6f2fd; --wave-cursor2: #1971c2; }
+  --wave-band: #f0f7fe; --wave-cursor2: #1971c2; }
 
 /* ---------------- interactive viewer (WaveView) ---------------- */
 .wv, .wv *, .wv *::before, .wv *::after { box-sizing: border-box; }   /* the rows' heights include their borders, whatever the page sets */
+.wv kbd, .wv code { color: inherit; background: none; border: 0; border-radius: 0; padding: 0; box-shadow: none; vertical-align: baseline; font-family: var(--font-mono); }   /* not the page's (VS Code's webview colours them by its theme) */
 .wv { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); overflow: clip;   /* clip, not hidden: hidden would stop the sticky canvas */ color: var(--fg); font-family: var(--font-body); }
 /* bar: title line (title, messages, cursor), then the tools in labelled groups; buttons of one control are joined */
 .wv .bar { border-bottom: 1px solid var(--line); background: var(--panel-2); font-size: 12.5px; }
@@ -66,7 +67,9 @@
 .wv .bar .tln:empty { display: none; }
 .wv .bar .tln > .tg:first-child > .tl { min-width: 6.6em; }   /* the lines start in one column */
 .wv .bar .tg { display: inline-flex; align-items: center; gap: 6px; padding-right: 12px; margin-right: 12px; border-right: 1px solid var(--line); }
-.wv .bar .tg:last-child { border-right: 0; margin-right: 0; padding-right: 0; }
+.wv .bar .tg:last-child, .wv .bar .tg.end { border-right: 0; margin-right: 0; padding-right: 0; }
+.wv .bar .tg.off:not(.float) { display: none; }   /* left out (toolsHidden; the right button on the bar) */
+.wv .wv-menu .ck { display: inline-block; width: 1.2em; }   /* a tick of the bar's tools menu */
 .wv .bar .tl { font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 .wv .bar .seg { display: inline-flex; align-items: stretch; }
 .wv .bar .seg > * { border-radius: 0 !important; margin: 0 0 0 -1px !important; }
@@ -396,3 +399,41 @@
 @media print { .wv > .bar { position: static !important; } }
 .wv .wv-menu.wv-groups { min-width: 220px; }   /* ctrl+G: your groups */
 .wv .wv-menu .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 7px; vertical-align: 0; }
+/* the Modules panel (t, modules.js): the tree of the modules over the viewer, its header moves it, its corner sizes it; a
+   drawer at the side on a narrow screen; not printed. A module Only keeps: .on (picked), .inc (under a picked one) */
+.wv .wv-mods { position: fixed; z-index: 48; width: 320px; height: min(62vh, 540px); min-width: 220px; min-height: 160px; max-width: 96vw; max-height: 92vh;
+  display: flex; flex-direction: column; resize: both; overflow: hidden; background: var(--panel); color: var(--fg); border: 1px solid var(--line);
+  border-radius: 6px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2); font: 12.5px var(--font-body); }
+.wv .wv-mods .mh { display: flex; align-items: center; gap: 8px; padding: 5px 6px 5px 10px; border-bottom: 1px solid var(--line); cursor: move; user-select: none; }
+.wv .wv-mods .mh .mt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11.5px; }
+.wv .wv-mods button { font: inherit; font-size: 11.5px; padding: 1px 7px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); border-radius: 4px;
+  cursor: pointer; }
+.wv .wv-mods button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.wv .wv-mods button:disabled { opacity: 0.5; cursor: default; }
+.wv .wv-mods .mf { display: flex; gap: 6px; padding: 6px; }
+.wv .wv-mods .mq { flex: 1; min-width: 0; font: inherit; padding: 2px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); color: var(--fg); }
+.wv .wv-mods .ms { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 0 8px 5px; color: var(--muted); font-size: 11.5px; }
+.wv .wv-mods .ms span { flex: 1 1 auto; }
+.wv .wv-mods .mtr { position: relative; flex: 1; overflow: auto; border-top: 1px solid var(--line); outline: none; user-select: none; touch-action: none; }
+.wv .wv-mods .mrows { position: relative; min-width: 100%; }
+.wv .wv-mods .mn { position: absolute; left: 0; right: 0; height: 22px; display: flex; align-items: center; gap: 4px; padding-right: 8px; white-space: nowrap;
+  cursor: pointer; font-family: var(--font-mono); font-size: 12px; box-sizing: border-box; }
+.wv .wv-mods .mn:hover { background: var(--panel-2); }
+.wv .wv-mods .mn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.wv .wv-mods .mn .tw { width: 12px; flex: none; text-align: center; color: var(--muted); }
+.wv .wv-mods .mn .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.wv .wv-mods .mn .ct { color: var(--muted); font-size: 11px; }
+.wv .wv-mods .mn .kd { color: var(--muted); font-size: 11px; }
+.wv .wv-mods .mn.on { background: var(--accent-soft); font-weight: 600; }
+.wv .wv-mods .mn.inc { background: color-mix(in srgb, var(--accent-soft) 45%, transparent); }
+.wv .wv-mods.paused .mn.on, .wv .wv-mods.paused .mn.inc { background: none; outline: 1px dashed var(--accent); outline-offset: -2px; }
+.wv .wv-mods .mn.pv { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.wv .wv-mods .mn.cur .nm::after { content: " ●"; color: var(--accent); }
+.wv .wv-mods .mn.hid .nm { opacity: 0.5; text-decoration: line-through; }
+.wv .wv-mods .mn.hit .nm { color: var(--accent); }
+.wv .wv-mods .mbox { position: absolute; left: 2px; right: 2px; z-index: 1; border: 1px dashed var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent);
+  pointer-events: none; }
+@media (max-width: 600px) { .wv .wv-mods { left: 0 !important; top: 0 !important; bottom: 0; width: min(88vw, 340px); height: auto; max-height: none;
+  border-radius: 0 6px 6px 0; resize: none; } .wv .wv-mods .mh { cursor: default; } }
+@media print { .wv .wv-mods { display: none; } }
+.wv .wv-mods .mn.way .nm { font-style: italic; }   /* on the way to a module Only keeps: its header only */

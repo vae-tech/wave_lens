@@ -8,6 +8,16 @@ import svabuild
 import viewedit as E
 import wavemcp as W
 
+CACHE = H.tmp()   # the bridges of these tests announce themselves here, not in ~/.cache/wavefw/live (a VS Code there would connect)
+
+
+def setUpModule():
+    os.environ['XDG_CACHE_HOME'] = CACHE.name
+
+
+def tearDownModule():
+    CACHE.cleanup()
+
 
 class Dump(unittest.TestCase):
     @classmethod
@@ -291,6 +301,37 @@ class Views(unittest.TestCase):
         self.assertTrue(W.same_file('/mnt/c/Users/x/p.html', 'C:\\Users\\x\\p.html'))
         self.assertTrue(W.same_file('/tmp/a b.html', '/tmp/a%20b.html'))
         self.assertFalse(W.same_file('/tmp/a.html', '/tmp/b.html'))
+        self.assertFalse(W.same_file('/home/x/A.vcd', '/home/x/a.vcd'))   # Linux tells the case apart, a Windows drive does not
+        self.assertTrue(W.same_file('/mnt/c/Users/X/a.vcd', '/mnt/c/users/x/A.vcd'))
+
+    def test_dump_in_vscode(self):
+        """A dump's tab in VS Code (vscode/): the bridge's note for the extension, view_live with open asks it to open
+        the dump, view_edit works on the tab live and never on the dump's file."""
+        dump = H.fixture('enum')
+        b = W.Bridge(port=0, token='t' * 20)
+        W.BRIDGE.append(b)
+        live = os.path.join(CACHE.name, 'wavefw', 'live')
+        with open(os.path.join(live, f'{b.port}.json'), encoding='utf-8') as f:
+            self.assertEqual(json.load(f)['pid'], os.getpid())
+        r = self.call('view_live', page=dump, open=True, wait=0)
+        self.assertTrue(r['opened'])
+        self.assertIn('not connected', r['note'])
+        asks = [x for x in os.listdir(live) if x.startswith('open-')]
+        with open(os.path.join(live, asks[0]), encoding='utf-8') as f:
+            ask = json.load(f)
+        self.assertEqual((ask['path'], ask['port']), (dump, b.port))
+        post = self.fake_page(b, dump)
+        r = self.call('view_edit', page=dump, ops=[{'op': 'marker', 't': 5}])
+        self.assertEqual((r['live'], r['results']), (dump, [{'op': 'marker', 't': '5ns', 'seen': True}]))
+        text, err = W.call('view_edit', {'page': dump, 'save': True, 'ops': [{'op': 'marker', 't': 6}]})
+        self.assertTrue(err)
+        self.assertIn('no page file', text)   # refused before the edit is done
+        post('bye', {})
+        text, err = W.call('view_edit', {'page': dump, 'ops': [{'op': 'marker', 't': 5}]})
+        self.assertTrue(err)
+        self.assertIn('not open in VS Code', text)
+        b.close()
+        self.assertFalse(os.path.exists(os.path.join(live, f'{b.port}.json')))
 
 
 class Review(unittest.TestCase):

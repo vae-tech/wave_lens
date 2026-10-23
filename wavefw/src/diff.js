@@ -145,9 +145,13 @@ Object.assign(WaveView.prototype, {
     }
   },
   // ]d [d: the cursor to the next / previous start of a difference: of the selected signal when it has some, else of all
+  // the signals in the view (hidden ones and the ones Only leaves out: not stepped to)
   diffStep(dir) {
     if (!this.cmp) { this.toast(']d [d: compare with a second dump first (Compare… in the bar)'); return this; }
-    const s = this.sel && this.cmpOf(this.sel), ts = s && s.spans.length ? s.spans.map(([a]) => a) : this.cmp.starts;
+    const s = this.sel && this.cmpOf(this.sel), some = this.onlyOn() || this.hiddenRows.size;
+    const ts = s && s.spans.length ? s.spans.map(([a]) => a) : !some ? this.cmp.starts :
+      (bySig => [...new Set([...this.cmp.rows].filter(([r]) => this.shown(r) || this.shown(bySig.get(r))).flatMap(([, c]) => c.spans.map(([a]) => a)))]
+        .sort((x, y) => x - y))(new Map(Object.values(this.M.groups).filter(g => g.sig).map(g => [g.sig, g])));   // a struct's value: by its row
     if (!ts.length) { this.toast(`no difference from ${this.cmp.name}`); return this; }
     const t = ts[stepTo(ts, this.cursor, dir)];
     this.cursor = t; if (t < this.t0 || t > this.t0 + this.span) this.t0 = this.clamp(t - this.span / 2);

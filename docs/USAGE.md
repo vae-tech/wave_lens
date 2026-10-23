@@ -21,6 +21,40 @@ after a new simulation and keeps the view (window, cursor, folding, highlight, b
 picked through the File System Access API, so ⟳ reads what is on the disk now. An FST is binary: `sva vcd x.fst --out
 x.vcd` (or GTKWave's `fst2vcd x.fst > x.vcd`), or a page with `make html WAVES=x.fst`. A saved state (`.view.json`) dropped on a viewer is loaded.
 
+### In VS Code over Remote-SSH or WSL
+
+The VS Code extension (`vscode/`) opens a dump in a tab with this viewer. It is a *workspace* extension: with Remote-SSH
+or WSL it runs on the Linux host, where the dumps, the simulator and the agents are; the tab is drawn on your machine.
+Nothing is installed on the host: the package carries the viewer's files and the static `sva` (an FST is turned into
+VCD text with it, kept in the extension's storage, 16 at most), and the extension runs in VS Code's own node.
+
+```sh
+make vsix                                         # out/wavefw-<version>.vsix (tools/mkvsix.py: no node, no npm)
+code --install-extension out/wavefw-0.17.0.vsix   # in a terminal of the remote window: installed on the host
+```
+
+(or Extensions → … → *Install from VSIX…* while connected). A `.vcd` / `.fst` in the Explorer → right click → *Open in
+wavefw*, or *Open With… → wavefw* (where you can make it the default for these files; it is an option, another viewer
+may be the default). What the tab does differently from a page in a browser:
+
+- **A new simulation.** The tab says when the dump changed on the disk (its size and time still for a second: polled,
+  so an NFS home of the host works too); ⟳ in the bar, or *wavefw: Read the dump again* (the editor's title), reads it
+  with the view kept. `wavefw.autoReload`: at once.
+- **Files are on the host.** Save state, PNG / SVG / WaveDrom and the assertions' report ask where to save on the host;
+  Load…, the `.sv` files and Compare pick there (an FST to compare is converted too); Open… a dump opens a tab of its
+  own. Bookmarks, groups, colours, radix, hidden rows and the assertion bindings are kept per dump in the workspace
+  (they survive closing the tab and VS Code). The clipboard is yours (VS Code's).
+- **Theme and keys.** VS Code's light / dark theme; the viewer's keys (`?`) work in the tab and do not reach VS Code
+  (ctrl+G is the group list, not Go to Line); the others (ctrl+P, F1, ctrl+tab …) are VS Code's.
+- **An agent** on the host (`tools/wavemcp.py`, below): when it starts its live link, every open tab connects (**●
+  live**); `view_live` with `page` a `.vcd` / `.fst` and `open: true` opens it in the VS Code window that has the file
+  in its folders, and `view_edit` / `view_get` with that `page` work on its tab (the tab only: a dump has no file to
+  write the edits into). `wavefw.live: false`: tabs do not connect. The extension relays the link (the tab cannot
+  reach the host's 127.0.0.1); nothing is forwarded.
+
+Settings: `wavefw.autoReload`, `wavefw.live`, `wavefw.sva` (another sva program). The output channel *wavefw* logs
+what went wrong. The cut of a big dump (`dumpBudget`) applies; the whole VCD text crosses to your machine once per read.
+
 ### WaveDrom JSON in your own page
 
 ```html
@@ -160,11 +194,12 @@ add theirs (`WaveFW.registerDefaults`).
 | `moduleShading` | true | neighbouring instances alternate between two backgrounds, the panel and a pale blue (`band` in `colors`); module rows bold |
 | `maxHeight` | none | e.g. `"80vh"`: the rows scroll inside the viewer (any number of rows); none: with the page, the bar sticking to the top (generated configs: `"80vh"`; the bar's **Scroll** button switches) |
 | `toolsFolded` | false | the bar's tools folded to its title line (**▴** / **▾ tools** in the bar) |
+| `toolsHidden` | `[]` | the bar's tool groups left out by their labels (`["style", "dump"]`; the right button on the bar) |
 | `savePage` | true | the bar's **Save page**: this page as a `.view.html` with your view in it (§ Save and Load); false hides it and keeps no copy of the page's text |
 | `cycles`, `cycleClock`, `cycleZero` | false, null, null | the clock cycles in a band under the time axis (§ Clock cycles): on, the clock counted (null: the `*clk*` found), the time of cycle 0 (`"50ns"` or ps; null: the first rising edge) |
 | `groupColors` | none | one colour per group: `{"aw": "#339af0", "tb.dut.u_rx": "#37b24d"}` (names, paths, `*` patterns) |
 | `highlight`, `dim` | none, 0.3 | instances in front at start (paths, names, `*` patterns) and the opacity of the rest |
-| `findHighlight`, `findOpen` | true, true | starting state of the find options |
+| `findHighlight`, `findOpen`, `findMask` | true, true, false | starting state of the find options **Highlight**, **Open**, **Mask** |
 | `findCase`, `findWord`, `findRegex` | false | starting state of **Aa** (match case), **Full** (whole name; `a.b`: the end of the full path), **.\*** (a regular expression) |
 | `arrowLabels`, `laneHeight` | `lane`, 16 | arrow labels in a lane of their own between the signals, or `overlay` |
 | `svaSignals`, `svaShow` | `view`, all | assertion groups: repeat the bound signals under the steps (`view`: in viewers, `true`: also in static SVGs, `false`); which assertions are drawn (labels, `*` patterns) |
@@ -362,7 +397,10 @@ ctrl+C and ctrl+F. Hover any button, field or list for what it does and its keys
 above them; or with the **page**, the browser's scroll bar — the bar then sticks to the top of the window while its rows
 go by, the time axis and the names' header right under it, and leaves with the viewer's end. **▴** folds the tools to
 the title line (title, cursor, the buttons), **▾ tools** opens them again; `/` and ctrl+F open them for the find
-field. Navigation follows Questa's wave window, the lists and the text vim: a sequence (`gg`, `zM`, `yy`,
+field. The right button on the bar lists its tool groups (cursor, view, edges, go to, find, expression, list, style,
+state, dump, assertions, a plugin's) with a tick each: a click leaves one out or brings it back (the menu stays open),
+**Show all** / **Hide all** do all of them; a line left without a group goes (kept in this browser, the `toolsHidden`
+setting is the start; a find left out still floats over the waves on `/`). Navigation follows Questa's wave window, the lists and the text vim: a sequence (`gg`, `zM`, `yy`,
 `]f` …) is two keys within a second.
 
 | Key | Action | Key | Action |
@@ -381,6 +419,7 @@ field. Navigation follows Questa's wave window, the lists and the text vim: a se
 | `m` | bookmark at the cursor | `]m [m` | the next / previous bookmark |
 | shift+click the waves | a second cursor (dashed, on an edge): Δ to the cursor in time, its frequency (`Δ 40 ns / 25 MHz`) and in cycles of the clock (the cycles band's when it is on, else the selected signal's, else the nearest `*clk*`) on the axis and in the readout; `x` swaps the two; Esc clears it | `1` … `9` | go to that bookmark (each bookmark's line shows its Δ from the cursor) |
 | `zM` / `zR` | fold / open every module | `zc` / `zo` / `za` | fold / open / toggle the module of the selected signal |
+| `t` | the Modules panel: the modules as a tree (§ below); again: the selected signal's module in it | **Only: N ✕** in the bar | ‖ pauses Only (every module), ▶ resumes it, ✕ clears it |
 | `yy`, ctrl+C | copy the selected signal (or the highlighted ones); while searching ctrl+C ends the search | `s` | sort off → A→Z → Z→A |
 | ○ or ctrl+click a name | highlight the signal or instance; ctrl+shift+click: every row from the last one to it | Esc | reset: no search, highlight or selection |
 | shift+click a name | select every signal from the last one clicked to it (selected, nothing dimmed; the tint inside bus values too) | alt+drag | a box: its time the range, the signals it touches selected, then the menu |
@@ -393,6 +432,33 @@ it, **Expand** / **Collapse** open or fold all. Hover a name for its full path. 
 own colour (here `u_master`, `u_slave`, `u_regfile`; the clocks keep the green of a `*clk` rule).
 
 ![The generated AXI-Lite page: u_master folded, u_slave and u_regfile open, one colour per module](img/hierarchy.png)
+
+**The Modules panel and Only.** `t` (or **Modules** in the bar, **Modules…** in the right button's menu) opens the
+page's modules as a tree over the viewer, without their signals: per module the signals of its own and with its
+submodules (`12 / 2060`; a packed struct is one), ● at the module of the selected signal; a filter on top (fuzzy, as
+the find). The tree folds on its own (▸ ▾, ← →); its header moves the panel, its corner sizes it (a narrow screen: a
+drawer at the side; not printed). Two ways to use it:
+
+- **A click on a name goes there**: the module and the ones above it are opened in the names column (shown again when
+  hidden), its first signal — its own, else of a submodule — selected in the middle of the waves. Enter does the same,
+  the filter's Enter goes to the first match.
+- **A box drawn over names keeps Only those modules** on the waves: their signals and their submodules', the modules on
+  the way to them as headers (their own signals go, the hierarchy stays as it is built), every other module gone; the
+  tree still has them all. The modules the box names — the nested ones too, though the set keeps the outermost — open in
+  the names column with the ones above them; the ones under them stay folded as they were (with the find's **Open** on,
+  Open goes off, so the next search does not fold them again). Pause, resume and ✕ fold or open nothing. **ctrl+click** (Space) puts one module in or takes it out, **shift+click** (shift+↑ ↓) keeps
+  a run, **Only matches** (shift+Enter in the filter) every module the filter finds; the right button on a name: **Go
+  to waves**, **Only this subtree**, **Also include this subtree**, **Remove this subtree from Only**, **Expand /
+  Collapse subtree**, **Copy scope path**. A module picked is marked in the tree, the ones under it lighter, the ones on
+  the way in italics. **Only: N modules ‖** in the bar pauses it (every module again, the set kept: **▶** resumes it),
+  **✕** clears it. A click on a module Only leaves out pauses it and goes there.
+
+Only is a layer of its own: Hide stays as it is under it; a highlight of a row it takes away comes back with it; the
+selection it takes away goes. The find counts the matches it leaves out (**no match · 8 outside Only**); the picture,
+WaveDrom, Paint, `]d [d` and the assertions' steps take only what is in the view (a clock left out still gives
+WaveDrom its cells). It is in the saved state (`"only": {"modules": [...], "on": true}`), Save page and undo, and not
+kept in this browser: a page opened again starts with every module. The command [`only`](#commands-and-edits) does the
+same from a script or an agent.
 
 **Highlight.** The ○ mark in front of a name (or ctrl+click) puts that signal or whole instance in front (the mark
 filled, the background as it was); the rest is dimmed but stays visible. Several instances at once; **Highlight: N ✕** or Esc clears it.
@@ -409,7 +475,10 @@ the dump's leaf and the full path (`tx_.*\.valid`); a bad one says so in the cou
 (`"show": false` in the config, or past the `dumpBudget` of a VCD opened in the page) is not lost silently: the count says
 **no match · 1 not in the page**, and its tooltip names them and how to bring them in. Matched
 letters are underlined; Enter, ‹ › or `n N` step through the matches, each scrolled to the middle of the waves. **Highlight** dims the rest, **Open** folds every
-module without a match, **Paint** colours the found signals and the highlighted ones (ctrl+click or the mark; a highlighted module: its signals; neither: the selected signal; kept in the browser), **Copy** copies their paths.
+module without a match, **Mask** leaves only the found rows on the waves with the modules on the way to them (a found
+module with what is in it; the search still runs over every row, and ending it brings them all back), **Select** selects
+the found signals as shift+click does (ctrl+click: adds them to the selection), so the right button on one of them takes
+them all (**New group of the N**, colour, radix, hide, the picture …), **Paint** colours the found signals and the highlighted ones (ctrl+click or the mark; a highlighted module: its signals; neither: the selected signal; kept in the browser), **Copy** copies their paths.
 
 ![Fuzzy find "awvd" with Highlight and Open](img/find.png)
 
@@ -447,11 +516,11 @@ state, as the bookmarks are; [commands](#commands-and-edits) make them too.
 
 **Save and Load.** **Save** downloads what you did in the viewer as `<title>.view.json`: the time window and the
 cursor, the order and its prefixes, the folded modules, the highlight, the paint, the selected signal, the search, the
-bookmarks and arrows, your markers and groups, the assertions (the files loaded or edited in the page, with their text,
+bookmarks and arrows, your markers and groups, Only (the modules kept), the assertions (the files loaded or edited in the page, with their text,
 and the bindings) and the ƒ rows. **Load…** reads it back into a viewer — after a reload, in another browser, or on other waves (what they lack is
 left out and counted in the bar). A state says what is not there too (`"cursor2": null`, `"range": null`, the edge kind
 `"edge": {"kind": "any", "value": ""}`): loaded, it clears them; a key it leaves out keeps the viewer's. Its `"config"`
-(`sort`, `sortIgnore`, `fold`, `highlight`, `findHighlight`, `findOpen`, `findCase`, `findWord`, `findRegex`) pastes into a
+(`sort`, `sortIgnore`, `fold`, `highlight`, `findHighlight`, `findOpen`, `findMask`, `findCase`, `findWord`, `findRegex`) pastes into a
 config file as it is; times are model units (ps).
 **Save page** downloads the page itself as `<page>.view.html` with your view in it: every viewer's state goes into the
 page's edits (the block `tools/viewedit.py` writes, a new revision), so whoever opens that one file — another browser,
@@ -526,7 +595,8 @@ time is never cut out (settings `gaps`, `gapIdle`, `gapKeep`, `gapSignals`, `gap
 paint taken off), **Radix** (a bus of the dump:
 auto, hex, dec, signed, bin, oct, ascii, float, fixed q / sq with its fraction bits), **Analog** (the bus as a step plot
 three rows high between its smallest and largest value, in its radix: signed, float, fixed; **As a bus** back), **Highlight**, **Hide**, **Fold its module**, **Bookmark here**,
-**Second cursor here** (and **Clear the second cursor** when there is one), **Copy the path** (on a module: fold / open, highlight, hide it all); **Fold / Open every module** and **Show the hidden**. On a
+**Second cursor here** (and **Clear the second cursor** when there is one), **Copy the path** (on a module: fold / open, highlight, hide it all); **Fold / Open every module** and **Show the hidden**;
+**Modules…**, **Locate module in tree** (the row's module in the panel), **Pause / Resume Only** and **Clear Only**. On a
 highlighted row (ctrl+click, ctrl+shift+click) the colour, the radix and Hide go to every highlighted row, on a row of
 a selected run (shift+click a name, or **alt+drag** a box over time and rows) to every selected one; the picture and
 WaveDrom then take the selected run (else the highlighted rows, else the screen's). Hidden
@@ -633,6 +703,7 @@ await v.run([
 | `paint` | `signals? color? clear?` | a colour (trace, outline, name) for signals; `color: null` their own again |
 | `select` | `signal? signals?` | the selected signal (edges, new bookmarks), or several |
 | `hide`, `show` | `signals` / `signals?` | rows out of the view and back (none given: every one) |
+| `only` | `modules? on? clear? open?` | only these modules on the waves, with their submodules (the way to them as headers; the Modules panel's box): `modules` replaces the set and turns it on (`[]`: none kept) and opens the modules named with the ones above them (`open: false`: the folding as it is), `on: false` pauses it, `true` resumes it, `clear` every module again; a name of a signal or a struct is an error; answers the set (`{modules, on}`, `null`: none) |
 | `fold`, `unfold` | `groups? all?` | modules and your groups folded or opened |
 | `radix`, `analog` | `signals radix` / `signals rows` | the radix of buses (`null`: the page's), a bus as a step plot |
 | `cursor`, `cursor2`, `view`, `fit`, `range` | `t` / `t` / `from? to? at? span?` / — / `from? to? signal?` | the cursors, the window, the measured range (cut to the waves; one wholly outside them is an error) |
@@ -701,7 +772,7 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
 | `wave_page` | a viewer page (`out` `.html`) or WaveJSON (`.json`) of signals over a window, assertions bound, to show a person |
 | `view_edit` | marks up a page for a person with the [commands](#commands-and-edits) (`ops`): bookmarks with a text, arrows, markers, groups, highlight, colours, hidden and folded rows, radix, cursor, window — live in their browser when the page is connected, else into the page's file (they see it when they open or reload it); `save`: a live page's state into its file too |
 | `view_get` | what a page shows: bookmarks, arrows, markers, groups, highlight, colours, hidden, cursor and window (live: with what the person changed); `rows`: its signals; `picture`: a PNG of the screen (live) |
-| `view_live` | connects a page to this server: the link is written into it, the person opens or reloads it (`open`: in their browser); `off`: disconnects; without a page: the pages connected |
+| `view_live` | connects a page to this server: the link is written into it, the person opens or reloads it (`open`: in their browser); `off`: disconnects; `page` a `.vcd` / `.fst`: its tab in VS Code (the extension connects by itself; `open`: VS Code opens it); without a page: the pages connected |
 
 The conventions are in the server's `instructions`: times are ns (a number) or a text with a unit, read as the viewer
 reads them (`"2.5us"`, `"100NS"`, `"1E2"`: 100 ns, `"0.1µs"`; a time that is not finite is an error); a
@@ -767,6 +838,7 @@ All tools are `python3 -I tools/<tool>.py --help`; the Makefile calls them for y
 | `embed.py` | WaveJSON → `data.js` for `file://` pages, or into an HTML placeholder | `--var NAME key=file.json`, `--html --placeholder` |
 | `dumpscan.py`, `wavejson.py` | the built-in dump reader (VCD text, FST via `fst2vcd -e` or `sva vcd`; `WAVEFW_FST=sva` / `fst2vcd` picks one) and the readable JSON writer | modules |
 | `wavemcp.py` | the tools as an MCP server for an AI agent (stdio), or one tool from the shell ([§ AI agents](#ai-agents-mcp)) | `--list`, `--call TOOL JSON` |
+| `mkvsix.py` | the VS Code extension as one `.vsix` ([§ In VS Code](#in-vs-code-over-remote-ssh-or-wsl)) | `--out`, `--sva`, `--target` |
 | `viewedit.py` | the viewer's [commands](#commands-and-edits) on a page's edits or a saved state (`.view.json`) | `PAGE --ops JSON\|@file`, `--view`, `--get`, `--views`, `--model`, `--commands` |
 | `svaverify.py` | the examples' checkers in Verilator `--assert` against `sva eval` (`make sva-verify`) | `--build`, `--only`, `--keep`, `--sva-bin` |
 | `sva` (the engine's CLI, Rust: `make sva-build`, or `bin/linux-x86_64/sva`) | `sva parse` an assertion file, `sva eval` assertions over a dump, `sva report` results, `sva --waves DUMP --info` a dump's scopes and variables, `sva vcd DUMP [--out x.vcd]` an FST as VCD text (as `fst2vcd -e` writes it: its names, enum tables, escaped strings, its end; *Formats*) | `sva <command> --help`; eval: `--waves --scope --sva [--assert NAME] [--from --to] [--out] [--json] [--attempts] [--x fail\|false] [--vacuous] [--no-lane] [--resolve up\|scope] [--ignore-prefix] [--alias] [--max-threads] [--report] [--junit] [-D]`; parse: `--json --expand -D` |

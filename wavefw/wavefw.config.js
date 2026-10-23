@@ -36,6 +36,7 @@ window.WAVEFW_CONFIG = {
   groupOrder: 'file',           // inside every group: 'last' = signals first, then the sub-groups (modules); 'first'; 'file' = as given
   findHighlight: true,          // fuzzy find: found rows in front, the rest dimmed
   findOpen: true,               // fuzzy find: every module folded except the ones with a match
+  findMask: false,              // fuzzy find: the found rows only, with the modules on the way to them
   findCase: false,              // find options (Aa Full .* in the find group): the case matters,
   findWord: false,              //   a word is the whole name (a.b: the end of the full path),
   findRegex: false,             //   the query is a regular expression (grep -E, JavaScript RegExp; \< \> as in vim)
@@ -64,6 +65,7 @@ window.WAVEFW_CONFIG = {
   maxHeight: null,              // e.g. '80vh' or 600: the rows scroll inside the viewer (the bar stays in view); null = page scroll
                                 //   (the bar sticks to the top while its rows go by); the bar's Scroll button switches on the fly
   toolsFolded: false,           // the bar's tools folded to its title line (▴ / ▾ in the bar)
+  toolsHidden: [],              // the bar's tool groups left out ("cursor", "go to", "find" …; the right button on the bar)
   // the clock cycles in a band under the time axis (the right button's Cycles ▸; kept in the browser, the saved state):
   cycles: false,                //   the band of cycle numbers on; the cursor's cycle in the title, Δ of the second cursor in them
   cycleClock: null,             //   the clock counted (a full path or a name); null: the clock found (a 1-bit *clk* / *clock*)

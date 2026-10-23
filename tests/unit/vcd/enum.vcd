@@ -1,0 +1,30 @@
+$timescale 1ns $end
+$attrbegin misc 07 pkg::state_t 3 IDLE RUN DONE 00 01 10 1 $end
+$scope module tb $end
+$var wire 1 ! clk $end
+$attrbegin misc 07 "" 1 $end
+$var logic 2 " state [1:0] $end
+$var logic 2 # plain [1:0] $end
+$scope struct st $end
+$attrbegin misc 07 "" 1 $end
+$var logic 2 $ s [1:0] $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+#0
+0!
+b0 "
+b0 #
+b0 $
+#5
+1!
+b1 "
+b11 #
+b1 $
+#10
+0!
+b10 "
+b10 $
+#15
+1!
+b11 "

@@ -440,6 +440,21 @@ def find(page, P):
     v.locator('button[data-act=fopen]').click()
     check(js('[...WaveFW.internal.peek(v).collapsed].sort((a, b) => a - b)') == pre, f'Open off: the folding from before the search is back ({len(pre)} folded)')
     v.locator('button[data-act=fopen]').click()
+    v.locator('button[data-act=fselect]').click(); settle(page)
+    fs = js("[[...v.selRun].every(r => v.found.has(r)), v.selRun.size, [...v.found.keys()].filter(r => r.type === 'sig' && r.tr && v.shown(r)).length, v.found.has(v.sel)]")
+    mh, ug = js("(v.menu(300, 300, v.sel), ['.mh', 'button[data-m=ugnew]'].map(q => (document.querySelector('.wv-menu ' + q) || {}).textContent))")
+    js('(v.closeMenu(), 0)')
+    check(fs[0] and fs[1] == fs[2] > 1 and fs[3] and f'{fs[1]} selected' in mh and f'New group of the {fs[1]}' in ug,
+          f'Select: the found signals selected, the right button takes them all ({fs[1]}: "{mh}", "{ug}")')
+    other = js("v.M.rows.find(r => r.type === 'sig' && r.tr && !v.found.has(r)).full")
+    js(f"(v.select('{other}'), 0)"); v.locator('button[data-act=fselect]').click(modifiers=['Control']); settle(page)
+    check(js(f"[v.selRun.size, [...v.selRun].some(r => r.full === '{other}')]") == [fs[1] + 1, True], 'ctrl+click Select: added to the selection there was')
+    n0 = js('v.allRows().length'); v.locator('button[data-act=fmask]').click(); settle(page)
+    mk = js("""(() => { const f = [...v.found.keys()], all = v.allRows(), ok = r => v.found.has(r) || r.anc.some(id => f.some(x => x.id === id && x.type === 'group')) ||
+        (r.type === 'group' && f.some(x => x.anc.includes(r.id))); return [all.every(ok), all.filter(r => v.found.has(r)).length, f.length, all.length]; })()""")
+    check(mk[0] and mk[1] == mk[2] and mk[3] < n0 and js('v.state().config.findMask'), f'Mask: the found rows and the modules on the way only ({mk[3]} of {n0} rows)')
+    v.locator('button[data-act=fmask]').click(); settle(page)
+    check(js('v.allRows().length') == n0, 'Mask off: every row again')
     page.evaluate("window.__c = null; navigator.clipboard.writeText = t => (window.__c = t, Promise.resolve())")
     v.locator('button[data-act=fcopy]').click()
     lines = (page.evaluate('window.__c') or '').split('\n')
@@ -609,6 +624,207 @@ def deep(page, P):
     check(oy == 20000 and js("document.querySelector('.wv canvas').getBoundingClientRect().top - document.querySelector('.wv .body').getBoundingClientRect().top") == 0,
           f'rows scroll under a canvas that stays in view (offset {oy}, first row {row})')
     js('(v.collapseAll(), 0)')
+
+
+def modules(page, P):
+    """The Modules panel (t, wavefw/src/modules.js) on the synthetic page: the tree of its 255 modules, a click goes to a
+    module (opened, unhidden, its first signal in the middle), a box over names keeps Only those (the way to them as
+    headers), ctrl / shift+click, Space, Only matches, pause and clear, the find outside Only, exports, undo, the state,
+    the twin in tools/viewedit.py; then a tree of 10 000 modules against the clock."""
+    js = lambda e: page.evaluate(f"(() => {{ const v = document.querySelector('.wv').waveView; return {e}; }})()")
+    rows = page.locator('.wv-mods .mn')
+    name = lambda n: page.locator('.wv-mods .mn', has_text=n).first.locator('.nm')
+    toast = lambda: js("v.root.querySelector('.bar .toast').textContent")
+    vis = lambda: js("WaveFW.internal.peek(v).vis.map(r => r.full || r.name)")
+    page.locator('.wv canvas').first.click(); page.keyboard.press('t'); settle(page)
+    first = [rows.nth(i).locator('.nm').inner_text() for i in range(rows.count())]
+    check(page.locator('.wv-mods').count() == 1 and first == ['tb_top', 'dut_i', 'dev0_i', 'dev1_i'] and rows.nth(0).locator('.ct').inner_text() == '12 / 2060',
+          f't opens the Modules panel: the modules two levels deep, the counts own / with the submodules {first} {rows.nth(0).locator(".ct").inner_text()}')
+    js("(v.hide(['tb_top.dut_i.dev1_i']), 0)")
+    name('dev1_i').click(); settle(page)
+    got = js("[v.sel && v.sel.full, v.hiddenRows.size, WaveFW.internal.peek(v).vis.includes(v.sel)]")
+    check(got == ['tb_top.dut_i.dev1_i.clk', 0, True] and toast().startswith('tb_top.dut_i.dev1_i'),
+          f'a click on a module goes there: shown again (Hide), opened, its first signal selected {got} {toast()!r}')
+    # a box over two names: Only those; the way to them stays as headers, their own signals go
+    js("(v.highlight(['tb_top.tb_sig0']), 0)")
+    a, b = rows.nth(2).bounding_box(), rows.nth(3).bounding_box()
+    page.mouse.move(a['x'] + 120, a['y'] + 6); page.mouse.down(); page.mouse.move(b['x'] + 120, b['y'] + 12, steps=4)
+    pv = page.locator('.wv-mods .mn.pv').count()
+    page.mouse.up(); settle(page)
+    got = js("v.onlyState()")
+    shown = vis()
+    check(pv == 2 and got == {'modules': ['tb_top.dut_i.dev0_i', 'tb_top.dut_i.dev1_i'], 'on': True} and shown[:2] == ['tb_top', 'tb_top.dut_i'] and
+          'tb_top.tb_sig0' not in shown and 'tb_top.dut_i.cfg_reg0' not in shown and page.locator('.wv-mods .mn.on').count() == 2,
+          f'a box over two names keeps Only them: the way to them as headers, the signals of the others gone (preview {pv}) {got} {shown[:4]}')
+    chip = page.locator('.wv .bar button[data-act=onlyp]')
+    check(chip.is_visible() and chip.inner_text() == 'Only: 2 modules ‖', f'the bar says it ({chip.inner_text()!r})')
+    wd = page.evaluate("(() => { const v = document.querySelector('.wv').waveView; return JSON.stringify(v.toWaveDrom()); })()")
+    check('tb_sig0' not in wd, 'a highlighted signal Only leaves out is not in WaveDrom')
+    page.locator('.wv input.q').first.fill('cfg_reg'); settle(page)
+    cnt = page.locator('.wv .find .cnt').first.inner_text()
+    check('8 outside Only' in cnt, f'the find counts the matches Only leaves out ({cnt!r})')
+    page.locator('.wv input.q').first.fill(''); page.locator('.wv canvas').first.click(); page.keyboard.press('Escape'); settle(page)
+    js("(v.highlight(null), 0)")
+    # ctrl+click: one in / out; a module under a picked one: said; shift+click: a run
+    page.keyboard.press('t'); settle(page)
+    name('dev1_i').click(modifiers=['Control']); settle(page)
+    check(js("v.onlyState().modules") == ['tb_top.dut_i.dev0_i'], f'ctrl+click takes a module out of Only {js("v.onlyState().modules")}')
+    name('dev0_i').click(); settle(page)   # in Only: a plain click only goes there
+    name('dev1_i').click(); settle(page)   # outside Only: paused (kept), there
+    got = js("[v.onlyState(), v.sel && v.sel.full]")
+    check(got == [{'modules': ['tb_top.dut_i.dev0_i'], 'on': False}, 'tb_top.dut_i.dev1_i.clk'] and 'Only paused' in toast() and
+          chip.inner_text() == 'Only paused: 1 module ▶', f'a click on a module outside Only pauses it (the set kept) and goes there {got} {chip.inner_text()!r}')
+    chip.click(); settle(page)
+    check(js("v.onlyState().on") and not js("WaveFW.internal.peek(v).vis.some(r => r.full && r.full.startsWith('tb_top.dut_i.dev1_i'))"),
+          'the bar\'s Only ▶ resumes it')
+    page.keyboard.press('Control+z'); settle(page)
+    check(js("v.onlyState().on") is False, f'ctrl+Z takes Only back a step ({js("v.onlyState()")})')
+    page.keyboard.press('Control+Shift+z'); settle(page)
+    page.keyboard.press('t'); settle(page)
+    name('dev0_i').click(modifiers=['Shift']); settle(page)   # the anchor: dev1_i (the last click)
+    check(js("v.onlyState().modules") == ['tb_top.dut_i.dev0_i', 'tb_top.dut_i.dev1_i'], f'shift+click keeps Only the run {js("v.onlyState().modules")}')
+    # the filter: Only matches (shift+Enter); keys in the tree
+    q = page.locator('.wv-mods .mq'); q.fill('unit1'); settle(page)
+    hits = page.locator('.wv-mods .mn.hit').count(); q.press('Shift+Enter'); settle(page)
+    got = js("v.onlyState().modules")
+    check(hits >= 11 and len(got) == hits, f'Only matches: the {hits} modules the filter finds ({len(got)})')
+    page.evaluate("document.querySelector('.wv').waveView.run({op: 'only', modules: ['unit1_i', 'unit17_i']})")
+    # ↓ ↓ ↓ Enter: dev0_i, on the way to unit1_i: its own signals left out, the first one of unit1_i selected
+    q.fill(''); q.press('ArrowDown'); page.keyboard.press('ArrowDown'); page.keyboard.press('ArrowDown'); page.keyboard.press('Enter'); settle(page)
+    sel = js("v.sel && v.sel.full") or ''
+    check(sel.startswith('tb_top.dut_i.dev0_i.') and '.unit1_i.' in sel and 'Only paused' not in toast(),
+          f'↓ Enter in the tree go to a module on the way to Only\'s: its first signal Only keeps ({sel})')
+    page.keyboard.press(' '); settle(page)
+    got = js("v.onlyState()")
+    check(got['on'] and len(got['modules']) == 2 and got['modules'][0] == 'tb_top.dut_i.dev0_i' and got['modules'][1].endswith('.unit17_i'),
+          f'Space puts the module into Only (unit1_i under it: in it) {got}')
+    page.keyboard.press('Escape'); settle(page)
+    check(page.locator('.wv-mods').count() == 0 and js("v.sel && v.sel.full") == sel and js("!!v.only"),
+          'Esc in the panel closes it: no reset of the viewer, Only stays')
+    # the state, the command, the twin
+    st = js("v.state().only")
+    miss = page.evaluate("(async () => { const v = document.querySelector('.wv').waveView; return v.setState({wavefw: 'state', version: 3, "
+                         "only: {modules: ['tb_top.dut_i.dev1_i', 'tb_top.nope'], on: true}}); })()")
+    check(st == got and miss == ['tb_top.nope'] and js("v.onlyState().modules") == ['tb_top.dut_i.dev1_i'],
+          f'Only in the saved state and back (a path not of a module: said) {st} {miss}')
+    ops = [{'op': 'only', 'modules': ['dev0_i', 'core1_i']}, {'op': 'select', 'signal': 'tb_top.tb_sig0'}, {'op': 'only', 'on': False},
+           {'op': 'only', 'on': True}, {'op': 'only'}, {'op': 'unfold', 'all': True},
+           {'op': 'select', 'signals': ['tb_top.dut_i.dev0_i.ready', 'tb_top.dut_i.dev1_i.ready']},
+           {'op': 'fold', 'all': True}, {'op': 'only', 'modules': ['dev1_i', 'core3_i'], 'open': False}, {'op': 'only', 'modules': ['dev1_i', 'core3_i']}]
+    res = page.evaluate("ops => document.querySelector('.wv').waveView.run(ops)", ops)
+    sys.path.insert(0, str(ROOT / 'tools'))
+    import viewedit
+    py = viewedit.Editor(viewedit.Model(page.evaluate("WAVES.all"))).run(ops)
+    pst = viewedit.Editor(viewedit.Model(page.evaluate("WAVES.all"))); pst.run(ops)
+    jsf = sorted(js("v.state().config.fold")); pyf = sorted(pst.fold())
+    check(jsf == pyf and 'tb_top.dut_i.dev1_i.core3_i' not in jsf and 'tb_top.dut_i.dev1_i' not in jsf and 'tb_top.dut_i.dev0_i' in jsf,
+          f'the folding the command only leaves: the same in the page and in tools/viewedit.py ({len(jsf)} / {len(pyf)} folded)')
+    check(res == py and res[0]['only'] == {'modules': ['tb_top.dut_i.dev0_i'], 'on': True} and res[1]['select'] is None and
+          res[6]['select'] == 'tb_top.dut_i.dev0_i.ready',
+          f'the command only: the same in the page and in tools/viewedit.py (a submodule of one picked: in it; a signal it leaves out: not selected) {res} {py}')
+    bad = page.evaluate("document.querySelector('.wv').waveView.run([{op: 'only', modules: 'nope'}, {op: 'only', clear: true}])")
+    check('no module "nope"' in bad[0].get('error', '') and bad[1]['only'] is None and not chip.is_visible(), f'a name that is no module: said; clear {bad}')
+    # what Only leaves out stays out (review of the implementation, O1 O2 O4 O6 O7 O13)
+    D0, D1 = 'tb_top.dut_i.dev0_i', 'tb_top.dut_i.dev1_i'
+    got = page.evaluate(f"""(async () => {{ const v = document.querySelector('.wv').waveView, out = [];
+        await v.run([{{op: 'only', modules: '{D0}'}}, {{op: 'select', signals: ['{D0}.ready', '{D1}.ready']}}]);
+        out.push([...v.selRun].map(r => r.full), JSON.stringify(v.toWaveDrom()).includes('"ready"'), v.toWaveDrom().signal.length);
+        await v.run([{{op: 'hide', signals: '{D0}.cnt'}}]); const r = await v.run([{{op: 'show', signals: '{D0}.cnt'}}, {{op: 'select', signal: '{D0}.cnt'}}]);
+        out.push(r[1].select);
+        await v.run([{{op: 'gaps', on: true, signals: '{D1}.err', only: true}}]); out.push(v.exportRows());
+        await v.run([{{op: 'gaps', reset: true}}, {{op: 'highlight', clear: true}}, {{op: 'select', signal: null}}]);
+        return out; }})()""")
+    check(got[0] == [f'{D0}.ready'] and got[3] == f'{D0}.cnt' and got[4] == [],
+          f'Only: a run of signals keeps the ones in the view, a batch show → select selects, gaps "only them" outside Only: no rows {got}')
+    js("(v.highlight(['" + D0 + ".ready', '" + D1 + ".err']), v.menu(300, 300, v.M.rows.find(r => r.full === '" + D0 + ".ready')), 0)")
+    hide = page.locator('.wv-menu button[data-m=hide]')
+    label = hide.inner_text()
+    hide.click()
+    got = js("[...v.hiddenRows]")
+    check(got == [f'{D0}.ready'], f'Hide of the highlighted rows leaves the ones Only takes away alone ({label!r} → {got})')
+    js("(v.unhide(), v.highlight(null), v.hide(['" + D1 + "']), 0)")
+    page.locator('.wv input.q').first.fill('err'); settle(page)
+    n0 = js("v.found.size")
+    js(f"(v.goScope('{D1}'), 0)"); settle(page)
+    n1 = js("v.found.size")
+    check(n1 > n0 and js("v.onlyState().on") is False and js("v.hiddenRows.size") == 0,
+          f'a click on a module hidden and outside Only: shown, Only paused, the find finds what they left out ({n0} → {n1})')
+    page.locator('.wv input.q').first.fill(''); settle(page)
+    # the panel: opened and closed again, drawn once per change; a box below the names or cancelled with Esc changes nothing;
+    # Hide replaced by another of the same size is drawn
+    js(f"(v.setOnly({{modules: ['{D0}']}}), 0)")
+    for _ in range(5):
+        js('(v.modules(false), v.modules(true), 0)')
+    renders = page.evaluate("""(() => { const v = document.querySelector('.wv').waveView, M = v.mods, R = M.render.bind(M); let n = 0;
+        M.render = f => { n++; return R(f); }; v.select(v.M.rows.find(r => r.full.endsWith('dev0_i.cnt'))); return n; })()""")
+    check(renders == 1 and page.locator('.wv-mods').count() == 1, f'the panel opened and closed five times: one panel, drawn once for a selection ({renders})')
+    js('(v.collapseAll(), 0)'); settle(page)
+    check(js('v.sel') is None and page.locator('.wv-mods .mn.cur').count() == 0, 'the selected signal folded away: its ● in the tree goes too')
+    before = js('JSON.stringify(v.onlyState())')
+    box = page.locator('.wv-mods .mtr').bounding_box(); last = rows.nth(rows.count() - 1).bounding_box()
+    y0 = last['y'] + last['height'] + 10
+    if y0 + 30 < box['y'] + box['height']:
+        page.mouse.move(box['x'] + 150, y0); page.mouse.down(); page.mouse.move(box['x'] + 150, y0 + 30, steps=3); page.mouse.up(); settle(page)
+    a = rows.nth(0).bounding_box(); page.locator('.wv-mods .mq').fill('dev'); settle(page)
+    page.mouse.move(a['x'] + 150, a['y'] + 5); page.mouse.down(); page.mouse.move(a['x'] + 150, a['y'] + 40, steps=3)
+    page.locator('.wv-mods .mq').focus(); page.keyboard.press('Escape'); page.mouse.up(); settle(page)
+    check(js('JSON.stringify(v.onlyState())') == before and page.locator('.wv-mods .mq').input_value() == 'dev',
+          f'a box over no name, a box cancelled by Esc (the focus in the filter): Only as it was {js("JSON.stringify(v.onlyState())")}')
+    page.locator('.wv-mods .mq').fill(''); settle(page)
+    js(f"(v.hide(['{D0}']), 0)"); settle(page)
+    js(f"(v.setState({{wavefw: 'state', version: 3, hidden: ['{D1}']}}), 0)"); settle(page)
+    struck = [rows.nth(i).locator('.nm').inner_text() for i in range(rows.count()) if 'hid' in (rows.nth(i).get_attribute('class') or '')]
+    check(struck == ['dev1_i'], f'a hidden module replaced by another: the tree strikes the new one ({struck})')
+    js("(v.unhide(), v.setOnly(null), v.modules(false), 0)")
+    # the modules a box names open on the waves, the nested ones too (the set keeps the outermost), the way to them open,
+    # the ones under them folded as they were; two subtrees: the way between them as headers
+    js("(v.setOnly(null), v.modules(true), v.collapseAll(), v.mods.subtree(v.mods.roots[0], true), 0)"); settle(page)
+    a, b = rows.nth(2).bounding_box(), rows.nth(5).bounding_box()   # dev0_i core0_i pipe0_i stage0_i
+    page.mouse.move(a['x'] + 150, a['y'] + 6); page.mouse.down(); page.mouse.move(b['x'] + 150, b['y'] + 12, steps=4); page.mouse.up(); settle(page)
+    got = js("[v.onlyState().modules, WaveFW.internal.peek(v).vis.filter(r => r.type === 'group' && !WaveFW.internal.peek(v).collapsed.has(r.id)).map(r => r.name), "
+             "WaveFW.internal.peek(v).vis.filter(r => r.type === 'group' && WaveFW.internal.peek(v).collapsed.has(r.id)).map(r => r.name)]")
+    check(got[0] == ['tb_top.dut_i.dev0_i'] and got[1] == ['tb_top', 'dut_i', 'dev0_i', 'core0_i', 'pipe0_i', 'stage0_i'] and
+          got[2] == ['unit0_i', 'unit1_i', 'stage1_i', 'pipe1_i', 'core1_i'], f'a box opens every module it names and the way to them, the others stay folded {got}')
+    r = page.evaluate("document.querySelector('.wv').waveView.run([{op: 'fold', all: true}, {op: 'only', modules: ['core1_i', 'core2_i']}])")
+    got = js("[WaveFW.internal.peek(v).vis.filter(r => r.type === 'group' && !WaveFW.internal.peek(v).collapsed.has(r.id)).map(r => r.name), "
+             "WaveFW.internal.peek(v).vis.filter(r => r.type === 'sig').map(r => r.full.split('.').slice(-2, -1)[0])]")
+    check(got[0] == ['tb_top', 'dut_i', 'dev0_i', 'core1_i', 'dev1_i', 'core2_i'] and set(got[1]) == {'core1_i', 'core2_i'},
+          f'two subtrees: the modules between them open as headers only, the signals of the two picked {got}')
+    # with the find and its Open on: Open goes off, so the next search does not fold the module again
+    page.evaluate("document.querySelector('.wv').waveView.run([{op: 'find', query: 'cnt', open: true}, {op: 'only', modules: 'stage4_i'}])"); settle(page)
+    got = js("[v.findOpen, WaveFW.internal.peek(v).collapsed.has(v.scopeOf(v.onlyState().modules[0]).id), v.q]")
+    page.locator('.wv input.q').first.fill('cnt '); settle(page)
+    got.append(js("WaveFW.internal.peek(v).collapsed.has(v.scopeOf(v.onlyState().modules[0]).id)"))
+    check(got == [False, False, 'cnt', False], f'with the find\'s Open on: Open switched off, the module stays open while the query changes {got}')
+    page.locator('.wv input.q').first.fill(''); settle(page)
+    # the find's Open on when Only opens: the folding from before the search back (as the twin has it), then the picked opened;
+    # open false: the folding as the search left it
+    ops2 = [{'op': 'only', 'clear': True}, {'op': 'fold', 'all': True}, {'op': 'unfold', 'groups': ['tb_top', 'dut_i', 'dev0_i', 'core0_i']},
+            {'op': 'find', 'query': 'stage5_i', 'open': True}, {'op': 'only', 'modules': 'dev0_i'}]
+    page.evaluate("ops => document.querySelector('.wv').waveView.run(ops)", ops2); settle(page)
+    tw = viewedit.Editor(viewedit.Model(page.evaluate("WAVES.all"))); tw.run(ops2)
+    got = [sorted(js("v.state().config.fold")) == sorted(tw.fold()), js("WaveFW.internal.peek(v).collapsed.has(v.scopeOf('tb_top.dut_i.dev0_i.core0_i').id)"), js('v.findOpen')]
+    check(got == [True, False, False], f'the find\'s Open on: the folding from before the search back, the modules picked open, as the twin has it {got}')
+    page.evaluate("document.querySelector('.wv').waveView.run([{op: 'only', clear: true}, {op: 'find', query: 'stage5_i', open: true}])"); settle(page)
+    before = js("[...WaveFW.internal.peek(v).collapsed].sort((a, b) => a - b).join()")
+    page.evaluate("document.querySelector('.wv').waveView.run({op: 'only', modules: 'dev0_i', open: false})"); settle(page)
+    check(js("[...WaveFW.internal.peek(v).collapsed].sort((a, b) => a - b).join()") == before and js('v.findOpen'), 'only … open: false with the find\'s Open on: the folding as it was')
+    page.evaluate("document.querySelector('.wv').waveView.run([{op: 'find', query: ''}, {op: 'only', clear: true}])"); settle(page)
+    folded = js("[...WaveFW.internal.peek(v).collapsed].length")
+    page.evaluate("document.querySelector('.wv').waveView.run([{op: 'only', on: false}, {op: 'only', on: true}, {op: 'only', clear: true}])")
+    check(js("[...WaveFW.internal.peek(v).collapsed].length") == folded, 'pause, resume and clear fold or open nothing')
+    js("(v.expandAll(), 0)")
+    js("(v.modules(false), 0)")
+    # 10 000 modules: the panel opens, every one open, a filter
+    t = page.evaluate("""(() => { const el = document.createElement('div'); document.body.append(el);
+        const mk = (d, k) => d === 0 ? [`m${k}`, {name: 'a', wave: '01'}] : [`m${k}`, {name: 'a', wave: '01'}, ...Array.from({length: 10}, (_, i) => mk(d - 1, i))];
+        const v = new WaveFW.WaveView(el, {signal: [mk(4, 0)]}), T = performance.now();
+        v.modules(true); const t1 = performance.now(); v.mods.subtree(v.mods.roots[0], true); const t2 = performance.now();
+        const n = [v.scopes().length, v.mods.rows.length, v.mods.el.querySelectorAll('.mn').length];
+        v.mods.qEl.value = v.mods.q = 'm7 m3'; v.mods.render(); const t3 = performance.now();
+        v.destroy(); el.remove(); return [t1 - T, t2 - t1, t3 - t2, ...n]; })()""")
+    check(t[3] == 11111 and t[4] == 11111 and t[0] + t[1] + t[2] < 3000 * SCALE,
+          f'{t[3]} modules: the panel opens in {t[0]:.0f} ms, all of them open in {t[1]:.0f} ms ({t[5]} rows), a filter in {t[2]:.0f} ms')
 
 
 def big(page):
@@ -979,11 +1195,125 @@ def sva_exprs(browser, build):
 READERS_BAD = {'backwards': 'time goes back', 'unsorted': 'time goes back', 'noend': 'no $enddefinitions'}
 
 
+def vscode_tab(browser, build):
+    """The VS Code extension's tab (vscode/media/host.js before the viewer) under the CSP of vscode/extension.js, with a
+    fake acquireVsCodeApi answering as the extension host does: the dump fetched by its URI and opened (an enum table
+    read), localStorage as the dump's store (given, then each write posted), Save state -> a save of the .view.json,
+    Load… -> a pick whose file is loaded, Open… -> a pick for a tab of its own, the clipboard, "changed" read again by
+    itself, the live link's EventSource and POSTs relayed with the dump's path; no CSP violation."""
+    import base64, json, time, urllib.parse
+    print('vscode: the extension\'s tab (host.js) with a fake VS Code')
+    src = 'https://wavefw.test'
+    files = {'/host.js': ROOT / 'vscode' / 'media' / 'host.js', '/dump.vcd': ROOT / 'tests' / 'unit' / 'vcd' / 'enum.vcd'}
+    files.update({'/media/' + f: ROOT / 'wavefw' / f for f in ('wavefw.css', 'wavefw.config.js', 'wavefw.js', 'sva.wasm.js', 'bus.js', 'sva.js')})
+    ext = (ROOT / 'vscode' / 'extension.js').read_text(encoding='utf-8')
+    csp = re.search(r'content="(default-src[^"]+)"', ext).group(1).replace('${src}', src).replace('${nonce}', 'N0NCE')
+    host = {'name': 'enum.vcd', 'path': '/host/dumps/enum.vcd', 'store': {'wavefw.given': 'yes'}, 'autoReload': False}
+    scripts = ''.join(f'<script nonce="N0NCE" src="{src}/media/{f}"></script>' for f in ('wavefw.config.js', 'wavefw.js', 'sva.wasm.js', 'bus.js', 'sva.js'))
+    html = (f'<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="{csp}">'
+            '<style>kbd { color: #ccc; background-color: rgba(128, 128, 128, 0.17); padding: 1px 3px; }'   # VS Code's webview styles
+            ' code { color: #d7ba7d; background-color: rgba(10, 10, 10, 0.4); padding: 1px 3px; }</style>'
+            f'<link rel="stylesheet" href="{src}/media/wavefw.css"></head><body class="vscode-light">'
+            f'<script type="application/json" id="wavefw-host">{json.dumps(host)}</script>'
+            '<script type="application/wavedrom">{ "signal": [{ "name": "reading…", "wave": "x..." }] }</script>'
+            f'<script nonce="N0NCE" src="{src}/host.js"></script>{scripts}</body></html>')
+    fake = """(() => { window.__sent = []; const reply = m => setTimeout(() => window.postMessage(m, '*'), 0);
+      window.acquireVsCodeApi = () => ({ getState() {}, setState() {}, postMessage(m) { window.__sent.push(m);
+        if (m.type === 'source') reply({ id: m.id, src: '%s/dump.vcd', name: 'enum.vcd' });
+        if (m.type === 'save') reply(window.__cancel ? { id: m.id, cancel: true } : { id: m.id, path: '/host/dumps/' + m.name });
+        if (m.type === 'clip') reply({ id: m.id, ok: true });
+        if (m.type === 'pick') reply({ id: m.id, files: /fst/.test(m.accept) ? [] : [{ name: 's.view.json', mtime: 1, b64: btoa(JSON.stringify(window.__S)) }] });
+        if (m.type === 'http') reply({ id: m.id, status: 200, text: 'ok' }); } }); })();""" % src
+    page = browser.new_page()
+    errs = []
+    page.on('console', lambda m: errs.append(m.text) if m.type == 'error' else None)
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.add_init_script(fake + "document.addEventListener('securitypolicyviolation', e => window.__csp = (window.__csp || []).concat(e.violatedDirective + ' ' + e.blockedURI));")
+    page.route(src + '/**', lambda r: r.fulfill(path=str(files[urllib.parse.urlparse(r.request.url).path])) if urllib.parse.urlparse(r.request.url).path in files
+               else r.fulfill(status=404))
+    page.route(src + '/', lambda r: r.fulfill(body=html, content_type='text/html'))
+    page.goto(src + '/')
+
+    def until(expr, timeout=5000):   # wait_for_function evaluates a string: the CSP refuses it (no 'unsafe-eval')
+        end = time.monotonic() + timeout / 1000
+        while not page.evaluate(expr):
+            if time.monotonic() > end:
+                raise TimeoutError(f'not true in {timeout / 1000} s: {expr}')
+            page.wait_for_timeout(50)
+    until("window.__sent && window.__sent.some(m => m.type === 'ready')", timeout=15000)
+    sent = lambda t: page.evaluate(f"window.__sent.filter(m => m.type === '{t}')")
+    ready = sent('ready')[0]
+    js = lambda e: page.evaluate(f"(async () => {{ const v = WaveFW.views().find(x => x.root.isConnected); return {e}; }})()")
+    check(ready.get('shown') == 4 and ready.get('name') == 'enum.vcd', f'the dump fetched and opened: {ready}')
+    check(js("WaveFW.internal.peek(v).vis.filter(r => r.enum).map(r => r.full).join(',')") == 'tb.state,tb.st.s', 'its enum tables on the rows')
+    check(js("localStorage.getItem('wavefw.given')") == 'yes' and js("(localStorage.setItem('wavefw.k', 'v'), localStorage.getItem('wavefw.k'))") == 'v' and
+          any(m['key'] == 'wavefw.k' and m['value'] == 'v' for m in sent('store')), 'localStorage: the store given, a write posted')
+    js("(v.saveState(), 0)"); until("window.__sent.some(m => m.type === 'save')", timeout=5000); settle(page)
+    sv = sent('save')[0]
+    check(sv['name'].endswith('.view.json') and 'wavefw' in json.loads(base64.b64decode(sv['b64'])), f'Save state: a save of {sv["name"]} with the state')
+    st = json.loads(base64.b64decode(sv['b64']))
+    st['bookmarks'] = [{'n': 4, 't': 10000, 'text': 'from the file'}]
+    page.evaluate('s => { window.__S = s; }', st)
+    js("(v.sfile.click(), 0)"); until("WaveFW.views().find(x => x.root.isConnected).state().bookmarks.some(b => b.text === 'from the file')", timeout=5000)
+    check(sent('pick')[0]['accept'].startswith('.json'), 'Load…: a pick of a .json, its state loaded (a bookmark from the file)')
+    n = len(sent('pick'))
+    js("(v.openDump(), 0)"); until(f"window.__sent.filter(m => m.type === 'pick').length > {n}", timeout=5000)
+    check('.fst' in sent('pick')[-1]['accept'] and not page.evaluate('!!window.showOpenFilePicker'), 'Open…: a pick of a dump (no showOpenFilePicker)')
+    js("navigator.clipboard.writeText('PSEL')")
+    check(any(m.get('text') == 'PSEL' for m in sent('clip')), 'the clipboard through VS Code')
+    page.evaluate("window.postMessage({ type: 'changed', auto: true }, '*')")
+    until("window.__sent.filter(m => m.type === 'loaded').length >= 2", timeout=5000)
+    check(len(sent('source')) >= 2, 'changed with autoReload: the dump fetched again')
+    page.evaluate("window.postMessage({ type: 'live', link: '8742:tok123' }, '*')")
+    until("window.__sent.some(m => m.type === 'es-open')", timeout=5000)
+    es = sent('es-open')[0]
+    page.evaluate(f"window.postMessage({{ type: 'es', sid: {es['sid']}, event: 'open' }}, '*')")
+    until("window.__sent.some(m => m.type === 'http' && /hello/.test(m.url))", timeout=5000)
+    hello = next(m for m in sent('http') if '/hello' in m['url'])
+    check(es['url'].startswith('http://127.0.0.1:8742/events?token=tok123') and json.loads(hello['body'])['path'] == host['path'],
+          'live: the EventSource and the hello relayed, the page named by the dump\'s path')
+    page.evaluate("window.postMessage({ type: 'es', sid: %d, event: 'cmd', data: JSON.stringify({ rid: 5, ops: [{ op: 'marker', t: 20000 }] }) }, '*')" % es['sid'])
+    until("window.__sent.some(m => m.type === 'http' && /reply/.test(m.url))", timeout=5000)
+    rep = json.loads(next(m for m in sent('http') if '/reply' in m['url'])['body'])
+    check(rep.get('rid') == 5 and rep['results'][0].get('op') == 'marker', f'live: a command run, its answer posted ({rep})')
+    check(page.evaluate("document.documentElement.dataset.theme") == 'light', 'the theme from VS Code\'s body class')
+    page.evaluate("document.body.className = 'vscode-dark'"); settle(page)
+    check(page.evaluate("document.documentElement.dataset.theme") == 'dark', 'and again when VS Code\'s theme changes')
+    # VS Code's webview styles kbd and code by its theme: the viewer's own (a tooltip's keys) keep the viewer's colours
+    tip = page.evaluate("""() => { const t = document.createElement('div'); t.className = 'wv-tip'; t.innerHTML = '<kbd>z</kbd><code>c</code>';
+      document.querySelector('.wv').append(t); const c = e => getComputedStyle(e), r = [c(t).color, c(t.firstChild).color,
+      c(t.lastChild).color, c(t.lastChild).backgroundColor]; t.remove(); return r; }""")
+    check(tip[0] == tip[1] == tip[2] and tip[3] == 'rgba(0, 0, 0, 0)', f'a tooltip\'s keys in its own colour, not VS Code\'s ({tip})')
+    # VS Code's webview listens on its window and gives every keydown to the workbench: the viewer's own keys stop before
+    page.evaluate("window.__fwd = []; window.addEventListener('keydown', e => window.__fwd.push((e.ctrlKey ? 'ctrl+' : '') + (e.altKey ? 'alt+' : '') + e.key))")
+    page.locator('.wv canvas').first.click()
+    for k in ('Control+g', 'Escape', 'Alt+ArrowDown', 'Control+z', 'Control+p', 'F1', 'Control+Shift+F', 'Control+Shift+G'):
+        page.keyboard.press(k)
+        page.keyboard.press('Escape')
+    fwd = page.evaluate('window.__fwd')
+    check('ctrl+g' not in fwd and 'ctrl+z' not in fwd and 'ctrl+p' in fwd and 'F1' in fwd and fwd.count('ctrl+F') == 1 and fwd.count('ctrl+G') == 1,
+          f'keys: the viewer\'s stay in the tab, the rest (ctrl+shift+F / G too) go to VS Code ({fwd})')
+    # the assertions in the page under the CSP: the engine inlined (wasm-unsafe-eval) and in a Web Worker from a Blob
+    sv = page.evaluate("""async () => { await SVA.loadFiles([{ name: 't.sva', text: 'module t (input logic clk, input logic [1:0] state); ' +
+        'a_st: assert property (@(posedge clk) state != 2\\'d3); endmodule' }]); await SVA.ready();
+      const p = SVA.panels()[0], out = [];
+      for (const lim of [100000, 0]) { SVA.syncLimit = lim; const b = p.bind('a_st', 'tb'); await SVA.ready(); await p.queue;
+        out.push([b.via || 'page', b.state, b.error || b.workerError || null, b.results ? b.results.assertions[0].stats.pass : null]); p.unbind(b); }
+      SVA.syncLimit = null; return out; }""")
+    check([x[0] for x in sv] == ['page', 'worker'] and all(x[2] is None and x[3] for x in sv), f'assertions in the page and in a worker under the CSP ({sv})')
+    # a save cancelled in the dialog: no "saved"
+    page.evaluate("window.__cancel = true")
+    js("(v.saveState(), 0)"); page.wait_for_timeout(400)
+    check(js("v.root.querySelector('.bar .toast').textContent") == 'not saved', 'a save cancelled says so')
+    check(not page.evaluate('window.__csp || []') and not errs, f'no CSP violation, no error: {page.evaluate("window.__csp || []")} {errs[:3]}')
+    page.close()
+
+
 def readers(browser, build):
     """The page's VCD reader (WaveFW.vcdToWave, wavefw/src/vcd.js) and the tools' (vcd2wavedrom.py --exact over
     dumpscan.py) give the same transitions, kinds and widths for every fixture of tests/unit/vcd: one rule for
     references, merged codes, vectors in parts (bits, ranges apart, two bits under one code), texts (realtime …, inf,
-    nan), VHDL values, tokens apart by any white space, comments in the body, x / z; the dumps the tools refuse the
+    nan), VHDL values, tokens apart by any white space, comments in the body, x / z, enum tables; the dumps the tools refuse the
     page refuses too."""
     import json
     sys.path.insert(0, str(ROOT / 'tools'))
@@ -996,7 +1326,8 @@ def readers(browser, build):
     for f in fixtures:
         text = f.read_text(encoding='utf-8', errors='replace')
         got = page.evaluate("""t => { try { const r = WaveFW.vcdToWave(t), out = {};
-            const walk = a => a.forEach(x => Array.isArray(x) ? walk(x.slice(1)) : (out[x.path] = { tv: x.tv, kind: x.kind || null, width: x.width || 1 }));
+            const walk = a => a.forEach(x => Array.isArray(x) ? walk(x.slice(1)) : (out[x.path] = { tv: x.tv, kind: x.kind || null, width: x.width || 1,
+              enum: x.enum || null }));
             walk(r.doc.signal); return { sigs: out, t0: r.doc.time.t0 }; } catch (e) { return { err: String(e.message || e) }; } }""", text)
         if f.stem in READERS_BAD:
             r = subprocess.run([sys.executable, '-I', str(ROOT / 'tools' / 'vcd2wavedrom.py'), '--waves', str(f), '--exact', '--signals', 'tb.s'], capture_output=True, text=True)
@@ -1028,7 +1359,7 @@ def readers(browser, build):
             if not tv or tv[0][0] > it['tv'][0][0]:   # the page starts at the first change, the tools at the window's start
                 tv = [[it['tv'][0][0], None if pg['kind'] else 'x']] + tv
             fl = lambda q: [[float(t), v] for t, v in q]   # times above 2^53 ps: JavaScript numbers round them (dumpscan warns)
-            if fl(tv) != fl(it['tv']) or pg['kind'] != it.get('kind') or pg['width'] != it.get('width', 1):
+            if fl(tv) != fl(it['tv']) or pg['kind'] != it.get('kind') or pg['width'] != it.get('width', 1) or pg['enum'] != it.get('enum'):
                 bad.append(f'{p}: page {tv[:4]} {pg["kind"]} w{pg["width"]}, tools {it["tv"][:4]} {it.get("kind")} w{it.get("width", 1)}')
         extra = set(got['sigs']) - set(tools)
         (differ if bad or extra else same).append(f.stem + (f' ({bad[:2]} {sorted(extra)[:3]})' if bad or extra else ''))
@@ -1968,7 +2299,7 @@ def ranges(browser, build):
     ref = js("[[...v.gapRefSet()].map(r => r.name), v.gapOpt().gaps, [...WaveFW.internal.peek(v).namesEl.querySelectorAll('.row.gref .n')].map(e => e.textContent)]")
     page.mouse.click(box['x'] + 5, box['y'] + y2, button='right'); menu.locator('.subh').click(); by = menu.locator('.gp').nth(1).inner_text()
     menu.locator('input.gonly').check(); only = js("[v.exportRows().filter(r => r.type !== 'lane').map(r => r.name), v.toWaveDrom(v.M.t0, v.M.t1).signal.map(s => s.name)]")
-    menu.locator('button[data-m=grefx]').click(); after = js('[v.gapRefSet().size, v.exportRows().length]')
+    menu.locator('button[data-m=grefx]').click(); after = js('[v.gapRefSet().size, (v.exportRows() || []).length]')
     check(ref[0] == ['PSEL'] and ref[1] and ref[2] == ['PSEL'] and 'by 1 signal' in by and only == [['PSEL'], ['PCLK', 'PSEL']] and after == [0, 0],
           f'Gaps by this signal: the gaps follow PSEL (// in the names), "only them": the picture and WaveDrom take PSEL alone; ✕: every signal again {ref} {by!r} {only} {after}')
     # the clock the gaps count: Gaps: cycles of this clock (↑ in the names), the cycles under the axis in its name
@@ -3227,6 +3558,41 @@ def synth_vcd(path):
     return len(sigs) + 1
 
 
+def bar_tools(page, P):
+    """The right button on the bar: its tool groups with a tick each; a click leaves one out (the menu stays open), Hide
+    all leaves every line of tools out, / still floats the find; kept in this browser and in the state; Show all; a field
+    keeps the browser's own menu."""
+    print('bar_tools: the right button on the bar')
+    v = page.locator('.wv').first
+    js = lambda e: page.evaluate(f"(() => {{ const v = document.querySelector('.wv').waveView; return {e}; }})()")
+    m, ticks = page.locator('.wv-menu.wv-tools'), lambda: m.locator('button[data-tg]').evaluate_all("bs => bs.map(b => [b.dataset.tg, b.getAttribute('aria-checked')])")
+    v.locator('.bar .tg[data-tg="list"] .tl').click(button='right'); settle(page)
+    t = ticks()
+    check(m.count() == 1 and {'cursor', 'view', 'find', 'list', 'state'} <= {n for n, _ in t} and all(c == 'true' for _, c in t),
+          f'the right button on the bar: a menu of its tool groups, each ticked {[n for n, _ in t]}')
+    m.locator('button[data-tg="cursor"]').click(); settle(page)
+    check(m.count() == 1 and v.locator('.bar .tg[data-tg="cursor"]').is_hidden() and dict(ticks())['cursor'] == 'false' and
+          js('v.state().config.toolsHidden') == ['cursor'] and 'cursor' in (js('localStorage.getItem(v.lookKey)') or ''),
+          'a click leaves the cursor out: the menu stays open, its tick off; in the state and in this browser')
+    h0 = js("v.root.querySelector('.bar').getBoundingClientRect().height")
+    m.locator('button[data-m=none]').click(); settle(page)
+    left = js("[...v.root.querySelectorAll('.bar .tools .tln')].filter(l => l.querySelector('.tg') && l.offsetHeight).length")
+    h1 = js("v.root.querySelector('.bar').getBoundingClientRect().height")
+    check(left == 0 and h1 < h0 and all(c == 'false' for _, c in ticks()), f'Hide all: no line of tools left, the bar {h0:.0f} -> {h1:.0f} px')
+    page.keyboard.press('Escape'); settle(page)
+    v.locator('canvas').evaluate('c => c.focus({ preventScroll: true })'); page.keyboard.press('/'); settle(page)
+    fl = [m.count(), v.locator('.tg.find.float').is_visible(), page.evaluate('document.activeElement.matches("input.q")')]
+    check(fl == [0, True, True], f'Esc closes the menu; / floats the find that is left out of the bar {fl}')
+    page.keyboard.press('Escape'); settle(page)
+    check(v.locator('.tg.find').is_hidden(), 'Esc puts it back: left out again')
+    v.locator('.bar .head').click(button='right'); settle(page); m.locator('button[data-m=all]').click(); settle(page)
+    check(v.locator('.bar .tools .tg.off').count() == 0 and js('v.state().config.toolsHidden') == [] and 'toolsHidden' not in (js('localStorage.getItem(v.lookKey)') or ''),
+          'Show all: every group again, nothing kept')
+    page.keyboard.press('Escape')
+    v.locator('input.q').dispatch_event('contextmenu'); settle(page)
+    check(m.count() == 0, 'the right button in a field: the browser\'s menu (paste), not this one')
+
+
 def synth_page(build):
     """BUILD/smoke/synth.html from synth_vcd() through mkconfig.py (tools/base.config.json) and mkhtml.py."""
     d = build / 'smoke'
@@ -3453,12 +3819,15 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'pages': 'every page in both schemes: no console errors, no error boxes, drawn canvases, static SVGs, a PNG',
     'units': 'the pure functions of the viewer (WaveFW.internal), the VCD reader, the bus decoders, sva.js expressions: a table of cases',
     'readers': 'the page\'s VCD reader against the tools\' on every fixture of tests/unit/vcd (one rule, the same transitions)',
+    'vscode': 'the VS Code extension\'s tab (host.js, its CSP) with a fake VS Code: the dump, the store, save, pick, clipboard, reload, live',
     'docs': 'docs/index.html: cursor, zoom, sorting, settings, styles, highlight, cursor fields, themes, bookmarks',
     'sva_docs': 'docs/index.html: the assertions section and the unit checks of wavefw/sva.js',
     'conformance': 'tests/conformance.html against stock WaveDrom: lanes and texts per case',
     'hierarchy': 'the synthetic page (and work/test_stream_video.html): scopes as groups, highlight, Collapse / Expand, "same"',
     'find': 'the synthetic page (and work/test_stream_video.html): fuzzy find, Open, Paint, Copy, Esc, n / N',
     'deep': 'the synthetic page (and work/test_stream_video.html): every level on the page, virtualised canvas',
+    'modules': 'the synthetic page: the Modules panel (t), a click goes to a module, a box keeps Only those, the keys, the twin; 10 000 modules',
+    'bar_tools': 'the synthetic page: the right button on the bar, its tool groups shown or left out (Show all, Hide all)',
     'fst': 'BUILD/demo_fst.html (make demo-fst): FSM state names and hierarchy from the FST',
     'examples': 'the example pages (make examples): bookmarks, arrows, colours, state names, their assertions',
     'big': 'every built page: redraw time, Sort',
@@ -3514,7 +3883,7 @@ def main():
     a.out = a.out or os.path.join(a.build, 'shots')
     build = pathlib.Path(a.build).resolve()   # as_uri() needs an absolute path
     ERRDIR[0] = str(build / 'smoke')
-    synth = synth_page(build) if any(want(x) for x in ('pages', 'hierarchy', 'find', 'deep', 'big', 'viewer')) else None
+    synth = synth_page(build) if any(want(x) for x in ('pages', 'hierarchy', 'find', 'deep', 'big', 'viewer', 'modules', 'bar_tools')) else None
     # the build products smoke expects (missing: SKIPPED) and the user's own pages under work/ (checked when there)
     expected = {build / 'demo.html': 'make html', build / 'demo_fst.html': 'make demo-fst'}
     expected.update({build / 'examples' / ex / f'{ex}{s}.html': 'make examples' for ex in EXAMPLES for s in ('', '_all')})
@@ -3531,7 +3900,7 @@ def main():
         for path in PAGES + BUILT:
             tsv = path.name == 'test_stream_video.html'
             own = (['docs', 'sva_docs', 'viewer', 'wavefw', 'plugin_api', 'api_docs'] if path == PAGES[0] else ['conformance'] if path == PAGES[1] else
-                   ['hierarchy', 'find', 'deep', 'viewer'] if path == synth or tsv else ['fst'] if path.name == 'demo_fst.html' else
+                   ['hierarchy', 'find', 'deep', 'viewer'] + (['modules', 'bar_tools'] if path == synth else []) if path == synth or tsv else ['fst'] if path.name == 'demo_fst.html' else
                    ['examples'] if path.stem in EXAMPLES or path.stem == 'fsm_all' else [])
             own += ['big'] if path in BUILT else []
             if not want('pages') and not any(want(x) for x in own):
@@ -3579,6 +3948,8 @@ def main():
                         run('deep', deep, page, P)
                         if path == synth:
                             run('viewer', viewer_big, page, P)
+                            run('modules', modules, page, P)
+                            run('bar_tools', bar_tools, page, P)
                     if path.name == 'demo_fst.html':
                         run('fst', fst, page)
                     if path.stem in EXAMPLES:
@@ -3610,6 +3981,7 @@ def main():
         run('view_review', view_review, b, build)
         run('dump', dump, b, build)
         run('readers', readers, b, build)
+        run('vscode', vscode_tab, b, build)
         run('ranges', ranges, b, build)
         run('buses', buses, b, build)
         run('tips', tips, b, build)

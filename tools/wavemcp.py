@@ -9,7 +9,8 @@ signal's transitions when a tool first needs it, then kept. The agent marks a pa
 commands (view_edit: bookmarks with a text, arrows, markers, groups, highlight, colours, cursor, window; tools/viewedit.py
 has them) and reads what is there (view_get): live in their browser once view_live has connected the page (an HTTP
 server of this process on 127.0.0.1, from port 8742 or WAVEFW_LIVE_PORT on, its key in ~/.cache/wavefw/live-token),
-else in the page's file. Times are ns in and out (a number), or a text with a unit as the viewer reads one
+else in the page's file; a .vcd / .fst open in VS Code (the extension in vscode/ connects its tabs to the link that
+~/.cache/wavefw/live/<port>.json announces, and opens a dump that view_live asks for) is live only. Times are ns in and out (a number), or a text with a unit as the viewer reads one
 ("2.5us", "100NS"); signal names are full paths, paths under "scope", or a unique tail of a path ("PSEL", "u_regs.PSEL").
 A request or an argument of a wrong shape gets an error answer and the session goes on; the programs the server starts
 get /dev/null as stdin (stdin and stdout are the protocol).
@@ -22,7 +23,7 @@ get /dev/null as stdin (stdin and stdout are the protocol).
 Standard library only; the sva CLI as svabuild.py finds it (--sva-bin, $WAVEFW_SVA, the build, bin/<os>/sva, PATH).
 docs/USAGE.md § "AI agents (MCP)" has the tools; tests/mcp_bench.py measures what they save.
 """
-import argparse, bisect, collections, contextlib, fnmatch, hmac, http.server, json, os, queue, re, secrets, shutil, statistics, subprocess, sys
+import argparse, atexit, bisect, collections, contextlib, fnmatch, hmac, http.server, json, os, queue, re, secrets, shutil, socket, statistics, subprocess, sys
 import tempfile, threading, time, traceback, urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
@@ -734,9 +735,13 @@ LIVE_PORT = 8742   # the first port tried (WAVEFW_LIVE_PORT), then the next nine
 BRIDGE = []   # the one Bridge of this process, once a view tool started it
 
 
+def cache_dir():
+    return os.path.join(os.environ.get('XDG_CACHE_HOME') or os.path.expanduser('~/.cache'), 'wavefw')
+
+
 def live_token():
     """This user's token of the live link (made once, kept: a page that has it reconnects after a restart)."""
-    d = os.path.join(os.environ.get('XDG_CACHE_HOME') or os.path.expanduser('~/.cache'), 'wavefw')
+    d = cache_dir()
     p = os.path.join(d, 'live-token')
     try:
         with open(p, encoding='utf-8') as f:
@@ -875,9 +880,29 @@ class Bridge:
         self.httpd.handle_error = lambda request, addr: print(f'wavemcp: the live link: {sys.exc_info()[1]!r} ({addr[0]})', file=sys.stderr)
         self.port, self.started = self.httpd.server_address[1], time.monotonic()
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+        self.announce()
+
+    def announce(self):
+        """~/.cache/wavefw/live/<port>.json while this link runs: the VS Code extension's tabs connect to it (vscode/)."""
+        d = os.path.join(cache_dir(), 'live')
+        self.note = os.path.join(d, f'{self.port}.json')
+        try:
+            os.makedirs(d, exist_ok=True)
+            with open(self.note, 'w', encoding='utf-8') as f:
+                json.dump({'port': self.port, 'pid': os.getpid(), 'host': socket.gethostname(), 'started': time.time()}, f)
+            atexit.register(self.unannounce)
+        except OSError:
+            self.note = None
+
+    def unannounce(self):
+        if self.note:
+            with contextlib.suppress(OSError):
+                os.remove(self.note)
+            self.note = None
 
     def close(self):
         self.closed = True
+        self.unannounce()
         for c in list(self.clients.values()):
             c['q'].put(None)
         self.httpd.shutdown()
@@ -985,7 +1010,8 @@ def same_file(page_path, browser_path):
         d = os.environ.get('WSL_DISTRO_NAME')
         if d and p.lower().startswith(f'/{d.lower()}/'):
             p = p[len(d) + 1:]
-        return os.path.normcase(os.path.normpath(p)).lower()
+        p = os.path.normcase(os.path.normpath(p))
+        return p.lower() if re.match(r'^/mnt/[a-z]/', p, re.I) else p   # a Windows drive (WSL) ignores case, Linux does not
     return norm(page_path) == norm(browser_path)
 
 
@@ -1145,11 +1171,28 @@ def summary(st, timed, base=None):
     return out
 
 
+DUMP_RE = re.compile(r'\.(vcd|fst)$', re.I)   # a dump open in a tab of VS Code (vscode/): live only, no file to write into
+
+
 def t_view_live(a):
     b = bridge()
     out = {'link': f'http://127.0.0.1:{b.port}'}
     path = page_arg(a)
-    if path:
+    if path and DUMP_RE.search(path):
+        if not os.path.isfile(path):
+            raise WaveError(f'no such dump: {path}')
+        out['page'] = path
+        if a.get('off'):
+            out['note'] = 'a dump in VS Code: close its tab, or turn the setting wavefw.live off there'
+        else:
+            if a.get('open'):
+                out['opened'] = vscode_open(path, b.port)
+            wait = a.get('wait', 10 if a.get('open') else max(0.0, 5 - (time.monotonic() - b.started)))
+            wait = min(max(float(wait), 0.0), 30.0) if viewedit.finite(wait) else 0.0
+            got = live_page({'page': path}, wait=wait)
+            out['note'] = ('its tab in VS Code is connected' if got else
+                           'not connected: the person opens it in VS Code with the wavefw extension (open: true asks VS Code to)')
+    elif path:
         pg = viewedit.Page(path)
         text = viewedit.put_block(pg.text, 'live', None if a.get('off') else {'port': b.port, 'token': b.token})
         if text != pg.text:
@@ -1171,6 +1214,21 @@ def t_view_live(a):
                 out['note'] += '; not connected yet: ask the person to open or reload it'
     out['pages'] = [{'page': c['path'], 'title': c['title'], 'views': [v.get('key') for v in c['views']]} for c in b.pages()]
     return out
+
+
+def vscode_open(path, port):
+    """A dump in a wavefw tab of the VS Code windows of this host (vscode/ watches ~/.cache/wavefw/live), connected to
+    the bridge on port -> asked."""
+    d = os.path.join(cache_dir(), 'live')
+    try:
+        os.makedirs(d, exist_ok=True)
+        p = os.path.join(d, f'open-{time.time_ns()}-{os.getpid()}.json')
+        with open(p + '.part', 'w', encoding='utf-8') as f:
+            json.dump({'path': path, 'port': port, 'host': socket.gethostname(), 'at': int(time.time() * 1000)}, f)
+        os.replace(p + '.part', p)
+        return True
+    except OSError:
+        return False
 
 
 def open_browser(path):
@@ -1210,6 +1268,12 @@ def target(a):
     path = page_arg(a)
     if path and not os.path.isfile(path):
         raise WaveError(f'no such page: {path}')
+    if path and DUMP_RE.search(path):   # a dump: its tab in VS Code, or nothing
+        b = bridge()   # the extension's tabs connect within a few seconds of its start
+        c = live_page(a, wait=max(0.0, 5 - (time.monotonic() - b.started)))
+        if not c:
+            raise WaveError(f'{os.path.basename(path)} is not open in VS Code (wavefw): view_live with page and open: true opens it there')
+        return 'live', c, live_view(c, a.get('view'))
     linked = bool(path) and has_live_block(path)
     if linked and not BRIDGE:
         bridge()
@@ -1222,13 +1286,15 @@ def target(a):
 
 
 def t_view_edit(a):
+    if a.get('save') and page_arg(a) and DUMP_RE.search(page_arg(a)):   # before anything is done: no edit twice on a retry
+        raise WaveError('save: a dump has no page file to write into (VS Code keeps the view of its tab; Save in the tab writes a .view.json)')
     mode, where, v = target(a)
     note = ''
     if mode == 'live':
         try:
             return live_edit(a, where, v)
         except LiveGone as e:   # the tab went before it answered the edit: the file, when there is one
-            if not page_arg(a):
+            if not page_arg(a) or DUMP_RE.search(page_arg(a)):
                 raise
             where, note = page_arg(a), f' ({e})'
     pg = viewedit.Page(where)
@@ -1273,7 +1339,7 @@ def t_view_get(a):
         try:
             return live_get(a, where, v)
         except LiveGone:
-            if not page_arg(a):
+            if not page_arg(a) or DUMP_RE.search(page_arg(a)):
                 raise
             where = page_arg(a)
     pg = viewedit.Page(where)
@@ -1366,13 +1432,15 @@ TOOLS = [
          'page file: they reload it). ops in order, each {op, …}: ' + ' '.join(f'{k}({v})' for k, v in viewedit.COMMANDS.items()
                                                                                   if k not in ('state', 'set_state', 'rows', 'picture')) +
          '. t/from/to in ns; signals: path, name, path tail or * pattern; bookmark: a numbered circle with a text (no signal: on the time '
-         'axis); arrow from/to: bookmark numbers; group: a folder of signals at the top; edge (live): the cursor to the next edge.',
+         'axis); arrow from/to: bookmark numbers; group: a folder of signals at the top; only: just these modules on the waves (with their '
+         'submodules); edge (live): the cursor to the next edge.',
          {'page': S, 'view': S, 'ops': {'type': 'array', 'items': {'type': 'object'}}, 'save': B}, ('ops',), ro=False),
     tool('view_get', t_view_get, 'What a page shows: bookmarks, arrows, markers, groups, highlight, colours, hidden, cursor, window (live: '
          'with the person\'s own edits). rows: list its signals (a pattern, "" all); picture: a PNG of the screen (live).',
          {'page': S, 'view': S, 'rows': S, 'limit': N, 'picture': B, 'full': B}, ()),
     tool('view_live', t_view_live, 'Connect a page to this server: it is written into the page (open or reload it), then view_edit and '
-         'view_get work on it live; open: open it in the browser; off: disconnect. Without page: the pages connected.',
+         'view_get work on it live; open: open it in the browser; off: disconnect. page a .vcd / .fst: its tab in VS Code (the wavefw '
+         'extension connects by itself; open: VS Code opens it). Without page: the pages connected.',
          {'page': S, 'open': B, 'off': B}, (), ro=False),
 ]
 BY_NAME = {t['name']: t for t in TOOLS}

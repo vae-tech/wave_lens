@@ -61,6 +61,9 @@ help:
 	@echo 'make sva-verify the checkers of the examples in Verilator --assert against sva eval (after make examples; skipped without verilator)'
 	@echo 'make sva-eval   WAVES=dump.vcd|fst SVA="pkg.sv checks.sva" SCOPE=tb.dut [OUT=results.json] [ARGS=...]: sva eval'
 	@echo 'make sva-spike  the spike page $$(BUILD)/sva/spike.html (the WebAssembly build and wavefw/sva.js in a page)'
+	@echo 'make vsix       the VS Code extension (vscode/) -> $$(BUILD)/wavefw-<version>.vsix: the viewer and the static sva, for the'
+	@echo '                Linux host of Remote-SSH / WSL (nothing else installed there; code --install-extension FILE there)'
+	@echo 'make vscode-e2e the extension (vscode/) in a real VS Code (tests/vscode_e2e.py; WSL: the VS Code of Windows, Remote - WSL)'
 	@echo 'make mcp-bench  the MCP server for AI agents (tools/wavemcp.py) on the benchmark tasks by a script: answers checked, bytes'
 	@echo '                returned (no agent); AGENT=claude|codex [MODEL=sonnet] [REPS=2] [TASKS=a1,b3]: agents with and without'
 	@echo '                it, tokens counted (costs tokens; tests/mcp_bench.py, the runs in $$(BUILD)/mcp_bench/runs.jsonl)'
@@ -247,6 +250,18 @@ sva-spike: sva-build $(VCD)
 	$(PY) sva/spike/mkspike.py $(SVA_WASM) $(B)/sva/spike.html
 	$(SVA_BIN) eval --waves $(VCD) --scope demo_tb --sva sva/spike/demo.sva || true   # a_start_done fails on purpose
 
+# The VS Code extension (vscode/): one .vsix with the viewer's files and the static sva CLI (tools/mkvsix.py, no node /
+# npm; install it into the Remote-SSH / WSL host); vscode-e2e runs it in a real VS Code (tests/vscode_e2e.py: in WSL the
+# VS Code of Windows connected to this distribution)
+VSIX := $(B)/wavefw-$(shell cat VERSION).0.vsix
+vsix: $(VSIX)
+$(VSIX): VERSION tools/mkvsix.py $(wildcard vscode/*.js vscode/*.json vscode/*.md vscode/media/*.js) $(DIST_LINUX) \
+    $(addprefix wavefw/,wavefw.css wavefw.config.js wavefw.js sva.wasm.js bus.js sva.js)
+	$(PY) tools/mkvsix.py --out $@
+vscode-e2e:
+	@test -f $(B)/examples/fsm/fsm.fst || $(MAKE) example EX=fsm
+	PYTHONDONTWRITEBYTECODE=1 python3 tests/vscode_e2e.py --build $(B)
+
 # The MCP server (tools/wavemcp.py) and what it saves an agent (tests/mcp_bench.py): a generated dump with known answers
 # and the APB / FSM examples; without AGENT the tasks are solved through the tools by a script (make check runs it)
 mcp-bench:
@@ -258,7 +273,7 @@ smoke:
 	$(PW) tests/smoke.py --build $(B) --out $(B)/shots $(if $(STRICT),--strict) $(if $(ONLY),--only $(ONLY))
 
 # wavefw/wavefw.js is the concatenation of wavefw/src/*.js (committed: a page needs one file and no build step)
-WAVEFW_SRC := $(addprefix wavefw/src/,model.js vcd.js paint.js view.js edit.js diff.js svg.js boot.js)
+WAVEFW_SRC := $(addprefix wavefw/src/,model.js vcd.js paint.js view.js edit.js diff.js modules.js svg.js boot.js)
 wavefw: wavefw/wavefw.js
 wavefw/wavefw.js: $(WAVEFW_SRC) tools/wavefwcat.py
 	$(PY) tools/wavefwcat.py
@@ -304,4 +319,4 @@ clean-all:
 	$(if $(filter $(B),/ $(CURDIR) $(HOME) $(abspath $(HOME)/..)),$(error clean-all: BUILD=$(B) is not a build directory))
 	rm -rf $(B)
 
-.PHONY: wavefw help demo demo-fst example examples shots guide-shots html config sva-build dist dist-linux dist-windows sva-test sva-bless sva-examples sva-verify sva-eval sva-spike mcp-bench smoke shots-check unit check fmt lint clean clean-all
+.PHONY: vsix vscode-e2e wavefw help demo demo-fst example examples shots guide-shots html config sva-build dist dist-linux dist-windows sva-test sva-bless sva-examples sva-verify sva-eval sva-spike mcp-bench smoke shots-check unit check fmt lint clean clean-all

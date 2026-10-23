@@ -194,6 +194,54 @@ class Commands(unittest.TestCase):
         alone = V.Editor(V.Model(), {})
         self.assertEqual(alone.run([{'op': 'cycles', 'clock': 'tb.clk'}])[0]['cycles']['cycleClock'], 'tb.clk')   # no page: the width unknown
 
+    def test_only(self):
+        """Only (modules.js setOnly): modules by name (not a signal, not a struct's value), in the model's order, one under
+        another picked left out; the way to them as headers, their signals gone; pause, resume, clear; a selection it
+        leaves out goes; the state's own names said when they are not modules here."""
+        e = ed()
+        r = e.run([{'op': 'only', 'modules': ['other', 'tb', 'dut']}])[0]
+        self.assertEqual(r['only'], {'modules': ['tb'], 'on': True})                       # dut and other under tb: in it
+        r = e.run([{'op': 'only', 'modules': ['other', 'dut']}, {'op': 'select', 'signal': 'clk'}, {'op': 'only'}])
+        self.assertEqual(r[0]['only']['modules'], ['tb.dut', 'tb.other'])
+        self.assertIsNone(r[1]['select'])                                               # clk: above every module
+        self.assertEqual(r[2]['only'], {'modules': ['tb.dut', 'tb.other'], 'on': True})  # none given: as it is
+        e.run([{'op': 'only', 'modules': 'dut'}])
+        self.assertEqual([x['full'] for x in e.ordered() if x['type'] != 'space'], ['tb', 'tb.dut', 'tb.dut.state', 'tb.dut.valid', 'tb.dut.data'])
+        self.assertEqual(len(e.ordered(only=False)), len(e.ordered()) + 6)              # clk, tb.other and its rows: back without it
+        self.assertEqual([x['full'] for x in e.found('state')], ['tb.dut.state'])
+        self.assertEqual(e.run([{'op': 'only', 'on': False}])[0]['only'], {'modules': ['tb.dut'], 'on': False})
+        self.assertEqual([x['full'] for x in e.found('state')], ['tb.dut.state', 'tb.other.state'])
+        bad = e.run([{'op': 'only', 'modules': 'reg'}, {'op': 'only', 'modules': 'valid'}, {'op': 'only', 'modules': None}])
+        self.assertEqual([x['error'][:22] for x in bad], ['no module "reg"', 'no module "valid"', 'modules: a list of mod'])
+        self.assertEqual(e.st['only'], {'modules': ['tb.dut'], 'on': False})            # the bad ones changed nothing
+        self.assertEqual(e.run([{'op': 'only', 'modules': []}])[0]['only'], {'modules': [], 'on': True})   # none kept: not every module
+        self.assertEqual(e.run([{'op': 'only', 'clear': True}])[0]['only'], None)
+        self.assertIn('no set to pause', e.run([{'op': 'only', 'on': True}])[0]['error'])
+        e.run([{'op': 'select', 'signal': 'tb.other.state'}])
+        miss = e.run([{'op': 'set_state', 'state': {'wavefw': 'state', 'only': {'modules': ['tb.dut', 'tb.nope', 'tb.other.reg']}}}])[0]
+        self.assertEqual(miss['missing'], ['tb.nope', 'tb.other.reg'])
+        self.assertEqual(e.st['only'], {'modules': ['tb.dut'], 'on': True})            # kept as the viewer keeps it
+        self.assertIsNone(e.st['select'])                                               # a selection it leaves out goes
+        # the modules named open with the ones above them (nested ones too), open false: the folding as it is
+        f = ed()
+        f.run([{'op': 'fold', 'all': True}, {'op': 'only', 'modules': ['tb.dut'], 'open': False}])
+        self.assertEqual(f.fold(), ['tb', 'tb.dut', 'tb.other', 'tb.other.reg'])
+        f.run([{'op': 'find', 'query': 'state', 'open': True}, {'op': 'only', 'modules': ['tb', 'tb.dut']}])
+        self.assertEqual(f.fold(), ['tb.other', 'tb.other.reg'])
+        self.assertIs(f.st['config']['findOpen'], False)                                # the find's Open off
+        f.run([{'op': 'fold', 'all': True}, {'op': 'only', 'on': False}, {'op': 'only', 'on': True}])
+        self.assertEqual(len(f.fold()), 4)                                              # pause, resume: no folding
+        # many modules: one pass over the rows (not a pass over the modules per row)
+        big = {'signal': [['top'] + [[f'm{i}', {'name': 'a', 'wave': '01'}] for i in range(4000)]]}
+        b = ed(doc=big)
+        b.run([{'op': 'only', 'modules': 'm7'}])
+        t0 = __import__('time').perf_counter()
+        self.assertEqual([x['full'] for x in b.ordered()], ['top', 'top.m7', 'top.m7.a'])
+        self.assertLess(__import__('time').perf_counter() - t0, 1.0)
+        # your group's signal: by the signal it shows
+        e.run([{'op': 'group', 'name': 'g', 'signals': ['clk', 'tb.dut.valid']}])
+        self.assertEqual([x['full'] for x in e.ordered()[:3]], ['@g', 'tb.dut.valid', 'tb'])
+
 
 class Twin(unittest.TestCase):
     """What edit.js does, the same here (review 2026-10-22: A9/B4, M4, B13, B14, B15)."""

@@ -339,6 +339,35 @@
   sub-modules first, or the file's order) and <code>groupColors</code> (one colour per module or channel) shape this further; see
   <a href="pages.html">Dump → page</a>.</p>
 
+<h3 id="modules">The Modules panel and Only</h3>
+<p><kbd>t</kbd> (<span class="ui">Modules</span> in the list group, <span class="ui">Modules…</span> in the right button's menu) opens the
+  page's modules as a tree over the viewer, without signals: per module the signals of its own and with its submodules, ● at the module of the
+  selected signal, a fuzzy filter on top. The tree folds on its own; its header moves the panel, its corner sizes it.</p>
+<ul>
+  <li><b>A click on a name goes there</b>: the module and the ones above it opened in the names column (shown again when hidden), its first
+    signal — its own, else of a submodule — selected in the middle of the waves.</li>
+  <li><b>A box drawn over names keeps Only those modules</b> on the waves, with their submodules: the modules on the way to them stay as
+    headers, every other module and its signals leave; the tree still has them all. The modules the box names (the nested ones too) open
+    on the waves with the ones above them; the ones under them stay folded as they were. <kbd>ctrl+click</kbd> (<kbd>Space</kbd>) puts one in or
+    takes it out, <kbd>shift+click</kbd> keeps a run, <span class="ui">Only matches</span> (<kbd>shift+Enter</kbd> in the filter) every module
+    the filter finds. <span class="ui">Only: N modules ‖</span> in the bar pauses it (the set kept, <span class="ui">▶</span> resumes it),
+    <span class="ui">✕</span> clears it; a click on a module Only leaves out pauses it and goes there.</li>
+</ul>
+<p>Only is its own layer over Hide: what you hid stays hidden, a highlight comes back with its rows. The find says how many matches it leaves
+  out; the picture, WaveDrom and Paint take only what is in the view. It is in the saved state, Save page and undo, and the command
+  <code>only</code> sets it from a script or an agent.</p>
+<figure><img src="img/viewer-modules.png" alt="The Modules panel over the AXI-Lite page: Only u_slave, axi_lite_tb kept as its header" loading="lazy">
+  <figcaption><b>Only one module.</b> <code>u_slave</code> picked in the tree: on the waves the testbench stays as a header on the way to it,
+  its own signals and <code>u_master</code> gone; the bar says <span class="ui">Only: 1 module ‖</span>.</figcaption></figure>
+<table>
+  <tr><th>In the tree</th><th>Does</th></tr>
+  <tr><td>click, <kbd>Enter</kbd></td><td>go to the module</td></tr>
+  <tr><td>a box over names, <kbd>shift+click</kbd>, <kbd>shift+↑</kbd> <kbd>↓</kbd></td><td>Only those</td></tr>
+  <tr><td><kbd>ctrl+click</kbd>, <kbd>Space</kbd></td><td>one module into Only or out of it</td></tr>
+  <tr><td><kbd>↑</kbd> <kbd>↓</kbd> <kbd>Home</kbd> <kbd>End</kbd>, <kbd>←</kbd> <kbd>→</kbd></td><td>move; fold / open (the parent / the first child)</td></tr>
+  <tr><td><kbd>/</kbd>, <kbd>t</kbd>, <kbd>Esc</kbd></td><td>the filter; the selected signal's module; close the panel</td></tr>
+</table>
+
 <h2 id="groups">Your groups</h2>
 <p>The right button's <span class="ui">Groups ▸</span> puts the signal clicked (or the highlighted, the selected ones) <span class="ui">Into</span>
   a group of your own or a <span class="ui">New group</span>: a folder at the top of the names with its signals in your order. They stay in
@@ -468,6 +497,7 @@
     <td>next / previous bookmark, bookmark n</td></tr>
   <tr><td><kbd>zM</kbd> / <kbd>zR</kbd></td><td>fold / open every module</td><td><kbd>zc</kbd> <kbd>zo</kbd> <kbd>za</kbd></td>
     <td>the selected signal's module</td></tr>
+  <tr><td><kbd>t</kbd></td><td>the Modules panel (<a href="#modules">Only</a>)</td><td><kbd>ctrl+G</kbd></td><td>the list of your groups</td></tr>
   <tr><td><kbd>yy</kbd>, <kbd>ctrl+C</kbd></td><td>copy the path</td><td><kbd>Esc</kbd></td><td>reset: search, highlight, selection</td></tr>
   <tr><td><kbd>]t</kbd> <kbd>[t</kbd></td><td>next / previous bus transaction (<a href="buses.html">Bus transactions</a>)</td>
     <td><kbd>]f</kbd> <kbd>[f</kbd>, <kbd>]a</kbd> <kbd>[a</kbd></td><td>next / previous assertion failure, assertion

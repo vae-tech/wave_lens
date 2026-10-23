@@ -2,7 +2,8 @@
 """viewedit.py — the viewer's commands (view.run of wavefw/src/edit.js) on a page's edits or a saved state, from the shell.
 
 What a person does with the buttons of a viewer — bookmarks (numbered circles with a text), arrows between them, markers,
-groups of their own, highlight, colours, the selection, hidden and folded rows, the radix, the cursor and the window — a
+groups of their own, highlight, colours, the selection, hidden and folded rows, the modules kept (Only), the radix, the
+cursor and the window — a
 script or an agent does with the same commands by name. In the page they run live (view.run, or tools/wavemcp.py
 view_live); here they change the file:
 
@@ -56,8 +57,8 @@ COMMANDS = {
     'marker': 'id? t? label? color? delete?', 'group': 'name signals? add? remove? color? rename? delete? go? move?',
     'highlight': 'add? remove? set? clear?', 'paint': 'signals? color? clear?', 'select': 'signal? signals?', 'hide': 'signals', 'show': 'signals?',
     'fold': 'groups? all?', 'unfold': 'groups? all?', 'radix': 'signals radix', 'analog': 'signals rows', 'sort': 'dir ignore?', 'style': 'name',
-    'layout': 'scroll? height? tools?', 'find': 'query case? word? regex? highlight? open?', 'gaps': 'on? idle? keep? signals? clock? aux? only? count? reset?',
-    'cycles': 'on? clock? zero? reset?',
+    'layout': 'scroll? height? tools?', 'find': 'query case? word? regex? highlight? open? mask?', 'gaps': 'on? idle? keep? signals? clock? aux? only? count? reset?',
+    'cycles': 'on? clock? zero? reset?', 'only': 'modules? on? clear? open?',
     'edge': 'dir? kind? value? signal?', 'reset': '', 'state': '', 'set_state': 'state', 'rows': 'pattern? limit? offset?',
     'picture': 'format? from? to? rows?',
 }
@@ -187,6 +188,11 @@ class Model:
         if doc:
             self._walk(doc.get('signal') or [], 0, [])
             self._span()
+            kinds = self.doc.get('scopes') if isinstance(self.doc.get('scopes'), dict) else {}   # model.js: "scopes" says a group's kind
+            for g in self.groups:
+                k = kinds.get(g['path'])
+                if not g.get('kind') and k:
+                    g['kind'] = k if isinstance(k, str) else k.get('kind') if isinstance(k, dict) else None
 
     def _span(self):
         """model.js parse: M.t0 = min(C(0), the first "tv" time), M.t1 = max(C(cycles), time.t1, the last change)."""
@@ -258,22 +264,37 @@ class Model:
     def sigs(self):
         return [r for r in self.rows if r['type'] == 'sig']
 
-    def pool(self, state, groups):
-        """What a name may be: the signals, then (groups) the modules in id order and your groups (their path "@name")."""
+    def scopes(self):
+        """modules.js scopes: the page's groups that are modules (interfaces …), not the value of a struct or a union."""
+        return [g for g in self.groups if g.get('kind') not in ('struct', 'union')]
+
+    def only_norm(self, paths):
+        """modules.js onlyNorm: the known module paths in id order, none under another one of them."""
+        by = {g['path']: g for g in self.scopes()}
+        gs = [by[p] for p in dict.fromkeys(paths) if p in by]
+        ids = {g['id'] for g in gs}
+        return [g['path'] for g in sorted(gs, key=lambda g: g['id']) if not ids & set(g['anc'])]
+
+    def pool(self, state, groups, scopes=False):
+        """What a name may be: the signals, then (groups) the modules in id order and your groups (their path "@name");
+        scopes: the modules only."""
+        if scopes:
+            return self.scopes()
         out = self.sigs()
         if groups:
             out = out + self.groups + [{'type': 'group', 'user': True, 'name': g['name'], 'full': '@' + g['name'], 'path': '@' + g['name']}
                                        for g in state.get('groups') or []]
         return out
 
-    def pick(self, state, spec, groups=False, one=False):
+    def pick(self, state, spec, groups=False, one=False, scopes=False):
         """view pickRows: a full path, a name, the end of a path, a * pattern -> rows; nothing found or ambiguous: an error."""
         items = prefixes(spec)
+        what = 'module' if scopes else 'signal or module' if groups else 'signal'
         if not items:
-            fail(f'no {"signals or modules" if groups else "signals"} given')
-        pool, out = self.pool(state, groups), []
+            fail(f'no {"modules" if scopes else "signals or modules" if groups else "signals"} given')
+        pool, out = self.pool(state, groups, scopes), []
         if not self.doc:   # a state without its page: names as they are (full paths)
-            return [{'type': 'sig', 'name': s.rsplit('.', 1)[-1], 'full': s, 'anc': [], 'width': 2} for s in items]
+            return [{'type': 'group' if scopes else 'sig', 'name': s.rsplit('.', 1)[-1], 'full': s, 'path': s, 'anc': [], 'width': 2} for s in items]
         for s in items:
             if '*' in s:
                 rx = glob_re(s)
@@ -286,7 +307,7 @@ class Model:
             if not hit:
                 low = s.lower().replace('*', '')
                 near = [r['full'] for r in pool if low and low in r['name'].lower()][:5]
-                fail(f'no {"signal or module" if groups else "signal"} "{s}"' + (f'; similar: {", ".join(near)}' if near else ''))
+                fail(f'no {what} "{s}"' + (f'; similar: {", ".join(near)}' if near else ''))
             fulls = list(dict.fromkeys(r['full'] for r in hit))
             if '*' not in s and len(fulls) > 1:   # one net at several levels: the one nearest the top, when it is one (as wavemcp.py)
                 top = min(f.count('.') for f in fulls)
@@ -747,9 +768,15 @@ class Editor:
         self.put_map('paint', p)
         return {'painted': len(rows)}
 
+    def in_view(self, r):
+        """modules.js shown: a signal not hidden (nor its module) and kept by Only (folded away it still is)."""
+        h = set(self.st.get('hidden') or [])
+        return r['full'] not in h and not {self.m.groups[i]['path'] for i in r['anc'] if i < len(self.m.groups)} & h and self.only_keeps(r)
+
     def c_select(self, a):
-        if a.get('signals') is not None:
-            self.st['select'] = self.m.pick(self.st, a['signals'])[-1]['full']
+        if a.get('signals') is not None:   # the last of the ones in the view (edit.js: the run of them)
+            rows = [r for r in self.m.pick(self.st, a['signals']) if not self.m.doc or self.in_view(r)]
+            self.st['select'] = rows[-1]['full'] if rows else None
         else:
             self.st['select'] = self.m.pick(self.st, a['signal'], one=True)[0]['full'] if a.get('signal') else None
         self.unselect_gone()
@@ -765,7 +792,7 @@ class Editor:
             return
         hidden, folded = set(self.st.get('hidden') or []), set(self.fold())
         paths = {self.m.groups[i]['path'] for i in r['anc']}
-        if sel in hidden or paths & hidden or paths & folded:
+        if sel in hidden or paths & hidden or paths & folded or not self.only_keeps(r):
             self.st['select'] = None
 
     def c_hide(self, a):
@@ -810,6 +837,61 @@ class Editor:
 
     def c_unfold(self, a):
         return self._fold(a, False)
+
+    def only(self):
+        """The state's Only as the viewer keeps it ({modules, on}; None: every module)."""
+        o = self.st.get('only')
+        if not isinstance(o, dict):
+            return None
+        ms = [p for p in o.get('modules') or [] if isinstance(p, str)]
+        return {'modules': self.m.only_norm(ms) if self.m.doc else list(dict.fromkeys(ms)), 'on': o.get('on') is not False}
+
+    def only_filter(self):
+        """modules.js onlyKeep: a test of a row of the page (your group's signal: by the signal it shows) — whether Only
+        keeps it; None: Only is off (every row)."""
+        o = self.only()
+        if not o or not o['on'] or not self.m.doc:
+            return None
+        sel = {g['id'] for g in self.m.groups if g['path'] in o['modules']}   # onlyIds: inn (picked, under them), way (above them)
+        inn = {g['id'] for g in self.m.groups if g['id'] in sel or sel & set(g['anc'])}
+        way = {a for i in sel for a in self.m.groups[i]['anc']} - inn
+
+        def keep(r):
+            if r.get('user') or (r['type'] == 'group' and (r['id'] in way or r['id'] in inn)):
+                return True
+            anc = r.get('oanc', r['anc'])
+            return bool(anc) and anc[-1] in inn
+        return keep
+
+    def only_keeps(self, r):
+        f = self.only_filter()
+        return f is None or f(r)
+
+    def c_only(self, a):
+        if a.get('clear'):
+            self.st['only'] = None
+        elif 'modules' in a:
+            if a['modules'] is None:
+                fail('modules: a list of modules (clear: every module again)')
+            ms = [] if isinstance(a['modules'], list) and not a['modules'] else [g['path'] for g in self.m.pick(self.st, a['modules'], scopes=True)]
+            self.st['only'] = {'modules': self.m.only_norm(ms) if self.m.doc else list(dict.fromkeys(ms)), 'on': True if a.get('on') is None else bool(a['on'])}
+            if a.get('open') is not False and a.get('on') is not False and ms:   # modules.js onlyOpen: the modules named and the ones above them
+                by, f = {g['path']: g for g in self.m.groups}, dict(self.st.get('folds') or {})
+                for p in dict.fromkeys(q for m in ms if m in by for q in [self.m.groups[i]['path'] for i in by[m]['anc']] + [m]):
+                    f.pop(p, None)
+                    f[p] = False
+                self.st['folds'] = f
+                if self.st.get('find') and self.opt('findOpen'):   # the find's Open off (its next search would fold them again)
+                    self.config()['findOpen'] = False
+        elif a.get('on') is not None:
+            o = self.only()
+            if not o:
+                fail('only: no set to pause or resume (modules: […] first)')
+            self.st['only'] = dict(o, on=bool(a['on']))
+        if 'only' in self.st and self.st['only'] is not None:
+            self.st['only'] = self.only()
+        self.unselect_gone()
+        return {'only': self.only()}
 
     def c_radix(self, a):
         rx = a.get('radix')
@@ -886,7 +968,8 @@ class Editor:
 
     def c_find(self, a):
         c = self.config()
-        for k, key in (('case', 'findCase'), ('word', 'findWord'), ('regex', 'findRegex'), ('highlight', 'findHighlight'), ('open', 'findOpen')):
+        for k, key in (('case', 'findCase'), ('word', 'findWord'), ('regex', 'findRegex'), ('highlight', 'findHighlight'), ('open', 'findOpen'),
+                       ('mask', 'findMask')):
             if a.get(k) is not None:
                 c[key] = bool(a[k])
         self.st['find'] = str(a.get('query') if a.get('query') is not None else '')
@@ -973,6 +1056,9 @@ class Editor:
                     self.config().update(v)
             elif k not in ('wavefw', 'version', 'title'):
                 self.st[k] = v
+        if 'only' in s:   # as the viewer keeps it: its known modules, on unless false; a selection it leaves out goes
+            self.st['only'] = self.only()
+            self.unselect_gone()
         return {'missing': self.missing(s)}
 
     def missing(self, s):
@@ -999,6 +1085,9 @@ class Editor:
                 see(p)
         for p in lst(s.get('hidden')):
             see(p)
+        mods = {g['path'] for g in self.m.scopes()}
+        for p in lst(s['only'].get('modules')) if isinstance(s.get('only'), dict) else []:
+            see(p, mods)
         for b in lst(s.get('bookmarks')):
             see(b.get('signal') if isinstance(b, dict) else None)
         see(s.get('select'))
@@ -1011,24 +1100,26 @@ class Editor:
         for i, g in enumerate(self.groups()):
             gid = -1 - i
             out.append({'type': 'group', 'user': True, 'id': gid, 'name': g['name'], 'full': '@' + g['name'], 'path': '@' + g['name'], 'anc': []})
-            out += [dict(by[f], anc=[gid], ug=True) for f in g['signals'] if f in by]
+            out += [dict(by[f], anc=[gid], ug=True, oanc=by[f]['anc']) for f in g['signals'] if f in by]
         return out
 
-    def ordered(self):
+    def ordered(self, only=True):
         """view.js allRows: your groups at the top, then the rows in the order of "sort"; hidden rows and what is under a
-        hidden module left out."""
+        hidden module left out, then (only) the rows Only leaves out."""
         sort, ign = self.opt('sort', 'none'), sorted(prefixes(self.opt('sortIgnore')), key=lambda p: -len(p))
         rows = self.user_rows() + order_rows(self.m.rows, sort, ign, self.m.cfg.get('groupOrder', 'file'))
         h = set(self.st.get('hidden') or [])
         ids = {g['id'] for g in self.m.groups if g['path'] in h}
-        return [r for r in rows if not (r['type'] != 'space' and r.get('full') and not r.get('ug') and r['full'] in h) and not ids & set(r['anc'])]
+        out = [r for r in rows if not (r['type'] != 'space' and r.get('full') and not r.get('ug') and r['full'] in h) and not ids & set(r['anc'])]
+        keep = self.only_filter() if only else None
+        return [r for r in out if keep(r)] if keep else out
 
     def c_rows(self, a):
         """edit.js rows: in display order, the hidden ones at the end."""
         pat = str(a.get('pattern') or '')
         rx = glob_re(pat) if '*' in pat else None
         h = set(self.st.get('hidden') or [])
-        shown = [r for r in self.ordered() if (r['type'] == 'sig' and not r.get('ug')) or (r['type'] == 'group' and r.get('full'))]
+        shown = [r for r in self.ordered(only=False) if (r['type'] == 'sig' and not r.get('ug')) or (r['type'] == 'group' and r.get('full'))]
         rows = [[r['full'], 'group' if r.get('user') else 'module' if r['type'] == 'group' else r['width']]
                 for r in shown + [r for r in self.m.rows if r.get('full') and r['full'] in h]]
         rows = [r for r in rows if not pat or (rx.match(r[0]) if rx else pat.lower() in r[0].lower())]

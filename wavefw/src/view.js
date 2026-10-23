@@ -93,6 +93,12 @@ Object.assign(TIPS, { '.subc': ['The clock cycles in a band under the time axis:
   'm:cycx': ['The cycles as the page sets them (cycles, cycleClock, cycleZero)'] });
 TIPS['m:ugto'] = ['Into your group (a folder at the top of the names)']; TIPS['m:ugoff'] = ['Out of this group of yours'];
 TIPS['m:ugo'] = ['Go to the group: opened, in the middle, its first signal selected', ['ctrl+G']];
+// the Modules panel (modules.js) and Only
+Object.assign(TIPS, { 'act:mods': ['The modules as a tree: a click goes to one, a box over names keeps Only those on the waves', ['t']],
+  'act:onlyp': ['Only these modules on the waves (with their submodules): a click pauses it (every module), again resumes it'],
+  'act:onlyx': ['Every module on the waves again (Only cleared)'], 'm:mods': ['The modules as a tree: go to one, keep Only some', ['t']],
+  'm:locate': ['The module of this row in the tree of the modules', ['t']], 'm:onlyp': ['Only paused: every module; resumed: the set again'],
+  'm:onlyx': ['Every module on the waves again (Only cleared)'] });
 // the help (? in the bar, key ?): the keys and the mouse by what they do; plugins' keys come from their addKey help
 const HELP = [
   ['Zoom and move', [[['i', '+'], 'zoom in'], [['o', '-'], 'zoom out'], [['f'], 'show everything'], [['l'], 'the window before the last zoom'],
@@ -105,7 +111,7 @@ const HELP = [
     [['gg', 'G'], 'the first / last'], [['ctrl+G'], 'your groups: a list, a click goes there'],
     [['alt+↑', 'alt+↓'], 'the selected signal up / down in your group (shift: the group); or drag it in the names'],
     [['ctrl+click', '○'], 'highlight'], [['ctrl+shift+click'], 'highlight every row from the last one to it'],
-    [['zM', 'zR'], 'fold / open every module'],
+    [['zM', 'zR'], 'fold / open every module'], [['t'], 'the modules as a tree: a click goes to one, a box keeps Only those (again: the selected one\'s)'],
     [['zc', 'zo', 'za'], 'the selected signal\'s module'], [['s'], 'sort'], [['yy', 'ctrl+C'], 'copy the path'],
       [['Esc'], 'reset: search, highlight, selection']]],
   ['Find', [[['/', 'ctrl+F'], 'find (the bar scrolled away: it floats over the waves)'],
@@ -118,6 +124,8 @@ const HELP = [
     [['alt+drag'], 'a box: its time and its signals, then the menu (picture, WaveDrom, colour)'], [['ctrl+click'], 'clear the range'],
     [['right button'], 'a range and the menu: picture, colour, radix, hide'], [['m'], 'bookmark at the cursor'],
     [[']m', '[m'], 'next / previous bookmark'], [['drag a bookmark'], 'move it'], [['shift+drag a bookmark'], 'an arrow to another one']]],
+  ['The bar', [[['right button'], 'on the bar: which of its tool groups it shows (Show all, Hide all, a tick each)'],
+    [['▴', '▾ tools'], 'fold the tools to the title line / open them']]],
   ['Undo', [[['ctrl+Z'], 'undo the last change of bookmarks, arrows, groups, colours, radix, hidden rows, highlight'],
     [['ctrl+shift+Z', 'ctrl+Y'], 'redo']]],
   ['Help', [[['?'], 'this box'], [['hover a button'], 'what it does, its keys']]],
@@ -126,6 +134,8 @@ const HELP = [
 const WD_CELLS = 2048;   // the cycles a WaveDrom export keeps at most (the rest of the range is said, not dropped silently)
 const KIND_MARK = { struct: '{}', union: '∪', interface: '⊟' };
 // the find group's options: [button, viewer property = setting, label, title, alt+ key code]
+// the find's view buttons: data-act -> the viewer's flag, its setting
+const FIND_VIEW = { fhl: ['findHl', 'findHighlight'], fopen: ['findOpen', 'findOpen'], fmask: ['findMask', 'findMask'] };
 const FIND_OPTS = [
   ['fcase', 'findCase', 'Aa', 'Match case (alt+C)', 'KeyC'],
   ['fword', 'findWord', 'Full', 'Full match: a word is the whole name, a.b the end of the full path (alt+W)', 'KeyW'],
@@ -164,11 +174,14 @@ class Bar {
       seg(...FIND_OPTS.map(([act, k, label, t]) =>
         `<button type="button" class="fo" data-act="${act}" aria-pressed="${!!S[k]}" title="${esc(t)}">${esc(label)}</button>`)),
       seg(`<button type="button" data-act="fhl" aria-pressed="${!!S.findHighlight}" title="Found rows in front, the rest dimmed">Highlight</button>`,
-        `<button type="button" data-act="fopen" aria-pressed="${!!S.findOpen}" title="Every module folded except the ones with a match">Open</button>`),
+        `<button type="button" data-act="fopen" aria-pressed="${!!S.findOpen}" title="Every module folded except the ones with a match">Open</button>`,
+        `<button type="button" data-act="fmask" aria-pressed="${!!S.findMask}" title="The found rows only (and the modules on the way to them)">Mask</button>`),
       seg(`<input type="color" class="fcol" value="${/^#[0-9a-f]{6}$/i.test(paint) ? paint : '#d6336c'}" aria-label="paint colour" title="Colour for Paint">`,
         ('<button type="button" data-act="fpaint" title="Paint the found and the highlighted signals in this colour (none: the selected one; kept in this ' +
           'browser)">Paint</button>')),
-      (`<button type="button" data-act="funpaint" title="Back to the signals' own colours" hidden>Unpaint</button><button type="button" data-act="fcopy" ` +
+      (`<button type="button" data-act="funpaint" title="Back to the signals' own colours" hidden>Unpaint</button><button type="button" data-act="fselect" ` +
+          `title="Select the found signals: the right button then takes them all (a new group, colour, radix, hide …); ctrl+click: add them to the ` +
+          `selection">Select</button><button type="button" data-act="fcopy" ` +
           `title="Copy the full paths of the found rows, one per line">Copy</button><button type="button" class="fx" data-act="fdock" title="Back into the ` +
           `bar (Esc: and reset the search)" aria-label="close">✕</button>`)).replace('class="tg"', 'class="tg find"');
     // cursor: type a time (in the unit chosen, or with its own: 85.12us) and Set; a span and Show: the window around the cursor
@@ -190,9 +203,12 @@ class Bar {
         units.replace('class="cu"', 'class="su"'),
           '<button type="button" data-act="cshow" title="Window of this span centred on the cursor (key: c)">Show</button>');
     const list = grp('list', sort ? seg(sort) : '', groups ? seg('<button type="button" data-act="expand" title="Expand all groups">Expand</button>',
-      '<button type="button" data-act="collapse" title="Collapse all groups">Collapse</button>') : '',
+      '<button type="button" data-act="collapse" title="Collapse all groups">Collapse</button>',
+      '<button type="button" data-act="mods" title="The modules as a tree (t)">Modules</button>') : '',
       '<button type="button" data-act="hl" title="Clear the highlight (Esc)" hidden></button>',
-        '<button type="button" data-act="unhide" title="Show the rows hidden with the right button\'s menu again" hidden></button>');
+        '<button type="button" data-act="unhide" title="Show the rows hidden with the right button\'s menu again" hidden></button>',
+      '<button type="button" data-act="onlyp" title="Only these modules: a click pauses it" hidden></button><button type="button" data-act="onlyx" ' +
+        'title="Every module again" aria-label="clear Only" hidden>✕</button>');
     const edges = grp('edges', seg('<button type="button" data-act="prev" title="Previous edge of the selected signal, or of any shown signal ([)">◀</button>',
       (`<select class="edge" aria-label="edge kind" title="Edge kind (e): any, rise, fall, a value, X / ` +
           `Z">${Object.entries(EDGE_KINDS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select>`),
@@ -222,7 +238,8 @@ class Bar {
       'alt+drag: a box of time and signals · click: cursor (on a near edge; alt: not) + select a signal · keys on the waves (as in Questa): ' +
       'i o zoom in / out, f full, l last, c in on the cursor · ← → pan, Home End · shift+← → cursor · ↑ ↓ (j k) select, gg G first / last · ' +
       'Tab shift+Tab next / previous edge, e edge kind · / ctrl+F find, n N next / previous match, * # the selected name · ' +
-      `m bookmark, ]m [m next / previous · zM zR fold / open all, zc zo the selected module · yy ctrl+C copy${S.sortButton ? ' · s sort' : ''} · ` +
+      `m bookmark, ]m [m next / previous · zM zR fold / open all, zc zo the selected module${groups ? ' · t modules' : ''} · ` +
+      `yy ctrl+C copy${S.sortButton ? ' · s sort' : ''} · ` +
       `Esc reset${groups ? ' · click a module to fold it' : ''} · shift+click a name: select every signal to it · ` +
       '○ or ctrl+click a name: highlight, ctrl+shift+click: every row to it';
     return `<div class="bar"><div class="head"><span
@@ -264,6 +281,8 @@ class Bar {
     v.edgeSel.addEventListener('change', () => v.setEdgeKind(v.edgeSel.value, true));
     v.evEl.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); v.edge(e.shiftKey ? -1 : 1); } });
     v.wsEl = r.querySelector('select.ws'); v.wsEl.addEventListener('change', () => v.setStyle(v.wsEl.value));
+    r.querySelector('.bar').addEventListener('contextmenu', e => {   // the right button on the bar: which tool groups it shows (a field: the browser's)
+      if (!v.S.contextMenu || e.target.closest('input, select, textarea')) return; e.preventDefault(); v.toolsMenu(e.clientX, e.clientY); });
     r.querySelector('.bar').addEventListener('click', e => {
       const b = e.target.closest('button'); if (!b) return;
       if (b.dataset.act === 'in') v.zoom(0.5, 0.5);
@@ -272,12 +291,15 @@ class Bar {
       else if (b.dataset.act === 'sort') v.setSort(SORTS[(SORTS.indexOf(v.sort) + 1) % SORTS.length]);
       else if (b.dataset.act === 'hl') v.highlight(null);
       else if (b.dataset.act === 'unhide') v.unhide();
+      else if (b.dataset.act === 'mods') v.modules();
+      else if (b.dataset.act === 'onlyp') v.setOnly({ on: !v.only.on });
+      else if (b.dataset.act === 'onlyx') { v.setOnly(null); v.toast('Only: every module again'); }
       else if (b.dataset.act === 'expand') v.expandAll();
       else if (b.dataset.act === 'collapse') v.collapseAll();
       else if (b.dataset.act === 'prev' || b.dataset.act === 'next') v.edge(b.dataset.act === 'next' ? 1 : -1);
       else if (b.dataset.act === 'mark') v.mark();
-      else if (b.dataset.act === 'fhl' || b.dataset.act === 'fopen') {
-        const k = b.dataset.act === 'fhl' ? 'findHl' : 'findOpen'; v[k] = !v[k]; b.setAttribute('aria-pressed', v[k]); v.find(v.q || '', k === 'findOpen');
+      else if (FIND_VIEW[b.dataset.act]) {
+        const k = FIND_VIEW[b.dataset.act][0]; v[k] = !v[k]; b.setAttribute('aria-pressed', v[k]); v.find(v.q || '', k === 'findOpen');
       }
       else if (FIND_OPTS.some(o => o[0] === b.dataset.act)) { const k = FIND_OPTS.find(o => o[0] === b.dataset.act)[1]; v.setFindOpt(k, !v[k]); }
       else if (b.dataset.act === 'fpaint') v.paint(v.fcol.value);
@@ -286,6 +308,7 @@ class Bar {
       else if (b.dataset.act === 'cshow') v.showCursor(v.csEl.value);
       else if (b.dataset.act === 'fnext' || b.dataset.act === 'fprev') v.findStep(b.dataset.act === 'fnext' ? 1 : -1);
       else if (b.dataset.act === 'fdock') { v.floatFind(false); v.canvas.focus({ preventScroll: true }); }
+      else if (b.dataset.act === 'fselect') v.selectFound(e.ctrlKey || e.metaKey);
       else if (b.dataset.act === 'fcopy') v.copyRows(v.allRows().filter(r => v.found.has(r)));
       else if (b.dataset.act === 'ssave') v.saveState();
       else if (b.dataset.act === 'spage') { try { v.toast('saved ' + savePage()); } catch (e) { v.toast(e.message); } }
@@ -400,6 +423,7 @@ class Names {
     v.rowsShown = v.rowsL; v.shape = shape;
     v.tabRow = v.sel || v.vis.find(x => x.type === 'sig');
     for (let k = 0; k < v.rowsL.length; k++) this.state(v.rowEls[k], v.rowsL[k]);
+    if (v.mods) v.mods.render();   // the Modules panel: Hide, Only, the selected signal's module
   }
   // the name of row r, the letters of a match marked (and the ignored prefix dimmed when sorting)
   label(r) {
@@ -621,6 +645,8 @@ class WaveView {
     this.picks = hlPick(M, this.S.highlight); this.hlFrom = JSON.stringify(this.S.highlight ?? null);
     this.selRun = new Set(); this.selAnchor = null;   // shift+click: a run of selected signals (selectRun)
     this.found = new Map(); this.findPicks = new Map(); this.findHl = this.S.findHighlight; this.findOpen = this.S.findOpen;   // fuzzy find
+    this.findMask = this.S.findMask;
+    this.only = null;   // Only: {modules: [paths], on} (modules.js)
     for (const [, k] of FIND_OPTS) this[k] = !!this.S[k];   // its options: the case, the whole name, a regular expression
     this.paintKey = 'wavefw.paint:' + this.storeId;
     this.painted = new Map(); this.loadPaint();
@@ -870,6 +896,7 @@ class WaveView {
       else if (k === 'x' && this.cursor2 != null) { [this.cursor, this.cursor2] = [this.cursor2, this.cursor]; this.draw(); }   // swap the cursors
       else if (k === '?') this.help();
       else if (k === 's' && this.S.sortButton) this.setSort(SORTS[(SORTS.indexOf(this.sort) + 1) % SORTS.length]);
+      else if (k === 't') this.modules(true, !!this.mods || !!this.sel);   // the Modules panel; open: the selected signal's module in it
       else if (k === 'Escape') h = false;   // handled by the viewer (reset)
       else if (this.keys[k]) this.keys[k](e);
       else h = false;
@@ -878,12 +905,23 @@ class WaveView {
   }
   fitPfx() { const i = this.root.querySelector('input.pfx'); if (i) i.style.width = Math.max(7, i.value.length + 2) + 'ch'; }
   // every row in display order (the model's and the plugins'), and the ones not folded away
-  allRows(hidden = false) {   // hidden: the hidden rows too, where they would be (the command rows)
+  // the ones Hide leaves (rowsHid), then the ones Only keeps (modules.js), then the find's Mask: rowsAll
+  allRows(hidden = false, unmasked = false) {   // hidden: the hidden rows too, where they would be (the command rows); unmasked: no Mask
     const rows = withExtra(orderRows(this.M.rows, this.sort, this.sortIgnore, this.S.groupOrder), this.extraRows, this.M, this);
     if (hidden) return rows;
-    if (!this.hiddenRows.size) return (this.rowsAll = rows);
-    const H = this.hiddenRows, ids = new Set(Object.values(this.M.groups).filter(g => H.has(g.path)).map(g => g.id));   // a hidden module: all of it
-    return (this.rowsAll = rows.filter(r => !(r.type !== 'space' && r.type !== 'lane' && r.full && !r.ug && H.has(r.full)) && !r.anc.some(id => ids.has(id))));
+    const H = this.hiddenRows, ids = H.size && new Set(Object.values(this.M.groups).filter(g => H.has(g.path)).map(g => g.id));   // a hidden module: all of it
+    this.rowsStale = false;
+    this.rowsHid = H.size ? rows.filter(r => !(r.type !== 'space' && r.type !== 'lane' && r.full && !r.ug && H.has(r.full)) && !r.anc.some(id => ids.has(id))) :
+      rows;
+    const rows2 = this.onlyOn() ? this.onlyKeep(this.rowsHid) : this.rowsHid;
+    if (unmasked) return rows2;
+    return (this.rowsAll = this.findMask && this.found.size ? this.maskKeep(rows2) : rows2);
+  }
+  // the find's Mask: the found rows, the modules on the way to them, what is inside a found module
+  maskKeep(rows) {
+    const way = new Set(), inn = new Set();
+    for (const r of this.found.keys()) { r.anc.forEach(id => way.add(id)); if (r.type === 'group') inn.add(r.id); }
+    return rows.filter(r => this.found.has(r) || (r.type === 'group' && way.has(r.id)) || r.anc.some(id => inn.has(id)));
   }
   visible() { return this.allRows().filter(r => !r.anc.some(id => this.collapsed.has(id))); }
   settingsChanged() { this.root.dispatchEvent(new CustomEvent('wavefw:settings')); }   // sort, prefixes, settings
@@ -921,6 +959,15 @@ class WaveView {
     this.setRange(T(Math.min(x0, x1)), T(Math.max(x0, x1)), rows[0] || null);   // draws
     this.renderNames(); return this;
   }
+  // the find's Select: the found signals in the view selected (as shift+click), in display order, for the right button
+  // (a new group, colour, radix, hide …); add (ctrl+click): to the ones selected already
+  selectFound(add = false) {
+    const rows = this.allRows().filter(r => this.found.has(r) && r.type === 'sig' && r.tr);
+    if (!rows.length) { this.toast(this.found.size ? 'no signal found' : 'nothing found'); return this; }
+    this.selRun = new Set([...(add ? [...this.selRun, this.sel].filter(Boolean) : []), ...rows]);
+    this.sel = rows[rows.length - 1]; this.selAnchor = rows[0];
+    this.renderNames(); this.draw(); this.toast(`${this.selRun.size} selected`); return this;
+  }
   isSel(r) { return r === this.sel || (!!this.selRun && this.selRun.has(r)); }
   highlightRun(a, b) {
     if (typeof a === 'string') a = this.vis.find(r => r.full === a); if (typeof b === 'string') b = this.vis.find(r => r.full === b);
@@ -932,19 +979,20 @@ class WaveView {
   // fuzzy find: rows matching every word; options: found rows in front (findHl), only their modules open (findOpen)
   // restore: give back the folding from before the search (the Open option switched off); clearing the search keeps the
   // modules it opened, so the view stays where it is
-  find(q, restore = false, keep = null) {
+  find(q, restore = false, keep = null, refold = true) {   // refold false: the matches only, the folding as it is (Only changed)
     this.q = q;
     const s = String(q || '').trim(), re = this.findRegex && s ? this.findRe(s) : null, badRe = this.findRegex && !!s && !re;
     const terms = this.findRegex ? (re ? [s] : []) : s.split(/\s+/).filter(w => w.replace(/\./g, ''));   // "." alone is no query
     const o = { cs: this.findCase, full: this.findWord, re };
     this.found = new Map();
-    if (terms.length) for (const r of this.allRows()) { if (r.type !== 'space') { const m = findRow(r, terms, this.M, o); if (m) this.found.set(r, m); } }
+    if (terms.length) for (const r of this.allRows(false, true)) {   // what Mask leaves out is searched too
+      if (r.type !== 'space') { const m = findRow(r, terms, this.M, o); if (m) this.found.set(r, m); } }
     let moved = null;
-    if (terms.length && this.findOpen) {   // fold everything but the way to the matches
+    if (terms.length && this.findOpen && refold) {   // fold everything but the way to the matches
       if (!this.foldSaved) { this.foldSaved = new Set(this.collapsed); this.foldTouched = false; }
       const keep = new Set(); for (const r of this.found.keys()) r.anc.forEach(id => keep.add(id));
       this.collapsed = new Set(Object.keys(this.M.groups).map(Number).filter(id => !keep.has(id)));
-    } else if (this.foldSaved) {
+    } else if (this.foldSaved && refold) {
       // the search ends: the folding from before it is back (unless you folded or opened a module meanwhile), with the
       // way to the row you stepped to kept open, and that row stays where it is on the screen
       if (restore) this.collapsed = this.foldSaved;
@@ -958,7 +1006,8 @@ class WaveView {
     this.findPicks = terms.length && this.findHl ? new Map([...this.found.keys()].map(r => [r, 6])) : new Map();
     this.fi = -1; this.fiRow = null;
     if (this.cntEl) { const n = this.found.size, miss = terms.length ? this.omitRows().filter(r => findRow(r, terms, this.M, o)) : [];
-      this.cntEl.textContent = badRe ? 'bad regex' : terms.length ? (n ? `${n} found` : 'no match') +
+      const out = terms.length ? this.onlyOut(r => !!findRow(r, terms, this.M, o)) : 0;   // in the modules Only leaves out
+      this.cntEl.textContent = badRe ? 'bad regex' : terms.length ? (n ? `${n} found` : 'no match') + (out ? ` · ${out} outside Only` : '') +
         (miss.length ? ` · ${miss.length} not in the page` : '') : '';
       this.cntEl.classList.toggle('none', badRe || (!!terms.length && !n));
       if (miss.length) { const why = this.M.src.meta.omitted.why === 'dumpBudget' ? `past the dumpBudget (${this.S.dumpBudget} changes) of the page's ` +
@@ -1066,7 +1115,7 @@ class WaveView {
   }
   paintRows() {
     const rows = this.M.rows.filter(r => r.type === 'sig' && (this.found.has(r) || this.picks.has(r) || this.selRun.has(r) ||
-      r.anc.some(id => this.picks.has(this.M.groups[id]))));
+      r.anc.some(id => this.picks.has(this.M.groups[id]))) && this.shown(r));   // not what you do not see (Hide, Only)
     return rows.length ? rows : this.sel && this.sel.type === 'sig' ? [this.sel] : [];
   }
   unpaint() { this.painted.clear(); this.savePaint(); this.renderNames(); this.draw(); return this; }
@@ -1094,11 +1143,11 @@ class WaveView {
     if (out.length) this.ugMemo = null;
     for (const r of [].concat(rows)) { const p = typeof r === 'string' ? r : r && !r.ug && (r.full || r.path); if (p) this.hiddenRows.add(p); }
     if (this.sel && !this.allRows().includes(this.sel)) this.sel = null;
-    this.saveRows(); this.renderNames(); this.draw(); return this;
+    this.rowsStale = true; this.saveRows(); this.renderNames(); this.draw(); return this;
   }
   unhide(paths) {   // these paths (none: every hidden row) back
     if (paths) [].concat(paths).forEach(p => this.hiddenRows.delete(p)); else this.hiddenRows.clear();
-    this.saveRows(); this.renderNames(); this.draw(); return this;
+    this.rowsStale = true; this.saveRows(); this.renderNames(); this.draw(); return this;
   }
   loadRows() {
     let o = {};
@@ -1135,7 +1184,8 @@ class WaveView {
       if (o && o.gap && typeof o.gap === 'object') L.gap = o.gap;
       if (o && o.cyc && typeof o.cyc === 'object') L.cyc = o.cyc;
       if (o && (typeof o.maxHeight === 'string' || typeof o.maxHeight === 'number')) L.maxHeight = o.maxHeight;
-      if (o && typeof o.toolsFolded === 'boolean') L.toolsFolded = o.toolsFolded; return L; } catch (e) { return {}; } }
+      if (o && typeof o.toolsFolded === 'boolean') L.toolsFolded = o.toolsFolded;
+      if (o && Array.isArray(o.toolsHidden)) L.toolsHidden = toolNames(o.toolsHidden); return L; } catch (e) { return {}; } }
   // where the rows scroll: 'window' (in the viewer, maxHeight high: height, else the settings', else 80vh; the bar above
   // them) or 'page' (with the page; the bar sticks to the top while the rows go by); null: the settings' again. Kept in
   // this browser (the bar's own layer), as the edge style
@@ -1155,6 +1205,14 @@ class WaveView {
     this.saveLook(); this.S.toolsFolded = 'toolsFolded' in this.local ? this.local.toolsFolded : base;
     this.layoutShow(); this.draw(); return this;
   }
+  // the bar's tool groups left out (their labels: "cursor", "find", "go to" …; the right button on the bar); null: the
+  // settings' again. Kept in this browser, as the folding of the tools; / and ctrl+F still float the find over the waves
+  setToolsHidden(list) {
+    const base = toolNames(settings(GLOBAL, this.M.cfg, this.opts).toolsHidden), want = list == null ? base : toolNames(list);
+    if (list == null || want.join() === base.join()) delete this.local.toolsHidden; else this.local.toolsHidden = want;
+    this.saveLook(); this.S.toolsHidden = want; this.layoutShow(); this.draw(); return this;
+  }
+  toolGroups() { return [...new Set([...this.root.querySelectorAll('.bar .tools .tg')].map(g => g.dataset.tg).filter(Boolean))]; }
   // the classes and the buttons of the two: the rows' scroll box, the sticky bar's height (the canvas and the names' header under it)
   layoutShow() {
     const S = this.S, r = this.root, win = S.maxHeight != null && S.maxHeight !== '';
@@ -1166,6 +1224,13 @@ class WaveView {
     if (s) { s.textContent = win ? 'Scroll: window' : 'Scroll: page'; s.setAttribute('aria-pressed', win); }
     if (t) { t.textContent = S.toolsFolded ? '▾ tools' : '▴'; t.setAttribute('aria-expanded', !S.toolsFolded);
       t.setAttribute('aria-label', S.toolsFolded ? 'open the tools' : 'fold the tools'); }
+    // the tool groups left out (toolsHidden), a line with none left gone (not while the find floats from it), no border after the last one
+    const H = new Set(toolNames(S.toolsHidden));
+    for (const ln of r.querySelectorAll('.bar .tools .tln')) {
+      const gs = [...ln.children].filter(g => g.classList.contains('tg')), on = gs.filter(g => !g.classList.toggle('off', H.has(g.dataset.tg)));
+      gs.forEach(g => g.classList.toggle('end', g === on[on.length - 1]));
+      ln.hidden = gs.length > 0 && !on.length && !gs.some(g => g.classList.contains('float'));
+    }
   }
   saveLook() {
     try { if (Object.keys(this.local).length) localStorage.setItem(this.lookKey, JSON.stringify(this.local)); else localStorage.removeItem(this.lookKey);
@@ -1249,13 +1314,15 @@ class WaveView {
   state() {
     const M = this.M, folded = this.foldSaved || this.collapsed;   // during a search: the folding from before it
     const st = { wavefw: 'state', version: STATE_VERSION, title: this.opts.title || M.title || '', from: this.t0, to: this.t0 + this.span, cursor: this.cursor,
-      config: { style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded, sort: this.sort, sortIgnore: [...this.sortIgnore],
+      config: { style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded,
+        toolsHidden: toolNames(this.S.toolsHidden), sort: this.sort, sortIgnore: [...this.sortIgnore],
         fold: [...folded].map(id => M.groups[id] && M.groups[id].path).filter(Boolean),
         highlight: [...this.picks].sort((a, b) => a[1] - b[1]).map(([r]) => r.full).filter(Boolean), findHighlight: !!this.findHl, findOpen: !!this.findOpen,
+        findMask: !!this.findMask,
           ...Object.fromEntries(FIND_OPTS.map(o => [o[1], !!this[o[1]]])), ...this.gapOpt(), ...this.cycOpt() },
       paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs), hidden: [...this.hiddenRows],
         select: (this.sel && this.sel.full) || null, find: this.q || '', bookmarks: this.bookmarks(), arrows: this.arrowList(), markers: this.markList(),
-        groups: this.groupList() };
+        groups: this.groupList(), only: this.onlyState() };
     // none is said (null, the kind "any"): a state loaded later clears what is there then (a key left out keeps it)
     st.cursor2 = this.cursor2 ?? null;
     st.range = this.range ? { from: this.range[0], to: this.range[1], signal: (this.rangeRow && this.rangeRow.full) || null } : null;
@@ -1286,6 +1353,7 @@ class WaveView {
     if (C.style !== undefined) this.setStyle(C.style);
     if (C.maxHeight !== undefined) this.setScroll(C.maxHeight == null || C.maxHeight === '' ? 'page' : 'window', C.maxHeight || undefined);
     if (C.toolsFolded !== undefined) this.setTools(!!C.toolsFolded);
+    if (C.toolsHidden !== undefined) this.setToolsHidden(C.toolsHidden ?? []);
     const gk = GAP_KEYS.filter(k => C[k] !== undefined);
     if (gk.length) this.setGaps(Object.fromEntries(gk.map(k => [k, C[k]])));   // null: the clock found (not the page's)
     const ck = CYC_KEYS.filter(k => C[k] !== undefined);
@@ -1295,8 +1363,8 @@ class WaveView {
       this.sort = sortDir(C.sort ?? this.sort); if (C.sortIgnore !== undefined) this.sortIgnore = prefixes(C.sortIgnore).sort((a, b) => b.length - a.length);
       if (pfx) { pfx.value = this.sortIgnore.join(','); this.fitPfx(); }
     }
-    for (const [k, own] of [['findHighlight', 'findHl'], ['findOpen', 'findOpen']]) if (C[k] !== undefined) {
-      this[own] = !!C[k]; this.root.querySelector(`button[data-act=${k === 'findOpen' ? 'fopen' : 'fhl'}]`)?.setAttribute('aria-pressed', this[own]);
+    for (const [act, [own, k]] of Object.entries(FIND_VIEW)) if (C[k] !== undefined) {
+      this[own] = !!C[k]; this.root.querySelector(`button[data-act=${act}]`)?.setAttribute('aria-pressed', this[own]);
     }
     for (const [act, k] of FIND_OPTS) if (C[k] !== undefined) { this[k] = !!C[k];
       this.root.querySelector(`button[data-act=${act}]`)?.setAttribute('aria-pressed', this[k]); }
@@ -1321,7 +1389,11 @@ class WaveView {
       for (const [p, n] of Object.entries(st.analog || {})) if (seen(p)) this.setAnalog(p, n, true);
     }
     if (st.radix !== undefined || st.analog !== undefined) this.saveRows();   // once (renderNames and draw: find() below)
-    if (st.hidden !== undefined) { this.hiddenRows = new Set((st.hidden || []).filter(p => seen(p))); this.saveRows(); }
+    if (st.hidden !== undefined) { this.hiddenRows = new Set((st.hidden || []).filter(p => seen(p))); this.rowsStale = true; this.saveRows(); }
+    // "only": {modules: [paths], on} (on left out: on), null: every module; a path not of a module here: left out (said)
+    if (st.only !== undefined) { const o = st.only && typeof st.only === 'object' ? st.only : null, ms = o && Array.isArray(o.modules) ? o.modules : [];
+      ms.forEach(p => { if (!this.scopeOf(p)) miss.add(String(p)); });
+      this.only = o ? { modules: this.onlyNorm(ms), on: o.on !== false } : null; this.onlyMemo = null; this.onlyShow(); }
     if (st.bookmarks !== undefined || st.arrows !== undefined) {
       const bms = (st.bookmarks || []).filter(b => !b.signal || seen(b.signal) || (b.signal = null, true));   // on the time axis when its signal is not here
       this.bms = bmNorm(bms); this.arrows = arNorm(st.arrows || [], bms); this.saveBookmarks(); this.renderNotes();
@@ -1341,6 +1413,7 @@ class WaveView {
     }
     if (st.edge !== undefined) { this.setEdgeKind((st.edge && st.edge.kind) || 'any'); if (this.evEl) this.evEl.value = (st.edge && st.edge.value) || ''; }
     if (st.find !== undefined && this.qEl) this.qEl.value = st.find || '';
+    if (st.only !== undefined) { this.allRows(); this.onlyFix(); }   // a selection the set left out goes
     this.find(st.find !== undefined ? st.find || '' : this.q || '');   // draws; with Open the folding above is the one from before the search
     this.settingsChanged();
     return [...miss];
@@ -1375,9 +1448,11 @@ class WaveView {
         types: [{ description: 'VCD dump', accept: { 'text/plain': ['.vcd'] } }] }); handle = h; file = await h.getFile(); }
       else if (!file) { this.dfile.click(); return this; }
       if (handle && handle.then) handle = await handle.catch(() => null);
-      if (/\.fst$/i.test(file.name)) { this.toast('an FST is binary: sva vcd x.fst --out x.vcd (or fst2vcd), or make html WAVES=x.fst'); return this; }
       this.toast(`reading ${file.name}…`);
-      const text = await file.text(), r = vcdToWave(text, { name: file.name, budget: this.S.dumpBudget });
+      const text = await file.text();   // an FST named so but given as VCD text (the VS Code extension converts it): read
+      if (/\.fst$/i.test(file.name) && !/^\s*\$/.test(text.slice(0, 64))) {
+        this.toast('an FST is binary: sva vcd x.fst --out x.vcd (or fst2vcd), or make html WAVES=x.fst'); return this; }
+      const r = vcdToWave(text, { name: file.name, budget: this.S.dumpBudget });
       if (!r.shown) { this.toast(`${file.name}: no signals`); return this; }
       const st = keep ? this.state() : null, root = this.root, opts = Object.assign({}, this.opts,
         { title: file.name, dumpSrc: { name: file.name, handle, file } });
@@ -1406,6 +1481,7 @@ class WaveView {
       let line = tools.querySelector(`.tln[data-ln="${ln}"]`);
       if (!line) { tools.insertAdjacentHTML('beforeend', toolLine(ln, '')); line = tools.lastElementChild; }
       g = document.createElement('span'); g.className = 'tg'; g.dataset.tg = group; g.innerHTML = `<span class="tl">${esc(group)}</span>`; line.appendChild(g);
+      this.layoutShow();   // left out when toolsHidden names it
     }
     if (typeof content === 'string') g.insertAdjacentHTML('beforeend', content); else if (content) g.appendChild(content);
     return g;
@@ -1483,7 +1559,8 @@ class WaveView {
   collapseAll() { this.collapsed = new Set(Object.keys(this.M.groups).map(Number)); this.foldTouched = true; this.renderNames(); this.draw(); return this; }
   select(row) { // the signal for edge search and bookmarks: a row, a full path / name, or null
     if (typeof row === 'string') row = this.M.rows.find(r => r.type === 'sig' && r.full === row) || this.M.rows.find(r => r.type === 'sig' && r.name === row);
-    this.sel = this.selAnchor = row && row.type === 'sig' && row.tr ? row : null; this.selRun = new Set(); this.renderNames(); this.draw();
+    const out = row && (this.onlyOn() || this.hiddenRows.size) && !this.shown(row);   // hidden, or left out by Only: not selected
+    this.sel = this.selAnchor = row && row.type === 'sig' && row.tr && !out ? row : null; this.selRun = new Set(); this.renderNames(); this.draw();
     this.namesEl.querySelector('.row.sel')?.scrollIntoView({ block: 'nearest' });
     return this;
   }
@@ -1691,12 +1768,13 @@ class WaveView {
   focusFind() {
     if (this.S.toolsFolded) this.setTools(false);   // the field is in the tools
     const g = this.qEl.closest('.find'), b = g.getBoundingClientRect();
-    if (!g.classList.contains('float') && (b.top < 0 || b.bottom > innerHeight)) this.floatFind(true);
+    // off the screen, or left out of the bar (toolsHidden): it floats
+    if (!g.classList.contains('float') && (g.classList.contains('off') || b.top < 0 || b.bottom > innerHeight)) this.floatFind(true);
     this.qEl.focus({ preventScroll: true }); this.qEl.select();
   }
   floatFind(on) {
     const g = this.qEl && this.qEl.closest('.find'); if (!g || g.classList.contains('float') === !!on) return this;
-    g.classList.toggle('float', !!on);
+    g.classList.toggle('float', !!on); this.layoutShow();   // its line, when the find is left out of the bar
     if (!on) { g.style.top = g.style.right = ''; return this; }
     const w = this.wcol.getBoundingClientRect(), gb = g.getBoundingClientRect();   // right-anchored: the count grows it leftwards
     g.style.top = Math.min(Math.max(w.top, 0) + 30, innerHeight - gb.height - 6) + 'px';
@@ -1745,16 +1823,19 @@ class WaveView {
     if (o && o.paths) for (const [sc, names] of Object.entries(o.paths)) for (const n of names) out.push({ type: 'sig', name: n, full: sc ? sc + '.' + n : n,
       path: sc ? sc + '.' + n : n, scope: sc, anc: [] });
     return (this.omitL = out); }
+  // null: no rows given (the screen's); [] with the gaps' "only them" and none of their signals in the view: none
   exportRows() { const m = this.gapMask(); if (m && m.length) return m;
-    return this.selRun.size > 1 ? (this.rowsL || []).filter(r => this.selRun.has(r)) : this.picks.size ? this.pickedRows() : []; }
+    if (m && [...this.gapRefSet()].every(r => !this.shown(r))) return [];
+    const p = this.selRun.size > 1 ? (this.rowsL || []).filter(r => this.selRun.has(r)) : this.picks.size ? this.pickedRows() : [];
+    return p.length ? p : null; }
   pickedRows() { return (this.rowsL || []).filter(r => this.picks.has(r) || (r.anc || []).some(id => this.picks.has(this.M.groups[id]))); }
   // WaveDrom (WaveJSON) of signals over [a, b]: the highlighted ones (else the rows on the screen); one cell per period of
   // a clock — a 1-bit *clk* / *clock* among them, else in their modules —, else of the shortest time between changes;
   // the values at the start of each cell (as vcd2wavedrom.py samples), buses as "=" with their text in the radix shown
   toWaveDrom(a = this.t0, b = this.t0 + this.span, rows = null) {
-    const mask = this.gapMask() && [...this.gapRefSet(), ...this.gapRows().aux];
-    const picked = mask || (this.selRun.size > 1 ? this.M.rows.filter(r => this.selRun.has(r)) : this.picks.size ? this.M.rows.filter(r => this.picks.has(r) ||
-      r.anc.some(id => this.picks.has(this.M.groups[id]))) : this.screenRows());
+    const mask = this.gapMask() && [...this.gapRefSet(), ...this.gapRows().aux].filter(r => this.shown(r));   // what is in the view (Hide, Only)
+    const picked = mask || (this.selRun.size > 1 ? this.M.rows.filter(r => this.selRun.has(r) && this.shown(r)) : this.picks.size ?
+      this.M.rows.filter(r => (this.picks.has(r) || r.anc.some(id => this.picks.has(this.M.groups[id]))) && this.shown(r)) : this.screenRows());
     const sigs = (rows || picked).filter(r => r.type === 'sig' && r.tr && r.tr.length);
     this.wdCut = null;
     const clk = (this.gapOpt().gaps && this.gapClockRow()) || this.clockFor(sigs);
@@ -1797,7 +1878,7 @@ class WaveView {
       (id < 0 ? '' : this.M.groups[id].path || this.M.groups[id].name);
     const signal = scopes.length > 1 ? scopes.map(id => [label(id), ...sigs.filter(r =>
       (r.anc.length ? r.anc[r.anc.length - 1] : -1) === id).map(one)]) : sigs.map(one);
-    if (clk && !sigs.includes(clk) && cells.length > 1) signal.unshift(one(clk));
+    if (clk && !sigs.includes(clk) && cells.length > 1 && this.shown(clk)) signal.unshift(one(clk));   // a clock left out of the view: its cells only
     const title = String(this.opts.title || this.M.title || 'waves');
     return { signal, head: { text: `${title}: ${this.fmt(a, (b - a) / 1000, b - a)} … ${this.fmt(b, (b - a) / 1000, b - a)}` },
       foot: { text: (clk && !cellT ? `one cell per ${clk.full || clk.name} cycle` : `one cell per ${this.fmt(cellT, 1, cellT || 1)}`) +
@@ -1850,9 +1931,9 @@ class WaveView {
     // or a row of the shift+click run: every row of the run
     const run = !!sig && this.selRun.size > 1 && this.selRun.has(sig);
     const many = run || (it && (this.picks.has(it) || sig && picked(sig)) && this.picks.size > 1);
-    const sigs = run ? [...this.selRun] : many ? this.M.rows.filter(r => r.type === 'sig' && r.tr && picked(r)) : sig ? [sig] : [];
+    const sigs = run ? [...this.selRun] : many ? this.M.rows.filter(r => r.type === 'sig' && r.tr && picked(r) && this.shown(r)) : sig ? [sig] : [];
     const buses = sigs.filter(r => r.width > 1 && r.tr.some(o => o.raw != null)),
-      rows = run ? sigs : many ? [...this.picks.keys()].filter(r => r.full && (r.type === 'sig' || this.M.groups[r.id] === r)) : [it];
+      rows = run ? sigs : many ? [...this.picks.keys()].filter(r => r.full && (r.type === 'sig' || this.M.groups[r.id] === r) && this.shown(r)) : [it];
     const acc = getComputedStyle(this.root).getPropertyValue('--wave-paint').trim(), col = sig && this.painted.get(sig.full) ||
       (/^#[0-9a-f]{6}$/i.test(acc) ? acc : '#d6336c');
     const of = many ? `the ${sigs.length} ${run ? 'selected' : 'highlighted'}` : sig ? sig.name : '', rx = sig &&
@@ -1860,7 +1941,7 @@ class WaveView {
     // a fixed-point radix: its kind and fraction bits
     const q0 = /^(s?q)(\d+)$/.exec((sig && this.radixes.get(sig.full)) || ''), qk = q0 ? q0[1] : '', qf = q0 ? +q0[2] : 8;
     // the picture and WaveDrom: the selected run, the highlighted rows, else the screen's
-    const np = this.exportRows().length, pic = np ? { rows: this.exportRows() } : {};
+    const ex = this.exportRows(), np = ex ? ex.length : 0, pic = ex ? { rows: ex } : {};
     // the gaps of the picture and WaveDrom (idle stretches left out): on / off, how long idle, how much kept; how many now
     const gp = this.gapOpt(), [ga, gb] = r || [this.t0, this.t0 + this.span], gaps = () => this.cutsOf(ga, gb, pic.rows || this.screenRows()).length - 1;
     const gn = () => (this.gapOpt().gaps ? `Gaps: ${gaps()}` : 'Gaps'), nref = this.gapRefSet().size;
@@ -1936,6 +2017,8 @@ class WaveView {
         b('umark', 'Marker here') + b('c2',
           'Second cursor here') + (this.cursor2 != null ? b('c2x', 'Clear the second cursor') : '') + b('copyname', 'Copy the path') : '') +
       (ng || nh ? '<hr>' + (ng ? b('zM', 'Fold every module') + b('zR', 'Open every module') : '') + (nh ? b('unhide', `Show the hidden (${nh})`) : '') : '') +
+      (this.scopes().length ? '<hr>' + b('mods', 'Modules…') + (it && this.scopeOfRow(it) ? b('locate', 'Locate module in tree') : '') +
+        (this.only ? b('onlyp', this.only.on ? 'Pause Only' : 'Resume Only') + b('onlyx', 'Clear Only') : '') : '') +
       (r ? '<hr>' + b('clear', 'Clear the range') : '');
     this.root.append(el); this.menuEl = el;
     const box = el.getBoundingClientRect();
@@ -1992,6 +2075,9 @@ class WaveView {
       else if (act === 'foldup') { this.collapsed.add(up); if (this.sel && this.sel.anc.includes(up)) this.sel = null; this.foldTouched = true;
         this.renderNames(); this.draw(); }
       else if (act === 'zM' || act === 'zR') this.seq(act);
+      else if (act === 'mods' || act === 'locate') { this.closeMenu(); this.modules(true); if (act === 'locate') this.mods.locate(it); return this; }
+      else if (act === 'onlyp') this.setOnly({ on: !this.only.on });
+      else if (act === 'onlyx') this.setOnly(null);
       else if (act === 'mark') { const t = this.snap(sig, at), n = Math.max(0, ...this.bms.map(x => x.n)) + 1;
         this.bms.push({ n, t, signal: sig.full, text: '', color: null }); this.changed(true);
         this.notesEl.querySelector(`li[data-n="${n}"] input.txt`)?.focus(); return this.closeMenu(); }
@@ -2049,6 +2135,41 @@ class WaveView {
     el.addEventListener('contextmenu', e => e.preventDefault());
     const off = this.offMenu = e => { if (!el.contains(e.target)) this.closeMenu(); };
     // after the click that opened it; not for a menu closed meanwhile (its listener would close the next one)
+    setTimeout(() => { if (this.menuEl !== el) return; document.addEventListener('pointerdown', off, { capture: true, signal: this.ac.signal });
+      window.addEventListener('blur', off, { signal: this.ac.signal }); }, 0);
+    (el.querySelector('button') || el).focus({ preventScroll: true });
+    return el;
+  }
+  // the right button on the bar: its tool groups with a tick each (a click shows / hides one), Show all, Hide all; the
+  // menu stays open for the next one
+  toolsMenu(cx, cy) {
+    this.closeMenu();
+    const el = document.createElement('div'); el.className = 'wv-menu wv-tools'; el.setAttribute('role', 'menu');
+    const item = n => `<button type="button" role="menuitemcheckbox" data-m="tg" data-tg="${esc(n)}"><span><span class="ck"></span>${
+      esc(n.charAt(0).toUpperCase() + n.slice(1))}</span></button>`;
+    el.innerHTML = '<div class="mh">Tools in the bar</div><button type="button" role="menuitem" data-m="all"><span>Show all</span></button>' +
+      '<button type="button" role="menuitem" data-m="none"><span>Hide all</span></button><hr>' + this.toolGroups().map(item).join('');
+    const mark = () => { const H = new Set(toolNames(this.S.toolsHidden));
+      for (const b of el.querySelectorAll('button[data-tg]')) { const on = !H.has(b.dataset.tg); b.setAttribute('aria-checked', on);
+        b.querySelector('.ck').textContent = on ? '✓' : ''; } };
+    mark(); this.root.append(el); this.menuEl = el;
+    const box = el.getBoundingClientRect();
+    el.style.left = Math.max(4, Math.min(cx, innerWidth - box.width - 4)) + 'px'; el.style.top = Math.max(4, Math.min(cy, innerHeight - box.height - 4)) + 'px';
+    el.addEventListener('click', e => {
+      const m = e.target.closest('button[data-m]'); if (!m) return;
+      const H = new Set(toolNames(this.S.toolsHidden));
+      if (m.dataset.m === 'all') H.clear(); else if (m.dataset.m === 'none') this.toolGroups().forEach(n => H.add(n));
+      else if (!H.delete(m.dataset.tg)) H.add(m.dataset.tg);
+      this.setToolsHidden([...H]); mark();
+    });
+    el.addEventListener('keydown', e => {
+      const bs = [...el.querySelectorAll('button')], k = bs.indexOf(document.activeElement);
+      if (e.key === 'Escape') { e.stopPropagation(); this.closeMenu(); this.canvas.focus({ preventScroll: true }); }
+      else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault();
+        bs[(k + (e.key === 'ArrowDown' ? 1 : -1) + bs.length) % bs.length]?.focus(); }
+    });
+    el.addEventListener('contextmenu', e => e.preventDefault());
+    const off = this.offMenu = e => { if (!el.contains(e.target)) this.closeMenu(); };
     setTimeout(() => { if (this.menuEl !== el) return; document.addEventListener('pointerdown', off, { capture: true, signal: this.ac.signal });
       window.addEventListener('blur', off, { signal: this.ac.signal }); }, 0);
     (el.querySelector('button') || el).focus({ preventScroll: true });
@@ -2142,7 +2263,7 @@ class WaveView {
     }
     const lay = this.lay = this.layout();
     if (this.wcol.style.height !== lay.H + 'px') this.wcol.style.height = lay.H + 'px';
-    if (this.sel && !this.vis.includes(this.sel)) this.sel = null;   // folded away
+    if (this.sel && !this.vis.includes(this.sel)) { this.sel = null; if (this.mods) this.mods.render(); }   // folded away (the panel's ● goes)
     if (this.printing) this.paintPrint(lay);
     else { const f = this.size(lay); this.bmGeo = this.paintFrame(this.canvas, f.W, f.Hc, f.oy, lay, true, f.dpr); }
     this.syncReadouts();
@@ -2256,7 +2377,7 @@ class WaveView {
     this.help(false);
     cancelAnimationFrame(this.raf); cancelAnimationFrame(this.inv); clearTimeout(this.toastT);
     if (ACTIVE.view === this) ACTIVE.view = null;
-    this.closeMenu(); VIEWS.delete(this);
+    this.closeMenu(); if (this.mods) { this.mods.ac.abort(); this.mods.el.remove(); } VIEWS.delete(this);
     this.root.dispatchEvent(new CustomEvent('wavefw:destroy'));
     if (this.root.waveView === this) delete this.root.waveView;
   }

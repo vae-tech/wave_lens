@@ -5,6 +5,37 @@ lives on a branch. The version is in `VERSION`, in `wavefw.js` (`WaveFW.version`
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.17 — 23 October 2026
+
+The Modules panel (a click goes to a module, a box keeps Only the ones you pick), the waves in VS Code over
+Remote-SSH / WSL, the bar's tools to taste, the find's Mask and Select.
+
+- **Modules (`t`).** The modules as a tree over the viewer, without signals: per module its own signals and with its
+  submodules, ● at the selected signal's module, a fuzzy filter, its own folding; moved by its header, sized by its
+  corner, a drawer on a narrow screen. A click (Enter) goes to a module: opened, shown again when hidden, its first
+  signal in the middle.
+- **Only.** A box over names (ctrl+click / Space, shift+click, Only matches) keeps only those modules on the waves,
+  with their submodules; the modules between them stay as headers, every other module goes. The modules the box
+  names open (the nested ones too), the ones under them keep their folding. **Only: N modules ‖** in the bar pauses it,
+  ▶ resumes, ✕ clears; a click on a module outside it pauses it. A layer over Hide: the find counts what it leaves
+  out, the picture, WaveDrom, Paint, `]d` and the assertions' steps take only what is in the view; in the saved state,
+  Save page and undo. The command `only modules? on? clear? open?` (page, `viewedit.py`, MCP `view_edit`).
+- Designed and reviewed with Codex in six rounds (`docs/reviews/module-explorer-2026-10-22.html`).
+- **VS Code over Remote-SSH / WSL** (`vscode/`, `make vsix`): a `.vcd` / `.fst` on the Linux host opens in a tab with
+  the viewer (Open in wavefw / Open With); nothing installed on the host (the static sva turns an FST into VCD text).
+  Saving and picking files on the host, the view kept per dump, ⟳ after a new simulation (or at once), VS Code's
+  theme, the viewer's keys kept from VS Code, the clipboard; an agent's `wavemcp.py` connects the tabs, `view_live`
+  with a dump opens it in VS Code. The page's VCD reader reads the FST enum tables (FSM states by name). Tested in a
+  real VS Code of Windows connected to WSL (`make vscode-e2e`); the plan reviewed with Codex
+  (`docs/reviews/vscode-remote-2026-10-22/`).
+- **The bar's tools to taste.** The right button on the bar: its tool groups (cursor, find, expression, list …) with
+  a tick each, **Show all**, **Hide all**; a line with none left goes, `/` still floats the find (`toolsHidden`, kept
+  in this browser and in the state).
+- **Find: Mask and Select.** **Mask** keeps only the found rows on the waves with the modules on the way (`findMask`;
+  the command `find … mask?`); **Select** selects the found signals (ctrl+click: adds them), so the right button takes
+  them all (a new group, colour, radix, hide). The second background of neighbouring modules is 40% lighter. In VS
+  Code the keys in a tooltip are readable again (its webview gave `kbd` and `code` its own colours).
+
 ## 0.16 — 22 October 2026
 
 Fixes from the third review with Codex: the dumps read as a simulator wrote them, the SVA core, the viewer at scale, MCP.

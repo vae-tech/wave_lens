@@ -181,6 +181,12 @@ class Body(unittest.TestCase):
         self.assertEqual(info['tb.b[3:0]'], info['tb.b'])
         self.assertEqual(info['tb.b']['changes'], 1)
 
+    def test_enum_tables(self):   # an FST as text (sva vcd, fst2vcd -e): the table, then a reference to it before each $var
+        info = dumpscan.scan(H.fixture('enum'), body=False)
+        self.assertEqual(info['tb.state']['enum'], {0: 'IDLE', 1: 'RUN', 2: 'DONE'})
+        self.assertEqual(info['tb.st.s']['enum'], {0: 'IDLE', 1: 'RUN', 2: 'DONE'})
+        self.assertIsNone(info['tb.plain']['enum'])
+
     @unittest.skipUnless(shutil.which('fst2vcd') and os.path.exists(os.path.join(H.BUILD, 'examples', 'apb', 'apb.fst')), 'fst2vcd and make examples')
     def test_fst_through_fst2vcd(self):
         d = dumpscan.read(os.path.join(H.BUILD, 'examples', 'apb', 'apb.fst'), 'count')

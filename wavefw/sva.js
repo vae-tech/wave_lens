@@ -1154,6 +1154,7 @@ class Panel {
     const v = this.v;
     if (!outcome(b) || !this.drawn().includes(b)) {
       this.toast(`${b.assert}: ${b.state === 'cannot' ? 'cannot bind here' : b.running ? 'evaluating…' : 'not drawn in this view'}`); return; }
+    if (!this.inView(b)) { this.outOfView(b); return; }
     const i = this.attemptOf(b, this.selA && this.selA.b === b ? this.selA.i + 1 : 0);
     if (i >= 0) { this.select(b, i); return; }
     // nothing but vacuous attempts: the group, the time as it is
@@ -1180,9 +1181,13 @@ class Panel {
     const ol = li.closest('ol.asv'), r = li.getBoundingClientRect(), q = ol.getBoundingClientRect();
     if (r.top < q.top || r.bottom > q.bottom) ol.scrollTop += r.top - q.top - ol.clientHeight / 3;
   }
-  step(dir) {
-    const fs = this.failures(), v = this.v;
-    if (!fs.length) { this.toast('no assertion failure'); return; }
+  // whether the group of b is in the view: its module not hidden, not left out by Only (folded away it is)
+  inView(b) { const g = b.draw && b.draw.g, v = this.v; return !g || !v.shown || v.shown(g); }
+  outOfView(b) { const v = this.v;
+    this.toast(`${b.assert}: its module is out of the view (${v.onlyOn && v.onlyOn() ? 'Only ‖ in the bar pauses it' : 'Hidden ✕ in the bar'})`); }
+  step(dir) {   // the failures of the assertions in the view
+    const all = this.failures(), fs = all.filter(f => this.inView(f.b)), v = this.v;
+    if (!fs.length) { this.toast(all.length ? `no assertion failure in the view (${all.length} out of it)` : 'no assertion failure'); return; }
     let k = this.selA ? fs.findIndex(f => f.b === this.selA.b && f.i === this.selA.i) : -1;
     if (k >= 0) k = (k + dir + fs.length) % fs.length;
     else k = U.stepTo(fs.map(f => f.t), v.cursor, dir);
@@ -1192,6 +1197,7 @@ class Panel {
   // signals highlighted; the panel's line says which one
   select(b, i) {
     const o = outcome(b), a = o && o.attempts[i], v = this.v; if (!a) return;
+    if (!this.inView(b)) { this.outOfView(b); return; }   // the list's attempts too
     const prev = this.selA && this.selA.b; this.selA = { b, i };
     const T = o.cycles || b.results.cycles, ts = T[a.start], te = T[Math.max(a.end, a.failed_at ?? a.end)] ?? ts;
     const per = T.length > 1 ? (T[T.length - 1] - T[0]) / (T.length - 1) : (v.M.t1 - v.M.t0) / 20;

@@ -8,7 +8,8 @@
 // reference of a $var (parse_ref: an escaped \name whole, a range glued or apart is the vector's, a 1-bit "err[3]" a
 // bit of "err", "mem[1]" an element "mem.[1]"), the same path under two id codes with one range merged, a path in
 // parts (bits "err[0]" "err[1]", ranges apart "data [7:0]" "data [15:8]") one vector from its lowest index to its highest,
-// real (realtime shortreal real_parameter) and string variables as texts ("kind"), events left out, $comment … $end
+// real (realtime shortreal real_parameter) and string variables as texts ("kind"), the enum tables of an FST
+// written as text ("enum": FSM states by name), events left out, $comment … $end
 // skipped in the body, VHDL's U W H L - folded, time in order.
 const VCD_UNIT = { s: 1e12, ms: 1e9, us: 1e6, ns: 1e3, ps: 1, fs: 1e-3, as: 1e-6, zs: 1e-9 };
 const VCD_TEXT = { real: 'real', realtime: 'real', shortreal: 'real', real_parameter: 'real', string: 'string' };   // -> "kind"
@@ -22,8 +23,9 @@ function vcdToWave(text, opts = {}) {
   let i = 0, unit = 1;
   const word = () => { while (i < text.length && text.charCodeAt(i) <= 32) i++; const s = i; while (i < text.length && text.charCodeAt(i) > 32) i++;
     return text.slice(s, i); };
-  const decls = new Map(), scope = [], kinds = {};   // path -> {path, name, scope, kind, depth, ds: [[code, [msb, lsb] | null, size, glued bit]]}
-  // the header: $scope / $var / $upscope / $timescale up to $enddefinitions
+  const decls = new Map(), scope = [], kinds = {};   // path -> {path, name, scope, kind, depth, enum, ds: [[code, [msb, lsb] | null, size, glued bit]]}
+  const tables = {}; let pending = null;   // the enum tables of an FST as VCD text (fst2vcd -e, sva vcd): handle -> {value: label}
+  // the header: $scope / $var / $upscope / $timescale / $attrbegin up to $enddefinitions
   for (;;) {
     const w = word(); if (!w) throw new Error('no $enddefinitions: not a VCD, or its header is cut off');
     if (w === '$enddefinitions') { word(); break; }
@@ -31,8 +33,19 @@ function vcdToWave(text, opts = {}) {
     else if (w === '$upscope') { word(); scope.pop(); }
     else if (w === '$timescale') { let t = ''; for (let x = word(); x && x !== '$end'; x = word()) t += x; const m = /^(\d+)(s|ms|us|ns|ps|fs|as|zs)$/.exec(t);
       unit = m ? +m[1] * VCD_UNIT[m[2]] : 1; }
+    else if (w === '$attrbegin') {   // misc 07 NAME COUNT LABEL… VALUE… HANDLE: a table; misc 07 "" HANDLE: the next $var's (dumpscan's _enum_table)
+      const toks = []; for (let x = word(); x && x !== '$end'; x = word()) toks.push(x);
+      if (toks[0] !== 'misc' || (toks[1] !== '07' && toks[1] !== '7') || toks.length < 4) continue;
+      const b = toks.slice(2), n = +b[1];
+      if (b.length === 2) pending = b[1];
+      else if (Number.isInteger(n) && b.length > 2 + 2 * n) {
+        const t = {}; for (let j = 0; j < n; j++) if (/^[01]+$/.test(b[2 + n + j])) t[parseInt(b[2 + n + j], 2)] = b[2 + j];
+        tables[b[2 + 2 * n]] = t;
+      }
+    }
     else if (w === '$var') {
-      const kind = word().toLowerCase(), size = +word() || 1, code = word(), toks = [];
+      const kind = word().toLowerCase(), size = +word() || 1, code = word(), toks = [], en = pending != null ? tables[pending] : null;
+      pending = null;
       for (let x = word(); x && x !== '$end'; x = word()) toks.push(x);
       if (kind === 'event') continue;   // no value to draw
       const [ref, rng] = vcdRef(toks), esc = ref[0] === '\\', m = esc ? null : /^(.+)\[(\d+)\]$/.exec(ref);
@@ -45,6 +58,7 @@ function vcdToWave(text, opts = {}) {
         path = scope.concat(leaf).join('.'); d = [code, r ? [+r[1], +(r[2] ?? r[1])] : null, size, false];
         if (!decls.has(path)) decls.set(path, { path, name: esc ? leaf : leaf.split('.').pop(), depth: scope.length, kind: VCD_TEXT[kind] || null,
           scope: !esc && leaf.includes('.') ? scope.concat(leaf.split('.').slice(0, -1)) : scope.slice(), ds: [] });
+        if (en && !decls.get(path).enum) decls.get(path).enum = en;
       }
       decls.get(path).ds.push(d);
     }
@@ -129,6 +143,7 @@ function vcdToWave(text, opts = {}) {
     let key = '';
     for (const p of v.scope) { const k2 = key ? key + '.' + p : p; if (!node.has(k2)) { const g = [p]; node.get(key).push(g); node.set(k2, g); } key = k2; }
     const s = { name: v.name, path: v.path, tv: tvOf(v) }; if (v.width > 1) s.width = v.width; if (v.kind) s.kind = v.kind;
+    if (v.enum) s.enum = v.enum;
     node.get(key).push(s);
   }
   const scopes = {};

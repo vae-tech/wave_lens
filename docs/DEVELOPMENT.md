@@ -12,13 +12,18 @@ wavefw/                       what a page needs, nothing else
                               page), paint.js (the two painters
                               and what they draw), view.js (WaveView and its parts Bar, Names, Notes), edit.js (the
                               viewer's commands view.run, your groups and markers, undo, Save page, the live link),
-                              diff.js (a second dump compared), svg.js (WaveSVG), boot.js (themes, configure, upgrade,
-                              exports): one scope, in this order
+                              diff.js (a second dump compared), modules.js (the Modules panel and Only), svg.js
+                              (WaveSVG), boot.js (themes, configure, upgrade, exports): one scope, in this order
   wavefw.config.js            global settings file (all keys, with defaults), loaded before wavefw.js
   sva.js, sva.wasm.js         assertions in the page: the panel, binding, evaluation; the engine (generated, make sva-build)
   bus.js                      bus transactions: ports found by their names, decoders (AXI, AXI-Stream, APB, AHB, Avalon, Wishbone, OBI), rows
+vscode/                       the VS Code extension (a workspace extension: Remote-SSH / WSL host): extension.js (the
+                              custom editor of .vcd / .fst, FST -> VCD by the bundled sva, the store, dialogs, the
+                              live relay), media/host.js (the tab's half, before wavefw.js: localStorage, downloads,
+                              pickers, clipboard, keys, theme, live link to the host), test/e2e.js (in a real VS Code)
 tools/                        what you run: python3 -I tools/<tool>.py
   mkconfig.py vcd2wavedrom.py mkhtml.py embed.py dumpscan.py wavejson.py svabuild.py
+  mkvsix.py                   vscode/ + wavefw/ + the static sva -> one .vsix (a zip: no node, no npm)
   wavemcp.py                  the tools as an MCP server for AI agents (stdio; USAGE § AI agents); the live link to a page
   viewedit.py                 the viewer's commands on a page's edits or a saved state (USAGE § Commands and edits)
   base.config.json            base settings for generated configs (make config / make html WAVES=x.vcd)
@@ -43,6 +48,7 @@ tests/
   unit/                       the Python unit tests of the tools (make unit: unittest, standard library); vcd/: small VCDs
                               of what simulators write (real, string, event, escaped names, VHDL values, comments …)
   smoke.py                    behaviour checks in headless Chromium (make smoke)
+  vscode_e2e.py               the VS Code extension in a real VS Code (make vscode-e2e; WSL: the Windows one)
   mcp_bench.py                what the MCP server saves an agent: tasks with known answers, agents with and without it
   sva/                        the SVA corpus: *.sv with every construct, err_*.sv with annotated errors, golden/;
                               third_party/: AXI4-Lite, APB, AHB checkers of others (licenses, units.json)
@@ -70,6 +76,8 @@ make smoke ONLY=find,sva_bind   # some sections (python3 tests/smoke.py --list);
 make shots                  # tests/shots.py: docs/img/*.png, dark theme (after make examples; ~20 s, see below)
 make shots-check            # the same into BUILD/img, compared with docs/img: a shot that no longer builds fails
 make guide-shots            # tests/guide_shots.py: docs/guides/img/*.png (after make examples; ONLY=gaps,sva: those guides)
+make vsix                   # tools/mkvsix.py: BUILD/wavefw-<version>.vsix (the extension, the viewer, the static sva)
+make vscode-e2e             # tests/vscode_e2e.py: the extension in a real VS Code (INSTALLED: python3 tests/vscode_e2e.py --installed)
 make sva-build              # the SVA engine (needs cargo + the wasm32 target): the sva CLI, wavefw/sva.wasm.js
 make dist                   # the CLI: bin/linux-x86_64/sva (musl, static, committed) + bin/windows-x86_64/sva.exe (mingw-w64)
 make sva-test               # the SVA engine: unit tests, the corpus tests/sva (third_party too), the JSON schema, the CLI
@@ -107,6 +115,20 @@ bits, struct fields, the value search, times, analog values, edges, the page's V
 expressions of `sva.js`); it calls the pure functions through `WaveFW.internal`, not an API, and the other sections
 read the fields of a viewer through `WaveFW.internal.peek(v)` only (`plugin_api` checks it), so a refactoring of
 `view.js` changes one place of the tests.
+
+**The VS Code extension** (`vscode/`) keeps the viewer as it is in a browser: `media/host.js`, loaded before
+`wavefw.js` in the tab, replaces what a webview cannot do or does on the wrong machine (the tab runs on the client,
+the extension and the files on the host) — `localStorage` (the dump's store in `workspaceState`, given in the page),
+an `<a download>` clicked (a save dialog on the host), an `<input type=file>` clicked (an open dialog on the host),
+`navigator.clipboard.writeText`, `EventSource` / `fetch` / `sendBeacon` to `127.0.0.1` (relayed to the host's: the
+agent's `wavemcp.py`), the theme; and it stops a key the viewer took (`preventDefault`) before VS Code's webview
+forwards it to the workbench (every keydown that reaches its window). The smoke section `vscode` runs that half under the
+extension's CSP with a fake `acquireVsCodeApi`; `make vscode-e2e` (`tests/vscode_e2e.py`) the whole extension in a
+real VS Code — in WSL the Windows VS Code connected to the distribution by Remote - WSL (its own user data under
+`BUILD/vscode-e2e`): the FSM example's VCD and FST and `test_stream_video.fst` opened (a picture of each), the store
+over reopening, a new write read again, an agent's `wavemcp.py` opening a dump with `view_live` and marking it up.
+`--installed` runs the `.vsix` installed into the host (`code --install-extension`) instead of `vscode/`. Not
+automated: the save / open dialogs themselves and keys through Windows (checked by hand).
 
 The viewer's commands live twice: in the page (`wavefw/src/edit.js`, `view.run`) and in `tools/viewedit.py`, which
 writes a page's edits without a browser. The section `edit` holds them together: the two lists of commands and their
@@ -197,7 +219,7 @@ approval"): the agent falls back to its shell. The runs, their transcripts and a
 
 ## Versions
 
-Two numbers, `MAJOR.MINOR` (0.16 now; [`CHANGELOG.md`](../CHANGELOG.md) lists them all). The work goes on a branch;
+Two numbers, `MAJOR.MINOR` (0.17 now; [`CHANGELOG.md`](../CHANGELOG.md) lists them all). The work goes on a branch;
 a version is a merge into `main` (`git merge --no-ff`) tagged `vMAJOR.MINOR` (an annotated tag, its message the
 changelog entry). One commit on the branch before the merge raises the version in four places: `VERSION`,
 `version:` in `wavefw/src/boot.js` (then `make wavefw`), a new top entry in `CHANGELOG.md`, and the committed builds
