@@ -732,6 +732,14 @@ class WaveView {
     const own = { signal: this.ac.signal };
     window.addEventListener('scroll', this.onScroll, { passive: true, ...own }); window.addEventListener('resize', this.onScroll, own);
     this.bodyEl.addEventListener('scroll', this.onScroll, { passive: true, ...own });
+    // the rows in the viewer's own box, the page scrolled past the viewer's top: the wheel over the rows brings the bar and
+    // the time axis back in sight first (the box is no taller than the window under the bar)
+    this.bodyEl.addEventListener('wheel', e => {
+      // not a pan (shift+wheel, a sideways swipe: the canvas's) nor a zoom (ctrl, wheel: "zoom")
+      if (!this.root.classList.contains('wv-scroll') || e.ctrlKey || e.shiftKey || Math.abs(e.deltaX) >= Math.abs(e.deltaY) ||
+        this.S.wheel === 'zoom') return;
+      const bar = this.root.querySelector('.bar'); if (bar.getBoundingClientRect().top < 0) bar.scrollIntoView({ block: 'start' });
+    }, { passive: true, ...own });
     VIEWS.add(this);
     for (const p of PLUGINS) try { p(this); } catch (e) { console.error('wavelens plugin:', e); }
     // the page's edits (tools/viewedit.py), then undo starts from the page as it opens; a live page: the agent hears of this viewer
@@ -1529,7 +1537,7 @@ class WaveView {
       const st = keep ? this.state() : null, root = this.root, opts = Object.assign({}, this.opts,
         { title: file.name, dumpSrc: { name: file.name, handle, file }, dumpDate: r.info.date, svWhy: why, svRun: run }), panel = keep && this.fsmPanelOf();
       this.destroy(); root.innerHTML = '';
-      const v = new WaveView(root, r.doc, opts);
+      const v = new WaveView(root, r.doc, opts); v.panelBox = this.panelBox;   // the panels open where they were
       if (st) { delete st.title; await v.setState(st); }
       v.fsmPanelAgain(panel);   // the FSM panel stays open (⟳)
       const bad = r.log.filter(x => x.level !== 'info').length;
@@ -1583,7 +1591,8 @@ class WaveView {
       return this; }
     const st = this.state(), root = this.root, opts = this.opts, panel = this.fsmPanelOf();
     this.destroy(); root.innerHTML = '';
-    const v = new WaveView(root, doc, opts); delete st.title; await v.setState(st); v.fsmPanelAgain(panel);   // the FSM panel: its new FSMs
+    const v = new WaveView(root, doc, opts); v.panelBox = this.panelBox; delete st.title; await v.setState(st);
+    v.fsmPanelAgain(panel);   // the FSM panel: its new FSMs
     v.toast(`${what}: labels or fields for ${n} signal${n === 1 ? '' : 's'}${said}`);
     return v;
   }
@@ -2415,10 +2424,14 @@ class WaveView {
   }
   size(lay) { // the canvas: as wide as its column, as tall as the rows in view (at least the axis and a little more)
     const c = this.canvas, dpr = window.devicePixelRatio || 1, H = lay.H, hdr = this.hdrH;
-    const own = this.root.classList.contains('wv-scroll'), bh = own ? 0 : this.root.querySelector('.bar').offsetHeight;   // the sticky bar over the rows
-    if (this.barH !== bh) { this.barH = bh; this.root.style.setProperty('--wv-bar-h', bh + 'px'); }
-    const W = c.getBoundingClientRect().width || 600, view = own ? this.bodyEl.clientHeight : window.innerHeight - bh;
-    const Hc = this.hc = Math.max(Math.min(H, hdr + 40), Math.min(H, view || H));
+    // the bar's height: with the page it sticks over the rows; in the viewer's own scroll box the box leaves room for it in the window
+    const own = this.root.classList.contains('wv-scroll'), bar = this.root.querySelector('.bar').offsetHeight, bh = own ? 0 : bar;
+    if (this.barH !== bar) { this.barH = bar; this.root.style.setProperty('--wv-bar-h', bar + 'px'); }
+    // with the page: no taller than the rows left under the bar, so at their end the canvas gets shorter and its axis
+    // stays under the bar while a row is in sight (the bar sticks on over the notes below)
+    const W = c.getBoundingClientRect().width || 600, w = !own && this.wcol.getBoundingClientRect();
+    const view = own ? this.bodyEl.clientHeight : Math.min(window.innerHeight - bh, w.bottom - Math.max(bh, w.top));
+    const Hc = this.hc = Math.max(Math.min(H, hdr + 40), Math.min(H, own ? view || H : view > 0 ? view : window.innerHeight - bh));   // gone above: as before
     if (c.width !== Math.round(W * dpr) || c.height !== Math.round(Hc * dpr)) { c.width = Math.round(W * dpr); c.height = Math.round(Hc * dpr);
       c.style.height = Hc + 'px'; }
     const oy = this.oy = Math.max(0, Math.min(H - Hc, c.getBoundingClientRect().top - this.wcol.getBoundingClientRect().top));

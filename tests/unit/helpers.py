@@ -63,6 +63,19 @@ def golden(case, name, text):
                   f'  want {b[i] if i < len(b) else "(end)"}')
 
 
+def until(cond, timeout, what):
+    """Wait for cond() up to timeout seconds (review VI T10: no loop that waits for ever) -> its value; else AssertionError."""
+    import time
+    end = time.monotonic() + timeout
+    while True:
+        v = cond()
+        if v:
+            return v
+        if time.monotonic() > end:
+            raise AssertionError(f'not in {timeout} s: {what}')
+        time.sleep(0.01)
+
+
 def tmp():
     """with tmp() as d: a scratch directory removed afterwards."""
     return tempfile.TemporaryDirectory(prefix='wavelens-unit-')

@@ -2606,6 +2606,14 @@ class WaveView {
     const own = { signal: this.ac.signal };
     window.addEventListener('scroll', this.onScroll, { passive: true, ...own }); window.addEventListener('resize', this.onScroll, own);
     this.bodyEl.addEventListener('scroll', this.onScroll, { passive: true, ...own });
+    // the rows in the viewer's own box, the page scrolled past the viewer's top: the wheel over the rows brings the bar and
+    // the time axis back in sight first (the box is no taller than the window under the bar)
+    this.bodyEl.addEventListener('wheel', e => {
+      // not a pan (shift+wheel, a sideways swipe: the canvas's) nor a zoom (ctrl, wheel: "zoom")
+      if (!this.root.classList.contains('wv-scroll') || e.ctrlKey || e.shiftKey || Math.abs(e.deltaX) >= Math.abs(e.deltaY) ||
+        this.S.wheel === 'zoom') return;
+      const bar = this.root.querySelector('.bar'); if (bar.getBoundingClientRect().top < 0) bar.scrollIntoView({ block: 'start' });
+    }, { passive: true, ...own });
     VIEWS.add(this);
     for (const p of PLUGINS) try { p(this); } catch (e) { console.error('wavelens plugin:', e); }
     // the page's edits (tools/viewedit.py), then undo starts from the page as it opens; a live page: the agent hears of this viewer
@@ -3403,7 +3411,7 @@ class WaveView {
       const st = keep ? this.state() : null, root = this.root, opts = Object.assign({}, this.opts,
         { title: file.name, dumpSrc: { name: file.name, handle, file }, dumpDate: r.info.date, svWhy: why, svRun: run }), panel = keep && this.fsmPanelOf();
       this.destroy(); root.innerHTML = '';
-      const v = new WaveView(root, r.doc, opts);
+      const v = new WaveView(root, r.doc, opts); v.panelBox = this.panelBox;   // the panels open where they were
       if (st) { delete st.title; await v.setState(st); }
       v.fsmPanelAgain(panel);   // the FSM panel stays open (⟳)
       const bad = r.log.filter(x => x.level !== 'info').length;
@@ -3457,7 +3465,8 @@ class WaveView {
       return this; }
     const st = this.state(), root = this.root, opts = this.opts, panel = this.fsmPanelOf();
     this.destroy(); root.innerHTML = '';
-    const v = new WaveView(root, doc, opts); delete st.title; await v.setState(st); v.fsmPanelAgain(panel);   // the FSM panel: its new FSMs
+    const v = new WaveView(root, doc, opts); v.panelBox = this.panelBox; delete st.title; await v.setState(st);
+    v.fsmPanelAgain(panel);   // the FSM panel: its new FSMs
     v.toast(`${what}: labels or fields for ${n} signal${n === 1 ? '' : 's'}${said}`);
     return v;
   }
@@ -4289,10 +4298,14 @@ class WaveView {
   }
   size(lay) { // the canvas: as wide as its column, as tall as the rows in view (at least the axis and a little more)
     const c = this.canvas, dpr = window.devicePixelRatio || 1, H = lay.H, hdr = this.hdrH;
-    const own = this.root.classList.contains('wv-scroll'), bh = own ? 0 : this.root.querySelector('.bar').offsetHeight;   // the sticky bar over the rows
-    if (this.barH !== bh) { this.barH = bh; this.root.style.setProperty('--wv-bar-h', bh + 'px'); }
-    const W = c.getBoundingClientRect().width || 600, view = own ? this.bodyEl.clientHeight : window.innerHeight - bh;
-    const Hc = this.hc = Math.max(Math.min(H, hdr + 40), Math.min(H, view || H));
+    // the bar's height: with the page it sticks over the rows; in the viewer's own scroll box the box leaves room for it in the window
+    const own = this.root.classList.contains('wv-scroll'), bar = this.root.querySelector('.bar').offsetHeight, bh = own ? 0 : bar;
+    if (this.barH !== bar) { this.barH = bar; this.root.style.setProperty('--wv-bar-h', bar + 'px'); }
+    // with the page: no taller than the rows left under the bar, so at their end the canvas gets shorter and its axis
+    // stays under the bar while a row is in sight (the bar sticks on over the notes below)
+    const W = c.getBoundingClientRect().width || 600, w = !own && this.wcol.getBoundingClientRect();
+    const view = own ? this.bodyEl.clientHeight : Math.min(window.innerHeight - bh, w.bottom - Math.max(bh, w.top));
+    const Hc = this.hc = Math.max(Math.min(H, hdr + 40), Math.min(H, own ? view || H : view > 0 ? view : window.innerHeight - bh));   // gone above: as before
     if (c.width !== Math.round(W * dpr) || c.height !== Math.round(Hc * dpr)) { c.width = Math.round(W * dpr); c.height = Math.round(Hc * dpr);
       c.style.height = Hc + 'px'; }
     const oy = this.oy = Math.max(0, Math.min(H - Hc, c.getBoundingClientRect().top - this.wcol.getBoundingClientRect().top));
@@ -5470,8 +5483,72 @@ Object.assign(WaveView.prototype, {
 });
 
 /* ---------------- the panel ---------------- */
-// One per viewer, over it (on a narrow screen a drawer at the side; not printed): its header moves it, its corner sizes
-// it. The tree has its own folding (the waves keep theirs), a fuzzy filter (the find's), the counts of signals (its own /
+// the panels over the viewer (Modules, State machines): a click on their text keeps the keys in them (the panel takes
+// the focus); ↑ ↓ Home End from anywhere in one but a text field go to its tree; its header moves it, its edges and
+// corners size it (the narrow screen's drawer: neither); where it was and its size kept for the next time it opens
+const treeKey = (e, el) => !!e.target.closest('.mtr') || e.target === el || !!e.target.closest('.fdb') ||
+  (/^(ArrowUp|ArrowDown|Home|End)$/.test(e.key) && !e.target.closest('textarea, select, input:not([type=checkbox])'));
+const panelNarrow = el => getComputedStyle(el).position !== 'fixed' || matchMedia('(max-width: 600px)').matches;
+function panelPlace(p, kind, box = (p.v.panelBox || {})[kind]) {
+  const v = p.v, el = p.el;
+  if (box && box.left) { Object.assign(el.style, { left: box.left, top: box.top, width: box.width || '', height: box.height || '' });
+    panelFit(el); return; }
+  const w = v.wcol.getBoundingClientRect(), pw = el.offsetWidth;
+  el.style.left = Math.max(6, Math.min(w.right - pw - 12, innerWidth - pw - 6)) + 'px';
+  el.style.top = Math.max(6, Math.min(Math.max(w.top, 0) + v.hdrH + 6, innerHeight - el.offsetHeight - 6)) + 'px';   // all of it in sight
+}
+// a panel back in the window (a smaller window since it was placed, or one made smaller while it is open)
+function panelFit(el) {
+  if (panelNarrow(el)) return;
+  const b = el.getBoundingClientRect();
+  el.style.left = Math.max(0, Math.min(b.left, innerWidth - Math.min(b.width, innerWidth))) + 'px';
+  el.style.top = Math.max(0, Math.min(b.top, innerHeight - Math.min(b.height, innerHeight))) + 'px';
+}
+function panelKeep(p, kind) {
+  const s = p.el.style; (p.v.panelBox = p.v.panelBox || {})[kind] = { left: s.left, top: s.top, width: s.width, height: s.height };
+}
+function panelFrame(p, kind) {
+  const el = p.el, head = el.querySelector('.mh'), sig = { signal: p.ac.signal };
+  el.tabIndex = -1;
+  window.addEventListener('resize', () => panelFit(el), sig);
+  // a click in it whose button went with the panel's new rows (Only, Clear …): the focus back on the tree, not on the page
+  el.addEventListener('click', () => setTimeout(() => { const f = document.activeElement;
+    if (el.isConnected && (!f || f === document.body || f === document.documentElement)) p.focusRow(); }), sig);
+  el.insertAdjacentHTML('beforeend', ['n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se'].map(s => `<div class="rz rz-${s}" data-rz="${s}"></div>`).join(''));
+  // a drag by the header (move) or an edge or corner (size), the pointer captured; the end: kept, the keys in the panel
+  const drag = (e, at, mv) => {
+    at.setPointerCapture(e.pointerId);
+    const up = () => { for (const [t, f] of [['pointermove', mv], ['pointerup', up], ['pointercancel', up]]) at.removeEventListener(t, f);
+      panelKeep(p, kind); if (!el.contains(document.activeElement) || document.activeElement === el) p.focusRow(); };
+    at.addEventListener('pointermove', mv); at.addEventListener('pointerup', up); at.addEventListener('pointercancel', up);
+  };
+  head.addEventListener('pointerdown', e => {
+    if (e.button !== 0 || e.target.closest('button') || panelNarrow(el)) return;
+    const b = el.getBoundingClientRect(), dx = e.clientX - b.left, dy = e.clientY - b.top;
+    drag(e, head, ev => { el.style.left = Math.min(Math.max(ev.clientX - dx, 0), innerWidth - 60) + 'px';
+      el.style.top = Math.min(Math.max(ev.clientY - dy, 0), innerHeight - 30) + 'px'; });
+  }, sig);
+  el.addEventListener('pointerdown', e => {
+    const h = e.target.closest('[data-rz]'); if (!h || e.button !== 0 || panelNarrow(el)) return;
+    e.preventDefault(); e.stopPropagation();
+    const s = h.dataset.rz, b = el.getBoundingClientRect(), x0 = e.clientX, y0 = e.clientY, cs = getComputedStyle(el);
+    // the CSS's least and greatest size (96vw × 92vh: the inline size never overrides them, so a narrow window's drawer
+    // and a smaller window keep their own)
+    const minW = parseFloat(cs.minWidth) || 220, minH = parseFloat(cs.minHeight) || 160;
+    const maxW = parseFloat(cs.maxWidth) || innerWidth, maxH = parseFloat(cs.maxHeight) || innerHeight;
+    drag(e, h, ev => {
+      const dx = ev.clientX - x0, dy = ev.clientY - y0; let { left, top, width, height } = b;
+      if (s.includes('e')) width = Math.max(minW, Math.min(b.width + dx, innerWidth - b.left, maxW));
+      if (s.includes('s')) height = Math.max(minH, Math.min(b.height + dy, innerHeight - b.top, maxH));
+      if (s.includes('w')) { left = Math.min(Math.max(b.left + dx, 0, b.right - maxW), b.right - minW); width = b.right - left; }
+      if (s.includes('n')) { top = Math.min(Math.max(b.top + dy, 0, b.bottom - maxH), b.bottom - minH); height = b.bottom - top; }
+      Object.assign(el.style, { left: left + 'px', top: top + 'px', width: width + 'px', height: height + 'px' });
+    });
+  }, { capture: true, ...sig });
+}
+
+// One per viewer, over it (on a narrow screen a drawer at the side; not printed): its header moves it, its edges and
+// corners size it. The tree has its own folding (the waves keep theirs), a fuzzy filter (the find's), the counts of signals (its own /
 // with its submodules; a packed struct one signal), ● at the module of the selected signal. A click on a name goes there
 // (goScope); a box drawn over names (4 px), ctrl+click / Space (one module in or out), shift+click (a run) set Only at
 // once; the right button: a menu of the module. Keys: ↑ ↓ Home End, ← → fold / open (the parent / the first child),
@@ -5505,12 +5582,11 @@ class Mods {
     v.root.append(el);
     this.tree = el.querySelector('.mtr'); this.rowsEl = el.querySelector('.mrows'); this.box = el.querySelector('.mbox');
     this.qEl = el.querySelector('.mq'); this.stEl = el.querySelector('.ms');
-    const w = v.wcol.getBoundingClientRect(), pw = el.offsetWidth;   // at the right of the waves (the names stay in sight), under the axis
-    el.style.left = Math.max(6, Math.min(w.right - pw - 12, innerWidth - pw - 6)) + 'px';
-    el.style.top = Math.max(6, Math.min(Math.max(w.top, 0) + v.hdrH + 6, innerHeight - 240)) + 'px';
+    panelPlace(this, 'mods');   // where it was last (its size too), first at the right of the waves (the names stay in sight), under the axis
     this.events(); this.render(true);   // drawn again with the names column (Names.render): Hide, Only, the selection
   }
-  close() { this.ac.abort(); this.el.remove(); this.v.closeMenu(); if (this.v.mods === this) this.v.mods = null; this.v.canvas.focus({ preventScroll: true }); }
+  close() { panelKeep(this, 'mods'); this.ac.abort(); this.el.remove(); this.v.closeMenu();
+    if (this.v.mods === this) this.v.mods = null; this.v.canvas.focus({ preventScroll: true }); }
   // the rows of the tree as shown: the open ones (a filter: the matches and the way to them)
   list() {
     const out = [], terms = this.q.trim().split(/\s+/).filter(w => w.replace(/\./g, ''));
@@ -5615,16 +5691,7 @@ class Mods {
       else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation();   // not the viewer's reset
         if (this.qEl.value) { this.qEl.value = this.q = ''; this.render(); } else this.close(); }
     });
-    // the header moves the panel (the narrow screen's drawer stays where it is)
-    const head = el.querySelector('.mh');
-    head.addEventListener('pointerdown', e => {
-      if (e.button !== 0 || e.target.closest('button') || getComputedStyle(el).position !== 'fixed' || matchMedia('(max-width: 600px)').matches) return;
-      const b = el.getBoundingClientRect(), dx = e.clientX - b.left, dy = e.clientY - b.top; head.setPointerCapture(e.pointerId);
-      const mv = ev => { el.style.left = Math.min(Math.max(ev.clientX - dx, 0), innerWidth - 60) + 'px';
-        el.style.top = Math.min(Math.max(ev.clientY - dy, 0), innerHeight - 30) + 'px'; };
-      const up = () => { for (const [t, f] of [['pointermove', mv], ['pointerup', up], ['pointercancel', up]]) head.removeEventListener(t, f); };
-      head.addEventListener('pointermove', mv); head.addEventListener('pointerup', up); head.addEventListener('pointercancel', up);
-    });
+    panelFrame(this, 'mods');   // the header moves it, its edges and corners size it
     // the tree: a click (go, ctrl: in / out, shift: a run, ▸: fold), a box (Only), the right button (the menu)
     let d = null;
     // Esc while the box is drawn (the focus may be in the filter or on the waves): the box goes, nothing else
@@ -5672,7 +5739,7 @@ class Mods {
       const k = e.key, nd = this.rows[this.fi] && this.rows[this.fi][0];
       if (k === 'Escape') { e.preventDefault(); e.stopPropagation(); if (d) { end(e, false); return; } if (v.menuEl) { v.closeMenu(); this.focusRow(); return; }
         this.close(); return; }
-      if (!e.target.closest('.mtr') || e.ctrlKey || e.metaKey || e.altKey) { if (k === 'Escape') e.stopPropagation(); return; }
+      if (!treeKey(e, el) || e.ctrlKey || e.metaKey || e.altKey) return;
       let h = true;
       if (k === 'ArrowDown' || k === 'ArrowUp' || k === 'Home' || k === 'End') {
         const to = k === 'Home' ? 0 : k === 'End' ? this.rows.length - 1 : this.fi + (k === 'ArrowDown' ? 1 : -1);
@@ -5827,11 +5894,11 @@ Object.assign(WaveView.prototype, {
     return this;
   },
   // the panel as it is ({q, fields, left, top}; null: closed), and again in a new viewer of the same waves (Sources…, ⟳)
-  fsmPanelOf() { const p = this.fsmP; return p ? { q: p.q, fields: p.fields, all: p.all, left: p.el.style.left, top: p.el.style.top,
-    det: p.det && p.det.full, tab: p.tab } : null; },
+  fsmPanelOf() { const p = this.fsmP, b = p && p.el.style; return p ? { q: p.q, fields: p.fields, all: p.all, left: b.left, top: b.top,
+    width: b.width, height: b.height, det: p.det && p.det.full, tab: p.tab } : null; },
   fsmPanelAgain(o) {
     if (!o || !this.fsms().length) return this;
-    const p = this.fsmP = new Fsms(this); Object.assign(p.el.style, { left: o.left, top: o.top });
+    const p = this.fsmP = new Fsms(this); panelPlace(p, 'fsms', o);
     p.q = p.qEl.value = o.q || ''; p.fields = p.el.querySelector('.ff').checked = !!o.fields; p.all = p.el.querySelector('.fa').checked = !!o.all;
     p.build(); p.render(true); const r = o.det && p.mine.find(x => x.full === o.det); p.detail(r || null, o.tab);
     return this;
@@ -5923,9 +5990,7 @@ class Fsms {
     v.root.append(el);
     this.tree = el.querySelector('.mtr'); this.rowsEl = el.querySelector('.mrows'); this.qEl = el.querySelector('.mq'); this.stEl = el.querySelector('.ms');
     this.box = el.querySelector('.mbox'); this.fdEl = el.querySelector('.fd'); this.fdb = el.querySelector('.fdb');
-    const w = v.wcol.getBoundingClientRect(), pw = el.offsetWidth;   // at the right of the waves, under the axis
-    el.style.left = Math.max(6, Math.min(w.right - pw - 12, innerWidth - pw - 6)) + 'px';
-    el.style.top = Math.max(6, Math.min(Math.max(w.top, 0) + v.hdrH + 6, innerHeight - 240)) + 'px';
+    panelPlace(this, 'fsms');   // where it was last, its size too (first: at the right of the waves, under the axis)
     this.events(); this.render(true);
     if (v.sel && this.mine.includes(v.sel)) this.detail(v.sel);   // the selected signal's details, when it is one of them
   }
@@ -5948,7 +6013,8 @@ class Fsms {
     this.open = new Set(this.nodes.keys());   // all open: the tree is only the way to the FSMs
     const mine = new Set(this.mine); this.pick = new Set([...this.pick].filter(r => mine.has(r)));
   }
-  close() { this.v.closeMenu(); this.ac.abort(); this.el.remove(); if (this.v.fsmP === this) this.v.fsmP = null; this.v.canvas.focus({ preventScroll: true }); }
+  close() { panelKeep(this, 'fsms'); this.v.closeMenu(); this.ac.abort(); this.el.remove();
+    if (this.v.fsmP === this) this.v.fsmP = null; this.v.canvas.focus({ preventScroll: true }); }
   // an FSM's states the waves reach, of its table's
   seenOf(r) { const st = this.v.fsmStatsOf(r); return [st.states.length - st.unseen.length, st.states.length]; }
   // its name under its module (a struct's field: struct.field)
@@ -6222,21 +6288,13 @@ class Fsms {
       else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation();   // not the viewer's reset
         if (this.qEl.value) { this.qEl.value = this.q = ''; this.render(); } else this.close(); }
     });
-    const head = el.querySelector('.mh');   // the header moves the panel (the narrow screen's drawer stays where it is)
-    head.addEventListener('pointerdown', e => {
-      if (e.button !== 0 || e.target.closest('button') || getComputedStyle(el).position !== 'fixed' || matchMedia('(max-width: 600px)').matches) return;
-      const b = el.getBoundingClientRect(), dx = e.clientX - b.left, dy = e.clientY - b.top; head.setPointerCapture(e.pointerId);
-      const mv = ev => { el.style.left = Math.min(Math.max(ev.clientX - dx, 0), innerWidth - 60) + 'px';
-        el.style.top = Math.min(Math.max(ev.clientY - dy, 0), innerHeight - 30) + 'px'; };
-      const up = () => { for (const [t, f] of [['pointermove', mv], ['pointerup', up], ['pointercancel', up]]) head.removeEventListener(t, f); };
-      head.addEventListener('pointermove', mv); head.addEventListener('pointerup', up); head.addEventListener('pointercancel', up);
-    });
+    panelFrame(this, 'fsms');   // the header moves it, its edges and corners size it (modules.js)
     el.addEventListener('keydown', e => {
       if (e.target === this.qEl) return;
       const k = e.key, x = this.rows[this.fi];
       if (k === 'Escape') { e.preventDefault(); e.stopPropagation(); if (d) { end(e, false); return; }
         if (v.menuEl) { v.closeMenu(); this.focusRow(); return; } this.close(); return; }
-      if (!e.target.closest('.mtr') || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (!treeKey(e, el) || e.ctrlKey || e.metaKey || e.altKey) return;
       let h = true;
       if (k === 'ArrowDown' || k === 'ArrowUp' || k === 'Home' || k === 'End') {
         const to = Math.min(Math.max(k === 'Home' ? 0 : k === 'End' ? this.rows.length - 1 : this.fi + (k === 'ArrowDown' ? 1 : -1), 0), this.rows.length - 1);
@@ -6651,7 +6709,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.20',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.21',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,
@@ -6663,7 +6721,7 @@ G.WaveLens = { version: '0.20',   // the project's version: VERSION (make check 
   registerTokens, registerDefaults, tips, util: { esc, glob, lastLE, lastBefore, stepTo, isEdge, circle, timeEps },
   // unstable: the pure functions for the unit table of tests/smoke.py and peek(view), the fields the tests read; not an API
   internal: { findRow, parseWant, valueIs, findEdge, edgeGlyph, bitsOf, hexOf, mixedBits, bitsVal, vcdHex, cycZero, cycAt, cycTime, cycUps, cycClock,
-    diffSpans, cmpKey, svTypes, svApply, fsmStats,
+    diffSpans, cmpKey, svTypes, svApply, fsmStats, svFingerprint, svRemap, svLookupKey,
     cycMarks, enumColor, analogValue, niceStep, cycMap, parseWave,
     idleCuts, gapLen, gapText, gapRefs, fmtFreq, gfmt, toFloat, fieldRow, stripPfx, trimNum,
     peek: v => ({ get lay() { return v.lay; }, get oy() { return v.oy; }, get vis() { return v.vis; }, get collapsed() { return v.collapsed; },

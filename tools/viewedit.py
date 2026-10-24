@@ -23,8 +23,8 @@ Each command is {"op": name, …arguments}; the list runs in order, a bad one is
 Times: model units (ps of timed waves, else cycles) or a text with a unit ("2.5us", "100NS"). Numbers of bookmarks,
 arrows and markers are whole (2, 2.0, "2"). set_state keeps what the state it is given does not have (null clears).
 Signals: a full path, a name,
-the end of a path ("u_regs.PSEL") or a * pattern. The commands that need the waves' values or the screen (edge,
-picture, fit) run only in a page (live). docs/USAGE.md § "Editing the views" has them all; the smoke test checks that a
+the end of a path ("u_regs.PSEL") or a * pattern. The commands that need the waves' values, their labels or the screen
+(edge, picture, fit, fsm, fsm_stats, fsm_go, types) run only in a page (live). docs/USAGE.md § "Editing the views" has them all; the smoke test checks that a
 page with these edits and the same commands run in it give the same state.
 """
 import argparse, datetime, functools, json, os, re, sys, unicodedata

@@ -8,14 +8,21 @@ import svabuild
 import viewedit as E
 import wavemcp as W
 
-CACHE = H.tmp()   # the bridges of these tests announce themselves here, not in ~/.cache/wavelens/live (a VS Code there would connect)
+CACHE = None   # the bridges of these tests announce themselves here, not in ~/.cache/wavelens/live (a VS Code there would connect)
+WAS = None   # XDG_CACHE_HOME before: back after these tests (review VI T10: the other modules' see their own)
 
 
 def setUpModule():
+    global CACHE, WAS
+    CACHE, WAS = H.tmp(), os.environ.get('XDG_CACHE_HOME')
     os.environ['XDG_CACHE_HOME'] = CACHE.name
 
 
 def tearDownModule():
+    if WAS is None:
+        os.environ.pop('XDG_CACHE_HOME', None)
+    else:
+        os.environ['XDG_CACHE_HOME'] = WAS
     CACHE.cleanup()
 
 
@@ -286,12 +293,12 @@ class Views(unittest.TestCase):
         got = {}
         t = threading.Thread(target=lambda: got.update(r=b.send('page1aaa', 'one', [{'op': 'state'}], timeout=5)))
         t.start()
-        while not b.pending:
-            time.sleep(0.01)
+        H.until(lambda: b.pending, 5, 'the bridge holds the request')
         rid = next(iter(b.pending))
         self.assertEqual(req(f'/reply?{q}', json.dumps({'rid': rid, 'results': [{'op': 'state', 'state': {'forged': 1}}]}).encode()), 409)
         self.assertEqual(req(f'/reply?token={b.token}&cid=page1aaa', json.dumps({'rid': rid, 'results': [{'op': 'state', 'state': {}}]}).encode()), 200)
         t.join(5)
+        self.assertFalse(t.is_alive(), 'the send returns once the page replied')
         self.assertEqual(got['r'], [{'op': 'state', 'state': {}}])
         self.assertEqual(req(f'/reply?token={b.token}&cid=page1aaa', json.dumps({'rid': rid, 'results': []}).encode()), 409)   # once
         self.assertEqual(req('/', None), 200)
@@ -402,7 +409,7 @@ class Review(unittest.TestCase):
     def pages(self, tool, key, **a):
         """Every page of an answer, each from the "next_from" / "next_offset" of the one before."""
         out, more = [], {}
-        while True:
+        for _ in range(1000):   # (a page that names itself as the next: not for ever)
             r = self.call(tool, dump=self.fs, **a, **more)
             if tool == 'wave_changes':
                 e = r['signals'][a['signals'][0]]
@@ -421,6 +428,7 @@ class Review(unittest.TestCase):
                 else:
                     more = {'from': r['next_from']}
             self.assertLess(len(out), 1000)
+        self.fail(f'{tool}: more than 1000 pages')
 
     def test_pages(self):
         """A7/B11: the pages of an answer (limit 1, 2, 3, all) put together are the answer without a limit."""
@@ -551,10 +559,17 @@ class Protocol(unittest.TestCase):
             time.sleep(0.5)
             p.stdin.write(json.dumps({'jsonrpc': '2.0', 'id': 2, 'method': 'ping'}) + '\n')
             p.stdin.flush()
-            reader.join(15)
-            p.stdin.close()
-            p.wait(10)
-            p.stdout.close()
+            try:
+                reader.join(15)
+                self.assertFalse(reader.is_alive(), 'two answers in 15 s')
+            finally:
+                p.stdin.close()
+                try:
+                    p.wait(10)
+                except subprocess.TimeoutExpired:
+                    p.kill()
+                    p.wait()
+                p.stdout.close()
         self.assertEqual([m.get('id') for m in got], [1, 2])
         self.assertEqual(got[1]['result'], {})
 

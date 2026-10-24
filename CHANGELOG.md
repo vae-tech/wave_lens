@@ -5,6 +5,27 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.21 — 24 October 2026
+
+The panels and the scroll made firm, and the tests of review VI: what the gate checks now fails when the code is wrong.
+
+- **The panels.** Modules and State machines keep the keys wherever you click in them (↑ ↓ Home End go on in the
+  tree from a button too); any edge or corner sizes them, never past the window; they open again where they were, at
+  their size, also after Sources… or ⟳; the narrow screen's drawer keeps its own size.
+- **The time axis stays in sight.** With the page, down to the last rows under the sticky bar; in the rows' own box,
+  the box is no taller than the window under the bar (120 px at least) and its end does not scroll the page on; the
+  wheel over the rows brings the bar back when the page is past the viewer's top; shift+wheel is a pan only.
+- **make vsix** writes `wavelens.vsix` (the same install line each time) and its copy `wavelens-<version>.vsix`.
+- **Tests.** `svaverify.py` fails on an assertion left out beyond each example's list; the page's assertions against
+  `sva eval` attempt by attempt; 40 generated VCDs against a model and the tools, read in byte pieces and cut at
+  every byte; a contract of the types for the Python and page twins and 200 generated cases (it found Python taking
+  an enum whose keys do not fit the width: fixed); the FSM panel's `fsm_go` and its Only / Add / undo / Save
+  sequence; `make shots-check` fails on a picture that changed or was not committed (`tests/pngdiff.py`, the visual
+  set `tests/visual`); time and memory budgets; `make unit-shuffle`; the VS Code e2e takes the results of its own run
+  only, every check named.
+- **Docs.** The FSM panel on docs/index.html and in the VS Code README, the guides' pictures made again (their bar had
+  no Sources…).
+
 ## 0.20 — 24 October 2026
 
 FSM states and structs of a VCD from the design's own types (Questa or Verilator), the state machines panel with each

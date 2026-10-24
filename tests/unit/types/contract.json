@@ -1,0 +1,597 @@
+{
+ "about": "review VI T6: what tools/svtypes.py (read, apply, fingerprint) and the page (svTypes, svApply, svFingerprint) both do with a types file and the signals of a dump: tests/unit/test_svtypes.py and tests/smoke.py (readers) read it. want: labels / fields put on a path by the types (the row's own ones are not), the notes of apply, the run's notes, error: the file is refused.",
+ "cases": [
+  {
+   "name": "its own path",
+   "types": {
+    "wavelens": "types",
+    "signals": {
+     "tb.u.state": {
+      "width": 2,
+      "enum": {
+       "0": "A",
+       "1": "B"
+      }
+     }
+    }
+   },
+   "signals": [
+    {
+     "path": "tb.u.state",
+     "width": 2
+    },
+    {
+     "path": "tb.v.state",
+     "width": 2
+    }
+   ],
+   "want": {
+    "labels": {
+     "tb.u.state": {
+      "0": "A",
+      "1": "B"
+     }
+    }
+   }
+  },
+  {
+   "name": "another root with a tb below is not the types' tb",
+   "types": {
+    "wavelens": "types",
+    "signals": {
+     "tb.u.state": {
+      "width": 2,
+      "enum": {
+       "0": "A",
+       "1": "B"
+      }
+     }
+    }
+   },
+   "signals": [
+    {
+     "path": "tb.u.state",
+     "width": 2
+    },
+    {
+     "path": "other.tb.u.state",
+     "width": 2
+    }
+   ],
+   "want": {
+    "labels": {
+     "tb.u.state": {
+      "0": "A",
+      "1": "B"
+     }
+    }
+   }
+  },
+  {
+   "name": "a top the dump adds (TOP of an FST)",
+   "types": {
+    "wavelens": "types",
+    "signals": {
+     "tb.u.state": {
+      "width": 2,
+      "enum": {
+       "0": "A",
+       "1": "B"
+      }
+     }
+    }
+   },
+   "signals": [
+    {
+     "path": "TOP.tb.u.state",
+     "width": 2
+    },
+    {
+     "path": "TOP.clk",
+     "width": 1
+    }
+   ],
+   "want": {
+    "labels": {
+     "TOP.tb.u.state": {
+      "0": "A",
+      "1": "B"
+     }
+    }
+   }
+  },
+  {
+   "name": "a width that does not fit",
+   "types": {
+    "wavelens": "types",
+    "signals": {
+     "tb.s": {
+      "width": 2,
+      "enum": {
+       "0": "A",
+       "1": "B"
+      }
+     }
+    }
+   },
+   "signals": [
+    {
+     "path": "tb.s",
+     "width": 3
+    }
+   ],
+   "want": {
+    "notes": [
+     "tb.s: 3 bits in the dump, 2 in the types: left as it is"
+    ]
+   }
+  },
+  {
+   "name": "the row's own labels stay",
+   "types": {
+    "wavelens": "types",
+    "signals": {
+     "tb.s": {
+      "width": 2,
+      "enum": {
+       "0": "A",
+       "1": "B"
+      }
+     }
+    }
+   },
+   "signals": [
+    {
+     "path": "tb.s",
+     "width": 2,
+     "enum": {
+      "0": "MINE"
+     }
+    }
+   ],
+   "want": {}
+  },
+  {
+   "name": "the elements of an unpacked array",
+   "types": {
+    "wavelens": "types",
+    "signals": {
+     "tb.arr": {
+      "width": 2,
+      "enum": {
+       "0": "A",
+       "1": "B"
+      }
+     }
+    }
+   },
+   "signals": [
+    {
+     "path": "tb.arr[3]",
+     "width": 2
+    },
+    {
+     "path": "tb.arr.[2]",
+     "width": 2
+    },
+    {
+     "path": "tb.arr.[-1]",
+     "width": 2
+    }
+   ],
+   "want": {
+    "labels": {
+     "tb.arr[3]": {
+      "0": "A",
+      "1": "B"
+     },
+     "tb.arr.[2]": {
+      "0": "A",
+      "1": "B"
+     },
+     "tb.arr.[-1]": {
+      "0": "A",
+      "1": "B"
+     }
+    }
+   }
+  },
+  {
+   "name": "the map of roots, its longest prefix",
+   "types": {
+    "wavelens": "types",
+    "signals": {
+     "dut.state": {
+      "width": 2,
+      "enum": {
+       "0": "A",
+       "1": "B"
+      }
+     },
+     "core.state": {
+      "width": 2,
+      "enum": {
+       "1": "C"
+      }
+     }
+    },
+    "map": {
+     "top.dut_i": "dut",
+     "top.dut_i.core_i": "core"
+    }
+   },
+   "signals": [
+    {
+     "path": "top.dut_i.state",
+     "width": 2
+    },
+    {
+     "path": "top.dut_i.core_i.state",
+     "width": 2
+    }
+   ],
+   "want": {
+    "labels": {
+     "top.dut_i.state": {
+      "0": "A",
+      "1": "B"
+     },
+     "top.dut_i.core_i.state": {
+      "1": "C"
+     }
+    }
+   }
+  },
+  {
+   "name": "map null: no map",
+   "types": {
+    "wavelens": "types",
+    "signals": {
+     "tb.s": {
+      "width": 2,
+      "enum": {
+       "0": "A",
+       "1": "B"
+      }
+     }
+    },
+    "map": null
+   },
+   "signals": [
+    {
+     "path": "tb.s",
+     "width": 2
+    }
+   ],
+   "want": {
+    "labels": {
+     "tb.s": {
+      "0": "A",
+      "1": "B"
+     }
+    }
+   }
+  },
+  {
+   "name": "a map that is a list",
+   "types": {
+    "wavelens": "types",
+    "signals": {},
+    "map": [
+     "tb=dut"
+    ]
+   },
+   "signals": [],
+   "want": {
+    "error": true
+   }
+  },
+  {
+   "name": "a map of a number",
+   "types": {
+    "wavelens": "types",
+    "signals": {},
+    "map": {
+     "tb": 1
+    }
+   },
+   "signals": [],
+   "want": {
+    "error": true
+   }
+  },
+  {
+   "name": "a map that is text",
+   "types": {
+    "wavelens": "types",
+    "signals": {},
+    "map": "tb"
+   },
+   "signals": [],
+   "want": {
+    "error": true
+   }
+  },
+  {
+   "name": "not a types file",
+   "types": {
+    "signals": {}
+   },
+   "signals": [],
+   "want": {
+    "error": true
+   }
+  },
+  {
+   "name": "a 64-bit enum, keys past 2^53",
+   "types": {
+    "wavelens": "types",
+    "signals": {
+     "tb.w": {
+      "width": 64,
+      "enum": {
+       "9007199254740992": "EVEN",
+       "9007199254740993": "ODD",
+       "18446744073709551615": "ALL"
+      }
+     }
+    }
+   },
+   "signals": [
+    {
+     "path": "tb.w",
+     "width": 64
+    }
+   ],
+   "want": {
+    "labels": {
+     "tb.w": {
+      "9007199254740992": "EVEN",
+      "9007199254740993": "ODD",
+      "18446744073709551615": "ALL"
+     }
+    }
+   }
+  },
+  {
+   "name": "a struct's fields, an enum field",
+   "types": {
+    "wavelens": "types",
+    "signals": {
+     "tb.o": {
+      "width": 8,
+      "fields": [
+       {
+        "name": "a",
+        "msb": 7,
+        "lsb": 4,
+        "enum": {
+         "1": "ONE"
+        }
+       },
+       {
+        "name": "b",
+        "msb": 3,
+        "lsb": 0
+       }
+      ]
+     }
+    }
+   },
+   "signals": [
+    {
+     "path": "tb.o",
+     "width": 8
+    }
+   ],
+   "want": {
+    "fields": {
+     "tb.o": [
+      {
+       "name": "a",
+       "msb": 7,
+       "lsb": 4,
+       "enum": {
+        "1": "ONE"
+       }
+      },
+      {
+       "name": "b",
+       "msb": 3,
+       "lsb": 0
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "fields beside the row's own",
+   "types": {
+    "wavelens": "types",
+    "signals": {
+     "tb.o": {
+      "width": 8,
+      "fields": [
+       {
+        "name": "a",
+        "msb": 7,
+        "lsb": 4,
+        "enum": {
+         "1": "ONE"
+        }
+       },
+       {
+        "name": "b",
+        "msb": 3,
+        "lsb": 0
+       }
+      ]
+     }
+    }
+   },
+   "signals": [
+    {
+     "path": "tb.o",
+     "width": 8,
+     "fields": [
+      {
+       "name": "mine",
+       "msb": 7,
+       "lsb": 0
+      }
+     ]
+    }
+   ],
+   "want": {}
+  },
+  {
+   "name": "Questa's describe of an enum",
+   "types": {
+    "wavelens": "types",
+    "describe": {
+     "tb.s": "Verilog enum: (0 to 1) [2 enumeration values]\n  (LO=0,HI=1)"
+    }
+   },
+   "signals": [
+    {
+     "path": "tb.s",
+     "width": 2
+    }
+   ],
+   "want": {
+    "labels": {
+     "tb.s": {
+      "0": "LO",
+      "1": "HI"
+     }
+    }
+   }
+  },
+  {
+   "name": "Questa's describe of a struct",
+   "types": {
+    "wavelens": "types",
+    "describe": {
+     "tb.o": "Array(1 downto 0) [length 2] of\n  Verilog enum: (1 downto 0) [2 enumeration values]\n    (X=1,Y=2)"
+    }
+   },
+   "signals": [
+    {
+     "path": "tb.o",
+     "width": 4
+    }
+   ],
+   "want": {
+    "fields": {
+     "tb.o": [
+      {
+       "name": "[1]",
+       "msb": 3,
+       "lsb": 2,
+       "enum": {
+        "1": "X",
+        "2": "Y"
+       }
+      },
+      {
+       "name": "[0]",
+       "msb": 1,
+       "lsb": 0,
+       "enum": {
+        "1": "X",
+        "2": "Y"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "the run: another day, an instance the dump has not",
+   "types": {
+    "wavelens": "types",
+    "signals": {},
+    "producer": {
+     "date": "2026-10-01T10:00:00"
+    },
+    "instances": {
+     "tb": "tb",
+     "tb.u": "m",
+     "tb.gone": "m",
+     "other.x": "m"
+    }
+   },
+   "signals": [],
+   "date": "Sat Oct 24 13:30:00 2026",
+   "modules": [
+    "tb",
+    "tb.u"
+   ],
+   "want": {
+    "run": [
+     "the types were written 23 days before the dump (2026-10-01T10:00:00; the dump: Sat Oct 24 13:30:00 2026): another run? (the labels of another design or other parameters may not fit)",
+     "1 instance of the types not in the dump, under modules it has: tb.gone (none of its signals dumped, or another design)"
+    ]
+   }
+  },
+  {
+   "name": "the run through the map",
+   "types": {
+    "wavelens": "types",
+    "signals": {},
+    "map": {
+     "top": "tb"
+    },
+    "instances": {
+     "tb.u": "m",
+     "tb.v": "m"
+    }
+   },
+   "signals": [],
+   "modules": [
+    "top",
+    "top.u"
+   ],
+   "want": {
+    "run": [
+     "1 instance of the types not in the dump, under modules it has: tb.v (none of its signals dumped, or another design)"
+    ]
+   }
+  },
+  {
+   "name": "the same day",
+   "types": {
+    "wavelens": "types",
+    "signals": {},
+    "producer": {
+     "date": "2026-10-24T10:00:00"
+    }
+   },
+   "signals": [],
+   "date": "Sat Oct 24 13:30:00 2026",
+   "want": {}
+  },
+  {
+   "name": "a table with a value that does not fit the width (found by the generated cases: svtypes.py took it)",
+   "types": {
+    "wavelens": "types",
+    "signals": {
+     "tb.s": {
+      "width": 2,
+      "enum": {
+       "0": "A",
+       "4": "TOO_BIG"
+      }
+     }
+    }
+   },
+   "signals": [
+    {
+     "path": "tb.s",
+     "width": 2
+    }
+   ],
+   "want": {}
+  }
+ ]
+}

@@ -91,11 +91,11 @@ Object.assign(WaveView.prototype, {
     return this;
   },
   // the panel as it is ({q, fields, left, top}; null: closed), and again in a new viewer of the same waves (Sources…, ⟳)
-  fsmPanelOf() { const p = this.fsmP; return p ? { q: p.q, fields: p.fields, all: p.all, left: p.el.style.left, top: p.el.style.top,
-    det: p.det && p.det.full, tab: p.tab } : null; },
+  fsmPanelOf() { const p = this.fsmP, b = p && p.el.style; return p ? { q: p.q, fields: p.fields, all: p.all, left: b.left, top: b.top,
+    width: b.width, height: b.height, det: p.det && p.det.full, tab: p.tab } : null; },
   fsmPanelAgain(o) {
     if (!o || !this.fsms().length) return this;
-    const p = this.fsmP = new Fsms(this); Object.assign(p.el.style, { left: o.left, top: o.top });
+    const p = this.fsmP = new Fsms(this); panelPlace(p, 'fsms', o);
     p.q = p.qEl.value = o.q || ''; p.fields = p.el.querySelector('.ff').checked = !!o.fields; p.all = p.el.querySelector('.fa').checked = !!o.all;
     p.build(); p.render(true); const r = o.det && p.mine.find(x => x.full === o.det); p.detail(r || null, o.tab);
     return this;
@@ -187,9 +187,7 @@ class Fsms {
     v.root.append(el);
     this.tree = el.querySelector('.mtr'); this.rowsEl = el.querySelector('.mrows'); this.qEl = el.querySelector('.mq'); this.stEl = el.querySelector('.ms');
     this.box = el.querySelector('.mbox'); this.fdEl = el.querySelector('.fd'); this.fdb = el.querySelector('.fdb');
-    const w = v.wcol.getBoundingClientRect(), pw = el.offsetWidth;   // at the right of the waves, under the axis
-    el.style.left = Math.max(6, Math.min(w.right - pw - 12, innerWidth - pw - 6)) + 'px';
-    el.style.top = Math.max(6, Math.min(Math.max(w.top, 0) + v.hdrH + 6, innerHeight - 240)) + 'px';
+    panelPlace(this, 'fsms');   // where it was last, its size too (first: at the right of the waves, under the axis)
     this.events(); this.render(true);
     if (v.sel && this.mine.includes(v.sel)) this.detail(v.sel);   // the selected signal's details, when it is one of them
   }
@@ -212,7 +210,8 @@ class Fsms {
     this.open = new Set(this.nodes.keys());   // all open: the tree is only the way to the FSMs
     const mine = new Set(this.mine); this.pick = new Set([...this.pick].filter(r => mine.has(r)));
   }
-  close() { this.v.closeMenu(); this.ac.abort(); this.el.remove(); if (this.v.fsmP === this) this.v.fsmP = null; this.v.canvas.focus({ preventScroll: true }); }
+  close() { panelKeep(this, 'fsms'); this.v.closeMenu(); this.ac.abort(); this.el.remove();
+    if (this.v.fsmP === this) this.v.fsmP = null; this.v.canvas.focus({ preventScroll: true }); }
   // an FSM's states the waves reach, of its table's
   seenOf(r) { const st = this.v.fsmStatsOf(r); return [st.states.length - st.unseen.length, st.states.length]; }
   // its name under its module (a struct's field: struct.field)
@@ -486,21 +485,13 @@ class Fsms {
       else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation();   // not the viewer's reset
         if (this.qEl.value) { this.qEl.value = this.q = ''; this.render(); } else this.close(); }
     });
-    const head = el.querySelector('.mh');   // the header moves the panel (the narrow screen's drawer stays where it is)
-    head.addEventListener('pointerdown', e => {
-      if (e.button !== 0 || e.target.closest('button') || getComputedStyle(el).position !== 'fixed' || matchMedia('(max-width: 600px)').matches) return;
-      const b = el.getBoundingClientRect(), dx = e.clientX - b.left, dy = e.clientY - b.top; head.setPointerCapture(e.pointerId);
-      const mv = ev => { el.style.left = Math.min(Math.max(ev.clientX - dx, 0), innerWidth - 60) + 'px';
-        el.style.top = Math.min(Math.max(ev.clientY - dy, 0), innerHeight - 30) + 'px'; };
-      const up = () => { for (const [t, f] of [['pointermove', mv], ['pointerup', up], ['pointercancel', up]]) head.removeEventListener(t, f); };
-      head.addEventListener('pointermove', mv); head.addEventListener('pointerup', up); head.addEventListener('pointercancel', up);
-    });
+    panelFrame(this, 'fsms');   // the header moves it, its edges and corners size it (modules.js)
     el.addEventListener('keydown', e => {
       if (e.target === this.qEl) return;
       const k = e.key, x = this.rows[this.fi];
       if (k === 'Escape') { e.preventDefault(); e.stopPropagation(); if (d) { end(e, false); return; }
         if (v.menuEl) { v.closeMenu(); this.focusRow(); return; } this.close(); return; }
-      if (!e.target.closest('.mtr') || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (!treeKey(e, el) || e.ctrlKey || e.metaKey || e.altKey) return;
       let h = true;
       if (k === 'ArrowDown' || k === 'ArrowUp' || k === 'Home' || k === 'End') {
         const to = Math.min(Math.max(k === 'Home' ? 0 : k === 'End' ? this.rows.length - 1 : this.fi + (k === 'ArrowDown' ? 1 : -1), 0), this.rows.length - 1);

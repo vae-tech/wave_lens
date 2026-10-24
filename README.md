@@ -60,7 +60,7 @@ Linux x86-64 host). The extension is installed on the host; nothing else is need
 1. Build the package in a clone, on the host or anywhere (Python only, no node / npm):
 
    ```sh
-   make vsix                       # -> out/wavelens-<version>.vsix; without make: python3 -I tools/mkvsix.py
+   make vsix                       # -> out/wavelens.vsix (+ wavelens-<version>.vsix); without make: python3 -I tools/mkvsix.py
    ```
 
 2. Connect VS Code to the host (*Remote-SSH: Connect to Host…* or *WSL: Connect to WSL*) and open the folder of
@@ -68,7 +68,7 @@ Linux x86-64 host). The extension is installed on the host; nothing else is need
 3. In a terminal of that **remote** window (where the `.vsix` is, or copy it there):
 
    ```sh
-   code --install-extension out/wavelens-*.vsix --force   # --force: over an older version
+   code --install-extension out/wavelens.vsix --force   # --force: over an older version
    ```
 
    or Extensions → `…` → *Install from VSIX…* while connected. Then *Developer: Reload Window*.
@@ -133,7 +133,7 @@ stream-video dump, which is not in git: with your `test_stream_video.fst` next t
 ```sh
 make wavelens        # wavelens/wavelens.js from wavelens/src/*.js (after editing them)
 make sva-build       # the SVA engine: the native CLI and wavelens/sva.wasm.js
-make vsix            # the VS Code extension: out/wavelens-<version>.vsix (no node / npm needed)
+make vsix            # the VS Code extension: out/wavelens.vsix and wavelens-<version>.vsix (no node / npm needed)
 make check           # the gate before a commit: the engine's tests, the unit tests, every page in a browser
 ```
 

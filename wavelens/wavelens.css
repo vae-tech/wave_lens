@@ -95,7 +95,11 @@
 .wv .bar .cur { font-family: var(--font-mono); margin-left: 12px; color: var(--muted); }
 .wv .bar .ver { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); opacity: 0.8; white-space: nowrap; }   /* the version and build */
 .wv .body { display: grid; grid-template-columns: var(--wv-names, 200px) minmax(0, 1fr); }
-.wv.wv-scroll .body { max-height: var(--wv-max-h); overflow-y: auto; }   /* maxHeight setting: rows scroll inside the viewer */
+/* maxHeight setting: the rows scroll inside the viewer, the box no taller than the window under the bar (the bar and the
+   time axis in sight together), and its end does not scroll the page on (the axis would go up with it)
+   (a window lower than the bar: a few rows still, 120 px, the page scrolls the rest) */
+.wv.wv-scroll .body { max-height: max(min(var(--wv-max-h), calc(100vh - var(--wv-bar-h, 0px) - 4px)), 120px); overflow-y: auto;
+  overscroll-behavior-y: contain; }
 .wv .wcol { position: relative; min-width: 0; }                         /* as tall as all rows; the canvas sticks in view */
 .wv .names { border-right: 1px solid var(--line); font-family: var(--font-mono); font-size: var(--wv-font-size, 11.5px); overflow: clip; }
 .wv .names .hdr { height: 24px; border-bottom: 1px solid var(--line); background: var(--panel-2); position: sticky; top: 0; z-index: 1; }
@@ -400,11 +404,21 @@
 @media print { .wv > .bar { position: static !important; } }
 .wv .wv-menu.wv-groups { min-width: 220px; }   /* ctrl+G: your groups */
 .wv .wv-menu .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 7px; vertical-align: 0; }
-/* the Modules panel (t, modules.js): the tree of the modules over the viewer, its header moves it, its corner sizes it; a
-   drawer at the side on a narrow screen; not printed. A module Only keeps: .on (picked), .inc (under a picked one) */
+/* the Modules panel (t, modules.js): the tree of the modules over the viewer, its header moves it, its edges and corners
+   (.rz) size it; a drawer at the side on a narrow screen; not printed. A module Only keeps: .on (picked), .inc (under a picked one) */
 .wv .wv-mods { position: fixed; z-index: 48; width: 320px; height: min(62vh, 540px); min-width: 220px; min-height: 160px; max-width: 96vw; max-height: 92vh;
-  display: flex; flex-direction: column; resize: both; overflow: hidden; background: var(--panel); color: var(--fg); border: 1px solid var(--line);
+  display: flex; flex-direction: column; overflow: hidden; background: var(--panel); color: var(--fg); border: 1px solid var(--line);
   border-radius: 6px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2); font: 12.5px var(--font-body); }
+.wv .wv-mods:focus { outline: none; }
+.wv .wv-mods .rz { position: absolute; z-index: 3; touch-action: none; }
+.wv .wv-mods .rz-n, .wv .wv-mods .rz-s { left: 10px; right: 10px; height: 5px; cursor: ns-resize; }
+.wv .wv-mods .rz-e, .wv .wv-mods .rz-w { top: 10px; bottom: 10px; width: 5px; cursor: ew-resize; }
+.wv .wv-mods .rz-n { top: 0; } .wv .wv-mods .rz-s { bottom: 0; } .wv .wv-mods .rz-e { right: 0; } .wv .wv-mods .rz-w { left: 0; }
+.wv .wv-mods .rz-nw, .wv .wv-mods .rz-ne, .wv .wv-mods .rz-sw, .wv .wv-mods .rz-se { width: 12px; height: 12px; }
+.wv .wv-mods .rz-nw { left: 0; top: 0; cursor: nwse-resize; } .wv .wv-mods .rz-se { right: 0; bottom: 0; cursor: nwse-resize; }
+.wv .wv-mods .rz-ne { right: 0; top: 0; cursor: nesw-resize; } .wv .wv-mods .rz-sw { left: 0; bottom: 0; cursor: nesw-resize; }
+.wv .wv-mods .rz-se { background: linear-gradient(135deg, transparent 55%, var(--muted) 55%, var(--muted) 62%, transparent 62%, transparent 72%,
+  var(--muted) 72%, var(--muted) 79%, transparent 79%); opacity: 0.6; border-radius: 0 0 6px 0; }
 .wv .wv-mods .mh { display: flex; align-items: center; gap: 8px; padding: 5px 6px 5px 10px; border-bottom: 1px solid var(--line); cursor: move; user-select: none; }
 .wv .wv-mods .mh .mt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11.5px; }
 .wv .wv-mods button { font: inherit; font-size: 11.5px; padding: 1px 7px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); border-radius: 4px;
@@ -434,8 +448,10 @@
 .wv .wv-mods .mn.hit .nm { color: var(--accent); }
 .wv .wv-mods .mbox { position: absolute; left: 2px; right: 2px; z-index: 1; border: 1px dashed var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent);
   pointer-events: none; }
-@media (max-width: 600px) { .wv .wv-mods { left: 0 !important; top: 0 !important; bottom: 0; width: min(88vw, 340px); height: auto; max-height: none;
-  border-radius: 0 6px 6px 0; resize: none; } .wv .wv-mods .mh { cursor: default; } }
+/* the drawer's size wins over a size the panel was given on a wide window (inline, kept for the next time) */
+@media (max-width: 600px) { .wv .wv-mods { left: 0 !important; top: 0 !important; bottom: 0; width: min(88vw, 340px) !important;
+  height: auto !important; max-width: none !important; max-height: none !important; border-radius: 0 6px 6px 0; }
+  .wv .wv-mods .mh { cursor: default; } .wv .wv-mods .rz { display: none; } }
 @media print { .wv .wv-mods { display: none; } }
 .wv .wv-mods .mn.way .nm { font-style: italic; }   /* on the way to a module Only keeps: its header only */
 /* the FSM panel (fsm.js): the Modules panel's look; an FSM's state at the cursor, how many of its states the waves reach */

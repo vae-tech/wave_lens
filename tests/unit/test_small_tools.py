@@ -1,5 +1,5 @@
 """tools/wavejson.py, embed.py, wavelenscat.py, mkhtml.py: the readable JSON, the data files, wavelens.js, the page."""
-import json, os, re, unittest
+import json, os, re, subprocess, sys, unittest
 
 from tests.unit import helpers as H
 import wavejson as WJ
@@ -38,6 +38,41 @@ class WaveJson(unittest.TestCase):
 
     def test_dumps_many(self):
         self.assertEqual(json.loads(WJ.dumps_many({'x': self.DOC, 'y': self.DOC}))['y']['time']['t0'], 25000)
+
+
+class PngDiff(unittest.TestCase):
+    # review VI T13: tests/pngdiff.py, what shots-check compares the pictures with: a picture read and written back is the
+    # same; a block of it moved is counted pixel by pixel; a faint change (under --tol) is not; another size is
+    def test_counts_what_moved(self):
+        from tests import pngdiff as P
+        w, h, rows = P.read(os.path.join(H.ROOT, 'docs', 'img', 'bar.png'))
+        with H.tmp() as d:
+            a, b, c, e, diff = (os.path.join(d, n + '.png') for n in 'abced')
+            P.write(a, w, h, rows)
+            self.assertEqual(P.read(a)[2], rows)
+            moved = [bytearray(r) for r in rows]
+            for y in range(10):
+                for x in range(50):
+                    moved[y][3 * x:3 * x + 3] = bytes(255 - v for v in rows[y][3 * x:3 * x + 3]) if abs(rows[y][3 * x] - 128) > 40 else b'\xff\x00\xff'
+            P.write(b, w, h, [bytes(r) for r in moved])
+            P.write(c, w, h, [bytes(min(255, v + 5) for v in r) for r in rows])
+            P.write(e, w, h - 1, rows[:-1])
+            self.assertEqual(P.compare(a, a)[:2], (0, w * h))
+            n, total, why = P.compare(a, b, diff=diff)
+            self.assertEqual((n, why), (500, None))
+            self.assertTrue(os.path.exists(diff))
+            self.assertEqual(P.compare(a, c)[0], 0)
+            self.assertIn(f'{w}x{h} -> {w}x{h - 1}', P.compare(a, e)[2])
+            # the CLI: a block of 500 px is a difference (a share of the picture would let it through), a picture made and
+            # not committed fails, a faint change passes
+            want, got = os.path.join(d, 'want'), os.path.join(d, 'got')
+            os.makedirs(want); os.makedirs(got)
+            P.write(os.path.join(want, 'x.png'), w, h, rows); P.write(os.path.join(got, 'x.png'), w, h, [bytes(r) for r in moved])
+            run = lambda: subprocess.run([sys.executable, '-I', os.path.join(H.ROOT, 'tests', 'pngdiff.py'), want, got], capture_output=True, text=True)
+            r = run(); self.assertEqual(r.returncode, 1, r.stdout); self.assertIn('500 of', r.stdout)
+            P.write(os.path.join(got, 'x.png'), w, h, [bytes(min(255, v + 5) for v in r) for r in rows]); self.assertEqual(run().returncode, 0)
+            P.write(os.path.join(got, 'y.png'), w, h, rows)
+            r = run(); self.assertEqual(r.returncode, 1, r.stdout); self.assertIn('y.png: made, not in', r.stdout)
 
 
 class Embed(unittest.TestCase):

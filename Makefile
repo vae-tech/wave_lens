@@ -48,8 +48,8 @@ help:
 	@echo 'make example    EX=apb|axi_lite|fsm: one of them'
 	@echo 'make questa     EX=fsm: the example in QuestaSim (vsim on PATH): VCD + its types (tools/questa/wavelens_types.tcl) + page in $$(BUILD)/questa/<ex>/'
 	@echo 'make types-fixture  tests/unit/types in QuestaSim again: questa.vcd, questa.types.json (another Questa version: read the diff)'
-	@echo 'make shots      the README screenshots in docs/img/ (after make examples)'
-	@echo 'make shots-check  the screenshots into $$(BUILD)/img, compared with docs/img (make check: a broken shot fails)'
+	@echo 'make shots      the README screenshots in docs/img/ and the visual regression'"'"'s tests/visual (after make examples)'
+	@echo 'make shots-check  both made again into $$(BUILD), compared pixel by pixel with the committed ones (tests/pngdiff.py): a change fails'
 	@echo 'make guide-shots  the pictures of the guides in docs/guides/img (after make examples; ONLY=gaps,sva: those guides)'
 	@echo 'make html       one self-contained page: the demo, CONFIG=work/x.config.json, or WAVES=work/x.vcd (config made if missing);'
 	@echo '                SVA="checks/*.sv" BIND="name@scope,…": assertions bound, evaluated, an Assertions section'
@@ -65,8 +65,9 @@ help:
 	@echo 'make sva-verify the checkers of the examples in Verilator --assert against sva eval (after make examples; skipped without verilator)'
 	@echo 'make sva-eval   WAVES=dump.vcd|fst SVA="pkg.sv checks.sva" SCOPE=tb.dut [OUT=results.json] [ARGS=...]: sva eval'
 	@echo 'make sva-spike  the spike page $$(BUILD)/sva/spike.html (the WebAssembly build and wavelens/sva.js in a page)'
-	@echo 'make vsix       the VS Code extension (vscode/) -> $$(BUILD)/wavelens-<version>.vsix: the viewer and the static sva, for the'
-	@echo '                Linux host of Remote-SSH / WSL (nothing else installed there; code --install-extension FILE there)'
+	@echo 'make vsix       the VS Code extension (vscode/) -> $$(BUILD)/wavelens.vsix and its copy wavelens-<version>.vsix (kept'
+	@echo '                side by side): the viewer and the static sva, for the Linux host of Remote-SSH / WSL (nothing else'
+	@echo '                installed there; code --install-extension FILE there)'
 	@echo 'make vscode-e2e the extension (vscode/) in a real VS Code (tests/vscode_e2e.py; WSL: the VS Code of Windows, Remote - WSL)'
 	@echo 'make mcp-bench  the MCP server for AI agents (tools/wavemcp.py) on the benchmark tasks by a script: answers checked, bytes'
 	@echo '                returned (no agent); AGENT=claude|codex [MODEL=sonnet] [REPS=2] [TASKS=a1,b3]: agents with and without'
@@ -75,8 +76,9 @@ help:
 	@echo '                make examples demo demo-fst sva-build sva-spike html first; what is missing is reported as SKIPPED);'
 	@echo '                STRICT=1: a skip fails; ONLY=sec1,sec2: those sections only (smoke.py --list)'
 	@echo 'make unit       the Python unit tests of the tools (tests/unit: unittest, standard library, a few seconds)'
+	@echo 'make unit-shuffle the unit tests one by one in the order of a seed (SEED=n: that order again): a test that needs another first fails'
 	@echo 'make unit-bless the goldens of tests/unit/golden (the bytes of wavejson.py, vcd2wavedrom.py over the fixtures) written anew: read the diff'
-	@echo 'make check      the gate before a commit: sva.wasm.js the build of sva/, the pages smoke needs, sva-test and unit (no skips), mcp-bench, smoke STRICT=1, shots-check'
+	@echo 'make check      the gate before a commit: sva.wasm.js the build of sva/, the pages smoke needs, sva-test and unit (no skips), sva-verify, mcp-bench, smoke STRICT=1, shots-check'
 	@echo 'make fmt        verible-verilog-format of the project SystemVerilog (docs/SV_STYLE.md), when installed'
 	@echo 'make lint       verilator --lint-only -Wall on the example testbenches'
 	@echo 'make clean      remove the build products under $$(BUILD) (the cargo target stays: make clean-all)'
@@ -176,18 +178,20 @@ types-fixture:
 
 shots:
 	$(PW) tests/shots.py --build $(B) $(if $(ONLY),--only $(ONLY))
+	$(PW) tests/shots.py --build $(B) --set visual $(if $(ONLY),--only $(ONLY))
 
 # the pictures of the guides (docs/guides/*.html): docs/guides/img/*.png; the gaps guide's dump is made in BUILD/guides
 guide-shots:
 	$(PW) tests/guide_shots.py --build $(B) $(if $(ONLY),--only $(ONLY))
 
-# every shot made again into BUILD/img: a shot that no longer builds fails; a picture that changed is listed (the look
-# changed: make shots and commit the PNGs with the change)
+# every shot made again: a shot that no longer builds fails, and so does a picture that changed (the look changed: make
+# shots and commit the PNGs with the change); the pictures made again and compared with the committed ones, docs/img and the visual regression's tests/visual
+# (tests/pngdiff.py: a picture that changed fails; the differences in BUILD/img/diff, BUILD/visual/diff)
 shots-check:
+	@rm -rf $(B)/img $(B)/visual   # every picture made by this run: none left from an earlier one
 	$(PW) tests/shots.py --build $(B) --out $(B)/img > /dev/null
-	@d=$$(for f in docs/img/*.png; do cmp -s $$f $(B)/img/$$(basename $$f) || echo $$(basename $$f); done); \
-	  if [ -n "$$d" ]; then echo "shots-check: these pictures differ from docs/img (make shots, then commit them): $$d"; \
-	  else echo 'shots-check: docs/img is current'; fi
+	$(PW) tests/shots.py --build $(B) --set visual --out $(B)/visual > /dev/null
+	@s=0; $(PY) tests/pngdiff.py docs/img $(B)/img || s=1; $(PY) tests/pngdiff.py tests/visual $(B)/visual || s=1; exit $$s
 
 # Two views of one dump (see $(DEMO_CONFIG)): clock-sampled (real WaveDrom wave strings) and exact transitions ("tv").
 $(DEMO_JS): $(VCD) $(DEMO_CONFIG) tools/vcd2wavedrom.py tools/wavejson.py tools/embed.py
@@ -288,7 +292,8 @@ sva-spike: sva-build $(VCD)
 # The VS Code extension (vscode/): one .vsix with the viewer's files and the static sva CLI (tools/mkvsix.py, no node /
 # npm; install it into the Remote-SSH / WSL host); vscode-e2e runs it in a real VS Code (tests/vscode_e2e.py: in WSL the
 # VS Code of Windows connected to this distribution)
-VSIX := $(B)/wavelens-$(shell cat VERSION).0.vsix
+# two files: wavelens.vsix (the last build: the same install line each time) and wavelens-<version>.vsix (kept side by side)
+VSIX := $(B)/wavelens.vsix
 vsix: $(VSIX)
 $(VSIX): VERSION tools/mkvsix.py $(wildcard vscode/*.js vscode/*.json vscode/*.md vscode/media/*.js) $(DIST_LINUX) \
     $(addprefix wavelens/,wavelens.css wavelens.config.js wavelens.js sva.wasm.js bus.js sva.js)
@@ -315,6 +320,10 @@ wavelens/wavelens.js: $(WAVELENS_SRC) tools/wavelenscat.py
 
 # Python unit tests of the tools (tests/unit/test_*.py on unittest, no dependencies; the fixtures in tests/unit/vcd).
 # The sva CLI of this BUILD when it is built (else svabuild finds one: an older out/ build would test stale code)
+# the unit tests one by one in an order of a seed (SEED=n again for the same order): a test that needs another first fails
+unit-shuffle:
+	BUILD=$(B) $(if $(WAVELENS_SVA),,$(if $(wildcard $(SVA_BIN)),WAVELENS_SVA=$(abspath $(SVA_BIN)))) $(PY) tests/unit/shuffle.py $(SEED)
+
 # the goldens of tests/unit/golden (the bytes wavejson.py and vcd2wavedrom.py write) made anew: read the diff
 unit-bless:
 	WAVELENS_BLESS=1 $(PY) -m unittest discover -s tests/unit -t . -p 'test_small_tools.py'
@@ -366,4 +375,4 @@ clean-all:
 	$(if $(filter $(B),/ $(CURDIR) $(HOME) $(abspath $(HOME)/..)),$(error clean-all: BUILD=$(B) is not a build directory))
 	rm -rf $(B)
 
-.PHONY: unit-bless vsix vscode-e2e wavelens help demo demo-fst example examples questa types-fixture shots guide-shots html config sva-build dist dist-linux dist-windows sva-test sva-bless sva-examples sva-verify sva-eval sva-spike mcp-bench smoke shots-check unit check fmt lint clean clean-all
+.PHONY: unit-bless unit-shuffle vsix vscode-e2e wavelens help demo demo-fst example examples questa types-fixture shots guide-shots html config sva-build dist dist-linux dist-windows sva-test sva-bless sva-examples sva-verify sva-eval sva-spike mcp-bench smoke shots-check unit check fmt lint clean clean-all

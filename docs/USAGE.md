@@ -29,8 +29,8 @@ Nothing else is needed on the host: the package carries the viewer's files and t
 VCD text with it, kept in the extension's storage, 16 at most), and the extension runs in VS Code's own node.
 
 ```sh
-make vsix                                         # out/wavelens-<version>.vsix (tools/mkvsix.py: no node, no npm)
-code --install-extension out/wavelens-*.vsix        # in a terminal of the remote window: installed on the host
+make vsix                                         # out/wavelens.vsix + wavelens-<version>.vsix (tools/mkvsix.py: no node, no npm)
+code --install-extension out/wavelens.vsix --force  # in a terminal of the remote window: installed on the host
 ```
 
 (or Extensions → … → *Install from VSIX…* while connected). A `.vcd` / `.fst` in the Explorer → right click → *Open in
@@ -51,7 +51,7 @@ may be the default). What the tab does differently from a page in a browser:
   what they mean in VS Code (ctrl+F find, ctrl+C copy, ctrl+Z / ctrl+Y undo / redo, alt+C W R in the find field);
   `wavelens.keysToVSCode` (default `ctrl+G`, Go to Line) are left to VS Code — the list of your groups is `gl` then; the
   others (ctrl+P, F1, ctrl+tab, ctrl+shift+…) are VS Code's.
-- **The version** in the bar's title line: `0.19 · dev@d502c48*` — the extension's branch and commit (`*`: changes not
+- **The version** in the bar's title line: `0.21 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
   committed), so a tab of a development build says which one it is.
 - **An agent** on the host (`tools/wavemcp.py`, below): when it starts its live link, every open tab connects (**●
   live**); `view_live` with `page` a `.vcd` / `.fst` and `open: true` opens it in the VS Code window that has the file
@@ -259,11 +259,11 @@ add theirs (`WaveLens.registerDefaults`).
 | `fold` | none | groups folded at start: `true`, a nesting depth (`2`), or group paths |
 | `groupOrder` | `file` | inside a group: `last` = signals first, then sub-modules; `first`; `file` |
 | `moduleShading` | true | neighbouring instances alternate between two backgrounds, the panel and a pale blue (`band` in `colors`); module rows bold |
-| `maxHeight` | none | e.g. `"80vh"`: the rows scroll inside the viewer (any number of rows); none: with the page, the bar sticking to the top (generated configs: `"80vh"`; the bar's **Scroll** button switches) |
+| `maxHeight` | none | e.g. `"80vh"`: the rows scroll inside the viewer (any number of rows; the box never taller than the window under the bar, 120 px at least); none: with the page, the bar sticking to the top (generated configs: `"80vh"`; the bar's **Scroll** button switches) |
 | `toolsFolded` | false | the bar's tools folded to its title line (**▴** / **▾ tools** in the bar) |
 | `toolsHidden` | `[]` | the bar's tool groups left out by their labels (`["style", "dump"]`; the right button on the bar) |
 | `themeButton` | `auto` | **◐** in the bar's title line: the page's theme (auto, light, white, dark; kept in this browser; in VS Code its list, VS Code's colours too); `auto`: when the page has no theme button of its own (`viewer.html`, the VS Code tab) |
-| `version` | true | the version in the bar's title line, and the build the page was made from (`0.19 · dev@d502c48*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
+| `version` | true | the version in the bar's title line, and the build the page was made from (`0.21 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
 | `keysLeft` | `[]` | keys the viewer leaves to its host: `["ctrl+G"]` (`ctrl+` is `cmd+` too, a letter by its place); the VS Code tab: `wavelens.keysToVSCode` |
 | `savePage` | true | the bar's **Save page**: this page as a `.view.html` with your view in it (§ Save and Load); false hides it and keeps no copy of the page's text |
 | `cycles`, `cycleClock`, `cycleZero` | false, null, null | the clock cycles in a band under the time axis (§ Clock cycles): on, the clock counted (null: the `*clk*` found), the time of cycle 0 (`"50ns"` or ps; null: the first rising edge) |
@@ -464,9 +464,11 @@ ctrl+C, ctrl+F, ctrl+G (`gl` too: your groups), ctrl+Z / ctrl+shift+Z / ctrl+Y (
 (key `?`) opens the box of all the keys and the mouse, the plugins' too.
 
 **Scroll: window / page** in the title line switches where the rows scroll, on the fly (kept in this browser; the
-`maxHeight` setting is the start): in a **window** of their own (`80vh` high unless the settings say otherwise), the bar
-above them; or with the **page**, the browser's scroll bar — the bar then sticks to the top of the window while its rows
-go by, the time axis and the names' header right under it, and leaves with the viewer's end. **▴** folds the tools to
+`maxHeight` setting is the start): in a **window** of their own (`80vh` high unless the settings say otherwise, never
+taller than the browser's window under the bar), the bar above them — the end of the rows does not scroll the page on,
+and with the page scrolled past the viewer's top the wheel over the rows brings the bar and the time axis back first;
+or with the **page**, the browser's scroll bar — the bar then sticks to the top of the window while its rows go by, the
+time axis and the names' header right under it down to the last rows, and leaves with the viewer's end. **▴** folds the tools to
 the title line (title, cursor, the buttons), **▾ tools** opens them again; `/` and ctrl+F open them for the find
 field. The right button on the bar lists its tool groups (cursor, view, edges, go to, find, expression, list, style,
 state, dump, assertions, a plugin's) with a tick each: a click leaves one out or brings it back (the menu stays open),
@@ -507,8 +509,10 @@ own colour (here `u_master`, `u_slave`, `u_regfile`; the clocks keep the green o
 **The Modules panel and Only.** `t` (or **Modules** in the bar, **Modules…** in the right button's menu) opens the
 page's modules as a tree over the viewer, without their signals: per module the signals of its own and with its
 submodules (`12 / 2060`; a packed struct is one), ● at the module of the selected signal; a filter on top (fuzzy, as
-the find). The tree folds on its own (▸ ▾, ← →); its header moves the panel, its corner sizes it (a narrow screen: a
-drawer at the side; not printed). Two ways to use it:
+the find). The tree folds on its own (▸ ▾, ← →); its header moves the panel, any edge or corner sizes it, never past
+the window (a narrow screen: a drawer at the side, of its own size; not printed), and it opens again where it was, at
+its size; a window made smaller brings it back in. A click anywhere in it keeps
+the keys there: ↑ ↓ Home End go on in the tree (from a button too; the filter keeps its own). Two ways to use it:
 
 - **A click on a name goes there**: the module and the ones above it are opened in the names column (shown again when
   hidden), its first signal — its own, else of a submodule — selected in the middle of the waves. Enter does the same,
@@ -537,7 +541,8 @@ names](#fsm-state-names-fst-or-vcd--the-designs-types)) — in the tree of the m
 each FSM with its state at the cursor and how many of its table's states the waves reach (`4/5`; x and z are none). It
 lists the ones named as a state machine (`state`, `fsm`, `cs` / `ns`, `…_q`; none so named: every one); **all enums** adds
 the other signals with labels (a running disparity, a kind of packet). **fields** adds the fields of structs with labels
-(a packed struct's state field). The panel stays open when **Sources…** or ⟳ reads the waves again. A click on an FSM goes there (opened, selected, in the
+(a packed struct's state field). The panel stays open when **Sources…** or ⟳ reads the waves again; it moves, sizes and
+keeps the keys as the Modules panel does. A click on an FSM goes there (opened, selected, in the
 middle; one the view leaves out joins the layer below, a hidden one is shown again), on a module goes to the module;
 **ctrl+click** (Space) picks an FSM, **shift+click** a run of them. Then, for the picked ones (none picked: every one the
 filter lists):

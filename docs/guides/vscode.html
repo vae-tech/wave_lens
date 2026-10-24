@@ -49,11 +49,11 @@
 
 <h2 id="install">Installing</h2>
 <ol class="steps">
-  <li>Build the package from a clone (no node, no npm): <code>make vsix</code> → <code>out/wavelens-&lt;version&gt;.vsix</code>. It is
+  <li>Build the package from a clone (no node, no npm): <code>make vsix</code> → <code>out/wavelens.vsix</code> (the last build) and its copy <code>out/wavelens-&lt;version&gt;.vsix</code> (the versions kept side by side: install another one to compare). It is
     for a Linux x86-64 host; VS Code 1.80 or newer.</li>
   <li>Connect VS Code to the host (<i>Remote-SSH: Connect to Host…</i>, or <i>WSL: Connect to WSL</i>) and open the folder of your
     dumps.</li>
-  <li>In a terminal of that <b>remote</b> window: <code>code --install-extension out/wavelens-*.vsix --force</code>
+  <li>In a terminal of that <b>remote</b> window: <code>code --install-extension out/wavelens.vsix --force</code>
     (<code>--force</code>: over an older version; or Extensions → … → <i>Install from VSIX…</i> while connected), then
     <i>Developer: Reload Window</i>. The Extensions view then lists WaveLens under the host's name (<i>SSH: …</i> /
     <i>WSL: …</i>), not under <i>Local</i>.</li>
@@ -90,7 +90,7 @@
     and <kbd>ctrl+F</kbd> <kbd>ctrl+C</kbd> <kbd>ctrl+Z</kbd> <kbd>alt+C W R</kbd>, which mean what they mean in VS Code.
     <code>wavelens.keysToVSCode</code> (default <kbd>ctrl+G</kbd>, Go to Line) go to VS Code — the viewer's list of your groups is
     <kbd>gl</kbd> then; <kbd>ctrl+P</kbd>, <kbd>F1</kbd>, <kbd>ctrl+Tab</kbd> stay VS Code's.</td></tr>
-  <tr><td>version</td><td>the bar's title line says the version and the extension's branch and commit (<code>0.20 ·
+  <tr><td>version</td><td>the bar's title line says the version and the extension's branch and commit (<code>0.21 ·
     dev@d502c48*</code>, <code>*</code>: changes not committed): a development build says which one it is.</td></tr>
   <tr><td>types by Verilator</td><td><i>WaveLens: Make the types with Verilator</i> (the editor's title menu) asks for the design
     (a <code>.f</code> file of the workspace, or the arguments: <code>*</code> and <code>?</code> in a file's name are expanded) and the top module (the dump's by default), runs
@@ -141,7 +141,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.20 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.21 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

@@ -445,7 +445,9 @@ def apply(types, sigs, m=None):
         if e['width'] != s['width']:
             notes.append(f'{s["path"]}: {s["width"]} bits in the dump, {e["width"]} in the types: left as it is')
             continue
-        if e.get('enum') and not s.get('enum'):
+        # a table whose values do not all fit the width is not this signal's (the page's svApply: the same)
+        fits = all(re.fullmatch(r'\d+', str(k)) and int(k) < 1 << s['width'] for k in e.get('enum') or ())
+        if e.get('enum') and not s.get('enum') and fits:
             s['enum'] = {int(k): v for k, v in e['enum'].items()}
             ne += 1
             given.add(s['path'])

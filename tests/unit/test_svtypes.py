@@ -112,6 +112,40 @@ class Apply(unittest.TestCase):
             self.assertNotIn('types_tb.u_plain.state', cfg['typed'])
             self.assertIn('types_tb.o', cfg['typed'])
 
+    def test_update_through_a_life(self):
+        # review VI T6: one signal's type over five runs of mkconfig --update: an enum, a struct, a plain vector, gone,
+        # an enum again, then edited by the user (and stays though the file changes); a table of the user's on another
+        # signal stays all the way, and "typed" names what the types gave
+        F = [{'name': 'hi', 'msb': 3, 'lsb': 2}, {'name': 'lo', 'msb': 1, 'lsb': 0}]
+        steps = [({'width': 4, 'enum': {'0': 'A0'}}, {'enum': {'0': 'A0'}}), ({'width': 4, 'fields': F}, {'fields': F}), ({'width': 4}, {}),
+                 (None, {}), ({'width': 4, 'enum': {'1': 'B1'}}, {'enum': {'1': 'B1'}})]
+        head = '$timescale 1ns $end\n$scope module tb $end\n$var wire 4 ! a [3:0] $end\n$var wire 4 " b [3:0] $end\n$upscope $end\n$enddefinitions $end\n'
+        with H.tmp() as d:
+            dump, out, ty = H.vcd(d, '#0\nb0 !\nb0 "\n#5\nb1 !\n', head, 'tb.vcd'), os.path.join(d, 'c.json'), os.path.join(d, 'tb.types.json')
+            for i, (entry, want) in enumerate(steps):
+                with open(ty, 'w') as f:
+                    json.dump({'wavelens': 'types', 'signals': {'tb.a': entry} if entry else {}}, f)
+                rc, _, err = H.run_tool('mkconfig', dump, '--out', out, *(['--update'] if i else []))
+                self.assertEqual(rc, 0, err)
+                cfg = readj(out)
+                if not i:
+                    cfg['signals']['tb.b']['enum'] = {'0': 'MINE'}
+                    with open(out, 'w') as f:
+                        json.dump(cfg, f)
+                a = cfg['signals']['tb.a']
+                with self.subTest(i):
+                    self.assertEqual({k: a[k] for k in ('enum', 'fields') if k in a}, want)
+                    self.assertEqual(cfg['signals']['tb.b'].get('enum'), {'0': 'MINE'})
+                    self.assertEqual('tb.a' in cfg.get('typed', {}), bool(want))
+            cfg['signals']['tb.a']['enum'] = {'1': 'EDITED'}   # the user's edit of what the types gave: it stays
+            with open(out, 'w') as f:
+                json.dump(cfg, f)
+            with open(ty, 'w') as f:
+                json.dump({'wavelens': 'types', 'signals': {'tb.a': {'width': 4, 'enum': {'2': 'C2'}}}}, f)
+            rc, _, err = H.run_tool('mkconfig', dump, '--out', out, '--update')
+            self.assertEqual(rc, 0, err)
+            self.assertEqual(readj(out)['signals']['tb.a']['enum'], {'1': 'EDITED'})
+
     def test_map_and_fingerprint(self):
         # review V X4 / X5: the dump's scopes as the types name them ("map", --map: the longest prefix); the run's
         # fingerprint: written more than a day apart, an instance of the types under a module the dump has but not in it
@@ -245,6 +279,33 @@ class Verilator(unittest.TestCase):
             rc, _, err = H.run_tool('svtypes', 'verilator', '--top', 'nope', '--out', out, '--', *CORPUS)
             self.assertNotEqual(rc, 0)
             self.assertIn('verilator --json-only failed', err)
+
+
+
+def contract_py(c):
+    """A case of tests/unit/types/contract.json through svtypes.py -> what the contract says (the page's twin: smoke readers)."""
+    try:
+        t = S.read(json.loads(json.dumps(c['types'])))
+    except WaveError:
+        return {'error': True}
+    sigs = [{'path': x['path'], 'width': x['width'], 'enum': dict(x.get('enum') or {}), 'fields': x.get('fields')} for x in c['signals']]
+    own = {x['path'] for x in c['signals'] if x.get('enum')}, {x['path'] for x in c['signals'] if x.get('fields')}
+    _, _, notes, given = S.apply(t, sigs)
+    out = {'labels': {x['path']: {str(k): v for k, v in x['enum'].items()} for x in sigs if x['path'] in given and x['enum'] and x['path'] not in own[0]},
+           'fields': {x['path']: x['fields'] for x in sigs if x['path'] in given and x['fields'] and x['path'] not in own[1]},
+           'notes': notes, 'run': S.fingerprint(t, c.get('date'), c.get('modules', []))}
+    return {k: v for k, v in out.items() if v}
+
+
+class Contract(unittest.TestCase):
+    # review VI T6: the cases both twins must give (the page's run of them: tests/smoke.py readers)
+    def test_the_cases(self):
+        with open(os.path.join(T, 'contract.json'), encoding='utf-8') as f:
+            cases = json.load(f)['cases']
+        self.assertGreater(len(cases), 15)
+        for c in cases:
+            with self.subTest(c['name']):
+                self.assertEqual(contract_py(c), c['want'])
 
 
 if __name__ == '__main__':

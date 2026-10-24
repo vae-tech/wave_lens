@@ -21,6 +21,12 @@ class Package(unittest.TestCase):
                 self.assertEqual(rc, 0, err)
             with open(outs[0], 'rb') as a, open(outs[1], 'rb') as b:
                 self.assertEqual(hashlib.sha256(a.read()).digest(), hashlib.sha256(b.read()).digest(), 'the same input, the same bytes')
+            named = [n for n in os.listdir(d) if n.startswith('wavelens-')]   # the copy named by the version, beside OUT
+            with open(outs[1], 'rb') as a, open(os.path.join(d, named[0]), 'rb') as b:
+                self.assertEqual(a.read(), b.read(), 'the copy named by the version: the same bytes')
+            os.makedirs(os.path.join(d, 'one'))
+            rc, _, err = H.run_tool('mkvsix', '--out', os.path.join(d, 'one', 'c.vsix'), '--one', '--sva', SHIPPED)
+            self.assertEqual((rc, os.listdir(os.path.join(d, 'one'))), (0, ['c.vsix']), f'--one: OUT only {err}')
             with zipfile.ZipFile(outs[0]) as z:
                 names = set(z.namelist())
                 pkg = json.loads(z.read('extension/package.json'))
@@ -29,6 +35,7 @@ class Package(unittest.TestCase):
         with open(os.path.join(H.ROOT, 'VERSION'), encoding='utf-8') as f:
             ver = f.read().strip()
         self.assertEqual(pkg['version'], ver + '.0' * (2 - ver.count('.')))
+        self.assertEqual(named, [f'wavelens-{pkg["version"]}.vsix'])
         self.assertIn(f'Version="{pkg["version"]}"', body['extension.vsixmanifest'].decode())
         main = 'extension/' + re.sub(r'^\./', '', pkg['main'])
         self.assertIn(main, names)

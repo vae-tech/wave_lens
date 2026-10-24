@@ -5,12 +5,14 @@
    is kept over closing and opening the tab again (the store), and a new write of a copy of the first dump is read again
    by itself (wavelens.autoReload); a dump with a stranger code and one whose time goes back put their notes in the
    Problems panel on their lines; a VCD as Questa writes it is named from a source of the workspace, another by the types
-   file beside it, read again when it is written. The results: out/result.json; the process exits 0 when all passed. */
+   file beside it, read again when it is written; a dump in a folder with a space in its name; the Verilator command with
+   a file's name of * ? (expanded). The results: out/result.json {run: the runner's id, done, results}; the process exits 0
+   when all passed (review VI T11: the runner takes only its own run's results, every check it names, the run done). */
 const vscode = require('vscode'), fs = require('fs'), path = require('path');
 
 const os = require('os');
 const CFG = JSON.parse(fs.readFileSync(path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'wavelens', 'e2e.json'), 'utf8'));
-const OUT = CFG.out, DUMPS = CFG.dumps;
+const OUT = CFG.out, DUMPS = CFG.dumps, RUN = CFG.run || null;
 const results = [], ok = (name, pass, info) => { results.push({ name, pass: !!pass, info }); };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -32,13 +34,17 @@ async function closeAll() { await vscode.commands.executeCommand('workbench.acti
 // an agent: tools/wavemcp.py of the repository as an MCP server over stdio; view_live with the dump and open: VS Code opens
 // its tab, which connects; view_edit puts a bookmark there; view_get reads it; the link's note in ~/.cache/wavelens/live goes
 async function agent(api, file) {
-  const cp = require('child_process'), root = path.join(__dirname, '..', '..');
+  const cp = require('child_process'), root = path.join(__dirname, '..', '..'), live = path.join(os.homedir(), '.cache', 'wavelens', 'live');
+  const notes = () => { try { return fs.readdirSync(live).filter(f => /^\d+\.json$/.test(f)); } catch (e) { return []; } };
+  const before = new Set(notes());   // another bridge's (an agent of yours): not this run's
   const p = cp.spawn('python3', ['-I', path.join(root, 'tools', 'wavemcp.py')], { stdio: ['pipe', 'pipe', 'inherit'] });
   let buf = '', id = 0; const wait = new Map();
   p.stdout.setEncoding('utf8');
   p.stdout.on('data', d => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const m = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1);
     if (wait.has(m.id)) { wait.get(m.id)(m); wait.delete(m.id); } } });
-  const rpc = (method, params) => new Promise(ok => { wait.set(++id, ok); p.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n'); });
+  const rpc = (method, params, ms = 60000) => new Promise((ok, no) => { const n = ++id, t = setTimeout(() => { wait.delete(n);
+    no(new Error(`${method}: no answer in ${ms / 1000} s`)); }, ms); wait.set(n, m => { clearTimeout(t); ok(m); });
+    p.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: n, method, params }) + '\n'); });
   const tool = async (name, args) => { const m = await rpc('tools/call', { name, arguments: args });
     const t = m.result && m.result.content && m.result.content[0].text;
     return { error: m.error || (m.result && m.result.isError && t), out: t && !(m.result && m.result.isError) ? JSON.parse(t) : null }; };
@@ -58,10 +64,9 @@ async function agent(api, file) {
     if (tab) await tab.run([{ op: 'bookmark', n: 9, delete: true }]);
   } catch (e) { ok('agent', false, { error: e.message }); }
   p.stdin.end();
-  await new Promise(r => p.on('close', r));
-  let left = [];
-  try { left = fs.readdirSync(path.join(os.homedir(), '.cache', 'wavelens', 'live')).filter(f => /^\d+\.json$/.test(f)); } catch (e) { /* none */ }
-  ok('agent: its link note removed on exit', !left.length, { left });
+  await Promise.race([new Promise(r => p.on('close', r)), sleep(20000).then(() => p.kill())]);
+  const left = notes().filter(f => !before.has(f));
+  ok('agent: its link note removed on exit', !left.length, { left, others: before.size });
   await closeAll();
 }
 
@@ -212,11 +217,34 @@ async function run() {
         await closeAll();
       }
     } catch (e) { ok('types: Verilator', false, { error: e.message }); }
+    // the arguments as typed (review VI A5): a file's name with ? expanded from the workspace's folder, no shell
+    try {
+      const fsmVcd = DUMPS.find(f => /fsm\.vcd$/.test(f)), src = path.join(__dirname, '..', '..', 'examples', 'fsm');
+      if (fsmVcd) {
+        const q = path.join(dir, 'fsm_glob.vcd'); fs.copyFileSync(fsmVcd, q);
+        const o = await open(api, q);
+        const res = await vscode.commands.executeCommand('wavelens.verilatorTypes', { args: [path.join(src, 'uart_pk?.sv'), path.join(src, 'fsm_tb.sv')],
+          top: 'fsm_tb' });
+        ok('types: Verilator, a file\'s name of ? expanded', res && res.signals === 3, { res });
+        await closeAll();
+      }
+    } catch (e) { ok('types: Verilator, a file\'s name of ? expanded', false, { error: e.message }); }
     await cfg.update('autoReload', undefined, vscode.ConfigurationTarget.Global);
     fs.rmSync(dir, { recursive: true, force: true });
+    // a dump in a folder with a space (a Windows user's): its URI and its path to the host as they are
+    const sp = path.join(path.dirname(DUMPS[0]), 'wavelens e2e space');
+    try {
+      fs.mkdirSync(sp, { recursive: true });
+      const q = path.join(sp, 'a b.vcd');
+      fs.writeFileSync(q, '$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! a $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\n#10\n1!\n');
+      const o = await open(api, q), r = await o.tab.run([{ op: 'cursor', t: 0 }, { op: 'edge', kind: 'rise', signal: 'tb.a' }]);
+      ok('a dump in a folder with a space', o.shown === 1 && r[1] && r[1].t === 10000, { shown: o.shown, edge: r[1] });
+      await closeAll();
+    } catch (e) { ok('a dump in a folder with a space', false, { error: e.message }); }
+    fs.rmSync(sp, { recursive: true, force: true });
   }
   if (DUMPS.length) await agent(api, DUMPS[0]);
-  fs.writeFileSync(path.join(OUT, 'result.json'), JSON.stringify(results, null, 1));
+  fs.writeFileSync(path.join(OUT, 'result.json'), JSON.stringify({ run: RUN, done: true, results }, null, 1));
   const bad = results.filter(r => !r.pass);
   if (bad.length) throw new Error(`${bad.length} of ${results.length} failed: ${bad.map(r => r.name).join(', ')}`);
 }

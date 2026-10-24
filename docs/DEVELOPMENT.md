@@ -91,10 +91,10 @@ make wavelens               # wavelens/wavelens.js from wavelens/src/*.js (after
 make demo examples html     # rebuild docs/demo_waves.js, the example pages, the demo page
 make smoke                  # tests/smoke.py: every page in light and dark, checks by section (--list), PNGs in BUILD/shots
 make smoke ONLY=find,sva_bind   # some sections (python3 tests/smoke.py --list); STRICT=1: a skip fails
-make shots                  # tests/shots.py: docs/img/*.png, dark theme (after make examples; ~20 s, see below)
-make shots-check            # the same into BUILD/img, compared with docs/img: a shot that no longer builds fails
+make shots                  # tests/shots.py: docs/img/*.png, dark theme, and tests/visual/*.png (--set visual: white, 420 px, an FSM's details, a scale of 2) (after make examples; ~20 s, see below)
+make shots-check            # both into BUILD/img and BUILD/visual, compared with the committed ones by tests/pngdiff.py: a picture that changed (more than 48 pixels by more than 32 of 255) or one made and not committed fails, its difference in BUILD/*/diff
 make guide-shots            # tests/guide_shots.py: docs/guides/img/*.png (after make examples; ONLY=gaps,sva: those guides)
-make vsix                   # tools/mkvsix.py: BUILD/wavelens-<version>.vsix (the extension, the viewer, the static sva)
+make vsix                   # tools/mkvsix.py: BUILD/wavelens.vsix, its copy wavelens-<version>.vsix (the extension, the viewer, the static sva)
 make vscode-e2e             # tests/vscode_e2e.py: the extension in a real VS Code (INSTALLED: python3 tests/vscode_e2e.py --installed)
 make sva-build              # the SVA engine (needs cargo + the wasm32 target): the sva CLI, wavelens/sva.wasm.js
 make dist                   # the CLI: bin/linux-x86_64/sva (musl, static, committed) + bin/windows-x86_64/sva.exe (mingw-w64)
@@ -144,7 +144,10 @@ forwards it to the workbench (every keydown that reaches its window). The smoke 
 extension's CSP with a fake `acquireVsCodeApi`; `make vscode-e2e` (`tests/vscode_e2e.py`) the whole extension in a
 real VS Code — in WSL the Windows VS Code connected to the distribution by Remote - WSL (its own user data under
 `BUILD/vscode-e2e`): the FSM example's VCD and FST and `test_stream_video.fst` opened (a picture of each), the store
-over reopening, a new write read again, an agent's `wavemcp.py` opening a dump with `view_live` and marking it up.
+over reopening, a new write read again, an agent's `wavemcp.py` opening a dump with `view_live` and marking it up, a
+dump in a folder with a space, the Verilator command with `?` in a file's name. The runner gives each run an id and takes
+only that run's `result.json` when it says it ended, and every check of its list must be there (a run that stops early
+fails, it does not pass with fewer); the agent's check counts only the live notes of its own bridge.
 `--installed` runs the `.vsix` installed into the host (`code --install-extension`) instead of `vscode/`. Not
 automated: the save / open dialogs themselves and keys through Windows (checked by hand).
 
@@ -161,11 +164,32 @@ and `event` variables, escaped names, a range glued to the name, the same path u
 (bits, ranges apart, two bits under one code), several changes on one line, tabs, indents and a time inside a line,
 `$comment` in the body, VHDL values, time going back, a header without `$enddefinitions`, times above 2^53 ps. The smoke section `readers` feeds the
 same files to the page's own VCD reader (`wavelens/src/vcd.js`) and demands the transitions of the tools; `test_svabuild`
-compares the name rule of `svabuild.Names` with `sva eval --resolve` case by case. `make shots` checks looks rather than
+compares the name rule of `svabuild.Names` with `sva eval --resolve` case by case.
+
+Beside the fixtures, generated input (review VI): `readers` reads 40 VCDs made from a seed (`gen_vcd`: aliases, a vector
+bit by bit, escaped and UTF-8 names, comments naming `$enddefinitions`, enum tables, changes on one line) against what
+the generator wrote down (the enum table too), against the tools, and as a File in pieces of 1–64 bytes (the parser
+given pieces of as many characters), three of them cut in two at every byte;
+`tests/unit/types/contract.json` is what `svtypes.py` and the page's `svTypes` / `svApply` / `svFingerprint` must both
+give (`test_svtypes` Contract, smoke `readers`), and 200 generated types files and dumps hold the two side by side.
+`tests/unit/golden` keeps the bytes `wavejson.py` and `vcd2wavedrom.py` write (`make unit-bless`). `svaverify.py` does
+not let the comparison with Verilator shrink: only the assertions of an example's `unsupported` list may be put out,
+the simulation must reach `$finish`, every compared assertion must be evaluated (not capped, not vacuous only). The
+smoke section `examples` evaluates the exact views' bindings again in the page (WebAssembly, a worker for the first) and
+compares them attempt by attempt with `sva eval`'s, and `sva_third_party` pins the totals of each third-party
+evaluation (`THIRD_PARTY`). Budgets (`tests/unit/test_perf.py`, smoke `readers` and `fsm`): the converter on two sizes of
+a generated dump (time, peak memory, both growing with the dump), the page's reader of 18 MB in pieces, the FSM panel
+over 1500 FSMs (`WAVELENS_TIME_SCALE` and `SMOKE_TIME_SCALE` multiply their times on a loaded machine). `make unit-shuffle SEED=n` runs the unit tests one by one in another order.
+
+`make shots` checks looks rather than
 behaviour: fixed viewport, fixed clicks, two animation frames after each, one element per image; it stops when IBM Plex
 is not available (offline without `fonts-ibm-plex`) instead of writing PNGs that differ. The same code gives the same
 bytes: Chromium rasterises in software, in one thread (`RASTER` in `tests/shots.py`: the borders of the form controls
-were anti-aliased differently run after run), tooltips are hidden and the pointer moved away before a shot. Both need
+were anti-aliased differently run after run), tooltips are hidden and the pointer moved away before a shot. `make
+shots-check` (in the gate) makes `docs/img` and `tests/visual` (the white theme, 420 px wide, an FSM's details, a device
+scale of 2) again, none left from a run before, and compares them pixel by pixel (`tests/pngdiff.py`): a picture that
+changed (more than 48 pixels), or one made that is not committed, fails, its difference
+in `BUILD/img/diff` / `BUILD/visual/diff`; a look changed on purpose: `make shots` and commit the PNGs. Both need
 Python playwright (a
 user-site install, so they run without `-I`, with `PYTHONDONTWRITEBYTECODE=1`). Environment used: Verilator 5.046,
 GTKWave fst2vcd, cargo 1.98 (the engine needs Rust ≥ 1.82).

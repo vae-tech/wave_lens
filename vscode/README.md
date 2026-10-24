@@ -26,19 +26,22 @@ is turned into VCD text with it, kept in the extension's storage).
   `typedef enum` there, by name; **Sources…** in the bar picks other files. *WaveLens: Make the types with Verilator*
   writes `tb.types.json` from a `.f` file of the workspace (or the arguments you type) with `verilator --json-only`: no
   Python needed (`wavelens.verilator`).
+- **State machines**: `T` (or **FSMs** in the bar) lists every signal with state names in the tree of its modules, its
+  state at the cursor: go to one, **Only FSMs**, **Add to view**, its states, changes and a diagram (a click: the cursor
+  to the next time). The right button's **Type…** on a name says where its names come from.
 - **The log**: each read writes the dump's parameters and what the reader noticed (a stranger code, a word that is no
   value, a `$timescale` it cannot read, …) to the output channel *WaveLens* and to the **Problems** panel on their
   lines; a dump it cannot read is an error there with its line. *WaveLens: Show the log* (the editor's title).
 - **Theme**: `wavelens.theme` — `auto` (light or dark by VS Code's), `vscode` (the colours of VS Code's theme),
   `light`, `white`, `dark`; **◐** in the bar (or *WaveLens: Choose the theme of the waves* in the editor's title) previews
   each on the open tabs.
-- **The version** in the bar: `0.19 · dev@d502c48*`, the extension's branch and commit (`*`: changes not committed).
+- **The version** in the bar: `0.21 · dev@5470d89*`, the extension's branch and commit (`*`: changes not committed).
 
 The keys are the viewer's (`?` in the tab): the plain ones, and the ctrl / alt ones that mean what they mean in VS Code
 (ctrl+F, ctrl+C, ctrl+Z, alt+C W R); `wavelens.keysToVSCode` (`ctrl+G`: Go to Line) go to VS Code — the list of your
 groups is `gl` then. Settings: `wavelens.theme` (auto), `wavelens.keysToVSCode` (`["ctrl+G"]`), `wavelens.verilator` (verilator), `wavelens.sources` (`**/*.sv`, `**/*.svh`), `wavelens.autoReload` (false: the tab offers ⟳ after a new
 simulation; true: it reads the dump at once), `wavelens.live` (true), `wavelens.sva` (another sva program).
 
-**Install.** Build the package from the repository (`make vsix`: `out/wavelens-<version>.vsix`, for a Linux x86-64 host;
-VS Code ≥ 1.80), then in a terminal of the **remote** window `code --install-extension out/wavelens-*.vsix` (or
+**Install.** Build the package from the repository (`make vsix`: `out/wavelens.vsix`, a copy as `wavelens-<version>.vsix`, for a Linux x86-64 host;
+VS Code ≥ 1.80), then in a terminal of the **remote** window `code --install-extension out/wavelens.vsix` (or
 Extensions → … → *Install from VSIX…* while connected): the Extensions view lists it under the host's name.

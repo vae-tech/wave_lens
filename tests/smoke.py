@@ -816,6 +816,37 @@ def modules(page, P):
     check(js("[...WaveLens.internal.peek(v).collapsed].length") == folded, 'pause, resume and clear fold or open nothing')
     js("(v.expandAll(), 0)")
     js("(v.modules(false), 0)")
+    # the panel's frame: a click on its text or a button keeps ↑ ↓ in the tree; its edges and corners size it, in the window,
+    # not under its least size; closed and opened again: where it was, its size
+    js("(v.panelBox = null, v.modules(true), 0)"); settle(page)
+    foc = "document.activeElement.closest('.wv-mods .mn') && +document.activeElement.dataset.i"
+    page.locator('.wv-mods .mh b').click(); page.keyboard.press('ArrowDown'); a = js(foc)
+    page.locator('.wv-mods .ms').click(); page.keyboard.press('ArrowDown'); b = js(foc)
+    page.locator('.wv-mods button[data-a=loc]').click(); settle(page); page.keyboard.press('Home'); c = js(foc)
+    check([a, b, c] == [1, 2, 0], f'a click on the header, the status line, a button: ↓ Home go on in the tree {[a, b, c]}')
+    pb = lambda: {k: round(x) for k, x in page.locator('.wv-mods').bounding_box().items()}
+    def size(s, dx, dy):
+        h = page.locator(f'.wv-mods .rz-{s}').bounding_box(); x, y = h['x'] + h['width'] / 2, h['y'] + h['height'] / 2
+        page.mouse.move(x, y); page.mouse.down(); page.mouse.move(x + dx, y + dy, steps=3); page.mouse.up(); return pb()
+    b0 = pb(); b1 = size('nw', -40, -30); b2 = size('se', 30, 20); b3 = size('e', -5000, 0); b4 = size('n', 0, 9000)
+    vw = page.viewport_size
+    check(b1 == {'x': b0['x'] - 40, 'y': b0['y'] - 30, 'width': b0['width'] + 40, 'height': b0['height'] + 30} and
+          (b2['width'], b2['height']) == (min(b1['width'] + 30, vw['width'] - b1['x']), min(b1['height'] + 20, vw['height'] - b1['y'])) and
+          b3['width'] == 220 and b3['x'] == b2['x'] and b4['height'] == 160 and b4['y'] + 160 == b3['y'] + b3['height'] and
+          js(foc) is not None, f'the corners and the edges size the panel, in the window, 220 × 160 at least, the focus in the tree {[b0, b1, b2, b3, b4]}')
+    page.keyboard.press('Escape'); js("(v.modules(true), 0)"); settle(page)
+    check(pb() == b4, f'closed and opened again: where it was, its size {pb()} {b4}')
+    # sized wide, then a window made narrow (the drawer) and short: the drawer's own size, all of it in the window; a
+    # smaller window that is not narrow: the panel back in it, no bigger than 96vw × 92vh
+    vw = page.viewport_size; b5 = size('se', 2000, 2000)
+    page.set_viewport_size({'width': 500, 'height': 420}); settle(page)
+    dr = js("(() => { const b = v.mods.el.getBoundingClientRect(), t = v.mods.tree.getBoundingClientRect(); "
+            "return [Math.round(b.width), Math.round(b.height), Math.round(t.bottom), innerHeight, Math.round(Math.min(innerWidth * 0.88, 340))]; })()")
+    page.set_viewport_size({'width': 900, 'height': 500}); settle(page); sm = pb()
+    page.set_viewport_size(vw); settle(page)
+    check(dr[0] == dr[4] and dr[1] <= dr[3] and dr[2] <= dr[3] and sm['x'] >= 0 and sm['x'] + sm['width'] <= 900 and sm['y'] + sm['height'] <= 500
+          and sm['width'] <= 864 and sm['height'] <= 460, f'sized wide, then a narrow window: the drawer\'s size, its tree in it; a smaller one: back in it {b5} {dr} {sm}')
+    js("(v.modules(false), v.panelBox = null, 0)")
     # 10 000 modules: the panel opens, every one open, a filter
     t = page.evaluate("""(() => { const el = document.createElement('div'); document.body.append(el);
         const mk = (d, k) => d === 0 ? [`m${k}`, {name: 'a', wave: '01'}] : [`m${k}`, {name: 'a', wave: '01'}, ...Array.from({length: 10}, (_, i) => mk(d - 1, i))];
@@ -1195,6 +1226,173 @@ def sva_exprs(browser, build):
 
 WL_VERSION = (ROOT / 'VERSION').read_text().strip()   # the version the bar shows
 READERS_BAD = {'backwards': 'time goes back', 'unsorted': 'time goes back', 'noend': 'no $enddefinitions'}
+READ_PAGE = """t => { try { const r = WaveLens.vcdToWave(t), out = {};
+    const walk = a => a.forEach(x => Array.isArray(x) ? walk(x.slice(1)) : (out[x.path] = { tv: x.tv, kind: x.kind || null, width: x.width || 1,
+      enum: x.enum || null }));
+    walk(r.doc.signal); return { sigs: out, t0: r.doc.time.t0 }; } catch (e) { return { err: String(e.message || e) }; } }"""
+
+
+# a case of tests/unit/types/contract.json in the page -> {labels, fields, notes, run} put on by the types, or {error}
+CONTRACT_JS = """cs => cs.map(c => { let sv; try { sv = WaveLens.svTypes(JSON.parse(JSON.stringify(c.types)), 'contract'); } catch (e) { return { error: true }; }
+    const rows = c.signals.map(x => Object.assign({ name: x.path.split('.').pop(), path: x.path, width: x.width, tv: [[0, '0']] },
+      x.enum ? { enum: Object.assign({}, x.enum) } : {}, x.fields ? { fields: x.fields } : {}));
+    const notes = []; WaveLens.svApply({ signal: rows }, sv, notes);
+    const labels = Object.fromEntries(rows.filter(r => r.svEnum).map(r => [r.path, r.enum]));
+    const fields = Object.fromEntries(rows.filter(r => r.svFields).map(r => [r.path, r.fields]));
+    const run = WaveLens.internal.svFingerprint(sv, c.date, new Set(c.modules || []));
+    const out = { labels, fields, notes, run };
+    return Object.fromEntries(Object.entries(out).filter(([, v]) => (Array.isArray(v) ? v.length : Object.keys(v).length))); })"""
+
+
+def gen_types_case(seed):
+    """review VI T6: a types file and a dump's signals from a seed, for the twins side by side: roots the types have or not
+    (tb, top, TOP above, other), elements of arrays (x[3], x.[2], x.[-1]), widths about 32, 53 and 64, enums with keys
+    that do not fit, fields, a map, the row's own labels, a width that differs."""
+    import random
+    rnd = random.Random(seed)
+    W = [1, 2, 3, 31, 32, 33, 53, 54, 63, 64]
+    sigs, rows = {}, []
+    for k in range(rnd.randint(1, 6)):
+        w = rnd.choice(W)
+        path = rnd.choice(['tb', 'dut']) + rnd.choice(['', '.u', '.u.core', f'.g[{k}]']) + f'.s{k}'
+        if rnd.random() < 0.6:
+            keys = {str(rnd.getrandbits(w + (1 if rnd.random() < 0.1 else 0))) for _ in range(rnd.randint(1, 4))}
+            sigs[path] = {'width': w, 'enum': {x: f'L{x}' for x in sorted(keys)}}
+        else:
+            hi = rnd.randint(0, w - 1)
+            sigs[path] = {'width': w, 'fields': [{'name': 'hi', 'msb': w - 1, 'lsb': hi}] + ([{'name': 'lo', 'msb': hi - 1, 'lsb': 0}] if hi else [])}
+        top = rnd.choice(['', '', 'TOP.', 'other.', 'top.'])
+        tail = rnd.choice(['', '', '[2]', '.[1]', '.[-1]'])
+        row = {'path': top + path + tail, 'width': w if rnd.random() < 0.85 else w + 1}
+        if rnd.random() < 0.15:
+            row['enum'] = {'0': 'MINE'}
+        rows.append(row)
+    t = {'wavelens': 'types', 'signals': sigs}
+    if rnd.random() < 0.3:
+        t['map'] = {'top': rnd.choice(['tb', 'dut'])}
+    return {'name': f'seed {seed}', 'types': t, 'signals': rows}
+
+
+def tools_signals(f):
+    """vcd2wavedrom.py --exact --hierarchy over every variable of the dump f -> ({path: signal, an alias with its tv}, stderr)"""
+    import json
+    sys.path.insert(0, str(ROOT / 'tools'))
+    import dumpscan
+    d = dumpscan.read(str(f), None)
+    paths = [p for p, v in d.vars.items() if v.kind != 'event']
+    r = subprocess.run([sys.executable, '-I', str(ROOT / 'tools' / 'vcd2wavedrom.py'), '--waves', str(f), '--exact', '--hierarchy', '--signals', ','.join(paths)],
+                       capture_output=True, text=True)
+    if r.returncode:
+        return None, r.stderr
+    tools = {}
+    def walk(items):
+        for it in items:
+            if isinstance(it, list):
+                walk(it[1:] if it and isinstance(it[0], str) else it)
+            elif isinstance(it, dict):
+                tools[it['path']] = it
+    walk(json.loads(r.stdout)['signal'])
+    for it in tools.values():
+        if 'same' in it:
+            it['tv'] = tools[it['same']]['tv']
+    return tools, r.stderr
+
+
+def page_vs_tools(f, got):
+    """The page's read of f (READ_PAGE) against the tools' -> what differs ([] the same)."""
+    tools, err = tools_signals(f)
+    if tools is None or 'err' in got:
+        return [f'page: {got.get("err")}, tools: {err.strip()[:80]}']
+    bad = []
+    for p, it in tools.items():
+        pg = got['sigs'].get(p)
+        if pg is None:
+            bad.append(f'{p}: not in the page'); continue
+        tv = pg['tv']
+        if not tv or tv[0][0] > it['tv'][0][0]:   # the page starts at the first change, the tools at the window's start
+            tv = [[it['tv'][0][0], None if pg['kind'] else 'x']] + tv
+        fl = lambda q: [[float(t), v] for t, v in q]   # times above 2^53 ps: JavaScript numbers round them (dumpscan warns)
+        if fl(tv) != fl(it['tv']) or pg['kind'] != it.get('kind') or pg['width'] != it.get('width', 1) or pg['enum'] != it.get('enum'):
+            bad.append(f'{p}: page {tv[:4]} {pg["kind"]} w{pg["width"]}, tools {it["tv"][:4]} {it.get("kind")} w{it.get("width", 1)}')
+    bad += [f'{p}: only in the page' for p in sorted(set(got['sigs']) - set(tools))[:3]]
+    return bad
+
+
+def gen_vcd(seed):
+    """review VI T5: a small VCD from a seed and what it holds, written down apart from both readers -> (text, model:
+    {path: {width, tv: [[ps, value as the tools write it]]}}, the paths an escaped name gives (the readers only)).
+    Its parts: a timescale of four, a header $comment that names $enddefinitions and $var, a $date in UTF-8, buses of
+    1-64 bits written short (b1: zero-extended, bx: all x), a vector declared bit by bit, one code under two names
+    (an alias in another scope), an escaped name with é in it, an enum table, changes at one time on one line or many,
+    $comment in the body, $dumpvars, values that never repeat the one before. The escaped name is in no model: the
+    readers are compared with each other on it."""
+    import random
+    rnd = random.Random(seed)
+    unit, step = rnd.choice([('1ns', 1000), ('10ps', 10), ('1ps', 1), ('100ns', 100000)])
+    codes = (chr(33 + i) for i in range(90) if chr(33 + i) not in '#$')
+    head = [f'$date Sa 24 Okt 2026 — été {seed} $end', f'$timescale {unit} $end']
+    if rnd.random() < 0.7:
+        head.insert(rnd.randint(0, 2), '$comment the header ends at $enddefinitions $end')
+    head.append('$attrbegin misc 07 st_t 3 IDLE RUN DONE 00 01 10 1 $end')
+    head.append('$scope module tb $end')
+    sigs = []   # [code, width, path or None (escaped), kind: 'bit' | 'bus' | 'part']
+    def var(w, name, path, kind='bus', code=None):
+        c = code or next(codes)
+        head.append(f'$var wire {w} {c} {name} $end')
+        sigs.append([c, w, path, kind])
+        return c
+    var(1, 'clk', 'tb.clk', 'bit')
+    for k in range(rnd.randint(1, 4)):
+        w = rnd.choice([2, 3, 8, 13, 32, 64])
+        var(w, f'v{k} [{w - 1}:0]', f'tb.v{k}')
+    head.append('$attrbegin misc 07 "" 1 $end')
+    var(2, 'state [1:0]', 'tb.state')
+    parts = [var(1, f'd[{i}]', None, 'part') for i in range(4)]   # tb.d: one vector of 4 bits
+    var(1, '\\esc$x\u00e9', None, 'bit')
+    head.append('$scope module u $end')
+    alias = sigs[1]
+    head.append(f'$var wire {alias[1]} {alias[0]} alias [{alias[1] - 1}:0] $end')
+    head += ['$upscope $end', '$upscope $end', '$enddefinitions $end']
+    cur = {s[0]: None for s in sigs}
+    def value(s):
+        while True:
+            if s[3] == 'part':
+                v = rnd.choice('01')
+            elif s[1] == 1:
+                v = rnd.choice('01xz')
+            else:
+                v = rnd.choice(['x', 'z'] + [rnd.getrandbits(s[1])] * 6)
+            if v != cur[s[0]]:
+                return v
+    def text(s, v):
+        if s[1] == 1:
+            return f'{v}{s[0]}'
+        return f'b{v if isinstance(v, str) else format(v, "b")} {s[0]}'
+    model = {s[2]: {'width': s[1], 'tv': []} for s in sigs if s[2]}
+    model['tb.state']['enum'] = {'0': 'IDLE', '1': 'RUN', '2': 'DONE'}   # the table the $attrbegin before it names
+    model['tb.u.alias'] = model[alias[2]]
+    model['tb.d'] = {'width': 4, 'tv': []}
+    body, t = [], 0
+    for n in range(rnd.randint(5, 30)):
+        moved = sigs if n == 0 else rnd.sample(sigs, rnd.randint(1, len(sigs)))
+        toks = []
+        for s in moved:
+            v = value(s); cur[s[0]] = v; toks.append(text(s, v))
+            if s[2]:
+                hx = v if isinstance(v, str) and s[1] > 1 else (v if s[1] == 1 else format(v, f'0{(s[1] + 3) // 4}x'))
+                model[s[2]]['tv'].append([t * step, hx])
+        if n == 0 or any(s[3] == 'part' for s in moved):
+            model['tb.d']['tv'].append([t * step, format(int(''.join(cur[c] for c in reversed(parts)), 2), 'x')])
+        if n == 0:
+            body += [f'#{t}', '$dumpvars', *toks, '$end']
+        elif rnd.random() < 0.3:
+            body.append(f'#{t} ' + ' '.join(toks))
+        else:
+            body += [f'#{t}', *toks]
+        if rnd.random() < 0.15:
+            body.append('$comment in the body: $var $end')
+        t += rnd.randint(1, 7)
+    return '\n'.join(head + body) + '\n', model
 
 
 def vscode_tab(browser, build):
@@ -1430,47 +1628,63 @@ def readers(browser, build):
     same, differ = [], []
     for f in fixtures:
         text = f.read_text(encoding='utf-8', errors='replace')
-        got = page.evaluate("""t => { try { const r = WaveLens.vcdToWave(t), out = {};
-            const walk = a => a.forEach(x => Array.isArray(x) ? walk(x.slice(1)) : (out[x.path] = { tv: x.tv, kind: x.kind || null, width: x.width || 1,
-              enum: x.enum || null }));
-            walk(r.doc.signal); return { sigs: out, t0: r.doc.time.t0 }; } catch (e) { return { err: String(e.message || e) }; } }""", text)
+        got = page.evaluate(READ_PAGE, text)
         if f.stem in READERS_BAD:
             r = subprocess.run([sys.executable, '-I', str(ROOT / 'tools' / 'vcd2wavedrom.py'), '--waves', str(f), '--exact', '--signals', 'tb.s'], capture_output=True, text=True)
             ok = READERS_BAD[f.stem] in (got.get('err') or '') and r.returncode == 1 and READERS_BAD[f.stem] in r.stderr
             (same if ok else differ).append(f.stem + ('' if ok else f' (page: {got.get("err")}, tools: {r.stderr.strip()[:80]})'))
             continue
-        d = dumpscan.read(str(f), None)
-        paths = [p for p, v in d.vars.items() if v.kind != 'event']
-        r = subprocess.run([sys.executable, '-I', str(ROOT / 'tools' / 'vcd2wavedrom.py'), '--waves', str(f), '--exact', '--hierarchy', '--signals', ','.join(paths)], capture_output=True, text=True)
-        if r.returncode or 'err' in got:
-            differ.append(f'{f.stem} (page: {got.get("err")}, tools: {r.stderr.strip()[:80]})'); continue
-        tools = {}
-        def walk(items):
-            for it in items:
-                if isinstance(it, list):
-                    walk(it[1:] if it and isinstance(it[0], str) else it)
-                elif isinstance(it, dict):
-                    tools[it['path']] = it
-        walk(json.loads(r.stdout)['signal'])
-        for it in tools.values():
-            if 'same' in it:
-                it['tv'] = tools[it['same']]['tv']
-        bad = []
-        for p, it in tools.items():
-            pg = got['sigs'].get(p)
-            if pg is None:
-                bad.append(f'{p}: not in the page'); continue
-            tv = pg['tv']
-            if not tv or tv[0][0] > it['tv'][0][0]:   # the page starts at the first change, the tools at the window's start
-                tv = [[it['tv'][0][0], None if pg['kind'] else 'x']] + tv
-            fl = lambda q: [[float(t), v] for t, v in q]   # times above 2^53 ps: JavaScript numbers round them (dumpscan warns)
-            if fl(tv) != fl(it['tv']) or pg['kind'] != it.get('kind') or pg['width'] != it.get('width', 1) or pg['enum'] != it.get('enum'):
-                bad.append(f'{p}: page {tv[:4]} {pg["kind"]} w{pg["width"]}, tools {it["tv"][:4]} {it.get("kind")} w{it.get("width", 1)}')
-        extra = set(got['sigs']) - set(tools)
-        (differ if bad or extra else same).append(f.stem + (f' ({bad[:2]} {sorted(extra)[:3]})' if bad or extra else ''))
+        bad = page_vs_tools(f, got)
+        (differ if bad else same).append(f.stem + (f' ({bad[:3]})' if bad else ''))
     check(not differ and len(same) == len(fixtures), f'the page and the tools read {len(same)} of {len(fixtures)} fixtures the same' + (f'; differ: {differ}' if differ else ''))
+    # review VI T5: 40 generated dumps (gen_vcd) against what they hold, the page against the tools, and the page's read of
+    # a File in pieces of BYTES (a stream of 1, 2, 3, 5, 64 bytes a read: an é or — cut in two) against its text at once,
+    # the parser given the whole text or pieces of that many characters; three small ones cut in two at every byte (the
+    # parser: the whole, or pieces of k characters)
+    import tempfile
+    gen_bad, cut_bad, n_cuts = [], [], 0
+    with tempfile.TemporaryDirectory() as tmp:
+        for seed in range(1, 41):
+            text, model = gen_vcd(seed)
+            got = page.evaluate(READ_PAGE, text)
+            if 'err' in got:
+                gen_bad.append(f'{seed}: {got["err"]}'); continue
+            for pth, m in model.items():
+                pg = got['sigs'].get(pth)
+                if pg is None or pg['width'] != m['width'] or pg['tv'] != m['tv'] or pg['enum'] != m.get('enum'):
+                    gen_bad.append(f'{seed} {pth}: page {pg and (pg["width"], pg["tv"][:3])}, written {m["width"], m["tv"][:3]}'); break
+            f = pathlib.Path(tmp) / f'gen{seed}.vcd'; f.write_text(text, encoding='utf-8')
+            gen_bad += [f'{seed} tools: {x}' for x in page_vs_tools(f, got)[:2]]
+            res = page.evaluate("""async ([name, t, sizes, every]) => { const one = r => JSON.stringify(r, (k, v) => (k === 'size' ? undefined : v));
+                const bytes = new TextEncoder().encode(t), whole = one(WaveLens.vcdToWave(t)), bad = [];
+                const file = cuts => ({ name, size: bytes.length, stream() { let i = 0, j = 0; return new ReadableStream({ pull(c) {
+                  if (i >= bytes.length) { c.close(); return; } const e = Math.min(bytes.length, cuts(j++, i)); c.enqueue(bytes.slice(i, e)); i = e; } }); } });
+                // chunk 1 << 20: the decoder's cuts only (a small dump reaches the parser whole); chunk n, k: the parser's too
+                for (const n of sizes) for (const ch of [1 << 20, n]) { const got = one(await WaveLens.vcdToWaveFile(file((j, i) => i + n), {}, ch));
+                  if (got !== whole) bad.push(`bytes ${n}, pieces of ${ch}`); }
+                if (every) for (let k = 1; k < bytes.length; k++) for (const ch of [1 << 20, k]) {
+                  const got = one(await WaveLens.vcdToWaveFile(file((j, i) => (j ? bytes.length : k)), {}, ch));
+                  if (got !== whole) { bad.push(`cut at ${k}, pieces of ${ch}`); k = bytes.length; break; } }
+                return [bad, every ? bytes.length - 1 : 0]; }""", [f.name, text, [1, 2, 3, 5, 64], seed <= 3])
+            cut_bad += [f'{seed} {x}' for x in res[0]]; n_cuts += res[1]
+    check(not gen_bad, f'40 generated dumps: the page reads what they hold (every value, the bits of a vector, the alias, the enum), the tools the same '
+          f'{gen_bad[:3]}')
+    check(not cut_bad and n_cuts > 300, f'a File read in pieces of 1, 2, 3, 5, 64 bytes, three of them cut in two at each of {n_cuts} bytes, the parser '
+          f'given those pieces too: its text at once {cut_bad[:3]}')
+    # review VI T15: a File of 18 MB in pieces of 8 MB (Open…) takes about the time of its text at once, both in a budget
+    rd = page.evaluate("""async n => { let s = '$timescale 1ns $end\\n$scope module tb $end\\n';
+        for (let i = 0; i < 64; i++) s += `$var wire 8 ${String.fromCharCode(33 + i)} s${i} [7:0] $end\\n`;
+        const parts = [s + '$upscope $end\\n$enddefinitions $end\\n']; let t = 0, c = 0;
+        while (c < n) { let l = '#' + (++t) + '\\n'; for (let k = 0; k < 8; k++) { l += 'b' + ((t * 7 + k * 13) & 255).toString(2) + ' ' +
+          String.fromCharCode(33 + ((t + k * 5) & 63)) + '\\n'; c++; } parts.push(l); }
+        const text = parts.join(''), f = new File([text], 'big.vcd');
+        let t0 = performance.now(); const a = WaveLens.vcdToWave(text, { budget: 1e9 }); const whole = performance.now() - t0;
+        t0 = performance.now(); const b = await WaveLens.vcdToWaveFile(f, { budget: 1e9 }); const file = performance.now() - t0;
+        return [text.length, whole, file, a.changes, b.changes]; }""", 1500000)
+    check(rd[3] == rd[4] == 1500000 and rd[2] < 15000 * SCALE and rd[2] < 2 * rd[1] + 500,
+          f'a VCD of {rd[0] / 1e6:.0f} MB: Open… in pieces {rd[2] / 1e3:.1f} s, its text at once {rd[1] / 1e3:.1f} s, {rd[4]} changes')
     # the names of SystemVerilog sources (a VCD has no enum tables): the page's svTables gives what mkconfig.py --sv does
-    import mkconfig, tempfile
+    import mkconfig
     sys.path.insert(0, str(ROOT)); from tests.unit.test_mkconfig import Sources   # its source text with nested structs
     srcs = [sorted((ROOT / 'examples' / 'fsm').glob('*.sv')), None]
     with tempfile.TemporaryDirectory() as d:
@@ -1523,6 +1737,18 @@ def readers(browser, build):
       const v = new WaveLens.WaveView(el, doc, {}), r = v.M.rows.find(x => x.full === 'tb.w'), out = [n, ...[5, 15, 25].map(t => v.valueAt(r, t))];
       v.destroy(); el.remove(); return out; }""")
     check(got == [1, 'EVEN', 'ODD', 'ALL'], f'a 64-bit enum: its table taken, 2^53 + 1 not 2^53, -1 by its label {got}')
+    # review VI T6: tests/unit/types/contract.json through the page's twin (svTypes, svApply, svFingerprint), as svtypes.py
+    # gives it (tests/unit/test_svtypes.py Contract)
+    contract = json.loads((T / 'contract.json').read_text(encoding='utf-8'))['cases']
+    got = page.evaluate(CONTRACT_JS, contract)
+    bad = [f'{c["name"]}: {g} (want {c["want"]})' for c, g in zip(contract, got) if g != c['want']]
+    check(not bad and len(got) == len(contract), f'the types contract: {len(contract)} cases, the page as svtypes.py {bad[:2]}')
+    sys.path.insert(0, str(ROOT)); from tests.unit.test_svtypes import contract_py
+    gen = [gen_types_case(seed) for seed in range(200)]
+    got = page.evaluate(CONTRACT_JS, gen)
+    bad = [f'{seed}: page {g}, svtypes.py {contract_py(c)}' for seed, (c, g) in enumerate(zip(gen, got)) if g != contract_py(c)]
+    typed = sum(1 for g in got if g.get('labels') or g.get('fields'))
+    check(not bad and typed > 50, f'200 generated types files and dumps: the page as svtypes.py ({typed} with labels or fields) {bad[:2]}')
     # known bits among x / z reach the page's engine as bits (they were x by the hex: the page and sva eval disagreed)
     for f in ('wavelens.config.js', 'sva.wasm.js', 'sva.js'):
         page.add_script_tag(path=str(ROOT / 'wavelens' / f))
@@ -1533,6 +1759,53 @@ def readers(browser, build):
     check(got == [[[0, 'x'], [10000, 'x'], [20000, '1'], [30000, '1']], [[0, '0'], [10000, 'x'], [20000, 'x'], [30000, 'x']],
                   [[0, '1'], [10000, '0'], [20000, '0'], [30000, '0']]],
           f'xz.vcd in the page\'s engine: bit 0 of bx1 is 1 (not x), 1x0z1z0x keeps its known bits (== on a known bit that differs: 0, not x) {got}')
+    page.close()
+
+
+def axis_in_sight(browser, build):
+    """The time axis never leaves while the rows scroll (axi_lite_all.html, every group open, a window shorter than the
+    viewer): in the viewer's own box the box fits under the bar and its end does not scroll the page on; the page
+    scrolled past the viewer's top, the wheel over the rows brings the bar back; with the page, at the end of the rows
+    the axis stays under the bar (the canvas gets shorter)."""
+    pg = build / 'examples' / 'axi_lite' / 'axi_lite_all.html'
+    if not need(pg, how='make examples'):
+        return
+    print('the axis in sight')
+    page = browser.new_page(viewport={'width': 1200, 'height': 600})
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(pg.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+    js = lambda e: page.evaluate(f"(() => {{ const v = document.querySelector('.wv').waveView; return {e}; }})()")
+    geo = ("(() => { const v = document.querySelector('.wv').waveView, b = v.root.querySelector('.bar').getBoundingClientRect(); return "
+           "[Math.round(b.top), Math.round(v.canvas.getBoundingClientRect().top - b.bottom), Math.round(v.bodyEl.getBoundingClientRect().bottom), "
+           "Math.round(scrollY), Math.round(v.bodyEl.scrollTop)]; })()")
+    js("(v.setScroll('window'), v.expandAll(), v.root.querySelector('.bar').scrollIntoView(), 0)"); settle(page)
+    page.mouse.move(700, 450); a = page.evaluate(geo)
+    for _ in range(8):
+        page.mouse.wheel(0, 600); page.wait_for_timeout(60 * SCALE)
+    settle(page); b = page.evaluate(geo)
+    check(a[0] == b[0] == 0 and a[1] == b[1] == 0 and a[2] <= 600 and b[3] == a[3] and b[4] > 1000,
+          f'its own box: no taller than the window under the bar, its end does not scroll the page on, the bar and the axis stay {a} {b}')
+    page.evaluate("window.scrollBy(0, 150)"); settle(page); c = page.evaluate(geo)
+    page.mouse.move(700, 300); page.mouse.wheel(0, -100); settle(page); d = page.evaluate(geo)
+    check(c[0] == -150 and d[0] == 0 and d[1] == 0, f'the page past the viewer\'s top: the wheel over the rows brings the bar and the axis back {c} {d}')
+    js("(v.zoom(0.25, 0.5), 0)")   # zoomed in: a pan has room
+    page.evaluate("window.scrollBy(0, 150)"); settle(page); t0 = js("v.t0"); y0 = page.evaluate('scrollY')
+    page.keyboard.down('Shift'); page.mouse.wheel(0, 100); page.keyboard.up('Shift'); settle(page)
+    check(page.evaluate('scrollY') == y0 and js("v.t0") != t0, f'shift+wheel over the rows: a pan, the page stays {y0} {page.evaluate("scrollY")}')
+    page.evaluate("window.scrollBy(0, -150)")
+    page.set_viewport_size({'width': 1000, 'height': 160}); settle(page)
+    lo = js("[v.bodyEl.clientHeight, WaveLens.internal.peek(v).hdrH, v.hc, WaveLens.internal.peek(v).lay.H]")
+    page.set_viewport_size({'width': 1200, 'height': 600}); settle(page)
+    check(lo[0] >= 120 and lo[2] < lo[3], f'a window lower than the bar: the box keeps 120 px of rows (the axis and some rows), not 0 {lo}')
+    js("(v.setScroll('page'), 0)"); settle(page)
+    seen = []
+    for y in (300, 900, 1500, 1900):   # the page among the rows, then their last ones in sight
+        page.evaluate(f"window.scrollTo(0, document.querySelector('.wv .wcol').getBoundingClientRect().top + scrollY + {y})"); settle(page)
+        g = page.evaluate(geo); seen.append(g[:2] + [js("v.hc")])
+    check(all(g[0] == 0 and g[1] == 0 for g in seen) and seen[-1][2] < seen[0][2],
+          f'with the page: the bar on top, the axis under it to the last rows (the canvas shorter there) {seen}')
+    check(not errs, f'no page errors {errs}')
     page.close()
 
 
@@ -1562,6 +1835,8 @@ def fsm_panel(browser, build):
     check(tree == ['fsm_tb', 'state', 'u_rx', 'state'] and st == '5/5', f'T: the modules with an FSM and their FSMs, the states reached of the table {tree} {st}')
     page.locator('.wv-fsms .mn.fs').nth(1).click(); settle(page)
     check(js("[v.sel && v.sel.full, WaveLens.internal.peek(v).vis.includes(v.sel)]") == ['fsm_tb.u_rx.state', True], 'a click: the FSM opened, selected')
+    page.locator('.wv-fsms .mh b').click(); page.keyboard.press('ArrowUp'); up = js("document.activeElement.dataset.i")
+    check(up == '2' and page.locator('.wv-fsms .rz').count() == 8, f'a click on the header: ↑ goes on in the tree (from the FSM clicked); its 8 edges and corners {up}')
     page.locator('.wv-fsms button[data-a=only]').click(); settle(page)
     only = js(sigs)
     check(only == ['fsm_tb.state', 'fsm_tb.u_rx.state'] and 'FSMs only: 2' in js("v.root.querySelector('.bar button[data-act=fsmx]').textContent"),
@@ -1650,6 +1925,52 @@ def fsm_panel(browser, build):
     st = res[0]
     check([x['entries'] for x in st['states']] == [3, 2, 2, 2, 1] and st['never'] == [] and st['changes'][0]['count'] == 2 and res[1]['t'] == 385000 and
           res[2]['t'] == 865000 and 'never NOPE' in res[3]['error'], f'fsm_stats: the entries of each state, its changes; fsm_go: a state, a change, one it never is {res[1:]}')
+    # review VI T8: fsm_go as a table — before, on and after an entry, back, round to the first / the last, the first one, a
+    # state by its value or its label, a change, one it never makes
+    go = page.evaluate("""async () => { const el = document.createElement('div'); document.body.append(el);
+        const doc = { signal: [{ name: 'st', path: 'st', width: 2, enum: { 0: 'A', 1: 'B', 2: 'C' }, tv: [[0, '0'], [10, '1'], [20, '0'], [30, '1'], [40, '2']] }],
+          time: { t0: 0, t1: 50 } };
+        const v = new WaveLens.WaveView(el, doc, {}), out = [];
+        for (const [c, op] of [[0, { state: 'B' }], [10, { state: 'B' }], [30, { state: 'B' }], [30, { state: 'B', dir: -1 }], [5, { state: 'B', dir: -1 }],
+            [35, { state: 'B', first: true }], [15, { state: '1' }], [15, { from: 'A', to: 'B' }], [31, { from: 'B', to: 'C', dir: -1 }], [0, { from: 'C', to: 'A' }],
+            [0, { state: 'NOPE' }]]) {
+          v.setCursor(c); const r = (await v.run([Object.assign({ op: 'fsm_go', signal: 'st' }, op)]))[0];
+          out.push(r.error ? 'never' : r.t + (/round/.test(v.root.querySelector('.bar .toast').textContent) ? ' round' : '')); }
+        v.destroy(); el.remove(); return out; }""")
+    check(go == ['10', '30', '10 round', '10', '30 round', '10', '30', '30', '40 round', 'never', 'never'],
+          f'fsm_go: the next entry after the cursor (on one: the one after), back, round to the first and the last, the first, by value, a change {go}')
+    # and a run of what one does with the panel: Only FSMs, hide one, undo it, Add an FSM to a view of one signal, Save and
+    # Load: the layer and the rows come back
+    seq = page.evaluate("""async () => { const v = document.querySelector('.wv').waveView, vis = () => WaveLens.internal.peek(v).vis.filter(r => r.type === 'sig').map(r => r.full);
+        const out = [vis().length]; await v.run([{ op: 'fsm', mode: 'only' }]); out.push(vis());
+        await v.run([{ op: 'hide', signals: 'fsm_tb.state' }]); out.push(vis()); await v.undo(); out.push(vis());
+        await v.run([{ op: 'fsm', clear: true }]); out.push(vis().length);
+        await v.run([{ op: 'fsm', mode: 'add', signals: 'fsm_tb.u_rx.state' }, { op: 'only', modules: ['fsm_tb.u_rx'] }]); const st = v.state(), a = vis();
+        await v.run([{ op: 'fsm', clear: true }, { op: 'only', clear: true }]); const b = vis().length; await v.setState(st);
+        out.push([a.includes('fsm_tb.u_rx.state'), b > a.length, JSON.stringify(vis()) === JSON.stringify(a), JSON.stringify(v.fsmState())]);
+        await v.run([{ op: 'fsm', clear: true }, { op: 'only', clear: true }]); return out; }""")
+    check(seq[1] == ['fsm_tb.state', 'fsm_tb.u_rx.state'] and seq[2] == ['fsm_tb.u_rx.state'] and seq[3] == seq[1] and seq[4] == seq[0] and
+          seq[5][:3] == [True, True, True] and 'fsm_tb.u_rx.state' in seq[5][3],
+          f'Only FSMs, Hide, undo, the layer off: as before; Add with Only, Save and Load: the same rows and layer {seq}')
+    # review VI T15: the panel over many FSMs (150 modules, 10 each): open, ↓ in its tree, the cursor's states, its DOM —
+    # and 10 times more of them grows by about 10 times, not more
+    big = page.evaluate("""async () => { const size = async nm => { const el = document.createElement('div'); document.body.append(el);
+        const sig = [], e = { 0: 'IDLE', 1: 'RUN', 2: 'DONE' };
+        for (let m = 0; m < nm; m++) { const g = ['u' + m]; for (let k = 0; k < 10; k++) g.push({ name: 'state' + k, path: `tb.u${m}.state${k}`, width: 2, enum: e,
+          tv: [[0, '0'], [10 + k, '1'], [30 + m, '2']] }); sig.push(g); }
+        const v = new WaveLens.WaveView(el, { signal: [['tb', ...sig]] }, {});
+        let t = performance.now(); v.fsmPanel(true); const open = performance.now() - t, p = v.fsmP, tree = p.el.querySelector('.mtr'), keys = [];
+        p.focusRow(0);
+        for (let i = 0; i < 30; i++) { t = performance.now(); tree.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); keys.push(performance.now() - t); }
+        const moved = p.fi; t = performance.now(); v.setCursor(25); const cur = performance.now() - t;
+        const n = p.el.querySelectorAll('*').length, fsms = v.fsms().length; v.destroy(); el.remove();
+        return { open, key: Math.max(...keys), moved, cur, n, fsms }; };
+      return [await size(15), await size(150)]; }""")
+    s1, s2 = big
+    check(s2['fsms'] == 1500 and s2['moved'] == 30 and s2['open'] < 1500 * SCALE and s2['key'] < 50 * SCALE and s2['cur'] < 500 * SCALE and
+          s2['n'] < 12 * s1['n'] and s2['open'] < 25 * max(s1['open'], 5),
+          f'1500 FSMs: the panel opens in {s2["open"]:.0f} ms, ↓ in {s2["key"]:.1f} ms at most, the cursor in {s2["cur"]:.0f} ms, {s2["n"]} elements '
+          f'(150 FSMs: {s1["n"]}, {s1["open"]:.0f} ms)')
     page.locator('.wv-fsms .mn.mm').first.click(button='right'); settle(page)
     menu = js("[...document.querySelectorAll('.wv-menu button')].map(b => b.querySelector('span').textContent)")
     page.locator('.wv-menu button[data-mm=only]').click(); settle(page)
@@ -2014,7 +2335,8 @@ def undo(browser, build):
     got.append(js("return v.bms[0].text;") == t0)
     check(got[0] == 1 and got[1] == t0 + ' abc' and got[2], f'a bookmark\'s text typed: one step when the field is left, undone whole {got}')
     # a real drag of a bookmark: one step, undone to its time and signal
-    box = w.locator('canvas').bounding_box(); p = js("return v.bmGeo.pos.get(2);"); b0 = js("return [v.bms[1].t, v.bms[1].signal];"); n = js("return v.undoS.length;")
+    js("v.root.scrollIntoView(); v.draw(); return 0;"); page.wait_for_timeout(50)   # the bookmark in sight, whatever the clicks scrolled
+    box = w.locator('canvas').bounding_box(); p = js("const p = v.bmGeo.pos.get(2); return [p[0], p[1] - (WaveLens.internal.peek(v).oy || 0)];"); b0 = js("return [v.bms[1].t, v.bms[1].signal];"); n = js("return v.undoS.length;")
     page.mouse.move(box['x'] + p[0], box['y'] + p[1]); page.mouse.down(); page.mouse.move(box['x'] + p[0] + 120, box['y'] + p[1] + 40, steps=8); page.mouse.up()
     page.wait_for_timeout(100); b1 = js("return [v.bms[1].t, v.bms[1].signal];"); d = js("return v.undoS.length;") - n
     page.keyboard.press('Control+z'); page.wait_for_timeout(100)
@@ -3339,6 +3661,11 @@ def sva_hardening(browser, build):
 
 
 SVA_PAGE = {'apb': 14, 'axi_lite': 19, 'fsm': 15}   # assertions in the config's files; all bound to the view's scope
+# the bindings of the exact views evaluated over the dump only (their signals not in the view): view:assertion
+SVA_DUMP_ONLY = {'axi_lite': {'WAVES.exact:axi_done'},
+                 'fsm': {'WAVES.status:' + a for a in ('fsm_from_idle', 'fsm_from_start', 'fsm_from_data', 'fsm_from_stop', 'fsm_from_error',
+                         'fsm_start_bit', 'fsm_error_exit', 'fsm_data_bits', 'fsm_frame_time', 'fsm_demo_short_data', 'fsm_valid',
+                         'fsm_frame_err', 'fsm_one_flag', 'fsm_cov_byte', 'fsm_cov_error')}}
 
 
 def sva_waves(browser, build):
@@ -3769,16 +4096,31 @@ def sva_page(page, ex):
     fails = sorted({b[0] for x in p for b in x['binds'] if b[2] != 'cover' and b[3]})
     states = {b[1] for x in p for b in x['binds']}
     check(fails == sorted(deliberate) and states <= {'bound', 'dump'}, f'{ex}: results from sva eval at build time, only {fails} fails ({states})')
-    # the exact view again in the page: the native counts (sva eval), also through the Web Worker
-    diff = page.evaluate("""async () => { const out = [], key = o => JSON.stringify(Object.keys(o).sort().map(k => [k, o[k]]));
+    # the exact views again in the page: sva eval's results (built with the page), also through the Web Worker — not only
+    # the counts (review VI T4: a failure moved to another cycle had the same totals): the clock, the cycles' times, each
+    # attempt's start, end, verdict, failing cycle, witness and antecedent ends, by time; a binding left out by name only
+    # (SVA_DUMP_ONLY: evaluated over the dump at build time, its signals not in the page)
+    diff = page.evaluate("""async () => { const out = [];
+        const norm = (r, a) => { const u = { ps: 1, ns: 1e3, us: 1e6, ms: 1e9, fs: 1e-3 }[r.unit] || 1, T = c => (c == null ? null : Math.round(r.cycles[c] * u));
+          return JSON.stringify({ clock: String(r.clock).split('.').pop(), cycles: r.cycles.map(c => Math.round(c * u)), name: a.name, kind: a.kind,
+            stats: Object.keys(a.stats).sort().map(k => k + '=' + a.stats[k]).join(' '),
+            attempts: (a.attempts || []).map(x => [T(x.start), T(x.end), x.result, T(x.failed_at), (x.trace || []).map(([s, c]) => s + '@' + T(c)),
+              (x.ante_end || []).map(T)]) }); };
         for (const p of SVA.panels()) { if (!p.v.M.rows.some(r => r.src && r.src.tv)) continue;
-          for (const [i, b] of p.bindings.entries()) { if (b.state !== 'bound') continue;
-            const nat = key(b.results.assertions[0].stats); SVA.syncLimit = i === 0 ? 0 : 100000;
-            await p.evaluate(b); const pag = key(b.results.assertions[0].stats);
-            out.push([b.assert, b.via, nat === pag && !b.error]); } }
+          for (const [i, b] of p.bindings.entries()) { if (b.state !== 'bound') { out.push([b.assert, b.state, null, p.v.root.dataset.wave]); continue; }
+            const nat = norm(b.results, b.results.assertions[0]); SVA.syncLimit = i === 0 ? 0 : 100000;
+            await p.evaluate(b); const pag = norm(b.results, b.results.assertions[0]);
+            out.push([b.assert, b.via, nat === pag && !b.error, nat === pag ? '' : nat.slice(0, 200) + ' / ' + pag.slice(0, 200), p.v.root.dataset.wave]); } }
         SVA.syncLimit = 100000; return out; }""")
-    bad = [d for d in diff if not d[2]]
-    check(len(diff) >= n - 2 and not bad and diff[0][1] == 'worker', f'{ex}: {len(diff)} bindings evaluated again in the page give the sva eval counts (first through a worker: {diff[0][1] if diff else None}) {bad[:3]}')
+    done = [d for d in diff if d[2] is not None]
+    left = sorted({f'{d[3]}:{d[0]}' for d in diff if d[2] is None})
+    bad = [d for d in done if not d[2]]
+    want = sorted(SVA_DUMP_ONLY.get(ex, ()))
+    views = {d[-1] for d in diff}   # each exact view: all n, evaluated again or left out by name
+    check(views and all(sum(d[-1] == w for d in diff) == n for w in views) and not bad and done[0][1] == 'worker' and left == want,
+          f'{ex}: {len(done)} bindings evaluated again in the page give sva eval\'s results attempt by attempt (first through a worker: '
+          f'{done[0][1] if done else None}); {len(left)} left out by name' + (f'; differ {bad[:2]}' if bad else '') +
+          ('' if left == want else f'; left out {left}, want {want}'))
 
 
 def sva_names(build, page_cands):
@@ -3918,8 +4260,22 @@ SVA_EXAMPLES = {
 }
 
 
+# review VI T4: what each third-party evaluation must find, not only "no failure": the attempts that pass, fail, are
+# vacuous, disabled or capped (the asserts and assumes), the covers and how many of them match (tests/sva/third_party
+# stays as it came: the expectations are here)
+THIRD_PARTY = {
+    ('saravana_apb', 'apb_tb.u_regs'): {'pass': 46, 'fail': 0, 'vacuous': 203, 'disabled': 0, 'capped': 0, 'covered': 4, 'covers': 4},
+    ('saravana_apb', 'apb_tb.u_master'): {'pass': 46, 'fail': 0, 'vacuous': 203, 'disabled': 0, 'capped': 0, 'covered': 4, 'covers': 4},
+    ('yosyshq_axi4_lite', 'axi_lite_tb.u_slave'): {'pass': 23, 'fail': 0, 'vacuous': 432, 'disabled': 0, 'capped': 0, 'covered': 3, 'covers': 4},
+    ('yosyshq_axi4_lite', 'axi_lite_tb.u_master'): {'pass': 23, 'fail': 0, 'vacuous': 432, 'disabled': 0, 'capped': 0, 'covered': 3, 'covers': 4},
+    ('opentitan_apb', 'apb_tb.u_regs'): {'pass': 86, 'fail': 0, 'vacuous': 104, 'disabled': 0, 'capped': 0, 'covered': 2, 'covers': 2},
+    ('sindhugd_axi4lite', 'axi_lite_tb.u_slave'): {'pass': 4, 'fail': 0, 'vacuous': 176, 'disabled': 0, 'capped': 0, 'covered': 0, 'covers': 0},
+}
+
+
 def sva_third_party(build):
-    """tests/sva/third_party/units.json: every evaluation over an example dump, no failure but the listed ones."""
+    """tests/sva/third_party/units.json: every evaluation over an example dump, no failure but the listed ones, the
+    totals of THIRD_PARTY (a vacuous run is not a pass)."""
     import json, subprocess
     sva = build / 'sva-target' / 'release' / 'sva'
     if not need(sva, how='make sva-build'):
@@ -3937,8 +4293,12 @@ def sva_third_party(build):
             fails = {a['name']: [a['stats']['pass'], a['stats']['fail']] for a in doc['assertions'] if a['kind'] != 'cover' and a['stats']['fail']}
             missing = [a['name'] for a in doc['assertions'] if a.get('missing')]
             ok = len(doc['assertions']) == u['assertions'] and not missing and fails == e.get('fail', {}) and r.returncode == (1 if fails else 0)
-            passes = sum(a['stats']['pass'] for a in doc['assertions'] if a['kind'] != 'cover')
-            check(ok, f'third party {u["name"]} at {e["scope"]}: {len(doc["assertions"])} assertions, {passes} passing attempts, failures {fails}, missing {missing}, exit {r.returncode}')
+            tot = {k: sum(a['stats'].get(k, 0) for a in doc['assertions'] if a['kind'] != 'cover') for k in ('pass', 'fail', 'vacuous', 'disabled', 'capped')}
+            tot.update(covered=sum(1 for a in doc['assertions'] if a['kind'] == 'cover' and a['stats'].get('matches', a['stats']['pass'])),
+                       covers=sum(1 for a in doc['assertions'] if a['kind'] == 'cover'))
+            want = THIRD_PARTY.get((u['name'], e['scope']))
+            check(ok and tot == want, f'third party {u["name"]} at {e["scope"]}: {len(doc["assertions"])} assertions, {tot} (want {want}), failures {fails}, '
+                  f'missing {missing}, exit {r.returncode}')
 
 
 def sva_examples(build):
@@ -4298,6 +4658,7 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'sva_exprs': 'stage 10: expressions in the bar (search, rows ƒ, kept, JSON), names in a hierarchy',
     'dump': 'a VCD opened in the page (Open…, dropped on a viewer), ⟳, wavelens/viewer.html',
     'fsm': 'the FSM panel (T) on the FSM example\'s VCD with its types: the tree, go to one, Only FSMs, add them to a masked view, the command, the state',
+    'axis': 'the time axis never leaves while the rows scroll: the own box fits under the bar, the wheel brings the bar back, with the page to the last rows',
     'state': 'Save / Load… of a viewer (the APB and AXI-Lite pages): its state to a file and back, on other waves',
     'edit': 'the viewer\'s commands, a page\'s edits (tools/viewedit.py) with the same state, your groups and markers, a page live through wavemcp.py',
     'view_review': 'the review of 0.15: Clear keeps markers, cycleZero a time, a run lays out before a picture, undo after a lost release, rows of '
@@ -4438,6 +4799,7 @@ def main():
         run('view_review', view_review, b, build)
         run('dump', dump, b, build)
         run('fsm', fsm_panel, b, build)
+        run('axis', axis_in_sight, b, build)
         run('readers', readers, b, build)
         run('vscode', vscode_tab, b, build)
         run('ranges', ranges, b, build)

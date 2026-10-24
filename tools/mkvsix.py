@@ -2,7 +2,10 @@
 """mkvsix.py — the VS Code extension (vscode/) as one .vsix, without node or npm: a VSIX is a zip of extension/ (the
 extension's files) with its manifest (extension.vsixmanifest) and [Content_Types].xml.
 
-  mkvsix.py [--out out/wavelens-0.17.0.vsix] [--sva bin/linux-x86_64/sva] [--target linux-x64]
+  mkvsix.py [--out out/wavelens.vsix] [--one] [--sva bin/linux-x86_64/sva] [--target linux-x64]
+
+Two files: OUT (the last build, the same install line each time) and beside it a copy named by its version
+(wavelens-0.20.0.vsix: the versions kept side by side, to install one and another and compare); --one: OUT only.
 
 Into extension/: vscode/package.json (its "version" from VERSION: 0.17 -> 0.17.0), vscode/extension.js, vscode/media/
 host.js, the viewer's files of wavelens/ under media/ (wavelens.css, wavelens.config.js, wavelens.js, sva.wasm.js, bus.js,
@@ -11,7 +14,7 @@ package is for one platform of the host that runs the extension (Remote-SSH / WS
 The same input gives the same bytes (fixed times in the zip). Install: code --install-extension FILE.vsix in a terminal
 of the remote window, or Extensions → … → Install from VSIX… while connected.
 """
-import argparse, json, os, sys, zipfile
+import argparse, json, os, shutil, sys, zipfile
 from xml.sax.saxutils import escape
 
 sys.dont_write_bytecode = True
@@ -102,15 +105,19 @@ def build(out, sva, target):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0], formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__.split('\n\n', 1)[1])
-    ap.add_argument('--out', help='the .vsix (default: out/wavelens-VERSION.vsix)')
+    ap.add_argument('--out', help='the .vsix (default: out/wavelens.vsix; the version is in its manifest)')
+    ap.add_argument('--one', action='store_true', help='OUT only, not its copy named by the version')
     ap.add_argument('--sva', default=os.path.join(ROOT, 'bin', 'linux-x86_64', 'sva'), help='the static sva CLI of the host (default: %(default)s)')
     ap.add_argument('--target', default='linux-x64', help='the platform of the host, as VS Code names it (default: %(default)s; "" none)')
     a = ap.parse_args()
-    with open(os.path.join(ROOT, 'VERSION'), encoding='utf-8') as f:
-        ver = f.read().strip()
-    out = a.out or os.path.join(ROOT, 'out', f'wavelens-{ver}.0.vsix')
+    out = a.out or os.path.join(ROOT, 'out', 'wavelens.vsix')
     v, n = build(out, a.sva, a.target)
     print(f'mkvsix: {out} (wavelens {v}, {n} files, {os.path.getsize(out) // 1024} KB)')
+    if not a.one:
+        named = os.path.join(os.path.dirname(os.path.abspath(out)), f'wavelens-{v}.vsix')
+        if os.path.abspath(out) != named:
+            shutil.copyfile(out, named)
+            print(f'mkvsix: {named} (the same, named by its version)')
 
 
 if __name__ == '__main__':

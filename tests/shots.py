@@ -11,6 +11,11 @@ cannot be made (a locator that matches nothing or two elements) stops the run wi
 after smoke, so a picture that no longer builds fails the gate.
 
   python3 tests/shots.py [--build out] [--out docs/img] [--only hero,bar]   (no -I: playwright)
+  python3 tests/shots.py --set visual [--out tests/visual]
+
+--set visual: the pictures of the visual regression (review VI T13; not in the docs): the white theme, a viewer 420 px
+wide, an FSM's details (its states, its diagram), a viewer at a device scale of 2. make shots-check compares both sets
+with the committed ones (tests/pngdiff.py: a picture that changed fails the gate); make shots writes both.
 """
 import argparse, os, pathlib, sys, time
 from playwright.sync_api import sync_playwright
@@ -30,10 +35,10 @@ def settle(page):
     page.evaluate('new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))')
 
 
-def open_page(browser, path, scheme='dark', height=900):
+def open_page(browser, path, scheme='dark', height=900, width=1280, scale=1):
     if not path.exists():
         sys.exit(f'shots: {path} is missing (make examples)')
-    page = browser.new_page(color_scheme=scheme, viewport={'width': 1280, 'height': height}, device_scale_factor=1)
+    page = browser.new_page(color_scheme=scheme, viewport={'width': width, 'height': height}, device_scale_factor=scale)
     page.on('console', lambda m: errors.append(f'{path.name}: {m.text}') if m.type == 'error' and 'fonts.g' not in m.text else None)
     page.on('pageerror', lambda e: errors.append(f'{path.name}: {e}'))
     page.goto(path.as_uri())
@@ -66,12 +71,41 @@ def js(page, i, expr):
     return page.evaluate(f"(() => {{ const v = document.querySelectorAll('.wv')[{i}].waveView; return {expr}; }})()")
 
 
+def visual(b, shot, apb, fsm, fsm_all):
+    """The visual regression's pictures (--set visual)."""
+    page = open_page(b, apb)                                       # the white theme
+    no_sva(page)
+    page.evaluate("WaveLens.setTheme('white')"); settle(page)
+    shot('white', page.locator('.bench').first, upto=view(page).locator('.notes'))
+    page.close()
+    page = open_page(b, apb, width=420, height=900)                # a phone's width: the bar wraps, the names narrow
+    no_sva(page)
+    shot('narrow', view(page))
+    page.close()
+    page = open_page(b, fsm_all, height=1000)                      # an FSM's details: its states, its diagram
+    no_sva(page)
+    js(page, 0, "(v.fsmPanel(true), v.cursor = 400000, v.draw(), 0)"); settle(page)
+    page.locator('.wv-fsms .mn.fs').nth(1).click(); settle(page)
+    page.evaluate("(() => { const p = document.querySelector('.wv-fsms'); p.style.left = '20px'; p.style.top = '20px'; })()"); settle(page)
+    shot('fsm-states', page.locator('.wv-fsms'))
+    page.locator('.wv-fsms .fdt button[data-t=graph]').click(); settle(page)
+    shot('fsm-graph', page.locator('.wv-fsms'))
+    page.close()
+    page = open_page(b, fsm, scale=2)                              # a device scale of 2: the canvas drawn at its pixels
+    no_sva(page)
+    shot('scale2', view(page).locator('canvas').first)
+    page.close()
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--build', default=str(pathlib.Path(__file__).resolve().parent.parent / 'out'), help='the Makefile BUILD directory (examples/<ex>/<ex>.html)')
     ap.add_argument('--out', default=str(ROOT / 'docs' / 'img'))
     ap.add_argument('--only', help='comma-separated shot names')
+    ap.add_argument('--set', choices=['docs', 'visual'], default='docs', help='docs/img (default) or the visual regression\'s tests/visual')
     a = ap.parse_args()
+    if a.set == 'visual' and a.out == str(ROOT / 'docs' / 'img'):
+        a.out = str(ROOT / 'tests' / 'visual')
     ex = pathlib.Path(a.build).resolve() / 'examples'   # as_uri() needs an absolute path
     apb, axi, axi_all, fsm = ex / 'apb' / 'apb.html', ex / 'axi_lite' / 'axi_lite.html', ex / 'axi_lite' / 'axi_lite_all.html', ex / 'fsm' / 'fsm.html'
     fsm_all = ex / 'fsm' / 'fsm_all.html'
@@ -96,6 +130,11 @@ def main():
 
     with sync_playwright() as p:
         b = p.chromium.launch(args=RASTER)
+        if a.set == 'visual':
+            visual(b, shot, apb, fsm, fsm_all)
+            b.close()
+            print(f'shots: {time.time() - t0:.1f} s -> {a.out}')
+            sys.exit(1 if errors else 0)
 
         page = open_page(b, apb, height=1100)                      # APB, dark: an assertion failure selected, the panel's numbers
         page.evaluate("(async () => { await SVA.ready(); WaveLens.configure({svaShow: ['apb_demo_no_wait'], svaSignals: false}); await SVA.ready(); })()")

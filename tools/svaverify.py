@@ -9,6 +9,11 @@ dump (`failed_at` of each failed attempt, as a time). The assertions Verilator d
 numbers kept) and listed, as is one it rejects (`!` in a cover's sequence); the rest must agree, the deliberate failures among them. make sva-verify; needs Verilator
 and the example dumps (make examples).
 
+The oracle does not weaken itself (review VI T3): only the assertions of an example's "unsupported" list may be put out
+(another one, or an error outside an assertion, is an error: a typo of the source must not shrink the comparison), the
+simulation must reach its $finish, and sva eval must have evaluated every compared assertion — present, not capped, at
+least one attempt that is not vacuous. One of the list that Verilator takes now is said, so the list follows it.
+
   python3 -I tools/svaverify.py [--build out] [--sva-bin PATH] [--only apb,fsm] [--keep]
 """
 import argparse, json, os, re, shutil, subprocess, sys
@@ -18,11 +23,18 @@ from common import ROOT, UNIT_PS, WaveError, add_sva_bin_arg, run_main  # noqa: 
 import svabuild  # noqa: E402
 
 # example: the testbench top, the scope of its sva eval run, the files of the sources (packages first) and of sva eval
+# unsupported: the assertions Verilator 5.046 does not take (or that use a declaration it does not take), the only ones
+# that may be put out
 EXAMPLES = {
-    'apb': {'top': 'apb_tb', 'scope': 'apb_tb', 'src': ['apb/apb_tb.sv'], 'sva': ['apb/apb_tb.sv', 'apb/apb.sva']},
-    'axi_lite': {'top': 'axi_lite_tb', 'scope': 'axi_lite_tb.u_slave', 'src': ['axi_lite/axi_lite_tb.sv'], 'sva': ['axi_lite/axi_lite.sva']},
-    'fsm': {'top': 'fsm_tb', 'scope': 'fsm_tb.u_rx', 'src': ['fsm/uart_pkg.sv', 'fsm/fsm_tb.sv'], 'sva': ['fsm/uart_pkg.sv', 'fsm/fsm.sva']},
+    'apb': {'top': 'apb_tb', 'scope': 'apb_tb', 'src': ['apb/apb_tb.sv'], 'sva': ['apb/apb_tb.sv', 'apb/apb.sva'],
+            'unsupported': {'apb_cov_read_wait', 'apb_cov_write', 'apb_read_waits'}},
+    'axi_lite': {'top': 'axi_lite_tb', 'scope': 'axi_lite_tb.u_slave', 'src': ['axi_lite/axi_lite_tb.sv'], 'sva': ['axi_lite/axi_lite.sva'],
+                 'unsupported': {'axi_ar_hold', 'axi_ar_stable', 'axi_aw_hold', 'axi_aw_stable', 'axi_b_hold', 'axi_b_latency', 'axi_cov_read',
+                                 'axi_cov_write', 'axi_done', 'axi_r_hold', 'axi_r_latency', 'axi_w_after_aw', 'axi_w_hold', 'axi_w_stable'}},
+    'fsm': {'top': 'fsm_tb', 'scope': 'fsm_tb.u_rx', 'src': ['fsm/uart_pkg.sv', 'fsm/fsm_tb.sv'], 'sva': ['fsm/uart_pkg.sv', 'fsm/fsm.sva'],
+            'unsupported': {'fsm_cov_byte', 'fsm_cov_error', 'fsm_demo_short_data', 'fsm_frame_time'}},
 }
+FINISH_RE = re.compile(r'\$finish\b')
 FAIL_RE = re.compile(r'^\[(\d+(?:\.\d+)?)\] %Error: (\S+?):(\d+): Assertion failed', re.M)
 UNSUP_RE = re.compile(r'^%Error(?:-\w+)?: (\S+?):(\d+):\d+:', re.M)   # UNSUPPORTED, or a syntax it does not take
 TIME_RE = re.compile(r'^\s*`timescale\s+\d+\s*(?:ns|ps|us|fs|ms|s)\s*/\s*(\d+)\s*(fs|ps|ns|us|ms|s)\b', re.M)
@@ -68,6 +80,39 @@ def blank(text, spans):
     for s, e in sorted(spans, reverse=True):
         text = text[:s] + re.sub(r'[^\n]', ' ', text[s:e]) + text[e:]
     return text
+
+
+def audit(name, ex, compared, skipped, sim, eng_rc, res):
+    """What would make an agreement hollow -> (errors, notes): put out beyond the list, nothing compared, a simulation
+    that did not finish, a compared assertion sva eval did not evaluate (missing, capped, vacuous only)."""
+    errors, notes = [], []
+    allow = ex.get('unsupported', set())
+    extra = sorted(set(skipped) - allow)
+    if extra:
+        errors.append(f'{name}: put out though not in its "unsupported" list: {", ".join(extra)} (a syntax error of the source? '
+                      'Verilator\'s message above)')
+    back = sorted(allow - set(skipped))
+    if back:
+        notes.append(f'{name}: Verilator takes {", ".join(back)} now: compared; take them out of its "unsupported" list')
+    if not compared:
+        errors.append(f'{name}: no assertion compared')
+    if sim.returncode or not FINISH_RE.search(sim.stdout + sim.stderr):
+        errors.append(f'{name}: the simulation did not reach its $finish (exit {sim.returncode}): '
+                      f'{(sim.stdout + sim.stderr).strip()[-300:]}')
+    if eng_rc not in (0, 1) or res is None:
+        errors.append(f'{name}: sva eval did not evaluate (exit {eng_rc})')
+        return errors, notes
+    got = {a['name']: a for a in res.get('assertions', [])}
+    for n in compared:
+        a = got.get(n)
+        st = (a or {}).get('stats', {})
+        if not a:
+            errors.append(f'{name}: {n}: not in the results of sva eval')
+        elif st.get('capped'):
+            errors.append(f'{name}: {n}: {st["capped"]} attempts capped: their verdict unknown')
+        elif not st.get('pass', 0) + st.get('fail', 0):
+            errors.append(f'{name}: {n}: vacuous in every attempt: the agreement says nothing')
+    return errors, notes
 
 
 def verify(name, ex, sva, build, keep):
@@ -126,16 +171,25 @@ def verify(name, ex, sva, build, keep):
         if label:
             ver.setdefault(label, []).append(round(float(t) * prec))
     args = [sva, 'eval', '--waves', dump, '--scope', ex['scope'], *[x for f in files for x in ('--sva', f)], '--json']
-    res = json.loads(run(args, cwd=ROOT).stdout)
+    er = run(args, cwd=ROOT)
+    try:
+        res = json.loads(er.stdout)
+    except ValueError:
+        res = None
+    compared = [a['label'] for f in files for a in asserts[f] if a['kind'] == 'assert' and a['label'] not in dropped[f]]
+    skipped = sorted(x['label'] for f in files for x in asserts[f] if x['label'] in dropped[f] and x['kind'] not in ('sequence', 'property'))
+    errors, notes = audit(name, ex, compared, skipped, sim, er.returncode, res)
+    if errors:
+        raise WaveError('\n'.join(errors))
+    for n in notes:
+        print('svaverify: ' + n, file=sys.stderr)
     unit = UNIT_PS[res['unit']] if isinstance(res.get('unit'), str) else 1
     eng = {}
     for a in res['assertions']:
         times = [round(res['cycles'][x['failed_at']] * unit) for x in a.get('attempts', []) if x['result'] == 'fail' and 'failed_at' in x]
         if times:
             eng[a['name']] = times
-    compared = [a['label'] for f in files for a in asserts[f] if a['kind'] == 'assert' and a['label'] not in dropped[f]]
     diff = [(n, ver.get(n, []), eng.get(n, [])) for n in compared if sorted(ver.get(n, [])) != sorted(eng.get(n, []))]
-    skipped = sorted(x['label'] for f in files for x in asserts[f] if x['label'] in dropped[f] and x['kind'] not in ('sequence', 'property'))
     if not keep:
         shutil.rmtree(os.path.join(out, 'obj'), ignore_errors=True)
     return compared, skipped, diff, {n: eng[n] for n in compared if n in eng}
