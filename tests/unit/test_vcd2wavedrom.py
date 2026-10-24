@@ -123,6 +123,11 @@ class Convert(unittest.TestCase):
         self.assertEqual(s['kind'], 'real')
         self.assertEqual(s['tv'], [[0, '1.5'], [10000, '2.25'], [20000, '-0.03']])
 
+    def test_integer_signed_decimal(self):
+        # an integer variable (Questa writes an int-based enum so) reads as signed decimal; a parameter, a time do not
+        s = H.wavejson_of(H.fixture('integer'))
+        self.assertEqual({p: x.get('radix') for p, x in s.items()}, {'tb.n': 'signed', 'tb.P': None, 'tb.t': None})
+
     def test_real_kinds_and_non_finite(self):
         s = H.wavejson_of(H.fixture('realkinds'))
         self.assertEqual({p: x.get('kind') for p, x in s.items()}, {'tb.r': 'real', 'tb.rt': 'real', 'tb.sr': 'real', 'tb.rp': 'real', 'tb.msg': 'string'})
@@ -291,9 +296,9 @@ class Convert(unittest.TestCase):
         """The APB example's VCD and its FST, the FST read by each reader there is: the same WaveJSON."""
         ex = os.path.join(H.BUILD, 'examples', 'apb')
         if not os.path.exists(os.path.join(ex, 'apb.fst')):
-            self.skipTest('make examples')
+            H.skip(self, 'make examples')
         if not self.readers():
-            self.skipTest('neither fst2vcd nor the sva CLI')
+            H.skip(self, 'neither fst2vcd nor the sva CLI')
         cfg = os.path.join(H.ROOT, 'examples', 'apb', 'apb.config.json')
         vcd = self.convert('', cfg, 'transfers', os.path.join(ex, 'apb.vcd'))[0]
         for r in self.readers():
@@ -305,8 +310,10 @@ class Convert(unittest.TestCase):
     def test_fst_readers_identical(self):
         """The FSM example's FST (enum tables, a struct scope) through fst2vcd and through sva vcd: the same WaveJSON."""
         fst = os.path.join(H.BUILD, 'examples', 'fsm', 'fsm.fst')
-        if not os.path.exists(fst) or len(self.readers()) < 2:
-            self.skipTest('make examples, fst2vcd and the sva CLI')
+        if not os.path.exists(fst):
+            H.skip(self, 'make examples')
+        if len(self.readers()) < 2:
+            H.skip(self, 'fst2vcd and the sva CLI', built=False)
         cfg = os.path.join(H.ROOT, 'examples', 'fsm', 'fsm.config.json')
         for view in ('run', 'status'):
             with self.subTest(view):
@@ -350,7 +357,7 @@ class Convert(unittest.TestCase):
     def test_fst_readers_identical_on_probes(self):
         """FST_PROBES through fst2vcd and through sva vcd: the same variables, the same WaveJSON."""
         if not shutil.which('vcd2fst') or len(self.readers()) < 2:
-            self.skipTest('vcd2fst, fst2vcd and the sva CLI')
+            H.skip(self, 'vcd2fst, fst2vcd and the sva CLI', built=False)
         with H.tmp() as d:
             for name, (decl, body) in self.FST_PROBES.items():
                 with self.subTest(name):

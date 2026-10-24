@@ -28,7 +28,7 @@ lines); VHDL's nine values are folded into four (U W - X: x, H: 1, L: 0, Z: z). 
 back (a WaveError). A $dumpoff block (every value x) counts as changes in `changes`. Times above 2^53 ps and a
 timescale finer than 1 ps get a warning: the page holds times as JavaScript numbers (ps).
 """
-import collections, os, re, shutil, subprocess, sys
+import collections, os, re, shutil, subprocess, sys, tempfile
 from typing import Dict, Iterable, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
@@ -77,18 +77,32 @@ def available(path):
 
 
 def _lines(path):
-    """(line iterator, close function) over the dump as VCD text; None if not possible."""
+    """(line iterator, close function, done function) over the dump as VCD text; None if not possible. done() after the
+    text was read to its end: an FST's converter that failed (a partial text, then an error) raises WaveError with the
+    end of what it said; a read that stops early (the declarations only) does not call it."""
     if not os.path.isfile(path):
         raise WaveError(f'no such dump: {path}')
     if path.lower().endswith('.vcd'):
         f = open(path, 'rb', buffering=1 << 20)
-        return f, f.close
+        return f, f.close, lambda: None
     argv = fst_reader()
     if not argv:
         print('dumpscan: neither fst2vcd (GTKWave) nor the sva CLI found: cannot read ' + os.path.basename(path) + ' as text', file=sys.stderr)
         return None
-    p = subprocess.Popen(argv + [path], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=1 << 20)
-    return p.stdout, lambda: (p.stdout.close(), p.kill(), p.wait())
+    err = tempfile.TemporaryFile()   # a file, not a pipe: a converter that says much cannot block on it
+    p = subprocess.Popen(argv + [path], stdout=subprocess.PIPE, stderr=err, bufsize=1 << 20)
+
+    def close():
+        p.stdout.close(); p.kill(); p.wait(); err.close()
+
+    def done():
+        if p.wait() != 0:
+            err.seek(0, os.SEEK_END)
+            err.seek(max(0, err.tell() - 2000))   # its end only: a converter may say a great deal
+            said = err.read().decode(errors='replace').strip()
+            raise WaveError(f'{os.path.basename(argv[0])} {os.path.basename(path)}: exit {p.returncode}' + (f': {said}' if said else '') +
+                            ' (the dump is cut off, or not an FST it reads)')
+    return p.stdout, close, done
 
 
 def _enum_table(tok):
@@ -217,7 +231,7 @@ def read(path: str, body: Optional[str] = 'count', want: Optional[Iterable[bytes
     src = _lines(path)
     if src is None:
         return None
-    lines, close = src
+    lines, close, done = src
     d = Dump()
     name = os.path.basename(path)
     try:
@@ -227,9 +241,10 @@ def read(path: str, body: Optional[str] = 'count', want: Optional[Iterable[bytes
             span = _scan(lines, first, name, cnt, None)
             if span is None:   # a change line with more on it: the dump again, every line token by token
                 close()
-                lines, close = _lines(path)
+                lines, close, done = _lines(path)
                 first, cnt = _header(lines, Dump(), path), collections.Counter()
                 span = _scan(lines, first, name, cnt, None, fast=False)
+            done()
             t_first, t_last = span
             for p, v in d.vars.items():
                 d.changes[p] = sum(max(0, cnt[code] - 1) for code in dict.fromkeys(c for c, _ in v.members))
@@ -237,6 +252,7 @@ def read(path: str, body: Optional[str] = 'count', want: Optional[Iterable[bytes
         elif body == 'collect':
             tr = d.trans = {code: [] for code in set(want or ())}
             t_first, t_last = _scan(lines, first, name, None, tr)
+            done()
             d.t_start, d.t_end = (t_first or 0) * d.unit_ps, (t_last or 0) * d.unit_ps
     finally:
         close()

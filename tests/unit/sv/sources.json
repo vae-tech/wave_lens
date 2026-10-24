@@ -1,0 +1,78 @@
+{
+  "enums": {
+    "state_q": {
+      "0": "IDLE",
+      "2": "RUN",
+      "3": "DONE"
+    },
+    "state_d": {
+      "0": "IDLE",
+      "2": "RUN",
+      "3": "DONE"
+    },
+    "sel": {
+      "1": "A0",
+      "2": "A1",
+      "4": "A2"
+    },
+    "d": {
+      "8": "D8",
+      "9": "D9"
+    },
+    "inline_e": {
+      "0": "GO",
+      "1": "STOP"
+    },
+    "port_i": {
+      "1": "A0",
+      "2": "A1",
+      "4": "A2"
+    },
+    "after_str": {
+      "0": "IDLE",
+      "2": "RUN",
+      "3": "DONE"
+    },
+    "after_cont": {
+      "0": "IDLE",
+      "2": "RUN",
+      "3": "DONE"
+    }
+  },
+  "fields": {
+    "status": [
+      {
+        "name": "state",
+        "msb": 6,
+        "lsb": 5,
+        "enum": {
+          "0": "IDLE",
+          "2": "RUN",
+          "3": "DONE"
+        }
+      },
+      {
+        "name": "cnt",
+        "msb": 4,
+        "lsb": 1
+      },
+      {
+        "name": "v",
+        "msb": 0,
+        "lsb": 0
+      }
+    ]
+  },
+  "notes": [
+    "signed_t",
+    "shift_t",
+    "macro_t",
+    "dup_t",
+    "us_t",
+    "anon_bad",
+    "kind_t",
+    "anon_bad",
+    "mix",
+    "state"
+  ]
+}

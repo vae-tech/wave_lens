@@ -1,5 +1,5 @@
 """tools/mkconfig.py: the catalog of a dump, the rules, --update, the SystemVerilog sources (--sv)."""
-import json, os, unittest
+import json, os, re, unittest
 
 from tests.unit import helpers as H
 import mkconfig as M
@@ -132,7 +132,19 @@ module m; p::st_t state_q, state_d; stat_t status; outer_t o; enum {A, B} inline
         self.assertEqual(e['inline_e'], {0: 'A', 1: 'B'})
 
     def test_sv_values(self):
-        self.assertEqual([M.sv_value(v, p) for v, p in (("4'hA", 0), ('', 3), ('0x10', 0), ("'b11", 0), ('X', 5))], [10, 4, 16, 3, 6])
+        # a value that is not a literal (a parameter, an expression, a negative number) is not guessed; 08 is decimal
+        self.assertEqual([M.sv_value(v, p) for v, p in (("4'hA", 0), ('', 3), ('0x10', 0), ("'b11", 0), ('X', 5), ('1 << 2', 0), ('-1', 0),
+                                                        ('08', 0), ("4'd1A", 0))], [10, 4, 16, 3, None, None, None, 8, None])
+
+    def test_sources_fixture_expected_tables(self):
+        # tests/unit/sv/sources.sv against the tables it should give (the page reads it against the same file: smoke readers):
+        # a type used in another module, an array, a port, an inline enum; not a function's names, not struct members; a
+        # name of two types and the enums it does not read left out with a note each
+        want = json.load(open(os.path.join(H.ROOT, 'tests', 'unit', 'sv', 'sources.json')))
+        e, f, notes = M.sv_tables(M.sv_texts([os.path.join(H.ROOT, 'tests', 'unit', 'sv', 'sources.sv')]))
+        self.assertEqual({k: {str(a): b for a, b in v.items()} for k, v in e.items()}, want['enums'])
+        self.assertEqual(f, want['fields'])
+        self.assertEqual([re.match(r'(?:enum |struct )?(\w+)', n).group(1) for n in notes], want['notes'])
 
     def test_sv_structs_nested_fields_msb_first(self):
         st = M.sv_structs([self.path])
@@ -141,7 +153,7 @@ module m; p::st_t state_q, state_d; stat_t status; outer_t o; enum {A, B} inline
         self.assertEqual([f['msb'] for f in st['o']], [8, 1])
 
 
-@unittest.skipUnless(svabuild.find_bin(), 'the sva CLI (make sva-build)')
+@H.needs(svabuild.find_bin(), 'the sva CLI (make sva-build)')
 class SvaBinds(unittest.TestCase):
     def test_binds_only_chosen_open_none(self):
         with H.tmp() as d:

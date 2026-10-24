@@ -47,7 +47,7 @@ class Rule(unittest.TestCase):
     def test_candidates_in_dump_order(self):
         self.assertEqual(names().candidates([{'name': 'clk'}, {'name': 'state'}]), ['tb.dut', 'tb.other'])
 
-    @unittest.skipUnless(SB.find_bin(), 'the sva CLI (make sva-build)')
+    @H.needs(SB.find_bin(), 'the sva CLI (make sva-build)')
     def test_cross_check_cli(self):
         """sva eval --resolve scope gives the same names and the same problems as Names.resolve (T8: three implementations
         of one rule; wavelens/sva.js is compared with them in make smoke)."""
@@ -87,13 +87,13 @@ class Binds(unittest.TestCase):
             with self.assertRaisesRegex(WaveError, '1 results for 2 files'):
                 SB.parse_files([(SV, 'a.sv'), (SV, 'b.sv')], fake)
 
-    @unittest.skipUnless(SB.find_bin(), 'the sva CLI (make sva-build)')
+    @H.needs(SB.find_bin(), 'the sva CLI (make sva-build)')
     def test_bind_to_a_scope_not_in_the_dump_is_an_error(self):
         files = [(SV, 'names.sv')]
         with self.assertRaisesRegex(WaveError, 'a_state@tb.nowhere: the dump has no scope tb.nowhere'):
             SB.evaluate([{'assert': 'a_state', 'scope': 'tb.nowhere'}], files, H.fixture('names'), SB.find_bin(), parsed=SB.parse_files(files, SB.find_bin()), quiet=True)
 
-    @unittest.skipUnless(SB.find_bin(), 'the sva CLI (make sva-build)')
+    @H.needs(SB.find_bin(), 'the sva CLI (make sva-build)')
     def test_evaluate_a_binding(self):
         files = [(SV, 'names.sv')]
         bs, notes = SB.evaluate([{'assert': 'a_*', 'scope': 'tb.dut'}], files, H.fixture('names'), SB.find_bin(), parsed=SB.parse_files(files, SB.find_bin(), quiet=True),

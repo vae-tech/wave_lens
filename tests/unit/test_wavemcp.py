@@ -103,7 +103,7 @@ class Dump(unittest.TestCase):
         self.assertEqual([s['name'] for s in doc['signal']], ['rst_n', 'count'])
         self.assertEqual(doc['meta']['mode'], 'clock')
 
-    @unittest.skipUnless(svabuild.find_bin(), 'no sva CLI')
+    @H.needs(svabuild.find_bin(), 'no sva CLI')
     def test_sva(self):
         t = self.truth
         r = self.call('sva_check', scope='tb.dut.ctl', source='req_ack: assert property (@(posedge clk) req |-> ##[1:4] ack);\n'
@@ -376,6 +376,19 @@ class Review(unittest.TestCase):
             text, err = W.call('wave_values', {'dump': p, 'signals': [bad], 'at': 1})
             self.assertTrue(err)
             self.assertIn('has bits [2:0]', text)
+
+    def test_stats_extrema_by_the_radix(self):
+        """review IV B21: min / max are the numbers the radix reads (signed: 80 is -128, 7f is 127; float: by value)."""
+        p = H.vcd(self.d.name, '#0\nb10000000 !\nb00111111100000000000000000000000 "\n#1\nb01111111 !\n'
+                  'b10111111100000000000000000000000 "\n#2\nb00000001 !\n#3\n',
+                  header='$timescale 1ns $end\n$scope module tb $end\n$var wire 8 ! b [7:0] $end\n$var wire 32 " f [31:0] $end\n$upscope $end\n'
+                  '$enddefinitions $end\n', name='ext.vcd')
+        s = self.call('wave_stats', dump=p, signals=['b'], radix='signed')['signals']['b']
+        self.assertEqual((s['min'], s['max']), ('-128', '127'))
+        s = self.call('wave_stats', dump=p, signals=['b'], radix='dec')['signals']['b']
+        self.assertEqual((s['min'], s['max']), ('1', '128'))
+        s = self.call('wave_stats', dump=p, signals=['f'], radix='float')['signals']['f']
+        self.assertEqual((s['min'], s['max']), ('-1', '1'))
 
     def test_clock_domains(self):
         """A6: two clocks whose edges are alike in count, first and last are two clocks; one net under two scopes is one."""

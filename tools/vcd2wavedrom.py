@@ -48,6 +48,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the 
 import dumpscan, svabuild, wavejson  # noqa: E402
 from common import UNIT_PS, WaveError, add_sva_bin_arg, check_config, glob_re, run_main  # noqa: E402
 
+INT_KINDS = {'integer', 'int', 'shortint', 'longint', 'byte'}   # $var types read as signed decimal without an enum (wavelens/src/vcd.js VCD_INT)
 X_TEXT = object()   # an unknown value of a "kind" real / string signal in a clock-sampled row (None there is a "|" gap)
 
 
@@ -251,6 +252,19 @@ def gfmt(f, p=7):
         return trim(jsfmt(f, f'.{max(0, p - 1 - e)}f'))
     m, x = jsfmt(f, f'.{p - 1}e').lower().split('e')
     return trim(m) + 'e' + ('-' if x[0] == '-' else '+') + x.lstrip('+-').rjust(2, '0')
+
+
+def order_key(n, width, radix=None):
+    """A bus value n (unsigned) as the number its radix reads, for min / max: signed and sq<F> two's complement, float its
+    IEEE value (NaN: None, no order); the rest (and q<F>: one scale) the unsigned order."""
+    r = {'unsigned': 'dec', 'sdec': 'signed'}.get(radix, radix)
+    q = re.fullmatch(r'(s?)q(\d+)', r or '')
+    if r == 'float' and width in (16, 32, 64):
+        f = struct.unpack({16: '>e', 32: '>f', 64: '>d'}[width], n.to_bytes(width // 8, 'big'))[0]
+        return None if f != f else f
+    if (r == 'signed' or (q and q[1])) and width > 1 and n >= 1 << (width - 1):
+        return n - (1 << width)
+    return n
 
 
 def label(v, width, enum=None, radix=None):
@@ -531,12 +545,14 @@ def collect_specs(a, rd):
         e = s['set'].get('enum')
         s['enum'] = parse_enums([{s['path']: e}])[s['path']] if e else enums.get(s['name'], enums.get(s['path']))
         s['radix'] = s['set'].get('radix') or None
-    if any(not s['enum'] for s in specs):   # FSM states by name: enum tables of the dump (FST; VCD written by fst2vcd -e or sva vcd)
+    if any(not s['enum'] or not s['radix'] for s in specs):
         decl = dumpscan.scan(a.waves, body=False)
-        for s in specs:
-            e = (decl.get(s['abs']) or {}).get('enum')
-            if not s['enum'] and e:
-                s['enum'] = e
+        for s in specs:   # FSM states by name: enum tables of the dump (FST; VCD written by fst2vcd -e or sva vcd)
+            d = decl.get(s['abs']) or {}
+            if not s['enum'] and d.get('enum'):
+                s['enum'] = d['enum']
+            if not s['enum'] and not s['radix'] and d.get('kind') in INT_KINDS:   # an integer (Questa's int enum): signed decimal
+                s['radix'] = s['int'] = 'signed'
     return specs, marks, t_from, t_to
 
 
@@ -655,6 +671,8 @@ def signal_settings(a, specs, sig_json):
             j['kind'] = s['kind']   # its values are texts (a real's number, a string), null: unknown
         if s['enum']:
             j['enum'] = {str(k): v for k, v in s['enum'].items()}
+        if s.get('int'):
+            j['radix'] = s['int']
         for k in ('radix', 'color', 'fill', 'style', 'enumColors', 'analog', 'height', 'fields'):
             if s['set'].get(k) not in (None, ''):   # "" = the global setting
                 j[k] = s['set'][k]

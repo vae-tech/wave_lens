@@ -1223,6 +1223,8 @@ def vscode_tab(browser, build):
         if (m.type === 'source') reply({ id: m.id, src: '%s/dump.vcd', name: 'enum.vcd' });
         if (m.type === 'save') reply(window.__cancel ? { id: m.id, cancel: true } : { id: m.id, path: '/host/dumps/' + m.name });
         if (m.type === 'clip') reply({ id: m.id, ok: true });
+        if (m.type === 'sources') reply({ id: m.id, texts: window.__SRC || ['package p; typedef enum logic [1:0] {OFF, ON = 2, HOLD} mode_t; endpackage',
+          'module m; p::mode_t plain, state; endmodule'] });
         if (m.type === 'pick') reply({ id: m.id, files: /fst/.test(m.accept) ? [] : [{ name: 's.view.json', mtime: 1, b64: btoa(JSON.stringify(window.__S)) }] });
         if (m.type === 'http') reply({ id: m.id, status: 200, text: 'ok' }); } }); })();""" % src
     page = browser.new_page()
@@ -1246,7 +1248,22 @@ def vscode_tab(browser, build):
     ready = sent('ready')[0]
     js = lambda e: page.evaluate(f"(async () => {{ const v = WaveLens.views().find(x => x.root.isConnected); return {e}; }})()")
     check(ready.get('shown') == 4 and ready.get('name') == 'enum.vcd', f'the dump fetched and opened: {ready}')
-    check(js("WaveLens.internal.peek(v).vis.filter(r => r.enum).map(r => r.full).join(',')") == 'tb.state,tb.st.s', 'its enum tables on the rows')
+    check(js("WaveLens.internal.peek(v).vis.filter(r => r.enum).map(r => r.full).join(',')") == 'tb.state,tb.plain,tb.st.s', 'its enum tables on the rows')
+    lab = js("[...new Set(WaveLens.internal.peek(v).vis.find(r => r.full === 'tb.plain').tr.map(o => o.v))].concat(WaveLens.internal.peek(v).vis.find(r => r.full === 'tb.state').enum[0])")
+    check(lab[-1] == 'IDLE' and set(lab[:-1]) <= {'OFF', 'ON', 'HOLD'} and len(lab) > 1,
+          f'wavelens.sources: the workspace\'s typedef enum names a VCD\'s bus without a table; the dump\'s own table stays ({lab})')
+    # the workspace's sources gone (review IV A6): ⟳ takes their names away; the ones picked with Sources… stay and win a name
+    labels = "(() => { const v = WaveLens.views().find(x => x.root.isConnected), r = n => WaveLens.internal.peek(v).vis.find(x => x.full === n); " \
+             "return [r('tb.plain').enum ? Object.values(r('tb.plain').enum).join(',') : null, r('tb.state').enum[0]]; })()"
+    n0 = len(sent('loaded'))
+    page.evaluate("window.__SRC = []; window.postMessage({ type: 'reload' }, '*')"); until(f"window.__sent.filter(m => m.type === 'loaded').length > {n0}", timeout=5000)
+    gone = page.evaluate(labels)
+    page.evaluate("(async () => { const v = WaveLens.views().find(x => x.root.isConnected); await v.setSources(['module m; typedef enum logic [1:0] {P0, P1, P2, P3} q_t; q_t plain; endmodule'], true); })()")
+    until("(v => v && WaveLens.internal.peek(v).vis.some(r => r.full === 'tb.plain' && r.enum))(WaveLens.views().find(x => x.root.isConnected))", timeout=5000)
+    n0 = len(sent('loaded'))
+    page.evaluate("window.__SRC = null; window.postMessage({ type: 'reload' }, '*')"); until(f"window.__sent.filter(m => m.type === 'loaded').length > {n0}", timeout=5000)
+    both = page.evaluate(labels)
+    check(gone == [None, 'IDLE'] and both == ['P0,P1,P2,P3', 'IDLE'], f'the workspace\'s sources gone: no names; picked ones stay over the workspace\'s {gone} {both}')
     check(js("localStorage.getItem('wavelens.given')") == 'yes' and js("(localStorage.setItem('wavelens.k', 'v'), localStorage.getItem('wavelens.k'))") == 'v' and
           any(m['key'] == 'wavelens.k' and m['value'] == 'v' for m in sent('store')), 'localStorage: the store given, a write posted')
     js("(v.saveState(), 0)"); until("window.__sent.some(m => m.type === 'save')", timeout=5000); settle(page)
@@ -1280,6 +1297,21 @@ def vscode_tab(browser, build):
     check(page.evaluate("document.documentElement.dataset.theme") == 'light', 'the theme from VS Code\'s body class')
     page.evaluate("document.body.className = 'vscode-dark'"); settle(page)
     check(page.evaluate("document.documentElement.dataset.theme") == 'dark', 'and again when VS Code\'s theme changes')
+    # wavelens.theme: one of the viewer's whatever VS Code's kind; vscode: VS Code's own colours (its --vscode-* on <html>)
+    page.evaluate("window.postMessage({ type: 'theme', theme: 'white' }, '*')"); settle(page)
+    check(page.evaluate("[document.documentElement.dataset.theme, getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()]") ==
+          ['white', '#ffffff'], 'wavelens.theme white: the white theme in a dark VS Code')
+    page.evaluate("""document.documentElement.style.setProperty('--vscode-editor-background', '#102030');
+      document.documentElement.style.setProperty('--vscode-editor-foreground', '#e0e0d0');
+      document.documentElement.style.setProperty('--vscode-sideBar-background', '#182838');
+      window.postMessage({ type: 'theme', theme: 'vscode' }, '*')"""); settle(page)
+    look = page.evaluate("""(() => { const h = document.documentElement, c = getComputedStyle(h), v = WaveLens.views().find(x => x.root.isConnected),
+      cv = v.root.querySelector('canvas'), d = window.devicePixelRatio || 1, p = cv.getContext('2d').getImageData(5 * d, cv.height - 3 * d, 1, 1).data;
+      return [h.dataset.theme, h.classList.contains('wl-vscode'), c.getPropertyValue('--bg').trim(), c.getPropertyValue('--wave-1').trim(), [...p.slice(0, 3)]]; })()""")
+    check(look[:4] == ['dark', True, '#102030', '#e0e0d0'] and look[4] in ([16, 32, 48], [24, 40, 56]), f'wavelens.theme vscode: VS Code\'s colours on the waves ({look})')
+    page.evaluate("window.postMessage({ type: 'theme', theme: 'auto' }, '*')"); settle(page)
+    check(page.evaluate("[document.documentElement.dataset.theme, document.documentElement.classList.contains('wl-vscode')]") == ['dark', False],
+          'wavelens.theme auto: by VS Code\'s kind again')
     # VS Code's webview styles kbd and code by its theme: the viewer's own (a tooltip's keys) keep the viewer's colours
     tip = page.evaluate("""() => { const t = document.createElement('div'); t.className = 'wv-tip'; t.innerHTML = '<kbd>z</kbd><code>c</code>';
       document.querySelector('.wv').append(t); const c = e => getComputedStyle(e), r = [c(t).color, c(t.firstChild).color,
@@ -1365,6 +1397,32 @@ def readers(browser, build):
         extra = set(got['sigs']) - set(tools)
         (differ if bad or extra else same).append(f.stem + (f' ({bad[:2]} {sorted(extra)[:3]})' if bad or extra else ''))
     check(not differ and len(same) == len(fixtures), f'the page and the tools read {len(same)} of {len(fixtures)} fixtures the same' + (f'; differ: {differ}' if differ else ''))
+    # the names of SystemVerilog sources (a VCD has no enum tables): the page's svTables gives what mkconfig.py --sv does
+    import mkconfig, tempfile
+    sys.path.insert(0, str(ROOT)); from tests.unit.test_mkconfig import Sources   # its source text with nested structs
+    srcs = [sorted((ROOT / 'examples' / 'fsm').glob('*.sv')), None]
+    with tempfile.TemporaryDirectory() as d:
+        (pathlib.Path(d) / 'p.sv').write_text(Sources.SV); srcs[1] = [pathlib.Path(d) / 'p.sv']
+        got = []
+        for fs in srcs:
+            py = {'enums': {k: {str(a): b for a, b in v.items()} for k, v in mkconfig.sv_enums([str(f) for f in fs]).items()},
+                  'fields': mkconfig.sv_structs([str(f) for f in fs])}
+            js = page.evaluate("ts => { const t = WaveLens.svTables(ts); return { enums: t.enums, fields: t.fields }; }", [f.read_text() for f in fs])
+            got.append((py == js, len(py['enums']), len(py['fields'])))
+    check(all(g[0] for g in got) and all(g[1] for g in got) and got[1][2], f'the sources\' enum names and struct fields: the page and mkconfig.py --sv the same {got}')
+    # and both against the tables the fixture should give (equal and both wrong would pass the line above)
+    want = json.loads((ROOT / 'tests' / 'unit' / 'sv' / 'sources.json').read_text())
+    js = page.evaluate("t => { const r = WaveLens.svTables([t]); return [r.enums, r.fields, r.notes.map(n => /^(?:enum |struct )?(\\w+)/.exec(n)[1])]; }",
+                       (ROOT / 'tests' / 'unit' / 'sv' / 'sources.sv').read_text())
+    # svApply (review IV A8, N2, C2; Codex C7, C8): array elements (also a negative index) get the array's table, a clock-sampled
+    # row (no tv) and a table that does not fit are left alone, an empty table is not applied
+    ap = page.evaluate("""() => { const tv = [[0, '1'], [10, '4']], doc = { signal: [['tb', ['sel', { name: '[-1]', path: 'tb.sel.[-1]', width: 3, tv },
+        { name: 'sel[2]', path: 'tb.sel[2]', width: 3, tv }], { name: 'sel', path: 'tb.sel', width: 3, wave: '==', data: ['1', '4'] },
+        { name: 'narrow', path: 'tb.narrow', width: 2, tv: [[0, '1']] }, { name: 'none', path: 'tb.none', width: 3, tv }]] };
+      const n = WaveLens.svApply(doc, { enums: { sel: { 1: 'A0', 2: 'A1', 4: 'A2' }, narrow: { 4: 'BIG' }, none: {} }, fields: {} });
+      const [, g, clk, nar, none] = doc.signal[0]; return [n, g[1].enum && g[1].enum[4], g[2].enum && g[2].enum[1], !!clk.enum, !!nar.enum, !!none.enum]; }""")
+    check(ap == [2, 'A2', 'A0', False, False, False], f'svApply: array elements (a negative index too) named; a clock-sampled row, a table too wide, an empty one left alone {ap}')
+    check(js == [want['enums'], want['fields'], want['notes']], f'tests/unit/sv/sources.sv: the page gives the expected tables and notes {js if js != [want["enums"], want["fields"], want["notes"]] else ""}')
     # known bits among x / z reach the page's engine as bits (they were x by the hex: the page and sva eval disagreed)
     for f in ('wavelens.config.js', 'sva.wasm.js', 'sva.js'):
         page.add_script_tag(path=str(ROOT / 'wavelens' / f))
@@ -1426,6 +1484,76 @@ def dump(browser, build):
         drop('d2.vcd'); await new Promise(f => setTimeout(f, 300)); drop('d3.vcd'); await new Promise(f => setTimeout(f, 300));
         return [n, WaveLens.views().filter(v => v.root === r).length, r.waveView.M.title, r.waveView.canvas.isConnected]; })()""")
     check(two == [2, 1, 'd3.vcd', True], f'dropped twice: one live viewer, one wavelens:dump each, its canvas in the page {two}')
+    # a VCD as Questa writes it (no enum tables: reg [1:0], an int-based enum as integer): Sources… names the states from the
+    # SystemVerilog sources, the view kept; ⟳ reads them again with the names
+    sv = page.evaluate(r"""(async () => { const r = document.querySelector('.wv');
+        const vcd = '$timescale 1ns $end\n$scope module tb $end\n$var reg 2 " state [1:0] $end\n$var integer 32 # color $end\n$upscope $end\n' +
+          '$enddefinitions $end\n#0\nb0 "\nb11 #\n#10\nb1 "\nb111 #\n#20\nb10 "\nb1100 #\n';
+        const dt = new DataTransfer(); dt.items.add(new File([vcd], 'questa.vcd')); r.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+        await new Promise(f => setTimeout(f, 400)); let v = r.waveView; const before = v.valueAt(v.M.rows.find(x => x.full === 'tb.color'), 15000);
+        v.cursor = 12000; v.draw();
+        v = await v.setSources([new File(['module tb; typedef enum logic [1:0] {IDLE, START, DATA, STOP} state_t; typedef enum {RED = 3, GREEN = 7, ' +
+          'BLUE = 12} color_t; state_t state; color_t color; endmodule'], 'tb.sv')]);
+        const at = t => ['tb.state', 'tb.color'].map(p => v.valueAt(v.M.rows.find(x => x.full === p), t));
+        const named = at(15000), cur = v.cursor; await v.reloadDump(); v = r.waveView;
+        const kept = at(25000);
+        // the sources changed (review IV A7): picked again, the new names replace the ones the sources gave; none: numbers again
+        v = await v.setSources([new File(['module tb; typedef enum logic [1:0] {OFF, WARM, HOT, BURN} state_t; state_t state; endmodule'], 'tb.sv')]);
+        const renamed = at(25000)[0];
+        v = await v.setSources([new File(['module tb; endmodule'], 'empty.sv')], true);
+        return [before, named, cur, kept, renamed, at(25000)[0]]; })()""")
+    # a new simulation under the same name (review IV B1, B9, review C1/C8): ⟳ of the changed file evaluates the new run
+    # (req |=> ack: the first run passes, the second has no ack: req is sampled at cycle 3, the attempt fails at 4), the bookmark and the
+    # window kept; a dump dropped again too. The fingerprint tells apart waves that serialise alike without separators
+    rerun = page.evaluate(r"""(async () => { const r = document.querySelector('.wv');
+        const run = ack => '$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! clk $end\n$var wire 1 " req $end\n$var wire 1 # ack $end\n' +
+          '$upscope $end\n$enddefinitions $end\n#0\n0!\n0"\n0#\n' + Array.from({ length: 12 }, (_, i) => `#${i * 10 + 5}\n1!\n` +
+          (i === 2 ? '1"\n' : i === 3 ? '0"\n' + (ack ? '1#\n' : '') : i === 4 ? '0#\n' : '') + `#${i * 10 + 10}\n0!\n`).join('');
+        let cur = new File([run(true)], 'run.vcd');
+        const handle = { kind: 'file', name: 'run.vcd', getFile: async () => cur };   // what ⟳ reads again (the VS Code tab's way)
+        const stats = async () => { const p = SVA.panels().find(x => x.v === r.waveView); await SVA.ready(); await p.queue; await new Promise(f => setTimeout(f, 300));
+          await p.queue; const b = p.bindings.find(x => x.assert === 'a_ra'), a = b && b.results && b.results.assertions[0], st = a && a.stats;
+          return st ? [st.pass, st.fail, (a.attempts || []).filter(x => x.result === 'fail').map(x => [x.start, x.failed_at ?? x.end])] : [b && b.state, b && b.error]; };
+        let v = await r.waveView.openDump(cur, handle);
+        await SVA.loadFiles([{ name: 'ra.sva', text: 'module tb (input logic clk, input logic req, input logic ack); ' +
+          'a_ra: assert property (@(posedge clk) req |=> ack); endmodule' }]);
+        await SVA.ready(); SVA.panels().find(x => x.v === r.waveView).bind('a_ra', 'tb');
+        const first = await stats();
+        v = r.waveView; v.mark('kept'); v.t0 = 20000; v.span = 50000; v.draw();
+        cur = new File([run(false)], 'run.vcd'); await v.reloadDump(); v = r.waveView;
+        const second = await stats(), kept = [v.bms.some(b => b.text === 'kept'), v.t0, v.span];
+        const dt = new DataTransfer(); dt.items.add(new File([run(true)], 'run.vcd')); r.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+        await new Promise(f => setTimeout(f, 400)); const third = await stats();
+        const id = doc => SVA.waveId(WaveLens.parse(doc)), d8 = tv => ({ signal: [{ name: 'd', width: 8, tv }], time: { t0: 0, t1: 100, unit: 'ps' } });
+        const cs = raw => ({ signal: [{ name: 'f', width: 32, wave: '=', data: ['1'], raw: [raw] }] });   // a clock-sampled row: its raw
+        const fp = [id(d8([[0, '0'], [1, '23']])) !== id(d8([[0, '0'], [12, '3']])), id(d8([[0, "'b000010x1"]])) !== id(d8([[0, "'b000000x1"]])),
+          id(cs('3f800001')) !== id(cs('3f800002'))];
+        return [first, second, kept, third, fp]; })()""")
+    # an older Open… still reading does not replace a newer one (review IV B12); a compare that fails says the one before stays (B26)
+    late = page.evaluate(r"""(async () => { const r = document.querySelector('.wv'), v = r.waveView;
+        const vcd = n => `$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! ${n} $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\n#50\n1!\n`;
+        const slow = (n, ms) => ({ name: n + '.vcd', text: () => new Promise(f => setTimeout(() => f(vcd(n)), ms)) });
+        const a = v.openDump(slow('slow', 400)); await new Promise(f => setTimeout(f, 50)); await v.openDump(new File([vcd('b')], 'fast.vcd')); await a;
+        const order1 = r.waveView.M.title;
+        const p1 = r.waveView.openDump(slow('first', 150)), p2 = r.waveView.openDump(slow('later', 400)); await p1; await p2;   // the first read ends first
+        const w = r.waveView, title = [order1, w.M.title], n = WaveLens.views().filter(x => x.root === r).length;
+        w.useSources({ enums: { x: { 0: 'E0' } }, fields: {}, notes: [], files: 1 }, 'workspace');
+        w.useSources({ enums: {}, fields: { x: [{ name: 'f', msb: 0, lsb: 0 }] }, notes: [], files: 1 }, 'manual');
+        const merged = [Object.keys(w.opts.sv.enums), Object.keys(w.opts.sv.fields)];
+        await w.setSources(['module m; typedef enum {A = 1 << 2, B} t_t; t_t later; endmodule']);
+        const noted = r.querySelector('.bar .toast').textContent; w.useSources(null, 'workspace'); w.useSources(null, 'manual');
+        await w.compare(new File([vcd('b').replace('1!', '0!')], 'other.vcd'));
+        await w.compare(new File([vcd('b').replace('#0', '#900000').replace('#50', '#900050')], 'far.vcd'));
+        return [title, n, w.cmp && w.cmp.name, r.querySelector('.bar .toast').textContent, merged, noted]; })()""")
+    check(late[:3] == [['fast.vcd', 'later.vcd'], 1, 'other.vcd'] and 'still compared with other.vcd' in late[3],
+          f'the latest Open… stays, whichever read ends first; a failed compare says which one stays {late[:4]}')
+    check(late[4] == [[], ['x']] and 'not used' in late[5] and 't_t' in late[5],
+          f'the picked sources win a name over the workspace\'s across enum / struct; notes of picked sources said though nothing applies {late[4:]}')
+    check(rerun[0] == [1, 0, []] and rerun[1] == [0, 1, [[3, 4]]] and rerun[2] == [True, 20000, 50000] and rerun[3][:2] == [1, 0] and rerun[4] == [True, True, True],
+          f'a new run under the same name (⟳ of the changed file, a drop) is evaluated again, the bookmark and the window kept; distinct fingerprints {rerun}')
+    check(sv[0] == '7' and sv[1] == ['START', 'GREEN'] and sv[2] == 12000 and sv[3] == ['DATA', 'BLUE'],
+          f'a Questa VCD: an integer reads as decimal; Sources… names the states (the cursor kept), ⟳ keeps the names {sv}')
+    check(sv[4] == 'HOT' and sv[5] == '2', f'Sources… again: the new names replace the sources\' old ones; sources without them: the number again {sv[4:]}')
     check(not errs, 'no page errors (dump)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
     page.close()
 
@@ -1755,6 +1883,34 @@ def order(browser, build):
     check(got[:3] == [['gA', 'PSEL'], ['gB'], ['gC', 'PADDR', 'PWRITE', 'PSEL']], f'a run from two groups: PSEL stays in gA where it was not picked {got}')
     got = js("return [(await v.run([{ op: 'group', name: 'gA', move: 1 }]))[0].at, (await v.run([{ op: 'group', name: 'gA', move: 'sideways' }]))[0].error];")
     check(got[0] == 1 and 'move: up, down, top, bottom' in got[1], f'group move: a number, a bad one said {got}')
+    # the right button on a name: the viewer's menu for that row; your group's row: Move up / down, to the top / bottom; its
+    # header: the group among yours; a signal of the dump: how to move it; text selected in the names: the browser's menu
+    js("await v.run([{ op: 'group', name: 'gA', signals: 'PSEL,PENABLE,PWRITE' }, { op: 'group', name: 'gB', signals: 'PADDR' }]); return 0;")
+    def names_menu(i):
+        page.keyboard.press('Escape'); r = box(i)
+        page.mouse.click(r['x'] + 30, r['y'] + r['height'] / 2, button='right'); page.wait_for_timeout(80)
+        return page.evaluate("[...document.querySelectorAll('.wv-menu > button[data-m]')].map(b => b.dataset.m)")
+    def pick(i, m):
+        names_menu(i); page.locator(f'.wv-menu > button[data-m={m}]').click(); page.wait_for_timeout(100)
+    ms = names_menu(idx('gA', 'PENABLE'))
+    pick(idx('gA', 'PENABLE'), 'mvdn'); a = groups()[0]; pick(idx('gA', 'PENABLE'), 'mvtop'); b = groups()[0]
+    pick(idx('gA', 'PSEL'), 'mvbot'); c = groups()[0]; pick(idx('gA', 'PWRITE'), 'mvup'); d = groups()[0]
+    check({'mvup', 'mvdn', 'mvtop', 'mvbot', 'copyname', 'hide'} <= set(ms) and a == ['gA', 'PSEL', 'PWRITE', 'PENABLE'] and
+          b == ['gA', 'PENABLE', 'PSEL', 'PWRITE'] and c == ['gA', 'PENABLE', 'PWRITE', 'PSEL'] and d == ['gA', 'PWRITE', 'PENABLE', 'PSEL'],
+          f'the right button on a name of your group: its menu moves it (down, to the top, to the bottom, up) {ms} {a} {b} {c} {d}')
+    top = names_menu(idx('gA', 'PWRITE')); hm = names_menu(hdr('gA'))
+    pick(hdr('gA'), 'mvdn'); e = [g[0] for g in groups()]
+    pick(hdr('gA'), 'ugfold'); folded = idx('gA', 'PWRITE') < 0; pick(hdr('gA'), 'ugfold')
+    dm = names_menu(js("return WaveLens.internal.peek(v).vis.findIndex(r => !r.ug && r.name === 'PRDATA');"))
+    hint = page.evaluate("[...document.querySelectorAll('.wv-menu .sub .mh')].some(h => /to move it/.test(h.textContent))")
+    page.keyboard.press('Escape')
+    check('mvup' not in top and 'mvtop' not in top and {'mvdn', 'ugfold'} <= set(hm) and 'fold' not in hm and e[:2] == ['gB', 'gA'] and folded and
+          not {'mvup', 'mvdn'} & set(dm) and 'copyname' in dm and hint,
+          f'the first row: no Move up; a header: the group moves among yours, folds; a signal of the dump: its menu and how to move it {top} {hm} {e} {dm}')
+    r1 = box(js("return WaveLens.internal.peek(v).vis.findIndex(r => !r.ug && r.name === 'PSEL');"))
+    page.mouse.dblclick(r1['x'] + 20, r1['y'] + r1['height'] / 2); page.mouse.click(r1['x'] + 20, r1['y'] + r1['height'] / 2, button='right')
+    page.wait_for_timeout(80); native = page.evaluate("!document.querySelector('.wv-menu') && !!String(getSelection())"); page.keyboard.press('Escape')
+    check(native, 'text selected in the names: the right button leaves it to the browser (copy)')
     page.evaluate('localStorage.clear()')
     check(not errs, 'no page errors (order)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
     ctx.close()
@@ -2771,9 +2927,49 @@ UNITS = [   # (JavaScript expression, its JSON value); NaN / ±Infinity / undefi
     ("tvOf(VW(vcd('$var wire 1 ! m[1] $end $var wire 1 \" m[0] $end', '#0 1! 0\" #10 1\"')).doc, 'm')", [[0, '2'], [10000, '3']]),
     ("(() => { try { VW(vcd('$var wire 1 ! s $end', '#10 0! #5 1!')); return 'no error'; } catch (e) { return e.message.slice(0, 14); } })()", 'time goes back'),
     ("VW(vcd('$var wire 1 ! a $end $scope module u $end $var wire 1 \" b $end $upscope $end', '#0 0! 0\" #1 1! 1\"'), { budget: 2 }).shown", 1),
+    # what the reader noticed, by its line: an unknown code, a word that is no value, too many bits, a $timescale it cannot read;
+    # an error it cannot read past says its line; the parameters of the dump
+    ("VW('$timescale 1ns $end\\n$scope module tb $end\\n$var wire 2 ! a $end\\n$upscope $end\\n$enddefinitions $end\\n#0\\nb00 !\\n1?\\nfoo\\n#5\\nb101 !\\n')"
+     ".log.map(x => [x.level, x.line, x.text.split(' ')[0]])", [['warning', 8, 'a'], ['warning', 9, '"foo"'], ['warning', 11, '3']]),
+    ("(r => [r.log[0].line, r.log[0].text.slice(0, 11), r.info.timescale])(VW('$timescale\\n 1 parsec $end\\n$var wire 1 ! a $end $enddefinitions $end #0 1!'))",
+     [1, '$timescale ', None]),
+    # a width that is not a number of bits is 1, as its note says (review IV A13)
+    ("(r => [r.doc.signal[0].width ?? 1, r.doc.signal[0].tv, r.log[0].text.includes('1 taken')])(VW('$var wire -1 ! a $end $enddefinitions $end #0 1!'))",
+     [1, [[0, '1']], True]),
+    # an integer variable (Questa's int-based enum) is signed decimal; with an enum table, its labels
+    ("VW('$scope module tb $end $var integer 32 ! c $end $var reg 2 \" s $end $upscope $end $enddefinitions $end #0 b1100 ! b1 \"').doc.signal[0].slice(1).map(x => x.radix || null)",
+     ['signed', None]),
+    ("(() => { try { VW('$var wire 1 ! s $end $enddefinitions $end\\n#10\\n0!\\n#5\\n1!'); } catch (e) { return [e.line, / \(line 4\)$/.test(e.message)]; } })()",
+     [4, True]),
+    ("(r => [r.info.version, r.info.timescale, r.info.t1, r.info.signals, r.info.changes, r.log.length])(VW('$version Icarus  Verilog $end $timescale 10ps $end "
+     "$scope module tb $end $var wire 1 ! a $end $upscope $end $enddefinitions $end #0 0! #3 1!'))", ['Icarus Verilog', '10ps', 30, 1, 2, 0]),
+    ("(r => r.log.map(x => x.text.slice(0, 7)))(VW(vcd('$var wire 1 ! a $end', '#0 ' + '0? '.repeat(25))))", ['a value'] * 20 + ['no valu', '1 signa', '5 more ']),
     # bus decoders on a model built in the page: per protocol, an x-valued valid, a clock starting at x, W before AW
     ("BUS('u_apb', { PSEL: '0111000', PENABLE: '0011000', PREADY: '0001000', PWRITE: '0111000', PADDR: [0, 0x10, 0x10, 0x10, 0, 0, 0], PWDATA: [0, 0x55, 0x55, 0x55, 0, 0, 0] }, 'PCLK')",
      [['apb', [['W', 'W 0x10 ← 0x55', 3, False]]]]),
+    # review IV B15: an APB transfer still waiting when the dump ends is open; PSEL dropped before PREADY: an error
+    ("BUS('u_apb', { PSEL: '0111', PENABLE: '0011', PREADY: '0000', PWRITE: '0111', PADDR: [0, 0x10, 0x10, 0x10], PWDATA: [0, 0x55, 0x55, 0x55] }, 'PCLK')",
+     [['apb', [['W', 'W 0x10 ← 0x55', None, False]]]]),
+    ("BUS('u_apb', { PSEL: '01100', PENABLE: '00100', PREADY: '00000', PWRITE: '00000', PADDR: [0, 0x20, 0x20, 0, 0] }, 'PCLK')",
+     [['apb', [['R', 'R 0x20 → ?', 2, True]]]]),
+    # review IV B14 / B15: pipelined Wishbone, a request acked in its own cycle; one not acked when the dump ends (open)
+    ("BUS('u_wb', { wb_cyc_o: '01111', wb_stb_o: '01010', wb_stall_i: '00000', wb_ack_i: '01000', wb_we_o: '00000', wb_adr_o: [0, 0x10, 0, 0x14, 0], "
+     "wb_dat_i: [0, 0x55, 0, 0, 0] })", [['wb', [['R', 'R 0x10 → 0x55', 1, False], ['R', 'R 0x14 → ?', None, False]]]]),
+    # review IV D5: a pipelined request stalled to the end (never accepted) is open; stalled when CYC drops: an error
+    ("BUS('u_wb', { wb_cyc_o: '0111', wb_stb_o: '0111', wb_stall_i: '0111', wb_ack_i: '0000', wb_we_o: '0000', wb_adr_o: [0, 0x10, 0x10, 0x10] })",
+     [['wb', [['R', 'R 0x10 → ?', None, False]]]]),
+    ("BUS('u_wb', { wb_cyc_o: '01100', wb_stb_o: '01100', wb_stall_i: '01100', wb_ack_i: '00000', wb_we_o: '00000', wb_adr_o: [0, 0x10, 0x10, 0, 0] })",
+     [['wb', [['R', 'R 0x10 → ?', 2, True]]]]),
+    # … and one whose CYC drops before its ack: an error, not lost
+    ("BUS('u_wb', { wb_cyc_o: '01110', wb_stb_o: '01010', wb_stall_i: '00000', wb_ack_i: '01000', wb_we_o: '00000', wb_adr_o: [0, 0x10, 0, 0x14, 0], "
+     "wb_dat_i: [0, 0x55, 0, 0, 0] })", [['wb', [['R', 'R 0x10 → 0x55', 1, False], ['R', 'R 0x14 → ?', 1, True]]]]),
+    # review IV B13: AXI3, W beats of IDs 1 and 2 interleaved (1:A1, 2:B1 last, 1:A2 last): each burst to the AW of its ID
+    ("BUS('u_axi', { s_axi_awvalid: '0110000000', s_axi_awready: '0110000000', s_axi_awaddr: [0, 0x100, 0x200, 0, 0, 0, 0, 0, 0, 0], "
+     "s_axi_awid: [0, 1, 2, 0, 0, 0, 0, 0, 0, 0], s_axi_awlen: [0, 1, 0, 0, 0, 0, 0, 0, 0, 0], s_axi_wvalid: '0001110000', s_axi_wready: '0001110000', "
+     "s_axi_wid: [0, 0, 0, 1, 2, 1, 0, 0, 0, 0], s_axi_wdata: [0, 0, 0, 0xa1, 0xb1, 0xa2, 0, 0, 0, 0], s_axi_wlast: '0000110000', "
+     "s_axi_bvalid: '0000001100', s_axi_bready: '0000001100', s_axi_bid: [0, 0, 0, 0, 0, 0, 2, 1, 0, 0], s_axi_bresp: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "
+     "s_axi_arvalid: '0000000000', s_axi_arready: '0000000000', s_axi_rvalid: '0000000000' }, 'aclk').map(([p, t]) => [p, t.map(x => x[1])])",
+     [['axi', ['W 0x100 ← 0xa1 ×2', 'W 0x200 ← 0xb1']]]),
     ("BUS('u_axis', { m_axis_tvalid: '01110', m_axis_tready: '00110', m_axis_tlast: '00010', m_axis_tdata: [0, 5, 5, 6, 0] }, 'aclk')",
      [['axis', [['P', '2 beats 0x5', 3, False]]]]),
     ("BUS('u_axis', { m_axis_tvalid: '0xx10', m_axis_tready: '01111', m_axis_tlast: '00010', m_axis_tdata: [0, 5, 5, 6, 0] }, 'aclk')",

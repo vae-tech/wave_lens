@@ -610,8 +610,12 @@ def t_stats(a):
             e['values_columns'] = ['value', 'times', 'pct_of_time']
             nums = [int(v, 16) for v in by if v and re.fullmatch('[0-9a-f]+', v)]
             if nums and w.decl.vars[p].kind not in dumpscan.TEXT_KINDS:
-                hx = lambda n: format(n, 'x').rjust((w.width(p, sl) + 3) // 4, '0')
-                e['min'], e['max'] = w.text(p, sl, hx(min(nums)), radix), w.text(p, sl, hx(max(nums)), radix)
+                wd = w.width(p, sl)
+                hx = lambda n: format(n, 'x').rjust((wd + 3) // 4, '0')
+                key = {n: vcd2wavedrom.order_key(n, wd, radix) for n in nums}   # by the number the radix reads (signed: 80 is -128)
+                nums = [n for n in nums if key[n] is not None]
+                if nums:
+                    e['min'], e['max'] = w.text(p, sl, hx(min(nums, key=key.get)), radix), w.text(p, sl, hx(max(nums, key=key.get)), radix)
         out['signals'][name] = e
     return out
 

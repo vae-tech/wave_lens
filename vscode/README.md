@@ -19,7 +19,16 @@ is turned into VCD text with it, kept in the extension's storage).
   `view_edit` / `view_get` with `page` = the dump's path work on its tab. On by default; `"wavelens.live": false`
   keeps the tabs off the link.
 
-The keys are the viewer's (`?` in the tab). Settings: `wavelens.autoReload` (false: the tab offers ⟳ after a new
+- **State names**: a VCD carries no enum names (Questa writes none); the tab reads the workspace's SystemVerilog sources
+  (`wavelens.sources`, default `**/*.sv`, `**/*.svh`) and names the state buses declared with a `typedef enum` there;
+  **Sources…** in the bar picks other files.
+- **The log**: each read writes the dump's parameters and what the reader noticed (a stranger code, a word that is no
+  value, a `$timescale` it cannot read, …) to the output channel *WaveLens* and to the **Problems** panel on their
+  lines; a dump it cannot read is an error there with its line. *WaveLens: Show the log* (the editor's title).
+- **Theme**: `wavelens.theme` — `auto` (light or dark by VS Code's), `vscode` (the colours of VS Code's theme),
+  `light`, `white`, `dark`; *WaveLens: Choose the theme of the waves* (the editor's title) previews each on the open tabs.
+
+The keys are the viewer's (`?` in the tab). Settings: `wavelens.theme` (auto), `wavelens.sources` (`**/*.sv`, `**/*.svh`), `wavelens.autoReload` (false: the tab offers ⟳ after a new
 simulation; true: it reads the dump at once), `wavelens.live` (true), `wavelens.sva` (another sva program).
 
 **Install.** Build the package from the repository (`make vsix`: `out/wavelens-<version>.vsix`, for a Linux x86-64 host;

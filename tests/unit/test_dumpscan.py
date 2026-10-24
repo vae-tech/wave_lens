@@ -1,5 +1,6 @@
 """tools/dumpscan.py: the VCD reader on what simulators write (tests/unit/vcd/*.vcd, each under 1 kB)."""
-import os, shutil, unittest
+import os, shutil, sys, unittest
+from unittest import mock
 
 from tests.unit import helpers as H
 import dumpscan
@@ -187,12 +188,37 @@ class Body(unittest.TestCase):
         self.assertEqual(info['tb.st.s']['enum'], {0: 'IDLE', 1: 'RUN', 2: 'DONE'})
         self.assertIsNone(info['tb.plain']['enum'])
 
-    @unittest.skipUnless(shutil.which('fst2vcd') and os.path.exists(os.path.join(H.BUILD, 'examples', 'apb', 'apb.fst')), 'fst2vcd and make examples')
     def test_fst_through_fst2vcd(self):
+        if not os.path.exists(os.path.join(H.BUILD, 'examples', 'apb', 'apb.fst')):
+            H.skip(self, 'make examples')
+        if not shutil.which('fst2vcd'):
+            H.skip(self, 'fst2vcd (GTKWave)', built=False)
         d = dumpscan.read(os.path.join(H.BUILD, 'examples', 'apb', 'apb.fst'), 'count')
         v = dumpscan.read(os.path.join(H.BUILD, 'examples', 'apb', 'apb.vcd'), 'count')
         self.assertEqual(set(d.vars), set(v.vars))
         self.assertEqual(d.changes, v.changes)
+
+    def test_fst_converter_failing_midway_is_an_error(self):
+        # review IV B19: a converter that writes a header and part of the body, then fails, was taken as a whole dump.
+        # Read to the end: WaveError with what it said; the declarations only (a read that stops early): no error
+        with H.tmp() as d:
+            conv, fst = os.path.join(d, 'conv.py'), os.path.join(d, 'x.fst')
+            open(fst, 'wb').close()
+            with open(conv, 'w') as f:
+                f.write('import sys\nsys.stdout.write("$timescale 1ns $end\\n$scope module tb $end\\n$var wire 1 ! a $end\\n$upscope $end\\n'
+                        '$enddefinitions $end\\n#0\\n0!\\n#5\\n1!\\n")\nsys.stdout.flush()\n'
+                        'sys.stderr.write("fstReader: block 3 is cut off\\n")\nsys.exit(int(sys.argv[1]))\n')
+            for code in (1, 0):
+                with mock.patch.object(dumpscan, 'fst_reader', lambda: [sys.executable, '-I', conv, str(code)]):
+                    head = dumpscan.read(fst, None)
+                    self.assertEqual(list(head.vars), ['tb.a'])
+                    if code:
+                        with self.assertRaisesRegex(WaveError, 'exit 1: fstReader: block 3 is cut off'):
+                            dumpscan.read(fst, 'count')
+                        with self.assertRaises(WaveError):
+                            dumpscan.read(fst, 'collect', {b'!'})
+                    else:
+                        self.assertEqual(dumpscan.read(fst, 'count').changes['tb.a'], 1)
 
 
 if __name__ == '__main__':

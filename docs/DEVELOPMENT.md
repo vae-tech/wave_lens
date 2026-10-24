@@ -42,7 +42,7 @@ docs/                         what you look at
   img/                        the README screenshots (make shots)
   sva/                        the SVA engine: STACK.md (technology), LANGUAGE.md (the subset), ENGINE.md (semantics,
                               results JSON, performance), the JSON schemas
-  reviews/                    the reviews of the stages with their findings (on main only, not in the public branch)
+  reviews/                    the reviews of the stages with their findings (on dev only, not in the public branch)
   reference/template.html     the original visual reference (PSI5 datasheet)
 tests/
   unit/                       the Python unit tests of the tools (make unit: unittest, standard library); vcd/: small VCDs
@@ -77,12 +77,12 @@ What each part needs:
 | the SystemVerilog style | verible (`make fmt`) and Verilator (`make lint`) |
 
 ```sh
-make check                  # the gate before a commit: wavelens.js current and its sources ≤ 160 columns, sva-test, unit, every page smoke needs, sva-verify, mcp-bench, smoke STRICT=1, shots-check
-make unit                   # tests/unit: the tools on small VCDs of what simulators write (168 tests, ~20 s, standard library)
+make check                  # the gate before a commit: wavelens.js current and its sources ≤ 160 columns, sva-test, every page smoke needs, unit (WAVELENS_STRICT: a test lacking what the gate builds fails), sva-verify, mcp-bench, smoke STRICT=1, shots-check
+make unit                   # tests/unit: the tools on small VCDs of what simulators write (~20 s, standard library)
 make mcp-bench              # tools/wavemcp.py on the benchmark tasks by a script (answers checked); AGENT=claude|codex: agents
 make wavelens               # wavelens/wavelens.js from wavelens/src/*.js (after editing them; make html / example do it too; lines ≤ 160 columns)
 make demo examples html     # rebuild docs/demo_waves.js, the example pages, the demo page
-make smoke                  # tests/smoke.py: every page in light and dark, 470 checks on 26 pages, PNGs in BUILD/shots
+make smoke                  # tests/smoke.py: every page in light and dark, checks by section (--list), PNGs in BUILD/shots
 make smoke ONLY=find,sva_bind   # some sections (python3 tests/smoke.py --list); STRICT=1: a skip fails
 make shots                  # tests/shots.py: docs/img/*.png, dark theme (after make examples; ~20 s, see below)
 make shots-check            # the same into BUILD/img, compared with docs/img: a shot that no longer builds fails
@@ -230,11 +230,12 @@ approval"): the agent falls back to its shell. The runs, their transcripts and a
 
 ## Versions
 
-Two numbers, `MAJOR.MINOR` (0.18 now; [`CHANGELOG.md`](../CHANGELOG.md) lists them all). The work goes on a branch;
-a version is a merge into `main` (`git merge --no-ff`) tagged `main/vMAJOR.MINOR` (an annotated tag, its message the
-changelog entry). The public branch `master` then gets the version as one commit: `python3 -I tools/publish.py
-MAJOR.MINOR "what it brings"` writes the tree of `main/vMAJOR.MINOR` less the internal `prompts/` and `docs/reviews/`
-with that one line as its message, and tags it `vMAJOR.MINOR`. Only `master` and the `v*` tags go to GitHub. One commit on the branch before the merge raises the version in four places: `VERSION`,
+Two numbers, `MAJOR.MINOR` (0.19 now; [`CHANGELOG.md`](../CHANGELOG.md) lists them all). The work goes on a branch;
+a version is a merge into the development branch `dev` (`git merge --no-ff`) tagged `dev/vMAJOR.MINOR` (an annotated
+tag, its message the changelog entry; `dev` and its tags were `main` and `main/v*` up to 0.18). The public branch `master` then gets the version as one commit: `python3 -I tools/publish.py
+MAJOR.MINOR "what it brings"` writes the tree of `dev/vMAJOR.MINOR` less the internal files (`INTERNAL` there)
+with that one line as its message, and tags it `vMAJOR.MINOR`. Only `master` and the `v*` tags go to GitHub (a local
+`.git/hooks/pre-push` refuses the rest; deleting a branch there it lets through). One commit on the branch before the merge raises the version in four places: `VERSION`,
 `version:` in `wavelens/src/boot.js` (then `make wavelens`), a new top entry in `CHANGELOG.md`, and the committed builds
 that carry it (`make sva-build dist-linux`: the `sva` CLI writes the version into a report's meta through
 `include_str!` of `VERSION`); `make unit` fails when they disagree. The Rust crates keep their own semver in
@@ -247,7 +248,7 @@ The viewer, the tools, the SystemVerilog Assertion engine (stack: [`sva/STACK.md
 CLI over VCD / FST, WebAssembly in the page), expressions and Why, bus transactions, gaps, the MCP server, the viewer's
 commands, the Modules panel and the VS Code extension are done; [`CHANGELOG.md`](../CHANGELOG.md) says what came in
 each version. The work was planned as a series of stage prompts and checked by reviews with their findings and the
-commits that closed them; both live on the development branch `main` only (`prompts/`, `docs/reviews/`), not in the
+commits that closed them; both live on the development branch `dev` only (`prompts/`, `docs/reviews/`), not in the
 public branch.
 
 Done so far: the language front end ([`sva/LANGUAGE.md`](sva/LANGUAGE.md)), the evaluator

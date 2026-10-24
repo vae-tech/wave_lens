@@ -325,7 +325,8 @@ not one attempt per cycle. Paths are linked lists of steps in an arena; a path t
   step, `1 0 1`, is no edge; before, it was two cycles at the same time). Every value is the one holding just before
   the edge time (the preponed region); a value written at the edge counts from the next cycle. The page's sampler does
   the same over `tv`. A dump with a timescale finer than 1 ps: its edges are the cycles, their times in the results are
-  rounded to ps (a warning).
+  rounded to ps (a warning) by the CLI; the page passes its times as they are and the engine takes whole ps only, so
+  such a dump is checked with the CLI (`sva eval`), not in the page.
 - **Before the first cycle** (`$past(x, n)` at cycle k < n, and the previous value of `$rose` … at cycle 0) every
   signal has the initial value of its type: x for 4-state signals (logic, reg, wire: everything a VCD has), 0 for
   2-state ones (`bit`, `int`, `byte`, `shortint`, `longint`: from the FST's variable types, `two_state` in the trace

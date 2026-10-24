@@ -1,9 +1,31 @@
 # Changelog
 
-Versions have two numbers, `MAJOR.MINOR`. A version is a merge into `main` (tagged `main/vMAJOR.MINOR` there),
+Versions have two numbers, `MAJOR.MINOR`. A version is a merge into `dev` (tagged `dev/vMAJOR.MINOR` there),
 published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the work in between lives on a branch. The version is in `VERSION`, in `wavelens.js` (`WaveLens.version`) and in what the `sva` CLI writes
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
+
+## 0.19 — 24 October 2026
+
+The waves in VS Code in its theme and with the dump's log, the names' own menu, state names of a VCD from the
+SystemVerilog sources; fixes in the assertions' results, the bus decoders and the tools.
+
+- **VS Code.** `wavelens.theme`: auto, vscode (the colours and fonts of VS Code's theme), light, white, dark, picked
+  with a preview on the open tabs (**Choose the theme of the waves**). The dump's log: what the reader noticed (a code
+  no `$var` declares, more bits than the variable has, a scope left open, the cut of `dumpBudget` …) by its line in
+  the output channel WaveLens and in the Problems panel; an error it cannot read past says its line.
+- **State names from the sources.** A VCD has no enum tables (Questa writes none): **Sources…** in the bar's dump
+  group reads `typedef enum` / `typedef struct packed` from `.sv` files and names the state buses and the struct
+  fields; in VS Code the workspace's sources do it at each read (`wavelens.sources`). No guesses: scoped
+  declarations, a table only where its values fit the width.
+- An integer / int / shortint / longint / byte variable without an enum table reads as signed decimal (Questa writes
+  an enum on int as `integer`).
+- **The names' menu.** The right button on a name opens the row's menu, as on the waves; a row of your groups moves
+  up, down, to the top or the bottom of its group, a group's header among yours.
+- **Fixes.** The assertions' results kept in the browser are of the waves they were evaluated on; AXI3 bursts by
+  WID, APB / Wishbone transfers that do not end, an ack in its request's cycle; a failing FST converter is an error;
+  MCP extrema by the radix's numbers; a slow Open… no longer lands over a later one, a compare that fails says which
+  one stays, a width that is not a number of bits is 1; `make check` builds the fixtures before the unit tests.
 
 ## 0.18 — 23 October 2026
 

@@ -263,6 +263,17 @@ const FILES_KEY = 'wavelens.sva.files:' + (G.location ? G.location.pathname : ''
 const esc = U.esc;
 const hash = s => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193);
   return (h >>> 0).toString(16).padStart(8, '0'); };
+// the waves' fingerprint: every signal's name, width and transitions (time, kind, exact four-state value) and the time
+// range, each field ended by a separator (no two waves serialise alike). Results kept in this browser are of these waves
+// only: a new simulation under the same name (⟳, a dump dropped again) is evaluated again
+const waveId = M => {
+  let h = 0x811c9dc5; const mix = s => { s = String(s); for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193);
+    h = Math.imul(h ^ 0x1f, 0x01000193); };   // the separator: a code no field holds
+  mix(M.t0); mix(M.t1);
+  for (const r of M.rows) if (r.type === 'sig' && r.tr) { mix(r.full); mix(r.width || 1);
+    for (const o of r.tr) { mix(o.t); mix(o.k); mix(o.bits ?? ''); mix(o.raw ?? ''); mix(o.hex ?? ''); mix(o.v ?? ''); } }   // what valOf reads
+  return (h >>> 0).toString(16).padStart(8, '0'); };
+SVA.waveId = waveId;   // (the tests)
 // set() says whether it was kept (false: private mode or the storage is full)
 const store = {
   get(k) { try { const v = localStorage.getItem(k); return v == null ? null : JSON.parse(v); } catch (e) { return null; } },
@@ -994,6 +1005,7 @@ class Panel {
     const results = {};
     for (const b of this.bindings) if (b.results && !b.page) results[bkey(b)] = b.results;
     const rec = { bind: this.bindJSON(), removed: [...this.removed], hidden: [...this.hidden], src: LIB.src, results };
+    if (Object.keys(results).length) rec.wave = this.wave();
     if (JSON.stringify(results).length > 200000) delete rec.results;
     if (!store.set(this.key, rec)) this.toast('not kept in this browser: its storage is full or off');
     this.saved = rec;
@@ -1033,6 +1045,7 @@ class Panel {
   }
   toast(m) { this.v.toast(m); }
   // after the files or the settings changed: resolve the bindings again, take kept results, evaluate the others
+  wave() { return this.waveMemo || (this.waveMemo = waveId(this.v.M)); }   // the model of a viewer does not change: once
   sync() {
     for (const b of this.bindings) {
       // results of another text of the assertion (an edit, a reload; the page's results of a file this browser replaced): gone
@@ -1041,7 +1054,7 @@ class Panel {
         this.dropSel(b); }
       b.asig = sig;
       this.check(b);
-      const kept = this.saved.results && this.saved.src === LIB.src && this.saved.results[bkey(b)];
+      const kept = this.saved.results && this.saved.src === LIB.src && this.saved.wave === this.wave() && this.saved.results[bkey(b)];
       if (b.state === 'bound' && ((outcome(b) || {}).missing || []).length) b.results = null;   // the build did not find a name the page does: evaluated here
       if (!b.results && b.state === 'bound' && kept && !(outcome({ results: kept }).missing || []).length) b.results = kept;
     }

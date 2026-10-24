@@ -44,7 +44,9 @@ may be the default). What the tab does differently from a page in a browser:
   Load…, the `.sv` files and Compare pick there (an FST to compare is converted too); Open… a dump opens a tab of its
   own. Bookmarks, groups, colours, radix, hidden rows and the assertion bindings are kept per dump in the workspace
   (they survive closing the tab and VS Code). The clipboard is yours (VS Code's).
-- **Theme and keys.** VS Code's light / dark theme; the viewer's keys (`?`) work in the tab and do not reach VS Code
+- **Theme and keys.** `wavelens.theme`: `auto` (the viewer's light or dark by VS Code's), `vscode` (the colours of
+  VS Code's theme: background, text, lines, accent, fonts), `light`, `white` or `dark`; *WaveLens: Choose the theme of
+  the waves* (the editor's title) shows each on the open tabs as you move through the list. The viewer's keys (`?`) work in the tab and do not reach VS Code
   (ctrl+G is the group list, not Go to Line); the others (ctrl+P, F1, ctrl+tab …) are VS Code's.
 - **An agent** on the host (`tools/wavemcp.py`, below): when it starts its live link, every open tab connects (**●
   live**); `view_live` with `page` a `.vcd` / `.fst` and `open: true` opens it in the VS Code window that has the file
@@ -52,8 +54,22 @@ may be the default). What the tab does differently from a page in a browser:
   write the edits into). `wavelens.live: false`: tabs do not connect. The extension relays the link (the tab cannot
   reach the host's 127.0.0.1); nothing is forwarded.
 
-Settings: `wavelens.autoReload`, `wavelens.live`, `wavelens.sva` (another sva program). The output channel *WaveLens* logs
-what went wrong. The cut of a big dump (`dumpBudget`) applies; the whole VCD text crosses to your machine once per read.
+- **State names.** A VCD has no enum tables (Questa writes none): the tab reads the workspace's SystemVerilog sources
+  (`wavelens.sources`: globs, default `**/*.sv`, `**/*.svh`; empty: none) at each read and names the state buses
+  declared with a `typedef enum` there, by the variable's name (*FSM state names* below): the files that declare an enum
+  or a packed struct and the files that use one of those types (a package and a module apart), each read again only when
+  it changed; a file above 8 MB is left out and said in the output channel. **Sources…** in the bar picks other files:
+  theirs win a name over the workspace's and stay over ⟳; names whose sources are gone go away at the next read.
+- **The log.** Each read of a dump writes its parameters to the output channel *WaveLens* (size, `$version`, `$date`,
+  `$timescale`, its time, scopes, signals, value changes) and what the reader noticed, as `path:line: warning: …` (a
+  click opens the dump there): a value of a code no `$var` declares, a word that is no value change, more bits than
+  the variable has, a `$timescale` it cannot read, a `$scope` left open, signals with no value, the cut of
+  `dumpBudget`. The same notes are in the **Problems** panel (ctrl+shift+M) on their lines, until the tab closes; a
+  dump it cannot read (the time goes back, no `$enddefinitions`, an FST `sva` cannot convert) is an error there and a
+  message with *Open at the line*. An FST's notes name the line of its VCD text. *WaveLens: Show the log* (the editor's
+  title) opens the channel. In a browser the notes go to the console (`WaveLens.vcdToWave(text).log`).
+
+Settings: `wavelens.theme`, `wavelens.sources`, `wavelens.autoReload`, `wavelens.live`, `wavelens.sva` (another sva program). The cut of a big dump (`dumpBudget`) applies; the whole VCD text crosses to your machine once per read.
 
 ### WaveDrom JSON in your own page
 
@@ -126,7 +142,19 @@ The example configs in [`examples/`](../examples) are written by hand and show e
 An FST written by Verilator (`--trace-fst`) carries the enum tables of the design, so state buses show `IDLE`, `START`, …
 straight from the dump. A VCD has none: `make html WAVES=x.vcd SV="rtl/*.sv"` (`mkconfig.py --sv`) reads
 `typedef enum {…} name_t;` from the sources and labels the signals declared with those types; or write `"enum"` into an
-entry. The FSM example builds both pages.
+entry. The FSM example builds both pages. Questa writes no enum table into a VCD (the format has none; its `wlf2vcd` loses
+the values of enums): an enum on `logic [1:0]` comes as `reg [1:0]`, one on `int` as `integer` — the viewer and the
+tools show an `integer` (`int`, `shortint`, `longint`, `byte`) without a table as a signed decimal number (`12`, not
+`0x0000000C`), so the state's code reads at once; the names come from the sources. In the viewer (a VCD opened, a page,
+the VS Code tab) **Sources…** in the bar's dump group reads `.sv` / `.svh` files by the same rules as `mkconfig.py
+--sv` (the enum names and packed-struct fields of a variable by its name, a table only where its values fit the
+signal's width; an element of an array gets the array's) and builds the waves again with the view kept; ⟳ keeps them.
+What is not guessed, with a note in the log (the VS Code tab's Problems, `mkconfig.py`'s stderr): a name declared with
+two different types (two modules with their own `state`) gets no labels, nor does an enum with a value it does not read
+(an expression such as `1 << 2`, a parameter, a negative number, labels by macro); function arguments and struct
+members are not signals. The VS Code tab reads the workspace's
+sources by itself at each read (`wavelens.sources`, default `**/*.sv`, `**/*.svh`). From a script:
+`WaveLens.svTables(texts)`, `WaveLens.svApply(waveJson, tables)`, `view.setSources(files)`.
 
 ![The FSM example: state names from the FST, questa edges, -|- arrows between the state changes](img/fsm.png)
 
@@ -182,7 +210,7 @@ add theirs (`WaveLens.registerDefaults`).
 | `svaOpen` | false | the assertion list (`sva.js`) open when the page opens; folded: ▸ Assertions opens it |
 | `dumpBudget` | 3000000 | a VCD opened in the page (Open…, dropped on a viewer): the signals nearest the top up to this many value changes |
 | `busDetect`, `buses` | true, none | bus transactions (`bus.js`): the ports found by their names; ports of your own `[{protocol, scope, prefix, map, clock, name}]` |
-| `contextMenu` | true | the right button on the waves: a range and the viewer's menu; false: the browser's |
+| `contextMenu` | true | the right button on the waves (a range and the viewer's menu) and on the names (the menu of that row); false: the browser's |
 | `menuTipDelay` | 2000 | ms before a tooltip in that menu shows (the bar's: 350 ms) |
 | `cursorSnap` | 8 | px: a click on the waves puts the cursor on an edge of the signal under the pointer this near (alt+click: not); 0 = off |
 | `gaps`, `gapIdle`, `gapKeep` | false, 16, 2 | the pictures and WaveDrom saved from the viewer's menu (and static SVGs) leave out the stretches where no signal but a clock changes for `gapIdle`, all but `gapKeep` after the last change and before the next one, a break `\|` in their place; lengths in clock cycles (`16`) or a time (`"2us"`); the menu's **Gaps** rows change them (kept in the browser) |
@@ -226,7 +254,8 @@ It follows the page theme, or paints its own background when it has one.
 
 `test_stream_video.vcd` (24 MB, 3520 signals in 214 scopes, 4.9 M value changes): the config in 2.7 s, a page with every
 changing signal (1526 signals, all 9 scope levels) in 25 s and 6.3 MB; it opens in 2 s and redraws in 4 ms. The viewer's
-canvas only covers the visible rows, so any number of rows scrolls smoothly. Above `select.budget` value changes
+canvas only covers the visible rows (the names column is still one element per row: tens of thousands of rows make
+folding and searching slower). Above `select.budget` value changes
 (6 M) `mkconfig.py` hides the deepest levels first and says which depth it kept.
 
 ## Assertions (SVA)
@@ -510,7 +539,9 @@ show on its row in the group) —, takes them **Out**, **Deletes** the group on 
 **ctrl+G** on the waves lists your groups the same way: a click or Enter opens one, brings it to the middle and
 selects its first signal. Their order is yours: **alt+↑ / alt+↓** move the selected signal (a run of them) one place
 in its group, **alt+shift+↑ / ↓** the group among yours; a signal of a group, or a group's header, **dragged** in the
-names goes where the line shows (into another group of yours too) — each one step to undo. Under the waves the **Markers** list has each marker's time, label and colour, the
+names goes where the line shows (into another group of yours too), and the right button on a name has **Move up / Move
+down / To the top / To the bottom** (on a group's header: among yours) — each one step to undo. The right button on any
+name opens the same menu as on the waves for that row, at the cursor (text selected in the names: the browser's menu). Under the waves the **Markers** list has each marker's time, label and colour, the
 **Groups** list each group's name and colour (its signals get the colour). Both are kept in this browser and in a saved
 state, as the bookmarks are; [commands](#commands-and-edits) make them too.
 

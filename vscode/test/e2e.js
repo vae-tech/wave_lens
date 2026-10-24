@@ -3,7 +3,8 @@
    one) as --extensionTestsPath, told what to do by ~/.cache/wavelens/e2e.json {out, dumps} (paths on the host). Every dump
    opens in a wavelens tab: it answers ready with its signals, a picture of it (PNG) is written to out; then a bookmark
    is kept over closing and opening the tab again (the store), and a new write of a copy of the first dump is read again
-   by itself (wavelens.autoReload). The results: out/result.json; the process exits 0 when all passed. */
+   by itself (wavelens.autoReload); a dump with a stranger code and one whose time goes back put their notes in the
+   Problems panel on their lines; a VCD as Questa writes it is named from a source of the workspace. The results: out/result.json; the process exits 0 when all passed. */
 const vscode = require('vscode'), fs = require('fs'), path = require('path');
 
 const os = require('os');
@@ -110,8 +111,70 @@ async function run() {
       const e = await again;
       ok('reload on a new write', e.shown > 0, { shown: e.shown });
       await closeAll();
+      // a new simulation with other values (review IV B1): the watcher reads it, the tab has the new ones
+      const small = path.join(OUT, 'values.vcd'), dump = t => '$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! a $end\n$upscope $end\n' +
+        `$enddefinitions $end\n#0\n0!\n#${t}\n1!\n#100\n`;
+      fs.writeFileSync(small, dump(10));
+      const s = await open(api, small), r1 = await s.tab.run([{ op: 'cursor', t: 0 }, { op: 'edge', kind: 'rise', signal: 'tb.a' }]);
+      const read = waitEvent(api, e => e.type === 'loaded' && e.tab === s.tab, 30000);
+      await sleep(1500); fs.writeFileSync(small, dump(30)); await read;
+      const r2 = await s.tab.run([{ op: 'cursor', t: 0 }, { op: 'edge', kind: 'rise', signal: 'tb.a' }]);
+      ok('reload: the new values', r1[1].t === 10000 && r2[1].t === 30000, { before: r1[1], after: r2[1] });
+      await closeAll();
     } catch (e) { ok('reload on a new write', false, { error: e.message }); }
     await cfg.update('autoReload', undefined, vscode.ConfigurationTarget.Global);
+  }
+  // the log: what the reader noticed in a dump goes to the Problems panel on its line; one it cannot read, an error there
+  try {
+    const head = '$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! a $end\n$upscope $end\n$enddefinitions $end\n';
+    const odd = path.join(OUT, 'odd.vcd'), bad = path.join(OUT, 'bad.vcd');
+    fs.writeFileSync(odd, head + '#0\n0!\n1?\n#5\n1!\n');   // line 8: a code no $var declares
+    fs.writeFileSync(bad, head + '#10\n0!\n#5\n1!\n');      // line 8: the time goes back
+    await open(api, odd);
+    const p1 = api.problems(vscode.Uri.file(odd)).map(d => [d.severity, d.range.start.line + 1]);
+    const failed = waitEvent(api, e => e.type === 'dumperror' && e.tab.file === bad, 60000);
+    await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(bad), 'wavelens.waves');
+    await failed;
+    const p2 = api.problems(vscode.Uri.file(bad)).map(d => [d.severity, d.range.start.line + 1]);
+    ok('the log: Problems on the lines', JSON.stringify(p1) === '[[1,8]]' && JSON.stringify(p2) === '[[0,8]]', { odd: p1, bad: p2 });
+    await closeAll();
+    ok('the log: cleared with the tab', !api.problems(vscode.Uri.file(odd)).length, {});
+  } catch (e) { ok('the log', false, { error: e.message }); }
+  // the theme command: its list opens, a move previews, Enter keeps the choice in the setting (the command itself, not a message)
+  if (DUMPS.length) {
+    const cfg = vscode.workspace.getConfiguration('wavelens');
+    try {
+      await open(api, DUMPS[0]);
+      const done = vscode.commands.executeCommand('wavelens.theme');
+      await sleep(800);
+      await vscode.commands.executeCommand('workbench.action.quickOpenSelectNext');   // auto -> vscode
+      await sleep(300);
+      await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
+      await Promise.race([done, sleep(5000)]);
+      const got = vscode.workspace.getConfiguration('wavelens').get('theme');
+      ok('theme: the command\'s list picks one', got === 'vscode', { theme: got });
+    } catch (e) { ok('theme', false, { error: e.message }); }
+    await cfg.update('theme', undefined, vscode.ConfigurationTarget.Global);
+    await closeAll();
+  }
+  // a VCD as Questa writes it (no enum tables) next to its SystemVerilog source in the workspace: the tab names the states
+  // from the source by itself (wavelens.sources)
+  if (DUMPS.length) {
+    const dir = path.join(path.dirname(DUMPS[0]), 'wavelens-e2e-src');
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      // the typedef in a package, the variable in a module of another file (review IV A2: that file has no "enum" in it)
+      fs.writeFileSync(path.join(dir, 'pkg.sv'), 'package p;\n    typedef enum logic [1:0] {IDLE, START, DATA, STOP} state_t;\nendpackage\n');
+      fs.writeFileSync(path.join(dir, 'tb.sv'), 'module tb;\n    p::state_t state;\nendmodule\n');
+      const q = path.join(dir, 'questa.vcd');
+      fs.writeFileSync(q, '$timescale 1ns $end\n$scope module tb $end\n$var reg 2 " state [1:0] $end\n$upscope $end\n$enddefinitions $end\n' +
+        '#0\nb0 "\n#10\nb1 "\n#20\nb10 "\n');
+      const o = await open(api, q);
+      const r = await o.tab.run([{ op: 'cursor', t: 0 }, { op: 'edge', value: 'DATA', signal: 'tb.state' }]);   // a label only the source knows
+      ok('sources: a Questa VCD named from the workspace', r[1] && r[1].moved && r[1].t === 20000, { edge: r[1] });
+      await closeAll();
+    } catch (e) { ok('sources', false, { error: e.message }); }
+    fs.rmSync(dir, { recursive: true, force: true });
   }
   if (DUMPS.length) await agent(api, DUMPS[0]);
   fs.writeFileSync(path.join(OUT, 'result.json'), JSON.stringify(results, null, 1));

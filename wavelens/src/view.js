@@ -28,6 +28,8 @@ const TIPS = {
     'act:fre': ['Regular expression (as grep -E; \\< \\> as in vim)', ['alt+R']],
   '.ev': ['The value to find (0x40, \'h40, 64, -3, IDLE)', ['Enter', 'shift+Enter']],
   'act:dopen': ['Open a VCD dump here (or drop it on the viewer)'], 'act:dreload': ['Read the dump again, the view kept'],
+  'act:dsrc': ['SystemVerilog sources: the names of "typedef enum" on the state buses of a VCD (it has none), "typedef struct packed" as ' +
+    'fields; kept for the next read (⟳)'],
   'act:dcmp': ['Compare with a second dump (a VCD of another run): where its values differ, a red band on the row, ≠ on the name', [']d', '[d']],
   'act:dcmpx': ['Compare no more'],
   'act:fprev': ['Previous match', ['N', 'shift+Enter']], 'act:fnext': ['Next match', ['n', 'Enter']],
@@ -82,6 +84,10 @@ const TIPS = {
   'm:unpaint': ['Its own colour back'],
   'm:umark': ['A marker here: a dashed line across the rows with a label (the Markers list)'], 'm:ugnew': ['A group of your own at the top of the names'],
   'm:ugout': ['Out of your group (the signal stays in its module)'], 'm:ugdel': ['Delete your group; its signals stay where they are'],
+  'm:mvup': ['One place up in your group (a selected run: as a block; a group: among yours)', ['alt+↑', 'drag the name']],
+  'm:mvdn': ['One place down in your group (a selected run: as a block; a group: among yours)', ['alt+↓', 'drag the name']],
+  'm:mvtop': ['First in your group (a group: the first of yours)'], 'm:mvbot': ['Last in your group (a group: the last of yours)'],
+  'm:ugfold': ['Fold / open your group'],
   'bm:mdel': ['Delete the marker'], 'bm:gdel': ['Delete your group; its signals stay where they are'], '.mt': ['Marker time: 250ns, 85.12us', ['Enter']],
   '.ml': ['Marker label'], '.ugn': ['Group name', ['Enter']],
   'act:live': ['Driven by an agent (tools/wavemcp.py view_live): its edits come in as you watch; click: disconnect'],
@@ -231,7 +237,8 @@ class Bar {
       ('<button type="button" data-act="dreload" title="Read the dump again from the disk; the view, the folding and the bookmarks stay" ' +
           'hidden>⟳</button><input type="file" class="dfile" accept=".vcd,.fst" hidden>'),
       ('<button type="button" data-act="dcmp">Compare…</button><button type="button" data-act="dcmpx" class="cmpx" hidden></button>' +
-        '<input type="file" class="cfile" accept=".vcd" hidden>'));
+        '<input type="file" class="cfile" accept=".vcd" hidden>'),
+      '<button type="button" data-act="dsrc">Sources…</button><input type="file" class="srcfile" accept=".sv,.svh,.v,.vh" multiple hidden>');
     const zoom = seg('<button type="button" data-act="out" title="Zoom out (−)">−</button>',
       '<button type="button" data-act="in" title="Zoom in (+)">+</button>', '<button type="button" data-act="fit" title="Show everything (0)">Fit</button>');
     const hint = 'Wheel: scroll · ctrl+wheel: zoom · shift+wheel / drag: pan · shift or middle drag: zoom to a range · ctrl+drag: measure · ' +
@@ -320,6 +327,7 @@ class Bar {
       else if (b.dataset.act === 'dopen') v.openDump();
       else if (b.dataset.act === 'dcmp') v.cfile.click();
       else if (b.dataset.act === 'dcmpx') v.compare(null);
+      else if (b.dataset.act === 'dsrc') v.srcfile.click();
       else if (b.dataset.act === 'dreload') v.reloadDump();
       else if (b.dataset.act === 'live') liveClick();
       else if (b.dataset.jump !== undefined) { const j = v.jumps[b.dataset.jump]; v.goto(j.t, j.span); }
@@ -328,6 +336,8 @@ class Bar {
     v.dfile.addEventListener('change', () => { const f = v.dfile.files[0]; v.dfile.value = ''; if (f) v.openDump(f); });
     v.cfile = r.querySelector('input.cfile');
     v.cfile.addEventListener('change', () => { const f = v.cfile.files[0]; v.cfile.value = ''; if (f) v.compare(f); });
+    v.srcfile = r.querySelector('input.srcfile');
+    v.srcfile.addEventListener('change', () => { const fs = [...v.srcfile.files]; v.srcfile.value = ''; if (fs.length) v.setSources(fs); });
     v.reloadBtn = r.querySelector('button[data-act=dreload]'); v.reloadBtn.hidden = !v.opts.dumpSrc;
     // a file dropped on the viewer: a VCD replaces its waves, a saved state (.json) is loaded
     // (on the viewer's element, which outlives this viewer when a dump replaces it: removed by destroy() through v.ac)
@@ -363,6 +373,12 @@ class Names {
       e.preventDefault(); e.clipboardData.setData('text/plain', rows.map(r => r.full || r.name).join('\n')); v.toast(`copied ${rows.length}`);
     });
     v.namesEl.addEventListener('mousedown', e => { if (e.shiftKey) e.preventDefault(); });   // shift(+ctrl)+click: rows, not text
+    // the right button on a name: the viewer's menu for its row at the cursor (as on the waves: colour, radix, groups, the
+    // moves of your groups' rows …); text selected in the names: the browser's menu (copy)
+    v.namesEl.addEventListener('contextmenu', e => {
+      const sel = getSelection(); if (!v.S.contextMenu || (sel && !sel.isCollapsed && v.namesEl.contains(sel.anchorNode))) return;
+      const row = e.target.closest('.row[data-r]'); e.preventDefault(); v.menu(e.clientX, e.clientY, row ? rowOf(row) : null, v.cursor);
+    });
     v.namesEl.addEventListener('click', e => {
       const sel = getSelection(); if (sel && !sel.isCollapsed && v.namesEl.contains(sel.anchorNode)) return;   // selecting text to copy
       const row = e.target.closest('.row'); if (!row || row.classList.contains('space')) return;
@@ -1447,24 +1463,66 @@ class WaveView {
       if (!file && G.showOpenFilePicker) { const [h] = await G.showOpenFilePicker({ id: 'wavelens-dump',
         types: [{ description: 'VCD dump', accept: { 'text/plain': ['.vcd'] } }] }); handle = h; file = await h.getFile(); }
       else if (!file) { this.dfile.click(); return this; }
+      const gen = this.root.wlOpen = (this.root.wlOpen || 0) + 1;   // the latest Open… on this element wins, whichever reads first
       if (handle && handle.then) handle = await handle.catch(() => null);
       this.toast(`reading ${file.name}…`);
       const text = await file.text();   // an FST named so but given as VCD text (the VS Code extension converts it): read
+      if (gen !== this.root.wlOpen || !VIEWS.has(this)) return this;   // a later one, or Sources…, replaced this viewer meanwhile
       if (/\.fst$/i.test(file.name) && !/^\s*\$/.test(text.slice(0, 64))) {
         this.toast('an FST is binary: sva vcd x.fst --out x.vcd (or fst2vcd), or make html WAVES=x.fst'); return this; }
-      const r = vcdToWave(text, { name: file.name, budget: this.S.dumpBudget });
-      if (!r.shown) { this.toast(`${file.name}: no signals`); return this; }
+      let r;
+      try { r = vcdToWave(text, { name: file.name, budget: this.S.dumpBudget }); }
+      catch (e) { this.dumpSaid(file.name, { error: e.message, line: e.line }); throw e; }
+      const nsv = svApply(r.doc, this.opts.sv);   // the sources' labels (Sources…, the VS Code tab's wavelens.sources)
+      if (nsv) r.log.push({ level: 'info', text: `labels or fields from the SystemVerilog sources for ${nsv} signal${nsv === 1 ? '' : 's'}` });
+      for (const n of (this.opts.sv && this.opts.sv.notes) || []) r.log.push({ level: 'warning', text: 'sources: ' + n });
+      if (!r.shown) { this.toast(`${file.name}: no signals`); this.dumpSaid(file.name, { error: 'no signals', log: r.log, info: r.info }); return this; }
       const st = keep ? this.state() : null, root = this.root, opts = Object.assign({}, this.opts,
         { title: file.name, dumpSrc: { name: file.name, handle, file } });
       this.destroy(); root.innerHTML = '';
       const v = new WaveView(root, r.doc, opts);
       if (st) { delete st.title; await v.setState(st); }
+      const bad = r.log.filter(x => x.level !== 'info').length;
       v.toast((`${file.name}: ${r.shown} of ${r.total} ` +
-          `signals${r.shown < r.total ? ` (dumpBudget ${this.S.dumpBudget} changes: the levels nearest the top)` : ''}`));
-      root.dispatchEvent(new CustomEvent('wavelens:dump', { detail: { name: file.name, shown: r.shown, total: r.total } }));
+          `signals${r.shown < r.total ? ` (dumpBudget ${this.S.dumpBudget} changes: the levels nearest the top)` : ''}`) +
+          (bad ? ` · ${bad} warning${bad === 1 ? '' : 's'} (the browser's console)` : ''));
+      v.dumpLog = r.log;
+      for (const x of r.log) (x.level === 'info' ? console.info : console.warn)(`${file.name}${x.line ? ':' + x.line : ''}: ${x.level}: ${x.text}`);
+      root.dispatchEvent(new CustomEvent('wavelens:dump', { detail: { name: file.name, shown: r.shown, total: r.total, log: r.log, info: r.info } }));
       return v;
     } catch (e) { if (e && e.name !== 'AbortError') this.toast('cannot open: ' + e.message); return this; }
   }
+  // SystemVerilog sources (Files or texts: Sources… in the bar, the VS Code tab's wavelens.sources): the names of their enums
+  // and the fields of their packed structs onto the signals that have none (by name, svApply), kept in opts.sv for the next
+  // read; the waves built again from their WaveJSON with the view kept -> the viewer (a new one when anything changed)
+  // Two sets: the ones picked here ('manual') and the VS Code workspace's ('workspace', useSources before each read); the
+  // picked win a name. Labels a set put there and no longer has go away; the dump's own tables stay.
+  useSources(sv, from = 'manual') {
+    const any = sv && (Object.keys(sv.enums).length || Object.keys(sv.fields).length || sv.notes.length);   // notes alone go to the log too
+    this.opts.svFrom = Object.assign({}, this.opts.svFrom, { [from]: any ? sv : null });
+    this.opts.sv = svMerge(this.opts.svFrom.workspace, this.opts.svFrom.manual) || null;
+    return this;
+  }
+  async setSources(files, quiet = false) {
+    const texts = await Promise.all([...(files || [])].map(f => (typeof f === 'string' ? f : f.text())));
+    const sv = svTables(texts), ne = Object.keys(sv.enums).length, nf = Object.keys(sv.fields).length;
+    this.useSources(sv, 'manual');
+    for (const x of sv.notes) console.warn('wavelens: sources: ' + x);
+    const said = sv.notes.length ? ` · ${sv.notes.length} not used (the console): ${sv.notes[0]}` : '';
+    if (!ne && !nf && !quiet) this.toast((sv.notes.length ? 'no labels from these files' : `no "typedef enum" or "typedef struct packed" in ${texts.length} ` +
+      `file${texts.length === 1 ? '' : 's'}`) + said);
+    const before = JSON.stringify(this.M.src.signal), doc = structuredClone(this.M.src), n = svApply(doc, this.opts.sv);
+    const what = `${ne} enum-typed and ${nf} struct-typed names in ${sv.files} files`;
+    if (JSON.stringify(doc.signal) === before) { if (!quiet && (ne || nf)) this.toast(`${what}: no signal of these names without labels${said}`); return this; }
+    const st = this.state(), root = this.root, opts = this.opts;
+    this.destroy(); root.innerHTML = '';
+    const v = new WaveView(root, doc, opts); delete st.title; await v.setState(st);
+    v.toast(`${what}: labels or fields for ${n} signal${n === 1 ? '' : 's'}${said}`);
+    return v;
+  }
+  // a dump that could not be read: the page hears why (wavelens:dumperror {name, error, line, log}: the VS Code tab's log)
+  dumpSaid(name, d) {
+    this.root.dispatchEvent(new CustomEvent('wavelens:dumperror', { detail: Object.assign({ name }, d) })); }
   // ⟳: the dump again from the disk (its handle; else the file as picked, if the browser still reads it), the view kept
   async reloadDump() {
     const d = this.opts.dumpSrc; if (!d) return this;
@@ -1926,6 +1984,10 @@ class WaveView {
     const r = this.range, sig = row && row.type === 'sig' && row.tr ? row : null, grp = row && row.type === 'group' &&
       this.M.groups[row.id] === row ? row : null, it = row && (sig || grp);
     const up = sig && sig.anc.length ? sig.anc[sig.anc.length - 1] : null, nh = this.hiddenRows.size, ng = Object.keys(this.M.groups).length;
+    // a row of your groups (its place there) or a header of one (its place among yours): Move up / down, to the top / bottom
+    const ugh = row && row.user ? row : null, mine = sig && sig.ug ? sig : null, ugOf = n => this.ugroups.find(g => g.name === n);
+    const mvAt = ugh ? [this.ugroups.indexOf(ugOf(ugh.name)), this.ugroups.length] : mine ? [ugOf(mine.ug.name).signals.indexOf(mine.orig.full),
+      ugOf(mine.ug.name).signals.length] : null;
     // a highlighted row clicked: colour, radix and hide go to every highlighted one (a highlighted module: its signals)
     const picked = r => this.picks.has(r) || r.anc.some(id => this.picks.has(this.M.groups[id]));
     // or a row of the shift+click run: every row of the run
@@ -1957,6 +2019,8 @@ class WaveView {
     const b = (m, label) => { const k = (TIPS['m:' + m] || [])[1];
       return `<button type="button" role="menuitem" data-m="${m}"><span>${label}</span>${k ? `<span class="kk">${esc(k[0])}</span>` : ''}</button>`; };
     const ugb = (m, i, label) => b(m, label).replace('data-m=', `data-g="${i}" data-m=`);   // an item of your group i
+    const mvs = (where) => !mvAt || mvAt[1] < 2 ? '' : (mvAt[0] > 0 ? b('mvup', 'Move up') : '') + (mvAt[0] < mvAt[1] - 1 ? b('mvdn', 'Move down') : '') +
+      (mvAt[0] > 0 ? b('mvtop', `To the top of ${where}`) : '') + (mvAt[0] < mvAt[1] - 1 ? b('mvbot', `To the bottom of ${where}`) : '');
     const el = document.createElement('div'); el.className = 'wv-menu'; el.setAttribute('role', 'menu');
     el.innerHTML = (r ? `<div class="mh">${esc(this.rangeText())}</div>` + b('zoom', 'Zoom to the range') + b('marks', 'Bookmarks at its ends',
       'Two bookmarks and an arrow with the Δ between them') + b('copyd', 'Copy Δ') + '<hr>' : '') +
@@ -1987,7 +2051,10 @@ class WaveView {
       (sig && sig.width === 1 ? b('cyclk', isCyc ? 'Not by this clock' : `Cycles of ${esc(sig.name)}`) : '') +
       (cda ? b('cyc0', at < cda.ups[0] ? `Cycle 0 at the first edge of ${esc(cda.clk.name)}` : `Cycle 0 at this edge of ${esc(cda.clk.name)}`) : '') +
       '<hr>' + b('cycx', 'Reset the cycles') + '</div></div>' +
+      (ugh ? `<hr><div class="mh">${esc(ugh.name)} · your group</div>` + mvs('your groups') + b('ugfold', this.collapsed.has(ugh.id) ? 'Open this group' :
+        'Fold this group') : '') +
       (it ? `<hr><div class="mh">${esc(it.full || it.name)}${many ? `<br>+ every ${run ? 'selected' : 'highlighted'} row: ${sigs.length} signals` : ''}</div>` +
+        (mine ? mvs(`“${esc(mine.ug.name)}”`) : '') +
         (sigs.length ?
           `<label class="mi">${many ? `Colour of ${sigs.length}` : 'Colour'} <input type="color" value="${esc(col)}"
             aria-label="colour of ${esc(of)}"></label>` +
@@ -2004,11 +2071,12 @@ class WaveView {
         b('hl', this.picks.has(it) ? 'Remove the highlight' : 'Highlight') + b('hide',
           many ? `Hide the ${rows.length} ${run ? 'selected' : 'highlighted'}` : grp ? 'Hide this module' : 'Hide',
           'Leave it out of the view (Hidden: N ✕ in the bar shows it again)') +
-        (grp ? b('fold', this.collapsed.has(grp.id) ? 'Open this module' : 'Fold this module') : up != null ? b('foldup', 'Fold its module') : '') +
+        (grp && !ugh ? b('fold', this.collapsed.has(grp.id) ? 'Open this module' : 'Fold this module') : up != null ? b('foldup', 'Fold its module') : '') +
         (sig ? b('mark', 'Bookmark here', 'A bookmark on this signal at the time clicked') : '') +
         // your groups: a submenu (into / out of a group, a new one, delete; go to any of them)
         (`<div class="msub"><button type="button" role="menuitem" class="subg" aria-haspopup="menu" aria-expanded="false">` +
           `<span>Groups${this.ugroups.length ? ` (${this.ugroups.length})` : ''}</span><span class="kk">▸</span></button><div class="sub" role="menu" hidden>` +
+          (sig && !mine ? '<div class="mh">to move it: into a group of yours, any order there</div>' : '') +
           (sigs.length ? this.ugroups.map((g, i) => (sigs.every(r => g.signals.includes((r.orig || r).full)) ? ugb('ugoff', i, `Out of “${g.name}”`) :
             ugb('ugto', i, `Into “${g.name}”`))).join('') + b('ugnew', many ? `New group of the ${sigs.length}` : 'New group with it') : '') +
           (sig && sig.ug ? b('ugout', `Out of “${sig.ug.name}” (this row)`) : '') + (grp && grp.user ? b('ugdel', 'Delete this group') : '') +
@@ -2091,7 +2159,11 @@ class WaveView {
       else if (act === 'ugnew') { let k = this.ugroups.length + 1; while (this.ugroups.some(g => g.name === `group ${k}`)) k++;
         this.toGroup(`group ${k}`, sigs); }
       else if (act === 'ugout') this.hide([sig]);
-      else if (act === 'ugdel') this.run({ op: 'group', name: grp.name, delete: true });
+      else if (act === 'ugdel') this.run({ op: 'group', name: (ugh || grp).name, delete: true });
+      else if (act === 'mvup' || act === 'mvdn' || act === 'mvtop' || act === 'mvbot') {
+        this.moveKey({ mvup: -1, mvdn: 1, mvtop: -Infinity, mvbot: Infinity }[act], false, ugh || mine); }
+      else if (act === 'ugfold') { if (this.collapsed.has(ugh.id)) this.collapsed.delete(ugh.id); else this.collapsed.add(ugh.id);
+        this.renderNames(); this.draw(); }
       else if (act === 'c2') this.setCursor2(sig ? this.snap(sig, at) : at);
       else if (act === 'gref') role('gapSignals', !gref);
       else if (act === 'gaux') role('gapAux', !gaux);

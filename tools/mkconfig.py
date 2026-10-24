@@ -68,20 +68,62 @@ def width_ok(rule, w):
 
 
 # ---------------- enum labels from SystemVerilog sources (VCD has none; FST carries its own tables) ----------------
+# The rules are wavelens/src/vcd.js svTables' (the twin; tests/unit/sv/sources.sv with its expected tables for both).
 SV_WORDS = {'input', 'output', 'inout', 'ref', 'var', 'const', 'static', 'automatic', 'logic', 'wire', 'reg', 'bit', 'signed', 'unsigned'}
+SV_BASE = {'logic': 1, 'bit': 1, 'reg': 1, 'wire': 1, 'byte': 8, 'shortint': 16, 'int': 32, 'integer': 32, 'longint': 64}
+SV_ENUM = re.compile(r'\btypedef\s+enum\b\s*([^{;]*)\{([^}]*)\}\s*(\w+)\s*;')
+SV_STRUCT = re.compile(r'\btypedef\s+struct\s+packed\b[^{;]*\{([^}]*)\}\s*(\w+)\s*;')
+SV_ANON = re.compile(r'(?<!typedef)\s\benum\b[^{;]*\{([^}]*)\}\s*(\w+(?:\s*,\s*\w+)*)\s*;')
+# not declarations of signals: functions and tasks (their arguments, results), the members of a struct or union (nested:
+# the innermost body first, until none is left); strings and comments are blanked before anything is read
+SV_SKIP = re.compile(r'\bfunction\b.*?\bendfunction\b|\btask\b.*?\bendtask\b', re.S)
+SV_BODY = re.compile(r'\b(?:struct|union)\b[^{};]*\{[^{}]*\}')
+SV_BLANK = re.compile(r'"(?:[^"\\\n]|\\.)*"|//[^\n]*|/\*.*?\*/', re.S)
+
+
+def sv_signals_text(t):
+    """A source with what holds no signal declarations blanked: function / task bodies, struct / union bodies."""
+    t = SV_SKIP.sub(' ', t)
+    while True:
+        u = SV_BODY.sub(' ', t)
+        if u == t:
+            return t
+        t = u
 
 
 def sv_value(v, prev):
-    v = v.strip().replace('_', '')
-    if not v:
+    """An enum label's value: its initializer v ('' none: prev + 1) -> int; None when it is not a literal (an expression,
+    a parameter, a negative number): the table is left out rather than guessed."""
+    if not v.strip():
         return prev + 1
+    v = v.strip().replace('_', '')   # (after: "_" alone is an identifier, not an omitted value)
     m = re.fullmatch(r"(?:\d+)?'[sS]?([bodhBODH])([0-9a-fA-F]+)", v)
     if m:
-        return int(m.group(2), {'b': 2, 'o': 8, 'd': 10, 'h': 16}[m.group(1).lower()])
-    return int(v, 0) if re.fullmatch(r'\d+|0[xX][0-9a-fA-F]+', v) else prev + 1
+        try:
+            return int(m.group(2), {'b': 2, 'o': 8, 'd': 10, 'h': 16}[m.group(1).lower()])
+        except ValueError:
+            return None
+    if re.fullmatch(r'\d+', v):
+        return int(v, 10)   # 08: decimal, as SystemVerilog reads it
+    return int(v, 16) if re.fullmatch(r'0[xX][0-9a-fA-F]+', v) else None
 
 
-SV_BASE = {'logic': 1, 'bit': 1, 'reg': 1, 'wire': 1, 'byte': 8, 'shortint': 16, 'int': 32, 'integer': 32, 'longint': 64}
+def sv_items(body):
+    """'A, B = 2'd3, C' -> {0: 'A', 3: 'B', 4: 'C'}; None when a label or a value is not read (a macro, a range, an
+    expression) or there is none."""
+    table, v = {}, -1
+    for it in body.split(','):
+        name, eq, val = it.partition('=')
+        name = name.strip()
+        if not name and not eq:
+            continue
+        if not re.fullmatch(r'\w+', name):
+            return None
+        v = sv_value(val if eq else '', v)
+        if v is None:
+            return None
+        table[v] = name
+    return table or None
 
 
 def sv_dims(s):
@@ -95,36 +137,54 @@ def sv_dims(s):
     return n
 
 
-def sv_structs(files):
-    """typedef struct packed {…} name_t; + declarations "name_t status;" -> {variable name: [{name, msb, lsb, enum?}]}, the
-    fields MSB first. A member's type: logic / bit / reg [m:n] … int / byte …, or a typedef enum / struct of these files
-    (an enum's base type gives its width: "typedef enum logic [2:0]"; none: 32). A struct with a member of an unknown
-    width is left out."""
-    texts = []
+def sv_texts(files):
+    out = []
     for f in files:
         with open(f, encoding='utf-8', errors='replace') as fh:
-            texts.append(re.sub(r'//[^\n]*|/\*.*?\*/', ' ', fh.read(), flags=re.S))
-    widths, labels, bodies = {}, {}, {}
+            out.append(fh.read())
+    return out
+
+
+def sv_tables(texts):
+    """SystemVerilog sources -> ({variable: {value: label}}, {variable: [{name, msb, lsb, enum?}]}, [notes]).
+    "typedef enum … {A, B = 2'd3} name_t;" and "typedef struct packed {…} name_t;" (fields MSB first; a member of a width
+    it cannot tell leaves the struct out), then the declarations of signals with those types ("p::name_t a, b;", ports,
+    arrays "name_t a [4];"; not function arguments, not struct members) and "enum {…} st;". By the variable's name only:
+    a name declared with two different types (two modules) gets nothing, and a note says so; so does an enum it does
+    not read."""
+    texts = [SV_BLANK.sub(lambda m: '""' if m.group(0)[0] == '"' else ' ', t) for t in texts]
+    types, widths, bodies, anon, notes, twice = {}, {}, {}, [], [], set()
     for t in texts:
-        for m in re.finditer(r'\btypedef\s+enum\b\s*([^{;]*)\{([^}]*)\}\s*(\w+)\s*;', t):
-            base = m.group(1).strip()
-            bm = re.fullmatch(r'(\w+)?\s*(?:signed|unsigned)?\s*((?:\[[^\]]*\]\s*)*)', base)
-            w = (SV_BASE.get(bm.group(1), None) if bm and bm.group(1) else 32) if bm else None
+        for m in SV_ENUM.finditer(t):
+            table, name = sv_items(m.group(2)), m.group(3)
+            if table is None:
+                notes.append(f'enum {name}: a label or value it does not read (an expression, a parameter, a macro): no labels')
+            if name in types and types[name] != table and name not in twice:   # p::t_t and q::t_t: which one a signal has is not known
+                twice.add(name); notes.append(f'enum {name}: defined twice with different labels (two packages?): no labels')
+            types[name] = None if name in twice else table
+            bm = re.fullmatch(r'(\w+)?\s*(?:signed|unsigned)?\s*((?:\[[^\]]*\]\s*)*)', m.group(1).strip())
+            w = (SV_BASE.get(bm.group(1)) if bm.group(1) else 32) if bm else None
             d = sv_dims(bm.group(2)) if bm else None
             if w is not None and d is not None:
-                widths[m.group(3)] = w * d
-            table, v = {}, -1
-            for it in m.group(2).split(','):
-                name, _, val = it.partition('=')
-                if re.fullmatch(r'\w+', name.strip()):
-                    v = sv_value(val, v); table[v] = name.strip()
-            labels[m.group(3)] = table
-        for m in re.finditer(r'\btypedef\s+struct\s+packed\b[^{;]*\{([^}]*)\}\s*(\w+)\s*;', t):
+                widths[name] = w * d
+        for m in SV_STRUCT.finditer(t):
+            if m.group(2) in bodies and bodies[m.group(2)] != m.group(1):
+                twice.add(m.group(2)); notes.append(f'struct {m.group(2)}: defined twice with different members: no fields')
             bodies[m.group(2)] = m.group(1)
+        for m in SV_ANON.finditer(sv_signals_text(t)):
+            table = sv_items(m.group(1))
+            if table is None:
+                notes.append(f'enum {m.group(2).strip()}: a label or value it does not read (an expression, a parameter, a macro): no labels')
+            anon += [(n.strip(), table) for n in m.group(2).split(',')]
+    for name in set(types) & set(bodies):   # an enum in one package, a struct in another: which one a signal has is not known
+        if name not in twice:
+            twice.add(name); notes.append(f'{name}: defined as an enum and as a struct (two packages?): no labels, no fields')
+        types[name] = None
     fields = {}
     for _ in range(len(bodies) + 1):   # nested typedefs: until nothing new resolves
+        new = False
         for name, body in bodies.items():
-            if name in fields:
+            if name in fields or name in twice:
                 continue
             members = []
             for decl in filter(None, (x.strip() for x in body.split(';'))):
@@ -134,52 +194,55 @@ def sv_structs(files):
                 if not base or d is None:
                     members = None
                     break
-                members += [(n.strip(), base * d, labels.get(m.group(1))) for n in m.group(3).split(',')]
+                members += [(n.strip(), base * d, types.get(m.group(1))) for n in m.group(3).split(',')]
             if members:
                 lsb, out = sum(w for _, w, _ in members), []
                 for n, w, e in members:
                     lsb -= w
                     out.append({'name': n, 'msb': lsb + w - 1, 'lsb': lsb, **({'enum': {str(k): v for k, v in sorted(e.items())}} if e else {})})
-                fields[name] = out; widths[name] = sum(w for _, w, _ in members)
-    out = {}
-    for t in texts:
-        for name, fl in fields.items():
-            for m in re.finditer(r'\b(?:\w+::)?' + re.escape(name) + r'\b\s+(\w+(?:\s*,\s*\w+)*)\s*[;=,)]', t):
-                for n in m.group(1).split(','):
-                    if n.strip() and n.strip() not in SV_WORDS:
-                        out[n.strip()] = fl
-    return out
+                fields[name] = out; widths[name] = sum(w for _, w, _ in members); new = True
+        if not new:
+            break
+    cand, clash = {}, set()   # one name, one candidate: ('e', table) or ('s', fields); None for an enum not read (it takes the name)
+    def put(name, val):
+        if name in clash:
+            return
+        if name in cand and cand[name] != val:
+            clash.add(name); del cand[name]
+            return
+        cand[name] = val
+    for n, table in anon:
+        put(n, ('e', table))
+    known = sorted(set(types) | set(fields) | set(bodies), key=len, reverse=True)
+    if known:
+        decl = re.compile(r'\b(?:\w+::)?(' + '|'.join(map(re.escape, known)) + r')\b\s+(?:\[[^\]]*\]\s*)*'
+                          r'(\w+(?:\s*(?:\[[^\]]*\]\s*)*,\s*\w+)*)\s*(?:\[[^\]]*\]\s*)*[;=,)]')
+        for t in texts:
+            for m in decl.finditer(sv_signals_text(t)):
+                ty = m.group(1)
+                for n in re.split(r'\s*(?:\[[^\]]*\]\s*)*,\s*', m.group(2)):
+                    if not n or n in SV_WORDS or n in types or n in fields:
+                        continue
+                    if ty in fields:
+                        put(n, ('s', fields[ty]))
+                    elif ty in types:   # an enum it did not read too: the name is taken, another table does not land on it
+                        put(n, ('e', types[ty]))
+                    elif ty in bodies:   # a struct whose fields it cannot tell (or defined twice): the name is taken
+                        put(n, ('s', None))
+    enums = {k: v[1] for k, v in cand.items() if v[0] == 'e' and v[1]}
+    structs = {k: v[1] for k, v in cand.items() if v[0] == 's' and v[1]}
+    notes += [f'{n}: declared with different types (in different modules?): no labels' for n in sorted(clash)]
+    return enums, structs, notes
 
 
 def sv_enums(files):
-    """typedef enum … {A, B = 2'd3, …} name_t; + declarations "name_t state_q, state_d;" / "enum {…} st;" ->
-    {variable name: {value: label}} (by name only: a variable with that name in any scope gets the labels)."""
-    out, types = {}, {}
-    def items(body):
-        table, v = {}, -1
-        for it in body.split(','):
-            name, _, val = it.partition('=')
-            name = name.strip()
-            if re.fullmatch(r'\w+', name):
-                v = sv_value(val, v); table[v] = name
-        return table
-    texts = []
-    for f in files:
-        with open(f, encoding='utf-8', errors='replace') as fh:
-            texts.append(re.sub(r'//[^\n]*|/\*.*?\*/', ' ', fh.read(), flags=re.S))
-    for t in texts:
-        for m in re.finditer(r'\btypedef\s+enum\b[^{;]*\{([^}]*)\}\s*(\w+)\s*;', t):
-            types[m.group(2)] = items(m.group(1))
-        for m in re.finditer(r'(?<!typedef)\s\benum\b[^{;]*\{([^}]*)\}\s*(\w+(?:\s*,\s*\w+)*)\s*;', t):
-            for n in m.group(2).split(','):
-                out[n.strip()] = items(m.group(1))
-    for t in texts:
-        for name, table in types.items():
-            for m in re.finditer(r'\b(?:\w+::)?' + re.escape(name) + r'\b\s+(?:\[[^\]]*\]\s*)*(\w+(?:\s*(?:\[[^\]]*\]\s*)*,\s*\w+)*)', t):
-                for n in re.split(r'\s*(?:\[[^\]]*\]\s*)*,\s*', m.group(1)):
-                    if n and n not in SV_WORDS and n not in types:
-                        out[n] = table
-    return out
+    """{variable name: {value: label}} of the sources (sv_tables)."""
+    return sv_tables(sv_texts(files))[0]
+
+
+def sv_structs(files):
+    """{variable name: [{name, msb, lsb, enum?}]} of the sources (sv_tables)."""
+    return sv_tables(sv_texts(files))[1]
 
 
 # ---------------- catalog ----------------
@@ -339,16 +402,19 @@ def read_signals(a):
 
 def apply_sv(files, sigs):
     """--sv: enum labels and packed-struct fields from the SystemVerilog sources onto the signals of their names."""
-    labels, n = sv_enums(files), 0
+    labels, structs, notes = sv_tables(sv_texts(files))
+    for note in notes:
+        print(f'mkconfig: --sv: {note}', file=sys.stderr)
+    leaf = lambda p: svabuild.split_path(re.sub(r'(\.?\[-?\d+\])+$', '', p))[-1]   # an element of an array: the array's name
+    n = 0
     for s in sigs:
-        leaf = re.sub(r'\[\d+\]$', '', svabuild.split_path(s['path'])[-1])
-        t = labels.get(leaf)
+        t = labels.get(leaf(s['path']))
         if not s['enum'] and t and max(t) < 2 ** s['width']:
             s['enum'] = t; n += 1
     print(f'mkconfig: --sv: {len(labels)} enum-typed names, labels for {n} signals', file=sys.stderr)
-    structs, n = sv_structs(files), 0
+    n = 0
     for s in sigs:   # a packed struct dumped as one vector (a VCD; an FST without --trace-structs): its fields
-        fl = structs.get(re.sub(r'\[\d+\]$', '', svabuild.split_path(s['path'])[-1]))
+        fl = structs.get(leaf(s['path']))
         if fl and fl[0]['msb'] + 1 == s['width']:
             s['fields'] = fl; n += 1
     if structs:

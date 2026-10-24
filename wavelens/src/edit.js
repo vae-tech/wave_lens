@@ -442,11 +442,13 @@ Object.assign(WaveView.prototype, {
     return true;
   },
   // alt+↑ / alt+↓: the selected signal (a selected run in the same group: as one block) one place up / down in its group;
-  // with shift its group among yours. row: the row of the names with the focus (a group's header: that group moves)
+  // with shift its group among yours. row: the row of the names with the focus (a group's header: that group moves).
+  // dir ±Infinity (the menu's To the top / bottom): first / last
   async moveKey(dir, whole = false, row = null) {
     if (row && row.user) { const g = this.ugroups.find(x => x.name === row.name), i = this.ugroups.indexOf(g), n = this.ugroups.length;
-      if (!g || i + dir < 0 || i + dir >= n) return false;
-      await this.run({ op: 'group', name: g.name, move: dir < 0 ? 'up' : 'down' }); this.toast(`${g.name}: group ${i + dir + 1} of ${n}`); return true; }
+      const j = Math.min(Math.max(i + dir, 0), n - 1); if (!g || j === i) return false;
+      await this.run({ op: 'group', name: g.name, move: dir === -1 ? 'up' : dir === 1 ? 'down' : dir < 0 ? 'top' : 'bottom' });
+      this.toast(`${g.name}: group ${j + 1} of ${n}`); return true; }
     const s = row && row.ug ? row : this.sel;
     if (!s || !s.ug) { this.toast('alt+↑ / alt+↓ order the rows of your groups (the right button: Groups ▸)'); return false; }
     if (whole) return this.moveKey(dir, false, s.ug);

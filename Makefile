@@ -281,15 +281,17 @@ wavelens/wavelens.js: $(WAVELENS_SRC) tools/wavelenscat.py
 # Python unit tests of the tools (tests/unit/test_*.py on unittest, no dependencies; the fixtures in tests/unit/vcd).
 # The sva CLI of this BUILD when it is built (else svabuild finds one: an older out/ build would test stale code)
 unit:
-	BUILD=$(B) $(if $(WAVELENS_SVA),,$(if $(wildcard $(SVA_BIN)),WAVELENS_SVA=$(abspath $(SVA_BIN)))) $(PY) -m unittest discover -s tests/unit -t .
+	BUILD=$(B) $(if $(WAVELENS_STRICT),WAVELENS_STRICT=1) $(if $(WAVELENS_SVA),,$(if $(wildcard $(SVA_BIN)),WAVELENS_SVA=$(abspath $(SVA_BIN)))) \
+	  $(PY) -m unittest discover -s tests/unit -t .
 
-# The gate: the engine's tests, the unit tests, every page smoke checks (so it has nothing to skip), smoke --strict
+# The gate: the engine's tests, every page smoke checks and the fixtures (built first: the unit tests' FST parity needs
+# the examples), the unit tests with what the gate builds required (WAVELENS_STRICT), smoke --strict
 check:
 	$(PY) tools/wavelenscat.py --check
 	$(MAKE) sva-test
 	$(MAKE) sva-build
-	$(MAKE) unit
 	$(MAKE) examples demo demo-fst sva-spike html
+	$(MAKE) unit WAVELENS_STRICT=1
 	$(MAKE) sva-verify mcp-bench
 	$(MAKE) smoke STRICT=1
 	$(MAKE) shots-check

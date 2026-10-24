@@ -106,7 +106,8 @@
   <tr><td>state</td><td><span class="ui">Save</span> and <span class="ui">Load…</span> what you did in the viewer,
     <span class="ui">Save page</span> the page with it (<a href="#state">Save and Load</a>).</td></tr>
   <tr><td>dump</td><td><span class="ui">Open…</span> a VCD, <span class="ui">⟳</span> read it again (<a href="#open">Opening waves</a>),
-    <span class="ui">Compare…</span> a second run (<a href="compare.html">Compare two runs</a>).</td></tr>
+    <span class="ui">Compare…</span> a second run (<a href="compare.html">Compare two runs</a>), <span class="ui">Sources…</span>
+    SystemVerilog files whose <code>typedef enum</code> names the states of a VCD (it has none).</td></tr>
   <tr><td>assertions</td><td><span class="ui">Load file…</span> reads <code>.sv</code> / <code>.sva</code> files; see
     <a href="sva.html">Assertions</a>.</td></tr>
 </table>
@@ -389,7 +390,10 @@
   its group, or the row of the names with the focus (a group's header: its group);
   <kbd>alt+shift+↑</kbd> / <kbd>alt+shift+↓</kbd> move the whole group among yours. Drag a signal of a group, or a group's header, in
   the names: a line shows where it goes — between two signals, at the end of another group of yours (it moves there), or before another
-  group. Each move is one step to <a href="#undo">undo</a>. A drag over the other names selects their text, as before (ctrl+C copies the
+  group. The right button on a name opens the menu of that row (the same as on the waves, at the cursor), with
+  <span class="ui">Move up</span>, <span class="ui">Move down</span>, <span class="ui">To the top</span> and <span class="ui">To the bottom</span>
+  for a row of your groups (on a group's header: its place among yours); a signal of the dump moves through
+  <span class="ui">Groups ▸</span> into one of yours. Each move is one step to <a href="#undo">undo</a>. A drag over the other names selects their text, as before (ctrl+C copies the
   paths). The groups are kept in this browser and the saved state; the command is <code>{"op": "group", "name": "ctl", "signals":
   ["PSEL", "PENABLE"]}</code>, <code>"move": "up"</code> for its place.</p>
 
@@ -524,7 +528,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.18 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.19 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

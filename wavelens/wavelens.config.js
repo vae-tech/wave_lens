@@ -46,7 +46,7 @@ window.WAVELENS_CONFIG = {
   busDetect: true,              // bus.js: the bus ports found by their signal names (AXI, AXI-Stream, APB, AHB, Avalon, Wishbone, OBI) drawn as transactions
   buses: null,                  // bus.js: ports of your own [{protocol, scope, prefix?, map?: {role: name}, clock?, name?}] (busDetect: false: only these)
   menuTipDelay: 2000,           // ms: the wait before a tooltip in that menu (the bar's: 350 ms)
-  contextMenu: true,            // the right button on the waves: a range and the viewer's menu (picture, colour, …); false: the browser's
+  contextMenu: true,            // the right button on the waves (a range and the viewer's menu: picture, colour, …) and on the names; false: the browser's
   cursorSnap: 8,                // px: a click on the waves puts the cursor on an edge of that signal this near (alt+click: not); 0 = off
   moduleShading: true,          // signals of neighbouring modules on alternating backgrounds, a line where the module changes
   svaSignals: 'view',           // assertion groups (sva.js): the bound signals again under the steps: 'view' (viewers), true (also static SVGs), false

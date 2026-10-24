@@ -15,7 +15,7 @@ class Blank(unittest.TestCase):
         self.assertEqual(set(''.join(out.splitlines()[:2])), {' '})
 
 
-@unittest.skipUnless(svabuild.find_bin(), 'the sva CLI (make sva-build)')
+@H.needs(svabuild.find_bin(), 'the sva CLI (make sva-build)')
 class Spans(unittest.TestCase):
     def test_assertions_with_actions_and_declarations(self):
         f = 'examples/axi_lite/axi_lite.sva'

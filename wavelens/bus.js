@@ -193,12 +193,17 @@ const DECODE = {
     for (const x of AW) x.label = hex(x.awaddr); for (const x of Wb) x.label = hex(x.wdata);
       for (const x of B) x.label = ['OKAY', 'EXOKAY', 'SLVERR', 'DECERR'][num(x.bresp)] || hex(x.bresp);
     for (const x of AR) x.label = hex(x.araddr); for (const x of R) x.label = hex(x.rdata);
-    // writes: the W bursts (to wlast, or len + 1 beats, or one) in order to the AWs, a B by ID to the oldest complete one
-    const bursts = []; let cur = [];
-    const lenOf = a => (lite ? 1 : num(a && a.awlen) + 1);
-    for (const x of Wb) { cur.push(x); const want = lenOf(AW[bursts.length]); if ((p.sig.wlast ? x.wlast === '1' : cur.length >= want) ||
-      lite) { bursts.push(cur); cur = []; } }
-    const writes = AW.map((a, i) => ({ a, d: bursts[i] || null, id: a.awid }));
+    // writes: the W bursts (to wlast, or len + 1 beats, or one) in order to the AWs, a B by ID to the oldest complete one;
+    // AXI3 (WID): the beats of different IDs may interleave, so a burst per ID, to the AWs of that ID in their order
+    const lenOf = a => (lite ? 1 : num(a && a.awlen) + 1), byId = !!p.sig.wid;
+    const idOf = v => (byId ? num(v) : 0), awOf = new Map(), open = new Map(), done = new Map();
+    for (const a of AW) { const i = idOf(a.awid); if (!awOf.has(i)) awOf.set(i, []); awOf.get(i).push(a); }
+    for (const x of Wb) {
+      const i = idOf(x.wid), cur = open.get(i) || [], fin1 = done.get(i) || [];
+      cur.push(x); open.set(i, cur); done.set(i, fin1);
+      if ((p.sig.wlast ? x.wlast === '1' : cur.length >= lenOf((awOf.get(i) || [])[fin1.length])) || lite) { fin1.push(cur); open.set(i, []); }
+    }
+    const writes = AW.map(a => { const i = idOf(a.awid); return { a, d: done.get(i) ? done.get(i)[awOf.get(i).indexOf(a)] || null : null, id: a.awid }; });
     for (const x of B) { const wr = writes.find(q => !q.b && q.d && (x.bid == null || q.id == null || q.id === x.bid) && q.d[q.d.length - 1].k <= x.k &&
       q.a.k <= x.k); if (wr) wr.b = x; }
     for (const q of writes) {
@@ -237,7 +242,7 @@ const DECODE = {
   apb({ p, n, E, c, V, on, at, D, chan, beats, fin }) {
     const ph = chan('phase'); let ks = null;
     for (let k = 0; k < n; k++) {
-      if (!on('psel', k)) { ks = null; continue; }
+      if (!on('psel', k)) { if (ks != null) aborted(k - 1); ks = null; continue; }
       if (!on('penable', k)) { ks = k; ph.beats.push({ t0: c(k), t1: E[k], label: 'setup' }); continue; }
       if (ks == null) ks = k;
       if (!on('pready', k, true)) continue;
@@ -248,6 +253,13 @@ const DECODE = {
             `state${waits === 1 ? '' : 's'}${err ? ', PSLVERR' : ''}`) }, ks, k));
       ks = null;
     }
+    // a transfer that does not end: PSEL dropped before PREADY (an error), or still waiting when the dump ends (open)
+    function aborted(k1) {
+      const wr = on('pwrite', ks), a = hex(at('paddr', ks)), d = wr ? ` ← ${hex(at('pwdata', ks))}` : ' → ?';
+      D.tx.push(fin({ kind: wr ? 'W' : 'R', err: k1 != null, label: `${wr ? 'W' : 'R'} ${a}${d}`,
+        tip: `${wr ? 'write' : 'read'} ${a}${d}: ${k1 != null ? 'PSEL dropped before PREADY' : 'no PREADY by the end of the dump'}` }, ks, k1));
+    }
+    if (ks != null) aborted(null);
   },
   ahb({ p, n, E, c, V, on, at, D, chan, beats, fin }) {
     const ad = chan('address'), da = chan('data'), rdy = k => (p.sig.hready ? on('hready', k) : on('hreadyout', k, true));
@@ -299,19 +311,30 @@ const DECODE = {
     const slave = /_i$/.test(leafOf(p.sig.cyc)), wd = slave ? 'dat_i' : 'dat_o', rdn = slave ? 'dat_o' : 'dat_i';
     const req = chan('request'), ack = chan('ack'), pipe = !!p.sig.stall, pend = []; let ks = null;
     const done = k => on('ack', k) || on('err', k) || on('rty', k);
+    // requests without their ack: CYC dropped (an error at k1), or the dump ended (open)
+    const unacked = (qs, k1) => { for (const q of qs) D.tx.push(fin({ kind: q.wr ? 'W' : 'R', err: k1 != null,
+      label: `${q.wr ? 'W' : 'R'} ${hex(q.a)} ${q.wr ? '← ' + hex(q.d) : '→ ?'}`,
+      tip: `${q.wr ? 'write' : 'read'} ${hex(q.a)}: ${q.stalled ? 'stalled, never accepted' : 'no ack'}` +
+        (k1 != null ? ', CYC dropped' : ' by the end of the dump') },
+      q.k0, k1)); };
+    const cur = () => ({ a: at('adr', ks), wr: on('we', ks), d: at(wd, ks), k0: ks, stalled: pipe });   // the strobe waiting since ks
     for (let k = 0; k < n; k++) {
-      if (!on('cyc', k)) { ks = null; pend.length = 0; continue; }
-      if (pipe && done(k) && pend.length) {   // pipelined: the acks in order
-        const q = pend.shift(), v = q.wr ? q.d : at(rdn, k), err = !on('ack', k);
-        ack.beats.push({ t0: c(k), t1: E[k], label: on('ack', k) ? 'ack' : on('err', k) ? 'err' : 'rty' });
-        D.tx.push(fin({ kind: q.wr ? 'W' : 'R', err, label: `${q.wr ? 'W' : 'R'} ${hex(q.a)} ${q.wr ? '←' : '→'} ${hex(v)}`,
-          tip: `${q.wr ? 'write' : 'read'} ${hex(q.a)} ${q.wr ? '←' : '→'} ${hex(v)}${err ? ' (' + (on('err', k) ? 'ERR' : 'RTY') + ')' : ''}` }, q.k0, k));
+      if (!on('cyc', k)) { unacked(pend.splice(0), k - 1); if (ks != null) unacked([cur()], k - 1); ks = null; continue; }
+      if (pipe) {   // pipelined: a request goes when not stalled; the acks in order (a request and its ack in one cycle too)
+        if (on('stb', k)) { if (ks == null) ks = k;
+          if (!on('stall', k)) { const wr = on('we', k), a = at('adr', k); req.beats.push({ t0: c(ks), t1: E[k], label: `${wr ? 'W' : 'R'} ${hex(a)}` });
+            pend.push({ a, wr, d: at(wd, k), k0: ks }); ks = null; } } else ks = null;
+        if (done(k) && pend.length) {
+          const q = pend.shift(), v = q.wr ? q.d : at(rdn, k), err = !on('ack', k);
+          ack.beats.push({ t0: c(k), t1: E[k], label: on('ack', k) ? 'ack' : on('err', k) ? 'err' : 'rty' });
+          D.tx.push(fin({ kind: q.wr ? 'W' : 'R', err, label: `${q.wr ? 'W' : 'R'} ${hex(q.a)} ${q.wr ? '←' : '→'} ${hex(v)}`,
+            tip: `${q.wr ? 'write' : 'read'} ${hex(q.a)} ${q.wr ? '←' : '→'} ${hex(v)}${err ? ' (' + (on('err', k) ? 'ERR' : 'RTY') + ')' : ''}` }, q.k0, k));
+        }
+        continue;
       }
       if (!on('stb', k)) { ks = null; continue; }
       if (ks == null) ks = k;
       const wr = on('we', k), a = at('adr', k);
-      if (pipe) { if (!on('stall', k)) { req.beats.push({ t0: c(ks), t1: E[k], label: `${wr ? 'W' : 'R'} ${hex(a)}` });
-        pend.push({ a, wr, d: at(wd, k), k0: ks }); ks = null; } continue; }
       if (!done(k)) continue;   // classic: the strobe until ack / err / rty
       const v = at(wr ? wd : rdn, k), err = !on('ack', k);
       req.beats.push({ t0: c(ks), t1: E[k], label: `${wr ? 'W' : 'R'} ${hex(a)}` });
@@ -320,6 +343,7 @@ const DECODE = {
           `state${k - ks === 1 ? '' : 's'}${err ? ' (' + (on('err', k) ? 'ERR' : 'RTY') + ')' : ''}`) }, ks, k));
       ks = null;
     }
+    unacked(pend, null); if (ks != null) unacked([cur()], null);
     p.label = pipe ? 'Wishbone pipelined' : 'Wishbone';
   },
   obi({ p, n, E, c, V, on, at, D, chan, beats, fin }) {

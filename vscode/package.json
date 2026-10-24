@@ -28,14 +28,18 @@
     "commands": [
       { "command": "wavelens.open", "title": "Open in WaveLens", "category": "WaveLens" },
       { "command": "wavelens.reload", "title": "Read the dump again", "category": "WaveLens", "icon": "$(refresh)" },
-      { "command": "wavelens.live", "title": "Connect to the agent (tools/wavemcp.py)", "category": "WaveLens" }
+      { "command": "wavelens.live", "title": "Connect to the agent (tools/wavemcp.py)", "category": "WaveLens" },
+      { "command": "wavelens.theme", "title": "Choose the theme of the waves", "category": "WaveLens", "icon": "$(symbol-color)" },
+      { "command": "wavelens.log", "title": "Show the log", "category": "WaveLens", "icon": "$(output)" }
     ],
     "menus": {
       "explorer/context": [
         { "command": "wavelens.open", "when": "resourceExtname =~ /^\\.(vcd|fst)$/i", "group": "navigation@9" }
       ],
       "editor/title": [
-        { "command": "wavelens.reload", "when": "activeCustomEditorId == wavelens.waves", "group": "navigation" }
+        { "command": "wavelens.reload", "when": "activeCustomEditorId == wavelens.waves", "group": "navigation" },
+        { "command": "wavelens.theme", "when": "activeCustomEditorId == wavelens.waves", "group": "navigation@2" },
+        { "command": "wavelens.log", "when": "activeCustomEditorId == wavelens.waves", "group": "navigation@3" }
       ],
       "commandPalette": [
         { "command": "wavelens.reload", "when": "activeCustomEditorId == wavelens.waves" },
@@ -54,6 +58,25 @@
           "type": "boolean",
           "default": true,
           "description": "Connect the open tabs to an agent's tools/wavemcp.py of this user when it starts its live link (view_live), and let it open dumps here."
+        },
+        "wavelens.theme": {
+          "type": "string",
+          "default": "auto",
+          "enum": ["auto", "vscode", "light", "white", "dark"],
+          "enumDescriptions": [
+            "The viewer's light or dark by the kind of VS Code's theme",
+            "The colours of VS Code's theme: its background, text, lines and accent (the traces' colours by its kind)",
+            "The viewer's light: grey paper that does not glare",
+            "Pure white, black traces: for print and slides",
+            "The viewer's dark"
+          ],
+          "description": "The theme of the waves (WaveLens: Choose the theme of the waves shows each on the open tabs)."
+        },
+        "wavelens.sources": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["**/*.sv", "**/*.svh"],
+          "description": "SystemVerilog sources of the workspace (globs) whose typedef enum names label the state buses of a VCD (a VCD has none: Questa writes none) and whose typedef struct packed splits a vector into fields; matched by the variable's name. Empty: none."
         },
         "wavelens.sva": {
           "type": "string",

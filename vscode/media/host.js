@@ -6,8 +6,10 @@
      host (Open… a dump: a tab of its own); no showOpenFilePicker (a handle of the client's disk);
    - navigator.clipboard.writeText -> the client's clipboard through VS Code;
    - the live link's EventSource / fetch / sendBeacon to 127.0.0.1 -> the host's 127.0.0.1 (the agent's wavemcp.py);
-   - the theme: VS Code's light / dark;
-   - a key the viewer took does not go on to VS Code (its webview forwards every keydown to the workbench).
+   - the theme: VS Code's light / dark, its own colours (wavelens.theme: vscode) or one of the viewer's;
+   - a key the viewer took does not go on to VS Code (its webview forwards every keydown to the workbench);
+   - the workspace's SystemVerilog sources (wavelens.sources): the enum names of a VCD's state buses (Sources… in the bar too);
+   - what the reader noticed in the dump (wavelens:dump, wavelens:dumperror) -> the extension's log and Problems panel.
    Then it opens the dump (fetched by its webview URI) in the viewer: ⟳ fetches it again, the view kept. */
 (() => {
   'use strict';
@@ -104,9 +106,23 @@
     try { WaveLens.live(link); } catch (e) { vscode.postMessage({ type: 'log', text: 'live: ' + e.message }); } };
 
   /* ---- the theme ---- */
-  const theme = () => { const c = document.body.classList;
-    document.documentElement.dataset.theme = c.contains('vscode-light') || c.contains('vscode-high-contrast-light') ? 'light' : 'dark'; };
+  // wavelens.theme: auto (VS Code's light / dark), vscode (the colours of VS Code's theme over its kind), light, white, dark
+  const VSC = document.createElement('style');
+  VSC.textContent = `html.wl-vscode { --bg: var(--vscode-editor-background); --panel: var(--vscode-editor-background);
+    --panel-2: var(--vscode-sideBar-background, var(--vscode-editor-background)); --fg: var(--vscode-editor-foreground);
+    --muted: var(--vscode-descriptionForeground, var(--vscode-editor-foreground));
+    --line: var(--vscode-panel-border, var(--vscode-editorGroup-border, var(--vscode-descriptionForeground)));
+    --accent: var(--vscode-textLink-foreground, var(--vscode-focusBorder)); --accent-soft: var(--vscode-editor-selectionBackground);
+    --wave-1: var(--vscode-editor-foreground); --wave-band: var(--vscode-sideBar-background, var(--vscode-editor-background)); --font-body: var(--vscode-font-family); --font-mono: var(--vscode-editor-font-family); }`;
+  document.head.append(VSC);
+  const looks = t => (['auto', 'vscode', 'light', 'white', 'dark'].includes(t) ? t : 'auto');
+  let themeSet = looks(H.theme);
+  const theme = () => { const c = document.body.classList, h = document.documentElement;
+    const kind = c.contains('vscode-light') || c.contains('vscode-high-contrast-light') ? 'light' : 'dark';
+    h.dataset.theme = themeSet === 'auto' || themeSet === 'vscode' ? kind : themeSet;
+    h.classList.toggle('wl-vscode', themeSet === 'vscode'); };
   theme(); new MutationObserver(theme).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+  on.theme = m => { themeSet = looks(m.theme); theme(); };
 
   /* ---- the dump ---- */
   const fetchDump = async () => {
@@ -118,13 +134,24 @@
   };
   const handle = { kind: 'file', name: H.name, getFile: fetchDump };   // what reloadDump (⟳) reads again
   let last = {};   // the last dump read: {name, shown, total}
-  document.addEventListener('wavelens:dump', e => { last = e.detail || {}; vscode.postMessage(Object.assign({ type: 'loaded' }, last)); },
-    true);   // capture: it does not bubble
+  // a read: its parameters and what the reader noticed go with it (the extension's log and Problems panel); one it could not
+  // read: why, and the line
+  document.addEventListener('wavelens:dump', e => { last = e.detail || {}; vscode.postMessage(Object.assign({ type: 'loaded' }, last));
+    const bad = (last.log || []).filter(x => x.level !== 'info').length;
+    if (bad) toast(`${last.name}: ${last.shown} of ${last.total} signals · ${bad} warning${bad === 1 ? '' : 's'}: the Problems panel (ctrl+shift+M), ` +
+      'WaveLens: Show the log'); }, true);   // capture: it does not bubble
+  document.addEventListener('wavelens:dumperror', e => vscode.postMessage(Object.assign({ type: 'dumperror' }, e.detail)), true);
   // one read again at a time, of the viewer that is there then (the one before is gone once it read); one asked meanwhile: once more after
+  // the workspace's SystemVerilog sources (wavelens.sources) before each read: their enum names on a VCD's state buses
+  // (the workspace's set: none found clears it, the ones of Sources… stay); -> the viewer there after the wait
+  const sources = async () => { const s = await call('sources', {}), v = view();
+    if (v) v.useSources(s.texts && s.texts.length ? WaveLens.svTables(s.texts) : null, 'workspace');
+    return v; };
   let busy = null, again = false;
   const reload = () => {
     if (busy) { again = true; return busy; }
-    busy = (async () => { do { again = false; const v = view(); if (v) await RELOAD.call(v); } while (again); })().finally(() => { busy = null; });
+    busy = (async () => { do { again = false; const v = await sources(); if (v) await RELOAD.call(v); } while (again); })()
+      .finally(() => { busy = null; });
     return busy;
   };
   let RELOAD = null;
@@ -143,7 +170,7 @@
       if (e.defaultPrevented && !((e.ctrlKey || e.metaKey) && e.shiftKey && e.code !== 'KeyZ')) e.stopPropagation(); });
     const P = WaveLens.WaveView.prototype; RELOAD = P.reloadDump; P.reloadDump = function () { return reload(); };   // ⟳ of the bar too
     const v = view(); let nv = v;
-    try { nv = await v.openDump(await fetchDump(), handle); }
+    try { await sources(); nv = await view().openDump(await fetchDump(), handle); }
     catch (e) { if (v) v.toast('cannot read ' + H.name + ': ' + e.message); vscode.postMessage({ type: 'log', text: String(e.stack || e) }); }
     vscode.postMessage(Object.assign({ type: 'ready', title: nv && nv.opts.title }, last));
   });

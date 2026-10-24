@@ -83,9 +83,21 @@
     compare is converted too); <span class="ui">Open…</span> a dump opens a tab of its own.</td></tr>
   <tr><td>what you did</td><td>bookmarks, groups, colours, radix, hidden rows and the assertion bindings are kept per dump in the
     workspace: they survive closing the tab and VS Code.</td></tr>
-  <tr><td>theme and keys</td><td>VS Code's light or dark theme; the viewer's keys (<kbd>?</kbd>) work in the tab and do not reach
+  <tr><td>theme and keys</td><td><code>wavelens.theme</code>: the viewer's light or dark by VS Code's (<code>auto</code>), the
+    colours of VS Code's own theme (<code>vscode</code>), or always <code>light</code>, <code>white</code> or <code>dark</code>;
+    <i>WaveLens: Choose the theme of the waves</i> (the editor's title) shows each on the open tabs as you move through the list.
+    The viewer's keys (<kbd>?</kbd>) work in the tab and do not reach
     VS Code (<kbd>ctrl+G</kbd> is the list of your groups, not Go to Line); <kbd>ctrl+P</kbd>, <kbd>F1</kbd>, <kbd>ctrl+Tab</kbd> stay
     VS Code's.</td></tr>
+  <tr><td>state names</td><td>a VCD has no enum names (Questa writes none, its int-based enums come as <code>integer</code>,
+    shown in decimal): the tab reads the workspace's SystemVerilog sources (<code>wavelens.sources</code>) at each read and names
+    the state buses declared with a <code>typedef enum</code> there, by the variable's name; <span class="ui">Sources…</span> in the
+    bar picks other files.</td></tr>
+  <tr><td>the log</td><td>each read writes the dump's parameters (size, <code>$version</code>, <code>$timescale</code>, its time,
+    scopes, signals, value changes) and what the reader noticed to the output channel <b>WaveLens</b>, a note as
+    <code>path:line: warning: …</code>; the same notes stand in the <b>Problems</b> panel (<kbd>ctrl+shift+M</kbd>) on their lines
+    (a click opens the dump there) until the tab closes. A dump it cannot read is an error there, with a message that opens the
+    line. <i>WaveLens: Show the log</i> in the editor's title.</td></tr>
   <tr><td>a big dump</td><td>the cut of <code>dumpBudget</code> applies; the whole VCD text crosses to your machine once per
     read.</td></tr>
 </table>
@@ -101,17 +113,21 @@
 <h2 id="settings">Settings and troubleshooting</h2>
 <table>
   <tr><th>Setting</th><th>Default</th><th>Does</th></tr>
+  <tr><td><code>wavelens.theme</code></td><td>auto</td><td>the theme of the waves: <code>auto</code> (by VS Code's light / dark),
+    <code>vscode</code> (VS Code's colours), <code>light</code>, <code>white</code>, <code>dark</code></td></tr>
+  <tr><td><code>wavelens.sources</code></td><td><code>**/*.sv</code>, <code>**/*.svh</code></td><td>the workspace's SystemVerilog
+    sources whose <code>typedef enum</code> names a VCD's state buses (empty: none)</td></tr>
   <tr><td><code>wavelens.autoReload</code></td><td>false</td><td>after a new simulation: read the dump at once (false: offer ⟳)</td></tr>
   <tr><td><code>wavelens.live</code></td><td>true</td><td>the tabs connect to an agent's live link (false: they do not)</td></tr>
   <tr><td><code>wavelens.sva</code></td><td></td><td>another <code>sva</code> program than the one the extension carries</td></tr>
 </table>
-<p>The output channel <b>WaveLens</b> (View → Output) logs what went wrong: a dump that could not be read, an FST the
-  <code>sva</code> could not convert, the live link. A host that is not Linux x86-64 needs <code>wavelens.sva</code> pointing at a
+<p>The output channel <b>WaveLens</b> (View → Output, or <i>WaveLens: Show the log</i>) logs each read and what went wrong: a
+  dump that could not be read (with its line, also in the Problems panel), an FST the <code>sva</code> could not convert, the live link. A host that is not Linux x86-64 needs <code>wavelens.sva</code> pointing at a
   <code>sva</code> built there (<code>make sva-build</code>).</p>
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.18 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.19 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

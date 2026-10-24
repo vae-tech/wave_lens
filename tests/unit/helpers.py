@@ -1,10 +1,31 @@
 """Shared pieces of the unit tests: the fixtures, a scratch directory, the tools run as a user runs them."""
-import contextlib, io, json, os, subprocess, sys, tempfile
+import contextlib, functools, io, json, os, subprocess, sys, tempfile, unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 TOOLS = os.path.join(ROOT, 'tools')
 VCD = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vcd')
 BUILD = os.environ.get('BUILD') or os.path.join(ROOT, 'out')
+STRICT = bool(os.environ.get('WAVELENS_STRICT'))   # make check: what the gate builds (the examples, sva) must be there
+
+
+def skip(case, why, built=True):
+    """case.skipTest(why); under make check (WAVELENS_STRICT) a test that lacks what the gate builds (built) fails instead:
+    a parity test skipped on a clean tree passed the gate before (review IV B7). Other programs (GTKWave): built=False."""
+    if STRICT and built:
+        case.fail(f'not there though make check builds it: {why}')
+    case.skipTest(why)
+
+
+def needs(cond, why):
+    """@unittest.skipUnless(cond, why), for a test or a class, that fails instead under make check (skip())."""
+    if cond or not STRICT:
+        return unittest.skipUnless(cond, why)
+    def deco(obj):
+        if isinstance(obj, type):
+            obj.setUp = lambda self: self.fail(f'not there though make check builds it: {why}')
+            return obj
+        return functools.wraps(obj)(lambda self, *a, **k: self.fail(f'not there though make check builds it: {why}'))
+    return deco
 
 
 def fixture(name):

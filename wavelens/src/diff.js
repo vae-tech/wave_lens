@@ -64,9 +64,11 @@ Object.assign(WaveView.prototype, {
     if (!this.M.timed || !mine.length) {
       this.toast('compare: these waves are clock-sampled (one cell per cycle): open the dump itself (Open…) and compare that'); return null; }
     const nm = name || file.name || 'B';
+    // a compare that fails leaves the one before as it was, and says so (its bands are still drawn)
+    const still = () => (this.cmp ? `; still compared with ${this.cmp.name}` : '');
     let doc;
     try { const text = typeof file === 'string' ? file : await file.text(); doc = vcdToWave(text, { name: nm, budget: this.S.dumpBudget }).doc; }
-    catch (e) { if (req === this.cmpReq && this.root.isConnected && VIEWS.has(this)) this.toast(`${nm}: ${e.message}`); return null; }
+    catch (e) { if (req === this.cmpReq && this.root.isConnected && VIEWS.has(this)) this.toast(`${nm}: ${e.message}${still()}`); return null; }
     if (req !== this.cmpReq || !this.root.isConnected || !VIEWS.has(this)) return null;   // compared again, or no more, meanwhile
     const brows = parse(doc).rows.filter(r => r.type === 'sig' && r.tr), bs = new Map(brows.map(r => [r.path || r.full, r])), byLeaf = new Map();
     for (const r of brows) { const k = (r.path || r.full).split('.').pop(); byLeaf.set(k, (byLeaf.get(k) || []).concat([r])); }
@@ -78,7 +80,7 @@ Object.assign(WaveView.prototype, {
     const from = Math.max(this.M.t0, doc.time.t0 ?? 0), to = Math.min(this.M.t1, doc.time.t1 ?? this.M.t1), rows = new Map();
     const f = t => this.fmt(t, (this.M.t1 - this.M.t0) / 1000, this.M.t1 - this.M.t0);
     if (to <= from) { this.toast(`${nm}: no time in common (these waves ${f(this.M.t0)} … ${f(this.M.t1)}, ${nm} ${f(doc.time.t0 ?? 0)} … ` +
-      `${f(doc.time.t1)}): nothing compared`); return null; }
+      `${f(doc.time.t1)}): nothing compared${still()}`); return null; }
     let differ = 0, missing = 0, omitted = 0; const byName = [];
     for (const a of mine) {
       // left out of B by its reader: under any name it could have there (then not looked for under another one)

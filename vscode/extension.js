@@ -5,7 +5,7 @@
    FST turned into VCD text first by the bundled sva, kept in the extension's storage). media/host.js brings here what a
    browser would do itself: the downloads (a save dialog on the host), the file pickers, the clipboard, localStorage
    (this dump's store in workspaceState), the agent's live link (tools/wavemcp.py listens on the host's 127.0.0.1, which
-   the client cannot reach: this side relays it). Nothing is installed on the host: node is VS Code's, sva is static. */
+   the client cannot reach: this side relays it), the theme (wavelens.theme). Nothing is installed on the host: node is VS Code's, sva is static. */
 const vscode = require('vscode'), fs = require('fs'), path = require('path'), os = require('os'), crypto = require('crypto');
 const http = require('http'), cp = require('child_process');
 
@@ -13,7 +13,7 @@ const VIEW = 'wavelens.waves';
 const MEDIA = ['wavelens.css', 'wavelens.config.js', 'wavelens.js', 'sva.wasm.js', 'bus.js', 'sva.js'];
 const TABS = new Set();
 const EVENTS = new vscode.EventEmitter();   // {type, tab, …} from the webviews (ready, loaded): the tests listen
-let CTX, OUT;
+let CTX, OUT, DIAG;
 
 const log = s => OUT && OUT.appendLine(`[${new Date().toISOString().slice(11, 19)}] ${s}`);
 const exists = p => { try { fs.accessSync(p); return true; } catch (e) { return false; } };
@@ -78,6 +78,57 @@ async function evict(dir) {
   for (const [p, t] of all.slice(16)) if (!used.has(p) && now - t > 600e3) await fs.promises.unlink(p).catch(() => {});
 }
 
+/* ---------------- the workspace's SystemVerilog sources (wavelens.sources) ---------------- */
+// The files that declare an enum or a packed struct, and the files that use one of those types (a module's "p::state_t
+// state;" with the typedef in a package): their texts for svTables in the tab. Each file's text is kept by its size and
+// time (every tab and every read share it: a reload reads only what changed); a file above 8 MB is not read, at most 4000
+// files and 64 MB are read (and kept) in all, 32 MB of texts go to a tab; what is left out is said. Calls while one runs
+// share it.
+const SRC = new Map();   // path -> {size, mtime, text}
+const SRC_MAX_FILE = 8 << 20, SRC_MAX_READ = 64 << 20, SRC_MAX_ALL = 32 << 20, SRC_MAX_N = 4000;
+const SRC_TYPES = [/\btypedef\s+enum\b[^{;]*\{[^}]*\}\s*(\w+)\s*;/g, /\btypedef\s+struct\s+packed\b[^{;]*\{[^}]*\}\s*(\w+)\s*;/g];
+let SRC_JOB = null;
+function workspaceSources() {
+  if (!SRC_JOB) SRC_JOB = scanSources().finally(() => { SRC_JOB = null; });
+  return SRC_JOB;
+}
+async function scanSources() {
+  const globs = vscode.workspace.getConfiguration('wavelens').get('sources') || [];
+  const out = { texts: [], files: 0, types: 0, left: 0, why: '' };
+  if (!globs.length || !vscode.workspace.workspaceFolders) { SRC.clear(); return out; }
+  const paths = new Set(); let many = false;
+  for (const g of globs) for (const u of await vscode.workspace.findFiles(g, '**/{node_modules,.git}/**', SRC_MAX_N + 1)) {
+    if (paths.size < SRC_MAX_N) paths.add(u.fsPath); else if (!paths.has(u.fsPath)) many = true; }
+  const texts = new Map(), big = []; let read = 0, over = 0;
+  for (const p of paths) {
+    let st; try { st = await fs.promises.stat(p); } catch (e) { continue; }
+    if (st.size > SRC_MAX_FILE) { big.push(path.basename(p)); continue; }
+    if (read + st.size > SRC_MAX_READ) { over++; continue; }   // before reading it: the bytes in all stay bounded, the cache too
+    read += st.size;
+    let c = SRC.get(p);
+    if (!c || c.size !== st.size || c.mtime !== st.mtimeMs) {
+      try { c = { size: st.size, mtime: st.mtimeMs, text: await fs.promises.readFile(p, 'utf8') }; } catch (e) { continue; }
+      SRC.set(p, c);
+    }
+    texts.set(p, c.text);
+  }
+  for (const p of [...SRC.keys()]) if (!texts.has(p)) SRC.delete(p);   // gone, or out of the globs now
+  // the types declared, then every file that declares one or names one (or has an anonymous enum)
+  const types = new Set();
+  for (const t of texts.values()) for (const re of SRC_TYPES) for (const m of t.matchAll(re)) types.add(m[1]);
+  const uses = types.size ? new RegExp(`\\b(?:${[...types].map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`) : null;
+  let size = 0, cut = 0;
+  for (const t of texts.values()) {
+    if (!/\benum\b|\bstruct\s+packed\b/.test(t) && !(uses && uses.test(t))) continue;
+    if (size + t.length > SRC_MAX_ALL) { cut++; continue; }
+    out.texts.push(t); size += t.length;
+  }
+  Object.assign(out, { files: paths.size, types: types.size, left: big.length + over + cut + (many ? 1 : 0),
+    why: [big.length ? `${big.length} above 8 MB: ${big.slice(0, 3).join(', ')}` : '', over ? `${over} past 64 MB read` : '',
+      cut ? `${cut} past 32 MB sent` : '', many ? `more than ${SRC_MAX_N} files: the first ${SRC_MAX_N}` : ''].filter(Boolean).join('; ') });
+  return out;
+}
+
 /* ---------------- a tab: one dump in a webview ---------------- */
 class Tab {
   constructor(uri, panel) {
@@ -99,7 +150,8 @@ class Tab {
     const u = (root, f) => w.asWebviewUri(vscode.Uri.file(path.join(root, f))).toString();
     const name = path.basename(this.file), esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
     const json = s => JSON.stringify(s).replace(/</g, '\\u003c');
-    const host = { name, path: this.file, store: this.store, autoReload: !!vscode.workspace.getConfiguration('wavelens').get('autoReload') };
+    const host = { name, path: this.file, store: this.store, autoReload: !!vscode.workspace.getConfiguration('wavelens').get('autoReload'),
+      theme: themeOf() };
     const scripts = MEDIA.filter(f => f.endsWith('.js')).map(f => `<script nonce="${nonce}" src="${u(r.wavelens, f)}"></script>`).join('\n');
     return `<!doctype html>
 <html lang="en">
@@ -125,7 +177,7 @@ ${scripts}
 </html>`;
   }
   async source() {   // -> {src, name}: the URI the webview fetches now (an FST: its VCD text, converted when it changed)
-    const f = this.src = await vcdOf(this.file);
+    let f; try { f = this.src = await vcdOf(this.file); } catch (e) { this.report({ error: e.message }); throw e; }
     return { src: this.panel.webview.asWebviewUri(vscode.Uri.file(f)).toString(), name: path.basename(this.file) };
   }
   async message(m) {
@@ -141,18 +193,48 @@ ${scripts}
       }
       case 'save': return reply(await this.save(String(m.name || 'wavelens.out'), Buffer.from(String(m.b64 || ''), 'base64')));
       case 'pick': return reply(await this.pick(String(m.accept || ''), !!m.multiple));
+      case 'sources': return reply(await this.sources());
       case 'clip': await vscode.env.clipboard.writeText(String(m.text ?? '')); return reply({ ok: true });
       case 'result': { const w = this.wait.get(m.rid); if (w) { this.wait.delete(m.rid); w(m.results); } return; }
       case 'ready': case 'loaded':
         this.info = { shown: m.shown, total: m.total, title: m.title };
         if (m.type === 'ready') { this.ready = true; liveTo(this); }
+        if (m.type === 'loaded') this.report(m);
         EVENTS.fire(Object.assign({}, m, { tab: this }));
         return;
+      case 'dumperror': this.report(m); EVENTS.fire(Object.assign({}, m, { tab: this })); return;
       case 'log': log(`${path.basename(this.file)}: ${m.text}`); return;
       case 'es-open': return this.esOpen(m.sid, String(m.url));
       case 'es-close': { const s = this.streams.get(m.sid); this.streams.delete(m.sid); if (s) s.close(); return; }
       case 'http': return reply(await relay(this, String(m.url), m.body == null ? '' : String(m.body)));
     }
+  }
+  /* A read of the dump -> the output channel (its parameters, then each note as "path:line: level: text", a link there) and
+     the Problems panel (a note on its line: a click opens the dump there). An FST's notes are about its VCD text: on the
+     FST's first line, the line of the text with them. One it could not read: also a message with the way to the line. */
+  report(m) {
+    const fst = /\.fst$/i.test(this.file), text = fst && this.src ? this.src : this.file, name = path.basename(this.file);
+    const notes = (m.log || []).concat(m.error ? [{ level: 'error', text: m.error, line: m.line }] : []);
+    if (m.info) log(`${name}: ${dumpInfo(m.info, m.shown)}`);
+    else if (m.error) log(`${name}: not read`);
+    for (const x of notes) OUT.appendLine(`  ${text}${x.line ? ':' + x.line : ''}: ${x.level}: ${x.text}`);
+    const SEV = { error: vscode.DiagnosticSeverity.Error, warning: vscode.DiagnosticSeverity.Warning, info: vscode.DiagnosticSeverity.Information };
+    DIAG.set(this.uri, notes.map(x => {
+      const at = x.line && !fst ? x.line - 1 : 0, d = new vscode.Diagnostic(new vscode.Range(at, 0, at, 4096),
+        x.text + (fst && x.line ? ` (line ${x.line} of its VCD text)` : ''), SEV[x.level] ?? vscode.DiagnosticSeverity.Warning);
+      d.source = 'WaveLens';
+      if (fst && x.line && this.src) d.relatedInformation = [new vscode.DiagnosticRelatedInformation(
+        new vscode.Location(vscode.Uri.file(this.src), new vscode.Position(x.line - 1, 0)), 'the line in the VCD text of the FST')];
+      return d;
+    }));
+    if (!m.error) { this.lastErr = null; return; }
+    if (m.error === this.lastErr) return;   // the same error again (autoReload of a dump written broken again): the log and Problems say it
+    this.lastErr = m.error;
+    const go = m.line ? 'Open at the line' : null;
+    vscode.window.showErrorMessage(`WaveLens: ${name}: ${m.error}`, ...[go, 'Show the log'].filter(Boolean)).then(c => {
+      if (c === 'Show the log') OUT.show(true);
+      else if (c === go) vscode.window.showTextDocument(vscode.Uri.file(text), { selection: new vscode.Range(m.line - 1, 0, m.line - 1, 0) });
+    });
   }
   flush() {   // the keys this tab changed onto what is kept now (another window of the workspace may have written others)
     clearTimeout(this.storeT); this.storeT = null;
@@ -185,6 +267,14 @@ ${scripts}
       files.push({ name: path.basename(u.fsPath), path: u.fsPath, mtime: st.mtimeMs, b64: (await fs.promises.readFile(f)).toString('base64') });
     }
     return { files };
+  }
+  // the workspace's SystemVerilog sources for the tab (wavelens.sources): their enum names label a VCD's state buses
+  async sources() {
+    const s = await workspaceSources();
+    const say = `${s.texts.length} of ${s.files} SystemVerilog sources: ${s.types} enum / packed-struct types` + (s.left ? `, ${s.left} left out (${s.why})` : '');
+    if (say !== this.srcSaid) log(`${path.basename(this.file)}: ${say} (wavelens.sources)`);
+    this.srcSaid = say;
+    return { texts: s.texts };
   }
   // the dump changed on the disk: once its size and time have stood still for a second (the simulator done writing)
   watch() {
@@ -242,10 +332,48 @@ ${scripts}
   }
   dispose() {
     TABS.delete(this); fs.unwatchFile(this.file, this.onStat); clearTimeout(this.changeT);
+    try { DIAG.delete(this.uri); } catch (e) { /* disposed: the window closes */ }
     this.flush();
     for (const s of this.streams.values()) s.close();
     this.streams.clear();
   }
+}
+
+// the parameters of a dump read: "12.4 MB · Icarus Verilog · 1ps · 0 … 1.2 ms · 3 scopes · 120 of 140 signals · 51 230 changes"
+function dumpInfo(i, shown) {
+  const mb = i.size >= 1 << 20 ? `${(i.size / (1 << 20)).toFixed(1)} MB` : `${Math.ceil(i.size / 1024)} kB`;
+  const t = ps => { if (!ps) return '0'; const u = [['s', 1e12], ['ms', 1e9], ['us', 1e6], ['ns', 1e3], ['ps', 1], ['fs', 1e-3]].find(x => Math.abs(ps) >= x[1]) ||
+    ['fs', 1e-3]; return `${+(ps / u[1]).toPrecision(4)} ${u[0]}`; };
+  return [mb, i.version, i.date, i.timescale ? `timescale ${i.timescale}` : 'no $timescale (1 ps)', `${t(i.t0)} … ${t(i.t1)}`,
+    `${i.scopes} scope${i.scopes === 1 ? '' : 's'}`, `${i.shown ?? shown} of ${i.signals} signals`, `${i.changes} value changes`].filter(Boolean).join(' · ');
+}
+
+/* ---------------- the theme: wavelens.theme, chosen with a preview on the open tabs ---------------- */
+const THEMES = [
+  ['auto', 'Follow VS Code', 'the viewer\'s light or dark by the kind of VS Code\'s theme'],
+  ['vscode', 'VS Code\'s colours', 'the background, text, lines and accent of VS Code\'s theme'],
+  ['light', 'Light', 'grey paper that does not glare'],
+  ['white', 'White', 'pure white, black traces: for print and slides'],
+  ['dark', 'Dark', 'the viewer\'s dark'],
+];
+const themeOf = () => vscode.workspace.getConfiguration('wavelens').get('theme') || 'auto';
+const themeAll = t => { for (const tab of TABS) tab.post({ type: 'theme', theme: t }); };
+async function chooseTheme() {
+  const now = themeOf(), qp = vscode.window.createQuickPick();
+  qp.title = 'WaveLens: the theme of the waves'; qp.placeholder = 'the open tabs show it as you move';
+  qp.items = THEMES.map(([id, label, detail]) => ({ id, label: label + (id === now ? '  ✓' : ''), detail }));
+  qp.activeItems = qp.items.filter(i => i.id === now);
+  let picked = null;
+  qp.onDidChangeActive(a => a[0] && themeAll(a[0].id));
+  qp.onDidAccept(() => { picked = qp.selectedItems[0] || qp.activeItems[0]; qp.hide(); });
+  const hidden = new Promise(ok => qp.onDidHide(ok));
+  qp.show();
+  try { await hidden; } finally { qp.dispose(); }
+  if (!picked) { themeAll(now); return; }   // Esc: as it was
+  // the workspace's own setting when it has one, else the user's
+  const inspect = vscode.workspace.getConfiguration('wavelens').inspect('theme');
+  const where = inspect && inspect.workspaceValue !== undefined ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
+  await vscode.workspace.getConfiguration('wavelens').update('theme', picked.id, where);
 }
 
 /* ---------------- the agent's live link (tools/wavemcp.py) ---------------- */
@@ -345,7 +473,8 @@ async function liveOpens() {   // view_live {page: a dump, open: true}: the tab 
 
 /* ---------------- activation ---------------- */
 function activate(ctx) {
-  CTX = ctx; OUT = vscode.window.createOutputChannel('WaveLens'); ctx.subscriptions.push(OUT, EVENTS);
+  CTX = ctx; OUT = vscode.window.createOutputChannel('WaveLens'); DIAG = vscode.languages.createDiagnosticCollection('wavelens');
+  ctx.subscriptions.push(OUT, EVENTS, DIAG);
   ctx.subscriptions.push(vscode.window.registerCustomEditorProvider(VIEW, {
     openCustomDocument: uri => ({ uri, dispose() {} }),
     resolveCustomEditor: (doc, panel) => { new Tab(doc.uri, panel); },
@@ -359,6 +488,9 @@ function activate(ctx) {
         .then(u => u && u[0] && vscode.commands.executeCommand('vscode.openWith', u[0], VIEW));
     }),
     vscode.commands.registerCommand('wavelens.reload', () => { const t = active(); if (t) t.post({ type: 'reload' }); }),
+    vscode.commands.registerCommand('wavelens.theme', chooseTheme),
+    vscode.commands.registerCommand('wavelens.log', () => OUT.show(true)),
+    vscode.workspace.onDidChangeConfiguration(e => { if (e.affectsConfiguration('wavelens.theme')) themeAll(themeOf()); }),
     vscode.commands.registerCommand('wavelens.live', () => {
       liveCheck(); const t = active();
       if (!liveOn()) vscode.window.showInformationMessage('WaveLens: the setting wavelens.live is off');
@@ -367,7 +499,7 @@ function activate(ctx) {
     }));
   const timer = setInterval(liveCheck, 1500); ctx.subscriptions.push({ dispose: () => clearInterval(timer) });
   liveCheck();
-  return { events: EVENTS.event, tabs: () => [...TABS], vcdOf };   // for the tests (vscode/test)
+  return { events: EVENTS.event, tabs: () => [...TABS], vcdOf, problems: uri => DIAG.get(uri) || [] };   // for the tests (vscode/test)
 }
 function deactivate() { for (const t of TABS) t.dispose(); }
 module.exports = { activate, deactivate };
