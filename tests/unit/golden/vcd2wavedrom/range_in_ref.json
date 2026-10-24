@@ -1,0 +1,12 @@
+{
+ "signal": [
+  ["tb",
+    {"name": "data", "width": 8, "wave": "=", "data": ["0x01"], "tv": [[0, "01"], [10000, "02"]], "path": "tb.data"},
+    {"name": "mem", "width": 2, "wave": "=", "data": ["1"], "tv": [[0, "1"], [10000, "2"]], "path": "tb.mem"}
+  ]
+ ],
+ "head": {"text": "range_in_ref.vcd"},
+ "time": {"t0": 0, "t1": 10000, "cycle": 10000, "unit": "ps"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "range_in_ref.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 0, "to_ps": 10000}
+}

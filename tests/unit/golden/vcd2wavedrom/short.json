@@ -1,0 +1,12 @@
+{
+ "signal": [
+  ["tb",
+    {"name": "b", "width": 8, "wave": "==", "data": ["0x01", "xx"], "tv": [[0, "01"], [10000, "'bxxxxxxx1"], [20000, "ff"]], "path": "tb.b"},
+    {"name": "c", "width": 12, "wave": "=z", "data": ["0x005"], "tv": [[0, "005"], [10000, "z"], [20000, "'bzzzzzzzzzzz1"]], "path": "tb.c"}
+  ]
+ ],
+ "head": {"text": "short.vcd"},
+ "time": {"t0": 0, "t1": 20000, "cycle": 10000, "unit": "ps"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "short.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 0, "to_ps": 20000}
+}

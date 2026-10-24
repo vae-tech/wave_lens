@@ -6,7 +6,9 @@ under its full hierarchical path, one line each, with per-signal settings to fil
   mkconfig.py dump.vcd --base my.base.json --out my.config.json
   mkconfig.py dump.vcd --out dump.config.json --update # dump changed: add new signals, drop gone ones, keep all edits
   mkconfig.py dump.fst                                 # FST: read through GTKWave's fst2vcd (or sva vcd), FSM enum labels included
-  mkconfig.py dump.vcd --sv rtl/*.sv                   # VCD: enum labels from "typedef enum", fields of "typedef struct packed"
+  mkconfig.py dump.vcd                                 # dump.types.json beside it (Questa / Verilator): states and structs by path
+  mkconfig.py dump.vcd --types other.types.json        # the types of the design from another file (tools/svtypes.py)
+  mkconfig.py dump.vcd --sv rtl/*.sv                   # no types file: enum labels by the variable's name from the sources
   mkconfig.py dump.fst --sva checks/*.sva              # assertions: "sva" and a "bind" line per matching instance
 
 Per-signal entry ("" = the global setting from "config"):
@@ -14,8 +16,9 @@ Per-signal entry ("" = the global setting from "config"):
   show   true/false (false: left out of the page)        radix  auto hex dec signed bin oct ascii float q8 sq15
   color  trace / outline / name colour, e.g. "#e03131"   style  auto wavedrom questa square
   also   "alias": "name shown", "fill": "#ffe066" (bus fill), "enum": {"0": "IDLE", "1": "RUN"}
-  width and changes (value changes in the dump) are information only. "enum" is filled from the dump (FST enum tables)
-  or from --sv sources, so FSM states show by name. A $dumpoff block (every value x) counts as changes; event
+  width and changes (value changes in the dump) are information only. "enum" is filled from the dump (FST enum tables),
+  from a types file (--types, or <dump>.types.json beside the dump: tools/svtypes.py) or from --sv sources, so FSM
+  states show by name. A $dumpoff block (every value x) counts as changes; event
   variables are left out (no value to draw), real and string ones are labelled with their texts.
 
 Base file (--base, default tools/base.config.json beside this script): copied into the new config, except two generator keys
@@ -32,14 +35,15 @@ one (else false, with the number of candidates in "comment": set "show": true on
 the "show" choices.
 
 --update refuses a dump that lost more than half of the config's signals (another design?) unless --force, and points
-"waves" at the dump it read.
+"waves" at the dump it read. What a types file gave is listed in "typed" ({path: mark}): --update replaces those "enum" /
+"fields" with the types' of now (or takes them away), unless you edited them; an "enum" of your own stays.
 """
-import argparse, json, os, re, sys
+import argparse, hashlib, json, os, re, sys
 
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)   # -I drops the script dir from sys.path
-import dumpscan, svabuild, vcd2wavedrom  # noqa: E402
+import dumpscan, svabuild, svtypes, vcd2wavedrom  # noqa: E402
 from common import SELECT_KEYS, WaveError, add_sva_bin_arg, check_config, glob_re, run_main  # noqa: E402
 
 ROOT = os.path.dirname(HERE)
@@ -79,6 +83,34 @@ SV_ANON = re.compile(r'(?<!typedef)\s\benum\b[^{;]*\{([^}]*)\}\s*(\w+(?:\s*,\s*\
 SV_SKIP = re.compile(r'\bfunction\b.*?\bendfunction\b|\btask\b.*?\bendtask\b', re.S)
 SV_BODY = re.compile(r'\b(?:struct|union)\b[^{};]*\{[^{}]*\}')
 SV_BLANK = re.compile(r'"(?:[^"\\\n]|\\.)*"|//[^\n]*|/\*.*?\*/', re.S)
+# a plain vector or integer variable ("logic [1:0] state;", a port): a name it has besides a type's is not labelled
+SV_PLAIN = re.compile(r'\b(?:logic|reg|wire|bit|byte|shortint|int|longint|integer)\b\s*(?:signed|unsigned)?\s*(?:\[[^\]]*\]\s*)*'
+                      r'(\w+(?:\s*(?:\[[^\]]*\]\s*)*,\s*\w+)*)\s*(?:\[[^\]]*\]\s*)*[;=,)]')
+
+
+SV_ONE = re.compile(r'\s*(\w+)\s*(?:\[[^\]]*\]\s*)*(?:=[\s\S]*)?')
+
+
+def sv_names(t, at):
+    """The names a declaration declares, its list read from offset at: "a [3:0] = f(x, y), b, c;" -> [a, b, c]; it ends
+    at the ; (or the ) of a port list), and a part that is not "name [dims] = value" (the next port's type) is none."""
+    parts, depth, cur = [], 0, []
+    for ch in t[at:]:
+        if ch in '([{':
+            depth += 1
+        elif ch in ')]}':
+            if not depth:
+                break
+            depth -= 1
+        elif not depth and ch in ',;':
+            parts.append(''.join(cur))
+            cur = []
+            if ch == ';':
+                break
+            continue
+        cur.append(ch)
+    parts.append(''.join(cur))
+    return [m.group(1) for m in map(SV_ONE.fullmatch, parts) if m]
 
 
 def sv_signals_text(t):
@@ -150,8 +182,8 @@ def sv_tables(texts):
     "typedef enum … {A, B = 2'd3} name_t;" and "typedef struct packed {…} name_t;" (fields MSB first; a member of a width
     it cannot tell leaves the struct out), then the declarations of signals with those types ("p::name_t a, b;", ports,
     arrays "name_t a [4];"; not function arguments, not struct members) and "enum {…} st;". By the variable's name only:
-    a name declared with two different types (two modules) gets nothing, and a note says so; so does an enum it does
-    not read."""
+    a name declared with two different types (two modules; one a plain vector) gets nothing, and a note says so; so does
+    an enum it does not read."""
     texts = [SV_BLANK.sub(lambda m: '""' if m.group(0)[0] == '"' else ' ', t) for t in texts]
     types, widths, bodies, anon, notes, twice = {}, {}, {}, [], [], set()
     for t in texts:
@@ -218,9 +250,10 @@ def sv_tables(texts):
         decl = re.compile(r'\b(?:\w+::)?(' + '|'.join(map(re.escape, known)) + r')\b\s+(?:\[[^\]]*\]\s*)*'
                           r'(\w+(?:\s*(?:\[[^\]]*\]\s*)*,\s*\w+)*)\s*(?:\[[^\]]*\]\s*)*[;=,)]')
         for t in texts:
-            for m in decl.finditer(sv_signals_text(t)):
+            st = sv_signals_text(t)
+            for m in decl.finditer(st):
                 ty = m.group(1)
-                for n in re.split(r'\s*(?:\[[^\]]*\]\s*)*,\s*', m.group(2)):
+                for n in sv_names(st, m.start(2)):   # (each name past an initialiser too)
                     if not n or n in SV_WORDS or n in types or n in fields:
                         continue
                     if ty in fields:
@@ -229,6 +262,12 @@ def sv_tables(texts):
                         put(n, ('e', types[ty]))
                     elif ty in bodies:   # a struct whose fields it cannot tell (or defined twice): the name is taken
                         put(n, ('s', None))
+    for t in texts:   # the same name as a plain vector somewhere (another module's state): which one a signal is is not known
+        st = sv_signals_text(t)
+        for m in SV_PLAIN.finditer(st):
+            for n in sv_names(st, m.start(1)):
+                if n and n not in SV_WORDS:
+                    put(n, ('p', None))
     enums = {k: v[1] for k, v in cand.items() if v[0] == 'e' and v[1]}
     structs = {k: v[1] for k, v in cand.items() if v[0] == 's' and v[1]}
     notes += [f'{n}: declared with different types (in different modules?): no labels' for n in sorted(clash)]
@@ -288,24 +327,46 @@ def build(sigs: list, base: dict) -> dict:
     return cat
 
 
-def merge(old: dict, new: dict) -> dict:
-    """Keep every edit of an existing catalog; take paths, order, width and changes from the dump. A per-signal key
-    the converter does not know (a typo) is an error now, not when the page is built."""
+def typed_mark(e):
+    """What a types file gave a signal ("enum" / "fields" as the config has them) -> a short mark, kept in the config's
+    "typed" {path: mark}: --update tells the types' own from an edit by it."""
+    v = json.dumps({k: e[k] for k in ('enum', 'fields') if k in e}, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha1(v.encode()).hexdigest()[:10]
+
+
+def merge(old: dict, new: dict, typed=None, was=None):
+    """Keep every edit of an existing catalog; take paths, order, width and changes from the dump. "enum" / "fields" of
+    a path the types file gave before (was: the config's "typed") and nobody edited since are the types' now (typed:
+    {path: mark}, None without a types file): replaced, or gone when it gives none (the type changed, the width no
+    longer fits); an edited one and the user's own stay. -> (catalog, "typed" of the new config). A per-signal key the
+    converter does not know (a typo) is an error now, not when the page is built."""
     for p, e in old.items():
         bad = set(e or {}) - set(vcd2wavedrom.SIG_KEYS)
         if bad:
             die(f'{p}: unknown signal setting(s) {", ".join(sorted(bad))} (have: {", ".join(vcd2wavedrom.SIG_KEYS)})')
-    out = {}
+    typed, was = dict(typed or {}), dict(was or {})
+    out, kept = {}, []
     for p, e in new.items():
         if p in old:
-            e = {**old[p], **{k: e[k] for k in INFO if k in e}, **{k: e[k] for k in ('enum', 'fields') if k in e and k not in old[p]}}
+            mine = {k: old[p][k] for k in ('enum', 'fields') if k in old[p]}
+            if p in was and typed_mark(mine) == was[p]:   # the types' before, untouched: the types' (or the dump's) now
+                e = {**{k: x for k, x in old[p].items() if k not in mine}, **{k: e[k] for k in INFO if k in e},
+                     **{k: e[k] for k in ('enum', 'fields') if k in e}}
+            else:
+                if mine and p in typed and typed_mark(mine) != typed[p]:
+                    kept.append(p)
+                    typed.pop(p)   # yours: not the types' any more
+                e = {**old[p], **{k: e[k] for k in INFO if k in e}, **{k: e[k] for k in ('enum', 'fields') if k in e and k not in old[p]}}
         out[p] = e
     gone = [p for p in old if p not in new]
     if gone:
         print(f'mkconfig: {len(gone)} signal(s) no longer in the dump, removed: {", ".join(gone[:5])}{" …" if len(gone) > 5 else ""}', file=sys.stderr)
     added = [p for p in new if p not in old]
     print(f'mkconfig: {len(added)} new signal(s) added, {len(out) - len(added)} kept with their settings', file=sys.stderr)
-    return out
+    if kept:
+        print(f'mkconfig: --types: {len(kept)} signal(s) keep the "enum" / "fields" written here instead of the types\' '
+              f'(take them out of the config to get the types\'): {", ".join(kept[:5])}{" …" if len(kept) > 5 else ""}', file=sys.stderr)
+    return out, {p: m for p, m in typed.items() if p in out}
 
 
 # ---------------- output: readable JSON, one signal per line, a blank line between scopes ----------------
@@ -342,6 +403,7 @@ HELP = [
     'signals: one entry per signal under its full path. "" = the global setting from "config".',
     '  show true/false · radix auto hex dec signed bin oct ascii float q8 sq15 · color "#e03131" (trace, outline, name) · style auto wavedrom questa square',
     '  optional: "alias": "shown name", "fill": "#ffe066" (bus fill), "enum": {"0": "IDLE"}; width/changes are information only.',
+    'typed: the signals whose "enum" / "fields" came from the types file (x.types.json): make config takes them from it again unless edited.',
     'config: page-wide WaveLens settings — style (edges: auto | wavedrom slanted | questa / square vertical), radix, theme, colors,',
     '  fold (group depth folded at start, true/false or scope paths), highlight (instances in front at start, e.g. ["tb.dut.u_x"]),',
     '  dim (opacity of the other rows), rowHeight, nameWidth, fontSize, sort, sortIgnore …',
@@ -389,7 +451,7 @@ def read_signals(a):
     info = dumpscan.scan(a.waves)   # VCD text, or FST through fst2vcd / sva vcd: signals, order, change counts, FST enum tables
     if not info:
         die(f'cannot read {a.waves}: an FST is read through fst2vcd (GTKWave) or the sva CLI, and neither is there')
-    decl = dumpscan.read(a.waves, None)
+    decl = a.decl = dumpscan.read(a.waves, None)   # (its $date and modules: the types' fingerprint)
     events = [p for p, v in decl.vars.items() if v.kind == 'event']
     if events:
         print(f'mkconfig: {len(events)} event variable(s) left out (no value to draw): {", ".join(events[:5])}{" …" if len(events) > 5 else ""}', file=sys.stderr)
@@ -398,6 +460,26 @@ def read_signals(a):
         d = info.get(s['path']) or {'order': len(info) + i, 'changes': None, 'enum': None}
         s.update(order=d['order'], changes=d['changes'], enum=d['enum'])
     return sigs
+
+
+def apply_types(a, sigs):
+    """--types FILE, or <dump>.types.json beside the dump: enum labels and struct fields by path (tools/svtypes.py) ->
+    the paths it gave them, None without a types file."""
+    path = a.types or svtypes.beside(a.waves)
+    if not path:
+        return None
+    if not os.path.exists(path):
+        die(f'--types: no such file: {path}')
+    t = svtypes.load(path)
+    m = {**t['map'], **svtypes.map_arg(a.types_map)}
+    ne, nf, notes, given = svtypes.apply(t, sigs, m)
+    decl = getattr(a, 'decl', None)
+    run = svtypes.fingerprint(t, decl and decl.date, decl.modules if decl else (), m)
+    for n in t['notes'] + notes + run:
+        print(f'mkconfig: --types: {n}', file=sys.stderr)
+    print(f'mkconfig: --types: {os.path.basename(path)} ({t["producer"].get("tool", "?")}): {len(t["signals"])} typed paths, '
+          f'labels for {ne} signals, fields for {nf}', file=sys.stderr)
+    return given
 
 
 def apply_sv(files, sigs):
@@ -429,7 +511,11 @@ def main():
     ap.add_argument('--update', action='store_true', help='the output exists: sync its signals with the dump, keep all edits')
     ap.add_argument('--force', action='store_true', help='overwrite an existing output (edits are lost); with --update: update even when most signals are gone')
     ap.add_argument('--depth', type=int, help='override select.depth of the base file')
-    ap.add_argument('--sv', nargs='+', metavar='FILE', help='SystemVerilog sources: enum labels for signals declared with an enum type (a VCD has none; an FST brings its own), "fields" for a packed struct dumped as one vector')
+    ap.add_argument('--types', metavar='FILE', help='the types of the design by path (tools/questa/wavelens_types.tcl, svtypes.py verilator): enum labels and '
+                    'struct fields; default: <dump>.types.json beside the dump, when there is one')
+    ap.add_argument('--types-map', action='append', metavar='DUMP=TYPES', help='a scope of the dump as the types file names it (top.dut_i=dut; '
+                    'again for more; the file\'s own "map" too)')
+    ap.add_argument('--sv', nargs='+', metavar='FILE', help='SystemVerilog sources, without a types file: enum labels for signals declared with an enum type, by the variable\'s name (a VCD has none; an FST brings its own), "fields" for a packed struct dumped as one vector')
     ap.add_argument('--sva', nargs='+', action='extend', metavar='FILE', help='SystemVerilog assertion files: "sva" and a "bind" line per instance that has every signal of an assertion')
     add_sva_bin_arg(ap)
     a = ap.parse_args()
@@ -453,8 +539,11 @@ def main():
         base['select'] = {**(base.get('select') or {}), 'depth': a.depth}
 
     sigs = read_signals(a)
-    if a.sv:
+    typed = apply_types(a, sigs)
+    if a.sv and typed is None:
         apply_sv(a.sv, sigs)
+    elif a.sv:
+        print('mkconfig: --sv is not used: the types file gives the signals their types by path', file=sys.stderr)
     found = sum(1 for s in sigs if s['enum'])
     if found:
         print(f'mkconfig: {found} signals with enum labels (FSM states shown by name)', file=sys.stderr)
@@ -465,12 +554,15 @@ def main():
         if len(gone) * 2 > len(old['signals']) and not a.force:
             die(f'{len(gone)} of the {len(old["signals"])} signals of {out} are not in {a.waves}: another design? '
                 '(--force updates it anyway, keeping the edits of the signals that are still there)')
-        cat = merge(old['signals'], cat)
+        cat, marks = merge(old['signals'], cat, typed and {p: typed_mark(cat[p]) for p in typed if p in cat}, old.get('typed'))
+    else:
+        marks = {p: typed_mark(cat[p]) for p in typed or () if p in cat}
 
     rel = os.path.relpath(os.path.abspath(a.waves), os.path.dirname(os.path.abspath(out)))
     name = os.path.basename(a.waves)
     if old is not None:
         cfg = {**old, 'signals': cat}
+        cfg.pop('typed', None)
         if cfg.get('waves') != rel:   # the config points at the dump it was updated from
             print(f'mkconfig: "waves": {cfg.get("waves")} -> {rel}', file=sys.stderr)
             cfg['waves'] = rel
@@ -482,6 +574,8 @@ def main():
                 cfg[k] = v
         cfg['page'] = {'title': name, **(cfg.get('page') or {})}
         cfg['signals'] = cat
+    if marks:   # what the types file gave: --update replaces it when nobody edited it
+        cfg['typed'] = marks
     if a.sva:
         exe = svabuild.find_bin(a.sva_bin)
         if not exe:

@@ -19,26 +19,76 @@ const VCD_TEXT = { real: 'real', realtime: 'real', shortreal: 'real', real_param
 // integer variables (Questa writes an int-based enum as one): signed decimal unless they have an enum table
 const VCD_INT = new Set(['integer', 'int', 'shortint', 'longint', 'byte']);
 const VCD_SAME = 20;   // notes of one kind kept in the log
-// the lines (1 the first) of offsets into text: one walk over the text up to the last of them
-function vcdLines(text, offs) {
-  const at = [...new Set(offs)].sort((a, b) => a - b), out = new Map(); let line = 1, p = 0;
-  for (const o of at) { for (let i = text.indexOf('\n', p); i >= 0 && i < o; i = text.indexOf('\n', i + 1)) { line++; p = i + 1; } out.set(o, line); }
-  return out;
-}
 function vcdRef(toks) {   // the words of a $var after its code -> [name, range]
   let ref = toks[0] || '', rng = toks.length > 1 && toks[1][0] === '[' ? toks[1] : '';
   if (ref[0] !== '\\' && !rng) { const m = /^(.+?)(\[\d+:\d+\])$/.exec(ref); if (m) { ref = m[1]; rng = m[2]; } }
   return [ref, rng];
 }
+// The reader is a generator over the text in pieces, so that a big dump is never all in memory (vcdToWaveFile: a File read
+// twice, piece by piece; vcdToWave: the whole text as one piece). It yields {pass, n}: the n-th piece of the text from its
+// start in this pass (1: the header and the count of the changes, 2: the transitions of the signals kept), and takes the
+// string, or null at the end. A token cut at the end of a piece, a value whose code is on the next line and a $comment
+// whose $end is not there yet wait for the next piece.
 function vcdToWave(text, opts = {}) {
+  const g = vcdRead(opts, text.length); let r = g.next();
+  while (!r.done) r = g.next(r.value.n === 0 ? text : null);
+  return r.value;
+}
+// a File (Open…, Compare…, a file dropped): read in pieces of about 8 MB (TextDecoder: a character cut between two reads
+// waits for the next one) -> the same as vcdToWave of its text; chunk: the size of a piece (the tests: a few bytes)
+async function vcdToWaveFile(file, opts = {}, chunk = 8 << 20) {
+  const g = vcdRead(opts, file.size); let r = g.next(), rd = null, dec = null, end = false, buf = '';
+  const piece = async () => {   // at most chunk characters (the reads the browser makes: as they come)
+    while (buf.length < chunk && !end) {
+      const { value, done } = await rd.read();
+      if (done) { buf += dec.decode(); end = true; } else buf += dec.decode(value, { stream: true });
+    }
+    const s = buf.length > chunk ? buf.slice(0, chunk) : buf; buf = buf.length > chunk ? buf.slice(chunk) : '';
+    return s || null;
+  };
+  try {
+    while (!r.done) {
+      if (r.value.n === 0) { if (rd) rd.cancel().catch(() => {}); rd = file.stream().getReader(); dec = new TextDecoder(); end = false; buf = ''; }
+      r = g.next(await piece());
+    }
+  } finally { if (rd) rd.cancel().catch(() => {}); }
+  return r.value;
+}
+function* vcdRead(opts = {}, size = 0) {
   const budget = opts.budget ?? 3e6, name = opts.name || 'dump.vcd';
+  // the header: pieces until its "$enddefinitions $end" (the whole text at once: vcdToWave), its words read on as the
+  // parser below takes them: a section ($comment, $var …) to its $end, so "$enddefinitions" in a comment is not the end
+  let text = '', n0 = 0, eof = false, hw = 0, sec = false, defs = false;
+  const headEnd = () => {   // the words read so far, a word cut at the end of the text waiting for the next piece
+    for (;;) {
+      let a = hw; while (a < text.length && text.charCodeAt(a) <= 32) a++;
+      let b = a; while (b < text.length && text.charCodeAt(b) > 32) b++;
+      if (b === text.length) return false;
+      hw = b;
+      if (defs) return true;   // the word after it (its $end)
+      if (text.charCodeAt(a) !== 36) continue;   // not a $word
+      const w = text.slice(a, b);
+      if (sec) sec = w !== '$end'; else if (w === '$enddefinitions') defs = true; else sec = w !== '$end';
+    }
+  };
+  for (;;) {
+    const s = yield { pass: 1, n: n0++ };
+    if (s == null) { eof = true; break; }
+    text += s;
+    if (headEnd()) break;
+  }
+  // the line of a character of the text (1 the first), counted on as the notes come (in the order of the text): cur is
+  // the piece read now, at its offset in the text
+  const ln = { pos: 0, line: 1 }; let cur = text, curAt = 0;
+  const lineAt = g => { for (let j = cur.indexOf('\n', ln.pos - curAt); j >= 0 && j < g - curAt; j = cur.indexOf('\n', j + 1)) ln.line++;
+    ln.pos = Math.max(ln.pos, g); return ln.line; };
   let i = 0, unit = 1, w0 = 0;   // w0: where the last word starts
   const word = () => { while (i < text.length && text.charCodeAt(i) <= 32) i++; const s = w0 = i; while (i < text.length && text.charCodeAt(i) > 32) i++;
     return text.slice(s, i); };
-  const log = [], same = new Map(), info = { size: text.length, timescale: null, version: null, date: null };
+  const log = [], same = new Map(), info = { size, timescale: null, version: null, date: null };
   const note = (level, at, kind, msg) => { const n = (same.get(kind) || [0])[0] + 1; same.set(kind, [n, level, msg]);
-    if (n <= VCD_SAME) log.push({ level, at, msg }); };
-  const fail = (at, msg) => { const line = vcdLines(text, [at]).get(at), e = new Error(`${msg} (line ${line})`); e.line = line; throw e; };
+    if (n <= VCD_SAME) log.push({ level, line: at != null ? lineAt(at) : null, msg }); };
+  const fail = (at, msg) => { const line = lineAt(at), e = new Error(`${msg} (line ${line})`); e.line = line; throw e; };
   const upTo = () => { const s = i; for (let x = word(); x && x !== '$end'; x = word()); return text.slice(s, w0).trim(); };   // the words to $end
   const decls = new Map(), scope = [], kinds = {};   // path -> {path, name, scope, kind, depth, enum, ds: [[code, [msb, lsb] | null, size, glued bit]]}
   const codes = new Map();   // id code -> its widest size (0: a text; events too: a value of theirs is no stranger)
@@ -59,7 +109,7 @@ function vcdToWave(text, opts = {}) {
       const b = toks.slice(2), n = +b[1];
       if (b.length === 2) pending = b[1];
       else if (Number.isInteger(n) && b.length > 2 + 2 * n) {
-        const t = {}; for (let j = 0; j < n; j++) if (/^[01]+$/.test(b[2 + n + j])) t[parseInt(b[2 + n + j], 2)] = b[2 + j];
+        const t = {}; for (let j = 0; j < n; j++) if (/^[01]+$/.test(b[2 + n + j])) t[BigInt('0b' + b[2 + n + j])] = b[2 + j];   // (exact past 2^53)
         tables[b[2 + 2 * n]] = t;
       }
     }
@@ -110,36 +160,65 @@ function vcdToWave(text, opts = {}) {
     v.codes = [...new Set(v.members.map(x => x[0]))];   // each code once: its changes counted once for the budget
   }
   // the value changes, token by token (one per line or several on a line): #time, 0! 1! x! z!, b0101 !, r1.5 !, sText !
-  const body = i, count = new Map();
-  const scan = (fn, notes = false) => {   // notes: the first walk says what it could not read
-    let p = body, t = 0, first = true; const n = text.length;
+  // step: the whole tokens of piece s from p (last: nothing comes after it) -> where the rest starts that waits for the
+  // next piece; fn(code, t, value, kind, at) with at the offset in the text, (null, t) at a time
+  const body = i;
+  const step = (s, p, last, fn, notes, st, at0) => {
+    const n = s.length;
     while (p < n) {
-      while (p < n && text.charCodeAt(p) <= 32) p++; if (p >= n) break;
-      const s0 = p; while (p < n && text.charCodeAt(p) > 32) p++;
-      const c = text[s0];
+      while (p < n && s.charCodeAt(p) <= 32) p++; if (p >= n) break;
+      const s0 = p; while (p < n && s.charCodeAt(p) > 32) p++;
+      if (p >= n && !last) return s0;   // cut at the end of the piece, maybe
+      const c = s[s0];
       if (c === '#') {
-        const tn = Number(text.slice(s0 + 1, p)) * unit;
-        if (!Number.isFinite(tn) || s0 + 1 === p) { if (notes) note('warning', s0, 'time', `"${text.slice(s0, p).slice(0, 40)}" is not a time: left out`);
+        const tn = Number(s.slice(s0 + 1, p)) * unit;
+        if (!Number.isFinite(tn) || s0 + 1 === p) { if (notes) note('warning', at0 + s0, 'time', `"${s.slice(s0, p).slice(0, 40)}" is not a time: left out`);
           continue; }
-        if (!first && tn < t) fail(s0, `time goes back: #${text.slice(s0 + 1, p)} after #${t / unit} (a VCD lists its times in order)`);
-        t = tn; first = false; fn(null, t);
+        if (!st.first && tn < st.t) fail(at0 + s0, `time goes back: #${s.slice(s0 + 1, p)} after #${st.t / unit} (a VCD lists its times in order)`);
+        st.t = tn; st.first = false; fn(null, st.t);
       }
       else if (c === '$') {   // $dumpvars $dumpall $dumpon $dumpoff $end: nothing; $comment and the like: to their $end
-        const kw = text.slice(s0, p);
-        if (!/^\$(dumpvars|dumpall|dumpon|dumpoff|end)$/.test(kw)) { const e = text.indexOf('$end', p); p = e < 0 ? n : e + 4;
-          if (notes && e < 0) note('warning', s0, 'comment', `${kw} without its $end: the rest of the dump skipped`); }
+        const kw = s.slice(s0, p);
+        if (!/^\$(dumpvars|dumpall|dumpon|dumpoff|end)$/.test(kw)) { const e = s.indexOf('$end', p);
+          if (e < 0 && !last) return s0;
+          p = e < 0 ? n : e + 4;
+          if (notes && e < 0) note('warning', at0 + s0, 'comment', `${kw} without its $end: the rest of the dump skipped`); }
       }
       else if ('bBrRsS'.includes(c)) {   // b… / r… / s… then its code
-        while (p < n && text.charCodeAt(p) <= 32) p++; const k0 = p; while (p < n && text.charCodeAt(p) > 32) p++;
-        const v = text.slice(s0 + 1, k0).trim();
-        fn(text.slice(k0, p), t, c === 'b' || c === 'B' ? vcdBits(v.toLowerCase()) : v, c === 'r' || c === 'R' ? 'real' : c === 's' ||
-          c === 'S' ? 'string' : 'b', s0);
+        while (p < n && s.charCodeAt(p) <= 32) p++; const k0 = p; while (p < n && s.charCodeAt(p) > 32) p++;
+        if (p >= n && !last) return s0;   // its code in the next piece
+        const v = s.slice(s0 + 1, k0).trim();
+        fn(s.slice(k0, p), st.t, c === 'b' || c === 'B' ? vcdBits(v.toLowerCase()) : v, c === 'r' || c === 'R' ? 'real' : c === 's' ||
+          c === 'S' ? 'string' : 'b', at0 + s0);
       }
-      else if ('01xzXZuUwWhHlL-'.includes(c)) fn(text.slice(s0 + 1, p), t, vcdBits(c.toLowerCase()), 'b', s0);
-      else if (notes) note('warning', s0, 'token', `"${text.slice(s0, p).slice(0, 40)}" is not a value change: left out`);
+      else if ('01xzXZuUwWhHlL-'.includes(c)) fn(s.slice(s0 + 1, p), st.t, vcdBits(c.toLowerCase()), 'b', at0 + s0);
+      else if (notes) note('warning', at0 + s0, 'token', `"${s.slice(s0, p).slice(0, 40)}" is not a value change: left out`);
     }
+    return n;
   };
-  scan((k, t, val, kind, at) => {
+  // one walk over the changes: pass 1 from the body in the header's text on, then the pieces after it; pass 2 from the
+  // start of the text again, the header skipped
+  function* scan(pass, fn, notes = false) {
+    const st = { t: 0, first: true };
+    let s, p, at0, k = 0, skip = body;
+    if (pass === 1) { s = text; p = body; at0 = 0; k = n0; }
+    else {
+      for (;;) { s = yield { pass, n: k++ }; if (s == null) return; if (skip < s.length) break; skip -= s.length; }
+      p = skip; at0 = body - skip;
+    }
+    for (let end = pass === 1 && eof; ;) {
+      cur = s; curAt = at0;
+      const r = step(s, p, end, fn, notes, st, at0);
+      if (end) return;
+      const next = yield { pass, n: k++ };
+      if (pass === 1 && notes) lineAt(at0 + r);   // the lines of what is behind (the notes after it count from there)
+      const rest = s.slice(r);
+      at0 += r; p = 0;
+      if (next == null) { s = rest; end = true; } else s = rest + next;
+    }
+  }
+  const count = new Map();
+  yield* scan(1, (k, t, val, kind, at) => {
     if (k == null) return;
     const w = codes.get(k);
     if (w === undefined) { note('warning', at, 'code', k ? `a value of "${k}", a code no $var declares: left out` : 'a value without its code: left out');
@@ -161,7 +240,8 @@ function vcdToWave(text, opts = {}) {
   // the transitions of the variables kept: per id code, then per variable (codes merged, bits put together)
   const raw = new Map(); for (const v of keep) for (const k of v.codes) raw.set(k, []);
   let t0 = null, t1 = 0;
-  scan((k, t, val) => {
+  text = cur = null;   // (the header's text: not needed any more)
+  yield* scan(2, (k, t, val) => {
     if (k == null) { if (t0 == null) t0 = t; t1 = Math.max(t1, t); return; }
     if (t0 == null) t0 = t;   // values before the first time (a $dumpvars block): the dump starts at 0
     const a = raw.get(k); if (a && val != null) a.push([t, val]);
@@ -203,8 +283,7 @@ function vcdToWave(text, opts = {}) {
     still.slice(0, 5).map(v => v.path).join(', ') + (still.length > 5 ? ' …' : ''));
   if (keep.size < vars.length) note('info', null, 'budget', `${keep.size} of ${vars.length} signals read: the levels nearest the top within ` +
     `dumpBudget (${budget} changes)`);
-  for (const [, [n, level, msg]] of same) if (n > VCD_SAME) log.push({ level, at: null, msg: `${n - VCD_SAME} more like "${msg}"` });
-  const lines = vcdLines(text, log.filter(x => x.at != null).map(x => x.at));
+  for (const [, [n, level, msg]] of same) if (n > VCD_SAME) log.push({ level, line: null, msg: `${n - VCD_SAME} more like "${msg}"` });
   Object.assign(info, { t0: t0 ?? 0, t1: end, scopes: new Set(vars.map(v => v.scope.join('.'))).size, signals: vars.length, shown: keep.size,
     changes: [...count.values()].reduce((a, b) => a + b, 0) });
   if (Object.keys(scopes).length) doc.scopes = scopes;
@@ -212,7 +291,7 @@ function vcdToWave(text, opts = {}) {
   for (const v of vars) if (!keep.has(v)) (omitted[v.scope.join('.')] ||= []).push(v.name);
   if (Object.keys(omitted).length) doc.meta = { omitted: { why: 'dumpBudget', paths: omitted } };
   return { doc, shown: shownVars.length, total: vars.length, changes: used, info,
-    log: log.map(x => Object.assign({ level: x.level, text: x.msg }, x.at != null ? { line: lines.get(x.at) } : {})) };
+    log: log.map(x => Object.assign({ level: x.level, text: x.msg }, x.line != null ? { line: x.line } : {})) };
 }
 // a VCD vector value in w digits: a shorter one extended with 0, or x / z; a longer one its last w
 const vcdExt = (b, w) => (b.length < w ? (b[0] === 'x' || b[0] === 'z' ? b[0] : '0').repeat(w - b.length) + b : b.length > w ? b.slice(b.length - w) : b);
@@ -239,7 +318,7 @@ function vcdHex(b, w) {
 // "typedef enum … {A, B = 2'd3} name_t;" and "typedef struct packed {…} name_t;" (fields MSB first; a member of a width
 // it cannot tell leaves the struct out), then the declarations of signals with those types ("p::name_t a, b;", ports,
 // arrays; not function arguments, not struct members) and "enum {…} st;". By the variable's name only: a name declared
-// with two different types (two modules) gets nothing and a note says so; so does an enum it does not read (a value
+// with two different types (two modules; one a plain vector) gets nothing and a note says so; so does an enum it does not read (a value
 // that is an expression or a parameter, labels by macro).
 const SV_WORDS = new Set(['input', 'output', 'inout', 'ref', 'var', 'const', 'static', 'automatic', 'logic', 'wire', 'reg', 'bit', 'signed', 'unsigned']);
 const SV_BASE = { logic: 1, bit: 1, reg: 1, wire: 1, byte: 8, shortint: 16, int: 32, integer: 32, longint: 64 };
@@ -249,6 +328,21 @@ const SV_ANON = /(?<!typedef)\s\benum\b[^{;]*\{([^}]*)\}\s*(\w+(?:\s*,\s*\w+)*)\
 // none is left); strings and comments are blanked before anything is read
 const SV_SKIP = /\bfunction\b[\s\S]*?\bendfunction\b|\btask\b[\s\S]*?\bendtask\b/g, SV_BODY = /\b(?:struct|union)\b[^{};]*\{[^{}]*\}/g;
 const SV_BLANK = /"(?:[^"\\\n]|\\[\s\S])*"|\/\/[^\n]*|\/\*[\s\S]*?\*\//g;   // (a string goes on after a backslash-newline)
+// a plain vector or integer variable ("logic [1:0] state;", a port): a name it has besides a type's is not labelled
+const SV_PLAIN = new RegExp(String.raw`\b(?:logic|reg|wire|bit|byte|shortint|int|longint|integer)\b\s*(?:signed|unsigned)?\s*(?:\[[^\]]*\]\s*)*` +
+  String.raw`(\w+(?:\s*(?:\[[^\]]*\]\s*)*,\s*\w+)*)\s*(?:\[[^\]]*\]\s*)*[;=,)]`, 'gd');   // (d: where its list starts)
+// the names a declaration declares, its list read from offset at: "a [3:0] = f(x, y), b, c;" -> [a, b, c]; it ends at the ;
+// (or the ) of a port list), and a part that is not "name [dims] = value" (the next port's type) is none (mkconfig sv_names)
+function svNames(t, at) {
+  const parts = []; let depth = 0, cur = '';
+  for (let i = at; i < t.length; i++) { const ch = t[i];
+    if ('([{'.includes(ch)) depth++;
+    else if (')]}'.includes(ch)) { if (!depth) break; depth--; }
+    else if (!depth && (ch === ',' || ch === ';')) { parts.push(cur); cur = ''; if (ch === ';') break; continue; }
+    cur += ch; }
+  parts.push(cur);
+  return parts.map(x => /^\s*(\w+)\s*(?:\[[^\]]*\]\s*)*(?:=[\s\S]*)?$/.exec(x)).filter(Boolean).map(m => m[1]);
+}
 const svSignalsText = t => { t = t.replace(SV_SKIP, ' '); for (let u = t.replace(SV_BODY, ' '); u !== t; u = t.replace(SV_BODY, ' ')) t = u; return t; };
 const svRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // an enum label's value: its initializer ('' none: prev + 1) -> a number; null when it is not a literal (the table is left
@@ -337,11 +431,11 @@ function svTables(texts) {
   const known = [...new Set([...types.keys(), ...fields.keys(), ...bodies.keys()])].sort((a, b) => b.length - a.length);
   if (known.length) {
     const decl = new RegExp(String.raw`\b(?:\w+::)?(${known.map(svRe).join('|')})\b\s+(?:\[[^\]]*\]\s*)*(\w+(?:\s*(?:\[[^\]]*\]\s*)*,\s*\w+)*)` +
-      String.raw`\s*(?:\[[^\]]*\]\s*)*[;=,)]`, 'g');
-    texts.forEach((t, i) => {
-      for (const m of svSignalsText(t).matchAll(decl)) {
+      String.raw`\s*(?:\[[^\]]*\]\s*)*[;=,)]`, 'gd');
+    texts.forEach((t, i) => { const st = svSignalsText(t);
+      for (const m of st.matchAll(decl)) {
         const ty = m[1];
-        for (const n of m[2].split(/\s*(?:\[[^\]]*\]\s*)*,\s*/)) {
+        for (const n of svNames(st, m.indices[2][0])) {   // (each name past an initialiser too)
           if (!n || SV_WORDS.has(n) || types.has(n) || fields.has(n)) continue;
           used.add(i);
           if (fields.has(ty)) put(n, ['s', fields.get(ty)]);
@@ -351,40 +445,201 @@ function svTables(texts) {
       }
     });
   }
+  for (const t of texts) { const st = svSignalsText(t);   // the same name as a plain vector somewhere
+    for (const m of st.matchAll(SV_PLAIN)) for (const n of svNames(st, m.indices[1][0])) if (n && !SV_WORDS.has(n)) put(n, ['p', null]); }
   for (const n of [...clash].sort()) notes.push(`${n}: declared with different types (in different modules?): no labels`);
   const of = k => Object.fromEntries([...cand].filter(([, v]) => v[0] === k && v[1]).map(([n, v]) => [n, v[1]]));
   return { enums: of('e'), fields: of('s'), notes, files: used.size };
 }
-// two sets of tables as one (the second wins a name: Sources… over the workspace's)
+// two sets of tables as one (the second wins a name or a path: Sources… over the workspace's)
 const svMerge = (a, b) => { if (!a || !b) return a || b;
   const mine = new Set([...Object.keys(b.enums), ...Object.keys(b.fields)]), keep = o => Object.fromEntries(Object.entries(o).filter(([n]) => !mine.has(n)));
-  return { enums: Object.assign(keep(a.enums), b.enums), fields: Object.assign(keep(a.fields), b.fields), notes: a.notes.concat(b.notes),
-    files: a.files + b.files }; };
+  const out = { enums: Object.assign(keep(a.enums), b.enums), fields: Object.assign(keep(a.fields), b.fields), notes: a.notes.concat(b.notes),
+    files: a.files + b.files };
+  if (a.paths || b.paths) out.paths = Object.assign({}, a.paths, b.paths);
+  if (a.producer || b.producer) out.producer = b.producer || a.producer;
+  if (a.map || b.map) out.map = Object.assign({}, a.map, b.map);
+  if (a.names || b.names) out.names = [...(a.names || []), ...(b.names || [])];
+  if (a.plain || b.plain) out.plain = Object.assign({}, a.plain, b.plain);
+  if (a.instances || b.instances) out.instances = Object.assign({}, a.instances, b.instances);
+  return out; };
 // the labels and fields of the sources onto the signals of a WaveJSON that have none (a name's table only when its values
 // fit the signal's width; fields when they cover it, as mkconfig.py apply_sv) -> how many signals got them
 // What it puts there is marked (svEnum, svFields): tables of other sources replace those, and only those (the dump's own
 // tables and a config's stay); sources without a name's table take its labels away again.
-function svApply(doc, sv) {
+// With a types file (sv.paths, svTypes) a signal takes only its own path's type, when its width is the type's (else a note
+// in log), and the names of the sources are not used: the design's types say which `state` is which.
+// why (a Map, optional): each signal's path -> what the types did with it, for the inspector (the right button's Type…):
+// {status: 'typed' | 'width' | 'none', key: the types' path, width, as: the path remapped, labels / fields: 'types' (put
+// there now), 'own' (the row's own: the dump's table, the config's, kept), null (none)}
+function svApply(doc, sv, log, why) {
   if (!doc || !doc.signal) return 0;
   sv = sv || { enums: {}, fields: {} };
+  const byPath = !!sv.paths;   // a types file, even an empty one: the names of the sources are not used
   let n = 0;
-  const walk = items => { for (const it of items) {
-    if (Array.isArray(it)) { walk(it.slice(typeof it[0] === 'string' ? 1 : 0)); continue; }
-    if (!it || typeof it !== 'object' || !it.name || it.kind) continue;
-    if (!it.tv) continue;   // a clock-sampled row's labels are made already (make html with mkconfig.py --sv does its own)
+  const rows = [], all = items => { for (const it of items) {
+    if (Array.isArray(it)) all(it.slice(typeof it[0] === 'string' ? 1 : 0));
+    else if (it && typeof it === 'object' && it.name && !it.kind) rows.push(it); } };
+  all(doc.signal);
+  const mp = sv.map || {}, tops = byPath ? svTops(sv.paths, rows.map(it => svRemap(String(it.path || it.name), mp))) : new Set();
+  for (const it of rows) {
+    if (!it.tv) continue;
+    let wy = null;   // a clock-sampled row's labels are made already (make html with mkconfig.py --sv does its own)
     // an element of an array (state.[0], state[0]): the array's name
-    const leaf = String(it.path || it.name).replace(/(\.?\[-?\d+\])+$/, '').split('.').pop(), w = +it.width || 1, t = sv.enums && sv.enums[leaf];
-    const fl = sv.fields && sv.fields[leaf];
+    const leaf = String(it.path || it.name).replace(/(\.?\[-?\d+\])+$/, '').split('.').pop(), w = +it.width || 1;
+    let t = !byPath && sv.enums && sv.enums[leaf], fl = !byPath && sv.fields && sv.fields[leaf];
+    if (byPath) {
+      const p = svRemap(String(it.path || it.name), mp), k = svLookupKey(sv.paths, p, tops), e = k != null ? sv.paths[k] : null;
+      if (e && e.width === w) { t = e.enum; fl = e.fields; }
+      else if (e && log) log.push(`${it.path || it.name}: ${w} bits in the dump, ${e.width} in the types: left as it is`);
+      if (why) why.set(String(it.path || it.name), wy = { status: !e ? 'none' : e.width === w ? 'typed' : 'width', key: k, width: e ? e.width : null, as: p });
+    }
     if (it.svEnum) { delete it.enum; delete it.svEnum; if (it.svRadix) it.radix = it.svRadix; delete it.svRadix; }   // the sources' before
     if (it.svFields) { delete it.fields; delete it.svFields; }
-    let got = false;
-    if (!it.enum && t && Object.keys(t).length && Math.max(...Object.keys(t).map(Number)) < 2 ** w) {   // (an integer's signed radix: the labels instead)
+    let got = false, ge = false, gf = false;
+    const fits = k => /^\d+$/.test(k) && BigInt(k) < 1n << BigInt(w);   // (exact past 2^53: a 64-bit enum's)
+    if (!it.enum && t && Object.keys(t).length && Object.keys(t).every(fits)) {   // (an integer's signed radix: the labels instead)
       it.enum = Object.fromEntries(Object.entries(t).map(([k, v]) => [String(k), v])); it.svEnum = true;
       if (it.radix === 'signed') { it.svRadix = it.radix; delete it.radix; }
-      got = true; }
-    if (!it.fields && fl && fl[0].msb + 1 === w) { it.fields = fl; it.svFields = true; got = true; }
+      got = ge = true; }
+    if (!it.fields && fl && fl.length && fl[0].msb + 1 === w) { it.fields = fl; it.svFields = true; got = gf = true; }
+    if (wy) Object.assign(wy, { labels: ge ? 'types' : it.enum ? 'own' : null, fields: gf ? 'types' : it.fields ? 'own' : null });
     if (got) n++;
-  } };
-  walk(doc.signal);
+  }
   return n;
+}
+
+// ---------------- types by path: tools/questa/wavelens_types.tcl, svtypes.py verilator (the twin of tools/svtypes.py) ----------------
+// A types file {"wavelens": "types", "describe": {path: Questa's text} | "signals": {path: {width, enum | fields}}} -> the
+// tables of svApply with paths: {enums: {}, fields: {}, paths, notes, files: 1, producer}. A nested struct gives dotted fields
+// (in.st), an array of enums or structs a field per element (pair[1]); a union, an enum of more than 32 bits from describe
+// (Questa keeps 32) or a text it does not read a note, and the signal stays as numbers.
+const TY_INTS = { int: 32, integer: 32, shortint: 16, longint: 64, byte: 8, time: 64 };
+function tyParse(text) {   // Questa's describe of one signal -> a type {kind: enum | vec | record | union | array | unknown, …}
+  const lines = String(text).split(/\r?\n/).map(x => x.trim()).filter(Boolean); let pos = 0;
+  const one = () => {
+    if (pos >= lines.length) return { kind: 'unknown', text: '(nothing)' };
+    const s = lines[pos++]; let m;
+    if ((m = /^Verilog enum: \((-?\d+) (?:downto|to) (-?\d+)\) \[(\d+) enumeration values?\]$/.exec(s))) {
+      let body = '';
+      while (pos < lines.length) { body += lines[pos++]; if (body.includes('(') && body.split('(').length <= body.split(')').length) break; }
+      const items = [];   // (A=0,B=1, …): a label is an SV identifier (letters, digits, _ and $)
+      for (const x of body.trim().replace(/^\(/, '').replace(/\)$/, '').split(',')) {
+        const e = /^([A-Za-z_][\w$]*)=(-?\d+)$/.exec(x.trim());
+        if (!e) return { kind: 'unknown', text: `enum values "${x.trim() || body}"` };
+        items.push([e[1], +e[2]]); }
+      return { kind: 'enum', width: Math.abs(+m[1] - +m[2]) + 1, count: +m[3], describe: true, items }; }
+    if ((m = /^(Record|Union) \[(\d+) elements?\]$/.exec(s))) {
+      const members = [];
+      for (let i = 0; i < +m[2]; i++) {
+        const e = pos < lines.length && /^Element #\d+ "([^"]*)" =>$/.exec(lines[pos]);
+        if (!e) return { kind: 'unknown', text: s };
+        pos++; members.push([e[1], one()]); }
+      return { kind: m[1] === 'Record' ? 'record' : 'union', members }; }
+    if ((m = /^Array\((-?\d+) (downto|to) (-?\d+)\) \[length (\d+)\] of$/.exec(s))) return { kind: 'array', left: +m[1], right: +m[3], elem: one() };
+    if (s in TY_INTS) return { kind: 'vec', width: TY_INTS[s] };
+    if ((m = /^(?:Signed )?(?:Register|Net|Wire|reg|wire|logic|bit)(?: \[(-?\d+):(-?\d+)\])?$/.exec(s)))
+      return { kind: 'vec', width: m[1] != null ? Math.abs(+m[1] - +m[2]) + 1 : 1 };
+    return { kind: 'unknown', text: s };
+  };
+  return one();
+}
+function tyWidth(t) {
+  if (t.kind === 'enum' || t.kind === 'vec') return t.width;
+  if (t.kind === 'record' || t.kind === 'union') { const ws = t.members.map(x => tyWidth(x[1]));
+    return ws.includes(null) || !ws.length ? null : t.kind === 'record' ? ws.reduce((a, b) => a + b, 0) : Math.max(...ws); }
+  if (t.kind === 'array') { const w = tyWidth(t.elem); return w == null ? null : w * (Math.abs(t.left - t.right) + 1); }
+  return null;
+}
+function tyTable(t) {   // an enum's values -> [{"value": "label"} unsigned on its width, or null, the reason]
+  if (t.width > 32 && t.describe) return [null, `an enum of ${t.width} bits: Questa's describe keeps 32 bits of each value`];
+  if (t.items.length !== t.count) return [null, `${t.items.length} of its ${t.count} enum values read`];
+  const u = v => (t.width >= 32 ? (v < 0 ? v + 2 ** 32 : v) : ((v % 2 ** t.width) + 2 ** t.width) % 2 ** t.width);
+  return [Object.fromEntries(t.items.map(([nm, v]) => [u(v), nm]).sort((a, b) => a[0] - b[0]).map(([v, nm]) => [String(v), nm])), null];
+}
+function tyFlat(t, name, lsb, out) {   // the fields of a type that starts at bit lsb, MSB first; a reason when it cannot be told
+  const w = tyWidth(t), typed = k => k === 'enum' || k === 'record' || k === 'array';
+  if (w == null) return `${name || 'the signal'}: a type it does not read (${t.text || t.kind})`;
+  if (t.kind === 'enum') { const [tb, why] = tyTable(t); if (why) return `${name}: ${why}`; out.push({ name, msb: lsb + w - 1, lsb, enum: tb }); }
+  else if (t.kind === 'record') {
+    let at = lsb + w; const part = [];
+    for (const [mn, mt] of t.members) { at -= tyWidth(mt); const why = tyFlat(mt, name ? `${name}.${mn}` : mn, at, part); if (why) return why; }
+    out.push(...part); }
+  else if (t.kind === 'array' && typed(t.elem.kind)) {
+    const n = Math.abs(t.left - t.right) + 1, ew = tyWidth(t.elem), step = t.left > t.right ? -1 : 1;
+    for (let j = 0; j < n; j++) { const why = tyFlat(t.elem, `${name}[${t.left + j * step}]`, lsb + (n - 1 - j) * ew, out); if (why) return why; } }
+  else out.push({ name, msb: lsb + w - 1, lsb });   // a vector, an array of vectors, a union inside a struct: one field
+  return null;
+}
+function tyLower(t) {   // a type -> [entry {width, enum | fields} or null for a plain vector, a note or null]
+  if (t.kind === 'enum') { const [tb, why] = tyTable(t); return why ? [null, why] : [{ width: t.width, enum: tb }, null]; }
+  if (t.kind === 'union') return [null, 'a packed union: which member holds the value is not known'];
+  const typed = k => k === 'enum' || k === 'record' || k === 'array';
+  if (t.kind === 'record' || (t.kind === 'array' && typed(t.elem.kind))) {
+    const out = [], why = tyFlat(t, '', 0, out);
+    if (why) return [null, why];
+    const has = x => x.kind === 'enum' || x.kind === 'record' || (x.members || []).some(m => has(m[1])) || (x.elem && has(x.elem));
+    if (t.kind === 'array' && !has(t.elem)) return [null, null];   // an array of plain vectors: a vector
+    return [{ width: tyWidth(t), fields: out }, null]; }
+  return t.kind === 'unknown' ? [null, `a type it does not read (${t.text})`] : [null, null];
+}
+const tyMark = t => { if (t.kind === 'enum') t.describe = true; for (const [, m] of t.members || []) tyMark(m); if (t.elem) tyMark(t.elem); return t; };
+function svTypes(d, where = 'types') {
+  if (typeof d === 'string') { try { d = JSON.parse(d); } catch (e) { throw new Error(`${where}: not a types file (${e.message})`); } }
+  if (!d || d.wavelens !== 'types') throw new Error(`${where}: not a WaveLens types file (no "wavelens": "types"; made by ` +
+    'tools/questa/wavelens_types.tcl or svtypes.py verilator)');
+  const paths = Object.assign({}, d.signals), notes = [...(d.notes || [])], plain = {};   // plain: what describe says of one with no type: its words
+  for (const [p, text] of Object.entries(d.describe || {})) {
+    if (String(text).startsWith('describe failed')) { notes.push(`${p}: ${text}`); continue; }
+    const [e, why] = tyLower(tyMark(tyParse(text)));
+    if (e) paths[p] = e; else plain[p] = why || String(text).split('\n')[0].trim();
+    if (why) notes.push(`${p}: ${why}`);
+  }
+  // none or null: no map; anything but an object of texts an error (svtypes.py's read)
+  const map = d.map == null ? {} : typeof d.map === 'object' && !Array.isArray(d.map) ? Object.assign({}, d.map) : null;
+  if (!map || Object.values(map).some(x => typeof x !== 'string')) throw new Error(`${where}: "map" is {"dump.prefix": "types.prefix"}`);
+  return { enums: {}, fields: {}, paths, notes, files: 1, producer: d.producer || {}, map, names: [where], plain,
+    instances: d.instances && typeof d.instances === 'object' ? d.instances : {} };
+}
+// the top scopes a dump adds above the design's (TOP. of Verilator's FST): its roots that are none of the types' roots but
+// have one as a child; none when a root of the dump is one of the types' (other.tb.state is not tb.state)
+function svTops(paths, dump) {
+  const mine = new Set(Object.keys(paths).map(p => p.split('.')[0])), roots = new Set(dump.map(p => p.split('.')[0]));
+  if ([...roots].some(r => mine.has(r))) return new Set();
+  return new Set(dump.map(p => p.split('.')).filter(q => q.length > 1 && mine.has(q[1])).map(q => q[0]));
+}
+// a dump's path in the types: its own; else without a top scope the dump adds (svTops); an element of an array the array's
+function svLookupKey(paths, p, tops = new Set()) {
+  if (hasKey(paths, p)) return p;
+  const k = p.indexOf('.');
+  if (k > 0 && tops.has(p.slice(0, k)) && hasKey(paths, p.slice(k + 1))) return p.slice(k + 1);
+  const base = p.replace(/(\.?\[-?\d+\])+$/, '');
+  return base !== p ? svLookupKey(paths, base, tops) : null;
+}
+const svLookup = (paths, p, tops) => { const k = svLookupKey(paths, p, tops); return k != null ? paths[k] : null; };
+// a dump's path as the types name it: the longest prefix of the map ({"top.dut_i": "dut"}: top.dut_i.state -> dut.state)
+function svRemap(p, m) {
+  for (const k of Object.keys(m || {}).sort((a, b) => b.length - a.length)) if (p === k || p.startsWith(k + '.')) return m[k] + p.slice(k.length);
+  return p;
+}
+// whether the types are of the run of the dump (svtypes.py fingerprint): written more than a day apart; instances of the
+// types under modules the dump has that it does not have -> [notes]
+// the scopes of a WaveJSON: every prefix of a signal's path (the instances the dump has)
+const svScopes = doc => { const out = new Set(), walk = items => { for (const it of items || []) {
+  if (Array.isArray(it)) walk(it.slice(typeof it[0] === 'string' ? 1 : 0));
+  else if (it && it.path) { const p = String(it.path).split('.'); for (let i = 1; i < p.length; i++) out.add(p.slice(0, i).join('.')); } } };
+  walk(doc && doc.signal); return out; };
+function svFingerprint(sv, date, modules) {
+  const out = [], p = (sv && sv.producer) || {}, when = x => { const t = Date.parse(String(x || '').replace(/\s+/g, ' ')); return isNaN(t) ? null : t; };
+  const a = when(p.date), b = when(date);
+  if (a != null && b != null && Math.abs(a - b) > 864e5) { const d = Math.floor(Math.abs(a - b) / 864e5);
+    out.push(`the types were written ${d} day${d === 1 ? '' : 's'} ${a > b ? 'after' : 'before'} the dump (${p.date}; the dump: ${date}): another run? ` +
+      '(the labels of another design or other parameters may not fit)'); }
+  const mods = new Set([...(modules || [])].map(x => svRemap(x, sv.map))), inst = Object.keys((sv && sv.instances) || {});
+  if (mods.size && inst.length) {
+    const miss = inst.filter(i => !mods.has(i) && mods.has(i.slice(0, Math.max(0, i.lastIndexOf('.'))))).sort();
+    if (miss.length) out.push(`${miss.length} instance${miss.length === 1 ? '' : 's'} of the types not in the dump, under modules it has: ` +
+      `${miss.slice(0, 3).join(', ')}${miss.length > 3 ? ' …' : ''} (none of its signals dumped, or another design)`);
+  }
+  return out;
 }

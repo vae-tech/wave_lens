@@ -1,0 +1,11 @@
+{
+ "signal": [
+  ["tb",
+    {"name": "b", "width": 8, "wave": "=z=", "data": ["xx", "xx"], "tv": [[0, "'b1x0z1z0x"], [10000, "z"], [20000, "'bxxxxxxx1"], [30000, "05"]], "path": "tb.b"}
+  ]
+ ],
+ "head": {"text": "xz.vcd"},
+ "time": {"t0": 0, "t1": 30000, "cycle": 10000, "unit": "ps"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "xz.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 0, "to_ps": 30000}
+}

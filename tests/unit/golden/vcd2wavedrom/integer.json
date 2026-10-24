@@ -1,0 +1,13 @@
+{
+ "signal": [
+  ["tb",
+    {"name": "n", "width": 32, "wave": "=", "data": ["5"], "tv": [[0, "00000005"], [10000, "00000006"]], "radix": "signed", "path": "tb.n"},
+    {"name": "P", "width": 32, "wave": "=", "data": ["0x0000000A"], "tv": [[0, "0000000a"]], "path": "tb.P"},
+    {"name": "t", "width": 64, "wave": "=", "data": ["0x0000000000000001"], "tv": [[0, "0000000000000001"]], "path": "tb.t"}
+  ]
+ ],
+ "head": {"text": "integer.vcd"},
+ "time": {"t0": 0, "t1": 10000, "cycle": 10000, "unit": "ps"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "integer.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 0, "to_ps": 10000}
+}

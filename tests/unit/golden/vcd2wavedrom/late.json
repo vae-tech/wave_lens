@@ -1,0 +1,12 @@
+{
+ "signal": [
+  ["tb",
+    {"name": "s", "width": 1, "wave": "0", "tv": [[100000, "0"], [200000, "1"]], "path": "tb.s"},
+    {"name": "b", "width": 4, "wave": "=", "data": ["3"], "tv": [[100000, "3"], [200000, "c"]], "path": "tb.b"}
+  ]
+ ],
+ "head": {"text": "late.vcd"},
+ "time": {"t0": 100000, "t1": 200000, "cycle": 100000, "unit": "ps"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "late.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 100000, "to_ps": 200000}
+}

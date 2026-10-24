@@ -21,11 +21,13 @@ V2W := $(PY) tools/vcd2wavedrom.py --config $(DEMO_CONFIG) --waves $(VCD)
 #   make config WAVES=work/x.vcd -> work/x.config.json: every signal under its full path, one line each (show, radix,
 #                                   color, style …), settings from $(BASE). Run it again after the dump changed: new
 #                                   signals are added, gone ones dropped, your edits kept.
-#   make html WAVES=work/x.vcd   -> work/x.html (makes work/x.config.json first if it does not exist yet)
+#   make html WAVES=work/x.vcd   -> work/x.html (makes work/x.config.json first if it does not exist yet, updates it
+#                                   when work/x.types.json is newer: the design's types by path, svtypes.py)
 #   make html WAVES=x.vcd SVA="checks/*.sv" BIND="a_req_ack@tb.dut,apb_*@tb.u_apb"   assertions bound and evaluated
 #   make config WAVES=x.vcd SVA="checks/*.sv"   the config gets "sva" and a "bind" line per matching instance
 #   WAVES may be a VCD or an FST (read by GTKWave's fst2vcd, else by the sva CLI of bin/: the same text, enums too).
-#   FSM state names: an FST brings its enum tables; for a VCD add SV="rtl/*.sv" (typedef enum in the sources).
+#   FSM state names: an FST brings its enum tables; for a VCD work/x.types.json beside it (tools/svtypes.py: Questa's
+#   describe or Verilator), else SV="rtl/*.sv" (typedef enum in the sources, by the variable's name).
 # make html: one self-contained page (wavelens.css/js + data inlined) from every view of CONFIG.
 #   make html                                demo dump -> $(BUILD)/demo.html
 #   make html CONFIG=work/dump.config.json   a hand-written config -> work/dump.html (or HTML=…)
@@ -44,6 +46,8 @@ help:
 	@echo 'make demo-fst   the same testbench as FST -> $$(BUILD)/demo_fst.config.json + demo_fst.html (FSM names from the dump)'
 	@echo 'make examples   every example (apb axi_lite fsm): VCD + FST, pages in $$(BUILD)/examples/<ex>/'
 	@echo 'make example    EX=apb|axi_lite|fsm: one of them'
+	@echo 'make questa     EX=fsm: the example in QuestaSim (vsim on PATH): VCD + its types (tools/questa/wavelens_types.tcl) + page in $$(BUILD)/questa/<ex>/'
+	@echo 'make types-fixture  tests/unit/types in QuestaSim again: questa.vcd, questa.types.json (another Questa version: read the diff)'
 	@echo 'make shots      the README screenshots in docs/img/ (after make examples)'
 	@echo 'make shots-check  the screenshots into $$(BUILD)/img, compared with docs/img (make check: a broken shot fails)'
 	@echo 'make guide-shots  the pictures of the guides in docs/guides/img (after make examples; ONLY=gaps,sva: those guides)'
@@ -71,12 +75,13 @@ help:
 	@echo '                make examples demo demo-fst sva-build sva-spike html first; what is missing is reported as SKIPPED);'
 	@echo '                STRICT=1: a skip fails; ONLY=sec1,sec2: those sections only (smoke.py --list)'
 	@echo 'make unit       the Python unit tests of the tools (tests/unit: unittest, standard library, a few seconds)'
-	@echo 'make check      the gate before a commit: sva-test, unit, the pages smoke needs, mcp-bench, smoke STRICT=1, shots-check'
+	@echo 'make unit-bless the goldens of tests/unit/golden (the bytes of wavejson.py, vcd2wavedrom.py over the fixtures) written anew: read the diff'
+	@echo 'make check      the gate before a commit: sva.wasm.js the build of sva/, the pages smoke needs, sva-test and unit (no skips), mcp-bench, smoke STRICT=1, shots-check'
 	@echo 'make fmt        verible-verilog-format of the project SystemVerilog (docs/SV_STYLE.md), when installed'
 	@echo 'make lint       verilator --lint-only -Wall on the example testbenches'
 	@echo 'make clean      remove the build products under $$(BUILD) (the cargo target stays: make clean-all)'
 	@echo 'make clean-all  remove $$(BUILD) entirely, the cargo target included'
-	@echo 'variables       BUILD=$(BUILD)  WAVES=dump.vcd|fst  CONFIG  HTML  BASE=$(BASE)  SV="rtl/*.sv"'
+	@echo 'variables       BUILD=$(BUILD)  WAVES=dump.vcd|fst  CONFIG  HTML  BASE=$(BASE)  TYPES=x.types.json (default: beside WAVES)  SV="rtl/*.sv"'
 	@echo '                SVA="checks/*.sv"  BIND="name@scope,…"  EX=apb|axi_lite|fsm  SCOPE=tb.dut  OUT=results.json  ARGS=…'
 	@echo '                FST=$$(BUILD)/demo_fst.fst  STRICT=1  ONLY=sec,…  AGENT=claude|codex  MODEL  REPS  TASKS'
 
@@ -109,9 +114,10 @@ $(VCD): $(OBJ)/Vdemo_tb
 	cd $(OBJ) && ./Vdemo_tb +trace && mv demo.vcd $(VCD)
 
 # Examples (examples/<ex>/: testbench, hand-written <ex>.config.json, README.md). make example EX=apb builds into
-# $(BUILD)/examples/<ex>/: the dump as VCD and as FST, <ex>.html from the example config, and <ex>_all.html from a
-# config that mkconfig.py makes from the VCD (the whole hierarchy; --sv gives enum names). The FSM page reads the FST
-# (state names and structs from the dump: fst2vcd, else the sva CLI); the others read the VCD.
+# $(BUILD)/examples/<ex>/: the dump as VCD and as FST, <ex>.types.json (the design's types by path: svtypes.py
+# verilator), <ex>.html from the example config, and <ex>_all.html from a config that mkconfig.py makes from the VCD (the
+# whole hierarchy; the types beside it give the state names and struct fields). The FSM page reads the FST (state names
+# and structs from the dump: fst2vcd, else the sva CLI); the others read the VCD.
 EXAMPLES := apb axi_lite fsm
 EX  ?= apb
 EXD := examples/$(EX)
@@ -133,13 +139,40 @@ $(EXB)/$(EX).vcd: $(EXB)/obj/V$(EX)_tb
 $(EXB)/$(EX).fst: $(EXB)/obj_fst/V$(EX)_tb
 	cd $(EXB)/obj_fst && ./V$(EX)_tb +trace +dump=$@
 
-example: wavelens/wavelens.js $(EXB)/$(EX).vcd $(EXB)/$(EX).fst
+$(EXB)/$(EX).types.json: $(EX_SRC) tools/svtypes.py
+	$(PY) tools/svtypes.py verilator --top $(EX)_tb --out $@ -- $(EX_SRC)
+
+example: wavelens/wavelens.js $(EXB)/$(EX).vcd $(EXB)/$(EX).fst $(EXB)/$(EX).types.json
 	$(PY) tools/mkhtml.py --config $(EXD)/$(EX).config.json --waves $(EXB)/$(EX).$(EX_DUMP) $(SVA_OPT) --out $(EXB)/$(EX).html
-	$(PY) tools/mkconfig.py $(EXB)/$(EX).vcd --base $(BASE) --sv $(EX_SRC) --out $(EXB)/$(EX)_all.config.json --force
+	$(PY) tools/mkconfig.py $(EXB)/$(EX).vcd --base $(BASE) --out $(EXB)/$(EX)_all.config.json --force
 	$(PY) tools/mkhtml.py --config $(EXB)/$(EX)_all.config.json --out $(EXB)/$(EX)_all.html
 
 examples:
 	@for ex in $(EXAMPLES); do $(MAKE) --no-print-directory example EX=$$ex || exit 1; done
+
+# An example in QuestaSim (vlog, vsim on PATH): $(BUILD)/questa/<ex>/ gets Questa's VCD, its types
+# (tools/questa/wavelens_types.tcl: describe of every signal) and <ex>.html made from them, as for a design of your own.
+# types-fixture: the corpus of tests/unit/types in Questa again (questa.vcd, questa.types.json; another Questa version:
+# read the diff)
+QB = $(B)/questa/$(EX)
+VSIM_TYPES = source $(abspath tools/questa/wavelens_types.tcl); wavelens_types $(1).types.json; run -all; quit -f
+questa: wavelens/wavelens.js
+	@command -v vsim >/dev/null || { echo 'questa: vsim is not on PATH (QuestaSim)'; exit 1; }
+	mkdir -p $(QB)
+	cd $(QB) && vlog -sv -quiet $(abspath $(EX_SRC)) && vsim -c -quiet -voptargs=+acc $(EX)_tb +trace +dump=$(EX).vcd \
+	  -do "$(call VSIM_TYPES,$(EX))"
+	$(PY) tools/svtypes.py check $(QB)/$(EX).types.json $(QB)/$(EX).vcd
+	$(PY) tools/mkconfig.py $(QB)/$(EX).vcd --base $(BASE) --out $(QB)/$(EX).config.json --force
+	$(PY) tools/mkhtml.py --config $(QB)/$(EX).config.json --out $(QB)/$(EX).html
+TF = tests/unit/types
+types-fixture:
+	@command -v vsim >/dev/null || { echo 'types-fixture: vsim is not on PATH (QuestaSim)'; exit 1; }
+	mkdir -p $(B)/questa/types
+	cd $(B)/questa/types && vlog -sv -quiet +incdir+$(abspath $(TF)) $(abspath $(TF)/types_pkg.sv $(TF)/types_tb.sv) && \
+	  vsim -c -quiet -voptargs=+acc types_tb +trace +dump=questa.vcd -do "$(call VSIM_TYPES,questa)"
+	sed 's/"date": "[^"]*"/"date": "2026-10-24T13:30:00"/' $(B)/questa/types/questa.types.json > $(TF)/questa.types.json
+	sed '/^\$$date/{n;s/.*/\tSat Oct 24 13:30:00 2026/}' $(B)/questa/types/questa.vcd > $(TF)/questa.vcd
+	$(PY) tools/svtypes.py check $(TF)/questa.types.json $(TF)/questa.vcd
 
 shots:
 	$(PW) tests/shots.py --build $(B) $(if $(ONLY),--only $(ONLY))
@@ -172,11 +205,13 @@ html: wavelens/wavelens.js $(CONFIG) $(if $(filter $(DEMO_CONFIG),$(CONFIG)),$(V
 
 config:
 	$(if $(WAVES),,$(error make config needs WAVES=dump.vcd))
-	$(PY) tools/mkconfig.py $(WAVES) --base $(BASE) --out $(CONFIG) --update $(if $(SV),--sv $(SV)) $(if $(SVA),$(SVA_FILES) $(if $(wildcard $(SVA_BIN)),--sva-bin $(SVA_BIN)))
+	$(PY) tools/mkconfig.py $(WAVES) --base $(BASE) --out $(CONFIG) --update $(if $(TYPES),--types $(TYPES)) $(if $(SV),--sv $(SV)) $(if $(SVA),$(SVA_FILES) $(if $(wildcard $(SVA_BIN)),--sva-bin $(SVA_BIN)))
 
 ifdef WAVES
-$(CONFIG): | $(WAVES)   # only when missing: never overwrites an edited config
-	$(PY) tools/mkconfig.py $(WAVES) --base $(BASE) --out $@ $(if $(SV),--sv $(SV))
+# missing: made; older than the types file (x.types.json beside the dump, or TYPES=): updated from it, every edit kept
+TYPES_OF = $(or $(TYPES),$(wildcard $(basename $(WAVES)).types.json))
+$(CONFIG): $(TYPES_OF) | $(WAVES)
+	$(PY) tools/mkconfig.py $(WAVES) --base $(BASE) --out $@ $(if $(wildcard $@),--update) $(if $(TYPES),--types $(TYPES)) $(if $(SV),--sv $(SV))
 endif
 
 # SVA engine (docs/sva/STACK.md): one Rust library, a native CLI over VCD / FST (wellen) and a WebAssembly module for
@@ -214,7 +249,7 @@ dist-windows:
 # unit tests (lexer, preprocessor, parser, expansion, evaluator), the corpus tests/sva/*.sv against its annotations
 # and golden files, docs/sva/ast.schema.json against the output, the sva binary end to end
 sva-test:
-	cd sva && BUILD=$(B) $(CARGO) test
+	cd sva && BUILD=$(B) $(if $(WAVELENS_STRICT),WAVELENS_STRICT=1) $(CARGO) test
 
 sva-bless:
 	cd sva && SVA_BLESS=1 BUILD=$(B) $(CARGO) test --test corpus --test cli
@@ -273,24 +308,34 @@ smoke:
 	$(PW) tests/smoke.py --build $(B) --out $(B)/shots $(if $(STRICT),--strict) $(if $(ONLY),--only $(ONLY))
 
 # wavelens/wavelens.js is the concatenation of wavelens/src/*.js (committed: a page needs one file and no build step)
-WAVELENS_SRC := $(addprefix wavelens/src/,model.js vcd.js paint.js view.js edit.js diff.js modules.js svg.js boot.js)
+WAVELENS_SRC := $(addprefix wavelens/src/,model.js vcd.js paint.js view.js edit.js diff.js modules.js fsm.js svg.js boot.js)
 wavelens: wavelens/wavelens.js
 wavelens/wavelens.js: $(WAVELENS_SRC) tools/wavelenscat.py
 	$(PY) tools/wavelenscat.py
 
 # Python unit tests of the tools (tests/unit/test_*.py on unittest, no dependencies; the fixtures in tests/unit/vcd).
 # The sva CLI of this BUILD when it is built (else svabuild finds one: an older out/ build would test stale code)
+# the goldens of tests/unit/golden (the bytes wavejson.py and vcd2wavedrom.py write) made anew: read the diff
+unit-bless:
+	WAVELENS_BLESS=1 $(PY) -m unittest discover -s tests/unit -t . -p 'test_small_tools.py'
+	WAVELENS_BLESS=1 $(PY) -m unittest discover -s tests/unit -t . -p 'test_vcd2wavedrom.py'
+	git status --short tests/unit/golden
+
 unit:
 	BUILD=$(B) $(if $(WAVELENS_STRICT),WAVELENS_STRICT=1) $(if $(WAVELENS_SVA),,$(if $(wildcard $(SVA_BIN)),WAVELENS_SVA=$(abspath $(SVA_BIN)))) \
 	  $(PY) -m unittest discover -s tests/unit -t .
 
-# The gate: the engine's tests, every page smoke checks and the fixtures (built first: the unit tests' FST parity needs
-# the examples), the unit tests with what the gate builds required (WAVELENS_STRICT), smoke --strict
+# The gate: the committed engine of the page is the build of its sources (wavelens/sva.wasm.js before and after
+# sva-build), every page smoke checks and the fixtures (built first: the engine's goldens over the examples' FST and the
+# unit tests' FST parity need them), the engine's and the unit tests with what the gate builds required
+# (WAVELENS_STRICT: a missing dump fails, not skipped), smoke --strict
 check:
 	$(PY) tools/wavelenscat.py --check
-	$(MAKE) sva-test
+	@mkdir -p $(B) && cp wavelens/sva.wasm.js $(B)/sva.wasm.js.committed
 	$(MAKE) sva-build
+	@cmp -s $(B)/sva.wasm.js.committed wavelens/sva.wasm.js || { echo 'check: wavelens/sva.wasm.js is not the build of sva/: commit the one sva-build wrote'; exit 1; }
 	$(MAKE) examples demo demo-fst sva-spike html
+	$(MAKE) sva-test WAVELENS_STRICT=1
 	$(MAKE) unit WAVELENS_STRICT=1
 	$(MAKE) sva-verify mcp-bench
 	$(MAKE) smoke STRICT=1
@@ -321,4 +366,4 @@ clean-all:
 	$(if $(filter $(B),/ $(CURDIR) $(HOME) $(abspath $(HOME)/..)),$(error clean-all: BUILD=$(B) is not a build directory))
 	rm -rf $(B)
 
-.PHONY: vsix vscode-e2e wavelens help demo demo-fst example examples shots guide-shots html config sva-build dist dist-linux dist-windows sva-test sva-bless sva-examples sva-verify sva-eval sva-spike mcp-bench smoke shots-check unit check fmt lint clean clean-all
+.PHONY: unit-bless vsix vscode-e2e wavelens help demo demo-fst example examples questa types-fixture shots guide-shots html config sva-build dist dist-linux dist-windows sva-test sva-bless sva-examples sva-verify sva-eval sva-spike mcp-bench smoke shots-check unit check fmt lint clean clean-all

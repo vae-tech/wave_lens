@@ -16,6 +16,7 @@ from xml.sax.saxutils import escape
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import common  # noqa: E402
 from common import WaveError, run_main  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -73,8 +74,11 @@ def build(out, sva, target):
     with open(os.path.join(ROOT, 'vscode', 'package.json'), encoding='utf-8') as f:
         pkg = json.load(f)
     pkg['version'] = ver + '.0' * (2 - ver.count('.'))   # semver: 0.17 -> 0.17.0
+    b = common.build_info('VSIX')   # the bar's version line in the tab: the commit it was packed from (no git where it runs)
+    if b:
+        pkg['wavelensBuild'] = b
     files = [('extension/package.json', json.dumps(pkg, indent=2, ensure_ascii=False).encode() + b'\n', 0o644)]
-    src = [('extension.js', 'vscode/extension.js'), ('media/host.js', 'vscode/media/host.js'), ('README.md', 'vscode/README.md')] + [('media/' + m, 'wavelens/' + m) for m in MEDIA]
+    src = [('extension.js', 'vscode/extension.js'), ('svtypes.js', 'vscode/svtypes.js'), ('media/host.js', 'vscode/media/host.js'), ('README.md', 'vscode/README.md')] + [('media/' + m, 'wavelens/' + m) for m in MEDIA]
     for name, p in src:
         with open(os.path.join(ROOT, p), 'rb') as f:
             files.append(('extension/' + name, f.read(), 0o644))

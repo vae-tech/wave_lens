@@ -4,7 +4,8 @@
    opens in a wavelens tab: it answers ready with its signals, a picture of it (PNG) is written to out; then a bookmark
    is kept over closing and opening the tab again (the store), and a new write of a copy of the first dump is read again
    by itself (wavelens.autoReload); a dump with a stranger code and one whose time goes back put their notes in the
-   Problems panel on their lines; a VCD as Questa writes it is named from a source of the workspace. The results: out/result.json; the process exits 0 when all passed. */
+   Problems panel on their lines; a VCD as Questa writes it is named from a source of the workspace, another by the types
+   file beside it, read again when it is written. The results: out/result.json; the process exits 0 when all passed. */
 const vscode = require('vscode'), fs = require('fs'), path = require('path');
 
 const os = require('os');
@@ -174,6 +175,44 @@ async function run() {
       ok('sources: a Questa VCD named from the workspace', r[1] && r[1].moved && r[1].t === 20000, { edge: r[1] });
       await closeAll();
     } catch (e) { ok('sources', false, { error: e.message }); }
+    // its types file beside it (review V C9): the labels of its path, not the workspace's by name; written again, read again
+    const cfg = vscode.workspace.getConfiguration('wavelens');
+    try {
+      await cfg.update('autoReload', true, vscode.ConfigurationTarget.Global);
+      const q = path.join(dir, 'typed.vcd'), ty = path.join(dir, 'typed.types.json');
+      const types = names => JSON.stringify({ wavelens: 'types', version: 1, producer: { tool: 'e2e' },
+        signals: { 'tb.state': { width: 2, enum: Object.fromEntries(names.map((n, i) => [String(i), n])) } } });
+      fs.writeFileSync(q, '$timescale 1ns $end\n$scope module tb $end\n$var reg 2 " state [1:0] $end\n$upscope $end\n$enddefinitions $end\n' +
+        '#0\nb0 "\n#10\nb1 "\n#20\nb10 "\n');
+      fs.writeFileSync(ty, types(['T0', 'T1', 'T2']));
+      const o = await open(api, q);
+      const a = await o.tab.run([{ op: 'cursor', t: 0 }, { op: 'edge', value: 'T2', signal: 'tb.state' }, { op: 'cursor', t: 0 },
+        { op: 'edge', value: 'DATA', signal: 'tb.state' }]);
+      const again = waitEvent(api, e => e.type === 'loaded' && e.tab === o.tab, 30000);
+      await sleep(1500); fs.writeFileSync(ty, types(['U0', 'U1', 'U2'])); await again;
+      const b = await o.tab.run([{ op: 'cursor', t: 0 }, { op: 'edge', value: 'U2', signal: 'tb.state' }]);
+      ok('types: the file beside the dump wins over the sources, read again when written', a[1] && a[1].t === 20000 && !(a[3] && a[3].moved) &&
+        b[1] && b[1].t === 20000, { t2: a[1], data: a[3], u2: b[1] });
+      await closeAll();
+    } catch (e) { ok('types', false, { error: e.message }); }
+    // the command Make the types with Verilator (vscode/svtypes.js): the FSM example's VCD copied, its sources given; the
+    // types file beside the copy, the tab reads it: the states by name
+    try {
+      const fsmVcd = DUMPS.find(f => /fsm\.vcd$/.test(f)), src = path.join(__dirname, '..', '..', 'examples', 'fsm');
+      if (fsmVcd) {
+        const q = path.join(dir, 'fsm_copy.vcd'); fs.copyFileSync(fsmVcd, q);
+        const o = await open(api, q);
+        const again = waitEvent(api, e => e.type === 'loaded' && e.tab === o.tab, 120000);
+        const res = await vscode.commands.executeCommand('wavelens.verilatorTypes', { args: [path.join(src, 'uart_pkg.sv'), path.join(src, 'fsm_tb.sv')],
+          top: 'fsm_tb' });
+        await again;
+        const r = await o.tab.run([{ op: 'cursor', t: 0 }, { op: 'edge', value: 'STOP', signal: 'fsm_tb.u_rx.state' }]);
+        ok('types: the command makes them with Verilator, the tab reads them', res && res.signals === 3 && fs.existsSync(path.join(dir, 'fsm_copy.types.json')) &&
+          r[1] && r[1].moved, { res, edge: r[1] });
+        await closeAll();
+      }
+    } catch (e) { ok('types: Verilator', false, { error: e.message }); }
+    await cfg.update('autoReload', undefined, vscode.ConfigurationTarget.Global);
     fs.rmSync(dir, { recursive: true, force: true });
   }
   if (DUMPS.length) await agent(api, DUMPS[0]);

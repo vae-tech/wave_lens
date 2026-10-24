@@ -1193,6 +1193,7 @@ def sva_exprs(browser, build):
     ctx.close()
 
 
+WL_VERSION = (ROOT / 'VERSION').read_text().strip()   # the version the bar shows
 READERS_BAD = {'backwards': 'time goes back', 'unsorted': 'time goes back', 'noend': 'no $enddefinitions'}
 
 
@@ -1209,7 +1210,8 @@ def vscode_tab(browser, build):
     files.update({'/media/' + f: ROOT / 'wavelens' / f for f in ('wavelens.css', 'wavelens.config.js', 'wavelens.js', 'sva.wasm.js', 'bus.js', 'sva.js')})
     ext = (ROOT / 'vscode' / 'extension.js').read_text(encoding='utf-8')
     csp = re.search(r'content="(default-src[^"]+)"', ext).group(1).replace('${src}', src).replace('${nonce}', 'N0NCE')
-    host = {'name': 'enum.vcd', 'path': '/host/dumps/enum.vcd', 'store': {'wavelens.given': 'yes'}, 'autoReload': False}
+    host = {'name': 'enum.vcd', 'path': '/host/dumps/enum.vcd', 'store': {'wavelens.given': 'yes'}, 'autoReload': False, 'keysLeft': ['ctrl+G'],
+            'build': {'branch': 'dev', 'commit': 'abc1234', 'dirty': True, 'by': 'the extension of the repository'}}
     scripts = ''.join(f'<script nonce="N0NCE" src="{src}/media/{f}"></script>' for f in ('wavelens.config.js', 'wavelens.js', 'sva.wasm.js', 'bus.js', 'sva.js'))
     html = (f'<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="{csp}">'
             '<style>kbd { color: #ccc; background-color: rgba(128, 128, 128, 0.17); padding: 1px 3px; }'   # VS Code's webview styles
@@ -1220,11 +1222,11 @@ def vscode_tab(browser, build):
             f'<script nonce="N0NCE" src="{src}/host.js"></script>{scripts}</body></html>')
     fake = """(() => { window.__sent = []; const reply = m => setTimeout(() => window.postMessage(m, '*'), 0);
       window.acquireVsCodeApi = () => ({ getState() {}, setState() {}, postMessage(m) { window.__sent.push(m);
-        if (m.type === 'source') reply({ id: m.id, src: '%s/dump.vcd', name: 'enum.vcd' });
+        if (m.type === 'source') reply({ id: m.id, src: '%s' + (window.__DUMP || '/dump.vcd'), name: 'enum.vcd' });
         if (m.type === 'save') reply(window.__cancel ? { id: m.id, cancel: true } : { id: m.id, path: '/host/dumps/' + m.name });
         if (m.type === 'clip') reply({ id: m.id, ok: true });
-        if (m.type === 'sources') reply({ id: m.id, texts: window.__SRC || ['package p; typedef enum logic [1:0] {OFF, ON = 2, HOLD} mode_t; endpackage',
-          'module m; p::mode_t plain, state; endmodule'] });
+        if (m.type === 'sources') reply(window.__TYPES ? { id: m.id, types: window.__TYPES, typesName: 'enum.types.json', texts: [] } : { id: m.id,
+          texts: window.__SRC || ['package p; typedef enum logic [1:0] {OFF, ON = 2, HOLD} mode_t; endpackage', 'module m; p::mode_t plain, state; endmodule'] });
         if (m.type === 'pick') reply({ id: m.id, files: /fst/.test(m.accept) ? [] : [{ name: 's.view.json', mtime: 1, b64: btoa(JSON.stringify(window.__S)) }] });
         if (m.type === 'http') reply({ id: m.id, status: 200, text: 'ok' }); } }); })();""" % src
     page = browser.new_page()
@@ -1232,9 +1234,11 @@ def vscode_tab(browser, build):
     page.on('console', lambda m: errs.append(m.text) if m.type == 'error' else None)
     page.on('pageerror', lambda e: errs.append(str(e)))
     page.add_init_script(fake + "document.addEventListener('securitypolicyviolation', e => window.__csp = (window.__csp || []).concat(e.violatedDirective + ' ' + e.blockedURI));")
+    dump2 = (ROOT / 'tests' / 'unit' / 'vcd' / 'enum.vcd').read_text().replace('b11 #', 'b1 #')   # the run of after "changed": tb.plain 1 at 5 ns, not 3
     page.route(src + '/**', lambda r: r.fulfill(path=str(files[urllib.parse.urlparse(r.request.url).path])) if urllib.parse.urlparse(r.request.url).path in files
                else r.fulfill(status=404))
     page.route(src + '/', lambda r: r.fulfill(body=html, content_type='text/html'))
+    page.route(src + '/dump2.vcd', lambda r: r.fulfill(body=dump2, content_type='text/plain'))   # (the last route first)
     page.goto(src + '/')
 
     def until(expr, timeout=5000):   # wait_for_function evaluates a string: the CSP refuses it (no 'unsafe-eval')
@@ -1264,6 +1268,17 @@ def vscode_tab(browser, build):
     page.evaluate("window.__SRC = null; window.postMessage({ type: 'reload' }, '*')"); until(f"window.__sent.filter(m => m.type === 'loaded').length > {n0}", timeout=5000)
     both = page.evaluate(labels)
     check(gone == [None, 'IDLE'] and both == ['P0,P1,P2,P3', 'IDLE'], f'the workspace\'s sources gone: no names; picked ones stay over the workspace\'s {gone} {both}')
+    # enum.types.json beside the dump (the extension reads it, by path): its table on tb.plain, the names of the picked sources not
+    # used beside it; gone again: the sources as before
+    n0 = len(sent('loaded'))
+    page.evaluate("""window.__TYPES = JSON.stringify({ wavelens: 'types', version: 1, signals: { 'tb.plain': { width: 2, enum: { 0: 'T0', 1: 'T1', 2: 'T2', 3: 'T3' } },
+        'tb.other': { width: 2, enum: { 0: 'NO' } } } }); window.postMessage({ type: 'reload' }, '*')""")
+    until(f"window.__sent.filter(m => m.type === 'loaded').length > {n0}", timeout=5000)
+    typed = page.evaluate(labels)
+    n0 = len(sent('loaded'))
+    page.evaluate("window.__TYPES = null; window.postMessage({ type: 'reload' }, '*')"); until(f"window.__sent.filter(m => m.type === 'loaded').length > {n0}", timeout=5000)
+    check(typed == ['T0,T1,T2,T3', 'IDLE'] and page.evaluate(labels) == ['P0,P1,P2,P3', 'IDLE'],
+          f'the types beside the dump: tb.plain by its path, not the sources\' name; gone: the sources again {typed}')
     check(js("localStorage.getItem('wavelens.given')") == 'yes' and js("(localStorage.setItem('wavelens.k', 'v'), localStorage.getItem('wavelens.k'))") == 'v' and
           any(m['key'] == 'wavelens.k' and m['value'] == 'v' for m in sent('store')), 'localStorage: the store given, a write posted')
     js("(v.saveState(), 0)"); until("window.__sent.some(m => m.type === 'save')", timeout=5000); settle(page)
@@ -1279,9 +1294,14 @@ def vscode_tab(browser, build):
     check('.fst' in sent('pick')[-1]['accept'] and not page.evaluate('!!window.showOpenFilePicker'), 'Open…: a pick of a dump (no showOpenFilePicker)')
     js("navigator.clipboard.writeText('PSEL')")
     check(any(m.get('text') == 'PSEL' for m in sent('clip')), 'the clipboard through VS Code')
-    page.evaluate("window.postMessage({ type: 'changed', auto: true }, '*')")
-    until("window.__sent.filter(m => m.type === 'loaded').length >= 2", timeout=5000)
-    check(len(sent('source')) >= 2, 'changed with autoReload: the dump fetched again')
+    # review VI T9: "changed" fetches the dump once more and reads it: one more source and load than before, the new values
+    plain = "(v => v.M.rows.find(r => r.full === 'tb.plain').tr.map(o => o.raw).join(','))(WaveLens.views().find(x => x.root.isConnected))"
+    was, n_src, n_load = page.evaluate(plain), len(sent('source')), len(sent('loaded'))
+    page.evaluate("window.__DUMP = '/dump2.vcd'; window.postMessage({ type: 'changed', auto: true }, '*')")
+    until(f"window.__sent.filter(m => m.type === 'loaded').length > {n_load}", timeout=5000)
+    now = page.evaluate(plain); page.evaluate("window.__DUMP = null")
+    check(len(sent('source')) == n_src + 1 and len(sent('loaded')) == n_load + 1 and was != now,
+          f'changed with autoReload: the dump fetched once more and its new values shown ({was} -> {now})')
     page.evaluate("window.postMessage({ type: 'live', link: '8742:tok123' }, '*')")
     until("window.__sent.some(m => m.type === 'es-open')", timeout=5000)
     es = sent('es-open')[0]
@@ -1324,8 +1344,15 @@ def vscode_tab(browser, build):
         page.keyboard.press(k)
         page.keyboard.press('Escape')
     fwd = page.evaluate('window.__fwd')
-    check('ctrl+g' not in fwd and 'ctrl+z' not in fwd and 'ctrl+p' in fwd and 'F1' in fwd and fwd.count('ctrl+F') == 1 and fwd.count('ctrl+G') == 1,
-          f'keys: the viewer\'s stay in the tab, the rest (ctrl+shift+F / G too) go to VS Code ({fwd})')
+    check('ctrl+g' in fwd and 'ctrl+z' not in fwd and 'ctrl+p' in fwd and 'F1' in fwd and fwd.count('ctrl+F') == 1 and fwd.count('ctrl+G') == 1,
+          f'keys: the viewer\'s stay in the tab; the rest (ctrl+shift+F / G too) and wavelens.keysToVSCode\'s ctrl+G go to VS Code ({fwd})')
+    # ctrl+G is VS Code's there: gl lists the groups; the bar's version line has the extension's build; ◐ asks VS Code's list of themes
+    page.locator('.wv canvas').first.click(); page.keyboard.press('g'); page.keyboard.press('l'); settle(page)
+    gl = page.evaluate("!!document.querySelector('.wv .wv-menu')"); page.keyboard.press('Escape')
+    ver = page.evaluate("[document.querySelector('.wv .bar .ver').textContent, document.querySelector('.wv .bar .ver').title]")
+    page.locator('.wv button[data-act=theme]').first.click(); settle(page)
+    check(gl and ver[0] == WL_VERSION + ' · dev@abc1234*' and 'with changes not committed' in ver[1] and sent('theme'),
+          f'VS Code: gl opens the groups list; the build in the bar ({ver}); ◐ asks the extension for its list of themes ({sent("theme")})')
     # the assertions in the page under the CSP: the engine inlined (wasm-unsafe-eval) and in a Web Worker from a Blob
     sv = page.evaluate("""async () => { await SVA.loadFiles([{ name: 't.sva', text: 'module t (input logic clk, input logic [1:0] state); ' +
         'a_st: assert property (@(posedge clk) state != 2\\'d3); endmodule' }]); await SVA.ready();
@@ -1355,6 +1382,51 @@ def readers(browser, build):
     page = browser.new_page()
     page.goto('about:blank'); page.add_script_tag(path=str(ROOT / 'wavelens' / 'wavelens.js'))
     fixtures = sorted((ROOT / 'tests' / 'unit' / 'vcd').glob('*.vcd'))
+    # a File read in pieces (vcdToWaveFile, review V X3: never all of it in memory) is read as its text at once: every fixture
+    # cut into pieces of 1, 3, 7 and 64 characters (a token, a value and its code, a $comment, a character of UTF-8 cut in
+    # two): the same doc, notes and their lines, the same error
+    cut = page.evaluate("""async ts => { const out = [];
+        const one = r => JSON.stringify(r, (k, v) => (k === 'size' ? undefined : v));
+        for (const [name, t] of ts) { let a; try { a = one(WaveLens.vcdToWave(t)); } catch (e) { a = 'error ' + e.message + ' ' + e.line; }
+          for (const n of [1, 3, 7, 64]) { let b; try { b = one(await WaveLens.vcdToWaveFile(new File([t], name), {}, n)); }
+            catch (e) { b = 'error ' + e.message + ' ' + e.line; } if (a !== b) out.push(`${name} in ${n}`); } }
+        return out; }""", [[f.name, f.read_text(encoding='utf-8', errors='replace')] for f in fixtures] + [
+          ['comment.vcd', '$timescale 1ns $end\n$scope module t $end\n$var wire 4 ! a [3:0] $end\n$var wire 1 " b $end\n$upscope $end\n$enddefinitions $end\n'
+           '#0\nb0000 !\n0"\n$comment a long one\nover lines $end\n#5\nb\n1010\n!\n1"\n#7 b1 ! 0"\n#9\nb11\n!\n$comment no end'],
+          ['utf8.vcd', '$date Sa 24 Okt 2026 — été $end\n$scope module t $end\n$var wire 1 ! é $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\n#5\n1!\n'],
+          ['back.vcd', '$scope module t $end\n$var wire 1 ! a $end\n$upscope $end\n$enddefinitions $end\n#10\n0!\n#5\n1!\n']])
+    check(not cut, f'a dump read in pieces of 1, 3, 7, 64 characters: the same doc, notes and lines as its text at once {cut}')
+    # review VI: "$enddefinitions" in a header's $comment is not its end (A1: the fixture head_comment in pieces above); an
+    # FST's enum table of 64 bits keeps 2^53 and 2^53 + 1 apart (A2); a types file's "map" not an object of texts is an
+    # error, as in svtypes.py (A3); a row's own labels stay before the file's and the inspector says so (A4, svWhy: own);
+    # an FSM of a clock-sampled row with labels that look like numbers counts its states by the table (A6)
+    six = page.evaluate("""() => { const I = WaveLens.internal, out = [];
+        const t = '$attrbegin misc 07 w 2 EVEN ODD 1' + '0'.repeat(53) + ' 1' + '0'.repeat(52) + '1 1 $end\\n$scope module t $end\\n' +
+          '$attrbegin misc 07 "" 1 $end\\n$var logic 64 ! w [63:0] $end\\n$upscope $end\\n$enddefinitions $end\\n#0\\nb1 !\\n';
+        out.push(WaveLens.vcdToWave(t).doc.signal[0][1].enum);
+        for (const m of [['tb=dut'], 'tb', { tb: 1 }]) { try { I.svTypes({ wavelens: 'types', map: m }); out.push('no error'); } catch (e) { out.push(/"map" is/.test(e.message)); } }
+        out.push(I.svTypes({ wavelens: 'types', map: null }).map);
+        const sv = I.svTypes({ wavelens: 'types', signals: { 't.s': { width: 1, enum: { 0: 'OTHER0', 1: 'OTHER1' } }, 't.u': { width: 1, enum: { 0: 'U0', 1: 'U1' } },
+          't.n': { width: 2, enum: { 0: 'N0' } } } }, 'other.types.json'), why = new Map();
+        const doc = { signal: [{ name: 's', path: 't.s', tv: [[0, '0']], enum: { 0: 'MINE0', 1: 'MINE1' } }, { name: 'u', path: 't.u', tv: [[0, '0']] },
+          { name: 'n', path: 't.n', tv: [[0, '0']], enum: { 0: 'OWN' } }] };
+        out.push([I.svApply(doc, sv, [], why), doc.signal[0].enum[0], doc.signal[1].enum[1], ...['t.s', 't.u', 't.n'].map(p => why.get(p).status + ' ' + why.get(p).labels)]);
+        const of = (p, e, w) => WaveView.prototype.typesOf.call({ opts: { svWhy: why, sv } }, { full: p, path: p, enum: e, width: w });
+        out.push([of('t.s', doc.signal[0].enum, 1), of('t.n', doc.signal[2].enum, 1)].map(o => o.status + ': ' + o.why));
+        const r = { width: 1, enum: { 0: '1', 1: '2' }, tr: [{ t: 0, k: '=', v: '1' }, { t: 10, k: '=', v: '2' }, { t: 20, k: '=', v: '1' }] }, st = I.fsmStats(r, 30);
+        out.push([[...st.vals.keys()], st.bad.length, st.unseen.length]);
+        // T8: x before the first state, the same time twice, z between, partly known bits, the last state held to t1
+        const f = I.fsmStats({ width: 2, enum: { 0: 'A', 1: 'B', 2: 'C' }, tr: [{ t: 0, k: 'x' }, { t: 10, k: '=', raw: '0', v: 'A' }, { t: 20, k: '=', raw: '1', v: 'B' },
+          { t: 20, k: '=', raw: '1', v: 'B' }, { t: 30, k: 'z' }, { t: 35, k: '=', bits: 'x1', v: '?' }, { t: 40, k: '=', raw: '0', v: 'A' }] }, 100);
+        out.push([f.seq.map(x => x.join('@')).join(' '), [...f.vals.values()].map(x => `${x.key}:${x.time}:${x.entries.length}`).join(' '),
+          [...f.trans.keys()].join(' '), f.unseen.join(), f.trans.get('x>0').times.join(), f.bad.map(x => x.key).join(), f.keyOf('B'), f.keyOf('Z'), f.name('2'), f.name('3')]);
+        return out; }""")
+    check(six[0] == {'9007199254740992': 'EVEN', '9007199254740993': 'ODD'} and six[1:4] == [True] * 3 and six[4] == {} and
+          six[5] == [1, 'MINE0', 'U1', 'typed own', 'typed types', 'width own'] and six[6][0].startswith('own: its own labels') and
+          'its own labels stay' in six[6][1] and six[7] == [['0', '1'], 0, 0] and
+          six[8] == ['0@x 10@0 20@1 30@z 35@x 40@0', 'x:15:2 0:70:2 1:10:1 z:5:1', 'x>0 0>1 1>z z>x', '2', '10,40', 'x,z', '1', 'z', 'C', '3 (no label)'],
+          f'review VI A2 A3 A4 A6 T8: 64-bit table keys exact, a bad map an error, own labels kept and said so, labels like numbers; an FSM\'s states '
+          f'and changes over x, z, a time twice, the last one held {six}')
     same, differ = [], []
     for f in fixtures:
         text = f.read_text(encoding='utf-8', errors='replace')
@@ -1423,6 +1495,34 @@ def readers(browser, build):
       const [, g, clk, nar, none] = doc.signal[0]; return [n, g[1].enum && g[1].enum[4], g[2].enum && g[2].enum[1], !!clk.enum, !!nar.enum, !!none.enum]; }""")
     check(ap == [2, 'A2', 'A0', False, False, False], f'svApply: array elements (a negative index too) named; a clock-sampled row, a table too wide, an empty one left alone {ap}')
     check(js == [want['enums'], want['fields'], want['notes']], f'tests/unit/sv/sources.sv: the page gives the expected tables and notes {js if js != [want["enums"], want["fields"], want["notes"]] else ""}')
+    # the types by path (tools/svtypes.py's twin): Questa's describe of the corpus gives the expected tables, every form of
+    # tests/unit/types/describe.json its entry or its note
+    T = ROOT / 'tests' / 'unit' / 'types'
+    tw, cases = json.loads((T / 'types.expected.json').read_text()), json.loads((T / 'describe.json').read_text())['cases']
+    js = page.evaluate("t => { const r = WaveLens.svTypes(t, 'questa.types.json'); return [r.paths, r.notes]; }", (T / 'questa.types.json').read_text())
+    check(js == [tw['signals'], tw['notes']], f'tests/unit/types/questa.types.json: the page gives the expected types by path {js if js[0] != tw["signals"] else js[1]}')
+    js = page.evaluate("""cs => cs.map(c => { const r = WaveLens.svTypes({ wavelens: 'types', describe: { x: c.describe } });
+        return [r.paths.x || null, r.notes.length ? r.notes[0].slice(3) : null]; })""", cases)
+    bad = [c['describe'][:30] for c, g in zip(cases, js) if g != [c['entry'], c['note']]]
+    check(not bad, f'tests/unit/types/describe.json: every form of describe as svtypes.py reads it {bad}')
+    # svApply by path (review V A2, A8): another root of the dump with a tb below is not the types' tb, a TOP above the
+    # design is skipped; an empty types file still keeps the names of the sources out
+    got = page.evaluate("""() => { const tv = [[0, '1']], s = (path, width = 2) => ({ name: path.split('.').pop(), path, width, tv });
+      const ty = WaveLens.svTypes({ wavelens: 'types', producer: { tool: 'Q' }, signals: { 'tb.u.state': { width: 2, enum: { 1: 'A' } } } });
+      const d1 = { signal: [s('tb.u.state'), s('other.tb.u.state')] }, d2 = { signal: [s('TOP.tb.u.state'), s('TOP.clk', 1)] };
+      const n1 = WaveLens.svApply(d1, ty), n2 = WaveLens.svApply(d2, ty);
+      const d3 = { signal: [s('tb.u.state')] }, empty = WaveLens.svTypes({ wavelens: 'types', signals: {} });
+      const n3 = WaveLens.svApply(d3, Object.assign(empty, { enums: { state: { 1: 'BYNAME' } } }));
+      return [n1, !!d1.signal[0].enum, !!d1.signal[1].enum, n2, d2.signal[0].enum && d2.signal[0].enum[1], n3]; }""")
+    check(got == [1, True, False, 1, 'A', 0], f'types by path: other.tb.state not tb.state, TOP. skipped; an empty types file: no labels by name {got}')
+    # a 64-bit enum (Verilator's, review V A3): 2^53 and 2^53 + 1 are two labels, -1 (2^64 - 1) fits the width
+    got = page.evaluate("""() => { const ty = WaveLens.svTypes({ wavelens: 'types', signals: { 'tb.w': { width: 64,
+        enum: { '9007199254740992': 'EVEN', '9007199254740993': 'ODD', '18446744073709551615': 'ALL' } } } });
+      const doc = { signal: [{ name: 'w', path: 'tb.w', width: 64, tv: [[0, '20000000000000'], [10, '20000000000001'], [20, 'ffffffffffffffff']] }] };
+      const n = WaveLens.svApply(doc, ty), el = document.createElement('div'); document.body.append(el);
+      const v = new WaveLens.WaveView(el, doc, {}), r = v.M.rows.find(x => x.full === 'tb.w'), out = [n, ...[5, 15, 25].map(t => v.valueAt(r, t))];
+      v.destroy(); el.remove(); return out; }""")
+    check(got == [1, 'EVEN', 'ODD', 'ALL'], f'a 64-bit enum: its table taken, 2^53 + 1 not 2^53, -1 by its label {got}')
     # known bits among x / z reach the page's engine as bits (they were x by the hex: the page and sva eval disagreed)
     for f in ('wavelens.config.js', 'sva.wasm.js', 'sva.js'):
         page.add_script_tag(path=str(ROOT / 'wavelens' / f))
@@ -1433,6 +1533,134 @@ def readers(browser, build):
     check(got == [[[0, 'x'], [10000, 'x'], [20000, '1'], [30000, '1']], [[0, '0'], [10000, 'x'], [20000, 'x'], [30000, 'x']],
                   [[0, '1'], [10000, '0'], [20000, '0'], [30000, '0']]],
           f'xz.vcd in the page\'s engine: bit 0 of bx1 is 1 (not x), 1x0z1z0x keeps its known bits (== on a known bit that differs: 0, not x) {got}')
+    page.close()
+
+
+def fsm_panel(browser, build):
+    """The state machines (wavelens/src/fsm.js) on fsm_all.html (the FSM example's VCD, its types beside it): T opens the
+    tree of the modules with an FSM, each FSM with its state at the cursor and its states reached; a click goes to one
+    folded away; Only FSMs keeps them and the modules on the way; Add to view puts them into a view the find's Mask made;
+    the command fsm, the fields, the state saved and loaded, undo; ✕ in the bar."""
+    pg = build / 'examples' / 'fsm' / 'fsm_all.html'
+    if not need(pg, how='make examples'):
+        return
+    print('the FSM panel')
+    page = browser.new_page(viewport={'width': 1360, 'height': 1000})
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(pg.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+    js = lambda e: page.evaluate(f"(() => {{ const v = document.querySelector('.wv').waveView; return {e}; }})()")
+    run = lambda ops: page.evaluate("ops => document.querySelector('.wv').waveView.run(ops)", ops)
+    sigs = "WaveLens.internal.peek(v).vis.filter(r => r.type === 'sig').map(r => r.full)"
+    check(js("[v.fsms(false).map(r => r.full), v.fsms().length]") == [['fsm_tb.state', 'fsm_tb.u_rx.state'], 3] and
+          page.locator('.wv .bar button[data-act=fsms]').count() == 1, 'the FSMs: the two state buses, the struct\'s state field among the fields; FSMs in the bar')
+    js("(v.collapseAll(), 0)")
+    js("(v.canvas.focus(), 0)"); page.keyboard.press('Shift+T'); settle(page)
+    rows = page.locator('.wv-fsms .mn')
+    tree = [rows.nth(i).locator('.nm').inner_text() for i in range(rows.count())]
+    st = page.locator('.wv-fsms .mn.fs').first.locator('.ct').inner_text()
+    check(tree == ['fsm_tb', 'state', 'u_rx', 'state'] and st == '5/5', f'T: the modules with an FSM and their FSMs, the states reached of the table {tree} {st}')
+    page.locator('.wv-fsms .mn.fs').nth(1).click(); settle(page)
+    check(js("[v.sel && v.sel.full, WaveLens.internal.peek(v).vis.includes(v.sel)]") == ['fsm_tb.u_rx.state', True], 'a click: the FSM opened, selected')
+    page.locator('.wv-fsms button[data-a=only]').click(); settle(page)
+    only = js(sigs)
+    check(only == ['fsm_tb.state', 'fsm_tb.u_rx.state'] and 'FSMs only: 2' in js("v.root.querySelector('.bar button[data-act=fsmx]').textContent"),
+          f'Only FSMs: the two of them, the modules on the way, the bar says it {only}')
+    js("(v.setFsm(null), 0)")
+    run([{'op': 'find', 'query': 'rxd', 'mask': True, 'regex': False}])
+    masked = js(sigs)
+    page.locator('.wv-fsms button[data-a=add]').click(); settle(page)
+    added = js(sigs)
+    check(set(masked) == {'fsm_tb.rxd', 'fsm_tb.u_rx.rxd'} and added == ['fsm_tb.rxd', 'fsm_tb.state', 'fsm_tb.u_rx.rxd', 'fsm_tb.u_rx.state'],
+          f'Add to view: the find\'s Mask kept, the FSMs in it too {masked} {added}')
+    saved = js("v.state().fsm")
+    run([{'op': 'find', 'query': ''}])
+    res = run([{'op': 'fsm', 'mode': 'only', 'signals': '*u_rx.state'}, {'op': 'fsm', 'fields': True, 'mode': 'only'}, {'op': 'fsm', 'mode': 'odd'}])
+    check(saved == {'mode': 'add', 'signals': ['fsm_tb.state', 'fsm_tb.u_rx.state']} and res[0]['fsm'] == {'mode': 'only', 'signals': ['fsm_tb.u_rx.state']} and
+          res[1]['fsm']['signals'] == ['fsm_tb.state', 'fsm_tb.status.state', 'fsm_tb.u_rx.state'] and 'only or add' in res[2].get('error', ''),
+          f'the state has the layer; the command: one FSM, every one with fields, a wrong mode refused {saved} {res}')
+    page.evaluate("(async () => { const v = document.querySelector('.wv').waveView; await v.run([{ op: 'fsm', clear: true }]); v.undo(); })()"); settle(page)
+    back = js("v.fsmState() && v.fsmState().signals.length")
+    page.evaluate("s => document.querySelector('.wv').waveView.setState(s)", {'wavelens': 'state', 'fsm': {'mode': 'only', 'signals': ['fsm_tb.state', 'tb.nope']}})
+    loaded = js("[v.fsmState(), " + sigs + "]")
+    page.locator('.wv .bar button[data-act=fsmx]').click(); settle(page)
+    check(back == 3 and loaded == [{'mode': 'only', 'signals': ['fsm_tb.state']}, ['fsm_tb.state']] and js("v.fsm") is None and
+          page.locator('.wv .bar button[data-act=fsmx]').is_hidden(), f'undo brings the layer back; a state loads it (a path not here left out); ✕ clears it {back} {loaded}')
+    # review V: a state with the layer takes the selection off a signal it leaves out (A13); a plugin's row above every
+    # module stays with Only FSMs, as with Only (C10); ↑ ↓ in the panel keep its rows (A14); going to an FSM switches the
+    # find's Open off, so the next search does not fold it again (A12)
+    js("(v.setFsm(null), v.select(v.M.rows.find(r => r.full === 'fsm_tb.rxd')), 0)")
+    page.evaluate("s => document.querySelector('.wv').waveView.setState(s)", {'wavelens': 'state', 'fsm': {'mode': 'only', 'signals': ['fsm_tb.state']}})
+    gone = js("v.sel")
+    js("(v.extraRows.push(g => g ? [] : [{ type: 'sig', name: 'fx', full: 'fx', width: 1, tr: [{ t: 0, k: '0' }], gaps: [] }]), v.setFsm({ mode: 'only' }), 0)")
+    fx = js(sigs)
+    js("(v.extraRows.pop(), v.setFsm(null), 0)")
+    check(gone is None and fx == ['fx', 'fsm_tb.state'], f'a state with the layer: the selection left out goes; Only FSMs keeps a plugin\'s row on top {gone} {fx}')
+    js("(v.fsmPanel(true), 0)"); settle(page)
+    page.evaluate("(window.fsmRow = document.querySelector('.wv-fsms .mn'), document.querySelector('.wv').waveView.fsmP.focusRow(0), 0)")
+    page.keyboard.press('ArrowDown'); page.keyboard.press('ArrowDown'); settle(page)
+    same = page.evaluate("[window.fsmRow === document.querySelector('.wv-fsms .mn'), document.activeElement.dataset.i, document.activeElement.tabIndex]")
+    check(same == [True, '2', 0], f'↑ ↓ in the panel: the focus moves, its rows stay (no new HTML each step) {same}')
+    folded = js("""(() => { const u = Object.values(v.M.groups).find(g => g.path === 'fsm_tb.u_rx'); v.findOpen = true;
+        v.find('status'); const before = WaveLens.internal.peek(v).collapsed.has(u.id); v.goFsm('fsm_tb.u_rx.state'); v.find('statu');
+        return [before, WaveLens.internal.peek(v).collapsed.has(u.id), v.findOpen, WaveLens.internal.peek(v).vis.some(r => r.full === 'fsm_tb.u_rx.state')]; })()""")
+    js("(v.find(''), 0)")
+    check(folded == [True, False, False, True], f'an FSM gone to during a search with Open: its module stays open at the next search (Open off) {folded}')
+    # Sources… with two types files (A9): no exception, the panel open again in the new viewer with its filter (C3)
+    page.locator('.wv-fsms .mq').fill('rx'); settle(page)
+    two = page.evaluate("""(async () => { let v = document.querySelector('.wv').waveView;
+        const f = (name, sig) => new File([JSON.stringify({ wavelens: 'types', producer: { tool: name }, signals: sig })], name);
+        v = await v.setSources([f('a.types.json', { 'fsm_tb.rxd': { width: 1, enum: { 0: 'LO', 1: 'HI' } } }),
+          f('b.types.json', { 'fsm_tb.u_rx.rst_n': { width: 1, enum: { 0: 'RESET', 1: 'RUN' } } })]);
+        return [v.fsms().map(r => r.full), !!v.fsmP, v.fsmP && v.fsmP.q, v.root.querySelector('.bar .toast').textContent]; })()""")
+    check('fsm_tb.rxd' in two[0] and 'fsm_tb.u_rx.rst_n' in two[0] and two[1] and two[2] == 'rx' and '2 typed paths (b.types.json' in two[3],
+          f'Sources… with two types files: both read; the FSM panel open again with its filter, the new FSMs in it {two}')
+    # the states reached (A11): x and z are none, a value with x bits is none; a clock-sampled row counts too
+    seen = page.evaluate("""(() => { const el = document.createElement('div'); document.body.append(el);
+        const e = { 1: 'A', 16: 'B', 2: 'C' }, doc = { signal: [{ name: 'ex', width: 8, enum: e, tv: [[0, '10'], [10, "'b0001xxxx"], [20, 'x'], [30, '2']] },
+          { name: 'cs', width: 8, enum: e, wave: '===', data: ['16', '2', '2'] }] };
+        const v = new WaveLens.WaveView(el, doc, {}); v.fsmPanel(true);
+        const out = v.fsms().map(r => v.fsmP.seenOf(r)), P = v.fsmP, named = [P.mine.map(r => r.name), P.others];
+        P.el.querySelector('.fa').click(); out.push(named, P.mine.map(r => r.name)); v.destroy(); el.remove(); return out; })()""")
+    check(seen == [[2, 3], [2, 3], [['cs'], 1], ['ex', 'cs']], f'the states reached: an exact row with x bits and a clock-sampled row count their own '
+          f'values; the panel lists the ones named as a state (cs), all enums the others too (C8) {seen}')
+    # the features of review V: an FSM's details (X1: its states, the times it entered each, its changes; X2: the diagram
+    # of them), a click there takes the cursor to the next entry / change; fsm_stats and fsm_go; the right button's menu and
+    # a box over the tree (X6)
+    page.goto(pg.as_uri()); page.wait_for_load_state('networkidle')
+    js("(v.fsmPanel(true), 0)"); settle(page)
+    page.locator('.wv-fsms .mn.fs').nth(1).click(); settle(page)
+    det = js("[v.fsmP.det && v.fsmP.det.full, document.querySelector('.wv-fsms .fdn').textContent, document.querySelector('.wv-fsms .fdm').textContent, "
+             "[...document.querySelectorAll('.wv-fsms .fst tr[data-k]')].map(r => r.firstChild.textContent)]")
+    page.locator('.wv-fsms .fst tr[data-k="2"]').evaluate("el => el.click()"); settle(page)
+    went = js("[v.cursor, v.sel && v.sel.full]")
+    page.locator('.wv-fsms .fdt button[data-t=changes]').click(); settle(page)
+    ch = js("[...document.querySelectorAll('.wv-fsms .fst tr[data-f]')].map(r => r.dataset.f + '>' + r.dataset.t + ' ' + r.children[3].textContent)")
+    page.locator('.wv-fsms .fdt button[data-t=graph]').click(); settle(page)
+    gr = js("[document.querySelectorAll('.wv-fsms .fsg .fn').length, document.querySelectorAll('.wv-fsms .fsg .fa').length, "
+            "document.querySelector('.wv-fsms .fsg .fn.now') && document.querySelector('.wv-fsms .fsg .fn.now').dataset.k]")
+    page.locator('.wv-fsms .fsg .fa[data-f="3"][data-t="4"] path.hit').dispatch_event('click'); settle(page)
+    arc = js("v.cursor")
+    check(det == ['fsm_tb.u_rx.state', 'u_rx.state', '5/5 states · 9 changes', ['IDLE', 'START', 'DATA', 'STOP', 'ERROR']] and went == [65000, 'fsm_tb.u_rx.state']
+          and '0>1 2' in ch and '3>4 1' in ch and len(ch) == 6 and gr == [5, 6, '2'] and arc == 905000,
+          f'an FSM\'s details: its states, a click the next entry; its changes; the diagram, a click on an arc the next time {det} {went} {ch} {gr} {arc}')
+    res = page.evaluate("""async () => { const v = document.querySelector('.wv').waveView; return await v.run([{ op: 'fsm_stats', signal: 'fsm_tb.u_rx.state' },
+      { op: 'fsm_go', signal: 'fsm_tb.u_rx.state', state: 'STOP', first: true }, { op: 'fsm_go', signal: 'fsm_tb.u_rx.state', from: 'DATA', to: 'STOP' },
+      { op: 'fsm_go', signal: 'fsm_tb.state', state: 'NOPE' }]); }""")
+    st = res[0]
+    check([x['entries'] for x in st['states']] == [3, 2, 2, 2, 1] and st['never'] == [] and st['changes'][0]['count'] == 2 and res[1]['t'] == 385000 and
+          res[2]['t'] == 865000 and 'never NOPE' in res[3]['error'], f'fsm_stats: the entries of each state, its changes; fsm_go: a state, a change, one it never is {res[1:]}')
+    page.locator('.wv-fsms .mn.mm').first.click(button='right'); settle(page)
+    menu = js("[...document.querySelectorAll('.wv-menu button')].map(b => b.querySelector('span').textContent)")
+    page.locator('.wv-menu button[data-mm=only]').click(); settle(page)
+    only = js(sigs)
+    js("(v.setFsm(null), 0)")
+    bb = page.locator('.wv-fsms .mrows').bounding_box()
+    page.mouse.move(bb['x'] + 40, bb['y'] + 3); page.mouse.down(); page.mouse.move(bb['x'] + 40, bb['y'] + 4 * 22 - 4, steps=6); page.mouse.up(); settle(page)
+    box = js("[...v.fsmP.pick].map(r => r.full).sort()")
+    check(menu == ['Go to the module', 'Only its FSMs', 'Add its FSMs to the view', 'Pick its FSMs', 'Copy scope path'] and only == ['fsm_tb.state', 'fsm_tb.u_rx.state']
+          and box == ['fsm_tb.state', 'fsm_tb.u_rx.state'], f'the right button on a module: Only its FSMs; a box over the tree picks the FSMs in it {menu} {only} {box}')
+    check(not errs, 'no page errors (fsm)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
     page.close()
 
 
@@ -1554,6 +1782,37 @@ def dump(browser, build):
     check(sv[0] == '7' and sv[1] == ['START', 'GREEN'] and sv[2] == 12000 and sv[3] == ['DATA', 'BLUE'],
           f'a Questa VCD: an integer reads as decimal; Sources… names the states (the cursor kept), ⟳ keeps the names {sv}')
     check(sv[4] == 'HOT' and sv[5] == '2', f'Sources… again: the new names replace the sources\' old ones; sources without them: the number again {sv[4:]}')
+    # Questa's VCD of the corpus and its types file (tools/questa/wavelens_types.tcl): Sources… with the .json names every path
+    # its own way (four leaf states of four widths, a struct with an enum field), the plain `state` stays a number, the sources'
+    # names are not used beside it
+    T = ROOT / 'tests' / 'unit' / 'types'
+    page.locator('.wv input.dfile').first.set_input_files(str(T / 'questa.vcd'))
+    page.wait_for_function("document.querySelector('.wv').waveView.M.title === 'questa.vcd'", timeout=30000)
+    page.locator('.wv input.srcfile').first.set_input_files([str(T / 'questa.types.json'), str(T / 'types_pkg.sv')])
+    page.wait_for_function("document.querySelector('.wv').waveView.M.rows.some(r => r.full === 'types_tb.u_l3.state' && r.enum)", timeout=30000)
+    ty = js("""(r => [r('types_tb.u_l3.state').enum[7], r('types_tb.gen[1].u_l.state').enum[31], !!r('types_tb.u_plain.state').enum,
+        v.M.rows.filter(x => x.full.startsWith('types_tb.o.')).map(x => x.name).join(','), v.root.querySelector('.bar .toast').textContent])
+        (n => v.M.rows.find(x => x.full === n))""")
+    check(ty[:4] == ['L_LAST', 'L_LAST', False, 'oh,in.st,in.code,pair,flag'] and 'typed paths' in ty[4] and '2 not used' in ty[4],
+          f'Sources… with a types file: each path its own table (widths 3 and 5), the plain state a number, a struct\'s fields; the union and the .sv not read: notes {ty}')
+    # the types inspector (X4: the right button's Type…, the command types), the root map ("map": the dump's scopes as the
+    # types name them) and the run's fingerprint (X5: a types file of another day, an instance the dump does not have)
+    tj = json.loads((T / 'questa.types.json').read_text())
+    other = dict(tj, describe={k.replace('types_tb.', 'tb.', 1): x for k, x in tj['describe'].items()}, map={'types_tb': 'tb'},
+                 producer=dict(tj['producer'], date='2026-10-01T10:00:00'), instances={'tb': 'types_tb', 'tb.u_gone': 'leaf', 'tb.u_l2': 'leaf'})
+    ins = page.evaluate("""async t => { let v = document.querySelector('.wv').waveView;
+        v = await v.setSources([new File([JSON.stringify(t)], 'other.types.json')], true);
+        const o = await v.run([{ op: 'types', signals: ['types_tb.state', 'types_tb.u_plain.state', 'types_tb.clk'] }]);
+        const r = v.M.rows.find(x => x.full === 'types_tb.state'), box = v.typesBox(r, 50, 50).why, shown = document.querySelector('.wv-types').innerText;
+        v.closeMenu(); return [o[0].types.map(x => x.status), o[0].types[0].why, o[0].run, box, shown.includes('run:') || shown.includes('day')]; }""", other)
+    check(ins[0] == ['typed', 'plain', 'plain'] and "types_tb.state as the types name it" in ins[1] and len(ins[2]) == 2 and '23 days before' in ins[2][0] and
+          'tb.u_gone' in ins[2][1] and ins[3] == ins[1] and ins[4], f'Type…: a path through the map, a plain vector the types know; the run: another day, '
+          f'an instance not in the dump {ins}')
+    # the bar of viewer.html: the version, ◐ (no theme button of the page's own), the theme kept in this browser
+    th = page.evaluate("""() => { const b = document.querySelector('.wv button[data-act=theme]'); b.click(); b.click();
+        return [document.querySelector('.wv .bar .ver').textContent, document.documentElement.dataset.theme, localStorage.getItem('wavelens-theme')]; }""")
+    check(th == [WL_VERSION, 'white', 'white'], f'viewer.html: the version in the bar; ◐ auto -> light -> white, kept in this browser {th}')
+    page.evaluate("localStorage.removeItem('wavelens-theme'); WaveLens.setTheme('auto')")
     check(not errs, 'no page errors (dump)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
     page.close()
 
@@ -4038,6 +4297,7 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'sva_waves': 'stage 7: the assertion groups on the waves',
     'sva_exprs': 'stage 10: expressions in the bar (search, rows ƒ, kept, JSON), names in a hierarchy',
     'dump': 'a VCD opened in the page (Open…, dropped on a viewer), ⟳, wavelens/viewer.html',
+    'fsm': 'the FSM panel (T) on the FSM example\'s VCD with its types: the tree, go to one, Only FSMs, add them to a masked view, the command, the state',
     'state': 'Save / Load… of a viewer (the APB and AXI-Lite pages): its state to a file and back, on other waves',
     'edit': 'the viewer\'s commands, a page\'s edits (tools/viewedit.py) with the same state, your groups and markers, a page live through wavemcp.py',
     'view_review': 'the review of 0.15: Clear keeps markers, cycleZero a time, a run lays out before a picture, undo after a lost release, rows of '
@@ -4177,6 +4437,7 @@ def main():
         run('compare', compare, b, build)
         run('view_review', view_review, b, build)
         run('dump', dump, b, build)
+        run('fsm', fsm_panel, b, build)
         run('readers', readers, b, build)
         run('vscode', vscode_tab, b, build)
         run('ranges', ranges, b, build)

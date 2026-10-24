@@ -11,7 +11,7 @@
 <body>
 <header class="top"><nav>
   <a class="home" href="index.html">WaveLens guides</a>
-  <a href="pages.html">Dump → page</a> <a href="viewer.html">Viewer</a> <a href="modules.html">Modules</a>
+  <a href="pages.html">Dump → page</a> <a href="types.html">State names</a> <a href="viewer.html">Viewer</a> <a href="modules.html">Modules</a>
   <a href="compare.html">Compare</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
   <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="vscode.html">VS Code</a>
   <a href="commands.html" aria-current="page">Commands</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
@@ -89,7 +89,7 @@ python3 -I tools/viewedit.py saved.view.json --model page.html --ops '[{"op": "b
 <p><code>read.json</code> is the list above as JSON. The page keeps its edits per view in a JSON block next to its data, with a new
   revision each time. Whoever opens the file sees the marks; what this browser keeps of a viewer (bookmarks, groups, colours …) is
   replaced once per revision, so what a person changes afterwards stays theirs until a newer revision comes. The commands that need the
-  values or the screen (<code>edge</code>, <code>fit</code>, <code>picture</code>) run only in a page.</p>
+  values, the labels or the screen (<code>edge</code>, <code>fit</code>, <code>picture</code>, <code>fsm</code>) run only in a page.</p>
 <div class="note"><p>A page made before the project was renamed to WaveLens (0.18) is refused: make it again with
   <code>make html</code> or <code>mkhtml.py</code>.</p></div>
 
@@ -108,7 +108,7 @@ python3 -I tools/viewedit.py saved.view.json --model page.html --ops '[{"op": "b
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.19 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.20 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

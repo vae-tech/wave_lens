@@ -383,6 +383,8 @@ fn examples_evaluation_goldens() {
     for (ex, scope, files) in cases {
         let dump = build.join(format!("examples/{ex}/{ex}.fst"));
         if !dump.exists() {
+            // make check (WAVELENS_STRICT): the gate builds the examples first, a dump missing there fails
+            assert!(std::env::var("WAVELENS_STRICT").is_err(), "examples_evaluation_goldens: {} is missing (make examples)", dump.display());
             eprintln!("examples_evaluation_goldens: {} is missing (make examples): {ex} skipped", dump.display());
             continue;
         }
@@ -431,6 +433,7 @@ fn vcd_writes_a_dump_as_vcd_text() {
     let build = std::env::var("BUILD").map(std::path::PathBuf::from).unwrap_or_else(|_| root.join("out"));
     let fst = build.join("examples/fsm/fsm.fst");
     if !fst.exists() {
+        assert!(std::env::var("WAVELENS_STRICT").is_err(), "vcd_writes_a_dump_as_vcd_text: {} is missing (make examples)", fst.display());
         eprintln!("vcd_writes_a_dump_as_vcd_text: {} is missing (make examples): the FST part skipped", fst.display());
         return;
     }

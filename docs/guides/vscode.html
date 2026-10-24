@@ -19,7 +19,7 @@
 <body>
 <header class="top"><nav>
   <a class="home" href="index.html">WaveLens guides</a>
-  <a href="pages.html">Dump → page</a> <a href="viewer.html">Viewer</a> <a href="modules.html">Modules</a>
+  <a href="pages.html">Dump → page</a> <a href="types.html">State names</a> <a href="viewer.html">Viewer</a> <a href="modules.html">Modules</a>
   <a href="compare.html">Compare</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
   <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="vscode.html" aria-current="page">VS Code</a>
   <a href="commands.html">Commands</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
@@ -85,14 +85,23 @@
     workspace: they survive closing the tab and VS Code.</td></tr>
   <tr><td>theme and keys</td><td><code>wavelens.theme</code>: the viewer's light or dark by VS Code's (<code>auto</code>), the
     colours of VS Code's own theme (<code>vscode</code>), or always <code>light</code>, <code>white</code> or <code>dark</code>;
-    <i>WaveLens: Choose the theme of the waves</i> (the editor's title) shows each on the open tabs as you move through the list.
-    The viewer's keys (<kbd>?</kbd>) work in the tab and do not reach
-    VS Code (<kbd>ctrl+G</kbd> is the list of your groups, not Go to Line); <kbd>ctrl+P</kbd>, <kbd>F1</kbd>, <kbd>ctrl+Tab</kbd> stay
-    VS Code's.</td></tr>
+    <b>◐</b> in the viewer's bar (or <i>WaveLens: Choose the theme of the waves</i> in the editor's title) shows each on the open
+    tabs as you move through the list. The viewer's keys (<kbd>?</kbd>) work in the tab and do not reach VS Code: the plain ones,
+    and <kbd>ctrl+F</kbd> <kbd>ctrl+C</kbd> <kbd>ctrl+Z</kbd> <kbd>alt+C W R</kbd>, which mean what they mean in VS Code.
+    <code>wavelens.keysToVSCode</code> (default <kbd>ctrl+G</kbd>, Go to Line) go to VS Code — the viewer's list of your groups is
+    <kbd>gl</kbd> then; <kbd>ctrl+P</kbd>, <kbd>F1</kbd>, <kbd>ctrl+Tab</kbd> stay VS Code's.</td></tr>
+  <tr><td>version</td><td>the bar's title line says the version and the extension's branch and commit (<code>0.20 ·
+    dev@d502c48*</code>, <code>*</code>: changes not committed): a development build says which one it is.</td></tr>
+  <tr><td>types by Verilator</td><td><i>WaveLens: Make the types with Verilator</i> (the editor's title menu) asks for the design
+    (a <code>.f</code> file of the workspace, or the arguments: <code>*</code> and <code>?</code> in a file's name are expanded) and the top module (the dump's by default), runs
+    <code>verilator --json-only</code> in the workspace's folder and writes <code>tb.types.json</code> beside the dump: the tab reads
+    it at once (FSM states by name, struct fields; <a href="types.html">Types</a>). No Python needed; <code>wavelens.verilator</code>.</td></tr>
   <tr><td>state names</td><td>a VCD has no enum names (Questa writes none, its int-based enums come as <code>integer</code>,
-    shown in decimal): the tab reads the workspace's SystemVerilog sources (<code>wavelens.sources</code>) at each read and names
-    the state buses declared with a <code>typedef enum</code> there, by the variable's name; <span class="ui">Sources…</span> in the
-    bar picks other files.</td></tr>
+    shown in decimal). The design's types next to the dump (<code>tb.types.json</code> by <code>tb.vcd</code>: from Questa
+    or Verilator, <a href="types.html">State names</a>) name every state bus and struct by its path, read at each read and
+    when the file is written. Without them the tab reads the workspace's SystemVerilog sources
+    (<code>wavelens.sources</code>) and names the state buses declared with a <code>typedef enum</code> there, by the variable's
+    name. <span class="ui">Sources…</span> in the bar picks other files.</td></tr>
   <tr><td>the log</td><td>each read writes the dump's parameters (size, <code>$version</code>, <code>$timescale</code>, its time,
     scopes, signals, value changes) and what the reader noticed to the output channel <b>WaveLens</b>, a note as
     <code>path:line: warning: …</code>; the same notes stand in the <b>Problems</b> panel (<kbd>ctrl+shift+M</kbd>) on their lines
@@ -116,7 +125,12 @@
   <tr><td><code>wavelens.theme</code></td><td>auto</td><td>the theme of the waves: <code>auto</code> (by VS Code's light / dark),
     <code>vscode</code> (VS Code's colours), <code>light</code>, <code>white</code>, <code>dark</code></td></tr>
   <tr><td><code>wavelens.sources</code></td><td><code>**/*.sv</code>, <code>**/*.svh</code></td><td>the workspace's SystemVerilog
-    sources whose <code>typedef enum</code> names a VCD's state buses (empty: none)</td></tr>
+    sources whose <code>typedef enum</code> names a VCD's state buses when there is no <code>tb.types.json</code> by the dump
+    (empty: none)</td></tr>
+  <tr><td><code>wavelens.keysToVSCode</code></td><td><code>["ctrl+G"]</code></td><td>the viewer's keys left to VS Code
+    (<code>ctrl+G</code>: Go to Line; the list of your groups is <kbd>gl</kbd> then)</td></tr>
+  <tr><td><code>wavelens.verilator</code></td><td>verilator</td><td>the Verilator 5 of <i>Make the types with Verilator</i>, on the
+    extension's host</td></tr>
   <tr><td><code>wavelens.autoReload</code></td><td>false</td><td>after a new simulation: read the dump at once (false: offer ⟳)</td></tr>
   <tr><td><code>wavelens.live</code></td><td>true</td><td>the tabs connect to an agent's live link (false: they do not)</td></tr>
   <tr><td><code>wavelens.sva</code></td><td></td><td>another <code>sva</code> program than the one the extension carries</td></tr>
@@ -127,7 +141,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.19 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.20 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

@@ -6,6 +6,66 @@ import vcd2wavedrom as V
 from common import WaveError
 
 
+class Golden(unittest.TestCase):
+    # review VI T7: what the converter writes for each fixture, byte for byte (exact, every variable, by scope; enum.vcd
+    # sampled by its clock too): a change of the text that json would read the same is a change of every page's bytes
+    def test_the_fixtures(self):
+        import dumpscan
+        for f in sorted(os.listdir(H.VCD)):
+            if not f.endswith('.vcd'):
+                continue
+            p = os.path.join(H.VCD, f)
+            try:
+                d = dumpscan.read(p, None)
+            except WaveError:
+                continue   # a dump the tools refuse (test_dumpscan, smoke readers)
+            sigs = ','.join(q for q, v in d.vars.items() if v.kind != 'event')
+            rc, out, err = H.run_tool('vcd2wavedrom', '--waves', f, '--exact', '--hierarchy', '--signals', sigs, cwd=H.VCD)
+            if rc:
+                continue
+            with self.subTest(f):
+                H.golden(self, f'vcd2wavedrom/{f[:-4]}.json', out)
+        rc, out, err = H.run_tool('vcd2wavedrom', '--waves', 'enum.vcd', '--clock', 'tb.clk', '--signals', 'tb.clk,tb.state,tb.plain,tb.st.s', cwd=H.VCD)
+        self.assertEqual(rc, 0, err)
+        H.golden(self, 'vcd2wavedrom/enum.clock.json', out)
+
+    def test_one_code_many_ways(self):
+        # one code under two names (an alias in another scope), a vector in two ranges apart, a clock of 40 edges: "tv"
+        # wrapped (16 pairs a line); exact and sampled; the signals asked in another order give each one the same
+        head = ('$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! clk $end\n$var wire 8 " bus [7:0] $end\n'
+                '$var wire 4 # d [7:4] $end\n$var wire 4 $ d [3:0] $end\n$scope module u $end\n$var wire 8 " bus_alias [7:0] $end\n'
+                '$upscope $end\n$upscope $end\n$enddefinitions $end\n')
+        body = ''.join(f'#{5 * i}\n{i % 2}!\n' + (f'b{i:b} "\nb{i % 16:b} #\nb{(i * 7) % 16:b} $\n' if i % 2 == 0 else '') for i in range(40))
+        sigs = ['tb.clk', 'tb.bus', 'tb.d', 'tb.u.bus_alias']
+        with H.tmp() as tmp:
+            H.vcd(tmp, body, head, 'many.vcd')
+            got = {}
+            for name, args in (('many.exact', ['--exact', '--hierarchy']), ('many.clock', ['--clock', 'tb.clk'])):
+                rc, out, err = H.run_tool('vcd2wavedrom', '--waves', 'many.vcd', *args, '--signals', ','.join(sigs), cwd=tmp)
+                self.assertEqual(rc, 0, err)
+                H.golden(self, f'vcd2wavedrom/{name}.json', out)
+                got[name] = out
+            rc, out, err = H.run_tool('vcd2wavedrom', '--waves', 'many.vcd', '--exact', '--hierarchy', '--signals', ','.join(reversed(sigs)), cwd=tmp)
+            self.assertEqual(rc, 0, err)
+        self.assertIn('"tv": [\n', got['many.exact'])
+        def by_path(text):
+            out = {}
+            def walk(items):
+                for it in items:
+                    if isinstance(it, list):
+                        walk(it[1:] if it and isinstance(it[0], str) else it)
+                    else:
+                        out[it.get('path', it['name'])] = {k: v for k, v in it.items() if k != 'same'}
+            walk(json.loads(text)['signal'])
+            return out
+        a, b = by_path(got['many.exact']), by_path(out)
+        for p in a:   # an alias is "same" as the one written first: its own transitions are the other's
+            for x in (a, b):
+                if 'tv' not in x[p]:
+                    x[p]['tv'] = next(v['tv'] for v in x.values() if 'tv' in v and v.get('width') == x[p].get('width') and v is not x[p])
+        self.assertEqual(a, b)
+
+
 class Values(unittest.TestCase):
     def test_norm_literals(self):
         self.assertEqual(V.norm("8'ha5", 8), 'a5')

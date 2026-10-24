@@ -1,0 +1,38 @@
+{
+  "wavelens": "types", "version": 1,
+  "producer": {"tool": "Questa Sim-64 vsim 2021.1 Simulator 2021.01 Jan 19 2021", "by": "tools/questa/wavelens_types.tcl", "root": "/*", "date": "2026-10-24T13:30:00"},
+  "instances": {
+    "types_pkg": "types_pkg",
+    "types_tb": "types_tb",
+    "types_tb.gen[0].u_l": "leaf",
+    "types_tb.gen[1].u_l": "leaf",
+    "types_tb.u_l2": "leaf",
+    "types_tb.u_l3": "leaf",
+    "types_tb.u_plain": "plain"
+  },
+  "describe": {
+    "types_tb.al": "Verilog enum: (2 downto 0) [5 enumeration values]\n  (IDLE=0,START=1,DATA=2,STOP=3,ERROR=4)",
+    "types_tb.bu": "Union [2 elements]\n  Element #1 \"raw\" =>\n    Register [7:0]\n  Element #2 \"nib\" =>\n    Record [2 elements]\n      Element #1 \"hi\" =>\n        Register [3:0]\n      Element #2 \"lo\" =>\n        Register [3:0]",
+    "types_tb.clk": "Register",
+    "types_tb.gen[0].u_l.clk": "Net",
+    "types_tb.gen[0].u_l.rst_n": "Net",
+    "types_tb.gen[0].u_l.state": "Verilog enum: (3 downto 0) [3 enumeration values]\n  (L_IDLE=0,L_RUN=1,L_LAST=15)",
+    "types_tb.gen[1].u_l.clk": "Net",
+    "types_tb.gen[1].u_l.rst_n": "Net",
+    "types_tb.gen[1].u_l.state": "Verilog enum: (4 downto 0) [3 enumeration values]\n  (L_IDLE=0,L_RUN=1,L_LAST=31)",
+    "types_tb.ie": "Verilog enum: (31 downto 0) [3 enumeration values]\n  (NEG=-1,ZERO=0,BIG=1048576)",
+    "types_tb.o": "Record [4 elements]\n  Element #1 \"oh\" =>\n    Verilog enum: (3 downto 0) [4 enumeration values]\n      (OH_A=1,OH_B=2,OH_C=4,OH_D=8)\n  Element #2 \"in\" =>\n    Record [2 elements]\n      Element #1 \"st\" =>\n        Verilog enum: (2 downto 0) [5 enumeration values]\n          (IDLE=0,START=1,DATA=2,STOP=3,\n            ERROR=4)\n      Element #2 \"code\" =>\n        Register [4:0]\n  Element #3 \"pair\" =>\n    Array(1 downto 0) [length 2] of\n      Register [3:0]\n  Element #4 \"flag\" =>\n    Register",
+    "types_tb.oh": "Verilog enum: (3 downto 0) [4 enumeration values]\n  (OH_A=1,OH_B=2,OH_C=4,OH_D=8)",
+    "types_tb.rst_n": "Register",
+    "types_tb.state": "Verilog enum: (2 downto 0) [5 enumeration values]\n  (IDLE=0,START=1,DATA=2,STOP=3,ERROR=4)",
+    "types_tb.u_l2.clk": "Net",
+    "types_tb.u_l2.rst_n": "Net",
+    "types_tb.u_l2.state": "Verilog enum: (1 downto 0) [3 enumeration values]\n  (L_IDLE=0,L_RUN=1,L_LAST=3)",
+    "types_tb.u_l3.clk": "Net",
+    "types_tb.u_l3.rst_n": "Net",
+    "types_tb.u_l3.state": "Verilog enum: (2 downto 0) [3 enumeration values]\n  (L_IDLE=0,L_RUN=1,L_LAST=7)",
+    "types_tb.u_plain.clk": "Net",
+    "types_tb.u_plain.rst_n": "Net",
+    "types_tb.u_plain.state": "Register [1:0]"
+  }
+}

@@ -1,0 +1,12 @@
+{
+ "signal": [
+  {"name": "clk", "wave": "p."},
+  {"name": "state", "wave": "46", "data": ["RUN", "3"], "width": 2, "enum": {"0": "IDLE", "1": "RUN", "2": "DONE"}},
+  {"name": "plain", "wave": "=.", "data": ["3"], "width": 2},
+  {"name": "s", "wave": "45", "data": ["RUN", "DONE"], "width": 2, "enum": {"0": "IDLE", "1": "RUN", "2": "DONE"}}
+ ],
+ "head": {"text": "enum.vcd @ posedge tb.clk", "tick": 0},
+ "time": {"t0": 5000, "t1": 25000, "cycle": 10000, "unit": "ps"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "enum.vcd", "tool": "wavelens reader", "mode": "clock", "from_ps": 0, "to_ps": 15000}
+}

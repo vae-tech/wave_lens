@@ -10,6 +10,16 @@
       "2": "RUN",
       "3": "DONE"
     },
+    "init_a": {
+      "0": "IDLE",
+      "2": "RUN",
+      "3": "DONE"
+    },
+    "init_b": {
+      "0": "IDLE",
+      "2": "RUN",
+      "3": "DONE"
+    },
     "sel": {
       "1": "A0",
       "2": "A1",
@@ -72,6 +82,8 @@
     "anon_bad",
     "kind_t",
     "anon_bad",
+    "lone",
+    "lone2",
     "mix",
     "state"
   ]

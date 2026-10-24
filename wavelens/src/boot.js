@@ -128,7 +128,12 @@ const takeSrc = () => {
   const ids = d && (d.publicId ? ` PUBLIC "${d.publicId}"` : d.systemId ? ' SYSTEM' : '') + (d.systemId ? ` "${d.systemId}"` : '');
   PAGE.doctype = d ? `<!DOCTYPE ${d.name}${ids}>\n` : '';
 };
-const start = () => { takeSrc(); if (PAGE.why) VIEWS.forEach(v => v.layoutShow()); if (!manual) upgrade(); liveHash(); };   // built already: no Save page
+// the theme the bar's ◐ chose in this browser (a page with a theme of its own, or a button of its own, keeps its own)
+const keptTheme = () => { if (!themeButtonOn(settings(GLOBAL)) || document.documentElement.dataset.theme) return;
+  let t = null; try { t = localStorage.getItem('wavelens-theme'); } catch (e) { /* none */ }
+  if (THEMES.includes(t)) applyLook(document.documentElement, t, null); };
+const start = () => {   // built already: no Save page
+  takeSrc(); keptTheme(); if (PAGE.why) VIEWS.forEach(v => v.layoutShow()); if (!manual) upgrade(); liveHash(); };
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 
 /* ---------------- tooltips: what a control of a viewer does and its keys ---------------- */
@@ -175,9 +180,10 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.19',   // the project's version: VERSION (make check compares them)
-  rowId: () => ++XID, parse, fromTV, vcdToWave, svTables, svApply, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme, setColors, configure, savePage,
-  pageText,
+G.WaveLens = { version: '0.20',   // the project's version: VERSION (make check compares them)
+  rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
+  setColors,
+  configure, savePage, pageText,
   plugin, svgPlugin, views: () => [...VIEWS], defaults: DEFAULTS, live,
   commands: () => Object.fromEntries(Object.entries(CMDS).map(([k, c]) => [k, { args: c.args, doc: c.doc }])),
   paint: { circle, arrowHead, edgeGeom, lastLE },
@@ -186,7 +192,7 @@ G.WaveLens = { version: '0.19',   // the project's version: VERSION (make check 
   registerTokens, registerDefaults, tips, util: { esc, glob, lastLE, lastBefore, stepTo, isEdge, circle, timeEps },
   // unstable: the pure functions for the unit table of tests/smoke.py and peek(view), the fields the tests read; not an API
   internal: { findRow, parseWant, valueIs, findEdge, edgeGlyph, bitsOf, hexOf, mixedBits, bitsVal, vcdHex, cycZero, cycAt, cycTime, cycUps, cycClock,
-    diffSpans, cmpKey,
+    diffSpans, cmpKey, svTypes, svApply, fsmStats,
     cycMarks, enumColor, analogValue, niceStep, cycMap, parseWave,
     idleCuts, gapLen, gapText, gapRefs, fmtFreq, gfmt, toFloat, fieldRow, stripPfx, trimNum,
     peek: v => ({ get lay() { return v.lay; }, get oy() { return v.oy; }, get vis() { return v.vis; }, get collapsed() { return v.collapsed; },

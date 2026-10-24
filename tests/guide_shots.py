@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import shots  # noqa: E402  (its raster flags, the page opener, settle, js)
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-GUIDES = ['viewer', 'modules', 'compare', 'commands', 'gaps', 'sva', 'wavedrom', 'pages', 'buses', 'mcp']
+GUIDES = ['viewer', 'modules', 'compare', 'commands', 'gaps', 'sva', 'wavedrom', 'pages', 'types', 'buses', 'mcp']
 
 # the gaps guide's dump: clk 100 MHz for 1000 cycles; packets of a valid / ready stream (start cycle, beats, cycles of
 # the packet with ready low), the state of the sender, an irq two cycles after each packet, a packet counter, and a
@@ -617,6 +617,31 @@ def pages(S, ex, build):
     shots.js(page, 0, '(v.expandAll(), 0)')
     S.quiet(page)
     S.save('pages-all', v)
+    page.close()
+
+
+# ---------------------------------------------------------------- the state names guide
+def types(S, ex, build):
+    # the FSM's VCD (no enum tables) with fsm.types.json beside it: the states and the struct's fields by path
+    page = S.page(ex / 'fsm' / 'fsm_all.html', height=900)
+    shots.no_sva(page)
+    v = shots.view(page)
+    shots.js(page, 0, "(v.cursor = 400000, v.draw(), 0)")
+    S.quiet(page)
+    S.save('types-fsm', v, upto=v.locator('.notes'))
+    # the FSM panel (T) with Only FSMs: the two state buses and the modules on the way, the panel beside them
+    shots.js(page, 0, "(v.collapseAll(), v.canvas.focus(), 0)")
+    page.keyboard.press('Shift+T'); page.wait_for_timeout(200)
+    page.locator('.wv-fsms button[data-a=only]').click(); page.wait_for_timeout(200)
+    shots.js(page, 0, "(v.fsmP.el.style.left = (v.root.getBoundingClientRect().right - v.fsmP.el.offsetWidth - 16) + 'px', " +
+             "v.fsmP.el.style.top = (v.root.getBoundingClientRect().top + 182) + 'px', v.fsmP.el.style.height = '196px', 0)")
+    S.quiet(page)
+    S.save('types-fsm-panel', v, upto=v.locator('.notes'))
+    # an FSM's details: the diagram of u_rx.state (its states, the changes seen with their counts), START at the cursor
+    shots.js(page, 0, "(v.setFsm(null), v.cursor = 50000, v.draw(), v.fsmP.el.style.height = '520px', " +
+             "v.fsmP.detail(v.fsms().find(r => r.full === 'fsm_tb.u_rx.state'), 'graph'), 0)")
+    S.quiet(page)
+    S.save('types-fsm-graph', page.locator('.wv-fsms'))
     page.close()
 
 

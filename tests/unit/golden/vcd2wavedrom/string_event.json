@@ -1,0 +1,12 @@
+{
+ "signal": [
+  ["tb",
+    {"name": "msg", "width": 1, "wave": "==", "data": ["Hello", "World"], "tv": [[0, "Hello"], [10000, "World"]], "kind": "string", "path": "tb.msg"},
+    {"name": "clk", "width": 1, "wave": "01", "tv": [[0, "0"], [10000, "1"], [20000, "0"]], "path": "tb.clk"}
+  ]
+ ],
+ "head": {"text": "string_event.vcd"},
+ "time": {"t0": 0, "t1": 20000, "cycle": 10000, "unit": "ps"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "string_event.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 0, "to_ps": 20000}
+}

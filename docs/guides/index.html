@@ -11,7 +11,7 @@
 <body>
 <header class="top"><nav>
   <a class="home" href="index.html" aria-current="page">WaveLens guides</a>
-  <a href="pages.html">Dump → page</a> <a href="viewer.html">Viewer</a> <a href="modules.html">Modules</a>
+  <a href="pages.html">Dump → page</a> <a href="types.html">State names</a> <a href="viewer.html">Viewer</a> <a href="modules.html">Modules</a>
   <a href="compare.html">Compare</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
   <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="vscode.html">VS Code</a>
   <a href="commands.html">Commands</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
@@ -19,7 +19,7 @@
 <div class="page">
 <main>
 <header class="hero">
-  <div class="kicker">WaveLens 0.19</div>
+  <div class="kicker">WaveLens 0.20</div>
   <h1>Guides</h1>
   <p class="lead">WaveLens turns a simulator dump (VCD or FST) or a
     <a href="https://wavedrom.com">WaveDrom</a> diagram into one self-contained HTML page: an interactive wave viewer,
@@ -61,11 +61,15 @@
   <a class="card" href="mcp.html"><img src="img/mcp-page.png" alt="" loading="lazy"><div>
     <h3>11 · AI agents (MCP)</h3>
     <p>The MCP server for Claude Code, Codex or any client: questions about a dump as short JSON answers, assertions, a page to show a person.</p></div></a>
+  <a class="card" href="types.html"><img src="img/types-fsm.png" alt="" loading="lazy"><div>
+    <h3>12 · State names and structs</h3>
+    <p>A VCD from Questa with its FSM states by name and its structs as fields: the design's types from Questa or Verilator, by path.</p></div></a>
 </div>
 
 <h2 id="start">Where to start</h2>
 <ul>
   <li>You have a dump and want to look at it: <a href="pages.html">From a dump to a page</a>, then <a href="viewer.html">The viewer</a>.</li>
+  <li>Your VCD shows numbers where the FSM has states: <a href="types.html">State names and structs</a>.</li>
   <li>You want a picture of a long run for a document or a review: <a href="viewer.html#menu">the right button's menu</a> and
     <a href="gaps.html">Gaps</a>.</li>
   <li>A design with many instances: <a href="modules.html">Modules</a>; a regression between two runs: <a href="compare.html">Compare</a>.</li>
@@ -81,7 +85,7 @@
   (<code>tests/guide_shots.py</code>) from the examples' pages; the VS Code one by <code>make vscode-e2e</code>.</p>
 </main>
 </div>
-<footer>WaveLens 0.19 · <a href="../../README.md">README</a> · <a href="../USAGE.md">USAGE.md</a> · <a href="../index.html">docs/index.html</a></footer>
+<footer>WaveLens 0.20 · <a href="../../README.md">README</a> · <a href="../USAGE.md">USAGE.md</a> · <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>
 </html>

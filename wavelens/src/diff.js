@@ -67,7 +67,9 @@ Object.assign(WaveView.prototype, {
     // a compare that fails leaves the one before as it was, and says so (its bands are still drawn)
     const still = () => (this.cmp ? `; still compared with ${this.cmp.name}` : '');
     let doc;
-    try { const text = typeof file === 'string' ? file : await file.text(); doc = vcdToWave(text, { name: nm, budget: this.S.dumpBudget }).doc; }
+    try { const o = { name: nm, budget: this.S.dumpBudget };   // a File in pieces; a text, or something with a text(), at once
+      doc = (typeof file === 'string' ? vcdToWave(file, o) : typeof file.stream === 'function' ? await vcdToWaveFile(file, o) :
+        vcdToWave(await file.text(), o)).doc; }
     catch (e) { if (req === this.cmpReq && this.root.isConnected && VIEWS.has(this)) this.toast(`${nm}: ${e.message}${still()}`); return null; }
     if (req !== this.cmpReq || !this.root.isConnected || !VIEWS.has(this)) return null;   // compared again, or no more, meanwhile
     const brows = parse(doc).rows.filter(r => r.type === 'sig' && r.tr), bs = new Map(brows.map(r => [r.path || r.full, r])), byLeaf = new Map();

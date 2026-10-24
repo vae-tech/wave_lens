@@ -19,16 +19,24 @@ is turned into VCD text with it, kept in the extension's storage).
   `view_edit` / `view_get` with `page` = the dump's path work on its tab. On by default; `"wavelens.live": false`
   keeps the tabs off the link.
 
-- **State names**: a VCD carries no enum names (Questa writes none); the tab reads the workspace's SystemVerilog sources
-  (`wavelens.sources`, default `**/*.sv`, `**/*.svh`) and names the state buses declared with a `typedef enum` there;
-  **Sources…** in the bar picks other files.
+- **State names**: a VCD carries no enum names (Questa writes none). The design's types next to the dump
+  (`tb.types.json` by `tb.vcd`, from Questa's `tools/questa/wavelens_types.tcl` or `tools/svtypes.py verilator`) name every
+  state bus and struct by its path, read again when the file changes. Without them the tab reads the workspace's
+  SystemVerilog sources (`wavelens.sources`, default `**/*.sv`, `**/*.svh`) and names the state buses declared with a
+  `typedef enum` there, by name; **Sources…** in the bar picks other files. *WaveLens: Make the types with Verilator*
+  writes `tb.types.json` from a `.f` file of the workspace (or the arguments you type) with `verilator --json-only`: no
+  Python needed (`wavelens.verilator`).
 - **The log**: each read writes the dump's parameters and what the reader noticed (a stranger code, a word that is no
   value, a `$timescale` it cannot read, …) to the output channel *WaveLens* and to the **Problems** panel on their
   lines; a dump it cannot read is an error there with its line. *WaveLens: Show the log* (the editor's title).
 - **Theme**: `wavelens.theme` — `auto` (light or dark by VS Code's), `vscode` (the colours of VS Code's theme),
-  `light`, `white`, `dark`; *WaveLens: Choose the theme of the waves* (the editor's title) previews each on the open tabs.
+  `light`, `white`, `dark`; **◐** in the bar (or *WaveLens: Choose the theme of the waves* in the editor's title) previews
+  each on the open tabs.
+- **The version** in the bar: `0.19 · dev@d502c48*`, the extension's branch and commit (`*`: changes not committed).
 
-The keys are the viewer's (`?` in the tab). Settings: `wavelens.theme` (auto), `wavelens.sources` (`**/*.sv`, `**/*.svh`), `wavelens.autoReload` (false: the tab offers ⟳ after a new
+The keys are the viewer's (`?` in the tab): the plain ones, and the ctrl / alt ones that mean what they mean in VS Code
+(ctrl+F, ctrl+C, ctrl+Z, alt+C W R); `wavelens.keysToVSCode` (`ctrl+G`: Go to Line) go to VS Code — the list of your
+groups is `gl` then. Settings: `wavelens.theme` (auto), `wavelens.keysToVSCode` (`["ctrl+G"]`), `wavelens.verilator` (verilator), `wavelens.sources` (`**/*.sv`, `**/*.svh`), `wavelens.autoReload` (false: the tab offers ⟳ after a new
 simulation; true: it reads the dump at once), `wavelens.live` (true), `wavelens.sva` (another sva program).
 
 **Install.** Build the package from the repository (`make vsix`: `out/wavelens-<version>.vsix`, for a Linux x86-64 host;

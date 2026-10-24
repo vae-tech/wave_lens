@@ -223,6 +223,50 @@ command('only', 'modules? on? clear? open?', 'only these modules on the waves, w
   } else if (a.on != null) { if (!v.only) fail('only: no set to pause or resume (modules: […] first)'); v.setOnly({ on: !!a.on }); }
   return { only: v.onlyState() };
 });
+command('fsm', 'mode? signals? fields? clear?', 'the state machines (signals with enum labels; the FSM panel): mode only — the waves ' +
+  'keep these FSMs (the modules on the way as headers), add — they join the view as Hide, Only and the find\'s Mask leave it; signals: ' +
+  'which ones (patterns; left out: the ones it has, none yet: every FSM, with fields the fields of structs too); clear: off; none given: ' +
+  'the list', (v, a) => {
+  if (a.mode != null && !FSM_MODES.includes(a.mode)) fail(`fsm: mode "${a.mode}" (only or add)`);
+  if (a.clear) v.setFsm(null);
+  else if (a.mode != null || a.signals != null) {
+    const all = v.fsms(!!a.fields), is = new Set(all);
+    const sigs = a.signals != null ? pickRows(v, a.signals).filter(r => is.has(r)) : a.fields || !v.fsm ? all : null;
+    if (sigs && !sigs.length) fail('fsm: none of these signals has enum labels');
+    v.setFsm({ mode: a.mode, signals: sigs && sigs.map(r => r.full) });
+  }
+  return { fsm: v.fsmState(), fsms: v.fsms(!!a.fields).map(r => r.full) };
+});
+// an FSM of the viewer by its path (or the first one a pattern names)
+const fsmRow = (v, spec) => { const all = v.fsms(true), p = String(spec ?? ''), r = all.find(x => x.full === p) ||
+  pickRows(v, spec).find(x => all.includes(x)); if (!r) fail(`no state machine "${p}" (a signal with enum labels)`); return r; };
+command('fsm_stats', 'signal', 'an FSM on these waves: each state of its table with how many times it entered it, the time it held it (share: of ' +
+  'the whole time) and its first entry; the states it never reaches (never); the values not in its table (invalid: x, z, a code without a ' +
+  'label); its changes from one value to another, the most frequent first, with their count and first time', (v, a) => {
+  const r = fsmRow(v, a.signal), st = v.fsmStatsOf(r), span = v.M.t1 - v.M.t0;
+  const one = s => ({ state: st.name(s.key), value: s.key, entries: s.entries.length, first: s.entries.length ? s.entries[0] : null, time: s.time,
+    share: span > 0 ? Math.round(1e4 * s.time / span) / 1e4 : 0 });
+  return { signal: r.full, states: st.states.map(one), never: st.unseen.map(k => st.name(k)), invalid: st.bad.map(one),
+    changes: [...st.trans.values()].map(x => ({ from: st.name(x.from), to: st.name(x.to), count: x.times.length, first: x.times[0] }))
+      .sort((x, y) => y.count - x.count) };
+});
+command('fsm_go', 'signal state? from? to? dir? first?', 'the cursor to the next (dir 1) or previous (-1) time an FSM enters a state (its ' +
+  'label or value) or makes a change (from, to: labels or values); first: the first time; past the last it rounds to the first', (v, a) => {
+  const r = fsmRow(v, a.signal);
+  if (a.state == null && (a.from == null || a.to == null)) fail('fsm_go: a state, or from and to');
+  const t = v.fsmGo(r, a.state != null ? { state: String(a.state), first: !!a.first } : { from: String(a.from), to: String(a.to), first: !!a.first },
+    a.dir < 0 ? -1 : 1);
+  if (t == null) fail(`fsm_go: ${r.full} is never ${a.state != null ? a.state : `${a.from} → ${a.to}`} on these waves`);
+  return { signal: r.full, t };
+});
+command('types', 'signals?', 'where the labels or fields of signals come from (the right button\'s Type…): the types file read for these waves ' +
+  'and the path in it (typed), a width that does not fit (width), no entry (none), else the page\'s own; signals: patterns (none: the selected one, ' +
+  'else every signal the types file was asked about); run: why the types may be of another run', (v, a) => {
+  const rows = a.signals != null ? pickRows(v, a.signals) : v.sel ? [v.sel] : v.M.rows.filter(r => r.type === 'sig' && r.tr && v.opts.svWhy &&
+    v.opts.svWhy.has(String(r.path || r.full)));
+  return { types: rows.filter(r => r.type === 'sig').slice(0, 500).map(r => { const o = v.typesOf(r); delete o.run; return o; }),
+    run: v.opts.svRun || [] };
+});
 command('hide', 'signals', 'signals, modules or your groups out of the view', (v, a) => { v.hide(pickRows(v, a.signals, { groups: true }));
   return { hidden: v.hiddenRows.size }; });
 command('show', 'signals?', 'hidden ones back (none given: every one)', (v, a) => {
@@ -368,7 +412,7 @@ Object.assign(WaveView.prototype, {
     const groups = this.groupList().map((g, i) => Object.assign(g, { uid: this.ugroups[i].uid || (this.ugroups[i].uid = ++XID) }));   // a group over a rename
     return JSON.stringify({ bookmarks: this.bookmarks(), arrows: this.arrowList(), markers: this.markList(), groups,
       paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs), hidden: [...this.hiddenRows],
-      only: this.onlyState(),
+      only: this.onlyState(), fsm: this.fsmState(),
       config: Object.assign({ style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded,
         toolsHidden: toolNames(this.S.toolsHidden) }, this.gapOpt(), this.cycOpt()),
       hl: [...this.picks].map(([r, i]) => [r.full, i]).sort((a, b) => a[1] - b[1]) });
@@ -542,7 +586,7 @@ Object.assign(WaveView.prototype, {
 const KEPT = ['bookmarks', 'arrows', 'markers', 'groups', 'paint', 'radix', 'analog', 'hidden'];
 const KEPT_CFG = ['style', 'maxHeight', 'toolsFolded', 'toolsHidden', ...GAP_KEYS, ...CYC_KEYS];
 // what undo takes back: the above and Only (not kept in this browser: a page opened again applies a revision's Only anew)
-const UNDO_KEYS = [...KEPT, 'only'];
+const UNDO_KEYS = [...KEPT, 'only', 'fsm'];
 const UNDO_N = 100;   // the steps undo keeps
 // a click, a key or a field changed anywhere: the viewers' edits looked at once it is done (one look per burst of events);
 // not while a button is down (a drag ends as one step) or a key types in a text field (it ends when the field is left).
@@ -566,7 +610,7 @@ function undoKey(e) {
   if (!(k === 'z' || (k === 'y' && e.ctrlKey && !e.metaKey))) return;
   const t = e.target && e.target.closest ? e.target : null;
   if (t && t.closest('input:not([type=checkbox]):not([type=radio]):not([type=button]), textarea, select, [contenteditable]')) return;
-  const root = t && t.closest('.wv'), v = (root && root.waveView) || ACTIVE.view; if (!v) return;
+  const root = t && t.closest('.wv'), v = (root && root.waveView) || ACTIVE.view; if (!v || keyLeft(v.S, e)) return;
   e.preventDefault(); v.undo(k === 'y' || e.shiftKey ? 1 : -1);
 }
 if (typeof document !== 'undefined') {

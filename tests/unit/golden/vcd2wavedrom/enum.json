@@ -1,0 +1,17 @@
+{
+ "signal": [
+  ["tb",
+    {"name": "clk", "width": 1, "wave": "010", "tv": [[0, "0"], [5000, "1"], [10000, "0"], [15000, "1"]], "path": "tb.clk"},
+    {"name": "state", "width": 2, "wave": "345", "data": ["IDLE", "RUN", "DONE"], "tv": [[0, "0"], [5000, "1"], [10000, "2"], [15000, "3"]], "enum": {"0": "IDLE", "1": "RUN", "2": "DONE"}, "path": "tb.state"},
+    {"name": "plain", "width": 2, "wave": "==.", "data": ["0", "3"], "tv": [[0, "0"], [5000, "3"]], "path": "tb.plain"},
+    ["st",
+      {"name": "s", "width": 2, "wave": "345", "data": ["IDLE", "RUN", "DONE"], "tv": [[0, "0"], [5000, "1"], [10000, "2"]], "enum": {"0": "IDLE", "1": "RUN", "2": "DONE"}, "path": "tb.st.s"}
+    ]
+  ]
+ ],
+ "head": {"text": "enum.vcd"},
+ "time": {"t0": 0, "t1": 15000, "cycle": 5000, "unit": "ps"},
+ "scopes": {"tb.st": {"kind": "struct", "width": 2}},
+ "config": {"hscale": 1},
+ "meta": {"waves": "enum.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 0, "to_ps": 15000}
+}

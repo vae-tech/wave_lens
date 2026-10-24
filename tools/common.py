@@ -4,7 +4,7 @@ keys of wavelens/wavelens.config.js, and WaveError.
 A library function raises WaveError with a one-line message; each tool's main() catches it once (run_main) and exits
 with that message, so a mistake in a config or a missing file is one line, not a traceback. Python >= 3.8.
 """
-import os, re, sys
+import os, re, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -18,6 +18,30 @@ SELECT_KEYS = ('depth', 'constants', 'hide', 'budget')   # mkconfig.py's "select
 
 class WaveError(Exception):
     """A user's mistake or a dump the tools cannot read: the message is the whole story (no traceback)."""
+
+
+def version():
+    """The project's version (VERSION at the top of the checkout)."""
+    with open(os.path.join(ROOT, 'VERSION'), encoding='utf-8') as f:
+        return f.read().strip()
+
+
+def build_info(by, date=None):
+    """The checkout these tools run from, for a page's WAVELENS_BUILD (the bar shows it beside the version): {branch, commit,
+    dirty (tracked files changed), tag (one on this commit), date, by}; None outside git (a copy of a release)."""
+    def git(*a):
+        try:
+            r = subprocess.run(['git', '-C', ROOT, *a], capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return r.stdout.strip() if r.returncode == 0 else None
+    commit = git('rev-parse', '--short', 'HEAD')
+    if not commit:
+        return None
+    out = {'branch': git('rev-parse', '--abbrev-ref', 'HEAD'), 'commit': commit,
+           'dirty': bool(git('status', '--porcelain', '--untracked-files=no')), 'tag': git('describe', '--tags', '--exact-match'),
+           'date': date, 'by': by}
+    return {k: v for k, v in out.items() if v not in (None, '')}
 
 
 def run_main(main, tool):

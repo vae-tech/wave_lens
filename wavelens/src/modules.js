@@ -76,12 +76,17 @@ Object.assign(WaveView.prototype, {
   // them again; the query and its highlight stay
   onlyOpen(paths) {
     const gs = [].concat(paths).map(p => this.scopeOf(p)).filter(Boolean); if (!gs.length) return;
-    if (this.findOpen && this.q) {   // as its button does: the folding from before the search back, then these opened
-      this.findOpen = false; if (this.foldSaved) this.collapsed = this.foldSaved; this.foldSaved = null;
-      this.root.querySelector('button[data-act=fopen]')?.setAttribute('aria-pressed', false);
-      this.onlyNote = ' · the find\'s Open is off'; this.toast('Only: the modules picked are open' + this.onlyNote); }
+    const off = this.findOpenOff(); if (off) { this.onlyNote = off; this.toast('Only: the modules picked are open' + off); }
     for (const g of gs) [...g.anc, g.id].forEach(id => this.collapsed.delete(id));
     this.foldTouched = true;
+  },
+  // the find's Open off, as its button does (its next search would fold again the modules opened now): the folding from
+  // before the search back -> ' · the find's Open is off', or '' when it was not on
+  findOpenOff() {
+    if (!this.findOpen || !this.q) return '';
+    this.findOpen = false; if (this.foldSaved) this.collapsed = this.foldSaved; this.foldSaved = null;
+    this.root.querySelector('button[data-act=fopen]')?.setAttribute('aria-pressed', false);
+    return ' · the find\'s Open is off';
   },
   // the selection among the rows that went goes (the highlight stays: it comes back with them)
   onlyFix() {

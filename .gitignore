@@ -3,6 +3,7 @@
 *.fst
 # but the unit tests' small fixtures (each under 1 kB, made by hand)
 !tests/unit/vcd/*.vcd
+!tests/unit/types/questa.vcd
 # pages built from your configs by make html (self-contained copies of wavelens.js + data)
 work/*.html
 examples/*/*.html

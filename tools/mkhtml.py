@@ -22,7 +22,7 @@ import argparse, datetime, html, json, os, sys
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)   # -I drops the script dir from sys.path
-import svabuild, vcd2wavedrom, wavejson  # noqa: E402
+import common, svabuild, vcd2wavedrom, wavejson  # noqa: E402
 from common import WaveError, add_sva_bin_arg, check_config, run_main  # noqa: E402
 
 FW = os.path.join(os.path.dirname(HERE), 'wavelens')   # the framework files inlined into the page
@@ -73,7 +73,7 @@ button.theme:hover {{ border-color: var(--accent); color: var(--accent); }}
   <div class="facts">{facts}</div>
 </header>
 {sections}
-<script>window.WAVELENS_CONFIG = {settings};</script>
+<script>window.WAVELENS_CONFIG = {settings};</script>{build}
 <script>
 window.WAVES = {data};
 </script>
@@ -190,6 +190,9 @@ def render_page(a, cfg, docs, renders, sva_views, with_sva, sva_files, sva_notes
     facts = [('Dump', ', '.join(sorted({m['waves'] for m in metas if 'waves' in m})) or '—'),
              ('Wave tool', ', '.join(sorted({m['tool'] for m in metas if 'tool' in m})) or '—'),
              ('Views', str(len(docs))), ('Generated', generated(a.reproducible))]
+    build = None if a.reproducible else common.build_info('mkhtml.py', generated(False))   # the bar's version line: this checkout's commit
+    at = build and (build['branch'] + '@' if build.get('branch', 'HEAD') != 'HEAD' else '') + build['commit'] + ('*' if build.get('dirty') else '')
+    facts.append(('WaveLens', common.version() + (f' · {at}' if at else '')))
     facts = [f for f in facts if f[1] is not None]
     if sva_files:
         n = sum(len((f.get('parsed') or {}).get('assertions', [])) for f in sva_files)
@@ -243,6 +246,7 @@ def render_page(a, cfg, docs, renders, sva_views, with_sva, sva_files, sva_notes
         facts=''.join(f'<div><b>{html.escape(k)}</b>{html.escape(v)}</div>' for k, v in facts),
         sections='\n\n'.join([section(k, d, *renders[k]) for k, d in docs.items()] + ([report] if report else [])),
         settings=safe(json.dumps({k: v for k, v in settings.items() if k != 'theme'}, ensure_ascii=False)), sva=sva, bus=bus,
+        build=f'\n<script>window.WAVELENS_BUILD = {safe(json.dumps(build, ensure_ascii=False))};</script>' if build else '',
         data=safe(wavejson.dumps_many(docs)))
     with open(a.out, 'w', encoding='utf-8') as f:
         f.write(text)

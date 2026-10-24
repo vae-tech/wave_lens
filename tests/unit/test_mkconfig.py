@@ -46,13 +46,13 @@ class Merge(unittest.TestCase):
         old = {'tb.clk': {'show': False, 'color': '#f00', 'width': 1, 'changes': 1}, 'tb.gone': {'show': True}}
         new = {'tb.clk': {'show': True, 'color': '', 'width': 1, 'changes': 40, 'enum': {'0': 'A'}}, 'tb.new': {'show': True}}
         with H.stderr() as e:
-            out = M.merge(old, new)
+            out, _ = M.merge(old, new)
         self.assertEqual(out['tb.clk'], {'show': False, 'color': '#f00', 'width': 1, 'changes': 40, 'enum': {'0': 'A'}})
         self.assertNotIn('tb.gone', out)
         self.assertIn('1 signal(s) no longer in the dump', e.getvalue())
 
     def test_enum_not_replaced(self):
-        out = M.merge({'s': {'enum': {'0': 'MINE'}}}, {'s': {'enum': {'0': 'DUMP'}}})
+        out, _ = M.merge({'s': {'enum': {'0': 'MINE'}}}, {'s': {'enum': {'0': 'DUMP'}}})
         self.assertEqual(out['s']['enum'], {'0': 'MINE'})
 
     def test_validates_signal_keys(self):

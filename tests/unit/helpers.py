@@ -6,6 +6,8 @@ TOOLS = os.path.join(ROOT, 'tools')
 VCD = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vcd')
 BUILD = os.environ.get('BUILD') or os.path.join(ROOT, 'out')
 STRICT = bool(os.environ.get('WAVELENS_STRICT'))   # make check: what the gate builds (the examples, sva) must be there
+GOLDEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'golden')
+BLESS = bool(os.environ.get('WAVELENS_BLESS'))   # make unit-bless: the goldens written anew (then read the diff)
 
 
 def skip(case, why, built=True):
@@ -41,14 +43,35 @@ def vcd(tmp, body, header='$timescale 1ns $end\n$scope module tb $end\n$var wire
     return p
 
 
+def golden(case, name, text):
+    """text is tests/unit/golden/<name> byte for byte (the bytes a page or a data file gets, not only what json reads back);
+    WAVELENS_BLESS=1: written instead."""
+    p = os.path.join(GOLDEN, name)
+    if BLESS:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, 'w', encoding='utf-8', newline='') as f:
+            f.write(text)
+        return
+    if not os.path.exists(p):
+        case.fail(f'{p} is missing: make unit-bless writes it')
+    with open(p, encoding='utf-8', newline='') as f:
+        want = f.read()
+    if text != want:
+        a, b = text.splitlines(), want.splitlines()
+        i = next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), min(len(a), len(b)))
+        case.fail(f'{name}: not the golden bytes (make unit-bless if meant), line {i + 1}:\n  got  {a[i] if i < len(a) else "(end)"}\n'
+                  f'  want {b[i] if i < len(b) else "(end)"}')
+
+
 def tmp():
     """with tmp() as d: a scratch directory removed afterwards."""
     return tempfile.TemporaryDirectory(prefix='wavelens-unit-')
 
 
 def run_tool(name, *args, cwd=ROOT):
-    """python3 -I tools/<name>.py ARGS -> (return code, stdout, stderr)."""
-    p = subprocess.run([sys.executable, '-I', os.path.join(TOOLS, name + '.py'), *map(str, args)], capture_output=True, text=True, cwd=cwd)
+    """python3 -I tools/<name>.py ARGS -> (return code, stdout, stderr); a tool that hangs fails the test after 10 minutes
+    (review VI T10), not the gate."""
+    p = subprocess.run([sys.executable, '-I', os.path.join(TOOLS, name + '.py'), *map(str, args)], capture_output=True, text=True, cwd=cwd, timeout=600)
     return p.returncode, p.stdout, p.stderr
 
 

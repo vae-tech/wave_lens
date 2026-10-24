@@ -1,0 +1,12 @@
+{
+ "signal": [
+  ["tb",
+    {"name": "flags", "width": 3, "wave": "=..=", "data": ["4", "7"], "tv": [[0, "4"], [5000, "7"], [7000, "3"]], "path": "tb.flags"},
+    {"name": "e", "width": 2, "wave": "=..=", "data": ["1", "0"], "tv": [[0, "1"], [5000, "0"], [7000, "2"]], "path": "tb.e"}
+  ]
+ ],
+ "head": {"text": "blasted.vcd"},
+ "time": {"t0": 0, "t1": 7000, "cycle": 2000, "unit": "ps"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "blasted.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 0, "to_ps": 7000}
+}

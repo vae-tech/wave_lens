@@ -47,6 +47,8 @@ const TIPS = {
   'act:undo': ['Undo the last change of bookmarks, arrows, markers, your groups, colours, radix, analog, hidden rows, the highlight, the edge ' +
     'style, the gaps or the cycles (not the cursor or the window)', ['ctrl+Z']], 'act:redo': ['Redo what was undone', ['ctrl+shift+Z', 'ctrl+Y']],
   'act:help': ['Keys and mouse', ['?']],
+  'act:theme': ['The theme: auto (the system\'s light or dark), light, white, dark; kept in this browser. In VS Code: its list, with VS ' +
+    'Code\'s own colours too'],
   'act:scroll': ['The rows scroll in a window of their own (the bar above them), or with the page (the bar sticks to the top); kept in this browser'],
   'act:tools': ['Fold the tools to this line, or open them (/ opens them for the find field)'], 'jump': ['Go to this marker'],
   '.mk': ['Highlight: in front, the rest dimmed', ['ctrl+click', 'ctrl+shift+click: every row to here']],
@@ -80,6 +82,7 @@ const TIPS = {
     'changes); or none'],
   'm:hl': ['Highlight', ['ctrl+click']], 'm:hide': ['Leave it out of the view'], 'm:unhide': ['Show the hidden rows'],
   'm:fold': ['Fold / open this module'], 'm:foldup': ['Fold its module', ['zc']], 'm:zM': ['Fold every module', ['zM']], 'm:zR': ['Open every module', ['zR']],
+  'm:types': ['Where its labels or fields come from: the types file and the path in it, the width, why it has none'],
   'm:mark': ['Bookmark on this signal here', ['m']], 'm:copyname': ['Copy the path', ['yy']], 'm:clear': ['Clear the range', ['Esc', 'ctrl+click']],
   'm:unpaint': ['Its own colour back'],
   'm:umark': ['A marker here: a dashed line across the rows with a label (the Markers list)'], 'm:ugnew': ['A group of your own at the top of the names'],
@@ -92,19 +95,23 @@ const TIPS = {
   '.ml': ['Marker label'], '.ugn': ['Group name', ['Enter']],
   'act:live': ['Driven by an agent (tools/wavemcp.py view_live): its edits come in as you watch; click: disconnect'],
 };
-TIPS['.subg'] = ['Your groups: put the signals into one, a new one, go to one', ['ctrl+G']];
+TIPS['.subg'] = ['Your groups: put the signals into one, a new one, go to one', ['ctrl+G', 'gl']];
 Object.assign(TIPS, { '.subc': ['The clock cycles in a band under the time axis: numbered from cycle 0, the cursor\'s in the title, Δ in them; ' +
   'c147 in the cursor field goes to cycle 147'], 'm:cycon': ['The band of cycle numbers under the time axis'],
   'm:cyclk': ['Count the cycles of this clock (its rising edges)'], 'm:cyc0': ['The rising edge at or before the time clicked is cycle 0'],
   'm:cycx': ['The cycles as the page sets them (cycles, cycleClock, cycleZero)'] });
 TIPS['m:ugto'] = ['Into your group (a folder at the top of the names)']; TIPS['m:ugoff'] = ['Out of this group of yours'];
-TIPS['m:ugo'] = ['Go to the group: opened, in the middle, its first signal selected', ['ctrl+G']];
+TIPS['m:ugo'] = ['Go to the group: opened, in the middle, its first signal selected', ['ctrl+G', 'gl']];
 // the Modules panel (modules.js) and Only
 Object.assign(TIPS, { 'act:mods': ['The modules as a tree: a click goes to one, a box over names keeps Only those on the waves', ['t']],
   'act:onlyp': ['Only these modules on the waves (with their submodules): a click pauses it (every module), again resumes it'],
   'act:onlyx': ['Every module on the waves again (Only cleared)'], 'm:mods': ['The modules as a tree: go to one, keep Only some', ['t']],
   'm:locate': ['The module of this row in the tree of the modules', ['t']], 'm:onlyp': ['Only paused: every module; resumed: the set again'],
   'm:onlyx': ['Every module on the waves again (Only cleared)'] });
+// the FSM panel (fsm.js) and its layer
+Object.assign(TIPS, { 'act:fsms': ['The state machines (signals with enum labels) in the tree of their modules: go to one, Only them, add them to the view',
+  ['T']], 'act:fsmx': ['The view without the FSM layer (Only FSMs / the FSMs added)'], 'm:fsms': ['The state machines in the tree of their modules', ['T']],
+  'm:fsmx': ['The view without the FSM layer'] });
 // the help (? in the bar, key ?): the keys and the mouse by what they do; plugins' keys come from their addKey help
 const HELP = [
   ['Zoom and move', [[['i', '+'], 'zoom in'], [['o', '-'], 'zoom out'], [['f'], 'show everything'], [['l'], 'the window before the last zoom'],
@@ -114,10 +121,11 @@ const HELP = [
   ['Cursor and edges', [[['click'], 'cursor on a near edge (alt: not) + select the signal'], [['shift+←', 'shift+→'], 'move the cursor'],
     [['Tab', 'shift+Tab'], 'next / previous edge (no signal selected: the focus moves on)'], [[']e', '[e'], 'next / previous edge'], [['e'], 'edge kind']]],
   ['Signals', [[['↑', '↓', 'j', 'k'], 'select the next / previous'], [['shift+click a name'], 'select every signal from the last clicked one'],
-    [['gg', 'G'], 'the first / last'], [['ctrl+G'], 'your groups: a list, a click goes there'],
+    [['gg', 'G'], 'the first / last'], [['ctrl+G', 'gl'], 'your groups: a list, a click goes there'],
     [['alt+↑', 'alt+↓'], 'the selected signal up / down in your group (shift: the group); or drag it in the names'],
     [['ctrl+click', '○'], 'highlight'], [['ctrl+shift+click'], 'highlight every row from the last one to it'],
     [['zM', 'zR'], 'fold / open every module'], [['t'], 'the modules as a tree: a click goes to one, a box keeps Only those (again: the selected one\'s)'],
+    [['T'], 'the state machines in the tree of their modules: go to one, Only them, add them to the view'],
     [['zc', 'zo', 'za'], 'the selected signal\'s module'], [['s'], 'sort'], [['yy', 'ctrl+C'], 'copy the path'],
       [['Esc'], 'reset: search, highlight, selection']]],
   ['Find', [[['/', 'ctrl+F'], 'find (the bar scrolled away: it floats over the waves)'],
@@ -158,6 +166,19 @@ const toolLine = (ln, html) => `<div class="tln" data-ln="${ln}">${html}</div>`;
 const wdText = d => '{ "signal": [\n' + d.signal.map(s => Array.isArray(s)
   ? `  [${JSON.stringify(s[0])},\n` + s.slice(1).map(x => '    ' + JSON.stringify(x)).join(',\n') + ']' : '  ' + JSON.stringify(s)).join(',\n') +
   '\n],\n' + Object.keys(d).filter(k => k !== 'signal').map(k => `  ${JSON.stringify(k)}: ${JSON.stringify(d[k])}`).join(',\n') + '\n}';
+
+// the version, and the build the page carries (WAVELENS_BUILD {branch, commit, dirty, tag, date, by}: mkhtml.py writes the
+// one of its checkout, the VS Code extension its own) -> [text, tooltip]; a page without one: the version alone
+function buildText() {
+  const b = G.WAVELENS_BUILD, ver = (G.WaveLens && G.WaveLens.version) || '';
+  if (!b || !b.commit) return [ver, `WaveLens ${ver}`];
+  const br = b.branch && b.branch !== 'HEAD' ? b.branch : '';
+  return [`${ver} · ${br ? br + '@' : ''}${b.commit}${b.dirty ? '*' : ''}`, `WaveLens ${ver} · ${br ? `branch ${br}, ` : ''}commit ${b.commit}` +
+    (b.dirty ? ' with changes not committed (*)' : '') + (b.tag ? ` (${b.tag})` : '') + (b.date ? ` · made ${b.date}` : '') + (b.by ? ` by ${b.by}` : '')];
+}
+// the bar's ◐: themeButton true, or 'auto' and the page has no theme button of its own (viewer.html, the VS Code tab)
+const themeButtonOn = S => S.themeButton === true || (S.themeButton === 'auto' && !document.querySelector('button#theme'));
+const THEME_CYCLE = ['auto', 'light', 'white', 'dark'];
 
 class Bar {
   // the viewer's markup: the bar (title line, tool groups), the names column and the waves, the lists, the hint
@@ -210,11 +231,13 @@ class Bar {
           '<button type="button" data-act="cshow" title="Window of this span centred on the cursor (key: c)">Show</button>');
     const list = grp('list', sort ? seg(sort) : '', groups ? seg('<button type="button" data-act="expand" title="Expand all groups">Expand</button>',
       '<button type="button" data-act="collapse" title="Collapse all groups">Collapse</button>',
-      '<button type="button" data-act="mods" title="The modules as a tree (t)">Modules</button>') : '',
+      '<button type="button" data-act="mods" title="The modules as a tree (t)">Modules</button>' +
+        (v.fsms().length ? '<button type="button" data-act="fsms" title="The state machines as a tree (T)">FSMs</button>' : '')) : '',
       '<button type="button" data-act="hl" title="Clear the highlight (Esc)" hidden></button>',
         '<button type="button" data-act="unhide" title="Show the rows hidden with the right button\'s menu again" hidden></button>',
       '<button type="button" data-act="onlyp" title="Only these modules: a click pauses it" hidden></button><button type="button" data-act="onlyx" ' +
-        'title="Every module again" aria-label="clear Only" hidden>✕</button>');
+        'title="Every module again" aria-label="clear Only" hidden>✕</button>',
+      '<button type="button" data-act="fsmx" title="The view without the FSM layer" hidden></button>');
     const edges = grp('edges', seg('<button type="button" data-act="prev" title="Previous edge of the selected signal, or of any shown signal ([e)">◀</button>',
       (`<select class="edge" aria-label="edge kind" title="Edge kind (e): any, rise, fall, a value, X / ` +
           `Z">${Object.entries(EDGE_KINDS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select>`),
@@ -238,7 +261,8 @@ class Bar {
           'hidden>⟳</button><input type="file" class="dfile" accept=".vcd,.fst" hidden>'),
       ('<button type="button" data-act="dcmp">Compare…</button><button type="button" data-act="dcmpx" class="cmpx" hidden></button>' +
         '<input type="file" class="cfile" accept=".vcd" hidden>'),
-      '<button type="button" data-act="dsrc">Sources…</button><input type="file" class="srcfile" accept=".sv,.svh,.v,.vh" multiple hidden>');
+      '<button type="button" data-act="dsrc" title="SystemVerilog sources, or the design\'s types (x.types.json: Questa, Verilator)">Sources…</button>' +
+      '<input type="file" class="srcfile" accept=".sv,.svh,.v,.vh,.json" multiple hidden>');
     const zoom = seg('<button type="button" data-act="out" title="Zoom out (−)">−</button>',
       '<button type="button" data-act="in" title="Zoom in (+)">+</button>', '<button type="button" data-act="fit" title="Show everything (0)">Fit</button>');
     const hint = 'Wheel: scroll · ctrl+wheel: zoom · shift+wheel / drag: pan · shift or middle drag: zoom to a range · ctrl+drag: measure · ' +
@@ -249,9 +273,12 @@ class Bar {
       `yy ctrl+C copy${S.sortButton ? ' · s sort' : ''} · ` +
       `Esc reset${groups ? ' · click a module to fold it' : ''} · shift+click a name: select every signal to it · ` +
       '○ or ctrl+click a name: highlight, ctrl+shift+click: every row to it';
+    const [ver, verTip] = buildText();
     return `<div class="bar"><div class="head"><span
       class="eyebrow">${esc(v.opts.title || v.M.title || 'Waveform').replace(/µ/g, '<span class="mu">µ</span>')}</span><span class="toast" role="status"
-        aria-live="polite"></span><span class="cur"></span><button type="button" data-act="undo" class="lay undo" disabled aria-label="undo">↶</button><button
+        aria-live="polite"></span><span class="cur"></span>${S.version ? `<span class="ver" title="${esc(verTip)}">${esc(ver)}</span>` : ''}${
+        themeButtonOn(S) ? '<button type="button" data-act="theme" class="lay" aria-label="theme">◐</button>' : ''}<button type="button"
+        data-act="undo" class="lay undo" disabled aria-label="undo">↶</button><button
         type="button" data-act="redo" class="lay undo" disabled aria-label="redo">↷</button><button type="button" class="lay" data-act="scroll"></button><button
         type="button" class="lay" data-act="tools" aria-label="fold the tools"></button><button type="button" class="hb" data-act="help"
         aria-label="keys and mouse">?</button></div>
@@ -280,7 +307,7 @@ class Bar {
     v.qEl.addEventListener('input', () => { cancelAnimationFrame(qt); qt = requestAnimationFrame(() => v.find(v.qEl.value)); });   // live, while typing
     v.qEl.addEventListener('keydown', e => {
       if (e.key === 'Enter') { e.preventDefault(); v.findStep(e.shiftKey ? -1 : 1); }
-      const opt = e.altKey && FIND_OPTS.find(o => o[4] === e.code);   // alt+C W R, as in VS Code (by the key's place: any layout)
+      const opt = e.altKey && !keyLeft(v.S, e) && FIND_OPTS.find(o => o[4] === e.code);   // alt+C W R, as in VS Code (by the key's place: any layout)
       if (opt) { e.preventDefault(); v.setFindOpt(opt[1], !v[opt[1]]); }
 
     });
@@ -299,6 +326,9 @@ class Bar {
       else if (b.dataset.act === 'hl') v.highlight(null);
       else if (b.dataset.act === 'unhide') v.unhide();
       else if (b.dataset.act === 'mods') v.modules();
+      else if (b.dataset.act === 'fsms') v.fsmPanel();
+      else if (b.dataset.act === 'theme') v.themeNext();
+      else if (b.dataset.act === 'fsmx') { v.setFsm(null); v.toast('the view without the FSM layer'); }
       else if (b.dataset.act === 'onlyp') v.setOnly({ on: !v.only.on });
       else if (b.dataset.act === 'onlyx') { v.setOnly(null); v.toast('Only: every module again'); }
       else if (b.dataset.act === 'expand') v.expandAll();
@@ -395,7 +425,7 @@ class Names {
     });
     v.namesEl.addEventListener('keydown', e => {
       const at = e.target.closest('.row[data-r]');
-      if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && e.altKey && !e.ctrlKey && !e.metaKey) {   // the row with the focus moves; the focus stays on it
+      if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && e.altKey && !e.ctrlKey && !e.metaKey && !keyLeft(v.S, e)) {   // the row with the focus moves
         e.preventDefault(); const r = at && rowOf(at);
         if (!r || !(r.user || r.ug)) { v.toast('alt+↑ / alt+↓ order the rows of your groups (the right button: Groups ▸)'); return; }   // not the selection's
         v.moveKey(e.key === 'ArrowUp' ? -1 : 1, e.shiftKey, r).then(() => { const i = v.vis.indexOf(r || v.sel);
@@ -440,6 +470,7 @@ class Names {
     v.tabRow = v.sel || v.vis.find(x => x.type === 'sig');
     for (let k = 0; k < v.rowsL.length; k++) this.state(v.rowEls[k], v.rowsL[k]);
     if (v.mods) v.mods.render();   // the Modules panel: Hide, Only, the selected signal's module
+    if (v.fsmP) v.fsmP.render();   // the FSM panel: what is in the view, the selected one
   }
   // the name of row r, the letters of a match marked (and the ignored prefix dimmed when sorting)
   label(r) {
@@ -878,6 +909,7 @@ class WaveView {
     c.addEventListener('keydown', e => {
       const k = e.key, ctl = e.ctrlKey || e.metaKey; let h = true;
       if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock'].includes(k)) return;   // a modifier alone: a sequence goes on (z, shift+M)
+      if (keyLeft(this.S, e)) return;   // the host's (keysLeft: VS Code's ctrl+G)
       if (e.altKey && !ctl && (k === 'ArrowUp' || k === 'ArrowDown')) { e.preventDefault(); this.moveKey(k === 'ArrowUp' ? -1 : 1, e.shiftKey); return; }
       if (e.altKey || (ctl && !['c', 'C', 'f', 'F', 'g', 'G'].includes(k))) return;   // ctrl+S, ctrl+M … stay the browser's
       // ctrl+F: find (Questa), ctrl+C: copy (nothing to copy: the browser's), ctrl+G: the list of your groups
@@ -913,6 +945,7 @@ class WaveView {
       else if (k === '?') this.help();
       else if (k === 's' && this.S.sortButton) this.setSort(SORTS[(SORTS.indexOf(this.sort) + 1) % SORTS.length]);
       else if (k === 't') this.modules(true, !!this.mods || !!this.sel);   // the Modules panel; open: the selected signal's module in it
+      else if (k === 'T') this.fsmPanel(true);   // the state machines
       else if (k === 'Escape') h = false;   // handled by the viewer (reset)
       else if (this.keys[k]) this.keys[k](e);
       else h = false;
@@ -921,17 +954,22 @@ class WaveView {
   }
   fitPfx() { const i = this.root.querySelector('input.pfx'); if (i) i.style.width = Math.max(7, i.value.length + 2) + 'ch'; }
   // every row in display order (the model's and the plugins'), and the ones not folded away
-  // the ones Hide leaves (rowsHid), then the ones Only keeps (modules.js), then the find's Mask: rowsAll
+  // the ones Hide leaves (rowsHid), then the ones Only keeps (modules.js), then the find's Mask: rowsAll. The FSM layer
+  // (fsm.js): "only" — the FSMs of its set after Hide (Only and the Mask not applied under it); "add" — its FSMs and the
+  // modules on the way to them kept through Hide, Only and the Mask
   allRows(hidden = false, unmasked = false) {   // hidden: the hidden rows too, where they would be (the command rows); unmasked: no Mask
     const rows = withExtra(orderRows(this.M.rows, this.sort, this.sortIgnore, this.S.groupOrder), this.extraRows, this.M, this);
     if (hidden) return rows;
     const H = this.hiddenRows, ids = H.size && new Set(Object.values(this.M.groups).filter(g => H.has(g.path)).map(g => g.id));   // a hidden module: all of it
+    const F = this.fsm ? this.fsmTest() : null, add = !!F && this.fsm.mode === 'add';
+    const also = (from, kept) => (add && kept !== from ? (s => from.filter(r => s.has(r) || F(r)))(new Set(kept)) : kept);   // kept, and the FSMs
     this.rowsStale = false;
-    this.rowsHid = H.size ? rows.filter(r => !(r.type !== 'space' && r.type !== 'lane' && r.full && !r.ug && H.has(r.full)) && !r.anc.some(id => ids.has(id))) :
-      rows;
-    const rows2 = this.onlyOn() ? this.onlyKeep(this.rowsHid) : this.rowsHid;
+    this.rowsHid = H.size ? rows.filter(r => (add && F(r)) || (!(r.type !== 'space' && r.type !== 'lane' && r.full && !r.ug && H.has(r.full)) &&
+      !r.anc.some(id => ids.has(id)))) : rows;
+    if (F && !add) { const kept = this.rowsHid.filter(this.fsmKeep()); return unmasked ? kept : (this.rowsAll = kept); }
+    const rows2 = also(this.rowsHid, this.onlyOn() ? this.onlyKeep(this.rowsHid) : this.rowsHid);
     if (unmasked) return rows2;
-    return (this.rowsAll = this.findMask && this.found.size ? this.maskKeep(rows2) : rows2);
+    return (this.rowsAll = also(rows2, this.findMask && this.found.size ? this.maskKeep(rows2) : rows2));
   }
   // the find's Mask: the found rows, the modules on the way to them, what is inside a found module
   maskKeep(rows) {
@@ -1338,7 +1376,7 @@ class WaveView {
           ...Object.fromEntries(FIND_OPTS.map(o => [o[1], !!this[o[1]]])), ...this.gapOpt(), ...this.cycOpt() },
       paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs), hidden: [...this.hiddenRows],
         select: (this.sel && this.sel.full) || null, find: this.q || '', bookmarks: this.bookmarks(), arrows: this.arrowList(), markers: this.markList(),
-        groups: this.groupList(), only: this.onlyState() };
+        groups: this.groupList(), only: this.onlyState(), fsm: this.fsmState() };
     // none is said (null, the kind "any"): a state loaded later clears what is there then (a key left out keeps it)
     st.cursor2 = this.cursor2 ?? null;
     st.range = this.range ? { from: this.range[0], to: this.range[1], signal: (this.rangeRow && this.rangeRow.full) || null } : null;
@@ -1410,6 +1448,11 @@ class WaveView {
     if (st.only !== undefined) { const o = st.only && typeof st.only === 'object' ? st.only : null, ms = o && Array.isArray(o.modules) ? o.modules : [];
       ms.forEach(p => { if (!this.scopeOf(p)) miss.add(String(p)); });
       this.only = o ? { modules: this.onlyNorm(ms), on: o.on !== false } : null; this.onlyMemo = null; this.onlyShow(); }
+    // "fsm": {mode: only | add, signals: [paths]}, null: off; a path that is no FSM here: left out (said)
+    if (st.fsm !== undefined) { const o = st.fsm && typeof st.fsm === 'object' ? st.fsm : null, ps = o && Array.isArray(o.signals) ? o.signals.map(String) : [];
+      const have = new Set(this.fsms().map(r => r.full)); ps.forEach(p => { if (!have.has(p)) miss.add(p); });
+      const sigs = ps.filter(p => have.has(p));
+      this.fsm = o && sigs.length ? { mode: FSM_MODES.includes(o.mode) ? o.mode : 'only', signals: sigs } : null; this.fsmMemo = null; this.fsmShow(); }
     if (st.bookmarks !== undefined || st.arrows !== undefined) {
       const bms = (st.bookmarks || []).filter(b => !b.signal || seen(b.signal) || (b.signal = null, true));   // on the time axis when its signal is not here
       this.bms = bmNorm(bms); this.arrows = arNorm(st.arrows || [], bms); this.saveBookmarks(); this.renderNotes();
@@ -1429,7 +1472,7 @@ class WaveView {
     }
     if (st.edge !== undefined) { this.setEdgeKind((st.edge && st.edge.kind) || 'any'); if (this.evEl) this.evEl.value = (st.edge && st.edge.value) || ''; }
     if (st.find !== undefined && this.qEl) this.qEl.value = st.find || '';
-    if (st.only !== undefined) { this.allRows(); this.onlyFix(); }   // a selection the set left out goes
+    if (st.only !== undefined || st.fsm !== undefined) { this.allRows(); this.onlyFix(); }   // a selection the layers left out goes
     this.find(st.find !== undefined ? st.find || '' : this.q || '');   // draws; with Open the folding above is the one from before the search
     this.settingsChanged();
     return [...miss];
@@ -1466,22 +1509,29 @@ class WaveView {
       const gen = this.root.wlOpen = (this.root.wlOpen || 0) + 1;   // the latest Open… on this element wins, whichever reads first
       if (handle && handle.then) handle = await handle.catch(() => null);
       this.toast(`reading ${file.name}…`);
-      const text = await file.text();   // an FST named so but given as VCD text (the VS Code extension converts it): read
+      // a File is read in pieces (a big dump is never all in memory: only the signals within dumpBudget are); something else
+      // that has a text() (a plugin's, a test's) as its text
+      const pieces = typeof file.stream === 'function' && typeof file.slice === 'function', text = pieces ? null : await file.text();
+      const head = pieces ? await file.slice(0, 64).text() : text.slice(0, 64);   // an FST named so but given as VCD text (VS Code converts it): read
       if (gen !== this.root.wlOpen || !VIEWS.has(this)) return this;   // a later one, or Sources…, replaced this viewer meanwhile
-      if (/\.fst$/i.test(file.name) && !/^\s*\$/.test(text.slice(0, 64))) {
+      if (/\.fst$/i.test(file.name) && !/^\s*\$/.test(head)) {
         this.toast('an FST is binary: sva vcd x.fst --out x.vcd (or fst2vcd), or make html WAVES=x.fst'); return this; }
       let r;
-      try { r = vcdToWave(text, { name: file.name, budget: this.S.dumpBudget }); }
+      try { const o = { name: file.name, budget: this.S.dumpBudget }; r = pieces ? await vcdToWaveFile(file, o) : vcdToWave(text, o); }
       catch (e) { this.dumpSaid(file.name, { error: e.message, line: e.line }); throw e; }
-      const nsv = svApply(r.doc, this.opts.sv);   // the sources' labels (Sources…, the VS Code tab's wavelens.sources)
-      if (nsv) r.log.push({ level: 'info', text: `labels or fields from the SystemVerilog sources for ${nsv} signal${nsv === 1 ? '' : 's'}` });
-      for (const n of (this.opts.sv && this.opts.sv.notes) || []) r.log.push({ level: 'warning', text: 'sources: ' + n });
+      if (gen !== this.root.wlOpen || !VIEWS.has(this)) return this;
+      const said = [], why = new Map(), nsv = svApply(r.doc, this.opts.sv, said, why);   // the sources' labels (Sources…, the VS Code tab's wavelens.sources)
+      const run = this.opts.sv && this.opts.sv.paths ? svFingerprint(this.opts.sv, r.info.date, svScopes(r.doc)) : [];   // the types of this run?
+      const from = this.opts.sv && this.opts.sv.paths ? 'the types file' : 'the SystemVerilog sources';
+      if (nsv) r.log.push({ level: 'info', text: `labels or fields from ${from} for ${nsv} signal${nsv === 1 ? '' : 's'}` });
+      for (const n of ((this.opts.sv && this.opts.sv.notes) || []).concat(said, run)) r.log.push({ level: 'warning', text: 'types: ' + n });
       if (!r.shown) { this.toast(`${file.name}: no signals`); this.dumpSaid(file.name, { error: 'no signals', log: r.log, info: r.info }); return this; }
       const st = keep ? this.state() : null, root = this.root, opts = Object.assign({}, this.opts,
-        { title: file.name, dumpSrc: { name: file.name, handle, file } });
+        { title: file.name, dumpSrc: { name: file.name, handle, file }, dumpDate: r.info.date, svWhy: why, svRun: run }), panel = keep && this.fsmPanelOf();
       this.destroy(); root.innerHTML = '';
       const v = new WaveView(root, r.doc, opts);
       if (st) { delete st.title; await v.setState(st); }
+      v.fsmPanelAgain(panel);   // the FSM panel stays open (⟳)
       const bad = r.log.filter(x => x.level !== 'info').length;
       v.toast((`${file.name}: ${r.shown} of ${r.total} ` +
           `signals${r.shown < r.total ? ` (dumpBudget ${this.S.dumpBudget} changes: the levels nearest the top)` : ''}`) +
@@ -1498,25 +1548,42 @@ class WaveView {
   // Two sets: the ones picked here ('manual') and the VS Code workspace's ('workspace', useSources before each read); the
   // picked win a name. Labels a set put there and no longer has go away; the dump's own tables stay.
   useSources(sv, from = 'manual') {
-    const any = sv && (Object.keys(sv.enums).length || Object.keys(sv.fields).length || sv.notes.length);   // notes alone go to the log too
+    const any = sv && (Object.keys(sv.enums).length || Object.keys(sv.fields).length || sv.notes.length || sv.paths);   // notes alone go to the log too
     this.opts.svFrom = Object.assign({}, this.opts.svFrom, { [from]: any ? sv : null });
     this.opts.sv = svMerge(this.opts.svFrom.workspace, this.opts.svFrom.manual) || null;
     return this;
   }
+  // A types file among them (x.types.json of tools/questa/wavelens_types.tcl or svtypes.py verilator: a File named .json, or a
+  // text that is JSON) gives the signals their types by path instead (svTypes): the names of the sources are not used then.
   async setSources(files, quiet = false) {
-    const texts = await Promise.all([...(files || [])].map(f => (typeof f === 'string' ? f : f.text())));
-    const sv = svTables(texts), ne = Object.keys(sv.enums).length, nf = Object.keys(sv.fields).length;
+    files = [...(files || [])];
+    const texts = await Promise.all(files.map(f => (typeof f === 'string' ? f : f.text())));
+    const isTypes = (f, t) => (typeof f === 'string' ? /^\s*\{/.test(t) : /\.json$/i.test(f.name));
+    let ty = null;
+    try { for (let i = 0; i < files.length; i++) if (isTypes(files[i], texts[i])) ty = svMerge(ty, svTypes(texts[i], files[i].name || 'types file')); }
+    catch (e) { this.toast(e.message); return this; }
+    const rest = texts.filter((t, i) => !isTypes(files[i], t)), np = ty ? Object.keys(ty.paths).length : 0;
+    if (ty && rest.length) ty.notes.push(`${rest.length} SystemVerilog source${rest.length === 1 ? '' : 's'} not read: the types file names ` +
+      'the signals by path');
+    const sv = ty || svTables(rest);
+    const ne = Object.keys(sv.enums).length, nf = Object.keys(sv.fields).length;
     this.useSources(sv, 'manual');
     for (const x of sv.notes) console.warn('wavelens: sources: ' + x);
-    const said = sv.notes.length ? ` · ${sv.notes.length} not used (the console): ${sv.notes[0]}` : '';
-    if (!ne && !nf && !quiet) this.toast((sv.notes.length ? 'no labels from these files' : `no "typedef enum" or "typedef struct packed" in ${texts.length} ` +
-      `file${texts.length === 1 ? '' : 's'}`) + said);
-    const before = JSON.stringify(this.M.src.signal), doc = structuredClone(this.M.src), n = svApply(doc, this.opts.sv);
-    const what = `${ne} enum-typed and ${nf} struct-typed names in ${sv.files} files`;
-    if (JSON.stringify(doc.signal) === before) { if (!quiet && (ne || nf)) this.toast(`${what}: no signal of these names without labels${said}`); return this; }
-    const st = this.state(), root = this.root, opts = this.opts;
+    let said = sv.notes.length ? ` · ${sv.notes.length} not used (the console): ${sv.notes[0]}` : '';
+    if (!ne && !nf && !np && !quiet) this.toast((sv.notes.length ? 'no labels from these files' : 'no "typedef enum" or "typedef struct packed" in ' +
+      `${texts.length} file${texts.length === 1 ? '' : 's'}`) + said);
+    const log = [], why = new Map(), before = JSON.stringify(this.M.src.signal), doc = structuredClone(this.M.src), n = svApply(doc, this.opts.sv, log, why);
+    const run = ty ? svFingerprint(this.opts.sv, this.opts.dumpDate, svScopes(doc)) : [];   // the types of the run of the dump?
+    Object.assign(this.opts, { svWhy: why, svRun: run });
+    for (const x of log.concat(run)) console.warn('wavelens: types: ' + x);
+    if (run.length && !quiet) said += ` · ${run[0]}`;
+    const what = ty ? `${np} typed paths (${(ty.producer || {}).tool || 'types file'})` : `${ne} enum-typed and ${nf} struct-typed names in ${sv.files} files`;
+    if (JSON.stringify(doc.signal) === before) {
+      if (!quiet && (ne || nf || np)) this.toast(`${what}: no signal of these ${np ? 'paths' : 'names'} without labels${log.length ? ' · ' + log[0] : said}`);
+      return this; }
+    const st = this.state(), root = this.root, opts = this.opts, panel = this.fsmPanelOf();
     this.destroy(); root.innerHTML = '';
-    const v = new WaveView(root, doc, opts); delete st.title; await v.setState(st);
+    const v = new WaveView(root, doc, opts); delete st.title; await v.setState(st); v.fsmPanelAgain(panel);   // the FSM panel: its new FSMs
     v.toast(`${what}: labels or fields for ${n} signal${n === 1 ? '' : 's'}${said}`);
     return v;
   }
@@ -1770,6 +1837,7 @@ class WaveView {
       this.foldTouched = true; this.renderNames(); this.draw();
     }
     else if (s === 'yy') this.copyKey();
+    else if (s === 'gl') this.groupsMenu();   // your groups (ctrl+G; this one where ctrl+G is the host's)
     else if (s === ']m' || s === '[m') this.stepMark(s[0] === ']' ? 1 : -1);
     else if (s === ']e' || s === '[e') this.edge(s[0] === ']' ? 1 : -1);
     else if (this.keys[s]) this.keys[s]();
@@ -2083,10 +2151,12 @@ class WaveView {
           (this.ugroups.length ? '<hr><div class="mh">Go to</div>' + this.ugroups.map((g, i) => ugb('ugo', i, `${g.name} · ${g.signals.length}`)).join('') :
             '<div class="mh">no groups yet</div>') + '</div></div>') +
         b('umark', 'Marker here') + b('c2',
-          'Second cursor here') + (this.cursor2 != null ? b('c2x', 'Clear the second cursor') : '') + b('copyname', 'Copy the path') : '') +
+          'Second cursor here') + (this.cursor2 != null ? b('c2x', 'Clear the second cursor') : '') + b('copyname', 'Copy the path') +
+        b('types', 'Type…') : '') +
       (ng || nh ? '<hr>' + (ng ? b('zM', 'Fold every module') + b('zR', 'Open every module') : '') + (nh ? b('unhide', `Show the hidden (${nh})`) : '') : '') +
       (this.scopes().length ? '<hr>' + b('mods', 'Modules…') + (it && this.scopeOfRow(it) ? b('locate', 'Locate module in tree') : '') +
         (this.only ? b('onlyp', this.only.on ? 'Pause Only' : 'Resume Only') + b('onlyx', 'Clear Only') : '') : '') +
+      (this.fsms().length ? '<hr>' + b('fsms', 'State machines…') + (this.fsm ? b('fsmx', 'Clear the FSM layer') : '') : '') +
       (r ? '<hr>' + b('clear', 'Clear the range') : '');
     this.root.append(el); this.menuEl = el;
     const box = el.getBoundingClientRect();
@@ -2146,10 +2216,13 @@ class WaveView {
       else if (act === 'mods' || act === 'locate') { this.closeMenu(); this.modules(true); if (act === 'locate') this.mods.locate(it); return this; }
       else if (act === 'onlyp') this.setOnly({ on: !this.only.on });
       else if (act === 'onlyx') this.setOnly(null);
+      else if (act === 'fsms') { this.closeMenu(); this.fsmPanel(true); return this; }
+      else if (act === 'fsmx') this.setFsm(null);
       else if (act === 'mark') { const t = this.snap(sig, at), n = Math.max(0, ...this.bms.map(x => x.n)) + 1;
         this.bms.push({ n, t, signal: sig.full, text: '', color: null }); this.changed(true);
         this.notesEl.querySelector(`li[data-n="${n}"] input.txt`)?.focus(); return this.closeMenu(); }
       else if (act === 'copyname') this.copyRows([it]);
+      else if (act === 'types') { const x = this.menuEl.getBoundingClientRect(); this.closeMenu(); this.typesBox(sig.orig || sig, x.left, x.top); return this; }
       else if (act === 'umark') { this.run({ op: 'marker', t: at }).then(() =>
           this.notesEl.querySelector(`li[data-k="${this.umarks.length - 1}"] input.ml`)?.focus());
         return this.closeMenu(); }
@@ -2431,6 +2504,7 @@ class WaveView {
         const d = b.t - this.cursor;
         el.textContent = d === 0 ? 'at the cursor' : `${d < 0 ? '−' : '+'}${this.fmt(Math.abs(d), Math.abs(d) / 1000 || 1, Math.abs(d) || 1)}`; }
     }
+    if (this.fsmP) this.fsmP.values();   // the FSM panel's states at the cursor
     if (this.valsAt !== this.cursor || this.valsGen !== this.namesGen || this.valsRadix !== this.S.radix) {   // value column: only when it changes
       this.valsAt = this.cursor; this.valsGen = this.namesGen; this.valsRadix = this.S.radix;
       let vi = 0;
@@ -2441,6 +2515,15 @@ class WaveView {
     }
   }
   setTheme(name) { applyLook(this.root, name || 'auto', null); this.draw(); return this; }
+  // the bar's ◐: the page's next theme (auto, light, white, dark), kept in this browser; a host takes it instead
+  // (wavelens:theme, cancelled: the VS Code tab opens its list of themes)
+  themeNext() {
+    if (!this.root.dispatchEvent(new CustomEvent('wavelens:theme', { bubbles: true, cancelable: true, detail: { view: this } }))) return this;
+    const h = document.documentElement, now = THEMES.includes(h.dataset.theme) ? h.dataset.theme : 'auto';
+    const next = THEME_CYCLE[(THEME_CYCLE.indexOf(now) + 1) % THEME_CYCLE.length];
+    setTheme(next); try { localStorage.setItem('wavelens-theme', next); } catch (e) { /* not kept */ }
+    this.toast(`theme: ${next}${next === 'auto' ? ' (the system\'s light or dark)' : ''}`); return this;
+  }
   setColors(map) { applyLook(this.root, undefined, map); this.draw(); return this; }
   // the viewer leaves: observers, window listeners and pending frames go; plugins hear wavelens:destroy and take their part
   destroy() {
@@ -2449,7 +2532,8 @@ class WaveView {
     this.help(false);
     cancelAnimationFrame(this.raf); cancelAnimationFrame(this.inv); clearTimeout(this.toastT);
     if (ACTIVE.view === this) ACTIVE.view = null;
-    this.closeMenu(); if (this.mods) { this.mods.ac.abort(); this.mods.el.remove(); } VIEWS.delete(this);
+    this.closeMenu(); if (this.mods) { this.mods.ac.abort(); this.mods.el.remove(); } if (this.fsmP) { this.fsmP.ac.abort(); this.fsmP.el.remove(); }
+    VIEWS.delete(this);
     this.root.dispatchEvent(new CustomEvent('wavelens:destroy'));
     if (this.root.waveView === this) delete this.root.waveView;
   }

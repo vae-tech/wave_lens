@@ -17,6 +17,9 @@ module a;
     p::dec_t d;
     p::shift_t sh;
     p::stat_t status;
+    p::st_t lone;                   // a plain vector of the same name in module f: not labelled
+    p::st_t init_a = p::IDLE, init_b;   // review V A10: a name after an initialiser is declared too
+    p::st_t lone2;                  // in module f after an initialiser: a plain vector too
     enum {GO, STOP} inline_e;
     function automatic p::st_t next(input p::st_t x);   // a function: next and x are no signals
         return x;
@@ -69,4 +72,11 @@ module e;
     initial $display("continued\
 function");
     p::st_t after_cont;
+endmodule
+
+// review V: a name typed in one module and a plain vector in another gets no labels (a table of
+// the right width would land on the plain one)
+module f;
+    logic [1:0] lone;
+    logic [1:0] other = f(2'd1, 2'd2), lone2;
 endmodule

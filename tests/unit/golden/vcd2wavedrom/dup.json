@@ -1,0 +1,11 @@
+{
+ "signal": [
+  ["tb",
+    {"name": "s", "width": 1, "wave": "01.", "tv": [[0, "0"], [10000, "1"], [30000, "0"]], "path": "tb.s"}
+  ]
+ ],
+ "head": {"text": "dup.vcd"},
+ "time": {"t0": 0, "t1": 30000, "cycle": 10000, "unit": "ps"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "dup.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 0, "to_ps": 30000}
+}

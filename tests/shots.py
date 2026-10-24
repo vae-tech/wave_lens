@@ -44,6 +44,7 @@ def open_page(browser, path, scheme='dark', height=900):
         sys.exit(f'shots: {", ".join(missing)} not available (offline?): the PNGs would differ from the committed ones. '
                  'Connect to the network (Google Fonts) or install the font (fonts-ibm-plex) and run again.')
     page.add_style_tag(content='.wv-tip { display: none !important; }')   # a tooltip shows 350 ms after a hover: never in a shot
+    page.add_style_tag(content='.wv .bar .ver { display: none !important; }')   # the version and commit: a picture the same at every commit
     settle(page)
     return page
 

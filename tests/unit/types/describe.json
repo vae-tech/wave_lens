@@ -1,0 +1,21 @@
+{
+  "cases": [
+    {"describe": "Register [3:0]", "entry": null, "note": null},
+    {"describe": "Register [0:3]", "entry": null, "note": null},
+    {"describe": "Signed Register [7:0]", "entry": null, "note": null},
+    {"describe": "int", "entry": null, "note": null},
+    {"describe": "Verilog enum: (0 to 1) [2 enumeration values]\n  (LO=0,HI=1)", "entry": {"width": 2, "enum": {"0": "LO", "1": "HI"}}, "note": null},
+    {"describe": "Verilog enum: (6 downto 0) [9 enumeration values]\n  (E0=0,E1=1,E2=2,E3=3,\n    E4=4,E5=5,E6=6,\n    E7=7,E99=99)", "entry": {"width": 7, "enum": {"0": "E0", "1": "E1", "2": "E2", "3": "E3", "4": "E4", "5": "E5", "6": "E6", "7": "E7", "99": "E99"}}, "note": null},
+    {"describe": "Verilog enum: (63 downto 0) [2 enumeration values]\n  (W0=0,W1=-1)", "entry": null, "note": "an enum of 64 bits: Questa's describe keeps 32 bits of each value"},
+    {"describe": "Verilog enum: (2 downto 0) [3 enumeration values]\n  (A=0,B=1)", "entry": null, "note": "2 of its 3 enum values read"},
+    {"describe": "Array(1 downto 0) [length 2] of\n  Verilog enum: (1 downto 0) [2 enumeration values]\n    (X=1,Y=2)", "entry": {"width": 4, "fields": [{"name": "[1]", "msb": 3, "lsb": 2, "enum": {"1": "X", "2": "Y"}}, {"name": "[0]", "msb": 1, "lsb": 0, "enum": {"1": "X", "2": "Y"}}]}, "note": null},
+    {"describe": "Array(1 downto 0) [length 2] of\n  Register [3:0]", "entry": null, "note": null},
+    {"describe": "Record [3 elements]\n  Element #1 \"b\" =>\n    bit [0:0]\n  Element #2 \"n\" =>\n    byte\n  Element #3 \"u\" =>\n    Union [2 elements]\n      Element #1 \"r\" =>\n        Register [1:0]\n      Element #2 \"s\" =>\n        Signed Register [1:0]", "entry": {"width": 11, "fields": [{"name": "b", "msb": 10, "lsb": 10}, {"name": "n", "msb": 9, "lsb": 2}, {"name": "u", "msb": 1, "lsb": 0}]}, "note": null},
+    {"describe": "Union [1 elements]\n  Element #1 \"r\" =>\n    Register [1:0]", "entry": null, "note": "a packed union: which member holds the value is not known"},
+    {"describe": "Class handle", "entry": null, "note": "a type it does not read (Class handle)"},
+    {"describe": "Verilog enum: (1 downto 0) [3 enumeration values]\n  (A$0=0,B$=1,C=2)", "entry": {"width": 2, "enum": {"0": "A$0", "1": "B$", "2": "C"}}, "note": null},
+    {"describe": "Verilog enum: (1 downto 0) [2 enumeration values]\n  (\\a+b =0,B=1)", "entry": null, "note": "a type it does not read (enum values \"\\a+b =0\")"},
+    {"describe": "Array(1 downto 0) [length 2] of\n  Record [2 elements]\n    Element #1 \"a\" =>\n      Register [1:0]\n    Element #2 \"b\" =>\n      Register [1:0]", "entry": {"width": 8, "fields": [{"name": "[1].a", "msb": 7, "lsb": 6}, {"name": "[1].b", "msb": 5, "lsb": 4}, {"name": "[0].a", "msb": 3, "lsb": 2}, {"name": "[0].b", "msb": 1, "lsb": 0}]}, "note": null},
+    {"describe": "Array(1 downto 0) [length 2] of\n  Array(1 downto 0) [length 2] of\n    Register [3:0]", "entry": null, "note": null}
+  ]
+}

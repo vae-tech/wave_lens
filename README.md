@@ -13,6 +13,10 @@ transactions are three plugin scripts more, inlined into a page): no build step,
   keeps only the modules you pick, your groups and order, clock cycles, undo, bookmarks and arrows with notes.
 - **SystemVerilog assertions** bound to instances, evaluated over the dump (in the page and by a CLI for CI), every
   attempt drawn on the waves, a failure taken apart step by step.
+- **FSM states by name on a Questa VCD**: the design's types from Questa (a Tcl script in `vsim`) or Verilator, by
+  path, so every state bus has its own names and a packed struct its fields; the FSMs as a tree beside the waves, Only
+  them or added to your view, each with its states, its changes and a diagram of them (a click: the next time it happens;
+  [the guide](docs/guides/types.html)).
 - **Bus transactions**: AXI, AXI-Stream, APB, AHB, Avalon, Wishbone and OBI ports found by their names and drawn as
   transfers; **two runs compared** signal by signal.
 - **Pictures for documents**: PNG, SVG and WaveDrom out of any window, long idle stretches cut out, a static
@@ -83,6 +87,7 @@ and an agent live in the tab: [the VS Code guide](docs/guides/vscode.html).
 | read an FST with the tools | GTKWave's `fst2vcd`, or the `sva` CLI committed in `bin/linux-x86_64/` (static, any Linux x86-64; the tools find it) |
 | check assertions from the tools or in CI (`mkhtml.py --sva`, `mkconfig.py --sva`, `sva eval`) | the `sva` CLI: `bin/linux-x86_64/sva`; on Windows `make dist-windows` builds it (mingw-w64). Without it a page still evaluates its assertions in the browser |
 | build the examples | Make and Verilator ≥ 5 |
+| state names on a VCD from the design's types | Questa (`tools/questa/wavelens_types.tcl` in `vsim`) or Verilator ≥ 5 (`tools/svtypes.py verilator`) |
 | the VS Code extension | VS Code ≥ 1.80; the package (`make vsix`) is for a Linux x86-64 host of Remote-SSH / WSL |
 | change the code | [DEVELOPMENT.md](docs/DEVELOPMENT.md): Rust for the assertion engine, Playwright for the tests |
 
@@ -93,6 +98,7 @@ and an agent live in the tab: [the VS Code guide](docs/guides/vscode.html).
 | Guide | |
 |---|---|
 | [From a dump to a page](docs/guides/pages.html) | `make html`, the generated config and what to edit in it, views, FSM names, structs, themes |
+| [State names and structs](docs/guides/types.html) | a VCD's FSM states and structs from the design's types: Questa's `describe` or Verilator, by path |
 | [The viewer](docs/guides/viewer.html) | the bar, zoom, cursors, edges, ranges, find, hierarchy, groups, cycles, bookmarks, undo, save |
 | [Modules](docs/guides/modules.html) | the tree of the modules: go to one, keep Only the ones you pick |
 | [Compare two runs](docs/guides/compare.html) | a second dump over the first: where they differ, step by step |

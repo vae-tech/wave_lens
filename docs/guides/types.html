@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>State names and structs · WaveLens guides</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="guide.css">
+</head>
+<body>
+<header class="top"><nav>
+  <a class="home" href="index.html">WaveLens guides</a>
+  <a href="pages.html">Dump → page</a> <a href="types.html" aria-current="page">State names</a> <a href="viewer.html">Viewer</a>
+  <a href="modules.html">Modules</a> <a href="compare.html">Compare</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
+  <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="vscode.html">VS Code</a>
+  <a href="commands.html">Commands</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
+</nav></header>
+<div class="page toc-side">
+<main>
+<header class="hero"><div class="kicker">Guide</div><h1>State names and structs: the design's types</h1>
+<p class="lead">A VCD has no types. Questa writes an FSM's <code>state_t state</code> as <code>reg [2:0]</code> and a packed struct
+  as one vector, so the waves show <code>2</code> where you want <code>DATA</code>. WaveLens takes the types from the tool that
+  compiled the design, Questa or Verilator. They go into a file next to the dump, <code>tb.types.json</code>, keyed by each signal's path.
+  Then every state bus has its own names and every struct shows its fields, whatever the packages, includes, macros, parameters and
+  generate blocks.</p></header>
+
+<h2 id="how">How it works</h2>
+<ol class="steps">
+  <li><b>The types are written.</b> Questa: a Tcl script in the same <code>vsim</code> run asks <code>describe</code> about every
+    signal. Verilator: <code>svtypes.py verilator</code> compiles the design with <code>--json-only</code> and walks its
+    instances. Either way the result is <code>tb.types.json</code>: for each path, the enum's table or the struct's fields.</li>
+  <li><b>WaveLens reads them.</b> <code>make html WAVES=tb.vcd</code> finds <code>tb.types.json</code> by its name. The viewer takes
+    it in <span class="ui">Sources…</span>. The VS Code tab reads it next to the dump, and again when it changes.</li>
+  <li><b>By path, by width.</b> A signal gets the type of its own path, <code>tb.u_rx.state</code>, only when its width in the dump is
+    the type's. Two modules' <code>state</code> each get their own table. A plain <code>logic [1:0] state</code> stays a number,
+    and so does a signal the file does not name.</li>
+</ol>
+<figure><img src="img/types-fsm.png" alt="The FSM example from its VCD: state and u_rx.state by name, the packed struct status split into its fields, status.state by name" loading="lazy">
+  <figcaption><b>A VCD with its types.</b> The UART FSM example from its VCD, which has no enum tables
+  (<code>out/examples/fsm/fsm_all.html</code>, <code>make examples</code>). <code>fsm.types.json</code> from Verilator names
+  <code>state</code> and <code>u_rx.state</code> and splits the 16-bit <code>status</code> into its fields; its <code>state</code>
+  field has names too. The same page comes from Questa's VCD with <code>make questa EX=fsm</code>.</figcaption></figure>
+
+<h2 id="questa">With Questa</h2>
+<p>Source <code>tools/questa/wavelens_types.tcl</code> in <code>vsim</code> and call <code>wavelens_types</code> any time after the
+  design is loaded, before or after <code>run</code>. Name the file after the dump:</p>
+<pre><code>vlog -sv -f files.f
+vsim -c -voptargs=+acc work.tb +trace -do "
+  source /path/to/wavelens/tools/questa/wavelens_types.tcl
+  wavelens_types tb.types.json            <span class="c"># every signal under /*</span>
+  vcd file tb.vcd; vcd add -r /tb/*       <span class="c"># or $dumpfile / $dumpvars in the testbench</span>
+  run -all; quit -f"</code></pre>
+<ul>
+  <li><code>-voptargs=+acc</code> keeps the signals visible. Without it Questa optimises them away from the VCD as well.</li>
+  <li><code>wavelens_types tb.types.json /tb/u_dut</code> covers only that instance and what is under it. The whole design is
+    seldom too much: 110&nbsp;000 signals in 10&nbsp;000 instances take 12&nbsp;s in <code>vsim</code> and give an 8.6&nbsp;MB
+    file, which the page reads in 0.3&nbsp;s.</li>
+  <li><b>An old run</b>, with no simulation: <code>vsim -c -view old.wlf</code>, then <code>source …</code> and
+    <code>wavelens_types old.types.json old:/tb</code> (the dataset is named after the WLF file). A WLF holds the same types.</li>
+  <li>The file holds Questa's own words (<code>describe</code> of each signal, the module of each instance), and WaveLens reads them.
+    Questa's <code>describe</code> gives only 32 bits of each enum value, so an enum wider than 32 bits is left as a number, with a note.</li>
+</ul>
+<p>To try it on the example: <code>make questa EX=fsm</code> (<code>vsim</code> on <code>PATH</code>). It builds
+  <code>out/questa/fsm/</code> with Questa's <code>fsm.vcd</code>, <code>fsm.types.json</code> and <code>fsm.html</code>, the same
+  steps as above.</p>
+
+<h2 id="verilator">With Verilator</h2>
+<p>When the dump is not from Questa, or Questa is not at hand, Verilator 5 reads the same sources. After <code>--</code> come the
+  arguments you give Verilator anyway:</p>
+<pre><code>python3 -I tools/svtypes.py verilator --top tb --out tb.types.json -- -f files.f
+python3 -I tools/svtypes.py verilator --top tb --out tb.types.json -- +incdir+rtl rtl/pkg.sv rtl/*.sv -GDEPTH=16</code></pre>
+<p>Verilator only elaborates here; nothing is built, and the dump may come from any simulator. Its parameters must be those of the
+  run (<code>-G…</code>, <code>+define+…</code>). When another parameter changes a width, those signals stay numbers, with a
+  note. When it changes only the values of an enum (the same width), nothing tells: the labels are those of the other
+  parameters. The width check is the only check; a types file from another run of the same width is taken as it is.
+  <code>make examples</code> does this for each example (<code>out/examples/&lt;ex&gt;/&lt;ex&gt;.types.json</code>).</p>
+<p>Verilator's file also has what Questa's VCD leaves out: a package's variables (<code>p.state</code>), unpacked arrays of
+  any dimensions (<code>two[1][2]</code> gets the type of <code>two</code>), escaped names as the VCD writes them
+  (<code>u-l.st-x</code>), and enums of up to 64 bits.</p>
+
+<h2 id="use">Using the file</h2>
+<table>
+  <tr><th>Where</th><th>What to do</th></tr>
+  <tr><td>a page: <code>make html</code></td><td><code>make html WAVES=tb.vcd</code> finds <code>tb.types.json</code> by its name;
+    another file: <code>TYPES=x.types.json</code>. Behind it <code>mkconfig.py --types</code> writes the names into the config;
+    a types file newer than the config updates it at the next <code>make html</code> (or <code>make config</code>). What the
+    file gave is listed in the config's <code>"typed"</code>: an update replaces it with the file's of now, or takes it
+    away when the file no longer gives it. An <code>"enum"</code> you wrote or edited stays.</td></tr>
+  <tr><td>the viewer</td><td><span class="ui">Open…</span> the dump, then <span class="ui">Sources…</span> and pick
+    <code>tb.types.json</code>. The view is kept, and <span class="ui">⟳</span> keeps the types.</td></tr>
+  <tr><td>VS Code</td><td>nothing to do: the tab reads <code>tb.types.json</code> next to <code>tb.vcd</code> (or
+    <code>tb.fst</code>) at each read. When the file is written again the tab offers <span class="ui">⟳</span>, or reads
+    the dump at once with <code>wavelens.autoReload</code>. <i>WaveLens: Make the types with Verilator</i> writes it from a
+    <code>.f</code> file of the workspace (no Python needed).</td></tr>
+  <tr><td>another root</td><td>the dump's scopes as the file names them: <code>"map": {"top.dut_i": "dut"}</code> in the file,
+    <code>--types-map top.dut_i=dut</code> for <code>mkconfig.py</code>, <code>--map</code> for <code>svtypes.py check</code>. The
+    longest prefix is replaced before the lookup.</td></tr>
+  <tr><td>why a signal has no labels</td><td>the right button on its name, <span class="ui">Type…</span>: the file and the path
+    there, a width that does not fit, a plain vector in the types, or no entry (the paths of its name the file has, the
+    <code>"map"</code> to write). The command <code>types</code> answers the same.</td></tr>
+  <tr><td>which run</td><td>the file and the dump compared as far as both tell: written more than a day apart, an instance of the
+    types the dump has not (under a module it has). A note in each of the places above (<code>run:</code> in
+    <code>svtypes.py check</code>): the labels may be of another design or other parameters.</td></tr>
+  <tr><td>a check</td><td><code>python3 -I tools/svtypes.py check tb.types.json tb.vcd</code>: each typed path with its table or
+    fields, then how many signals of the dump get them, which widths differ, which paths are not in the dump.</td></tr>
+</table>
+<pre><code>$ python3 -I tools/svtypes.py check tb.types.json tb.vcd
+tb.types.json: Questa Sim-64 vsim 2021.1 …: 3 typed signals, 0 notes
+  fsm_tb.state [3]: IDLE=0 START=1 DATA=2 STOP=3 ERROR=4
+  fsm_tb.status [16]: state[15:13]*, bit_cnt[12:10], valid[9:9], frame_err[8:8], data[7:0]   (* an enum)
+  fsm_tb.u_rx.state [3]: IDLE=0 START=1 DATA=2 STOP=3 ERROR=4
+tb.vcd: 23 signals: 2 get enum labels, 1 get fields; 0 width differs, 0 typed paths not in the dump</code></pre>
+<div class="note"><p>With a types file the names from <code>.sv</code> files are not used. Those come by the variable's name
+  (<code>--sv</code>, <span class="ui">Sources…</span> with <code>.sv</code> files, <code>wavelens.sources</code> in VS Code), so
+  a table could land on another module's <code>state</code>. An FST from Verilator (<code>--trace-fst</code>) carries its own enum
+  tables and needs no types file: the dump's own tables always stay.</p></div>
+
+<h2 id="cases">What a type gives</h2>
+<table>
+  <tr><th>In the design</th><th>On the waves</th></tr>
+  <tr><td><code>typedef enum logic [2:0] {IDLE, START, …} state_t</code> in a package, an include, a module</td><td>the names</td></tr>
+  <tr><td>values by expression: <code>OH_B = 4'b0001 &lt;&lt; 1</code>, <code>(1 &lt;&lt; W) - 1</code>, a macro, a localparam</td>
+    <td>the names: the simulator has computed the values</td></tr>
+  <tr><td>an enum on <code>int</code> with <code>NEG = -1</code></td><td><code>NEG</code> at <code>0xFFFFFFFF</code></td></tr>
+  <tr><td>a parameterised module with its own <code>typedef enum logic [W-1:0]</code>, in a generate loop</td><td>each instance its
+    own table, of its own width</td></tr>
+  <tr><td>a packed struct</td><td>its fields as rows under it; an enum field by name</td></tr>
+  <tr><td>a struct in a struct</td><td>dotted fields: <code>in.st</code>, <code>in.code</code></td></tr>
+  <tr><td>a packed array of enums or structs (<code>state_t [1:0] two</code>)</td><td>a field per element: <code>[1]</code>,
+    <code>[0]</code></td></tr>
+  <tr><td>a packed union</td><td>a number, with a note: which member holds the value is not known</td></tr>
+  <tr><td>an enum over 32 bits from Questa</td><td>a number, with a note (Verilator gives it)</td></tr>
+</table>
+
+<h2 id="fsms">The state machines panel</h2>
+<p><kbd>T</kbd> (or <span class="ui">FSMs</span> in the bar) lists every FSM of the waves in the tree of the modules above it:
+  every signal with enum labels, whether the names came from a types file, an FST or <span class="ui">Sources…</span>. Each FSM shows
+  its state at the cursor and how many of its states the waves reach (<code>4/5</code>). The list holds the signals named as a state
+  machine (<code>state</code>, <code>fsm</code>, <code>cs</code> / <code>ns</code>, <code>…_q</code>); <span class="ui">all enums</span>
+  adds the other enums, <span class="ui">fields</span> a packed struct's state field.</p>
+<ul>
+  <li><b>Go there.</b> A click on an FSM opens its modules and selects it in the middle of the waves. If the view leaves it out,
+    it is added to the view.</li>
+  <li><b>Only FSMs.</b> The waves keep only the FSMs and the modules on the way to them. Only and the find's Mask come back
+    when you clear it (✕ in the bar).</li>
+  <li><b>Add to view.</b> The view stays as you made it, for example a find with Mask or Only on a few modules, and the FSMs
+    are added to it.</li>
+  <li>ctrl+click (Space) picks a few FSMs, shift+click a run of them, a box drawn over the tree the ones in it; the two buttons
+    then take only the picked ones. The right button on an FSM or a module: Only it (its FSMs), add it, pick, copy the path. The
+    command <code>fsm</code> does the same from a script or an agent.</li>
+  <li><b>Its details.</b> Below the tree, for the FSM clicked (<kbd>d</kbd>): its <b>States</b> (how many times the waves enter
+    each, the share of the time it holds it, the first entry; never reached in italics, a value not in its table in red), its
+    <b>Changes</b> (from → to, how many, the first) and a <b>Diagram</b> of them (an arrow per change seen, as thick as it is
+    frequent). A click on a state, a change or an arrow: the cursor to the next time it happens (shift: the previous); on the
+    first time: there. <code>fsm_stats</code> and <code>fsm_go</code> do it from a script.</li>
+</ul>
+<figure><img src="img/types-fsm-graph.png" alt="The State machines panel with the details of u_rx.state: the diagram of its five states, an arrow per change with its count, the state at the cursor filled" loading="lazy">
+  <figcaption><b>An FSM's diagram.</b> <code>u_rx.state</code> of the FSM example: its five states, the changes seen with their
+  counts (IDLE → START 2, STOP → ERROR 1), START at the cursor. A click on an arrow goes to the next time it happens.</figcaption></figure>
+<figure><img src="img/types-fsm-panel.png" alt="The FSM example with Only FSMs: state and u_rx.state with their modules, the State machines panel beside them with each state at the cursor" loading="lazy">
+  <figcaption><b>Only FSMs.</b> The FSM example's two state buses and the modules above them. The panel shows each FSM's state at
+  the cursor and its states reached, 5 of 5.</figcaption></figure>
+
+<h2 id="file">The file</h2>
+<p>JSON, small enough to read. Questa's version keeps <code>describe</code> as Questa printed it. A WaveLens that reads a new
+  wording better needs no new simulation:</p>
+<pre><code>{ "wavelens": "types", "version": 1,
+  "producer": {"tool": "Questa Sim-64 vsim 2021.1 …", "by": "tools/questa/wavelens_types.tcl", "root": "/*"},
+  "instances": {"fsm_tb.u_rx": "uart_rx", …},
+  "describe": {"fsm_tb.u_rx.state": "Verilog enum: (2 downto 0) [5 enumeration values]\n  (IDLE=0,START=1,DATA=2,STOP=3,ERROR=4)", …} }</code></pre>
+<p>Verilator's, and any tool of your own, writes the result directly. These are the keys of a config's signal, by path:</p>
+<pre><code>{ "wavelens": "types", "version": 1, "producer": {"tool": "Verilator 5.046 …"},
+  "signals": {
+    "fsm_tb.u_rx.state": {"width": 3, "enum": {"0": "IDLE", "1": "START", "2": "DATA", "3": "STOP", "4": "ERROR"}},
+    "fsm_tb.status": {"width": 16, "fields": [{"name": "state", "msb": 15, "lsb": 13, "enum": {"0": "IDLE", …}}, …]} },
+  "notes": [] }</code></pre>
+<p>From a script: <code>WaveLens.svTypes(text)</code> reads either one, and <code>view.setSources([file])</code> applies it.
+  <code>tests/unit/types/</code> holds a design with most of the cases above, Questa's file of it, the tables expected, and
+  <code>describe.json</code> with Questa's wording of the rest. The tests check
+  Questa's file and Verilator's output against those tables, and Verilator's against the enum tables of its own FST.</p>
+</main>
+<nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
+</div>
+<footer>WaveLens 0.20 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+  <a href="../index.html">docs/index.html</a></footer>
+<script src="guide.js"></script>
+</body>
+</html>

@@ -8,7 +8,8 @@
    - the live link's EventSource / fetch / sendBeacon to 127.0.0.1 -> the host's 127.0.0.1 (the agent's wavemcp.py);
    - the theme: VS Code's light / dark, its own colours (wavelens.theme: vscode) or one of the viewer's;
    - a key the viewer took does not go on to VS Code (its webview forwards every keydown to the workbench);
-   - the workspace's SystemVerilog sources (wavelens.sources): the enum names of a VCD's state buses (Sources… in the bar too);
+   - the design's types beside the dump (tb.types.json: Questa, Verilator; by path), else the workspace's SystemVerilog sources
+     (wavelens.sources): the enum names of a VCD's state buses (Sources… in the bar too);
    - what the reader noticed in the dump (wavelens:dump, wavelens:dumperror) -> the extension's log and Problems panel.
    Then it opens the dump (fetched by its webview URI) in the viewer: ⟳ fetches it again, the view kept. */
 (() => {
@@ -123,6 +124,9 @@
     h.classList.toggle('wl-vscode', themeSet === 'vscode'); };
   theme(); new MutationObserver(theme).observe(document.body, { attributes: true, attributeFilter: ['class'] });
   on.theme = m => { themeSet = looks(m.theme); theme(); };
+  on.keys = m => { if (G.WaveLens) WaveLens.configure({ keysLeft: m.keysLeft || [] }); };
+  document.addEventListener('wavelens:theme', e => { e.preventDefault(); vscode.postMessage({ type: 'theme' }); }, true);   // the bar's ◐: VS Code's list
+  if (H.build) G.WAVELENS_BUILD = H.build;   // the bar's version line: the extension's branch and commit
 
   /* ---- the dump ---- */
   const fetchDump = async () => {
@@ -144,8 +148,11 @@
   // one read again at a time, of the viewer that is there then (the one before is gone once it read); one asked meanwhile: once more after
   // the workspace's SystemVerilog sources (wavelens.sources) before each read: their enum names on a VCD's state buses
   // (the workspace's set: none found clears it, the ones of Sources… stay); -> the viewer there after the wait
+  // or the design's types beside the dump (tb.types.json, by path: then the sources are not read)
   const sources = async () => { const s = await call('sources', {}), v = view();
-    if (v) v.useSources(s.texts && s.texts.length ? WaveLens.svTables(s.texts) : null, 'workspace');
+    let sv = s.texts && s.texts.length ? WaveLens.svTables(s.texts) : null;
+    if (s.types != null) try { sv = WaveLens.svTypes(s.types, s.typesName); } catch (e) { if (v) v.toast(e.message); sv = null; }
+    if (v) v.useSources(sv, 'workspace');
     return v; };
   let busy = null, again = false;
   const reload = () => {
@@ -163,9 +170,11 @@
     vscode.postMessage({ type: 'result', rid: m.rid, results }); };
   G.addEventListener('load', async () => {
     theme();   // again: wavelens.config.js (its "theme") came after
-    // VS Code's webview sends every keydown that reaches its window to the workbench (ctrl+G would open Go to Line too):
-    // a key the viewer took (preventDefault) stops here, after the viewer's own listeners on the document
-    // (the viewer's ctrl keys do not look at shift: ctrl+shift+F / G / C stay VS Code's, ctrl+shift+Z is the viewer's redo)
+    // VS Code's webview sends every keydown that reaches its window to the workbench: a key the viewer took (preventDefault)
+    // stops here, after the viewer's own listeners on the document; the ones of wavelens.keysToVSCode (ctrl+G: Go to Line)
+    // the viewer leaves alone (keysLeft), so they reach VS Code (the viewer's ctrl keys do not look at shift: ctrl+shift+F
+    // / G / C stay VS Code's, ctrl+shift+Z is the viewer's redo)
+    WaveLens.configure({ keysLeft: H.keysLeft || [] });
     document.addEventListener('keydown', e => {
       if (e.defaultPrevented && !((e.ctrlKey || e.metaKey) && e.shiftKey && e.code !== 'KeyZ')) e.stopPropagation(); });
     const P = WaveLens.WaveView.prototype; RELOAD = P.reloadDump; P.reloadDump = function () { return reload(); };   // ⟳ of the bar too

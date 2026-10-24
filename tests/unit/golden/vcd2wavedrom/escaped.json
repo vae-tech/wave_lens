@@ -1,0 +1,13 @@
+{
+ "signal": [
+  ["tb",
+    {"name": "\\x[0].y", "width": 1, "wave": "0", "tv": [[0, "0"], [10000, "1"]], "path": "tb.\\x[0].y"},
+    {"name": "\\a.b", "width": 1, "wave": "1", "tv": [[0, "1"], [10000, "0"]], "path": "tb.\\a.b"},
+    {"name": "\\bus$x", "width": 4, "wave": "=", "data": ["10"], "tv": [[0, "a"], [10000, "5"]], "path": "tb.\\bus$x"}
+  ]
+ ],
+ "head": {"text": "escaped.vcd"},
+ "time": {"t0": 0, "t1": 10000, "cycle": 10000, "unit": "ps"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "escaped.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 0, "to_ps": 10000}
+}

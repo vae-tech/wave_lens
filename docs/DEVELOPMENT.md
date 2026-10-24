@@ -12,7 +12,8 @@ wavelens/                     what a page needs, nothing else
                               page), paint.js (the two painters
                               and what they draw), view.js (WaveView and its parts Bar, Names, Notes), edit.js (the
                               viewer's commands view.run, your groups and markers, undo, Save page, the live link),
-                              diff.js (a second dump compared), modules.js (the Modules panel and Only), svg.js
+                              diff.js (a second dump compared), modules.js (the Modules panel and Only), fsm.js (the
+                              state machines panel and its layer), svg.js
                               (WaveSVG), boot.js (themes, configure, upgrade, exports): one scope, in this order
   wavelens.config.js          global settings file (all keys, with defaults), loaded before wavelens.js
   sva.js, sva.wasm.js         assertions in the page: the panel, binding, evaluation; the engine (generated, make sva-build)
@@ -20,9 +21,14 @@ wavelens/                     what a page needs, nothing else
 vscode/                       the VS Code extension (a workspace extension: Remote-SSH / WSL host): extension.js (the
                               custom editor of .vcd / .fst, FST -> VCD by the bundled sva, the store, dialogs, the
                               live relay), media/host.js (the tab's half, before wavelens.js: localStorage, downloads,
-                              pickers, clipboard, keys, theme, live link to the host), test/e2e.js (in a real VS Code)
+                              pickers, clipboard, keys, theme, live link to the host), svtypes.js (the twin of
+                              svtypes.py verilator: the command Make the types with Verilator; tests/unit compares
+                              the two), test/e2e.js (in a real VS Code)
 tools/                        what you run: python3 -I tools/<tool>.py
   mkconfig.py vcd2wavedrom.py mkhtml.py embed.py dumpscan.py wavejson.py svabuild.py
+  svtypes.py                  the design's types by path (Questa's describe read, Verilator --json-only walked); its
+                              twin in the page is wavelens/src/vcd.js svTypes
+  questa/wavelens_types.tcl   in vsim: describe of every signal and the module of every instance -> <dump>.types.json
   mkvsix.py                   vscode/ + wavelens/ + the static sva -> one .vsix (a zip: no node, no npm)
   wavemcp.py                  the tools as an MCP server for AI agents (stdio; USAGE § AI agents); the live link to a page
   viewedit.py                 the viewer's commands on a page's edits or a saved state (USAGE § Commands and edits)
@@ -77,8 +83,9 @@ What each part needs:
 | the SystemVerilog style | verible (`make fmt`) and Verilator (`make lint`) |
 
 ```sh
-make check                  # the gate before a commit: wavelens.js current and its sources ≤ 160 columns, sva-test, every page smoke needs, unit (WAVELENS_STRICT: a test lacking what the gate builds fails), sva-verify, mcp-bench, smoke STRICT=1, shots-check
+make check                  # the gate before a commit: wavelens.js current and its sources ≤ 160 columns, the committed sva.wasm.js the build of sva/, every page smoke needs, sva-test and unit (WAVELENS_STRICT: a test lacking what the gate builds fails, the engine's goldens over the examples too), sva-verify, mcp-bench, smoke STRICT=1, shots-check
 make unit                   # tests/unit: the tools on small VCDs of what simulators write (~20 s, standard library)
+make unit-bless             # rewrite tests/unit/golden (the bytes wavejson.py and vcd2wavedrom.py write for the fixtures) after a meant change of them: read the diff
 make mcp-bench              # tools/wavemcp.py on the benchmark tasks by a script (answers checked); AGENT=claude|codex: agents
 make wavelens               # wavelens/wavelens.js from wavelens/src/*.js (after editing them; make html / example do it too; lines ≤ 160 columns)
 make demo examples html     # rebuild docs/demo_waves.js, the example pages, the demo page

@@ -9,7 +9,7 @@ import json
 def ints(o):  # 25000.0 -> 25000 so times stay readable
     if isinstance(o, float) and o.is_integer():
         return int(o)
-    if isinstance(o, list):
+    if isinstance(o, (list, tuple)):   # (a tuple: a transition of the reader's)
         return [ints(x) for x in o]
     if isinstance(o, dict):
         return {k: ints(v) for k, v in o.items()}
@@ -20,18 +20,32 @@ def _j(v):
     return json.dumps(v, ensure_ascii=False, separators=(', ', ': '))
 
 
+SAFE = frozenset('0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\'_.+- ')
+
+
+def _pair(p):
+    """A [t, v] transition as _j(ints(p)) writes it, without json for the usual ones (a whole time, a value of plain characters;
+    the reader's times are floats of ps: 5000.0 as ints() writes it)."""
+    t, v = p
+    if type(t) is float and t.is_integer():
+        t = int(t)
+    if type(t) is int and type(v) is str and SAFE.issuperset(v):
+        return f'[{t}, "{v}"]'
+    return _j(ints(list(p)))
+
+
 def _sig(s, ind, wrap):
     if isinstance(s, list):   # group: ["name", member, …]
         if not any(isinstance(m, (dict, list)) for m in s):
-            return _j(s)
+            return _j(ints(s))
         named = isinstance(s[0], str) if s else False
         rows = ',\n'.join(ind + '  ' + _sig(m, ind + '  ', wrap) for m in s[1 if named else 0:])
         return '[' + (_j(s[0]) + ',' if named else '') + '\n' + rows + '\n' + ind + ']'
     tv = s.get('tv') if isinstance(s, dict) else None
     if not tv or len(tv) <= wrap:
-        return _j(s)
-    head = _j({k: v for k, v in s.items() if k != 'tv'})
-    lines = [', '.join(_j(p) for p in tv[i:i + wrap]) for i in range(0, len(tv), wrap)]
+        return _j(ints(s))
+    head = _j(ints({k: v for k, v in s.items() if k != 'tv'}))
+    lines = [', '.join(map(_pair, tv[i:i + wrap])) for i in range(0, len(tv), wrap)]
     return head[:-1] + (', ' if len(head) > 2 else '') + '"tv": [\n' + ',\n'.join(ind + '    ' + x for x in lines) + '\n' + ind + '  ]}'
 
 
@@ -43,13 +57,13 @@ def count(signal):
 
 def dumps(doc, indent='', wrap=16):
     """WaveJSON doc -> text (no trailing newline). `indent` prefixes every line after the first."""
-    doc, parts = ints(doc), []
+    parts = []   # (ints of the signals as they are written: no copy of a big dump's transitions)
     for k, v in doc.items():
         if k == 'signal':
             rows = ',\n'.join(indent + '  ' + _sig(s, indent + '  ', wrap) for s in v)
             parts.append(f'"signal": [\n{rows}\n{indent} ]')
         else:
-            parts.append(json.dumps(k) + ': ' + _j(v))
+            parts.append(json.dumps(k) + ': ' + _j(ints(v)))
     return '{\n' + indent + ' ' + (',\n' + indent + ' ').join(parts) + '\n' + indent + '}'
 
 

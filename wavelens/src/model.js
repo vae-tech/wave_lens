@@ -28,6 +28,12 @@ const THEMES = ['light', 'white', 'dark'];
 const ENUMS = {};   // global enum registry: full path (or a signal name, for every signal of that name) -> { value: label }
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const num = v => (typeof v === 'number' ? v : parseFloat(v));
+// a key as keysLeft names it: ctrl+ (cmd too) alt+ shift+ and the key, a letter by its place (ctrl+G on any layout)
+const keyName = e => (e.ctrlKey || e.metaKey ? 'ctrl+' : '') + (e.altKey ? 'alt+' : '') + (e.shiftKey ? 'shift+' : '') +
+  (/^Key[A-Z]$/.test(e.code || '') ? e.code.slice(3) : String(e.key || '').length === 1 ? String(e.key).toUpperCase() : String(e.key || ''));
+// a key the viewer leaves to its host (keysLeft: ["ctrl+G"]; the VS Code tab: wavelens.keysToVSCode): not taken, not stopped
+const keyLeft = (S, e) => { const l = S && S.keysLeft; if (!l || !l.length || !(e.ctrlKey || e.metaKey || e.altKey)) return false;
+  const k = keyName(e).toLowerCase(); return [].concat(l).some(x => String(x).replace(/\s+/g, '').replace(/^cmd\+/i, 'ctrl+').toLowerCase() === k); };
 // binary search over n sorted items: the index of the last one with at(i) <= t (strict: < t), -1 if none
 function lastBefore(n, at, t, strict = false) {
   let lo = 0, hi = n - 1, ans = -1;
@@ -68,7 +74,7 @@ const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight
   findRegex: false, cursorSnap: 8,
     wheel: 'scroll', contextMenu: true, enumColors: null, dumpBudget: 3000000, gaps: false, gapIdle: 16, gapKeep: 2,
     gapSignals: null, gapClock: null, gapAux: null, gapOnly: false, gapCount: 'clock', gapLine: 'dashdot', menuTipDelay: 2000, cycles: false,
-    cycleClock: null, cycleZero: null, savePage: true };
+    cycleClock: null, cycleZero: null, savePage: true, themeButton: 'auto', version: true, keysLeft: [] };
 // a plugin's settings with their defaults (bus.js: busDetect, buses; sva.js: svaOpen, svaShow, svaSignals): in every
 // layer like the framework's own, listed in WaveLens.defaults, known to the warning on unknown keys
 const registerDefaults = map => { Object.assign(DEFAULTS, map || {}); return Object.assign({}, DEFAULTS); };
@@ -335,12 +341,14 @@ function toFloat(n, w) {
     return e === 0 ? s * m * 2 ** -24 : e === 31 ? (m ? NaN : s * Infinity) : s * (1 + m / 1024) * 2 ** (e - 15); }
   return null;
 }
+// a value's key in an enum table (decimal, as the JSON has it): exact past 2^53 too (Verilator's 64-bit enums)
+const enumKey = h => (h.length <= 13 ? String(parseInt(h, 16)) : BigInt('0x' + h).toString());
 function decode(sig, v, radix) {
   if (v === undefined) return '?';
   if (/[xz]/i.test(v)) return (sig.radix || radix) === 'bin' ? [...v].map(c => (/[xz]/i.test(c) ? c.repeat(4) : parseInt(c, 16).toString(2)
     .padStart(4, '0'))).join('').slice(-(sig.width || 1)) : v;   // whole nibbles x / z: bin spells them out
   const e = sig.enum || ENUMS[sig.full] || ENUMS[sig.name];
-  if (e) { const n = parseInt(v, 16); if (e[n] !== undefined) return e[n]; }
+  if (e && v) { const n = enumKey(v); if (e[n] !== undefined) return e[n]; }
   const w = sig.width || 1, big = () => BigInt('0x' + (v || '0')) & ((1n << BigInt(w)) - 1n);   // a value wider than the signal: its low bits
   const r = sig.radix || radix, q = /^(s?)q(\d+)$/.exec(r || '');
   if (q) {   // fixed point: the value / 2^F exactly (the F decimals of 1/2^F: the fraction times 5^F), trailing zeros left out

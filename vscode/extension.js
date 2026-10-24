@@ -129,6 +129,9 @@ async function scanSources() {
   return out;
 }
 
+// the types file of a dump: its name with .types.json (tb.vcd, tb.fst -> tb.types.json)
+const typesFile = f => f.replace(/\.(vcd|fst)$/i, '') + '.types.json';
+
 /* ---------------- a tab: one dump in a webview ---------------- */
 class Tab {
   constructor(uri, panel) {
@@ -151,7 +154,7 @@ class Tab {
     const name = path.basename(this.file), esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
     const json = s => JSON.stringify(s).replace(/</g, '\\u003c');
     const host = { name, path: this.file, store: this.store, autoReload: !!vscode.workspace.getConfiguration('wavelens').get('autoReload'),
-      theme: themeOf() };
+      theme: themeOf(), build: buildOf(), keysLeft: vscode.workspace.getConfiguration('wavelens').get('keysToVSCode') || [] };
     const scripts = MEDIA.filter(f => f.endsWith('.js')).map(f => `<script nonce="${nonce}" src="${u(r.wavelens, f)}"></script>`).join('\n');
     return `<!doctype html>
 <html lang="en">
@@ -195,6 +198,7 @@ ${scripts}
       case 'pick': return reply(await this.pick(String(m.accept || ''), !!m.multiple));
       case 'sources': return reply(await this.sources());
       case 'clip': await vscode.env.clipboard.writeText(String(m.text ?? '')); return reply({ ok: true });
+      case 'theme': chooseTheme(); return;   // the bar's ◐: the list of themes, as the command
       case 'result': { const w = this.wait.get(m.rid); if (w) { this.wait.delete(m.rid); w(m.results); } return; }
       case 'ready': case 'loaded':
         this.info = { shown: m.shown, total: m.total, title: m.title };
@@ -268,8 +272,18 @@ ${scripts}
     }
     return { files };
   }
-  // the workspace's SystemVerilog sources for the tab (wavelens.sources): their enum names label a VCD's state buses
+  // the design's types beside the dump (tb.vcd -> tb.types.json: tools/questa/wavelens_types.tcl, svtypes.py verilator), by
+  // path; without them the workspace's SystemVerilog sources (wavelens.sources): their enum names label a VCD's state buses
   async sources() {
+    const tf = typesFile(this.file);
+    let types = null;
+    try { types = await fs.promises.readFile(tf, 'utf8'); } catch (e) { /* none */ }
+    if (types != null) {
+      const say = `the types of ${path.basename(tf)} (by path; wavelens.sources not used)`;
+      if (say !== this.srcSaid) log(`${path.basename(this.file)}: ${say}`);
+      this.srcSaid = say;
+      return { types, typesName: path.basename(tf), texts: [] };
+    }
     const s = await workspaceSources();
     const say = `${s.texts.length} of ${s.files} SystemVerilog sources: ${s.types} enum / packed-struct types` + (s.left ? `, ${s.left} left out (${s.why})` : '');
     if (say !== this.srcSaid) log(`${path.basename(this.file)}: ${say} (wavelens.sources)`);
@@ -290,6 +304,12 @@ ${scripts}
     };
     this.onStat = (cur, prev) => { if (cur.mtimeMs !== prev.mtimeMs || cur.size !== prev.size) quiet(cur); };
     fs.watchFile(this.file, { interval: 1000 }, this.onStat);   // polling: NFS homes of a Remote-SSH host send no events
+    this.onTypes = (cur, prev) => {   // the types beside it written (or made, or removed): a read again, as for the dump
+      if (cur.mtimeMs === prev.mtimeMs && cur.size === prev.size) return;
+      clearTimeout(this.typesT);
+      this.typesT = setTimeout(() => this.post({ type: 'changed', auto: !!vscode.workspace.getConfiguration('wavelens').get('autoReload') }), 1200);
+    };
+    fs.watchFile(typesFile(this.file), { interval: 1000 }, this.onTypes);
   }
   run(ops, timeout = 20000) {   // the viewer's commands (view.run) -> their results (the tests; later the agent without a bridge)
     const rid = ++this.rid;
@@ -331,7 +351,8 @@ ${scripts}
     go();
   }
   dispose() {
-    TABS.delete(this); fs.unwatchFile(this.file, this.onStat); clearTimeout(this.changeT);
+    TABS.delete(this); fs.unwatchFile(this.file, this.onStat); fs.unwatchFile(typesFile(this.file), this.onTypes);
+    clearTimeout(this.changeT); clearTimeout(this.typesT);
     try { DIAG.delete(this.uri); } catch (e) { /* disposed: the window closes */ }
     this.flush();
     for (const s of this.streams.values()) s.close();
@@ -357,6 +378,20 @@ const THEMES = [
   ['dark', 'Dark', 'the viewer\'s dark'],
 ];
 const themeOf = () => vscode.workspace.getConfiguration('wavelens').get('theme') || 'auto';
+// the build of this extension for the bar's version line (WAVELENS_BUILD): a VSIX's from its package.json (mkvsix.py),
+// else its checkout's branch and commit (vscode/ of the repository, make vscode-e2e), asked once
+let BUILD;
+function buildOf() {
+  if (BUILD !== undefined) return BUILD;
+  const own = CTX.extension && CTX.extension.packageJSON && CTX.extension.packageJSON.wavelensBuild;
+  if (own) return (BUILD = own);
+  const git = a => { try { return cp.execFileSync('git', ['-C', CTX.extensionPath, ...a], { encoding: 'utf8', timeout: 5000,
+    stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch (e) { return ''; } };
+  const commit = git(['rev-parse', '--short', 'HEAD']);
+  BUILD = commit ? { branch: git(['rev-parse', '--abbrev-ref', 'HEAD']), commit, dirty: !!git(['status', '--porcelain', '--untracked-files=no']),
+    tag: git(['describe', '--tags', '--exact-match']) || undefined, by: 'the extension of the repository' } : null;
+  return BUILD;
+}
 const themeAll = t => { for (const tab of TABS) tab.post({ type: 'theme', theme: t }); };
 async function chooseTheme() {
   const now = themeOf(), qp = vscode.window.createQuickPick();
@@ -374,6 +409,57 @@ async function chooseTheme() {
   const inspect = vscode.workspace.getConfiguration('wavelens').inspect('theme');
   const where = inspect && inspect.workspaceValue !== undefined ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global;
   await vscode.workspace.getConfiguration('wavelens').update('theme', picked.id, where);
+}
+
+/* ---------------- the design's types through Verilator (vscode/svtypes.js): <dump>.types.json beside the dump ---------------- */
+// The arguments Verilator takes (a .f file of the workspace, or typed: files, -f, +incdir+, +define+, -G…) and the top
+// module (the dump's top scope by default), asked once per dump and kept; the file written next to the dump, which the
+// tab reads at once (its watcher). opts {args, top}: no questions (the tests)
+const SVT = require('./svtypes.js');
+function topOf(file) {   // the dump's first $scope module (a VCD's head), '' for an FST
+  try { const fd = fs.openSync(file, 'r'), b = Buffer.alloc(65536), n = fs.readSync(fd, b, 0, b.length, 0); fs.closeSync(fd);
+    const m = /\$scope\s+module\s+(\S+)/.exec(b.toString('latin1', 0, n)); return m ? m[1] : ''; } catch (e) { return ''; }
+}
+async function verilatorTypes(tab, opts = {}) {
+  if (!tab) { vscode.window.showInformationMessage('WaveLens: open a dump first (its types go beside it)'); return null; }
+  const key = 'verilator:' + tab.file, was = CTX.workspaceState.get(key) || {};
+  let args = opts.args, top = opts.top;
+  if (!args) {
+    const fl = (await vscode.workspace.findFiles('**/*.f', '**/node_modules/**', 50)).map(u => u.fsPath).sort();
+    const items = [...(was.args ? [{ label: was.args.join(' '), description: 'as the last time', args: was.args }] : []),
+      ...fl.map(f => ({ label: '-f ' + vscode.workspace.asRelativePath(f), description: 'a file list of the workspace', args: ['-f', f] })),
+      { label: 'Type the arguments…', description: 'files, -f list.f, +incdir+…, +define+…, -GNAME=…', typed: true }];
+    const pick = await vscode.window.showQuickPick(items, { title: 'WaveLens: the design for Verilator (its types by path)',
+      placeHolder: 'the arguments you give Verilator for this design' });
+    if (!pick) return null;
+    if (pick.typed) {
+      const t = await vscode.window.showInputBox({ title: 'WaveLens: the arguments for verilator --json-only', value: (was.args || []).join(' '),
+        prompt: 'as on its command line: rtl/pkg.sv rtl/*.sv +incdir+rtl -GDEPTH=16 (paths from the workspace\'s folder; * ? in a file\'s name)' });
+      if (!t || !t.trim()) return null;
+      args = t.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g).map(x => x.replace(/^(["'])(.*)\1$/, '$2'));
+    } else args = pick.args;
+  }
+  if (top == null) {
+    top = await vscode.window.showInputBox({ title: 'WaveLens: the top module', value: was.top || topOf(tab.file),
+      prompt: 'the module the dump starts at (verilator --top-module); empty: Verilator\'s choice' });
+    if (top == null) return null;
+  }
+  await CTX.workspaceState.update(key, { args, top });
+  const out = typesFile(tab.file), exe = vscode.workspace.getConfiguration('wavelens').get('verilator') || 'verilator';
+  // Verilator runs in the workspace's folder: the paths of the arguments and of a .f file's lines are from there
+  const cwd = (vscode.workspace.workspaceFolders || [])[0] ? vscode.workspace.workspaceFolders[0].uri.fsPath : path.dirname(tab.file);
+  try {
+    const doc = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification,
+      title: `WaveLens: verilator --json-only (${path.basename(out)})` }, () => SVT.make(args, top || null, exe, undefined, cwd));
+    fs.writeFileSync(out, SVT.text(doc));
+    const ne = Object.values(doc.signals).filter(e => e.enum).length;
+    log(`${path.basename(out)}: ${ne} enum and ${Object.keys(doc.signals).length - ne} struct signals (${doc.producer.tool})`);
+    for (const n of doc.notes) log(`${path.basename(out)}: ${n}`);
+    if (!opts.args) vscode.window.showInformationMessage(`WaveLens: ${path.basename(out)}: ${ne} enum and ${Object.keys(doc.signals).length - ne} struct ` +
+      'signals by path; the tab reads it');
+    tab.post({ type: 'changed', auto: true });   // read at once (asked for: whatever wavelens.autoReload says)
+    return { out, signals: Object.keys(doc.signals).length, notes: doc.notes };
+  } catch (e) { log(`verilator types: ${e.message}`); if (!opts.args) vscode.window.showErrorMessage('WaveLens: ' + e.message.split('\n')[0]); throw e; }
 }
 
 /* ---------------- the agent's live link (tools/wavemcp.py) ---------------- */
@@ -490,7 +576,11 @@ function activate(ctx) {
     vscode.commands.registerCommand('wavelens.reload', () => { const t = active(); if (t) t.post({ type: 'reload' }); }),
     vscode.commands.registerCommand('wavelens.theme', chooseTheme),
     vscode.commands.registerCommand('wavelens.log', () => OUT.show(true)),
-    vscode.workspace.onDidChangeConfiguration(e => { if (e.affectsConfiguration('wavelens.theme')) themeAll(themeOf()); }),
+    vscode.commands.registerCommand('wavelens.verilatorTypes', opts => verilatorTypes(active(), opts || {})),
+    vscode.workspace.onDidChangeConfiguration(e => { if (e.affectsConfiguration('wavelens.theme')) themeAll(themeOf());
+      if (e.affectsConfiguration('wavelens.keysToVSCode')) {
+        const keysLeft = vscode.workspace.getConfiguration('wavelens').get('keysToVSCode') || [];
+        for (const tab of TABS) tab.post({ type: 'keys', keysLeft }); } }),
     vscode.commands.registerCommand('wavelens.live', () => {
       liveCheck(); const t = active();
       if (!liveOn()) vscode.window.showInformationMessage('WaveLens: the setting wavelens.live is off');

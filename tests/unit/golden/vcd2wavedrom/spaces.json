@@ -1,0 +1,13 @@
+{
+ "signal": [
+  ["tb",
+    {"name": "s", "width": 1, "wave": "0..1.0", "tv": [[0, "0"], [5000, "1"], [9000, "0"], [12000, "1"]], "path": "tb.s"},
+    {"name": "bus", "width": 4, "wave": "=..==.", "data": ["2", "3", "4"], "tv": [[0, "2"], [5000, "3"], [7000, "4"], [12000, "f"]], "path": "tb.bus"},
+    {"name": "t", "width": 1, "wave": "0...1.", "tv": [[0, "0"], [7000, "1"]], "path": "tb.t"}
+  ]
+ ],
+ "head": {"text": "spaces.vcd"},
+ "time": {"t0": 0, "t1": 12000, "cycle": 2000, "unit": "ps"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "spaces.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 0, "to_ps": 12000}
+}

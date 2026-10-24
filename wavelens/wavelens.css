@@ -93,6 +93,7 @@
 .wv .bar .tg.find.float .fx { display: inline-block; padding: 2px 7px; }
 .wv .bar .eyebrow .mu { text-transform: none; }   /* uppercase would turn µs into ΜS */
 .wv .bar .cur { font-family: var(--font-mono); margin-left: 12px; color: var(--muted); }
+.wv .bar .ver { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); opacity: 0.8; white-space: nowrap; }   /* the version and build */
 .wv .body { display: grid; grid-template-columns: var(--wv-names, 200px) minmax(0, 1fr); }
 .wv.wv-scroll .body { max-height: var(--wv-max-h); overflow-y: auto; }   /* maxHeight setting: rows scroll inside the viewer */
 .wv .wcol { position: relative; min-width: 0; }                         /* as tall as all rows; the canvas sticks in view */
@@ -437,3 +438,50 @@
   border-radius: 0 6px 6px 0; resize: none; } .wv .wv-mods .mh { cursor: default; } }
 @media print { .wv .wv-mods { display: none; } }
 .wv .wv-mods .mn.way .nm { font-style: italic; }   /* on the way to a module Only keeps: its header only */
+/* the FSM panel (fsm.js): the Modules panel's look; an FSM's state at the cursor, how many of its states the waves reach */
+.wv .wv-fsms .mf label { display: flex; align-items: center; gap: 3px; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+.wv .wv-fsms .mn.mm .nm { color: var(--muted); }
+.wv .wv-fsms .mn.fs .st { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-size: 11px;
+  color: var(--accent); }
+.wv .wv-fsms .mn.pk { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.wv .wv-fsms .mn.out .nm { opacity: 0.55; }
+/* an FSM's details under the tree (fsm.js): its states, its changes, the diagram; never reached: muted, not in its table: red, at the cursor: the accent */
+.wv .wv-fsms .fd { flex: 0 1 auto; max-height: 55%; display: flex; flex-direction: column; border-top: 1px solid var(--line); min-height: 0; }
+.wv .wv-fsms .fdh { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 4px 6px 4px 10px; }
+.wv .wv-fsms .fdh .fdn { font-family: var(--font-mono); font-size: 12px; }
+.wv .wv-fsms .fdh .fdm { flex: 1 1 auto; color: var(--muted); font-size: 11px; }
+.wv .wv-fsms .fdt { display: inline-flex; }
+.wv .wv-fsms .fdt button { font: inherit; font-size: 11px; padding: 1px 7px; border: 1px solid var(--line); background: var(--panel); color: var(--fg);
+  cursor: pointer; margin-left: -1px; }
+.wv .wv-fsms .fdt button:first-child { border-radius: 4px 0 0 4px; } .wv .wv-fsms .fdt button:last-child { border-radius: 0 4px 4px 0; }
+.wv .wv-fsms .fdt button[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.wv .wv-fsms .fdb { overflow: auto; padding: 0 6px 6px; min-height: 0; }
+.wv .wv-fsms .fst { border-collapse: collapse; width: 100%; font-family: var(--font-mono); font-size: 11.5px; }
+.wv .wv-fsms .fst th { position: sticky; top: 0; background: var(--panel); text-align: left; font-weight: 600; color: var(--muted); padding: 2px 4px; }
+.wv .wv-fsms .fst td { padding: 1px 4px; border-top: 1px solid color-mix(in srgb, var(--line) 50%, transparent); white-space: nowrap; }
+.wv .wv-fsms .fst tr[data-k], .wv .wv-fsms .fst tr[data-f] { cursor: pointer; }
+.wv .wv-fsms .fst tr[data-k]:hover td, .wv .wv-fsms .fst tr[data-f]:hover td { background: var(--panel-2); }
+.wv .wv-fsms .fst td.fi { text-decoration: underline dotted; }
+.wv .wv-fsms .fst tr.never td { color: var(--muted); font-style: italic; }
+.wv .wv-fsms .fst tr.bad td { color: var(--wave-x); }
+.wv .wv-fsms .fst tr.now td:first-child { color: var(--accent); font-weight: 700; }
+.wv .wv-fsms .fdz { color: var(--muted); font-size: 11.5px; margin: 6px 4px; }
+.wv .wv-fsms .fsg { width: 100%; height: auto; display: block; font-family: var(--font-mono); }
+.wv .wv-fsms .fsg marker path { fill: var(--muted); }
+.wv .wv-fsms .fsg .fa path { fill: none; stroke: var(--muted); }
+.wv .wv-fsms .fsg .fa path.hit { stroke: transparent; stroke-width: 10; cursor: pointer; }
+.wv .wv-fsms .fsg .fa:hover path:not(.hit) { stroke: var(--accent); }
+.wv .wv-fsms .fsg .fa text { font-size: 9px; fill: var(--muted); text-anchor: middle; pointer-events: none; }
+.wv .wv-fsms .fsg .fa.bad path:not(.hit) { stroke: var(--wave-x); }
+.wv .wv-fsms .fsg .fn { cursor: pointer; }
+.wv .wv-fsms .fsg .fn circle { fill: var(--panel-2); stroke: var(--fg); stroke-width: 1.2; }
+.wv .wv-fsms .fsg .fn text { font-size: 9px; fill: var(--fg); text-anchor: middle; pointer-events: none; }
+.wv .wv-fsms .fsg .fn.never circle { stroke: var(--muted); stroke-dasharray: 3 2; fill: none; }
+.wv .wv-fsms .fsg .fn.never text { fill: var(--muted); }
+.wv .wv-fsms .fsg .fn.bad circle { stroke: var(--wave-x); }
+.wv .wv-fsms .fsg .fn.now circle { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2; }
+.wv .wv-fsms .fsg .fn:hover circle { stroke: var(--accent); }
+.wv .wv-menu.wv-types { max-width: min(460px, 92vw); padding-bottom: 6px; }
+.wv .wv-menu.wv-types p { margin: 4px 10px; font-size: 12px; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
+.wv .wv-menu.wv-types p.run { color: var(--wave-x); }
+.wv .wv-menu.wv-types button { display: inline-block; width: auto; margin: 4px 0 0 10px; }

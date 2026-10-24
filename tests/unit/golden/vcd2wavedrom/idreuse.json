@@ -1,0 +1,14 @@
+{
+ "signal": [
+  ["tb",
+    {"name": "clk", "width": 1, "wave": "01", "tv": [[0, "0"], [10000, "1"], [20000, "0"]], "path": "tb.clk"},
+    ["dut",
+      {"name": "clk", "width": 1, "wave": "01", "same": "tb.clk", "path": "tb.dut.clk"}
+    ]
+  ]
+ ],
+ "head": {"text": "idreuse.vcd"},
+ "time": {"t0": 0, "t1": 20000, "cycle": 10000, "unit": "ps"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "idreuse.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 0, "to_ps": 20000}
+}

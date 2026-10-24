@@ -11,7 +11,7 @@
 <body>
 <header class="top"><nav>
   <a class="home" href="index.html">WaveLens guides</a>
-  <a href="pages.html">Dump → page</a> <a href="viewer.html" aria-current="page">Viewer</a> <a href="modules.html">Modules</a>
+  <a href="pages.html">Dump → page</a> <a href="types.html">State names</a> <a href="viewer.html" aria-current="page">Viewer</a> <a href="modules.html">Modules</a>
   <a href="compare.html">Compare</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
   <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="vscode.html">VS Code</a>
   <a href="commands.html">Commands</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
@@ -107,7 +107,8 @@
     <span class="ui">Save page</span> the page with it (<a href="#state">Save and Load</a>).</td></tr>
   <tr><td>dump</td><td><span class="ui">Open…</span> a VCD, <span class="ui">⟳</span> read it again (<a href="#open">Opening waves</a>),
     <span class="ui">Compare…</span> a second run (<a href="compare.html">Compare two runs</a>), <span class="ui">Sources…</span>
-    SystemVerilog files whose <code>typedef enum</code> names the states of a VCD (it has none).</td></tr>
+    the design's types (<code>x.types.json</code>, <a href="types.html">State names</a>) or SystemVerilog files whose
+    <code>typedef enum</code> names the states of a VCD (it has none).</td></tr>
   <tr><td>assertions</td><td><span class="ui">Load file…</span> reads <code>.sv</code> / <code>.sva</code> files; see
     <a href="sva.html">Assertions</a>.</td></tr>
 </table>
@@ -406,8 +407,9 @@
 
 <h2 id="struct">Packed structs</h2>
 <p>A packed struct is one row <code>{}</code> with its whole value and a row per field under it. It comes from an FST written by Verilator
-  with <code>--trace-structs</code> (a struct scope of the dump), or from <code>mkconfig.py --sv</code>, which reads
-  <code>typedef struct packed</code> from the sources and writes the <code>"fields"</code> of a vector.</p>
+  with <code>--trace-structs</code> (a struct scope of the dump), from the design's types (<a href="types.html">State names</a>), or
+  from <code>mkconfig.py --sv</code>, which reads <code>typedef struct packed</code> from the sources and writes the
+  <code>"fields"</code> of a vector.</p>
 <figure><img src="img/viewer-struct.png" alt="The FSM's generated page: the packed struct status as a {} row with its fields under it" loading="lazy">
   <figcaption><b>A packed struct.</b> <code>{} status</code> = 0x5400 at the cursor, its fields <code>state</code>, <code>bit_cnt</code>,
   <code>valid</code>, <code>frame_err</code>, <code>data</code> under it.</figcaption></figure>
@@ -468,7 +470,7 @@
 <p>Three themes: <b>light</b> (warm paper), <b>white</b> (black traces, for print and slides) and <b>dark</b>. They follow the system
   (<code>prefers-color-scheme</code>) unless set: the theme button in a generated page's header, <code>&lt;html data-theme="white"&gt;</code>,
   <code>WaveLens.setTheme('dark')</code>, or <code>"config": {"theme": …}</code>. Every colour is a CSS custom property; see
-  <a href="pages.html">Dump → page</a> for colours per signal, group and module.</p>
+  <a href="pages.html">Dump → page</a> <a href="types.html">State names</a> for colours per signal, group and module.</p>
 <div class="pair">
   <figure><img src="img/theme-light.png" alt="The APB viewer in the light theme" loading="lazy"><figcaption><b>light</b></figcaption></figure>
   <figure><img src="img/theme-white.png" alt="The APB viewer in the white theme" loading="lazy"><figcaption><b>white</b></figcaption></figure>
@@ -528,7 +530,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.19 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.20 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

@@ -1,0 +1,12 @@
+{
+ "signal": [
+  ["tb",
+    {"name": "s", "width": 1, "wave": "0..1", "tv": [[0, "0"], [5000, "1"], [8000, "0"]], "path": "tb.s"},
+    {"name": "v", "width": 2, "wave": "=...", "data": ["0"], "tv": [[0, "0"], [8000, "3"]], "path": "tb.v"}
+  ]
+ ],
+ "head": {"text": "inline_time.vcd"},
+ "time": {"t0": 0, "t1": 8000, "cycle": 2000, "unit": "ps"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "inline_time.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 0, "to_ps": 8000}
+}

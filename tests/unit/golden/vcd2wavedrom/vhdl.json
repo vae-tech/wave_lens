@@ -1,0 +1,12 @@
+{
+ "signal": [
+  ["top",
+    {"name": "s", "width": 1, "wave": "x1", "tv": [[0, "x"], [10000, "1"], [20000, "0"]], "path": "top.s"},
+    {"name": "v", "width": 4, "wave": "x=", "data": ["6"], "tv": [[0, "x"], [10000, "6"], [20000, "'b1xx0"]], "path": "top.v"}
+  ]
+ ],
+ "head": {"text": "vhdl.vcd"},
+ "time": {"t0": 0, "t1": 20000, "cycle": 10000, "unit": "ps"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "vhdl.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 0, "to_ps": 20000}
+}

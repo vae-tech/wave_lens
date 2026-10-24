@@ -11,7 +11,7 @@
 <body>
 <header class="top"><nav>
   <a class="home" href="index.html">WaveLens guides</a>
-  <a href="pages.html" aria-current="page">Dump → page</a> <a href="viewer.html">Viewer</a> <a href="modules.html">Modules</a>
+  <a href="pages.html" aria-current="page">Dump → page</a> <a href="types.html">State names</a> <a href="viewer.html">Viewer</a> <a href="modules.html">Modules</a>
   <a href="compare.html">Compare</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
   <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="vscode.html">VS Code</a>
   <a href="commands.html">Commands</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
@@ -69,7 +69,7 @@ static SVG).</figcaption></figure>
 
 <h2 id="config">The generated config</h2>
 <p><code>tools/mkconfig.py</code> writes every signal of the dump under its full path, one line each. A real one, from the FSM
-example's VCD with its sources (<code>--sv</code>):</p>
+example's VCD with its types (<code>fsm.types.json</code> beside it, <a href="types.html">State names</a>):</p>
 <pre><code>"signals": {
   "fsm_tb.clk":       {"show": true,  "radix": "", "color": "#2f9e44", "style": "", "width": 1, "changes": 213},
   "fsm_tb.rst_n":     {"show": true,  "radix": "", "color": "#e8590c", "style": "", "width": 1, "changes": 1},
@@ -213,8 +213,11 @@ name; interactively, <span class="ui">Paint</span> in the viewer's find group (<
 <ul>
 <li><b>FST</b> written by Verilator (<code>--trace-fst</code>) carries the enum tables of the design: <code>make html WAVES=x.fst</code>
   labels the states by itself.</li>
-<li><b>VCD</b> has none: <code>make html WAVES=x.vcd SV="rtl/*.sv"</code> (<code>mkconfig.py --sv</code>) reads
-  <code>typedef enum {…} name_t;</code> from the sources and labels the signals declared with those types.</li>
+<li><b>VCD</b> has none: the design's types next to it, <code>x.types.json</code> from Questa or Verilator, label every state bus
+  by its path. <code>make html WAVES=x.vcd</code> finds the file by itself; see <a href="types.html">State names and structs</a>.</li>
+<li>Without a types file, <code>make html WAVES=x.vcd SV="rtl/*.sv"</code> (<code>mkconfig.py --sv</code>) reads
+  <code>typedef enum {…} name_t;</code> from the sources and labels the signals declared with those types by their names. A name
+  declared with two types, or also as a plain vector, gets none.</li>
 <li>By hand: <code>"enum": {"0": "IDLE", …}</code> in the signal's entry, or a top-level <code>"enum": {"phase": {…}}</code>.</li>
 </ul>
 <figure><img src="img/pages-fsm.png"
@@ -227,8 +230,9 @@ name; interactively, <span class="ui">Paint</span> in the viewer's find group (<
 <p>A packed struct is shown as a <code>{}</code> row with its whole value and a row per field under it. Two sources:</p>
 <ul>
 <li>an FST written with Verilator <code>--trace-structs</code> has struct scopes: each is a <code>{}</code> group by itself;</li>
-<li>a struct dumped as one vector: <code>mkconfig.py --sv</code> (<code>SV=</code>) writes its <code>"fields"</code> from
-  <code>typedef struct packed</code> (see <code>fsm_tb.status</code> in the config above), or write them yourself:
+<li>a struct dumped as one vector: the types file gives its <code>"fields"</code> (see <code>fsm_tb.status</code> in the config
+  above; nested structs as <code>in.st</code>), else <code>mkconfig.py --sv</code> (<code>SV=</code>) from
+  <code>typedef struct packed</code>, or write them yourself:
   <code>[{"name": "state", "msb": 15, "lsb": 13, "enum": {…}}, …]</code>, MSB first.</li>
 </ul>
 <figure><img src="../img/struct.png"
@@ -321,7 +325,7 @@ config <code>mkconfig.py</code> makes from the dump (the whole hierarchy). <code
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.19 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live
+<footer>WaveLens 0.20 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live
 reference: <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

@@ -58,11 +58,14 @@ COMMANDS = {
     'highlight': 'add? remove? set? clear?', 'paint': 'signals? color? clear?', 'select': 'signal? signals?', 'hide': 'signals', 'show': 'signals?',
     'fold': 'groups? all?', 'unfold': 'groups? all?', 'radix': 'signals radix', 'analog': 'signals rows', 'sort': 'dir ignore?', 'style': 'name',
     'layout': 'scroll? height? tools?', 'find': 'query case? word? regex? highlight? open? mask?', 'gaps': 'on? idle? keep? signals? clock? aux? only? count? reset?',
-    'cycles': 'on? clock? zero? reset?', 'only': 'modules? on? clear? open?',
+    'cycles': 'on? clock? zero? reset?', 'only': 'modules? on? clear? open?', 'fsm': 'mode? signals? fields? clear?',
+    'fsm_stats': 'signal', 'fsm_go': 'signal state? from? to? dir? first?', 'types': 'signals?',
     'edge': 'dir? kind? value? signal?', 'reset': '', 'state': '', 'set_state': 'state', 'rows': 'pattern? limit? offset?',
     'picture': 'format? from? to? rows?',
 }
-LIVE_ONLY = {'fit': 'the time of the waves', 'edge': 'the values of the signals', 'picture': 'the screen'}
+LIVE_ONLY = {'fit': 'the time of the waves', 'edge': 'the values of the signals', 'picture': 'the screen',
+             'fsm': 'the enum labels of the signals', 'fsm_stats': 'the transitions of the signals', 'fsm_go': 'the transitions of the signals',
+             'types': 'the types file read in the page'}
 # the arguments of each command that are times (wavemcp.py turns its ns into "…ns" for these)
 TIME_ARGS = {'cursor': ('t',), 'cursor2': ('t',), 'view': ('from', 'to', 'at', 'span'), 'range': ('from', 'to'), 'bookmark': ('t',), 'marker': ('t',),
              'picture': ('from', 'to'), 'cycles': ('zero',)}

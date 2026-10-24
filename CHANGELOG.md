@@ -5,6 +5,32 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.20 — 24 October 2026
+
+FSM states and structs of a VCD from the design's own types (Questa or Verilator), the state machines panel with each
+FSM's states, changes and diagram; the theme and the version in the bar; tests that hold the bytes the tools write.
+
+- **Types by path.** `<dump>.types.json` beside a VCD — Questa's `describe` (`tools/questa/wavelens_types.tcl`,
+  `make questa`) or `verilator --json-only` (`svtypes.py verilator`; in VS Code **Make the types with Verilator**, no
+  Python needed) — gives each signal the enum or struct of its own path, only where the width fits: packages,
+  includes, arrays, nested structs, enums up to 64 bits. `mkconfig.py --types` (`--update` follows the file),
+  `svtypes.py check`, a `"map"` of roots (`--types-map`, `--map`), the run's fingerprint (a file of another day, an
+  instance the dump does not have). **Type…** on a name says where its labels come from.
+- **State machines.** A panel of the FSMs in the tree of their modules with the state at the cursor: go to one, Only
+  FSMs or add them to the view; its details — the states (entries, time held, never reached, values not in the
+  table), the changes, a diagram — and a click takes the cursor to the next entry (shift: the previous); the right
+  button and a box to pick them; the commands `fsm`, `fsm_stats`, `fsm_go`, `types`.
+- **The bar.** ◐ switches the theme (in VS Code: its list of themes); the version with the branch and the commit the
+  page was made from. VS Code keeps ctrl+G (`wavelens.keysToVSCode`); `gl` opens the groups list.
+- **Big dumps.** Open… and Compare… read a VCD in pieces, never all of it in memory; `vcd2wavedrom.py` and
+  `mkhtml.py` take less time and half the memory on a big dump, the bytes the same.
+- **Tests.** Goldens of the bytes the converter writes (`make unit-bless`); `make check` builds the examples before
+  the engine's tests and fails on a missing dump, and checks that the committed `sva.wasm.js` and
+  `bin/linux-x86_64/sva` are the build of `sva/`; the VSIX's files; the reload in VS Code by its new values.
+- **Fixes.** A `$comment` naming `$enddefinitions` in a header, 64-bit enum tables of an FST, labels that look like
+  numbers in an FSM's states, a types file's own labels kept before the file's (and said so), `rtl/*.sv` typed in VS
+  Code expanded, a bad `"map"` an error in the page as in Python.
+
 ## 0.19 — 24 October 2026
 
 The waves in VS Code in its theme and with the dump's log, the names' own menu, state names of a VCD from the

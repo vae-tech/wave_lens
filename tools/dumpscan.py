@@ -46,6 +46,8 @@ class Dump:
         self.vars, self.alias, self.unit_ps, self.t_start, self.t_end = {}, {}, 1, None, None
         self.changes, self.trans = {}, {}
         self.scopes = {}   # path -> scope type other than module ($scope struct / union / interface …: an FST as VCD text)
+        self.modules = set()   # the paths of every $scope module (the instances the dump has)
+        self.date = None   # its $date, as written
 
     def find(self, path):
         return path if path in self.vars else self.alias.get(path)
@@ -166,11 +168,15 @@ def _header(lines, d, path):
         if t0 == b'$timescale':   # one command: _commands joined its lines
             m = TS_RE.search(line)
             d.unit_ps = int(m.group(1)) * UNIT_PS[m.group(2).decode()] if m else 1
+        elif t0 == b'$date':
+            d.date = b' '.join(tok[1:-1] if tok[-1] == b'$end' else tok[1:]).decode(errors='replace') or None
         elif t0 == b'$scope' and len(tok) > 2:
             scope.append(tok[2].decode(errors='replace'))
             kind = tok[1].decode(errors='replace').lower()
             if kind not in ('module', '$end'):
                 d.scopes['.'.join(scope)] = kind
+            else:
+                d.modules.add('.'.join(scope))
         elif t0 == b'$upscope' and scope:
             scope.pop()
         elif t0 == b'$attrbegin' and len(tok) > 4 and tok[1] == b'misc' and tok[2] in (b'07', b'7'):

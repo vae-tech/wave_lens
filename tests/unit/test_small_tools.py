@@ -26,6 +26,16 @@ class WaveJson(unittest.TestCase):
     def test_count_nested_same(self):
         self.assertEqual(WJ.count(self.DOC['signal']), 3)
 
+    def test_the_bytes(self):
+        # review VI T7: the text itself, not what json reads back (a space more in _pair passed every test): the fast pairs
+        # and json's (a quote, UTF-8, a fraction of a time, a time past 2^53), "tv" of 15, 16 and 17 pairs about the wrap,
+        # a group in a group, dumps_many's keys
+        odd = [[0, 'a"b'], [1, 'été'], [2.5, '1'], [2 ** 60, 'x'], [3.0, '0']]
+        doc = {'signal': [{'name': 'n15', 'tv': [[i, 'ab'[i % 2]] for i in range(15)]}, {'name': 'n16', 'tv': [[i * 1000, '1f'] for i in range(16)]},
+                          ['g', {'name': 'n17', 'width': 8, 'tv': [[i, 'ff'] for i in range(17)]}, ['h', {'name': 'odd', 'tv': odd * 4}]], {'name': 'w', 'wave': '01.'}],
+               'time': {'t0': 25000.0, 't1': 9e3, 'unit': 'ps'}, 'head': {'text': 'é "x"'}}
+        H.golden(self, 'wavejson.txt', WJ.dumps(doc) + '\n--- wrap 4, indent\n' + WJ.dumps(doc, '  ', 4) + '\n--- many\n' + WJ.dumps_many({'a': doc, 'b': {'signal': []}}))
+
     def test_dumps_many(self):
         self.assertEqual(json.loads(WJ.dumps_many({'x': self.DOC, 'y': self.DOC}))['y']['time']['t0'], 25000)
 
@@ -134,6 +144,31 @@ class MkHtml(unittest.TestCase):
     def test_missing_config_one_line(self):
         rc, _, err = H.run_tool('mkhtml', '--config', 'nope.json', '--out', os.devnull)
         self.assertEqual((rc, err.strip()), (1, 'mkhtml: no such file: nope.json'))
+
+    def test_build_in_the_page(self):
+        # the bar's version line: the page carries the commit of the checkout that made it; --reproducible: none (the bytes)
+        import common
+        b = common.build_info('mkhtml.py')
+        if b is None:
+            self.skipTest('not a git checkout')
+        self.assertRegex(b['commit'], r'^[0-9a-f]{7,}$')
+        with H.tmp() as d:
+            c, out = os.path.join(d, 'c.json'), os.path.join(d, 'p.html')
+            json.dump(self.CFG, open(c, 'w'))
+            rc, _, err = H.run_tool('mkhtml', '--config', c, '--out', out, '--no-sva')
+            self.assertEqual(rc, 0, err)
+            text = open(out, encoding='utf-8').read()
+        self.assertIn(f'"commit": "{b["commit"]}"', text)
+        self.assertIn(f'<b>WaveLens</b>{common.version()} · ', text)
+        rc, _, text = self.page(self.CFG, '--no-sva')
+        self.assertNotIn('window.WAVELENS_BUILD =', text)
+
+    def test_views_not_a_mapping_one_line(self):
+        # "views" as a list (review V C7): what it should be, not a TypeError's traceback
+        rc, err, _ = self.page({**self.CFG, 'views': [{'title': 'a'}]}, '--no-sva')
+        self.assertEqual(rc, 1)
+        self.assertIn('"views" is {"name": {settings}, …}, one entry per view (not a list)', err)
+        self.assertNotIn('Traceback', err)
 
 
 if __name__ == '__main__':

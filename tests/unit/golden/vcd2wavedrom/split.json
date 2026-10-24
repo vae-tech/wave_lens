@@ -1,0 +1,16 @@
+{
+ "signal": [
+  ["tb",
+    {"name": "err", "width": 2, "wave": "=....=", "data": ["1", "0"], "tv": [[0, "1"], [5000, "0"], [6000, "2"]], "path": "tb.err"},
+    {"name": "data", "width": 16, "wave": "=....=", "data": ["0x0201", "0x0203"], "tv": [[0, "0201"], [5000, "0203"]], "path": "tb.data"},
+    {"name": "e", "width": 2, "wave": "=.....", "data": ["1"], "tv": [[0, "1"]], "path": "tb.e"},
+    {"name": "x", "width": 8, "wave": "=.....", "data": ["0x3A"], "tv": [[0, "3a"]], "path": "tb.x"},
+    {"name": "y", "width": 8, "wave": "=.....", "data": ["0x81"], "tv": [[0, "81"]], "path": "tb.y"},
+    {"name": "q", "width": 3, "wave": "=....=", "data": ["x", "x"], "tv": [[0, "'b1x0"], [5000, "'b1x1"]], "path": "tb.q"}
+  ]
+ ],
+ "head": {"text": "split.vcd"},
+ "time": {"t0": 0, "t1": 6000, "cycle": 1000, "unit": "ps"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "split.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 0, "to_ps": 6000}
+}

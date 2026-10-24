@@ -45,16 +45,23 @@ may be the default). What the tab does differently from a page in a browser:
   own. Bookmarks, groups, colours, radix, hidden rows and the assertion bindings are kept per dump in the workspace
   (they survive closing the tab and VS Code). The clipboard is yours (VS Code's).
 - **Theme and keys.** `wavelens.theme`: `auto` (the viewer's light or dark by VS Code's), `vscode` (the colours of
-  VS Code's theme: background, text, lines, accent, fonts), `light`, `white` or `dark`; *WaveLens: Choose the theme of
-  the waves* (the editor's title) shows each on the open tabs as you move through the list. The viewer's keys (`?`) work in the tab and do not reach VS Code
-  (ctrl+G is the group list, not Go to Line); the others (ctrl+P, F1, ctrl+tab …) are VS Code's.
+  VS Code's theme: background, text, lines, accent, fonts), `light`, `white` or `dark`; **◐** in the bar (or *WaveLens:
+  Choose the theme of the waves* in the editor's title) shows each on the open tabs as you move through the list. The
+  viewer's keys (`?`) work in the tab and do not reach VS Code: the plain ones, and the ctrl / alt ones that mean there
+  what they mean in VS Code (ctrl+F find, ctrl+C copy, ctrl+Z / ctrl+Y undo / redo, alt+C W R in the find field);
+  `wavelens.keysToVSCode` (default `ctrl+G`, Go to Line) are left to VS Code — the list of your groups is `gl` then; the
+  others (ctrl+P, F1, ctrl+tab, ctrl+shift+…) are VS Code's.
+- **The version** in the bar's title line: `0.19 · dev@d502c48*` — the extension's branch and commit (`*`: changes not
+  committed), so a tab of a development build says which one it is.
 - **An agent** on the host (`tools/wavemcp.py`, below): when it starts its live link, every open tab connects (**●
   live**); `view_live` with `page` a `.vcd` / `.fst` and `open: true` opens it in the VS Code window that has the file
   in its folders, and `view_edit` / `view_get` with that `page` work on its tab (the tab only: a dump has no file to
   write the edits into). `wavelens.live: false`: tabs do not connect. The extension relays the link (the tab cannot
   reach the host's 127.0.0.1); nothing is forwarded.
 
-- **State names.** A VCD has no enum tables (Questa writes none): the tab reads the workspace's SystemVerilog sources
+- **State names.** A VCD has no enum tables (Questa writes none): the tab reads the design's types next to the dump
+  (`tb.types.json` by `tb.vcd`, from Questa or Verilator: by path, *FSM state names* below) at each read and when the file
+  is written again. Without them it reads the workspace's SystemVerilog sources
   (`wavelens.sources`: globs, default `**/*.sv`, `**/*.svh`; empty: none) at each read and names the state buses
   declared with a `typedef enum` there, by the variable's name (*FSM state names* below): the files that declare an enum
   or a packed struct and the files that use one of those types (a package and a module apart), each read again only when
@@ -117,8 +124,8 @@ every view of the config, each as a viewer or a static SVG; scopes become foldab
 Edit `show` (false = left out), `radix` (`auto hex dec signed bin oct ascii float`, fixed point `q8` / `sq15`), `color`, `style`
 (`auto wavedrom questa square`), and add `alias`, `fill`, `enum` (`{"0": "IDLE"}`), `enumColors` (`{"IDLE": "#ffe066", "3": "c5"}`)
 or `analog` (`true` or a number of rows: the bus as a step plot), `height` (the row's own height in px), or `fields` (`[{"name": "state", "msb": 15, "lsb": 13, "enum": {…}}, …]`:
-a packed struct dumped as one vector, a row per field under a `{}` row with the whole value; `mkconfig.py --sv` writes
-them from `typedef struct packed`). A struct scope of the dump (an FST written with Verilator `--trace-structs`) is a
+a packed struct dumped as one vector, a row per field under a `{}` row with the whole value; a types file gives them, or
+`mkconfig.py --sv` from `typedef struct packed`). A struct scope of the dump (an FST written with Verilator `--trace-structs`) is a
 `{}` group by itself, its row the whole value when every field is shown; `""` takes the global value from
 `"config"`. `width` and `changes` are information. A VCD's `real` (also `realtime`, `shortreal`, `real_parameter`) and
 `string` variables become rows of texts (their numbers, `inf` `-inf` `nan` included, their strings; a real can be
@@ -137,24 +144,56 @@ The starting values come from `tools/base.config.json` (`BASE=`): which scope de
 how many value changes fit on a page, and rules by path pattern and width (`python3 -I tools/mkconfig.py --help`).
 The example configs in [`examples/`](../examples) are written by hand and show every key.
 
-### FSM state names: FST, or VCD + sources
+### FSM state names: FST, or VCD + the design's types
 
 An FST written by Verilator (`--trace-fst`) carries the enum tables of the design, so state buses show `IDLE`, `START`, …
-straight from the dump. A VCD has none: `make html WAVES=x.vcd SV="rtl/*.sv"` (`mkconfig.py --sv`) reads
-`typedef enum {…} name_t;` from the sources and labels the signals declared with those types; or write `"enum"` into an
-entry. The FSM example builds both pages. Questa writes no enum table into a VCD (the format has none; its `wlf2vcd` loses
-the values of enums): an enum on `logic [1:0]` comes as `reg [1:0]`, one on `int` as `integer` — the viewer and the
-tools show an `integer` (`int`, `shortint`, `longint`, `byte`) without a table as a signed decimal number (`12`, not
-`0x0000000C`), so the state's code reads at once; the names come from the sources. In the viewer (a VCD opened, a page,
-the VS Code tab) **Sources…** in the bar's dump group reads `.sv` / `.svh` files by the same rules as `mkconfig.py
---sv` (the enum names and packed-struct fields of a variable by its name, a table only where its values fit the
-signal's width; an element of an array gets the array's) and builds the waves again with the view kept; ⟳ keeps them.
-What is not guessed, with a note in the log (the VS Code tab's Problems, `mkconfig.py`'s stderr): a name declared with
-two different types (two modules with their own `state`) gets no labels, nor does an enum with a value it does not read
-(an expression such as `1 << 2`, a parameter, a negative number, labels by macro); function arguments and struct
-members are not signals. The VS Code tab reads the workspace's
-sources by itself at each read (`wavelens.sources`, default `**/*.sv`, `**/*.svh`). From a script:
-`WaveLens.svTables(texts)`, `WaveLens.svApply(waveJson, tables)`, `view.setSources(files)`.
+straight from the dump. A VCD has none. Questa writes an enum on `logic [1:0]` as `reg [1:0]`, one on `int` as `integer`, a
+packed struct as one vector, and its `wlf2vcd` loses the values of enums. The viewer and the tools show an `integer` (`int`,
+`shortint`, `longint`, `byte`) without a table as a signed decimal number (`12`, not `0x0000000C`), so the state's code reads
+at once; the names come from the design's types (guide: [State names and structs](guides/types.html)):
+
+- **A types file** `tb.types.json` next to `tb.vcd`, keyed by path, written by the tool that elaborated the design:
+  - **Questa**: `source tools/questa/wavelens_types.tcl` in `vsim` (`-voptargs=+acc`), then `wavelens_types tb.types.json
+    [root]`, any time after the design is loaded. A saved WLF too: `vsim -view old.wlf`, `wavelens_types old.types.json
+    old:/tb`. The file keeps Questa's `describe` of every signal and the module of every instance. `make questa EX=fsm` does
+    it for the FSM example (`BUILD/questa/fsm/`).
+  - **Verilator**: `python3 -I tools/svtypes.py verilator --top tb --out tb.types.json -- -f files.f` (after `--`, the
+    arguments Verilator takes: files, `+incdir+`, `+define+`, `-G…`): `--json-only`, its instances walked, every type followed;
+    a package's variables too (`p.state`), unpacked arrays of any dimensions, escaped names as the VCD has them, enums up to 64 bits.
+    `make examples` writes one for each example.
+- A signal gets the type of **its own path** (a top scope the dump adds, `TOP.`, is skipped only when no root of the dump is
+  one of the file's), and only when its width in the dump is the type's. Two modules' `state` get
+  their own tables, a parameterised module's instances their own widths, a plain `logic [1:0] state` none. A nested struct
+  gives dotted fields (`in.st`), a packed array of enums or structs a field per element (`two[1]`). A union, an enum over 32 bits
+  from Questa (its `describe` keeps 32), or a text it does not read stays a number, with a note. The width is the only check:
+  a types file of a run with other parameters that keep the widths gives its labels as they are.
+- **Used by** `make html WAVES=tb.vcd` (`mkconfig.py` finds `tb.types.json` by its name; `--types FILE` / `TYPES=` another;
+  a types file newer than the config updates it at the next `make html`. The config's `"typed"` lists what the file gave:
+  `--update` replaces that with the file's of now, or takes it away; an `"enum"` you wrote or edited stays); the viewer's **Sources…** with the `.json`
+  (the view kept, ⟳ keeps them); the VS Code tab, which reads it next to the dump (`tb.vcd` or `tb.fst`) at each read and
+  offers ⟳ when it is written again; there *WaveLens: Make the types with Verilator* writes it too (a `.f` file of the
+  workspace or the arguments typed, `rtl/*.sv` expanded, the top module; `wavelens.verilator`; no Python needed). `python3 -I tools/svtypes.py
+  check tb.types.json tb.vcd` lists what each path gets and which signals of the dump get it.
+- **Another root.** The dump's scopes as the types name them: `"map": {"top.dut_i": "dut"}` in the types file, or
+  `--types-map top.dut_i=dut` (`mkconfig.py`) / `--map` (`svtypes.py check`): the longest prefix is replaced before the lookup.
+- **Which run.** The types and the dump are compared as far as both tell: written more than a day apart (Questa's types and
+  its VCD come from one `vsim`), an instance of the types under a module the dump has but not in it. Either is a note
+  (`mkconfig.py`, `svtypes.py check`'s `run:` lines, the viewer's log and **Type…**): the labels may be of another design or
+  other parameters. The right button's **Type…** on a signal tells where its labels come from: the types file and the path
+  there, a width that does not fit, a plain vector in the types, no entry (with the paths of its name the file has, and the
+  `"map"` to write when they are under another root); the command `types` answers the same.
+- **Without a types file**, by the variable's name: `make html WAVES=x.vcd SV="rtl/*.sv"` (`mkconfig.py --sv`), **Sources…**
+  with `.sv` / `.svh` files, the VS Code tab's `wavelens.sources` (default `**/*.sv`, `**/*.svh`) read `typedef enum {…}
+  name_t;` and `typedef struct packed` and label the signals declared with those types (a table only where its values fit
+  the width; an element of an array gets the array's). What is not guessed, with a note in the log (the VS Code tab's
+  Problems, `mkconfig.py`'s stderr): a name declared with two different types (two modules with their own `state`, or one
+  of them a plain vector) gets no labels, nor does an enum with a value it does not read (an expression such as `1 << 2`, a
+  parameter, a negative number, labels by macro); function arguments and struct members are not signals. With a types file
+  these are not used.
+- Or write `"enum"` into an entry by hand. The FSM example builds both pages (the FST's names; the VCD's from its types).
+
+From a script: `WaveLens.svTypes(text)` (a types file), `WaveLens.svTables(texts)` (sources),
+`WaveLens.svApply(waveJson, tables)`, `view.setSources(files)`.
 
 ![The FSM example: state names from the FST, questa edges, -|- arrows between the state changes](img/fsm.png)
 
@@ -223,6 +262,9 @@ add theirs (`WaveLens.registerDefaults`).
 | `maxHeight` | none | e.g. `"80vh"`: the rows scroll inside the viewer (any number of rows); none: with the page, the bar sticking to the top (generated configs: `"80vh"`; the bar's **Scroll** button switches) |
 | `toolsFolded` | false | the bar's tools folded to its title line (**▴** / **▾ tools** in the bar) |
 | `toolsHidden` | `[]` | the bar's tool groups left out by their labels (`["style", "dump"]`; the right button on the bar) |
+| `themeButton` | `auto` | **◐** in the bar's title line: the page's theme (auto, light, white, dark; kept in this browser; in VS Code its list, VS Code's colours too); `auto`: when the page has no theme button of its own (`viewer.html`, the VS Code tab) |
+| `version` | true | the version in the bar's title line, and the build the page was made from (`0.19 · dev@d502c48*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
+| `keysLeft` | `[]` | keys the viewer leaves to its host: `["ctrl+G"]` (`ctrl+` is `cmd+` too, a letter by its place); the VS Code tab: `wavelens.keysToVSCode` |
 | `savePage` | true | the bar's **Save page**: this page as a `.view.html` with your view in it (§ Save and Load); false hides it and keeps no copy of the page's text |
 | `cycles`, `cycleClock`, `cycleZero` | false, null, null | the clock cycles in a band under the time axis (§ Clock cycles): on, the clock counted (null: the `*clk*` found), the time of cycle 0 (`"50ns"` or ps; null: the first rising edge) |
 | `groupColors` | none | one colour per group: `{"aw": "#339af0", "tb.dut.u_rx": "#37b24d"}` (names, paths, `*` patterns) |
@@ -418,7 +460,7 @@ count, ‹ ›, Highlight / Open, colour + Paint, Copy. Expression (`sva.js`): t
 **list** (Sort and the ignored prefixes, Expand / Collapse, clear highlight, show the hidden rows), **style** (the edges:
 auto, slanted, vertical, square), **state** (Save, Load…), **assertions** (Load file…). Keys work once the waves have the focus (a click on the
 waves or on a name); with ctrl, alt or ⌘ held they stay the browser's (ctrl+S saves the page, it does not sort), except
-ctrl+C, ctrl+F, ctrl+G, ctrl+Z / ctrl+shift+Z / ctrl+Y (undo, redo), alt+↑ ↓ and alt+shift+↑ ↓ (the order of your groups). Hover any button, field or list for what it does and its keys; **?** at the right of the title line
+ctrl+C, ctrl+F, ctrl+G (`gl` too: your groups), ctrl+Z / ctrl+shift+Z / ctrl+Y (undo, redo), alt+↑ ↓ and alt+shift+↑ ↓ (the order of your groups). Hover any button, field or list for what it does and its keys; **?** at the right of the title line
 (key `?`) opens the box of all the keys and the mouse, the plugins' too.
 
 **Scroll: window / page** in the title line switches where the rows scroll, on the fly (kept in this browser; the
@@ -448,7 +490,7 @@ setting is the start; a find left out still floats over the waves on `/`). Navig
 | `m` | bookmark at the cursor | `]m [m` | the next / previous bookmark |
 | shift+click the waves | a second cursor (dashed, on an edge): Δ to the cursor in time, its frequency (`Δ 40 ns / 25 MHz`) and in cycles of the clock (the cycles band's when it is on, else the selected signal's, else the nearest `*clk*`) on the axis and in the readout; `x` swaps the two; Esc clears it | `1` … `9` | go to that bookmark (each bookmark's line shows its Δ from the cursor) |
 | `zM` / `zR` | fold / open every module | `zc` / `zo` / `za` | fold / open / toggle the module of the selected signal |
-| `t` | the Modules panel: the modules as a tree (§ below); again: the selected signal's module in it | **Only: N ✕** in the bar | ‖ pauses Only (every module), ▶ resumes it, ✕ clears it |
+| `t` | the Modules panel: the modules as a tree (§ below); again: the selected signal's module in it; `T`: the state machines | **Only: N ✕** in the bar | ‖ pauses Only (every module), ▶ resumes it, ✕ clears it |
 | `yy`, ctrl+C | copy the selected signal (or the highlighted ones); while searching ctrl+C ends the search | `s` | sort off → A→Z → Z→A |
 | ○ or ctrl+click a name | highlight the signal or instance; ctrl+shift+click: every row from the last one to it | Esc | reset: no search, highlight or selection |
 | shift+click a name | select every signal from the last one clicked to it (selected, nothing dimmed; the tint inside bus values too) | alt+drag | a box: its time the range, the signals it touches selected, then the menu |
@@ -488,6 +530,41 @@ WaveDrom, Paint, `]d [d` and the assertions' steps take only what is in the view
 WaveDrom its cells). It is in the saved state (`"only": {"modules": [...], "on": true}`), Save page and undo, and not
 kept in this browser: a page opened again starts with every module. The command [`only`](#commands-and-edits) does the
 same from a script or an agent.
+
+**The state machines.** `T` (or **FSMs** in the bar, **State machines…** in the right button's menu) opens the FSMs of the
+waves — every signal with enum labels: an FST's tables, a types file, **Sources…**, a config's `"enum"` ([§ FSM state
+names](#fsm-state-names-fst-or-vcd--the-designs-types)) — in the tree of the modules above them, as the Modules panel looks:
+each FSM with its state at the cursor and how many of its table's states the waves reach (`4/5`; x and z are none). It
+lists the ones named as a state machine (`state`, `fsm`, `cs` / `ns`, `…_q`; none so named: every one); **all enums** adds
+the other signals with labels (a running disparity, a kind of packet). **fields** adds the fields of structs with labels
+(a packed struct's state field). The panel stays open when **Sources…** or ⟳ reads the waves again. A click on an FSM goes there (opened, selected, in the
+middle; one the view leaves out joins the layer below, a hidden one is shown again), on a module goes to the module;
+**ctrl+click** (Space) picks an FSM, **shift+click** a run of them. Then, for the picked ones (none picked: every one the
+filter lists):
+
+- **Only FSMs**: the waves keep only them and the modules on the way to them (Hide stays; Only and the find's Mask are kept
+  under it and come back when it goes) — **FSMs only: N ✕** in the bar;
+- **+ Add to view**: the view as Hide, Only and the Mask leave it, and these FSMs in it too (a hidden one, one Only or the
+  Mask leaves out) — **+ N FSMs ✕** in the bar.
+
+Either opens the modules on the way to them; **✕** (or **Clear**) takes the layer away. It is in the saved state
+(`"fsm": {"mode": "only" | "add", "signals": [...]}`), Save page and undo; the command [`fsm`](#commands-and-edits)
+does the same (in a page: `tools/viewedit.py` keeps the key, the command needs the page's labels).
+
+**An FSM's details.** A click on an FSM (or **d**, or **States and changes** in its right button's menu) shows it below
+the tree, on three tabs:
+- **States**: each state of its table with how many times the waves enter it, the share of the time it holds it and its
+  first entry; one never reached in italics; a value not in its table (X, Z, a code without a label) in red;
+- **Changes**: each change from one value to another with its count and first time, the most frequent first;
+- **Diagram**: the states on a circle and an arrow per change seen, as thick as it is frequent (never reached: dashed;
+  not in the table: red; the state at the cursor: filled).
+
+A click on a state, a change or an arrow takes the cursor to the next time it happens after the cursor (**shift**: the
+previous; round the end to the first), on the first time to that one. The right button on an FSM: go there, its details,
+**Only this FSM**, **Add it to the view**, pick, copy the path; on a module: **Only its FSMs**, **Add its FSMs to the
+view**, pick them. A box drawn over the tree picks the FSMs in it (ctrl: adds them). The commands
+[`fsm_stats`](#commands-and-edits) (the same numbers) and `fsm_go` (the cursor to a state or a change) do it from a script
+or an agent.
 
 **Highlight.** The ○ mark in front of a name (or ctrl+click) puts that signal or whole instance in front (the mark
 filled, the background as it was); the rest is dimmed but stays visible. Several instances at once; **Highlight: N ✕** or Esc clears it.
@@ -734,6 +811,10 @@ await v.run([
 | `paint` | `signals? color? clear?` | a colour (trace, outline, name) for signals; `color: null` their own again |
 | `select` | `signal? signals?` | the selected signal (edges, new bookmarks), or several |
 | `hide`, `show` | `signals` / `signals?` | rows out of the view and back (none given: every one) |
+| `fsm_stats` | `signal` | an FSM on the waves: each state of its table with its `entries`, the `time` it held it (`share` of the whole), its `first` entry; `never` (the states it does not reach), `invalid` (x, z, codes without a label), `changes` (`from`, `to`, `count`, `first`), the most frequent first; in a page only |
+| `fsm_go` | `signal state? from? to? dir? first?` | the cursor to the next (`dir` 1) or previous (−1) time an FSM enters a `state` (its label or value) or makes a change `from` → `to`; `first`: the first time; answers `t`; in a page only |
+| `types` | `signals?` | where their labels or fields come from (the right button's **Type…**): `status` `typed` (the types file's path, `key`), `own` (its own labels, an FST's or the config's, stay before the file's), `width` (it does not fit), `plain` (a plain vector in the types), `none` (no entry: the paths of its name the file has), null (the page's own); `why` in words; `run`: why the types may be of another run; none given: the selected signal, else every one the types file was asked about; in a page only |
+| `fsm` | `mode? signals? fields? clear?` | the state machines (signals with enum labels, the FSM panel): `mode: "only"` — the waves keep these FSMs and the modules on the way to them; `"add"` — they join the view as Hide, Only and the find's Mask leave it; `signals` which ones (patterns; left out: the ones it has, none yet: every FSM; `fields`: the fields of structs too); `clear` the layer off; answers the layer (`{mode, signals}`, `null`: none) and every FSM (`fsms`); in a page only |
 | `only` | `modules? on? clear? open?` | only these modules on the waves, with their submodules (the way to them as headers; the Modules panel's box): `modules` replaces the set and turns it on (`[]`: none kept) and opens the modules named with the ones above them (`open: false`: the folding as it is), `on: false` pauses it, `true` resumes it, `clear` every module again; a name of a signal or a struct is an error; answers the set (`{modules, on}`, `null`: none) |
 | `fold`, `unfold` | `groups? all?` | modules and your groups folded or opened |
 | `radix`, `analog` | `signals radix` / `signals rows` | the radix of buses (`null`: the page's), a bus as a step plot |
@@ -862,7 +943,9 @@ All tools are `python3 -I tools/<tool>.py --help`; the Makefile calls them for y
 
 | Tool | Does | Main options |
 |---|---|---|
-| `mkconfig.py` | dump → editable config with every signal | `DUMP`, `--out`, `--update`, `--force`, `--base`, `--depth`, `--sv FILES`, `--sva FILES`, `--sva-bin` |
+| `mkconfig.py` | dump → editable config with every signal | `DUMP`, `--out`, `--update`, `--force`, `--base`, `--depth`, `--types FILE` (default `<dump>.types.json`), `--sv FILES`, `--sva FILES`, `--sva-bin` |
+| `svtypes.py` | the design's types by path ([§ FSM state names](#fsm-state-names-fst-or-vcd--the-designs-types)): Verilator's, and a check of a types file against a dump | `verilator --top --out -- ARGS`, `check TYPES [DUMP]` |
+| `questa/wavelens_types.tcl` | in `vsim`: the types of a Questa design (`describe` of every signal) | `source` it, `wavelens_types FILE [ROOT]` |
 | `mkhtml.py` | config (every view) or WaveJSON files → one self-contained page | `--config`, `--view`, `--waves`, `--render`, `--out`, `--sva FILE`, `--bind NAME@SCOPE`, `--sva-bin`, `--no-sva`, `--reproducible` |
 | `vcd2wavedrom.py` | one window of a dump → WaveJSON | `--config` + `--view`, or `--waves --scope --signals --clock/--exact --from --to --marker --group --enum`; `--gap A:B` / `--auto-gap IDLE[:KEEP]` (`--clock`: a window, or every stretch of IDLE cycles where nothing but a clock changes, as one `\|` cell); `--sva FILE --bind NAME@SCOPE` |
 | `svabuild.py` | the `"sva"` / `"bind"` of a config: files parsed, bindings evaluated with the `sva` CLI (used by the two above) | `--waves --sva --bind --out` |

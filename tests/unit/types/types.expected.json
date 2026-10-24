@@ -1,0 +1,14 @@
+{
+  "signals": {
+    "types_tb.al": {"width": 3, "enum": {"0": "IDLE", "1": "START", "2": "DATA", "3": "STOP", "4": "ERROR"}},
+    "types_tb.gen[0].u_l.state": {"width": 4, "enum": {"0": "L_IDLE", "1": "L_RUN", "15": "L_LAST"}},
+    "types_tb.gen[1].u_l.state": {"width": 5, "enum": {"0": "L_IDLE", "1": "L_RUN", "31": "L_LAST"}},
+    "types_tb.ie": {"width": 32, "enum": {"0": "ZERO", "1048576": "BIG", "4294967295": "NEG"}},
+    "types_tb.o": {"width": 21, "fields": [{"name": "oh", "msb": 20, "lsb": 17, "enum": {"1": "OH_A", "2": "OH_B", "4": "OH_C", "8": "OH_D"}}, {"name": "in.st", "msb": 16, "lsb": 14, "enum": {"0": "IDLE", "1": "START", "2": "DATA", "3": "STOP", "4": "ERROR"}}, {"name": "in.code", "msb": 13, "lsb": 9}, {"name": "pair", "msb": 8, "lsb": 1}, {"name": "flag", "msb": 0, "lsb": 0}]},
+    "types_tb.oh": {"width": 4, "enum": {"1": "OH_A", "2": "OH_B", "4": "OH_C", "8": "OH_D"}},
+    "types_tb.state": {"width": 3, "enum": {"0": "IDLE", "1": "START", "2": "DATA", "3": "STOP", "4": "ERROR"}},
+    "types_tb.u_l2.state": {"width": 2, "enum": {"0": "L_IDLE", "1": "L_RUN", "3": "L_LAST"}},
+    "types_tb.u_l3.state": {"width": 3, "enum": {"0": "L_IDLE", "1": "L_RUN", "7": "L_LAST"}}
+  },
+  "notes": ["types_tb.bu: a packed union: which member holds the value is not known"]
+}

@@ -1,0 +1,11 @@
+{
+ "signal": [
+  ["tb",
+    {"name": "s", "width": 1, "wave": "0", "tv": [[0, "0"], [100000000, "1"]], "path": "tb.s"}
+  ]
+ ],
+ "head": {"text": "ts1.vcd"},
+ "time": {"t0": 0, "t1": 100000000, "cycle": 100000000, "unit": "ps"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "ts1.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 0, "to_ps": 100000000}
+}

@@ -41,7 +41,7 @@ Examples
       --signals clk,txd,state --group tx=state,txd --marker 'posedge done=done' --out exact.json
   python3 -I tools/vcd2wavedrom.py --config dump.config.json --view exact --out exact.json
 """
-import argparse, bisect, decimal, functools, json, math, os, re, statistics, struct, sys
+import argparse, bisect, collections, decimal, functools, json, math, os, re, statistics, struct, sys
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
@@ -63,6 +63,7 @@ class Builtin:
     """The built-in reader: one pass over the dump as VCD text (an FST through fst2vcd or sva vcd), keeping only the requested
     signals; the window, clock sampling and markers are then computed in memory."""
     EVENT = re.compile(r'\s*(?:(posedge|negedge|edge)\s+)?([^\s()|&!=<>~^*]+)\s*')
+    keys = frozenset()   # the streams prepare() reads for: their raw changes go once made (none: a reader that keeps them)
 
     def __init__(self, waves, scope):
         self.waves, self.scope = waves, scope
@@ -94,6 +95,8 @@ class Builtin:
         extra = ([self.resolve(clock)] if clock else []) + [self.resolve(self.event_signal(e)[1]) for e in events]
         codes = {c for path, _ in self.res + extra for c, _ in self.decl.vars[path].members}
         self.d = dumpscan.read(self.waves, 'collect', codes)
+        self.keys = {(path, sl) for path, sl in self.res} | {(path, None) for path, _ in extra}   # who reads each id code: its
+        self.users = collections.Counter(c for path, _ in self.keys for c, _ in dict.fromkeys(self.decl.vars[path].members))   # changes go once all have
         self.t_start, self.t_end = self.d.t_start, self.d.t_end
         self.specs = [(path + (f'[{sl[0]}:{sl[1]}]' if sl else ''), sl[0] - sl[1] + 1 if sl else self.decl.vars[path].width) for path, sl in self.res]
         self.kinds = [dumpscan.TEXT_KINDS.get(self.decl.vars[path].kind) for path, _ in self.res]   # realtime … -> real
@@ -108,11 +111,13 @@ class Builtin:
             if all(b is None for _, b in v.members):   # one id code, or the same path under several: their changes merged
                 ev = self.d.trans[v.members[0][0]] if len(v.members) == 1 else sorted((x for c, _ in v.members for x in self.d.trans[c]), key=lambda x: x[0])
                 for t, raw in ev:
+                    if u != 1:   # (1 ps: the reader's own time, not a new number per change)
+                        t *= u
                     val = bits(raw, w, sl)
-                    if out and out[-1][0] == t * u:
-                        out[-1] = (t * u, val)
+                    if out and out[-1][0] == t:
+                        out[-1] = (t, val)
                     else:
-                        out.append((t * u, val))
+                        out.append((t, val))
             else:   # a vector in parts (bit-blasted, or ranges declared apart): rebuild it bit by bit
                 state = ['x'] * w   # state[0]: bit 0, the last digit
                 ev = sorted(((t, part, raw) for code, part in v.members for t, raw in self.d.trans[code]), key=lambda e: e[0])
@@ -124,6 +129,10 @@ class Builtin:
                     if i + 1 == len(ev) or ev[i + 1][0] != t:
                         out.append((t * u, bits(''.join(reversed(state)).encode(), w, sl)))
             self.streams[key] = out
+            for c, _ in dict.fromkeys(v.members) if key in self.keys else ():   # the raw changes once every stream of the code is made
+                self.users[c] -= 1
+                if self.users[c] <= 0:
+                    self.d.trans[c] = []
         return self.streams[key]
 
     def _at(self, st, t):   # value at t (after the changes at t)
@@ -178,6 +187,8 @@ def bits(raw, width, sl):
     b = b.rjust(width, b[0] if b[0] in 'xz' else '0')[-width:]
     if sl:
         b, width = b[len(b) - 1 - sl[0]:len(b) - sl[1]], sl[0] - sl[1] + 1
+    if width > 1 and not b.strip('01'):   # known bits (the most of a big dump): their hex at once, as norm() gives it
+        return format(int(b, 2), 'x').rjust((width + 3) // 4, '0')
     return norm(f"{width}'b{b}", width)
 
 
@@ -345,7 +356,7 @@ def nice_floor(x):
 
 # ---------------- options: command line + config file ----------------
 LIST_KEYS = ('signals', 'gap', 'enum', 'group', 'marker', 'sva', 'bind', 'exprs')
-SKIP_KEYS = ('views', 'page', 'config', 'description', 'comment', 'render', 'note', 'select', 'rules')   # not converter options
+SKIP_KEYS = ('views', 'page', 'config', 'description', 'comment', 'render', 'note', 'select', 'rules', 'typed')   # not converter options
 SIG_KEYS = ('show', 'alias', 'radix', 'color', 'fill', 'style', 'enum', 'width', 'changes', 'enumColors', 'analog', 'height', 'fields')   # catalog entry keys
 
 
@@ -382,14 +393,20 @@ def parser():
 
 
 def load_config(path):
-    """A JSON config file -> dict; a missing file or bad JSON is a WaveError (one line)."""
+    """A JSON config file -> dict; a missing file, bad JSON or "views" not {name: {…}} is a WaveError (one line)."""
     try:
         with open(path, encoding='utf-8') as f:
-            return json.load(f)
+            cfg = json.load(f)
     except FileNotFoundError:
         raise WaveError(f'no such file: {path}') from None
     except json.JSONDecodeError as e:
         raise WaveError(f'{path}: {e}') from None
+    if not isinstance(cfg, dict):
+        raise WaveError(f'{path}: a JSON object {{…}} expected, not a {type(cfg).__name__}')
+    views = cfg.get('views')
+    if views is not None and not (isinstance(views, dict) and all(isinstance(v, dict) for v in views.values())):
+        raise WaveError(f'{path}: "views" is {{"name": {{settings}}, …}}, one entry per view (not a {type(views).__name__})')
+    return cfg
 
 
 def view_config(cfg, view=None):
@@ -619,16 +636,17 @@ def exact_mode(a, rd, specs, t_from, t_to):
     """--exact: the transitions of each signal ("tv") and a quantised wave string for stock WaveDrom -> ({abs path:
     signal JSON}, {head, time})."""
     doc, sig_json = {}, {}
-    tv = {s['abs']: [[t_from, s['base']]] for s in specs}
+    tv = {s['abs']: [(t_from, s['base'])] for s in specs}   # (t, value): the reader's own pairs, not copies (a big dump)
     for s, ch in zip(specs, rd.changes(t_from, t_to)):
-        for t, val in ch:
-            q = tv[s['abs']]
+        q = tv[s['abs']]
+        for p in ch:
+            t, val = p
             if q[-1][0] == t:          # same timestamp (e.g. the baseline): keep the last value
-                q[-1][1] = val
+                q[-1] = p
                 if len(q) > 1 and q[-2][1] == val:
                     q.pop()
             elif q[-1][1] != val:      # dumps may repeat a value (initial $dumpvars, glitches): drop it
-                q.append([t, val])
+                q.append(p)
     if a.cycle:
         cycle = to_ps(a.cycle)
     else:  # finest spacing between changes (so clocks don't alias), but at most ~2000 cells
@@ -649,11 +667,12 @@ def exact_mode(a, rd, specs, t_from, t_to):
         j['tv'] = seq
         sig_json[s['abs']] = j
     # the same net seen at several levels (tb.clk, tb.dut.clk, …): store its transitions once, the copies say "same"
+    # (found by a hash of the transitions, then compared: no text of each list)
     first = {}
     for s in specs:
         j = sig_json[s['abs']]
-        key = (s['width'], json.dumps(j['tv']))
-        if key in first and len(j['tv']) > 2:
+        key = (s['width'], len(j['tv']), hash(tuple(j['tv'])))
+        if key in first and len(j['tv']) > 2 and sig_json[first[key]]['tv'] == j['tv']:
             del j['tv']; j['same'] = first[key]
             sig_json[first[key]]['path'] = first[key]
         else:

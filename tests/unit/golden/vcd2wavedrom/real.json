@@ -1,0 +1,12 @@
+{
+ "signal": [
+  ["tb",
+    {"name": "volt", "width": 64, "wave": "==", "data": ["1.5", "2.25"], "tv": [[0, "1.5"], [10000, "2.25"], [20000, "-0.03"]], "kind": "real", "path": "tb.volt"},
+    {"name": "clk", "width": 1, "wave": "01", "tv": [[0, "0"], [10000, "1"], [20000, "0"]], "path": "tb.clk"}
+  ]
+ ],
+ "head": {"text": "real.vcd"},
+ "time": {"t0": 0, "t1": 20000, "cycle": 10000, "unit": "ps"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "real.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 0, "to_ps": 20000}
+}

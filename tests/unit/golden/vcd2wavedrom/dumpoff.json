@@ -1,0 +1,12 @@
+{
+ "signal": [
+  ["tb",
+    {"name": "bus", "width": 8, "wave": "==x.=", "data": ["0x01", "0x02", "0x02"], "tv": [[0, "01"], [10000, "02"], [20000, "x"], [40000, "02"], [50000, "03"]], "path": "tb.bus"},
+    {"name": "clk", "width": 1, "wave": "01x.1", "tv": [[0, "0"], [10000, "1"], [20000, "x"], [40000, "1"], [50000, "0"]], "path": "tb.clk"}
+  ]
+ ],
+ "head": {"text": "dumpoff.vcd"},
+ "time": {"t0": 0, "t1": 50000, "cycle": 10000, "unit": "ps"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "dumpoff.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 0, "to_ps": 50000}
+}

@@ -1,0 +1,24 @@
+{
+ "signal": [
+  ["tb",
+    {"name": "clk", "width": 1, "wave": "010", "tv": [[0, "0"], [5000, "1"], [10000, "0"], [15000, "1"]], "path": "tb.clk"},
+    ["dut",
+      {"name": "i_valid", "width": 1, "wave": "0..", "tv": [[0, "0"]], "path": "tb.dut.i_valid"},
+      {"name": "o_valid", "width": 1, "wave": "0..", "tv": [[0, "0"]], "path": "tb.dut.o_valid"},
+      {"name": "i_ready", "width": 1, "wave": "0..", "tv": [[0, "0"]], "path": "tb.dut.i_ready"},
+      {"name": "data_q", "width": 8, "wave": "=..", "data": ["0x00"], "tv": [[0, "00"]], "path": "tb.dut.data_q"},
+      {"name": "state", "width": 2, "wave": "=..", "data": ["0"], "tv": [[0, "0"]], "path": "tb.dut.state"},
+      ["u_fifo",
+        {"name": "full", "width": 1, "wave": "0..", "tv": [[0, "0"]], "path": "tb.dut.u_fifo.full"}
+      ]
+    ],
+    ["other",
+      {"name": "state", "width": 2, "wave": "=..", "data": ["0"], "tv": [[0, "0"]], "path": "tb.other.state"}
+    ]
+  ]
+ ],
+ "head": {"text": "names.vcd"},
+ "time": {"t0": 0, "t1": 15000, "cycle": 5000, "unit": "ps"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "names.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 0, "to_ps": 15000}
+}

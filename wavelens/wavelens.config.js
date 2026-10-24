@@ -71,4 +71,10 @@ window.WAVELENS_CONFIG = {
   cycleClock: null,             //   the clock counted (a full path or a name); null: the clock found (a 1-bit *clk* / *clock*)
   cycleZero: null,              //   the time of cycle 0 (its rising edge at or after it); null: the clock's first rising edge
   savePage: true,               // the bar's Save page: this page as a file with your view in it (false: off; the page's text is kept for it)
+  themeButton: 'auto',          // ◐ in the bar's title line: auto, light, white, dark (in VS Code also its colours); 'auto': when the page
+                                //   has no theme button of its own (viewer.html, the VS Code tab), true / false: always / never
+  keysLeft: [],                 // keys the viewer leaves to its host, e.g. ['ctrl+G'] (the VS Code tab: wavelens.keysToVSCode, default
+                                //   ctrl+G: Go to Line; the group list is gl then); ctrl+ is cmd+ too, a letter by its place
+  version: true,                // the version in the bar's title line, and the build when the page has one (WAVELENS_BUILD: the branch
+                                //   and commit mkhtml.py and the VS Code extension were made from)
 };

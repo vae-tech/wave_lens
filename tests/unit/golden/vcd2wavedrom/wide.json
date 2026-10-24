@@ -1,0 +1,11 @@
+{
+ "signal": [
+  ["tb",
+    {"name": "w", "width": 96, "wave": "==", "data": ["0xFFFFFFFFFFFFFFFFFFFFFFFF", "0xAAAAAAAAAAAAAAAAAAAAAAAA"], "tv": [[0, "ffffffffffffffffffffffff"], [10000, "aaaaaaaaaaaaaaaaaaaaaaaa"], [20000, "000000000000000000000001"]], "path": "tb.w"}
+  ]
+ ],
+ "head": {"text": "wide.vcd"},
+ "time": {"t0": 0, "t1": 20000, "cycle": 10000, "unit": "ps"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "wide.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 0, "to_ps": 20000}
+}

@@ -1,0 +1,15 @@
+{
+ "signal": [
+  ["tb",
+    {"name": "r", "width": 64, "wave": "====", "data": ["1.25", "inf", "-inf", "nan"], "tv": [[0, "1.25"], [10000, "inf"], [20000, "-inf"], [30000, "nan"], [40000, "0"]], "kind": "real", "path": "tb.r"},
+    {"name": "rt", "width": 64, "wave": "==..", "data": ["7", "2.5e-09"], "tv": [[0, "7"], [10000, "2.5e-09"]], "kind": "real", "path": "tb.rt"},
+    {"name": "sr", "width": 32, "wave": "=..=", "data": ["0.5", "-inf"], "tv": [[0, "0.5"], [30000, "-inf"]], "kind": "real", "path": "tb.sr"},
+    {"name": "rp", "width": 64, "wave": "=...", "data": ["3"], "tv": [[0, "3"]], "kind": "real", "path": "tb.rp"},
+    {"name": "msg", "width": 1, "wave": "=...", "data": ["Hi"], "tv": [[0, "Hi"]], "kind": "string", "path": "tb.msg"}
+  ]
+ ],
+ "head": {"text": "realkinds.vcd"},
+ "time": {"t0": 0, "t1": 40000, "cycle": 10000, "unit": "ps"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "realkinds.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 0, "to_ps": 40000}
+}

@@ -1,0 +1,33 @@
+{
+ "signal": [
+  ["tb",
+    ["blk",
+      {"name": "a", "width": 1, "wave": "0", "tv": [[0, "0"], [10000, "1"]], "path": "tb.blk.a"}
+    ],
+    ["fk",
+      {"name": "b", "width": 1, "wave": "0", "tv": [[0, "0"], [10000, "1"]], "path": "tb.fk.b"}
+    ],
+    ["fn",
+      {"name": "c", "width": 1, "wave": "0", "tv": [[0, "0"], [10000, "1"]], "path": "tb.fn.c"}
+    ],
+    ["st",
+      {"name": "f0", "width": 2, "wave": "=", "data": ["1"], "tv": [[0, "1"], [10000, "2"]], "path": "tb.st.f0"},
+      {"name": "f1", "width": 1, "wave": "0", "tv": [[0, "0"], [10000, "1"]], "path": "tb.st.f1"}
+    ],
+    ["ifc",
+      {"name": "d", "width": 1, "wave": "0", "tv": [[0, "0"], [10000, "1"]], "path": "tb.ifc.d"}
+    ],
+    ["pk",
+      {"name": "e", "width": 1, "wave": "0", "tv": [[0, "0"], [10000, "1"]], "path": "tb.pk.e"}
+    ],
+    ["tk",
+      {"name": "g", "width": 1, "wave": "0", "tv": [[0, "0"], [10000, "1"]], "path": "tb.tk.g"}
+    ]
+  ]
+ ],
+ "head": {"text": "scopes.vcd"},
+ "time": {"t0": 0, "t1": 10000, "cycle": 10000, "unit": "ps"},
+ "scopes": {"tb.st": {"kind": "struct", "width": 3}, "tb.ifc": "interface"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "scopes.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 0, "to_ps": 10000}
+}
