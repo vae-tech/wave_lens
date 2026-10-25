@@ -253,8 +253,9 @@ const fsmRow = (v, spec) => { const all = v.fsms(true), p = String(spec ?? ''), 
   pickRows(v, spec).find(x => all.includes(x)); if (!r) fail(`no state machine "${p}" (a signal with enum labels)`); return r; };
 command('fsm_stats', 'signal', 'an FSM on these waves: each state of its table with how many times it entered it, the time it held it (share: of ' +
   'the whole time) and its first entry; the states it never reaches (never); the values not in its table (invalid: x, z, a code without a ' +
-  'label); its changes from one value to another, the most frequent first, with their count and first time', (v, a) => {
-  const r = fsmRow(v, a.signal), st = v.fsmStatsOf(r), span = v.M.t1 - v.M.t0;
+  'label); its changes from one value to another, the most frequent first, with their count and first time', async (v, a) => {
+  const r = fsmRow(v, a.signal); await v.need([r]);   // a large dump read as it is needed: its changes first
+  const st = v.fsmStatsOf(r), span = v.M.t1 - v.M.t0;
   const one = s => ({ state: st.name(s.key), value: s.key, entries: s.entries.length, first: s.entries.length ? s.entries[0] : null, time: s.time,
     share: span > 0 ? Math.round(1e4 * s.time / span) / 1e4 : 0 });
   return { signal: r.full, states: st.states.map(one), never: st.unseen.map(k => st.name(k)), invalid: st.bad.map(one),
@@ -262,8 +263,8 @@ command('fsm_stats', 'signal', 'an FSM on these waves: each state of its table w
       .sort((x, y) => y.count - x.count) };
 });
 command('fsm_go', 'signal state? from? to? dir? first?', 'the cursor to the next (dir 1) or previous (-1) time an FSM enters a state (its ' +
-  'label or value) or makes a change (from, to: labels or values); first: the first time; past the last it rounds to the first', (v, a) => {
-  const r = fsmRow(v, a.signal);
+  'label or value) or makes a change (from, to: labels or values); first: the first time; past the last it rounds to the first', async (v, a) => {
+  const r = fsmRow(v, a.signal); await v.need([r]);
   if (a.state == null && (a.from == null || a.to == null)) fail('fsm_go: a state, or from and to');
   const t = v.fsmGo(r, a.state != null ? { state: String(a.state), first: !!a.first } : { from: String(a.from), to: String(a.to), first: !!a.first },
     a.dir < 0 ? -1 : 1);
@@ -356,9 +357,10 @@ command('cycles', 'on? clock? zero? reset?', 'the clock cycles in a band under t
   return { cycles: v.cycOpt(), clock: d ? d.clk.full : null, cycle: d ? cycAt(d.ups, d.iz, v.cursor) : null };
 });
 command('edge', 'dir? kind? value? signal?', 'the cursor to the next (dir 1) or previous (-1) edge of the selected signal (signal: that one, ' +
-  `selected), kind: ${Object.keys(EDGE_KINDS).join(' ')}; value: the value to become`, (v, a) => {
+  `selected), kind: ${Object.keys(EDGE_KINDS).join(' ')}; value: the value to become`, async (v, a) => {
   if (a.kind != null && !hasKey(EDGE_KINDS, a.kind)) fail(`kind: one of ${Object.keys(EDGE_KINDS).join(' ')}`);
   if (a.signal) v.select(pickRows(v, a.signal, { one: true })[0]);
+  if (v.sel) await v.need([v.sel]);
   const at = v.cursor; v.edge(a.dir === -1 || a.dir === '-1' ? -1 : 1, a.kind || (a.value != null ? 'value' : v.edgeKind), a.value ?? null);
   return { t: v.cursor, moved: v.cursor !== at };
 });
@@ -383,6 +385,7 @@ command('picture', 'format? from? to? rows?', 'the waves as a picture: png (base
   if (a.to != null) o.to = cmdTime(v, a.to, 'to');
   if (a.rows != null) o.rows = ['screen', 'all', 'picked'].includes(a.rows) ? (a.rows === 'screen' ? undefined : a.rows) : sigsOf(v, pickRows(v, a.rows,
     { groups: true })).map(r => v.rowsL.find(x => x === r) || r).filter(r => v.shown(r));   // the ones in the view (Hide, Only)
+  await v.need(Array.isArray(o.rows) ? o.rows : o.rows === 'all' ? v.allRows(false, true) : o.rows === 'picked' ? [...v.picks.keys()] : v.vis);   // read
   if (f === 'wavedrom') { const wavedrom = v.toWaveDrom(o.from, o.to, Array.isArray(o.rows) ? o.rows : null);   // cut: the first cycles only
     return v.wdCut ? { wavedrom, cut: { cycles: v.wdCut.cells, to: v.wdCut.to } } : { wavedrom }; }
   if (f === 'svg') return { svg: v.toSVG(o) };

@@ -3,7 +3,7 @@
    one) as --extensionTestsPath, told what to do by ~/.cache/wavelens/e2e.json {out, dumps} (paths on the host). Every dump
    opens in a wavelens tab: it answers ready with its signals, a picture of it (PNG) is written to out; then a bookmark
    is kept over closing and opening the tab again (the store), and a new write of a copy of the first dump is read again
-   by itself (wavelens.autoReload); a dump with a stranger code and one whose time goes back put their notes in the
+   by itself (wavelens.autoReload), a large dump read as it is needed (wavelens.lazy); a dump with a stranger code and one whose time goes back put their notes in the
    Problems panel on their lines; a VCD as Questa writes it is named from a source of the workspace, another by the types
    file beside it, read again when it is written, and its FST made by Convert to FST names them without it; a dump in a folder with a space in its name; the Verilator command with
    a file's name of * ? (expanded). The results: out/result.json {run: the runner's id, done, results}; the process exits 0
@@ -129,6 +129,19 @@ async function run() {
       await closeAll();
     } catch (e) { ok('reload on a new write', false, { error: e.message }); }
     await cfg.update('autoReload', undefined, vscode.ConfigurationTarget.Global);
+    // a large dump (wavelens.lazy always): its modules at once, folded; a signal of a folded module read when a command
+    // needs it (sva fst once, then sva vcd --codes of the FST): its rise where the dump has it
+    try {
+      await cfg.update('lazy', 'always', vscode.ConfigurationTarget.Global);
+      const big = path.join(OUT, 'lazy.vcd');
+      fs.writeFileSync(big, '$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! clk $end\n$scope module u $end\n$var wire 1 " a $end\n' +
+        '$upscope $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\n0"\n#10\n1!\n#20\n0!\n#25\n1"\n#30\n1!\n#40\n');
+      const o = await open(api, big), r = await o.tab.run([{ op: 'rows' }, { op: 'cursor', t: 0 }, { op: 'edge', kind: 'rise', signal: 'tb.u.a' }]);
+      ok('a large dump read as it is needed', o.total === 2 && r[2].t === 25000, { shown: o.shown, total: o.total, rows: r[0].rows && r[0].rows.length,
+        edge: r[2] });
+      await closeAll();
+    } catch (e) { ok('a large dump read as it is needed', false, { error: e.message }); }
+    await cfg.update('lazy', undefined, vscode.ConfigurationTarget.Global);
   }
   // the log: what the reader noticed in a dump goes to the Problems panel on its line; one it cannot read, an error there
   try {

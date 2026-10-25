@@ -457,6 +457,11 @@ function joinBits(g, parts) {
   }
   return sig;
 }
+// the parts of a struct group, its first field first: its signals and its structs' whole values (sub: a struct's whole)
+function structParts(M, g, sub = x => x.sig) {
+  return M.rows.filter(r => r.anc.length === g.anc.length + 1 && r.anc[g.anc.length] === g.id && (r.type === 'sig' ? r.tr && !r.same : r.type === 'group'))
+    .map(r => (r.type === 'group' ? sub(r) : r)).filter(Boolean);
+}
 // a field [msb:lsb] of a packed vector as a row of its own (its name under the vector's, its radix, its labels)
 function fieldRow(sig, f, depth, anc) {
   const msb = num(f && f.msb), lsb = num(f && (f.lsb ?? f.msb)); if (!f || !f.name || !isFinite(msb) || !isFinite(lsb)) return null;
@@ -465,7 +470,7 @@ function fieldRow(sig, f, depth, anc) {
     return null;
   }
   const w = msb - lsb + 1, r = { type: 'sig', name: String(f.name), depth, anc, width: w, enum: f.enum, radix: f.radix, path: null, src: f, fromTv: !!sig.tv,
-    full: sig.full + '.' + f.name, field: [msb, lsb], tr: [], gaps: [] };
+    full: sig.full + '.' + f.name, field: [msb, lsb], tr: [], gaps: [], of: sig };
   for (const o of sig.tr) {
     const b = bitsOf(o, sig.width), fb = b.slice(b.length - 1 - msb, b.length - lsb);
     const n = w === 1 ? { k: /^[01z]$/.test(fb) ? fb : 'x' } : bitsVal(fb);
@@ -538,6 +543,7 @@ function parse(src) {
           stroke: it.stroke || (typeof it.color === 'string' && !/^[2-9]$/.test(it.color) ? it.color : undefined), fill: it.fill, enumColors: it.enumColors,
             analog: it.analog,
           kind: it.kind, height: num(it.height) || undefined };
+        if (it.lazy) sig.lazy = true;   // a large dump read as it is needed: its changes come later (fillRows)
         sig.full = it.path || anc.map(id => M.groups[id].name).concat(sig.name).join('.');
         const r = it.tv ? parseTV(it, sig) : parseWave(it, C);
         if (!it.tv && num(it.width) > 1) sig.width = num(it.width);   // a clock-sampled bus: its width (signed search, analog, fields)
@@ -566,9 +572,7 @@ function parse(src) {
   const done = new Set(), whole = g => {
     if (done.has(g) || g.sig) return g.sig; done.add(g);
     if (g.kind !== 'struct' && g.kind !== 'union') return null;
-    const parts = M.rows.filter(r => r.anc.length === g.anc.length + 1 && r.anc[g.anc.length] === g.id &&
-      (r.type === 'sig' ? r.tr && !r.same : r.type === 'group'))
-      .map(r => (r.type === 'group' ? whole(r) : r)).filter(Boolean);
+    const parts = structParts(M, g, whole);
     const w = parts.reduce((n, p) => n + (p.width || 1), 0);
     if (g.kind === 'struct' && parts.length && (!g.bits || w === g.bits)) g.sig = joinBits(g, parts);
     else if (g.kind === 'struct' && parts.length) g.partial = [w, g.bits];   // some fields not shown: no whole value
@@ -587,6 +591,29 @@ function parse(src) {
   M.bookmarks = bmNorm(j.bookmarks); M.arrows = arNorm(j.arrows, j.bookmarks);
   return M;
 }
+// lazy rows (a large dump read as it is needed, "lazy": the id codes of a signal not read yet): the WaveJSON signals read
+// later (their path, their tv) onto their rows, the fields of a vector and a struct's whole value made again -> the rows
+function fillRows(M, sigs) {
+  const by = new Map(sigs.filter(s => s && s.path && s.tv).map(s => [s.path, s])), got = new Set();
+  for (const r of M.rows) {
+    if (r.type !== 'sig' || !r.lazy || r.field) continue;
+    const s = by.get(r.path); if (!s) continue;
+    const w = r.width; r.src.tv = s.tv; r.tr = parseTV(r.src, r).tr; r.width = w; r.lazy = false; got.add(r);
+  }
+  if (!got.size) return [];
+  for (const r of M.rows) if (r.field && got.has(r.of)) { const f = fieldRow(r.of, r.src, r.depth, r.anc); if (f) r.tr = f.tr; }
+  // a struct of the dump's scopes (the innermost first): its whole value once every part has its changes
+  for (const g of Object.values(M.groups).sort((a, b) => b.depth - a.depth)) {
+    if (!g.sig || !g.sig.struct) continue;
+    const kids = M.rows.slice(M.rows.indexOf(g) + 1, g.last + 1);
+    if (!kids.some(r => got.has(r)) || kids.some(r => r.lazy)) continue;
+    g.sig.tr = joinBits(g, structParts(M, g)).tr;
+  }
+  return [...got];
+}
+// the rows a row on the screen needs read (lazy): itself, the vector of a field, every signal of a struct
+const lazyOf = (M, r) => (r.type === 'sig' ? (r.lazy ? [r] : r.field && r.of && r.of.lazy ? [r.of] : []) :
+  r.type === 'group' && r.sig && r.sig.struct ? M.rows.slice(M.rows.indexOf(r) + 1, r.last + 1).filter(q => q.lazy) : []);
 // template.html's dump format ({ t0, t1, signals: [{ name, w, t: [[ps, value]] }] }) -> WaveJSON with the time extension
 function fromTV(wave, extra = {}) {
   return Object.assign({ signal: wave.signals.map(s => ({ name: s.name, width: s.w, tv: s.t })),
@@ -780,6 +807,8 @@ function groupNorm(list) {
 // What it noticed on the way goes to `log`: [{level: error | warning | info, line, text}] (a line of the text, 1 the first;
 // none: the whole dump), at most VCD_SAME of a kind and then how many more; `info`: the dump's parameters ($version,
 // $date, $timescale, its time, scopes, signals, changes). An error it cannot read past is thrown with its line (e.line).
+// opts.lazy: the text is a dump's header (sva vcd --header: the declarations, the first and last times) and every
+// variable is a signal whose changes come later ("lazy": its id codes; a viewer reads them as it needs them, fillRows).
 const VCD_UNIT = { s: 1e12, ms: 1e9, us: 1e6, ns: 1e3, ps: 1, fs: 1e-3, as: 1e-6, zs: 1e-9 };
 const VCD_TEXT = { real: 'real', realtime: 'real', shortreal: 'real', real_parameter: 'real', string: 'string' };   // -> "kind"
 // integer variables (Questa writes an int-based enum as one): signed decimal unless they have an enum table
@@ -821,7 +850,7 @@ async function vcdToWaveFile(file, opts = {}, chunk = 8 << 20) {
   return r.value;
 }
 function* vcdRead(opts = {}, size = 0) {
-  const budget = opts.budget ?? 3e6, name = opts.name || 'dump.vcd';
+  const lazy = !!opts.lazy, budget = lazy ? Infinity : opts.budget ?? 3e6, name = opts.name || 'dump.vcd';
   // the header: pieces until its "$enddefinitions $end" (the whole text at once: vcdToWave), its words read on as the
   // parser below takes them: a section ($comment, $var …) to its $end, so "$enddefinitions" in a comment is not the end
   let text = '', n0 = 0, eof = false, hw = 0, sec = false, defs = false;
@@ -997,7 +1026,7 @@ function* vcdRead(opts = {}, size = 0) {
       'drawn as written');
   }, true);
   if (!vars.length) note('warning', null, 'novar', 'no $var: the dump has no signals');
-  else if (!count.size) note('warning', null, 'empty', 'no value changes after $enddefinitions');
+  else if (!count.size && !lazy) note('warning', null, 'empty', 'no value changes after $enddefinitions');
   const changes = v => v.codes.reduce((s, k) => s + (count.get(k) || 0), 0);
   const order = vars.slice().sort((a, b) => a.depth - b.depth);   // stable: declaration order inside a level
   const keep = new Set(); let used = 0;
@@ -1036,6 +1065,7 @@ function* vcdRead(opts = {}, size = 0) {
     let key = '';
     for (const p of v.scope) { const k2 = key ? key + '.' + p : p; if (!node.has(k2)) { const g = [p]; node.get(key).push(g); node.set(k2, g); } key = k2; }
     const s = { name: v.name, path: v.path, tv: tvOf(v) }; if (v.width > 1) s.width = v.width; if (v.kind) s.kind = v.kind;
+    if (lazy) s.lazy = v.codes;
     if (v.enum) s.enum = v.enum; else if (v.num) s.radix = 'signed';
     node.get(key).push(s);
   }
@@ -1045,7 +1075,7 @@ function* vcdRead(opts = {}, size = 0) {
   const end = Math.max(t1, (t0 ?? 0) + 1);
   const doc = { signal: out, head: { text: name }, time: { t0: t0 ?? 0, t1: end, cycle: (end - (t0 ?? 0)) / 40, unit: 'ps' }, config: {} };
   const still = vars.filter(v => keep.has(v) && !changes(v));
-  if (still.length) note('info', null, 'still', `${still.length} signal${still.length === 1 ? ' has' : 's have'} no value in the dump (drawn x): ` +
+  if (still.length && !lazy) note('info', null, 'still', `${still.length} signal${still.length === 1 ? ' has' : 's have'} no value in the dump (drawn x): ` +
     still.slice(0, 5).map(v => v.path).join(', ') + (still.length > 5 ? ' …' : ''));
   if (keep.size < vars.length) note('info', null, 'budget', `${keep.size} of ${vars.length} signals read: the levels nearest the top within ` +
     `dumpBudget (${budget} changes)`);
@@ -1059,6 +1089,8 @@ function* vcdRead(opts = {}, size = 0) {
   return { doc, shown: shownVars.length, total: vars.length, changes: used, info,
     log: log.map(x => Object.assign({ level: x.level, text: x.msg }, x.line != null ? { line: x.line } : {})) };
 }
+// the signals of vcdToWave's WaveJSON, out of their groups
+const vcdSignals = a => a.flatMap(x => (Array.isArray(x) ? vcdSignals(x.slice(1)) : [x]));
 // a VCD vector value in w digits: a shorter one extended with 0, or x / z; a longer one its last w
 const vcdExt = (b, w) => (b.length < w ? (b[0] === 'x' || b[0] === 'z' ? b[0] : '0').repeat(w - b.length) + b : b.length > w ? b.slice(b.length - w) : b);
 // a real as written (r1.5, rinf, r-inf, rnan) -> its number as gfmt prints it (15 digits); not a number: as written (the
@@ -1712,6 +1744,7 @@ function paintBody(P, M, lay, X, tA, tB, xL, xR, hl, sel, allLay, band, late, st
     if (bgOnly) continue;
     if (row.draw) row.draw(P, { y, h, X, tA, tB, xL, xR });
     if (row.overlay) over.add(row.overlay);
+    if (row.lazy) { P.text(xL + 6, y + h / 2, 'reading…', { size: 10, fill: 'muted' }); rowY.set(row, y + h / 2); continue; }   // not read yet
     if (row.type === 'sig') { if (row.tr) paintSig(P, row, y, h, X, tA, tB, xL, xR, M.t1, strokeOf(row), b === 1 ? 'band' : 'panel', isSel);
       rowY.set(row, y + h / 2); }
   }
@@ -2568,7 +2601,10 @@ class WaveView {
     applyLook(root, opts.theme ?? M.theme, Object.assign({}, M.colors, opts.colors));
     this.storeId = this.storeName();
     this.lookKey = 'wavelens.look:' + this.storeId; this.local = this.loadLook();   // the bar's own layer of the settings (the edge style)
-    this.restyle(false); this.collapsed = foldSet(M, this.S.fold);
+    // a large dump read as it is needed (its rows "lazy", opts.loadCodes reads them): the top level open, its modules folded
+    this.lazy = M.rows.some(r => r.lazy); this.lazyWait = new Map();
+    if (this.lazy && !opts.loadCodes) { M.rows.forEach(r => { r.lazy = false; }); this.lazy = false; }   // nothing to read them with: as they are
+    this.restyle(false); this.collapsed = foldSet(M, this.S.fold ?? (this.lazy ? 1 : null));
     this.picks = hlPick(M, this.S.highlight); this.hlFrom = JSON.stringify(this.S.highlight ?? null);
     this.selRun = new Set(); this.selAnchor = null;   // shift+click: a run of selected signals (selectRun)
     this.found = new Map(); this.findPicks = new Map(); this.findHl = this.S.findHighlight; this.findOpen = this.S.findOpen;   // fuzzy find
@@ -3231,6 +3267,7 @@ class WaveView {
     const key = JSON.stringify(o);
     if (!this.cycMemo || this.cycMemo.key !== key) {
       const clk = cycClock(this.M.rows, o.cycleClock), ups = clk ? cycUps(clk) : [];
+      if (clk && clk.lazy) this.need([clk]);   // a large dump: the clock read, the band drawn when it is there (need resets the memo)
       this.cycMemo = { key, d: clk && ups.length ? { clk, ups, iz: cycZero(ups, o.cycleZero) } : null };
     }
     return this.cycMemo.d;
@@ -3405,7 +3442,8 @@ class WaveView {
       if (/\.fst$/i.test(file.name) && !/^\s*\$/.test(head)) {
         this.toast('an FST is binary: sva vcd x.fst --out x.vcd (or fst2vcd), or make html WAVES=x.fst'); return this; }
       let r;
-      try { const o = { name: file.name, budget: this.S.dumpBudget }; r = pieces ? await vcdToWaveFile(file, o) : vcdToWave(text, o); }
+      // a large dump given lazy (the VS Code tab): its header, every signal read later through file.wlLoad (need, lazyAsk)
+      try { const o = { name: file.name, budget: this.S.dumpBudget, lazy: !!file.wlLazy }; r = pieces ? await vcdToWaveFile(file, o) : vcdToWave(text, o); }
       catch (e) { this.dumpSaid(file.name, { error: e.message, line: e.line }); throw e; }
       if (gen !== this.root.wlOpen || !VIEWS.has(this)) return this;
       const said = [], why = new Map(), nsv = svApply(r.doc, this.opts.sv, said, why);   // the sources' labels (Sources…, the VS Code tab's wavelens.sources)
@@ -3415,13 +3453,14 @@ class WaveView {
       for (const n of ((this.opts.sv && this.opts.sv.notes) || []).concat(said, run)) r.log.push({ level: 'warning', text: 'types: ' + n });
       if (!r.shown) { this.toast(`${file.name}: no signals`); this.dumpSaid(file.name, { error: 'no signals', log: r.log, info: r.info }); return this; }
       const st = keep ? this.state() : null, root = this.root, opts = Object.assign({}, this.opts,
-        { title: file.name, dumpSrc: { name: file.name, handle, file }, dumpDate: r.info.date, svWhy: why, svRun: run }), panel = keep && this.fsmPanelOf();
+        { title: file.name, dumpSrc: { name: file.name, handle, file }, dumpDate: r.info.date, svWhy: why, svRun: run, loadCodes: file.wlLoad || null }),
+        panel = keep && this.fsmPanelOf();
       this.destroy(); root.innerHTML = '';
       const v = new WaveView(root, r.doc, opts); v.panelBox = this.panelBox;   // the panels open where they were
       if (st) { delete st.title; await v.setState(st); }
       v.fsmPanelAgain(panel);   // the FSM panel stays open (⟳)
       const bad = r.log.filter(x => x.level !== 'info').length;
-      v.toast((`${file.name}: ${r.shown} of ${r.total} ` +
+      v.toast((file.wlLazy ? `${file.name}: ${r.total} signals in ${r.info.scopes} modules, read as you open them` : `${file.name}: ${r.shown} of ${r.total} ` +
           `signals${r.shown < r.total ? ` (dumpBudget ${this.S.dumpBudget} changes: the levels nearest the top)` : ''}`) +
           (bad ? ` · ${bad} warning${bad === 1 ? '' : 's'} (the browser's console)` : ''));
       v.dumpLog = r.log;
@@ -4384,6 +4423,30 @@ class WaveView {
     if (this.cursor < this.t0 || this.cursor > this.t0 + this.span) this.t0 = this.clamp(this.cursor - this.span / 2);
     this.draw(); return this;
   }
+  // A large dump read as it is needed (the VS Code tab: sva vcd --codes of its FST): the rows on the screen whose changes
+  // are not read yet, asked for at once after a frame; their waves drawn when they come
+  lazyAsk(lay, oy, h) {
+    if (!this.lazy || !this.opts.loadCodes) return;
+    const want = new Set();
+    for (const o of lay) if (o.y + o.h >= oy && o.y <= oy + h) for (const r of lazyOf(this.M, o.row.orig || o.row)) if (!this.lazyWait.has(r)) want.add(r);
+    if (want.size) this.need([...want]);
+  }
+  // the changes of these rows read (the ones not read yet; a row asked for already: that read) -> a promise, when they are
+  // there; the assertions, the FSM panel and the commands ask for theirs this way
+  need(rows) {
+    const M = this.M, all = new Set(rows.flatMap(r => lazyOf(M, r.orig || r))), ask = [...all].filter(r => !this.lazyWait.has(r));
+    if (ask.length && this.opts.loadCodes) {
+      const p = (async () => {
+        const text = await this.opts.loadCodes([...new Set(ask.flatMap(r => r.src.lazy || []))]);
+        const got = fillRows(M, vcdSignals(vcdToWave(text, { name: this.opts.title, budget: Infinity }).doc.signal));
+        for (const r of ask) if (r.lazy) this.lazyWait.delete(r);   // not in what came: asked again when it is on the screen
+        if (got.length) { this.clkMemo = null; this.cycMemo = null; this.fsmSt = null; this.invalidate(); if (this.fsmP) this.fsmP.render(true); }
+        return got;
+      })().catch(e => { for (const r of ask) this.lazyWait.delete(r); this.toast('reading the signals: ' + e.message); return []; });
+      for (const r of ask) this.lazyWait.set(r, p);
+    }
+    return Promise.all([...all].map(r => this.lazyWait.get(r)).filter(Boolean)).then(() => this);
+  }
   invalidate() { // one redraw in the next frame, however many changes ask for it
     if (!this.inv) this.inv = requestAnimationFrame(() => { this.inv = 0; if (this.root.isConnected) this.draw(); });
   }
@@ -4413,7 +4476,7 @@ class WaveView {
     if (this.wcol.style.height !== lay.H + 'px') this.wcol.style.height = lay.H + 'px';
     if (this.sel && !this.vis.includes(this.sel)) { this.sel = null; if (this.mods) this.mods.render(); }   // folded away (the panel's ● goes)
     if (this.printing) this.paintPrint(lay);
-    else { const f = this.size(lay); this.bmGeo = this.paintFrame(this.canvas, f.W, f.Hc, f.oy, lay, true, f.dpr); }
+    else { const f = this.size(lay); this.bmGeo = this.paintFrame(this.canvas, f.W, f.Hc, f.oy, lay, true, f.dpr); this.lazyAsk(lay, f.oy, f.Hc); }
     this.syncReadouts();
   }
   size(lay) { // the canvas: as wide as its column, as tall as the rows in view (at least the axis and a little more)
@@ -4798,8 +4861,9 @@ const fsmRow = (v, spec) => { const all = v.fsms(true), p = String(spec ?? ''), 
   pickRows(v, spec).find(x => all.includes(x)); if (!r) fail(`no state machine "${p}" (a signal with enum labels)`); return r; };
 command('fsm_stats', 'signal', 'an FSM on these waves: each state of its table with how many times it entered it, the time it held it (share: of ' +
   'the whole time) and its first entry; the states it never reaches (never); the values not in its table (invalid: x, z, a code without a ' +
-  'label); its changes from one value to another, the most frequent first, with their count and first time', (v, a) => {
-  const r = fsmRow(v, a.signal), st = v.fsmStatsOf(r), span = v.M.t1 - v.M.t0;
+  'label); its changes from one value to another, the most frequent first, with their count and first time', async (v, a) => {
+  const r = fsmRow(v, a.signal); await v.need([r]);   // a large dump read as it is needed: its changes first
+  const st = v.fsmStatsOf(r), span = v.M.t1 - v.M.t0;
   const one = s => ({ state: st.name(s.key), value: s.key, entries: s.entries.length, first: s.entries.length ? s.entries[0] : null, time: s.time,
     share: span > 0 ? Math.round(1e4 * s.time / span) / 1e4 : 0 });
   return { signal: r.full, states: st.states.map(one), never: st.unseen.map(k => st.name(k)), invalid: st.bad.map(one),
@@ -4807,8 +4871,8 @@ command('fsm_stats', 'signal', 'an FSM on these waves: each state of its table w
       .sort((x, y) => y.count - x.count) };
 });
 command('fsm_go', 'signal state? from? to? dir? first?', 'the cursor to the next (dir 1) or previous (-1) time an FSM enters a state (its ' +
-  'label or value) or makes a change (from, to: labels or values); first: the first time; past the last it rounds to the first', (v, a) => {
-  const r = fsmRow(v, a.signal);
+  'label or value) or makes a change (from, to: labels or values); first: the first time; past the last it rounds to the first', async (v, a) => {
+  const r = fsmRow(v, a.signal); await v.need([r]);
   if (a.state == null && (a.from == null || a.to == null)) fail('fsm_go: a state, or from and to');
   const t = v.fsmGo(r, a.state != null ? { state: String(a.state), first: !!a.first } : { from: String(a.from), to: String(a.to), first: !!a.first },
     a.dir < 0 ? -1 : 1);
@@ -4901,9 +4965,10 @@ command('cycles', 'on? clock? zero? reset?', 'the clock cycles in a band under t
   return { cycles: v.cycOpt(), clock: d ? d.clk.full : null, cycle: d ? cycAt(d.ups, d.iz, v.cursor) : null };
 });
 command('edge', 'dir? kind? value? signal?', 'the cursor to the next (dir 1) or previous (-1) edge of the selected signal (signal: that one, ' +
-  `selected), kind: ${Object.keys(EDGE_KINDS).join(' ')}; value: the value to become`, (v, a) => {
+  `selected), kind: ${Object.keys(EDGE_KINDS).join(' ')}; value: the value to become`, async (v, a) => {
   if (a.kind != null && !hasKey(EDGE_KINDS, a.kind)) fail(`kind: one of ${Object.keys(EDGE_KINDS).join(' ')}`);
   if (a.signal) v.select(pickRows(v, a.signal, { one: true })[0]);
+  if (v.sel) await v.need([v.sel]);
   const at = v.cursor; v.edge(a.dir === -1 || a.dir === '-1' ? -1 : 1, a.kind || (a.value != null ? 'value' : v.edgeKind), a.value ?? null);
   return { t: v.cursor, moved: v.cursor !== at };
 });
@@ -4928,6 +4993,7 @@ command('picture', 'format? from? to? rows?', 'the waves as a picture: png (base
   if (a.to != null) o.to = cmdTime(v, a.to, 'to');
   if (a.rows != null) o.rows = ['screen', 'all', 'picked'].includes(a.rows) ? (a.rows === 'screen' ? undefined : a.rows) : sigsOf(v, pickRows(v, a.rows,
     { groups: true })).map(r => v.rowsL.find(x => x === r) || r).filter(r => v.shown(r));   // the ones in the view (Hide, Only)
+  await v.need(Array.isArray(o.rows) ? o.rows : o.rows === 'all' ? v.allRows(false, true) : o.rows === 'picked' ? [...v.picks.keys()] : v.vis);   // read
   if (f === 'wavedrom') { const wavedrom = v.toWaveDrom(o.from, o.to, Array.isArray(o.rows) ? o.rows : null);   // cut: the first cycles only
     return v.wdCut ? { wavedrom, cut: { cycles: v.wdCut.cells, to: v.wdCut.to } } : { wavedrom }; }
   if (f === 'svg') return { svg: v.toSVG(o) };
@@ -6021,6 +6087,7 @@ Object.assign(WaveView.prototype, {
     if (!this.fsms().length) {
       this.toast('no state machines on these waves: none has enum labels (an FST\'s, x.types.json or .sv files in Sources…)'); return this; }
     if (!this.fsmP) this.fsmP = new Fsms(this);
+    this.need(this.fsms());   // a large dump read as it is needed: the FSMs' changes (their states reached, the details)
     this.fsmP.focusRow();
     return this;
   },
@@ -6870,7 +6937,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.22',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.23',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,

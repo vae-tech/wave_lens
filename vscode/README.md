@@ -10,6 +10,9 @@ is turned into VCD text with it, kept in the extension's storage).
 
 - **Open**: right click on a `.vcd` / `.fst` in the Explorer → *Open in WaveLens*, or *Open With… → WaveLens* (make it the
   default there for these files if you like).
+- **A large dump** (`wavelens.lazy`, auto: an FST of 4 MB, a VCD of 64 MB and more) opens with every module and signal
+  at once, the top level open and its modules folded; the signals you open are read from its FST then (a VCD becomes an
+  FST once, kept). Assertions, the FSM panel and pictures read what they need first.
 - **A new simulation**: the tab says when the dump changed; ⟳ (the bar, or the editor's title) reads it again with the
   view kept. `wavelens.autoReload`: at once.
 - **Saving** (state, PNG, SVG, WaveDrom, the report) asks where on the host; **Load…**, the `.sv` files and Compare
@@ -38,11 +41,11 @@ is turned into VCD text with it, kept in the extension's storage).
 - **Theme**: `wavelens.theme` — `auto` (light or dark by VS Code's), `vscode` (the colours of VS Code's theme),
   `light`, `white`, `dark`; **◐** in the bar (or *WaveLens: Choose the theme of the waves* in the editor's title) previews
   each on the open tabs.
-- **The version** in the bar: `0.22 · dev@5470d89*`, the extension's branch and commit (`*`: changes not committed).
+- **The version** in the bar: `0.23 · dev@5470d89*`, the extension's branch and commit (`*`: changes not committed).
 
 The keys are the viewer's (`?` in the tab): the plain ones, and the ctrl / alt ones that mean what they mean in VS Code
 (ctrl+F, ctrl+C, ctrl+Z, alt+C W R); `wavelens.keysToVSCode` (`ctrl+G`: Go to Line) go to VS Code — the list of your
-groups is `gl` then. Settings: `wavelens.theme` (auto), `wavelens.keysToVSCode` (`["ctrl+G"]`), `wavelens.verilator` (verilator), `wavelens.sources` (`**/*.sv`, `**/*.svh`), `wavelens.autoReload` (false: the tab offers ⟳ after a new
+groups is `gl` then. Settings: `wavelens.theme` (auto), `wavelens.keysToVSCode` (`["ctrl+G"]`), `wavelens.verilator` (verilator), `wavelens.sources` (`**/*.sv`, `**/*.svh`), `wavelens.lazy` (auto: a large dump read as it is needed; always, never), `wavelens.autoReload` (false: the tab offers ⟳ after a new
 simulation; true: it reads the dump at once), `wavelens.live` (true), `wavelens.sva` (another sva program).
 
 **Install.** Build the package from the repository (`make vsix`: `out/wavelens.vsix`, a copy as `wavelens-<version>.vsix`, for a Linux x86-64 host;

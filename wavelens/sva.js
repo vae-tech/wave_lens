@@ -561,6 +561,7 @@ const bkey = b => b.assert + '@' + b.scope;
 // each request. -> 'page' | 'worker'
 async function evaluateScope(v, bs, progress) {
   const asserts = bs.map(b => LIB.byLabel.get(b.assert).a), rows = Object.assign({}, ...bs.map(b => b.res.map));
+  if (v.lazy) await v.need(Object.values(rows));   // a large dump read as it is needed: the signals they read first
   const unit = v.M.timed ? 'ps' : 'cycles', steps = plan(SOURCES(), asserts, rowSampler(rows), unit);
   const eng = await SVA.engine(), outs = [];
   let via = 'page';

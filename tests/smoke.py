@@ -1420,7 +1420,8 @@ def vscode_tab(browser, build):
             f'<script nonce="N0NCE" src="{src}/host.js"></script>{scripts}</body></html>')
     fake = """(() => { window.__sent = []; const reply = m => setTimeout(() => window.postMessage(m, '*'), 0);
       window.acquireVsCodeApi = () => ({ getState() {}, setState() {}, postMessage(m) { window.__sent.push(m);
-        if (m.type === 'source') reply({ id: m.id, src: '%s' + (window.__DUMP || '/dump.vcd'), name: 'enum.vcd' });
+        if (m.type === 'source') reply({ id: m.id, src: '%s' + (window.__LAZY ? '/head.vcd' : window.__DUMP || '/dump.vcd'), name: 'enum.vcd', lazy: !!window.__LAZY });
+        if (m.type === 'codes') window.lazyCodes(m.codes).then(text => reply({ id: m.id, text }));
         if (m.type === 'save') reply(window.__cancel ? { id: m.id, cancel: true } : { id: m.id, path: '/host/dumps/' + m.name });
         if (m.type === 'clip') reply({ id: m.id, ok: true });
         if (m.type === 'sources') reply(window.__TYPES ? { id: m.id, types: window.__TYPES, typesName: 'enum.types.json', texts: [] } : { id: m.id,
@@ -1559,6 +1560,29 @@ def vscode_tab(browser, build):
         out.push([b.via || 'page', b.state, b.error || b.workerError || null, b.results ? b.results.assertions[0].stats.pass : null]); p.unbind(b); }
       SVA.syncLimit = null; return out; }""")
     check([x[0] for x in sv] == ['page', 'worker'] and all(x[2] is None and x[3] for x in sv), f'assertions in the page and in a worker under the CSP ({sv})')
+    # a large dump (the extension's wavelens.lazy): its FST's header, then the signals shown read through "codes" (sva vcd
+    # --codes of the FST), the top level open; an assertion reads its signals first: the same counts as from the whole dump
+    import shutil, tempfile
+    exe = build / 'sva-target' / 'release' / 'sva'
+    if need(exe, how='make sva-build'):
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix='wl-lazy-')); shutil.copy(files['/dump.vcd'], tmp / 'enum.vcd')
+        subprocess.run([exe, 'fst', str(tmp / 'enum.vcd'), '--no-types', '-q'], check=True)
+        (tmp / 'head.vcd').write_text(subprocess.run([exe, 'vcd', str(tmp / 'enum.fst'), '--header'], capture_output=True, text=True, check=True).stdout)
+        files['/head.vcd'] = tmp / 'head.vcd'
+        page.expose_function('lazyCodes', lambda codes: subprocess.run([exe, 'vcd', str(tmp / 'enum.fst'), '--codes', '-'], input='\n'.join(codes),
+                                                                        capture_output=True, text=True).stdout)
+        n0 = len(sent('loaded'))
+        page.evaluate("window.__LAZY = true; window.__TYPES = null; window.__SRC = []; window.postMessage({ type: 'reload' }, '*')")
+        until(f"window.__sent.filter(m => m.type === 'loaded').length > {n0}", timeout=5000)
+        until("(v => v && v.lazy && !WaveLens.internal.peek(v).vis.some(r => r.lazy))(WaveLens.views().find(x => x.root.isConnected))", timeout=5000)
+        lz = [js("v.M.rows.filter(r => r.type === 'sig').length"), js("v.M.rows.filter(r => r.lazy).map(r => r.full)"), len(sent('codes'))]
+        sv2 = page.evaluate("""async () => { const p = SVA.panels()[0], b = p.bind('a_st', 'tb'); await SVA.ready(); await p.queue;
+          const out = [b.state, b.error || null, b.results ? b.results.assertions[0].stats.pass : null]; p.unbind(b); return out; }""")
+        check(lz[0] >= 4 and lz[1] == [] and lz[2] >= 1 and sv2 == ['bound', None, sv[0][3]],
+              f'a large dump: its header first, the signals on the screen read through "codes" (a struct\'s header: its fields, for its whole value); '
+              f'an assertion reads its own (the counts of the whole dump) {lz} {sv2} / {sv[0][3]}')
+        page.evaluate("window.__LAZY = false")
+        shutil.rmtree(tmp, ignore_errors=True)
     # a save cancelled in the dialog: no "saved"
     page.evaluate("window.__cancel = true")
     js("(v.saveState(), 0)"); page.wait_for_timeout(400)
@@ -1808,6 +1832,148 @@ def axis_in_sight(browser, build):
     check(not errs, f'no page errors {errs}')
     page.close()
 
+
+def lazy_vcd(seed=7, subs=6, mods=5, cores=3, sigs=10, steps=400):
+    """A dump of a design's shape for the lazy reading: tb (clk, rst_n), subN (ctl), subN.modM (data, valid, clk, an FSM's
+    state with its enum table), subN.modM.coreK (sN of 1–32 bits); random changes -> its text."""
+    import random
+    rnd = random.Random(seed)
+    out, vs, names = ['$timescale 1ns $end', '$attrbegin misc 07 st_t 3 IDLE RUN DONE 00 01 10 1 $end', '$scope module tb $end'], [], []
+    def var(w, name, ref=False):
+        names.append(name)
+        n, c = len(vs) + 1, ''
+        while n:
+            n -= 1; c += chr(33 + n % 94); n //= 94
+        vs.append((c, w))
+        if ref:
+            out.append('$attrbegin misc 07 "" 1 $end')
+        out.append(f'$var wire {w} {c} {name}' + (f' [{w - 1}:0]' if w > 1 else '') + ' $end')
+    var(1, 'clk'); var(1, 'rst_n')
+    for a in range(subs):
+        out.append(f'$scope module sub{a} $end'); var(8, 'ctl')
+        for b in range(mods):
+            out.append(f'$scope module mod{b} $end'); var(32, 'data'); var(1, 'valid'); var(1, 'clk'); var(2, 'state', ref=True)
+            for c in range(cores):
+                out.append(f'$scope module core{c} $end')
+                for d in range(sigs):
+                    var(rnd.choice([1, 1, 4, 8, 32]), f's{d}')
+                out.append('$upscope $end')
+            out.append('$upscope $end')
+        out.append('$upscope $end')
+    out += ['$upscope $end', '$enddefinitions $end', '#0', '$dumpvars'] + [f'0{c}' if w == 1 else f'b0 {c}' for c, w in vs] + ['$end']
+    clks = [i for i, x in enumerate(names) if x == 'clk']
+    for t in range(1, steps):
+        out.append(f'#{t * 5}')
+        out += [f'{t % 2}{vs[i][0]}' for i in clks]
+        for i in rnd.sample([i for i in range(len(vs)) if i not in clks], 40):
+            c, w = vs[i]
+            out.append(f'{rnd.getrandbits(1)}{c}' if w == 1 else f'b{rnd.randrange(3) if w == 2 else rnd.getrandbits(w):b} {c}')
+    return '\n'.join(out) + '\n'
+
+
+def lazy_dump(browser, build):
+    """A large dump read as it is needed (the VS Code tab, wavelens.lazy: the header of its FST from sva vcd --header, then
+    the signals shown from sva vcd --codes): every module and signal at once, the top level open and its modules folded;
+    the signals on the screen read after a frame (only those), a module opened: its own; every signal read gives the
+    rows the whole text gives (the fixtures, generated dumps, a design-shaped one, the examples); an assertion bound to a
+    folded module and the FSM panel read theirs first (the counts and the states of the whole dump); the picture command
+    its rows; a page without a reader shows what it has."""
+    import shutil, tempfile
+    exe = build / 'sva-target' / 'release' / 'sva'
+    pg = build / 'examples' / 'apb' / 'apb.html'
+    if not need(exe, pg, how='make sva-build examples'):
+        return
+    print('lazy: a large dump read as it is needed')
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix='wl-lazy-'))
+    parts = {}   # name -> its FST
+
+    def fst_of(name, text):   # -> (the whole text of its FST, its header)
+        v, f = tmp / (name + '.vcd'), tmp / (name + '.fst')
+        v.write_text(text, encoding='utf-8')
+        if subprocess.run([str(exe), 'fst', str(v), '--no-types', '-q'], capture_output=True).returncode:
+            return None
+        parts[name] = f
+        rd = lambda *a: subprocess.run([str(exe), 'vcd', str(f), *a], capture_output=True, text=True, check=True).stdout
+        return rd(), rd('--header')
+    asked = []
+
+    def codes(name, cs):
+        asked.append((name, len(cs)))
+        return subprocess.run([str(exe), 'vcd', str(parts[name]), '--codes', '-'], input='\n'.join(cs), capture_output=True, text=True, check=True).stdout
+    page = browser.new_page(viewport={'width': 1400, 'height': 900})
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.expose_function('lazyCodes', codes)
+    page.goto(pg.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('SVA.ready()')
+    js = lambda e: page.evaluate(f"(async () => {{ const v = document.querySelector('.wv').waveView; return {e}; }})()")
+    open_ = ("([n, t, lazy]) => { const f = new File([t], n + '.fst'); if (lazy) { f.wlLazy = true; f.wlLoad = c => window.lazyCodes(n, c); } "
+             "return document.querySelector('.wv').waveView.openDump(f).then(() => 0); }")
+    # every signal read: the rows of the whole text (fixtures, generated dumps, the design-shaped one, the examples)
+    same = """async ([n, whole, head]) => { const a = document.createElement('div'), b = document.createElement('div'); document.body.append(a, b);
+      const va = new WaveLens.WaveView(a, WaveLens.vcdToWave(whole, { name: n, budget: Infinity }).doc, {});
+      const vb = new WaveLens.WaveView(b, WaveLens.vcdToWave(head, { name: n, lazy: true }).doc, { loadCodes: c => window.lazyCodes(n, c) });
+      const was = vb.M.rows.filter(r => r.lazy).length; await vb.need(vb.M.rows);
+      const key = v => JSON.stringify([v.M.t0, v.M.t1, v.M.rows.map(r => [r.type, r.full, r.width, r.kind || null,
+        (r.type === 'sig' ? r.tr : r.sig ? r.sig.tr : []).map(o => [o.t, o.k, o.raw ?? null, o.v ?? null, o.bits ?? null])])]);
+      const out = [key(va) === key(vb), was, vb.M.rows.filter(r => r.lazy).length]; va.destroy(); vb.destroy(); a.remove(); b.remove(); return out; }"""
+    dumps = [(f.stem, f.read_text(encoding='utf-8', errors='replace')) for f in sorted((ROOT / 'tests' / 'unit' / 'vcd').glob('*.vcd'))]
+    dumps += [(f'gen{s}', gen_vcd(s)[0]) for s in range(10)] + [('design', lazy_vcd())]
+    dumps += [(f'ex_{x}', (build / 'examples' / x / f'{x}.vcd').read_text()) for x in ('apb', 'axi_lite', 'fsm') if (build / 'examples' / x / f'{x}.vcd').exists()]
+    bad, n = [], 0
+    for name, text in dumps:
+        w = fst_of(name, text)
+        if w is None:
+            continue   # a dump sva fst refuses (time back, cut off)
+        r = page.evaluate(same, [name, *w]); n += 1
+        if not r[0] or r[2] or (r[1] == 0 and 'signal' in w[0] and '$var' in w[1] and False):
+            bad.append((name, r))
+    check(not bad and n >= 40, f'{n} dumps read as they are needed, every signal: the rows of the whole text {bad}')
+    # the design-shaped dump: the top level open, its modules folded; the signals on the screen read, only those
+    whole, head = fst_of('design', lazy_vcd())
+    asked.clear()
+    page.evaluate(open_, ['design', head, True]); settle(page); page.wait_for_timeout(300)
+    vis = "WaveLens.internal.peek(v).vis"
+    g1 = js(f"[v.lazy, v.M.rows.filter(r => r.type === 'sig').length, {vis}.length, {vis}.filter(r => r.lazy).length, "
+            f"v.M.rows.filter(r => r.type === 'sig' && !r.lazy).map(r => r.full)]")
+    check(g1[0] and g1[1] == 1028 and g1[2] <= 12 and g1[3] == 0 and sorted(g1[4]) == ['tb.clk', 'tb.rst_n'] and asked == [('design', 2)],
+          f'its header: every signal there ({g1[1]}), the top level open, its modules folded; the two on the screen read, nothing more {g1[:4]} {asked}')
+    js("(v.fold(Object.values(v.M.groups).find(g => g.path === 'tb.sub2').id, false), v.fold(Object.values(v.M.groups).find(g => g.path === 'tb.sub2.mod3').id, "
+       "false), 0)"); settle(page); page.wait_for_timeout(300)
+    g2 = js(f"[{vis}.filter(r => r.lazy).length, v.M.rows.filter(r => r.full.startsWith('tb.sub2.mod3.') && r.type === 'sig' && r.depth === 3).every(r => !r.lazy), "
+            "v.M.rows.filter(r => r.full.startsWith('tb.sub4.') && r.type === 'sig').every(r => r.lazy), "
+            "(r => [r.tr.length > 5, r.tr[0].t])(v.M.rows.find(r => r.full === 'tb.sub2.mod3.data'))]")
+    check(g2[0] == 0 and g2[1] and g2[2] and g2[3] == [True, 0], f"a module opened: its signals read and drawn, the others' not {g2} {asked}")
+    # an assertion bound to a folded module reads its signals first: the counts of the whole dump
+    js("(SVA.loadFiles([{ name: 'lz.sva', text: 'module lz (input logic clk, input logic [1:0] state); ' + "
+       "'a_lz: assert property (@(posedge clk) state != 2\\'d3); c_lz: cover property (@(posedge clk) state == 2\\'d2); endmodule' }]), 0)")
+    bind = """async () => { await SVA.ready(); const p = SVA.panels().find(x => x.v === document.querySelector('.wv').waveView), out = [];
+      for (const a of ['a_lz', 'c_lz']) { const b = p.bind(a, 'tb.sub1.mod2'); await SVA.ready(); await p.queue; const s = b.results ? b.results.assertions[0].stats : {};
+        out.push([b.state, b.error || null, s.pass, s.fail, s.attempts]); p.unbind(b); } return out; }"""
+    js("(v.collapseAll(), 0)"); settle(page)
+    lazy_sv = page.evaluate(bind)
+    read = js("v.M.rows.filter(r => r.full.startsWith('tb.sub1.mod2.') && r.depth === 3 && !r.lazy).map(r => r.name).sort()")
+    page.evaluate(open_, ['design', whole, False]); settle(page)
+    whole_sv = page.evaluate(bind)
+    check(lazy_sv == whole_sv and lazy_sv[0][4] > 100 and {'clk', 'state'} <= set(read), f'an assertion bound to a folded module reads its signals first: '
+          f'the counts of the whole dump {lazy_sv} / {whole_sv} {read}')
+    # the FSM panel and fsm_stats: the FSMs read; picture: its rows
+    st_whole = js("v.run([{ op: 'fsm_stats', signal: 'tb.sub5.mod4.state' }])")
+    page.evaluate(open_, ['design', head, True]); settle(page)
+    st_lazy = js("v.run([{ op: 'fsm_stats', signal: 'tb.sub5.mod4.state' }])")
+    js("(v.fsmPanel(true), 0)"); settle(page); page.wait_for_timeout(300)
+    fs = js("[v.fsms().length, v.fsms().filter(r => r.lazy).length, v.fsmP && v.fsmP.seenOf(v.fsms()[0])]")
+    js("(v.fsmPanel(false), v.fold(Object.values(v.M.groups).find(g => g.path === 'tb.sub0').id, false), 0)")
+    pic = js("(async () => { const r = await v.run([{ op: 'picture', format: 'svg' }]); return [!!r[0].svg, WaveLens.internal.peek(v).vis.filter(r => r.lazy).length]; })()")
+    check(st_lazy == st_whole and 'error' not in st_lazy[0] and fs[0] == 30 and fs[1] == 0 and fs[2] and fs[2][0] == 3 and pic == [True, 0],
+          f'fsm_stats and the FSM panel read the FSMs (the states of the whole dump), picture its rows {fs} {pic} {str(st_lazy)[:120]}')
+    # a page without the reader (a saved one): its rows as they are, nothing waits
+    nl = page.evaluate("""h => { const a = document.createElement('div'); document.body.append(a);
+      const v = new WaveLens.WaveView(a, WaveLens.vcdToWave(h, { lazy: true }).doc, {}); const out = [v.lazy, v.M.rows.filter(r => r.lazy).length];
+      v.destroy(); a.remove(); return out; }""", head)
+    check(nl == [False, 0], f'without a reader: no row waits to be read {nl}')
+    check(not errs, f'no page errors {errs[:3]}')
+    page.close()
+    shutil.rmtree(tmp, ignore_errors=True)
 
 def bookmark_view(browser, build):
     """Going to a bookmark puts the waves where they were when it was made (axi_lite_all.html, every group open): the
@@ -4795,6 +4961,7 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'pages': 'every page in both schemes: no console errors, no error boxes, drawn canvases, static SVGs, a PNG',
     'units': 'the pure functions of the viewer (WaveLens.internal), the VCD reader, the bus decoders, sva.js expressions: a table of cases',
     'readers': 'the page\'s VCD reader against the tools\' on every fixture of tests/unit/vcd (one rule, the same transitions)',
+    'lazy_dump': 'a large dump read as it is needed (the VS Code tab): every module at once, the signals shown read, the same rows as the whole text',
     'bookmark_view': 'going to a bookmark: the rows scrolled as when it was made, its time bookmarkLeft from the left (1–9, ]m, Markers…, the command)',
     'vscode': 'the VS Code extension\'s tab (host.js, its CSP) with a fake VS Code: the dump, the store, save, pick, clipboard, reload, live',
     'docs': 'docs/index.html: cursor, zoom, sorting, settings, styles, highlight, cursor fields, themes, bookmarks',
@@ -4962,6 +5129,7 @@ def main():
         run('fsm', fsm_panel, b, build)
         run('axis', axis_in_sight, b, build)
         run('bookmark_view', bookmark_view, b, build)
+        run('lazy_dump', lazy_dump, b, build)
         run('readers', readers, b, build)
         run('vscode', vscode_tab, b, build)
         run('ranges', ranges, b, build)

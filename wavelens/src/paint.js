@@ -303,6 +303,7 @@ function paintBody(P, M, lay, X, tA, tB, xL, xR, hl, sel, allLay, band, late, st
     if (bgOnly) continue;
     if (row.draw) row.draw(P, { y, h, X, tA, tB, xL, xR });
     if (row.overlay) over.add(row.overlay);
+    if (row.lazy) { P.text(xL + 6, y + h / 2, 'reading…', { size: 10, fill: 'muted' }); rowY.set(row, y + h / 2); continue; }   // not read yet
     if (row.type === 'sig') { if (row.tr) paintSig(P, row, y, h, X, tA, tB, xL, xR, M.t1, strokeOf(row), b === 1 ? 'band' : 'panel', isSel);
       rowY.set(row, y + h / 2); }
   }

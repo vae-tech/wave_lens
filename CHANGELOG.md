@@ -5,6 +5,19 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.23 — 25 October 2026
+
+A large dump opens at once in VS Code: every module and signal, the values of the ones you open read then.
+
+- **A large dump read as it is needed** (VS Code, `wavelens.lazy`; auto: an FST of 4 MB, a VCD of 64 MB and more): the
+  tab gets the header of the dump's FST — every module and signal, the top level open, its modules folded — and reads
+  the signals on the screen from it as you open them (`reading…` for a moment); a VCD is made an FST once. A dump of
+  643 MB: its modules in 0.3 s instead of its whole text read twice and cut to `dumpBudget` (which left modules out of
+  the tree). Assertions, the FSM panel and `fsm_stats`, edge search, pictures read what they need first; the values
+  are the ones the whole dump gives.
+- **`sva vcd --header`, `--codes FILE`**: of an FST its declarations only, or the variables of some id codes with
+  their changes.
+
 ## 0.22 — 25 October 2026
 
 A VCD as an FST of our own with its FSM states kept, bookmarks that bring back the screen where they were made, the

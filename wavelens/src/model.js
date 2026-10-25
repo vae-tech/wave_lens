@@ -455,6 +455,11 @@ function joinBits(g, parts) {
   }
   return sig;
 }
+// the parts of a struct group, its first field first: its signals and its structs' whole values (sub: a struct's whole)
+function structParts(M, g, sub = x => x.sig) {
+  return M.rows.filter(r => r.anc.length === g.anc.length + 1 && r.anc[g.anc.length] === g.id && (r.type === 'sig' ? r.tr && !r.same : r.type === 'group'))
+    .map(r => (r.type === 'group' ? sub(r) : r)).filter(Boolean);
+}
 // a field [msb:lsb] of a packed vector as a row of its own (its name under the vector's, its radix, its labels)
 function fieldRow(sig, f, depth, anc) {
   const msb = num(f && f.msb), lsb = num(f && (f.lsb ?? f.msb)); if (!f || !f.name || !isFinite(msb) || !isFinite(lsb)) return null;
@@ -463,7 +468,7 @@ function fieldRow(sig, f, depth, anc) {
     return null;
   }
   const w = msb - lsb + 1, r = { type: 'sig', name: String(f.name), depth, anc, width: w, enum: f.enum, radix: f.radix, path: null, src: f, fromTv: !!sig.tv,
-    full: sig.full + '.' + f.name, field: [msb, lsb], tr: [], gaps: [] };
+    full: sig.full + '.' + f.name, field: [msb, lsb], tr: [], gaps: [], of: sig };
   for (const o of sig.tr) {
     const b = bitsOf(o, sig.width), fb = b.slice(b.length - 1 - msb, b.length - lsb);
     const n = w === 1 ? { k: /^[01z]$/.test(fb) ? fb : 'x' } : bitsVal(fb);
@@ -536,6 +541,7 @@ function parse(src) {
           stroke: it.stroke || (typeof it.color === 'string' && !/^[2-9]$/.test(it.color) ? it.color : undefined), fill: it.fill, enumColors: it.enumColors,
             analog: it.analog,
           kind: it.kind, height: num(it.height) || undefined };
+        if (it.lazy) sig.lazy = true;   // a large dump read as it is needed: its changes come later (fillRows)
         sig.full = it.path || anc.map(id => M.groups[id].name).concat(sig.name).join('.');
         const r = it.tv ? parseTV(it, sig) : parseWave(it, C);
         if (!it.tv && num(it.width) > 1) sig.width = num(it.width);   // a clock-sampled bus: its width (signed search, analog, fields)
@@ -564,9 +570,7 @@ function parse(src) {
   const done = new Set(), whole = g => {
     if (done.has(g) || g.sig) return g.sig; done.add(g);
     if (g.kind !== 'struct' && g.kind !== 'union') return null;
-    const parts = M.rows.filter(r => r.anc.length === g.anc.length + 1 && r.anc[g.anc.length] === g.id &&
-      (r.type === 'sig' ? r.tr && !r.same : r.type === 'group'))
-      .map(r => (r.type === 'group' ? whole(r) : r)).filter(Boolean);
+    const parts = structParts(M, g, whole);
     const w = parts.reduce((n, p) => n + (p.width || 1), 0);
     if (g.kind === 'struct' && parts.length && (!g.bits || w === g.bits)) g.sig = joinBits(g, parts);
     else if (g.kind === 'struct' && parts.length) g.partial = [w, g.bits];   // some fields not shown: no whole value
@@ -585,6 +589,29 @@ function parse(src) {
   M.bookmarks = bmNorm(j.bookmarks); M.arrows = arNorm(j.arrows, j.bookmarks);
   return M;
 }
+// lazy rows (a large dump read as it is needed, "lazy": the id codes of a signal not read yet): the WaveJSON signals read
+// later (their path, their tv) onto their rows, the fields of a vector and a struct's whole value made again -> the rows
+function fillRows(M, sigs) {
+  const by = new Map(sigs.filter(s => s && s.path && s.tv).map(s => [s.path, s])), got = new Set();
+  for (const r of M.rows) {
+    if (r.type !== 'sig' || !r.lazy || r.field) continue;
+    const s = by.get(r.path); if (!s) continue;
+    const w = r.width; r.src.tv = s.tv; r.tr = parseTV(r.src, r).tr; r.width = w; r.lazy = false; got.add(r);
+  }
+  if (!got.size) return [];
+  for (const r of M.rows) if (r.field && got.has(r.of)) { const f = fieldRow(r.of, r.src, r.depth, r.anc); if (f) r.tr = f.tr; }
+  // a struct of the dump's scopes (the innermost first): its whole value once every part has its changes
+  for (const g of Object.values(M.groups).sort((a, b) => b.depth - a.depth)) {
+    if (!g.sig || !g.sig.struct) continue;
+    const kids = M.rows.slice(M.rows.indexOf(g) + 1, g.last + 1);
+    if (!kids.some(r => got.has(r)) || kids.some(r => r.lazy)) continue;
+    g.sig.tr = joinBits(g, structParts(M, g)).tr;
+  }
+  return [...got];
+}
+// the rows a row on the screen needs read (lazy): itself, the vector of a field, every signal of a struct
+const lazyOf = (M, r) => (r.type === 'sig' ? (r.lazy ? [r] : r.field && r.of && r.of.lazy ? [r.of] : []) :
+  r.type === 'group' && r.sig && r.sig.struct ? M.rows.slice(M.rows.indexOf(r) + 1, r.last + 1).filter(q => q.lazy) : []);
 // template.html's dump format ({ t0, t1, signals: [{ name, w, t: [[ps, value]] }] }) -> WaveJSON with the time extension
 function fromTV(wave, extra = {}) {
   return Object.assign({ signal: wave.signals.map(s => ({ name: s.name, width: s.w, tv: s.t })),

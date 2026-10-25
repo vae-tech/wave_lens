@@ -75,6 +75,10 @@
 <h2 id="differs">What the tab does differently</h2>
 <table>
   <tr><th></th><th>In a VS Code tab</th></tr>
+  <tr><td>a large dump</td><td>an FST of 4 MB or a VCD of 64 MB and more (<code>wavelens.lazy</code>) opens with every module
+    and signal at once, the top level open and its modules folded, no value read yet; open a module and the signals on the screen
+    are read from the dump's FST (<code>sva vcd --codes</code>; a VCD is made an FST once). Assertions, the FSM panel and pictures
+    read what they need first.</td></tr>
   <tr><td>a new simulation</td><td>the tab sees the dump change on the disk (polled: an NFS home works too) and offers
     <span class="ui">⟳</span> in the bar, or <i>WaveLens: Read the dump again</i> in the editor's title; the view is kept.
     <code>wavelens.autoReload: true</code> reads it at once.</td></tr>
@@ -90,7 +94,7 @@
     and <kbd>ctrl+F</kbd> <kbd>ctrl+C</kbd> <kbd>ctrl+Z</kbd> <kbd>alt+C W R</kbd>, which mean what they mean in VS Code.
     <code>wavelens.keysToVSCode</code> (default <kbd>ctrl+G</kbd>, Go to Line) go to VS Code — the viewer's list of your groups is
     <kbd>gl</kbd> then; <kbd>ctrl+P</kbd>, <kbd>F1</kbd>, <kbd>ctrl+Tab</kbd> stay VS Code's.</td></tr>
-  <tr><td>version</td><td>the bar's title line says the version and the extension's branch and commit (<code>0.22 ·
+  <tr><td>version</td><td>the bar's title line says the version and the extension's branch and commit (<code>0.23 ·
     dev@d502c48*</code>, <code>*</code>: changes not committed): a development build says which one it is.</td></tr>
   <tr><td>types by Verilator</td><td><i>WaveLens: Make the types with Verilator</i> (the editor's title menu) asks for the design
     (a <code>.f</code> file of the workspace, or the arguments: <code>*</code> and <code>?</code> in a file's name are expanded) and the top module (the dump's by default), runs
@@ -137,6 +141,8 @@
   <tr><td><code>wavelens.verilator</code></td><td>verilator</td><td>the Verilator 5 of <i>Make the types with Verilator</i>, on the
     extension's host</td></tr>
   <tr><td><code>wavelens.autoReload</code></td><td>false</td><td>after a new simulation: read the dump at once (false: offer ⟳)</td></tr>
+  <tr><td><code>wavelens.lazy</code></td><td>auto</td><td>a large dump read as it is needed (auto: an FST of 4 MB, a VCD of 64 MB
+    and more; always; never: read whole, cut to <code>dumpBudget</code>)</td></tr>
   <tr><td><code>wavelens.live</code></td><td>true</td><td>the tabs connect to an agent's live link (false: they do not)</td></tr>
   <tr><td><code>wavelens.sva</code></td><td></td><td>another <code>sva</code> program than the one the extension carries</td></tr>
 </table>
@@ -146,7 +152,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.22 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.23 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

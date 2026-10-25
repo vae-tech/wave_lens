@@ -87,6 +87,7 @@ Object.assign(WaveView.prototype, {
     if (!this.fsms().length) {
       this.toast('no state machines on these waves: none has enum labels (an FST\'s, x.types.json or .sv files in Sources…)'); return this; }
     if (!this.fsmP) this.fsmP = new Fsms(this);
+    this.need(this.fsms());   // a large dump read as it is needed: the FSMs' changes (their states reached, the details)
     this.fsmP.focusRow();
     return this;
   },

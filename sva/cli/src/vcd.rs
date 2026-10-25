@@ -12,17 +12,24 @@
 //! Another dump (a VCD) goes through wellen: its adjacent bit selects of one vector are merged (`d[0]`, `d[1]` ->
 //! `d [1:0]`), a lone one is written glued (`err[2]`), and the end time is the last change. Both are streamed, so a
 //! large dump needs no more memory than its header.
+//!
+//! Of an FST also a part (a viewer that reads a large dump as it is needed: the VS Code tab): `--header` the
+//! declarations and the dump's first and last times, no value; `--codes FILE` (`-`: stdin) the variables of those id
+//! codes (as the whole text numbers them, apart by white space): their declarations in their scopes, their enum
+//! tables, their changes. A reader of the parts gets what it gets of the whole text, those variables only.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, Seek, Write};
 use std::process::ExitCode;
 use fst_reader::{FstFilter, FstHierarchyEntry, FstReader, FstScopeType, FstSignalValue, FstVarType, ReadSignalsError};
 use wellen::stream::{self, Filter};
 use wellen::{Hierarchy, ItemRef, LoadOptions, ScopeType, SignalRef, SignalValueRef, TimescaleUnit, VarType};
 
-const USAGE: &str = "usage: sva vcd [--waves] DUMP [--out FILE.vcd]
+const USAGE: &str = "usage: sva vcd [--waves] DUMP [--out FILE.vcd] [--header | --codes FILE]
 The dump (FST or VCD) as VCD text, to FILE or stdout, as GTKWave's fst2vcd -e writes it: the names as the FST holds
-them, FST enum tables included, strings escaped as fstapi does (\\040 for a space), the end time of the dump kept.";
+them, FST enum tables included, strings escaped as fstapi does (\\040 for a space), the end time of the dump kept.
+Of an FST a part: --header the declarations and the first and last times only; --codes FILE (- stdin) the variables
+of those id codes (as the whole text numbers them, apart by white space) with their changes.";
 
 /// The VCD id code of signal `index` (an FST handle less one): base 94 over the printable characters `!`..`~`, as
 /// fst2vcd numbers its handles.
@@ -166,6 +173,25 @@ fn fst_var_word(t: FstVarType) -> &'static str {
     }
 }
 
+/// The index of a signal (its FST handle less one) from its VCD id code: `code` backwards; None for another word.
+fn index_of(code: &str) -> Option<usize> {
+    let mut n = 0usize;
+    for &c in code.as_bytes().iter().rev() {
+        if !(b'!'..=b'~').contains(&c) {
+            return None;
+        }
+        n = n.checked_mul(94)?.checked_add((c - b'!') as usize + 1)?;
+    }
+    n.checked_sub(1)
+}
+
+/// What of an FST is written: every value, none (`--header`), the variables of some signals (`--codes`: their indices).
+pub(crate) enum Part {
+    All,
+    Header,
+    Codes(HashSet<usize>),
+}
+
 /// One entry of an FST's hierarchy as declarations; `strings[handle]` marks the string variables.
 fn fst_declare(e: FstHierarchyEntry, strings: &mut [bool], o: &mut impl Write) -> std::io::Result<()> {
     match e {
@@ -198,8 +224,8 @@ fn fst_declare(e: FstHierarchyEntry, strings: &mut [bool], o: &mut impl Write) -
     }
 }
 
-/// An FST as VCD text: the header, the declarations, the value changes, the end time.
-fn fst_text<R: BufRead + Seek>(r: &mut FstReader<R>, o: &mut impl Write) -> std::io::Result<()> {
+/// An FST as VCD text: the header, the declarations, the value changes, the end time; of `part` only.
+fn fst_text<R: BufRead + Seek>(r: &mut FstReader<R>, part: &Part, o: &mut impl Write) -> std::io::Result<()> {
     let h = r.get_header();
     if !h.date.trim().is_empty() {
         writeln!(o, "$date\n\t{}\n$end", h.date.trim())?;
@@ -210,16 +236,53 @@ fn fst_text<R: BufRead + Seek>(r: &mut FstReader<R>, o: &mut impl Write) -> std:
     writeln!(o, "$timescale\n\t{}\n$end", fst_timescale(h.timescale_exponent))?;
     let mut strings = vec![false; h.max_handle as usize + 1];
     let mut res = Ok(());
+    // --codes: a variable not asked for left out, the reference to its enum table with it (it comes just before it)
+    let mut held: Option<FstHierarchyEntry> = None;
     r.read_hierarchy(|e| {
+        if res.is_err() {
+            return;
+        }
+        if let Part::Codes(want) = part {
+            match &e {
+                FstHierarchyEntry::EnumTableRef { .. } => {
+                    held = Some(e);
+                    return;
+                }
+                FstHierarchyEntry::Var { handle, .. } if !want.contains(&handle.get_index()) => {
+                    held = None;
+                    return;
+                }
+                // the reference holds until its variable (a $comment between: dumpscan.py's pending)
+                FstHierarchyEntry::Var { .. } => {
+                    if let Some(x) = held.take() {
+                        res = fst_declare(x, &mut strings, o);
+                    }
+                }
+                _ => {}
+            }
+        }
         if res.is_ok() {
             res = fst_declare(e, &mut strings, o);
         }
     }).map_err(std::io::Error::other)?;
     res?;
     writeln!(o, "$enddefinitions $end")?;
-    // every time of the dump is written, those without a change too (a `#6` of the VCD nothing changed at, the end),
-    // as fst2vcd writes them: the times of the FST's blocks (8 bytes a time step) merged with the changes
     let times = r.get_time_table().map(<[u64]>::to_vec).unwrap_or_default();
+    let end = times.last().map_or(h.end_time, |&t| t.max(h.end_time));
+    let start = times.first().map_or(h.start_time, |&t| t.min(h.start_time));
+    if let Part::Header = part {
+        // the span of the dump: its first and its last time, no value
+        writeln!(o, "#{start}")?;
+        if end > start {
+            writeln!(o, "#{end}")?;
+        }
+        return o.flush();
+    }
+    // every time of the dump is written, those without a change too (a `#6` of the VCD nothing changed at, the end),
+    // as fst2vcd writes them: the times of the FST's blocks (8 bytes a time step) merged with the changes; of some
+    // variables only their times, the first and the last
+    let some = matches!(part, Part::Codes(_));
+    let times = if some { vec![start] } else { times };
     let mut next = 0;
     let mut now: Option<u64> = None;
     let mut step = |t: u64, now: &mut Option<u64>, o: &mut dyn Write| -> std::io::Result<()> {
@@ -236,7 +299,15 @@ fn fst_text<R: BufRead + Seek>(r: &mut FstReader<R>, o: &mut impl Write) -> std:
         *now = Some(t);
         Ok(())
     };
-    let r = r.read_signals(&FstFilter::all(), |t, handle, v| -> std::io::Result<()> {
+    let filter = match part {
+        Part::Codes(want) => {
+            let mut v: Vec<usize> = want.iter().copied().filter(|&i| i < h.max_handle as usize).collect();
+            v.sort_unstable();
+            FstFilter { start: 0, end: None, include: Some(v.into_iter().map(fst_reader::FstSignalHandle::from_index).collect()) }
+        }
+        _ => FstFilter::all(),
+    };
+    let r = r.read_signals(&filter, |t, handle, v| -> std::io::Result<()> {
         if now != Some(t) {
             step(t, &mut now, o)?;
         }
@@ -254,7 +325,6 @@ fn fst_text<R: BufRead + Seek>(r: &mut FstReader<R>, o: &mut impl Write) -> std:
         Err(ReadSignalsError::ReadError(e)) => return Err(std::io::Error::other(e)),
     }
     // the times after the last change and the end of the dump: a final stretch without changes is part of the dump
-    let end = times.last().map_or(h.end_time, |&t| t.max(h.end_time));
     if now.is_none_or(|n| n < end) {
         step(end, &mut now, o)?;
     }
@@ -440,12 +510,15 @@ fn body<R: BufRead + Seek>(w: &mut stream::StreamingWaveform<R>, o: &mut impl Wr
     o.flush()
 }
 
-/// The dump as VCD text into `o`: an FST by fst-reader, anything else by wellen.
-fn convert(waves: &str, o: &mut impl Write) -> Result<(), String> {
+/// The dump as VCD text into `o`: an FST by fst-reader, anything else by wellen; a part of an FST only.
+fn convert(waves: &str, part: &Part, o: &mut impl Write) -> Result<(), String> {
     let mut f = std::io::BufReader::new(std::fs::File::open(waves).map_err(|e| e.to_string())?);
     if fst_reader::is_fst_file(&mut f) {
         let mut r = FstReader::open_and_read_time_table(f).map_err(|e| e.to_string())?;
-        return fst_text(&mut r, o).map_err(io_text);
+        return fst_text(&mut r, part, o).map_err(io_text);
+    }
+    if !matches!(part, Part::All) {
+        return Err("--header and --codes read an FST (sva fst makes one of a VCD)".into());
     }
     let mut w = stream::read_from_file(waves, &LoadOptions::default()).map_err(|e| e.to_string())?;
     header(w.hierarchy(), o).and_then(|_| body(&mut w, o)).map_err(io_text)
@@ -457,12 +530,14 @@ fn io_text(e: std::io::Error) -> String {
 }
 
 pub fn vcd_cmd(args: &[String]) -> ExitCode {
-    let (mut waves, mut out) = (None::<String>, None::<String>);
+    let (mut waves, mut out, mut header, mut codes) = (None::<String>, None::<String>, false, None::<String>);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--waves" => waves = it.next().cloned(),
             "--out" | "-o" => out = it.next().cloned(),
+            "--header" => header = true,
+            "--codes" => codes = it.next().cloned(),
             "-h" | "--help" => {
                 println!("{USAGE}");
                 return ExitCode::SUCCESS;
@@ -482,6 +557,42 @@ pub fn vcd_cmd(args: &[String]) -> ExitCode {
         eprintln!("sva: {waves}: {e}");
         return ExitCode::from(2);
     }
+    let part = match (header, codes) {
+        (true, Some(_)) => {
+            eprintln!("sva: --header or --codes, not both\n{USAGE}");
+            return ExitCode::from(2);
+        }
+        (true, None) => Part::Header,
+        (false, None) => Part::All,
+        (false, Some(f)) => {
+            let text = if f == "-" {
+                let mut s = String::new();
+                std::io::Read::read_to_string(&mut std::io::stdin(), &mut s).map(|_| s)
+            } else {
+                std::fs::read_to_string(&f)
+            };
+            let text = match text {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("sva: {f}: {e}");
+                    return ExitCode::from(2);
+                }
+            };
+            let mut want = HashSet::new();
+            for w in text.split_whitespace() {
+                match index_of(w) {
+                    Some(i) => {
+                        want.insert(i);
+                    }
+                    None => {
+                        eprintln!("sva: {f}: \"{w}\" is not an id code");
+                        return ExitCode::from(2);
+                    }
+                }
+            }
+            Part::Codes(want)
+        }
+    };
     crate::reading(&waves);
     let sink: Box<dyn Write> = match &out {
         Some(f) => match std::fs::File::create(f) {
@@ -494,7 +605,7 @@ pub fn vcd_cmd(args: &[String]) -> ExitCode {
         None => Box::new(std::io::stdout().lock()),
     };
     let mut o = std::io::BufWriter::with_capacity(1 << 20, sink);
-    match convert(&waves, &mut o) {
+    match convert(&waves, &part, &mut o) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) if e.is_empty() => ExitCode::SUCCESS,
         Err(e) => {
@@ -526,6 +637,14 @@ mod tests {
         assert_eq!(fst_timescale(-12), "1ps");
         assert_eq!(fst_timescale(0), "1s");
         assert_eq!(fst_timescale(-2), "10ms");
+    }
+
+    #[test]
+    fn id_codes_back_to_their_index() {
+        for i in [0, 1, 93, 94, 95, 94 * 94 + 93, 1_000_000] {
+            assert_eq!(index_of(&code(i)), Some(i), "{i}");
+        }
+        assert_eq!(index_of("a b"), None);
     }
 
     #[test]

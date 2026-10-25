@@ -634,6 +634,42 @@ fn fst_header_of_a_vcd_and_its_odd_declarations() {
     }
 }
 
+/// The parts of an FST a viewer reads as it needs them: `--header` every declaration and the dump's first and last
+/// times, no value; `--codes` the variables of those id codes (an alias's too, their enum tables) and their changes, as
+/// the whole text has them.
+#[test]
+fn vcd_parts_of_an_fst() {
+    let vcd = own("vcd-parts", "all.vcd", ALL_KINDS);
+    assert_eq!(sva(&["fst", &vcd.to_string_lossy(), "-q"]).status.code(), Some(0));
+    let fst = vcd.with_extension("fst");
+    let whole = out(&sva(&["vcd", &fst.to_string_lossy()]));
+    let head = out(&sva(&["vcd", &fst.to_string_lossy(), "--header"]));
+    let decl = |t: &str| t.split("$enddefinitions $end").next().unwrap().to_string();
+    assert_eq!(decl(&head), decl(&whole));
+    assert!(head.ends_with("$enddefinitions $end\n#0\n#20\n"), "{head}");
+    // state (") with its enum table and its reference, r (%); clk (!) is clk_copy too
+    let codes = own("vcd-parts", "codes.txt", "\" %\n!");
+    let part = out(&sva(&["vcd", &fst.to_string_lossy(), "--codes", &codes.to_string_lossy()]));
+    assert!(part.contains("$attrbegin misc 07 pkg::state_t 3 IDLE RUN DONE 00 01 10 1 $end\n$scope module tb $end\n$var wire 1 ! clk $end\n\
+        $attrbegin misc 07 \"\" 1 $end\n$var logic 2 \" state [1:0] $end\n$var real 64 % r $end\n$scope module u $end\n$var wire 1 ! clk_copy $end\n\
+        $upscope $end\n$upscope $end\n$enddefinitions $end\n"), "{part}");
+    let only = |t: &str| changes(t).into_iter().map(|(t, v)| (t, v.into_iter().filter(|l| l.ends_with('!') || l.ends_with('"') || l.ends_with('%'))
+        .collect::<Vec<_>>())).filter(|(_, v)| !v.is_empty()).collect::<Vec<_>>();
+    assert_eq!(only(&part), only(&whole), "{part}");
+    assert!(part.trim_end().ends_with("#20"), "the end of the dump: {part}");
+    // the codes on stdin; one that is no code, and a VCD (no part of it): said
+    let o = Command::new(env!("CARGO_BIN_EXE_sva")).args(["vcd", &fst.to_string_lossy(), "--codes", "-"]).stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped()).spawn().and_then(|mut c| {
+            use std::io::Write as _;
+            c.stdin.take().unwrap().write_all(b"%")?;
+            c.wait_with_output()
+        }).unwrap();
+    assert_eq!(only(&out(&o)).iter().map(|x| x.1.len()).sum::<usize>(), 2, "r at #0 and #5: {}", out(&o));
+    let bad = own("vcd-parts", "bad.txt", "! a\u{7f}b");
+    assert!(err(&sva(&["vcd", &fst.to_string_lossy(), "--codes", &bad.to_string_lossy()])).contains("is not an id code"));
+    assert!(err(&sva(&["vcd", &vcd.to_string_lossy(), "--header"])).contains("read an FST"));
+}
+
 /// The blocks of changes (64 MiB each; `--block-bytes` makes them small) and the aliases of equal changes read back as
 /// one block does; --out names another file.
 #[test]

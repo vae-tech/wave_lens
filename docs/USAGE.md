@@ -40,6 +40,12 @@ may be the default). What the tab does differently from a page in a browser:
 - **Convert to FST.** A `.vcd` in the Explorer → right click → *WaveLens: Convert to FST* (or the tab's title menu, or
   the palette) writes `tb.fst` beside `tb.vcd` with `sva fst` ([§ A VCD as an FST](#a-vcd-as-an-fst)): the FSM states of
   the VCD and of `tb.types.json` in it. Its notes go to the output channel *WaveLens* as they come, a failure opens it.
+- **A large dump** (`wavelens.lazy`, auto: an FST of 4 MB or a VCD of 64 MB and more) opens with every module and
+  signal at once — the top level open, its modules folded, no value read yet — as GTKWave and Surfer open one: open a
+  module and the signals on the screen are read (`reading…` on their rows for a moment) from the dump's FST with
+  `sva vcd --codes`; a VCD is made an FST once (`sva fst --no-types`, kept in the extension's storage, a few seconds for
+  500 MB). What needs other signals reads them first: an assertion its signals, the FSM panel and `fsm_stats` the state
+  machines, a picture its rows. Their values are the ones the whole dump gives (smoke `lazy_dump` holds it to that).
 - **A new simulation.** The tab says when the dump changed on the disk (its size and time still for a second: polled,
   so an NFS home of the host works too); ⟳ in the bar, or *WaveLens: Read the dump again* (the editor's title), reads it
   with the view kept. `wavelens.autoReload`: at once.
@@ -54,7 +60,7 @@ may be the default). What the tab does differently from a page in a browser:
   what they mean in VS Code (ctrl+F find, ctrl+C copy, ctrl+Z / ctrl+Y undo / redo, alt+C W R in the find field);
   `wavelens.keysToVSCode` (default `ctrl+G`, Go to Line) are left to VS Code — the list of your groups is `gl` then; the
   others (ctrl+P, F1, ctrl+tab, ctrl+shift+…) are VS Code's.
-- **The version** in the bar's title line: `0.22 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
+- **The version** in the bar's title line: `0.23 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
   committed), so a tab of a development build says which one it is.
 - **An agent** on the host (`tools/wavemcp.py`, below): when it starts its live link, every open tab connects (**●
   live**); `view_live` with `page` a `.vcd` / `.fst` and `open: true` opens it in the VS Code window that has the file
@@ -79,7 +85,7 @@ may be the default). What the tab does differently from a page in a browser:
   message with *Open at the line*. An FST's notes name the line of its VCD text. *WaveLens: Show the log* (the editor's
   title) opens the channel. In a browser the notes go to the console (`WaveLens.vcdToWave(text).log`).
 
-Settings: `wavelens.theme`, `wavelens.sources`, `wavelens.autoReload`, `wavelens.live`, `wavelens.sva` (another sva program). The cut of a big dump (`dumpBudget`) applies; the whole VCD text crosses to your machine once per read.
+Settings: `wavelens.theme`, `wavelens.sources`, `wavelens.autoReload`, `wavelens.lazy` (auto, always, never), `wavelens.live`, `wavelens.sva` (another sva program). A dump read whole (smaller than the `wavelens.lazy` sizes, or `never`) is cut to `dumpBudget`, and its whole VCD text crosses to your machine once per read.
 
 ### WaveDrom JSON in your own page
 
@@ -269,7 +275,7 @@ add theirs (`WaveLens.registerDefaults`).
 | `toolsFolded` | false | the bar's tools folded to its title line (**▴** / **▾ tools** in the bar) |
 | `toolsHidden` | `[]` | the bar's tool groups left out by their labels (`["style", "dump"]`; the right button on the bar) |
 | `themeButton` | `auto` | **◐** in the bar's title line: the page's theme (auto, light, white, dark; kept in this browser; in VS Code its list, VS Code's colours too); `auto`: when the page has no theme button of its own (`viewer.html`, the VS Code tab) |
-| `version` | true | the version in the bar's title line, and the build the page was made from (`0.22 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
+| `version` | true | the version in the bar's title line, and the build the page was made from (`0.23 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
 | `keysLeft` | `[]` | keys the viewer leaves to its host: `["ctrl+G"]` (`ctrl+` is `cmd+` too, a letter by its place); the VS Code tab: `wavelens.keysToVSCode` |
 | `savePage` | true | the bar's **Save page**: this page as a `.view.html` with your view in it (§ Save and Load); false hides it and keeps no copy of the page's text |
 | `cycles`, `cycleClock`, `cycleZero` | false, null, null | the clock cycles in a band under the time axis (§ Clock cycles): on, the clock counted (null: the `*clk*` found), the time of cycle 0 (`"50ns"` or ps; null: the first rising edge) |
@@ -305,7 +311,10 @@ It follows the page theme, or paints its own background when it has one.
 changing signal (1526 signals, all 9 scope levels) in 25 s and 6.3 MB; it opens in 2 s and redraws in 4 ms. The viewer's
 canvas only covers the visible rows (the names column is still one element per row: tens of thousands of rows make
 folding and searching slower). Above `select.budget` value changes
-(6 M) `mkconfig.py` hides the deepest levels first and says which depth it kept.
+(6 M) `mkconfig.py` hides the deepest levels first and says which depth it kept. A VCD opened in a page (Open…) is cut to
+`dumpBudget` (3 M changes: the levels nearest the top, the rest named by the find); the VS Code tab reads a large one
+as it is needed instead (*VS Code* above: every module at once, the signals you open read then; a VCD of 643 MB and 10 000
+signals: an FST in 9 s once, then its modules in 0.3 s, a module opened in a moment).
 
 ## Assertions (SVA)
 
@@ -980,7 +989,7 @@ All tools are `python3 -I tools/<tool>.py --help`; the Makefile calls them for y
 | `mkvsix.py` | the VS Code extension as one `.vsix` ([§ In VS Code](#in-vs-code-over-remote-ssh-or-wsl)) | `--out`, `--sva`, `--target` |
 | `viewedit.py` | the viewer's [commands](#commands-and-edits) on a page's edits or a saved state (`.view.json`) | `PAGE --ops JSON\|@file`, `--view`, `--get`, `--views`, `--model`, `--commands` |
 | `svaverify.py` | the examples' checkers in Verilator `--assert` against `sva eval` (`make sva-verify`) | `--build`, `--only`, `--keep`, `--sva-bin` |
-| `sva` (the engine's CLI, Rust: `make sva-build`, or `bin/linux-x86_64/sva`) | `sva parse` an assertion file, `sva eval` assertions over a dump, `sva report` results, `sva --waves DUMP --info` a dump's scopes and variables, `sva vcd DUMP [--out x.vcd]` an FST as VCD text (as `fst2vcd -e` writes it: its names, enum tables, escaped strings, its end; *Formats*), `sva fst DUMP.vcd [--out x.fst]` a VCD as an FST beside it (as `vcd2fst` writes it, enum tables and the types file's FSM states kept; *Formats*) | `sva <command> --help`; eval: `--waves --scope --sva [--assert NAME] [--from --to] [--out] [--json] [--attempts] [--x fail\|false] [--vacuous] [--no-lane] [--resolve up\|scope] [--ignore-prefix] [--alias] [--max-threads] [--report] [--junit] [-D]`; parse: `--json --expand -D` |
+| `sva` (the engine's CLI, Rust: `make sva-build`, or `bin/linux-x86_64/sva`) | `sva parse` an assertion file, `sva eval` assertions over a dump, `sva report` results, `sva --waves DUMP --info` a dump's scopes and variables, `sva vcd DUMP [--out x.vcd] [--header \| --codes FILE]` an FST as VCD text (as `fst2vcd -e` writes it: its names, enum tables, escaped strings, its end; *Formats*; of an FST a part: its header, or the variables of some id codes), `sva fst DUMP.vcd [--out x.fst]` a VCD as an FST beside it (as `vcd2fst` writes it, enum tables and the types file's FSM states kept; *Formats*) | `sva <command> --help`; eval: `--waves --scope --sva [--assert NAME] [--from --to] [--out] [--json] [--attempts] [--x fail\|false] [--vacuous] [--no-lane] [--resolve up\|scope] [--ignore-prefix] [--alias] [--max-threads] [--report] [--junit] [-D]`; parse: `--json --expand -D` |
 
 `sva eval --attempts` adds a line per attempt under an assertion's summary: its cycles, the time it started, the result
 and its trace (the elements `s1`, `s2` … and the cycle each matched at), a failure's reason after `--`:
@@ -1051,7 +1060,11 @@ names as they are (`\e[0]`) —, the enum tables (`$attrbegin misc 07`), the str
 (`\040` a space, `\t`, `\n`, `\"`, `\\`, a byte above 127 in octal: a string is one token of the text), every time of
 the dump, the end after the last change too (`#10` after a change at 5). Not written: `$dumpoff` / `$dumpon` (the x
 values of the gap are). `sva vcd` of a VCD reads it with wellen: the adjacent bit selects of a vector are merged (`d
-[7:4]`), a lone one is glued, the times are those of the changes. `sva eval` and `sva --info` read every dump with
+[7:4]`), a lone one is glued, the times are those of the changes. Of an FST also a part, for a viewer that reads a
+large dump as it is needed (the VS Code tab): `--header` every declaration and the dump's first and last times, no
+value (313 kB and 0.01 s of a 127 MB FST of 10 000 signals); `--codes FILE` (`-`: stdin) the variables of those id
+codes as the whole text numbers them — their declarations in their scopes, their enum tables, their changes, the end
+(50 signals of it: 0.06 s); a reader of a part gets what it gets of the whole text for them. `sva eval` and `sva --info` read every dump with
 wellen (*ENGINE.md*: the merged selects, the escaped names that end in one).
 
 ### A VCD as an FST

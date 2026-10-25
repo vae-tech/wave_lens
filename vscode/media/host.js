@@ -134,7 +134,11 @@
     if (s.error) throw new Error(s.error);
     const r = await nativeFetch(s.src, { cache: 'no-store' });
     if (!r.ok) throw new Error(`${s.name}: ${r.status} ${r.statusText}`);
-    return new File([await r.blob()], s.name);
+    const f = new File([await r.blob()], s.name);
+    // a large dump: its header now, the signals the viewer shows read by the extension as they are needed
+    if (s.lazy) Object.assign(f, { wlLazy: true, wlLoad: async codes => { const x = await call('codes', { codes }); if (x.error) throw new Error(x.error);
+      return x.text; } });
+    return f;
   };
   const handle = { kind: 'file', name: H.name, getFile: fetchDump };   // what reloadDump (⟳) reads again
   let last = {};   // the last dump read: {name, shown, total}

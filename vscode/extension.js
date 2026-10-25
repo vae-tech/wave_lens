@@ -38,25 +38,37 @@ function svaBin() {
 }
 
 /* ---------------- an FST as VCD text: sva vcd, kept by path, size, time and the program ---------------- */
+// A large dump is read as it is needed (wavelens.lazy; auto: an FST of 4 MB, a VCD of 64 MB or more): the tab gets the
+// header of its FST (sva vcd --header: every module and signal, no value), then the signals it shows (sva vcd --codes);
+// a VCD becomes an FST once (sva fst --no-types, kept as the text is)
 const CONV = new Map();   // the conversions running: their output -> Promise
-async function vcdOf(file) {
-  if (!/\.fst$/i.test(file)) return file;
+const LAZY_FST = 4 << 20, LAZY_VCD = 64 << 20;
+function lazyFor(file, size) {
+  const set = vscode.workspace.getConfiguration('wavelens').get('lazy') || 'auto';
+  return set === 'always' || (set !== 'never' && size >= (/\.fst$/i.test(file) ? LAZY_FST : LAZY_VCD));
+}
+const vcdOf = file => (/\.fst$/i.test(file) ? convert(file, 'vcd', 'VCD text', (bin, tmp) => ['vcd', file, '--out', tmp]) : Promise.resolve(file));
+const fstOf = file => (/\.fst$/i.test(file) ? Promise.resolve(file) :
+  convert(file, 'fst', 'FST', (bin, tmp) => ['fst', file, '--no-types', '-q', '--out', tmp]));
+const headerOf = fst => convert(fst, 'head.vcd', 'its modules and signals', (bin, tmp) => ['vcd', fst, '--header', '--out', tmp]);
+// the file sva makes of `file` (ext: vcd, fst, head.vcd), kept by the file's path, size, time and the program
+async function convert(file, ext, what, args) {
   const st = await fs.promises.stat(file), bin = svaBin();
   let tag = bin; try { const b = fs.statSync(bin); tag += b.size + ':' + b.mtimeMs; } catch (e) { /* on the PATH */ }
   const dir = path.join(CTX.globalStorageUri.fsPath, 'fst'), key = sha(file);
-  const out = path.join(dir, `${key}-${sha(`${st.size}:${st.mtimeMs}:${tag}`)}.vcd`);
+  const out = path.join(dir, `${key}-${sha(`${st.size}:${st.mtimeMs}:${tag}`)}.${ext}`);
   if (exists(out)) return out;
   if (CONV.has(out)) return CONV.get(out);
   const job = (async () => {
     await fs.promises.mkdir(dir, { recursive: true });
     const tmp = `${out}.${process.pid}.${Date.now()}.part`;
     try {
-      await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `WaveLens: ${path.basename(file)} → VCD text` }, () =>
+      await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `WaveLens: ${path.basename(file)} → ${what}` }, () =>
         new Promise((ok, no) => {
-          const p = cp.spawn(bin, ['vcd', file, '--out', tmp], { stdio: ['ignore', 'ignore', 'pipe'] });
+          const p = cp.spawn(bin, args(bin, tmp), { stdio: ['ignore', 'ignore', 'pipe'] });
           let err = ''; p.stderr.on('data', d => { err += d; });
           p.on('error', e => no(new Error(`${bin}: ${e.message}`)));
-          p.on('close', code => (code === 0 ? ok() : no(new Error(err.trim() || `${bin} vcd: exit ${code}`))));
+          p.on('close', code => (code === 0 ? ok() : no(new Error(err.trim() || `${bin} ${args(bin, tmp)[0]}: exit ${code}`))));
         }));
       await fs.promises.rename(tmp, out);   // a revision's file is whole or not there (other windows share the directory)
     } catch (e) { await fs.promises.unlink(tmp).catch(() => {}); throw e; }
@@ -69,10 +81,10 @@ async function vcdOf(file) {
 
 // the newest 16 conversions kept; one an open tab reads, or younger than ten minutes (another window's), stays
 async function evict(dir) {
-  const used = new Set([...TABS].map(t => t.src)), now = Date.now(), all = [];
+  const used = new Set([...TABS].flatMap(t => [t.src, t.fst])), now = Date.now(), all = [];
   for (const f of await fs.promises.readdir(dir).catch(() => [])) {
     const p = path.join(dir, f);
-    try { const st = await fs.promises.stat(p); if (f.endsWith('.vcd') || now - st.mtimeMs > 86400e3) all.push([p, st.mtimeMs]); } catch (e) { /* gone */ }
+    try { const st = await fs.promises.stat(p); if (/\.(vcd|fst)$/.test(f) || now - st.mtimeMs > 86400e3) all.push([p, st.mtimeMs]); } catch (e) { /* gone */ }
   }
   all.sort((a, b) => b[1] - a[1]);
   for (const [p, t] of all.slice(16)) if (!used.has(p) && now - t > 600e3) await fs.promises.unlink(p).catch(() => {});
@@ -226,15 +238,38 @@ ${scripts}
 </body>
 </html>`;
   }
-  async source() {   // -> {src, name}: the URI the webview fetches now (an FST: its VCD text, converted when it changed)
-    let f; try { f = this.src = await vcdOf(this.file); } catch (e) { this.report({ error: e.message }); throw e; }
-    return { src: this.panel.webview.asWebviewUri(vscode.Uri.file(f)).toString(), name: path.basename(this.file) };
+  // -> {src, name, lazy}: the URI the webview fetches now (an FST: its VCD text, converted when it changed; a large dump:
+  // the header of its FST, lazy)
+  async source() {
+    let f, lazy = false;
+    try {
+      lazy = lazyFor(this.file, (await fs.promises.stat(this.file)).size);
+      this.fst = lazy ? await fstOf(this.file) : null;
+      f = this.src = lazy ? await headerOf(this.fst) : await vcdOf(this.file);
+    } catch (e) { this.report({ error: e.message }); throw e; }
+    if (lazy) log(`${path.basename(this.file)}: large: its modules and signals first, the values of the ones shown as they are needed`);
+    return { src: this.panel.webview.asWebviewUri(vscode.Uri.file(f)).toString(), name: path.basename(this.file), lazy };
+  }
+  // the VCD text of some signals of the large dump (their id codes in its header): sva vcd --codes of its FST -> {text}
+  codes(list) {
+    const bin = svaBin(), fst = this.fst;
+    if (!fst) return Promise.resolve({ error: 'this dump is read whole' });
+    return new Promise(ok => {
+      const p = cp.spawn(bin, ['vcd', fst, '--codes', '-'], { stdio: ['pipe', 'pipe', 'pipe'] });
+      const out = [], err = [];
+      p.stdout.on('data', d => out.push(d)); p.stderr.on('data', d => err.push(d));
+      p.on('error', e => ok({ error: `${bin}: ${e.message}` }));
+      p.on('close', code => ok(code === 0 ? { text: Buffer.concat(out).toString('utf8') } :
+        { error: Buffer.concat(err).toString('utf8').trim() || `${bin} vcd --codes: exit ${code}` }));
+      p.stdin.end(list.map(String).join('\n'));
+    });
   }
   async message(m) {
     if (!m || typeof m.type !== 'string') return;
     const reply = o => this.post(Object.assign({ id: m.id }, o));
     switch (m.type) {
       case 'source': return reply(await this.source());
+      case 'codes': return reply(await this.codes(Array.isArray(m.codes) ? m.codes : []));
       case 'store': {   // a localStorage key of this dump (null: removed), kept in the workspace: the keys changed, not a snapshot
         if (typeof m.key !== 'string') return;
         this.changed.set(m.key, m.value == null ? null : String(m.value));

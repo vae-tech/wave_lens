@@ -69,6 +69,12 @@
           "default": false,
           "description": "When the dump changes on the disk (a new simulation), read it again at once, the view kept. Off: the tab says so and ⟳ reads it."
         },
+        "wavelens.lazy": {
+          "type": "string",
+          "enum": ["auto", "always", "never"],
+          "default": "auto",
+          "description": "A large dump read as it is needed: every module and signal at once (the top level open, its modules folded), the values of the signals you open read from its FST then (a VCD is made an FST once, kept). auto: an FST of 4 MB or a VCD of 64 MB and more; never: every dump read whole (cut to dumpBudget)."
+        },
         "wavelens.live": {
           "type": "boolean",
           "default": true,

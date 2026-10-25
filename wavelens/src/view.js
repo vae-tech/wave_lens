@@ -692,7 +692,10 @@ class WaveView {
     applyLook(root, opts.theme ?? M.theme, Object.assign({}, M.colors, opts.colors));
     this.storeId = this.storeName();
     this.lookKey = 'wavelens.look:' + this.storeId; this.local = this.loadLook();   // the bar's own layer of the settings (the edge style)
-    this.restyle(false); this.collapsed = foldSet(M, this.S.fold);
+    // a large dump read as it is needed (its rows "lazy", opts.loadCodes reads them): the top level open, its modules folded
+    this.lazy = M.rows.some(r => r.lazy); this.lazyWait = new Map();
+    if (this.lazy && !opts.loadCodes) { M.rows.forEach(r => { r.lazy = false; }); this.lazy = false; }   // nothing to read them with: as they are
+    this.restyle(false); this.collapsed = foldSet(M, this.S.fold ?? (this.lazy ? 1 : null));
     this.picks = hlPick(M, this.S.highlight); this.hlFrom = JSON.stringify(this.S.highlight ?? null);
     this.selRun = new Set(); this.selAnchor = null;   // shift+click: a run of selected signals (selectRun)
     this.found = new Map(); this.findPicks = new Map(); this.findHl = this.S.findHighlight; this.findOpen = this.S.findOpen;   // fuzzy find
@@ -1355,6 +1358,7 @@ class WaveView {
     const key = JSON.stringify(o);
     if (!this.cycMemo || this.cycMemo.key !== key) {
       const clk = cycClock(this.M.rows, o.cycleClock), ups = clk ? cycUps(clk) : [];
+      if (clk && clk.lazy) this.need([clk]);   // a large dump: the clock read, the band drawn when it is there (need resets the memo)
       this.cycMemo = { key, d: clk && ups.length ? { clk, ups, iz: cycZero(ups, o.cycleZero) } : null };
     }
     return this.cycMemo.d;
@@ -1529,7 +1533,8 @@ class WaveView {
       if (/\.fst$/i.test(file.name) && !/^\s*\$/.test(head)) {
         this.toast('an FST is binary: sva vcd x.fst --out x.vcd (or fst2vcd), or make html WAVES=x.fst'); return this; }
       let r;
-      try { const o = { name: file.name, budget: this.S.dumpBudget }; r = pieces ? await vcdToWaveFile(file, o) : vcdToWave(text, o); }
+      // a large dump given lazy (the VS Code tab): its header, every signal read later through file.wlLoad (need, lazyAsk)
+      try { const o = { name: file.name, budget: this.S.dumpBudget, lazy: !!file.wlLazy }; r = pieces ? await vcdToWaveFile(file, o) : vcdToWave(text, o); }
       catch (e) { this.dumpSaid(file.name, { error: e.message, line: e.line }); throw e; }
       if (gen !== this.root.wlOpen || !VIEWS.has(this)) return this;
       const said = [], why = new Map(), nsv = svApply(r.doc, this.opts.sv, said, why);   // the sources' labels (Sources…, the VS Code tab's wavelens.sources)
@@ -1539,13 +1544,14 @@ class WaveView {
       for (const n of ((this.opts.sv && this.opts.sv.notes) || []).concat(said, run)) r.log.push({ level: 'warning', text: 'types: ' + n });
       if (!r.shown) { this.toast(`${file.name}: no signals`); this.dumpSaid(file.name, { error: 'no signals', log: r.log, info: r.info }); return this; }
       const st = keep ? this.state() : null, root = this.root, opts = Object.assign({}, this.opts,
-        { title: file.name, dumpSrc: { name: file.name, handle, file }, dumpDate: r.info.date, svWhy: why, svRun: run }), panel = keep && this.fsmPanelOf();
+        { title: file.name, dumpSrc: { name: file.name, handle, file }, dumpDate: r.info.date, svWhy: why, svRun: run, loadCodes: file.wlLoad || null }),
+        panel = keep && this.fsmPanelOf();
       this.destroy(); root.innerHTML = '';
       const v = new WaveView(root, r.doc, opts); v.panelBox = this.panelBox;   // the panels open where they were
       if (st) { delete st.title; await v.setState(st); }
       v.fsmPanelAgain(panel);   // the FSM panel stays open (⟳)
       const bad = r.log.filter(x => x.level !== 'info').length;
-      v.toast((`${file.name}: ${r.shown} of ${r.total} ` +
+      v.toast((file.wlLazy ? `${file.name}: ${r.total} signals in ${r.info.scopes} modules, read as you open them` : `${file.name}: ${r.shown} of ${r.total} ` +
           `signals${r.shown < r.total ? ` (dumpBudget ${this.S.dumpBudget} changes: the levels nearest the top)` : ''}`) +
           (bad ? ` · ${bad} warning${bad === 1 ? '' : 's'} (the browser's console)` : ''));
       v.dumpLog = r.log;
@@ -2508,6 +2514,30 @@ class WaveView {
     if (this.cursor < this.t0 || this.cursor > this.t0 + this.span) this.t0 = this.clamp(this.cursor - this.span / 2);
     this.draw(); return this;
   }
+  // A large dump read as it is needed (the VS Code tab: sva vcd --codes of its FST): the rows on the screen whose changes
+  // are not read yet, asked for at once after a frame; their waves drawn when they come
+  lazyAsk(lay, oy, h) {
+    if (!this.lazy || !this.opts.loadCodes) return;
+    const want = new Set();
+    for (const o of lay) if (o.y + o.h >= oy && o.y <= oy + h) for (const r of lazyOf(this.M, o.row.orig || o.row)) if (!this.lazyWait.has(r)) want.add(r);
+    if (want.size) this.need([...want]);
+  }
+  // the changes of these rows read (the ones not read yet; a row asked for already: that read) -> a promise, when they are
+  // there; the assertions, the FSM panel and the commands ask for theirs this way
+  need(rows) {
+    const M = this.M, all = new Set(rows.flatMap(r => lazyOf(M, r.orig || r))), ask = [...all].filter(r => !this.lazyWait.has(r));
+    if (ask.length && this.opts.loadCodes) {
+      const p = (async () => {
+        const text = await this.opts.loadCodes([...new Set(ask.flatMap(r => r.src.lazy || []))]);
+        const got = fillRows(M, vcdSignals(vcdToWave(text, { name: this.opts.title, budget: Infinity }).doc.signal));
+        for (const r of ask) if (r.lazy) this.lazyWait.delete(r);   // not in what came: asked again when it is on the screen
+        if (got.length) { this.clkMemo = null; this.cycMemo = null; this.fsmSt = null; this.invalidate(); if (this.fsmP) this.fsmP.render(true); }
+        return got;
+      })().catch(e => { for (const r of ask) this.lazyWait.delete(r); this.toast('reading the signals: ' + e.message); return []; });
+      for (const r of ask) this.lazyWait.set(r, p);
+    }
+    return Promise.all([...all].map(r => this.lazyWait.get(r)).filter(Boolean)).then(() => this);
+  }
   invalidate() { // one redraw in the next frame, however many changes ask for it
     if (!this.inv) this.inv = requestAnimationFrame(() => { this.inv = 0; if (this.root.isConnected) this.draw(); });
   }
@@ -2537,7 +2567,7 @@ class WaveView {
     if (this.wcol.style.height !== lay.H + 'px') this.wcol.style.height = lay.H + 'px';
     if (this.sel && !this.vis.includes(this.sel)) { this.sel = null; if (this.mods) this.mods.render(); }   // folded away (the panel's ● goes)
     if (this.printing) this.paintPrint(lay);
-    else { const f = this.size(lay); this.bmGeo = this.paintFrame(this.canvas, f.W, f.Hc, f.oy, lay, true, f.dpr); }
+    else { const f = this.size(lay); this.bmGeo = this.paintFrame(this.canvas, f.W, f.Hc, f.oy, lay, true, f.dpr); this.lazyAsk(lay, f.oy, f.Hc); }
     this.syncReadouts();
   }
   size(lay) { // the canvas: as wide as its column, as tall as the rows in view (at least the axis and a little more)

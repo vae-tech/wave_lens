@@ -14,6 +14,8 @@
 // What it noticed on the way goes to `log`: [{level: error | warning | info, line, text}] (a line of the text, 1 the first;
 // none: the whole dump), at most VCD_SAME of a kind and then how many more; `info`: the dump's parameters ($version,
 // $date, $timescale, its time, scopes, signals, changes). An error it cannot read past is thrown with its line (e.line).
+// opts.lazy: the text is a dump's header (sva vcd --header: the declarations, the first and last times) and every
+// variable is a signal whose changes come later ("lazy": its id codes; a viewer reads them as it needs them, fillRows).
 const VCD_UNIT = { s: 1e12, ms: 1e9, us: 1e6, ns: 1e3, ps: 1, fs: 1e-3, as: 1e-6, zs: 1e-9 };
 const VCD_TEXT = { real: 'real', realtime: 'real', shortreal: 'real', real_parameter: 'real', string: 'string' };   // -> "kind"
 // integer variables (Questa writes an int-based enum as one): signed decimal unless they have an enum table
@@ -55,7 +57,7 @@ async function vcdToWaveFile(file, opts = {}, chunk = 8 << 20) {
   return r.value;
 }
 function* vcdRead(opts = {}, size = 0) {
-  const budget = opts.budget ?? 3e6, name = opts.name || 'dump.vcd';
+  const lazy = !!opts.lazy, budget = lazy ? Infinity : opts.budget ?? 3e6, name = opts.name || 'dump.vcd';
   // the header: pieces until its "$enddefinitions $end" (the whole text at once: vcdToWave), its words read on as the
   // parser below takes them: a section ($comment, $var …) to its $end, so "$enddefinitions" in a comment is not the end
   let text = '', n0 = 0, eof = false, hw = 0, sec = false, defs = false;
@@ -231,7 +233,7 @@ function* vcdRead(opts = {}, size = 0) {
       'drawn as written');
   }, true);
   if (!vars.length) note('warning', null, 'novar', 'no $var: the dump has no signals');
-  else if (!count.size) note('warning', null, 'empty', 'no value changes after $enddefinitions');
+  else if (!count.size && !lazy) note('warning', null, 'empty', 'no value changes after $enddefinitions');
   const changes = v => v.codes.reduce((s, k) => s + (count.get(k) || 0), 0);
   const order = vars.slice().sort((a, b) => a.depth - b.depth);   // stable: declaration order inside a level
   const keep = new Set(); let used = 0;
@@ -270,6 +272,7 @@ function* vcdRead(opts = {}, size = 0) {
     let key = '';
     for (const p of v.scope) { const k2 = key ? key + '.' + p : p; if (!node.has(k2)) { const g = [p]; node.get(key).push(g); node.set(k2, g); } key = k2; }
     const s = { name: v.name, path: v.path, tv: tvOf(v) }; if (v.width > 1) s.width = v.width; if (v.kind) s.kind = v.kind;
+    if (lazy) s.lazy = v.codes;
     if (v.enum) s.enum = v.enum; else if (v.num) s.radix = 'signed';
     node.get(key).push(s);
   }
@@ -279,7 +282,7 @@ function* vcdRead(opts = {}, size = 0) {
   const end = Math.max(t1, (t0 ?? 0) + 1);
   const doc = { signal: out, head: { text: name }, time: { t0: t0 ?? 0, t1: end, cycle: (end - (t0 ?? 0)) / 40, unit: 'ps' }, config: {} };
   const still = vars.filter(v => keep.has(v) && !changes(v));
-  if (still.length) note('info', null, 'still', `${still.length} signal${still.length === 1 ? ' has' : 's have'} no value in the dump (drawn x): ` +
+  if (still.length && !lazy) note('info', null, 'still', `${still.length} signal${still.length === 1 ? ' has' : 's have'} no value in the dump (drawn x): ` +
     still.slice(0, 5).map(v => v.path).join(', ') + (still.length > 5 ? ' …' : ''));
   if (keep.size < vars.length) note('info', null, 'budget', `${keep.size} of ${vars.length} signals read: the levels nearest the top within ` +
     `dumpBudget (${budget} changes)`);
@@ -293,6 +296,8 @@ function* vcdRead(opts = {}, size = 0) {
   return { doc, shown: shownVars.length, total: vars.length, changes: used, info,
     log: log.map(x => Object.assign({ level: x.level, text: x.msg }, x.line != null ? { line: x.line } : {})) };
 }
+// the signals of vcdToWave's WaveJSON, out of their groups
+const vcdSignals = a => a.flatMap(x => (Array.isArray(x) ? vcdSignals(x.slice(1)) : [x]));
 // a VCD vector value in w digits: a shorter one extended with 0, or x / z; a longer one its last w
 const vcdExt = (b, w) => (b.length < w ? (b[0] === 'x' || b[0] === 'z' ? b[0] : '0').repeat(w - b.length) + b : b.length > w ? b.slice(b.length - w) : b);
 // a real as written (r1.5, rinf, r-inf, rnan) -> its number as gfmt prints it (15 digits); not a number: as written (the
