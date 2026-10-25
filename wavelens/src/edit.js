@@ -96,8 +96,10 @@ command('range', 'from? to? signal?', 'the measured range (Δ, the edges or chan
   v.setRange(Math.max(Math.min(p, q), v.M.t0), Math.min(Math.max(p, q), v.M.t1), row);
   return { range: v.range, text: v.rangeText() };
 });
-command('bookmark', 'n? t? signal? text? color? lift? delete?', 'a numbered circle on a signal (none: the time axis) with its text: a new one ' +
-  '(n free or left out, t default the cursor) or bookmark n changed; lift: above its signal in a lane; delete: bookmark n goes ' +
+command('bookmark', 'n? t? signal? text? color? lift? top? go? delete?', 'a numbered circle on a signal (none: the time axis) with its text: a new one ' +
+  '(n free or left out, t default the cursor) or bookmark n changed; lift: above its signal in a lane; top: the row going to it puts at the top ' +
+  'of the waves (a signal\'s or module\'s path; null: none; the view\'s own bookmarks take the row at the top); go: the waves to it as 1–9 go; ' +
+  'delete: bookmark n goes ' +
   '(n "all": every one, with the arrows)', (v, a) => {
   if (a.n != null && !(a.n === 'all' && a.delete) && !isNum(a.n)) fail(`n: a bookmark number (1, 2 …), not ${JSON.stringify(a.n)}`);
   if (a.delete) {
@@ -108,15 +110,24 @@ command('bookmark', 'n? t? signal? text? color? lift? delete?', 'a numbered circ
   }
   const t = a.t != null ? cmdTime(v, a.t) : null, sig = a.signal ? pickRows(v, a.signal, { one: true })[0].full : null;
   let b = a.n != null ? v.bms.find(x => x.n === +a.n) : null;
-  if (!b) { b = { n: a.n != null ? +a.n : Math.max(0, ...v.bms.map(x => x.n)) + 1, t: v.cursor, signal: null, text: '', color: null, lift: false };
+  const touch = !b || ['t', 'signal', 'text', 'color', 'lift', 'top'].some(k => a[k] !== undefined);   // go alone changes nothing of it
+  if (a.top != null && typeof a.top !== 'string') fail(`top: a row's path (a signal or a module), not ${JSON.stringify(a.top)}`);
+  const top = a.top ? pickRows(v, a.top, { one: true, groups: true })[0].full : null;   // a row there is (a name: its path), as signal
+  // top only as given: the commands give the same state in a page and on its file (viewedit.py), which has no screen;
+  // the right button's Bookmark here, b and the range's bookmarks take the row at the top of the waves themselves
+  if (!b) { b = { n: a.n != null ? +a.n : Math.max(0, ...v.bms.map(x => x.n)) + 1, t: v.cursor, signal: null, text: '', color: null, lift: false,
+    top: null };
     v.bms.push(b); }
   if (t != null) b.t = t;
   if (a.signal !== undefined) b.signal = sig;
   if (a.text !== undefined) b.text = a.text == null ? '' : String(a.text);
   if (a.color !== undefined) b.color = a.color || null;
   if (a.lift !== undefined) b.lift = !!a.lift;
+  if (a.top !== undefined) b.top = top;
   b.lift = !!b.lift && !!b.signal;
-  v.changed(true); return { n: b.n };
+  if (touch) v.changed(true);
+  if (a.go) { v.goBm(b); return { n: b.n, t: v.cursor, from: v.t0, top: b.top }; }
+  return { n: b.n };
 });
 command('arrow', 'id? from? to? shape? head? line? color? label? delete?', 'an arrow from bookmark to bookmark with its label: a new one, or ' +
   'arrow id (1, 2 … as listed; or the one from → to) changed; delete', (v, a) => {

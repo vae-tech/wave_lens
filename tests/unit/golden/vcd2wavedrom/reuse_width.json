@@ -1,0 +1,16 @@
+{
+ "signal": [
+  ["tb",
+    {"name": "bit", "width": 1, "wave": "01", "tv": [[0, "0"], [10000, "1"]], "path": "tb.bit"},
+    {"name": "bus", "width": 8, "wave": "==", "data": ["0xAA", "0x01"], "tv": [[0, "aa"], [10000, "01"], [20000, "f1"]], "path": "tb.bus"},
+    {"name": "clk", "width": 1, "wave": "01", "tv": [[0, "0"], [10000, "1"], [20000, "0"]], "path": "tb.clk"},
+    ["u",
+      {"name": "bus2", "width": 8, "wave": "==", "data": ["0xAA", "0x01"], "same": "tb.bus", "path": "tb.u.bus2"}
+    ]
+  ]
+ ],
+ "head": {"text": "reuse_width.vcd"},
+ "time": {"t0": 0, "t1": 20000, "cycle": 10000, "unit": "ps"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "reuse_width.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 0, "to_ps": 20000}
+}

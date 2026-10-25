@@ -111,6 +111,31 @@ class Dump(unittest.TestCase):
         self.assertEqual(doc['meta']['mode'], 'clock')
 
     @H.needs(svabuild.find_bin(), 'no sva CLI')
+    def test_to_fst(self):
+        """wave_to_fst: the FST beside the VCD (or at out) that the tools read as the VCD; an error names the line."""
+        out = os.path.join(self.d.name, 'b.fst')
+        r = self.call('wave_to_fst', out=out)
+        self.assertEqual(r['fst'], out)
+        self.assertRegex(r['written'], r'^167 variables \(\d+ signals\), \d+ value changes, 0 enum tables$')
+        a, b = self.call('wave_info'), json.loads(W.call('wave_info', {'dump': out})[0])
+        self.assertEqual((a['signals'], a['end'], a['clocks']), (b['signals'], b['end'], b['clocks']))
+        with H.tmp() as d:
+            bad = H.vcd(d, '#0\n0!\n#20\n1!\n#5\n0!\n', name='back.vcd')
+            text, err = W.call('wave_to_fst', {'dump': bad})
+            self.assertTrue(err)
+            self.assertIn('back.vcd:10: #5 after #20: the time goes back', text)
+            self.assertFalse(os.path.exists(os.path.join(d, 'back.fst')))
+            # the FST named as the CLI names it, not read from its line ("job: one" has ": " in it); progress is no note
+            os.mkdir(os.path.join(d, 'job: one'))
+            out = os.path.join(d, 'job: one', 'o.fst')
+            r = self.call('wave_to_fst', out=out)
+            self.assertEqual((r['fst'], r['bytes'] > 0), (out, True))
+            self.assertRegex(r['written'], r'^167 variables ')
+        self.assertEqual(W.fst_notes('sva: tb.vcd: progress: 9 variables (9 signals) in 2 scopes, 0 enum tables; the values next (70 MB)\n'
+                                     'sva: tb.vcd: progress: 10% (line 9, #5)\nsva: tb.vcd:12: a value of "%", which no $var declares: left out\n'),
+                         ['tb.vcd:12: a value of "%", which no $var declares: left out'])
+
+    @H.needs(svabuild.find_bin(), 'no sva CLI')
     def test_sva(self):
         t = self.truth
         r = self.call('sva_check', scope='tb.dut.ctl', source='req_ack: assert property (@(posedge clk) req |-> ##[1:4] ack);\n'
@@ -479,7 +504,8 @@ class Protocol(unittest.TestCase):
         self.assertEqual(names[0], 'wave_info')
         self.assertTrue(all('fn' not in t and t['inputSchema']['type'] == 'object' for t in r[1]['result']['tools']))
         # codex exec calls a tool without approval only when it says it reads: every tool but the ones that write a file
-        self.assertEqual([t['name'] for t in r[1]['result']['tools'] if not t['annotations']['readOnlyHint']], ['wave_page', 'view_edit', 'view_live'])
+        self.assertEqual([t['name'] for t in r[1]['result']['tools'] if not t['annotations']['readOnlyHint']],
+                         ['wave_page', 'wave_to_fst', 'view_edit', 'view_live'])
         arrays = [(t['name'], k) for t in r[1]['result']['tools'] for k, v in t['inputSchema']['properties'].items()
                   if 'array' in str(v.get('type')) and 'items' not in v]
         self.assertEqual(arrays, [])   # an array without items is refused by OpenAI's function schemas

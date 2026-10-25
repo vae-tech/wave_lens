@@ -1809,6 +1809,117 @@ def axis_in_sight(browser, build):
     page.close()
 
 
+def bookmark_view(browser, build):
+    """Going to a bookmark puts the waves where they were when it was made (axi_lite_all.html, every group open): the
+    row then at the top under the axis at the top again, its time bookmarkLeft (0.2) of the waves from the left, the span
+    kept; with the page and in the viewer's own box, through 1–9, ]m, the list (gm) and the command; the way to that row
+    opened when its module was folded since; a bookmark without a top (an older one): its signal brought into sight, as it
+    is when its top is gone; its signal folded since: opened and selected; the list's cursor button takes the screen too;
+    at 1200×320 and 480×600."""
+    pg = build / 'examples' / 'axi_lite' / 'axi_lite_all.html'
+    if not need(pg, how='make examples'):
+        return
+    print('bookmarks: the view where they were made')
+    page = browser.new_page(viewport={'width': 1200, 'height': 600})
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(pg.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+    js = lambda e: page.evaluate(f"(async () => {{ const v = document.querySelector('.wv').waveView; return {e}; }})()")
+    # where a row is against the top of the rows under the axis (px, 0: at the top), the cursor's place in the window
+    at = ("(p => { const r = WaveLens.internal.peek(v).vis.find(q => (q.full || q.path) === p), y = r && v.rowTop(r); "
+          "return y == null ? null : Math.round(y - v.canvas.getBoundingClientRect().top - v.hdrH); })")
+    frac = "Math.round((v.cursor - v.t0) / v.span * 100) / 100"
+    # a signal's row between the axis and the bottom of the waves on the screen (its element, not v.inSight)
+    seen = ("(p => { const k = WaveLens.internal.peek(v).vis.findIndex(r => r.full === p), "
+            "el = k >= 0 && v.root.querySelector(`.names .row[data-r=\"${k}\"]`); if (!el) return false; "
+            "const q = el.getBoundingClientRect(), c = v.canvas.getBoundingClientRect(), own = v.root.classList.contains('wv-scroll'), "
+            "bot = Math.min(innerHeight, own ? v.bodyEl.getBoundingClientRect().bottom : c.bottom); "
+            "return q.top >= c.top + v.hdrH - 1 && q.bottom <= bot + 1; })")
+    js("(v.setScroll('page'), v.expandAll(), v.zoom(0.1, 0.5), 0)"); settle(page)
+    page.evaluate("window.scrollTo(0, document.querySelector('.wv .wcol').getBoundingClientRect().top + scrollY + 700)"); settle(page)
+    top1 = js("v.topNow()")
+    sig = js("(() => { const c = v.canvas.getBoundingClientRect(); return WaveLens.internal.peek(v).vis.find(r => r.type === 'sig' && v.rowTop(r) > c.top + 200).full; })()")
+    t1 = js(f"(v.select(v.M.rows.find(r => r.full === {json.dumps(sig)})), v.cursor = v.t0 + v.span * 0.7, v.mark('one'))")
+    b1 = js(f"v.bms.find(b => b.n === {t1})")
+    check(top1 and b1['top'] == top1 and js(f"{at}({json.dumps(top1)})") <= 0 < js(f"{at}({json.dumps(top1)})") + js("v.rowH.sig"),
+          f'a new bookmark keeps the row at the top of the waves under the axis {top1} {b1}')
+    span = js("v.span")
+    page.evaluate("window.scrollTo(0, 0)"); js("(v.t0 = v.M.t0, v.draw(), v.canvas.focus({preventScroll: true}), 0)"); settle(page)
+    page.keyboard.press(str(t1)); settle(page)
+    g1 = [js("v.cursor") == b1['t'], js(frac), js("v.span") == span, js(f"{at}({json.dumps(top1)})"), js("v.sel && v.sel.full")]
+    check(g1[0] and g1[1] == 0.2 and g1[2] and abs(g1[3]) <= 1 and g1[4] == sig,
+          f'1–9: the cursor on it 0.2 of the waves from the left, the span kept, the row of then at the top again, its signal selected {g1}')
+    # in the viewer's own box: a bookmark by the command (the row at the top now), then ]m and the list from elsewhere
+    js("(v.setScroll('window'), 0)"); settle(page); js("(v.bodyEl.scrollTop = 1500, 0)"); settle(page)
+    top2 = js("v.topNow()")
+    n2 = js(f"(await v.run([{{op: 'bookmark', t: v.t0 + v.span / 2, signal: {json.dumps(sig)}, text: 'two'}}]))[0].n")
+    t2 = js(f"v.bms.find(b => b.n === {n2}).top")   # the command: top only as given (its file twin has no screen)
+    js(f"(v.run([{{op: 'bookmark', n: {n2}, top: v.topNow()}}]), 0)"); settle(page)
+    check(t2 is None and js(f"v.bms.find(b => b.n === {n2}).top") == top2 and top2 != top1,
+          f'the command: no top of its own, top: v.topNow() the row at the top of the box {t2} {top2}')
+    js("(v.bodyEl.scrollTop = 0, v.t0 = v.M.t0, v.cursor = v.M.t0, v.draw(), v.canvas.focus({preventScroll: true}), 0)"); settle(page)
+    want = sorted([(b1['t'], top1), (js(f"v.bms.find(b => b.n === {n2}).t"), top2)])
+    page.keyboard.press(']'); page.keyboard.press('m'); settle(page)
+    g2 = [js("v.cursor") == want[0][0], js(frac), js(f"{at}({json.dumps(want[0][1])})")]
+    check(g2[0] and g2[1] == 0.2 and abs(g2[2]) <= 1, f']m in the own box: the first bookmark in time, where it was made {g2}')
+    js("(v.bodyEl.scrollTop = 0, v.draw(), 0)"); settle(page)
+    page.keyboard.press('g'); page.keyboard.press('m'); settle(page)
+    page.locator('.wv-marks button[data-i]').last.click(); settle(page)
+    g3 = [js("v.cursor") == want[1][0], js(frac), js(f"{at}({json.dumps(want[1][1])})"), page.locator('.wv-marks').count()]
+    page.keyboard.press('Escape'); settle(page)
+    check(g3[0] and g3[1] == 0.2 and abs(g3[2]) <= 1 and g3[3] == 1, f'Markers…: a bookmark picked, the waves where it was made, the list stays {g3}')
+    # its module folded since: the way to the row opened, the row at the top; bookmarkLeft 0.5: in the middle
+    js("(v.collapseAll(), v.bodyEl.scrollTop = 0, v.S.bookmarkLeft = 0.5, v.draw(), 0)"); settle(page)
+    r = js(f"(await v.run([{{op: 'bookmark', n: {t1}, go: true}}]))[0]")
+    g4 = [js(frac), js(f"{at}({json.dumps(top1)})"), r.get('top') == top1, js("v.bms.length"),
+          js("v.bodyEl.scrollHeight - v.bodyEl.clientHeight - v.bodyEl.scrollTop <= 1")]
+    check(g4[0] == 0.5 and g4[1] is not None and (abs(g4[1]) <= 1 or g4[1] > 0 and g4[4]) and g4[2] and g4[3] == 2,
+          f'go to it with every module folded: the way opened, its row at the top as far as the scroll goes; bookmarkLeft 0.5: in the middle; '
+          f'go changes nothing of it {g4} {r}')
+    # a bookmark of before (no top): its signal brought into the box
+    js("(v.S.bookmarkLeft = 0.2, v.expandAll(), 0)"); settle(page)
+    last = js("WaveLens.internal.peek(v).vis.filter(r => r.type === 'sig').pop().full")
+    js(f"(await v.run([{{op: 'bookmark', n: 9, t: v.M.t0 + v.span, signal: {json.dumps(last)}, top: null}}]), v.bodyEl.scrollTop = 0, v.draw(), 0)"); settle(page)
+    page.keyboard.press('9'); settle(page)
+    check(js(f"{seen}({json.dumps(last)})") and js("v.bms.find(b => b.n === 9).top") is None,
+          f'a bookmark without a top: its signal brought into sight (its row between the axis and the bottom of the box)')
+    st = js("v.bookmarks()")
+    check([b.get('top') for b in st] == [top1, top2, None], f'the bookmarks\' JSON keeps top (Save, this browser) {st}')
+    # its signal's module folded since (the row of then elsewhere): opened, the signal selected and there, the row at the top
+    fold = f"(() => {{ const s = v.M.rows.find(r => r.full === {json.dumps(sig)}); v.sel = null; v.fold(s.anc[s.anc.length - 1], true); return 0; }})()"
+    js(f"({fold}, v.bodyEl.scrollTop = 0, v.draw(), v.canvas.focus({{preventScroll: true}}), 0)"); settle(page)
+    page.keyboard.press(str(t1)); settle(page)
+    g5 = [js("v.sel && v.sel.full"), js(f"WaveLens.internal.peek(v).vis.some(r => r.full === {json.dumps(sig)})"), js(f"{at}({json.dumps(top1)})")]
+    check(g5[0] == sig and g5[1] and g5[2] is not None and abs(g5[2]) <= 1, f'its signal folded since: opened and selected, the row of then at the top {g5}')
+    # its row of then gone (a name no row has now: an older page's): the signal brought into sight instead, opened
+    js(f"(v.bms.find(b => b.n === {t1}).top = 'no.such.row', {fold}, v.bodyEl.scrollTop = 0, v.draw(), v.canvas.focus({{preventScroll: true}}), 0)")
+    settle(page); page.keyboard.press(str(t1)); settle(page)
+    g6 = [js("v.sel && v.sel.full"), js(f"{seen}({json.dumps(sig)})")]
+    check(g6 == [sig, True], f'its row of then gone: its signal opened, selected and brought into sight {g6}')
+    js(f"(v.bms.find(b => b.n === {t1}).top = {json.dumps(top1)}, 0)")
+    # the list under the waves: "cursor" moves a bookmark to the cursor and to the screen of now (its top as a new one's)
+    js("(v.bodyEl.scrollTop = 900, v.cursor = v.t0 + v.span / 3, v.draw(), 0)"); settle(page)
+    now = js("[v.topNow(), v.cursor]")
+    page.locator('.wv').first.locator('.notes li[data-n="9"] button[data-bm=here]').click(); settle(page)
+    g7 = js("(b => [b.top, b.t])(v.bms.find(b => b.n === 9))")
+    check(now[0] and g7 == now, f'the list\'s cursor button: the bookmark at the cursor and the row at the top now {g7} {now}')
+    check(not errs, f'no page errors {errs}')
+    page.close()
+    # other sizes: a low window (the waves a few rows high) and a narrow one, with the page's scroll
+    for w, h in ((1200, 320), (480, 600)):
+        page = browser.new_page(viewport={'width': w, 'height': h})
+        page.on('pageerror', lambda e: errs.append(str(e)))
+        page.goto(pg.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+        js("(v.setScroll('page'), v.expandAll(), v.zoom(0.1, 0.5), 0)"); settle(page)
+        page.evaluate("window.scrollTo(0, document.querySelector('.wv .wcol').getBoundingClientRect().top + scrollY + 500)"); settle(page)
+        top = js("v.topNow()"); n = js("(v.cursor = v.t0 + v.span * 0.6, v.mark('size'))")
+        page.evaluate("window.scrollTo(0, 0)"); js("(v.t0 = v.M.t0, v.draw(), v.canvas.focus({preventScroll: true}), 0)"); settle(page)
+        page.keyboard.press(str(n)); settle(page)
+        g = [top, js(f"{at}({json.dumps(top)})"), js(frac)]
+        check(top and g[1] is not None and abs(g[1]) <= 1 and g[2] == 0.2, f'{w}×{h}: the row of then at the top again, the bookmark 0.2 from the left {g}')
+        check(not errs, f'{w}×{h}: no page errors {errs}')
+        page.close()
+
 def fsm_panel(browser, build):
     """The state machines (wavelens/src/fsm.js) on fsm_all.html (the FSM example's VCD, its types beside it): T opens the
     tree of the modules with an FSM, each FSM with its state at the cursor and its states reached; a click goes to one
@@ -1835,6 +1946,18 @@ def fsm_panel(browser, build):
     check(tree == ['fsm_tb', 'state', 'u_rx', 'state'] and st == '5/5', f'T: the modules with an FSM and their FSMs, the states reached of the table {tree} {st}')
     page.locator('.wv-fsms .mn.fs').nth(1).click(); settle(page)
     check(js("[v.sel && v.sel.full, WaveLens.internal.peek(v).vis.includes(v.sel)]") == ['fsm_tb.u_rx.state', True], 'a click: the FSM opened, selected')
+    # the details' rows by the keys: ↓ Enter the next time of that change, shift+Enter back, → ← the tabs, Esc the tree
+    page.locator('.wv-fsms .fdt button[data-t=changes]').click(); page.locator('.wv-fsms .fdb tr[data-r]').nth(0).click(); settle(page)
+    for k in ('ArrowDown', 'ArrowDown', 'Enter'):
+        page.keyboard.press(k)
+    settle(page); c1 = js("v.cursor"); page.keyboard.press('Enter'); settle(page); c2 = js("v.cursor"); page.keyboard.press('Shift+Enter'); settle(page)
+    dk = [js("document.activeElement.dataset.r"), page.locator('.wv-fsms .fdb tr.fk').inner_text().split()[0:3], c1, c2, js("v.cursor")]
+    page.keyboard.press('ArrowRight'); dk.append(js("v.fsmP.tab")); page.keyboard.press('ArrowLeft'); dk.append(js("v.fsmP.tab"))
+    page.keyboard.press('Escape'); dk.append(js("!!document.activeElement.closest('.wv-fsms .mtr')"))
+    check(dk[0] == '2' and dk[1] == ['DATA', '→', 'STOP'] and dk[2] == 385000 and dk[3] > dk[2] and dk[4] == dk[2] and dk[5:] == ['graph', 'changes', True],
+          f'the details by the keys: ↓ ↓ Enter the next DATA → STOP, again the one after, shift+Enter back; → ← the tabs; Esc the tree {dk}')
+    page.locator('.wv-fsms .fdt button[data-t=states]').click()
+    page.locator('.wv-fsms .mn.fs').nth(1).click(); settle(page)
     page.locator('.wv-fsms .mh b').click(); page.keyboard.press('ArrowUp'); up = js("document.activeElement.dataset.i")
     check(up == '2' and page.locator('.wv-fsms .rz').count() == 8, f'a click on the header: ↑ goes on in the tree (from the FSM clicked); its 8 edges and corners {up}')
     page.locator('.wv-fsms button[data-a=only]').click(); settle(page)
@@ -2214,8 +2337,10 @@ EDIT_OPS = [   # every command that changes a state, with the arguments in their
     {'op': 'highlight', 'add': ['PSEL', 'payload']}, {'op': 'highlight', 'add': 'PREADY', 'remove': 'PSEL'},
     {'op': 'paint', 'signals': 'PADDR', 'color': '#123456'}, {'op': 'paint', 'signals': ['PWDATA', 'PRDATA'], 'color': '#654321'},
     {'op': 'paint', 'signals': 'PRDATA', 'color': None}, {'op': 'hide', 'signals': 'PSLVERR'}, {'op': 'radix', 'signals': 'PADDR', 'radix': 'dec'},
-    {'op': 'analog', 'signals': 'PWDATA', 'rows': 2}, {'op': 'select', 'signal': 'PENABLE'}, {'op': 'cursor', 't': '150ns'}, {'op': 'cursor2', 't': '170ns'},
-    {'op': 'view', 'from': '40ns', 'to': '180ns'}, {'op': 'range', 'from': '100ns', 'to': '60ns', 'signal': 'PCLK'},
+    {'op': 'analog', 'signals': 'PWDATA', 'rows': 2},
+    {'op': 'bookmark', 'n': 1, 'top': 'apb_tb.PCLK', 'go': True}, {'op': 'select', 'signal': 'PENABLE'}, {'op': 'cursor', 't': '150ns'}, {'op': 'cursor2', 't': '170ns'},
+    {'op': 'view', 'from': '40ns', 'to': '180ns'}, {'op': 'bookmark', 'n': 5, 't': 0, 'go': True}, {'op': 'bookmark', 'n': 6, 't': '205ns', 'top': 'PADDR', 'go': True},
+    {'op': 'cursor', 't': '150ns'}, {'op': 'view', 'from': '40ns', 'to': '180ns'}, {'op': 'range', 'from': '100ns', 'to': '60ns', 'signal': 'PCLK'},
     {'op': 'sort', 'dir': 'desc', 'ignore': 'P'}, {'op': 'style', 'name': 'questa'}, {'op': 'fold', 'groups': 'ctl'},
     {'op': 'find', 'query': 'pw', 'case': True, 'open': False}, {'op': 'gaps', 'on': True, 'idle': 8},
     {'op': 'layout', 'scroll': 'page', 'tools': 'fold'}, {'op': 'group', 'name': 'ctl', 'go': True},
@@ -2827,6 +2952,11 @@ def edit(browser, build):
                        capture_output=True, text=True)
     py = json.loads(r.stdout or '[]')
     check(r.returncode == 0 and len(py) == len(EDIT_OPS) and not [x for x in py if 'error' in x], f'viewedit.py: the same commands on the page\'s file {r.stderr.strip()}')
+    # go once the file knows the window (the view command before it): at the start and the end of the waves, clamped alike
+    at = next(i for i, o in enumerate(EDIT_OPS) if o['op'] == 'view')
+    gos = [(run['res'][i], py[i]) for i, o in enumerate(EDIT_OPS) if o['op'] == 'bookmark' and o.get('go') and at < i < len(py)]
+    check(len(gos) == 2 and all(a == b for a, b in gos) and [a['from'] for a, _ in gos] == [0, 65000],
+          f'go to a bookmark at the ends of the waves: the same cursor, window (within the waves) and top in both {gos}')
     open_(pa)
     page.wait_for_function(f"localStorage.getItem('wavelens.edits:' + {V}.storeId)")
     st = page.evaluate(f"{V}.state()")
@@ -2876,9 +3006,39 @@ def edit(browser, build):
     page.evaluate(f"(v => v.menu(200, 200, WaveLens.internal.peek(v).vis.find(r => r.user && r.name === 'group 2'), 70000))({V})")
     page.locator('.wv-menu .subg').hover(); page.locator('.wv-menu button[data-m=ugdel]').click()
     page.evaluate(f"(v => v.menu(200, 200, v.M.rows.find(r => r.name === 'PWRITE'), 70000))({V})")
-    page.locator('.wv-menu button[data-m=umark]').click()
-    got = page.evaluate(f"(v => [v.ugroups.map(g => g.name), v.markList().map(m => m.t)])({V})")
-    check(got == [['g1'], [90000, 70000]], f'the menu: New group with it, Delete this group, Marker here {got}')
+    y0 = page.evaluate('scrollY'); page.locator('.wv-menu button[data-m=umark]').click()
+    ask = page.locator('.wv-ask'); asked = [ask.count(), page.evaluate("document.activeElement.placeholder"), ask.locator('.mh').inner_text()]
+    page.keyboard.type('burst'); page.keyboard.press('Enter')
+    got = page.evaluate(f"(v => [v.ugroups.map(g => g.name), v.markList().map(m => [m.t, m.label || ''])])({V})")
+    check(got == [['g1'], [[90000, 'mk'], [70000, 'burst']]] and asked[:2] == [1, 'its label'] and ask.count() == 0 and page.evaluate('scrollY') == y0,
+          f'the menu: New group with it, Delete this group; Marker here asks its label over the waves (Enter: added, the page where it was) {got} {asked}')
+    page.evaluate(f"(v => v.menu(200, 200, v.M.rows.find(r => r.name === 'PWRITE'), 70000))({V})")
+    page.locator('.wv-menu button[data-m=umark]').click(); page.keyboard.type('no'); page.keyboard.press('Escape')
+    n_esc = page.evaluate(f"(v => v.markList().length)({V})")
+    page.evaluate(f"(v => v.menu(200, 200, v.M.rows.find(r => r.name === 'PWRITE'), 70000))({V})")
+    page.locator('.wv-menu button[data-m=mark]').click(); page.keyboard.type('write'); page.locator('.wv-ask button[data-m=ok]').click()
+    bm = page.evaluate(f"(v => {{ const b = v.bms[v.bms.length - 1]; return [b.signal, b.text, document.activeElement === v.canvas]; }})({V})")
+    check(n_esc == 2 and bm[1:] == ['write', True] and bm[0].endswith('PWRITE'),
+          f'Esc in it: no marker; Bookmark here asks its text too (Add: added, the keys back on the waves) {n_esc} {bm}')
+    # gm: the markers (by time) and the bookmarks in a list over the waves; ↓ the first, each step the cursor on it and the
+    # waves at its time with their span, a bookmark's signal selected; a click too; Enter closes it there; the page stays
+    page.evaluate(f"(v => {{ v.run({{op: 'view', from: '0ns', to: '40ns'}}); v.canvas.focus({{preventScroll: true}}); }})({V})"); settle(page)
+    y0, sp = page.evaluate('scrollY'), page.evaluate(f"(v => v.span)({V})")
+    page.keyboard.press('g'); page.keyboard.press('m'); settle(page)
+    st = lambda: page.evaluate(f"(v => [v.cursor, Math.round(v.t0 + v.span / 2), v.span, v.sel && v.sel.name])({V})")
+    lst = page.locator('.wv-marks button[data-i]'); n_l = lst.count(); seen = []
+    for k in ('ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowUp'):
+        page.keyboard.press(k); seen.append(st())
+    lst.nth(n_l - 1).click(); seen.append(st()); page.keyboard.press('Enter')
+    mk_t, bm_t = page.evaluate(f"(v => [v.markers.map(m => m.t).sort((a, b) => a - b), v.bms.map(b => b.t).sort((a, b) => a - b)])({V})")
+    want = (mk_t + bm_t)[:3] + [(mk_t + bm_t)[1]]
+    # a marker in the middle; a bookmark 0.2 of the waves from the left (bookmarkLeft), its rows as they were (bookmark_view)
+    placed = lambda i, x: x[1] == x[0] if i < len(mk_t) else round(x[1] - x[2] / 2 + x[2] * 0.2) == x[0]   # i: its place in the list
+    check(n_l == len(mk_t) + len(bm_t) and [x[0] for x in seen[:4]] == want
+          and all(placed(i, x) and x[2] == sp for i, x in zip([0, 1, 2, 1, n_l - 1], seen))
+          and seen[4][0] == bm_t[-1] and seen[4][3] and page.locator('.wv-marks').count() == 0,
+          f'gm: the markers and bookmarks in a list, ↓ ↓ ↓ ↑ and a click go to each at the same span, a marker in the middle, a bookmark '
+          f'0.2 from the left; Enter closes it {seen}')
     # where the rows scroll: the bar's buttons, the bar sticking to the top with the page, folded; kept after a reload
     page.evaluate('localStorage.clear()'); open_(pb)
     page.set_viewport_size({'width': 1300, 'height': 600})
@@ -4635,6 +4795,7 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'pages': 'every page in both schemes: no console errors, no error boxes, drawn canvases, static SVGs, a PNG',
     'units': 'the pure functions of the viewer (WaveLens.internal), the VCD reader, the bus decoders, sva.js expressions: a table of cases',
     'readers': 'the page\'s VCD reader against the tools\' on every fixture of tests/unit/vcd (one rule, the same transitions)',
+    'bookmark_view': 'going to a bookmark: the rows scrolled as when it was made, its time bookmarkLeft from the left (1–9, ]m, Markers…, the command)',
     'vscode': 'the VS Code extension\'s tab (host.js, its CSP) with a fake VS Code: the dump, the store, save, pick, clipboard, reload, live',
     'docs': 'docs/index.html: cursor, zoom, sorting, settings, styles, highlight, cursor fields, themes, bookmarks',
     'sva_docs': 'docs/index.html: the assertions section and the unit checks of wavelens/sva.js',
@@ -4800,6 +4961,7 @@ def main():
         run('dump', dump, b, build)
         run('fsm', fsm_panel, b, build)
         run('axis', axis_in_sight, b, build)
+        run('bookmark_view', bookmark_view, b, build)
         run('readers', readers, b, build)
         run('vscode', vscode_tab, b, build)
         run('ranges', ranges, b, build)

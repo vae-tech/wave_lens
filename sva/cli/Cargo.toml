@@ -15,3 +15,5 @@ sva-core = { path = "../core" }
 wellen = "0.25"
 fst-reader = "0.17"   # `sva vcd` of an FST: the names and the end time as fstapi gives them (wellen merges bit selects)
 serde_json = "1"
+miniz_oxide = "0.9"   # `sva fst`: the frames, time tables and geometry of the FST (zlib), as fst-reader reads them
+lz4_flex = "0.13"     # `sva fst`: the value changes and the hierarchy (LZ4)

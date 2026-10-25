@@ -1289,6 +1289,40 @@ def target(a):
     return 'file', path, None
 
 
+def t_to_fst(a):
+    """sva fst: the VCD as an FST beside it (tb.vcd -> tb.fst) or at "out", the FSM states of its types file in it."""
+    src = os.path.abspath(os.path.expanduser(str(a.get('dump') or '')))
+    if not os.path.isfile(src):
+        raise WaveError(f'no such file: {src}')
+    exe = svabuild.find_bin(a.get('sva_bin'))
+    if not exe:
+        raise WaveError('no sva CLI (make sva-build, or bin/<os>-x86_64/sva): the conversion needs it')
+    cmd = [exe, 'fst', src]
+    if a.get('out'):
+        cmd += ['--out', os.path.abspath(os.path.expanduser(str(a['out'])))]
+    if a.get('types'):
+        cmd += ['--types', os.path.abspath(os.path.expanduser(str(a['types'])))]
+    if a.get('no_types'):
+        cmd.append('--no-types')
+    r = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL)   # stdin is the protocol
+    notes = fst_notes(r.stderr)
+    if r.returncode:
+        raise WaveError('; '.join(notes) or f'sva fst: exit {r.returncode}')
+    # the FST as the CLI names it (out, else the dump with .fst): its last line is "<that>: N variables …"
+    fst = cmd[cmd.index('--out') + 1] if '--out' in cmd else os.path.splitext(src)[0] + '.fst'
+    said = r.stdout.strip().splitlines()[-1] if r.stdout.strip() else ''
+    out = {'fst': fst, 'written': said[len(fst) + 2:] if said.startswith(fst + ': ') else said,
+           'bytes': os.path.getsize(fst) if os.path.isfile(fst) else None}
+    if notes:
+        out['notes'] = notes
+    return out
+
+
+def fst_notes(err):
+    """The notes of `sva fst` on stderr, without "sva: "; its lines of progress ("…: progress: 40% (line …)") are not notes."""
+    return [l.removeprefix('sva: ') for l in err.splitlines() if l.strip() and not re.match(r'sva: .*?: progress: ', l)]
+
+
 def t_view_edit(a):
     if a.get('save') and page_arg(a) and DUMP_RE.search(page_arg(a)):   # before anything is done: no edit twice on a retry
         raise WaveError('save: a dump has no page file to write into (VS Code keeps the view of its tab; Save in the tab writes a .view.json)')
@@ -1432,6 +1466,10 @@ TOOLS = [
          '(name or "auto"): a cell per cycle, auto_gap "16:2" folds idle cycles; sva files + bind ["name@scope"].',
          {'dump': None, 'signals': None, 'out': S, 'clock': S, 'from': None, 'to': None, 'scope': None, 'auto_gap': S, 'sva': L,
           'bind': L, 'title': S}, ('dump', 'signals', 'out'), ro=False),
+    tool('wave_to_fst', t_to_fst, 'Convert a VCD to an FST beside it (tb.vcd -> tb.fst; out: another file), as GTKWave\'s vcd2fst, '
+         'keeping the enum tables (FSM states) and attributes; the states of tb.types.json beside it go in too (types: another file, '
+         'no_types: none) -> fst, what was written, notes (file:line).',
+         {'dump': None, 'out': S, 'types': S, 'no_types': B}, ('dump',), ro=False),
     tool('view_edit', t_view_edit, 'Mark up a WaveLens page for a person (live in their browser when connected by view_live, else in the '
          'page file: they reload it). ops in order, each {op, …}: ' + ' '.join(f'{k}({v})' for k, v in viewedit.COMMANDS.items()
                                                                                   if k not in ('state', 'set_state', 'rows', 'picture')) +

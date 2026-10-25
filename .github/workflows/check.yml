@@ -1,0 +1,52 @@
+# The gate (make check) on the maintainer's machine: a self-hosted runner there (docs/DEVELOPMENT.md § CI on the local
+# machine) takes every push to master, that is every release tools/publish.py wrote, and a run started by hand.
+# No pull_request trigger: a fork's code never runs on that machine through this file.
+name: check
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    # the label wavelens: only the runner registered for this repository with it, never a hosted one
+    runs-on: [self-hosted, linux, x64, wavelens]
+    timeout-minutes: 90
+    env:
+      # one BUILD kept between runs: the cargo target stays (incremental), make clean empties the rest first
+      BUILD: ${{ github.workspace }}/../wavelens-build
+      SMOKE_TIME_SCALE: 2
+      WAVELENS_TIME_SCALE: 2
+    steps:
+      - uses: actions/checkout@v5
+      - name: tools
+        run: |
+          python3 --version; cargo --version; verilator --version; command -v fst2vcd
+          PYTHONDONTWRITEBYTECODE=1 python3 -c 'import playwright; print("playwright", playwright.__version__)'
+      - name: make clean
+        run: make clean BUILD="$BUILD"
+      - name: make check
+        run: make check BUILD="$BUILD"
+      - name: cargo clippy
+        working-directory: sva
+        run: cargo clippy --all-targets --target-dir "$BUILD/sva-target" -- -D warnings
+      - name: what failed
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: check-${{ github.sha }}
+          path: |
+            ${{ env.BUILD }}/smoke
+            ${{ env.BUILD }}/shots
+            ${{ env.BUILD }}/img/diff
+            ${{ env.BUILD }}/visual/diff
+          if-no-files-found: ignore
+          retention-days: 7

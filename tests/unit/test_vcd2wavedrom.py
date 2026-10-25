@@ -427,5 +427,33 @@ class Convert(unittest.TestCase):
                     subprocess.run(['vcd2fst', vcd, fst], capture_output=True, check=True)
                     self.assertEqual(self.read_all('sva', fst), self.read_all('fst2vcd', fst))
 
+    def test_sva_fst_of_every_fixture(self):
+        """Every fixture VCD made an FST by `sva fst`: the same variables and the same WaveJSON as the VCD through each FST
+        reader there is (VHDL's bits, $dumpoff, one line, enum tables, strings, reals); a time that goes back or a header
+        cut off is an error with its line, and no FST."""
+        import svabuild
+        exe = svabuild.find_bin()
+        if not exe:
+            H.skip(self, 'the sva CLI')
+        with H.tmp() as d:
+            for f in sorted(os.listdir(H.VCD)):
+                name = f[:-4]
+                with self.subTest(name):
+                    vcd, fst = os.path.join(d, f), os.path.join(d, name + '.fst')
+                    shutil.copy(os.path.join(H.VCD, f), vcd)
+                    p = subprocess.run([exe, 'fst', vcd, '--no-types', '-q'], capture_output=True, text=True)
+                    if name in ('backwards', 'unsorted', 'noend'):
+                        self.assertEqual(p.returncode, 2, p.stderr)
+                        self.assertRegex(p.stderr, rf'{name}\.vcd:\d+: ')
+                        self.assertFalse(os.path.exists(fst))
+                        continue
+                    self.assertEqual(p.returncode, 0, p.stderr)
+                    want = self.read_all('', vcd)
+                    want[1].get('head', {}).pop('text', None)   # the file's name
+                    for r in self.readers():
+                        got = self.read_all(r, fst)
+                        got[1].get('head', {}).pop('text', None)
+                        self.assertEqual(got, want, r)
+
 if __name__ == '__main__':
     unittest.main()

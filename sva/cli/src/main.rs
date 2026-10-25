@@ -5,6 +5,7 @@
 //!   sva FILE... --waves DUMP [...]                                 the same as `sva eval`
 //!   sva --waves DUMP --info                                        scopes, variables, widths, enum tables
 //!   sva vcd DUMP [--out FILE.vcd]                                  the dump (FST) as VCD text, as fst2vcd -e writes it
+//!   sva fst DUMP.vcd [--out FILE.fst]                              the VCD as an FST beside it, as vcd2fst writes it
 //!   sva report [--md F] [--junit F] [--html F] [--json F] RESULTS.json...   the report of results documents
 //!
 //! Exit status: 0 everything evaluated passed; 1 a failure, or an attempt without verdict (capped: the thread limit);
@@ -16,6 +17,7 @@
 //! --ignore-prefix for the names without those prefixes, and a select wider than the variable does not resolve). Values are sampled just before each clock edge
 //! (the preponed region), so a value written at the edge counts from the next sampling point, as in a simulator.
 
+mod fst;
 mod vcd;
 
 use std::collections::BTreeMap;
@@ -56,6 +58,7 @@ const USAGE: &str = "usage: sva parse [--json] [--expand] [-D NAME[=VALUE]] FILE
        sva FILE... --waves DUMP [...]          (the same as sva eval)
        sva --waves DUMP --info
        sva vcd DUMP [--out FILE.vcd]          (an FST as VCD text, enum tables included, as fst2vcd -e writes it)
+       sva fst DUMP.vcd [--out FILE.fst]      (a VCD as an FST, by default DUMP.fst; enum tables and tb.types.json's FSM states kept)
        sva report [--title T] [--md F] [--junit F] [--html F] [--json F] [--max-failures N] RESULTS.json...   (- for stdout)
 TIME is a number with a unit (100ns, 2.5us; ps without one). --alias: a shown name of a config (the page's alias) for
 the variable at PATH. --report: .md, .html, .xml (JUnit), .json (the results with the meta, as a page's report.json;
@@ -830,6 +833,7 @@ fn run() -> ExitCode {
         Some("parse") => return parse_cmd(&argv[1..]),
         Some("report") => return report_cmd(&argv[1..]),
         Some("vcd") => return vcd::vcd_cmd(&argv[1..]),
+        Some("fst") => return fst::fst_cmd(&argv[1..]),
         Some("eval") => &argv[1..],
         _ => &argv[..],
     };

@@ -69,7 +69,7 @@ const flatText = t => Array.isArray(t) ? t.slice(typeof t[1] === 'object' && !Ar
 // theme and colors are not merged here: they become data-theme / CSS custom properties (see applyLook).
 const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight: 24, traceWidth: 1.4, busWidth: 1.2,
   labelSize: 11, fontSize: 11.5, sort: 'none', sortIgnore: [], sortButton: true, hint: true, style: 'auto', radix: 'auto', fold: null,
-  highlight: null, dim: 0.3, groupColors: null, arrowLabels: 'lane', laneHeight: 16, maxHeight: null, toolsFolded: false, toolsHidden: [],
+  highlight: null, dim: 0.3, groupColors: null, bookmarkLeft: 0.2, arrowLabels: 'lane', laneHeight: 16, maxHeight: null, toolsFolded: false, toolsHidden: [],
   groupOrder: 'file', moduleShading: true, findHighlight: true, findOpen: true, findMask: false, findCase: false, findWord: false,
   findRegex: false, cursorSnap: 8,
     wheel: 'scroll', contextMenu: true, enumColors: null, dumpBudget: 3000000, gaps: false, gapIdle: 16, gapKeep: 2,
@@ -732,7 +732,8 @@ function gapCuts(rows, a, b, S, clk, cycle = 1, also = [], picked = false) {
   }
   return idleCuts([...ts].sort((x, y) => x - y), a, b, idle, keep, d.length ? ups : [], d.length ? 2 * cyc : 0);
 }
-// extension "bookmarks": [{n, t, signal (full path), text, color}] and "arrows": [{from, to, shape, head, line, color, label}]
+// extension "bookmarks": [{n, t, signal (full path), text, color, top (the row at the top of the waves when it was made:
+// a signal's full path or a module's path; going to it puts that row there again)}] and "arrows": [{from, to, shape, head, line, color, label}]
 // (from / to = bookmark numbers). An old bookmark with "to" / "shape" / "label" becomes an arrow.
 const AR_SHAPES = { '~': 'curve', '-': 'straight', '-~': 'curve, late', '~-': 'curve, early', '-|': 'corner ┐', '|-': 'corner └', '-|-': 'step' };
 const AR_HEADS = { '>': '→ end', '<>': '↔ both', '<': '← start', '': '— none' };
@@ -740,7 +741,8 @@ const AR_LINES = { solid: null, dashed: [6, 4], dotted: [1.5, 3] };
 function bmNorm(list) {
   const obj = x => x && typeof x === 'object';   // an entry that is no object (a bad copy in this browser): left out
   return (Array.isArray(list) ? list : []).filter(obj).map((b, i) => ({ n: +b.n || i + 1, t: num(parseT(b.t)), signal: b.signal || null,
-    text: b.text || '', color: b.color || null, lift: !!b.lift && !!b.signal })).filter(b => isFinite(b.t));   // lift: in the lane above its signal
+    text: b.text || '', color: b.color || null, lift: !!b.lift && !!b.signal, top: typeof b.top === 'string' && b.top ? b.top : null }))
+    .filter(b => isFinite(b.t));   // lift: in the lane above its signal
 }
 function arNorm(list, bms) {
   const old = (Array.isArray(bms) ? bms : []).map((b, i) => b && b.to != null && b.to !== '' ? { from: +b.n || i + 1, to: +b.to, shape: b.shape,

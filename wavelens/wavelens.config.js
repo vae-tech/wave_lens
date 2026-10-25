@@ -31,6 +31,7 @@ window.WAVELENS_CONFIG = {
   highlight: null,              // instances highlighted at start: ['tb.dut.u_tx', '*.irq'] (paths, names, * patterns)
   dim: 0.3,                     // opacity of the rows that are not highlighted
   groupColors: null,            // one colour per group: {aw: '#339af0', 'tb.dut.u_rx': '#37b24d', '*.fifo*': …} (path, name, * pattern)
+  bookmarkLeft: 0.2,            // going to a bookmark (1–9, ]m [m, Markers…, its list): its time this far from the left of the waves (0 … 0.9)
   arrowLabels: 'lane',          // bookmark arrow labels: 'lane' (a thin row of their own between signals) | 'overlay' (on the arrow)
   laneHeight: 16,               // px per label in such a lane
   groupOrder: 'file',           // inside every group: 'last' = signals first, then the sub-groups (modules); 'first'; 'file' = as given

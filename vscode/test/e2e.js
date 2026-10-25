@@ -5,7 +5,7 @@
    is kept over closing and opening the tab again (the store), and a new write of a copy of the first dump is read again
    by itself (wavelens.autoReload); a dump with a stranger code and one whose time goes back put their notes in the
    Problems panel on their lines; a VCD as Questa writes it is named from a source of the workspace, another by the types
-   file beside it, read again when it is written; a dump in a folder with a space in its name; the Verilator command with
+   file beside it, read again when it is written, and its FST made by Convert to FST names them without it; a dump in a folder with a space in its name; the Verilator command with
    a file's name of * ? (expanded). The results: out/result.json {run: the runner's id, done, results}; the process exits 0
    when all passed (review VI T11: the runner takes only its own run's results, every check it names, the run done). */
 const vscode = require('vscode'), fs = require('fs'), path = require('path');
@@ -214,6 +214,15 @@ async function run() {
         const r = await o.tab.run([{ op: 'cursor', t: 0 }, { op: 'edge', value: 'STOP', signal: 'fsm_tb.u_rx.state' }]);
         ok('types: the command makes them with Verilator, the tab reads them', res && res.signals === 3 && fs.existsSync(path.join(dir, 'fsm_copy.types.json')) &&
           r[1] && r[1].moved, { res, edge: r[1] });
+        await closeAll();
+        // Convert to FST: fsm_copy.fst beside the VCD with the states of the types file in it; the types file taken away,
+        // the FST's tab still names them (its own enum tables)
+        const conv = await vscode.commands.executeCommand('wavelens.toFst', vscode.Uri.file(q), { quiet: true });
+        fs.unlinkSync(path.join(dir, 'fsm_copy.types.json'));
+        const f = await open(api, path.join(dir, 'fsm_copy.fst'));
+        const e = await f.tab.run([{ op: 'cursor', t: 0 }, { op: 'edge', value: 'STOP', signal: 'fsm_tb.u_rx.state' }]);
+        ok('to FST: beside the VCD, the FSM states in it', conv && conv.ok && /from fsm_copy\.types\.json \(3 variables\)/.test(conv.said) &&
+          e[1] && e[1].moved, { conv, edge: e[1] });
         await closeAll();
       }
     } catch (e) { ok('types: Verilator', false, { error: e.message }); }

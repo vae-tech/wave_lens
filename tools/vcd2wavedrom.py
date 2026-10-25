@@ -381,7 +381,7 @@ def parser():
     ap.add_argument('--hierarchy', action='store_true', default=None, help='nest signals in groups by their scope path (instead of --group)')
     ap.add_argument('--marker', action='append', help="'EVENT=label', EVENT is 'posedge X', 'negedge X', 'edge X' or 'X' (any change)")
     ap.add_argument('--title', help='head.text')
-    ap.add_argument('--bookmarks', help='JSON list [{"n", "t", "signal", "text", "color"}] (usually in the config file; the viewer\'s JSON button writes it)')
+    ap.add_argument('--bookmarks', help='JSON list [{"n", "t", "signal", "text", "color", "lift", "top"}] (usually in the config file; the viewer\'s JSON button writes it)')
     ap.add_argument('--arrows', help='JSON list [{"from", "to", "shape", "head", "line", "color", "label"}] between bookmarks')
     ap.add_argument('--sva', action='append', help='SystemVerilog assertion file for the page (repeatable; one compilation unit, in order)')
     ap.add_argument('--bind', action='append', help='NAME@SCOPE: bind assertion NAME to instance SCOPE, evaluated over the dump (repeatable)')

@@ -64,6 +64,7 @@ help:
 	@echo 'make sva-examples  sva parse + sva eval of the assertion files of examples/ (apb, axi_lite, fsm; after make examples)'
 	@echo 'make sva-verify the checkers of the examples in Verilator --assert against sva eval (after make examples; skipped without verilator)'
 	@echo 'make sva-eval   WAVES=dump.vcd|fst SVA="pkg.sv checks.sva" SCOPE=tb.dut [OUT=results.json] [ARGS=...]: sva eval'
+	@echo 'make fst        WAVES=tb.vcd [OUT=tb.fst] [ARGS=--no-types]: sva fst, the VCD as an FST beside it (FSM states of tb.types.json in it)'
 	@echo 'make sva-spike  the spike page $$(BUILD)/sva/spike.html (the WebAssembly build and wavelens/sva.js in a page)'
 	@echo 'make vsix       the VS Code extension (vscode/) -> $$(BUILD)/wavelens.vsix and its copy wavelens-<version>.vsix (kept'
 	@echo '                side by side): the viewer and the static sva, for the Linux host of Remote-SSH / WSL (nothing else'
@@ -278,6 +279,11 @@ sva-examples: sva-build
 	  if [ -f $$d ]; then echo "== $$ex"; $(SVA_BIN) eval --waves $$d $(SVA_EX_$$ex) --out $(B)/sva/$$ex.results.json; \
 	  else echo "== $$ex: no $$d (make examples)"; fi; done; true
 
+# a VCD as an FST beside it (tb.vcd -> tb.fst, docs/USAGE.md § A VCD as an FST): make fst WAVES=work/x.vcd [OUT=x.fst]
+fst: sva-build
+	$(if $(WAVES),,$(error make fst needs WAVES=dump.vcd))
+	$(SVA_BIN) fst $(WAVES) $(if $(OUT),--out $(OUT)) $(ARGS)
+
 # sva eval over any dump: make sva-eval WAVES=work/x.fst SVA="rtl/pkg.sv checks.sva" SCOPE=tb.dut [OUT=r.json]
 sva-eval: sva-build
 	$(if $(WAVES),,$(error make sva-eval needs WAVES=dump.vcd|fst))
@@ -375,4 +381,4 @@ clean-all:
 	$(if $(filter $(B),/ $(CURDIR) $(HOME) $(abspath $(HOME)/..)),$(error clean-all: BUILD=$(B) is not a build directory))
 	rm -rf $(B)
 
-.PHONY: unit-bless unit-shuffle vsix vscode-e2e wavelens help demo demo-fst example examples questa types-fixture shots guide-shots html config sva-build dist dist-linux dist-windows sva-test sva-bless sva-examples sva-verify sva-eval sva-spike mcp-bench smoke shots-check unit check fmt lint clean clean-all
+.PHONY: unit-bless unit-shuffle vsix vscode-e2e wavelens help demo demo-fst fst example examples questa types-fixture shots guide-shots html config sva-build dist dist-linux dist-windows sva-test sva-bless sva-examples sva-verify sva-eval sva-spike mcp-bench smoke shots-check unit check fmt lint clean clean-all

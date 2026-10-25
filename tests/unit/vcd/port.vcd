@@ -1,0 +1,17 @@
+$timescale 1ns $end
+$scope module tb $end
+$var port 1 ! p $end
+$var port 4 " q [3:0] $end
+$var wire 1 # w $end
+$upscope $end
+$enddefinitions $end
+#0
+1!
+b1010 "
+0#
+#10
+pD 6 6 !
+1#
+#20
+0!
+b0110 "

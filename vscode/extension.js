@@ -78,6 +78,53 @@ async function evict(dir) {
   for (const [p, t] of all.slice(16)) if (!used.has(p) && now - t > 600e3) await fs.promises.unlink(p).catch(() => {});
 }
 
+/* ---------------- a VCD as an FST beside it: sva fst (tb.vcd -> tb.fst, the FSM states of tb.types.json in it) ---------------- */
+// From the explorer's menu of a .vcd, the menu of its tab, or the palette (the active tab's VCD). sva writes the FST whole
+// or not at all (an older one stays when it fails); its notes (file:line, five of a kind, then their count) go to the log
+// as they come, its last line too; a failure opens the log. opts {quiet}: no messages (the tests) -> {ok, fst, said, notes}
+async function toFst(file, opts = {}) {
+  if (!file || !/\.vcd$/i.test(file)) {
+    if (!opts.quiet) vscode.window.showWarningMessage('WaveLens: an FST is made from a .vcd (the explorer\'s menu of one, or its tab)');
+    return { ok: false, notes: [] };
+  }
+  const bin = svaBin(), fst = file.replace(/\.vcd$/i, '.fst'), notes = [];
+  log(`${file} → ${path.basename(fst)}: ${bin} fst`);
+  let said = '';
+  // its lines of progress (sva: tb.vcd: progress: 40% …) in the log and the notification, not counted as notes; a run
+  // stopped leaves its part (tb.fst.<pid>.part): removed here
+  const run = (token, bar) => new Promise((ok, no) => {
+    const p = cp.spawn(bin, ['fst', file], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let err = '';
+    const lines = d => { err += d; let i; while ((i = err.indexOf('\n')) >= 0) { const l = err.slice(0, i); err = err.slice(i + 1); if (!l) continue;
+      log(l); const m = /^sva: .*?: progress: (.*)$/.exec(l); if (!m) notes.push(l); else if (bar) bar.report({ message: m[1] }); } };
+    p.stdout.on('data', d => { said += d; });
+    p.stderr.on('data', lines);
+    if (token) token.onCancellationRequested(() => p.kill());
+    p.on('error', e => no(new Error(`${bin}: ${e.message}`)));
+    p.on('close', (code, sig) => { if (err) lines('\n'); said = said.trim(); if (said) log(said);
+      if (code !== 0 && p.pid) fs.unlink(`${fst}.${p.pid}.part`, () => {});
+      if (code === 0) ok(); else no(new Error(sig ? 'stopped' : notes[notes.length - 1] || `${bin} fst: exit ${code}`)); });
+  });
+  try {
+    if (opts.quiet) await run(null);
+    else await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `WaveLens: ${path.basename(file)} → FST`,
+      cancellable: true }, (bar, token) => run(token, bar));
+  } catch (e) {
+    log(`${path.basename(fst)} not written: ${e.message}`);
+    if (!opts.quiet) { OUT.show(true); vscode.window.showErrorMessage(`WaveLens: ${e.message.replace(/^sva: /, '')}`); }
+    return { ok: false, notes, error: e.message };
+  }
+  if (!opts.quiet) {
+    const what = said.replace(/^.*?\.fst: /, '');
+    vscode.window.showInformationMessage(`WaveLens: ${path.basename(fst)} written beside the VCD: ${what}` +
+      (notes.length ? ` (${notes.length} note${notes.length === 1 ? '' : 's'} in the log)` : ''), 'Open', 'Show the log').then(a => {
+      if (a === 'Open') vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(fst), VIEW);
+      else if (a === 'Show the log') OUT.show(true);
+    });
+  }
+  return { ok: true, fst, said, notes };
+}
+
 /* ---------------- the workspace's SystemVerilog sources (wavelens.sources) ---------------- */
 // The files that declare an enum or a packed struct, and the files that use one of those types (a module's "p::state_t
 // state;" with the typedef in a package): their texts for svTables in the tab. Each file's text is kept by its size and
@@ -577,6 +624,10 @@ function activate(ctx) {
     vscode.commands.registerCommand('wavelens.theme', chooseTheme),
     vscode.commands.registerCommand('wavelens.log', () => OUT.show(true)),
     vscode.commands.registerCommand('wavelens.verilatorTypes', opts => verilatorTypes(active(), opts || {})),
+    vscode.commands.registerCommand('wavelens.toFst', (uri, opts) => {   // the explorer's file, else the active tab's dump
+      const t = active();
+      return toFst(uri && uri.fsPath ? uri.fsPath : t && t.file, opts || {});
+    }),
     vscode.workspace.onDidChangeConfiguration(e => { if (e.affectsConfiguration('wavelens.theme')) themeAll(themeOf());
       if (e.affectsConfiguration('wavelens.keysToVSCode')) {
         const keysLeft = vscode.workspace.getConfiguration('wavelens').get('keysToVSCode') || [];

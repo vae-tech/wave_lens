@@ -1,5 +1,5 @@
 {
- "about": "review VI T6: what tools/svtypes.py (read, apply, fingerprint) and the page (svTypes, svApply, svFingerprint) both do with a types file and the signals of a dump: tests/unit/test_svtypes.py and tests/smoke.py (readers) read it. want: labels / fields put on a path by the types (the row's own ones are not), the notes of apply, the run's notes, error: the file is refused.",
+ "about": "review VI T6: what tools/svtypes.py (read, apply, fingerprint) and the page (svTypes, svApply, svFingerprint) both do with a types file and the signals of a dump: tests/unit/test_svtypes.py and tests/smoke.py (readers) read it. want: labels / fields put on a path by the types (the row's own ones are not), the notes of apply, the run's notes, error: the file is refused. A signal's \"ref\": its $var reference as a VCD writes it (sva fst reads the VCD: sva/cli/tests/cli.rs; the others take the path).",
  "cases": [
   {
    "name": "its own path",
@@ -592,6 +592,122 @@
     }
    ],
    "want": {}
+  },
+  {
+   "name": "a range glued to the name or apart, an element of an array with its range (state[1:0], apart [1:0], mem[3] [1:0] of a VCD)",
+   "types": {
+    "wavelens": "types",
+    "signals": {
+     "tb.state": {
+      "width": 2,
+      "enum": {
+       "0": "A",
+       "1": "B"
+      }
+     },
+     "tb.apart": {
+      "width": 2,
+      "enum": {
+       "0": "A",
+       "1": "B"
+      }
+     },
+     "tb.mem": {
+      "width": 2,
+      "enum": {
+       "1": "M"
+      }
+     }
+    }
+   },
+   "signals": [
+    {
+     "path": "tb.state",
+     "width": 2,
+     "ref": "state[1:0]"
+    },
+    {
+     "path": "tb.apart",
+     "width": 2,
+     "ref": "apart [1:0]"
+    },
+    {
+     "path": "tb.mem.[3]",
+     "width": 2,
+     "ref": "mem[3] [1:0]"
+    }
+   ],
+   "want": {
+    "labels": {
+     "tb.state": {
+      "0": "A",
+      "1": "B"
+     },
+     "tb.apart": {
+      "0": "A",
+      "1": "B"
+     },
+     "tb.mem.[3]": {
+      "1": "M"
+     }
+    }
+   }
+  },
+  {
+   "name": "a root of the types without an enum (a struct's) is the design's too: other.tb.state is not tb.state",
+   "types": {
+    "wavelens": "types",
+    "signals": {
+     "tb.state": {
+      "width": 2,
+      "enum": {
+       "0": "A",
+       "1": "B"
+      }
+     },
+     "other.payload": {
+      "width": 8,
+      "fields": [
+       {
+        "name": "hi",
+        "msb": 7,
+        "lsb": 4
+       },
+       {
+        "name": "lo",
+        "msb": 3,
+        "lsb": 0
+       }
+      ]
+     }
+    }
+   },
+   "signals": [
+    {
+     "path": "other.tb.state",
+     "width": 2
+    },
+    {
+     "path": "other.payload",
+     "width": 8
+    }
+   ],
+   "want": {
+    "fields": {
+     "other.payload": [
+      {
+       "name": "hi",
+       "msb": 7,
+       "lsb": 4
+      },
+      {
+       "name": "lo",
+       "msb": 3,
+       "lsb": 0
+      }
+     ]
+    }
+   }
   }
  ]
 }

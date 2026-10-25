@@ -165,7 +165,8 @@ function fsmStats(r, t1) {
 // changes and a diagram of them; a click there takes the cursor to the next entry or change (shift: the previous). A click
 // on a module goes there (goScope); ctrl+click / Space picks an FSM, shift+click a run, a box drawn over the tree picks the
 // FSMs in it. Only FSMs / Add to view take the picked ones (none picked: every one the filter lists); the right button: a
-// menu of an FSM or a module. Keys: ↑ ↓ Home End, ← → fold / open, Enter go, d details, Space pick, / the filter, Esc.
+// menu of an FSM or a module. Keys: ↑ ↓ Home End, ← → fold / open, Enter go, d details, Space pick, / the filter, Esc; in
+// the details (a click there, Tab): ↑ ↓ their rows, Enter the next time (shift: the previous), ← → the tabs, Esc the tree.
 const FSM_TABS = [['states', 'States'], ['changes', 'Changes'], ['graph', 'Diagram']];
 class Fsms {
   constructor(v) {
@@ -183,7 +184,8 @@ class Fsms {
         '<div class="mtr" role="tree" aria-label="state machines" aria-multiselectable="true"><div class="mbox" hidden></div><div class="mrows"></div></div>' +
         '<div class="fd" hidden><div class="fdh"><b class="fdn"></b><span class="fdm"></span><span class="fdt" role="tablist">' +
         FSM_TABS.map(([t, n]) => `<button type="button" role="tab" data-t="${t}">${n}</button>`).join('') +
-        '</span><button type="button" data-a="fdx" aria-label="close the details" title="Close the details (d)">✕</button></div><div class="fdb"></div></div>');
+        '</span><button type="button" data-a="fdx" aria-label="close the details" title="Close the details (d)">✕</button></div>' +
+        '<div class="fdb" tabindex="-1"></div></div>');
     v.root.append(el);
     this.tree = el.querySelector('.mtr'); this.rowsEl = el.querySelector('.mrows'); this.qEl = el.querySelector('.mq'); this.stEl = el.querySelector('.ms');
     this.box = el.querySelector('.mbox'); this.fdEl = el.querySelector('.fd'); this.fdb = el.querySelector('.fdb');
@@ -331,6 +333,9 @@ class Fsms {
     if (was) { const b = this.el.getBoundingClientRect();   // the details just opened: the panel all in sight
       if (b.bottom > innerHeight - 4 && getComputedStyle(this.el).position === 'fixed') this.el.style.top = Math.max(4, innerHeight - b.height - 6) + 'px'; }
     const v = this.v, st = v.fsmStatsOf(r), now = this.detNow = this.nowKey(), span = Math.max(1e-30, v.M.t1 - v.M.t0);
+    if (r !== this.dsFor) { this.dsel = {}; this.dsFor = r; }   // the row with the keys in each tab (another FSM: the first)
+    const had = this.fdb.contains(document.activeElement), di = this.dsel[this.tab] || 0;
+    const row = i => ` data-r="${i}" tabindex="${i === di ? 0 : -1}"`;
     const reached = st.states.length - st.unseen.length, nch = Math.max(0, st.seq.length - 1);
     const up = r.anc.map(id => v.M.groups[id]).filter(g => g && this.nodes.has(g.id)).pop();
     this.el.querySelector('.fdn').textContent = (up ? up.name + '.' : '') + this.label(r);   // u_rx.state: which state it is
@@ -343,19 +348,42 @@ class Fsms {
       const tip = s => `${st.name(s.key)}: ` + (s.entries.length ? `entered ${s.entries.length}× · a click: the next entry after the cursor, shift: ` +
         'the previous; the first one: its time' : 'never reached on these waves') + (st.table[s.key] === undefined ? ' · not a state of its table' : '');
       this.fdb.innerHTML = '<table class="fst"><tr><th>state</th><th>value</th><th title="how many times it entered it">in</th>' +
-        '<th title="of the whole time">time</th><th>first</th></tr>' + [...st.states, ...st.bad].map(s =>
-        `<tr class="${cls(s)}" data-k="${esc(s.key)}" title="${esc(tip(s))}"><td>${esc(st.name(s.key))}</td><td>${esc(s.key)}</td>` +
+        '<th title="of the whole time">time</th><th>first</th></tr>' + [...st.states, ...st.bad].map((s, i) =>
+        `<tr class="${cls(s)}" data-k="${esc(s.key)}"${row(i)} title="${esc(tip(s))}"><td>${esc(st.name(s.key))}</td><td>${esc(s.key)}</td>` +
         `<td>${s.entries.length}</td><td>${s.entries.length ? (100 * s.time / span).toFixed(1) + '%' : ''}</td>` +
         `<td${s.entries.length ? ' class="fi" data-first="1"' : ''}>${s.entries.length ? when(s.entries[0]) : 'never'}</td></tr>`).join('') + '</table>';
     } else if (this.tab === 'changes') {
       const ch = [...st.trans.values()].sort((a, b) => b.times.length - a.times.length);
       const bad = x => st.table[x.from] === undefined || st.table[x.to] === undefined;
-      this.fdb.innerHTML = ch.length ? '<table class="fst"><tr><th>from</th><th></th><th>to</th><th>×</th><th>first</th></tr>' + ch.map(x =>
-        `<tr data-f="${esc(x.from)}" data-t="${esc(x.to)}" class="${bad(x) ? 'bad' : ''}${x.from === now ? ' now' : ''}" title="a click: the next time ` +
+      this.fdb.innerHTML = ch.length ? '<table class="fst"><tr><th>from</th><th></th><th>to</th><th>×</th><th>first</th></tr>' + ch.map((x, i) =>
+        `<tr data-f="${esc(x.from)}" data-t="${esc(x.to)}"${row(i)} class="${bad(x) ? 'bad' : ''}${x.from === now ? ' now' : ''}" ` +
+        'title="a click: the next time ' +
         `after the cursor, shift: the previous"><td>${esc(st.name(x.from))}</td><td>→</td><td>${esc(st.name(x.to))}</td><td>${x.times.length}</td>` +
         `<td class="fi" data-first="1">${when(x.times[0])}</td></tr>`).join('') + '</table>' : '<p class="fdz">no change on these waves</p>';
     } else this.fdb.innerHTML = this.graph(st, now);
+    if (had) this.focusDet();   // drawn again (the cursor moved): the keys stay on its row
     return this;
+  }
+  // the details' row with the keys (i: another one, kept per tab), in sight; no rows (the diagram): the details themselves
+  focusDet(i = (this.dsel || {})[this.tab] || 0) {
+    const rows = this.fdb.querySelectorAll('tr[data-r]');
+    if (!rows.length) { this.fdb.focus({ preventScroll: true }); return; }
+    i = Math.min(Math.max(i, 0), rows.length - 1); this.dsel[this.tab] = i;
+    rows.forEach((x, j) => { x.tabIndex = j === i ? 0 : -1; x.classList.toggle('fk', j === i); });
+    rows[i].focus({ preventScroll: true }); rows[i].scrollIntoView({ block: 'nearest' });
+  }
+  // a key in the details: ↑ ↓ Home End its rows, Enter (shift: back) the cursor to the next time as a click, ← → the tabs,
+  // Esc back to the tree -> handled
+  detKey(e) {
+    const k = e.key, rows = [...this.fdb.querySelectorAll('tr[data-r]')], i = this.dsel[this.tab] || 0;
+    if (/^(ArrowUp|ArrowDown|Home|End)$/.test(k)) {
+      if (rows.length) this.focusDet(k === 'Home' ? 0 : k === 'End' ? rows.length - 1 : i + (k === 'ArrowDown' ? 1 : -1)); return true; }
+    if (k === 'Enter' && rows[i]) { rows[i].dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: e.shiftKey })); return true; }
+    if (k === 'ArrowLeft' || k === 'ArrowRight') {
+      const t = FSM_TABS.findIndex(x => x[0] === this.tab) + (k === 'ArrowRight' ? 1 : -1);
+      if (t >= 0 && t < FSM_TABS.length) { this.detail(this.det, FSM_TABS[t][0]); this.focusDet(); } return true; }
+    if (k === 'Escape') { this.focusRow(); return true; }
+    return false;
   }
   // the diagram: the states on a circle (the table's order, then the values not in it), an arrow per change seen, as thick
   // as it is frequent; never reached: dashed; not in the table: red; at the cursor: filled. A click: the next entry / change
@@ -439,6 +467,7 @@ class Fsms {
       const tb = e.target.closest('.fdt button[data-t]'); if (tb) { this.detail(this.det, tb.dataset.t); return; }
       if (e.target.closest('.fdb')) {   // the details: a state (its next entry), a change (its next time), the first one
         const s = e.target.closest('[data-k]'), c = e.target.closest('[data-f]'), first = !!e.target.closest('[data-first]'), dir = e.shiftKey ? -1 : 1;
+        const tr = e.target.closest('tr[data-r]'); if (tr) { this.dsel[this.tab] = +tr.dataset.r; this.focusDet(); }   // the keys on it
         if (s) v.fsmGo(this.det, { state: s.dataset.k, first }, dir); else if (c) v.fsmGo(this.det, { from: c.dataset.f, to: c.dataset.t, first }, dir);
         return;
       }
@@ -488,6 +517,7 @@ class Fsms {
     panelFrame(this, 'fsms');   // the header moves it, its edges and corners size it (modules.js)
     el.addEventListener('keydown', e => {
       if (e.target === this.qEl) return;
+      if (e.target.closest('.fdb') && !e.ctrlKey && !e.metaKey && !e.altKey && this.detKey(e)) { e.preventDefault(); e.stopPropagation(); return; }
       const k = e.key, x = this.rows[this.fi];
       if (k === 'Escape') { e.preventDefault(); e.stopPropagation(); if (d) { end(e, false); return; }
         if (v.menuEl) { v.closeMenu(); this.focusRow(); return; } this.close(); return; }

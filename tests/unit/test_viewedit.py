@@ -89,6 +89,22 @@ class Commands(unittest.TestCase):
                                                      'arrow: from and to are one bookmark', 'no arrow 5 (there are 0)',
                                                      'shape: one of "~" "-" "-~" "~-" "-|" "|-" "-|-"', 'n: a bookmark number (1, 2 …)',
                                                      'bookmark: t (the cursor here is not known)'])
+        # top: kept as given (a file has no screen to take it from), a row there is (a name: its path); go: the cursor on
+        # it, bookmarkLeft of the window from the left, the window within the waves (0 … 80 ns) as view.js clamps it
+        e.st.update({'from': 0, 'to': 20000})
+        r = self.run_ok(e, {'op': 'bookmark', 'n': 3, 'top': 'tb.dut', 'go': True})[0]
+        self.assertEqual((r['t'], r['from'], r['top'], e.st['cursor'], e.st['to']), (60000, 56000, 'tb.dut', 60000, 76000))
+        self.assertEqual(e.st['bookmarks'][-1], {'n': 3, 't': 60000, 'color': '#0a0', 'top': 'tb.dut'})
+        self.assertEqual(self.run_ok(e, {'op': 'bookmark', 'n': 3, 'top': 'valid'})[0], {'op': 'bookmark', 'n': 3})
+        self.assertEqual(e.st['bookmarks'][-1]['top'], 'tb.dut.valid')
+        self.assertEqual([self.run_ok(e, {'op': 'bookmark', 'n': 3, 't': t, 'go': True})[0]['from'] for t in (0, 80000, 30000)], [0, 60000, 26000])
+        got = []
+        for x in (0.5, None, '', 'abc', -1, 5, 'Infinity', '0.5'):   # as view.js goBm: not a number 0.2, else within 0 … 0.9
+            e.st['config'] = {'bookmarkLeft': x}
+            got.append(self.run_ok(e, {'op': 'bookmark', 'n': 3, 'go': True})[0]['from'])
+        self.assertEqual(got, [20000, 26000, 26000, 26000, 30000, 12000, 26000, 20000])
+        self.assertIn("top: a row's path", e.run([{'op': 'bookmark', 'n': 3, 'top': 5}])[0]['error'])
+        self.assertEqual(e.run([{'op': 'bookmark', 'n': 3, 'top': 'no.such'}])[0]['error'], 'no signal or module "no.such"')
         self.run_ok(e, {'op': 'bookmark', 'n': 'all', 'delete': True})
         self.assertEqual((e.st['bookmarks'], e.st['arrows']), ([], []))
 

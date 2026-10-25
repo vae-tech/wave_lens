@@ -1,0 +1,12 @@
+$scope module tb $end
+$var wire 1 ! s $end
+$var wire 4 " n [3:0] $end
+$upscope $end
+$enddefinitions $end
+#0
+0!
+b0 "
+#10
+1!
+#25
+b1001 "

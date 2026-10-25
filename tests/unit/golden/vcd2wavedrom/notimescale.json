@@ -1,0 +1,12 @@
+{
+ "signal": [
+  ["tb",
+    {"name": "s", "width": 1, "wave": "01", "tv": [[0, "0"], [10, "1"]], "path": "tb.s"},
+    {"name": "n", "width": 4, "wave": "=.", "data": ["0"], "tv": [[0, "0"], [25, "9"]], "path": "tb.n"}
+  ]
+ ],
+ "head": {"text": "notimescale.vcd"},
+ "time": {"t0": 0, "t1": 25, "cycle": 10, "unit": "ps"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "notimescale.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 0, "to_ps": 25}
+}

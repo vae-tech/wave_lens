@@ -37,6 +37,9 @@ code --install-extension out/wavelens.vsix --force  # in a terminal of the remot
 WaveLens*, or *Open With… → WaveLens* (where you can make it the default for these files; it is an option, another viewer
 may be the default). What the tab does differently from a page in a browser:
 
+- **Convert to FST.** A `.vcd` in the Explorer → right click → *WaveLens: Convert to FST* (or the tab's title menu, or
+  the palette) writes `tb.fst` beside `tb.vcd` with `sva fst` ([§ A VCD as an FST](#a-vcd-as-an-fst)): the FSM states of
+  the VCD and of `tb.types.json` in it. Its notes go to the output channel *WaveLens* as they come, a failure opens it.
 - **A new simulation.** The tab says when the dump changed on the disk (its size and time still for a second: polled,
   so an NFS home of the host works too); ⟳ in the bar, or *WaveLens: Read the dump again* (the editor's title), reads it
   with the view kept. `wavelens.autoReload`: at once.
@@ -51,7 +54,7 @@ may be the default). What the tab does differently from a page in a browser:
   what they mean in VS Code (ctrl+F find, ctrl+C copy, ctrl+Z / ctrl+Y undo / redo, alt+C W R in the find field);
   `wavelens.keysToVSCode` (default `ctrl+G`, Go to Line) are left to VS Code — the list of your groups is `gl` then; the
   others (ctrl+P, F1, ctrl+tab, ctrl+shift+…) are VS Code's.
-- **The version** in the bar's title line: `0.21 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
+- **The version** in the bar's title line: `0.22 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
   committed), so a tab of a development build says which one it is.
 - **An agent** on the host (`tools/wavemcp.py`, below): when it starts its live link, every open tab connects (**●
   live**); `view_live` with `page` a `.vcd` / `.fst` and `open: true` opens it in the VS Code window that has the file
@@ -174,6 +177,9 @@ at once; the names come from the design's types (guide: [State names and structs
   offers ⟳ when it is written again; there *WaveLens: Make the types with Verilator* writes it too (a `.f` file of the
   workspace or the arguments typed, `rtl/*.sv` expanded, the top module; `wavelens.verilator`; no Python needed). `python3 -I tools/svtypes.py
   check tb.types.json tb.vcd` lists what each path gets and which signals of the dump get it.
+- **Into an FST.** `sva fst tb.vcd` (or *Convert to FST* in VS Code, `wave_to_fst` of the MCP server) writes `tb.fst`
+  with each state bus's names as the FST's own enum table, by the same rules (its path, its width; `--map` as here):
+  GTKWave, Surfer and every reader of the FST show them without the types file ([§ A VCD as an FST](#a-vcd-as-an-fst)).
 - **Another root.** The dump's scopes as the types name them: `"map": {"top.dut_i": "dut"}` in the types file, or
   `--types-map top.dut_i=dut` (`mkconfig.py`) / `--map` (`svtypes.py check`): the longest prefix is replaced before the lookup.
 - **Which run.** The types and the dump are compared as far as both tell: written more than a day apart (Questa's types and
@@ -263,7 +269,7 @@ add theirs (`WaveLens.registerDefaults`).
 | `toolsFolded` | false | the bar's tools folded to its title line (**▴** / **▾ tools** in the bar) |
 | `toolsHidden` | `[]` | the bar's tool groups left out by their labels (`["style", "dump"]`; the right button on the bar) |
 | `themeButton` | `auto` | **◐** in the bar's title line: the page's theme (auto, light, white, dark; kept in this browser; in VS Code its list, VS Code's colours too); `auto`: when the page has no theme button of its own (`viewer.html`, the VS Code tab) |
-| `version` | true | the version in the bar's title line, and the build the page was made from (`0.21 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
+| `version` | true | the version in the bar's title line, and the build the page was made from (`0.22 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
 | `keysLeft` | `[]` | keys the viewer leaves to its host: `["ctrl+G"]` (`ctrl+` is `cmd+` too, a letter by its place); the VS Code tab: `wavelens.keysToVSCode` |
 | `savePage` | true | the bar's **Save page**: this page as a `.view.html` with your view in it (§ Save and Load); false hides it and keeps no copy of the page's text |
 | `cycles`, `cycleClock`, `cycleZero` | false, null, null | the clock cycles in a band under the time axis (§ Clock cycles): on, the clock counted (null: the `*clk*` found), the time of cycle 0 (`"50ns"` or ps; null: the first rising edge) |
@@ -271,6 +277,7 @@ add theirs (`WaveLens.registerDefaults`).
 | `highlight`, `dim` | none, 0.3 | instances in front at start (paths, names, `*` patterns) and the opacity of the rest |
 | `findHighlight`, `findOpen`, `findMask` | true, true, false | starting state of the find options **Highlight**, **Open**, **Mask** |
 | `findCase`, `findWord`, `findRegex` | false | starting state of **Aa** (match case), **Full** (whole name; `a.b`: the end of the full path), **.\*** (a regular expression) |
+| `bookmarkLeft` | 0.2 | going to a bookmark (`1`–`9`, `]m [m`, **Markers…**, a number in its list, the command's `go`): its time this far from the left of the waves (0 … 0.9; 0.5: the middle; not a number: 0.2) |
 | `arrowLabels`, `laneHeight` | `lane`, 16 | arrow labels in a lane of their own between the signals, or `overlay` |
 | `svaSignals`, `svaShow` | `view`, all | assertion groups: repeat the bound signals under the steps (`view`: in viewers, `true`: also in static SVGs, `false`); which assertions are drawn (labels, `*` patterns) |
 
@@ -490,6 +497,7 @@ setting is the start; a find left out still floats over the waves on `/`). Navig
 | shift+`← →` | move the cursor a hundredth of the view | the pointer on a signal | its value there, the change into it and the next one (tooltip) |
 | `/`, ctrl+F | find (the bar scrolled away: the find group floats over the waves; ✕ or Esc puts it back) | `n N`, `*` `#` | next / previous match; find the selected signal's name and go to its next / previous match |
 | `m` | bookmark at the cursor | `]m [m` | the next / previous bookmark |
+| `gm` (the right button's **Markers…**) | the markers (the page's, yours) and the bookmarks in a list over the waves, by time: `↓` the first (`↑` the last), then `↑ ↓` Home End step through them, a click picks one — the cursor on it and the waves at its time with the span they have: a marker in the middle, a bookmark as going to it does (below); Enter or Esc closes it there | `gl`, ctrl+G | your groups: a list |
 | shift+click the waves | a second cursor (dashed, on an edge): Δ to the cursor in time, its frequency (`Δ 40 ns / 25 MHz`) and in cycles of the clock (the cycles band's when it is on, else the selected signal's, else the nearest `*clk*`) on the axis and in the readout; `x` swaps the two; Esc clears it | `1` … `9` | go to that bookmark (each bookmark's line shows its Δ from the cursor) |
 | `zM` / `zR` | fold / open every module | `zc` / `zo` / `za` | fold / open / toggle the module of the selected signal |
 | `t` | the Modules panel: the modules as a tree (§ below); again: the selected signal's module in it; `T`: the state machines | **Only: N ✕** in the bar | ‖ pauses Only (every module), ▶ resumes it, ✕ clears it |
@@ -565,7 +573,9 @@ the tree, on three tabs:
   not in the table: red; the state at the cursor: filled).
 
 A click on a state, a change or an arrow takes the cursor to the next time it happens after the cursor (**shift**: the
-previous; round the end to the first), on the first time to that one. The right button on an FSM: go there, its details,
+previous; round the end to the first), on the first time to that one; the keys do it too once a row of the details
+has them (a click on it, or Tab from the tree): **↑ ↓ Home End** the rows of States or Changes, **Enter** the next time
+(**shift+Enter** the previous), **← →** the tabs, **Esc** back to the tree. The right button on an FSM: go there, its details,
 **Only this FSM**, **Add it to the view**, pick, copy the path; on a module: **Only its FSMs**, **Add its FSMs to the
 view**, pick them. A box drawn over the tree picks the FSMs in it (ctrl: adds them). The commands
 [`fsm_stats`](#commands-and-edits) (the same numbers) and `fsm_go` (the cursor to a state or a change) do it from a script
@@ -614,7 +624,16 @@ above shows arrows between handshakes with the latency as the label.
 ![The bookmark and arrow lists under the waves](img/bookmarks.png)
 
 **Markers and your groups.** The right button's **Marker here** draws a dashed line across every row with a label at
-the top (yours, next to the page's own markers); its **Groups ▸** submenu puts the signal (the highlighted or selected
+the top (yours, next to the page's own markers): a small box asks its label where you clicked — **Enter** (or **Add**)
+puts it in, also empty, **Esc** or a click elsewhere leaves it out — and it goes into the Markers list under the waves,
+edited there; **Markers…** (`gm`) lists them all over the waves to step through with ↑ ↓, the waves following; the waves stay where they are (**Bookmark here** asks a bookmark's text the same way).
+**Going to a bookmark** (`1`–`9`, `]m [m`, **Markers…**, a number in the list under the waves) shows the waves as they
+were when it was made: its time `bookmarkLeft` (0.2) of the waves from the left, the span you have now, its signal
+selected, and the rows scrolled so that the row that was at the top under the time axis is at the top again (`"top"`
+in the bookmarks' JSON: a signal's or module's path; the other rows as they are now: what you hid or left out with
+Only stays so); a module folded since is opened on the way to that row and to its signal. A bookmark without a `top`
+(made before, or by the command without one), or whose row is no longer there, brings its signal into sight. The
+list's **cursor** button moves a bookmark to the cursor and to the screen of now (its `top` the row at the top). The right button's **Groups ▸** submenu puts the signal (the highlighted or selected
 ones) **Into** a group of your own or a **New group** — a folder at the top of the names with its signals in your order
 (they stay in their modules too; their radix, colour and values are the signal's; bookmarks and highlight of a signal
 show on its row in the group) —, takes them **Out**, **Deletes** the group on its header, and **Go to** any group.
@@ -807,7 +826,7 @@ await v.run([
 
 | Command | Arguments (`?` optional) | Does |
 |---|---|---|
-| `bookmark` | `n? t? signal? text? color? lift? delete?` | a numbered circle on a signal (none: the time axis) with its text: a new one (`n` free or left out, `t` the cursor by default) or bookmark `n` changed; `lift`: above its signal, in a lane; `delete: true`: bookmark `n` goes (`n: "all"`: every one; its arrows go too) |
+| `bookmark` | `n? t? signal? text? color? lift? top? go? delete?` | a numbered circle on a signal (none: the time axis) with its text: a new one (`n` free or left out, `t` the cursor by default) or bookmark `n` changed; `lift`: above its signal, in a lane; `top`: the row going to it puts at the top of the waves (a signal's or module's path, or a name as `signal` takes it — a row there is, else an error; null: none — the command takes none by itself, as its file twin has no screen; the viewer's own **Bookmark here**, `m` and a range's bookmarks take the row at the top then); `go: true`: the waves to it, as `1`–`9` go (in a file: the cursor, the window within the waves and the selection); `delete: true`: bookmark `n` goes (`n: "all"`: every one; its arrows go too) |
 | `arrow` | `id? from? to? shape? head? line? color? label? delete?` | an arrow between bookmarks `from` → `to` with its label: new, or arrow `id` (1, 2 … as listed; or the one from → to) changed; shape `~ - -~ ~- -\| \|- -\|-`, head `> <> < ""`, line `solid dashed dotted` |
 | `marker` | `id? t? label? color? delete?` | a dashed line across the rows with its label: new, or marker `id` changed; `delete`: `id` or `"all"` (`"all"` without `delete` is an error) |
 | `group` | `name signals? add? remove? color? rename? delete? go? move?` | your group: `signals` sets its signals in this order (a module: its signals), `add`, `remove`, `rename`, `delete`; `go`: opened, in the middle, its first signal selected (ctrl+G); `move`: its place among your groups (`up`, `down`, `top`, `bottom`, a number) |
@@ -887,6 +906,7 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
 | `wave_stats` | over a window: a bit's rises, falls, high time, pulse widths and period; a bus's changes, distinct values, the longest-held ones, minimum and maximum |
 | `sva_check` | assertion files and / or text evaluated over the dump in a scope: the failed ones with their first failures (`cycle`, `t`, `start_cycle`, `start_t`, the reason), passed, vacuous, not evaluated (names missing), the covers |
 | `wave_page` | a viewer page (`out` `.html`) or WaveJSON (`.json`) of signals over a window, assertions bound, to show a person |
+| `wave_to_fst` | the VCD as an FST beside it (`out`: another file) with `sva fst`, the FSM states of its types file in it (`types`, `no_types`); what was written and the notes with their lines |
 | `view_edit` | marks up a page for a person with the [commands](#commands-and-edits) (`ops`): bookmarks with a text, arrows, markers, groups, highlight, colours, hidden and folded rows, radix, cursor, window — live in their browser when the page is connected, else into the page's file (they see it when they open or reload it); `save`: a live page's state into its file too |
 | `view_get` | what a page shows: bookmarks, arrows, markers, groups, highlight, colours, hidden, cursor and window (live: with what the person changed); `rows`: its signals; `picture`: a PNG of the screen (live) |
 | `view_live` | connects a page to this server: the link is written into it, the person opens or reloads it (`open`: in their browser); `off`: disconnects; `page` a `.vcd` / `.fst`: its tab in VS Code (the extension connects by itself; `open`: VS Code opens it); without a page: the pages connected |
@@ -960,7 +980,7 @@ All tools are `python3 -I tools/<tool>.py --help`; the Makefile calls them for y
 | `mkvsix.py` | the VS Code extension as one `.vsix` ([§ In VS Code](#in-vs-code-over-remote-ssh-or-wsl)) | `--out`, `--sva`, `--target` |
 | `viewedit.py` | the viewer's [commands](#commands-and-edits) on a page's edits or a saved state (`.view.json`) | `PAGE --ops JSON\|@file`, `--view`, `--get`, `--views`, `--model`, `--commands` |
 | `svaverify.py` | the examples' checkers in Verilator `--assert` against `sva eval` (`make sva-verify`) | `--build`, `--only`, `--keep`, `--sva-bin` |
-| `sva` (the engine's CLI, Rust: `make sva-build`, or `bin/linux-x86_64/sva`) | `sva parse` an assertion file, `sva eval` assertions over a dump, `sva report` results, `sva --waves DUMP --info` a dump's scopes and variables, `sva vcd DUMP [--out x.vcd]` an FST as VCD text (as `fst2vcd -e` writes it: its names, enum tables, escaped strings, its end; *Formats*) | `sva <command> --help`; eval: `--waves --scope --sva [--assert NAME] [--from --to] [--out] [--json] [--attempts] [--x fail\|false] [--vacuous] [--no-lane] [--resolve up\|scope] [--ignore-prefix] [--alias] [--max-threads] [--report] [--junit] [-D]`; parse: `--json --expand -D` |
+| `sva` (the engine's CLI, Rust: `make sva-build`, or `bin/linux-x86_64/sva`) | `sva parse` an assertion file, `sva eval` assertions over a dump, `sva report` results, `sva --waves DUMP --info` a dump's scopes and variables, `sva vcd DUMP [--out x.vcd]` an FST as VCD text (as `fst2vcd -e` writes it: its names, enum tables, escaped strings, its end; *Formats*), `sva fst DUMP.vcd [--out x.fst]` a VCD as an FST beside it (as `vcd2fst` writes it, enum tables and the types file's FSM states kept; *Formats*) | `sva <command> --help`; eval: `--waves --scope --sva [--assert NAME] [--from --to] [--out] [--json] [--attempts] [--x fail\|false] [--vacuous] [--no-lane] [--resolve up\|scope] [--ignore-prefix] [--alias] [--max-threads] [--report] [--junit] [-D]`; parse: `--json --expand -D` |
 
 `sva eval --attempts` adds a line per attempt under an assertion's summary: its cycles, the time it started, the result
 and its trace (the elements `s1`, `s2` … and the cycle each matched at), a failure's reason after `--`:
@@ -1033,3 +1053,40 @@ the dump, the end after the last change too (`#10` after a change at 5). Not wri
 values of the gap are). `sva vcd` of a VCD reads it with wellen: the adjacent bit selects of a vector are merged (`d
 [7:4]`), a lone one is glued, the times are those of the changes. `sva eval` and `sva --info` read every dump with
 wellen (*ENGINE.md*: the merged selects, the escaped names that end in one).
+
+### A VCD as an FST
+
+`sva fst tb.vcd` writes `tb.fst` beside it (`--out` another file; an FST there is replaced, and only when the new one is
+complete: each run writes a part of its own, `tb.fst.<pid>.part`, and renames it, so a failure leaves the older one and
+two runs at once each finish; a run killed leaves its part, which the VS Code command removes when you cancel it; on
+Windows the rename fails while another program has `tb.fst` open), the way GTKWave's `vcd2fst`
+writes it — blocks of value changes packed with LZ4, a block every 64 MiB of changes, equal change streams written once
+(a clock and its copies), the hierarchy in LZ4, the frames, the geometry and the time tables in zlib — and `sva vcd` and
+`fst2vcd` read it back as the VCD: the same WaveJSON (`tests/unit` holds every fixture VCD to it through both readers).
+Kept: the `$date`, `$version`, `$timescale`, `$timezero`, the `$comment`s of the header, every scope with its type, every
+variable with its type and its name as the VCD writes it (`data [7:0]`, `err[2]`, `\e[0]`), one id code at several places as
+an alias, the `$attrbegin` / `$attrend` attributes — the enum tables `$attrbegin misc 07 NAME COUNT LABEL… VALUE… HANDLE
+$end` and their references before a `$var` that `sva vcd` and `fst2vcd` write, which `vcd2fst` drops —, `$dumpoff` /
+`$dumpon` as the FST's blackouts, a vector's value extended as VCD extends it (`b1` on 8 bits is `00000001`, `bz` is `zzzzzzzz`),
+reals, strings (unescaped: `\040` is a space in the FST), events, VHDL's values (a 1-bit `U` `H` `L` comes back as `u` `h`
+`l`, the FST's code of a bit; `vcd2fst` loses them), a dump on one line. The FSM states of the design's types file
+(`tb.types.json` beside the dump, `--types FILE` another, `--no-types` none, `--map DUMP=TYPES` as `svtypes.py check`)
+become the FST's enum tables of the variables of their paths whose width is the type's (*FSM state names* above); a table
+the VCD gives a variable stays. A time that goes back is an error (as the tools read the VCD; `vcd2fst` merges it).
+
+The edges, as WaveLens reads the VCD: no `$timescale` is 1 ps (`vcd2fst` takes 1 ns); an id code declared again at
+another width is a signal of its own, each variable with the value on its width (`b10101010 !` is `0` on a 1-bit `!` and
+`10101010` on an 8-bit one; `vcd2fst` gives both the first one's width); a `$var port` of an extended VCD is a wire of
+its width and its values `pD 6 0 !` are left out (one note each); a name longer than 65535 bytes, a `$comment` or an
+attribute longer than 69631, is cut to that with a note (the FST's readers take no more); a byte of a name that is not
+UTF-8 is U+FFFD. The block's memory counts its times too: a dump of times without changes is written in blocks as well.
+Where `vcd2fst` writes another FST of the same VCD (and `sva fst` follows the VCD): a `#` inside a `$comment` of the
+body, a dump on one line or `#5 1!` on one line, VHDL's 1-bit `U` `H` `L`, upper-case `X` `Z`, the time of the first
+`$dumpvars`, a value wider than its `$var`.
+
+The log on stderr says what happens without flooding it: a note at its line (`tb.vcd:120: a value of "%", which no $var
+declares: left out`), the first five of each kind, then one line with their count; a dump of 64 MB or more says its
+declarations, then how far it is at each tenth (`tb.vcd: progress: 40% (line …)`: in the log and the VS Code
+notification, not counted as notes); the last line on stdout what was written (`tb.fst: 318 variables (300
+signals), 52310 value changes, 3 enum tables, 2 of them from tb.types.json (4 variables)`; `-q`: none). An error is one
+line with its file and line, exit 2. The VS Code command and the MCP tool show the same lines.

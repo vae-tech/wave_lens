@@ -260,6 +260,8 @@ name = "sva-cli"
 version = "0.1.0"
 dependencies = [
  "fst-reader",
+ "lz4_flex",
+ "miniz_oxide",
  "serde_json",
  "sva-core",
  "wellen",

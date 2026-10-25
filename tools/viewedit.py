@@ -27,7 +27,7 @@ the end of a path ("u_regs.PSEL") or a * pattern. The commands that need the wav
 (edge, picture, fit, fsm, fsm_stats, fsm_go, types) run only in a page (live). docs/USAGE.md § "Editing the views" has them all; the smoke test checks that a
 page with these edits and the same commands run in it give the same state.
 """
-import argparse, datetime, functools, json, os, re, sys, unicodedata
+import argparse, datetime, functools, json, math, os, re, sys, unicodedata
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
 from common import WaveError, run_main  # noqa: E402
@@ -53,7 +53,7 @@ CYC_DEFAULTS = {'cycles': False, 'cycleClock': None, 'cycleZero': None}
 # the commands: name -> arguments (? optional), as WaveLens.commands() gives them (the smoke test compares the two)
 COMMANDS = {
     'cursor': 't', 'cursor2': 't', 'view': 'from? to? at? span?', 'fit': '', 'range': 'from? to? signal?',
-    'bookmark': 'n? t? signal? text? color? lift? delete?', 'arrow': 'id? from? to? shape? head? line? color? label? delete?',
+    'bookmark': 'n? t? signal? text? color? lift? top? go? delete?', 'arrow': 'id? from? to? shape? head? line? color? label? delete?',
     'marker': 'id? t? label? color? delete?', 'group': 'name signals? add? remove? color? rename? delete? go? move?',
     'highlight': 'add? remove? set? clear?', 'paint': 'signals? color? clear?', 'select': 'signal? signals?', 'hide': 'signals', 'show': 'signals?',
     'fold': 'groups? all?', 'unfold': 'groups? all?', 'radix': 'signals radix', 'analog': 'signals rows', 'sort': 'dir ignore?', 'style': 'name',
@@ -380,7 +380,8 @@ def bm_norm(lst):
         if t is None or t != t or t in (float('inf'), float('-inf')):
             continue
         out.append({'n': n, 't': t, 'signal': b.get('signal') or None, 'text': b.get('text') or '', 'color': b.get('color') or None,
-                    'lift': bool(b.get('lift')) and bool(b.get('signal'))})
+                    'lift': bool(b.get('lift')) and bool(b.get('signal')),
+                    'top': b['top'] if isinstance(b.get('top'), str) and b['top'] else None})
     return out
 
 
@@ -407,7 +408,7 @@ def ar_norm(lst, bms=None):
 def bm_list(bms):
     """view.bookmarks(): the JSON form (empty and default left out)."""
     return [{k: v for k, v in (('n', b['n']), ('t', b['t']), ('signal', b['signal']), ('text', b['text']), ('color', b['color']),
-                                ('lift', b['lift'] or None)) if v is not None and v != ''} for b in bms]
+                                ('lift', b['lift'] or None), ('top', b.get('top'))) if v is not None and v != ''} for b in bms]
 
 
 def ar_list(ars):
@@ -448,6 +449,15 @@ class Editor:
 
     def config(self):
         return self.st.setdefault('config', {})
+
+    def cfg_num(self, k, default, lo, hi):
+        """A number of the settings (the state's, then the page's), clamped as view.js clamps it."""
+        v = (self.st.get('config') or {}).get(k, self.m.cfg.get(k, default))
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            return default
+        return min(max(v, lo), hi) if math.isfinite(v) else default   # NaN, inf: Number() of view.js, isFinite
 
     def highlight(self):
         c = self.st.get('config') or {}
@@ -576,11 +586,15 @@ class Editor:
         t = self.time(a['t']) if a.get('t') is not None else None
         sig = self.m.pick(self.st, a['signal'], one=True)[0]['full'] if a.get('signal') else None
         b = next((b for b in bms if n is not None and b['n'] == n), None)
+        touch = not b or any(k in a for k in ('t', 'signal', 'text', 'color', 'lift', 'top'))   # go alone changes nothing of it
+        if a.get('top') is not None and not isinstance(a['top'], str):
+            fail(f"top: a row's path (a signal or a module), not {json.dumps(a['top'])}")
+        top = self.m.pick(self.st, a['top'], groups=True, one=True)[0]['full'] if a.get('top') else None   # a row there is, as signal
         if not b:
             if t is None and self.st.get('cursor') is None:
                 fail('bookmark: t (the cursor here is not known)')
             b = {'n': n if n is not None else max([0] + [x['n'] for x in bms]) + 1, 't': self.st.get('cursor'), 'signal': None, 'text': '',
-                 'color': None, 'lift': False}
+                 'color': None, 'lift': False, 'top': None}
             bms.append(b)
         if t is not None:
             b['t'] = t
@@ -592,8 +606,23 @@ class Editor:
             b['color'] = a['color'] or None
         if 'lift' in a:
             b['lift'] = bool(a['lift'])
+        if 'top' in a:
+            b['top'] = top
         b['lift'] = bool(b['lift']) and bool(b['signal'])
-        self.put_marks(bms)
+        if touch:
+            self.put_marks(bms)
+        if a.get('go'):   # view.js goBm: the cursor on it, bookmarkLeft of the window from the left (its span kept), its signal selected
+            self.st['cursor'] = b['t']
+            if self.st.get('from') is not None and self.st.get('to') is not None:
+                f = self.cfg_num('bookmarkLeft', 0.2, 0, 0.9)
+                span = self.st['to'] - self.st['from']
+                x = b['t'] - span * f
+                if self.m.t0 is not None and self.m.t1 is not None:   # view.js clamp: the window within the waves
+                    x = min(max(x, self.m.t0), self.m.t1 - span)
+                self.st['from'], self.st['to'] = x, x + span
+            if b['signal']:
+                self.st['select'] = b['signal']
+            return {'n': b['n'], 't': b['t'], 'from': self.st.get('from'), 'top': b['top']}
         return {'n': b['n']}
 
     @staticmethod

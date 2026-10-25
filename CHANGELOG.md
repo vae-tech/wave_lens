@@ -5,6 +5,28 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.22 — 25 October 2026
+
+A VCD as an FST of our own with its FSM states kept, bookmarks that bring back the screen where they were made, the
+markers and bookmarks in a list to step through.
+
+- **`sva fst`: a VCD as an FST** beside it (`tb.vcd` → `tb.fst`), the way GTKWave's `vcd2fst` writes it, and with what
+  `vcd2fst` drops: the enum tables of FSM states and their references, the other attributes, the header's comments,
+  VHDL's 1-bit values; the FSM states of the design's types file (`tb.types.json`) written as the FST's enum tables, so
+  GTKWave and Surfer show the state names. VCD and FST give one WaveJSON: no `$timescale` is 1 ps, an id code at another
+  width a signal of its own, a `$var port` a wire. A log at the line (`tb.vcd:120: …`, five of a kind then a count,
+  progress on large dumps), a part file of each run's own. VS Code **Convert to FST** (the explorer's menu, the tab),
+  the MCP tool `wave_to_fst`, `make fst WAVES=…`. Tested against `vcd2fst` on generated VCDs and every fixture.
+- **A bookmark keeps the screen.** Made with `m`, **Bookmark here** or a range, it remembers the row at the top of the
+  waves; going to it (`1`–`9`, `]m [m`, the list, the command's `go`) scrolls that row to the top again (the way to it
+  and to its signal opened), its time `bookmarkLeft` (0.2) from the left, the span you have; the list's cursor button
+  takes the screen of now.
+- **gm / Markers…** lists the markers and the bookmarks over the waves: ↑ ↓ step through them, the waves follow.
+  **Bookmark here / Marker here** ask their text in a small box where you clicked; the FSM panel's details take the keys.
+- **CI on this machine:** `.github/workflows/check.yml` runs `make check` on a self-hosted runner.
+- **Review 2026-10-25** (Codex Astra, Fable, a verdict): its findings closed before this version
+  (`docs/reviews/review-2026-10-25`).
+
 ## 0.21 — 24 October 2026
 
 The panels and the scroll made firm, and the tests of review VI: what the gate checks now fails when the code is wrong.

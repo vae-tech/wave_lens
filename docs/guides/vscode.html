@@ -90,12 +90,17 @@
     and <kbd>ctrl+F</kbd> <kbd>ctrl+C</kbd> <kbd>ctrl+Z</kbd> <kbd>alt+C W R</kbd>, which mean what they mean in VS Code.
     <code>wavelens.keysToVSCode</code> (default <kbd>ctrl+G</kbd>, Go to Line) go to VS Code — the viewer's list of your groups is
     <kbd>gl</kbd> then; <kbd>ctrl+P</kbd>, <kbd>F1</kbd>, <kbd>ctrl+Tab</kbd> stay VS Code's.</td></tr>
-  <tr><td>version</td><td>the bar's title line says the version and the extension's branch and commit (<code>0.21 ·
+  <tr><td>version</td><td>the bar's title line says the version and the extension's branch and commit (<code>0.22 ·
     dev@d502c48*</code>, <code>*</code>: changes not committed): a development build says which one it is.</td></tr>
   <tr><td>types by Verilator</td><td><i>WaveLens: Make the types with Verilator</i> (the editor's title menu) asks for the design
     (a <code>.f</code> file of the workspace, or the arguments: <code>*</code> and <code>?</code> in a file's name are expanded) and the top module (the dump's by default), runs
     <code>verilator --json-only</code> in the workspace's folder and writes <code>tb.types.json</code> beside the dump: the tab reads
     it at once (FSM states by name, struct fields; <a href="types.html">Types</a>). No Python needed; <code>wavelens.verilator</code>.</td></tr>
+  <tr><td>convert to FST</td><td><i>WaveLens: Convert to FST</i> (a right click on a <code>.vcd</code> in the Explorer, the tab's
+    title menu, or the palette) writes <code>tb.fst</code> beside <code>tb.vcd</code> with the bundled <code>sva fst</code>: the
+    enum tables of the VCD and the FSM states of <code>tb.types.json</code> become the FST's own, so GTKWave or Surfer name the
+    states too. The notes go to the log with their lines (five of a kind, then their count); a failure opens the log and
+    leaves an older <code>tb.fst</code> as it was.</td></tr>
   <tr><td>state names</td><td>a VCD has no enum names (Questa writes none, its int-based enums come as <code>integer</code>,
     shown in decimal). The design's types next to the dump (<code>tb.types.json</code> by <code>tb.vcd</code>: from Questa
     or Verilator, <a href="types.html">State names</a>) name every state bus and struct by its path, read at each read and
@@ -141,7 +146,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.21 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.22 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

@@ -83,9 +83,12 @@ const TIPS = {
   'm:hl': ['Highlight', ['ctrl+click']], 'm:hide': ['Leave it out of the view'], 'm:unhide': ['Show the hidden rows'],
   'm:fold': ['Fold / open this module'], 'm:foldup': ['Fold its module', ['zc']], 'm:zM': ['Fold every module', ['zM']], 'm:zR': ['Open every module', ['zR']],
   'm:types': ['Where its labels or fields come from: the types file and the path in it, the width, why it has none'],
-  'm:mark': ['Bookmark on this signal here', ['m']], 'm:copyname': ['Copy the path', ['yy']], 'm:clear': ['Clear the range', ['Esc', 'ctrl+click']],
+  'm:mark': ['Bookmark on this signal here: its text asked here, then in the list', ['m']],
+  'm:copyname': ['Copy the path', ['yy']], 'm:clear': ['Clear the range', ['Esc', 'ctrl+click']],
   'm:unpaint': ['Its own colour back'],
-  'm:umark': ['A marker here: a dashed line across the rows with a label (the Markers list)'], 'm:ugnew': ['A group of your own at the top of the names'],
+  'm:umark': ['A marker here: a dashed line across the rows; its label asked here, then in the Markers list'],
+  'm:mlist': ['The markers and bookmarks in a list: ↑ ↓ go through them, the waves follow', ['gm']],
+  'm:ugnew': ['A group of your own at the top of the names'],
   'm:ugout': ['Out of your group (the signal stays in its module)'], 'm:ugdel': ['Delete your group; its signals stay where they are'],
   'm:mvup': ['One place up in your group (a selected run: as a block; a group: among yours)', ['alt+↑', 'drag the name']],
   'm:mvdn': ['One place down in your group (a selected run: as a block; a group: among yours)', ['alt+↓', 'drag the name']],
@@ -137,7 +140,9 @@ const HELP = [
     [['1', '…', '9'], 'go to bookmark 1 … 9'], [['ctrl+drag'], 'measure a range: Δ, the edges or changes of that signal'],
     [['alt+drag'], 'a box: its time and its signals, then the menu (picture, WaveDrom, colour)'], [['ctrl+click'], 'clear the range'],
     [['right button'], 'a range and the menu: picture, colour, radix, hide'], [['m'], 'bookmark at the cursor'],
-    [[']m', '[m'], 'next / previous bookmark'], [['drag a bookmark'], 'move it'], [['shift+drag a bookmark'], 'an arrow to another one']]],
+    [[']m', '[m'], 'next / previous bookmark'],
+    [['gm'], 'the markers and bookmarks: a list, ↑ ↓ go through them'], [['drag a bookmark'], 'move it'],
+    [['shift+drag a bookmark'], 'an arrow to another one']]],
   ['The bar', [[['right button'], 'on the bar: which of its tool groups it shows (Show all, Hide all, a tick each)'],
     [['▴', '▾ tools'], 'fold the tools to the title line / open them']]],
   ['Undo', [[['ctrl+Z'], 'undo the last change of bookmarks, arrows, groups, colours, radix, hidden rows, highlight'],
@@ -616,9 +621,8 @@ class Notes {
     const li = b.closest('li'), n = li ? +li.dataset.n : NaN, bm = v.bms.find(x => x.n === n), act = b.dataset.bm;
     if (act === 'mdel') return v.run({ op: 'marker', id: +li.dataset.k + 1, delete: true });
     if (act === 'gdel') return v.run({ op: 'group', name: v.ugroups[+li.dataset.g].name, delete: true });
-    if (act === 'go' && bm) { v.cursor = bm.t; if (bm.t < v.t0 || bm.t > v.t0 + v.span) v.t0 = v.clamp(bm.t - v.span / 2);
-      if (bm.signal) v.sel = v.M.rows.find(r => r.full === bm.signal) || v.sel; v.renderNames(); v.draw(); }
-    else if (act === 'here' && bm) { bm.t = v.cursor; v.changed(true); }
+    if (act === 'go' && bm) v.goBm(bm);
+    else if (act === 'here' && bm) { bm.t = v.cursor; bm.top = v.topNow(); v.changed(true); }   // the screen of now, as a new one
     else if (act === 'lift' && bm) { bm.lift = !bm.lift && !!bm.signal; v.changed(true); }
     else if (act === 'del') { v.bms = v.bms.filter(x => x.n !== n); v.arrows = v.arrows.filter(a => a.from !== n && a.to !== n); v.changed(true); }
     else if (act === 'adel') { v.arrows.splice(+li.dataset.a, 1); v.changed(true); }
@@ -1752,7 +1756,7 @@ class WaveView {
   mark(text = '') {
     const s = this.sel, t = this.cursor = this.snap(s, this.cursor);
     const n = Math.max(0, ...this.bms.map(b => b.n)) + 1;
-    this.bms.push({ n, t, signal: s ? s.full : null, text, color: null });
+    this.bms.push({ n, t, signal: s ? s.full : null, text, color: null, top: this.topNow() });
     this.saveBookmarks(); this.renderNotes(); this.draw();
     if (!text) this.notesEl.querySelector(`li[data-n="${n}"] input.txt`)?.focus();
     return n;
@@ -1761,7 +1765,7 @@ class WaveView {
     return this; }
   // JSON for a config file / WaveJSON (t in model units: ps for timed waves, else cycles); defaults are left out
   bookmarks() { return this.bms.map(b => Object.fromEntries(Object.entries({ n: b.n, t: b.t, signal: b.signal, text: b.text, color: b.color, lift: b.lift ||
-    null }).filter(([, v]) => v != null && v !== ''))); }
+    null, top: b.top }).filter(([, v]) => v != null && v !== ''))); }
   arrowList() {
     return this.arrows.map(a => Object.fromEntries(Object.entries({ from: a.from, to: a.to, shape: a.shape, head: a.head === '>' ? null : a.head,
       line: a.line === 'solid' ? null : a.line,
@@ -1847,6 +1851,7 @@ class WaveView {
     }
     else if (s === 'yy') this.copyKey();
     else if (s === 'gl') this.groupsMenu();   // your groups (ctrl+G; this one where ctrl+G is the host's)
+    else if (s === 'gm') this.marksMenu();   // the markers and the bookmarks: a list to step through
     else if (s === ']m' || s === '[m') this.stepMark(s[0] === ']' ? 1 : -1);
     else if (s === ']e' || s === '[e') this.edge(s[0] === ']' ? 1 : -1);
     else if (this.keys[s]) this.keys[s]();
@@ -1855,9 +1860,53 @@ class WaveView {
   }
   goMark(n) {   // the cursor to bookmark n (keys 1–9), the view follows, its signal selected
     const b = this.bms.find(x => x.n === n); if (!b) { this.toast(`no bookmark ${n}`); return this; }
-    this.cursor = b.t; if (b.t < this.t0 || b.t > this.t0 + this.span) this.t0 = this.clamp(b.t - this.span / 2);
-    if (b.signal) this.sel = this.M.rows.find(r => r.full === b.signal) || this.sel;
-    this.renderNames(); this.draw(); return this;
+    return this.goBm(b);
+  }
+  // going to a bookmark (1–9, ]m [m, Markers…, its list): the cursor on it, its time bookmarkLeft of the waves from the
+  // left (the span kept), its signal selected, and the waves scrolled as they were when it was made: the row that was at
+  // their top under the axis there again (the way to it opened); an older bookmark, or that row gone: its signal in sight
+  // the bookmark's signal selected, the way to it opened (folded since: open again); then the row of then at the top,
+  // else (no top, or that row is gone) the signal in sight; bookmarkLeft not a number (null, '', 'abc'): 0.2, as viewedit.py
+  goBm(b) {
+    const raw = this.S.bookmarkLeft, n = raw == null || raw === '' ? NaN : Number(raw), f = isFinite(n) ? Math.min(Math.max(n, 0), 0.9) : 0.2;
+    this.cursor = b.t; this.t0 = this.clamp(b.t - this.span * f);
+    const s = b.signal ? this.M.rows.find(r => r.full === b.signal) : null;
+    if (s) { if (s.anc.some(id => this.collapsed.has(id))) { s.anc.forEach(id => this.collapsed.delete(id)); this.foldTouched = true; }
+      this.sel = s; }
+    this.renderNamesNow(); this.draw();
+    if (!this.topTo(b.top) && s && this.vis.includes(s) && !this.inSight(s)) this.centerRow(s);
+    this.draw(); return this;
+  }
+  // the row at the top of the waves now, under the axis (the first whose middle is in sight; a lane or a group of yours
+  // has no path: the next one) -> its full path or module path, null when nothing is drawn yet
+  topNow() {
+    if (!this.lay || this.oy == null) return null;
+    const top = this.oy + this.hdrH;
+    for (const o of this.lay) { if (o.y + o.h / 2 < top) continue; const k = o.row.full || o.row.path; if (k && o.row.type !== 'lane') return k; }
+    return null;
+  }
+  // the row of path p at the top of the waves under the axis, the way to it opened, as far as the scroll goes -> whether
+  // it is in the view
+  topTo(p) {
+    if (!p) return false;
+    const key = r => r.full || r.path, r = this.vis.find(q => key(q) === p) || this.M.rows.find(q => key(q) === p);
+    if (!r) return false;
+    if (!this.vis.includes(r)) { if (!r.anc.some(id => this.collapsed.has(id))) return false;   // hidden, or out of Only: not ours to bring back
+      r.anc.forEach(id => this.collapsed.delete(id)); this.foldTouched = true; this.renderNamesNow(); this.draw(); if (!this.vis.includes(r)) return false; }
+    const own = this.root.classList.contains('wv-scroll');
+    for (let i = 0; i < 2; i++) {   // twice: with the page, the canvas sticks under the bar only once the rows reach it
+      const y = this.rowTop(r); if (y == null) return false;
+      const d = y - (this.canvas.getBoundingClientRect().top + this.hdrH); if (Math.abs(d) < 1) break;
+      if (own) this.bodyEl.scrollTop += d; else window.scrollBy(0, d);
+    }
+    this.invalidate(); return true;
+  }
+  // a row between the axis and the bottom of the waves on the screen
+  inSight(r) {
+    const k = this.vis.indexOf(r), el = k >= 0 && this.namesEl.querySelector(`.row[data-r="${k}"]`); if (!el) return false;
+    const q = el.getBoundingClientRect(), c = this.canvas.getBoundingClientRect(), bot = this.root.classList.contains('wv-scroll') ?
+      this.bodyEl.getBoundingClientRect().bottom : Math.min(window.innerHeight, c.bottom);
+    return q.top >= c.top + this.hdrH - 1 && q.bottom <= bot + 1;
   }
   // the second cursor (shift+click; null: none): Δ to the cursor in time and in cycles of a clock (clockFor)
   setCursor2(t) { this.cursor2 = t == null || !isFinite(t) ? null : Math.min(Math.max(t, this.M.t0), this.M.t1); this.draw(); return this; }
@@ -1889,10 +1938,7 @@ class WaveView {
   }
   stepMark(dir) {   // the cursor to the next / previous bookmark in time (round the ends)
     const bs = [...this.bms].sort((a, b) => a.t - b.t); if (!bs.length) return this;
-    const b = bs[stepTo(bs.map(x => x.t), this.cursor, dir)];
-    this.cursor = b.t; if (b.t < this.t0 || b.t > this.t0 + this.span) this.t0 = this.clamp(b.t - this.span / 2);
-    if (b.signal) this.sel = this.M.rows.find(r => r.full === b.signal) || this.sel;
-    this.renderNames(); this.draw(); return this;
+    return this.goBm(bs[stepTo(bs.map(x => x.t), this.cursor, dir)]);
   }
   pageRows(dir) {   // PgUp / PgDn: the rows a page (the viewer's own scroll bar, else the page)
     if (this.root.classList.contains('wv-scroll')) this.bodyEl.scrollTop += dir * this.bodyEl.clientHeight * 0.9;
@@ -2057,7 +2103,7 @@ class WaveView {
   // the right button's menu at (cx, cy) on the screen: the range (zoom, bookmarks at its ends, copy Δ), the picture (copy,
   // PNG, SVG), the signal under the pointer (colour, highlight, copy its path); Esc, a click elsewhere or a choice closes it
   menu(cx, cy, row, at = this.cursor) {
-    this.closeMenu();
+    this.closeMenu(); this.menuAt = [cx, cy];   // where it was opened: a text asked there after (Bookmark here, Marker here)
     const r = this.range, sig = row && row.type === 'sig' && row.tr ? row : null, grp = row && row.type === 'group' &&
       this.M.groups[row.id] === row ? row : null, it = row && (sig || grp);
     const up = sig && sig.anc.length ? sig.anc[sig.anc.length - 1] : null, nh = this.hiddenRows.size, ng = Object.keys(this.M.groups).length;
@@ -2159,7 +2205,7 @@ class WaveView {
           (sig && sig.ug ? b('ugout', `Out of “${sig.ug.name}” (this row)`) : '') + (grp && grp.user ? b('ugdel', 'Delete this group') : '') +
           (this.ugroups.length ? '<hr><div class="mh">Go to</div>' + this.ugroups.map((g, i) => ugb('ugo', i, `${g.name} · ${g.signals.length}`)).join('') :
             '<div class="mh">no groups yet</div>') + '</div></div>') +
-        b('umark', 'Marker here') + b('c2',
+        b('umark', 'Marker here') + b('mlist', 'Markers…') + b('c2',
           'Second cursor here') + (this.cursor2 != null ? b('c2x', 'Clear the second cursor') : '') + b('copyname', 'Copy the path') +
         b('types', 'Type…') : '') +
       (ng || nh ? '<hr>' + (ng ? b('zM', 'Fold every module') + b('zR', 'Open every module') : '') + (nh ? b('unhide', `Show the hidden (${nh})`) : '') : '') +
@@ -2190,7 +2236,7 @@ class WaveView {
       if (act === 'zoom') this.zoomTo(...r);
       else if (act === 'marks') {
         const n = Math.max(0, ...this.bms.map(x => x.n)) + 1, s = sig ? sig.full : null;
-        this.bms.push(...bmNorm([{ n, t: r[0], signal: s }, { n: n + 1, t: r[1], signal: s }]));
+        const top = this.topNow(); this.bms.push(...bmNorm([{ n, t: r[0], signal: s, top }, { n: n + 1, t: r[1], signal: s, top }]));
         this.arrows.push(...arNorm([{ from: n, to: n + 1, shape: '-', head: '<>', label: this.rangeText().replace(/^Δ /, '') }])); this.changed(true);
       }
       else if (act === 'copyd') this.copyText(this.rangeText().replace(/^Δ /, '').split(' · ')[0].split(' / ')[0]);
@@ -2227,14 +2273,18 @@ class WaveView {
       else if (act === 'onlyx') this.setOnly(null);
       else if (act === 'fsms') { this.closeMenu(); this.fsmPanel(true); return this; }
       else if (act === 'fsmx') this.setFsm(null);
-      else if (act === 'mark') { const t = this.snap(sig, at), n = Math.max(0, ...this.bms.map(x => x.n)) + 1;
-        this.bms.push({ n, t, signal: sig.full, text: '', color: null }); this.changed(true);
-        this.notesEl.querySelector(`li[data-n="${n}"] input.txt`)?.focus(); return this.closeMenu(); }
+      // a bookmark, a marker: its text asked over the waves first, then it goes into its list below them (edited there)
+      else if (act === 'mark') { const t = this.snap(sig, at), [x, y] = this.menuAt, top = this.topNow();   // the waves as they are now
+        this.askText(x, y, `Bookmark · ${sig.name} · ${this.fmtCursor(t)}`, 'its text', text => {
+          const n = Math.max(0, ...this.bms.map(b => b.n)) + 1; this.bms.push({ n, t, signal: sig.full, text, color: null, top }); this.changed(true); });
+        return this; }
       else if (act === 'copyname') this.copyRows([it]);
       else if (act === 'types') { const x = this.menuEl.getBoundingClientRect(); this.closeMenu(); this.typesBox(sig.orig || sig, x.left, x.top); return this; }
-      else if (act === 'umark') { this.run({ op: 'marker', t: at }).then(() =>
-          this.notesEl.querySelector(`li[data-k="${this.umarks.length - 1}"] input.ml`)?.focus());
-        return this.closeMenu(); }
+      else if (act === 'mlist') { this.closeMenu(); this.marksMenu(); return this; }
+      else if (act === 'umark') { const [x, y] = this.menuAt;
+        this.askText(x, y, `Marker · ${this.fmtCursor(at)}`, 'its label',
+          label => this.run(Object.assign({ op: 'marker', t: at }, label ? { label } : {})));
+        return this; }
       else if (act === 'ugto') this.toGroup(this.ugroups[+m.dataset.g].name, sigs);
       else if (act === 'ugoff') this.run({ op: 'group', name: this.ugroups[+m.dataset.g].name, remove: sigs.map(x => (x.orig || x).full) });
       else if (act === 'ugo') { this.closeMenu(); return this.goGroup(this.ugroups[+m.dataset.g].name); }
@@ -2355,12 +2405,80 @@ class WaveView {
     (el.querySelector('button') || el).focus({ preventScroll: true });
     return el;
   }
+  // gm (the right button's Markers…): the markers (the page's and yours) and the bookmarks in a list over the waves, by
+  // time; ↓ the first (↑ the last), then ↑ ↓ Home End step through them and a click picks one: the cursor on it, the
+  // waves at its time with the span they have — a marker in the middle; a bookmark bookmarkLeft from the left, its signal
+  // selected and the rows scrolled as they were when it was made (goBm); Enter or Esc closes it there. Nothing below the
+  // waves takes the focus
+  marksMenu() {
+    this.closeMenu();
+    const items = [...this.markers.map((m, i) => ({ t: m.t, label: m.label || '', color: m.color, kind: i < this.pageMarks.length ? 'page' : 'mine' }))
+      .sort((a, b) => a.t - b.t), ...this.bms.map(b => ({ t: b.t, label: b.text || '', color: b.color, kind: 'bm', n: b.n, signal: b.signal, b }))
+      .sort((a, b) => a.t - b.t)];
+    const el = document.createElement('div'); el.className = 'wv-menu wv-marks'; el.setAttribute('role', 'listbox'); el.setAttribute('aria-label', 'markers');
+    el.tabIndex = -1;
+    const nm = items.filter(x => x.kind !== 'bm').length;
+    const item = (x, i) => `<button type="button" role="option" data-i="${i}" aria-selected="false" title="${esc(x.label || this.fmtCursor(x.t))}">` +
+      `<span><i class="sw" style="background:${esc(x.color || (x.kind === 'bm' ? 'var(--accent)' : 'var(--muted)'))}"></i>` +
+      `<b>${esc(this.fmtCursor(x.t))}</b> ${esc(x.label)}</span><span class="kk">${x.kind === 'bm' ? `${x.n}${x.signal ? ' · ' +
+        esc(x.signal.split('.').pop()) : ''}` : x.kind === 'page' ? 'page' : ''}</span></button>`;
+    el.innerHTML = '<div class="mh">Markers · ↑ ↓ the waves follow · Enter, Esc close</div>' + (items.length ? (nm ? '' :
+      '<div class="mh">no markers: the right button, Marker here</div>') + items.map((x, i) => (i === nm && nm < items.length ?
+        '<hr><div class="mh">Bookmarks</div>' : '') + item(x, i)).join('') : '<div class="mh">none yet: the right button, Marker here or Bookmark here</div>');
+    this.root.append(el); this.menuEl = el;
+    const w = this.wcol.getBoundingClientRect(), box = el.getBoundingClientRect();   // at the right of the waves, under the axis
+    el.style.left = Math.max(4, Math.min(w.right - box.width - 12, innerWidth - box.width - 4)) + 'px';
+    el.style.top = Math.max(4, Math.min(Math.max(w.top, 0) + this.hdrH + 6, innerHeight - box.height - 4)) + 'px';
+    const bs = [...el.querySelectorAll('button[data-i]')];
+    let at = -1;
+    const pick = i => {
+      if (!items.length) return; at = Math.min(Math.max(i, 0), items.length - 1); const x = items[at];
+      bs.forEach((b, j) => { b.setAttribute('aria-selected', j === at); b.classList.toggle('on', j === at); });
+      bs[at].focus({ preventScroll: true }); bs[at].scrollIntoView({ block: 'nearest' });
+      if (x.b) { this.goBm(x.b); return; }   // a bookmark: where it was made (goBm); a marker: in the middle
+      this.cursor = x.t; this.t0 = this.clamp(x.t - this.span / 2);
+      this.renderNames(); this.draw();
+    };
+    el.addEventListener('click', e => { const b = e.target.closest('button[data-i]'); if (b) pick(+b.dataset.i); });
+    el.addEventListener('keydown', e => {
+      const k = e.key;
+      if (k === 'Escape' || k === 'Enter') { e.preventDefault(); e.stopPropagation(); this.closeMenu(); this.canvas.focus({ preventScroll: true }); }
+      else if (k === 'ArrowDown' || k === 'ArrowUp') {
+        e.preventDefault(); pick(at < 0 ? (k === 'ArrowDown' ? 0 : items.length - 1) : at + (k === 'ArrowDown' ? 1 : -1)); }
+      else if (k === 'Home' || k === 'End') { e.preventDefault(); pick(k === 'Home' ? 0 : items.length - 1); }
+    });
+    el.addEventListener('contextmenu', e => e.preventDefault());
+    const off = this.offMenu = e => { if (!el.contains(e.target)) this.closeMenu(); };
+    setTimeout(() => { if (this.menuEl !== el) return; document.addEventListener('pointerdown', off, { capture: true, signal: this.ac.signal }); }, 0);
+    el.focus({ preventScroll: true });
+    return el;
+  }
   // your group by its name: opened (and shown when hidden), in the middle of the waves, its first signal selected
   goGroup(name) {
     const g = this.ugRows().find(r => r.type === 'group' && r.name === name); if (!g) { this.toast(`no group "${name}"`); return this; }
     this.collapsed.delete(g.id); if (this.hiddenRows.delete(g.path)) this.saveRows(); this.foldTouched = true; this.renderNamesNow();
     const first = this.vis.find(r => r.ug === g); if (first) this.select(first); else this.draw();
     this.centerRow(g); this.toast(name); return this;
+  }
+  // a text asked over the waves where the menu was (a bookmark's text, a marker's label): Enter gives it (empty too), Esc
+  // or a click elsewhere gives nothing; the waves stay where they are (no field below them takes the focus)
+  askText(x, y, title, hint, give) {
+    this.closeMenu();
+    const el = document.createElement('div'); el.className = 'wv-menu wv-ask'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', title);
+    el.innerHTML = `<div class="mh">${esc(title)}</div><input type="text" spellcheck="false" autocomplete="off" placeholder="${esc(hint)}" ` +
+      `aria-label="${esc(hint)}"><div class="ak"><span>Enter: add · Esc: cancel</span><button type="button" data-m="ok">Add</button></div>`;
+    this.root.append(el); this.menuEl = el;
+    const b = el.getBoundingClientRect(), inp = el.querySelector('input');
+    el.style.left = Math.max(4, Math.min(x, innerWidth - b.width - 4)) + 'px'; el.style.top = Math.max(4, Math.min(y, innerHeight - b.height - 4)) + 'px';
+    const done = ok => { const v = inp.value.trim(); this.closeMenu(); this.canvas.focus({ preventScroll: true }); if (ok) give(v); };
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(e.key === 'Enter'); } });
+    el.querySelector('button[data-m=ok]').addEventListener('click', () => done(true));
+    el.addEventListener('contextmenu', e => e.preventDefault());
+    const off = this.offMenu = e => { if (!el.contains(e.target)) this.closeMenu(); };
+    setTimeout(() => { if (this.menuEl === el) document.addEventListener('pointerdown', off, { capture: true, signal: this.ac.signal }); }, 0);
+    inp.focus({ preventScroll: true });
+    return el;
   }
   closeMenu() {
     if (!this.menuEl) return;

@@ -262,8 +262,9 @@
     menu, brings it back</td></tr>
   <tr><td>Fold its module</td><td>on a signal; on a module row: <span class="ui">Fold this module</span> / <span class="ui">Open this module</span>
     (and Highlight, Hide it all)</td></tr>
-  <tr><td>Bookmark here</td><td>a bookmark on this signal at the time clicked</td></tr>
-  <tr><td>Marker here</td><td>a dashed line across every row with a label at the top, yours (<a href="#bookmarks">Bookmarks and arrows</a>)</td></tr>
+  <tr><td>Bookmark here</td><td>a bookmark on this signal at the time clicked: a small box there asks its text (<kbd>Enter</kbd> adds it, <kbd>Esc</kbd> leaves it out), then it is in the list under the waves</td></tr>
+  <tr><td>Marker here</td><td>a dashed line across every row with a label at the top, yours: its label asked where you clicked, as for a bookmark; edited later in the Markers list (<a href="#bookmarks">Bookmarks and arrows</a>)</td></tr>
+  <tr><td>Markers…</td><td>the markers and bookmarks in a list over the waves (<kbd>gm</kbd>): <kbd>↑</kbd> <kbd>↓</kbd> go through them, the waves follow</td></tr>
   <tr><td>Groups ▸</td><td><span class="ui">Into “…”</span> a group of yours, <span class="ui">New group with it</span> (of the N
     selected), <span class="ui">Out of …</span>, <span class="ui">Delete this group</span>, <span class="ui">Go to</span> any group
     (<a href="#groups">Your groups</a>)</td></tr>
@@ -435,8 +436,12 @@
 <p>Arrow labels get a thin lane of their own between the signals, so they cover no value; an arrow between two bookmarks of one signal is a
   dimension line in that lane. A circle dragged onto the top quarter of its row (or ↥ in its line) is <b>lifted</b> into the lane above the
   signal with a leader down to it (<code>"lift": true</code> in the JSON).</p>
-<p><kbd>1</kbd> … <kbd>9</kbd> go to that bookmark (its signal selected), <kbd>]m</kbd> / <kbd>[m</kbd> to the next / previous one in time;
-  a click on a number in the list does the same. The bookmarks are kept in this browser; <span class="ui">JSON</span> gives the
+<p><kbd>1</kbd> … <kbd>9</kbd> go to that bookmark, <kbd>]m</kbd> / <kbd>[m</kbd> to the next / previous one in time;
+  a click on a number in the list does the same. Going to a bookmark shows the waves as they were when you made it: its time a fifth of the
+  waves from the left (<code>bookmarkLeft</code>, 0.2), the span you have now, its signal selected, and the rows scrolled so that the row
+  that was at the top under the time axis is at the top again — a module folded since is opened on the way to it and to its signal (<code>"top"</code> in the JSON; that row gone, the signal is brought into sight). <kbd>gm</kbd> (or <span class="ui">Markers…</span> in the right button's menu) lists the
+  markers and the bookmarks over the waves, by time: <kbd>↓</kbd> takes the first, <kbd>↑</kbd> <kbd>↓</kbd> step through them and each
+  one is at once the cursor, the waves at its time with the span they have (a marker in the middle, a bookmark as above); <kbd>Enter</kbd> or <kbd>Esc</kbd> closes the list there. The bookmarks are kept in this browser; <span class="ui">JSON</span> gives the
   <code>"bookmarks"</code> and <code>"arrows"</code> lists to paste into a view of the config, so the built page — and its static SVG — carries
   them. <span class="ui">Clear</span> forgets this browser's bookmarks and arrows (the page's own come back on reload; your markers
   stay).</p>
@@ -514,6 +519,8 @@
   <tr><td>○, <kbd>ctrl+click</kbd> a name</td><td>highlight</td><td><kbd>ctrl+shift+click</kbd></td><td>highlight every row to here</td></tr>
   <tr><td><kbd>m</kbd></td><td>bookmark at the cursor</td><td><kbd>]m</kbd> <kbd>[m</kbd>, <kbd>1</kbd> … <kbd>9</kbd></td>
     <td>next / previous bookmark, bookmark n</td></tr>
+  <tr><td><kbd>gm</kbd></td><td>the markers and bookmarks: a list, <kbd>↑</kbd> <kbd>↓</kbd> go through them</td><td><kbd>gl</kbd>, <kbd>ctrl+G</kbd></td>
+    <td>your groups: a list</td></tr>
   <tr><td><kbd>zM</kbd> / <kbd>zR</kbd></td><td>fold / open every module</td><td><kbd>zc</kbd> <kbd>zo</kbd> <kbd>za</kbd></td>
     <td>the selected signal's module</td></tr>
   <tr><td><kbd>t</kbd></td><td>the Modules panel (<a href="#modules">Only</a>)</td><td><kbd>ctrl+G</kbd></td><td>the list of your groups</td></tr>
@@ -532,7 +539,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.21 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.22 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

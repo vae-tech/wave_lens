@@ -120,6 +120,8 @@ def main():
         path = os.path.join(a.out, name + '.png')
         loc.page.evaluate('document.activeElement && document.activeElement.blur()')   # no focus ring in the picture
         loc.page.mouse.move(0, 0)                                                         # no hover
+        # a face the page asks for only when its text shows (a <select>'s): loaded before the picture, not half way
+        loc.page.evaluate('document.fonts.ready'); settle(loc.page)
         if upto:   # from the top of loc down to the top of another element (the waves without the lists under them)
             loc.scroll_into_view_if_needed()
             box, end = loc.bounding_box(), upto.bounding_box()

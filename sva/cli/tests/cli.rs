@@ -490,3 +490,427 @@ fn a_dump_that_does_not_read_is_named() {
         assert!(e.contains("long.vcd") && !e.contains("internal error") && e.trim_end().lines().count() == 1, "{args:?}: {e}");
     }
 }
+
+/// A VCD of the fst tests in a directory of its own (they run in parallel, and `sva fst` writes beside the dump).
+fn own(test: &str, name: &str, text: &str) -> PathBuf {
+    let d = dir().join(test);
+    std::fs::create_dir_all(&d).unwrap();
+    let p = d.join(name);
+    std::fs::write(&p, text).unwrap();
+    p
+}
+
+/// The value changes of a VCD text by time, each time's lines sorted (an FST's readers give one time's changes in
+/// their own order).
+fn changes(t: &str) -> Vec<(String, Vec<String>)> {
+    let body = t.split("$enddefinitions $end").nth(1).unwrap_or("");
+    let mut out: Vec<(String, Vec<String>)> = Vec::new();
+    for l in body.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('$')) {
+        if l.starts_with('#') {
+            out.push((l.to_string(), Vec::new()));
+        } else if let Some(last) = out.last_mut() {
+            last.1.push(l.to_string());
+        }
+    }
+    out.iter_mut().for_each(|x| x.1.sort());
+    out
+}
+
+/// The part files beside a dump (tb.fst.<pid>.part: a run not finished, or killed).
+fn parts(vcd: &std::path::Path) -> Vec<String> {
+    std::fs::read_dir(vcd.parent().unwrap()).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".part")).collect()
+}
+
+/// GTKWave's fst2vcd of an FST, None when it is not installed; under make check (WAVELENS_STRICT) it must be: the
+/// gate's machine has GTKWave, the FST's other reader.
+fn fst2vcd(fst: &std::path::Path) -> Option<String> {
+    match Command::new("fst2vcd").arg(fst).output() {
+        Ok(g) => {
+            assert!(g.status.success(), "fst2vcd {}: {}", fst.display(), String::from_utf8_lossy(&g.stderr));
+            Some(String::from_utf8_lossy(&g.stdout).into_owned())
+        }
+        Err(e) => {
+            assert!(std::env::var("WAVELENS_STRICT").is_err(), "fst2vcd: {e} (GTKWave is needed by make check)");
+            None
+        }
+    }
+}
+
+/// The fields of an FST's header block (fstapi's FST_BL_HDR): start, end, scopes, variables, signals, blocks of
+/// changes, the exponent of its timescale, $timezero.
+fn fst_header(fst: &std::path::Path) -> [i64; 8] {
+    let b = std::fs::read(fst).unwrap();
+    assert_eq!(b[0], 0, "the header block first");
+    let u = |at: usize| u64::from_be_bytes(b[at..at + 8].try_into().unwrap()) as i64;
+    [u(9), u(17), u(41), u(49), u(57), u(65), b[73] as i8 as i64, u(322)]
+}
+
+const ALL_KINDS: &str = "$date\n  Sun Oct 25 10:00:00 2026\n$end\n$version Questa 2021.1 $end\n$comment made by hand $end\n\
+    $timescale 10ps $end\n$attrbegin misc 07 pkg::state_t 3 IDLE RUN DONE 00 01 10 1 $end\n$scope module tb $end\n\
+    $var wire 1 ! clk $end\n$attrbegin misc 07 \"\" 1 $end\n$var logic 2 \" state [1:0] $end\n$var wire 8 # data [7:0] $end\n\
+    $var wire 1 $ err[2] $end\n$var real 64 % r $end\n$var string 1 & msg $end\n$var event 1 ' ev $end\n\
+    $scope module u $end\n$var wire 1 ! clk_copy $end\n$var wire 1 ( s $end\n$upscope $end\n$upscope $end\n$enddefinitions $end\n\
+    #0\n$dumpvars\n0!\nb0 \"\nb1x #\n1$\nr1.5 %\nsHello\\040world &\nU(\n$end\n#5\n1!\nb1 \"\nbz #\nr-2.5e-9 %\n1'\nH(\n\
+    #10\n0!\nb10 \"\nb10100101 #\n0$\nsq\\x22 &\nL(\n#20\n";
+
+/// `sva fst` writes the FST beside the VCD under its name, and `sva vcd` reads back what the VCD has: the date and
+/// version, the comment, the timescale, the enum table and its reference, every name as the VCD writes it, an alias,
+/// vectors extended as VCD extends them, reals, strings, an event, VHDL's 1-bit values, the end of the dump.
+#[test]
+fn fst_of_a_vcd_keeps_what_it_declares_and_its_values() {
+    let vcd = own("fst-all", "all.vcd", ALL_KINDS);
+    let o = sva(&["fst", &vcd.to_string_lossy()]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    let fst = vcd.with_extension("fst");
+    assert!(out(&o).contains("all.fst: 9 variables (8 signals), ") && out(&o).contains(" 1 enum table"), "{}", out(&o));
+    assert!(parts(&vcd).is_empty(), "the part file is renamed");
+    let t = out(&sva(&["vcd", &fst.to_string_lossy()]));
+    for line in ["$date\n\tSun Oct 25 10:00:00 2026\n$end\n$version\n\tQuesta 2021.1\n$end\n$timescale\n\t10ps\n$end\n$comment\n\tmade by hand\n$end\n",
+                 "$attrbegin misc 07 pkg::state_t 3 IDLE RUN DONE 00 01 10 1 $end\n$scope module tb $end\n$var wire 1 ! clk $end\n\
+                  $attrbegin misc 07 \"\" 1 $end\n$var logic 2 \" state [1:0] $end\n$var wire 8 # data [7:0] $end\n$var wire 1 $ err[2] $end\n\
+                  $var real 64 % r $end\n$var string 0 & msg $end\n$var event 1 ' ev $end\n$scope module u $end\n$var wire 1 ! clk_copy $end\n"] {
+        assert!(t.contains(line), "{line:?} not in:\n{t}");
+    }
+    // a 1-bit U H L comes back as u h l: the FST's code of a bit (fstapi's "xzhuwl-?")
+    let want = [("#0", vec!["0!", "1$", "u(", "b00 \"", "b0000001x #", "r1.5 %", "sHello\\040world &"]),
+                ("#5", vec!["1!", "1'", "h(", "b01 \"", "bzzzzzzzz #", "r-2.5e-09 %"]),
+                ("#10", vec!["0!", "0$", "l(", "b10 \"", "b10100101 #", "sq\\\" &"]), ("#20", vec![])];
+    let want: Vec<(String, Vec<String>)> = want.iter().map(|(t, v)| {
+        let mut v: Vec<String> = v.iter().map(|s| s.to_string()).collect();
+        v.sort();
+        (t.to_string(), v)
+    }).collect();
+    assert_eq!(changes(&t), want, "{t}");
+
+    // GTKWave reads it the same
+    if let Some(g) = fst2vcd(&fst) {
+        assert_eq!(changes(&g), want, "fst2vcd:\n{g}");
+    }
+    // the header: 9 variables in 2 scopes, 8 signals (clk_copy an alias), one block, 10ps, from #0 to #20
+    assert_eq!(fst_header(&fst), [0, 20, 2, 9, 8, 1, -11, 0]);
+}
+
+/// The header of the FST as the VCD gives it: no $timescale is 1 ps (as WaveLens reads a VCD; vcd2fst takes 1 ns),
+/// $timezero below 0, the times from the first to the last (an empty last #); a code declared again at another width
+/// is a signal of its own with the values on its width; a port is a wire of its width, its EVCD values left out.
+#[test]
+fn fst_header_of_a_vcd_and_its_odd_declarations() {
+    let vcd = own("fst-header", "nots.vcd", "$timezero -100 $end\n$scope module tb $end\n$var wire 1 ! s $end\n$upscope $end\n\
+        $enddefinitions $end\n#5\n0!\n#10\n1!\n#30\n");
+    let o = sva(&["fst", &vcd.to_string_lossy()]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    assert!(err(&o).contains("nots.vcd: no $timescale: 1ps taken"), "{}", err(&o));
+    let fst = vcd.with_extension("fst");
+    assert_eq!(fst_header(&fst), [5, 30, 1, 1, 1, 1, -12, -100]);
+    assert!(out(&sva(&["vcd", &fst.to_string_lossy()])).contains("$timescale\n\t1ps\n$end\n"));
+    if let Some(g) = fst2vcd(&fst) {
+        assert!(g.contains("$timescale\n\t1ps\n$end\n") && g.contains("$timezero\n\t-100\n$end\n"), "{g}");
+    }
+    for (ts, e) in [("100fs", -13), ("10ps", -11), ("1 s", 0), ("1 us", -6)] {
+        let vcd = own("fst-header", "ts.vcd", &format!("$timescale {ts} $end\n$scope module tb $end\n$var wire 1 ! s $end\n$upscope $end\n\
+            $enddefinitions $end\n#0\n0!\n"));
+        assert_eq!(sva(&["fst", &vcd.to_string_lossy(), "-q"]).status.code(), Some(0));
+        assert_eq!(fst_header(&vcd.with_extension("fst"))[6], e, "{ts}");
+    }
+
+    let vcd = own("fst-header", "odd.vcd", "$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! bit $end\n\
+        $var wire 8 ! bus [7:0] $end\n$var wire 8 ! bus2 [7:0] $end\n$var port 4 \" p [3:0] $end\n$upscope $end\n$enddefinitions $end\n\
+        #0\nb10101010 !\nb1010 \"\n#10\npD 6 6 \"\n1!\n");
+    let o = sva(&["fst", &vcd.to_string_lossy()]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    assert!(out(&o).contains("odd.fst: 4 variables (3 signals)"), "bus2 an alias of bus, bit and bus apart: {}", out(&o));
+    let e = err(&o);
+    assert!(e.contains("odd.vcd:6: $var port p [3:0]: written as a wire") && e.contains("odd.vcd:13: \"pD\": a port value"), "{e}");
+    let fst = vcd.with_extension("fst");
+    let t = out(&sva(&["vcd", &fst.to_string_lossy()]));
+    assert!(t.contains("$var wire 1 ! bit $end\n$var wire 8 \" bus [7:0] $end\n$var wire 8 \" bus2 [7:0] $end\n$var wire 4 # p [3:0] $end\n"), "{t}");
+    let want = vec![("#0".to_string(), vec!["0!".to_string(), "b1010 #".into(), "b10101010 \"".into()]),
+                    ("#10".to_string(), vec!["1!".to_string(), "b00000001 \"".into()])];
+    assert_eq!(changes(&t), want, "{t}");
+    if let Some(g) = fst2vcd(&fst) {
+        assert!(g.contains("$var wire 4 # p [3:0] $end"), "{g}");
+        assert_eq!(changes(&g), want, "fst2vcd:\n{g}");
+    }
+}
+
+/// The blocks of changes (64 MiB each; `--block-bytes` makes them small) and the aliases of equal changes read back as
+/// one block does; --out names another file.
+#[test]
+fn fst_in_many_blocks_reads_as_one() {
+    let mut text = String::from("$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! clk $end\n$var wire 1 \" clk2 $end\n\
+        $var wire 16 # n [15:0] $end\n$var real 64 $ r $end\n$upscope $end\n$enddefinitions $end\n");
+    for i in 0..400 {
+        text += &format!("#{}\n{}!\n{}\"\nb{:b} #\nr{} $\n", i * 5, i % 2, i % 2, i * 7 % 65536, i as f64 / 4.0);
+    }
+    let vcd = own("fst-blocks", "b.vcd", &text);
+    let (one, many) = (vcd.with_extension("fst"), vcd.with_extension("many.fst"));
+    assert_eq!(sva(&["fst", &vcd.to_string_lossy(), "-q"]).status.code(), Some(0));
+    let o = sva(&["fst", &vcd.to_string_lossy(), "--out", &many.to_string_lossy(), "--block-bytes", "64"]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    let a = out(&sva(&["vcd", &one.to_string_lossy()]));
+    let b = out(&sva(&["vcd", &many.to_string_lossy()]));
+    assert_eq!(changes(&a).len(), 400);
+    assert_eq!(changes(&a), changes(&b));
+    assert_eq!(fst_header(&one)[5], 1);
+    assert!(fst_header(&many)[5] > 100, "blocks: {:?}", fst_header(&many));
+    if let Some(g) = fst2vcd(&many) {
+        assert_eq!(changes(&g), changes(&a), "fst2vcd of the blocks");
+    }
+    // blocks whose alias (clk2 of clk) is longer than 32 bytes: fstapi's reader needs its memory counted too
+    let mid = vcd.with_extension("mid.fst");
+    assert_eq!(sva(&["fst", &vcd.to_string_lossy(), "--out", &mid.to_string_lossy(), "--block-bytes", "2000", "-q"]).status.code(), Some(0));
+    assert!((2..20).contains(&fst_header(&mid)[5]), "{:?}", fst_header(&mid));
+    if let Some(g) = fst2vcd(&mid) {
+        assert_eq!(changes(&g), changes(&a), "fst2vcd of the blocks with aliases");
+    }
+
+    // times without a change fill a block too (its table of times is in memory until the block is written)
+    let mut text = String::from("$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! s $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\n");
+    for i in 1..1000 {
+        text += &format!("#{i}\n");
+    }
+    let vcd = own("fst-blocks", "times.vcd", &text);
+    assert_eq!(sva(&["fst", &vcd.to_string_lossy(), "--block-bytes", "800", "-q"]).status.code(), Some(0));
+    let h = fst_header(&vcd.with_extension("fst"));
+    assert!(h[5] >= 8 && h[1] == 999, "{h:?}");
+    if let Some(g) = fst2vcd(&vcd.with_extension("fst")) {
+        assert!(g.contains("#0\n$dumpvars\n0!\n$end\n#1\n#2\n") && g.trim_end().ends_with("#998\n#999"), "{g}");
+    }
+}
+
+/// The words of a VCD read through the 1 MiB buffer: a value and its code across its end (LF and CRLF), a word longer
+/// than the buffer, give what they give in one piece.
+#[test]
+fn fst_reads_words_across_its_buffer() {
+    const BUF: usize = 1 << 20;
+    let head = "$timescale 1ns $end\n$scope module tb $end\n$var wire 8 # v [7:0] $end\n$var wire 1 ! s $end\n$upscope $end\n$enddefinitions $end\n#0\n";
+    for nl in ["\n", "\r\n"] {
+        for k in 0..12 {
+            // the value "b10100101 #" starts k bytes before the end of the buffer (sva vcd numbers the codes anew)
+            let pre = format!("{head}$comment ");
+            let fill = BUF - k - pre.len() - format!(" $end{nl}").len();
+            let text = format!("{pre}{} $end{nl}b10100101 #{nl}1!{nl}#5{nl}0!{nl}", "c".repeat(fill)).replace('\n', nl).replace("\r\r", "\r");
+            assert_eq!(text.find("b10100101").unwrap() + k, BUF + if nl == "\n" { 0 } else { 7 }, "{k}");
+            let vcd = own("fst-words", "w.vcd", &text);
+            let o = sva(&["fst", &vcd.to_string_lossy(), "-q"]);
+            assert_eq!(o.status.code(), Some(0), "{k} {nl:?}: {}", err(&o));
+            assert!(err(&o).is_empty(), "{k} {nl:?}: {}", err(&o));
+            let t = out(&sva(&["vcd", &vcd.with_extension("fst").to_string_lossy()]));
+            assert_eq!(changes(&t), vec![("#0".to_string(), vec!["1\"".to_string(), "b10100101 !".into()]), ("#5".to_string(), vec!["0\"".to_string()])],
+                       "{k} {nl:?}");
+        }
+    }
+    // a word of 1.5 MiB in a $comment of the header, cut to what an FST's readers take, a long name too; a value after
+    let text = format!("$comment {} $end\n{}b1 #\n", "w".repeat(BUF * 3 / 2), head.replace(" s $end", &format!(" {} $end", "n".repeat(70000))));
+    let vcd = own("fst-words", "long.vcd", &text);
+    let o = sva(&["fst", &vcd.to_string_lossy(), "-q"]);
+    assert_eq!(o.status.code(), Some(0));
+    assert!(err(&o).contains("long.vcd:1: a $comment of 1572864 bytes: cut to 69631") && err(&o).contains("long.vcd:5: a $var name of 70000 bytes: cut to 65535"),
+            "{}", err(&o));
+    let t = sva(&["vcd", &vcd.with_extension("fst").to_string_lossy()]);
+    assert_eq!(t.status.code(), Some(0), "{}", err(&t));
+    assert_eq!(changes(&out(&t)), vec![("#0".to_string(), vec!["b00000001 !".to_string()])]);
+    if let Some(g) = fst2vcd(&vcd.with_extension("fst")) {
+        assert_eq!(changes(&g), changes(&out(&t)));
+    }
+}
+
+/// The FSM states of the types file beside the VCD (tb.types.json by tb.vcd) become enum tables of the variables of
+/// their paths whose width is the type's: Questa's describe and "signals", an instance's own table, an array element
+/// the array's; a width that differs gets none, and a table the VCD gives stays.
+#[test]
+fn fst_writes_the_fsm_states_of_the_types_file() {
+    let vcd = own("fst-types", "tb.vcd", "$timescale 1ns $end\n$attrbegin misc 07 own_t 2 A B 0 1 1 $end\n$scope module tb $end\n\
+        $var reg 3 ! state [2:0] $end\n$scope module u $end\n$var reg 2 \" state [1:0] $end\n$upscope $end\n\
+        $var reg 4 # wide [3:0] $end\n$var reg 2 $ arr[1] $end\n$attrbegin misc 07 \"\" 1 $end\n$comment between $end\n$var reg 1 % mine $end\n\
+        $var reg 3 & glued[2:0] $end\n$upscope $end\n$enddefinitions $end\n#0\nb0 !\nb0 \"\nb0 #\nb0 $\n0%\nb0 &\n");
+    std::fs::write(vcd.with_extension("types.json"), r#"{"wavelens": "types", "version": 1,
+        "describe": {"tb.state": "Verilog enum: (2 downto 0) [3 enumeration values]\n  (IDLE=0,RUN=1,\n DONE=4)",
+                     "tb.wide": "Verilog enum: (2 downto 0) [2 enumeration values]\n  (P=0,Q=1)", "tb.mine": "Verilog enum: (0 downto 0) [2 enumeration values]\n  (X0=0,X1=1)",
+                     "tb.glued": "Verilog enum: (2 downto 0) [2 enumeration values]\n  (G0=0,G7=7)"},
+        "signals": {"tb.u.state": {"width": 2, "enum": {"0": "U_IDLE", "3": "U_LAST"}}, "tb.arr": {"width": 2, "enum": {"1": "ONE"}}}}"#).unwrap();
+    let o = sva(&["fst", &vcd.to_string_lossy()]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    assert!(out(&o).contains("5 enum tables, 4 of them from tb.types.json (4 variables)"), "{}", out(&o));
+    let t = out(&sva(&["vcd", &vcd.with_extension("fst").to_string_lossy()]));
+    for line in ["$attrbegin misc 07 state_t 3 IDLE RUN DONE 000 001 100 2 $end\n$attrbegin misc 07 \"\" 2 $end\n$var reg 3 ! state [2:0] $end\n",
+                 "$attrbegin misc 07 state_t 2 U_IDLE U_LAST 00 11 3 $end\n$attrbegin misc 07 \"\" 3 $end\n$var reg 2 \" state [1:0] $end\n",
+                 "$upscope $end\n$var reg 4 # wide [3:0] $end\n",
+                 "$attrbegin misc 07 arr_t 1 ONE 01 4 $end\n$attrbegin misc 07 \"\" 4 $end\n$var reg 2 $ arr[1] $end\n",
+                 "$attrbegin misc 07 \"\" 1 $end\n$comment\n\tbetween\n$end\n$var reg 1 % mine $end\n",
+                 "$attrbegin misc 07 glued_t 2 G0 G7 000 111 5 $end\n$attrbegin misc 07 \"\" 5 $end\n$var reg 3 & glued[2:0] $end\n"] {
+        assert!(t.contains(line), "{line:?} not in:\n{t}");
+    }
+    // --no-types: the VCD's own table only; --map then has nothing to map, and says so
+    let o = sva(&["fst", &vcd.to_string_lossy(), "--no-types", "--map", "top=tb"]);
+    assert!(out(&o).contains(", 1 enum table\n"), "{}", out(&o));
+    assert!(err(&o).contains("tb.vcd: --map given, but no types file (tb.types.json beside the dump, or --types): --no-types"), "{}", err(&o));
+}
+
+/// The cases of tests/unit/types/contract.json (what svtypes.py and the page's svApply give the signals of a dump)
+/// through `sva fst`, the fourth twin: each case's signals as a VCD ($var as the case's `ref`, else from its path: x.[3] is
+/// x[3]; its own labels as the VCD's enum table), its types beside it -> which $var gets which enum table, and a file
+/// the twins refuse is refused. The notes, fields and the run are the others' (an FST holds enum tables only).
+#[test]
+fn fst_gives_the_enum_tables_the_twins_give() {
+    let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/unit/types/contract.json")).unwrap();
+    let doc: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let cases = doc["cases"].as_array().unwrap();
+    for (k, c) in cases.iter().enumerate() {
+        let name = c["name"].as_str().unwrap();
+        let sigs = c["signals"].as_array().unwrap();
+        let mut vcd = String::from("$timescale 1ns $end\n");
+        let mut open: Vec<String> = Vec::new();
+        let mut body = String::from("#0\n");
+        for (i, s) in sigs.iter().enumerate() {
+            let path = s["path"].as_str().unwrap().replace(".[", "[");
+            let mut comps: Vec<String> = path.split('.').map(String::from).collect();
+            let leaf = comps.pop().unwrap();
+            let r = s.get("ref").and_then(|x| x.as_str()).map_or(leaf, String::from);
+            let same = open.iter().zip(&comps).take_while(|(a, b)| a == b).count();
+            while open.len() > same {
+                open.pop();
+                vcd += "$upscope $end\n";
+            }
+            for c in &comps[same..] {
+                vcd += &format!("$scope module {c} $end\n");
+                open.push(c.clone());
+            }
+            let w = s["width"].as_u64().unwrap() as usize;
+            if let Some(own) = s.get("enum").and_then(|x| x.as_object()) {
+                let (labels, values): (Vec<_>, Vec<_>) = own.iter().map(|(v, l)| (l.as_str().unwrap().to_string(),
+                    format!("{:0w$b}", v.parse::<u128>().unwrap()))).unzip();
+                vcd += &format!("$attrbegin misc 07 own_t {} {} {} {} $end\n$attrbegin misc 07 \"\" {} $end\n", own.len(), labels.join(" "),
+                                values.join(" "), 100 + i, 100 + i);
+            }
+            let code = (b'!' + i as u8) as char;
+            vcd += &format!("$var reg {w} {code} {r} $end\n");
+            body += &format!("b0 {code}\n");
+        }
+        vcd += &"$upscope $end\n".repeat(open.len());
+        vcd += "$enddefinitions $end\n";
+        let p = own("fst-contract", &format!("c{k}.vcd"), &(vcd + &body));
+        std::fs::write(p.with_extension("types.json"), c["types"].to_string()).unwrap();
+        let o = sva(&["fst", &p.to_string_lossy(), "-q"]);
+        if c["want"].get("error").is_some() {
+            assert_eq!(o.status.code(), Some(2), "{name}: the twins refuse the types file: {}", err(&o));
+            assert!(err(&o).contains(&format!("c{k}.types.json")), "{name}: {}", err(&o));
+            continue;
+        }
+        assert_eq!(o.status.code(), Some(0), "{name}: {}", err(&o));
+        // the tables of the FST, and the one each $var refers to (in the order of the case's signals)
+        let t = out(&sva(&["vcd", &p.with_extension("fst").to_string_lossy()]));
+        let mut tables: std::collections::HashMap<String, (String, serde_json::Map<String, serde_json::Value>)> = Default::default();
+        let (mut pending, mut got) = (None, Vec::new());
+        for l in t.lines() {
+            let w: Vec<&str> = l.split_whitespace().collect();
+            if l.starts_with("$attrbegin misc 07 \"\" ") {
+                pending = Some(w[4].to_string());
+            } else if l.starts_with("$attrbegin misc 07 ") {
+                let n: usize = w[4].parse().unwrap();
+                let map = (0..n).map(|j| (u128::from_str_radix(w[5 + n + j], 2).unwrap().to_string(), serde_json::Value::from(w[5 + j]))).collect();
+                tables.insert(w[5 + 2 * n].to_string(), (w[3].to_string(), map));
+            } else if l.starts_with("$var ") {
+                got.push(pending.take().map(|h| tables[&h].clone()));
+            }
+        }
+        assert_eq!(got.len(), sigs.len(), "{name}:\n{t}");
+        for (s, g) in sigs.iter().zip(&got) {
+            let path = s["path"].as_str().unwrap();
+            let want = s.get("enum").or_else(|| c["want"].get("labels").and_then(|l| l.get(path))).and_then(|x| x.as_object());
+            assert_eq!(g.as_ref().map(|x| &x.1), want, "{name}: {path}:\n{t}");
+            if let Some((tname, _)) = g {
+                assert_eq!(tname == "own_t", s.get("enum").is_some(), "{name}: {path}: the VCD's own table stays");
+            }
+        }
+    }
+}
+
+/// A dump that does not convert is one message with its file and line, exit 2, and no FST (an older one stays);
+/// the notes of one kind are shown five times, then counted.
+#[test]
+fn fst_errors_name_the_line_and_notes_are_counted() {
+    let vcd = own("fst-errors", "back.vcd", "$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! s $end\n$upscope $end\n\
+        $enddefinitions $end\n#0\n0!\n#20\n1!\n#5\n0!\n");
+    std::fs::write(vcd.with_extension("fst"), "older").unwrap();
+    let o = sva(&["fst", &vcd.to_string_lossy()]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(err(&o).contains("back.vcd:10: #5 after #20: the time goes back"), "{}", err(&o));
+    assert_eq!(std::fs::read_to_string(vcd.with_extension("fst")).unwrap(), "older");
+    assert!(parts(&vcd).is_empty(), "the part is removed");
+
+    let mut text = String::from("$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! s $end\n$upscope $end\n$enddefinitions $end\n#0\n");
+    for i in 0..12 {
+        text += &format!("1{}\n", ["%", "&"][i % 2]);
+    }
+    let vcd = own("fst-errors", "codes.vcd", &text);
+    let o = sva(&["fst", &vcd.to_string_lossy(), "-q"]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    let e = err(&o);
+    assert_eq!(e.matches("which no $var declares").count(), 3, "two codes shown once each, and the summary:\n{e}");
+    assert!(e.contains("codes.vcd:7: a value of \"%\", which no $var declares: left out"), "{e}");
+    assert!(out(&o).is_empty(), "-q: no last line");
+
+    let mut text = String::from("$timescale 1ns $end\n$scope module tb $end\n$var real 64 ! r $end\n$upscope $end\n$enddefinitions $end\n#0\n");
+    for i in 0..8 {
+        text += &format!("rbad{i} !\n");
+    }
+    let o = sva(&["fst", &own("fst-errors", "reals.vcd", &text).to_string_lossy(), "-q"]);
+    let e = err(&o);
+    assert_eq!(e.matches("is not a number: NaN taken").count(), 6, "five shown, then the count:\n{e}");
+    assert!(e.contains("8 such notes in all, the first 5 above"), "{e}");
+    let o = sva(&["fst", &vcd.with_extension("fst").to_string_lossy()]);
+    assert!(err(&o).contains("already an FST"), "{}", err(&o));
+}
+
+/// The FST appears whole: each run writes a part of its own (tb.fst.<pid>.part, never a file there before) and renames
+/// it; runs at once each finish, a run killed leaves only its part and the next one is not stopped by it, a dump named
+/// like a part is not touched; a large dump's progress lines say "progress:", told from the notes.
+#[test]
+fn fst_runs_at_once_and_killed() {
+    let mut text = String::from("$timescale 1ns $end\n$scope module tb $end\n$var wire 8 ! n [7:0] $end\n$upscope $end\n$enddefinitions $end\n");
+    for i in 0..200_000 {
+        text += &format!("#{i}\nb{:b} !\n", i % 251);
+    }
+    let vcd = own("fst-runs", "two.vcd", &text);
+    let fst = vcd.with_extension("fst");
+    let runs: Vec<_> = (0..4).map(|_| Command::new(env!("CARGO_BIN_EXE_sva")).args(["fst", &vcd.to_string_lossy(), "-q"])
+        .stderr(std::process::Stdio::piped()).spawn().unwrap()).collect();
+    for r in runs {
+        let o = r.wait_with_output().unwrap();
+        assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    }
+    assert!(parts(&vcd).is_empty(), "{:?}", parts(&vcd));
+    let t = out(&sva(&["vcd", &fst.to_string_lossy()]));
+    assert_eq!(changes(&t).len(), 200_000);
+
+    // killed while it writes: its part stays (named by its pid), the FST before it stays, the next run is not stopped
+    let mut k = Command::new(env!("CARGO_BIN_EXE_sva")).args(["fst", &vcd.to_string_lossy(), "-q"]).spawn().unwrap();
+    let pid = k.id();
+    let part = vcd.with_file_name(format!("two.fst.{pid}.part"));
+    let t0 = std::time::Instant::now();
+    while !part.exists() && t0.elapsed().as_secs() < 10 {
+        std::thread::yield_now();
+    }
+    k.kill().unwrap();
+    let killed = k.wait().unwrap().code().is_none();   // not done before the kill (a fast machine may finish first)
+    assert_eq!(parts(&vcd), if killed { vec![format!("two.fst.{pid}.part")] } else { vec![] });
+    assert_eq!(changes(&out(&sva(&["vcd", &fst.to_string_lossy()]))).len(), 200_000, "the FST of before is whole");
+    assert_eq!(sva(&["fst", &vcd.to_string_lossy(), "-q"]).status.code(), Some(0));
+    let _ = std::fs::remove_file(&part);
+
+    // a dump named as a part, written to the FST it would be the part of: read, not emptied
+    let odd = own("fst-runs", "x.fst.part", "$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! s $end\n$upscope $end\n$enddefinitions $end\n#0\n1!\n");
+    let o = sva(&["fst", &odd.to_string_lossy(), "--out", &odd.with_file_name("x.fst").to_string_lossy(), "-q"]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    assert!(std::fs::read_to_string(&odd).unwrap().contains("$enddefinitions"));
+
+    // progress of a large dump (--large-bytes makes this one large): its own lines, none a note
+    let o = sva(&["fst", &vcd.to_string_lossy(), "--large-bytes", "1000"]);
+    let e = err(&o);
+    let (progress, notes): (Vec<&str>, Vec<&str>) = e.lines().partition(|l| l.contains("two.vcd: progress: "));
+    assert!(progress.len() >= 4 && notes.is_empty(), "{e}");   // a tenth at most each 1 MiB read: 3 MB, three or four
+    assert!(progress[0].contains("progress: 1 variables (1 signals) in 1 scopes, 0 enum tables; the values next")
+            && progress[1].contains("% (line "), "{e}");
+}

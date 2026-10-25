@@ -1,0 +1,13 @@
+{
+ "signal": [
+  ["tb",
+    {"name": "p", "width": 1, "wave": "1.", "tv": [[0, "1"], [20000, "0"]], "path": "tb.p"},
+    {"name": "q", "width": 4, "wave": "=.", "data": ["10"], "tv": [[0, "a"], [20000, "6"]], "path": "tb.q"},
+    {"name": "w", "width": 1, "wave": "01", "tv": [[0, "0"], [10000, "1"]], "path": "tb.w"}
+  ]
+ ],
+ "head": {"text": "port.vcd"},
+ "time": {"t0": 0, "t1": 20000, "cycle": 10000, "unit": "ps"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "port.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 0, "to_ps": 20000}
+}

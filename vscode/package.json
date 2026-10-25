@@ -31,22 +31,26 @@
       { "command": "wavelens.live", "title": "Connect to the agent (tools/wavemcp.py)", "category": "WaveLens" },
       { "command": "wavelens.theme", "title": "Choose the theme of the waves", "category": "WaveLens", "icon": "$(symbol-color)" },
       { "command": "wavelens.log", "title": "Show the log", "category": "WaveLens", "icon": "$(output)" },
-      { "command": "wavelens.verilatorTypes", "title": "Make the types with Verilator (FSM states, structs)", "category": "WaveLens" }
+      { "command": "wavelens.verilatorTypes", "title": "Make the types with Verilator (FSM states, structs)", "category": "WaveLens" },
+      { "command": "wavelens.toFst", "title": "Convert to FST (beside the VCD, FSM states kept)", "category": "WaveLens" }
     ],
     "menus": {
       "explorer/context": [
-        { "command": "wavelens.open", "when": "resourceExtname =~ /^\\.(vcd|fst)$/i", "group": "navigation@9" }
+        { "command": "wavelens.open", "when": "resourceExtname =~ /^\\.(vcd|fst)$/i", "group": "navigation@9" },
+        { "command": "wavelens.toFst", "when": "resourceExtname =~ /^\\.vcd$/i", "group": "navigation@10" }
       ],
       "editor/title": [
         { "command": "wavelens.reload", "when": "activeCustomEditorId == wavelens.waves", "group": "navigation" },
         { "command": "wavelens.theme", "when": "activeCustomEditorId == wavelens.waves", "group": "navigation@2" },
         { "command": "wavelens.log", "when": "activeCustomEditorId == wavelens.waves", "group": "navigation@3" },
-        { "command": "wavelens.verilatorTypes", "when": "activeCustomEditorId == wavelens.waves", "group": "types@1" }
+        { "command": "wavelens.verilatorTypes", "when": "activeCustomEditorId == wavelens.waves", "group": "types@1" },
+        { "command": "wavelens.toFst", "when": "activeCustomEditorId == wavelens.waves && resourceExtname =~ /^\\.vcd$/i", "group": "types@2" }
       ],
       "commandPalette": [
         { "command": "wavelens.reload", "when": "activeCustomEditorId == wavelens.waves" },
         { "command": "wavelens.live", "when": "activeCustomEditorId == wavelens.waves" },
-        { "command": "wavelens.verilatorTypes", "when": "activeCustomEditorId == wavelens.waves" }
+        { "command": "wavelens.verilatorTypes", "when": "activeCustomEditorId == wavelens.waves" },
+        { "command": "wavelens.toFst", "when": "activeCustomEditorId == wavelens.waves && resourceExtname =~ /^\\.vcd$/i" }
       ]
     },
     "configuration": {

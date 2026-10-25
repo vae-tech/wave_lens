@@ -19,7 +19,8 @@ wavelens/                     what a page needs, nothing else
   sva.js, sva.wasm.js         assertions in the page: the panel, binding, evaluation; the engine (generated, make sva-build)
   bus.js                      bus transactions: ports found by their names, decoders (AXI, AXI-Stream, APB, AHB, Avalon, Wishbone, OBI), rows
 vscode/                       the VS Code extension (a workspace extension: Remote-SSH / WSL host): extension.js (the
-                              custom editor of .vcd / .fst, FST -> VCD by the bundled sva, the store, dialogs, the
+                              custom editor of .vcd / .fst, FST -> VCD by the bundled sva (and Convert to FST: sva
+                              fst), the store, dialogs, the
                               live relay), media/host.js (the tab's half, before wavelens.js: localStorage, downloads,
                               pickers, clipboard, keys, theme, live link to the host), svtypes.js (the twin of
                               svtypes.py verilator: the command Make the types with Verilator; tests/unit compares
@@ -62,7 +63,8 @@ tests/
   guide_shots.py              the pictures of docs/guides (make guide-shots; writes the gaps guide's dump into BUILD/guides)
   conformance.html            every feature next to stock WaveDrom 3.5.0 (vendor/, test-only)
 work/                         your dumps and their configs: configs tracked, dumps and pages git-ignored
-sva/                          the SVA engine (Rust: core, native CLI, WebAssembly)
+sva/                          the SVA engine (Rust: core, native CLI, WebAssembly); the CLI's sva vcd (cli/src/vcd.rs:
+                              a dump as VCD text) and sva fst (cli/src/fst.rs: a VCD as an FST, as vcd2fst writes it)
 prompts/                      the roadmap as a series of prompts (on main only)
 bin/                          the prebuilt sva CLI, committed: linux-x86_64/sva (static); windows-x86_64/sva.exe by make dist-windows
 out/                          build products (make's BUILD, git-ignored): cargo target, example dumps and pages, shots
@@ -79,7 +81,7 @@ What each part needs:
 | the tools | python3 ≥ 3.8 (standard library only) |
 | the examples | Verilator ≥ 5 (`make examples`) |
 | the assertion engine | cargo ≥ 1.82 and `rustup target add wasm32-unknown-unknown` (`make sva-build`); musl for `make dist-linux`, mingw-w64 for `make dist-windows` |
-| the tests and the pictures | `pip install playwright`, `python3 -m playwright install chromium` (`make smoke`, `make check`); `fonts-ibm-plex` (or the network) for `make shots`, `make guide-shots` |
+| the tests and the pictures | `pip install playwright`, `python3 -m playwright install chromium` (`make smoke`, `make check`); `fonts-ibm-plex` (or the network) for `make shots`, `make guide-shots`; GTKWave's `vcd2fst` and `fst2vcd` (`apt install gtkwave`) for `make check`: `sva fst` is compared with them (`tests/unit/test_svafst.py`, `sva/cli/tests/cli.rs`) |
 | the SystemVerilog style | verible (`make fmt`) and Verilator (`make lint`) |
 
 ```sh
@@ -92,7 +94,7 @@ make demo examples html     # rebuild docs/demo_waves.js, the example pages, the
 make smoke                  # tests/smoke.py: every page in light and dark, checks by section (--list), PNGs in BUILD/shots
 make smoke ONLY=find,sva_bind   # some sections (python3 tests/smoke.py --list); STRICT=1: a skip fails
 make shots                  # tests/shots.py: docs/img/*.png, dark theme, and tests/visual/*.png (--set visual: white, 420 px, an FSM's details, a scale of 2) (after make examples; ~20 s, see below)
-make shots-check            # both into BUILD/img and BUILD/visual, compared with the committed ones by tests/pngdiff.py: a picture that changed (more than 48 pixels by more than 32 of 255) or one made and not committed fails, its difference in BUILD/*/diff
+make shots-check            # both into BUILD/img and BUILD/visual, compared with the committed ones by tests/pngdiff.py: a picture that changed (more than 48 pixels by more than 32 of 255 from the pixel there and the 8 around it: text a pixel off is the same) or one made and not committed fails, its difference in BUILD/*/diff
 make guide-shots            # tests/guide_shots.py: docs/guides/img/*.png (after make examples; ONLY=gaps,sva: those guides)
 make vsix                   # tools/mkvsix.py: BUILD/wavelens.vsix, its copy wavelens-<version>.vsix (the extension, the viewer, the static sva)
 make vscode-e2e             # tests/vscode_e2e.py: the extension in a real VS Code (INSTALLED: python3 tests/vscode_e2e.py --installed)
@@ -103,6 +105,7 @@ make sva-bless              # rewrite tests/sva/golden/*.txt after a reviewed ch
 make sva-examples sva-spike # sva parse + sva eval of examples/*/*.sva; the WebAssembly build in a page (wasm32 target)
 make sva-verify             # the examples' checkers in Verilator --assert against sva eval (sva/ENGINE.md § Tests)
 make sva-eval WAVES=work/x.fst SVA="pkg.sv checks.sva" SCOPE=tb.dut OUT=results.json   # assertions over any dump
+make fst WAVES=work/x.vcd     # sva fst: work/x.fst beside it, the FSM states of work/x.types.json in it
 make fmt lint               # verible-verilog-format (docs/SV_STYLE.md), verilator --lint-only -Wall on the testbenches
 make clean                  # the build products under BUILD; clean-all: BUILD entirely, the cargo target included
 ```
@@ -171,7 +174,11 @@ bit by bit, escaped and UTF-8 names, comments naming `$enddefinitions`, enum tab
 the generator wrote down (the enum table too), against the tools, and as a File in pieces of 1–64 bytes (the parser
 given pieces of as many characters), three of them cut in two at every byte;
 `tests/unit/types/contract.json` is what `svtypes.py` and the page's `svTypes` / `svApply` / `svFingerprint` must both
-give (`test_svtypes` Contract, smoke `readers`), and 200 generated types files and dumps hold the two side by side.
+give (`test_svtypes` Contract, smoke `readers`; `sva fst` too: `cli.rs` `fst_gives_the_enum_tables_the_twins_give`, a
+case's `ref` its `$var` as a VCD writes it), and 200 generated types files and dumps hold the two side by side.
+`test_svafst` holds `sva fst` to GTKWave's `vcd2fst`: 40 VCDs from a seed (widths 1 to 1000, x and z, reals, strings,
+aliases, small blocks) and every fixture, both FSTs read back by `fst2vcd` and `sva vcd`, the same variables and
+changes; the fixtures where `vcd2fst` writes another FST are listed with the reason (`DIFFERS`).
 `tests/unit/golden` keeps the bytes `wavejson.py` and `vcd2wavedrom.py` write (`make unit-bless`). `svaverify.py` does
 not let the comparison with Verilator shrink: only the assertions of an example's `unsupported` list may be put out,
 the simulation must reach `$finish`, every compared assertion must be evaluated (not capped, not vacuous only). The
@@ -196,6 +203,41 @@ GTKWave fst2vcd, cargo 1.98 (the engine needs Rust ≥ 1.82).
 
 SystemVerilog follows [SV_STYLE.md](SV_STYLE.md). Reformatting `tests/sva/*.sv` moves the line numbers in the golden
 files: `make sva-bless`, then the diff must show nothing but `line N`; the carets of `tests/sva/err_*.sv` move by hand.
+
+## CI on the local machine
+
+`.github/workflows/check.yml` runs the gate on GitHub's side of a push, but on the maintainer's machine: a
+[self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners) there, registered for this
+repository with the label `wavelens`, takes the job. It runs on every push to `master` (that is every release
+`tools/publish.py` wrote) and by hand (Actions → check → Run workflow): a fresh checkout of the public tree,
+`make clean` and `make check` in one `BUILD` kept beside the runner's work folder (the cargo target stays, so the
+engine builds incrementally), then `cargo clippy --all-targets -D warnings`. A failed run uploads `BUILD/smoke`,
+`BUILD/shots` and the shots' diffs as an artifact (7 days). The machine needs what `make check` needs (§ Build and
+test); the runner inherits the `PATH` of the shell that configured it. A push while the machine is off waits in the
+queue (GitHub keeps a job 24 hours) and runs when the runner is back. What the gate does not run: the VS Code
+extension's end-to-end test (`make vscode-e2e`: VS Code itself in a window, Convert to FST among its checks), run by
+hand before a release that changes `vscode/`.
+
+Once, in WSL (systemd on: `/etc/wsl.conf` `[boot] systemd=true`), on the Linux file system — the token from GitHub,
+repository → Settings → Actions → Runners → New self-hosted runner (it is valid one hour):
+
+```sh
+mkdir -p ~/actions-runner && cd ~/actions-runner
+curl -fsSLO https://github.com/actions/runner/releases/download/v2.338.1/actions-runner-linux-x64-2.338.1.tar.gz
+tar xzf actions-runner-linux-x64-2.338.1.tar.gz        # the sha256 is on the release page
+./config.sh --url https://github.com/vae-tech/wave_lens --token TOKEN --name "$(hostname)-wsl" --labels wavelens --unattended
+sudo ./svc.sh install "$USER" && sudo ./svc.sh start   # a systemd service: it starts with the distribution
+```
+
+`./run.sh` instead of the service runs it in a terminal for one session. After a change of the toolchain's paths,
+`./env.sh` in `~/actions-runner` and `sudo ./svc.sh stop && sudo ./svc.sh start`. To remove it: `sudo ./svc.sh
+uninstall`, then `./config.sh remove --token TOKEN` (a removal token from the same page).
+
+**Safety.** The repository is public and a self-hosted runner runs what a workflow tells it, as the runner's user.
+`check.yml` has no `pull_request` trigger, but a fork's pull request could bring a workflow of its own aimed at the
+label: keep Settings → Actions → General → *Approval for running fork pull request workflows from contributors* at
+**Require approval for all external contributors**, and approve nothing you have not read. WSL may stop the distribution
+some time after its last terminal closed; while it is down the jobs wait.
 
 ## Measured
 

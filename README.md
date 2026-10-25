@@ -85,6 +85,7 @@ and an agent live in the tab: [the VS Code guide](docs/guides/vscode.html).
 | open a page, or a VCD in `wavelens/viewer.html` | a browser from 2023 on (Chrome / Edge 111, Firefox 113, Safari 16.2) |
 | make pages from dumps (`tools/*.py`) | Python ≥ 3.8, standard library only |
 | read an FST with the tools | GTKWave's `fst2vcd`, or the `sva` CLI committed in `bin/linux-x86_64/` (static, any Linux x86-64; the tools find it) |
+| turn a VCD into an FST (FSM states kept) | the `sva` CLI: `sva fst tb.vcd` writes `tb.fst`; in VS Code *Convert to FST* on a `.vcd` |
 | check assertions from the tools or in CI (`mkhtml.py --sva`, `mkconfig.py --sva`, `sva eval`) | the `sva` CLI: `bin/linux-x86_64/sva`; on Windows `make dist-windows` builds it (mingw-w64). Without it a page still evaluates its assertions in the browser |
 | build the examples | Make and Verilator ≥ 5 |
 | state names on a VCD from the design's types | Questa (`tools/questa/wavelens_types.tcl` in `vsim`) or Verilator ≥ 5 (`tools/svtypes.py verilator`) |

@@ -401,6 +401,14 @@ not one attempt per cycle. Paths are linked lists of steps in an arena; a path t
   500 MB of that run are its results (39 900 capped attempts, 2.8 M trace steps), which stage 9.6's compact results
   address.
 - **Covers** count every attempt that matches non-vacuously (`cover property`), or every match (`cover sequence`).
+- **`sva fst`: an FST writer of our own** (`sva/cli/src/fst.rs`, review 2026-10-25 CD1), not the fst-writer crate (no
+  attributes: no enum tables) nor fstapi.c through C (a C toolchain for the Windows build): the blocks as fstapi lays
+  them out, about 1 400 lines. Measured against `vcd2fst` on the same dumps: 2.42 s against 2.22 s, 94 MB against
+  149 MB at most, an FST of the same size (a few hundred MB of VCD); 0.36 s and 13 MB against 0.48 s and 36 MB on
+  `work/`'s 24 MB dump. What keeps it right: every fixture through `fst2vcd` and `sva vcd` (`tests/unit`), the header
+  fields, blocks and aliases across them through `fst2vcd` (`sva/cli/tests/cli.rs`, required under make check). Its
+  lookup of the types file is the fourth twin of `tools/svtypes.py`: `tests/unit/types/contract.json` holds the cases
+  all of them give (`cli.rs` `fst_gives_the_enum_tables_the_twins_give`: which `$var` gets which table).
 
 ## Performance (October 2026, this machine: WSL2, 16 CPUs)
 

@@ -374,6 +374,21 @@
 .wv .wv-menu .mi.gp input.bad { outline: 2px solid var(--wave-x); outline-offset: -1px; }
 .wv .wv-menu .mi input.qf { width: 4.5em; margin-left: 4px; padding: 0 3px; color: var(--fg); cursor: text; }   /* fixed point: fraction bits */
 .wv .wv-menu .mh { padding: 4px 10px 2px; font: 600 11px var(--font-mono); color: var(--muted); overflow-wrap: anywhere; }
+/* gm: the markers and bookmarks to step through (the one picked: .on) */
+.wv .wv-marks { min-width: 280px; max-width: min(460px, 90vw); max-height: min(60vh, 420px); overflow-y: auto; }
+.wv .wv-marks:focus { outline: none; }
+.wv .wv-marks button span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wv .wv-marks button b { font: 600 11.5px var(--font-mono); margin-right: 6px; }
+.wv .wv-marks button .kk { white-space: nowrap; flex: none; }
+.wv .wv-marks button.on { background: var(--accent-soft); outline: 1px solid var(--accent); outline-offset: -1px; }
+/* a text asked over the waves (the right button's Bookmark here / Marker here): Enter adds it, Esc cancels */
+.wv .wv-ask { width: 300px; gap: 6px; padding: 6px 8px 8px; }
+.wv .wv-ask .mh { padding: 2px 2px 0; }
+.wv .wv-ask input { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel-2); color: var(--fg); }
+.wv .wv-ask input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.wv .wv-ask .ak { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 11px; }
+.wv .wv-ask .ak button { all: unset; padding: 2px 10px; border: 1px solid var(--line); border-radius: 4px; cursor: pointer; color: var(--fg); }
+.wv .wv-ask .ak button:hover { border-color: var(--accent); color: var(--accent); }
 .wv .wv-menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 2px; }
 /* tooltips of the controls (what it does, its keys) and the help box (? in the bar) */
 .wv .wv-tip { position: fixed; z-index: 60; max-width: 340px; padding: 5px 8px; border-radius: 5px; background: var(--fg); color: var(--panel); font: 12px/1.35 var(--font-body);
@@ -478,6 +493,9 @@
 .wv .wv-fsms .fst tr[data-k], .wv .wv-fsms .fst tr[data-f] { cursor: pointer; }
 .wv .wv-fsms .fst tr[data-k]:hover td, .wv .wv-fsms .fst tr[data-f]:hover td { background: var(--panel-2); }
 .wv .wv-fsms .fst td.fi { text-decoration: underline dotted; }
+.wv .wv-fsms .fst tr.fk td { background: var(--accent-soft); }   /* the row with the keys (↑ ↓, Enter) */
+.wv .wv-fsms .fst tr:focus { outline: none; } .wv .wv-fsms .fst tr:focus-visible td { box-shadow: inset 0 1px var(--accent), inset 0 -1px var(--accent); }
+.wv .wv-fsms .fdb:focus { outline: none; }
 .wv .wv-fsms .fst tr.never td { color: var(--muted); font-style: italic; }
 .wv .wv-fsms .fst tr.bad td { color: var(--wave-x); }
 .wv .wv-fsms .fst tr.now td:first-child { color: var(--accent); font-weight: 700; }

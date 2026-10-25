@@ -3,7 +3,7 @@
 says so), standard library only: the PNGs playwright writes (8-bit RGB / RGBA, not interlaced) read with zlib.
 
 A pixel differs when one of its channels moves by more than --tol (default 32 of 255: anti-aliasing of another
-machine's fonts stays under it); a picture differs when more than --max pixels do (default 48: fewer than a changed
+machine's fonts stays under it) from the pixel there and from the 8 around it (text placed a pixel off is the same); a picture differs when more than --max pixels do (default 48: fewer than a changed
 letter; a share of the picture would let a word through in a big one) or its size is another. For each one that
 differs a picture of the difference (the new one faded, the pixels that moved in red) goes to --diff. A picture made
 (in GOT) that is not in WANT fails too: a shot added and not committed.
@@ -71,14 +71,19 @@ def compare(want, got, tol=32, diff=None):
     if (w1, h1) != (w2, h2):
         return w2 * h2, w2 * h2, f'{w1}x{h1} -> {w2}x{h2}'
     n, out = 0, []
-    for ra, rb in zip(a, b):
+    near = lambda r, i, q: max(abs(r[i] - q[0]), abs(r[i + 1] - q[1]), abs(r[i + 2] - q[2])) <= tol
+    for y, (ra, rb) in enumerate(zip(a, b)):
         if ra == rb:
             if diff:
                 out.append(bytes(200 + x // 5 for x in rb))
             continue
         line = bytearray()
         for i in range(0, len(rb), 3):
-            moved = max(abs(ra[i] - rb[i]), abs(ra[i + 1] - rb[i + 1]), abs(ra[i + 2] - rb[i + 2])) > tol
+            q = rb[i:i + 3]
+            # a pixel moved when the old picture has none like it there or one pixel around (a glyph a pixel up or down,
+            # as Chromium places the text of a <select> now and then, is the same picture; a changed word is not)
+            moved = not near(ra, i, q) and not any(near(a[yy], ii, q) for yy in (y - 1, y, y + 1) if 0 <= yy < h1
+                                                    for ii in (i - 3, i, i + 3) if 0 <= ii < len(ra))
             n += moved
             line += b'\xff\x00\x00' if moved else bytes(200 + x // 5 for x in rb[i:i + 3])
         out.append(bytes(line))
