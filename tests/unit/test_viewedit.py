@@ -108,6 +108,43 @@ class Commands(unittest.TestCase):
         self.run_ok(e, {'op': 'bookmark', 'n': 'all', 'delete': True})
         self.assertEqual((e.st['bookmarks'], e.st['arrows']), ([], []))
 
+    def test_label_lift_below_spans(self):
+        e = ed()
+        self.run_ok(e, {'op': 'bookmark', 'n': 1, 'label': 'ok', 'lift': 'below'}, {'op': 'bookmark', 't': '40ns', 'lift': 'below'},
+                    {'op': 'span', 'from': '50ns', 'to': '20ns', 'label': 'A', 'color': 'c7'}, {'op': 'span', 'from': 0, 'to': 10000, 'signals': 'valid'},
+                    {'op': 'span', 'id': 1, 'label': 'phase'})
+        self.assertEqual(e.st['bookmarks'][0], {'n': 1, 't': 20000, 'signal': 'tb.dut.valid', 'label': 'ok', 'text': 'page own', 'lift': 'below'})
+        self.assertNotIn('lift', e.st['bookmarks'][1])   # no signal: on the axis, not lifted
+        self.assertEqual(e.st['spans'], [{'from': 20000, 'to': 50000, 'label': 'phase', 'color': 'c7'}, {'from': 0, 'to': 10000, 'signals': ['tb.dut.valid']}])
+        bad = e.run([{'op': 'bookmark', 'n': 1, 'lift': 'up'}, {'op': 'span', 'from': 1}, {'op': 'span', 'id': 9, 'label': 'x'}, {'op': 'span', 'id': 'all'}])
+        self.assertEqual([r['error'] for r in bad], ['lift: true, "above", "below" or false, not "up"', 'span: from and to', 'no span 9 (there are 2)',
+                                                     'span: id "all" is for delete (a new one: no id)'])
+        self.run_ok(e, {'op': 'span', 'id': 'all', 'delete': True})
+        self.assertEqual(e.st['spans'], [])
+        # an old bookmark with "to": its label is the arrow's, not the bookmark's
+        self.assertEqual([b['label'] for b in V.bm_norm([{'n': 1, 't': 1, 'to': 2, 'label': 'Δ'}, {'n': 2, 't': 2, 'label': 'mine'}])], ['', 'mine'])
+        self.assertEqual(V.ar_norm([], [{'n': 1, 't': 1, 'to': 2, 'label': 'Δ'}])[0]['label'], 'Δ')
+        self.assertEqual(V.span_norm([{'from': '5ns', 'to': 1000, 'signals': 'x'}, {'from': 'x', 'to': 1}, 3]), [{'from': 1000, 'to': 5000, 'label': '',
+                                                                                                           'color': None, 'signals': ['x']}])
+
+    def test_link(self):
+        e = ed()
+        self.run_ok(e, {'op': 'bookmark', 'n': 1, 'link': 'crc'}, {'op': 'bookmark', 't': 1, 'link': {'view': 'gap', 'bookmark': '2'}})
+        self.assertEqual([b.get('link') for b in e.st['bookmarks']], [{'view': 'crc'}, {'view': 'gap', 'bookmark': 2}])
+        self.assertIn('link: a view', e.run([{'op': 'bookmark', 'n': 1, 'link': 5}])[0]['error'])
+        self.run_ok(e, {'op': 'bookmark', 'n': 1, 'link': None})
+        self.assertNotIn('link', e.st['bookmarks'][0])
+
+    def test_bookmark_at_kept_until_moved(self):
+        # "at": the event a bookmark's time came from (mkhtml.py): kept by the other edits, dropped when its time moves
+        doc = {**DOC, 'bookmarks': [{'n': 1, 't': 20000, 'at': {'signal': 'valid', 'edge': 'rise'}, 'signal': 'tb.dut.valid'}]}
+        e = ed(doc=doc)
+        self.run_ok(e, {'op': 'bookmark', 'n': 1, 'text': 'rise', 'color': '#0a0'})
+        self.assertEqual(e.st['bookmarks'][0]['at'], {'signal': 'valid', 'edge': 'rise'})
+        self.run_ok(e, {'op': 'bookmark', 'n': 1, 't': '30ns'})
+        self.assertNotIn('at', e.st['bookmarks'][0])
+        self.assertEqual(V.bm_norm([{'n': 1, 't': 5, 'at': 5}])[0].get('at'), None)   # an event is a text or an object
+
     def test_markers_groups(self):
         e = ed()
         self.run_ok(e, {'op': 'marker', 't': '10ns', 'label': 'a'}, {'op': 'marker', 't': '30ns'}, {'op': 'marker', 'id': 2, 'label': 'b', 'color': 'red'},
@@ -415,6 +452,54 @@ class Pages(unittest.TestCase):
         rc, _, err = H.run_tool('viewedit', old, '--get')
         self.assertNotEqual(rc, 0)
         self.assertIn('before the rename to WaveLens', err)
+
+
+class Config(unittest.TestCase):
+    """bookmark, arrow and span on a view of a config (mkhtml.py's): written into its "views", a rebuild keeps them."""
+    CFG = {'waves': H.fixture('names'), 'clock': 'tb.clk', 'signals': 'tb.clk,tb.dut.state', 'note_key': 1,
+           'bookmarks': [{'n': 1, 't': '5ns', 'signal': 'tb.clk', 'text': 'top level'}],
+           'views': {'a': {'from': '0ns'}, 'b': {'bookmarks': [{'n': 1, 'at': 'posedge tb.clk', 'text': 'first edge'}]}}}
+
+    def test_edits_written_and_built(self):
+        with H.tmp() as d:
+            c = os.path.join(d, 'c.config.json')
+            cfg = {k: v for k, v in self.CFG.items() if k != 'note_key'}
+            json.dump(cfg, open(c, 'w'), indent=2)
+            ops = [{'op': 'bookmark', 'n': 1, 'text': 'the first edge', 'label': 'go'}, {'op': 'bookmark', 't': '25ns', 'signal': 'tb.dut.state'},
+                   {'op': 'arrow', 'from': 1, 'to': 2, 'label': '{dt}'}, {'op': 'span', 'from': {'bookmark': 1}, 'to': {'bookmark': 2}, 'label': 'x'}]
+            res, view, changed = V.edit_config(c, ops, 'b')
+            self.assertEqual((view, changed), ('b', ['views.b.bookmarks', 'views.b.arrows', 'views.b.spans']))
+            got = json.load(open(c))
+            self.assertEqual(got['views']['b']['bookmarks'][0], {'n': 1, 'at': 'posedge tb.clk', 'text': 'the first edge', 'label': 'go'})   # its event kept
+            self.assertEqual(got['views']['a'], {'from': '0ns'})   # the other view as it was
+            self.assertEqual(list(got), list(cfg))
+            res, _, changed = V.edit_config(c, [{'op': 'bookmark', 'n': 1, 't': '15ns'}], 'b')   # a t replaces the event
+            self.assertNotIn('at', json.load(open(c))['views']['b']['bookmarks'][0])
+            res, _, changed = V.edit_config(c, [{'op': 'bookmark', 'n': 3, 't': '5ns'}, {'op': 'marker', 't': 1}], 'a')
+            self.assertEqual(changed, [])   # a bad command: nothing written
+            self.assertIn('a config\'s markers are events', res[1]['error'])
+            self.assertNotIn('bookmarks', json.load(open(c))['views']['a'])
+            V.edit_config(c, [{'op': 'bookmark', 'n': 2, 't': '15ns', 'text': 'mine'}], 'a')   # the top level's become the view's own
+            self.assertEqual([b['n'] for b in json.load(open(c))['views']['a']['bookmarks']], [1, 2])
+            for _ in range(2):   # built, and built again: the marks are the config's
+                out = os.path.join(d, 'p.html')
+                rc, _, err = H.run_tool('mkhtml', '--config', c, '--out', out, '--no-sva', '--reproducible')
+                self.assertEqual(rc, 0, err)
+                waves = json.loads(re.search(r'window\.WAVES = (\{.*?\n\});', open(out, encoding='utf-8').read(), re.S).group(1))
+                self.assertEqual(waves['b']['bookmarks'][1]['t'], '25ns')   # as written (the page reads it)
+                self.assertEqual(waves['b']['spans'], [{'label': 'x', 'from': 15000, 'to': 25000}])
+                self.assertEqual(waves['a']['bookmarks'][1]['text'], 'mine')
+
+    def test_mcp_view_edit_config(self):
+        import wavemcp
+        with H.tmp() as d:
+            c = os.path.join(d, 'c.config.json')
+            json.dump({k: v for k, v in self.CFG.items() if k != 'note_key'}, open(c, 'w'))
+            text, err = wavemcp.call('view_edit', {'config': c, 'view': 'b', 'ops': [{'op': 'bookmark', 't': 35, 'text': 'ns from the agent'}]})
+            self.assertFalse(err, text)
+            self.assertEqual(json.load(open(c))['views']['b']['bookmarks'][1]['t'], '35ns')   # its ns as a time with a unit
+            text, err = wavemcp.call('view_edit', {'config': c, 'page': c, 'ops': [{'op': 'bookmark', 't': 1}]})
+            self.assertTrue(err)
 
 
 if __name__ == '__main__':

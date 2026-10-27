@@ -5,6 +5,12 @@
   mkhtml.py --config cfg.json --view exact --waves other.vcd ...  # some views only, another dump
   mkhtml.py cyc=cyc.json exact=exact.json --settings cfg.json --out page.html   # from WaveJSON files
   mkhtml.py --config x.config.json --sva checks.sv --bind a_req_ack@tb.dut --out x.html   # assertions bound (make html SVA= BIND=)
+  mkhtml.py --config x.config.json --lint [--strict]       # the warnings of every view, no page (--strict: exit 1 on one)
+
+Lint (printed at every build, "mkhtml: lint: <code>: <JSON path>: <text>"; docs/USAGE.md "Lint"): bookmark-outside-view,
+bookmark-signal-missing, bookmark-duplicate, bookmark-time, bookmark-key, bookmark-link-missing, arrow-end-missing, arrow-key, marker-no-match,
+marker-key, bind-unknown, svashow-no-match, bookmarks-close (a heuristic), enum-colors-hex, span-outside-view,
+span-signal-missing, span-key.
 
 Config keys used here (the rest is vcd2wavedrom.py's, see its --help):
   "config"  global wavelens settings for the page: theme, colors, rowHeight, nameWidth, fontSize, sort, sortIgnore, …
@@ -16,6 +22,9 @@ Config keys used here (the rest is vcd2wavedrom.py's, see its --help):
   "bind"    [{"assert": "a_req_ack", "scope": "tb.dut"}] (top level: every view; or in a view) evaluated over the
             dump with sva eval, so the page opens with them bound (docs/USAGE.md "Assertions"); the page also gets a printable
             "Assertions" section: the bindings over the whole dump (totals, one row per assertion, the failures)
+  "report"  {"bind": [{"assert": "*", "scope": "tb.dut"}]} (or the list alone; top level) bindings for that printable section
+            only: evaluated over the whole dump with the top-level "sva", drawn in no view (a view's own "bind" is drawn and
+            reported); false: no printable section. --report NAME@SCOPE (repeatable)
 """
 import argparse, datetime, html, json, os, sys
 
@@ -147,6 +156,7 @@ def build_views(a, cfg, base):
                 vcfg.pop('sva')
             o = vcd2wavedrom.resolve(vcd2wavedrom.parser().parse_args(argv), vcfg, base)
             o.sva_prefixes = vcfg['config'].get('sortIgnore', (cfg.get('config') or {}).get('sortIgnore'))   # the page's, for the names
+            o.lint_at, o.prog, o.views_known = f'views.{key}' if key else None, 'mkhtml', list(views)   # (a bookmark's link: one of them)
             if a.no_sva:   # no engine in the page: nothing to evaluate either
                 o.sva, o.bind = [], []
             name = key or 'wave'
@@ -154,6 +164,7 @@ def build_views(a, cfg, base):
                 sva_views.append((name, o))
             print(f'mkhtml: view {name}: {o.waves} ({"clock " + o.clock if o.clock else "exact"})', file=sys.stderr)
             docs[name] = vcd2wavedrom.convert(o)
+            a.lint_count = getattr(a, 'lint_count', 0) + len(o.lint)
             renders[name] = (a.render or own.get('render') or cfg.get('render') or 'view', own.get('note'))
     for spec in a.files:
         key, _, path = spec.rpartition('=')
@@ -180,6 +191,29 @@ def collect_sva(a, cfg, docs):
         if not x.get('bind'):
             del d['sva']
     return with_sva, sva_files, sva_notes
+
+
+def report_binds(a, cfg):
+    """The top-level "report" ({"bind": [...]} or a list of bindings; --report): bindings for the printable section only,
+    evaluated over the whole dump with the top-level "sva" files, in no view -> (None, options) or None."""
+    rep = cfg.get('report')
+    if not rep:
+        return None
+    binds = rep.get('bind') if isinstance(rep, dict) else rep
+    if isinstance(rep, dict) and set(rep) - {'bind'}:
+        raise WaveError(f'mkhtml: "report": unknown key(s) {", ".join(sorted(set(rep) - {"bind"}))} (have: bind)')
+    binds = svabuild.bind_list(binds)
+    sva = cfg.get('sva')
+    if not sva or not isinstance(sva, (list, str)):
+        raise WaveError('mkhtml: "report" needs the assertion files: a top-level "sva" (or --sva)')
+    base = os.path.dirname(os.path.abspath(a.config or a.settings or '.'))
+    waves = a.waves or (cfg.get('waves') and os.path.join(base, os.path.expanduser(cfg['waves'])))   # as a view's (vcd2wavedrom.resolve)
+    if not waves:
+        raise WaveError('mkhtml: "report" needs the dump: a top-level "waves" (or --waves)')
+    pfx = (cfg.get('config') or {}).get('sortIgnore')
+    o = argparse.Namespace(sva=[(os.path.join(base, os.path.expanduser(x)), x) for x in ([sva] if isinstance(sva, str) else sva)], bind=binds,
+                           waves=waves, sva_prefixes=[pfx] if isinstance(pfx, str) else pfx)
+    return None, o
 
 
 def render_page(a, cfg, docs, renders, sva_views, with_sva, sva_files, sva_notes):
@@ -219,14 +253,19 @@ def render_page(a, cfg, docs, renders, sva_views, with_sva, sva_files, sva_notes
         for d in docs.values():
             d.pop('sva', None)
     report = ''
-    if sva_views:   # the printable section: every binding of every view over the whole dump, each once
+    extra = report_binds(a, cfg) if with_sva and cfg.get('report') is not False else None
+    if cfg.get('report') is False:   # a page without the printable section
+        sva_views = []
+    if sva_views or extra:   # the printable section: every binding of every view, and of "report", over the whole dump, each once
         results, seen, dumps = [], set(), []
-        for name, o in sva_views:
-            if o.t_from or o.t_to:   # a window: the bindings again over the whole dump, with the view's files and names
+        for name, o in sva_views + ([extra] if extra else []):
+            if name is None:   # "report": evaluated over the whole dump, in no view
+                rs = svabuild.whole(o.sva, o.bind, o.waves, a.sva_bin, o.sva_prefixes)
+            elif o.t_from or o.t_to:   # a window: the bindings again over the whole dump, with the view's files and names
                 pfx = o.sva_prefixes
                 rs = svabuild.whole(o.sva, o.bind, o.waves, a.sva_bin, [pfx] if isinstance(pfx, str) else pfx, getattr(o, 'sva_aliases', None))
             else:   # the view's own results are the whole dump's
-                rs = [b['results'] for b in (docs[name].get('sva') or {}).get('bind', []) if b.get('results')]
+                rs = [b['results'] for b in svabuild.inflate(docs[name].get('sva')) if b.get('results')]
             for r in rs:
                 x = r['assertions'][0]
                 if (x['name'], x.get('scope') or '', o.waves) not in seen:
@@ -266,13 +305,20 @@ def main():
     add_sva_bin_arg(ap)
     ap.add_argument('--sva', action='append', metavar='FILE', help='assertion file for every view (repeatable; replaces the config\'s top-level "sva")')
     ap.add_argument('--bind', action='append', metavar='NAME@SCOPE', help='binding for every view (repeatable, NAME may be a pattern; replaces the top-level "bind")')
+    ap.add_argument('--report', action='append', metavar='NAME@SCOPE', help='binding for the printable "Assertions" section only, over the whole '
+                    'dump, in no view (repeatable, NAME may be a pattern; replaces the top-level "report")')
     ap.add_argument('--no-sva', action='store_true', help='leave the assertion engine (wavelens/sva.js + sva.wasm.js, ~410 kB) out of the page, and evaluate nothing')
     ap.add_argument('--reproducible', action='store_true', help='no "Generated" time in the page: the same inputs give the same bytes '
                     '(or set SOURCE_DATE_EPOCH: that time, in UTC)')
-    ap.add_argument('--out', required=True, help='output .html')
+    ap.add_argument('--lint', action='store_true', help='check the config: the views are converted and their warnings printed '
+                    '(they are printed at every build too); without --out no page is written')
+    ap.add_argument('--strict', action='store_true', help='a lint warning is an error (exit 1, no page)')
+    ap.add_argument('--out', help='output .html (required unless --lint)')
     a = ap.parse_args()
     if not a.config and not a.files:
         ap.error('need --config or WaveJSON files')
+    if not a.out and not a.lint:
+        ap.error('need --out (or --lint: the check alone)')
 
     cfg = vcd2wavedrom.load_config(a.config or a.settings) if (a.config or a.settings) else {}
     check_config(cfg.get('config'), f'mkhtml: {a.config or a.settings}: "config"')
@@ -281,7 +327,16 @@ def main():
         cfg['sva'] = [os.path.abspath(f) for f in a.sva]
     if a.bind:
         cfg['bind'] = a.bind
+    if a.report:
+        cfg['report'] = {'bind': a.report}
     docs, renders, sva_views = build_views(a, cfg, base)
+    n = getattr(a, 'lint_count', 0)
+    if a.lint or a.strict:
+        print(f'mkhtml: lint: {n} warning{"s" if n != 1 else ""}' + (' (--strict: no page)' if n and a.strict and a.out else ''), file=sys.stderr)
+    if n and a.strict:
+        sys.exit(1)
+    if not a.out:   # --lint alone: the check, no page
+        return
     with_sva, sva_files, sva_notes = collect_sva(a, cfg, docs)
     render_page(a, cfg, docs, renders, sva_views, with_sva, sva_files, sva_notes)
 

@@ -3,8 +3,13 @@
 #
 #   vsim -voptargs=+acc work.tb                       (+acc: the signals stay visible, as for the VCD itself)
 #   source /path/to/wavelens/tools/questa/wavelens_types.tcl
-#   wavelens_types tb.types.json                      (any time after the design is loaded: before or after run)
+#   wavelens_types tb.types.json                      (after the design is loaded, BEFORE run: in a batch vsim the test's
+#                                                       $finish ends vsim unless -onfinish stop, and what comes after
+#                                                       run -all is not run: no types file)
 #   wavelens_types tb.types.json /tb/u_dut            (only under that instance)
+#   wavelens_vcd tb.vcd /tb/u_dut                     (the VCD of the signals under an instance, default /*: vcd file +
+#                                                       vcd add -r; or $dumpfile / $dumpvars in the testbench)
+#   run -all
 #   vsim -c -view old.wlf, then source it and: wavelens_types old.types.json old:/tb   (a saved WLF, its dataset
 #                                                       named after the file: no simulation needed)
 #
@@ -80,4 +85,15 @@ proc wavelens_types {file {root /*}} {
     puts $fh "\}"
     close $fh
     puts "wavelens_types: $n signals, [llength $rows] instances -> $file"
+}
+
+# The VCD of every signal under root (default /*): vcd file + vcd add -r. Call it before run, as wavelens_types; a
+# testbench with its own $dumpfile / $dumpvars needs neither.
+proc wavelens_vcd {file {root /*}} {
+    vcd file $file
+    if {[string range $root end-1 end] ne "/*"} {
+        set root "[string trimright $root /]/*"
+    }
+    vcd add -r $root
+    puts "wavelens_vcd: $root -> $file"
 }

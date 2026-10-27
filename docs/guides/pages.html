@@ -59,7 +59,11 @@ static SVG).</figcaption></figure>
 <ul>
 <li>One section per view of the config, each a viewer, a static SVG or both. Scopes are foldable groups.</li>
 <li>With assertions (<code>"sva"</code> and <code>"bind"</code>): the assertions panel in every viewer and, at the end, a printable
-  <b>Assertions</b> section with the results over the whole dump.</li>
+  <b>Assertions</b> section with the results over the whole dump. <code>"report": {"bind": [{"assert": "*", "scope": "tb.dut"}]}</code>
+  puts bindings into that section only, drawn in no view: the full report of a page whose views each draw a few.</li>
+<li>Warnings for what would not show (<code>mkhtml: lint: …</code>): a bookmark outside its view's window or on no row of it, an arrow
+  to no bookmark, a binding to no assertion, two circles on top of each other. <code>mkhtml.py --lint</code> checks without a page,
+  <code>--strict</code> fails on one.</li>
 <li>Everything inline but the fonts: the page asks Google Fonts for IBM Plex Sans and Mono; offline it uses a local IBM Plex
   (Debian / Ubuntu: <code>fonts-ibm-plex</code>), else <code>Segoe UI</code> / <code>system-ui</code> and the system monospace. It works
   the same, only the letters differ.</li>
@@ -138,7 +142,8 @@ key and adds its own. The APB example's config, written by hand:</p>
       "bookmarks": [
         { "n": 1, "t": "50ns", "signal": "PSEL", "text": "SETUP: PSEL high, PADDR / PWRITE / PWDATA valid for the whole transfer" },
         { "n": 2, "t": "60ns", "signal": "PENABLE", "text": "ACCESS: PENABLE high; PREADY high ends the write in this cycle" }, …
-      ],
+        { "n": 6, "at": "posedge PSLVERR", "signal": "PSLVERR", "text": "PSLVERR with PREADY: the transfer failed" }
+      ],                                                       <span class="c">// "at": the time found in the dump</span>
       "arrows": [ { "from": 1, "to": 2, "shape": "-|-", "label": "setup → access" }, … ]
     },
     "write": {
@@ -150,7 +155,7 @@ key and adds its own. The APB example's config, written by hand:</p>
     "exact": {
       "exact": true, "from": "0ns", "to": "205ns",             <span class="c">// every transition at its time</span>
       "signals": ["PCLK", "PRESETn", "phase", "PSEL", "PENABLE", "PWRITE", "PADDR", "PWDATA", "PRDATA", "PREADY", "PSLVERR", "done", "err", "rdata"],
-      "marker": ["posedge done=done", "posedge PSLVERR=error"],
+      "marker": ["posedge done=done", { "on": { "signal": "PSLVERR", "edge": "rise" }, "label": "error" }],
       "title": "APB3 · the whole run · exact transitions"
     }
   }
@@ -164,9 +169,18 @@ key and adds its own. The APB example's config, written by hand:</p>
 <tr><td><code>clock</code> / <code>exact</code></td><td>one cell per clock cycle (plain WaveDrom, the value after the edge) / every
   transition at its time (<a href="wavedrom.html#from-a-dump">WaveDrom guide</a>)</td></tr>
 <tr><td><code>group</code>, <code>hierarchy</code></td><td>named groups <code>{"aw": ["AWVALID", …]}</code>; or every scope a group</td></tr>
-<tr><td><code>marker</code></td><td><code>"posedge done=done"</code>: dashed markers, the <span class="ui">go to</span> buttons</td></tr>
+<tr><td><code>marker</code></td><td><code>"posedge done=done"</code>: dashed markers, the <span class="ui">go to</span> buttons;
+  <code>{"on": EVENT, "label"}</code> at every match of an event (below)</td></tr>
 <tr><td><code>bookmarks</code>, <code>arrows</code></td><td>numbered notes and arrows (the viewer's <span class="ui">JSON</span> button writes
-  them for you)</td></tr>
+  them for you). A bookmark's <code>"at"</code> instead of <code>"t"</code> is an event whose time the build finds in the dump, so a
+  changed test moves it along: <code>"posedge X"</code>, <code>{"signal": "state", "value": "ERROR"}</code> (a label, a number,
+  <code>'h40</code>), <code>{"signal", "edge": "rise"}</code>, <code>{"expr": "eof &amp;&amp; err[1]", "clock"}</code> (an SV expression
+  sampled on the clock), <code>{"assert": "a_x", "result": "fail"}</code> (an attempt of a binding); <code>"nth"</code>,
+  <code>"from"</code>, <code>"to"</code> pick the match. No match is an error that names the bookmark. <code>"label"</code>: a short text by
+  the circle; <code>"lift": "below"</code>: in a lane under its signal. An arrow's <code>"label"</code> takes <code>{dt}</code>,
+  <code>{cycles}</code>, <code>{cycles:PCLK}</code>.</td></tr>
+<tr><td><code>spans</code></td><td><code>[{"from": "45ns", "to": {"signal": "PREADY", "edge": "fall"}, "label": "write", "color": "c7"}]</code>:
+  coloured stretches of time over every row (or <code>"signals"</code>); an end is a time, an event, or <code>{"bookmark": n}</code></td></tr>
 <tr><td><code>render</code></td><td><code>view</code> (default), <code>svg</code> (a static figure), <code>both</code></td></tr>
 <tr><td><code>title</code>, <code>note</code></td><td>the section heading and the line under it</td></tr>
 <tr><td><code>config</code></td><td>settings of this view only (layer 3 below)</td></tr>
@@ -325,7 +339,7 @@ config <code>mkconfig.py</code> makes from the dump (the whole hierarchy). <code
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.27 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live
+<footer>WaveLens 0.28 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live
 reference: <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

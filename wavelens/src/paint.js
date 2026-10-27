@@ -341,6 +341,20 @@ function paintGapLine(P, xm, y0, y1, style) {
   if (style === 'wave') return P.path(wavy(xm, 2, 6), { stroke: 'muted', w: 0.9, dash: [5, 2, 1.5, 2] });
   return P.path([['M', xm, y0], ['L', xm, y1]], { stroke: 'muted', w: 0.9, dash: [6, 2, 1.5, 2] });
 }
+// coloured stretches of time (spans): from y0 to y1 over every row, or the rows of "signals" (lay: [{row, y, h}]), their
+// label at the top left over the first of them
+function paintSpans(P, spans, X, tA, tB, lay, y0, y1) {
+  for (const s of spans || []) {
+    if (s.to < tA || s.from > tB) continue;
+    const xa = X(Math.max(s.from, tA)), xb = X(Math.min(s.to, tB)), c = s.color || 'acc';
+    const has = r => s.signals.includes(r.full) || s.signals.includes(r.name);
+    const on = s.signals && s.signals.length ? lay.filter(o => o.row.type === 'sig' && has(o.row)) : null;
+    const bands = on ? on.map(o => [o.y, o.h]) : [[y0, y1 - y0]];
+    for (const [y, h] of bands) { P.rect(xa, y, Math.max(1, xb - xa), h, c, 0.2); P.rect(xa, y, Math.max(1, xb - xa), 2, c, 0.9); }   // a bar on its top
+    if (s.label && bands.length && s.from >= tA) { const y = bands[0][0], w = P.measure(s.label, { size: 10, weight: 600 });   // the text: the theme's
+      P.rect(xa + 1, y + 3, w + 6, 13, 'panel', 0.9); P.text(xa + 4, y + 9.5, s.label, { size: 10, weight: 600, fill: 'fg' }); }
+  }
+}
 function paintMarkers(P, markers, X, tA, tB, y0, y1) {
   for (const m of markers) {
     if (m.t < tA || m.t > tB) continue;
@@ -368,13 +382,14 @@ function arrowLanes(rows, bms, arrows) {
     if (!lanes.has(at)) lanes.set(at, []);
     lanes.get(at).push(i);
   });
-  for (const b of bms) {
-    const r = b.lift ? rowOf(b.n) : -1, id = 'b:' + b.signal; if (r < 0) continue;
-    if (!lanes.has(r - 1)) lanes.set(r - 1, []);
-    if (!lanes.get(r - 1).includes(id)) lanes.get(r - 1).push(id);
+  for (const b of bms) {   // "below": the lane under its row ("b:" + path + ":below"), the nearest to it
+    const r = b.lift ? rowOf(b.n) : -1, below = b.lift === 'below', id = laneId(b), at = below ? r : r - 1; if (r < 0) continue;
+    if (!lanes.has(at)) lanes.set(at, []);
+    const l = lanes.get(at); if (!l.includes(id)) { if (below) l.unshift(id); else l.push(id); }
   }
   return lanes;
 }
+const laneId = b => 'b:' + b.signal + (b.lift === 'below' ? ':below' : '');   // the lane of a lifted bookmark
 function withLanes(rows, lanes) { // rows with {type: 'lane', ids: [arrow index]} rows spliced in
   const out = [], lane = i => { if (lanes.has(i)) out.push({ type: 'lane', ids: lanes.get(i), name: '', depth: 0, anc: [] }); };
   lane(-1); rows.forEach((r, i) => { out.push(r); lane(i); });
@@ -393,7 +408,8 @@ function bands(rows) {
 // What the viewer and the static SVG both draw from the rows in display order: the rows with the arrow-label lanes,
 // the module bands and the highlight state (picks: Map(row -> colour), all: the rows the highlight covers).
 function compose(M, S, rows, bms, arrows, picks, all) {
-  const lanes = S.arrowLabels === 'lane' ? arrowLanes(rows, bms || [], arrows || []) : new Map(), out = withLanes(rows, lanes);
+  // the lifted bookmarks' lanes always; the arrows' labels in lanes only with arrowLabels "lane" (else on the arrows)
+  const lanes = arrowLanes(rows, bms || [], S.arrowLabels === 'lane' ? arrows || [] : []), out = withLanes(rows, lanes);
   return { rows: out, lanes, band: S.moduleShading && Object.keys(M.groups).length ? bands(out) : null, hl: hlState(M, picks, S.dim, all || out) };
 }
 // rows -> [{row, y, h}] from y down (rh: the height of a sig / group / space row, laneH: of one arrow label); .H: the end
@@ -406,19 +422,32 @@ function layoutRows(rows, rh, laneH, y = 0) {
   lay.H = y; return lay;
 }
 // the bookmarks and arrows as far as the lanes depend on them: the lanes are worked out again only when this changes
-const laneKey = (bms, arrows) => JSON.stringify([(bms || []).map(b => [b.n, b.signal, !!b.lift]), (arrows || []).map(a => [a.from, a.to, !!a.label])]);
+const laneKey = (bms, arrows) => JSON.stringify([(bms || []).map(b => [b.n, b.signal, b.lift || false]), (arrows || []).map(a => [a.from, a.to, !!a.label])]);
 const laneY = (lay, h) => { const m = new Map(); for (const o of lay) if (o.row.type === 'lane') o.row.ids.forEach((a, k) => m.set(a, o.y + h * k + h / 2));
   return m; };
+// an arrow's label with its placeholders filled at the times of its ends: {dt} the time between them (cycles, "3T", in
+// a diagram without time), {cycles} the cycles of a clock-sampled view's clock, {cycles:NAME} the rising edges of row
+// NAME (a full path or a name) between them; "?" where there is none. The state keeps the template: a moved end updates it.
+function arrowFill(M, rows) {
+  return (label, ta, tb) => (!label || !label.includes('{') ? label : label.replace(/\{(dt|cycles)(?::([^}]+))?\}/g, (all, k, name) => {
+    const a = Math.min(ta, tb), b = Math.max(ta, tb);
+    if (k === 'dt') return M.timed ? fmtExact(b - a) : trimNum(b - a) + 'T';
+    if (!name) return M.timed && !(M.src && M.src.meta && M.src.meta.mode === 'clock') ? '?' : String(Math.round((b - a) / M.cycle));
+    const r = rows.find(x => x.type === 'sig' && x.tr && x.full === name) || rows.find(x => x.type === 'sig' && x.tr && x.name === name);
+    return r ? String(riseTimes(r).filter(t => t > a && t <= b).length) : '?';
+  }));
+}
 // numbered circles on their signal rows (on the axis when the row is not shown), guide lines, arrows between bookmarks;
-// rubber: {from, x, y} = an arrow being drawn. Returns {pos: n -> [x, y], mids: [[arrow index, x, y]]} for hit tests.
-function paintBookmarks(P, bms, arrows, X, tA, tB, rowY, y0, y1, yAxis, rubber, lanes) {
+// rubber: {from, x, y} = an arrow being drawn; fill: arrowFill. Returns {pos: n -> [x, y], mids: [[arrow index, x, y]]}
+// for hit tests.
+function paintBookmarks(P, bms, arrows, X, tA, tB, rowY, y0, y1, yAxis, rubber, lanes, fill) {
   const at = new Map(), pos = new Map(), mids = [];
   for (const [r, y] of rowY) if (r.ug && !at.has(r.full)) at.set(r.full, y);   // in your group (where you look) first, then the signal
   for (const [r, y] of rowY) if (!r.same && !at.has(r.full)) at.set(r.full, y);
   for (const [r, y] of rowY) if (r.same && !at.has(r.full)) at.set(r.full, y);
   const lifted = new Map();   // n -> the y of its signal row, under the circle in the lane
   for (const b of bms) {
-    const y = b.signal != null && at.has(b.signal) ? at.get(b.signal) : yAxis, ly = b.lift && lanes && y !== yAxis ? lanes.get('b:' + b.signal) : null;
+    const y = b.signal != null && at.has(b.signal) ? at.get(b.signal) : yAxis, ly = b.lift && lanes && y !== yAxis ? lanes.get(laneId(b)) : null;
     pos.set(b.n, [X(b.t), ly ?? y]); if (ly != null) lifted.set(b.n, y);
   }
   for (const b of bms) if (b.t >= tA && b.t <= tB) { const x = X(b.t); P.path([['M', x, y0], ['L', x, y1]],
@@ -426,9 +455,11 @@ function paintBookmarks(P, bms, arrows, X, tA, tB, rowY, y0, y1, yAxis, rubber, 
   const near = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]) < 0.5;
   // on the circle
   const tip = (p, f) => { const L = Math.hypot(p[0] - f[0], p[1] - f[1]) || 1; return [p[0] - 9 * (p[0] - f[0]) / L, p[1] - 9 * (p[1] - f[1]) / L]; };
+  const tOf = n => (bms.find(b => b.n === n) || {}).t;
   arrows.forEach((a, i) => {
     const A = pos.get(a.from), B = pos.get(a.to); if (!A || !B) return;
-    const col = a.color || 'acc', ly0 = lanes && lanes.get(i);
+    const col = a.color || 'acc', ly0 = lanes && lanes.get(i), label = fill ? fill(a.label, tOf(a.from), tOf(a.to)) : a.label;
+    a = label === a.label ? a : Object.assign({}, a, { label });
     // both ends on one row: a dimension line in its lane above the row, not through the signal
     if (ly0 != null && Math.abs(A[1] - B[1]) < 0.5 && Math.abs(ly0 - A[1]) > 9) {
       const up = ly0 < A[1] ? -1 : 1;
@@ -461,9 +492,12 @@ function paintBookmarks(P, bms, arrows, X, tA, tB, rowY, y0, y1, yAxis, rubber, 
   for (const b of bms) {
     if (b.t < tA || b.t > tB) continue;
     const [x, y] = pos.get(b.n);
-    if (lifted.has(b.n)) P.path([['M', x, y + 8], ['L', x, lifted.get(b.n)]], { stroke: b.color || 'acc', w: 1.2 });   // a leader down to its signal
+    if (lifted.has(b.n)) { const ry = lifted.get(b.n);   // a leader to its signal: down from the lane above, up from the one under it
+      P.path([['M', x, y + (ry > y ? 8 : -8)], ['L', x, ry]], { stroke: b.color || 'acc', w: 1.2 }); }
     P.path(circle(x, y, 8), { fill: b.color || 'acc', stroke: 'panel', w: 1.5 });
     P.text(x, y + 0.5, String(b.n), { anchor: 'middle', size: b.n > 9 ? 9 : 10.5, weight: 700, fill: 'panel' });
+    if (b.label) { const w = P.measure(b.label, { size: 10 });   // the short label right of the circle
+      P.rect(x + 10, y - 6, w + 6, 12, 'panel'); P.text(x + 13, y, b.label, { size: 10, fill: b.color || 'acc' }); }
   }
   return { pos, mids };
 }

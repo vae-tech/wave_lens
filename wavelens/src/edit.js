@@ -96,8 +96,9 @@ command('range', 'from? to? signal?', 'the measured range (Δ, the edges or chan
   v.setRange(Math.max(Math.min(p, q), v.M.t0), Math.min(Math.max(p, q), v.M.t1), row);
   return { range: v.range, text: v.rangeText() };
 });
-command('bookmark', 'n? t? signal? text? color? lift? top? go? delete?', 'a numbered circle on a signal (none: the time axis) with its text: a new one ' +
-  '(n free or left out, t default the cursor) or bookmark n changed; lift: above its signal in a lane; top: the row going to it puts at the top ' +
+command('bookmark', 'n? t? signal? text? label? color? lift? top? link? go? delete?', 'a numbered circle on a signal (none: the time axis) with its text: a ' +
+  'new one (n free or left out, t default the cursor) or bookmark n changed; label: a short text by the circle; lift: true (or "above") in a lane ' +
+  'above its signal, "below" in one under it; link: another view of the page ("crc" or {view, bookmark}); top: the row going to it puts at the top ' +
   'of the waves (a signal\'s or module\'s path; null: none; the view\'s own bookmarks take the row at the top); go: the waves to it as 1–9 go; ' +
   'delete: bookmark n goes ' +
   '(n "all": every one, with the arrows)', (v, a) => {
@@ -110,21 +111,25 @@ command('bookmark', 'n? t? signal? text? color? lift? top? go? delete?', 'a numb
   }
   const t = a.t != null ? cmdTime(v, a.t) : null, sig = a.signal ? pickRows(v, a.signal, { one: true })[0].full : null;
   let b = a.n != null ? v.bms.find(x => x.n === +a.n) : null;
-  const touch = !b || ['t', 'signal', 'text', 'color', 'lift', 'top'].some(k => a[k] !== undefined);   // go alone changes nothing of it
+  const touch = !b || ['t', 'signal', 'text', 'label', 'color', 'lift', 'top', 'link'].some(k => a[k] !== undefined);   // go alone changes nothing of it
+  if (a.link != null && !linkOf(a.link)) fail(`link: a view's key ("crc") or {view, bookmark}, not ${JSON.stringify(a.link)}`);
+  if (a.lift != null && ![true, false, 'above', 'below'].includes(a.lift)) fail(`lift: true, "above", "below" or false, not ${JSON.stringify(a.lift)}`);
   if (a.top != null && typeof a.top !== 'string') fail(`top: a row's path (a signal or a module), not ${JSON.stringify(a.top)}`);
   const top = a.top ? pickRows(v, a.top, { one: true, groups: true })[0].full : null;   // a row there is (a name: its path), as signal
   // top only as given: the commands give the same state in a page and on its file (viewedit.py), which has no screen;
   // the right button's Bookmark here, b and the range's bookmarks take the row at the top of the waves themselves
-  if (!b) { b = { n: a.n != null ? +a.n : Math.max(0, ...v.bms.map(x => x.n)) + 1, t: v.cursor, signal: null, text: '', color: null, lift: false,
-    top: null };
+  if (!b) { b = { n: a.n != null ? +a.n : Math.max(0, ...v.bms.map(x => x.n)) + 1, t: v.cursor, signal: null, text: '', label: '', color: null,
+    lift: false, top: null };
     v.bms.push(b); }
-  if (t != null) b.t = t;
+  if (t != null) { b.t = t; delete b.at; }   // the event its time came from (mkhtml.py) no longer says it
   if (a.signal !== undefined) b.signal = sig;
   if (a.text !== undefined) b.text = a.text == null ? '' : String(a.text);
+  if (a.label !== undefined) b.label = a.label == null ? '' : String(a.label);
   if (a.color !== undefined) b.color = a.color || null;
-  if (a.lift !== undefined) b.lift = !!a.lift;
+  if (a.lift !== undefined) b.lift = liftOf(a.lift);
   if (a.top !== undefined) b.top = top;
-  b.lift = !!b.lift && !!b.signal;
+  if (a.link !== undefined) { if (a.link) b.link = linkOf(a.link); else delete b.link; }
+  b.lift = b.signal ? liftOf(b.lift) : false;
   if (touch) v.changed(true);
   if (a.go) { v.goBm(b); return { n: b.n, t: v.cursor, from: v.t0, top: b.top }; }
   return { n: b.n };
@@ -171,6 +176,28 @@ command('marker', 'id? t? label? color? delete?', 'a marker: a dashed line acros
   if (a.label !== undefined) m.label = a.label == null ? '' : String(a.label);
   if (a.color !== undefined) m.color = a.color || null;
   v.setMarks(); return { id: v.umarks.indexOf(m) + 1 };
+});
+command('span', 'id? from? to? label? color? signals? delete?', 'a coloured stretch of time over every row, or over the rows of signals, with its ' +
+  'label: a new one (from and to), or span id (1, 2 … as listed) changed; delete: id or "all"', (v, a) => {
+  idOk(a.id, 'span');
+  if (a.id === 'all' && !a.delete) fail('span: id "all" is for delete (a new one: no id)');
+  if (a.id != null && a.id !== 'all' && !v.spans[+a.id - 1]) fail(`no span ${a.id} (there are ${v.spans.length})`);
+  if (a.delete) {
+    if (a.id == null) fail('span: delete takes id or "all"');
+    if (a.id === 'all') v.spans = []; else v.spans.splice(+a.id - 1, 1);
+    v.changed(true); return { id: a.id, deleted: true };
+  }
+  const from = a.from != null ? cmdTime(v, a.from) : null, to = a.to != null ? cmdTime(v, a.to) : null;
+  const sigs = a.signals == null ? undefined : (Array.isArray(a.signals) ? a.signals : [a.signals]).map(x => pickRows(v, x, { one: true })[0].full);
+  let s = a.id != null ? v.spans[+a.id - 1] : null;
+  if (!s) { if (from == null || to == null) fail('span: from and to'); s = { from, to, label: '', color: null, signals: null }; v.spans.push(s); }
+  if (from != null) s.from = from;
+  if (to != null) s.to = to;
+  if (s.from > s.to) [s.from, s.to] = [s.to, s.from];
+  if (a.label !== undefined) s.label = a.label == null ? '' : String(a.label);
+  if (a.color !== undefined) s.color = a.color || null;
+  if (sigs !== undefined) s.signals = sigs.length ? sigs : null;
+  v.changed(true); return { id: v.spans.indexOf(s) + 1 };
 });
 command('group', 'name signals? add? remove? color? rename? delete? go? move?', 'your group of signals, a folder at the top of the names (the ' +
   'signals stay where they are too): made or changed — signals: its signals in this order, add, remove, color, rename; delete; go: opened, shown, ' +
@@ -597,7 +624,7 @@ Object.assign(WaveView.prototype, {
 // (wavelens.edits:<page>), so what you change here afterwards stays until a newer one (Save keeps yours in a file). The
 // rest (cursor, window, highlight, selection, folding, order, search), which a page opened again starts from anyway,
 // is applied every time, as the page's own settings are.
-const KEPT = ['bookmarks', 'arrows', 'markers', 'groups', 'paint', 'radix', 'analog', 'hidden'];
+const KEPT = ['bookmarks', 'arrows', 'markers', 'spans', 'groups', 'paint', 'radix', 'analog', 'hidden'];
 const KEPT_CFG = ['style', 'maxHeight', 'toolsFolded', 'toolsHidden', ...GAP_KEYS, ...CYC_KEYS];
 // what undo takes back: the above and Only (not kept in this browser: a page opened again applies a revision's Only anew)
 const UNDO_KEYS = [...KEPT, 'only', 'fsm'];

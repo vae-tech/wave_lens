@@ -4,7 +4,9 @@
 The "sva" files of a config are parsed with the engine's CLI (`sva parse --json`, one compilation unit in the order
 given) and its "bind" list is evaluated over the dump (`sva eval`, one run per scope); the result is the WaveJSON
 extension "sva" of a view:
-  {"files": [{"name", "path", "source", "parsed"}], "bind": [{"assert", "scope", "results"}], "notes": ["…"]}
+  {"files": [{"name", "path", "source", "parsed"}], "bind": [{"assert", "scope", "results"}], "cycles": {"<clock>": [times]},
+   "notes": ["…"]}
+(each "results.cycles" names its array in "cycles": one copy per clock, not one per binding; intern_cycles / inflate)
 mkhtml.py moves "files" and "notes" of every view into window.SVA (once per page); wavelens/sva.js lists the assertions
 and draws the bindings. Parse errors do not stop the build: they are printed and the page shows them. report() is the
 page's printable "Assertions" section: the bindings evaluated over the whole dump, `sva report --html`.
@@ -243,11 +245,53 @@ def build(files, binds, waves, exe=None, t_from=None, t_to=None, prefixes=None, 
     fs = parse_files(files, exe)
     bs, notes = evaluate(bind_list(binds), files, waves, exe, t_from, t_to, fs, prefixes=prefixes, aliases=aliases)
     doc = {'files': fs, 'bind': bs}
+    tables = intern_cycles(bs)
+    if tables:
+        doc['cycles'] = tables
     if notes:
         doc['notes'] = notes
         for n in notes:
             print('svabuild: ' + n, file=sys.stderr)
     return doc
+
+
+def intern_cycles(binds):
+    """The sampled times of the bindings once per view: each "results.cycles" array becomes a key of the returned table
+    {clock path: [times]} (an equal array of the same clock shares it; another one of that clock: "<clock>#2", …). The
+    times start at the dump's start (the attempts index them), so a window's arrays are nearly the whole dump's: one
+    copy per binding was most of a page's bytes. wavelens/sva.js inflates them back (pageBinds); an array in
+    "results.cycles" is still read (older pages, `sva eval --out` given as it is)."""
+    tables, ids = {}, {}
+    for b in binds:
+        r = b.get('results')
+        if not r or not isinstance(r.get('cycles'), list):
+            continue
+        arr = r['cycles']
+        key = ids.get(id(arr))
+        if key is None:
+            base = str(r.get('clock') or 'cycles')
+            key = next((k for k, t in tables.items() if k.split('#')[0] == base and t == arr), None)
+            if key is None:
+                n = sum(k.split('#')[0] == base for k in tables)
+                key = base if not n else f'{base}#{n + 1}'
+                tables[key] = arr
+            ids[id(arr)] = key
+        r['cycles'] = key
+    return tables
+
+
+def inflate(doc):
+    """The inverse of intern_cycles on a view's "sva" extension (a copy: each binding's "results.cycles" an array again)."""
+    tables = (doc or {}).get('cycles') or {}
+    out = []
+    for b in (doc or {}).get('bind') or []:
+        r = b.get('results')
+        if r and isinstance(r.get('cycles'), str):
+            if r['cycles'] not in tables:
+                raise WaveError(f'svabuild: bind {b.get("assert")}@{b.get("scope")}: no cycles table "{r["cycles"]}"')
+            b = {**b, 'results': {**r, 'cycles': tables[r['cycles']]}}
+        out.append(b)
+    return out
 
 
 def whole(files, binds, waves, exe=None, prefixes=None, aliases=None):

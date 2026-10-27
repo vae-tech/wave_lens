@@ -53,11 +53,14 @@ const TIPS = {
   'act:tools': ['Fold the tools to this line, or open them (/ opens them for the find field)'], 'jump': ['Go to this marker'],
   '.mk': ['Highlight: in front, the rest dimmed', ['ctrl+click', 'ctrl+shift+click: every row to here']],
   'bm:json': ['The bookmarks and arrows as JSON for a config'], 'bm:clear': ['Remove this browser\'s bookmarks'],
-  'bm:go': ['Go to this bookmark', [']m', '[m']], 'bm:here': ['Move it to the cursor'], 'bm:lift': ['Above its signal, in a lane (or drag the circle up)'],
+  'bm:go': ['Go to this bookmark', [']m', '[m']], 'bm:here': ['Move it to the cursor'],
+  'bm:lift': ['Into a lane of its own: over its signal, then under it, then on the row again (or drag the circle to the top or the bottom of its row)'],
     'bm:del': ['Delete the bookmark and its arrows'],
   'bm:addar': ['Arrow between the last two bookmarks', ['shift+drag a circle']], 'bm:adel': ['Delete the arrow'],
   '.tm': ['Bookmark time: 250ns, 85.12us', ['Enter']], '.sig': ['Its signal (empty: the time axis)', ['Enter']], '.txt': ['What happens here'],
-  '.col': ['Colour'], '.lab': ['Arrow label'], '.from': ['From bookmark'], '.to': ['To bookmark'], '.shape': ['Arrow shape'], '.head': ['Arrow head'],
+  '.lbl': ['A short label by the circle on the waves'],
+  '.col': ['Colour'], '.lab': ['Arrow label: {dt} the time between its ends, {cycles} the clock cycles, {cycles:CLK} the rising edges of CLK'],
+  '.from': ['From bookmark'], '.to': ['To bookmark'], '.shape': ['Arrow shape'], '.head': ['Arrow head'],
     '.line': ['Line'],
   'm:zoom': ['Zoom to the range', ['shift+drag', 'middle drag']], 'm:marks': ['Bookmarks at its ends, an arrow with Δ'], 'm:copyd': ['Copy Δ'],
   'm:copyimg': ['The range (else the window) as PNG to the clipboard: the highlighted rows, else the ones on the screen'], 'm:png': ['Save the picture as PNG'],
@@ -573,7 +576,8 @@ class Notes {
       '#$1$1$2$2$3$3'), hex = c => /^#[0-9a-f]{6}$/i.test(six(c)) ? six(c) : /^#[0-9a-f]{6}$/i.test(acc) ? acc : '#b5551b';
     const opt = (v, label, cur) => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(label)}</option>`;
     const nums = cur => v.bms.map(o => opt(String(o.n), String(o.n), String(cur))).join('');
-    el.innerHTML = (v.bms.length ? `<div class="nh"><b>Bookmarks</b><span
+    const head = v.opts.title || v.M.title;   // several viewers on a page: whose list this is
+    el.innerHTML = (v.bms.length ? `<div class="nh"><b>Bookmarks${head ? ` · ${esc(head)}` : ''}</b><span
       class="muted">click a number to go there · drag a circle on the waves to move it, shift+drag to another one for an arrow · kept in this browser</span>
       <button type="button" data-bm="json">JSON</button><button type="button" data-bm="clear"
         title="Remove the bookmarks and arrows of this browser (the page's own come back on reload; your markers stay)">Clear</button></div><ol class="bms">` +
@@ -588,9 +592,15 @@ class Notes {
         <span class="eg">${esc(edgeGlyph(s, b.t))}</span>
         <span class="dt" title="Δ from the cursor (keys 1–9: go to the bookmark)"></span>
         <button type="button" class="ic up" data-bm="lift" aria-pressed="${!!b.lift}"
-          title="Above the signal, in the lane over its row (or drag the circle up there)"${b.signal ? '' : ' disabled'}>↥</button>
+          title="In a lane of its own: over its signal, then under it, then on the row again (or drag the circle to the top or the bottom)"${b.signal ?
+            '' : ' disabled'}>${b.lift === 'below' ? '↧' : '↥'}</button>
         <input type="color" class="col" value="${hex(b.color)}" aria-label="bookmark ${b.n} colour" title="Colour">
+        <input type="text" class="lbl" value="${esc(b.label || '')}" placeholder="label" aria-label="bookmark ${b.n} label" spellcheck="false"
+          title="A short label by the circle on the waves">
         <input type="text" class="txt" value="${esc(b.text)}" placeholder="describe the event" aria-label="bookmark ${b.n} text">
+        ${b.link ? `<button type="button" class="ic lk" data-bm="link"${v.linkTarget(b.link) ? '' : ' disabled'} title="${v.linkTarget(b.link) ?
+          `Open the view ${esc(b.link.view)} of this page${b.link.bookmark ? ` at its bookmark ${b.link.bookmark}` : ''}` :
+          `No section ${esc(b.link.view)} on this page`}">→ ${esc(b.link.view)}</button>` : ''}
         <button type="button" class="ic" data-bm="del" title="Delete bookmark ${b.n} (and its arrows)">✕</button></li>`; }).join('') +
       (`</ol><div class="nh"><b>Arrows</b><span class="muted">from → to · shape · head · line · colour · label</span><button type="button" ` +
           `data-bm="addar"${v.bms.length < 2 ? ' disabled' : ''}>+ Arrow</button></div><ol class="ars">`) +
@@ -624,8 +634,9 @@ class Notes {
     if (act === 'mdel') return v.run({ op: 'marker', id: +li.dataset.k + 1, delete: true });
     if (act === 'gdel') return v.run({ op: 'group', name: v.ugroups[+li.dataset.g].name, delete: true });
     if (act === 'go' && bm) v.goBm(bm);
-    else if (act === 'here' && bm) { bm.t = v.cursor; bm.top = v.topNow(); v.changed(true); }   // the screen of now, as a new one
-    else if (act === 'lift' && bm) { bm.lift = !bm.lift && !!bm.signal; v.changed(true); }
+    else if (act === 'link' && bm && bm.link) v.followLink(bm);
+    else if (act === 'here' && bm) { bm.t = v.cursor; delete bm.at; bm.top = v.topNow(); v.changed(true); }   // the screen of now, as a new one
+    else if (act === 'lift' && bm && bm.signal) { bm.lift = !bm.lift ? true : bm.lift === true ? 'below' : false; v.changed(true); }   // off, above, under
     else if (act === 'del') { v.bms = v.bms.filter(x => x.n !== n); v.arrows = v.arrows.filter(a => a.from !== n && a.to !== n); v.changed(true); }
     else if (act === 'adel') { v.arrows.splice(+li.dataset.a, 1); v.changed(true); }
     else if (act === 'addar') { const k = v.bms.length; v.arrows.push(arNorm([{ from: v.bms[k - 2].n, to: v.bms[k - 1].n }])[0]); v.changed(true); }
@@ -656,6 +667,7 @@ class Notes {
     }
     const bm = v.bms.find(x => x.n === +li.dataset.n); if (!bm) return;
     if (T.matches('input.txt')) { bm.text = T.value; v.saveBookmarks(); }
+    if (T.matches('input.lbl')) { bm.label = T.value; v.saveBookmarks(); v.draw(); }
     else if (T.matches('input.col')) { bm.color = T.value; li.querySelector('.bn').style.background = T.value; v.changed(false); }
   }
   change(e) {
@@ -669,7 +681,7 @@ class Notes {
     if (T.matches('input.tm')) {
       const t = v.parseWhen(T.value, bm.t);
       if (t == null || !isFinite(t)) { T.value = v.when(bm.t); T.classList.add('bad'); setTimeout(() => T.classList.remove('bad'), 900); return; }
-      bm.t = Math.min(Math.max(t, v.M.t0), v.M.t1);
+      bm.t = Math.min(Math.max(t, v.M.t0), v.M.t1); delete bm.at;
       if (bm.t < v.t0 || bm.t > v.t0 + v.span) v.t0 = v.clamp(bm.t - v.span / 2);
       v.changed(true);
     } else if (T.matches('input.sig')) {   // a full path or a name; empty: the time axis
@@ -854,8 +866,10 @@ class WaveView {
         const bm = this.bmAt(x, y), o = !bm && (this.lay || []).find(o => y >= o.y && y < o.y + o.h), tip = o && o.row.tip ? o.row.tip(x, y - o.y, this) : '';
         // the value under the pointer (a struct's row: its whole value)
         const vr = o && (o.row.sig || o.row), val = !bm && !tip && vr && vr.type === 'sig' && vr.tr ? this.valueTip(vr, this.t0 + x / this.pxPerT()) : '';
-        c.style.cursor = bm ? 'grab' : tip ? 'pointer' : ''; c.title = bm ? `Bookmark ${bm.n}: drag to move it, shift+drag to another bookmark for an arrow` :
-          tip || val; return;
+        c.style.cursor = bm ? 'grab' : tip ? 'pointer' : '';
+        const sp = !bm && !tip ? this.spanTip(this.t0 + x / this.pxPerT(), vr) : '';   // a span under the pointer: its label and length
+        c.title = bm ? `Bookmark ${bm.n}${bm.text ? ': ' + bm.text : ''} — drag to move it, shift+drag to another bookmark for an arrow` : tip ||
+          [sp, val].filter(Boolean).join('\n'); return;
       }
       if (drag.zoom != null) { this.zband = [drag.zoom, x].map(px => this.t0 + px / this.pxPerT()); this.draw(); return; }
       if (drag.box) {
@@ -1395,6 +1409,7 @@ class WaveView {
           ...Object.fromEntries(FIND_OPTS.map(o => [o[1], !!this[o[1]]])), ...this.gapOpt(), ...this.cycOpt() },
       paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs), hidden: [...this.hiddenRows],
         select: (this.sel && this.sel.full) || null, find: this.q || '', bookmarks: this.bookmarks(), arrows: this.arrowList(), markers: this.markList(),
+        spans: this.spanList(),
         groups: this.groupList(), only: this.onlyState(), fsm: this.fsmState() };
     // none is said (null, the kind "any"): a state loaded later clears what is there then (a key left out keeps it)
     st.cursor2 = this.cursor2 ?? null;
@@ -1477,6 +1492,7 @@ class WaveView {
       this.bms = bmNorm(bms); this.arrows = arNorm(st.arrows || [], bms); this.saveBookmarks(); this.renderNotes();
     }
     if (st.markers !== undefined) { this.umarks = markNorm(st.markers); this.setMarks(); }
+    if (st.spans !== undefined) { this.spans = spanNorm(st.spans); this.saveBookmarks(); this.draw(); }
 
     if (st.select !== undefined) this.sel = (st.select && seen(st.select) && M.rows.find(r => r.type === 'sig' && r.tr && r.full === st.select)) || null;
     if (st.from != null && st.to != null && isFinite(st.from) && isFinite(st.to)) { this.span = Math.min(Math.max(st.to - st.from, this.minSpan), M.t1 - M.t0);
@@ -1775,12 +1791,13 @@ class WaveView {
   moveBookmark(b, x, y, lay = this.lay || []) {
     const k = lay.findIndex(o => y >= o.y && y < o.y + o.h), o = lay[k];
     if (y < (this.oy || 0) + this.hdrH) { b.signal = null; b.lift = false; }
-    else if (o && o.row.type === 'sig') { b.signal = o.row.full; b.lift = this.S.arrowLabels === 'lane' && y < o.y + o.h / 4; }
+    else if (o && o.row.type === 'sig') { b.signal = o.row.full; b.lift = y < o.y + o.h / 4 ? true : y > o.y + o.h * 3 / 4 ? 'below' : false; }
     else if (o && o.row.type === 'lane' && o.row.ids.includes('b:' + b.signal)) b.lift = true;
+    else if (o && o.row.type === 'lane' && o.row.ids.includes('b:' + b.signal + ':below')) b.lift = 'below';
     else if (o && o.row.type === 'lane') { const r = lay.slice(k + 1).find(q => q.row.type !== 'lane');
-      if (r && r.row.type === 'sig') { b.signal = r.row.full; b.lift = this.S.arrowLabels === 'lane'; } }
+      if (r && r.row.type === 'sig') { b.signal = r.row.full; b.lift = true; } }
     const s = b.signal != null ? this.M.rows.find(r => r.type === 'sig' && r.full === b.signal) : null;
-    b.t = Math.min(Math.max(this.snap(s, this.t0 + x / this.pxPerT()), this.M.t0), this.M.t1);
+    b.t = Math.min(Math.max(this.snap(s, this.t0 + x / this.pxPerT()), this.M.t0), this.M.t1); delete b.at;   // moved: no longer at its event
     this.draw();
   }
   // bookmark: numbered circle at the cursor on the selected signal (snapped to its edge within 6 px), described below the waves
@@ -1795,8 +1812,21 @@ class WaveView {
   arrow(from, to, opts = {}) { this.arrows.push(...arNorm([Object.assign({ from, to }, opts)])); this.saveBookmarks(); this.renderNotes(); this.draw();
     return this; }
   // JSON for a config file / WaveJSON (t in model units: ps for timed waves, else cycles); defaults are left out
-  bookmarks() { return this.bms.map(b => Object.fromEntries(Object.entries({ n: b.n, t: b.t, signal: b.signal, text: b.text, color: b.color, lift: b.lift ||
-    null, top: b.top }).filter(([, v]) => v != null && v !== ''))); }
+  bookmarks() { return this.bms.map(b => Object.fromEntries(Object.entries({ n: b.n, t: b.t, at: b.at, signal: b.signal, label: b.label, text: b.text,
+    color: b.color, lift: b.lift || null, top: b.top, link: b.link }).filter(([, v]) => v != null && v !== ''))); }
+  // a bookmark's link: the section of its view on this page (mkhtml.py: <h2 id=view>) and that view's viewer -> {h, view}
+  linkTarget(l) {
+    const h = l && document.getElementById(l.view), w = h && [...VIEWS].find(x => x !== this && x.root.dataset.wave &&
+      x.root.dataset.wave.replace(/^WAVES\.?/, '').replace(/^\["|"\]$/g, '') === l.view);
+    return h ? { h, view: w || null } : null;
+  }
+  followLink(b) {
+    const T = this.linkTarget(b.link); if (!T) { this.toast(`no section "${b.link.view}" on this page`); return null; }
+    T.h.scrollIntoView({ block: 'start' });
+    const x = T.view && b.link.bookmark && T.view.bms.find(q => q.n === b.link.bookmark);
+    if (x) T.view.goBm(x); else if (T.view && b.link.bookmark) T.view.toast(`no bookmark ${b.link.bookmark} here`);
+    return T;
+  }
   arrowList() {
     return this.arrows.map(a => Object.fromEntries(Object.entries({ from: a.from, to: a.to, shape: a.shape, head: a.head === '>' ? null : a.head,
       line: a.line === 'solid' ? null : a.line,
@@ -1805,23 +1835,33 @@ class WaveView {
   // your markers and groups as a state has them (empty and null left out)
   markList() { return this.umarks.map(m => Object.fromEntries(Object.entries({ t: m.t, label: m.label, color: m.color })
     .filter(([, x]) => x != null && x !== ''))); }
+  spanTip(t, row) {
+    const on = s => !s.signals || !s.signals.length || (row && (s.signals.includes(row.full) || s.signals.includes(row.name)));
+    return this.spans.filter(s => t >= s.from && t <= s.to && on(s)).map(s => `${s.label || 'span'}: ${this.when(s.from)} … ${this.when(s.to)} (Δ ` +
+      `${this.M.timed ? fmtExact(s.to - s.from) : trimNum(s.to - s.from) + ' cycles'})`).join('\n');
+  }
+  spanList() { return this.spans.map(s => Object.fromEntries(Object.entries({ from: s.from, to: s.to, label: s.label, color: s.color,
+    signals: s.signals && s.signals.length ? [...s.signals] : null }).filter(([, x]) => x != null && x !== ''))); }
   groupList() { return this.ugroups.map(g => Object.fromEntries(Object.entries({ name: g.name, signals: [...g.signals], color: g.color })
     .filter(([, x]) => x != null))); }
   setBookmarks(list, arrows = []) { this.bms = bmNorm(list); this.arrows = arNorm(arrows, list); this.saveBookmarks(); this.renderNotes(); this.draw();
     return this; }
   loadBookmarks() { // this browser's copy (localStorage) wins over the page's "bookmarks" / "arrows"; a copy of the markers only (Clear): the page's
-    const page = { bms: this.M.bookmarks.map(b => Object.assign({}, b)), arrows: this.M.arrows.map(a => Object.assign({}, a)), umarks: [] };
-    try {
+    const page = { bms: this.M.bookmarks.map(b => Object.assign({}, b)), arrows: this.M.arrows.map(a => Object.assign({}, a)), umarks: [],
+      spans: this.M.spans.map(s => Object.assign({}, s)) };
+    try {   // the spans: this browser's when it has them (the span command), else the page's
       const v = localStorage.getItem(this.bmKey), o = v == null ? null : JSON.parse(v);
-      if (Array.isArray(o)) return { bms: bmNorm(o), arrows: arNorm([], o), umarks: [] };
-      if (o && typeof o === 'object') return o.bookmarks === undefined ? Object.assign(page, { umarks: markNorm(o.markers) }) : { bms: bmNorm(o.bookmarks),
-        arrows: arNorm(o.arrows, o.bookmarks), umarks: markNorm(o.markers) };
+      if (Array.isArray(o)) return { bms: bmNorm(o), arrows: arNorm([], o), umarks: [], spans: page.spans };
+      if (o && typeof o === 'object') return Object.assign(o.bookmarks === undefined ? Object.assign(page, { umarks: markNorm(o.markers) }) :
+        { bms: bmNorm(o.bookmarks), arrows: arNorm(o.arrows, o.bookmarks), umarks: markNorm(o.markers) }, { spans: o.spans ? spanNorm(o.spans) : page.spans });
     } catch (e) { /* no storage: page bookmarks */ }
     return page;
   }
   // this browser's copy; bms false (Clear): the markers only, so the page's bookmarks come back on reload
   saveBookmarks(bms = true) {
-    try { const o = bms ? { bookmarks: this.bookmarks(), arrows: this.arrowList(), markers: this.markList() } : { markers: this.markList() };
+    try {
+      const o = bms ? { bookmarks: this.bookmarks(), arrows: this.arrowList(), markers: this.markList(), spans: this.spanList() } :
+        { markers: this.markList() };
       if (!bms && !o.markers.length) localStorage.removeItem(this.bmKey); else localStorage.setItem(this.bmKey, JSON.stringify(o));
     } catch (e) { /* private mode */ }
   }
@@ -2585,9 +2625,9 @@ class WaveView {
   // draw = size (the canvas and its offset) + paintFrame (the pixels) + syncReadouts (the cursor line, fields, values).
   draw() {
     if (this.held) { this.held.draw = true; return; }
-    if (this.S.arrowLabels === 'lane' && this.laneKey !== laneKey(this.bms, this.arrows)) {   // a bookmark or an arrow label changed: its lane?
+    if (this.laneKey !== laneKey(this.bms, this.arrows)) {   // a bookmark or an arrow label changed: its lane?
       this.laneKey = laneKey(this.bms, this.arrows);
-      if (this.laneSig !== JSON.stringify([...arrowLanes(this.vis, this.bms, this.arrows)])) this.renderNames();
+      if (this.laneSig !== JSON.stringify([...arrowLanes(this.vis, this.bms, this.S.arrowLabels === 'lane' ? this.arrows : [])])) this.renderNames();
     }
     const lay = this.lay = this.layout();
     if (this.wcol.style.height !== lay.H + 'px') this.wcol.style.height = lay.H + 'px';
@@ -2626,6 +2666,7 @@ class WaveView {
     g.save(); g.beginPath(); g.rect(0, hdr, W, Hc - hdr); g.clip(); g.translate(0, -oy);   // rows: layout coordinates, under the axis
     const late = [], rowY = paintBody(P, M, shown, X, this.t0, tB, 0, W, this.hl, this.selRun &&
       this.selRun.size ? new Set([...this.selRun, this.sel]) : this.sel, lay, this.band, late, r => this.strokeOf(r), r => this.collapsed.has(r.id));
+    paintSpans(P, this.spans, X, this.t0, tB, shown, oy + hdr, oy + Hc);
     paintMarkers(P, this.markers, X, this.t0, tB, oy + hdr, oy + Hc);
     this.paintDiff(P, shown, X, this.t0, tB);   // a second dump compared (diff.js): where it differs
     g.restore();
@@ -2641,7 +2682,7 @@ class WaveView {
     if (late.length) { g.save(); g.beginPath(); g.rect(0, hdr, W, Hc - hdr); g.clip(); g.translate(0, -oy); late.forEach(f => f()); g.restore(); }
     g.save(); g.translate(0, -oy);
     const geo = paintBookmarks(P, this.bms, this.arrows, X, this.t0, tB, rowY, oy + hdr, oy + Hc, oy + this.S.headerHeight / 2, this.rubber,
-      laneY(lay, this.S.laneHeight));
+      laneY(lay, this.S.laneHeight), arrowFill(M, M.rows));
     g.restore();
     return geo;
   }

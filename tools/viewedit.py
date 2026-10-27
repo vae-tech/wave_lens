@@ -17,6 +17,7 @@ view_live); here they change the file:
   viewedit.py page.html --get                                # the edits as JSON (--view …: one view)
   viewedit.py page.html --views                              # the views: key, title, signals, edits
   viewedit.py saved.view.json --model page.html --ops '…'    # a state; names checked against the page's signals
+  viewedit.py --config x.config.json --view drop --ops '…'   # bookmark, arrow, span on a view of a config: a rebuild keeps them
   viewedit.py --commands                                     # the commands and their arguments
 
 Each command is {"op": name, …arguments}; the list runs in order, a bad one is said (exit 1) and the rest still run.
@@ -53,8 +54,9 @@ CYC_DEFAULTS = {'cycles': False, 'cycleClock': None, 'cycleZero': None}
 # the commands: name -> arguments (? optional), as WaveLens.commands() gives them (the smoke test compares the two)
 COMMANDS = {
     'cursor': 't', 'cursor2': 't', 'view': 'from? to? at? span?', 'fit': '', 'range': 'from? to? signal?',
-    'bookmark': 'n? t? signal? text? color? lift? top? go? delete?', 'arrow': 'id? from? to? shape? head? line? color? label? delete?',
-    'marker': 'id? t? label? color? delete?', 'group': 'name signals? add? remove? color? rename? delete? go? move?',
+    'bookmark': 'n? t? signal? text? label? color? lift? top? link? go? delete?', 'arrow': 'id? from? to? shape? head? line? color? label? delete?',
+    'marker': 'id? t? label? color? delete?', 'span': 'id? from? to? label? color? signals? delete?',
+    'group': 'name signals? add? remove? color? rename? delete? go? move?',
     'highlight': 'add? remove? set? clear?', 'paint': 'signals? color? clear?', 'select': 'signal? signals?', 'hide': 'signals', 'show': 'signals?',
     'fold': 'groups? all?', 'unfold': 'groups? all?', 'radix': 'signals radix', 'analog': 'signals rows', 'sort': 'dir ignore?', 'style': 'name',
     'layout': 'scroll? height? tools?', 'find': 'query case? word? regex? highlight? open? mask?', 'gaps': 'on? idle? keep? signals? clock? aux? only? count? reset?',
@@ -68,6 +70,7 @@ LIVE_ONLY = {'fit': 'the time of the waves', 'edge': 'the values of the signals'
              'types': 'the types file read in the page'}
 # the arguments of each command that are times (wavemcp.py turns its ns into "…ns" for these)
 TIME_ARGS = {'cursor': ('t',), 'cursor2': ('t',), 'view': ('from', 'to', 'at', 'span'), 'range': ('from', 'to'), 'bookmark': ('t',), 'marker': ('t',),
+             'span': ('from', 'to'),
              'picture': ('from', 'to'), 'cycles': ('zero',)}
 def block_re(name):
     """A JSON block of the page (<script type="application/json" id="wavelens-…">), at a line's start: not the text of it in
@@ -367,6 +370,9 @@ class Model:
     def base_arrows(self):
         return ar_norm(self.doc.get('arrows'), self.doc.get('bookmarks'))
 
+    def base_spans(self):
+        return span_norm(self.doc.get('spans'))
+
 
 def bm_norm(lst):
     """model.js bmNorm."""
@@ -379,10 +385,49 @@ def bm_norm(lst):
         t = parse_t(b.get('t'))
         if t is None or t != t or t in (float('inf'), float('-inf')):
             continue
-        out.append({'n': n, 't': t, 'signal': b.get('signal') or None, 'text': b.get('text') or '', 'color': b.get('color') or None,
-                    'lift': bool(b.get('lift')) and bool(b.get('signal')),
-                    'top': b['top'] if isinstance(b.get('top'), str) and b['top'] else None})
+        out.append({'n': n, 't': t, 'signal': b.get('signal') or None, 'text': b.get('text') or '',
+                    'label': str(b['label']) if b.get('to') in (None, '') and b.get('label') is not None else '', 'color': b.get('color') or None,
+                    'lift': lift_of(b.get('lift')) if b.get('signal') else False,
+                    'top': b['top'] if isinstance(b.get('top'), str) and b['top'] else None,
+                    **({'at': b['at']} if isinstance(b.get('at'), (str, dict)) else {}),   # the event its time came from
+                    **({'link': link_of(b['link'])} if link_of(b.get('link')) else {})})   # another view of the page
     return out
+
+
+def link_of(x):
+    """model.js linkOf: "crc" or {"view", "bookmark"?} -> {"view", "bookmark"?} | None."""
+    if isinstance(x, str) and x:
+        return {'view': x}
+    if isinstance(x, dict) and isinstance(x.get('view'), str) and x['view']:
+        n = whole(x.get('bookmark')) if x.get('bookmark') is not None else None
+        return {'view': x['view'], **({'bookmark': n} if n and n > 0 else {})}
+    return None
+
+
+def lift_of(x):
+    """model.js liftOf: "below", else true ("above") or false."""
+    return 'below' if x == 'below' else x == 'above' or bool(x)
+
+
+def span_norm(lst):
+    """model.js spanNorm."""
+    out = []
+    for s in lst if isinstance(lst, list) else []:
+        if not isinstance(s, dict):
+            continue
+        a, b = parse_t(s.get('from')), parse_t(s.get('to'))
+        if a is None or b is None or not finite(a) or not finite(b):
+            continue
+        sg = s.get('signals')
+        out.append({'from': min(a, b), 'to': max(a, b), 'label': '' if s.get('label') is None else str(s['label']), 'color': s.get('color') or None,
+                    'signals': [str(x) for x in sg] if isinstance(sg, list) else [sg] if isinstance(sg, str) and sg else None})
+    return out
+
+
+def span_list(ss):
+    """view.spanList()."""
+    return [{k: v for k, v in (('from', s['from']), ('to', s['to']), ('label', s['label']), ('color', s['color']),
+                                ('signals', list(s['signals']) if s.get('signals') else None)) if v is not None and v != ''} for s in ss]
 
 
 def ar_norm(lst, bms=None):
@@ -407,8 +452,9 @@ def ar_norm(lst, bms=None):
 
 def bm_list(bms):
     """view.bookmarks(): the JSON form (empty and default left out)."""
-    return [{k: v for k, v in (('n', b['n']), ('t', b['t']), ('signal', b['signal']), ('text', b['text']), ('color', b['color']),
-                                ('lift', b['lift'] or None), ('top', b.get('top'))) if v is not None and v != ''} for b in bms]
+    return [{k: v for k, v in (('n', b['n']), ('t', b['t']), ('at', b.get('at')), ('signal', b['signal']), ('label', b.get('label')), ('text', b['text']),
+                                ('color', b['color']), ('lift', b['lift'] or None), ('top', b.get('top')), ('link', b.get('link')))
+             if v is not None and v != ''} for b in bms]
 
 
 def ar_list(ars):
@@ -440,6 +486,9 @@ class Editor:
 
     def ars(self):
         return ar_norm(self.st['arrows']) if 'arrows' in self.st else self.m.base_arrows()
+
+    def spans(self):
+        return span_norm(self.st['spans']) if 'spans' in self.st else self.m.base_spans()
 
     def marks(self):
         return [{'t': parse_t(x.get('t')), 'label': str(x.get('label') or ''), 'color': x.get('color') or None} for x in self.st.get('markers') or []]
@@ -586,7 +635,11 @@ class Editor:
         t = self.time(a['t']) if a.get('t') is not None else None
         sig = self.m.pick(self.st, a['signal'], one=True)[0]['full'] if a.get('signal') else None
         b = next((b for b in bms if n is not None and b['n'] == n), None)
-        touch = not b or any(k in a for k in ('t', 'signal', 'text', 'color', 'lift', 'top'))   # go alone changes nothing of it
+        touch = not b or any(k in a for k in ('t', 'signal', 'text', 'label', 'color', 'lift', 'top', 'link'))   # go alone changes nothing of it
+        if a.get('link') is not None and not link_of(a['link']):
+            fail(f'link: a view\'s key ("crc") or {{view, bookmark}}, not {json.dumps(a["link"])}')
+        if a.get('lift') is not None and a['lift'] not in (True, False, 'above', 'below'):
+            fail(f'lift: true, "above", "below" or false, not {json.dumps(a["lift"])}')
         if a.get('top') is not None and not isinstance(a['top'], str):
             fail(f"top: a row's path (a signal or a module), not {json.dumps(a['top'])}")
         top = self.m.pick(self.st, a['top'], groups=True, one=True)[0]['full'] if a.get('top') else None   # a row there is, as signal
@@ -594,21 +647,29 @@ class Editor:
             if t is None and self.st.get('cursor') is None:
                 fail('bookmark: t (the cursor here is not known)')
             b = {'n': n if n is not None else max([0] + [x['n'] for x in bms]) + 1, 't': self.st.get('cursor'), 'signal': None, 'text': '',
-                 'color': None, 'lift': False, 'top': None}
+                 'label': '', 'color': None, 'lift': False, 'top': None}
             bms.append(b)
         if t is not None:
             b['t'] = t
+            b.pop('at', None)   # the event its time came from no longer says it
         if 'signal' in a:
             b['signal'] = sig
         if 'text' in a:
             b['text'] = '' if a['text'] is None else str(a['text'])
+        if 'label' in a:
+            b['label'] = '' if a['label'] is None else str(a['label'])
         if 'color' in a:
             b['color'] = a['color'] or None
         if 'lift' in a:
-            b['lift'] = bool(a['lift'])
+            b['lift'] = lift_of(a['lift'])
         if 'top' in a:
             b['top'] = top
-        b['lift'] = bool(b['lift']) and bool(b['signal'])
+        if 'link' in a:
+            if a['link']:
+                b['link'] = link_of(a['link'])
+            else:
+                b.pop('link', None)
+        b['lift'] = lift_of(b['lift']) if b['signal'] else False
         if touch:
             self.put_marks(bms)
         if a.get('go'):   # view.js goBm: the cursor on it, bookmarkLeft of the window from the left (its span kept), its signal selected
@@ -715,6 +776,42 @@ class Editor:
             m['color'] = a['color'] or None
         self.st['markers'] = mark_list(ms)
         return {'id': ms.index(m) + 1}
+
+    def c_span(self, a):
+        sid, ss = self.id_ok(a.get('id'), 'span'), self.spans()
+        if sid == 'all' and not a.get('delete'):
+            fail('span: id "all" is for delete (a new one: no id)')
+        if sid not in (None, 'all') and not sid <= len(ss):
+            fail(f'no span {a["id"]} (there are {len(ss)})')
+        if a.get('delete'):
+            if sid is None:
+                fail('span: delete takes id or "all"')
+            self.st['spans'] = span_list([] if sid == 'all' else ss[:sid - 1] + ss[sid:])
+            return {'id': sid, 'deleted': True}
+        t0 = self.time(a['from'], 'from') if a.get('from') is not None else None
+        t1 = self.time(a['to'], 'to') if a.get('to') is not None else None
+        given = a.get('signals')
+        sigs = None if given is None else [self.m.pick(self.st, x, one=True)[0]['full'] for x in (given if isinstance(given, list) else [given])]
+        s = ss[sid - 1] if sid is not None else None
+        if not s:
+            if t0 is None or t1 is None:
+                fail('span: from and to')
+            s = {'from': t0, 'to': t1, 'label': '', 'color': None, 'signals': None}
+            ss.append(s)
+        if t0 is not None:
+            s['from'] = t0
+        if t1 is not None:
+            s['to'] = t1
+        if s['from'] > s['to']:
+            s['from'], s['to'] = s['to'], s['from']
+        if 'label' in a:
+            s['label'] = '' if a['label'] is None else str(a['label'])
+        if 'color' in a:
+            s['color'] = a['color'] or None
+        if a.get('signals') is not None:
+            s['signals'] = sigs or None
+        self.st['spans'] = span_list(ss)
+        return {'id': ss.index(s) + 1}
 
     def c_group(self, a):
         name = str(a.get('name') if a.get('name') is not None else '').strip()
@@ -1349,6 +1446,200 @@ def edit_state(path, ops, model=None):
     return res
 
 
+# ---------------- the commands on a config file (mkhtml.py's): a rebuild keeps them ----------------
+CONFIG_OPS = {'bookmark': ('n', 't', 'at', 'signal', 'text', 'label', 'color', 'lift', 'top', 'link', 'delete'),
+              'arrow': ('id', 'from', 'to', 'shape', 'head', 'line', 'color', 'label', 'delete'),
+              'span': ('id', 'from', 'to', 'label', 'color', 'signals', 'delete')}
+
+
+def config_time(x, what):
+    """A time for a config: a text with a unit as it is ("825.654us", the converter reads it), a number in ps."""
+    if isinstance(x, str) and parse_t(x) is not None:
+        return x.strip()
+    if isinstance(x, (int, float)) and not isinstance(x, bool) and finite(x):
+        return int(x) if float(x).is_integer() else x
+    fail(f'{what}: "{x}" is not a time (ps, or a text with a unit: "250ns")')
+
+
+def config_ops(view, ops):
+    """The commands bookmark, arrow and span on a view of a config (its "bookmarks", "arrows", "spans", as written:
+    a bookmark's "at" stays until a "t" replaces it, and the other way) -> results; view changed in place."""
+    res = []
+    for o in ops:
+        try:
+            if not isinstance(o, dict) or o.get('op') not in CONFIG_OPS:
+                fail(f'{json.dumps((o or {}).get("op") if isinstance(o, dict) else o)}: in a config only {", ".join(CONFIG_OPS)} (the rest is a page\'s: '
+                     'give "page"); a config\'s markers are events ("marker": ["posedge X=label"])')
+            op, a = o['op'], {k: v for k, v in o.items() if k != 'op'}
+            bad = sorted(set(a) - set(CONFIG_OPS[op]))
+            if bad:
+                fail(f'{op}: no argument {", ".join(bad)} in a config (it takes: {", ".join(CONFIG_OPS[op])})')
+            res.append({'op': op, **globals()['cfg_' + op](view, a)})
+        except WaveError as e:
+            res.append({'op': o.get('op') if isinstance(o, dict) else None, 'error': str(e)})
+    return res
+
+
+def cfg_bookmark(view, a):
+    bms = view.setdefault('bookmarks', [])
+    n = a.get('n')
+    if n is not None and not (n == 'all' and a.get('delete')):
+        n = whole(n)
+        if n is None or n < 1:
+            fail('n: a bookmark number (1, 2 …)')
+    if a.get('delete'):
+        if n == 'all':
+            view['bookmarks'], view['arrows'] = [], []
+            return {'deleted': 'all'}
+        b = next((b for b in bms if isinstance(b, dict) and b.get('n') == n), None)
+        if b is None:
+            fail(f'no bookmark {n} (there are: {", ".join(str(x.get("n")) for x in bms if isinstance(x, dict)) or "none"})')
+        bms.remove(b)
+        view['arrows'] = [x for x in view.get('arrows') or [] if n not in (x.get('from'), x.get('to'))]
+        return {'n': n, 'deleted': True}
+    b = next((b for b in bms if isinstance(b, dict) and n is not None and b.get('n') == n), None)
+    if b is None:
+        if a.get('t') is None and a.get('at') is None:
+            fail('bookmark: t or at (a new one in a config)')
+        b = {'n': n if n is not None else max([0] + [x.get('n') or 0 for x in bms if isinstance(x, dict)]) + 1}
+        bms.append(b)
+    if 't' in a and 'at' in a:
+        fail('bookmark: t or at, not both')
+    if a.get('t') is not None:
+        b['t'] = config_time(a['t'], 't')
+        b.pop('at', None)   # its time given: no longer at the event
+    if a.get('at') is not None:
+        b['at'] = a['at']
+        b.pop('t', None)
+    if a.get('lift') is not None and a['lift'] not in (True, False, 'above', 'below'):
+        fail(f'lift: true, "above", "below" or false, not {json.dumps(a["lift"])}')
+    for k in ('signal', 'text', 'label', 'color', 'lift', 'top', 'link'):
+        if k in a:
+            if a[k] in (None, '', False):
+                b.pop(k, None)
+            else:
+                b[k] = a[k]
+    return {'n': b['n']}
+
+
+def cfg_arrow(view, a):
+    ars = view.setdefault('arrows', [])
+    i = given = a.get('id')
+    if i is not None:
+        i = whole(i)
+        if i is None or not 1 <= i <= len(ars):
+            fail(f'no arrow {given} (there are {len(ars)})')
+        i -= 1
+    elif a.get('from') is not None and a.get('to') is not None:
+        i = next((k for k, x in enumerate(ars) if x.get('from') == a['from'] and x.get('to') == a['to']), None)
+    if a.get('delete'):
+        if i is None:
+            fail('arrow: delete takes id, or from and to')
+        ars.pop(i)
+        return {'id': i + 1, 'deleted': True}
+    nums = {b.get('n') for b in view.get('bookmarks') or [] if isinstance(b, dict)}
+    for k in ('from', 'to'):
+        if a.get(k) is not None and a[k] not in nums:
+            fail(f'{k}: no bookmark {a[k]} in the view (there are: {", ".join(map(str, sorted(x for x in nums if x is not None))) or "none"})')
+    for k, table in (('shape', AR_SHAPES), ('head', AR_HEADS), ('line', AR_LINES)):
+        if a.get(k) is not None and a[k] not in table:
+            fail(f'{k}: one of ' + ' '.join(json.dumps(x) for x in table))
+    if i is None:
+        if a.get('from') is None or a.get('to') is None:
+            fail('arrow: from and to (bookmark numbers)')
+        ars.append({})
+        i = len(ars) - 1
+    x = ars[i]
+    for k in ('from', 'to', 'shape', 'head', 'line', 'color', 'label'):
+        if k in a:
+            if a[k] is None or (a[k] == '' and k != 'head'):
+                x.pop(k, None)
+            else:
+                x[k] = a[k]
+    if x.get('from') == x.get('to'):
+        fail('arrow: from and to are one bookmark')
+    return {'id': i + 1}
+
+
+def cfg_span(view, a):
+    ss = view.setdefault('spans', [])
+    sid = a.get('id')
+    if sid not in (None, 'all'):
+        sid = whole(sid)
+        if sid is None or not 1 <= sid <= len(ss):
+            fail(f'no span {a["id"]} (there are {len(ss)})')
+    if a.get('delete'):
+        if sid is None:
+            fail('span: delete takes id or "all"')
+        if sid == 'all':
+            ss.clear()
+        else:
+            ss.pop(sid - 1)
+        return {'id': sid, 'deleted': True}
+    if sid == 'all':
+        fail('span: id "all" is for delete')
+    if sid is None:
+        if a.get('from') is None or a.get('to') is None:
+            fail('span: from and to')
+        ss.append({})
+        sid = len(ss)
+    x = ss[sid - 1]
+    for k in ('from', 'to'):   # a time, an event, {"bookmark": n}: as the converter takes them
+        if a.get(k) is not None:
+            x[k] = config_time(a[k], k) if isinstance(a[k], (int, float)) or (isinstance(a[k], str) and parse_t(a[k]) is not None) else a[k]
+    for k in ('label', 'color', 'signals'):
+        if k in a:
+            if a[k] in (None, '', []):
+                x.pop(k, None)
+            else:
+                x[k] = a[k]
+    return {'id': sid}
+
+
+def edit_config(path, ops, view=None):
+    """The commands on a view of a config file (mkhtml.py's, its "views"; none: the top level) -> (results, view, the
+    JSON paths changed). The whole list is checked first: a bad command writes nothing. The file is written atomically,
+    its keys and the other views as they were; bookmarks a view takes from the top level become its own."""
+    try:
+        with open(path, encoding='utf-8') as f:
+            cfg = json.load(f)
+    except OSError as e:
+        fail(f'cannot read {path}: {e.strerror}')
+    except ValueError as e:
+        fail(f'{path}: not JSON ({e})')
+    if not isinstance(cfg, dict):
+        fail(f'{path}: a config is a JSON object')
+    views = cfg.get('views') if isinstance(cfg.get('views'), dict) else None
+    if views:
+        if view is None and len(views) == 1:
+            view = next(iter(views))
+        if view not in views:
+            fail(f'view: one of {", ".join(views)} (the config\'s "views")' if view is None else f'no view "{view}" in {path} (have: {", ".join(views)})')
+        target, at = views[view], f'views.{view}'
+    else:
+        target, at = cfg, ''
+    import copy
+    work = copy.deepcopy(target)
+    for k in ('bookmarks', 'arrows', 'spans'):   # the top level's, made the view's own
+        if views and k not in work and isinstance(cfg.get(k), list):
+            work[k] = copy.deepcopy(cfg[k])
+    res = config_ops(work, ops)
+    if any('error' in r for r in res):
+        return res, view, []
+    keys = [k for k in ('bookmarks', 'arrows', 'spans') if (work.get(k) or None) != (target.get(k) or None)]   # (none and [] alike)
+    for k in keys:
+        target[k] = work.get(k) or []
+    changed = [f'{at}.{k}' if at else k for k in keys]
+    if not changed:
+        return res, view, []
+    tmp = path + '.part'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
+        f.write('\n')
+    os.replace(tmp, path)
+    return res, view, changed
+
+
 def read_ops(text):
     """--ops: JSON (a command or a list), @file, or - (stdin)."""
     if text == '-':
@@ -1372,7 +1663,16 @@ def main():
     ap.add_argument('--get', action='store_true', help='print the edits (a page: of every view, or --view) as JSON')
     ap.add_argument('--views', action='store_true', help='print the views of a page: key, title, signals, revision of its edits')
     ap.add_argument('--commands', action='store_true', help='print the commands and their arguments')
+    ap.add_argument('--config', metavar='FILE', help='a config file (mkhtml.py\'s): bookmark, arrow and span on its view --view (a rebuild keeps '
+                    'them; a bookmark\'s "at" stays until a "t" replaces it)')
     a = ap.parse_args()
+    if a.config:
+        res, key, changed = edit_config(a.config, read_ops(a.ops or '[]'), a.view)
+        print(json.dumps(res, ensure_ascii=False))
+        bad = any('error' in r for r in res)
+        print(f'viewedit: {a.config}: ' + (f'{key}: ' if key else '') + ('nothing written: a command failed' if bad else ', '.join(changed) or 'nothing changed'),
+              file=sys.stderr)
+        return 1 if any('error' in r for r in res) else 0
     if a.commands:
         for k, v in COMMANDS.items():
             print(f'{k:10} {v}' + (f'   (in a page only: {LIVE_ONLY[k]})' if k in LIVE_ONLY else ''))

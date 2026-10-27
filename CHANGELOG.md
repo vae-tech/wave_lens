@@ -5,6 +5,32 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.28 — 27 October 2026
+
+What an agent missed while it built an annotated page of a real test (six views, 32 bookmarks, 19 assertions): times
+found in the dump instead of by hand, markup on the waves, warnings for what the page would not show, a page a third
+of the size, and tools to see and keep its work.
+
+- **A bookmark at an event.** In a config `"at"` instead of `"t"`: `"posedge X"`, `{"signal", "value"}` (an enum label,
+  a number), `{"expr", "clock"}` (an SV expression, the sva engine), `{"assert", "result"}` (an attempt of a binding),
+  with `nth`, `from`, `to`; a marker `"on"` the same. The build finds the time; no match is an error naming the bookmark.
+  One resolver with the MCP `wave_find` (`tools/wavefind.py`).
+- **Markup on the waves** (the viewer and the static SVG): `"lift": "below"` (a lane under the signal), a bookmark's
+  `"label"` by its circle, `{dt}` / `{cycles}` / `{cycles:CLK}` in arrow labels (filled where they are drawn), `"spans"`:
+  coloured stretches of time over every row or some, their ends a time, an event or a bookmark (the `span` command);
+  a bookmark's `"link"` opens another view of the page.
+- **Lint** at every build (`mkhtml.py --lint`, `--strict`): a bookmark outside its window or on no row, arrows to no
+  bookmark, markers that match nothing, bindings to no assertion, `svaShow` names of none, overlapping circles, unknown
+  keys, hex enum fills in a theme that may be dark.
+- **Assertions:** the sampled times once per view and clock (`sva.cycles`): six windows with 19 bindings 6.8 → 2.8 MB;
+  a top-level `"report"` puts bindings into the printable section only. The panel says how many `svaShow` draws.
+- **Agents:** MCP enum labels from the types file beside the dump, argument synonyms, an unknown argument an error;
+  `view_edit {config}` (a rebuild keeps the marks); `view_get` with `picture` on a page's file through
+  `tools/pageshot.py` (headless Chromium: PNGs of a page's views; the one tool outside the standard library, optional);
+  `wavemcp.py --lean` (a third fewer characters per request).
+- **Questa:** `wavelens_types` before `run` (a batch vsim ends at `$finish`), `wavelens_vcd FILE [ROOT]`.
+- The APB example shows the new keys; README and guide pictures made again.
+
 ## 0.27 — 27 October 2026
 
 A Questa 2023 VCD as the user's simulation writes it: its enums at their own width, and the dump cut off at its end.

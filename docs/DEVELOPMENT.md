@@ -239,6 +239,13 @@ label: keep Settings → Actions → General → *Approval for running fork pull
 **Require approval for all external contributors**, and approve nothing you have not read. WSL may stop the distribution
 some time after its last terminal closed; while it is down the jobs wait.
 
+## The one tool outside the standard library
+
+`tools/pageshot.py` makes PNGs of a page's views in a headless Chromium (Python playwright, as `tests/smoke.py` and
+`tests/shots.py`): an agent sees its markup without a live page (`view_get` with `picture` on a file runs it). It is
+optional: without playwright it says so (exit 2) and the MCP server answers without the picture. Every other tool stays
+standard library only, run as `python3 -I`.
+
 ## Measured
 
 The dump reader (`tools/dumpscan.py`, `vcd2wavedrom.py`), measured on this machine (16 CPUs):
@@ -275,6 +282,16 @@ step plot, a redraw at Fit 1050 → 9 ms and its SVG 1.5 MB → 120 KB (one bar 
 value), 500 000 changes 97 ms (before: the page did not open in 30 s).
 
 The SVA engine's numbers are in [`sva/ENGINE.md`](sva/ENGINE.md) *Performance*.
+
+A page with assertions (stage 13.1; `docs/reviews/review-2026-10-27-wave-tour/probe/gen.py`: a VCD of 17 780 cycles of
+12 MHz, 19 assertions, six windowed views with bindings as in the report that asked for it): 6.76 MB when every binding
+carried its sampled times (`results.cycles`, nearly the whole dump's even in a window: the attempts index from the start),
+2.80 MB with them once per view and clock (`sva.cycles`); the same views without bindings 1.24 MB, and 1.25 MB with the
+19 in a top-level `"report"` only. Built in 4 s. The report's 23 MB page had `"bind": "*"` in each of its six views.
+
+The MCP tool list (stage 13): 8 845 characters at 0.27, 9 649 with the types file and the synonyms' schemas and the config
+edits; `--lean` (first sentences, no property descriptions, `types` not listed) 6 474, a third fewer, read again with
+every request; the scripted `make mcp-bench` answers the same.
 
 The MCP server (`make mcp-bench AGENT=claude MODEL=sonnet REPS=2`, `AGENT=codex`; 21 October 2026, the tool list of
 5036 characters): every token per task, the median of two runs without the tools → with them (saved). Every one of the

@@ -50,6 +50,7 @@ help:
 	@echo 'make types-fixture  tests/unit/types in QuestaSim again: questa.vcd, questa.types.json (another Questa version: read the diff)'
 	@echo 'make shots      the README screenshots in docs/img/ and the visual regression'"'"'s tests/visual (after make examples)'
 	@echo 'make shots-check  both made again into $$(BUILD), compared pixel by pixel with the committed ones (tests/pngdiff.py): a change fails'
+	@echo 'make pageshot   HTML=page.html [VIEW=key THEME=dark|light|both OUT=dir]: PNGs of a page'"'"'s views in a headless Chromium (tools/pageshot.py, playwright)'
 	@echo 'make guide-shots  the pictures of the guides in docs/guides/img (after make examples; ONLY=gaps,sva: those guides)'
 	@echo 'make html       one self-contained page: the demo, CONFIG=work/x.config.json, or WAVES=work/x.vcd (config made if missing);'
 	@echo '                SVA="checks/*.sv" BIND="name@scope,…": assertions bound, evaluated, an Assertions section'
@@ -180,6 +181,11 @@ types-fixture:
 shots:
 	$(PW) tests/shots.py --build $(B) $(if $(ONLY),--only $(ONLY))
 	$(PW) tests/shots.py --build $(B) --set visual $(if $(ONLY),--only $(ONLY))
+
+# PNGs of a page's views, as a person sees them (tools/pageshot.py: playwright, the one tool outside the standard library)
+pageshot:
+	@test -n "$(HTML)" || { echo 'pageshot: HTML=page.html (VIEW=key THEME=dark|light|both OUT=dir)'; exit 1; }
+	$(PW) tools/pageshot.py $(HTML) $(if $(VIEW),--view $(VIEW)) $(if $(THEME),--theme $(THEME)) $(if $(OUT),--out $(OUT))
 
 # the pictures of the guides (docs/guides/*.html): docs/guides/img/*.png; the gaps guide's dump is made in BUILD/guides
 guide-shots:
@@ -381,4 +387,4 @@ clean-all:
 	$(if $(filter $(B),/ $(CURDIR) $(HOME) $(abspath $(HOME)/..)),$(error clean-all: BUILD=$(B) is not a build directory))
 	rm -rf $(B)
 
-.PHONY: unit-bless unit-shuffle vsix vscode-e2e wavelens help demo demo-fst fst example examples questa types-fixture shots guide-shots html config sva-build dist dist-linux dist-windows sva-test sva-bless sva-examples sva-verify sva-eval sva-spike mcp-bench smoke shots-check unit check fmt lint clean clean-all
+.PHONY: pageshot unit-bless unit-shuffle vsix vscode-e2e wavelens help demo demo-fst fst example examples questa types-fixture shots guide-shots html config sva-build dist dist-linux dist-windows sva-test sva-bless sva-examples sva-verify sva-eval sva-spike mcp-bench smoke shots-check unit check fmt lint clean clean-all

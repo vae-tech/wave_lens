@@ -14,7 +14,9 @@ Modes
 Config file (--config cfg.json): every option can be a key (dashes or underscores), command-line options win.
   "signals" list or comma string, or a catalog {full.path: {per-signal settings}} (what mkconfig.py writes),
   "enum" {sig: {"0": "IDLE"}}, "group" {name: [sigs]}, "hierarchy" true (nest signals in groups by scope),
-  "gap" ["A:B"], "marker" ["EXPR=label"], "bookmarks" [{"n": 1, "t": 85120000, "signal": "tb.x", "text": "…"}], "arrows" [{"from": 1, "to": 2}],
+  "gap" ["A:B"], "marker" ["EXPR=label", {"on": EVENT, "label"}], "bookmarks" [{"n": 1, "t": 85120000, "signal": "tb.x", "text": "…"}]
+  (or "at": EVENT instead of "t": the time found in the dump; EVENT is "posedge X", {"signal", "value" | "edge"}, {"expr",
+  "clock"}, {"assert", "result", "point"}, with "nth", "from", "to": tools/wavefind.py), "arrows" [{"from": 1, "to": 2}],
   "config" {...} (copied into the WaveJSON "config": theme, colors,
   style, radix, fold, rowHeight, sort, …), "views" {key: {...}} named variants of the top-level settings (pick one
   with --view; mkhtml.py builds them all). With a catalog, a view's "signals" list selects from it ("*" and "?"
@@ -34,6 +36,10 @@ Config file (--config cfg.json): every option can be a key (dashes or underscore
   variable is not a signal to draw. A vector dumped in parts (bit by bit "err[0]" "err[1]", or ranges apart
   "data [7:0]" "data [15:8]" under several id codes) is one signal: its lowest declared index to its highest.
 
+Warnings ("vcd2wavedrom: lint: <code>: <JSON path>: <text>", on stderr; mkhtml.py --lint / --strict, docs/USAGE.md "Lint"): a
+bookmark outside the window or on no row of the view, a number twice, an arrow to no bookmark, a marker that matches
+nothing, a binding to no assertion, an svaShow name of none, two circles that overlap, unknown keys, hex enum fills.
+
 Examples
   python3 -I tools/vcd2wavedrom.py --waves dump.vcd --scope tb --clock clk --from 0ns --to 400ns \
       --signals clk,state,data=DATA --enum state=0:IDLE,1:RUN --gap 200ns:300ns --out cyc.json
@@ -45,7 +51,7 @@ import argparse, bisect, collections, decimal, functools, json, math, os, re, st
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
-import dumpscan, svabuild, wavejson  # noqa: E402
+import dumpscan, svabuild, wavefind, wavejson  # noqa: E402
 from common import UNIT_PS, WaveError, add_sva_bin_arg, check_config, glob_re, run_main  # noqa: E402
 
 INT_KINDS = {'integer', 'int', 'shortint', 'longint', 'byte'}   # $var types read as signed decimal without an enum (wavelens/src/vcd.js VCD_INT)
@@ -62,7 +68,7 @@ def to_ps(s):
 class Builtin:
     """The built-in reader: one pass over the dump as VCD text (an FST through fst2vcd or sva vcd), keeping only the requested
     signals; the window, clock sampling and markers are then computed in memory."""
-    EVENT = re.compile(r'\s*(?:(posedge|negedge|edge)\s+)?([^\s()|&!=<>~^*]+)\s*')
+    EVENT = wavefind.EVENT
     keys = frozenset()   # the streams prepare() reads for: their raw changes go once made (none: a reader that keeps them)
 
     def __init__(self, waves, scope):
@@ -72,13 +78,13 @@ class Builtin:
         self.streams = {}
 
     def resolve(self, p):
-        q = p if not self.scope or p.startswith(self.scope + '.') else self.scope + '.' + p
-        hit = self.decl.find(q)
-        if hit:
-            return hit, None
-        m = re.fullmatch(r'(.+)\[(\d+):(\d+)\]', q)
-        if m and self.decl.find(m.group(1)):
-            return self.decl.find(m.group(1)), (int(m.group(2)), int(m.group(3)))
+        for q in dict.fromkeys([p if not self.scope or p.startswith(self.scope + '.') else self.scope + '.' + p, p]):   # under the scope, else a full path
+            hit = self.decl.find(q)
+            if hit:
+                return hit, None
+            m = re.fullmatch(r'(.+)\[(\d+):(\d+)\]', q)
+            if m and self.decl.find(m.group(1)):
+                return self.decl.find(m.group(1)), (int(m.group(2)), int(m.group(3)))
         raise WaveError(f'vcd2wavedrom: no signal "{p}" in {os.path.basename(self.waves)}' + (f' (scope {self.scope})' if self.scope else ''))
 
     def event_signal(self, expr):
@@ -95,7 +101,7 @@ class Builtin:
         extra = ([self.resolve(clock)] if clock else []) + [self.resolve(self.event_signal(e)[1]) for e in events]
         codes = {c for path, _ in self.res + extra for c, _ in self.decl.vars[path].members}
         self.d = dumpscan.read(self.waves, 'collect', codes)
-        self.keys = {(path, sl) for path, sl in self.res} | {(path, None) for path, _ in extra}   # who reads each id code: its
+        self.keys = {(path, sl) for path, sl in self.res} | {(path, None) for path, _ in extra} | set(extra)   # who reads each id code: its
         self.users = collections.Counter(c for path, _ in self.keys for c, _ in dict.fromkeys(self.decl.vars[path].members))   # changes go once all have
         self.t_start, self.t_end = self.d.t_start, self.d.t_end
         self.specs = [(path + (f'[{sl[0]}:{sl[1]}]' if sl else ''), sl[0] - sl[1] + 1 if sl else self.decl.vars[path].width) for path, sl in self.res]
@@ -150,15 +156,7 @@ class Builtin:
         return out
 
     def edges(self, path, kind, t0, t1):
-        st, out, prev = self.stream(path), [], None
-        for t, v in st:
-            if prev is not None and t0 <= t <= t1:
-                rise = (prev == '0' and v in '1xz') or (prev in 'xz' and v == '1')
-                fall = (prev == '1' and v in '0xz') or (prev in 'xz' and v == '0')
-                if (kind == 'posedge' and rise) or (kind == 'negedge' and fall) or (kind == 'edge' and (rise or fall)) or (kind == 'change' and v != prev):
-                    out.append(t)
-            prev = v
-        return out
+        return wavefind.edge_times(self.stream(path), kind, t0, t1)
 
     def sampled(self, clock, t0, t1):
         times = self.edges(self.resolve(clock)[0], 'posedge', t0, t1)
@@ -356,7 +354,7 @@ def nice_floor(x):
 
 # ---------------- options: command line + config file ----------------
 LIST_KEYS = ('signals', 'gap', 'enum', 'group', 'marker', 'sva', 'bind', 'exprs')
-SKIP_KEYS = ('views', 'page', 'config', 'description', 'comment', 'render', 'note', 'select', 'rules', 'typed')   # not converter options
+SKIP_KEYS = ('views', 'page', 'config', 'description', 'comment', 'render', 'note', 'select', 'rules', 'typed', 'report')   # not converter options
 SIG_KEYS = ('show', 'alias', 'radix', 'color', 'fill', 'style', 'enum', 'width', 'changes', 'enumColors', 'analog', 'height', 'fields')   # catalog entry keys
 
 
@@ -382,7 +380,10 @@ def parser():
     ap.add_argument('--marker', action='append', help="'EVENT=label', EVENT is 'posedge X', 'negedge X', 'edge X' or 'X' (any change)")
     ap.add_argument('--title', help='head.text')
     ap.add_argument('--bookmarks', help='JSON list [{"n", "t", "signal", "text", "color", "lift", "top"}] (usually in the config file; the viewer\'s JSON button writes it)')
-    ap.add_argument('--arrows', help='JSON list [{"from", "to", "shape", "head", "line", "color", "label"}] between bookmarks')
+    ap.add_argument('--arrows', help='JSON list [{"from", "to", "shape", "head", "line", "color", "label"}] between bookmarks (label: {dt}, {cycles}, '
+                    '{cycles:CLK} filled at the ends)')
+    ap.add_argument('--spans', help='JSON list [{"from", "to", "label", "color", "signals"}]: coloured stretches of time; from / to a time, an event '
+                    '(as a bookmark\'s "at") or {"bookmark": n}')
     ap.add_argument('--sva', action='append', help='SystemVerilog assertion file for the page (repeatable; one compilation unit, in order)')
     ap.add_argument('--bind', action='append', help='NAME@SCOPE: bind assertion NAME to instance SCOPE, evaluated over the dump (repeatable)')
     ap.add_argument('--expr', dest='exprs', action='append', help='an expression of the signals the page draws as a row (ƒ expressions; repeatable), e.g. "PSEL && !PREADY"')
@@ -510,11 +511,13 @@ def parse_groups(items):  # -> [(name, [members])]
     return out
 
 
-def parse_markers(items):  # -> [(expr, label)]
+def parse_markers(items):  # -> [(expr or an event object (wavefind), label)]
     out = []
     for mk in items:
         if isinstance(mk, dict):
-            out.append((mk['on'], mk.get('label', mk['on'])))
+            if 'on' not in mk:
+                raise WaveError(f'vcd2wavedrom: a marker {{"on": EVENT, "label"}}, not {json.dumps(mk)[:80]}')
+            out.append((mk['on'], mk.get('label', mk['on'] if isinstance(mk['on'], str) else 'marker')))
         else:
             expr, _, lab = mk.rpartition('=')
             out.append((expr, lab) if expr else (lab, lab))
@@ -551,7 +554,11 @@ def collect_specs(a, rd):
         raise WaveError('vcd2wavedrom: no signals to show (all "show": false?)')
     paths = [s['path'] for s in specs]
     marks = parse_markers(a.marker)
-    for s, (absp, w), k in zip(specs, rd.prepare(paths, a.clock, [e for e, _ in marks]), getattr(rd, 'kinds', None) or [None] * len(specs)):
+    events = [e for e, _ in marks if isinstance(e, str)] + [n for e, _ in marks if not isinstance(e, str) for n in wavefind.signals_of(e)]
+    events += [n for b in bookmark_list(a) if isinstance(b, dict) and b.get('at') is not None for n in wavefind.signals_of(b['at'])]
+    events += [n for sp in span_list(a) if isinstance(sp, dict) for k in ('from', 'to') if isinstance(sp.get(k), (str, dict)) and not is_time(sp[k])
+               for n in wavefind.signals_of(sp[k])]
+    for s, (absp, w), k in zip(specs, rd.prepare(paths, a.clock, events), getattr(rd, 'kinds', None) or [None] * len(specs)):
         s['abs'], s['width'], s['kind'] = absp, w, k
     t_from = to_ps(a.t_from) if a.t_from else rd.t_start
     t_to = to_ps(a.t_to) if a.t_to else rd.t_end
@@ -741,21 +748,34 @@ def finish(a, rd, doc, specs, marks, t_from, t_to):
 
     # ---- markers from event expressions (posedge / negedge / edge / any change of a signal) ----
     markers = []
-    for expr, lab in marks:
-        hits = rd.events(expr, t_from, t_to)
-        for i, t in enumerate(hits):
-            markers.append({'t': t, 'label': lab if len(hits) == 1 else f'{lab} {i + 1}'})
+    a.no_match = []   # the markers that matched nothing (lint)
+    for i, (expr, lab) in enumerate(marks):
+        if isinstance(expr, str):
+            hits = rd.events(expr, t_from, t_to)
+        else:   # an event object: every match, or the nth one
+            sp = wavefind.spec(expr)
+            hits = event_times(a, rd, sp, t_from, t_to, specs)
+            if 'nth' in expr:
+                hits = hits[sp['nth'] - 1:sp['nth']]
+        if not hits:
+            a.no_match.append((i, expr if isinstance(expr, str) else json.dumps(expr, ensure_ascii=False)))
+        for k, t in enumerate(hits):
+            markers.append({'t': t, 'label': lab if len(hits) == 1 else f'{lab} {k + 1}'})
     if markers:
         doc['markers'] = sorted(markers, key=lambda m: m['t'])
-    for k in ('bookmarks', 'arrows'):
-        v = getattr(a, k)
-        if v:
-            doc[k] = json.loads(v) if isinstance(v, str) else v
+    if a.bookmarks:
+        doc['bookmarks'] = bookmark_list(a)
+    if a.arrows:
+        doc['arrows'] = json.loads(a.arrows) if isinstance(a.arrows, str) else a.arrows
     a.sva_aliases = {s['abs']: s['name'] for s in specs if s.get('abs') and s['name'] != leaf_name(a, s['path'])}   # shown names, for the assertions
     if a.sva or a.bind:
         pfx = getattr(a, 'sva_prefixes', None)
         pfx = (a.wave_config or {}).get('sortIgnore') if pfx is None else pfx   # names resolve as in the page
         doc['sva'] = svabuild.build(a.sva, a.bind, a.waves, a.sva_bin, t_from, t_to, [pfx] if isinstance(pfx, str) else pfx, a.sva_aliases)
+    if any(isinstance(b, dict) and 'at' in b for b in doc.get('bookmarks') or []):   # after the assertions: an "at" of a binding's attempt
+        doc['bookmarks'] = bookmarks_at(a, rd, doc['bookmarks'], specs, t_from, t_to)
+    if span_list(a):
+        doc['spans'] = spans_of(a, rd, doc.get('bookmarks') or [], specs, t_from, t_to)
     if a.exprs:   # the page values them (the rows "ƒ expressions"); a scope: {"expr", "scope"}
         doc.setdefault('sva', {})['exprs'] = a.exprs
     doc['meta'] = {'waves': os.path.basename(a.waves), 'tool': rd.tool, 'mode': 'clock' if a.clock else 'exact',
@@ -774,6 +794,316 @@ def finish(a, rd, doc, specs, marks, t_from, t_to):
         doc['meta']['omitted'] = {'why': 'config', 'paths': omitted}
 
 
+# ---------------- events: a bookmark "at", a marker "on" (tools/wavefind.py, the rules of wave_find) ----------------
+def bookmark_list(a):
+    """The bookmarks of the options (a list, or its JSON text from --bookmarks) -> list."""
+    v = a.bookmarks
+    if isinstance(v, str):
+        try:
+            v = json.loads(v)
+        except json.JSONDecodeError as e:
+            raise WaveError(f'vcd2wavedrom: --bookmarks: {e}') from None
+    a.bookmarks = v if isinstance(v, list) else [] if v is None else v
+    return a.bookmarks if isinstance(a.bookmarks, list) else []
+
+
+def span_list(a):
+    """The spans of the options (a list, or its JSON text from --spans)."""
+    v = getattr(a, 'spans', None)
+    if isinstance(v, str):
+        try:
+            v = json.loads(v)
+        except json.JSONDecodeError as e:
+            raise WaveError(f'vcd2wavedrom: --spans: {e}') from None
+    a.spans = v if isinstance(v, list) else []
+    return a.spans
+
+
+def is_time(v):
+    """A span's end that is a time: ps, or a number with a unit (else an event or {"bookmark": n})."""
+    return isinstance(v, (int, float)) and not isinstance(v, bool) or isinstance(v, str) and bm_time(v) is not None
+
+
+def spans_of(a, rd, bms, specs, t_from, t_to):
+    """The spans with their ends in ps: a time as it is, a bookmark's time, an event's first match (or its "nth")."""
+    out, at = [], where_of(a)
+    for i, sp in enumerate(span_list(a)):
+        where = f'{at}spans[{i}]'
+        if not isinstance(sp, dict) or 'from' not in sp or 'to' not in sp:
+            raise WaveError(f'vcd2wavedrom: {where}: a span is {{"from", "to", "label"?, "color"?, "signals"?}}')
+        ends = []
+        for k in ('from', 'to'):
+            v = sp[k]
+            if is_time(v):
+                ends.append(bm_time(v))
+            elif isinstance(v, dict) and set(v) == {'bookmark'}:
+                b = next((b for b in bms if isinstance(b, dict) and b.get('n') == v['bookmark']), None)
+                if b is None or bm_time(b.get('t')) is None:
+                    raise WaveError(f'vcd2wavedrom: {where}: "{k}": no bookmark {v["bookmark"]} with a time in the view')
+                ends.append(bm_time(b['t']))
+            else:
+                try:
+                    e = wavefind.spec(v)
+                    ends.append(wavefind.pick(event_times(a, rd, e, t_from, t_to, specs), e, f'{where}.{k}', f'{fmt_t(t_from)}…{fmt_t(t_to)}'))
+                except WaveError as err:
+                    raise WaveError(str(err) if str(err).startswith(where) else f'{where}.{k}: {err}') from None
+        x = {**{k: sp[k] for k in sp if k not in ('from', 'to')}, 'from': min(ends), 'to': max(ends)}
+        out.append({k: (int(v) if isinstance(v, float) and v.is_integer() else v) for k, v in x.items()})
+    return out
+
+
+def where_of(a):
+    w = getattr(a, 'lint_at', None) or (f'views.{a.view}' if getattr(a, 'view', None) else None)
+    return (w + '.') if w else ''
+
+
+def ev_time(v, what):
+    """An event's "from" / "to": ps, or a time with a unit."""
+    t = bm_time(v)
+    if t is None:
+        raise WaveError(f'"{what}" {json.dumps(v)} is no time (ps, or a number with a unit: "800us")')
+    return t
+
+
+def event_times(a, rd, sp, t_from, t_to, specs):
+    """The times of an event (wavefind.spec) in this view's dump -> [ps], in order: a signal's value or edges in the
+    window (the event's "from" / "to", else the view's), an expression's matches (the sva engine), a binding's attempts
+    over the whole dump."""
+    t0 = ev_time(sp['from'], 'from') if 'from' in sp else None
+    t1 = ev_time(sp['to'], 'to') if 'to' in sp else None
+    if sp['kind'] == 'signal':
+        t0, t1 = t_from if t0 is None else t0, t_to if t1 is None else t1
+        path, sl = rd.resolve(sp['signal'])
+        st = rd.stream(path, sl)
+        if 'value' not in sp:
+            return wavefind.edge_times(st, sp['edge'], t0, t1)
+        width = sl[0] - sl[1] + 1 if sl else rd.decl.vars[path].width
+        own = next((s for s in specs if s['abs'] == path + (f'[{sl[0]}:{sl[1]}]' if sl else '')), None)
+        if own:
+            enum, radix = own['enum'], own['radix']
+        else:
+            enums = parse_enums(a.enum)
+            enum, radix = enums.get(sp['signal'], enums.get(path)) or (None if sl else rd.decl.vars[path].enum), None
+        return wavefind.value_times(st, sp['value'], width, t0, t1, lambda v: label(v, width, enum, radix))
+    if sp['kind'] == 'expr':
+        t0, t1 = t_from if t0 is None else t0, t_to if t1 is None else t1
+        clock = sp.get('clock') or a.clock
+        if not clock:
+            raise WaveError('an expression is sampled on a clock: give "clock" (an exact view has none)')
+        scope = sp.get('scope', a.scope or '')
+        clk = rd.resolve(clock)[0]
+        cname = clk[len(scope) + 1:] if scope and clk.startswith(scope + '.') else clk
+        res, msgs = wavefind.cover(svabuild.find_bin(a.sva_bin), a.waves, sp['expr'], cname, scope, t0, t1, sp.get('edge') or 'posedge',
+                                   t_start=rd.t_start, t_end=rd.t_end)
+        return [h[1] for h in wavefind.cover_hits(res, msgs, scope)[0]]
+    return [t for t in wavefind.attempt_times(assert_results(a, sp), sp['result'], sp.get('point'))
+            if (t0 is None or t >= t0) and (t1 is None or t <= t1)]
+
+
+def assert_results(a, sp):
+    """The results of a binding over the whole dump (cached per options): the assertion named, in its "scope", else the
+    scope of the one binding of it (the view's "bind"), else the view's scope."""
+    if not a.sva:
+        raise WaveError(f'an event {{"assert": "{sp["assert"]}"}} needs the "sva" files')
+    exe = svabuild.find_bin(a.sva_bin)
+    if not exe:
+        raise WaveError(f'an event {{"assert": "{sp["assert"]}"}} needs the sva CLI (make sva-build)')
+    scope = sp.get('scope')
+    if scope is None:
+        import fnmatch
+        scopes = list(dict.fromkeys(b['scope'] for b in svabuild.bind_list(a.bind) if fnmatch.fnmatchcase(sp['assert'], b['assert'])))
+        if len(scopes) > 1:
+            raise WaveError(f'"{sp["assert"]}" is bound to {" and ".join(scopes)}: give "scope"')
+        scope = scopes[0] if scopes else (a.scope or '')
+    cache = a.__dict__.setdefault('assert_cache', {})
+    key = (sp['assert'], scope)
+    if key not in cache:
+        pfx = getattr(a, 'sva_prefixes', None)
+        pfx = (a.wave_config or {}).get('sortIgnore') if pfx is None else pfx
+        fs = svabuild.parse_files(a.sva, exe, quiet=True)
+        bs, notes = svabuild.evaluate([{'assert': sp['assert'], 'scope': scope}], a.sva, a.waves, exe, parsed=fs, quiet=True,
+                                      prefixes=[pfx] if isinstance(pfx, str) else pfx, aliases=getattr(a, 'sva_aliases', None))
+        r = bs[0].get('results') if bs else None
+        if not r or r['assertions'][0].get('missing'):
+            why = '; '.join(notes) or (f'missing {", ".join(r["assertions"][0]["missing"])}' if r else 'not evaluated')
+            raise WaveError(f'"{sp["assert"]}"@{scope or "(top)"}: {why}')
+        cache[key] = r
+    return cache[key]
+
+
+def bookmarks_at(a, rd, bms, specs, t_from, t_to):
+    """Each bookmark with "at": its time ("t", ps) from the event; the event goes along (the viewer and view_edit {config}
+    keep it). No match, "t" too: an error that names the bookmark."""
+    out, at = [], where_of(a)
+    for i, b in enumerate(bms):
+        if not isinstance(b, dict) or 'at' not in b:
+            out.append(b)
+            continue
+        where = f'{at}bookmarks[{i}] (n {b.get("n", i + 1)})'
+        if 't' in b:
+            raise WaveError(f'vcd2wavedrom: {where}: "t" and "at" both: one time')
+        try:
+            sp = wavefind.spec(b['at'])
+            win = f'{fmt_t(ev_time(sp["from"], "from") if "from" in sp else t_from)}…{fmt_t(ev_time(sp["to"], "to") if "to" in sp else t_to)}' \
+                if sp['kind'] != 'assert' else 'the whole dump'
+            t = wavefind.pick(event_times(a, rd, sp, t_from, t_to, specs), sp, where, win)
+        except WaveError as e:
+            raise WaveError(str(e) if str(e).startswith(where) else f'{where}: {e}') from None
+        out.append({**b, 't': int(t) if float(t).is_integer() else t})
+    return out
+
+
+# ---------------- lint: what the page would draw otherwise than meant, or not at all, said at build time ----------------
+BM_KEYS = ('n', 't', 'at', 'signal', 'text', 'color', 'lift', 'top', 'link', 'to', 'shape', 'label')   # model.js bmNorm (to, shape, label: an old arrow)
+AR_KEYS = ('from', 'to', 'shape', 'head', 'line', 'color', 'label')                     # model.js arNorm
+MK_KEYS = ('on', 'label')
+SPAN_KEYS = ('from', 'to', 'label', 'color', 'signals')
+CLOSE_PX = 16   # two circles of one row nearer than this at 1000 px of waves overlap (a circle is 16 px wide)
+HEX = re.compile(r'#[0-9a-fA-F]{3,8}')
+
+
+def row_paths(items, anc=()):
+    """The rows' full paths as the page names them (model.js: a signal's "path", else its groups' names and its name)."""
+    out = []
+    for it in items:
+        if isinstance(it, list) and it and isinstance(it[0], str):
+            out += row_paths(it[1:], anc + (it[0],))
+        elif isinstance(it, list):
+            out += row_paths(it, anc)
+        elif isinstance(it, dict) and 'name' in it:
+            out.append(it.get('path') or '.'.join(anc + (it['name'],)))
+    return out
+
+
+def bm_time(t):
+    """A bookmark's "t": ps, or a time with a unit -> ps | None (model.js parseT)."""
+    if isinstance(t, bool):
+        return None
+    if isinstance(t, (int, float)):
+        return float(t)
+    try:
+        return to_ps(t) if isinstance(t, str) and not re.fullmatch(r'\s*[\d.]+\s*', t) else float(t)
+    except (WaveError, ValueError, TypeError):
+        return None
+
+
+def lint(doc, a, where=None):
+    """The view's WaveJSON and options -> ["<code>: <JSON path>: <text>"]: a bookmark outside the window or not on a row of
+    the view (the page leaves it out or puts it on the axis, without a word), a number twice, an arrow to no bookmark, a
+    marker that matched nothing, a binding to no assertion, an svaShow name of none, two circles that overlap, unknown keys,
+    hex colours in a theme that may be dark. where: the config path of the view ("views.gap"), else the top level."""
+    at = (where + '.') if where else ''
+    out = []
+    m = doc.get('meta') or {}
+    t0, t1 = m.get('from_ps'), m.get('to_ps')
+    rows = row_paths(doc.get('signal') or [])
+    have = set(rows)
+    leaf = {}
+    for r in rows:
+        leaf.setdefault((svabuild.split_path(r) or [r])[-1], []).append(r)
+    bms = doc.get('bookmarks') if isinstance(doc.get('bookmarks'), list) else []
+    seen, placed = {}, []
+    for i, b in enumerate(bms):
+        p = f'{at}bookmarks[{i}]'
+        if not isinstance(b, dict):
+            out.append(f'bookmark-bad: {p}: not an object ({b!r})')
+            continue
+        bad = sorted(set(b) - set(BM_KEYS))
+        if bad:
+            out.append(f'bookmark-key: {p}: unknown key(s) {", ".join(bad)} (have: {", ".join(BM_KEYS)})')
+        n = b.get('n', i + 1)
+        t = bm_time(b.get('t'))
+        if t is None:
+            out.append(f'bookmark-time: {p} (n {n}): "t" {b.get("t")!r} is no time (ps, or a number with a unit: "825.654us")')
+        elif t0 is not None and t1 is not None and not t0 <= t <= t1:
+            out.append(f'bookmark-outside-view: {p} (n {n}): {b.get("t")} is outside the view {fmt_t(t0)}…{fmt_t(t1)}: not drawn')
+        if n in seen:
+            out.append(f'bookmark-duplicate: {p}: number {n} again ({at}bookmarks[{seen[n]}]): arrows take the first')
+        seen.setdefault(n, i)
+        sig = b.get('signal')
+        if sig and sig not in have:
+            hint = leaf.get((svabuild.split_path(str(sig)) or [str(sig)])[-1])
+            out.append(f'bookmark-signal-missing: {p} (n {n}): "{sig}" is no row of the view: the circle goes on the time axis'
+                       + (f' (a row is named by its full path: {" or ".join(hint[:3])})' if hint else ''))
+        link = b.get('link')
+        lv = link if isinstance(link, str) else link.get('view') if isinstance(link, dict) else None
+        if link is not None and (not lv or (getattr(a, 'views_known', None) is not None and lv not in a.views_known)):
+            out.append(f'bookmark-link-missing: {p} (n {n}): "link" {json.dumps(link)} is no view of the page' +
+                       (f' (have: {", ".join(a.views_known)})' if getattr(a, 'views_known', None) else ''))
+        if t is not None and sig:
+            placed.append((n, t, sig, 'below' if b.get('lift') == 'below' else bool(b.get('lift'))))   # (one row, one lane)
+    nums = set(seen)
+    for i, ar in enumerate(doc.get('arrows') if isinstance(doc.get('arrows'), list) else []):
+        p = f'{at}arrows[{i}]'
+        if not isinstance(ar, dict):
+            out.append(f'arrow-bad: {p}: not an object ({ar!r})')
+            continue
+        bad = sorted(set(ar) - set(AR_KEYS))
+        if bad:
+            out.append(f'arrow-key: {p}: unknown key(s) {", ".join(bad)} (have: {", ".join(AR_KEYS)})')
+        for end in ('from', 'to'):
+            if ar.get(end) not in nums:
+                out.append(f'arrow-end-missing: {p}: "{end}" {ar.get(end)!r} is no bookmark of the view (have: {", ".join(map(str, sorted(nums))) or "none"}): not drawn')
+    for i, sp in enumerate(doc.get('spans') or []):
+        p = f'{at}spans[{i}]'
+        bad = sorted(set(sp) - set(SPAN_KEYS))
+        if bad:
+            out.append(f'span-key: {p}: unknown key(s) {", ".join(bad)} (have: {", ".join(SPAN_KEYS)})')
+        if t0 is not None and t1 is not None and (sp['to'] < t0 or sp['from'] > t1):
+            out.append(f'span-outside-view: {p}: {fmt_t(sp["from"])}…{fmt_t(sp["to"])} is outside the view {fmt_t(t0)}…{fmt_t(t1)}: not drawn')
+        for sg in [sp['signals']] if isinstance(sp.get('signals'), str) else sp.get('signals') or []:
+            if sg not in have and sg not in leaf:   # (the page takes a row's full path or its name)
+                out.append(f'span-signal-missing: {p}: "{sg}" is no row of the view')
+    for i, mk in enumerate(a.marker or []):
+        if isinstance(mk, dict):
+            bad = sorted(set(mk) - set(MK_KEYS))
+            if bad:
+                out.append(f'marker-key: {at}marker[{i}]: unknown key(s) {", ".join(bad)} (have: {", ".join(MK_KEYS)})')
+    for i, expr in getattr(a, 'no_match', []):
+        out.append(f'marker-no-match: {at}marker[{i}]: "{expr}" matches nothing in the window: no marker')
+    sva = doc.get('sva') or {}
+    for note in sva.get('notes') or []:
+        if note.startswith('bind: no assertion') or note.endswith('matches no assertion'):
+            out.append(f'bind-unknown: {at}bind: {note[6:]}')
+    labels = [x['label'] for f in sva.get('files') or [] for x in (f.get('parsed') or {}).get('assertions', [])]
+    show = (doc.get('config') or {}).get('svaShow')
+    if show is not None and labels:
+        for name in (show if isinstance(show, list) else str(show).split(',')):
+            name = str(name).strip()
+            if name and not any(glob_re(name).fullmatch(x) for x in labels):
+                out.append(f'svashow-no-match: {at}config.svaShow: "{name}" is no assertion of the files (have: {", ".join(labels[:8])}{", …" if len(labels) > 8 else ""})')
+    if t0 is not None and t1 is not None and t1 > t0:   # advisory: at 1000 px of waves, the whole window
+        near = (t1 - t0) * CLOSE_PX / 1000
+        placed.sort(key=lambda x: (x[2], str(x[3]), x[1]))
+        for (n1, ta, s1, l1), (n2, tb, s2, l2) in zip(placed, placed[1:]):
+            if s1 == s2 and l1 == l2 and tb - ta < near:
+                out.append(f'bookmarks-close: {at}bookmarks (n {n1}, n {n2}): {(tb - ta) * 1000 / (t1 - t0):.0f} px apart at 1000 px of the whole window on '
+                           f'{s1}: they overlap (a heuristic: zoomed in they part); lift one of them ("lift": true)')
+    cfg = doc.get('config') or {}
+    if cfg.get('theme') in (None, 'auto'):
+        sigs = []
+        def walk(items):
+            for it in items:
+                if isinstance(it, list):
+                    walk(it)
+                elif isinstance(it, dict):
+                    sigs.append(it)
+        walk(doc.get('signal') or [])
+        hexes = list(dict.fromkeys(k for e in [cfg.get('enumColors')] + [s.get('enumColors') for s in sigs] if isinstance(e, dict)
+                                   for k, v in e.items() if isinstance(v, str) and HEX.fullmatch(v)))
+        if hexes:
+            out.append(f'enum-colors-hex: {at}config.enumColors: a hex fill ({", ".join(hexes[:4])}{", …" if len(hexes) > 4 else ""}) is the same in the dark '
+                       'theme, under a light text there; the tokens c3…c9 follow the theme')
+    return out
+
+
+def fmt_t(ps):
+    for f, u in ((1e12, 's'), (1e9, 'ms'), (1e6, 'us'), (1e3, 'ns')):
+        if abs(ps) >= f:
+            return f'{ps / f:g}{u}'
+    return f'{ps:g}ps'
+
+
 def convert(a: argparse.Namespace) -> dict:
     """Resolved options -> WaveJSON dict: the signals read, clock-sampled or exact, grouped, then the extensions."""
     rd = open_reader(a)
@@ -785,6 +1115,9 @@ def convert(a: argparse.Namespace) -> dict:
         doc['scopes'] = scopes
     doc = {'signal': out, **doc, 'config': {'hscale': a.hscale, **a.wave_config}}
     finish(a, rd, doc, specs, marks, t_from, t_to)
+    a.lint = lint(doc, a, getattr(a, 'lint_at', None) or (f'views.{a.view}' if getattr(a, 'view', None) else None))
+    for w in a.lint:
+        print(f'{a.prog if hasattr(a, "prog") else "vcd2wavedrom"}: lint: {w}', file=sys.stderr)
     return doc
 
 

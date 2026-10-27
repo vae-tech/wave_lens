@@ -556,6 +556,25 @@ Object.assign(SVA, { scopeInfo, resolve, candidates });
 /* ---------------- bindings: assertion + scope of a viewer, their results ---------------- */
 const SOURCES = () => active().map(f => f.source);
 const bkey = b => b.assert + '@' + b.scope;
+// The page's bindings of a WaveJSON (its "sva.bind"), each "results.cycles" an array: mkhtml.py keeps the sampled times once
+// per clock in "sva.cycles" and names them in "results.cycles" (tools/svabuild.py intern_cycles); an array there is read as
+// it is (older pages). A name that is not in the table: the binding's error, not empty times. Once per WaveJSON.
+const PAGEB = new WeakMap();
+function pageBinds(M) {
+  const x = M.src.sva;
+  if (!x || !Array.isArray(x.bind)) return [];
+  if (PAGEB.has(x)) return PAGEB.get(x);
+  const T = (x.cycles && typeof x.cycles === 'object') ? x.cycles : {};
+  const out = x.bind.map(b => {
+    const r = b.results;
+    if (!r || typeof r.cycles !== 'string') return b;
+    if (!Array.isArray(T[r.cycles])) return { ...b, results: null, error: `no cycles table "${r.cycles}" in the page` };
+    return { ...b, results: { ...r, cycles: T[r.cycles] } };
+  });
+  PAGEB.set(x, out);
+  return out;
+}
+SVA.pageBinds = pageBinds;
 // The bindings of one scope in one evaluation: one request per clock with all their assertions (the files are parsed
 // once: the engine keeps the last unit). Each binding gets the results document of its assertion; progress(i, n) after
 // each request. -> 'page' | 'worker'
@@ -991,12 +1010,13 @@ class Panel {
     this.saved = store.get(this.key) || {};
     this.hidden = new Set(this.saved.hidden || []);
     this.removed = new Set(this.saved.removed || []);
-    const page = (v.M.src.sva && v.M.src.sva.bind) || [];
+    const page = pageBinds(v.M);
     const list = (this.saved.bind || []).slice();
     for (const p of page) if (!this.removed.has(bkey(p)) && !list.some(b => bkey(b) === bkey(p))) list.push(p);
     for (const b of list) {
       const pb = page.find(p => bkey(p) === bkey(b));
-      this.bindings.push({ assert: b.assert, scope: b.scope, results: pb && pb.results ? pb.results : null, page: !!pb, fromPage: !!(pb && pb.results) });
+      this.bindings.push({ assert: b.assert, scope: b.scope, results: pb && pb.results ? pb.results : null, page: !!pb, fromPage: !!(pb && pb.results),
+        ...(pb && pb.error ? { error: pb.error } : {}) });
     }
     LIB.panels.add(this);
   }
@@ -1027,12 +1047,13 @@ class Panel {
     if (files.length) await SVA.loadFiles(files.map(f => ({ name: f.name, text: f.source }))); else await LIB.parsing;
     if (s.bind !== undefined || s.hidden !== undefined) {
       const list = (s.bind || []).filter(b => b && b.assert).map(b => ({ assert: b.assert, scope: b.scope || '' })), want = new Set(list.map(bkey));
-      const old = this.bindings, page = (this.v.M.src.sva && this.v.M.src.sva.bind) || [];
+      const old = this.bindings, page = pageBinds(this.v.M);
       for (const b of old) if (!want.has(bkey(b))) { this.dropSel(b); if (b.page) this.removed.add(bkey(b)); }
       this.bindings = list.map(x => {
         const b = old.find(o => bkey(o) === bkey(x)); if (b) return b;
         const pb = page.find(p => bkey(p) === bkey(x)); this.removed.delete(bkey(x));
-        return { assert: x.assert, scope: x.scope, results: pb && pb.results ? pb.results : null, page: !!pb, fromPage: !!(pb && pb.results) };
+        return { assert: x.assert, scope: x.scope, results: pb && pb.results ? pb.results : null, page: !!pb, fromPage: !!(pb && pb.results),
+          ...(pb && pb.error ? { error: pb.error } : {}) };
       });
       if (s.hidden !== undefined) this.hidden = new Set(s.hidden || []);
       old.filter(b => !this.bindings.includes(b)).forEach(b => this.changed(b, false));
@@ -1448,7 +1469,8 @@ class Panel {
     };
     el.innerHTML = `<div class="nh"><button type="button" class="tw" data-sv="tw" aria-expanded="${this.open}"
       aria-label="${this.open ? 'fold' : 'open'} the assertions">${this.open ? '▾' : '▸'} <b>Assertions</b></button><span
-        class="muted">${list.length} loaded · click a line to go to it on the waves` +
+        class="muted">${list.length} loaded${this.v.S.svaShow != null ? ` · ${this.drawn().length} shown on the waves` : ''}` +
+          ` · click a line to go to it on the waves` +
           ` · drag a line onto a module in the names to bind it, or Bind…` +
           ` · kept in this browser</span>
       <button type="button" data-sv="watch" aria-pressed="${!!LIB.watching}"
@@ -1521,6 +1543,7 @@ class Panel {
       bad = bs.filter(b => b.error).length;
     const not = [cannot && `${cannot} cannot bind`, bad && `${bad} error${bad === 1 ? '' : 's'}`].filter(Boolean).join(', ');
     let tot = `${loaded} loaded · ${ev} bound${not ? ` (${not})` : ''}`;
+    if (v.S.svaShow != null) tot += ` · ${this.drawn().length} shown on the waves (svaShow)`;   // the totals stay over every binding
     const t = r && r.summary.assertions.length ? r.summary.totals : null;
     if (t) tot += (` · <b class="${t.with_failures ? 'c-fail' : ''}">${t.with_failures} with failures</b> · ${t.attempts} attempts: ${t.pass} pass, <span ` +
         `class="c-fail${t.fail ? '' : ' zero'}">${t.fail} fail</span>, ${t.vacuous} ` +
@@ -1724,8 +1747,8 @@ function clearAll() {
   for (const p of LIB.panels) {
     store.set(p.key, null);
     p.saved = {}; p.hidden.clear(); p.removed.clear();
-    const old = p.bindings, page = (p.v.M.src.sva && p.v.M.src.sva.bind) || [];
-    p.bindings = page.map(x => ({ assert: x.assert, scope: x.scope, results: x.results || null, page: true }));
+    const old = p.bindings, page = pageBinds(p.v.M);
+    p.bindings = page.map(x => ({ assert: x.assert, scope: x.scope, results: x.results || null, page: true, ...(x.error ? { error: x.error } : {}) }));
     old.forEach(b => p.changed(b, false)); p.redraw();
   }
   reparse();
@@ -1947,7 +1970,7 @@ function rowsOf(M, o) {
   return out;
 }   // WaveJSON -> {binds: [{assert, scope, results, draw}], wait}
 function svgRows(M, S) {
-  const x = M.src.sva, binds = (x && Array.isArray(x.bind) && x.bind) || [], exprs = (x && Array.isArray(x.exprs) && x.exprs) || [];
+  const x = M.src.sva, binds = pageBinds(M), exprs = (x && Array.isArray(x.exprs) && x.exprs) || [];
   if (!binds.length && !exprs.length) return null;
   let k = SVGST.get(M.src);
   if (!k) SVGST.set(M.src, k = { binds: binds.map(b => ({ assert: b.assert, scope: b.scope || '', results: b.results || null, draw: {} })), xst: {},

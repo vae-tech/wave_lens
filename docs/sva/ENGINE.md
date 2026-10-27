@@ -249,7 +249,9 @@ the CLI adds to each assertion (`file`, `scope`, `signals` with the paths) are i
 the CLI's output to it.
 
 - `cycles[k]` is the time of cycle k (the k-th clock edge); attempts and traces refer to cycles. An assertion on another
-  clock than the document's first one carries its own `clock` and `cycles`.
+  clock than the document's first one carries its own `clock` and `cycles`. In a page (`mkhtml.py`) each binding's
+  results keep one assertion and `results.cycles` names its array in the view's `sva.cycles` (once per clock, not once
+  per binding: `tools/svabuild.py` `intern_cycles`); an array there is read as it is.
 - `steps`: the sequence elements, each with its `role`: `ante` / `cons` (the antecedent / consequent of the implication
   `group`, 0, 1, … in source order), `cond` (the condition of a `throughout`), `seq` (a sequence property, a cover).
 - `attempts` lists every attempt that is not vacuous, by start cycle (vacuous ones are counted in `stats`; option

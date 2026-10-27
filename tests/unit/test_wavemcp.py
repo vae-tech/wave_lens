@@ -612,5 +612,63 @@ class Protocol(unittest.TestCase):
         self.assertEqual(len(json.loads(out)), len(W.TOOLS))
 
 
+class Arguments(unittest.TestCase):
+    """The types file beside a dump (its enum labels, as mkconfig.py takes them), the synonyms of sibling tools' names,
+    an argument a tool does not take."""
+    TYPES = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'types')
+    QV = os.path.join(TYPES, 'questa.vcd')
+
+    def value(self, **a):
+        text, err = W.call('wave_values', {'dump': self.QV, 'signals': 'types_tb.al', 'at': 0, **a})
+        self.assertFalse(err, text)
+        return json.loads(text)['rows'][0][1]
+
+    def test_types_beside_the_dump(self):
+        self.assertEqual(self.value(), 'STOP')                 # questa.types.json beside questa.vcd (it was "3")
+        self.assertEqual(self.value(no_types=True), '3')
+        info = json.loads(W.call('wave_info', {'dump': self.QV})[0])
+        self.assertEqual(info['types'], 'questa.types.json')
+        self.assertTrue(any(n.startswith('types questa.types.json: labels for ') for n in info['notes']), info.get('notes'))
+        with H.tmp() as d:   # another types file by name; none beside a copy of the dump
+            v, t = os.path.join(d, 'q.vcd'), os.path.join(d, 'other.json')
+            shutil.copy(self.QV, v)
+            shutil.copy(os.path.join(self.TYPES, 'questa.types.json'), t)
+            self.assertEqual(self.value(dump=v), '3')
+            self.assertEqual(self.value(dump=v, types=t), 'STOP')
+            text, err = W.call('wave_values', {'dump': v, 'signals': 'types_tb.al', 'at': 0, 'types': os.path.join(d, 'nope.json')})
+            self.assertTrue(err)
+            self.assertIn('"types": no such file', text)
+            shutil.copy(t, os.path.join(d, 'q.types.json'))   # a types file that appears: the cached dump reads it
+            self.assertEqual(self.value(dump=v), 'STOP')
+
+    def test_synonyms(self):
+        self.assertEqual(self.value(at=None, times=[0]), 'STOP')
+        text, err = W.call('wave_values', {'dump': self.QV, 'signal': 'types_tb.al', 't': 0})
+        self.assertFalse(err, text)
+        text, err = W.call('wave_find', {'dump': self.QV, 'signals': ['types_tb.al'], 'edge': 'change'})
+        self.assertFalse(err, text)
+        self.assertEqual(json.loads(text)['signal'], 'types_tb.al')
+        text, err = W.call('wave_find', {'dump': self.QV, 'signals': ['a', 'b'], 'edge': 'change'})
+        self.assertTrue(err)
+        self.assertIn('searches one "signal", not 2', text)
+        text, err = W.call('wave_values', {'dump': self.QV, 'signals': 'types_tb.al', 'at': 0, 't': 5})
+        self.assertEqual((text, err), ('"t" is "at" here, and both are given with other values', True))
+        text, err = W.call('sva_check', {'dump': self.QV, 'text': 'module m; endmodule'})
+        self.assertNotIn('no argument', text)
+
+    def test_lean_list(self):
+        full, lean = W.listing(False), W.listing(True)
+        size = lambda x: len(json.dumps(x, separators=(',', ':')))
+        self.assertEqual([t['name'] for t in lean], [t['name'] for t in full])
+        self.assertLess(size(lean), size(full) * 0.7)   # (measured: 9649 -> 6474 characters)
+        self.assertNotIn('types', next(t for t in lean if t['name'] == 'wave_values')['inputSchema']['properties'])
+        self.assertEqual(self.value(types=os.path.join(self.TYPES, 'questa.types.json')), 'STOP')   # still taken
+
+    def test_unknown_argument(self):
+        text, err = W.call('wave_values', {'dump': self.QV, 'signals': 'types_tb.al', 'at': 0, 'colour': 'red'})
+        self.assertTrue(err)
+        self.assertTrue(text.startswith('wave_values: no argument "colour" (it takes: dump, '), text)
+
+
 if __name__ == '__main__':
     unittest.main()

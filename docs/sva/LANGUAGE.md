@@ -243,6 +243,9 @@ an error). `restrict property` is skipped with a warning (it only constrains for
 parentheses (not SystemVerilog, taken for `@(posedge clk)`); `##0`, `[*0]`, `[->0]` and `[=0]` (empty matches,
 *Semantics*); `macromodule` (a module).
 
+**Elsewhere**: an expression of `wave_find` (MCP) and of a bookmark's `"at": {"expr": …}` (a config) is this
+language, nothing more: it is put into `cover property (@(posedge clock) …)` and evaluated by the same engine.
+
 **Limits**: the operand of `not`, `nexttime`, `and`, `or` and the like cannot start with `always`, `eventually`,
 `s_eventually` or `if` without parentheses (`not (always a)`); a clock with an index (`@(posedge g[0].clk)`) is not
 read; a `clocking` block is a default only for what comes after it; at most 256 threads per attempt

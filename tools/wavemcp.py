@@ -12,11 +12,15 @@ server of this process on 127.0.0.1, from port 8742 or WAVELENS_LIVE_PORT on, it
 else in the page's file; a .vcd / .fst open in VS Code (the extension in vscode/ connects its tabs to the link that
 ~/.cache/wavelens/live/<port>.json announces, and opens a dump that view_live asks for) is live only. Times are ns in and out (a number), or a text with a unit as the viewer reads one
 ("2.5us", "100NS"); signal names are full paths, paths under "scope", or a unique tail of a path ("PSEL", "u_regs.PSEL").
+Enum labels come from the dump and from the types file beside it (tb.vcd -> tb.types.json; "types", "no_types"). An
+argument a tool does not take is an error; a sibling tool's name is taken for its own ("signal" for "signals", "times" for
+"at", "text" for "source").
 A request or an argument of a wrong shape gets an error answer and the session goes on; the programs the server starts
 get /dev/null as stdin (stdin and stdout are the protocol).
 
   claude mcp add wavelens -- python3 -I /path/to/wavelens/tools/wavemcp.py      # Claude Code
   codex mcp add wavelens -- python3 -I /path/to/wavelens/tools/wavemcp.py       # Codex CLI
+  claude mcp add wavelens -- python3 -I /path/to/wavelens/tools/wavemcp.py --lean   # the short tool list (a third fewer characters)
   wavemcp.py --list                                     # the tools and their input schemas
   wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd"}'   # one tool from the shell (tests, the benchmark)
 
@@ -27,7 +31,7 @@ import argparse, atexit, bisect, collections, contextlib, fnmatch, hmac, http.se
 import tempfile, threading, time, traceback, urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
-import dumpscan, svabuild, vcd2wavedrom, viewedit  # noqa: E402
+import dumpscan, svabuild, svtypes, vcd2wavedrom, viewedit, wavefind  # noqa: E402
 from common import ROOT, UNIT_PS, WaveError  # noqa: E402
 
 PROTOCOLS = ('2025-06-18', '2025-03-26', '2024-11-05')
@@ -76,7 +80,7 @@ class Wave(vcd2wavedrom.Builtin):
     """A dump read once: the declarations, change counts, start and end; the transitions of a signal read (one pass for
     all the missing ones) when a tool first needs them and kept. stream(), edges() are the converter's built-in reader."""
 
-    def __init__(self, path):
+    def __init__(self, path, types=None):
         if not os.path.isfile(path):
             raise WaveError(f'no such dump: {path}')
         if not dumpscan.available(path):
@@ -88,6 +92,24 @@ class Wave(vcd2wavedrom.Builtin):
         self.d = dumpscan.Dump()
         self.d.unit_ps, self.have = self.decl.unit_ps, set()
         self._clocks = None
+        self.types, self.type_notes, self.typed = types, [], set()
+        if types:
+            self.apply_types(types)
+
+    def apply_types(self, path):
+        """The enum labels of a types file (tb.types.json beside tb.vcd: Questa's wavelens_types, svtypes.py verilator)
+        onto the dump's variables, as mkconfig.py does: a path's entry of the variable's width, or an enum on a wider integer
+        (Questa's int enums); the dump's own tables (an FST's) stay."""
+        t = svtypes.load(path)
+        sigs = [{'path': p, 'width': v.width, 'kind': v.kind, 'enum': v.enum} for p, v in self.decl.vars.items() if v.kind != 'event']
+        ne, _, notes, given = svtypes.apply(t, sigs)
+        for s in sigs:
+            if s['path'] in given and s.get('enum') and not self.decl.vars[s['path']].enum:
+                self.decl.vars[s['path']] = self.decl.vars[s['path']]._replace(enum=s['enum'])   # (a namedtuple)
+                self.typed.add(s['path'])
+        self.type_notes = [f'types {os.path.basename(path)}: {n}' for n in t['notes'] + notes +
+                           svtypes.fingerprint(t, getattr(self.decl, 'date', None), getattr(self.decl, 'modules', ()))]
+        self.type_notes.append(f'types {os.path.basename(path)}: labels for {len(self.typed)} signals')
 
     def load(self, paths):
         codes = {c for p in paths for c, _ in self.decl.vars[p].members} - self.have
@@ -150,15 +172,7 @@ class Wave(vcd2wavedrom.Builtin):
 
     def edges(self, path, kind, t0, t1, sl=None):
         """The times of the edges (posedge negedge edge) or changes of a signal or a select of it in [t0, t1]."""
-        st, out, prev = self.stream(path, sl), [], None
-        for t, v in st:
-            if prev is not None and t0 <= t <= t1:
-                rise = (prev == '0' and v in '1xz') or (prev in 'xz' and v == '1')
-                fall = (prev == '1' and v in '0xz') or (prev in 'xz' and v == '0')
-                if (kind == 'posedge' and rise) or (kind == 'negedge' and fall) or (kind == 'edge' and (rise or fall)) or (kind == 'change' and v != prev):
-                    out.append(t)
-            prev = v
-        return out
+        return wavefind.edge_times(self.stream(path, sl), kind, t0, t1)
 
     def snap(self, t):
         """A time given (ns, rounded) -> the dump's own time when it is one (within a millionth of a step): a page of an
@@ -255,14 +269,25 @@ NOTES = []   # the names a tool resolved by a guess (the shallowest of several):
 MISSING = []   # the names of several that were not found: said in the answer, the others answered
 
 
-def wave(path):
-    """The cached Wave of a dump (read again when the file changed)."""
+def stamp(p):
+    return (os.path.getmtime(p), os.path.getsize(p)) if p and os.path.isfile(p) else (None, None)
+
+
+def wave(path, a=None):
+    """The cached Wave of a dump (read again when the file or its types file changed). The enum labels of the types file
+    beside it (tb.vcd -> tb.types.json, svtypes.beside) are applied as mkconfig.py does: "types" another file, "no_types"
+    none."""
     if not path:
         raise WaveError('"dump" is required: the path of a VCD or FST')
     key = os.path.abspath(os.path.expanduser(str(path)))
-    w = WAVES.get(key)
-    if w is None or w.stamp != (os.path.getmtime(key) if os.path.isfile(key) else None, os.path.getsize(key) if os.path.isfile(key) else None):
-        w = WAVES[key] = Wave(key)
+    a = a or {}
+    types = None if a.get('no_types') else os.path.abspath(os.path.expanduser(str(a['types']))) if a.get('types') else svtypes.beside(key)
+    if types and not os.path.isfile(types):
+        raise WaveError(f'"types": no such file: {types}')
+    w = WAVES.get((key, types))
+    if w is None or w.stamp != stamp(key) or w.tstamp != stamp(types):
+        w = WAVES[(key, types)] = Wave(key, types)
+        w.tstamp = stamp(types)
     return w
 
 
@@ -285,7 +310,7 @@ def limit(a, default, top=10000):
 
 # ---------------- the tools ----------------
 def t_info(a):
-    w = wave(a.get('dump'))
+    w = wave(a.get('dump'), a)
     scopes = collections.Counter()
     for p in w.decl.vars:
         parts = svabuild.split_path(p)[:-1]
@@ -300,11 +325,14 @@ def t_info(a):
                       for p, per, t0, n in w.clocks()[:8]],
            'resets': sorted((p for p, v in w.decl.vars.items() if v.width == 1 and RESET_RE.search(p.rsplit('.', 1)[-1])),
                             key=lambda p: (p.count('.'), p))[:6]}
+    if w.types:
+        out['types'] = os.path.basename(w.types)
+        NOTES.extend(w.type_notes)
     return out
 
 
 def t_signals(a):
-    w = wave(a.get('dump'))
+    w = wave(a.get('dump'), a)
     scope = (a.get('scope') or '').rstrip('.')
     pat = (a.get('pattern') or '').strip()
     rx = None
@@ -336,7 +364,7 @@ def t_signals(a):
 
 
 def t_values(a):
-    w = wave(a.get('dump'))
+    w = wave(a.get('dump'), a)
     scope, radix = a.get('scope') or '', a.get('radix')
     at = a.get('at')
     times = at if isinstance(at, list) else [at]
@@ -354,7 +382,7 @@ def t_values(a):
 
 
 def t_changes(a):
-    w = wave(a.get('dump'))
+    w = wave(a.get('dump'), a)
     scope, radix = a.get('scope') or '', a.get('radix')
     t0, t1 = window(w, a)
     n = limit(a, 50)
@@ -374,7 +402,7 @@ def t_changes(a):
 
 
 def t_sample(a):
-    w = wave(a.get('dump'))
+    w = wave(a.get('dump'), a)
     scope, radix = a.get('scope') or '', a.get('radix')
     t0, t1 = window(w, a)
     n = limit(a, 100)
@@ -409,35 +437,11 @@ def t_sample(a):
     return out
 
 
-def bits_value(want, width):
-    """A value to look for -> the normalised form of a stream (hex digits, 0 1 x z), or None for a label."""
-    s = str(want).strip().lower().replace('_', '')
-    m = re.fullmatch(r"(?:(\d*)')?(?:([hdbo])|0([xbo]))?([0-9a-fxz]+)", s)
-    if not m:
-        return None
-    base = (m.group(2) or {'x': 'h', 'b': 'b', 'o': 'o'}.get(m.group(3) or '', 'd'))
-    digits = m.group(4)
-    if digits in ('x', 'z'):
-        return digits
-    if re.search('[xz]', digits) and base in ('b', 'h'):   # four-state: the stream's form of those bits ("'b10x1", or hex)
-        bits = digits if base == 'b' else ''.join(c * 4 if c in 'xz' else format(int(c, 16), '04b') for c in digits)
-        if not re.fullmatch('[01xz]+', bits):
-            return None
-        if m.group(1):   # sized (4'bx1): x / z extended to its size, then 0s to the signal's width
-            n = int(m.group(1))
-            bits = bits.rjust(n, bits[0] if bits[0] in 'xz' else '0')[-n:].rjust(width, '0')
-        return vcd2wavedrom.norm(f"{width}'b{bits.rjust(width, bits[0] if bits[0] in 'xz' else '0')[-width:]}", width)
-    try:
-        n = int(digits, {'h': 16, 'd': 10, 'b': 2, 'o': 8}[base])
-    except ValueError:
-        return None
-    if width == 1:
-        return str(n & 1) if n in (0, 1) else None
-    return format(n, 'x').rjust((width + 3) // 4, '0')
+bits_value = wavefind.bits_value   # (tests, the bench)
 
 
 def t_find(a):
-    w = wave(a.get('dump'))
+    w = wave(a.get('dump'), a)
     scope = a.get('scope') or ''
     t0, t1 = window(w, a)
     n = limit(a, 20)
@@ -449,19 +453,7 @@ def t_find(a):
     st, width = w.stream(p, sl), w.width(p, sl)
     if a.get('value') is not None:
         want = str(a['value'])
-        raw = bits_value(want, width)
-        hits = []
-        prev = w.at(st, t0)
-        if prev is not None and (prev == raw or w.text(p, sl, prev, a.get('radix')) == want):
-            hits.append(t0)
-        lo = bisect.bisect_right(st, (t0, '\uffff'))
-        for t, v in st[lo:]:
-            if t > t1:
-                break
-            hit = v == raw or w.text(p, sl, v, a.get('radix')) == want
-            if hit and not (prev == v):
-                hits.append(t)
-            prev = v
+        hits = wavefind.value_times(st, want, width, t0, t1, lambda v: w.text(p, sl, v, a.get('radix')))   # the rules of a bookmark "at"
         rows = []
         for t in hits[:n]:
             j = bisect.bisect_right(st, (t, '\uffff'))
@@ -469,8 +461,7 @@ def t_find(a):
             rows.append([ns(t), ns(end - t) if end is not None else None])
         out = {'unit': 'ns', 'signal': a['signal'], 'value': want, 'matches': len(hits), 'columns': ['t', 'lasts'], 'rows': rows}
     else:
-        edge = {'rise': 'posedge', 'fall': 'negedge', 'any': 'change', 'change': 'change', 'posedge': 'posedge',
-                'negedge': 'negedge', 'edge': 'edge'}.get(a.get('edge') or 'change')
+        edge = wavefind.EDGES.get(a.get('edge') or 'change')
         if not edge:
             raise WaveError('"edge" is rise, fall or change')
         ts = w.edges(p, edge, t0, t1, sl)
@@ -544,17 +535,16 @@ def find_expr(w, a, scope, t0, t1, n):
         scope = default_scope(w, [clk])
     cname = clk[len(scope) + 1:] if scope and clk.startswith(scope + '.') else clk
     edge = a.get('edge') if a.get('edge') in ('posedge', 'negedge', 'edge') else 'posedge'
-    src = f'wavemcp_find: cover property (@({edge} {cname}) {expr});\n'
-    res, msgs = run_sva(w, [], src, scope, a, t0, t1)
-    if not res or not res.get('assertions'):
-        raise WaveError('the expression did not evaluate: ' + ' | '.join(msgs[:6]))
-    r = res['assertions'][0]
-    if r.get('missing'):
-        raise WaveError(f'no {", ".join(r["missing"])} in scope {scope or "(top)"} — give "scope" or full names')
+    exe = svabuild.find_bin(a.get('sva_bin'))
+    if not exe:
+        raise WaveError('no sva CLI (make sva-build, or bin/<os>-x86_64/sva): the assertions need it')
+    defs = a.get('defines') or {}
+    args = [x for k, v in (defs.items() if isinstance(defs, dict) else [(d, None) for d in defs]) for x in ('-D', f'{k}={v}' if v not in (None, '') else str(k))]
+    args += ['--resolve', a['resolve']] if a.get('resolve') else []
+    res, msgs = wavefind.cover(exe, w.waves, expr, cname, scope, t0, t1, edge, args, w.t_start, w.t_end)   # the rules of a bookmark "at"
+    hits, r, res = wavefind.cover_hits(res, msgs, scope)
     cyc = res.get('cycles') or []
-    tm = lambda c: ns(cyc[c] * UNIT_PS.get(res.get('unit', 'ps'), 1)) if 0 <= c < len(cyc) else None
-    hits = [x for x in r.get('attempts', []) if x.get('result') == 'pass']
-    rows = [[x['start'], tm(x['start'])] + ([x['end'], tm(x['end'])] if x['end'] != x['start'] else []) for x in hits[:n]]
+    rows = [[c, ns(t)] + ([e, ns(te)] if e != c else []) for c, t, e, te in hits[:n]]
     out = {'unit': 'ns', 'expr': expr, 'clock': clk, 'scope': scope or None, 'sampled': 'just before the edge',
            'cycles': len(cyc), 'matches': r.get('stats', {}).get('matches', len(hits)),
            'columns': ['cycle', 't', 'end_cycle', 'end_t'], 'rows': rows}
@@ -564,7 +554,7 @@ def find_expr(w, a, scope, t0, t1, n):
 
 
 def t_stats(a):
-    w = wave(a.get('dump'))
+    w = wave(a.get('dump'), a)
     scope, radix = a.get('scope') or '', a.get('radix')
     t0, t1 = window(w, a)
     names, res = w.signals(a.get('signals'), scope)
@@ -621,7 +611,7 @@ def t_stats(a):
 
 
 def t_sva(a):
-    w = wave(a.get('dump'))
+    w = wave(a.get('dump'), a)
     t0, t1 = window(w, a)
     scope = a.get('scope') or default_scope(w)
     files = a.get('files') or []
@@ -678,6 +668,10 @@ def t_sva(a):
 def converter_args(w, a, scope):
     _, res = w.signals(a.get('signals'), scope)
     argv = ['--waves', w.waves, '--signals', ','.join(p + (f'[{sl[0]}:{sl[1]}]' if sl else '') for p, sl in res)]
+    for p, sl in res:   # the labels of the types file (the converter reads the dump's own tables itself)
+        e = w.decl.vars[p].enum if p in w.typed and not sl else None
+        if e and not any(c in str(x) for x in e.values() for c in ',:='):
+            argv += ['--enum', f'{p}=' + ','.join(f'{k}:{x}' for k, x in e.items())]
     clk = a.get('clock')
     if clk is True or clk == 'auto':
         clk = w.clock_for(None, scope, [p for p, _ in res])
@@ -697,7 +691,7 @@ def converter_args(w, a, scope):
 
 
 def t_page(a):
-    w = wave(a.get('dump'))
+    w = wave(a.get('dump'), a)
     out = a.get('out')
     if not out:
         raise WaveError('"out" is required: the HTML page (or .json: the WaveJSON) to write')
@@ -1150,6 +1144,9 @@ def summary(st, timed, base=None):
     ms = st.get('markers') or []
     if ms:
         out['markers'] = [dict(m, id=i + 1, t=t(m.get('t'))) for i, m in enumerate(ms)]
+    ss = viewedit.span_list(ed.spans())
+    if ss:
+        out['spans'] = [dict(x, id=i + 1, **{'from': t(x['from']), 'to': t(x['to'])}) for i, x in enumerate(ss)]
     if st.get('groups'):
         out['groups'] = st['groups']
     hl = ed.highlight()
@@ -1324,6 +1321,18 @@ def fst_notes(err):
 
 
 def t_view_edit(a):
+    if a.get('config'):   # the config file a page is built from: the marks a rebuild keeps
+        if a.get('page') or a.get('save'):
+            raise WaveError('"config" or "page": one of them (a config: its views\' bookmarks, arrows, spans)')
+        path = os.path.abspath(os.path.expanduser(str(a['config'])))
+        res, key, changed = viewedit.edit_config(path, ops_in(a.get('ops'), True), a.get('view'))
+        errs = sum(1 for r in res if 'error' in r)
+        out = {'config': path, 'view': key, 'results': res, 'changed': changed,
+               'note': 'nothing written: a command failed' if errs else 'written into the config: mkhtml.py builds the page with them' if changed else
+               'nothing changed'}
+        if errs:
+            out['errors'] = errs
+        return out
     if a.get('save') and page_arg(a) and DUMP_RE.search(page_arg(a)):   # before anything is done: no edit twice on a retry
         raise WaveError('save: a dump has no page file to write into (VS Code keeps the view of its tab; Save in the tab writes a .view.json)')
     mode, where, v = target(a)
@@ -1388,9 +1397,33 @@ def t_view_get(a):
     out.update((state_ns(ed.st) if m.timed else ed.st) if a.get('full') else summary(ed.st, m.timed, ed))
     if a.get('rows') is not None:
         out['rows'] = ed.c_rows({'pattern': a['rows'] or '', 'limit': a.get('limit') or 200})
-    if a.get('picture'):
-        out['note'] = 'a picture needs the page live (view_live)'
+    if a.get('picture'):   # the page's file in a headless Chromium (tools/pageshot.py, playwright: optional)
+        png, why = page_picture(where, key)
+        if png:
+            return Image(png, out)
+        out['note'] = f'no picture: {why}; live: view_live'
     return out
+
+
+def page_picture(path, key, theme='dark'):
+    """A PNG (base64) of one view of a page's file, made by tools/pageshot.py -> (png | None, why not)."""
+    import base64
+    exe = [sys.executable, os.path.join(ROOT, 'tools', 'pageshot.py')]
+    with tempfile.TemporaryDirectory(prefix='wavemcp-shot-') as d:
+        env = dict(os.environ, PYTHONDONTWRITEBYTECODE='1')
+        try:
+            r = subprocess.run(exe + [path, '--view', key, '--theme', theme, '--out', d], capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                               timeout=120, env=env)
+        except subprocess.TimeoutExpired:
+            return None, 'pageshot.py took more than 2 minutes'
+        try:
+            made = json.loads(r.stdout or '[]')
+        except json.JSONDecodeError:
+            made = []
+        if r.returncode == 2 or not made:
+            return None, (r.stderr.strip().splitlines() or ['pageshot.py failed'])[-1].replace('pageshot: ', '')
+        with open(made[0]['path'], 'rb') as f:
+            return base64.b64encode(f.read()).decode(), None
 
 
 def live_get(a, where, v):
@@ -1428,7 +1461,7 @@ S, N, B = {'type': 'string'}, {'type': 'integer'}, {'type': 'boolean'}
 L = {'type': 'array', 'items': S}
 T = {'type': ['number', 'string']}
 COMMON = {'dump': S, 'signals': L, 'scope': S, 'from': T, 'to': T, 'radix': {'type': 'string', 'description': 'hex dec signed bin …'},
-          'limit': N}
+          'limit': N, 'types': {'type': 'string', 'description': 'types file (default: <dump>.types.json beside it)'}, 'no_types': B}
 
 
 def tool(name, fn, desc, props, required=('dump',), ro=True):
@@ -1440,23 +1473,24 @@ def tool(name, fn, desc, props, required=('dump',), ro=True):
 
 
 TOOLS = [
-    tool('wave_info', t_info, 'A dump at a glance: time span, signal count, scopes, clocks with period, resets.', {'dump': None}),
+    tool('wave_info', t_info, 'A dump at a glance: time span, signal count, scopes, clocks with period, resets.', {'dump': None, 'types': None, 'no_types': None}),
     tool('wave_signals', t_signals, 'Find signals -> [path, width, changes]. pattern: substring or glob (* ?); depth: levels under scope.',
          {'dump': None, 'pattern': S, 'scope': None, 'depth': N, 'active': B, 'limit': None, 'offset': N}),
     tool('wave_values', t_values, 'Values of signals at one or more times (side "before": just before the changes at that time).',
-         {'dump': None, 'signals': None, 'at': {'type': ['number', 'string', 'array'], 'items': T}, 'side': S, 'scope': None, 'radix': None},
+         {'dump': None, 'types': None, 'no_types': None, 'signals': None, 'at': {'type': ['number', 'string', 'array'], 'items': T}, 'side': S, 'scope': None, 'radix': None},
          ('dump', 'signals', 'at')),
     tool('wave_changes', t_changes, 'Value changes of signals in a window: value at "from", then [t, value], limit per signal.',
-         {'dump': None, 'signals': None, 'from': None, 'to': None, 'scope': None, 'radix': None, 'limit': None}, ('dump', 'signals')),
+         {'dump': None, 'types': None, 'no_types': None, 'signals': None, 'from': None, 'to': None, 'scope': None, 'radix': None, 'limit': None}, ('dump', 'signals')),
     tool('wave_sample', t_sample, 'Table per clock cycle [cycle, t, values], sampled before the edge; only_changes (default true) '
          'drops rows equal to the one before; clock: default the nearest.',
-         {'dump': None, 'signals': None, 'clock': S, 'edge': S, 'only_changes': B, 'from': None, 'to': None, 'scope': None,
+         {'dump': None, 'types': None, 'no_types': None, 'signals': None, 'clock': S, 'edge': S, 'only_changes': B, 'from': None, 'to': None, 'scope': None,
           'radix': None, 'limit': None}, ('dump', 'signals')),
     tool('wave_find', t_find, 'Search -> match count and first matches. expr: SV expression or sequence per clock cycle (sva engine; '
          '"req && !ack", "req ##[1:3] ack", "$rose(x)"; names under scope). Or signal + edge (rise fall change) or value: exact times.',
-         {'dump': None, 'expr': S, 'clock': S, 'signal': S, 'edge': S, 'value': T, 'from': None, 'to': None, 'scope': None, 'limit': None}),
+         {'dump': None, 'types': None, 'no_types': None, 'expr': S, 'clock': S, 'signal': S, 'edge': S, 'value': T, 'from': None, 'to': None, 'scope': None,
+          'limit': None, 'radix': None, 'defines': {'type': ['object', 'array'], 'items': S}}),
     tool('wave_stats', t_stats, 'Aggregates over a window. Bit: rises, falls, high %, pulse widths, period. Bus: changes, distinct, '
-         'longest-held values, min, max.', {'dump': None, 'signals': None, 'from': None, 'to': None, 'scope': None, 'radix': None},
+         'longest-held values, min, max.', {'dump': None, 'types': None, 'no_types': None, 'signals': None, 'from': None, 'to': None, 'scope': None, 'radix': None},
          ('dump', 'signals')),
     tool('sva_check', t_sva, 'Evaluate SystemVerilog assertions (files, packages first, and/or source text) over the dump in scope -> '
          'failed with first failures [cycle, t, start_cycle, start_t, note], passed, vacuous, not_evaluated, covers.',
@@ -1464,7 +1498,7 @@ TOOLS = [
           'details': B, 'defines': {'type': ['object', 'array'], 'items': S}}),
     tool('wave_page', t_page, 'Write a WaveLens viewer page (out .html) or WaveJSON (out .json) of signals to show a person; clock '
          '(name or "auto"): a cell per cycle, auto_gap "16:2" folds idle cycles; sva files + bind ["name@scope"].',
-         {'dump': None, 'signals': None, 'out': S, 'clock': S, 'from': None, 'to': None, 'scope': None, 'auto_gap': S, 'sva': L,
+         {'dump': None, 'types': None, 'no_types': None, 'signals': None, 'out': S, 'clock': S, 'from': None, 'to': None, 'scope': None, 'auto_gap': S, 'sva': L,
           'bind': L, 'title': S}, ('dump', 'signals', 'out'), ro=False),
     tool('wave_to_fst', t_to_fst, 'Convert a VCD to an FST beside it (tb.vcd -> tb.fst; out: another file), as GTKWave\'s vcd2fst, '
          'keeping the enum tables (FSM states) and attributes; the states of tb.types.json beside it go in too (types: another file, '
@@ -1475,10 +1509,12 @@ TOOLS = [
                                                                                   if k not in ('state', 'set_state', 'rows', 'picture')) +
          '. t/from/to in ns; signals: path, name, path tail or * pattern; bookmark: a numbered circle with a text (no signal: on the time '
          'axis); arrow from/to: bookmark numbers; group: a folder of signals at the top; only: just these modules on the waves (with their '
-         'submodules); edge (live): the cursor to the next edge.',
-         {'page': S, 'view': S, 'ops': {'type': 'array', 'items': {'type': 'object'}}, 'save': B}, ('ops',), ro=False),
+         'submodules); edge (live): the cursor to the next edge. config (instead of page): a mkhtml config file, bookmark / arrow / span '
+         'on its view, kept by a rebuild (a bookmark\'s "at" event stays until a t replaces it).',
+         {'page': S, 'config': S, 'view': S, 'ops': {'type': 'array', 'items': {'type': 'object'}}, 'save': B}, ('ops',), ro=False),
     tool('view_get', t_view_get, 'What a page shows: bookmarks, arrows, markers, groups, highlight, colours, hidden, cursor, window (live: '
-         'with the person\'s own edits). rows: list its signals (a pattern, "" all); picture: a PNG of the screen (live).',
+         'with the person\'s own edits). rows: list its signals (a pattern, "" all); picture: a PNG of the view (live: the screen; a file: '
+         'made in a headless Chromium, tools/pageshot.py).',
          {'page': S, 'view': S, 'rows': S, 'limit': N, 'picture': B, 'full': B}, ()),
     tool('view_live', t_view_live, 'Connect a page to this server: it is written into the page (open or reload it), then view_edit and '
          'view_get work on it live; open: open it in the browser; off: disconnect. page a .vcd / .fst: its tab in VS Code (the WaveLens '
@@ -1488,8 +1524,27 @@ TOOLS = [
 BY_NAME = {t['name']: t for t in TOOLS}
 
 
-def listing():
-    return [{k: v for k, v in t.items() if k != 'fn'} for t in TOOLS]
+LEAN = [False]   # --lean: the short tool list
+
+
+def listing(lean=None):
+    """The tools as the protocol lists them. lean (--lean): each description its first sentence, the properties without
+    theirs, types / no_types not listed (still taken), view_edit without its list of commands: a third fewer characters,
+    sent with every request; the same tools and answers."""
+    out = [{k: v for k, v in t.items() if k != 'fn'} for t in TOOLS]
+    if not (LEAN[0] if lean is None else lean):
+        return out
+    short = []
+    for t in json.loads(json.dumps(out)):
+        t['description'] = ("Mark up a WaveLens page (or its config) for a person: ops [{op, …}] of the viewer's commands (wavemcp.py --list: their "
+                            'arguments).' if t['name'] == 'view_edit' else re.split(r'(?<=\.)\s', t['description'])[0])
+        props = t['inputSchema']['properties']
+        for k in [k for k in ('types', 'no_types') if t['name'] != 'wave_to_fst' and k in props]:   # the types file beside the dump: taken anyway
+            del props[k]
+        for p in props.values():
+            p.pop('description', None)
+        short.append(t)
+    return short
 
 
 def compact(obj):
@@ -1510,10 +1565,33 @@ def fits(v, sch):
     return False
 
 
+# another name an agent gives an argument (the one of a sibling tool): taken for the schema's own, one way
+SYNONYMS = {'signals': ('signal',), 'signal': ('signals',), 'at': ('times', 't'), 'source': ('text',)}
+HIDDEN = {'sva_bin', 'resolve', 'wait', 'hierarchy'}   # for the tests and the VS Code extension: not in the schemas
+
+
 def check_args(t, a):
-    """A tool's arguments against its schema -> them (an integer as an int); one of a wrong kind is an error that says
-    what it takes. Arguments not in the schema are left to the tool."""
-    props, out = t['inputSchema']['properties'], dict(a)
+    """A tool's arguments against its schema -> them (an integer as an int); one of a wrong kind, one the tool does not
+    take, a synonym (SYNONYMS: "signal" for "signals", "times" for "at", "text" for "source") given with its own name and
+    another value are errors that say what it takes."""
+    props, a = t['inputSchema']['properties'], dict(a)
+    for main, alts in SYNONYMS.items():
+        for alt in alts:
+            if main not in props or alt in props or alt not in a:
+                continue
+            v = a.pop(alt)
+            if main == 'signal':   # wave_find: one signal
+                if isinstance(v, list) and len(v) == 1:
+                    v = v[0]
+                elif isinstance(v, list):
+                    raise WaveError(f'{t["name"]} searches one "signal", not {len(v)} ({json.dumps(v, ensure_ascii=False)[:80]})')
+            if a.get(main) is not None and a[main] != v:
+                raise WaveError(f'"{alt}" is "{main}" here, and both are given with other values')
+            a[main] = v
+    bad = [k for k in a if k not in props and k not in HIDDEN]
+    if bad:
+        raise WaveError(f'{t["name"]}: no argument {", ".join(json.dumps(k) for k in bad)} (it takes: {", ".join(props)})')
+    out = dict(a)
     for k, v in a.items():
         sch = props.get(k)
         if sch is None or v is None:
@@ -1655,7 +1733,10 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--list', action='store_true', help='print the tools (name, description, input schema) and exit')
     ap.add_argument('--call', nargs=2, metavar=('TOOL', 'JSON'), help='run one tool with these arguments, print its answer and exit')
+    ap.add_argument('--lean', action='store_true', help='the short tool list: first sentences, no property descriptions (a third fewer characters '
+                    'with every request; the same tools and answers)')
     a = ap.parse_args()
+    LEAN[0] = a.lean
     if a.list:
         print(json.dumps(listing(), indent=1, ensure_ascii=False))
         return 0

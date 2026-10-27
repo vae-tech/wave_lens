@@ -34,7 +34,8 @@
 
 <h2 id="setup">Setting it up</h2>
 <pre><code>claude mcp add wavelens -- python3 -I /path/to/wavelens/tools/wavemcp.py     <span class="c"># Claude Code (add --scope user: every project)</span>
-codex mcp add wavelens -- python3 -I /path/to/wavelens/tools/wavemcp.py      <span class="c"># Codex CLI</span></code></pre>
+codex mcp add wavelens -- python3 -I /path/to/wavelens/tools/wavemcp.py      <span class="c"># Codex CLI</span>
+claude mcp add wavelens -- python3 -I /path/to/wavelens/tools/wavemcp.py --lean   <span class="c"># the short tool list: a third fewer characters per request</span></code></pre>
 <p>Any other MCP client: run <code>python3 -I tools/wavemcp.py</code> as a stdio server. The server tells the agent its conventions in
   its <code>instructions</code> (start with <code>wave_info</code>, then <code>wave_signals</code> to find names …), so the agent needs no
   prompt of yours to use it. The tools that only read are marked read-only (<code>readOnlyHint</code>); <code>wave_page</code>,
@@ -70,8 +71,10 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
   <tr><td><code>wave_to_fst</code></td><td>the VCD as an FST beside it (<code>sva fst</code>), the FSM states of its types file in it:
     what was written, the notes with their lines</td></tr>
   <tr><td><code>view_edit</code></td><td>marks a page up for a person: bookmarks with an explanation, arrows between them, markers, a group
-    of the signals that matter, highlight, colours, the cursor and the window — live in their browser, else in the page's file</td></tr>
-  <tr><td><code>view_get</code></td><td>what a page shows, the person's own edits too; its signals; a picture of the screen (live)</td></tr>
+    of the signals that matter, highlight, colours, the cursor and the window — live in their browser, else in the page's file;
+    <code>config</code>: bookmarks, arrows and spans into a view of the page's config, so a rebuild keeps them</td></tr>
+  <tr><td><code>view_get</code></td><td>what a page shows, the person's own edits too; its signals; a picture (live: the screen; a page's file: made in
+    a headless Chromium by <code>tools/pageshot.py</code>, playwright)</td></tr>
   <tr><td><code>view_live</code></td><td>connects a page to the agent: what it does there appears as it happens</td></tr>
 </table>
 
@@ -202,6 +205,14 @@ view_get  {"page": "apb_page.html", "picture": true}  <span class="c"># what is 
   the person moves it or answers in its text, <code>view_get</code> reads it back. <code>save</code> in <code>view_edit</code> writes the
   live page's state into its file too; <code>off</code> in <code>view_live</code> takes the link out of the page before it goes to anyone
   else.</p>
+<h3 id="config">The config, for a page built again</h3>
+<p>Edits in a page's file are gone when <code>mkhtml.py</code> builds it again. For marks that belong to the page, edit its config:</p>
+<pre><code>view_edit {"config": "tb.config.json", "view": "drop", "ops": [
+  {"op": "bookmark", "n": 4, "text": "r_cnt_re reached 43: back to IDLE", "label": "43"},
+  {"op": "span", "from": {"bookmark": 2}, "to": {"bookmark": 4}, "label": "43 ticks"}]}
+view_get  {"page": "tb.html", "view": "drop", "picture": true}   <span class="c"># after make html: the PNG of that view, no browser needed</span></code></pre>
+<p>The whole list is checked before the file is written (one bad command: nothing written); a bookmark placed <code>"at"</code> an
+  event keeps it until a <code>t</code> replaces it; the other views and keys stay as they are.</p>
 
 <h2 id="conventions">Conventions</h2>
 <ul>
@@ -211,6 +222,12 @@ view_get  {"page": "apb_page.html", "picture": true}  <span class="c"># what is 
     <code>u_regs.PSEL</code>). Of several matches the one nearest the top is taken and named in <code>notes</code>; two at the same
     depth are an error naming both. Of several signals asked for, one not found is left out and named in <code>missing</code>.</li>
   <li><b>Bits</b>: <code>x[7:4]</code> and <code>x[3]</code> select bits.</li>
+  <li><b>State names</b> come from the dump (an FST's tables) and from the types file beside it (<code>tb.vcd</code> →
+    <code>tb.types.json</code>, as <code>mkconfig.py</code> takes it): <code>r_state</code> answers <code>FRAME_ERROR</code>, not
+    <code>5</code>. <code>types</code>: another file, <code>no_types</code>: none; <code>wave_info</code> names the file.</li>
+  <li><b>Arguments</b>: one a tool does not take is an error that lists the ones it takes; a sibling tool's name is taken for the
+    tool's own (<code>signal</code> for <code>signals</code>, <code>times</code> for <code>at</code>, <code>text</code> for
+    <code>source</code>).</li>
   <li><b>Cycles</b> are the clock's rising edges from the start of the dump, numbered from 0 — the same numbers in
     <code>wave_sample</code>, <code>wave_find</code> and <code>sva_check</code>. Sampled values are the ones just before the edge.</li>
   <li><b>Long answers</b> stop at <code>limit</code>; <code>more</code>, <code>next_from</code> / <code>next_offset</code> say how to
@@ -266,7 +283,7 @@ make mcp-bench AGENT=codex TASKS=a1,b3                 <span class="c"># some ta
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.27 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.28 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

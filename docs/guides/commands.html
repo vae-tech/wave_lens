@@ -73,7 +73,11 @@ await v.run([
   <li><b>Bookmarks</b> are numbered 1, 2, …; arrows go <code>from</code> one number <code>to</code> another; markers and arrows have
     an <code>id</code> as listed. Change one by naming it (<code>{op: 'bookmark', n: 2, text: '…'}</code>), delete one with
     <code>{op: 'bookmark', n: 2, delete: true}</code> (<code>n: 'all'</code>: every one; its arrows go too); a marker with
-    <code>{op: 'marker', id: 1, delete: true}</code>.</li>
+    <code>{op: 'marker', id: 1, delete: true}</code>. A bookmark's <code>label</code> is a short text by its circle,
+    <code>lift: 'below'</code> puts it in a lane under its signal; an arrow's label takes <code>{dt}</code>, <code>{cycles}</code>,
+    <code>{cycles:PCLK}</code>, filled at its ends.</li>
+  <li><b>Spans</b>: <code>{op: 'span', from: '45ns', to: '65ns', label: 'write', color: 'c7'}</code> shades a stretch of time
+    across the rows (<code>signals</code>: only those), with its label; changed by <code>id</code>, deleted as a marker is.</li>
 </ul>
 <p>The commands that only read: <code>state</code> (what <span class="ui">Save</span> writes), <code>rows</code> (the signals in
   display order), <code>picture</code> (PNG as base64, SVG or WaveDrom). <code>find</code> answers its matches too, but it sets the
@@ -109,7 +113,7 @@ python3 -I tools/viewedit.py saved.view.json --model page.html --ops '[{"op": "b
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.27 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.28 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

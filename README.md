@@ -10,7 +10,8 @@ transactions are three plugin scripts more, inlined into a page): no build step,
 ![The APB example in the dark theme: viewer bar, waves, numbered bookmarks and arrow labels in their own lanes](docs/img/hero.png)
 
 - **A wave window in the browser**: zoom, two cursors, measured ranges, fuzzy find, the hierarchy, a Modules tree that
-  keeps only the modules you pick, your groups and order, clock cycles, undo, bookmarks and arrows with notes; a log
+  keeps only the modules you pick, your groups and order, clock cycles, undo, bookmarks and arrows with notes (in a config at
+  an event: `"at": {"signal": "state", "value": "ERROR"}`, the build finds the time); a log
   under the waves of what was read and what went wrong (a JSON file's error at its line and column).
 - **SystemVerilog assertions** bound to instances, evaluated over the dump (in the page and by a CLI for CI), every
   attempt drawn on the waves, a failure taken apart step by step.
@@ -25,7 +26,8 @@ transactions are three plugin scripts more, inlined into a page): no build step,
 - **VS Code over Remote-SSH or WSL**: a dump on the Linux host opens in a tab, nothing else installed there
   ([installing it](#the-vs-code-extension)).
 - **Scripts and AI agents**: whatever the buttons do, a command does by name — from the console, `tools/viewedit.py`
-  or an MCP server, live in an open page.
+  or an MCP server, live in an open page, into the page's file or into its config (a rebuild keeps them); a PNG of each
+  view without a browser open (`tools/pageshot.py`); warnings at the build for what the page would not show.
 
 ## Try it in a minute
 

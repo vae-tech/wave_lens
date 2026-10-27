@@ -608,7 +608,7 @@ function parse(src) {
   M.markers = (j.markers || []).map(m => ({ t: mt(m), label: m.label || '' }));
   M.jumps = j.jumps ? j.jumps.map(m => ({ t: mt(m), span: num(parseT(m.span)) || (M.t1 - M.t0) / 5, label: m.label || '' })) : null;
   M.cursor = j.cursor != null ? num(parseT(j.cursor)) : null;
-  M.bookmarks = bmNorm(j.bookmarks); M.arrows = arNorm(j.arrows, j.bookmarks);
+  M.bookmarks = bmNorm(j.bookmarks); M.arrows = arNorm(j.arrows, j.bookmarks); M.spans = spanNorm(j.spans);
   return M;
 }
 // lazy rows (a large dump read as it is needed, "lazy": the id codes of a signal not read yet): the WaveJSON signals read
@@ -781,7 +781,7 @@ function gapCuts(rows, a, b, S, clk, cycle = 1, also = [], picked = false) {
   }
   return idleCuts([...ts].sort((x, y) => x - y), a, b, idle, keep, d.length ? ups : [], d.length ? 2 * cyc : 0);
 }
-// extension "bookmarks": [{n, t, signal (full path), text, color, top (the row at the top of the waves when it was made:
+// extension "bookmarks": [{n, t, at, signal (full path), text, color, top (the row at the top of the waves when it was made:
 // a signal's full path or a module's path; going to it puts that row there again)}] and "arrows": [{from, to, shape, head, line, color, label}]
 // (from / to = bookmark numbers). An old bookmark with "to" / "shape" / "label" becomes an arrow.
 const AR_SHAPES = { '~': 'curve', '-': 'straight', '-~': 'curve, late', '~-': 'curve, early', '-|': 'corner ┐', '|-': 'corner └', '-|-': 'step' };
@@ -789,9 +789,27 @@ const AR_HEADS = { '>': '→ end', '<>': '↔ both', '<': '← start', '': '— 
 const AR_LINES = { solid: null, dashed: [6, 4], dotted: [1.5, 3] };
 function bmNorm(list) {
   const obj = x => x && typeof x === 'object';   // an entry that is no object (a bad copy in this browser): left out
-  return (Array.isArray(list) ? list : []).filter(obj).map((b, i) => ({ n: +b.n || i + 1, t: num(parseT(b.t)), signal: b.signal || null,
-    text: b.text || '', color: b.color || null, lift: !!b.lift && !!b.signal, top: typeof b.top === 'string' && b.top ? b.top : null }))
-    .filter(b => isFinite(b.t));   // lift: in the lane above its signal
+  // lift: false, true (the lane above its signal) or "below" (the lane under it); label: a short text by the circle (an
+  // old bookmark with "to": the arrow's)
+  return (Array.isArray(list) ? list : []).filter(obj).map((b, i) => Object.assign({ n: +b.n || i + 1, t: num(parseT(b.t)), signal: b.signal || null,
+    text: b.text || '', label: (b.to == null || b.to === '') && b.label != null ? String(b.label) : '', color: b.color || null,
+    lift: b.signal ? liftOf(b.lift) : false, top: typeof b.top === 'string' && b.top ? b.top : null },
+    b.at != null && (typeof b.at === 'string' || obj(b.at)) ? { at: b.at } : {},   // at: the event its time came from (mkhtml.py); moved, it goes
+    linkOf(b.link) ? { link: linkOf(b.link) } : {}))   // link: another view of the page ({view, bookmark}) its button opens
+    .filter(b => isFinite(b.t));
+}
+const liftOf = x => (x === 'below' ? 'below' : x === 'above' || !!x);   // "above" is true
+// a bookmark's link: "crc" (the section of that view) or {view: "crc", bookmark: 3} (its viewer goes to that bookmark)
+const linkOf = x => (typeof x === 'string' && x ? { view: x } : x && typeof x === 'object' && typeof x.view === 'string' && x.view ?
+  Object.assign({ view: x.view }, +x.bookmark > 0 ? { bookmark: +x.bookmark } : {}) : null);
+// extension "spans": [{from, to, label, color, signals}] coloured stretches of time, over every row or the rows of
+// "signals" (full paths or names): the page's (mkhtml.py resolves their ends) and yours (the span command)
+function spanNorm(list) {
+  return (Array.isArray(list) ? list : []).filter(s => s && typeof s === 'object').map(s => {
+    const a = num(parseT(s.from)), b = num(parseT(s.to));
+    return { from: Math.min(a, b), to: Math.max(a, b), label: s.label != null ? String(s.label) : '', color: s.color || null,
+      signals: Array.isArray(s.signals) ? s.signals.map(String) : typeof s.signals === 'string' && s.signals ? [s.signals] : null };
+  }).filter(s => isFinite(s.from) && isFinite(s.to));
 }
 function arNorm(list, bms) {
   const old = (Array.isArray(bms) ? bms : []).map((b, i) => b && b.to != null && b.to !== '' ? { from: +b.n || i + 1, to: +b.to, shape: b.shape,

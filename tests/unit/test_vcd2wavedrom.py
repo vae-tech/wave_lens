@@ -455,5 +455,83 @@ class Convert(unittest.TestCase):
                         got[1].get('head', {}).pop('text', None)
                         self.assertEqual(got, want, r)
 
+
+class Lint(unittest.TestCase):
+    """lint(): each check by itself, on a WaveJSON as convert() writes it (meta, signal, config) and the options."""
+    import argparse
+    A = argparse.Namespace(marker=[], no_match=[])
+    SIG = [{'name': 'clk', 'wave': 'p'}, ['u', {'name': 'state', 'wave': '='}], {'name': 'x', 'path': 'tb.d.x', 'wave': '0'}]
+
+    def lint(self, a=None, **doc):
+        doc = {'meta': {'from_ps': 0, 'to_ps': 1e6}, 'signal': self.SIG, **doc}
+        return V.lint(doc, a or self.A, 'views.v')
+
+    def codes(self, *a, **doc):
+        return [w.split(':', 1)[0] for w in self.lint(*a, **doc)]
+
+    def test_clean(self):
+        self.assertEqual(self.lint(bookmarks=[{'n': 1, 't': '100ns', 'signal': 'u.state'}, {'n': 2, 't': 500000, 'signal': 'tb.d.x'}],
+                                   arrows=[{'from': 1, 'to': 2, 'label': 'a'}]), [])
+
+    def test_row_paths_as_the_page_names_them(self):
+        self.assertEqual(V.row_paths(self.SIG), ['clk', 'u.state', 'tb.d.x'])
+
+    def test_bookmark_outside_the_view(self):
+        w = self.lint(bookmarks=[{'n': 1, 't': '1133.8us', 'signal': 'clk'}])
+        self.assertEqual(w, ['bookmark-outside-view: views.v.bookmarks[0] (n 1): 1133.8us is outside the view 0ps…1us: not drawn'])
+
+    def test_bookmark_signal_missing_with_a_hint(self):
+        w = self.lint(bookmarks=[{'n': 1, 't': 10, 'signal': 'state'}])
+        self.assertEqual(len(w), 1)
+        self.assertTrue(w[0].startswith('bookmark-signal-missing: views.v.bookmarks[0] (n 1): "state" is no row'), w)
+        self.assertIn('full path: u.state', w[0])
+
+    def test_duplicate_bad_time_unknown_key(self):
+        self.assertEqual(self.codes(bookmarks=[{'n': 1, 't': 10}, {'n': 1, 't': 'soon', 'lable': 'x'}]),
+                         ['bookmark-key', 'bookmark-time', 'bookmark-duplicate'])
+
+    def test_arrow_to_no_bookmark(self):
+        w = self.lint(bookmarks=[{'n': 1, 't': 10}], arrows=[{'from': 1, 'to': 3, 'colour': 'r'}])
+        self.assertEqual([x.split(':')[0] for x in w], ['arrow-key', 'arrow-end-missing'])
+        self.assertIn('"to" 3 is no bookmark of the view (have: 1)', w[1])
+
+    def test_marker(self):
+        import argparse
+        a = argparse.Namespace(marker=['posedge q=q', {'on': 'q', 'lable': 'x'}], no_match=[(0, 'posedge q')])
+        self.assertEqual(self.codes(a), ['marker-key', 'marker-no-match'])
+
+    def test_bind_and_svashow(self):
+        sva = {'notes': ["bind: no assertion 'a_nope' in t.sva", "bind: 'z_*' matches no assertion", 'bind: no sva binary at build time'],
+               'files': [{'parsed': {'assertions': [{'label': 'a1'}, {'label': 'a2'}]}}]}
+        w = self.lint(sva=sva, config={'svaShow': ['a*', 'zz']})
+        self.assertEqual([x.split(':')[0] for x in w], ['bind-unknown', 'bind-unknown', 'svashow-no-match'])
+        self.assertIn('"zz" is no assertion of the files (have: a1, a2)', w[2])
+        self.assertEqual(self.codes(sva=sva | {'notes': []}, config={'svaShow': 'a1, a2'}), [])
+
+    def test_close_circles_on_one_row(self):
+        bms = [{'n': 1, 't': 1000, 'signal': 'clk'}, {'n': 2, 't': 5000, 'signal': 'clk'}]
+        self.assertEqual(self.codes(bookmarks=bms), ['bookmarks-close'])
+        self.assertEqual(self.codes(bookmarks=[bms[0], {**bms[1], 'lift': True}]), [])   # another lane
+        self.assertEqual(self.codes(bookmarks=[bms[0], {**bms[1], 't': 30000}]), [])      # 30 px apart
+
+    def test_hex_enum_colours_in_an_auto_theme(self):
+        self.assertEqual(self.codes(config={'enumColors': {'IDLE': '#ffe066', 'RUN': 'c3'}}), ['enum-colors-hex'])
+        self.assertEqual(self.codes(config={'theme': 'light', 'enumColors': {'IDLE': '#ffe066'}}), [])
+        sig = [{'name': 's', 'wave': '=', 'enumColors': {'A': '#123'}}]
+        self.assertEqual(self.codes(signal=sig), ['enum-colors-hex'])
+
+    def test_spans(self):
+        self.assertEqual(self.codes(spans=[{'from': 2e6, 'to': 3e6}, {'from': 0, 'to': 10, 'signals': ['state', 'u.state', 'nope'], 'colour': 1}]),
+                         ['span-outside-view', 'span-key', 'span-signal-missing'])
+
+    def test_convert_prints_them(self):
+        with H.tmp() as d:
+            cfg = os.path.join(d, 'c.json')
+            json.dump({'waves': H.fixture('names'), 'exact': True, 'signals': 'tb.clk', 'marker': ['posedge tb.dut.i_ready=r'],
+                       'bookmarks': [{'n': 1, 't': '1s', 'signal': 'tb.clk'}]}, open(cfg, 'w'))
+            rc, _, err = H.run_tool('vcd2wavedrom', '--config', cfg)
+        self.assertIn('vcd2wavedrom: lint: bookmark-outside-view: bookmarks[0] (n 1)', err)
+
+
 if __name__ == '__main__':
     unittest.main()

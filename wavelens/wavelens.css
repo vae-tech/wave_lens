@@ -181,6 +181,7 @@
 .wv .notes .ic { padding: 1px 6px; }
 .wv .notes .ic.up[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }   /* the bookmark lifted above its signal */
 .wv .notes input[type="color"] { width: 26px; height: 22px; padding: 1px; border-radius: 4px; cursor: pointer; }
+.wv .notes input.lbl { width: 12ch; border-radius: 4px; }   /* the short label by the circle */
 .wv .notes input.txt { flex: 1 1 18ch; min-width: 12ch; border-radius: 4px; }
 .wv .notes input.lab { width: 14ch; border-radius: 4px; }
 .wv .notes button:disabled { opacity: 0.45; cursor: default; }

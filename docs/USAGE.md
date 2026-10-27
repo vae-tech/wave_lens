@@ -71,7 +71,7 @@ may be the default). What the tab does differently from a page in a browser:
   what they mean in VS Code (ctrl+F find, ctrl+C copy, ctrl+Z / ctrl+Y undo / redo, alt+C W R in the find field);
   `wavelens.keysToVSCode` (default `ctrl+G`, Go to Line) are left to VS Code — the list of your groups is `gl` then; the
   others (ctrl+P, F1, ctrl+tab, ctrl+shift+…) are VS Code's.
-- **The version** in the bar's title line: `0.27 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
+- **The version** in the bar's title line: `0.28 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
   committed), so a tab of a development build says which one it is.
 - **An agent** on the host (`tools/wavemcp.py`, below): when it starts its live link, every open tab connects (**●
   live**); `view_live` with `page` a `.vcd` / `.fst` and `open: true` opens it in the VS Code window that has the file
@@ -173,6 +173,31 @@ The starting values come from `tools/base.config.json` (`BASE=`): which scope de
 how many value changes fit on a page, and rules by path pattern and width (`python3 -I tools/mkconfig.py --help`).
 The example configs in [`examples/`](../examples) are written by hand and show every key.
 
+### Lint: what the page would not show
+
+`mkhtml.py` (and `vcd2wavedrom.py`) print a warning for what the page would draw otherwise than meant, or not at all,
+with the config path of the entry; the page is still written:
+
+```
+mkhtml: lint: bookmark-outside-view: views.drop.bookmarks[0] (n 1): 1133.8us is outside the view 1.155ms…1.2ms: not drawn
+```
+
+`mkhtml.py --config x.config.json --lint` checks without writing a page; `--strict` makes a warning an error (exit 1, no
+page). The checks:
+
+| Code | What |
+|---|---|
+| `bookmark-outside-view` | a bookmark's time is outside its view's window: not drawn (the list still has it) |
+| `bookmark-signal-missing` | its `signal` is no row of the view: the circle goes on the time axis (a row is named by its full path, or as the config gave it with `scope`; the warning names the row whose last part matches) |
+| `bookmark-duplicate`, `bookmark-time`, `bookmark-key` | a number twice (arrows take the first), a `t` that is no time, an unknown key (`lable`) |
+| `arrow-end-missing`, `arrow-key` | an arrow from or to no bookmark of the view (not drawn), an unknown key |
+| `marker-no-match`, `marker-key` | a marker's event matches nothing in the window, an unknown key |
+| `bind-unknown` | a binding to an assertion that is not in the files (`mc_fsm_gap` for `mc_fsm_from_gap`) |
+| `svashow-no-match` | an `svaShow` name or pattern that matches no assertion |
+| `bookmarks-close` | two circles on one row nearer than 16 px at 1000 px of the whole window: they overlap (a heuristic; `"lift": true` puts one in the lane above, `"below"` in the one under) |
+| `span-outside-view`, `span-signal-missing`, `span-key` | a span outside the window (not drawn), on no row of the view, an unknown key |
+| `enum-colors-hex` | an `enumColors` fill in hex while the theme may be dark: it stays light there, under a light text (the tokens `c3`…`c9` follow the theme) |
+
 ### FSM state names: FST, or VCD + the design's types
 
 An FST written by Verilator (`--trace-fst`) carries the enum tables of the design, so state buses show `IDLE`, `START`, …
@@ -183,7 +208,10 @@ at once; the names come from the design's types (guide: [State names and structs
 
 - **A types file** `tb.types.json` next to `tb.vcd`, keyed by path, written by the tool that elaborated the design:
   - **Questa**: `source tools/questa/wavelens_types.tcl` in `vsim` (`-voptargs=+acc`), then `wavelens_types tb.types.json
-    [root]`, any time after the design is loaded. A saved WLF too: `vsim -view old.wlf`, `wavelens_types old.types.json
+    [root]` after the design is loaded and **before** `run` (in a batch `vsim` the test's `$finish` ends vsim unless
+    `-onfinish stop`, and a command after `run -all` is never run); `wavelens_vcd tb.vcd [root]` writes the VCD of the signals
+    under root (`vcd file` + `vcd add -r`; or `$dumpfile` / `$dumpvars` in the testbench):
+    `source …/wavelens_types.tcl; wavelens_types tb.types.json; wavelens_vcd tb.vcd /tb/u_dut; run -all`. A saved WLF too: `vsim -view old.wlf`, `wavelens_types old.types.json
     old:/tb`. The file keeps Questa's `describe` of every signal and the module of every instance. `make questa EX=fsm` does
     it for the FSM example (`BUILD/questa/fsm/`).
   - **Verilator**: `python3 -I tools/svtypes.py verilator --top tb --out tb.types.json -- -f files.f` (after `--`, the
@@ -303,7 +331,7 @@ add theirs (`WaveLens.registerDefaults`).
 | `toolsFolded` | false | the bar's tools folded to its title line (**▴** / **▾ tools** in the bar) |
 | `toolsHidden` | `[]` | the bar's tool groups left out by their labels (`["style", "dump"]`; the right button on the bar) |
 | `themeButton` | `auto` | **◐** in the bar's title line: the page's theme (auto, light, white, dark; kept in this browser; in VS Code its list, VS Code's colours too); `auto`: when the page has no theme button of its own (`viewer.html`, the VS Code tab) |
-| `version` | true | the version in the bar's title line, and the build the page was made from (`0.27 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
+| `version` | true | the version in the bar's title line, and the build the page was made from (`0.28 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
 | `keysLeft` | `[]` | keys the viewer leaves to its host: `["ctrl+G"]` (`ctrl+` is `cmd+` too, a letter by its place); the VS Code tab: `wavelens.keysToVSCode` |
 | `log` | `auto` | the log under the viewer (§ A dump straight in the browser): `auto` from the first thing done in the page (a dump read, Sources…, Load…), `true` always, `false` never |
 | `savePage` | true | the bar's **Save page**: this page as a `.view.html` with your view in it (§ Save and Load); false hides it and keeps no copy of the page's text |
@@ -373,6 +401,17 @@ full list: [`docs/sva/LANGUAGE.md`](sva/LANGUAGE.md); the evaluator:
 ```
 
 or on the command line: `make html WAVES=x.vcd SVA="checks/*.sv" BIND="a_req_ack@tb.dut,apb_*@tb.u_apb"`.
+A top-level `"bind"` is every view's; a view's own `"bind"` is drawn in that view. The page's printable **Assertions**
+section has every binding of every view over the whole dump; `"report"` adds bindings to that section only, drawn in
+no view — the full report of a page whose views each draw two or three assertions:
+
+```json
+"report": { "bind": [{ "assert": "*", "scope": "tb.dut" }] }
+```
+
+(or the list alone, `"report": ["*@tb.dut"]`; `mkhtml.py --report NAME@SCOPE`, repeatable; it needs the top-level `"sva"`
+and `"waves"`; `"report": false`: no printable section). A view's bindings keep their sampled times once per clock
+(`sva.cycles`), not once per binding: a page of six windows with 19 bindings is 2.8 MB instead of 6.8 MB.
 `make config WAVES=x.vcd SVA="checks/*.sv"` (`mkconfig.py --sva`) writes the `"bind"` lines for you: one per assertion and
 instance in which every signal resolves, `"show": true` when there is only one such instance (else choose); run again,
 it keeps your choices, the lines and keys you wrote and the other files of `"sva"` (a mistyped `SVA=` stops `make`).
@@ -439,7 +478,8 @@ first pass) selected at the zoom you have, the attempt in the middle of the wind
 `]a` / `[a` on the waves for the next / previous assertion. Click a bar or a circle, a failure in the panel, one of the failure buttons in **go to** (at most six) or press `]f` /
 `[f`: the attempt is **selected** — the cursor at its start, the view moved to it at the same zoom, its circles and arrows in front, the
 signals it read highlighted; Esc clears it. With more than three assertions at one place the ones without failures
-start folded; `"svaShow": ["apb_*"]` limits which are drawn. A `"render": "svg"` view draws the same rows with every
+start folded; `"svaShow": ["apb_*"]` limits which are drawn (the panel says `19 loaded · 19 bound · 2 shown on the waves`;
+its totals stay over every binding). A `"render": "svg"` view draws the same rows with every
 attempt's arrows and a legend of the steps, and the first failure (else the first attempt) of each assertion on its
 signals with its start and end flags.
 
@@ -659,6 +699,58 @@ come back on reload); **JSON** gives the `"bookmarks"` and
 `"arrows"` lists to paste into a config, so the built page (and its static SVG) carries them. The AXI-Lite picture
 above shows arrows between handshakes with the latency as the label.
 
+**On the waves** (the viewer and the static SVG alike): `"lift": "below"` puts a circle into a lane **under** its
+signal (`true`, or `"above"`, over it; **↥** in its line goes off → over → under → off, **↧** shows under; a circle
+dragged onto the bottom quarter of its row goes under), for a row whose top already has arrow labels or other circles.
+`"label": "CRC ≠ 0"` is a short text by the circle (the field next to the text in its line); the long `"text"` stays in
+the list, the SVG's legend and the circle's tooltip (an old bookmark with `"to"` is an arrow, and its `"label"` the
+arrow's). An arrow's label may hold placeholders filled at its ends: `{dt}` the time between them (`10 ns`; in a diagram
+without time its cycles, `3T`), `{cycles}` the cycles of a clock-sampled view's clock, `{cycles:NAME}` the rising
+edges of the row NAME (a full path or a name) between them, `?` where there is none — `"43 ticks"` written as
+`"{cycles:clk_sampl_en} ticks"` stays right when the test changes, and an end moved by hand updates it.
+
+**Spans** are coloured stretches of time: a frame's phases, a window of 43 ticks, frame 3. A view's `"spans"`:
+
+```json
+"spans": [{ "from": "45ns", "to": { "signal": "PREADY", "edge": "fall" }, "label": "write", "color": "c7" },
+          { "from": { "bookmark": 3 }, "to": { "bookmark": 4 }, "signals": ["PREADY"], "label": "wait" }]
+```
+
+`from` / `to`: a time (a number in ps, or with a unit), an event as a bookmark's `"at"` (its first match, or `"nth"`),
+or `{"bookmark": n}` (a bare number is a time, not a bookmark); `signals`: only those rows (full paths or names), else
+every row; the colour a token (`c3`…`c9`, `acc`) or `#hex`. The label sits at its top left; the tooltip on the waves
+gives it with its length. The `span` command adds or changes yours (kept in the browser, in a saved state, undone with
+the rest).
+
+**A bookmark at an event.** In a config a bookmark may give `"at"` instead of `"t"`: the build finds its time in the
+dump, so a test changed later moves it with the event (both `"t"` and `"at"` are an error). The forms are `wave_find`'s
+and `bind`'s:
+
+```json
+{ "n": 6, "at": "posedge PSLVERR", "signal": "PSLVERR", "text": "the transfer failed" }
+{ "n": 4, "at": { "signal": "r_state", "value": "FRAME_ERROR", "from": "800us" }, "signal": "r_state" }
+{ "n": 3, "at": { "expr": "o_sat_data_eof && o_err_sat[1]", "clock": "i_clk_12m" } }
+{ "n": 7, "at": { "assert": "mc_start_ends_in_eof", "result": "fail", "nth": 1 } }
+```
+
+- a text: a marker's event — `"posedge X"`, `"negedge X"`, `"edge X"`, `"X"` (any change);
+- `{"signal", "value"}`: the signal becomes that value (an enum label of the config or the dump, a number, `'h40`,
+  `'b10x1`); already that value at `from`: `from` is the match. `{"signal", "edge"}`: `rise`, `fall`, `change`;
+- `{"expr", "clock"?, "scope"?}`: an SV expression or sequence sampled just before each edge of the clock (the view's by
+  default; the sva engine, as `wave_find`): each match at its first cycle (`$rose(…)` for where a condition starts);
+- `{"assert", "scope"?, "result"?, "point"?}`: an attempt of a binding over the whole dump — `result` `fail` (default)
+  at its failing cycle, `pass` at its end; `point` `start`, `end` or `failed_at`; the scope of the assertion's one
+  binding by default;
+- `"nth"` (from 1), `"from"`, `"to"`: which match, and the window searched (the view's; the whole dump for `assert`).
+
+The built page keeps the event next to the time it gave (the viewer's JSON too); moved by hand, a bookmark loses it.
+A bookmark's `"link"` opens another view of the page: `"link": "crc"` (that section), `{"view": "crc", "bookmark": 3}`
+(and its viewer goes to its bookmark 3) — the button `→ crc` in the bookmark's line (disabled when the page has no such
+section; the viewer only: a static SVG has no buttons); `bookmark-link-missing` when the config has no such view.
+No match is an error naming the bookmark: `views.gap.bookmarks[3] (n 4): no match for {"signal": "r_state", "value":
+"FRAME_ERROR"} in 790us…842us`. A marker's `"on"` takes the same events: `{"on": {"signal": "state", "value": "ERR"},
+"label": "err"}` puts a marker at every match (`"nth"`: that one).
+
 ![The bookmark and arrow lists under the waves](img/bookmarks.png)
 
 **Markers and your groups.** The right button's **Marker here** draws a dashed line across every row with a label at
@@ -864,9 +956,10 @@ await v.run([
 
 | Command | Arguments (`?` optional) | Does |
 |---|---|---|
-| `bookmark` | `n? t? signal? text? color? lift? top? go? delete?` | a numbered circle on a signal (none: the time axis) with its text: a new one (`n` free or left out, `t` the cursor by default) or bookmark `n` changed; `lift`: above its signal, in a lane; `top`: the row going to it puts at the top of the waves (a signal's or module's path, or a name as `signal` takes it — a row there is, else an error; null: none — the command takes none by itself, as its file twin has no screen; the viewer's own **Bookmark here**, `m` and a range's bookmarks take the row at the top then); `go: true`: the waves to it, as `1`–`9` go (in a file: the cursor, the window within the waves and the selection); `delete: true`: bookmark `n` goes (`n: "all"`: every one; its arrows go too) |
+| `bookmark` | `n? t? signal? text? label? color? lift? top? go? delete?` | a numbered circle on a signal (none: the time axis) with its text: a new one (`n` free or left out, `t` the cursor by default) or bookmark `n` changed; `label`: a short text by the circle; `lift`: `true` (or `"above"`) in a lane above its signal, `"below"` in one under it; `top`: the row going to it puts at the top of the waves (a signal's or module's path, or a name as `signal` takes it — a row there is, else an error; null: none — the command takes none by itself, as its file twin has no screen; the viewer's own **Bookmark here**, `m` and a range's bookmarks take the row at the top then); `go: true`: the waves to it, as `1`–`9` go (in a file: the cursor, the window within the waves and the selection); `delete: true`: bookmark `n` goes (`n: "all"`: every one; its arrows go too) |
 | `arrow` | `id? from? to? shape? head? line? color? label? delete?` | an arrow between bookmarks `from` → `to` with its label: new, or arrow `id` (1, 2 … as listed; or the one from → to) changed; shape `~ - -~ ~- -\| \|- -\|-`, head `> <> < ""`, line `solid dashed dotted` |
 | `marker` | `id? t? label? color? delete?` | a dashed line across the rows with its label: new, or marker `id` changed; `delete`: `id` or `"all"` (`"all"` without `delete` is an error) |
+| `span` | `id? from? to? label? color? signals? delete?` | a coloured stretch of time across the rows (or the rows of `signals`) with its label: new (`from` and `to`), or span `id` changed; `delete`: `id` or `"all"` |
 | `group` | `name signals? add? remove? color? rename? delete? go? move?` | your group: `signals` sets its signals in this order (a module: its signals), `add`, `remove`, `rename`, `delete`; `go`: opened, in the middle, its first signal selected (ctrl+G); `move`: its place among your groups (`up`, `down`, `top`, `bottom`, a number) |
 | `layout` | `scroll? height? tools?` | where the rows scroll: `window` (`height`: `"80vh"`, `600`) or `page`; the bar's tools `fold` or `open`; answers `scroll`, `height`, `tools` |
 | `highlight` | `add? remove? set? clear?` | signals and modules (and your groups) in front in their colours, the rest dimmed |
@@ -929,6 +1022,7 @@ an FST needs `fst2vcd` or the `sva` CLI.
 
 ```sh
 claude mcp add wavelens -- python3 -I /path/to/wavelens/tools/wavemcp.py     # Claude Code (--scope user: every project)
+claude mcp add wavelens -- python3 -I /path/to/wavelens/tools/wavemcp.py --lean   # the short tool list: a third fewer characters
 codex mcp add wavelens -- python3 -I /path/to/wavelens/tools/wavemcp.py      # Codex CLI
 python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd"}'   # one tool from the shell
 ```
@@ -940,13 +1034,13 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
 | `wave_values` | the values of signals at one or more times (after the changes at that time, or `side: "before"`) |
 | `wave_changes` | the value at the start of a window and the changes in it, `limit` per signal (`more`, `next_from`: how to go on) |
 | `wave_sample` | a table per clock cycle (`cycle`, `t`, the values sampled just before the edge, as SVA samples), by default only the cycles where a value changes |
-| `wave_find` | `expr`: an SV expression or sequence matched on every clock cycle by the sva engine (`req && !ack`, `req ##[1:3] ack`, `$rose(x)`); or a signal's edges (`rise`, `fall`, `change`) or value (a number, `'h40`, `'b10x1` bit for bit, an enum label) at their exact times; the count and the first matches |
+| `wave_find` | `expr`: an SV expression or sequence matched on every clock cycle by the sva engine (`req && !ack`, `req ##[1:3] ack`, `$rose(x)`); or a signal's edges (`rise`, `fall`, `change`) or value (a number, `'h40`, `'b10x1` bit for bit, an enum label) at their exact times; the count and the first matches (the rules of a bookmark's `at`: one module, `tools/wavefind.py`) |
 | `wave_stats` | over a window: a bit's rises, falls, high time, pulse widths and period; a bus's changes, distinct values, the longest-held ones, minimum and maximum |
 | `sva_check` | assertion files and / or text evaluated over the dump in a scope: the failed ones with their first failures (`cycle`, `t`, `start_cycle`, `start_t`, the reason), passed, vacuous, not evaluated (names missing), the covers |
 | `wave_page` | a viewer page (`out` `.html`) or WaveJSON (`.json`) of signals over a window, assertions bound, to show a person |
 | `wave_to_fst` | the VCD as an FST beside it (`out`: another file) with `sva fst`, the FSM states of its types file in it (`types`, `no_types`); what was written and the notes with their lines |
-| `view_edit` | marks up a page for a person with the [commands](#commands-and-edits) (`ops`): bookmarks with a text, arrows, markers, groups, highlight, colours, hidden and folded rows, radix, cursor, window — live in their browser when the page is connected, else into the page's file (they see it when they open or reload it); `save`: a live page's state into its file too |
-| `view_get` | what a page shows: bookmarks, arrows, markers, groups, highlight, colours, hidden, cursor and window (live: with what the person changed); `rows`: its signals; `picture`: a PNG of the screen (live) |
+| `view_edit` | marks up a page for a person with the [commands](#commands-and-edits) (`ops`): bookmarks with a text, arrows, markers, groups, highlight, colours, hidden and folded rows, radix, cursor, window — live in their browser when the page is connected, else into the page's file (they see it when they open or reload it); `save`: a live page's state into its file too; `config` (instead of `page`): `bookmark`, `arrow` and `span` on a view of a `mkhtml.py` config, so a rebuild keeps them (a bookmark's `"at"` stays until a `t` replaces it; the whole list checked first, the file written at once) |
+| `view_get` | what a page shows: bookmarks, arrows, markers, groups, highlight, colours, hidden, cursor and window (live: with what the person changed); `rows`: its signals; `picture`: a PNG of the view (live: the screen; a page's file: made in a headless Chromium by `tools/pageshot.py`, when playwright is there) |
 | `view_live` | connects a page to this server: the link is written into it, the person opens or reloads it (`open`: in their browser); `off`: disconnects; `page` a `.vcd` / `.fst`: its tab in VS Code (the extension connects by itself; `open`: VS Code opens it); without a page: the pages connected |
 
 The conventions are in the server's `instructions`: times are ns (a number) or a text with a unit, read as the viewer
@@ -958,6 +1052,17 @@ edges and changes are the select's own; bits outside the bus are an error); the 
 edges from the start of the dump, as `sva_check` counts them. A dump is read once per server and kept (again when the
 file changes); the transitions of a signal when a tool first needs it; a value written again is no change. `wave_info`
 lists a clock once per net (one id code under several scopes), two clocks with edges alike are two.
+
+**Enum labels from the types file.** The tools that read values (`wave_info`, `wave_values`, `wave_changes`,
+`wave_sample`, `wave_find`, `wave_stats`, `wave_page`) take the labels of the types file beside the dump, as `mkconfig.py`
+does: `tb.vcd` → `tb.types.json` (Questa's `wavelens_types`, `svtypes.py verilator`); `types`: another file, `no_types`:
+none. `r_state` answers `FRAME_ERROR`, not `5`, and `wave_find` takes `"value": "FRAME_ERROR"`. An FST's own tables
+stay; `wave_info` names the file and its notes (another run's types, a width that differs).
+
+**Arguments.** An argument a tool does not take is an error that lists the ones it takes. A sibling tool's name for an
+argument is taken for the tool's own: `signal` for `signals` (`wave_values`, `wave_changes`, `wave_sample`,
+`wave_stats`, `wave_page`), `signals` of one for `signal` (`wave_find`), `times` or `t` for `at` (`wave_values`), `text`
+for `source` (`sva_check`); both names with other values are an error.
 
 **Long answers** stop at `limit` and say how to go on: `next_from` (`wave_changes`: the time of the last change given —
 `from` is the value after the changes at that time, so the next page starts with the change after it; `wave_sample`:
@@ -1009,8 +1114,9 @@ All tools are `python3 -I tools/<tool>.py --help`; the Makefile calls them for y
 | `mkconfig.py` | dump → editable config with every signal | `DUMP`, `--out`, `--update`, `--force`, `--base`, `--depth`, `--types FILE` (default `<dump>.types.json`), `--sv FILES`, `--sva FILES`, `--sva-bin` |
 | `svtypes.py` | the design's types by path ([§ FSM state names](#fsm-state-names-fst-or-vcd--the-designs-types)): Verilator's, and a check of a types file against a dump | `verilator --top --out -- ARGS`, `check TYPES [DUMP]` |
 | `questa/wavelens_types.tcl` | in `vsim`: the types of a Questa design (`describe` of every signal) | `source` it, `wavelens_types FILE [ROOT]` |
-| `mkhtml.py` | config (every view) or WaveJSON files → one self-contained page | `--config`, `--view`, `--waves`, `--render`, `--out`, `--sva FILE`, `--bind NAME@SCOPE`, `--sva-bin`, `--no-sva`, `--reproducible` |
+| `mkhtml.py` | config (every view) or WaveJSON files → one self-contained page | `--config`, `--view`, `--waves`, `--render`, `--out`, `--sva FILE`, `--bind NAME@SCOPE`, `--report NAME@SCOPE`, `--sva-bin`, `--no-sva`, `--reproducible`, `--lint`, `--strict` |
 | `vcd2wavedrom.py` | one window of a dump → WaveJSON | `--config` + `--view`, or `--waves --scope --signals --clock/--exact --from --to --marker --group --enum`; `--gap A:B` / `--auto-gap IDLE[:KEEP]` (`--clock`: a window, or every stretch of IDLE cycles where nothing but a clock changes, as one `\|` cell); `--sva FILE --bind NAME@SCOPE` |
+| `pageshot.py` | a page → a PNG per view and theme, made in a headless Chromium, and a manifest (`make pageshot HTML=…`); the one tool outside the standard library, optional (playwright, run without `-I`) | `--view KEY`, `--theme dark\|light\|both`, `--out DIR`, `--width` |
 | `svabuild.py` | the `"sva"` / `"bind"` of a config: files parsed, bindings evaluated with the `sva` CLI (used by the two above) | `--waves --sva --bind --out` |
 | `embed.py` | WaveJSON → `data.js` for `file://` pages, or into an HTML placeholder | `--var NAME key=file.json`, `--html --placeholder` |
 | `dumpscan.py`, `wavejson.py` | the built-in dump reader (VCD text, FST via `fst2vcd -e` or `sva vcd`; `WAVELENS_FST=sva` / `fst2vcd` picks one) and the readable JSON writer | modules |
@@ -1067,11 +1173,12 @@ WaveDrom 3.5.0.
 | `signal[i].width / enum / radix / style / color / fill` | bus width, value labels (`{"0": "IDLE"}`), radix, edge style, colours |
 | `signal[i].path`, `same` | full hierarchical path (the name's tooltip); `"same": "tb.clk"` = the `tv` of the signal with that `path` (one net seen at several levels is stored once) |
 | `config: {…}` | the settings of this diagram (see *Settings*) |
-| `bookmarks: [{n, t, signal, text, color}]` | numbered events on signal rows (`signal` = full path, `group.name` without one; `t` in model units or `"85.12us"`) |
-| `arrows: [{from, to, shape, head, line, color, label}]` | arrows between bookmarks: shape `- ~ -~ ~- -\| \|- -\|-`, head `> <> <` or `""`, line `solid dashed dotted` |
+| `bookmarks: [{n, t, at, signal, label, text, color, lift, top}]` | numbered events on signal rows (`signal` = full path, `group.name` without one; `t` in model units or `"85.12us"`; `at`: the event the build took `t` from; `label`: by the circle; `lift`: `true` / `"above"`, `"below"`) |
+| `arrows: [{from, to, shape, head, line, color, label}]` | arrows between bookmarks: shape `- ~ -~ ~- -\| \|- -\|-`, head `> <> <` or `""`, line `solid dashed dotted`; `label` with `{dt}`, `{cycles}`, `{cycles:NAME}` filled at its ends |
+| `spans: [{from, to, label, color, signals}]` | coloured stretches of time (ps), over every row or the rows of `signals` |
 | `markers: [{t \| cycle, label}]` | dashed markers; they become jump buttons when there are ≤ 6 and no `jumps` |
 | `jumps: [{t \| cycle, span, label}]`, `cursor` | jump buttons and the initial cursor |
-| `sva: {files?, bind, notes?, exprs?}` | assertions (`wavelens/sva.js`): `files: [{name, path, source, parsed?}]` (`parsed`: `sva parse --json`, else the page parses), `bind: [{assert, scope, results?}]` (`scope` an instance path, `""` the top of the diagram; `results` from `sva eval`, else evaluated when the page opens), `exprs: ["expr" \| {expr, scope}]` (rows ƒ, valued in the page) |
+| `sva: {files?, bind, notes?, exprs?}` | assertions (`wavelens/sva.js`): `files: [{name, path, source, parsed?}]` (`parsed`: `sva parse --json`, else the page parses), `bind: [{assert, scope, results?}]` (`scope` an instance path, `""` the top of the diagram; `results` from `sva eval`, else evaluated when the page opens; `results.cycles` an array of times, or the name of one in `cycles`), `cycles: {"<clock>": [times]}` (the sampled times once per clock: `mkhtml.py` names them in each `results.cycles`), `exprs: ["expr" \| {expr, scope}]` (rows ƒ, valued in the page) |
 | `meta.scope` | the converter's `--scope`: the instance the top rows belong to |
 | `meta.omitted` | `{why, paths: {scope: [names]}}`: the dump's signals not in the page (`why`: `config`, its `"show": false`; `dumpBudget`, a VCD opened in the page); the find names them |
 | `signal[i].width`, `raw` (clock-sampled) | a bus's width, and the hex value (or `'b` and the bits, as in `tv`) of each `data` label when the labels do not read back as values (`bin` `signed` `oct` `ascii` radix, x digits): what the page's assertions sample |

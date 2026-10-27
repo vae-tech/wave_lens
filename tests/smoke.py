@@ -349,9 +349,22 @@ def bookmarks(page):
     p2 = pos(2); page.mouse.move(box['x'] + p2[0], box['y'] + p2[1]); page.mouse.down(); page.mouse.move(box['x'] + p2[0], box['y'] + rowy('data') + 4, steps=6); page.mouse.up()
     down = js("[v.bms[1].lift, v.rowsL.some(r => r.type === 'lane' && r.ids.includes('b:bus.data'))]")
     bl.nth(1).locator('button[data-bm=lift]').click(); btn = js("[v.bms[1].lift, v.bmGeo.pos.get(2)[1] < (o => o.y)(WaveLens.internal.peek(v).lay.find(o => o.row.name === 'data'))]")
+    bl.nth(1).locator('button[data-bm=lift]').click()   # ↥ again: under the signal (↧), then on the row again
+    under = js("[v.bms[1].lift, (o => v.bmGeo.pos.get(2)[1] > o.y + o.h)(WaveLens.internal.peek(v).lay.find(o => o.row.name === 'data'))]")
     bl.nth(1).locator('button[data-bm=lift]').click()
-    check(up[0] is True and up[1] < up[2][0] and up[3] and up[4] is True and down == [False, False] and btn == [True, True] and not js('v.bms[1].lift'),
-          f'a circle dragged to the top of its row goes into a lane above the signal (kept in the JSON), lower down back on the row; ↥ does the same {up} {down} {btn}')
+    check(up[0] is True and up[1] < up[2][0] and up[3] and up[4] is True and down == [False, False] and btn == [True, True] and under == ['below', True]
+          and not js('v.bms[1].lift'), f'a circle dragged to the top of its row goes into a lane above the signal (kept in the JSON), lower down back on '
+          f'the row; ↥ does the same, again: under the signal, again: on the row {up} {down} {btn} {under}')
+    # the lane of a lifted bookmark does not depend on arrowLabels: with "overlay" the arrows' labels stay on the arrows
+    page.evaluate("WaveLens.configure({arrowLabels: 'overlay'})")
+    bl.nth(1).locator('button[data-bm=lift]').click()
+    ov = js("[v.rowsL.filter(r => r.type === 'lane').map(r => r.ids.join(',')), v.bmGeo.pos.get(2)[1] < (o => o.y)(WaveLens.internal.peek(v).lay.find(o => o.row.name === 'data'))]")
+    bl.nth(1).locator('button[data-bm=lift]').click(); bl.nth(1).locator('button[data-bm=lift]').click()   # (above, under, off)
+    page.evaluate("WaveLens.configure({arrowLabels: null})")
+    check(ov == [['b:bus.data'], True], f'arrowLabels "overlay": a lifted bookmark still gets its lane, the arrow labels none {ov}')
+    tip = js("(() => { const p = v.bmGeo.pos.get(1), c = v.canvas, r = c.getBoundingClientRect(); c.dispatchEvent(new PointerEvent('pointermove', "
+             "{clientX: r.left + p[0], clientY: r.top + p[1], bubbles: true})); return c.title; })()")
+    check(tip.startswith('Bookmark 1: ') and '— drag to move it' in tip, f'the tooltip of a circle has its text {tip!r}')
     p1, p4 = pos(1), pos(4)
     page.keyboard.down('Shift'); page.mouse.move(box['x'] + p1[0], box['y'] + p1[1]); page.mouse.down()
     page.mouse.move(box['x'] + p4[0], box['y'] + p4[1], steps=6); page.mouse.up(); page.keyboard.up('Shift')
@@ -393,6 +406,61 @@ def bookmarks(page):
 # the hierarchy / find / virtualisation checks: the synthetic page of synth_page() and the user's test_stream_video page
 SYNTH = {'top': 'tb_top', 'inst': 'dut_i', 'fuzzy': 'pxvd', 'hit': 's_pix_valid', 'path': 'dev.fifo_s_val', 'mod': 'dev', 'leaf': 'fifo_s_val', 'view': 'all'}
 TSV = {'top': 'tb_cxp_top', 'inst': 'cxp_device_top_i', 'fuzzy': 'pxvd', 'hit': 's_pix_valid', 'path': 'dev.fifo_s_val', 'mod': 'dev', 'leaf': 'fifo_s_val', 'view': 'all'}
+
+
+def pageshot(browser, build):
+    """tools/pageshot.py on the APB page: a PNG per view and theme with the sizes its manifest says, one view by its key,
+    a view the page has not (exit 1)."""
+    import struct
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    d = build / 'smoke' / 'pageshot'
+    run_ = lambda *a: subprocess.run([sys.executable, str(ROOT / 'tools' / 'pageshot.py'), str(apb), '--out', str(d), *a], capture_output=True, text=True,
+                                     env=dict(os.environ, PYTHONDONTWRITEBYTECODE='1'), timeout=300 * SCALE)
+    r = run_()
+    made = json.loads(r.stdout or '[]')
+    size = lambda p: struct.unpack('>II', open(p, 'rb').read()[16:24])
+    ok = [size(m['path']) == (m['width'], m['height']) for m in made]
+    check(r.returncode == 0 and len(made) == 6 and all(ok) and {m['theme'] for m in made} == {'dark', 'light'} and (d / 'manifest.json').exists(),
+          f'pageshot: 3 views × 2 themes, each PNG as big as its manifest says {[(m["view"], m["theme"]) for m in made]} {r.stderr.strip()[-200:]}')
+    r1, r2 = run_('--view', 'exact', '--theme', 'dark'), run_('--view', 'nope')
+    one = json.loads(r1.stdout or '[]')
+    check(r1.returncode == 0 and [(m['view'], m['theme']) for m in one] == [('exact', 'dark')] and r2.returncode == 1 and 'no view "nope"' in r2.stderr,
+          f'pageshot --view exact: one PNG; a view not there: exit 1 with the views it has {r2.stderr.strip()[:200]}')
+
+
+def markup(page):
+    """A viewer made here (a clock, a state bus, a strobe): a bookmark lifted "below" its signal (a lane under the row, the
+    circle there, a leader up to it), labels by the circles, an arrow's {dt} / {cycles} / {cycles:clk} filled at its ends
+    (and again when an end moves), spans over every row and over one row; WaveSVG draws the same; an old bookmark with
+    "to" and "label" is still an arrow."""
+    r = page.evaluate("""(async () => {
+      const ns = 1000, ck = [], st = [[0, '0'], [30 * ns, '1'], [70 * ns, '2'], [110 * ns, '0']];
+      for (let t = 0; t <= 150; t += 5) ck.push([t * ns, (t / 5) % 2 ? '1' : '0']);
+      const j = { signal: [{ name: 'clk', tv: ck }, { name: 's', width: 2, tv: st }, { name: 'q', tv: [[0, '0'], [40 * ns, '1'], [60 * ns, '0']] }],
+        time: { t0: 0, unit: 'ps' },
+        bookmarks: [{ n: 1, t: 30 * ns, signal: 's', label: 'go', lift: 'below' }, { n: 2, t: 70 * ns, signal: 's', label: 'two' }, { n: 3, t: 40 * ns, signal: 'q', lift: true }],
+        arrows: [{ from: 1, to: 2, label: '{dt} {cycles} {cycles:clk}' }], spans: [{ from: 20 * ns, to: 50 * ns, label: 'phase A', color: 'c7' },
+          { from: 60 * ns, to: 90 * ns, signals: ['q'], label: 'pulse' }] };
+      const el = document.body.appendChild(document.createElement('div')); el.id = 'markup-test';
+      const v = new WaveLens.WaveView(el, j, { key: 'markup-test' }); localStorage.removeItem(v.bmKey);
+      v.setBookmarks(j.bookmarks, j.arrows); v.spans = j.spans.map(x => Object.assign({}, x)); v.draw();
+      const lay = WaveLens.internal.peek(v).lay, row = n => lay.find(o => o.row.type === 'sig' && o.row.name === n), ids = v.rowsL.filter(r => r.type === 'lane').map(r => r.ids.join(','));
+      const p1 = v.bmGeo.pos.get(1), sRow = row('s'), lane = lay[lay.indexOf(sRow) + 1];
+      const svgV = v.toSVG(), svgS = WaveLens.WaveSVG.toString(j);
+      const old = WaveLens.parse({ signal: [{ name: 'a', wave: '0101' }], bookmarks: [{ n: 1, t: 1, label: 'Δ', to: 2 }, { n: 2, t: 3, label: 'mine' }] });
+      await v.run([{ op: 'bookmark', n: 2, t: 110 * ns }]); const moved = v.toSVG();
+      const out = { ids, below: !!lane && lane.row.type === 'lane' && p1[1] > sRow.y + sRow.h && p1[1] < lane.y + lane.h, json: v.bookmarks()[0].lift,
+        texts: ['go', 'two', '40 ns', 'phase A', 'pulse'].map(t => [svgV.includes('>' + t), svgS.includes('>' + t)]), cyc: svgS.includes('>40 ns ? 4<'),
+        moved: moved.includes('80 ns'), old: [old.arrows.map(a => a.label), old.bookmarks.map(b => b.label)], spans: v.spanList() };
+      v.destroy && v.destroy(); el.remove(); return out; })()""")
+    lanes = ','.join(r['ids']).split(',')
+    check('b:q' in lanes and 'b:s:below' in lanes and r['below'] and r['json'] == 'below',
+          f'a bookmark lifted "below": a lane under its row, the circle in it (in the JSON "below"); "lift": true above {r["ids"]} {r["below"]}')
+    check(all(a and b for a, b in r['texts']) and r['cyc'], f'labels by the circles, {{dt}} {{cycles:clk}} filled ({{cycles}}: "?" in an exact view), the spans\' labels: in the viewer\'s picture and the static SVG {r["texts"]}')
+    check(r['moved'] and r['old'] == [['Δ'], ['', 'mine']] and len(r['spans']) == 2,
+          f'the arrow\'s {{dt}} follows a moved end (40 → 80 ns); an old bookmark with "to" keeps its label on the arrow {r["old"]}')
 
 
 def find(page, P):
@@ -569,6 +637,27 @@ def example(page, ex):
     bl, al = v.locator('.notes ol.bms > li'), v.locator('.notes ol.ars > li')
     check(bl.count() == bms and al.count() == ars, f'{ex}: the bookmarks and arrows of the config are listed ({bl.count()}/{bms}, {al.count()}/{ars})')
     check(v.locator('.names .row.lane').count() > 0, f'{ex}: arrow labels have their lanes')
+    if ex == 'apb':   # bookmark 6 "at" an event (the build gave its time), the exact view's marker "on" an event object
+        at = page.evaluate("""(async () => { const v = document.querySelector('.wv').waveView, b = v.bookmarks().find(b => b.n === 6),
+            x = [...document.querySelectorAll('.wv')].map(e => e.waveView).find(w => w.M.markers.some(m => m.label === 'error'));
+            const ok = [b && b.t, b && b.at, x && x.M.markers.find(m => m.label === 'error').t];
+            const el = document.body.appendChild(document.createElement('div')), w = new WaveLens.WaveView(el, { signal: [{ name: 'a', tv: [[0, '0'], [10, '1']] }],
+              bookmarks: [{ n: 1, t: 10, at: 'posedge a', signal: 'a' }, { n: 2, t: 10, at: { signal: 'a', edge: 'rise' } }] }, {});
+            const kept = w.bookmarks().map(b => b.at); await w.run([{ op: 'bookmark', n: 1, t: 5 }]);
+            const moved = w.bookmarks().map(b => b.at === undefined); w.destroy && w.destroy(); el.remove(); return [ok, kept, moved]; })()""")
+        check(at == [[155000, 'posedge PSLVERR', 155000], ['posedge a', {'signal': 'a', 'edge': 'rise'}], [True, False]],
+              f'apb: bookmark 6 at "posedge PSLVERR" (155 ns, its event kept), marker on an event; moved, the event goes {at}')
+        # a bookmark's link: its button opens that view's section; with a bookmark number, that viewer goes to it
+        lk = page.evaluate("""(async () => { const vs = WaveLens.views(), t = vs.find(v => v.root.dataset.wave === 'WAVES.transfers'),
+            x = vs.find(v => v.root.dataset.wave === 'WAVES.exact'); window.scrollTo(0, 0);
+            const li = t.notesEl.querySelector('li[data-n="6"] button[data-bm=link]'), info = li && [li.textContent.trim(), li.disabled];
+            li.click(); await new Promise(r => setTimeout(r, 300)); const top = document.getElementById('exact').getBoundingClientRect().top;
+            await x.run([{ op: 'bookmark', n: 9, t: '20ns', link: { view: 'transfers', bookmark: 3 } }, { op: 'bookmark', n: 8, t: '30ns', link: 'nowhere' }]);
+            x.notesEl.querySelector('li[data-n="9"] button[data-bm=link]').click(); await new Promise(r => setTimeout(r, 300));
+            const out = [info, Math.abs(top) < 5, t.cursor, t.bms.find(b => b.n === 3).t, x.notesEl.querySelector('li[data-n="8"] button[data-bm=link]').disabled];
+            await x.run([{ op: 'bookmark', n: 9, delete: true }, { op: 'bookmark', n: 8, delete: true }]); return out; })()""")
+        check(lk[0] == ['→ exact', False] and lk[1] and lk[2] == lk[3] and lk[4] is True,
+              f'apb: bookmark 6\'s link "exact": its button scrolls to that section; a link with a bookmark moves that viewer to it; to no view: disabled {lk}')
     if ex == 'axi_lite':
         check(v.locator('.names .row.grp.hl').count() == 3 and v.locator('.names .row.dim').count() > 0, 'axi_lite: highlight of the write channels from the config')
         col = lambda n: v.locator('.names .row:not(.sva-g):not(.sva-step):not(.sva-copy)', has_text=n).first.locator('.n').evaluate('e => getComputedStyle(e).color')
@@ -2587,6 +2676,9 @@ EDIT_OPS = [   # every command that changes a state, with the arguments in their
     {'op': 'bookmark', 'n': 1, 'text': 'setup (edited)'}, {'op': 'arrow', 'from': 1, 'to': 2, 'label': 'Δ 20ns', 'shape': '-|-', 'head': '<>'},
     {'op': 'bookmark', 't': '120ns', 'text': 'axis'}, {'op': 'arrow', 'from': 2, 'to': 3, 'line': 'dashed'}, {'op': 'arrow', 'id': 2, 'color': '#f00'},
     {'op': 'bookmark', 't': '130ns'}, {'op': 'bookmark', 'n': 4, 'delete': True},
+    {'op': 'bookmark', 'n': 3, 'signal': 'PREADY', 'label': 'ready', 'lift': 'below'}, {'op': 'arrow', 'id': 1, 'label': '{dt} · {cycles:PCLK}'},
+    {'op': 'span', 'from': '50ns', 'to': '70ns', 'label': 'setup', 'color': 'c7'}, {'op': 'span', 'from': '110ns', 'to': '90ns', 'signals': ['PREADY', 'PENABLE']},
+    {'op': 'span', 'id': 2, 'label': 'wait'}, {'op': 'span', 'from': 1, 'to': 2}, {'op': 'span', 'id': 3, 'delete': True},
     {'op': 'marker', 't': '100ns', 'label': 'M', 'color': '#c00'}, {'op': 'marker', 't': '140ns'}, {'op': 'marker', 'id': 2, 'label': 'second'},
     {'op': 'group', 'name': 'ctl', 'signals': ['PSEL', 'PENABLE'], 'color': '#08f'}, {'op': 'group', 'name': 'ctl', 'add': 'PWRITE'},
     {'op': 'group', 'name': 'data', 'signals': 'P*DATA'}, {'op': 'group', 'name': 'data', 'rename': 'payload'},
@@ -3681,6 +3773,14 @@ def sva_nesting(browser, build):
 
 def sva_units(page):
     """wavelens/sva.js on hand-made models: scopes, the name rules, samplers."""
+    # the page's bindings: "results.cycles" names a table of "sva.cycles" (mkhtml.py keeps the times once per clock), an
+    # array is read as it is (older pages), a name not in the table is the binding's error
+    pb = page.evaluate("""(() => { const r = c => ({ clock: 'tb.clk', unit: 'ps', cycles: c, assertions: [{ name: 'a' }] });
+      const M = WaveLens.parse({ signal: [{ name: 'clk', wave: 'p..' }], sva: { cycles: { 'tb.clk': [5, 15] },
+        bind: [{ assert: 'a', scope: 's', results: r('tb.clk') }, { assert: 'b', scope: 's', results: r([1, 2, 3]) }, { assert: 'c', scope: 's', results: r('nope') }] } });
+      const b = SVA.pageBinds(M); return [b.map(x => x.results && x.results.cycles), b[2].error, SVA.pageBinds(M) === b, M.src.sva.bind[0].results.cycles]; })()""")
+    check(pb == [[[5, 15], [1, 2, 3], None], 'no cycles table "nope" in the page', True, 'tb.clk'],
+          f'the page\'s bindings take their times from "sva.cycles" (once per clock), an array as it is, a missing table is an error {pb}')
     r = page.evaluate("""(() => {
       const tv = (...p) => p.map(([t, v]) => [t, v]);
       const M = WaveLens.parse({ signal: [['tb', { name: 'clk', path: 'tb.clk', tv: tv([0, '0'], [5, '1'], [10, '0'], [15, '1']) },
@@ -4507,6 +4607,9 @@ def sva_page(page, ex):
     p = page.evaluate("""SVA.panels().map(p => ({ key: p.v.root.dataset.wave, n: p.el.querySelectorAll('ol.asv > li[data-a]').length, tv: p.v.M.rows.some(r => r.src && r.src.tv),
         binds: p.bindings.map(b => [b.assert, b.state, b.results ? b.results.assertions[0].kind : null, b.results ? b.results.assertions[0].stats.fail : null]) }))""")
     n = SVA_PAGE[ex]
+    form = page.evaluate("""Object.values(window.WAVES).filter(d => d.sva && (d.sva.bind || []).some(b => b.results)).map(d => [Object.keys(d.sva.cycles || {}).length,
+        d.sva.bind.filter(b => b.results).every(b => typeof b.results.cycles === 'string' && Array.isArray(d.sva.cycles[b.results.cycles]))])""")
+    check(form and all(k >= 1 and ok for k, ok in form), f'{ex}: the bindings name their times in "sva.cycles", once per clock (not an array each) {form}')
     check(all(x['n'] == n and len(x['binds']) == n for x in p), f'{ex}: every viewer lists the {n} assertions of the config, all bound ({[(x["n"], len(x["binds"])) for x in p]})')
     deliberate = SVA_EXAMPLES[ex][2]
     fails = sorted({b[0] for x in p for b in x['binds'] if b[2] != 'cover' and b[3]})
@@ -5052,6 +5155,8 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'units': 'the pure functions of the viewer (WaveLens.internal), the VCD reader, the bus decoders, sva.js expressions: a table of cases',
     'readers': 'the page\'s VCD reader against the tools\' on every fixture of tests/unit/vcd (one rule, the same transitions)',
     'lazy_dump': 'a large dump read as it is needed (the VS Code tab): every module at once, the signals shown read, the same rows as the whole text',
+    'pageshot': 'tools/pageshot.py: a PNG per view and theme of a page in a headless Chromium, the manifest, a view by key, a view not there',
+    'markup': 'markup on the waves: a bookmark lifted under its signal, its label by the circle, {dt} / {cycles} in arrow labels, spans; the SVG the same',
     'bookmark_view': 'going to a bookmark: the rows scrolled as when it was made, its time bookmarkLeft from the left (1–9, ]m, Markers…, the command)',
     'vscode': 'the VS Code extension\'s tab (host.js, its CSP) with a fake VS Code: the dump, the store, save, pick, clipboard, reload, live',
     'docs': 'docs/index.html: cursor, zoom, sorting, settings, styles, highlight, cursor fields, themes, bookmarks',
@@ -5137,7 +5242,7 @@ def main():
         sva_open(b)
         for path in PAGES + BUILT:
             tsv = path.name == 'test_stream_video.html'
-            own = (['docs', 'sva_docs', 'viewer', 'wavelens', 'plugin_api', 'api_docs'] if path == PAGES[0] else ['conformance'] if path == PAGES[1] else
+            own = (['docs', 'sva_docs', 'viewer', 'wavelens', 'plugin_api', 'api_docs', 'markup'] if path == PAGES[0] else ['conformance'] if path == PAGES[1] else
                    ['hierarchy', 'find', 'deep', 'viewer'] + (['modules', 'bar_tools'] if path == synth else []) if path == synth or tsv else ['fst'] if path.name == 'demo_fst.html' else
                    ['examples'] if path.stem in EXAMPLES or path.stem == 'fsm_all' else [])
             own += ['big'] if path in BUILT else []
@@ -5177,6 +5282,7 @@ def main():
                         run('viewer', viewer_fixes, page)
                         run('plugin_api', plugin_api, page)
                         run('api_docs', api_docs, page)
+                        run('markup', markup, page)
                     if path == PAGES[1]:
                         run('conformance', conformance, page)
                     if path == synth or tsv:
@@ -5223,6 +5329,7 @@ def main():
         run('fsm', fsm_panel, b, build)
         run('axis', axis_in_sight, b, build)
         run('bookmark_view', bookmark_view, b, build)
+        run('pageshot', pageshot, b, build)
         run('lazy_dump', lazy_dump, b, build)
         run('readers', readers, b, build)
         run('vscode', vscode_tab, b, build)

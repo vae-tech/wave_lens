@@ -244,6 +244,14 @@ class Apply(unittest.TestCase):
         out = subprocess.run(['tclsh'], input=script, capture_output=True, text=True, check=True).stdout.split('\n')
         self.assertEqual(out[:len(cases)], list(cases.values()))
 
+    @H.needs(shutil.which('tclsh'), 'tclsh')
+    def test_questa_vcd(self):
+        # wavelens_vcd FILE [ROOT]: Questa's vcd file + vcd add -r of the signals under ROOT (here a stub of vcd)
+        tcl = os.path.join(H.ROOT, 'tools', 'questa', 'wavelens_types.tcl')
+        script = f'proc vcd {{args}} {{puts "vcd $args"}}\nsource {{{tcl}}}\nwavelens_vcd tb.vcd /tb/u_dut/\nwavelens_vcd x.vcd\n'
+        out = subprocess.run(['tclsh'], input=script, capture_output=True, text=True, check=True).stdout.split('\n')
+        self.assertEqual([o for o in out if o.startswith('vcd')], ['vcd file tb.vcd', 'vcd add -r /tb/u_dut/*', 'vcd file x.vcd', 'vcd add -r /*'])
+
     def test_mkconfig_types_file_missing(self):
         rc, _, err = H.run_tool('mkconfig', os.path.join(T, 'questa.vcd'), '--out', os.devnull, '--force', '--types', 'nope.types.json')
         self.assertNotEqual(rc, 0)

@@ -102,6 +102,35 @@ class Binds(unittest.TestCase):
         self.assertEqual(got, {'a_state': 2, 'a_nested': 2, 'a_alias': 2, 'a_prefix': 2, 'a_ambiguous': 0, 'a_missing': 0, 'a_wide': 0})
         self.assertEqual(notes, [])
 
+    @H.needs(SB.find_bin(), 'the sva CLI (make sva-build)')
+    def test_build_keeps_the_cycles_once(self):
+        """Two bindings of one clock share one array in "sva.cycles" (it was copied into each "results"); inflate gives
+        the arrays back, equal to what sva eval wrote."""
+        files = [(SV, 'names.sv')]
+        doc = SB.build(files, ['a_state@tb.dut', 'a_nested@tb.dut'], H.fixture('names'))
+        self.assertEqual(list(doc['cycles']), ['tb.clk'])
+        self.assertEqual([b['results']['cycles'] for b in doc['bind']], ['tb.clk', 'tb.clk'])
+        full = SB.inflate(doc)
+        self.assertEqual([b['results']['cycles'] for b in full], [doc['cycles']['tb.clk']] * 2)
+        self.assertTrue(doc['cycles']['tb.clk'])
+        self.assertEqual(doc['bind'][0]['results']['cycles'], 'tb.clk')   # inflate copies: the page's form stays
+
+
+class Cycles(unittest.TestCase):
+    def test_intern_by_clock_and_by_equality(self):
+        a, b, c, d = [0, 10, 20], [0, 10, 20], [5, 15], [5, 15]
+        bs = [{'assert': f'x{i}', 'results': {'clock': clk, 'cycles': arr}} for i, (clk, arr) in enumerate([('tb.clk', a), ('tb.clk', b), ('tb.clk', c), ('tb.k2', d)])]
+        tables = SB.intern_cycles(bs)
+        self.assertEqual(tables, {'tb.clk': [0, 10, 20], 'tb.clk#2': [5, 15], 'tb.k2': [5, 15]})
+        self.assertEqual([x['results']['cycles'] for x in bs], ['tb.clk', 'tb.clk', 'tb.clk#2', 'tb.k2'])
+
+    def test_inflate_reads_arrays_and_names(self):
+        doc = {'cycles': {'k': [1, 2]}, 'bind': [{'assert': 'a', 'results': {'cycles': 'k'}}, {'assert': 'b', 'results': {'cycles': [3]}}, {'assert': 'c'}]}
+        self.assertEqual([b.get('results', {}).get('cycles') for b in SB.inflate(doc)], [[1, 2], [3], None])
+        doc['bind'][0]['results']['cycles'] = 'nope'
+        with self.assertRaisesRegex(WaveError, 'no cycles table "nope"'):
+            SB.inflate(doc)
+
 
 if __name__ == '__main__':
     unittest.main()

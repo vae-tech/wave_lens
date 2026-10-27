@@ -201,6 +201,64 @@ class MkHtml(unittest.TestCase):
         rc, _, text = self.page(self.CFG, '--no-sva')
         self.assertNotIn('window.WAVELENS_BUILD =', text)
 
+    SV = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sv', 'names.sv')
+    REP = {'waves': H.fixture('names'), 'clock': 'tb.clk', 'signals': 'tb.clk,tb.dut.state', 'sva': [SV], 'views': {'v': {'from': '0ns'}}}
+
+    @staticmethod
+    def waves(text):
+        return json.loads(re.search(r'window\.WAVES = (\{.*?\n\});', text, re.S).group(1).replace('<\\/', '</'))
+
+    @H.needs(__import__('svabuild').find_bin(), 'the sva CLI (make sva-build)')
+    def test_report_binds_the_section_only(self):
+        """"report": the printable Assertions section from bindings no view draws (a view's "bind": "*" was the way, and
+        it put the results of every assertion into that view)."""
+        for cfg, args in (({**self.REP, 'report': {'bind': [{'assert': 'a_state', 'scope': 'tb.dut'}]}}, ()),
+                          ({**self.REP, 'report': ['a_state@tb.dut']}, ()), (self.REP, ('--report', 'a_state@tb.dut'))):
+            with self.subTest(args or cfg['report']):
+                rc, err, text = self.page(cfg, *args)
+                self.assertEqual(rc, 0, err)
+                self.assertIn('id="assertions"', text)
+                self.assertIn('a_state', text.split('id="assertions"', 1)[1])
+                self.assertNotIn('sva', self.waves(text)['v'])   # in no view
+        rc, err, text = self.page(self.REP)
+        self.assertEqual(rc, 0, err)
+        self.assertNotIn('id="assertions"', text)   # neither "report" nor a "bind": no section, as before
+
+    @H.needs(__import__('svabuild').find_bin(), 'the sva CLI (make sva-build)')
+    def test_report_false_and_errors(self):
+        rc, err, text = self.page({**self.REP, 'bind': ['a_state@tb.dut'], 'report': False})
+        self.assertEqual(rc, 0, err)
+        self.assertNotIn('id="assertions"', text)
+        self.assertIn('results', json.dumps(self.waves(text)['v']['sva']))   # the view keeps its binding
+        rc, err, _ = self.page({k: v for k, v in self.REP.items() if k != 'sva'} | {'report': ['a_state@tb.dut']})
+        self.assertEqual(rc, 1)
+        self.assertIn('"report" needs the assertion files', err)
+        rc, err, _ = self.page({**self.REP, 'report': {'bind': [], 'waves': 'x.vcd'}})
+        self.assertEqual(rc, 1)
+        self.assertIn('"report": unknown key(s) waves', err)
+
+    def test_lint(self):
+        """A bookmark out of its view's window: a warning at the build (the page is written, exit 0); --strict: exit 1, no
+        page; --lint without --out: the check alone."""
+        cfg = {**self.CFG, 'views': {'v': {'to': '20ns', 'bookmarks': [{'n': 1, 't': '50ns', 'signal': 's'}]}}}
+        rc, err, text = self.page(cfg, '--no-sva')
+        self.assertEqual(rc, 0, err)
+        self.assertIn('mkhtml: lint: bookmark-outside-view: views.v.bookmarks[0] (n 1): 50ns is outside the view', err)
+        self.assertIsNotNone(text)
+        rc, err, text = self.page(cfg, '--no-sva', '--strict')
+        self.assertEqual((rc, text), (1, None))
+        self.assertIn('mkhtml: lint: 1 warning (--strict: no page)', err)
+        with H.tmp() as d:
+            c = os.path.join(d, 'c.json')
+            json.dump(cfg, open(c, 'w'))
+            rc, _, err = H.run_tool('mkhtml', '--config', c, '--lint', '--no-sva')
+            self.assertEqual(rc, 0, err)
+            self.assertEqual(os.listdir(d), ['c.json'])
+            self.assertIn('mkhtml: lint: 1 warning', err)
+            rc, _, err = H.run_tool('mkhtml', '--config', c)
+            self.assertEqual(rc, 2)
+            self.assertIn('need --out (or --lint: the check alone)', err)
+
     def test_views_not_a_mapping_one_line(self):
         # "views" as a list (review V C7): what it should be, not a TypeError's traceback
         rc, err, _ = self.page({**self.CFG, 'views': [{'title': 'a'}]}, '--no-sva')
