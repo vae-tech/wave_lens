@@ -1,5 +1,5 @@
 {
- "about": "review VI T6: what tools/svtypes.py (read, apply, fingerprint) and the page (svTypes, svApply, svFingerprint) both do with a types file and the signals of a dump: tests/unit/test_svtypes.py and tests/smoke.py (readers) read it. want: labels / fields put on a path by the types (the row's own ones are not), the notes of apply, the run's notes, error: the file is refused. A signal's \"ref\": its $var reference as a VCD writes it (sva fst reads the VCD: sva/cli/tests/cli.rs; the others take the path).",
+ "about": "review VI T6: what tools/svtypes.py (read, apply, fingerprint) and the page (svTypes, svApply, svFingerprint) both do with a types file and the signals of a dump: tests/unit/test_svtypes.py and tests/smoke.py (readers) read it. want: labels / fields put on a path by the types (the row's own ones are not), the notes of apply, the run's notes, error: the file is refused. A signal's \"ref\": its $var reference as a VCD writes it (sva fst reads the VCD: sva/cli/tests/cli.rs; the others take the path). A signal's \"kind\": its $var type when not a reg (integer: an enum of the types on it when it is wider, as a Questa VCD writes an enum type).",
  "cases": [
   {
    "name": "its own path",
@@ -707,6 +707,69 @@
       }
      ]
     }
+   }
+  },
+  {
+   "name": "an enum on a wider integer of the dump (a Questa VCD of an enum type), not on a wider reg",
+   "types": {
+    "wavelens": "types",
+    "signals": {
+     "tb.u.state": {
+      "width": 3,
+      "enum": {
+       "0": "A",
+       "1": "B",
+       "2": "C"
+      }
+     },
+     "tb.u.wide": {
+      "width": 3,
+      "enum": {
+       "0": "A",
+       "1": "B",
+       "2": "C"
+      }
+     },
+     "tb.u.sel": {
+      "width": 1,
+      "enum": {
+       "0": "RISE",
+       "1": "FALL"
+      }
+     }
+    }
+   },
+   "signals": [
+    {
+     "path": "tb.u.state",
+     "width": 32,
+     "kind": "integer"
+    },
+    {
+     "path": "tb.u.wide",
+     "width": 32
+    },
+    {
+     "path": "tb.u.sel",
+     "width": 32,
+     "kind": "integer"
+    }
+   ],
+   "want": {
+    "labels": {
+     "tb.u.state": {
+      "0": "A",
+      "1": "B",
+      "2": "C"
+     },
+     "tb.u.sel": {
+      "0": "RISE",
+      "1": "FALL"
+     }
+    },
+    "notes": [
+     "tb.u.wide: 32 bits in the dump, 3 in the types: left as it is"
+    ]
    }
   }
  ]

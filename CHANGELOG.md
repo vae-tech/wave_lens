@@ -5,6 +5,19 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.25 — 27 October 2026
+
+The FSMs of a Questa 2023 VCD by name: an enum the simulator wrote as `integer 32`.
+
+- **An enum on an integer of the dump.** Questa 2023.3 dumps a variable of an enum type as `integer 32`, its code the
+  value (2021.1 writes `reg [2:0]`); every FSM of such a VCD was left a number ("32 bits in the dump, 3 in the types").
+  An integer wider than the enum its types give it now takes the enum's labels by the codes and is an FSM — in the
+  viewer and the VS Code tab, `svtypes.py check`, `make html` and `sva fst` (its enum table on the integer's width). A
+  `reg` of another width stays a number. The log says how many, a value that is no code of the enum (a number then),
+  and only `x` in the dump (a VCD of `wlf2vcd`, which loses the values of enums); **Type…** says it of a signal.
+- **No note for a real of the design** (`Floating point type`: an analog model's parameters, hundreds of notes).
+- `tests/unit/types/int_enum.vcd` with its types: such a VCD to try it on.
+
 ## 0.24 — 27 October 2026
 
 A log under the waves: what the page read and did, and what went wrong, a JSON file's error at its line and column.

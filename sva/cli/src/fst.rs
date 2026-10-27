@@ -7,8 +7,9 @@
 //! references before a `$var` (an FST read back by `sva vcd` or fst2vcd, or a VCD written by them, has its FSM states
 //! there), every other `$attrbegin` / `$attrend`, the `$comment`s of the header, a 1-bit VHDL value (`U`, `H`, `L`, `-`),
 //! a dump on one line. The FSM states of the design's types file (tb.types.json beside tb.vcd, by path, as
-//! tools/svtypes.py gives them) become enum tables too, on the variables whose width is the type's, so GTKWave and
-//! Surfer show the state names. Times that go back are an error, as in tools/dumpscan.py (vcd2fst merges them).
+//! tools/svtypes.py gives them) become enum tables too, on the variables whose width is the type's (or an integer
+//! wider than the enum: Questa 2023's VCD of an enum type, its code the value), so GTKWave and Surfer show the state
+//! names. Times that go back are an error, as in tools/dumpscan.py (vcd2fst merges them).
 //!
 //! The VCD is read as a stream of words (any line breaks), so a large dump needs the memory of its signals' values and
 //! of one block of changes (64 MiB, then the block is written).
@@ -24,7 +25,8 @@ FST there is replaced, the file appears only when it is complete). Every scope a
 one id code at several places as aliases, the attributes ($attrbegin: the enum tables of FSM states and their
 references), the $comment lines of the header, $timezero, $dumpoff / $dumpon. The FSM states of the design's types
 file (tb.types.json beside tb.vcd, or --types; --map as in svtypes.py check) become enum tables of the variables
-whose width is the type's; a table the VCD gives a variable stays. The last line says what was written.";
+whose width is the type's (or an integer wider than the enum: a Questa VCD of an enum type); a table the VCD gives a
+variable stays. The last line says what was written.";
 
 /// Bytes of value changes held before a block is written (`--block-bytes`, for the tests: many small blocks).
 const BLOCK: usize = 64 << 20;
@@ -139,6 +141,11 @@ const VT_STRING: u8 = 21;
 
 fn is_real(t: u8) -> bool {
     matches!(t, 3 | 4 | 20 | 29)
+}
+
+/// integer, int, shortint, longint, byte: Questa 2023's VCD writes a variable of an enum type as integer 32
+fn is_int(t: u8) -> bool {
+    matches!(t, 1 | 24 | 25 | 26 | 27)
 }
 
 /// The attribute types of `$attrbegin` as fst2vcd writes them (FST_AT_*: `class` is the pack type).
@@ -786,11 +793,13 @@ fn add_types(h: &mut Header, types: &Types) -> (usize, usize) {
     let mut referenced = false;   // the VCD's own reference before this variable (after the one before)
     for e in std::mem::take(&mut h.entries) {
         if let Entry::Var { len, path, tpe, .. } = &e {
+            // its width's table; an enum on a wider integer its codes on the integer's width (svtypes.py on_integer)
             let t = (!referenced && !is_real(*tpe) && *tpe != VT_STRING)
-                .then(|| lookup(&types.enums, &remap(path, map), &tops)).flatten().filter(|t| t.0 == *len);
+                .then(|| lookup(&types.enums, &remap(path, map), &tops)).flatten()
+                .and_then(|t| (t.0 == *len || (is_int(*tpe) && t.0 < *len)).then(|| (*len, t.1.clone())));
             if let Some(t) = t {
                 let leaf = path.rsplit('.').find(|c| !c.starts_with('[')).unwrap_or("state");   // an array's element: the array's
-                let text = table_text(&format!("{leaf}_t"), t);
+                let text = table_text(&format!("{leaf}_t"), &t);
                 let key = String::from_utf8_lossy(&text[text.iter().position(|&c| c == b' ').unwrap_or(0)..]).into_owned();
                 let handle = *handles.entry(key).or_insert_with(|| {
                     out.push(Entry::Attr { tpe: 0, sub: MT_ENUMTABLE, name: text, arg: next });

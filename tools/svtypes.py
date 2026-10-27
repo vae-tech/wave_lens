@@ -11,7 +11,8 @@ theirs, and two modules' `state` get each its own table:
   Verilator  `svtypes.py verilator` runs `verilator --json-only` with your arguments and writes the same file.
 Name it as the dump (tb.vcd -> tb.types.json): `make html WAVES=tb.vcd` (mkconfig.py) takes it by itself, the viewer
 takes it in Sources…, the VS Code tab reads it next to the dump. A signal gets a type only from its own path and only
-when its width in the dump is the type's; the rest stays as numbers.
+when its width in the dump is the type's, or it is an integer wider than the type's enum (Questa 2023's VCD writes a
+variable of an enum type as integer 32, its code the value); the rest stays as numbers.
 
 The file: {"wavelens": "types", "version": 1, "producer": {...}, and "describe": {path: Questa's text} (read here and
 in the page, wavelens/src/vcd.js svTypes) or "signals": {path: {"width": 3, "enum": {"0": "IDLE"}} | {"width": 16,
@@ -34,6 +35,8 @@ DESC_REC = re.compile(r'(Record|Union) \[(\d+) elements?\]')
 DESC_ELEM = re.compile(r'Element #\d+ "([^"]*)" =>')
 DESC_ARR = re.compile(r'Array\((-?\d+) (downto|to) (-?\d+)\) \[length (\d+)\] of')
 DESC_ITEM = re.compile(r'([A-Za-z_][\w$]*)=(-?\d+)')   # a label is an SV identifier: letters, digits, _ and $
+# a real of the design (a parameter of an analog model, a time): a plain number in the dump, no note
+DESC_REAL = re.compile(r'Floating point type\b.*|(?:Real|Shortreal|Realtime)')
 
 
 def enum_items(body):
@@ -176,6 +179,8 @@ def from_describe(desc):
     for p, text in desc.items():
         if str(text).startswith('describe failed'):
             notes.append(f'{p}: {text}')
+            continue
+        if DESC_REAL.fullmatch(str(text).strip()):
             continue
         t = parse_describe(text)
         if t['kind'] == 'enum':
@@ -440,10 +445,20 @@ def lookup_key(sigs, path, tops=frozenset()):   # (path: as the types name it, r
     return lookup_key(sigs, base, tops) if base != path else None
 
 
+INT_KINDS = {'integer', 'int', 'shortint', 'longint', 'byte'}
+
+
+def on_integer(e, s):
+    """An enum of the types on an integer variable of the dump wider than it: Questa 2023's VCD writes a variable of an
+    enum type so (integer 32, its code the value); its table is the integer's (the page's svApply, sva fst: the same)."""
+    return bool(e.get('enum')) and e['width'] < s['width'] and s.get('kind') in INT_KINDS
+
+
 def apply(types, sigs, m=None):
-    """The types onto the signals of a dump ([{path, width, enum, fields}], mkconfig's): a path's entry when its width
-    is the signal's; the dump's own tables (an FST's) stay -> (labelled, with fields, [notes], {paths given}). m: the
-    dump's scopes as the types name them, over the file's "map" (remap)."""
+    """The types onto the signals of a dump ([{path, width, kind, enum, fields}], mkconfig's): a path's entry when its
+    width is the signal's, or an enum on a wider integer (on_integer); the dump's own tables (an FST's) stay ->
+    (labelled, with fields, [notes], {paths given}). m: the dump's scopes as the types name them, over the file's "map"
+    (remap)."""
     ne = nf = 0
     notes, given = [], set()
     m = {**types.get('map', {}), **(m or {})}
@@ -452,7 +467,7 @@ def apply(types, sigs, m=None):
         e = lookup(types['signals'], remap(s['path'], m), tops)
         if not e:
             continue
-        if e['width'] != s['width']:
+        if e['width'] != s['width'] and not on_integer(e, s):
             notes.append(f'{s["path"]}: {s["width"]} bits in the dump, {e["width"]} in the types: left as it is')
             continue
         # a table whose values do not all fit the width is not this signal's (the page's svApply: the same)
@@ -521,7 +536,7 @@ def main():
     if a.dump:
         import dumpscan
         decl = dumpscan.read(a.dump, None)
-        sigs = [{'path': p, 'width': x.width, 'enum': {}, 'fields': None} for p, x in decl.vars.items() if x.kind != 'event']
+        sigs = [{'path': p, 'width': x.width, 'kind': x.kind, 'enum': {}, 'fields': None} for p, x in decl.vars.items() if x.kind != 'event']
         mp = {**t['map'], **map_arg(a.map)}
         ne, nf, notes, _ = apply(t, sigs, mp)
         tops = added_tops(t['signals'], [remap(s['path'], mp) for s in sigs])
@@ -533,6 +548,10 @@ def main():
               f'{len(notes)} width differs, {len(miss)} typed paths not in the dump')
         for n in notes:
             print(f'  {n}')
+        for s in sigs:   # labelled though wider: an integer of the dump (Questa 2023's VCD of an enum)
+            e = lookup(t['signals'], remap(s['path'], mp), tops)
+            if e and on_integer(e, s):
+                print(f'  {s["path"]}: an integer of {s["width"]} bits in the dump, an enum of {e["width"]} in the types: its labels')
         for p in miss[:20]:
             print(f'  not in the dump: {p}')
         return 1 if notes else 0

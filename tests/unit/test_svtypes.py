@@ -43,6 +43,31 @@ class Describe(unittest.TestCase):
         with self.assertRaisesRegex(WaveError, 'not a WaveLens types file'):
             S.read({'signals': {}})
 
+    def test_enum_on_an_integer_of_the_dump(self):
+        # a Questa 2023 VCD writes a variable of an enum type as integer 32 (tests/unit/types/int_enum.vcd): the enum's
+        # labels on it, its codes the values; a reg of 32 bits stays a number (another width: another run?); a real of
+        # the design (Floating point type) is no note
+        t = S.load(os.path.join(T, 'int_enum.types.json'))
+        self.assertEqual(t['notes'], [])
+        rc, out, _ = H.run_tool('svtypes', 'check', os.path.join(T, 'int_enum.types.json'), os.path.join(T, 'int_enum.vcd'))
+        self.assertEqual(rc, 0, out)
+        self.assertIn('8 signals: 5 get enum labels, 0 get fields; 1 width differs', out)
+        self.assertIn('top.dec.r_wide: 32 bits in the dump, 3 in the types: left as it is', out)
+        self.assertIn('top.dec.act_edge_sel: an integer of 32 bits in the dump, an enum of 1 in the types: its labels', out)
+        import svabuild, dumpscan
+        sva = svabuild.find_bin()
+        if not sva:
+            H.skip(self, 'no sva binary: make sva-build')
+        with H.tmp() as d:   # sva fst: the enum tables of the FST on the integers, by their codes on 32 bits
+            fst = os.path.join(d, 'int_enum.fst')
+            r = subprocess.run([sva, 'fst', os.path.join(T, 'int_enum.vcd'), '--types', os.path.join(T, 'int_enum.types.json'), '--out', fst, '-q'],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            got = {p.rsplit('.', 1)[1]: v['enum'] for p, v in dumpscan.scan(fst).items() if p.startswith('top.dec.') and '[' not in p}
+        abc = {0: 'IDLE', 1: 'SYNC', 2: 'DATA', 3: 'ERR'}
+        self.assertEqual(got, {'clk': None, 'r_state': abc, 'next_state': abc, 'act_edge_sel': {0: 'E_RISE', 1: 'E_FALL'}, 'r_odd': abc,
+                               'r_lost': abc, 'r_wide': None})
+
     def test_broken_json_says_where(self):
         # a types file that is not JSON (cut short, edited by hand): the line, the column and a caret under it, as the
         # page's log shows it (jsonParse); an empty one said so
@@ -305,7 +330,8 @@ def contract_py(c):
         t = S.read(json.loads(json.dumps(c['types'])))
     except WaveError:
         return {'error': True}
-    sigs = [{'path': x['path'], 'width': x['width'], 'enum': dict(x.get('enum') or {}), 'fields': x.get('fields')} for x in c['signals']]
+    sigs = [{'path': x['path'], 'width': x['width'], 'kind': x.get('kind', 'reg'), 'enum': dict(x.get('enum') or {}), 'fields': x.get('fields')}
+            for x in c['signals']]
     own = {x['path'] for x in c['signals'] if x.get('enum')}, {x['path'] for x in c['signals'] if x.get('fields')}
     _, _, notes, given = S.apply(t, sigs)
     out = {'labels': {x['path']: {str(k): v for k, v in x['enum'].items()} for x in sigs if x['path'] in given and x['enum'] and x['path'] not in own[0]},

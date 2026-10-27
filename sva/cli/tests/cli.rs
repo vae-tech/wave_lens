@@ -821,7 +821,8 @@ fn fst_gives_the_enum_tables_the_twins_give() {
                                 values.join(" "), 100 + i, 100 + i);
             }
             let code = (b'!' + i as u8) as char;
-            vcd += &format!("$var reg {w} {code} {r} $end\n");
+            let kind = s.get("kind").and_then(|x| x.as_str()).unwrap_or("reg");
+            vcd += &format!("$var {kind} {w} {code} {r} $end\n");
             body += &format!("b0 {code}\n");
         }
         vcd += &"$upscope $end\n".repeat(open.len());

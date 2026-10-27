@@ -455,7 +455,7 @@ def read_signals(a):
     events = [p for p, v in decl.vars.items() if v.kind == 'event']
     if events:
         print(f'mkconfig: {len(events)} event variable(s) left out (no value to draw): {", ".join(events[:5])}{" …" if len(events) > 5 else ""}', file=sys.stderr)
-    sigs = [{'path': p, 'width': v.width} for p, v in decl.vars.items() if v.kind != 'event']
+    sigs = [{'path': p, 'width': v.width, 'kind': v.kind} for p, v in decl.vars.items() if v.kind != 'event']   # (kind: an enum on an integer)
     for i, s in enumerate(sigs):
         d = info.get(s['path']) or {'order': len(info) + i, 'changes': None, 'enum': None}
         s.update(order=d['order'], changes=d['changes'], enum=d['enum'])

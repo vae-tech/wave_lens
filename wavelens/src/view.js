@@ -1546,6 +1546,7 @@ class WaveView {
       const run = this.opts.sv && this.opts.sv.paths ? svFingerprint(this.opts.sv, r.info.date, svScopes(r.doc)) : [];   // the types of this run?
       const from = this.opts.sv && this.opts.sv.paths ? 'the types file' : 'the SystemVerilog sources';
       if (nsv) r.log.push({ level: 'info', text: `labels or fields from ${from} for ${nsv} signal${nsv === 1 ? '' : 's'}` });
+      const ni = [...why.values()].filter(x => x.int).length; if (ni) r.log.push({ level: 'info', text: svIntSaid(ni) });
       for (const n of ((this.opts.sv && this.opts.sv.notes) || []).concat(said, run)) r.log.push({ level: 'warning', text: 'types: ' + n });
       if (!r.shown) { this.toast(`${file.name}: no signals`); this.dumpSaid(file.name, { error: 'no signals', log: r.log, info: r.info });
         this.log('error', `${file.name}: no signals`, { items: r.log.map(logLine) }); return this; }
@@ -1612,8 +1613,11 @@ class WaveView {
     const run = ty ? svFingerprint(this.opts.sv, this.opts.dumpDate, svScopes(doc)) : [];   // the types of the run of the dump?
     Object.assign(this.opts, { svWhy: why, svRun: run });
     for (const x of log.concat(run)) console.warn('wavelens: types: ' + x);
-    if (log.length) this.log('warning', `${log.length} signal${log.length === 1 ? '' : 's'} left as ${log.length === 1 ? 'it is' : 'they are'}: ` +
-      'another width in the dump', { items: log, what: 'the list' });
+    const left = log.filter(x => x.endsWith('left as it is')), ni = [...why.values()].filter(x => x.int).length;
+    if (left.length) this.log('warning', `${left.length} signal${left.length === 1 ? '' : 's'} left as ${left.length === 1 ? 'it is' : 'they are'}: ` +
+      'another width in the dump', { items: left, what: 'the list' });
+    if (ni) this.log('info', svIntSaid(ni));
+    for (const x of log.filter(x => !x.endsWith('left as it is'))) this.log('warning', 'types: ' + x);
     for (const x of run) this.log('warning', 'types: ' + x);
     if (run.length && !quiet) said += ` · ${run[0]}`;
     const what = ty ? `${np} typed paths (${(ty.producer || {}).tool || 'types file'})` : `${ne} enum-typed and ${nf} struct-typed names in ${sv.files} files`;

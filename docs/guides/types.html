@@ -34,7 +34,9 @@
     it in <span class="ui">Sources…</span>. The VS Code tab reads it next to the dump, and again when it changes.</li>
   <li><b>By path, by width.</b> A signal gets the type of its own path, <code>tb.u_rx.state</code>, only when its width in the dump is
     the type's. Two modules' <code>state</code> each get their own table. A plain <code>logic [1:0] state</code> stays a number,
-    and so does a signal the file does not name.</li>
+    and so does a signal the file does not name. One exception: Questa 2023's VCD writes a variable of an enum type as
+    <code>integer 32</code>, the code its value, and such an integer takes the enum's labels (the log under the viewer says
+    a value that is no code of it, or only <code>x</code>: a VCD of <code>wlf2vcd</code>, which loses them).</li>
 </ol>
 <figure><img src="img/types-fsm.png" alt="The FSM example from its VCD: state and u_rx.state by name, the packed struct status split into its fields, status.state by name" loading="lazy">
   <figcaption><b>A VCD with its types.</b> The UART FSM example from its VCD, which has no enum tables
@@ -190,7 +192,7 @@ tb.vcd: 23 signals: 2 get enum labels, 1 get fields; 0 width differs, 0 typed pa
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.24 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.25 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

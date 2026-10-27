@@ -71,7 +71,7 @@ may be the default). What the tab does differently from a page in a browser:
   what they mean in VS Code (ctrl+F find, ctrl+C copy, ctrl+Z / ctrl+Y undo / redo, alt+C W R in the find field);
   `wavelens.keysToVSCode` (default `ctrl+G`, Go to Line) are left to VS Code — the list of your groups is `gl` then; the
   others (ctrl+P, F1, ctrl+tab, ctrl+shift+…) are VS Code's.
-- **The version** in the bar's title line: `0.24 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
+- **The version** in the bar's title line: `0.25 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
   committed), so a tab of a development build says which one it is.
 - **An agent** on the host (`tools/wavemcp.py`, below): when it starts its live link, every open tab connects (**●
   live**); `view_live` with `page` a `.vcd` / `.fst` and `open: true` opens it in the VS Code window that has the file
@@ -186,8 +186,16 @@ at once; the names come from the design's types (guide: [State names and structs
   one of the file's), and only when its width in the dump is the type's. Two modules' `state` get
   their own tables, a parameterised module's instances their own widths, a plain `logic [1:0] state` none. A nested struct
   gives dotted fields (`in.st`), a packed array of enums or structs a field per element (`two[1]`). A union, an enum over 32 bits
-  from Questa (its `describe` keeps 32), or a text it does not read stays a number, with a note. The width is the only check:
+  from Questa (its `describe` keeps 32), or a text it does not read stays a number, with a note; a real of the design (an
+  analog model's parameter: `Floating point type`) a number, without one. The width is the only check:
   a types file of a run with other parameters that keep the widths gives its labels as they are.
+- **An enum on an integer.** A Questa VCD may write a variable of an enum type as `integer 32` (2023.3 does; 2021.1
+  writes `reg [2:0]`), the enum's code its value: an `integer` (`int`, `shortint`, `longint`, `byte`) of the dump wider
+  than the enum the types give it takes its labels by those codes, and is an FSM. The viewer's log says how many, and of
+  each one a value that is no code of its enum (shown as a number: another design?) or only `x` in the dump (a VCD of
+  `wlf2vcd`, which loses the values of enums: dump the VCD from `vsim`, `vcd file` / `vcd add -r /*`). A `reg` of 32 bits
+  stays a number. `svtypes.py check` lists them (`an integer of 32 bits in the dump, an enum of 3 in the types`), and
+  `sva fst` writes their tables into the FST on the integer's width.
 - **Used by** `make html WAVES=tb.vcd` (`mkconfig.py` finds `tb.types.json` by its name; `--types FILE` / `TYPES=` another;
   a types file newer than the config updates it at the next `make html`. The config's `"typed"` lists what the file gave:
   `--update` replaces that with the file's of now, or takes it away; an `"enum"` you wrote or edited stays); the viewer's **Sources…** with the `.json`
@@ -287,7 +295,7 @@ add theirs (`WaveLens.registerDefaults`).
 | `toolsFolded` | false | the bar's tools folded to its title line (**▴** / **▾ tools** in the bar) |
 | `toolsHidden` | `[]` | the bar's tool groups left out by their labels (`["style", "dump"]`; the right button on the bar) |
 | `themeButton` | `auto` | **◐** in the bar's title line: the page's theme (auto, light, white, dark; kept in this browser; in VS Code its list, VS Code's colours too); `auto`: when the page has no theme button of its own (`viewer.html`, the VS Code tab) |
-| `version` | true | the version in the bar's title line, and the build the page was made from (`0.24 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
+| `version` | true | the version in the bar's title line, and the build the page was made from (`0.25 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
 | `keysLeft` | `[]` | keys the viewer leaves to its host: `["ctrl+G"]` (`ctrl+` is `cmd+` too, a letter by its place); the VS Code tab: `wavelens.keysToVSCode` |
 | `log` | `auto` | the log under the viewer (§ A dump straight in the browser): `auto` from the first thing done in the page (a dump read, Sources…, Load…), `true` always, `false` never |
 | `savePage` | true | the bar's **Save page**: this page as a `.view.html` with your view in it (§ Save and Load); false hides it and keeps no copy of the page's text |

@@ -1235,6 +1235,7 @@ READ_PAGE = """t => { try { const r = WaveLens.vcdToWave(t), out = {};
 # a case of tests/unit/types/contract.json in the page -> {labels, fields, notes, run} put on by the types, or {error}
 CONTRACT_JS = """cs => cs.map(c => { let sv; try { sv = WaveLens.svTypes(JSON.parse(JSON.stringify(c.types)), 'contract'); } catch (e) { return { error: true }; }
     const rows = c.signals.map(x => Object.assign({ name: x.path.split('.').pop(), path: x.path, width: x.width, tv: [[0, '0']] },
+      x.kind === 'integer' ? { radix: 'signed' } : {},   // (the VCD reader's mark of an integer)
       x.enum ? { enum: Object.assign({}, x.enum) } : {}, x.fields ? { fields: x.fields } : {}));
     const notes = []; WaveLens.svApply({ signal: rows }, sv, notes);
     const labels = Object.fromEntries(rows.filter(r => r.svEnum).map(r => [r.path, r.enum]));
@@ -2479,6 +2480,40 @@ def log_panel(browser, build):
     check([x and [x['line'], x['col']] for x in w] == [[2, 6], [2, 6], [1, 10], None],
           f'the place of a JSON error from the messages of Firefox, V8 (a position), an end too soon; none from Safari {w}')
     check(not errs, 'no page errors (log)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
+    page.close()
+
+
+def int_enums(browser, build):
+    """A Questa 2023 VCD writes a variable of an enum type as integer 32 (tests/unit/types/int_enum.vcd): its types file
+    (Sources…) labels the integers by their codes, they are FSMs; a reg of 32 bits stays a number; a value no code of
+    its enum and only x (a VCD of wlf2vcd) are said in the log; Type… tells it; a real of the design is no note."""
+    T = ROOT / 'tests' / 'unit' / 'types'
+    print('enums on integers of the dump')
+    page = browser.new_page(viewport={'width': 1200, 'height': 800})
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto((ROOT / 'wavelens' / 'viewer.html').as_uri()); page.wait_for_load_state('networkidle')
+    page.locator('.wv input.dfile').first.set_input_files(str(T / 'int_enum.vcd'))
+    page.wait_for_function("document.querySelector('.wv').waveView.M.title === 'int_enum.vcd'")
+    page.locator('.wv input.srcfile').first.set_input_files(str(T / 'int_enum.types.json'))
+    page.wait_for_function("document.querySelector('.wv').waveView.M.rows.some(r => r.full === 'top.dec.r_state' && r.enum)")
+    got = page.evaluate("""(v => ({ tr: Object.fromEntries(v.M.rows.filter(r => r.type === 'sig' && r.full.startsWith('top.dec.r_')).map(r =>
+        [r.full.split('.').pop(), (r.tr || []).map(o => o.v).join('|')])), fsms: v.fsms().map(f => f.full || f.path).sort(),
+        log: v.logList().map(e => e.level + ' ' + e.text), why: v.typesOf(v.M.rows.find(r => r.full === 'top.dec.act_edge_sel')).why }))
+        (document.querySelector('.wv').waveView)""")
+    check(got['tr']['r_state'] == 'IDLE|SYNC|DATA|ERR|IDLE' and got['tr']['r_odd'] == 'IDLE|SYNC|0x00000006|ERR' and
+          got['tr']['r_wide'].startswith('0x00000000|0x00000001'),
+          f'an enum on an integer of 32 bits: its labels by the codes, a value no code of it a number; a reg of 32 bits a number {got["tr"]}')
+    check(got['fsms'] == ['top.dec.act_edge_sel', 'top.dec.next_state', 'top.dec.r_lost', 'top.dec.r_odd', 'top.dec.r_state'],
+          f'the integers labelled are FSMs {got["fsms"]}')
+    log = got['log']
+    check(any('5 enums of the types on integers of the dump' in x for x in log) and
+          any(x.startswith('warning 1 signal left as it is') for x in log) and
+          any('r_odd: an integer of 32 bits labelled by its enum of 3: 1 value no code of it (6)' in x for x in log) and
+          any('r_lost: only x in the dump' in x and 'wlf2vcd' in x for x in log) and not any('Floating point' in x for x in log),
+          f'the log: the integers labelled, the reg left, a value no code, only x (wlf2vcd?), no note of a real {log}')
+    check('on an integer of 32 bits in the dump' in got['why'] and '1 bits' in got['why'], f'Type…: an enum on an integer {got["why"]!r}')
+    check(not errs, 'no page errors (int_enums)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
     page.close()
 
 
@@ -5041,6 +5076,7 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'sva_exprs': 'stage 10: expressions in the bar (search, rows ƒ, kept, JSON), names in a hierarchy',
     'dump': 'a VCD opened in the page (Open…, dropped on a viewer), ⟳, wavelens/viewer.html',
     'log': 'the log under the viewer: what was done, an error of a JSON file with its line, column and caret',
+    'int_enums': 'a Questa VCD\'s enum as integer 32: labelled by the types, a value no code of it and only x said',
     'fsm': 'the FSM panel (T) on the FSM example\'s VCD with its types: the tree, go to one, Only FSMs, add them to a masked view, the command, the state',
     'axis': 'the time axis never leaves while the rows scroll: the own box fits under the bar, the wheel brings the bar back, with the page to the last rows',
     'state': 'Save / Load… of a viewer (the APB and AXI-Lite pages): its state to a file and back, on other waves',
@@ -5183,6 +5219,7 @@ def main():
         run('view_review', view_review, b, build)
         run('dump', dump, b, build)
         run('log', log_panel, b, build)
+        run('int_enums', int_enums, b, build)
         run('fsm', fsm_panel, b, build)
         run('axis', axis_in_sight, b, build)
         run('bookmark_view', bookmark_view, b, build)

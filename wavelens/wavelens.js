@@ -1292,6 +1292,25 @@ const svMerge = (a, b) => { if (!a || !b) return a || b;
 // why (a Map, optional): each signal's path -> what the types did with it, for the inspector (the right button's Type…):
 // {status: 'typed' | 'width' | 'none', key: the types' path, width, as: the path remapped, labels / fields: 'types' (put
 // there now), 'own' (the row's own: the dump's table, the config's, kept), null (none)}
+// an integer labelled by a narrower enum (svApply): the values of the dump that are no code of it (shown as numbers), or
+// only x (a VCD of wlf2vcd, which loses the values of enums) -> a note, or null when every value read is one of its codes
+function svIntValues(it, e, w) {
+  const keys = new Set(Object.keys(e.enum)), out = new Set(), name = it.path || it.name;
+  let known = 0, xs = 0;
+  for (const [, v] of it.tv || []) {
+    const s = String(v ?? '');
+    if (!/^[0-9a-f]+$/i.test(s)) { xs++; continue; }
+    const n = BigInt('0x' + s).toString();
+    if (keys.has(n)) known++; else out.add(n);
+  }
+  if (xs && !known && !out.size) return `${name}: only x in the dump, an enum in the types (a VCD of wlf2vcd? it loses the values of enums)`;
+  if (!out.size) return null;
+  const vs = [...out];
+  return `${name}: an integer of ${w} bits labelled by its enum of ${e.width}: ${vs.length} value${vs.length === 1 ? '' : 's'} no code of it ` +
+    `(${vs.slice(0, 4).join(', ')}${vs.length > 4 ? ', …' : ''}), shown as numbers`;
+}
+const svIntSaid = n => `${n} enum${n === 1 ? '' : 's'} of the types on integers of the dump (wider: a Questa VCD writes an enum as integer 32): ` +
+  'labelled by their codes';
 function svApply(doc, sv, log, why) {
   if (!doc || !doc.signal) return 0;
   sv = sv || { enums: {}, fields: {} };
@@ -1310,9 +1329,13 @@ function svApply(doc, sv, log, why) {
     let t = !byPath && sv.enums && sv.enums[leaf], fl = !byPath && sv.fields && sv.fields[leaf];
     if (byPath) {
       const p = svRemap(String(it.path || it.name), mp), k = svLookupKey(sv.paths, p, tops), e = k != null ? sv.paths[k] : null;
-      if (e && e.width === w) { t = e.enum; fl = e.fields; }
+      // an enum on a wider integer of the dump (the VCD reader's signed radix: Questa 2023 writes an enum as integer 32)
+      const int = !!(e && e.enum && e.width < w && (it.radix === 'signed' || it.svRadix === 'signed'));
+      if (e && (e.width === w || int)) { t = e.enum; fl = e.fields; }
       else if (e && log) log.push(`${it.path || it.name}: ${w} bits in the dump, ${e.width} in the types: left as it is`);
-      if (why) why.set(String(it.path || it.name), wy = { status: !e ? 'none' : e.width === w ? 'typed' : 'width', key: k, width: e ? e.width : null, as: p });
+      if (int && log) { const n = svIntValues(it, e, w); if (n) log.push(n); }
+      if (why) why.set(String(it.path || it.name), wy = { status: !e ? 'none' : e.width === w || int ? 'typed' : 'width', key: k,
+        width: e ? e.width : null, as: p, int });
     }
     if (it.svEnum) { delete it.enum; delete it.svEnum; if (it.svRadix) it.radix = it.svRadix; delete it.svRadix; }   // the sources' before
     if (it.svFields) { delete it.fields; delete it.svFields; }
@@ -1335,6 +1358,7 @@ function svApply(doc, sv, log, why) {
 // (in.st), an array of enums or structs a field per element (pair[1]); a union, an enum of more than 32 bits from describe
 // (Questa keeps 32) or a text it does not read a note, and the signal stays as numbers.
 const TY_INTS = { int: 32, integer: 32, shortint: 16, longint: 64, byte: 8, time: 64 };
+const TY_REAL = /^(?:Floating point type\b.*|Real|Shortreal|Realtime)$/;   // svtypes.py DESC_REAL
 function tyParse(text) {   // Questa's describe of one signal -> a type {kind: enum | vec | record | union | array | unknown, …}
   const lines = String(text).split(/\r?\n/).map(x => x.trim()).filter(Boolean); let pos = 0;
   const one = () => {
@@ -1411,6 +1435,7 @@ function svTypes(d, where = 'types') {
   const paths = Object.assign({}, d.signals), notes = [...(d.notes || [])], plain = {};   // plain: what describe says of one with no type: its words
   for (const [p, text] of Object.entries(d.describe || {})) {
     if (String(text).startsWith('describe failed')) { notes.push(`${p}: ${text}`); continue; }
+    if (TY_REAL.test(String(text).trim())) { plain[p] = String(text).trim(); continue; }   // a real (an analog model's parameter): a number, no note
     const [e, why] = tyLower(tyMark(tyParse(text)));
     if (e) paths[p] = e; else plain[p] = why || String(text).split('\n')[0].trim();
     if (why) notes.push(`${p}: ${why}`);
@@ -3477,6 +3502,7 @@ class WaveView {
       const run = this.opts.sv && this.opts.sv.paths ? svFingerprint(this.opts.sv, r.info.date, svScopes(r.doc)) : [];   // the types of this run?
       const from = this.opts.sv && this.opts.sv.paths ? 'the types file' : 'the SystemVerilog sources';
       if (nsv) r.log.push({ level: 'info', text: `labels or fields from ${from} for ${nsv} signal${nsv === 1 ? '' : 's'}` });
+      const ni = [...why.values()].filter(x => x.int).length; if (ni) r.log.push({ level: 'info', text: svIntSaid(ni) });
       for (const n of ((this.opts.sv && this.opts.sv.notes) || []).concat(said, run)) r.log.push({ level: 'warning', text: 'types: ' + n });
       if (!r.shown) { this.toast(`${file.name}: no signals`); this.dumpSaid(file.name, { error: 'no signals', log: r.log, info: r.info });
         this.log('error', `${file.name}: no signals`, { items: r.log.map(logLine) }); return this; }
@@ -3543,8 +3569,11 @@ class WaveView {
     const run = ty ? svFingerprint(this.opts.sv, this.opts.dumpDate, svScopes(doc)) : [];   // the types of the run of the dump?
     Object.assign(this.opts, { svWhy: why, svRun: run });
     for (const x of log.concat(run)) console.warn('wavelens: types: ' + x);
-    if (log.length) this.log('warning', `${log.length} signal${log.length === 1 ? '' : 's'} left as ${log.length === 1 ? 'it is' : 'they are'}: ` +
-      'another width in the dump', { items: log, what: 'the list' });
+    const left = log.filter(x => x.endsWith('left as it is')), ni = [...why.values()].filter(x => x.int).length;
+    if (left.length) this.log('warning', `${left.length} signal${left.length === 1 ? '' : 's'} left as ${left.length === 1 ? 'it is' : 'they are'}: ` +
+      'another width in the dump', { items: left, what: 'the list' });
+    if (ni) this.log('info', svIntSaid(ni));
+    for (const x of log.filter(x => !x.endsWith('left as it is'))) this.log('warning', 'types: ' + x);
     for (const x of run) this.log('warning', 'types: ' + x);
     if (run.length && !quiet) said += ` · ${run[0]}`;
     const what = ty ? `${np} typed paths (${(ty.producer || {}).tool || 'types file'})` : `${ne} enum-typed and ${nf} struct-typed names in ${sv.files} files`;
@@ -6609,7 +6638,8 @@ Object.assign(WaveView.prototype, {
     const named = w ? `${w.key}${w.as !== at ? ` (the dump's ${at} as the types name it)` : ''}` : '';
     if (w && w.status === 'typed' && own) { out.status = 'own';
       out.why = `its own labels (an FST's table, the config's "enum" / "fields") stay: ${file} has ${named} too, ${w.width} bits, not used`; }
-    else if (w && w.status === 'typed') out.why = `its type from ${file}: ${named}, ${w.width} bits`;
+    else if (w && w.status === 'typed') out.why = `its type from ${file}: ${named}, ${w.width} bits` +
+      (w.int ? `, on an integer of ${r.width || 1} bits in the dump (a Questa VCD writes an enum so): labelled by its codes` : '');
     else if (w && w.status === 'width') out.why = `${file} has ${w.key} of ${w.width} bits, the dump ${r.width || 1}: not used, ` +
       `${out.labels || out.fields ? 'its own labels stay' : 'left as numbers'} (another run, other parameters?)`;
     else if (w && sv.plain && hasKey(sv.plain, w.as)) { out.status = 'plain'; out.why = `${file}: ${w.as} is ${sv.plain[w.as]}, no enum or struct` }
@@ -7062,7 +7092,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.24',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.25',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,

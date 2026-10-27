@@ -1,0 +1,19 @@
+{
+  "wavelens": "types", "version": 1,
+  "producer": {"tool": "Questa Sim-64 vsim 2023.3_1 Simulator 2023.08 Aug 11 2023", "by": "tools/questa/wavelens_types.tcl", "root": "/*", "date": "2026-10-27T12:00:00"},
+  "instances": {
+    "top": "top",
+    "top.dec": "dec"
+  },
+  "describe": {
+    "top.clk": "Register",
+    "top.dec.act_edge_sel": "Verilog enum: (0 downto 0) [2 enumeration values]\n  (E_RISE=0,E_FALL=1)",
+    "top.dec.clk": "Net",
+    "top.dec.next_state": "Verilog enum: (2 downto 0) [4 enumeration values]\n  (IDLE=0,SYNC=1,DATA=2,ERR=3)",
+    "top.dec.r_lost": "Verilog enum: (2 downto 0) [4 enumeration values]\n  (IDLE=0,SYNC=1,DATA=2,ERR=3)",
+    "top.dec.r_odd": "Verilog enum: (2 downto 0) [4 enumeration values]\n  (IDLE=0,SYNC=1,DATA=2,ERR=3)",
+    "top.dec.r_state": "Verilog enum: (2 downto 0) [4 enumeration values]\n  (IDLE=0,SYNC=1,DATA=2,ERR=3)",
+    "top.dec.r_wide": "Verilog enum: (2 downto 0) [4 enumeration values]\n  (IDLE=0,SYNC=1,DATA=2,ERR=3)",
+    "top.dec.t_cycle": "Floating point type (-1.79769e+308 to 1.79769e+308)"
+  }
+}

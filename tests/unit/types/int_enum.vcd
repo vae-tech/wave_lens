@@ -1,0 +1,80 @@
+$date
+	Tue Oct 27 12:00:00 2026
+$end
+$version
+	QuestaSim Version 2023.3_1
+$end
+$comment
+	A Questa 2023 VCD that writes a variable of an enum type as "integer 32", the enum's code as its value
+	(tests/unit/types/int_enum.types.json: their types). r_state, next_state, act_edge_sel: codes of their
+	enums; r_odd: 6 is no code of its enum; r_lost: only x (as wlf2vcd writes an enum); r_wide: a reg of 32
+	bits, not an integer: its width is not the enum's, left as it is.
+$end
+$timescale
+	1ns
+$end
+$scope module top $end
+$var reg 1 ! clk $end
+$scope module dec $end
+$var wire 1 " clk $end
+$var integer 32 # r_state $end
+$var integer 32 $ next_state $end
+$var integer 32 % act_edge_sel $end
+$var integer 32 & r_odd $end
+$var integer 32 ' r_lost $end
+$var reg 32 ( r_wide [31:0] $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+#0
+$dumpvars
+0!
+0"
+b0 #
+b1 $
+b0 %
+b0 &
+bx '
+b0 (
+$end
+#5
+1!
+1"
+b1 #
+b10 $
+b1 %
+b1 &
+b1 (
+#10
+0!
+0"
+#15
+1!
+1"
+b10 #
+b11 $
+b0 %
+b110 &
+b10 (
+#20
+0!
+0"
+#25
+1!
+1"
+b11 #
+b0 $
+b1 %
+b11 &
+b11 (
+#30
+0!
+0"
+#35
+1!
+1"
+b0 #
+b1 $
+b0 %
+b0 (
+#40

@@ -564,7 +564,8 @@ Object.assign(WaveView.prototype, {
     const named = w ? `${w.key}${w.as !== at ? ` (the dump's ${at} as the types name it)` : ''}` : '';
     if (w && w.status === 'typed' && own) { out.status = 'own';
       out.why = `its own labels (an FST's table, the config's "enum" / "fields") stay: ${file} has ${named} too, ${w.width} bits, not used`; }
-    else if (w && w.status === 'typed') out.why = `its type from ${file}: ${named}, ${w.width} bits`;
+    else if (w && w.status === 'typed') out.why = `its type from ${file}: ${named}, ${w.width} bits` +
+      (w.int ? `, on an integer of ${r.width || 1} bits in the dump (a Questa VCD writes an enum so): labelled by its codes` : '');
     else if (w && w.status === 'width') out.why = `${file} has ${w.key} of ${w.width} bits, the dump ${r.width || 1}: not used, ` +
       `${out.labels || out.fields ? 'its own labels stay' : 'left as numbers'} (another run, other parameters?)`;
     else if (w && sv.plain && hasKey(sv.plain, w.as)) { out.status = 'plain'; out.why = `${file}: ${w.as} is ${sv.plain[w.as]}, no enum or struct` }

@@ -477,6 +477,25 @@ const svMerge = (a, b) => { if (!a || !b) return a || b;
 // why (a Map, optional): each signal's path -> what the types did with it, for the inspector (the right button's Type…):
 // {status: 'typed' | 'width' | 'none', key: the types' path, width, as: the path remapped, labels / fields: 'types' (put
 // there now), 'own' (the row's own: the dump's table, the config's, kept), null (none)}
+// an integer labelled by a narrower enum (svApply): the values of the dump that are no code of it (shown as numbers), or
+// only x (a VCD of wlf2vcd, which loses the values of enums) -> a note, or null when every value read is one of its codes
+function svIntValues(it, e, w) {
+  const keys = new Set(Object.keys(e.enum)), out = new Set(), name = it.path || it.name;
+  let known = 0, xs = 0;
+  for (const [, v] of it.tv || []) {
+    const s = String(v ?? '');
+    if (!/^[0-9a-f]+$/i.test(s)) { xs++; continue; }
+    const n = BigInt('0x' + s).toString();
+    if (keys.has(n)) known++; else out.add(n);
+  }
+  if (xs && !known && !out.size) return `${name}: only x in the dump, an enum in the types (a VCD of wlf2vcd? it loses the values of enums)`;
+  if (!out.size) return null;
+  const vs = [...out];
+  return `${name}: an integer of ${w} bits labelled by its enum of ${e.width}: ${vs.length} value${vs.length === 1 ? '' : 's'} no code of it ` +
+    `(${vs.slice(0, 4).join(', ')}${vs.length > 4 ? ', …' : ''}), shown as numbers`;
+}
+const svIntSaid = n => `${n} enum${n === 1 ? '' : 's'} of the types on integers of the dump (wider: a Questa VCD writes an enum as integer 32): ` +
+  'labelled by their codes';
 function svApply(doc, sv, log, why) {
   if (!doc || !doc.signal) return 0;
   sv = sv || { enums: {}, fields: {} };
@@ -495,9 +514,13 @@ function svApply(doc, sv, log, why) {
     let t = !byPath && sv.enums && sv.enums[leaf], fl = !byPath && sv.fields && sv.fields[leaf];
     if (byPath) {
       const p = svRemap(String(it.path || it.name), mp), k = svLookupKey(sv.paths, p, tops), e = k != null ? sv.paths[k] : null;
-      if (e && e.width === w) { t = e.enum; fl = e.fields; }
+      // an enum on a wider integer of the dump (the VCD reader's signed radix: Questa 2023 writes an enum as integer 32)
+      const int = !!(e && e.enum && e.width < w && (it.radix === 'signed' || it.svRadix === 'signed'));
+      if (e && (e.width === w || int)) { t = e.enum; fl = e.fields; }
       else if (e && log) log.push(`${it.path || it.name}: ${w} bits in the dump, ${e.width} in the types: left as it is`);
-      if (why) why.set(String(it.path || it.name), wy = { status: !e ? 'none' : e.width === w ? 'typed' : 'width', key: k, width: e ? e.width : null, as: p });
+      if (int && log) { const n = svIntValues(it, e, w); if (n) log.push(n); }
+      if (why) why.set(String(it.path || it.name), wy = { status: !e ? 'none' : e.width === w || int ? 'typed' : 'width', key: k,
+        width: e ? e.width : null, as: p, int });
     }
     if (it.svEnum) { delete it.enum; delete it.svEnum; if (it.svRadix) it.radix = it.svRadix; delete it.svRadix; }   // the sources' before
     if (it.svFields) { delete it.fields; delete it.svFields; }
@@ -520,6 +543,7 @@ function svApply(doc, sv, log, why) {
 // (in.st), an array of enums or structs a field per element (pair[1]); a union, an enum of more than 32 bits from describe
 // (Questa keeps 32) or a text it does not read a note, and the signal stays as numbers.
 const TY_INTS = { int: 32, integer: 32, shortint: 16, longint: 64, byte: 8, time: 64 };
+const TY_REAL = /^(?:Floating point type\b.*|Real|Shortreal|Realtime)$/;   // svtypes.py DESC_REAL
 function tyParse(text) {   // Questa's describe of one signal -> a type {kind: enum | vec | record | union | array | unknown, …}
   const lines = String(text).split(/\r?\n/).map(x => x.trim()).filter(Boolean); let pos = 0;
   const one = () => {
@@ -596,6 +620,7 @@ function svTypes(d, where = 'types') {
   const paths = Object.assign({}, d.signals), notes = [...(d.notes || [])], plain = {};   // plain: what describe says of one with no type: its words
   for (const [p, text] of Object.entries(d.describe || {})) {
     if (String(text).startsWith('describe failed')) { notes.push(`${p}: ${text}`); continue; }
+    if (TY_REAL.test(String(text).trim())) { plain[p] = String(text).trim(); continue; }   // a real (an analog model's parameter): a number, no note
     const [e, why] = tyLower(tyMark(tyParse(text)));
     if (e) paths[p] = e; else plain[p] = why || String(text).split('\n')[0].trim();
     if (why) notes.push(`${p}: ${why}`);
