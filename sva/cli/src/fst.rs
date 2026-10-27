@@ -149,8 +149,9 @@ fn is_int(t: u8) -> bool {
 }
 
 /// A vector written without its b and glued to its id code, `00000000000000000000000000000001A&` (Questa 2023 writes an
-/// integer so): when the token is no bit of a declared code, the length of the digits of a code whose widest
-/// declaration is that wide (the longest first) -> where its code starts; None: a bit and its code as usual
+/// integer so, its enums declared at their own width too): when the token is no bit of a declared code, the length of
+/// the digits of a code whose widest declaration is that wide (the longest first), else of any declared code (its
+/// value then cut to its width as any wider one) -> where its code starts; None: a bit and its code as usual
 /// (tools/dumpscan.py and the page's reader: the same).
 fn glued(t: &[u8], h: &Header) -> Option<usize> {
     if t.len() < 3 || h.codes.contains_key(&t[1..]) {
@@ -159,6 +160,7 @@ fn glued(t: &[u8], h: &Header) -> Option<usize> {
     let width = |hs: &Vec<u32>| hs.iter().map(|&x| match h.kinds[x as usize - 1] { Kind::Bits(w) => w, _ => 0 }).max();
     let run = t.iter().take_while(|c| b"01xzXZ".contains(c)).count().min(t.len() - 1);
     (2..=run).rev().find(|&j| h.codes.get(&t[j..]).and_then(width) == Some(j as u32))
+        .or_else(|| (2..=run).rev().find(|&j| h.codes.contains_key(&t[j..])))
 }
 
 /// The attribute types of `$attrbegin` as fst2vcd writes them (FST_AT_*: `class` is the pack type).
@@ -1261,6 +1263,12 @@ fn convert(vcd: &str, out: &mut (impl Write + Seek), types: Option<&Types>, limi
             let Some(s) = s else { return Err(format!("{file}:{line}: \"{}\" is not a time", String::from_utf8_lossy(t))) };
             if let Some(n) = b.now() {
                 if s < n {
+                    // the last word of the file: a time cut short (the dump still being written), left out; else an error
+                    if !w.next().map_err(io)? {
+                        log.note("cut", line, format!("#{s} after #{n} at the end of the file (cut off: still being written? vcd flush, or quit \
+                            vsim): left out"));
+                        break;
+                    }
                     return Err(format!("{file}:{line}: #{s} after #{n}: the time goes back (a dump of several runs?)"));
                 }
             }
@@ -1301,7 +1309,11 @@ fn convert(vcd: &str, out: &mut (impl Write + Seek), types: Option<&Types>, limi
                 val.extend_from_slice(&t[1..]);
                 let k = c.to_ascii_lowercase();
                 if !w.next().map_err(io)? {
-                    return Err(format!("{file}:{line}: a value without its code at the end of the file"));
+                    // a dump cut off (the simulator still writing it, not flushed): the rest is written, as the page and
+                    // dumpscan.py read it
+                    log.note("cut", line, "a value without its code at the end of the file (cut off: still being written? vcd flush, \
+                        or quit vsim): left out".into());
+                    break;
                 }
                 code.clear();
                 code.extend_from_slice(&w.tok);

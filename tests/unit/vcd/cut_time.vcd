@@ -1,0 +1,16 @@
+$comment
+	A dump cut off in the middle of a time (the simulator still writing it): #1 after #10 is the end of
+	#1000: every reader leaves it out and reads the rest; a time that goes back before the end is an error.
+$end
+$timescale 1ns $end
+$scope module tb $end
+$var wire 1 ! clk $end
+$upscope $end
+$enddefinitions $end
+#0
+0!
+#5
+1!
+#10
+0!
+#1

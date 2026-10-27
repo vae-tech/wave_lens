@@ -5,6 +5,17 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.27 — 27 October 2026
+
+A Questa 2023 VCD as the user's simulation writes it: its enums at their own width, and the dump cut off at its end.
+
+- **A glued vector of any declared code.** Questa writes an enum declared `reg [2:0]` in 32 digits glued to its code
+  all the same: read as the digits before a declared code, cut to its width (0.26 took only the code of that width).
+- **A dump cut off at its end** (the simulator still writing it) is read up to the cut: a last value without its code,
+  or a last time cut short (`#1` after `#10`), is left out with a note — the page, the tools and `sva fst`, which wrote
+  no FST of it before (the VS Code tab had nothing). A time that goes back before the end stays an error.
+- `tests/unit/vcd/cut.vcd`, `cut_time.vcd`; `glued.vcd` with an enum at its own width.
+
 ## 0.26 — 27 October 2026
 
 The values of a Questa 2023 VCD's integers: written without their `b`, glued to their id codes.

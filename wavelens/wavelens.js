@@ -981,13 +981,15 @@ function* vcdRead(opts = {}, size = 0) {
   // next piece; fn(code, t, value, kind, at) with at the offset in the text, (null, t) at a time
   const body = i;
   // a vector without its b, glued to its code (Questa 2023 writes an integer so: 0000…0001A& is 1 of A&): when the token is
-  // no bit of a declared code, the length of the digits of a code declared that wide (the longest first) -> where its
-  // code starts; 0: a bit and its code as usual (sva fst glued, tools/dumpscan.py: the same)
+  // no bit of a declared code, the length of the digits of a code declared that wide (the longest first), else of any
+  // declared code (an enum at its own width: the value cut to it) -> where its code starts; 0: a bit and its code as
+  // usual (sva fst glued, tools/dumpscan.py: the same)
   let gluedSaid = false;
   const glued = t => {
     if (t.length < 3 || codes.has(t.slice(1))) return 0;
     let run = 0; while (run < t.length - 1 && '01xzXZ'.includes(t[run])) run++;
     for (let j = run; j >= 2; j--) if (codes.get(t.slice(j)) === j) return j;
+    for (let j = run; j >= 2; j--) if (codes.has(t.slice(j))) return j;
     return 0;
   };
   const step = (s, p, last, fn, notes, st, at0) => {
@@ -1001,7 +1003,14 @@ function* vcdRead(opts = {}, size = 0) {
         const tn = Number(s.slice(s0 + 1, p)) * unit;
         if (!Number.isFinite(tn) || s0 + 1 === p) { if (notes) note('warning', at0 + s0, 'time', `"${s.slice(s0, p).slice(0, 40)}" is not a time: left out`);
           continue; }
-        if (!st.first && tn < st.t) fail(at0 + s0, `time goes back: #${s.slice(s0 + 1, p)} after #${st.t / unit} (a VCD lists its times in order)`);
+        if (!st.first && tn < st.t) {
+          if (last && !/\S/.test(s.slice(p))) {   // the last word of the file: a time cut short (still being written), left out
+            if (notes) note('warning', at0 + s0, 'cut', `#${s.slice(s0 + 1, p)} after #${st.t / unit} at the end of the file (cut off: still being ` +
+              'written? vcd flush, or quit vsim): left out');
+            return n;
+          }
+          fail(at0 + s0, `time goes back: #${s.slice(s0 + 1, p)} after #${st.t / unit} (a VCD lists its times in order)`);
+        }
         st.t = tn; st.first = false; fn(null, st.t);
       }
       else if (c === '$') {   // $dumpvars $dumpall $dumpon $dumpoff $end: nothing; $comment and the like: to their $end
@@ -7108,7 +7117,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.26',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.27',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,

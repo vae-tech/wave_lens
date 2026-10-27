@@ -1,0 +1,11 @@
+{
+ "signal": [
+  ["tb",
+    {"name": "clk", "width": 1, "wave": "01", "tv": [[0, "0"], [5000, "1"], [10000, "0"]], "path": "tb.clk"}
+  ]
+ ],
+ "head": {"text": "cut_time.vcd"},
+ "time": {"t0": 0, "t1": 10000, "cycle": 5000, "unit": "ps"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "cut_time.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 0, "to_ps": 10000}
+}

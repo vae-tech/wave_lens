@@ -1,0 +1,19 @@
+$comment
+	A dump cut off in the middle of a value change (the simulator still writing it): its last vector has no code.
+	Every reader leaves that one out and reads the rest (sva fst too: it said "not written").
+$end
+$timescale 1ns $end
+$scope module tb $end
+$var wire 1 ! clk $end
+$var wire 4 " cnt [3:0] $end
+$upscope $end
+$enddefinitions $end
+#0
+0!
+b0000 "
+#5
+1!
+b0001 "
+#10
+0!
+b0

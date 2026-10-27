@@ -864,15 +864,40 @@ fn fst_gives_the_enum_tables_the_twins_give() {
     }
 }
 
-/// A VCD whose integers are written without b, glued to their codes (Questa 2023: tests/unit/vcd/glued.vcd): sva fst
-/// reads them, and sva vcd and sva eval, which read a VCD through wellen (it stops at the first one), read its FST.
+/// A dump cut off in the middle of a value (tests/unit/vcd/cut.vcd: the simulator still writing it) or of a time
+/// (cut_time.vcd: #1 of #1000, back in time): the FST is written with everything before it, and a note says what was
+/// left out (it was "not written").
+#[test]
+fn fst_of_a_dump_cut_off() {
+    let vcd = own("fst-cut", "cut.vcd", &std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/unit/vcd/cut.vcd")).unwrap());
+    let o = sva(&["fst", &vcd.to_string_lossy()]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    assert!(err(&o).contains("cut.vcd:19: a value without its code at the end of the file (cut off: still being written?"), "{}", err(&o));
+    let t = out(&sva(&["vcd", &vcd.with_extension("fst").to_string_lossy()]));
+    assert!(t.ends_with("#5\n1!\nb0001 \"\n#10\n0!\n"), "{t}");
+    // a time cut short at the end (#1 after #10): left out; before the end it is the error it was
+    let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/unit/vcd/cut_time.vcd")).unwrap();
+    let vcd = own("fst-cut", "cut_time.vcd", &text);
+    let o = sva(&["fst", &vcd.to_string_lossy()]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    assert!(err(&o).contains("cut_time.vcd:16: #1 after #10 at the end of the file (cut off"), "{}", err(&o));
+    assert!(out(&sva(&["vcd", &vcd.with_extension("fst").to_string_lossy()])).ends_with("#10\n0!\n"));
+    let vcd = own("fst-cut", "back.vcd", &(text + "\n1!\n"));
+    let o = sva(&["fst", &vcd.to_string_lossy()]);
+    assert_eq!(o.status.code(), Some(2), "{}", err(&o));
+    assert!(err(&o).contains("#1 after #10: the time goes back"), "{}", err(&o));
+}
+
+/// A VCD whose integers are written without b, glued to their codes (Questa 2023: tests/unit/vcd/glued.vcd; st3 an enum
+/// declared at its own width, its value in 32 digits all the same): sva fst reads them, and sva vcd and sva eval, which
+/// read a VCD through wellen (it stops at the first one), read its FST.
 #[test]
 fn glued_vectors_are_read() {
     let vcd = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/unit/vcd/glued.vcd");
     let o = sva(&["vcd", vcd]);
     assert_eq!(o.status.code(), Some(0), "{}", err(&o));
     let t = out(&o);
-    for want in ["b00000000000000000000000000000011 \"", "b0000000000000000000000000000xxxx #", "b1111 $", "#20\n0!"] {
+    for want in ["b00000000000000000000000000000011 \"", "b0000000000000000000000000000xxxx #", "b1111 $", "b101 %", "#20\n0!"] {
         assert!(t.contains(want), "{want}:\n{t}");
     }
     let s = own("glued", "g.sva", "module m;\n  a_p: assert property (@(posedge clk) next == 1 |-> ##1 next == 2);\nendmodule\n");

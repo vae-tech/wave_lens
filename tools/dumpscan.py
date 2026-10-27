@@ -244,14 +244,15 @@ def _widths(d):
 
 def _glued(tok, widths):
     """A vector without its b, glued to its id code (Questa 2023 writes an integer so: 0000…0001A& is 1 of A&): when the
-    token is no bit of a declared code, the length of the digits of a code declared that wide (the longest first) ->
-    where its code starts; 0: a bit and its code as usual (sva fst glued and the page's reader: the same)."""
+    token is no bit of a declared code, the length of the digits of a code declared that wide (the longest first), else
+    of any declared code (an enum at its own width: the value cut to it) -> where its code starts; 0: a bit and its
+    code as usual (sva fst glued and the page's reader: the same)."""
     if len(tok) < 3 or tok[1:] in widths:
         return 0
     run = 0
     while run < len(tok) - 1 and tok[run] in b'01xzXZ':
         run += 1
-    return next((j for j in range(run, 1, -1) if widths.get(tok[j:]) == j), 0)
+    return next((j for j in range(run, 1, -1) if widths.get(tok[j:]) == j), 0) or next((j for j in range(run, 1, -1) if tok[j:] in widths), 0)
 
 
 def read(path: str, body: Optional[str] = 'count', want: Optional[Iterable[bytes]] = None) -> Optional[Dump]:
@@ -264,15 +265,15 @@ def read(path: str, body: Optional[str] = 'count', want: Optional[Iterable[bytes
     name = os.path.basename(path)
     try:
         first = _header(lines, d, path)
-        widths = _widths(d)
+        widths, last = _widths(d), _last_word(path)
         if body == 'count':
             cnt = collections.Counter()
-            span = _scan(lines, first, name, cnt, None, widths=widths)
+            span = _scan(lines, first, name, cnt, None, widths=widths, last=last)
             if span is None:   # a change line with more on it: the dump again, every line token by token
                 close()
                 lines, close, done = _lines(path)
                 first, cnt = _header(lines, Dump(), path), collections.Counter()
-                span = _scan(lines, first, name, cnt, None, fast=False, widths=widths)
+                span = _scan(lines, first, name, cnt, None, fast=False, widths=widths, last=last)
             done()
             for k in [k for k in cnt if k not in widths]:   # a glued vector counted under its bit's code: its own
                 j = _glued(b'0' + k, widths)
@@ -284,7 +285,7 @@ def read(path: str, body: Optional[str] = 'count', want: Optional[Iterable[bytes
             d.t_start, d.t_end = (t_first or 0) * d.unit_ps, (t_last or 0) * d.unit_ps
         elif body == 'collect':
             tr = d.trans = {code: [] for code in set(want or ())}
-            t_first, t_last = _scan(lines, first, name, None, tr, widths=widths)
+            t_first, t_last = _scan(lines, first, name, None, tr, widths=widths, last=last)
             done()
             d.t_start, d.t_end = (t_first or 0) * d.unit_ps, (t_last or 0) * d.unit_ps
     finally:
@@ -297,7 +298,19 @@ def read(path: str, body: Optional[str] = 'count', want: Optional[Iterable[bytes
     return d
 
 
-def _scan(lines, first, name, cnt, tr, fast=True, widths=None):
+def _last_word(path):
+    """The last word of a VCD's text (None for an FST, read through a converter): a time there that goes back is the
+    dump cut off, not an error (_scan)."""
+    if not path.lower().endswith('.vcd'):
+        return None
+    with open(path, 'rb') as f:
+        f.seek(0, os.SEEK_END)
+        f.seek(max(0, f.tell() - 256))
+        words = f.read().split()
+    return words[-1] if words else None
+
+
+def _scan(lines, first, name, cnt, tr, fast=True, widths=None, last=None):
     """The value changes: counted per id code into cnt, or kept as (time in dump units, value bytes) in tr[code] for
     the codes tr has; -> (first time, last time). Values as stored: b'0' / b'1' / b'x' / b'z' (a bit), the digits of a
     vector without its b (b'0101'), b'r1.5' (a real), b'sHello' (a string). The usual line, one change or one time
@@ -306,12 +319,17 @@ def _scan(lines, first, name, cnt, tr, fast=True, widths=None):
     lines while a vector waits for its id code (b0101 then " on the next line) or a $comment for its $end. Counting
     looks for white space in a code only at the end (a test per line costs a third more): a code with white space
     (a line "0! #5 1!") -> None, read() counts again with fast=False, every line through slow(). widths: the codes'
-    sizes, for a vector glued to its code (_glued; counting puts it right afterwards, in read())."""
+    sizes, for a vector glued to its code (_glued; counting puts it right afterwards, in read()). last: the file's last
+    word (_last_word)."""
     widths = widths or {}
     st = {'t': 0, 'first': None}
     def at(v):
         tn = int(v)
         if tn < st['t']:
+            if last == b'#' + v:   # the last word of the file: a time cut short (still being written), left out
+                print(f'dumpscan: {name}: #{tn} after #{st["t"]} at the end of the file (cut off: still being written? vcd flush, '
+                      'or quit vsim): left out', file=sys.stderr)
+                return
             raise WaveError(f'{name}: time goes back: #{tn} after #{st["t"]} (a VCD lists its times in order)')
         st['t'] = tn
         if st['first'] is None:   # values before the first time (a $dumpvars block): the dump starts at 0
