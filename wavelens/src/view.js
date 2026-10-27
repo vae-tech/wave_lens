@@ -292,6 +292,7 @@ class Bar {
       <div class="body"><div class="names"></div><div class="wcol"><canvas tabindex="0" role="application" aria-roledescription="waveform"
         aria-label="waveform: + − zoom, ← → pan, shift+← → move the cursor, ↑ ↓ select a signal, [e ]e or Tab edges"></canvas></div></div>
       <div class="notes" hidden></div>
+      <div class="wlog" hidden></div>
       ${S.hint ? `<div class="hint">${esc(v.hintBase = hint)}</div>` : ''}`;
   }
   constructor(v) {
@@ -353,7 +354,8 @@ class Bar {
       else if (b.dataset.act === 'fselect') v.selectFound(e.ctrlKey || e.metaKey);
       else if (b.dataset.act === 'fcopy') v.copyRows(v.allRows().filter(r => v.found.has(r)));
       else if (b.dataset.act === 'ssave') v.saveState();
-      else if (b.dataset.act === 'spage') { try { v.toast('saved ' + savePage()); } catch (e) { v.toast(e.message); } }
+      else if (b.dataset.act === 'spage') { try { const n = savePage(); v.toast('saved ' + n); v.log('ok', 'saved the page: ' + n); }
+        catch (e) { v.toast(e.message); v.logError(e, 'cannot save the page: ' + e.message); } }
       else if (b.dataset.act === 'undo' || b.dataset.act === 'redo') v.undo(b.dataset.act === 'undo' ? -1 : 1);
       else if (b.dataset.act === 'help') v.help();
       else if (b.dataset.act === 'scroll') v.setScroll(v.S.maxHeight != null && v.S.maxHeight !== '' ? 'page' : 'window');
@@ -779,6 +781,7 @@ class WaveView {
     if (redraw && this.qEl && this.q) this.find(this.q);
     if (this.wsEl) this.wsEl.value = S.style;
     if (redraw) { const i = this.root.querySelector('input.pfx'); if (i) i.value = S.sortIgnore.join(','); this.fitPfx(); this.renderNames(); this.draw();
+      this.logRender();   // "log": shown or not
       this.settingsChanged(); }
   }
   build() {
@@ -796,7 +799,7 @@ class WaveView {
       e.preventDefault(); this.reset(); this.floatFind(false);
       if (e.target === this.qEl) this.canvas.focus({ preventScroll: true });
     }, { signal: this.ac.signal });
-    this.notes = new Notes(this);
+    this.notes = new Notes(this); this.logMount();   // the log under it (log.js)
     this.renderNames(); this.renderNotes();
   }
   wheelInput(c) {
@@ -1499,16 +1502,18 @@ class WaveView {
     a.download = name || (String(st.title || 'waves').replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'waves') + '.view.json';
     a.href = URL.createObjectURL(new Blob([JSON.stringify(st, null, 1)], { type: 'application/json' }));
     document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-    this.toast(`saved ${a.download}`); return st;
+    this.toast(`saved ${a.download}`); this.log('ok', `saved the view: ${a.download}`); return st;
   }
   async loadState(file) {
     try {
-      const text = typeof file === 'string' ? file : await file.text(), miss = await this.setState(JSON.parse(text));
+      const name = file.name || 'state', text = typeof file === 'string' ? file : await file.text(), miss = await this.setState(jsonParse(text, name));
       this.undoTick();   // the load is one step to undo
-      this.toast((`${file.name || 'state'} ` +
+      this.toast((`${name} ` +
           `loaded${miss.length ? ` · not in these waves: ${miss.length} (${miss.slice(0, 3).join(', ')}${miss.length > 3 ? ', …' : ''})` : ''}`));
+      this.log(miss.length ? 'warning' : 'ok', `${name} loaded${miss.length ? `: ${miss.length} not in these waves, left out` : ''}`, { items: miss });
       return miss;
-    } catch (e) { this.toast(`${file.name || 'state'}: ${e.message}`); return null; }
+    } catch (e) { const m = e.json ? e.message : `${file.name || 'state'}: ${e.message}`;
+      this.toast(m); this.logError(e, `cannot load: ${m}`); return null; }
   }
   // the colour a row is drawn in here: your paint, its own colour, its group's (groupColors); the model is not changed
   strokeOf(r) { return (r.type === 'sig' && this.painted.get(r.full)) || r.stroke || (this.groupStroke && this.groupStroke.get(r.orig || r)) || undefined; }
@@ -1530,9 +1535,9 @@ class WaveView {
       const pieces = typeof file.stream === 'function' && typeof file.slice === 'function', text = pieces ? null : await file.text();
       const head = pieces ? await file.slice(0, 64).text() : text.slice(0, 64);   // an FST named so but given as VCD text (VS Code converts it): read
       if (gen !== this.root.wlOpen || !VIEWS.has(this)) return this;   // a later one, or Sources…, replaced this viewer meanwhile
-      if (/\.fst$/i.test(file.name) && !/^\s*\$/.test(head)) {
-        this.toast('an FST is binary: sva vcd x.fst --out x.vcd (or fst2vcd), or make html WAVES=x.fst'); return this; }
-      let r;
+      if (/\.fst$/i.test(file.name) && !/^\s*\$/.test(head)) { const m = 'an FST is binary: sva vcd x.fst --out x.vcd (or fst2vcd), or make html WAVES=x.fst';
+        this.toast(m); this.log('warning', `${file.name}: not read: ${m}`); return this; }
+      let r; const t0 = performance.now();
       // a large dump given lazy (the VS Code tab): its header, every signal read later through file.wlLoad (need, lazyAsk)
       try { const o = { name: file.name, budget: this.S.dumpBudget, lazy: !!file.wlLazy }; r = pieces ? await vcdToWaveFile(file, o) : vcdToWave(text, o); }
       catch (e) { this.dumpSaid(file.name, { error: e.message, line: e.line }); throw e; }
@@ -1542,7 +1547,8 @@ class WaveView {
       const from = this.opts.sv && this.opts.sv.paths ? 'the types file' : 'the SystemVerilog sources';
       if (nsv) r.log.push({ level: 'info', text: `labels or fields from ${from} for ${nsv} signal${nsv === 1 ? '' : 's'}` });
       for (const n of ((this.opts.sv && this.opts.sv.notes) || []).concat(said, run)) r.log.push({ level: 'warning', text: 'types: ' + n });
-      if (!r.shown) { this.toast(`${file.name}: no signals`); this.dumpSaid(file.name, { error: 'no signals', log: r.log, info: r.info }); return this; }
+      if (!r.shown) { this.toast(`${file.name}: no signals`); this.dumpSaid(file.name, { error: 'no signals', log: r.log, info: r.info });
+        this.log('error', `${file.name}: no signals`, { items: r.log.map(logLine) }); return this; }
       const st = keep ? this.state() : null, root = this.root, opts = Object.assign({}, this.opts,
         { title: file.name, dumpSrc: { name: file.name, handle, file }, dumpDate: r.info.date, svWhy: why, svRun: run, loadCodes: file.wlLoad || null }),
         panel = keep && this.fsmPanelOf();
@@ -1555,10 +1561,17 @@ class WaveView {
           `signals${r.shown < r.total ? ` (dumpBudget ${this.S.dumpBudget} changes: the levels nearest the top)` : ''}`) +
           (bad ? ` · ${bad} warning${bad === 1 ? '' : 's'} (the browser's console)` : ''));
       v.dumpLog = r.log;
+      const ms = Math.round(performance.now() - t0), notes = r.log.filter(x => x.level !== 'info');
+      v.log('ok', (file.wlLazy ? `${file.name}: ${r.total} signals in ${r.info.scopes} modules (read as you open them)` : `${file.name}: ${r.shown} of ` +
+        `${r.total} signals`) + `${r.info.timescale ? ', ' + r.info.timescale : ''} · ${ms} ms`,
+        { items: r.log.filter(x => x.level === 'info').map(logLine) });
+      if (notes.length) v.log(notes.some(x => x.level === 'error') ? 'error' : 'warning',
+        `${file.name}: ${notes.length} warning${notes.length === 1 ? '' : 's'}`, { items: notes.map(logLine), what: 'what the reader noticed' });
       for (const x of r.log) (x.level === 'info' ? console.info : console.warn)(`${file.name}${x.line ? ':' + x.line : ''}: ${x.level}: ${x.text}`);
       root.dispatchEvent(new CustomEvent('wavelens:dump', { detail: { name: file.name, shown: r.shown, total: r.total, log: r.log, info: r.info } }));
       return v;
-    } catch (e) { if (e && e.name !== 'AbortError') this.toast('cannot open: ' + e.message); return this; }
+    } catch (e) { if (e && e.name !== 'AbortError') { this.toast('cannot open: ' + e.message);
+      this.logError(e, `cannot open ${(file && file.name) || 'the dump'}${e.line ? ` (line ${e.line})` : ''}: ${e.message}`); } return this; }
   }
   // SystemVerilog sources (Files or texts: Sources… in the bar, the VS Code tab's wavelens.sources): the names of their enums
   // and the fields of their packed structs onto the signals that have none (by name, svApply), kept in opts.sv for the next
@@ -1579,7 +1592,7 @@ class WaveView {
     const isTypes = (f, t) => (typeof f === 'string' ? /^\s*\{/.test(t) : /\.json$/i.test(f.name));
     let ty = null;
     try { for (let i = 0; i < files.length; i++) if (isTypes(files[i], texts[i])) ty = svMerge(ty, svTypes(texts[i], files[i].name || 'types file')); }
-    catch (e) { this.toast(e.message); return this; }
+    catch (e) { this.toast(e.message); this.logError(e); return this; }
     const rest = texts.filter((t, i) => !isTypes(files[i], t)), np = ty ? Object.keys(ty.paths).length : 0;
     if (ty && rest.length) ty.notes.push(`${rest.length} SystemVerilog source${rest.length === 1 ? '' : 's'} not read: the types file names ` +
       'the signals by path');
@@ -1587,6 +1600,11 @@ class WaveView {
     const ne = Object.keys(sv.enums).length, nf = Object.keys(sv.fields).length;
     this.useSources(sv, 'manual');
     for (const x of sv.notes) console.warn('wavelens: sources: ' + x);
+    const names = files.map(f => f.name || (typeof f === 'string' ? 'a text' : '?')).join(', ');
+    this.log('ok', ty ? `${names}: ${np} typed paths (${(ty.producer || {}).tool || 'types file'})` :
+      `${names}: ${ne} enum and ${nf} struct types (typedef) in ${sv.files} file${sv.files === 1 ? '' : 's'}`);
+    if (sv.notes.length) this.log('warning', `${sv.notes.length} note${sv.notes.length === 1 ? '' : 's'} of the ${ty ? 'types' : 'sources'}: not used`,
+      { items: sv.notes, what: 'the list' });
     let said = sv.notes.length ? ` · ${sv.notes.length} not used (the console): ${sv.notes[0]}` : '';
     if (!ne && !nf && !np && !quiet) this.toast((sv.notes.length ? 'no labels from these files' : 'no "typedef enum" or "typedef struct packed" in ' +
       `${texts.length} file${texts.length === 1 ? '' : 's'}`) + said);
@@ -1594,16 +1612,19 @@ class WaveView {
     const run = ty ? svFingerprint(this.opts.sv, this.opts.dumpDate, svScopes(doc)) : [];   // the types of the run of the dump?
     Object.assign(this.opts, { svWhy: why, svRun: run });
     for (const x of log.concat(run)) console.warn('wavelens: types: ' + x);
+    if (log.length) this.log('warning', `${log.length} signal${log.length === 1 ? '' : 's'} left as ${log.length === 1 ? 'it is' : 'they are'}: ` +
+      'another width in the dump', { items: log, what: 'the list' });
+    for (const x of run) this.log('warning', 'types: ' + x);
     if (run.length && !quiet) said += ` · ${run[0]}`;
     const what = ty ? `${np} typed paths (${(ty.producer || {}).tool || 'types file'})` : `${ne} enum-typed and ${nf} struct-typed names in ${sv.files} files`;
-    if (JSON.stringify(doc.signal) === before) {
+    if (JSON.stringify(doc.signal) === before) { this.log('info', `${what}: no signal of these ${np ? 'paths' : 'names'} without labels`);
       if (!quiet && (ne || nf || np)) this.toast(`${what}: no signal of these ${np ? 'paths' : 'names'} without labels${log.length ? ' · ' + log[0] : said}`);
       return this; }
     const st = this.state(), root = this.root, opts = this.opts, panel = this.fsmPanelOf();
     this.destroy(); root.innerHTML = '';
     const v = new WaveView(root, doc, opts); v.panelBox = this.panelBox; delete st.title; await v.setState(st);
     v.fsmPanelAgain(panel);   // the FSM panel: its new FSMs
-    v.toast(`${what}: labels or fields for ${n} signal${n === 1 ? '' : 's'}${said}`);
+    v.toast(`${what}: labels or fields for ${n} signal${n === 1 ? '' : 's'}${said}`); v.log('ok', `labels or fields for ${n} signal${n === 1 ? '' : 's'}`);
     return v;
   }
   // a dump that could not be read: the page hears why (wavelens:dumperror {name, error, line, log}: the VS Code tab's log)
@@ -2533,7 +2554,8 @@ class WaveView {
         for (const r of ask) if (r.lazy) this.lazyWait.delete(r);   // not in what came: asked again when it is on the screen
         if (got.length) { this.clkMemo = null; this.cycMemo = null; this.fsmSt = null; this.invalidate(); if (this.fsmP) this.fsmP.render(true); }
         return got;
-      })().catch(e => { for (const r of ask) this.lazyWait.delete(r); this.toast('reading the signals: ' + e.message); return []; });
+      })().catch(e => { for (const r of ask) this.lazyWait.delete(r); this.toast('reading the signals: ' + e.message);
+        this.logError(e, 'reading the signals: ' + e.message); return []; });
       for (const r of ask) this.lazyWait.set(r, p);
     }
     return Promise.all([...all].map(r => this.lazyWait.get(r)).filter(Boolean)).then(() => this);

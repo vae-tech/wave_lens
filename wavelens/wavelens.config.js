@@ -71,6 +71,8 @@ window.WAVELENS_CONFIG = {
   cycles: false,                //   the band of cycle numbers on; the cursor's cycle in the title, Δ of the second cursor in them
   cycleClock: null,             //   the clock counted (a full path or a name); null: the clock found (a 1-bit *clk* / *clock*)
   cycleZero: null,              //   the time of cycle 0 (its rising edge at or after it); null: the clock's first rising edge
+  log: 'auto',                  // the log under the viewer (what was done, what went wrong, a JSON file's error with its line): 'auto'
+                                //   from the first thing done in the page (a dump read, Sources…, Load…), true / false: always / never
   savePage: true,               // the bar's Save page: this page as a file with your view in it (false: off; the page's text is kept for it)
   themeButton: 'auto',          // ◐ in the bar's title line: auto, light, white, dark (in VS Code also its colours); 'auto': when the page
                                 //   has no theme button of its own (viewer.html, the VS Code tab), true / false: always / never

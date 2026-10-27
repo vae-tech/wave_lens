@@ -590,7 +590,7 @@ function tyLower(t) {   // a type -> [entry {width, enum | fields} or null for a
 }
 const tyMark = t => { if (t.kind === 'enum') t.describe = true; for (const [, m] of t.members || []) tyMark(m); if (t.elem) tyMark(t.elem); return t; };
 function svTypes(d, where = 'types') {
-  if (typeof d === 'string') { try { d = JSON.parse(d); } catch (e) { throw new Error(`${where}: not a types file (${e.message})`); } }
+  if (typeof d === 'string') d = jsonParse(d, where, 'not a types file');   // its error: the line and column (the log shows them)
   if (!d || d.wavelens !== 'types') throw new Error(`${where}: not a WaveLens types file (no "wavelens": "types"; made by ` +
     'tools/questa/wavelens_types.tcl or svtypes.py verilator)');
   const paths = Object.assign({}, d.signals), notes = [...(d.notes || [])], plain = {};   // plain: what describe says of one with no type: its words

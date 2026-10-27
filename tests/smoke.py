@@ -2427,6 +2427,61 @@ def dump(browser, build):
     page.close()
 
 
+def log_panel(browser, build):
+    """The log under the viewer (log.js): hidden until something is done in the page; a dump read, the types taken said
+    there; a types file or a saved state that is not JSON: an error with its line, column and a caret, the log opened;
+    folded: the last entry and the counts; Problems, Clear; "log": false never shows it; the place of an error from the
+    messages of V8, Firefox and an end too soon."""
+    viewer, T = ROOT / 'wavelens' / 'viewer.html', ROOT / 'tests' / 'unit' / 'types'
+    print('the log')
+    page = browser.new_page(viewport={'width': 1200, 'height': 800})
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(viewer.as_uri()); page.wait_for_load_state('networkidle')
+    js = lambda e, *a: page.evaluate(f"async a => {{ const v = document.querySelector('.wv').waveView; return {e}; }}", *a)
+    strip = "(el => [el.hidden, el.querySelector('.lf') && el.querySelector('.lf').getAttribute('aria-expanded'), el.innerText])(document.querySelector('.wv .wlog'))"
+    check(js(strip)[0] and js('v.logList().length') == 0, 'the log: hidden on a page where nothing was done yet')
+    page.locator('.wv input.dfile').first.set_input_files(str(T / 'questa.vcd'))
+    page.wait_for_function("document.querySelector('.wv').waveView.M.title === 'questa.vcd'")
+    got = js(strip)
+    check(not got[0] and got[1] == 'false' and 'questa.vcd: 29 of 29 signals, 1ns' in got[2], f'Open… a dump: the log shown folded, its line the read {got}')
+    good = (T / 'questa.types.json').read_text(encoding='utf-8')
+    bad = good.replace('"types_tb.state":', '"types_tb.state"', 1)
+    js("(await v.setSources([new File([a], 'questa.types.json')]), 0)", bad)
+    e = js("[v.logList().slice(-1)[0], document.querySelector('.wv .wlog .lj').innerText, document.querySelector('.wv .wlog .lf').getAttribute('aria-expanded')]")
+    j = e[0].get('json') or {}
+    check(e[0]['level'] == 'error' and 'not a types file at line 27, column 22' in e[0]['text'] and (j.get('line'), j.get('col')) == (27, 22) and
+          e[1].startswith('questa.types.json:27:22\n') and e[1].endswith('\n' + ' ' * 21 + '^') and e[2] == 'true',
+          f'a types file that is not JSON: an error with its line and column, the line and a caret under it, the log opened {e[0]["text"]!r} {e[1]!r}')
+    js("(await v.setSources([new File([a], 'questa.types.json')]), 0)", good)
+    page.wait_for_function("document.querySelector('.wv').waveView.M.rows.some(r => r.full === 'types_tb.state' && r.enum)")
+    got = js("v.logList().map(e => e.level + ' ' + e.text)")
+    check(any(x.startswith('ok questa.types.json: 9 typed paths') for x in got) and 'ok labels or fields for 9 signals' in got,
+          f'the types taken: their paths and the signals labelled, in the log {got[-4:]}')
+    page.locator('.wv .wlog button[data-l=only]').click()
+    only = js("[...document.querySelectorAll('.wv .wlog .lb > li')].map(li => li.className)")
+    page.locator('.wv .wlog button[data-l=fold]').click()
+    fold = js(strip)
+    check(set(only) == {'lv-error', 'lv-warning'} and fold[1] == 'false' and '✖ 1' in fold[2] and 'labels or fields for 9 signals' in fold[2],
+          f'Problems: only the errors and warnings; folded: the counts and the last entry {only} {fold}')
+    st = js("(await v.loadState(a), v.logList().slice(-1)[0])", '{\n  "from": 1,,\n}')
+    check(st['level'] == 'error' and (st['json']['line'], st['json']['col']) == (2, 13) and 'not JSON at line 2, column 13' in st['text'],
+          f'Load… of a state that is not JSON: its line and column {st}')
+    js("(v.logClear(), 0)")
+    check(js("v.logList().length") == 0 and not js(strip)[0], 'Clear: an empty log, still shown')
+    js("(WaveLens.configure({ log: false }), 0)")
+    check(js(strip)[0], '"log": false: never shown')
+    js("(WaveLens.configure({ log: 'auto' }), 0)")
+    w = js("a.map(([t, m]) => WaveLens.internal.jsonWhere(t, new Error(m)))", [
+        ['{\n "a" 1}', "JSON.parse: expected ':' after property name in object at line 2 column 6 of the JSON data"],
+        ['{\n "a" 1}', 'Unexpected number in JSON at position 7'], ['{"a": [1,', 'Unexpected end of JSON input'],
+        ['{', "JSON Parse error: Expected '}'"]])
+    check([x and [x['line'], x['col']] for x in w] == [[2, 6], [2, 6], [1, 10], None],
+          f'the place of a JSON error from the messages of Firefox, V8 (a position), an end too soon; none from Safari {w}')
+    check(not errs, 'no page errors (log)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
+    page.close()
+
+
 def state(browser, build):
     """Save / Load… of a viewer: everything done in it to a file and back, the assertions and ƒ rows too; another page
     takes what it has."""
@@ -4985,6 +5040,7 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'sva_waves': 'stage 7: the assertion groups on the waves',
     'sva_exprs': 'stage 10: expressions in the bar (search, rows ƒ, kept, JSON), names in a hierarchy',
     'dump': 'a VCD opened in the page (Open…, dropped on a viewer), ⟳, wavelens/viewer.html',
+    'log': 'the log under the viewer: what was done, an error of a JSON file with its line, column and caret',
     'fsm': 'the FSM panel (T) on the FSM example\'s VCD with its types: the tree, go to one, Only FSMs, add them to a masked view, the command, the state',
     'axis': 'the time axis never leaves while the rows scroll: the own box fits under the bar, the wheel brings the bar back, with the page to the last rows',
     'state': 'Save / Load… of a viewer (the APB and AXI-Lite pages): its state to a file and back, on other waves',
@@ -5126,6 +5182,7 @@ def main():
         run('compare', compare, b, build)
         run('view_review', view_review, b, build)
         run('dump', dump, b, build)
+        run('log', log_panel, b, build)
         run('fsm', fsm_panel, b, build)
         run('axis', axis_in_sight, b, build)
         run('bookmark_view', bookmark_view, b, build)

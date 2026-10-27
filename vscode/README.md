@@ -41,7 +41,7 @@ is turned into VCD text with it, kept in the extension's storage).
 - **Theme**: `wavelens.theme` — `auto` (light or dark by VS Code's), `vscode` (the colours of VS Code's theme),
   `light`, `white`, `dark`; **◐** in the bar (or *WaveLens: Choose the theme of the waves* in the editor's title) previews
   each on the open tabs.
-- **The version** in the bar: `0.23 · dev@5470d89*`, the extension's branch and commit (`*`: changes not committed).
+- **The version** in the bar: `0.24 · dev@5470d89*`, the extension's branch and commit (`*`: changes not committed).
 
 The keys are the viewer's (`?` in the tab): the plain ones, and the ctrl / alt ones that mean what they mean in VS Code
 (ctrl+F, ctrl+C, ctrl+Z, alt+C W R); `wavelens.keysToVSCode` (`ctrl+G`: Go to Line) go to VS Code — the list of your

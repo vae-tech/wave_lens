@@ -43,6 +43,23 @@ class Describe(unittest.TestCase):
         with self.assertRaisesRegex(WaveError, 'not a WaveLens types file'):
             S.read({'signals': {}})
 
+    def test_broken_json_says_where(self):
+        # a types file that is not JSON (cut short, edited by hand): the line, the column and a caret under it, as the
+        # page's log shows it (jsonParse); an empty one said so
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            bad, empty = os.path.join(d, 'bad.types.json'), os.path.join(d, 'empty.types.json')
+            with open(bad, 'w', encoding='utf-8') as f:
+                f.write('{\n  "wavelens": "types",\n  "signals": {"tb.s" 1}\n}\n')
+            with open(empty, 'w', encoding='utf-8') as f:
+                f.write('\n')
+            with self.assertRaises(WaveError) as e:
+                S.load(bad)
+            self.assertIn('not a types file at line 3, column 22: Expecting \':\' delimiter', str(e.exception))
+            self.assertTrue(str(e.exception).endswith('\n      "signals": {"tb.s" 1}\n                         ^'), str(e.exception))
+            with self.assertRaisesRegex(WaveError, 'not a types file: the file is empty'):
+                S.load(empty)
+
 
 class Apply(unittest.TestCase):
     def test_paths_widths_top_and_elements(self):

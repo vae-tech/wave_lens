@@ -327,7 +327,17 @@ def load(path):
     """A types file -> {'signals': {path: entry}, 'notes': [...], 'producer': {...}} (Questa's describe read here)."""
     try:
         with open(path, encoding='utf-8') as f:
-            d = json.load(f)
+            text = f.read()
+        if not text.strip():
+            raise WaveError(f'{path}: not a types file: the file is empty')
+        d = json.loads(text)
+    except json.JSONDecodeError as e:   # where: the line, a caret under the column (the page's log: the same)
+        line = e.doc.splitlines()[e.lineno - 1] if e.lineno <= len(e.doc.splitlines()) else ''
+        a = max(0, e.colno - 61)
+        cut = ('…' if a else '') + line[a:a + 100] + ('…' if a + 100 < len(line) else '')
+        pad = ' ' * (len('…' if a else '') + e.colno - 1 - a)
+        raise WaveError(f'{path}: not a types file at line {e.lineno}, column {e.colno}: {e.msg}' +
+                        (f'\n    {cut}\n    {pad}^' if line else '')) from None
     except (OSError, ValueError) as e:
         raise WaveError(f'{path}: not a types file ({e})')
     return read(d, path)

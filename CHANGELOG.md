@@ -5,6 +5,19 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.24 — 27 October 2026
+
+A log under the waves: what the page read and did, and what went wrong, a JSON file's error at its line and column.
+
+- **The log** (the setting `log`): a strip under the viewer, at the window's foot while it is in sight, folded to its
+  last entry with the errors and warnings counted, opened by a click or by an error; **Problems**, **Copy**, **Clear**.
+  A dump read (signals, timescale, time; the reader's notes with their lines), the types or sources taken (typed paths,
+  notes, signals left as numbers for another width, another run), Load… / Save / Save page, Compare…, the signals of a
+  large dump read later. A dump opened again or Sources… keep it; in VS Code its errors go to *WaveLens: Show the log*.
+- **A file that is not JSON says where**: a types file or a saved state, `name:line:column`, the line and a caret under
+  the column; an empty file said so. `svtypes.py` and `mkconfig.py` say the same on the terminal. In VS Code a types
+  file beside the dump that is not JSON was a toast only.
+
 ## 0.23 — 25 October 2026
 
 A large dump opens at once in VS Code: every module and signal, the values of the ones you open read then.

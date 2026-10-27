@@ -74,7 +74,7 @@ const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight
   findRegex: false, cursorSnap: 8,
     wheel: 'scroll', contextMenu: true, enumColors: null, dumpBudget: 3000000, gaps: false, gapIdle: 16, gapKeep: 2,
     gapSignals: null, gapClock: null, gapAux: null, gapOnly: false, gapCount: 'clock', gapLine: 'dashdot', menuTipDelay: 2000, cycles: false,
-    cycleClock: null, cycleZero: null, savePage: true, themeButton: 'auto', version: true, keysLeft: [] };
+    cycleClock: null, cycleZero: null, savePage: true, themeButton: 'auto', version: true, keysLeft: [], log: 'auto' };
 // a plugin's settings with their defaults (bus.js: busDetect, buses; sva.js: svaOpen, svaShow, svaSignals): in every
 // layer like the framework's own, listed in WaveLens.defaults, known to the warning on unknown keys
 const registerDefaults = map => { Object.assign(DEFAULTS, map || {}); return Object.assign({}, DEFAULTS); };
@@ -374,6 +374,28 @@ function decode(sig, v, radix) {
 // bus label of transition o with the radix in effect (re-decoded only when the radix changes)
 const vtext = (s, o, radix) => o.raw == null ? o.v : (s.radix || radix || 'auto') === o.rk ? o.vr : (o.rk = s.radix || radix || 'auto',
   o.vr = o.bits && o.rk === 'bin' ? o.bits : decode(s, o.raw, o.rk));
+
+// where JSON.parse stopped in a text -> {line, col (1 the first), text: that line}, from its message (V8: "… at position 12
+// (line 2 column 5)", Firefox: "… at line 2 column 5 …"; an end too soon: the end), null when it says no place (Safari)
+function jsonWhere(text, e) {
+  const m = String((e && e.message) || ''), lc = /line (\d+) column (\d+)/.exec(m), pos = /position (\d+)/.exec(m), lines = String(text).split('\n');
+  let line, col;
+  if (lc) { line = +lc[1]; col = +lc[2]; }
+  else if (pos) { const b = String(text).slice(0, +pos[1]).split('\n'); line = b.length; col = b[b.length - 1].length + 1; }
+  else if (/end of (JSON )?(input|data)|unexpected EOF/i.test(m)) { line = lines.length; col = lines[line - 1].length + 1; }
+  else return null;
+  return { line, col, text: (lines[line - 1] || '').replace(/\r$/, '') };
+}
+// JSON.parse with the place of an error: Error "<name>: <what> at line L, column C" whose .json is {name, msg, line, col,
+// text} (the log shows the line and a caret under the column)
+function jsonParse(text, name = 'JSON', what = 'not JSON') {
+  if (!String(text).trim()) { const e = new Error(`${name}: ${what}: the file is empty`); e.json = { name, msg: 'the file is empty' }; throw e; }
+  try { return JSON.parse(text); } catch (x) {
+    const w = jsonWhere(text, x), msg = String(x.message).replace(/^JSON\.parse: /, '').replace(/ (in JSON )?at (position \d+|line \d+ column \d+).*$/, '');
+    const e = new Error(`${name}: ${what}${w ? ` at line ${w.line}, column ${w.col}` : ''}: ${msg}`);
+    e.json = Object.assign({ name, msg }, w); throw e;
+  }
+}
 
 /* ---------------- parser: WaveJSON -> model ---------------- */
 function parseText(txt) {

@@ -21,6 +21,17 @@ after a new simulation and keeps the view (window, cursor, folding, highlight, b
 picked through the File System Access API, so ⟳ reads what is on the disk now. An FST is binary: `sva vcd x.fst --out
 x.vcd` (or GTKWave's `fst2vcd x.fst > x.vcd`), or a page with `make html WAVES=x.fst`. A saved state (`.view.json`) dropped on a viewer is loaded.
 
+**The log** under the viewer says what the page did and what went wrong: a dump read (its signals, timescale, the time it
+took; what the reader noticed, folded under one line with the line numbers), the types or sources taken (**Sources…**,
+the VS Code tab's own: how many typed paths, the notes, the signals left as they are, another run), a state loaded or
+saved, **Save page**, **Compare…**. A file that is not JSON (a types file cut short or edited by hand, a saved state) is
+an error with its place: `name:line:column`, the line and a caret under the column (`svtypes.py` and `mkconfig.py` say
+the same on the terminal). The log stays folded to one line (the last entry, **✖** errors and **⚠** warnings counted;
+a click opens it), sticks to the foot of the window while the viewer is in sight, and opens by itself on an error;
+open, **Problems** keeps the errors and warnings, **Copy** puts all of it on the clipboard as text, **Clear** empties
+it. It shows up with the first thing done in the page (the setting `log`: `true` always, `false` never); a dump opened
+again or **Sources…** keep it. In VS Code its errors go to *WaveLens: Show the log* too.
+
 ### In VS Code over Remote-SSH or WSL
 
 The VS Code extension (`vscode/`) opens a dump in a tab with this viewer. It is a *workspace* extension: with Remote-SSH
@@ -60,7 +71,7 @@ may be the default). What the tab does differently from a page in a browser:
   what they mean in VS Code (ctrl+F find, ctrl+C copy, ctrl+Z / ctrl+Y undo / redo, alt+C W R in the find field);
   `wavelens.keysToVSCode` (default `ctrl+G`, Go to Line) are left to VS Code — the list of your groups is `gl` then; the
   others (ctrl+P, F1, ctrl+tab, ctrl+shift+…) are VS Code's.
-- **The version** in the bar's title line: `0.23 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
+- **The version** in the bar's title line: `0.24 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
   committed), so a tab of a development build says which one it is.
 - **An agent** on the host (`tools/wavemcp.py`, below): when it starts its live link, every open tab connects (**●
   live**); `view_live` with `page` a `.vcd` / `.fst` and `open: true` opens it in the VS Code window that has the file
@@ -83,7 +94,8 @@ may be the default). What the tab does differently from a page in a browser:
   `dumpBudget`. The same notes are in the **Problems** panel (ctrl+shift+M) on their lines, until the tab closes; a
   dump it cannot read (the time goes back, no `$enddefinitions`, an FST `sva` cannot convert) is an error there and a
   message with *Open at the line*. An FST's notes name the line of its VCD text. *WaveLens: Show the log* (the editor's
-  title) opens the channel. In a browser the notes go to the console (`WaveLens.vcdToWave(text).log`).
+  title) opens the channel, with the errors of the viewer's log (a types file that is not JSON: its line and column). The
+  same notes are in the log under the viewer, and in a browser in the console (`WaveLens.vcdToWave(text).log`).
 
 Settings: `wavelens.theme`, `wavelens.sources`, `wavelens.autoReload`, `wavelens.lazy` (auto, always, never), `wavelens.live`, `wavelens.sva` (another sva program). A dump read whole (smaller than the `wavelens.lazy` sizes, or `never`) is cut to `dumpBudget`, and its whole VCD text crosses to your machine once per read.
 
@@ -275,8 +287,9 @@ add theirs (`WaveLens.registerDefaults`).
 | `toolsFolded` | false | the bar's tools folded to its title line (**▴** / **▾ tools** in the bar) |
 | `toolsHidden` | `[]` | the bar's tool groups left out by their labels (`["style", "dump"]`; the right button on the bar) |
 | `themeButton` | `auto` | **◐** in the bar's title line: the page's theme (auto, light, white, dark; kept in this browser; in VS Code its list, VS Code's colours too); `auto`: when the page has no theme button of its own (`viewer.html`, the VS Code tab) |
-| `version` | true | the version in the bar's title line, and the build the page was made from (`0.23 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
+| `version` | true | the version in the bar's title line, and the build the page was made from (`0.24 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
 | `keysLeft` | `[]` | keys the viewer leaves to its host: `["ctrl+G"]` (`ctrl+` is `cmd+` too, a letter by its place); the VS Code tab: `wavelens.keysToVSCode` |
+| `log` | `auto` | the log under the viewer (§ A dump straight in the browser): `auto` from the first thing done in the page (a dump read, Sources…, Load…), `true` always, `false` never |
 | `savePage` | true | the bar's **Save page**: this page as a `.view.html` with your view in it (§ Save and Load); false hides it and keeps no copy of the page's text |
 | `cycles`, `cycleClock`, `cycleZero` | false, null, null | the clock cycles in a band under the time axis (§ Clock cycles): on, the clock counted (null: the `*clk*` found), the time of cycle 0 (`"50ns"` or ps; null: the first rising edge) |
 | `groupColors` | none | one colour per group: `{"aw": "#339af0", "tb.dut.u_rx": "#37b24d"}` (names, paths, `*` patterns) |

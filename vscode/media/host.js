@@ -149,13 +149,15 @@
     if (bad) toast(`${last.name}: ${last.shown} of ${last.total} signals · ${bad} warning${bad === 1 ? '' : 's'}: the Problems panel (ctrl+shift+M), ` +
       'WaveLens: Show the log'); }, true);   // capture: it does not bubble
   document.addEventListener('wavelens:dumperror', e => vscode.postMessage(Object.assign({ type: 'dumperror' }, e.detail)), true);
+  // the viewer's log (the strip under the waves): its errors in the extension's log too, a JSON file's with its line and column
+  document.addEventListener('wavelens:log', e => { if (e.detail.level === 'error') vscode.postMessage({ type: 'log', text: e.detail.plain }); }, true);
   // one read again at a time, of the viewer that is there then (the one before is gone once it read); one asked meanwhile: once more after
   // the workspace's SystemVerilog sources (wavelens.sources) before each read: their enum names on a VCD's state buses
   // (the workspace's set: none found clears it, the ones of Sources… stay); -> the viewer there after the wait
   // or the design's types beside the dump (tb.types.json, by path: then the sources are not read)
   const sources = async () => { const s = await call('sources', {}), v = view();
     let sv = s.texts && s.texts.length ? WaveLens.svTables(s.texts) : null;
-    if (s.types != null) try { sv = WaveLens.svTypes(s.types, s.typesName); } catch (e) { if (v) v.toast(e.message); sv = null; }
+    if (s.types != null) try { sv = WaveLens.svTypes(s.types, s.typesName); } catch (e) { if (v) { v.toast(e.message); v.logError(e); } sv = null; }
     if (v) v.useSources(sv, 'workspace');
     return v; };
   let busy = null, again = false;

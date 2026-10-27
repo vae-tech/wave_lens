@@ -21,7 +21,7 @@
   --wave-paint: #d6336c;  /* the find group's Paint colour (its first value) */
   --wave-cursor2: #1864ab;   /* the second cursor (shift+click) */
   /* assertions on the waves (sva.js): attempt bars, step circles, the per-cycle strip, a drop target */
-  --sva-pass: #22652f; --sva-fail: #a82020; --sva-disabled: #4f565d; --sva-active: #145a9a; --sva-capped: #56526a; --sva-ok: #37b24d;   /* >= 4.5:1 against the grey panel (the step digits) */
+  --sva-pass: #22652f; --sva-fail: #a82020; --sva-disabled: #4f565d; --sva-active: #145a9a; --sva-capped: #56526a; --sva-ok: #37b24d; --log-warn: #855a00;   /* >= 4.5:1 against the grey panel (the step digits) */
   --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
   color-scheme: light;
@@ -34,7 +34,7 @@
   --wave-c3: #3d3818; --wave-c4: #42301c; --wave-c5: #1f3247; --wave-c6: #1b3a3c;
   --wave-c7: #20391f; --wave-c8: #33264a; --wave-c9: #452423; color-scheme: dark;
   --wave-hl1: #4dabf7; --wave-hl2: #da77f2; --wave-hl3: #3bc9db; --wave-hl4: #f783ac; --wave-hl5: #a9e34b; --wave-hl6: #ff922b;
-  --wave-hl8: #9775fa; --wave-paint: #f06595; --sva-pass: #51cf66; --sva-fail: #ff6b6b; --sva-disabled: #868e96; --sva-active: #4dabf7; --sva-capped: #adb5bd; --sva-ok: #69db7c;
+  --wave-hl8: #9775fa; --wave-paint: #f06595; --sva-pass: #51cf66; --sva-fail: #ff6b6b; --sva-disabled: #868e96; --sva-active: #4dabf7; --sva-capped: #adb5bd; --sva-ok: #69db7c; --log-warn: #f0b429;
   --wave-band: #1f2933; --wave-cursor2: #74c0fc; --bus-write: #4dabf7; --bus-read: #69db7c; --bus-error: #ff6b6b; --bus-channel: #adb5bd; } }
 [data-theme="dark"] {
   --bg: #16181d; --panel: #1f2229; --panel-2: #272b33; --fg: #e8e6df; --muted: #9aa0ab; --line: #363b45;
@@ -43,7 +43,7 @@
   --wave-c3: #3d3818; --wave-c4: #42301c; --wave-c5: #1f3247; --wave-c6: #1b3a3c;
   --wave-c7: #20391f; --wave-c8: #33264a; --wave-c9: #452423; color-scheme: dark;
   --wave-hl1: #4dabf7; --wave-hl2: #da77f2; --wave-hl3: #3bc9db; --wave-hl4: #f783ac; --wave-hl5: #a9e34b; --wave-hl6: #ff922b;
-  --wave-hl8: #9775fa; --wave-paint: #f06595; --sva-pass: #51cf66; --sva-fail: #ff6b6b; --sva-disabled: #868e96; --sva-active: #4dabf7; --sva-capped: #adb5bd; --sva-ok: #69db7c;
+  --wave-hl8: #9775fa; --wave-paint: #f06595; --sva-pass: #51cf66; --sva-fail: #ff6b6b; --sva-disabled: #868e96; --sva-active: #4dabf7; --sva-capped: #adb5bd; --sva-ok: #69db7c; --log-warn: #f0b429;
   --wave-band: #1f2933; --wave-cursor2: #74c0fc; --bus-write: #4dabf7; --bus-read: #69db7c; --bus-error: #ff6b6b; --bus-channel: #adb5bd; }
 /* white: pure white paper, black traces and stock-WaveDrom bus colours (good for print and slides) */
 [data-theme="white"] {
@@ -336,6 +336,30 @@
   .wv, .wv .body { break-inside: auto; }
 }
 .wv .hint { font-size: 11.5px; color: var(--muted); padding: 4px 10px; border-top: 1px solid var(--line); }
+/* the log (log.js): a strip under the waves, one line folded (the last entry, ✖ ⚠ counts), its entries open; not printed */
+.wv .wlog { border-top: 1px solid var(--line); background: var(--panel); font-size: 12px; }
+.wv:not(.wv-scroll) > .wlog { position: sticky; bottom: 0; z-index: 30; }   /* at the window's foot while the viewer is in sight, as the bar at its top */
+.wv .wlog .lh { display: flex; align-items: center; gap: 8px; padding: 3px 10px; min-height: 24px; cursor: pointer; }
+.wv .wlog .lh .ll { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.wv .wlog .lh .lsp { flex: 1 1 0; }
+.wv .wlog button { font: inherit; font-size: 12px; padding: 1px 8px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); border-radius: 4px; cursor: pointer; }
+.wv .wlog button:hover { border-color: var(--accent); color: var(--accent); }
+.wv .wlog button.lf { border: 0; padding: 1px 2px; font-weight: 600; background: none; }
+.wv .wlog button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.wv .wlog .lc { font: 600 11.5px var(--font-mono); white-space: nowrap; }
+.wv .wlog .le, .wv .wlog .lv-error > .li, .wv .wlog .ll.lv-error { color: var(--sva-fail); }
+.wv .wlog .lw, .wv .wlog .lv-warning > .li, .wv .wlog .ll.lv-warning { color: var(--log-warn); }
+.wv .wlog .lv-ok > .li { color: var(--sva-pass); }
+.wv .wlog .lb { list-style: none; margin: 0; padding: 2px 10px 6px; max-height: min(34vh, 320px); overflow: auto; border-top: 1px solid var(--line);
+  font-family: var(--font-mono); font-size: 11.5px; line-height: 1.45; }
+.wv .wlog .lb > li { display: grid; grid-template-columns: 8ch 2ch 1fr; column-gap: 6px; padding: 1px 0; }
+.wv .wlog .lb > li > :is(pre, details) { grid-column: 3; }
+.wv .wlog .lt { color: var(--muted); }
+.wv .wlog .lx { overflow-wrap: anywhere; }
+.wv .wlog .lj { margin: 2px 0 4px; padding: 4px 6px; background: var(--panel-2); border-left: 2px solid var(--sva-fail); white-space: pre; overflow-x: auto; }
+.wv .wlog details summary { color: var(--muted); cursor: pointer; }
+.wv .wlog details ul { margin: 2px 0 4px; padding-left: 2ch; overflow-wrap: anywhere; }
+@media print { .wv .wlog { display: none; } }
 @media (max-width: 600px) { .wv .body { grid-template-columns: min(var(--wv-names, 200px), 130px) minmax(0, 1fr); } }
 
 /* ---------------- static SVG (WaveSVG) ---------------- */

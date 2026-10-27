@@ -70,7 +70,8 @@ Object.assign(WaveView.prototype, {
     try { const o = { name: nm, budget: this.S.dumpBudget };   // a File in pieces; a text, or something with a text(), at once
       doc = (typeof file === 'string' ? vcdToWave(file, o) : typeof file.stream === 'function' ? await vcdToWaveFile(file, o) :
         vcdToWave(await file.text(), o)).doc; }
-    catch (e) { if (req === this.cmpReq && this.root.isConnected && VIEWS.has(this)) this.toast(`${nm}: ${e.message}${still()}`); return null; }
+    catch (e) { if (req === this.cmpReq && this.root.isConnected && VIEWS.has(this)) { this.toast(`${nm}: ${e.message}${still()}`);
+      this.logError(e, `cannot compare with ${nm}${e.line ? ` (line ${e.line})` : ''}: ${e.message}`); } return null; }
     if (req !== this.cmpReq || !this.root.isConnected || !VIEWS.has(this)) return null;   // compared again, or no more, meanwhile
     const brows = parse(doc).rows.filter(r => r.type === 'sig' && r.tr), bs = new Map(brows.map(r => [r.path || r.full, r])), byLeaf = new Map();
     for (const r of brows) { const k = (r.path || r.full).split('.').pop(); byLeaf.set(k, (byLeaf.get(k) || []).concat([r])); }
@@ -102,10 +103,10 @@ Object.assign(WaveView.prototype, {
       byName };
     this.cmpMarks(); this.cmpShow(); this.draw();
     const c = this.cmp;
-    this.toast(`${nm}: ${differ} of ${c.compared} signals differ${c.first == null ? '' : `, the first at ${f(c.first)}`}` +
+    const said = `${nm}: ${differ} of ${c.compared} signals differ${c.first == null ? '' : `, the first at ${f(c.first)}`}` +
       (missing ? ` · ${missing} not in it` : '') + (omitted ? ` · ${omitted} not read (dumpBudget)` : '') +
-      (from > this.M.t0 || to < this.M.t1 ? ` · compared ${f(from)} … ${f(to)} (both dumps)` : '') + (byName.length ? ' · ' + cmpByName(c) : '') +
-      (differ ? ' · ]d [d go to them' : ''));
+      (from > this.M.t0 || to < this.M.t1 ? ` · compared ${f(from)} … ${f(to)} (both dumps)` : '') + (byName.length ? ' · ' + cmpByName(c) : '');
+    this.toast(said + (differ ? ' · ]d [d go to them' : '')); this.log('ok', 'compared with ' + said);
     return { name: nm, compared: c.compared, differ, missing, omitted, first: c.first, from, to, byName: byName.length };
   },
   // the compare result of a row: a struct's group row its vector, a row of your groups its signal

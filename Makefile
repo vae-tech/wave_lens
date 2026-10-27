@@ -319,7 +319,7 @@ smoke:
 	$(PW) tests/smoke.py --build $(B) --out $(B)/shots $(if $(STRICT),--strict) $(if $(ONLY),--only $(ONLY))
 
 # wavelens/wavelens.js is the concatenation of wavelens/src/*.js (committed: a page needs one file and no build step)
-WAVELENS_SRC := $(addprefix wavelens/src/,model.js vcd.js paint.js view.js edit.js diff.js modules.js fsm.js svg.js boot.js)
+WAVELENS_SRC := $(addprefix wavelens/src/,model.js vcd.js paint.js view.js edit.js diff.js modules.js fsm.js log.js svg.js boot.js)
 wavelens: wavelens/wavelens.js
 wavelens/wavelens.js: $(WAVELENS_SRC) tools/wavelenscat.py
 	$(PY) tools/wavelenscat.py

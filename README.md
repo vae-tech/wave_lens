@@ -10,7 +10,8 @@ transactions are three plugin scripts more, inlined into a page): no build step,
 ![The APB example in the dark theme: viewer bar, waves, numbered bookmarks and arrow labels in their own lanes](docs/img/hero.png)
 
 - **A wave window in the browser**: zoom, two cursors, measured ranges, fuzzy find, the hierarchy, a Modules tree that
-  keeps only the modules you pick, your groups and order, clock cycles, undo, bookmarks and arrows with notes.
+  keeps only the modules you pick, your groups and order, clock cycles, undo, bookmarks and arrows with notes; a log
+  under the waves of what was read and what went wrong (a JSON file's error at its line and column).
 - **SystemVerilog assertions** bound to instances, evaluated over the dump (in the page and by a CLI for CI), every
   attempt drawn on the waves, a failure taken apart step by step.
 - **FSM states by name on a Questa VCD**: the design's types from Questa (a Tcl script in `vsim`) or Verilator, by
