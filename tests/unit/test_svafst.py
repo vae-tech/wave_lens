@@ -18,6 +18,7 @@ DIFFERS = {
     'vhdl': 'VHDL\'s 1-bit U H L (vcd2fst writes x)',
     'reuse_width': 'a code declared again at another width (vcd2fst gives both the first one\'s width)',
     'port': 'a $var port (vcd2fst keeps EVCD\'s 3n+2 bits)',
+    'glued': 'a vector without its b, glued to its code (Questa 2023\'s integer: vcd2fst reads a bit of a code it does not know)',
     'backwards': 'a time that goes back (an error here, merged by vcd2fst)',
     'unsorted': 'a time that goes back (an error here, merged by vcd2fst)',
     'noend': 'a header cut off (an error here)',

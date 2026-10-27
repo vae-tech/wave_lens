@@ -1,0 +1,43 @@
+$date
+	Tue Oct 27 15:00:00 2026
+$end
+$version
+	QuestaSim 2023.3_1
+$end
+$comment
+	A Questa 2023 VCD writes the value of an integer (an enum variable's code) without its b and glued to its id
+	code: 00000000000000000000000000000001A& is 1 of A&, not 0 of a code 0000…1A& no $var declares. Read as the
+	digits of the variable's width, then its code (nib: a code that starts with a digit, 0a); a b value and a
+	bit as usual between them.
+$end
+$timescale
+	1ns
+$end
+$scope module tb $end
+$var reg 1 ! clk $end
+$var integer 32 A& state $end
+$var integer 32 "9 next $end
+$var reg 4 0a nib [3:0] $end
+$upscope $end
+$enddefinitions $end
+#0
+$dumpvars
+0!
+00000000000000000000000000000000A&
+00000000000000000000000000000001"9
+00010a
+$end
+#5
+1!
+00000000000000000000000000000001A&
+00000000000000000000000000000010"9
+#10
+0!
+b10 A&
+#15
+1!
+00000000000000000000000000000011A&
+0000000000000000000000000000xxxx"9
+11110a
+#20
+0!

@@ -864,6 +864,24 @@ fn fst_gives_the_enum_tables_the_twins_give() {
     }
 }
 
+/// A VCD whose integers are written without b, glued to their codes (Questa 2023: tests/unit/vcd/glued.vcd): sva fst
+/// reads them, and sva vcd and sva eval, which read a VCD through wellen (it stops at the first one), read its FST.
+#[test]
+fn glued_vectors_are_read() {
+    let vcd = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/unit/vcd/glued.vcd");
+    let o = sva(&["vcd", vcd]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    let t = out(&o);
+    for want in ["b00000000000000000000000000000011 \"", "b0000000000000000000000000000xxxx #", "b1111 $", "#20\n0!"] {
+        assert!(t.contains(want), "{want}:\n{t}");
+    }
+    let s = own("glued", "g.sva", "module m;\n  a_p: assert property (@(posedge clk) next == 1 |-> ##1 next == 2);\nendmodule\n");
+    let o = sva(&["eval", "--waves", vcd, "--scope", "tb", "--sva", &s.to_string_lossy()]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    assert!(err(&o).contains("glued to their codes (Questa 2023's integers): read through an FST of it"), "{}", err(&o));
+    assert!(out(&o).contains("a_p assert 2 attempts: 1 pass, 0 fail, 1 vacuous"), "{}", out(&o));
+}
+
 /// A dump that does not convert is one message with its file and line, exit 2, and no FST (an older one stays);
 /// the notes of one kind are shown five times, then counted.
 #[test]

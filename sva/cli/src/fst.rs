@@ -148,6 +148,19 @@ fn is_int(t: u8) -> bool {
     matches!(t, 1 | 24 | 25 | 26 | 27)
 }
 
+/// A vector written without its b and glued to its id code, `00000000000000000000000000000001A&` (Questa 2023 writes an
+/// integer so): when the token is no bit of a declared code, the length of the digits of a code whose widest
+/// declaration is that wide (the longest first) -> where its code starts; None: a bit and its code as usual
+/// (tools/dumpscan.py and the page's reader: the same).
+fn glued(t: &[u8], h: &Header) -> Option<usize> {
+    if t.len() < 3 || h.codes.contains_key(&t[1..]) {
+        return None;
+    }
+    let width = |hs: &Vec<u32>| hs.iter().map(|&x| match h.kinds[x as usize - 1] { Kind::Bits(w) => w, _ => 0 }).max();
+    let run = t.iter().take_while(|c| b"01xzXZ".contains(c)).count().min(t.len() - 1);
+    (2..=run).rev().find(|&j| h.codes.get(&t[j..]).and_then(width) == Some(j as u32))
+}
+
 /// The attribute types of `$attrbegin` as fst2vcd writes them (FST_AT_*: `class` is the pack type).
 fn attr_type(w: &[u8]) -> Option<u8> {
     match w {
@@ -325,6 +338,7 @@ struct Log {
     file: String,
     kinds: Vec<(&'static str, u64, String)>,
     quiet: bool,
+    mute: bool,   // no note shown (the probe and the FST of glued_fst: wellen's reading says what it says)
     size: u64,
     next: u64,
     large: u64,
@@ -338,7 +352,7 @@ const LARGE: u64 = 64 << 20;
 impl Log {
     fn new(file: &str, quiet: bool, large: u64) -> Self {
         let size = std::fs::metadata(file).map_or(0, |m| m.len());
-        Log { file: file.to_string(), kinds: Vec::new(), quiet, size, next: size / 10, large }
+        Log { file: file.to_string(), kinds: Vec::new(), quiet, mute: false, size, next: size / 10, large }
     }
 
     /// A note of `kind` at `line` (0: the file).
@@ -354,7 +368,7 @@ impl Log {
                 1
             }
         };
-        if n <= SHOWN {
+        if n <= SHOWN && !self.mute {
             eprintln!("sva: {at}: {msg}");
         }
     }
@@ -1157,6 +1171,56 @@ fn value(kind: Kind, k: u8, v: &[u8], out: &mut Vec<u8>) -> bool {
     true
 }
 
+/// Tokens of a VCD's body looked at for a glued vector before wellen reads it (`glued_fst`).
+const PROBE: usize = 1 << 20;
+
+/// An FST in the temporary directory, removed when dropped.
+pub struct TempFst(pub PathBuf);
+
+impl Drop for TempFst {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// A VCD with a vector glued to its code in its first PROBE tokens (`glued`: Questa 2023's integers): wellen, which reads
+/// a VCD for `sva eval` and `sva vcd`, stops at the first one, so the VCD is written as an FST in the temporary
+/// directory by this writer, which reads them -> that FST (removed when dropped); None: read the VCD itself (an FST,
+/// or a header it cannot read: wellen says why).
+pub fn glued_fst(vcd: &str) -> Result<Option<TempFst>, String> {
+    let mut f = std::io::BufReader::new(std::fs::File::open(vcd).map_err(|e| format!("{vcd}: {e}"))?);
+    if fst_reader::is_fst_file(&mut f) {
+        return Ok(None);
+    }
+    let mut w = Words::new(std::fs::File::open(vcd).map_err(|e| format!("{vcd}: {e}"))?);
+    let mut log = Log::new(vcd, true, u64::MAX);
+    log.mute = true;
+    let Ok(h) = header(&mut w, &mut log) else { return Ok(None) };
+    let mut found = false;
+    for _ in 0..PROBE {
+        if !w.next().map_err(|e| format!("{vcd}: {e}"))? {
+            break;
+        }
+        let t = &w.tok;
+        if t.len() >= 3 && b"01xzXZ".contains(&t[0]) && glued(t, &h).is_some() {
+            found = true;
+            break;
+        }
+    }
+    if !found {
+        return Ok(None);
+    }
+    let tmp = TempFst(std::env::temp_dir().join(format!("sva-glued-{}-{}.fst", std::process::id(),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos()))));
+    let file = std::fs::File::create(&tmp.0).map_err(|e| format!("{}: {e}", tmp.0.display()))?;
+    let mut o = std::io::BufWriter::with_capacity(1 << 20, file);
+    let mut log = Log::new(vcd, true, LARGE);
+    log.mute = true;
+    convert(vcd, &mut o, None, BLOCK, &mut log)?;
+    o.flush().map_err(|e| format!("{}: {e}", tmp.0.display()))?;
+    Ok(Some(tmp))
+}
+
 /// What `convert` wrote.
 struct Done {
     vars: u64,
@@ -1183,6 +1247,7 @@ fn convert(vcd: &str, out: &mut (impl Write + Seek), types: Option<&Types>, limi
     let placeholder = header_block(&h, &b, 0);
     out.write_all(&placeholder).map_err(io)?;
     let (mut unknown, mut skipped): (HashSet<Vec<u8>>, u64) = (HashSet::new(), 0);
+    let mut glued_said = false;   // a vector glued to its code: said once
     let (mut val, mut code, mut fit) = (Vec::new(), Vec::new(), Vec::new());
     while w.next().map_err(io)? {
         let line = w.line;
@@ -1248,9 +1313,22 @@ fn convert(vcd: &str, out: &mut (impl Write + Seek), types: Option<&Types>, limi
                     continue;
                 }
                 val.clear();
-                val.push(c);
                 code.clear();
-                code.extend_from_slice(&t[1..]);
+                match glued(t, &h) {
+                    Some(j) => {   // a vector without its b, glued to its code (Questa 2023's integer)
+                        val.extend_from_slice(&t[..j]);
+                        code.extend_from_slice(&t[j..]);
+                        if !glued_said {
+                            glued_said = true;
+                            log.note("glued", line, format!("\"{}\": a vector without its b, glued to its code: read as {} bits of \"{}\" \
+                                (Questa writes an integer so)", String::from_utf8_lossy(t), j, String::from_utf8_lossy(&code)));
+                        }
+                    }
+                    None => {
+                        val.push(c);
+                        code.extend_from_slice(&t[1..]);
+                    }
+                }
                 (b'b', &val)
             }
         };

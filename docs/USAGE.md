@@ -71,7 +71,7 @@ may be the default). What the tab does differently from a page in a browser:
   what they mean in VS Code (ctrl+F find, ctrl+C copy, ctrl+Z / ctrl+Y undo / redo, alt+C W R in the find field);
   `wavelens.keysToVSCode` (default `ctrl+G`, Go to Line) are left to VS Code — the list of your groups is `gl` then; the
   others (ctrl+P, F1, ctrl+tab, ctrl+shift+…) are VS Code's.
-- **The version** in the bar's title line: `0.25 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
+- **The version** in the bar's title line: `0.26 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
   committed), so a tab of a development build says which one it is.
 - **An agent** on the host (`tools/wavemcp.py`, below): when it starts its live link, every open tab connects (**●
   live**); `view_live` with `page` a `.vcd` / `.fst` and `open: true` opens it in the VS Code window that has the file
@@ -154,7 +154,11 @@ a packed struct dumped as one vector, a row per field under a `{}` row with the 
 dumped in parts is one row: bit by bit (`err[0]`, `err[1]`, even two bits under one id code) or in ranges given apart
 (`data [7:0]` and `data [15:8]` under two id codes: a 16-bit `data`), from its lowest declared index to its highest
 (as wellen and `sva vcd` merge them; a bit not declared is `x`); the same range under two id codes is one signal. The
-values are tokens apart by any white space (indented lines, tabs, a vector's id code on the next line).
+values are tokens apart by any white space (indented lines, tabs, a vector's id code on the next line). A vector written
+without its `b` and glued to its id code, as Questa 2023 writes an integer (an enum variable's code: `00000000000000000000000000000001A&`
+is 1 of `A&`), is read as the digits of a code declared that wide (the longest first; a note says it once): the page,
+the tools and `sva fst`. `sva eval` and `sva vcd` read a VCD through wellen, which stops at the first one: they read an
+FST of it written in the temporary directory instead (one line on stderr says so).
 
 ![The FSM's generated page: the packed struct status as a {} row with its whole value, a row per field under it](img/struct.png)
 
@@ -295,7 +299,7 @@ add theirs (`WaveLens.registerDefaults`).
 | `toolsFolded` | false | the bar's tools folded to its title line (**▴** / **▾ tools** in the bar) |
 | `toolsHidden` | `[]` | the bar's tool groups left out by their labels (`["style", "dump"]`; the right button on the bar) |
 | `themeButton` | `auto` | **◐** in the bar's title line: the page's theme (auto, light, white, dark; kept in this browser; in VS Code its list, VS Code's colours too); `auto`: when the page has no theme button of its own (`viewer.html`, the VS Code tab) |
-| `version` | true | the version in the bar's title line, and the build the page was made from (`0.25 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
+| `version` | true | the version in the bar's title line, and the build the page was made from (`0.26 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
 | `keysLeft` | `[]` | keys the viewer leaves to its host: `["ctrl+G"]` (`ctrl+` is `cmd+` too, a letter by its place); the VS Code tab: `wavelens.keysToVSCode` |
 | `log` | `auto` | the log under the viewer (§ A dump straight in the browser): `auto` from the first thing done in the page (a dump read, Sources…, Load…), `true` always, `false` never |
 | `savePage` | true | the bar's **Save page**: this page as a `.view.html` with your view in it (§ Save and Load); false hides it and keeps no copy of the page's text |

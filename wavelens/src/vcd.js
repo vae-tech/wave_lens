@@ -165,6 +165,16 @@ function* vcdRead(opts = {}, size = 0) {
   // step: the whole tokens of piece s from p (last: nothing comes after it) -> where the rest starts that waits for the
   // next piece; fn(code, t, value, kind, at) with at the offset in the text, (null, t) at a time
   const body = i;
+  // a vector without its b, glued to its code (Questa 2023 writes an integer so: 0000…0001A& is 1 of A&): when the token is
+  // no bit of a declared code, the length of the digits of a code declared that wide (the longest first) -> where its
+  // code starts; 0: a bit and its code as usual (sva fst glued, tools/dumpscan.py: the same)
+  let gluedSaid = false;
+  const glued = t => {
+    if (t.length < 3 || codes.has(t.slice(1))) return 0;
+    let run = 0; while (run < t.length - 1 && '01xzXZ'.includes(t[run])) run++;
+    for (let j = run; j >= 2; j--) if (codes.get(t.slice(j)) === j) return j;
+    return 0;
+  };
   const step = (s, p, last, fn, notes, st, at0) => {
     const n = s.length;
     while (p < n) {
@@ -193,7 +203,13 @@ function* vcdRead(opts = {}, size = 0) {
         fn(s.slice(k0, p), st.t, c === 'b' || c === 'B' ? vcdBits(v.toLowerCase()) : v, c === 'r' || c === 'R' ? 'real' : c === 's' ||
           c === 'S' ? 'string' : 'b', at0 + s0);
       }
-      else if ('01xzXZuUwWhHlL-'.includes(c)) fn(s.slice(s0 + 1, p), st.t, vcdBits(c.toLowerCase()), 'b', at0 + s0);
+      else if ('01xzXZuUwWhHlL-'.includes(c)) {
+        const j = glued(s.slice(s0, p));
+        if (!j) { fn(s.slice(s0 + 1, p), st.t, vcdBits(c.toLowerCase()), 'b', at0 + s0); continue; }
+        if (notes && !gluedSaid) { gluedSaid = true; note('info', at0 + s0, 'glued', `"${s.slice(s0, p).slice(0, 48)}": a vector without its b, glued to ` +
+          `its code: read as ${j} bits of "${s.slice(s0 + j, p)}" (Questa writes an integer so)`); }
+        fn(s.slice(s0 + j, p), st.t, vcdBits(s.slice(s0, s0 + j).toLowerCase()), 'b', at0 + s0);
+      }
       else if (notes) note('warning', at0 + s0, 'token', `"${s.slice(s0, p).slice(0, 40)}" is not a value change: left out`);
     }
     return n;

@@ -1,0 +1,14 @@
+{
+ "signal": [
+  ["tb",
+    {"name": "clk", "width": 1, "wave": "0101", "tv": [[0, "0"], [5000, "1"], [10000, "0"], [15000, "1"], [20000, "0"]], "path": "tb.clk"},
+    {"name": "state", "width": 32, "wave": "====", "data": ["0", "1", "2", "3"], "tv": [[0, "00000000"], [5000, "00000001"], [10000, "00000002"], [15000, "00000003"]], "radix": "signed", "path": "tb.state"},
+    {"name": "next", "width": 32, "wave": "==.=", "data": ["1", "2", "0000000x"], "tv": [[0, "00000001"], [5000, "00000002"], [15000, "0000000x"]], "radix": "signed", "path": "tb.next"},
+    {"name": "nib", "width": 4, "wave": "=..=", "data": ["1", "15"], "tv": [[0, "1"], [15000, "f"]], "path": "tb.nib"}
+  ]
+ ],
+ "head": {"text": "glued.vcd"},
+ "time": {"t0": 0, "t1": 20000, "cycle": 5000, "unit": "ps"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "glued.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 0, "to_ps": 20000}
+}

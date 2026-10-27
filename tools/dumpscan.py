@@ -232,6 +232,28 @@ def _header(lines, d, path):
 DUMP_KW = (b'$dumpvars', b'$dumpall', b'$dumpon', b'$dumpoff', b'$end')
 
 
+def _widths(d):
+    """id code -> its widest size (a text 0), as the page's reader keeps them: for _glued."""
+    out = {}
+    for v in d.vars.values():
+        for code, part in v.members:
+            w = 0 if v.kind in TEXT_KINDS else abs(part[0] - part[1]) + 1 if part else v.width
+            out[code] = max(out.get(code, 0), w)
+    return out
+
+
+def _glued(tok, widths):
+    """A vector without its b, glued to its id code (Questa 2023 writes an integer so: 0000…0001A& is 1 of A&): when the
+    token is no bit of a declared code, the length of the digits of a code declared that wide (the longest first) ->
+    where its code starts; 0: a bit and its code as usual (sva fst glued and the page's reader: the same)."""
+    if len(tok) < 3 or tok[1:] in widths:
+        return 0
+    run = 0
+    while run < len(tok) - 1 and tok[run] in b'01xzXZ':
+        run += 1
+    return next((j for j in range(run, 1, -1) if widths.get(tok[j:]) == j), 0)
+
+
 def read(path: str, body: Optional[str] = 'count', want: Optional[Iterable[bytes]] = None) -> Optional[Dump]:
     """body: None (declarations only), 'count' (value changes per signal), 'collect' (transitions of the id codes in want)."""
     src = _lines(path)
@@ -242,22 +264,27 @@ def read(path: str, body: Optional[str] = 'count', want: Optional[Iterable[bytes
     name = os.path.basename(path)
     try:
         first = _header(lines, d, path)
+        widths = _widths(d)
         if body == 'count':
             cnt = collections.Counter()
-            span = _scan(lines, first, name, cnt, None)
+            span = _scan(lines, first, name, cnt, None, widths=widths)
             if span is None:   # a change line with more on it: the dump again, every line token by token
                 close()
                 lines, close, done = _lines(path)
                 first, cnt = _header(lines, Dump(), path), collections.Counter()
-                span = _scan(lines, first, name, cnt, None, fast=False)
+                span = _scan(lines, first, name, cnt, None, fast=False, widths=widths)
             done()
+            for k in [k for k in cnt if k not in widths]:   # a glued vector counted under its bit's code: its own
+                j = _glued(b'0' + k, widths)
+                if j:
+                    cnt[(b'0' + k)[j:]] += cnt.pop(k)
             t_first, t_last = span
             for p, v in d.vars.items():
                 d.changes[p] = sum(max(0, cnt[code] - 1) for code in dict.fromkeys(c for c, _ in v.members))
             d.t_start, d.t_end = (t_first or 0) * d.unit_ps, (t_last or 0) * d.unit_ps
         elif body == 'collect':
             tr = d.trans = {code: [] for code in set(want or ())}
-            t_first, t_last = _scan(lines, first, name, None, tr)
+            t_first, t_last = _scan(lines, first, name, None, tr, widths=widths)
             done()
             d.t_start, d.t_end = (t_first or 0) * d.unit_ps, (t_last or 0) * d.unit_ps
     finally:
@@ -270,7 +297,7 @@ def read(path: str, body: Optional[str] = 'count', want: Optional[Iterable[bytes
     return d
 
 
-def _scan(lines, first, name, cnt, tr, fast=True):
+def _scan(lines, first, name, cnt, tr, fast=True, widths=None):
     """The value changes: counted per id code into cnt, or kept as (time in dump units, value bytes) in tr[code] for
     the codes tr has; -> (first time, last time). Values as stored: b'0' / b'1' / b'x' / b'z' (a bit), the digits of a
     vector without its b (b'0101'), b'r1.5' (a real), b'sHello' (a string). The usual line, one change or one time
@@ -278,7 +305,9 @@ def _scan(lines, first, name, cnt, tr, fast=True):
     (indented, several changes, a $comment, VHDL's U W H L -) goes through slow(): the same tokens, also over the next
     lines while a vector waits for its id code (b0101 then " on the next line) or a $comment for its $end. Counting
     looks for white space in a code only at the end (a test per line costs a third more): a code with white space
-    (a line "0! #5 1!") -> None, read() counts again with fast=False, every line through slow()."""
+    (a line "0! #5 1!") -> None, read() counts again with fast=False, every line through slow(). widths: the codes'
+    sizes, for a vector glued to its code (_glued; counting puts it right afterwards, in read())."""
+    widths = widths or {}
     st = {'t': 0, 'first': None}
     def at(v):
         tn = int(v)
@@ -322,7 +351,11 @@ def _scan(lines, first, name, cnt, tr, fast=True):
                 elif c in b'bBrRsS':
                     val = tk
                 elif c in SCALAR:
-                    put(tk[1:], c)
+                    j = _glued(tk, widths) if cnt is None else 0
+                    if j:
+                        put(tk[j:], b'b' + tk[:j])
+                    else:
+                        put(tk[1:], c)
     if first:
         slow(first)
     if not fast:
@@ -362,6 +395,11 @@ def _scan(lines, first, name, cnt, tr, fast=True):
                 elif b' ' in code or b'\t' in code:
                     slow(l)
                     t = st['t']
+                elif code not in widths:   # a vector glued to its code (_glued)
+                    j = _glued(c + code, widths)
+                    q = tr.get(code[j - 1:]) if j else None
+                    if q is not None:
+                        q.append((t, (c + code)[:j]))
             elif c == b'#':
                 s = l.rstrip()
                 if b' ' in s or b'\t' in s:

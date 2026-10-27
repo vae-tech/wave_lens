@@ -512,6 +512,10 @@ fn body<R: BufRead + Seek>(w: &mut stream::StreamingWaveform<R>, o: &mut impl Wr
 
 /// The dump as VCD text into `o`: an FST by fst-reader, anything else by wellen; a part of an FST only.
 fn convert(waves: &str, part: &Part, o: &mut impl Write) -> Result<(), String> {
+    // a VCD whose vectors are glued to their codes (Questa 2023's integers): wellen stops at one, its FST is read instead
+    let glued = if matches!(part, Part::All) { crate::fst::glued_fst(waves)? } else { None };
+    let waves = glued.as_ref().map_or(waves.to_string(), |g| g.0.to_string_lossy().into_owned());
+    let waves = waves.as_str();
     let mut f = std::io::BufReader::new(std::fs::File::open(waves).map_err(|e| e.to_string())?);
     if fst_reader::is_fst_file(&mut f) {
         let mut r = FstReader::open_and_read_time_table(f).map_err(|e| e.to_string())?;

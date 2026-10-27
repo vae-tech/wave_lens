@@ -422,7 +422,19 @@ fn eval_cmd(a: Args) -> ExitCode {
         return ExitCode::from(2);
     }
     reading(&a.waves);
-    let mut w = match simple::read(&a.waves) {
+    // a VCD whose vectors are glued to their codes (Questa 2023's integers): wellen stops at one, its FST is read instead
+    let glued = match fst::glued_fst(&a.waves) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("sva: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    if glued.is_some() {
+        eprintln!("sva: {}: values written without b, glued to their codes (Questa 2023's integers): read through an FST of it", a.waves);
+    }
+    let src = glued.as_ref().map_or(a.waves.clone(), |g| g.0.to_string_lossy().into_owned());
+    let mut w = match simple::read(&src) {
         Ok(w) => w,
         Err(e) => {
             eprintln!("sva: {}: {e}", a.waves);

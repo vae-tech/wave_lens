@@ -5,6 +5,17 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.26 — 27 October 2026
+
+The values of a Questa 2023 VCD's integers: written without their `b`, glued to their id codes.
+
+- **A vector glued to its code.** Questa 2023.3 writes the value of an integer (an enum variable's code) as its digits
+  glued to its id code, `00000000000000000000000000000001A&`, no `b`, no space; every reader left it out as a bit of a
+  code no `$var` declares, and the FSMs of such a dump stayed `x`. The page, the tools and `sva fst` now read it as the
+  digits of a code declared that wide (a note says it once); `sva eval` and `sva vcd`, which read a VCD through
+  wellen (it stops at the first one), read an FST of it written in the temporary directory.
+- `tests/unit/vcd/glued.vcd`: such a VCD.
+
 ## 0.25 — 27 October 2026
 
 The FSMs of a Questa 2023 VCD by name: an enum the simulator wrote as `integer 32`.
