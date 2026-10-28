@@ -244,10 +244,11 @@
 <ul>
   <li><span class="ui">time, cycles</span> (default, <code>clock</code>): a thin row under the axis with, over each break, the time it leaves out
     and the clock's cycles in it (<code>+89.0 ns · 89 clk</code>), and in the middle of each part its own cycles (<code>8 clk</code>) when there is
-    room.</li>
+    room. The signals marked <code>+</code> get their counts too (below); the select then reads <span class="ui">time, cycles, +</span>.</li>
   <li><span class="ui">+ changes in a gap</span> (<code>edges</code>): the same, plus a thin row under each counted signal with, over each break,
     what it did in the stretch left out — a bit its rising and falling edges (<code>6↑ 7↓</code>), a bus its changes (<code>2×</code>). Counted are
-    the signals marked <code>+</code>; none marked: every signal but the ones the gaps follow and the clock.</li>
+    the signals marked <code>+</code>; none marked: every signal but the ones the gaps follow and the clock. <span class="ui">Count its changes in a
+    gap</span> with <span class="ui">no texts</span> turns the texts back on.</li>
   <li><span class="ui">no texts</span> (<code>off</code>): only the breaks.</li>
 </ul>
 <figure>
@@ -368,11 +369,11 @@ last  0.............10..|...1.0..........10..|........10..|....10..|..
     drawn</td></tr>
   <tr><td><code>gapClock</code></td><td>none</td><td>the clock whose cycles <i>idle</i>, <i>keep</i> and the texts count; none: the selected clock, else
     the nearest <code>*clk*</code></td></tr>
-  <tr><td><code>gapAux</code></td><td>none</td><td>the signals counted in a gap (with <code>gapCount: "edges"</code>); none: every one but the
-    followed signals and the clock</td></tr>
+  <tr><td><code>gapAux</code></td><td>none</td><td>the signals counted in a gap (with any texts but <code>off</code>); none: with <code>gapCount: "edges"</code>
+    every one but the followed signals and the clock</td></tr>
   <tr><td><code>gapOnly</code></td><td><code>false</code></td><td>the viewer's picture and WaveDrom of those three kinds alone</td></tr>
   <tr><td><code>gapCount</code></td><td><code>"clock"</code></td><td>the texts: <code>clock</code> (time and cycles under the axis), <code>edges</code>
-    (also the counts under the counted signals), <code>off</code></td></tr>
+    (also the counts under every signal when none is marked <code>+</code>), <code>off</code></td></tr>
   <tr><td><code>gapLine</code></td><td><code>"dashdot"</code></td><td>the line of a break: <code>dashdot</code>, <code>wave</code>, <code>waves</code>,
     <code>zigzag</code>, <code>double</code></td></tr>
 </table>
@@ -395,7 +396,7 @@ last  0.............10..|...1.0..........10..|........10..|....10..|..
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.28 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.29 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

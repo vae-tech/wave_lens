@@ -73,7 +73,7 @@ const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight
   labelSize: 11, fontSize: 11.5, sort: 'none', sortIgnore: [], sortButton: true, hint: true, style: 'auto', radix: 'auto', fold: null,
   highlight: null, dim: 0.3, groupColors: null, bookmarkLeft: 0.2, arrowLabels: 'lane', laneHeight: 16, maxHeight: null, toolsFolded: false, toolsHidden: [],
   groupOrder: 'file', moduleShading: true, findHighlight: true, findOpen: true, findMask: false, findCase: false, findWord: false,
-  findRegex: false, cursorSnap: 8,
+  findRegex: false, cursorSnap: 8, showWidth: true,
     wheel: 'scroll', contextMenu: true, enumColors: null, dumpBudget: 3000000, gaps: false, gapIdle: 16, gapKeep: 2,
     gapSignals: null, gapClock: null, gapAux: null, gapOnly: false, gapCount: 'clock', gapLine: 'dashdot', menuTipDelay: 2000, cycles: false,
     cycleClock: null, cycleZero: null, savePage: true, themeButton: 'auto', version: true, keysLeft: [], log: 'auto' };
@@ -503,6 +503,35 @@ function fieldRow(sig, f, depth, anc) {
   }
   return r;
 }
+// a vector unfolded into its bits (the viewer's Bits): a bus with values of bits, not a real or a string
+const isVec = r => !!r && r.type === 'sig' && !!r.tr && (r.width || 1) > 1 && r.kind !== 'real' && r.kind !== 'string';
+// the changes of every bit of a vector at once, MSB first: one pass over its changes
+function bitTrs(sig) {
+  const w = sig.width || 1, trs = Array.from({ length: w }, () => []);
+  for (const o of sig.tr) {
+    const b = bitsOf(o, w);
+    for (let j = 0; j < w; j++) { const c = b[j], k = c === '0' || c === '1' || c === 'z' ? c : 'x', a = trs[j];
+      if (!a.length || a[a.length - 1].k !== k) a.push({ k, t: o.t }); }
+  }
+  return trs;
+}
+// its bits as rows (MSB first), named "[i]" under it, full "vec[i]": fields [i:i] of it, their changes read again when
+// the vector's are new (a lazy dump read later)
+function bitRows(sig) {
+  const w = sig.width || 1; let from = null, trs = [];
+  const get = j => { if (from !== sig.tr) { from = sig.tr; trs = bitTrs(sig); } return trs[j]; };
+  return Array.from({ length: w }, (_, j) => {
+    const i = w - 1 - j, r = { type: 'sig', name: `[${i}]`, full: `${sig.full}[${i}]`, path: null, width: 1, depth: sig.depth + 1, anc: sig.anc,
+      gaps: [], src: {}, fromTv: !!sig.tv, field: [i, i], bit: i, of: sig };
+    Object.defineProperty(r, 'tr', { get: () => get(j), enumerable: true });
+    return r;
+  });
+}
+// the width after a name: a vector's [w-1:0], a field's place in its vector [msb:lsb], a struct's whole value's; none
+// for a bit, a real, a string
+const widthTag = r => { const s = r && r.type === 'group' ? r.sig : r;
+  if (!isVec(s) || (r.type === 'sig' && r.bit != null)) return '';
+  return s.field && r === s ? `[${s.field[0]}:${s.field[1]}]` : `[${s.width - 1}:0]`; };
 function parseTV(s, sig) { // extension: exact transitions [[time, value], …]; bit values 0/1/x/z, bus values hex or "'b" + bits;
   // "kind": "real" / "string": the values are texts shown as they are (a real's number, a string), null unknown
   const tv = s.tv || [], text = s.kind === 'real' || s.kind === 'string';
@@ -2100,6 +2129,7 @@ const TIPS = {
     'm:svg': ['Save the picture as SVG'],
   'm:c2': ['A second cursor: Δ to the cursor in time and clock cycles', ['shift+click']], 'm:c2x': ['No second cursor', ['Esc']],
   'm:analog': ['The bus as a step plot, three rows high (its radix: signed, float, fixed)'],
+  'm:bits': ['The bus bit by bit: a row per bit under it, the highest first (a click on its width [7:0] does it too)', ['b']],
   'm:wdjson': ['The range as a WaveDrom file (.json): the highlighted signals, else the ones on the screen, a cell per clock cycle'],
     'm:wdcopy': ['The same WaveDrom to the clipboard'],
   '.gon': ['Gaps: the picture and WaveDrom leave out the stretches where the signals (the clocks aside) do not change, a break "|" there'],
@@ -2110,12 +2140,12 @@ const TIPS = {
   'm:gclkx': ['The cycles of the clock found again (the selected one, else the nearest *clk*)'],
   'm:greset': ['Every gap setting of this viewer back to the settings (the roles, the counts, idle, keep; by default no gaps)'],
   '.subh': ['The gaps of the picture and WaveDrom: on / off, idle, keep, the signals they follow and count, the texts'],
-  'm:gaux': ['With "+ changes in a gap": count what this signal did in the stretches left out (marked + in the names); none marked: every signal ' +
-    'but the ones the gaps follow'],
+  'm:gaux': ['Count what this signal did in the stretches left out (marked + in the names): its edges, a bus its changes, in a thin row under it ' +
+    'over each gap'],
   'm:gauxx': ['Count every signal but the ones the gaps follow again'],
   '.gonly': ['The picture and WaveDrom: only the signals the gaps follow'],
-  '.gcnt': ['The texts of the gaps: under the axis the time left out and the clock cycles; under each signal what it did there (its edges, its ' +
-    'changes); or none'],
+  '.gcnt': ['The texts of the gaps: under the axis the time left out and the clock cycles; under each signal marked + what it did there (its ' +
+    'edges, its changes); none marked, "+ changes in a gap": under every one but the ones the gaps follow; or no texts'],
   'm:hl': ['Highlight', ['ctrl+click']], 'm:hide': ['Leave it out of the view'], 'm:unhide': ['Show the hidden rows'],
   'm:fold': ['Fold / open this module'], 'm:foldup': ['Fold its module', ['zc']], 'm:zM': ['Fold every module', ['zM']], 'm:zR': ['Open every module', ['zR']],
   'm:types': ['Where its labels or fields come from: the types file and the path in it, the width, why it has none'],
@@ -2165,7 +2195,8 @@ const HELP = [
     [['ctrl+click', '○'], 'highlight'], [['ctrl+shift+click'], 'highlight every row from the last one to it'],
     [['zM', 'zR'], 'fold / open every module'], [['t'], 'the modules as a tree: a click goes to one, a box keeps Only those (again: the selected one\'s)'],
     [['T'], 'the state machines in the tree of their modules: go to one, Only them, add them to the view'],
-    [['zc', 'zo', 'za'], 'the selected signal\'s module'], [['s'], 'sort'], [['yy', 'ctrl+C'], 'copy the path'],
+    [['zc', 'zo', 'za'], 'the selected signal\'s module'], [['b', 'click [7:0]'], 'the selected bus bit by bit (again: folded)'],
+    [['s'], 'sort'], [['yy', 'ctrl+C'], 'copy the path'],
       [['Esc'], 'reset: search, highlight, selection']]],
   ['Find', [[['/', 'ctrl+F'], 'find (the bar scrolled away: it floats over the waves)'],
     [['alt+C', 'alt+W', 'alt+R'], 'in the field: match case, full match, regular expression'], [['n', 'N', 'Enter'], 'next / previous match'],
@@ -2455,6 +2486,7 @@ class Names {
     v.namesEl.addEventListener('click', e => {
       const sel = getSelection(); if (sel && !sel.isCollapsed && v.namesEl.contains(sel.anchorNode)) return;   // selecting text to copy
       const row = e.target.closest('.row'); if (!row || row.classList.contains('space')) return;
+      if (e.target.closest('.wd[data-b]')) { v.setBits(rowOf(row)); v.canvas.focus({ preventScroll: true }); return; }   // the bus bit by bit
       if (e.target.closest('.mk') || e.ctrlKey || e.metaKey) {   // mark / ctrl+click: highlight it; ctrl+shift+click: every row from the last one to it
         const r = rowOf(row);
         if (e.shiftKey && v.hlAnchor && v.vis.includes(v.hlAnchor)) v.highlightRun(v.hlAnchor, r); else { v.toggleHighlight(r); v.hlAnchor = r; }
@@ -2505,7 +2537,7 @@ class Names {
     if (v.unhideBtn) { v.unhideBtn.hidden = !v.hiddenRows.size; v.unhideBtn.textContent = `Hidden: ${v.hiddenRows.size} ✕`; }
     if (v.sortBtn) { v.sortBtn.textContent = 'Sort: ' + { none: 'off', asc: 'A→Z', desc: 'Z→A' }[v.sort];
       v.sortBtn.setAttribute('aria-pressed', v.sort !== 'none'); }
-    const shape = [v.sort, v.sortIgnore.join(','), v.hdrH, JSON.stringify(v.rowH), v.S.laneHeight, [...v.analogs].join()].join('|');
+    const shape = [v.sort, v.sortIgnore.join(','), v.hdrH, JSON.stringify(v.rowH), v.S.laneHeight, [...v.analogs].join(), v.S.showWidth].join('|');
     v.labGen = v.q || '';   // the marks of a search are in the labels
     const prev = v.rowsShown, same = prev && v.shape === shape && prev.length === v.rowsL.length && v.rowsL.every((r, k) => r === prev[k]);
     if (!same) this.build();
@@ -2525,7 +2557,15 @@ class Names {
     const kdTitle = r.partial ? `: ${r.partial[0]} of its ${r.partial[1]} bits shown, no whole value` :
       r.sig ? `, ${r.sig.width} bits: its whole value on this row` : '';
     const kd = r.type === 'group' && hasKey(KIND_MARK, r.kind) ? `<span class="kd" title="${r.kind}${kdTitle}">${KIND_MARK[r.kind]}</span>` : '';
-    return kd + (p ? `<span class="pfx">${txt(p, 0)}</span>` : '') + txt(rest, p.length);
+    const name = (p ? `<span class="pfx">${txt(p, 0)}</span>` : '') + txt(rest, p.length), w = this.widthTag(r);
+    return kd + (w && r.type === 'sig' ? `<span class="nt">${name}</span>${w}` : name + w);   // a narrow column: the name, its width only whole
+  }
+  // a bus's width after its name ([7:0]; showWidth): a click on it shows the bus bit by bit (b, the menu's Bits), again folds them
+  widthTag(r) {
+    const v = this.v, w = v.S.showWidth !== false && widthTag(r); if (!w) return '';
+    if (r.type !== 'sig' || (r.same && !r.ug)) return `<span class="wd">${w}</span>`;
+    const open = v.bitsOpen.has((r.orig || r).full), n = r.width;
+    return `<span class="wd${open ? ' open' : ''}" data-b title="${n} bits: ${open ? 'fold the bits' : 'show them one by one'} (b)">${w}</span>`;
   }
   build() {
     const v = this.v;
@@ -2542,7 +2582,7 @@ class Names {
       `time axis: rising edges of ${esc(cy.clk.full || cy.clk.name)}">cycles ↑ ${esc(cy.clk.name)}</span>` : ''}</div>` + v.rowsL.map(r => {
       if (r.type === 'lane') return (`<div class="row lane${alt(r)}" style="height:${v.S.laneHeight * r.ids.length}px" title="arrow labels, lifted ` +
           `bookmarks"></div>`);
-      const h = rowHeight(r, v.rowH, v.S.laneHeight), i = ++vi, cls = r.cls ? ' ' + r.cls : '';
+      const h = rowHeight(r, v.rowH, v.S.laneHeight), i = ++vi, cls = (r.cls ? ' ' + r.cls : '') + (r.bit != null ? ' bit' : '');
       if (r.type === 'space') return `<div class="row space${alt(r)}" data-r="${i}" style="height:${h}px;${pad(r)}"><span
         class="n">${esc(r.name)}</span></div>`;
       if (r.type === 'group') return (`<div class="row grp${cls}" data-r="${i}" style="height:${h}px;${pad(r)}" data-g="${r.id}" tabindex="0" role="button" ` +
@@ -2563,7 +2603,8 @@ class Names {
     if (r.type === 'lane') return;
     const hl = v.hl, c = hl ? hl.cover.get(r) : undefined, dim = !!hl && !hl.on.has(r);
     const key = `${+dim}${c ?? '-'}${+v.picks.has(r)}${v.strokeOf(r) || ''}${+v.collapsed.has(r.id)}${+v.isSel(r)}${+(r === v.tabRow)}` +
-      `${v.found.has(r) ? 'f' : ''}${v.labGen}${+v.gapRefSet().has(r)}${+(r === v.gapClockRow())}${+v.gapRows().aux.has(r)}`;
+      `${v.found.has(r) ? 'f' : ''}${v.labGen}${+v.gapRefSet().has(r)}${+(r === v.gapClockRow())}${+v.gapRows().aux.has(r)}` +
+      `${+v.bitsOpen.has((r.orig || r).full)}`;
     if (v.rowKey.get(r) === key) return;   // nothing of this row changed
     v.rowKey.set(r, key);
     el.classList.toggle('dim', dim);
@@ -2614,7 +2655,7 @@ class Notes {
       class="muted">click a number to go there · drag a circle on the waves to move it, shift+drag to another one for an arrow · kept in this browser</span>
       <button type="button" data-bm="json">JSON</button><button type="button" data-bm="clear"
         title="Remove the bookmarks and arrows of this browser (the page's own come back on reload; your markers stay)">Clear</button></div><ol class="bms">` +
-      v.bms.map(b => { const s = byFull.get(b.signal);
+      v.bms.map(b => { const s = byFull.get(b.signal) || (b.signal && v.sigByPath(b.signal));
         return `<li data-n="${b.n}"><button type="button" class="bn" data-bm="go"
           title="Go to bookmark ${b.n}"${b.color ? ` style="background:${esc(b.color)}"` : ''}>${b.n}</button>
         <input type="text" class="tm" value="${esc(v.when(b.t))}" spellcheck="false" aria-label="bookmark ${b.n} time"
@@ -2718,7 +2759,7 @@ class Notes {
       if (bm.t < v.t0 || bm.t > v.t0 + v.span) v.t0 = v.clamp(bm.t - v.span / 2);
       v.changed(true);
     } else if (T.matches('input.sig')) {   // a full path or a name; empty: the time axis
-      const val = T.value.trim(), r = val && (v.M.rows.find(x => x.type === 'sig' && x.full === val) || v.M.rows.find(x => x.type === 'sig' && x.name === val));
+      const val = T.value.trim(), r = val && (v.sigByPath(val) || v.M.rows.find(x => x.type === 'sig' && x.name === val));
       if (val && !r) { T.value = bm.signal || ''; v.bad(T); return; }
       bm.signal = r ? r.full : null; v.changed(true);
     }
@@ -2751,8 +2792,9 @@ class WaveView {
     for (const [, k] of FIND_OPTS) this[k] = !!this.S[k];   // its options: the case, the whole name, a regular expression
     this.paintKey = 'wavelens.paint:' + this.storeId;
     this.painted = new Map(); this.loadPaint();
-    // the menu's radix per signal, hidden rows
-    this.rowsKey = 'wavelens.rows:' + this.storeId; this.radixes = new Map(); this.analogs = new Map(); this.hiddenRows = new Set(); this.loadRows();
+    // the menu's radix per signal, hidden rows, the buses shown bit by bit (their bit rows: bitsOf)
+    this.rowsKey = 'wavelens.rows:' + this.storeId; this.radixes = new Map(); this.analogs = new Map(); this.hiddenRows = new Set();
+    this.bitsOpen = new Set(); this.bitMemo = new WeakMap(); this.loadRows();
     this.t0 = M.t0; this.span = M.t1 - M.t0;
     this.minSpan = opts.minSpan ?? (M.timed ? Math.max(this.span / 1e6, 10) : 0.5);
     this.cursor = opts.cursor ?? M.cursor ?? M.t0;
@@ -3005,6 +3047,9 @@ class WaveView {
       // the selected name (vim: the word under the cursor)
       else if (k === '*' || k === '#') { if (this.sel) { this.qEl.value = this.sel.name; this.find(this.sel.name); this.findStep(k === '*' ? 1 : -1); } }
       else if (k === 'm') this.mark();
+      // the selected bus bit by bit, again: folded (a bit selected: its bus folded)
+      else if (k === 'b') { const s = this.sel && (this.sel.bit != null ? this.sel.of : this.sel);
+        if (isVec(s)) this.setBits(s, this.sel.bit != null ? false : undefined); else this.toast('b: select a bus to show it bit by bit'); }
       else if (/^[1-9]$/.test(k)) this.goMark(+k);   // the bookmark of that number
       else if (k === 'x' && this.cursor2 != null) { [this.cursor, this.cursor2] = [this.cursor2, this.cursor]; this.draw(); }   // swap the cursors
       else if (k === '?') this.help();
@@ -3023,18 +3068,20 @@ class WaveView {
   // (fsm.js): "only" — the FSMs of its set after Hide (Only and the Mask not applied under it); "add" — its FSMs and the
   // modules on the way to them kept through Hide, Only and the Mask
   allRows(hidden = false, unmasked = false) {   // hidden: the hidden rows too, where they would be (the command rows); unmasked: no Mask
-    const rows = withExtra(orderRows(this.M.rows, this.sort, this.sortIgnore, this.S.groupOrder), this.extraRows, this.M, this);
+    const rows = this.withBits(withExtra(orderRows(this.M.rows, this.sort, this.sortIgnore, this.S.groupOrder), this.extraRows, this.M, this));
     if (hidden) return rows;
     const H = this.hiddenRows, ids = H.size && new Set(Object.values(this.M.groups).filter(g => H.has(g.path)).map(g => g.id));   // a hidden module: all of it
     const F = this.fsm ? this.fsmTest() : null, add = !!F && this.fsm.mode === 'add';
     const also = (from, kept) => (add && kept !== from ? (s => from.filter(r => s.has(r) || F(r)))(new Set(kept)) : kept);   // kept, and the FSMs
+    // a bus's bits go with it through Hide, Only, the FSM layer and the Mask: under every bus kept (a bit hidden by its path stays out)
+    const bits = list => (this.bitsOpen.size ? this.withBits(list.filter(r => r.bit == null), H) : list);
     this.rowsStale = false;
     this.rowsHid = H.size ? rows.filter(r => (add && F(r)) || (!(r.type !== 'space' && r.type !== 'lane' && r.full && !r.ug && H.has(r.full)) &&
       !r.anc.some(id => ids.has(id)))) : rows;
-    if (F && !add) { const kept = this.rowsHid.filter(this.fsmKeep()); return unmasked ? kept : (this.rowsAll = kept); }
+    if (F && !add) { const kept = bits(this.rowsHid.filter(this.fsmKeep())); return unmasked ? kept : (this.rowsAll = kept); }
     const rows2 = also(this.rowsHid, this.onlyOn() ? this.onlyKeep(this.rowsHid) : this.rowsHid);
-    if (unmasked) return rows2;
-    return (this.rowsAll = also(rows2, this.findMask && this.found.size ? this.maskKeep(rows2) : rows2));
+    if (unmasked) return bits(rows2);
+    return (this.rowsAll = bits(also(rows2, this.findMask && this.found.size ? this.maskKeep(rows2) : rows2)));
   }
   // the find's Mask: the found rows, the modules on the way to them, what is inside a found module
   maskKeep(rows) {
@@ -3043,6 +3090,34 @@ class WaveView {
     return rows.filter(r => this.found.has(r) || (r.type === 'group' && way.has(r.id)) || r.anc.some(id => inn.has(id)));
   }
   visible() { return this.allRows().filter(r => !r.anc.some(id => this.collapsed.has(id))); }
+  // Bits: a bus shown bit by bit, its bits as rows under it (MSB first, "[3]", full "data[3]"), kept like the hidden rows;
+  // a copy of it in your groups unfolds too (its bits copies of the bus's), a plugin's copy (an assertion's signals) not
+  withBits(rows, hid = null) {   // hid: the hidden paths (a bit hidden by its own)
+    if (!this.bitsOpen.size) return rows;
+    return rows.flatMap(r => (r.type === 'sig' && (!r.same || r.ug) && this.bitsOpen.has((r.orig || r).full) && isVec(r) ?
+      [r, ...(hid && hid.size ? this.bitsOf(r).filter(k => !hid.has(k.full)) : this.bitsOf(r))] : [r]));
+  }
+  bitsOf(r) {   // the same objects while the bus stays (selection, highlight, bookmarks)
+    let b = this.bitMemo.get(r);
+    if (!b) { const o = r.orig; b = o ? this.bitsOf(o).map(k => Object.assign(Object.create(k), { orig: k, same: true })) : bitRows(r);
+      this.bitMemo.set(r, b); }
+    for (const k of b) { k.depth = r.depth + 1; k.anc = r.anc; }
+    return b;
+  }
+  // a signal by its full path: a row of the model, else a bit of a bus ("data[3]", shown or not)
+  sigByPath(p) {
+    const s = this.M.rows.find(r => r.type === 'sig' && r.full === p); if (s || typeof p !== 'string') return s || null;
+    const m = /^(.+)\[(0|[1-9]\d*)\]$/.exec(p), v = m && this.M.rows.find(r => r.full === m[1] && isVec(r));
+    return v && +m[2] < v.width ? this.bitsOf(v)[v.width - 1 - m[2]] : null;
+  }
+  // rows: rows or paths of buses; on: true / false, none: each the other way -> the buses changed
+  setBits(rows, on, quiet = false) {
+    const vs = [].concat(rows).map(r => (typeof r === 'string' ? this.sigByPath(r) : r && (r.orig || r))).filter(isVec);
+    for (const r of vs) { if (on ?? !this.bitsOpen.has(r.full)) this.bitsOpen.add(r.full); else this.bitsOpen.delete(r.full); }
+    if (this.sel && this.sel.bit != null && !this.bitsOpen.has((this.sel.orig || this.sel).of.full)) this.sel = this.sel.of;   // a bit folded away: its bus
+    this.rowsStale = true; if (!quiet) { this.saveRows(); this.renderNames(); this.draw(); }
+    return vs;
+  }
   settingsChanged() { this.root.dispatchEvent(new CustomEvent('wavelens:settings')); }   // sort, prefixes, settings
   // dir: none | asc | desc; ignore: prefixes skipped when comparing names ("i_,o_" or an array)
   setSort(dir, ignore) {
@@ -3272,6 +3347,7 @@ class WaveView {
     let o = {};
     try { o = JSON.parse(localStorage.getItem(this.rowsKey) || '{}') || {}; } catch (e) { /* no storage */ }
     this.hiddenRows = new Set(Array.isArray(o.hidden) ? o.hidden : []); this.ugroups = groupNorm(o.groups);
+    this.bitsOpen = new Set(Array.isArray(o.bits) ? o.bits.map(String) : []);
     for (const [p, n] of Object.entries(o.analog || {})) { const r = this.M.rows.find(x => x.type === 'sig' && x.full === p);
       if (r) { if (!('analog0' in r)) r.analog0 = r.analog; r.analog = n || false; this.analogs.set(p, n); } }
     for (const [p, rx] of Object.entries(o.radix || {})) { const r = this.M.rows.find(x => x.type === 'sig' && x.full === p);
@@ -3279,9 +3355,9 @@ class WaveView {
   }
   saveRows() {
     try {
-      if (this.radixes.size || this.hiddenRows.size || this.analogs.size || this.ugroups.length) localStorage.setItem(this.rowsKey,
+      if (this.radixes.size || this.hiddenRows.size || this.analogs.size || this.ugroups.length || this.bitsOpen.size) localStorage.setItem(this.rowsKey,
         JSON.stringify({ radix: Object.fromEntries(this.radixes), hidden: [...this.hiddenRows], analog: Object.fromEntries(this.analogs),
-          groups: this.groupList() }));
+          groups: this.groupList(), bits: [...this.bitsOpen] }));
       else localStorage.removeItem(this.rowsKey);
     } catch (e) { /* private mode */ }
   }
@@ -3441,8 +3517,8 @@ class WaveView {
         findMask: !!this.findMask,
           ...Object.fromEntries(FIND_OPTS.map(o => [o[1], !!this[o[1]]])), ...this.gapOpt(), ...this.cycOpt() },
       paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs), hidden: [...this.hiddenRows],
-        select: (this.sel && this.sel.full) || null, find: this.q || '', bookmarks: this.bookmarks(), arrows: this.arrowList(), markers: this.markList(),
-        spans: this.spanList(),
+        bits: [...this.bitsOpen], select: (this.sel && this.sel.full) || null, find: this.q || '', bookmarks: this.bookmarks(), arrows: this.arrowList(),
+        markers: this.markList(), spans: this.spanList(),
         groups: this.groupList(), only: this.onlyState(), fsm: this.fsmState() };
     // none is said (null, the kind "any"): a state loaded later clears what is there then (a key left out keeps it)
     st.cursor2 = this.cursor2 ?? null;
@@ -3470,7 +3546,8 @@ class WaveView {
       this.setGroups();
     }
     this.allRows();   // the plugins' groups and yours are there now (their folding)
-    const paths = new Set([...M.rows.map(r => r.full), ...Object.values(M.groups).map(g => g.path)]), seen = p => paths.has(p) || (miss.add(p), false);
+    const paths = new Set([...M.rows.map(r => r.full), ...Object.values(M.groups).map(g => g.path)]);
+    const seen = p => paths.has(p) || !!this.sigByPath(p) || (miss.add(p), false);   // a bit of a bus too ("data[3]")
     if (C.style !== undefined) this.setStyle(C.style);
     if (C.maxHeight !== undefined) this.setScroll(C.maxHeight == null || C.maxHeight === '' ? 'page' : 'window', C.maxHeight || undefined);
     if (C.toolsFolded !== undefined) this.setTools(!!C.toolsFolded);
@@ -3511,6 +3588,8 @@ class WaveView {
     }
     if (st.radix !== undefined || st.analog !== undefined) this.saveRows();   // once (renderNames and draw: find() below)
     if (st.hidden !== undefined) { this.hiddenRows = new Set((st.hidden || []).filter(p => seen(p))); this.rowsStale = true; this.saveRows(); }
+    if (st.bits !== undefined) { this.bitsOpen = new Set((st.bits || []).map(String).filter(p => seen(p) && isVec(this.sigByPath(p)))); this.rowsStale = true;
+      this.saveRows(); }
     // "only": {modules: [paths], on} (on left out: on), null: every module; a path not of a module here: left out (said)
     if (st.only !== undefined) { const o = st.only && typeof st.only === 'object' ? st.only : null, ms = o && Array.isArray(o.modules) ? o.modules : [];
       ms.forEach(p => { if (!this.scopeOf(p)) miss.add(String(p)); });
@@ -3527,13 +3606,13 @@ class WaveView {
     if (st.markers !== undefined) { this.umarks = markNorm(st.markers); this.setMarks(); }
     if (st.spans !== undefined) { this.spans = spanNorm(st.spans); this.saveBookmarks(); this.draw(); }
 
-    if (st.select !== undefined) this.sel = (st.select && seen(st.select) && M.rows.find(r => r.type === 'sig' && r.tr && r.full === st.select)) || null;
+    if (st.select !== undefined) this.sel = (st.select && seen(st.select) && this.sigByPath(st.select)) || null;
     if (st.from != null && st.to != null && isFinite(st.from) && isFinite(st.to)) { this.span = Math.min(Math.max(st.to - st.from, this.minSpan), M.t1 - M.t0);
       this.t0 = this.clamp(st.from); }
     if (st.cursor != null && isFinite(st.cursor)) this.cursor = Math.min(Math.max(st.cursor, M.t0), M.t1);
     if (st.cursor2 !== undefined) this.cursor2 = st.cursor2 != null && isFinite(st.cursor2) ? Math.min(Math.max(st.cursor2, M.t0), M.t1) : null;
     if (st.range !== undefined) {
-      const g = st.range, row = g && g.signal ? (seen(g.signal) && M.rows.find(r => r.type === 'sig' && r.full === g.signal)) || null : null;
+      const g = st.range, row = g && g.signal ? (seen(g.signal) && this.sigByPath(g.signal)) || null : null;
       const cl = x => Math.min(Math.max(x, M.t0), M.t1), a = g && cl(Math.min(g.from, g.to)), b = g && cl(Math.max(g.from, g.to));
       if (g && isFinite(g.from) && isFinite(g.to) && b > a) { this.range = [a, b]; this.rangeRow = row; this.rangeKey = null; }
       else this.range = null;   // none, or outside these waves: never one the wrong way round
@@ -3829,7 +3908,7 @@ class WaveView {
     else if (o && o.row.type === 'lane' && o.row.ids.includes('b:' + b.signal + ':below')) b.lift = 'below';
     else if (o && o.row.type === 'lane') { const r = lay.slice(k + 1).find(q => q.row.type !== 'lane');
       if (r && r.row.type === 'sig') { b.signal = r.row.full; b.lift = true; } }
-    const s = b.signal != null ? this.M.rows.find(r => r.type === 'sig' && r.full === b.signal) : null;
+    const s = b.signal != null ? this.sigByPath(b.signal) : null;
     b.t = Math.min(Math.max(this.snap(s, this.t0 + x / this.pxPerT()), this.M.t0), this.M.t1); delete b.at;   // moved: no longer at its event
     this.draw();
   }
@@ -3974,8 +4053,9 @@ class WaveView {
   goBm(b) {
     const raw = this.S.bookmarkLeft, n = raw == null || raw === '' ? NaN : Number(raw), f = isFinite(n) ? Math.min(Math.max(n, 0), 0.9) : 0.2;
     this.cursor = b.t; this.t0 = this.clamp(b.t - this.span * f);
-    const s = b.signal ? this.M.rows.find(r => r.full === b.signal) : null;
-    if (s) { if (s.anc.some(id => this.collapsed.has(id))) { s.anc.forEach(id => this.collapsed.delete(id)); this.foldTouched = true; }
+    const s = b.signal ? this.sigByPath(b.signal) : null;
+    if (s) { if (s.bit != null && !this.bitsOpen.has(s.of.full)) { this.setBits(s.of, true, true); this.saveRows(); }   // a bit of a bus folded: shown
+      if (s.anc.some(id => this.collapsed.has(id))) { s.anc.forEach(id => this.collapsed.delete(id)); this.foldTouched = true; }
       this.sel = s; }
     this.renderNamesNow(); this.draw();
     if (!this.topTo(b.top) && s && this.vis.includes(s) && !this.inSight(s)) this.centerRow(s);
@@ -4221,6 +4301,7 @@ class WaveView {
     const run = !!sig && this.selRun.size > 1 && this.selRun.has(sig);
     const many = run || (it && (this.picks.has(it) || sig && picked(sig)) && this.picks.size > 1);
     const sigs = run ? [...this.selRun] : many ? this.M.rows.filter(r => r.type === 'sig' && r.tr && picked(r) && this.shown(r)) : sig ? [sig] : [];
+    const vecs = sigs.map(r => r.orig || r).filter(isVec);   // Bits: the buses bit by bit
     const buses = sigs.filter(r => r.width > 1 && r.tr.some(o => o.raw != null)),
       rows = run ? sigs : many ? [...this.picks.keys()].filter(r => r.full && (r.type === 'sig' || this.M.groups[r.id] === r) && this.shown(r)) : [it];
     const acc = getComputedStyle(this.root).getPropertyValue('--wave-paint').trim(), col = sig && this.painted.get(sig.full) ||
@@ -4242,6 +4323,7 @@ class WaveView {
     const role = (key, on) => { const fs = sigs.map(x => x.full).filter(Boolean), g = this.gapOpt(), o = { gaps: true };
       for (const k of ['gapSignals', 'gapAux']) o[k] = g[k].filter(x => !fs.includes(x));
       if (key === 'gapClock') o.gapClock = on ? sig.full : null; else { if (on) o[key].push(...fs); if (fs.includes(g.gapClock)) o.gapClock = null; }
+      if (key === 'gapAux' && on && g.gapCount === 'off') o.gapCount = 'clock';   // counted: its counts in the picture
       this.setGaps(o); };
     const b = (m, label) => { const k = (TIPS['m:' + m] || [])[1];
       return `<button type="button" role="menuitem" data-m="${m}"><span>${label}</span>${k ? `<span class="kk">${esc(k[0])}</span>` : ''}</button>`; };
@@ -4264,7 +4346,8 @@ class WaveView {
         `data-m="gclkx" aria-label="the cycles of the clock found">✕</button>` : ''}${naux ? ` · + ${naux} <button type="button" class="gx" ` +
         `data-m="gauxx" aria-label="count every other signal">✕</button>` : ''}</span><span>` +
         (nref ? `<label><input type="checkbox" class="gonly"${gp.gapOnly ? ' checked' : ''}> only them</label> ` : '') +
-        `<select class="gcnt" aria-label="the texts of the gaps">${[['clock', 'time, cycles'], ['edges', '+ changes in a gap'], ['off', 'no texts']]
+        `<select class="gcnt" aria-label="the texts of the gaps">${[['clock', naux ? 'time, cycles, +' : 'time, cycles'],
+          ['edges', '+ changes in a gap'], ['off', 'no texts']]
           .map(([v, t]) => `<option value="${v}"${gp.gapCount === v ? ' selected' : ''}>${t}</option>`).join('')}</select></span></div>`) +
       (sigs.length ? `<hr><div class="mh">${esc(many ? of : sig.name)}</div>` +
         b('gref', gref ? 'Not by this signal' : many ? `By the ${sigs.length}: their changes kept` : 'By this signal: its changes kept') +
@@ -4295,6 +4378,8 @@ class WaveView {
           (`<input type="number" class="qf" min="0" max="128" value="${qf}" aria-label="fraction bits" title="Fraction bits of the fixed-point ` +
               `value"${qk ? '' : ' hidden'}></span></label>`) : '') +
         (sig && buses.length ? b('analog', buses.every(r => r.analog) ? 'As a bus' : many ? `Analog: ${buses.length}` : 'Analog (step plot)') : '') +
+        (vecs.length ? b('bits', vecs.every(r => this.bitsOpen.has(r.full)) ? (many ? `Fold the bits of ${vecs.length}` : 'Fold the bits') :
+          many ? `Bits of ${vecs.length}` : `Bits: ${vecs[0].width} rows`) : '') +
         b('hl', this.picks.has(it) ? 'Remove the highlight' : 'Highlight') + b('hide',
           many ? `Hide the ${rows.length} ${run ? 'selected' : 'highlighted'}` : grp ? 'Hide this module' : 'Hide',
           'Leave it out of the view (Hidden: N ✕ in the bar shows it again)') +
@@ -4365,6 +4450,7 @@ class WaveView {
       else if (act === 'unpaint') { sigs.forEach(r => this.painted.delete(r.full)); this.savePaint(); this.renderNames(); this.draw(); }
       else if (act === 'hl') this.toggleHighlight(it);
       else if (act === 'analog') { const on = !buses.every(r => r.analog); buses.forEach(r => this.setAnalog(r, on ? 3 : false)); }
+      else if (act === 'bits') this.setBits(vecs, !vecs.every(r => this.bitsOpen.has(r.full)));
       else if (act === 'hide') this.hide(rows);
       else if (act === 'unhide') this.unhide();
       else if (act === 'fold') { if (this.collapsed.has(grp.id)) this.collapsed.delete(grp.id); else this.collapsed.add(grp.id); this.foldTouched = true;
@@ -4843,6 +4929,7 @@ function pickRows(v, spec, o = {}) {
       if (!hit.length) { const at = pool.filter(r => s.endsWith('.' + r.full)), n = Math.max(0, ...at.map(r => r.full.length));
         hit = at.filter(r => r.full.length === n); }
     }
+    if (!hit.length && !o.scopes) { const b = v.sigByPath(s); if (b) hit = [b]; }   // a bit of a bus: "data[3]"
     if (!hit.length) {
       const low = s.toLowerCase().replace(/\*/g, ''), near = low ? pool.filter(r => r.name.toLowerCase().includes(low)).slice(0, 5).map(r => r.full) : [];
       fail(`no ${what} "${s}"${near.length ? '; similar: ' + near.join(', ') : ''}`);
@@ -5134,6 +5221,11 @@ command('analog', 'signals rows', 'buses drawn as a step plot that many rows hig
   if (n != null && n !== false && !(Number.isInteger(n) && n >= 0)) fail('rows: a number of rows, true, false or null');
   rows.forEach(r => v.setAnalog(r, n == null ? null : n || false, true)); v.saveRows(); v.renderNames(); v.draw(); return { signals: rows.length };
 });
+command('bits', 'signals on?', 'buses shown bit by bit, a row per bit under each (the highest first, "data[3]"); on: false folds them', (v, a) => {
+  if (a.on != null && typeof a.on !== 'boolean') fail('on: true or false');
+  const rows = pickRows(v, a.signals), bad = rows.filter(r => !isVec(r)); if (bad.length) fail(`not a bus: ${bad.map(r => r.full).join(', ')}`);
+  v.setBits(rows, a.on ?? true); return { signals: rows.length };
+});
 command('sort', 'dir ignore?', 'the order of the names: none, asc, desc; ignore: prefixes left out when comparing ("i_,o_")', (v, a) => {
   if (!SORTS.includes(a.dir)) fail(`dir: one of ${SORTS.join(' ')}`);
   v.setSort(a.dir, a.ignore ?? undefined); return { sort: v.sort, ignore: v.sortIgnore };
@@ -5198,7 +5290,7 @@ command('rows', 'pattern? limit? offset?', 'the signals and modules of the page 
   'hidden and folded ones too', (v, a) => {
   const rx = a.pattern ? (String(a.pattern).includes('*') ? glob(String(a.pattern)) : null) : null, low = String(a.pattern || '').toLowerCase();
   const all = v.allRows(true)   // the hidden ones too (a signal under a hidden module), where they would be
-    .filter(r => (r.type === 'sig' && r.tr && !r.ug) || (r.type === 'group' && r.full))
+    .filter(r => (r.type === 'sig' && r.tr && !r.ug && r.bit == null) || (r.type === 'group' && r.full))   // a bus's bits: by their paths
     .filter(r => !a.pattern || (rx ? rx.test(r.full) : r.full.toLowerCase().includes(low)));
   const off = Math.max(0, +a.offset || 0), n = Math.max(1, +a.limit || 200), page = all.slice(off, off + n);
   return { total: all.length, rows: page.map(r => [r.full, r.type === 'group' ? (r.user ? 'group' : 'module') : r.width || 1]),
@@ -5252,7 +5344,7 @@ Object.assign(WaveView.prototype, {
     const groups = this.groupList().map((g, i) => Object.assign(g, { uid: this.ugroups[i].uid || (this.ugroups[i].uid = ++XID) }));   // a group over a rename
     return JSON.stringify({ bookmarks: this.bookmarks(), arrows: this.arrowList(), markers: this.markList(), groups,
       paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs), hidden: [...this.hiddenRows],
-      only: this.onlyState(), fsm: this.fsmState(),
+      bits: [...this.bitsOpen], only: this.onlyState(), fsm: this.fsmState(),
       config: Object.assign({ style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded,
         toolsHidden: toolNames(this.S.toolsHidden) }, this.gapOpt(), this.cycOpt()),
       hl: [...this.picks].map(([r, i]) => [r.full, i]).sort((a, b) => a[1] - b[1]) });
@@ -5423,7 +5515,7 @@ Object.assign(WaveView.prototype, {
 // (wavelens.edits:<page>), so what you change here afterwards stays until a newer one (Save keeps yours in a file). The
 // rest (cursor, window, highlight, selection, folding, order, search), which a page opened again starts from anyway,
 // is applied every time, as the page's own settings are.
-const KEPT = ['bookmarks', 'arrows', 'markers', 'spans', 'groups', 'paint', 'radix', 'analog', 'hidden'];
+const KEPT = ['bookmarks', 'arrows', 'markers', 'spans', 'groups', 'paint', 'radix', 'analog', 'hidden', 'bits'];
 const KEPT_CFG = ['style', 'maxHeight', 'toolsFolded', 'toolsHidden', ...GAP_KEYS, ...CYC_KEYS];
 // what undo takes back: the above and Only (not kept in this browser: a page opened again applies a revision's Only anew)
 const UNDO_KEYS = [...KEPT, 'only', 'fsm'];
@@ -6919,31 +7011,35 @@ const WaveSVG = {
     const hl = C.hl;
     // gaps (opts.cuts, else the settings gaps, gapIdle, gapKeep, gapSignals): the parts of [from, to] kept, side by side, a
     // narrow column GAP px wide between; their texts (gapCount) in thin rows over each gap: under the axis the time it
-    // leaves out and the cycles of the clock in it; with "edges" under each signal counted (gapAux; none: every one but the
-    // ones the gaps follow and the clock) what it did in the stretch left out (its rising and falling edges, a bus its changes)
+    // leaves out and the cycles of the clock in it; under each signal counted (gapAux, with any texts; none marked: with
+    // "edges" every one but the ones the gaps follow and the clock) what it did in the stretch left out (its rising and
+    // falling edges, a bus its changes; "rise", "fall", "any": those)
     const G = V ? V.gapOpt() : S, ref = gapRefs(M.rows, G.gapSignals);
     const clk = V ? V.gapClockFor(C.rows) : gapRefs(M.rows, G.gapClock)[0] || M.rows.find(isClkRow);   // the cycles counted: gapClock, else a clock
     const cuts = opts.cuts || (V ? [[from, to]] : gapCuts(ref.length ? ref : C.rows, from, to, S, clk, M.cycle, bms.map(b => b.t), ref.length > 0));
     const ng = cuts.length - 1, kept = cuts.reduce((n, [p, q]) => n + q - p, 0), gapLab = { size: 9.5 }, gc = G.gapCount || 'clock';
     const aux = new Set(V ? V.gapRows().aux : gapRefs(M.rows, G.gapAux)), refs = new Set(V ? V.gapRefSet() : ref);
+    const kind = ['edges', 'rise', 'fall', 'any'].includes(gc) ? gc : 'edges', each = gc !== 'off' && (aux.size > 0 || kind === gc);
     const counted = r => r.type === 'sig' && r.tr && r !== clk && (aux.size ? aux.has(r) : !refs.has(r));
     const ups = clk ? riseTimes(clk) : [], cyc = (p, q) => lastBefore(ups.length, j => ups[j], q, true) - lastBefore(ups.length, j => ups[j], p, true);
     const holes = cuts.slice(1).map(([q], i) => {   // cyc: the clock's cycles that start in [p, q)
       const p = cuts[i][1], d = q - p, nc = cyc(p, q), text = new Map();
-      if (gc === 'edges') for (const r of C.rows) if (counted(r)) { const t = gapText(r, p, q, gc); if (t) text.set(r, t); }
+      if (each) for (const r of C.rows) if (counted(r)) { const t = gapText(r, p, q, kind); if (t) text.set(r, t); }
       return { p, q, w: GAP, text, info: '+' + (M.timed ? fmtTime(d, d / 100, d) : trimNum(d)) + (nc ? ` · ${nc} ${clk.name}` : '') };
     });
     // a thin row under each signal with a text, on its module's background
-    const band = ng && gc === 'edges' ? new Map(C.band || []) : C.band;
+    const band = ng && each ? new Map(C.band || []) : C.band;
     const rows = band === C.band ? C.rows : C.rows.flatMap(r => { if (!holes.some(h => h.text.has(r))) return [r];
-      const sub = { type: 'space', name: '', depth: r.depth, anc: r.anc, height: 12, gapOf: r };
+      const sub = { type: 'space', name: '', depth: r.depth, anc: r.anc, height: 14, gapOf: r };
       if (band.has(r)) band.set(sub, band.get(r));
       return [r, sub]; });
     // the clock cycles under the axis (the viewer's Cycles, else the settings cycles, cycleClock, cycleZero); its clock under the names
     const cy = V ? V.cycData() : S.cycles ? (c => { const ups = c ? cycUps(c) : []; return ups.length ? { clk: c, ups, iz: cycZero(ups,
       zeroTime(S.cycleZero)) } : null; })(cycClock(M.rows, S.cycleClock)) : null, cyLab = cy && `cycles ↑ ${cy.clk.name}`;
-    const nameW = Math.ceil(Math.max(40, cy ? P.measure(cyLab, { size: 10 }) + 12 : 0, ...rows.map(r => P.measure(r.name || '', { size: fs,
-      weight: r.type === 'group' ? 600 : 400 }) + 22 + r.depth * 12)));
+    // a bus's width after its name (showWidth: [7:0], a field's [msb:lsb]), a little smaller and muted, as in the viewer
+    const wTag = r => (S.showWidth !== false && r.name ? widthTag(r) : ''), wSt = { size: fs - 1, fill: 'muted' };
+    const nameOf = r => P.measure(r.name || '', { size: fs, weight: r.type === 'group' ? 600 : 400 }), tagW = r => (wTag(r) ? 5 + P.measure(wTag(r), wSt) : 0);
+    const nameW = Math.ceil(Math.max(40, cy ? P.measure(cyLab, { size: 10 }) + 12 : 0, ...rows.map(r => nameOf(r) + tagW(r) + 22 + r.depth * 12)));
     let k = ((opts.cyclePx || 40) * M.hscale) / M.cycle;
     if (opts.width) k = (opts.width - nameW - 8 - ng * GAP) / kept;
     const waveW = kept * k + ng * GAP, Wt = Math.ceil(nameW + waveW + 8);
@@ -6982,7 +7078,9 @@ const WaveSVG = {
       if (typeof c === 'string') { P.rect(0, ry, xL, h, c, 0.1); P.rect(0, ry, 3, h, c); }   // a plugin's highlight
       if (!row.name) return;
       const g = row.type === 'group';
-      P.text(6 + row.depth * 12 + (g ? 0 : 8), ry + h / 2, row.name, { size: fs, weight: g ? 700 : 400, fill: strokeOf(row) || 'fg' });
+      const nx = 6 + row.depth * 12 + (g ? 0 : 8), nst = { size: fs, weight: g ? 700 : 400, fill: strokeOf(row) || 'fg' };
+      P.text(nx, ry + h / 2, row.name, nst);
+      if (wTag(row)) P.text(nx + P.measure(row.name, nst) + 5, ry + h / 2, wTag(row), wSt);
       if (g && last[row.id] > i) {
         const end = lay[last[row.id]], bx = 3 + row.depth * 12;
         P.path([['M', bx + 4, ry + h], ['L', bx, ry + h], ['L', bx, end.y + end.h - 3], ['L', bx + 4, end.y + end.h - 3]], { stroke: 'muted', w: 1 });
@@ -7014,7 +7112,7 @@ const WaveSVG = {
         });
       });
       // the texts over each gap: the time and the cycles under the axis, a counted signal's under it
-      const lab = Object.assign({ anchor: 'middle', fill: 'muted' }, gapLab);
+      const lab = Object.assign({ anchor: 'middle', fill: 'muted' }, gapLab), cnt = Object.assign({}, lab, { size: 10, fill: 'fg' });
       if (ng && gc !== 'off') { P.rect(xL, infoY, waveW, 14, 'panel2', 0.6); for (const o of lay) if (o.row.gapOf) P.rect(xL, o.y, waveW, o.h, 'panel2', 0.6); }
       // in the middle of each part its cycles (from the gap before to the gap after), where the gaps' texts leave room
       const used = holes.map((h, i) => { const w = P.measure(h.info, gapLab) / 2 + 6, x = segX[i + 1] - GAP / 2; return [x - w, x + w]; });
@@ -7025,8 +7123,8 @@ const WaveSVG = {
       });
       if (ng && gc !== 'off') holes.forEach((h, i) => { const xm = segX[i + 1] - GAP / 2;
         P.text(xm, infoY + 7, h.info, lab);
-        for (const { row, y: ry, h: rh } of lay) { const t = row.gapOf && h.text.get(row.gapOf), tw = t && P.measure(t, gapLab) + 6;
-          if (t) { P.rect(xm - tw / 2, ry + 1, tw, rh - 2, 'panel2'); P.text(xm, ry + rh / 2, t, lab); } }   // over the gap's line
+        for (const { row, y: ry, h: rh } of lay) { const t = row.gapOf && h.text.get(row.gapOf), tw = t && P.measure(t, cnt) + 6;
+          if (t) { P.rect(xm - tw / 2, ry + 1, tw, rh - 2, 'panel2'); P.text(xm, ry + rh / 2, t, cnt); } }   // over the gap's line
       });
       const top = showAxis ? axisY + 20 : lay.length ? lay[0].y : y;
       paintSpans(P, V ? V.spans : M.spans, X, from, to, lay, top, bodyEnd);
@@ -7238,7 +7336,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.28',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.29',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,
@@ -7252,7 +7350,7 @@ G.WaveLens = { version: '0.28',   // the project's version: VERSION (make check 
   internal: { findRow, parseWant, valueIs, findEdge, edgeGlyph, bitsOf, hexOf, mixedBits, bitsVal, vcdHex, cycZero, cycAt, cycTime, cycUps, cycClock,
     diffSpans, cmpKey, svTypes, svApply, fsmStats, svFingerprint, svRemap, svLookupKey, jsonParse, jsonWhere,
     cycMarks, enumColor, analogValue, niceStep, cycMap, parseWave,
-    idleCuts, gapLen, gapText, gapRefs, fmtFreq, gfmt, toFloat, fieldRow, stripPfx, trimNum,
+    idleCuts, gapLen, gapText, gapRefs, fmtFreq, gfmt, toFloat, fieldRow, bitRows, widthTag, stripPfx, trimNum,
     peek: v => ({ get lay() { return v.lay; }, get oy() { return v.oy; }, get vis() { return v.vis; }, get collapsed() { return v.collapsed; },
       get rowEls() { return v.rowEls; }, get namesEl() { return v.namesEl; } }) } };
 G.WaveView = WaveView; G.WaveSVG = WaveSVG;

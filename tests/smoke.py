@@ -158,7 +158,7 @@ def interact(page):
 
 def sorting(page):
     v = page.locator('#ex-sort-view')
-    names = lambda: [x.strip() for x in v.locator('.names .row .n').all_inner_texts()]
+    names = lambda: [re.sub(r'\s*\[\d+:\d+\]$', '', x.strip()) for x in v.locator('.names .row .n').all_inner_texts()]   # the names, not their widths
     btn = v.locator('button[data-act=sort]')
     check(names() == ['rst_n', 'o_ready', 'i_valid', 'clk', 'o_data', 'i_data'] and btn.inner_text() == 'Sort: off', f'file order at start {names()}')
     btn.click()
@@ -183,7 +183,7 @@ def sorting(page):
     pfx = ex.locator('input.pfx').input_value()
     check(pfx == 'bit_,rx_', f'JSON config beats wavelens.config.js ({pfx!r})')
     ex.locator('button[data-act=sort]').click()
-    en = [x.strip() for x in ex.locator('.names .row .n').all_inner_texts()]
+    en = [re.sub(r'\s*\[\d+:\d+\]$', '', x.strip()) for x in ex.locator('.names .row .n').all_inner_texts()]
     check(en == ['clk', 'data', '▾ mc_tx', 'busy', 'bit_cnt', 'done', 'state', 'txd', 'rst_n', 'rx_sr', 'start'], f'group sorted as a block, members inside {en}')
     ex.locator('button[data-act=sort]').click(); ex.locator('button[data-act=sort]').click()
 
@@ -2693,7 +2693,70 @@ EDIT_OPS = [   # every command that changes a state, with the arguments in their
     {'op': 'find', 'query': 'pw', 'case': True, 'open': False}, {'op': 'gaps', 'on': True, 'idle': 8},
     {'op': 'layout', 'scroll': 'page', 'tools': 'fold'}, {'op': 'group', 'name': 'ctl', 'go': True},
     {'op': 'cycles', 'on': True, 'clock': 'PCLK', 'zero': '50ns'}, {'op': 'group', 'name': 'payload', 'move': 1},
+    {'op': 'bits', 'signals': ['PADDR', 'PWDATA']}, {'op': 'bits', 'signals': 'PWDATA', 'on': False},
+    {'op': 'bookmark', 't': '60ns', 'signal': 'PADDR[2]', 'text': 'a bit'},
 ]
+
+
+def bits(browser, build):
+    """A bus's width after its name ([7:0], a field's [msb:lsb]) and the bus bit by bit: a click on the width, b, the
+    menu's Bits, the command; its bits' values, kept over a reload and in the state, a bookmark on a bit, the pictures."""
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('viewer: bus widths, bits')
+    ctx = browser.new_context(viewport={'width': 1400, 'height': 1000})
+    page = ctx.new_page()
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+    js = lambda e: page.evaluate(f"(async () => {{ const v = document.querySelector('.wv').waveView; {e} }})()")
+    row = lambda n: page.locator('.wv').first.locator(f'.names .row:has(.n[title="{n}"])').first
+    tags = js("""const t = n => (e => e ? e.textContent : null)(v.rowEl(v.M.rows.find(r => r.full === n)).querySelector('.wd'));
+        const I = WaveLens.internal, M = WaveLens.parse({ signal: [{ name: 's', wave: '=', data: ['0x1f'], width: 8, fields: [{ name: 'hi', msb: 7, lsb: 4 },
+          { name: 'b', msb: 0 }] }, { name: 'r', tv: [[0, '1.5']], kind: 'real' }] });
+        return [t('PADDR'), t('PWDATA'), t('PCLK'), M.rows.map(r => I.widthTag(r))];""")
+    check(tags == ['[7:0]', '[31:0]', None, ['[7:0]', '[7:4]', '', '']],
+          f'the width after a bus\'s name, none on a bit; a struct\'s whole value, its field\'s place [msb:lsb], none on a real {tags}')
+    row('PADDR').locator('.wd').click()
+    got = js("""const vis = WaveLens.internal.peek(v).vis, i = vis.findIndex(r => r.full === 'PADDR'), b = vis.slice(i + 1).filter(r => r.type === 'sig').slice(0, 8);
+        return [b.map(r => r.name).join(' '), b.map(r => v.valueAt(r, 60000)).join(''), v.state().bits, v.rowEl(vis[i]).querySelector('.wd').classList.contains('open'),
+          b.every(r => r.depth === vis[i].depth + 1)];""")
+    check(got == ['[7] [6] [5] [4] [3] [2] [1] [0]', '00000100', ['PADDR'], True, True],
+          f'a click on [7:0]: the bus bit by bit under it, the highest first, each its bit of the value (0x04 at 60 ns), in the state {got}')
+    page.reload(); page.wait_for_load_state('networkidle')
+    kept = js("return [v.state().bits, WaveLens.internal.peek(v).vis.filter(r => r.bit != null).length]")
+    js("(v.select(v.sigByPath('PADDR[2]')), v.canvas.focus(), 0)"); page.keyboard.press('b')
+    key = js("return [v.state().bits, v.sel && v.sel.full]")
+    js("(v.select('PWDATA'), v.canvas.focus(), 0)"); page.keyboard.press('b'); key2 = js("return v.state().bits"); page.keyboard.press('b')
+    check(kept == [['PADDR'], 8] and key == [[], 'PADDR'] and key2 == ['PWDATA'],
+          f'kept over a reload; b on a bit folds its bus (the bus selected), on a bus shows its bits {kept} {key} {key2}')
+    c = page.locator('.wv canvas').first; c.scroll_into_view_if_needed(); box = c.bounding_box()
+    y = js("const o = WaveLens.internal.peek(v).lay.find(o => o.row.full === 'PRDATA'); return o.y + o.h / 2 - (WaveLens.internal.peek(v).oy || 0)")
+    page.mouse.click(box['x'] + 300, box['y'] + y, button='right'); menu = page.locator('.wv-menu')
+    lab = menu.locator('button[data-m=bits]').inner_text().split('\n')[0]; menu.locator('button[data-m=bits]').click()
+    m = js("return v.state().bits")
+    r = js("""const r = await v.run([{ op: 'bits', signals: 'PRDATA', on: false }, { op: 'bits', signals: 'PCLK' }, { op: 'bits', signals: 'PADDR', on: 1 },
+          { op: 'bookmark', t: 60000, signal: 'PADDR[2]', text: 'bit 2' }, { op: 'bookmark', t: 60000, signal: 'PADDR[8]' }]);
+        const n = r[3].n; v.goMark(n); return [r.map(x => x.error || x.signals || x.n), v.state().bits, v.sel && v.sel.full, v.bookmarks().find(b => b.n === n).signal];""")
+    check(lab.startswith('Bits: 32 rows') and m == ['PRDATA'] and r[0][:3] == [1, 'not a bus: PCLK', 'on: true or false'] and 'no signal "PADDR[8]"' in r[0][4] and
+          r[1:] == [['PADDR'], 'PADDR[2]', 'PADDR[2]'], f'the menu\'s Bits; the command (not a bus, on); a bookmark on a bit: going to it shows the bits {lab} {m} {r}')
+    pic = js("""const a = v.toSVG(); WaveLens.configure({ showWidth: false }); const b = v.toSVG(), n = WaveLens.internal.peek(v).namesEl.querySelectorAll('.wd').length;
+        WaveLens.configure({ showWidth: true }); return [a.includes('>[7:0]</text>'), a.includes('>[2]</text>'), b.includes('[7:0]'), n,
+          WaveSVG.toString(v.M.src).includes('>[31:0]</text>')];""")
+    check(pic == [True, True, False, 0, True], f'the picture has the widths and the bits shown; showWidth: false, none in the names or the picture; WaveSVG too {pic}')
+    vis = "WaveLens.internal.peek(v).vis.filter(r => r.bit != null)"
+    hid = js(f"""await v.run([{{ op: 'bits', signals: 'PADDR' }}, {{ op: 'hide', signals: 'PADDR' }}]); const a = {vis}.length;
+        await v.run([{{ op: 'show' }}, {{ op: 'hide', signals: 'PADDR[3]' }}]); const b = {vis}.map(r => r.name).join(' ');
+        await v.run([{{ op: 'show' }}, {{ op: 'find', query: 'PADDR', mask: true }}]); const c = {vis}.length;
+        await v.run([{{ op: 'find', query: '', mask: false }}]); return [a, b, c];""")
+    check(hid == [0, '[7] [6] [5] [4] [2] [1] [0]', 8], f'the bits go with their bus: hidden with it, one hidden by its path, kept under it by the find\'s Mask {hid}')
+    lazy = page.evaluate("""(() => { const s = { type: 'sig', full: 'd', width: 4, depth: 0, anc: [], tr: [{ t: 0, k: '=', raw: '5' }, { t: 5, k: 'x' }] };
+        const b = WaveLens.internal.bitRows(s), a = b.map(r => r.tr.map(o => o.k).join('')).join(' ');
+        s.tr = [{ t: 0, k: '=', raw: 'a', bits: '1z10' }]; return [a, b.map(r => r.tr.map(o => o.k).join('')).join(' '), b.map(r => r.full).join(' ')]; })()""")
+    check(lazy == ['0x 1x 0x 1x', '1 z 1 0', 'd[3] d[2] d[1] d[0]'], f'bit rows: x and z bit by bit, read again when the bus\'s changes are new (a lazy dump) {lazy}')
+    check(not errs, 'no page errors (bits)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
+    ctx.close()
 
 
 def cycles(browser, build):
@@ -3561,6 +3624,20 @@ def ranges(browser, build):
         const moved = [v.gapRefSet().size, v.gapRows().aux.size]; v.setGaps({ gapOnly: false }); return [rows, names, moved]; })()""")
     check(aux == [['PCLK', 'PSEL', 'PENABLE'], ['PENABLE'], [0, 2]],
           f'Gaps: count its changes: PENABLE counted (+ in the names), "only them" takes the three kinds; one role per signal {aux}')
+    # the marks: on the row between the name and the value (a bus's [7:0] and a long name cut them before); a signal marked +
+    # counted with the default texts too ("time, cycles"), its count over the gap in the picture
+    mk = js("""(() => { const D = v.M.rows.find(r => r.name === 'PADDR' && r.tr), R = v.M.rows.find(r => r.name === 'PRESETn' && r.tr),
+        P = v.M.rows.find(r => r.name === 'PSEL' && r.tr);
+        v.setGaps({ gaps: true, gapIdle: 3, gapKeep: 0, gapSignals: [D.full, P.full], gapAux: [R.full], gapCount: 'clock' });
+        const el = [...WaveLens.internal.peek(v).namesEl.querySelectorAll('.row.gref')].find(e => e.querySelector('.wd')), n = el.querySelector('.n'), mark = getComputedStyle(el, '::after');
+        const got = [n.textContent, mark.content, getComputedStyle(n, '::after').content, mark.order];   // read now: the rows are built again below
+        const svg = v.toSVG({ from: v.M.t0, to: v.M.t1 }); v.menu(10, 10, null); const opt = v.menuEl.querySelector('.gcnt option[value=clock]').textContent;
+        v.closeMenu(); v.setGaps({ gapAux: null, gapCount: 'off' }); v.menu(10, 10, R); v.menuEl.querySelector('button[data-m=gaux]').click();
+        return [...got, /\\d+↑/.test(svg), opt, v.gapOpt().gapCount]; })()""")
+    check(mk == ['PADDR[7:0]', '"//"', 'none', '1', True, 'time, cycles, +', 'clock'],
+          f'Gaps: the // of a bus with its width a mark of the row (never cut with the name); a signal marked + counted with "time, cycles" (N↑ '
+          f'over a gap), Count its changes turns the texts on {mk}')
+    js('(v.setGaps({ gapAux: null, gapSignals: null, gapCount: "clock" }), 0)')
     check(ck[0] == 'Count in cycles of this clock' and ck[1] and ck[2] == ['PCLK'] and ck[3] and ck[4],
           f'Gaps: cycles of this clock: the gaps count PCLK (↑ in the names), "· N PCLK" under the axis of the picture {ck}')
     rs = js("""(() => { v.setGaps({ gaps: true, gapIdle: 5, gapAux: ['x'] }); v.menu(10, 10, null); v.menuEl.querySelector('button[data-m=greset]').click();
@@ -5193,6 +5270,7 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'order': 'your groups\' rows in another order: alt+↑ / alt+↓ (shift: the group), a drag in the names, group move; one step each',
     'undo': 'ctrl+Z / ctrl+shift+Z and ↶ ↷: the edits undone and redone a step at a time (a batch of commands, a menu action), not the cursor',
     'cycles': 'the clock cycles under the time axis: numbers, the cursor\'s cycle, c147, cycle 0, Δ, the menu, the pictures, kept',
+    'bits': 'a bus\'s width after its name and the bus bit by bit: a click on [7:0], b, the menu, the command, kept, a bookmark on a bit, the pictures',
     'ranges': 'a range on the waves (shift+drag, the right button) and its menu: zoom, bookmarks, the picture, a colour',
     'tips': 'every control has a tooltip with its keys; ? shows the keys and the mouse',
     'buses': 'stage 11: bus transactions (AXI4, AXI4-Stream, APB, AHB, Avalon-MM / ST, Wishbone, OBI) on a dump of every protocol and the examples',
@@ -5318,6 +5396,7 @@ def main():
         run('state', state, b, build)
         run('edit', edit, b, build)
         run('cycles', cycles, b, build)
+        run('bits', bits, b, build)
         run('undo', undo, b, build)
         run('order', order, b, build)
         run('savepage', savepage, b, build)

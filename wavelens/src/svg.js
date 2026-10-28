@@ -20,31 +20,35 @@ const WaveSVG = {
     const hl = C.hl;
     // gaps (opts.cuts, else the settings gaps, gapIdle, gapKeep, gapSignals): the parts of [from, to] kept, side by side, a
     // narrow column GAP px wide between; their texts (gapCount) in thin rows over each gap: under the axis the time it
-    // leaves out and the cycles of the clock in it; with "edges" under each signal counted (gapAux; none: every one but the
-    // ones the gaps follow and the clock) what it did in the stretch left out (its rising and falling edges, a bus its changes)
+    // leaves out and the cycles of the clock in it; under each signal counted (gapAux, with any texts; none marked: with
+    // "edges" every one but the ones the gaps follow and the clock) what it did in the stretch left out (its rising and
+    // falling edges, a bus its changes; "rise", "fall", "any": those)
     const G = V ? V.gapOpt() : S, ref = gapRefs(M.rows, G.gapSignals);
     const clk = V ? V.gapClockFor(C.rows) : gapRefs(M.rows, G.gapClock)[0] || M.rows.find(isClkRow);   // the cycles counted: gapClock, else a clock
     const cuts = opts.cuts || (V ? [[from, to]] : gapCuts(ref.length ? ref : C.rows, from, to, S, clk, M.cycle, bms.map(b => b.t), ref.length > 0));
     const ng = cuts.length - 1, kept = cuts.reduce((n, [p, q]) => n + q - p, 0), gapLab = { size: 9.5 }, gc = G.gapCount || 'clock';
     const aux = new Set(V ? V.gapRows().aux : gapRefs(M.rows, G.gapAux)), refs = new Set(V ? V.gapRefSet() : ref);
+    const kind = ['edges', 'rise', 'fall', 'any'].includes(gc) ? gc : 'edges', each = gc !== 'off' && (aux.size > 0 || kind === gc);
     const counted = r => r.type === 'sig' && r.tr && r !== clk && (aux.size ? aux.has(r) : !refs.has(r));
     const ups = clk ? riseTimes(clk) : [], cyc = (p, q) => lastBefore(ups.length, j => ups[j], q, true) - lastBefore(ups.length, j => ups[j], p, true);
     const holes = cuts.slice(1).map(([q], i) => {   // cyc: the clock's cycles that start in [p, q)
       const p = cuts[i][1], d = q - p, nc = cyc(p, q), text = new Map();
-      if (gc === 'edges') for (const r of C.rows) if (counted(r)) { const t = gapText(r, p, q, gc); if (t) text.set(r, t); }
+      if (each) for (const r of C.rows) if (counted(r)) { const t = gapText(r, p, q, kind); if (t) text.set(r, t); }
       return { p, q, w: GAP, text, info: '+' + (M.timed ? fmtTime(d, d / 100, d) : trimNum(d)) + (nc ? ` · ${nc} ${clk.name}` : '') };
     });
     // a thin row under each signal with a text, on its module's background
-    const band = ng && gc === 'edges' ? new Map(C.band || []) : C.band;
+    const band = ng && each ? new Map(C.band || []) : C.band;
     const rows = band === C.band ? C.rows : C.rows.flatMap(r => { if (!holes.some(h => h.text.has(r))) return [r];
-      const sub = { type: 'space', name: '', depth: r.depth, anc: r.anc, height: 12, gapOf: r };
+      const sub = { type: 'space', name: '', depth: r.depth, anc: r.anc, height: 14, gapOf: r };
       if (band.has(r)) band.set(sub, band.get(r));
       return [r, sub]; });
     // the clock cycles under the axis (the viewer's Cycles, else the settings cycles, cycleClock, cycleZero); its clock under the names
     const cy = V ? V.cycData() : S.cycles ? (c => { const ups = c ? cycUps(c) : []; return ups.length ? { clk: c, ups, iz: cycZero(ups,
       zeroTime(S.cycleZero)) } : null; })(cycClock(M.rows, S.cycleClock)) : null, cyLab = cy && `cycles ↑ ${cy.clk.name}`;
-    const nameW = Math.ceil(Math.max(40, cy ? P.measure(cyLab, { size: 10 }) + 12 : 0, ...rows.map(r => P.measure(r.name || '', { size: fs,
-      weight: r.type === 'group' ? 600 : 400 }) + 22 + r.depth * 12)));
+    // a bus's width after its name (showWidth: [7:0], a field's [msb:lsb]), a little smaller and muted, as in the viewer
+    const wTag = r => (S.showWidth !== false && r.name ? widthTag(r) : ''), wSt = { size: fs - 1, fill: 'muted' };
+    const nameOf = r => P.measure(r.name || '', { size: fs, weight: r.type === 'group' ? 600 : 400 }), tagW = r => (wTag(r) ? 5 + P.measure(wTag(r), wSt) : 0);
+    const nameW = Math.ceil(Math.max(40, cy ? P.measure(cyLab, { size: 10 }) + 12 : 0, ...rows.map(r => nameOf(r) + tagW(r) + 22 + r.depth * 12)));
     let k = ((opts.cyclePx || 40) * M.hscale) / M.cycle;
     if (opts.width) k = (opts.width - nameW - 8 - ng * GAP) / kept;
     const waveW = kept * k + ng * GAP, Wt = Math.ceil(nameW + waveW + 8);
@@ -83,7 +87,9 @@ const WaveSVG = {
       if (typeof c === 'string') { P.rect(0, ry, xL, h, c, 0.1); P.rect(0, ry, 3, h, c); }   // a plugin's highlight
       if (!row.name) return;
       const g = row.type === 'group';
-      P.text(6 + row.depth * 12 + (g ? 0 : 8), ry + h / 2, row.name, { size: fs, weight: g ? 700 : 400, fill: strokeOf(row) || 'fg' });
+      const nx = 6 + row.depth * 12 + (g ? 0 : 8), nst = { size: fs, weight: g ? 700 : 400, fill: strokeOf(row) || 'fg' };
+      P.text(nx, ry + h / 2, row.name, nst);
+      if (wTag(row)) P.text(nx + P.measure(row.name, nst) + 5, ry + h / 2, wTag(row), wSt);
       if (g && last[row.id] > i) {
         const end = lay[last[row.id]], bx = 3 + row.depth * 12;
         P.path([['M', bx + 4, ry + h], ['L', bx, ry + h], ['L', bx, end.y + end.h - 3], ['L', bx + 4, end.y + end.h - 3]], { stroke: 'muted', w: 1 });
@@ -115,7 +121,7 @@ const WaveSVG = {
         });
       });
       // the texts over each gap: the time and the cycles under the axis, a counted signal's under it
-      const lab = Object.assign({ anchor: 'middle', fill: 'muted' }, gapLab);
+      const lab = Object.assign({ anchor: 'middle', fill: 'muted' }, gapLab), cnt = Object.assign({}, lab, { size: 10, fill: 'fg' });
       if (ng && gc !== 'off') { P.rect(xL, infoY, waveW, 14, 'panel2', 0.6); for (const o of lay) if (o.row.gapOf) P.rect(xL, o.y, waveW, o.h, 'panel2', 0.6); }
       // in the middle of each part its cycles (from the gap before to the gap after), where the gaps' texts leave room
       const used = holes.map((h, i) => { const w = P.measure(h.info, gapLab) / 2 + 6, x = segX[i + 1] - GAP / 2; return [x - w, x + w]; });
@@ -126,8 +132,8 @@ const WaveSVG = {
       });
       if (ng && gc !== 'off') holes.forEach((h, i) => { const xm = segX[i + 1] - GAP / 2;
         P.text(xm, infoY + 7, h.info, lab);
-        for (const { row, y: ry, h: rh } of lay) { const t = row.gapOf && h.text.get(row.gapOf), tw = t && P.measure(t, gapLab) + 6;
-          if (t) { P.rect(xm - tw / 2, ry + 1, tw, rh - 2, 'panel2'); P.text(xm, ry + rh / 2, t, lab); } }   // over the gap's line
+        for (const { row, y: ry, h: rh } of lay) { const t = row.gapOf && h.text.get(row.gapOf), tw = t && P.measure(t, cnt) + 6;
+          if (t) { P.rect(xm - tw / 2, ry + 1, tw, rh - 2, 'panel2'); P.text(xm, ry + rh / 2, t, cnt); } }   // over the gap's line
       });
       const top = showAxis ? axisY + 20 : lay.length ? lay[0].y : y;
       paintSpans(P, V ? V.spans : M.spans, X, from, to, lay, top, bodyEnd);

@@ -71,7 +71,7 @@ const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight
   labelSize: 11, fontSize: 11.5, sort: 'none', sortIgnore: [], sortButton: true, hint: true, style: 'auto', radix: 'auto', fold: null,
   highlight: null, dim: 0.3, groupColors: null, bookmarkLeft: 0.2, arrowLabels: 'lane', laneHeight: 16, maxHeight: null, toolsFolded: false, toolsHidden: [],
   groupOrder: 'file', moduleShading: true, findHighlight: true, findOpen: true, findMask: false, findCase: false, findWord: false,
-  findRegex: false, cursorSnap: 8,
+  findRegex: false, cursorSnap: 8, showWidth: true,
     wheel: 'scroll', contextMenu: true, enumColors: null, dumpBudget: 3000000, gaps: false, gapIdle: 16, gapKeep: 2,
     gapSignals: null, gapClock: null, gapAux: null, gapOnly: false, gapCount: 'clock', gapLine: 'dashdot', menuTipDelay: 2000, cycles: false,
     cycleClock: null, cycleZero: null, savePage: true, themeButton: 'auto', version: true, keysLeft: [], log: 'auto' };
@@ -501,6 +501,35 @@ function fieldRow(sig, f, depth, anc) {
   }
   return r;
 }
+// a vector unfolded into its bits (the viewer's Bits): a bus with values of bits, not a real or a string
+const isVec = r => !!r && r.type === 'sig' && !!r.tr && (r.width || 1) > 1 && r.kind !== 'real' && r.kind !== 'string';
+// the changes of every bit of a vector at once, MSB first: one pass over its changes
+function bitTrs(sig) {
+  const w = sig.width || 1, trs = Array.from({ length: w }, () => []);
+  for (const o of sig.tr) {
+    const b = bitsOf(o, w);
+    for (let j = 0; j < w; j++) { const c = b[j], k = c === '0' || c === '1' || c === 'z' ? c : 'x', a = trs[j];
+      if (!a.length || a[a.length - 1].k !== k) a.push({ k, t: o.t }); }
+  }
+  return trs;
+}
+// its bits as rows (MSB first), named "[i]" under it, full "vec[i]": fields [i:i] of it, their changes read again when
+// the vector's are new (a lazy dump read later)
+function bitRows(sig) {
+  const w = sig.width || 1; let from = null, trs = [];
+  const get = j => { if (from !== sig.tr) { from = sig.tr; trs = bitTrs(sig); } return trs[j]; };
+  return Array.from({ length: w }, (_, j) => {
+    const i = w - 1 - j, r = { type: 'sig', name: `[${i}]`, full: `${sig.full}[${i}]`, path: null, width: 1, depth: sig.depth + 1, anc: sig.anc,
+      gaps: [], src: {}, fromTv: !!sig.tv, field: [i, i], bit: i, of: sig };
+    Object.defineProperty(r, 'tr', { get: () => get(j), enumerable: true });
+    return r;
+  });
+}
+// the width after a name: a vector's [w-1:0], a field's place in its vector [msb:lsb], a struct's whole value's; none
+// for a bit, a real, a string
+const widthTag = r => { const s = r && r.type === 'group' ? r.sig : r;
+  if (!isVec(s) || (r.type === 'sig' && r.bit != null)) return '';
+  return s.field && r === s ? `[${s.field[0]}:${s.field[1]}]` : `[${s.width - 1}:0]`; };
 function parseTV(s, sig) { // extension: exact transitions [[time, value], …]; bit values 0/1/x/z, bus values hex or "'b" + bits;
   // "kind": "real" / "string": the values are texts shown as they are (a real's number, a string), null unknown
   const tv = s.tv || [], text = s.kind === 'real' || s.kind === 'string';

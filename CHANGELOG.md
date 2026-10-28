@@ -5,6 +5,20 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.29 — 28 October 2026
+
+A bus read bit by bit, and the gaps' marks and counts where they were lost.
+
+- **Bus widths on the names** (`PADDR [7:0]`; a packed struct's field its `[msb:lsb]`), in the viewer and the static
+  SVG; `showWidth: false` leaves them out. In a narrow names column the name stays whole, the width whole or not at all.
+- **A bus bit by bit:** a click on the width, `b`, or the menu's **Bits: N rows** — a row per bit under the bus
+  (`PADDR[7]` … `PADDR[0]`), a signal like any other (selected, its edges, a bookmark, the picture); kept in the browser,
+  the saved state (`bits`), undo and a page's edits; the command `bits` in the page and in `tools/viewedit.py`.
+- **Gaps:** the marks `//`, `↑`, `+` are the row's, between the name and the value (a bus's width or a long name hid
+  them); a signal marked `+` is counted with the default texts too (**time, cycles, +**; before only with **+ changes
+  in a gap**), **Count its changes in a gap** turns the texts on; `gapCount` `rise` / `fall` / `any` draw their counts;
+  the count over a gap more legible.
+
 ## 0.28 — 27 October 2026
 
 What an agent missed while it built an annotated page of a real test (six views, 32 bookmarks, 19 assertions): times

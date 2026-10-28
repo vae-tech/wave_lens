@@ -141,6 +141,15 @@
 .wv .names .row .n b.fm { color: var(--accent); font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
 .wv .names .row.alt { background-color: var(--wave-band); }
 .wv .names .row.grp .kd { font: 600 10.5px var(--font-mono); color: var(--muted); margin-right: 4px; }   /* {} struct, ∪ union, ⊟ interface */
+.wv .names .row .n .wd { font: 10.5px var(--font-mono); color: var(--muted); margin-left: 5px; }   /* a bus's width [7:0] */
+.wv .names .row .n:has(> .nt) { display: flex; flex-wrap: wrap; align-items: baseline; min-width: 0; height: 1.5em; line-height: 1.5em; }   /* the name
+   first; its width whole, or out of sight on the next line (a narrow column), never cut */
+.wv .names .row .n .nt { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.wv .names .row .n .nt + .wd { flex: none; }
+.wv .names .row .n .wd[data-b] { cursor: pointer; user-select: none; }   /* a click: the bus bit by bit */
+.wv .names .row .n .wd[data-b]:hover, .wv .names .row .n .wd.open { color: var(--accent); }
+.wv .names .row .n .wd[data-b]:hover { text-decoration: underline; text-underline-offset: 2px; }
+.wv .names .row.bit .n { font-family: var(--font-mono); font-size: 10.5px; }   /* a bit of a bus: [3] */
 .wv .names .row.grp:hover, .wv .names .row.grp:focus-visible { color: var(--accent); outline: none; }
 .wv .names .row.space { border-bottom-color: transparent; }
 .wv .names .row.lane { padding: 0; border-bottom: 0; background: color-mix(in srgb, var(--panel-2) 45%, transparent); }   /* arrow labels */
@@ -389,13 +398,16 @@
 .wv .wv-menu .mi.gp label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
 .wv .wv-menu .mi.gp input[type=checkbox] { width: auto; height: auto; margin: 0; border: 0; }
 .wv .wv-menu .mi.gp > span { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
-.wv .wv-menu .mi.gp select { max-width: 9em; }
+.wv .wv-menu .mi.gp select { max-width: 11em; }
 .wv .wv-menu .mi.gp input.gi, .wv .wv-menu .mi.gp input.gk { width: 4em; padding: 0 3px; color: var(--fg); cursor: text; }
 .wv .wv-menu .mi.gp button.gx { display: inline; padding: 0 4px; margin-left: 2px; color: var(--muted); }
 .wv .wv-menu .mi.gp button.gx:hover { color: var(--fg); }
-.wv .names .row.gref .n::after { content: ' //'; color: var(--accent); font-weight: 600; }   /* the gaps follow this signal */
-.wv .names .row.gclk .n::after { content: ' ↑'; color: var(--accent); font-weight: 600; }   /* the gaps count its cycles */
-.wv .names .row.gaux .n::after { content: ' +'; color: var(--muted); font-weight: 600; }   /* the gaps count its changes */
+/* the roles in the gaps: a mark of the row between the name and the value, never cut with a long name or a bus's width */
+.wv .names .row.gref::after, .wv .names .row.gclk::after, .wv .names .row.gaux::after { order: 1; flex: none; margin: 0 auto 0 -2px; font-weight: 600; }
+.wv .names .row .v { order: 2; }
+.wv .names .row.gref::after { content: '//'; color: var(--accent); }   /* the gaps follow this signal */
+.wv .names .row.gclk::after { content: '↑'; color: var(--accent); }   /* the gaps count its cycles */
+.wv .names .row.gaux::after { content: '+'; color: var(--muted); }   /* the gaps count its changes */
 .wv .wv-menu .mi.gp input.bad { outline: 2px solid var(--wave-x); outline-offset: -1px; }
 .wv .wv-menu .mi input.qf { width: 4.5em; margin-left: 4px; padding: 0 3px; color: var(--fg); cursor: text; }   /* fixed point: fraction bits */
 .wv .wv-menu .mh { padding: 4px 10px 2px; font: 600 11px var(--font-mono); color: var(--muted); overflow-wrap: anywhere; }

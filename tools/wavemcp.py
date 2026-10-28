@@ -1155,8 +1155,9 @@ def summary(st, timed, base=None):
     for k in ('paint', 'radix', 'analog'):
         if st.get(k):
             out[k] = st[k]
-    if st.get('hidden'):
-        out['hidden'] = st['hidden']
+    for k in ('hidden', 'bits'):
+        if st.get(k):
+            out[k] = st[k]
     fold = ed.fold()
     if fold:
         out['folded'] = fold

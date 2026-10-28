@@ -44,6 +44,7 @@ function pickRows(v, spec, o = {}) {
       if (!hit.length) { const at = pool.filter(r => s.endsWith('.' + r.full)), n = Math.max(0, ...at.map(r => r.full.length));
         hit = at.filter(r => r.full.length === n); }
     }
+    if (!hit.length && !o.scopes) { const b = v.sigByPath(s); if (b) hit = [b]; }   // a bit of a bus: "data[3]"
     if (!hit.length) {
       const low = s.toLowerCase().replace(/\*/g, ''), near = low ? pool.filter(r => r.name.toLowerCase().includes(low)).slice(0, 5).map(r => r.full) : [];
       fail(`no ${what} "${s}"${near.length ? '; similar: ' + near.join(', ') : ''}`);
@@ -335,6 +336,11 @@ command('analog', 'signals rows', 'buses drawn as a step plot that many rows hig
   if (n != null && n !== false && !(Number.isInteger(n) && n >= 0)) fail('rows: a number of rows, true, false or null');
   rows.forEach(r => v.setAnalog(r, n == null ? null : n || false, true)); v.saveRows(); v.renderNames(); v.draw(); return { signals: rows.length };
 });
+command('bits', 'signals on?', 'buses shown bit by bit, a row per bit under each (the highest first, "data[3]"); on: false folds them', (v, a) => {
+  if (a.on != null && typeof a.on !== 'boolean') fail('on: true or false');
+  const rows = pickRows(v, a.signals), bad = rows.filter(r => !isVec(r)); if (bad.length) fail(`not a bus: ${bad.map(r => r.full).join(', ')}`);
+  v.setBits(rows, a.on ?? true); return { signals: rows.length };
+});
 command('sort', 'dir ignore?', 'the order of the names: none, asc, desc; ignore: prefixes left out when comparing ("i_,o_")', (v, a) => {
   if (!SORTS.includes(a.dir)) fail(`dir: one of ${SORTS.join(' ')}`);
   v.setSort(a.dir, a.ignore ?? undefined); return { sort: v.sort, ignore: v.sortIgnore };
@@ -399,7 +405,7 @@ command('rows', 'pattern? limit? offset?', 'the signals and modules of the page 
   'hidden and folded ones too', (v, a) => {
   const rx = a.pattern ? (String(a.pattern).includes('*') ? glob(String(a.pattern)) : null) : null, low = String(a.pattern || '').toLowerCase();
   const all = v.allRows(true)   // the hidden ones too (a signal under a hidden module), where they would be
-    .filter(r => (r.type === 'sig' && r.tr && !r.ug) || (r.type === 'group' && r.full))
+    .filter(r => (r.type === 'sig' && r.tr && !r.ug && r.bit == null) || (r.type === 'group' && r.full))   // a bus's bits: by their paths
     .filter(r => !a.pattern || (rx ? rx.test(r.full) : r.full.toLowerCase().includes(low)));
   const off = Math.max(0, +a.offset || 0), n = Math.max(1, +a.limit || 200), page = all.slice(off, off + n);
   return { total: all.length, rows: page.map(r => [r.full, r.type === 'group' ? (r.user ? 'group' : 'module') : r.width || 1]),
@@ -453,7 +459,7 @@ Object.assign(WaveView.prototype, {
     const groups = this.groupList().map((g, i) => Object.assign(g, { uid: this.ugroups[i].uid || (this.ugroups[i].uid = ++XID) }));   // a group over a rename
     return JSON.stringify({ bookmarks: this.bookmarks(), arrows: this.arrowList(), markers: this.markList(), groups,
       paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs), hidden: [...this.hiddenRows],
-      only: this.onlyState(), fsm: this.fsmState(),
+      bits: [...this.bitsOpen], only: this.onlyState(), fsm: this.fsmState(),
       config: Object.assign({ style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded,
         toolsHidden: toolNames(this.S.toolsHidden) }, this.gapOpt(), this.cycOpt()),
       hl: [...this.picks].map(([r, i]) => [r.full, i]).sort((a, b) => a[1] - b[1]) });
@@ -624,7 +630,7 @@ Object.assign(WaveView.prototype, {
 // (wavelens.edits:<page>), so what you change here afterwards stays until a newer one (Save keeps yours in a file). The
 // rest (cursor, window, highlight, selection, folding, order, search), which a page opened again starts from anyway,
 // is applied every time, as the page's own settings are.
-const KEPT = ['bookmarks', 'arrows', 'markers', 'spans', 'groups', 'paint', 'radix', 'analog', 'hidden'];
+const KEPT = ['bookmarks', 'arrows', 'markers', 'spans', 'groups', 'paint', 'radix', 'analog', 'hidden', 'bits'];
 const KEPT_CFG = ['style', 'maxHeight', 'toolsFolded', 'toolsHidden', ...GAP_KEYS, ...CYC_KEYS];
 // what undo takes back: the above and Only (not kept in this browser: a page opened again applies a revision's Only anew)
 const UNDO_KEYS = [...KEPT, 'only', 'fsm'];

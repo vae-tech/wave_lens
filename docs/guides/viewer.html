@@ -257,6 +257,9 @@
     fixed sq (signed) with a field for the fraction bits</td></tr>
   <tr><td>Analog (step plot)</td><td>the bus as a step plot three rows high, between its smallest and largest value in its radix (signed,
     float, fixed); <span class="ui">As a bus</span> turns it back</td></tr>
+  <tr><td>Bits: N rows</td><td>the bus bit by bit: a row per bit under it, the highest first (<code>[7]</code> … <code>[0]</code>, the path
+    <code>PADDR[7]</code>); as a click on its width <code>[7:0]</code> after the name, or <kbd>b</kbd>; <span class="ui">Fold the bits</span>
+    folds them; kept in this browser and in the saved state</td></tr>
   <tr><td>Highlight</td><td>as ctrl+click (<a href="#highlight">Highlight</a>)</td></tr>
   <tr><td>Hide</td><td>leaves the row out; <span class="ui">Hidden: N ✕</span> in the bar, or <span class="ui">Show the hidden</span> in this
     menu, brings it back</td></tr>
@@ -449,7 +452,7 @@
 <h2 id="state">Save and Load</h2>
 <p><span class="ui">Save</span> downloads what you did in the viewer as <code>&lt;title&gt;.view.json</code>: the time window and the
   cursor, the order and its prefixes, the folded modules, the highlight, the paint, the selected signal, the search, the bookmarks and
-  arrows, the radix, analog and hidden rows, the second cursor and the range, the gap settings, the assertions (files loaded or edited in
+  arrows, the radix, analog and hidden rows, the buses shown bit by bit, the second cursor and the range, the gap settings, the assertions (files loaded or edited in
   the page, with their text, and the bindings) and the ƒ rows. <span class="ui">Load…</span> (or dropping the file on a viewer) reads it
   back — after a reload, in another browser, or on other waves: what they lack is left out and counted in the title line. A state says
   what is not there too (<code>"cursor2": null</code>, <code>"range": null</code>, the edge kind): loaded, it clears them; a key a
@@ -465,7 +468,7 @@
   <span class="ui">Save</span>. The file carries what you did: your assertion files' text, notes, the search.</p>
 <h3 id="undo">Undo and redo</h3>
 <p><kbd>ctrl+Z</kbd> (or <span class="ui">↶</span> in the bar's title line, there with the tools folded too) takes back the last change of what you edit in a viewer: bookmarks and
-  arrows, markers, your groups, colours, radix, analog and hidden rows, the highlight, the edge style, the scroll and the folded tools,
+  arrows, markers, your groups, colours, radix, analog and hidden rows, the buses bit by bit, the highlight, the edge style, the scroll and the folded tools,
   the gaps and the cycles. <kbd>ctrl+shift+Z</kbd> or <kbd>ctrl+Y</kbd> (<span class="ui">↷</span>) does it again. A step is what one
   action changed: a menu item, a colour picked, a bookmark dragged, a batch of commands from a script or a live agent; the toast names
   it (<code>undone: radix, hidden</code>). The cursor, the window, the selection and the search are not steps (move them back with
@@ -539,7 +542,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.28 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.29 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

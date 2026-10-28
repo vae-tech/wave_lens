@@ -58,7 +58,8 @@ COMMANDS = {
     'marker': 'id? t? label? color? delete?', 'span': 'id? from? to? label? color? signals? delete?',
     'group': 'name signals? add? remove? color? rename? delete? go? move?',
     'highlight': 'add? remove? set? clear?', 'paint': 'signals? color? clear?', 'select': 'signal? signals?', 'hide': 'signals', 'show': 'signals?',
-    'fold': 'groups? all?', 'unfold': 'groups? all?', 'radix': 'signals radix', 'analog': 'signals rows', 'sort': 'dir ignore?', 'style': 'name',
+    'fold': 'groups? all?', 'unfold': 'groups? all?', 'radix': 'signals radix', 'analog': 'signals rows', 'bits': 'signals on?',
+    'sort': 'dir ignore?', 'style': 'name',
     'layout': 'scroll? height? tools?', 'find': 'query case? word? regex? highlight? open? mask?', 'gaps': 'on? idle? keep? signals? clock? aux? only? count? reset?',
     'cycles': 'on? clock? zero? reset?', 'only': 'modules? on? clear? open?', 'fsm': 'mode? signals? fields? clear?',
     'fsm_stats': 'signal', 'fsm_go': 'signal state? from? to? dir? first?', 'types': 'signals?',
@@ -179,6 +180,11 @@ def flat_text(t):
 
 
 # ---------------- the page's waves: rows and groups as the viewer's parse() makes them ----------------
+def is_vec(r):
+    """model.js isVec: a bus of bits (shown bit by bit), not a real or a string."""
+    return (r.get('width') or 1) > 1 and r.get('kind') not in ('real', 'string')
+
+
 class Model:
     """The rows of one WaveJSON (signals with their full path and width, groups with their id and path) and the
     settings the viewer starts from (highlight, fold, sort), for names, the base of a state and the order of folding."""
@@ -270,6 +276,14 @@ class Model:
     def sigs(self):
         return [r for r in self.rows if r['type'] == 'sig']
 
+    def bit(self, p):
+        """view.js sigByPath: a bit of a bus by its path ("data[3]"), shown or not; None when it is not one."""
+        m = re.fullmatch(r'(.+)\[(0|[1-9]\d*)\]', p) if isinstance(p, str) else None
+        v = m and next((r for r in self.sigs() if r['full'] == m[1] and is_vec(r)), None)
+        if not v or int(m[2]) >= v['width']:
+            return None
+        return {'type': 'sig', 'name': f'[{m[2]}]', 'full': p, 'anc': v['anc'], 'width': 1, 'kind': None, 'bit': int(m[2])}
+
     def scopes(self):
         """modules.js scopes: the page's groups that are modules (interfaces …), not the value of a struct or a union."""
         return [g for g in self.groups if g.get('kind') not in ('struct', 'union')]
@@ -310,6 +324,8 @@ class Model:
                 if not hit:   # the dump's path of a signal the page shows under a shorter one (wave_page: "tb.aclk" for "aclk")
                     at = [r for r in pool if s.endswith('.' + r['full'])]
                     hit = [r for r in at if len(r['full']) == max(len(x['full']) for x in at)]
+            if not hit and not scopes and self.bit(s):   # a bit of a bus: "data[3]"
+                hit = [self.bit(s)]
             if not hit:
                 low = s.lower().replace('*', '')
                 near = [r['full'] for r in pool if low and low in r['name'].lower()][:5]
@@ -1055,6 +1071,23 @@ class Editor:
         self.put_map('analog', p)
         return {'signals': len(rows)}
 
+    def c_bits(self, a):
+        on = a.get('on')
+        if on is not None and not isinstance(on, bool):
+            fail('on: true or false')
+        rows = self.m.pick(self.st, a.get('signals'))
+        bad = [r['full'] for r in rows if not is_vec(r)]
+        if bad:
+            fail(f'not a bus: {", ".join(bad)}')
+        b = list(self.st.get('bits') or [])
+        for r in rows:
+            if on is False:
+                b = [p for p in b if p != r['full']]
+            elif r['full'] not in b:
+                b.append(r['full'])
+        self.st['bits'] = b
+        return {'signals': len(rows)}
+
     def c_sort(self, a):
         if a.get('dir') not in SORTS:
             fail(f'dir: one of {" ".join(SORTS)}')
@@ -1185,6 +1218,9 @@ class Editor:
                     self.config().update(v)
             elif k not in ('wavelens', 'version', 'title'):
                 self.st[k] = v
+        if 'bits' in s and self.m.doc:   # as the viewer keeps them: the buses of these waves
+            vec = {r['full'] for r in self.m.sigs() if is_vec(r)}
+            self.st['bits'] = [p for p in dict.fromkeys(map(str, s['bits'] if isinstance(s['bits'], list) else [])) if p in vec]
         if 'only' in s:   # as the viewer keeps it: its known modules, on unless false; a selection it leaves out goes
             self.st['only'] = self.only()
             self.unselect_gone()
@@ -1199,7 +1235,7 @@ class Editor:
         c = s['config'] if isinstance(s.get('config'), dict) else {}
         lst = lambda x: x if isinstance(x, list) else []
         def see(p, pool=paths):
-            if isinstance(p, str) and p and not p.startswith('@') and p not in pool and p not in out:
+            if isinstance(p, str) and p and not p.startswith('@') and p not in pool and p not in out and not (pool is paths and self.m.bit(p)):
                 out.append(p)
         for g in lst(s.get('groups')):
             for p in lst(g.get('signals')) if isinstance(g, dict) else []:
@@ -1212,7 +1248,7 @@ class Editor:
         for k in ('paint', 'radix', 'analog'):
             for p in s[k] if isinstance(s.get(k), dict) else {}:
                 see(p)
-        for p in lst(s.get('hidden')):
+        for p in lst(s.get('hidden')) + lst(s.get('bits')):
             see(p)
         mods = {g['path'] for g in self.m.scopes()}
         for p in lst(s['only'].get('modules')) if isinstance(s.get('only'), dict) else []:
