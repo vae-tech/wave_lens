@@ -64,7 +64,8 @@ tests/
   conformance.html            every feature next to stock WaveDrom 3.5.0 (vendor/, test-only)
 work/                         your dumps and their configs: configs tracked, dumps and pages git-ignored
 sva/                          the SVA engine (Rust: core, native CLI, WebAssembly); the CLI's sva vcd (cli/src/vcd.rs:
-                              a dump as VCD text) and sva fst (cli/src/fst.rs: a VCD as an FST, as vcd2fst writes it)
+                              a dump as VCD text, a cut of it), sva fst (cli/src/fst.rs: a VCD as an FST, as vcd2fst
+                              writes it) and sva diff (cli/src/diff.rs: two dumps streamed and merged by time)
 prompts/                      the roadmap as a series of prompts (on main only)
 bin/                          the prebuilt sva CLI, committed: linux-x86_64/sva (static); windows-x86_64/sva.exe by make dist-windows
 out/                          build products (make's BUILD, git-ignored): cargo target, example dumps and pages, shots
@@ -106,6 +107,7 @@ make sva-examples sva-spike # sva parse + sva eval of examples/*/*.sva; the WebA
 make sva-verify             # the examples' checkers in Verilator --assert against sva eval (sva/ENGINE.md § Tests)
 make sva-eval WAVES=work/x.fst SVA="pkg.sv checks.sva" SCOPE=tb.dut OUT=results.json   # assertions over any dump
 make fst WAVES=work/x.vcd     # sva fst: work/x.fst beside it, the FSM states of work/x.types.json in it
+make diff REF=work/a.vcd WAVES=work/b.vcd ARGS="--segment tb_test"   # sva diff: two runs change by change
 make fmt lint               # verible-verilog-format (docs/SV_STYLE.md), verilator --lint-only -Wall on the testbenches
 make clean                  # the build products under BUILD; clean-all: BUILD entirely, the cargo target included
 ```
@@ -282,6 +284,23 @@ step plot, a redraw at Fit 1050 → 9 ms and its SVG 1.5 MB → 120 KB (one bar 
 value), 500 000 changes 97 ms (before: the page did not open in 30 s).
 
 The SVA engine's numbers are in [`sva/ENGINE.md`](sva/ENGINE.md) *Performance*.
+
+`sva diff` (stage 14.1; the release build, synthetic dumps of `tests/mcp_bench.py gen_vcd`, 167 signals, a dump against
+a copy of itself; *RssAnon*: the heap, sampled from `/proc`; *RSS* also counts the pages of the two VCDs wellen maps
+into memory, the page cache's to take back):
+
+| Job | time | heap (RssAnon) | RSS |
+|---|---|---|---|
+| 38 MB × 2 VCD (2.6 M changes compared) | 1.3 s | 1.5 MB | 78 MB |
+| 214 MB × 2 VCD (14.2 M changes) | 6.9 s | 1.5 MB | 422 MB |
+| 430 MB × 2 VCD (28.4 M changes) | 14.8 s | — | 844 MB |
+| 27 MB × 2 FST of the 214 MB VCD (`sva fst`, blocks of 64 MiB) | 10.5 s | 255 MB | 258 MB |
+| the same FST written in blocks of 8 MB (`--block-bytes`) | — | 99 MB | — |
+| `sva vcd --from 10ms --to 11ms` of the 214 MB VCD / of its FST (a 10.9 MB cut) | 1.7 s / 0.95 s | — | 109 / 153 MB |
+
+A VCD costs the heap nothing that grows with it: the values held are one per compared signal and side. An FST is read a
+block at a time, each reader holding one block of changes unpacked and the time table (8 bytes a time step): its heap
+is that much, about twice the 64 MiB blocks of `sva fst` here; a dump twice as long adds the time table (324 MB).
 
 A page with assertions (stage 13.1; `docs/reviews/review-2026-10-27-wave-tour/probe/gen.py`: a VCD of 17 780 cycles of
 12 MHz, 19 assertions, six windowed views with bindings as in the report that asked for it): 6.76 MB when every binding

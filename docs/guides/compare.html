@@ -70,13 +70,45 @@
   into a review as it is:</p>
 <figure><img src="img/compare-svg.png" alt="The SVG of 40–200 ns with the red bands of PRDATA and PREADY" loading="lazy">
   <figcaption><b>The SVG of the window.</b> The same bands as on the screen (the names plain: no ≠, no strike).</figcaption></figure>
-<div class="note"><p>A compare is a look at the waves for this session: it is <b>not</b> in the saved state nor in
-  <span class="ui">Save page</span> — the page does not carry dump B. Keep the picture, or B's VCD next to the page, to show it
-  again.</p></div>
+<div class="note"><p>A compare is kept: <span class="ui">Save page</span> and <span class="ui">Save</span> write its result (not dump B)
+  into the page or the state file, so who opens it sees the bands. A page can also be built with them: the config's
+  <code>"compare": {"dump": "b.vcd"}</code> runs <code>sva diff</code> when the page is made (below).</p></div>
+<p>A large B is read once, only its signals that could be the page's rows and only over the page's time; the toast says how far
+  it is, and <span class="ui">≠ … ✕</span> in the bar stops the read.</p>
+
+<h2 id="shell">From the shell</h2>
+<p>The page reads all of B. For dumps of hundreds of MB, for CI, or for two testbenches whose scopes are named apart,
+  compare them in the shell: <code>sva diff</code> reads both as streams, neither in memory, and compares their values as
+  <span class="ui">Compare…</span> does (two VCDs of 214 MB in 7 s):</p>
+<pre>sva diff apb.vcd apb_b.vcd --limit 4
+A: apb.vcd  0 ps … 205 ns, 61 signals
+B: apb_b.vcd  0 ps … 205 ns, 58 signals
+58 signals compared, 3 only in A, 0 ps … 205 ns
+398 changes compared, 6 differ in 6 signals; the first at 115 ns: apb_tb.PRDATA A=0xcafe0001 B=0xdeadbeef
+          115 ns  apb_tb.PRDATA  A=0xcafe0001 B=0xdeadbeef
+          115 ns  apb_tb.u_master.PRDATA  A=0xcafe0001 B=0xdeadbeef
+          115 ns  apb_tb.u_regs.PRDATA  A=0xcafe0001 B=0xdeadbeef
+          155 ns  apb_tb.PREADY  A=1 B=0
+  … and 2 more (--limit)</pre>
+<p>The same three differences as on the page: <code>PRDATA</code> at 115 ns (on each of its three paths), <code>PREADY</code> at
+  155 ns, and <code>PSLVERR</code> only in A. The exit status is 1.</p>
+<ul>
+  <li>A signal of A pairs with B's of the same path; <code>--map A=B</code> renames a scope or one signal (the tops pair by
+    themselves when each dump has one). Nothing is matched by its short name.</li>
+  <li><code>--from</code> / <code>--to</code> a window, <code>--offset</code> B later by that much; <code>--segment tb_test</code> a line per test
+    case, <code>--align</code> case k of B on case k of A (the same case run alone and in a group).</li>
+  <li><code>--json -</code> the result as JSON, <code>--junit diff.xml</code> a test case per segment for CI; exit status 0 equal, 1 they
+    differ, 2 a usage error.</li>
+  <li>Two testbenches with their scopes named apart: <code>--map tb_a.if_x=tb_b.if_x</code>, and for a signal that moved
+    <code>--map tb_a.sensor_data=tb_b.bif.sensor_data</code>.</li>
+  <li>To look at one case on a page: cut it out, <code>sva vcd b.vcd --from 4783.174us --to 7426.132us --signals 'tb.if_x.*'
+    --out case4.vcd</code>, and give that to <span class="ui">Compare…</span>.</li>
+</ul>
+<p>All the options: <a href="../USAGE.md">USAGE.md</a> § Compare two runs from the shell.</p>
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.29 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.30 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

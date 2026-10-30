@@ -21,6 +21,8 @@ writes one bit by bit (`d[4]` … `d[7]` → `d [7:4]`: an assertion names `d`);
 merged the same way (`\e[0]` `\e[1]` → `\e [1:0]`), a known limitation of the reader (not patched here). `sva vcd`
 does not go through wellen for an FST: it writes the names as the FST holds them, as `fst2vcd -e` does (USAGE.md §
 *An FST as VCD text*). A dump wellen cannot read (a value longer than its variable) is one line naming the file, exit 2.
+`sva diff A B` (USAGE.md § *Compare two runs from the shell*) is not the engine: two dumps read as wellen streams and
+compared change by change, no sampling, no assertion.
 
 `sva eval` resolves every signal name in `--scope`, then in the scopes above it (so a checker bound into `tb.dut` can
 read `tb.clk`; `--resolve scope` is the page's binding rule of *Name resolution* below, which `mkhtml.py` uses for a

@@ -48,6 +48,7 @@ help:
 	@echo 'make example    EX=apb|axi_lite|fsm: one of them'
 	@echo 'make questa     EX=fsm: the example in QuestaSim (vsim on PATH): VCD + its types (tools/questa/wavelens_types.tcl) + page in $$(BUILD)/questa/<ex>/'
 	@echo 'make types-fixture  tests/unit/types in QuestaSim again: questa.vcd, questa.types.json (another Questa version: read the diff)'
+	@echo 'make missing-fixture  tests/unit/types/missing.* in QuestaSim again: what its VCD (vcd add without -r) lacks of the types'
 	@echo 'make shots      the README screenshots in docs/img/ and the visual regression'"'"'s tests/visual (after make examples)'
 	@echo 'make shots-check  both made again into $$(BUILD), compared pixel by pixel with the committed ones (tests/pngdiff.py): a change fails'
 	@echo 'make pageshot   HTML=page.html [VIEW=key THEME=dark|light|both OUT=dir]: PNGs of a page'"'"'s views in a headless Chromium (tools/pageshot.py, playwright)'
@@ -66,6 +67,7 @@ help:
 	@echo 'make sva-verify the checkers of the examples in Verilator --assert against sva eval (after make examples; skipped without verilator)'
 	@echo 'make sva-eval   WAVES=dump.vcd|fst SVA="pkg.sv checks.sva" SCOPE=tb.dut [OUT=results.json] [ARGS=...]: sva eval'
 	@echo 'make fst        WAVES=tb.vcd [OUT=tb.fst] [ARGS=--no-types]: sva fst, the VCD as an FST beside it (FSM states of tb.types.json in it)'
+	@echo 'make diff       REF=a.vcd|fst WAVES=b.vcd|fst [ARGS="--map a.top=b.top --segment tb_test --json d.json"]: sva diff, two runs change by change'
 	@echo 'make sva-spike  the spike page $$(BUILD)/sva/spike.html (the WebAssembly build and wavelens/sva.js in a page)'
 	@echo 'make vsix       the VS Code extension (vscode/) -> $$(BUILD)/wavelens.vsix and its copy wavelens-<version>.vsix (kept'
 	@echo '                side by side): the viewer and the static sva, for the Linux host of Remote-SSH / WSL (nothing else'
@@ -177,6 +179,15 @@ types-fixture:
 	sed 's/"date": "[^"]*"/"date": "2026-10-24T13:30:00"/' $(B)/questa/types/questa.types.json > $(TF)/questa.types.json
 	sed '/^\$$date/{n;s/.*/\tSat Oct 24 13:30:00 2026/}' $(B)/questa/types/questa.vcd > $(TF)/questa.vcd
 	$(PY) tools/svtypes.py check $(TF)/questa.types.json $(TF)/questa.vcd
+# what a Questa VCD leaves out (svtypes.py check: missing): its types and a VCD of `vcd add` without -r
+missing-fixture:
+	@command -v vsim >/dev/null || { echo 'missing-fixture: vsim is not on PATH (QuestaSim)'; exit 1; }
+	mkdir -p $(B)/questa/missing
+	cd $(B)/questa/missing && vlog -sv -quiet $(abspath $(TF)/missing_tb.sv) && vsim -c -quiet -voptargs=+acc missing_tb \
+	  -do "source $(abspath tools/questa/wavelens_types.tcl); wavelens_types missing.types.json; vcd file missing.vcd; vcd add /missing_tb/*; run -all; quit -f"
+	sed 's/"date": "[^"]*"/"date": "2026-10-30T09:00:00"/' $(B)/questa/missing/missing.types.json > $(TF)/missing.types.json
+	sed '/^\$$date/{n;s/.*/\tFri Oct 30 09:00:00 2026/}' $(B)/questa/missing/missing.vcd > $(TF)/missing.vcd
+	-$(PY) tools/svtypes.py check $(TF)/missing.types.json $(TF)/missing.vcd
 
 shots:
 	$(PW) tests/shots.py --build $(B) $(if $(ONLY),--only $(ONLY))
@@ -290,6 +301,13 @@ fst: sva-build
 	$(if $(WAVES),,$(error make fst needs WAVES=dump.vcd))
 	$(SVA_BIN) fst $(WAVES) $(if $(OUT),--out $(OUT)) $(ARGS)
 
+# two dumps of one test compared change by change, streamed (docs/USAGE.md § Compare two runs from the shell):
+# make diff REF=golden.vcd WAVES=run.vcd [ARGS="--segment tb_test --junit diff.xml"]
+diff: sva-build
+	$(if $(REF),,$(error make diff needs REF=a.vcd|fst (A, the reference) and WAVES=b.vcd|fst (B)))
+	$(if $(WAVES),,$(error make diff needs WAVES=b.vcd|fst (B, compared with REF)))
+	$(SVA_BIN) diff $(REF) $(WAVES) $(ARGS)
+
 # sva eval over any dump: make sva-eval WAVES=work/x.fst SVA="rtl/pkg.sv checks.sva" SCOPE=tb.dut [OUT=r.json]
 sva-eval: sva-build
 	$(if $(WAVES),,$(error make sva-eval needs WAVES=dump.vcd|fst))
@@ -387,4 +405,4 @@ clean-all:
 	$(if $(filter $(B),/ $(CURDIR) $(HOME) $(abspath $(HOME)/..)),$(error clean-all: BUILD=$(B) is not a build directory))
 	rm -rf $(B)
 
-.PHONY: pageshot unit-bless unit-shuffle vsix vscode-e2e wavelens help demo demo-fst fst example examples questa types-fixture shots guide-shots html config sva-build dist dist-linux dist-windows sva-test sva-bless sva-examples sva-verify sva-eval sva-spike mcp-bench smoke shots-check unit check fmt lint clean clean-all
+.PHONY: pageshot unit-bless unit-shuffle vsix vscode-e2e wavelens help demo demo-fst fst diff example examples questa types-fixture missing-fixture shots guide-shots html config sva-build dist dist-linux dist-windows sva-test sva-bless sva-examples sva-verify sva-eval sva-spike mcp-bench smoke shots-check unit check fmt lint clean clean-all

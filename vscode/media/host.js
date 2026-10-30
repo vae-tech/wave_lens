@@ -2,8 +2,10 @@
    browser does by itself and a webview cannot (or does on the wrong machine) goes to the extension host by postMessage:
    - localStorage: this dump's store, given in the page (#wavelens-host) and kept by the extension (workspaceState);
    - a download (an <a download> clicked: Save state, PNG, SVG, WaveDrom, the report) -> a save dialog on the host;
-   - a file picker (an <input type=file> clicked: Load state, the .sv files, Compare, Open…) -> an open dialog on the
-     host (Open… a dump: a tab of its own); no showOpenFilePicker (a handle of the client's disk);
+   - a file picker (an <input type=file> clicked: Load state, the .sv files, Open…) -> an open dialog on the host (Open…
+     a dump: a tab of its own); no showOpenFilePicker (a handle of the client's disk);
+   - Compare… -> an open dialog on the host and sva diff there (the second dump, VCD or FST, never sent here): its result
+     over the tab's waves (compareResult);
    - navigator.clipboard.writeText -> the client's clipboard through VS Code;
    - the live link's EventSource / fetch / sendBeacon to 127.0.0.1 -> the host's 127.0.0.1 (the agent's wavemcp.py);
    - the theme: VS Code's light / dark, its own colours (wavelens.theme: vscode) or one of the viewer's;
@@ -60,6 +62,15 @@
   const iclick = HTMLInputElement.prototype.click;
   HTMLInputElement.prototype.click = function () {
     if (this.type !== 'file') return iclick.call(this);
+    if (this.classList.contains('cfile')) {   // Compare…: sva diff on the host over this view's signals and time
+      const root = this.closest('.wv'), v = (root && root.waveView) || view(); if (!v) return;
+      const signals = v.cmpRows().map(r => (r.src && r.src.path) || r.path || r.full);
+      call('compare', { signals, from: v.M.t0, to: v.M.t1 }).then(m => {
+        if (m.error) { toast(m.error); return; }
+        if (m.result) v.compareResult(m.result);
+      });
+      return;
+    }
     call('pick', { accept: this.accept, multiple: this.multiple }).then(m => {
       if (m.error) { toast(m.error); return; }
       if (!m.files || !m.files.length) return;

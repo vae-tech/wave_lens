@@ -2,6 +2,7 @@
 import json, os, shutil, subprocess, unittest
 
 from tests.unit import helpers as H
+import svabuild
 import vcd2wavedrom as V
 from common import WaveError
 
@@ -454,6 +455,59 @@ class Convert(unittest.TestCase):
                         got = self.read_all(r, fst)
                         got[1].get('head', {}).pop('text', None)
                         self.assertEqual(got, want, r)
+
+
+CMP_HEAD = ('$timescale 1ns $end\n$scope module {top} $end\n$var wire 1 ! clk $end\n$var wire 4 " d [3:0] $end\n$var integer 32 # tb_test $end\n'
+            '$upscope $end\n$enddefinitions $end\n')
+
+
+def cmp_bench(d, name, top, d30):
+    """A dump of three test cases (tb_test 0, 1, 2) with the bus d of value d30 from 30 ns."""
+    return H.vcd(d, f'#0\n0!\nb0 "\nb0 #\n#10\n1!\nb1010 "\nb1 #\n#20\n0!\n#30\n1!\nb{d30} "\nb10 #\n#40\n0!\n#50\n',
+                 header=CMP_HEAD.format(top=top), name=name)
+
+
+@H.needs(svabuild.find_bin(), 'the sva CLI (make sva-build)')
+class Compare(unittest.TestCase):
+    """Stage 14.3: the config's "compare" (sva diff at the build -> the WaveJSON "compare", by the rows as the page names
+    them), refused on a clock view; "spans" with "every" (a span per test case, {value} and {n})."""
+
+    def conv(self, d, cfg):
+        c = os.path.join(d, 'c.json')
+        with open(c, 'w', encoding='utf-8') as f:
+            json.dump(cfg, f)
+        rc, out, err = H.run_tool('vcd2wavedrom', '--config', c)
+        return rc, (json.loads(out) if rc == 0 else None), err
+
+    def test_compare_key(self):
+        with H.tmp() as d:
+            cmp_bench(d, 'a.vcd', 'tb', '1011'), cmp_bench(d, 'b.vcd', 'top', '1111')
+            rc, doc, err = self.conv(d, {'waves': 'a.vcd', 'exact': True, 'signals': ['tb.clk', 'tb.d'], 'compare': {'dump': 'b.vcd'}})
+            self.assertEqual(rc, 0, err)
+            c = doc['compare']
+            self.assertEqual((c['name'], c['from'], c['to'], c['compared'], c['differ'], c['first']), ('b.vcd', 0, 50000, 2, 1, 30000))
+            self.assertEqual(c['signals']['d'], {'spans': [[30000, 50000]], 'b': 'top.d'}, 'by the row as the page names it')
+            self.assertEqual((c['signals']['clk']['spans'], c['missing'], c['map'][0]['auto']), ([], [], True))
+            rc, _, err = self.conv(d, {'waves': 'a.vcd', 'clock': 'tb.clk', 'signals': ['tb.d'], 'compare': {'dump': 'b.vcd'}})
+            self.assertEqual(rc, 1)
+            self.assertIn('"compare" is of exact waves', err)
+            rc, _, err = self.conv(d, {'waves': 'a.vcd', 'exact': True, 'signals': ['tb.d'], 'compare': {'dump': 'b.vcd', 'sideways': 1}})
+            self.assertIn('unknown key(s) sideways', err)
+            rc, _, err = self.conv(d, {'waves': 'a.vcd', 'exact': True, 'signals': ['tb.d'], 'compare': 'b.vcd'})
+            self.assertIn('"compare" is {"dump"', err)
+
+    def test_spans_every(self):
+        with H.tmp() as d:
+            cmp_bench(d, 'a.vcd', 'tb', '1011')
+            rc, doc, err = self.conv(d, {'waves': 'a.vcd', 'exact': True, 'signals': ['tb.d'], 'spans': [
+                {'every': 'tb.tb_test', 'label': 'case {value} ({n})', 'color': 'c5'}, {'every': {'signal': 'tb.d', 'value': '0xe'}}]})
+            self.assertEqual(rc, 0, err)
+            self.assertEqual(doc['spans'], [{'color': 'c5', 'from': 0, 'to': 10000, 'label': 'case 0 (1)'},
+                                            {'color': 'c5', 'from': 10000, 'to': 30000, 'label': 'case 1 (2)'},
+                                            {'color': 'c5', 'from': 30000, 'to': 50000, 'label': 'case 2 (3)'}])
+            self.assertIn('span-every-no-match: spans[1]', err)
+            rc, _, err = self.conv(d, {'waves': 'a.vcd', 'exact': True, 'signals': ['tb.d'], 'spans': [{'every': 'tb.tb_test', 'from': 0}]})
+            self.assertIn('no "from" / "to" with it', err)
 
 
 class Lint(unittest.TestCase):

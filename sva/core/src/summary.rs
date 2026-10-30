@@ -325,7 +325,7 @@ pub fn markdown(r: &Value) -> String {
 }
 
 /// XML text: the five entities, and no control characters (XML 1.0 has none but tab, line feed, carriage return).
-fn xml(x: &str) -> String {
+pub fn xml(x: &str) -> String {
     x.chars().filter(|c| !c.is_control() || matches!(c, '\t' | '\n' | '\r')).collect::<String>()
         .replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }

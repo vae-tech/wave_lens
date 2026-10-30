@@ -110,6 +110,32 @@ class Apply(unittest.TestCase):
         self.assertEqual(rc, 0, err)
         self.assertIn('8 get enum labels, 1 get fields; 0 width differs, 0 typed paths not in the dump', out)
 
+    def test_what_the_dump_lacks(self):
+        # stage 14.4, Questa 2021.1 (make missing-fixture): its types declare every signal (find -nofilter: the arrays too);
+        # its VCD of `vcd add /missing_tb/*` has neither the unpacked arrays nor anything under the generate scopes
+        t = S.load(os.path.join(T, 'missing.types.json'))
+        self.assertTrue(t['every'])
+        self.assertEqual(t['notes'], [], 'a parameter (Integer) is a plain number, no note')
+        rc, out, err = H.run_tool('svtypes', 'check', os.path.join(T, 'missing.types.json'), os.path.join(T, 'missing.vcd'))
+        self.assertEqual(rc, 0, err)
+        self.assertIn('7 signals of the types are not in the dump: unpacked arrays 2, under generate scopes 5', out)
+        self.assertIn("unpacked arrays (Questa's VCD leaves them out: USAGE.md § What a Questa VCD lacks): missing_tb.arr, missing_tb.bytes", out)
+        self.assertIn('under generate scopes the dump has not got: missing_tb.gen[0].g, missing_tb.gen[0].gv, missing_tb.gen[1].g, '
+                      'missing_tb.gen[1].gv, missing_tb.genblk2.ug', out)
+        # the generate scopes dumped (vcd add -r): the arrays only; an element of an array dumped: the array is there
+        paths = ['missing_tb.clk', 'missing_tb.cnt', 'missing_tb.gen[0].g', 'missing_tb.gen[0].gv', 'missing_tb.gen[1].g', 'missing_tb.gen[1].gv',
+                 'missing_tb.genblk2.ug', 'missing_tb.arr[1]']
+        scopes = {'missing_tb', 'missing_tb.gen[0]', 'missing_tb.gen[1]', 'missing_tb.genblk2'}
+        self.assertEqual(S.missing(t, paths, scopes), [{'path': 'missing_tb.bytes', 'why': 'array'}])
+        # a scope of a module instance the dump lacks: "scope"; one under a scope it has: "other"
+        t2 = S.read({'wavelens': 'types', 'describe': {'tb.u.a': 'Register', 'tb.b': 'Register'}})
+        self.assertEqual(S.missing(t2, ['tb.c'], {'tb'}), [{'path': 'tb.u.a', 'why': 'scope'}, {'path': 'tb.b', 'why': 'other'}])
+        with H.tmp() as d:   # mkconfig says it too
+            rc, _, err = H.run_tool('mkconfig', os.path.join(T, 'missing.vcd'), '--types', os.path.join(T, 'missing.types.json'),
+                                    '--out', os.path.join(d, 'm.config.json'))
+            self.assertEqual(rc, 0, err)
+            self.assertIn('mkconfig: --types: 7 signals of the types are not in the dump: unpacked arrays 2, under generate scopes 5', err)
+
     def test_mkconfig_takes_the_types_beside_the_dump(self):
         # tb.vcd -> tb.types.json by itself; the types win over --sv (which would guess by name), and --update replaces
         # the tables they gave before while an "enum" of the user's on another signal stays
@@ -344,7 +370,8 @@ def contract_py(c):
     _, _, notes, given = S.apply(t, sigs)
     out = {'labels': {x['path']: {str(k): v for k, v in x['enum'].items()} for x in sigs if x['path'] in given and x['enum'] and x['path'] not in own[0]},
            'fields': {x['path']: x['fields'] for x in sigs if x['path'] in given and x['fields'] and x['path'] not in own[1]},
-           'notes': notes, 'run': S.fingerprint(t, c.get('date'), c.get('modules', []))}
+           'notes': notes, 'run': S.fingerprint(t, c.get('date'), c.get('modules', [])),
+           'missing': S.missing_notes(t, S.missing(t, c['dump']['paths'], c['dump']['scopes'])) if c.get('dump') else []}
     return {k: v for k, v in out.items() if v}
 
 

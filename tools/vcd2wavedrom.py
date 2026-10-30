@@ -354,7 +354,7 @@ def nice_floor(x):
 
 # ---------------- options: command line + config file ----------------
 LIST_KEYS = ('signals', 'gap', 'enum', 'group', 'marker', 'sva', 'bind', 'exprs')
-SKIP_KEYS = ('views', 'page', 'config', 'description', 'comment', 'render', 'note', 'select', 'rules', 'typed', 'report')   # not converter options
+SKIP_KEYS = ('views', 'page', 'config', 'description', 'comment', 'render', 'note', 'select', 'rules', 'typed', 'report', 'compare')   # not converter options
 SIG_KEYS = ('show', 'alias', 'radix', 'color', 'fill', 'style', 'enum', 'width', 'changes', 'enumColors', 'analog', 'height', 'fields')   # catalog entry keys
 
 
@@ -471,6 +471,10 @@ def resolve(a, cfg, base='.'):
     for k in LIST_KEYS:
         setattr(a, k, getattr(a, k) or [])
     a.sva = [x if isinstance(x, tuple) else (x, x) for x in a.sva]
+    c = cfg.get('compare')   # a second dump compared when the page is built (finish: sva diff)
+    if c is not None and not (isinstance(c, dict) and isinstance(c.get('dump'), str) and c['dump']):
+        raise WaveError('vcd2wavedrom: "compare" is {"dump": "b.vcd", "map"?: {a: b}, "offset"?, "segment"?, "align"?}')
+    a.compare = dict(c, dump=os.path.join(base, os.path.expanduser(c['dump']))) if c else None
     if not a.waves or not a.signals:
         raise WaveError('vcd2wavedrom: need --waves and --signals (on the command line or in the config)')
     if bool(a.clock) == bool(a.exact):
@@ -556,7 +560,7 @@ def collect_specs(a, rd):
     marks = parse_markers(a.marker)
     events = [e for e, _ in marks if isinstance(e, str)] + [n for e, _ in marks if not isinstance(e, str) for n in wavefind.signals_of(e)]
     events += [n for b in bookmark_list(a) if isinstance(b, dict) and b.get('at') is not None for n in wavefind.signals_of(b['at'])]
-    events += [n for sp in span_list(a) if isinstance(sp, dict) for k in ('from', 'to') if isinstance(sp.get(k), (str, dict)) and not is_time(sp[k])
+    events += [n for sp in span_list(a) if isinstance(sp, dict) for k in ('from', 'to', 'every') if isinstance(sp.get(k), (str, dict)) and not is_time(sp[k])
                for n in wavefind.signals_of(sp[k])]
     for s, (absp, w), k in zip(specs, rd.prepare(paths, a.clock, events), getattr(rd, 'kinds', None) or [None] * len(specs)):
         s['abs'], s['width'], s['kind'] = absp, w, k
@@ -776,6 +780,8 @@ def finish(a, rd, doc, specs, marks, t_from, t_to):
         doc['bookmarks'] = bookmarks_at(a, rd, doc['bookmarks'], specs, t_from, t_to)
     if span_list(a):
         doc['spans'] = spans_of(a, rd, doc.get('bookmarks') or [], specs, t_from, t_to)
+    if getattr(a, 'compare', None):
+        doc['compare'] = compare_of(a, doc, t_from, t_to)
     if a.exprs:   # the page values them (the rows "ƒ expressions"); a scope: {"expr", "scope"}
         doc.setdefault('sva', {})['exprs'] = a.exprs
     doc['meta'] = {'waves': os.path.basename(a.waves), 'tool': rd.tool, 'mode': 'clock' if a.clock else 'exact',
@@ -792,6 +798,30 @@ def finish(a, rd, doc, specs, marks, t_from, t_to):
                 omitted.setdefault(path[:max(0, len(path) - len(lf) - 1)], []).append(lf)
     if omitted:
         doc['meta']['omitted'] = {'why': 'config', 'paths': omitted}
+
+
+COMPARE_KEYS = ('dump', 'map', 'offset', 'segment', 'align')
+
+
+def compare_of(a, doc, t_from, t_to):
+    """The config's "compare": `sva diff` of the view's dump and that one over the view's window and rows (svabuild.compare)
+    -> the WaveJSON extension "compare"."""
+    c = a.compare
+    bad = sorted(set(c) - set(COMPARE_KEYS))
+    if bad:
+        raise WaveError(f'vcd2wavedrom: "compare": unknown key(s) {", ".join(bad)} (have: {", ".join(COMPARE_KEYS)})')
+    if a.clock:
+        raise WaveError('vcd2wavedrom: "compare" is of exact waves (one cell per cycle is another time scale): give the view "exact"')
+    if not os.path.isfile(c['dump']):
+        raise WaveError(f'vcd2wavedrom: "compare": no such dump {c["dump"]}')
+    exe = svabuild.find_bin(a.sva_bin)
+    if not exe:
+        raise WaveError('vcd2wavedrom: "compare" needs the sva CLI (make sva-build, or bin/<os>-x86_64/sva)')
+    rows = getattr(a, 'row_abs', None) or [(r, r) for r in row_paths(doc.get('signal') or [])]
+    try:
+        return svabuild.compare(exe, a.waves, c['dump'], rows, t_from, t_to, c.get('map'), c.get('offset'), c.get('segment'), c.get('align'))
+    except WaveError as e:
+        raise WaveError(f'vcd2wavedrom: "compare": {e}') from None
 
 
 # ---------------- events: a bookmark "at", a marker "on" (tools/wavefind.py, the rules of wave_find) ----------------
@@ -825,12 +855,20 @@ def is_time(v):
 
 
 def spans_of(a, rd, bms, specs, t_from, t_to):
-    """The spans with their ends in ps: a time as it is, a bookmark's time, an event's first match (or its "nth")."""
+    """The spans with their ends in ps: a time as it is, a bookmark's time, an event's first match (or its "nth"); one
+    with "every" (an event) a span from each match to the next (the last: to the end of the view), its label's {n} the
+    number of the match (1 the first) and {value} the value of the event's signal after it (a test case's number)."""
     out, at = [], where_of(a)
+    a.span_no_match = []
     for i, sp in enumerate(span_list(a)):
         where = f'{at}spans[{i}]'
+        if isinstance(sp, dict) and 'every' in sp:
+            if 'from' in sp or 'to' in sp:
+                raise WaveError(f'vcd2wavedrom: {where}: "every" makes the spans from its matches: no "from" / "to" with it')
+            out += spans_every(a, rd, sp, specs, t_from, t_to, where)
+            continue
         if not isinstance(sp, dict) or 'from' not in sp or 'to' not in sp:
-            raise WaveError(f'vcd2wavedrom: {where}: a span is {{"from", "to", "label"?, "color"?, "signals"?}}')
+            raise WaveError(f'vcd2wavedrom: {where}: a span is {{"from", "to", "label"?, "color"?, "signals"?}}, or {{"every": EVENT, "label"?, …}}')
         ends = []
         for k in ('from', 'to'):
             v = sp[k]
@@ -849,6 +887,38 @@ def spans_of(a, rd, bms, specs, t_from, t_to):
                     raise WaveError(str(err) if str(err).startswith(where) else f'{where}.{k}: {err}') from None
         x = {**{k: sp[k] for k in sp if k not in ('from', 'to')}, 'from': min(ends), 'to': max(ends)}
         out.append({k: (int(v) if isinstance(v, float) and v.is_integer() else v) for k, v in x.items()})
+    return out
+
+
+def spans_every(a, rd, sp, specs, t_from, t_to, where):
+    """A span "every": one from each match of the event to the next, the last to the end of the view."""
+    try:
+        e = wavefind.spec(sp['every'])
+        e.pop('nth', None)
+        times = sorted(set(event_times(a, rd, e, t_from, t_to, specs)))
+    except WaveError as err:
+        raise WaveError(f'{where}.every: {err}') from None
+    value = lambda t: ''
+    if e['kind'] == 'signal':   # {value}: the label of the event's signal after the match, as the page shows it
+        path, sl = rd.resolve(e['signal'])
+        st, width = rd.stream(path, sl), sl[0] - sl[1] + 1 if sl else rd.decl.vars[path].width
+        if e.get('edge') == 'change' and (not times or times[0] > t_from) and wavefind.value_at(st, t_from) is not None:
+            times.insert(0, t_from)   # every change of a value: the value the window starts with is the first (sva diff --segment's)
+        own = next((s for s in specs if s['abs'] == path + (f'[{sl[0]}:{sl[1]}]' if sl else '')), None)
+        var = rd.decl.vars.get(path)
+        enum = own['enum'] if own else parse_enums(a.enum).get(e['signal'], parse_enums(a.enum).get(path)) or (None if sl or not var else var.enum)
+        radix = own['radix'] if own and own.get('radix') else 'signed' if var and var.kind in ('integer', 'int', 'shortint', 'longint', 'byte') else None
+        value = lambda t: (lambda v: '' if v is None else label(v, width, enum, radix))(wavefind.value_at(st, t))
+    if not times:
+        a.span_no_match.append((where, json.dumps(sp['every'], ensure_ascii=False)))
+        return []
+    text = str(sp.get('label') or '')
+    out = []
+    for k, t in enumerate(times):
+        u = times[k + 1] if k + 1 < len(times) else t_to
+        x = {**{n: sp[n] for n in sp if n not in ('every', 'label')}, 'from': t, 'to': u,
+             'label': text.replace('{n}', str(k + 1)).replace('{value}', value(t))}
+        out.append({n: (int(v) if isinstance(v, float) and v.is_integer() else v) for n, v in x.items()})
     return out
 
 
@@ -975,6 +1045,19 @@ def row_paths(items, anc=()):
     return out
 
 
+def row_items(items, anc=()):
+    """As row_paths: (the row's full path, id of its JSON) of each signal."""
+    out = []
+    for it in items:
+        if isinstance(it, list) and it and isinstance(it[0], str):
+            out += row_items(it[1:], anc + (it[0],))
+        elif isinstance(it, list):
+            out += row_items(it, anc)
+        elif isinstance(it, dict) and 'name' in it:
+            out.append((it.get('path') or '.'.join(anc + (it['name'],)), id(it)))
+    return out
+
+
 def bm_time(t):
     """A bookmark's "t": ps, or a time with a unit -> ps | None (model.js parseT)."""
     if isinstance(t, bool):
@@ -1054,6 +1137,9 @@ def lint(doc, a, where=None):
         for sg in [sp['signals']] if isinstance(sp.get('signals'), str) else sp.get('signals') or []:
             if sg not in have and sg not in leaf:   # (the page takes a row's full path or its name)
                 out.append(f'span-signal-missing: {p}: "{sg}" is no row of the view')
+    for p, x in ((doc.get('compare') or {}).get('signals') or {}).items():
+        if x.get('more'):
+            out.append(f'compare-spans-cut: {at}compare: {p} differs in {len(x["spans"]) + x["more"]} stretches; the page has the first {len(x["spans"])}')
     for i, mk in enumerate(a.marker or []):
         if isinstance(mk, dict):
             bad = sorted(set(mk) - set(MK_KEYS))
@@ -1061,6 +1147,8 @@ def lint(doc, a, where=None):
                 out.append(f'marker-key: {at}marker[{i}]: unknown key(s) {", ".join(bad)} (have: {", ".join(MK_KEYS)})')
     for i, expr in getattr(a, 'no_match', []):
         out.append(f'marker-no-match: {at}marker[{i}]: "{expr}" matches nothing in the window: no marker')
+    for where, expr in getattr(a, 'span_no_match', []):
+        out.append(f'span-every-no-match: {where}: "every" {expr} matches nothing in the window: no span')
     sva = doc.get('sva') or {}
     for note in sva.get('notes') or []:
         if note.startswith('bind: no assertion') or note.endswith('matches no assertion'):
@@ -1114,6 +1202,8 @@ def convert(a: argparse.Namespace) -> dict:
     if scopes:
         doc['scopes'] = scopes
     doc = {'signal': out, **doc, 'config': {'hscale': a.hscale, **a.wave_config}}
+    by_id = {id(j): p for p, j in sig_json.items()}
+    a.row_abs = [(r, by_id[i]) for r, i in row_items(out) if i in by_id]   # (the row as the page names it, its dump path): "compare"
     finish(a, rd, doc, specs, marks, t_from, t_to)
     a.lint = lint(doc, a, getattr(a, 'lint_at', None) or (f'views.{a.view}' if getattr(a, 'view', None) else None))
     for w in a.lint:

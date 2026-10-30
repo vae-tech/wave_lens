@@ -3,7 +3,8 @@
 /* ---------------- compare with a second dump ---------------- */
 // The same test before and after a change of the RTL, two seeds: the second dump (B, a VCD read by the page's reader)
 // over these waves on the same time scale, signal by signal (by path; else by name under the page's scope; else the one
-// path of B that ends with the name). Where B's value differs, a red band on the row; the names of the signals that
+// path of B that ends with the name). B is read once, its signals that could be these rows only and over these waves' time
+// (a large B: its progress said, ≠ … ✕ stops it). Where B's value differs, a red band on the row; the names of the signals that
 // differ get ≠, the ones B has not got are struck (the ones its reader left out for dumpBudget: said apart); ]d [d step
 // through the differences (of the selected signal when it has some, else of all). Compared over the time both dumps
 // cover; values as values: bits ("'b" bits, x and z apart, a bus of another width differs everywhere), a real as a
@@ -49,6 +50,28 @@ const cmpPath = r => (r.src && r.src.path) || r.path || r.full;
 const cmpByName = c => (c.byName.length ? `matched by name: ${c.byName[0][0]} → ${c.byName[0][1]}${c.byName.length > 1 ? ` (+${c.byName.length - 1} more: ` +
   'their tooltips)' : ''}` : '');
 const cmpText = r => (r.kind === 'real' || r.kind === 'string');
+// the red bands of the stretches that differ (of(row): {spans} or null), on the rows laid out (lay entries), over [t0, t1): the
+// first one in view found by a binary search, none past t1; the stretches less than a pixel apart one band (as a burst of
+// edges: a clock a picosecond late differs twice a cycle), the next one found by a binary search too: a band per pixel at most
+function paintCmp(P, lay, X, t0, t1, of) {
+  if (!(t1 > t0)) return;
+  const k = (X(t1) - X(t0)) / (t1 - t0), px = k > 0 ? 1 / k : 0;   // the time of a pixel
+  for (const o of lay) {
+    const c = of(o.row); if (!c || !c.spans.length) continue;
+    const S = c.spans, n = S.length, at = j => S[j][0];
+    for (let i = Math.max(0, lastBefore(n, at, t0)); i < n;) {
+      const a = S[i][0]; let b = S[i][1], j = i + 1;
+      if (a >= t1) break;
+      while (j < n && S[j][0] < t1 && S[j][0] <= b + px) { const m = lastBefore(n, at, b + px); b = Math.max(b, S[m][1]); j = m + 1; }
+      i = j; if (b <= t0) continue;
+      const x0 = X(Math.max(a, t0)), x1 = Math.max(X(Math.min(b, t1)), x0 + 1.5);
+      P.rect(x0, o.y + 1, x1 - x0, o.h - 2, 'x', 0.16); P.rect(x0, o.y + o.h - 3, x1 - x0, 2, 'x', 0.85);
+    }
+  }
+}
+// a compare result of the page (WaveJSON "compare", sva diff's made by the build or given by the command compare) for the
+// static SVG: a row's stretches by its path, a struct's by its group's vector
+const cmpOfDoc = c => (c ? r => { const x = r && c.signals[cmpPath(r.sig || r.orig || r)]; return x || null; } : () => null);
 Object.assign(WaveView.prototype, {
   // the rows these waves compare: the signals of exact transitions (not a struct's fields: its whole vector instead, on its group)
   cmpRows() {
@@ -67,11 +90,21 @@ Object.assign(WaveView.prototype, {
     // a compare that fails leaves the one before as it was, and says so (its bands are still drawn)
     const still = () => (this.cmp ? `; still compared with ${this.cmp.name}` : '');
     let doc;
-    try { const o = { name: nm, budget: this.S.dumpBudget };   // a File in pieces; a text, or something with a text(), at once
+    // B's variables that could be these rows (a path, a name, the last part of either: cmpFind's), its changes over their time
+    const only = new Set();
+    for (const a of mine) for (const n of [cmpPath(a), a.full, a.name]) if (n) { only.add(String(n)); only.add(String(n).split('.').pop()); }
+    const mb = n => (n / 1048576).toFixed(n < 10485760 ? 1 : 0);
+    let told = 0;   // the bytes the last progress said
+    const o = { name: nm, only, from: this.M.t0, to: this.M.t1, cancel: () => req !== this.cmpReq || !this.root.isConnected,
+      progress: (got, size) => { if (size >= 8 << 20 && got - told >= 8 << 20 && got < size) { told = got;
+        this.toast(`compare: ${mb(got)} of ${mb(size)} MB of ${nm} read (≠ … ✕ stops)`); } } };
+    this.cmpReading = req; this.cmpShow();
+    try {   // a File in pieces; a text, or something with a text(), at once
       doc = (typeof file === 'string' ? vcdToWave(file, o) : typeof file.stream === 'function' ? await vcdToWaveFile(file, o) :
         vcdToWave(await file.text(), o)).doc; }
     catch (e) { if (req === this.cmpReq && this.root.isConnected && VIEWS.has(this)) { this.toast(`${nm}: ${e.message}${still()}`);
       this.logError(e, `cannot compare with ${nm}${e.line ? ` (line ${e.line})` : ''}: ${e.message}`); } return null; }
+    finally { if (this.cmpReading === req) { this.cmpReading = 0; this.cmpShow(); } }
     if (req !== this.cmpReq || !this.root.isConnected || !VIEWS.has(this)) return null;   // compared again, or no more, meanwhile
     const brows = parse(doc).rows.filter(r => r.type === 'sig' && r.tr), bs = new Map(brows.map(r => [r.path || r.full, r])), byLeaf = new Map();
     for (const r of brows) { const k = (r.path || r.full).split('.').pop(); byLeaf.set(k, (byLeaf.get(k) || []).concat([r])); }
@@ -109,6 +142,17 @@ Object.assign(WaveView.prototype, {
     this.toast(said + (differ ? ' · ]d [d go to them' : '')); this.log('ok', 'compared with ' + said);
     return { name: nm, compared: c.compared, differ, missing, omitted, first: c.first, from, to, byName: byName.length };
   },
+  // the compare as a result (the saved state's "compare", as the WaveJSON's): the one given, else the one of a dump read here
+  cmpState() {
+    const c = this.cmp; if (!c) return null;
+    if (c.result) return c.result;
+    const signals = {}, missing = [];
+    for (const [r, x] of c.rows) {
+      if (x.missing || x.omitted) missing.push(cmpPath(r));
+      else signals[cmpPath(r)] = Object.assign({ spans: x.spans }, x.other ? { other: x.other } : {});
+    }
+    return { name: c.name, from: c.from, to: c.to, first: c.first, signals, missing };
+  },
   // the compare result of a row: a struct's group row its vector, a row of your groups its signal
   cmpOf(r) { return this.cmp ? this.cmp.rows.get(r.sig || r.orig || r) : null; },
   // the rows' marks in the names (≠ differs, struck: not in B; your groups' rows too) and their tooltips
@@ -124,30 +168,46 @@ Object.assign(WaveView.prototype, {
       else if (this.cmpTitled && this.cmpTitled.delete(r)) this.rowTitle(r, null);
     }
   },
-  cmpShow() {   // the bar's ≠ N ✕ (no compare: hidden)
+  // a second dump being read stopped (≠ … ✕): the compare before it stays
+  compareStop() { this.cmpReq = (this.cmpReq || 0) + 1; this.cmpReading = 0; this.cmpShow(); this.toast(`compare: stopped${this.cmp ? `; still compared ` +
+    `with ${this.cmp.name}` : ''}`); },
+  cmpShow() {   // the bar's ≠ N ✕ (no compare: hidden; a dump being read: ≠ … ✕ stops it)
     const b = this.root.querySelector('button[data-act=dcmpx]'); if (!b) return;
+    if (this.cmpReading) { b.hidden = false; b.textContent = '≠ … ✕'; b.title = 'reading the second dump: click to stop'; return; }
     b.hidden = !this.cmp; if (this.cmp) b.textContent = `≠ ${this.cmp.differ} ✕`;
     b.title = this.cmp ? `${this.cmp.name}: ${this.cmp.differ} of ${this.cmp.compared} signals differ${this.cmp.missing ? `, ${this.cmp.missing} not in it` :
       ''}${this.cmp.byName.length ? `; ${cmpByName(this.cmp)}` : ''}; ]d [d go to the differences; click: compare no more` : '';
   },
-  // the red bands of the stretches that differ, on the rows laid out (lay entries), over [t0, t1): the first one in view
-  // found by a binary search, none past t1; the stretches less than a pixel apart one band (as a burst of edges: a clock
-  // a picosecond late differs twice a cycle), the next one found by a binary search too: a band per pixel at most
-  paintDiff(P, lay, X, t0, t1) {
-    if (!this.cmp || !(t1 > t0)) return;
-    const k = (X(t1) - X(t0)) / (t1 - t0), px = k > 0 ? 1 / k : 0;   // the time of a pixel
-    for (const o of lay) {
-      const c = this.cmpOf(o.row); if (!c || !c.spans.length) continue;
-      const S = c.spans, n = S.length, at = j => S[j][0];
-      for (let i = Math.max(0, lastBefore(n, at, t0)); i < n;) {
-        const a = S[i][0]; let b = S[i][1], j = i + 1;
-        if (a >= t1) break;
-        while (j < n && S[j][0] < t1 && S[j][0] <= b + px) { const m = lastBefore(n, at, b + px); b = Math.max(b, S[m][1]); j = m + 1; }
-        i = j; if (b <= t0) continue;
-        const x0 = X(Math.max(a, t0)), x1 = Math.max(X(Math.min(b, t1)), x0 + 1.5);
-        P.rect(x0, o.y + 1, x1 - x0, o.h - 2, 'x', 0.16); P.rect(x0, o.y + o.h - 3, x1 - x0, 2, 'x', 0.85);
-      }
+  // the red bands of a dump compared (paintCmp)
+  paintDiff(P, lay, X, t0, t1) { if (this.cmp) paintCmp(P, lay, X, t0, t1, r => this.cmpOf(r)); },
+  // a compare result already made (sva diff's, by the build from the config's "compare", or the command compare): the WaveJSON
+  // extension "compare" {name, from, to, signals: {path: {spans, other, b}}, missing: [path]} over these waves, as compare()
+  // puts a dump read here; null: compared no more. quiet: no toast (the page opens with it) -> as compare()
+  compareResult(c, quiet) {
+    this.cmpReq = (this.cmpReq || 0) + 1;
+    if (c == null) { this.cmp = null; this.cmpMarks(); this.cmpShow(); this.draw(); return null; }
+    c = cmpNorm(c);
+    if (!c) throw new Error('compare: a result {name, from, to, signals: {path: {spans}}} (sva diff\'s, as the page\'s "compare")');
+    if (!this.M.timed) { this.toast('compare: these waves are clock-sampled (one cell per cycle): a compare is of exact waves'); return null; }
+    const rows = new Map(), miss = new Set(c.missing);
+    let differ = 0, missing = 0;
+    for (const a of this.cmpRows()) {
+      const p = cmpPath(a), s = c.signals[p];
+      if (miss.has(p)) { rows.set(a, { missing: true, omitted: false, spans: [] }); missing++; continue; }
+      if (!s) continue;
+      rows.set(a, { spans: s.spans, other: s.other || null, by: null, b: s.b || null });
+      if (s.spans.length) differ++;
     }
+    const starts = [...new Set([...rows.values()].flatMap(x => x.spans.map(([t]) => t)))].sort((x, y) => x - y);
+    this.cmp = { name: c.name, rows, differ, missing, omitted: 0, compared: rows.size - missing, from: c.from, to: c.to, starts,
+      first: starts.length ? starts[0] : null, byName: [], result: c };
+    this.cmpMarks(); this.cmpShow(); this.draw();
+    const f = t => this.fmt(t, (this.M.t1 - this.M.t0) / 1000, this.M.t1 - this.M.t0), x = this.cmp;
+    const said = `${x.name}: ${differ} of ${x.compared} signals differ${x.first == null ? '' : `, the first at ${f(x.first)}`}` +
+      (missing ? ` · ${missing} not in it` : '') + (c.from > this.M.t0 || c.to < this.M.t1 ? ` · compared ${f(c.from)} … ${f(c.to)}` : '');
+    if (!quiet) this.toast(said + (differ ? ' · ]d [d go to them' : ''));
+    this.log('ok', 'compared with ' + said);
+    return { name: x.name, compared: x.compared, differ, missing, omitted: 0, first: x.first, from: c.from, to: c.to, byName: 0 };
   },
   // ]d [d: the cursor to the next / previous start of a difference: of the selected signal when it has some, else of all
   // the signals in the view (hidden ones and the ones Only leaves out: not stepped to)
@@ -163,4 +223,8 @@ Object.assign(WaveView.prototype, {
     this.draw(); this.syncCursorFields(true); return this;
   },
 });
-PLUGINS.push(v => v.addKey(']d', () => v.diffStep(1)).addKey('[d', () => v.diffStep(-1)));
+// a compare result of the page (WaveJSON "compare"): its bands when the viewer opens
+PLUGINS.push(v => {
+  v.addKey(']d', () => v.diffStep(1)).addKey('[d', () => v.diffStep(-1));
+  if (v.M.compare && v.M.timed) v.compareResult(v.M.compare, true);
+});

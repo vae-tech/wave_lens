@@ -16,6 +16,9 @@
 // $date, $timescale, its time, scopes, signals, changes). An error it cannot read past is thrown with its line (e.line).
 // opts.lazy: the text is a dump's header (sva vcd --header: the declarations, the first and last times) and every
 // variable is a signal whose changes come later ("lazy": its id codes; a viewer reads them as it needs them, fillRows).
+// opts.only (Compare…): the variables whose path, or the last part of it, is in this Set, the rest left out; no count of the
+// changes first (no budget: the body read once); opts.from / to: of the changes before `from` the last one kept, none
+// after `to`.
 const VCD_UNIT = { s: 1e12, ms: 1e9, us: 1e6, ns: 1e3, ps: 1, fs: 1e-3, as: 1e-6, zs: 1e-9 };
 const VCD_TEXT = { real: 'real', realtime: 'real', shortreal: 'real', real_parameter: 'real', string: 'string' };   // -> "kind"
 // integer variables (Questa writes an int-based enum as one): signed decimal unless they have an enum table
@@ -37,27 +40,31 @@ function vcdToWave(text, opts = {}) {
   return r.value;
 }
 // a File (Open…, Compare…, a file dropped): read in pieces of about 8 MB (TextDecoder: a character cut between two reads
-// waits for the next one) -> the same as vcdToWave of its text; chunk: the size of a piece (the tests: a few bytes)
+// waits for the next one) -> the same as vcdToWave of its text; chunk: the size of a piece (the tests: a few bytes);
+// opts.progress(bytes read, size) after each piece, opts.cancel() true: stopped (an Error "cancelled")
 async function vcdToWaveFile(file, opts = {}, chunk = 8 << 20) {
-  const g = vcdRead(opts, file.size); let r = g.next(), rd = null, dec = null, end = false, buf = '';
+  const g = vcdRead(opts, file.size); let r = g.next(), rd = null, dec = null, end = false, buf = '', got = 0;
   const piece = async () => {   // at most chunk characters (the reads the browser makes: as they come)
     while (buf.length < chunk && !end) {
+      if (opts.cancel && opts.cancel()) throw new Error('cancelled');
       const { value, done } = await rd.read();
-      if (done) { buf += dec.decode(); end = true; } else buf += dec.decode(value, { stream: true });
+      if (done) { buf += dec.decode(); end = true; } else { buf += dec.decode(value, { stream: true }); got += value.length; }
     }
+    if (opts.progress) opts.progress(got, file.size);
     const s = buf.length > chunk ? buf.slice(0, chunk) : buf; buf = buf.length > chunk ? buf.slice(chunk) : '';
     return s || null;
   };
   try {
     while (!r.done) {
-      if (r.value.n === 0) { if (rd) rd.cancel().catch(() => {}); rd = file.stream().getReader(); dec = new TextDecoder(); end = false; buf = ''; }
+      if (r.value.n === 0) { if (rd) rd.cancel().catch(() => {}); rd = file.stream().getReader(); dec = new TextDecoder(); end = false; buf = ''; got = 0; }
       r = g.next(await piece());
     }
   } finally { if (rd) rd.cancel().catch(() => {}); }
   return r.value;
 }
 function* vcdRead(opts = {}, size = 0) {
-  const lazy = !!opts.lazy, budget = lazy ? Infinity : opts.budget ?? 3e6, name = opts.name || 'dump.vcd';
+  const lazy = !!opts.lazy, only = opts.only || null, budget = lazy || only ? Infinity : opts.budget ?? 3e6, name = opts.name || 'dump.vcd';
+  const from = opts.from ?? -Infinity, to = opts.to ?? Infinity;
   // the header: pieces until its "$enddefinitions $end" (the whole text at once: vcdToWave), its words read on as the
   // parser below takes them: a section ($comment, $var …) to its $end, so "$enddefinitions" in a comment is not the end
   let text = '', n0 = 0, eof = false, hw = 0, sec = false, defs = false;
@@ -245,7 +252,7 @@ function* vcdRead(opts = {}, size = 0) {
     }
   }
   const count = new Map();
-  yield* scan(1, (k, t, val, kind, at) => {
+  if (!only) yield* scan(1, (k, t, val, kind, at) => {
     if (k == null) return;
     const w = codes.get(k);
     if (w === undefined) { note('warning', at, 'code', k ? `a value of "${k}", a code no $var declares: left out` : 'a value without its code: left out');
@@ -258,12 +265,13 @@ function* vcdRead(opts = {}, size = 0) {
       'drawn as written');
   }, true);
   if (!vars.length) note('warning', null, 'novar', 'no $var: the dump has no signals');
-  else if (!count.size && !lazy) note('warning', null, 'empty', 'no value changes after $enddefinitions');
+  else if (!count.size && !lazy && !only) note('warning', null, 'empty', 'no value changes after $enddefinitions');
   const changes = v => v.codes.reduce((s, k) => s + (count.get(k) || 0), 0);
   const order = vars.slice().sort((a, b) => a.depth - b.depth);   // stable: declaration order inside a level
   const keep = new Set(); let used = 0;
   // the levels nearest the top, as many as fit
-  for (const v of order) { const n = changes(v); if (used + n > budget && keep.size) break; keep.add(v); used += n; }
+  if (only) for (const v of vars) { if (only.has(v.path) || only.has(v.path.slice(v.path.lastIndexOf('.') + 1))) keep.add(v); }
+  else for (const v of order) { const n = changes(v); if (used + n > budget && keep.size) break; keep.add(v); used += n; }
   // the transitions of the variables kept: per id code, then per variable (codes merged, bits put together)
   const raw = new Map(); for (const v of keep) for (const k of v.codes) raw.set(k, []);
   let t0 = null, t1 = 0;
@@ -271,7 +279,9 @@ function* vcdRead(opts = {}, size = 0) {
   yield* scan(2, (k, t, val) => {
     if (k == null) { if (t0 == null) t0 = t; t1 = Math.max(t1, t); return; }
     if (t0 == null) t0 = t;   // values before the first time (a $dumpvars block): the dump starts at 0
-    const a = raw.get(k); if (a && val != null) a.push([t, val]);
+    const a = raw.get(k); if (!a || val == null || t > to) return;
+    if (t < from && a.length && a[a.length - 1][0] < from) a[a.length - 1] = [t, val];   // before the window: its last value only
+    else a.push([t, val]);
   });
   const tvOf = v => {
     const out = [], put = (t, x) => { const L = out[out.length - 1]; if (L && L[0] === t) { L[1] = x;
@@ -306,17 +316,17 @@ function* vcdRead(opts = {}, size = 0) {
     scopes[p] = k === 'interface' ? k : { kind: k, width: vars.filter(v => v.path.startsWith(p + '.')).reduce((n, v) => n + v.width, 0) };
   const end = Math.max(t1, (t0 ?? 0) + 1);
   const doc = { signal: out, head: { text: name }, time: { t0: t0 ?? 0, t1: end, cycle: (end - (t0 ?? 0)) / 40, unit: 'ps' }, config: {} };
-  const still = vars.filter(v => keep.has(v) && !changes(v));
-  if (still.length && !lazy) note('info', null, 'still', `${still.length} signal${still.length === 1 ? ' has' : 's have'} no value in the dump (drawn x): ` +
+  const still = lazy || only ? [] : vars.filter(v => keep.has(v) && !changes(v));
+  if (still.length) note('info', null, 'still', `${still.length} signal${still.length === 1 ? ' has' : 's have'} no value in the dump (drawn x): ` +
     still.slice(0, 5).map(v => v.path).join(', ') + (still.length > 5 ? ' …' : ''));
-  if (keep.size < vars.length) note('info', null, 'budget', `${keep.size} of ${vars.length} signals read: the levels nearest the top within ` +
+  if (keep.size < vars.length && !only) note('info', null, 'budget', `${keep.size} of ${vars.length} signals read: the levels nearest the top within ` +
     `dumpBudget (${budget} changes)`);
   for (const [, [n, level, msg]] of same) if (n > VCD_SAME) log.push({ level, line: null, msg: `${n - VCD_SAME} more like "${msg}"` });
   Object.assign(info, { t0: t0 ?? 0, t1: end, scopes: new Set(vars.map(v => v.scope.join('.'))).size, signals: vars.length, shown: keep.size,
     changes: [...count.values()].reduce((a, b) => a + b, 0) });
   if (Object.keys(scopes).length) doc.scopes = scopes;
   const omitted = {};   // past the budget: in the dump, not in the page (its find says so), by scope
-  for (const v of vars) if (!keep.has(v)) (omitted[v.scope.join('.')] ||= []).push(v.name);
+  if (!only) for (const v of vars) if (!keep.has(v)) (omitted[v.scope.join('.')] ||= []).push(v.name);
   if (Object.keys(omitted).length) doc.meta = { omitted: { why: 'dumpBudget', paths: omitted } };
   return { doc, shown: shownVars.length, total: vars.length, changes: used, info,
     log: log.map(x => Object.assign({ level: x.level, text: x.msg }, x.line != null ? { line: x.line } : {})) };
@@ -568,7 +578,7 @@ function svApply(doc, sv, log, why) {
 // (in.st), an array of enums or structs a field per element (pair[1]); a union, an enum of more than 32 bits from describe
 // (Questa keeps 32) or a text it does not read a note, and the signal stays as numbers.
 const TY_INTS = { int: 32, integer: 32, shortint: 16, longint: 64, byte: 8, time: 64 };
-const TY_REAL = /^(?:Floating point type\b.*|Real|Shortreal|Realtime)$/;   // svtypes.py DESC_REAL
+const TY_REAL = /^(?:Floating point type\b.*|Real|Shortreal|Realtime|Integer)$/;   // svtypes.py DESC_REAL (a real, an integer parameter)
 function tyParse(text) {   // Questa's describe of one signal -> a type {kind: enum | vec | record | union | array | unknown, …}
   const lines = String(text).split(/\r?\n/).map(x => x.trim()).filter(Boolean); let pos = 0;
   const one = () => {
@@ -653,8 +663,12 @@ function svTypes(d, where = 'types') {
   // none or null: no map; anything but an object of texts an error (svtypes.py's read)
   const map = d.map == null ? {} : typeof d.map === 'object' && !Array.isArray(d.map) ? Object.assign({}, d.map) : null;
   if (!map || Object.values(map).some(x => typeof x !== 'string')) throw new Error(`${where}: "map" is {"dump.prefix": "types.prefix"}`);
+  // every signal the types declare (svMissing): Questa's describe has them all, Verilator's "signals" the typed ones
+  const desc = d.describe && typeof d.describe === 'object' ? d.describe : {};
+  const declared = Object.assign(Object.fromEntries(Object.keys(d.signals || {}).map(p => [p, ''])),
+    Object.fromEntries(Object.entries(desc).map(([p, x]) => [p, String(x)])));
   return { enums: {}, fields: {}, paths, notes, files: 1, producer: d.producer || {}, map, names: [where], plain,
-    instances: d.instances && typeof d.instances === 'object' ? d.instances : {} };
+    instances: d.instances && typeof d.instances === 'object' ? d.instances : {}, declared, every: Object.keys(desc).length > 0 };
 }
 // the top scopes a dump adds above the design's (TOP. of Verilator's FST): its roots that are none of the types' roots but
 // have one as a child; none when a root of the dump is one of the types' (other.tb.state is not tb.state)
@@ -679,11 +693,51 @@ function svRemap(p, m) {
 }
 // whether the types are of the run of the dump (svtypes.py fingerprint): written more than a day apart; instances of the
 // types under modules the dump has that it does not have -> [notes]
+// the signals the types declare that the dump has not got (svtypes.py missing): dump its variables' paths, scopes its
+// scopes -> [{path, why}]: array (Questa's "Array(…) of"), generate (under a scope it lacks a generate makes: name[k],
+// genblk…), scope (under another one it lacks), other
+const SV_MISS = { array: 'unpacked arrays (Questa\'s VCD leaves them out: USAGE.md § What a Questa VCD lacks)',
+  generate: 'under generate scopes the dump has not got', scope: 'in scopes the dump has not got (vcd add without -r?)', other: 'not dumped' };
+const SV_MISS_SHORT = { array: 'unpacked arrays', generate: 'under generate scopes', scope: 'in other scopes', other: 'not dumped' };
+function svMissing(sv, dump, scopes) {
+  const declared = (sv && sv.declared) || {}, m = (sv && sv.map) || {}, mine = dump.map(p => svRemap(p, m)), tops = svTops(declared, mine);
+  const have = new Set(mine.map(p => svLookupKey(declared, p, tops)).filter(x => x != null));
+  for (const p of mine) have.add(p.replace(/(\.?\[-?\d+\])+$/, ''));   // an element of an array: the array is there
+  const sc = new Set([...scopes].map(s => svRemap(s, m)));
+  for (const s of [...sc]) { const k = s.indexOf('.'); if (k > 0 && tops.has(s.slice(0, k))) sc.add(s.slice(k + 1)); }
+  const out = [];
+  for (const [p, text] of Object.entries(declared)) {
+    if (have.has(p)) continue;
+    const parts = p.split('.').slice(0, -1);
+    let gone = null;
+    if (sc.size) for (let i = 0; i < parts.length && gone == null; i++) { const q = parts.slice(0, i + 1).join('.'); if (!sc.has(q)) gone = q; }
+    const leaf = gone ? gone.slice(gone.lastIndexOf('.') + 1) : '';
+    const gen = /\[-?\d+\]$/.test(leaf) || /^<?genblk/.test(leaf);
+    out.push({ path: p, why: /^\s*Array\(/.test(text) ? 'array' : gone ? (gen ? 'generate' : 'scope') : 'other' });
+  }
+  return out;
+}
+function svMissingNotes(sv, miss, shown = 3) {
+  if (!miss.length) return [];
+  const by = {}; for (const x of miss) (by[x.why] ||= []).push(x.path);
+  const n = miss.length, ks = Object.keys(SV_MISS).filter(k => by[k]);
+  return [`${n} signal${n === 1 ? '' : 's'} of the types ${n > 1 ? 'are' : 'is'} not in the dump: ` +
+    ks.map(k => `${SV_MISS_SHORT[k]} ${by[k].length}`).join(', ') +
+    (sv.every ? '' : ' (the types name their typed signals only: the others are not looked for)'),
+    ...ks.map(k => `${SV_MISS[k]}: ${by[k].slice(0, shown).join(', ')}${by[k].length > shown ? ' …' : ''}`)];
+}
 // the scopes of a WaveJSON: every prefix of a signal's path (the instances the dump has)
 const svScopes = doc => { const out = new Set(), walk = items => { for (const it of items || []) {
   if (Array.isArray(it)) walk(it.slice(typeof it[0] === 'string' ? 1 : 0));
   else if (it && it.path) { const p = String(it.path).split('.'); for (let i = 1; i < p.length; i++) out.add(p.slice(0, i).join('.')); } } };
   walk(doc && doc.signal); return out; };
+// the paths of a WaveJSON's signals (svMissing: a dump read whole)
+const svPaths = doc => { const out = [], walk = items => { for (const it of items || []) {
+  if (Array.isArray(it)) walk(it.slice(typeof it[0] === 'string' ? 1 : 0)); else if (it && it.path) out.push(String(it.path)); } };
+  walk(doc && doc.signal); return out; };
+// the notes of what a dump read whole has not got of the types (none when its reader left signals out: dumpBudget)
+const svMissSaid = (sv, doc) => (sv && sv.declared && !(doc.meta && doc.meta.omitted) ?
+  svMissingNotes(sv, svMissing(sv, svPaths(doc), svScopes(doc))) : []);
 function svFingerprint(sv, date, modules) {
   const out = [], p = (sv && sv.producer) || {}, when = x => { const t = Date.parse(String(x || '').replace(/\s+/g, ' ')); return isNaN(t) ? null : t; };
   const a = when(p.date), b = when(date);

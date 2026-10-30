@@ -994,3 +994,223 @@ fn fst_runs_at_once_and_killed() {
     assert!(progress[0].contains("progress: 1 variables (1 signals) in 1 scopes, 0 enum tables; the values next")
             && progress[1].contains("% (line "), "{e}");
 }
+
+// ---------------------------------------------------------------------------------------------------------- sva diff
+
+/// A small test bench: a clock, a bus, a test case number (an int), a real, a string; `top` its top scope, `d30` the
+/// bus at 30 ns, `shift` ns added to every time.
+fn bench(top: &str, d30: &str, shift: u64) -> String {
+    let mut t = format!("$timescale 1ns $end\n$scope module {top} $end\n$var wire 1 ! clk $end\n$var wire 4 \" d [3:0] $end\n\
+        $var integer 32 # tb_test $end\n$var real 64 $ r $end\n$var string 1 % s $end\n$upscope $end\n$enddefinitions $end\n");
+    for (at, vals) in [(0, "0!\nb0000 \"\nb0 #\nr0.5 $\nsidle %\n"), (10, "1!\nb1010 \"\nb1 #\n"), (20, "0!\n"),
+                       (30, &*format!("1!\nb{d30} \"\nb10 #\n")), (40, "0!\nr1.5 $\nsdone %\n"), (50, "")] {
+        t.push_str(&format!("#{}\n{vals}", at + shift));
+    }
+    t
+}
+
+fn diff_json(args: &[&str]) -> (Option<i32>, serde_json::Value, String) {
+    let mut a = vec!["diff", "--json", "-"];
+    a.extend_from_slice(args);
+    let o = sva(&a);
+    (o.status.code(), serde_json::from_slice(&o.stdout).unwrap_or_default(), err(&o))
+}
+
+/// `sva diff`: equal dumps exit 0 with every change counted once (a change in both at one time is one); one value
+/// apart exits 1 with the first difference, the list and the stretch it differs over; the tops pair by themselves.
+#[test]
+fn diff_counts_the_changes_and_the_first_difference() {
+    let a = write("da.vcd", &bench("tb", "1011", 0));
+    let b = write("db.vcd", &bench("top", "1011", 0));
+    let c = write("dc.vcd", &bench("top", "1111", 0));
+    let (code, v, e) = diff_json(&[&a, &b]);
+    assert_eq!(code, Some(0), "{e}");
+    assert_eq!((v["compared"].as_u64(), v["differ"].as_u64(), v["signals_compared"].as_u64()), (Some(15), Some(0), Some(5)), "{v}");
+    assert_eq!(v["map"], serde_json::json!([{"a": "tb", "b": "top", "auto": true, "signals": 5}]));
+    assert_eq!((v["from"].as_u64(), v["to"].as_u64(), v["unit"].as_str()), (Some(0), Some(50_000), Some("ps")));
+    let (code, v, _) = diff_json(&[&a, &c, "--spans", "4"]);
+    assert_eq!(code, Some(1));
+    assert_eq!(v["first"], serde_json::json!({"t": 30_000, "signal": "tb.d", "a": "1011", "b": "1111"}));
+    assert_eq!((v["differ"].as_u64(), v["signals_differ"].as_u64(), v["more"].as_u64()), (Some(1), Some(1), Some(0)));
+    let d = v["signals"].as_array().unwrap().iter().find(|s| s["path"] == "tb.d").unwrap();
+    assert_eq!((d["b"].as_str(), d["width"].as_u64(), d["changes"].as_u64()), (Some("top.d"), Some(4), Some(3)));
+    assert_eq!(d["spans"], serde_json::json!([[30_000, 50_000]]), "it differs from 30 ns to the end");
+    let t = out(&sva(&["diff", &a, &c]));
+    assert!(t.contains("5 signals compared, 0 ps … 50 ns") && t.contains("15 changes compared, 1 differ in 1 signal; the first at 30 ns: tb.d A=1011 B=1111"), "{t}");
+}
+
+/// Values compare as the viewer compares them: a bus of another width differs everywhere (not counted as changes),
+/// inf and nan are values, a string is its text, x before a signal's first value; the signals of one dump only are
+/// listed apart and change nothing.
+#[test]
+fn diff_compares_values_as_the_viewer_does() {
+    let head = |w: u32, only: &str| format!("$timescale 1ps $end\n$scope module tb $end\n$var wire {w} \" d [{}:0] $end\n$var real 64 $ r $end\n\
+        $var string 1 % s $end\n$var wire 1 & {only} $end\n$var wire 2 ' late [1:0] $end\n$upscope $end\n$enddefinitions $end\n", w - 1);
+    let a = write("dka.vcd", &(head(4, "onlya") + "#0\nb0 \"\nrinf $\nshello %\n0&\n#5\nb10 '\n#10\nrnan $\nsworld %\n#20\n"));
+    let b = write("dkb.vcd", &(head(8, "onlyb") + "#0\nb0 \"\nrinf $\nshello %\n0&\n#7\nb10 '\n#10\nrnan $\nsworld! %\n#20\n"));
+    let (code, v, e) = diff_json(&[&a, &b, "--spans", "3"]);
+    assert_eq!(code, Some(1), "{e}");
+    let sig = |p: &str| v["signals"].as_array().unwrap().iter().find(|s| s["path"] == p).unwrap().clone();
+    assert_eq!((sig("tb.d")["other"].as_str(), sig("tb.d")["changes"].as_u64()), (Some("8 bits"), Some(0)));
+    assert_eq!(sig("tb.d")["spans"], serde_json::json!([[0, 20]]));
+    assert_eq!(sig("tb.r")["differ"].as_u64(), Some(0), "inf = inf, nan = nan");
+    assert_eq!(sig("tb.s")["first"], serde_json::json!({"t": 10, "signal": "tb.s", "a": "world", "b": "world!"}));
+    assert_eq!(sig("tb.late")["spans"], serde_json::json!([[5, 7]]), "x in B until its first value");
+    assert_eq!((v["only_a"].clone(), v["only_b"].clone()), (serde_json::json!(["tb.onlya"]), serde_json::json!(["tb.onlyb"])));
+    assert_eq!(v["signals_differ"].as_u64(), Some(3));
+}
+
+/// --map: a scope pair (the longest one wins) and an exact pair of paths (it wins over a scope); a rule that pairs
+/// nothing is a note; --signals: paths and patterns, a path without its pair in B is exit 2.
+#[test]
+fn diff_maps_names_and_picks_signals() {
+    let a = write("dma.vcd", "$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! x $end\n$scope module bus $end\n$var wire 1 \" v $end\n\
+        $var wire 1 # w $end\n$upscope $end\n$var wire 1 $ data $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\n0\"\n0#\n0$\n#5\n1!\n1\"\n1$\n#9\n");
+    let b = write("dmb.vcd", "$timescale 1ns $end\n$scope module top $end\n$var wire 1 ! x $end\n$scope module bif $end\n$var wire 1 \" v $end\n\
+        $var wire 1 # w $end\n$var wire 1 $ data $end\n$upscope $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\n0\"\n0#\n0$\n#5\n1!\n1\"\n1$\n#9\n");
+    let (code, v, e) = diff_json(&[&a, &b, "--map", "tb.bus=top.bif", "--map", "tb.data=top.bif.data", "--map", "tb.nothing=top.no"]);
+    assert_eq!(code, Some(0), "{e}");
+    assert_eq!(v["signals_compared"].as_u64(), Some(4), "{v}");
+    let pairs: Vec<(String, String)> = v["signals"].as_array().unwrap().iter().map(|s| (s["path"].as_str().unwrap().into(), s["b"].as_str().unwrap().into())).collect();
+    assert!(pairs.contains(&("tb.bus.v".into(), "top.bif.v".into())) && pairs.contains(&("tb.data".into(), "top.bif.data".into()))
+            && pairs.contains(&("tb.x".into(), "top.x".into())), "{pairs:?}");
+    assert!(v["notes"][0].as_str().unwrap().contains("--map tb.nothing=top.no: no signal paired by it"), "{v}");
+    // without the alias tb.data has no pair: listed, not an error; asked for by name, exit 2
+    let (code, v, _) = diff_json(&[&a, &b, "--map", "tb.bus=top.bif"]);
+    assert_eq!((code, v["only_a"].clone()), (Some(0), serde_json::json!(["tb.data"])));
+    let (code, _, e) = diff_json(&[&a, &b, "--signals", "data"]);
+    assert_eq!(code, Some(2));
+    assert!(e.contains("no signal top.data (the pair of tb.data"), "{e}");
+    let (code, v, _) = diff_json(&[&a, &b, "--map", "tb.bus=top.bif", "--signals", "tb.bus.*"]);
+    assert_eq!((code, v["signals_compared"].as_u64(), v["only_b"].as_array().map(Vec::len)), (Some(0), Some(2), Some(0)));
+    // --signals-from: a page's rows; one not in A or without its pair is listed, not an error
+    let list = write("dm.list", "tb.x\ntb.data\ntb.nothing\n");
+    let (code, v, e) = diff_json(&[&a, &b, "--signals-from", &list]);
+    assert_eq!((code, v["signals_compared"].as_u64()), (Some(0), Some(1)), "{e}");
+    assert_eq!((v["only_a"].clone(), v["not_in_a"].clone(), v["only_b"].clone()), (serde_json::json!(["tb.data"]), serde_json::json!(["tb.nothing"]), serde_json::json!([])));
+    let (code, _, e) = diff_json(&[&a, &b, "--signals", "tb.nope*"]);
+    assert_eq!(code, Some(2));
+    assert!(e.contains("no signal matches tb.nope*"), "{e}");
+}
+
+/// --from / --to: the window in A's time, its ends included; --offset: B later by that much (the same run 5 ns
+/// later: equal with it, not without); no time in common is exit 2.
+#[test]
+fn diff_windows_and_offsets() {
+    let a = write("dwa.vcd", &bench("tb", "1011", 0));
+    let b = write("dwb.vcd", &bench("tb", "1011", 5));
+    let (code, v, _) = diff_json(&[&a, &b]);
+    assert_eq!((code, v["from"].as_u64()), (Some(1), Some(5_000)), "the window both cover");
+    let (code, v, e) = diff_json(&[&a, &b, "--offset", "5ns"]);
+    assert_eq!((code, v["compared"].as_u64(), v["offset"].as_i64()), (Some(0), Some(15), Some(5_000)), "{e}");
+    let (code, v, _) = diff_json(&[&a, &b, "--offset", "5ns", "--from", "10ns", "--to", "30ns"]);
+    assert_eq!((code, v["compared"].as_u64(), v["from"].as_u64(), v["to"].as_u64()), (Some(0), Some(7), Some(10_000), Some(30_000)));
+    let (code, _, e) = diff_json(&[&b, &a, "--offset", "-5ns"]);
+    assert_eq!(code, Some(0), "{e}");
+    let (code, _, e) = diff_json(&[&a, &b, "--from", "60ns"]);
+    assert_eq!(code, Some(2));
+    assert!(e.contains("no time in common"), "{e}");
+}
+
+/// --segment: the counts per change of the test case number in A (its value as a number); --align: segment k of B
+/// from the k-th change in B, compared on the length both have (B's case 1 is 10 ns longer: cut there, equal).
+#[test]
+fn diff_segments_and_aligns_them() {
+    let a = write("dsa.vcd", &bench("tb", "1011", 0));
+    let c = write("dsc.vcd", &bench("tb", "1111", 0));
+    let (code, v, _) = diff_json(&[&a, &c, "--segment", "tb_test"]);
+    assert_eq!(code, Some(1));
+    let segs: Vec<(u64, String, u64, u64)> = v["segments"].as_array().unwrap().iter()
+        .map(|s| (s["n"].as_u64().unwrap(), s["value"].as_str().unwrap().into(), s["changes"].as_u64().unwrap(), s["differ"].as_u64().unwrap())).collect();
+    assert_eq!(segs, [(1, "0".into(), 5, 0), (2, "1".into(), 4, 0), (3, "2".into(), 6, 1)], "{v}");
+    let t = out(&sva(&["diff", &a, &c, "--segment", "tb_test"]));
+    assert!(t.contains("segment 3 (tb_test = 2): 30 ns … 50 ns: 6 changes, 1 differ; the first at 30 ns: tb.d A=1011 B=1111"), "{t}");
+    // B: case 1 runs 30 ns, not 20
+    let long = bench("tb", "1011", 0).replace("#30\n1!\nb1011 \"\nb10 #\n#40\n0!\nr1.5 $\nsdone %\n#50\n",
+        "#30\n1!\n#35\n0!\n#40\n1!\nb1011 \"\nb10 #\n#50\n0!\nr1.5 $\nsdone %\n#60\n");
+    let g = write("dsg.vcd", &long);
+    assert_eq!(diff_json(&[&a, &g, "--segment", "tb_test"]).0, Some(1), "not aligned: they differ from 30 ns");
+    let (code, v, e) = diff_json(&[&a, &g, "--segment", "tb_test", "--align"]);
+    assert_eq!(code, Some(0), "{e}");
+    let s = &v["segments"][2];
+    assert_eq!((s["from"].as_u64(), s["b_from"].as_u64(), s["compared_to"].as_u64()), (Some(30_000), Some(40_000), Some(50_000)), "{v}");
+    assert_eq!(v["segments"][1]["compared_to"].as_u64(), Some(30_000), "case 1 compared on A's 20 ns");
+    assert_eq!(diff_json(&[&a, &g, "--align"]).0, Some(2), "--align without --segment");
+    // B stops in case 1 (at 25 ns, no case 2): case 1 compared to there, case 2 not compared, said in a note
+    let short = bench("tb", "0000", 0).split("#30\n").next().unwrap().to_string() + "#25\n";
+    let h = write("dsh.vcd", &short);
+    let (code, v, e) = diff_json(&[&a, &h, "--segment", "tb_test", "--align"]);
+    assert_eq!(code, Some(0), "{e} {v}");
+    assert_eq!((v["segments"][1]["compared_to"].as_u64(), v["segments"][2]["b_from"].clone()), (Some(25_000), serde_json::Value::Null), "{v}");
+    assert_eq!(v["segments"][2]["differ"].as_u64(), Some(0));
+    assert!(v["notes"][0].as_str().unwrap().contains("3 segments in A, 2 in B"), "{v}");
+}
+
+/// The outputs: --json FILE beside the text, --junit a test case per segment with the first differences, --limit the
+/// differences listed; a dump that is not one is exit 2.
+#[test]
+fn diff_writes_json_and_junit() {
+    let a = write("doa.vcd", &bench("tb", "1011", 0));
+    let b = write("dob.vcd", &bench("tb", "1011", 5));
+    let (j, x) = (dir().join("do.json"), dir().join("do.xml"));
+    let o = sva(&["diff", &a, &b, "--json", &j.to_string_lossy(), "--junit", &x.to_string_lossy(), "--limit", "2", "--segment", "tb_test"]);
+    assert_eq!(o.status.code(), Some(1));
+    assert!(out(&o).contains("… and"), "{}", out(&o));
+    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&j).unwrap()).unwrap();
+    assert_eq!(v["differences"].as_array().map(Vec::len), Some(2));
+    assert_eq!(v["more"].as_u64(), Some(v["differ"].as_u64().unwrap() - 2));
+    let xml = std::fs::read_to_string(&x).unwrap();
+    assert!(xml.contains("<testsuite name=\"diff ") && xml.contains("name=\"segment 2 (tb_test = 1)\"") && xml.contains("<failure type=\"differ\" message=\""), "{xml}");
+    assert_eq!(xml.matches("<testcase ").count(), 3, "{xml}");
+    let bad = write("dbad.vcd", "not a dump\n");
+    let o = sva(&["diff", &a, &bad]);
+    assert_eq!(o.status.code(), Some(2), "{}", err(&o));
+    assert_eq!(sva(&["diff", &a]).status.code(), Some(2));
+    assert!(out(&sva(&["diff", "--help"])).contains("usage: sva diff"));
+}
+
+/// A VCD pair and the FST pair made of it (sva fst) give the same result, byte for byte but the file names; a Questa
+/// 2023 VCD with values glued to their codes is read through its FST.
+#[test]
+fn diff_of_fsts_is_the_diff_of_their_vcds() {
+    let a = write("dfa.vcd", &bench("tb", "1011", 0));
+    let c = write("dfc.vcd", &bench("top", "1111", 0));
+    for f in [&a, &c] {
+        assert_eq!(sva(&["fst", f, "-q"]).status.code(), Some(0));
+    }
+    let fa = a.replace(".vcd", ".fst");
+    let fc = c.replace(".vcd", ".fst");
+    let args = ["--segment", "tb_test", "--spans", "9"];
+    let (_, v, _) = diff_json(&[&[a.as_str(), c.as_str()][..], &args].concat());
+    let (_, f, e) = diff_json(&[&[fa.as_str(), fc.as_str()][..], &args].concat());
+    assert_eq!(v.to_string().replace(".vcd", ".X"), f.to_string().replace(".fst", ".X"), "{e}");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let glued = root.join("tests/unit/vcd/glued.vcd").to_string_lossy().into_owned();
+    let o = sva(&["diff", &glued, &glued]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    assert!(err(&o).contains("glued to their codes"), "{}", err(&o));
+}
+
+/// `sva vcd --from --to --signals`: those signals' declarations only (their scope), their values at --from as
+/// $dumpvars (x when none yet), the changes up to --to, then #to; the same of the FST; with --header, exit 2.
+#[test]
+fn vcd_cuts_a_window_out_of_a_dump() {
+    let a = write("cut_src.vcd", &bench("tb", "1011", 0));
+    let o = sva(&["vcd", &a, "--from", "15ns", "--to", "35ns", "--signals", "tb.d,tb.c*"]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    let t = out(&o);
+    assert!(t.contains("$scope module tb $end\n$var wire 1 ! clk $end\n$var wire 4 \" d [3:0] $end\n$upscope $end\n$enddefinitions $end\n\
+        #15\n$dumpvars\n1!\nb1010 \"\n$end\n#20\n0!\n#30\n1!\nb1011 \"\n#35\n"), "{t}");
+    assert!(!t.contains("tb_test") && t.ends_with("#35\n"), "{t}");
+    assert_eq!(sva(&["fst", &a, "-q"]).status.code(), Some(0));
+    let f = out(&sva(&["vcd", &a.replace(".vcd", ".fst"), "--from", "15ns", "--to", "35ns", "--signals", "tb.d,tb.c*"]));
+    assert!(f.contains("$enddefinitions $end\n#15\n$dumpvars\n1!\nb1010 \"\n$end\n#20\n0!\n#30\n1!\nb1011 \"\n#35\n"), "{f}");
+    // a signal without a value at --from: x; a window past the end ends at the end
+    let late = write("cut_late.vcd", "$timescale 1ns $end\n$scope module tb $end\n$var wire 2 ! q [1:0] $end\n$var wire 1 \" b $end\n$upscope $end\n\
+        $enddefinitions $end\n#0\n0\"\n#8\nb10 !\n#9\n");
+    let t = out(&sva(&["vcd", &late, "--from", "2ns", "--to", "1us"]));
+    assert!(t.contains("#2\n$dumpvars\nbxx !\n0\"\n$end\n#8\nb10 !\n#9\n") && t.ends_with("#9\n"), "{t}");
+    assert_eq!(sva(&["vcd", &late, "--signals", "tb.zz"]).status.code(), Some(2));
+    assert!(out(&sva(&["vcd", &late, "--signals", "q"])).contains("$var wire 2 ! q [1:0] $end\n$upscope"), "a name: the one path ending with it");
+    assert_eq!(sva(&["vcd", &late, "--from", "1ns", "--header"]).status.code(), Some(2));
+}

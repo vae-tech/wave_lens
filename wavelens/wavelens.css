@@ -179,6 +179,7 @@
 .wv .notes button:hover { border-color: var(--accent); color: var(--accent); }
 .wv .notes ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .wv .notes li { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+.wv .notes li.here { background: var(--panel-2); box-shadow: inset 3px 0 0 var(--accent); margin-left: -6px; padding-left: 6px; }   /* at the cursor, as in the assertions' list */
 .wv .notes .bn { width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; background: var(--accent); color: var(--panel); font: 700 11px var(--font-mono); }
 .wv .notes .bn:hover { color: var(--panel); outline: 2px solid var(--accent-soft); }
 .wv .notes .nh + ol + .nh { margin-top: 8px; }

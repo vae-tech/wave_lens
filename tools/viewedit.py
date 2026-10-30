@@ -28,7 +28,7 @@ the end of a path ("u_regs.PSEL") or a * pattern. The commands that need the wav
 (edge, picture, fit, fsm, fsm_stats, fsm_go, types) run only in a page (live). docs/USAGE.md § "Editing the views" has them all; the smoke test checks that a
 page with these edits and the same commands run in it give the same state.
 """
-import argparse, datetime, functools, json, math, os, re, sys, unicodedata
+import argparse, collections, datetime, functools, json, math, os, re, sys, unicodedata
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
 from common import WaveError, run_main  # noqa: E402
@@ -64,7 +64,7 @@ COMMANDS = {
     'cycles': 'on? clock? zero? reset?', 'only': 'modules? on? clear? open?', 'fsm': 'mode? signals? fields? clear?',
     'fsm_stats': 'signal', 'fsm_go': 'signal state? from? to? dir? first?', 'types': 'signals?',
     'edge': 'dir? kind? value? signal?', 'reset': '', 'state': '', 'set_state': 'state', 'rows': 'pattern? limit? offset?',
-    'picture': 'format? from? to? rows?',
+    'picture': 'format? from? to? rows?', 'compare': 'result? dump? a? map? offset? off?',
 }
 LIVE_ONLY = {'fit': 'the time of the waves', 'edge': 'the values of the signals', 'picture': 'the screen',
              'fsm': 'the enum labels of the signals', 'fsm_stats': 'the transitions of the signals', 'fsm_go': 'the transitions of the signals',
@@ -72,7 +72,7 @@ LIVE_ONLY = {'fit': 'the time of the waves', 'edge': 'the values of the signals'
 # the arguments of each command that are times (wavemcp.py turns its ns into "…ns" for these)
 TIME_ARGS = {'cursor': ('t',), 'cursor2': ('t',), 'view': ('from', 'to', 'at', 'span'), 'range': ('from', 'to'), 'bookmark': ('t',), 'marker': ('t',),
              'span': ('from', 'to'),
-             'picture': ('from', 'to'), 'cycles': ('zero',)}
+             'picture': ('from', 'to'), 'cycles': ('zero',), 'compare': ('offset',)}
 def block_re(name):
     """A JSON block of the page (<script type="application/json" id="wavelens-…">), at a line's start: not the text of it in
     the comments of the inlined wavelens.js."""
@@ -1279,13 +1279,41 @@ class Editor:
         keep = self.only_filter() if only else None
         return [r for r in out if keep(r)] if keep else out
 
+    def compare(self):
+        """The compare of the view: the state's, else the page's own (WaveJSON "compare")."""
+        c = self.st['compare'] if 'compare' in self.st else self.m.doc.get('compare') if self.m.doc and self.m.timed else None
+        return c if isinstance(c, dict) else None
+
+    def c_compare(self, a):
+        """A second dump over these waves (diff.js compareResult): result (sva diff's, as the WaveJSON "compare"), dump (a VCD or
+        FST: sva diff of the view's dump, a, and it, over the view's window and rows; the page's file only), off: none."""
+        if a.get('off'):
+            self.st['compare'] = None
+            return {'off': True}
+        if a.get('result') is not None:
+            c = a['result']
+            if not isinstance(c, dict) or not isinstance(c.get('signals'), dict):
+                fail('compare: a result {name, from, to, signals: {path: {spans}}} (sva diff\'s, as the page\'s "compare")')
+        elif a.get('dump'):
+            c = compare_dump(self.m, getattr(self, 'base', None), a)
+        else:
+            fail('compare: result, dump or off')
+        if not self.m.timed and self.m.doc:
+            fail('compare: these waves are clock-sampled (one cell per cycle): a compare is of exact waves')
+        self.st['compare'] = c
+        return compare_summary(c)
+
     def c_rows(self, a):
         """edit.js rows: in display order, the hidden ones at the end."""
         pat = str(a.get('pattern') or '')
         rx = glob_re(pat) if '*' in pat else None
         h = set(self.st.get('hidden') or [])
         shown = [r for r in self.ordered(only=False) if (r['type'] == 'sig' and not r.get('ug')) or (r['type'] == 'group' and r.get('full'))]
-        rows = [[r['full'], 'group' if r.get('user') else 'module' if r['type'] == 'group' else r['width']]
+        c = self.compare() or {}
+        sigs, miss = c.get('signals') or {}, set(c.get('missing') or [])
+        mark = lambda r: (['≠'] if ((sigs.get(r.get('path') or r['full']) or {}).get('spans')) else
+                          ['missing'] if (r.get('path') or r['full']) in miss else []) if r['type'] == 'sig' else []
+        rows = [[r['full'], 'group' if r.get('user') else 'module' if r['type'] == 'group' else r['width'], *mark(r)]
                 for r in shown + [r for r in self.m.rows if r.get('full') and r['full'] in h]]
         rows = [r for r in rows if not pat or (rx.match(r[0]) if rx else pat.lower() in r[0].lower())]
         off, n = max(0, int(a.get('offset') or 0)), max(1, int(a.get('limit') or 200))
@@ -1451,6 +1479,7 @@ def edit_page(path, ops, view=None):
     p = Page(path)
     key = p.view(view)
     ed = Editor(p.model(key), p.state(key))
+    ed.base = os.path.dirname(os.path.abspath(path))   # compare dump: the page's dump is beside it
     before = json.dumps(tidy(ed.st), sort_keys=True)   # 30000.0 is 30000
     res = ed.run(ops)
     rev = None
@@ -1458,6 +1487,59 @@ def edit_page(path, ops, view=None):
         rev = p.put(key, ed.st)
         p.save()
     return res, key, rev
+
+
+def compare_summary(c):
+    """What the command compare answers (as the page's): {name, compared, differ, first, missing}."""
+    sigs = c.get('signals') or {}
+    return {'name': c.get('name') or 'B', 'compared': len(sigs), 'differ': sum(1 for x in sigs.values() if (x or {}).get('spans')),
+            'first': c.get('first'), 'missing': len(c.get('missing') or [])}
+
+
+def compare_dump(model, base, a):
+    """sva diff of the view's dump (a's "a", else the page's meta.waves beside it) and a's "dump" over the view's window and
+    rows -> the result (svabuild.compare). A row's path in the dump: its own, else its name under the view's scope, else the
+    one path that ends with it (diff.js cmpFind's rules)."""
+    import dumpscan, svabuild
+    meta = model.doc.get('meta') or {}
+    if not base and not a.get('a'):
+        fail('compare dump: on a page\'s file (its dump is beside it), or give "a", the dump of these waves')
+    here = lambda p: os.path.abspath(os.path.join(base or '.', os.path.expanduser(str(p))))
+    dump_a, dump_b = here(a.get('a') or meta.get('waves') or ''), here(a['dump'])
+    for p, what in ((dump_a, 'the dump of these waves (a)'), (dump_b, 'dump')):
+        if not os.path.isfile(p):
+            fail(f'compare: no such file {p} ({what})')
+    exe = svabuild.find_bin()
+    if not exe:
+        fail('compare dump: needs the sva CLI (make sva-build, or bin/<os>-x86_64/sva)')
+    d = dumpscan.read(dump_a, body=None)
+    paths = set(d.vars) if d else set()
+    scope = meta.get('scope') or ''
+    tails = {}
+    for p in paths:
+        tails.setdefault(p.rsplit('.', 1)[-1], []).append(p)
+    found, votes = [], collections.Counter()
+    for r in model.sigs():
+        if r.get('bit') is not None:
+            continue
+        hit = next(([p] for p in [r.get('path'), scope and f'{scope}.{r["full"]}', scope and f'{scope}.{r["name"]}', r['full'], r['name']]
+                    if p and p in paths), None)
+        if hit is None:
+            hit = [p for p in tails.get(r['full'].rsplit('.', 1)[-1], []) if p.endswith('.' + r['full'])]
+        found.append((r['full'], hit))
+        if len(hit) == 1:
+            votes[hit[0][:len(hit[0]) - len(r['full']) - 1]] += 1
+    # a name several paths end with (the converter left out the prefix the signals share): the prefix most rows have
+    pick = lambda full, hit: max(hit, key=lambda p: (votes[p[:len(p) - len(full) - 1]], -p.count('.')))
+    rows = [(full, pick(full, hit) if hit else full) for full, hit in found]
+    t0, t1 = meta.get('from_ps', model.t0), meta.get('to_ps', model.t1)
+    off = a.get('offset')
+    if off not in (None, ''):
+        t = parse_t(off) if isinstance(off, str) else off
+        if not finite(t):
+            fail(f'compare: offset "{off}" is not a time')
+        off = f'{round(t)}ps'
+    return svabuild.compare(exe, dump_a, dump_b, rows, t0, t1, a.get('map'), off)
 
 
 def edit_state(path, ops, model=None):

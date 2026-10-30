@@ -640,6 +640,7 @@ function parse(src) {
   M.jumps = j.jumps ? j.jumps.map(m => ({ t: mt(m), span: num(parseT(m.span)) || (M.t1 - M.t0) / 5, label: m.label || '' })) : null;
   M.cursor = j.cursor != null ? num(parseT(j.cursor)) : null;
   M.bookmarks = bmNorm(j.bookmarks); M.arrows = arNorm(j.arrows, j.bookmarks); M.spans = spanNorm(j.spans);
+  M.compare = cmpNorm(j.compare);
   return M;
 }
 // lazy rows (a large dump read as it is needed, "lazy": the id codes of a signal not read yet): the WaveJSON signals read
@@ -835,6 +836,20 @@ const linkOf = x => (typeof x === 'string' && x ? { view: x } : x && typeof x ==
   Object.assign({ view: x.view }, +x.bookmark > 0 ? { bookmark: +x.bookmark } : {}) : null);
 // extension "spans": [{from, to, label, color, signals}] coloured stretches of time, over every row or the rows of
 // "signals" (full paths or names): the page's (mkhtml.py resolves their ends) and yours (the span command)
+// extension "compare" {name, from, to, signals: {path: {spans: [[t, u]], other, b, more}}, missing: [path], ...}: a second dump
+// compared with these waves (sva diff's result, made by the build from the config's "compare"); null when it is not one
+function cmpNorm(c) {
+  if (!c || typeof c !== 'object' || !c.signals || typeof c.signals !== 'object' || Array.isArray(c.signals)) return null;
+  const signals = {};
+  for (const [p, s] of Object.entries(c.signals)) {
+    if (!s || typeof s !== 'object') continue;
+    const spans = (Array.isArray(s.spans) ? s.spans : []).map(x => (Array.isArray(x) ? [num(x[0]), num(x[1])] : null))
+      .filter(x => x && isFinite(x[0]) && isFinite(x[1]) && x[1] >= x[0]).sort((a, b) => a[0] - b[0]);
+    signals[p] = { spans, other: s.other ? String(s.other) : null, b: s.b ? String(s.b) : null, more: +s.more || 0 };
+  }
+  return Object.assign({}, c, { name: String(c.name || 'B'), from: num(c.from), to: num(c.to), signals,
+    missing: Array.isArray(c.missing) ? c.missing.map(String) : [] });
+}
 function spanNorm(list) {
   return (Array.isArray(list) ? list : []).filter(s => s && typeof s === 'object').map(s => {
     const a = num(parseT(s.from)), b = num(parseT(s.to));
@@ -878,6 +893,9 @@ function groupNorm(list) {
 // $date, $timescale, its time, scopes, signals, changes). An error it cannot read past is thrown with its line (e.line).
 // opts.lazy: the text is a dump's header (sva vcd --header: the declarations, the first and last times) and every
 // variable is a signal whose changes come later ("lazy": its id codes; a viewer reads them as it needs them, fillRows).
+// opts.only (Compare…): the variables whose path, or the last part of it, is in this Set, the rest left out; no count of the
+// changes first (no budget: the body read once); opts.from / to: of the changes before `from` the last one kept, none
+// after `to`.
 const VCD_UNIT = { s: 1e12, ms: 1e9, us: 1e6, ns: 1e3, ps: 1, fs: 1e-3, as: 1e-6, zs: 1e-9 };
 const VCD_TEXT = { real: 'real', realtime: 'real', shortreal: 'real', real_parameter: 'real', string: 'string' };   // -> "kind"
 // integer variables (Questa writes an int-based enum as one): signed decimal unless they have an enum table
@@ -899,27 +917,31 @@ function vcdToWave(text, opts = {}) {
   return r.value;
 }
 // a File (Open…, Compare…, a file dropped): read in pieces of about 8 MB (TextDecoder: a character cut between two reads
-// waits for the next one) -> the same as vcdToWave of its text; chunk: the size of a piece (the tests: a few bytes)
+// waits for the next one) -> the same as vcdToWave of its text; chunk: the size of a piece (the tests: a few bytes);
+// opts.progress(bytes read, size) after each piece, opts.cancel() true: stopped (an Error "cancelled")
 async function vcdToWaveFile(file, opts = {}, chunk = 8 << 20) {
-  const g = vcdRead(opts, file.size); let r = g.next(), rd = null, dec = null, end = false, buf = '';
+  const g = vcdRead(opts, file.size); let r = g.next(), rd = null, dec = null, end = false, buf = '', got = 0;
   const piece = async () => {   // at most chunk characters (the reads the browser makes: as they come)
     while (buf.length < chunk && !end) {
+      if (opts.cancel && opts.cancel()) throw new Error('cancelled');
       const { value, done } = await rd.read();
-      if (done) { buf += dec.decode(); end = true; } else buf += dec.decode(value, { stream: true });
+      if (done) { buf += dec.decode(); end = true; } else { buf += dec.decode(value, { stream: true }); got += value.length; }
     }
+    if (opts.progress) opts.progress(got, file.size);
     const s = buf.length > chunk ? buf.slice(0, chunk) : buf; buf = buf.length > chunk ? buf.slice(chunk) : '';
     return s || null;
   };
   try {
     while (!r.done) {
-      if (r.value.n === 0) { if (rd) rd.cancel().catch(() => {}); rd = file.stream().getReader(); dec = new TextDecoder(); end = false; buf = ''; }
+      if (r.value.n === 0) { if (rd) rd.cancel().catch(() => {}); rd = file.stream().getReader(); dec = new TextDecoder(); end = false; buf = ''; got = 0; }
       r = g.next(await piece());
     }
   } finally { if (rd) rd.cancel().catch(() => {}); }
   return r.value;
 }
 function* vcdRead(opts = {}, size = 0) {
-  const lazy = !!opts.lazy, budget = lazy ? Infinity : opts.budget ?? 3e6, name = opts.name || 'dump.vcd';
+  const lazy = !!opts.lazy, only = opts.only || null, budget = lazy || only ? Infinity : opts.budget ?? 3e6, name = opts.name || 'dump.vcd';
+  const from = opts.from ?? -Infinity, to = opts.to ?? Infinity;
   // the header: pieces until its "$enddefinitions $end" (the whole text at once: vcdToWave), its words read on as the
   // parser below takes them: a section ($comment, $var …) to its $end, so "$enddefinitions" in a comment is not the end
   let text = '', n0 = 0, eof = false, hw = 0, sec = false, defs = false;
@@ -1107,7 +1129,7 @@ function* vcdRead(opts = {}, size = 0) {
     }
   }
   const count = new Map();
-  yield* scan(1, (k, t, val, kind, at) => {
+  if (!only) yield* scan(1, (k, t, val, kind, at) => {
     if (k == null) return;
     const w = codes.get(k);
     if (w === undefined) { note('warning', at, 'code', k ? `a value of "${k}", a code no $var declares: left out` : 'a value without its code: left out');
@@ -1120,12 +1142,13 @@ function* vcdRead(opts = {}, size = 0) {
       'drawn as written');
   }, true);
   if (!vars.length) note('warning', null, 'novar', 'no $var: the dump has no signals');
-  else if (!count.size && !lazy) note('warning', null, 'empty', 'no value changes after $enddefinitions');
+  else if (!count.size && !lazy && !only) note('warning', null, 'empty', 'no value changes after $enddefinitions');
   const changes = v => v.codes.reduce((s, k) => s + (count.get(k) || 0), 0);
   const order = vars.slice().sort((a, b) => a.depth - b.depth);   // stable: declaration order inside a level
   const keep = new Set(); let used = 0;
   // the levels nearest the top, as many as fit
-  for (const v of order) { const n = changes(v); if (used + n > budget && keep.size) break; keep.add(v); used += n; }
+  if (only) for (const v of vars) { if (only.has(v.path) || only.has(v.path.slice(v.path.lastIndexOf('.') + 1))) keep.add(v); }
+  else for (const v of order) { const n = changes(v); if (used + n > budget && keep.size) break; keep.add(v); used += n; }
   // the transitions of the variables kept: per id code, then per variable (codes merged, bits put together)
   const raw = new Map(); for (const v of keep) for (const k of v.codes) raw.set(k, []);
   let t0 = null, t1 = 0;
@@ -1133,7 +1156,9 @@ function* vcdRead(opts = {}, size = 0) {
   yield* scan(2, (k, t, val) => {
     if (k == null) { if (t0 == null) t0 = t; t1 = Math.max(t1, t); return; }
     if (t0 == null) t0 = t;   // values before the first time (a $dumpvars block): the dump starts at 0
-    const a = raw.get(k); if (a && val != null) a.push([t, val]);
+    const a = raw.get(k); if (!a || val == null || t > to) return;
+    if (t < from && a.length && a[a.length - 1][0] < from) a[a.length - 1] = [t, val];   // before the window: its last value only
+    else a.push([t, val]);
   });
   const tvOf = v => {
     const out = [], put = (t, x) => { const L = out[out.length - 1]; if (L && L[0] === t) { L[1] = x;
@@ -1168,17 +1193,17 @@ function* vcdRead(opts = {}, size = 0) {
     scopes[p] = k === 'interface' ? k : { kind: k, width: vars.filter(v => v.path.startsWith(p + '.')).reduce((n, v) => n + v.width, 0) };
   const end = Math.max(t1, (t0 ?? 0) + 1);
   const doc = { signal: out, head: { text: name }, time: { t0: t0 ?? 0, t1: end, cycle: (end - (t0 ?? 0)) / 40, unit: 'ps' }, config: {} };
-  const still = vars.filter(v => keep.has(v) && !changes(v));
-  if (still.length && !lazy) note('info', null, 'still', `${still.length} signal${still.length === 1 ? ' has' : 's have'} no value in the dump (drawn x): ` +
+  const still = lazy || only ? [] : vars.filter(v => keep.has(v) && !changes(v));
+  if (still.length) note('info', null, 'still', `${still.length} signal${still.length === 1 ? ' has' : 's have'} no value in the dump (drawn x): ` +
     still.slice(0, 5).map(v => v.path).join(', ') + (still.length > 5 ? ' …' : ''));
-  if (keep.size < vars.length) note('info', null, 'budget', `${keep.size} of ${vars.length} signals read: the levels nearest the top within ` +
+  if (keep.size < vars.length && !only) note('info', null, 'budget', `${keep.size} of ${vars.length} signals read: the levels nearest the top within ` +
     `dumpBudget (${budget} changes)`);
   for (const [, [n, level, msg]] of same) if (n > VCD_SAME) log.push({ level, line: null, msg: `${n - VCD_SAME} more like "${msg}"` });
   Object.assign(info, { t0: t0 ?? 0, t1: end, scopes: new Set(vars.map(v => v.scope.join('.'))).size, signals: vars.length, shown: keep.size,
     changes: [...count.values()].reduce((a, b) => a + b, 0) });
   if (Object.keys(scopes).length) doc.scopes = scopes;
   const omitted = {};   // past the budget: in the dump, not in the page (its find says so), by scope
-  for (const v of vars) if (!keep.has(v)) (omitted[v.scope.join('.')] ||= []).push(v.name);
+  if (!only) for (const v of vars) if (!keep.has(v)) (omitted[v.scope.join('.')] ||= []).push(v.name);
   if (Object.keys(omitted).length) doc.meta = { omitted: { why: 'dumpBudget', paths: omitted } };
   return { doc, shown: shownVars.length, total: vars.length, changes: used, info,
     log: log.map(x => Object.assign({ level: x.level, text: x.msg }, x.line != null ? { line: x.line } : {})) };
@@ -1430,7 +1455,7 @@ function svApply(doc, sv, log, why) {
 // (in.st), an array of enums or structs a field per element (pair[1]); a union, an enum of more than 32 bits from describe
 // (Questa keeps 32) or a text it does not read a note, and the signal stays as numbers.
 const TY_INTS = { int: 32, integer: 32, shortint: 16, longint: 64, byte: 8, time: 64 };
-const TY_REAL = /^(?:Floating point type\b.*|Real|Shortreal|Realtime)$/;   // svtypes.py DESC_REAL
+const TY_REAL = /^(?:Floating point type\b.*|Real|Shortreal|Realtime|Integer)$/;   // svtypes.py DESC_REAL (a real, an integer parameter)
 function tyParse(text) {   // Questa's describe of one signal -> a type {kind: enum | vec | record | union | array | unknown, …}
   const lines = String(text).split(/\r?\n/).map(x => x.trim()).filter(Boolean); let pos = 0;
   const one = () => {
@@ -1515,8 +1540,12 @@ function svTypes(d, where = 'types') {
   // none or null: no map; anything but an object of texts an error (svtypes.py's read)
   const map = d.map == null ? {} : typeof d.map === 'object' && !Array.isArray(d.map) ? Object.assign({}, d.map) : null;
   if (!map || Object.values(map).some(x => typeof x !== 'string')) throw new Error(`${where}: "map" is {"dump.prefix": "types.prefix"}`);
+  // every signal the types declare (svMissing): Questa's describe has them all, Verilator's "signals" the typed ones
+  const desc = d.describe && typeof d.describe === 'object' ? d.describe : {};
+  const declared = Object.assign(Object.fromEntries(Object.keys(d.signals || {}).map(p => [p, ''])),
+    Object.fromEntries(Object.entries(desc).map(([p, x]) => [p, String(x)])));
   return { enums: {}, fields: {}, paths, notes, files: 1, producer: d.producer || {}, map, names: [where], plain,
-    instances: d.instances && typeof d.instances === 'object' ? d.instances : {} };
+    instances: d.instances && typeof d.instances === 'object' ? d.instances : {}, declared, every: Object.keys(desc).length > 0 };
 }
 // the top scopes a dump adds above the design's (TOP. of Verilator's FST): its roots that are none of the types' roots but
 // have one as a child; none when a root of the dump is one of the types' (other.tb.state is not tb.state)
@@ -1541,11 +1570,51 @@ function svRemap(p, m) {
 }
 // whether the types are of the run of the dump (svtypes.py fingerprint): written more than a day apart; instances of the
 // types under modules the dump has that it does not have -> [notes]
+// the signals the types declare that the dump has not got (svtypes.py missing): dump its variables' paths, scopes its
+// scopes -> [{path, why}]: array (Questa's "Array(…) of"), generate (under a scope it lacks a generate makes: name[k],
+// genblk…), scope (under another one it lacks), other
+const SV_MISS = { array: 'unpacked arrays (Questa\'s VCD leaves them out: USAGE.md § What a Questa VCD lacks)',
+  generate: 'under generate scopes the dump has not got', scope: 'in scopes the dump has not got (vcd add without -r?)', other: 'not dumped' };
+const SV_MISS_SHORT = { array: 'unpacked arrays', generate: 'under generate scopes', scope: 'in other scopes', other: 'not dumped' };
+function svMissing(sv, dump, scopes) {
+  const declared = (sv && sv.declared) || {}, m = (sv && sv.map) || {}, mine = dump.map(p => svRemap(p, m)), tops = svTops(declared, mine);
+  const have = new Set(mine.map(p => svLookupKey(declared, p, tops)).filter(x => x != null));
+  for (const p of mine) have.add(p.replace(/(\.?\[-?\d+\])+$/, ''));   // an element of an array: the array is there
+  const sc = new Set([...scopes].map(s => svRemap(s, m)));
+  for (const s of [...sc]) { const k = s.indexOf('.'); if (k > 0 && tops.has(s.slice(0, k))) sc.add(s.slice(k + 1)); }
+  const out = [];
+  for (const [p, text] of Object.entries(declared)) {
+    if (have.has(p)) continue;
+    const parts = p.split('.').slice(0, -1);
+    let gone = null;
+    if (sc.size) for (let i = 0; i < parts.length && gone == null; i++) { const q = parts.slice(0, i + 1).join('.'); if (!sc.has(q)) gone = q; }
+    const leaf = gone ? gone.slice(gone.lastIndexOf('.') + 1) : '';
+    const gen = /\[-?\d+\]$/.test(leaf) || /^<?genblk/.test(leaf);
+    out.push({ path: p, why: /^\s*Array\(/.test(text) ? 'array' : gone ? (gen ? 'generate' : 'scope') : 'other' });
+  }
+  return out;
+}
+function svMissingNotes(sv, miss, shown = 3) {
+  if (!miss.length) return [];
+  const by = {}; for (const x of miss) (by[x.why] ||= []).push(x.path);
+  const n = miss.length, ks = Object.keys(SV_MISS).filter(k => by[k]);
+  return [`${n} signal${n === 1 ? '' : 's'} of the types ${n > 1 ? 'are' : 'is'} not in the dump: ` +
+    ks.map(k => `${SV_MISS_SHORT[k]} ${by[k].length}`).join(', ') +
+    (sv.every ? '' : ' (the types name their typed signals only: the others are not looked for)'),
+    ...ks.map(k => `${SV_MISS[k]}: ${by[k].slice(0, shown).join(', ')}${by[k].length > shown ? ' …' : ''}`)];
+}
 // the scopes of a WaveJSON: every prefix of a signal's path (the instances the dump has)
 const svScopes = doc => { const out = new Set(), walk = items => { for (const it of items || []) {
   if (Array.isArray(it)) walk(it.slice(typeof it[0] === 'string' ? 1 : 0));
   else if (it && it.path) { const p = String(it.path).split('.'); for (let i = 1; i < p.length; i++) out.add(p.slice(0, i).join('.')); } } };
   walk(doc && doc.signal); return out; };
+// the paths of a WaveJSON's signals (svMissing: a dump read whole)
+const svPaths = doc => { const out = [], walk = items => { for (const it of items || []) {
+  if (Array.isArray(it)) walk(it.slice(typeof it[0] === 'string' ? 1 : 0)); else if (it && it.path) out.push(String(it.path)); } };
+  walk(doc && doc.signal); return out; };
+// the notes of what a dump read whole has not got of the types (none when its reader left signals out: dumpBudget)
+const svMissSaid = (sv, doc) => (sv && sv.declared && !(doc.meta && doc.meta.omitted) ?
+  svMissingNotes(sv, svMissing(sv, svPaths(doc), svScopes(doc))) : []);
 function svFingerprint(sv, date, modules) {
   const out = [], p = (sv && sv.producer) || {}, when = x => { const t = Date.parse(String(x || '').replace(/\s+/g, ' ')); return isNaN(t) ? null : t; };
   const a = when(p.date), b = when(date);
@@ -2430,7 +2499,7 @@ class Bar {
       else if (b.dataset.act === 'sload') v.sfile.click();
       else if (b.dataset.act === 'dopen') v.openDump();
       else if (b.dataset.act === 'dcmp') v.cfile.click();
-      else if (b.dataset.act === 'dcmpx') v.compare(null);
+      else if (b.dataset.act === 'dcmpx') { if (v.cmpReading) v.compareStop(); else v.compare(null); }
       else if (b.dataset.act === 'dsrc') v.srcfile.click();
       else if (b.dataset.act === 'dreload') v.reloadDump();
       else if (b.dataset.act === 'live') liveClick();
@@ -3519,7 +3588,7 @@ class WaveView {
       paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs), hidden: [...this.hiddenRows],
         bits: [...this.bitsOpen], select: (this.sel && this.sel.full) || null, find: this.q || '', bookmarks: this.bookmarks(), arrows: this.arrowList(),
         markers: this.markList(), spans: this.spanList(),
-        groups: this.groupList(), only: this.onlyState(), fsm: this.fsmState() };
+        groups: this.groupList(), only: this.onlyState(), fsm: this.fsmState(), compare: this.cmpState() };
     // none is said (null, the kind "any"): a state loaded later clears what is there then (a key left out keeps it)
     st.cursor2 = this.cursor2 ?? null;
     st.range = this.range ? { from: this.range[0], to: this.range[1], signal: (this.rangeRow && this.rangeRow.full) || null } : null;
@@ -3605,6 +3674,7 @@ class WaveView {
     }
     if (st.markers !== undefined) { this.umarks = markNorm(st.markers); this.setMarks(); }
     if (st.spans !== undefined) { this.spans = spanNorm(st.spans); this.saveBookmarks(); this.draw(); }
+    if (st.compare !== undefined && (st.compare || this.cmp)) this.compareResult(st.compare, true);   // a second dump compared (diff.js)
 
     if (st.select !== undefined) this.sel = (st.select && seen(st.select) && this.sigByPath(st.select)) || null;
     if (st.from != null && st.to != null && isFinite(st.from) && isFinite(st.to)) { this.span = Math.min(Math.max(st.to - st.from, this.minSpan), M.t1 - M.t0);
@@ -3671,7 +3741,8 @@ class WaveView {
       catch (e) { this.dumpSaid(file.name, { error: e.message, line: e.line }); throw e; }
       if (gen !== this.root.wlOpen || !VIEWS.has(this)) return this;
       const said = [], why = new Map(), nsv = svApply(r.doc, this.opts.sv, said, why);   // the sources' labels (Sources…, the VS Code tab's wavelens.sources)
-      const run = this.opts.sv && this.opts.sv.paths ? svFingerprint(this.opts.sv, r.info.date, svScopes(r.doc)) : [];   // the types of this run?
+      const run = this.opts.sv && this.opts.sv.paths ? svFingerprint(this.opts.sv, r.info.date, svScopes(r.doc)).concat(svMissSaid(this.opts.sv, r.doc)) :
+        [];   // the types of this run? what of them the dump has not got
       const from = this.opts.sv && this.opts.sv.paths ? 'the types file' : 'the SystemVerilog sources';
       if (nsv) r.log.push({ level: 'info', text: `labels or fields from ${from} for ${nsv} signal${nsv === 1 ? '' : 's'}` });
       const ni = [...why.values()].filter(x => x.int).length; if (ni) r.log.push({ level: 'info', text: svIntSaid(ni) });
@@ -3738,7 +3809,8 @@ class WaveView {
     if (!ne && !nf && !np && !quiet) this.toast((sv.notes.length ? 'no labels from these files' : 'no "typedef enum" or "typedef struct packed" in ' +
       `${texts.length} file${texts.length === 1 ? '' : 's'}`) + said);
     const log = [], why = new Map(), before = JSON.stringify(this.M.src.signal), doc = structuredClone(this.M.src), n = svApply(doc, this.opts.sv, log, why);
-    const run = ty ? svFingerprint(this.opts.sv, this.opts.dumpDate, svScopes(doc)) : [];   // the types of the run of the dump?
+    const run = ty ? svFingerprint(this.opts.sv, this.opts.dumpDate, svScopes(doc)).concat(this.opts.dumpSrc ? svMissSaid(this.opts.sv, doc) : []) :
+      [];   // the types of the run of the dump? what of them a dump opened here has not got
     Object.assign(this.opts, { svWhy: why, svRun: run });
     for (const x of log.concat(run)) console.warn('wavelens: types: ' + x);
     const left = log.filter(x => x.endsWith('left as it is')), ni = [...why.values()].filter(x => x.int).length;
@@ -4845,11 +4917,14 @@ class WaveView {
     this.curEl.textContent = 'cursor ' + this.fmtCursor(this.cursor) + ' · view ' + (M.timed ? fmtTime(this.span, this.span / 10,
       this.span) : this.span.toFixed(1) + ' cycles') + (this.cursor2 != null ? ' · cursor 2 ' + this.fmtCursor(this.cursor2) + ' · ' + this.delta2() : '') +
       (this.range ? ' · ' + this.rangeText() : '') + this.cycText();
-    if (this.bms.length && (this.dtAt !== this.cursor || this.dtGen !== this.notesGen)) {   // the bookmarks' Δ to the cursor
+    // the bookmarks' Δ to the cursor; the bookmarks and markers at the cursor marked in their lists, as an assertion's attempt is
+    if ((this.bms.length || this.umarks.length) && (this.dtAt !== this.cursor || this.dtGen !== this.notesGen)) {
       this.dtAt = this.cursor; this.dtGen = this.notesGen;
-      for (const el of this.notesEl.querySelectorAll('li[data-n] .dt')) { const b = this.bms.find(x => x.n === +el.closest('li').dataset.n); if (!b) continue;
-        const d = b.t - this.cursor;
-        el.textContent = d === 0 ? 'at the cursor' : `${d < 0 ? '−' : '+'}${this.fmt(Math.abs(d), Math.abs(d) / 1000 || 1, Math.abs(d) || 1)}`; }
+      for (const li of this.notesEl.querySelectorAll('li[data-n]')) { const b = this.bms.find(x => x.n === +li.dataset.n); if (!b) continue;
+        const d = b.t - this.cursor, el = li.querySelector('.dt'); li.classList.toggle('here', d === 0);
+        el.textContent = d === 0 ? '' : `${d < 0 ? '−' : '+'}${this.fmt(Math.abs(d), Math.abs(d) / 1000 || 1, Math.abs(d) || 1)}`; }
+      for (const li of this.notesEl.querySelectorAll('li[data-k]')) {
+        const m = this.umarks[+li.dataset.k]; li.classList.toggle('here', !!m && m.t === this.cursor); }
     }
     if (this.fsmP) this.fsmP.values();   // the FSM panel's states at the cursor
     if (this.valsAt !== this.cursor || this.valsGen !== this.namesGen || this.valsRadix !== this.S.radix) {   // value column: only when it changes
@@ -5062,6 +5137,18 @@ command('marker', 'id? t? label? color? delete?', 'a marker: a dashed line acros
   if (a.label !== undefined) m.label = a.label == null ? '' : String(a.label);
   if (a.color !== undefined) m.color = a.color || null;
   v.setMarks(); return { id: v.umarks.indexOf(m) + 1 };
+});
+command('compare', 'result? dump? a? map? offset? off?', 'a second dump over these waves, where its values differ (red bands, ≠, ]d [d): ' +
+  'result (sva diff\'s, as the page\'s "compare": tools/viewedit.py and view_edit make it of dump); off: compared no more', (v, a) => {
+  if (a.off) { v.compareResult(null); return { off: true }; }
+  if (a.result != null) {
+    const r = v.compareResult(a.result, true);
+    if (!r) fail('compare: these waves are clock-sampled (one cell per cycle): a compare is of exact waves');
+    return { name: r.name, compared: r.compared, differ: r.differ, first: r.first, missing: r.missing };
+  }
+  if (a.dump != null) fail('compare dump: a page reads no file by itself: pick it with Compare… here; an agent gives result (view_edit makes it of dump ' +
+    'on the page\'s file, or live)');
+  fail('compare: result or off');
 });
 command('span', 'id? from? to? label? color? signals? delete?', 'a coloured stretch of time over every row, or over the rows of signals, with its ' +
   'label: a new one (from and to), or span id (1, 2 … as listed) changed; delete: id or "all"', (v, a) => {
@@ -5287,13 +5374,14 @@ command('state', '', 'the viewer\'s state (what Save writes)', v => ({ state: v.
 command('set_state', 'state', 'a state back (what Load… does); every key it has replaces this viewer\'s', async (v, a) =>
   ({ missing: await v.setState(a.state) }));
 command('rows', 'pattern? limit? offset?', 'the signals and modules of the page in display order: [full path, width | "module" | "group"], ' +
-  'hidden and folded ones too', (v, a) => {
+  'hidden and folded ones too; a dump compared: "≠" (it differs) or "missing" (not in it) third', (v, a) => {
   const rx = a.pattern ? (String(a.pattern).includes('*') ? glob(String(a.pattern)) : null) : null, low = String(a.pattern || '').toLowerCase();
   const all = v.allRows(true)   // the hidden ones too (a signal under a hidden module), where they would be
     .filter(r => (r.type === 'sig' && r.tr && !r.ug && r.bit == null) || (r.type === 'group' && r.full))   // a bus's bits: by their paths
     .filter(r => !a.pattern || (rx ? rx.test(r.full) : r.full.toLowerCase().includes(low)));
   const off = Math.max(0, +a.offset || 0), n = Math.max(1, +a.limit || 200), page = all.slice(off, off + n);
-  return { total: all.length, rows: page.map(r => [r.full, r.type === 'group' ? (r.user ? 'group' : 'module') : r.width || 1]),
+  const mark = r => { const c = v.cmpOf(r); return !c ? [] : c.spans.length ? ['≠'] : c.missing || c.omitted ? ['missing'] : []; };
+  return { total: all.length, rows: page.map(r => [r.full, r.type === 'group' ? (r.user ? 'group' : 'module') : r.width || 1, ...mark(r)]),
     ...(off + n < all.length ? { next_offset: off + n } : {}) };
 });
 command('picture', 'format? from? to? rows?', 'the waves as a picture: png (base64), svg or wavedrom (WaveJSON); rows: screen (default), all, ' +
@@ -5692,7 +5780,8 @@ function live(url) {
 /* ---------------- compare with a second dump ---------------- */
 // The same test before and after a change of the RTL, two seeds: the second dump (B, a VCD read by the page's reader)
 // over these waves on the same time scale, signal by signal (by path; else by name under the page's scope; else the one
-// path of B that ends with the name). Where B's value differs, a red band on the row; the names of the signals that
+// path of B that ends with the name). B is read once, its signals that could be these rows only and over these waves' time
+// (a large B: its progress said, ≠ … ✕ stops it). Where B's value differs, a red band on the row; the names of the signals that
 // differ get ≠, the ones B has not got are struck (the ones its reader left out for dumpBudget: said apart); ]d [d step
 // through the differences (of the selected signal when it has some, else of all). Compared over the time both dumps
 // cover; values as values: bits ("'b" bits, x and z apart, a bus of another width differs everywhere), a real as a
@@ -5738,6 +5827,28 @@ const cmpPath = r => (r.src && r.src.path) || r.path || r.full;
 const cmpByName = c => (c.byName.length ? `matched by name: ${c.byName[0][0]} → ${c.byName[0][1]}${c.byName.length > 1 ? ` (+${c.byName.length - 1} more: ` +
   'their tooltips)' : ''}` : '');
 const cmpText = r => (r.kind === 'real' || r.kind === 'string');
+// the red bands of the stretches that differ (of(row): {spans} or null), on the rows laid out (lay entries), over [t0, t1): the
+// first one in view found by a binary search, none past t1; the stretches less than a pixel apart one band (as a burst of
+// edges: a clock a picosecond late differs twice a cycle), the next one found by a binary search too: a band per pixel at most
+function paintCmp(P, lay, X, t0, t1, of) {
+  if (!(t1 > t0)) return;
+  const k = (X(t1) - X(t0)) / (t1 - t0), px = k > 0 ? 1 / k : 0;   // the time of a pixel
+  for (const o of lay) {
+    const c = of(o.row); if (!c || !c.spans.length) continue;
+    const S = c.spans, n = S.length, at = j => S[j][0];
+    for (let i = Math.max(0, lastBefore(n, at, t0)); i < n;) {
+      const a = S[i][0]; let b = S[i][1], j = i + 1;
+      if (a >= t1) break;
+      while (j < n && S[j][0] < t1 && S[j][0] <= b + px) { const m = lastBefore(n, at, b + px); b = Math.max(b, S[m][1]); j = m + 1; }
+      i = j; if (b <= t0) continue;
+      const x0 = X(Math.max(a, t0)), x1 = Math.max(X(Math.min(b, t1)), x0 + 1.5);
+      P.rect(x0, o.y + 1, x1 - x0, o.h - 2, 'x', 0.16); P.rect(x0, o.y + o.h - 3, x1 - x0, 2, 'x', 0.85);
+    }
+  }
+}
+// a compare result of the page (WaveJSON "compare", sva diff's made by the build or given by the command compare) for the
+// static SVG: a row's stretches by its path, a struct's by its group's vector
+const cmpOfDoc = c => (c ? r => { const x = r && c.signals[cmpPath(r.sig || r.orig || r)]; return x || null; } : () => null);
 Object.assign(WaveView.prototype, {
   // the rows these waves compare: the signals of exact transitions (not a struct's fields: its whole vector instead, on its group)
   cmpRows() {
@@ -5756,11 +5867,21 @@ Object.assign(WaveView.prototype, {
     // a compare that fails leaves the one before as it was, and says so (its bands are still drawn)
     const still = () => (this.cmp ? `; still compared with ${this.cmp.name}` : '');
     let doc;
-    try { const o = { name: nm, budget: this.S.dumpBudget };   // a File in pieces; a text, or something with a text(), at once
+    // B's variables that could be these rows (a path, a name, the last part of either: cmpFind's), its changes over their time
+    const only = new Set();
+    for (const a of mine) for (const n of [cmpPath(a), a.full, a.name]) if (n) { only.add(String(n)); only.add(String(n).split('.').pop()); }
+    const mb = n => (n / 1048576).toFixed(n < 10485760 ? 1 : 0);
+    let told = 0;   // the bytes the last progress said
+    const o = { name: nm, only, from: this.M.t0, to: this.M.t1, cancel: () => req !== this.cmpReq || !this.root.isConnected,
+      progress: (got, size) => { if (size >= 8 << 20 && got - told >= 8 << 20 && got < size) { told = got;
+        this.toast(`compare: ${mb(got)} of ${mb(size)} MB of ${nm} read (≠ … ✕ stops)`); } } };
+    this.cmpReading = req; this.cmpShow();
+    try {   // a File in pieces; a text, or something with a text(), at once
       doc = (typeof file === 'string' ? vcdToWave(file, o) : typeof file.stream === 'function' ? await vcdToWaveFile(file, o) :
         vcdToWave(await file.text(), o)).doc; }
     catch (e) { if (req === this.cmpReq && this.root.isConnected && VIEWS.has(this)) { this.toast(`${nm}: ${e.message}${still()}`);
       this.logError(e, `cannot compare with ${nm}${e.line ? ` (line ${e.line})` : ''}: ${e.message}`); } return null; }
+    finally { if (this.cmpReading === req) { this.cmpReading = 0; this.cmpShow(); } }
     if (req !== this.cmpReq || !this.root.isConnected || !VIEWS.has(this)) return null;   // compared again, or no more, meanwhile
     const brows = parse(doc).rows.filter(r => r.type === 'sig' && r.tr), bs = new Map(brows.map(r => [r.path || r.full, r])), byLeaf = new Map();
     for (const r of brows) { const k = (r.path || r.full).split('.').pop(); byLeaf.set(k, (byLeaf.get(k) || []).concat([r])); }
@@ -5798,6 +5919,17 @@ Object.assign(WaveView.prototype, {
     this.toast(said + (differ ? ' · ]d [d go to them' : '')); this.log('ok', 'compared with ' + said);
     return { name: nm, compared: c.compared, differ, missing, omitted, first: c.first, from, to, byName: byName.length };
   },
+  // the compare as a result (the saved state's "compare", as the WaveJSON's): the one given, else the one of a dump read here
+  cmpState() {
+    const c = this.cmp; if (!c) return null;
+    if (c.result) return c.result;
+    const signals = {}, missing = [];
+    for (const [r, x] of c.rows) {
+      if (x.missing || x.omitted) missing.push(cmpPath(r));
+      else signals[cmpPath(r)] = Object.assign({ spans: x.spans }, x.other ? { other: x.other } : {});
+    }
+    return { name: c.name, from: c.from, to: c.to, first: c.first, signals, missing };
+  },
   // the compare result of a row: a struct's group row its vector, a row of your groups its signal
   cmpOf(r) { return this.cmp ? this.cmp.rows.get(r.sig || r.orig || r) : null; },
   // the rows' marks in the names (≠ differs, struck: not in B; your groups' rows too) and their tooltips
@@ -5813,30 +5945,46 @@ Object.assign(WaveView.prototype, {
       else if (this.cmpTitled && this.cmpTitled.delete(r)) this.rowTitle(r, null);
     }
   },
-  cmpShow() {   // the bar's ≠ N ✕ (no compare: hidden)
+  // a second dump being read stopped (≠ … ✕): the compare before it stays
+  compareStop() { this.cmpReq = (this.cmpReq || 0) + 1; this.cmpReading = 0; this.cmpShow(); this.toast(`compare: stopped${this.cmp ? `; still compared ` +
+    `with ${this.cmp.name}` : ''}`); },
+  cmpShow() {   // the bar's ≠ N ✕ (no compare: hidden; a dump being read: ≠ … ✕ stops it)
     const b = this.root.querySelector('button[data-act=dcmpx]'); if (!b) return;
+    if (this.cmpReading) { b.hidden = false; b.textContent = '≠ … ✕'; b.title = 'reading the second dump: click to stop'; return; }
     b.hidden = !this.cmp; if (this.cmp) b.textContent = `≠ ${this.cmp.differ} ✕`;
     b.title = this.cmp ? `${this.cmp.name}: ${this.cmp.differ} of ${this.cmp.compared} signals differ${this.cmp.missing ? `, ${this.cmp.missing} not in it` :
       ''}${this.cmp.byName.length ? `; ${cmpByName(this.cmp)}` : ''}; ]d [d go to the differences; click: compare no more` : '';
   },
-  // the red bands of the stretches that differ, on the rows laid out (lay entries), over [t0, t1): the first one in view
-  // found by a binary search, none past t1; the stretches less than a pixel apart one band (as a burst of edges: a clock
-  // a picosecond late differs twice a cycle), the next one found by a binary search too: a band per pixel at most
-  paintDiff(P, lay, X, t0, t1) {
-    if (!this.cmp || !(t1 > t0)) return;
-    const k = (X(t1) - X(t0)) / (t1 - t0), px = k > 0 ? 1 / k : 0;   // the time of a pixel
-    for (const o of lay) {
-      const c = this.cmpOf(o.row); if (!c || !c.spans.length) continue;
-      const S = c.spans, n = S.length, at = j => S[j][0];
-      for (let i = Math.max(0, lastBefore(n, at, t0)); i < n;) {
-        const a = S[i][0]; let b = S[i][1], j = i + 1;
-        if (a >= t1) break;
-        while (j < n && S[j][0] < t1 && S[j][0] <= b + px) { const m = lastBefore(n, at, b + px); b = Math.max(b, S[m][1]); j = m + 1; }
-        i = j; if (b <= t0) continue;
-        const x0 = X(Math.max(a, t0)), x1 = Math.max(X(Math.min(b, t1)), x0 + 1.5);
-        P.rect(x0, o.y + 1, x1 - x0, o.h - 2, 'x', 0.16); P.rect(x0, o.y + o.h - 3, x1 - x0, 2, 'x', 0.85);
-      }
+  // the red bands of a dump compared (paintCmp)
+  paintDiff(P, lay, X, t0, t1) { if (this.cmp) paintCmp(P, lay, X, t0, t1, r => this.cmpOf(r)); },
+  // a compare result already made (sva diff's, by the build from the config's "compare", or the command compare): the WaveJSON
+  // extension "compare" {name, from, to, signals: {path: {spans, other, b}}, missing: [path]} over these waves, as compare()
+  // puts a dump read here; null: compared no more. quiet: no toast (the page opens with it) -> as compare()
+  compareResult(c, quiet) {
+    this.cmpReq = (this.cmpReq || 0) + 1;
+    if (c == null) { this.cmp = null; this.cmpMarks(); this.cmpShow(); this.draw(); return null; }
+    c = cmpNorm(c);
+    if (!c) throw new Error('compare: a result {name, from, to, signals: {path: {spans}}} (sva diff\'s, as the page\'s "compare")');
+    if (!this.M.timed) { this.toast('compare: these waves are clock-sampled (one cell per cycle): a compare is of exact waves'); return null; }
+    const rows = new Map(), miss = new Set(c.missing);
+    let differ = 0, missing = 0;
+    for (const a of this.cmpRows()) {
+      const p = cmpPath(a), s = c.signals[p];
+      if (miss.has(p)) { rows.set(a, { missing: true, omitted: false, spans: [] }); missing++; continue; }
+      if (!s) continue;
+      rows.set(a, { spans: s.spans, other: s.other || null, by: null, b: s.b || null });
+      if (s.spans.length) differ++;
     }
+    const starts = [...new Set([...rows.values()].flatMap(x => x.spans.map(([t]) => t)))].sort((x, y) => x - y);
+    this.cmp = { name: c.name, rows, differ, missing, omitted: 0, compared: rows.size - missing, from: c.from, to: c.to, starts,
+      first: starts.length ? starts[0] : null, byName: [], result: c };
+    this.cmpMarks(); this.cmpShow(); this.draw();
+    const f = t => this.fmt(t, (this.M.t1 - this.M.t0) / 1000, this.M.t1 - this.M.t0), x = this.cmp;
+    const said = `${x.name}: ${differ} of ${x.compared} signals differ${x.first == null ? '' : `, the first at ${f(x.first)}`}` +
+      (missing ? ` · ${missing} not in it` : '') + (c.from > this.M.t0 || c.to < this.M.t1 ? ` · compared ${f(c.from)} … ${f(c.to)}` : '');
+    if (!quiet) this.toast(said + (differ ? ' · ]d [d go to them' : ''));
+    this.log('ok', 'compared with ' + said);
+    return { name: x.name, compared: x.compared, differ, missing, omitted: 0, first: x.first, from: c.from, to: c.to, byName: 0 };
   },
   // ]d [d: the cursor to the next / previous start of a difference: of the selected signal when it has some, else of all
   // the signals in the view (hidden ones and the ones Only leaves out: not stepped to)
@@ -5852,7 +6000,11 @@ Object.assign(WaveView.prototype, {
     this.draw(); this.syncCursorFields(true); return this;
   },
 });
-PLUGINS.push(v => v.addKey(']d', () => v.diffStep(1)).addKey('[d', () => v.diffStep(-1)));
+// a compare result of the page (WaveJSON "compare"): its bands when the viewer opens
+PLUGINS.push(v => {
+  v.addKey(']d', () => v.diffStep(1)).addKey('[d', () => v.diffStep(-1));
+  if (v.M.compare && v.M.timed) v.compareResult(v.M.compare, true);
+});
 /* ======================== src/modules.js ======================== */
 /* ---------------- Only: the modules kept on the waves ---------------- */
 // Only (state "only": {modules: [paths], on}; the command only): the waves keep the signals of the modules picked and of
@@ -7101,6 +7253,7 @@ const WaveSVG = {
           if (cy) paintCycles(P, { xL: xa, xR: xb, y: cycY, h: CYC_H, X, from: p, to: q, ups: cy.ups, iz: cy.iz });
           rowY = paintBody(P, M, lay, X, p, q, xa, xb, hl, sel, null, band, null, strokeOf, r => !(last[r.id] > rows.indexOf(r)));
           if (V) V.paintDiff(P, lay, X, p, q);   // the viewer's picture: a dump compared, where it differs
+          else if (M.compare) paintCmp(P, lay, X, p, q, cmpOfDoc(M.compare));   // the page's compare result (WaveJSON "compare")
         };
         if (ng) P.clip(xa, 0, xb - xa, Ht, go); else go();
         if (i < ng) P.clip(xb, 0, GAP, Ht, () => {   // the gap: the rows' backgrounds go on, no waves; a double dashed line
@@ -7336,7 +7489,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.29',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.30',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,
@@ -7348,7 +7501,7 @@ G.WaveLens = { version: '0.29',   // the project's version: VERSION (make check 
   registerTokens, registerDefaults, tips, util: { esc, glob, lastLE, lastBefore, stepTo, isEdge, circle, timeEps },
   // unstable: the pure functions for the unit table of tests/smoke.py and peek(view), the fields the tests read; not an API
   internal: { findRow, parseWant, valueIs, findEdge, edgeGlyph, bitsOf, hexOf, mixedBits, bitsVal, vcdHex, cycZero, cycAt, cycTime, cycUps, cycClock,
-    diffSpans, cmpKey, svTypes, svApply, fsmStats, svFingerprint, svRemap, svLookupKey, jsonParse, jsonWhere,
+    diffSpans, cmpKey, svTypes, svApply, fsmStats, svFingerprint, svMissing, svMissingNotes, svRemap, svLookupKey, jsonParse, jsonWhere,
     cycMarks, enumColor, analogValue, niceStep, cycMap, parseWave,
     idleCuts, gapLen, gapText, gapRefs, fmtFreq, gfmt, toFloat, fieldRow, bitRows, widthTag, stripPfx, trimNum,
     peek: v => ({ get lay() { return v.lay; }, get oy() { return v.oy; }, get vis() { return v.vis; }, get collapsed() { return v.collapsed; },

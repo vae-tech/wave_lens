@@ -3,7 +3,8 @@
 
 An agent asks questions of a dump (VCD, or FST through fst2vcd or the sva CLI) and gets short answers instead of reading the dump:
 the signals, values at a time, changes in a window, a clock-sampled table, searches by an SV expression or sequence
-(the sva engine), aggregates, SystemVerilog assertions checked over the dump with their first failures, and a viewer
+(the sva engine), aggregates, SystemVerilog assertions checked over the dump with their first failures, two dumps
+compared change by change (wave_diff: sva diff, streamed) or a window of one cut out (wave_cut), and a viewer
 page (or the WaveJSON) of a window for a person. The dump is read once per server (the declarations and the change counts); a
 signal's transitions when a tool first needs it, then kept. The agent marks a page up for the person with the viewer's
 commands (view_edit: bookmarks with a text, arrows, markers, groups, highlight, colours, cursor, window; tools/viewedit.py
@@ -42,7 +43,7 @@ INSTRUCTIONS = (
     'Waveform (VCD/FST) analysis. Times are ns (numbers) unless a unit is given ("2.5us"). Signal names: full path, '
     'path under "scope", or a unique tail ("PSEL"). Start with wave_info, then wave_signals to find names; ask for '
     'values (wave_values, wave_changes, wave_sample), search with wave_find (an SV expression or sequence on a clock, '
-    'or a value / edge of one signal), count with wave_stats, check SystemVerilog assertions with sva_check. Sampled '
+    'or a value / edge of one signal), count with wave_stats, check SystemVerilog assertions with sva_check, compare two runs with wave_diff. Sampled '
     'values are the ones just before the clock edge, as SVA samples; cycle numbers are the clock\'s rising edges from '
     'the start of the dump (the same as sva_check\'s). Long answers are cut at "limit" ("more", "next_from" / '
     '"next_offset" say how to go on). wave_page writes a viewer page to show a person; view_edit marks it up for them '
@@ -107,8 +108,9 @@ class Wave(vcd2wavedrom.Builtin):
             if s['path'] in given and s.get('enum') and not self.decl.vars[s['path']].enum:
                 self.decl.vars[s['path']] = self.decl.vars[s['path']]._replace(enum=s['enum'])   # (a namedtuple)
                 self.typed.add(s['path'])
+        miss = svtypes.missing(t, list(self.decl.vars), set(getattr(self.decl, 'modules', ())) | set(getattr(self.decl, 'scopes', {})))
         self.type_notes = [f'types {os.path.basename(path)}: {n}' for n in t['notes'] + notes +
-                           svtypes.fingerprint(t, getattr(self.decl, 'date', None), getattr(self.decl, 'modules', ()))]
+                           svtypes.fingerprint(t, getattr(self.decl, 'date', None), getattr(self.decl, 'modules', ())) + svtypes.missing_notes(t, miss)]
         self.type_notes.append(f'types {os.path.basename(path)}: labels for {len(self.typed)} signals')
 
     def load(self, paths):
@@ -704,7 +706,14 @@ def t_page(a):
     if a.get('title'):
         argv += ['--title', a['title']]
     try:
-        doc = vcd2wavedrom.convert(vcd2wavedrom.options(argv))
+        o = vcd2wavedrom.options(argv)
+        c = a.get('compare')   # the config's "compare": sva diff with that dump, the page opens with its bands
+        if c is not None:
+            c = {'dump': c} if isinstance(c, str) else c
+            if not isinstance(c, dict) or not c.get('dump'):
+                raise WaveError('"compare": a dump ("b.vcd"), or {"dump", "map"?, "offset"?, "segment"?, "align"?}')
+            o.compare = dict(c, dump=os.path.abspath(os.path.expanduser(str(c['dump']))))
+        doc = vcd2wavedrom.convert(o)
     except SystemExit as e:   # argparse of the converter in this process: its message is on stderr, the server goes on
         raise WaveError(f'the converter refused its arguments ({e.code}): {" ".join(argv[2:])}') from None
     if out.lower().endswith('.json'):   # the WaveJSON itself (WaveDrom, mkhtml.py, embed.py)
@@ -1170,6 +1179,10 @@ def summary(st, timed, base=None):
         out['style'] = c['style']
     if c.get('cycles'):
         out['cycles'] = {'clock': c.get('cycleClock'), 'zero': t(c['cycleZero']) if c.get('cycleZero') is not None else None}
+    cmp = st['compare'] if 'compare' in st else ed.compare() if ed.m.doc else None
+    if isinstance(cmp, dict):
+        s = viewedit.compare_summary(cmp)
+        out['compare'] = dict(s, first=t(s['first']) if s['first'] is not None else None)
     return out
 
 
@@ -1321,6 +1334,121 @@ def fst_notes(err):
     return [l.removeprefix('sva: ') for l in err.splitlines() if l.strip() and not re.match(r'sva: .*?: progress: ', l)]
 
 
+def dump_path(a, key='dump'):
+    p = os.path.abspath(os.path.expanduser(str(a.get(key) or '')))
+    if not os.path.isfile(p):
+        raise WaveError(f'no such file: {p}' + (f' ("{key}")' if key != 'dump' else ''))
+    return p
+
+
+def sva_exe(a, what):
+    exe = svabuild.find_bin(a.get('sva_bin'))
+    if not exe:
+        raise WaveError(f'no sva CLI (make sva-build, or bin/<os>-x86_64/sva): {what} needs it')
+    return exe
+
+
+def cli_time(a, k):
+    """A time argument of the agent (ns, or a text with a unit) as the CLI takes it: ps, with a sign."""
+    t = ps_of(a.get(k), k)
+    return None if t is None else f'{round(t)}ps'
+
+
+def names_arg(v):
+    return ','.join(v) if isinstance(v, list) else str(v)
+
+
+def bits_text(v):
+    """A value of sva diff as an agent reads it: a bus of known bits in hex (as the CLI's text), the rest as it is."""
+    return f'0x{int(v, 2):0{(len(v) + 3) // 4}x}' if len(v) > 4 and set(v) <= {'0', '1'} else v
+
+
+def t_diff(a):
+    """sva diff: two dumps compared change by change (streamed: neither read here) -> its JSON with the times in ns, the
+    signals listed those that differ."""
+    da, db = dump_path(a, 'a'), dump_path(a, 'b')
+    cmd = [sva_exe(a, 'wave_diff'), 'diff', da, db, '--json', '-', '--quiet', '--limit', str(limit(a, 20))]
+    for k in ('from', 'to', 'offset'):
+        t = cli_time(a, k)
+        if t is not None:
+            cmd += [f'--{k}', t]
+    if a.get('signals'):
+        cmd += ['--signals', names_arg(a['signals'])]
+    if a.get('scope'):
+        cmd += ['--scope', a['scope']]
+    for x, y in (a.get('map') or {}).items():
+        cmd += ['--map', f'{x}={y}']
+    if a.get('segment'):
+        cmd += ['--segment', a['segment']]
+    if a.get('align'):
+        cmd.append('--align')
+    if a.get('spans'):
+        cmd += ['--spans', str(a['spans'])]
+    r = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL)   # stdin is the protocol
+    if r.returncode not in (0, 1):
+        raise WaveError('; '.join(fst_notes(r.stderr)) or f'sva diff: exit {r.returncode}')
+    d = json.loads(r.stdout)
+    t = lambda v: None if v is None else ns(v)
+    first = lambda f: f and {**f, 't': ns(f['t']), 'a': bits_text(f['a']), 'b': bits_text(f['b'])}
+    for side in ('a', 'b'):
+        d[side] = {**d[side], 'start': t(d[side].get('start')), 'end': t(d[side].get('end'))}
+    d.update(unit='ns', equal=r.returncode == 0, **{k: t(d.get(k)) for k in ('from', 'to', 'offset')})
+    d['first'] = first(d.get('first'))
+    d['differences'] = [first(x) for x in d.get('differences', [])]
+    n = limit(a, 20)
+    sigs = [x for x in d.get('signals', []) if x.get('differ') or x.get('other')]
+    for x in sigs:
+        x['first'] = first(x.get('first'))
+        if 'spans' in x:
+            x['spans'] = [[ns(u), ns(v)] for u, v in x['spans']]
+    d['signals'] = sigs[:n]
+    if len(sigs) > n:
+        d['signals_more'] = len(sigs) - n
+    for g in d.get('segments', []):
+        for k in ('from', 'to', 'b_from', 'compared_to'):
+            if k in g:
+                g[k] = t(g[k])
+        g['first'] = first(g.get('first'))
+    if not d.get('notes'):
+        d.pop('notes', None)
+    d.pop('wavelens', None)
+    d.pop('version', None)
+    return d
+
+
+def t_cut(a):
+    """sva vcd --from --to --signals: a window of a dump as a small VCD (the values at "from" as $dumpvars)."""
+    src = dump_path(a)
+    out = os.path.abspath(os.path.expanduser(str(a.get('out') or '')))
+    if not a.get('out') or out == src:
+        raise WaveError('"out": the VCD to write (not the dump itself)')
+    cmd = [sva_exe(a, 'wave_cut'), 'vcd', src, '--out', out]
+    for k in ('from', 'to'):
+        t = cli_time(a, k)
+        if t is not None:
+            cmd += [f'--{k}', t]
+    if a.get('signals'):
+        cmd += ['--signals', names_arg(a['signals'])]
+    r = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    if r.returncode:
+        raise WaveError('; '.join(fst_notes(r.stderr)) or f'sva vcd: exit {r.returncode}')
+    # what the cut holds: its declarations and its first and last time, read off its text
+    head, times, nvar = True, [], 0
+    with open(out, encoding='utf-8', errors='replace') as f:
+        for line in f:
+            if head:
+                nvar += line.lstrip().startswith('$var ')
+                head = '$enddefinitions' not in line
+            elif line.startswith('#'):
+                times.append(line[1:].strip())
+    d = dumpscan.read(out, body=None)
+    unit = d.unit_ps if d else None
+    res = {'out': out, 'bytes': os.path.getsize(out), 'variables': nvar}
+    if times and unit:
+        res.update(unit='ns', **{'from': ns(int(times[0]) * unit), 'to': ns(int(times[-1]) * unit)})
+    return res
+
+
 def t_view_edit(a):
     if a.get('config'):   # the config file a page is built from: the marks a rebuild keeps
         if a.get('page') or a.get('save'):
@@ -1357,8 +1485,30 @@ def t_view_edit(a):
     return out
 
 
+def live_compare(op, where, v, a):
+    """compare {dump} for a live viewer (it reads no file by itself): sva diff here, the page gets {result}. The page's file
+    gives the rows and the dump beside it; a dump's tab in VS Code is that dump, every signal of it."""
+    if not (isinstance(op, dict) and op.get('op') == 'compare' and op.get('dump') and op.get('result') is None):
+        return op
+    path = where['path'] if os.path.isfile(where['path']) else page_arg(a)
+    args = {k: x for k, x in op.items() if k != 'op'}
+    if path and DUMP_RE.search(path):
+        exe = svabuild.find_bin(a.get('sva_bin'))
+        if not exe:
+            raise WaveError('compare dump: needs the sva CLI (make sva-build, or bin/<os>-x86_64/sva)')
+        b = os.path.join(os.path.dirname(path), os.path.expanduser(str(args['dump'])))
+        res = svabuild.compare(exe, args.get('a') or path, b, None, None, None, args.get('map'), args.get('offset'))
+    elif path:
+        pg = viewedit.Page(path)
+        res = viewedit.compare_dump(pg.model(pg.view(v.get('key'))), os.path.dirname(os.path.abspath(path)), args)
+    else:
+        raise WaveError('compare dump: the live page has no file here to find its dump beside: give "page", or "a" with the dump of its waves')
+    return {'op': 'compare', 'result': res}
+
+
 def live_edit(a, where, v):
-    res = BRIDGE[0].send(where['cid'], v.get('key'), ops_in(a.get('ops'), v.get('timed')))
+    ops = [live_compare(o, where, v, a) for o in ops_in(a.get('ops'), v.get('timed'))]   # before any is sent: none done twice
+    res = BRIDGE[0].send(where['cid'], v.get('key'), ops)
     out = {'live': where['path'], 'view': v.get('key'), 'results': ns_out(res, v.get('timed'))}
     if a.get('save'):   # the page answered: the edit is done there; never done again on the file (the person's own would go)
         try:
@@ -1498,13 +1648,23 @@ TOOLS = [
          {'dump': None, 'files': L, 'source': S, 'scope': None, 'assertions': L, 'from': None, 'to': None, 'max_failures': N,
           'details': B, 'defines': {'type': ['object', 'array'], 'items': S}}),
     tool('wave_page', t_page, 'Write a WaveLens viewer page (out .html) or WaveJSON (out .json) of signals to show a person; clock '
-         '(name or "auto"): a cell per cycle, auto_gap "16:2" folds idle cycles; sva files + bind ["name@scope"].',
+         '(name or "auto"): a cell per cycle, auto_gap "16:2" folds idle cycles; sva files + bind ["name@scope"]; compare: a second dump '
+         '(or {dump, map, offset}) whose differences the page shows.',
          {'dump': None, 'types': None, 'no_types': None, 'signals': None, 'out': S, 'clock': S, 'from': None, 'to': None, 'scope': None, 'auto_gap': S, 'sva': L,
-          'bind': L, 'title': S}, ('dump', 'signals', 'out'), ro=False),
+          'bind': L, 'title': S, 'compare': {'type': ['string', 'object']}}, ('dump', 'signals', 'out'), ro=False),
     tool('wave_to_fst', t_to_fst, 'Convert a VCD to an FST beside it (tb.vcd -> tb.fst; out: another file), as GTKWave\'s vcd2fst, '
          'keeping the enum tables (FSM states) and attributes; the states of tb.types.json beside it go in too (types: another file, '
          'no_types: none) -> fst, what was written, notes (file:line).',
          {'dump': None, 'out': S, 'types': S, 'no_types': B}, ('dump',), ro=False),
+    tool('wave_diff', t_diff, 'Compare two dumps a and b (VCD/FST, streamed: hundreds of MB) change by change, as the viewer\'s Compare… '
+         'does -> compared, differ, first [t, signal, a, b], the signals that differ, only_a, only_b, segments. map {"tb_a.if": "tb_b.if"}: '
+         'a\'s scope or path -> b\'s; offset: b later by that much; segment: a signal (a test case number), counts per value; align: '
+         'segment k of b on segment k of a.',
+         {'a': S, 'b': S, 'signals': None, 'scope': None, 'from': None, 'to': None, 'offset': T, 'map': {'type': 'object'}, 'segment': S,
+          'align': B, 'limit': None, 'spans': N}, ('a', 'b')),
+    tool('wave_cut', t_cut, 'Cut a window (and some signals) out of a dump into a small VCD (out): the values at "from" first, '
+         'then the changes up to "to" -> out, bytes, variables, from, to. For Compare… on a page, a fixture, sending one test case.',
+         {'dump': None, 'out': S, 'from': None, 'to': None, 'signals': None}, ('dump', 'out'), ro=False),
     tool('view_edit', t_view_edit, 'Mark up a WaveLens page for a person (live in their browser when connected by view_live, else in the '
          'page file: they reload it). ops in order, each {op, …}: ' + ' '.join(f'{k}({v})' for k, v in viewedit.COMMANDS.items()
                                                                                   if k not in ('state', 'set_state', 'rows', 'picture')) +
@@ -1567,7 +1727,7 @@ def fits(v, sch):
 
 
 # another name an agent gives an argument (the one of a sibling tool): taken for the schema's own, one way
-SYNONYMS = {'signals': ('signal',), 'signal': ('signals',), 'at': ('times', 't'), 'source': ('text',)}
+SYNONYMS = {'signals': ('signal',), 'signal': ('signals',), 'at': ('times', 't'), 'source': ('text',), 'a': ('dump',)}
 HIDDEN = {'sva_bin', 'resolve', 'wait', 'hierarchy'}   # for the tests and the VS Code extension: not in the schemas
 
 

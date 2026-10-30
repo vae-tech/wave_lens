@@ -174,5 +174,42 @@ class AgainstVcd2fst(unittest.TestCase):
             self.assertRegex(t, r'#20\n\$dumpoff \$end\nx"\nbxxxxxxxx !\n#40\n\$dumpon \$end\n', t)
 
 
+class Cuts(unittest.TestCase):
+    """`sva vcd --from --to` (stage 14.1.6): the cut of a VCD and the cut of its FST (sva fst) read back the same, the
+    values at --from as $dumpvars, the changes up to --to; dumpscan reads them as one dump."""
+
+    def setUp(self):
+        import svabuild
+        self.sva = svabuild.find_bin()
+        if not self.sva:
+            H.skip(self, 'the sva CLI')
+
+    def test_cut_of_a_vcd_is_the_cut_of_its_fst(self):
+        import dumpscan
+        with H.tmp() as d:
+            for seed in range(20):
+                with self.subTest(seed=seed):
+                    text = gen(seed)
+                    vcd = os.path.join(d, f'c{seed}.vcd')
+                    with open(vcd, 'w', newline='') as f:
+                        f.write(text)
+                    subprocess.run([self.sva, 'fst', vcd, '-q'], check=True)
+                    times = [int(t) for t in re.findall(r'^#(\d+)$', text, re.M)]
+                    rnd = random.Random(seed)
+                    a = rnd.choice(times)
+                    b = min(max(times), a + rnd.choice([0, 1, 7, 100, 5000]))
+                    win = ['--from', f'{a}ps', '--to', f'{b}ps']
+                    x, y = readback([self.sva, 'vcd', *win], vcd), readback([self.sva, 'vcd', *win], vcd[:-4] + '.fst')
+                    self.assertEqual(x[0], y[0], f'seed {seed}: the variables')
+                    self.assertEqual(x[1], y[1], f'seed {seed}: the changes')
+                    self.assertEqual(min(x[1]), a, 'the values at --from first')
+                    cuts = []
+                    for src in (vcd, vcd[:-4] + '.fst'):
+                        out = os.path.join(d, f'c{seed}.cut.{src[-3:]}.vcd')
+                        subprocess.run([self.sva, 'vcd', *win, src, '--out', out], check=True)
+                        cuts.append(dumpscan.scan(out))
+                    self.assertEqual(cuts[0], cuts[1], f'seed {seed}: dumpscan of the two cuts')
+
+
 if __name__ == '__main__':
     unittest.main()

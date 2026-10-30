@@ -1,0 +1,18 @@
+{
+  "wavelens": "types", "version": 1,
+  "producer": {"tool": "Questa Sim-64 vsim 2021.1 Simulator 2021.01 Jan 19 2021", "by": "tools/questa/wavelens_types.tcl", "root": "/*", "date": "2026-10-30T09:00:00"},
+  "instances": {
+    "missing_tb": "missing_tb"
+  },
+  "describe": {
+    "missing_tb.arr": "Array(1 to 4) [length 4] of\n  Register [3:0]",
+    "missing_tb.bytes": "Array(0 to 1) [length 2] of\n  Register [7:0]",
+    "missing_tb.clk": "Register",
+    "missing_tb.cnt": "int",
+    "missing_tb.gen[0].g": "Integer",
+    "missing_tb.gen[0].gv": "Register [1:0]",
+    "missing_tb.gen[1].g": "Integer",
+    "missing_tb.gen[1].gv": "Register [1:0]",
+    "missing_tb.genblk2.ug": "Register"
+  }
+}

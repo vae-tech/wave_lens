@@ -136,6 +136,95 @@ class Dump(unittest.TestCase):
                          ['tb.vcd:12: a value of "%", which no $var declares: left out'])
 
     @H.needs(svabuild.find_bin(), 'no sva CLI')
+    def test_diff(self):
+        """wave_diff (stage 14.2): the dump against itself, one value other, a signal taken out, the scope renamed (map),
+        the run 5 ns later (offset), counts per state (segment), dump for a; times in ns, a bus in hex."""
+        with open(self.vcd, encoding='utf-8') as f:
+            text = f.read()
+        head, body = text.split('$enddefinitions $end\n', 1)
+        code = {l.split()[4]: l.split()[3] for l in head.splitlines() if l.startswith('$var')}
+        cnt, data = code['count'], code['s_tdata']
+        lines, orig = body.split('\n'), body.split('\n')
+        # B: the first value of s_tdata after 1000 ns other; err not in it
+        at, k = 0, None
+        for i, l in enumerate(lines):
+            if l.startswith('#'):
+                at = int(l[1:])
+            elif at > 1000 and l.endswith(' ' + data) and k is None:
+                k, t_k = i, at
+                lines[i] = f'b{0xdeadbeef:b} {data}'
+        err = code['err']
+        b_head = '\n'.join(l for l in head.splitlines() if not (l.startswith('$var') and l.split()[3] == err)) + '\n'
+        b_lines = [l for l in lines if l not in ('0' + err, '1' + err)]
+        b = os.path.join(self.d.name, 'b.vcd')
+        with open(b, 'w', encoding='utf-8') as f:
+            f.write(b_head + '$enddefinitions $end\n' + '\n'.join(b_lines))
+        same = self.call('wave_diff', b=self.vcd)
+        self.assertEqual((same['equal'], same['differ'], same['signals'], same['unit']), (True, 0, [], 'ns'))
+        self.assertEqual((same['from'], same['to'], same['signals_compared']), (0, 40000, 167))
+        r = W.call('wave_diff', {'dump': self.vcd, 'b': b, 'limit': 5})
+        r = json.loads(r[0])
+        self.assertFalse(r['equal'])
+        self.assertEqual((r['first']['t'], r['first']['signal'], r['first']['b']), (t_k, 'tb.dut.s_tdata', '0xdeadbeef'))
+        self.assertEqual(r['only_a'], ['tb.dut.err'])
+        self.assertEqual([x['path'] for x in r['signals']], ['tb.dut.s_tdata'])
+        # the scope renamed in B: paired by the map
+        moved = os.path.join(self.d.name, 'moved.vcd')
+        with open(moved, 'w', encoding='utf-8') as f:
+            f.write(text.replace('$scope module dut $end', '$scope module core $end'))
+        self.assertEqual(self.call('wave_diff', b=moved)['signals_compared'], 2, 'without the map: tb.clk, tb.rst_n')
+        m = self.call('wave_diff', b=moved, map={'tb.dut': 'tb.core'})
+        self.assertEqual((m['equal'], m['signals_compared'], m['map']), (True, 167, [{'a': 'tb.dut', 'b': 'tb.core', 'signals': 165}]))
+        # 5 ns later
+        late = os.path.join(self.d.name, 'late.vcd')
+        with open(late, 'w', encoding='utf-8') as f:
+            f.write(head + '$enddefinitions $end\n' + '\n'.join(f'#{int(l[1:]) + 5}' if l.startswith('#') else l for l in orig))
+        self.assertFalse(self.call('wave_diff', b=late, signals=['tb.dut.s_t*'])['equal'])
+        o = self.call('wave_diff', b=late, offset='5ns', signals='tb.dut.s_t*')
+        self.assertEqual((o['equal'], o['offset'], o['from'], o['signals_compared']), (True, 5, 0, 4))
+        g = self.call('wave_diff', b=self.vcd, segment='tb.dut.ctl.state', signals=['count'])
+        self.assertTrue(len(g['segments']) > 2 and all(x['differ'] == 0 for x in g['segments']), g['segments'][:3])
+        self.assertEqual(sum(x['changes'] for x in g['segments']), g['compared'])
+        self.assertIn('no such file', self.error('wave_diff', b='/nope.vcd'))
+        self.assertIn('no argument "nope"', self.error('wave_diff', b=b, nope=1))
+        self.assertIn('no signal', self.error('wave_diff', b=b, signals=['zz_nope']))
+
+    @H.needs(svabuild.find_bin(), 'no sva CLI')
+    def test_compare_on_a_page(self):
+        """view_edit compare (stage 14.3.3) on a page's file: sva diff of its dump beside it and dump; view_get says it."""
+        page, b = os.path.join(self.d.name, 'cmp.html'), os.path.join(self.d.name, 'cmpb.vcd')
+        with open(self.vcd, encoding='utf-8') as f:
+            text = f.read()
+        code = next(l.split()[3] for l in text.splitlines() if l.startswith('$var') and l.split()[4] == 'err')
+        with open(b, 'w', encoding='utf-8') as f:
+            f.write(text.replace(f'\n1{code}\n', f'\n0{code}\n', 1))
+        self.call('wave_page', signals=['tb.dut.err', 'tb.dut.s_tvalid'], out=page)
+        r = json.loads(W.call('view_edit', {'page': page, 'ops': [{'op': 'compare', 'dump': b}]})[0])
+        self.assertEqual((r['results'][0]['name'], r['results'][0]['compared'], r['results'][0]['differ']), ('cmpb.vcd', 2, 1), r)
+        g = json.loads(W.call('view_get', {'page': page, 'rows': ''})[0])
+        self.assertEqual((g['compare']['differ'], g['compare']['missing']), (1, 0), g)
+        self.assertIn(['err', 1, '≠'], g['rows']['rows'])
+        r = json.loads(W.call('view_edit', {'page': page, 'ops': [{'op': 'compare', 'off': True}]})[0])
+        self.assertNotIn('compare', json.loads(W.call('view_get', {'page': page})[0]))
+        made = os.path.join(self.d.name, 'cmp.json')
+        doc = self.call('wave_page', signals=['tb.dut.err'], out=made, compare=b)
+        self.assertEqual(json.load(open(made))['compare']['differ'], 1, doc)
+
+    @H.needs(svabuild.find_bin(), 'no sva CLI')
+    def test_cut(self):
+        """wave_cut: a window of some signals as a small VCD the tools read: its span, its values at "from"."""
+        out = os.path.join(self.d.name, 'cut.vcd')
+        r = self.call('wave_cut', out=out, signals=['tb.dut.fifo.*', 'cyc_cnt'], **{'from': 1000, 'to': '2us'})
+        self.assertEqual((r['out'], r['variables'], r['from'], r['to']), (out, 4, 1000, 2000))
+        i = json.loads(W.call('wave_info', {'dump': out})[0])
+        self.assertEqual((i['start'], i['end'], i['signals']), (1000, 2000, 4))
+        full = self.call('wave_values', signals=['tb.dut.perf.cyc_cnt'], at=1000)
+        cut = json.loads(W.call('wave_values', {'dump': out, 'signals': ['tb.dut.perf.cyc_cnt'], 'at': 1000})[0])
+        self.assertEqual(full['rows'], cut['rows'])
+        self.assertIn('"out"', self.error('wave_cut', out=self.vcd))
+        self.assertIn('no signal zz_nope', self.error('wave_cut', out=out, signals=['zz_nope']))
+
+    @H.needs(svabuild.find_bin(), 'no sva CLI')
     def test_sva(self):
         t = self.truth
         r = self.call('sva_check', scope='tb.dut.ctl', source='req_ack: assert property (@(posedge clk) req |-> ##[1:4] ack);\n'
@@ -505,7 +594,7 @@ class Protocol(unittest.TestCase):
         self.assertTrue(all('fn' not in t and t['inputSchema']['type'] == 'object' for t in r[1]['result']['tools']))
         # codex exec calls a tool without approval only when it says it reads: every tool but the ones that write a file
         self.assertEqual([t['name'] for t in r[1]['result']['tools'] if not t['annotations']['readOnlyHint']],
-                         ['wave_page', 'wave_to_fst', 'view_edit', 'view_live'])
+                         ['wave_page', 'wave_to_fst', 'wave_cut', 'view_edit', 'view_live'])
         arrays = [(t['name'], k) for t in r[1]['result']['tools'] for k, v in t['inputSchema']['properties'].items()
                   if 'array' in str(v.get('type')) and 'items' not in v]
         self.assertEqual(arrays, [])   # an array without items is refused by OpenAI's function schemas
@@ -629,6 +718,8 @@ class Arguments(unittest.TestCase):
         info = json.loads(W.call('wave_info', {'dump': self.QV})[0])
         self.assertEqual(info['types'], 'questa.types.json')
         self.assertTrue(any(n.startswith('types questa.types.json: labels for ') for n in info['notes']), info.get('notes'))
+        miss = json.loads(W.call('wave_info', {'dump': os.path.join(self.TYPES, 'missing.vcd')})[0])   # stage 14.4: what it lacks
+        self.assertIn('types missing.types.json: 7 signals of the types are not in the dump: unpacked arrays 2, under generate scopes 5', miss['notes'])
         with H.tmp() as d:   # another types file by name; none beside a copy of the dump
             v, t = os.path.join(d, 'q.vcd'), os.path.join(d, 'other.json')
             shutil.copy(self.QV, v)

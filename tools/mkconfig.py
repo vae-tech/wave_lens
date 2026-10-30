@@ -18,7 +18,7 @@ Per-signal entry ("" = the global setting from "config"):
   also   "alias": "name shown", "fill": "#ffe066" (bus fill), "enum": {"0": "IDLE", "1": "RUN"}
   width and changes (value changes in the dump) are information only. "enum" is filled from the dump (FST enum tables),
   from a types file (--types, or <dump>.types.json beside the dump: tools/svtypes.py) or from --sv sources, so FSM
-  states show by name. A $dumpoff block (every value x) counts as changes; event
+  states show by name; what the types declare that the dump has not got is said (unpacked arrays, generate scopes). A $dumpoff block (every value x) counts as changes; event
   variables are left out (no value to draw), real and string ones are labelled with their texts.
 
 Base file (--base, default tools/base.config.json beside this script): copied into the new config, except two generator keys
@@ -475,6 +475,8 @@ def apply_types(a, sigs):
     ne, nf, notes, given = svtypes.apply(t, sigs, m)
     decl = getattr(a, 'decl', None)
     run = svtypes.fingerprint(t, decl and decl.date, decl.modules if decl else (), m)
+    if decl:   # what the types declare that the dump has not got (Questa's VCD: unpacked arrays; generate scopes without -r)
+        run += svtypes.missing_notes(t, svtypes.missing(t, list(decl.vars), set(decl.modules) | set(decl.scopes), m))
     for n in t['notes'] + notes + run:
         print(f'mkconfig: --types: {n}', file=sys.stderr)
     print(f'mkconfig: --types: {os.path.basename(path)} ({t["producer"].get("tool", "?")}): {len(t["signals"])} typed paths, '

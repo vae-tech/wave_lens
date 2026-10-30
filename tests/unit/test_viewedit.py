@@ -4,6 +4,7 @@ the smoke test's (section edit)."""
 import json, os, re, unittest
 
 from tests.unit import helpers as H
+import svabuild
 import viewedit as V
 
 DOC = {'signal': [
@@ -452,6 +453,43 @@ class Pages(unittest.TestCase):
         rc, _, err = H.run_tool('viewedit', old, '--get')
         self.assertNotEqual(rc, 0)
         self.assertIn('before the rename to WaveLens', err)
+
+
+class Compare(unittest.TestCase):
+    """The command compare (stage 14.3.3): a result kept in the edits as the page's state has it, off, refused on clock
+    waves; dump on a page's file: sva diff of the page's dump beside it (rows named without their prefix found by it)."""
+
+    def test_result_and_off(self):
+        res = {'name': 'b.vcd', 'from': 0, 'to': 80000, 'signals': {'tb.dut.valid': {'spans': [[20000, 40000]]}, 'clk': {'spans': []}}, 'missing': ['tb.dut.data']}
+        e = ed()
+        self.assertEqual(e.run([{'op': 'compare', 'result': res}])[0], {'op': 'compare', 'name': 'b.vcd', 'compared': 2, 'differ': 1, 'first': None, 'missing': 1})
+        self.assertEqual(e.st['compare'], res)
+        self.assertEqual(dict(zip(*zip(*[(r[0], r[2:]) for r in e.c_rows({})['rows']])))['tb.dut.valid'], ['≠'])
+        self.assertEqual(e.run([{'op': 'compare', 'off': True}])[0], {'op': 'compare', 'off': True})
+        self.assertIsNone(e.st['compare'])
+        self.assertIn('result, dump or off', e.run([{'op': 'compare'}])[0]['error'])
+        self.assertIn('a result {name', e.run([{'op': 'compare', 'result': {'signals': []}}])[0]['error'])
+        clocked = dict(DOC)
+        clocked.pop('time')
+        self.assertIn('clock-sampled', ed(doc=clocked).run([{'op': 'compare', 'result': res}])[0]['error'])
+
+    @H.needs(svabuild.find_bin(), 'the sva CLI (make sva-build)')
+    def test_dump_on_a_page(self):
+        with H.tmp() as d:
+            head = '$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! clk $end\n$var wire 1 " v $end\n$scope module u $end\n$var wire 1 # v $end\n' \
+                   '$upscope $end\n$upscope $end\n$enddefinitions $end\n'
+            H.vcd(d, '#0\n0!\n0"\n0#\n#10\n1!\n1"\n#20\n0!\n#30\n', header=head, name='a.vcd')
+            H.vcd(d, '#0\n0!\n0"\n0#\n#10\n1!\n#15\n1"\n#20\n0!\n#30\n', header=head, name='b.vcd')
+            c, page = os.path.join(d, 'c.json'), os.path.join(d, 'a.html')
+            with open(c, 'w', encoding='utf-8') as f:
+                json.dump({'waves': 'a.vcd', 'exact': True, 'signals': ['tb.clk', 'tb.v']}, f)
+            rc, _, err = H.run_tool('mkhtml', '--config', c, '--out', page, '--no-sva')
+            self.assertEqual(rc, 0, err)
+            res, key, rev = V.edit_page(page, [{'op': 'compare', 'dump': 'b.vcd'}])
+            self.assertEqual(res[0], {'op': 'compare', 'name': 'b.vcd', 'compared': 2, 'differ': 1, 'first': 10000, 'missing': 0}, res)
+            st = V.Page(page).state(key)['compare']
+            self.assertEqual(st['signals']['v'], {'spans': [[10000, 15000]], 'b': 'tb.v'}, 'v of the page is tb.v, not tb.u.v')
+            self.assertIn('no such file', V.edit_page(page, [{'op': 'compare', 'dump': 'nope.vcd'}])[0][0]['error'])
 
 
 class Config(unittest.TestCase):

@@ -39,8 +39,8 @@ claude mcp add wavelens -- python3 -I /path/to/wavelens/tools/wavemcp.py --lean 
 <p>Any other MCP client: run <code>python3 -I tools/wavemcp.py</code> as a stdio server. The server tells the agent its conventions in
   its <code>instructions</code> (start with <code>wave_info</code>, then <code>wave_signals</code> to find names …), so the agent needs no
   prompt of yours to use it. The tools that only read are marked read-only (<code>readOnlyHint</code>); <code>wave_page</code>,
-  <code>view_edit</code> and <code>view_live</code> write only the page you name, <code>wave_to_fst</code> the FST beside the VCD
-  (<code>destructiveHint: false</code>).</p>
+  <code>view_edit</code> and <code>view_live</code> write only the page you name, <code>wave_to_fst</code> the FST beside the VCD,
+  <code>wave_cut</code> the VCD you name (<code>destructiveHint: false</code>).</p>
 <h3>From the shell</h3>
 <p>The same tools work without an agent — for a script, a test, or an agent that prefers its shell:</p>
 <pre><code>python3 -I tools/wavemcp.py --list                                                  <span class="c"># the tools and their input schemas</span>
@@ -70,6 +70,11 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
     assertions bound, to show a person</td></tr>
   <tr><td><code>wave_to_fst</code></td><td>the VCD as an FST beside it (<code>sva fst</code>), the FSM states of its types file in it:
     what was written, the notes with their lines</td></tr>
+  <tr><td><code>wave_diff</code></td><td>two dumps compared change by change (<code>sva diff</code>, streamed: hundreds of MB): equal or not,
+    the first difference and the signals that differ, the signals of one dump only; <code>map</code> pairs scopes or signals named
+    apart, <code>offset</code> a run that starts later, <code>segment</code> the counts per test case</td></tr>
+  <tr><td><code>wave_cut</code></td><td>a window and some signals of a dump as a small VCD: for <span class="ui">Compare…</span> on a page,
+    a fixture, one test case to send</td></tr>
   <tr><td><code>view_edit</code></td><td>marks a page up for a person: bookmarks with an explanation, arrows between them, markers, a group
     of the signals that matter, highlight, colours, the cursor and the window — live in their browser, else in the page's file;
     <code>config</code>: bookmarks, arrows and spans into a view of the page's config, so a rebuild keeps them</td></tr>
@@ -283,7 +288,7 @@ make mcp-bench AGENT=codex TASKS=a1,b3                 <span class="c"># some ta
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.29 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.30 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

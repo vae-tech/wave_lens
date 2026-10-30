@@ -110,6 +110,7 @@ const WaveSVG = {
           if (cy) paintCycles(P, { xL: xa, xR: xb, y: cycY, h: CYC_H, X, from: p, to: q, ups: cy.ups, iz: cy.iz });
           rowY = paintBody(P, M, lay, X, p, q, xa, xb, hl, sel, null, band, null, strokeOf, r => !(last[r.id] > rows.indexOf(r)));
           if (V) V.paintDiff(P, lay, X, p, q);   // the viewer's picture: a dump compared, where it differs
+          else if (M.compare) paintCmp(P, lay, X, p, q, cmpOfDoc(M.compare));   // the page's compare result (WaveJSON "compare")
         };
         if (ng) P.clip(xa, 0, xb - xa, Ht, go); else go();
         if (i < ng) P.clip(xb, 0, GAP, Ht, () => {   // the gap: the rows' backgrounds go on, no waves; a double dashed line

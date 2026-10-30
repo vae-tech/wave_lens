@@ -62,10 +62,14 @@ proc wavelens_types {file {root /*}} {
             lappend rows "    [::wavelens::str [::wavelens::path $p]]: [::wavelens::str $m]"
         }
     }
-    # the signals: path -> what `describe` says (its return value: describe in a loop prints nothing)
+    # the signals: path -> what `describe` says (its return value: describe in a loop prints nothing); -nofilter: the
+    # unpacked arrays too (a VCD of Questa leaves them out: svtypes.py check names them), else what find gives
     set sigs {}
     set n 0
-    foreach s [lsort -unique [find signals -r $root]] {
+    if {[catch {find signals -r -nofilter $root} all]} {
+        set all [find signals -r $root]
+    }
+    foreach s [lsort -unique $all] {
         if {[string match *#* $s]} {
             continue
         }

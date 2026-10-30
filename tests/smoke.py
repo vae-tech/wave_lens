@@ -1330,7 +1330,8 @@ CONTRACT_JS = """cs => cs.map(c => { let sv; try { sv = WaveLens.svTypes(JSON.pa
     const labels = Object.fromEntries(rows.filter(r => r.svEnum).map(r => [r.path, r.enum]));
     const fields = Object.fromEntries(rows.filter(r => r.svFields).map(r => [r.path, r.fields]));
     const run = WaveLens.internal.svFingerprint(sv, c.date, new Set(c.modules || []));
-    const out = { labels, fields, notes, run };
+    const missing = c.dump ? WaveLens.internal.svMissingNotes(sv, WaveLens.internal.svMissing(sv, c.dump.paths, new Set(c.dump.scopes))) : [];
+    const out = { labels, fields, notes, run, missing };
     return Object.fromEntries(Object.entries(out).filter(([, v]) => (Array.isArray(v) ? v.length : Object.keys(v).length))); })"""
 
 
@@ -3180,9 +3181,58 @@ def compare(browser, build):
         '$enddefinitions $end #100 0! #140', 'late.vcd'), t5 = u.root.querySelector('.toast').textContent;
       u.destroy(); w.destroy();
       return [r.differ, r.compared, marked, sp, r.to, [r2.missing, r2.omitted > 0], r3, gone, kmark, [r4.omitted, r4.differ], r5, /no time in common/.test(t5)]; })()""")
-    check(got == [2, 4, True, [[20, 30]], 40, [0, True], None, None, True, [1, 0], None, True], f'a struct by its vector (its group ≠), a string the '
-          f'same as itself, [from, to) both cover, dumpBudget apart (not matched to another tb.a), a compare superseded is dropped, a new group of '
-          f'yours marked, no time in common said {got}')
+    check(got == [2, 4, True, [[20, 30]], 40, [0, False], None, None, True, [0, 1], None, True], f'a struct by its vector (its group ≠), a string the '
+          f'same as itself, [from, to) both cover, B read for these rows only (no dumpBudget: none left out; tb.u.a by its path), a compare '
+          f'superseded is dropped, a new group of yours marked, no time in common said {got}')
+    # stage 14.3: a result already made (sva diff's, the WaveJSON "compare"): the page opens with its bands, the static SVG
+    # draws them, the state keeps it, the command compare gives one and takes it off; B large: read once, the page's
+    # signals only, its progress said, ≠ … ✕ stops it
+    big = b / 'big.vcd'
+    if not big.exists():
+        n, out = 2000, ['$timescale 1ps $end', '$scope module tb $end']
+        code = lambda i: ''.join(chr(33 + d) for d in ([i % 94] if i < 94 else [i // 94 % 94, i % 94]))
+        out += [f'$var wire 8 {code(i)} s{i} [7:0] $end' for i in range(n)] + ['$upscope $end', '$enddefinitions $end']
+        for t in range(0, 5000):
+            out.append(f'#{t * 10}')
+            out += [f'b{(t + i) & 255:b} {code(i)}' for i in range(t % 7, n, 7)]
+        big.write_text('\n'.join(out) + '\n')
+    page.evaluate("(() => { const i = document.createElement('input'); i.type = 'file'; i.id = 'bigin'; document.body.append(i); })()")
+    page.set_input_files('#bigin', str(big))
+    got = page.evaluate("""(async () => {
+      const mk = doc => { const el = document.body.appendChild(document.createElement('div')); return new WaveLens.WaveView(el, doc, {}); };
+      const doc = { signal: [['tb', { name: 'a', path: 'tb.a', tv: [[0, '0'], [30, '1']] }, { name: 'b', path: 'tb.b', tv: [[0, '0']] },
+          { name: 'c', path: 'tb.c', tv: [[0, '1']] }]], time: { t0: 0, t1: 40, unit: 'ps' },
+        compare: { name: 'b.vcd', from: 0, to: 40, signals: { 'tb.a': { spans: [[20, 30]], b: 'top.a' }, 'tb.b': { spans: [], b: 'top.b' } }, missing: ['tb.c'] } };
+      const w = mk(doc), R = n => w.M.rows.find(r => r.name === n), el = n => WaveLens.internal.peek(w).rowEls[WaveLens.internal.peek(w).vis.indexOf(R(n))];
+      const open = [w.cmp && w.cmp.differ, w.cmp && w.cmp.compared, el('a').classList.contains('cmpd'), el('c').classList.contains('cmpm'),
+        w.root.querySelector('button[data-act=dcmpx]').textContent];
+      const svgWith = WaveSVG.toString(doc), svgNo = WaveSVG.toString(Object.assign({}, doc, { compare: undefined }));
+      const st = w.state().compare, rows = Object.fromEntries((await w.run([{ op: 'rows' }]))[0].rows.map(r => [r[0], r[2] || '']));
+      const off = (await w.run([{ op: 'compare', off: true }]))[0], none = [w.cmp, w.state().compare];
+      const on = (await w.run([{ op: 'compare', result: doc.compare }]))[0], dump = (await w.run([{ op: 'compare', dump: 'b.vcd' }]))[0].error || '';
+      await w.setState({ wavelens: 'state', version: 3, compare: null }); const cleared = w.cmp;
+      w.destroy();
+      // B large: 2000 buses, this page shows 7 of them
+      const sigs = [0, 1, 2, 3, 4, 5, 6].map(i => ({ name: 's' + i, path: 'tb.s' + i, width: 8, tv: [[0, '00']] }));
+      const v = mk({ signal: [['tb', ...sigs]], time: { t0: 0, t1: 49990, unit: 'ps' } }), toasts = [];
+      const obs = new MutationObserver(() => { const t = v.root.querySelector('.toast'); if (t) toasts.push(t.textContent); });
+      obs.observe(v.root, { subtree: true, childList: true, characterData: true });
+      const f = document.getElementById('bigin').files[0], t0 = performance.now(), r = await v.compare(f), ms = performance.now() - t0;
+      obs.disconnect();
+      const rd = v.compare(f); await new Promise(res => setTimeout(res, 5)); const reading = v.root.querySelector('button[data-act=dcmpx]').textContent;
+      v.compareStop(); const stopped = await rd, kept = v.cmp && v.cmp.name;
+      v.destroy();
+      return { open, bands: (svgWith.match(/<rect/g) || []).length - (svgNo.match(/<rect/g) || []).length, st: !!(st && st.signals['tb.a']), rows,
+        off: [off.off, ...none], on: [on.differ, on.compared, on.missing], dump: /pick it with Compare/.test(dump), cleared, big: [r && r.compared, r && r.differ],
+        ms, progress: toasts.some(x => /MB of big\\.vcd read/.test(x)), reading, stopped, kept };
+    })()""")
+    check(got['open'] == [1, 2, True, True, '≠ 1 ✕'] and got['bands'] == 2 and got['st'] and [got['rows'].get(k) for k in ('tb.a', 'tb.b', 'tb.c')] == ['≠', '', 'missing'],
+          f'a page with "compare" opens with its bands (a ≠, a struck row, ≠ 1 ✕), the static SVG draws them, the state keeps it, rows marks them {got}')
+    check(got['off'] == [True, None, None] and got['on'] == [1, 2, 1] and got['dump'] and got['cleared'] is None,
+          f'the command compare: off, a result, dump refused in a page (no file read by itself); a state with compare null clears it {got}')
+    check(got['big'] == [7, 7] and got['ms'] < 5000 * SCALE and got['progress'] and got['reading'] == '≠ … ✕' and got['stopped'] is None
+          and got['kept'] == 'big.vcd', f'B of {big.stat().st_size >> 20} MB, 2000 signals: the page\'s 7 read once in {got["ms"]:.0f} ms '
+          f'(< {5000 * SCALE:.0f}), its progress said; ≠ … ✕ stops a read, the compare before it kept {got}')
     check(not errs, 'no page errors (compare)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
     ctx.close()
 
@@ -3679,10 +3729,13 @@ def ranges(browser, build):
     c2 = js("[v.cursor2, v.delta2(), v.curEl.textContent, v.cycles(v.clockFor(), v.cursor, v.cursor2), v.M.rows.find(r => r.full === 'apb_tb.PCLK').tr.filter(o => o.k === '1' && o.t > v.cursor && o.t <= v.cursor2).length, v.state().cursor2]")
     c.focus(); page.keyboard.press('x'); sw = js('[v.cursor, v.cursor2]'); page.keyboard.press('x')
     nb = js("(v.bms = [], v.mark('one'), v.cursor = 0, v.draw(), v.bms[0].t)"); page.keyboard.press('1'); k1 = js('v.cursor')
-    dt = page.locator('.wv .notes .dt').first.inner_text(); page.keyboard.press('Escape'); gone = js('v.cursor2')
+    dt = page.locator('.wv .notes .dt').first.inner_text(); here = js("[...document.querySelectorAll('.wv .notes li[data-n]')].map(li => li.classList.contains('here'))")
+    page.keyboard.press('Escape'); gone = js('v.cursor2')
+    js('(v.cursor = 0, v.draw(), 0)'); away = js("document.querySelector('.wv .notes li[data-n]').classList.contains('here')")
     check(c2[0] and c2[0] != 25000 and c2[3] == c2[4] and c2[3] > 0 and f'{c2[3]} PCLK' in c2[1] and 'cursor 2' in c2[2] and c2[5] == c2[0] and sw == [c2[0], 25000]
-          and k1 == nb and dt == 'at the cursor' and gone is None,
-          f'shift+click: the second cursor (on an edge), Δ and the PCLK cycles between, in the state; x swaps, 1 goes to bookmark 1, its Δ; Esc clears it {c2} {sw} {dt!r}')
+          and k1 == nb and dt == '' and here == [True] and not away and gone is None,
+          f'shift+click: the second cursor (on an edge), Δ and the PCLK cycles between, in the state; x swaps, 1 goes to bookmark 1, its line marked '
+          f'in the list (no Δ), not once the cursor moves; Esc clears it {c2} {sw} {dt!r} {here} {away}')
     js("(v.bms = [], v.arrows = [], v.changed(true), 0)")
     # the edge kind "= value": the next / previous time the selected signal becomes it (hex, Verilog, decimal, an enum
     # label); "X / Z": the next x or z of the selected signal or of any shown one

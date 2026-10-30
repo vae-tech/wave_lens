@@ -180,7 +180,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.29',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.30',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,
@@ -192,7 +192,7 @@ G.WaveLens = { version: '0.29',   // the project's version: VERSION (make check 
   registerTokens, registerDefaults, tips, util: { esc, glob, lastLE, lastBefore, stepTo, isEdge, circle, timeEps },
   // unstable: the pure functions for the unit table of tests/smoke.py and peek(view), the fields the tests read; not an API
   internal: { findRow, parseWant, valueIs, findEdge, edgeGlyph, bitsOf, hexOf, mixedBits, bitsVal, vcdHex, cycZero, cycAt, cycTime, cycUps, cycClock,
-    diffSpans, cmpKey, svTypes, svApply, fsmStats, svFingerprint, svRemap, svLookupKey, jsonParse, jsonWhere,
+    diffSpans, cmpKey, svTypes, svApply, fsmStats, svFingerprint, svMissing, svMissingNotes, svRemap, svLookupKey, jsonParse, jsonWhere,
     cycMarks, enumColor, analogValue, niceStep, cycMap, parseWave,
     idleCuts, gapLen, gapText, gapRefs, fmtFreq, gfmt, toFloat, fieldRow, bitRows, widthTag, stripPfx, trimNum,
     peek: v => ({ get lay() { return v.lay; }, get oy() { return v.oy; }, get vis() { return v.vis; }, get collapsed() { return v.collapsed; },

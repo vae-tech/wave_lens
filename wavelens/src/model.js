@@ -638,6 +638,7 @@ function parse(src) {
   M.jumps = j.jumps ? j.jumps.map(m => ({ t: mt(m), span: num(parseT(m.span)) || (M.t1 - M.t0) / 5, label: m.label || '' })) : null;
   M.cursor = j.cursor != null ? num(parseT(j.cursor)) : null;
   M.bookmarks = bmNorm(j.bookmarks); M.arrows = arNorm(j.arrows, j.bookmarks); M.spans = spanNorm(j.spans);
+  M.compare = cmpNorm(j.compare);
   return M;
 }
 // lazy rows (a large dump read as it is needed, "lazy": the id codes of a signal not read yet): the WaveJSON signals read
@@ -833,6 +834,20 @@ const linkOf = x => (typeof x === 'string' && x ? { view: x } : x && typeof x ==
   Object.assign({ view: x.view }, +x.bookmark > 0 ? { bookmark: +x.bookmark } : {}) : null);
 // extension "spans": [{from, to, label, color, signals}] coloured stretches of time, over every row or the rows of
 // "signals" (full paths or names): the page's (mkhtml.py resolves their ends) and yours (the span command)
+// extension "compare" {name, from, to, signals: {path: {spans: [[t, u]], other, b, more}}, missing: [path], ...}: a second dump
+// compared with these waves (sva diff's result, made by the build from the config's "compare"); null when it is not one
+function cmpNorm(c) {
+  if (!c || typeof c !== 'object' || !c.signals || typeof c.signals !== 'object' || Array.isArray(c.signals)) return null;
+  const signals = {};
+  for (const [p, s] of Object.entries(c.signals)) {
+    if (!s || typeof s !== 'object') continue;
+    const spans = (Array.isArray(s.spans) ? s.spans : []).map(x => (Array.isArray(x) ? [num(x[0]), num(x[1])] : null))
+      .filter(x => x && isFinite(x[0]) && isFinite(x[1]) && x[1] >= x[0]).sort((a, b) => a[0] - b[0]);
+    signals[p] = { spans, other: s.other ? String(s.other) : null, b: s.b ? String(s.b) : null, more: +s.more || 0 };
+  }
+  return Object.assign({}, c, { name: String(c.name || 'B'), from: num(c.from), to: num(c.to), signals,
+    missing: Array.isArray(c.missing) ? c.missing.map(String) : [] });
+}
 function spanNorm(list) {
   return (Array.isArray(list) ? list : []).filter(s => s && typeof s === 'object').map(s => {
     const a = num(parseT(s.from)), b = num(parseT(s.to));

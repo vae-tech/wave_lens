@@ -1,5 +1,5 @@
 {
- "about": "review VI T6: what tools/svtypes.py (read, apply, fingerprint) and the page (svTypes, svApply, svFingerprint) both do with a types file and the signals of a dump: tests/unit/test_svtypes.py and tests/smoke.py (readers) read it. want: labels / fields put on a path by the types (the row's own ones are not), the notes of apply, the run's notes, error: the file is refused. A signal's \"ref\": its $var reference as a VCD writes it (sva fst reads the VCD: sva/cli/tests/cli.rs; the others take the path). A signal's \"kind\": its $var type when not a reg (integer: an enum of the types on it when it is wider, as a Questa VCD writes an enum type).",
+ "about": "review VI T6: what tools/svtypes.py (read, apply, fingerprint) and the page (svTypes, svApply, svFingerprint) both do with a types file and the signals of a dump: tests/unit/test_svtypes.py and tests/smoke.py (readers) read it. want: labels / fields put on a path by the types (the row's own ones are not), the notes of apply, the run's notes, error: the file is refused. A signal's \"ref\": its $var reference as a VCD writes it (sva fst reads the VCD: sva/cli/tests/cli.rs; the others take the path). A signal's \"kind\": its $var type when not a reg (integer: an enum of the types on it when it is wider, as a Questa VCD writes an enum type). \"dump\": {paths, scopes} of the dump: \"missing\", the notes of what the types declare that it has not got (svtypes.py missing, the page's svMissing).",
  "cases": [
   {
    "name": "its own path",
@@ -769,6 +769,138 @@
     },
     "notes": [
      "tb.u.wide: 32 bits in the dump, 3 in the types: left as it is"
+    ]
+   }
+  },
+  {
+   "name": "the declared signals a dump has not got (stage 14.4): an unpacked array, a generate scope, another scope, one not dumped; an element of an array there: the array is",
+   "types": {
+    "wavelens": "types",
+    "describe": {
+     "tb.clk": "Register",
+     "tb.arr": "Array(1 to 4) [length 4] of\n  Register [3:0]",
+     "tb.mem": "Array(0 to 1) [length 2] of\n  Register [7:0]",
+     "tb.gen[0].v": "Register [1:0]",
+     "tb.genblk2.u": "Register",
+     "tb.u_core.busy": "Register",
+     "tb.u_core.idle": "Register",
+     "tb.flag": "Register",
+     "tb.p": "Integer"
+    }
+   },
+   "signals": [
+    {
+     "path": "tb.clk",
+     "width": 1
+    },
+    {
+     "path": "tb.mem[0]",
+     "width": 8
+    },
+    {
+     "path": "tb.u_core.busy",
+     "width": 1
+    }
+   ],
+   "dump": {
+    "paths": [
+     "tb.clk",
+     "tb.mem[0]",
+     "tb.u_core.busy"
+    ],
+    "scopes": [
+     "tb",
+     "tb.u_core"
+    ]
+   },
+   "want": {
+    "missing": [
+     "6 signals of the types are not in the dump: unpacked arrays 1, under generate scopes 2, not dumped 3",
+     "unpacked arrays (Questa's VCD leaves them out: USAGE.md § What a Questa VCD lacks): tb.arr",
+     "under generate scopes the dump has not got: tb.gen[0].v, tb.genblk2.u",
+     "not dumped: tb.u_core.idle, tb.flag, tb.p"
+    ]
+   }
+  },
+  {
+   "name": "the declared signals of a types file of typed signals only (Verilator): said so; a top the dump adds",
+   "types": {
+    "wavelens": "types",
+    "signals": {
+     "tb.state": {
+      "width": 2,
+      "enum": {
+       "0": "A",
+       "1": "B"
+      }
+     },
+     "tb.gen[1].st": {
+      "width": 2,
+      "enum": {
+       "0": "A"
+      }
+     }
+    }
+   },
+   "signals": [
+    {
+     "path": "TOP.tb.state",
+     "width": 2
+    }
+   ],
+   "dump": {
+    "paths": [
+     "TOP.tb.state"
+    ],
+    "scopes": [
+     "TOP",
+     "TOP.tb"
+    ]
+   },
+   "want": {
+    "labels": {
+     "TOP.tb.state": {
+      "0": "A",
+      "1": "B"
+     }
+    },
+    "missing": [
+     "1 signal of the types is not in the dump: under generate scopes 1 (the types name their typed signals only: the others are not looked for)",
+     "under generate scopes the dump has not got: tb.gen[1].st"
+    ]
+   }
+  },
+  {
+   "name": "the declared signals under the dump's own names (map)",
+   "types": {
+    "wavelens": "types",
+    "map": {
+     "top.dut_i": "dut"
+    },
+    "describe": {
+     "dut.a": "Register",
+     "dut.b": "Register"
+    }
+   },
+   "signals": [
+    {
+     "path": "top.dut_i.a",
+     "width": 1
+    }
+   ],
+   "dump": {
+    "paths": [
+     "top.dut_i.a"
+    ],
+    "scopes": [
+     "top",
+     "top.dut_i"
+    ]
+   },
+   "want": {
+    "missing": [
+     "1 signal of the types is not in the dump: not dumped 1",
+     "not dumped: dut.b"
     ]
    }
   }

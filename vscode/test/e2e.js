@@ -143,6 +143,21 @@ async function run() {
     } catch (e) { ok('a large dump read as it is needed', false, { error: e.message }); }
     await cfg.update('lazy', undefined, vscode.ConfigurationTarget.Global);
   }
+  // Compare…: the second dump picked on the host (the dialog stubbed), sva diff there, its result over the tab: a bit
+  // that rises 5 ns later differs once, its row marked
+  try {
+    const head = '$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! a $end\n$upscope $end\n$enddefinitions $end\n';
+    const a = path.join(OUT, 'cmp_a.vcd'), b = path.join(OUT, 'cmp_b.vcd');
+    fs.writeFileSync(a, head + '#0\n0!\n#10\n1!\n#20\n'); fs.writeFileSync(b, head + '#0\n0!\n#15\n1!\n#20\n');
+    const o = await open(api, a), was = vscode.window.showOpenDialog;
+    let got;
+    try { vscode.window.showOpenDialog = async () => [vscode.Uri.file(b)]; got = await o.tab.compare(['tb.a'], 0, 20000); }
+    finally { vscode.window.showOpenDialog = was; }
+    const r = got.result ? await o.tab.run([{ op: 'compare', result: got.result }, { op: 'rows' }]) : [];
+    ok('compare: the second dump through sva diff on the host', r[0] && r[0].differ === 1 && r[1].rows.some(x => x[2] === '≠'),
+      { result: r[0], error: got.error });
+    await closeAll();
+  } catch (e) { ok('compare: the second dump through sva diff on the host', false, { error: e.message }); }
   // the log: what the reader noticed in a dump goes to the Problems panel on its line; one it cannot read, an error there
   try {
     const head = '$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! a $end\n$upscope $end\n$enddefinitions $end\n';

@@ -19,7 +19,7 @@ REQUIRED = ['active at startup', 'activate', 'store over reopening', 'reload on 
             'the log: Problems on the lines', 'the log: cleared with the tab', "theme: the command's list picks one",
             'sources: a Questa VCD named from the workspace', 'types: the file beside the dump wins over the sources, read again when written',
             'a dump in a folder with a space', 'agent: view_live opens the dump', 'agent: view_edit / view_get on the tab',
-            'agent: its link note removed on exit']
+            'agent: its link note removed on exit', 'compare: the second dump through sva diff on the host']
 FSM = ['types: the command makes them with Verilator, the tab reads them', "types: Verilator, a file's name of ? expanded"]
 WIN_CODE = '/mnt/c/Program Files/Microsoft VS Code/Code.exe'
 

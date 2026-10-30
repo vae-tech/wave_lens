@@ -35,7 +35,7 @@ pub use value::V;
 pub use lex::Span;
 pub use print::Printer;
 pub use report::{describe, diagnostic};
-pub use summary::{check_input as check_report_input, html as report_html, junit as report_junit, markdown as report_markdown, summarize, time_text};
+pub use summary::{check_input as check_report_input, html as report_html, junit as report_junit, markdown as report_markdown, summarize, time_text, xml as xml_text};
 
 use serde::{Deserialize, Serialize};
 use std::fmt;

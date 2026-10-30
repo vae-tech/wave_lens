@@ -1,0 +1,32 @@
+$date
+	Fri Oct 30 09:00:00 2026
+$end
+$version
+	QuestaSim Version 2021.1
+$end
+$timescale
+	1ns
+$end
+
+$scope module missing_tb $end
+$var reg 1 ! clk $end
+$var integer 32 " cnt $end
+$upscope $end
+$enddefinitions $end
+#0
+$dumpvars
+0!
+b0 "
+$end
+#5
+1!
+b1 "
+#10
+0!
+#15
+1!
+b10 "
+#20
+0!
+#25
+1!

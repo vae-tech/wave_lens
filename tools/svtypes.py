@@ -3,7 +3,9 @@
 packed structs as fields on a VCD, which has no types (Questa writes an enum as `reg [2:0]`, a struct as one vector).
 
   svtypes.py verilator --top tb --out tb.types.json -- rtl/pkg.sv rtl/*.sv +incdir+rtl     (or -- -f files.f)
-  svtypes.py check tb.types.json [tb.vcd]          what it gives each path; with a dump: which signals it labels
+  svtypes.py check tb.types.json [tb.vcd]          what it gives each path; with a dump: which signals it labels, and
+                                                   what the types declare that the dump has not got (Questa's VCD:
+                                                   unpacked arrays; generate scopes without vcd add -r)
 
 The types come from whoever elaborated the design, so packages, `include, macros, parameters and generate blocks are
 theirs, and two modules' `state` get each its own table:
@@ -35,8 +37,9 @@ DESC_REC = re.compile(r'(Record|Union) \[(\d+) elements?\]')
 DESC_ELEM = re.compile(r'Element #\d+ "([^"]*)" =>')
 DESC_ARR = re.compile(r'Array\((-?\d+) (downto|to) (-?\d+)\) \[length (\d+)\] of')
 DESC_ITEM = re.compile(r'([A-Za-z_][\w$]*)=(-?\d+)')   # a label is an SV identifier: letters, digits, _ and $
-# a real of the design (a parameter of an analog model, a time): a plain number in the dump, no note
-DESC_REAL = re.compile(r'Floating point type\b.*|(?:Real|Shortreal|Realtime)')
+# a real of the design (a parameter of an analog model, a time), an integer parameter (Questa's "Integer": the types of
+# wavelens_types.tcl list the parameters too, find -nofilter): a plain number in the dump, no note
+DESC_REAL = re.compile(r'Floating point type\b.*|(?:Real|Shortreal|Realtime|Integer)')
 
 
 def enum_items(body):
@@ -360,8 +363,12 @@ def read(d, where='types'):
     m = {} if d.get('map') is None else d['map']   # none or null: no map ([] or "" an error, as in the page)
     if not isinstance(m, dict) or not all(isinstance(k, str) and isinstance(x, str) for k, x in m.items()):
         raise WaveError(f'{where}: "map" is {{"dump.prefix": "types.prefix"}}, the dump\'s scopes as the types name them')
+    # every signal the types declare (missing: the ones the dump lacks): Questa's describe has them all, typed or not;
+    # Verilator's "signals" the typed ones only
+    desc = d.get('describe') if isinstance(d.get('describe'), dict) else {}
+    declared = {**{p: '' for p in sigs}, **{p: str(x) for p, x in desc.items()}}
     return {'signals': sigs, 'notes': notes, 'producer': d.get('producer') or {}, 'map': dict(m),
-            'instances': d.get('instances') if isinstance(d.get('instances'), dict) else {}}
+            'instances': d.get('instances') if isinstance(d.get('instances'), dict) else {}, 'declared': declared, 'every': bool(desc)}
 
 
 def remap(path, m):
@@ -415,6 +422,59 @@ def fingerprint(types, date=None, modules=(), m=None):
             notes.append(f'{len(miss)} instance{"" if len(miss) == 1 else "s"} of the types not in the dump, under modules it has: '
                          f'{", ".join(miss[:3])}{" …" if len(miss) > 3 else ""} (none of its signals dumped, or another design)')
     return notes
+
+
+MISS_WHY = {
+    'array': "unpacked arrays (Questa's VCD leaves them out: USAGE.md § What a Questa VCD lacks)",
+    'generate': 'under generate scopes the dump has not got',
+    'scope': 'in scopes the dump has not got (vcd add without -r?)',
+    'other': 'not dumped',
+}
+MISS_SHORT = {'array': 'unpacked arrays', 'generate': 'under generate scopes', 'scope': 'in other scopes', 'other': 'not dumped'}
+
+
+def missing(types, paths, scopes, m=None):
+    """The signals the types declare that the dump has not got (paths: its variables, scopes: its scopes, both as the dump
+    names them) -> [{"path", "why"}]: "array" an unpacked array (Questa's describe "Array(…) of"; its elements are in the
+    dump when they are, as x[3]), "generate" under a scope the dump lacks that a generate makes (name[k], genblk…),
+    "scope" under another scope it lacks, "other"."""
+    declared = types.get('declared') or {}
+    m = {**types.get('map', {}), **(m or {})}
+    mine = [remap(p, m) for p in paths]
+    tops = added_tops(declared, mine)
+    have = {lookup_key(declared, p, tops) for p in mine} - {None}
+    have |= {re.sub(r'(\.?\[-?\d+\])+$', '', p) for p in mine}   # an element of an array: the array is there
+    sc = {remap(s, m) for s in scopes}
+    sc |= {s.split('.', 1)[1] for s in sc if '.' in s and s.split('.', 1)[0] in tops}
+    out = []
+    for p, text in declared.items():
+        if p in have:
+            continue
+        parts = p.split('.')[:-1]
+        gone = next(('.'.join(parts[:i + 1]) for i in range(len(parts)) if '.'.join(parts[:i + 1]) not in sc), None) if sc else None
+        if text.lstrip().startswith('Array('):
+            why = 'array'
+        elif gone:
+            leaf = gone.rsplit('.', 1)[-1]
+            why = 'generate' if re.search(r'\[-?\d+\]$', leaf) or re.match(r'<?genblk', leaf) else 'scope'
+        else:
+            why = 'other'
+        out.append({'path': p, 'why': why})
+    return out
+
+
+def missing_notes(types, miss, shown=3):
+    """The notes of missing(): one line of the counts by why, then one per why with its first paths."""
+    if not miss:
+        return []
+    by = {}
+    for x in miss:
+        by.setdefault(x['why'], []).append(x['path'])
+    n = len(miss)
+    head = (f'{n} signal{"" if n == 1 else "s"} of the types {"are" if n > 1 else "is"} not in the dump: ' +
+            ', '.join(f'{MISS_SHORT[k]} {len(by[k])}' for k in MISS_WHY if k in by) +
+            ('' if types.get('every') else ' (the types name their typed signals only: the others are not looked for)'))
+    return [head] + [f'{MISS_WHY[k]}: {", ".join(by[k][:shown])}{" …" if len(by[k]) > shown else ""}' for k in MISS_WHY if k in by]
 
 
 def added_tops(sigs, paths):
@@ -498,7 +558,7 @@ def main():
     v.add_argument('--out', '-o', required=True, help='the types file to write (name it as the dump: tb.types.json)')
     v.add_argument('--verilator', default='verilator', help='the verilator executable')
     v.add_argument('args', nargs=argparse.REMAINDER, help='after --: what you give verilator (files, -f list.f, +incdir+…, +define+…)')
-    c = sub.add_parser('check', help='what a types file gives each path, and with a dump which of its signals')
+    c = sub.add_parser('check', help='what a types file gives each path, and with a dump which of its signals, and what it declares the dump has not got')
     c.add_argument('types')
     c.add_argument('dump', nargs='?')
     c.add_argument('--map', action='append', metavar='DUMP=TYPES', help='a scope of the dump as the types name it (top.dut_i=dut; again for more)')
@@ -548,12 +608,12 @@ def main():
               f'{len(notes)} width differs, {len(miss)} typed paths not in the dump')
         for n in notes:
             print(f'  {n}')
+        for n in missing_notes(t, missing(t, [s['path'] for s in sigs], set(decl.modules) | set(decl.scopes), mp), 20):
+            print(f'  {n}')
         for s in sigs:   # labelled though wider: an integer of the dump (Questa 2023's VCD of an enum)
             e = lookup(t['signals'], remap(s['path'], mp), tops)
             if e and on_integer(e, s):
                 print(f'  {s["path"]}: an integer of {s["width"]} bits in the dump, an enum of {e["width"]} in the types: its labels')
-        for p in miss[:20]:
-            print(f'  not in the dump: {p}')
         return 1 if notes else 0
     return 0
 

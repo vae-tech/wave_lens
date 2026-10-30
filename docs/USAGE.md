@@ -71,7 +71,7 @@ may be the default). What the tab does differently from a page in a browser:
   what they mean in VS Code (ctrl+F find, ctrl+C copy, ctrl+Z / ctrl+Y undo / redo, alt+C W R in the find field);
   `wavelens.keysToVSCode` (default `ctrl+G`, Go to Line) are left to VS Code — the list of your groups is `gl` then; the
   others (ctrl+P, F1, ctrl+tab, ctrl+shift+…) are VS Code's.
-- **The version** in the bar's title line: `0.29 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
+- **The version** in the bar's title line: `0.30 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
   committed), so a tab of a development build says which one it is.
 - **An agent** on the host (`tools/wavemcp.py`, below): when it starts its live link, every open tab connects (**●
   live**); `view_live` with `page` a `.vcd` / `.fst` and `open: true` opens it in the VS Code window that has the file
@@ -250,6 +250,12 @@ at once; the names come from the design's types (guide: [State names and structs
   other parameters. The right button's **Type…** on a signal tells where its labels come from: the types file and the path
   there, a width that does not fit, a plain vector in the types, no entry (with the paths of its name the file has, and the
   `"map"` to write when they are under another root); the command `types` answers the same.
+- **What the dump lacks.** Questa's types declare every signal (`describe` of each, unpacked arrays and parameters too):
+  the ones the dump has not got are said in counts by why — `unpacked arrays` (a Questa VCD leaves them out),
+  `under generate scopes` (a scope `name[k]` or `genblk…` it lacks: `vcd add` without `-r`), `in other scopes`, `not
+  dumped` — with their first paths: `svtypes.py check`, `mkconfig.py`, `wave_info`'s notes, the viewer's log when it
+  opens a dump with its types (§ *What a Questa VCD lacks*). Verilator's types name their typed signals only: the note
+  says so.
 - **Without a types file**, by the variable's name: `make html WAVES=x.vcd SV="rtl/*.sv"` (`mkconfig.py --sv`), **Sources…**
   with `.sv` / `.svh` files, the VS Code tab's `wavelens.sources` (default `**/*.sv`, `**/*.svh`) read `typedef enum {…}
   name_t;` and `typedef struct packed` and label the signals declared with those types (a table only where its values fit
@@ -332,7 +338,7 @@ add theirs (`WaveLens.registerDefaults`).
 | `toolsFolded` | false | the bar's tools folded to its title line (**▴** / **▾ tools** in the bar) |
 | `toolsHidden` | `[]` | the bar's tool groups left out by their labels (`["style", "dump"]`; the right button on the bar) |
 | `themeButton` | `auto` | **◐** in the bar's title line: the page's theme (auto, light, white, dark; kept in this browser; in VS Code its list, VS Code's colours too); `auto`: when the page has no theme button of its own (`viewer.html`, the VS Code tab) |
-| `version` | true | the version in the bar's title line, and the build the page was made from (`0.29 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
+| `version` | true | the version in the bar's title line, and the build the page was made from (`0.30 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
 | `keysLeft` | `[]` | keys the viewer leaves to its host: `["ctrl+G"]` (`ctrl+` is `cmd+` too, a letter by its place); the VS Code tab: `wavelens.keysToVSCode` |
 | `log` | `auto` | the log under the viewer (§ A dump straight in the browser): `auto` from the first thing done in the page (a dump read, Sources…, Load…), `true` always, `false` never |
 | `savePage` | true | the bar's **Save page**: this page as a `.view.html` with your view in it (§ Save and Load); false hides it and keeps no copy of the page's text |
@@ -577,7 +583,7 @@ setting is the start; a find left out still floats over the waves on `/`). Navig
 | `/`, ctrl+F | find (the bar scrolled away: the find group floats over the waves; ✕ or Esc puts it back) | `n N`, `*` `#` | next / previous match; find the selected signal's name and go to its next / previous match |
 | `m` | bookmark at the cursor | `]m [m` | the next / previous bookmark |
 | `gm` (the right button's **Markers…**) | the markers (the page's, yours) and the bookmarks in a list over the waves, by time: `↓` the first (`↑` the last), then `↑ ↓` Home End step through them, a click picks one — the cursor on it and the waves at its time with the span they have: a marker in the middle, a bookmark as going to it does (below); Enter or Esc closes it there | `gl`, ctrl+G | your groups: a list |
-| shift+click the waves | a second cursor (dashed, on an edge): Δ to the cursor in time, its frequency (`Δ 40 ns / 25 MHz`) and in cycles of the clock (the cycles band's when it is on, else the selected signal's, else the nearest `*clk*`) on the axis and in the readout; `x` swaps the two; Esc clears it | `1` … `9` | go to that bookmark (each bookmark's line shows its Δ from the cursor) |
+| shift+click the waves | a second cursor (dashed, on an edge): Δ to the cursor in time, its frequency (`Δ 40 ns / 25 MHz`) and in cycles of the clock (the cycles band's when it is on, else the selected signal's, else the nearest `*clk*`) on the axis and in the readout; `x` swaps the two; Esc clears it | `1` … `9` | go to that bookmark (each bookmark's line shows its Δ from the cursor; the bookmarks and markers at the cursor are marked in their lists) |
 | `zM` / `zR` | fold / open every module | `zc` / `zo` / `za` | fold / open / toggle the module of the selected signal |
 | `b`, a click on a bus's `[7:0]` | the selected bus bit by bit: a row per bit under it (§ below); again, or on one of its bits: folded | | |
 | `t` | the Modules panel: the modules as a tree (§ below); again: the selected signal's module in it; `T`: the state machines | **Only: N ✕** in the bar | ‖ pauses Only (every module), ▶ resumes it, ✕ clears it |
@@ -730,7 +736,11 @@ edges of the row NAME (a full path or a name) between them, `?` where there is n
 or `{"bookmark": n}` (a bare number is a time, not a bookmark); `signals`: only those rows (full paths or names), else
 every row; the colour a token (`c3`…`c9`, `acc`) or `#hex`. The label sits at its top left; the tooltip on the waves
 gives it with its length. The `span` command adds or changes yours (kept in the browser, in a saved state, undone with
-the rest).
+the rest). A span with **`"every"`** (an event, as above) instead of `from` / `to` is a span from each of its matches to
+the next, the last to the end of the view: the test cases of a long run, `{"every": "tb_test", "label": "case {value}"}`
+(`{value}`: the signal's value after the match, as the page shows it; `{n}`: the match's number from 1; a change of a
+signal that has a value at the start of the view: that start is the first). None: lint `span-every-no-match`. To step
+through them, a marker `{"on": "tb_test", "label": "case"}` and `]m [m`.
 
 **A bookmark at an event.** In a config a bookmark may give `"at"` instead of `"t"`: the build finds its time in the
 dump, so a test changed later moves it with the event (both `"t"` and `"at"` are an error). The forms are `wave_find`'s
@@ -810,10 +820,52 @@ the page's scope; one found by its short name only is said: *matched by name: tb
 title line says how many differ and where the first one is; **]d / [d** step to the next / previous difference (of the
 selected signal when it has some, else of all); **≠ N ✕** in the bar compares no more. Values are compared as values:
 bit for bit (x and z apart; a bus of another width differs everywhere), a real as a number (`inf`, `-inf`, `nan` apart), a string as text; a packed
-struct by its whole vector (≠ on its group). Over the time both dumps cover (the toast says it when that is less); a
-signal B's reader left out for `dumpBudget` is said apart from one B has not got. The picture (PNG, SVG) draws the bands. It works on exact
-waves (a page of `--exact`, a dump opened in the page), not on a clock-sampled view; an FST: `sva vcd x.fst --out x.vcd`.
-Not kept in the saved state.
+struct by its whole vector (≠ on its group). Over the time both dumps cover (the toast says it when that is less). The
+picture (PNG, SVG) draws the bands. It works on exact waves (a page of `--exact`, a dump opened in the page), not on a
+clock-sampled view; an FST: `sva vcd x.fst --out x.vcd` (in VS Code the tab compares a VCD or an FST through `sva diff`
+on the host, B never sent to the tab). B is read once and only for this page: its signals that could be the page's rows
+and its changes over the page's time (a B of 13 MB and 2000 signals against a page of 7: 0.6 s), its progress in the
+toast from 8 MB on; **≠ … ✕** in the bar stops a read (the compare before it stays). The compare is in the saved state
+(`"compare"`: the result, below), so **Save page** and **Save** keep it and **Load…** brings it back.
+
+A compare can also come made: the config's **`"compare"`** (top level or a view's) — `{"dump": "b.vcd", "map"?: {"tb_a":
+"tb_b"}, "offset"?: "5ns", "segment"?: "tb_test", "align"?: true}`, `dump` beside the config — runs `sva diff` (below)
+of the view's dump and that one over the view's window and rows when the page is built, and the page carries the result,
+the WaveJSON extension `"compare"` (`{name, from, to, compared, differ, first, signals: {row: {spans, b, other?, more?}},
+missing, map, segments?}`, times in ps; a page from `file://` cannot read `b.vcd` by itself): it opens with the bands,
+its static SVG draws them. A clock-sampled view with `"compare"` is an error; a signal with more than 1000 stretches
+that differ keeps the first 1000 (lint `compare-spans-cut`). The command **`compare`** gives a result (`result`), or
+none (`off`); `tools/viewedit.py` and `view_edit` also take `dump` (with `a`, `map`, `offset`): `sva diff` of the page's
+dump beside it and that one (a row named without the prefix its signals share is found by the prefix the most rows have),
+live through the agent's server.
+
+**Compare two runs from the shell.** `sva diff A B` (`make diff REF=A WAVES=B`) compares two dumps (VCD or FST, the two
+kinds mixed too) change by change without a page and without either of them in memory: each is read as a stream in a
+thread of its own and the two are merged by time, so two Questa VCDs of 288 MB take seconds, not the whole dump twice in
+memory (*DEVELOPMENT.md* § Measured). The values compare as **Compare…** compares them (above). A signal of A pairs
+with the one of B at its path; `--map A=B` (again for each pair) renames A's paths for B — a scope (`--map
+tb.if_a=top.if_a`: the longest one that matches) or one signal's path (`--map tb.sensor_data=top.bif.sensor_data`: an
+exact pair wins over a scope); two dumps with one top scope each, named apart (`au_psi5_tb`, `psi5_top_tb`), pair their
+tops without a map. Nothing is matched by its short name only. `--signals` paths (under `--scope`, else the one path that
+ends with the name) or `*` `?` patterns of A's paths; by default every signal of A that B has (the others are listed:
+only in A, only in B; they change nothing). `--from` / `--to` the window in A's time, both ends included (default: the
+time both dumps cover); `--offset T` (`-T`): B's time is A's time plus T — a run that starts later. `--segment SIGNAL`
+the counts per segment, a segment from each change of that signal in A — a test case number (`tb_test`) gives a line
+per case: `segment 4 (tb_test = 4): 4.783174 ms … 7.426132 ms: 207876 changes, 0 differ`; its value is the enum label
+when A has the table, else a number. `--align` with it: segment k of B starts at the k-th change of the signal in B and
+is compared with segment k of A on the length both have (the same case run alone and inside a group of cases); the rest
+of a longer segment is not compared, the counts of segments say so. A change is a time a compared signal changes in A or
+in B (both at once: one); it differs when the values differ after it, and so does the start of the window, or of a
+segment, where they already differ. The text says the dumps, the pairs of the map, the counts, the first `--limit`
+differences (20; 0: all) and the segments; `--json [FILE|-]` the result as JSON (`-`: on stdout instead of the text;
+times in ps): `{"wavelens": "diff", "a", "b", "from", "to", "offset", "map", "signals_compared", "signals_differ",
+"compared", "differ", "first", "differences", "more", "signals": [{"path", "b", "kind", "width", "changes", "differ",
+"first", "other"}], "only_a", "only_b", "segments": [{"n", "value", "from", "to", "changes", "differ", "first"}],
+"notes"}` (`--spans N`: each signal's first N stretches that differ, `[from, to]`; `--align`: a segment's `b_from` and
+`compared_to`). `--junit FILE` a JUnit report for CI: a test case per segment (none: one, `all`) failing with its first
+differences, the signals of another width or kind one more. Exit status 0 equal, 1 they differ, 2 a usage error, a dump
+that does not read, a signal asked for without its pair, no time in common — a golden-dump regression is `sva diff
+golden.vcd run.vcd --junit diff.xml`.
 
 **Undo and redo.** **ctrl+Z** (or **↶** in the bar's title line) takes back the last change of what you edit: bookmarks, arrows,
 markers, your groups, colours, radix, analog and hidden rows, the highlight, the edge style, the scroll and the folded
@@ -972,6 +1024,7 @@ await v.run([
 | `arrow` | `id? from? to? shape? head? line? color? label? delete?` | an arrow between bookmarks `from` → `to` with its label: new, or arrow `id` (1, 2 … as listed; or the one from → to) changed; shape `~ - -~ ~- -\| \|- -\|-`, head `> <> < ""`, line `solid dashed dotted` |
 | `marker` | `id? t? label? color? delete?` | a dashed line across the rows with its label: new, or marker `id` changed; `delete`: `id` or `"all"` (`"all"` without `delete` is an error) |
 | `span` | `id? from? to? label? color? signals? delete?` | a coloured stretch of time across the rows (or the rows of `signals`) with its label: new (`from` and `to`), or span `id` changed; `delete`: `id` or `"all"` |
+| `compare` | `result? dump? a? map? offset? off?` | a second dump over the waves (red bands, ≠, `]d [d`): `result` (`sva diff`'s, the WaveJSON `"compare"`), `off`: none; `dump` (`a`: the page's dump, `map`, `offset`) in `tools/viewedit.py` / `view_edit` only (they run `sva diff`); answers `name`, `compared`, `differ`, `first`, `missing`; in the saved state |
 | `group` | `name signals? add? remove? color? rename? delete? go? move?` | your group: `signals` sets its signals in this order (a module: its signals), `add`, `remove`, `rename`, `delete`; `go`: opened, in the middle, its first signal selected (ctrl+G); `move`: its place among your groups (`up`, `down`, `top`, `bottom`, a number) |
 | `layout` | `scroll? height? tools?` | where the rows scroll: `window` (`height`: `"80vh"`, `600`) or `page`; the bar's tools `fold` or `open`; answers `scroll`, `height`, `tools` |
 | `highlight` | `add? remove? set? clear?` | signals and modules (and your groups) in front in their colours, the rest dimmed |
@@ -990,7 +1043,7 @@ await v.run([
 | `sort`, `style`, `find`, `gaps` | | the order of the names, the edge style, the find field and its options (answers the rows `found`, the first 50, and their `count`), the gaps of the picture (`reset`: the page's own; answers every gap setting) |
 | `cycles` | `on? clock? zero? reset?` | the clock cycles under the time axis: on, the clock counted (a 1-bit signal), the time of cycle 0 (`null`: the first edge), `reset`: the page's; answers the settings, the clock and the cursor's cycle (in the page; `null` from a file) |
 | `edge`, `reset` | `dir? kind? value? signal?` / — | the cursor to the next / previous edge; what Esc does |
-| `state`, `set_state`, `rows`, `picture` | / `state` / `pattern? limit? offset?` / `format? from? to? rows?` | read: the state (Save); a state back (Load…): a key it has replaces this one's (`config` key by key), a key it does not have stays, `null` clears; the signals of the page in display order (your groups first, as sorted, the hidden ones at the end); the screen as PNG (base64), SVG or WaveDrom |
+| `state`, `set_state`, `rows`, `picture` | / `state` / `pattern? limit? offset?` / `format? from? to? rows?` | read: the state (Save); a state back (Load…): a key it has replaces this one's (`config` key by key), a key it does not have stays, `null` clears; the signals of the page in display order (your groups first, as sorted, the hidden ones at the end; a dump compared: `"≠"` or `"missing"` third); the screen as PNG (base64), SVG or WaveDrom |
 
 Times are model units (ps of timed waves, else cycles) or a text with a unit (`"2.5us"`, `"100NS"`, `"0.1µs"`). A
 bookmark's `n`, the `id` of an arrow or a marker and an arrow's `from` / `to` are whole numbers (`2`, `2.0`, `"2"`;
@@ -1050,10 +1103,12 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
 | `wave_find` | `expr`: an SV expression or sequence matched on every clock cycle by the sva engine (`req && !ack`, `req ##[1:3] ack`, `$rose(x)`); or a signal's edges (`rise`, `fall`, `change`) or value (a number, `'h40`, `'b10x1` bit for bit, an enum label) at their exact times; the count and the first matches (the rules of a bookmark's `at`: one module, `tools/wavefind.py`) |
 | `wave_stats` | over a window: a bit's rises, falls, high time, pulse widths and period; a bus's changes, distinct values, the longest-held ones, minimum and maximum |
 | `sva_check` | assertion files and / or text evaluated over the dump in a scope: the failed ones with their first failures (`cycle`, `t`, `start_cycle`, `start_t`, the reason), passed, vacuous, not evaluated (names missing), the covers |
-| `wave_page` | a viewer page (`out` `.html`) or WaveJSON (`.json`) of signals over a window, assertions bound, to show a person |
+| `wave_page` | a viewer page (`out` `.html`) or WaveJSON (`.json`) of signals over a window, assertions bound, to show a person; `compare`: a second dump (or `{dump, map, offset}`, the config's `"compare"`), its differences on the page |
 | `wave_to_fst` | the VCD as an FST beside it (`out`: another file) with `sva fst`, the FSM states of its types file in it (`types`, `no_types`); what was written and the notes with their lines |
+| `wave_diff` | two dumps `a` and `b` (`dump` is `a`) compared change by change with `sva diff` (*Compare two runs from the shell*: streamed, neither read by the server): `equal`, `compared`, `differ`, `first` (`t`, `signal`, `a`, `b`; a bus in hex), the first `limit` `differences`, the signals that differ (`signals_more`: the rest), `only_a`, `only_b`, `segments`; `map` an object (`{"tb_a.if": "tb_b.if"}`), `offset`, `segment`, `align`, `spans`; times in ns |
+| `wave_cut` | a window (`from`, `to`) and some `signals` of a dump as a small VCD at `out` (`sva vcd --from --to --signals`): the values at `from` first; `out`, `bytes`, `variables`, its `from` and `to` |
 | `view_edit` | marks up a page for a person with the [commands](#commands-and-edits) (`ops`): bookmarks with a text, arrows, markers, groups, highlight, colours, hidden and folded rows, radix, cursor, window — live in their browser when the page is connected, else into the page's file (they see it when they open or reload it); `save`: a live page's state into its file too; `config` (instead of `page`): `bookmark`, `arrow` and `span` on a view of a `mkhtml.py` config, so a rebuild keeps them (a bookmark's `"at"` stays until a `t` replaces it; the whole list checked first, the file written at once) |
-| `view_get` | what a page shows: bookmarks, arrows, markers, groups, highlight, colours, hidden, cursor and window (live: with what the person changed); `rows`: its signals; `picture`: a PNG of the view (live: the screen; a page's file: made in a headless Chromium by `tools/pageshot.py`, when playwright is there) |
+| `view_get` | what a page shows: bookmarks, arrows, markers, groups, highlight, colours, hidden, cursor and window, a dump compared (`compare`: `name`, `compared`, `differ`, `first`, `missing`) (live: with what the person changed); `rows`: its signals; `picture`: a PNG of the view (live: the screen; a page's file: made in a headless Chromium by `tools/pageshot.py`, when playwright is there) |
 | `view_live` | connects a page to this server: the link is written into it, the person opens or reloads it (`open`: in their browser); `off`: disconnects; `page` a `.vcd` / `.fst`: its tab in VS Code (the extension connects by itself; `open`: VS Code opens it); without a page: the pages connected |
 
 The conventions are in the server's `instructions`: times are ns (a number) or a text with a unit, read as the viewer
@@ -1137,7 +1192,7 @@ All tools are `python3 -I tools/<tool>.py --help`; the Makefile calls them for y
 | `mkvsix.py` | the VS Code extension as one `.vsix` ([§ In VS Code](#in-vs-code-over-remote-ssh-or-wsl)) | `--out`, `--sva`, `--target` |
 | `viewedit.py` | the viewer's [commands](#commands-and-edits) on a page's edits or a saved state (`.view.json`) | `PAGE --ops JSON\|@file`, `--view`, `--get`, `--views`, `--model`, `--commands` |
 | `svaverify.py` | the examples' checkers in Verilator `--assert` against `sva eval` (`make sva-verify`) | `--build`, `--only`, `--keep`, `--sva-bin` |
-| `sva` (the engine's CLI, Rust: `make sva-build`, or `bin/linux-x86_64/sva`) | `sva parse` an assertion file, `sva eval` assertions over a dump, `sva report` results, `sva --waves DUMP --info` a dump's scopes and variables, `sva vcd DUMP [--out x.vcd] [--header \| --codes FILE]` an FST as VCD text (as `fst2vcd -e` writes it: its names, enum tables, escaped strings, its end; *Formats*; of an FST a part: its header, or the variables of some id codes), `sva fst DUMP.vcd [--out x.fst]` a VCD as an FST beside it (as `vcd2fst` writes it, enum tables and the types file's FSM states kept; *Formats*) | `sva <command> --help`; eval: `--waves --scope --sva [--assert NAME] [--from --to] [--out] [--json] [--attempts] [--x fail\|false] [--vacuous] [--no-lane] [--resolve up\|scope] [--ignore-prefix] [--alias] [--max-threads] [--report] [--junit] [-D]`; parse: `--json --expand -D` |
+| `sva` (the engine's CLI, Rust: `make sva-build`, or `bin/linux-x86_64/sva`) | `sva parse` an assertion file, `sva eval` assertions over a dump, `sva report` results, `sva --waves DUMP --info` a dump's scopes and variables, `sva vcd DUMP [--out x.vcd] [--header \| --codes FILE] [--from --to --signals]` an FST as VCD text (as `fst2vcd -e` writes it: its names, enum tables, escaped strings, its end; *Formats*; of an FST a part: its header, or the variables of some id codes; of any dump a cut: a window, some signals), `sva fst DUMP.vcd [--out x.fst]` a VCD as an FST beside it (as `vcd2fst` writes it, enum tables and the types file's FSM states kept; *Formats*), `sva diff A B` two dumps compared change by change (*Compare two runs from the shell*) | `sva <command> --help`; diff: `--signals --scope --from --to --offset --map --segment --align --json --junit --limit --spans --quiet`; eval: `--waves --scope --sva [--assert NAME] [--from --to] [--out] [--json] [--attempts] [--x fail\|false] [--vacuous] [--no-lane] [--resolve up\|scope] [--ignore-prefix] [--alias] [--max-threads] [--report] [--junit] [-D]`; parse: `--json --expand -D` |
 
 `sva eval --attempts` adds a line per attempt under an assertion's summary: its cycles, the time it started, the result
 and its trace (the elements `s1`, `s2` … and the cycle each matched at), a failure's reason after `--`:
@@ -1213,8 +1268,26 @@ values of the gap are). `sva vcd` of a VCD reads it with wellen: the adjacent bi
 large dump as it is needed (the VS Code tab): `--header` every declaration and the dump's first and last times, no
 value (313 kB and 0.01 s of a 127 MB FST of 10 000 signals); `--codes FILE` (`-`: stdin) the variables of those id
 codes as the whole text numbers them — their declarations in their scopes, their enum tables, their changes, the end
-(50 signals of it: 0.06 s); a reader of a part gets what it gets of the whole text for them. `sva eval` and `sva --info` read every dump with
-wellen (*ENGINE.md*: the merged selects, the escaped names that end in one).
+(50 signals of it: 0.06 s); a reader of a part gets what it gets of the whole text for them. Of any dump a **cut**:
+`sva vcd DUMP --from T --to T [--signals PAT,…] [--out cut.vcd]` writes the declarations of those signals (paths or `*`
+`?` patterns; none: all) in their scopes with their enum tables, then under `#from` a `$dumpvars` with the value each of
+them has at `--from` (x on every bit when it has none yet), its changes after it up to `--to`, and `#to`, the end (not
+past the dump's); a window of 1 ms of a 214 MB VCD: 1.7 s. For **Compare…** with a large B, for sending one test case,
+for a small fixture. The cut of a VCD and the cut of its FST read the same (`tests/unit/test_svafst.py`). `sva eval` and
+`sva --info` read every dump with wellen (*ENGINE.md*: the merged selects, the escaped names that end in one).
+
+### What a Questa VCD lacks
+
+As seen on Questa 2021.1 (`tests/unit/types/missing_tb.sv`, `make missing-fixture`): an unpacked array (`logic [3:0] arr
+[1:4]`, `logic [7:0] b [2]`) is in no VCD of it — `$dumpvars(0, tb)` with `-voptargs=+acc`, `vcd add -r /*`, nor a
+`vcd add /tb/arr` of the array by name: none writes it, without a word. A packed struct is one vector (its fields: the
+types file). The scopes of a generate loop (`gen[0]`) and an unnamed generate block (`genblk2`) are written by
+`$dumpvars(0, tb)` and `vcd add -r /*`; `vcd add /tb/*` (no `-r`) writes the signals of `tb` only, nothing under a
+scope — a generate's nor an instance's. `svtypes.py check tb.types.json tb.vcd` says what of the types the dump has not
+got (§ *FSM state names*). To have an array's elements in the VCD: a module of wires, one per element, in the simulation
+beside the testbench — `module tb_probe; wire [3:0] arr_1 = tb.arr[1]; … endmodule`, `vsim … tb tb_probe` — Questa
+writes it (each wire bit by bit, `arr_1 [3]` … `arr_1 [0]`: the tools read them as one vector). `wlf2vcd` of a WLF loses
+the values of enums (§ *FSM state names*): dump the VCD from `vsim` itself.
 
 ### A VCD as an FST
 

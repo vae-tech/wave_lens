@@ -5,6 +5,29 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.30 — 30 October 2026
+
+Two runs of one test compared without a page and without either dump in memory, the result on a page, and what a
+Questa VCD leaves out of the design said.
+
+- **`sva diff A B`** (`make diff REF= WAVES=`): two dumps (VCD or FST) compared change by change, each streamed by a
+  thread of its own and merged by time — two VCDs of 214 MB in 7 s, 1.5 MB of heap. Values as Compare… compares them;
+  `--map` renames a scope or a signal of A for B (one top each, named apart: paired by themselves); `--from --to`,
+  `--offset`; `--segment tb_test` the counts per test case, `--align` case k of B on case k of A; text, `--json`,
+  `--junit` (a test case per segment); exit 0 equal, 1 they differ, 2 a usage error. **`sva vcd --from --to
+  --signals`** cuts a window: the values at `--from` as `$dumpvars`, the changes to `--to`.
+- **MCP:** `wave_diff` and `wave_cut`; `wave_page` takes `compare`.
+- **On the page:** a compare result as the WaveJSON extension `"compare"` (made by the build from the config's
+  `"compare": {"dump": "b.vcd", "map", "offset"}`): the page opens with its bands, the static SVG draws them; the command
+  `compare` (`result`, `off`; `dump` in `viewedit.py` and `view_edit`, live too); the compare is in the saved state
+  (Save page, Save, Load…); `rows` and `view_get` say it. **Compare…** reads B once, only what the page shows (13 MB of
+  2000 signals in 0.6 s), its progress said, ≠ … ✕ stops it; in VS Code through `sva diff` on the host.
+- **`"spans": [{"every": "tb_test", "label": "case {value}"}]`**: a span per test case.
+- **What the dump lacks:** the types declare every signal (`wavelens_types.tcl`: arrays and parameters too); the ones
+  the dump has not got are counted by why — unpacked arrays, under generate scopes (`vcd add` without `-r`), other scopes,
+  not dumped — by `svtypes.py check`, `mkconfig.py`, `wave_info` and the viewer's log. USAGE § What a Questa VCD lacks:
+  what Questa 2021.1 writes, and a module of wires for an array.
+
 ## 0.29 — 28 October 2026
 
 A bus read bit by bit, and the gaps' marks and counts where they were lost.

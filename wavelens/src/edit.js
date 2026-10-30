@@ -178,6 +178,18 @@ command('marker', 'id? t? label? color? delete?', 'a marker: a dashed line acros
   if (a.color !== undefined) m.color = a.color || null;
   v.setMarks(); return { id: v.umarks.indexOf(m) + 1 };
 });
+command('compare', 'result? dump? a? map? offset? off?', 'a second dump over these waves, where its values differ (red bands, ≠, ]d [d): ' +
+  'result (sva diff\'s, as the page\'s "compare": tools/viewedit.py and view_edit make it of dump); off: compared no more', (v, a) => {
+  if (a.off) { v.compareResult(null); return { off: true }; }
+  if (a.result != null) {
+    const r = v.compareResult(a.result, true);
+    if (!r) fail('compare: these waves are clock-sampled (one cell per cycle): a compare is of exact waves');
+    return { name: r.name, compared: r.compared, differ: r.differ, first: r.first, missing: r.missing };
+  }
+  if (a.dump != null) fail('compare dump: a page reads no file by itself: pick it with Compare… here; an agent gives result (view_edit makes it of dump ' +
+    'on the page\'s file, or live)');
+  fail('compare: result or off');
+});
 command('span', 'id? from? to? label? color? signals? delete?', 'a coloured stretch of time over every row, or over the rows of signals, with its ' +
   'label: a new one (from and to), or span id (1, 2 … as listed) changed; delete: id or "all"', (v, a) => {
   idOk(a.id, 'span');
@@ -402,13 +414,14 @@ command('state', '', 'the viewer\'s state (what Save writes)', v => ({ state: v.
 command('set_state', 'state', 'a state back (what Load… does); every key it has replaces this viewer\'s', async (v, a) =>
   ({ missing: await v.setState(a.state) }));
 command('rows', 'pattern? limit? offset?', 'the signals and modules of the page in display order: [full path, width | "module" | "group"], ' +
-  'hidden and folded ones too', (v, a) => {
+  'hidden and folded ones too; a dump compared: "≠" (it differs) or "missing" (not in it) third', (v, a) => {
   const rx = a.pattern ? (String(a.pattern).includes('*') ? glob(String(a.pattern)) : null) : null, low = String(a.pattern || '').toLowerCase();
   const all = v.allRows(true)   // the hidden ones too (a signal under a hidden module), where they would be
     .filter(r => (r.type === 'sig' && r.tr && !r.ug && r.bit == null) || (r.type === 'group' && r.full))   // a bus's bits: by their paths
     .filter(r => !a.pattern || (rx ? rx.test(r.full) : r.full.toLowerCase().includes(low)));
   const off = Math.max(0, +a.offset || 0), n = Math.max(1, +a.limit || 200), page = all.slice(off, off + n);
-  return { total: all.length, rows: page.map(r => [r.full, r.type === 'group' ? (r.user ? 'group' : 'module') : r.width || 1]),
+  const mark = r => { const c = v.cmpOf(r); return !c ? [] : c.spans.length ? ['≠'] : c.missing || c.omitted ? ['missing'] : []; };
+  return { total: all.length, rows: page.map(r => [r.full, r.type === 'group' ? (r.user ? 'group' : 'module') : r.width || 1, ...mark(r)]),
     ...(off + n < all.length ? { next_offset: off + n } : {}) };
 });
 command('picture', 'format? from? to? rows?', 'the waves as a picture: png (base64), svg or wavedrom (WaveJSON); rows: screen (default), all, ' +

@@ -368,7 +368,7 @@ class Bar {
       else if (b.dataset.act === 'sload') v.sfile.click();
       else if (b.dataset.act === 'dopen') v.openDump();
       else if (b.dataset.act === 'dcmp') v.cfile.click();
-      else if (b.dataset.act === 'dcmpx') v.compare(null);
+      else if (b.dataset.act === 'dcmpx') { if (v.cmpReading) v.compareStop(); else v.compare(null); }
       else if (b.dataset.act === 'dsrc') v.srcfile.click();
       else if (b.dataset.act === 'dreload') v.reloadDump();
       else if (b.dataset.act === 'live') liveClick();
@@ -1457,7 +1457,7 @@ class WaveView {
       paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs), hidden: [...this.hiddenRows],
         bits: [...this.bitsOpen], select: (this.sel && this.sel.full) || null, find: this.q || '', bookmarks: this.bookmarks(), arrows: this.arrowList(),
         markers: this.markList(), spans: this.spanList(),
-        groups: this.groupList(), only: this.onlyState(), fsm: this.fsmState() };
+        groups: this.groupList(), only: this.onlyState(), fsm: this.fsmState(), compare: this.cmpState() };
     // none is said (null, the kind "any"): a state loaded later clears what is there then (a key left out keeps it)
     st.cursor2 = this.cursor2 ?? null;
     st.range = this.range ? { from: this.range[0], to: this.range[1], signal: (this.rangeRow && this.rangeRow.full) || null } : null;
@@ -1543,6 +1543,7 @@ class WaveView {
     }
     if (st.markers !== undefined) { this.umarks = markNorm(st.markers); this.setMarks(); }
     if (st.spans !== undefined) { this.spans = spanNorm(st.spans); this.saveBookmarks(); this.draw(); }
+    if (st.compare !== undefined && (st.compare || this.cmp)) this.compareResult(st.compare, true);   // a second dump compared (diff.js)
 
     if (st.select !== undefined) this.sel = (st.select && seen(st.select) && this.sigByPath(st.select)) || null;
     if (st.from != null && st.to != null && isFinite(st.from) && isFinite(st.to)) { this.span = Math.min(Math.max(st.to - st.from, this.minSpan), M.t1 - M.t0);
@@ -1609,7 +1610,8 @@ class WaveView {
       catch (e) { this.dumpSaid(file.name, { error: e.message, line: e.line }); throw e; }
       if (gen !== this.root.wlOpen || !VIEWS.has(this)) return this;
       const said = [], why = new Map(), nsv = svApply(r.doc, this.opts.sv, said, why);   // the sources' labels (Sources…, the VS Code tab's wavelens.sources)
-      const run = this.opts.sv && this.opts.sv.paths ? svFingerprint(this.opts.sv, r.info.date, svScopes(r.doc)) : [];   // the types of this run?
+      const run = this.opts.sv && this.opts.sv.paths ? svFingerprint(this.opts.sv, r.info.date, svScopes(r.doc)).concat(svMissSaid(this.opts.sv, r.doc)) :
+        [];   // the types of this run? what of them the dump has not got
       const from = this.opts.sv && this.opts.sv.paths ? 'the types file' : 'the SystemVerilog sources';
       if (nsv) r.log.push({ level: 'info', text: `labels or fields from ${from} for ${nsv} signal${nsv === 1 ? '' : 's'}` });
       const ni = [...why.values()].filter(x => x.int).length; if (ni) r.log.push({ level: 'info', text: svIntSaid(ni) });
@@ -1676,7 +1678,8 @@ class WaveView {
     if (!ne && !nf && !np && !quiet) this.toast((sv.notes.length ? 'no labels from these files' : 'no "typedef enum" or "typedef struct packed" in ' +
       `${texts.length} file${texts.length === 1 ? '' : 's'}`) + said);
     const log = [], why = new Map(), before = JSON.stringify(this.M.src.signal), doc = structuredClone(this.M.src), n = svApply(doc, this.opts.sv, log, why);
-    const run = ty ? svFingerprint(this.opts.sv, this.opts.dumpDate, svScopes(doc)) : [];   // the types of the run of the dump?
+    const run = ty ? svFingerprint(this.opts.sv, this.opts.dumpDate, svScopes(doc)).concat(this.opts.dumpSrc ? svMissSaid(this.opts.sv, doc) : []) :
+      [];   // the types of the run of the dump? what of them a dump opened here has not got
     Object.assign(this.opts, { svWhy: why, svRun: run });
     for (const x of log.concat(run)) console.warn('wavelens: types: ' + x);
     const left = log.filter(x => x.endsWith('left as it is')), ni = [...why.values()].filter(x => x.int).length;
@@ -2783,11 +2786,14 @@ class WaveView {
     this.curEl.textContent = 'cursor ' + this.fmtCursor(this.cursor) + ' · view ' + (M.timed ? fmtTime(this.span, this.span / 10,
       this.span) : this.span.toFixed(1) + ' cycles') + (this.cursor2 != null ? ' · cursor 2 ' + this.fmtCursor(this.cursor2) + ' · ' + this.delta2() : '') +
       (this.range ? ' · ' + this.rangeText() : '') + this.cycText();
-    if (this.bms.length && (this.dtAt !== this.cursor || this.dtGen !== this.notesGen)) {   // the bookmarks' Δ to the cursor
+    // the bookmarks' Δ to the cursor; the bookmarks and markers at the cursor marked in their lists, as an assertion's attempt is
+    if ((this.bms.length || this.umarks.length) && (this.dtAt !== this.cursor || this.dtGen !== this.notesGen)) {
       this.dtAt = this.cursor; this.dtGen = this.notesGen;
-      for (const el of this.notesEl.querySelectorAll('li[data-n] .dt')) { const b = this.bms.find(x => x.n === +el.closest('li').dataset.n); if (!b) continue;
-        const d = b.t - this.cursor;
-        el.textContent = d === 0 ? 'at the cursor' : `${d < 0 ? '−' : '+'}${this.fmt(Math.abs(d), Math.abs(d) / 1000 || 1, Math.abs(d) || 1)}`; }
+      for (const li of this.notesEl.querySelectorAll('li[data-n]')) { const b = this.bms.find(x => x.n === +li.dataset.n); if (!b) continue;
+        const d = b.t - this.cursor, el = li.querySelector('.dt'); li.classList.toggle('here', d === 0);
+        el.textContent = d === 0 ? '' : `${d < 0 ? '−' : '+'}${this.fmt(Math.abs(d), Math.abs(d) / 1000 || 1, Math.abs(d) || 1)}`; }
+      for (const li of this.notesEl.querySelectorAll('li[data-k]')) {
+        const m = this.umarks[+li.dataset.k]; li.classList.toggle('here', !!m && m.t === this.cursor); }
     }
     if (this.fsmP) this.fsmP.values();   // the FSM panel's states at the cursor
     if (this.valsAt !== this.cursor || this.valsGen !== this.namesGen || this.valsRadix !== this.S.radix) {   // value column: only when it changes

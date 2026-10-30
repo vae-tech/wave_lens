@@ -278,6 +278,7 @@ ${scripts}
       }
       case 'save': return reply(await this.save(String(m.name || 'wavelens.out'), Buffer.from(String(m.b64 || ''), 'base64')));
       case 'pick': return reply(await this.pick(String(m.accept || ''), !!m.multiple));
+      case 'compare': return reply(await this.compare(Array.isArray(m.signals) ? m.signals.map(String) : [], +m.from, +m.to));
       case 'sources': return reply(await this.sources());
       case 'clip': await vscode.env.clipboard.writeText(String(m.text ?? '')); return reply({ ok: true });
       case 'theme': chooseTheme(); return;   // the bar's ◐: the list of themes, as the command
@@ -353,6 +354,37 @@ ${scripts}
       files.push({ name: path.basename(u.fsPath), path: u.fsPath, mtime: st.mtimeMs, b64: (await fs.promises.readFile(f)).toString('base64') });
     }
     return { files };
+  }
+  // Compare…: a second dump picked on the host, sva diff of this one and it over the tab's signals and window (neither read
+  // here: the CLI streams both) -> {result}: the WaveJSON extension "compare" the viewer takes (compareResult), as the
+  // build makes it of a config's "compare" (tools/svabuild.py compare)
+  async compare(signals, from, to) {
+    const got = await vscode.window.showOpenDialog({ defaultUri: vscode.Uri.file(path.dirname(this.file)), canSelectMany: false,
+      title: `Compare ${path.basename(this.file)} with`, filters: { 'vcd, fst': ['vcd', 'fst'], 'every file': ['*'] } });
+    if (!got || !got.length) return {};
+    const b = got[0].fsPath, bin = svaBin();
+    const args = ['diff', this.file, b, '--json', '-', '--quiet', '--spans', '1000', '--limit', '0', '--signals-from', '-'];
+    if (isFinite(from)) args.push('--from', `${Math.round(from)}ps`);
+    if (isFinite(to)) args.push('--to', `${Math.round(to)}ps`);
+    log(`${path.basename(this.file)}: compare with ${b}`);
+    const r = await new Promise(ok => {
+      const p = cp.spawn(bin, args, { stdio: ['pipe', 'pipe', 'pipe'] }), out = [], err = [];
+      p.stdout.on('data', d => out.push(d)); p.stderr.on('data', d => err.push(d));
+      p.on('error', e => ok({ error: e.code === 'ENOENT' ? `Compare runs the sva CLI on this host, and there is none (${bin}): ` +
+        'set wavelens.sva, or make dist-linux in the repository' : `${bin}: ${e.message}` }));
+      p.on('close', code => ok(code === 0 || code === 1 ? { text: Buffer.concat(out).toString('utf8') } :
+        { error: Buffer.concat(err).toString('utf8').trim().replace(/^sva: /, '') || `${bin} diff: exit ${code}` }));
+      p.stdin.end(signals.join('\n') + '\n');
+    });
+    if (r.error) { log(`${path.basename(this.file)}: compare: ${r.error}`); return { error: `compare: ${r.error}` }; }
+    let d;
+    try { d = JSON.parse(r.text); } catch (e) { return { error: `compare: sva diff wrote no JSON (${e.message})` }; }
+    const sig = {};
+    for (const x of d.signals || []) {
+      sig[x.path] = Object.assign({ spans: x.spans || [], b: x.b }, x.other ? { other: x.other } : {}, x.more ? { more: x.more } : {});
+    }
+    return { result: { name: path.basename(b), from: d.from, to: d.to, compared: d.signals_compared, differ: d.signals_differ, changes: d.compared,
+      first: d.first && d.first.t, signals: sig, missing: [...(d.only_a || []), ...(d.not_in_a || [])], map: d.map || [] } };
   }
   // the design's types beside the dump (tb.vcd -> tb.types.json: tools/questa/wavelens_types.tcl, svtypes.py verilator), by
   // path; without them the workspace's SystemVerilog sources (wavelens.sources): their enum names label a VCD's state buses

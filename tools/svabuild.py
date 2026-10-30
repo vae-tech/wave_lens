@@ -306,6 +306,50 @@ def whole(files, binds, waves, exe=None, prefixes=None, aliases=None):
     return [b['results'] for b in bs if b.get('results')]
 
 
+COMPARE_SPANS = 1000   # the stretches that differ kept per signal of a page
+
+
+def compare(exe, a, b, rows, t_from=None, t_to=None, mp=None, offset=None, segment=None, align=False):
+    """`sva diff` of dump a and dump b over [t_from, t_to] (ps) for rows [(the row as the page names it, its path in a)] (None:
+    every signal of a, by its path) ->
+    the WaveJSON extension "compare" (wavelens model.js cmpNorm): {name, from, to, compared, differ, changes, first,
+    signals: {row: {spans, b, other?, more?}}, missing: [the rows b has not got], map, segments?, notes?}, times in ps."""
+    row_of = {}
+    for r, p in rows or ():
+        row_of.setdefault(p, []).append(r)
+    cmd = [exe, 'diff', a, b, '--json', '-', '--quiet', '--spans', str(COMPARE_SPANS), '--limit', '0'] + (['--signals-from', '-'] if rows is not None else [])
+    if t_from is not None:
+        cmd += ['--from', f'{round(t_from)}ps']
+    if t_to is not None:
+        cmd += ['--to', f'{round(t_to)}ps']
+    for x, y in (mp or {}).items():
+        cmd += ['--map', f'{x}={y}']
+    if offset not in (None, '', 0):
+        cmd += ['--offset', str(offset)]
+    if segment:
+        cmd += ['--segment', str(segment)] + (['--align'] if align else [])
+    r = subprocess.run(cmd, input='\n'.join(row_of) + '\n' if rows is not None else '', capture_output=True, text=True)
+    if r.returncode not in (0, 1):
+        raise WaveError(f'compare with {os.path.basename(b)}: ' + (r.stderr.strip().removeprefix('sva: ') or f'sva diff: exit {r.returncode}'))
+    d = json.loads(r.stdout)
+    out = {'name': os.path.basename(b), 'from': d['from'], 'to': d['to'], 'compared': d['signals_compared'], 'differ': d['signals_differ'],
+           'changes': d['compared'], 'first': d['first'] and d['first']['t'], 'signals': {},
+           'missing': [x for p in d['only_a'] + d.get('not_in_a', []) for x in row_of.get(p, [p])], 'map': d['map']}
+    for x in d['signals']:
+        e = {'spans': x.get('spans', []), 'b': x['b']}
+        if x.get('other'):
+            e['other'] = x['other']
+        if x.get('more'):
+            e['more'] = x['more']
+        for row in row_of.get(x['path'], [x['path']]):
+            out['signals'][row] = e
+    if d.get('segments'):
+        out['segments'] = d['segments']
+    if d.get('notes'):
+        out['notes'] = d['notes']
+    return out
+
+
 def report(results, exe=None, meta=None):
     """Results documents (one per binding, over the whole dump) -> (HTML section, summary JSON) of `sva report`, or
     (None, None) without the sva binary or results."""
