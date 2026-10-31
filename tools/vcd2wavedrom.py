@@ -800,7 +800,7 @@ def finish(a, rd, doc, specs, marks, t_from, t_to):
         doc['meta']['omitted'] = {'why': 'config', 'paths': omitted}
 
 
-COMPARE_KEYS = ('dump', 'map', 'offset', 'segment', 'align')
+COMPARE_KEYS = ('dump', 'map', 'offset', 'segment', 'align', 'show')
 
 
 def compare_of(a, doc, t_from, t_to):
@@ -810,6 +810,8 @@ def compare_of(a, doc, t_from, t_to):
     bad = sorted(set(c) - set(COMPARE_KEYS))
     if bad:
         raise WaveError(f'vcd2wavedrom: "compare": unknown key(s) {", ".join(bad)} (have: {", ".join(COMPARE_KEYS)})')
+    if c.get('show') not in (None, 'a', 'b', 'overlay'):
+        raise WaveError(f'vcd2wavedrom: "compare": show is a, b or overlay, not "{c["show"]}"')
     if a.clock:
         raise WaveError('vcd2wavedrom: "compare" is of exact waves (one cell per cycle is another time scale): give the view "exact"')
     if not os.path.isfile(c['dump']):
@@ -819,7 +821,7 @@ def compare_of(a, doc, t_from, t_to):
         raise WaveError('vcd2wavedrom: "compare" needs the sva CLI (make sva-build, or bin/<os>-x86_64/sva)')
     rows = getattr(a, 'row_abs', None) or [(r, r) for r in row_paths(doc.get('signal') or [])]
     try:
-        return svabuild.compare(exe, a.waves, c['dump'], rows, t_from, t_to, c.get('map'), c.get('offset'), c.get('segment'), c.get('align'))
+        return svabuild.compare(exe, a.waves, c['dump'], rows, t_from, t_to, c.get('map'), c.get('offset'), c.get('segment'), c.get('align'), c.get('show'))
     except WaveError as e:
         raise WaveError(f'vcd2wavedrom: "compare": {e}') from None
 

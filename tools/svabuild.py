@@ -307,13 +307,28 @@ def whole(files, binds, waves, exe=None, prefixes=None, aliases=None):
 
 
 COMPARE_SPANS = 1000   # the stretches that differ kept per signal of a page
+COMPARE_WAVES = 32 << 20   # bytes: the cut of the second dump a page carries at most (its "vcd": the overlay, A B on the page)
 
 
-def compare(exe, a, b, rows, t_from=None, t_to=None, mp=None, offset=None, segment=None, align=False):
+def compare_cut(exe, b, paths, t_from, t_to):
+    """`sva vcd` of dump b: the signals `paths` over [t_from, t_to] (B's time, ps), or a note when it is not to be had."""
+    cmd = [exe, 'vcd', b, '--from', f'{round(t_from)}ps', '--to', f'{round(t_to)}ps', '--signals-from', '-']
+    r = subprocess.run(cmd, input='\n'.join(paths) + '\n', capture_output=True, text=True)
+    if r.returncode:
+        return None, f'the values of {os.path.basename(b)} are not on the page: ' + (r.stderr.strip().removeprefix('sva: ') or f'sva vcd: exit {r.returncode}')
+    if len(r.stdout) > COMPARE_WAVES:
+        return None, (f'the values of {os.path.basename(b)} are not on the page: {len(r.stdout) >> 20} MB of changes of the signals that differ '
+                      f'(at most {COMPARE_WAVES >> 20}): compare fewer signals or a shorter window')
+    return r.stdout, None
+
+
+def compare(exe, a, b, rows, t_from=None, t_to=None, mp=None, offset=None, segment=None, align=False, show=None):
     """`sva diff` of dump a and dump b over [t_from, t_to] (ps) for rows [(the row as the page names it, its path in a)] (None:
     every signal of a, by its path) ->
     the WaveJSON extension "compare" (wavelens model.js cmpNorm): {name, from, to, compared, differ, changes, first,
-    signals: {row: {spans, b, other?, more?}}, missing: [the rows b has not got], map, segments?, notes?}, times in ps."""
+    signals: {row: {spans, b, other?, more?}}, missing: [the rows b has not got], map, segments?, notes?}, times in ps;
+    vcd, shift: the cut of b of the signals that differ, its time less a's (not with --align: no one offset); show: what the
+    page opens with (a, b, overlay)."""
     row_of = {}
     for r, p in rows or ():
         row_of.setdefault(p, []).append(r)
@@ -347,6 +362,16 @@ def compare(exe, a, b, rows, t_from=None, t_to=None, mp=None, offset=None, segme
         out['segments'] = d['segments']
     if d.get('notes'):
         out['notes'] = d['notes']
+    diff = sorted({x.get('b') or x['path'] for x in d.get('signals', ()) if x.get('spans')})
+    if diff and not align:
+        shift = d.get('offset') or 0
+        cut, note = compare_cut(exe, b, diff, d['from'] + shift, d['to'] + shift)
+        if cut is not None:
+            out['vcd'], out['shift'] = cut, shift
+        else:
+            out['notes'] = (out.get('notes') or []) + [note]
+    if show:
+        out['show'] = show
     return out
 
 

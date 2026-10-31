@@ -23,20 +23,21 @@
 //! after `from` up to `to`, and `#to`, the end. A cut of a VCD and the cut of its FST give a reader the same signals.
 
 use std::collections::{HashMap, HashSet};
-use std::io::{BufRead, Seek, Write};
+use std::io::{BufRead, Read, Seek, Write};
 use std::process::ExitCode;
 use fst_reader::{FstFilter, FstHierarchyEntry, FstReader, FstScopeType, FstSignalValue, FstVarType, ReadSignalsError};
 use wellen::stream::{self, Filter};
 use wellen::{Hierarchy, ItemRef, LoadOptions, ScopeType, SignalRef, SignalValueRef, TimescaleUnit, VarRef, VarType};
 
-const USAGE: &str = "usage: sva vcd [--waves] DUMP [--out FILE.vcd] [--header | --codes FILE] [--from T] [--to T] [--signals PAT,...]
+const USAGE: &str = "usage: sva vcd [--waves] DUMP [--out FILE.vcd] [--header | --codes FILE] [--from T] [--to T] [--signals PAT,...] [--signals-from FILE]
 The dump (FST or VCD) as VCD text, to FILE or stdout, as GTKWave's fst2vcd -e writes it: the names as the FST holds
 them, FST enum tables included, strings escaped as fstapi does (\\040 for a space), the end time of the dump kept.
 Of an FST a part: --header the declarations and the first and last times only; --codes FILE (- stdin) the variables
 of those id codes (as the whole text numbers them, apart by white space) with their changes.
 A cut: --from/--to a window (TIME: 100ns, 2.5us; ps without one): each signal's value at --from as $dumpvars under
 #from (x when it has none yet), its changes up to --to, then #to; --signals only those (paths, * ? patterns, or
-the one path that ends with a name).";
+the one path that ends with a name); --signals-from FILE (- stdin): the same, one a line (a name may hold a comma,
+and a list too long for a command line goes this way).";
 
 /// The VCD id code of signal `index` (an FST handle less one): base 94 over the printable characters `!`..`~`, as
 /// fst2vcd numbers its handles.
@@ -794,6 +795,25 @@ pub fn vcd_cmd(args: &[String]) -> ExitCode {
                 if a == "--from" { cut.from = Some(t) } else { cut.to = Some(t) }
             }
             "--signals" => cut.signals.extend(it.next().into_iter().flat_map(|v| v.split(',')).map(str::trim).filter(|s| !s.is_empty()).map(String::from)),
+            "--signals-from" => {
+                let Some(f) = it.next() else {
+                    eprintln!("sva: --signals-from needs a file\n{USAGE}");
+                    return ExitCode::from(2);
+                };
+                let text = if f == "-" {
+                    let mut t = String::new();
+                    std::io::stdin().read_to_string(&mut t).map(|_| t)
+                } else {
+                    std::fs::read_to_string(f)
+                };
+                match text {
+                    Ok(t) => cut.signals.extend(t.lines().map(str::trim).filter(|s| !s.is_empty()).map(String::from)),
+                    Err(e) => {
+                        eprintln!("sva: --signals-from {f}: {e}");
+                        return ExitCode::from(2);
+                    }
+                }
+            }
             "-h" | "--help" => {
                 println!("{USAGE}");
                 return ExitCode::SUCCESS;

@@ -20,6 +20,7 @@
   --bus-write: #1c7ed6; --bus-read: #2b8a3e; --bus-error: #c92a2a; --bus-channel: #868e96;   /* bus transactions (bus.js) */
   --wave-paint: #d6336c;  /* the find group's Paint colour (its first value) */
   --wave-cursor2: #1864ab;   /* the second cursor (shift+click) */
+  --wave-run-b: #c2255c;   /* the second dump of a compare: its waves over these, its tag */
   /* assertions on the waves (sva.js): attempt bars, step circles, the per-cycle strip, a drop target */
   --sva-pass: #22652f; --sva-fail: #a82020; --sva-disabled: #4f565d; --sva-active: #145a9a; --sva-capped: #56526a; --sva-ok: #37b24d; --log-warn: #855a00;   /* >= 4.5:1 against the grey panel (the step digits) */
   --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
@@ -35,7 +36,7 @@
   --wave-c7: #20391f; --wave-c8: #33264a; --wave-c9: #452423; color-scheme: dark;
   --wave-hl1: #4dabf7; --wave-hl2: #da77f2; --wave-hl3: #3bc9db; --wave-hl4: #f783ac; --wave-hl5: #a9e34b; --wave-hl6: #ff922b;
   --wave-hl8: #9775fa; --wave-paint: #f06595; --sva-pass: #51cf66; --sva-fail: #ff6b6b; --sva-disabled: #868e96; --sva-active: #4dabf7; --sva-capped: #adb5bd; --sva-ok: #69db7c; --log-warn: #f0b429;
-  --wave-band: #1f2933; --wave-cursor2: #74c0fc; --bus-write: #4dabf7; --bus-read: #69db7c; --bus-error: #ff6b6b; --bus-channel: #adb5bd; } }
+  --wave-band: #1f2933; --wave-cursor2: #74c0fc; --wave-run-b: #f783ac; --bus-write: #4dabf7; --bus-read: #69db7c; --bus-error: #ff6b6b; --bus-channel: #adb5bd; } }
 [data-theme="dark"] {
   --bg: #16181d; --panel: #1f2229; --panel-2: #272b33; --fg: #e8e6df; --muted: #9aa0ab; --line: #363b45;
   --accent: #e4834a; --accent-soft: #3a2a1f; --wave-1: #e8e6df; --wave-bus: #7fb0dd; --wave-x: #e0665a;
@@ -44,7 +45,7 @@
   --wave-c7: #20391f; --wave-c8: #33264a; --wave-c9: #452423; color-scheme: dark;
   --wave-hl1: #4dabf7; --wave-hl2: #da77f2; --wave-hl3: #3bc9db; --wave-hl4: #f783ac; --wave-hl5: #a9e34b; --wave-hl6: #ff922b;
   --wave-hl8: #9775fa; --wave-paint: #f06595; --sva-pass: #51cf66; --sva-fail: #ff6b6b; --sva-disabled: #868e96; --sva-active: #4dabf7; --sva-capped: #adb5bd; --sva-ok: #69db7c; --log-warn: #f0b429;
-  --wave-band: #1f2933; --wave-cursor2: #74c0fc; --bus-write: #4dabf7; --bus-read: #69db7c; --bus-error: #ff6b6b; --bus-channel: #adb5bd; }
+  --wave-band: #1f2933; --wave-cursor2: #74c0fc; --wave-run-b: #f783ac; --bus-write: #4dabf7; --bus-read: #69db7c; --bus-error: #ff6b6b; --bus-channel: #adb5bd; }
 /* white: pure white paper, black traces and stock-WaveDrom bus colours (good for print and slides) */
 [data-theme="white"] {
   --bg: #ffffff; --panel: #ffffff; --panel-2: #f3f4f6; --fg: #000000; --muted: #4b5563; --line: #d1d5db;
@@ -53,7 +54,7 @@
   --wave-c3: #ffffb4; --wave-c4: #ffe0b9; --wave-c5: #b9e0ff; --wave-c6: #ccfdfe;
   --wave-c7: #cdfdc5; --wave-c8: #f0c1fb; --wave-c9: #f5c2c0; color-scheme: light;
   --sva-pass: #2b7a3b; --sva-fail: #e03131; --sva-active: #1971c2;
-  --wave-band: #f0f7fe; --wave-cursor2: #1971c2; }
+  --wave-band: #f0f7fe; --wave-cursor2: #1971c2; --wave-run-b: #c2255c; }
 
 /* ---------------- interactive viewer (WaveView) ---------------- */
 .wv, .wv *, .wv *::before, .wv *::after { box-sizing: border-box; }   /* the rows' heights include their borders, whatever the page sets */
@@ -76,6 +77,9 @@
 .wv .bar .seg > :first-child { border-radius: 4px 0 0 4px !important; margin-left: 0 !important; }
 .wv .bar .seg > :last-child { border-radius: 0 4px 4px 0 !important; }
 .wv .bar .seg > :focus-visible { position: relative; z-index: 1; }
+.wv .bar .cmpv[hidden] { display: none; }
+.wv .bar .cmpv { margin-left: 4px; }
+.wv .bar .cmpv button[data-run="b"][aria-pressed="true"], .wv .bar .cmpv button[data-run="overlay"][aria-pressed="true"] { border-color: var(--wave-run-b); color: var(--wave-run-b); }
 .wv .bar button[data-act="in"], .wv .bar button[data-act="out"] { min-width: 2.4em; font-weight: 600; }
 .wv .bar .eyebrow { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
 .wv .bar button { font: inherit; font-size: 12px; padding: 2px 9px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); border-radius: 4px; cursor: pointer; }

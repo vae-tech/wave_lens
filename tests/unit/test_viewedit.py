@@ -467,7 +467,14 @@ class Compare(unittest.TestCase):
         self.assertEqual(dict(zip(*zip(*[(r[0], r[2:]) for r in e.c_rows({})['rows']])))['tb.dut.valid'], ['≠'])
         self.assertEqual(e.run([{'op': 'compare', 'off': True}])[0], {'op': 'compare', 'off': True})
         self.assertIsNone(e.st['compare'])
-        self.assertIn('result, dump or off', e.run([{'op': 'compare'}])[0]['error'])
+        self.assertIn('result, show, dump or off', e.run([{'op': 'compare'}])[0]['error'])
+        self.assertIn('compare with a second dump first', e.run([{'op': 'compare', 'show': 'b'}])[0]['error'])
+        e.run([{'op': 'compare', 'result': res}])
+        self.assertIn('differences only', e.run([{'op': 'compare', 'show': 'b'}])[0]['error'], 'no "vcd" in this result')
+        self.assertEqual(e.run([{'op': 'compare', 'show': 'a'}])[0]['show'], 'a')
+        self.assertEqual(e.run([{'op': 'compare', 'result': dict(res, vcd='$end'), 'show': 'overlay'}])[0]['show'], 'overlay')
+        e.run([{'op': 'compare', 'off': True}])
+        self.assertNotIn('compareShow', e.st)
         self.assertIn('a result {name', e.run([{'op': 'compare', 'result': {'signals': []}}])[0]['error'])
         clocked = dict(DOC)
         clocked.pop('time')
@@ -489,6 +496,15 @@ class Compare(unittest.TestCase):
             self.assertEqual(res[0], {'op': 'compare', 'name': 'b.vcd', 'compared': 2, 'differ': 1, 'first': 10000, 'missing': 0}, res)
             st = V.Page(page).state(key)['compare']
             self.assertEqual(st['signals']['v'], {'spans': [[10000, 15000]], 'b': 'tb.v'}, 'v of the page is tb.v, not tb.u.v')
+            # the cut of B for the page's A B A+B: the signals that differ only, their values, over the page's window
+            self.assertEqual((st['shift'], st['show'] if 'show' in st else None), (0, None))
+            self.assertIn('$var wire 1 " v $end', st['vcd'])
+            self.assertNotIn('clk', st['vcd'])
+            self.assertIn('#15\n1"', st['vcd'])
+            res, key, rev = V.edit_page(page, [{'op': 'compare', 'show': 'overlay'}])
+            self.assertEqual(res[0], {'op': 'compare', 'show': 'overlay', 'name': 'b.vcd'}, res)
+            self.assertEqual(V.Page(page).state(key)['compareShow'], 'overlay')
+            self.assertIn('show is a, b, overlay', V.edit_page(page, [{'op': 'compare', 'show': 'c'}])[0][0]['error'])
             self.assertIn('no such file', V.edit_page(page, [{'op': 'compare', 'dump': 'nope.vcd'}])[0][0]['error'])
 
 

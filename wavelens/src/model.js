@@ -8,7 +8,7 @@
 const TOK = { fg: '--fg', muted: '--muted', line: '--line', panel: '--panel', panel2: '--panel-2', acc: '--accent',
   one: '--wave-1', bus: '--wave-bus', x: '--wave-x', xsoft: '--wave-x-soft', z: '--wave-z',
   c3: '--wave-c3', c4: '--wave-c4', c5: '--wave-c5', c6: '--wave-c6', c7: '--wave-c7', c8: '--wave-c8', c9: '--wave-c9',
-  band: '--wave-band', cursor2: '--wave-cursor2',
+  band: '--wave-band', cursor2: '--wave-cursor2', runb: '--wave-run-b',
   // hl7: find, hl8: plugins
   hl1: '--wave-hl1', hl2: '--wave-hl2', hl3: '--wave-hl3', hl4: '--wave-hl4', hl5: '--wave-hl5', hl6: '--wave-hl6', hl7: '--accent', hl8: '--wave-hl8',
   paint: '--wave-paint' };   // the find group's Paint colour; plugins add their own (WaveLens.registerTokens)
@@ -23,7 +23,7 @@ const CVAR = { trace: '--wave-1', one: '--wave-1', bus: '--wave-bus', x: '--wave
   bg: '--panel', panel: '--panel', header: '--panel-2', grid: '--line', text: '--fg', muted: '--muted', accent: '--accent', cursor: '--accent',
   page: '--bg', c3: '--wave-c3', c4: '--wave-c4', c5: '--wave-c5', c6: '--wave-c6', c7: '--wave-c7', c8: '--wave-c8', c9: '--wave-c9',
   hl1: '--wave-hl1', hl2: '--wave-hl2', hl3: '--wave-hl3', hl4: '--wave-hl4', hl5: '--wave-hl5', hl6: '--wave-hl6',
-  band: '--wave-band', cursor2: '--wave-cursor2' };
+  band: '--wave-band', cursor2: '--wave-cursor2', runb: '--wave-run-b' };
 const THEMES = ['light', 'white', 'dark'];
 const ENUMS = {};   // global enum registry: full path (or a signal name, for every signal of that name) -> { value: label }
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -651,7 +651,13 @@ function fillRows(M, sigs) {
     const w = r.width; r.src.tv = s.tv; r.tr = parseTV(r.src, r).tr; r.width = w; r.lazy = false; got.add(r);
   }
   if (!got.size) return [];
-  for (const r of M.rows) if (r.field && got.has(r.of)) { const f = fieldRow(r.of, r.src, r.depth, r.anc); if (f) r.tr = f.tr; }
+  rowsMade(M, got);
+  return [...got];
+}
+// the changes of the rows got are others (read late, or the second dump's: diff.js): the fields of a vector and a struct's
+// whole value made again
+function rowsMade(M, got) {
+  for (const r of M.rows) if (r.field && got.has(r.of)) { const f = fieldRow(r.of, r.src, r.depth, r.anc); if (f) { r.tr = f.tr; r.an = null; } }
   // a struct of the dump's scopes (the innermost first): its whole value once every part has its changes
   for (const g of Object.values(M.groups).sort((a, b) => b.depth - a.depth)) {
     if (!g.sig || !g.sig.struct) continue;
@@ -659,7 +665,6 @@ function fillRows(M, sigs) {
     if (!kids.some(r => got.has(r)) || kids.some(r => r.lazy)) continue;
     g.sig.tr = joinBits(g, structParts(M, g)).tr;
   }
-  return [...got];
 }
 // the rows a row on the screen needs read (lazy): itself, the vector of a field, every signal of a struct
 const lazyOf = (M, r) => (r.type === 'sig' ? (r.lazy ? [r] : r.field && r.of && r.of.lazy ? [r.of] : []) :

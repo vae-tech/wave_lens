@@ -261,6 +261,24 @@ class Values(unittest.TestCase):
         self.assertEqual(got[0]['cycles']['cycleZero'], 50)
         self.assertEqual(W.state_ns({'config': {'cycleZero': 50000, 'cycles': True}})['config']['cycleZero'], 50)
 
+    @H.needs(W.svabuild.find_bin(), 'the sva CLI (make sva-build)')
+    def test_live_compare_keeps_show(self):
+        """view_edit compare {dump, show} on a live dump's tab: sva diff here, the page gets the result with its cut, and show."""
+        head = '$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! v $end\n$upscope $end\n$enddefinitions $end\n'
+        with H.tmp() as d:
+            a, b = H.vcd(d, '#0\n0!\n#10\n1!\n#30\n', header=head, name='a.vcd'), H.vcd(d, '#0\n0!\n#15\n1!\n#30\n', header=head, name='b.vcd')
+            got = W.live_compare({'op': 'compare', 'dump': 'b.vcd', 'show': 'overlay'}, {'path': a}, {}, {})
+            self.assertEqual((got['show'], got['result']['differ'], got['result']['shift']), ('overlay', 1, 0), b)
+            self.assertIn('#15\n1!', got['result']['vcd'])
+            self.assertNotIn('show', W.live_compare({'op': 'compare', 'dump': 'b.vcd'}, {'path': a}, {}, {}))
+
+    def test_state_without_the_cut(self):
+        """A compare's cut of the second dump: what the page carries, not what an agent reads; its size said, the rest kept."""
+        st = {'compare': {'name': 'b.vcd', 'vcd': 'x' * 100, 'signals': {}}, 'compareShow': 'b'}
+        got = W.state_ns(st)
+        self.assertEqual(got['compare'], {'name': 'b.vcd', 'signals': {}, 'vcd_bytes': 100})
+        self.assertEqual((got['compareShow'], len(st['compare']['vcd'])), ('b', 100), 'the state given stays as it was')
+
 
 class Views(unittest.TestCase):
     """view_edit / view_get on a page's file, and live through the bridge with a page played here (its stream, hello,

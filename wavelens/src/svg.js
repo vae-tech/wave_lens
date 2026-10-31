@@ -6,7 +6,8 @@ const WaveSVG = {
   // view: a viewer, drawn as it shows its waves (its rows — opts.rows, a part of them —, folding, colours, highlight,
   // bookmarks, cursor; the model is the viewer's): its picture (view.toSVG)
   toString(model, opts = {}) {
-    const V = opts.view, M = V ? V.M : parse(model), S = V ? V.S : settings(SVG_DEFAULTS, GLOBAL, M.cfg, opts), P = new SvgPainter(S);
+    const V = opts.view, M = V ? V.M : parse(model), docShow = V ? null : cmpDocShow(M);
+    const S = V ? V.S : settings(SVG_DEFAULTS, GLOBAL, M.cfg, opts), P = new SvgPainter(S);
     const gp = groupPaint(M, S.groupColors), strokeOf = V ? r => V.strokeOf(r) : r => r.stroke ?? gp.get(r);
     const from = parseT(opts.from) ?? M.t0, to = parseT(opts.to) ?? M.t1, fs = S.fontSize;
     const rh = { sig: S.rowHeight, group: S.groupHeight, space: S.spaceHeight }, bms = V ? V.bms : M.bookmarks, ars = V ? V.arrows : M.arrows;
@@ -110,7 +111,10 @@ const WaveSVG = {
           if (cy) paintCycles(P, { xL: xa, xR: xb, y: cycY, h: CYC_H, X, from: p, to: q, ups: cy.ups, iz: cy.iz });
           rowY = paintBody(P, M, lay, X, p, q, xa, xb, hl, sel, null, band, null, strokeOf, r => !(last[r.id] > rows.indexOf(r)));
           if (V) V.paintDiff(P, lay, X, p, q);   // the viewer's picture: a dump compared, where it differs
-          else if (M.compare) paintCmp(P, lay, X, p, q, cmpOfDoc(M.compare));   // the page's compare result (WaveJSON "compare")
+          else if (M.compare) {   // the page's compare result (WaveJSON "compare"), its "show"
+            if (docShow === 'b') paintCmpOut(P, lay, X, p, q, M.compare);
+            paintCmp(P, lay, X, p, q, cmpOfDoc(M.compare), docShow === 'overlay', M.t1);
+          }
         };
         if (ng) P.clip(xa, 0, xb - xa, Ht, go); else go();
         if (i < ng) P.clip(xb, 0, GAP, Ht, () => {   // the gap: the rows' backgrounds go on, no waves; a double dashed line
@@ -142,6 +146,7 @@ const WaveSVG = {
       paintBookmarks(P, bms, ars, X, from, to, rowY, top, bodyEnd, showAxis ? axisY + 10 : top + 10, null, laneY(lay, S.laneHeight), arrowFill(M, M.rows));
       if (V && V.cursor >= from && V.cursor <= to) P.path([['M', X(V.cursor), top], ['L', X(V.cursor), bodyEnd]], { stroke: 'acc', w: 1.2 });
       if (V) V.paintMeasures(P, X, from, to, xL, xR, top, bodyEnd, showAxis ? [axisY, 20] : null, true);   // the second cursor, the measured range
+      if (V && showAxis) V.paintRunTag(P, xR, axisY, 20);   // which run of a compare this is
     });
     notes.forEach((b, i) => {
       const cy = notesY + i * 20 + 10;

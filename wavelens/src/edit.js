@@ -178,17 +178,26 @@ command('marker', 'id? t? label? color? delete?', 'a marker: a dashed line acros
   if (a.color !== undefined) m.color = a.color || null;
   v.setMarks(); return { id: v.umarks.indexOf(m) + 1 };
 });
-command('compare', 'result? dump? a? map? offset? off?', 'a second dump over these waves, where its values differ (red bands, ≠, ]d [d): ' +
-  'result (sva diff\'s, as the page\'s "compare": tools/viewedit.py and view_edit make it of dump); off: compared no more', (v, a) => {
+command('compare', 'result? dump? a? map? offset? off? show?', 'a second dump over these waves, where its values differ (red bands, ≠, ]d [d): ' +
+  'result (sva diff\'s, as the page\'s "compare": tools/viewedit.py and view_edit make it of dump); off: compared no more; show: which run the waves ' +
+  'show, a (these waves), b (the second dump\'s values on these rows) or overlay (both over each other where they differ), alone or with result',
+async (v, a) => {
   if (a.off) { v.compareResult(null); return { off: true }; }
+  const shown = async () => {
+    const no = v.cmpCant(a.show); if (no) fail(no);
+    await v.compareView(a.show, true); return v.cmpRun;
+  };
+  if (a.show != null && !CMP_SHOWS.includes(a.show)) fail(`compare: show is ${CMP_SHOWS.join(', ')}, not "${a.show}"`);
   if (a.result != null) {
     const r = v.compareResult(a.result, true);
     if (!r) fail('compare: these waves are clock-sampled (one cell per cycle): a compare is of exact waves');
-    return { name: r.name, compared: r.compared, differ: r.differ, first: r.first, missing: r.missing };
+    return Object.assign({ name: r.name, compared: r.compared, differ: r.differ, first: r.first, missing: r.missing },
+      a.show != null ? { show: await shown() } : {});
   }
+  if (a.show != null && a.dump == null) return { show: await shown(), name: v.cmp.name };
   if (a.dump != null) fail('compare dump: a page reads no file by itself: pick it with Compare… here; an agent gives result (view_edit makes it of dump ' +
     'on the page\'s file, or live)');
-  fail('compare: result or off');
+  fail('compare: result, show or off');
 });
 command('span', 'id? from? to? label? color? signals? delete?', 'a coloured stretch of time over every row, or over the rows of signals, with its ' +
   'label: a new one (from and to), or span id (1, 2 … as listed) changed; delete: id or "all"', (v, a) => {

@@ -5,6 +5,24 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.31 — 31 October 2026
+
+Two runs compared by looking at them: a key that flips the waves between the two, both over each other, the run shown
+named all the time.
+
+- **A, B, A+B** (the bar, once a dump is compared): **B** puts the second dump's values on these rows in place, so the
+  cursor's values, the edges, the find, the FSM panel and the picture are of B and only what differs moves (the
+  assertions stay A's, the time B does not cover is shaded); **A+B** draws both on the stretches that differ, a bit's B
+  over its A in B's colour, a bus's row in two lanes with both values, `1 ≠ 0` in the value column.
+- **Keys:** `d` flips A and B, `D` the overlay and back; `]d [d` work in all three. The time axis names the run shown, in
+  its colour (`--wave-run-b`), and so does the picture.
+- **Commands and agents:** the command `compare` takes `show` (`a`, `b`, `overlay`), alone or with `result` or `dump`, in
+  `viewedit.py` and `view_edit`, live too; `compareView()` and the event `wavelens:compare` on a viewer; the config's
+  `"compare": {"dump": "b.vcd", "show": "overlay"}` opens that way, the static SVG draws it; `"compareShow"` in the saved state.
+- **B's values on the page:** only of the signals that differ, as the result's `"vcd"` and `"shift"` (at most 32 MB, none
+  with `--align`: then bands only), read at its first use; the VS Code tab gets them too. An agent's view of a state
+  leaves them out and says their size. **`sva vcd --signals-from FILE`** (`-`: stdin): a list too long for a command line.
+
 ## 0.30 — 30 October 2026
 
 Two runs of one test compared without a page and without either dump in memory, the result on a page, and what a

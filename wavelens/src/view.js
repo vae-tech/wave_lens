@@ -31,7 +31,7 @@ const TIPS = {
   'act:dsrc': ['SystemVerilog sources: the names of "typedef enum" on the state buses of a VCD (it has none), "typedef struct packed" as ' +
     'fields; kept for the next read (⟳)'],
   'act:dcmp': ['Compare with a second dump (a VCD of another run): where its values differ, a red band on the row, ≠ on the name', [']d', '[d']],
-  'act:dcmpx': ['Compare no more'],
+  'act:dcmpx': ['Compare no more'], 'act:dcmpv': ['Which run the waves show: this one, the second, both over each other', ['d', 'D']],
   'act:fprev': ['Previous match', ['N', 'shift+Enter']], 'act:fnext': ['Next match', ['n', 'Enter']],
   'act:fhl': ['Found rows in front, the rest dimmed'], 'act:fopen': ['Fold the modules without a match'],
   '.fcol': ['Colour for Paint'], 'act:fpaint': ['Paint the found and highlighted signals'], 'act:funpaint': ['Their own colours back'],
@@ -142,6 +142,8 @@ const HELP = [
   ['Measure and mark', [[['shift+click'], 'a second cursor: Δ to the cursor, in cycles of the clock'], [['x'], 'swap the cursors'],
     [['c147'], 'in the cursor field: cycle 147 of the clock (right button: Cycles ▸, a band of them under the axis)'],
     [[']d', '[d'], 'next / previous difference from a dump compared (Compare… in the bar)'],
+    [['d'], 'a dump compared: flip the waves between the two runs (the time axis names the one shown)'],
+    [['D'], 'a dump compared: both runs over each other where they differ, again one'],
     [['1', '…', '9'], 'go to bookmark 1 … 9'], [['ctrl+drag'], 'measure a range: Δ, the edges or changes of that signal'],
     [['alt+drag'], 'a box: its time and its signals, then the menu (picture, WaveDrom, colour)'], [['ctrl+click'], 'clear the range'],
     [['right button'], 'a range and the menu: picture, colour, radix, hide'], [['m'], 'bookmark at the cursor'],
@@ -270,6 +272,9 @@ class Bar {
       ('<button type="button" data-act="dreload" title="Read the dump again from the disk; the view, the folding and the bookmarks stay" ' +
           'hidden>⟳</button><input type="file" class="dfile" accept=".vcd,.fst" hidden>'),
       ('<button type="button" data-act="dcmp">Compare…</button><button type="button" data-act="dcmpx" class="cmpx" hidden></button>' +
+        '<span class="seg cmpv" hidden><button type="button" data-act="dcmpv" data-run="a" aria-pressed="true">A</button>' +
+        '<button type="button" data-act="dcmpv" data-run="b" aria-pressed="false">B</button>' +
+        '<button type="button" data-act="dcmpv" data-run="overlay" aria-pressed="false">A+B</button></span>' +
         '<input type="file" class="cfile" accept=".vcd" hidden>'),
       '<button type="button" data-act="dsrc" title="SystemVerilog sources, or the design\'s types (x.types.json: Questa, Verilator)">Sources…</button>' +
       '<input type="file" class="srcfile" accept=".sv,.svh,.v,.vh,.json" multiple hidden>');
@@ -369,6 +374,7 @@ class Bar {
       else if (b.dataset.act === 'dopen') v.openDump();
       else if (b.dataset.act === 'dcmp') v.cfile.click();
       else if (b.dataset.act === 'dcmpx') { if (v.cmpReading) v.compareStop(); else v.compare(null); }
+      else if (b.dataset.act === 'dcmpv') v.compareView(b.dataset.run);
       else if (b.dataset.act === 'dsrc') v.srcfile.click();
       else if (b.dataset.act === 'dreload') v.reloadDump();
       else if (b.dataset.act === 'live') liveClick();
@@ -1457,7 +1463,7 @@ class WaveView {
       paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs), hidden: [...this.hiddenRows],
         bits: [...this.bitsOpen], select: (this.sel && this.sel.full) || null, find: this.q || '', bookmarks: this.bookmarks(), arrows: this.arrowList(),
         markers: this.markList(), spans: this.spanList(),
-        groups: this.groupList(), only: this.onlyState(), fsm: this.fsmState(), compare: this.cmpState() };
+        groups: this.groupList(), only: this.onlyState(), fsm: this.fsmState(), compare: this.cmpState(), compareShow: this.cmp ? this.cmpRun : null };
     // none is said (null, the kind "any"): a state loaded later clears what is there then (a key left out keeps it)
     st.cursor2 = this.cursor2 ?? null;
     st.range = this.range ? { from: this.range[0], to: this.range[1], signal: (this.rangeRow && this.rangeRow.full) || null } : null;
@@ -1544,6 +1550,8 @@ class WaveView {
     if (st.markers !== undefined) { this.umarks = markNorm(st.markers); this.setMarks(); }
     if (st.spans !== undefined) { this.spans = spanNorm(st.spans); this.saveBookmarks(); this.draw(); }
     if (st.compare !== undefined && (st.compare || this.cmp)) this.compareResult(st.compare, true);   // a second dump compared (diff.js)
+    if (st.compareShow && this.cmp && !this.cmpCant(st.compareShow) && st.compareShow !== this.cmpRun) {
+      await this.compareView(st.compareShow, true); }
 
     if (st.select !== undefined) this.sel = (st.select && seen(st.select) && this.sigByPath(st.select)) || null;
     if (st.from != null && st.to != null && isFinite(st.from) && isFinite(st.to)) { this.span = Math.min(Math.max(st.to - st.from, this.minSpan), M.t1 - M.t0);
@@ -2670,9 +2678,10 @@ class WaveView {
   // the tooltip of a signal at t: its value there, the change into it and the next change ("prev → value @ t")
   valueTip(r, t) {
     const a = r.tr, i = lastLE(a, t), txt = o => o.k === '=' ? vtext(r, o, this.S.radix) : o.k;
-    if (i < 0) return `${r.name}: no value yet`;
+    if (i < 0) return `${r.name}: no value yet${this.cmpTip(r, t)}`;
     const o = a[i], p = a[i - 1], n = a[i + 1];
-    return `${r.name} = ${txt(o)}` + (p ? `\n${txt(p)} → ${txt(o)} @ ${this.when(o.t)}` : '') + (n ? `\nnext ${txt(n)} @ ${this.when(n.t)}` : '');
+    return `${r.name} = ${txt(o)}` + (p ? `\n${txt(p)} → ${txt(o)} @ ${this.when(o.t)}` : '') + (n ? `\nnext ${txt(n)} @ ${this.when(n.t)}` : '') +
+      this.cmpTip(r, t);
   }
   valueAt(sig, t) {
     if (sig.value) return sig.value(t);
@@ -2732,6 +2741,7 @@ class WaveView {
     g.restore();
     if (this.cursor >= this.t0 && this.cursor <= tB) P.path([['M', X(this.cursor), 0], ['L', X(this.cursor), Hc]], { stroke: 'acc', w: 1.2 });
     this.paintMeasures(P, X, this.t0, tB, 0, W, 0, Hc, top ? [0, ah] : null);
+    if (top) this.paintRunTag(P, W, 0, ah);   // which run of a compare the waves show
     // alt+drag
     if (this.box) { const [a, ya, b, yb] = this.box; P.path([['M', a, ya - oy], ['L', b, ya - oy], ['L', b, yb - oy], ['L', a, yb - oy], ['Z']],
       { stroke: 'acc', w: 1.2, dash: [4, 3] }); }
@@ -2800,8 +2810,8 @@ class WaveView {
       this.valsAt = this.cursor; this.valsGen = this.namesGen; this.valsRadix = this.S.radix;
       let vi = 0;
       for (const r of this.vis) if (r.type === 'sig' || r.sig) {   // a struct's row: its whole value
-        const el = this.vals[vi++], v = String(this.valueAt(r.sig || r, this.cursor));
-        if (el.textContent !== v) { el.textContent = v; el.title = v.length > 6 ? v : ''; }   // cut to its column: the title has it all
+        const el = this.vals[vi++], v = this.valueBoth(r.sig || r, this.cursor), w = v.length > 14 && v.includes(' ≠ ') ? v.split(' ≠ ')[0] : v;
+        if (el.textContent !== w) { el.textContent = w; el.title = v.length > 6 ? v : ''; }   // cut to its column: the title has it all
       }
     }
   }

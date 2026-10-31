@@ -65,6 +65,22 @@
   <figcaption><b><kbd>]d</kbd> from the start.</b> The cursor lands on 115 ns, where <code>PRDATA</code> first differs; the value
   column shows A's value there.</figcaption></figure>
 
+<h2 id="flip">Flipping between the runs</h2>
+<p>With a dump compared the bar has <span class="ui">A</span> <span class="ui">B</span> <span class="ui">A+B</span>, and the time axis
+  names the run shown on its colour, so the name stays in sight with the bar folded or scrolled away.</p>
+<ul>
+  <li><kbd>d</kbd> flips the waves between A and B. B's values go on these rows in place: the rows that differ change, a row B has
+    not got is empty, the colours stay. Held on one stretch, only the difference moves. The value column, the edge keys, the find
+    and the FSM panel read the run shown; the assertions stay A's.</li>
+  <li><kbd>D</kbd> puts both over each other where they differ: a bit's B over its A in B's colour, a bus's row in two lanes, A above
+    B, each with its value; the value column says <code>1 ≠ 0</code>. <kbd>D</kbd> again: the run before.</li>
+</ul>
+<figure><img src="img/compare-overlay.png" alt="Both runs over each other: PREADY's B low in its colour, PRDATA in two lanes, both dumps named on the time axis" loading="lazy">
+  <figcaption><b><kbd>D</kbd>: both runs.</b> The time axis names them in the colours of their waves; where they agree the row is
+  as it was.</figcaption></figure>
+<p><kbd>]d</kbd> <kbd>[d</kbd> work in all three. An agent does the same with the command <code>compare</code>:
+  <code>{"op": "compare", "show": "overlay"}</code>, <code>"b"</code> or <code>"a"</code>, and the picture is of the run shown.</p>
+
 <h2 id="export">Pictures and what is kept</h2>
 <p>The picture of the view (the right button's PNG / SVG, the <code>picture</code> command) draws the bands, so a regression can go
   into a review as it is:</p>
@@ -72,7 +88,9 @@
   <figcaption><b>The SVG of the window.</b> The same bands as on the screen (the names plain: no ≠, no strike).</figcaption></figure>
 <div class="note"><p>A compare is kept: <span class="ui">Save page</span> and <span class="ui">Save</span> write its result (not dump B)
   into the page or the state file, so who opens it sees the bands. A page can also be built with them: the config's
-  <code>"compare": {"dump": "b.vcd"}</code> runs <code>sva diff</code> when the page is made (below).</p></div>
+  <code>"compare": {"dump": "b.vcd"}</code> runs <code>sva diff</code> when the page is made (below), carries B's values of the
+  signals that differ, up to 32 MB, for <span class="ui">B</span> and <span class="ui">A+B</span>, and <code>"show": "overlay"</code>
+  opens it that way. A compare of a dump read in the page has them for the session: saved, it keeps the bands.</p></div>
 <p>A large B is read once, only its signals that could be the page's rows and only over the page's time; the toast says how far
   it is, and <span class="ui">≠ … ✕</span> in the bar stops the read.</p>
 
@@ -108,7 +126,7 @@ B: apb_b.vcd  0 ps … 205 ns, 58 signals
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.30 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.31 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

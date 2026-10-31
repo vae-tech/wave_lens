@@ -21,7 +21,7 @@ transactions are three plugin scripts more, inlined into a page): no build step,
   them or added to your view, each with its states, its changes and a diagram of them (a click: the next time it happens;
   [the guide](docs/guides/types.html)).
 - **Bus transactions**: AXI, AXI-Stream, APB, AHB, Avalon, Wishbone and OBI ports found by their names and drawn as
-  transfers; **two runs compared** signal by signal.
+  transfers; **two runs compared** signal by signal: the red bands, a key that flips the waves between the runs, both over each other.
 - **Pictures for documents**: PNG, SVG and WaveDrom out of any window, long idle stretches cut out, a static
   WaveDrom-style SVG next to the viewer.
 - **VS Code over Remote-SSH or WSL**: a dump on the Linux host opens in a tab, nothing else installed there

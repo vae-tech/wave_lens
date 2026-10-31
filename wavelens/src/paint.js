@@ -145,14 +145,15 @@ function paintAnalog(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk) {
     lab = { size: S.labelSize - 1, fill: 'muted' };
     P.text(xL + 4, yh + 2, f(hi), lab); P.text(xL + 4, yl - 2, f(lo), lab); }
 }
-// sk: its colour (a viewer's paint), bg: the row's background (the module band), tint: selected (the bus values too)
-function paintSig(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk = s.stroke, bg = 'panel', tint = false) {
+// sk: its colour (a viewer's paint), bg: the row's background (the module band), tint: selected (the bus values too), lane: half
+// a row (a compare's overlay): less margin, a smaller text
+function paintSig(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk = s.stroke, bg = 'panel', tint = false, lane = false) {
   const a = s.tr; if (!a.length) return;
   if (s.analog && s.width > 1) return paintAnalog(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk);
-  const yh = y + 4, yl = y + h - 5, ym = (yh + yl) / 2;
+  const yh = y + (lane ? 1 : 4), yl = y + h - (lane ? 1 : 5), ym = (yh + yl) / 2;
   const cl = x => Math.min(Math.max(x, xL - 8), xR + 8);
   let lv = null, lvDash = null, pk = null, py = ym, pw = Infinity, xe = 0;
-  const trace = sk || 'one', S = P.S, lab = { anchor: 'middle', size: S.labelSize };
+  const trace = sk || 'one', S = P.S, lab = { anchor: 'middle', size: lane ? Math.min(S.labelSize, 9.5) : S.labelSize };
   const E = (hasKey(EDGES, s.style) && EDGES[s.style]) || (hasKey(EDGES, S.style) && EDGES[S.style]) || EDGES.auto, slope = E.slope ?? (s.tv ? 0 : 2.5);
   const flush = x => { if (lv) { lv.push(['L', cl(x), py]); P.path(lv, { stroke: trace, w: S.traceWidth, dash: lvDash }); lv = null; } };
   for (let i = Math.max(lastLE(a, tA), 0); i < a.length && a[i].t <= tB; i++) {

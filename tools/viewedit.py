@@ -64,7 +64,7 @@ COMMANDS = {
     'cycles': 'on? clock? zero? reset?', 'only': 'modules? on? clear? open?', 'fsm': 'mode? signals? fields? clear?',
     'fsm_stats': 'signal', 'fsm_go': 'signal state? from? to? dir? first?', 'types': 'signals?',
     'edge': 'dir? kind? value? signal?', 'reset': '', 'state': '', 'set_state': 'state', 'rows': 'pattern? limit? offset?',
-    'picture': 'format? from? to? rows?', 'compare': 'result? dump? a? map? offset? off?',
+    'picture': 'format? from? to? rows?', 'compare': 'result? dump? a? map? offset? off? show?',
 }
 LIVE_ONLY = {'fit': 'the time of the waves', 'edge': 'the values of the signals', 'picture': 'the screen',
              'fsm': 'the enum labels of the signals', 'fsm_stats': 'the transitions of the signals', 'fsm_go': 'the transitions of the signals',
@@ -1286,10 +1286,21 @@ class Editor:
 
     def c_compare(self, a):
         """A second dump over these waves (diff.js compareResult): result (sva diff's, as the WaveJSON "compare"), dump (a VCD or
-        FST: sva diff of the view's dump, a, and it, over the view's window and rows; the page's file only), off: none."""
+        FST: sva diff of the view's dump, a, and it, over the view's window and rows; the page's file only), off: none; show: which
+        run the page opens with (a, b, overlay; compareView), alone or with result or dump."""
         if a.get('off'):
             self.st['compare'] = None
+            self.st.pop('compareShow', None)
             return {'off': True}
+        show = a.get('show')
+        if show is not None and show not in ('a', 'b', 'overlay'):
+            fail(f'compare: show is a, b, overlay, not "{show}"')
+        if show is not None and a.get('result') is None and not a.get('dump'):
+            c = self.compare()
+            if c is None:
+                fail(f'compare {show}: compare with a second dump first (Compare… in the bar)')
+            self.compare_show(show, c)
+            return {'show': show, 'name': c.get('name') or 'B'}
         if a.get('result') is not None:
             c = a['result']
             if not isinstance(c, dict) or not isinstance(c.get('signals'), dict):
@@ -1297,11 +1308,22 @@ class Editor:
         elif a.get('dump'):
             c = compare_dump(self.m, getattr(self, 'base', None), a)
         else:
-            fail('compare: result, dump or off')
+            fail('compare: result, show, dump or off')
         if not self.m.timed and self.m.doc:
             fail('compare: these waves are clock-sampled (one cell per cycle): a compare is of exact waves')
         self.st['compare'] = c
+        self.st.pop('compareShow', None)
+        if show is not None:
+            self.compare_show(show, c)
+            return dict(compare_summary(c), show=show)
         return compare_summary(c)
+
+    def compare_show(self, show, c):
+        """The page's run on opening: B's needs its values in the result (diff.js cmpCant)."""
+        if show != 'a' and not c.get('vcd'):
+            fail(f'compare {show}: this compare has the differences only, not the values of {c.get("name") or "B"} '
+                 '(a saved one, a cut too large for the page, one of --align): compare again')
+        self.st['compareShow'] = show
 
     def c_rows(self, a):
         """edit.js rows: in display order, the hidden ones at the end."""

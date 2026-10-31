@@ -1213,4 +1213,9 @@ fn vcd_cuts_a_window_out_of_a_dump() {
     assert_eq!(sva(&["vcd", &late, "--signals", "tb.zz"]).status.code(), Some(2));
     assert!(out(&sva(&["vcd", &late, "--signals", "q"])).contains("$var wire 2 ! q [1:0] $end\n$upscope"), "a name: the one path ending with it");
     assert_eq!(sva(&["vcd", &late, "--from", "1ns", "--header"]).status.code(), Some(2));
+    // --signals-from: a list in a file, one a line (a list too long for a command line)
+    let list = write("cut_list.txt", "tb.q\n\n  tb.b  \n");
+    let t = out(&sva(&["vcd", &late, "--signals-from", &list]));
+    assert!(t.contains("$var wire 2 ! q [1:0] $end\n$var wire 1 \" b $end\n$upscope"), "{t}");
+    assert_eq!(sva(&["vcd", &late, "--signals-from", "cut_no_such_list.txt"]).status.code(), Some(2));
 }

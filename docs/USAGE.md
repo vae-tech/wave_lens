@@ -71,7 +71,7 @@ may be the default). What the tab does differently from a page in a browser:
   what they mean in VS Code (ctrl+F find, ctrl+C copy, ctrl+Z / ctrl+Y undo / redo, alt+C W R in the find field);
   `wavelens.keysToVSCode` (default `ctrl+G`, Go to Line) are left to VS Code — the list of your groups is `gl` then; the
   others (ctrl+P, F1, ctrl+tab, ctrl+shift+…) are VS Code's.
-- **The version** in the bar's title line: `0.30 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
+- **The version** in the bar's title line: `0.31 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
   committed), so a tab of a development build says which one it is.
 - **An agent** on the host (`tools/wavemcp.py`, below): when it starts its live link, every open tab connects (**●
   live**); `view_live` with `page` a `.vcd` / `.fst` and `open: true` opens it in the VS Code window that has the file
@@ -338,7 +338,7 @@ add theirs (`WaveLens.registerDefaults`).
 | `toolsFolded` | false | the bar's tools folded to its title line (**▴** / **▾ tools** in the bar) |
 | `toolsHidden` | `[]` | the bar's tool groups left out by their labels (`["style", "dump"]`; the right button on the bar) |
 | `themeButton` | `auto` | **◐** in the bar's title line: the page's theme (auto, light, white, dark; kept in this browser; in VS Code its list, VS Code's colours too); `auto`: when the page has no theme button of its own (`viewer.html`, the VS Code tab) |
-| `version` | true | the version in the bar's title line, and the build the page was made from (`0.30 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
+| `version` | true | the version in the bar's title line, and the build the page was made from (`0.31 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
 | `keysLeft` | `[]` | keys the viewer leaves to its host: `["ctrl+G"]` (`ctrl+` is `cmd+` too, a letter by its place); the VS Code tab: `wavelens.keysToVSCode` |
 | `log` | `auto` | the log under the viewer (§ A dump straight in the browser): `auto` from the first thing done in the page (a dump read, Sources…, Load…), `true` always, `false` never |
 | `savePage` | true | the bar's **Save page**: this page as a `.view.html` with your view in it (§ Save and Load); false hides it and keeps no copy of the page's text |
@@ -828,14 +828,32 @@ and its changes over the page's time (a B of 13 MB and 2000 signals against a pa
 toast from 8 MB on; **≠ … ✕** in the bar stops a read (the compare before it stays). The compare is in the saved state
 (`"compare"`: the result, below), so **Save page** and **Save** keep it and **Load…** brings it back.
 
+**Which run the waves show.** With a dump compared the bar has **A B A+B**, and the time axis names the run shown, on its
+colour (the name stays in sight with the bar folded, and goes into the picture):
+
+- **A**: these waves, the bands over them.
+- **B**: the second dump's values on these rows, in place: the rows that differ take its changes, a row it has not got is
+  empty, the others are the same. The cursor's values, the edges, the find, the FSM panel and the picture are of B; the
+  colours stay, so **d** flipping to and fro moves only what differs. The assertions stay A's. The time B does not cover is
+  shaded.
+- **A+B**: both at once on the stretches that differ: a bit's B over its A in B's colour, a bus's row in two lanes, A above
+  B, each with its value; the value column has `1 ≠ 0` (a long one: its tooltip), a tooltip on the waves says the other run.
+
+**d** flips between A and B, **D** turns the overlay on and off (back to the run before it); **]d [d** go on working in all
+three. The view is in the saved state (`"compareShow"`), `compareView('a' | 'b' | 'overlay')` of a viewer sets it (the event
+`wavelens:compare` says it), the command `compare` takes it as `show`.
+
 A compare can also come made: the config's **`"compare"`** (top level or a view's) — `{"dump": "b.vcd", "map"?: {"tb_a":
-"tb_b"}, "offset"?: "5ns", "segment"?: "tb_test", "align"?: true}`, `dump` beside the config — runs `sva diff` (below)
+"tb_b"}, "offset"?: "5ns", "segment"?: "tb_test", "align"?: true, "show"?: "overlay"}`, `dump` beside the config — runs `sva diff` (below)
 of the view's dump and that one over the view's window and rows when the page is built, and the page carries the result,
 the WaveJSON extension `"compare"` (`{name, from, to, compared, differ, first, signals: {row: {spans, b, other?, more?}},
-missing, map, segments?}`, times in ps; a page from `file://` cannot read `b.vcd` by itself): it opens with the bands,
-its static SVG draws them. A clock-sampled view with `"compare"` is an error; a signal with more than 1000 stretches
-that differ keeps the first 1000 (lint `compare-spans-cut`). The command **`compare`** gives a result (`result`), or
-none (`off`); `tools/viewedit.py` and `view_edit` also take `dump` (with `a`, `map`, `offset`): `sva diff` of the page's
+missing, map, segments?, vcd?, shift?, show?}`, times in ps; a page from `file://` cannot read `b.vcd` by itself): it opens
+with the bands, its static SVG draws them. `vcd` is the cut of B of the signals that differ (`sva vcd --signals-from`, at most
+32 MB, else a note and bands only; none with `align`, which has no one offset), what **B** and **A+B** show, `shift` B's time
+less A's, `show` the run the page opens with and its static SVG draws (a compare of a dump read in the page keeps B's values
+for the session only: a saved one has the bands). A clock-sampled view with `"compare"` is an error; a signal with more than
+1000 stretches that differ keeps the first 1000 (lint `compare-spans-cut`). The command **`compare`** gives a result
+(`result`), none (`off`) or the run shown (`show`, also with `result` or `dump`); `tools/viewedit.py` and `view_edit` also take `dump` (with `a`, `map`, `offset`): `sva diff` of the page's
 dump beside it and that one (a row named without the prefix its signals share is found by the prefix the most rows have),
 live through the agent's server.
 
@@ -1024,7 +1042,7 @@ await v.run([
 | `arrow` | `id? from? to? shape? head? line? color? label? delete?` | an arrow between bookmarks `from` → `to` with its label: new, or arrow `id` (1, 2 … as listed; or the one from → to) changed; shape `~ - -~ ~- -\| \|- -\|-`, head `> <> < ""`, line `solid dashed dotted` |
 | `marker` | `id? t? label? color? delete?` | a dashed line across the rows with its label: new, or marker `id` changed; `delete`: `id` or `"all"` (`"all"` without `delete` is an error) |
 | `span` | `id? from? to? label? color? signals? delete?` | a coloured stretch of time across the rows (or the rows of `signals`) with its label: new (`from` and `to`), or span `id` changed; `delete`: `id` or `"all"` |
-| `compare` | `result? dump? a? map? offset? off?` | a second dump over the waves (red bands, ≠, `]d [d`): `result` (`sva diff`'s, the WaveJSON `"compare"`), `off`: none; `dump` (`a`: the page's dump, `map`, `offset`) in `tools/viewedit.py` / `view_edit` only (they run `sva diff`); answers `name`, `compared`, `differ`, `first`, `missing`; in the saved state |
+| `compare` | `result? dump? a? map? offset? off? show?` | a second dump over the waves (red bands, ≠, `]d [d`): `result` (`sva diff`'s, the WaveJSON `"compare"`), `off`: none; `dump` (`a`: the page's dump, `map`, `offset`) in `tools/viewedit.py` / `view_edit` only (they run `sva diff`); answers `name`, `compared`, `differ`, `first`, `missing`; `show`: which run the waves show, `a`, `b` or `overlay` (*Which run the waves show*; alone it answers `show`, `name`; `b` and `overlay` need B's values: a result without `vcd` refuses); in the saved state (`compareShow`) |
 | `group` | `name signals? add? remove? color? rename? delete? go? move?` | your group: `signals` sets its signals in this order (a module: its signals), `add`, `remove`, `rename`, `delete`; `go`: opened, in the middle, its first signal selected (ctrl+G); `move`: its place among your groups (`up`, `down`, `top`, `bottom`, a number) |
 | `layout` | `scroll? height? tools?` | where the rows scroll: `window` (`height`: `"80vh"`, `600`) or `page`; the bar's tools `fold` or `open`; answers `scroll`, `height`, `tools` |
 | `highlight` | `add? remove? set? clear?` | signals and modules (and your groups) in front in their colours, the rest dimmed |
@@ -1103,10 +1121,10 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
 | `wave_find` | `expr`: an SV expression or sequence matched on every clock cycle by the sva engine (`req && !ack`, `req ##[1:3] ack`, `$rose(x)`); or a signal's edges (`rise`, `fall`, `change`) or value (a number, `'h40`, `'b10x1` bit for bit, an enum label) at their exact times; the count and the first matches (the rules of a bookmark's `at`: one module, `tools/wavefind.py`) |
 | `wave_stats` | over a window: a bit's rises, falls, high time, pulse widths and period; a bus's changes, distinct values, the longest-held ones, minimum and maximum |
 | `sva_check` | assertion files and / or text evaluated over the dump in a scope: the failed ones with their first failures (`cycle`, `t`, `start_cycle`, `start_t`, the reason), passed, vacuous, not evaluated (names missing), the covers |
-| `wave_page` | a viewer page (`out` `.html`) or WaveJSON (`.json`) of signals over a window, assertions bound, to show a person; `compare`: a second dump (or `{dump, map, offset}`, the config's `"compare"`), its differences on the page |
+| `wave_page` | a viewer page (`out` `.html`) or WaveJSON (`.json`) of signals over a window, assertions bound, to show a person; `compare`: a second dump (or `{dump, map, offset, show}`, the config's `"compare"`), its differences on the page, `show` the run it opens with |
 | `wave_to_fst` | the VCD as an FST beside it (`out`: another file) with `sva fst`, the FSM states of its types file in it (`types`, `no_types`); what was written and the notes with their lines |
 | `wave_diff` | two dumps `a` and `b` (`dump` is `a`) compared change by change with `sva diff` (*Compare two runs from the shell*: streamed, neither read by the server): `equal`, `compared`, `differ`, `first` (`t`, `signal`, `a`, `b`; a bus in hex), the first `limit` `differences`, the signals that differ (`signals_more`: the rest), `only_a`, `only_b`, `segments`; `map` an object (`{"tb_a.if": "tb_b.if"}`), `offset`, `segment`, `align`, `spans`; times in ns |
-| `wave_cut` | a window (`from`, `to`) and some `signals` of a dump as a small VCD at `out` (`sva vcd --from --to --signals`): the values at `from` first; `out`, `bytes`, `variables`, its `from` and `to` |
+| `wave_cut` | a window (`from`, `to`) and some `signals` of a dump as a small VCD at `out` (`sva vcd --from --to --signals`; a long list: `--signals-from FILE`, one a line): the values at `from` first; `out`, `bytes`, `variables`, its `from` and `to` |
 | `view_edit` | marks up a page for a person with the [commands](#commands-and-edits) (`ops`): bookmarks with a text, arrows, markers, groups, highlight, colours, hidden and folded rows, radix, cursor, window — live in their browser when the page is connected, else into the page's file (they see it when they open or reload it); `save`: a live page's state into its file too; `config` (instead of `page`): `bookmark`, `arrow` and `span` on a view of a `mkhtml.py` config, so a rebuild keeps them (a bookmark's `"at"` stays until a `t` replaces it; the whole list checked first, the file written at once) |
 | `view_get` | what a page shows: bookmarks, arrows, markers, groups, highlight, colours, hidden, cursor and window, a dump compared (`compare`: `name`, `compared`, `differ`, `first`, `missing`) (live: with what the person changed); `rows`: its signals; `picture`: a PNG of the view (live: the screen; a page's file: made in a headless Chromium by `tools/pageshot.py`, when playwright is there) |
 | `view_live` | connects a page to this server: the link is written into it, the person opens or reloads it (`open`: in their browser); `off`: disconnects; `page` a `.vcd` / `.fst`: its tab in VS Code (the extension connects by itself; `open`: VS Code opens it); without a page: the pages connected |

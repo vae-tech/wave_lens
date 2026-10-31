@@ -6,6 +6,7 @@
    browser would do itself: the downloads (a save dialog on the host), the file pickers, the clipboard, localStorage
    (this dump's store in workspaceState), the agent's live link (tools/wavemcp.py listens on the host's 127.0.0.1, which
    the client cannot reach: this side relays it), the theme (wavelens.theme). Nothing is installed on the host: node is VS Code's, sva is static. */
+const COMPARE_WAVES = 32 << 20;   // bytes: the second dump's values a tab takes at most (tools/svabuild.py)
 const vscode = require('vscode'), fs = require('fs'), path = require('path'), os = require('os'), crypto = require('crypto');
 const http = require('http'), cp = require('child_process');
 
@@ -383,8 +384,25 @@ ${scripts}
     for (const x of d.signals || []) {
       sig[x.path] = Object.assign({ spans: x.spans || [], b: x.b }, x.other ? { other: x.other } : {}, x.more ? { more: x.more } : {});
     }
-    return { result: { name: path.basename(b), from: d.from, to: d.to, compared: d.signals_compared, differ: d.signals_differ, changes: d.compared,
-      first: d.first && d.first.t, signals: sig, missing: [...(d.only_a || []), ...(d.not_in_a || [])], map: d.map || [] } };
+    const shift = d.offset || 0, diff = [...new Set((d.signals || []).filter(x => x.spans && x.spans.length).map(x => x.b || x.path))];
+    const vcd = diff.length ? await this.compareCut(bin, b, diff, d.from + shift, d.to + shift) : null;
+    return { result: Object.assign({ name: path.basename(b), from: d.from, to: d.to, compared: d.signals_compared, differ: d.signals_differ, changes: d.compared,
+      first: d.first && d.first.t, signals: sig, missing: [...(d.only_a || []), ...(d.not_in_a || [])], map: d.map || [] }, vcd != null ? { vcd, shift } : {}) };
+  }
+  // the second dump's values of the signals that differ (the tab's A B A+B, as svabuild.compare_cut): sva vcd, null when too much or none
+  async compareCut(bin, b, signals, from, to) {
+    const name = path.basename(b), r = await new Promise(ok => {
+      const p = cp.spawn(bin, ['vcd', b, '--from', `${Math.round(from)}ps`, '--to', `${Math.round(to)}ps`, '--signals-from', '-'], { stdio: ['pipe', 'pipe', 'pipe'] });
+      const out = [], err = []; let size = 0;
+      p.stdout.on('data', d => { size += d.length; if (size > COMPARE_WAVES) p.kill(); else out.push(d); });
+      p.stderr.on('data', d => err.push(d));
+      p.on('error', e => ok({ error: e.message }));
+      p.on('close', code => ok(size > COMPARE_WAVES ? { error: `more than ${COMPARE_WAVES >> 20} MB of changes of the signals that differ` } : code === 0 ?
+        { text: Buffer.concat(out).toString('utf8') } : { error: Buffer.concat(err).toString('utf8').trim() || `exit ${code}` }));
+      p.stdin.end(signals.join('\n') + '\n');
+    });
+    if (r.error) log(`${path.basename(this.file)}: the values of ${name} are not in the tab: ${r.error}`);
+    return r.error ? null : r.text;
   }
   // the design's types beside the dump (tb.vcd -> tb.types.json: tools/questa/wavelens_types.tcl, svtypes.py verilator), by
   // path; without them the workspace's SystemVerilog sources (wavelens.sources): their enum names label a VCD's state buses

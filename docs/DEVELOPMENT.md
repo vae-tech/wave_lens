@@ -12,7 +12,7 @@ wavelens/                     what a page needs, nothing else
                               page), paint.js (the two painters
                               and what they draw), view.js (WaveView and its parts Bar, Names, Notes), edit.js (the
                               viewer's commands view.run, your groups and markers, undo, Save page, the live link),
-                              diff.js (a second dump compared), modules.js (the Modules panel and Only), fsm.js (the
+                              diff.js (a second dump compared: bands, A / B / overlay), modules.js (the Modules panel and Only), fsm.js (the
                               state machines panel and its layer), log.js (the log under the viewer), svg.js
                               (WaveSVG), boot.js (themes, configure, upgrade, exports): one scope, in this order
   wavelens.config.js          global settings file (all keys, with defaults), loaded before wavelens.js

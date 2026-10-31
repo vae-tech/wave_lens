@@ -9,6 +9,14 @@
 // through the differences (of the selected signal when it has some, else of all). Compared over the time both dumps
 // cover; values as values: bits ("'b" bits, x and z apart, a bus of another width differs everywhere), a real as a
 // number, a string as text. A packed struct by its whole vector. Not in the saved state: a session's look.
+//
+// What the waves show of the two (compareView, keys d D, the bar's A B A+B, the command compare's show; its name on the time
+// axis): 'a' these waves; 'b' the second dump's values on these rows, in place: the rows that differ take its changes (the rows
+// it has not got none, a field or a struct made again), so the cursor's values, the edges, the find, the FSM panel and the
+// picture are of B, the colours are the same, and d flipping to and fro moves only what differs. The assertions stay A's.
+// 'overlay' both at once, on the stretches that differ: a bit's B over its A in B's colour, a bus's row in two lanes, A above B.
+// B's values are kept of the rows that differ only (the others have A's): the rows of a dump read here, the result's "vcd", a
+// cut of B of those signals (svabuild.compare; read at its first use), "shift" its offset; a result without it: bands only.
 
 // a value of row r at transition o as compared (o null: before its first change, unknown): a text or a real unknown is
 // none of its values ("x" is a text); a bus unknown is its width of x. A real as a number: inf, -inf and nan as the
@@ -50,10 +58,41 @@ const cmpPath = r => (r.src && r.src.path) || r.path || r.full;
 const cmpByName = c => (c.byName.length ? `matched by name: ${c.byName[0][0]} → ${c.byName[0][1]}${c.byName.length > 1 ? ` (+${c.byName.length - 1} more: ` +
   'their tooltips)' : ''}` : '');
 const cmpText = r => (r.kind === 'real' || r.kind === 'string');
+const CMP_SHOWS = ['a', 'b', 'overlay'];
+// the "vcd" of a result: its rows by path, on A's time (shift: B's time less A's)
+function cmpCut(c) {
+  const by = new Map();
+  for (const r of parse(vcdToWave(c.vcd, { name: c.name, budget: Infinity }).doc).rows) {
+    if (r.type !== 'sig' || !r.tr) continue;
+    if (c.shift) for (const o of r.tr) o.t -= c.shift;
+    by.set(r.path || r.full, r);
+  }
+  return by;
+}
+// a stretch x0 … x1 ([a, b) of time) of row o with both runs (paintCmp, overlay): a bit's B over its A in B's colour; a bus's row
+// in two lanes, A above B, so that both values are read; an analog row B's line on A's scale
+function paintBoth(P, o, c, a, b, x0, x1, X, tEnd) {
+  const s = o.row.sig || o.row, vb = c.view || (c.view = Object.assign(Object.create(s), { tr: c.row.tr }));
+  const px = 2 * (b - a) / Math.max(x1 - x0, 1), hl = o.h / 2;
+  vb.an = s.an;
+  P.clip(x0 - 1, o.y, x1 - x0 + 2, o.h, () => {
+    if (!((s.width || 1) > 1 || cmpText(s)) || s.analog) return paintSig(P, vb, o.y, o.h, X, a - px, b, x0 - 1, x1 + 1, tEnd, 'runb');
+    P.rect(x0 - 1, o.y, x1 - x0 + 2, o.h, 'panel');
+    paintSig(P, s, o.y, hl, X, a - px, b, x0, x1, tEnd, undefined, 'panel', false, true);
+    paintSig(P, vb, o.y + hl, hl, X, a - px, b, x0, x1, tEnd, 'runb', 'panel', false, true);
+  });
+}
+// the time of a view that B does not cover, shaded (the rows that differ have B's values, the others A's: not a run's there)
+function paintCmpOut(P, lay, X, t0, t1, c) {
+  if (!lay.length) return;
+  const y = lay[0].y, h = lay[lay.length - 1].y + lay[lay.length - 1].h - y;
+  for (const [a, b] of [[t0, Math.min(c.from, t1)], [Math.max(c.to, t0), t1]]) if (b > a) P.rect(X(a), y, X(b) - X(a), h, 'panel2', 0.6);
+}
 // the red bands of the stretches that differ (of(row): {spans} or null), on the rows laid out (lay entries), over [t0, t1): the
 // first one in view found by a binary search, none past t1; the stretches less than a pixel apart one band (as a burst of
-// edges: a clock a picosecond late differs twice a cycle), the next one found by a binary search too: a band per pixel at most
-function paintCmp(P, lay, X, t0, t1, of) {
+// edges: a clock a picosecond late differs twice a cycle), the next one found by a binary search too: a band per pixel at most;
+// both: the overlay, B's waves in them (paintBoth), up to tEnd
+function paintCmp(P, lay, X, t0, t1, of, both = false, tEnd = t1) {
   if (!(t1 > t0)) return;
   const k = (X(t1) - X(t0)) / (t1 - t0), px = k > 0 ? 1 / k : 0;   // the time of a pixel
   for (const o of lay) {
@@ -65,13 +104,28 @@ function paintCmp(P, lay, X, t0, t1, of) {
       while (j < n && S[j][0] < t1 && S[j][0] <= b + px) { const m = lastBefore(n, at, b + px); b = Math.max(b, S[m][1]); j = m + 1; }
       i = j; if (b <= t0) continue;
       const x0 = X(Math.max(a, t0)), x1 = Math.max(X(Math.min(b, t1)), x0 + 1.5);
-      P.rect(x0, o.y + 1, x1 - x0, o.h - 2, 'x', 0.16); P.rect(x0, o.y + o.h - 3, x1 - x0, 2, 'x', 0.85);
+      if (both && c.row && !o.row.lazy) paintBoth(P, o, c, Math.max(a, t0), Math.min(b, t1), x0, x1, X, tEnd);
+      P.rect(x0, o.y + 1, x1 - x0, o.h - 2, 'x', both && c.row ? 0.06 : 0.16);
+      if (!(both && c.row)) P.rect(x0, o.y + o.h - 3, x1 - x0, 2, 'x', 0.85);   // over B's waves: it would hide a bit low in B
     }
   }
 }
 // a compare result of the page (WaveJSON "compare", sva diff's made by the build or given by the command compare) for the
 // static SVG: a row's stretches by its path, a struct's by its group's vector
 const cmpOfDoc = c => (c ? r => { const x = r && c.signals[cmpPath(r.sig || r.orig || r)]; return x || null; } : () => null);
+// the static SVG of a result with "show" and its "vcd": B's values on the rows that differ (M is the figure's own) -> b / overlay, else null
+function cmpDocShow(M) {
+  const c = M.compare; if (!c || !c.vcd || (c.show !== 'b' && c.show !== 'overlay')) return null;
+  const by = cmpCut(c), got = new Set();
+  for (const r of [...M.rows, ...Object.values(M.groups).filter(g => g.sig).map(g => g.sig)]) {
+    if (r.type !== 'sig' || !r.tr) continue;
+    const p = cmpPath(r), x = c.signals[p], b = x && x.spans.length ? by.get(x.b || p) : null;
+    if (b) { x.row = b; if (c.show === 'b') { r.tr = b.tr; got.add(r); } }
+    else if (c.show === 'b' && c.missing.includes(p)) { r.tr = []; got.add(r); }
+  }
+  if (got.size) rowsMade(M, got);
+  return c.show;
+}
 Object.assign(WaveView.prototype, {
   // the rows these waves compare: the signals of exact transitions (not a struct's fields: its whole vector instead, on its group)
   cmpRows() {
@@ -82,7 +136,7 @@ Object.assign(WaveView.prototype, {
   // missing, omitted, first, from, to } (null: nothing compared; a newer call or the viewer gone meanwhile: null)
   async compare(file, name) {
     const req = this.cmpReq = (this.cmpReq || 0) + 1;
-    if (file == null) { this.cmp = null; this.cmpMarks(); this.cmpShow(); this.draw(); return null; }
+    if (file == null) { this.cmpBack(); this.cmp = null; this.cmpMarks(); this.cmpShow(); this.draw(); return null; }
     const mine = this.cmpRows();
     if (!this.M.timed || !mine.length) {
       this.toast('compare: these waves are clock-sampled (one cell per cycle): open the dump itself (Open…) and compare that'); return null; }
@@ -117,6 +171,7 @@ Object.assign(WaveView.prototype, {
     const f = t => this.fmt(t, (this.M.t1 - this.M.t0) / 1000, this.M.t1 - this.M.t0);
     if (to <= from) { this.toast(`${nm}: no time in common (these waves ${f(this.M.t0)} … ${f(this.M.t1)}, ${nm} ${f(doc.time.t0 ?? 0)} … ` +
       `${f(doc.time.t1)}): nothing compared${still()}`); return null; }
+    this.cmpBack();   // these rows' own values again: compared with B, or the one before
     let differ = 0, missing = 0, omitted = 0; const byName = [];
     for (const a of mine) {
       // left out of B by its reader: under any name it could have there (then not looked for under another one)
@@ -128,12 +183,12 @@ Object.assign(WaveView.prototype, {
       const other = cmpText(a) !== cmpText(b) || (!cmpText(a) && (a.width || 1) !== (b.width || 1));
       const spans = other ? [[from, to]] : diffSpans(a, b, from, to), by = hit.byName ? cmpPath(b) : null;
       if (by) byName.push([cmpPath(a), by]);
-      rows.set(a, { spans, other: other ? (cmpText(b) ? b.kind : `${b.width || 1} bits`) : null, by });
+      rows.set(a, { spans, other: other ? (cmpText(b) ? b.kind : `${b.width || 1} bits`) : null, by, row: spans.length ? b : null });
       if (spans.length) differ++;
     }
     const starts = [...new Set([...rows.values()].flatMap(c => c.spans.map(([s]) => s)))].sort((x, y) => x - y);
     this.cmp = { name: nm, rows, differ, missing, omitted, compared: rows.size - missing - omitted, from, to, starts, first: starts.length ? starts[0] : null,
-      byName };
+      byName, waves: true };
     this.cmpMarks(); this.cmpShow(); this.draw();
     const c = this.cmp;
     const said = `${nm}: ${differ} of ${c.compared} signals differ${c.first == null ? '' : `, the first at ${f(c.first)}`}` +
@@ -171,24 +226,119 @@ Object.assign(WaveView.prototype, {
   // a second dump being read stopped (≠ … ✕): the compare before it stays
   compareStop() { this.cmpReq = (this.cmpReq || 0) + 1; this.cmpReading = 0; this.cmpShow(); this.toast(`compare: stopped${this.cmp ? `; still compared ` +
     `with ${this.cmp.name}` : ''}`); },
-  cmpShow() {   // the bar's ≠ N ✕ (no compare: hidden; a dump being read: ≠ … ✕ stops it)
-    const b = this.root.querySelector('button[data-act=dcmpx]'); if (!b) return;
+  cmpShow() {   // the bar's ≠ N ✕ (no compare: hidden; a dump being read: ≠ … ✕ stops it) and its A B A+B
+    const b = this.root.querySelector('button[data-act=dcmpx]'), seg = this.root.querySelector('.cmpv'); if (!b) return;
+    const has = this.cmpCan(), names = this.cmp ? { a: this.cmpNames()[0], b: this.cmpNames()[1] } : null;
+    if (seg) { seg.hidden = !this.cmp; if (this.cmp) for (const x of seg.querySelectorAll('button')) { const s = x.dataset.run, on = s === this.cmpRun;
+      x.setAttribute('aria-pressed', on); x.disabled = s !== 'a' && !has;
+      x.title = s !== 'a' && !has ? this.cmpCant(s) : s === 'a' ? `Show ${names.a} (the run of these waves; d flips to the other)` : s === 'b' ?
+        `Show ${names.b}, the second run, on these rows (d flips to the other)` : `Both runs over each other where they differ: ${names.a}, ${names.b} (D)`; } }
+    this.root.classList.toggle('wv-runb', !!this.cmp && this.cmpRun === 'b');
     if (this.cmpReading) { b.hidden = false; b.textContent = '≠ … ✕'; b.title = 'reading the second dump: click to stop'; return; }
     b.hidden = !this.cmp; if (this.cmp) b.textContent = `≠ ${this.cmp.differ} ✕`;
     b.title = this.cmp ? `${this.cmp.name}: ${this.cmp.differ} of ${this.cmp.compared} signals differ${this.cmp.missing ? `, ${this.cmp.missing} not in it` :
       ''}${this.cmp.byName.length ? `; ${cmpByName(this.cmp)}` : ''}; ]d [d go to the differences; click: compare no more` : '';
   },
-  // the red bands of a dump compared (paintCmp)
-  paintDiff(P, lay, X, t0, t1) { if (this.cmp) paintCmp(P, lay, X, t0, t1, r => this.cmpOf(r)); },
+  // the red bands of a dump compared (paintCmp); B shown: the time it does not cover shaded
+  paintDiff(P, lay, X, t0, t1) {
+    if (!this.cmp) return;
+    if (this.cmpRun === 'b') paintCmpOut(P, lay, X, t0, t1, this.cmp);
+    paintCmp(P, lay, X, t0, t1, r => this.cmpOf(r), this.cmpRun === 'overlay', this.M.t1);
+  },
+  // the names of the two runs: of these waves (the dump they are made of, the title), of the second dump
+  cmpNames() {
+    const m = (this.M.src && this.M.src.meta) || {};
+    return [String(m.waves || this.opts.title || this.M.title || 'these waves').split(/[\\/]/).pop(), this.cmp ? this.cmp.name : 'B'];
+  },
+  // which run the waves show, on the time axis at the right, always in sight (the bar may be folded or off the screen) and in
+  // the picture: the run's letter and name on its colour, the two of the overlay in the colours of their waves; none while a
+  // compare has bands only. A strip under the axis while B is shown
+  paintRunTag(P, xR, y, h) {
+    if (!this.cmpCan()) return;
+    const [na, nb] = this.cmpNames().map(s => (s.length > 32 ? s.slice(0, 31) + '…' : s)), st = { size: 10.5, weight: 600 };
+    const parts = this.cmpRun === 'b' ? [['B', nb, 'runb']] : this.cmpRun === 'overlay' ? [['A', na, 'one'], ['B', nb, 'runb']] : [['A', na, 'acc']];
+    let x = xR - 4;
+    for (const [l, n, col] of parts.reverse()) {
+      const t = `${l} · ${n}`, w = P.measure(t, st) + 12; x -= w;
+      P.rect(x, y + 3, w, h - 6, col); P.text(x + 6, y + h / 2, t, Object.assign({ fill: 'panel' }, st)); x -= 3;
+    }
+    if (this.cmpRun === 'b') P.rect(0, y + h - 2, xR, 2, 'runb');
+  },
+  // B's values here (a dump read here, a result's "vcd")?
+  cmpCan() { const c = this.cmp; return !!c && !!(c.waves || (c.result && c.result.vcd)); },
+  // a result's "vcd" read, at its first use: its rows to the ones that differ
+  cmpLoad() {
+    const c = this.cmp; if (c.waves) return;
+    const by = cmpCut(c.result);
+    for (const [a, x] of c.rows) if (x.spans.length) x.row = by.get(x.b || cmpPath(a)) || null;
+    c.waves = true;
+  },
+  // why this view cannot be shown, '' when it can
+  cmpCant(show) {
+    if (!this.cmp) return `compare ${show}: compare with a second dump first (Compare… in the bar)`;
+    return show === 'a' || this.cmpCan() ? '' : `compare ${show}: this compare has the differences only, not the values of ${this.cmp.name} ` +
+      '(a saved one, a cut too large for the page, one of --align): compare again';
+  },
+  // the rows that differ take B's changes (those B has not got none), or their own again
+  cmpSwap(on) {
+    const c = this.cmp; if (!c || !!c.swapped === on) return;
+    c.swapped = on;
+    const got = new Set();
+    for (const [a, x] of c.rows) {
+      if (!x.row && !x.missing && !x.omitted) continue;
+      if (on) { x.atr = a.tr; a.tr = x.row ? x.row.tr : []; } else a.tr = x.atr;
+      a.an = null; RISES.delete(a); got.add(a);
+    }
+    rowsMade(this.M, got);
+    this.clkMemo = null; this.cycMemo = null; this.fsmSt = null; this.rangeKey = null; this.valsAt = null;
+    if (this.fsmP) this.fsmP.render(true);
+  },
+  // these waves again, before the compare changes
+  cmpBack() { this.cmpSwap(false); this.cmpRun = 'a'; this.valsAt = null; },
+  // what the waves show of a compare ('a', 'b', 'overlay'; see above) -> it, null when it cannot be (said, unless quiet) or a
+  // newer call came meanwhile; a large dump's rows are read first
+  async compareView(show, quiet) {
+    if (!CMP_SHOWS.includes(show)) throw new Error(`compare: show is ${CMP_SHOWS.join(', ')}, not "${show}"`);
+    const no = this.cmpCant(show); if (no) { if (!quiet) this.toast(no); return null; }
+    const req = this.cmpViewReq = (this.cmpViewReq || 0) + 1, c = this.cmp;
+    if (show !== 'a') this.cmpLoad();
+    if (show === 'b') await this.need([...c.rows.keys()]);
+    if (req !== this.cmpViewReq || c !== this.cmp) return null;
+    if (show === 'overlay' && this.cmpRun !== 'overlay') this.cmpLast = this.cmpRun;
+    this.cmpSwap(show === 'b'); this.cmpRun = show; this.valsAt = null;
+    this.cmpShow(); this.draw();
+    const [na, nb] = this.cmpNames();
+    if (!quiet) this.toast(show === 'overlay' ? `A + B: ${na}, ${nb} · D: one run again` : `${show === 'b' ? `B: ${nb}` : `A: ${na}`} · d: the other`);
+    this.root.dispatchEvent(new CustomEvent('wavelens:compare', { detail: { show, name: show === 'a' ? na : nb } }));
+    return show;
+  },
+  // d: the other run (from the overlay: A); D: the overlay, again the run before it
+  cmpFlip() { if (!this.cmp) { this.toast('d: compare with a second dump first (Compare… in the bar)'); return this; }
+    this.compareView(this.cmpRun === 'b' ? 'a' : this.cmpRun === 'overlay' ? 'a' : 'b'); return this; },
+  cmpBoth() { if (!this.cmp) { this.toast('D: compare with a second dump first (Compare… in the bar)'); return this; }
+    this.compareView(this.cmpRun === 'overlay' ? this.cmpLast || 'a' : 'overlay'); return this; },
+  // the value at the cursor in the overlay: both when they differ
+  valueBoth(s, t) {
+    const a = String(this.valueAt(s, t)), c = this.cmpRun === 'overlay' ? this.cmpOf(s) : null; if (!c || !c.row) return a;
+    const b = String(this.valueAt(c.view || (c.view = Object.assign(Object.create(s), { tr: c.row.tr })), t));
+    return a === b ? a : `${a} ≠ ${b}`;
+  },
+  // a row's value in the other run, for its tooltip: '' when it has none, or it is the same
+  cmpTip(r, t) {
+    const c = this.cmp && this.cmpOf(r), b = this.cmpRun === 'b'; if (!c || !(b ? c.atr : c.row)) return '';
+    const o = Object.assign(Object.create(r), { tr: b ? c.atr : c.row.tr }), v = String(this.valueAt(o, t));
+    return v === String(this.valueAt(r, t)) ? '' : `\n${b ? 'A' : 'B'}: ${v}`;
+  },
   // a compare result already made (sva diff's, by the build from the config's "compare", or the command compare): the WaveJSON
   // extension "compare" {name, from, to, signals: {path: {spans, other, b}}, missing: [path]} over these waves, as compare()
   // puts a dump read here; null: compared no more. quiet: no toast (the page opens with it) -> as compare()
   compareResult(c, quiet) {
     this.cmpReq = (this.cmpReq || 0) + 1;
-    if (c == null) { this.cmp = null; this.cmpMarks(); this.cmpShow(); this.draw(); return null; }
+    if (c == null) { this.cmpBack(); this.cmp = null; this.cmpMarks(); this.cmpShow(); this.draw(); return null; }
     c = cmpNorm(c);
     if (!c) throw new Error('compare: a result {name, from, to, signals: {path: {spans}}} (sva diff\'s, as the page\'s "compare")');
     if (!this.M.timed) { this.toast('compare: these waves are clock-sampled (one cell per cycle): a compare is of exact waves'); return null; }
+    this.cmpBack();
     const rows = new Map(), miss = new Set(c.missing);
     let differ = 0, missing = 0;
     for (const a of this.cmpRows()) {
@@ -225,6 +375,10 @@ Object.assign(WaveView.prototype, {
 });
 // a compare result of the page (WaveJSON "compare"): its bands when the viewer opens
 PLUGINS.push(v => {
-  v.addKey(']d', () => v.diffStep(1)).addKey('[d', () => v.diffStep(-1));
-  if (v.M.compare && v.M.timed) v.compareResult(v.M.compare, true);
+  v.cmpRun = 'a';
+  v.addKey(']d', () => v.diffStep(1)).addKey('[d', () => v.diffStep(-1)).addKey('d', () => v.cmpFlip()).addKey('D', () => v.cmpBoth());
+  if (v.M.compare && v.M.timed) {
+    v.compareResult(v.M.compare, true);
+    if (v.M.compare.show) v.compareView(v.M.compare.show, true).catch(e => v.logError(e, e.message));
+  }
 });

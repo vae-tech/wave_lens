@@ -3144,8 +3144,8 @@ def compare(browser, build):
     page.keyboard.press('['); page.keyboard.press('d'); page.wait_for_timeout(50); c2 = page.evaluate(f"{V}.cursor")
     pic1 = page.evaluate(f"(v => (v.zoomTo(v.M.t0, v.M.t1), v.toSVG()))({V})")
     pic2 = page.evaluate(f"(v => {{ const c = v.cmp; v.cmp = null; const s = v.toSVG(); v.cmp = c; return s; }})({V})")
-    check(c1 == moved and c2 == moved and pic1.count('<rect') == pic2.count('<rect') + 2, f']d to the difference (round the ends with [d); the picture '
-          f'has its band (2 more rects: the shade and the line) {c1} {c2} {pic1.count("<rect")} {pic2.count("<rect")}')
+    check(c1 == moved and c2 == moved and pic1.count('<rect') == pic2.count('<rect') + 3, f']d to the difference (round the ends with [d); the picture '
+          f'has its band (3 more rects: the shade, the line, the tag of the run) {c1} {c2} {pic1.count("<rect")} {pic2.count("<rect")}')
     ref = page.evaluate("WaveLens.views()[0].compare('$timescale 1ns $end $scope module t $end $var wire 1 ! a $end $upscope $end $enddefinitions $end #0 0!', 'x.vcd')")
     toast = page.evaluate("WaveLens.views()[0].root.querySelector('.toast').textContent")
     w.locator('button[data-act=dcmpx]').click()
@@ -3234,6 +3234,94 @@ def compare(browser, build):
           and got['kept'] == 'big.vcd', f'B of {big.stat().st_size >> 20} MB, 2000 signals: the page\'s 7 read once in {got["ms"]:.0f} ms '
           f'(< {5000 * SCALE:.0f}), its progress said; ≠ … ✕ stops a read, the compare before it kept {got}')
     check(not errs, 'no page errors (compare)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
+    ctx.close()
+
+
+def compare_view(browser, build):
+    """What the waves show of a compare: A, B on these rows (values, edges, a struct's fields made again, the rows B lacks empty,
+    the rest A's), both over each other (a bit in B's colour, a bus in two lanes, the value column with both), d D and the bar's A
+    B A+B, the run named on the axis and in the picture, a result's "vcd" read at its first use, its shift, the state and the
+    command show, a new compare back on A, a compare without B's values refusing."""
+    print('viewer: what the waves show of a compare')
+    d = build / 'smoke' / 'compare_view'
+    d.mkdir(parents=True, exist_ok=True)
+    pg = d / 'view.html'
+    pg.write_text(f'''<!doctype html><html><head><meta charset="utf-8"><title>view</title>
+<link rel="stylesheet" href="{(ROOT / 'wavelens' / 'wavelens.css').as_uri()}"></head><body><div id="w"></div>
+<script src="{(ROOT / 'wavelens' / 'wavelens.js').as_uri()}"></script></body></html>''', encoding='utf-8')
+    ctx = browser.new_context(viewport={'width': 1200, 'height': 700})
+    page = ctx.new_page()
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(pg.as_uri())
+    got = page.evaluate("""(async () => {
+      const head = v => '$timescale 1ps $end $scope module tb $end $var wire 1 ! a $end $var wire 8 " d [7:0] $end $var wire 1 # s $end ' + v +
+        '$upscope $end $enddefinitions $end ';
+      const B = head('') + '#0 0! b1 " 0# #20 1! b10 " #40 b11 " #60 1# #100 0! #120';
+      const doc = () => ({ signal: [['tb', { name: 'a', path: 'tb.a', tv: [[0, '0'], [30, '1'], [100, '0']] }, { name: 'd', path: 'tb.d', wave: '', width: 8,
+          tv: [[0, '1'], [40, '3']] }, { name: 'c', path: 'tb.c', tv: [[0, '1'], [50, '0']] }, { name: 's', path: 'tb.s', tv: [[0, '0'], [60, '1']] }]],
+        time: { t0: 0, t1: 120, unit: 'ps' } });
+      const mk = o => { const el = document.body.appendChild(document.createElement('div')); return new WaveLens.WaveView(el, o, {}); };
+      const w = mk(doc()), R = n => w.M.rows.find(r => r.name === n), at = (n, t) => w.valueAt(R(n), t), pressed = () => [...w.root.querySelectorAll('.cmpv button')]
+        .filter(b => b.getAttribute('aria-pressed') === 'true').map(b => b.textContent).join('');
+      const out = {};
+      out.none = [w.root.querySelector('.cmpv').hidden, await w.compareView('b'), w.cmpRun];
+      const r = await w.compare(B, 'b.vcd');
+      out.cmp = [r.differ, r.missing, w.cmp.rows.get(R('s')).row, !!w.cmp.rows.get(R('a')).row, w.root.querySelector('.cmpv').hidden, pressed()];
+      const a0 = R('a').tr, c0 = R('c').tr, svgA = w.toSVG();
+      out.a = [at('a', 25), at('d', 25), at('s', 70)];
+      await w.compareView('b');
+      out.b = [at('a', 25), at('d', 25), at('s', 70), R('c').tr.length, R('a').tr !== a0, pressed(), w.root.classList.contains('wv-runb')];
+      const svgB = w.toSVG();
+      out.pics = [svgA.includes('A · '), svgB.includes('B · b.vcd'), svgB.includes(`A · `)];
+      await w.compareView('a'); out.back = [R('a').tr === a0, R('c').tr === c0, at('d', 25)];
+      await w.compareView('overlay');
+      w.cursor = 25; w.draw();
+      const val = w.vals.map(e => e.textContent), svgO = w.toSVG();
+      out.over = [R('a').tr === a0, val.some(v => v.includes('≠')), svgO.includes('A · '), svgO.includes('B · b.vcd'), /--wave-run-b|#c2255c/i.test(svgO),
+        pressed(), w.valueTip(R('d'), 25).split('\\n').pop()];
+      w.canvas.focus(); await w.compareView('a');
+      const key = async k => { w.canvas.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true })); await new Promise(res => setTimeout(res, 20)); return w.cmpRun; };
+      const ks = [await key('d'), await key('d'), await key('D'), await key('D'), await key('d'), await key('D'), await key('D')];
+      out.keys = ks;
+      await w.compareView('a');
+      await w.compareView('b'); const st = w.state(); out.state = [st.compareShow, st.compare.signals['tb.a'].spans];
+      const r2 = await w.compare(B, 'b.vcd'); out.again = [w.cmpRun, R('a').tr === a0, r2.differ];
+      await w.compareView('b'); await w.compare(null); out.off = [w.cmpRun, R('a').tr === a0, w.root.querySelector('.cmpv').hidden, w.root.classList.contains('wv-runb')];
+      // a result: its "vcd" read at its first use, B's time less shift, "show" on opening; the static SVG; without "vcd": bands only
+      const res = { name: 'r.vcd', from: 0, to: 120, signals: { 'tb.a': { spans: [[20, 30]], b: 'top.a' } }, missing: ['tb.c'], shift: 1000,
+        vcd: '$timescale 1ps $end $scope module top $end $var wire 1 ! a $end $upscope $end $enddefinitions $end #1000 0! #1020 1! #1100 0! #1120' };
+      const u = mk(Object.assign(doc(), { compare: Object.assign({ show: 'b' }, res) }));
+      await new Promise(r => setTimeout(r, 30));
+      out.result = [u.cmpRun, u.valueAt(u.M.rows.find(r => r.name === 'a'), 25), u.M.rows.find(r => r.name === 'c').tr.length, u.valueAt(u.M.rows.find(r => r.name === 's'), 70)];
+      const svg = s => WaveSVG.toString(Object.assign(doc(), { compare: Object.assign({}, res, s ? { show: s } : {}) }));
+      out.fig = [svg('overlay') !== svg(''), svg('b') !== svg(''), svg('overlay').includes('--wave-run-b')];
+      const n = mk(doc()); await n.run([{ op: 'compare', result: Object.assign({}, res, { vcd: undefined }) }]);
+      const cant = (await n.run([{ op: 'compare', show: 'b' }]))[0], can = (await n.run([{ op: 'compare', show: 'a' }]))[0];
+      out.bands = [cant.error, can.show, n.root.querySelector('.cmpv button[data-run=b]').disabled];
+      const cmd = (await u.run([{ op: 'compare', show: 'overlay' }, { op: 'compare', show: 'nope' }]));
+      out.cmd = [cmd[0].show, cmd[0].name, cmd[1].error];
+      const size = (await w.run([{ op: 'compare', result: res, show: 'overlay' }]))[0]; out.both = [size.differ, size.show, w.cmpRun];
+      return out; })()""")
+    check(got['none'][0] and got['none'][1] is None and got['none'][2] == 'a', f'no compare: no A B in the bar, none shown {got["none"]}')
+    check(got['cmp'][:2] == [2, 1] and got['cmp'][2] is None and got['cmp'][3] and not got['cmp'][4] and got['cmp'][5] == 'A',
+          f'a dump read here: B\'s rows kept of the rows that differ only; the bar shows A B A+B, A pressed {got["cmp"]}')
+    check(got['b'][:4] == ['1', '0x02', '1', 0] and got['a'][:2] == ['0', '0x1'] and got['b'][4] and got['b'][5] == 'B' and got['b'][6],
+          f'B: its values on these rows (a 0→1, d 1→2), a same row A\'s, the row it lacks empty {got["a"]} {got["b"]}')
+    check(got['pics'][:2] == [True, True] and not got['pics'][2], f'the picture names the run shown {got["pics"]}')
+    check(got['back'] == [True, True, '0x1'], f'A again: the rows\' own changes back {got["back"]}')
+    check(got['over'][0] and got['over'][1] and got['over'][2] and got['over'][3] and got['over'][4] and got['over'][5] == 'A+B',
+          f'overlay: A\'s rows kept, the value column with both, both named, B\'s colour in the picture {got["over"]}')
+    check(got['keys'] == ['b', 'a', 'overlay', 'a', 'b', 'overlay', 'b'], f'd flips, D the overlay and back to the run before it {got["keys"]}')
+    check(got['state'][0] == 'b' and got['state'][1] == [[20, 30]], f'the state keeps the view; its compare of the rows\' own values {got["state"]}')
+    check(got['again'] == ['a', True, 2], f'compared again while B is shown: of A\'s values, back on A {got["again"]}')
+    check(got['off'] == ['a', True, True, False], f'compared no more while B is shown: A back, the bar clean {got["off"]}')
+    check(got['result'] == ['b', '1', 0, got['a'][2]], f'a result: "show" on opening, "vcd" less its "shift", the missing row empty {got["result"]}')
+    check(all(got['fig']), f'the static SVG of a result with "show" draws it {got["fig"]}')
+    check('differences only' in (got['bands'][0] or '') and got['bands'][1] == 'a' and got['bands'][2], f'without B\'s values: refused, its buttons off {got["bands"]}')
+    check(got['cmd'][:2] == ['overlay', 'r.vcd'] and 'show is a, b, overlay' in (got['cmd'][2] or ''), f'the command compare: show {got["cmd"]}')
+    check(got['both'] == [1, 'overlay', 'overlay'], f'the command compare: a result and show at once {got["both"]}')
+    check(not errs, 'no page errors (compare_view)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
     ctx.close()
 
 
@@ -5318,6 +5406,7 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'edit': 'the viewer\'s commands, a page\'s edits (tools/viewedit.py) with the same state, your groups and markers, a page live through wavemcp.py',
     'view_review': 'the review of 0.15: Clear keeps markers, cycleZero a time, a run lays out before a picture, undo after a lost release, rows of '
                    'hidden modules, states clear, matched by name, ±inf, inherited names, ids and ranges; compare and analog at scale',
+    'compare_view': 'what the waves show of a compare: A, B on these rows, both over each other; d D, the bar, the run named; a result\'s cut; the command show',
     'compare': 'a second dump compared: ≠ on the names that differ, struck when it lacks them, red bands, ]d [d, in the picture; clock-sampled refused',
     'savepage': 'Save page: the page with your view in its edits opens elsewhere as you left it; its waves as they were; the live token left out',
     'order': 'your groups\' rows in another order: alt+↑ / alt+↓ (shift: the group), a drag in the names, group move; one step each',
@@ -5454,6 +5543,7 @@ def main():
         run('order', order, b, build)
         run('savepage', savepage, b, build)
         run('compare', compare, b, build)
+        run('compare_view', compare_view, b, build)
         run('view_review', view_review, b, build)
         run('dump', dump, b, build)
         run('log', log_panel, b, build)

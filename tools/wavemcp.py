@@ -1116,8 +1116,12 @@ def state_conv(st, f):
 
 
 def state_ns(st):
-    """A state's times as ns (view_get, the state command)."""
-    return state_conv(st, lambda v: ns(v) if isinstance(v, (int, float)) else v)
+    """A state's times as ns (view_get, the state command); a compare's cut of the second dump left out, its size said."""
+    st = state_conv(st, lambda v: ns(v) if isinstance(v, (int, float)) else v)
+    c = st.get('compare')
+    if isinstance(c, dict) and isinstance(c.get('vcd'), str):
+        st = dict(st, compare={**{k: x for k, x in c.items() if k != 'vcd'}, 'vcd_bytes': len(c['vcd'])})
+    return st
 
 
 def state_ps(st):
@@ -1182,7 +1186,7 @@ def summary(st, timed, base=None):
     cmp = st['compare'] if 'compare' in st else ed.compare() if ed.m.doc else None
     if isinstance(cmp, dict):
         s = viewedit.compare_summary(cmp)
-        out['compare'] = dict(s, first=t(s['first']) if s['first'] is not None else None)
+        out['compare'] = dict(s, first=t(s['first']) if s['first'] is not None else None, show=st.get('compareShow') or cmp.get('show') or 'a')
     return out
 
 
@@ -1503,7 +1507,7 @@ def live_compare(op, where, v, a):
         res = viewedit.compare_dump(pg.model(pg.view(v.get('key'))), os.path.dirname(os.path.abspath(path)), args)
     else:
         raise WaveError('compare dump: the live page has no file here to find its dump beside: give "page", or "a" with the dump of its waves')
-    return {'op': 'compare', 'result': res}
+    return {'op': 'compare', 'result': res, **({'show': op['show']} if op.get('show') is not None else {})}
 
 
 def live_edit(a, where, v):
@@ -1649,7 +1653,7 @@ TOOLS = [
           'details': B, 'defines': {'type': ['object', 'array'], 'items': S}}),
     tool('wave_page', t_page, 'Write a WaveLens viewer page (out .html) or WaveJSON (out .json) of signals to show a person; clock '
          '(name or "auto"): a cell per cycle, auto_gap "16:2" folds idle cycles; sva files + bind ["name@scope"]; compare: a second dump '
-         '(or {dump, map, offset}) whose differences the page shows.',
+         '(or {dump, map, offset, show}) whose differences the page shows; show: the run it opens with, a, b or overlay.',
          {'dump': None, 'types': None, 'no_types': None, 'signals': None, 'out': S, 'clock': S, 'from': None, 'to': None, 'scope': None, 'auto_gap': S, 'sva': L,
           'bind': L, 'title': S, 'compare': {'type': ['string', 'object']}}, ('dump', 'signals', 'out'), ro=False),
     tool('wave_to_fst', t_to_fst, 'Convert a VCD to an FST beside it (tb.vcd -> tb.fst; out: another file), as GTKWave\'s vcd2fst, '
