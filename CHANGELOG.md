@@ -5,6 +5,37 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.32 — 31 October 2026
+
+The fixes of the global review of 0.31: the gate catches what it missed, compare agrees with `sva diff` at its edges, the
+tools say when the data is not there, the viewer holds 20 000 rows, every table of the docs is checked against the code.
+
+- **Compare.** A result from anywhere (a saved state, an agent, another window) is cut to the page's time, and `]d` stays on
+  the waves. The bits of a bus compare by their own values: bands, ≠, `]d`, overlay, B's view. The static SVG names the run it
+  draws. A row of another width or kind is empty in B's view and is not the first difference, as in `sva diff`. A dump with
+  no signal in common compares nothing and keeps the compare before it.
+- **`sva`.** wellen's warning goes to stderr on Unix, so `--json -` and a cut stay clean (on Windows `svabuild.py` reads past it).
+  A cut of a VCD with a last step over 64 KB ends at its time, not at 2^64−1. `--align` counts B's segments past A's last.
+  `sva eval` with a window without an edge exits 2: it was a green run that checked nothing. `--from` / `--to` take any case,
+  `µs` and an exponent, as the tools do. One line for a dump that does not read; "1 bit".
+- **Tools.** `svtypes.py` checks a types file on load, `check` no longer falls over an entry without labels. One table of time units
+  and one `parse_time`, so a config's `"100NS"` or `"0.1µs"` reads. `mkconfig.py --update` says when a scope looks renamed, `--map
+  OLD=NEW` keeps its settings. A page whose edits block was edited by hand is refused with what to do. Python ≥ 3.9 is what the
+  docs say now: it was what the tools needed.
+- **MCP.** `wave_diff` and `wave_cut` take a tail of a path as the other tools. A time outside the dump is said in `notes`, a window
+  wholly outside it is an error. `side` and `radix` are checked. `wave_signals` rows have one length, with `extra`. `view_edit`'s
+  list marks what runs live only. `view_live rotate` makes a new key. `save` writes the file the agent named, not the one the
+  page says; `Access-Control-Allow-Origin` is the allowed Origin, not `*`.
+- **The viewer.** Above 4000 rows the names column holds those near the view: a find keystroke on 20 000 signals goes from 1.2 s
+  to 54–159 ms. A group's name is text in the menu, a colour is checked before it goes into a style. A day of Open… leaves no
+  listeners behind, and of two at once the later one stays. The open log appends a row. `picture` refuses above 5000 rows, a PNG
+  above 16384 px. Sort is undone. A selection no longer rebuilds the column on a page with bookmark lanes. The keys come back to
+  the waves after a click outside a menu. `view.js` is split into `bar.js`, `names.js`, `menu.js`, `look.js`.
+- **VS Code.** A tab's `sva` processes go with it; the store of a dump that no longer exists goes at the next start.
+- **Tests.** `make unit` holds `bits`, `compare.show`, the options of `sva diff` and the commands without a browser;
+  `tests/unit/golden/api.txt` pins the public names. The budgets of smoke come from what it measures. The mutations that survived
+  the review are all caught. cargo 312, unit 335, smoke 805.
+
 ## 0.31 — 31 October 2026
 
 Two runs compared by looking at them: a key that flips the waves between the two, both over each other, the run shown

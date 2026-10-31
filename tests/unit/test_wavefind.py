@@ -71,7 +71,8 @@ class Bookmarks(unittest.TestCase):
     """A bookmark "at" an event and a marker "on" one, through the converter (vcd2wavedrom.py, as mkhtml.py runs it)."""
     def convert(self, d, vcd, view, *args):
         cfg = os.path.join(d, 'c.json')
-        json.dump({'waves': vcd, 'scope': 'tb.u', 'clock': 'tb.clk', 'signals': 'state,eof', 'enum': {'state': ENUM['tb.u.state']}, **view}, open(cfg, 'w'))
+        with open(cfg, 'w') as f:
+            json.dump({'waves': vcd, 'scope': 'tb.u', 'clock': 'tb.clk', 'signals': 'state,eof', 'enum': {'state': ENUM['tb.u.state']}, **view}, f)
         rc, out, err = H.run_tool('vcd2wavedrom', '--config', cfg, *args)
         return rc, (json.loads(out) if rc == 0 else None), err
 
@@ -133,7 +134,8 @@ class Bookmarks(unittest.TestCase):
         with H.tmp() as d:
             vcd = fsm_vcd(d)
             sv = os.path.join(d, 'c.sv')
-            open(sv, 'w').write('module c; a_no_err: assert property (@(posedge clk) state != 5); endmodule\n')
+            with open(sv, 'w') as f:
+                f.write('module c; a_no_err: assert property (@(posedge clk) state != 5); endmodule\n')
             bm = [{'n': 1, 'at': {'expr': 'eof && state == 5'}}, {'n': 2, 'at': {'expr': '$rose(eof)', 'nth': 2}},
                   {'n': 3, 'at': {'assert': 'a_no_err'}}, {'n': 4, 'at': {'assert': 'a_no_err', 'nth': 2, 'point': 'start'}},
                   {'n': 5, 'at': {'assert': 'a_no_err', 'result': 'pass'}}]

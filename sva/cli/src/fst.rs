@@ -1449,7 +1449,7 @@ pub fn fst_cmd(args: &[String]) -> ExitCode {
                 }
             },
             "-h" | "--help" => {
-                println!("{USAGE}");
+                crate::write_out(format_args!("{USAGE}"), true);
                 return ExitCode::SUCCESS;
             }
             s if s.starts_with('-') => {
@@ -1522,8 +1522,8 @@ pub fn fst_cmd(args: &[String]) -> ExitCode {
                     (Some(p), _) => format!(", none from {}", p.file_name().unwrap_or_default().to_string_lossy()),
                     _ => String::new(),
                 };
-                println!("{}: {} variables ({} signals), {} value changes, {} enum table{}{types}", target.display(), d.vars,
-                         d.signals, d.changes, d.tables, if d.tables == 1 { "" } else { "s" });
+                crate::write_out(format_args!("{}: {} variables ({} signals), {} value changes, {} enum table{}{types}", target.display(), d.vars,
+                         d.signals, d.changes, d.tables, if d.tables == 1 { "" } else { "s" }), true);
             }
             ExitCode::SUCCESS
         }

@@ -758,10 +758,10 @@ fn convert(waves: &str, part: &Part, cut: Option<&Cut>, o: &mut impl Write) -> R
     let ppu = h.timescale().and_then(|t| t.unit.to_exponent().map(|e| t.factor as f64 * 10f64.powi(e as i32 + 12))).unwrap_or(1.0);
     let all: Vec<(String, VarRef)> = h.all_vars().map(|v| (h[v].full_name(h), v)).collect();
     let keep: HashSet<VarRef> = chosen(&all, &c.signals)?.into_iter().collect();
-    // the end: the dump's last time (its tail), else --to as given
-    let end = crate::diff::end_time(waves).unwrap_or(u64::MAX);
+    // the end: the dump's last time, else --to as given (a dump with no time at all, no --to: nothing after --from)
+    let end = crate::diff::end_time(waves);
     let from = units(c.from.unwrap_or(0), ppu);
-    let to = c.to.map_or(end, |t| units(t, ppu).min(end)).max(from);
+    let to = c.to.map(|t| units(t, ppu)).map_or(end.unwrap_or(from), |t| end.map_or(t, |e| t.min(e))).max(from);
     header(h, Some(&keep), o).and_then(|_| cut_body(&mut w, &keep, from, to, o)).map_err(io_text)
 }
 
@@ -815,7 +815,7 @@ pub fn vcd_cmd(args: &[String]) -> ExitCode {
                 }
             }
             "-h" | "--help" => {
-                println!("{USAGE}");
+                crate::write_out(format_args!("{USAGE}"), true);
                 return ExitCode::SUCCESS;
             }
             s if s.starts_with('-') => {
@@ -889,7 +889,7 @@ pub fn vcd_cmd(args: &[String]) -> ExitCode {
                 return ExitCode::from(2);
             }
         },
-        None => Box::new(std::io::stdout().lock()),
+        None => crate::out_stream(),
     };
     let mut o = std::io::BufWriter::with_capacity(1 << 20, sink);
     match convert(&waves, &part, cutting.then_some(&cut), &mut o) {

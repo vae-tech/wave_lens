@@ -331,6 +331,8 @@ not one attempt per cycle. Paths are linked lists of steps in an arena; a path t
   the same over `tv`. A dump with a timescale finer than 1 ps: its edges are the cycles, their times in the results are
   rounded to ps (a warning) by the CLI; the page passes its times as they are and the engine takes whole ps only, so
   such a dump is checked with the CLI (`sva eval`), not in the page.
+- **An empty match, fused**: the delays are left-associative, `a |-> ##1 b[*0] ##0 c` is `(1 ##1 empty) ##0 c`, `1 ##0 1` by
+  IEEE 16.9.2, so `c` is checked at `a`'s cycle; grouped right, `##1 (b[*0] ##0 c)`, it never matches (`empty ##0 s` does not).
 - **Before the first cycle** (`$past(x, n)` at cycle k < n, and the previous value of `$rose` … at cycle 0) every
   signal has the initial value of its type: x for 4-state signals (logic, reg, wire: everything a VCD has), 0 for
   2-state ones (`bit`, `int`, `byte`, `shortint`, `longint`: from the FST's variable types, `two_state` in the trace
@@ -436,7 +438,7 @@ record of those runs, not something a clone can repeat; the example and unit-tes
 | a wide delay window, `(a ##[1:200] b) \|-> a` with `b` never (stage 12) | a hand-made VCD, 40 000 cycles | 39 800 vacuous, 200 active | 3.0 s, 13 MB: one group per age of the window (their countdowns differ, so they do not merge); a representation by deadline would make it one group — left for later |
 | a capped `intersect`, `a \|-> (a[*1:$] intersect (a ##[1:100] b)) and (a ##[2:150] b)` (stage 12) | the same, 40 000 cycles | 39 900 capped | 4.0 s, 506 MB: the results (2.8 M trace steps), not the terms (414) |
 
-The WebAssembly module is 571 kB, 278 kB in a page (570 957 B / 277 560 B, stage 12; stage 8: 546 kB, the report code
+The WebAssembly module is 571 kB, 278 kB in a page (571 405 B / 277 756 B, version 0.31; stage 12: 570 957 B / 277 560 B; stage 8: 546 kB, the report code
 and `serde_json::Value`; stage 5.1: 451 kB) (`wavelens/sva.wasm.js`, deflate-raw + base64; STACK.md). A call of
 the spike page (parse, evaluate 12 cycles, JSON both ways) takes about 110 µs.
 

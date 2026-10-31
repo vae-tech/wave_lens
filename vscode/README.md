@@ -13,13 +13,13 @@ is turned into VCD text with it, kept in the extension's storage).
 - **A large dump** (`wavelens.lazy`, auto: an FST of 4 MB, a VCD of 64 MB and more) opens with every module and signal
   at once, the top level open and its modules folded; the signals you open are read from its FST then (a VCD becomes an
   FST once, kept). Assertions, the FSM panel and pictures read what they need first.
-- **A new simulation**: the tab says when the dump changed; ⟳ (the bar, or the editor's title) reads it again with the
+- **A new simulation**: the tab says when the dump changed; ⟳ (the bar, or *WaveLens: Read the dump again* in the editor's title) reads it again with the
   view kept. `wavelens.autoReload`: at once.
 - **Saving** (state, PNG, SVG, WaveDrom, the report) asks where on the host; **Load…**, the `.sv` files and Compare
-  pick on the host too. Bookmarks, groups, colours are kept per dump in the workspace.
+  pick on the host too. Bookmarks, groups, colours are kept per dump in the workspace (the store of a dump that no longer exists goes at the next start).
 - **An agent** (Claude Code, Codex with `tools/wavemcp.py`) on the same host: when it starts its live link
   (`view_live`), the open tabs connect (● live in the bar); `view_live` with a dump and `open` opens it here, and
-  `view_edit` / `view_get` with `page` = the dump's path work on its tab. On by default; `"wavelens.live": false`
+  `view_edit` / `view_get` with `page` = the dump's path work on its tab. *WaveLens: Connect to the agent* connects the tab now. On by default; `"wavelens.live": false`
   keeps the tabs off the link.
 
 - **State names**: a VCD carries no enum names (Questa writes none). The design's types next to the dump
@@ -41,7 +41,7 @@ is turned into VCD text with it, kept in the extension's storage).
 - **Theme**: `wavelens.theme` — `auto` (light or dark by VS Code's), `vscode` (the colours of VS Code's theme),
   `light`, `white`, `dark`; **◐** in the bar (or *WaveLens: Choose the theme of the waves* in the editor's title) previews
   each on the open tabs.
-- **The version** in the bar: `0.31 · dev@5470d89*`, the extension's branch and commit (`*`: changes not committed).
+- **The version** in the bar: `0.32 · dev@5470d89*`, the extension's branch and commit (`*`: changes not committed).
 
 The keys are the viewer's (`?` in the tab): the plain ones, and the ctrl / alt ones that mean what they mean in VS Code
 (ctrl+F, ctrl+C, ctrl+Z, alt+C W R); `wavelens.keysToVSCode` (`ctrl+G`: Go to Line) go to VS Code — the list of your

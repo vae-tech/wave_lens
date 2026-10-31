@@ -343,10 +343,11 @@ smoke:
 	$(PW) tests/smoke.py --build $(B) --out $(B)/shots $(if $(STRICT),--strict) $(if $(ONLY),--only $(ONLY))
 
 # wavelens/wavelens.js is the concatenation of wavelens/src/*.js (committed: a page needs one file and no build step)
-WAVELENS_SRC := $(addprefix wavelens/src/,model.js vcd.js paint.js view.js edit.js diff.js modules.js fsm.js log.js svg.js boot.js)
+WAVELENS_SRC := $(addprefix wavelens/src/,model.js vcd.js paint.js bar.js names.js view.js menu.js look.js edit.js diff.js modules.js fsm.js log.js svg.js boot.js)
 wavelens: wavelens/wavelens.js
 wavelens/wavelens.js: $(WAVELENS_SRC) tools/wavelenscat.py
 	$(PY) tools/wavelenscat.py
+	@echo 'wavelens.js rebuilt: commit it'
 
 # Python unit tests of the tools (tests/unit/test_*.py on unittest, no dependencies; the fixtures in tests/unit/vcd).
 # The sva CLI of this BUILD when it is built (else svabuild finds one: an older out/ build would test stale code)
@@ -358,6 +359,7 @@ unit-shuffle:
 unit-bless:
 	WAVELENS_BLESS=1 $(PY) -m unittest discover -s tests/unit -t . -p 'test_small_tools.py'
 	WAVELENS_BLESS=1 $(PY) -m unittest discover -s tests/unit -t . -p 'test_vcd2wavedrom.py'
+	WAVELENS_BLESS=1 $(PY) -m unittest discover -s tests/unit -t . -p 'test_repo.py'
 	git status --short tests/unit/golden
 
 unit:

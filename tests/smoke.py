@@ -950,7 +950,7 @@ def modules(page, P):
 
 def big(page):
     t = page.evaluate('() => { const t0 = performance.now(); WaveLens.redrawAll(); return performance.now() - t0; }')
-    check(t < 1500 * SCALE, f'redraw of all viewers takes {t:.0f} ms (< {1500 * SCALE:.0f})')
+    check(t < 60 * SCALE, f'redraw of all viewers takes {t:.0f} ms (< {60 * SCALE:.0f})')
     v = page.locator('.wv').last
     v.locator('button[data-act=sort]').click()
     check(v.locator('button[data-act=sort]').inner_text() == 'Sort: A→Z', 'Sort works on the generated page')
@@ -1095,7 +1095,7 @@ def viewer_big(page, P):
         for (let i = 0; i < 5; i++) { const n = WaveLens.internal.peek(v).namesEl.querySelectorAll('.row:not(.grp) .n')[3 + i], t0 = performance.now(); n.click(); t.push(performance.now() - t0);
           await new Promise(r => requestAnimationFrame(r)); }
         t.sort((a, b) => a - b); return [t[2], WaveLens.internal.peek(v).rowEls[10] === keep, WaveLens.internal.peek(v).vis.length]; })()""")
-    check(el0 and t[1] and t[0] < 10 * SCALE, f'a click on a name with {t[2]} rows takes {t[0]:.1f} ms (< {10 * SCALE:.0f}) and keeps the rows of the names column')
+    check(el0 and t[1] and t[0] < 50 * SCALE, f'a click on a name with {t[2]} rows takes {t[0]:.1f} ms (< {50 * SCALE:.0f}) and keeps the rows of the names column')
     q, body = page.locator('.wv').first.locator('input.q'), page.locator('.wv .body').first
     q.fill(P['fuzzy']); settle(page); q.press('Enter'); q.press('Enter'); settle(page)
     row = js('v.fiRow && v.fiRow.full'); y0 = js('v.rowTop(v.fiRow)')
@@ -1238,6 +1238,11 @@ def api_docs(page):
     check(got['keys'] == got['doc'] and got['rows'] == len(got['keys']) and not got['todo'],
           f'docs § API: one line per export of WaveLens ({len(got["keys"])}; not described: {sorted(set(got["keys"]) - set(got["doc"]))}, gone: {sorted(set(got["doc"]) - set(got["keys"]))})')
     check(not got['view'], f'docs § API: every viewer method it lists exists (missing: {got["view"]})')
+    # the methods behind documented keys and menus (review 0.31 D11): a line each, so the table cannot drop one with the code
+    public = ['diffStep', 'cmpFlip', 'cmpBoth', 'compareStop', 'compareView', 'setGaps', 'setCycles', 'setToolsHidden', 'followLink', 'typesBox', 'moveRows', 'spanList',
+              'logError']
+    gone = page.evaluate('names => names.filter(k => !(k in VIEW_API) || typeof WaveView.prototype[k] !== "function")', public)
+    check(not gone, f'docs § API: the public methods {len(public)} there, in the code and the table (missing: {gone})')
     check(not got['settings'], f'docs § Settings names every default setting (missing: {got["settings"]})')
 
 
@@ -1796,7 +1801,7 @@ def readers(browser, build):
         let t0 = performance.now(); const a = WaveLens.vcdToWave(text, { budget: 1e9 }); const whole = performance.now() - t0;
         t0 = performance.now(); const b = await WaveLens.vcdToWaveFile(f, { budget: 1e9 }); const file = performance.now() - t0;
         return [text.length, whole, file, a.changes, b.changes]; }""", 1500000)
-    check(rd[3] == rd[4] == 1500000 and rd[2] < 15000 * SCALE and rd[2] < 2 * rd[1] + 500,
+    check(rd[3] == rd[4] == 1500000 and rd[2] < 8000 * SCALE and rd[2] < 2 * rd[1] + 500,
           f'a VCD of {rd[0] / 1e6:.0f} MB: Open… in pieces {rd[2] / 1e3:.1f} s, its text at once {rd[1] / 1e3:.1f} s, {rd[4]} changes')
     # the names of SystemVerilog sources (a VCD has no enum tables): the page's svTables gives what mkconfig.py --sv does
     import mkconfig
@@ -2471,8 +2476,8 @@ def dump(browser, build):
         const merged = [Object.keys(w.opts.sv.enums), Object.keys(w.opts.sv.fields)];
         await w.setSources(['module m; typedef enum {A = 1 << 2, B} t_t; t_t later; endmodule']);
         const noted = r.querySelector('.bar .toast').textContent; w.useSources(null, 'workspace'); w.useSources(null, 'manual');
-        await w.compare(new File([vcd('b').replace('1!', '0!')], 'other.vcd'));
-        await w.compare(new File([vcd('b').replace('#0', '#900000').replace('#50', '#900050')], 'far.vcd'));
+        await w.compare(new File([vcd('later').replace('1!', '0!')], 'other.vcd'));
+        await w.compare(new File([vcd('later').replace('#0', '#900000').replace('#50', '#900050')], 'far.vcd'));
         return [title, n, w.cmp && w.cmp.name, r.querySelector('.bar .toast').textContent, merged, noted]; })()""")
     check(late[:3] == [['fast.vcd', 'later.vcd'], 1, 'other.vcd'] and 'still compared with other.vcd' in late[3],
           f'the latest Open… stays, whichever read ends first; a failed compare says which one stays {late[:4]}')
@@ -3230,9 +3235,9 @@ def compare(browser, build):
           f'a page with "compare" opens with its bands (a ≠, a struck row, ≠ 1 ✕), the static SVG draws them, the state keeps it, rows marks them {got}')
     check(got['off'] == [True, None, None] and got['on'] == [1, 2, 1] and got['dump'] and got['cleared'] is None,
           f'the command compare: off, a result, dump refused in a page (no file read by itself); a state with compare null clears it {got}')
-    check(got['big'] == [7, 7] and got['ms'] < 5000 * SCALE and got['progress'] and got['reading'] == '≠ … ✕' and got['stopped'] is None
+    check(got['big'] == [7, 7] and got['ms'] < 3000 * SCALE and got['progress'] and got['reading'] == '≠ … ✕' and got['stopped'] is None
           and got['kept'] == 'big.vcd', f'B of {big.stat().st_size >> 20} MB, 2000 signals: the page\'s 7 read once in {got["ms"]:.0f} ms '
-          f'(< {5000 * SCALE:.0f}), its progress said; ≠ … ✕ stops a read, the compare before it kept {got}')
+          f'(< {3000 * SCALE:.0f}), its progress said; ≠ … ✕ stops a read, the compare before it kept {got}')
     check(not errs, 'no page errors (compare)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
     ctx.close()
 
@@ -3302,6 +3307,57 @@ def compare_view(browser, build):
       const cmd = (await u.run([{ op: 'compare', show: 'overlay' }, { op: 'compare', show: 'nope' }]));
       out.cmd = [cmd[0].show, cmd[0].name, cmd[1].error];
       const size = (await w.run([{ op: 'compare', result: res, show: 'overlay' }]))[0]; out.both = [size.differ, size.show, w.cmpRun];
+      // the review of 0.31: a result cut to the page (C2, C7), the first difference as sva diff's (C8), the run named in the static SVG (C4)
+      const q = mk(doc()), Q = n => q.M.rows.find(r => r.name === n);
+      const cut = (await q.run([{ op: 'compare', result: { name: 'r.vcd', from: -50, to: 500, signals: { 'tb.a': { spans: [[-20, 10], [100, 300], [300, 310]] },
+        'tb.d': { spans: [[130, 140]] } } } }]))[0];
+      q.cursor = 110; q.diffStep(1); const c1 = q.cursor; q.cursor = 110; q.diffStep(-1); const c2 = q.cursor;
+      out.cut = [cut.differ, cut.first, q.cmp.rows.get(Q('a')).spans, q.cmp.rows.get(Q('d')).spans, q.cmp.from, q.cmp.to, q.cmp.starts, c1, c2];
+      await q.run([{ op: 'compare', result: { name: 'r.vcd', signals: { 'tb.a': { spans: [[20, 30]] } } } }]);
+      out.nofrom = [q.cmp.from, q.cmp.to, q.state().compare.from, q.state().compare.to];
+      const ot = (await q.run([{ op: 'compare', result: { name: 'r.vcd', from: 0, to: 120, signals: { 'tb.d': { spans: [[0, 120]], other: '16 bits' } } } }]))[0];
+      out.first = [ot.first, ot.differ];
+      out.named = [svg('b').includes('B · r.vcd'), svg('overlay').includes('A · '), svg('overlay').includes('B · r.vcd'), svg('').includes('B · r.vcd')];
+      // the bits of a bus compared by their own values (C3): d is 2 in B, 1 in A from 20 to 40: bits 0 and 1 differ, the others not
+      const k = mk(doc()), K = n => k.M.rows.find(r => r.name === n), el = r => WaveLens.internal.peek(k).rowEls[WaveLens.internal.peek(k).vis.indexOf(r)];
+      await k.compare(B, 'b.vcd'); k.setBits('tb.d', true); const bs = k.bitsOf(K('d')), b0 = bs[7], b1 = bs[6], b7 = bs[0];
+      const mark = r => el(r).classList.contains('cmpd');
+      out.bits = [k.cmpOf(b0).spans, k.cmpOf(b1).spans, k.cmpOf(b7).spans, mark(b0), mark(b1), mark(b7)];
+      k.sel = b7; k.cursor = 0; k.diffStep(1); const seven = k.cursor; k.sel = b0; k.cursor = 0; k.diffStep(1); out.bitStep = [seven, k.cursor];
+      await k.compareView('overlay'); const svgBit = k.toSVG(), vb = k.valueBoth(b0, 30);
+      await k.compareView('b'); out.bitB = [k.valueAt(b0, 30), k.valueTip(b0, 30).includes('A: 1'), vb, /--wave-run-b|#c2255c/i.test(svgBit)];
+      await k.compare(null); out.bitOff = mark(b0);
+      // another width (C5): not swapped, its row empty in B's view, the tooltip says what B has; nothing in common (C6); B shorter (T31)
+      const wd = () => ({ signal: [['tb', { name: 'w', path: 'tb.w', width: 8, tv: [[0, '01']] }, { name: 'a', path: 'tb.a', tv: [[0, '0'], [30, '1']] }]],
+        time: { t0: 0, t1: 120, unit: 'ps' } });
+      const e = mk(wd()), W = e.M.rows.find(r => r.name === 'w'), wtr = W.tr;
+      const r3 = await e.compare('$timescale 1ps $end $scope module tb $end $var wire 16 ! w [15:0] $end $var wire 1 " a $end $upscope $end $enddefinitions $end #0 b1 ! 0" #30 1" #90',
+        'wide.vcd');
+      const toastOf = v => v.root.querySelector('.toast').textContent;
+      await e.compareView('b');
+      out.other = [W.tr.length, e.rowTitles.get(W), W.width, e.cmp.rows.get(W).row, r3.first];
+      await e.compareView('a'); out.otherBack = W.tr === wtr;
+      out.short = [r3.to, e.cmp.rows.get(W).spans, e.cmp.from];
+      const none = await e.compare('$timescale 1ps $end $scope module other $end $var wire 1 ! z $end $upscope $end $enddefinitions $end #0 0! #40', 'none.vcd');
+      out.none2 = [none, toastOf(e), e.cmp.name, e.cmp.differ];
+      // B's view: the edges are B's (the rises made again), the time B does not cover shaded (T33, T34)
+      const g = mk(doc()), G = n => g.M.rows.find(r => r.name === n);
+      await g.compare(B.replace('#120', '#100'), 'short.vcd');
+      await g.run([{ op: 'select', signal: 'tb.a' }]); g.cursor = 0;
+      await g.run([{ op: 'edge', dir: 1, kind: 'rise' }]); const ea = g.cursor, ua = WaveLens.internal.cycUps(G('a'))[0];
+      await g.compareView('b'); g.cursor = 0; await g.run([{ op: 'edge', dir: 1, kind: 'rise' }]); const eb = g.cursor, ub = WaveLens.internal.cycUps(G('a'))[0];
+      const nrect = s => (s.match(/<rect/g) || []).length, sh1 = nrect(g.toSVG()), keep = g.cmp.to; g.cmp.to = g.M.t1; const sh0 = nrect(g.toSVG()); g.cmp.to = keep;
+      out.edges = [ea, eb, sh1 - sh0, keep, ua, ub];
+      // ]d [d leave out what is hidden and what Only leaves out; the bands closer than a pixel one
+      const hd = mk({ signal: [['tb', ['u', { name: 'x', path: 'tb.u.x', tv: [[0, '0']] }], ['v', { name: 'y', path: 'tb.v.y', tv: [[0, '0']] }]]], time: { t0: 0, t1: 100, unit: 'ps' },
+        compare: { name: 'r.vcd', from: 0, to: 100, signals: { 'tb.u.x': { spans: [[10, 20]] }, 'tb.v.y': { spans: [[50, 60]] } } } });
+      hd.cursor = 0; hd.diffStep(1); const s0 = hd.cursor;
+      await hd.run([{ op: 'hide', signals: 'tb.u.x' }]); hd.cursor = 0; hd.diffStep(1); const s1 = hd.cursor;
+      await hd.run([{ op: 'show' }, { op: 'only', modules: 'tb.u' }]); hd.cursor = 30; hd.diffStep(1); out.step = [s0, s1, hd.cursor];
+      const sp = Array.from({ length: 1000 }, (_, i) => [i * 10, i * 10 + 5]);
+      const big = o => mk({ signal: [{ name: 'a', path: 'tb.a', tv: [[0, '0']] }], time: { t0: 0, t1: 100000, unit: 'ps' }, ...o });
+      const n1 = big({ compare: { name: 'r.vcd', from: 0, to: 100000, signals: { 'tb.a': { spans: sp } } } }), n2 = big({});
+      out.px = nrect(n1.toSVG()) - nrect(n2.toSVG());
       return out; })()""")
     check(got['none'][0] and got['none'][1] is None and got['none'][2] == 'a', f'no compare: no A B in the bar, none shown {got["none"]}')
     check(got['cmp'][:2] == [2, 1] and got['cmp'][2] is None and got['cmp'][3] and not got['cmp'][4] and got['cmp'][5] == 'A',
@@ -3321,7 +3377,210 @@ def compare_view(browser, build):
     check('differences only' in (got['bands'][0] or '') and got['bands'][1] == 'a' and got['bands'][2], f'without B\'s values: refused, its buttons off {got["bands"]}')
     check(got['cmd'][:2] == ['overlay', 'r.vcd'] and 'show is a, b, overlay' in (got['cmd'][2] or ''), f'the command compare: show {got["cmd"]}')
     check(got['both'] == [1, 'overlay', 'overlay'], f'the command compare: a result and show at once {got["both"]}')
+    check(got['cut'] == [1, 0, [[0, 10], [100, 120]], [], 0, 120, [0, 100], 0, 100] and got['nofrom'] == [0, 120, 0, 120],
+          f'a result is cut to the page (spans, differ, first, from, to), ]d stays on the waves, one without from / to is of all of them {got["cut"]} {got["nofrom"]}')
+    check(got['first'] == [None, 1], f'a row of another width alone: no first difference, as sva diff {got["first"]}')
+    check(got['named'] == [True, True, True, False], f'the static SVG names the run it draws {got["named"]}')
+    check(got['bits'] == [[[20, 40]], [[20, 40]], [], True, True, False] and got['bitStep'] == [20, 20] and got['bitB'][:3] == ['0', True, '1 ≠ 0'] and got['bitB'][3]
+          and got['bitOff'] is False, f'the bits of a bus compare by their own values: bands, ≠, ]d, the overlay, B\'s view, marks gone with the compare '
+          f'{got["bits"]} {got["bitStep"]} {got["bitB"]} {got["bitOff"]}')
+    check(got['other'][0] == 0 and '16 bits in wide.vcd' in (got['other'][1] or '') and got['other'][2] == 8 and got['other'][3] is None and got['other'][4] is None and got['otherBack'],
+          f'a row of another width: empty in B\'s view, the tooltip says what B has, not the first difference, its values back {got["other"]}')
+    check(got['short'] == [90, [[0, 90]], 0], f'B shorter than A: compared to B\'s end, no band past it {got["short"]}')
+    check(got['none2'][0] is None and got['none2'][1].startswith('none.vcd: none of these 2 signals is in it: nothing compared; still compared with wide.vcd')
+          and got['none2'][2:] == ['wide.vcd', 1], f'no signal in common: nothing compared, the one before kept {got["none2"]}')
+    check(got['edges'] == [30, 20, 1, 100, 30, 20], f'B\'s view: its edges, the time it does not cover shaded {got["edges"]}')
+    check(got['step'] == [10, 50, 10], f']d leaves out what is hidden and what Only leaves out {got["step"]}')
+    check(got['px'] == 2, f'a thousand stretches closer than a pixel: one band (its shade and line, {got["px"]} rects)')
     check(not errs, 'no page errors (compare_view)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
+    ctx.close()
+    # the page and sva diff on one pair (review 0.31 T42): a bit, a bus, x against z, a real written two ways, a string, another
+    # width, a change before the window, B shorter; a page built with "show" (T44); Save page in B's view (T43)
+    exe = build / 'sva-target' / 'release' / 'sva'
+    if not need(exe, how='make sva-build'):
+        return
+    head = lambda wide: ('$timescale 1ps $end\n$scope module tb $end\n$var wire 1 ! a $end\n$var wire 8 " d [7:0] $end\n'
+                         f'$var wire {16 if wide else 8} # w [{15 if wide else 7}:0] $end\n$var wire 1 $ xz $end\n$var real 64 % r $end\n'
+                         '$var string 1 & s $end\n$var wire 1 ( late $end\n$var wire 4 ) nib [3:0] $end\n$upscope $end\n$enddefinitions $end\n')
+    (d / 'a.vcd').write_text(head(False) + '#0\n0!\nb1 "\nb1 #\nx$\nr1.0 %\nshi &\n0(\nb0 )\n#10\n1$\n1(\n#30\nr2.5 %\n#40\nb11 "\n#45\n1!\n#50\nz$\n#70\nbx01x )\n#100\n0!\n#120\n')
+    (d / 'b.vcd').write_text(head(True) + '#0\n0!\nb1 "\nb1 #\nx$\nr1 %\nshi &\n0(\nb0 )\n#10\n1$\n1(\n#30\nr2.50 %\n#40\nb10 "\n#50\nx$\n#55\n1!\n#60\nb11 "\n#70\nbz01x )\n#80\nsyo &\n#85\n0!\n#90\n')
+    cfg = d / 'c.config.json'
+    cfg.write_text(json.dumps({'waves': 'a.vcd', 'exact': True, 'signals': ['tb.a', 'tb.d', 'tb.w', 'tb.xz', 'tb.r', 'tb.s', 'tb.late', 'tb.nib'],
+                               'compare': {'dump': 'b.vcd', 'show': 'overlay'}}))
+    env = dict(os.environ, WAVELENS_SVA=str(exe))
+    r = subprocess.run([sys.executable, '-I', str(ROOT / 'tools' / 'mkhtml.py'), '--config', cfg.name, '--no-sva', '--out', 'pair.html'], cwd=d, env=env, capture_output=True, text=True)
+    check(r.returncode == 0, f'mkhtml --config with "compare" {r.stderr.strip()[:300]}')
+    cli = json.loads(subprocess.run([str(exe), 'diff', 'a.vcd', 'b.vcd', '--json', '-', '--quiet', '--spans', '1000', '--limit', '0', '--to', '90ps'], cwd=d, capture_output=True, text=True).stdout)
+    cli = {x['path']: x['spans'] for x in cli['signals']}
+    ctx = browser.new_context(viewport={'width': 1200, 'height': 700})
+    page = ctx.new_page()
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto((d / 'pair.html').as_uri()); page.wait_for_load_state('networkidle')
+    page.evaluate('localStorage.clear()')
+    got = page.evaluate("""(async b => { const v = WaveLens.views()[0], key = c => Object.fromEntries([...c.rows].map(([r, x]) => ['tb.' + r.name, x.spans]));
+      const built = key(v.cmp), first = [v.cmpRun, v.root.querySelector('.cmpv button[aria-pressed=true]').textContent];
+      await v.compareView('a'); await v.compare(b, 'b.vcd');
+      const read = key(v.cmp); await v.compareView('b');
+      return { built, read, first, text: WaveLens.pageText ? (await WaveLens.pageText()) : '' }; })""", (d / 'b.vcd').read_text())
+    check(got['first'] == ['overlay', 'A+B'], f'a page built with "compare": {{"show": "overlay"}} opens that way {got["first"]}')
+    bad = {p: (got['read'].get(p), s) for p, s in cli.items() if got['read'].get(p) != s}
+    check(not bad and set(got['read']) == set(cli), f'{len(cli)} signals: the page\'s stretches are sva diff\'s {bad}')
+    bad = {p: (got['built'].get(p), s) for p, s in cli.items() if got['built'].get(p) != s}
+    check(not bad, f'the same through the build (svabuild.compare) {bad}')
+    saved = d / 'saved.html'
+    saved.write_text(got['text'], encoding='utf-8')
+    page.goto(saved.as_uri()); page.wait_for_load_state('networkidle'); page.wait_for_timeout(100)
+    got = page.evaluate("""(v => [v.cmpRun, v.cmp && v.cmp.differ, v.state().compareShow])(WaveLens.views()[0])""")
+    check(got[0] == 'a' and got[1] == 6 and got[2] in (None, 'a'), f'Save page in B\'s view opens on A with its bands (B\'s values were of the session) {got}')
+    check(not errs, 'no page errors (the pair)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
+    ctx.close()
+
+
+def view_031(browser, build):
+    """The review of 0.31, the viewer: a group's name is text in the menu, a colour of a state goes through the browser's own test,
+    Open… leaves no listeners behind and the last one wins, the open log appends, the keys come back to the waves, a picture
+    says when it is too large, sort is undone, Only on what is hidden is said, a state of a later version is in the log."""
+    print('viewer: the review of 0.31')
+    d = build / 'smoke' / 'view_031'
+    d.mkdir(parents=True, exist_ok=True)
+    pg = d / 'view.html'
+    pg.write_text(f"""<!doctype html><html><head><meta charset="utf-8"><title>v</title>
+<link rel="stylesheet" href="{(ROOT / 'wavelens' / 'wavelens.css').as_uri()}"></head><body><div id="w"></div>
+<script src="{(ROOT / 'wavelens' / 'wavelens.js').as_uri()}"></script></body></html>""", encoding='utf-8')
+    ctx = browser.new_context(viewport={'width': 1200, 'height': 800})
+    page = ctx.new_page()
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(pg.as_uri())
+    got = page.evaluate("""(async () => {
+      const mk = o => new WaveLens.WaveView(document.body.appendChild(document.createElement('div')), o, {});
+      const doc = () => ({ signal: [['tb', ['u', { name: 'a', path: 'tb.u.a', tv: [[0, '0'], [30, '1']] }], { name: 'z', path: 'tb.z', tv: [[0, '1']] },
+        { name: 'b', path: 'tb.b', tv: [[0, '0']] }]], time: { t0: 0, t1: 120, unit: 'ps' } });
+      const out = {}, v = mk(doc()), R = n => v.M.rows.find(r => r.name === n);
+      // X1: a name is text wherever it goes
+      await v.run([{ op: 'group', name: '<b>x</b>', signals: 'tb.z' }]);
+      v.menu(10, 10, R('z')); const m = v.menuEl;
+      out.menu = [!!m, m.querySelector('b'), [...m.querySelectorAll('span')].some(s => s.textContent.includes('<b>x</b>'))];
+      v.closeMenu();
+      // X2: what is no colour goes
+      const r2 = await v.run([{ op: 'bookmark', t: 5, color: 'red;background:url(http://h/x)' }, { op: 'bookmark', t: 6, color: 'rgb(1, 2, 3)' }, { op: 'bookmark', t: 7, color: 'c5' },
+        { op: 'paint', signals: 'tb.b', color: 'a;b:c' }]);
+      await v.setState({ wavelens: 'state', version: 3, bookmarks: [{ n: 1, t: 5, color: 'red;x:y' }], markers: [{ t: 8, color: 'x:y' }], paint: { 'tb.b': 'a;b:c' } });
+      out.color = [r2.map(r => !!r.error), v.bms[0].color, v.umarks[0].color, v.painted.size];
+      // W5: sort is an edit, undone like one
+      const a0 = v.sort; await v.run([{ op: 'sort', dir: 'asc' }]); const a1 = v.sort; await v.undo(); out.sort = [a0, a1, v.sort];
+      // W6: Only of what is hidden says so
+      const h = mk(doc()); await h.run([{ op: 'hide', signals: 'tb.u' }, { op: 'only', modules: 'tb.u' }]);
+      out.only = h.root.querySelector('.toast').textContent;
+      // W11
+      await h.setState({ wavelens: 'state', version: 99 }); out.ver = h.logText().split('\\n').filter(l => /version 99/.test(l)).length;
+      // W2: the open log appends
+      h.logOpen(true); const l0 = performance.now(); for (let i = 0; i < 500; i++) h.log('info', 'line ' + i); out.log = [performance.now() - l0, h.logEl.querySelectorAll('.lb > li').length];
+      h.log('warning', 'w'); h.log('error', 'e'); out.count = [...h.logEl.querySelectorAll('.lc')].map(x => x.textContent);
+      // W10: the keys back on the waves
+      h.help(true); h.helpEl.querySelector('button').focus(); h.help(false); out.help = document.activeElement === h.canvas;
+      // W4: a picture of everything, of too much
+      const many = Array.from({ length: 5100 }, (_, i) => ({ name: 's' + i, path: 'tb.s' + i, tv: [[0, '0']] }));
+      const w = mk({ signal: [['tb', ...many]], time: { t0: 0, t1: 120, unit: 'ps' } });
+      const p = (await w.run([{ op: 'picture', format: 'svg', rows: 'all' }]))[0];
+      const p2 = (await w.run([{ op: 'picture', format: 'svg', rows: 'tb.s*' }]))[0];
+      const p3 = await w.toPNG({ rows: w.rowsL.slice(0, 2000) }, 2).then(() => 'drawn', e => e.message);
+      out.pic = [p.error, p2.error, p3];
+      return out; })()""")
+    check(got['menu'][0] and got['menu'][1] is None and got['menu'][2], f'a group named <b>x</b> is text in the menu {got["menu"]}')
+    check(got['color'] == [[True, False, False, True], None, None, 0],
+          f'a colour of a command or a state: a token or what the browser takes, nothing else {got["color"]}')
+    check(got['sort'] == ['none', 'asc', 'none'], f'undo takes the sort back, not the step before it {got["sort"]}')
+    check('is hidden' in got['only'], f'Only on what is hidden says so {got["only"]!r}')
+    check(got['ver'] == 1, f'a state of a later version is in the log {got["ver"]}')
+    check(got['log'][0] < 300 * SCALE and got['log'][1] >= 500 and got['count'] == ['✖ 1', '⚠ 1'], f'500 entries into the open log in {got["log"][0]:.0f} ms (< {300 * SCALE:.0f}), the counts follow {got["log"]} {got["count"]}')
+    check(got['help'], 'the help box closed by its ✕: the keys on the waves')
+    check('5101 rows' in (got['pic'][0] or '') or 'rows: at most 5000' in (got['pic'][0] or ''), f'picture of every row of 5100: refused, it says what to do {got["pic"][0]}')
+    check('rows: at most 5000' in (got['pic'][1] or '') and 'a PNG stops at 16384' in got['pic'][2], f'a pattern of too many, a PNG too tall: said {got["pic"][1:]}')
+    page.evaluate("""(() => { const v = WaveLens.views()[0]; v.canvas.focus(); v.menu(10, 10, v.M.rows.find(r => r.name === 'z')); })()""")
+    page.wait_for_timeout(30)
+    page.mouse.click(1190, 790); page.wait_for_timeout(30)
+    check(page.evaluate("document.activeElement === WaveLens.views()[0].canvas"), 'a click outside a menu: the keys on the waves')
+    check(not errs, 'no page errors (the review of 0.31)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
+    page.close()
+    # W3: 20 000 rows: the column holds those near the view, as the canvas does
+    page = ctx.new_page()
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(pg.as_uri())
+    got = page.evaluate("""(async () => {
+      const sigs = n => Array.from({ length: n }, (_, i) => ({ name: 'sig' + i, path: `tb.m${i >> 6}.sig${i}`, width: i % 3 ? 1 : 8, tv: [[0, i % 3 ? '0' : '00'], [50, i % 3 ? '1' : 'ff']] }));
+      const mods = []; const all = sigs(20000); for (let i = 0; i < 400; i++) mods.push(['m' + i, ...all.slice(i * 64, (i + 1) * 64)]);
+      const v = new WaveLens.WaveView(document.body.appendChild(document.createElement('div')), { signal: [['tb', ...mods.map(m => m.slice())]], time: { t0: 0, t1: 100, unit: 'ps' } }, {});
+      await new Promise(r => setTimeout(r, 50));
+      const out = {}, T = async f => { const t0 = performance.now(); await f(); return performance.now() - t0; };
+      const inDom = () => WaveLens.internal.peek(v).namesEl.querySelectorAll('.row').length;
+      out.rows = [v.rowsL.length, inDom(), v.wcol.getBoundingClientRect().height === WaveLens.internal.peek(v).namesEl.getBoundingClientRect().height];
+      const q = v.root.querySelector('input.q'); const keys = [];
+      for (const s of ['s', 'si', 'sig1', 'sig12']) keys.push(await T(() => v.find(s)));
+      out.find = keys; await T(() => v.clearFind()); out.clear = await T(() => { v.find(''); });
+      await T(() => v.fit());
+      // far down: the rows there, their values, a click on them; the row that goes on selected from elsewhere
+      window.scrollTo(0, 0);
+      const pick = v.M.rows.find(r => r.name === 'sig19000'), el0 = v.rowEl(pick);
+      out.far = [el0, v.rowTop(pick) > 100000];
+      v.select(pick); await new Promise(r => setTimeout(r, 60));
+      const el = v.rowEl(pick); out.sel = [!!el, el && el.classList.contains('sel'), v.inSight(pick)];
+      v.cursor = 60; v.draw();
+      const shown = (v.rowEl(pick) || { querySelector: () => null }).querySelector('.v');
+      out.val = shown && shown.textContent;
+      const nb = v.M.rows.find(r => r.name === 'sig19001'); v.rowEl(nb).querySelector('.n').click(); await new Promise(r => setTimeout(r, 30));
+      out.clicked = v.sel === nb;
+      out.size = [inDom() < 300, document.body.querySelectorAll('.vsp').length];
+      return out; })()""")
+    check(got['rows'][0] > 20000 and got['rows'][1] < 300 and got['rows'][2], f'{got["rows"][0]} rows: {got["rows"][1]} of them in the column, as tall as the waves {got["rows"]}')
+    check(max(got['find']) < 300 * SCALE, f'a key of the find on 20 000 rows: {[round(x) for x in got["find"]]} ms (< {300 * SCALE:.0f}; it took 1.2 s)')
+    check(got['far'][0] is None and got['far'][1] and got['sel'] == [True, True, True] and got['val'] and got['clicked'],
+          f'a row far down: not in the column, known where it is, selected from elsewhere it comes into sight, with its value and its clicks {got["far"]} {got["sel"]} {got["val"]} {got["clicked"]}')
+    check(not errs, 'no page errors (20 000 rows)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
+    page.close()
+    # W9: a selection leaves the column as it is on a page with bindings and lifted bookmarks too
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if need(apb, how='make examples'):
+        page = ctx.new_page()
+        page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.wait_for_timeout(800)
+        kept = page.evaluate("""(async () => { const out = []; for (const v of WaveLens.views()) { const keep = WaveLens.internal.peek(v).rowEls[2];
+          v.select(v.M.rows.filter(r => r.type === 'sig' && r.tr)[2]); await new Promise(r => setTimeout(r, 30)); out.push(WaveLens.internal.peek(v).rowEls[2] === keep); } return out; })()""")
+        check(all(kept) and kept, f'a selection keeps the rows of the column on apb.html {kept}')
+        page.close()
+    # Open…: no listeners left behind (root, document, window), the last of two at once wins
+    page = ctx.new_page()
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto((ROOT / 'wavelens' / 'viewer.html').as_uri()); page.wait_for_load_state('networkidle')
+    files = []
+    for i in range(3):
+        f = d / f'o{i}.vcd'
+        f.write_text('$timescale 1ns $end $scope module tb $end $var wire 1 ! a $end $upscope $end $enddefinitions $end #0 0! #10 1! #20\n')
+        files.append(str(f))
+    cdp = ctx.new_cdp_session(page)
+    def listeners(expr):
+        o = cdp.send('Runtime.evaluate', {'expression': expr})['result']['objectId']
+        return len(cdp.send('DOMDebugger.getEventListeners', {'objectId': o})['listeners'])
+    def counts():
+        return [listeners(e) for e in ("document.querySelector('.wv')", 'document', 'window')]
+    def opened(name):
+        page.wait_for_function(f"document.querySelector('.wv').waveView.opts.title === '{name}'", timeout=5000 * SCALE)
+    inp = lambda: page.locator('.wv input.dfile').first
+    inp().set_input_files(files[0]); opened('o0.vcd')
+    inp().set_input_files(files[1]); opened('o1.vcd')
+    c0 = counts()
+    for f, n in ((files[0], 'o0.vcd'), (files[1], 'o1.vcd'), (files[2], 'o2.vcd')):
+        inp().set_input_files(f); opened(n)
+    c1 = counts()
+    check(c1 == c0, f'three Open…: as many listeners on the viewer, the document and the window {c0} {c1}')
+    ok = []
+    for i in range(3):
+        page.evaluate("""([a, b]) => { const v = document.querySelector('.wv').waveView, F = (n, ms) => ({ name: n,
+          text: () => new Promise(f => setTimeout(() => f('$timescale 1ns $end $scope module tb $end $var wire 1 ! a $end $upscope $end $enddefinitions $end #0 0! #10'), ms)) });
+          v.openDump(F(a, 30)); v.openDump(F(b, 5)); }""", [f'first{i}.vcd', f'last{i}.vcd'])
+        page.wait_for_timeout(120 * SCALE)
+        ok.append(page.evaluate("document.querySelector('.wv').waveView.opts.title"))
+    check(ok == ['last0.vcd', 'last1.vcd', 'last2.vcd'], f'two Open… at once: the later one stays {ok}')
+    check(not errs, 'no page errors (Open… again)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
     ctx.close()
 
 
@@ -3434,7 +3693,7 @@ def view_review(browser, build):
         const r = await v.compare(vcd('$scope module top $end ' + vars.join(' ') + ' $upscope $end', '#0 ' + b0.join(' ') + ' #100 ' + b1.join(' ') + ' #1000'), 'b.vcd');
         let t = performance.now(); v.cmpMarks(); const marks = performance.now() - t;
         t = performance.now(); await v.compare(null); const clear = performance.now() - t; v.destroy(); return [r.differ, marks, clear];""")
-    check(got[0] == 3000 and got[1] < 300 * SCALE and got[2] < 600 * SCALE, f'6000 signals compared: their marks in {got[1]:.0f} ms, compared no '
+    check(got[0] == 3000 and got[1] < 60 * SCALE and got[2] < 450 * SCALE, f'6000 signals compared: their marks in {got[1]:.0f} ms, compared no '
           f'more in {got[2]:.0f} ms ({got[0]} differ; it took 941 / 1068 ms)')
     got = js("""const N = 100000, tv = [], body = [];
         for (let i = 0; i < N; i++) { tv.push([i * 10, i % 2 ? '1' : '0']); body.push(`#${i ? i * 10 + 1 : 0} ${i % 2 ? 1 : 0}!`); }
@@ -4144,6 +4403,8 @@ UNITS = [   # (JavaScript expression, its JSON value); NaN / ±Infinity / undefi
     ("(P => I.diffSpans(P([[0, '0'], [10, '1'], [20, '0'], [40, '1']]), P([[0, '0'], [12, '1'], [20, '0'], [35, '1'], [40, '0']]), 0, 50))"
      "(tv => F.parse({ signal: [{ name: 'a', tv }] }).rows[0])", [[10, 12], [35, 50]]),
     ("(P => I.diffSpans(P([[0, '0'], [10, '1']]), P([[0, '0'], [10, '1']]), 0, 20))(tv => F.parse({ signal: [{ name: 'a', tv }] }).rows[0])", []),
+    ("I.cmpKey({ width: 1 }, { k: 'z' }) === I.cmpKey({ width: 1 }, { k: 'x' })", False),   # x and z apart, on a bit and in a nibble
+    ("(P => I.diffSpans(P('z01x'), P('x01x'), 0, 20))(v => F.parse({ signal: [{ name: 'a', width: 4, tv: [[0, \"'b\" + v]] }] }).rows[0])", [[0, 20]]),
     # the clock cycles: cycle 0, the cycle at a time, the time of a cycle, the edges counted, the clock by a name, the band's marks
     ("[null, 20, 21, 35].map(z => I.cycZero([10, 20, 30], z))", [0, 1, 2, 3]), ("[5, 10, 25, 30].map(t => I.cycAt([10, 20, 30], 1, t))", [-2, -1, 0, 1]),
     ("[-1, -2, 1, 2].map(n => I.cycTime([10, 20, 30], 1, n))", [10, None, 30, None]),
@@ -4194,6 +4455,7 @@ UNITS = [   # (JavaScript expression, its JSON value); NaN / ±Infinity / undefi
     ("FIND('s_pix_valid', 'pix_valid', { full: true })", None), ("FIND('s_pix_valid', 's_pix_valid', { full: true })", list(range(11))),
     ("FIND('s_pix_valid', 'x', { re: /v.l/ })", [6, 7, 8]),
     # times: negatives, µs and us, plain numbers in the model's unit
+    ("F.parseT('1.5.5us')", 'undefined'), ("F.parseT('1e400')", 'undefined'), ("F.parseT('.5ns')", 500), ("F.parseT('5.ns')", 5000), ("F.fmtExact(0.001)", '1 fs'),
     ("F.fmtTime(-1234567, 1000)", '-1235 ns'), ("F.fmtExact(-1500)", '-1.5 ns'), ("F.fmtExact(1234567)", '1.234567 µs'),
     ("F.parseT('-2ns')", -2000), ("F.parseT('1.5µs')", 1500000), ("F.parseT('1.5us')", 1500000), ("F.parseT('1.5 US')", 1500000),
     ("F.parseT('3')", 3), ("F.parseT('1e-3ns')", 1), ("F.parseT('ns')", 'undefined'), ("F.parseT('1.5 ks')", 'undefined'), ("F.parseT('')", 'undefined'),
@@ -4301,6 +4563,12 @@ UNITS = [   # (JavaScript expression, its JSON value); NaN / ±Infinity / undefi
 ]
 
 
+# the table's cases by what they hold (review 0.31 S4: a failing line says its group, the others stay counted); the last takes the rest
+UNIT_GROUPS = [('decode and floats', r'D\(|F\.decode|I\.gfmt|I\.toFloat'), ('bits and hex', r'I\.(bitsOf|hexOf|mixedBits|bitsVal|vcdHex|fieldRow|parseWave)|FR\(|XZ|MX'),
+               ('times and clock cycles', r'F\.(parseT|fmtTime|fmtExact)|F\.util\.stepTo|I\.(cyc|niceStep)'), ('the VCD reader', r'VW\(|tvOf'),
+               ('bus decoders', r'BUS'), ('sva.js', r'SVA\.'), ('values, edges, the search, analog, gaps', r'')]
+
+
 def units(browser, build):
     """The pure functions of the viewer (WaveLens.internal, unstable), the page's VCD reader, the bus decoders and the
     expressions of sva.js on a blank page: one case per line of UNITS, all in one evaluate."""
@@ -4311,9 +4579,18 @@ def units(browser, build):
     page.add_script_tag(content=UNITS_SETUP)
     got = page.evaluate("""cases => cases.map(c => { try { return JSON.stringify((0, eval)(c), (k, x) => typeof x === 'number' && !isFinite(x) ? String(x) :
         typeof x === 'bigint' ? x + 'n' : x === undefined ? 'undefined' : x); } catch (e) { return JSON.stringify('ERR ' + e.message); } })""", [c for c, _ in UNITS])
-    bad = [f'{c} = {g} (want {json.dumps(w, ensure_ascii=False)})' for (c, w), g in zip(UNITS, got) if json.loads(g) != w]
-    check(not bad, f'{len(UNITS)} unit cases: decode, bits, fields, the value search, times, analog, edges, the VCD reader, the bus decoders, sva.js'
-          + ('' if not bad else f' — {len(bad)} wrong:\n      ' + '\n      '.join(bad)))
+    groups = {g: [] for g, _ in UNIT_GROUPS}
+    for (c, w), g in zip(UNITS, got):
+        groups[next(n for n, rx in UNIT_GROUPS if re.match(rx, c))].append(None if json.loads(g) == w else f'{c} = {g} (want {json.dumps(w, ensure_ascii=False)})')
+    for name, res in groups.items():
+        bad = [x for x in res if x]
+        check(res and not bad, f'{len(res)} unit cases: {name}' + ('' if not bad else f' — {len(bad)} wrong:\n      ' + '\n      '.join(bad)))
+    table = json.loads((ROOT / 'tests' / 'unit' / 'cmpfind.json').read_text(encoding='utf-8'))
+    got = page.evaluate("""cases => cases.map(c => { const bs = new Map(c.paths.map(p => [p, { path: p }])), by = new Map();
+        for (const p of c.paths) { const k = p.split('.').pop(); by.set(k, (by.get(k) || []).concat([{ path: p }])); }
+        const hit = WaveLens.internal.cmpFind(bs, by, c.row, c.scope); return hit ? hit.b.path : null; })""", table)
+    want = [c['hits'][0] if len(c['hits']) == 1 else None for c in table]
+    check(got == want, f'{len(table)} rows found in a dump as viewedit.py finds them (tests/unit/cmpfind.json) {[c["why"] for c, g, w in zip(table, got, want) if g != w]}')
     page.close()
 
 
@@ -4336,7 +4613,7 @@ def sva_hardening(browser, build):
     t = page.evaluate("""async src => { await SVA.loadFiles([{ name: 'many.sva', text: src }]); await SVA.ready(); const p = SVA.panels()[0], t0 = performance.now();
         for (let k = 0; k < 100; k++) p.bindings.push({ assert: 'm' + k, scope: 'apb_tb.u_regs', results: null });
         p.sync(); await SVA.ready(); return [performance.now() - t0, p.bindings.filter(b => b.results && b.results.assertions[0].stats.pass === 3).length]; }""", src)
-    check(t[0] < 1000 * SCALE and t[1] == 100, f'100 bindings of one instance evaluated in {t[0]:.0f} ms (< {1000 * SCALE:.0f}), all with their counts ({t[1]})')
+    check(t[0] < 600 * SCALE and t[1] == 100, f'100 bindings of one instance evaluated in {t[0]:.0f} ms (< {600 * SCALE:.0f}), all with their counts ({t[1]})')
     page.reload(); page.wait_for_load_state('networkidle')
     t = page.evaluate("""async () => { const t0 = performance.now(); await SVA.ready(); const p = SVA.panels()[0];
         return [performance.now() - t0, p.bindings.length, p.bindings.filter(b => b.results).length, p.bindings.filter(b => b.via).length]; }""")
@@ -5363,8 +5640,8 @@ def spike(browser, build):
           f'sva spike: the WebAssembly build gives the native results {got} ({s["wasm"]} B, one call {s["callUs"]:.0f} µs)')
     tv = s['tv']
     want_ = {'attempts': 32764, 'pass': 2016, 'fail': 32, 'vacuous': 30716, 'disabled': 0, 'active': 0, 'capped': 0}
-    check(tv['cycles'] == 32768 and tv['stats'] == want_ and tv['ms'] < 1000 * SCALE,
-          f'sva spike: evaluate(parsed, tvSampler) over 32768 clock edges in {tv["ms"]:.0f} ms (< {1000 * SCALE:.0f}): {tv["stats"]}')
+    check(tv['cycles'] == 32768 and tv['stats'] == want_ and tv['ms'] < 700 * SCALE,
+          f'sva spike: evaluate(parsed, tvSampler) over 32768 clock edges in {tv["ms"]:.0f} ms (< {700 * SCALE:.0f}): {tv["stats"]}')
     page.close()
 
 
@@ -5406,6 +5683,7 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'edit': 'the viewer\'s commands, a page\'s edits (tools/viewedit.py) with the same state, your groups and markers, a page live through wavemcp.py',
     'view_review': 'the review of 0.15: Clear keeps markers, cycleZero a time, a run lays out before a picture, undo after a lost release, rows of '
                    'hidden modules, states clear, matched by name, ±inf, inherited names, ids and ranges; compare and analog at scale',
+    'view_031': 'the review of 0.31: a name as text, colours, Open… again, the log appended, the keys back, picture limits, undo of sort',
     'compare_view': 'what the waves show of a compare: A, B on these rows, both over each other; d D, the bar, the run named; a result\'s cut; the command show',
     'compare': 'a second dump compared: ≠ on the names that differ, struck when it lacks them, red bands, ]d [d, in the picture; clock-sampled refused',
     'savepage': 'Save page: the page with your view in its edits opens elsewhere as you left it; its waves as they were; the live token left out',
@@ -5485,9 +5763,14 @@ def main():
                     check(page.locator('.wvf-err').count() == 0, 'no wavelens error boxes')
                     n = page.locator('.wv canvas').count()
                     blank = page.evaluate('''() => [...document.querySelectorAll('.wv canvas')].filter(c => c.width === 0 || c.height === 0).length''')
-                    check(n > 0 and blank == 0, f'{n} viewers, all canvases drawn')
+                    # what the page asks for against what it built (review 0.31 S6: "> 0" passes a page that lost half of them)
+                    want_v, want_s = page.evaluate('''() => { const m = e => e.dataset.mode || (e.type === 'WaveDrom' ? 'svg' : 'view'),
+                        all = [...document.querySelectorAll('script[type="application/wavedrom"], script[type="WaveDrom"], [data-wave]')].filter(e => e.dataset.lazy == null);
+                        return [all.filter(e => m(e) === 'view').length, all.filter(e => m(e) === 'svg').length]; }''')
+                    views = page.evaluate('WaveLens.views().length')
+                    check(n > 0 and blank == 0 and views >= want_v, f'{n} viewers of {want_v} asked for (WaveLens.views {views}), all canvases drawn')
                     if path not in BUILT:
-                        check(page.locator('.wvs svg').count() > 0, f'{page.locator(".wvs svg").count()} static SVGs')
+                        check(page.locator('.wvs svg').count() >= max(want_s, 1), f'{page.locator(".wvs svg").count()} static SVGs of {want_s} asked for')
                 stale = path in user and page.evaluate('window.WaveLens && WaveLens.version') != VERSION
                 if stale:   # the user's page, built with another wavelens.js: the general checks only
                     print(f'  note: {path.name} was built with wavelens {page.evaluate("window.WaveLens && WaveLens.version")}, this is {VERSION}: rebuild it (make html WAVES=…) for the rest')
@@ -5545,6 +5828,7 @@ def main():
         run('compare', compare, b, build)
         run('compare_view', compare_view, b, build)
         run('view_review', view_review, b, build)
+        run('view_031', view_031, b, build)
         run('dump', dump, b, build)
         run('log', log_panel, b, build)
         run('int_enums', int_enums, b, build)

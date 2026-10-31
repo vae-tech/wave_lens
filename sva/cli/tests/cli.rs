@@ -341,6 +341,18 @@ fn nothing_to_check_exits_2() {
     let o = sva(&["eval", "--waves", &d, "--scope", "tb", "--sva", &c, "--from", "8ns", "--to", "2ns"]);
     assert_eq!(o.status.code(), Some(2));
     assert!(err(&o).contains("--to 2 ns is before --from 8 ns"), "{}", err(&o));
+    // a window without an edge checks nothing (review 0.31 R3); the edge at --to is in the window (the posedge at 5 ns)
+    let o = sva(&["eval", "--waves", &d, "--scope", "tb", "--sva", &c, "--to", "1ns"]);
+    assert_eq!(o.status.code(), Some(2), "{}", err(&o));
+    assert!(err(&o).contains("--to 1 ns is before the first posedge of tb.clk (5 ns)"), "{}", err(&o));
+    let d = clock_dump("window2.vcd", "1ns", "#0\n0!\n1\"\n1#\n#5\n1!\n#10\n0!\n#15\n1!\n#20\n0!\n");
+    let o = sva(&["eval", "--waves", &d, "--scope", "tb", "--sva", &c, "--from", "6ns", "--to", "9ns"]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(err(&o).contains("no posedge of tb.clk from 6 ns to 9 ns: nothing to check"), "{}", err(&o));
+    let o = sva(&["eval", "--waves", &d, "--scope", "tb", "--sva", &c, "--from", "6ns", "--to", "15ns", "--json"]);
+    assert!(o.status.code() != Some(2), "the edge at --to is in the window: {}", err(&o));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["cycles"].as_array().and_then(|c| c.last()).and_then(|t| t.as_u64()), Some(15_000), "{v}");
 }
 
 #[test]
@@ -489,6 +501,12 @@ fn a_dump_that_does_not_read_is_named() {
         let e = err(&o);
         assert!(e.contains("long.vcd") && !e.contains("internal error") && e.trim_end().lines().count() == 1, "{args:?}: {e}");
     }
+    // sva diff: the reader's panic in its thread, said once, of the dump it is (review 0.31 R5)
+    let good = write("good.vcd", "$timescale 1ns $end\n$scope module tb $end\n$var wire 2 % m $end\n$upscope $end\n$enddefinitions $end\n#0\nb10 %\n#1\nb1 %\n");
+    let o = sva(&["diff", &good, &bad]);
+    assert_eq!(o.status.code(), Some(2));
+    let e = err(&o);
+    assert!(e.contains("long.vcd: the dump does not read") && !e.contains("good.vcd") && e.trim_end().lines().count() == 1, "{e}");
 }
 
 /// A VCD of the fst tests in a directory of its own (they run in parallel, and `sva fst` writes beside the dump).
@@ -888,6 +906,25 @@ fn fst_of_a_dump_cut_off() {
     assert!(err(&o).contains("#1 after #10: the time goes back"), "{}", err(&o));
 }
 
+/// A dump whose time goes back: wellen says so with println!, and left on stdout that broke --json - and the VCD of a cut
+/// (review 0.31 C1, R7). Skipped steps with the warning on stderr: diff, vcd, eval; sva fst refuses (above).
+#[test]
+fn time_back_warns_on_stderr() {
+    let head = "$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! a $end\n$upscope $end\n$enddefinitions $end\n";
+    let a = own("back-out", "a.vcd", &format!("{head}#0\n0!\n#100\n1!\n#120\n"));
+    let b = own("back-out", "b.vcd", &format!("{head}#0\n0!\n#100\n1!\n#90\n0!\n#120\n"));
+    let (a, b) = (a.to_string_lossy(), b.to_string_lossy());
+    let o = sva(&["diff", &a, &b, "--json", "-", "--quiet"]);
+    let j: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap_or_else(|e| panic!("{e}: {}", out(&o)));
+    assert_eq!(j["wavelens"], "diff");
+    assert!(err(&o).contains("time decreased from 100 to 90"), "{}", err(&o));
+    let o = sva(&["vcd", &b, "--from", "0", "--to", "110ns"]);
+    assert!(out(&o).starts_with('$') && !out(&o).contains("WARN"), "{}", out(&o));
+    assert!(err(&o).contains("time decreased from 100 to 90"), "{}", err(&o));
+    assert!(out(&sva(&["vcd", "--help"])).contains("usage: sva vcd"), "the help on stdout");
+    assert!(out(&sva(&["diff", "--help"])).contains("usage: sva diff"), "the help on stdout");
+}
+
 /// A VCD whose integers are written without b, glued to their codes (Questa 2023: tests/unit/vcd/glued.vcd; st3 an enum
 /// declared at its own width, its value in 32 digits all the same): sva fst reads them, and sva vcd and sva eval, which
 /// read a VCD through wellen (it stops at the first one), read its FST.
@@ -1144,6 +1181,116 @@ fn diff_segments_and_aligns_them() {
     assert_eq!((v["segments"][1]["compared_to"].as_u64(), v["segments"][2]["b_from"].clone()), (Some(25_000), serde_json::Value::Null), "{v}");
     assert_eq!(v["segments"][2]["differ"].as_u64(), Some(0));
     assert!(v["notes"][0].as_str().unwrap().contains("3 segments in A, 2 in B"), "{v}");
+    // B has two segments more (review 0.31 R2): compared up to where B left the last common one, said in a note
+    let more = bench("tb", "1011", 0).replace("#40\n0!\nr1.5 $\nsdone %\n#50\n", "#40\n0!\nr1.5 $\nsdone %\nb11 #\n#45\nb100 #\n#50\n");
+    let m = write("dsm.vcd", &more);
+    let (_, v, e) = diff_json(&[&a, &m, "--segment", "tb_test", "--align"]);
+    assert_eq!(v["segments"].as_array().map(Vec::len), Some(3), "{e} {v}");
+    assert_eq!(v["segments"][2]["compared_to"].as_u64(), Some(40_000), "{v}");
+    assert!(v["notes"][0].as_str().unwrap().contains("3 segments in A, 5 in B: the last ones of B are not compared"), "{v}");
+}
+
+/// The JUnit report (review 0.31 T20): names and values escaped, failures counted. `--spans` keeps as many as it is told and
+/// counts the rest (T21); a real of -0 is 0 (T24); --json takes a name ending with .json (R4); a width of 1 is one bit (R6).
+#[test]
+fn diff_reports_escaped_and_capped() {
+    let head = |w: u32| format!("$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! a<b $end\n$var string 1 \" s $end\n$var real 64 # r $end\n\
+        $var wire {w} $ v $end\n$upscope $end\n$enddefinitions $end\n");
+    let a = write("dea.vcd", &(head(1) + "#0\n0!\nsx&y \"\nr0 #\n0$\n#10\n1!\n#20\n0!\n#30\n1!\n#40\n0!\n#50\n"));
+    let b = write("deb.vcd", &(head(4) + "#0\n1!\nsy&z \"\nr-0 #\nb0 $\n#10\n0!\n#20\n1!\n#30\n0!\n#40\n1!\n#50\n"));
+    let dir = std::env::temp_dir();
+    let (ju, js) = (dir.join("sva-de.xml"), dir.join("sva-de-out.json"));
+    let o = sva(&["diff", &a, &b, "--junit", &ju.to_string_lossy(), "--json", &js.to_string_lossy()]);
+    assert_eq!(o.status.code(), Some(1), "{}", err(&o));
+    let x = std::fs::read_to_string(&ju).unwrap();
+    assert!(x.contains("tb.a&lt;b") && !x.contains("a<b") && x.contains("x&amp;y") && x.contains("failures=\"2\""), "{x}");
+    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&js).unwrap()).unwrap();
+    let sig = |n: &str| v["signals"].as_array().unwrap().iter().find(|s| s["path"] == n).unwrap().clone();
+    assert_eq!(sig("tb.r")["differ"].as_u64(), Some(0), "-0 is 0: {v}");
+    assert_eq!(sig("tb.v")["other"], "4 bits", "{v}");
+    let one = "$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! a $end\n$upscope $end\n$enddefinitions $end\n";
+    let flat = write("def.vcd", &format!("{one}#0\n0!\n#50\n"));
+    let three = write("det.vcd", &format!("{one}#0\n0!\n#10\n1!\n#15\n0!\n#20\n1!\n#25\n0!\n#30\n1!\n#35\n0!\n#50\n"));
+    let once = write("deo.vcd", &format!("{one}#0\n0!\n#10\n1!\n#50\n"));
+    assert_eq!(sva(&["diff", &flat, &once, "--junit", &ju.to_string_lossy()]).status.code(), Some(1));
+    let x = std::fs::read_to_string(&ju).unwrap();
+    assert!(x.contains("failures=\"1\""), "one change that differs is a failure: {x}");
+    let (_, w, _) = diff_json(&[&flat, &three, "--spans", "1"]);
+    let s = &w["signals"][0];
+    assert_eq!((s["spans"].as_array().map(Vec::len), s["more"].as_u64()), (Some(1), Some(2)), "{w}");
+    let t = out(&sva(&["diff", &b, &a]));
+    assert!(t.contains("4 bits in A, 1 bit in B"), "{t}");
+    let o = sva(&["diff", &a, &b, "--json", "out.txt"]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(err(&o).contains("two dumps, A and B (3 given:") && err(&o).contains("out.txt"), "{}", err(&o));
+}
+
+/// A VCD whose last step is longer than the tail read for its end (review 0.31 R1, T23): the end is its last #time for
+/// sva diff and a cut; a cut word of the tail, or an id code, is not taken for one.
+#[test]
+fn the_end_of_a_long_last_step() {
+    let head = "$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! a $end\n$var wire 1 #12 c $end\n$var wire 8 #5 d [7:0] $end\n$upscope $end\n$enddefinitions $end\n";
+    let long = "0!\n".repeat(30_000);
+    assert!(long.len() > 1 << 16);
+    let v = write("eol.vcd", &format!("{head}#0\n0!\n1#12\n#9000\n1#12\n{long}"));
+    let a = write("eol-a.vcd", &format!("{head}#0\n0!\n1#12\n#9000\n1#12\n"));
+    let o = sva(&["vcd", &v, "--signals", "tb.a"]);
+    assert_eq!(out(&o).lines().rfind(|l| l.starts_with('#')), Some("#9000"), "{}", err(&o));
+    let (_, j, e) = diff_json(&[&a, &v]);
+    assert_eq!(j["to"].as_u64(), Some(9_000_000), "{e}");
+    // the tail starts right after the 1 of 1#12: "#12" is no time, and no more is the id code of `b1 #5` at the end
+    let tail = format!("#12\n{}", "0!\n".repeat((1 << 16) / 3 - 3));
+    let n = (1 << 16) - tail.len() - 6;
+    let tail = tail + &"\n".repeat(n) + "b1 #5\n";
+    let v = write("eol-2.vcd", &format!("{head}#0\n0!\n#9000\n1{tail}"));
+    assert_eq!(out(&sva(&["vcd", &v, "--signals", "tb.a"])).lines().rfind(|l| l.starts_with('#')), Some("#9000"));
+}
+
+/// The times of --from / --to as the tools and the page read them (review 0.31 P2): any case, µs, an exponent.
+#[test]
+fn times_read_as_everywhere() {
+    let head = "$timescale 1ps $end\n$scope module tb $end\n$var wire 1 ! a $end\n$upscope $end\n$enddefinitions $end\n";
+    let v = write("tr.vcd", &format!("{head}#0\n0!\n#50000\n1!\n#100000\n"));
+    for t in ["0.04µs", "40NS", "4E-2us", "4e4", " 40 ns"] {
+        let o = sva(&["vcd", &v, "--from", t]);
+        assert_eq!(o.status.code(), Some(0), "{t}: {}", err(&o));
+        assert!(out(&o).contains("#40000\n"), "{t}: {}", out(&o));
+    }
+    for (t, msg) in [("5 parsecs", "not a time unit"), ("1.2.3ns", "not a time"), ("ns", "not a time"), ("-5ns", "0 or more")] {
+        let o = sva(&["vcd", &v, "--from", t]);
+        assert_eq!(o.status.code(), Some(2), "{t}");
+        assert!(err(&o).contains(msg), "{t}: {}", err(&o));
+    }
+}
+
+/// A cut (review 0.31 T25): a bit without a value at --from is x, a time rounded to the dump's unit; --signals-from and
+/// --codes read stdin (T27); a word that is no id code is an error.
+#[test]
+fn cuts_rounding_and_stdin_lists() {
+    let head = "$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! a $end\n$var wire 1 \" late $end\n$upscope $end\n$enddefinitions $end\n";
+    let v = write("cr.vcd", &format!("{head}#0\n0!\n#10\n1\"\n#20\n1!\n#30\n"));
+    let t = out(&sva(&["vcd", &v, "--from", "2.6ns", "--to", "20ns"]));
+    assert!(t.contains("#3\n$dumpvars\n0!\nx\"\n$end") || t.contains("#3\n"), "{t}");
+    assert!(t.contains("x\""), "a bit without a value yet: {t}");
+    let piped = |args: &[&str], input: &str| {
+        use std::io::Write;
+        let mut c = Command::new(env!("CARGO_BIN_EXE_sva")).args(args).stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().unwrap();
+        c.stdin.take().unwrap().write_all(input.as_bytes()).unwrap();
+        c.wait_with_output().unwrap()
+    };
+    let o = piped(&["vcd", &v, "--signals-from", "-"], "tb.a\n");
+    assert!(out(&o).contains("a $end") && !out(&o).contains("late"), "{}", out(&o));
+    let o = piped(&["diff", &v, &v, "--signals-from", "-", "--json", "-", "--quiet"], "tb.a\ntb.nope\n");
+    let j: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!((j["signals_compared"].as_u64(), j["not_in_a"][0].as_str()), (Some(1), Some("tb.nope")), "{j}");
+    let f = own("cr-fst", "c.vcd", &format!("{head}#0\n0!\n#10\n1\"\n#20\n1!\n#30\n"));
+    assert_eq!(sva(&["fst", &f.to_string_lossy(), "--no-types", "-q"]).status.code(), Some(0));
+    let fst = f.with_extension("fst");
+    let o = piped(&["vcd", &fst.to_string_lossy(), "--codes", "-"], "!\n");
+    assert!(out(&o).contains("#20"), "{}", out(&o));
+    let o = piped(&["vcd", &fst.to_string_lossy(), "--codes", "-"], "é\n");
+    assert_eq!(o.status.code(), Some(2), "{}", err(&o));
 }
 
 /// The outputs: --json FILE beside the text, --junit a test case per segment with the first differences, --limit the

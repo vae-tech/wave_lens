@@ -346,7 +346,13 @@ def compare(exe, a, b, rows, t_from=None, t_to=None, mp=None, offset=None, segme
     r = subprocess.run(cmd, input='\n'.join(row_of) + '\n' if rows is not None else '', capture_output=True, text=True)
     if r.returncode not in (0, 1):
         raise WaveError(f'compare with {os.path.basename(b)}: ' + (r.stderr.strip().removeprefix('sva: ') or f'sva diff: exit {r.returncode}'))
-    d = json.loads(r.stdout)
+    # wellen's warnings (a time that goes back in a dump): on stderr, on stdout before the JSON where sva cannot put them aside
+    i = r.stdout.find('{')
+    head = (r.stdout[:i] if i > 0 else '').splitlines() + [x for x in r.stderr.splitlines() if x.startswith('WARN: ')]
+    try:
+        d = json.loads(r.stdout[max(i, 0):])
+    except ValueError:
+        raise WaveError(f'compare with {os.path.basename(b)}: sva diff wrote no JSON: {(r.stdout or r.stderr).strip()[:200]}') from None
     out = {'name': os.path.basename(b), 'from': d['from'], 'to': d['to'], 'compared': d['signals_compared'], 'differ': d['signals_differ'],
            'changes': d['compared'], 'first': d['first'] and d['first']['t'], 'signals': {},
            'missing': [x for p in d['only_a'] + d.get('not_in_a', []) for x in row_of.get(p, [p])], 'map': d['map']}
@@ -360,8 +366,9 @@ def compare(exe, a, b, rows, t_from=None, t_to=None, mp=None, offset=None, segme
             out['signals'][row] = e
     if d.get('segments'):
         out['segments'] = d['segments']
-    if d.get('notes'):
-        out['notes'] = d['notes']
+    warned = [f'{os.path.basename(a)} or {os.path.basename(b)}: {x.removeprefix("WARN: ")}' for x in head if x.strip()]
+    if d.get('notes') or warned:
+        out['notes'] = (d.get('notes') or []) + warned
     diff = sorted({x.get('b') or x['path'] for x in d.get('signals', ()) if x.get('spans')})
     if diff and not align:
         shift = d.get('offset') or 0

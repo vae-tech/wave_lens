@@ -2,13 +2,13 @@
 keys of wavelens/wavelens.config.js, and WaveError.
 
 A library function raises WaveError with a one-line message; each tool's main() catches it once (run_main) and exits
-with that message, so a mistake in a config or a missing file is one line, not a traceback. Python >= 3.8.
+with that message, so a mistake in a config or a missing file is one line, not a traceback. Python >= 3.9.
 """
 import os, re, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-UNIT_PS = {'zs': 1e-9, 'as': 1e-6, 'fs': 1e-3, 'ps': 1, 'ns': 1e3, 'us': 1e6, 'ms': 1e9, 's': 1e12}
+UNIT_PS = {'zs': 1e-9, 'as': 1e-6, 'fs': 1e-3, 'ps': 1, 'ns': 1e3, 'us': 1e6, 'µs': 1e6, 'ms': 1e9, 's': 1e12}
 TS_RE = re.compile(rb'(\d+)\s*(zs|as|fs|ps|ns|us|ms|s)\b')   # the value of a $timescale command
 CONFIG_JS = os.path.join(ROOT, 'wavelens', 'wavelens.config.js')
 # keys of a "config" object that are not in wavelens.config.js: WaveDrom's own, and an older name the viewer still reads
@@ -22,8 +22,11 @@ class WaveError(Exception):
 
 def version():
     """The project's version (VERSION at the top of the checkout)."""
-    with open(os.path.join(ROOT, 'VERSION'), encoding='utf-8') as f:
-        return f.read().strip()
+    try:
+        with open(os.path.join(ROOT, 'VERSION'), encoding='utf-8') as f:
+            return f.read().strip()
+    except OSError:
+        return '0'
 
 
 def build_info(by, date=None):
@@ -53,9 +56,29 @@ def run_main(main, tool):
         sys.exit(msg if msg.startswith(tool + ':') else f'{tool}: {msg}')
 
 
-def glob_re(pattern):
-    """A full-path pattern with * (any run) and ? (one character) -> compiled regex that must match the whole path."""
-    return re.compile(''.join('.*' if c == '*' else '.' if c == '?' else re.escape(c) for c in pattern) + r'\Z')
+def parse_time(v, plain=1):
+    """A time as a person writes it -> a number in ps, or None: a number is in plain units (model units in viewedit.py, ns for
+    wavemcp.py), a text a number with a unit or none ("1.5us", "100NS", "1E2", "0.1µs", "-5ns"), case-insensitive as the
+    viewer's parseT; plain None: a text without a unit is no time."""
+    if v is None or v == '' or isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return None if plain is None else v * plain
+    m = re.fullmatch(r'\s*(-?[\d.]+(?:e-?\d+)?)\s*([a-zµ]+)?\s*', str(v), re.I)
+    if not m or (m.group(2) and m.group(2).lower() not in UNIT_PS) or (plain is None and not m.group(2)):
+        return None
+    try:
+        x = float(m.group(1))
+    except ValueError:
+        return None
+    t = x * (UNIT_PS[m.group(2).lower()] if m.group(2) else plain)
+    return t if abs(t) != float('inf') else None
+
+
+def glob_re(pattern, one=True):
+    """A full-path pattern with * (any run) and ? (one character; one False: a ? as it is, the viewer's rows) -> compiled
+    regex that must match the whole path."""
+    return re.compile(''.join('.*' if c == '*' else '.' if c == '?' and one else re.escape(c) for c in pattern) + r'\Z')
 
 
 def add_sva_bin_arg(ap):

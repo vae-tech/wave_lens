@@ -435,11 +435,11 @@ class Buses {
     this.v = v; v.buses = this; this.st = new Map(); this.sel = null;
     v.extraRows.push(g => this.rowsFor(g));
     v.addKey(']t', () => this.step(1), ']t [t next / previous bus transaction').addKey('[t', () => this.step(-1));
-    v.root.addEventListener('wavelens:reset', () => { this.sel = null; });
+    v.root.addEventListener('wavelens:reset', () => { this.sel = null; }, { signal: v.ac.signal });
     // the selected transaction in a saved viewer state: its port and its start
     v.extraState.push({ key: 'bus', get: () => (this.sel && this.selPort ? { port: this.selPort.key, t0: this.sel.t0 } : undefined),
       set: s => { const p = s && this.list().find(q => q.key === s.port), x = p && p.D.tx.find(q => q.t0 === s.t0); if (x) this.select(p, x); } });
-    v.root.addEventListener('wavelens:settings', () => { this.ports = null; });
+    v.root.addEventListener('wavelens:settings', () => { this.ports = null; }, { signal: v.ac.signal });
   }
   // the ports and their transactions, found once (again when the settings change)
   list() {

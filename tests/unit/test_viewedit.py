@@ -389,6 +389,83 @@ class Twin(unittest.TestCase):
         for text in ('5 parsecs', '1.2.3ns', 'ns', ''):
             self.assertIsNone(V.parse_t(text))
         self.assertEqual(V.parse_time('3', plain=1000), 3000)   # wavemcp.py: a plain number is ns
+        self.assertEqual(V.parse_t('3as'), 3e-6)                 # one table: a dump's resolution may be below fs
+
+
+class Bits(unittest.TestCase):
+    """review 0.31 S1, T1: `bits` without a browser: only a bus, in the order given, off by name, once each."""
+    def bits(self, e, signals, **a):
+        r = e.run([{'op': 'bits', 'signals': signals, **a}])[0]
+        self.assertNotIn('error', r, r)
+        return e.st['bits']
+
+    def test_a_scalar_is_not_a_bus(self):
+        e = ed()
+        self.assertEqual(e.run([{'op': 'bits', 'signals': 'tb.dut.valid'}])[0]['error'], 'not a bus: tb.dut.valid')
+        self.assertEqual(e.run([{'op': 'bits', 'signals': 'clk, tb.dut.data'}])[0]['error'], 'not a bus: clk')
+        self.assertFalse(e.st.get('bits'))   # none of a list with a scalar in it
+
+    def test_the_order_they_came_in(self):
+        e = ed()
+        self.bits(e, 'tb.dut.data')
+        self.assertEqual(self.bits(e, 'tb.dut.state'), ['tb.dut.data', 'tb.dut.state'])
+
+    def test_off_leaves_the_others(self):
+        e = ed()
+        self.bits(e, 'tb.dut.data, tb.dut.state')
+        self.assertEqual(self.bits(e, 'tb.dut.state', on=False), ['tb.dut.data'])
+        self.assertEqual(self.bits(e, 'tb.dut.state', on=False), ['tb.dut.data'])   # off of one that is off: nothing
+
+    def test_repeated_not_doubled(self):
+        e = ed()
+        self.bits(e, 'tb.dut.data')
+        self.assertEqual(self.bits(e, 'tb.dut.data', on=True), ['tb.dut.data'])
+
+    def test_a_field_of_a_struct(self):
+        e = ed()
+        self.assertEqual(self.bits(e, 'tb.other.reg.hi'), ['tb.other.reg.hi'])   # [7:4] of reg: 4 bits, a bus of its own
+
+    def test_on_is_a_boolean(self):
+        self.assertEqual(ed().run([{'op': 'bits', 'signals': 'tb.dut.data', 'on': 'no'}])[0]['error'], 'on: true or false')
+
+
+class NoBrowser(unittest.TestCase):
+    """review 0.31 S1, T2, T3, S8: what smoke's section edit holds through a browser, held by make unit too."""
+    def test_the_commands_are_those_of_edit_js(self):
+        with open(os.path.join(H.ROOT, 'wavelens', 'src', 'edit.js'), encoding='utf-8') as f:
+            text = f.read()
+        js = dict(re.findall(r"^command\('(\w+)', '([^']*)'", text, re.M))
+        names, args = re.search(r"for \(const \[?name.*?\n\s*command\(name, '([^']*)'()", text).group(0, 1)   # fold, unfold: one call in a loop
+        js.update((n, args) for n in re.findall(r"\['(\w+)'", names))
+        self.assertEqual(js, V.COMMANDS)
+
+    def test_live_only_are_commands(self):
+        self.assertEqual(set(V.LIVE_ONLY) - set(V.COMMANDS), set())
+        self.assertEqual(ed().run([{'op': 'fit'}])[0]['error'], 'fit needs the time of the waves: it runs in the page only (live)')
+
+    def test_reset(self):
+        e = ed()
+        e.run([{'op': 'highlight', 'add': 'tb.dut.data'}, {'op': 'select', 'signal': 'tb.dut.data'}, {'op': 'find', 'query': 'data'},
+               {'op': 'range', 'from': '10ns', 'to': '20ns'}, {'op': 'cursor2', 't': '30ns'}, {'op': 'reset'}])
+        self.assertEqual((e.st['config']['highlight'], e.st['select'], e.st['find'], e.st['range'], e.st['cursor2']), ([], None, '', None, None))
+
+    def test_unfold_undoes_fold(self):
+        e = ed()
+        e.run([{'op': 'unfold', 'groups': 'tb.other'}])
+        self.assertNotIn('tb.other', e.fold())
+        e.run([{'op': 'fold', 'groups': 'tb.other'}])
+        self.assertIn('tb.other', e.fold())
+
+    def test_state_round_trip(self):
+        e = ed()
+        e.run([{'op': 'bookmark', 't': '50ns', 'text': 'here'}, {'op': 'bits', 'signals': 'tb.dut.data'}, {'op': 'hide', 'signals': 'clk'},
+               {'op': 'marker', 't': '40ns', 'label': 'm'}, {'op': 'cursor', 't': '30ns'}, {'op': 'radix', 'signals': 'tb.dut.data', 'radix': 'dec'}])
+        saved = json.loads(json.dumps(e.run([{'op': 'state'}])[0]['state']))
+        saved['wavelens'] = 'state'
+        back = ed()
+        r = back.run([{'op': 'set_state', 'state': saved}])[0]
+        self.assertNotIn('error', r, r)
+        self.assertEqual(back.run([{'op': 'state'}])[0]['state'], {k: v for k, v in saved.items() if k != 'wavelens'})
 
 
 class Pages(unittest.TestCase):
@@ -407,6 +484,20 @@ class Pages(unittest.TestCase):
     def text(self):
         with open(self.page, encoding='utf-8') as f:
             return f.read()
+
+    def test_hand_edited_block(self):   # review 0.31 M1, T4
+        text = V.put_block(self.text(), 'edits', {'hand': 1})
+        put = lambda block: V.write_text(self.page, text.replace('{"hand":1}', block))
+        for block in ('null', '{"views": []}', '{"views": {"one": 5}}', '{"views": {"one": {"state": 5}}}'):
+            with self.subTest(block):
+                put(block)
+                with self.assertRaisesRegex(V.WaveError, 'make it again or remove'):
+                    V.Page(self.page)
+        # a state with a key of another kind: left out, as the viewer does on loading it
+        put('{"views": {"one": {"rev": "hand", "state": {"groups": 5, "hidden": "clk", "cursor": "45ns", "config": [], "bookmarks": [{"n": 1, "t": 5}, 7]}}}}')
+        res, _, _ = V.edit_page(self.page, [{'op': 'state'}, {'op': 'group', 'name': 'g', 'signals': 'clk'}, {'op': 'unfold', 'all': True}])
+        self.assertEqual([r for r in res if 'error' in r], [])
+        self.assertEqual(res[0]['state'], {'bookmarks': [{'n': 1, 't': 5}]})
 
     def test_edits(self):
         res, key, rev = V.edit_page(self.page, [{'op': 'bookmark', 't': '30ns', 'text': 'a </script> b'}])
@@ -456,6 +547,14 @@ class Pages(unittest.TestCase):
 
 
 class Compare(unittest.TestCase):
+    def test_row_in_a_dump_as_the_page_finds_it(self):   # review 0.31 C9: one table with cmpFind of diff.js (smoke units)
+        for c in H.load(os.path.join(H.ROOT, 'tests', 'unit', 'cmpfind.json')):
+            with self.subTest(c['why']):
+                tails = {}
+                for p in c['paths']:
+                    tails.setdefault(p.rsplit('.', 1)[-1], []).append(p)
+                self.assertEqual(V.row_hits(c['row'], set(c['paths']), tails, c['scope']), c['hits'])
+
     """The command compare (stage 14.3.3): a result kept in the edits as the page's state has it, off, refused on clock
     waves; dump on a page's file: sva diff of the page's dump beside it (rows named without their prefix found by it)."""
 
@@ -518,28 +617,28 @@ class Config(unittest.TestCase):
         with H.tmp() as d:
             c = os.path.join(d, 'c.config.json')
             cfg = {k: v for k, v in self.CFG.items() if k != 'note_key'}
-            json.dump(cfg, open(c, 'w'), indent=2)
+            H.dump(cfg, c, indent=2)
             ops = [{'op': 'bookmark', 'n': 1, 'text': 'the first edge', 'label': 'go'}, {'op': 'bookmark', 't': '25ns', 'signal': 'tb.dut.state'},
                    {'op': 'arrow', 'from': 1, 'to': 2, 'label': '{dt}'}, {'op': 'span', 'from': {'bookmark': 1}, 'to': {'bookmark': 2}, 'label': 'x'}]
             res, view, changed = V.edit_config(c, ops, 'b')
             self.assertEqual((view, changed), ('b', ['views.b.bookmarks', 'views.b.arrows', 'views.b.spans']))
-            got = json.load(open(c))
+            got = H.load(c)
             self.assertEqual(got['views']['b']['bookmarks'][0], {'n': 1, 'at': 'posedge tb.clk', 'text': 'the first edge', 'label': 'go'})   # its event kept
             self.assertEqual(got['views']['a'], {'from': '0ns'})   # the other view as it was
             self.assertEqual(list(got), list(cfg))
             res, _, changed = V.edit_config(c, [{'op': 'bookmark', 'n': 1, 't': '15ns'}], 'b')   # a t replaces the event
-            self.assertNotIn('at', json.load(open(c))['views']['b']['bookmarks'][0])
+            self.assertNotIn('at', H.load(c)['views']['b']['bookmarks'][0])
             res, _, changed = V.edit_config(c, [{'op': 'bookmark', 'n': 3, 't': '5ns'}, {'op': 'marker', 't': 1}], 'a')
             self.assertEqual(changed, [])   # a bad command: nothing written
             self.assertIn('a config\'s markers are events', res[1]['error'])
-            self.assertNotIn('bookmarks', json.load(open(c))['views']['a'])
+            self.assertNotIn('bookmarks', H.load(c)['views']['a'])
             V.edit_config(c, [{'op': 'bookmark', 'n': 2, 't': '15ns', 'text': 'mine'}], 'a')   # the top level's become the view's own
-            self.assertEqual([b['n'] for b in json.load(open(c))['views']['a']['bookmarks']], [1, 2])
+            self.assertEqual([b['n'] for b in H.load(c)['views']['a']['bookmarks']], [1, 2])
             for _ in range(2):   # built, and built again: the marks are the config's
                 out = os.path.join(d, 'p.html')
                 rc, _, err = H.run_tool('mkhtml', '--config', c, '--out', out, '--no-sva', '--reproducible')
                 self.assertEqual(rc, 0, err)
-                waves = json.loads(re.search(r'window\.WAVES = (\{.*?\n\});', open(out, encoding='utf-8').read(), re.S).group(1))
+                waves = json.loads(re.search(r'window\.WAVES = (\{.*?\n\});', H.text(out), re.S).group(1))
                 self.assertEqual(waves['b']['bookmarks'][1]['t'], '25ns')   # as written (the page reads it)
                 self.assertEqual(waves['b']['spans'], [{'label': 'x', 'from': 15000, 'to': 25000}])
                 self.assertEqual(waves['a']['bookmarks'][1]['text'], 'mine')
@@ -548,10 +647,10 @@ class Config(unittest.TestCase):
         import wavemcp
         with H.tmp() as d:
             c = os.path.join(d, 'c.config.json')
-            json.dump({k: v for k, v in self.CFG.items() if k != 'note_key'}, open(c, 'w'))
+            H.dump({k: v for k, v in self.CFG.items() if k != 'note_key'}, c)
             text, err = wavemcp.call('view_edit', {'config': c, 'view': 'b', 'ops': [{'op': 'bookmark', 't': 35, 'text': 'ns from the agent'}]})
             self.assertFalse(err, text)
-            self.assertEqual(json.load(open(c))['views']['b']['bookmarks'][1]['t'], '35ns')   # its ns as a time with a unit
+            self.assertEqual(H.load(c)['views']['b']['bookmarks'][1]['t'], '35ns')   # its ns as a time with a unit
             text, err = wavemcp.call('view_edit', {'config': c, 'page': c, 'ops': [{'op': 'bookmark', 't': 1}]})
             self.assertTrue(err)
 

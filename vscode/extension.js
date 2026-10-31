@@ -195,7 +195,7 @@ const typesFile = f => f.replace(/\.(vcd|fst)$/i, '') + '.types.json';
 /* ---------------- a tab: one dump in a webview ---------------- */
 class Tab {
   constructor(uri, panel) {
-    this.uri = uri; this.file = uri.fsPath; this.panel = panel; this.wait = new Map(); this.rid = 0; this.streams = new Map();
+    this.uri = uri; this.file = uri.fsPath; this.panel = panel; this.wait = new Map(); this.rid = 0; this.streams = new Map(); this.procs = new Set();
     this.storeKey = 'store:' + uri.toString(); this.store = Object.assign({}, CTX.workspaceState.get(this.storeKey) || {}); this.changed = new Map();
     const r = roots();
     panel.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.file(r.host), vscode.Uri.file(r.wavelens),
@@ -251,12 +251,13 @@ ${scripts}
     if (lazy) log(`${path.basename(this.file)}: large: its modules and signals first, the values of the ones shown as they are needed`);
     return { src: this.panel.webview.asWebviewUri(vscode.Uri.file(f)).toString(), name: path.basename(this.file), lazy };
   }
+  proc(p) { this.procs.add(p); p.on('close', () => this.procs.delete(p)); p.on('error', () => this.procs.delete(p)); return p; }   // killed with the tab
   // the VCD text of some signals of the large dump (their id codes in its header): sva vcd --codes of its FST -> {text}
   codes(list) {
     const bin = svaBin(), fst = this.fst;
     if (!fst) return Promise.resolve({ error: 'this dump is read whole' });
     return new Promise(ok => {
-      const p = cp.spawn(bin, ['vcd', fst, '--codes', '-'], { stdio: ['pipe', 'pipe', 'pipe'] });
+      const p = this.proc(cp.spawn(bin, ['vcd', fst, '--codes', '-'], { stdio: ['pipe', 'pipe', 'pipe'] }));
       const out = [], err = [];
       p.stdout.on('data', d => out.push(d)); p.stderr.on('data', d => err.push(d));
       p.on('error', e => ok({ error: `${bin}: ${e.message}` }));
@@ -369,7 +370,7 @@ ${scripts}
     if (isFinite(to)) args.push('--to', `${Math.round(to)}ps`);
     log(`${path.basename(this.file)}: compare with ${b}`);
     const r = await new Promise(ok => {
-      const p = cp.spawn(bin, args, { stdio: ['pipe', 'pipe', 'pipe'] }), out = [], err = [];
+      const p = this.proc(cp.spawn(bin, args, { stdio: ['pipe', 'pipe', 'pipe'] })), out = [], err = [];
       p.stdout.on('data', d => out.push(d)); p.stderr.on('data', d => err.push(d));
       p.on('error', e => ok({ error: e.code === 'ENOENT' ? `Compare runs the sva CLI on this host, and there is none (${bin}): ` +
         'set wavelens.sva, or make dist-linux in the repository' : `${bin}: ${e.message}` }));
@@ -392,7 +393,7 @@ ${scripts}
   // the second dump's values of the signals that differ (the tab's A B A+B, as svabuild.compare_cut): sva vcd, null when too much or none
   async compareCut(bin, b, signals, from, to) {
     const name = path.basename(b), r = await new Promise(ok => {
-      const p = cp.spawn(bin, ['vcd', b, '--from', `${Math.round(from)}ps`, '--to', `${Math.round(to)}ps`, '--signals-from', '-'], { stdio: ['pipe', 'pipe', 'pipe'] });
+      const p = this.proc(cp.spawn(bin, ['vcd', b, '--from', `${Math.round(from)}ps`, '--to', `${Math.round(to)}ps`, '--signals-from', '-'], { stdio: ['pipe', 'pipe', 'pipe'] }));
       const out = [], err = []; let size = 0;
       p.stdout.on('data', d => { size += d.length; if (size > COMPARE_WAVES) p.kill(); else out.push(d); });
       p.stderr.on('data', d => err.push(d));
@@ -489,6 +490,7 @@ ${scripts}
     this.flush();
     for (const s of this.streams.values()) s.close();
     this.streams.clear();
+    for (const p of this.procs) p.kill();
   }
 }
 
@@ -723,6 +725,9 @@ function activate(ctx) {
       else if (!LIVE_NOW) vscode.window.showInformationMessage('WaveLens: no agent\'s live link on this host (the agent starts it with view_live)');
       else if (t) { t.sent = false; liveTo(t); }
     }));
+  // the stores of dumps that are no more (each dump opened keeps one in the workspace's state)
+  for (const k of ctx.workspaceState.keys()) { if (!k.startsWith('store:')) continue;
+    try { if (!fs.existsSync(vscode.Uri.parse(k.slice(6)).fsPath)) ctx.workspaceState.update(k, undefined); } catch (e) { log(`the store of ${k}: ${e.message}`); } }
   const timer = setInterval(liveCheck, 1500); ctx.subscriptions.push({ dispose: () => clearInterval(timer) });
   liveCheck();
   return { events: EVENTS.event, tabs: () => [...TABS], vcdOf, problems: uri => DIAG.get(uri) || [] };   // for the tests (vscode/test)

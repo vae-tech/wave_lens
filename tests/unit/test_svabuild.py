@@ -57,7 +57,7 @@ class Rule(unittest.TestCase):
             out = os.path.join(d, 'r.json')
             subprocess.run([exe, 'eval', '--waves', H.fixture('names'), '--resolve', 'scope', '--scope', 'tb.dut', '--ignore-prefix', ','.join(PREFIXES),
                             '--alias', 'data=tb.dut.data_q', '--sva', SV, '--out', out], capture_output=True, text=True)
-            cli = {a['name']: (a['signals'], a.get('missing') or []) for a in json.load(open(out))['assertions']}
+            cli = {a['name']: (a['signals'], a.get('missing') or []) for a in H.load(out)['assertions']}
         n = names()
         for a in parsed:
             with self.subTest(a['label']):
@@ -130,6 +130,92 @@ class Cycles(unittest.TestCase):
         doc['bind'][0]['results']['cycles'] = 'nope'
         with self.assertRaisesRegex(WaveError, 'no cycles table "nope"'):
             SB.inflate(doc)
+
+
+def compare_vcd(d, name, scope='tb', d2='b10', shift=0):
+    """A dump of three signals: a clock, a bus that takes d2 at 30 ns (the place two runs differ), the test case's number."""
+    head = (f'$timescale 1ns $end\n$scope module {scope} $end\n$var wire 1 ! clk $end\n$var wire 4 " d [3:0] $end\n'
+            '$var wire 8 # test [7:0] $end\n$upscope $end\n$enddefinitions $end\n')
+    steps = [(0, '0!\nb1 "\nb0 #'), (10, '1!'), (20, '0!\nb1 #'), (30, f'1!\n{d2} "'), (40, '0!\nb10 #'), (50, '1!'), (60, '')]
+    return H.vcd(d, ''.join(f'#{t + shift}\n{x}\n' if x else f'#{t + shift}\n' for t, x in steps), header=head, name=name)
+
+
+@H.needs(SB.find_bin(), 'the sva CLI (make sva-build)')
+class Compare(unittest.TestCase):
+    """review 0.31 S2, T7: svabuild.compare and each option of `sva diff` it passes on."""
+    def setUp(self):
+        self.tmp = H.tmp()
+        self.d = self.tmp.name
+        self.exe = SB.find_bin()
+        self.a = compare_vcd(self.d, 'a.vcd')
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_equal(self):
+        c = SB.compare(self.exe, self.a, compare_vcd(self.d, 'same.vcd'), None)
+        self.assertEqual((c['compared'], c['differ'], c['first'], c['changes']), (3, 0, None, 11))
+        self.assertNotIn('vcd', c)   # nothing differs: no values of B to carry
+
+    def test_map(self):
+        c = SB.compare(self.exe, self.a, compare_vcd(self.d, 'b.vcd', 'top', 'b11'), None, mp={'tb': 'top'})
+        self.assertEqual((c['differ'], c['first'], c['map']), (1, 30000, [{'a': 'tb', 'b': 'top', 'signals': 3}]))
+        self.assertEqual(c['signals']['tb.d'], {'spans': [[30000, 60000]], 'b': 'top.d'})
+        self.assertEqual(c['shift'], 0)
+        self.assertIn('$var', c['vcd'])
+        self.assertIn('d', c['vcd'])
+
+    def test_offset(self):
+        b = compare_vcd(self.d, 'late.vcd', d2='b11', shift=5)
+        self.assertLess(SB.compare(self.exe, self.a, b, None)['first'], 30000)   # not aligned: it differs before the place
+        c = SB.compare(self.exe, self.a, b, None, offset='5ns')
+        self.assertEqual((c['differ'], c['first'], c['shift']), (1, 30000, 5000))
+
+    def test_window_and_rows(self):
+        b = compare_vcd(self.d, 'b.vcd', d2='b11')
+        c = SB.compare(self.exe, self.a, b, [('d', 'tb.d'), ('gone', 'tb.gone')], 0, 20000)
+        self.assertEqual((c['from'], c['to'], c['differ'], c['missing']), (0, 20000, 0, ['gone']))
+        c = SB.compare(self.exe, self.a, b, [('d', 'tb.d')], 25000, 45000)
+        self.assertEqual((c['signals']['d']['spans'], c['first']), ([[30000, 45000]], 30000))
+
+    def test_segment(self):
+        b = compare_vcd(self.d, 'b.vcd', d2='b11')
+        c = SB.compare(self.exe, self.a, b, None, segment='tb.test')
+        self.assertEqual([(s['n'], s['from'], s['to'], s['value'], s['differ']) for s in c['segments']],
+                         [(1, 0, 20000, '0', 0), (2, 20000, 40000, '1', 1), (3, 40000, 60000, '2', 1)])
+        self.assertIn('vcd', c)
+
+    def test_align(self):
+        b = compare_vcd(self.d, 'b.vcd', d2='b11')
+        c = SB.compare(self.exe, self.a, b, None, segment='tb.test', align=True)
+        self.assertEqual([s['b_from'] for s in c['segments']], [0, 20000, 40000])
+        self.assertNotIn('vcd', c)   # no one offset: no cut of B
+        self.assertNotIn('shift', c)
+
+    def test_show(self):
+        b = compare_vcd(self.d, 'b.vcd', d2='b11')
+        self.assertEqual(SB.compare(self.exe, self.a, b, None, show='overlay')['show'], 'overlay')
+        self.assertNotIn('show', SB.compare(self.exe, self.a, b, None))
+
+    def test_time_going_back_is_a_note(self):   # review 0.31 C1: wellen's warning reaches notes, the JSON stays JSON
+        head = '$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! a $end\n$upscope $end\n$enddefinitions $end\n'
+        a, b = H.vcd(self.d, '#0\n0!\n#100\n1!\n#120\n', header=head, name='p.vcd'), H.vcd(self.d, '#0\n0!\n#100\n1!\n#90\n0!\n#120\n', header=head, name='back.vcd')
+        c = SB.compare(self.exe, a, b, None)
+        self.assertEqual(c['compared'], 1)
+        self.assertTrue(any('time decreased from 100 to 90' in n for n in c['notes']), c.get('notes'))
+
+    def test_no_json_is_a_wave_error(self):
+        with H.tmp() as d:
+            fake = os.path.join(d, 'sva')
+            with open(fake, 'w') as f:
+                f.write('#!/bin/sh\necho the wrong program\nexit 1\n')
+            os.chmod(fake, 0o755)
+            with self.assertRaisesRegex(WaveError, 'compare with b: sva diff wrote no JSON: the wrong program'):
+                SB.compare(fake, 'a', 'b', None)
+
+    def test_a_dump_that_does_not_read(self):
+        with self.assertRaisesRegex(WaveError, 'compare with nope.vcd'):
+            SB.compare(self.exe, self.a, os.path.join(self.d, 'nope.vcd'), None)
 
 
 if __name__ == '__main__':

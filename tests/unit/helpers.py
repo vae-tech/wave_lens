@@ -43,6 +43,23 @@ def vcd(tmp, body, header='$timescale 1ns $end\n$scope module tb $end\n$var wire
     return p
 
 
+def text(path):
+    """A file's text, the file closed (a file left open: a ResourceWarning here, a PermissionError on the scratch directory on Windows)."""
+    with open(path, encoding='utf-8') as f:
+        return f.read()
+
+
+def load(path):
+    """A JSON file's value."""
+    return json.loads(text(path))
+
+
+def dump(obj, path, **kw):
+    """obj written as JSON."""
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(obj, f, **kw)
+
+
 def golden(case, name, text):
     """text is tests/unit/golden/<name> byte for byte (the bytes a page or a data file gets, not only what json reads back);
     WAVELENS_BLESS=1: written instead."""

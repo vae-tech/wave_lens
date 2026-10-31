@@ -282,7 +282,7 @@ function findRow(r, terms, M, o = {}) {
 }
 
 /* ---------------- time formatting ---------------- */
-const UNITS = [[1e12, 's'], [1e9, 'ms'], [1e6, 'µs'], [1e3, 'ns'], [1, 'ps']];
+const UNITS = [[1e12, 's'], [1e9, 'ms'], [1e6, 'µs'], [1e3, 'ns'], [1, 'ps'], [1e-3, 'fs']];
 const UNIT_PS = { fs: 1e-3, ps: 1, ns: 1e3, us: 1e6, 'µs': 1e6, ms: 1e9, s: 1e12 };
 function fmtTime(ps, ref, unitRef) { // ref = resolution (axis step, span/1000 …) -> decimals; unitRef (default ref) -> unit
   ref = Math.abs(ref || ps) || 1;
@@ -295,7 +295,7 @@ function fmtTime(ps, ref, unitRef) { // ref = resolution (axis step, span/1000 �
 // bookmarks read the same at any zoom (1234567 ps -> "1.234567 µs")
 function fmtExact(ps, unitRef) {
   const uref = Math.abs(unitRef || ps) || 1, [f, u] = UNITS.find(([f]) => uref >= f) || UNITS[UNITS.length - 1];
-  let s = (ps / f).toFixed(Math.round(Math.log10(f)));
+  let s = (ps / f).toFixed(Math.max(0, Math.round(Math.log10(f))));
   if (s.includes('.')) s = s.replace(/0+$/, '').replace(/\.$/, '');
   return s + ' ' + u;
 }
@@ -307,9 +307,10 @@ function fmtFreq(ps) {
 }
 function parseT(v) { // "1.5us" -> 1.5e6 (ps); plain numbers are model units
   if (v == null || v === '') return undefined;
-  const m = /^\s*(-?[\d.]+(?:e-?\d+)?)\s*(fs|ps|ns|us|µs|ms|s)?\s*$/i.exec(String(v));
+  const m = /^\s*(-?(?:\d+\.?\d*|\.\d+)(?:e-?\d+)?)\s*(fs|ps|ns|us|µs|ms|s)?\s*$/i.exec(String(v));
   if (!m) return undefined;
-  return parseFloat(m[1]) * (m[2] ? UNIT_PS[m[2].toLowerCase()] : 1);
+  const t = parseFloat(m[1]) * (m[2] ? UNIT_PS[m[2].toLowerCase()] : 1);
+  return isFinite(t) ? t : undefined;
 }
 function niceStep(target, cycles) { // smallest 1-2-5 step >= target
   const e = 10 ** Math.floor(Math.log10(Math.max(target, 1e-9)));
@@ -822,12 +823,14 @@ function gapCuts(rows, a, b, S, clk, cycle = 1, also = [], picked = false) {
 const AR_SHAPES = { '~': 'curve', '-': 'straight', '-~': 'curve, late', '~-': 'curve, early', '-|': 'corner ┐', '|-': 'corner └', '-|-': 'step' };
 const AR_HEADS = { '>': '→ end', '<>': '↔ both', '<': '← start', '': '— none' };
 const AR_LINES = { solid: null, dashed: [6, 4], dotted: [1.5, 3] };
+// a colour from a state, a command or a page: a token or a colour the browser reads (it goes into style="…": nothing else)
+const colorOk = c => (typeof c === 'string' && (/^[\w#-]+$/.test(c) || (typeof CSS !== 'undefined' && CSS.supports('color', c))) ? c : null);
 function bmNorm(list) {
   const obj = x => x && typeof x === 'object';   // an entry that is no object (a bad copy in this browser): left out
   // lift: false, true (the lane above its signal) or "below" (the lane under it); label: a short text by the circle (an
   // old bookmark with "to": the arrow's)
   return (Array.isArray(list) ? list : []).filter(obj).map((b, i) => Object.assign({ n: +b.n || i + 1, t: num(parseT(b.t)), signal: b.signal || null,
-    text: b.text || '', label: (b.to == null || b.to === '') && b.label != null ? String(b.label) : '', color: b.color || null,
+    text: b.text || '', label: (b.to == null || b.to === '') && b.label != null ? String(b.label) : '', color: colorOk(b.color),
     lift: b.signal ? liftOf(b.lift) : false, top: typeof b.top === 'string' && b.top ? b.top : null },
     b.at != null && (typeof b.at === 'string' || obj(b.at)) ? { at: b.at } : {},   // at: the event its time came from (mkhtml.py); moved, it goes
     linkOf(b.link) ? { link: linkOf(b.link) } : {}))   // link: another view of the page ({view, bookmark}) its button opens
@@ -856,7 +859,7 @@ function cmpNorm(c) {
 function spanNorm(list) {
   return (Array.isArray(list) ? list : []).filter(s => s && typeof s === 'object').map(s => {
     const a = num(parseT(s.from)), b = num(parseT(s.to));
-    return { from: Math.min(a, b), to: Math.max(a, b), label: s.label != null ? String(s.label) : '', color: s.color || null,
+    return { from: Math.min(a, b), to: Math.max(a, b), label: s.label != null ? String(s.label) : '', color: colorOk(s.color),
       signals: Array.isArray(s.signals) ? s.signals.map(String) : typeof s.signals === 'string' && s.signals ? [s.signals] : null };
   }).filter(s => isFinite(s.from) && isFinite(s.to));
 }
@@ -866,16 +869,16 @@ function arNorm(list, bms) {
   // a shape, head or line of no table of its own ("constructor", a typo): the default one
   return old.filter(Boolean).concat(Array.isArray(list) ? list.filter(a => a && typeof a === 'object') : []).map(a => ({ from: +a.from, to: +a.to,
     shape: hasKey(AR_SHAPES, a.shape) ? a.shape : '~', head: hasKey(AR_HEADS, a.head) ? a.head : '>', line: hasKey(AR_LINES, a.line) ? a.line : 'solid',
-    color: a.color || null, label: a.label || '' }))
+    color: colorOk(a.color), label: a.label || '' }))
     .filter(a => a.from && a.to && a.from !== a.to);
 }
 // your markers [{t, label, color}] (a saved state, this browser) and groups [{name, signals: [full path], color}]: normalised
 function markNorm(list) {
   return (Array.isArray(list) ? list : []).map(m => ({ t: num(parseT(m && m.t)), label: m && m.label != null ? String(m.label) : '',
-    color: (m && m.color) || null })).filter(m => isFinite(m.t));
+    color: colorOk(m && m.color) })).filter(m => isFinite(m.t));
 }
 function groupNorm(list) {
   const seen = new Set();
   return (Array.isArray(list) ? list : []).filter(g => g && String(g.name ?? '').trim() && !seen.has(String(g.name).trim()) && seen.add(String(g.name).trim()))
-    .map(g => Object.assign({ name: String(g.name).trim(), signals: [...new Set(prefixes(g.signals))], color: g.color || null }, g.uid ? { uid: g.uid } : {}));
+    .map(g => Object.assign({ name: String(g.name).trim(), signals: [...new Set(prefixes(g.signals))], color: colorOk(g.color) }, g.uid ? { uid: g.uid } : {}));
 }

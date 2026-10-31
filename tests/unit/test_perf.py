@@ -51,6 +51,7 @@ class Converter(unittest.TestCase):
             base = run(sys.executable, '-I', '-c', 'import json, re, zlib')[1]   # an interpreter's own memory
         (t1, m1), (t4, m4) = got[100000], got[400000]
         say = f'100 000 changes: {t1:.1f} s {m1:.0f} MB; 400 000: {t4:.1f} s {m4:.0f} MB (an interpreter: {base:.0f} MB)'
+        print(f'test_perf: {say}', file=sys.stderr)   # in the gate's log: the drift is seen before a budget breaks
         self.assertLess(t4, 30 * SCALE, say)
         self.assertLess(m4, 400, say)
         self.assertLess(t4 / max(t1, 0.05), 6, 'time grows faster than the dump: ' + say)

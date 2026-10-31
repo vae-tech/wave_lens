@@ -15,6 +15,39 @@ class Blank(unittest.TestCase):
         self.assertEqual(set(''.join(out.splitlines()[:2])), {' '})
 
 
+class Output(unittest.TestCase):
+    """review 0.31 S9, T17: Verilator's text read without Verilator: what a format change of it would break."""
+    TEXT = ('[15] %Error: fsm.sva:12: Assertion failed in top.dut.a_one: at 15ps\n'
+            '%Error: fsm.sva:12: Verilog $stop\n'
+            '[42.5] %Error: /build/sva-verify/fsm/fsm.sva:12: Assertion failed in top.dut.a_one\n'
+            '[60] %Error: fsm.sva:30: Assertion failed in top.dut.a_two\n'
+            '[70] %Error: other.sv:12: Assertion failed in top.dut\n'
+            '[80] %Warning: fsm.sva:30: not a failure\n'
+            '- fsm_tb.sv:159: Verilog $finish\n')
+    LINES = {('fsm.sva', 12): 'a_one', ('fsm.sva', 13): 'a_one', ('fsm.sva', 30): 'a_two'}
+
+    def test_failures_by_label(self):
+        self.assertEqual(V.failures(self.TEXT, self.LINES, 1), {'a_one': [15, 42], 'a_two': [60]})   # a line outside the assertions: none
+
+    def test_the_precision(self):
+        self.assertEqual(V.failures(self.TEXT, self.LINES, 1000)['a_one'], [15000, 42500])
+
+    def test_none(self):
+        self.assertEqual(V.failures('- fsm_tb.sv:159: Verilog $finish\n', self.LINES, 1), {})
+
+    def test_the_finish_and_the_cap(self):
+        self.assertTrue(V.FINISH_RE.search(self.TEXT))
+        err, _ = V.audit('x', {'unsupported': set()}, ['a'], [], Audit.sim('%Error: too many errors\n'), 0, Audit.res(a={}))
+        self.assertTrue(any('$finish' in e for e in err), err)
+
+    def test_what_verilator_refuses(self):
+        text = '%Error-UNSUPPORTED: fsm.sva:7:12: Unsupported: within\n%Error: fsm.sva:9:3: syntax error\n%Warning-WIDTH: fsm.sva:2:1: x\n'
+        self.assertEqual(V.UNSUP_RE.findall(text), [('fsm.sva', '7'), ('fsm.sva', '9')])
+
+    def test_the_timescale(self):
+        self.assertEqual(V.TIME_RE.search('`timescale 1ns / 10ps\n').groups(), ('10', 'ps'))
+
+
 class Audit(unittest.TestCase):
     """review VI T3: what makes an agreement hollow is an error, not a smaller comparison."""
     EX = {'unsupported': {'a_within', 'c_cov'}}

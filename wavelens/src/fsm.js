@@ -214,7 +214,7 @@ class Fsms {
     const mine = new Set(this.mine); this.pick = new Set([...this.pick].filter(r => mine.has(r)));
   }
   close() { panelKeep(this, 'fsms'); this.v.closeMenu(); this.ac.abort(); this.el.remove();
-    if (this.v.fsmP === this) this.v.fsmP = null; this.v.canvas.focus({ preventScroll: true }); }
+    if (this.v.fsmP === this) this.v.fsmP = null; this.v.refocus(); }
   // an FSM's states the waves reach, of its table's
   seenOf(r) { const st = this.v.fsmStatsOf(r); return [st.states.length - st.unseen.length, st.states.length]; }
   // its name under its module (a struct's field: struct.field)
@@ -447,9 +447,7 @@ class Fsms {
         e.preventDefault(); bs[(j + (e.key === 'ArrowDown' ? 1 : -1) + bs.length) % bs.length]?.focus(); }
     });
     el.addEventListener('contextmenu', e => e.preventDefault());
-    const off = v.offMenu = e => { if (!el.contains(e.target)) v.closeMenu(); };
-    setTimeout(() => { if (v.menuEl !== el) return; document.addEventListener('pointerdown', off, { capture: true, signal: v.ac.signal });
-      window.addEventListener('blur', off, { signal: v.ac.signal }); }, 0);
+    v.menuOff(el);
     (el.querySelector('button') || el).focus({ preventScroll: true });
   }
   events() {
@@ -591,10 +589,9 @@ Object.assign(WaveView.prototype, {
     const b = el.getBoundingClientRect();
     el.style.left = Math.max(4, Math.min(x, innerWidth - b.width - 4)) + 'px'; el.style.top = Math.max(4, Math.min(y, innerHeight - b.height - 4)) + 'px';
     el.addEventListener('click', e => { const m = e.target.closest('button[data-m]'); if (!m) return; if (m.dataset.m === 'copy') this.copyText(text);
-      this.closeMenu(); this.canvas.focus({ preventScroll: true }); });
+      this.closeMenu(); this.refocus(); });
     el.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); this.closeMenu(); this.canvas.focus(); } });
-    const off = this.offMenu = e => { if (!el.contains(e.target)) this.closeMenu(); };
-    setTimeout(() => { if (this.menuEl === el) document.addEventListener('pointerdown', off, { capture: true, signal: this.ac.signal }); }, 0);
+    this.menuOff(el, false);
     el.querySelector('button').focus({ preventScroll: true });
     return o;
   },

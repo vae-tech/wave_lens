@@ -10,7 +10,7 @@ wavelens/                     what a page needs, nothing else
   wavelens.js / wavelens.css  framework (one <script> + one <link>); wavelens.js is made by make wavelens from src/
   src/                        model.js (settings, sorting, find, time, values, the parser), vcd.js (a VCD read in the
                               page), paint.js (the two painters
-                              and what they draw), view.js (WaveView and its parts Bar, Names, Notes), edit.js (the
+                              and what they draw), bar.js (the bar: Bar, tooltips, help), names.js (the names column Names, the lists Notes), view.js (WaveView), menu.js (its menus), look.js (what it keeps in this browser, gaps, cycles), edit.js (the
                               viewer's commands view.run, your groups and markers, undo, Save page, the live link),
                               diff.js (a second dump compared: bands, A / B / overlay), modules.js (the Modules panel and Only), fsm.js (the
                               state machines panel and its layer), log.js (the log under the viewer), svg.js
@@ -79,7 +79,7 @@ What each part needs:
 | To | You need |
 |---|---|
 | open the pages | a browser |
-| the tools | python3 ≥ 3.8 (standard library only) |
+| the tools | python3 ≥ 3.9 (standard library only) |
 | the examples | Verilator ≥ 5 (`make examples`) |
 | the assertion engine | cargo ≥ 1.82 and `rustup target add wasm32-unknown-unknown` (`make sva-build`); musl for `make dist-linux`, mingw-w64 for `make dist-windows` |
 | the tests and the pictures | `pip install playwright`, `python3 -m playwright install chromium` (`make smoke`, `make check`); `fonts-ibm-plex` (or the network) for `make shots`, `make guide-shots`; GTKWave's `vcd2fst` and `fst2vcd` (`apt install gtkwave`) for `make check`: `sva fst` is compared with them (`tests/unit/test_svafst.py`, `sva/cli/tests/cli.rs`) |
@@ -88,7 +88,7 @@ What each part needs:
 ```sh
 make check                  # the gate before a commit: wavelens.js current and its sources ≤ 160 columns, the committed sva.wasm.js the build of sva/, every page smoke needs, sva-test and unit (WAVELENS_STRICT: a test lacking what the gate builds fails, the engine's goldens over the examples too), sva-verify, mcp-bench, smoke STRICT=1, shots-check
 make unit                   # tests/unit: the tools on small VCDs of what simulators write (~20 s, standard library)
-make unit-bless             # rewrite tests/unit/golden (the bytes wavejson.py and vcd2wavedrom.py write for the fixtures) after a meant change of them: read the diff
+make unit-bless             # rewrite tests/unit/golden (the bytes wavejson.py and vcd2wavedrom.py write for the fixtures, the public names of api.txt) after a meant change of them: read the diff
 make mcp-bench              # tools/wavemcp.py on the benchmark tasks by a script (answers checked); AGENT=claude|codex: agents
 make wavelens               # wavelens/wavelens.js from wavelens/src/*.js (after editing them; make html / example do it too; lines ≤ 160 columns)
 make demo examples html     # rebuild docs/demo_waves.js, the example pages, the demo page
@@ -181,7 +181,10 @@ case's `ref` its `$var` as a VCD writes it), and 200 generated types files and d
 `test_svafst` holds `sva fst` to GTKWave's `vcd2fst`: 40 VCDs from a seed (widths 1 to 1000, x and z, reals, strings,
 aliases, small blocks) and every fixture, both FSTs read back by `fst2vcd` and `sva vcd`, the same variables and
 changes; the fixtures where `vcd2fst` writes another FST are listed with the reason (`DIFFERS`).
-`tests/unit/golden` keeps the bytes `wavejson.py` and `vcd2wavedrom.py` write (`make unit-bless`). `svaverify.py` does
+`tests/unit/golden` keeps the bytes `wavejson.py` and `vcd2wavedrom.py` write and, in `api.txt`, the public names: the exports of
+`WaveLens` and the commands with their arguments, so a name removed or renamed fails until it is meant (`make unit-bless`). The
+commands are held without a browser too: `test_viewedit.py` checks `bits`, `reset`, `unfold` and `state` ↔ `set_state`, and
+`COMMANDS` against the `command(…)` calls of `edit.js`; `test_svabuild.py` every option of `sva diff` that `compare` passes on. `svaverify.py` does
 not let the comparison with Verilator shrink: only the assertions of an example's `unsupported` list may be put out,
 the simulation must reach `$finish`, every compared assertion must be evaluated (not capped, not vacuous only). The
 smoke section `examples` evaluates the exact views' bindings again in the page (WebAssembly, a worker for the first) and
@@ -267,9 +270,23 @@ Chromium, before / after stage 9.4; the arbiter page: the same dump with five bi
 | `renderNames()` (the names column) | 13.2 ms | 1.4 ms (built again only when its rows change) |
 | a click on a name (select, draw) | 70.9 ms | 4.8–5.6 ms |
 | ArrowDown on the waves | 67.5 ms | 4.6–5.1 ms |
-| a find keystroke (`p`, `px`, `pxv`, `pxvd`) | 29 ms | 38–43 ms: the rows shown change with every letter, so the DOM of the names column is built again (1488 rows 69 ms, 309 rows 15 ms); a virtual names column would help |
+| a find keystroke (`p`, `px`, `pxv`, `pxvd`) | 29 ms | 38–43 ms: the rows shown change with every letter, so the DOM of the names column is built again (1488 rows 69 ms, 309 rows 15 ms); above 4000 rows the column holds those near the view (below) |
 | 20 wheel events and the frame after them | 66.7 ms | 35 ms (one draw per frame; most of it is the two frames waited for) |
 | Clear on the arbiter page | 28.4 ms | 22.5–30.8 ms |
+
+20 000 signals in 400 modules, 2.2 M changes, 37 MB, every row open (20 401 rows; `docs/reviews/global-review-2026-10-31/probe/view-scale.py`).
+Above 4000 rows the names column holds those near the view:
+
+| Job | 0.31 | now |
+|---|---|---|
+| open in `viewer.html` | 9.0 s | 5.9 s, 392 MB of heap |
+| `draw()`, the whole time | 45 ms | 39 ms |
+| a find keystroke (`s` … `sig12`) | 1183–1302 ms | 54–159 ms |
+| a click on a name, ArrowDown | 397, 78 ms | 91, 53 ms |
+| `setCursor` | 115 ms | 27 ms |
+| fold every module | 143 ms | 15 ms |
+| `toSVG()` of the screen | 258 ms | 32 ms, 537 KB |
+| `toSVG({ rows: 'all' })` | 13.5 s, 416 MB | the same; the command `picture` refuses above 5000 rows, a PNG above 16384 px |
 
 The second cursor (step 12.4: the rising edges of a clock indexed once, the cycles between the cursors by two binary
 searches): a clock of 400 000 changes and 20 buses, 100 ns of 2 ms shown, `draw()` 0.89 ms without the second cursor
@@ -339,7 +356,7 @@ approval"): the agent falls back to its shell. The runs, their transcripts and a
 
 ## Versions
 
-Two numbers, `MAJOR.MINOR` (0.19 now; [`CHANGELOG.md`](../CHANGELOG.md) lists them all). The work goes on a branch;
+Two numbers, `MAJOR.MINOR` (`VERSION` has the one of now; [`CHANGELOG.md`](../CHANGELOG.md) lists them all). The work goes on a branch;
 a version is a merge into the development branch `dev` (`git merge --no-ff`) tagged `dev/vMAJOR.MINOR` (an annotated
 tag, its message the changelog entry; `dev` and its tags were `main` and `main/v*` up to 0.18). The public branch `master` then gets the version as one commit: `python3 -I tools/publish.py
 MAJOR.MINOR "what it brings"` writes the tree of `dev/vMAJOR.MINOR` less the internal files (`INTERNAL` there)

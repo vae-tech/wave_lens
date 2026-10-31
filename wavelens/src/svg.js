@@ -147,6 +147,7 @@ const WaveSVG = {
       if (V && V.cursor >= from && V.cursor <= to) P.path([['M', X(V.cursor), top], ['L', X(V.cursor), bodyEnd]], { stroke: 'acc', w: 1.2 });
       if (V) V.paintMeasures(P, X, from, to, xL, xR, top, bodyEnd, showAxis ? [axisY, 20] : null, true);   // the second cursor, the measured range
       if (V && showAxis) V.paintRunTag(P, xR, axisY, 20);   // which run of a compare this is
+      else if (docShow && showAxis) paintRunTagOf(P, xR, axisY, 20, docShow, [cmpNameA(M), M.compare.name]);
     });
     notes.forEach((b, i) => {
       const cy = notesY + i * 20 + 10;

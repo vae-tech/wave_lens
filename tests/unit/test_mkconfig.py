@@ -66,10 +66,29 @@ class Tool(unittest.TestCase):
             out = os.path.join(d, 'c.json')
             rc, _, err = H.run_tool('mkconfig', H.fixture('string_event'), '--out', out)
             self.assertEqual(rc, 0, err)
-            cfg = json.load(open(out))
+            cfg = H.load(out)
         self.assertEqual(list(cfg['signals']), ['tb.msg', 'tb.clk'])   # the event is left out
         self.assertIn('event variable(s) left out', err)
         self.assertEqual(cfg['waves'], os.path.relpath(H.fixture('string_event'), d))
+
+    def test_a_renamed_scope(self):   # review 0.31 P3, T16
+        head = lambda s: f'$timescale 1ns $end\n$scope module tb $end\n$scope module {s} $end\n$var wire 1 ! a $end\n$var wire 8 " d [7:0] $end\n$upscope $end\n$var wire 1 # keep $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\nb1 "\n0#\n#10\n'
+        with H.tmp() as d:
+            a, b, out = H.vcd(d, '', header=head('u_master'), name='a.vcd'), H.vcd(d, '', header=head('u_mstr'), name='b.vcd'), os.path.join(d, 'c.json')
+            rc, _, err = H.run_tool('mkconfig', a, '--out', out)
+            self.assertEqual(rc, 0, err)
+            cfg = H.load(out)
+            cfg['signals']['tb.u_master.a']['alias'] = 'mine'
+            H.dump(cfg, out)
+            rc, _, err = H.run_tool('mkconfig', b, '--out', out, '--update', '--force')
+            self.assertEqual(rc, 0, err)
+            self.assertIn('a renamed scope? --map tb.u_master=tb.u_mstr keeps their settings', err)
+            self.assertNotIn('alias', H.load(out)['signals']['tb.u_mstr.a'])
+            H.dump(cfg, out)
+            rc, _, err = H.run_tool('mkconfig', b, '--out', out, '--update', '--map', 'tb.u_master=tb.u_mstr')
+            self.assertEqual(rc, 0, err)
+            self.assertEqual(H.load(out)['signals']['tb.u_mstr.a']['alias'], 'mine')
+            self.assertNotIn('renamed', err)
 
     def test_exists_without_update_dies(self):
         with H.tmp() as d:
@@ -88,10 +107,10 @@ class Tool(unittest.TestCase):
             self.assertIn('2 of the 2 signals', err)
             rc, _, err = H.run_tool('mkconfig', H.fixture('late'), '--out', out, '--update')   # tb.s, tb.b again
             self.assertEqual(rc, 0, err)
-            cfg = json.load(open(out))
+            cfg = H.load(out)
             rc, _, err = H.run_tool('mkconfig', H.fixture('wide'), '--out', out, '--update', '--force')
             self.assertEqual(rc, 0, err)
-            cfg2 = json.load(open(out))
+            cfg2 = H.load(out)
         self.assertEqual(cfg['waves'], os.path.relpath(H.fixture('late'), d))
         self.assertEqual(list(cfg2['signals']), ['tb.w'])
 
@@ -140,7 +159,7 @@ module m; p::st_t state_q, state_d; stat_t status; outer_t o; enum {A, B} inline
         # tests/unit/sv/sources.sv against the tables it should give (the page reads it against the same file: smoke readers):
         # a type used in another module, an array, a port, an inline enum; not a function's names, not struct members; a
         # name of two types and the enums it does not read left out with a note each
-        want = json.load(open(os.path.join(H.ROOT, 'tests', 'unit', 'sv', 'sources.json')))
+        want = H.load(os.path.join(H.ROOT, 'tests', 'unit', 'sv', 'sources.json'))
         e, f, notes = M.sv_tables(M.sv_texts([os.path.join(H.ROOT, 'tests', 'unit', 'sv', 'sources.sv')]))
         self.assertEqual({k: {str(a): b for a, b in v.items()} for k, v in e.items()}, want['enums'])
         self.assertEqual(f, want['fields'])
@@ -165,7 +184,7 @@ class SvaBinds(unittest.TestCase):
             out = os.path.join(d, 'c.json')
             rc, _, err = H.run_tool('mkconfig', dump, '--out', out, '--sva', sv)
             self.assertEqual(rc, 0, err)
-            bind = json.load(open(out))['bind']
+            bind = H.load(out)['bind']
         self.assertEqual([(b['assert'], b['scope'], b['show']) for b in bind], [('a_one', 'tb', True), ('a_none', '', False)])
         self.assertIn('1 bound to their only instance', err)
 

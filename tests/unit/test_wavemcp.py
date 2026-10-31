@@ -54,6 +54,32 @@ class Dump(unittest.TestCase):
         self.assertEqual(i['resets'], ['tb.rst_n'])
         self.assertIn(['tb.dut.regs', 150], i['scopes'])
 
+    def test_names_as_the_other_tools_take_them(self):   # review 0.31 M2, T10: a tail of a path in wave_diff and wave_cut
+        self.assertEqual(self.call('wave_diff', b=self.vcd, signals=['s_tvalid', 'tb.dut.s_t*'])['signals_compared'], 4)
+        self.assertEqual(self.call('wave_diff', b=self.vcd, scope='tb.dut', signals=['s_tdata'])['signals_compared'], 1)
+        out = os.path.join(self.d.name, 'tail.vcd')
+        self.assertEqual(self.call('wave_cut', out=out, signals=['s_tvalid', 's_tready'], to=100)['variables'], 2)
+        self.assertIn('no signal', self.error('wave_cut', out=out, signals=['zz_nope']))
+
+    def test_times_outside_the_dump(self):   # review 0.31 M3, T11
+        r = self.call('wave_values', signals=['s_tvalid'], at=[10, 1e9, -5])
+        self.assertEqual(len(r['notes']), 1)
+        self.assertIn('outside the dump (0 … 40000 ns)', r['notes'][0])
+        self.assertIn('1000000000', r['notes'][0])
+        self.assertNotIn('notes', self.call('wave_values', signals=['s_tvalid'], at=[10]))
+        self.assertIn('outside the dump', self.error('wave_changes', signals=['s_tvalid'], **{'from': '1ms', 'to': '2ms'}))
+        self.assertIn('outside the dump', self.error('wave_cut', out=os.path.join(self.d.name, 'out.vcd'), **{'from': '1ms', 'to': '2ms'}))
+
+    def test_rows_of_one_length(self):   # review 0.31 M7, T9
+        s = self.call('wave_signals', limit=200)
+        self.assertEqual(s['columns'], ['path', 'width', 'changes', 'extra'])
+        self.assertEqual({len(x) for x in s['signals']}, {4})
+        q = W.call('wave_signals', {'dump': H.fixture('realkinds')})
+        self.assertIn('real', {x[3] for x in json.loads(q[0])['signals']})
+
+    def test_page_out_in_no_directory(self):   # review 0.31 M8
+        self.assertIn('"out": no such directory', self.error('wave_page', signals=['s_tvalid'], out='/nope/dir/x.html'))
+
     def test_signals(self):
         s = self.call('wave_signals', scope='tb.dut', depth=1, pattern='s_t*')
         self.assertEqual([x[0] for x in s['signals']], ['s_tvalid', 's_tready', 's_tlast', 's_tdata'])
@@ -208,7 +234,8 @@ class Dump(unittest.TestCase):
         self.assertNotIn('compare', json.loads(W.call('view_get', {'page': page})[0]))
         made = os.path.join(self.d.name, 'cmp.json')
         doc = self.call('wave_page', signals=['tb.dut.err'], out=made, compare=b)
-        self.assertEqual(json.load(open(made))['compare']['differ'], 1, doc)
+        with open(made) as f:
+            self.assertEqual(json.load(f)['compare']['differ'], 1, doc)
 
     @H.needs(svabuild.find_bin(), 'no sva CLI')
     def test_cut(self):
@@ -222,7 +249,7 @@ class Dump(unittest.TestCase):
         cut = json.loads(W.call('wave_values', {'dump': out, 'signals': ['tb.dut.perf.cyc_cnt'], 'at': 1000})[0])
         self.assertEqual(full['rows'], cut['rows'])
         self.assertIn('"out"', self.error('wave_cut', out=self.vcd))
-        self.assertIn('no signal zz_nope', self.error('wave_cut', out=out, signals=['zz_nope']))
+        self.assertIn('no signal "zz_nope"', self.error('wave_cut', out=out, signals=['zz_nope']))
 
     @H.needs(svabuild.find_bin(), 'no sva CLI')
     def test_sva(self):
@@ -333,6 +360,54 @@ class Views(unittest.TestCase):
                     post('reply', {'rid': m['rid'], 'results': [dict(o, seen=True) for o in m['ops']]})
         threading.Thread(target=run, daemon=True).start()
         return post
+
+    def test_rotate(self):   # review 0.31 M9, T13: a copy of a page with the old key no longer connects
+        import urllib.error, urllib.request
+        b = W.Bridge(port=0, token='t' * 20)
+        W.BRIDGE.append(b)
+        old = b.token
+        self.call('view_live', rotate=True)
+        self.assertNotEqual(b.token, old)
+        with open(os.path.join(CACHE.name, 'wavelens', 'live-token'), encoding='utf-8') as f:
+            self.assertEqual(f.read().strip(), b.token)
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen(f'http://127.0.0.1:{b.port}/events?token={old}&cid=abcd', timeout=5)
+        self.assertEqual(e.exception.code, 403)
+
+    def test_headers(self):   # review 0.31 M11, T13: the answer readable by an Origin of this link only, no banner, a verb it has not: JSON
+        import http.client
+        b = W.Bridge(port=0, token='t' * 20)
+        W.BRIDGE.append(b)
+        def req(method, origin=None):
+            c = http.client.HTTPConnection('127.0.0.1', b.port, timeout=5)
+            c.request(method, '/', headers={'Origin': origin} if origin else {})
+            r = c.getresponse()
+            body = r.read()
+            c.close()
+            return r.status, r.getheader('Access-Control-Allow-Origin'), r.getheader('Server'), body
+        self.assertEqual(req('GET', 'null')[:2], (200, 'null'))
+        self.assertEqual(req('GET', 'http://localhost:9000')[1], 'http://localhost:9000')
+        self.assertIsNone(req('GET', 'https://evil.example')[1])
+        self.assertEqual(req('OPTIONS', 'https://evil.example')[0], 403)
+        self.assertEqual(req('OPTIONS', 'null')[:2], (204, 'null'))
+        self.assertEqual(req('PUT')[0], 405)
+        self.assertIn(b'GET or POST', req('DELETE')[3])
+        self.assertNotIn('Python', req('GET')[2])
+
+    def test_save_writes_the_file_named(self):   # review 0.31 M10, T13: a page does not choose the file that is written
+        b = W.Bridge(port=0, token='t' * 20)
+        W.BRIDGE.append(b)
+        other = os.path.join(self.d.name, 'other.html')
+        shutil.copy(self.page, other)
+        self.fake_page(b, other)   # this page says it is other.html
+        before = H.text(self.page)
+        c = b.pages()[0]
+        r = W.live_edit({'page': self.page, 'save': True, 'ops': [{'op': 'marker', 't': 5}]}, dict(c), {'key': 'one', 'timed': True})
+        self.assertIsNone(r['saved'])
+        self.assertIn('is not this page', r['note'])
+        self.assertEqual(H.text(self.page), before)
+        r = W.live_edit({'save': True, 'ops': [{'op': 'marker', 't': 6}]}, dict(c), {'key': 'one', 'timed': True})
+        self.assertIn('give "page"', r['note'])
 
     def test_live(self):
         import urllib.error, urllib.request
@@ -466,7 +541,9 @@ class Views(unittest.TestCase):
         self.assertTrue(err)
         self.assertIn('no page file', text)   # refused before the edit is done
         post('bye', {})
+        t0 = time.monotonic()
         text, err = W.call('view_edit', {'page': dump, 'ops': [{'op': 'marker', 't': 5}]})
+        self.assertLess(time.monotonic() - t0, 1, 'a dump not open in VS Code: waited for once (review 0.31 M4)')
         self.assertTrue(err)
         self.assertIn('not open in VS Code', text)
         b.close()
@@ -633,7 +710,7 @@ class Protocol(unittest.TestCase):
                 ({'jsonrpc': '2.0', 'id': 2, 'method': 'initialize', 'params': [1]}, -32602),
                 (call(3, 'sva_check', {'dump': short, 'defines': ['X=1'], 'source': 'a: assert property (@(posedge b[0]) 1);',
                                        'sva_bin': '/nonexistent/sva'}), (True, 'no sva binary')),
-                (call(4, 'sva_check', {'dump': short, 'defines': 5}), (True, '"defines": a object/array of string, not 5')),
+                (call(4, 'sva_check', {'dump': short, 'defines': 5}), (True, '"defines": an object/array of string, not 5')),
                 (call(5, 'wave_signals', {'dump': short, 'scope': 5}), (True, '"scope": a string, not 5')),
                 (call(6, 'wave_values', {'dump': short, 'signals': ['b'], 'at': '1e999'}), (True, 'bad time "1e999"')),
                 ('{"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "wave_values", "arguments": '
@@ -642,7 +719,7 @@ class Protocol(unittest.TestCase):
                  f'{{"dump": {json.dumps(short)}, "signals": ["b"], "at": NaN}}}}}}', (True, '"at": a number/string/array')),
                 (call(9, 'wave_page', {'dump': short, 'signals': ['b'], 'from': -5, 'out': os.path.join(d, 'w.json')}), (False, '"wavejson"')),
                 (call(10, 'wave_signals', {'dump': short, 'limit': 2.0}), (False, '"total"')),
-                (call(11, 'wave_signals', {'dump': short, 'limit': 'many'}), (True, '"limit": a integer')),
+                (call(11, 'wave_signals', {'dump': short, 'limit': 'many'}), (True, '"limit": an integer')),
                 (call(12, 5, {}), -32602),
                 ({'jsonrpc': '2.0', 'id': {'a': 1}, 'method': 'ping'}, -32600),
                 ({'jsonrpc': '2.0', 'id': 14, 'method': 5}, -32600),
@@ -772,6 +849,26 @@ class Arguments(unittest.TestCase):
         self.assertLess(size(lean), size(full) * 0.7)   # (measured: 9649 -> 6474 characters)
         self.assertNotIn('types', next(t for t in lean if t['name'] == 'wave_values')['inputSchema']['properties'])
         self.assertEqual(self.value(types=os.path.join(self.TYPES, 'questa.types.json')), 'STOP')   # still taken
+
+    def test_view_edit_says_what_needs_a_page(self):   # review 0.31 M5
+        d = next(t for t in W.listing(False) if t['name'] == 'view_edit')['description']
+        for k in W.viewedit.LIVE_ONLY:
+            if k != 'picture':
+                self.assertIn(f'{k}({W.viewedit.COMMANDS[k]})·live', d)
+        self.assertNotIn('cursor(t)·live', d)
+
+    def test_a_name_and_a_side_checked(self):   # review 0.31 M6, M12
+        text, err = W.call('wave_values', {'dump': self.QV, 'signals': 'types_tb.al', 'at': 0, 'side': 'middle'})
+        self.assertTrue(err)
+        self.assertIn('"side": before or after', text)
+        for r in ('roman', 'q'):
+            text, err = W.call('wave_values', {'dump': self.QV, 'signals': 'types_tb.al', 'at': 0, 'radix': r})
+            self.assertTrue(err)
+            self.assertIn('"radix": auto, hex', text)
+        text, err = W.call('wave_values', {'dump': self.QV, 'signals': 'types_tb.al', 'at': 0, 'radix': 'sq15'})
+        self.assertFalse(err, text)
+        text, err = W.call('wave_signals', {'dump': self.QV, 'limit': 'ten'})
+        self.assertIn('"limit": an integer, not "ten"', text)
 
     def test_unknown_argument(self):
         text, err = W.call('wave_values', {'dump': self.QV, 'signals': 'types_tb.al', 'at': 0, 'colour': 'red'})

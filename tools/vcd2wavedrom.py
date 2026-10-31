@@ -52,17 +52,17 @@ import argparse, bisect, collections, decimal, functools, json, math, os, re, st
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
 import dumpscan, svabuild, wavefind, wavejson  # noqa: E402
-from common import UNIT_PS, WaveError, add_sva_bin_arg, check_config, glob_re, run_main  # noqa: E402
+from common import WaveError, add_sva_bin_arg, check_config, glob_re, parse_time, run_main  # noqa: E402
 
 INT_KINDS = {'integer', 'int', 'shortint', 'longint', 'byte'}   # $var types read as signed decimal without an enum (wavelens/src/vcd.js VCD_INT)
 X_TEXT = object()   # an unknown value of a "kind" real / string signal in a clock-sampled row (None there is a "|" gap)
 
 
 def to_ps(s):
-    m = re.fullmatch(r'\s*([\d.]+(?:e-?\d+)?)\s*(zs|as|fs|ps|ns|us|ms|s)\s*', str(s))
-    if not m:
+    t = parse_time(str(s), None)
+    if t is None or t < 0:
         raise WaveError(f'vcd2wavedrom: bad time "{s}" (need a unit, e.g. 250ns)')
-    return float(m.group(1)) * UNIT_PS[m.group(2)]
+    return t
 
 
 class Builtin:

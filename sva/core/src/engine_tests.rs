@@ -110,6 +110,7 @@ cases! {
     consecutive_breaks: "a |-> b[*3]", "a=1000 b=1100" => "0-2F";
     consecutive_range: "a |-> b[*1:3] ##1 c", "a=10000 b=11100 c=00010" => "0-3P";
     zero_repetition_is_empty: "s |-> a ##1 b[*0] ##1 c", "s=1000 a=1000 b=0000 c=0100" => "0-1P";
+    zero_repetition_fused: "a |-> ##1 b[*0] ##0 c", "a=10 b=00 c=10" => "0-0P";
     optional_repetition: "s |-> a ##1 b[*0:1] ##1 c", "s=1000 a=1000 b=0100 c=0010" => "0-2P";
     open_repetition_active: "a |-> b[*2:$] ##1 c", "a=1000 b=1111 c=0000" => "0-3A";
     goto: "a |-> b[->2] ##1 c", "a=100000 b=010100 c=000010" => "0-4P";

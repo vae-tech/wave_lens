@@ -351,11 +351,27 @@ def load(path):
     return read(d, path)
 
 
+def check_entry(where, path, e):
+    """A signal of a types file has the shape the tools read, else a WaveError that names it (a file edited by hand)."""
+    at = f'{where}: signals["{path}"]'
+    if not isinstance(e, dict):
+        raise WaveError(f'{at} is not an object')
+    if not isinstance(e.get('width', 1), int) or isinstance(e.get('width'), bool):
+        raise WaveError(f'{at}: "width" is a number of bits, not {json.dumps(e["width"])}')
+    if not isinstance(e.get('enum', {}), dict):
+        raise WaveError(f'{at}: "enum" is an object {{"value": "label"}}, not {json.dumps(e["enum"])[:60]}')
+    fields = e.get('fields', [])
+    if not isinstance(fields, list) or not all(isinstance(f, dict) and {'name', 'msb', 'lsb'} <= set(f) for f in fields):
+        raise WaveError(f'{at}: "fields" is a list of {{"name", "msb", "lsb"}}, not {json.dumps(fields)[:60]}')
+
+
 def read(d, where='types'):
     if not isinstance(d, dict) or d.get('wavelens') != 'types':
         raise WaveError(f'{where}: not a WaveLens types file (no "wavelens": "types"; made by tools/questa/wavelens_types.tcl '
                         'or svtypes.py verilator)')
     sigs, notes = dict(d.get('signals') or {}), list(d.get('notes') or [])
+    for p, e in sigs.items():
+        check_entry(where, p, e)
     if isinstance(d.get('describe'), dict):
         s, n = from_describe(d['describe'])
         sigs.update(s)
@@ -587,6 +603,8 @@ def main():
     for p, e in t['signals'].items():
         if 'enum' in e:
             print(f'  {p} [{e["width"]}]: ' + ' '.join(f'{v}={k}' for k, v in e['enum'].items()))
+        elif not e.get('fields'):
+            print(f'  {p} [{e.get("width", "?")}]: (no labels)')
         else:
             star = any('enum' in f for f in e['fields'])
             print(f'  {p} [{e["width"]}]: ' + ', '.join(f'{f["name"]}[{f["msb"]}:{f["lsb"]}]' + ('*' if 'enum' in f else '')

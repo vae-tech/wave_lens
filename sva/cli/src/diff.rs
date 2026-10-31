@@ -30,7 +30,7 @@ macro_rules! outln {
 }
 
 const USAGE: &str = "usage: sva diff A B [--signals PAT,...] [--signals-from FILE] [--scope S] [--from T] [--to T] [--offset [-]T] [--map A=B ...]
-                [--segment SIGNAL [--align]] [--json [FILE|-]] [--junit FILE] [--limit N] [--spans N] [--quiet]
+                [--segment SIGNAL [--align]] [--json [FILE.json|-]] [--junit FILE] [--limit N] [--spans N] [--quiet]
 Two dumps (VCD or FST) compared change by change, streamed: neither is held in memory. A signal of A pairs with the one
 of B at its path; --map A=B renames A's paths for B: a scope (the longest one that matches) or one signal's path (an
 exact pair wins); no `=` in a name. Two dumps with one top scope each, named apart, pair their tops without a map.
@@ -40,8 +40,8 @@ in B, is listed (not_in_a, only_a), not an error.
 --from/--to: the window in A's time (default: the time both dumps cover), the changes at both ends included;
 --offset: B's time is A's time plus this. --segment: the counts per segment, a segment from each change of that signal
 in A; --align: segment k of B starts at the k-th change of the signal in B and compares on the length both have (the
-rest of a longer segment is not compared). --json: the result as JSON (times in ps) to FILE, or stdout instead of the
-text; --junit: a JUnit XML report, a test case per segment. --limit: differences listed (default 20, 0 all); --spans:
+rest of a longer segment is not compared). --json: the result as JSON (times in ps) to FILE (a name ending with .json, as
+the dumps can follow), or stdout instead of the text; --junit: a JUnit XML report, a test case per segment. --limit: differences listed (default 20, 0 all); --spans:
 per signal its stretches that differ in the JSON (default 0: none). TIME is a number with a unit (100ns, 2.5us; ps without one).
 Exit status: 0 the dumps are equal over the window; 1 they differ; 2 usage, a dump that does not read, a signal not
 in it, no time in common.";
@@ -64,6 +64,7 @@ impl Kind {
     }
     fn word(self) -> String {
         match self {
+            Kind::Bits(1) => "1 bit".into(),
             Kind::Bits(w) => format!("{w} bits"),
             Kind::Real => "real".into(),
             Kind::Text => "string".into(),
@@ -184,7 +185,7 @@ fn opts(args: &[String]) -> Result<Opt, String> {
             "--segment" => o.segment = Some(val(&mut i, a)?),
             "--align" => o.align = true,
             "--json" => {
-                // a file only when it is one: `-`, or a name ending with .json (else the dumps follow)
+                // a file only when it says so: `-`, or a name ending with .json (--json may stand before the dumps)
                 let f = args.get(i + 1).filter(|f| f.as_str() == "-" || f.ends_with(".json"));
                 o.json = Some(f.cloned().unwrap_or_else(|| "-".into()));
                 if f.is_some() {
@@ -200,7 +201,7 @@ fn opts(args: &[String]) -> Result<Opt, String> {
         }
         i += 1;
     }
-    let [a, b] = <[String; 2]>::try_from(files).map_err(|f| format!("two dumps, A and B ({} given)\n{USAGE}", f.len()))?;
+    let [a, b] = <[String; 2]>::try_from(files).map_err(|f| format!("two dumps, A and B ({} given: {})\n{USAGE}", f.len(), f.join(" ")))?;
     (o.a, o.b) = (a, b);
     if o.align && o.segment.is_none() {
         return Err("--align aligns the segments of --segment: give --segment SIGNAL".into());
@@ -233,8 +234,8 @@ fn to_ps(t: u64, ps: f64) -> i64 {
     if ps.fract() == 0.0 { (t as i64).saturating_mul(ps as i64) } else { (t as f64 * ps).round() as i64 }
 }
 
-/// The last time of a dump: an FST's header (its last block), a VCD's last `#time` (its tail read); None when there
-/// is none to read there (then the last change counts).
+/// The last time of a dump: an FST's header (its last block), a VCD's last `#time` (the tail read, more of it until one is
+/// there: a last step can be any size); None when it has none (then the last change counts).
 pub(crate) fn end_time(path: &str) -> Option<u64> {
     let mut f = BufReader::new(std::fs::File::open(path).ok()?);
     if fst_reader::is_fst_file(&mut f) {
@@ -243,19 +244,28 @@ pub(crate) fn end_time(path: &str) -> Option<u64> {
         return Some(r.get_header().end_time.max(last));
     }
     let len = f.seek(SeekFrom::End(0)).ok()?;
-    let k = len.min(1 << 16);
-    f.seek(SeekFrom::Start(len - k)).ok()?;
-    let mut tail = Vec::new();
-    f.read_to_end(&mut tail).ok()?;
-    let text = String::from_utf8_lossy(&tail);
-    let mut words = text.split_ascii_whitespace().collect::<Vec<_>>();
-    if k < len && !words.is_empty() {
-        words.remove(0);   // the first word may be cut
+    let mut k = len.min(1 << 16);
+    loop {
+        f.seek(SeekFrom::Start(len - k)).ok()?;
+        let mut tail = Vec::new();
+        f.read_to_end(&mut tail).ok()?;
+        let text = String::from_utf8_lossy(&tail);
+        let mut words = text.split_ascii_whitespace().collect::<Vec<_>>();
+        if k < len && !words.is_empty() {
+            words.remove(0);   // the first word may be cut
+        }
+        // `b101 #5`: an id code that looks like a time, the word after a vector's, a real's or a string's value
+        let code = |i: usize| i > 0 && words[i - 1].starts_with(['b', 'B', 'r', 'R', 's', 'S']);
+        let t = (0..words.len()).rev().find_map(|i| if code(i) { None } else { words[i].strip_prefix('#').and_then(|n| n.parse().ok()) });
+        if t.is_some() || k == len {
+            return t;
+        }
+        k = len.min(k.saturating_mul(4));
     }
-    words.iter().rev().find_map(|w| w.strip_prefix('#').and_then(|n| n.parse().ok()))
 }
 
 fn open(file: &str, quiet: bool) -> Result<Dump, String> {
+    crate::reading(file);
     let bytes = std::fs::metadata(file).map_err(|e| format!("{file}: {e}"))?.len();
     // a VCD whose vectors are glued to their codes (Questa 2023's integers): wellen stops at one, its FST is read instead
     let tmp = crate::fst::glued_fst(file)?;
@@ -285,7 +295,7 @@ fn spawn(d: Dump, refs: Vec<SignalRef>, kinds: Vec<Kind>) -> (Receiver<Result<St
         }
         let mut now: Option<u64> = None;
         let mut batch: Vec<(u32, String)> = Vec::new();
-        let r = w.stream_changes(Filter::include_signals(&refs), |t, s, v| -> Result<(), ()> {
+        let r = crate::catching(|| w.stream_changes(Filter::include_signals(&refs), |t, s, v| -> Result<(), ()> {
             let i = at.get(s.index()).copied().unwrap_or(u32::MAX);
             if i == u32::MAX {
                 return Ok(());
@@ -300,16 +310,19 @@ fn spawn(d: Dump, refs: Vec<SignalRef>, kinds: Vec<Kind>) -> (Receiver<Result<St
                 batch.push((i, k));
             }
             Ok(())
-        });
+        }));
         match r {
-            Ok(()) => {
+            Ok(Ok(())) => {
                 if let Some(n) = now.filter(|_| !batch.is_empty()) {
                     let _ = tx.send(Ok((to_ps(n, ps), batch)));
                 }
             }
-            Err(StreamError::Callback(())) => {}
-            Err(StreamError::Wellen(e)) => {
+            Ok(Err(StreamError::Callback(()))) => {}
+            Ok(Err(StreamError::Wellen(e))) => {
                 let _ = tx.send(Err(format!("{file}: {e}")));
+            }
+            Err(m) => {
+                let _ = tx.send(Err(format!("{file}: the dump does not read: {m}")));
             }
         }
     });
@@ -617,7 +630,7 @@ pub fn diff_cmd(args: &[String]) -> ExitCode {
     let o = match opts(args) {
         Ok(o) => o,
         Err(e) if e == USAGE => {
-            println!("{USAGE}");
+            outln!("{USAGE}");
             return ExitCode::SUCCESS;
         }
         Err(e) => {
@@ -637,7 +650,6 @@ pub fn diff_cmd(args: &[String]) -> ExitCode {
 
 /// The comparison -> the dumps are equal over the window.
 fn run(o: &Opt) -> Result<bool, String> {
-    crate::reading(&format!("{} or {}", o.a, o.b));
     let da = open(&o.a, o.quiet)?;
     let db = open(&o.b, o.quiet)?;
     let (ha, hb) = (da.w.hierarchy(), db.w.hierarchy());
@@ -863,6 +875,7 @@ fn run(o: &Opt) -> Result<bool, String> {
     };
     let (mut a_seg_start, mut b_seg_start): (Option<i64>, Option<i64>) = (None, None);
     let mut b_out = false;   // --align: B has no more segments
+    let mut b_past: Option<i64> = None;   // --align: where B went on to a segment A has not got
     let (mut segs_a, mut segs_b) = (0u64, 0u64);
     loop {
         a.fill()?;
@@ -904,12 +917,16 @@ fn run(o: &Opt) -> Result<bool, String> {
                     Vec::new()
                 };
                 a_seg_start = Some(t);
+                b_past = None;
                 let ba = a.take();
                 m.step(t, ba, bb, b_out, false);   // B has no more segments: A's counted, not compared
                 if let Some(s) = m.cur() {
                     s.b_from = if b_out { None } else { b_seg_start };
                 }
                 continue;
+            }
+            if bh {
+                b_past = b_past.or(tb);
             }
             if bh && a.done {
                 break;
@@ -952,6 +969,23 @@ fn run(o: &Opt) -> Result<bool, String> {
         }
     }
     let b_end = b.last.max(end_b);
+    // B's segments past A's last one: not compared, counted for the note
+    if let (true, false, Some(i)) = (o.align, b_out, seg_ib) {
+        let mut cur = m.vb[i as usize].clone();
+        loop {
+            b.fill()?;
+            let Some(t) = b.peek() else { break };
+            if t - shift > m.to {
+                break;
+            }
+            for (_, v) in b.take().into_iter().filter(|(k, _)| *k == i) {
+                if v != cur {
+                    segs_b += 1;
+                    cur = v;
+                }
+            }
+        }
+    }
     drop(a);
     drop(b);
     drop((tmp_a, tmp_b));
@@ -969,7 +1003,7 @@ fn run(o: &Opt) -> Result<bool, String> {
     if let Some(s) = m.segs.last_mut() {
         s.to = to;
         if o.align && !b_out {
-            s.compared_to = Some(cut_of(a_seg_start, b_seg_start, to, None, true, b_end).min(to));
+            s.compared_to = Some(b_past.unwrap_or_else(|| cut_of(a_seg_start, b_seg_start, to, None, true, b_end)).min(to));
         }
     }
     if o.align && segs_a != segs_b {

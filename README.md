@@ -35,11 +35,11 @@ transactions are three plugin scripts more, inlined into a page): no build step,
 Clone or download the repository; the commands run from its root.
 
 1. **Nothing to install**: open [`wavelens/viewer.html`](wavelens/viewer.html) in a browser and drop a `.vcd` on it.
-2. **A page to keep or send** (Python ≥ 3.8, standard library only):
+2. **A page to keep or send** (Python ≥ 3.9, standard library only):
 
    ```sh
-   python3 tools/mkconfig.py work/my.vcd --out work/my.config.json   # every signal of the dump, a file you can edit
-   python3 tools/mkhtml.py --config work/my.config.json --out work/my.html
+   python3 -I tools/mkconfig.py work/my.vcd --out work/my.config.json   # every signal of the dump, a file you can edit
+   python3 -I tools/mkhtml.py --config work/my.config.json --out work/my.html
    ```
 
    Open `work/my.html`: it is the whole viewer and the waves in one file. With `make`: `make html WAVES=work/my.vcd`.
@@ -87,7 +87,7 @@ and an agent live in the tab: [the VS Code guide](docs/guides/vscode.html).
 | To | You need |
 |---|---|
 | open a page, or a VCD in `wavelens/viewer.html` | a browser from 2023 on (Chrome / Edge 111, Firefox 113, Safari 16.2) |
-| make pages from dumps (`tools/*.py`) | Python ≥ 3.8, standard library only |
+| make pages from dumps (`tools/*.py`) | Python ≥ 3.9, standard library only |
 | read an FST with the tools | GTKWave's `fst2vcd`, or the `sva` CLI committed in `bin/linux-x86_64/` (static, any Linux x86-64; the tools find it) |
 | turn a VCD into an FST (FSM states kept) | the `sva` CLI: `sva fst tb.vcd` writes `tb.fst`; in VS Code *Convert to FST* on a `.vcd` |
 | compare two runs in the shell or in CI, cut a window out of a dump | the `sva` CLI: `sva diff a.vcd b.vcd [--map …] [--segment tb_test] [--junit diff.xml]` (streamed: dumps of hundreds of MB), `sva vcd x.vcd --from T --to T --signals …` |

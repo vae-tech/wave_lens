@@ -72,6 +72,7 @@ const isNum = x => (typeof x === 'number' ? Number.isInteger(x) && x > 0 : typeo
 const idOk = (x, what) => { if (x != null && x !== 'all' && !isNum(x)) fail(`id: the number of the ${what} as listed (1, 2 …), ` +
   `not ${JSON.stringify(x)}; a new one: no id`); };
 
+const cmdColor = a => { if (a.color && !colorOk(a.color)) fail(`"${a.color}" is no colour`); return a.color || null; };
 command('cursor', 't', 'the cursor to t; the window follows', (v, a) => { v.setCursor(cmdTime(v, a.t)); return { t: v.cursor }; });
 command('cursor2', 't', 'the second cursor at t (null: none)', (v, a) => { v.setCursor2(a.t == null ? null : cmdTime(v, a.t)); return { t: v.cursor2 }; });
 command('view', 'from? to? at? span?', 'the window: from … to, or span around at (default the cursor)', (v, a) => {
@@ -126,7 +127,7 @@ command('bookmark', 'n? t? signal? text? label? color? lift? top? link? go? dele
   if (a.signal !== undefined) b.signal = sig;
   if (a.text !== undefined) b.text = a.text == null ? '' : String(a.text);
   if (a.label !== undefined) b.label = a.label == null ? '' : String(a.label);
-  if (a.color !== undefined) b.color = a.color || null;
+  if (a.color !== undefined) b.color = cmdColor(a);
   if (a.lift !== undefined) b.lift = liftOf(a.lift);
   if (a.top !== undefined) b.top = top;
   if (a.link !== undefined) { if (a.link) b.link = linkOf(a.link); else delete b.link; }
@@ -156,7 +157,7 @@ command('arrow', 'id? from? to? shape? head? line? color? label? delete?', 'an a
   if (i < 0) { v.arrows.push(arNorm([{ from, to }])[0]); i = v.arrows.length - 1; }
   const x = v.arrows[i]; x.from = from; x.to = to;
   for (const k of ['shape', 'head', 'line']) if (a[k] != null) x[k] = a[k];
-  if (a.color !== undefined) x.color = a.color || null;
+  if (a.color !== undefined) x.color = cmdColor(a);
   if (a.label !== undefined) x.label = a.label == null ? '' : String(a.label);
   v.changed(true); return { id: i + 1 };
 });
@@ -175,7 +176,7 @@ command('marker', 'id? t? label? color? delete?', 'a marker: a dashed line acros
   if (!m) { m = { t: v.cursor, label: '', color: null }; v.umarks.push(m); }
   if (t != null) m.t = t;
   if (a.label !== undefined) m.label = a.label == null ? '' : String(a.label);
-  if (a.color !== undefined) m.color = a.color || null;
+  if (a.color !== undefined) m.color = cmdColor(a);
   v.setMarks(); return { id: v.umarks.indexOf(m) + 1 };
 });
 command('compare', 'result? dump? a? map? offset? off? show?', 'a second dump over these waves, where its values differ (red bands, ≠, ]d [d): ' +
@@ -217,7 +218,7 @@ command('span', 'id? from? to? label? color? signals? delete?', 'a coloured stre
   if (to != null) s.to = to;
   if (s.from > s.to) [s.from, s.to] = [s.to, s.from];
   if (a.label !== undefined) s.label = a.label == null ? '' : String(a.label);
-  if (a.color !== undefined) s.color = a.color || null;
+  if (a.color !== undefined) s.color = cmdColor(a);
   if (sigs !== undefined) s.signals = sigs.length ? sigs : null;
   v.changed(true); return { id: v.spans.indexOf(s) + 1 };
 });
@@ -242,7 +243,7 @@ command('group', 'name signals? add? remove? color? rename? delete? go? move?', 
   if (set) g.signals = set;
   for (const f of add) if (!g.signals.includes(f)) g.signals.push(f);
   if (rm.length) g.signals = g.signals.filter(f => !rm.includes(f));
-  if (a.color !== undefined) g.color = a.color || null;
+  if (a.color !== undefined) g.color = cmdColor(a);
   if (to) g.name = to;
   v.setGroups();
   if (a.go) { v.held.names = false; v.renderNamesNow(); v.goGroup(g.name); }
@@ -262,6 +263,7 @@ command('paint', 'signals? color? clear?', 'signals (a module: its signals) in a
   if (a.signals == null && !a.clear) fail('paint: signals and a color, or clear');
   if (a.clear) v.painted.clear();
   const rows = a.signals != null ? sigsOf(v, pickRows(v, a.signals, { groups: true })) : [];
+  cmdColor(a);
   for (const r of rows) if (a.color) v.painted.set(r.full, String(a.color)); else v.painted.delete(r.full);
   v.savePaint(); v.renderNames(); v.draw(); return { painted: rows.length };
 });
@@ -433,13 +435,16 @@ command('rows', 'pattern? limit? offset?', 'the signals and modules of the page 
   return { total: all.length, rows: page.map(r => [r.full, r.type === 'group' ? (r.user ? 'group' : 'module') : r.width || 1, ...mark(r)]),
     ...(off + n < all.length ? { next_offset: off + n } : {}) };
 });
+const PICTURE_ROWS = 5000;   // a picture of 20 000 rows is 400 MB of text and 13 s
 command('picture', 'format? from? to? rows?', 'the waves as a picture: png (base64), svg or wavedrom (WaveJSON); rows: screen (default), all, ' +
   'picked (highlighted) or signals', async (v, a) => {
   const f = a.format || 'png', o = {};
   if (a.from != null) o.from = cmdTime(v, a.from, 'from');
   if (a.to != null) o.to = cmdTime(v, a.to, 'to');
+  if (a.rows === 'all' && v.rowsL.length > PICTURE_ROWS) fail(`${v.rowsL.length} rows: at most ${PICTURE_ROWS} in a picture: give rows or a pattern`);
   if (a.rows != null) o.rows = ['screen', 'all', 'picked'].includes(a.rows) ? (a.rows === 'screen' ? undefined : a.rows) : sigsOf(v, pickRows(v, a.rows,
     { groups: true })).map(r => v.rowsL.find(x => x === r) || r).filter(r => v.shown(r));   // the ones in the view (Hide, Only)
+  if (Array.isArray(o.rows) && o.rows.length > PICTURE_ROWS) fail(`${o.rows.length} rows: at most ${PICTURE_ROWS} in a picture: give fewer`);
   await v.need(Array.isArray(o.rows) ? o.rows : o.rows === 'all' ? v.allRows(false, true) : o.rows === 'picked' ? [...v.picks.keys()] : v.vis);   // read
   if (f === 'wavedrom') { const wavedrom = v.toWaveDrom(o.from, o.to, Array.isArray(o.rows) ? o.rows : null);   // cut: the first cycles only
     return v.wdCut ? { wavedrom, cut: { cycles: v.wdCut.cells, to: v.wdCut.to } } : { wavedrom }; }
@@ -483,7 +488,7 @@ Object.assign(WaveView.prototype, {
       paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs), hidden: [...this.hiddenRows],
       bits: [...this.bitsOpen], only: this.onlyState(), fsm: this.fsmState(),
       config: Object.assign({ style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded,
-        toolsHidden: toolNames(this.S.toolsHidden) }, this.gapOpt(), this.cycOpt()),
+        toolsHidden: toolNames(this.S.toolsHidden), sort: this.sort, sortIgnore: [...this.sortIgnore] }, this.gapOpt(), this.cycOpt()),
       hl: [...this.picks].map(([r, i]) => [r.full, i]).sort((a, b) => a[1] - b[1]) });
   },
   undoTick(base = false) {

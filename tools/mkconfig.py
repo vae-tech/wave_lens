@@ -334,6 +334,32 @@ def typed_mark(e):
     return hashlib.sha1(v.encode()).hexdigest()[:10]
 
 
+def renamed_scope(gone, added, old, new):
+    """What went and what came pair one to one by the last name and the width, one scope for another -> (old scope, new scope),
+    else None."""
+    key = lambda p, d: (p.rsplit('.', 1)[-1], (d[p] or {}).get('width'), p)
+    a, b = sorted(key(p, old) for p in gone), sorted(key(p, new) for p in added)
+    if not a or len(a) != len(b) or [x[:2] for x in a] != [x[:2] for x in b]:
+        return None
+    pairs = set()
+    for (_, _, x), (_, _, y) in zip(a, b):
+        x, y = x.split('.'), y.split('.')
+        while len(x) > 1 and len(y) > 1 and x[-1] == y[-1]:
+            x, y = x[:-1], y[:-1]
+        pairs.add(('.'.join(x), '.'.join(y)))
+    return pairs.pop() if len(pairs) == 1 else None
+
+
+def renames(sigs, moves):
+    """A catalog with its scopes renamed (--map OLD=NEW): the settings of OLD.x are NEW.x's."""
+    def to(p):
+        for x, y in moves:
+            if p == x or p.startswith(x + '.'):
+                return y + p[len(x):]
+        return p
+    return {to(p): e for p, e in sigs.items()}
+
+
 def merge(old: dict, new: dict, typed=None, was=None):
     """Keep every edit of an existing catalog; take paths, order, width and changes from the dump. "enum" / "fields" of
     a path the types file gave before (was: the config's "typed") and nobody edited since are the types' now (typed:
@@ -363,6 +389,9 @@ def merge(old: dict, new: dict, typed=None, was=None):
         print(f'mkconfig: {len(gone)} signal(s) no longer in the dump, removed: {", ".join(gone[:5])}{" …" if len(gone) > 5 else ""}', file=sys.stderr)
     added = [p for p in new if p not in old]
     print(f'mkconfig: {len(added)} new signal(s) added, {len(out) - len(added)} kept with their settings', file=sys.stderr)
+    moved = renamed_scope(gone, added, old, new)
+    if moved:
+        print(f'mkconfig: a renamed scope? --map {moved[0]}={moved[1]} keeps their settings', file=sys.stderr)
     if kept:
         print(f'mkconfig: --types: {len(kept)} signal(s) keep the "enum" / "fields" written here instead of the types\' '
               f'(take them out of the config to get the types\'): {", ".join(kept[:5])}{" …" if len(kept) > 5 else ""}', file=sys.stderr)
@@ -511,6 +540,8 @@ def main():
     ap.add_argument('--base', help='base settings (default: tools/base.config.json, if present)')
     ap.add_argument('--out', help='config file to write (default: <dump>.config.json next to the dump)')
     ap.add_argument('--update', action='store_true', help='the output exists: sync its signals with the dump, keep all edits')
+    ap.add_argument('--map', action='append', default=[], metavar='OLD=NEW',
+                    help='with --update: a scope renamed in the design: the settings of OLD.x are NEW.x\'s (repeatable)')
     ap.add_argument('--force', action='store_true', help='overwrite an existing output (edits are lost); with --update: update even when most signals are gone')
     ap.add_argument('--depth', type=int, help='override select.depth of the base file')
     ap.add_argument('--types', metavar='FILE', help='the types of the design by path (tools/questa/wavelens_types.tcl, svtypes.py verilator): enum labels and '
@@ -552,11 +583,17 @@ def main():
     sigs.sort(key=lambda s: s['order'])   # declaration order of the dump
     cat = build(sigs, base)
     if old is not None:
+        moves = [tuple(m.split('=', 1)) for m in a.map]
+        if any(len(m) != 2 or not all(m) for m in moves):
+            die('--map OLD=NEW: a scope and its new name')
+        old['signals'] = renames(old['signals'], moves)
         gone = [p for p in old['signals'] if p not in cat]
         if len(gone) * 2 > len(old['signals']) and not a.force:
-            die(f'{len(gone)} of the {len(old["signals"])} signals of {out} are not in {a.waves}: another design? '
+            moved = renamed_scope(gone, [p for p in cat if p not in old['signals']], old['signals'], cat)
+            die(f'{len(gone)} of the {len(old["signals"])} signals of {out} are not in {a.waves}: ' +
+                (f'a renamed scope? --map {moved[0]}={moved[1]} keeps their settings; ' if moved else 'another design? ') +
                 '(--force updates it anyway, keeping the edits of the signals that are still there)')
-        cat, marks = merge(old['signals'], cat, typed and {p: typed_mark(cat[p]) for p in typed if p in cat}, old.get('typed'))
+        cat, marks = merge(old['signals'], cat, typed and {p: typed_mark(cat[p]) for p in typed if p in cat}, renames(old.get('typed') or {}, moves))
     else:
         marks = {p: typed_mark(cat[p]) for p in typed or () if p in cat}
 

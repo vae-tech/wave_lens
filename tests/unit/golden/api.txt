@@ -1,0 +1,79 @@
+WaveLens.WaveSVG
+WaveLens.WaveView
+WaveLens.colorNames
+WaveLens.commands
+WaveLens.configure
+WaveLens.decode
+WaveLens.defaults
+WaveLens.enums
+WaveLens.fmtExact
+WaveLens.fmtTime
+WaveLens.fromTV
+WaveLens.fuzzy
+WaveLens.live
+WaveLens.pageText
+WaveLens.paint
+WaveLens.parse
+WaveLens.parseT
+WaveLens.plugin
+WaveLens.radixes
+WaveLens.redrawAll
+WaveLens.redrawSvgs
+WaveLens.registerDefaults
+WaveLens.registerTokens
+WaveLens.rowId
+WaveLens.savePage
+WaveLens.setColors
+WaveLens.setTheme
+WaveLens.sortRows
+WaveLens.styles
+WaveLens.svApply
+WaveLens.svTables
+WaveLens.svTypes
+WaveLens.svgPlugin
+WaveLens.themes
+WaveLens.tips
+WaveLens.upgrade
+WaveLens.util
+WaveLens.vcdToWave
+WaveLens.vcdToWaveFile
+WaveLens.version
+WaveLens.views
+command analog: signals rows
+command arrow: id? from? to? shape? head? line? color? label? delete?
+command bits: signals on?
+command bookmark: n? t? signal? text? label? color? lift? top? link? go? delete?
+command compare: result? dump? a? map? offset? off? show?
+command cursor: t
+command cursor2: t
+command cycles: on? clock? zero? reset?
+command edge: dir? kind? value? signal?
+command find: query case? word? regex? highlight? open? mask?
+command fit: 
+command fold: groups? all?
+command fsm: mode? signals? fields? clear?
+command fsm_go: signal state? from? to? dir? first?
+command fsm_stats: signal
+command gaps: on? idle? keep? signals? clock? aux? only? count? reset?
+command group: name signals? add? remove? color? rename? delete? go? move?
+command hide: signals
+command highlight: add? remove? set? clear?
+command layout: scroll? height? tools?
+command marker: id? t? label? color? delete?
+command only: modules? on? clear? open?
+command paint: signals? color? clear?
+command picture: format? from? to? rows?
+command radix: signals radix
+command range: from? to? signal?
+command reset: 
+command rows: pattern? limit? offset?
+command select: signal? signals?
+command set_state: state
+command show: signals?
+command sort: dir ignore?
+command span: id? from? to? label? color? signals? delete?
+command state: 
+command style: name
+command types: signals?
+command unfold: groups? all?
+command view: from? to? at? span?

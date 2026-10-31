@@ -7,10 +7,11 @@
   mkhtml.py --config x.config.json --sva checks.sv --bind a_req_ack@tb.dut --out x.html   # assertions bound (make html SVA= BIND=)
   mkhtml.py --config x.config.json --lint [--strict]       # the warnings of every view, no page (--strict: exit 1 on one)
 
-Lint (printed at every build, "mkhtml: lint: <code>: <JSON path>: <text>"; docs/USAGE.md "Lint"): bookmark-outside-view,
+Lint (printed at every build, "mkhtml: lint: <code>: <JSON path>: <text>"; docs/USAGE.md "Lint"): bookmark-bad, arrow-bad, bookmark-outside-view,
 bookmark-signal-missing, bookmark-duplicate, bookmark-time, bookmark-key, bookmark-link-missing, arrow-end-missing, arrow-key, marker-no-match,
 marker-key, bind-unknown, svashow-no-match, bookmarks-close (a heuristic), enum-colors-hex, span-outside-view,
-span-signal-missing, span-key.
+span-signal-missing, span-key, span-every-no-match, compare-spans-cut. A marker or a span "every" on a signal the dump has not got
+is no warning: the build stops there, as for any name of the config (marker-no-match: the signal is there, the event never happens).
 
 Config keys used here (the rest is vcd2wavedrom.py's, see its --help):
   "config"  global wavelens settings for the page: theme, colors, rowHeight, nameWidth, fontSize, sort, sortIgnore, …
@@ -287,8 +288,11 @@ def render_page(a, cfg, docs, renders, sva_views, with_sva, sva_files, sva_notes
         settings=safe(json.dumps({k: v for k, v in settings.items() if k != 'theme'}, ensure_ascii=False)), sva=sva, bus=bus,
         build=f'\n<script>window.WAVELENS_BUILD = {safe(json.dumps(build, ensure_ascii=False))};</script>' if build else '',
         data=safe(wavejson.dumps_many(docs)))
-    with open(a.out, 'w', encoding='utf-8') as f:
-        f.write(text)
+    try:
+        with open(a.out, 'w', encoding='utf-8') as f:
+            f.write(text)
+    except OSError as e:
+        raise WaveError(f'cannot write {a.out}: {e.strerror}') from None
     print(f'mkhtml: {len(docs)} views -> {a.out} ({len(text.encode()) / 1e6:.2f} MB)', file=sys.stderr)
 
 

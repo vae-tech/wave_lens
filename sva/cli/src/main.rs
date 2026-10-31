@@ -32,14 +32,45 @@ use wellen::{simple, Hierarchy, SignalRef, TimeTableIdx, VarRef, VarType};
 /// evaluation's (println! would panic there).
 static STDOUT_GONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// The real stdout, kept aside (stdout_aside).
+#[cfg(unix)]
+static REAL_OUT: std::sync::OnceLock<std::fs::File> = std::sync::OnceLock::new();
+
+/// wellen prints its warnings with println! ("WARN: time decreased …"), into the JSON or the VCD sva is writing, and has no hook
+/// for them: for the whole run fd 1 is stderr, so what a library prints lands there, and sva's own output goes to a copy of the
+/// real stdout (out_stream). Elsewhere than Unix wellen's line stays on stdout: a dump whose time goes back only.
+#[cfg(unix)]
+fn stdout_aside() {
+    use std::os::fd::FromRawFd;
+    extern "C" {
+        fn dup(fd: i32) -> i32;
+        fn dup2(old: i32, new: i32) -> i32;
+    }
+    // SAFETY: at the start of main, one thread; the fd dup returns is this process's and owned by the File alone
+    unsafe {
+        let fd = dup(1);
+        if fd >= 0 && dup2(2, 1) >= 0 {
+            let _ = REAL_OUT.set(std::fs::File::from_raw_fd(fd));
+        }
+    }
+}
+
+/// Where sva's own output goes.
+pub(crate) fn out_stream() -> Box<dyn std::io::Write> {
+    #[cfg(unix)]
+    if let Some(f) = REAL_OUT.get() {
+        return Box::new(f);
+    }
+    Box::new(std::io::stdout().lock())
+}
+
 pub(crate) fn write_out(args: std::fmt::Arguments, newline: bool) {
-    use std::io::Write;
     use std::sync::atomic::Ordering::Relaxed;
     if STDOUT_GONE.load(Relaxed) {
         return;
     }
-    let mut o = std::io::stdout().lock();
-    let r = o.write_fmt(args).and_then(|_| if newline { o.write_all(b"\n") } else { Ok(()) });
+    let text = format!("{args}{}", if newline { "\n" } else { "" });
+    let r = out_stream().write_all(text.as_bytes());
     if r.is_err() {
         STDOUT_GONE.store(true, Relaxed);
     }
@@ -62,9 +93,11 @@ const USAGE: &str = "usage: sva parse [--json] [--expand] [-D NAME[=VALUE]] FILE
        sva --waves DUMP --info
        sva vcd DUMP [--out FILE.vcd]          (an FST as VCD text, enum tables included, as fst2vcd -e writes it)
        sva fst DUMP.vcd [--out FILE.fst]      (a VCD as an FST, by default DUMP.fst; enum tables and tb.types.json's FSM states kept)
-       sva vcd DUMP --from T --to T [--signals PAT,...] [--out cut.vcd]   (a cut of a dump: a window, some signals)
-       sva diff A B [--signals PAT,...] [--from T --to T] [--offset T] [--map A=B ...] [--segment SIGNAL [--align]]
-                [--json [FILE|-]] [--junit FILE]   (two dumps compared change by change: sva diff --help)
+       sva vcd DUMP --from T --to T [--signals PAT,...] [--signals-from FILE] [--out cut.vcd]   (a cut of a dump: a window, some signals)
+       sva vcd DUMP.fst --header | --codes FILE    (the declarations alone; the changes of those id codes)
+       sva diff A B [--signals PAT,...] [--signals-from FILE] [--scope S] [--from T --to T] [--offset T] [--map A=B ...]
+                [--segment SIGNAL [--align]] [--json [FILE.json|-]] [--junit FILE] [--limit N] [--spans N] [--quiet]
+                (two dumps compared change by change: sva diff --help)
        sva report [--title T] [--md F] [--junit F] [--html F] [--json F] [--max-failures N] RESULTS.json...   (- for stdout)
 TIME is a number with a unit (100ns, 2.5us; ps without one). --alias: a shown name of a config (the page's alias) for
 the variable at PATH. --report: .md, .html, .xml (JUnit), .json (the results with the meta, as a page's report.json;
@@ -99,10 +132,20 @@ struct Args {
 }
 
 /// `100ns`, `2.5us`, `40` (ps) -> ps.
+/// A time as the tools and the page read one: a number (an exponent too) with a unit or none, any case, µs.
 fn time(s: &str) -> Result<u64, String> {
-    let k = s.find(|c: char| c.is_ascii_alphabetic()).unwrap_or(s.len());
-    let (n, unit) = s.split_at(k);
-    let n: f64 = n.trim().parse().map_err(|_| format!("'{s}' is not a time"))?;
+    let low = s.trim().to_lowercase();
+    let b = low.as_bytes();
+    let digits = |mut i: usize| { while i < b.len() && (b[i].is_ascii_digit() || b[i] == b'.') { i += 1; } i };
+    let mut k = digits(usize::from(b.first().is_some_and(|c| *c == b'-' || *c == b'+')));
+    if b.get(k) == Some(&b'e') {   // an exponent, not a unit: a digit follows
+        let d = k + 1 + usize::from(matches!(b.get(k + 1), Some(b'-' | b'+')));
+        if b.get(d).is_some_and(u8::is_ascii_digit) {
+            k = digits(d);
+        }
+    }
+    let (n, unit) = low.split_at(k);
+    let n: f64 = n.parse().map_err(|_| format!("'{s}' is not a time"))?;
     if !n.is_finite() || n < 0.0 {
         return Err(format!("'{s}': a time is a number of 0 or more"));
     }
@@ -110,10 +153,10 @@ fn time(s: &str) -> Result<u64, String> {
         "fs" => 1e-3,
         "" | "ps" => 1.0,
         "ns" => 1e3,
-        "us" => 1e6,
+        "us" | "µs" => 1e6,
         "ms" => 1e9,
         "s" => 1e12,
-        u => return Err(format!("'{u}' is not a time unit (fs ps ns us ms s)")),
+        u => return Err(format!("'{u}' is not a time unit (fs ps ns us µs ms s)")),
     };
     Ok((n * f).round() as u64)
 }
@@ -566,6 +609,12 @@ fn eval_cmd(a: Args) -> ExitCode {
         } else if a.from.is_some_and(|f| f > times[times.len() - 1]) {
             eprintln!("sva: --from {} is after the last {edge} of {clk_name} ({}): nothing to check", ns(a.from.unwrap()), ns(times[times.len() - 1]));
             bad = true;
+        } else if a.to.is_some_and(|t| t < times[0]) {
+            eprintln!("sva: --to {} is before the first {edge} of {clk_name} ({}): nothing to check", ns(a.to.unwrap()), ns(times[0]));
+            bad = true;
+        } else if a.from.map_or(0, |f| times.partition_point(|t| *t < f)) >= a.to.map_or(times.len(), |t| times.partition_point(|x| *x <= t)) {
+            eprintln!("sva: no {edge} of {clk_name} from {} to {}: nothing to check", ns(a.from.unwrap_or(0)), ns(a.to.unwrap_or(0)));
+            bad = true;
         }
         let mut tr = Trace { cycles: ed.len(), times: times.clone(), unit: Some("ps".into()), ..Default::default() };
         for ((name, _), (sig, (width, two))) in refs.iter().zip(sigs.iter().zip(&info)) {
@@ -817,6 +866,17 @@ fn report_cmd(argv: &[String]) -> ExitCode {
     }
 }
 
+thread_local! {
+    /// In a reader's thread (catching): the panic's first line, for the thread to say, so one line says it.
+    static CAUGHT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// f, in the thread of a dump's reader: a panic of its reader (wellen, fst-reader) comes back as its first line, not printed.
+pub(crate) fn catching<T>(f: impl FnOnce() -> T) -> Result<T, String> {
+    CAUGHT.with(|c| *c.borrow_mut() = Some(String::new()));
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).map_err(|_| CAUGHT.with(|c| c.borrow_mut().take().unwrap_or_default()))
+}
+
 /// The dump being read, for the message of a panic in its reader.
 static READING: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
@@ -835,13 +895,19 @@ fn main() -> ExitCode {
         let file = info.location().map_or("", |l| l.file());
         let p = info.payload();
         let msg = p.downcast_ref::<&str>().copied().or_else(|| p.downcast_ref::<String>().map(String::as_str));
+        let reader = file.contains("wellen") || file.contains("fst-reader");
+        if reader && CAUGHT.with(|c| c.borrow_mut().as_mut().map(|s| s.push_str(msg.and_then(|m| m.lines().next()).unwrap_or(""))).is_some()) {
+            return;
+        }
         match msg {
-            Some(m) if !dump.is_empty() && (file.contains("wellen") || file.contains("fst-reader")) => {
+            Some(m) if !dump.is_empty() && reader => {
                 eprintln!("sva: {dump}: the dump does not read: {}", m.lines().next().unwrap_or(""));
             }
             _ => eprintln!("sva: internal error, please report it with the input that caused it: {info}"),
         }
     }));
+    #[cfg(unix)]
+    stdout_aside();
     std::panic::catch_unwind(run).unwrap_or(ExitCode::from(2))
 }
 

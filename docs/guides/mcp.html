@@ -67,7 +67,7 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
   <tr><td><code>sva_check</code></td><td>assertion files and / or text evaluated over the dump in a scope: the failed ones with their first
     failures, passed, vacuous, not evaluated, the covers</td></tr>
   <tr><td><code>wave_page</code></td><td>a viewer page (<code>.html</code>) or WaveJSON (<code>.json</code>) of signals over a window, with
-    assertions bound, to show a person</td></tr>
+    assertions bound, to show a person; <code>compare</code>: a second dump's differences on it (<a href="compare.html">Compare</a>)</td></tr>
   <tr><td><code>wave_to_fst</code></td><td>the VCD as an FST beside it (<code>sva fst</code>), the FSM states of its types file in it:
     what was written, the notes with their lines</td></tr>
   <tr><td><code>wave_diff</code></td><td>two dumps compared change by change (<code>sva diff</code>, streamed: hundreds of MB): equal or not,
@@ -79,7 +79,7 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
     of the signals that matter, highlight, colours, the cursor and the window — live in their browser, else in the page's file;
     <code>config</code>: bookmarks, arrows and spans into a view of the page's config, so a rebuild keeps them</td></tr>
   <tr><td><code>view_get</code></td><td>what a page shows, the person's own edits too; its signals; a picture (live: the screen; a page's file: made in
-    a headless Chromium by <code>tools/pageshot.py</code>, playwright)</td></tr>
+    a headless Chromium by <code>tools/pageshot.py</code>, playwright); a dump compared, as <code>compare</code> in its answer</td></tr>
   <tr><td><code>view_live</code></td><td>connects a page to the agent: what it does there appears as it happens</td></tr>
 </table>
 
@@ -92,8 +92,8 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
 
 <h3 id="wave-signals">wave_signals — find the names</h3>
 <pre><code>--call wave_signals '{"dump": "…/apb.vcd", "pattern": "PADDR"}'
-{"total":3,"scope":null,"columns":["path","width","changes"],
- "signals":[["apb_tb.PADDR",8,2],["apb_tb.u_master.PADDR",8,2],["apb_tb.u_regs.PADDR",8,2]]}</code></pre>
+{"total":3,"scope":null,"columns":["path","width","changes","extra"],
+ "signals":[["apb_tb.PADDR",8,2,""],["apb_tb.u_master.PADDR",8,2,""],["apb_tb.u_regs.PADDR",8,2,""]]}</code></pre>
 <p>Also <code>scope</code>, <code>depth</code> (levels under it), <code>active</code> (only signals that change), <code>limit</code> /
   <code>offset</code> for long lists.</p>
 
@@ -288,7 +288,7 @@ make mcp-bench AGENT=codex TASKS=a1,b3                 <span class="c"># some ta
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.31 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.32 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

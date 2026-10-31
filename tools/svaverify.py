@@ -115,6 +115,16 @@ def audit(name, ex, compared, skipped, sim, eng_rc, res):
     return errors, notes
 
 
+def failures(text, by_line, prec):
+    """The assertions the simulation failed: Verilator's output, {(file, line): label}, a $time's unit in ps -> {label: [ps, …]}."""
+    ver = {}
+    for t, path, line in FAIL_RE.findall(text):
+        label = by_line.get((os.path.basename(path), int(line)))
+        if label:
+            ver.setdefault(label, []).append(round(float(t) * prec))
+    return ver
+
+
 def verify(name, ex, sva, build, keep):
     out = os.path.join(build, 'sva-verify', name)
     os.makedirs(out, exist_ok=True)
@@ -165,11 +175,7 @@ def verify(name, ex, sva, build, keep):
         for a in asserts[f]:
             for ln in a['lines']:
                 by_line[(os.path.basename(f), ln)] = a['label']
-    ver = {}
-    for t, path, line in FAIL_RE.findall(sim.stdout + sim.stderr):
-        label = by_line.get((os.path.basename(path), int(line)))
-        if label:
-            ver.setdefault(label, []).append(round(float(t) * prec))
+    ver = failures(sim.stdout + sim.stderr, by_line, prec)
     args = [sva, 'eval', '--waves', dump, '--scope', ex['scope'], *[x for f in files for x in ('--sva', f)], '--json']
     er = run(args, cwd=ROOT)
     try:

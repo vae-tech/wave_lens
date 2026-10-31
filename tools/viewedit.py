@@ -31,10 +31,9 @@ page with these edits and the same commands run in it give the same state.
 import argparse, collections, datetime, functools, json, math, os, re, sys, unicodedata
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
-from common import WaveError, run_main  # noqa: E402
+from common import UNIT_PS, WaveError, glob_re as path_re, parse_time, run_main  # noqa: E402
 
 STATE_VERSION = 3   # wavelens/src/view.js STATE_VERSION
-UNIT_PS = {'fs': 1e-3, 'ps': 1, 'ns': 1e3, 'us': 1e6, 'µs': 1e6, 'ms': 1e9, 's': 1e12}
 RADIX = ['auto', 'hex', 'dec', 'signed', 'bin', 'oct', 'ascii', 'float']   # model.js RADIX
 SORTS = ['none', 'asc', 'desc']
 STYLES = ['auto', 'wavedrom', 'questa', 'square']
@@ -110,28 +109,6 @@ def fail(msg):
     raise WaveError(msg)
 
 
-TIME_UNITS = dict(UNIT_PS, zs=1e-9, **{'as': 1e-6})   # what wavemcp.py takes too (a dump's resolution may be below fs)
-
-
-def parse_time(v, plain=1, units=None):
-    """A time as a person writes it -> a number, or None: a number is in plain units (model units here, ns for
-    wavemcp.py), a text a number with a unit or none ("1.5us", "100NS", "1E2", "0.1µs", "-5ns"), case-insensitive as the
-    viewer's parseT. units: the units known (default the viewer's: fs ps ns us µs ms s)."""
-    if v is None or v == '' or isinstance(v, bool):
-        return None
-    if isinstance(v, (int, float)):
-        return v * plain
-    units = units or UNIT_PS
-    m = re.fullmatch(r'\s*(-?[\d.]+(?:e-?\d+)?)\s*([a-zµ]+)?\s*', str(v), re.I)
-    if not m or (m.group(2) and m.group(2).lower() not in units):
-        return None
-    try:
-        x = float(m.group(1))
-    except ValueError:
-        return None
-    return x * (units[m.group(2).lower()] if m.group(2) else plain)
-
-
 def parse_t(v):
     """model.js parseT: "1.5us" -> 1.5e6 (ps); a plain number is in model units; else None."""
     return parse_time(v)
@@ -170,7 +147,7 @@ def prefixes(v):
 
 
 def glob_re(p):
-    return re.compile('^' + '.*'.join(re.escape(s) for s in p.split('*')) + '$')
+    return path_re(p, one=False)
 
 
 def flat_text(t):
@@ -489,12 +466,33 @@ def group_list(gs):
 
 
 # ---------------- the commands on a state ----------------
+def clean_state(state):
+    """A state as the viewer takes one on loading it: a key of another kind (a block edited by hand) is left out, not a traceback
+    in a command that reads it."""
+    st = dict(state or {})
+    for k in ('bookmarks', 'arrows', 'markers', 'groups', 'spans'):
+        if isinstance(st.get(k), list):
+            st[k] = [x for x in st[k] if isinstance(x, dict)]
+        elif k in st:
+            st.pop(k)
+    for k in ('hidden', 'bits'):
+        if k in st and not isinstance(st[k], list):
+            st.pop(k)
+    for k in ('config', 'paint', 'radix', 'analog', 'folds'):
+        if k in st and not isinstance(st[k], dict):
+            st.pop(k)
+    for k in ('from', 'to', 'cursor', 'cursor2'):
+        if k in st and st[k] is not None and not finite(st[k]):
+            st.pop(k)
+    return st
+
+
 class Editor:
     """The commands on a state (the keys the edits touched) of one viewer: each reads what it changes from the state,
     else from the page (its bookmarks, the highlight and fold settings), and writes it back in the form state() has."""
 
     def __init__(self, model, state=None):
-        self.m, self.st = model, dict(state or {})
+        self.m, self.st = model, clean_state(state)
 
     # what the state has, else the page's
     def bms(self):
@@ -1461,6 +1459,9 @@ class Page:
             self.edits = json.loads(e.group(1)) if e else {}
         except ValueError:
             fail(f'{path}: its edits are not JSON (the wavelens-edits script)')
+        views = self.edits.get('views', {}) if isinstance(self.edits, dict) else None
+        if not isinstance(views, dict) or not all(isinstance(x, dict) and isinstance(x.get('state', {}), dict) for x in views.values()):
+            fail(f'{path}: its edits are not {{"views": {{view: {{"rev", "state"}}}}}}: make it again or remove the wavelens-edits block')
         self.edits.setdefault('views', {})
 
     def view(self, key=None):
@@ -1512,10 +1513,26 @@ def edit_page(path, ops, view=None):
 
 
 def compare_summary(c):
-    """What the command compare answers (as the page's): {name, compared, differ, first, missing}."""
+    """What the command compare answers (as the page's): {name, compared, differ, first, missing}; compared: the signals of the
+    result (the page counts its rows among them: a row it does not show is not compared there)."""
     sigs = c.get('signals') or {}
     return {'name': c.get('name') or 'B', 'compared': len(sigs), 'differ': sum(1 for x in sigs.values() if (x or {}).get('spans')),
             'first': c.get('first'), 'missing': len(c.get('missing') or [])}
+
+
+def row_hits(r, paths, tails, scope):
+    """Row r in a dump (paths, tails: paths by their last part), diff.js cmpFind's rules: its path; else its name, full then short,
+    under the view's scope or as it is, else the paths ending with it -> the paths found (several: the caller chooses)."""
+    if r.get('path') in paths:
+        return [r['path']]
+    for n in dict.fromkeys(x for x in (r.get('full'), r.get('name')) if x):
+        hit = next((p for p in (scope and f'{scope}.{n}', n) if p and p in paths), None)
+        if hit:
+            return [hit]
+        hit = [p for p in tails.get(n.rsplit('.', 1)[-1], []) if p.endswith('.' + n)]
+        if hit:
+            return hit
+    return []
 
 
 def compare_dump(model, base, a):
@@ -1544,10 +1561,7 @@ def compare_dump(model, base, a):
     for r in model.sigs():
         if r.get('bit') is not None:
             continue
-        hit = next(([p] for p in [r.get('path'), scope and f'{scope}.{r["full"]}', scope and f'{scope}.{r["name"]}', r['full'], r['name']]
-                    if p and p in paths), None)
-        if hit is None:
-            hit = [p for p in tails.get(r['full'].rsplit('.', 1)[-1], []) if p.endswith('.' + r['full'])]
+        hit = row_hits(r, paths, tails, scope)
         found.append((r['full'], hit))
         if len(hit) == 1:
             votes[hit[0][:len(hit[0]) - len(r['full']) - 1]] += 1

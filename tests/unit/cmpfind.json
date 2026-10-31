@@ -1,0 +1,11 @@
+[
+ {"why": "its path in the dump", "paths": ["tb.u.a", "tb.a"], "row": {"path": "tb.u.a", "full": "a", "name": "a"}, "scope": "", "hits": ["tb.u.a"]},
+ {"why": "the path before the scope", "paths": ["tb.u.a", "tb.v.a"], "row": {"path": "tb.u.a", "full": "a", "name": "a"}, "scope": "tb.v", "hits": ["tb.u.a"]},
+ {"why": "its name under the scope", "paths": ["tb.u.a", "top.a"], "row": {"full": "a", "name": "a"}, "scope": "tb.u", "hits": ["tb.u.a"]},
+ {"why": "its full name before its short one, under the scope", "paths": ["tb.u.a", "tb.a"], "row": {"full": "u.a", "name": "a"}, "scope": "tb", "hits": ["tb.u.a"]},
+ {"why": "its full name as it is", "paths": ["tb.a", "tb.b.a"], "row": {"full": "tb.a", "name": "a"}, "scope": "", "hits": ["tb.a"]},
+ {"why": "the one path ending with it", "paths": ["top.tb.u.a", "top.tb.v.a"], "row": {"full": "u.a", "name": "a"}, "scope": "", "hits": ["top.tb.u.a"]},
+ {"why": "several end with it: none in the page, the most common prefix in viewedit", "paths": ["x.a", "y.a"], "row": {"full": "a", "name": "a"}, "scope": "", "hits": ["x.a", "y.a"]},
+ {"why": "its short name when the full one is not there", "paths": ["other.a"], "row": {"full": "dut.a", "name": "a"}, "scope": "", "hits": ["other.a"]},
+ {"why": "not there", "paths": ["tb.a"], "row": {"full": "q", "name": "q"}, "scope": "", "hits": []}
+]

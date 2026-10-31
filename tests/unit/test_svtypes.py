@@ -22,6 +22,46 @@ def want():
     return readj(os.path.join(T, 'types.expected.json'))
 
 
+class HandEdited(unittest.TestCase):
+    """review 0.31 P1, T15: a file edited by hand, or an entry that has neither labels nor fields: a message, not a traceback."""
+    HEAD = {'wavelens': 'types'}
+
+    def check(self, sigs):
+        with H.tmp() as d:
+            p = os.path.join(d, 't.types.json')
+            H.dump(dict(self.HEAD, signals=sigs), p)
+            return H.run_tool('svtypes', 'check', p)
+
+    def test_bad_entries(self):
+        for sigs, want in (({'tb.a': 5}, 'signals["tb.a"] is not an object'), ({'tb.a': {'width': 'x'}}, '"width" is a number of bits'),
+                           ({'tb.a': {'width': 2, 'enum': [1, 2]}}, '"enum" is an object'),
+                           ({'tb.a': {'width': 2, 'fields': 7}}, '"fields" is a list'), ({'tb.a': {'width': 2, 'fields': [{'name': 'x'}]}}, '"fields" is a list')):
+            with self.subTest(want):
+                rc, _, err = self.check(sigs)
+                self.assertEqual(rc, 1, err)
+                self.assertIn(want, err)
+                self.assertNotIn('Traceback', err)
+
+    def test_neither_labels_nor_fields(self):
+        rc, out, err = self.check({'tb.a': {'width': 1, 'unpacked': [4]}})
+        self.assertEqual(rc, 0, err)
+        self.assertIn('tb.a [1]: (no labels)', out)
+
+
+class Missing(unittest.TestCase):
+    """T15: svtypes.missing case by case, with a map."""
+    def why(self, declared, paths, scopes, m=None):
+        return {x['path']: x['why'] for x in S.missing({'declared': declared, 'map': {}}, paths, scopes, m)}
+
+    def test_each_why(self):
+        got = self.why({'tb.mem': 'Array(0 to 3) of Logic', 'tb.gen[1].g': '', 'tb.genblk2.g': '', 'tb.gone.x': '', 'tb.y': '', 'tb.here': ''},
+                       ['tb.here'], ['tb'])
+        self.assertEqual(got, {'tb.mem': 'array', 'tb.gen[1].g': 'generate', 'tb.genblk2.g': 'generate', 'tb.gone.x': 'scope', 'tb.y': 'other'})
+
+    def test_with_a_map(self):
+        self.assertEqual(self.why({'dut.a': '', 'dut.b': ''}, ['top.u.a'], ['top.u'], {'top.u': 'dut'}), {'dut.b': 'other'})
+
+
 class Describe(unittest.TestCase):
     def test_cases(self):
         # tests/unit/types/describe.json: the forms of describe seen in Questa 2021.1 (the page reads the same file: smoke

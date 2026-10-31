@@ -33,6 +33,8 @@
   <tr><td>MCP: <code>view_edit</code>, <code>view_get</code></td><td>a page's file, or live the page in a browser or a VS Code tab</td>
     <td>an agent that explains a failure to a person (<a href="mcp.html">AI agents</a>)</td></tr>
 </table>
+<p>The runs of a compare and the bits of a bus are commands like the others: <code>{op: 'compare', show: 'overlay'}</code> (<code>a</code>,
+  <code>b</code> or <code>overlay</code>; <a href="compare.html#flip">Compare</a>), <code>{op: 'bits', signals: 'PADDR'}</code> (<code>on: false</code> folds them).</p>
 <p>Every command and its arguments are listed by <code>WaveLens.commands()</code>, in the table of
   <a href="../USAGE.md#commands-and-edits">USAGE.md § Commands and edits</a> and in <a href="../index.html#api">docs/index.html § API</a>.</p>
 
@@ -113,7 +115,7 @@ python3 -I tools/viewedit.py saved.view.json --model page.html --ops '[{"op": "b
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.31 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.32 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

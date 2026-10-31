@@ -17,6 +17,8 @@
 // 'overlay' both at once, on the stretches that differ: a bit's B over its A in B's colour, a bus's row in two lanes, A above B.
 // B's values are kept of the rows that differ only (the others have A's): the rows of a dump read here, the result's "vcd", a
 // cut of B of those signals (svabuild.compare; read at its first use), "shift" its offset; a result without it: bands only.
+// A row of another width or kind has no values on these rows: empty in B's view (its tooltip says what B has), bands only.
+// The bits of a bus (b) compare by their own values, once B's are here; bands only: the bus's bands.
 
 // a value of row r at transition o as compared (o null: before its first change, unknown): a text or a real unknown is
 // none of its values ("x" is a text); a bus unknown is its width of x. A real as a number: inf, -inf and nan as the
@@ -59,6 +61,25 @@ const cmpByName = c => (c.byName.length ? `matched by name: ${c.byName[0][0]} �
   'their tooltips)' : ''}` : '');
 const cmpText = r => (r.kind === 'real' || r.kind === 'string');
 const CMP_SHOWS = ['a', 'b', 'overlay'];
+// the row of B's values over s, a row of these waves (its width, kind, enum): a bit's tr is a getter, so defined, not set
+const cmpView = (c, s) => c.view || (c.view = Object.create(s, { tr: { value: c.row.tr, writable: true } }));
+// the first difference: a row of another width differs from the start, which says nothing of where it goes wrong (as sva diff)
+const cmpFirst = rows => { let f = null; for (const x of rows.values()) if (!x.other && x.spans.length && (f == null || x.spans[0][0] < f)) f = x.spans[0][0];
+  return f; };
+const cmpStarts = rows => [...new Set([...rows.values()].flatMap(x => x.spans.map(([t]) => t)))].sort((x, y) => x - y);
+// which run the waves show, on a picture's axis: the run's letter and name on its colour, the two of the overlay in the colours of their
+// waves; a strip under the axis while B is shown. names: [A's, B's]
+function paintRunTagOf(P, xR, y, h, run, names) {
+  const [na, nb] = names.map(s => (s.length > 32 ? s.slice(0, 31) + '…' : s)), st = { size: 10.5, weight: 600 };
+  const parts = run === 'b' ? [['B', nb, 'runb']] : run === 'overlay' ? [['A', na, 'one'], ['B', nb, 'runb']] : [['A', na, 'acc']];
+  let x = xR - 4;
+  for (const [l, n, col] of parts.reverse()) {
+    const t = `${l} · ${n}`, w = P.measure(t, st) + 12; x -= w;
+    P.rect(x, y + 3, w, h - 6, col); P.text(x + 6, y + h / 2, t, Object.assign({ fill: 'panel' }, st)); x -= 3;
+  }
+  if (run === 'b') P.rect(0, y + h - 2, xR, 2, 'runb');
+}
+const cmpNameA = (M, title) => String((M.src && M.src.meta && M.src.meta.waves) || title || M.title || 'these waves').split(/[\\/]/).pop();
 // the "vcd" of a result: its rows by path, on A's time (shift: B's time less A's)
 function cmpCut(c) {
   const by = new Map();
@@ -72,7 +93,7 @@ function cmpCut(c) {
 // a stretch x0 … x1 ([a, b) of time) of row o with both runs (paintCmp, overlay): a bit's B over its A in B's colour; a bus's row
 // in two lanes, A above B, so that both values are read; an analog row B's line on A's scale
 function paintBoth(P, o, c, a, b, x0, x1, X, tEnd) {
-  const s = o.row.sig || o.row, vb = c.view || (c.view = Object.assign(Object.create(s), { tr: c.row.tr }));
+  const s = o.row.sig || o.row, vb = cmpView(c, s);
   const px = 2 * (b - a) / Math.max(x1 - x0, 1), hl = o.h / 2;
   vb.an = s.an;
   P.clip(x0 - 1, o.y, x1 - x0 + 2, o.h, () => {
@@ -119,9 +140,9 @@ function cmpDocShow(M) {
   const by = cmpCut(c), got = new Set();
   for (const r of [...M.rows, ...Object.values(M.groups).filter(g => g.sig).map(g => g.sig)]) {
     if (r.type !== 'sig' || !r.tr) continue;
-    const p = cmpPath(r), x = c.signals[p], b = x && x.spans.length ? by.get(x.b || p) : null;
+    const p = cmpPath(r), x = c.signals[p], b = x && x.spans.length && !x.other ? by.get(x.b || p) : null;
     if (b) { x.row = b; if (c.show === 'b') { r.tr = b.tr; got.add(r); } }
-    else if (c.show === 'b' && c.missing.includes(p)) { r.tr = []; got.add(r); }
+    else if (c.show === 'b' && ((x && x.other) || c.missing.includes(p))) { r.tr = []; got.add(r); }
   }
   if (got.size) rowsMade(M, got);
   return c.show;
@@ -171,6 +192,8 @@ Object.assign(WaveView.prototype, {
     const f = t => this.fmt(t, (this.M.t1 - this.M.t0) / 1000, this.M.t1 - this.M.t0);
     if (to <= from) { this.toast(`${nm}: no time in common (these waves ${f(this.M.t0)} … ${f(this.M.t1)}, ${nm} ${f(doc.time.t0 ?? 0)} … ` +
       `${f(doc.time.t1)}): nothing compared${still()}`); return null; }
+    if (!left.size && !mine.some(a => cmpFind(bs, byLeaf, a, scope))) {   // as sva diff: nothing to compare is no compare (the one before stays)
+      this.toast(`${nm}: none of these ${mine.length} signals is in it: nothing compared${still()}`); return null; }
     this.cmpBack();   // these rows' own values again: compared with B, or the one before
     let differ = 0, missing = 0, omitted = 0; const byName = [];
     for (const a of mine) {
@@ -183,11 +206,10 @@ Object.assign(WaveView.prototype, {
       const other = cmpText(a) !== cmpText(b) || (!cmpText(a) && (a.width || 1) !== (b.width || 1));
       const spans = other ? [[from, to]] : diffSpans(a, b, from, to), by = hit.byName ? cmpPath(b) : null;
       if (by) byName.push([cmpPath(a), by]);
-      rows.set(a, { spans, other: other ? (cmpText(b) ? b.kind : `${b.width || 1} bits`) : null, by, row: spans.length ? b : null });
+      rows.set(a, { spans, other: other ? (cmpText(b) ? b.kind : `${b.width || 1} bits`) : null, by, row: spans.length && !other ? b : null });
       if (spans.length) differ++;
     }
-    const starts = [...new Set([...rows.values()].flatMap(c => c.spans.map(([s]) => s)))].sort((x, y) => x - y);
-    this.cmp = { name: nm, rows, differ, missing, omitted, compared: rows.size - missing - omitted, from, to, starts, first: starts.length ? starts[0] : null,
+    this.cmp = { name: nm, rows, differ, missing, omitted, compared: rows.size - missing - omitted, from, to, starts: cmpStarts(rows), first: cmpFirst(rows),
       byName, waves: true };
     this.cmpMarks(); this.cmpShow(); this.draw();
     const c = this.cmp;
@@ -208,17 +230,37 @@ Object.assign(WaveView.prototype, {
     }
     return { name: c.name, from: c.from, to: c.to, first: c.first, signals, missing };
   },
-  // the compare result of a row: a struct's group row its vector, a row of your groups its signal
-  cmpOf(r) { return this.cmp ? this.cmp.rows.get(r.sig || r.orig || r) : null; },
-  // the rows' marks in the names (≠ differs, struck: not in B; your groups' rows too) and their tooltips
+  // the compare result of a row: a struct's group row its vector, a row of your groups its signal, a bit of a bus its own
+  cmpOf(r) {
+    if (!this.cmp) return null;
+    const k = r.sig || r.orig || r;
+    return k.bit != null ? this.cmpBit(k) : this.cmp.rows.get(k);
+  },
+  // a bit of a bus: its own stretches and B's bit, the changes of the bits of a bus read once for all of them; without B's
+  // values, a row of another width: the bus's
+  cmpBit(r) {
+    const c = this.cmp, x = c.rows.get(r.of); if (!x) return null;
+    if (this.cmpCan()) this.cmpLoad();
+    if (!x.row) return x;
+    const w = r.of.width || 1, j = w - 1 - r.bit, tr = x.atr || r.of.tr, memo = c.bits || (c.bits = new WeakMap());
+    let m = memo.get(x);
+    if (!m || m.tr !== tr) { m = { tr, a: bitTrs({ width: w, tr }), b: bitTrs(x.row), rows: [] }; memo.set(x, m); }
+    return m.rows[j] || (m.rows[j] = { spans: diffSpans({ width: 1, tr: m.a[j] }, { width: 1, tr: m.b[j] }, c.from, c.to), other: null, by: null,
+      row: { tr: m.b[j] }, atr: m.a[j] });
+  },
+  // the rows' marks in the names (≠ differs, struck: not in B; your groups' rows and the bits of a bus too) and their tooltips
   cmpMarks() {
-    const all = [...this.M.rows, ...Object.values(this.M.groups), ...this.ugRows()];
-    for (const r of all) {
+    const all = [...this.M.rows, ...Object.values(this.M.groups), ...this.ugRows()], bits = new Set(this.cmpBits);
+    if (this.bitsOpen.size) {
+      for (const r of all) if (r.type === 'sig' && this.bitsOpen.has((r.orig || r).full) && isVec(r)) for (const k of this.bitsOf(r)) bits.add(k);
+    }
+    this.cmpBits = bits;   // the bits folded meanwhile too: their marks go with the compare
+    for (const r of [...all, ...bits]) {
       const c = this.cmpOf(r), d = !!(c && c.spans.length), m = !!(c && (c.missing || c.omitted)), by = c && c.by ? ` (matched by name: ` +
         `${cmpPath(r.sig || r.orig || r)} → ${c.by})` : '';
       this.rowClass(r, 'cmpd', d).rowClass(r, 'cmpm', m);
       if (d || m || by) { this.rowTitle(r, `${r.full || r.name} — ${c.missing ? `not in ${this.cmp.name}` : c.omitted ? `not read from ${this.cmp.name} ` +
-        `(dumpBudget ${this.S.dumpBudget} changes)` : c.other ? `${this.cmp.name}: ${c.other}` : d ? `${c.spans.length} stretch${c.spans.length === 1 ? '' :
+        `(dumpBudget ${this.S.dumpBudget} changes)` : c.other ? `${c.other} in ${this.cmp.name}` : d ? `${c.spans.length} stretch${c.spans.length === 1 ? '' :
         'es'} other in ${this.cmp.name}` : `the same in ${this.cmp.name}`}${by}`); (this.cmpTitled ||= new Set()).add(r); }
       else if (this.cmpTitled && this.cmpTitled.delete(r)) this.rowTitle(r, null);
     }
@@ -247,30 +289,18 @@ Object.assign(WaveView.prototype, {
   },
   // the names of the two runs: of these waves (the dump they are made of, the title), of the second dump
   cmpNames() {
-    const m = (this.M.src && this.M.src.meta) || {};
-    return [String(m.waves || this.opts.title || this.M.title || 'these waves').split(/[\\/]/).pop(), this.cmp ? this.cmp.name : 'B'];
+    return [cmpNameA(this.M, this.opts.title), this.cmp ? this.cmp.name : 'B'];
   },
   // which run the waves show, on the time axis at the right, always in sight (the bar may be folded or off the screen) and in
-  // the picture: the run's letter and name on its colour, the two of the overlay in the colours of their waves; none while a
-  // compare has bands only. A strip under the axis while B is shown
-  paintRunTag(P, xR, y, h) {
-    if (!this.cmpCan()) return;
-    const [na, nb] = this.cmpNames().map(s => (s.length > 32 ? s.slice(0, 31) + '…' : s)), st = { size: 10.5, weight: 600 };
-    const parts = this.cmpRun === 'b' ? [['B', nb, 'runb']] : this.cmpRun === 'overlay' ? [['A', na, 'one'], ['B', nb, 'runb']] : [['A', na, 'acc']];
-    let x = xR - 4;
-    for (const [l, n, col] of parts.reverse()) {
-      const t = `${l} · ${n}`, w = P.measure(t, st) + 12; x -= w;
-      P.rect(x, y + 3, w, h - 6, col); P.text(x + 6, y + h / 2, t, Object.assign({ fill: 'panel' }, st)); x -= 3;
-    }
-    if (this.cmpRun === 'b') P.rect(0, y + h - 2, xR, 2, 'runb');
-  },
+  // the picture; none while a compare has bands only
+  paintRunTag(P, xR, y, h) { if (this.cmpCan()) paintRunTagOf(P, xR, y, h, this.cmpRun, this.cmpNames()); },
   // B's values here (a dump read here, a result's "vcd")?
   cmpCan() { const c = this.cmp; return !!c && !!(c.waves || (c.result && c.result.vcd)); },
   // a result's "vcd" read, at its first use: its rows to the ones that differ
   cmpLoad() {
     const c = this.cmp; if (c.waves) return;
     const by = cmpCut(c.result);
-    for (const [a, x] of c.rows) if (x.spans.length) x.row = by.get(x.b || cmpPath(a)) || null;
+    for (const [a, x] of c.rows) if (x.spans.length && !x.other) x.row = by.get(x.b || cmpPath(a)) || null;
     c.waves = true;
   },
   // why this view cannot be shown, '' when it can
@@ -285,9 +315,10 @@ Object.assign(WaveView.prototype, {
     c.swapped = on;
     const got = new Set();
     for (const [a, x] of c.rows) {
-      if (!x.row && !x.missing && !x.omitted) continue;
+      if (!x.row && !x.missing && !x.omitted && !x.other) continue;
       if (on) { x.atr = a.tr; a.tr = x.row ? x.row.tr : []; } else a.tr = x.atr;
       a.an = null; RISES.delete(a); got.add(a);
+      for (const k of this.bitMemo.get(a) || []) RISES.delete(k);   // its bits follow its changes
     }
     rowsMade(this.M, got);
     this.clkMemo = null; this.cycMemo = null; this.fsmSt = null; this.rangeKey = null; this.valsAt = null;
@@ -302,7 +333,7 @@ Object.assign(WaveView.prototype, {
     const no = this.cmpCant(show); if (no) { if (!quiet) this.toast(no); return null; }
     const req = this.cmpViewReq = (this.cmpViewReq || 0) + 1, c = this.cmp;
     if (show !== 'a') this.cmpLoad();
-    if (show === 'b') await this.need([...c.rows.keys()]);
+    if (show === 'b') await this.need([...c.rows].filter(([, x]) => x.row || x.missing || x.omitted || x.other).map(([r]) => r));
     if (req !== this.cmpViewReq || c !== this.cmp) return null;
     if (show === 'overlay' && this.cmpRun !== 'overlay') this.cmpLast = this.cmpRun;
     this.cmpSwap(show === 'b'); this.cmpRun = show; this.valsAt = null;
@@ -320,13 +351,13 @@ Object.assign(WaveView.prototype, {
   // the value at the cursor in the overlay: both when they differ
   valueBoth(s, t) {
     const a = String(this.valueAt(s, t)), c = this.cmpRun === 'overlay' ? this.cmpOf(s) : null; if (!c || !c.row) return a;
-    const b = String(this.valueAt(c.view || (c.view = Object.assign(Object.create(s), { tr: c.row.tr })), t));
+    const b = String(this.valueAt(cmpView(c, s), t));
     return a === b ? a : `${a} ≠ ${b}`;
   },
   // a row's value in the other run, for its tooltip: '' when it has none, or it is the same
   cmpTip(r, t) {
     const c = this.cmp && this.cmpOf(r), b = this.cmpRun === 'b'; if (!c || !(b ? c.atr : c.row)) return '';
-    const o = Object.assign(Object.create(r), { tr: b ? c.atr : c.row.tr }), v = String(this.valueAt(o, t));
+    const o = Object.create(r, { tr: { value: b ? c.atr : c.row.tr } }), v = String(this.valueAt(o, t));
     return v === String(this.valueAt(r, t)) ? '' : `\n${b ? 'A' : 'B'}: ${v}`;
   },
   // a compare result already made (sva diff's, by the build from the config's "compare", or the command compare): the WaveJSON
@@ -339,25 +370,28 @@ Object.assign(WaveView.prototype, {
     if (!c) throw new Error('compare: a result {name, from, to, signals: {path: {spans}}} (sva diff\'s, as the page\'s "compare")');
     if (!this.M.timed) { this.toast('compare: these waves are clock-sampled (one cell per cycle): a compare is of exact waves'); return null; }
     this.cmpBack();
+    // on these waves: a result of another window, a saved state, an agent's: the time of the page, nothing outside it counted
+    const { t0, t1 } = this.M, from = Math.min(Math.max(isFinite(c.from) ? c.from : t0, t0), t1), to = Math.max(Math.min(isFinite(c.to) ? c.to : t1, t1), from);
+    const cut = sp => sp.flatMap(([a, b]) => (b > from && a < to ? [[Math.max(a, from), Math.min(b, to)]] : []));
     const rows = new Map(), miss = new Set(c.missing);
     let differ = 0, missing = 0;
     for (const a of this.cmpRows()) {
       const p = cmpPath(a), s = c.signals[p];
       if (miss.has(p)) { rows.set(a, { missing: true, omitted: false, spans: [] }); missing++; continue; }
       if (!s) continue;
-      rows.set(a, { spans: s.spans, other: s.other || null, by: null, b: s.b || null });
-      if (s.spans.length) differ++;
+      const spans = cut(s.spans);
+      rows.set(a, { spans, other: s.other || null, by: null, b: s.b || null });
+      if (spans.length) differ++;
     }
-    const starts = [...new Set([...rows.values()].flatMap(x => x.spans.map(([t]) => t)))].sort((x, y) => x - y);
-    this.cmp = { name: c.name, rows, differ, missing, omitted: 0, compared: rows.size - missing, from: c.from, to: c.to, starts,
-      first: starts.length ? starts[0] : null, byName: [], result: c };
+    this.cmp = { name: c.name, rows, differ, missing, omitted: 0, compared: rows.size - missing, from, to, starts: cmpStarts(rows), first: cmpFirst(rows),
+      byName: [], result: Object.assign({}, c, { from, to }) };
     this.cmpMarks(); this.cmpShow(); this.draw();
     const f = t => this.fmt(t, (this.M.t1 - this.M.t0) / 1000, this.M.t1 - this.M.t0), x = this.cmp;
     const said = `${x.name}: ${differ} of ${x.compared} signals differ${x.first == null ? '' : `, the first at ${f(x.first)}`}` +
-      (missing ? ` · ${missing} not in it` : '') + (c.from > this.M.t0 || c.to < this.M.t1 ? ` · compared ${f(c.from)} … ${f(c.to)}` : '');
+      (missing ? ` · ${missing} not in it` : '') + (from > t0 || to < t1 ? ` · compared ${f(from)} … ${f(to)}` : '');
     if (!quiet) this.toast(said + (differ ? ' · ]d [d go to them' : ''));
     this.log('ok', 'compared with ' + said);
-    return { name: x.name, compared: x.compared, differ, missing, omitted: 0, first: x.first, from: c.from, to: c.to, byName: 0 };
+    return { name: x.name, compared: x.compared, differ, missing, omitted: 0, first: x.first, from, to, byName: 0 };
   },
   // ]d [d: the cursor to the next / previous start of a difference: of the selected signal when it has some, else of all
   // the signals in the view (hidden ones and the ones Only leaves out: not stepped to)
@@ -368,7 +402,7 @@ Object.assign(WaveView.prototype, {
       (bySig => [...new Set([...this.cmp.rows].filter(([r]) => this.shown(r) || this.shown(bySig.get(r))).flatMap(([, c]) => c.spans.map(([a]) => a)))]
         .sort((x, y) => x - y))(new Map(Object.values(this.M.groups).filter(g => g.sig).map(g => [g.sig, g])));   // a struct's value: by its row
     if (!ts.length) { this.toast(`no difference from ${this.cmp.name}`); return this; }
-    const t = ts[stepTo(ts, this.cursor, dir)];
+    const t = Math.min(Math.max(ts[stepTo(ts, this.cursor, dir)], this.M.t0), this.M.t1);
     this.cursor = t; if (t < this.t0 || t > this.t0 + this.span) this.t0 = this.clamp(t - this.span / 2);
     this.draw(); this.syncCursorFields(true); return this;
   },

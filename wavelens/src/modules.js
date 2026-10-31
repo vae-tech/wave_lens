@@ -68,6 +68,8 @@ Object.assign(WaveView.prototype, {
     }
     if (o && o.open && o.open.length) this.onlyOpen(o.open);
     this.onlyMemo = null; this.allRows(); this.onlyFix();
+    if (this.only && this.only.on && this.only.modules.length && this.only.modules.every(p => this.hiddenRows.has(p))) {
+      this.toast('Only: what is left is hidden (Hidden ✕ in the bar shows it)'); }
     if (this.q) this.find(this.q, false, null, false); else { this.renderNames(); this.draw(); }   // the matches outside it counted again (no refolding)
     this.onlyShow(); return this;
   },
@@ -241,7 +243,7 @@ class Mods {
     this.events(); this.render(true);   // drawn again with the names column (Names.render): Hide, Only, the selection
   }
   close() { panelKeep(this, 'mods'); this.ac.abort(); this.el.remove(); this.v.closeMenu();
-    if (this.v.mods === this) this.v.mods = null; this.v.canvas.focus({ preventScroll: true }); }
+    if (this.v.mods === this) this.v.mods = null; this.v.refocus(); }
   // the rows of the tree as shown: the open ones (a filter: the matches and the way to them)
   list() {
     const out = [], terms = this.q.trim().split(/\s+/).filter(w => w.replace(/\./g, ''));
@@ -453,9 +455,7 @@ class Mods {
         bs[(k + (e.key === 'ArrowDown' ? 1 : -1) + bs.length) % bs.length]?.focus(); }
     });
     el.addEventListener('contextmenu', e => e.preventDefault());
-    const off = v.offMenu = e => { if (!el.contains(e.target)) v.closeMenu(); };
-    setTimeout(() => { if (v.menuEl !== el) return; document.addEventListener('pointerdown', off, { capture: true, signal: v.ac.signal });
-      window.addEventListener('blur', off, { signal: v.ac.signal }); }, 0);
+    v.menuOff(el);
     (el.querySelector('button') || el).focus({ preventScroll: true });
   }
 }

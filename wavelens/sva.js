@@ -994,7 +994,7 @@ class Panel {
     v.listen('names', 'dragover', e => { const t = this.dropTarget(e); if (t) { e.preventDefault(); e.dataTransfer.dropEffect = 'link'; this.hover(t); } });
     v.listen('names', 'dragleave', e => { if (!v.rowAt(e.relatedTarget)) this.hover(null); });
     v.listen('names', 'drop', e => { const t = this.dropTarget(e); if (!t) return; e.preventDefault(); this.dragEnd(); this.drop(t); });
-    v.root.addEventListener('wavelens:settings', () => this.sync());   // sortIgnore prefixes: the names resolve again
+    v.root.addEventListener('wavelens:settings', () => this.sync(), { signal: v.ac.signal });   // sortIgnore prefixes: the names resolve again
     if (v.extraJSON) v.extraJSON.push(() => this.bindings.length ? `"bind": [\n${this.bindJSON().map(x => '  ' + JSON.stringify(x)).join(',\n')}\n]` : null);
     if (v.extraState) v.extraState.push({ key: 'sva', get: () => this.snapshot(), set: s => this.restore(s) });
     // on the waves: the rows of the bindings, f / F through the failures, Esc unselects
@@ -1004,7 +1004,7 @@ class Panel {
     if (v.extraRows) v.extraRows.push(g => this.rowsFor(g));
     v.addKey(']f', () => this.step(1), ']f [f next / previous assertion failure').addKey('[f', () => this.step(-1));
     v.addKey(']a', () => this.stepAssert(1), ']a [a next / previous assertion').addKey('[a', () => this.stepAssert(-1));
-    v.root.addEventListener('wavelens:reset', () => this.unselect(false));
+    v.root.addEventListener('wavelens:reset', () => this.unselect(false), { signal: v.ac.signal });
     v.root.addEventListener('wavelens:destroy', () => { LIB.panels.delete(this); this.el.remove(); v.sva = null; }, { once: true });
     // this browser's bindings, with the page's that are new since (the ones the user unbound stay away)
     this.saved = store.get(this.key) || {};
@@ -1890,7 +1890,7 @@ class Exprs {
     if (v.extraState) v.extraState.push({ key: 'exprs', get: () => this.json(), set: l => this.setList(l) });
     if (v.extraJSON) v.extraJSON.push(() => this.list.length ?
       `"exprs": [\n${this.list.map(x => '  ' + JSON.stringify(x.scope ? { expr: x.text, scope: x.scope } : x.text)).join(',\n')}\n]` : null);
-    v.root.addEventListener('wavelens:settings', () => this.again());
+    v.root.addEventListener('wavelens:settings', () => this.again(), { signal: v.ac.signal });
     const page = (v.M.src.sva && v.M.src.sva.exprs) || [], kept = store.get(this.key);
     this.list = (kept || page).map(x => (typeof x === 'string' ? { text: x, scope: '' } : { text: x.expr || x.text, scope: x.scope || '' })).filter(x =>
       x.text);

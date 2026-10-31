@@ -31,7 +31,25 @@ Object.assign(WaveView.prototype, {
     if (!e.quiet) this.root.wlLogSeen = true;
     if (level === 'error') this.root.wlLogOpen = true;
     this.root.dispatchEvent(new CustomEvent('wavelens:log', { detail: Object.assign({ plain: logPlain(e) }, e) }));
-    this.logRender(); return this;
+    if (!this.logAppend(e)) this.logRender();
+    return this;
+  },
+  // an entry into the list that is open: one row and the counts, not the 500 rows again (an agent's hundreds of lines) -> done
+  logAppend(e) {
+    const el = this.logEl, b = el && el.isConnected && !el.hidden && el.querySelector('.lb'), L = this.logList();
+    if (!b || L.length < 2 || b.querySelector('.lv-none')) return false;
+    const h = el.querySelector('.lh');
+    if (e.level === 'error' || e.level === 'warning') { h.querySelectorAll('.lc').forEach(x => x.remove());
+      h.querySelector('.lf').insertAdjacentHTML('afterend', this.logCounts(L)); }
+    else if (this.root.wlLogOnly) return true;
+    b.insertAdjacentHTML('beforeend', this.logRow(e));
+    while (b.childElementCount > LOG_MAX) b.firstElementChild.remove();
+    if (!this.logScroll) this.logScroll = requestAnimationFrame(() => { this.logScroll = 0; b.scrollTop = b.scrollHeight; });   // the latest in sight
+    return true;
+  },
+  logCounts(L) {
+    const ne = L.filter(e => e.level === 'error').length, nw = L.filter(e => e.level === 'warning').length;
+    return (ne ? `<span class="lc le" title="errors">✖ ${ne}</span>` : '') + (nw ? `<span class="lc lw" title="warnings">⚠ ${nw}</span>` : '');
   },
   // what went wrong (an Error): its text, and its place when it is one of a JSON file
   logError(e, text) { return this.log('error', text || e.message, e && e.json && e.json.line ? { json: e.json } : {}); },
@@ -56,9 +74,7 @@ Object.assign(WaveView.prototype, {
     const el = this.logEl; if (!el || !el.isConnected) return;
     const L = this.logList(), S = this.S, show = S.log === true || (S.log !== false && !!this.root.wlLogSeen);
     el.hidden = !show; if (!show) { el.innerHTML = ''; return; }
-    const ne = L.filter(e => e.level === 'error').length, nw = L.filter(e => e.level === 'warning').length;
-    const open = !!this.root.wlLogOpen, only = !!this.root.wlLogOnly, last = L[L.length - 1];
-    const cnt = (ne ? `<span class="lc le" title="errors">✖ ${ne}</span>` : '') + (nw ? `<span class="lc lw" title="warnings">⚠ ${nw}</span>` : '');
+    const open = !!this.root.wlLogOpen, only = !!this.root.wlLogOnly, last = L[L.length - 1], cnt = this.logCounts(L);
     let h = `<div class="lh"><button type="button" data-l="fold" class="lf" aria-expanded="${open}" title="${open ? 'Fold the log' :
       'Open the log: what the page did, and what went wrong'}">${open ? '▾' : '▸'} Log</button>${cnt}` + (open ? '<span class="lsp"></span>' +
       `<button type="button" data-l="only" aria-pressed="${only}" title="Only the errors and warnings">Problems</button>` +
@@ -66,7 +82,7 @@ Object.assign(WaveView.prototype, {
       `<span class="ll lv-${last ? last.level : 'info'}">${last ? esc(last.text) : 'nothing yet'}</span>`) + '</div>';
     if (open) {
       const rows = L.filter(e => !only || e.level === 'error' || e.level === 'warning');
-      const none = `<li class="lv-info">${only ? 'no errors or warnings' : 'nothing yet'}</li>`;
+      const none = `<li class="lv-info lv-none">${only ? 'no errors or warnings' : 'nothing yet'}</li>`;
       h += `<ol class="lb" role="log">${rows.map(e => this.logRow(e)).join('') || none}</ol>`;
     }
     el.innerHTML = h;

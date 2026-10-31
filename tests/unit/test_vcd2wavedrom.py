@@ -7,6 +7,27 @@ import vcd2wavedrom as V
 from common import WaveError
 
 
+class Times(unittest.TestCase):
+    """review 0.31 P2, T8: a config's times read as the page and viewedit.py read them."""
+    TABLE = (('100NS', 1e5), ('0.1µs', 1e5), ('2.5us', 2.5e6), ('1e-3ns', 1), ('1E2ps', 100), ('3as', 3e-6), (' 5 ns ', 5000))
+
+    def test_to_ps(self):
+        for text, ps in self.TABLE:
+            with self.subTest(text):
+                self.assertAlmostEqual(V.to_ps(text), ps)
+        for text in ('5', '-5ns', '5 parsecs', '1.2.3ns', 'ns', ''):
+            with self.subTest(text), self.assertRaisesRegex(WaveError, 'bad time'):
+                V.to_ps(text)
+
+    def test_a_config_from(self):
+        with H.tmp() as d:
+            c = os.path.join(d, 'c.json')
+            H.dump({'waves': H.fixture('names'), 'exact': True, 'signals': 'tb.clk', 'from': '0.001µs', 'to': '100NS'}, c)
+            rc, out, err = H.run_tool('vcd2wavedrom', '--config', c)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(json.loads(out)['meta']['from_ps'], 1000)
+
+
 class Golden(unittest.TestCase):
     # review VI T7: what the converter writes for each fixture, byte for byte (exact, every variable, by scope; enum.vcd
     # sampled by its clock too): a change of the text that json would read the same is a change of every page's bytes
@@ -199,7 +220,7 @@ class Convert(unittest.TestCase):
     def test_real_clock_sampled(self):
         with H.tmp() as d:
             body = ''.join(f'#{t}\n{t // 5 % 2}"\nr{t / 10} !\n' for t in range(0, 40, 5))
-            p = H.vcd(d, body, header=open(H.fixture('real')).read().split('#0')[0])
+            p = H.vcd(d, body, header=H.text(H.fixture('real')).split('#0')[0])
             rc, out, err = H.run_tool('vcd2wavedrom', '--waves', p, '--clock', 'tb.clk', '--signals', 'tb.clk,tb.volt')
         self.assertEqual(rc, 0, err)
         volt = json.loads(out)['signal'][1]
@@ -496,6 +517,19 @@ class Compare(unittest.TestCase):
             rc, _, err = self.conv(d, {'waves': 'a.vcd', 'exact': True, 'signals': ['tb.d'], 'compare': 'b.vcd'})
             self.assertIn('"compare" is {"dump"', err)
 
+    def test_compare_show(self):   # review 0.31 S2, T6: what the page opens with, checked at the build
+        with H.tmp() as d:
+            cmp_bench(d, 'a.vcd', 'tb', '1011'), cmp_bench(d, 'b.vcd', 'top', '1111')
+            cfg = {'waves': 'a.vcd', 'exact': True, 'signals': ['tb.clk', 'tb.d']}
+            rc, _, err = self.conv(d, {**cfg, 'compare': {'dump': 'b.vcd', 'show': 'c'}})
+            self.assertEqual(rc, 1)
+            self.assertIn('"compare": show is a, b or overlay, not "c"', err)
+            for show in ('a', 'b', 'overlay'):
+                rc, doc, err = self.conv(d, {**cfg, 'compare': {'dump': 'b.vcd', 'show': show}})
+                self.assertEqual((rc, doc['compare']['show']), (0, show), err)
+            rc, doc, err = self.conv(d, {**cfg, 'compare': {'dump': 'b.vcd'}})
+            self.assertNotIn('show', doc['compare'], err)
+
     def test_spans_every(self):
         with H.tmp() as d:
             cmp_bench(d, 'a.vcd', 'tb', '1011')
@@ -581,8 +615,8 @@ class Lint(unittest.TestCase):
     def test_convert_prints_them(self):
         with H.tmp() as d:
             cfg = os.path.join(d, 'c.json')
-            json.dump({'waves': H.fixture('names'), 'exact': True, 'signals': 'tb.clk', 'marker': ['posedge tb.dut.i_ready=r'],
-                       'bookmarks': [{'n': 1, 't': '1s', 'signal': 'tb.clk'}]}, open(cfg, 'w'))
+            H.dump({'waves': H.fixture('names'), 'exact': True, 'signals': 'tb.clk', 'marker': ['posedge tb.dut.i_ready=r'],
+                    'bookmarks': [{'n': 1, 't': '1s', 'signal': 'tb.clk'}]}, cfg)
             rc, _, err = H.run_tool('vcd2wavedrom', '--config', cfg)
         self.assertIn('vcd2wavedrom: lint: bookmark-outside-view: bookmarks[0] (n 1)', err)
 

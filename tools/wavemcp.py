@@ -33,7 +33,7 @@ import tempfile, threading, time, traceback, urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
 import dumpscan, svabuild, svtypes, vcd2wavedrom, viewedit, wavefind  # noqa: E402
-from common import ROOT, UNIT_PS, WaveError  # noqa: E402
+from common import ROOT, UNIT_PS, WaveError, version  # noqa: E402
 
 PROTOCOLS = ('2025-06-18', '2025-03-26', '2024-11-05')
 MAX_TEXT = 60000   # characters of one answer: above it the agent is asked to narrow the request
@@ -51,20 +51,12 @@ INSTRUCTIONS = (
     'view_live, else in the page\'s file (they reload it); view_get reads what is there, their own edits too.')
 
 
-def version():
-    try:
-        with open(os.path.join(ROOT, 'VERSION'), encoding='utf-8') as f:
-            return f.read().strip()
-    except OSError:
-        return '0'
-
-
 # ---------------- times ----------------
 def ps_of(v, what='time'):
     """A time from the agent: a number (ns) or a text with a unit, as the viewer reads one (viewedit.parse_time) -> ps."""
     if v is None or v == '':
         return None
-    t = viewedit.parse_time(v, 1000, viewedit.TIME_UNITS) if isinstance(v, (str, int, float)) else None
+    t = viewedit.parse_time(v, 1000) if isinstance(v, (str, int, float)) else None
     if t is None or not viewedit.finite(t):
         raise WaveError(f'bad {what} {json.dumps(v, ensure_ascii=False)}: a finite number of ns or a text with a unit ("250ns", "2.5us")')
     return float(t)
@@ -300,6 +292,8 @@ def window(w, a):
     t1 = w.t_end if t1 is None else t1
     if t1 < t0:
         raise WaveError(f'"to" ({ns(t1)}) is before "from" ({ns(t0)})')
+    if t0 > w.t_end or t1 < w.t_start:
+        raise WaveError(f'the window {ns(t0)} … {ns(t1)} ns is outside the dump ({ns(w.t_start)} … {ns(w.t_end)} ns)')
     return t0, t1
 
 
@@ -357,12 +351,17 @@ def t_signals(a):
     off = max(0, a.get('offset') or 0)
     n = limit(a, 200)
     page = items[off:off + n]
-    out = {'total': len(items), 'scope': scope or None, 'columns': ['path', 'width', 'changes'],
-           'signals': [[rel, v.width, c] + ([{'enum': len(v.enum)}] if v.enum else []) + ([v.kind] if v.kind not in ('wire', 'reg', 'logic') else [])
-                       for rel, v, c in page]}
+    extra = lambda v: ' '.join(([f'enum:{len(v.enum)}'] if v.enum else []) + ([v.kind] if v.kind not in ('wire', 'reg', 'logic') else []))
+    out = {'total': len(items), 'scope': scope or None, 'columns': ['path', 'width', 'changes', 'extra'],
+           'signals': [[rel, v.width, c, extra(v)] for rel, v, c in page]}
     if off + n < len(items):
         out['next_offset'] = off + n
     return out
+
+
+def check_radix(radix):
+    if radix is not None and radix not in viewedit.RADIX and not re.fullmatch(r's?q\d+', str(radix)):
+        raise WaveError(f'"radix": {", ".join(viewedit.RADIX)} or q8 / sq15 (fixed point), not {json.dumps(radix)[:40]}')
 
 
 def t_values(a):
@@ -374,18 +373,28 @@ def t_values(a):
         raise WaveError('"at" is required: a time or a list of times')
     if len(times) > 200:
         raise WaveError('"at": 200 times at most (wave_sample gives a value per clock cycle)')
+    check_radix(radix)
+    if a.get('side') not in (None, 'before', 'after'):
+        raise WaveError(f'"side": before or after, not {json.dumps(a["side"])[:40]}')
     names, res = w.signals(a.get('signals'), scope)
     before = a.get('side') == 'before'
-    rows = []
+    rows, out = [], []
     for t in times:
         tp = w.snap(ps_of(t))
         rows.append([ns(tp)] + [w.text(p, sl, w.at(w.stream(p, sl), tp, before), radix) for p, sl in res])
-    return {'unit': 'ns', 'side': 'before' if before else 'after', 'columns': ['t'] + list(names), 'rows': rows}
+        if not w.t_start <= tp <= w.t_end:
+            out.append(ns(tp))
+    d = {'unit': 'ns', 'side': 'before' if before else 'after', 'columns': ['t'] + list(names), 'rows': rows}
+    if out:
+        d['notes'] = [f'{", ".join(map(str, out[:5]))}{" …" if len(out) > 5 else ""} ns: outside the dump ({ns(w.t_start)} … {ns(w.t_end)} ns): '
+                      'nothing there, past its end the last value held']
+    return d
 
 
 def t_changes(a):
     w = wave(a.get('dump'), a)
     scope, radix = a.get('scope') or '', a.get('radix')
+    check_radix(radix)
     t0, t1 = window(w, a)
     n = limit(a, 50)
     names, res = w.signals(a.get('signals'), scope)
@@ -682,8 +691,6 @@ def converter_args(w, a, scope):
     argv += ['--clock', clk] if clk else ['--exact']
     t0, t1 = window(w, a)
     t0, t1 = max(t0, w.t_start), min(t1, w.t_end)   # a window past the dump's ends: the dump's
-    if t1 < t0:
-        raise WaveError(f'the window is outside the dump ({ns(w.t_start)} … {ns(w.t_end)} ns)')
     argv += [f'--from={ns(t0)}ns', f'--to={ns(t1)}ns']   # with "=": a time below 0 is not an option
     if a.get('auto_gap') and clk:
         argv += ['--auto-gap', str(a['auto_gap'])]
@@ -698,6 +705,8 @@ def t_page(a):
     if not out:
         raise WaveError('"out" is required: the HTML page (or .json: the WaveJSON) to write')
     out = os.path.abspath(os.path.expanduser(str(out)))
+    if not os.path.isdir(os.path.dirname(out)):
+        raise WaveError(f'"out": no such directory {os.path.dirname(out)}')
     argv = converter_args(w, a, a.get('scope') or '')
     for f in [a['sva']] if isinstance(a.get('sva'), str) else a.get('sva') or []:
         argv += ['--sva', f]
@@ -746,14 +755,14 @@ def cache_dir():
     return os.path.join(os.environ.get('XDG_CACHE_HOME') or os.path.expanduser('~/.cache'), 'wavelens')
 
 
-def live_token():
-    """This user's token of the live link (made once, kept: a page that has it reconnects after a restart)."""
+def live_token(new=False):
+    """This user's token of the live link (made once, kept: a page that has it reconnects after a restart); new: another one."""
     d = cache_dir()
     p = os.path.join(d, 'live-token')
     try:
         with open(p, encoding='utf-8') as f:
             t = f.read().strip()
-        if len(t) >= 16:
+        if len(t) >= 16 and not new:
             return t
     except OSError:
         pass
@@ -773,13 +782,14 @@ class LiveHandler(http.server.BaseHTTPRequestHandler):
     """GET /events (server-sent events: the commands for the page), POST /hello (its viewers), POST /reply (the results);
     the token in every request, an Origin of a file:// page ("null") or this machine only."""
     bridge = None
+    server_version, sys_version = 'wavelens', ''
 
     def log_message(self, *a):   # stdout is the protocol, stderr is the agent's log: quiet
         pass
 
     def head(self, code, ctype='application/json', length=None):
         self.send_response(code)
-        self.send_header('Access-Control-Allow-Origin', '*')
+        self.origin()
         self.send_header('Cache-Control', 'no-store')
         self.send_header('Content-Type', ctype)
         if length is not None:
@@ -798,15 +808,30 @@ class LiveHandler(http.server.BaseHTTPRequestHandler):
         """The Host of the request is this server by a local name (not a name of another site sent here: DNS rebinding)."""
         return bool(re.fullmatch(rf'(127\.0\.0\.1|localhost|\[::1\]):{self.bridge.port}', self.headers.get('Host') or '', re.I))
 
-    def allowed(self):
+    def origin_ok(self):
         o = self.headers.get('Origin')
-        if not self.local() or o not in (None, 'null') and not re.fullmatch(r'https?://(127\.0\.0\.1|localhost|\[::1\])(:\d+)?', o):
+        return o in (None, 'null') or bool(re.fullmatch(r'https?://(127\.0\.0\.1|localhost|\[::1\])(:\d+)?', o))
+
+    def origin(self):
+        """The header that lets a page read the answer: for an Origin this link serves only."""
+        if self.headers.get('Origin') and self.origin_ok():
+            self.send_header('Access-Control-Allow-Origin', self.headers['Origin'])
+
+    def allowed(self):
+        if not self.local() or not self.origin_ok():
             return False
         return hmac.compare_digest((self.query().get('token') or [''])[0].encode(), self.bridge.token.encode())
 
+    def do_PUT(self):
+        self.answer(405, {'error': 'GET or POST'})
+
+    do_DELETE = do_PATCH = do_PUT
+
     def do_OPTIONS(self):
+        if not self.local() or not self.origin_ok():
+            return self.answer(403, {'error': 'not allowed'})
         self.send_response(204)
-        self.send_header('Access-Control-Allow-Origin', '*')
+        self.origin()
         self.send_header('Access-Control-Allow-Methods', 'GET, POST')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
@@ -886,6 +911,7 @@ class Bridge:
         self.httpd.daemon_threads = True
         self.httpd.handle_error = lambda request, addr: print(f'wavemcp: the live link: {sys.exc_info()[1]!r} ({addr[0]})', file=sys.stderr)
         self.port, self.started = self.httpd.server_address[1], time.monotonic()
+        self.waited = False   # a dump's tab waited for once (its first view tool): an error need not cost 5 s each time
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         self.announce()
 
@@ -1195,6 +1221,8 @@ DUMP_RE = re.compile(r'\.(vcd|fst)$', re.I)   # a dump open in a tab of VS Code 
 
 def t_view_live(a):
     b = bridge()
+    if a.get('rotate'):
+        b.token = live_token(new=True)
     out = {'link': f'http://127.0.0.1:{b.port}'}
     path = page_arg(a)
     if path and DUMP_RE.search(path):
@@ -1218,7 +1246,7 @@ def t_view_live(a):
             viewedit.write_text(path, text)
         out['page'] = path
         if a.get('off'):
-            out['note'] = 'the page no longer connects (reload it)'
+            out['note'] = 'the page no longer connects (reload it); a copy made while it carried the key still has it: rotate makes a new one'
         else:
             url = 'file://' + urllib.parse.quote(path)
             out['note'] = ('the page connects when opened or reloaded (it carries the key of this link: view_live off before you send it '
@@ -1288,8 +1316,9 @@ def target(a):
     if path and not os.path.isfile(path):
         raise WaveError(f'no such page: {path}')
     if path and DUMP_RE.search(path):   # a dump: its tab in VS Code, or nothing
-        b = bridge()   # the extension's tabs connect within a few seconds of its start
-        c = live_page(a, wait=max(0.0, 5 - (time.monotonic() - b.started)))
+        b = bridge()   # the extension's tabs connect within a few seconds of its start: waited for once
+        c = live_page(a, wait=0 if b.waited else max(0.0, 5 - (time.monotonic() - b.started)))
+        b.waited = True
         if not c:
             raise WaveError(f'{os.path.basename(path)} is not open in VS Code (WaveLens): view_live with page and open: true opens it there')
         return 'live', c, live_view(c, a.get('view'))
@@ -1362,6 +1391,14 @@ def names_arg(v):
     return ','.join(v) if isinstance(v, list) else str(v)
 
 
+def cli_names(path, names, scope=''):
+    """The agent's signals of dump path, by the rules of the wave_ tools (a path, under scope, a unique tail), as the CLI
+    takes them: full paths, a * ? pattern as it is."""
+    w = wave(path, {})
+    items = names if isinstance(names, list) else [x for x in str(names).split(',') if x.strip()]
+    return ','.join(x.strip() if re.search(r'[*?]', x) else w.signals([x], scope)[1][0][0] for x in items)
+
+
 def bits_text(v):
     """A value of sva diff as an agent reads it: a bus of known bits in hex (as the CLI's text), the rest as it is."""
     return f'0x{int(v, 2):0{(len(v) + 3) // 4}x}' if len(v) > 4 and set(v) <= {'0', '1'} else v
@@ -1377,8 +1414,8 @@ def t_diff(a):
         if t is not None:
             cmd += [f'--{k}', t]
     if a.get('signals'):
-        cmd += ['--signals', names_arg(a['signals'])]
-    if a.get('scope'):
+        cmd += ['--signals', cli_names(da, a['signals'], a.get('scope') or '')]
+    elif a.get('scope'):
         cmd += ['--scope', a['scope']]
     for x, y in (a.get('map') or {}).items():
         cmd += ['--map', f'{x}={y}']
@@ -1427,12 +1464,13 @@ def t_cut(a):
     if not a.get('out') or out == src:
         raise WaveError('"out": the VCD to write (not the dump itself)')
     cmd = [sva_exe(a, 'wave_cut'), 'vcd', src, '--out', out]
+    window(wave(src, {}), a)
     for k in ('from', 'to'):
         t = cli_time(a, k)
         if t is not None:
             cmd += [f'--{k}', t]
     if a.get('signals'):
-        cmd += ['--signals', names_arg(a['signals'])]
+        cmd += ['--signals', cli_names(src, a['signals'])]
     r = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     if r.returncode:
         raise WaveError('; '.join(fst_notes(r.stderr)) or f'sva vcd: exit {r.returncode}')
@@ -1494,7 +1532,7 @@ def live_compare(op, where, v, a):
     gives the rows and the dump beside it; a dump's tab in VS Code is that dump, every signal of it."""
     if not (isinstance(op, dict) and op.get('op') == 'compare' and op.get('dump') and op.get('result') is None):
         return op
-    path = where['path'] if os.path.isfile(where['path']) else page_arg(a)
+    path = page_arg(a) or (where['path'] if os.path.isfile(where['path']) else None)
     args = {k: x for k, x in op.items() if k != 'op'}
     if path and DUMP_RE.search(path):
         exe = svabuild.find_bin(a.get('sva_bin'))
@@ -1516,6 +1554,9 @@ def live_edit(a, where, v):
     out = {'live': where['path'], 'view': v.get('key'), 'results': ns_out(res, v.get('timed'))}
     if a.get('save'):   # the page answered: the edit is done there; never done again on the file (the person's own would go)
         try:
+            path = page_arg(a)   # the file the agent named, the page's word for its path checked against it: a page does not choose what is written
+            if not path or not same_file(path, where['path']):
+                raise WaveError('give "page", the file of this page' if not path else f'{path} is not this page ({where["path"]})')
             st = BRIDGE[0].send(where['cid'], v.get('key'), [{'op': 'state'}])[0]
             st = st.get('state') if isinstance(st, dict) else None
             if not isinstance(st, dict):
@@ -1524,7 +1565,7 @@ def live_edit(a, where, v):
             out['saved'] = None
             out['note'] = f'applied live, not saved into the page\'s file: {e}'
         else:
-            pg = viewedit.Page(where['path'] if os.path.isfile(where['path']) else page_arg(a))
+            pg = viewedit.Page(path)
             key = pg.view(v.get('key'))
             pg.put(key, {k: x for k, x in st.items() if k not in ('wavelens', 'version', 'title')})
             pg.save()
@@ -1670,11 +1711,12 @@ TOOLS = [
          'then the changes up to "to" -> out, bytes, variables, from, to. For Compare… on a page, a fixture, sending one test case.',
          {'dump': None, 'out': S, 'from': None, 'to': None, 'signals': None}, ('dump', 'out'), ro=False),
     tool('view_edit', t_view_edit, 'Mark up a WaveLens page for a person (live in their browser when connected by view_live, else in the '
-         'page file: they reload it). ops in order, each {op, …}: ' + ' '.join(f'{k}({v})' for k, v in viewedit.COMMANDS.items()
-                                                                                  if k not in ('state', 'set_state', 'rows', 'picture')) +
-         '. t/from/to in ns; signals: path, name, path tail or * pattern; bookmark: a numbered circle with a text (no signal: on the time '
+         'page file: they reload it). ops in order, each {op, …}: ' +
+         ' '.join(f'{k}({v})' + ('·live' if k in viewedit.LIVE_ONLY else '') for k, v in viewedit.COMMANDS.items()
+                  if k not in ('state', 'set_state', 'rows', 'picture')) +
+         ' (·live: in a connected page only). t/from/to in ns; signals: path, name, path tail or * pattern; bookmark: a numbered circle with a text (no signal: on the time '
          'axis); arrow from/to: bookmark numbers; group: a folder of signals at the top; only: just these modules on the waves (with their '
-         'submodules); edge (live): the cursor to the next edge. config (instead of page): a mkhtml config file, bookmark / arrow / span '
+         'submodules); edge: the cursor to the next edge. config (instead of page): a mkhtml config file, bookmark / arrow / span '
          'on its view, kept by a rebuild (a bookmark\'s "at" event stays until a t replaces it).',
          {'page': S, 'config': S, 'view': S, 'ops': {'type': 'array', 'items': {'type': 'object'}}, 'save': B}, ('ops',), ro=False),
     tool('view_get', t_view_get, 'What a page shows: bookmarks, arrows, markers, groups, highlight, colours, hidden, cursor, window (live: '
@@ -1682,9 +1724,10 @@ TOOLS = [
          'made in a headless Chromium, tools/pageshot.py).',
          {'page': S, 'view': S, 'rows': S, 'limit': N, 'picture': B, 'full': B}, ()),
     tool('view_live', t_view_live, 'Connect a page to this server: it is written into the page (open or reload it), then view_edit and '
-         'view_get work on it live; open: open it in the browser; off: disconnect. page a .vcd / .fst: its tab in VS Code (the WaveLens '
-         'extension connects by itself; open: VS Code opens it). Without page: the pages connected.',
-         {'page': S, 'open': B, 'off': B}, (), ro=False),
+         'view_get work on it live; open: open it in the browser; off: disconnect; rotate: a new key, so a copy of a page that carried '
+         'the old one no longer connects (the pages linked before need view_live again). page a .vcd / .fst: its tab in VS Code (the '
+         'WaveLens extension connects by itself; open: VS Code opens it). Without page: the pages connected.',
+         {'page': S, 'open': B, 'off': B, 'rotate': B}, (), ro=False),
 ]
 BY_NAME = {t['name']: t for t in TOOLS}
 
@@ -1764,7 +1807,7 @@ def check_args(t, a):
         if not fits(v, sch):
             want = '/'.join(sch['type'] if isinstance(sch['type'], list) else [sch['type']])
             want += f' of {sch["items"]["type"] if isinstance(sch["items"]["type"], str) else "/".join(sch["items"]["type"])}' if 'items' in sch else ''
-            raise WaveError(f'"{k}": a {want}, not {json.dumps(v, ensure_ascii=False)[:80]}')
+            raise WaveError(f'"{k}": {"an" if want[0] in "aeiou" else "a"} {want}, not {json.dumps(v, ensure_ascii=False)[:80]}')
         if sch.get('type') == 'integer':
             out[k] = int(v)
     return out
