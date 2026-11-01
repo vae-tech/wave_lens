@@ -10,7 +10,7 @@ wavelens/                     what a page needs, nothing else
   wavelens.js / wavelens.css  framework (one <script> + one <link>); wavelens.js is made by make wavelens from src/
   src/                        model.js (settings, sorting, find, time, values, the parser), vcd.js (a VCD read in the
                               page), paint.js (the two painters
-                              and what they draw), bar.js (the bar: Bar, tooltips, help), names.js (the names column Names, the lists Notes), view.js (WaveView), menu.js (its menus), look.js (what it keeps in this browser, gaps, cycles), edit.js (the
+                              and what they draw), bar.js (the bar: Bar, tooltips, help), names.js (the names column Names, the lists Notes), view.js (WaveView), menu.js (its menus), look.js (what it keeps in this browser, gaps, cycles), warp.js (the gaps on the waves: time ↔ screen, its frame and painting), edit.js (the
                               viewer's commands view.run, your groups and markers, undo, Save page, the live link),
                               diff.js (a second dump compared: bands, A / B / overlay), modules.js (the Modules panel and Only), fsm.js (the
                               state machines panel and its layer), log.js (the log under the viewer), svg.js

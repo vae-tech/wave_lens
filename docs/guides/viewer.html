@@ -222,6 +222,7 @@
   <li>a bit: its rising edges and the frequency of a period that long (<code>Δ 20 ns / 50 MHz · 2 ↑ PCLK</code>);</li>
   <li>a bus: its changes and the number of values it took (<code>Δ 80 ns / 12.5 MHz · 7 changes of PADDR (4 values)</code>).</li>
 </ul>
+<p>Through <a href="gaps.html#live">gaps on the waves</a> the range counts what they hide, and says the cycles of their clock on any row.</p>
 <p>The signal is the one the range was measured on, else the selected one. <kbd>ctrl+click</kbd> or <kbd>Esc</kbd> clears it.</p>
 <figure><img src="img/viewer-range.png" alt="A measured range from 45 to 105 ns on PADDR, Δ 60 ns / 16.67 MHz on the axis" loading="lazy">
   <figcaption><b>A measured range.</b> From 45 to 105 ns on PADDR: shaded, <code>Δ 60 ns / 16.67 MHz</code> on the axis.</figcaption></figure>
@@ -249,7 +250,7 @@
     one cell per cycle of their clock (at most 2048: a longer range is cut there, said in the foot and the toast), buses as
     <code>=</code> with their values in the radix shown, a group per module; see
     <a href="wavedrom.html">WaveDrom</a></td></tr>
-  <tr><td>Gaps ▸</td><td>a submenu: the picture and WaveDrom leave out the idle stretches of a long range. The whole story with pictures
+  <tr><td>Gaps ▸</td><td>a submenu: the picture and WaveDrom leave out the idle stretches of a long range; <i>on the waves</i> (<kbd>gv</kbd>) cuts the waves themselves, live. The whole story with pictures
     is in <a href="gaps.html">Gaps</a></td></tr>
   <tr><td colspan="2"><b>The row under the pointer</b></td></tr>
   <tr><td>Colour</td><td>a colour picker: the trace, the bus outline and the name; <span class="ui">Its own colour</span> takes the paint off</td></tr>
@@ -524,6 +525,7 @@
     <td>next / previous bookmark, bookmark n</td></tr>
   <tr><td><kbd>gm</kbd></td><td>the markers and bookmarks: a list, <kbd>↑</kbd> <kbd>↓</kbd> go through them</td><td><kbd>gl</kbd>, <kbd>ctrl+G</kbd></td>
     <td>your groups: a list</td></tr>
+  <tr><td><kbd>gv</kbd></td><td>the waves with the gaps cut out, or in continuous time (<a href="gaps.html#live">Gaps</a>)</td><td></td><td></td></tr>
   <tr><td><kbd>zM</kbd> / <kbd>zR</kbd></td><td>fold / open every module</td><td><kbd>zc</kbd> <kbd>zo</kbd> <kbd>za</kbd></td>
     <td>the selected signal's module</td></tr>
   <tr><td><kbd>t</kbd></td><td>the Modules panel (<a href="#modules">Only</a>)</td><td><kbd>ctrl+G</kbd></td><td>the list of your groups</td></tr>
@@ -546,7 +548,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.32 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.33 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

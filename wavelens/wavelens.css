@@ -78,6 +78,10 @@
 .wv .bar .seg > :last-child { border-radius: 0 4px 4px 0 !important; }
 .wv .bar .seg > :focus-visible { position: relative; z-index: 1; }
 .wv .bar .cmpv[hidden] { display: none; }
+.wv .bar .gapv { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; color: var(--muted); white-space: nowrap; }
+.wv .bar .gapv[hidden] { display: none; }
+.wv .bar .gapv input { width: 4em; }
+.wv .bar .gapv input.bad { outline: 2px solid var(--wave-x); outline-offset: -1px; }
 .wv .bar .cmpv { margin-left: 4px; }
 .wv .bar .cmpv button[data-run="b"][aria-pressed="true"], .wv .bar .cmpv button[data-run="overlay"][aria-pressed="true"] { border-color: var(--wave-run-b); color: var(--wave-run-b); }
 .wv .bar button[data-act="in"], .wv .bar button[data-act="out"] { min-width: 2.4em; font-weight: 600; }

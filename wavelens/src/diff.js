@@ -403,7 +403,7 @@ Object.assign(WaveView.prototype, {
         .sort((x, y) => x - y))(new Map(Object.values(this.M.groups).filter(g => g.sig).map(g => [g.sig, g])));   // a struct's value: by its row
     if (!ts.length) { this.toast(`no difference from ${this.cmp.name}`); return this; }
     const t = Math.min(Math.max(ts[stepTo(ts, this.cursor, dir)], this.M.t0), this.M.t1);
-    this.cursor = t; if (t < this.t0 || t > this.t0 + this.span) this.t0 = this.clamp(t - this.span / 2);
+    this.cursor = t; if (t < this.t0 || t > this.t0 + this.span) this.center(t);
     this.draw(); this.syncCursorFields(true); return this;
   },
 });

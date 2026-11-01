@@ -346,6 +346,17 @@ class Views(unittest.TestCase):
         self.assertIn('"page" is required', W.call('view_edit', {'ops': [{'op': 'fit'}]})[0])
         self.assertIn('"ops": a list of commands', W.call('view_edit', {'page': self.page, 'ops': []})[0])
 
+    def test_gaps_view(self):
+        """The gaps on the waves in the agent's words: view_get says them, a cut (the page's) in ns."""
+        r = self.call('view_edit', page=self.page, ops=[{'op': 'gaps', 'on': True, 'view': True, 'idle': 8, 'signals': 'PSEL'}])
+        self.assertTrue(r['results'][0]['gaps']['gapView'])
+        self.assertNotIn('cut', r['results'][0])   # a file: the waves are the browser's
+        self.assertEqual(self.call('view_get', page=self.page)['gaps'], {'idle': 8, 'keep': 2, 'view': True, 'signals': ['PSEL']})
+        self.assertNotIn('gaps', self.call('view_edit', page=self.page, ops=[{'op': 'gaps', 'on': False}]) and self.call('view_get', page=self.page))
+        out = W.ns_out([{'op': 'gaps', 'cut': {'gaps': 1, 'kept': 5000, 'total': 20000, 'parts': [[0, 2000], [17000, 20000]]}}], True)
+        self.assertEqual(out[0]['cut'], {'gaps': 1, 'kept': 5, 'total': 20, 'parts': [[0, 2], [17, 20]]})
+        self.assertEqual(W.ns_out([{'op': 'gaps', 'cut': {'kept': 5}}], False)[0]['cut'], {'kept': 5})   # cycles
+
     def fake_page(self, b, path, cid='abcd1234', answer=True):
         """A page as a browser has it: the stream of commands, its hello, an answer (the ops echoed) to each command."""
         import threading, urllib.request

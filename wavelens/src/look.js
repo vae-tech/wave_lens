@@ -94,7 +94,7 @@ Object.assign(WaveView.prototype, {
   gapOpt() {
     const S = this.S, L = this.local.gap || {}, o = {};
     for (const k of GAP_KEYS) o[k] = L[k] !== undefined ? L[k] : S[k];
-    o.gaps = !!o.gaps; o.gapOnly = !!o.gapOnly; o.gapSignals = prefixes(o.gapSignals); o.gapAux = prefixes(o.gapAux);
+    o.gaps = !!o.gaps; o.gapOnly = !!o.gapOnly; o.gapView = !!o.gapView; o.gapSignals = prefixes(o.gapSignals); o.gapAux = prefixes(o.gapAux);
     o.gapClock = o.gapClock || null;
     if (!['off', 'clock', 'edges', 'rise', 'fall', 'any'].includes(o.gapCount)) o.gapCount = 'clock';
     return o;
@@ -104,7 +104,7 @@ Object.assign(WaveView.prototype, {
       JSON.stringify(list(k) ? prefixes(this.S[k]) : this.S[k]);
     const own = Object.entries(Object.assign({}, this.local.gap, o)).filter(([k, v]) => o && GAP_KEYS.includes(k) && !same(k, v));
     if (own.length) this.local.gap = Object.fromEntries(own); else delete this.local.gap;
-    this.gapMemo = null; this.saveLook(); this.renderNames(); this.draw(); this.settingsChanged(); return this;
+    this.gapMemo = null; this.saveLook(); this.hdrH = this.headH(); this.syncGapBar(); this.renderNames(); this.draw(); this.settingsChanged(); return this;
   },
   // the gaps' rows, worked out again when the settings, the rows or the menu's gaps change (the names column asks per row)
   gapRows() {
@@ -132,7 +132,7 @@ Object.assign(WaveView.prototype, {
     const own = Object.entries(Object.assign({}, this.local.cyc, o)).filter(([k, v]) => o && CYC_KEYS.includes(k) && JSON.stringify(v ?? null) !==
       JSON.stringify(this.S[k] ?? null));
     if (own.length) this.local.cyc = Object.fromEntries(own); else delete this.local.cyc;
-    this.saveLook(); this.cycMemo = null; this.hdrH = this.S.headerHeight + (this.cycData() ? CYC_H : 0);
+    this.saveLook(); this.cycMemo = null; this.hdrH = this.headH();
     this.renderNames(); this.draw(); this.settingsChanged(); return this;
   },
   // the clock the cycles count (cycleClock, else the clock found) and its rising edges, cycle 0 at iz; null: no band (off,
@@ -158,6 +158,7 @@ Object.assign(WaveView.prototype, {
   // the parts of [a, b] a picture or WaveDrom of these rows keeps (gapCuts): the idle stretches of the signals the gaps
   // follow (else of these rows) left out, in cycles of their clock (clockFor), the bookmarks' times kept; [[a, b]]: no gap
   cutsOf(a, b, rows) {
+    const live = this.liveCuts(); if (live) return clipCuts(live.w.cuts, a, b);   // the gaps on the waves: what you see is what you save
     const ref = [...this.gapRefSet()], sigs = ref.length ? ref : rows.filter(r => r.type === 'sig' || (r.type === 'group' && r.sig));
     return gapCuts(sigs, a, b, this.gapOpt(), this.gapClockFor(ref.length ? rows : sigs), this.M.cycle, this.bms.map(x => x.t), ref.length > 0);
   },

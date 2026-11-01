@@ -3912,9 +3912,24 @@ def edit(browser, build):
         g, err, img = tool('view_get', page=str(pl), view='exact', picture=True)
         check(not err and g['bookmarks'] == [{'n': 1, 't': 60, 'signal': 'PSEL', 'text': 'person'}] and g['cursor'] == 75 and len(img) == 1,
               f'view_get on a live page: the person\'s edits, a picture {g if err else g.get("bookmarks")}')
+        # the gaps on the waves from an agent: the person's waves cut at once, what is left in ns, in the answer and in view_get; a picture; off again
+        ga = tool('view_edit', page=str(pl), view='exact', ops=[{'op': 'gaps', 'on': True, 'view': True, 'idle': 3, 'keep': 0, 'signals': 'PENABLE'}])[0]['results'][0]
+        wf = page.evaluate(f"(v => [v.wf ? v.wf.w.n : 0, v.wf ? v.wf.w.kept : 0, v.gapParts().parts.map(p => p.map(t => t / 1000)), v.M.t1 - v.M.t0])({V})")
+        gg, err, img = tool('view_get', page=str(pl), view='exact', picture=True)
+        cut = gg.get('gaps', {}).get('cut') or {}
+        check(wf[0] >= 3 and ga['cut']['gaps'] == wf[0] - 1 and ga['cut']['kept'] == wf[1] / 1000 and ga['cut']['total'] == wf[3] / 1000 and
+              ga['cut']['parts'] == wf[2] and gg['gaps']['view'] is True and gg['gaps']['signals'] == ['PENABLE'] and cut.get('gaps') == wf[0] - 1 and
+              cut.get('parts') == ga['cut']['parts'] and len(img) == 1 and not err, f'view_edit gaps view: the waves cut live, cut in ns in the answer and in view_get, a picture {ga["cut"]} {wf} err {err} img {len(img)} {gg.get("gaps")}')
+        off = tool('view_edit', page=str(pl), view='exact', ops=[{'op': 'gaps', 'reset': True}])[0]['results'][0]
+        check('cut' not in off and page.evaluate(f"(v => v.wf === null && v.gapParts() === null)({V})"), f'gaps reset: continuous time, no cut {off}')
         page.goto('about:blank'); page.wait_for_timeout(300 * SCALE)
         r = tool('view_edit', page=str(pl), view='exact', ops=[{'op': 'marker', 't': 10}])[0]
         check(r.get('page') == str(pl) and 'written into the page' in r.get('note', ''), f'the page closed: the edit goes into its file {r}')
+        r = tool('view_edit', page=str(pl), view='exact', ops=[{'op': 'gaps', 'on': True, 'view': True, 'idle': 3, 'keep': 0, 'signals': 'PENABLE'}])[0]
+        open_(pl, idle=False); page.wait_for_function(f"{V}.wf && {V}.wf.w.n === {wf[0]}", timeout=8000 * SCALE)
+        fg = tool('view_get', page=str(pl), view='exact')[0].get('gaps') or {}
+        check('cut' not in r['results'][0] and r.get('page') == str(pl) and fg.get('view') is True and page.evaluate(f"!{V}.root.querySelector('.gapv').hidden"),
+              f'gaps view into the file: the page opens with its waves cut and idle, keep on the bar, no cut in the answer {r["results"]} {fg}')
     finally:
         mcp.stdin.close(); mcp.wait(10)
     ctx.close()
@@ -4003,7 +4018,7 @@ def ranges(browser, build):
     # the signals the gaps follow: Gaps by this signal (// in the names), only them in the picture, ✕: every signal again
     page.mouse.click(box['x'] + 5, box['y'] + y2, button='right'); menu.locator('.subh').click(); menu.locator('button[data-m=gref]').click()
     ref = js("[[...v.gapRefSet()].map(r => r.name), v.gapOpt().gaps, [...WaveLens.internal.peek(v).namesEl.querySelectorAll('.row.gref .n')].map(e => e.textContent)]")
-    page.mouse.click(box['x'] + 5, box['y'] + y2, button='right'); menu.locator('.subh').click(); by = menu.locator('.gp').nth(1).inner_text()
+    page.mouse.click(box['x'] + 5, box['y'] + y2, button='right'); menu.locator('.subh').click(); by = menu.locator('.gp').nth(2).inner_text()
     menu.locator('input.gonly').check(); only = js("[v.exportRows().filter(r => r.type !== 'lane').map(r => r.name), v.toWaveDrom(v.M.t0, v.M.t1).signal.map(s => s.name)]")
     menu.locator('button[data-m=grefx]').click(); after = js('[v.gapRefSet().size, (v.exportRows() || []).length]')
     check(ref[0] == ['PSEL'] and ref[1] and ref[2] == ['PSEL'] and 'by 1 signal' in by and only == [['PSEL'], ['PCLK', 'PSEL']] and after == [0, 0],
@@ -4041,6 +4056,86 @@ def ranges(browser, build):
         const g = v.gapOpt(); return [g.gaps, g.gapIdle, g.gapAux.length, g.gapSignals.length, g.gapClock, !!v.local.gap, v.menuEl]; })()""")
     check(rs == [False, 16, 0, 0, None, False, None], f'Reset the gaps: every gap setting of the viewer back to the settings, the menu closed {rs}')
     js('(v.setGaps(null), 0)')
+    # the gaps on the waves: the frame maps real times, a setting shows at once, a pan keeps the scale, the jumps stay in sight, the picture is what is seen
+    c.scroll_into_view_if_needed(); v0 = js('(v.fit(), [v.t0, v.span])')
+    gl = js("""(() => { const h0 = v.hdrH; const PE = v.M.rows.find(r => r.name === 'PENABLE').full;
+        v.setGaps({ gaps: true, gapView: true, gapIdle: 3, gapKeep: 0, gapSignals: [PE] }); const F = v.wf, c = F.w.cuts;
+        const tm = (c[1][0] + c[1][1]) / 2, ends = [F.X(v.t0), F.X(v.t0 + v.span)], back = Math.abs(F.T(F.X(tm)) - tm) < 1e-6, hdr = v.hdrH - h0;
+        const n = F.w.n, pic = v.cutsOf(v.t0, v.t0 + v.span, []).length, wd = v.toWaveDrom(v.t0, v.t0 + v.span, [v.M.rows.find(r => r.name === 'PSEL')]).signal[0].wave.split('|').length;
+        v.setGaps({ gapIdle: 6 }); const n2 = v.wf ? v.wf.w.n : 1, cfg = v.state().config.gapView;
+        v.setGaps({ gapIdle: 3, gapSignals: [v.M.rows.find(r => r.name === 'PSEL').full] }); const n3 = v.wf ? v.wf.w.n : 1;
+        v.setGaps({ gapSignals: [PE] }); return [n, n2, n3, ends, back, hdr, pic, wd, cfg, v.curEl.textContent.includes(`${n - 1} gaps`)]; })()""")
+    check(gl[0] >= 3 and gl[1] < gl[0] and gl[2] != gl[0] and abs(gl[3][0]) < 1e-6 and abs(gl[3][1] - js('v.wf.W')) < 1e-6 and gl[4] and gl[5] == 14 and gl[6] == gl[0] and
+          gl[7] == gl[0] and gl[8] is True and gl[9], f'the gaps on the waves: a part kept maps to the screen and back, the times fill the width, the band under '
+          f'the axis, idle and the signals they follow change the waves at once, the picture and WaveDrom cut where the waves do, the readout says it {gl}')
+    pn = js("""(() => { v.markView(); v.zoom(0.25, 0.5); v.draw(); const F = v.wf, k = F.k, w0 = [v.t0, v.span], at = F.T(300), pts = [];
+        v.zoom(0.5, 300 / F.W); v.draw(); pts.push(Math.abs(v.wf.X(at) - 300)); v.zoom(2, 300 / v.wf.W); v.draw();
+        const k1 = v.wf.k, x = v.wf.X(v.t0 + v.span / 2); v.panPart(0.2); v.draw(); const k2 = v.wf.k; v.panFrom(v.t0, -50); v.draw(); const k3 = v.wf.k;
+        v.center(v.M.t1, 1); v.draw(); const end = v.t0 + v.span, k4 = v.wf.k; v.center(v.M.t0, 0); v.draw(); const home = v.t0;
+        const hole = [v.wf.w.cuts[0][1], v.wf.w.cuts[1][0]], far = v.wf.w.cuts[v.wf.w.n - 1][0]; v.setCursor(far); const seen = v.wf.X(v.cursor);
+        v.zoomTo(hole[0] + 0.25 * (hole[1] - hole[0]), hole[0] + 0.3 * (hole[1] - hole[0])); const inHole = [v.wf.k > 0, isFinite(v.t0), isFinite(v.span), v.span > 0];
+        v.fit(); return [pts[0], k1 === k2, k2 === k3, k3 === k4, end, home, seen >= 0 && seen <= v.wf.W + 1e-6 || [seen], inHole]; })()""")
+    check(pn[0] < 40 and pn[1] and pn[2] and pn[3] and abs(pn[4] - js('v.M.t1')) < 1e-3 and pn[5] == js('v.M.t0') and pn[6] is True and pn[7] == [True] * 4,
+          f'the gaps on the waves: a zoom stays at the pointer, a pan keeps the scale up to the ends, a cursor far away comes into the window, a zoom into a gap holds {pn}')
+    wh = js('[v.zoom(0.25, 0.5), v.draw(), v.t0, v.wf.k, v.wf.T(100)]'); bx = c.bounding_box(); page.mouse.move(bx['x'] + 200, bx['y'] + 80); page.keyboard.down('Shift')
+    page.mouse.wheel(0, 120); page.keyboard.up('Shift'); page.wait_for_timeout(100); page.mouse.click(bx['x'] + 100, bx['y'] + 80)
+    wa = js('[v.t0, v.wf.k, v.wf.X(v.cursor)]')
+    bk = js("""(async () => { const h = [v.wf.w.cuts[0][1], v.wf.w.cuts[1][0]], t = (h[0] + h[1]) / 2, n = v.wf.w.n; await v.run([{ op: 'bookmark', t }]); v.draw();
+        const m = v.wf ? v.wf.w.n : 1, kept = v.cutsOf(v.M.t0, v.M.t1, []).some(([p, q]) => p <= t && t <= q); await v.run([{ op: 'bookmark', n: v.bms.find(b => b.t === t).n, delete: true }]);
+        return [m !== n, kept]; })()""")
+    check(wa[0] > wh[2] and wa[1] == wh[3] and abs(wa[2] - 100) < 8 and bk == [True, True], f'the gaps on the waves: shift+wheel pans at the scale, a click puts the '
+          f'cursor under the pointer, a bookmark in a gap keeps its time {wh} {wa} {bk}')
+    # a range through the gaps, by the right button as the user drags it: the hidden time and the clocks count, a gap's column gives its sides
+    def gap_drag(frm, to, alt=False, keep=False):
+        g = js("""(() => { const F = v.wf, c = F.w.cuts, o = WaveLens.internal.peek(v).lay.find(o => o.row.name === 'PENABLE'), b = v.canvas.getBoundingClientRect();
+            return { x: b.x, y: b.y + o.y - WaveLens.internal.peek(v).oy + o.h / 2, h: c.map(([, q], i) => [F.X(q), i + 1 < c.length ? F.X(c[i + 1][0]) : 0]), s: c.map(([p]) => F.X(p)) }; })()""")
+        x0, x1 = frm(g), to(g)
+        if alt: page.keyboard.down('Alt')
+        page.mouse.move(g['x'] + x0, g['y']); page.mouse.down(button='right'); page.mouse.move(g['x'] + (x0 + x1) / 2, g['y'], steps=3)
+        page.mouse.move(g['x'] + x1, g['y'], steps=3); page.mouse.up(button='right')
+        if alt: page.keyboard.up('Alt')
+        r = js('[v.range, v.rangeText(), v.rangeRow && v.rangeRow.name]')
+        if not keep: page.keyboard.press('Escape'); js('(v.setRange(null), 0)')
+        return r
+    js('(v.fit(), 0)'); c.scroll_into_view_if_needed(); page.wait_for_timeout(50)
+    cuts = js('v.wf.w.cuts'); clk0 = js("v.liveCuts().clk.name")
+    th = gap_drag(lambda g: g['h'][0][0] - 4, lambda g: g['s'][2] + 30)
+    n = js(f'v.cycles(v.liveCuts().clk, {th[0][0]}, {th[0][1]})')
+    check(th[0][0] < cuts[0][1] and th[0][1] > cuts[2][0] and th[2] == 'PENABLE' and n > 2 and f'{n} ↑ {clk0}' in th[1] and '↑ PENABLE' in th[1],
+          f'a range dragged through gaps on a signal that is no clock: its real length, the clocks counted with the hidden ones, the edges of its row {th} {n}')
+    sd = [gap_drag(lambda g: g['s'][1] + 10, lambda g: g['h'][1][0] + 2)[0], gap_drag(lambda g: g['s'][1] + 10, lambda g: g['h'][1][1] - 2)[0],
+          gap_drag(lambda g: g['h'][1][0] + 1, lambda g: g['h'][1][1] - 1)[0], gap_drag(lambda g: g['s'][1] + 10, lambda g: g['h'][1][0] + 2, alt=True)[0]]
+    check(sd[0][1] == cuts[1][1] and sd[1][1] == cuts[2][0] and sd[2] == [cuts[1][1], cuts[2][0]] and cuts[1][1] < sd[3][1] < cuts[2][0],
+          f'an end on a gap\'s column: the side of the gap nearer, over the column the gap itself, alt: inside it {sd} {cuts[1:3]}')
+    md = gap_drag(lambda g: g['s'][1] + 10, lambda g: g['h'][1][1] - 2, keep=True); n0 = js('v.wf.w.n')
+    js("(v.menuEl.querySelector('button[data-m=marks]').click(), 0)")
+    mk = js('[v.wf.w.n, v.bms.length, v.arrows.length && v.arrows[v.arrows.length - 1].label]')
+    off = js("(v.setGaps({ gapView: false }), v.rangeText())"); on = js("(v.setGaps({ gapView: true }), v.rangeText())")
+    check(mk[0] == n0 and mk[2] == on.replace('Δ ', '') and '↑ ' + clk0 in on and '↑ ' + clk0 not in off,
+          f'bookmarks at the ends of such a range keep the gap, the arrow says the Δ; the clocks are said with the gaps on the waves only {mk} {off!r} {on!r}')
+    js("""(async () => { for (const b of [...v.bms]) await v.run([{ op: 'bookmark', n: b.n, delete: true }]); v.setRange(null); return 0; })()""")
+    gc = js("""(async () => { const [r] = await v.run([{ op: 'gaps', view: true }]), p = v.gapParts(), one = v.gapParts(1);
+        return [r.cut.gaps === p.gaps, r.gaps.gapView, r.cut.parts.length === p.parts.length, p.total === v.M.t1 - v.M.t0, p.kept === p.parts.reduce((n, [a, b]) => n + b - a, 0),
+          one.parts.length, one.partsAll === p.parts.length, 'partsAll' in p, v.tOfX(v.wf.X(v.t0 + v.span / 2)) === v.wf.T(v.wf.X(v.t0 + v.span / 2))]; })()""")
+    check(gc == [True, True, True, True, True, 1, True, False, True], f'the gaps command says what the waves keep, gapParts the same, limit and partsAll, tOfX {gc}')
+    gb = page.locator('.wv .gapv').first; bar = [gb.is_visible()]; gb.locator('.bgi').fill('12'); page.wait_for_timeout(200)
+    bar += js('[v.gapOpt().gapIdle, v.wf ? v.wf.w.n : 1]'); gb.locator('.bgi').fill('junk'); page.wait_for_timeout(200); bar.append(js('v.gapOpt().gapIdle'))
+    gb.locator('.bgi').fill('3'); page.wait_for_timeout(200); gb.locator('button').click(); bar += [gb.is_visible(), js('v.wf'), js('[v.gapOpt().gaps, v.t0 >= v.M.t0]')]
+    c.focus(); page.keyboard.press('g'); page.keyboard.press('v'); keyed = js('[v.gapOpt().gapView, !!v.wf]'); page.keyboard.press('g'); page.keyboard.press('v')
+    keyed += js('[v.gapOpt().gapView, !!v.wf]')
+    js('(v.setGaps(null), 0)'); bx = c.bounding_box(); page.mouse.click(bx['x'] + 100, bx['y'] + 80, button='right'); menu.locator('.subh').hover()
+    menu.locator('input.gview').check()
+    mv = js('[v.gapOpt().gaps, v.gapOpt().gapView, !!v.menuEl]'); menu.locator('input.gk').fill('0'); menu.locator('input.gi').fill('3'); page.wait_for_timeout(200)
+    mv += js('[v.gapOpt().gapIdle, !!v.wf]')
+    menu.locator('input.gon').uncheck(); mv += js('[!!v.wf, v.hdrH === v.S.headerHeight]'); page.keyboard.press('Escape')
+    check(bar[0] and bar[1] == 12 and bar[3] == 12 and bar[4] is False and bar[5] is None and bar[6] == [True, True] and keyed == [True, True, False, False] and
+          mv == [True, True, True, 3, True, False, True], f'the gaps on the waves: idle on the bar as it is typed (a value not done leaves it), ✕; gv both ways; the '
+          f'menu\'s on the waves turns the gaps on, its idle shows at once, the gaps off: continuous time, no band {bar} {keyed} {mv}')
+    cf = js("""(() => { v.setGaps(null); WaveLens.configure({ gaps: true, gapView: true, gapIdle: 3, gapKeep: 0 }); v.draw();
+        const on = [v.gapLive(), !!v.wf || v.gapParts().gaps === 0, !v.root.querySelector('.gapv').hidden, v.hdrH > v.S.headerHeight];
+        WaveLens.configure({ gaps: false, gapView: false, gapIdle: 16, gapKeep: 2 }); v.draw(); return [on, v.gapLive(), v.root.querySelector('.gapv').hidden, v.hdrH === v.S.headerHeight]; })()""")
+    check(cf == [[True] * 4, False, True, True], f'gapView from WaveLens.configure, as from the menu; off again {cf}')
+    js(f'(v.setGaps(null), v.zoomTo({v0[0]}, {v0[0] + v0[1]}), 0)')
     # radix and hide from the menu (a bus of the dump: apb_tb.PADDR), the Hidden button, kept over a reload and in the state
     page.goto((build / 'examples' / 'apb' / 'apb_all.html').as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
     c.scroll_into_view_if_needed(); box = c.bounding_box()
@@ -4464,6 +4559,10 @@ UNITS = [   # (JavaScript expression, its JSON value); NaN / ±Infinity / undefi
     ("I.cycMap({ cycle: 10, skip: [[2, 5]] })(2.5)", 45),
     # gaps: the parts kept, a gap's ends on the rising edges (the cycle of a change and keep more kept), a gap's length
     ("I.idleCuts([50, 60, 1000], 0, 2000, 160, 20, Array.from({ length: 200 }, (_, i) => i * 10), 20)", [[0, 90], [980, 1030], [1980, 2000]]),
+    ("(w => [0, 15, 20, 35, 55, 100, 150].map(t => I.warpV(w, t, 2, 8)))(I.warpOf([[0, 20], [50, 60], [100, 150]]))", [0, 30, 40, 44, 58, 76, 176]),
+    ("(w => [0, 44, 58, 176].map(v => I.warpT(w, v, 2, 8)))(I.warpOf([[0, 20], [50, 60], [100, 150]]))", [0, 35, 55, 150]),
+    ("I.warpFit(I.warpOf([[0, 20], [50, 60], [100, 150]]), 0, 150, 200)", {'k': 2.3, 'g': 8}), ("I.warpFit(I.warpOf([[0, 20], [50, 60]]), 25, 30, 200).k", 0),
+    ("I.clipCuts([[0, 20], [50, 60]], 10, 55)", [[10, 20], [50, 55]]), ("I.clipCuts([[0, 20], [50, 60]], 30, 40)", [[30, 40]]),
     ("I.idleCuts([50], 0, 1000, 200, 10)", [[0, 60], [990, 1000]]), ("I.idleCuts([50], 0, 100, 200, 10)", [[0, 100]]),
     ("I.idleCuts([], 0, 100, 50, 45, [], 20)", [[0, 100]]), ("I.idleCuts([], 0, 100, 50, 0)", [[0, 100]]),
     ("['rise', 'fall', 'any'].map(k => I.gapText(R('b'), 5, 45, k))", ['2↑', '1↓', '4↕']), ("I.gapText(R('d'), 5, 45, 'rise')", '4×'),

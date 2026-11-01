@@ -328,7 +328,7 @@ class Notes {
       const t = v.parseWhen(T.value, bm.t);
       if (t == null || !isFinite(t)) { T.value = v.when(bm.t); T.classList.add('bad'); setTimeout(() => T.classList.remove('bad'), 900); return; }
       bm.t = Math.min(Math.max(t, v.M.t0), v.M.t1); delete bm.at;
-      if (bm.t < v.t0 || bm.t > v.t0 + v.span) v.t0 = v.clamp(bm.t - v.span / 2);
+      if (bm.t < v.t0 || bm.t > v.t0 + v.span) v.center(bm.t);
       v.changed(true);
     } else if (T.matches('input.sig')) {   // a full path or a name; empty: the time axis
       const val = T.value.trim(), r = val && (v.sigByPath(val) || v.M.rows.find(x => x.type === 'sig' && x.name === val));

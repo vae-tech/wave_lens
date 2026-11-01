@@ -43,12 +43,12 @@ AR_LINES = ['solid', 'dashed', 'dotted']
 EDGE_KINDS = ['any', 'rise', 'fall', 'value', 'xz']
 HL_N = 6
 GAP_KEYS = {'on': 'gaps', 'idle': 'gapIdle', 'keep': 'gapKeep', 'signals': 'gapSignals', 'clock': 'gapClock', 'aux': 'gapAux', 'only': 'gapOnly',
-            'count': 'gapCount'}
-ALL_GAP_KEYS = ['gaps', 'gapIdle', 'gapKeep', 'gapSignals', 'gapClock', 'gapAux', 'gapOnly', 'gapCount', 'gapLine']   # view.js GAP_KEYS
+            'count': 'gapCount', 'view': 'gapView'}
+ALL_GAP_KEYS = ['gaps', 'gapIdle', 'gapKeep', 'gapSignals', 'gapClock', 'gapAux', 'gapOnly', 'gapCount', 'gapLine', 'gapView']   # view.js GAP_KEYS
 CYC_KEYS = ['cycles', 'cycleClock', 'cycleZero']   # view.js CYC_KEYS
 # their defaults, as wavelens/wavelens.config.js has them (tests/unit/test_viewedit.py reads them there)
 GAP_DEFAULTS = {'gaps': False, 'gapIdle': 16, 'gapKeep': 2, 'gapSignals': None, 'gapClock': None, 'gapAux': None, 'gapOnly': False,
-                'gapCount': 'clock', 'gapLine': 'dashdot'}
+                'gapCount': 'clock', 'gapLine': 'dashdot', 'gapView': False}
 CYC_DEFAULTS = {'cycles': False, 'cycleClock': None, 'cycleZero': None}
 # the commands: name -> arguments (? optional), as WaveLens.commands() gives them (the smoke test compares the two)
 COMMANDS = {
@@ -59,7 +59,7 @@ COMMANDS = {
     'highlight': 'add? remove? set? clear?', 'paint': 'signals? color? clear?', 'select': 'signal? signals?', 'hide': 'signals', 'show': 'signals?',
     'fold': 'groups? all?', 'unfold': 'groups? all?', 'radix': 'signals radix', 'analog': 'signals rows', 'bits': 'signals on?',
     'sort': 'dir ignore?', 'style': 'name',
-    'layout': 'scroll? height? tools?', 'find': 'query case? word? regex? highlight? open? mask?', 'gaps': 'on? idle? keep? signals? clock? aux? only? count? reset?',
+    'layout': 'scroll? height? tools?', 'find': 'query case? word? regex? highlight? open? mask?', 'gaps': 'on? idle? keep? signals? clock? aux? only? count? view? reset?',
     'cycles': 'on? clock? zero? reset?', 'only': 'modules? on? clear? open?', 'fsm': 'mode? signals? fields? clear?',
     'fsm_stats': 'signal', 'fsm_go': 'signal state? from? to? dir? first?', 'types': 'signals?',
     'edge': 'dir? kind? value? signal?', 'reset': '', 'state': '', 'set_state': 'state', 'rows': 'pattern? limit? offset?',
@@ -1167,7 +1167,7 @@ class Editor:
     def gap_opt(self):
         """view.js gapOpt: the gaps' settings as they are now."""
         o = {k: self.opt(k, GAP_DEFAULTS[k]) for k in ALL_GAP_KEYS}
-        o['gaps'], o['gapOnly'] = bool(o['gaps']), bool(o['gapOnly'])
+        o['gaps'], o['gapOnly'], o['gapView'] = bool(o['gaps']), bool(o['gapOnly']), bool(o['gapView'])
         o['gapSignals'], o['gapAux'], o['gapClock'] = prefixes(o['gapSignals']), prefixes(o['gapAux']), o['gapClock'] or None
         if o['gapCount'] not in ('off', 'clock', 'edges', 'rise', 'fall', 'any'):
             o['gapCount'] = 'clock'

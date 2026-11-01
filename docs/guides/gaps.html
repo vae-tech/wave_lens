@@ -44,7 +44,7 @@
 <p>A <b>gap</b> is a stretch of time where none of the signals the gaps follow changes for at least <i>idle</i>; all of it but <i>keep</i> after
   the last change and <i>keep</i> before the next one is left out, and a narrow break column takes its place. The time axis goes on with the real
   time after each break, so every value under the axis is still a true time of the dump.</p>
-<p>Gaps change <b>what you save</b>, never what you look at:</p>
+<p>By default gaps change <b>what you save</b>, not what you look at (to see them on the waves, see <a href="#live">On the waves</a>):</p>
 <ul>
   <li>the pictures of the right button's menu — <span class="ui">Copy image</span>, <span class="ui">Save image as PNG</span>,
     <span class="ui">Save image as SVG</span>;</li>
@@ -55,7 +55,7 @@
   <li>on the command line, <code>vcd2wavedrom.py --auto-gap</code> and the MCP tool <code>wave_page</code> (<code>auto_gap</code>) cut the
     same way when they write WaveJSON.</li>
 </ul>
-<p>The viewer itself always shows continuous time: zoom, cursor and measurements stay exact.</p>
+<p>Without <span class="ui">on the waves</span> the viewer shows continuous time: zoom, cursor and measurements stay exact.</p>
 
 <p>The example in this guide is a 100 MHz stream with five rare packets in 10 µs (<code>valid</code>, <code>ready</code>, <code>data</code>,
   <code>last</code>), the sender's <code>state</code>, an <code>irq</code> after each packet, a packet counter <code>frames</code> and a slow
@@ -101,6 +101,51 @@
   <img src="img/gaps-menu-viewer.png" alt="The viewer with the menu open; the signals the gaps follow marked // in the names" loading="lazy">
   <figcaption><b>The menu in its place.</b> The signals the gaps follow carry <code>//</code> after their names in the names column.</figcaption>
 </figure>
+
+<h2 id="live">On the waves: try the settings live</h2>
+<p><span class="ui">Gaps ▸ on the waves</span> (or <kbd>gv</kbd> on the waves, setting <code>gapView</code>) cuts the viewer's waves themselves, the
+  way a picture is cut, so you tune the gaps on what they do to a long dump instead of saving a picture to see:</p>
+<ul>
+  <li><b>Every change shows at once</b>: <i>idle</i> and <i>keep</i> as you type them (they stay on the bar, next to the zoom, while the mode is on),
+    <span class="ui">By this signal</span>, the clock, the counts, a bookmark. The window keeps its times, so the same stretch gets denser or looser
+    in front of you.</li>
+  <li><b>Read it through</b>: <kbd>shift</kbd>+wheel, a drag and <kbd>←</kbd> <kbd>→</kbd> pan at the same scale from gap to gap, up to the ends;
+    <kbd>ctrl</kbd>+wheel zooms at the pointer; <kbd>f</kbd> shows everything that is kept.</li>
+  <li><b>Time stays real</b>: the axis, the cursor, measures, bookmarks and every jump are in the dump's time. The band under the axis says what each
+    gap leaves out, a signal counted gets a tag over the gap, the pointer over a gap says it too, and the readout how much of the dump is kept.</li>
+  <li><b>Measure through gaps</b>: drag the right button or <kbd>ctrl</kbd> over any number of gaps. Δ is the real time with the hidden part in it,
+    and with the gaps on the waves it counts the clock of the gaps on every row: <code>Δ 114.2 ns / 8.757 MHz · 11 ↑ PCLK · 2 ↑ PENABLE</code>, the
+    hidden cycles too. An end let go on a gap's column takes the side of the gap nearer, so over the column you measure the gap itself; with
+    <kbd>alt</kbd> it stays where it falls inside the gap. A click and <kbd>shift</kbd>+click do the same for the cursors.</li>
+  <li><b>What you see is what you save</b>: a picture or WaveDrom taken from these waves cuts where they do. The gaps are worked out over the whole
+    dump from every signal drawn, not the rows in sight, so scrolling the rows moves none. <span class="ui">only them</span> still applies to the
+    pictures alone.</li>
+</ul>
+<figure>
+  <img src="img/gaps-live.png" alt="The viewer with the gaps on the waves: idle and keep on the bar, the parts side by side, the time left out under the axis" loading="lazy">
+  <figcaption><b>The gaps on the waves, by <code>valid</code> and <code>ready</code>:</b> the same dump you scroll and zoom, with what is left out
+    under the axis.</figcaption>
+</figure>
+<p>✕ on the bar, <kbd>gv</kbd> again, or turning the gaps off goes back to continuous time; the window stays where it was.</p>
+
+<h3 id="live-api">From a config, a script, a shell, an agent</h3>
+<table>
+  <tr><th>Where</th><th>How</th></tr>
+  <tr><td>a config or the page</td><td><code>"config": { "gaps": true, "gapView": true, "gapIdle": 8, "gapSignals": ["*valid", "*ready"] }</code>, or
+    <code>WaveLens.configure({ gaps: true, gapView: true })</code> for every viewer</td></tr>
+  <tr><td>a script in the page</td><td><code>view.setGaps({ gaps: true, gapView: true, gapIdle: 8 })</code>, or as a command
+    <code>await view.run([{ op: 'gaps', on: true, view: true, idle: 8 }])</code>. What came of it: <code>view.gapParts()</code> gives
+    <code>{ gaps: 6, kept: 505000, total: 10005000, parts: [[0, 30000], [100000, 190000], …] }</code> (times in the viewer's units: ps of timed waves)</td></tr>
+  <tr><td>a shell</td><td><code>python3 -I tools/viewedit.py page.html --ops '[{"op": "gaps", "on": true, "view": true, "idle": 8}]'</code>: the page
+    opens that way</td></tr>
+  <tr><td>an agent (MCP)</td><td><code>view_edit {"page": "p.html", "ops": [{"op": "gaps", "on": true, "view": true, "idle": 8}]}</code>; live the answer has
+    <code>cut</code>, on a file <code>view_get {"page": "p.html", "picture": true}</code> shows the result
+    (<a href="mcp.html#gaps">AI agents</a>)</td></tr>
+</table>
+<p>A plugin that turns a pointer's <code>x</code> into a time takes <code>view.tOfX(x)</code>, and one that moves the window
+  <code>view.center(t)</code> or <code>view.moveTo(t)</code>: with gaps on the waves <code>t0 + x / pxPerT()</code> and
+  <code>t - span / 2</code> are not on the screen. <code>view.t0</code> and <code>view.span</code> stay the real times at the ends of the
+  window.</p>
 
 <h2 id="how">How a gap is found</h2>
 <svg class="dia" viewBox="0 0 860 210" role="img" aria-label="A stretch between two changes longer than idle: keep after the first change and
@@ -377,6 +422,8 @@ last  0.............10..|...1.0..........10..|........10..|....10..|..
     (those rows with these edges alone, or any change), <code>off</code></td></tr>
   <tr><td><code>gapLine</code></td><td><code>"dashdot"</code></td><td>the line of a break: <code>dashdot</code>, <code>wave</code>, <code>waves</code>,
     <code>zigzag</code>, <code>double</code></td></tr>
+  <tr><td><code>gapView</code></td><td><code>false</code></td><td>the viewer's waves themselves with the gaps cut out, <a href="#live">live</a>
+    (<span class="ui">on the waves</span>, <kbd>gv</kbd>)</td></tr>
 </table>
 <p>A page that starts with gaps on for every viewer, following the handshakes of every stream port:</p>
 <pre><code>"config": { "gaps": true, "gapIdle": "1us", "gapKeep": 4, "gapSignals": ["*_tvalid", "*_tready", "*_tlast"], "gapClock": "tb.aclk" }</code></pre>
@@ -397,7 +444,7 @@ last  0.............10..|...1.0..........10..|........10..|....10..|..
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.32 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.33 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

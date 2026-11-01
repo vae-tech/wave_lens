@@ -73,7 +73,7 @@ const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight
   groupOrder: 'file', moduleShading: true, findHighlight: true, findOpen: true, findMask: false, findCase: false, findWord: false,
   findRegex: false, cursorSnap: 8, showWidth: true,
     wheel: 'scroll', contextMenu: true, enumColors: null, dumpBudget: 3000000, gaps: false, gapIdle: 16, gapKeep: 2,
-    gapSignals: null, gapClock: null, gapAux: null, gapOnly: false, gapCount: 'clock', gapLine: 'dashdot', menuTipDelay: 2000, cycles: false,
+    gapSignals: null, gapClock: null, gapAux: null, gapOnly: false, gapCount: 'clock', gapLine: 'dashdot', gapView: false, menuTipDelay: 2000, cycles: false,
     cycleClock: null, cycleZero: null, savePage: true, themeButton: 'auto', version: true, keysLeft: [], log: 'auto' };
 // a plugin's settings with their defaults (bus.js: busDetect, buses; sva.js: svaOpen, svaShow, svaSignals): in every
 // layer like the framework's own, listed in WaveLens.defaults, known to the warning on unknown keys
@@ -804,18 +804,36 @@ function gapText(s, p, q, kind) {
 // the parts of [a, b] a figure of these rows keeps (S: gaps, gapIdle, gapKeep): the changes of their signals but clk's
 // (and the other clocks', unless the rows were picked: picked), and the times of also (bookmarks), counted; the lengths in
 // cycles of clk (the step of its rising edges in the range), else of the model's cycle; a gap at least two cycles long
-function gapCuts(rows, a, b, S, clk, cycle = 1, also = [], picked = false) {
+// times: gapTimes of these rows, when known (the waves' own gaps keep them while idle and keep change)
+function gapCuts(rows, a, b, S, clk, cycle = 1, also = [], picked = false, times = null) {
   if (!S.gaps || !(b > a)) return [[a, b]];
   const ups = clk ? riseTimes(clk) : [], u = ups.filter(t => t >= a && t <= b), d = u.slice(1).map((t, i) => t - u[i]).sort((x, y) => x - y);
   const cyc = d.length ? d[d.length >> 1] : cycle, idle = gapLen(S.gapIdle, cyc), keep = Math.max(0, gapLen(S.gapKeep, cyc) || 0);
   if (!(idle > 0)) return [[a, b]];
-  const ts = new Set(also.filter(t => t > a && t < b));
+  const ts = times || gapTimes(rows, a, b, clk, picked), more = also.filter(t => t > a && t < b);
+  return idleCuts(more.length ? [...new Set([...ts, ...more])].sort((x, y) => x - y) : ts, a, b, idle, keep, d.length ? ups : [], d.length ? 2 * cyc : 0);
+}
+// the times in (a, b) where these rows change, sorted: all but clk's (and the other clocks', unless the rows were picked)
+function gapTimes(rows, a, b, clk, picked = false) {
+  const ts = new Set();
   for (const r of rows) {
     const s = r.type === 'group' ? r.sig : r;
     if (!s || !s.tr || !s.tr.length || s === clk || (!picked && isClkRow(s))) continue;
     for (let i = lastLE(s.tr, a) + 1; i < s.tr.length && s.tr[i].t < b; i++) if (s.tr[i].t > a) ts.add(s.tr[i].t);
   }
-  return idleCuts([...ts].sort((x, y) => x - y), a, b, idle, keep, d.length ? ups : [], d.length ? 2 * cyc : 0);
+  return [...ts].sort((x, y) => x - y);
+}
+// the texts of the gaps (gc: gapCount), in a figure and on the waves: under the axis over a gap [p, q) the time left out and
+// the cycles of clk in it, in a part kept its cycles; each: a thin row (a tag on the waves) over a gap for each signal
+// counted (aux with any texts; none marked: with "edges" every one but refs and clk), kind as gapText takes it
+function gapTexts(M, gc, clk, aux, refs) {
+  const kind = ['edges', 'rise', 'fall', 'any'].includes(gc) ? gc : 'edges', ups = clk ? riseTimes(clk) : [];
+  const cyc = (p, q) => lastBefore(ups.length, j => ups[j], q, true) - lastBefore(ups.length, j => ups[j], p, true);   // the cycles that start in [p, q)
+  const len = d => (M.timed ? fmtTime(d, d / 100, d) : trimNum(d));
+  return { kind, cyc, each: gc !== 'off' && (aux.size > 0 || kind === gc),
+    counted: r => r.type === 'sig' && r.tr && r !== clk && (aux.size ? aux.has(r) : !refs.has(r)),
+    hole: (p, q) => { const nc = cyc(p, q); return '+' + len(q - p) + (nc ? ` · ${nc} ${clk.name}` : ''); },
+    part: (p, q) => { const nc = cyc(p, q); return nc ? `${nc} ${clk.name}` : len(q - p); } };
 }
 // extension "bookmarks": [{n, t, at, signal (full path), text, color, top (the row at the top of the waves when it was made:
 // a signal's full path or a module's path; going to it puts that row there again)}] and "arrows": [{from, to, shape, head, line, color, label}]

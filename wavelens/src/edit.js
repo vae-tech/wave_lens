@@ -85,7 +85,7 @@ command('view', 'from? to? at? span?', 'the window: from … to, or span around 
   } else if (a.span != null || a.at != null) {
     const s = a.span == null ? v.span : cmdTime(v, a.span, 'span'), at = a.at == null ? v.cursor : cmdTime(v, a.at, 'at');
     if (!(s > 0)) fail('view: span is not a length');
-    v.markView(); v.span = Math.min(Math.max(s, v.minSpan), full); v.t0 = v.clamp(at - v.span / 2); v.draw();
+    v.markView(); v.span = Math.min(Math.max(s, v.minSpan), full); v.center(at); v.draw();
   } else fail('view: from and to, or span (and at)');
   return { from: v.t0, to: v.t0 + v.span };
 });
@@ -392,13 +392,16 @@ command('find', 'query case? word? regex? highlight? open? mask?', 'the find fie
     if (v.qEl) v.qEl.value = String(a.query ?? '');
     v.find(String(a.query ?? '')); return { found: [...v.found.keys()].map(r => r.full || r.name).slice(0, 50), count: v.found.size };
   });
-command('gaps', 'on? idle? keep? signals? clock? aux? only? count? reset?', 'the gaps of the picture and WaveDrom (the menu\'s Gaps): on, idle ' +
-  'and keep (cycles or a time), the signals they follow, the clock they count, aux (changes counted), only, count (clock edges off); reset', (v, a) => {
+command('gaps', 'on? idle? keep? signals? clock? aux? only? count? view? reset?', 'the gaps of the picture and WaveDrom (the menu\'s Gaps): on, ' +
+  'idle and keep (cycles or a time), the signals they follow, the clock they count, aux (changes counted), only, count (clock edges off), view (on the ' +
+  'waves too); reset', (v, a) => {
   if (a.reset) v.setGaps(null);
-  const map = { on: 'gaps', idle: 'gapIdle', keep: 'gapKeep', signals: 'gapSignals', clock: 'gapClock', aux: 'gapAux', only: 'gapOnly', count: 'gapCount' };
+  const map = { on: 'gaps', idle: 'gapIdle', keep: 'gapKeep', signals: 'gapSignals', clock: 'gapClock', aux: 'gapAux', only: 'gapOnly', count: 'gapCount',
+    view: 'gapView' };
   const o = Object.fromEntries(Object.entries(map).filter(([k]) => a[k] !== undefined).map(([k, g]) => [g, a[k]]));
   if (Object.keys(o).length) v.setGaps(o);
-  return { gaps: v.gapOpt() };
+  const cut = v.gapParts(50);   // on the waves: what they leave
+  return { gaps: v.gapOpt(), ...(cut ? { cut } : {}) };
 });
 command('cycles', 'on? clock? zero? reset?', 'the clock cycles in a band under the time axis (the menu\'s Cycles): on, the clock counted (a ' +
   '1-bit signal), zero: the time of cycle 0 (the rising edge at or after it), null the first edge; reset: as the page sets them', (v, a) => {
@@ -751,7 +754,7 @@ Object.assign(WaveView.prototype, {
       const miss = await this.setState(Object.assign({ wavelens: 'state', version: STATE_VERSION }, st));
       const c = st.cursor;   // a cursor the edits put outside the window: the window follows (as the cursor command)
       if (c != null && st.from == null && (this.cursor < this.t0 || this.cursor > this.t0 + this.span)) {
-        this.t0 = this.clamp(this.cursor - this.span / 2); this.draw(); }
+        this.center(this.cursor); this.draw(); }
       try { localStorage.setItem(key, String(e.rev)); } catch (err) { /* private mode */ }
       if (!seen) this.toast(`the page's edits applied (${String(e.rev).split('@')[0]})` +
         (miss.length ? ` · not in these waves: ${miss.slice(0, 3).join(', ')}` : ''));

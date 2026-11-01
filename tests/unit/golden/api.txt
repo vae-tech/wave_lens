@@ -54,7 +54,7 @@ command fold: groups? all?
 command fsm: mode? signals? fields? clear?
 command fsm_go: signal state? from? to? dir? first?
 command fsm_stats: signal
-command gaps: on? idle? keep? signals? clock? aux? only? count? reset?
+command gaps: on? idle? keep? signals? clock? aux? only? count? view? reset?
 command group: name signals? add? remove? color? rename? delete? go? move?
 command hide: signals
 command highlight: add? remove? set? clear?

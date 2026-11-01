@@ -5,6 +5,21 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.33 — 1 November 2026
+
+The gaps on the waves: the viewer's own waves cut by the gap settings, tuned live, scrolled and measured through.
+
+- **Gaps on the waves.** **Gaps ▸ on the waves** (`gv`, the setting `gapView`) cuts the waves in the viewer, not only the
+  pictures: a change of idle, keep or the signals followed shows at once, also with idle and keep on the bar while it is on. A
+  long dump pans at the same scale from gap to gap, up to the ends, and zooms at the pointer. The window, the cursor, the
+  bookmarks and every jump stay in real time. A band under the axis says what each gap leaves out, a signal counted gets a tag
+  over the gap, and a picture or WaveDrom saved cuts where the waves do.
+- **Measuring through gaps.** A range or the cursors count the hidden time and clocks. With gaps on the waves a range says the
+  cycles of their clock on any row, and an end on a gap's column takes the side of the gap nearer (alt: inside it), so a drag
+  over a column measures that gap.
+- **API and MCP.** `view.gapParts()` says what the waves keep; the command `gaps` takes `view` and answers with `cut`, `view_edit`
+  gives it in ns, `view_get` tells the gaps' settings and, on a live page, `cut`.
+
 ## 0.32 — 31 October 2026
 
 The fixes of the global review of 0.31: the gate catches what it missed, compare agrees with `sva diff` at its edges, the

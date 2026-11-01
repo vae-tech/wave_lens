@@ -57,6 +57,10 @@ const TIPS = {
   'm:wdjson': ['The range as a WaveDrom file (.json): the highlighted signals, else the ones on the screen, a cell per clock cycle'],
     'm:wdcopy': ['The same WaveDrom to the clipboard'],
   '.gon': ['Gaps: the picture and WaveDrom leave out the stretches where the signals (the clocks aside) do not change, a break "|" there'],
+  '.gview': ['The waves themselves with the gaps cut out: scroll and zoom them, every change of a gap setting shows at once; a picture saved is what ' +
+    'you see', ['gv']],
+  '.bgi': ['A gap where nothing changes this long: clock cycles (16) or a time (2us); the waves follow as you type'],
+  '.bgk': ['Kept after a change and before the next one: cycles or a time'], 'act:gapvx': ['The waves in continuous time again', ['gv']],
   '.gi': ['A gap where nothing changes this long: clock cycles (16) or a time (2us)'], '.gk': ['Kept after a change and before the next one: cycles or a time'],
   'm:gref': ['The gaps follow the changes of these signals only (marked // in the names); none: of every signal in the picture'],
   'm:grefx': ['The gaps by every signal in the picture again'],
@@ -115,6 +119,7 @@ const HELP = [
     [['Tab', 'shift+Tab'], 'next / previous edge (no signal selected: the focus moves on)'], [[']e', '[e'], 'next / previous edge'], [['e'], 'edge kind']]],
   ['Signals', [[['↑', '↓', 'j', 'k'], 'select the next / previous'], [['shift+click a name'], 'select every signal from the last clicked one'],
     [['gg', 'G'], 'the first / last'], [['ctrl+G', 'gl'], 'your groups: a list, a click goes there'],
+    [['gv'], 'the waves with the gaps cut out, or in continuous time'],
     [['alt+↑', 'alt+↓'], 'the selected signal up / down in your group (shift: the group); or drag it in the names'],
     [['ctrl+click', '○'], 'highlight'], [['ctrl+shift+click'], 'highlight every row from the last one to it'],
     [['zM', 'zR'], 'fold / open every module'], [['t'], 'the modules as a tree: a click goes to one, a box keeps Only those (again: the selected one\'s)'],
@@ -265,7 +270,10 @@ class Bar {
       '<button type="button" data-act="dsrc" title="SystemVerilog sources, or the design\'s types (x.types.json: Questa, Verilator)">Sources…</button>' +
       '<input type="file" class="srcfile" accept=".sv,.svh,.v,.vh,.json" multiple hidden>');
     const zoom = seg('<button type="button" data-act="out" title="Zoom out (−)">−</button>',
-      '<button type="button" data-act="in" title="Zoom in (+)">+</button>', '<button type="button" data-act="fit" title="Show everything (0)">Fit</button>');
+      '<button type="button" data-act="in" title="Zoom in (+)">+</button>', '<button type="button" data-act="fit" title="Show everything (0)">Fit</button>') +
+      ('<span class="gapv" hidden>gaps idle <input type="text" class="bgi" spellcheck="false" aria-label="gaps: idle this long"> keep <input type="text" ' +
+        'class="bgk" spellcheck="false" aria-label="gaps: kept around a change"><button type="button" data-act="gapvx" aria-label="the gaps off the ' +
+        'waves">✕</button></span>');
     const hint = 'Wheel: scroll · ctrl+wheel: zoom · shift+wheel / drag: pan · shift or middle drag: zoom to a range · ctrl+drag: measure · ' +
       'alt+drag: a box of time and signals · click: cursor (on a near edge; alt: not) + select a signal · keys on the waves (as in Questa): ' +
       'i o zoom in / out, f full, l last, c in on the cursor · ← → pan, Home End · shift+← → cursor · ↑ ↓ (j k) select, gg G first / last · ' +
@@ -315,6 +323,10 @@ class Bar {
     });
     v.evEl = r.querySelector('input.ev');
     v.edgeSel.addEventListener('change', () => v.setEdgeKind(v.edgeSel.value, true));
+    const gv = r.querySelector('.gapv'), bgi = gv.querySelector('.bgi'), bgk = gv.querySelector('.bgk');   // idle, keep: the waves follow as they are typed
+    gv.addEventListener('input', () => v.gapType(() => v.gapFields(bgi, bgk, true)));
+    gv.addEventListener('change', e => { if (e.target.matches('input')) { clearTimeout(v.gapTypeT); v.setGaps(v.gapFields(bgi, bgk)); } });
+    v.syncGapBar();
     v.evEl.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); v.edge(e.shiftKey ? -1 : 1); } });
     v.wsEl = r.querySelector('select.ws'); v.wsEl.addEventListener('change', () => v.setStyle(v.wsEl.value));
     r.querySelector('.bar').addEventListener('contextmenu', e => {   // the right button on the bar: which tool groups it shows (a field: the browser's)
@@ -358,6 +370,7 @@ class Bar {
       else if (b.dataset.act === 'tools') v.setTools(!v.S.toolsFolded);
       else if (b.dataset.act === 'sload') v.sfile.click();
       else if (b.dataset.act === 'dopen') v.openDump();
+      else if (b.dataset.act === 'gapvx') v.setGaps({ gapView: false });
       else if (b.dataset.act === 'dcmp') v.cfile.click();
       else if (b.dataset.act === 'dcmpx') { if (v.cmpReading) v.compareStop(); else v.compare(null); }
       else if (b.dataset.act === 'dcmpv') v.compareView(b.dataset.run);

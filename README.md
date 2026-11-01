@@ -108,7 +108,7 @@ and an agent live in the tab: [the VS Code guide](docs/guides/vscode.html).
 | [The viewer](docs/guides/viewer.html) | the bar, zoom, cursors, edges, ranges, find, hierarchy, groups, cycles, bookmarks, undo, save |
 | [Modules](docs/guides/modules.html) | the tree of the modules: go to one, keep Only the ones you pick |
 | [Compare two runs](docs/guides/compare.html) | a second dump over the first: where they differ, step by step |
-| [Gaps](docs/guides/gaps.html) | the idle stretches cut out of a picture or WaveDrom |
+| [Gaps](docs/guides/gaps.html) | the idle stretches cut out of a picture, WaveDrom or the waves themselves, live |
 | [Assertions (SVA)](docs/guides/sva.html) | bind, read the attempts, why one failed, edit and run again, reports for CI |
 | [Bus transactions](docs/guides/buses.html) | the ports found by their names, drawn as transfers |
 | [WaveDrom](docs/guides/wavedrom.html) | diagrams in your own page, the supported subset and the extensions |

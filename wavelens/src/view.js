@@ -20,7 +20,7 @@ const VIEWS = new Set(), ACTIVE = { view: null };   // ACTIVE.view: the viewer u
 const PLUGINS = [];   // WaveLens.plugin(fn): fn(viewer) for every viewer, now and later (wavelens/sva.js: the assertions panel)
 const STATE_VERSION = 3;   // a saved viewer state (state()): 2 has range and edge, 3 your markers and groups
 // the settings of the gaps (the menu's Gaps rows)
-const GAP_KEYS = ['gaps', 'gapIdle', 'gapKeep', 'gapSignals', 'gapClock', 'gapAux', 'gapOnly', 'gapCount', 'gapLine'];
+const GAP_KEYS = ['gaps', 'gapIdle', 'gapKeep', 'gapSignals', 'gapClock', 'gapAux', 'gapOnly', 'gapCount', 'gapLine', 'gapView'];
 const CYC_KEYS = ['cycles', 'cycleClock', 'cycleZero'], CYC_H = 16;   // the band of clock cycles under the time axis, its height
 class WaveView {
   constructor(root, model, opts = {}) {
@@ -108,7 +108,7 @@ class WaveView {
     this.groupStroke = groupPaint(this.M, S.groupColors);
     for (const [name, v] of styleVars(Object.assign({}, this.M.cfg, this.opts))) this.root.style.setProperty(name, v);
     this.rowH = { sig: S.rowHeight, group: S.groupHeight, space: S.spaceHeight }; this.cycMemo = null;
-    this.hdrH = S.headerHeight + (this.cycData() ? CYC_H : 0);
+    this.hdrH = this.headH(); this.syncGapBar();
     this.sort = S.sort; this.sortIgnore = S.sortIgnore;
     this.root.style.setProperty('--wv-dim', S.dim);
     this.layoutShow();
@@ -147,7 +147,7 @@ class WaveView {
       const u = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? c.clientHeight || 400 : 1;
       let dx = e.deltaX * u, dy = e.deltaY * u;
       if (e.shiftKey && !dx) { dx = dy; dy = 0; }
-      if (Math.abs(dx) > Math.abs(dy)) { e.preventDefault(); this.t0 = this.clamp(this.t0 + dx / this.pxPerT()); this.invalidate(); }
+      if (Math.abs(dx) > Math.abs(dy)) { e.preventDefault(); this.panFrom(this.t0, dx); this.invalidate(); }
       else if (dy && (e.ctrlKey || this.S.wheel === 'zoom')) {
         e.preventDefault(); this.markView(true);
         const pinch = e.ctrlKey && e.deltaMode === 0 && Math.abs(dy) < 50;   // a trackpad pinch: small steps, many of them
@@ -189,13 +189,13 @@ class WaveView {
       if (!drag) {
         const bm = this.bmAt(x, y), o = !bm && (this.lay || []).find(o => y >= o.y && y < o.y + o.h), tip = o && o.row.tip ? o.row.tip(x, y - o.y, this) : '';
         // the value under the pointer (a struct's row: its whole value)
-        const vr = o && (o.row.sig || o.row), val = !bm && !tip && vr && vr.type === 'sig' && vr.tr ? this.valueTip(vr, this.t0 + x / this.pxPerT()) : '';
+        const vr = o && (o.row.sig || o.row), val = !bm && !tip && vr && vr.type === 'sig' && vr.tr ? this.valueTip(vr, this.tOfX(x)) : '';
         c.style.cursor = bm ? 'grab' : tip ? 'pointer' : '';
-        const sp = !bm && !tip ? this.spanTip(this.t0 + x / this.pxPerT(), vr) : '';   // a span under the pointer: its label and length
+        const sp = !bm && !tip ? this.spanTip(this.tOfX(x), vr) : '';   // a span under the pointer: its label and length
         c.title = bm ? `Bookmark ${bm.n}${bm.text ? ': ' + bm.text : ''} — drag to move it, shift+drag to another bookmark for an arrow` : tip ||
-          [sp, val].filter(Boolean).join('\n'); return;
+          [this.gapTip(x), sp, val].filter(Boolean).join('\n'); return;
       }
-      if (drag.zoom != null) { this.zband = [drag.zoom, x].map(px => this.t0 + px / this.pxPerT()); this.draw(); return; }
+      if (drag.zoom != null) { this.zband = [drag.zoom, x].map(px => this.tOfX(px)); this.draw(); return; }
       if (drag.box) {
         if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 3) drag.moved = true;
         if (drag.moved) this.boxSelect(drag.box[0], drag.box[1], x, y);
@@ -210,7 +210,7 @@ class WaveView {
       if (!drag.moved) return;
       if (drag.arrow) { this.rubber = { from: drag.bm.n, x, y }; this.draw(); }
       else if (drag.bm) { c.style.cursor = 'grabbing'; this.moveBookmark(drag.bm, x, y, drag.lay); }
-      else { this.t0 = this.clamp(drag.t0 - dx / this.pxPerT()); this.invalidate(); }   // a pan: one draw per frame, not per move event
+      else { this.panFrom(drag.t0, -dx); this.invalidate(); }   // a pan: one draw per frame, not per move event
     });
     c.addEventListener('pointerup', e => {
       const [x, y] = local(e);
@@ -284,13 +284,13 @@ class WaveView {
       // the next / previous transition of the selected signal (Questa); none selected (Esc): the focus moves on
       else if (k === 'Tab' && this.sel) this.edge(e.shiftKey ? -1 : 1);
       else if (k === 'e') { const ks = Object.keys(EDGE_KINDS); this.setEdgeKind(ks[(ks.indexOf(this.edgeKind) + 1) % ks.length]); }
-      else if (k === 'Home' || k === 'End') { this.markView(); this.t0 = this.clamp(k === 'Home' ? this.M.t0 : this.M.t1); this.draw(); }
+      else if (k === 'Home' || k === 'End') { this.markView(); this.center(k === 'Home' ? this.M.t0 : this.M.t1, k === 'Home' ? 0 : 1); this.draw(); }
       else if (k === 'PageDown' || k === 'PageUp') this.pageRows(k === 'PageDown' ? 1 : -1);
       else if (k === 'ArrowDown' || k === 'j') sigStep(1);
       else if (k === 'ArrowUp' || k === 'k') sigStep(-1);
       else if (k === 'G') { const sigs = this.vis.filter(r => r.type === 'sig' && r.tr); this.select(sigs[sigs.length - 1] || null); }
       else if ((k === 'ArrowLeft' || k === 'ArrowRight') && e.shiftKey) this.nudge(k === 'ArrowRight' ? 1 : -1);   // the cursor, a 100th of the view
-      else if (k === 'ArrowLeft' || k === 'ArrowRight') { this.t0 = this.clamp(this.t0 + this.span * (k === 'ArrowRight' ? 0.2 : -0.2)); this.invalidate(); }
+      else if (k === 'ArrowLeft' || k === 'ArrowRight') { this.panPart(k === 'ArrowRight' ? 0.2 : -0.2); this.invalidate(); }
       else if (k === '/') this.focusFind();
       else if ((k === 'n' || k === 'N') && this.found.size) this.findStep(k === 'n' ? 1 : -1);   // like vim
       // the selected name (vim: the word under the cursor)
@@ -396,7 +396,7 @@ class WaveView {
   // alt+drag from (x0, y0) to (x1, y1), layout px: the box drawn; its time the range (not snapped), the signal rows it
   // touches the selection (as shift+click), the last one the selected signal
   boxSelect(x0, y0, x1, y1) {
-    const T = px => this.t0 + px / this.pxPerT(), ya = Math.min(y0, y1), yb = Math.max(y0, y1);
+    const T = px => this.tOfX(px), ya = Math.min(y0, y1), yb = Math.max(y0, y1);
     this.box = [Math.min(x0, x1), ya, Math.max(x0, x1), yb];
     const rows = (this.lay || []).filter(o => o.y + o.h > ya && o.y < yb && o.row.type === 'sig' && o.row.tr).map(o => o.row);
     this.selRun = new Set(rows); this.sel = rows[rows.length - 1] || this.sel; if (rows.length) this.selAnchor = rows[0];
@@ -508,14 +508,14 @@ class WaveView {
     const t = typeof v === 'number' ? v : this.parseIn(v, this.cuEl, true);
     if (t == null || !isFinite(t)) { this.bad(this.ctEl); return this; }
     this.cursor = Math.min(Math.max(t, this.M.t0), this.M.t1);
-    if (this.cursor < this.t0 || this.cursor > this.t0 + this.span) this.t0 = this.clamp(this.cursor - this.span / 2);
+    if (this.cursor < this.t0 || this.cursor > this.t0 + this.span) this.center(this.cursor);
     this.draw(); this.syncCursorFields(true); return this;
   }
   showCursor(v) { // window of a span (typed, else the current one) centred on the cursor
     const sp = v == null || v === '' ? this.span : typeof v === 'number' ? v : this.parseIn(v, this.suEl);
     if (sp == null || !isFinite(sp) || sp <= 0) { this.bad(this.csEl); return this; }
     this.span = Math.min(Math.max(sp, this.minSpan), this.M.t1 - this.M.t0);
-    this.t0 = this.clamp(this.cursor - this.span / 2); this.draw(); this.syncCursorFields(true); return this;
+    this.center(this.cursor); this.draw(); this.syncCursorFields(true); return this;
   }
   syncCursorFields(force) { // the fields show the cursor and the span, except while one is being typed in
     if (!this.ctEl) return;
@@ -915,8 +915,8 @@ class WaveView {
   // middle, else the window moves only when t is outside it; "l" goes back to the window before (plugins: ]t ]f …)
   moveTo(t, { left = null, center = false, cursor = true } = {}) {
     this.markView();
-    if (left != null) this.t0 = this.clamp(left);
-    else if (center || t < this.t0 || t > this.t0 + this.span) this.t0 = this.clamp(t - this.span / 2);
+    if (left != null) { this.t0 = this.clamp(left); if (this.warpSync() && (t < this.t0 || t > this.t0 + this.span)) this.center(t); }   // t in sight
+    else if (center || t < this.t0 || t > this.t0 + this.span) this.center(t);
     if (cursor) this.cursor = Math.min(Math.max(t, this.M.t0), this.M.t1);
     this.draw(); return this;
   }
@@ -990,7 +990,7 @@ class WaveView {
       return this; }
     if ((kind === 'value' || kind === 'xz') && !this.sel && at) this.toast(`${at.name} ${kind === 'xz' ? 'goes X / Z' : '= ' + w.text}`);
     this.cursor = best;
-    if (best < this.t0 || best > this.t0 + this.span) this.t0 = this.clamp(best - this.span / 2);
+    if (best < this.t0 || best > this.t0 + this.span) this.center(best);
     this.draw(); return this;
   }
   // nearest edge of signal s within px pixels of t (the initial value is not an edge), else t
@@ -1015,7 +1015,7 @@ class WaveView {
     else if (o && o.row.type === 'lane') { const r = lay.slice(k + 1).find(q => q.row.type !== 'lane');
       if (r && r.row.type === 'sig') { b.signal = r.row.full; b.lift = true; } }
     const s = b.signal != null ? this.sigByPath(b.signal) : null;
-    b.t = Math.min(Math.max(this.snap(s, this.t0 + x / this.pxPerT()), this.M.t0), this.M.t1); delete b.at;   // moved: no longer at its event
+    b.t = Math.min(Math.max(this.snap(s, this.tOfX(x)), this.M.t0), this.M.t1); delete b.at;   // moved: no longer at its event
     this.draw();
   }
   // bookmark: numbered circle at the cursor on the selected signal (snapped to its edge within 6 px), described below the waves
@@ -1105,12 +1105,24 @@ class WaveView {
   changed(list) { this.saveBookmarks(); if (list) this.renderNotes(); this.draw(); }
   layout() { return layoutRows(this.rowsL, this.rowH, this.S.laneHeight, this.hdrH); }
   frac(e) { const r = this.canvas.getBoundingClientRect(); return (e.clientX - r.left) / r.width; }
-  pxPerT() { return this.canvas.getBoundingClientRect().width / this.span; }
+  pxPerT() { const F = this.warpSync(); return F ? F.k : this.canvas.getBoundingClientRect().width / this.span; }   // with gaps on the waves: in a part
+  tOfX(x) { const F = this.warpSync(); return F ? F.T(x) : this.t0 + x / this.pxPerT(); }   // the time at x on the waves
   clamp(t) { return Math.min(Math.max(t, this.M.t0), this.M.t1 - this.span); }
+  // the window puts time t at this fraction of its width (the gaps on the waves: on the screen, not in time); a new span set: as it is
+  center(t, f = 0.5) {
+    const F = this.warpSync();
+    if (F && F.span === this.span) this.warpPlace(F, F.X(t) + F.v0 - f * F.W); else this.t0 = this.clamp(t - this.span * f);
+  }
+  // the window dx px on from where time t is at its left, the scale kept: a pan
+  panFrom(t, dx) { const F = this.warpSync(); if (F) this.warpPlace(F, F.X(t) + F.v0 + dx); else this.t0 = this.clamp(t + dx / this.pxPerT()); }
+  panPart(f) { const F = this.warpSync(); if (F) this.warpPlace(F, F.v0 + f * F.W); else this.t0 = this.clamp(this.t0 + this.span * f); }   // by a part of it
   zoom(f, at, lazy = false) { // lazy: in the next frame (the wheel: many events per frame)
-    const tAt = this.t0 + at * this.span;
-    this.span = Math.min(Math.max(this.span * f, this.minSpan), this.M.t1 - this.M.t0);
-    this.t0 = this.clamp(tAt - at * this.span); if (lazy) this.invalidate(); else this.draw();
+    const F = this.warpSync();
+    if (F) this.warpZoom(F, f, at);
+    else { const tAt = this.t0 + at * this.span;
+      this.span = Math.min(Math.max(this.span * f, this.minSpan), this.M.t1 - this.M.t0);
+      this.t0 = this.clamp(tAt - at * this.span); }
+    if (lazy) this.invalidate(); else this.draw();
   }
   fit() { this.t0 = this.M.t0; this.span = this.M.t1 - this.M.t0; this.draw(); }
   // the window to go back to with l (Questa's zoom last): the one before a zoom, fit, a jump; a run of wheel steps is one
@@ -1130,6 +1142,8 @@ class WaveView {
   seq(s) {
     const sigs = () => this.vis.filter(r => r.type === 'sig' && r.tr), up = this.sel && this.sel.anc[this.sel.anc.length - 1];
     if (s === 'gg') this.select(sigs()[0] || null);
+    else if (s === 'gv') { const on = !this.gapLive(); this.setGaps(on ? { gaps: true, gapView: true } : { gapView: false });
+      this.toast(on ? 'the gaps on the waves' : 'the waves in continuous time'); }
     else if (s === 'zR') this.expandAll();
     else if (s === 'zM') this.collapseAll();
     else if (s === 'zc' || s === 'zo' || s === 'za') {
@@ -1158,7 +1172,7 @@ class WaveView {
   // else (no top, or that row is gone) the signal in sight; bookmarkLeft not a number (null, '', 'abc'): 0.2, as viewedit.py
   goBm(b) {
     const raw = this.S.bookmarkLeft, n = raw == null || raw === '' ? NaN : Number(raw), f = isFinite(n) ? Math.min(Math.max(n, 0), 0.9) : 0.2;
-    this.cursor = b.t; this.t0 = this.clamp(b.t - this.span * f);
+    this.cursor = b.t; this.center(b.t, f);
     const s = b.signal ? this.sigByPath(b.signal) : null;
     if (s) { if (s.bit != null && !this.bitsOpen.has(s.of.full)) { this.setBits(s.of, true, true); this.saveRows(); }   // a bit of a bus folded: shown
       if (s.anc.some(id => this.collapsed.has(id))) { s.anc.forEach(id => this.collapsed.delete(id)); this.foldTouched = true; }
@@ -1254,9 +1268,11 @@ class WaveView {
   }
   rowOfY(y) { const o = (this.lay || []).find(o => y >= o.y && y < o.y + o.h); return o ? o.row : null; }
   // the time at x on the waves (layout y): on an edge of the signal at y within cursorSnap px (free: not), else a round
-  // time at the zoom — for the cursor and the ends of a range
+  // time at the zoom — for the cursor and the ends of a range. In a gap's column (free: not) the side of the gap nearer: a
+  // place in the column is no time of the waves, so a Δ neither moves with a pixel there nor shows a time made up
   pickTime(x, y, free = false) {
-    const r = this.rowOfY(y), sig = r && r.type === 'sig' && r.tr ? r : null, raw = this.t0 + x / this.pxPerT();
+    const h = !free && this.gapAt(x); if (h) return x - h.x0 < h.x1 - x ? h.p : h.q;
+    const r = this.rowOfY(y), sig = r && r.type === 'sig' && r.tr ? r : null, raw = this.tOfX(x);
     const at = sig && this.S.cursorSnap > 0 && !free ? this.snap(sig, raw, this.S.cursorSnap) : raw;
     return at !== raw ? at : this.timeAt(x);
   }
@@ -1269,10 +1285,13 @@ class WaveView {
   }
   // "Δ 20 ns / 50 MHz · 2 ↑ PCLK" / "Δ 80 ns / 12.5 MHz · 7 changes of PADDR (4 values)": the range's length (and its
   // frequency, a period that long) and, on the signal it was
-  // measured on (else the selected one), its rising edges (a bit) or its changes and the values it took (a bus)
+  // measured on (else the selected one), its rising edges (a bit) or its changes and the values it took (a bus). All of the
+  // range counts, what gaps on the waves hide too; with them the clock they count is said on any row, " · 11 ↑ PCLK": it is
+  // what the band under the axis counts, and the cycles of a gap cannot be seen
   rangeText() {
     if (!this.range) return '';
-    const [a, b] = this.range, s = this.rangeRow && this.rangeRow.tr ? this.rangeRow : this.sel, key = `${a}|${b}|${s ? s.full : ''}`;
+    const [a, b] = this.range, s = this.rangeRow && this.rangeRow.tr ? this.rangeRow : this.sel, clk = this.gapLive() ? this.liveCuts().clk : null;
+    const key = `${a}|${b}|${s ? s.full : ''}|${clk ? clk.full : ''}`;
     if (this.rangeKey === key) return this.rangeTxt;
     let more = '';
     if (s && s.tr && s.tr.length) {
@@ -1281,6 +1300,7 @@ class WaveView {
       else if (i1 >= i0) { const vals = new Set(); for (let i = Math.max(i0 - 1, 0); i <= i1; i++) vals.add(tr[i].bits ?? tr[i].raw ?? tr[i].v ?? tr[i].k);
         const n = i1 - i0 + 1; more = ` · ${n} change${n === 1 ? '' : 's'} of ${s.name} (${vals.size} value${vals.size === 1 ? '' : 's'})`; }
     }
+    if (clk && !(s && s.full === clk.full)) { const n = this.cycles(clk, a, b); if (n) more = ` · ${n} ↑ ${clk.name}${more}`; }
     this.rangeKey = key;
     this.rangeTxt = 'Δ ' + (this.M.timed ? fmtExact(b - a) + (b > a ? ' / ' + fmtFreq(b - a) : '') : trimNum(b - a) + ' cycles') + more;
     return this.rangeTxt;
@@ -1397,7 +1417,7 @@ class WaveView {
     const rows = this.sel ? [this.sel] : [...this.picks.keys()]; if (rows.length) this.copyRows(rows);
     return rows.length > 0;
   }
-  goto(t, span) { this.markView(); this.span = Math.min(Math.max(span, this.minSpan), this.M.t1 - this.M.t0); this.t0 = this.clamp(t - this.span * 0.1);
+  goto(t, span) { this.markView(); this.span = Math.min(Math.max(span, this.minSpan), this.M.t1 - this.M.t0); this.center(t, 0.1);
     this.cursor = t; this.draw(); }
   fmt(t, ref, unitRef) { return this.M.timed ? fmtTime(t, ref, unitRef) : 'cycle ' + (t + (this.M.tick || 0)).toFixed(Math.max(0,
     Math.min(2, Math.ceil(-Math.log10(ref))))); }
@@ -1405,13 +1425,14 @@ class WaveView {
   fmtCursor(t) { return this.M.timed ? fmtExact(t, this.span) : 'cycle ' + trimNum(t + (this.M.tick || 0)); }
   // a time from a click at x: rounded to a 1-2-5 step of about a pixel, so the cursor reads as a short exact number
   timeAt(x) {
-    const t = this.t0 + x / this.pxPerT(), tpp = 1 / this.pxPerT(), e = 10 ** Math.floor(Math.log10(tpp));
+    const t = this.tOfX(x), tpp = 1 / this.pxPerT(), e = 10 ** Math.floor(Math.log10(tpp));
     let q = [1, 2, 5, 10].find(m => m * e >= tpp) * e; if (this.M.timed) q = Math.max(1, q);
     return Math.min(Math.max(Math.round(Math.round(t / q) * q * 1e6) / 1e6, this.M.t0), this.M.t1);
   }
   nudge(dir) { // shift+← / →: the cursor a hundredth of the view, the view follows
-    this.cursor = Math.min(Math.max(this.cursor + dir * this.span / 100, this.M.t0), this.M.t1);
-    if (this.cursor < this.t0 || this.cursor > this.t0 + this.span) this.t0 = this.clamp(this.cursor - this.span / 2);
+    const F = this.warpSync(), t = F ? F.T(F.X(this.cursor) + dir * F.W / 100) : this.cursor + dir * this.span / 100;
+    this.cursor = Math.min(Math.max(t, this.M.t0), this.M.t1);
+    if (this.cursor < this.t0 || this.cursor > this.t0 + this.span) this.center(this.cursor);
     this.draw(); return this;
   }
   // A large dump read as it is needed (the VS Code tab: sva vcd --codes of its FST): the rows on the screen whose changes
@@ -1431,7 +1452,8 @@ class WaveView {
         const text = await this.opts.loadCodes([...new Set(ask.flatMap(r => r.src.lazy || []))]);
         const got = fillRows(M, vcdSignals(vcdToWave(text, { name: this.opts.title, budget: Infinity }).doc.signal));
         for (const r of ask) if (r.lazy) this.lazyWait.delete(r);   // not in what came: asked again when it is on the screen
-        if (got.length) { this.clkMemo = null; this.cycMemo = null; this.fsmSt = null; this.invalidate(); if (this.fsmP) this.fsmP.render(true); }
+        if (got.length) { this.clkMemo = null; this.cycMemo = null; this.fsmSt = null; this.warpMemo = null; this.invalidate();
+          if (this.fsmP) this.fsmP.render(true); }
         return got;
       })().catch(e => { for (const r of ask) this.lazyWait.delete(r); this.toast('reading the signals: ' + e.message);
         this.logError(e, 'reading the signals: ' + e.message); return []; });
@@ -1465,6 +1487,7 @@ class WaveView {
       this.laneKey = laneKey(this.bms, this.arrows);
       if (this.laneSig !== JSON.stringify([...arrowLanes(this.vis, this.bms, this.S.arrowLabels === 'lane' ? this.arrows : [])])) this.renderNames();
     }
+    this.warpSync();
     const lay = this.lay = this.layout();
     if (this.wcol.style.height !== lay.H + 'px') this.wcol.style.height = lay.H + 'px';
     if (this.sel && !this.vis.includes(this.sel)) { this.sel = null; if (this.mods) this.mods.render(); }   // folded away (the panel's ● goes)
@@ -1495,17 +1518,24 @@ class WaveView {
     const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
     const P = new CanvasPainter(g, getComputedStyle(this.root), this.S, dpr);
     P.rect(0, 0, W, Hc, 'panel');
-    const k = W / this.span, X = t => (t - this.t0) * k, tB = this.t0 + this.span;
+    const F = this.wf, k = W / this.span, X = F ? F.X : t => (t - this.t0) * k, tB = this.t0 + this.span;
     const ah = this.S.headerHeight, cy = top && this.cycData();   // the time axis, the cycles' band under it
-    if (top) paintAxis(P, { from: this.t0, span: this.span, xL: 0, xR: W, y: 0, h: ah, yEnd: Hc, X, timed: M.timed, tick: M.tick, every: 1 });
-    if (cy) paintCycles(P, { xL: 0, xR: W, y: ah, h: CYC_H, X, from: this.t0, to: tB, ups: cy.ups, iz: cy.iz });
+    const WP = F && warpParts(F);   // the gaps on the waves: what of them is in the window
+    if (WP) { if (top) this.paintWarpHead(P, F, WP, Hc, ah, cy); }
+    else {
+      if (top) paintAxis(P, { from: this.t0, span: this.span, xL: 0, xR: W, y: 0, h: ah, yEnd: Hc, X, timed: M.timed, tick: M.tick, every: 1 });
+      if (cy) paintCycles(P, { xL: 0, xR: W, y: ah, h: CYC_H, X, from: this.t0, to: tB, ups: cy.ups, iz: cy.iz });
+      if (top && this.gapLive() && this.gapBand()) this.paintGapBand(P, null, null, ah + (cy ? CYC_H : 0));
+    }
     const shown = lay.filter(o => o.y + o.h > oy + hdr && o.y < oy + Hc);
     g.save(); g.beginPath(); g.rect(0, hdr, W, Hc - hdr); g.clip(); g.translate(0, -oy);   // rows: layout coordinates, under the axis
-    const late = [], rowY = paintBody(P, M, shown, X, this.t0, tB, 0, W, this.hl, this.selRun &&
-      this.selRun.size ? new Set([...this.selRun, this.sel]) : this.sel, lay, this.band, late, r => this.strokeOf(r), r => this.collapsed.has(r.id));
+    const late = [], sel = this.selRun && this.selRun.size ? new Set([...this.selRun, this.sel]) : this.sel;
+    const body = (p, q, xa, xb, to, bg = false) => paintBody(P, M, shown, X, p, q, xa, xb, this.hl, sel, lay, this.band, to, r => this.strokeOf(r),
+      r => this.collapsed.has(r.id), bg);
+    const rowY = WP ? this.paintWarpBody(P, F, WP, body, late, shown, oy, Hc, hdr) : body(this.t0, tB, 0, W, late);
     paintSpans(P, this.spans, X, this.t0, tB, shown, oy + hdr, oy + Hc);
     paintMarkers(P, this.markers, X, this.t0, tB, oy + hdr, oy + Hc);
-    this.paintDiff(P, shown, X, this.t0, tB);   // a second dump compared (diff.js): where it differs
+    if (!WP) this.paintDiff(P, shown, X, this.t0, tB);   // a second dump compared (diff.js): where it differs
     g.restore();
     if (this.cursor >= this.t0 && this.cursor <= tB) P.path([['M', X(this.cursor), 0], ['L', X(this.cursor), Hc]], { stroke: 'acc', w: 1.2 });
     this.paintMeasures(P, X, this.t0, tB, 0, W, 0, Hc, top ? [0, ah] : null);
@@ -1563,7 +1593,7 @@ class WaveView {
     this.syncCursorFields();
     this.curEl.textContent = 'cursor ' + this.fmtCursor(this.cursor) + ' · view ' + (M.timed ? fmtTime(this.span, this.span / 10,
       this.span) : this.span.toFixed(1) + ' cycles') + (this.cursor2 != null ? ' · cursor 2 ' + this.fmtCursor(this.cursor2) + ' · ' + this.delta2() : '') +
-      (this.range ? ' · ' + this.rangeText() : '') + this.cycText();
+      (this.range ? ' · ' + this.rangeText() : '') + this.cycText() + this.gapReadout();
     // the bookmarks' Δ to the cursor; the bookmarks and markers at the cursor marked in their lists, as an assertion's attempt is
     if ((this.bms.length || this.umarks.length) && (this.dtAt !== this.cursor || this.dtGen !== this.notesGen)) {
       this.dtAt = this.cursor; this.dtGen = this.notesGen;
@@ -1599,7 +1629,7 @@ class WaveView {
     if (!VIEWS.has(this)) return;
     this.ro.disconnect(); this.ac.abort();   // every listener on the root, the window and the document
     this.help(false);
-    cancelAnimationFrame(this.raf); cancelAnimationFrame(this.inv); clearTimeout(this.toastT);
+    cancelAnimationFrame(this.raf); cancelAnimationFrame(this.inv); clearTimeout(this.toastT); clearTimeout(this.gapTypeT);
     if (ACTIVE.view === this) ACTIVE.view = null;
     this.closeMenu(); if (this.mods) { this.mods.ac.abort(); this.mods.el.remove(); } if (this.fsmP) { this.fsmP.ac.abort(); this.fsmP.el.remove(); }
     VIEWS.delete(this);

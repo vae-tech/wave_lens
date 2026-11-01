@@ -153,6 +153,11 @@ def gaps(S, ex, build):
     js('(v.setGaps(null), 0)')
     S.quiet(page)
     S.save('gaps-viewer', v, upto=v.locator('.notes'))
+    js("(v.setGaps({gaps: true, gapView: true, gapIdle: 8, gapSignals: ['valid', 'ready']}), 0)")
+    S.quiet(page)
+    S.save('gaps-live', v, upto=v.locator('.notes'))
+    js('(v.setGaps(null), 0)')
+    S.quiet(page)
     whole = "v.toSVG({from: v.M.t0, to: v.M.t1, rows: 'all', width: 1180})"
     S.save('gaps-off', picture(page, js(whole)))
     js("(v.setGaps({gaps: true}), 0)")

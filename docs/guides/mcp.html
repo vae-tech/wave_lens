@@ -210,6 +210,18 @@ view_get  {"page": "apb_page.html", "picture": true}  <span class="c"># what is 
   the person moves it or answers in its text, <code>view_get</code> reads it back. <code>save</code> in <code>view_edit</code> writes the
   live page's state into its file too; <code>off</code> in <code>view_live</code> takes the link out of the page before it goes to anyone
   else.</p>
+<h3 id="gaps">The gaps on the waves</h3>
+<p>A long run with rare transfers is easier to show cut. The <code>gaps</code> command with <code>view</code> cuts the person's waves themselves,
+  which they then scroll and zoom; times stay real (<a href="gaps.html#live">Gaps</a>):</p>
+<pre><code>view_edit {"page": "tb.html", "ops": [{"op": "gaps", "on": true, "view": true, "idle": 8, "keep": 2, "signals": "*valid, *ready"}]}
+{"live":"…/tb.html","view":"view","results":[{"op":"gaps","gaps":{"gaps":true,"gapIdle":8,"gapView":true,…},
+ "cut":{"gaps":6,"kept":505,"total":10005,"parts":[[0,30],[100,190],…]}}]}   <span class="c"># live: ns; the first 50 parts, partsAll when more</span>
+view_get  {"page": "tb.html", "picture": true}   <span class="c"># gaps with its cut; the picture is what the screen shows</span></code></pre>
+<p>Change <code>idle</code>, <code>keep</code> or <code>signals</code> in another <code>view_edit</code> and read <code>cut</code> to tune it: too many
+  gaps means a signal keeps cutting the pauses (leave it out of <code>signals</code>). On a page's file the edit goes into the file, there is no
+  <code>cut</code> (the waves are the browser's) and <code>view_get</code> with <code>picture</code> shows the result. <code>{"view": false}</code>: continuous
+  time again, <code>{"reset": true}</code>: the page's own settings. A page built with it on: <code>"gapView": true</code> in its config. This is not
+  <code>auto_gap</code> of <code>wave_page</code>, which folds cycles of a clock-sampled page when it is written.</p>
 <h3 id="config">The config, for a page built again</h3>
 <p>Edits in a page's file are gone when <code>mkhtml.py</code> builds it again. For marks that belong to the page, edit its config:</p>
 <pre><code>view_edit {"config": "tb.config.json", "view": "drop", "ops": [
@@ -288,7 +300,7 @@ make mcp-bench AGENT=codex TASKS=a1,b3                 <span class="c"># some ta
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.32 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.33 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

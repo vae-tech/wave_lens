@@ -29,13 +29,11 @@ const WaveSVG = {
     const cuts = opts.cuts || (V ? [[from, to]] : gapCuts(ref.length ? ref : C.rows, from, to, S, clk, M.cycle, bms.map(b => b.t), ref.length > 0));
     const ng = cuts.length - 1, kept = cuts.reduce((n, [p, q]) => n + q - p, 0), gapLab = { size: 9.5 }, gc = G.gapCount || 'clock';
     const aux = new Set(V ? V.gapRows().aux : gapRefs(M.rows, G.gapAux)), refs = new Set(V ? V.gapRefSet() : ref);
-    const kind = ['edges', 'rise', 'fall', 'any'].includes(gc) ? gc : 'edges', each = gc !== 'off' && (aux.size > 0 || kind === gc);
-    const counted = r => r.type === 'sig' && r.tr && r !== clk && (aux.size ? aux.has(r) : !refs.has(r));
-    const ups = clk ? riseTimes(clk) : [], cyc = (p, q) => lastBefore(ups.length, j => ups[j], q, true) - lastBefore(ups.length, j => ups[j], p, true);
-    const holes = cuts.slice(1).map(([q], i) => {   // cyc: the clock's cycles that start in [p, q)
-      const p = cuts[i][1], d = q - p, nc = cyc(p, q), text = new Map();
-      if (each) for (const r of C.rows) if (counted(r)) { const t = gapText(r, p, q, kind); if (t) text.set(r, t); }
-      return { p, q, w: GAP, text, info: '+' + (M.timed ? fmtTime(d, d / 100, d) : trimNum(d)) + (nc ? ` · ${nc} ${clk.name}` : '') };
+    const T = gapTexts(M, gc, clk, aux, refs), each = T.each;
+    const holes = cuts.slice(1).map(([q], i) => {
+      const p = cuts[i][1], text = new Map();
+      if (each) for (const r of C.rows) if (T.counted(r)) { const t = gapText(r, p, q, T.kind); if (t) text.set(r, t); }
+      return { p, q, w: GAP, text, info: T.hole(p, q) };
     });
     // a thin row under each signal with a text, on its module's background
     const band = ng && each ? new Map(C.band || []) : C.band;
@@ -131,8 +129,7 @@ const WaveSVG = {
       // in the middle of each part its cycles (from the gap before to the gap after), where the gaps' texts leave room
       const used = holes.map((h, i) => { const w = P.measure(h.info, gapLab) / 2 + 6, x = segX[i + 1] - GAP / 2; return [x - w, x + w]; });
       if (ng && gc !== 'off') cuts.forEach(([p, q], i) => {
-        const nc = cyc(p, q), t = nc ? `${nc} ${clk.name}` : M.timed ? fmtTime(q - p, (q - p) / 100, q - p) : trimNum(q - p);
-        const x = segX[i] + (q - p) * k / 2, w = P.measure(t, gapLab) / 2;
+        const t = T.part(p, q), x = segX[i] + (q - p) * k / 2, w = P.measure(t, gapLab) / 2;
         if (x - w > segX[i] + 2 && x + w < segX[i] + (q - p) * k - 2 && !used.some(([a, b]) => x + w > a && x - w < b)) P.text(x, infoY + 7, t, lab);
       });
       if (ng && gc !== 'off') holes.forEach((h, i) => { const xm = segX[i + 1] - GAP / 2;

@@ -65,6 +65,7 @@ window.WAVELENS_CONFIG = {
   gapCount: 'clock',            //   texts: 'clock' (under the axis the time left out and the clock cycles; under a gapAux signal its count),
                                 //   'edges' (also a thin row under every signal when no gapAux: its rising / falling edges in the stretch
                                 //   left out, a bus its changes), 'off'
+  gapView: false,               //   the waves of the viewer with the gaps cut out, and live ("Gaps ▸ on the waves", gv); what you see is what you save
   gapLine: 'dashdot',           //   the line of a gap: 'dashdot' | 'wave' | 'waves' | 'zigzag' | 'double'
   maxHeight: null,              // e.g. '80vh' or 600: the rows scroll inside the viewer (the bar stays in view); null = page scroll
                                 //   (the bar sticks to the top while its rows go by); the bar's Scroll button switches on the fly

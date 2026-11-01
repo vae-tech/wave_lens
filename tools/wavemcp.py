@@ -1119,8 +1119,15 @@ def ns_out(results, timed):
                 r['state'] = state_ns(r['state'])
             if r.get('op') == 'cycles' and isinstance(r.get('cycles'), dict):
                 r['cycles'] = dict(r['cycles'], cycleZero=t(r['cycles'].get('cycleZero')))
+            if r.get('op') == 'gaps' and isinstance(r.get('cut'), dict):
+                r['cut'] = cut_ns(r['cut'], t)
         out.append(r)
     return out
+
+
+def cut_ns(cut, t):
+    """What the gaps on the waves leave (the gaps command's cut) with its times through t."""
+    return dict(cut, kept=t(cut.get('kept')), total=t(cut.get('total')), parts=[[t(p), t(q)] for p, q in cut.get('parts') or []])
 
 
 def state_conv(st, f):
@@ -1209,6 +1216,10 @@ def summary(st, timed, base=None):
         out['style'] = c['style']
     if c.get('cycles'):
         out['cycles'] = {'clock': c.get('cycleClock'), 'zero': t(c['cycleZero']) if c.get('cycleZero') is not None else None}
+    g = ed.gap_opt()
+    if g['gaps']:   # with the gaps command's names; view: on the waves
+        out['gaps'] = {'idle': g['gapIdle'], 'keep': g['gapKeep'], 'view': g['gapView'], **{n: g[k] for n, k in (('signals', 'gapSignals'), ('clock', 'gapClock'),
+                       ('aux', 'gapAux'), ('only', 'gapOnly')) if g[k]}}
     cmp = st['compare'] if 'compare' in st else ed.compare() if ed.m.doc else None
     if isinstance(cmp, dict):
         s = viewedit.compare_summary(cmp)
@@ -1633,6 +1644,10 @@ def live_get(a, where, v):
     out.update((state_ns(st) if v.get('timed') else st) if a.get('full') else summary(st, v.get('timed')))
     if a.get('rows') is not None:
         out['rows'] = {k: x for k, x in res[1].items() if k != 'op'} if isinstance(res[1], dict) and 'error' not in res[1] else fail_live(res[1])
+    if (out.get('gaps') or {}).get('view'):   # the gaps on the waves: what they leave
+        cut = ns_out(BRIDGE[0].send(where['cid'], v.get('key'), [{'op': 'gaps'}]), v.get('timed'))[0]
+        if isinstance(cut, dict) and isinstance(cut.get('cut'), dict):
+            out['gaps'] = dict(out['gaps'], cut=cut['cut'])
     if a.get('picture'):
         pic = BRIDGE[0].send(where['cid'], v.get('key'), [{'op': 'picture', 'format': 'png'}])[0]
         return Image(got(pic, 'png'), out)
@@ -1717,10 +1732,11 @@ TOOLS = [
          ' (·live: in a connected page only). t/from/to in ns; signals: path, name, path tail or * pattern; bookmark: a numbered circle with a text (no signal: on the time '
          'axis); arrow from/to: bookmark numbers; group: a folder of signals at the top; only: just these modules on the waves (with their '
          'submodules); edge: the cursor to the next edge. config (instead of page): a mkhtml config file, bookmark / arrow / span '
-         'on its view, kept by a rebuild (a bookmark\'s "at" event stays until a t replaces it).',
+         'on its view, kept by a rebuild (a bookmark\'s "at" event stays until a t replaces it). gaps with view true: the waves themselves '
+         'with the idle stretches cut out, as the person scrolls them (live: its answer has cut, what is left).',
          {'page': S, 'config': S, 'view': S, 'ops': {'type': 'array', 'items': {'type': 'object'}}, 'save': B}, ('ops',), ro=False),
     tool('view_get', t_view_get, 'What a page shows: bookmarks, arrows, markers, groups, highlight, colours, hidden, cursor, window (live: '
-         'with the person\'s own edits). rows: list its signals (a pattern, "" all); picture: a PNG of the view (live: the screen; a file: '
+         'with the person\'s own edits), the gaps (live, on the waves: cut, the gaps and the parts kept). rows: list its signals (a pattern, "" all); picture: a PNG of the view (live: the screen; a file: '
          'made in a headless Chromium, tools/pageshot.py).',
          {'page': S, 'view': S, 'rows': S, 'limit': N, 'picture': B, 'full': B}, ()),
     tool('view_live', t_view_live, 'Connect a page to this server: it is written into the page (open or reload it), then view_edit and '

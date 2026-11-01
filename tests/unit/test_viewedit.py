@@ -326,6 +326,14 @@ class Twin(unittest.TestCase):
         self.assertEqual(r[1]['gaps'], dict(V.GAP_DEFAULTS, gapIdle=8, gapSignals=[], gapAux=[]))
         self.assertEqual({k: e.st['config'][k] for k in ('gaps', 'gapIdle', 'gapSignals')}, {'gaps': False, 'gapIdle': 8, 'gapSignals': None})
 
+    def test_gaps_view(self):
+        """gaps view: gapView in the state as a boolean, as view.js gapOpt says it."""
+        e = ed()
+        r = e.run([{'op': 'gaps', 'on': True, 'view': 1}, {'op': 'gaps', 'view': False}])
+        self.assertIs(r[0]['gaps']['gapView'], True)
+        self.assertIs(r[1]['gaps']['gapView'], False)
+        self.assertIs(r[1]['gaps']['gaps'], True)
+
     def test_gap_defaults_are_the_config_files(self):
         with open(os.path.join(H.ROOT, 'wavelens', 'wavelens.config.js'), encoding='utf-8') as f:
             text = f.read()

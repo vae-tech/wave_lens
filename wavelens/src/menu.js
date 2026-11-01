@@ -55,7 +55,9 @@ Object.assign(WaveView.prototype, {
       // the gaps: a submenu (its settings, the role of the signals clicked, a reset)
       (`<div class="msub"><button type="button" role="menuitem" class="subh" aria-haspopup="menu" aria-expanded="false"><span class="gh">${gn()}</span>` +
         `<span class="kk">▸</span></button><div class="sub" role="menu" hidden>`) +
-      (`<div class="mi gp"><label><input type="checkbox" class="gon"${gp.gaps ? ' checked' : ''}> <span class="gn">${gn()}</span></label><span>idle ` +
+      (`<div class="mi gp"><label><input type="checkbox" class="gon"${gp.gaps ? ' checked' : ''}> <span class="gn">${gn()}</span></label>` +
+        `<label><input type="checkbox" ` +
+        `class="gview"${gp.gapView ? ' checked' : ''}> on the waves</label></div><div class="mi gp"><span>idle ` +
         `<input class="gi" value="${esc(gp.gapIdle)}" aria-label="idle this long: clock cycles or a time"> keep <input class="gk" ` +
         `value="${esc(gp.gapKeep)}" aria-label="kept around a change: clock cycles or a time"></span></div>`) +
       (`<div class="mi gp"><span>${nref ? `by ${nref} signal${nref === 1 ? '' : 's'} <button type="button" class="gx" data-m="grefx" ` +
@@ -232,14 +234,16 @@ Object.assign(WaveView.prototype, {
       this.savePaint(); this.renderNames(); this.draw(); } });
     el.addEventListener('change', e => {   // the gaps: kept for this viewer, the menu stays open
       if (!e.target.closest('.gp')) return;
-      const val = inp => { const v = inp.value.trim(); return /^[\d.]+(e[-+]?\d+)?$/i.test(v) ? +v : v; };
-      const gi = el.querySelector('.gi'), gk = el.querySelector('.gk');
-      const idle = val(gi), keep = val(gk), ok = [gapLen(idle, 1) > 0, gapLen(keep, 1) >= 0];
-      if (!ok[0]) this.bad(gi); if (!ok[1]) this.bad(gk);
-      const only = el.querySelector('.gonly');
-      this.setGaps({ gaps: el.querySelector('.gon').checked, ...(ok[0] ? { gapIdle: idle } : {}), ...(ok[1] ? { gapKeep: keep } : {}),
+      const gon = el.querySelector('.gon'), gv = el.querySelector('.gview'), only = el.querySelector('.gonly');
+      if (e.target === gv && gv.checked) gon.checked = true;   // on the waves: the gaps on
+      clearTimeout(this.gapTypeT);
+      this.setGaps({ gaps: gon.checked, gapView: gv.checked, ...this.gapFields(el.querySelector('.gi'), el.querySelector('.gk')),
         ...(only ? { gapOnly: only.checked } : {}), gapCount: el.querySelector('.gcnt').value });
       for (const x of el.querySelectorAll('.gn, .gh')) x.textContent = gn();
+    });
+    el.addEventListener('input', e => {   // idle, keep: as they are typed, on the waves at once
+      if (!e.target.matches('.gi, .gk') || !this.gapLive()) return;
+      this.gapType(() => this.gapFields(el.querySelector('.gi'), el.querySelector('.gk'), true));
     });
     el.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); done(); } });
     // Windows sends contextmenu on the release of the button: by then this menu is under the pointer (no browser menu over it)
@@ -336,7 +340,7 @@ Object.assign(WaveView.prototype, {
       bs.forEach((b, j) => { b.setAttribute('aria-selected', j === at); b.classList.toggle('on', j === at); });
       bs[at].focus({ preventScroll: true }); bs[at].scrollIntoView({ block: 'nearest' });
       if (x.b) { this.goBm(x.b); return; }   // a bookmark: where it was made (goBm); a marker: in the middle
-      this.cursor = x.t; this.t0 = this.clamp(x.t - this.span / 2);
+      this.cursor = x.t; this.center(x.t);
       this.renderNames(); this.draw();
     };
     el.addEventListener('click', e => { const b = e.target.closest('button[data-i]'); if (b) pick(+b.dataset.i); });
