@@ -356,12 +356,20 @@ function paintSpans(P, spans, X, tA, tB, lay, y0, y1) {
       P.rect(xa + 1, y + 3, w + 6, 13, 'panel', 0.9); P.text(xa + 4, y + 9.5, s.label, { size: 10, weight: 600, fill: 'fg' }); }
   }
 }
-function paintMarkers(P, markers, X, tA, tB, y0, y1) {
-  for (const m of markers) {
-    if (m.t < tA || m.t > tB) continue;
-    const x = X(m.t), c = m.color || 'muted'; P.path([['M', x, y0], ['L', x, y1]], { stroke: c, w: m.color ? 1.2 : 1, dash: [3, 3] });
-    if (m.label) { P.rect(x + 1, y0 + 2, P.measure(m.label, { size: 10 }) + 4, 12, 'panel'); P.text(x + 3, y0 + 8, m.label, { size: 10, fill: c }); }
-  }
+// the markers: a dashed line across the rows, pale without a colour of its own; the text at the top of the rows, or in the
+// lane of its signal (lanes: laneY; that row not drawn: at the top). -> [{i, x, y, w}]: where each text is, for the hit tests
+function paintMarkers(P, markers, X, tA, tB, y0, y1, lanes) {
+  const tags = [];
+  markers.forEach((m, i) => {
+    if (m.t < tA || m.t > tB) return;
+    const x = X(m.t), c = m.color || 'muted', ly = m.signal && lanes ? lanes.get(laneId(m)) : null, y = ly ?? y0 + 8;
+    const w = m.label ? P.measure(m.label, { size: 10 }) + 4 : 7;
+    P.path([['M', x, y0], ['L', x, y1]], { stroke: c, w: m.color ? 1.2 : 1, dash: [3, 3] });
+    if (m.label) { P.rect(x + 1, y - 6, w, 12, 'panel'); P.text(x + 3, y, m.label, { size: 10, fill: c }); }
+    else if (ly != null) P.path(circle(x, y, 3), { fill: c });   // no text yet: a dot to find it by
+    tags.push({ i, x, y, w });
+  });
+  return tags;
 }
 
 const circle = (x, y, r) => { const k = 0.5523 * r; return [['M', x - r, y], ['C', x - r, y - k, x - k, y - r, x, y - r],
@@ -369,28 +377,29 @@ const circle = (x, y, r) => { const k = 0.5523 * r; return [['M', x - r, y], ['C
   ['C', x + r, y + k, x + k, y + r, x, y + r], ['C', x - k, y + r, x - r, y + k, x - r, y], ['Z']]; };
 // arrow labels in lanes: a thin row inserted under the upper end of a labelled arrow (above the row when both ends share
 // it; the top when an end is on the time axis), so the text never covers a signal; and the lifted bookmarks of a signal
-// ("lift"), in one lane line above it ("b:" + its path), the nearest to the row.
+// ("lift"), in one lane line above it ("b:" + its path), the nearest to the row; the texts of the markers (marks) on a
+// signal in the same lines.
 // -> Map(row index it follows -> [arrow index | "b:" + path])
-function arrowLanes(rows, bms, arrows) {
+function arrowLanes(rows, bms, arrows, marks = []) {
   const idx = new Map(), lanes = new Map(), has = n => bms.some(b => b.n === n);
   rows.forEach((r, i) => { if (r.type === 'sig' && r.ug && !idx.has(r.full)) idx.set(r.full, i); });   // in your group first (paintBookmarks)
   rows.forEach((r, i) => { if (r.type === 'sig' && !r.same && !idx.has(r.full)) idx.set(r.full, i); });
   rows.forEach((r, i) => { if (r.type === 'sig' && r.same && !idx.has(r.full)) idx.set(r.full, i); });   // copies: when the original is not shown
-  const rowOf = n => { const b = bms.find(x => x.n === n); return b && b.signal != null && idx.has(b.signal) ? idx.get(b.signal) : -1; };
+  const rowAt = o => (o && o.signal != null && idx.has(o.signal) ? idx.get(o.signal) : -1), rowOf = n => rowAt(bms.find(x => x.n === n));
   arrows.forEach((a, i) => {
     if (!a.label || !has(a.from) || !has(a.to)) return;
     const r1 = rowOf(a.from), r2 = rowOf(a.to), at = Math.max(-1, r1 === r2 ? r1 - 1 : Math.min(r1, r2));
     if (!lanes.has(at)) lanes.set(at, []);
     lanes.get(at).push(i);
   });
-  for (const b of bms) {   // "below": the lane under its row ("b:" + path + ":below"), the nearest to it
-    const r = b.lift ? rowOf(b.n) : -1, below = b.lift === 'below', id = laneId(b), at = below ? r : r - 1; if (r < 0) continue;
+  for (const b of [...bms, ...marks]) {   // "below": the lane under its row ("b:" + path + ":below"), the nearest to it
+    const r = b.lift ? rowAt(b) : -1, below = b.lift === 'below', id = laneId(b), at = below ? r : r - 1; if (r < 0) continue;
     if (!lanes.has(at)) lanes.set(at, []);
     const l = lanes.get(at); if (!l.includes(id)) { if (below) l.unshift(id); else l.push(id); }
   }
   return lanes;
 }
-const laneId = b => 'b:' + b.signal + (b.lift === 'below' ? ':below' : '');   // the lane of a lifted bookmark
+const laneId = b => 'b:' + b.signal + (b.lift === 'below' ? ':below' : '');   // the lane of a lifted bookmark, of a marker's text
 function withLanes(rows, lanes) { // rows with {type: 'lane', ids: [arrow index]} rows spliced in
   const out = [], lane = i => { if (lanes.has(i)) out.push({ type: 'lane', ids: lanes.get(i), name: '', depth: 0, anc: [] }); };
   lane(-1); rows.forEach((r, i) => { out.push(r); lane(i); });
@@ -408,9 +417,9 @@ function bands(rows) {
 }
 // What the viewer and the static SVG both draw from the rows in display order: the rows with the arrow-label lanes,
 // the module bands and the highlight state (picks: Map(row -> colour), all: the rows the highlight covers).
-function compose(M, S, rows, bms, arrows, picks, all) {
+function compose(M, S, rows, bms, arrows, picks, all, marks) {
   // the lifted bookmarks' lanes always; the arrows' labels in lanes only with arrowLabels "lane" (else on the arrows)
-  const lanes = arrowLanes(rows, bms || [], S.arrowLabels === 'lane' ? arrows || [] : []), out = withLanes(rows, lanes);
+  const lanes = arrowLanes(rows, bms || [], S.arrowLabels === 'lane' ? arrows || [] : [], marks), out = withLanes(rows, lanes);
   return { rows: out, lanes, band: S.moduleShading && Object.keys(M.groups).length ? bands(out) : null, hl: hlState(M, picks, S.dim, all || out) };
 }
 // rows -> [{row, y, h}] from y down (rh: the height of a sig / group / space row, laneH: of one arrow label); .H: the end
@@ -423,7 +432,9 @@ function layoutRows(rows, rh, laneH, y = 0) {
   lay.H = y; return lay;
 }
 // the bookmarks and arrows as far as the lanes depend on them: the lanes are worked out again only when this changes
-const laneKey = (bms, arrows) => JSON.stringify([(bms || []).map(b => [b.n, b.signal, b.lift || false]), (arrows || []).map(a => [a.from, a.to, !!a.label])]);
+const laneKey = (bms, arrows, marks) => JSON.stringify([(bms || []).map(b => [b.n, b.signal, b.lift || false]),
+  (arrows || []).map(a => [a.from, a.to, !!a.label]),
+  (marks || []).map(m => [m.signal || null, m.lift || false])]);
 const laneY = (lay, h) => { const m = new Map(); for (const o of lay) if (o.row.type === 'lane') o.row.ids.forEach((a, k) => m.set(a, o.y + h * k + h / 2));
   return m; };
 // an arrow's label with its placeholders filled at the times of its ends: {dt} the time between them (cycles, "3T", in

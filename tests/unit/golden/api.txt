@@ -59,7 +59,7 @@ command group: name signals? add? remove? color? rename? delete? go? move?
 command hide: signals
 command highlight: add? remove? set? clear?
 command layout: scroll? height? tools?
-command marker: id? t? label? color? delete?
+command marker: id? t? label? color? signal? lift? delete?
 command only: modules? on? clear? open?
 command paint: signals? color? clear?
 command picture: format? from? to? rows?

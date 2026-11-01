@@ -440,6 +440,14 @@
 <p>Arrow labels get a thin lane of their own between the signals, so they cover no value; an arrow between two bookmarks of one signal is a
   dimension line in that lane. A circle dragged onto the top quarter of its row (or ↥ in its line) is <b>lifted</b> into the lane above the
   signal with a leader down to it (<code>"lift": true</code> in the JSON).</p>
+<p id="marker-lines">The <b>text of a marker</b> uses the same lines. Drag it onto a signal: the upper half of the row puts it on the line over that signal, the lower half on
+  the line under it, next to any lifted bookmark there. The drag moves it along the time too, onto the edges of that signal; straight up or down, or with <kbd>alt</kbd>, the time
+  stays. Up to the axis it is back at the top of the rows, and a marker without a text is taken by the top of its dashed line. A marker is pale until you give it a colour: the right
+  button on its text has <span class="ui">Its text…</span>, <span class="ui">Colour</span>, <span class="ui">Pale again</span> and <span class="ui">Delete the marker</span>; a click puts
+  the cursor on it with its label ready in the Markers list, which has its signal, ↥ ↧ and colour too. The markers of the page itself stay where the page puts them.</p>
+<figure><img src="img/viewer-marker-lines.png" alt="Three markers: a pale text on the line over PENABLE, a coloured text on the line under PRDATA, a pale text at the top of the rows" loading="lazy">
+  <figcaption><b>Marker texts on the lines of signals.</b> Pale by default, in a colour when you pick one, at the top of the rows when no signal is given.</figcaption></figure>
+
 <p><kbd>1</kbd> … <kbd>9</kbd> go to that bookmark, <kbd>]m</kbd> / <kbd>[m</kbd> to the next / previous one in time;
   a click on a number in the list does the same. Going to a bookmark shows the waves as they were when you made it: its time a fifth of the
   waves from the left (<code>bookmarkLeft</code>, 0.2), the span you have now, its signal selected, and the rows scrolled so that the row
@@ -548,7 +556,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.33 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.34 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

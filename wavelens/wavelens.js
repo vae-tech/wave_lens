@@ -637,7 +637,7 @@ function parse(src) {
   if (!(M.t1 > M.t0)) M.t1 = M.t0 + (tm ? num(tm.cycle) || 1 : 1);
   M.cycle = tm ? num(tm.cycle) || (M.t1 - M.t0) / 40 : 1;
   const mt = m => m.cycle != null ? C(num(m.cycle)) : num(parseT(m.t));
-  M.markers = (j.markers || []).map(m => ({ t: mt(m), label: m.label || '' }));
+  M.markers = (j.markers || []).map(m => pageMark({ t: mt(m), label: m.label || '', color: colorOk(m.color), signal: m.signal || null, lift: m.lift }));
   M.jumps = j.jumps ? j.jumps.map(m => ({ t: mt(m), span: num(parseT(m.span)) || (M.t1 - M.t0) / 5, label: m.label || '' })) : null;
   M.cursor = j.cursor != null ? num(parseT(j.cursor)) : null;
   M.bookmarks = bmNorm(j.bookmarks); M.arrows = arNorm(j.arrows, j.bookmarks); M.spans = spanNorm(j.spans);
@@ -892,10 +892,15 @@ function arNorm(list, bms) {
     color: colorOk(a.color), label: a.label || '' }))
     .filter(a => a.from && a.to && a.from !== a.to);
 }
-// your markers [{t, label, color}] (a saved state, this browser) and groups [{name, signals: [full path], color}]: normalised
+// your markers [{t, label, color, signal, lift}] (a saved state, this browser) and groups [{name, signals: [full path], color}]:
+// normalised. signal: its text in the lane over that row ("lift": "below": under it), none: at the top of the rows
+const markLift = m => (!m.signal ? false : m.lift === 'below' ? 'below' : true);
+const pageMark = m => ({ ...m, lift: markLift(m) });   // of a document or a page's opts: the same lanes
 function markNorm(list) {
-  return (Array.isArray(list) ? list : []).map(m => ({ t: num(parseT(m && m.t)), label: m && m.label != null ? String(m.label) : '',
-    color: colorOk(m && m.color) })).filter(m => isFinite(m.t));
+  return (Array.isArray(list) ? list : []).map(m => { const signal = m && m.signal ? String(m.signal) : null;
+    return { t: num(parseT(m && m.t)), label: m && m.label != null ? String(m.label) : '', color: colorOk(m && m.color), signal,
+      lift: markLift({ signal, lift: m && m.lift }) }; })
+    .filter(m => isFinite(m.t));
 }
 function groupNorm(list) {
   const seen = new Set();
@@ -2011,12 +2016,20 @@ function paintSpans(P, spans, X, tA, tB, lay, y0, y1) {
       P.rect(xa + 1, y + 3, w + 6, 13, 'panel', 0.9); P.text(xa + 4, y + 9.5, s.label, { size: 10, weight: 600, fill: 'fg' }); }
   }
 }
-function paintMarkers(P, markers, X, tA, tB, y0, y1) {
-  for (const m of markers) {
-    if (m.t < tA || m.t > tB) continue;
-    const x = X(m.t), c = m.color || 'muted'; P.path([['M', x, y0], ['L', x, y1]], { stroke: c, w: m.color ? 1.2 : 1, dash: [3, 3] });
-    if (m.label) { P.rect(x + 1, y0 + 2, P.measure(m.label, { size: 10 }) + 4, 12, 'panel'); P.text(x + 3, y0 + 8, m.label, { size: 10, fill: c }); }
-  }
+// the markers: a dashed line across the rows, pale without a colour of its own; the text at the top of the rows, or in the
+// lane of its signal (lanes: laneY; that row not drawn: at the top). -> [{i, x, y, w}]: where each text is, for the hit tests
+function paintMarkers(P, markers, X, tA, tB, y0, y1, lanes) {
+  const tags = [];
+  markers.forEach((m, i) => {
+    if (m.t < tA || m.t > tB) return;
+    const x = X(m.t), c = m.color || 'muted', ly = m.signal && lanes ? lanes.get(laneId(m)) : null, y = ly ?? y0 + 8;
+    const w = m.label ? P.measure(m.label, { size: 10 }) + 4 : 7;
+    P.path([['M', x, y0], ['L', x, y1]], { stroke: c, w: m.color ? 1.2 : 1, dash: [3, 3] });
+    if (m.label) { P.rect(x + 1, y - 6, w, 12, 'panel'); P.text(x + 3, y, m.label, { size: 10, fill: c }); }
+    else if (ly != null) P.path(circle(x, y, 3), { fill: c });   // no text yet: a dot to find it by
+    tags.push({ i, x, y, w });
+  });
+  return tags;
 }
 
 const circle = (x, y, r) => { const k = 0.5523 * r; return [['M', x - r, y], ['C', x - r, y - k, x - k, y - r, x, y - r],
@@ -2024,28 +2037,29 @@ const circle = (x, y, r) => { const k = 0.5523 * r; return [['M', x - r, y], ['C
   ['C', x + r, y + k, x + k, y + r, x, y + r], ['C', x - k, y + r, x - r, y + k, x - r, y], ['Z']]; };
 // arrow labels in lanes: a thin row inserted under the upper end of a labelled arrow (above the row when both ends share
 // it; the top when an end is on the time axis), so the text never covers a signal; and the lifted bookmarks of a signal
-// ("lift"), in one lane line above it ("b:" + its path), the nearest to the row.
+// ("lift"), in one lane line above it ("b:" + its path), the nearest to the row; the texts of the markers (marks) on a
+// signal in the same lines.
 // -> Map(row index it follows -> [arrow index | "b:" + path])
-function arrowLanes(rows, bms, arrows) {
+function arrowLanes(rows, bms, arrows, marks = []) {
   const idx = new Map(), lanes = new Map(), has = n => bms.some(b => b.n === n);
   rows.forEach((r, i) => { if (r.type === 'sig' && r.ug && !idx.has(r.full)) idx.set(r.full, i); });   // in your group first (paintBookmarks)
   rows.forEach((r, i) => { if (r.type === 'sig' && !r.same && !idx.has(r.full)) idx.set(r.full, i); });
   rows.forEach((r, i) => { if (r.type === 'sig' && r.same && !idx.has(r.full)) idx.set(r.full, i); });   // copies: when the original is not shown
-  const rowOf = n => { const b = bms.find(x => x.n === n); return b && b.signal != null && idx.has(b.signal) ? idx.get(b.signal) : -1; };
+  const rowAt = o => (o && o.signal != null && idx.has(o.signal) ? idx.get(o.signal) : -1), rowOf = n => rowAt(bms.find(x => x.n === n));
   arrows.forEach((a, i) => {
     if (!a.label || !has(a.from) || !has(a.to)) return;
     const r1 = rowOf(a.from), r2 = rowOf(a.to), at = Math.max(-1, r1 === r2 ? r1 - 1 : Math.min(r1, r2));
     if (!lanes.has(at)) lanes.set(at, []);
     lanes.get(at).push(i);
   });
-  for (const b of bms) {   // "below": the lane under its row ("b:" + path + ":below"), the nearest to it
-    const r = b.lift ? rowOf(b.n) : -1, below = b.lift === 'below', id = laneId(b), at = below ? r : r - 1; if (r < 0) continue;
+  for (const b of [...bms, ...marks]) {   // "below": the lane under its row ("b:" + path + ":below"), the nearest to it
+    const r = b.lift ? rowAt(b) : -1, below = b.lift === 'below', id = laneId(b), at = below ? r : r - 1; if (r < 0) continue;
     if (!lanes.has(at)) lanes.set(at, []);
     const l = lanes.get(at); if (!l.includes(id)) { if (below) l.unshift(id); else l.push(id); }
   }
   return lanes;
 }
-const laneId = b => 'b:' + b.signal + (b.lift === 'below' ? ':below' : '');   // the lane of a lifted bookmark
+const laneId = b => 'b:' + b.signal + (b.lift === 'below' ? ':below' : '');   // the lane of a lifted bookmark, of a marker's text
 function withLanes(rows, lanes) { // rows with {type: 'lane', ids: [arrow index]} rows spliced in
   const out = [], lane = i => { if (lanes.has(i)) out.push({ type: 'lane', ids: lanes.get(i), name: '', depth: 0, anc: [] }); };
   lane(-1); rows.forEach((r, i) => { out.push(r); lane(i); });
@@ -2063,9 +2077,9 @@ function bands(rows) {
 }
 // What the viewer and the static SVG both draw from the rows in display order: the rows with the arrow-label lanes,
 // the module bands and the highlight state (picks: Map(row -> colour), all: the rows the highlight covers).
-function compose(M, S, rows, bms, arrows, picks, all) {
+function compose(M, S, rows, bms, arrows, picks, all, marks) {
   // the lifted bookmarks' lanes always; the arrows' labels in lanes only with arrowLabels "lane" (else on the arrows)
-  const lanes = arrowLanes(rows, bms || [], S.arrowLabels === 'lane' ? arrows || [] : []), out = withLanes(rows, lanes);
+  const lanes = arrowLanes(rows, bms || [], S.arrowLabels === 'lane' ? arrows || [] : [], marks), out = withLanes(rows, lanes);
   return { rows: out, lanes, band: S.moduleShading && Object.keys(M.groups).length ? bands(out) : null, hl: hlState(M, picks, S.dim, all || out) };
 }
 // rows -> [{row, y, h}] from y down (rh: the height of a sig / group / space row, laneH: of one arrow label); .H: the end
@@ -2078,7 +2092,9 @@ function layoutRows(rows, rh, laneH, y = 0) {
   lay.H = y; return lay;
 }
 // the bookmarks and arrows as far as the lanes depend on them: the lanes are worked out again only when this changes
-const laneKey = (bms, arrows) => JSON.stringify([(bms || []).map(b => [b.n, b.signal, b.lift || false]), (arrows || []).map(a => [a.from, a.to, !!a.label])]);
+const laneKey = (bms, arrows, marks) => JSON.stringify([(bms || []).map(b => [b.n, b.signal, b.lift || false]),
+  (arrows || []).map(a => [a.from, a.to, !!a.label]),
+  (marks || []).map(m => [m.signal || null, m.lift || false])]);
 const laneY = (lay, h) => { const m = new Map(); for (const o of lay) if (o.row.type === 'lane') o.row.ids.forEach((a, k) => m.set(a, o.y + h * k + h / 2));
   return m; };
 // an arrow's label with its placeholders filled at the times of its ends: {dt} the time between them (cycles, "3T", in
@@ -2238,7 +2254,8 @@ const TIPS = {
   'm:mark': ['Bookmark on this signal here: its text asked here, then in the list', ['m']],
   'm:copyname': ['Copy the path', ['yy']], 'm:clear': ['Clear the range', ['Esc', 'ctrl+click']],
   'm:unpaint': ['Its own colour back'],
-  'm:umark': ['A marker here: a dashed line across the rows; its label asked here, then in the Markers list'],
+  'm:umark': ['A marker here: a dashed line across the rows; its label asked here. Drag the text to a line over or under any signal; the right ' +
+    'button on it: its colour'],
   'm:mlist': ['The markers and bookmarks in a list: ↑ ↓ go through them, the waves follow', ['gm']],
   'm:ugnew': ['A group of your own at the top of the names'],
   'm:ugout': ['Out of your group (the signal stays in its module)'], 'm:ugdel': ['Delete your group; its signals stay where they are'],
@@ -2247,7 +2264,11 @@ const TIPS = {
   'm:mvtop': ['First in your group (a group: the first of yours)'], 'm:mvbot': ['Last in your group (a group: the last of yours)'],
   'm:ugfold': ['Fold / open your group'],
   'bm:mdel': ['Delete the marker'], 'bm:gdel': ['Delete your group; its signals stay where they are'], '.mt': ['Marker time: 250ns, 85.12us', ['Enter']],
-  '.ml': ['Marker label'], '.ugn': ['Group name', ['Enter']],
+  '.ml': ['Marker label'],
+  '.msig': ['The signal whose line, over or under it, has the text of the marker; empty: at the top of the rows', ['Enter']],
+  'bm:mlift': ['The text over its signal or under it'], 'bm:mpale': ['The pale colour of a marker again'],
+  'm:mktext': ['Change the text of this marker'], 'm:mkpale': ['The pale colour of a marker again'], 'm:mkdel': ['Delete this marker'],
+  '.ugn': ['Group name', ['Enter']],
   'act:live': ['Driven by an agent (tools/wavemcp.py view_live): its edits come in as you watch; click: disconnect'],
 };
 TIPS['.subg'] = ['Your groups: put the signals into one, a new one, go to one', ['ctrl+G', 'gl']];
@@ -2298,6 +2319,7 @@ const HELP = [
     [['right button'], 'a range and the menu: picture, colour, radix, hide'], [['m'], 'bookmark at the cursor'],
     [[']m', '[m'], 'next / previous bookmark'],
     [['gm'], 'the markers and bookmarks: a list, ↑ ↓ go through them'], [['drag a bookmark'], 'move it'],
+    [['drag a marker\'s text'], 'to a line over or under a signal, along the time (alt: the time stays)'],
     [['shift+drag a bookmark'], 'an arrow to another one']]],
   ['The bar', [[['right button'], 'on the bar: which of its tool groups it shows (Show all, Hide all, a tick each)'],
     [['▴', '▾ tools'], 'fold the tools to the title line / open them']]],
@@ -2635,9 +2657,9 @@ class Names {
     v.vis = v.visible();
     // your own picks keep their colour
     const picks = (v.findPicks && v.findPicks.size) || v.extraPicks.size ? new Map([...v.findPicks, ...v.extraPicks, ...v.picks]) : v.picks;
-    const C = compose(v.M, v.S, v.vis, v.bms, v.arrows, picks, v.rowsAll || v.M.rows);
+    const C = compose(v.M, v.S, v.vis, v.bms, v.arrows, picks, v.rowsAll || v.M.rows, v.markers);
     v.lanes = C.lanes; v.rowsL = C.rows; v.band = C.band; v.hl = C.hl;
-    v.laneSig = JSON.stringify([...v.lanes]); v.laneKey = laneKey(v.bms, v.arrows);
+    v.laneSig = JSON.stringify([...v.lanes]); v.laneKey = laneKey(v.bms, v.arrows, v.markers);
     if (v.hlBtn) { v.hlBtn.hidden = !v.picks.size; v.hlBtn.textContent = `Highlight: ${v.picks.size} ✕`; }
     if (v.unhideBtn) { v.unhideBtn.hidden = !v.hiddenRows.size; v.unhideBtn.textContent = `Hidden: ${v.hiddenRows.size} ✕`; }
     if (v.sortBtn) { v.sortBtn.textContent = 'Sort: ' + { none: 'off', asc: 'A→Z', desc: 'Z→A' }[v.sort];
@@ -2714,7 +2736,7 @@ class Names {
       `time axis: rising edges of ${esc(cy.clk.full || cy.clk.name)}">cycles ↑ ${esc(cy.clk.name)}</span>` : ''}</div>` +
       (v.rowY ? spacer(v.rowY[a]) : '') + v.rowsL.slice(a, b).map((r, j) => {
       if (r.type === 'lane') return (`<div class="row lane${alt(r)}" style="height:${v.S.laneHeight * r.ids.length}px" title="arrow labels, lifted ` +
-          `bookmarks"></div>`);
+          `bookmarks, texts of markers"></div>`);
       const h = rowHeight(r, v.rowH, v.S.laneHeight), i = v.rowVi[a + j], cls = (r.cls ? ' ' + r.cls : '') + (r.bit != null ? ' bit' : '');
       if (r.type === 'space') return `<div class="row space${alt(r)}" data-r="${i}" style="height:${h}px;${pad(r)}"><span
         class="n">${esc(r.name)}</span></div>`;
@@ -2783,7 +2805,8 @@ class Notes {
     const sigs = M.rows.filter(r => r.type === 'sig'), byFull = new Map(sigs.map(r => [r.full, r]));
     v.sigList = v.sigList || 'wvf-sigs-' + (++LIST_ID);   // one list of the signals for every bookmark's field
     const acc = getComputedStyle(v.root).getPropertyValue('--accent').trim(), six = c => String(c || '').replace(/^#([0-9a-f])([0-9a-f])([0-9a-f])$/i,
-      '#$1$1$2$2$3$3'), hex = c => /^#[0-9a-f]{6}$/i.test(six(c)) ? six(c) : /^#[0-9a-f]{6}$/i.test(acc) ? acc : '#b5551b';
+      '#$1$1$2$2$3$3'), hex = (c, d = acc) => /^#[0-9a-f]{6}$/i.test(six(c)) ? six(c) : /^#[0-9a-f]{6}$/i.test(six(d)) ? six(d) : '#b5551b';
+    const pale = getComputedStyle(v.root).getPropertyValue('--muted').trim();   // a marker without a colour is drawn in it
     const opt = (v, label, cur) => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(label)}</option>`;
     const nums = cur => v.bms.map(o => opt(String(o.n), String(o.n), String(cur))).join('');
     const head = v.opts.title || v.M.title;   // several viewers on a page: whose list this is
@@ -2824,11 +2847,17 @@ class Notes {
         <button type="button" class="ic" data-bm="adel" title="Delete this arrow">✕</button></li>`).join('') +
       '</ol><textarea class="json" readonly hidden aria-label="bookmarks as JSON"></textarea>' : '') +
       // your markers: a dashed line across the rows with its label; your groups: a folder of signals at the top of the names
-      (v.umarks.length ? `<div class="nh"><b>Markers</b><span class="muted">time · label · colour</span></div><ol class="mks">` +
+      (v.umarks.length ? `<div class="nh"><b>Markers</b><span class="muted">time · signal · label · colour · drag a text on the waves to a line ` +
+        `over or under a signal, along the time</span></div><ol class="mks">` +
         v.umarks.map((m, i) => `<li data-k="${i}"><span class="mn">${i + 1}</span>
         <input type="text" class="mt" value="${esc(v.when(m.t))}" spellcheck="false" aria-label="marker ${i + 1} time" title="Time: 250ns, 85.12us">
+        <input type="text" class="msig" list="${v.sigList}" value="${esc(m.signal || '')}" placeholder="— top" spellcheck="false"
+          aria-label="marker ${i + 1} signal" title="${esc(m.signal || 'at the top of the rows')}: the signal whose line has its text, empty for the top">
+        <button type="button" class="ic up" data-bm="mlift" aria-pressed="${m.lift === 'below'}" title="Over its signal or under it"${m.signal ? '' :
+          ' disabled'}>${m.lift === 'below' ? '↧' : '↥'}</button>
         <input type="text" class="ml" value="${esc(m.label)}" placeholder="label" aria-label="marker ${i + 1} label">
-        <input type="color" class="col" value="${hex(m.color)}" aria-label="marker ${i + 1} colour" title="Colour">
+        <input type="color" class="col" value="${hex(m.color, pale)}" aria-label="marker ${i + 1} colour" title="Colour">
+        <button type="button" class="ic" data-bm="mpale" title="The pale colour again"${m.color ? '' : ' disabled'}>pale</button>
         <button type="button" class="ic" data-bm="mdel" title="Delete marker ${i + 1}">✕</button></li>`).join('') + '</ol>' : '') +
       (v.ugroups.length ? `<div class="nh"><b>Groups</b><span class="muted">yours, at the top of the names · name · colour</span></div><ol class="ugs">` +
         v.ugroups.map((g, i) => `<li data-g="${i}"><input type="text" class="ugn" value="${esc(g.name)}" spellcheck="false" aria-label="group ${i + 1} name"
@@ -2842,6 +2871,8 @@ class Notes {
     const b = e.target.closest('button[data-bm]'); if (!b) return;
     const li = b.closest('li'), n = li ? +li.dataset.n : NaN, bm = v.bms.find(x => x.n === n), act = b.dataset.bm;
     if (act === 'mdel') return v.run({ op: 'marker', id: +li.dataset.k + 1, delete: true });
+    if (act === 'mlift') return v.run({ op: 'marker', id: +li.dataset.k + 1, lift: v.umarks[+li.dataset.k].lift === 'below' ? 'above' : 'below' });
+    if (act === 'mpale') return v.run({ op: 'marker', id: +li.dataset.k + 1, color: null });
     if (act === 'gdel') return v.run({ op: 'group', name: v.ugroups[+li.dataset.g].name, delete: true });
     if (act === 'go' && bm) v.goBm(bm);
     else if (act === 'link' && bm && bm.link) v.followLink(bm);
@@ -2864,7 +2895,8 @@ class Notes {
     const v = this.v; // text, colours, arrow settings: live
     const T = e.target, li = T.closest('li'); if (!li) return;
     if (li.dataset.k != null) { const m = v.umarks[+li.dataset.k]; if (!m) return;
-      if (T.matches('input.ml')) m.label = T.value; else if (T.matches('input.col')) m.color = T.value; else return;
+      if (T.matches('input.ml')) m.label = T.value;
+      else if (T.matches('input.col')) { m.color = T.value; li.querySelector('[data-bm=mpale]').disabled = false; } else return;
       v.markers = v.pageMarks.concat(v.umarks); v.saveBookmarks(); return v.draw(); }
     if (li.dataset.g != null) { const g = v.ugroups[+li.dataset.g]; if (g && T.matches('input.col')) { g.color = T.value; v.setGroups(); } return; }
     if (li.dataset.a != null) {
@@ -2885,6 +2917,9 @@ class Notes {
     const T = e.target, li = T.closest('li'), bm = li && v.bms.find(x => x.n === +li.dataset.n);
     if (li && li.dataset.k != null && T.matches('input.mt')) { const m = v.umarks[+li.dataset.k], t = m && v.parseWhen(T.value, m.t);
       if (!m) return; if (t == null || !isFinite(t)) { T.value = v.when(m.t); v.bad(T); return; } m.t = t; v.setMarks(); return; }
+    if (li && li.dataset.k != null && T.matches('input.msig')) { const k = +li.dataset.k;
+      v.run({ op: 'marker', id: k + 1, signal: T.value.trim() || null }).then(r => { if (!r[0].error) return;
+        T.value = v.umarks[k].signal || ''; v.bad(T); v.toast(r[0].error); }); return; }
     if (li && li.dataset.g != null && T.matches('input.ugn')) { const g = v.ugroups[+li.dataset.g]; if (!g) return;
       v.run({ op: 'group', name: g.name, rename: T.value }).then(r => { if (r[0].error) { T.value = g.name; v.bad(T); v.toast(r[0].error); } }); return; }
     if (!bm) return;
@@ -2949,7 +2984,7 @@ class WaveView {
     this.t0 = M.t0; this.span = M.t1 - M.t0;
     this.minSpan = opts.minSpan ?? (M.timed ? Math.max(this.span / 1e6, 10) : 0.5);
     this.cursor = opts.cursor ?? M.cursor ?? M.t0;
-    this.pageMarks = (opts.markers || []).concat(M.markers);   // the page's markers; yours (umarks, the marker command) after them
+    this.pageMarks = (opts.markers || []).map(pageMark).concat(M.markers);   // the page's markers; yours (umarks, the marker command) after them
     this.jumps = opts.jumps || M.jumps || (this.pageMarks.length && this.pageMarks.length <= 6
       ? this.pageMarks.map(m => ({ label: '→ ' + m.label, t: m.t, span: this.span / 5 })) : []);
     this.sel = null; this.edgeKind = 'any';   // selected signal row (edge search, bookmarks), edge kind
@@ -3067,34 +3102,39 @@ class WaveView {
     c.addEventListener('contextmenu', e => { if (this.S.contextMenu) e.preventDefault(); });   // the viewer's menu instead
     c.addEventListener('pointerdown', e => {
       if (e.button === 1) { const [x] = local(e); drag = { zoom: x, x: e.clientX, y: e.clientY }; c.setPointerCapture(e.pointerId); return; }
-      const [x, y] = local(e), bm = e.button === 0 && this.bmAt(x, y);
+      const [x, y] = local(e), bm = e.button === 0 && this.bmAt(x, y), mk = !bm && this.markAt(x, y);
       // shift+drag (not from a bookmark: that draws an arrow): zoom into the range dragged over, as the middle button
       if (e.button === 0 && e.shiftKey && !bm && !e.ctrlKey && !e.metaKey) { drag = { zoom: x, x: e.clientX, y: e.clientY, c2: [x, y, e.altKey] };
         c.setPointerCapture(e.pointerId); return; }
       // a measured range: ctrl+drag or the right button (then the menu), its ends on the edges of the signal under the
       // pointer (alt: not), its Δ counted on that signal
       if ((e.button === 2 && this.S.contextMenu) || (e.button === 0 && (e.ctrlKey || e.metaKey) && !bm)) {
-        drag = { range: this.pickTime(x, y, e.altKey), menu: e.button === 2, x: e.clientX, y: e.clientY, moved: false, free: e.altKey, row: this.rowOfY(y) };
+        drag = { range: this.pickTime(x, y, e.altKey), menu: e.button === 2, x: e.clientX, y: e.clientY, moved: false, free: e.altKey, row: this.rowOfY(y),
+          mk: e.button === 2 && mk };
         c.setPointerCapture(e.pointerId); return;
       }
       if (e.button !== 0) return;
       // alt+drag: a box over time and rows — its time is the range, its signals the selection; then the menu (the picture,
       // WaveDrom, colour … of those signals); alt+click: the cursor without the snap
-      if (e.altKey && !bm && !e.shiftKey && !e.ctrlKey && !e.metaKey) { drag = { box: [x, y], x: e.clientX, y: e.clientY, moved: false };
+      if (e.altKey && !bm && !mk && !e.shiftKey && !e.ctrlKey && !e.metaKey) { drag = { box: [x, y], x: e.clientX, y: e.clientY, moved: false };
         c.setPointerCapture(e.pointerId); return; }
       // lay: the rows as they were (a lane coming or going does not move them under the pointer)
-      drag = { x: e.clientX, y: e.clientY, t0: this.t0, moved: false, bm, arrow: bm && e.shiftKey, free: e.altKey, lay: this.lay };
+      drag = { x: e.clientX, y: e.clientY, t0: this.t0, moved: false, bm, arrow: bm && e.shiftKey, free: e.altKey, lay: this.lay,
+        mk: mk && { ...mk, x0: x, t: mk.m.t } };
       c.setPointerCapture(e.pointerId);
     });
     c.addEventListener('pointermove', e => {
       const [x, y] = local(e);
       if (!drag) {
-        const bm = this.bmAt(x, y), o = !bm && (this.lay || []).find(o => y >= o.y && y < o.y + o.h), tip = o && o.row.tip ? o.row.tip(x, y - o.y, this) : '';
+        const bm = this.bmAt(x, y), mk = !bm && this.markAt(x, y), o = !bm && !mk && (this.lay || []).find(o => y >= o.y && y < o.y + o.h);
+        const tip = o && o.row.tip ? o.row.tip(x, y - o.y, this) : '';
         // the value under the pointer (a struct's row: its whole value)
         const vr = o && (o.row.sig || o.row), val = !bm && !tip && vr && vr.type === 'sig' && vr.tr ? this.valueTip(vr, this.tOfX(x)) : '';
-        c.style.cursor = bm ? 'grab' : tip ? 'pointer' : '';
-        const sp = !bm && !tip ? this.spanTip(this.tOfX(x), vr) : '';   // a span under the pointer: its label and length
-        c.title = bm ? `Bookmark ${bm.n}${bm.text ? ': ' + bm.text : ''} — drag to move it, shift+drag to another bookmark for an arrow` : tip ||
+        c.style.cursor = bm || mk ? 'grab' : tip ? 'pointer' : '';
+        const sp = !bm && !mk && !tip ? this.spanTip(this.tOfX(x), vr) : '';   // a span under the pointer: its label and length
+        c.title = mk ? `Marker ${this.umarks.indexOf(mk.m) + 1}${mk.m.label ? ': ' + mk.m.label : ''} — drag it to a line over or under a signal, along the ` +
+          'time (alt: the time stays), a click edits it, the right button: its colour' : bm ?
+          `Bookmark ${bm.n}${bm.text ? ': ' + bm.text : ''} — drag to move it, shift+drag to another bookmark for an arrow` : tip ||
           [this.gapTip(x), sp, val].filter(Boolean).join('\n'); return;
       }
       if (drag.zoom != null) { this.zband = [drag.zoom, x].map(px => this.tOfX(px)); this.draw(); return; }
@@ -3112,6 +3152,7 @@ class WaveView {
       if (!drag.moved) return;
       if (drag.arrow) { this.rubber = { from: drag.bm.n, x, y }; this.draw(); }
       else if (drag.bm) { c.style.cursor = 'grabbing'; this.moveBookmark(drag.bm, x, y, drag.lay); }
+      else if (drag.mk) { c.style.cursor = 'grabbing'; this.moveMarker(drag.mk, x, y, drag.lay, drag.free); }
       else { this.panFrom(drag.t0, -dx); this.invalidate(); }   // a pan: one draw per frame, not per move event
     });
     c.addEventListener('pointerup', e => {
@@ -3119,7 +3160,7 @@ class WaveView {
       if (drag && drag.range != null) {   // a range ends; the right button opens the menu (on it, or on the signal under it)
         const d = drag; drag = null;
         if (!d.moved && !d.menu) this.setRange(null);   // ctrl+click: no range
-        if (d.menu) this.menu(e.clientX, e.clientY, d.row, d.range);
+        if (d.menu) this.menu(e.clientX, e.clientY, d.mk && !d.moved ? null : d.row, d.range, d.mk && !d.moved ? d.mk.m : null);
         return;
       }
       if (drag && drag.box) {   // the box: the menu on its signals; a click: the cursor here, not snapped
@@ -3141,7 +3182,9 @@ class WaveView {
         const to = this.bmAt(x, y); this.rubber = null;
         if (to && to.n !== drag.bm.n) { this.arrows.push(arNorm([{ from: drag.bm.n, to: to.n }])[0]); this.saveBookmarks(); this.renderNotes(); }
         this.draw();
-      } else if (drag && drag.moved && drag.bm) { c.style.cursor = 'grab'; this.saveBookmarks(); this.renderNotes(); }
+      } else if (drag && drag.moved && (drag.bm || drag.mk)) { c.style.cursor = 'grab'; this.saveBookmarks(); this.renderNotes(); }
+      else if (drag && !drag.moved && drag.mk) {   // a click on a marker's text: the cursor on it, its label in the list
+        this.cursor = drag.mk.m.t; this.draw(); this.notesEl.querySelector(`li[data-k="${this.umarks.indexOf(drag.mk.m)}"] input.ml`)?.focus(); }
       else if (drag && !drag.moved) {
         const hit = this.bmAt(x, y), mid = !hit && this.bmGeo && this.bmGeo.mids.find(([, mx, my]) => Math.hypot(mx - x, my - y) <= 10);
         if (hit) { this.cursor = hit.t; this.draw(); this.notesEl.querySelector(`li[data-n="${hit.n}"] input.txt`)?.focus(); }
@@ -3905,6 +3948,31 @@ class WaveView {
   }
   bmAt(x, y) { const pos = this.bmGeo && this.bmGeo.pos; return pos && this.bms.find(b =>
     { const p = pos.get(b.n); return p && Math.hypot(p[0] - x, p[1] - y) <= 9; }); }
+  // your marker whose text is at (x, y), the last drawn on top -> { m, x, y, w }; the page's own stay where the page puts them
+  markAt(x, y) {
+    const n = this.pageMarks.length, tags = (this.bmGeo && this.bmGeo.tags) || [];
+    const o = tags.filter(g => g.i >= n && x >= g.x - 4 && x <= g.x + g.w + 2 && Math.abs(y - g.y) <= 7).pop();
+    return o ? { ...o, m: this.umarks[o.i - n] } : null;
+  }
+  // the line a marker's text dragged to y goes on -> [signal, lift]: over a row its upper half, under it the lower, a lane
+  // as it is, over the axis at the top of the rows; null: no line there (a module's row), it stays
+  markPlace(y, lay) {
+    if (y < (this.oy || 0) + this.hdrH) return [null, false];
+    const k = lay.findIndex(o => y >= o.y && y < o.y + o.h), o = lay[k];
+    if (o && o.row.type === 'sig') return [o.row.full, y < o.y + o.h / 2 ? true : 'below'];
+    if (!o || o.row.type !== 'lane') return null;
+    const id = o.row.ids[Math.floor((y - o.y) / this.S.laneHeight)], r = lay.slice(k + 1).find(q => q.row.type !== 'lane');
+    if (typeof id !== 'string') return r && r.row.type === 'sig' ? [r.row.full, true] : null;   // an arrow's line: over the row after it
+    return id.endsWith(':below') ? [id.slice(2, -6), 'below'] : [id.slice(2), true];
+  }
+  // dragged (d: markAt with where it started): the line from y, the time from x as a bookmark's, edges of its signal; a drag
+  // straight up or down and free (alt) leave the time
+  moveMarker(d, x, y, lay, free) {
+    const m = d.m, p = this.markPlace(y, lay), at = x + d.x - d.x0; if (p) [m.signal, m.lift] = p;
+    const s = m.signal != null ? this.sigByPath(m.signal) : null;
+    m.t = free || Math.abs(x - d.x0) <= 3 ? d.t : Math.min(Math.max(this.gapSide(at) ?? this.snap(s, this.tOfX(at)), this.M.t0), this.M.t1);
+    this.draw();
+  }
   // drag on the waves: time from x (snapped to an edge of the row), signal from the row under y (the time axis: no signal)
   // dragged: the time (snapped to an edge of its row), the row under the pointer, or the axis; on the top quarter of a
   // signal row, or in the lane above it, lifted into that lane (a leader down to the signal), lower down on the row again
@@ -3953,8 +4021,8 @@ class WaveView {
       color: a.color, label: a.label }).filter(([k, v]) => v != null && (v !== '' || k === 'head'))));   // head "" = no head
   }
   // your markers and groups as a state has them (empty and null left out)
-  markList() { return this.umarks.map(m => Object.fromEntries(Object.entries({ t: m.t, label: m.label, color: m.color })
-    .filter(([, x]) => x != null && x !== ''))); }
+  markList() { return this.umarks.map(m => Object.fromEntries(Object.entries({ t: m.t, label: m.label, color: m.color, signal: m.signal,
+    lift: m.lift === 'below' ? m.lift : null }).filter(([, x]) => x != null && x !== ''))); }
   spanTip(t, row) {
     const on = s => !s.signals || !s.signals.length || (row && (s.signals.includes(row.full) || s.signals.includes(row.name)));
     return this.spans.filter(s => t >= s.from && t <= s.to && on(s)).map(s => `${s.label || 'span'}: ${this.when(s.from)} … ${this.when(s.to)} (Δ ` +
@@ -4173,7 +4241,7 @@ class WaveView {
   // time at the zoom — for the cursor and the ends of a range. In a gap's column (free: not) the side of the gap nearer: a
   // place in the column is no time of the waves, so a Δ neither moves with a pixel there nor shows a time made up
   pickTime(x, y, free = false) {
-    const h = !free && this.gapAt(x); if (h) return x - h.x0 < h.x1 - x ? h.p : h.q;
+    const side = free ? null : this.gapSide(x); if (side != null) return side;
     const r = this.rowOfY(y), sig = r && r.type === 'sig' && r.tr ? r : null, raw = this.tOfX(x);
     const at = sig && this.S.cursorSnap > 0 && !free ? this.snap(sig, raw, this.S.cursorSnap) : raw;
     return at !== raw ? at : this.timeAt(x);
@@ -4385,9 +4453,10 @@ class WaveView {
   // draw = size (the canvas and its offset) + paintFrame (the pixels) + syncReadouts (the cursor line, fields, values).
   draw() {
     if (this.held) { this.held.draw = true; return; }
-    if (this.laneKey !== laneKey(this.bms, this.arrows)) {   // a bookmark or an arrow label changed: its lane?
-      this.laneKey = laneKey(this.bms, this.arrows);
-      if (this.laneSig !== JSON.stringify([...arrowLanes(this.vis, this.bms, this.S.arrowLabels === 'lane' ? this.arrows : [])])) this.renderNames();
+    if (this.laneKey !== laneKey(this.bms, this.arrows, this.markers)) {   // a bookmark, a marker or an arrow label changed: its lane?
+      this.laneKey = laneKey(this.bms, this.arrows, this.markers);
+      const lanes = arrowLanes(this.vis, this.bms, this.S.arrowLabels === 'lane' ? this.arrows : [], this.markers);
+      if (this.laneSig !== JSON.stringify([...lanes])) this.renderNames();
     }
     this.warpSync();
     const lay = this.lay = this.layout();
@@ -4436,7 +4505,7 @@ class WaveView {
       r => this.collapsed.has(r.id), bg);
     const rowY = WP ? this.paintWarpBody(P, F, WP, body, late, shown, oy, Hc, hdr) : body(this.t0, tB, 0, W, late);
     paintSpans(P, this.spans, X, this.t0, tB, shown, oy + hdr, oy + Hc);
-    paintMarkers(P, this.markers, X, this.t0, tB, oy + hdr, oy + Hc);
+    const tags = paintMarkers(P, this.markers, X, this.t0, tB, oy + hdr, oy + Hc, laneY(lay, this.S.laneHeight));
     if (!WP) this.paintDiff(P, shown, X, this.t0, tB);   // a second dump compared (diff.js): where it differs
     g.restore();
     if (this.cursor >= this.t0 && this.cursor <= tB) P.path([['M', X(this.cursor), 0], ['L', X(this.cursor), Hc]], { stroke: 'acc', w: 1.2 });
@@ -4454,6 +4523,7 @@ class WaveView {
     const geo = paintBookmarks(P, this.bms, this.arrows, X, this.t0, tB, rowY, oy + hdr, oy + Hc, oy + this.S.headerHeight / 2, this.rubber,
       laneY(lay, this.S.laneHeight), arrowFill(M, M.rows));
     g.restore();
+    geo.tags = tags;
     return geo;
   }
   // the second cursor (dashed, its Δ on a tag) and the measured range (shaded, its ends dashed, its Δ on a tag): on the
@@ -4543,7 +4613,7 @@ class WaveView {
 Object.assign(WaveView.prototype, {
   // the right button's menu at (cx, cy) on the screen: the range (zoom, bookmarks at its ends, copy Δ), the picture (copy,
   // PNG, SVG), the signal under the pointer (colour, highlight, copy its path); Esc, a click elsewhere or a choice closes it
-  menu(cx, cy, row, at = this.cursor) {
+  menu(cx, cy, row, at = this.cursor, mk = null) {   // mk: your marker whose text was clicked (its text, colour)
     this.closeMenu(); this.menuAt = [cx, cy];   // where it was opened: a text asked there after (Bookmark here, Marker here)
     const r = this.range, sig = row && row.type === 'sig' && row.tr ? row : null, grp = row && row.type === 'group' &&
       this.M.groups[row.id] === row ? row : null, it = row && (sig || grp);
@@ -4588,7 +4658,12 @@ Object.assign(WaveView.prototype, {
     const mvs = (where) => !mvAt || mvAt[1] < 2 ? '' : (mvAt[0] > 0 ? b('mvup', 'Move up') : '') + (mvAt[0] < mvAt[1] - 1 ? b('mvdn', 'Move down') : '') +
       (mvAt[0] > 0 ? b('mvtop', `To the top of ${where}`) : '') + (mvAt[0] < mvAt[1] - 1 ? b('mvbot', `To the bottom of ${where}`) : '');
     const el = document.createElement('div'); el.className = 'wv-menu'; el.setAttribute('role', 'menu');
-    el.innerHTML = (r ? `<div class="mh">${esc(this.rangeText())}</div>` + b('zoom', 'Zoom to the range') + b('marks', 'Bookmarks at its ends',
+    const mkId = mk ? this.umarks.indexOf(mk) + 1 : 0, pale = getComputedStyle(this.root).getPropertyValue('--muted').trim();
+    const six = c => /^#[0-9a-f]{6}$/i.test(c || '');
+    el.innerHTML = (mk ? `<div class="mh">Marker ${mkId}${mk.label ? ' · ' + esc(mk.label) : ''}</div>` + b('mktext', 'Its text…') +
+      `<label class="mi">Colour <input type="color" class="mkc" value="${esc(six(mk.color) ? mk.color : six(pale) ? pale : '#808080')}" ` +
+      `aria-label="marker ${mkId} colour"></label>` + (mk.color ? b('mkpale', 'Pale again') : '') + b('mkdel', 'Delete the marker') + '<hr>' : '') +
+      (r ? `<div class="mh">${esc(this.rangeText())}</div>` + b('zoom', 'Zoom to the range') + b('marks', 'Bookmarks at its ends',
       'Two bookmarks and an arrow with the Δ between them') + b('copyd', 'Copy Δ') + '<hr>' : '') +
       (np ? `<div class="mh">${np} ${this.selRun.size > 1 ? 'selected' : 'highlighted'} rows</div>` : '') + b('copyimg', 'Copy image') + b('png',
         'Save image as PNG') + b('svg', 'Save image as SVG') + b('wdjson', 'Save as WaveDrom') + b('wdcopy', 'Copy WaveDrom') +
@@ -4730,6 +4805,11 @@ Object.assign(WaveView.prototype, {
       else if (act === 'copyname') this.copyRows([it]);
       else if (act === 'types') { const x = this.menuEl.getBoundingClientRect(); this.closeMenu(); this.typesBox(sig.orig || sig, x.left, x.top); return this; }
       else if (act === 'mlist') { this.closeMenu(); this.marksMenu(); return this; }
+      else if (act === 'mktext') { const [x, y] = this.menuAt;
+        this.askText(x, y, `Marker ${mkId} · ${this.fmtCursor(mk.t)}`, 'its label', label => this.run({ op: 'marker', id: mkId, label }), mk.label);
+        return this; }
+      else if (act === 'mkpale') this.run({ op: 'marker', id: mkId, color: null });
+      else if (act === 'mkdel') this.run({ op: 'marker', id: mkId, delete: true });
       else if (act === 'umark') { const [x, y] = this.menuAt;
         this.askText(x, y, `Marker · ${this.fmtCursor(at)}`, 'its label',
           label => this.run(Object.assign({ op: 'marker', t: at }, label ? { label } : {})));
@@ -4781,6 +4861,10 @@ Object.assign(WaveView.prototype, {
         ...(only ? { gapOnly: only.checked } : {}), gapCount: el.querySelector('.gcnt').value });
       for (const x of el.querySelectorAll('.gn, .gh')) x.textContent = gn();
     });
+    if (mk) {   // its colour: seen as it is picked, one step of undo when the picker closes
+      el.querySelector('.mkc').addEventListener('input', e => { mk.color = e.target.value; this.draw(); });
+      el.querySelector('.mkc').addEventListener('change', e => this.run({ op: 'marker', id: mkId, color: e.target.value }));
+    }
     el.addEventListener('input', e => {   // idle, keep: as they are typed, on the waves at once
       if (!e.target.matches('.gi, .gk') || !this.gapLive()) return;
       this.gapType(() => this.gapFields(el.querySelector('.gi'), el.querySelector('.gk'), true));
@@ -4905,13 +4989,13 @@ Object.assign(WaveView.prototype, {
   },
   // a text asked over the waves where the menu was (a bookmark's text, a marker's label): Enter gives it (empty too), Esc
   // or a click elsewhere gives nothing; the waves stay where they are (no field below them takes the focus)
-  askText(x, y, title, hint, give) {
+  askText(x, y, title, hint, give, value = '') {
     this.closeMenu();
     const el = document.createElement('div'); el.className = 'wv-menu wv-ask'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', title);
     el.innerHTML = `<div class="mh">${esc(title)}</div><input type="text" spellcheck="false" autocomplete="off" placeholder="${esc(hint)}" ` +
       `aria-label="${esc(hint)}"><div class="ak"><span>Enter: add · Esc: cancel</span><button type="button" data-m="ok">Add</button></div>`;
     this.root.append(el); this.menuEl = el;
-    const b = el.getBoundingClientRect(), inp = el.querySelector('input');
+    const b = el.getBoundingClientRect(), inp = el.querySelector('input'); inp.value = value;
     el.style.left = Math.max(4, Math.min(x, innerWidth - b.width - 4)) + 'px'; el.style.top = Math.max(4, Math.min(y, innerHeight - b.height - 4)) + 'px';
     const done = ok => { const v = inp.value.trim(); this.closeMenu(); this.refocus(); if (ok) give(v); };
     inp.addEventListener('keydown', e => {
@@ -5300,6 +5384,8 @@ Object.assign(WaveView.prototype, {
   },
   // the gap whose column is at x (m: px more on each side)
   gapAt(x, m = 0) { const F = this.warpSync(); return F ? warpParts(F).holes.find(o => x > o.x0 - m && x < o.x1 + m) : null; },
+  // the time at x when that is in a gap's column: the side of the gap nearer
+  gapSide(x) { const h = this.gapAt(x); return h ? (x - h.x0 < h.x1 - x ? h.p : h.q) : null; },
   // the tooltip of a gap's column
   gapTip(x) { const h = this.gapAt(x, 1); return h ? `gap: ${this.gapTextsNow().hole(h.p, h.q)} left out` : ''; },
   gapReadout() {
@@ -5484,8 +5570,9 @@ command('arrow', 'id? from? to? shape? head? line? color? label? delete?', 'an a
   if (a.label !== undefined) x.label = a.label == null ? '' : String(a.label);
   v.changed(true); return { id: i + 1 };
 });
-command('marker', 'id? t? label? color? delete?', 'a marker: a dashed line across every row with its label at the top: a new one (t default ' +
-  'the cursor), or marker id (1, 2 … as listed) changed; delete: id or "all"', (v, a) => {
+command('marker', 'id? t? label? color? signal? lift? delete?', 'a marker: a dashed line across every row, pale unless it has a color (null: pale ' +
+  'again), with its label at the top of the rows, or with signal in a lane over that row (lift "below": under it, the lanes of the bookmarks; signal ' +
+  'null: at the top again): a new one (t default the cursor), or marker id (1, 2 … as listed) changed; delete: id or "all"', (v, a) => {
   idOk(a.id, 'marker');
   if (a.id === 'all' && !a.delete) fail('marker: id "all" is for delete (a new one: no id)');
   if (a.id != null && a.id !== 'all' && !v.umarks[+a.id - 1]) fail(`no marker ${a.id} (there are ${v.umarks.length})`);
@@ -5494,12 +5581,17 @@ command('marker', 'id? t? label? color? delete?', 'a marker: a dashed line acros
     if (a.id === 'all') v.umarks = []; else v.umarks.splice(+a.id - 1, 1);
     v.setMarks(); return { id: a.id, deleted: true };
   }
-  const t = a.t != null ? cmdTime(v, a.t) : null;
+  const t = a.t != null ? cmdTime(v, a.t) : null, sig = a.signal ? pickRows(v, a.signal, { one: true })[0].full : null;
+  if (a.lift != null && ![true, 'above', 'below'].includes(a.lift)) fail(`lift: true, "above" or "below", not ${JSON.stringify(a.lift)}`);
   let m = a.id != null ? v.umarks[+a.id - 1] : null;
-  if (!m) { m = { t: v.cursor, label: '', color: null }; v.umarks.push(m); }
+  if (a.lift != null && !(a.signal !== undefined ? sig : m && m.signal)) fail('marker: lift is the lane of a signal: give signal');
+  if (!m) { m = { t: v.cursor, label: '', color: null, signal: null, lift: false }; v.umarks.push(m); }
   if (t != null) m.t = t;
   if (a.label !== undefined) m.label = a.label == null ? '' : String(a.label);
   if (a.color !== undefined) m.color = cmdColor(a);
+  if (a.signal !== undefined) m.signal = sig;
+  if (a.lift != null) m.lift = a.lift;
+  m.lift = markLift(m);
   v.setMarks(); return { id: v.umarks.indexOf(m) + 1 };
 });
 command('compare', 'result? dump? a? map? offset? off? show?', 'a second dump over these waves, where its values differ (red bands, ≠, ]d [d): ' +
@@ -7735,12 +7827,13 @@ const WaveSVG = {
     const gp = groupPaint(M, S.groupColors), strokeOf = V ? r => V.strokeOf(r) : r => r.stroke ?? gp.get(r);
     const from = parseT(opts.from) ?? M.t0, to = parseT(opts.to) ?? M.t1, fs = S.fontSize;
     const rh = { sig: S.rowHeight, group: S.groupHeight, space: S.spaceHeight }, bms = V ? V.bms : M.bookmarks, ars = V ? V.arrows : M.arrows;
+    const marks = V ? V.markers : (opts.markers || []).map(pageMark).concat(M.markers);
     let C;
     if (V) C = { rows: opts.rows || V.rowsL, band: V.band, hl: V.hl };
     else {
       const sorted = orderRows(M.rows, S.sort, S.sortIgnore, S.groupOrder);
       const all = withExtra(sorted, (opts.extraRows || []).concat(...SVG_PLUGINS.map(f => f(M, S, opts) || [])), M, opts.owner || M);
-      C = compose(M, S, all, M.bookmarks, M.arrows, hlPick(M, S.highlight));
+      C = compose(M, S, all, M.bookmarks, M.arrows, hlPick(M, S.highlight), undefined, marks);
     }
     const hl = C.hl;
     // gaps (opts.cuts, else the settings gaps, gapIdle, gapKeep, gapSignals): the parts of [from, to] kept, side by side, a
@@ -7863,7 +7956,7 @@ const WaveSVG = {
       });
       const top = showAxis ? axisY + 20 : lay.length ? lay[0].y : y;
       paintSpans(P, V ? V.spans : M.spans, X, from, to, lay, top, bodyEnd);
-      paintMarkers(P, V ? V.markers : (opts.markers || []).concat(M.markers), X, from, to, top, bodyEnd);
+      paintMarkers(P, marks, X, from, to, top, bodyEnd, laneY(lay, S.laneHeight));
       paintBookmarks(P, bms, ars, X, from, to, rowY, top, bodyEnd, showAxis ? axisY + 10 : top + 10, null, laneY(lay, S.laneHeight), arrowFill(M, M.rows));
       if (V && V.cursor >= from && V.cursor <= to) P.path([['M', X(V.cursor), top], ['L', X(V.cursor), bodyEnd]], { stroke: 'acc', w: 1.2 });
       if (V) V.paintMeasures(P, X, from, to, xL, xR, top, bodyEnd, showAxis ? [axisY, 20] : null, true);   // the second cursor, the measured range
@@ -8073,7 +8166,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.33',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.34',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,

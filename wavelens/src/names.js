@@ -71,9 +71,9 @@ class Names {
     v.vis = v.visible();
     // your own picks keep their colour
     const picks = (v.findPicks && v.findPicks.size) || v.extraPicks.size ? new Map([...v.findPicks, ...v.extraPicks, ...v.picks]) : v.picks;
-    const C = compose(v.M, v.S, v.vis, v.bms, v.arrows, picks, v.rowsAll || v.M.rows);
+    const C = compose(v.M, v.S, v.vis, v.bms, v.arrows, picks, v.rowsAll || v.M.rows, v.markers);
     v.lanes = C.lanes; v.rowsL = C.rows; v.band = C.band; v.hl = C.hl;
-    v.laneSig = JSON.stringify([...v.lanes]); v.laneKey = laneKey(v.bms, v.arrows);
+    v.laneSig = JSON.stringify([...v.lanes]); v.laneKey = laneKey(v.bms, v.arrows, v.markers);
     if (v.hlBtn) { v.hlBtn.hidden = !v.picks.size; v.hlBtn.textContent = `Highlight: ${v.picks.size} ✕`; }
     if (v.unhideBtn) { v.unhideBtn.hidden = !v.hiddenRows.size; v.unhideBtn.textContent = `Hidden: ${v.hiddenRows.size} ✕`; }
     if (v.sortBtn) { v.sortBtn.textContent = 'Sort: ' + { none: 'off', asc: 'A→Z', desc: 'Z→A' }[v.sort];
@@ -150,7 +150,7 @@ class Names {
       `time axis: rising edges of ${esc(cy.clk.full || cy.clk.name)}">cycles ↑ ${esc(cy.clk.name)}</span>` : ''}</div>` +
       (v.rowY ? spacer(v.rowY[a]) : '') + v.rowsL.slice(a, b).map((r, j) => {
       if (r.type === 'lane') return (`<div class="row lane${alt(r)}" style="height:${v.S.laneHeight * r.ids.length}px" title="arrow labels, lifted ` +
-          `bookmarks"></div>`);
+          `bookmarks, texts of markers"></div>`);
       const h = rowHeight(r, v.rowH, v.S.laneHeight), i = v.rowVi[a + j], cls = (r.cls ? ' ' + r.cls : '') + (r.bit != null ? ' bit' : '');
       if (r.type === 'space') return `<div class="row space${alt(r)}" data-r="${i}" style="height:${h}px;${pad(r)}"><span
         class="n">${esc(r.name)}</span></div>`;
@@ -219,7 +219,8 @@ class Notes {
     const sigs = M.rows.filter(r => r.type === 'sig'), byFull = new Map(sigs.map(r => [r.full, r]));
     v.sigList = v.sigList || 'wvf-sigs-' + (++LIST_ID);   // one list of the signals for every bookmark's field
     const acc = getComputedStyle(v.root).getPropertyValue('--accent').trim(), six = c => String(c || '').replace(/^#([0-9a-f])([0-9a-f])([0-9a-f])$/i,
-      '#$1$1$2$2$3$3'), hex = c => /^#[0-9a-f]{6}$/i.test(six(c)) ? six(c) : /^#[0-9a-f]{6}$/i.test(acc) ? acc : '#b5551b';
+      '#$1$1$2$2$3$3'), hex = (c, d = acc) => /^#[0-9a-f]{6}$/i.test(six(c)) ? six(c) : /^#[0-9a-f]{6}$/i.test(six(d)) ? six(d) : '#b5551b';
+    const pale = getComputedStyle(v.root).getPropertyValue('--muted').trim();   // a marker without a colour is drawn in it
     const opt = (v, label, cur) => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(label)}</option>`;
     const nums = cur => v.bms.map(o => opt(String(o.n), String(o.n), String(cur))).join('');
     const head = v.opts.title || v.M.title;   // several viewers on a page: whose list this is
@@ -260,11 +261,17 @@ class Notes {
         <button type="button" class="ic" data-bm="adel" title="Delete this arrow">✕</button></li>`).join('') +
       '</ol><textarea class="json" readonly hidden aria-label="bookmarks as JSON"></textarea>' : '') +
       // your markers: a dashed line across the rows with its label; your groups: a folder of signals at the top of the names
-      (v.umarks.length ? `<div class="nh"><b>Markers</b><span class="muted">time · label · colour</span></div><ol class="mks">` +
+      (v.umarks.length ? `<div class="nh"><b>Markers</b><span class="muted">time · signal · label · colour · drag a text on the waves to a line ` +
+        `over or under a signal, along the time</span></div><ol class="mks">` +
         v.umarks.map((m, i) => `<li data-k="${i}"><span class="mn">${i + 1}</span>
         <input type="text" class="mt" value="${esc(v.when(m.t))}" spellcheck="false" aria-label="marker ${i + 1} time" title="Time: 250ns, 85.12us">
+        <input type="text" class="msig" list="${v.sigList}" value="${esc(m.signal || '')}" placeholder="— top" spellcheck="false"
+          aria-label="marker ${i + 1} signal" title="${esc(m.signal || 'at the top of the rows')}: the signal whose line has its text, empty for the top">
+        <button type="button" class="ic up" data-bm="mlift" aria-pressed="${m.lift === 'below'}" title="Over its signal or under it"${m.signal ? '' :
+          ' disabled'}>${m.lift === 'below' ? '↧' : '↥'}</button>
         <input type="text" class="ml" value="${esc(m.label)}" placeholder="label" aria-label="marker ${i + 1} label">
-        <input type="color" class="col" value="${hex(m.color)}" aria-label="marker ${i + 1} colour" title="Colour">
+        <input type="color" class="col" value="${hex(m.color, pale)}" aria-label="marker ${i + 1} colour" title="Colour">
+        <button type="button" class="ic" data-bm="mpale" title="The pale colour again"${m.color ? '' : ' disabled'}>pale</button>
         <button type="button" class="ic" data-bm="mdel" title="Delete marker ${i + 1}">✕</button></li>`).join('') + '</ol>' : '') +
       (v.ugroups.length ? `<div class="nh"><b>Groups</b><span class="muted">yours, at the top of the names · name · colour</span></div><ol class="ugs">` +
         v.ugroups.map((g, i) => `<li data-g="${i}"><input type="text" class="ugn" value="${esc(g.name)}" spellcheck="false" aria-label="group ${i + 1} name"
@@ -278,6 +285,8 @@ class Notes {
     const b = e.target.closest('button[data-bm]'); if (!b) return;
     const li = b.closest('li'), n = li ? +li.dataset.n : NaN, bm = v.bms.find(x => x.n === n), act = b.dataset.bm;
     if (act === 'mdel') return v.run({ op: 'marker', id: +li.dataset.k + 1, delete: true });
+    if (act === 'mlift') return v.run({ op: 'marker', id: +li.dataset.k + 1, lift: v.umarks[+li.dataset.k].lift === 'below' ? 'above' : 'below' });
+    if (act === 'mpale') return v.run({ op: 'marker', id: +li.dataset.k + 1, color: null });
     if (act === 'gdel') return v.run({ op: 'group', name: v.ugroups[+li.dataset.g].name, delete: true });
     if (act === 'go' && bm) v.goBm(bm);
     else if (act === 'link' && bm && bm.link) v.followLink(bm);
@@ -300,7 +309,8 @@ class Notes {
     const v = this.v; // text, colours, arrow settings: live
     const T = e.target, li = T.closest('li'); if (!li) return;
     if (li.dataset.k != null) { const m = v.umarks[+li.dataset.k]; if (!m) return;
-      if (T.matches('input.ml')) m.label = T.value; else if (T.matches('input.col')) m.color = T.value; else return;
+      if (T.matches('input.ml')) m.label = T.value;
+      else if (T.matches('input.col')) { m.color = T.value; li.querySelector('[data-bm=mpale]').disabled = false; } else return;
       v.markers = v.pageMarks.concat(v.umarks); v.saveBookmarks(); return v.draw(); }
     if (li.dataset.g != null) { const g = v.ugroups[+li.dataset.g]; if (g && T.matches('input.col')) { g.color = T.value; v.setGroups(); } return; }
     if (li.dataset.a != null) {
@@ -321,6 +331,9 @@ class Notes {
     const T = e.target, li = T.closest('li'), bm = li && v.bms.find(x => x.n === +li.dataset.n);
     if (li && li.dataset.k != null && T.matches('input.mt')) { const m = v.umarks[+li.dataset.k], t = m && v.parseWhen(T.value, m.t);
       if (!m) return; if (t == null || !isFinite(t)) { T.value = v.when(m.t); v.bad(T); return; } m.t = t; v.setMarks(); return; }
+    if (li && li.dataset.k != null && T.matches('input.msig')) { const k = +li.dataset.k;
+      v.run({ op: 'marker', id: k + 1, signal: T.value.trim() || null }).then(r => { if (!r[0].error) return;
+        T.value = v.umarks[k].signal || ''; v.bad(T); v.toast(r[0].error); }); return; }
     if (li && li.dataset.g != null && T.matches('input.ugn')) { const g = v.ugroups[+li.dataset.g]; if (!g) return;
       v.run({ op: 'group', name: g.name, rename: T.value }).then(r => { if (r[0].error) { T.value = g.name; v.bad(T); v.toast(r[0].error); } }); return; }
     if (!bm) return;

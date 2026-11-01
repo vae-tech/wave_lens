@@ -3,7 +3,7 @@
 Object.assign(WaveView.prototype, {
   // the right button's menu at (cx, cy) on the screen: the range (zoom, bookmarks at its ends, copy Δ), the picture (copy,
   // PNG, SVG), the signal under the pointer (colour, highlight, copy its path); Esc, a click elsewhere or a choice closes it
-  menu(cx, cy, row, at = this.cursor) {
+  menu(cx, cy, row, at = this.cursor, mk = null) {   // mk: your marker whose text was clicked (its text, colour)
     this.closeMenu(); this.menuAt = [cx, cy];   // where it was opened: a text asked there after (Bookmark here, Marker here)
     const r = this.range, sig = row && row.type === 'sig' && row.tr ? row : null, grp = row && row.type === 'group' &&
       this.M.groups[row.id] === row ? row : null, it = row && (sig || grp);
@@ -48,7 +48,12 @@ Object.assign(WaveView.prototype, {
     const mvs = (where) => !mvAt || mvAt[1] < 2 ? '' : (mvAt[0] > 0 ? b('mvup', 'Move up') : '') + (mvAt[0] < mvAt[1] - 1 ? b('mvdn', 'Move down') : '') +
       (mvAt[0] > 0 ? b('mvtop', `To the top of ${where}`) : '') + (mvAt[0] < mvAt[1] - 1 ? b('mvbot', `To the bottom of ${where}`) : '');
     const el = document.createElement('div'); el.className = 'wv-menu'; el.setAttribute('role', 'menu');
-    el.innerHTML = (r ? `<div class="mh">${esc(this.rangeText())}</div>` + b('zoom', 'Zoom to the range') + b('marks', 'Bookmarks at its ends',
+    const mkId = mk ? this.umarks.indexOf(mk) + 1 : 0, pale = getComputedStyle(this.root).getPropertyValue('--muted').trim();
+    const six = c => /^#[0-9a-f]{6}$/i.test(c || '');
+    el.innerHTML = (mk ? `<div class="mh">Marker ${mkId}${mk.label ? ' · ' + esc(mk.label) : ''}</div>` + b('mktext', 'Its text…') +
+      `<label class="mi">Colour <input type="color" class="mkc" value="${esc(six(mk.color) ? mk.color : six(pale) ? pale : '#808080')}" ` +
+      `aria-label="marker ${mkId} colour"></label>` + (mk.color ? b('mkpale', 'Pale again') : '') + b('mkdel', 'Delete the marker') + '<hr>' : '') +
+      (r ? `<div class="mh">${esc(this.rangeText())}</div>` + b('zoom', 'Zoom to the range') + b('marks', 'Bookmarks at its ends',
       'Two bookmarks and an arrow with the Δ between them') + b('copyd', 'Copy Δ') + '<hr>' : '') +
       (np ? `<div class="mh">${np} ${this.selRun.size > 1 ? 'selected' : 'highlighted'} rows</div>` : '') + b('copyimg', 'Copy image') + b('png',
         'Save image as PNG') + b('svg', 'Save image as SVG') + b('wdjson', 'Save as WaveDrom') + b('wdcopy', 'Copy WaveDrom') +
@@ -190,6 +195,11 @@ Object.assign(WaveView.prototype, {
       else if (act === 'copyname') this.copyRows([it]);
       else if (act === 'types') { const x = this.menuEl.getBoundingClientRect(); this.closeMenu(); this.typesBox(sig.orig || sig, x.left, x.top); return this; }
       else if (act === 'mlist') { this.closeMenu(); this.marksMenu(); return this; }
+      else if (act === 'mktext') { const [x, y] = this.menuAt;
+        this.askText(x, y, `Marker ${mkId} · ${this.fmtCursor(mk.t)}`, 'its label', label => this.run({ op: 'marker', id: mkId, label }), mk.label);
+        return this; }
+      else if (act === 'mkpale') this.run({ op: 'marker', id: mkId, color: null });
+      else if (act === 'mkdel') this.run({ op: 'marker', id: mkId, delete: true });
       else if (act === 'umark') { const [x, y] = this.menuAt;
         this.askText(x, y, `Marker · ${this.fmtCursor(at)}`, 'its label',
           label => this.run(Object.assign({ op: 'marker', t: at }, label ? { label } : {})));
@@ -241,6 +251,10 @@ Object.assign(WaveView.prototype, {
         ...(only ? { gapOnly: only.checked } : {}), gapCount: el.querySelector('.gcnt').value });
       for (const x of el.querySelectorAll('.gn, .gh')) x.textContent = gn();
     });
+    if (mk) {   // its colour: seen as it is picked, one step of undo when the picker closes
+      el.querySelector('.mkc').addEventListener('input', e => { mk.color = e.target.value; this.draw(); });
+      el.querySelector('.mkc').addEventListener('change', e => this.run({ op: 'marker', id: mkId, color: e.target.value }));
+    }
     el.addEventListener('input', e => {   // idle, keep: as they are typed, on the waves at once
       if (!e.target.matches('.gi, .gk') || !this.gapLive()) return;
       this.gapType(() => this.gapFields(el.querySelector('.gi'), el.querySelector('.gk'), true));
@@ -365,13 +379,13 @@ Object.assign(WaveView.prototype, {
   },
   // a text asked over the waves where the menu was (a bookmark's text, a marker's label): Enter gives it (empty too), Esc
   // or a click elsewhere gives nothing; the waves stay where they are (no field below them takes the focus)
-  askText(x, y, title, hint, give) {
+  askText(x, y, title, hint, give, value = '') {
     this.closeMenu();
     const el = document.createElement('div'); el.className = 'wv-menu wv-ask'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', title);
     el.innerHTML = `<div class="mh">${esc(title)}</div><input type="text" spellcheck="false" autocomplete="off" placeholder="${esc(hint)}" ` +
       `aria-label="${esc(hint)}"><div class="ak"><span>Enter: add · Esc: cancel</span><button type="button" data-m="ok">Add</button></div>`;
     this.root.append(el); this.menuEl = el;
-    const b = el.getBoundingClientRect(), inp = el.querySelector('input');
+    const b = el.getBoundingClientRect(), inp = el.querySelector('input'); inp.value = value;
     el.style.left = Math.max(4, Math.min(x, innerWidth - b.width - 4)) + 'px'; el.style.top = Math.max(4, Math.min(y, innerHeight - b.height - 4)) + 'px';
     const done = ok => { const v = inp.value.trim(); this.closeMenu(); this.refocus(); if (ok) give(v); };
     inp.addEventListener('keydown', e => {

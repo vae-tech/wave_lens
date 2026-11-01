@@ -11,12 +11,13 @@ const WaveSVG = {
     const gp = groupPaint(M, S.groupColors), strokeOf = V ? r => V.strokeOf(r) : r => r.stroke ?? gp.get(r);
     const from = parseT(opts.from) ?? M.t0, to = parseT(opts.to) ?? M.t1, fs = S.fontSize;
     const rh = { sig: S.rowHeight, group: S.groupHeight, space: S.spaceHeight }, bms = V ? V.bms : M.bookmarks, ars = V ? V.arrows : M.arrows;
+    const marks = V ? V.markers : (opts.markers || []).map(pageMark).concat(M.markers);
     let C;
     if (V) C = { rows: opts.rows || V.rowsL, band: V.band, hl: V.hl };
     else {
       const sorted = orderRows(M.rows, S.sort, S.sortIgnore, S.groupOrder);
       const all = withExtra(sorted, (opts.extraRows || []).concat(...SVG_PLUGINS.map(f => f(M, S, opts) || [])), M, opts.owner || M);
-      C = compose(M, S, all, M.bookmarks, M.arrows, hlPick(M, S.highlight));
+      C = compose(M, S, all, M.bookmarks, M.arrows, hlPick(M, S.highlight), undefined, marks);
     }
     const hl = C.hl;
     // gaps (opts.cuts, else the settings gaps, gapIdle, gapKeep, gapSignals): the parts of [from, to] kept, side by side, a
@@ -139,7 +140,7 @@ const WaveSVG = {
       });
       const top = showAxis ? axisY + 20 : lay.length ? lay[0].y : y;
       paintSpans(P, V ? V.spans : M.spans, X, from, to, lay, top, bodyEnd);
-      paintMarkers(P, V ? V.markers : (opts.markers || []).concat(M.markers), X, from, to, top, bodyEnd);
+      paintMarkers(P, marks, X, from, to, top, bodyEnd, laneY(lay, S.laneHeight));
       paintBookmarks(P, bms, ars, X, from, to, rowY, top, bodyEnd, showAxis ? axisY + 10 : top + 10, null, laneY(lay, S.laneHeight), arrowFill(M, M.rows));
       if (V && V.cursor >= from && V.cursor <= to) P.path([['M', X(V.cursor), top], ['L', X(V.cursor), bodyEnd]], { stroke: 'acc', w: 1.2 });
       if (V) V.paintMeasures(P, X, from, to, xL, xR, top, bodyEnd, showAxis ? [axisY, 20] : null, true);   // the second cursor, the measured range

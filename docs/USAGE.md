@@ -71,7 +71,7 @@ may be the default). What the tab does differently from a page in a browser:
   what they mean in VS Code (ctrl+F find, ctrl+C copy, ctrl+Z / ctrl+Y undo / redo, alt+C W R in the find field);
   `wavelens.keysToVSCode` (default `ctrl+G`, Go to Line) are left to VS Code — the list of your groups is `gl` then; the
   others (ctrl+P, F1, ctrl+tab, ctrl+shift+…) are VS Code's.
-- **The version** in the bar's title line: `0.33 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
+- **The version** in the bar's title line: `0.34 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
   committed), so a tab of a development build says which one it is.
 - **An agent** on the host (`tools/wavemcp.py`, below): when it starts its live link, every open tab connects (**●
   live**); `view_live` with `page` a `.vcd` / `.fst` and `open: true` opens it in the VS Code window that has the file
@@ -340,7 +340,7 @@ add theirs (`WaveLens.registerDefaults`).
 | `toolsFolded` | false | the bar's tools folded to its title line (**▴** / **▾ tools** in the bar) |
 | `toolsHidden` | `[]` | the bar's tool groups left out by their labels (`["style", "dump"]`; the right button on the bar) |
 | `themeButton` | `auto` | **◐** in the bar's title line: the page's theme (auto, light, white, dark; kept in this browser; in VS Code its list, VS Code's colours too); `auto`: when the page has no theme button of its own (`viewer.html`, the VS Code tab) |
-| `version` | true | the version in the bar's title line, and the build the page was made from (`0.33 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
+| `version` | true | the version in the bar's title line, and the build the page was made from (`0.34 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
 | `keysLeft` | `[]` | keys the viewer leaves to its host: `["ctrl+G"]` (`ctrl+` is `cmd+` too, a letter by its place); the VS Code tab: `wavelens.keysToVSCode` |
 | `log` | `auto` | the log under the viewer (§ A dump straight in the browser): `auto` from the first thing done in the page (a dump read, Sources…, Load…), `true` always, `false` never |
 | `savePage` | true | the bar's **Save page**: this page as a `.view.html` with your view in it (§ Save and Load); false hides it and keeps no copy of the page's text |
@@ -782,7 +782,11 @@ No match is an error naming the bookmark: `views.gap.bookmarks[3] (n 4): no matc
 **Markers and your groups.** The right button's **Marker here** draws a dashed line across every row with a label at
 the top (yours, next to the page's own markers): a small box asks its label where you clicked — **Enter** (or **Add**)
 puts it in, also empty, **Esc** or a click elsewhere leaves it out — and it goes into the Markers list under the waves,
-edited there; **Markers…** (`gm`) lists them all over the waves to step through with ↑ ↓, the waves following; the waves stay where they are (**Bookmark here** asks a bookmark's text the same way).
+edited there. A marker is pale until you give it a colour. **Its text goes on any line**: drag it (a marker without a text: by the top of its dashed line)
+onto a signal and it sits on the thin line over that row (the upper half) or under it (the lower half), the line lifted bookmarks use, one line for all of them; the
+drag also moves it along the time, on the edges of that signal (straight up or down, or with alt: the time stays), and up to the axis it goes back to the top. A click
+on the text puts the cursor there with its label ready in the list; the right button on it: **Its text…**, **Colour**, **Pale again**, **Delete the marker**. The markers
+of the page itself stay where the page puts them. **Markers…** (`gm`) lists them all over the waves to step through with ↑ ↓, the waves following; the waves stay where they are (**Bookmark here** asks a bookmark's text the same way).
 **Going to a bookmark** (`1`–`9`, `]m [m`, **Markers…**, a number in the list under the waves) shows the waves as they
 were when it was made: its time `bookmarkLeft` (0.2) of the waves from the left, the span you have now, its signal
 selected, and the rows scrolled so that the row that was at the top under the time axis is at the top again (`"top"`
@@ -798,7 +802,7 @@ selects its first signal. Their order is yours: **alt+↑ / alt+↓** move the s
 in its group, **alt+shift+↑ / ↓** the group among yours; a signal of a group, or a group's header, **dragged** in the
 names goes where the line shows (into another group of yours too), and the right button on a name has **Move up / Move
 down / To the top / To the bottom** (on a group's header: among yours) — each one step to undo. The right button on any
-name opens the same menu as on the waves for that row, at the cursor (text selected in the names: the browser's menu). Under the waves the **Markers** list has each marker's time, label and colour, the
+name opens the same menu as on the waves for that row, at the cursor (text selected in the names: the browser's menu). Under the waves the **Markers** list has each marker's time, signal (empty: the top; ↥ ↧ over it or under it), label, colour and **pale**, the
 **Groups** list each group's name and colour (its signals get the colour). Both are kept in this browser and in a saved
 state, as the bookmarks are; [commands](#commands-and-edits) make them too.
 
@@ -1058,7 +1062,7 @@ await v.run([
 |---|---|---|
 | `bookmark` | `n? t? signal? text? label? color? lift? top? link? go? delete?` | a numbered circle on a signal (none: the time axis) with its text: a new one (`n` free or left out, `t` the cursor by default) or bookmark `n` changed; `label`: a short text by the circle; `lift`: `true` (or `"above"`) in a lane above its signal, `"below"` in one under it; `top`: the row going to it puts at the top of the waves (a signal's or module's path, or a name as `signal` takes it — a row there is, else an error; null: none — the command takes none by itself, as its file twin has no screen; the viewer's own **Bookmark here**, `m` and a range's bookmarks take the row at the top then); `go: true`: the waves to it, as `1`–`9` go (in a file: the cursor, the window within the waves and the selection); `delete: true`: bookmark `n` goes (`n: "all"`: every one; its arrows go too) |
 | `arrow` | `id? from? to? shape? head? line? color? label? delete?` | an arrow between bookmarks `from` → `to` with its label: new, or arrow `id` (1, 2 … as listed; or the one from → to) changed; shape `~ - -~ ~- -\| \|- -\|-`, head `> <> < ""`, line `solid dashed dotted` |
-| `marker` | `id? t? label? color? delete?` | a dashed line across the rows with its label: new, or marker `id` changed; `delete`: `id` or `"all"` (`"all"` without `delete` is an error) |
+| `marker` | `id? t? label? color? signal? lift? delete?` | a dashed line across the rows, pale unless `color` is given (`null`: pale again), with its label at the top, or with `signal` in the lane over that row (`lift: "below"`: under it; `signal: null`: at the top again): new, or marker `id` changed; `delete`: `id` or `"all"` (`"all"` without `delete` is an error) |
 | `span` | `id? from? to? label? color? signals? delete?` | a coloured stretch of time across the rows (or the rows of `signals`) with its label: new (`from` and `to`), or span `id` changed; `delete`: `id` or `"all"` |
 | `compare` | `result? dump? a? map? offset? off? show?` | a second dump over the waves (red bands, ≠, `]d [d`): `result` (`sva diff`'s, the WaveJSON `"compare"`), `off`: none; `dump` (`a`: the page's dump, `map`, `offset`) in `tools/viewedit.py` / `view_edit` only (they run `sva diff`); answers `name`, `compared`, `differ`, `first`, `missing`; `show`: which run the waves show, `a`, `b` or `overlay` (*Which run the waves show*; alone it answers `show`, `name`; `b` and `overlay` need B's values: a result without `vcd` refuses); in the saved state (`compareShow`) |
 | `group` | `name signals? add? remove? color? rename? delete? go? move?` | your group: `signals` sets its signals in this order (a module: its signals), `add`, `remove`, `rename`, `delete`; `go`: opened, in the middle, its first signal selected (ctrl+G); `move`: its place among your groups (`up`, `down`, `top`, `bottom`, a number) |
@@ -1288,7 +1292,7 @@ too); here what the tools write.
 | `bookmarks: [{n, t, at, signal, label, text, color, lift, top}]` | numbered events on signal rows (`signal` = full path, `group.name` without one; `t` in model units or `"85.12us"`; `at`: the event the build took `t` from; `label`: by the circle; `lift`: `true` / `"above"`, `"below"`) |
 | `arrows: [{from, to, shape, head, line, color, label}]` | arrows between bookmarks: shape `- ~ -~ ~- -\| \|- -\|-`, head `> <> <` or `""`, line `solid dashed dotted`; `label` with `{dt}`, `{cycles}`, `{cycles:NAME}` filled at its ends |
 | `spans: [{from, to, label, color, signals}]` | coloured stretches of time (ps), over every row or the rows of `signals` |
-| `markers: [{t \| cycle, label}]` | dashed markers; they become jump buttons when there are ≤ 6 and no `jumps` |
+| `markers: [{t \| cycle, label, color?, signal?, lift?}]` | dashed markers, pale without `color`, the text at the top or with `signal` in the lane over that row (`lift: "below"`: under it); they become jump buttons when there are ≤ 6 and no `jumps` |
 | `jumps: [{t \| cycle, span, label}]`, `cursor` | jump buttons and the initial cursor |
 | `sva: {files?, bind, notes?, exprs?}` | assertions (`wavelens/sva.js`): `files: [{name, path, source, parsed?}]` (`parsed`: `sva parse --json`, else the page parses), `bind: [{assert, scope, results?}]` (`scope` an instance path, `""` the top of the diagram; `results` from `sva eval`, else evaluated when the page opens; `results.cycles` an array of times, or the name of one in `cycles`), `cycles: {"<clock>": [times]}` (the sampled times once per clock: `mkhtml.py` names them in each `results.cycles`), `exprs: ["expr" \| {expr, scope}]` (rows ƒ, valued in the page) |
 | `meta.scope` | the converter's `--scope`: the instance the top rows belong to |

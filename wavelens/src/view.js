@@ -47,7 +47,7 @@ class WaveView {
     this.t0 = M.t0; this.span = M.t1 - M.t0;
     this.minSpan = opts.minSpan ?? (M.timed ? Math.max(this.span / 1e6, 10) : 0.5);
     this.cursor = opts.cursor ?? M.cursor ?? M.t0;
-    this.pageMarks = (opts.markers || []).concat(M.markers);   // the page's markers; yours (umarks, the marker command) after them
+    this.pageMarks = (opts.markers || []).map(pageMark).concat(M.markers);   // the page's markers; yours (umarks, the marker command) after them
     this.jumps = opts.jumps || M.jumps || (this.pageMarks.length && this.pageMarks.length <= 6
       ? this.pageMarks.map(m => ({ label: '→ ' + m.label, t: m.t, span: this.span / 5 })) : []);
     this.sel = null; this.edgeKind = 'any';   // selected signal row (edge search, bookmarks), edge kind
@@ -165,34 +165,39 @@ class WaveView {
     c.addEventListener('contextmenu', e => { if (this.S.contextMenu) e.preventDefault(); });   // the viewer's menu instead
     c.addEventListener('pointerdown', e => {
       if (e.button === 1) { const [x] = local(e); drag = { zoom: x, x: e.clientX, y: e.clientY }; c.setPointerCapture(e.pointerId); return; }
-      const [x, y] = local(e), bm = e.button === 0 && this.bmAt(x, y);
+      const [x, y] = local(e), bm = e.button === 0 && this.bmAt(x, y), mk = !bm && this.markAt(x, y);
       // shift+drag (not from a bookmark: that draws an arrow): zoom into the range dragged over, as the middle button
       if (e.button === 0 && e.shiftKey && !bm && !e.ctrlKey && !e.metaKey) { drag = { zoom: x, x: e.clientX, y: e.clientY, c2: [x, y, e.altKey] };
         c.setPointerCapture(e.pointerId); return; }
       // a measured range: ctrl+drag or the right button (then the menu), its ends on the edges of the signal under the
       // pointer (alt: not), its Δ counted on that signal
       if ((e.button === 2 && this.S.contextMenu) || (e.button === 0 && (e.ctrlKey || e.metaKey) && !bm)) {
-        drag = { range: this.pickTime(x, y, e.altKey), menu: e.button === 2, x: e.clientX, y: e.clientY, moved: false, free: e.altKey, row: this.rowOfY(y) };
+        drag = { range: this.pickTime(x, y, e.altKey), menu: e.button === 2, x: e.clientX, y: e.clientY, moved: false, free: e.altKey, row: this.rowOfY(y),
+          mk: e.button === 2 && mk };
         c.setPointerCapture(e.pointerId); return;
       }
       if (e.button !== 0) return;
       // alt+drag: a box over time and rows — its time is the range, its signals the selection; then the menu (the picture,
       // WaveDrom, colour … of those signals); alt+click: the cursor without the snap
-      if (e.altKey && !bm && !e.shiftKey && !e.ctrlKey && !e.metaKey) { drag = { box: [x, y], x: e.clientX, y: e.clientY, moved: false };
+      if (e.altKey && !bm && !mk && !e.shiftKey && !e.ctrlKey && !e.metaKey) { drag = { box: [x, y], x: e.clientX, y: e.clientY, moved: false };
         c.setPointerCapture(e.pointerId); return; }
       // lay: the rows as they were (a lane coming or going does not move them under the pointer)
-      drag = { x: e.clientX, y: e.clientY, t0: this.t0, moved: false, bm, arrow: bm && e.shiftKey, free: e.altKey, lay: this.lay };
+      drag = { x: e.clientX, y: e.clientY, t0: this.t0, moved: false, bm, arrow: bm && e.shiftKey, free: e.altKey, lay: this.lay,
+        mk: mk && { ...mk, x0: x, t: mk.m.t } };
       c.setPointerCapture(e.pointerId);
     });
     c.addEventListener('pointermove', e => {
       const [x, y] = local(e);
       if (!drag) {
-        const bm = this.bmAt(x, y), o = !bm && (this.lay || []).find(o => y >= o.y && y < o.y + o.h), tip = o && o.row.tip ? o.row.tip(x, y - o.y, this) : '';
+        const bm = this.bmAt(x, y), mk = !bm && this.markAt(x, y), o = !bm && !mk && (this.lay || []).find(o => y >= o.y && y < o.y + o.h);
+        const tip = o && o.row.tip ? o.row.tip(x, y - o.y, this) : '';
         // the value under the pointer (a struct's row: its whole value)
         const vr = o && (o.row.sig || o.row), val = !bm && !tip && vr && vr.type === 'sig' && vr.tr ? this.valueTip(vr, this.tOfX(x)) : '';
-        c.style.cursor = bm ? 'grab' : tip ? 'pointer' : '';
-        const sp = !bm && !tip ? this.spanTip(this.tOfX(x), vr) : '';   // a span under the pointer: its label and length
-        c.title = bm ? `Bookmark ${bm.n}${bm.text ? ': ' + bm.text : ''} — drag to move it, shift+drag to another bookmark for an arrow` : tip ||
+        c.style.cursor = bm || mk ? 'grab' : tip ? 'pointer' : '';
+        const sp = !bm && !mk && !tip ? this.spanTip(this.tOfX(x), vr) : '';   // a span under the pointer: its label and length
+        c.title = mk ? `Marker ${this.umarks.indexOf(mk.m) + 1}${mk.m.label ? ': ' + mk.m.label : ''} — drag it to a line over or under a signal, along the ` +
+          'time (alt: the time stays), a click edits it, the right button: its colour' : bm ?
+          `Bookmark ${bm.n}${bm.text ? ': ' + bm.text : ''} — drag to move it, shift+drag to another bookmark for an arrow` : tip ||
           [this.gapTip(x), sp, val].filter(Boolean).join('\n'); return;
       }
       if (drag.zoom != null) { this.zband = [drag.zoom, x].map(px => this.tOfX(px)); this.draw(); return; }
@@ -210,6 +215,7 @@ class WaveView {
       if (!drag.moved) return;
       if (drag.arrow) { this.rubber = { from: drag.bm.n, x, y }; this.draw(); }
       else if (drag.bm) { c.style.cursor = 'grabbing'; this.moveBookmark(drag.bm, x, y, drag.lay); }
+      else if (drag.mk) { c.style.cursor = 'grabbing'; this.moveMarker(drag.mk, x, y, drag.lay, drag.free); }
       else { this.panFrom(drag.t0, -dx); this.invalidate(); }   // a pan: one draw per frame, not per move event
     });
     c.addEventListener('pointerup', e => {
@@ -217,7 +223,7 @@ class WaveView {
       if (drag && drag.range != null) {   // a range ends; the right button opens the menu (on it, or on the signal under it)
         const d = drag; drag = null;
         if (!d.moved && !d.menu) this.setRange(null);   // ctrl+click: no range
-        if (d.menu) this.menu(e.clientX, e.clientY, d.row, d.range);
+        if (d.menu) this.menu(e.clientX, e.clientY, d.mk && !d.moved ? null : d.row, d.range, d.mk && !d.moved ? d.mk.m : null);
         return;
       }
       if (drag && drag.box) {   // the box: the menu on its signals; a click: the cursor here, not snapped
@@ -239,7 +245,9 @@ class WaveView {
         const to = this.bmAt(x, y); this.rubber = null;
         if (to && to.n !== drag.bm.n) { this.arrows.push(arNorm([{ from: drag.bm.n, to: to.n }])[0]); this.saveBookmarks(); this.renderNotes(); }
         this.draw();
-      } else if (drag && drag.moved && drag.bm) { c.style.cursor = 'grab'; this.saveBookmarks(); this.renderNotes(); }
+      } else if (drag && drag.moved && (drag.bm || drag.mk)) { c.style.cursor = 'grab'; this.saveBookmarks(); this.renderNotes(); }
+      else if (drag && !drag.moved && drag.mk) {   // a click on a marker's text: the cursor on it, its label in the list
+        this.cursor = drag.mk.m.t; this.draw(); this.notesEl.querySelector(`li[data-k="${this.umarks.indexOf(drag.mk.m)}"] input.ml`)?.focus(); }
       else if (drag && !drag.moved) {
         const hit = this.bmAt(x, y), mid = !hit && this.bmGeo && this.bmGeo.mids.find(([, mx, my]) => Math.hypot(mx - x, my - y) <= 10);
         if (hit) { this.cursor = hit.t; this.draw(); this.notesEl.querySelector(`li[data-n="${hit.n}"] input.txt`)?.focus(); }
@@ -1003,6 +1011,31 @@ class WaveView {
   }
   bmAt(x, y) { const pos = this.bmGeo && this.bmGeo.pos; return pos && this.bms.find(b =>
     { const p = pos.get(b.n); return p && Math.hypot(p[0] - x, p[1] - y) <= 9; }); }
+  // your marker whose text is at (x, y), the last drawn on top -> { m, x, y, w }; the page's own stay where the page puts them
+  markAt(x, y) {
+    const n = this.pageMarks.length, tags = (this.bmGeo && this.bmGeo.tags) || [];
+    const o = tags.filter(g => g.i >= n && x >= g.x - 4 && x <= g.x + g.w + 2 && Math.abs(y - g.y) <= 7).pop();
+    return o ? { ...o, m: this.umarks[o.i - n] } : null;
+  }
+  // the line a marker's text dragged to y goes on -> [signal, lift]: over a row its upper half, under it the lower, a lane
+  // as it is, over the axis at the top of the rows; null: no line there (a module's row), it stays
+  markPlace(y, lay) {
+    if (y < (this.oy || 0) + this.hdrH) return [null, false];
+    const k = lay.findIndex(o => y >= o.y && y < o.y + o.h), o = lay[k];
+    if (o && o.row.type === 'sig') return [o.row.full, y < o.y + o.h / 2 ? true : 'below'];
+    if (!o || o.row.type !== 'lane') return null;
+    const id = o.row.ids[Math.floor((y - o.y) / this.S.laneHeight)], r = lay.slice(k + 1).find(q => q.row.type !== 'lane');
+    if (typeof id !== 'string') return r && r.row.type === 'sig' ? [r.row.full, true] : null;   // an arrow's line: over the row after it
+    return id.endsWith(':below') ? [id.slice(2, -6), 'below'] : [id.slice(2), true];
+  }
+  // dragged (d: markAt with where it started): the line from y, the time from x as a bookmark's, edges of its signal; a drag
+  // straight up or down and free (alt) leave the time
+  moveMarker(d, x, y, lay, free) {
+    const m = d.m, p = this.markPlace(y, lay), at = x + d.x - d.x0; if (p) [m.signal, m.lift] = p;
+    const s = m.signal != null ? this.sigByPath(m.signal) : null;
+    m.t = free || Math.abs(x - d.x0) <= 3 ? d.t : Math.min(Math.max(this.gapSide(at) ?? this.snap(s, this.tOfX(at)), this.M.t0), this.M.t1);
+    this.draw();
+  }
   // drag on the waves: time from x (snapped to an edge of the row), signal from the row under y (the time axis: no signal)
   // dragged: the time (snapped to an edge of its row), the row under the pointer, or the axis; on the top quarter of a
   // signal row, or in the lane above it, lifted into that lane (a leader down to the signal), lower down on the row again
@@ -1051,8 +1084,8 @@ class WaveView {
       color: a.color, label: a.label }).filter(([k, v]) => v != null && (v !== '' || k === 'head'))));   // head "" = no head
   }
   // your markers and groups as a state has them (empty and null left out)
-  markList() { return this.umarks.map(m => Object.fromEntries(Object.entries({ t: m.t, label: m.label, color: m.color })
-    .filter(([, x]) => x != null && x !== ''))); }
+  markList() { return this.umarks.map(m => Object.fromEntries(Object.entries({ t: m.t, label: m.label, color: m.color, signal: m.signal,
+    lift: m.lift === 'below' ? m.lift : null }).filter(([, x]) => x != null && x !== ''))); }
   spanTip(t, row) {
     const on = s => !s.signals || !s.signals.length || (row && (s.signals.includes(row.full) || s.signals.includes(row.name)));
     return this.spans.filter(s => t >= s.from && t <= s.to && on(s)).map(s => `${s.label || 'span'}: ${this.when(s.from)} … ${this.when(s.to)} (Δ ` +
@@ -1271,7 +1304,7 @@ class WaveView {
   // time at the zoom — for the cursor and the ends of a range. In a gap's column (free: not) the side of the gap nearer: a
   // place in the column is no time of the waves, so a Δ neither moves with a pixel there nor shows a time made up
   pickTime(x, y, free = false) {
-    const h = !free && this.gapAt(x); if (h) return x - h.x0 < h.x1 - x ? h.p : h.q;
+    const side = free ? null : this.gapSide(x); if (side != null) return side;
     const r = this.rowOfY(y), sig = r && r.type === 'sig' && r.tr ? r : null, raw = this.tOfX(x);
     const at = sig && this.S.cursorSnap > 0 && !free ? this.snap(sig, raw, this.S.cursorSnap) : raw;
     return at !== raw ? at : this.timeAt(x);
@@ -1483,9 +1516,10 @@ class WaveView {
   // draw = size (the canvas and its offset) + paintFrame (the pixels) + syncReadouts (the cursor line, fields, values).
   draw() {
     if (this.held) { this.held.draw = true; return; }
-    if (this.laneKey !== laneKey(this.bms, this.arrows)) {   // a bookmark or an arrow label changed: its lane?
-      this.laneKey = laneKey(this.bms, this.arrows);
-      if (this.laneSig !== JSON.stringify([...arrowLanes(this.vis, this.bms, this.S.arrowLabels === 'lane' ? this.arrows : [])])) this.renderNames();
+    if (this.laneKey !== laneKey(this.bms, this.arrows, this.markers)) {   // a bookmark, a marker or an arrow label changed: its lane?
+      this.laneKey = laneKey(this.bms, this.arrows, this.markers);
+      const lanes = arrowLanes(this.vis, this.bms, this.S.arrowLabels === 'lane' ? this.arrows : [], this.markers);
+      if (this.laneSig !== JSON.stringify([...lanes])) this.renderNames();
     }
     this.warpSync();
     const lay = this.lay = this.layout();
@@ -1534,7 +1568,7 @@ class WaveView {
       r => this.collapsed.has(r.id), bg);
     const rowY = WP ? this.paintWarpBody(P, F, WP, body, late, shown, oy, Hc, hdr) : body(this.t0, tB, 0, W, late);
     paintSpans(P, this.spans, X, this.t0, tB, shown, oy + hdr, oy + Hc);
-    paintMarkers(P, this.markers, X, this.t0, tB, oy + hdr, oy + Hc);
+    const tags = paintMarkers(P, this.markers, X, this.t0, tB, oy + hdr, oy + Hc, laneY(lay, this.S.laneHeight));
     if (!WP) this.paintDiff(P, shown, X, this.t0, tB);   // a second dump compared (diff.js): where it differs
     g.restore();
     if (this.cursor >= this.t0 && this.cursor <= tB) P.path([['M', X(this.cursor), 0], ['L', X(this.cursor), Hc]], { stroke: 'acc', w: 1.2 });
@@ -1552,6 +1586,7 @@ class WaveView {
     const geo = paintBookmarks(P, this.bms, this.arrows, X, this.t0, tB, rowY, oy + hdr, oy + Hc, oy + this.S.headerHeight / 2, this.rubber,
       laneY(lay, this.S.laneHeight), arrowFill(M, M.rows));
     g.restore();
+    geo.tags = tags;
     return geo;
   }
   // the second cursor (dashed, its Δ on a tag) and the measured range (shaded, its ends dashed, its Δ on a tag): on the

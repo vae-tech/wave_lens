@@ -2686,6 +2686,8 @@ EDIT_OPS = [   # every command that changes a state, with the arguments in their
     {'op': 'span', 'from': '50ns', 'to': '70ns', 'label': 'setup', 'color': 'c7'}, {'op': 'span', 'from': '110ns', 'to': '90ns', 'signals': ['PREADY', 'PENABLE']},
     {'op': 'span', 'id': 2, 'label': 'wait'}, {'op': 'span', 'from': 1, 'to': 2}, {'op': 'span', 'id': 3, 'delete': True},
     {'op': 'marker', 't': '100ns', 'label': 'M', 'color': '#c00'}, {'op': 'marker', 't': '140ns'}, {'op': 'marker', 'id': 2, 'label': 'second'},
+    {'op': 'marker', 'id': 1, 'signal': 'PSEL'}, {'op': 'marker', 'id': 2, 'signal': 'PADDR', 'lift': 'below', 'color': '#0a0'}, {'op': 'marker', 't': '150ns', 'signal': 'PREADY', 'lift': 'above'},
+    {'op': 'marker', 'id': 3, 'signal': None}, {'op': 'marker', 'id': 1, 'lift': 'above', 'color': None}, {'op': 'marker', 'id': 3, 'delete': True},
     {'op': 'group', 'name': 'ctl', 'signals': ['PSEL', 'PENABLE'], 'color': '#08f'}, {'op': 'group', 'name': 'ctl', 'add': 'PWRITE'},
     {'op': 'group', 'name': 'data', 'signals': 'P*DATA'}, {'op': 'group', 'name': 'data', 'rename': 'payload'},
     {'op': 'highlight', 'add': ['PSEL', 'payload']}, {'op': 'highlight', 'add': 'PREADY', 'remove': 'PSEL'},
@@ -3922,17 +3924,141 @@ def edit(browser, build):
               cut.get('parts') == ga['cut']['parts'] and len(img) == 1 and not err, f'view_edit gaps view: the waves cut live, cut in ns in the answer and in view_get, a picture {ga["cut"]} {wf} err {err} img {len(img)} {gg.get("gaps")}')
         off = tool('view_edit', page=str(pl), view='exact', ops=[{'op': 'gaps', 'reset': True}])[0]['results'][0]
         check('cut' not in off and page.evaluate(f"(v => v.wf === null && v.gapParts() === null)({V})"), f'gaps reset: continuous time, no cut {off}')
+        ml = tool('view_edit', page=str(pl), view='exact', ops=[{'op': 'marker', 't': 100, 'label': 'agent', 'signal': 'PSEL', 'lift': 'below', 'color': '#2f9e44'}])[0]['results'][0]
+        gm = tool('view_get', page=str(pl), view='exact')[0].get('markers') or []
+        lv = page.evaluate(f"(v => [v.umarks[{ml.get('id', 1) - 1}].lift, v.rowsL.some(r => r.type === 'lane' && r.ids.some(x => /PSEL:below$/.test(x)))])({V})")
+        check(lv == ['below', True] and any(m.get('t') == 100 and m.get('lift') == 'below' and m.get('signal', '').endswith('PSEL') for m in gm), f'view_edit marker on a live page: on the line under the signal at once, view_get says it in ns {ml} {lv} {gm}')
         page.goto('about:blank'); page.wait_for_timeout(300 * SCALE)
-        r = tool('view_edit', page=str(pl), view='exact', ops=[{'op': 'marker', 't': 10}])[0]
+        r = tool('view_edit', page=str(pl), view='exact', ops=[{'op': 'marker', 't': 10, 'label': 'file', 'signal': 'PENABLE'}])[0]
         check(r.get('page') == str(pl) and 'written into the page' in r.get('note', ''), f'the page closed: the edit goes into its file {r}')
         r = tool('view_edit', page=str(pl), view='exact', ops=[{'op': 'gaps', 'on': True, 'view': True, 'idle': 3, 'keep': 0, 'signals': 'PENABLE'}])[0]
         open_(pl, idle=False); page.wait_for_function(f"{V}.wf && {V}.wf.w.n === {wf[0]}", timeout=8000 * SCALE)
+        fm = page.evaluate(f"(v => [v.markList().some(m => m.label === 'file' && /PENABLE$/.test(m.signal)), v.rowsL.some(r => r.type === 'lane' && r.ids.some(x => /PENABLE$/.test(x)))])({V})")
+        check(fm == [True, True], f'a marker on a signal written into the page file: on its line when the page is opened {fm}')
         fg = tool('view_get', page=str(pl), view='exact')[0].get('gaps') or {}
         check('cut' not in r['results'][0] and r.get('page') == str(pl) and fg.get('view') is True and page.evaluate(f"!{V}.root.querySelector('.gapv').hidden"),
               f'gaps view into the file: the page opens with its waves cut and idle, keep on the bar, no cut in the answer {r["results"]} {fg}')
     finally:
         mcp.stdin.close(); mcp.wait(10)
     ctx.close()
+
+
+def marker_lanes(browser, build):
+    """A marker's text on a line over or under a signal: the lines of the lifted bookmarks, dragged by the mouse from line to
+    line and along the time, pale until a colour is picked, on the right button, in the list, the picture, a reload and undo."""
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('viewer: the texts of markers in lanes')
+    page = browser.new_page(viewport={'width': 1400, 'height': 1000})
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+    js = lambda e: page.evaluate(f"(async () => {{ const v = document.querySelector('.wv').waveView; {e} }})()")
+    laneids = "v.rowsL.filter(r => r.type === 'lane').flatMap(r => r.ids).filter(x => typeof x === 'string')"
+    S = lambda n: f'{json.dumps(js(f"return v.M.rows.find(r => r.name === {json.dumps(n)}).full;"))}'
+    PSEL, PWRITE, PADDR = S('PSEL'), S('PWRITE'), S('PADDR')
+    n0 = js('return v.markList().length;')
+    # the commands: in the lane of its signal, the lane a lifted bookmark there has
+    a = js(f"""await v.run([{{ op: 'bookmark', t: '20ns', signal: 'PSEL', lift: true }}]); const before = {laneids};
+        const r = await v.run([{{ op: 'marker', t: '60ns', label: 'one', signal: 'PSEL' }}, {{ op: 'marker', t: '100ns', label: 'two', signal: 'PADDR', lift: 'below' }},
+          {{ op: 'marker', t: '140ns', label: 'top' }}, {{ op: 'marker', t: '170ns' }}]); v.draw();
+        return [before, {laneids}, v.markList(), r.map(x => x.id)];""")
+    check(a[0] == [f'b:{json.loads(PSEL)}'] and sorted(a[1]) == sorted([f'b:{json.loads(PSEL)}', f'b:{json.loads(PADDR)}:below']) and a[2][0].get('signal') == json.loads(PSEL) and 'lift' not in a[2][0] and
+          a[2][1].get('lift') == 'below' and 'signal' not in a[2][2] and a[3] == [1, 2, 3, 4], f'marker signal, lift: the text on the bookmarks\' line of that signal, one line for both; none: at the top {a}')
+    js('await v.run([{ op: "bookmark", n: "all", delete: true }]); v.draw();')
+    c = page.locator('.wv canvas').first; c.scroll_into_view_if_needed(); page.wait_for_timeout(50)
+    geo = """(() => { const b = v.canvas.getBoundingClientRect(); return { x: b.x, y: b.y, oy: WaveLens.internal.peek(v).oy, hdr: v.hdrH, tags: v.bmGeo.tags, n: v.pageMarks.length,
+        lay: WaveLens.internal.peek(v).lay.map(o => [o.row.full || o.row.type, o.y, o.h, o.row.ids || null]) }; })()"""
+    def tag(i):
+        g = js(f'return {geo};'); t = next(o for o in g['tags'] if o['i'] == g['n'] + i); return g, t, g['x'] + t['x'] + 4, g['y'] + t['y'] - g['oy']
+    def row_y(g, full, f):
+        r = next(o for o in g['lay'] if o[0] == full); return g['y'] + r[1] - g['oy'] + r[2] * f
+    def drag(i, dx, to, alt=False):
+        g, t, x, y = tag(i)
+        if alt: page.keyboard.down('Alt')
+        page.mouse.move(x, y); page.mouse.down(); page.mouse.move(x + dx / 2, (y + to(g)) / 2, steps=3); page.mouse.move(x + dx, to(g), steps=3); page.mouse.up()
+        if alt: page.keyboard.up('Alt')
+        page.wait_for_timeout(40)
+        return js(f'return v.markList()[{i}];')
+    top = drag(2, 0, lambda g: row_y(g, json.loads(PWRITE), 0.8))
+    check(top == {'t': 140000, 'label': 'top', 'signal': json.loads(PWRITE), 'lift': 'below'}, f'a text dragged straight down to the lower half of a row: on the line under it, the time as it was {top}')
+    up = drag(2, 0, lambda g: row_y(g, json.loads(PSEL), 0.2))
+    st = js(f'return {laneids};')
+    check(up.get('signal') == json.loads(PSEL) and 'lift' not in up and st.count(f'b:{json.loads(PSEL)}') == 1 and f'b:{json.loads(PWRITE)}:below' not in st,
+          f'to the upper half of another row: on the line over it, which it shares with the text there, the line it left gone {up} {st}')
+    und = js('await v.undo(); return v.markList()[2];')
+    check(und.get('signal') == json.loads(PWRITE) and und.get('lift') == 'below', f'a drag is one step of undo {und}')
+    js('await v.undo(1);')
+    lane = drag(0, 0, lambda g: next(g['y'] + o[1] - g['oy'] + 8 for o in g['lay'] if o[0] == 'lane' and o[3] and f'b:{json.loads(PADDR)}:below' in o[3]))
+    check(lane.get('signal') == json.loads(PADDR) and lane.get('lift') == 'below', f'dropped on a line that is there: that line {lane}')
+    along = drag(0, 120, lambda g: tag(0)[3]); edges = js(f'return v.M.rows.find(r => r.full === {PADDR}).tr.map(o => o.t);')
+    k = js('return v.canvas.getBoundingClientRect().width / v.span;')
+    check(along['t'] != 60000 and abs(along['t'] - (60000 + 120 / k)) < 9 / k and along.get('signal') == json.loads(PADDR), f'dragged along its line: the time follows {along} {k}')
+    edge = edges[-1] if edges[-1] > 0 else edges[-2]; js(f"await v.run([{{ op: 'marker', id: 1, t: {edge - 4 / k} }}]);"); g, t, x, y = tag(0)
+    near = drag(0, 6, lambda g: y)
+    check(near['t'] in edges, f'dragged near an edge of its signal: on the edge {near} {edges}')
+    keep = drag(0, 150, lambda g: row_y(g, json.loads(PSEL), 0.8), alt=True)
+    check(keep['t'] == near['t'] and keep.get('signal') == json.loads(PSEL) and keep.get('lift') == 'below', f'with alt only the line changes {keep}')
+    ax = drag(0, 0, lambda g: g['y'] + 4)
+    check('signal' not in ax and 'lift' not in ax and f'b:{json.loads(PSEL)}:below' not in js(f'return {laneids};'), f'dragged up to the axis: at the top of the rows again, its line gone {ax}')
+    emp = drag(3, 0, lambda g: row_y(g, json.loads(PWRITE), 0.2))
+    check(emp.get('signal') == json.loads(PWRITE), f'a marker without a text is taken by the top of its line, and has a dot on the line {emp}')
+    # a click: the cursor on it, the label in the list; the right button: text, colour, pale again, delete
+    g, t, x, y = tag(1); page.mouse.click(x, y); page.wait_for_timeout(40)
+    cl = js('const m = v.markList()[1]; return [v.cursor === m.t, document.activeElement.matches("input.ml"), document.activeElement.value === m.label];')
+    check(cl == [True, True, True], f'a click on a text: the cursor on it, its label in the list to edit {cl}')
+    pale0 = js('return [v.markList()[1].color ?? null, v.toSVG().includes(getComputedStyle(v.root).getPropertyValue("--muted").trim())];')
+    js('document.activeElement.blur(); v.root.scrollIntoView({ block: "start" });'); page.wait_for_timeout(50); g, t, x, y = tag(1)   # the field took the page down
+    page.mouse.click(x, y, button='right'); page.wait_for_timeout(60)
+    mh = js('return [v.menuEl.querySelector(".mh").textContent, !!v.menuEl.querySelector("input.mkc"), !!v.menuEl.querySelector("button[data-m=mkpale]")];')
+    picked = js("""const i = v.menuEl.querySelector('input.mkc'); i.value = '#d6336c'; i.dispatchEvent(new Event('input', { bubbles: true })); const live = v.umarks[1].color;
+        i.dispatchEvent(new Event('change', { bubbles: true })); await new Promise(r => setTimeout(r, 30)); v.closeMenu(); v.draw(); return [live, v.markList()[1].color, v.toSVG().toLowerCase().includes('#d6336c')];""")
+    check(pale0[0] is None and mh[0].startswith('Marker 2') and mh[1] and not mh[2] and picked == ['#d6336c', '#d6336c', True],
+          f'the right button on a text: its menu; no colour of its own by default, a colour picked shows at once and goes into the state and the picture {pale0} {mh} {picked}')
+    page.mouse.click(x, y, button='right'); page.wait_for_timeout(60); page.locator('.wv-menu button[data-m=mkpale]').click(); page.wait_for_timeout(40)
+    pl = js('return v.markList()[1].color ?? null;'); g, t, x, y = tag(1)
+    page.mouse.click(x, y, button='right'); page.wait_for_timeout(60); page.locator('.wv-menu button[data-m=mktext]').click(); page.wait_for_timeout(40)
+    ask = page.locator('.wv-ask input'); was = ask.input_value(); ask.fill('renamed'); ask.press('Enter'); page.wait_for_timeout(40)
+    check(pl is None and was == 'two' and js('return v.markList()[1].label;') == 'renamed', f'Pale again; Its text… with the text there {pl} {was}')
+    # the list: the signal, over / under, pale
+    li = page.locator('.wv ol.mks li').nth(1); sg = li.locator('input.msig')
+    sg.fill(json.loads(PSEL)); sg.press('Enter'); page.wait_for_timeout(60); l1 = js('return v.markList()[1];')
+    page.locator('.wv ol.mks li').nth(1).locator('button[data-bm=mlift]').click(); page.wait_for_timeout(60); l2 = js('return v.markList()[1];')
+    sg = page.locator('.wv ol.mks li').nth(1).locator('input.msig'); sg.fill('nosuchsignal'); sg.press('Enter'); page.wait_for_timeout(60)
+    l3 = [js('return v.markList()[1].signal;'), sg.input_value()]
+    pb = page.locator('.wv ol.mks li').nth(1); pb.locator('input.col').evaluate("(i, c) => { i.value = c; i.dispatchEvent(new Event('input', { bubbles: true })); }", '#2f9e44'); dis = pb.locator('button[data-bm=mpale]').is_disabled()
+    pb.locator('button[data-bm=mpale]').click(); page.wait_for_timeout(40); l4 = js('return v.markList()[1].color ?? null;')
+    sg = page.locator('.wv ol.mks li').nth(1).locator('input.msig'); sg.fill(''); sg.press('Enter'); page.wait_for_timeout(60); l5 = js('return v.markList()[1];')
+    check(l1.get('signal') == json.loads(PSEL) and l1.get('lift') == 'below' and 'lift' not in l2 and l3 == [json.loads(PSEL), json.loads(PSEL)] and not dis and l4 is None and 'signal' not in l5,
+          f'the Markers list: its signal, over or under, a name that is none refused, pale again, empty: the top {l1} {l2} {l3} {dis} {l4} {l5}')
+    # errors, the state, a reload, the picture, the page's own markers, the gaps on the waves
+    er = js("""const r = await v.run([{ op: 'marker', t: 1, lift: 'below' }]); const r2 = await v.run([{ op: 'marker', t: 1, signal: 'PSEL', lift: 'sideways' }]);
+        const r3 = await v.run([{ op: 'marker', t: 1, signal: 'nosuch' }]); return [r[0].error, r2[0].error, r3[0].error, v.markList().length];""")
+    check('give signal' in er[0] and 'lift:' in er[1] and er[2] and er[3] == 4, f'what a marker refuses, and no marker made of it {er}')
+    js("await v.run([{ op: 'marker', id: 1, signal: 'PWRITE', lift: 'below', label: 'kept', color: '#123456' }]);")
+    st0 = js('return v.state().markers;'); page.reload(); page.wait_for_load_state('networkidle'); page.wait_for_timeout(100)
+    rl = js(f'return [v.markList(), {laneids}, v.bmGeo.tags.filter(o => o.i >= v.pageMarks.length).length];')
+    check(rl[0] == st0 and f'b:{json.loads(PWRITE)}:below' in rl[1], f'kept over a reload, in the state, its line drawn again {rl} {st0}')
+    sv = js(f"""const s0 = v.toSVG(), st = v.state(); const hi = s => +s.match(/height="(\\d+)/)[1]; await v.run([{{ op: 'marker', id: 1, signal: 'PRDATA' }}]); const h1 = hi(v.toSVG({{ rows: 'all' }}));
+        await v.run([{{ op: 'marker', id: 1, signal: null }}]); const h0 = hi(v.toSVG({{ rows: 'all' }}));
+        const doc = {{ signal: [{{ name: 'a', wave: '0101' }}, {{ name: 'b', wave: '0011' }}] }}, svg = o => WaveLens.WaveSVG.toString(JSON.stringify(doc), o);
+        const w0 = svg({{ markers: [{{ t: 1, label: 'solo' }}] }}), w1 = svg({{ markers: [{{ t: 1, label: 'solo', signal: 'b' }}] }}); await v.run([{{ op: 'marker', id: 1, signal: 'PWRITE', lift: 'below' }}]);
+        return [s0.includes('kept'), h1 - h0, hi(w1) - hi(w0), w1.includes('solo')];""")
+    check(sv == [True, 16, 16, True], f'the picture draws the text in its line, a line taller than without it, the static SVG too {sv}')
+    pg = js("""const n = v.pageMarks.length; if (!n) { v.pageMarks = [{ t: 80000, label: 'page' }]; v.setMarks(); }
+        const t = v.bmGeo.tags.find(o => o.i < v.pageMarks.length), hit = t && v.markAt(t.x + 3, t.y), mine = v.bmGeo.tags.find(o => o.i >= v.pageMarks.length), got = mine && v.markAt(mine.x + 3, mine.y);
+        if (!n) { v.pageMarks = []; v.setMarks(); } return [!!t, hit, !!got];""")
+    check(pg == [True, None, True], f'the markers of the page itself stay where the page puts them, yours move {pg}')
+    gp = js("""await v.run([{ op: 'gaps', on: true, view: true, idle: 3, keep: 0, signals: 'PENABLE' }]); v.fit(); v.draw(); const m = v.umarks[0], F = v.wf, t = v.bmGeo.tags.find(o => o.i === v.pageMarks.length + 0);
+        const ok = F && t && Math.abs(t.x - F.X(m.t)) < 1e-6, h = F && { p: F.w.cuts[0][1], q: F.w.cuts[1][0] }, t0 = m.t, lay = WaveLens.internal.peek(v).lay;
+        h.x0 = F.X(h.p); h.x1 = F.X(h.q);
+        v.moveMarker({ m, x: 0, x0: 0, t: t0 }, h.x0 + 1, 40, lay, false); const near = m.t === h.p; v.moveMarker({ m, x: 0, x0: 0, t: t0 }, h.x1 - 1, 40, lay, false); const far = m.t === h.q; m.t = t0; v.setMarks();
+        await v.run([{ op: 'gaps', view: false, on: false }]); return ok && near && far || [!!F, !!t, near, far];""")
+    check(gp is True, f'with gaps on the waves a text stands at its time, dropped on a gap\'s column at the side nearer {gp}')
+    check(n0 == 0, f'the page starts without markers of yours {n0}')
+    check(not errs, f'no page error {errs}')
+    page.close()
 
 
 def ranges(browser, build):
@@ -5790,6 +5916,7 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'undo': 'ctrl+Z / ctrl+shift+Z and ↶ ↷: the edits undone and redone a step at a time (a batch of commands, a menu action), not the cursor',
     'cycles': 'the clock cycles under the time axis: numbers, the cursor\'s cycle, c147, cycle 0, Δ, the menu, the pictures, kept',
     'bits': 'a bus\'s width after its name and the bus bit by bit: a click on [7:0], b, the menu, the command, kept, a bookmark on a bit, the pictures',
+    'marker_lanes': 'the text of a marker on a line over or under a signal: the mouse, the colour, the list, the picture, undo',
     'ranges': 'a range on the waves (shift+drag, the right button) and its menu: zoom, bookmarks, the picture, a colour',
     'tips': 'every control has a tooltip with its keys; ? shows the keys and the mouse',
     'buses': 'stage 11: bus transactions (AXI4, AXI4-Stream, APB, AHB, Avalon-MM / ST, Wishbone, OBI) on a dump of every protocol and the examples',
@@ -5938,6 +6065,7 @@ def main():
         run('lazy_dump', lazy_dump, b, build)
         run('readers', readers, b, build)
         run('vscode', vscode_tab, b, build)
+        run('marker_lanes', marker_lanes, b, build)
         run('ranges', ranges, b, build)
         run('buses', buses, b, build)
         run('tips', tips, b, build)

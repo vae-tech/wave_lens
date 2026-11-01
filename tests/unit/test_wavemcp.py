@@ -346,6 +346,18 @@ class Views(unittest.TestCase):
         self.assertIn('"page" is required', W.call('view_edit', {'ops': [{'op': 'fit'}]})[0])
         self.assertIn('"ops": a list of commands', W.call('view_edit', {'page': self.page, 'ops': []})[0])
 
+    def test_marker_lanes(self):
+        """A marker's text on a line over or under a signal in the agent's words: the path resolved, view_get in ns."""
+        r = self.call('view_edit', page=self.page, ops=[{'op': 'marker', 'id': 'all', 'delete': True},
+                                                        {'op': 'marker', 't': 35, 'label': 'here', 'signal': 'valid', 'lift': 'below', 'color': '#2f9e44'},
+                                                        {'op': 'marker', 't': 45, 'signal': 'valid'}, {'op': 'marker', 'id': 2, 'color': None, 'signal': None}])
+        self.assertEqual([x.get('id') for x in r['results']], ['all', 1, 2, 2], r)
+        ms = self.call('view_get', page=self.page)['markers']
+        self.assertEqual(ms[0]['signal'], 'tb.valid')
+        self.assertEqual((ms[0]['id'], ms[0]['t'], ms[0]['label'], ms[0]['lift'], ms[0]['color']), (1, 35, 'here', 'below', '#2f9e44'))
+        self.assertEqual(ms[1], {'id': 2, 't': 45})   # at the top, pale
+        self.assertIn('marker(id? t? label? color? signal? lift? delete?)', next(t for t in W.TOOLS if t['name'] == 'view_edit')['description'])
+
     def test_gaps_view(self):
         """The gaps on the waves in the agent's words: view_get says them, a cut (the page's) in ns."""
         r = self.call('view_edit', page=self.page, ops=[{'op': 'gaps', 'on': True, 'view': True, 'idle': 8, 'signals': 'PSEL'}])

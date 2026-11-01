@@ -296,6 +296,23 @@ class Commands(unittest.TestCase):
         e.run([{'op': 'group', 'name': 'g', 'signals': ['clk', 'tb.dut.valid']}])
         self.assertEqual([x['full'] for x in e.ordered()[:3]], ['@g', 'tb.dut.valid', 'tb'])
 
+    def test_marker_lanes(self):
+        """A marker's text on the line of a signal: signal, lift, as view.js markList says them; pale by default."""
+        e = ed()
+        self.run_ok(e, {'op': 'marker', 't': 5, 'label': 'a', 'signal': 'tb.dut.valid'}, 
+                    {'op': 'marker', 't': 6, 'signal': 'tb.dut.valid', 'lift': 'below'}, {'op': 'marker', 't': 7})
+        self.assertEqual(e.st['markers'], [{'t': 5, 'label': 'a', 'signal': 'tb.dut.valid'}, {'t': 6, 'signal': 'tb.dut.valid', 'lift': 'below'}, {'t': 7}])
+        self.run_ok(e, {'op': 'marker', 'id': 2, 'lift': 'above'}, {'op': 'marker', 'id': 1, 'lift': 'below', 'color': 'red'}, {'op': 'marker', 'id': 1, 'color': None})
+        self.assertEqual(e.st['markers'][:2], [{'t': 5, 'label': 'a', 'signal': 'tb.dut.valid', 'lift': 'below'}, {'t': 6, 'signal': 'tb.dut.valid'}])
+        self.run_ok(e, {'op': 'marker', 'id': 1, 'signal': None})   # at the top again: no lift left behind
+        self.assertEqual(e.st['markers'][0], {'t': 5, 'label': 'a'})
+        n = len(e.st['markers'])
+        bad = e.run([{'op': 'marker', 't': 1, 'lift': 'below'}, {'op': 'marker', 'id': 3, 'lift': 'below'}, {'op': 'marker', 't': 1, 'signal': 'tb.dut.valid', 'lift': 'sideways'},
+                     {'op': 'marker', 't': 1, 'signal': 'nosuch'}, {'op': 'marker', 't': 1, 'signal': 'tb.dut.valid', 'lift': False}])
+        self.assertTrue(all('error' in r for r in bad), bad)
+        self.assertIn('give signal', bad[0]['error'])
+        self.assertEqual(len(e.st['markers']), n)   # nothing made of them
+
 
 class Twin(unittest.TestCase):
     """What edit.js does, the same here (review 2026-10-22: A9/B4, M4, B13, B14, B15)."""

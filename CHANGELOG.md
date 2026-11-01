@@ -5,6 +5,20 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.34 — 1 November 2026
+
+The texts of markers on the lines of signals: dragged by the mouse, pale until a colour is picked, in the API and MCP.
+
+- **A marker's text on any line.** Dragged onto a signal it sits on the thin line over that row (the upper half) or under it (the
+  lower half), the line lifted bookmarks use. The drag also moves it along the time, on the edges of that signal; straight up or
+  down, or with alt, the time stays. Up to the axis it is back at the top of the rows. A marker without a text is taken by the top
+  of its dashed line and has a dot on the line.
+- **Colour.** Pale by default, as before. The right button on a text: **Its text…**, **Colour**, **Pale again**, **Delete the
+  marker**. A click puts the cursor on it with its label ready in the list; the list has its signal, ↥ ↧ and **pale** too.
+- **API and MCP.** The command `marker` takes `signal` and `lift` (`signal: null`: the top, `color: null`: pale) in the page, in
+  `viewedit.py` and in `view_edit`; `view_get` says them. A document's `markers` take `color`, `signal` and `lift`, the picture and
+  the static SVG draw the line.
+
 ## 0.33 — 1 November 2026
 
 The gaps on the waves: the viewer's own waves cut by the gap settings, tuned live, scrolled and measured through.

@@ -635,7 +635,7 @@ function parse(src) {
   if (!(M.t1 > M.t0)) M.t1 = M.t0 + (tm ? num(tm.cycle) || 1 : 1);
   M.cycle = tm ? num(tm.cycle) || (M.t1 - M.t0) / 40 : 1;
   const mt = m => m.cycle != null ? C(num(m.cycle)) : num(parseT(m.t));
-  M.markers = (j.markers || []).map(m => ({ t: mt(m), label: m.label || '' }));
+  M.markers = (j.markers || []).map(m => pageMark({ t: mt(m), label: m.label || '', color: colorOk(m.color), signal: m.signal || null, lift: m.lift }));
   M.jumps = j.jumps ? j.jumps.map(m => ({ t: mt(m), span: num(parseT(m.span)) || (M.t1 - M.t0) / 5, label: m.label || '' })) : null;
   M.cursor = j.cursor != null ? num(parseT(j.cursor)) : null;
   M.bookmarks = bmNorm(j.bookmarks); M.arrows = arNorm(j.arrows, j.bookmarks); M.spans = spanNorm(j.spans);
@@ -890,10 +890,15 @@ function arNorm(list, bms) {
     color: colorOk(a.color), label: a.label || '' }))
     .filter(a => a.from && a.to && a.from !== a.to);
 }
-// your markers [{t, label, color}] (a saved state, this browser) and groups [{name, signals: [full path], color}]: normalised
+// your markers [{t, label, color, signal, lift}] (a saved state, this browser) and groups [{name, signals: [full path], color}]:
+// normalised. signal: its text in the lane over that row ("lift": "below": under it), none: at the top of the rows
+const markLift = m => (!m.signal ? false : m.lift === 'below' ? 'below' : true);
+const pageMark = m => ({ ...m, lift: markLift(m) });   // of a document or a page's opts: the same lanes
 function markNorm(list) {
-  return (Array.isArray(list) ? list : []).map(m => ({ t: num(parseT(m && m.t)), label: m && m.label != null ? String(m.label) : '',
-    color: colorOk(m && m.color) })).filter(m => isFinite(m.t));
+  return (Array.isArray(list) ? list : []).map(m => { const signal = m && m.signal ? String(m.signal) : null;
+    return { t: num(parseT(m && m.t)), label: m && m.label != null ? String(m.label) : '', color: colorOk(m && m.color), signal,
+      lift: markLift({ signal, lift: m && m.lift }) }; })
+    .filter(m => isFinite(m.t));
 }
 function groupNorm(list) {
   const seen = new Set();

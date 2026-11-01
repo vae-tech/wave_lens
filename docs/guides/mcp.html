@@ -198,6 +198,10 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
   list under the waves, the arrow with its label in a lane of its own, the marker where the read is done, the handshake signals as a
   group at the top, the address and the data highlighted. Everything stays editable: the person moves a circle, changes a text, adds
   their own.</figcaption></figure>
+<p id="marker-lines">A marker's text need not stay at the top of the rows: <code>{"op": "marker", "t": 125, "label": "read done", "signal": "PREADY", "lift": "below"}</code>
+  puts it on the thin line under <code>PREADY</code> (no <code>lift</code>: over it; <code>"signal": null</code>: at the top again), and
+  <code>view_get</code> gives back <code>signal</code> and <code>lift</code>. It stays pale without a <code>color</code>
+  (<code>"color": null</code>: pale again), and the person can drag it to another line.</p>
 <p>A command that cannot run says why in its result (<code>no signal "PSELL"; similar: apb_tb.PSEL</code>) and the others still run.
   Without a live page the edits go into the page's file, and the person sees them when they open or reload it; what they changed in
   their browser meanwhile in the same parts gives way, the rest stays.</p>
@@ -300,7 +304,7 @@ make mcp-bench AGENT=codex TASKS=a1,b3                 <span class="c"># some ta
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.33 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.34 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

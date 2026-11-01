@@ -161,8 +161,9 @@ command('arrow', 'id? from? to? shape? head? line? color? label? delete?', 'an a
   if (a.label !== undefined) x.label = a.label == null ? '' : String(a.label);
   v.changed(true); return { id: i + 1 };
 });
-command('marker', 'id? t? label? color? delete?', 'a marker: a dashed line across every row with its label at the top: a new one (t default ' +
-  'the cursor), or marker id (1, 2 … as listed) changed; delete: id or "all"', (v, a) => {
+command('marker', 'id? t? label? color? signal? lift? delete?', 'a marker: a dashed line across every row, pale unless it has a color (null: pale ' +
+  'again), with its label at the top of the rows, or with signal in a lane over that row (lift "below": under it, the lanes of the bookmarks; signal ' +
+  'null: at the top again): a new one (t default the cursor), or marker id (1, 2 … as listed) changed; delete: id or "all"', (v, a) => {
   idOk(a.id, 'marker');
   if (a.id === 'all' && !a.delete) fail('marker: id "all" is for delete (a new one: no id)');
   if (a.id != null && a.id !== 'all' && !v.umarks[+a.id - 1]) fail(`no marker ${a.id} (there are ${v.umarks.length})`);
@@ -171,12 +172,17 @@ command('marker', 'id? t? label? color? delete?', 'a marker: a dashed line acros
     if (a.id === 'all') v.umarks = []; else v.umarks.splice(+a.id - 1, 1);
     v.setMarks(); return { id: a.id, deleted: true };
   }
-  const t = a.t != null ? cmdTime(v, a.t) : null;
+  const t = a.t != null ? cmdTime(v, a.t) : null, sig = a.signal ? pickRows(v, a.signal, { one: true })[0].full : null;
+  if (a.lift != null && ![true, 'above', 'below'].includes(a.lift)) fail(`lift: true, "above" or "below", not ${JSON.stringify(a.lift)}`);
   let m = a.id != null ? v.umarks[+a.id - 1] : null;
-  if (!m) { m = { t: v.cursor, label: '', color: null }; v.umarks.push(m); }
+  if (a.lift != null && !(a.signal !== undefined ? sig : m && m.signal)) fail('marker: lift is the lane of a signal: give signal');
+  if (!m) { m = { t: v.cursor, label: '', color: null, signal: null, lift: false }; v.umarks.push(m); }
   if (t != null) m.t = t;
   if (a.label !== undefined) m.label = a.label == null ? '' : String(a.label);
   if (a.color !== undefined) m.color = cmdColor(a);
+  if (a.signal !== undefined) m.signal = sig;
+  if (a.lift != null) m.lift = a.lift;
+  m.lift = markLift(m);
   v.setMarks(); return { id: v.umarks.indexOf(m) + 1 };
 });
 command('compare', 'result? dump? a? map? offset? off? show?', 'a second dump over these waves, where its values differ (red bands, ≠, ]d [d): ' +

@@ -54,7 +54,7 @@ CYC_DEFAULTS = {'cycles': False, 'cycleClock': None, 'cycleZero': None}
 COMMANDS = {
     'cursor': 't', 'cursor2': 't', 'view': 'from? to? at? span?', 'fit': '', 'range': 'from? to? signal?',
     'bookmark': 'n? t? signal? text? label? color? lift? top? link? go? delete?', 'arrow': 'id? from? to? shape? head? line? color? label? delete?',
-    'marker': 'id? t? label? color? delete?', 'span': 'id? from? to? label? color? signals? delete?',
+    'marker': 'id? t? label? color? signal? lift? delete?', 'span': 'id? from? to? label? color? signals? delete?',
     'group': 'name signals? add? remove? color? rename? delete? go? move?',
     'highlight': 'add? remove? set? clear?', 'paint': 'signals? color? clear?', 'select': 'signal? signals?', 'hide': 'signals', 'show': 'signals?',
     'fold': 'groups? all?', 'unfold': 'groups? all?', 'radix': 'signals radix', 'analog': 'signals rows', 'bits': 'signals on?',
@@ -458,7 +458,8 @@ def ar_list(ars):
 
 
 def mark_list(ms):
-    return [{k: v for k, v in (('t', m['t']), ('label', m['label']), ('color', m['color'])) if v is not None and v != ''} for m in ms]
+    return [{k: v for k, v in (('t', m['t']), ('label', m['label']), ('color', m['color']), ('signal', m['signal']),
+                               ('lift', 'below' if m['signal'] and m['lift'] == 'below' else None)) if v is not None and v != ''} for m in ms]
 
 
 def group_list(gs):
@@ -505,7 +506,8 @@ class Editor:
         return span_norm(self.st['spans']) if 'spans' in self.st else self.m.base_spans()
 
     def marks(self):
-        return [{'t': parse_t(x.get('t')), 'label': str(x.get('label') or ''), 'color': x.get('color') or None} for x in self.st.get('markers') or []]
+        return [{'t': parse_t(x.get('t')), 'label': str(x.get('label') or ''), 'color': x.get('color') or None, 'signal': x.get('signal') or None,
+                 'lift': x.get('lift')} for x in self.st.get('markers') or []]
 
     def groups(self):
         return [{'name': g['name'], 'signals': list(g.get('signals') or []), 'color': g.get('color') or None} for g in self.st.get('groups') or []]
@@ -776,11 +778,16 @@ class Editor:
         if mid == 'all':
             fail('marker: id "all" goes with delete (every marker deleted); one to change: its number')
         t = self.time(a['t']) if a.get('t') is not None else None
+        sig = self.m.pick(self.st, a['signal'], one=True)[0]['full'] if a.get('signal') else None
+        if a.get('lift') is not None and a['lift'] not in (True, 'above', 'below'):
+            fail(f'lift: true, "above" or "below", not {json.dumps(a["lift"])}')
         m = ms[mid - 1] if mid is not None else None
+        if a.get('lift') is not None and not (sig if 'signal' in a else m and m['signal']):
+            fail('marker: lift is the lane of a signal: give signal')
         if not m:
             if t is None and self.st.get('cursor') is None:
                 fail('marker: t (the cursor here is not known)')
-            m = {'t': self.st.get('cursor'), 'label': '', 'color': None}
+            m = {'t': self.st.get('cursor'), 'label': '', 'color': None, 'signal': None, 'lift': None}
             ms.append(m)
         if t is not None:
             m['t'] = t
@@ -788,6 +795,10 @@ class Editor:
             m['label'] = '' if a['label'] is None else str(a['label'])
         if 'color' in a:
             m['color'] = a['color'] or None
+        if 'signal' in a:
+            m['signal'] = sig
+        if a.get('lift') is not None:
+            m['lift'] = a['lift']
         self.st['markers'] = mark_list(ms)
         return {'id': ms.index(m) + 1}
 

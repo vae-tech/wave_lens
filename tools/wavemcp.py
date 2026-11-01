@@ -1733,7 +1733,9 @@ TOOLS = [
          'axis); arrow from/to: bookmark numbers; group: a folder of signals at the top; only: just these modules on the waves (with their '
          'submodules); edge: the cursor to the next edge. config (instead of page): a mkhtml config file, bookmark / arrow / span '
          'on its view, kept by a rebuild (a bookmark\'s "at" event stays until a t replaces it). gaps with view true: the waves themselves '
-         'with the idle stretches cut out, as the person scrolls them (live: its answer has cut, what is left).',
+         'with the idle stretches cut out, as the person scrolls them (live: its answer has cut, what is left). marker: pale unless it has a '
+         'color (null: pale again), its label at the top of the rows, with signal in a thin line over that row (lift "below": under it, the lines '
+         'lifted bookmarks use; signal null: at the top again); the person drags it from line to line.',
          {'page': S, 'config': S, 'view': S, 'ops': {'type': 'array', 'items': {'type': 'object'}}, 'save': B}, ('ops',), ro=False),
     tool('view_get', t_view_get, 'What a page shows: bookmarks, arrows, markers, groups, highlight, colours, hidden, cursor, window (live: '
          'with the person\'s own edits), the gaps (live, on the waves: cut, the gaps and the parts kept). rows: list its signals (a pattern, "" all); picture: a PNG of the view (live: the screen; a file: '

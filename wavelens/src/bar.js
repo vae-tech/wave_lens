@@ -80,7 +80,8 @@ const TIPS = {
   'm:mark': ['Bookmark on this signal here: its text asked here, then in the list', ['m']],
   'm:copyname': ['Copy the path', ['yy']], 'm:clear': ['Clear the range', ['Esc', 'ctrl+click']],
   'm:unpaint': ['Its own colour back'],
-  'm:umark': ['A marker here: a dashed line across the rows; its label asked here, then in the Markers list'],
+  'm:umark': ['A marker here: a dashed line across the rows; its label asked here. Drag the text to a line over or under any signal; the right ' +
+    'button on it: its colour'],
   'm:mlist': ['The markers and bookmarks in a list: ↑ ↓ go through them, the waves follow', ['gm']],
   'm:ugnew': ['A group of your own at the top of the names'],
   'm:ugout': ['Out of your group (the signal stays in its module)'], 'm:ugdel': ['Delete your group; its signals stay where they are'],
@@ -89,7 +90,11 @@ const TIPS = {
   'm:mvtop': ['First in your group (a group: the first of yours)'], 'm:mvbot': ['Last in your group (a group: the last of yours)'],
   'm:ugfold': ['Fold / open your group'],
   'bm:mdel': ['Delete the marker'], 'bm:gdel': ['Delete your group; its signals stay where they are'], '.mt': ['Marker time: 250ns, 85.12us', ['Enter']],
-  '.ml': ['Marker label'], '.ugn': ['Group name', ['Enter']],
+  '.ml': ['Marker label'],
+  '.msig': ['The signal whose line, over or under it, has the text of the marker; empty: at the top of the rows', ['Enter']],
+  'bm:mlift': ['The text over its signal or under it'], 'bm:mpale': ['The pale colour of a marker again'],
+  'm:mktext': ['Change the text of this marker'], 'm:mkpale': ['The pale colour of a marker again'], 'm:mkdel': ['Delete this marker'],
+  '.ugn': ['Group name', ['Enter']],
   'act:live': ['Driven by an agent (tools/wavemcp.py view_live): its edits come in as you watch; click: disconnect'],
 };
 TIPS['.subg'] = ['Your groups: put the signals into one, a new one, go to one', ['ctrl+G', 'gl']];
@@ -140,6 +145,7 @@ const HELP = [
     [['right button'], 'a range and the menu: picture, colour, radix, hide'], [['m'], 'bookmark at the cursor'],
     [[']m', '[m'], 'next / previous bookmark'],
     [['gm'], 'the markers and bookmarks: a list, ↑ ↓ go through them'], [['drag a bookmark'], 'move it'],
+    [['drag a marker\'s text'], 'to a line over or under a signal, along the time (alt: the time stays)'],
     [['shift+drag a bookmark'], 'an arrow to another one']]],
   ['The bar', [[['right button'], 'on the bar: which of its tool groups it shows (Show all, Hide all, a tick each)'],
     [['▴', '▾ tools'], 'fold the tools to the title line / open them']]],

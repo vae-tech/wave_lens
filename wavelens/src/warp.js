@@ -194,6 +194,8 @@ Object.assign(WaveView.prototype, {
   },
   // the gap whose column is at x (m: px more on each side)
   gapAt(x, m = 0) { const F = this.warpSync(); return F ? warpParts(F).holes.find(o => x > o.x0 - m && x < o.x1 + m) : null; },
+  // the time at x when that is in a gap's column: the side of the gap nearer
+  gapSide(x) { const h = this.gapAt(x); return h ? (x - h.x0 < h.x1 - x ? h.p : h.q) : null; },
   // the tooltip of a gap's column
   gapTip(x) { const h = this.gapAt(x, 1); return h ? `gap: ${this.gapTextsNow().hole(h.p, h.q)} left out` : ''; },
   gapReadout() {

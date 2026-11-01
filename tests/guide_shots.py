@@ -269,6 +269,11 @@ def viewer(S, ex, build):
     S.save('viewer-tip', clip=union(page.locator('.wv-tip').bounding_box(), v.locator('.bar').bounding_box()), page=page)
     page.add_style_tag(content='.wv-tip { display: none !important; }')   # no more tooltips in this page's shots
     S.quiet(page)
+    # the texts of markers on the lines of signals
+    js("""(v.run([{ op: 'marker', t: '60ns', label: 'setup done', signal: 'PENABLE' }, { op: 'marker', t: '100ns', label: 'data read', signal: 'PRDATA', lift: 'below',
+        color: '#d6336c' }, { op: 'marker', t: '140ns', label: 'at the top' }]), 0)"""); shots.settle(page)
+    S.save('viewer-marker-lines', v, upto=v.locator('.notes'))
+    js("(v.run([{ op: 'marker', id: 'all', delete: true }]), 0)"); shots.settle(page)
     # a measured range (ctrl+drag) on PADDR, then two cursors with an analog bus
     js("(v.setRange(45000, 105000, v.M.rows.find(r => r.name === 'PADDR')), v.select('PADDR'), 0)"); shots.settle(page)
     S.save('viewer-range', v, upto=v.locator('.notes'))
