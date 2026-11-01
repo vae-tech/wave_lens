@@ -48,6 +48,9 @@ command cursor: t
 command cursor2: t
 command cycles: on? clock? zero? reset?
 command edge: dir? kind? value? signal?
+command expr: id? text? scope? label? color? on? row? mark? gap? delete?
+command expr_go: id? dir? n?
+command expr_matches: id? from? to? limit? offset?
 command find: query case? word? regex? highlight? open? mask?
 command fit: 
 command fold: groups? all?

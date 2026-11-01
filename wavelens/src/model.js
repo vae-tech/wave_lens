@@ -807,11 +807,53 @@ function gapText(s, p, q, kind) {
 // times: gapTimes of these rows, when known (the waves' own gaps keep them while idle and keep change)
 function gapCuts(rows, a, b, S, clk, cycle = 1, also = [], picked = false, times = null) {
   if (!S.gaps || !(b > a)) return [[a, b]];
-  const ups = clk ? riseTimes(clk) : [], u = ups.filter(t => t >= a && t <= b), d = u.slice(1).map((t, i) => t - u[i]).sort((x, y) => x - y);
-  const cyc = d.length ? d[d.length >> 1] : cycle, idle = gapLen(S.gapIdle, cyc), keep = Math.max(0, gapLen(S.gapKeep, cyc) || 0);
+  const { idle, keep, ups, min } = gapLens(S, clk, a, b, cycle);
   if (!(idle > 0)) return [[a, b]];
   const ts = times || gapTimes(rows, a, b, clk, picked), more = also.filter(t => t > a && t < b);
-  return idleCuts(more.length ? [...new Set([...ts, ...more])].sort((x, y) => x - y) : ts, a, b, idle, keep, d.length ? ups : [], d.length ? 2 * cyc : 0);
+  return idleCuts(more.length ? [...new Set([...ts, ...more])].sort((x, y) => x - y) : ts, a, b, idle, keep, ups, min);
+}
+// idle and keep (S: gapIdle, gapKeep) over [a, b] in cycles of clk (the step of its rising edges there), else of the model's
+// cycle; ups: its edges, min: the shortest gap (two cycles), when it has any there
+function gapLens(S, clk, a, b, cycle) {
+  const ups = clk ? riseTimes(clk) : [], u = ups.filter(t => t >= a && t <= b), d = u.slice(1).map((t, i) => t - u[i]).sort((x, y) => x - y);
+  const cyc = d.length ? d[d.length >> 1] : cycle, ok = d.length > 0;
+  return { idle: gapLen(S.gapIdle, cyc), keep: Math.max(0, gapLen(S.gapKeep, cyc) || 0), ups: ok ? ups : [], min: ok ? 2 * cyc : 0 };
+}
+// gaps around stretches of time (the matches of expressions; sorted, apart): between two of them for idle or longer, the
+// stretch from keep after the one to keep before the next is left out, and before the first and after the last up to the
+// ends a, b (a part of nothing stays there, so a gap's column says what went). Its ends on the rising edges ups (sorted, if
+// any), the first at or after and the last at or before -> the parts kept, [[from, to], …]
+function keepCuts(spans, a, b, idle, keep, ups = [], min = 0) {
+  const out = [], S = spans.filter(([p, q]) => q >= a && p <= b), n = ups.length, edge = (t, strict) => lastBefore(n, k => ups[k], t, strict);
+  let from = a;
+  for (let i = 0; i <= S.length; i++) {
+    const first = !i, last = i === S.length, p = first ? a : S[i - 1][1], q = last ? b : S[i][0];
+    if (!(q - p >= idle)) continue;
+    let hs = first ? a : p + keep, he = last ? b : q - keep;
+    if (n && !first) { const j = edge(hs, true) + 1; hs = j < n ? ups[j] : Infinity; }
+    if (n && !last) { const k = edge(he); he = k >= 0 ? ups[k] : -Infinity; }
+    if (he - hs > 0 && he - hs >= min && hs >= from) { out.push([from, hs]); from = he; }
+  }
+  out.push([from, b]);
+  return out;
+}
+// stretches of time together: by time, the ones that meet made one
+function mergeSpans(S) {
+  const out = [];
+  for (const [p, q] of [...S].sort((x, y) => x[0] - y[0])) {
+    const l = out[out.length - 1];
+    if (l && p <= l[1]) l[1] = Math.max(l[1], q); else out.push([p, q]);
+  }
+  return out;
+}
+// the parts of [a, b] the gaps of these stretches keep (S: gapIdle, gapKeep; clk, cycle as gapCuts), the times of also
+// (bookmarks) with them; no stretch, or nothing left: [[a, b]]
+function gapKeeps(spans, a, b, S, clk, cycle = 1, also = []) {
+  const { idle, keep, ups, min } = gapLens(S, clk, a, b, cycle);
+  if (!spans.length || !(b > a) || !(idle > 0)) return [[a, b]];
+  const all = mergeSpans([...spans, ...also.filter(t => t > a && t < b).map(t => [t, t])]);
+  const cuts = keepCuts(all, a, b, idle, keep, ups, min);
+  return cuts.some(([p, q]) => q > p) ? cuts : [[a, b]];
 }
 // the times in (a, b) where these rows change, sorted: all but clk's (and the other clocks', unless the rows were picked)
 function gapTimes(rows, a, b, clk, picked = false) {

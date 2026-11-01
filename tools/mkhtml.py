@@ -311,7 +311,7 @@ def main():
     ap.add_argument('--bind', action='append', metavar='NAME@SCOPE', help='binding for every view (repeatable, NAME may be a pattern; replaces the top-level "bind")')
     ap.add_argument('--report', action='append', metavar='NAME@SCOPE', help='binding for the printable "Assertions" section only, over the whole '
                     'dump, in no view (repeatable, NAME may be a pattern; replaces the top-level "report")')
-    ap.add_argument('--no-sva', action='store_true', help='leave the assertion engine (wavelens/sva.js + sva.wasm.js, ~410 kB) out of the page, and evaluate nothing')
+    ap.add_argument('--no-sva', action='store_true', help='leave the assertion engine (wavelens/sva.js + sva.wasm.js, ~440 kB) out of the page, and evaluate nothing')
     ap.add_argument('--reproducible', action='store_true', help='no "Generated" time in the page: the same inputs give the same bytes '
                     '(or set SOURCE_DATE_EPOCH: that time, in UTC)')
     ap.add_argument('--lint', action='store_true', help='check the config: the views are converted and their warnings printed '

@@ -251,8 +251,13 @@ if (G.WaveLens && G.WaveLens.tips) G.WaveLens.tips.add({
   'sv:fail': ['Go to the first failure', [']f']], 'sv:unbind': ['Remove this binding'], 'sv:apply': ['Parse and evaluate', ['ctrl+Enter']],
   'sv:noedit': ['Cancel', ['Esc']], 'sv:revert': ['Back to the page\'s file'], 'sv:nopick': ['Close'], 'sv:to': ['Bind to this instance'],
   'sv:go': ['Go to this attempt'], 'sv:only': ['Only these attempts (again: all)'], 'sv:wt': ['The cursor to this cycle'], 'sv:nowhy': ['Close Why', ['Esc']],
-  'x:prev': ['The previous time it becomes true', ['shift+Enter']], 'x:next': ['The next time it becomes true', ['Enter']],
-  'x:add': ['Draw it as a row ƒ'], 'x:del': ['Remove the row ƒ'], '.svq': ['An expression of the signals: PSEL && !PREADY', ['Enter', 'shift+Enter']],
+  'x:open': ['The list of expressions', ['gx']], 'x:prev': ['The previous match of the expression you are on', ['[x']],
+  'x:next': ['The next match of the expression you are on', [']x']], 'x:new': ['Write a new expression'], 'x:all': ['Every expression\'s marks on or off'],
+  'x:json': ['The list for a config'], 'x:tw': ['Fold / open the expressions'], 'x:forth': ['Its next match', ['→']], 'x:back': ['Its previous match', ['←']],
+  'x:gap': ['Cut the waves to its matches, with the others that have ✂', ['c']], 'x:nogap': ['The waves whole again'],
+  'x:row': ['Draw it as a signal in ƒ expressions'], 'x:list': ['List its matches'], 'x:edit': ['Edit it here'], 'x:del': ['Remove it'],
+  'x:apply': ['Value it and keep it', ['ctrl+Enter']], 'x:noedit': ['Cancel', ['Esc']], 'x:auto': ['The colour of its place in the list'],
+  'x:match': ['Go to this match'],
 });
 
 /* ---------------- the assertion files of the page ---------------- */
@@ -347,6 +352,7 @@ function index() {
   for (const p of [...LIB.panels]) {
     if (p.v.root.isConnected) p.sync(); else LIB.panels.delete(p);   // a viewer that is gone
     const x = p.v.svaExprs; if (x && x.list.length) x.again();   // package constants may have come
+    if (x) x.wordsOf = null;
   }
 }
 SVA.fileList = () => LIB.files.map(({ name, path, origin, hash }) => ({ name, path, origin, hash }));
@@ -1766,13 +1772,15 @@ function splitClock(text) {
   const m = CLOCKED.exec(text);
   return m ? { clock: { edge: m[1] || 'posedge', signal: m[2] }, body: m[3].trim() } : { clock: null, body: String(text).trim() };
 }
+// the one module at the top of a dump (a testbench): its signals need no path; null: none, or several
+const soleTop = I => { const t = I.scopes.filter(s => s && parts(s).length === 1 && s !== I.root); return t.length === 1 ? t[0] : null; };
 // names in scope S of model M, each from S up to the root, else as a path from the top -> {map: {name: row}, missing, errors}
 function resolveUp(M, pfx, names, S) {
   const I = scopeInfo(M), map = {}, missing = [], errors = [];
   for (const n of names) {
     let hit = null;
     for (let s = S; ; s = parent(s)) { hit = lookup(I, s, n, pfx); if (hit || !s || s === I.root) break; }
-    hit = hit || lookup(I, I.root, n, pfx) || lookup(I, '', n, pfx);
+    hit = hit || lookup(I, I.root, n, pfx) || lookup(I, '', n, pfx) || (soleTop(I) != null && lookup(I, soleTop(I), n, pfx));
     if (!hit) missing.push(n);
     else if (hit.many) errors.push(`${n} (ambiguous: ${hit.many.map(r => r.full).join(' or ')})`);
     else map[n] = hit.row;
@@ -1802,29 +1810,39 @@ function tvValue(v, w) {
 }
 const truthy = v => (typeof v === 'number' ? v !== 0 : /^h/i.test(v) ? /[1-9a-f]/i.test(v) : /1/.test(String(v)));
 const MAX_TIMES = 2e6;
-// expression {text, scope} of model M -> {text, times, values, width, map} | {err}
-async function valueOf(M, pfx, x) {
+// what an expression {text, scope} of model M reads: parsed, its names found -> {clock, body, files, signals, rows} | {err}
+async function exprNames(M, pfx, x) {
   const { clock, body } = splitClock(x.text), eng = await SVA.engine(), files = SOURCES();
   const info = eng.call({ files, exprs: [body] });
   const e = info.exprs ? info.exprs[0] : { errors: (info.errors || []).map(r => r.msg) };
   if (e.errors) return { err: e.errors[0] };
-  const names = e.signals.map(s => s.name).concat(clock ? [clock.signal] : []);
-  const res = resolveUp(M, pfx, names, x.scope || '');
+  const res = resolveUp(M, pfx, e.signals.map(s => s.name).concat(clock ? [clock.signal] : []), x.scope || '');
   if (res.missing.length || res.errors.length) return { err: res.errors.concat(res.missing.length ? [`not found: ${res.missing.join(', ')}`] : []).join('; ') };
-  const rows = res.map, sm = rowSampler(rows);
+  return { clock, body, files, eng, signals: e.signals, rows: res.map };
+}
+// expression {text, scope} of model M -> {text, times, values, width, map, spans, stat} | {err}; need(rows): a large dump
+// read as it is needed (view.need)
+async function valueOf(M, pfx, x, need) {
+  const p = await exprNames(M, pfx, x); if (p.err) return p;
+  const { clock, body, files, eng, signals, rows } = p;
+  if (need) await need(Object.values(rows));
+  const sm = rowSampler(rows);
   let times, col;
   if (clock) { times = sm.edges(clock.signal, clock.edge) || []; col = n => sm.column(n, times); }
   else {
     const all = new Set([M.t0]);
-    for (const s of e.signals) for (const o of rows[s.name].tr) all.add(o.t);
+    for (const s of signals) for (const o of rows[s.name].tr) all.add(o.t);
     times = [...all].sort((a, b) => a - b); col = n => atColumn(rows[n], times);
   }
   if (times.length > MAX_TIMES) return { err: `${times.length} changes: give it a clock, @(posedge clk) …` };
   const trace = { cycles: times.length, times: [], signals: {}, widths: {} };
-  for (const s of e.signals) { trace.signals[s.name] = col(s.name); const w = rowWidth(rows[s.name]); if (w) trace.widths[s.name] = w; }
+  for (const s of signals) { trace.signals[s.name] = col(s.name); const w = rowWidth(rows[s.name]); if (w) trace.widths[s.name] = w; }
   const out = eng.call({ files, exprs: [body], trace }).exprs[0];
   if (out.errors) return { err: out.errors[0] };
-  return { text: (clock ? `@(${clock.edge} ${clock.signal}) ` : '') + out.text, times, values: out.values, width: out.width || 1, map: rows };
+  const res = { text: (clock ? `@(${clock.edge} ${clock.signal}) ` : '') + out.text, times, values: out.values, width: out.width || 1, map: rows };
+  res.spans = stretches(res, M.t1);
+  res.stat = spanStat(res.spans, M.t1 - M.t0);
+  return res;
 }
 // the times where it becomes true (a match of the search)
 function matches(res) {
@@ -1833,122 +1851,513 @@ function matches(res) {
   res.values.forEach((v, i) => { const t = truthy(v); if (t && !was) out.push(res.times[i]); was = t; });
   return out;
 }
+// the stretches of time it holds: [[from, to], …] by time, the last to `end` when it still holds there
+function stretches(res, end) {
+  const out = [];
+  let at = null;
+  res.values.forEach((v, i) => { const t = truthy(v), now = res.times[i];
+    if (t && at == null) at = now; else if (!t && at != null) { out.push([at, now]); at = null; } });
+  if (at != null) out.push([at, Math.max(end, at)]);
+  return out;
+}
+// the numbers of a list of stretches: how many, the time they take (its share of `whole`), the first and last start, the
+// shortest and the longest
+function spanStat(S, whole) {
+  const len = S.map(([a, b]) => b - a), time = len.reduce((a, b) => a + b, 0);
+  return { n: S.length, time, share: whole > 0 ? time / whole : 0, first: S.length ? S[0][0] : null, last: S.length ? S[S.length - 1][0] : null,
+    min: S.length ? len.reduce((a, b) => Math.min(a, b)) : null, max: S.length ? len.reduce((a, b) => Math.max(a, b)) : null };
+}
 // a row that draws the values like a signal ("tv")
 function fillRow(row, res) {
   const w = res.width, tv = res.values.map((v, i) => [res.times[i], tvValue(v, w)]);
   const r0 = G.WaveLens.parse({ signal: [{ name: row.name, tv, width: w }] }).rows.find(r => r.type === 'sig');
   Object.assign(row, { tr: r0.tr, gaps: r0.gaps, width: r0.width, tv: true });
 }
+// An item of the list as a config, a saved state or the expr command gives it -> {text, scope, label, color, on, row, mark, gap}.
+// A text alone (or an object without "row") draws its row, as "exprs" always did; new ones here say row: false. gap: the
+// waves cut to its matches, with the others' that have it.
+const MARK_KINDS = ['band', 'line', 'strip'];
+const exprText = t => String(t == null ? '' : t).trim().replace(/[;\s]+$/, '');
+function exprNorm(x) {
+  const o = typeof x === 'string' ? { expr: x } : x || {}, color = o.color && U.colorOk ? U.colorOk(o.color) : o.color;
+  return { text: exprText(o.expr ?? o.text), scope: o.scope || '', label: o.label != null ? String(o.label) : '', color: color || null, on: o.on !== false,
+    row: o.row !== false, mark: MARK_KINDS.includes(o.mark) ? o.mark : 'band', gap: !!o.gap };
+}
+// …and back, what is as the defaults left out: a text alone when nothing else is said (tools/viewedit.py expr_json)
+function exprJSON(x) {
+  const o = Object.fromEntries(Object.entries({ expr: x.text, scope: x.scope, label: x.label, color: x.color, on: x.on ? null : false,
+    row: x.row ? null : false, mark: x.mark === 'band' ? null : x.mark, gap: x.gap ? true : null }).filter(([, v]) => v != null && v !== ''));
+  return Object.keys(o).length === 1 ? x.text : o;
+}
+const exprLine = x => x.text.replace(/\s+/g, ' ');
+// the colour of the expression at place i of its list when it has none of its own
+const EXPR_COLORS = ['#d9822b', '#2f9e8f', '#8e6bd8', '#d6457a', '#5b8def', '#7aa32c', '#c0584a', '#3aa0c9'];
+const exprColor = (x, i) => x.color || EXPR_COLORS[i % EXPR_COLORS.length];
+// what it marks on the waves (view.extraMarks, paintTimeMarks): the ones on, valued, in the order of the list
+const exprMarks = (list, cur) => list.map((x, i) => (x.on && x.res && x.res.spans ? { spans: x.res.spans, color: exprColor(x, i), label: x.label, mark: x.mark,
+  on: x === cur, tip: `ƒ ${x.label || exprLine(x)}` } : null)).filter(Boolean);
+// what the gaps keep of a list (view.extraKeep): the stretches of the ones with ✂, together
+const exprKeeps = list => U.mergeSpans(list.flatMap(x => (x.gap && x.res && x.res.spans) || []));
 // rows of a list of expressions under one group ("ƒ expressions"); st keeps the row objects between calls
-function exprRows(st, list, base = { anc: [], depth: 0 }) {
+function exprRows(st, all, base = { anc: [], depth: 0 }) {
+  const list = all.filter(x => x.row);
   if (!list.length) return [];
   const g = st.g || (st.g = { type: 'group', id: G.WaveLens.rowId() });
   Object.assign(g, { name: `ƒ expressions (${list.length})`, full: 'ƒ', path: 'ƒ', anc: base.anc, depth: base.depth, cls: 'sva-xg',
-    title: 'Expressions of the waves (a name in the bar: ƒ); click one to put it in the field' });
+    title: 'The expressions drawn as signals (the Expressions list: ƒ row); click one to find it in the list' });
   st.rows = st.rows || new Map();
   const rows = list.map(x => {
     const r = st.rows.get(x) || { type: 'sig', tr: [], gaps: [], width: 1, x };
     st.rows.set(x, r);
     const err = x.res && x.res.err;
     if (x.res && !err && r.res !== x.res) { fillRow(r, x.res); r.res = x.res; }
-    return Object.assign(r, { anc: base.anc.concat(g.id), depth: base.depth + 1, name: `ƒ ${x.text}${err ? '  ⚠ ' + err : ''}`, full: `ƒ ${x.text}`,
-      cls: 'sva-expr' + (err ? ' bad' : ''), title:
+    return Object.assign(r, { anc: base.anc.concat(g.id), depth: base.depth + 1, name: `ƒ ${x.label || exprLine(x)}${err ? '  ⚠ ' + err : ''}`,
+      full: `ƒ ${x.text}`, cls: 'sva-expr' + (err ? ' bad' : ''), stroke: x.color || undefined, title:
         `${x.res && x.res.text ? x.res.text : x.text}${x.scope ? '\nnames from ' + x.scope + ' up' : ''}${err ? '\n' + err : ''}` });
   });
   return [g, ...rows];
 }
-SVA.expressions = { splitClock, valueOf, matches, tvValue };
+SVA.expressions = { splitClock, valueOf, matches, tvValue, stretches, spanStat, norm: exprNorm, json: exprJSON };
 
-/* ---------------- expressions in a viewer: the field in the bar, the rows, the search ---------------- */
+/* ---------------- expressions in a viewer: the list, the editor, the marks, the commands ---------------- */
+// The panel under the bar, as the assertions': a line per expression (its marks on or off, colour, label, text, what it
+// found, ◀ ▶ through its matches, how it marks, its row ƒ, the matches listed, ✎ ✕). this.cur: the one the user is on (its
+// signals highlighted, its marks stronger; ]x [x and the bar's ◀ ▶ step through its matches, ]X [X through the list).
+const EXPR_LIST_MAX = 200, CHECK_MS = 300, CHECK_MAX = 300000;   // matches listed under a line; the check while typing: its delay, the changes it values
+const SYS_FUNCS = ['$rose', '$fell', '$stable', '$changed', '$past', '$countones', '$onehot', '$onehot0', '$isunknown'];
 class Exprs {
   constructor(v) {
-    this.v = v; v.svaExprs = this; this.list = []; this.st = {};
+    this.v = v; v.svaExprs = this; this.list = []; this.st = {}; this.cur = null; this.ed = null; this.jsonOpen = false; this.checkN = 0;
+    this.names = (v.sortIgnore || []).join();
     this.key = 'wavelens.sva-exprs:' + (v.storeId || G.location.pathname + ':' + (v.opts.key || v.root.id || v.root.dataset.wave || v.M.title));
-    const g = v.addTool('expression', `<input type="text" class="svq" spellcheck="false" placeholder="ƒ  PSEL && !PREADY"
-      aria-label="an expression of the signals: Enter finds the next time it becomes true"
-      title="An expression of the signals (SystemVerilog, as in an assertion: && || ! == $rose(a) $past(a) a[3:0]` +
-        ` pkg::NAME …); @(posedge clk) … samples it at the clock's edges` +
-        `.&#10;Names: from the selected signal's module up to the top, or a full path` +
-        `.&#10;Enter / shift+Enter: the next / previous time it becomes true.` +
-        ` + Row: draw it as a signal (ƒ expressions).">` +
-      ('<button type="button" data-x="prev" title="The previous time it becomes true (shift+Enter)">◀</button><button type="button" data-x="next" title="The ' +
-          'next time it becomes true (Enter)">▶</button>') +
-      ('<span class="svqn" aria-live="polite"></span><button type="button" data-x="add" title="Draw the expression as a signal in ƒ expressions (kept in ' +
-          'this browser)">+ Row</button>') +
-      '<button type="button" data-x="del" title="Remove the expression in the field (or the selected ƒ row) from the rows">− Row</button>');
+    this.open = store.get(this.key + ':open') ?? !!v.S.exprsOpen;
+    const g = v.addTool('expression',
+      ('<button type="button" data-x="open" aria-pressed="false" title="The list of expressions: write them, mark them on the waves, go through their ' +
+        'matches (g x)">ƒ Expressions<span class="svqn"></span></button>') +
+      ('<button type="button" data-x="prev" title="The previous match of the expression you are on ([x)">◀</button>' +
+        '<button type="button" data-x="next" title="The next match of the expression you are on (]x)">▶</button>' +
+        '<span class="svqk" aria-live="polite"></span>'));
     g.classList.add('svx-tool');
-    this.inp = g.querySelector('input.svq'); this.cnt = g.querySelector('.svqn');
-    this.inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); this.find(e.shiftKey ? -1 : 1);
-      } else if (e.key === 'Escape') this.inp.blur(); });
-    this.inp.addEventListener('input', () => { this.cnt.textContent = ''; });
+    this.btn = g.querySelector('[data-x=open]'); this.cnt = g.querySelector('.svqn'); this.pos = g.querySelector('.svqk');
     g.addEventListener('click', e => { const b = e.target.closest('button[data-x]'); if (!b) return;
-      ({ prev: () => this.find(-1), next: () => this.find(1), add: () => this.add(), del: () => this.del() })[b.dataset.x](); });
+      ({ open: () => this.toggle(), prev: () => this.step(-1), next: () => this.step(1) })[b.dataset.x](); });
+    this.el = document.createElement('div'); this.el.className = 'sva xpanel'; this.el.hidden = true; v.addPanel(this.el);
+    this.el.addEventListener('click', e => this.click(e));
+    this.el.addEventListener('change', e => this.changed(e));
+    this.el.addEventListener('input', e => this.typed(e));
+    this.el.addEventListener('keydown', e => this.keyDown(e));
     // before the names are drawn again
-    v.listen('names', 'click', e => { const r = v.rowAt(e.target); if (r && r.x && this.list.includes(r.x)) { this.inp.value = r.x.text;
-      this.cnt.textContent = ''; } }, { capture: true });
+    v.listen('names', 'click', e => { const r = v.rowAt(e.target); if (r && r.x && this.list.includes(r.x)) this.pick(r.x); }, { capture: true });
     if (v.extraRows) v.extraRows.push(grp => (grp ? [] : exprRows(this.st, this.list)));
+    v.extraMarks.push(() => exprMarks(this.list, this.cur));
+    v.extraKeep = { by: () => this.list.flatMap((x, i) => (x.gap ? [i + 1] : [])), spans: () => this.keeps(), off: cut => this.noGaps(cut) };
     if (v.extraState) v.extraState.push({ key: 'exprs', get: () => this.json(), set: l => this.setList(l) });
-    if (v.extraJSON) v.extraJSON.push(() => this.list.length ?
-      `"exprs": [\n${this.list.map(x => '  ' + JSON.stringify(x.scope ? { expr: x.text, scope: x.scope } : x.text)).join(',\n')}\n]` : null);
-    v.root.addEventListener('wavelens:settings', () => this.again(), { signal: v.ac.signal });
+    if (v.extraJSON) v.extraJSON.push(() => (this.list.length ? this.jsonText() : null));
+    v.addKey(']x', () => this.step(1), ']x [x next / previous match of the expression').addKey('[x', () => this.step(-1));
+    v.addKey(']X', () => this.stepList(1), ']X [X next / previous expression').addKey('[X', () => this.stepList(-1));
+    v.addKey('gx', () => this.toggle(), 'gx the list of expressions');
+    v.root.addEventListener('wavelens:settings', () => this.settings(), { signal: v.ac.signal });
+    v.root.addEventListener('wavelens:reset', () => this.unpick(), { signal: v.ac.signal });
+    v.root.addEventListener('wavelens:destroy', () => { this.el.remove(); v.svaExprs = null; }, { once: true });
     const page = (v.M.src.sva && v.M.src.sva.exprs) || [], kept = store.get(this.key);
-    this.list = (kept || page).map(x => (typeof x === 'string' ? { text: x, scope: '' } : { text: x.expr || x.text, scope: x.scope || '' })).filter(x =>
-      x.text);
+    this.list = (kept || page).map(exprNorm).filter(x => x.text);
     this.cache = new Map();
+    this.render();
     if (this.list.length) this.again();
   }
   // the scope a new expression is written in: the selected signal's module, else the view's top ('')
   scope() { const I = scopeInfo(this.v.M), r = this.v.sel, s = r && I.of.get(r); return s && s !== I.root ? s : ''; }   // '': the view's top
+  need() { return this.v.lazy ? rows => this.v.need(rows) : undefined; }   // a large dump: the signals it reads first
   async value(x) {
     const k = x.text + '\n' + x.scope;
-    if (!this.cache.has(k)) this.cache.set(k, valueOf(this.v.M, this.v.sortIgnore || [], x).catch(err => ({ err: err.message })));
+    if (!this.cache.has(k)) this.cache.set(k, valueOf(this.v.M, this.v.sortIgnore || [], x, this.need()).catch(err => ({ err: err.message })));
     return this.cache.get(k);
   }
-  // every row again (the files or the name settings changed)
+  // every expression again (the files or the name settings changed)
   async again() {
     this.cache.clear();
     await Promise.all(this.list.map(async x => { x.res = await this.value(x); }));
-    this.v.renderNames(); this.v.draw();
+    this.render(); this.redraw();
   }
-  json() { return this.list.map(x => (x.scope ? { expr: x.text, scope: x.scope } : x.text)); }
+  // the settings changed: the names read otherwise (the prefixes), or only what the gaps leave
+  settings() {
+    const names = (this.v.sortIgnore || []).join();
+    if (names !== this.names) { this.names = names; this.again(); } else this.cutText();
+  }
+  redraw() {
+    const cut = this.list.some(x => x.gap);
+    if (cut !== !!this.cut) { this.cut = cut; this.v.gapsChanged(); this.cutText(); return; }   // the gaps on or off: the head, the bar
+    this.v.renderNames(); this.v.draw(); if (cut) this.cutText();
+  }
+  // the stretches of the ones with ✂: the same array until those change (the waves' memo goes by it)
+  keeps() {
+    const rs = this.list.filter(x => x.gap).map(x => x.res), m = this.kept;
+    if (!m || m.rs.length !== rs.length || m.rs.some((r, i) => r !== rs[i])) this.kept = { rs, spans: exprKeeps(this.list) };
+    return this.kept.spans;
+  }
+  // ✂ off every line; cut: and the waves drawn whole again now (else the gaps' setting does that)
+  noGaps(cut) {
+    if (!this.list.some(x => x.gap)) return;
+    this.list.forEach(x => { x.gap = false; }); this.cut = false; this.save(); this.render();
+    if (cut) this.v.gapsChanged();
+  }
+  // what ✂ leaves of the waves, in the panel's head
+  cutText() {
+    const el = this.el.querySelector('.xcut'), o = this.v.gapParts(0), n = this.list.filter(x => x.gap).length; if (!el) return;
+    el.textContent = n && o ? `✂ ${n} · ${o.gaps} gap${o.gaps === 1 ? '' : 's'} · ${this.dur(o.kept)} of ${this.dur(o.total)} kept` : '';
+  }
+  json() { return this.list.map(exprJSON); }
+  jsonText() { return `"exprs": [\n${this.json().map(x => '  ' + JSON.stringify(x)).join(',\n')}\n]`; }
   save() { if (!store.set(this.key, this.json())) this.v.toast('not kept in this browser'); }
-  // a saved list (Load… of the viewer's state): the rows of these expressions
+  told(detail) { this.v.root.dispatchEvent(new CustomEvent('wavelens:sva-exprs', { detail })); }
+  // a saved list (Load… of the viewer's state, the page's edits): these expressions
   async setList(l) {
-    this.list = (Array.isArray(l) ? l : []).map(x => (typeof x === 'string' ? { text: x, scope: '' } : { text: x.expr || x.text, scope: x.scope ||
-      '' })).filter(x => x.text);
+    this.list = (Array.isArray(l) ? l : []).map(exprNorm).filter(x => x.text);
     if (this.v.sel && this.v.sel.x && !this.list.includes(this.v.sel.x)) this.v.select(null);
-    this.save(); await this.again();
+    if (this.cur && !this.list.includes(this.cur)) this.unpick();
+    this.ed = null; this.save(); await this.again();
   }
-  text() { const t = this.inp.value.trim(); if (!t) { this.v.toast('type an expression of the signals, e.g. PSEL && !PREADY'); this.inp.focus(); } return t; }
-  async add() {
-    const t = this.text(); if (!t) return;
-    if (this.list.some(x => x.text === t)) { this.v.toast(`ƒ ${t} is there already`); return; }
-    const x = { text: t, scope: this.scope() };
-    x.res = await this.value(x);
-    if (x.res.err) { this.v.toast(`ƒ ${t}: ${x.res.err}`); this.inp.classList.add('bad'); setTimeout(() => this.inp.classList.remove('bad'), 900); return; }
-    this.list.push(x); this.save();
-    this.v.renderNames(); this.v.draw(); this.v.centerRow(this.st.rows.get(x));
-    this.v.root.dispatchEvent(new CustomEvent('wavelens:sva-exprs', { detail: { added: x.text } }));
+  color(x) { return exprColor(x, this.list.indexOf(x)); }
+  dur(d) { return this.v.M.timed ? G.WaveLens.fmtExact(d) : `${d} cycle${d === 1 ? '' : 's'}`; }
+  // what it found, in words
+  found(x) {
+    const r = x.res, v = this.v;
+    if (!r) return 'evaluating…';
+    if (r.err) return `⚠ ${r.err}`;
+    const s = r.stat;
+    if (!s.n) return 'never true';
+    return `${s.n} match${s.n === 1 ? '' : 'es'} · true ${(s.share * 100).toFixed(s.share < 0.1 ? 1 : 0)}% of the time · first ${v.when(s.first)}` +
+      (s.n > 1 ? ` · last ${v.when(s.last)} · ${this.dur(s.min)} … ${this.dur(s.max)} long` : ` · ${this.dur(s.max)} long`);
   }
-  del() {
-    const sel = this.v.sel && this.v.sel.x, t = this.inp.value.trim();
-    const x = this.list.find(x => x.text === t) || (this.list.includes(sel) ? sel : null);
-    if (!x) { this.v.toast(t ? `no ƒ row ${t}` : 'put a ƒ row in the field (click its name) to remove it'); return; }
-    this.list.splice(this.list.indexOf(x), 1); this.st.rows.delete(x); this.save();
-    if (this.v.sel === sel) this.v.select(null);
-    this.v.renderNames(); this.v.draw();
+  place(x) { const n = x.res && x.res.stat ? x.res.stat.n : 0; return x.k != null && n ? `${x.k + 1}/${n}` : n ? `${n}` : ''; }
+
+  /* ---------------- the panel ---------------- */
+  lineHTML(x, i) {
+    const r = x.res, err = r && r.err, S = r && r.spans, go = !!(S && S.length), btn = (a, t, title, on) => `<button type="button" class="ic" data-x="${a}"` +
+      ` title="${title}"${on === undefined ? '' : ` aria-pressed="${on}"`}>${t}</button>`;
+    const more = S && S.length > EXPR_LIST_MAX ? `<li class="muted">… ${S.length - EXPR_LIST_MAX} more (the expr_matches command gives them)</li>` : '';
+    const list = x.open && S ? `<ol class="atl">${S.slice(0, EXPR_LIST_MAX).map(([a, b], k) => `<li><button type="button" data-x="match"
+      data-k="${k}">#${k + 1}</button> ${esc(this.v.when(a))} · ${esc(this.dur(b - a))}</li>`).join('')}${more}</ol>` : '';
+    return `<li data-i="${i}" tabindex="0" class="${x === this.cur ? 'here' : ''}${err ? ' bad' : ''}"
+      title="click: go to its next match · ↑ ↓ the other expressions · ← → its matches · space: its marks on or off · c: the waves cut to it">
+      <span class="an">${i + 1}</span>
+      <span class="xc"><input type="checkbox" data-c="on"${x.on ? ' checked' : ''} aria-label="mark it on the waves" title="Mark it on the waves"><input
+        type="color" data-c="color" value="${esc(this.hexOf(x))}" aria-label="its colour" title="Its colour on the waves"></span>
+      <span class="xb">${x.label ? `<b class="al">${esc(x.label)}</b>` : ''}<code class="at" title="${esc((r && r.text) || x.text)}${x.scope ?
+        `\nnames from ${esc(x.scope)} up` : ''}">${propParts(exprLine(x)).map(t => `<span class="pp">${esc(t)}</span>`).join(' ')}</code>
+        <span class="xr${err ? ' err' : ''}">${esc(this.found(x))}</span></span>
+      <span class="ab"><button type="button" class="ic" data-x="back" title="Its previous match"${go ? '' : ' disabled'}>◀</button><span
+        class="xk">${this.place(x)}</span><button type="button" class="ic" data-x="forth" title="Its next match"${go ? '' : ' disabled'}>▶</button><select
+          data-c="mark" aria-label="how it is marked"
+          title="On the waves: a pale band where it holds, a line where it starts, or only the strip at the top">${MARK_KINDS.map(k =>
+    `<option${k === x.mark ? ' selected' : ''}>${k}</option>`).join('')}</select>${btn('gap', '✂', 'Cut the waves to its matches, with the others that ' +
+    'have ✂: idle and keep on the bar, a gap between them', x.gap)}${btn('row', 'ƒ row', 'Draw it as a signal (ƒ expressions)', x.row)}${
+  btn('list', '≡', 'List its matches', !!x.open)}${btn('edit', '✎', 'Edit it (ctrl+Enter applies)')}${btn('del', '✕', 'Remove it')}</span>
+      ${list}${this.ed && this.ed.x === x ? this.editHTML() : ''}</li>`;
   }
-  // the next / previous time the expression in the field becomes true, from the cursor (round the ends)
-  async find(dir) {
-    const t = this.text(); if (!t) return;
-    const x = this.list.find(x => x.text === t) || { text: t, scope: this.scope() }, res = await this.value(x), v = this.v;
-    if (res.err) { this.cnt.textContent = ''; v.toast(`ƒ ${t}: ${res.err}`); return; }
-    const ms = matches(res);
-    if (!ms.length) { this.cnt.textContent = '0'; v.toast(`ƒ ${t}: never true`); return; }
-    const k = U.stepTo(ms, v.cursor, dir);
-    v.setCursor(ms[k]);
-    this.cnt.textContent = `${k + 1}/${ms.length}`;
-    this.last = { text: t, k, n: ms.length, t: ms[k] };
+  hexOf(x) { const c = this.color(x); if (/^#[0-9a-f]{6}$/i.test(c)) return c;
+    const g = document.createElement('canvas').getContext('2d'); g.fillStyle = c; return /^#/.test(g.fillStyle) ? g.fillStyle : '#808080'; }
+  render() {
+    const el = this.el, n = this.list.length, on = this.list.filter(x => x.on).length;
+    el.hidden = !n && !this.ed;
+    this.btn.setAttribute('aria-pressed', !el.hidden && this.open); this.cnt.textContent = n ? ` (${n})` : '';
+    this.bar();
+    if (el.hidden) { el.innerHTML = ''; return; }
+    const ed = this.keepEd(), ol = el.querySelector('ol.xl'), top = ol ? ol.scrollTop : 0;
+    el.innerHTML = `<div class="nh"><button type="button" class="tw" data-x="tw" aria-expanded="${this.open}"
+      aria-label="${this.open ? 'fold' : 'open'} the expressions">${this.open ? '▾' : '▸'} <b>Expressions</b></button><span class="muted">${n} · ${on} ` +
+      `marked on the waves · click a line to go to its next match · kept in this browser</span><span class="xcut" aria-live="polite"></span>` +
+      `<button type="button" data-x="new" title="Write a new expression">+ New</button>` +
+      (this.list.some(x => x.gap) ? `<button type="button" data-x="nogap" title="The waves whole again: ✂ off every expression">✂ off</button>` : '') +
+      (n ? `<button type="button" data-x="all" title="Every expression's marks on, or off when they all are">${on === n ? 'All off' : 'All on'}</button>` +
+        `<button type="button" data-x="json" aria-pressed="${this.jsonOpen}" title="The list for the config file">JSON</button>` : '') + '</div>' +
+      (this.open ? (this.ed && !this.ed.x ? this.editHTML() : '') + (n ? `<ol class="xl">${this.list.map((x, i) => this.lineHTML(x, i)).join('')}</ol>` : '') +
+      `<textarea class="json" readonly${this.jsonOpen ? '' : ' hidden'} aria-label="the expressions as JSON"></textarea>` : '');
+    const ta = el.querySelector('textarea.json'); if (ta && this.jsonOpen) ta.value = this.jsonText();
+    const nol = el.querySelector('ol.xl'); if (nol) nol.scrollTop = top;
+    this.backEd(ed); this.cutText();
+  }
+  // one line's numbers in place
+  bar() { const x = this.cur; this.pos.textContent = x ? this.place(x) : ''; }
+  lineEl(x) { return this.el.querySelector(`ol.xl > li[data-i="${this.list.indexOf(x)}"]`); }
+  mark(x) {
+    for (const e of this.el.querySelectorAll('ol.xl > li.here')) e.classList.remove('here');
+    const li = x && this.lineEl(x); this.bar(); if (!li) return;
+    li.classList.add('here'); const k = li.querySelector('.xk'); if (k) k.textContent = this.place(x);
+    const ol = li.closest('ol'), r = li.getBoundingClientRect(), q = ol.getBoundingClientRect();
+    if (r.top < q.top || r.bottom > q.bottom) ol.scrollTop += r.top - q.top - ol.clientHeight / 3;
+  }
+  // the list shown and open, shown folded, or gone when it is empty
+  toggle(on = !(this.open && !this.el.hidden)) {
+    this.open = on; store.set(this.key + ':open', on);
+    if (on && !this.list.length && !this.ed) { this.edit(null); return; }
+    if (!on) this.ed = null;
+    this.render(); this.v.draw();
+  }
+  // the one the user is on: its signals highlighted (Esc: none), its line marked
+  pick(x) {
+    const v = this.v, same = this.cur === x; this.cur = x;
+    if (!same) {
+      const row = this.st.rows && this.st.rows.get(x);
+      v.extraPicks = this.picks = new Map([...Object.values((x.res && x.res.map) || {}), ...(row && x.row ? [row] : [])].map(r => [r, 'hl8']));
+      this.redraw();
+    }
+    this.mark(x);
+  }
+  unpick() { const v = this.v; this.cur = null; this.mark(null); if (v.extraPicks === this.picks) v.extraPicks = new Map(); v.renderNames(); v.draw(); }
+  // the cursor to its match: the next or previous from the cursor (round the ends), or number n of them -> {t, k, n}
+  async go(x, dir, n) {
+    const v = this.v, res = x.res || (x.res = await this.value(x));
+    if (res.err) { v.toast(`ƒ ${exprLine(x)}: ${res.err}`); this.pick(x); return null; }
+    const ms = res.spans.map(s => s[0]);
+    if (!ms.length) { x.k = null; v.toast(`ƒ ${exprLine(x)}: never true`); this.pick(x); return null; }
+    if (n != null && !(n >= 1 && n <= ms.length)) throw new Error(`no match ${n} (there are ${ms.length})`);
+    x.k = n != null ? n - 1 : U.stepTo(ms, v.cursor, dir);
+    this.pick(x); v.moveTo(ms[x.k]); this.mark(x);
+    return { t: ms[x.k], k: x.k + 1, n: ms.length };
+  }
+  // ]x [x, the bar's ◀ ▶: the one the user is on, else the first that is marked
+  step(dir) {
+    const x = this.cur || this.list.find(y => y.on) || this.list[0];
+    if (!x) { this.toggle(true); return; }
+    return this.go(x, dir);
+  }
+  stepList(dir) {
+    const n = this.list.length; if (!n) { this.v.toast('no expression'); return; }
+    const k = this.list.indexOf(this.cur);
+    return this.go(this.list[k < 0 ? (dir > 0 ? 0 : n - 1) : (k + dir + n) % n], 1);
+  }
+  remove(x) {
+    this.list.splice(this.list.indexOf(x), 1); this.st.rows && this.st.rows.delete(x);
+    if (this.v.sel && this.v.sel.x === x) this.v.select(null);
+    if (this.cur === x) this.unpick();
+    if (this.ed && this.ed.x === x) this.ed = null;
+    this.save(); this.render(); this.redraw(); this.told({ removed: x.text });
+  }
+  click(e) {
+    const b = e.target.closest('button[data-x]'), li = e.target.closest('ol.xl > li'), x = li ? this.list[+li.dataset.i] : null, a = b && b.dataset.x;
+    if (b) {
+      if (a === 'tw') this.toggle();
+      else if (a === 'new') this.edit(null);
+      else if (a === 'all') { const on = this.list.some(y => !y.on); this.list.forEach(y => { y.on = on; }); this.save(); this.render(); }
+      else if (a === 'json') { this.jsonOpen = !this.jsonOpen; this.render(); }
+      else if (a === 'nogap') this.noGaps(true);
+      else if (a === 'apply') this.apply();
+      else if (a === 'noedit') this.noEdit();
+      else if (a === 'auto' && this.ed && this.ed.x) { this.ed.x.color = null; this.save(); this.render(); this.redraw(); }
+      else if (x) {
+        if (a === 'forth' || a === 'back') this.go(x, a === 'forth' ? 1 : -1);
+        else if (a === 'row') { x.row = !x.row; this.save(); this.render(); this.redraw(); }
+        else if (a === 'gap') this.setGap(x, !x.gap);
+        else if (a === 'list') { x.open = !x.open; this.render(); }
+        else if (a === 'edit') this.edit(x);
+        else if (a === 'del') this.remove(x);
+        else if (a === 'match') this.go(x, 1, +b.dataset.k + 1);
+      }
+      return;
+    }
+    if (e.target.closest('.nh') && !e.target.closest('input, select')) { if (!String(G.getSelection())) this.toggle(); return; }
+    if (x && !e.target.closest('input, select, textarea, .sve, code.at, ol.atl') && !String(G.getSelection())) this.go(x, 1);
+  }
+  changed(e) {
+    const c = e.target.dataset.c, li = e.target.closest('ol.xl > li'), x = li && this.list[+li.dataset.i]; if (!c || !x) return;
+    if (c === 'on') { x.on = e.target.checked; this.render(); }
+    else if (c === 'mark') x.mark = e.target.value;
+    else if (c === 'color') x.color = e.target.value;
+    this.save(); this.redraw();
+  }
+
+  // ✂ of one expression: the waves change at once
+  setGap(x, on) { x.gap = on; this.save(); this.render(); this.redraw(); this.told({ changed: x.text }); }
+
+  /* ---------------- the editor: under its line, or over the list for a new one ---------------- */
+  edit(x) {
+    this.open = true;
+    this.ed = { x, text: x ? x.text : '', label: x ? x.label : '', scope: x ? x.scope : this.scope(), err: '', focus: true };
+    this.render(); this.v.draw(); this.check();
+  }
+  noEdit() { const x = this.ed && this.ed.x; this.ed = null; this.render(); const li = x && this.lineEl(x); if (li) li.focus(); else this.v.refocus(); }
+  editHTML() {
+    const e = this.ed, I = scopeInfo(this.v.M);
+    return `<div class="sve xed"><div class="xf"><label>Label <input class="xlb" value="${esc(e.label)}" placeholder="its text on the waves"
+        aria-label="its label"></label>
+      <label title="Its names are looked for from this module up to the top; a full path always works">Names from <input class="xsc" list="${this.scopeList()}"
+        value="${esc(e.scope)}" placeholder="the top" spellcheck="false" aria-label="the module its names start from"></label><datalist
+          id="${this.scopeList()}">${I.scopes.filter(Boolean).map(s => `<option value="${esc(s)}">`).join('')}</datalist></div>
+      <div class="xta"><textarea class="src" spellcheck="false" rows="${Math.min(10, e.text.split('\n').length + 2)}" aria-label="the expression"
+        placeholder="PSEL &amp;&amp; !PREADY&#10;@(posedge PCLK) $rose(req) &amp;&amp; state == IDLE">${esc(e.text)}</textarea><ul class="xac"
+          role="listbox" hidden></ul></div>
+      <span class="eb"><button type="button" data-x="apply" title="Value it and keep it (ctrl+Enter)">${e.x ? 'Apply' : 'Add'}</button><button type="button"
+        data-x="noedit" title="Esc">Cancel</button>${e.x && e.x.color ? `<button type="button" data-x="auto"
+          title="Back to the colour of its place in the list">Auto colour</button>` : ''}
+        <span class="xp muted" aria-live="polite"></span><span class="em" role="alert">${esc(e.err)}</span></span></div>`;
+  }
+  scopeList() { return 'wv-xs-' + (this.lid || (this.lid = G.WaveLens.rowId())); }
+  // what the editor holds through a render: read before it, put back after
+  keepEd() {
+    const q = s => this.el.querySelector('.xed ' + s), ta = q('textarea.src'), e = this.ed; if (!e || !ta) return null;
+    e.text = ta.value; e.label = q('.xlb').value; e.scope = q('.xsc').value;
+    return { sel: [ta.selectionStart, ta.selectionEnd], on: document.activeElement === ta, hint: q('.xp').textContent };
+  }
+  backEd(was) {
+    const e = this.ed, ta = this.el.querySelector('.xed textarea.src'); if (!e || !ta) return;
+    if (was) { ta.setSelectionRange(...was.sel); this.el.querySelector('.xed .xp').textContent = was.hint; }
+    if ((was && was.on) || e.focus) { ta.focus({ preventScroll: true }); e.focus = false; }
+  }
+  // the words the caret may be finishing: the system functions, the names from the scope up, the paths from the top
+  words(scope) {
+    this.wordsOf = this.wordsOf || new Map();
+    if (!this.wordsOf.has(scope)) {
+      const I = scopeInfo(this.v.M), out = new Set();
+      for (let s = scope; ; s = parent(s)) { for (const r of I.sigs.get(s) || []) out.add(leaf(r)); if (!s || s === I.root) break; }
+      for (const r of [...(I.sigs.get(I.root) || []), ...(I.sigs.get(soleTop(I)) || [])]) out.add(leaf(r));
+      const pre = I.root ? I.root + '.' : '';
+      for (const rs of I.sigs.values()) for (const r of rs) { const p = r.src && r.src.path; if (p && p.startsWith(pre)) out.add(p.slice(pre.length)); }
+      this.wordsOf.set(scope, [...out]);
+    }
+    return this.wordsOf.get(scope);
+  }
+  // the list under the field for the word before the caret (Tab or Enter takes it)
+  complete(ta) {
+    const box = ta.parentElement.querySelector('ul.xac'), w = (ta.value.slice(0, ta.selectionStart).match(/[$\w.]+$/) || [''])[0];
+    const low = w.toLowerCase(), all = w[0] === '$' ? SYS_FUNCS : w ? this.words(this.ed.scope) : [];
+    const hit = !w || /^\d/.test(w) ? [] : all.filter(n => n.toLowerCase().includes(low) && n !== w)
+      .sort((a, b) => a.toLowerCase().indexOf(low) - b.toLowerCase().indexOf(low) || a.length - b.length).slice(0, 8);
+    this.ac = hit.length ? { w, hit, k: 0, box } : null;
+    box.hidden = !hit.length;
+    box.innerHTML = hit.map((n, i) => `<li role="option" data-k="${i}" aria-selected="${i === 0}">${esc(n)}</li>`).join('');
+    box.onpointerdown = e => { const li = e.target.closest('li[data-k]'); if (li) { e.preventDefault(); this.ac.k = +li.dataset.k; this.takeWord(ta); } };
+  }
+  takeWord(ta) {
+    const { w, hit, k, box } = this.ac, at = ta.selectionStart, text = hit[k] + (hit[k][0] === '$' ? '(' : '');
+    ta.setRangeText(text, at - w.length, at, 'end');
+    this.ac = null; box.hidden = true; this.keepEd(); this.check();
+  }
+  typed(e) {
+    const t = e.target; if (!this.ed || !t.closest('.xed')) return;
+    if (t.matches('textarea.src')) { this.complete(t); this.ed.err = ''; const m = this.el.querySelector('.xed .em'); if (m) m.textContent = ''; }
+    this.keepEd(); clearTimeout(this.checkT); this.checkT = setTimeout(() => this.check(), CHECK_MS);
+  }
+  // what the editor holds, checked while it is typed: parsed, its names found, its matches counted when that is quick
+  async check() {
+    const e = this.ed; if (!e) return;
+    this.keepEd();
+    const x = { text: exprText(e.text), scope: exprText(e.scope) }, hint = this.el.querySelector('.xed .xp'), v = this.v, n = ++this.checkN;
+    if (!x.text) { if (hint) hint.textContent = ''; return; }
+    let t;
+    try {
+      const p = await exprNames(v.M, v.sortIgnore || [], x);
+      if (p.err) t = `⚠ ${p.err}`;
+      else if (v.lazy || Object.values(p.rows).reduce((a, r) => a + r.tr.length, 0) > CHECK_MAX) {
+        t = `✓ ${p.signals.length} signals: ${e.x ? 'Apply' : 'Add'} counts its matches`; }
+      else {
+        const r = await valueOf(v.M, v.sortIgnore || [], x), n1 = r.stat && r.stat.n;
+        t = r.err ? `⚠ ${r.err}` : n1 ? `✓ ${n1} match${n1 === 1 ? '' : 'es'}, first at ${v.when(r.stat.first)}` : '✓ never true';
+      }
+    } catch (err) { t = `⚠ ${err.message}`; }
+    const h = this.el.querySelector('.xed .xp');
+    if (h && this.ed === e && n === this.checkN) { h.textContent = t; h.classList.toggle('bad', t[0] === '⚠'); }
+  }
+  async apply() {
+    const e = this.ed; if (!e) return;
+    this.keepEd();
+    const text = exprText(e.text), scope = exprText(e.scope);
+    const say = m => { e.err = m; const el = this.el.querySelector('.xed .em'); if (el) el.textContent = m; };
+    if (!text) { say('write an expression of the signals, e.g. PSEL && !PREADY'); return; }
+    const same = this.list.findIndex(y => y !== e.x && y.text === text && y.scope === scope);
+    if (same >= 0) { say(`it is there already (${same + 1})`); return; }
+    const res = await this.value({ text, scope });
+    if (res.err) { say(res.err); return; }
+    const was = e.x, x = was || exprNorm({ expr: text, row: false, on: true });
+    Object.assign(x, { text, scope, label: e.label.trim(), res });
+    x.k = null;
+    if (!was) this.list.push(x);
+    this.ed = null; this.save(); this.render(); this.redraw();
+    this.told(was ? { changed: x.text } : { added: x.text });
+    if (was) this.pick(x); else await this.go(x, 1);
+    const li = this.lineEl(x); if (li) li.focus({ preventScroll: true });
+  }
+  keyDown(e) {
+    const ta = e.target.closest('.xed textarea.src');
+    if (ta) {
+      const ac = this.ac;
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this.apply(); }
+      else if (ac && (e.key === 'Tab' || e.key === 'Enter')) { e.preventDefault(); this.takeWord(ta); }
+      else if (ac && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault();
+        ac.k = (ac.k + (e.key === 'ArrowDown' ? 1 : -1) + ac.hit.length) % ac.hit.length;
+        [...ac.box.children].forEach((li, i) => li.setAttribute('aria-selected', i === ac.k)); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (ac) { this.ac = null; ac.box.hidden = true; } else this.noEdit(); }
+      return;
+    }
+    if (e.target.closest('.xed')) {   // its label, its module
+      if (e.key === 'Escape') { e.preventDefault(); this.noEdit(); } else if (e.key === 'Enter') { e.preventDefault(); this.apply(); }
+      return;
+    }
+    const li = e.target.matches('ol.xl > li') ? e.target : null, x = li && this.list[+li.dataset.i]; if (!x) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { const n = li[e.key === 'ArrowDown' ? 'nextElementSibling' : 'previousElementSibling'];
+      if (n) { n.focus(); this.pick(this.list[+n.dataset.i]); } }
+    else if (e.key === 'ArrowRight' || e.key === 'Enter') this.go(x, 1);
+    else if (e.key === 'ArrowLeft') this.go(x, -1);
+    else if (e.key === ' ') { x.on = !x.on; this.save(); this.render(); const l = this.lineEl(x); if (l) l.focus(); }
+    else if (e.key === 'c') { this.setGap(x, !x.gap); const l = this.lineEl(x); if (l) l.focus(); }
+    else return;
+    e.preventDefault();
+  }
+
+  /* ---------------- the commands (wavelens/src/edit.js: expr, expr_go, expr_matches) ---------------- */
+  byId(id, op) {
+    if (id == null) { if (this.cur) return this.cur; throw new Error(`${op}: id (none is picked)`); }
+    const x = this.list[+id - 1]; if (!x) throw new Error(`no expression ${id} (there are ${this.list.length})`); return x;
+  }
+  summary(x) {
+    const r = x.res || {}, j = exprJSON(x), o = Object.assign({ id: this.list.indexOf(x) + 1 }, typeof j === 'string' ? { expr: j } : j,
+      { on: x.on, row: x.row, mark: x.mark, gap: x.gap });
+    return Object.assign(o, r.err ? { error: r.err } : r.stat ? { ...r.stat } : {});
+  }
+  async set(a) {
+    if (a.id === 'all' && !a.delete) throw new Error('expr: id "all" is for delete (a new one: no id)');
+    if (a.delete) {
+      if (a.id == null) throw new Error('expr: delete takes id or "all"');
+      if (a.id === 'all') { const n = this.list.length; await this.setList([]); return { id: 'all', deleted: true, n }; }
+      this.remove(this.byId(a.id, 'expr')); return { id: a.id, deleted: true };
+    }
+    const was = a.id != null ? this.byId(a.id, 'expr') : null, text = a.text !== undefined ? exprText(a.text) : was ? was.text : '';
+    if (a.mark != null && !MARK_KINDS.includes(a.mark)) throw new Error(`expr: mark is ${MARK_KINDS.join(', ')}, not ${JSON.stringify(a.mark)}`);
+    if (!text) throw new Error('expr: text (an expression of the signals: PSEL && !PREADY)');
+    const scope = a.scope !== undefined ? exprText(a.scope) : was ? was.scope : '';
+    const same = this.list.findIndex(y => y !== was && y.text === text && y.scope === scope);
+    if (same >= 0) throw new Error(`expr: it is there already (id ${same + 1})`);
+    const res = await this.value({ text, scope }); if (res.err) throw new Error(`expr: ${res.err}`);
+    const x = was || exprNorm({ expr: text, row: false });
+    Object.assign(x, { text, scope, res, k: null });
+    if (a.label !== undefined) x.label = a.label == null ? '' : String(a.label);
+    if (a.color !== undefined) x.color = a.color || null;
+    if (a.on !== undefined) x.on = !!a.on;
+    if (a.row !== undefined) x.row = !!a.row;
+    if (a.mark != null) x.mark = a.mark;
+    if (a.gap !== undefined) x.gap = !!a.gap;
+    if (!was) this.list.push(x);
+    this.save(); this.render(); this.redraw();
+    this.told(was ? { changed: x.text } : { added: x.text });
+    const cut = a.gap !== undefined && this.v.gapParts(50);   // what the waves leave now
+    return Object.assign(this.summary(x), cut ? { cut } : {});
+  }
+  async goTo(a) {
+    if (a.dir != null && a.dir !== 1 && a.dir !== -1) throw new Error('expr_go: dir is 1 or -1');
+    const x = a.id == null && !this.cur ? this.list.find(y => y.on) : this.byId(a.id, 'expr_go');
+    if (!x) throw new Error('expr_go: no expression is marked');
+    x.res = x.res || await this.value(x);
+    if (x.res.err) throw new Error(`expr_go: ${x.res.err}`);
+    const r = await this.go(x, a.dir || 1, a.n);
+    return Object.assign({ id: this.list.indexOf(x) + 1 }, r || { n: 0 });
+  }
+  // every expression's numbers; with id its stretches in [from, to], limit of them from offset on
+  async matchesOf(a, from, to) {
+    await Promise.all(this.list.map(async x => { x.res = x.res || await this.value(x); }));
+    if (a.id == null) return { exprs: this.list.map(x => this.summary(x)) };
+    const x = this.byId(a.id, 'expr_matches'); if (x.res.err) throw new Error(`expr_matches: ${x.res.err}`);
+    const S = x.res.spans.filter(([p, q]) => q >= from && p <= to), lim = a.limit == null ? 100 : +a.limit, off = +a.offset || 0;
+    return Object.assign(this.summary(x), { total: S.length, matches: S.slice(off, off + lim) }, off + lim < S.length ? { next_offset: off + lim } : {});
   }
 }
 
@@ -1970,11 +2379,11 @@ function rowsOf(M, o) {
   return out;
 }   // WaveJSON -> {binds: [{assert, scope, results, draw}], wait}
 function svgRows(M, S) {
-  const x = M.src.sva, binds = pageBinds(M), exprs = (x && Array.isArray(x.exprs) && x.exprs) || [];
+  const x = M.src.sva, binds = pageBinds(M), exprs = (x && Array.isArray(x.exprs) && x.exprs) || [];   // a figure: their rows and marks as a viewer draws them
   if (!binds.length && !exprs.length) return null;
   let k = SVGST.get(M.src);
   if (!k) SVGST.set(M.src, k = { binds: binds.map(b => ({ assert: b.assert, scope: b.scope || '', results: b.results || null, draw: {} })), xst: {},
-    exprs: exprs.map(e => (typeof e === 'string' ? { text: e, scope: '' } : { text: e.expr || e.text, scope: e.scope || '' })).filter(e => e.text) });
+    exprs: exprs.map(exprNorm).filter(e => e.text) });
   if (!k.wait && G.WAVELENS_SVA_WASM && k.binds.some(b => !b.results)) k.wait = svgEvaluate(M, S, k);
   if (!k.xwait && G.WAVELENS_SVA_WASM && k.exprs.length) k.xwait = svgExprs(M, S, k);
   const ok = shown(S), I = scopeInfo(M), at = new Map([[-1, exprRows(k.xst, k.exprs.filter(e => e.res && !e.res.err))]]);
@@ -1988,7 +2397,8 @@ function svgRows(M, S) {
     if (!at.has(key)) at.set(key, []);
     at.get(key).push(...rows);
   }
-  return [g => at.get(g ? g.id : -1) || []];
+  return [Object.assign(g => at.get(g ? g.id : -1) || [], { marks: () => exprMarks(k.exprs),
+    keeps: () => (k.exprs.some(e => e.gap) ? exprKeeps(k.exprs) : null) })];
 }
 // the expressions of a figure, valued in the page (the files of its "sva" for package constants), then drawn again
 function svgExprs(M, S, k) {
@@ -2023,7 +2433,7 @@ function svgEvaluate(M, S, k) {
 function start() {
   if (!G.WaveLens || !G.WaveLens.plugin) return;
   // the settings of this plugin (wavelens.config.js lists them): the list open at start, which groups, the signals again
-  if (G.WaveLens.registerDefaults) G.WaveLens.registerDefaults({ svaOpen: false, svaShow: null, svaSignals: 'view' });
+  if (G.WaveLens.registerDefaults) G.WaveLens.registerDefaults({ svaOpen: false, svaShow: null, svaSignals: 'view', exprsOpen: false });
   G.WaveLens.registerTokens({ 'sva-pass': '--sva-pass', 'sva-fail': '--sva-fail', 'sva-disabled': '--sva-disabled', 'sva-active': '--sva-active',
     'sva-capped': '--sva-capped' });
   localFiles();

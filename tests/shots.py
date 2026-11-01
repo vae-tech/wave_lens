@@ -147,7 +147,7 @@ def main():
         shot('sva', page.locator('.bench').first, upto=view(page).locator('.notes'))
         page.evaluate(f"(async () => {{ const p = {p0}; p.open = true; p.showTable = true; p.showFails = true; p.render(); p.el.querySelector('ol.asv').style.display = 'none'; }})()")
         settle(page)
-        shot('sva-table', view(page).locator('.sva'))
+        shot('sva-table', view(page).locator('.sva:not(.xpanel)'))
         page.evaluate('WaveLens.configure({svaShow: null, svaSignals: null})')
         page.close()
 

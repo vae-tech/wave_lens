@@ -515,7 +515,7 @@ def sva(S, ex, build):
     # the panel open: the list of assertions
     page.evaluate(f"(() => {{ const p = {p0}; p.open = true; p.render(); }})()"); shots.settle(page)
     S.quiet(page)
-    S.save('sva-panel', v.locator('.sva'))
+    S.save('sva-panel', v.locator('.sva:not(.xpanel)'))
     # one assertion on the waves, its failing attempt selected
     page.evaluate("(async () => { WaveLens.configure({svaShow: ['apb_demo_no_wait'], svaSignals: false}); await SVA.ready(); })()")
     page.evaluate(f"""(() => {{ const p = {p0}; p.open = false; p.render(); p.v.expandAll();
@@ -553,17 +553,27 @@ def sva(S, ex, build):
     S.quiet(page)
     S.save('sva-bind', li)
     page.evaluate("WaveLens.configure({svaShow: null, svaSignals: null})")
-    # the expression field and a row ƒ (no assertion groups on the waves)
+    # the list of expressions, their marks and a row ƒ (no assertion groups on the waves)
     page.evaluate("(async () => { WaveLens.configure({svaShow: []}); await SVA.ready(); })()")
     page.evaluate(f"(() => {{ const p = {p0}; p.open = false; p.render(); }})()")
-    q = v.locator('input.svq')
-    q.fill('PSEL && !PREADY'); v.locator('button[data-x=add]').click(); shots.settle(page)
-    q.fill('@(posedge PCLK) $rose(PENABLE)'); v.locator('button[data-x=add]').click(); shots.settle(page)
-    q.fill('PSEL && !PREADY'); q.press('Enter'); shots.settle(page)
-    page.wait_for_timeout(200); shots.settle(page)
+    page.evaluate("""(async () => { const v = document.querySelector('.wv').waveView; await v.run([
+      { op: 'expr', text: 'PSEL && !PREADY', label: 'wait' }, { op: 'expr', text: '@(posedge PCLK) $rose(PENABLE)', label: 'access', mark: 'line', row: true },
+      { op: 'expr', text: 'PSEL && PENABLE && PREADY && PWRITE', label: 'write', mark: 'strip' }, { op: 'expr_go', id: 1, n: 3 }]); })()""")
+    shots.settle(page); page.wait_for_timeout(200); shots.settle(page)
+    v.locator('.bar [data-x=open]').click(); v.locator('.xpanel ol.xl > li').first.locator('[data-x=list]').click(); shots.settle(page)
     S.quiet(page)
     S.save('sva-expr', v, upto=v.locator('.notes'))
-    v.locator('button[data-x=del]').click(); q.fill('@(posedge PCLK) $rose(PENABLE)'); v.locator('button[data-x=del]').click()
+    v.locator('.xpanel ol.xl > li').first.locator('[data-x=list]').click()
+    v.locator('.xpanel ol.xl > li').nth(1).locator('[data-x=edit]').click(); page.keyboard.press('Control+End'); page.keyboard.type(' && PSE'); page.wait_for_timeout(400); shots.settle(page)
+    S.quiet(page)
+    S.save('sva-expr-edit', v.locator('.xpanel'))
+    v.locator('.xpanel [data-x=noedit]').click()
+    # the waves cut to the matches of the first
+    page.evaluate("""document.querySelector('.wv').waveView.run([{ op: 'gaps', idle: 1, keep: 0 }, { op: 'expr', id: 1, gap: true }])"""); shots.settle(page); page.wait_for_timeout(200); shots.settle(page)
+    S.quiet(page)
+    S.save('sva-expr-gap', v, upto=v.locator('.notes'))
+    page.evaluate("document.querySelector('.wv').waveView.run([{ op: 'expr', id: 1, gap: false }, { op: 'gaps', reset: true }])"); shots.settle(page)
+    page.evaluate("document.querySelector('.wv').waveView.run([{ op: 'expr', id: 'all', delete: true }])"); shots.settle(page)
     # the printable section of the page
     sec = page.locator('section.sva-report, #assertions, section:has(h2:text("Assertions"))').first
     S.quiet(page)

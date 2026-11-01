@@ -54,6 +54,9 @@ class WaveView {
     this.extraJSON = [];   // plugins: () -> '"key": …' lines for the bookmarks JSON (or null)
     this.extraState = [];   // plugins: {key, get() -> a JSON value, set(value) (may be async)}: their part of the saved state
     this.extraRows = [Object.assign(g => (g ? [] : this.ugRows()), { head: true })];   // plugins: rows under a group (withExtra); yours at the top
+    // a plugin: what the gaps on the waves keep in place of the signals, {by() -> who says so ([]: nobody), spans() -> [[from, to], …], off()}
+    this.extraKeep = null;
+    this.extraMarks = [];   // plugins: functions -> the times they mark on the waves ([{spans, color, label, mark, on}]: paintTimeMarks)
     this.extraPicks = new Map();   // plugins: rows highlighted, row -> a token ('hl8': --wave-hl8) or a colour index; Esc clears (then wavelens:reset)
     this.keys = {};   // plugins: key -> fn(event) on the waves (addKey)
     this.rowMarks = new Map(); this.rowTitles = new Map();   // plugins: classes and tooltips of name rows (rowClass, rowTitle)
@@ -620,7 +623,7 @@ class WaveView {
         fold: [...folded].map(id => M.groups[id] && M.groups[id].path).filter(Boolean),
         highlight: [...this.picks].sort((a, b) => a[1] - b[1]).map(([r]) => r.full).filter(Boolean), findHighlight: !!this.findHl, findOpen: !!this.findOpen,
         findMask: !!this.findMask,
-          ...Object.fromEntries(FIND_OPTS.map(o => [o[1], !!this[o[1]]])), ...this.gapOpt(), ...this.cycOpt() },
+          ...Object.fromEntries(FIND_OPTS.map(o => [o[1], !!this[o[1]]])), ...this.gapOpt(true), ...this.cycOpt() },
       paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs), hidden: [...this.hiddenRows],
         bits: [...this.bitsOpen], select: (this.sel && this.sel.full) || null, find: this.q || '', bookmarks: this.bookmarks(), arrows: this.arrowList(),
         markers: this.markList(), spans: this.spanList(),
@@ -658,7 +661,7 @@ class WaveView {
     if (C.toolsFolded !== undefined) this.setTools(!!C.toolsFolded);
     if (C.toolsHidden !== undefined) this.setToolsHidden(C.toolsHidden ?? []);
     const gk = GAP_KEYS.filter(k => C[k] !== undefined);
-    if (gk.length) this.setGaps(Object.fromEntries(gk.map(k => [k, C[k]])));   // null: the clock found (not the page's)
+    if (gk.length) this.setGaps(Object.fromEntries(gk.map(k => [k, C[k]])), true);   // null: the clock found (not the page's)
     const ck = CYC_KEYS.filter(k => C[k] !== undefined);
     if (ck.length) this.setCycles(Object.fromEntries(ck.map(k => [k, C[k]])));   // null: the clock found, the first edge (not the page's)
     if (C.sort !== undefined || C.sortIgnore !== undefined) {
@@ -1088,9 +1091,12 @@ class WaveView {
     lift: m.lift === 'below' ? m.lift : null }).filter(([, x]) => x != null && x !== ''))); }
   spanTip(t, row) {
     const on = s => !s.signals || !s.signals.length || (row && (s.signals.includes(row.full) || s.signals.includes(row.name)));
-    return this.spans.filter(s => t >= s.from && t <= s.to && on(s)).map(s => `${s.label || 'span'}: ${this.when(s.from)} … ${this.when(s.to)} (Δ ` +
-      `${this.M.timed ? fmtExact(s.to - s.from) : trimNum(s.to - s.from) + ' cycles'})`).join('\n');
+    const line = (name, a, b) => `${name}: ${this.when(a)} … ${this.when(b)} (Δ ${this.M.timed ? fmtExact(b - a) : trimNum(b - a) + ' cycles'})`;
+    const marks = this.timeMarks().map(m => { const s = m.spans[lastBefore(m.spans.length, k => m.spans[k][0], t)];
+      return s && t <= s[1] ? line(m.tip || m.label, s[0], s[1]) : ''; });
+    return this.spans.filter(s => t >= s.from && t <= s.to && on(s)).map(s => line(s.label || 'span', s.from, s.to)).concat(marks).filter(Boolean).join('\n');
   }
+  timeMarks() { return this.extraMarks.flatMap(f => f() || []); }   // what the plugins mark on the waves now
   spanList() { return this.spans.map(s => Object.fromEntries(Object.entries({ from: s.from, to: s.to, label: s.label, color: s.color,
     signals: s.signals && s.signals.length ? [...s.signals] : null }).filter(([, x]) => x != null && x !== ''))); }
   groupList() { return this.ugroups.map(g => Object.fromEntries(Object.entries({ name: g.name, signals: [...g.signals], color: g.color })
@@ -1567,6 +1573,7 @@ class WaveView {
     const body = (p, q, xa, xb, to, bg = false) => paintBody(P, M, shown, X, p, q, xa, xb, this.hl, sel, lay, this.band, to, r => this.strokeOf(r),
       r => this.collapsed.has(r.id), bg);
     const rowY = WP ? this.paintWarpBody(P, F, WP, body, late, shown, oy, Hc, hdr) : body(this.t0, tB, 0, W, late);
+    paintTimeMarks(P, this.timeMarks(), X, this.t0, tB, oy + hdr, oy + Hc, this.span / W);
     paintSpans(P, this.spans, X, this.t0, tB, shown, oy + hdr, oy + Hc);
     const tags = paintMarkers(P, this.markers, X, this.t0, tB, oy + hdr, oy + Hc, laneY(lay, this.S.laneHeight));
     if (!WP) this.paintDiff(P, shown, X, this.t0, tB);   // a second dump compared (diff.js): where it differs

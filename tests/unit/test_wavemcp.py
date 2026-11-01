@@ -358,6 +358,28 @@ class Views(unittest.TestCase):
         self.assertEqual(ms[1], {'id': 2, 't': 45})   # at the top, pale
         self.assertIn('marker(id? t? label? color? signal? lift? delete?)', next(t for t in W.TOOLS if t['name'] == 'view_edit')['description'])
 
+    def test_view_exprs(self):   # after test_file: it counts the revisions of the page
+        """The expressions in the agent's words: into a page's file, what they found in ns, go and matches only live."""
+        r = self.call('view_edit', page=self.page, ops=[{'op': 'expr', 'text': 'valid && ready', 'label': 'beat', 'color': '#c00'},
+                                                        {'op': 'expr', 'text': 'valid', 'row': True, 'mark': 'line'}, {'op': 'expr_go', 'id': 1}, {'op': 'expr_matches'}])
+        self.assertEqual([x.get('id') for x in r['results'][:2]], [1, 2], r)
+        self.assertTrue(all('page only' in x['error'] for x in r['results'][2:]), r)
+        self.assertEqual(self.call('view_get', page=self.page)['exprs'], [{'expr': 'valid && ready', 'label': 'beat', 'color': '#c00', 'row': False, 'id': 1},
+                                                                          {'expr': 'valid', 'mark': 'line', 'id': 2}])
+        self.call('view_edit', page=self.page, ops=[{'op': 'expr', 'id': 2, 'gap': True}, {'op': 'gaps', 'idle': 3, 'keep': 0}])
+        got = self.call('view_get', page=self.page)
+        self.assertEqual((got['exprs'][1]['gap'], got['gaps']['by'], got['gaps']['view'], got['gaps']['idle']), (True, [2], True, 3))
+        self.call('view_edit', page=self.page, ops=[{'op': 'expr', 'id': 2, 'gap': False}])
+        self.assertNotIn('by', self.call('view_get', page=self.page).get('gaps', {}))
+        self.call('view_edit', page=self.page, ops=[{'op': 'expr', 'id': 'all', 'delete': True}, {'op': 'gaps', 'reset': True}])
+        self.assertNotIn('exprs', self.call('view_get', page=self.page))
+        out = W.ns_out([{'op': 'expr_go', 't': 5000, 'k': 1, 'n': 3}, {'op': 'expr', 'n': 2, 'time': 3000, 'first': 1000, 'last': 2000, 'min': 1000, 'max': 2000, 'share': 0.5},
+                        {'op': 'expr_matches', 'first': 1000, 'matches': [[1000, 2000]]}, {'op': 'expr_matches', 'exprs': [{'id': 1, 'n': 1, 'first': 4000, 'share': 0.25}]}], True)
+        self.assertEqual((out[0]['t'], out[0]['k'], out[1]['time'], out[1]['n'], out[1]['share'], out[2]['first'], out[2]['matches'], out[3]['exprs']),
+                         (5, 1, 3, 2, 0.5, 1, [[1, 2]], [{'id': 1, 'n': 1, 'first': 4, 'share': 0.25}]))
+        self.assertEqual(W.ns_out([{'op': 'expr', 'cut': {'gaps': 2, 'kept': 5000, 'total': 20000, 'parts': [[2000, 7000]]}}], True)[0]['cut'], {'gaps': 2, 'kept': 5, 'total': 20, 'parts': [[2, 7]]})
+        self.assertIn('expr(id? text? scope? label? color? on? row? mark? gap? delete?)', next(t for t in W.TOOLS if t['name'] == 'view_edit')['description'])
+
     def test_gaps_view(self):
         """The gaps on the waves in the agent's words: view_get says them, a cut (the page's) in ns."""
         r = self.call('view_edit', page=self.page, ops=[{'op': 'gaps', 'on': True, 'view': True, 'idle': 8, 'signals': 'PSEL'}])
@@ -368,6 +390,23 @@ class Views(unittest.TestCase):
         out = W.ns_out([{'op': 'gaps', 'cut': {'gaps': 1, 'kept': 5000, 'total': 20000, 'parts': [[0, 2000], [17000, 20000]]}}], True)
         self.assertEqual(out[0]['cut'], {'gaps': 1, 'kept': 5, 'total': 20, 'parts': [[0, 2], [17, 20]]})
         self.assertEqual(W.ns_out([{'op': 'gaps', 'cut': {'kept': 5}}], False)[0]['cut'], {'kept': 5})   # cycles
+
+    def test_times_in_ns(self):
+        """Every time a command answers is in ns: the ones the agent's text promises and an answer could miss."""
+        out = W.ns_out([{'op': 'bookmark', 'n': 1, 't': 85000, 'from': 40000, 'top': None}, {'op': 'fsm_go', 'signal': 's', 't': 7000},
+                        {'op': 'compare', 'differ': 2, 'first': 115000},
+                        {'op': 'fsm_stats', 'states': [{'state': 'A', 'entries': 2, 'first': 1000, 'time': 3000, 'share': 0.5}],
+                         'invalid': [], 'changes': [{'from': 'A', 'to': 'B', 'count': 1, 'first': 2000}]}], True)
+        self.assertEqual((out[0]['t'], out[0]['from'], out[0]['n'], out[1]['t'], out[2]['first'], out[2]['differ']), (85, 40, 1, 7, 115, 2))
+        self.assertEqual(out[3]['states'], [{'state': 'A', 'entries': 2, 'first': 1, 'time': 3, 'share': 0.5}])
+        self.assertEqual(out[3]['changes'], [{'from': 'A', 'to': 'B', 'count': 1, 'first': 2}])
+
+    def test_rows_pages(self):
+        """view_get rows goes on from its next_offset."""
+        a = self.call('view_get', page=self.page, rows='', limit=2)['rows']
+        b = self.call('view_get', page=self.page, rows='', limit=2, offset=a['next_offset'])['rows']
+        self.assertEqual((len(a['rows']), a['next_offset'], len(b['rows']), a['total']), (2, 2, 1, 3))
+        self.assertNotIn('next_offset', b)
 
     def fake_page(self, b, path, cid='abcd1234', answer=True):
         """A page as a browser has it: the stream of commands, its hello, an answer (the ops echoed) to each command."""

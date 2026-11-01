@@ -44,6 +44,7 @@ window.WAVELENS_CONFIG = {
   wheel: 'scroll',              // the wheel scrolls the rows, ctrl+wheel zooms (as in Questa); 'zoom': the wheel zooms
   dumpBudget: 3000000,          // a VCD opened in the page (Open…, dropped): the signals nearest the top up to this many value changes
   svaOpen: false,               // sva.js: the assertion list open at start (false: folded, ▸ Assertions opens it)
+  exprsOpen: false,             // sva.js: the list of expressions open at start (false: folded, ▸ Expressions opens it)
   busDetect: true,              // bus.js: the bus ports found by their signal names (AXI, AXI-Stream, APB, AHB, Avalon, Wishbone, OBI) drawn as transactions
   buses: null,                  // bus.js: ports of your own [{protocol, scope, prefix?, map?: {role: name}, clock?, name?}] (busDetect: false: only these)
   menuTipDelay: 2000,           // ms: the wait before a tooltip in that menu (the bar's: 350 ms)

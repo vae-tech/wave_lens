@@ -24,8 +24,9 @@ Config file (--config cfg.json): every option can be a key (dashes or underscore
   "sva" ["checks.sv", …] SystemVerilog assertion files (parsed with the sva CLI, inlined for the page's assertions
   panel), "bind" [{"assert": "a_req_ack", "scope": "tb.dut"}] or ["a_req_ack@tb.dut"] (evaluated over the dump with
   sva eval; the page opens with them bound): the WaveJSON extension "sva" (tools/svabuild.py, docs/USAGE.md "Assertions").
-  "exprs" ["PSEL && !PREADY", "@(posedge PCLK) $rose(req)", {"expr": "…", "scope": "tb.dut"}] expressions of the signals the
-  page draws as rows "ƒ expressions" (valued in the page: names from the scope up, or full paths).
+  "exprs" ["PSEL && !PREADY", "@(posedge PCLK) $rose(req)", {"expr": "…", "scope": "tb.dut", "label", "color", "on", "row",
+  "mark", "gap"}] expressions of the signals, on the page's list of expressions: marked on the waves, each a row "ƒ expressions"
+  unless "row": false (valued in the page: names from the scope up, or full paths).
   Clock-sampled buses get "width" and, when their labels do not read back as values (bin signed oct ascii, x digits),
   "raw": the hex value of each label (the page's assertions sample them); "'b" and the bits when hex would lose some.
   Per-signal settings: show (false: left out), alias (displayed name), radix (auto hex dec signed bin oct ascii),
@@ -386,7 +387,7 @@ def parser():
                     '(as a bookmark\'s "at") or {"bookmark": n}')
     ap.add_argument('--sva', action='append', help='SystemVerilog assertion file for the page (repeatable; one compilation unit, in order)')
     ap.add_argument('--bind', action='append', help='NAME@SCOPE: bind assertion NAME to instance SCOPE, evaluated over the dump (repeatable)')
-    ap.add_argument('--expr', dest='exprs', action='append', help='an expression of the signals the page draws as a row (ƒ expressions; repeatable), e.g. "PSEL && !PREADY"')
+    ap.add_argument('--expr', dest='exprs', action='append', help='an expression of the signals on the page\'s list, marked on the waves and drawn as a row (ƒ expressions; repeatable), e.g. "PSEL && !PREADY"')
     add_sva_bin_arg(ap)
     ap.add_argument('--hscale', type=float)
     ap.add_argument('--out', help='output file (default: stdout)')

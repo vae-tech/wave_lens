@@ -15,7 +15,7 @@ function command(name, args, doc, run) {
   CMDS[name] = { args, keys: args.split(/\s+/).filter(Boolean).map(k => k.replace(/\?$/, '')), doc, run };
 }
 const fail = msg => { throw new Error(msg); };
-const READ_CMDS = new Set(['state', 'rows', 'picture']);   // they change nothing (no toast in a live page)
+const READ_CMDS = new Set(['state', 'rows', 'picture', 'expr_matches']);   // they change nothing (no toast in a live page)
 const LAY_CMDS = new Set(['picture', 'edge', 'rows']);   // they read the rows laid out: what the run held back is done before them
 // a time of a command: a number (model units) or a text with a unit; untimed waves take cycles only
 function cmdTime(v, x, what = 't') {
@@ -184,6 +184,24 @@ command('marker', 'id? t? label? color? signal? lift? delete?', 'a marker: a das
   if (a.lift != null) m.lift = a.lift;
   m.lift = markLift(m);
   v.setMarks(); return { id: v.umarks.indexOf(m) + 1 };
+});
+// the expressions of the page: its list is the plugin's (wavelens/sva.js), which needs the engine
+const exprs = v => v.svaExprs || fail('expressions need the assertion engine in the page (sva.js and sva.wasm.js: no mkhtml.py --no-sva)');
+command('expr', 'id? text? scope? label? color? on? row? mark? gap? delete?', 'an expression of the signals in the list of expressions (SystemVerilog, as ' +
+  'in an assertion; @(posedge clk) … samples it at a clock; names from scope up to the top, a full path too): a new one (text; a text that does not value ' +
+  'is refused), or expression id (1, 2 … as listed) changed; label: its text on the waves, color (null: the colour of its place), on: its marks, mark: ' +
+  'band (a pale band where it holds), line (where it starts) or strip (only the strip at the top), row: drawn as a signal too; gap: the waves cut to the ' +
+  'matches of the expressions that have it (idle and keep of the gaps command; the gaps on, on the waves, for as long as one has it); delete: id or "all"; ' +
+  '-> what it found (n, time, share, first, last, min, max), with gap what the waves leave (cut)', (v, a) => {
+  idOk(a.id, 'expression'); cmdColor(a); return exprs(v).set(a);
+});
+command('expr_go', 'id? dir? n?', 'the cursor to the next (dir 1) or previous (-1) match of an expression from the cursor, round the ends, or to match n ' +
+  '(1 …); its signals highlighted, its marks stronger; id default the one picked, else the first marked -> {id, t, k, n}: the time, which match, how many ' +
+  '(n 0: never true)', (v, a) => { idOk(a.id, 'expression'); return exprs(v).goTo(a); });
+command('expr_matches', 'id? from? to? limit? offset?', 'what the expressions found: without id every one\'s numbers (exprs: [{id, expr, n, time, share, ' +
+  'first, last, min, max} | {… error}]), with id its stretches in [from, to] too (matches: [[from, to], …], limit default 100, next_offset)', (v, a) => {
+  idOk(a.id, 'expression');
+  return exprs(v).matchesOf(a, a.from != null ? cmdTime(v, a.from) : v.M.t0, a.to != null ? cmdTime(v, a.to) : v.M.t1);
 });
 command('compare', 'result? dump? a? map? offset? off? show?', 'a second dump over these waves, where its values differ (red bands, ≠, ]d [d): ' +
   'result (sva diff\'s, as the page\'s "compare": tools/viewedit.py and view_edit make it of dump); off: compared no more; show: which run the waves ' +
@@ -400,7 +418,7 @@ command('find', 'query case? word? regex? highlight? open? mask?', 'the find fie
   });
 command('gaps', 'on? idle? keep? signals? clock? aux? only? count? view? reset?', 'the gaps of the picture and WaveDrom (the menu\'s Gaps): on, ' +
   'idle and keep (cycles or a time), the signals they follow, the clock they count, aux (changes counted), only, count (clock edges off), view (on the ' +
-  'waves too); reset', (v, a) => {
+  'waves too); reset. Expressions with gap (expr) have them on, gapBy says which; on or view false, or reset, takes it off them', (v, a) => {
   if (a.reset) v.setGaps(null);
   const map = { on: 'gaps', idle: 'gapIdle', keep: 'gapKeep', signals: 'gapSignals', clock: 'gapClock', aux: 'gapAux', only: 'gapOnly', count: 'gapCount',
     view: 'gapView' };
@@ -446,7 +464,7 @@ command('rows', 'pattern? limit? offset?', 'the signals and modules of the page 
 });
 const PICTURE_ROWS = 5000;   // a picture of 20 000 rows is 400 MB of text and 13 s
 command('picture', 'format? from? to? rows?', 'the waves as a picture: png (base64), svg or wavedrom (WaveJSON); rows: screen (default), all, ' +
-  'picked (highlighted) or signals', async (v, a) => {
+  'picked (highlighted) or signals (at most 5000 rows)', async (v, a) => {
   const f = a.format || 'png', o = {};
   if (a.from != null) o.from = cmdTime(v, a.from, 'from');
   if (a.to != null) o.to = cmdTime(v, a.to, 'to');
@@ -493,11 +511,11 @@ Object.assign(WaveView.prototype, {
   // pointer is up (a drag is one step), a key that is not typing, a field changed (a text: when it is left), a load
   undoPart() {
     const groups = this.groupList().map((g, i) => Object.assign(g, { uid: this.ugroups[i].uid || (this.ugroups[i].uid = ++XID) }));   // a group over a rename
-    return JSON.stringify({ bookmarks: this.bookmarks(), arrows: this.arrowList(), markers: this.markList(), groups,
+    return JSON.stringify({ bookmarks: this.bookmarks(), arrows: this.arrowList(), markers: this.markList(), spans: this.spanList(), groups,
       paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs), hidden: [...this.hiddenRows],
       bits: [...this.bitsOpen], only: this.onlyState(), fsm: this.fsmState(),
       config: Object.assign({ style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded,
-        toolsHidden: toolNames(this.S.toolsHidden), sort: this.sort, sortIgnore: [...this.sortIgnore] }, this.gapOpt(), this.cycOpt()),
+        toolsHidden: toolNames(this.S.toolsHidden), sort: this.sort, sortIgnore: [...this.sortIgnore] }, this.gapOpt(true), this.cycOpt()),
       hl: [...this.picks].map(([r, i]) => [r.full, i]).sort((a, b) => a[1] - b[1]) });
   },
   undoTick(base = false) {
@@ -750,7 +768,7 @@ Object.assign(WaveView.prototype, {
     if (!e || !e.state) return null;
     let st = e.state, seen = false;
     try { seen = localStorage.getItem(key) === String(e.rev); } catch (err) { /* no storage: all of it every time */ }
-    if (seen) {   // applied before: only what this browser does not keep (the plugins' parts too: assertions, ƒ rows)
+    if (seen) {   // applied before: only what this browser does not keep (the plugins' parts too: assertions, expressions)
       const plug = this.extraState.map(x => x.key);
       st = Object.fromEntries(Object.entries(st).filter(([k]) => !KEPT.includes(k) && !plug.includes(k)));
       if (st.config) st.config = Object.fromEntries(Object.entries(st.config).filter(([k]) => !KEPT_CFG.includes(k)));

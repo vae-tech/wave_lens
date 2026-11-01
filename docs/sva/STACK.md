@@ -49,7 +49,7 @@ over 32 768 clock edges of one assertion 73 ms, over the real `tv` of `test_stre
 into a page deflate-raw compressed and base64 encoded, `wavelens/sva.wasm.js`: 206 kB, inside the budget for what a page
 carries (`DecompressionStream`, in every current browser, unpacks it in a few ms; `sva/wasm/pack.py`, Python's zlib).
 `serde_json` stays: replacing it would save about 100 kB raw for a rewrite of every serialised type. With `wavelens/sva.js`
-(~30 kB) a page grows by about 240 kB; `mkhtml.py --no-sva` leaves both out. After stage 5.1 (merged attempts, reasons,
+(~165 kB) a page grows by about 440 kB; `mkhtml.py --no-sva` leaves both out. After stage 5.1 (merged attempts, reasons,
 step roles, the nesting limit) the module is 451 kB, 220 kB in a page.
 
 **In the page** (headless Chromium, `sva/spike/spike.html` built by `make sva-spike`): the module is decoded from base64
@@ -83,12 +83,13 @@ just before each clock edge, as in the preponed region; stage-5 numbers in docs/
 sva/                    Cargo workspace (make sva-build / sva-test / sva-bless / sva-examples / sva-spike)
   core/                 sva-core: parser, AST, evaluator, results JSON; no I/O, the only code with SVA semantics
     src/                lex pre (preprocessor) parse expr prop (parser) expand (instances, clock, ids, signals)
-                        consts print report ast; engine (attempts, threads, results) value (4-state expressions);
+                        decl (declarations) consts print report explain ast; engine, engine/seq, engine/results
+                        (attempts, threads, results) value (4-state expressions);
                         summary (the report: numbers per assertion, totals, failures; Markdown, JUnit, HTML);
                         tests.rs, engine_tests.rs: unit tests
     tests/              corpus.rs (tests/sva/*.sv: annotations, golden files, round trips), schema.rs
   cli/                  sva: native CLI — sva parse FILE...; sva eval --waves DUMP --sva FILE... [--report --junit] (dumps
-                        through wellen); sva report RESULTS.json...; tests/
+                        through wellen); sva report RESULTS.json...; src/vcd.rs, fst.rs, diff.rs: sva vcd, fst, diff; tests/
   wasm/                 sva-wasm: cdylib, C ABI — sva_alloc / sva_run / sva_result_len / sva_free, JSON in and out
   wasm/pack.py          the module for pages: wavelens/sva.wasm.js (deflate-raw + base64), written by make sva-build
   spike/                the stage-3 property, the demo properties, the spike page and its generator
@@ -97,12 +98,12 @@ tests/sva/              the corpus: one file per group of constructs and per pro
                         third_party/: checkers of others (YosysHQ AXI4 FVIP library, OpenTitan macros, APB / AHB / AXI-Lite)
 wavelens/sva.js           the engine in a page (SVA.load -> parse / evaluate(parsed, sampler); tvSampler, rowSampler), the
                         assertions panel (list, binding, evaluation, numbers, failures, exports: stages 6, 8) and the
-                        assertion groups on the waves and in static SVGs (stage 7)
+                        assertion groups on the waves and in static SVGs (stage 7), the list of expressions
 wavelens/sva.wasm.js      the generated module, committed (pages build without Rust)
 tools/svabuild.py       a config's "sva" / "bind" through the CLI, for mkhtml.py and vcd2wavedrom.py; the name rule
                         (Names) for mkconfig.py --sva; the page's printable report (sva report --html)
 docs/sva/               STACK.md (this), LANGUAGE.md (the subset), ENGINE.md (evaluation, results JSON),
-                        ast.schema.json (the parsed file as JSON)
+                        ast.schema.json (the parsed file as JSON), results.schema.json
 ```
 
 The page loads the module from `wavelens/sva.wasm.js` (`window.WAVELENS_SVA_WASM = {size, deflate}`), inlined by mkhtml or
@@ -123,8 +124,8 @@ per assertion `steps`, `stats`, `attempts` with `[id, cycle]` traces, `lane`), o
 
 - **Semantics.** Unbounded ranges (`##[1:$]`, `[*]`, `[->n]`), `intersect`, `first_match` and nested implications make
   the thread sets grow. Stage 5 hash-conses the residual sequences (one thread per distinct state), caps a set at 256
-  with a note, and tests every construct against hand-computed traces (docs/sva/ENGINE.md); a comparison with a
-  simulator's own assertion results is still to do.
+  with a note, and tests every construct against hand-computed traces (docs/sva/ENGINE.md); `make sva-verify`
+  compares them with Verilator's own assertion results.
 - **Four-state values.** Since stage 5 every sample carries its unknown bits; an unknown boolean fails the attempt with a
   note (or reads as false).
 - **`disable iff`.** Checked at the sampling points (stage 5, ENGINE.md *Decisions*); the standard checks it
@@ -133,7 +134,7 @@ per assertion `steps`, `stats`, `attempts` with `[id, cycle]` traces, `lane`), o
 - **Sampling in the page.** The page has `tv` transitions, not a dump. Stage 5 put the sampling behind a sampler
   (`edges`, `before`) on each side — wellen's changes natively, `SVA.tvSampler` in the page — with the same rule (the
   value before the edge; the first value is no edge); the spike page and `page_bench.py` check that both agree.
-- **Size.** The module is 546 kB (265 kB in a page) after stage 8 (`make smoke` prints the bytes). If it matters,
+- **Size.** The module is 571 kB (278 kB in a page) (`make smoke` prints the bytes). If it matters,
   drop `serde_json` for a small hand-written JSON writer and run `wasm-opt -Oz` (binaryen) as an optional step.
 - **Toolchain on other machines.** Building needs cargo and the wasm32 target; using does not, once the generated module
   is committed (see *Layout*). Python-only users keep every current feature.

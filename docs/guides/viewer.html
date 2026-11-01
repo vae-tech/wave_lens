@@ -71,6 +71,7 @@
   <li><b>The waves</b>: the time axis on top, the cursor as a solid orange line, markers dashed, bookmarks as numbered circles and arrows
     between them. The pointer over a signal shows its value there, the change into it and the next one.</li>
   <li><b>The lists</b> of bookmarks and arrows, when the view has some (<a href="#bookmarks">Bookmarks and arrows</a>).</li>
+  <li><b>The log</b>: what was done and what went wrong (a dump read, a file's error with its line; <code>"log"</code>).</li>
   <li><b>The hint line</b>: the mouse and the keys in one paragraph (<code>"hint": false</code> leaves it out).</li>
 </ol>
 <div class="note"><p>The keys work once the waves have the focus: click the waves or a name first. With ctrl, alt or ⌘ held the keys stay
@@ -81,8 +82,8 @@
 
 <h2 id="bar">The bar, group by group</h2>
 <figure><img src="img/viewer-bar.png" alt="The bar: cursor, view, edges; find; expression; list, style, state, dump, assertions" loading="lazy">
-  <figcaption><b>The bar of the APB example.</b> Time on the first line, find on the second, the expression of signals on the third, the
-  rows and the files on the last.</figcaption></figure>
+  <figcaption><b>The bar of the APB example.</b> Time on the first line, find and the expressions on the second, the rows and the files on the
+  last.</figcaption></figure>
 <table>
   <tr><th>Group</th><th>What it does</th></tr>
   <tr><td>cursor</td><td>A time and its unit, <span class="ui">Set</span> puts the cursor there; a span and its unit,
@@ -95,12 +96,13 @@
   <tr><td>find</td><td>The find field, ‹ ›, <span class="ui">Aa</span> <span class="ui">Full</span> <span class="ui">.*</span>,
     <span class="ui">Highlight</span>, <span class="ui">Open</span>, <span class="ui">Mask</span>, the colour and <span class="ui">Paint</span>,
     <span class="ui">Select</span>, <span class="ui">Copy</span> (<a href="#find">Find</a>).</td></tr>
-  <tr><td>expression</td><td>The ƒ field: an expression of the signals (<code>PSEL &amp;&amp; !PREADY</code>), ◀ ▶ to the times it becomes
-    true, <span class="ui">+ Row</span> / <span class="ui">− Row</span>. It belongs to the assertions: <a href="sva.html">Assertions</a>.</td></tr>
+  <tr><td>expression</td><td>On the line of find: <span class="ui">ƒ Expressions</span> opens the list of conditions of the signals
+    (<code>PSEL &amp;&amp; !PREADY</code>), marked on the waves; ◀ ▶ through the matches of the one you are on:
+    <a href="sva.html#expressions">Expressions</a>.</td></tr>
   <tr><td>list</td><td><span class="ui">Sort</span> and the ignored prefixes (<a href="#sort">Sorting</a>),
     <span class="ui">Expand</span> / <span class="ui">Collapse</span> every module, <span class="ui">Modules</span>
-    (<a href="modules.html">Modules</a>), <span class="ui">Highlight: N ✕</span> and
-    <span class="ui">Hidden: N ✕</span> when there are such rows.</td></tr>
+    (<a href="modules.html">Modules</a>), <span class="ui">FSMs</span> (<a href="types.html#fsms">State names</a>), and when there are such rows
+    <span class="ui">Highlight: N ✕</span>, <span class="ui">Hidden: N ✕</span> and <span class="ui">Only: N modules ‖ ✕</span>.</td></tr>
   <tr><td>style</td><td>The edges: <code>auto</code>, slanted (WaveDrom), vertical (a simulator's), square; kept in this browser for this
     viewer.</td></tr>
   <tr><td>state</td><td><span class="ui">Save</span> and <span class="ui">Load…</span> what you did in the viewer,
@@ -259,7 +261,7 @@
   <tr><td>Analog (step plot)</td><td>the bus as a step plot three rows high, between its smallest and largest value in its radix (signed,
     float, fixed); <span class="ui">As a bus</span> turns it back</td></tr>
   <tr><td>Bits: N rows</td><td>the bus bit by bit: a row per bit under it, the highest first (<code>[7]</code> … <code>[0]</code>, the path
-    <code>PADDR[7]</code>); as a click on its width <code>[7:0]</code> after the name, or <kbd>b</kbd>; <span class="ui">Fold the bits</span>
+    <code>PADDR[7]</code>); as a click on its width <code>[7:0]</code> after the name (<code>showWidth: false</code> leaves the widths out), or <kbd>b</kbd>; <span class="ui">Fold the bits</span>
     folds them; kept in this browser and in the saved state</td></tr>
   <tr><td>Highlight</td><td>as ctrl+click (<a href="#highlight">Highlight</a>)</td></tr>
   <tr><td>Hide</td><td>leaves the row out; <span class="ui">Hidden: N ✕</span> in the bar, or <span class="ui">Show the hidden</span> in this
@@ -276,6 +278,8 @@
     <span class="ui">Reset the cycles</span> (<a href="#cycles">Clock cycles</a>)</td></tr>
   <tr><td>Second cursor here</td><td>as shift+click; <span class="ui">Clear the second cursor</span> when there is one</td></tr>
   <tr><td>Copy the path</td><td>the full hierarchical path</td></tr>
+  <tr><td>Type…</td><td>where the labels or fields of the signal come from (<a href="types.html">State names</a>)</td></tr>
+  <tr><td>State machines…</td><td>the FSMs as a tree; <span class="ui">Clear the FSM layer</span> when there is one (<a href="types.html#fsms">State names</a>)</td></tr>
   <tr><td colspan="2"><b>Every row</b></td></tr>
   <tr><td>Fold / Open every module</td><td><kbd>zM</kbd> / <kbd>zR</kbd></td></tr>
   <tr><td>Modules…, Locate module in tree</td><td>the Modules panel, opened at the module of this row
@@ -427,19 +431,19 @@
 <ol class="steps">
   <li>Select a signal, put the cursor near the event and press <span class="ui">+ Mark</span> or <kbd>m</kbd>: a bookmark, snapped to an
     edge of that signal. <span class="ui">Bookmark here</span> in the right button's menu puts one where you clicked.</li>
-  <li>Type its text in the list under the waves; change its time (<code>250ns</code>, <code>85.12us</code>), its signal (empty: the time axis)
+  <li>Type its text in the list under the waves, a short label by the circle too; change its time (<code>250ns</code>, <code>85.12us</code>), its signal (empty: the time axis)
     or its colour there. <span class="ui">cursor</span> moves it to the cursor; the Δ column shows its distance from the cursor.</li>
   <li>Drag a circle on the waves to move it. <kbd>shift+drag</kbd> from one circle to another draws an arrow; or
     <span class="ui">+ Arrow</span> joins the last two.</li>
   <li>Pick the arrow's shape (<code>- ~ -~ ~- -| |- -|-</code>: straight, curve, curve late / early, corner, step), head (→ end, ↔ both,
     ← start, none), line (solid, dashed, dotted), colour and label.</li>
 </ol>
-<figure><img src="img/viewer-notes.png" alt="The bookmark list (number, time, cursor, signal, Δ, lift, colour, text) and the arrow list" loading="lazy">
+<figure><img src="img/viewer-notes.png" alt="The bookmark list (number, time, cursor, signal, Δ, lift, colour, label, text) and the arrow list" loading="lazy">
   <figcaption><b>The lists.</b> Six bookmarks of the APB example with their Δ from the cursor and their texts; three arrows, two of them
   steps (<code>-|-</code>) and one a curve.</figcaption></figure>
 <p>Arrow labels get a thin lane of their own between the signals, so they cover no value; an arrow between two bookmarks of one signal is a
   dimension line in that lane. A circle dragged onto the top quarter of its row (or ↥ in its line) is <b>lifted</b> into the lane above the
-  signal with a leader down to it (<code>"lift": true</code> in the JSON).</p>
+  signal with a leader down to it (<code>"lift": true</code> in the JSON); the bottom quarter, or ↥ again, puts it in the lane under the signal (<code>"lift": "below"</code>), ↥ once more back on the row.</p>
 <p id="marker-lines">The <b>text of a marker</b> uses the same lines. Drag it onto a signal: the upper half of the row puts it on the line over that signal, the lower half on
   the line under it, next to any lifted bookmark there. The drag moves it along the time too, onto the edges of that signal; straight up or down, or with <kbd>alt</kbd>, the time
   stays. Up to the axis it is back at the top of the rows, and a marker without a text is taken by the top of its dashed line. A marker is pale until you give it a colour: the right
@@ -462,7 +466,7 @@
 <p><span class="ui">Save</span> downloads what you did in the viewer as <code>&lt;title&gt;.view.json</code>: the time window and the
   cursor, the order and its prefixes, the folded modules, the highlight, the paint, the selected signal, the search, the bookmarks and
   arrows, the radix, analog and hidden rows, the buses shown bit by bit, the second cursor and the range, the gap settings, the assertions (files loaded or edited in
-  the page, with their text, and the bindings) and the ƒ rows. <span class="ui">Load…</span> (or dropping the file on a viewer) reads it
+  the page, with their text, and the bindings) and the expressions. <span class="ui">Load…</span> (or dropping the file on a viewer) reads it
   back — after a reload, in another browser, or on other waves: what they lack is left out and counted in the title line. A state says
   what is not there too (<code>"cursor2": null</code>, <code>"range": null</code>, the edge kind): loaded, it clears them; a key a
   state leaves out (an older one, one written by hand) keeps what the viewer has.</p>
@@ -470,15 +474,15 @@
   toggles …) pastes into a config file as it is; times are in model units (ps).</p>
 <p><span class="ui">Save page</span> downloads the page itself, <code>&lt;page&gt;.view.html</code>, with your view written into it:
   one file to send. Whoever opens it — in another browser, on another machine — sees the bookmarks, arrows, groups, colours, highlight,
-  cursor and window, the assertions and ƒ rows you had; the waves are the page's as they were, the live link to an agent and its token
+  cursor and window, the assertions and expressions you had; the waves are the page's as they were, the live link to an agent and its token
   are left out. It is the page's edits block that <code>tools/viewedit.py</code> writes, a new revision: what the person then changes
   stays theirs. It is there on a page that is all in itself (<code>make html</code>, <code>mkhtml.py</code>); a page with
   <code>wavelens.js</code> beside it, or a dump opened in the page (<span class="ui">Open…</span>), keeps its view with
   <span class="ui">Save</span>. The file carries what you did: your assertion files' text, notes, the search.</p>
 <h3 id="undo">Undo and redo</h3>
 <p><kbd>ctrl+Z</kbd> (or <span class="ui">↶</span> in the bar's title line, there with the tools folded too) takes back the last change of what you edit in a viewer: bookmarks and
-  arrows, markers, your groups, colours, radix, analog and hidden rows, the buses bit by bit, the highlight, the edge style, the scroll and the folded tools,
-  the gaps and the cycles. <kbd>ctrl+shift+Z</kbd> or <kbd>ctrl+Y</kbd> (<span class="ui">↷</span>) does it again. A step is what one
+  arrows, markers, spans, your groups, colours, radix, analog and hidden rows, the buses bit by bit, the highlight, the sort, Only, the FSM layer, the edge style,
+  the scroll and the folded tools, the gaps and the cycles. <kbd>ctrl+shift+Z</kbd> or <kbd>ctrl+Y</kbd> (<span class="ui">↷</span>) does it again. A step is what one
   action changed: a menu item, a colour picked, a bookmark dragged, a batch of commands from a script or a live agent; the toast names
   it (<code>undone: radix, hidden</code>). The cursor, the window, the selection and the search are not steps (move them back with
   <kbd>l</kbd>, the bookmarks, <kbd>Esc</kbd>). A text typed (a bookmark's, an arrow's label) is one step when its field is left; in a
@@ -487,7 +491,7 @@
 
 <h2 id="themes">Themes</h2>
 <p>Three themes: <b>light</b> (warm paper), <b>white</b> (black traces, for print and slides) and <b>dark</b>. They follow the system
-  (<code>prefers-color-scheme</code>) unless set: the theme button in a generated page's header, <code>&lt;html data-theme="white"&gt;</code>,
+  (<code>prefers-color-scheme</code>) unless set: the theme button in a generated page's header, ◐ in the bar's title line of <code>wavelens/viewer.html</code> (<code>themeButton</code>), <code>&lt;html data-theme="white"&gt;</code>,
   <code>WaveLens.setTheme('dark')</code>, or <code>"config": {"theme": …}</code>. Every colour is a CSS custom property; see
   <a href="pages.html">Dump → page</a> <a href="types.html">State names</a> for colours per signal, group and module.</p>
 <div class="pair">
@@ -539,6 +543,9 @@
   <tr><td><kbd>t</kbd></td><td>the Modules panel (<a href="#modules">Only</a>)</td><td><kbd>ctrl+G</kbd></td><td>the list of your groups</td></tr>
   <tr><td><kbd>yy</kbd>, <kbd>ctrl+C</kbd></td><td>copy the path</td><td><kbd>Esc</kbd></td><td>reset: search, highlight, selection</td></tr>
   <tr><td><kbd>]t</kbd> <kbd>[t</kbd></td><td>next / previous bus transaction (<a href="buses.html">Bus transactions</a>)</td>
+    <td><kbd>]x</kbd> <kbd>[x</kbd>, <kbd>]X</kbd> <kbd>[X</kbd>, <kbd>gx</kbd></td><td>next / previous match of the expression you are on,
+      next / previous expression, the list of expressions</td></tr>
+  <tr>
     <td><kbd>]f</kbd> <kbd>[f</kbd>, <kbd>]a</kbd> <kbd>[a</kbd></td><td>next / previous assertion failure, assertion
     (<a href="sva.html">Assertions</a>)</td></tr>
   <tr><td><kbd>ctrl+Z</kbd></td><td>undo (<a href="#undo">Undo and redo</a>)</td><td><kbd>ctrl+shift+Z</kbd>, <kbd>ctrl+Y</kbd></td>
@@ -556,7 +563,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.34 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.35 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

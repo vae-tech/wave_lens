@@ -71,7 +71,7 @@
   names the run shown on its colour, so the name stays in sight with the bar folded or scrolled away.</p>
 <ul>
   <li><kbd>d</kbd> flips the waves between A and B. B's values go on these rows in place: the rows that differ change, a row B has
-    not got is empty, the colours stay. Held on one stretch, only the difference moves. The value column, the edge keys, the find
+    not got, or of another width or kind, is empty, the time B does not cover is shaded, the colours stay. Held on one stretch, only the difference moves. The value column, the edge keys, the find
     and the FSM panel read the run shown; the assertions stay A's.</li>
   <li><kbd>D</kbd> puts both over each other where they differ: a bit's B over its A in B's colour, a bus's row in two lanes, A above
     B, each with its value; the value column says <code>1 ≠ 0</code>. <kbd>D</kbd> again: the run before.</li>
@@ -96,7 +96,7 @@
   it is, and <span class="ui">≠ … ✕</span> in the bar stops the read.</p>
 
 <h2 id="shell">From the shell</h2>
-<p>The page reads all of B. For dumps of hundreds of MB, for CI, or for two testbenches whose scopes are named apart,
+<p>The page keeps B's signals in memory. For dumps of hundreds of MB, for CI, or for two testbenches whose scopes are named apart,
   compare them in the shell: <code>sva diff</code> reads both as streams, neither in memory, and compares their values as
   <span class="ui">Compare…</span> does (two VCDs of 214 MB in 7 s):</p>
 <pre>sva diff apb.vcd apb_b.vcd --limit 4
@@ -127,7 +127,7 @@ B: apb_b.vcd  0 ps … 205 ns, 58 signals
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.34 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.35 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

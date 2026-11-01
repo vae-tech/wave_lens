@@ -2,7 +2,7 @@
 """viewedit.py — the viewer's commands (view.run of wavelens/src/edit.js) on a page's edits or a saved state, from the shell.
 
 What a person does with the buttons of a viewer — bookmarks (numbered circles with a text), arrows between them, markers,
-groups of their own, highlight, colours, the selection, hidden and folded rows, the modules kept (Only), the radix, the
+expressions, groups of their own, highlight, colours, the selection, hidden and folded rows, the modules kept (Only), the radix, the
 cursor and the window — a
 script or an agent does with the same commands by name. In the page they run live (view.run, or tools/wavemcp.py
 view_live); here they change the file:
@@ -25,7 +25,7 @@ Times: model units (ps of timed waves, else cycles) or a text with a unit ("2.5u
 arrows and markers are whole (2, 2.0, "2"). set_state keeps what the state it is given does not have (null clears).
 Signals: a full path, a name,
 the end of a path ("u_regs.PSEL") or a * pattern. The commands that need the waves' values, their labels or the screen
-(edge, picture, fit, fsm, fsm_stats, fsm_go, types) run only in a page (live). docs/USAGE.md § "Editing the views" has them all; the smoke test checks that a
+(edge, picture, fit, fsm, fsm_stats, fsm_go, types, expr_go, expr_matches) run only in a page (live). docs/USAGE.md § "Commands and edits" has them all; the smoke test checks that a
 page with these edits and the same commands run in it give the same state.
 """
 import argparse, collections, datetime, functools, json, math, os, re, sys, unicodedata
@@ -41,6 +41,7 @@ AR_SHAPES = ['~', '-', '-~', '~-', '-|', '|-', '-|-']
 AR_HEADS = ['>', '<>', '<', '']
 AR_LINES = ['solid', 'dashed', 'dotted']
 EDGE_KINDS = ['any', 'rise', 'fall', 'value', 'xz']
+EXPR_MARKS = ['band', 'line', 'strip']   # wavelens/sva.js MARK_KINDS
 HL_N = 6
 GAP_KEYS = {'on': 'gaps', 'idle': 'gapIdle', 'keep': 'gapKeep', 'signals': 'gapSignals', 'clock': 'gapClock', 'aux': 'gapAux', 'only': 'gapOnly',
             'count': 'gapCount', 'view': 'gapView'}
@@ -55,6 +56,7 @@ COMMANDS = {
     'cursor': 't', 'cursor2': 't', 'view': 'from? to? at? span?', 'fit': '', 'range': 'from? to? signal?',
     'bookmark': 'n? t? signal? text? label? color? lift? top? link? go? delete?', 'arrow': 'id? from? to? shape? head? line? color? label? delete?',
     'marker': 'id? t? label? color? signal? lift? delete?', 'span': 'id? from? to? label? color? signals? delete?',
+    'expr': 'id? text? scope? label? color? on? row? mark? gap? delete?', 'expr_go': 'id? dir? n?', 'expr_matches': 'id? from? to? limit? offset?',
     'group': 'name signals? add? remove? color? rename? delete? go? move?',
     'highlight': 'add? remove? set? clear?', 'paint': 'signals? color? clear?', 'select': 'signal? signals?', 'hide': 'signals', 'show': 'signals?',
     'fold': 'groups? all?', 'unfold': 'groups? all?', 'radix': 'signals radix', 'analog': 'signals rows', 'bits': 'signals on?',
@@ -67,11 +69,11 @@ COMMANDS = {
 }
 LIVE_ONLY = {'fit': 'the time of the waves', 'edge': 'the values of the signals', 'picture': 'the screen',
              'fsm': 'the enum labels of the signals', 'fsm_stats': 'the transitions of the signals', 'fsm_go': 'the transitions of the signals',
-             'types': 'the types file read in the page'}
+             'types': 'the types file read in the page', 'expr_go': 'the values of the signals', 'expr_matches': 'the values of the signals'}
 # the arguments of each command that are times (wavemcp.py turns its ns into "…ns" for these)
 TIME_ARGS = {'cursor': ('t',), 'cursor2': ('t',), 'view': ('from', 'to', 'at', 'span'), 'range': ('from', 'to'), 'bookmark': ('t',), 'marker': ('t',),
              'span': ('from', 'to'),
-             'picture': ('from', 'to'), 'cycles': ('zero',), 'compare': ('offset',)}
+             'picture': ('from', 'to'), 'cycles': ('zero',), 'compare': ('offset',), 'expr_matches': ('from', 'to')}
 def block_re(name):
     """A JSON block of the page (<script type="application/json" id="wavelens-…">), at a line's start: not the text of it in
     the comments of the inlined wavelens.js."""
@@ -462,6 +464,25 @@ def mark_list(ms):
                                ('lift', 'below' if m['signal'] and m['lift'] == 'below' else None)) if v is not None and v != ''} for m in ms]
 
 
+def expr_norm(x):
+    """An item of "exprs" as sva.js exprNorm: a text alone draws its row."""
+    o = {'expr': x} if isinstance(x, str) else x if isinstance(x, dict) else {}
+    return {'text': expr_text(o.get('expr') if o.get('expr') is not None else o.get('text')), 'scope': o.get('scope') or '',
+            'label': str(o['label']) if o.get('label') is not None else '', 'color': o.get('color') or None, 'on': o.get('on') is not False,
+            'row': o.get('row') is not False, 'mark': o['mark'] if o.get('mark') in EXPR_MARKS else 'band', 'gap': bool(o.get('gap'))}
+
+
+def expr_text(t):
+    return '' if t is None else str(t).strip().rstrip('; \t\r\n')
+
+
+def expr_json(x):
+    """An expression as a state has it (sva.js exprJSON): what is as the defaults left out, a text alone when nothing else is said."""
+    o = {k: v for k, v in (('expr', x['text']), ('scope', x['scope']), ('label', x['label']), ('color', x['color']), ('on', None if x['on'] else False),
+                           ('row', None if x['row'] else False), ('mark', None if x['mark'] == 'band' else x['mark']), ('gap', True if x['gap'] else None)) if v is not None and v != ''}
+    return x['text'] if len(o) == 1 else o
+
+
 def group_list(gs):
     return [{k: v for k, v in (('name', g['name']), ('signals', list(g['signals'])), ('color', g['color'])) if v is not None} for g in gs]
 
@@ -476,7 +497,7 @@ def clean_state(state):
             st[k] = [x for x in st[k] if isinstance(x, dict)]
         elif k in st:
             st.pop(k)
-    for k in ('hidden', 'bits'):
+    for k in ('hidden', 'bits', 'exprs'):
         if k in st and not isinstance(st[k], list):
             st.pop(k)
     for k in ('config', 'paint', 'radix', 'analog', 'folds'):
@@ -508,6 +529,11 @@ class Editor:
     def marks(self):
         return [{'t': parse_t(x.get('t')), 'label': str(x.get('label') or ''), 'color': x.get('color') or None, 'signal': x.get('signal') or None,
                  'lift': x.get('lift')} for x in self.st.get('markers') or []]
+
+    def exprs(self):
+        """The list of expressions: the state's, else the page's "sva".exprs."""
+        l = self.st['exprs'] if 'exprs' in self.st else ((self.m.doc or {}).get('sva') or {}).get('exprs') or []
+        return [x for x in map(expr_norm, l) if x['text']]
 
     def groups(self):
         return [{'name': g['name'], 'signals': list(g.get('signals') or []), 'color': g.get('color') or None} for g in self.st.get('groups') or []]
@@ -801,6 +827,44 @@ class Editor:
             m['lift'] = a['lift']
         self.st['markers'] = mark_list(ms)
         return {'id': ms.index(m) + 1}
+
+    def c_expr(self, a):
+        xid, xs = self.id_ok(a.get('id'), 'expression'), self.exprs()
+        if xid not in (None, 'all') and not xid <= len(xs):
+            fail(f'no expression {a["id"]} (there are {len(xs)})')
+        if xid == 'all' and not a.get('delete'):
+            fail('expr: id "all" is for delete (a new one: no id)')
+        if a.get('delete'):
+            if xid is None:
+                fail('expr: delete takes id or "all"')
+            xs = [] if xid == 'all' else xs[:xid - 1] + xs[xid:]
+            self.st['exprs'] = [expr_json(x) for x in xs]
+            return {'id': xid, 'deleted': True}
+        was = xs[xid - 1] if xid is not None else None
+        if a.get('mark') is not None and a['mark'] not in EXPR_MARKS:
+            fail(f'expr: mark is {", ".join(EXPR_MARKS)}, not {json.dumps(a["mark"])}')
+        text = expr_text(a['text']) if 'text' in a else was['text'] if was else ''
+        if not text:
+            fail('expr: text (an expression of the signals: PSEL && !PREADY)')
+        scope = expr_text(a['scope']) if 'scope' in a else was['scope'] if was else ''
+        same = [i for i, y in enumerate(xs) if y is not was and y['text'] == text and y['scope'] == scope]
+        if same:
+            fail(f'expr: it is there already (id {same[0] + 1})')
+        x = was or expr_norm({'expr': text, 'row': False})
+        x.update(text=text, scope=scope)
+        if 'label' in a:
+            x['label'] = '' if a['label'] is None else str(a['label'])
+        if 'color' in a:
+            x['color'] = a['color'] or None
+        for k in ('on', 'row', 'gap'):
+            if k in a:
+                x[k] = bool(a[k])
+        if a.get('mark') is not None:
+            x['mark'] = a['mark']
+        if not was:
+            xs.append(x)
+        self.st['exprs'] = [expr_json(y) for y in xs]
+        return {'id': xs.index(x) + 1}
 
     def c_span(self, a):
         sid, ss = self.id_ok(a.get('id'), 'span'), self.spans()
@@ -1167,11 +1231,16 @@ class Editor:
         return [r for r in self.ordered() if r['type'] != 'space' and find_row(r, terms, groups, cs, word, rx)]
 
     def c_gaps(self, a):
-        c = self.config()
+        c, xs = self.config(), self.exprs()
+        by = any(x['gap'] for x in xs)
+        if by and (a.get('reset') or a.get('on') is False or a.get('view') is False):   # look.js setGaps: the gaps off end the expressions'
+            for x in xs:
+                x['gap'] = False
+            self.st['exprs'] = [expr_json(x) for x in xs]
         if a.get('reset'):   # the page's own again (view.js setGaps(null)): a value equal to the page's setting is no override
             c.update({k: self.m.cfg.get(k, GAP_DEFAULTS[k]) for k in ALL_GAP_KEYS})
         for k, g in GAP_KEYS.items():
-            if k in a:
+            if k in a and not (by and a[k] is True and k in ('on', 'view')):   # on already, by them: not your setting
                 c[g] = a[k]
         return {'gaps': self.gap_opt()}
 
@@ -1182,6 +1251,9 @@ class Editor:
         o['gapSignals'], o['gapAux'], o['gapClock'] = prefixes(o['gapSignals']), prefixes(o['gapAux']), o['gapClock'] or None
         if o['gapCount'] not in ('off', 'clock', 'edges', 'rise', 'fall', 'any'):
             o['gapCount'] = 'clock'
+        by = [i + 1 for i, x in enumerate(self.exprs()) if x['gap']]
+        if by:   # expressions with gap have them on, on the waves
+            o.update(gaps=True, gapView=True, gapBy=by)
         return o
 
     def c_cycles(self, a):

@@ -26,10 +26,10 @@ is turned into VCD text with it, kept in the extension's storage).
   (`tb.types.json` by `tb.vcd`, from Questa's `tools/questa/wavelens_types.tcl` or `tools/svtypes.py verilator`) name every
   state bus and struct by its path, read again when the file changes. Without them the tab reads the workspace's
   SystemVerilog sources (`wavelens.sources`, default `**/*.sv`, `**/*.svh`) and names the state buses declared with a
-  `typedef enum` there, by name; **Sources…** in the bar picks other files. *WaveLens: Make the types with Verilator*
+  `typedef enum` there, by name, the fields of a `typedef struct packed` too; **Sources…** in the bar picks other files. *WaveLens: Make the types with Verilator (FSM states, structs)*
   writes `tb.types.json` from a `.f` file of the workspace (or the arguments you type) with `verilator --json-only`: no
   Python needed (`wavelens.verilator`).
-- **Convert to FST**: a `.vcd` in the Explorer → right click → *WaveLens: Convert to FST* (or the tab's title menu)
+- **Convert to FST**: a `.vcd` in the Explorer → right click → *WaveLens: Convert to FST (beside the VCD, FSM states kept)* (or the tab's title menu)
   writes `tb.fst` beside it with the bundled `sva fst`: the VCD's enum tables and the FSM states of `tb.types.json` in it,
   so any FST reader names the states. Its notes (with their lines, five of a kind) go to the log; a failure opens it.
 - **State machines**: `T` (or **FSMs** in the bar) lists every signal with state names in the tree of its modules, its
@@ -41,7 +41,7 @@ is turned into VCD text with it, kept in the extension's storage).
 - **Theme**: `wavelens.theme` — `auto` (light or dark by VS Code's), `vscode` (the colours of VS Code's theme),
   `light`, `white`, `dark`; **◐** in the bar (or *WaveLens: Choose the theme of the waves* in the editor's title) previews
   each on the open tabs.
-- **The version** in the bar: `0.34 · dev@5470d89*`, the extension's branch and commit (`*`: changes not committed).
+- **The version** in the bar: `0.35 · dev@5470d89*`, the extension's branch and commit (`*`: changes not committed).
 
 The keys are the viewer's (`?` in the tab): the plain ones, and the ctrl / alt ones that mean what they mean in VS Code
 (ctrl+F, ctrl+C, ctrl+Z, alt+C W R); `wavelens.keysToVSCode` (`ctrl+G`: Go to Line) go to VS Code — the list of your

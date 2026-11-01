@@ -1267,7 +1267,7 @@ def themes(page):
 
 
 def sva_exprs(browser, build):
-    """Stage 10: the expression field of the bar on the APB pages."""
+    """The list of expressions on the APB pages: the editor, going through the matches, the marks on the waves, the commands."""
     apb, apb_all = build / 'examples' / 'apb' / 'apb.html', build / 'examples' / 'apb' / 'apb_all.html'
     if not need(apb, apb_all, how='make examples'):
         return
@@ -1279,40 +1279,194 @@ def sva_exprs(browser, build):
     page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('SVA.ready()'); page.evaluate('localStorage.clear()')
     v = page.locator('.wv').first
     js = lambda e: page.evaluate(f"(() => {{ const v = document.querySelector('.wv').waveView, x = v.svaExprs; {e} }})()")
-    inp, cnt = v.locator('input.svq'), v.locator('.svqn')
+    bar, panel = v.locator('.bar .svx-tool'), v.locator('.sva.xpanel')
+    ed, go_key = panel.locator('textarea.src'), lambda *keys: [page.keyboard.press(k) for k in keys]
+    rows_x = "WaveLens.internal.peek(document.querySelector('.wv').waveView).vis.filter(r => (r.cls || '').startsWith('sva-expr'))"
+    lines = lambda: panel.locator('ol.xl > li')
     js('v.cursor = 0;')
-    inp.fill('PSEL && !PREADY')
+    check(v.locator('input.svq').count() == 0 and panel.is_hidden() and bar.locator('[data-x=open]').inner_text().strip() == 'ƒ Expressions',
+          'no field in the bar any more: a button, and no panel while there is no expression')
+    bar.locator('[data-x=open]').click()
+    ed.wait_for(); ed.click(); page.keyboard.type('PSE'); ac = panel.locator('ul.xac li')
+    first = ac.all_inner_texts()
+    go_key('Tab'); page.keyboard.type(' &&\n    !PREA'); go_key('ArrowDown', 'ArrowUp', 'Tab')
+    page.wait_for_function("(document.querySelector('.wv .xpanel .xp') || {}).textContent === '✓ 3 matches, first at 45 ns'", timeout=4000 * SCALE)
+    check(first[0] == 'PSEL' and ed.input_value() == 'PSEL &&\n    !PREADY', f'the editor: several lines; the names as you type, the shortest first, Tab takes one {first} {ed.input_value()!r}')
+    ed.press('Control+End'); page.keyboard.type(' && PEN'); panel.locator('ul.xac li').first.wait_for()
+    go_key('Escape'); kept = [ed.count(), panel.locator('ul.xac').is_hidden()]
+    go_key('Backspace', 'Backspace', 'Backspace'); page.keyboard.type('nope')
+    page.wait_for_function("(document.querySelector('.wv .xpanel .xp') || {}).textContent.includes('not found: nope')", timeout=4000 * SCALE)
+    page.keyboard.press('Control+Enter'); page.wait_for_function("document.querySelector('.wv .xpanel .em').textContent.includes('not found: nope')")
+    check(kept == [1, True] and lines().count() == 0, f'a name that is not there: said while typing and on Add, nothing added; Esc closes the list of names first {kept}')
+    for _ in ' && nope': page.keyboard.press('Backspace')
+    page.keyboard.press('Control+Enter'); lines().first.wait_for()
+    page.wait_for_function("document.querySelector('.wv').waveView.cursor === 45000")
+    got = [js('return x.json();'), lines().first.locator('.xr').inner_text(), lines().first.locator('.xk').inner_text(), bar.locator('.svqk').inner_text(),
+           bar.locator('[data-x=open]').inner_text().strip(), js('return v.state().exprs;')]
+    check(got[0] == [{'expr': 'PSEL &&\n    !PREADY', 'row': False}] and got[1].startswith('3 matches · true 25% of the time · first 45 ns · last 145 ns') and got[2:5] == ['1/3', '1/3', 'ƒ Expressions (1)']
+          and got[5] == got[0], f'Add: on the list as typed, marked, no row, what it found, the cursor on its first match {got}')
+    # going through it: the line, ◀ ▶, the keys, its matches listed
     seq = []
-    for k in ('Enter', 'Enter', 'Enter', 'Enter', 'Shift+Enter'):
-        prev = cnt.inner_text(); inp.press(k)
-        page.wait_for_function('(n) => document.querySelector(".wv .svqn").textContent !== n', arg=prev)
-        seq.append([cnt.inner_text(), js('return v.cursor;')])
-    check([x[0] for x in seq] == ['1/3', '2/3', '3/3', '1/3', '3/3'] and [x[1] for x in seq][:3] == [45000, 85000, 145000],
-          f'Enter / shift+Enter: the times PSEL && !PREADY becomes true, from the cursor, round the ends {seq}')
-    v.locator('button[data-x=add]').click()
-    inp.fill('@(posedge PCLK) PSEL && PENABLE && !PREADY'); v.locator('button[data-x=add]').click()
-    inp.fill('PSEL && nope'); v.locator('button[data-x=add]').click()
-    page.wait_for_function("WaveLens.internal.peek(document.querySelector('.wv').waveView).vis.filter(r => (r.cls || '').startsWith('sva-expr')).length === 2")
-    toast = v.locator('.bar .toast').inner_text()
-    rows = js("return WaveLens.internal.peek(v).vis.filter(r => (r.cls || '').startsWith('sva-expr')).map(r => [r.name, r.tr.filter(o => o.k === '1').map(o => o.t)]);")
-    check(rows == [['ƒ PSEL && !PREADY', [45000, 85000, 145000]], ['ƒ @(posedge PCLK) PSEL && PENABLE && !PREADY', [105000]]] and 'not found: nope' in toast,
-          f'+ Row: two rows ƒ (the clocked one at the edge after its cycle); a name that is not there is said, no row {rows} {toast!r}')
-    jtxt = page.evaluate("document.querySelector('.wv').waveView.extraJSON.map(f => f()).filter(Boolean).join('\\n')")
+    li = lines().first
+    li.locator('code.at').click(position={'x': 1, 'y': 1}); seq.append(js('return v.cursor;'))   # the text is selectable: no jump
+    li.locator('.xr').click(); page.wait_for_timeout(50); seq.append(js('return v.cursor;'))
+    li.locator('[data-x=forth]').click(); page.wait_for_timeout(50); seq.append(js('return v.cursor;'))
+    li.locator('[data-x=forth]').click(); page.wait_for_timeout(50); seq.append(js('return v.cursor;'))   # round the end
+    bar.locator('[data-x=prev]').click(); page.wait_for_timeout(50); seq.append(js('return v.cursor;'))
+    v.locator('canvas').first.focus(); go_key(']', 'x'); page.wait_for_timeout(50); seq.append(js('return v.cursor;'))
+    go_key('[', 'x'); page.wait_for_timeout(50); seq.append(js('return v.cursor;'))
+    check(seq == [45000, 85000, 145000, 45000, 145000, 45000, 145000], f'a click on the line, ◀ ▶ on it and in the bar, ]x [x: its matches from the cursor, round the ends {seq}')
+    li.locator('[data-x=list]').click(); ms = panel.locator('ol.atl li').all_inner_texts(); panel.locator('ol.atl [data-x=match]').nth(1).click(); page.wait_for_timeout(50)
+    check(len(ms) == 3 and '#1 45 ns' in ms[0] and js('return v.cursor;') == 85000 and bar.locator('.svqk').inner_text() == '2/3', f'≡ lists its matches, a click goes to one {ms}')
+    picks = js('return [...v.extraPicks.keys()].map(r => r.name);')
+    check(picks == ['PSEL', 'PREADY'], f'the expression you are on: its signals highlighted {picks}')
+    page.keyboard.press('Escape'); li.focus(); 
+    # a second one by the commands; marks on and off on the canvas
+    r = page.evaluate("""async () => { const v = document.querySelector('.wv').waveView; return v.run([
+      { op: 'expr', text: '@(posedge PCLK) PSEL && PENABLE && !PREADY;', label: 'wait', color: '#c03030', mark: 'line', row: true },
+      { op: 'expr', text: 'PSEL && nope' }, { op: 'expr', text: 'PSEL', mark: 'zigzag' }, { op: 'expr', id: 9, label: 'x' }, { op: 'expr', id: 'all', label: 'x' },
+      { op: 'expr', text: '@(posedge PCLK) PSEL && PENABLE && !PREADY' }, { op: 'expr', text: '  ' }, { op: 'expr', delete: true }, { op: 'expr', text: 'PSEL', color: 'no colour!' },
+      { op: 'expr_go', id: 9 }, { op: 'expr_go', id: 2, dir: 2 }, { op: 'expr_go', id: 2, n: 9 }, { op: 'expr_matches', id: 9 }]); }""")
+    errs_ = [x.get('error', '')[:40] for x in r[1:]]
+    check(r[0].get('id') == 2 and r[0]['n'] == 1 and r[0]['first'] == 105000 and r[0]['time'] == 20000 and r[0]['mark'] == 'line' and all(errs_) and 'not found: nope' in errs_[0] and 'band, line, strip' in r[2]['error']
+          and 'no expression 9' in errs_[2] and 'id "all" is for delete' in errs_[3] and 'there already (id 2)' in r[5]['error'] and 'expr: text' in errs_[5] and 'delete takes id' in errs_[6] and 'no colour' in errs_[7]
+          and 'no match 9 (there are 1)' in r[11]['error'] and js('return x.list.length;') == 2, f'the expr commands: what it found; what is wrong said, nothing made of it {r[0]} {errs_}')
+    ra = js("""return v.run([{ op: 'expr_go', id: 2 }, { op: 'expr_go', id: 1, n: 2 }, { op: 'expr_go', id: 1, dir: -1 }, { op: 'expr_matches' }, { op: 'expr_matches', id: 1, limit: 1, offset: 1 },
+        { op: 'expr_matches', id: 1, from: '100ns' }, { op: 'expr', id: 1, label: 'phase', on: false }, { op: 'expr', id: 1, on: true, color: null, mark: 'strip' }]);""")
+    check(ra[0]['t'] == 105000 and ra[0]['id'] == 2 and ra[1]['t'] == 85000 and ra[1]['k'] == 2 and ra[2]['t'] == 45000 and [e['n'] for e in ra[3]['exprs']] == [3, 1] and ra[3]['exprs'][1]['first'] == 105000
+          and ra[4]['matches'] == [[85000, 115000]] and ra[4]['next_offset'] == 2 and ra[4]['total'] == 3 and ra[5]['matches'] == [[85000, 115000], [145000, 155000]] and ra[6]['on'] is False,
+          f'expr_go: to a match, by number or from the cursor; expr_matches: the numbers of all, one\'s stretches paged and in a window {ra[:6]}')
+    # the marks: what the viewer gives the painter, the pixels, the strip; on and off
+    mk = js("""const c = v.canvas, g = c.getContext('2d'), d = devicePixelRatio, L = WaveLens.internal.peek(v).lay;
+        const at = (t, y) => [...g.getImageData(Math.round(v.wf ? 0 : (t - v.t0) / v.span * c.clientWidth * d), Math.round(y * d), 1, 1).data].slice(0, 3).join();
+        const o = v.timeMarks().map(m => [m.label, m.mark, m.color, m.spans.length, m.on]); return [o, at(90000, v.hdrH + 1), at(50000, v.hdrH + 1)];""")
+    check(mk[0][0][:4] == ['phase', 'strip', '#d9822b', 3] and mk[0][1][:4] == ['wait', 'line', '#c03030', 1], f'the marks of the list: label, kind, the colour of its place or its own {mk}')
+    js("v.goto(v.M.t0, v.M.t1 - v.M.t0); x.list[0].mark = 'band'; x.list[0].label = ''; x.list[1].on = false; x.render(); v.draw();")
+    pix = lambda t, dy=60: js(f"const c = v.canvas, d = devicePixelRatio; return [...c.getContext('2d').getImageData(Math.round(({t} - v.t0) / v.span * c.clientWidth * d), Math.round((v.hdrH + {dy}) * d), 1, 1).data].slice(0, 3).join();")
+    inb = pix(90000); outb = pix(30000)
+    panel.locator('ol.xl > li').first.locator('input[data-c=on]').uncheck(); offb = pix(90000)
+    panel.locator('ol.xl > li').first.locator('input[data-c=on]').check()
+    panel.locator('ol.xl > li').first.locator('input[data-c=color]').evaluate("e => { e.value = '#0000ff'; e.dispatchEvent(new Event('change', { bubbles: true })); }"); blue = pix(90000)
+    check(inb != offb and offb != blue and js('return x.list[0].color;') == '#0000ff', f'a band over the rows where it holds; its tick takes it off, the colour changes it {inb} {outb} {offb} {blue}')
+    tip = js("return v.spanTip(90000, null);")
+    check('ƒ PSEL &&' in tip and '85 ns … 115 ns' in tip and '(Δ 30 ns)' in tip, f'hover: which expression, the stretch and its length {tip!r}')
+    svg = js("const s = v.toSVG(); v.svaExprs.list[0].on = false; const t = v.toSVG(); v.svaExprs.list[0].on = true; return [s.includes('#0000ff'), t.includes('#0000ff')];")
+    check(svg == [True, False], f'the picture has the marks of the ones that are on {svg}')
+    many = page.evaluate("""(() => { const I = WaveLens.internal, S = Array.from({ length: 1000000 }, (_, i) => [i * 10, i * 10 + 5]); let rects = 0, texts = 0, lines = 0, X = t => t / 1e4;
+      const P = { rect: () => rects++, text: () => texts++, path: d => { lines += d.length / 2; }, measure: () => 30 };
+      const t0 = performance.now(); I.paintTimeMarks(P, [{ spans: S, mark: 'band', color: 'c', label: 'L' }], X, 0, 1e7, 0, 100, 1e4); const dt = performance.now() - t0;
+      const one = []; I.paintTimeMarks({ rect: (x, y, w, h, c) => one.push([x, w, h]), text() {}, path() {}, measure: () => 1 },
+        [{ spans: [[-10, 10], [20, 30], [31, 32], [90, 200]], mark: 'band', color: 'c', label: '' }], t => t, 0, 100, 0, 100, 2);
+      let d = 0; I.paintTimeMarks({ rect() {}, text() {}, path: x => { d = x.length / 2; }, measure: () => 1 }, [{ spans: [[-10, 10], [20, 30], [31, 32], [90, 200]], mark: 'line', color: 'c', label: '' }], t => t, 0, 100, 0, 100, 0.1);
+      return [rects <= 4, dt < 100, one, d]; })()""")
+    check(many[0] and many[1] and many[2] == [[0, 10, 100], [0, 10, 2.5], [20, 12, 100], [20, 12, 2.5], [90, 10, 100], [90, 10, 2.5]] and many[3] == 3,
+          f'a million stretches cost a frame (nearer than a pixel: one); one over the left edge cut, and no line where it starts before the window {many}')
+    # the row ƒ, a click on it finds the line; the list after a reload and in the JSON
+    li2 = lines().nth(1); pressed = li2.locator('[data-x=row]').get_attribute('aria-pressed')
+    lines().first.locator('[data-x=row]').click()
+    page.wait_for_function(f"{rows_x}.filter(r => r.tr.length).length === 2")
+    rows = js(f"return {rows_x}.map(r => [r.name, r.tr.filter(o => o.k === '1').map(o => o.t), r.stroke]);")
+    check(pressed == 'true' and rows == [['ƒ PSEL && !PREADY', [45000, 85000, 145000], '#0000ff'], ['ƒ wait', [105000], '#c03030']],
+          f'ƒ row: drawn as a signal, in its colour, named by its label (the clocked one at the edge after its cycle) {rows}')
+    v.locator('.names .row', has_text='ƒ wait').first.click()
+    check('here' in lines().nth(1).get_attribute('class'), 'a click on the row ƒ finds its line in the list')
+    panel.locator('[data-x=json]').click(); jtxt = panel.locator('textarea.json').input_value()
+    want = [{'expr': 'PSEL &&\n    !PREADY', 'color': '#0000ff', 'mark': 'band'}, {'expr': '@(posedge PCLK) PSEL && PENABLE && !PREADY', 'label': 'wait', 'color': '#c03030', 'on': False, 'mark': 'line'}]
+    for w in want: w.pop('mark') if w['mark'] == 'band' else None
+    state = js('return x.json();')
+    check(state == want and jtxt.startswith('"exprs": [\n  {"expr":"PSEL &&\\n    !PREADY"'), f'the JSON for a config, the state: what differs from the defaults {state} {jtxt[:60]!r}')
     page.reload(); page.wait_for_load_state('networkidle'); page.evaluate('SVA.ready()')
-    page.wait_for_function("WaveLens.internal.peek(document.querySelector('.wv').waveView).vis.filter(r => (r.cls || '').startsWith('sva-expr') && r.tr.length).length === 2")
-    v.locator('.names .row', has_text='ƒ PSEL && !PREADY').first.click()
-    got = [inp.input_value()]
-    v.locator('button[data-x=del]').click()
-    got.append(js("return WaveLens.internal.peek(v).vis.filter(r => (r.cls || '').startsWith('sva-expr')).map(r => r.name);"))
-    check('"exprs": [\n  "PSEL && !PREADY",' in jtxt and got == ['PSEL && !PREADY', ['ƒ @(posedge PCLK) PSEL && PENABLE && !PREADY']],
-          f'the rows are kept over a reload and in the JSON ("exprs"); a click on a row puts it in the field, − Row removes it {got}')
+    page.wait_for_function(f"{rows_x}.filter(r => r.tr.length).length === 2")
+    check(js('return x.json();') == want and js('return x.open;') is True and lines().count() == 2, 'the list, its colours and marks are kept over a reload, the panel open')
+    # the editor over an expression: Esc cancels; Apply keeps the rest; ✕ removes
+    lines().first.locator('[data-x=edit]').click(); e2 = lines().first.locator('textarea.src'); e2.fill('PSEL'); lines().first.locator('.xlb').fill('sel'); e2.press('Escape'); page.wait_for_timeout(30)
+    a = [js('return x.list[0].text;'), panel.locator('textarea.src').count()]
+    lines().first.locator('[data-x=edit]').click(); e2 = lines().first.locator('textarea.src'); e2.fill('PSEL'); lines().first.locator('.xlb').fill('sel'); e2.press('Control+Enter')
+    page.wait_for_function("document.querySelector('.wv').waveView.svaExprs.list[0].text === 'PSEL'")
+    b = js('const l = x.list[0]; return [l.label, l.color, l.res.stat.n];')
+    check(a == ['PSEL &&\n    !PREADY', 0] and b == ['sel', '#0000ff', 3], f'✎: Esc leaves it as it was, Apply changes the text and the label, the colour stays {a} {b}')
+    lines().nth(1).focus(); page.keyboard.press('ArrowUp'); page.wait_for_timeout(30); page.keyboard.press('ArrowRight'); page.wait_for_timeout(50)
+    c1 = js('return [x.list.indexOf(x.cur), v.cursor];'); page.keyboard.press(' '); page.wait_for_timeout(30); off1 = js('return x.list[0].on;'); page.keyboard.press(' ')
+    check(c1[0] == 0 and off1 is False and js('return x.list[0].on;') is True, f'the keys on the list: ↑ ↓ the expressions, ← → its matches, space its marks {c1} {off1}')
+    panel.locator('[data-x=all]').click(); o1 = js('return x.list.map(y => y.on);'); panel.locator('[data-x=all]').click(); o2 = js('return x.list.map(y => y.on);')
+    check(o1 == [True, True] and o2 == [False, False] or o1 == [False, False] and o2 == [True, True], f'All on / All off {o1} {o2}')
+    panel.locator('.nh [data-x=tw]').click(); folded = panel.locator('ol.xl').count(); panel.locator('.nh [data-x=tw]').click()
+    check(folded == 0 and lines().count() == 2, 'its header folds the list')
+    lines().first.locator('[data-x=forth]').click(); page.wait_for_timeout(50); was = js('return v.extraPicks.size;')
+    lines().first.locator('[data-x=del]').click(); page.wait_for_timeout(30); now = js('return [v.extraPicks.size, x.cur];')
+    check(was > 0 and now == [0, None], f'the one you are on removed: its signals are not highlighted any more {was} {now}')
+    lines().first.locator('[data-x=del]').click(); page.wait_for_timeout(30)
+    check(panel.is_hidden() and js(f'return {rows_x}.length;') == 0 and js('return v.state().exprs;') == [], '✕ removes it with its row; no expression left: no panel')
+    st = js("""await x.setList(['PSEL && !PREADY', { expr: 'PENABLE', scope: 'apb_tb', on: false }]); const a = x.list.map(y => [y.row, y.on, y.mark, y.scope]); await x.setList([]); return a;""".replace('await x.setList', 'return (async () => { await x.setList', 1).rstrip().replace('return a;', 'return a; })();'))
+    check(st == [[True, True, 'band', ''], [True, False, 'band', 'apb_tb']], f'a list as a config has it: a text alone draws its row too, as "exprs" always did {st}')
+    nd = js("""const r = []; return SVA.expressions.valueOf(v.M, [], { text: 'PSEL', scope: '' }, rows => { r.push(rows.length); return Promise.resolve(); }).then(o => [r, o.stat.n]);""")
+    check(nd[0] == [1], f'a large dump read as needed: the signals an expression reads come first {nd}')
+    wr = js("""v.setGaps({ gaps: true, gapView: true, gapSignals: 'PENABLE', gapIdle: 3, gapKeep: 0 }); return v.run([{ op: 'expr', text: 'PSEL', label: 'L' }, { op: 'expr_go', id: 1 }]).then(a => { v.setGaps({ gaps: false, gapView: false }); return x.setList([]).then(() => a); });""")
+    check(wr[0].get('n') and wr[1].get('t') is not None, f'the marks and the steps with the gaps on the waves {wr}')
     # a hierarchy: names from the selected signal's module up, or a full path
     page.goto(apb_all.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('SVA.ready()')
     h = js("""v.expandAll(); const I = SVA.scopeInfo(v.M), r = v.M.rows.find(r => r.src && r.src.path === 'apb_tb.u_regs.PREADY'); v.select(r);
         const X = SVA.expressions, M = v.M, go = x => X.valueOf(M, [], x).then(o => o.err || Object.values(o.map).map(r => r.src.path));
-        return Promise.all([go({ text: 'PSEL && PREADY', scope: x.scope() }), go({ text: 'apb_tb.u_master.PSEL || PCLK', scope: 'apb_tb.u_regs' }), go({ text: 'PSEL', scope: 'apb_tb.u_count' })]);""")
-    check(h[0] == ['apb_tb.u_regs.PSEL', 'apb_tb.u_regs.PREADY'] and h[1] == ['apb_tb.u_master.PSEL', 'apb_tb.u_regs.PCLK'] and h[2] == ['apb_tb.PSEL'],
-          f'names: from the selected signal\'s module (u_regs) up to the top, a full path as it is {h}')
+        return Promise.all([go({ text: 'PSEL && PREADY', scope: x.scope() }), go({ text: 'apb_tb.u_master.PSEL || PCLK', scope: 'apb_tb.u_regs' }), go({ text: 'PSEL', scope: 'apb_tb.u_count' }), go({ text: 'PSEL', scope: '' })]);""")
+    check(h[0] == ['apb_tb.u_regs.PSEL', 'apb_tb.u_regs.PREADY'] and h[1] == ['apb_tb.u_master.PSEL', 'apb_tb.u_regs.PCLK'] and h[2] == ['apb_tb.PSEL'] and h[3] == ['apb_tb.PSEL'],
+          f'names: from the selected signal\'s module (u_regs) up to the top, a full path as it is, and the one module at the top without its path {h}')
+    # ✂: the waves cut to the matches of expressions, one or several, with the gaps' idle and keep
+    js("v.setGaps({ gapIdle: 2, gapKeep: 0 }); x.toggle(true); return x.setList([{ expr: 'PSEL && !PREADY', row: false }, { expr: 'PENABLE && PREADY', row: false }, { expr: 'PSEL && !PSEL', row: false }]);")
+    page.wait_for_function("document.querySelector('.wv').waveView.svaExprs.list.every(y => y.res) && document.querySelectorAll('.wv .xpanel ol.xl > li').length === 3")
+    gb, cut, ns = v.locator('.gapv'), panel.locator('.xcut'), lambda ps: [[a / 1000, b / 1000] for a, b in ps]
+    parts = lambda: ns((js('return v.gapParts(9);') or {'parts': []})['parts'])
+    h0 = js('return v.hdrH;'); w0 = (js('return v.wf;'), gb.is_visible())
+    lines().first.locator('[data-x=gap]').click(); page.wait_for_timeout(30)
+    a = [parts(), js('return v.gapOpt().gapBy;'), js('return v.gapOpt(true).gapView;'), gb.is_visible(), js('return v.hdrH;') > h0, cut.inner_text(), lines().first.locator('[data-x=gap]').get_attribute('aria-pressed')]
+    check(w0 == (None, False) and a == [[[45, 55], [85, 115], [145, 155]], [1], False, True, True, '✂ 1 · 4 gaps · 50 ns of 205 ns kept', 'true'],
+          f'✂ on a line: the waves keep its matches, gaps before the first and after the last too, idle and keep on the bar, what they leave said; your own settings not touched {a}')
+    ends = js('return (c => [c[0], c[c.length - 1]])(v.wf.w.cuts);')
+    check(ends == [[0, 0], [205000, 205000]] and js('return [v.t0, v.span];') == [0, 205000], f'…the window still the times of the whole dump, a part of nothing at each end {ends}')
+    lines().nth(1).focus(); page.keyboard.press('c'); page.wait_for_timeout(30)
+    b = [parts(), js('return v.gapOpt().gapBy;'), js('return document.activeElement.dataset.i;')]
+    check(b == [[[45, 65], [85, 125], [145, 165]], [1, 2], '1'], f'…on several: their matches together; c on a line, which keeps the focus {b}')
+    lines().nth(2).locator('[data-x=gap]').click(); page.wait_for_timeout(30); c = parts()
+    js('x.list[0].gap = x.list[1].gap = false; x.save(); x.render(); x.redraw();'); page.wait_for_timeout(30); d = [parts(), js('return v.wf;'), js('return v.gapOpt().gapBy;')]
+    check(c == b[0] and d == [[[0, 205]], None, [3]], f'…one that never holds adds nothing, alone it cuts nothing {c} {d}')
+    js('x.list[2].gap = false; x.list[0].gap = x.list[1].gap = true; x.save(); x.render(); x.redraw();'); page.wait_for_timeout(30)
+    res0 = js('window.__r = x.list[0].res; return 1;'); gb.locator('.bgk').fill('5ns'); page.wait_for_timeout(250)
+    e = [parts(), js('return window.__r === x.list[0].res;'), cut.inner_text()]
+    check(e == [[[35, 175]], True, '✂ 2 · 2 gaps · 140 ns of 205 ns kept'], f'…keep on the bar: the waves at once, around each match, the expressions not valued again {e}')
+    gb.locator('.bgk').fill('0'); page.wait_for_timeout(250)
+    js("return v.run([{ op: 'view', from: '45ns', to: '60ns' }]);"); lines().first.locator('[data-x=forth]').click(); page.wait_for_timeout(30)
+    lines().first.locator('[data-x=forth]').click(); page.wait_for_timeout(50); f = js('return [v.cursor, v.wf.X(v.cursor) >= 0 && v.wf.X(v.cursor) <= v.wf.W];')
+    check(f[1] is True, f'…going through the matches with a short window: the match in the window {f}')
+    js("return v.run([{ op: 'view', from: 0, to: '205ns' }]);")
+    st = js('return v.state();')
+    g = [st['exprs'][0].get('gap'), st['exprs'][2].get('gap'), st['config']['gapView'], st['config']['gaps']]
+    js('x.noGaps(true);'); page.wait_for_timeout(30); h = [parts(), panel.locator('[data-x=nogap]').count()]
+    page.evaluate("s => document.querySelector('.wv').waveView.setState(s)", st); page.wait_for_timeout(100)
+    i = [parts(), js('return v.gapOpt(true).gapView;'), js('return x.list.map(y => y.gap);')]
+    check(g == [True, None, False, False] and h == [[], 0] and i == [b[0], False, [True, True, False]], f'…in a state: gap on the expression, the settings your own; back whole, and cut again when loaded {g} {h} {i}')
+    js("return v.run([{ op: 'gaps', on: true, view: true }]);"); j = js('return [v.gapOpt(true).gapView, v.gapOpt(true).gaps];')
+    box = v.locator('canvas').first.bounding_box(); page.mouse.click(box['x'] + 300, box['y'] + 120, button='right'); mn = page.locator('.wv-menu')
+    mn.locator('.subh').first.hover(); mn.locator('.subh').first.click(); page.wait_for_timeout(40); k = mn.locator('[data-m=gbyx]').locator('..').inner_text()
+    mn.locator('[data-m=gbyx]').click(); page.wait_for_timeout(40); page.keyboard.press('Escape'); l = [parts(), js('return x.list.some(y => y.gap);'), js('return v.gapOpt().gapView;')]
+    check(j == [False, False] and '✂ 2 expressions' in k and l == [[], False, False], f'…the gaps command said on changes nothing of yours; the menu says what cuts, its ✕ ends it {j} {k!r} {l}')
+    js('x.setGap(x.list[0], true);'); page.wait_for_timeout(30); gb.locator('button').click(); page.wait_for_timeout(30)
+    m = [parts(), js('return x.list[0].gap;'), gb.is_visible(), js('return v.gapOpt(true).gapView;')]
+    js('x.setGap(x.list[0], true);'); page.wait_for_timeout(30); panel.locator('[data-x=nogap]').click(); page.wait_for_timeout(30); n = [parts(), gb.is_visible(), cut.inner_text()]
+    check(m == [[], False, False, False] and n == [[], False, ''], f'the bar\'s ✕ and ✂ off in the panel: the waves whole, ✂ off the lines {m} {n}')
+    o = js("return v.run([{ op: 'expr', id: 1, gap: true }, { op: 'gaps', idle: 2, keep: 0 }, { op: 'gaps', view: false }, { op: 'expr', id: 2, gap: true }, { op: 'gaps', reset: true }, { op: 'expr', id: 2 }]);")
+    check(o[0]['gap'] is True and ns(o[0]['cut']['parts']) == [[45, 55], [85, 115], [145, 155]] and o[1]['gaps']['gapBy'] == [1] and ns(o[1]['cut']['parts']) == [[45, 55], [85, 115], [145, 155]]
+          and 'gapBy' not in o[2]['gaps'] and o[3]['cut'] and o[4]['gaps']['gaps'] is False and 'cut' not in o[5] and o[5]['gap'] is False, f'the commands: expr gap says what the waves leave; gaps says who cuts; view false and reset end it {o}')
+    js("v.setGaps({ gapIdle: 2, gapKeep: 0 }); x.setGap(x.list[0], true);"); page.wait_for_timeout(30)
+    q = js("return [v.cutsOf(0, 205000, v.screenRows()).map(c => c[0] / 1000), v.cutsOf(50000, 100000, v.screenRows()).map(c => c[0] / 1000)];")
+    check(q == [[45, 85, 145], [50, 85]], f'a picture of the window keeps what the waves keep {q}')
+    r = page.evaluate("""async () => { const v = document.querySelector('.wv').waveView, d = Object.assign({}, v.M.src, { config: Object.assign({}, v.M.src.config, { gapIdle: 2, gapKeep: 0 }),
+      sva: Object.assign({}, v.M.src.sva, { exprs: [{ expr: 'PSEL && !PREADY', row: false, gap: true }] }) });
+      const a = WaveLens.WaveSVG.toString(d), wait = () => new Promise(f => setTimeout(f, 300)); await wait();
+      const b = WaveLens.WaveSVG.toString(d); return [a.includes('+45.0 ns'), b.includes('+45.0 ns'), b.includes('+30.0 ns')]; }""")
+    check(r == [False, True, True], f'the static SVG: cut to the matches once they are valued, the gaps\' texts over them {r}')
+    u = js("""return (async () => { await v.run([{ op: 'paint', signals: 'PADDR', color: '#00ff00' }]); x.setGap(x.list[0], false);
+        await v.run([{ op: 'paint', signals: 'PADDR', color: '#0000ff' }]); await v.undo(); const raw = v.gapOpt(true); return [raw.gaps, raw.gapView, v.wf]; })();""")
+    check(u == [False, False, None], f'undo over a step made with ✂ on: what ✂ forced does not become your gaps, the waves stay whole {u}')
+    js('return x.setList([]);'); js('v.setGaps(null);'); page.wait_for_timeout(50)
     page.evaluate('localStorage.clear()')
     check(not errs, 'no page errors (expressions)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
     ctx.close()
@@ -2103,7 +2257,7 @@ def bookmark_view(browser, build):
     sig = js("(() => { const c = v.canvas.getBoundingClientRect(); return WaveLens.internal.peek(v).vis.find(r => r.type === 'sig' && v.rowTop(r) > c.top + 200).full; })()")
     t1 = js(f"(v.select(v.M.rows.find(r => r.full === {json.dumps(sig)})), v.cursor = v.t0 + v.span * 0.7, v.mark('one'))")
     b1 = js(f"v.bms.find(b => b.n === {t1})")
-    check(top1 and b1['top'] == top1 and js(f"{at}({json.dumps(top1)})") <= 0 < js(f"{at}({json.dumps(top1)})") + js("v.rowH.sig"),
+    check(top1 and b1['top'] == top1 and abs(js(f"{at}({json.dumps(top1)})")) <= js("v.rowH.sig") / 2,   # the first whose middle is under the axis
           f'a new bookmark keeps the row at the top of the waves under the axis {top1} {b1}')
     span = js("v.span")
     page.evaluate("window.scrollTo(0, 0)"); js("(v.t0 = v.M.t0, v.draw(), v.canvas.focus({preventScroll: true}), 0)"); settle(page)
@@ -2688,6 +2842,10 @@ EDIT_OPS = [   # every command that changes a state, with the arguments in their
     {'op': 'marker', 't': '100ns', 'label': 'M', 'color': '#c00'}, {'op': 'marker', 't': '140ns'}, {'op': 'marker', 'id': 2, 'label': 'second'},
     {'op': 'marker', 'id': 1, 'signal': 'PSEL'}, {'op': 'marker', 'id': 2, 'signal': 'PADDR', 'lift': 'below', 'color': '#0a0'}, {'op': 'marker', 't': '150ns', 'signal': 'PREADY', 'lift': 'above'},
     {'op': 'marker', 'id': 3, 'signal': None}, {'op': 'marker', 'id': 1, 'lift': 'above', 'color': None}, {'op': 'marker', 'id': 3, 'delete': True},
+    {'op': 'expr', 'text': 'PSEL && !PREADY', 'label': 'wait', 'color': '#c00'}, {'op': 'expr', 'text': '@(posedge PCLK)\n  PENABLE; ', 'mark': 'line', 'row': True},
+    {'op': 'expr', 'text': 'PWRITE', 'on': False}, {'op': 'expr', 'id': 2, 'scope': 'apb_tb', 'label': 'en', 'mark': 'strip'}, {'op': 'expr', 'id': 1, 'color': None, 'on': False},
+    {'op': 'expr', 'id': 3, 'delete': True}, {'op': 'expr', 'id': 1, 'gap': True}, {'op': 'gaps', 'on': True, 'view': True}, {'op': 'expr', 'id': 2, 'gap': True},
+    {'op': 'expr', 'id': 1, 'gap': False}, {'op': 'gaps', 'view': False},
     {'op': 'group', 'name': 'ctl', 'signals': ['PSEL', 'PENABLE'], 'color': '#08f'}, {'op': 'group', 'name': 'ctl', 'add': 'PWRITE'},
     {'op': 'group', 'name': 'data', 'signals': 'P*DATA'}, {'op': 'group', 'name': 'data', 'rename': 'payload'},
     {'op': 'highlight', 'add': ['PSEL', 'payload']}, {'op': 'highlight', 'add': 'PREADY', 'remove': 'PSEL'},
@@ -2917,13 +3075,15 @@ def undo(browser, build):
     # batch not done; a group renamed and undone is the same group, folded as it was
     got = js("""const na = v.arrowList().length; await v.run([{ op: 'bookmark', n: 1, text: 'changed' }]); await v.undo();
         const a = v.arrowList().length === na;
+        await v.run([{ op: 'span', from: '10ns', to: '20ns', label: 'one' }]); const sp1 = v.spans.length; await v.undo(); const sp0 = v.spans.length;
+        await v.undo(1); const sp2 = v.spans.length; await v.undo(); const sp = sp0 === sp1 - 1 && sp2 === sp1;
         await v.run([{ op: 'highlight', set: ['PSEL', 'PWRITE'] }]); await v.run([{ op: 'highlight', remove: 'PSEL' }]); const h0 = v.highlighted();
         await v.run([{ op: 'highlight', clear: true }]); await v.undo(); const h = JSON.stringify(v.highlighted()) === JSON.stringify(h0);
         const pr = v.run([{ op: 'paint', signals: 'PSEL', color: '#ff00ff' }, { op: 'picture', format: 'png' }]); const busy = await v.undo(); await pr;
         await v.run([{ op: 'group', name: 'gr', signals: 'PCLK' }]); const g = v.ugRows().find(r => r.name === 'gr'); WaveLens.internal.peek(v).collapsed.add(g.id);
         await v.run([{ op: 'group', name: 'gr', rename: 'gs' }]); await v.undo(); const g2 = v.ugRows().find(r => r.name === 'gr');
-        return [a, h, busy, g2 === g, WaveLens.internal.peek(v).collapsed.has(g.id), v.state().paint.PSEL];""")
-    check(got == [True, True, '', True, True, '#ff00ff'], f'arrows kept, highlight colours, no undo in a batch not done, a rename undone: the same group {got}')
+        return [a, h, busy, g2 === g, WaveLens.internal.peek(v).collapsed.has(g.id), v.state().paint.PSEL, sp];""")
+    check(got == [True, True, '', True, True, '#ff00ff', True], f'arrows kept, highlight colours, no undo in a batch not done, a rename undone: the same group, a span undone {got}')
     page.evaluate('localStorage.clear()')
     check(not errs, 'no page errors (undo)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
     ctx.close()
@@ -3088,7 +3248,7 @@ def savepage(browser, build):
     check('SECRET-TOKEN' not in text and 'id="wavelens-live"' not in text.split('<script>\n')[0] and blocks(text) == 1 and blocks(again) == 1,
           'the live link (its block written another way, its token) is not in the saved page; one block of edits, saved twice too')
     # the person who opens it: a ƒ row and a bookmark text of theirs stay over a reload (the page's revision is applied once)
-    page.evaluate(f"(v => {{ v.root.querySelector('input.svq').value = 'PSEL && PENABLE'; v.root.querySelector('button[data-x=add]').click(); }})({V})")
+    page.evaluate(f"{V}.run([{{ op: 'expr', text: 'PSEL && PENABLE' }}])")
     page.evaluate(f"{V}.run([{{ op: 'bookmark', n: 1, text: 'theirs' }}])"); page.wait_for_timeout(300 * SCALE)
     page.reload(); page.wait_for_load_state('networkidle'); page.wait_for_timeout(300 * SCALE)
     kept = page.evaluate(f"""(v => [v.bms[0].text, v.svaExprs ? JSON.stringify(v.extraJSON.map(f => f()).filter(Boolean)).includes('PSEL && PENABLE') : null])({V})""")
@@ -3144,6 +3304,10 @@ def compare(browser, build):
         const el = n => WaveLens.internal.peek(v).rowEls[WaveLens.internal.peek(v).vis.indexOf(R(n))]; return c && [c.differ, c.missing, c.first, el('PREADY').classList.contains('cmpd'),
         el('PSLVERR').classList.contains('cmpm'), el('PSEL').classList.contains('cmpd'), v.root.querySelector('button[data-act=dcmpx]').textContent,
         c.rows.get(R('PREADY')).spans]; }})({V})""")
+    # a bus's width wraps out of sight in a narrow names column: ≠ goes before it, or it would go too
+    wd = page.evaluate(f"""(v => {{ const e = v.root.querySelector('.names .row .n .wd'), r = e && e.closest('.row'); if (!r) return null; r.classList.add('cmpd');
+        const o = getComputedStyle(e).order; r.classList.remove('cmpd'); return [o, getComputedStyle(e).order]; }})({V})""")
+    check(wd == ['1', '0'], f'≠ comes before the width of a bus, which wraps out of sight first {wd}')
     check(got and got[0] == 1 and got[1] == 1 and got[2] == moved and got[3] and got[4] and not got[5] and got[6] == '≠ 1 ✕' and got[7] == [[moved, moved + 10000]],
           f'B ({bv.name}): PREADY ≠ from {moved} for 10 ns, PSLVERR struck (not in B), PSEL the same; ≠ 1 ✕ in the bar {got}')
     page.evaluate(f"(v => {{ v.cursor = 0; v.canvas.focus(); }})({V})")
@@ -3928,6 +4092,18 @@ def edit(browser, build):
         gm = tool('view_get', page=str(pl), view='exact')[0].get('markers') or []
         lv = page.evaluate(f"(v => [v.umarks[{ml.get('id', 1) - 1}].lift, v.rowsL.some(r => r.type === 'lane' && r.ids.some(x => /PSEL:below$/.test(x)))])({V})")
         check(lv == ['below', True] and any(m.get('t') == 100 and m.get('lift') == 'below' and m.get('signal', '').endswith('PSEL') for m in gm), f'view_edit marker on a live page: on the line under the signal at once, view_get says it in ns {ml} {lv} {gm}')
+        ex = tool('view_edit', page=str(pl), view='exact', ops=[{'op': 'expr', 'text': 'PSEL && !PREADY', 'label': 'agent', 'color': '#2f9e44'}, {'op': 'expr_go', 'id': 1, 'n': 2},
+                                                                {'op': 'expr_matches', 'id': 1, 'limit': 1}, {'op': 'expr', 'text': 'PSEL && nope'}])[0]['results']
+        gx = tool('view_get', page=str(pl), view='exact')[0].get('exprs')
+        lx = page.evaluate(f"(v => [v.cursor, v.svaExprs.list[0].label, v.timeMarks().length])({V})")
+        check(ex[0]['n'] == 3 and ex[0]['first'] == 45 and ex[1]['t'] == 85 and ex[2]['matches'] == [[45, 55]] and ex[2]['next_offset'] == 1 and 'nope' in ex[3]['error'] and lx == [85000, 'agent', 1]
+              and gx == [{'expr': 'PSEL && !PREADY', 'label': 'agent', 'color': '#2f9e44', 'row': False, 'id': 1}], f'view_edit expr on a live page: its list, the cursor on a match, what it found in ns, a bad one said {ex} {gx} {lx}')
+        ec = tool('view_edit', page=str(pl), view='exact', ops=[{'op': 'gaps', 'idle': 2, 'keep': 0}, {'op': 'expr', 'id': 1, 'gap': True}])[0]['results'][1]
+        gg = tool('view_get', page=str(pl), view='exact')[0]
+        bt = [b['t'] for b in gg.get('bookmarks', [])]; pc = ec['cut']['parts']; within = lambda t: any(p <= t <= q for p, q in pc)
+        check(all(within(t) for t in [45, 55, 85, 115, 145, 155]) and not within(75) and all(within(t) for t in bt if 0 < t < 205) and ec['cut']['gaps'] == 4 and gg['gaps'].get('by') == [1] and gg['gaps']['view'] is True
+              and gg['exprs'][0].get('gap') is True and gg['gaps'].get('cut', {}).get('parts') == pc, f'view_edit expr gap on a live page: the waves keep its matches and the bookmarks, what they leave in ns, view_get says who cuts {pc} {bt} {gg.get("gaps")}')
+        tool('view_edit', page=str(pl), view='exact', ops=[{'op': 'expr', 'id': 'all', 'delete': True}])
         page.goto('about:blank'); page.wait_for_timeout(300 * SCALE)
         r = tool('view_edit', page=str(pl), view='exact', ops=[{'op': 'marker', 't': 10, 'label': 'file', 'signal': 'PENABLE'}])[0]
         check(r.get('page') == str(pl) and 'written into the page' in r.get('note', ''), f'the page closed: the edit goes into its file {r}')
@@ -4010,7 +4186,7 @@ def marker_lanes(browser, build):
     check(cl == [True, True, True], f'a click on a text: the cursor on it, its label in the list to edit {cl}')
     pale0 = js('return [v.markList()[1].color ?? null, v.toSVG().includes(getComputedStyle(v.root).getPropertyValue("--muted").trim())];')
     js('document.activeElement.blur(); v.root.scrollIntoView({ block: "start" });'); page.wait_for_timeout(50); g, t, x, y = tag(1)   # the field took the page down
-    page.mouse.click(x, y, button='right'); page.wait_for_timeout(60)
+    page.mouse.click(x, y, button='right'); page.wait_for_function("document.querySelector('.wv').waveView.menuEl", timeout=3000 * SCALE)
     mh = js('return [v.menuEl.querySelector(".mh").textContent, !!v.menuEl.querySelector("input.mkc"), !!v.menuEl.querySelector("button[data-m=mkpale]")];')
     picked = js("""const i = v.menuEl.querySelector('input.mkc'); i.value = '#d6336c'; i.dispatchEvent(new Event('input', { bubbles: true })); const live = v.umarks[1].color;
         i.dispatchEvent(new Event('change', { bubbles: true })); await new Promise(r => setTimeout(r, 30)); v.closeMenu(); v.draw(); return [live, v.markList()[1].color, v.toSVG().toLowerCase().includes('#d6336c')];""")
@@ -4436,7 +4612,7 @@ def sva_docs(page):
     svg = page.locator('#ex-sva-svg svg')
     page.wait_for_function("(document.querySelector('#ex-sva-svg svg') || {}).innerHTML.includes('ƒ req')")
     txt = svg.inner_html() if svg.count() else ''
-    check('ƒ expressions (2)' in txt and 'ƒ req &amp;&amp; !ack' in txt, 'docs: the static SVG draws the expressions too')
+    check('ƒ expressions (2)' in txt and 'ƒ req &amp;&amp; !ack' in txt and '#d9822b' in txt and '#2f9e8f' in txt, 'docs: the static SVG draws the expressions too: their rows and their marks')
     check('⚑ a_req_ack · 2 pass · 1 fail' in txt and '##[1:3] ack  (cons)' in txt and 'no ack within [1:3]' in txt and '>1T<' in txt,
           'docs: the static SVG of the same JSON, evaluated in the page: the group, the arrows with their labels, the legend of the steps')
     fl = page.evaluate("""(() => { const fig = document.querySelector('#ex-apb-svg svg'); return [document.querySelector('#ex-sva-svg svg').innerHTML.match(/>(▶ start|✕ fail|✓ pass)</g),
@@ -4691,9 +4867,23 @@ UNITS = [   # (JavaScript expression, its JSON value); NaN / ±Infinity / undefi
     ("I.clipCuts([[0, 20], [50, 60]], 10, 55)", [[10, 20], [50, 55]]), ("I.clipCuts([[0, 20], [50, 60]], 30, 40)", [[30, 40]]),
     ("I.idleCuts([50], 0, 1000, 200, 10)", [[0, 60], [990, 1000]]), ("I.idleCuts([50], 0, 100, 200, 10)", [[0, 100]]),
     ("I.idleCuts([], 0, 100, 50, 45, [], 20)", [[0, 100]]), ("I.idleCuts([], 0, 100, 50, 0)", [[0, 100]]),
+    # gaps around the matches of expressions: keep after one and before the next, the ends left out, a part of nothing there
+    ("I.keepCuts([[40, 50], [200, 210]], 0, 300, 20, 5)", [[0, 0], [35, 55], [195, 215], [300, 300]]),
+    ("I.keepCuts([[40, 50], [60, 70]], 0, 100, 20, 0)", [[0, 0], [40, 70], [100, 100]]), ("I.keepCuts([[40, 50]], 0, 100, 200, 0)", [[0, 100]]),
+    ("I.keepCuts([[15, 25]], 0, 100, 20, 0, Array.from({ length: 11 }, (_, i) => i * 10), 20)", [[0, 30], [100, 100]]),
+    ("I.keepCuts([[30, 40]], 0, 100, 20, 0, Array.from({ length: 11 }, (_, i) => i * 10), 20)", [[0, 0], [30, 40], [100, 100]]),
+    ("I.keepCuts([[30, 40]], 0, 100, 20, 0, Array.from({ length: 11 }, (_, i) => i * 10), 80)", [[0, 100]]),
+    ("I.keepCuts([[-20, -10], [40, 50], [140, 150]], 0, 100, 20, 0)", [[0, 0], [40, 50], [100, 100]]),
+    ("I.gapKeeps([], 0, 100, { gapIdle: 5, gapKeep: 0 }, null)", [[0, 100]]), ("I.gapKeeps([[40, 50]], 0, 100, { gapIdle: 5, gapKeep: 0 }, null)", [[0, 0], [40, 50], [100, 100]]),
+    ("I.gapKeeps([[40, 50]], 0, 100, { gapIdle: 5, gapKeep: 0 }, null, 1, [80, 500])", [[0, 0], [40, 50], [80, 80], [100, 100]]),
+    ("I.gapKeeps([[40, 50]], 0, 100, { gapIdle: 2, gapKeep: 1 }, null, 3)", [[0, 0], [37, 53], [100, 100]]), ("I.gapKeeps([[100, 100]], 0, 100, { gapIdle: 5, gapKeep: 0 }, null)", [[0, 100]]),
+    ("I.gapKeeps([[40, 50]], 0, 100, { gapIdle: 'x', gapKeep: 0 }, null)", [[0, 100]]), ("WaveLens.util.mergeSpans([[5, 6], [1, 3], [3, 4], [2, 2]])", [[1, 4], [5, 6]]),
+    ("(w => [0, 20, 40].map(t => I.warpV(w, t, 2, 8)).concat([4, 8].map(v => I.warpT(w, v, 2, 8))))(I.warpOf([[0, 0], [40, 50]]))", [0, 4, 8, 20, 40]),
     ("['rise', 'fall', 'any'].map(k => I.gapText(R('b'), 5, 45, k))", ['2↑', '1↓', '4↕']), ("I.gapText(R('d'), 5, 45, 'rise')", '4×'),
     ("I.gapText(R('b'), 41, 50, 'rise')", ''), ("[I.gapText(R('b'), 5, 45, 'edges'), I.gapText(R('d'), 5, 45, 'edges')]", ['2↑ 1↓', '4×']), ("I.gapRefs(UM.rows, 'tb.b, st, *pix*').map(r => r.name)", ['b', 'st', 's_pix_valid']),
     ("I.gapRefs(UM.rows, null).length", 0),
+    ("[SVA.expressions.norm({ expr: 'a' }).gap, SVA.expressions.norm({ expr: 'a', gap: 1 }).gap]", [False, True]),
+    ("SVA.expressions.json(SVA.expressions.norm({ expr: 'a', gap: true, row: false }))", {'expr': 'a', 'row': False, 'gap': True}),
     ("[40000, 6400, 1000, 3e6, 7e11, 3e13].map(I.fmtFreq)", ['25 MHz', '156.3 MHz', '1 GHz', '333.3 kHz', '1.429 Hz', '0.033 Hz']),
     ("I.gapLen('16', 10)", 160), ("I.gapLen(2, 10)", 20), ("I.gapLen('2ns', 10)", 2000), ("I.gapLen('x', 10)", 'undefined'),
     ("(M => [M({}), M({ gaps: true }), M({ gaps: true, gapIdle: 12 }), M({ gaps: true, gapIdle: '600ps', gapKeep: 1 })])(o => +WaveSVG.toString({ signal: "
@@ -4782,6 +4972,13 @@ UNITS = [   # (JavaScript expression, its JSON value); NaN / ±Infinity / undefi
      [['axi', [['W', 'W 0x40 ← 0xa1', 5, False]]]]),
     # the expressions of sva.js
     ("SVA.expressions.splitClock('@(posedge clk) a ##1 b')", {'clock': {'edge': 'posedge', 'signal': 'clk'}, 'body': 'a ##1 b'}),
+    ("SVA.expressions.stretches({ values: [0, 1, 'h3', 0, 1], times: [0, 5, 6, 8, 9] }, 12)", [[5, 8], [9, 12]]),
+    ("SVA.expressions.stretches({ values: [0, 'x', 'hx'], times: [0, 5, 6] }, 12)", []),
+    ("SVA.expressions.spanStat([[5, 8], [9, 10]], 20)", {'n': 2, 'time': 4, 'share': 0.2, 'first': 5, 'last': 9, 'min': 1, 'max': 3}),
+    ("SVA.expressions.spanStat([], 20).first", None),
+    ("SVA.expressions.json(SVA.expressions.norm({ expr: ' a; ', mark: 'zigzag' }))", 'a'),
+    ("SVA.expressions.json(SVA.expressions.norm({ expr: 'a', on: false, row: false, mark: 'line', label: 'L', scope: 's', color: '#123456' }))",
+     {'expr': 'a', 'scope': 's', 'label': 'L', 'color': '#123456', 'on': False, 'row': False, 'mark': 'line'}),
     ("SVA.expressions.splitClock('a && b').clock", None), ("SVA.expressions.tvValue(5, 4)", '5'), ("SVA.expressions.tvValue('hz', 4)", 'z'),
     ("SVA.expressions.tvValue('zzzz0001', 8)", 'z1'), ("SVA.expressions.tvValue('zz01', 4)", "'bzz01"), ("I.gfmt(0.0001234)", '0.0001234'),
     ("SVA.stepSignals('a && $past(b) == 4\\'hc', new Set(['a', 'b']))", ['a', 'b']), ("SVA.propParts('a |-> b')", ['a', '|-> b']),
@@ -5393,7 +5590,7 @@ def sva_bind(browser, build):
     page.on('pageerror', lambda e: errs.append(str(e)))
     page.goto(path.as_uri()); page.wait_for_load_state('networkidle')
     v = page.locator('.wv').first
-    check(v.locator('.sva').is_hidden() and v.locator('button[data-sv=load]').count() == 1, 'apb_all: no assertion loaded: the panel is hidden, Load file… is in the bar')
+    check(v.locator('.sva:not(.xpanel)').is_hidden() and v.locator('button[data-sv=load]').count() == 1, 'apb_all: no assertion loaded: the panel is hidden, Load file… is in the bar')
     v.locator('input.svfile').set_input_files([str(ROOT / 'tests' / 'sva' / 'apb.sv'), str(ROOT / 'tests' / 'sva' / 'third_party' / 'saravana_apb_ahb' / 'apb_assertions.sv')])
     page.wait_for_function("SVA.panels()[0].el.querySelectorAll('ol.asv > li[data-a]').length > 0")
     page.evaluate('SVA.ready()')
@@ -5473,7 +5670,7 @@ def sva_bind(browser, build):
     page2.close()
     v.locator('.sva button[data-sv=clear]').click()
     page.evaluate('SVA.ready()')
-    check(v.locator('.sva').is_hidden() and page.evaluate("localStorage.length") == 0, 'Clear: this browser forgets the files and bindings, the panel hides')
+    check(v.locator('.sva:not(.xpanel)').is_hidden() and page.evaluate("localStorage.length") == 0, 'Clear: this browser forgets the files and bindings, the panel hides')
     check(not errs, 'no page errors while binding' + (': ' + ' | '.join(errs[:3]) if errs else ''))
     ctx.close()
 
@@ -5818,9 +6015,9 @@ def tips(browser, build):
     check(fold and all(f == [False, False, 'false'] for f in fold) and opened, f'the assertion list starts folded (svaOpen: false); ▸ Assertions opens it {fold}')
     lines = page.evaluate("[...document.querySelector('.wv .bar .tools').children].map(l => [l.dataset.ln, [...l.querySelectorAll(':scope > .tg')].map(g => g.dataset.tg), Math.round(l.getBoundingClientRect().top)])")
     got = {l[0]: l[1] for l in lines}
-    check([l[0] for l in lines] == ['time', 'find', 'expr', 'rows'] and got['time'][:3] == ['cursor', 'view', 'edges'] and got['find'] == ['find'] and got['expr'] == ['expression']
-          and got['rows'] == ['list', 'style', 'state', 'dump', 'assertions'] and len({l[2] for l in lines}) == 4,
-          f'the bar: one line per kind (time, find, expression, rows and files), the plugins\' groups on theirs {lines}')
+    check([l[0] for l in lines] == ['time', 'find', 'rows'] and got['time'][:3] == ['cursor', 'view', 'edges'] and got['find'] == ['find', 'expression']
+          and got['rows'] == ['list', 'style', 'state', 'dump', 'assertions'] and len({l[2] for l in lines}) == 3,
+          f'the bar: one line per kind (time, signals and conditions, rows and files), the plugins\' groups on theirs {lines}')
     miss = page.evaluate("""[...document.querySelector('.wv').querySelectorAll('button, input:not([type=file]), select, .mk')].filter(e => !WaveLens.tips.of(e)).map(e => e.outerHTML.slice(0, 80))""")
     check(not miss, f'every button, field and list of a viewer (bar, assertions, bookmarks) has a tooltip (missing: {miss[:5]})')
     b = page.locator('.wv button[data-act=in]').first; b.hover(); until(page, "!!document.querySelector('.wv-tip')")

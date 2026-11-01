@@ -94,14 +94,14 @@
     and <kbd>ctrl+F</kbd> <kbd>ctrl+C</kbd> <kbd>ctrl+Z</kbd> <kbd>alt+C W R</kbd>, which mean what they mean in VS Code.
     <code>wavelens.keysToVSCode</code> (default <kbd>ctrl+G</kbd>, Go to Line) go to VS Code — the viewer's list of your groups is
     <kbd>gl</kbd> then; <kbd>ctrl+P</kbd>, <kbd>F1</kbd>, <kbd>ctrl+Tab</kbd> stay VS Code's.</td></tr>
-  <tr><td>version</td><td>the bar's title line says the version and the extension's branch and commit (<code>0.34 ·
+  <tr><td>version</td><td>the bar's title line says the version and the extension's branch and commit (<code>0.35 ·
     dev@d502c48*</code>, <code>*</code>: changes not committed): a development build says which one it is.</td></tr>
-  <tr><td>types by Verilator</td><td><i>WaveLens: Make the types with Verilator</i> (the editor's title menu) asks for the design
+  <tr><td>types by Verilator</td><td><i>WaveLens: Make the types with Verilator (FSM states, structs)</i> (the editor's title menu) asks for the design
     (a <code>.f</code> file of the workspace, or the arguments: <code>*</code> and <code>?</code> in a file's name are expanded) and the top module (the dump's by default), runs
     <code>verilator --json-only</code> in the workspace's folder and writes <code>tb.types.json</code> beside the dump: the tab reads
     it at once (FSM states by name, struct fields; <a href="types.html">Types</a>). No Python needed; <code>wavelens.verilator</code>.</td></tr>
-  <tr><td>convert to FST</td><td><i>WaveLens: Convert to FST</i> (a right click on a <code>.vcd</code> in the Explorer, the tab's
-    title menu, or the palette) writes <code>tb.fst</code> beside <code>tb.vcd</code> with the bundled <code>sva fst</code>: the
+  <tr><td>convert to FST</td><td><i>WaveLens: Convert to FST (beside the VCD, FSM states kept)</i> (a right click on a <code>.vcd</code> in the Explorer, the tab's
+    title menu, or the palette with such a tab active) writes <code>tb.fst</code> beside <code>tb.vcd</code> with the bundled <code>sva fst</code>: the
     enum tables of the VCD and the FSM states of <code>tb.types.json</code> become the FST's own, so GTKWave or Surfer name the
     states too. The notes go to the log with their lines (five of a kind, then their count); a failure opens the log and
     leaves an older <code>tb.fst</code> as it was.</td></tr>
@@ -109,14 +109,14 @@
     shown in decimal). The design's types next to the dump (<code>tb.types.json</code> by <code>tb.vcd</code>: from Questa
     or Verilator, <a href="types.html">State names</a>) name every state bus and struct by its path, read at each read and
     when the file is written. Without them the tab reads the workspace's SystemVerilog sources
-    (<code>wavelens.sources</code>) and names the state buses declared with a <code>typedef enum</code> there, by the variable's
+    (<code>wavelens.sources</code>) and names the state buses declared with a <code>typedef enum</code> there, the fields of a <code>typedef struct packed</code> too, by the variable's
     name. <span class="ui">Sources…</span> in the bar picks other files.</td></tr>
   <tr><td>the log</td><td>each read writes the dump's parameters (size, <code>$version</code>, <code>$timescale</code>, its time,
     scopes, signals, value changes) and what the reader noticed to the output channel <b>WaveLens</b>, a note as
     <code>path:line: warning: …</code>; the same notes stand in the <b>Problems</b> panel (<kbd>ctrl+shift+M</kbd>) on their lines
     (a click opens the dump there) until the tab closes. A dump it cannot read is an error there, with a message that opens the
     line. <i>WaveLens: Show the log</i> in the editor's title.</td></tr>
-  <tr><td>a big dump</td><td>the cut of <code>dumpBudget</code> applies; the whole VCD text crosses to your machine once per
+  <tr><td>a big dump</td><td>read whole (<code>wavelens.lazy</code> never, or under its sizes), the cut of <code>dumpBudget</code> applies; the whole VCD text crosses to your machine once per
     read.</td></tr>
 </table>
 
@@ -152,7 +152,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.34 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.35 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

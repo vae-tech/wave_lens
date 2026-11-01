@@ -356,6 +356,33 @@ function paintSpans(P, spans, X, tA, tB, lay, y0, y1) {
       P.rect(xa + 1, y + 3, w + 6, 13, 'panel', 0.9); P.text(xa + 4, y + 9.5, s.label, { size: 10, weight: 600, fill: 'fg' }); }
   }
 }
+// the times marked by a plugin (view.extraMarks; sva.js: its expressions), each {spans: [[from, to], …] by time, color, label,
+// mark, on}: a thin strip of its own under the top (they do not cover each other), and over the rows a pale band where it
+// holds (mark "band") or a line where each stretch starts ("line"; "strip": the strip alone); on: the one the user is on,
+// stronger; its label at the start of a stretch, where the last one left room. px: the time of a pixel: stretches nearer
+// than that are drawn as one, and the ones under it jumped over, so a dump of a million of them costs a frame.
+const MARK_STRIP = 3, MARK_LABEL = 13;
+function paintTimeMarks(P, marks, X, tA, tB, y0, y1, px) {
+  const named = (marks || []).filter(m => m.label);
+  (marks || []).forEach((m, i) => {
+    const S = m.spans, n = S.length, c = m.color || 'acc', y = y0 + i * MARK_STRIP, d = [];
+    const ly = y0 + marks.length * MARK_STRIP + named.indexOf(m) * MARK_LABEL + 2;
+    // the first that ends after t
+    const after = t => { let lo = 0, hi = n; while (lo < hi) { const k = (lo + hi) >> 1; if (S[k][1] <= t) lo = k + 1; else hi = k; } return lo; };
+    let room = -Infinity;
+    for (let k = after(tA); k < n && S[k][0] <= tB; k++) {
+      const from = S[k][0];
+      while (k + 1 < n && S[k + 1][0] <= S[k][1] + px) k = Math.max(k + 1, after(S[k][1] + px) - 1);
+      const xa = X(Math.max(from, tA)), xb = X(Math.min(S[k][1], tB)), w = Math.max(1, xb - xa);
+      if (m.mark === 'band') P.rect(xa, y0, w, y1 - y0, c, m.on ? 0.26 : 0.13);
+      else if (m.mark === 'line' && from >= tA) d.push(['M', xa, y0], ['L', xa, y1]);
+      P.rect(xa, y, w, MARK_STRIP - 0.5, c, 0.95);
+      if (m.label && from >= tA && xa >= room) { const tw = P.measure(m.label, { size: 10, weight: 600 }) + 6; room = xa + tw + 8;
+        P.rect(xa + 1, ly, tw, MARK_LABEL - 1, 'panel', 0.9); P.text(xa + 4, ly + 6, m.label, { size: 10, weight: 600, fill: c }); }
+    }
+    if (d.length) P.path(d, { stroke: c, w: m.on ? 1.6 : 1, dash: [2, 3] });
+  });
+}
 // the markers: a dashed line across the rows, pale without a colour of its own; the text at the top of the rows, or in the
 // lane of its signal (lanes: laneY; that row not drawn: at the top). -> [{i, x, y, w}]: where each text is, for the hit tests
 function paintMarkers(P, markers, X, tA, tB, y0, y1, lanes) {

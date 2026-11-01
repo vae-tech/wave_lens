@@ -12,22 +12,26 @@ const WaveSVG = {
     const from = parseT(opts.from) ?? M.t0, to = parseT(opts.to) ?? M.t1, fs = S.fontSize;
     const rh = { sig: S.rowHeight, group: S.groupHeight, space: S.spaceHeight }, bms = V ? V.bms : M.bookmarks, ars = V ? V.arrows : M.arrows;
     const marks = V ? V.markers : (opts.markers || []).map(pageMark).concat(M.markers);
-    let C;
+    let C, timeMarks = V ? V.timeMarks() : [], keeps = null;
     if (V) C = { rows: opts.rows || V.rowsL, band: V.band, hl: V.hl };
     else {
       const sorted = orderRows(M.rows, S.sort, S.sortIgnore, S.groupOrder);
-      const all = withExtra(sorted, (opts.extraRows || []).concat(...SVG_PLUGINS.map(f => f(M, S, opts) || [])), M, opts.owner || M);
+      const extra = (opts.extraRows || []).concat(...SVG_PLUGINS.map(f => f(M, S, opts) || []));
+      timeMarks = extra.flatMap(f => (f.marks ? f.marks() : []));   // a plugin's times, as view.extraMarks
+      keeps = extra.map(f => (f.keeps ? f.keeps() : null)).find(Boolean) || null;   // the stretches it keeps, as view.extraKeep
+      const all = withExtra(sorted, extra, M, opts.owner || M);
       C = compose(M, S, all, M.bookmarks, M.arrows, hlPick(M, S.highlight), undefined, marks);
     }
     const hl = C.hl;
-    // gaps (opts.cuts, else the settings gaps, gapIdle, gapKeep, gapSignals): the parts of [from, to] kept, side by side, a
+    // gaps (opts.cuts, a plugin's stretches, else the settings gaps, gapIdle, gapKeep, gapSignals): the parts of [from, to] kept, side by side, a
     // narrow column GAP px wide between; their texts (gapCount) in thin rows over each gap: under the axis the time it
     // leaves out and the cycles of the clock in it; under each signal counted (gapAux, with any texts; none marked: with
     // "edges" every one but the ones the gaps follow and the clock) what it did in the stretch left out (its rising and
     // falling edges, a bus its changes; "rise", "fall", "any": those)
     const G = V ? V.gapOpt() : S, ref = gapRefs(M.rows, G.gapSignals);
     const clk = V ? V.gapClockFor(C.rows) : gapRefs(M.rows, G.gapClock)[0] || M.rows.find(isClkRow);   // the cycles counted: gapClock, else a clock
-    const cuts = opts.cuts || (V ? [[from, to]] : gapCuts(ref.length ? ref : C.rows, from, to, S, clk, M.cycle, bms.map(b => b.t), ref.length > 0));
+    const cuts = opts.cuts || (V ? [[from, to]] : keeps ? gapKeeps(keeps, from, to, S, clk, M.cycle, bms.map(b => b.t)) :
+      gapCuts(ref.length ? ref : C.rows, from, to, S, clk, M.cycle, bms.map(b => b.t), ref.length > 0));
     const ng = cuts.length - 1, kept = cuts.reduce((n, [p, q]) => n + q - p, 0), gapLab = { size: 9.5 }, gc = G.gapCount || 'clock';
     const aux = new Set(V ? V.gapRows().aux : gapRefs(M.rows, G.gapAux)), refs = new Set(V ? V.gapRefSet() : ref);
     const T = gapTexts(M, gc, clk, aux, refs), each = T.each;
@@ -139,6 +143,7 @@ const WaveSVG = {
           if (t) { P.rect(xm - tw / 2, ry + 1, tw, rh - 2, 'panel2'); P.text(xm, ry + rh / 2, t, cnt); } }   // over the gap's line
       });
       const top = showAxis ? axisY + 20 : lay.length ? lay[0].y : y;
+      paintTimeMarks(P, timeMarks, X, from, to, top, bodyEnd, (to - from) / Math.max(1, xR - xL));
       paintSpans(P, V ? V.spans : M.spans, X, from, to, lay, top, bodyEnd);
       paintMarkers(P, marks, X, from, to, top, bodyEnd, laneY(lay, S.laneHeight));
       paintBookmarks(P, bms, ars, X, from, to, rowY, top, bodyEnd, showAxis ? axisY + 10 : top + 10, null, laneY(lay, S.laneHeight), arrowFill(M, M.rows));

@@ -16,7 +16,7 @@ wavelens/                     what a page needs, nothing else
                               state machines panel and its layer), log.js (the log under the viewer), svg.js
                               (WaveSVG), boot.js (themes, configure, upgrade, exports): one scope, in this order
   wavelens.config.js          global settings file (all keys, with defaults), loaded before wavelens.js
-  sva.js, sva.wasm.js         assertions in the page: the panel, binding, evaluation; the engine (generated, make sva-build)
+  sva.js, sva.wasm.js         assertions and expressions in the page: their panels, binding, evaluation, marks; the engine (generated, make sva-build)
   bus.js                      bus transactions: ports found by their names, decoders (AXI, AXI-Stream, APB, AHB, Avalon, Wishbone, OBI), rows
 vscode/                       the VS Code extension (a workspace extension: Remote-SSH / WSL host): extension.js (the
                               custom editor of .vcd / .fst, FST -> VCD by the bundled sva (and Convert to FST: sva
@@ -26,7 +26,10 @@ vscode/                       the VS Code extension (a workspace extension: Remo
                               svtypes.py verilator: the command Make the types with Verilator; tests/unit compares
                               the two), test/e2e.js (in a real VS Code)
 tools/                        what you run: python3 -I tools/<tool>.py
-  mkconfig.py vcd2wavedrom.py mkhtml.py embed.py dumpscan.py wavejson.py svabuild.py
+  mkconfig.py vcd2wavedrom.py mkhtml.py embed.py dumpscan.py wavejson.py svabuild.py wavefind.py common.py
+  wavelenscat.py              wavelens/wavelens.js from wavelens/src/*.js (make wavelens)
+  publish.py                  master's commit of a version (§ Versions)
+  svaverify.py                the examples' checkers in Verilator against sva eval (make sva-verify)
   svtypes.py                  the design's types by path (Questa's describe read, Verilator --json-only walked); its
                               twin in the page is wavelens/src/vcd.js svTypes
   questa/wavelens_types.tcl   in vsim: describe of every signal and the module of every instance -> <dump>.types.json
@@ -59,14 +62,15 @@ tests/
   mcp_bench.py                what the MCP server saves an agent: tasks with known answers, agents with and without it
   sva/                        the SVA corpus: *.sv with every construct, err_*.sv with annotated errors, golden/;
                               third_party/: AXI4-Lite, APB, AHB checkers of others (licenses, units.json)
-  shots.py                    the screenshots (make shots)
+  shots.py                    the screenshots (make shots); visual/: the visual regression's pictures
+  pngdiff.py                  pictures compared pixel by pixel (make shots-check)
   guide_shots.py              the pictures of docs/guides (make guide-shots; writes the gaps guide's dump into BUILD/guides)
   conformance.html            every feature next to stock WaveDrom 3.5.0 (vendor/, test-only)
 work/                         your dumps and their configs: configs tracked, dumps and pages git-ignored
 sva/                          the SVA engine (Rust: core, native CLI, WebAssembly); the CLI's sva vcd (cli/src/vcd.rs:
                               a dump as VCD text, a cut of it), sva fst (cli/src/fst.rs: a VCD as an FST, as vcd2fst
                               writes it) and sva diff (cli/src/diff.rs: two dumps streamed and merged by time)
-prompts/                      the roadmap as a series of prompts (on main only)
+prompts/                      the roadmap as a series of prompts (on dev only)
 bin/                          the prebuilt sva CLI, committed: linux-x86_64/sva (static); windows-x86_64/sva.exe by make dist-windows
 out/                          build products (make's BUILD, git-ignored): cargo target, example dumps and pages, shots
 Makefile                      make help lists the targets; build products go to BUILD (default out/)
@@ -360,9 +364,9 @@ Two numbers, `MAJOR.MINOR` (`VERSION` has the one of now; [`CHANGELOG.md`](../CH
 a version is a merge into the development branch `dev` (`git merge --no-ff`) tagged `dev/vMAJOR.MINOR` (an annotated
 tag, its message the changelog entry; `dev` and its tags were `main` and `main/v*` up to 0.18). The public branch `master` then gets the version as one commit: `python3 -I tools/publish.py
 MAJOR.MINOR "what it brings"` writes the tree of `dev/vMAJOR.MINOR` less the internal files (`INTERNAL` there)
-with that one line as its message, and tags it `vMAJOR.MINOR`. Only `master` and the `v*` tags go to GitHub (a local
-`.git/hooks/pre-push` refuses the rest; deleting a branch there it lets through). One commit on the branch before the merge raises the version in four places: `VERSION`,
-`version:` in `wavelens/src/boot.js` (then `make wavelens`), a new top entry in `CHANGELOG.md`, and the committed builds
+with the message `vMAJOR.MINOR: <that line>`, and tags it `vMAJOR.MINOR`. Only `master` and the `v*` tags go to GitHub (a local
+`.git/hooks/pre-push` refuses the rest; deleting a branch there it lets through). One commit on the branch before the merge raises the version in five places: `VERSION`,
+`version:` in `wavelens/src/boot.js` (then `make wavelens`), a new top entry in `CHANGELOG.md`, the footers and kickers of `docs/guides/*.html`, and the committed builds
 that carry it (`make sva-build dist-linux`: the `sva` CLI writes the version into a report's meta through
 `include_str!` of `VERSION`); `make unit` fails when they disagree. The Rust crates keep their own semver in
 `sva/Cargo.toml`. A page tells its version in `WaveLens.version`; `make smoke` names a page under `work/` built with

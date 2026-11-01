@@ -296,6 +296,47 @@ class Commands(unittest.TestCase):
         e.run([{'op': 'group', 'name': 'g', 'signals': ['clk', 'tb.dut.valid']}])
         self.assertEqual([x['full'] for x in e.ordered()[:3]], ['@g', 'tb.dut.valid', 'tb'])
 
+    def test_exprs(self):
+        """The list of expressions: as sva.js writes it (a text alone only when it draws its row), the page's first; no evaluation here."""
+        e = ed()
+        self.run_ok(e, {'op': 'expr', 'text': ' a && b; ', 'label': 'one', 'color': '#c00'}, {'op': 'expr', 'text': '@(posedge clk)\n  c', 'row': True, 'mark': 'line'},
+                    {'op': 'expr', 'text': 'd', 'on': False, 'row': True, 'scope': 'tb.dut'})
+        self.assertEqual(e.st['exprs'], [{'expr': 'a && b', 'label': 'one', 'color': '#c00', 'row': False}, {'expr': '@(posedge clk)\n  c', 'mark': 'line'},
+                                         {'expr': 'd', 'scope': 'tb.dut', 'on': False}])
+        self.run_ok(e, {'op': 'expr', 'id': 1, 'label': None, 'color': None, 'row': True}, {'op': 'expr', 'id': 2, 'mark': 'band'}, {'op': 'expr', 'id': 3, 'on': True, 'scope': ''})
+        self.assertEqual(e.st['exprs'], ['a && b', '@(posedge clk)\n  c', 'd'])   # as the defaults: a text alone
+        bad = e.run([{'op': 'expr', 'text': 'a && b'}, {'op': 'expr', 'id': 1, 'text': 'd'}, {'op': 'expr', 'text': ' ; '}, {'op': 'expr', 'id': 9, 'on': False},
+                     {'op': 'expr', 'id': 'all', 'on': False}, {'op': 'expr', 'delete': True}, {'op': 'expr', 'text': 'x', 'mark': 'zigzag'}, {'op': 'expr', 'text': 'x', 'nope': 1}])
+        self.assertTrue(all('error' in r for r in bad), bad)
+        self.assertIn('there already (id 1)', bad[0]['error'])
+        self.assertIn('band, line, strip', bad[6]['error'])
+        self.assertEqual(len(e.st['exprs']), 3)
+        for op in ({'op': 'expr_go', 'id': 1}, {'op': 'expr_matches'}):
+            self.assertIn('runs in the page only', e.run([op])[0]['error'])
+        self.run_ok(e, {'op': 'expr', 'id': 2, 'delete': True})
+        self.assertEqual(e.st['exprs'], ['a && b', 'd'])
+        self.run_ok(e, {'op': 'expr', 'id': 'all', 'delete': True})
+        self.assertEqual(e.st['exprs'], [])
+
+    def test_expr_gap(self):
+        """The waves cut to the matches of expressions, as sva.js and look.js setGaps: on while one has gap, your settings apart, the gaps off end it."""
+        e = ed()
+        self.run_ok(e, {'op': 'expr', 'text': 'a', 'gap': True}, {'op': 'expr', 'text': 'b'}, {'op': 'expr', 'id': 2, 'gap': True}, {'op': 'expr', 'text': 'c', 'gap': False})
+        self.assertEqual(e.st['exprs'], [{'expr': 'a', 'row': False, 'gap': True}, {'expr': 'b', 'row': False, 'gap': True}, {'expr': 'c', 'row': False}])
+        g = e.run([{'op': 'gaps', 'on': True, 'view': True, 'idle': 4}])[0]['gaps']
+        self.assertEqual((g['gaps'], g['gapView'], g['gapBy'], g['gapIdle']), (True, True, [1, 2], 4))
+        self.assertNotIn('gaps', e.st['config'])     # on by them, not your setting
+        self.assertNotIn('gapView', e.st['config'])
+        self.assertEqual(e.run([{'op': 'expr', 'id': 1, 'gap': False}, {'op': 'gaps'}])[1]['gaps']['gapBy'], [2])
+        g = e.run([{'op': 'gaps', 'view': False}])[0]['gaps']
+        self.assertEqual((g['gaps'], g['gapView'], 'gapBy' in g), (False, False, False))
+        self.assertEqual([x if isinstance(x, str) else x.get('gap') for x in e.st['exprs']], [None, None, None])
+        self.run_ok(e, {'op': 'expr', 'id': 1, 'gap': True})
+        self.assertTrue(e.run([{'op': 'gaps'}])[0]['gaps']['gapView'])
+        self.assertNotIn('gapBy', e.run([{'op': 'gaps', 'on': False}])[0]['gaps'])
+        self.run_ok(e, {'op': 'expr', 'id': 2, 'gap': True})
+        self.assertNotIn('gapBy', e.run([{'op': 'gaps', 'reset': True}])[0]['gaps'])
+
     def test_marker_lanes(self):
         """A marker's text on the line of a signal: signal, lift, as view.js markList says them; pale by default."""
         e = ed()

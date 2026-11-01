@@ -19,7 +19,7 @@
 <div class="page">
 <main>
 <header class="hero">
-  <div class="kicker">WaveLens 0.34</div>
+  <div class="kicker">WaveLens 0.35</div>
   <h1>Guides</h1>
   <p class="lead">WaveLens turns a simulator dump (VCD or FST) or a
     <a href="https://wavedrom.com">WaveDrom</a> diagram into one self-contained HTML page: an interactive wave viewer,
@@ -42,10 +42,10 @@
     <p>A second dump over the first: a red band where a signal differs, ≠ on its name, <kbd>]d</kbd> to the next difference.</p></div></a>
   <a class="card" href="gaps.html"><img src="img/gaps-by-signals.png" alt="" loading="lazy"><div>
     <h3>5 · Gaps</h3>
-    <p>The idle stretches cut out of a saved picture or WaveDrom: <i>idle</i>, <i>keep</i>, the signals the gaps follow, the clock they count, the texts, the command line.</p></div></a>
+    <p>The idle stretches cut out of a saved picture, WaveDrom or the waves themselves: <i>idle</i>, <i>keep</i>, the signals the gaps follow, the clock they count, the texts, the command line.</p></div></a>
   <a class="card" href="sva.html"><img src="img/sva-attempt.png" alt="" loading="lazy"><div>
     <h3>6 · Assertions (SVA)</h3>
-    <p>Bind an assertion to an instance, read its attempts on the waves, take a failure apart with Why, edit and run again, reports for CI.</p></div></a>
+    <p>Bind an assertion to an instance, read its attempts on the waves, take a failure apart with Why, edit and run again, reports for CI; a list of expressions, marked on the waves, the waves cut to them.</p></div></a>
   <a class="card" href="buses.html"><img src="img/buses-open.png" alt="" loading="lazy"><div>
     <h3>7 · Bus transactions</h3>
     <p>AXI, AXI-Stream, APB, AHB, Avalon, Wishbone and OBI ports found by their names and drawn as transfers, a row per channel.</p></div></a>
@@ -74,6 +74,7 @@
     <a href="gaps.html">Gaps</a>.</li>
   <li>A design with many instances: <a href="modules.html">Modules</a>; a regression between two runs: <a href="compare.html">Compare</a>.</li>
   <li>You write assertions and want to see why one fails: <a href="sva.html">Assertions</a>.</li>
+  <li>You look for a condition over the waves, without an assertion: <a href="sva.html#expressions">Expressions</a>.</li>
   <li>Your dumps are on a server or in WSL and you work in VS Code: <a href="vscode.html">VS Code</a>.</li>
   <li>You write documentation with timing diagrams: <a href="wavedrom.html">WaveDrom</a>.</li>
   <li>You mark up pages from a script or a CI job: <a href="commands.html">Commands and scripts</a>.</li>
@@ -85,7 +86,7 @@
   (<code>tests/guide_shots.py</code>) from the examples' pages; the VS Code one by <code>make vscode-e2e</code>.</p>
 </main>
 </div>
-<footer>WaveLens 0.34 · <a href="../../README.md">README</a> · <a href="../USAGE.md">USAGE.md</a> · <a href="../index.html">docs/index.html</a></footer>
+<footer>WaveLens 0.35 · <a href="../../README.md">README</a> · <a href="../USAGE.md">USAGE.md</a> · <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>
 </html>

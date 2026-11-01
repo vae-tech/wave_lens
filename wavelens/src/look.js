@@ -90,22 +90,32 @@ Object.assign(WaveView.prototype, {
       } catch (e) { /* private mode */ }
   },
   // the gaps of the pictures and WaveDrom saved from this viewer (settings gaps, gapIdle, gapKeep; the menu's own over them,
-  // kept in this browser where they differ from the settings; null: the settings' again)
-  gapOpt() {
-    const S = this.S, L = this.local.gap || {}, o = {};
+  // kept in this browser where they differ from the settings; null: the settings' again). A plugin keeping stretches
+  // (view.extraKeep: expressions with ✂) has them on, on the waves, for as long as it does; gapBy: which ones say so; own: as
+  // the settings and the menu have them, without that
+  gapOpt(own) {
+    const S = this.S, L = this.local.gap || {}, o = {}, by = !own && this.extraKeep ? this.extraKeep.by() : [];
     for (const k of GAP_KEYS) o[k] = L[k] !== undefined ? L[k] : S[k];
     o.gaps = !!o.gaps; o.gapOnly = !!o.gapOnly; o.gapView = !!o.gapView; o.gapSignals = prefixes(o.gapSignals); o.gapAux = prefixes(o.gapAux);
     o.gapClock = o.gapClock || null;
     if (!['off', 'clock', 'edges', 'rise', 'fall', 'any'].includes(o.gapCount)) o.gapCount = 'clock';
+    if (by.length) { o.gaps = o.gapView = true; o.gapBy = by; }
     return o;
   },
-  setGaps(o) {
+  // kept: a state's own values (its plugins' parts, which came first, stay); else the gaps said off, or reset, end extraKeep's
+  setGaps(o, kept) {
+    const K = this.extraKeep;
+    if (!kept && K && K.by().length) {
+      if (!o || o.gaps === false || o.gapView === false) K.off();
+      if (o) o = Object.fromEntries(Object.entries(o).filter(([k, v]) => !(v === true && (k === 'gaps' || k === 'gapView'))));
+    }
     const list = k => k === 'gapSignals' || k === 'gapAux', same = (k, v) => JSON.stringify(list(k) ? prefixes(v) : v) ===
       JSON.stringify(list(k) ? prefixes(this.S[k]) : this.S[k]);
     const own = Object.entries(Object.assign({}, this.local.gap, o)).filter(([k, v]) => o && GAP_KEYS.includes(k) && !same(k, v));
     if (own.length) this.local.gap = Object.fromEntries(own); else delete this.local.gap;
-    this.gapMemo = null; this.saveLook(); this.hdrH = this.headH(); this.syncGapBar(); this.renderNames(); this.draw(); this.settingsChanged(); return this;
+    this.saveLook(); return this.gapsChanged();
   },
+  gapsChanged() { this.gapMemo = null; this.hdrH = this.headH(); this.syncGapBar(); this.renderNames(); this.draw(); this.settingsChanged(); return this; },
   // the gaps' rows, worked out again when the settings, the rows or the menu's gaps change (the names column asks per row)
   gapRows() {
     const m = this.gapMemo;

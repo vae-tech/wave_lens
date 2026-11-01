@@ -7,7 +7,7 @@ the signals, values at a time, changes in a window, a clock-sampled table, searc
 compared change by change (wave_diff: sva diff, streamed) or a window of one cut out (wave_cut), and a viewer
 page (or the WaveJSON) of a window for a person. The dump is read once per server (the declarations and the change counts); a
 signal's transitions when a tool first needs it, then kept. The agent marks a page up for the person with the viewer's
-commands (view_edit: bookmarks with a text, arrows, markers, groups, highlight, colours, cursor, window; tools/viewedit.py
+commands (view_edit: bookmarks with a text, arrows, markers, expressions, groups, highlight, colours, cursor, window; tools/viewedit.py
 has them) and reads what is there (view_get): live in their browser once view_live has connected the page (an HTTP
 server of this process on 127.0.0.1, from port 8742 or WAVELENS_LIVE_PORT on, its key in ~/.cache/wavelens/live-token),
 else in the page's file; a .vcd / .fst open in VS Code (the extension in vscode/ connects its tabs to the link that
@@ -25,7 +25,7 @@ get /dev/null as stdin (stdin and stdout are the protocol).
   wavemcp.py --list                                     # the tools and their input schemas
   wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd"}'   # one tool from the shell (tests, the benchmark)
 
-Standard library only; the sva CLI as svabuild.py finds it (--sva-bin, $WAVELENS_SVA, the build, bin/<os>/sva, PATH).
+Standard library only; the sva CLI as svabuild.py finds it ($WAVELENS_SVA, the build, bin/<os>/sva, PATH).
 docs/USAGE.md § "AI agents (MCP)" has the tools; tests/mcp_bench.py measures what they save.
 """
 import argparse, atexit, bisect, collections, contextlib, fnmatch, hmac, http.server, json, os, queue, re, secrets, shutil, socket, statistics, subprocess, sys
@@ -47,7 +47,7 @@ INSTRUCTIONS = (
     'values are the ones just before the clock edge, as SVA samples; cycle numbers are the clock\'s rising edges from '
     'the start of the dump (the same as sva_check\'s). Long answers are cut at "limit" ("more", "next_from" / '
     '"next_offset" say how to go on). wave_page writes a viewer page to show a person; view_edit marks it up for them '
-    '(bookmarks with a text, arrows, markers, groups, highlight, colours, cursor, window), live in their browser after '
+    '(bookmarks with a text, arrows, markers, expressions, groups, highlight, colours, cursor, window), live in their browser after '
     'view_live, else in the page\'s file (they reload it); view_get reads what is there, their own edits too.')
 
 
@@ -1100,12 +1100,16 @@ def ops_in(ops, timed):
     return out
 
 
+EXPR_TIMES = ('time', 'first', 'last', 'min', 'max')   # what the expr commands give in the viewer's times
+
+
 def ns_out(results, timed):
     """The results of the commands with the viewer's model times (ps) as ns: per command, the keys that are times."""
     if not timed or not isinstance(results, list):
         return results
     t = lambda v: ns(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else v
-    keys = {'cursor': ('t',), 'cursor2': ('t',), 'edge': ('t',), 'view': ('from', 'to'), 'fit': ('from', 'to')}
+    keys = {'cursor': ('t',), 'cursor2': ('t',), 'edge': ('t',), 'view': ('from', 'to'), 'fit': ('from', 'to'), 'expr_go': ('t',),
+            'expr': EXPR_TIMES, 'expr_matches': EXPR_TIMES, 'bookmark': ('t', 'from'), 'fsm_go': ('t',), 'compare': ('first',)}
     out = []
     for r in results:
         if isinstance(r, dict) and 'error' not in r:
@@ -1119,8 +1123,17 @@ def ns_out(results, timed):
                 r['state'] = state_ns(r['state'])
             if r.get('op') == 'cycles' and isinstance(r.get('cycles'), dict):
                 r['cycles'] = dict(r['cycles'], cycleZero=t(r['cycles'].get('cycleZero')))
-            if r.get('op') == 'gaps' and isinstance(r.get('cut'), dict):
+            if r.get('op') == 'expr_matches':
+                if isinstance(r.get('matches'), list):
+                    r['matches'] = [[t(a), t(b)] for a, b in r['matches']]
+                if isinstance(r.get('exprs'), list):
+                    r['exprs'] = [{k: t(v) if k in EXPR_TIMES else v for k, v in x.items()} for x in r['exprs']]
+            if r.get('op') in ('gaps', 'expr') and isinstance(r.get('cut'), dict):
                 r['cut'] = cut_ns(r['cut'], t)
+            if r.get('op') == 'fsm_stats':
+                for k, ts in (('states', ('first', 'time')), ('invalid', ('first', 'time')), ('changes', ('first',))):
+                    if isinstance(r.get(k), list):
+                        r[k] = [{f: t(v) if f in ts else v for f, v in x.items()} for x in r[k]]
         out.append(r)
     return out
 
@@ -1193,6 +1206,9 @@ def summary(st, timed, base=None):
     ss = viewedit.span_list(ed.spans())
     if ss:
         out['spans'] = [dict(x, id=i + 1, **{'from': t(x['from']), 'to': t(x['to'])}) for i, x in enumerate(ss)]
+    xs = ed.exprs()
+    if xs:
+        out['exprs'] = [dict({'expr': e} if isinstance(e, str) else e, id=i + 1) for i, e in enumerate(map(viewedit.expr_json, xs))]
     if st.get('groups'):
         out['groups'] = st['groups']
     hl = ed.highlight()
@@ -1219,7 +1235,7 @@ def summary(st, timed, base=None):
     g = ed.gap_opt()
     if g['gaps']:   # with the gaps command's names; view: on the waves
         out['gaps'] = {'idle': g['gapIdle'], 'keep': g['gapKeep'], 'view': g['gapView'], **{n: g[k] for n, k in (('signals', 'gapSignals'), ('clock', 'gapClock'),
-                       ('aux', 'gapAux'), ('only', 'gapOnly')) if g[k]}}
+                       ('aux', 'gapAux'), ('only', 'gapOnly'), ('by', 'gapBy')) if g.get(k)}}
     cmp = st['compare'] if 'compare' in st else ed.compare() if ed.m.doc else None
     if isinstance(cmp, dict):
         s = viewedit.compare_summary(cmp)
@@ -1603,7 +1619,7 @@ def t_view_get(a):
     out = {'page': where, 'view': key, 'views': list(pg.waves), 'edits': pg.rev(key)}
     out.update((state_ns(ed.st) if m.timed else ed.st) if a.get('full') else summary(ed.st, m.timed, ed))
     if a.get('rows') is not None:
-        out['rows'] = ed.c_rows({'pattern': a['rows'] or '', 'limit': a.get('limit') or 200})
+        out['rows'] = ed.c_rows({'pattern': a['rows'] or '', 'limit': a.get('limit') or 200, 'offset': a.get('offset') or 0})
     if a.get('picture'):   # the page's file in a headless Chromium (tools/pageshot.py, playwright: optional)
         png, why = page_picture(where, key)
         if png:
@@ -1636,7 +1652,7 @@ def page_picture(path, key, theme='dark'):
 def live_get(a, where, v):
     ops = [{'op': 'state'}]
     if a.get('rows') is not None:
-        ops.append({'op': 'rows', 'pattern': a['rows'] or '', 'limit': a.get('limit') or 200})
+        ops.append({'op': 'rows', 'pattern': a['rows'] or '', 'limit': a.get('limit') or 200, 'offset': a.get('offset') or 0})
     res = BRIDGE[0].send(where['cid'], v.get('key'), ops)
     got = lambda r, k: r[k] if isinstance(r, dict) and isinstance(r.get(k), (dict, str)) else fail_live(r)
     st = got(res[0], 'state')
@@ -1685,7 +1701,7 @@ def tool(name, fn, desc, props, required=('dump',), ro=True):
 
 TOOLS = [
     tool('wave_info', t_info, 'A dump at a glance: time span, signal count, scopes, clocks with period, resets.', {'dump': None, 'types': None, 'no_types': None}),
-    tool('wave_signals', t_signals, 'Find signals -> [path, width, changes]. pattern: substring or glob (* ?); depth: levels under scope.',
+    tool('wave_signals', t_signals, 'Find signals -> [path, width, changes, extra]. pattern: substring or glob (* ?); depth: levels under scope.',
          {'dump': None, 'pattern': S, 'scope': None, 'depth': N, 'active': B, 'limit': None, 'offset': N}),
     tool('wave_values', t_values, 'Values of signals at one or more times (side "before": just before the changes at that time).',
          {'dump': None, 'types': None, 'no_types': None, 'signals': None, 'at': {'type': ['number', 'string', 'array'], 'items': T}, 'side': S, 'scope': None, 'radix': None},
@@ -1709,7 +1725,7 @@ TOOLS = [
           'details': B, 'defines': {'type': ['object', 'array'], 'items': S}}),
     tool('wave_page', t_page, 'Write a WaveLens viewer page (out .html) or WaveJSON (out .json) of signals to show a person; clock '
          '(name or "auto"): a cell per cycle, auto_gap "16:2" folds idle cycles; sva files + bind ["name@scope"]; compare: a second dump '
-         '(or {dump, map, offset, show}) whose differences the page shows; show: the run it opens with, a, b or overlay.',
+         '(or {dump, map, offset, segment, align, show}: show the run it opens with, a, b or overlay) whose differences the page shows.',
          {'dump': None, 'types': None, 'no_types': None, 'signals': None, 'out': S, 'clock': S, 'from': None, 'to': None, 'scope': None, 'auto_gap': S, 'sva': L,
           'bind': L, 'title': S, 'compare': {'type': ['string', 'object']}}, ('dump', 'signals', 'out'), ro=False),
     tool('wave_to_fst', t_to_fst, 'Convert a VCD to an FST beside it (tb.vcd -> tb.fst; out: another file), as GTKWave\'s vcd2fst, '
@@ -1732,15 +1748,18 @@ TOOLS = [
          ' (·live: in a connected page only). t/from/to in ns; signals: path, name, path tail or * pattern; bookmark: a numbered circle with a text (no signal: on the time '
          'axis); arrow from/to: bookmark numbers; group: a folder of signals at the top; only: just these modules on the waves (with their '
          'submodules); edge: the cursor to the next edge. config (instead of page): a mkhtml config file, bookmark / arrow / span '
-         'on its view, kept by a rebuild (a bookmark\'s "at" event stays until a t replaces it). gaps with view true: the waves themselves '
+         'on its view, kept by a rebuild (a bookmark\'s "at" event stays until a t replaces it). gaps with on and view true: the waves themselves '
          'with the idle stretches cut out, as the person scrolls them (live: its answer has cut, what is left). marker: pale unless it has a '
          'color (null: pale again), its label at the top of the rows, with signal in a thin line over that row (lift "below": under it, the lines '
-         'lifted bookmarks use; signal null: at the top again); the person drags it from line to line.',
+         'lifted bookmarks use; signal null: at the top again); the person drags it from line to line. expr: a condition in the page\'s list '
+         '(text), marked band, line or strip, gap: the waves cut to its matches with the others that have it, answers n, time, share, first, '
+         'last, min, max, on a file only id.',
          {'page': S, 'config': S, 'view': S, 'ops': {'type': 'array', 'items': {'type': 'object'}}, 'save': B}, ('ops',), ro=False),
-    tool('view_get', t_view_get, 'What a page shows: bookmarks, arrows, markers, groups, highlight, colours, hidden, cursor, window (live: '
-         'with the person\'s own edits), the gaps (live, on the waves: cut, the gaps and the parts kept). rows: list its signals (a pattern, "" all); picture: a PNG of the view (live: the screen; a file: '
+    tool('view_get', t_view_get, 'What a page shows: bookmarks, arrows, markers, expressions, groups, highlight, colours, hidden, cursor, window (live: '
+         'with the person\'s own edits), the gaps (live, on the waves: cut, the gaps and the parts kept). rows: list its signals (a pattern, "" all; limit, '
+         'offset); full: the whole state; picture: a PNG of the view (live: the screen; a file: '
          'made in a headless Chromium, tools/pageshot.py).',
-         {'page': S, 'view': S, 'rows': S, 'limit': N, 'picture': B, 'full': B}, ()),
+         {'page': S, 'view': S, 'rows': S, 'limit': N, 'offset': N, 'picture': B, 'full': B}, ()),
     tool('view_live', t_view_live, 'Connect a page to this server: it is written into the page (open or reload it), then view_edit and '
          'view_get work on it live; open: open it in the browser; off: disconnect; rotate: a new key, so a copy of a page that carried '
          'the old one no longer connects (the pages linked before need view_live again). page a .vcd / .fst: its tab in VS Code (the '

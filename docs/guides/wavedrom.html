@@ -67,8 +67,8 @@ draws, the static SVG draws too where it makes sense (bookmarks, arrows, groups,
     the assertions out):
 <pre><code>&lt;script src="wavelens/wavelens.config.js"&gt;&lt;/script&gt;   <span class="c">&lt;!-- optional: your global settings, before wavelens.js --&gt;</span>
 &lt;script src="wavelens/wavelens.js"&gt;&lt;/script&gt;
-&lt;script src="wavelens/sva.wasm.js"&gt;&lt;/script&gt;          <span class="c">&lt;!-- the assertion engine (~400 kB) … --&gt;</span>
-&lt;script src="wavelens/sva.js"&gt;&lt;/script&gt;               <span class="c">&lt;!-- … and its panel, the ƒ expressions --&gt;</span>
+&lt;script src="wavelens/sva.wasm.js"&gt;&lt;/script&gt;          <span class="c">&lt;!-- the assertion engine (~280 kB) … --&gt;</span>
+&lt;script src="wavelens/sva.js"&gt;&lt;/script&gt;               <span class="c">&lt;!-- … and its panels: assertions, expressions --&gt;</span>
 &lt;script src="wavelens/bus.js"&gt;&lt;/script&gt;               <span class="c">&lt;!-- bus transactions --&gt;</span></code></pre></li>
 </ol>
 <p>The same two blocks, live:</p>
@@ -203,7 +203,7 @@ from a real dump: real time, exact transitions, value labels, notes.</p>
 <tr><td><code>config: {…}</code></td><td>the settings of this diagram (theme, colours, sizes, sort, gaps …)</td></tr>
 <tr><td><code>bookmarks</code>, <code>arrows</code></td><td>numbered notes on signal rows and arrows between them</td></tr>
 <tr><td><code>markers</code>, <code>jumps</code>, <code>cursor</code></td><td>dashed markers, jump buttons, the initial cursor</td></tr>
-<tr><td><code>sva: {files?, bind, notes?, exprs?}</code></td><td>assertions bound to the diagram (<a href="sva.html">Assertions</a>)</td></tr>
+<tr><td><code>sva: {files?, bind, cycles?, notes?, exprs?}</code></td><td>assertions bound to the diagram (<a href="sva.html">Assertions</a>)</td></tr>
 <tr><td><code>meta.scope</code></td><td>the instance the top rows belong to (for binding)</td></tr>
 <tr><td><code>meta.omitted</code></td><td>the dump's signals not in the page (<code>"show": false</code> in the config, or past <code>dumpBudget</code>), by scope: the find names them</td></tr>
 </table>
@@ -425,7 +425,7 @@ are written by hand).</p>
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.34 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live
+<footer>WaveLens 0.35 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live
 reference: <a href="../index.html">docs/index.html</a></footer>
 <script src="../../wavelens/wavelens.js"></script>
 <script>

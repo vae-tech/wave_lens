@@ -809,11 +809,53 @@ function gapText(s, p, q, kind) {
 // times: gapTimes of these rows, when known (the waves' own gaps keep them while idle and keep change)
 function gapCuts(rows, a, b, S, clk, cycle = 1, also = [], picked = false, times = null) {
   if (!S.gaps || !(b > a)) return [[a, b]];
-  const ups = clk ? riseTimes(clk) : [], u = ups.filter(t => t >= a && t <= b), d = u.slice(1).map((t, i) => t - u[i]).sort((x, y) => x - y);
-  const cyc = d.length ? d[d.length >> 1] : cycle, idle = gapLen(S.gapIdle, cyc), keep = Math.max(0, gapLen(S.gapKeep, cyc) || 0);
+  const { idle, keep, ups, min } = gapLens(S, clk, a, b, cycle);
   if (!(idle > 0)) return [[a, b]];
   const ts = times || gapTimes(rows, a, b, clk, picked), more = also.filter(t => t > a && t < b);
-  return idleCuts(more.length ? [...new Set([...ts, ...more])].sort((x, y) => x - y) : ts, a, b, idle, keep, d.length ? ups : [], d.length ? 2 * cyc : 0);
+  return idleCuts(more.length ? [...new Set([...ts, ...more])].sort((x, y) => x - y) : ts, a, b, idle, keep, ups, min);
+}
+// idle and keep (S: gapIdle, gapKeep) over [a, b] in cycles of clk (the step of its rising edges there), else of the model's
+// cycle; ups: its edges, min: the shortest gap (two cycles), when it has any there
+function gapLens(S, clk, a, b, cycle) {
+  const ups = clk ? riseTimes(clk) : [], u = ups.filter(t => t >= a && t <= b), d = u.slice(1).map((t, i) => t - u[i]).sort((x, y) => x - y);
+  const cyc = d.length ? d[d.length >> 1] : cycle, ok = d.length > 0;
+  return { idle: gapLen(S.gapIdle, cyc), keep: Math.max(0, gapLen(S.gapKeep, cyc) || 0), ups: ok ? ups : [], min: ok ? 2 * cyc : 0 };
+}
+// gaps around stretches of time (the matches of expressions; sorted, apart): between two of them for idle or longer, the
+// stretch from keep after the one to keep before the next is left out, and before the first and after the last up to the
+// ends a, b (a part of nothing stays there, so a gap's column says what went). Its ends on the rising edges ups (sorted, if
+// any), the first at or after and the last at or before -> the parts kept, [[from, to], …]
+function keepCuts(spans, a, b, idle, keep, ups = [], min = 0) {
+  const out = [], S = spans.filter(([p, q]) => q >= a && p <= b), n = ups.length, edge = (t, strict) => lastBefore(n, k => ups[k], t, strict);
+  let from = a;
+  for (let i = 0; i <= S.length; i++) {
+    const first = !i, last = i === S.length, p = first ? a : S[i - 1][1], q = last ? b : S[i][0];
+    if (!(q - p >= idle)) continue;
+    let hs = first ? a : p + keep, he = last ? b : q - keep;
+    if (n && !first) { const j = edge(hs, true) + 1; hs = j < n ? ups[j] : Infinity; }
+    if (n && !last) { const k = edge(he); he = k >= 0 ? ups[k] : -Infinity; }
+    if (he - hs > 0 && he - hs >= min && hs >= from) { out.push([from, hs]); from = he; }
+  }
+  out.push([from, b]);
+  return out;
+}
+// stretches of time together: by time, the ones that meet made one
+function mergeSpans(S) {
+  const out = [];
+  for (const [p, q] of [...S].sort((x, y) => x[0] - y[0])) {
+    const l = out[out.length - 1];
+    if (l && p <= l[1]) l[1] = Math.max(l[1], q); else out.push([p, q]);
+  }
+  return out;
+}
+// the parts of [a, b] the gaps of these stretches keep (S: gapIdle, gapKeep; clk, cycle as gapCuts), the times of also
+// (bookmarks) with them; no stretch, or nothing left: [[a, b]]
+function gapKeeps(spans, a, b, S, clk, cycle = 1, also = []) {
+  const { idle, keep, ups, min } = gapLens(S, clk, a, b, cycle);
+  if (!spans.length || !(b > a) || !(idle > 0)) return [[a, b]];
+  const all = mergeSpans([...spans, ...also.filter(t => t > a && t < b).map(t => [t, t])]);
+  const cuts = keepCuts(all, a, b, idle, keep, ups, min);
+  return cuts.some(([p, q]) => q > p) ? cuts : [[a, b]];
 }
 // the times in (a, b) where these rows change, sorted: all but clk's (and the other clocks', unless the rows were picked)
 function gapTimes(rows, a, b, clk, picked = false) {
@@ -2016,6 +2058,33 @@ function paintSpans(P, spans, X, tA, tB, lay, y0, y1) {
       P.rect(xa + 1, y + 3, w + 6, 13, 'panel', 0.9); P.text(xa + 4, y + 9.5, s.label, { size: 10, weight: 600, fill: 'fg' }); }
   }
 }
+// the times marked by a plugin (view.extraMarks; sva.js: its expressions), each {spans: [[from, to], …] by time, color, label,
+// mark, on}: a thin strip of its own under the top (they do not cover each other), and over the rows a pale band where it
+// holds (mark "band") or a line where each stretch starts ("line"; "strip": the strip alone); on: the one the user is on,
+// stronger; its label at the start of a stretch, where the last one left room. px: the time of a pixel: stretches nearer
+// than that are drawn as one, and the ones under it jumped over, so a dump of a million of them costs a frame.
+const MARK_STRIP = 3, MARK_LABEL = 13;
+function paintTimeMarks(P, marks, X, tA, tB, y0, y1, px) {
+  const named = (marks || []).filter(m => m.label);
+  (marks || []).forEach((m, i) => {
+    const S = m.spans, n = S.length, c = m.color || 'acc', y = y0 + i * MARK_STRIP, d = [];
+    const ly = y0 + marks.length * MARK_STRIP + named.indexOf(m) * MARK_LABEL + 2;
+    // the first that ends after t
+    const after = t => { let lo = 0, hi = n; while (lo < hi) { const k = (lo + hi) >> 1; if (S[k][1] <= t) lo = k + 1; else hi = k; } return lo; };
+    let room = -Infinity;
+    for (let k = after(tA); k < n && S[k][0] <= tB; k++) {
+      const from = S[k][0];
+      while (k + 1 < n && S[k + 1][0] <= S[k][1] + px) k = Math.max(k + 1, after(S[k][1] + px) - 1);
+      const xa = X(Math.max(from, tA)), xb = X(Math.min(S[k][1], tB)), w = Math.max(1, xb - xa);
+      if (m.mark === 'band') P.rect(xa, y0, w, y1 - y0, c, m.on ? 0.26 : 0.13);
+      else if (m.mark === 'line' && from >= tA) d.push(['M', xa, y0], ['L', xa, y1]);
+      P.rect(xa, y, w, MARK_STRIP - 0.5, c, 0.95);
+      if (m.label && from >= tA && xa >= room) { const tw = P.measure(m.label, { size: 10, weight: 600 }) + 6; room = xa + tw + 8;
+        P.rect(xa + 1, ly, tw, MARK_LABEL - 1, 'panel', 0.9); P.text(xa + 4, ly + 6, m.label, { size: 10, weight: 600, fill: c }); }
+    }
+    if (d.length) P.path(d, { stroke: c, w: m.on ? 1.6 : 1, dash: [2, 3] });
+  });
+}
 // the markers: a dashed line across the rows, pale without a colour of its own; the text at the top of the rows, or in the
 // lane of its signal (lanes: laneY; that row not drawn: at the top). -> [{i, x, y, w}]: where each text is, for the hit tests
 function paintMarkers(P, markers, X, tA, tB, y0, y1, lanes) {
@@ -2238,6 +2307,7 @@ const TIPS = {
   '.gi': ['A gap where nothing changes this long: clock cycles (16) or a time (2us)'], '.gk': ['Kept after a change and before the next one: cycles or a time'],
   'm:gref': ['The gaps follow the changes of these signals only (marked // in the names); none: of every signal in the picture'],
   'm:grefx': ['The gaps by every signal in the picture again'],
+  'm:gbyx': ['The waves no more cut to the matches of expressions (✂ off in their list)'],
   'm:gclk': ['The gaps count in cycles of this clock (idle, keep, the cycles of a gap; marked ↑ in the names); its edges are no change'],
   'm:gclkx': ['The cycles of the clock found again (the selected one, else the nearest *clk*)'],
   'm:greset': ['Every gap setting of this viewer back to the settings (the roles, the counts, idle, keep; by default no gaps)'],
@@ -2340,8 +2410,8 @@ const FIND_OPTS = [
 ];
 
 // the bar's tools, one line per kind of work: where you are in time (cursor, zoom, edges, jumps), the signals by name
-// (find), times by a condition (sva.js: ƒ expression), the rows and the files (list, edge style, state, assertions)
-const TOOL_LINES = { cursor: 'time', view: 'time', edges: 'time', 'go to': 'time', find: 'find', expression: 'expr', list: 'rows', style: 'rows', state: 'rows',
+// and the times by a condition (find; sva.js: expression), the rows and the files (list, edge style, state, assertions)
+const TOOL_LINES = { cursor: 'time', view: 'time', edges: 'time', 'go to': 'time', find: 'find', expression: 'find', list: 'rows', style: 'rows', state: 'rows',
   dump: 'rows', assertions: 'rows' };
 const toolLine = (ln, html) => `<div class="tln" data-ln="${ln}">${html}</div>`;
 
@@ -2431,7 +2501,7 @@ class Bar {
         '<button type="button" data-act="mark" title="Bookmark at the cursor, on the selected signal (m)">+ Mark</button>');
     const state = grp('state',
       ('<button type="button" data-act="ssave" title="Save what you did in this viewer to a file: the window, the cursor, the order, the folding, the ' +
-        'highlight, the paint, the bookmarks and arrows, the search, the assertions and the ƒ rows">Save</button>'),
+        'highlight, the paint, the bookmarks and arrows, the search, the assertions and the expressions">Save</button>'),
       ('<button type="button" data-act="sload" title="Load a saved file into this viewer (what is not in these waves is left out)">Load…</button><input ' +
           'type="file" class="sfile" accept=".json,application/json" hidden>'),
       '<button type="button" data-act="spage" class="spage">Save page</button>',
@@ -2472,7 +2542,7 @@ class Bar {
         type="button" class="lay" data-act="tools" aria-label="fold the tools"></button><button type="button" class="hb" data-act="help"
         aria-label="keys and mouse">?</button></div>
       <div class="tools">${toolLine('time', grp('cursor', cursor) + grp('view', zoom) + edges + (jumps ? grp('go to', jumps) : ''))}${toolLine('find', find)}${
-        toolLine('expr', '')}${toolLine('rows', list + grp('style', wstyle) + state + dump)}</div></div>
+        toolLine('rows', list + grp('style', wstyle) + state + dump)}</div></div>
       <div class="body"><div class="names"></div><div class="wcol"><canvas tabindex="0" role="application" aria-roledescription="waveform"
         aria-label="waveform: + − zoom, ← → pan, shift+← → move the cursor, ↑ ↓ select a signal, [e ]e or Tab edges"></canvas></div></div>
       <div class="notes" hidden></div>
@@ -2991,6 +3061,9 @@ class WaveView {
     this.extraJSON = [];   // plugins: () -> '"key": …' lines for the bookmarks JSON (or null)
     this.extraState = [];   // plugins: {key, get() -> a JSON value, set(value) (may be async)}: their part of the saved state
     this.extraRows = [Object.assign(g => (g ? [] : this.ugRows()), { head: true })];   // plugins: rows under a group (withExtra); yours at the top
+    // a plugin: what the gaps on the waves keep in place of the signals, {by() -> who says so ([]: nobody), spans() -> [[from, to], …], off()}
+    this.extraKeep = null;
+    this.extraMarks = [];   // plugins: functions -> the times they mark on the waves ([{spans, color, label, mark, on}]: paintTimeMarks)
     this.extraPicks = new Map();   // plugins: rows highlighted, row -> a token ('hl8': --wave-hl8) or a colour index; Esc clears (then wavelens:reset)
     this.keys = {};   // plugins: key -> fn(event) on the waves (addKey)
     this.rowMarks = new Map(); this.rowTitles = new Map();   // plugins: classes and tooltips of name rows (rowClass, rowTitle)
@@ -3557,7 +3630,7 @@ class WaveView {
         fold: [...folded].map(id => M.groups[id] && M.groups[id].path).filter(Boolean),
         highlight: [...this.picks].sort((a, b) => a[1] - b[1]).map(([r]) => r.full).filter(Boolean), findHighlight: !!this.findHl, findOpen: !!this.findOpen,
         findMask: !!this.findMask,
-          ...Object.fromEntries(FIND_OPTS.map(o => [o[1], !!this[o[1]]])), ...this.gapOpt(), ...this.cycOpt() },
+          ...Object.fromEntries(FIND_OPTS.map(o => [o[1], !!this[o[1]]])), ...this.gapOpt(true), ...this.cycOpt() },
       paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs), hidden: [...this.hiddenRows],
         bits: [...this.bitsOpen], select: (this.sel && this.sel.full) || null, find: this.q || '', bookmarks: this.bookmarks(), arrows: this.arrowList(),
         markers: this.markList(), spans: this.spanList(),
@@ -3595,7 +3668,7 @@ class WaveView {
     if (C.toolsFolded !== undefined) this.setTools(!!C.toolsFolded);
     if (C.toolsHidden !== undefined) this.setToolsHidden(C.toolsHidden ?? []);
     const gk = GAP_KEYS.filter(k => C[k] !== undefined);
-    if (gk.length) this.setGaps(Object.fromEntries(gk.map(k => [k, C[k]])));   // null: the clock found (not the page's)
+    if (gk.length) this.setGaps(Object.fromEntries(gk.map(k => [k, C[k]])), true);   // null: the clock found (not the page's)
     const ck = CYC_KEYS.filter(k => C[k] !== undefined);
     if (ck.length) this.setCycles(Object.fromEntries(ck.map(k => [k, C[k]])));   // null: the clock found, the first edge (not the page's)
     if (C.sort !== undefined || C.sortIgnore !== undefined) {
@@ -4025,9 +4098,12 @@ class WaveView {
     lift: m.lift === 'below' ? m.lift : null }).filter(([, x]) => x != null && x !== ''))); }
   spanTip(t, row) {
     const on = s => !s.signals || !s.signals.length || (row && (s.signals.includes(row.full) || s.signals.includes(row.name)));
-    return this.spans.filter(s => t >= s.from && t <= s.to && on(s)).map(s => `${s.label || 'span'}: ${this.when(s.from)} … ${this.when(s.to)} (Δ ` +
-      `${this.M.timed ? fmtExact(s.to - s.from) : trimNum(s.to - s.from) + ' cycles'})`).join('\n');
+    const line = (name, a, b) => `${name}: ${this.when(a)} … ${this.when(b)} (Δ ${this.M.timed ? fmtExact(b - a) : trimNum(b - a) + ' cycles'})`;
+    const marks = this.timeMarks().map(m => { const s = m.spans[lastBefore(m.spans.length, k => m.spans[k][0], t)];
+      return s && t <= s[1] ? line(m.tip || m.label, s[0], s[1]) : ''; });
+    return this.spans.filter(s => t >= s.from && t <= s.to && on(s)).map(s => line(s.label || 'span', s.from, s.to)).concat(marks).filter(Boolean).join('\n');
   }
+  timeMarks() { return this.extraMarks.flatMap(f => f() || []); }   // what the plugins mark on the waves now
   spanList() { return this.spans.map(s => Object.fromEntries(Object.entries({ from: s.from, to: s.to, label: s.label, color: s.color,
     signals: s.signals && s.signals.length ? [...s.signals] : null }).filter(([, x]) => x != null && x !== ''))); }
   groupList() { return this.ugroups.map(g => Object.fromEntries(Object.entries({ name: g.name, signals: [...g.signals], color: g.color })
@@ -4504,6 +4580,7 @@ class WaveView {
     const body = (p, q, xa, xb, to, bg = false) => paintBody(P, M, shown, X, p, q, xa, xb, this.hl, sel, lay, this.band, to, r => this.strokeOf(r),
       r => this.collapsed.has(r.id), bg);
     const rowY = WP ? this.paintWarpBody(P, F, WP, body, late, shown, oy, Hc, hdr) : body(this.t0, tB, 0, W, late);
+    paintTimeMarks(P, this.timeMarks(), X, this.t0, tB, oy + hdr, oy + Hc, this.span / W);
     paintSpans(P, this.spans, X, this.t0, tB, shown, oy + hdr, oy + Hc);
     const tags = paintMarkers(P, this.markers, X, this.t0, tB, oy + hdr, oy + Hc, laneY(lay, this.S.laneHeight));
     if (!WP) this.paintDiff(P, shown, X, this.t0, tB);   // a second dump compared (diff.js): where it differs
@@ -4642,6 +4719,7 @@ Object.assign(WaveView.prototype, {
     // the gaps of the picture and WaveDrom (idle stretches left out): on / off, how long idle, how much kept; how many now
     const gp = this.gapOpt(), [ga, gb] = r || [this.t0, this.t0 + this.span], gaps = () => this.cutsOf(ga, gb, pic.rows || this.screenRows()).length - 1;
     const gn = () => (this.gapOpt().gaps ? `Gaps: ${gaps()}` : 'Gaps'), nref = this.gapRefSet().size;
+    const gby = gp.gapBy ? gp.gapBy.length : 0;   // the expressions the waves are cut to
     const gref = sigs.length && sigs.every(x => this.gapRefSet().has(x));   // the signals clicked: the gaps follow them already
     const gck = this.gapClockRow(), isGck = !!sig && sig === gck;   // the clock the gaps count cycles of
     const co = this.cycOpt(), cd = this.cycData(), cda = this.cycData(true), isCyc = !!sig && co.cycles && co.cycleClock === sig.full;   // the cycles
@@ -4675,8 +4753,10 @@ Object.assign(WaveView.prototype, {
         `class="gview"${gp.gapView ? ' checked' : ''}> on the waves</label></div><div class="mi gp"><span>idle ` +
         `<input class="gi" value="${esc(gp.gapIdle)}" aria-label="idle this long: clock cycles or a time"> keep <input class="gk" ` +
         `value="${esc(gp.gapKeep)}" aria-label="kept around a change: clock cycles or a time"></span></div>`) +
-      (`<div class="mi gp"><span>${nref ? `by ${nref} signal${nref === 1 ? '' : 's'} <button type="button" class="gx" data-m="grefx" ` +
-        `aria-label="the gaps by the signals drawn">✕</button>` : 'by the signals drawn'}${gck ? ` · ↑ ${esc(gck.name)} <button type="button" class="gx" ` +
+      (`<div class="mi gp"><span>${gby ? `✂ ${gby} expression${gby === 1 ? '' : 's'} <button type="button" class="gx" data-m="gbyx" ` +
+        `aria-label="the gaps of the expressions off">✕</button>` : nref ? `by ${nref} signal${nref === 1 ? '' : 's'} <button type="button" class="gx" ` +
+        `data-m="grefx" aria-label="the gaps by the signals drawn">✕</button>` : 'by the signals drawn'}` +
+        `${gck ? ` · ↑ ${esc(gck.name)} <button type="button" class="gx" ` +
         `data-m="gclkx" aria-label="the cycles of the clock found">✕</button>` : ''}${naux ? ` · + ${naux} <button type="button" class="gx" ` +
         `data-m="gauxx" aria-label="count every other signal">✕</button>` : ''}</span><span>` +
         (nref ? `<label><input type="checkbox" class="gonly"${gp.gapOnly ? ' checked' : ''}> only them</label> ` : '') +
@@ -4829,6 +4909,7 @@ Object.assign(WaveView.prototype, {
       else if (act === 'gref') role('gapSignals', !gref);
       else if (act === 'gaux') role('gapAux', !gaux);
       else if (act === 'grefx') this.setGaps({ gapSignals: null });
+      else if (act === 'gbyx') this.extraKeep.off(true);
       else if (act === 'gauxx') this.setGaps({ gapAux: null });
       else if (act === 'gclk') role('gapClock', !isGck);
       else if (act === 'cycon') this.setCycles({ cycles: !co.cycles });
@@ -5116,22 +5197,32 @@ Object.assign(WaveView.prototype, {
       } catch (e) { /* private mode */ }
   },
   // the gaps of the pictures and WaveDrom saved from this viewer (settings gaps, gapIdle, gapKeep; the menu's own over them,
-  // kept in this browser where they differ from the settings; null: the settings' again)
-  gapOpt() {
-    const S = this.S, L = this.local.gap || {}, o = {};
+  // kept in this browser where they differ from the settings; null: the settings' again). A plugin keeping stretches
+  // (view.extraKeep: expressions with ✂) has them on, on the waves, for as long as it does; gapBy: which ones say so; own: as
+  // the settings and the menu have them, without that
+  gapOpt(own) {
+    const S = this.S, L = this.local.gap || {}, o = {}, by = !own && this.extraKeep ? this.extraKeep.by() : [];
     for (const k of GAP_KEYS) o[k] = L[k] !== undefined ? L[k] : S[k];
     o.gaps = !!o.gaps; o.gapOnly = !!o.gapOnly; o.gapView = !!o.gapView; o.gapSignals = prefixes(o.gapSignals); o.gapAux = prefixes(o.gapAux);
     o.gapClock = o.gapClock || null;
     if (!['off', 'clock', 'edges', 'rise', 'fall', 'any'].includes(o.gapCount)) o.gapCount = 'clock';
+    if (by.length) { o.gaps = o.gapView = true; o.gapBy = by; }
     return o;
   },
-  setGaps(o) {
+  // kept: a state's own values (its plugins' parts, which came first, stay); else the gaps said off, or reset, end extraKeep's
+  setGaps(o, kept) {
+    const K = this.extraKeep;
+    if (!kept && K && K.by().length) {
+      if (!o || o.gaps === false || o.gapView === false) K.off();
+      if (o) o = Object.fromEntries(Object.entries(o).filter(([k, v]) => !(v === true && (k === 'gaps' || k === 'gapView'))));
+    }
     const list = k => k === 'gapSignals' || k === 'gapAux', same = (k, v) => JSON.stringify(list(k) ? prefixes(v) : v) ===
       JSON.stringify(list(k) ? prefixes(this.S[k]) : this.S[k]);
     const own = Object.entries(Object.assign({}, this.local.gap, o)).filter(([k, v]) => o && GAP_KEYS.includes(k) && !same(k, v));
     if (own.length) this.local.gap = Object.fromEntries(own); else delete this.local.gap;
-    this.gapMemo = null; this.saveLook(); this.hdrH = this.headH(); this.syncGapBar(); this.renderNames(); this.draw(); this.settingsChanged(); return this;
+    this.saveLook(); return this.gapsChanged();
   },
+  gapsChanged() { this.gapMemo = null; this.hdrH = this.headH(); this.syncGapBar(); this.renderNames(); this.draw(); this.settingsChanged(); return this; },
   // the gaps' rows, worked out again when the settings, the rows or the menu's gaps change (the names column asks per row)
   gapRows() {
     const m = this.gapMemo;
@@ -5259,22 +5350,25 @@ Object.assign(WaveView.prototype, {
   gapBand() { return this.gapOpt().gapCount !== 'off'; },
   // the height of the header: the axis, the cycles, the gaps' texts
   headH() { return this.S.headerHeight + (this.cycData() ? CYC_H : 0) + (this.gapLive() && this.gapBand() ? GAP_H : 0); },
-  // the gaps on the waves: the signals they look at, the changes of those and the parts kept. The parts are worked out over
-  // the whole dump from every row drawn, not from those on the screen: the scroll of the rows moves no gap. idle and keep
-  // changed: only the parts again, so a value being typed shows at once on a long dump
+  // the gaps on the waves: the signals they look at, the changes of those and the parts kept (a plugin's stretches, when it
+  // has any: view.extraKeep, in place of the signals). The parts are worked out over the whole dump from every row drawn, not
+  // from those on the screen: the scroll of the rows moves no gap. idle and keep changed: only the parts again, so a value
+  // being typed shows at once on a long dump
   liveCuts() {
     if (!this.gapLive()) return null;
-    const G = this.gapRows(), M = this.M, ref = [...G.ref], g = this.gapOpt();
+    const G = this.gapRows(), M = this.M, ref = [...G.ref], g = this.gapOpt(), by = g.gapBy ? this.extraKeep.spans() : null;
     const rows = (this.rowsL || []).filter(r => r.type === 'sig' || (r.type === 'group' && r.sig));
     const same = (a, b) => a.length === b.length && a.every((r, i) => r === b[i]);
     let m = this.warpMemo;
-    if (!m || m.gck !== G.clk || m.run !== this.cmpRun || !same(m.rows, rows) || !same(m.ref, ref)) {
-      const sigs = ref.length ? ref : rows, clk = this.gapClockFor(rows), un = [...(clk ? [clk] : []), ...sigs].filter(r => lazyOf(M, r.orig || r).length);
+    if (!m || m.gck !== G.clk || m.run !== this.cmpRun || !same(m.rows, rows) || !same(m.ref, ref) || !m.by !== !by) {
+      const sigs = by ? [] : ref.length ? ref : rows, clk = this.gapClockFor(rows);
+      const un = [...(clk ? [clk] : []), ...sigs].filter(r => lazyOf(M, r.orig || r).length);
       if (un.length) this.need(un);   // a large dump: read, then worked out again (need resets the memo)
-      m = this.warpMemo = { rows, ref, sigs, clk, gck: G.clk, run: this.cmpRun, ts: gapTimes(sigs, M.t0, M.t1, clk, ref.length > 0) };
+      m = this.warpMemo = { rows, ref, sigs, clk, gck: G.clk, run: this.cmpRun, by, ts: gapTimes(sigs, M.t0, M.t1, clk, ref.length > 0) };
     }
     const bm = this.bms.map(x => x.t), key = JSON.stringify([g.gapIdle, g.gapKeep, bm]);
-    if (m.key !== key) { m.key = key; m.w = warpOf(gapCuts(m.sigs, M.t0, M.t1, g, m.clk, M.cycle, bm, m.ref.length > 0, m.ts)); }
+    if (m.key !== key || m.by !== by) { m.key = key; m.by = by;
+      m.w = warpOf(by ? gapKeeps(by, M.t0, M.t1, g, m.clk, M.cycle, bm) : gapCuts(m.sigs, M.t0, M.t1, g, m.clk, M.cycle, bm, m.ref.length > 0, m.ts)); }
     return m;
   },
   // what the gaps on the waves leave: their number, the time kept, of the whole, the parts kept over the whole dump (the
@@ -5424,7 +5518,7 @@ function command(name, args, doc, run) {
   CMDS[name] = { args, keys: args.split(/\s+/).filter(Boolean).map(k => k.replace(/\?$/, '')), doc, run };
 }
 const fail = msg => { throw new Error(msg); };
-const READ_CMDS = new Set(['state', 'rows', 'picture']);   // they change nothing (no toast in a live page)
+const READ_CMDS = new Set(['state', 'rows', 'picture', 'expr_matches']);   // they change nothing (no toast in a live page)
 const LAY_CMDS = new Set(['picture', 'edge', 'rows']);   // they read the rows laid out: what the run held back is done before them
 // a time of a command: a number (model units) or a text with a unit; untimed waves take cycles only
 function cmdTime(v, x, what = 't') {
@@ -5593,6 +5687,24 @@ command('marker', 'id? t? label? color? signal? lift? delete?', 'a marker: a das
   if (a.lift != null) m.lift = a.lift;
   m.lift = markLift(m);
   v.setMarks(); return { id: v.umarks.indexOf(m) + 1 };
+});
+// the expressions of the page: its list is the plugin's (wavelens/sva.js), which needs the engine
+const exprs = v => v.svaExprs || fail('expressions need the assertion engine in the page (sva.js and sva.wasm.js: no mkhtml.py --no-sva)');
+command('expr', 'id? text? scope? label? color? on? row? mark? gap? delete?', 'an expression of the signals in the list of expressions (SystemVerilog, as ' +
+  'in an assertion; @(posedge clk) … samples it at a clock; names from scope up to the top, a full path too): a new one (text; a text that does not value ' +
+  'is refused), or expression id (1, 2 … as listed) changed; label: its text on the waves, color (null: the colour of its place), on: its marks, mark: ' +
+  'band (a pale band where it holds), line (where it starts) or strip (only the strip at the top), row: drawn as a signal too; gap: the waves cut to the ' +
+  'matches of the expressions that have it (idle and keep of the gaps command; the gaps on, on the waves, for as long as one has it); delete: id or "all"; ' +
+  '-> what it found (n, time, share, first, last, min, max), with gap what the waves leave (cut)', (v, a) => {
+  idOk(a.id, 'expression'); cmdColor(a); return exprs(v).set(a);
+});
+command('expr_go', 'id? dir? n?', 'the cursor to the next (dir 1) or previous (-1) match of an expression from the cursor, round the ends, or to match n ' +
+  '(1 …); its signals highlighted, its marks stronger; id default the one picked, else the first marked -> {id, t, k, n}: the time, which match, how many ' +
+  '(n 0: never true)', (v, a) => { idOk(a.id, 'expression'); return exprs(v).goTo(a); });
+command('expr_matches', 'id? from? to? limit? offset?', 'what the expressions found: without id every one\'s numbers (exprs: [{id, expr, n, time, share, ' +
+  'first, last, min, max} | {… error}]), with id its stretches in [from, to] too (matches: [[from, to], …], limit default 100, next_offset)', (v, a) => {
+  idOk(a.id, 'expression');
+  return exprs(v).matchesOf(a, a.from != null ? cmdTime(v, a.from) : v.M.t0, a.to != null ? cmdTime(v, a.to) : v.M.t1);
 });
 command('compare', 'result? dump? a? map? offset? off? show?', 'a second dump over these waves, where its values differ (red bands, ≠, ]d [d): ' +
   'result (sva diff\'s, as the page\'s "compare": tools/viewedit.py and view_edit make it of dump); off: compared no more; show: which run the waves ' +
@@ -5809,7 +5921,7 @@ command('find', 'query case? word? regex? highlight? open? mask?', 'the find fie
   });
 command('gaps', 'on? idle? keep? signals? clock? aux? only? count? view? reset?', 'the gaps of the picture and WaveDrom (the menu\'s Gaps): on, ' +
   'idle and keep (cycles or a time), the signals they follow, the clock they count, aux (changes counted), only, count (clock edges off), view (on the ' +
-  'waves too); reset', (v, a) => {
+  'waves too); reset. Expressions with gap (expr) have them on, gapBy says which; on or view false, or reset, takes it off them', (v, a) => {
   if (a.reset) v.setGaps(null);
   const map = { on: 'gaps', idle: 'gapIdle', keep: 'gapKeep', signals: 'gapSignals', clock: 'gapClock', aux: 'gapAux', only: 'gapOnly', count: 'gapCount',
     view: 'gapView' };
@@ -5855,7 +5967,7 @@ command('rows', 'pattern? limit? offset?', 'the signals and modules of the page 
 });
 const PICTURE_ROWS = 5000;   // a picture of 20 000 rows is 400 MB of text and 13 s
 command('picture', 'format? from? to? rows?', 'the waves as a picture: png (base64), svg or wavedrom (WaveJSON); rows: screen (default), all, ' +
-  'picked (highlighted) or signals', async (v, a) => {
+  'picked (highlighted) or signals (at most 5000 rows)', async (v, a) => {
   const f = a.format || 'png', o = {};
   if (a.from != null) o.from = cmdTime(v, a.from, 'from');
   if (a.to != null) o.to = cmdTime(v, a.to, 'to');
@@ -5902,11 +6014,11 @@ Object.assign(WaveView.prototype, {
   // pointer is up (a drag is one step), a key that is not typing, a field changed (a text: when it is left), a load
   undoPart() {
     const groups = this.groupList().map((g, i) => Object.assign(g, { uid: this.ugroups[i].uid || (this.ugroups[i].uid = ++XID) }));   // a group over a rename
-    return JSON.stringify({ bookmarks: this.bookmarks(), arrows: this.arrowList(), markers: this.markList(), groups,
+    return JSON.stringify({ bookmarks: this.bookmarks(), arrows: this.arrowList(), markers: this.markList(), spans: this.spanList(), groups,
       paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs), hidden: [...this.hiddenRows],
       bits: [...this.bitsOpen], only: this.onlyState(), fsm: this.fsmState(),
       config: Object.assign({ style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded,
-        toolsHidden: toolNames(this.S.toolsHidden), sort: this.sort, sortIgnore: [...this.sortIgnore] }, this.gapOpt(), this.cycOpt()),
+        toolsHidden: toolNames(this.S.toolsHidden), sort: this.sort, sortIgnore: [...this.sortIgnore] }, this.gapOpt(true), this.cycOpt()),
       hl: [...this.picks].map(([r, i]) => [r.full, i]).sort((a, b) => a[1] - b[1]) });
   },
   undoTick(base = false) {
@@ -6159,7 +6271,7 @@ Object.assign(WaveView.prototype, {
     if (!e || !e.state) return null;
     let st = e.state, seen = false;
     try { seen = localStorage.getItem(key) === String(e.rev); } catch (err) { /* no storage: all of it every time */ }
-    if (seen) {   // applied before: only what this browser does not keep (the plugins' parts too: assertions, ƒ rows)
+    if (seen) {   // applied before: only what this browser does not keep (the plugins' parts too: assertions, expressions)
       const plug = this.extraState.map(x => x.key);
       st = Object.fromEntries(Object.entries(st).filter(([k]) => !KEPT.includes(k) && !plug.includes(k)));
       if (st.config) st.config = Object.fromEntries(Object.entries(st.config).filter(([k]) => !KEPT_CFG.includes(k)));
@@ -7828,22 +7940,26 @@ const WaveSVG = {
     const from = parseT(opts.from) ?? M.t0, to = parseT(opts.to) ?? M.t1, fs = S.fontSize;
     const rh = { sig: S.rowHeight, group: S.groupHeight, space: S.spaceHeight }, bms = V ? V.bms : M.bookmarks, ars = V ? V.arrows : M.arrows;
     const marks = V ? V.markers : (opts.markers || []).map(pageMark).concat(M.markers);
-    let C;
+    let C, timeMarks = V ? V.timeMarks() : [], keeps = null;
     if (V) C = { rows: opts.rows || V.rowsL, band: V.band, hl: V.hl };
     else {
       const sorted = orderRows(M.rows, S.sort, S.sortIgnore, S.groupOrder);
-      const all = withExtra(sorted, (opts.extraRows || []).concat(...SVG_PLUGINS.map(f => f(M, S, opts) || [])), M, opts.owner || M);
+      const extra = (opts.extraRows || []).concat(...SVG_PLUGINS.map(f => f(M, S, opts) || []));
+      timeMarks = extra.flatMap(f => (f.marks ? f.marks() : []));   // a plugin's times, as view.extraMarks
+      keeps = extra.map(f => (f.keeps ? f.keeps() : null)).find(Boolean) || null;   // the stretches it keeps, as view.extraKeep
+      const all = withExtra(sorted, extra, M, opts.owner || M);
       C = compose(M, S, all, M.bookmarks, M.arrows, hlPick(M, S.highlight), undefined, marks);
     }
     const hl = C.hl;
-    // gaps (opts.cuts, else the settings gaps, gapIdle, gapKeep, gapSignals): the parts of [from, to] kept, side by side, a
+    // gaps (opts.cuts, a plugin's stretches, else the settings gaps, gapIdle, gapKeep, gapSignals): the parts of [from, to] kept, side by side, a
     // narrow column GAP px wide between; their texts (gapCount) in thin rows over each gap: under the axis the time it
     // leaves out and the cycles of the clock in it; under each signal counted (gapAux, with any texts; none marked: with
     // "edges" every one but the ones the gaps follow and the clock) what it did in the stretch left out (its rising and
     // falling edges, a bus its changes; "rise", "fall", "any": those)
     const G = V ? V.gapOpt() : S, ref = gapRefs(M.rows, G.gapSignals);
     const clk = V ? V.gapClockFor(C.rows) : gapRefs(M.rows, G.gapClock)[0] || M.rows.find(isClkRow);   // the cycles counted: gapClock, else a clock
-    const cuts = opts.cuts || (V ? [[from, to]] : gapCuts(ref.length ? ref : C.rows, from, to, S, clk, M.cycle, bms.map(b => b.t), ref.length > 0));
+    const cuts = opts.cuts || (V ? [[from, to]] : keeps ? gapKeeps(keeps, from, to, S, clk, M.cycle, bms.map(b => b.t)) :
+      gapCuts(ref.length ? ref : C.rows, from, to, S, clk, M.cycle, bms.map(b => b.t), ref.length > 0));
     const ng = cuts.length - 1, kept = cuts.reduce((n, [p, q]) => n + q - p, 0), gapLab = { size: 9.5 }, gc = G.gapCount || 'clock';
     const aux = new Set(V ? V.gapRows().aux : gapRefs(M.rows, G.gapAux)), refs = new Set(V ? V.gapRefSet() : ref);
     const T = gapTexts(M, gc, clk, aux, refs), each = T.each;
@@ -7955,6 +8071,7 @@ const WaveSVG = {
           if (t) { P.rect(xm - tw / 2, ry + 1, tw, rh - 2, 'panel2'); P.text(xm, ry + rh / 2, t, cnt); } }   // over the gap's line
       });
       const top = showAxis ? axisY + 20 : lay.length ? lay[0].y : y;
+      paintTimeMarks(P, timeMarks, X, from, to, top, bodyEnd, (to - from) / Math.max(1, xR - xL));
       paintSpans(P, V ? V.spans : M.spans, X, from, to, lay, top, bodyEnd);
       paintMarkers(P, marks, X, from, to, top, bodyEnd, laneY(lay, S.laneHeight));
       paintBookmarks(P, bms, ars, X, from, to, rowY, top, bodyEnd, showAxis ? axisY + 10 : top + 10, null, laneY(lay, S.laneHeight), arrowFill(M, M.rows));
@@ -8166,7 +8283,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.34',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.35',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,
@@ -8175,12 +8292,13 @@ G.WaveLens = { version: '0.34',   // the project's version: VERSION (make check 
   paint: { circle, arrowHead, edgeGeom, lastLE },
   sortRows: (M, dir = 'asc', ignore = [], groupOrder = 'file') => orderRows(parse(M).rows, sortDir(dir), prefixes(ignore), groupOrder), fuzzy, themes: THEMES,
     colorNames: CVAR, styles: Object.keys(EDGES), radixes: RADIX, enums: ENUMS, decode, fmtTime, fmtExact, parseT,
-  registerTokens, registerDefaults, tips, util: { esc, glob, lastLE, lastBefore, stepTo, isEdge, circle, timeEps },
+  registerTokens, registerDefaults, tips, util: { esc, glob, lastLE, lastBefore, stepTo, isEdge, circle, timeEps, colorOk, mergeSpans },
   // unstable: the pure functions for the unit table of tests/smoke.py and peek(view), the fields the tests read; not an API
   internal: { findRow, parseWant, valueIs, findEdge, edgeGlyph, bitsOf, hexOf, mixedBits, bitsVal, vcdHex, cycZero, cycAt, cycTime, cycUps, cycClock,
     diffSpans, cmpKey, cmpFind, svTypes, svApply, fsmStats, svFingerprint, svMissing, svMissingNotes, svRemap, svLookupKey, jsonParse, jsonWhere,
-    cycMarks, enumColor, analogValue, niceStep, cycMap, parseWave,
-    idleCuts, gapLen, gapText, gapRefs, warpOf, warpV, warpT, warpFit, clipCuts, fmtFreq, gfmt, toFloat, fieldRow, bitRows, widthTag, stripPfx, trimNum,
+    cycMarks, enumColor, analogValue, niceStep, cycMap, parseWave, paintTimeMarks,
+    idleCuts, keepCuts, gapKeeps, gapLen, gapText, gapRefs, warpOf, warpV, warpT, warpFit, clipCuts, fmtFreq, gfmt, toFloat, fieldRow, bitRows, widthTag,
+    stripPfx, trimNum,
     peek: v => ({ get lay() { return v.lay; }, get oy() { return v.oy; }, get vis() { return v.vis; }, get collapsed() { return v.collapsed; },
       get rowEls() { return v.rowEls; }, get namesEl() { return v.namesEl; } }) } };
 G.WaveView = WaveView; G.WaveSVG = WaveSVG;

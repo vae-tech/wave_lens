@@ -1,7 +1,7 @@
 # SVA subset of WaveLens (v1) — the single source of truth
 
 This is the part of SystemVerilog Assertions (IEEE 1800-2017 clause 16) that `sva-core` reads. The parser
-(`sva/core/src/`: `lex.rs`, `pre.rs`, `parse.rs`, `expr.rs`, `prop.rs`, `expand.rs`) follows this file; the corpus
+(`sva/core/src/`: `lex.rs`, `pre.rs`, `parse.rs`, `decl.rs`, `expr.rs`, `prop.rs`, `expand.rs`) follows this file; the corpus
 `tests/sva/*.sv` has an example of the constructs of the table below (its second column names the file; `restrict`,
 `cover sequence`, packed-struct ports, token pasting and `` `__LINE__ `` are tested in the unit tests of `sva/core`
 instead), and the negative files `tests/sva/err_*.sv` show the errors. A construct outside the subset is an error that
@@ -243,8 +243,8 @@ an error). `restrict property` is skipped with a warning (it only constrains for
 parentheses (not SystemVerilog, taken for `@(posedge clk)`); `##0`, `[*0]`, `[->0]` and `[=0]` (empty matches,
 *Semantics*); `macromodule` (a module).
 
-**Elsewhere**: an expression of `wave_find` (MCP) and of a bookmark's `"at": {"expr": …}` (a config) is this
-language, nothing more: it is put into `cover property (@(posedge clock) …)` and evaluated by the same engine.
+**Elsewhere**: an expression of `wave_find` (MCP), of a bookmark's `"at": {"expr": …}` (a config) and of the page's
+list of expressions (a clock prefix `@(edge clk)` cut off first) is this language, nothing more: it is put into `cover property (@(posedge clock) …)` and evaluated by the same engine.
 
 **Limits**: the operand of `not`, `nexttime`, `and`, `or` and the like cannot start with `always`, `eventually`,
 `s_eventually` or `if` without parentheses (`not (always a)`); a clock with an index (`@(posedge g[0].clk)`) is not

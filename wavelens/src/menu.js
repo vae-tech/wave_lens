@@ -32,6 +32,7 @@ Object.assign(WaveView.prototype, {
     // the gaps of the picture and WaveDrom (idle stretches left out): on / off, how long idle, how much kept; how many now
     const gp = this.gapOpt(), [ga, gb] = r || [this.t0, this.t0 + this.span], gaps = () => this.cutsOf(ga, gb, pic.rows || this.screenRows()).length - 1;
     const gn = () => (this.gapOpt().gaps ? `Gaps: ${gaps()}` : 'Gaps'), nref = this.gapRefSet().size;
+    const gby = gp.gapBy ? gp.gapBy.length : 0;   // the expressions the waves are cut to
     const gref = sigs.length && sigs.every(x => this.gapRefSet().has(x));   // the signals clicked: the gaps follow them already
     const gck = this.gapClockRow(), isGck = !!sig && sig === gck;   // the clock the gaps count cycles of
     const co = this.cycOpt(), cd = this.cycData(), cda = this.cycData(true), isCyc = !!sig && co.cycles && co.cycleClock === sig.full;   // the cycles
@@ -65,8 +66,10 @@ Object.assign(WaveView.prototype, {
         `class="gview"${gp.gapView ? ' checked' : ''}> on the waves</label></div><div class="mi gp"><span>idle ` +
         `<input class="gi" value="${esc(gp.gapIdle)}" aria-label="idle this long: clock cycles or a time"> keep <input class="gk" ` +
         `value="${esc(gp.gapKeep)}" aria-label="kept around a change: clock cycles or a time"></span></div>`) +
-      (`<div class="mi gp"><span>${nref ? `by ${nref} signal${nref === 1 ? '' : 's'} <button type="button" class="gx" data-m="grefx" ` +
-        `aria-label="the gaps by the signals drawn">✕</button>` : 'by the signals drawn'}${gck ? ` · ↑ ${esc(gck.name)} <button type="button" class="gx" ` +
+      (`<div class="mi gp"><span>${gby ? `✂ ${gby} expression${gby === 1 ? '' : 's'} <button type="button" class="gx" data-m="gbyx" ` +
+        `aria-label="the gaps of the expressions off">✕</button>` : nref ? `by ${nref} signal${nref === 1 ? '' : 's'} <button type="button" class="gx" ` +
+        `data-m="grefx" aria-label="the gaps by the signals drawn">✕</button>` : 'by the signals drawn'}` +
+        `${gck ? ` · ↑ ${esc(gck.name)} <button type="button" class="gx" ` +
         `data-m="gclkx" aria-label="the cycles of the clock found">✕</button>` : ''}${naux ? ` · + ${naux} <button type="button" class="gx" ` +
         `data-m="gauxx" aria-label="count every other signal">✕</button>` : ''}</span><span>` +
         (nref ? `<label><input type="checkbox" class="gonly"${gp.gapOnly ? ' checked' : ''}> only them</label> ` : '') +
@@ -219,6 +222,7 @@ Object.assign(WaveView.prototype, {
       else if (act === 'gref') role('gapSignals', !gref);
       else if (act === 'gaux') role('gapAux', !gaux);
       else if (act === 'grefx') this.setGaps({ gapSignals: null });
+      else if (act === 'gbyx') this.extraKeep.off(true);
       else if (act === 'gauxx') this.setGaps({ gapAux: null });
       else if (act === 'gclk') role('gapClock', !isGck);
       else if (act === 'cycon') this.setCycles({ cycles: !co.cycles });

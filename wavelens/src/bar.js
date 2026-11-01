@@ -64,6 +64,7 @@ const TIPS = {
   '.gi': ['A gap where nothing changes this long: clock cycles (16) or a time (2us)'], '.gk': ['Kept after a change and before the next one: cycles or a time'],
   'm:gref': ['The gaps follow the changes of these signals only (marked // in the names); none: of every signal in the picture'],
   'm:grefx': ['The gaps by every signal in the picture again'],
+  'm:gbyx': ['The waves no more cut to the matches of expressions (✂ off in their list)'],
   'm:gclk': ['The gaps count in cycles of this clock (idle, keep, the cycles of a gap; marked ↑ in the names); its edges are no change'],
   'm:gclkx': ['The cycles of the clock found again (the selected one, else the nearest *clk*)'],
   'm:greset': ['Every gap setting of this viewer back to the settings (the roles, the counts, idle, keep; by default no gaps)'],
@@ -166,8 +167,8 @@ const FIND_OPTS = [
 ];
 
 // the bar's tools, one line per kind of work: where you are in time (cursor, zoom, edges, jumps), the signals by name
-// (find), times by a condition (sva.js: ƒ expression), the rows and the files (list, edge style, state, assertions)
-const TOOL_LINES = { cursor: 'time', view: 'time', edges: 'time', 'go to': 'time', find: 'find', expression: 'expr', list: 'rows', style: 'rows', state: 'rows',
+// and the times by a condition (find; sva.js: expression), the rows and the files (list, edge style, state, assertions)
+const TOOL_LINES = { cursor: 'time', view: 'time', edges: 'time', 'go to': 'time', find: 'find', expression: 'find', list: 'rows', style: 'rows', state: 'rows',
   dump: 'rows', assertions: 'rows' };
 const toolLine = (ln, html) => `<div class="tln" data-ln="${ln}">${html}</div>`;
 
@@ -257,7 +258,7 @@ class Bar {
         '<button type="button" data-act="mark" title="Bookmark at the cursor, on the selected signal (m)">+ Mark</button>');
     const state = grp('state',
       ('<button type="button" data-act="ssave" title="Save what you did in this viewer to a file: the window, the cursor, the order, the folding, the ' +
-        'highlight, the paint, the bookmarks and arrows, the search, the assertions and the ƒ rows">Save</button>'),
+        'highlight, the paint, the bookmarks and arrows, the search, the assertions and the expressions">Save</button>'),
       ('<button type="button" data-act="sload" title="Load a saved file into this viewer (what is not in these waves is left out)">Load…</button><input ' +
           'type="file" class="sfile" accept=".json,application/json" hidden>'),
       '<button type="button" data-act="spage" class="spage">Save page</button>',
@@ -298,7 +299,7 @@ class Bar {
         type="button" class="lay" data-act="tools" aria-label="fold the tools"></button><button type="button" class="hb" data-act="help"
         aria-label="keys and mouse">?</button></div>
       <div class="tools">${toolLine('time', grp('cursor', cursor) + grp('view', zoom) + edges + (jumps ? grp('go to', jumps) : ''))}${toolLine('find', find)}${
-        toolLine('expr', '')}${toolLine('rows', list + grp('style', wstyle) + state + dump)}</div></div>
+        toolLine('rows', list + grp('style', wstyle) + state + dump)}</div></div>
       <div class="body"><div class="names"></div><div class="wcol"><canvas tabindex="0" role="application" aria-roledescription="waveform"
         aria-label="waveform: + − zoom, ← → pan, shift+← → move the cursor, ↑ ↓ select a signal, [e ]e or Tab edges"></canvas></div></div>
       <div class="notes" hidden></div>

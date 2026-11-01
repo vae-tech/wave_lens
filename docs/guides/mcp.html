@@ -25,8 +25,8 @@
 
 <h2 id="what">What it is</h2>
 <p><code>tools/wavemcp.py</code> is an MCP server (Model Context Protocol, JSON-RPC over stdio). Python standard library only, like the
-  other tools. It reads a VCD, or an FST through GTKWave's <code>fst2vcd</code> or the <code>sva</code> CLI. Two tools need the <code>sva</code> engine's CLI —
-  <code>sva_check</code> and <code>wave_find</code> with an expression — and find it the way <code>svabuild.py</code> does:
+  other tools. It reads a VCD, or an FST through GTKWave's <code>fst2vcd</code> or the <code>sva</code> CLI. Some tools need the <code>sva</code> engine's CLI —
+  <code>sva_check</code>, <code>wave_find</code> with an expression, <code>wave_to_fst</code>, <code>wave_diff</code>, <code>wave_cut</code> and <code>compare</code> with a <code>dump</code> — and find it the way <code>svabuild.py</code> does:
   <code>$WAVELENS_SVA</code>, the build (<code>make sva-build</code>), the committed <code>bin/&lt;os&gt;-x86_64/sva</code>, the
   <code>PATH</code>.</p>
 <p>A dump is read once per server (its declarations and the change counts) and kept; the transitions of a signal are read when a tool
@@ -39,7 +39,7 @@ claude mcp add wavelens -- python3 -I /path/to/wavelens/tools/wavemcp.py --lean 
 <p>Any other MCP client: run <code>python3 -I tools/wavemcp.py</code> as a stdio server. The server tells the agent its conventions in
   its <code>instructions</code> (start with <code>wave_info</code>, then <code>wave_signals</code> to find names …), so the agent needs no
   prompt of yours to use it. The tools that only read are marked read-only (<code>readOnlyHint</code>); <code>wave_page</code>,
-  <code>view_edit</code> and <code>view_live</code> write only the page you name, <code>wave_to_fst</code> the FST beside the VCD,
+  <code>view_edit</code> and <code>view_live</code> write only the page you name (<code>view_edit</code> with <code>config</code>: that config), <code>wave_to_fst</code> the FST beside the VCD,
   <code>wave_cut</code> the VCD you name (<code>destructiveHint: false</code>).</p>
 <h3>From the shell</h3>
 <p>The same tools work without an agent — for a script, a test, or an agent that prefers its shell:</p>
@@ -68,19 +68,21 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
     failures, passed, vacuous, not evaluated, the covers</td></tr>
   <tr><td><code>wave_page</code></td><td>a viewer page (<code>.html</code>) or WaveJSON (<code>.json</code>) of signals over a window, with
     assertions bound, to show a person; <code>compare</code>: a second dump's differences on it (<a href="compare.html">Compare</a>)</td></tr>
-  <tr><td><code>wave_to_fst</code></td><td>the VCD as an FST beside it (<code>sva fst</code>), the FSM states of its types file in it:
-    what was written, the notes with their lines</td></tr>
+  <tr><td><code>wave_to_fst</code></td><td>the VCD as an FST beside it (<code>sva fst</code>; <code>out</code>: another file), the FSM states of its types file in it
+    (<code>types</code>, <code>no_types</code>): what was written, the notes with their lines</td></tr>
   <tr><td><code>wave_diff</code></td><td>two dumps compared change by change (<code>sva diff</code>, streamed: hundreds of MB): equal or not,
-    the first difference and the signals that differ, the signals of one dump only; <code>map</code> pairs scopes or signals named
-    apart, <code>offset</code> a run that starts later, <code>segment</code> the counts per test case</td></tr>
-  <tr><td><code>wave_cut</code></td><td>a window and some signals of a dump as a small VCD: for <span class="ui">Compare…</span> on a page,
+    the first difference and the signals that differ, the signals of one dump only; <code>signals</code>, <code>scope</code>, <code>from</code>, <code>to</code> narrow it,
+    <code>map</code> pairs scopes or signals named apart, <code>offset</code> a run that starts later, <code>segment</code> the counts per test case (<code>align</code>: case k on
+    case k), <code>limit</code> and <code>spans</code> the differences and stretches listed</td></tr>
+  <tr><td><code>wave_cut</code></td><td>a window (<code>from</code>, <code>to</code>) and some <code>signals</code> of a dump as a small VCD at <code>out</code>: for <span class="ui">Compare…</span> on a page,
     a fixture, one test case to send</td></tr>
-  <tr><td><code>view_edit</code></td><td>marks a page up for a person: bookmarks with an explanation, arrows between them, markers, a group
+  <tr><td><code>view_edit</code></td><td>marks a page up for a person: bookmarks with an explanation, arrows between them, markers, expressions, a group
     of the signals that matter, highlight, colours, the cursor and the window — live in their browser, else in the page's file;
     <code>config</code>: bookmarks, arrows and spans into a view of the page's config, so a rebuild keeps them</td></tr>
-  <tr><td><code>view_get</code></td><td>what a page shows, the person's own edits too; its signals; a picture (live: the screen; a page's file: made in
+  <tr><td><code>view_get</code></td><td>what a page shows, the person's own edits too (<code>full</code>: the whole state); its signals (<code>rows</code>: a pattern, <code>limit</code>, <code>offset</code>); a picture (live: the screen; a page's file: made in
     a headless Chromium by <code>tools/pageshot.py</code>, playwright); a dump compared, as <code>compare</code> in its answer</td></tr>
-  <tr><td><code>view_live</code></td><td>connects a page to the agent: what it does there appears as it happens</td></tr>
+  <tr><td><code>view_live</code></td><td>connects a page to the agent: what it does there appears as it happens; <code>rotate</code>: a new key; <code>page</code> a dump: its VS Code
+    tab; no <code>page</code>: the pages connected</td></tr>
 </table>
 
 <h3 id="wave-info">wave_info — the dump at a glance</h3>
@@ -198,6 +200,15 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
   list under the waves, the arrow with its label in a lane of its own, the marker where the read is done, the handshake signals as a
   group at the top, the address and the data highlighted. Everything stays editable: the person moves a circle, changes a text, adds
   their own.</figcaption></figure>
+<p id="exprs">An agent can also leave a person the conditions it looked for, on the page's <a href="sva.html#expressions">list of expressions</a>, marked on
+  the waves: <code>{"op": "expr", "text": "PSEL &amp;&amp; !PREADY", "label": "wait", "mark": "band"}</code> answers what it found, times in ns
+  (<code>n</code>, <code>time</code>, <code>share</code>, <code>first</code>, <code>last</code>, <code>min</code>, <code>max</code>) and refuses a text that does not value (into a file: not checked, an error shows in the page);
+  <code>{"op": "expr_go", "id": 1, "n": 2}</code> puts their cursor on a match; <code>{"op": "expr_matches", "id": 1, "limit": 50}</code> lists the stretches (<code>next_offset</code>
+  goes on). <code>expr_go</code> and <code>expr_matches</code> need a live page; into a file <code>expr</code> writes the list, valued when the page opens. <code>view_get</code>
+  lists them under <code>exprs</code>, the person's own too. To search a dump without a page: <code>wave_find</code>.</p>
+<p>To show only what an expression found, <code>{"op": "expr", "id": 1, "gap": true}</code> cuts the waves to its matches, those of every expression with <code>gap</code>
+  together, a gap between (<a href="sva.html#expr-gap">Expressions</a>): tune with <code>{"op": "gaps", "idle": 2, "keep": 0}</code>. Live the answer has <code>cut</code> in ns, as
+  below, and <code>view_get</code> names them, <code>gaps.by: [1]</code>; <code>{"op": "expr", "id": 1, "gap": false}</code> or <code>{"op": "gaps", "view": false}</code> ends it.</p>
 <p id="marker-lines">A marker's text need not stay at the top of the rows: <code>{"op": "marker", "t": 125, "label": "read done", "signal": "PREADY", "lift": "below"}</code>
   puts it on the thin line under <code>PREADY</code> (no <code>lift</code>: over it; <code>"signal": null</code>: at the top again), and
   <code>view_get</code> gives back <code>signal</code> and <code>lift</code>. It stays pale without a <code>color</code>
@@ -231,7 +242,7 @@ view_get  {"page": "tb.html", "picture": true}   <span class="c"># gaps with its
 <pre><code>view_edit {"config": "tb.config.json", "view": "drop", "ops": [
   {"op": "bookmark", "n": 4, "text": "r_cnt_re reached 43: back to IDLE", "label": "43"},
   {"op": "span", "from": {"bookmark": 2}, "to": {"bookmark": 4}, "label": "43 ticks"}]}
-view_get  {"page": "tb.html", "view": "drop", "picture": true}   <span class="c"># after make html: the PNG of that view, no browser needed</span></code></pre>
+view_get  {"page": "tb.html", "view": "drop", "picture": true}   <span class="c"># after make html: the PNG of that view, no live page needed</span></code></pre>
 <p>The whole list is checked before the file is written (one bad command: nothing written); a bookmark placed <code>"at"</code> an
   event keeps it until a <code>t</code> replaces it; the other views and keys stay as they are.</p>
 
@@ -253,6 +264,10 @@ view_get  {"page": "tb.html", "view": "drop", "picture": true}   <span class="c"
     <code>wave_sample</code>, <code>wave_find</code> and <code>sva_check</code>. Sampled values are the ones just before the edge.</li>
   <li><b>Long answers</b> stop at <code>limit</code>; <code>more</code>, <code>next_from</code> / <code>next_offset</code> say how to
     continue.</li>
+  <li><b>Options of several tools</b>: <code>radix</code> <code>hex</code>, <code>dec</code>, <code>signed</code>, <code>bin</code>, <code>oct</code>, <code>ascii</code>, or fixed point
+    <code>q8</code>, <code>sq15</code>; <code>wave_sample</code>'s <code>edge</code> <code>posedge</code> (default), <code>negedge</code>, <code>edge</code>; <code>sva_check</code>'s
+    <code>details</code>: the passed ones as <code>[name, pass, vacuous]</code>; <code>defines</code> of <code>sva_check</code> and <code>wave_find</code>; <code>view</code> of
+    <code>view_edit</code> and <code>view_get</code>: a live page of several views needs it.</li>
 </ul>
 
 <h2 id="session">What a session looks like</h2>
@@ -304,7 +319,7 @@ make mcp-bench AGENT=codex TASKS=a1,b3                 <span class="c"># some ta
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.34 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.35 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

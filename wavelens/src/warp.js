@@ -69,22 +69,25 @@ Object.assign(WaveView.prototype, {
   gapBand() { return this.gapOpt().gapCount !== 'off'; },
   // the height of the header: the axis, the cycles, the gaps' texts
   headH() { return this.S.headerHeight + (this.cycData() ? CYC_H : 0) + (this.gapLive() && this.gapBand() ? GAP_H : 0); },
-  // the gaps on the waves: the signals they look at, the changes of those and the parts kept. The parts are worked out over
-  // the whole dump from every row drawn, not from those on the screen: the scroll of the rows moves no gap. idle and keep
-  // changed: only the parts again, so a value being typed shows at once on a long dump
+  // the gaps on the waves: the signals they look at, the changes of those and the parts kept (a plugin's stretches, when it
+  // has any: view.extraKeep, in place of the signals). The parts are worked out over the whole dump from every row drawn, not
+  // from those on the screen: the scroll of the rows moves no gap. idle and keep changed: only the parts again, so a value
+  // being typed shows at once on a long dump
   liveCuts() {
     if (!this.gapLive()) return null;
-    const G = this.gapRows(), M = this.M, ref = [...G.ref], g = this.gapOpt();
+    const G = this.gapRows(), M = this.M, ref = [...G.ref], g = this.gapOpt(), by = g.gapBy ? this.extraKeep.spans() : null;
     const rows = (this.rowsL || []).filter(r => r.type === 'sig' || (r.type === 'group' && r.sig));
     const same = (a, b) => a.length === b.length && a.every((r, i) => r === b[i]);
     let m = this.warpMemo;
-    if (!m || m.gck !== G.clk || m.run !== this.cmpRun || !same(m.rows, rows) || !same(m.ref, ref)) {
-      const sigs = ref.length ? ref : rows, clk = this.gapClockFor(rows), un = [...(clk ? [clk] : []), ...sigs].filter(r => lazyOf(M, r.orig || r).length);
+    if (!m || m.gck !== G.clk || m.run !== this.cmpRun || !same(m.rows, rows) || !same(m.ref, ref) || !m.by !== !by) {
+      const sigs = by ? [] : ref.length ? ref : rows, clk = this.gapClockFor(rows);
+      const un = [...(clk ? [clk] : []), ...sigs].filter(r => lazyOf(M, r.orig || r).length);
       if (un.length) this.need(un);   // a large dump: read, then worked out again (need resets the memo)
-      m = this.warpMemo = { rows, ref, sigs, clk, gck: G.clk, run: this.cmpRun, ts: gapTimes(sigs, M.t0, M.t1, clk, ref.length > 0) };
+      m = this.warpMemo = { rows, ref, sigs, clk, gck: G.clk, run: this.cmpRun, by, ts: gapTimes(sigs, M.t0, M.t1, clk, ref.length > 0) };
     }
     const bm = this.bms.map(x => x.t), key = JSON.stringify([g.gapIdle, g.gapKeep, bm]);
-    if (m.key !== key) { m.key = key; m.w = warpOf(gapCuts(m.sigs, M.t0, M.t1, g, m.clk, M.cycle, bm, m.ref.length > 0, m.ts)); }
+    if (m.key !== key || m.by !== by) { m.key = key; m.by = by;
+      m.w = warpOf(by ? gapKeeps(by, M.t0, M.t1, g, m.clk, M.cycle, bm) : gapCuts(m.sigs, M.t0, M.t1, g, m.clk, M.cycle, bm, m.ref.length > 0, m.ts)); }
     return m;
   },
   // what the gaps on the waves leave: their number, the time kept, of the whole, the parts kept over the whole dump (the

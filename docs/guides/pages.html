@@ -36,7 +36,7 @@ make html WAVES=work/my.fst          <span class="c"># FST (read through fst2vcd
   <li>After a new simulation changed the dump's signals: <code>make config WAVES=work/my.vcd</code> — new signals are added, gone ones
     dropped, your edits kept.</li>
 </ol>
-<p>Behind <code>make html</code> are two tools, Python 3.8+ with the standard library only. Without <code>make</code> (and on
+<p>Behind <code>make html</code> are two tools, Python 3.9+ with the standard library only. Without <code>make</code> (and on
 Windows, with <code>py</code> for <code>python3</code>):</p>
 <pre><code>python3 tools/mkconfig.py work/my.vcd --out work/my.config.json     <span class="c"># every signal of the dump, one line each</span>
 python3 tools/mkhtml.py --config work/my.config.json --out work/my.html   <span class="c"># every view of the config -> one page</span></code></pre>
@@ -177,16 +177,17 @@ key and adds its own. The APB example's config, written by hand:</p>
   <code>'h40</code>), <code>{"signal", "edge": "rise"}</code>, <code>{"expr": "eof &amp;&amp; err[1]", "clock"}</code> (an SV expression
   sampled on the clock), <code>{"assert": "a_x", "result": "fail"}</code> (an attempt of a binding); <code>"nth"</code>,
   <code>"from"</code>, <code>"to"</code> pick the match. No match is an error that names the bookmark. <code>"label"</code>: a short text by
-  the circle; <code>"lift": "below"</code>: in a lane under its signal. An arrow's <code>"label"</code> takes <code>{dt}</code>,
+  the circle; <code>"lift": "below"</code>: in a lane under its signal; <code>"link": "exact"</code> or <code>{"view", "bookmark"}</code>: a button to another view of the page. An arrow's <code>"label"</code> takes <code>{dt}</code>,
   <code>{cycles}</code>, <code>{cycles:PCLK}</code>.</td></tr>
 <tr><td><code>spans</code></td><td><code>[{"from": "45ns", "to": {"signal": "PREADY", "edge": "fall"}, "label": "write", "color": "c7"}]</code>:
-  coloured stretches of time over every row (or <code>"signals"</code>); an end is a time, an event, or <code>{"bookmark": n}</code></td></tr>
+  coloured stretches of time over every row (or <code>"signals"</code>); an end is a time, an event, or <code>{"bookmark": n}</code>;
+  <code>{"every": "tb_test", "label": "case {value}"}</code>: a span per value of a signal, one per test case</td></tr>
 <tr><td><code>render</code></td><td><code>view</code> (default), <code>svg</code> (a static figure), <code>both</code></td></tr>
 <tr><td><code>title</code>, <code>note</code></td><td>the section heading and the line under it</td></tr>
 <tr><td><code>config</code></td><td>settings of this view only (layer 3 below)</td></tr>
 <tr><td><code>gap</code>, <code>auto-gap</code></td><td>clock views: windows or idle stretches as one <code>|</code> cell
   (<a href="gaps.html">Gaps</a>)</td></tr>
-<tr><td><code>sva</code>, <code>bind</code>, <code>exprs</code></td><td>assertions and expression rows of this view</td></tr>
+<tr><td><code>sva</code>, <code>bind</code>, <code>exprs</code></td><td>assertions and expressions of this view</td></tr>
 </table>
 <p><code>mkhtml.py --view transfers</code> builds some views only; <code>--waves other.vcd</code> runs the same config on another dump.</p>
 
@@ -198,7 +199,7 @@ sub-modules. Hover a name for its full path.</p>
 <figure><img src="img/pages-all.png"
   alt="apb_all.html: apb_tb with its signals, the APB bus port group, u_count and u_master modules open" loading="lazy">
 <figcaption><b><code>apb_all.html</code>, made by <code>mkconfig.py</code> from the dump.</b> <code>apb_tb</code> on top with its
-signals (<code>phase</code> labelled from the sources, <code>--sv</code>), the APB port that the
+signals (<code>phase</code> labelled from <code>apb.types.json</code> beside the dump), the APB port that the
 viewer found by its names (<code>⇄ apb_tb.APB</code>), then the modules <code>u_count</code> and <code>u_master</code>, each on its own
 background.</figcaption></figure>
 
@@ -285,7 +286,7 @@ name), <code>bit_cnt</code>, <code>valid</code>, <code>frame_err</code>, <code>d
   and Load</a>)</td></tr>
 <tr><td><code>cycles</code>, <code>cycleClock</code>, <code>cycleZero</code></td><td>false, null, null</td><td>the cycles of a clock in a
   band under the time axis, the clock counted, the time of cycle 0 (<code>"50ns"</code>, or ps) (<a href="viewer.html#cycles">Clock cycles</a>)</td></tr>
-<tr><td><code>svaOpen</code>, <code>svaShow</code></td><td>false, all</td><td>the assertion list open at start; which assertions are drawn</td></tr>
+<tr><td><code>svaOpen</code>, <code>exprsOpen</code>, <code>svaShow</code></td><td>false, false, all</td><td>the assertion list, the list of expressions open at start; which assertions are drawn</td></tr>
 </table>
 <p>Every key with its default: <a href="../USAGE.md#settings">USAGE § Settings</a> and <code>wavelens/wavelens.config.js</code>.</p>
 
@@ -331,7 +332,7 @@ config <code>mkconfig.py</code> makes from the dump (the whole hierarchy). <code
   static-SVG view; three views (clock, svg, exact); assertions with one failing on purpose</td></tr>
 <tr><td><code>axi_lite</code></td><td>AXI4-Lite write (<code>AWREADY</code> a cycle late) and read; channel groups with a colour each, highlight
   from the config, latency arrows; three module levels in <code>_all</code></td></tr>
-<tr><td><code>fsm</code></td><td>UART receiver with <code>typedef enum</code> states in a package: names from the FST and, for the VCD, from the
+<tr><td><code>fsm</code></td><td>UART receiver with <code>typedef enum</code> states in a package: names from the FST and, for the VCD, from its types file, made from the
   sources; a packed struct; questa edges</td></tr>
 <tr><td><code>demo</code></td><td>the Manchester transmitter behind <code>docs/index.html</code> (<code>make demo</code>)</td></tr>
 </table>
@@ -339,7 +340,7 @@ config <code>mkconfig.py</code> makes from the dump (the whole hierarchy). <code
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.34 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live
+<footer>WaveLens 0.35 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live
 reference: <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

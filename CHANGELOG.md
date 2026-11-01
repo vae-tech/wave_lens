@@ -5,6 +5,29 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.35 — 1 November 2026
+
+The expressions as a list like the assertions', the waves cut to what they find, and the docs read against the code.
+
+- **Expressions as a list.** The one-line field of the bar is gone: **ƒ Expressions** (`gx`) opens a panel under the bar. An editor
+  of several lines offers the names as you type and checks the text. Each line says what it found (matches, the share of the time,
+  first, last, shortest, longest), goes through its matches (a click, ◀ ▶, `]x [x`, `]X [X`, the keys of the list) and has a tick, a
+  colour, a label, how it marks (band, line, strip) and **ƒ row**. On the waves every expression has a strip of its own at the top
+  of the rows and a band or a line over them, in a saved picture and the static SVG too. Names also resolve in the one module at
+  the top of a dump; a lazy dump reads what an expression needs first.
+- **The waves cut to the expressions.** ✂ on one line or several has the gaps on the waves keep what those expressions find in
+  place of the changes of signals: what lies between two matches for idle or longer goes, from keep after one to keep before the
+  next, with the ends before the first and after the last. The gaps' frame, texts, jumps, ranges, saved pictures and WaveDrom all
+  follow; your own gap settings come back with the last ✂ off.
+- **API and MCP.** The commands `expr`, `expr_go`, `expr_matches` in the page and `view_edit`, `expr` in `viewedit.py`; `expr` takes
+  `gap` and answers with `cut`, `gaps` answers with `gapBy`, `view_get` lists the expressions and says `gaps.by`. The setting
+  `exprsOpen`. `"exprs"` keeps working: a text alone, or an object without `"row"`, still draws its row; new keys `label`, `color`,
+  `on`, `row`, `mark`, `gap`.
+- **The docs against the code.** USAGE, the guides, the reference, DEVELOPMENT, the SVA documents, the README and the tools' texts
+  corrected: keys, labels, menus, sizes, stale statements; the parameters of the MCP tools and the tools' options described.
+- **Fixes.** Every time in an MCP answer is in ns (`bookmark` go, `fsm_go`, `fsm_stats`, `compare`); a span is undone with the rest;
+  `view_get rows` takes the `offset` its `next_offset` names; ≠ stays on a bus whose width wraps out of sight.
+
 ## 0.34 — 1 November 2026
 
 The texts of markers on the lines of signals: dragged by the mouse, pale until a colour is picked, in the API and MCP.

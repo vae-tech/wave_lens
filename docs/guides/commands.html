@@ -73,6 +73,14 @@ await v.run([
     (<code>'P*DATA'</code>), alone, in a list or as a text with commas. A name that several signals have takes the one nearest the
     top when only one is there (a net seen at several levels); else it is an error that names them — give more of the path, or a
     <code>*</code> pattern for all of them.</li>
+  <li id="exprs"><b>Expressions</b>: <code>{op: 'expr', text: 'PSEL &amp;&amp; !PREADY', label: 'wait', color: '#c03030', mark: 'line'}</code> adds one to the
+    <a href="sva.html#expressions">list</a> and answers what it found (<code>n</code>, <code>time</code>, <code>share</code>, <code>first</code>, <code>last</code>,
+    <code>min</code>, <code>max</code>); a text that does not value is refused, nothing changes (in a file it is not checked: the page shows the error). <code>id</code> changes one (<code>label</code>, <code>color</code>,
+    <code>scope</code>, <code>on</code>: its marks, <code>mark</code>: <code>band</code>, <code>line</code> or <code>strip</code>, <code>row: true</code>: drawn as a signal, <code>gap: true</code>: the waves cut to its matches, with the others that have it, answered with
+    <code>cut</code> as the <code>gaps</code> command's; its <code>idle</code> and <code>keep</code> apply, <code>gapBy</code> in its answer says who cuts, <code>view: false</code> ends it),
+    <code>delete</code> takes <code>id</code> or <code>"all"</code>. <code>{op: 'expr_go', id: 1, n: 2}</code> puts the cursor on match 2 (<code>dir</code>: the next or
+    previous from the cursor); <code>{op: 'expr_matches', id: 1, from: '100ns', limit: 50}</code> gives its stretches, without <code>id</code> everyone's numbers. Both read
+    the values: in a page only; <code>expr</code> also runs on a file, valued when the page opens.</li>
   <li><b>Bookmarks</b> are numbered 1, 2, …; arrows go <code>from</code> one number <code>to</code> another; markers and arrows have
     an <code>id</code> as listed. Change one by naming it (<code>{op: 'bookmark', n: 2, text: '…'}</code>), delete one with
     <code>{op: 'bookmark', n: 2, delete: true}</code> (<code>n: 'all'</code>: every one; its arrows go too); a marker with
@@ -97,7 +105,7 @@ python3 -I tools/viewedit.py saved.view.json --model page.html --ops '[{"op": "b
 <p><code>read.json</code> is the list above as JSON. The page keeps its edits per view in a JSON block next to its data, with a new
   revision each time. Whoever opens the file sees the marks; what this browser keeps of a viewer (bookmarks, groups, colours …) is
   replaced once per revision, so what a person changes afterwards stays theirs until a newer revision comes. The commands that need the
-  values, the labels or the screen (<code>edge</code>, <code>fit</code>, <code>picture</code>, <code>fsm</code>, <code>fsm_stats</code>, <code>fsm_go</code>,
+  values, the labels or the screen (<code>edge</code>, <code>fit</code>, <code>picture</code>, <code>fsm</code>, <code>fsm_stats</code>, <code>fsm_go</code>, <code>expr_go</code>, <code>expr_matches</code>,
   <code>types</code>) run only in a page.</p>
 <div class="note"><p>A page made before the project was renamed to WaveLens (0.18) is refused: make it again with
   <code>make html</code> or <code>mkhtml.py</code>.</p></div>
@@ -117,7 +125,7 @@ python3 -I tools/viewedit.py saved.view.json --model page.html --ops '[{"op": "b
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.34 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.35 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

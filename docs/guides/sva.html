@@ -120,7 +120,7 @@ bind apb_tb apb_checks u_apb_checks (.*);</code></pre>
 <p>That is what <code>examples/apb/apb.config.json</code> has. <code>mkhtml.py</code> parses the files (<code>sva parse --json</code>; a
   parse error becomes a note in the page, not a failed build) and evaluates every binding over the dump, so the page opens with the
   assertions bound and drawn. <code>"sva": false</code> (or <code>mkhtml.py --no-sva</code>) leaves the engine out of the page
-  (about 410 kB).</p>
+  (about 440 kB).</p>
 
 <h3>On the command line</h3>
 <pre><code>make html WAVES=work/x.vcd SVA="checks/*.sv" BIND="a_req_ack@tb.dut,apb_*@tb.u_apb"   <span class="c"># bound and evaluated</span>
@@ -163,7 +163,7 @@ make config WAVES=work/x.vcd SVA="checks/*.sv"                                  
   six).</p>
 <figure><img src="img/sva-page.png" alt="The viewer bar with the go to failure buttons and the folded assertions panel" loading="lazy">
 <figcaption><b>Folded.</b> <span class="ui">go to</span>: the two failures of <code>apb_demo_no_wait</code> (105 ns, 115 ns); the
-  <span class="ui">expression</span> field; <span class="ui">Load file…</span> in <span class="ui">assertions</span>; the panel's
+  <span class="ui">ƒ Expressions</span> button; <span class="ui">Load file…</span> in <span class="ui">assertions</span>; the panel's
   header with <span class="ui">Watch</span>, <span class="ui">JSON</span>, <span class="ui">Clear</span>, <span class="ui">Table</span>,
   <span class="ui">Failures</span>, <span class="ui">report.md</span>, <span class="ui">report.json</span>.</figcaption></figure>
 <figure><img src="img/sva-panel.png" alt="The assertions panel open: a totals line and one entry per assertion" loading="lazy">
@@ -190,7 +190,7 @@ make config WAVES=work/x.vcd SVA="checks/*.sv"                                  
   <tr><td><span class="ui">Unbind</span></td><td>remove this binding; the assertion stays loaded</td></tr>
   <tr><td><span class="ui">Watch</span></td><td>check every second the files read with ⟳ and evaluate them again when one changes (Chrome /
     Edge: the File System Access API)</td></tr>
-  <tr><td><span class="ui">JSON</span></td><td>the <code>"bind"</code> list (and the <code>"exprs"</code>) to paste into the config;
+  <tr><td><span class="ui">JSON</span></td><td>the <code>"sva"</code> and <code>"bind"</code> lists to paste into the config (the list of expressions has its own, for <code>"exprs"</code>);
     copied to the clipboard</td></tr>
   <tr><td><span class="ui">Clear</span></td><td>forget this browser's files and bindings for the page; the page's own come back</td></tr>
   <tr><td><span class="ui">Table</span>, <span class="ui">Failures</span></td><td>the numbers (see <a href="#numbers">Numbers</a>)</td></tr>
@@ -278,25 +278,78 @@ make config WAVES=work/x.vcd SVA="checks/*.sv"                                  
   viewers.</p></div>
 
 <h2 id="expressions">Expressions</h2>
-<p>The <span class="ui">expression</span> field in the bar takes any expression of the signals, written as in an assertion:
+<p>A condition of the signals you keep at hand, without writing an assertion: a list like the assertions', its own panel under the bar.
+  <span class="ui">ƒ Expressions</span> in the bar (<kbd>g</kbd> <kbd>x</kbd>) opens it. An expression is written as in an assertion:
   <code>PSEL &amp;&amp; !PREADY</code>, <code>state == pkg::WAIT &amp;&amp; timeout</code>, <code>addr[7:4] == 4'h3</code>,
   <code>$rose(req)</code>. Without a clock it is valued after every change of its signals; <code>@(posedge PCLK) …</code> samples it at
-  the clock's edges like an assertion. Names are looked up from the selected signal's module up to the top (or give a full path);
-  package constants come from the loaded files.</p>
-<ul>
-  <li><kbd>Enter</kbd> / <kbd>shift</kbd>+<kbd>Enter</kbd> (or ◀ ▶) — the cursor to the next / previous time it becomes true, round the
-    ends; the field says which one of how many (<code>3/3</code>).</li>
-  <li><span class="ui">+ Row</span> — draw it as a signal in the group <b>ƒ expressions</b> under the top (a bus when it is wider than a
-    bit). Click a row's name to put it back in the field; <span class="ui">− Row</span> removes it.</li>
-  <li>The rows are kept in this browser; <span class="ui">JSON</span> lists them as <code>"exprs"</code>. In a config,
-    <code>"exprs": ["PSEL &amp;&amp; !PREADY", {"expr": "…", "scope": "tb.dut"}]</code> (or <code>vcd2wavedrom.py --expr</code>) puts them
-    in the page, its static SVG included.</li>
-</ul>
-<figure><img src="img/sva-expr.png" alt="Two expression rows under the APB signals, the cursor on the third time PSEL && !PREADY becomes true"
+  the clock's edges like an assertion. Names are looked up from the module in <span class="ui">Names from</span> (for a new one, the
+  selected signal's) up to the top, then in the one module at the top of the dump, or give a full path; package constants come from the
+  loaded files.</p>
+<figure><img src="img/sva-expr.png" alt="The list of three expressions under the bar; on the waves their strips at the top, a pale band, lines and labels, a row ƒ"
   loading="lazy">
-<figcaption><b>ƒ rows.</b> <code>PSEL &amp;&amp; !PREADY</code> (true in every SETUP and wait state; <kbd>Enter</kbd> stepped to the
-  third, 145 ns, <code>3/3</code>) and <code>@(posedge PCLK) $rose(PENABLE)</code>, sampled at the clock's edges, in the group
-  <b>ƒ expressions (2)</b>.</figcaption></figure>
+<figcaption><b>Three expressions.</b> <i>wait</i> is a pale band where <code>PSEL &amp;&amp; !PREADY</code> holds, its matches listed
+  under its line and the cursor on the third; <i>access</i>, sampled at the clock, a line where it starts and a row in
+  <b>ƒ expressions</b>; <i>write</i> only its strip at the top of the rows.</figcaption></figure>
+<h3>Writing one</h3>
+<p><span class="ui">+ New</span> opens the editor, ✎ on a line does for that one. The field takes as many lines as the expression needs and
+  says as you type what it finds, or what is wrong. Names and <code>$</code> functions are offered as you type.</p>
+<figure><img src="img/sva-expr-edit.png" alt="The editor of an expression with its label, the module its names start from, the list of names under the caret" loading="lazy">
+<figcaption><b>The editor.</b> The list of names under the field; the line below checks the text.</figcaption></figure>
+<table>
+  <tr><th>Key</th><th>In the editor</th></tr>
+  <tr><td><kbd>Tab</kbd> or <kbd>Enter</kbd>, <kbd>↑</kbd> <kbd>↓</kbd></td><td>with the list of names open: take one, choose one</td></tr>
+  <tr><td><kbd>ctrl</kbd>+<kbd>Enter</kbd></td><td>keep it (a new one: the cursor on its first match); what does not value stays here, said</td></tr>
+  <tr><td><kbd>Esc</kbd></td><td>the list of names closed, then the editor, nothing changed</td></tr>
+</table>
+<h3>Going through them</h3>
+<p>A line says what its expression found: how many matches, the share of the time it holds, the first and the last, the shortest and the
+  longest. A click on the line goes to its next match from the cursor, round the ends, and the window follows. That expression is then the one
+  you are on: its signals highlighted (<kbd>Esc</kbd>: no more), its marks stronger.</p>
+<table>
+  <tr><th>Where</th><th>What</th></tr>
+  <tr><td>◀ ▶ on a line, in the bar</td><td>its previous / next match; <code>2/3</code> says which</td></tr>
+  <tr><td><kbd>]x</kbd> / <kbd>[x</kbd> on the waves</td><td>the next / previous match of the one you are on</td></tr>
+  <tr><td><kbd>]X</kbd> / <kbd>[X</kbd> on the waves</td><td>the next / previous expression, at its next match</td></tr>
+  <tr><td><kbd>↑</kbd> <kbd>↓</kbd>, <kbd>←</kbd> <kbd>→</kbd>, <kbd>space</kbd> on the list</td><td>along the list, through its matches, its marks on or off</td></tr>
+  <tr><td>≡ on a line</td><td>its matches listed with their times and lengths, a click goes to one</td></tr>
+</table>
+<h3>On the waves</h3>
+<p>Every expression that is ticked has a thin strip of its own at the top of the rows, where it holds, in its colour: they do not cover each other, and
+  it stays in sight while the rows scroll. The tick takes the marks off, <span class="ui">All off</span> all of them; the expression stays in the list.
+  Hovering a mark says which expression, the stretch and its length. The same marks are in a saved picture and the static SVG.</p>
+<table>
+  <tr><th>Control</th><th>Does</th></tr>
+  <tr><td>the colour</td><td>its marks and its row; until you pick one, the colour of its place in the list (<span class="ui">Auto colour</span> in the editor: back to it)</td></tr>
+  <tr><td><span class="ui">Label</span></td><td>its text on the waves, at the start of a stretch where the last one left room, and the name of its row</td></tr>
+  <tr><td><code>band</code></td><td>a pale band over the rows where it holds</td></tr>
+  <tr><td><code>line</code></td><td>a dashed line where each stretch starts</td></tr>
+  <tr><td><code>strip</code></td><td>only the strip: for what holds so often that a band would cover the waves</td></tr>
+  <tr><td><span class="ui">ƒ row</span></td><td>drawn as a signal in the group <b>ƒ expressions</b> under the top (a bus when it is wider than a bit); a click on the row finds its line</td></tr>
+</table>
+<h3 id="expr-gap">The waves cut to the matches</h3>
+<p>✂ on a line (<kbd>c</kbd> with the line in focus) leaves on the waves what the expression finds, with a gap between: the <a href="gaps.html#live">gaps on
+  the waves</a>, by the matches of an expression in place of the changes of signals. On several lines their matches go together. You keep scrolling, zooming and
+  stepping through them, and a saved picture cuts where the waves do.</p>
+<figure><img src="img/sva-expr-gap.png" alt="The list with ✂ pressed on the first expression; on the waves only its matches, a gap's column before, between and after them, the time each leaves out under the axis" loading="lazy">
+<figcaption><b>Only the matches.</b> A gap before the first, between them and after the last, and what each leaves out under the axis; <i>idle</i> and <i>keep</i> on the bar.</figcaption></figure>
+<table>
+  <tr><th>Control</th><th>Does</th></tr>
+  <tr><td><i>idle</i> on the bar</td><td>the shortest stretch without a match that goes: cycles of the clock, or a time (<code>50ns</code>)</td></tr>
+  <tr><td><i>keep</i> on the bar</td><td>what stays around each match; <code>idle 1</code>, <code>keep 0</code>: the matches alone</td></tr>
+  <tr><td>✂ again</td><td>that expression no more; the last one off, the waves as they were, your own gaps settings included</td></tr>
+  <tr><td><span class="ui">✂ off</span> in the head of the list</td><td>off every line</td></tr>
+  <tr><td>✕ on the bar, <kbd>gv</kbd>, the menu's <span class="ui">Gaps</span> off</td><td>the waves whole, ✂ off every line</td></tr>
+</table>
+<p>The head of the list says what is left: <code>✂ 2 · 4 gaps · 120 ns of 205 ns kept</code>. An expression that never holds cuts nothing, and bookmarks stay in
+  sight as with any gaps. ✂ is a part of the expression: kept with the list, and in a config (<code>"gap": true</code>) a page opens cut.</p>
+<h3>Kept, in a config, from a script</h3>
+<p>The list is kept in this browser and in the viewer's saved state. <span class="ui">JSON</span> gives it for a config:</p>
+<pre>"exprs": ["PSEL &amp;&amp; !PREADY",
+  {"expr": "@(posedge PCLK) $rose(PENABLE)", "scope": "tb.dut", "label": "access", "color": "#c03030", "mark": "line", "on": true, "row": false, "gap": true}]</pre>
+<p>In such a list a text alone, or an object without <code>"row"</code>, draws its row too, as <code>"exprs"</code> always did; one made in the
+  panel has <code>"row": false</code> until you ask. <code>vcd2wavedrom.py --expr</code> adds one; the page's static SVG draws them. Scripts and agents use the
+  commands <code>expr</code>, <code>expr_go</code> and <code>expr_matches</code> (<a href="commands.html#exprs">Commands</a>, <a href="mcp.html#exprs">MCP</a>).</p>
+
 
 <h2 id="numbers">Numbers</h2>
 <p><span class="ui">Table</span>: one row per binding — attempts, pass, fail, vacuous, disabled, active, capped, the first and last
@@ -376,6 +429,7 @@ make sva-eval WAVES=x.fst SVA="pkg.sv checks.sva" SCOPE=tb.dut ARGS="--junit rep
 <table>
   <tr><th>Key</th><th>Default</th><th>Meaning</th></tr>
   <tr><td><code>svaOpen</code></td><td>false</td><td>the assertion list open when the page opens</td></tr>
+  <tr><td><code>exprsOpen</code></td><td>false</td><td>the list of expressions open when the page opens and it has some</td></tr>
   <tr><td><code>svaShow</code></td><td>all</td><td>which assertions are drawn on the waves (labels, <code>*</code> patterns)</td></tr>
   <tr><td><code>svaSignals</code></td><td><code>view</code></td><td>repeat the bound signals under the steps: in viewers
     (<code>view</code>), also in static SVGs (<code>true</code>), never (<code>false</code>)</td></tr>
@@ -388,7 +442,7 @@ make sva-eval WAVES=x.fst SVA="pkg.sv checks.sva" SCOPE=tb.dut ARGS="--junit rep
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.34 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.35 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>
