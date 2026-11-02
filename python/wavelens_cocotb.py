@@ -59,7 +59,8 @@ def same(got, expected):
 
 def where_of(exc):
     """The line of the test that raised: the last frame outside this file, "test_apb.py:88"."""
-    frames = [f for f in traceback.extract_tb(exc.__traceback__) if f.filename != __file__]
+    own = where_of.__code__.co_filename   # not __file__: a cached compile keeps the path it was made under (cocotb's assertion rewriting, a symlink)
+    frames = [f for f in traceback.extract_tb(exc.__traceback__) if f.filename != own]
     return f'{os.path.basename(frames[-1].filename)}:{frames[-1].lineno}' if frames else ''
 
 

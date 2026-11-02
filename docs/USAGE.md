@@ -40,8 +40,8 @@ Nothing else is needed on the host: the package carries the viewer's files and t
 VCD text with it, kept in the extension's storage, 16 at most), and the extension runs in VS Code's own node.
 
 ```sh
-make vsix                                         # out/wavelens.vsix + wavelens-<version>.vsix (tools/mkvsix.py: no node, no npm)
-code --install-extension out/wavelens.vsix --force  # in a terminal of the remote window: installed on the host
+code --install-extension bin/wavelens.vsix --force  # in a terminal of the remote window: installed on the host; the build of the version
+make vsix                                           # the tree as it is now: out/wavelens.vsix + wavelens-<version>.vsix (tools/mkvsix.py: no node, no npm)
 ```
 
 (or Extensions → … → *Install from VSIX…* while connected). A `.vcd` / `.fst` in the Explorer → right click → *Open in
@@ -62,7 +62,8 @@ may be the default). What the tab does differently from a page in a browser:
   with the view kept. `wavelens.autoReload`: at once.
 - **Files are on the host.** Save state, PNG / SVG / WaveDrom and the assertions' report ask where to save on the host;
   Load…, the `.sv` files and Compare pick there (an FST to compare is converted too); Open… a dump opens a tab of its
-  own. Bookmarks, groups, colours, radix, hidden rows and the assertion bindings are kept per dump in the workspace
+  own. The state loaded last is the workspace's, whichever dump it was: Load… opens on that file, **Reload** (`r`) reads it in every tab,
+  and a dump seen for the first time takes it at once (`wavelens.openLastState`, ctrl+Z undoes it); a dump with a view of its own keeps it. Bookmarks, groups, colours, radix, hidden rows and the assertion bindings are kept per dump in the workspace
   (they survive closing the tab and VS Code). The clipboard is yours (VS Code's).
 - **Theme and keys.** `wavelens.theme`: `auto` (the viewer's light or dark by VS Code's), `vscode` (the colours of
   VS Code's theme: background, text, lines, accent, fonts), `light`, `white` or `dark`; **◐** in the bar (or *WaveLens:
@@ -71,7 +72,7 @@ may be the default). What the tab does differently from a page in a browser:
   what they mean in VS Code (ctrl+F find, ctrl+C copy, ctrl+Z / ctrl+Y undo / redo, alt+C W R in the find field);
   `wavelens.keysToVSCode` (default `ctrl+G`, Go to Line) are left to VS Code — the list of your groups is `gl` then; the
   others (ctrl+P, F1, ctrl+tab, ctrl+shift+…) are VS Code's.
-- **The version** in the bar's title line: `0.36 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
+- **The version** in the bar's title line: `0.37 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
   committed), so a tab of a development build says which one it is.
 - **An agent** on the host (`tools/wavemcp.py`, below): when it starts its live link, every open tab connects (**●
   live**); `view_live` with `page` a `.vcd` / `.fst` and `open: true` opens it in the VS Code window that has the file
@@ -97,7 +98,7 @@ may be the default). What the tab does differently from a page in a browser:
   title) opens the channel, with the errors of the viewer's log (a types file that is not JSON: its line and column). The
   same notes are in the log under the viewer, and in a browser in the console (`WaveLens.vcdToWave(text).log`).
 
-Settings: `wavelens.theme`, `wavelens.sources`, `wavelens.autoReload`, `wavelens.lazy` (auto, always, never), `wavelens.live`, `wavelens.sva` (another sva program), `wavelens.verilator` (for *Make the types with Verilator*), `wavelens.keysToVSCode` (the keys left to VS Code, ctrl+G by default). A dump read whole (smaller than the `wavelens.lazy` sizes, or `never`) is cut to `dumpBudget`, and its whole VCD text crosses to your machine once per read.
+Settings: `wavelens.theme`, `wavelens.sources`, `wavelens.autoReload`, `wavelens.openLastState`, `wavelens.lazy` (auto, always, never), `wavelens.live`, `wavelens.sva` (another sva program), `wavelens.verilator` (for *Make the types with Verilator*), `wavelens.keysToVSCode` (the keys left to VS Code, ctrl+G by default). A dump read whole (smaller than the `wavelens.lazy` sizes, or `never`) is cut to `dumpBudget`, and its whole VCD text crosses to your machine once per read.
 
 ### WaveDrom JSON in your own page
 
@@ -344,7 +345,7 @@ add theirs (`WaveLens.registerDefaults`).
 | `toolsFolded` | false | the bar's tools folded to its title line (**▴** / **▾ tools** in the bar) |
 | `toolsHidden` | `[]` | the bar's tool groups left out by their labels (`["style", "dump"]`; the right button on the bar) |
 | `themeButton` | `auto` | **◐** in the bar's title line: the page's theme (auto, light, white, dark; kept in this browser; in VS Code its list, VS Code's colours too); `auto`: when the page has no theme button of its own (`viewer.html`, the VS Code tab) |
-| `version` | true | the version in the bar's title line, and the build the page was made from (`0.36 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
+| `version` | true | the version in the bar's title line, and the build the page was made from (`0.37 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
 | `keysLeft` | `[]` | keys the viewer leaves to its host: `["ctrl+G"]` (`ctrl+` is `cmd+` too, a letter by its place); the VS Code tab: `wavelens.keysToVSCode` |
 | `log` | `auto` | the log under the viewer (§ A dump straight in the browser): `auto` from the first thing done in the page (a dump read, Sources…, Load…), `true` always, `false` never |
 | `savePage` | true | the bar's **Save page**: this page as a `.view.html` with your view in it (§ Save and Load); false hides it and keeps no copy of the page's text |
@@ -581,7 +582,7 @@ Time: **cursor** (a time and its unit, **Set**; a span, **Show** = that window a
 **edges** (◀ edge kind ▶, + Mark), **go to** (marker jumps, the assertions' failures). Find: the field, **Aa Full .\***,
 count, ‹ ›, Highlight / Open / Mask, colour + Paint (Unpaint when something is painted), Select, Copy. Expression (`sva.js`, on the same line): **ƒ Expressions** opens their list, ◀ ▶ through the matches of the one you are on. Rows and files:
 **list** (Sort and the ignored prefixes, Expand / Collapse, Modules, FSMs, clear highlight, show the hidden rows, Only), **style** (the edges:
-auto, slanted, vertical, square), **state** (Save, Load…, Save page), **dump** (Open…, Compare…, Sources…), **assertions** (Load file…). Keys work once the waves have the focus (a click on the
+auto, slanted, vertical, square), **state** (Save, Load…, Reload, Save page), **dump** (Open…, Compare…, Sources…), **assertions** (Load file…). Keys work once the waves have the focus (a click on the
 waves or on a name); with ctrl, alt or ⌘ held they stay the browser's (ctrl+S saves the page, it does not sort), except
 ctrl+C, ctrl+F, ctrl+G (`gl` too: your groups), ctrl+Z / ctrl+shift+Z / ctrl+Y (undo, redo), alt+↑ ↓ and alt+shift+↑ ↓ (the order of your groups). Hover any button, field or list for what it does and its keys; **?** at the right of the title line
 (key `?`) opens the box of all the keys and the mouse, the plugins' too.
@@ -614,6 +615,7 @@ setting is the start; a find left out still floats over the waves on `/`). Navig
 | shift+`← →` | move the cursor a hundredth of the view | the pointer on a signal | its value there, the change into it and the next one (tooltip) |
 | `/`, ctrl+F | find (the bar scrolled away: the find group floats over the waves; ✕ or Esc puts it back) | `n N`, `*` `#` | next / previous match; find the selected signal's name and go to its next / previous match |
 | `m` | bookmark at the cursor | `]m [m` | the next / previous bookmark |
+| `r` | the last state loaded, read again (Reload) | | |
 | `gm` (the right button's **Markers…**) | the markers (the page's, yours) and the bookmarks in a list over the waves, by time: `↓` the first (`↑` the last), then `↑ ↓` Home End step through them, a click picks one — the cursor on it and the waves at its time with the span they have: a marker in the middle, a bookmark as going to it does (below); Enter or Esc closes it there | `gl`, ctrl+G | your groups: a list |
 | shift+click the waves | a second cursor (dashed, on an edge): Δ to the cursor in time, its frequency (`Δ 40 ns / 25 MHz`) and in cycles of the clock (the cycles band's when it is on, else the selected signal's, else the nearest `*clk*`) on the axis and in the readout; `x` swaps the two; Esc clears it | `1` … `9` | go to that bookmark (each bookmark's line shows its Δ from the cursor; the bookmarks and markers at the cursor are marked in their lists) |
 | `zM` / `zR` | fold / open every module | `zc` / `zo` / `za` | fold / open / toggle the module of the selected signal |
@@ -840,7 +842,8 @@ state, as the bookmarks are; [commands](#commands-and-edits) make them too.
 cursor, the order and its prefixes, the folded modules, the highlight, the paint, the selected signal, the search, the
 bookmarks and arrows, your markers and groups, Only (the modules kept), the assertions (the files loaded or edited in the page, with their text,
 and the bindings) and the expressions. **Load…** reads it back into a viewer — after a reload, in another browser, or on other waves (what they lack is
-left out and counted in the bar). A state says what is not there too (`"cursor2": null`, `"range": null`, the edge kind
+left out and counted in the bar). The last file loaded stays: **Reload** in the bar, or `r`, reads it again with no dialog, after a dump opened in the viewer too and, where the browser
+keeps a file's handle (Chrome, Edge), in the next page (it may ask to read the file on the first click); Load… opens in its folder. A state says what is not there too (`"cursor2": null`, `"range": null`, the edge kind
 `"edge": {"kind": "any", "value": ""}`): loaded, it clears them; a key it leaves out keeps the viewer's. Its `"config"`
 (`style`, `maxHeight`, `toolsFolded`, `toolsHidden`, `sort`, `sortIgnore`, `fold`, `highlight`, `findHighlight`, `findOpen`, `findMask`, `findCase`, `findWord`, `findRegex`, the gaps' and the cycles' keys) pastes into a
 config file as it is; times are model units (ps).
@@ -1370,7 +1373,7 @@ All tools are `python3 -I tools/<tool>.py --help`; the Makefile calls them for y
 | `embed.py` | WaveJSON → `data.js` for `file://` pages, or into an HTML placeholder | `--var NAME key=file.json`, `--html --placeholder`, `--out`, `--compact` |
 | `dumpscan.py`, `wavejson.py` | the built-in dump reader (VCD text, FST via `fst2vcd -e` or `sva vcd`; `WAVELENS_FST=sva` / `fst2vcd` picks one) and the readable JSON writer | modules |
 | `wavemcp.py` | the tools as an MCP server for an AI agent (stdio), or one tool from the shell ([§ AI agents](#ai-agents-mcp)) | `--list`, `--call TOOL JSON`, `--lean` |
-| `mkvsix.py` | the VS Code extension as one `.vsix` ([§ In VS Code](#in-vs-code-over-remote-ssh-or-wsl)) | `--out`, `--sva`, `--target`, `--one` |
+| `mkvsix.py` | the VS Code extension as one `.vsix` ([§ In VS Code](#in-vs-code-over-remote-ssh-or-wsl)) | `--out`, `--sva`, `--target`, `--one`, `--plain` |
 | `viewedit.py` | the viewer's [commands](#commands-and-edits) on a page's edits or a saved state (`.view.json`) | `PAGE --ops JSON\|@file`, `--config FILE` (its bookmarks, arrows and spans), `--view`, `--get`, `--views`, `--model`, `--commands` |
 | `svaverify.py` | the examples' checkers in Verilator `--assert` against `sva eval` (`make sva-verify`) | `--build`, `--only`, `--keep`, `--sva-bin` |
 | `sva` (the engine's CLI, Rust: `make sva-build`, or `bin/linux-x86_64/sva`) | `sva parse` an assertion file, `sva eval` assertions over a dump, `sva report` results, `sva --waves DUMP --info` a dump's scopes and variables, `sva vcd DUMP [--out x.vcd] [--header \| --codes FILE] [--from --to --signals]` an FST as VCD text (as `fst2vcd -e` writes it: its names, enum tables, escaped strings, its end; *Formats*; of an FST a part: its header, or the variables of some id codes; of any dump a cut: a window, some signals), `sva fst DUMP.vcd [--out x.fst]` a VCD as an FST beside it (as `vcd2fst` writes it, enum tables and the types file's FSM states kept; *Formats*), `sva diff A B` two dumps compared change by change (*Compare two runs from the shell*) | `sva <command> --help`; diff: `--signals --signals-from --scope --from --to --offset --map --segment --align --json --junit --limit --spans --quiet`; vcd: `--signals-from` too; fst: `--types --no-types --map --quiet`; report: `--title --md --junit --html --json --max-failures`; eval: `--waves --scope --sva [--assert NAME] [--from --to] [--out] [--json] [--attempts] [--x fail\|false] [--vacuous] [--no-lane] [--resolve up\|scope] [--ignore-prefix] [--alias] [--max-threads] [--report] [--junit] [--max-failures] [-D]`; parse: `--json --expand -D` |

@@ -15,6 +15,8 @@ is turned into VCD text with it, kept in the extension's storage).
   FST once, kept). Assertions, the FSM panel and pictures read what they need first.
 - **A new simulation**: the tab says when the dump changed; ⟳ (the bar, or *WaveLens: Read the dump again* in the editor's title) reads it again with the
   view kept. `wavelens.autoReload`: at once.
+- **The last state**, the workspace's whichever dump it was: Load… opens on that file, **Reload** (`r`) reads it in every tab, a dump seen for
+  the first time takes it at once (`wavelens.openLastState`), a dump with a view of its own keeps it.
 - **Saving** (state, PNG, SVG, WaveDrom, the report) asks where on the host; **Load…**, the `.sv` files and Compare
   pick on the host too. Bookmarks, groups, colours are kept per dump in the workspace (the store of a dump that no longer exists goes at the next start).
 - **An agent** (Claude Code, Codex with `tools/wavemcp.py`) on the same host: when it starts its live link
@@ -45,7 +47,7 @@ is turned into VCD text with it, kept in the extension's storage).
 
 The keys are the viewer's (`?` in the tab): the plain ones, and the ctrl / alt ones that mean what they mean in VS Code
 (ctrl+F, ctrl+C, ctrl+Z, alt+C W R); `wavelens.keysToVSCode` (`ctrl+G`: Go to Line) go to VS Code — the list of your
-groups is `gl` then. Settings: `wavelens.theme` (auto), `wavelens.keysToVSCode` (`["ctrl+G"]`), `wavelens.verilator` (verilator), `wavelens.sources` (`**/*.sv`, `**/*.svh`), `wavelens.lazy` (auto: a large dump read as it is needed; always, never), `wavelens.autoReload` (false: the tab offers ⟳ after a new
+groups is `gl` then. Settings: `wavelens.theme` (auto), `wavelens.keysToVSCode` (`["ctrl+G"]`), `wavelens.openLastState` (true), `wavelens.verilator` (verilator), `wavelens.sources` (`**/*.sv`, `**/*.svh`), `wavelens.lazy` (auto: a large dump read as it is needed; always, never), `wavelens.autoReload` (false: the tab offers ⟳ after a new
 simulation; true: it reads the dump at once), `wavelens.live` (true), `wavelens.sva` (another sva program).
 
 **Install.** Build the package from the repository (`make vsix`: `out/wavelens.vsix`, a copy as `wavelens-<version>.vsix`, for a Linux x86-64 host;

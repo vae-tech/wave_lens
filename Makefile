@@ -1,7 +1,8 @@
 # wavelens — demo flow: Verilator VCD -> vcd2wavedrom.py -> WaveDrom JSON -> docs/demo_waves.js (loaded by docs/index.html)
 # Build products live under BUILD (default out/ in the repository, git-ignored: the cargo target, the example dumps and
 # pages, the smoke shots). On a slow mount (the repository on /mnt/c under WSL) make BUILD=/tmp/wavelens … builds faster.
-# make dist: the prebuilt sva CLI under bin/ (Linux committed: a clone works without Rust; Windows needs mingw-w64).
+# make dist: the prebuilt sva CLI under bin/ (Linux committed: a clone works without Rust; Windows needs mingw-w64) and the
+# VS Code package that carries it (bin/wavelens.vsix, committed: installed from a clone without building anything).
 # make check is the gate before a commit: the engine's tests, the unit tests, everything smoke needs, smoke --strict,
 # the screenshots made again (a broken one fails).
 # Converter settings (signals, enums, groups, markers, colours, sorting …) come from a JSON config file.
@@ -60,7 +61,8 @@ help:
 	@echo 'make wavelens   wavelens/wavelens.js from wavelens/src/*.js (the page needs one file: run it after editing the sources)'
 	@echo 'make sva-build  the SVA engine (sva/, Rust): native CLI $$(BUILD)/sva-target/release/sva + sva_wasm.wasm -> wavelens/sva.wasm.js'
 	@echo 'make dist       the prebuilt sva CLI: dist-linux (bin/linux-x86_64/sva, static, committed) and dist-windows'
-	@echo 'make dist-linux    bin/linux-x86_64/sva (musl, static)'
+	@echo 'make dist-linux    bin/linux-x86_64/sva (musl, static), then dist-vsix: the package that carries it'
+	@echo 'make dist-vsix     bin/wavelens.vsix (committed with a version), and make vsix'
 	@echo 'make dist-windows  bin/windows-x86_64/sva.exe (needs mingw-w64: sudo apt install mingw-w64)'
 	@echo 'make sva-test   cargo test of the SVA engine: unit tests, the corpus tests/sva (third_party too), the schema, the CLI'
 	@echo 'make sva-bless  rewrite tests/sva/golden/*.txt after a reviewed change of the parser output'
@@ -264,12 +266,17 @@ sva-build:
 # (Ubuntu: sudo apt install mingw-w64).
 DIST_LINUX := bin/linux-x86_64/sva
 DIST_WIN   := bin/windows-x86_64/sva.exe
+DIST_VSIX  := bin/wavelens.vsix
 MINGW_CC   := x86_64-w64-mingw32-gcc
 dist: dist-linux dist-windows
 dist-linux:
 	cd sva && $(CARGO) build --release -p sva-cli --target x86_64-unknown-linux-musl
 	mkdir -p $(dir $(DIST_LINUX)) && cp $(B)/sva-target/x86_64-unknown-linux-musl/release/sva $(DIST_LINUX)
 	$(DIST_LINUX) parse examples/axi_lite/axi_lite.sva > /dev/null && ls -l $(DIST_LINUX)
+	$(MAKE) dist-vsix
+dist-vsix:
+	$(PY) tools/mkvsix.py --out $(DIST_VSIX) --one --plain
+	$(MAKE) vsix
 dist-windows:
 	@command -v $(MINGW_CC) >/dev/null || { echo 'dist-windows: $(MINGW_CC) is not installed (Ubuntu: sudo apt install mingw-w64)'; exit 1; }
 	cd sva && CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=$(MINGW_CC) $(CARGO) build --release -p sva-cli --target x86_64-pc-windows-gnu
@@ -383,7 +390,7 @@ check:
 	@mkdir -p $(B) && cp wavelens/sva.wasm.js $(B)/sva.wasm.js.committed
 	$(MAKE) sva-build
 	@cmp -s $(B)/sva.wasm.js.committed wavelens/sva.wasm.js || { echo 'check: wavelens/sva.wasm.js is not the build of sva/: commit the one sva-build wrote'; exit 1; }
-	$(MAKE) examples cocotb demo demo-fst sva-spike html
+	$(MAKE) examples cocotb demo demo-fst sva-spike html vsix
 	$(MAKE) sva-test WAVELENS_STRICT=1
 	$(MAKE) unit WAVELENS_STRICT=1
 	$(MAKE) sva-verify mcp-bench
@@ -415,4 +422,4 @@ clean-all:
 	$(if $(filter $(B),/ $(CURDIR) $(HOME) $(abspath $(HOME)/..)),$(error clean-all: BUILD=$(B) is not a build directory))
 	rm -rf $(B)
 
-.PHONY: cocotb pageshot unit-bless unit-shuffle vsix vscode-e2e wavelens help demo demo-fst fst diff example examples questa types-fixture missing-fixture shots guide-shots html config sva-build dist dist-linux dist-windows sva-test sva-bless sva-examples sva-verify sva-eval sva-spike mcp-bench smoke shots-check unit check fmt lint clean clean-all
+.PHONY: cocotb pageshot unit-bless unit-shuffle vsix dist-vsix vscode-e2e wavelens help demo demo-fst fst diff example examples questa types-fixture missing-fixture shots guide-shots html config sva-build dist dist-linux dist-windows sva-test sva-bless sva-examples sva-verify sva-eval sva-spike mcp-bench smoke shots-check unit check fmt lint clean clean-all

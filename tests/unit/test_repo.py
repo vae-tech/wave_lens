@@ -1,6 +1,6 @@
 """The repository's promises: one version (VERSION, wavelens.js, CHANGELOG.md, the CLI), make help lists every target, the docs' settings table is the settings file's keys, the
 tools answer --help, the converter's per-signal keys are documented and read by the page."""
-import os, re, subprocess, unittest
+import json, os, re, subprocess, unittest, zipfile
 
 from tests.unit import helpers as H
 import common
@@ -169,6 +169,8 @@ class Version(unittest.TestCase):
         self.assertEqual(re.search(r"version: '([^']+)'", read('wavelens', 'src', 'boot.js')).group(1), v)
         self.assertEqual(re.search(r'^## (\S+)', read('CHANGELOG.md'), re.M).group(1), v)   # the top entry
         self.assertIn('include_str!("../../../VERSION")', read('sva', 'cli', 'src', 'main.rs'))
+        with zipfile.ZipFile(os.path.join(H.ROOT, 'bin', 'wavelens.vsix')) as z:   # the package committed with the version
+            self.assertEqual(json.loads(z.read('extension/package.json'))['version'], v + '.0', 'bin/wavelens.vsix: make dist-linux')
         guides = os.path.join(H.ROOT, 'docs', 'guides')
         for f in sorted(os.listdir(guides)):   # the guides' footers (and the index's kicker) name the version
             if f.endswith('.html'):

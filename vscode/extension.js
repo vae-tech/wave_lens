@@ -193,6 +193,7 @@ async function scanSources() {
 const typesFile = f => f.replace(/\.(vcd|fst)$/i, '') + '.types.json';
 
 /* ---------------- a tab: one dump in a webview ---------------- */
+const LAST_STATE = 'lastState';   // workspaceState: the path of the state loaded last
 class Tab {
   constructor(uri, panel) {
     this.uri = uri; this.file = uri.fsPath; this.panel = panel; this.wait = new Map(); this.rid = 0; this.streams = new Map(); this.procs = new Set();
@@ -214,7 +215,8 @@ class Tab {
     const name = path.basename(this.file), esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
     const json = s => JSON.stringify(s).replace(/</g, '\\u003c');
     const host = { name, path: this.file, store: this.store, autoReload: !!vscode.workspace.getConfiguration('wavelens').get('autoReload'),
-      theme: themeOf(), build: buildOf(), keysLeft: vscode.workspace.getConfiguration('wavelens').get('keysToVSCode') || [] };
+      theme: themeOf(), build: buildOf(), keysLeft: vscode.workspace.getConfiguration('wavelens').get('keysToVSCode') || [],
+      lastState: CTX.workspaceState.get(LAST_STATE) || null, openLastState: !!vscode.workspace.getConfiguration('wavelens').get('openLastState') };
     const scripts = MEDIA.filter(f => f.endsWith('.js')).map(f => `<script nonce="${nonce}" src="${u(r.wavelens, f)}"></script>`).join('\n');
     return `<!doctype html>
 <html lang="en">
@@ -279,7 +281,9 @@ ${scripts}
         return;
       }
       case 'save': return reply(await this.save(String(m.name || 'wavelens.out'), Buffer.from(String(m.b64 || ''), 'base64')));
-      case 'pick': return reply(await this.pick(String(m.accept || ''), !!m.multiple));
+      case 'pick': return reply(await this.pick(String(m.accept || ''), !!m.multiple, !!m.state));
+      case 'state-kept': return this.stateKept();
+      case 'state-read': return reply(await this.stateRead());
       case 'compare': return reply(await this.compare(Array.isArray(m.signals) ? m.signals.map(String) : [], +m.from, +m.to));
       case 'sources': return reply(await this.sources());
       case 'clip': await vscode.env.clipboard.writeText(String(m.text ?? '')); return reply({ ok: true });
@@ -340,12 +344,31 @@ ${scripts}
     await vscode.workspace.fs.writeFile(to, data);
     return { path: to.fsPath };
   }
-  async pick(accept, multiple) {
+  // the last state of this workspace, whichever dump it was loaded on: Load… opens there, Reload (r) reads it, a new dump takes it
+  stateUri() {
+    const p = CTX.workspaceState.get(LAST_STATE);
+    for (const x of p ? [p, path.dirname(p)] : []) if (fs.existsSync(x)) return vscode.Uri.file(x);
+    return vscode.Uri.file(path.dirname(this.file));
+  }
+  async stateKept() {   // the file picked is loaded
+    if (!this.picked) return;
+    await CTX.workspaceState.update(LAST_STATE, this.picked);
+    for (const tab of TABS) tab.post({ type: 'laststate', path: this.picked });
+  }
+  async stateRead() {
+    const p = CTX.workspaceState.get(LAST_STATE);
+    if (!p) return { error: 'no state loaded yet' };
+    try { const st = await fs.promises.stat(p);
+      return { name: path.basename(p), mtime: st.mtimeMs, b64: (await fs.promises.readFile(p)).toString('base64') }; }
+    catch (e) { return { error: e.message }; }
+  }
+  async pick(accept, multiple, state = false) {
     const exts = [...new Set(accept.split(',').map(s => s.trim()).filter(s => s.startsWith('.')).map(s => s.slice(1)))];
     if (exts.includes('vcd')) exts.push('fst');
-    const got = await vscode.window.showOpenDialog({ defaultUri: vscode.Uri.file(path.dirname(this.file)), canSelectMany: multiple,
+    const got = await vscode.window.showOpenDialog({ defaultUri: state ? this.stateUri() : vscode.Uri.file(path.dirname(this.file)), canSelectMany: multiple,
       filters: exts.length ? { [exts.join(', ')]: [...new Set(exts)], 'every file': ['*'] } : undefined });
     if (!got || !got.length) return { files: [] };
+    if (state) this.picked = got[0].fsPath;
     if (exts.includes('fst') && /\.fst\b/.test(accept)) {   // Open… a dump: a tab of its own
       for (const u of got) await vscode.commands.executeCommand('vscode.openWith', u, VIEW);
       return { files: [] };

@@ -1718,7 +1718,8 @@ def vscode_tab(browser, build):
         if (m.type === 'clip') reply({ id: m.id, ok: true });
         if (m.type === 'sources') reply(window.__TYPES ? { id: m.id, types: window.__TYPES, typesName: 'enum.types.json', texts: [] } : { id: m.id,
           texts: window.__SRC || ['package p; typedef enum logic [1:0] {OFF, ON = 2, HOLD} mode_t; endpackage', 'module m; p::mode_t plain, state; endmodule'] });
-        if (m.type === 'pick') reply({ id: m.id, files: /fst/.test(m.accept) ? [] : [{ name: 's.view.json', mtime: 1, b64: btoa(JSON.stringify(window.__S)) }] });
+        if (m.type === 'pick') reply({ id: m.id, files: /fst/.test(m.accept) ? [] : [{ name: 's.view.json', path: '/states/s.view.json', mtime: 1, b64: btoa(JSON.stringify(window.__S)) }] });
+        if (m.type === 'state-read') reply(window.__S ? { id: m.id, name: 's.view.json', mtime: 2, b64: btoa(JSON.stringify(window.__S)) } : { id: m.id, error: 'gone' });
         if (m.type === 'http') reply({ id: m.id, status: 200, text: 'ok' }); } }); })();""" % src
     page = browser.new_page()
     errs = []
@@ -1780,6 +1781,21 @@ def vscode_tab(browser, build):
     page.evaluate('s => { window.__S = s; }', st)
     js("(v.sfile.click(), 0)"); until("WaveLens.views().find(x => x.root.isConnected).state().bookmarks.some(b => b.text === 'from the file')", timeout=5000)
     check(sent('pick')[0]['accept'].startswith('.json'), 'Load…: a pick of a .json, its state loaded (a bookmark from the file)')
+    # the last state: the extension keeps its path (asked by the pick, told once it is loaded), Reload and r read it there, every tab
+    check(sent('pick')[0].get('state') is True and len(sent('state-kept')) == 1, f'Load…: the pick says a state, and that it was loaded {sent("state-kept")}')
+    check(js("[v.stateBtn.hidden, v.stateBtn.title]") == [False, 'Read /states/s.view.json again (r)'], 'Reload: shown, it names the file on the host')
+    st['bookmarks'] = [{'n': 4, 't': 10000, 'text': 'changed on the disk'}]
+    page.evaluate('s => { window.__S = s; }', st)
+    page.keyboard.press('Escape'); js("(v.root.querySelector('.names').focus?.(), 0)")
+    js("(v.root.querySelector('button[data-act=sreload]').click(), 0)")
+    until("WaveLens.views().find(x => x.root.isConnected).state().bookmarks.some(b => b.text === 'changed on the disk')", timeout=5000)
+    check(len(sent('state-read')) == 1 and len(sent('pick')) == 1, 'Reload: the state read again on the host, no dialog')
+    page.evaluate('window.__S = null')
+    js("(await v.reloadState(), 0)")
+    check('cannot read s.view.json again' in js("v.root.querySelector('.bar .toast').textContent") and not js("v.stateBtn.hidden"), 'Reload: the file gone is said, the button stays')
+    page.evaluate('s => { window.__S = s; }', st)
+    page.evaluate("window.postMessage({ type: 'laststate', path: '/other/x.view.json' }, '*')"); until("WaveLens.views().find(x => x.root.isConnected).root.wlState.path === '/other/x.view.json'", timeout=5000)
+    check(js("v.stateBtn.title") == 'Read /other/x.view.json again (r)', 'another tab loaded a state: this one follows')
     n = len(sent('pick'))
     js("(v.openDump(), 0)"); until(f"window.__sent.filter(m => m.type === 'pick').length > {n}", timeout=5000)
     check('.fst' in sent('pick')[-1]['accept'] and not page.evaluate('!!window.showOpenFilePicker'), 'Open…: a pick of a dump (no showOpenFilePicker)')
@@ -1880,6 +1896,28 @@ def vscode_tab(browser, build):
     js("(v.saveState(), 0)"); page.wait_for_timeout(400)
     check(js("v.root.querySelector('.bar .toast').textContent") == 'not saved', 'a save cancelled says so')
     check(not page.evaluate('window.__csp || []') and not errs, f'no CSP violation, no error: {page.evaluate("window.__csp || []")} {errs[:3]}')
+    # a dump seen for the first time takes the state loaded last; one with a view of its own keeps it; wavelens.openLastState off: Reload only
+    def tab(store, opened=True):
+        one = browser.new_page()
+        one.add_init_script(fake + f"window.__S = {json.dumps({**st, 'bookmarks': [{'n': 4, 't': 10000, 'text': 'the last state'}]})};")
+        page_html = html.replace(json.dumps(host), json.dumps({**host, 'store': store, 'lastState': '/states/s.view.json', 'openLastState': opened}))
+        one.route(src + '/**', lambda r: r.fulfill(path=str(files[urllib.parse.urlparse(r.request.url).path])) if urllib.parse.urlparse(r.request.url).path in files
+                  else r.fulfill(status=404))
+        one.route(src + '/', lambda r: r.fulfill(body=page_html, content_type='text/html'))
+        one.goto(src + '/')
+        end = time.monotonic() + 15
+        while not one.evaluate("window.__sent && window.__sent.some(m => m.type === 'ready')"):
+            if time.monotonic() > end:
+                raise TimeoutError('the tab is not ready')
+            one.wait_for_timeout(50)
+        got = one.evaluate("(v => [v.state().bookmarks.some(b => b.text === 'the last state'), v.stateBtn.hidden, v.stateBtn.title])(WaveLens.views().find(x => x.root.isConnected))")
+        one.close()
+        return got
+    title = 'Read /states/s.view.json again (r)'
+    fresh_got = tab({})
+    check(fresh_got == [True, False, title], f'a new dump: the last state of the workspace taken at once, Reload there {fresh_got}')
+    check(tab({'wavelens.given': 'yes'}) == [False, False, title], 'a dump with a view of its own keeps it: Reload there, nothing loaded')
+    check(tab({}, False) == [False, False, title], 'wavelens.openLastState off: Reload there, nothing loaded')
     page.close()
 
 
@@ -2843,6 +2881,8 @@ def state(browser, build):
             WaveLens.internal.peek(v).vis.some(r => (r.cls || '').startsWith('sva-expr')), [...v.notesEl.querySelectorAll('input.txt')].some(i => i.value === 'saved here')]; })()""")
     check(not diff and shown == ['Sort: Z→A', 'P', 'pready', 'cannot', True, True],
           f'Load… after a reload with nothing kept: the same state, the bar and the lists show it (differs: {diff}) {shown}')
+    # Load… where the browser gives a handle: Reload and r read that file again, a dump opened after it keeps it, the next page too
+    state_reload(page, v, st)
     page.goto(axi.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('SVA.ready()')
     v.locator('input.sfile').set_input_files(path)
     page.wait_for_function("document.querySelector('.wv .bar .toast').textContent.includes('loaded')")
@@ -6169,6 +6209,38 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
 
 
 VERSION = re.search(r"version: '([^']+)'", (ROOT / 'wavelens' / 'src' / 'boot.js').read_text()).group(1)
+
+
+def state_reload(page, v, st):
+    view = "document.querySelector('.wv').waveView"
+    has = lambda text: page.wait_for_function(f"{view}.state().bookmarks.some(b => b.text === '{text}')", timeout=5000)
+    write = lambda text: page.evaluate("t => { window.__txt = t; }", json.dumps({**st, 'bookmarks': [{'n': 4, 't': 10000, 'text': text}]}))
+    write('first')
+    page.evaluate("""() => { window.__opts = []; window.__hand = { kind: 'file', name: 'h.view.json', queryPermission: async () => 'granted',
+        getFile: async () => new File([window.__txt], 'h.view.json') }; window.showOpenFilePicker = async o => { window.__opts.push(o); return [window.__hand]; }; }""")
+    v.locator('button[data-act=sload]').click(); has('first')
+    check(page.evaluate('window.__opts[0].id') == 'wavelens-state' and page.evaluate(f"{view}.stateBtn.title") == 'Read h.view.json again (r)',
+          'Load…: the picker of its own folder (its id), Reload names the file')
+    write('second'); v.locator('button[data-act=sreload]').click(); has('second')
+    check(len(page.evaluate('window.__opts')) == 1, 'Reload: the file read again, no picker')
+    write('third'); v.locator('canvas').first.click(position={'x': 40, 'y': 40}); page.keyboard.press('r'); has('third')
+    check(True, 'r: the same as Reload')
+    page.evaluate(f"{view}.openDump(new File([`$timescale 1ns $end\\n$var wire 1 ! a $end\\n$enddefinitions $end\\n#0\\n0!\\n#5\\n1!\\n`], 'n.vcd'))")
+    page.wait_for_function(f"{view}.opts.title === 'n.vcd'", timeout=5000)
+    write('fourth'); v.locator('button[data-act=sreload]').click()
+    page.wait_for_function(f"{view}.root.querySelector('.bar .toast').textContent.includes('h.view.json loaded')", timeout=5000)
+    check(page.evaluate(f"{view}.stateBtn.hidden") is False, 'a dump opened after it: Reload stays, reads the same file')
+    page.evaluate("delete window.showOpenFilePicker")
+    # the next page: a handle in the browser's database. A stand-in that survives the clone: reading a real one back kills chrome-headless-shell (any page,
+    # no permission context there), so this says the database's way there and back, not a real handle's
+    page.evaluate(f"""async () => {{ window.FileSystemHandle = class {{ constructor(n) {{ this.name = n; }} async getFile() {{ return new File([window.__txt], this.name); }} }};
+        const h = new FileSystemHandle('kept.view.json'); await {view}.loadState(await h.getFile(), h); await new Promise(ok => setTimeout(ok, 200)); }}""")
+    page.reload(); page.wait_for_load_state('networkidle')
+    page.wait_for_function(f"!{view}.stateBtn.hidden", timeout=5000)
+    check(page.evaluate(f"{view}.stateBtn.title") == 'Read kept.view.json again (r)', 'the next page: Reload is there, the file kept in the browser')
+    page.evaluate("""() => new Promise(ok => { const q = indexedDB.deleteDatabase('wavelens'); q.onsuccess = q.onerror = q.onblocked = () => ok(); })""")
+    page.reload(); page.wait_for_load_state('networkidle'); page.wait_for_timeout(200)
+    check(page.evaluate(f"{view}.stateBtn.hidden") is True, 'nothing loaded before: no Reload')
 
 
 def main():

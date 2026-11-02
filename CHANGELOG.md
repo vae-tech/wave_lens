@@ -5,6 +5,20 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.37 — 2 November 2026
+
+The last state stays at hand, and every build gives the VS Code package.
+
+- **The last state.** Load… remembers what it loaded: **Reload** in the bar and the key `r` read that file again with no dialog, after a dump
+  opened in the viewer too; Load… opens in its folder. Where the browser keeps a file's handle (Chrome, Edge) it stays for the next page.
+- **In VS Code** the state loaded last is the workspace's, whichever dump it was: Load… opens on that file, Reload works in every tab, and a dump seen for
+  the first time takes it at once (`wavelens.openLastState`, on by default; ctrl+Z undoes it). A dump with a view of its own keeps it.
+- **The package with every build.** `make check` builds `out/wavelens.vsix`; `make dist-linux` ends with `bin/wavelens.vsix`, committed with a version, so a clone
+  installs the extension with nothing built. `mkvsix.py --plain` leaves out the checkout's commit: the tree alone decides the package's bytes, and `publish.py`
+  refuses a version whose package is not the build of its tree.
+- **cocotb: fixed.** After a run through a symlink a test's failure named `wavelens_cocotb.py` instead of the test's line: cocotb's assertion rewriting caches a
+  compile with the path it was made under.
+
 ## 0.36 — 2 November 2026
 
 A cocotb test marks up its own waves, on Verilator and on Questa, and each test can stand apart on the page.

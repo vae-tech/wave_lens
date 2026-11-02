@@ -1,7 +1,10 @@
 """tools/mkvsix.py and what it ships: the package's files as the extension needs them, the committed sva CLI the build's."""
-import hashlib, json, os, re, subprocess, unittest, zipfile
+import hashlib, json, os, re, subprocess, sys, unittest, zipfile
 
 from tests.unit import helpers as H
+
+sys.path.insert(0, os.path.join(H.ROOT, 'tools'))
+import mkvsix  # noqa: E402
 
 SHIPPED = os.path.join(H.ROOT, 'bin', 'linux-x86_64', 'sva')
 EXAMPLES = [('apb', 'apb_tb', ['examples/apb/apb_tb.sv', 'examples/apb/apb.sva']),   # the cases of sva/cli/tests/cli.rs
@@ -55,6 +58,41 @@ class Package(unittest.TestCase):
         for n in names:   # nothing of the tree beside the extension's (a dump, a page of work/)
             self.assertTrue(n in ('[Content_Types].xml', 'extension.vsixmanifest') or n.startswith('extension/'), n)
         self.assertFalse([n for n in names if re.search(r'\.(vcd|fst|html)$', n)])
+
+
+class Committed(unittest.TestCase):
+    # bin/wavelens.vsix: the tree alone decides its bytes (--plain: not the commit of the checkout), and a tree whose package is not
+    # its build is named by stale(), what publish.py refuses a version on
+    def tree(self, d):
+        def read(path):
+            for base in (d, H.ROOT):
+                if os.path.isfile(os.path.join(base, path)):
+                    with open(os.path.join(base, path), 'rb') as f:
+                        return f.read()
+            return None
+        return read
+
+    def build(self, d, *args):
+        os.makedirs(os.path.join(d, 'bin'), exist_ok=True)
+        rc, _, err = H.run_tool('mkvsix', '--out', os.path.join(d, 'bin', 'wavelens.vsix'), '--one', '--plain', '--sva', SHIPPED, *args)
+        self.assertEqual(rc, 0, err)
+
+    def test_plain_has_no_build(self):
+        with H.tmp() as d:
+            self.build(d)
+            with zipfile.ZipFile(os.path.join(d, 'bin', 'wavelens.vsix')) as z:
+                self.assertNotIn('wavelensBuild', json.loads(z.read('extension/package.json')))
+
+    def test_stale_names_what_changed(self):
+        with H.tmp() as d:
+            self.build(d)
+            read = self.tree(d)
+            self.assertEqual(mkvsix.stale(read), [])
+            over = lambda path, data: lambda p: data if p == path else read(p)
+            self.assertEqual(mkvsix.stale(over('wavelens/wavelens.js', b'//')), ['wavelens/wavelens.js'], 'the viewer')
+            self.assertEqual(mkvsix.stale(over('bin/linux-x86_64/sva', b'x')), ['bin/linux-x86_64/sva'], 'the CLI it carries')
+            self.assertIn('VERSION', mkvsix.stale(over('VERSION', b'99.1\n')), 'the version')
+            self.assertEqual(mkvsix.stale(over('bin/wavelens.vsix', None)), ['bin/wavelens.vsix'], 'no package')
 
 
 class Shipped(unittest.TestCase):

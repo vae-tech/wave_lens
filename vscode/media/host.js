@@ -4,6 +4,8 @@
    - a download (an <a download> clicked: Save state, PNG, SVG, WaveDrom, the report) -> a save dialog on the host;
    - a file picker (an <input type=file> clicked: Load state, the .sv files, Open…) -> an open dialog on the host (Open…
      a dump: a tab of its own); no showOpenFilePicker (a handle of the client's disk);
+   - the last state loaded in this workspace: a handle over the host's file, for Reload (r) in every tab; a new dump takes it
+     (wavelens.openLastState);
    - Compare… -> an open dialog on the host and sva diff there (the second dump, VCD or FST, never sent here): its result
      over the tab's waves (compareResult);
    - navigator.clipboard.writeText -> the client's clipboard through VS Code;
@@ -58,6 +60,13 @@
       .then(m => toast(m.path ? 'saved ' + m.path : m.error ? 'not saved: ' + m.error : 'not saved'), e => toast('not saved: ' + e.message));
   };
 
+  /* ---- the last state: what Reload reads, whichever tab loaded it; the file is the extension's to name ---- */
+  const fresh = !data.size;   // a dump seen here before has a view of its own: a new one takes the last state
+  const lastState = p => ({ kind: 'file', name: p.replace(/^.*[\\/]/, ''), path: p, getFile: async () => { const m = await call('state-read', {});
+    if (m.error) throw new Error(m.error);
+    return new File([unb64(m.b64)], m.name, { lastModified: m.mtime }); } });
+  on.laststate = m => { const v = view(); if (v) v.keepState(lastState(m.path)); };
+
   /* ---- file pickers ---- */
   const iclick = HTMLInputElement.prototype.click;
   HTMLInputElement.prototype.click = function () {
@@ -71,9 +80,13 @@
       });
       return;
     }
-    call('pick', { accept: this.accept, multiple: this.multiple }).then(m => {
+    const state = this.classList.contains('sfile');
+    call('pick', { accept: this.accept, multiple: this.multiple, state }).then(async m => {
       if (m.error) { toast(m.error); return; }
       if (!m.files || !m.files.length) return;
+      if (state) { const f = m.files[0], v = view();
+        if (v && await v.loadState(new File([unb64(f.b64)], f.name, { lastModified: f.mtime }), lastState(f.path))) vscode.postMessage({ type: 'state-kept' });
+        return; }
       const dt = new DataTransfer();
       for (const f of m.files) dt.items.add(new File([unb64(f.b64)], f.name, { lastModified: f.mtime }));
       this.files = dt.files; this.dispatchEvent(new Event('change', { bubbles: true }));
@@ -197,7 +210,8 @@
     const P = WaveLens.WaveView.prototype; RELOAD = P.reloadDump; P.reloadDump = function () { return reload(); };   // ⟳ of the bar too
     const v = view(); let nv = v;
     try { await sources(); nv = await view().openDump(await fetchDump(), handle); }
-    catch (e) { if (v) v.toast('cannot read ' + H.name + ': ' + e.message); vscode.postMessage({ type: 'log', text: String(e.stack || e) }); }
+    catch (e) { if (v) v.toast('cannot read ' + H.name + ': ' + e.message); vscode.postMessage({ type: 'log', text: String(e.stack || e) }); nv = null; }
+    if (nv && H.lastState) { nv.keepState(lastState(H.lastState)); if (fresh && H.openLastState) await nv.reloadState(); }
     vscode.postMessage(Object.assign({ type: 'ready', title: nv && nv.opts.title }, last));
   });
   // a dump dropped on the tab would replace its waves under this tab's name, store and watcher: a tab of its own instead

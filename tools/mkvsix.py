@@ -2,10 +2,12 @@
 """mkvsix.py — the VS Code extension (vscode/) as one .vsix, without node or npm: a VSIX is a zip of extension/ (the
 extension's files) with its manifest (extension.vsixmanifest) and [Content_Types].xml.
 
-  mkvsix.py [--out out/wavelens.vsix] [--one] [--sva bin/linux-x86_64/sva] [--target linux-x64]
+  mkvsix.py [--out out/wavelens.vsix] [--one] [--plain] [--sva bin/linux-x86_64/sva] [--target linux-x64]
 
 Two files: OUT (the last build, the same install line each time) and beside it a copy named by its version
 (wavelens-0.20.0.vsix: the versions kept side by side, to install one and another and compare); --one: OUT only.
+--plain: without the build of the bar (the checkout's commit), so that the package depends on the tree alone: bin/wavelens.vsix,
+committed with a version (make dist-linux); publish.py refuses a version whose package is not of its tree (stale()).
 
 Into extension/: vscode/package.json (its "version" from VERSION: 0.17 -> 0.17.0), vscode/extension.js, vscode/media/
 host.js, the viewer's files of wavelens/ under media/ (wavelens.css, wavelens.config.js, wavelens.js, sva.wasm.js, bus.js,
@@ -14,7 +16,7 @@ package is for one platform of the host that runs the extension (Remote-SSH / WS
 The same input gives the same bytes (fixed times in the zip). Install: code --install-extension FILE.vsix in a terminal
 of the remote window, or Extensions → … → Install from VSIX… while connected.
 """
-import argparse, json, os, shutil, sys, zipfile
+import argparse, io, json, os, shutil, sys, zipfile
 from xml.sax.saxutils import escape
 
 sys.dont_write_bytecode = True
@@ -23,6 +25,8 @@ import common  # noqa: E402
 from common import WaveError, run_main  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+COMMITTED = 'bin/wavelens.vsix'
+SVA = 'bin/linux-x86_64/sva'
 MEDIA = ['wavelens.css', 'wavelens.config.js', 'wavelens.js', 'sva.wasm.js', 'bus.js', 'sva.js']
 TYPES = {'.json': 'application/json', '.js': 'application/javascript', '.css': 'text/css', '.md': 'text/markdown',
          '.txt': 'text/plain', '.vsixmanifest': 'text/xml'}
@@ -71,18 +75,43 @@ def content_types(names):
             + '\n'.join(rows) + '\n</Types>\n')
 
 
-def build(out, sva, target):
+def sources():
+    """The package's files as they are in the tree: [(name under extension/, path in the repository)]."""
+    return [('extension.js', 'vscode/extension.js'), ('svtypes.js', 'vscode/svtypes.js'), ('media/host.js', 'vscode/media/host.js'),
+            ('README.md', 'vscode/README.md')] + [('media/' + m, 'wavelens/' + m) for m in MEDIA]
+
+
+def semver(ver):
+    return ver + '.0' * (2 - ver.count('.'))   # 0.17 -> 0.17.0
+
+
+def stale(read):
+    """What of a tree the package committed there does not carry; read(path) -> the file's bytes in it, None when it has none.
+    -> the paths that differ, [] when the package is the tree's."""
+    data = read(COMMITTED)
+    if data is None:
+        return [COMMITTED]
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        has = {n: z.read(n) for n in z.namelist()}
+    out = [p for n, p in sources() + [('bin/sva', SVA)] if has.get('extension/' + n) != read(p)]
+    pkg, own = json.loads(has['extension/package.json']), json.loads(read('vscode/package.json'))
+    pkg.pop('wavelensBuild', None)
+    if pkg != {**own, 'version': semver(read('VERSION').decode().strip())}:
+        out += ['vscode/package.json', 'VERSION']
+    return out
+
+
+def build(out, sva, target, plain=False):
     with open(os.path.join(ROOT, 'VERSION'), encoding='utf-8') as f:
         ver = f.read().strip()
     with open(os.path.join(ROOT, 'vscode', 'package.json'), encoding='utf-8') as f:
         pkg = json.load(f)
-    pkg['version'] = ver + '.0' * (2 - ver.count('.'))   # semver: 0.17 -> 0.17.0
-    b = common.build_info('VSIX')   # the bar's version line in the tab: the commit it was packed from (no git where it runs)
+    pkg['version'] = semver(ver)
+    b = not plain and common.build_info('VSIX')   # the bar's version line in the tab: the commit it was packed from (no git where it runs)
     if b:
         pkg['wavelensBuild'] = b
     files = [('extension/package.json', json.dumps(pkg, indent=2, ensure_ascii=False).encode() + b'\n', 0o644)]
-    src = [('extension.js', 'vscode/extension.js'), ('svtypes.js', 'vscode/svtypes.js'), ('media/host.js', 'vscode/media/host.js'), ('README.md', 'vscode/README.md')] + [('media/' + m, 'wavelens/' + m) for m in MEDIA]
-    for name, p in src:
+    for name, p in sources():
         with open(os.path.join(ROOT, p), 'rb') as f:
             files.append(('extension/' + name, f.read(), 0o644))
     if not os.path.isfile(sva):
@@ -107,11 +136,12 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0], formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__.split('\n\n', 1)[1])
     ap.add_argument('--out', help='the .vsix (default: out/wavelens.vsix; the version is in its manifest)')
     ap.add_argument('--one', action='store_true', help='OUT only, not its copy named by the version')
-    ap.add_argument('--sva', default=os.path.join(ROOT, 'bin', 'linux-x86_64', 'sva'), help='the static sva CLI of the host (default: %(default)s)')
+    ap.add_argument('--plain', action='store_true', help='no build of the bar: the package of the tree alone (the committed one)')
+    ap.add_argument('--sva', default=os.path.join(ROOT, SVA), help='the static sva CLI of the host (default: %(default)s)')
     ap.add_argument('--target', default='linux-x64', help='the platform of the host, as VS Code names it (default: %(default)s; "" none)')
     a = ap.parse_args()
     out = a.out or os.path.join(ROOT, 'out', 'wavelens.vsix')
-    v, n = build(out, a.sva, a.target)
+    v, n = build(out, a.sva, a.target, a.plain)
     print(f'mkvsix: {out} (wavelens {v}, {n} files, {os.path.getsize(out) // 1024} KB)')
     if not a.one:
         named = os.path.join(os.path.dirname(os.path.abspath(out)), f'wavelens-{v}.vsix')

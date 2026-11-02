@@ -63,7 +63,8 @@ A WaveDrom diagram in your own page needs the two files of `wavelens/` ([the Wav
 For dumps on a Linux machine you reach from VS Code over **Remote-SSH** or **WSL** (VS Code ≥ 1.80 on your side, a
 Linux x86-64 host). The extension is installed on the host; nothing else is needed there.
 
-1. Build the package in a clone, on the host or anywhere (Python only, no node / npm):
+1. The package comes with the clone: `bin/wavelens.vsix`, the build of the version. To pack the tree as it is now (Python
+   only, no node / npm):
 
    ```sh
    make vsix                       # -> out/wavelens.vsix (+ wavelens-<version>.vsix); without make: python3 -I tools/mkvsix.py
@@ -74,7 +75,7 @@ Linux x86-64 host). The extension is installed on the host; nothing else is need
 3. In a terminal of that **remote** window (where the `.vsix` is, or copy it there):
 
    ```sh
-   code --install-extension out/wavelens.vsix --force   # --force: over an older version
+   code --install-extension bin/wavelens.vsix --force   # --force: over an older version
    ```
 
    or Extensions → `…` → *Install from VSIX…* while connected. Then *Developer: Reload Window*.
@@ -96,7 +97,7 @@ and an agent live in the tab: [the VS Code guide](docs/guides/vscode.html).
 | check assertions from the tools or in CI (`mkhtml.py --sva`, `mkconfig.py --sva`, `sva eval`) | the `sva` CLI: `bin/linux-x86_64/sva`; on Windows `make dist-windows` builds it (mingw-w64). Without it a page still evaluates its assertions in the browser |
 | build the examples | Make and Verilator ≥ 5 |
 | state names on a VCD from the design's types | Questa (`tools/questa/wavelens_types.tcl` in `vsim`) or Verilator ≥ 5 (`tools/svtypes.py verilator`) |
-| the VS Code extension | VS Code ≥ 1.80; the package (`make vsix`) is for a Linux x86-64 host of Remote-SSH / WSL |
+| the VS Code extension | VS Code ≥ 1.80; the package (`bin/wavelens.vsix`) is for a Linux x86-64 host of Remote-SSH / WSL |
 | change the code | [DEVELOPMENT.md](docs/DEVELOPMENT.md): Rust for the assertion engine, Playwright for the tests |
 
 ## Documentation

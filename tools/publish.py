@@ -7,13 +7,15 @@ The work and its history stay on dev (tagged dev/vX.Y); the public branch (maste
 tree of --from (default the tag dev/vX.Y) less INTERNAL (the reviews, the roadmap prompts and the paths that
 prompts/INTERNAL lists, one per line), the date of that commit, the author of the repository, the message
 "vX.Y: <message>" and nothing else; the tag vX.Y on it. An empty branch starts at the first version. Only the public
-branch and the vX.Y tags go to GitHub (DEVELOPMENT.md § Versions).
+branch and the vX.Y tags go to GitHub (DEVELOPMENT.md § Versions). A version whose bin/wavelens.vsix is not the build of
+its tree is refused.
 """
 import argparse, os, subprocess, sys
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import WaveError, run_main  # noqa: E402
+import mkvsix  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INTERNAL = ['docs/reviews', 'prompts']   # on dev only, with what prompts/INTERNAL names
@@ -24,6 +26,12 @@ def git(*args, env=None, check=True):
     if check and r.returncode:
         raise WaveError(f'git {" ".join(args)}: {r.stderr.strip()}')
     return r.stdout.strip() if r.returncode == 0 else None
+
+
+def blob(src, path):
+    """A file of a commit, its bytes; None when it has none."""
+    r = subprocess.run(['git', '-C', ROOT, 'show', f'{src}:{path}'], capture_output=True)
+    return r.stdout if r.returncode == 0 else None
 
 
 def main():
@@ -41,6 +49,9 @@ def main():
     if git('rev-parse', '--verify', '-q', f'refs/tags/{tag}', check=False):
         raise WaveError(f'the tag {tag} is there already')
     parent = git('rev-parse', '--verify', '-q', f'refs/heads/{a.branch}', check=False)
+    old = mkvsix.stale(lambda p: blob(src, p))
+    if old:
+        raise WaveError(f'{mkvsix.COMMITTED} of {a.src or "dev/" + tag} is not the build of its tree ({", ".join(old)}): make dist-linux, commit, tag again')
     internal = INTERNAL + (git('show', f'{src}:prompts/INTERNAL', check=False) or '').split()
     index = os.path.join(git('rev-parse', '--absolute-git-dir'), 'publish.index')
     env = dict(os.environ, GIT_INDEX_FILE=index)

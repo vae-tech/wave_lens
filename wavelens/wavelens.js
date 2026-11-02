@@ -2392,7 +2392,7 @@ const HELP = [
     [['drag a marker\'s text'], 'to a line over or under a signal, along the time (alt: the time stays)'],
     [['shift+drag a bookmark'], 'an arrow to another one']]],
   ['The bar', [[['right button'], 'on the bar: which of its tool groups it shows (Show all, Hide all, a tick each)'],
-    [['▴', '▾ tools'], 'fold the tools to the title line / open them']]],
+    [['▴', '▾ tools'], 'fold the tools to the title line / open them'], [['r'], 'the last state loaded, read again (Reload)']]],
   ['Undo', [[['ctrl+Z'], 'undo the last change of bookmarks, arrows, groups, colours, radix, hidden rows, highlight'],
     [['ctrl+shift+Z', 'ctrl+Y'], 'redo']]],
   ['Help', [[['?'], 'this box'], [['hover a button'], 'what it does, its keys']]],
@@ -2504,6 +2504,7 @@ class Bar {
         'highlight, the paint, the bookmarks and arrows, the search, the assertions and the expressions">Save</button>'),
       ('<button type="button" data-act="sload" title="Load a saved file into this viewer (what is not in these waves is left out)">Load…</button><input ' +
           'type="file" class="sfile" accept=".json,application/json" hidden>'),
+      '<button type="button" data-act="sreload" title="Read the state loaded last again (r)" hidden>Reload</button>',
       '<button type="button" data-act="spage" class="spage">Save page</button>',
       '<button type="button" class="live" data-act="live" hidden></button>');
     // dump: a VCD read in the page (Open…, or a file dropped on the viewer), ⟳ reads it again from the disk keeping the view
@@ -2618,7 +2619,8 @@ class Bar {
       else if (b.dataset.act === 'help') v.help();
       else if (b.dataset.act === 'scroll') v.setScroll(v.S.maxHeight != null && v.S.maxHeight !== '' ? 'page' : 'window');
       else if (b.dataset.act === 'tools') v.setTools(!v.S.toolsFolded);
-      else if (b.dataset.act === 'sload') v.sfile.click();
+      else if (b.dataset.act === 'sload') v.pickState();
+      else if (b.dataset.act === 'sreload') v.reloadState();
       else if (b.dataset.act === 'dopen') v.openDump();
       else if (b.dataset.act === 'gapvx') v.setGaps({ gapView: false });
       else if (b.dataset.act === 'dcmp') v.cfile.click();
@@ -2646,10 +2648,13 @@ class Bar {
       r.classList.remove('wv-drop'); const it = [...(e.dataTransfer.items || [])].find(x => x.kind === 'file');
         if (!it || e.target.closest('.names, .sva')) return;
       e.preventDefault(); const f = it.getAsFile(), h = it.getAsFileSystemHandle ? it.getAsFileSystemHandle() : null;
-      if (f && /\.json$/i.test(f.name)) v.loadState(f); else if (f) v.openDump(f, h);
+      if (f && /\.json$/i.test(f.name)) v.loadState(f, h); else if (f) v.openDump(f, h);
     }, own);
     v.sfile = r.querySelector('input.sfile');
     v.sfile.addEventListener('change', () => { const f = v.sfile.files[0]; v.sfile.value = ''; if (f) v.loadState(f); });
+    v.stateBtn = r.querySelector('button[data-act=sreload]'); v.stateShow();
+    if (!r.wlState && G.showOpenFilePicker) stateDb('readonly', s => s.get('last')).then(h => { if (h && !r.wlState) { r.wlState = h;
+      if (r.waveView) r.waveView.stateShow(); } }).catch(() => { /* no database here */ });
     const pfx = r.querySelector('input.pfx');
     if (pfx) pfx.addEventListener('input', () => { v.fitPfx(); v.setSort(v.sort, pfx.value); });
     v.fitPfx();
@@ -3029,6 +3034,15 @@ const STATE_VERSION = 3;   // a saved viewer state (state()): 2 has range and ed
 // the settings of the gaps (the menu's Gaps rows)
 const GAP_KEYS = ['gaps', 'gapIdle', 'gapKeep', 'gapSignals', 'gapClock', 'gapAux', 'gapOnly', 'gapCount', 'gapLine', 'gapView'];
 const CYC_KEYS = ['cycles', 'cycleClock', 'cycleZero'], CYC_H = 16;   // the band of clock cycles under the time axis, its height
+// the browser's database of this origin: fn(store) in a transaction -> what its request gave
+const stateDb = (mode, fn) => new Promise((ok, no) => {
+  const q = indexedDB.open('wavelens', 1);
+  q.onupgradeneeded = () => q.result.createObjectStore('states');
+  q.onerror = () => no(q.error);
+  q.onsuccess = () => { const db = q.result, t = db.transaction('states', mode), r = fn(t.objectStore('states'));
+    t.oncomplete = () => { db.close(); ok(r.result); }; t.onerror = t.onabort = () => { db.close(); no(t.error); }; };
+});
+
 class WaveView {
   constructor(root, model, opts = {}) {
     this.root = root; this.M = parse(model); this.opts = opts;
@@ -3323,6 +3337,7 @@ class WaveView {
       else if (k === 's' && this.S.sortButton) this.setSort(SORTS[(SORTS.indexOf(this.sort) + 1) % SORTS.length]);
       else if (k === 't') this.modules(true, !!this.mods || !!this.sel);   // the Modules panel; open: the selected signal's module in it
       else if (k === 'T') this.fsmPanel(true);   // the state machines
+      else if (k === 'r') this.reloadState();
       else if (k === 'Escape') h = false;   // handled by the viewer (reset)
       else if (this.keys[k]) this.keys[k](e);
       else h = false;
@@ -3742,7 +3757,8 @@ class WaveView {
     this.settingsChanged();
     return [...miss];
   }
-  // Save: the state as <title>.view.json (a download); Load…: a file of it (a File, or its text)
+  // Save: the state as <title>.view.json (a download); Load…: a file of it (a File, or its text), picked where the browser gives a
+  // handle (its folder comes back by the picker's id, the file for Reload), else through the file input (the VS Code tab: on the host)
   saveState(name) {
     const st = this.state(), a = document.createElement('a');
     a.download = name || (String(st.title || 'waves').replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'waves') + '.view.json';
@@ -3750,16 +3766,40 @@ class WaveView {
     document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     this.toast(`saved ${a.download}`); this.log('ok', `saved the view: ${a.download}`); return st;
   }
-  async loadState(file) {
+  async pickState() {
+    if (!G.showOpenFilePicker) { this.sfile.click(); return; }
+    try { const [h] = await G.showOpenFilePicker({ id: 'wavelens-state', types: [{ description: 'Saved state', accept: { 'application/json': ['.json'] } }] });
+      await this.loadState(await h.getFile(), h); }
+    catch (e) { if (e.name !== 'AbortError') { this.toast(e.message); this.logError(e, `cannot load: ${e.message}`); } }
+  }
+  // handle: what Reload reads again (a Promise of it: a dropped file's); none: the file as picked, while the browser still reads it
+  async loadState(file, handle = null) {
     try {
       const name = file.name || 'state', text = typeof file === 'string' ? file : await file.text(), miss = await this.setState(jsonParse(text, name));
       this.undoTick();   // the load is one step to undo
+      if (handle && handle.then) handle = await handle.catch(() => null);
+      if (typeof file !== 'string') this.keepState(handle || { name, getFile: async () => file });
       this.toast((`${name} ` +
           `loaded${miss.length ? ` · not in these waves: ${miss.length} (${miss.slice(0, 3).join(', ')}${miss.length > 3 ? ', …' : ''})` : ''}`));
       this.log(miss.length ? 'warning' : 'ok', `${name} loaded${miss.length ? `: ${miss.length} not in these waves, left out` : ''}`, { items: miss });
       return miss;
     } catch (e) { const m = e.json ? e.message : `${file.name || 'state'}: ${e.message}`;
       this.toast(m); this.logError(e, `cannot load: ${m}`); return null; }
+  }
+  // the last state loaded, for Reload (r): on the viewer's element, so a dump read after it keeps it; a browser's handle in its
+  // database too, for the next page (no more than a button until a click lets it read)
+  keepState(h) {
+    this.root.wlState = h; this.stateShow();
+    if (G.FileSystemHandle && h instanceof G.FileSystemHandle) stateDb('readwrite', s => s.put(h, 'last')).catch(() => { /* not kept */ });
+  }
+  stateShow() { const h = this.root.wlState, b = this.stateBtn; if (!b) return; b.hidden = !h; if (h) b.title = `Read ${h.path || h.name} again (r)`; }
+  async reloadState() {
+    const h = this.root.wlState; if (!h) { this.toast('r: no state loaded yet: Load… first'); return null; }
+    try {
+      const can = { mode: 'read' };   // (a handle of an earlier page asks, on the click that came here)
+      if (h.queryPermission && await h.queryPermission(can) !== 'granted' && await h.requestPermission(can) !== 'granted') throw new Error('not allowed');
+      return await this.loadState(await h.getFile(), h);
+    } catch (e) { const m = `cannot read ${h.name} again (pick it with Load…): ${e.message}`; this.toast(m); this.logError(e, m); return null; }
   }
   // the colour a row is drawn in here: your paint, its own colour, its group's (groupColors); the model is not changed
   strokeOf(r) { return (r.type === 'sig' && this.painted.get(r.full)) || r.stroke || (this.groupStroke && this.groupStroke.get(r.orig || r)) || undefined; }
@@ -8283,7 +8323,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.36',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.37',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,

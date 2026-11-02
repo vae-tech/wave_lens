@@ -149,7 +149,7 @@ const HELP = [
     [['drag a marker\'s text'], 'to a line over or under a signal, along the time (alt: the time stays)'],
     [['shift+drag a bookmark'], 'an arrow to another one']]],
   ['The bar', [[['right button'], 'on the bar: which of its tool groups it shows (Show all, Hide all, a tick each)'],
-    [['▴', '▾ tools'], 'fold the tools to the title line / open them']]],
+    [['▴', '▾ tools'], 'fold the tools to the title line / open them'], [['r'], 'the last state loaded, read again (Reload)']]],
   ['Undo', [[['ctrl+Z'], 'undo the last change of bookmarks, arrows, groups, colours, radix, hidden rows, highlight'],
     [['ctrl+shift+Z', 'ctrl+Y'], 'redo']]],
   ['Help', [[['?'], 'this box'], [['hover a button'], 'what it does, its keys']]],
@@ -261,6 +261,7 @@ class Bar {
         'highlight, the paint, the bookmarks and arrows, the search, the assertions and the expressions">Save</button>'),
       ('<button type="button" data-act="sload" title="Load a saved file into this viewer (what is not in these waves is left out)">Load…</button><input ' +
           'type="file" class="sfile" accept=".json,application/json" hidden>'),
+      '<button type="button" data-act="sreload" title="Read the state loaded last again (r)" hidden>Reload</button>',
       '<button type="button" data-act="spage" class="spage">Save page</button>',
       '<button type="button" class="live" data-act="live" hidden></button>');
     // dump: a VCD read in the page (Open…, or a file dropped on the viewer), ⟳ reads it again from the disk keeping the view
@@ -375,7 +376,8 @@ class Bar {
       else if (b.dataset.act === 'help') v.help();
       else if (b.dataset.act === 'scroll') v.setScroll(v.S.maxHeight != null && v.S.maxHeight !== '' ? 'page' : 'window');
       else if (b.dataset.act === 'tools') v.setTools(!v.S.toolsFolded);
-      else if (b.dataset.act === 'sload') v.sfile.click();
+      else if (b.dataset.act === 'sload') v.pickState();
+      else if (b.dataset.act === 'sreload') v.reloadState();
       else if (b.dataset.act === 'dopen') v.openDump();
       else if (b.dataset.act === 'gapvx') v.setGaps({ gapView: false });
       else if (b.dataset.act === 'dcmp') v.cfile.click();
@@ -403,10 +405,13 @@ class Bar {
       r.classList.remove('wv-drop'); const it = [...(e.dataTransfer.items || [])].find(x => x.kind === 'file');
         if (!it || e.target.closest('.names, .sva')) return;
       e.preventDefault(); const f = it.getAsFile(), h = it.getAsFileSystemHandle ? it.getAsFileSystemHandle() : null;
-      if (f && /\.json$/i.test(f.name)) v.loadState(f); else if (f) v.openDump(f, h);
+      if (f && /\.json$/i.test(f.name)) v.loadState(f, h); else if (f) v.openDump(f, h);
     }, own);
     v.sfile = r.querySelector('input.sfile');
     v.sfile.addEventListener('change', () => { const f = v.sfile.files[0]; v.sfile.value = ''; if (f) v.loadState(f); });
+    v.stateBtn = r.querySelector('button[data-act=sreload]'); v.stateShow();
+    if (!r.wlState && G.showOpenFilePicker) stateDb('readonly', s => s.get('last')).then(h => { if (h && !r.wlState) { r.wlState = h;
+      if (r.waveView) r.waveView.stateShow(); } }).catch(() => { /* no database here */ });
     const pfx = r.querySelector('input.pfx');
     if (pfx) pfx.addEventListener('input', () => { v.fitPfx(); v.setSort(v.sort, pfx.value); });
     v.fitPfx();

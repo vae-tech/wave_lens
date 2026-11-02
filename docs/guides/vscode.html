@@ -49,11 +49,12 @@
 
 <h2 id="install">Installing</h2>
 <ol class="steps">
-  <li>Build the package from a clone (no node, no npm): <code>make vsix</code> → <code>out/wavelens.vsix</code> (the last build) and its copy <code>out/wavelens-&lt;version&gt;.vsix</code> (the versions kept side by side: install another one to compare). It is
+  <li>The package comes with a clone: <code>bin/wavelens.vsix</code>, the build of the version. To pack the tree as it is now (no node, no npm):
+    <code>make vsix</code> → <code>out/wavelens.vsix</code> (the last build) and its copy <code>out/wavelens-&lt;version&gt;.vsix</code> (the versions kept side by side: install another one to compare). It is
     for a Linux x86-64 host; VS Code 1.80 or newer.</li>
   <li>Connect VS Code to the host (<i>Remote-SSH: Connect to Host…</i>, or <i>WSL: Connect to WSL</i>) and open the folder of your
     dumps.</li>
-  <li>In a terminal of that <b>remote</b> window: <code>code --install-extension out/wavelens.vsix --force</code>
+  <li>In a terminal of that <b>remote</b> window: <code>code --install-extension bin/wavelens.vsix --force</code>
     (<code>--force</code>: over an older version; or Extensions → … → <i>Install from VSIX…</i> while connected), then
     <i>Developer: Reload Window</i>. The Extensions view then lists WaveLens under the host's name (<i>SSH: …</i> /
     <i>WSL: …</i>), not under <i>Local</i>.</li>
@@ -85,6 +86,9 @@
   <tr><td>files</td><td><span class="ui">Save</span>, PNG / SVG / WaveDrom and the assertions' report ask where to save <b>on the
     host</b>; <span class="ui">Load…</span>, the <code>.sv</code> files and <span class="ui">Compare…</span> pick there (an FST to
     compare is converted too); <span class="ui">Open…</span> a dump opens a tab of its own.</td></tr>
+  <tr><td>the last state</td><td>the state loaded last is the workspace's, whichever dump it was: <span class="ui">Load…</span> opens on that file,
+    <span class="ui">Reload</span> (<kbd>r</kbd>) reads it in every tab, and a dump seen for the first time takes it at once (ctrl+Z undoes it);
+    a dump with a view of its own keeps it.</td></tr>
   <tr><td>what you did</td><td>bookmarks, groups, colours, radix, hidden rows and the assertion bindings are kept per dump in the
     workspace: they survive closing the tab and VS Code.</td></tr>
   <tr><td>theme and keys</td><td><code>wavelens.theme</code>: the viewer's light or dark by VS Code's (<code>auto</code>), the
@@ -141,6 +145,7 @@
   <tr><td><code>wavelens.verilator</code></td><td>verilator</td><td>the Verilator 5 of <i>Make the types with Verilator</i>, on the
     extension's host</td></tr>
   <tr><td><code>wavelens.autoReload</code></td><td>false</td><td>after a new simulation: read the dump at once (false: offer ⟳)</td></tr>
+  <tr><td><code>wavelens.openLastState</code></td><td>true</td><td>a dump seen for the first time takes the state loaded last (false: only Reload offers it)</td></tr>
   <tr><td><code>wavelens.lazy</code></td><td>auto</td><td>a large dump read as it is needed (auto: an FST of 4 MB, a VCD of 64 MB
     and more; always; never: read whole, cut to <code>dumpBudget</code>)</td></tr>
   <tr><td><code>wavelens.live</code></td><td>true</td><td>the tabs connect to an agent's live link (false: they do not); <i>WaveLens: Connect to the agent</i> connects the tab now</td></tr>
@@ -152,7 +157,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.36 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.37 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

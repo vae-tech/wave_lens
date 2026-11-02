@@ -91,6 +91,24 @@ class Verdict(unittest.TestCase):
                 self.assertEqual(wc.verdict(exc, **opts), want)
 
 
+class Where(unittest.TestCase):
+    def test_the_line_of_the_test_under_a_stale_compile(self):
+        # compiled under another path than the module's __file__, as a cached compile reached through a symlink: its frames are still its own
+        with open(wc.__file__, encoding='utf-8') as f:
+            code = compile(f.read(), '/elsewhere/link/python/wavelens_cocotb.py', 'exec')
+        lib = types.ModuleType('wavelens_stale')
+        lib.__file__ = wc.__file__
+        sys.modules['wavelens_stale'] = lib   # (a dataclass or a decorator may look its module up)
+        self.addCleanup(sys.modules.pop, 'wavelens_stale')
+        exec(code, lib.__dict__)
+        try:
+            lib.Marks(path='off').check(1, 2, 'a value')
+        except AssertionError as e:
+            self.assertRegex(lib.where_of(e), r'^test_cocotb_marks\.py:\d+$')
+        else:
+            self.fail('check did not raise')
+
+
 class Texts(unittest.TestCase):
     def test_values_as_the_waves_show_them(self):
         for v, want in ((0, '0'), (9, '9'), (10, '0xA'), (0xCAFE, '0xCAFE'), (-16, '-0x10'), (True, '1'), (Vector(255), '0xFF'), (Vector(None), 'xxxx'), ('abc', 'abc')):

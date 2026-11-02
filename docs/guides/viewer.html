@@ -105,7 +105,7 @@
     <span class="ui">Highlight: N ✕</span>, <span class="ui">Hidden: N ✕</span> and <span class="ui">Only: N modules ‖ ✕</span>.</td></tr>
   <tr><td>style</td><td>The edges: <code>auto</code>, slanted (WaveDrom), vertical (a simulator's), square; kept in this browser for this
     viewer.</td></tr>
-  <tr><td>state</td><td><span class="ui">Save</span> and <span class="ui">Load…</span> what you did in the viewer,
+  <tr><td>state</td><td><span class="ui">Save</span>, <span class="ui">Load…</span> and <span class="ui">Reload</span> what you did in the viewer,
     <span class="ui">Save page</span> the page with it (<a href="#state">Save and Load</a>).</td></tr>
   <tr><td>dump</td><td><span class="ui">Open…</span> a VCD, <span class="ui">⟳</span> read it again (<a href="#open">Opening waves</a>),
     <span class="ui">Compare…</span> a second run (<a href="compare.html">Compare two runs</a>), <span class="ui">Sources…</span>
@@ -467,7 +467,8 @@
   cursor, the order and its prefixes, the folded modules, the highlight, the paint, the selected signal, the search, the bookmarks and
   arrows, the radix, analog and hidden rows, the buses shown bit by bit, the second cursor and the range, the gap settings, the assertions (files loaded or edited in
   the page, with their text, and the bindings) and the expressions. <span class="ui">Load…</span> (or dropping the file on a viewer) reads it
-  back — after a reload, in another browser, or on other waves: what they lack is left out and counted in the title line. A state says
+  back — after a reload, in another browser, or on other waves: what they lack is left out and counted in the title line. The last file loaded
+  stays: <span class="ui">Reload</span> in the bar, or <kbd>r</kbd>, reads it again with no dialog, and Load… opens in its folder. A state says
   what is not there too (<code>"cursor2": null</code>, <code>"range": null</code>, the edge kind): loaded, it clears them; a key a
   state leaves out (an older one, one written by hand) keeps what the viewer has.</p>
 <p>The file's <code>"config"</code> (<code>sort</code>, <code>sortIgnore</code>, <code>fold</code>, <code>highlight</code>, the find
@@ -533,6 +534,7 @@
   <tr><td><kbd>alt+drag</kbd></td><td>a box: time range and signals, then the menu</td><td><kbd>shift+click</kbd> a name</td>
     <td>select a run of signals</td></tr>
   <tr><td>○, <kbd>ctrl+click</kbd> a name</td><td>highlight</td><td><kbd>ctrl+shift+click</kbd></td><td>highlight every row to here</td></tr>
+  <tr><td><kbd>r</kbd></td><td>the last state loaded, read again (<span class="ui">Reload</span>)</td><td></td></tr>
   <tr><td><kbd>m</kbd></td><td>bookmark at the cursor</td><td><kbd>]m</kbd> <kbd>[m</kbd>, <kbd>1</kbd> … <kbd>9</kbd></td>
     <td>next / previous bookmark, bookmark n</td></tr>
   <tr><td><kbd>gm</kbd></td><td>the markers and bookmarks: a list, <kbd>↑</kbd> <kbd>↓</kbd> go through them</td><td><kbd>gl</kbd>, <kbd>ctrl+G</kbd></td>
@@ -563,7 +565,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.36 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.37 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

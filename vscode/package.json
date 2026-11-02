@@ -69,6 +69,11 @@
           "default": false,
           "description": "When the dump changes on the disk (a new simulation), read it again at once, the view kept. Off: the tab says so and ⟳ reads it."
         },
+        "wavelens.openLastState": {
+          "type": "boolean",
+          "default": true,
+          "description": "A dump seen for the first time in this workspace takes the state loaded last (Load…), as Reload would. A dump you have worked on keeps its own view."
+        },
         "wavelens.lazy": {
           "type": "string",
           "enum": ["auto", "always", "never"],

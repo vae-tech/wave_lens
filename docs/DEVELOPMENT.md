@@ -102,10 +102,10 @@ make smoke ONLY=find,sva_bind   # some sections (python3 tests/smoke.py --list);
 make shots                  # tests/shots.py: docs/img/*.png, dark theme, and tests/visual/*.png (--set visual: white, 420 px, an FSM's details, a scale of 2) (after make examples; ~20 s, see below)
 make shots-check            # both into BUILD/img and BUILD/visual, compared with the committed ones by tests/pngdiff.py: a picture that changed (more than 48 pixels by more than 32 of 255 from the pixel there and the 8 around it: text a pixel off is the same) or one made and not committed fails, its difference in BUILD/*/diff
 make guide-shots            # tests/guide_shots.py: docs/guides/img/*.png (after make examples; ONLY=gaps,sva: those guides)
-make vsix                   # tools/mkvsix.py: BUILD/wavelens.vsix, its copy wavelens-<version>.vsix (the extension, the viewer, the static sva)
+make vsix                   # tools/mkvsix.py: BUILD/wavelens.vsix, its copy wavelens-<version>.vsix (the extension, the viewer, the static sva); make check builds it
 make vscode-e2e             # tests/vscode_e2e.py: the extension in a real VS Code (INSTALLED: python3 tests/vscode_e2e.py --installed)
 make sva-build              # the SVA engine (needs cargo + the wasm32 target): the sva CLI, wavelens/sva.wasm.js
-make dist                   # the CLI: bin/linux-x86_64/sva (musl, static, committed) + bin/windows-x86_64/sva.exe (mingw-w64)
+make dist                   # the CLI: bin/linux-x86_64/sva (musl, static, committed) + bin/windows-x86_64/sva.exe (mingw-w64); dist-linux also bin/wavelens.vsix (committed)
 make sva-test               # the SVA engine: unit tests, the corpus tests/sva (third_party too), the JSON schema, the CLI
 make sva-bless              # rewrite tests/sva/golden/*.txt after a reviewed change of the parser output
 make sva-examples sva-spike # sva parse + sva eval of examples/*/*.sva; the WebAssembly build in a page (wasm32 target)
@@ -369,7 +369,7 @@ with the message `vMAJOR.MINOR: <that line>`, and tags it `vMAJOR.MINOR`. Only `
 `.git/hooks/pre-push` refuses the rest; deleting a branch there it lets through). One commit on the branch before the merge raises the version in five places: `VERSION`,
 `version:` in `wavelens/src/boot.js` (then `make wavelens`), a new top entry in `CHANGELOG.md`, the footers and kickers of `docs/guides/*.html`, and the committed builds
 that carry it (`make sva-build dist-linux`: the `sva` CLI writes the version into a report's meta through
-`include_str!` of `VERSION`); `make unit` fails when they disagree. The Rust crates keep their own semver in
+`include_str!` of `VERSION`, and `dist-linux` ends with `bin/wavelens.vsix`, the package with that CLI: the last build before the commit, after every other file of the version); `make unit` fails when they disagree, and `publish.py` refuses a version whose package is not the build of its tree (`mkvsix.py --plain`: the tree alone decides the package's bytes, the bar shows no commit). The Rust crates keep their own semver in
 `sva/Cargo.toml`. A page tells its version in `WaveLens.version`; `make smoke` names a page under `work/` built with
 another one.
 
