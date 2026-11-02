@@ -573,8 +573,10 @@ function parse(src) {
     theme: j.config && j.config.theme, colors: (j.config && j.config.colors) || null, cfg: j.config || {} };
   warnKeys(M.cfg, 'WaveJSON "config"');
   let cyc = 0, tmin = Infinity, tmax = -Infinity, gid = 0;
-  // extension "same": "path" = the transitions of the signal with that "path" (one net seen at several levels)
-  const byPath = {}, collect = a => a.forEach(it => { if (Array.isArray(it)) collect(it); else if (it && it.path && it.tv) byPath[it.path] = it.tv; });
+  // extension "same": "path" = the transitions of the signal with that "path" or "abs" (one net seen at several levels). "abs": where a row is in
+  // the dump, for the names that look for it; unlike "path" it does not name the row, so a row is called the same whatever the others' waves
+  const byPath = {}, key = it => it.path || it.abs;
+  const collect = a => a.forEach(it => { if (Array.isArray(it)) collect(it); else if (it && key(it) && it.tv) byPath[key(it)] = it.tv; });
   collect(j.signal);
   const walk = (arr, depth, anc) => {
     for (let it of arr) {
@@ -787,7 +789,9 @@ const gapLen = (v, cyc) => (/^\s*[\d.]+(e[-+]?\d+)?\s*$/i.test(String(v ?? '')) 
 // the clock they count cycles of (gapClock): gapRefs(rows, gapClock)[0]
 function gapRefs(rows, list) {
   const ps = prefixes(list), rx = ps.filter(p => p.includes('*')).map(glob), at = new Set(ps.filter(p => !p.includes('*'))), seen = new Set();
-  return ps.length ? rows.filter(r => r.type === 'sig' && r.tr && (at.has(r.full) || at.has(r.name) || rx.some(x => x.test(r.full))) &&
+  const abs = r => (r.src && r.src.abs) || r.full;
+  const hit = r => at.has(r.full) || at.has(r.name) || at.has(abs(r)) || rx.some(x => x.test(r.full) || x.test(abs(r)));
+  return ps.length ? rows.filter(r => r.type === 'sig' && r.tr && hit(r) &&
     !seen.has(r.full) && seen.add(r.full)) : [];
 }
 // a signal in a gap [p, q): its rising edges (kind "rise"), falling ("fall"), both ("edges"), or changes ("any"; a bus: its

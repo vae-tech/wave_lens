@@ -5,6 +5,20 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.38 — 2 November 2026
+
+The bugs found by moving 42 cocotb benches to the marks: a description no longer fails a test, a row keeps its name, and names find rows by one rule.
+
+- **A phase in `ReadOnly`** no longer fails a correct test. It keeps its exact time: begun there it is a span on the `TEST_STEP` row, ended there the row goes
+  back at the test's next call. No task writes later: one primed in `ReadOnly` and cancelled at the test's end crashes Verilator 5.
+- **A row's name** no longer depends on the waves of another row: the first of two rows with equal transitions took its full path as its name. Every row of a
+  view without `"hierarchy"` says where it is in the dump in a new key `"abs"`, which names nothing; `"same"` finds its net by it.
+- **Paths of the dump find rows.** An expression by a path below the scope or a full path, an alias too; `cycleClock`, `gapClock`, `gapSignals`, `gapAux`.
+- **Marks and bookmarks in a group.** A bookmark's `signal` as the config said it, or the path in the dump, lands on its row, in a group too.
+- **A view's `"exprs"`** stay on the page without a `"bind"`.
+- **Lint says what was silent:** `expr-name-missing`, `exprs-no-engine`, `gap-view-off` (`gapView` needs `gaps`, USAGE says so now), `setting-signal-missing`.
+  A config that built with `--strict` may stop on one of them.
+
 ## 0.37 — 2 November 2026
 
 The last state stays at hand, and every build gives the VS Code package.

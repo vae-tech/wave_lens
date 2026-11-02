@@ -575,8 +575,10 @@ function parse(src) {
     theme: j.config && j.config.theme, colors: (j.config && j.config.colors) || null, cfg: j.config || {} };
   warnKeys(M.cfg, 'WaveJSON "config"');
   let cyc = 0, tmin = Infinity, tmax = -Infinity, gid = 0;
-  // extension "same": "path" = the transitions of the signal with that "path" (one net seen at several levels)
-  const byPath = {}, collect = a => a.forEach(it => { if (Array.isArray(it)) collect(it); else if (it && it.path && it.tv) byPath[it.path] = it.tv; });
+  // extension "same": "path" = the transitions of the signal with that "path" or "abs" (one net seen at several levels). "abs": where a row is in
+  // the dump, for the names that look for it; unlike "path" it does not name the row, so a row is called the same whatever the others' waves
+  const byPath = {}, key = it => it.path || it.abs;
+  const collect = a => a.forEach(it => { if (Array.isArray(it)) collect(it); else if (it && key(it) && it.tv) byPath[key(it)] = it.tv; });
   collect(j.signal);
   const walk = (arr, depth, anc) => {
     for (let it of arr) {
@@ -789,7 +791,9 @@ const gapLen = (v, cyc) => (/^\s*[\d.]+(e[-+]?\d+)?\s*$/i.test(String(v ?? '')) 
 // the clock they count cycles of (gapClock): gapRefs(rows, gapClock)[0]
 function gapRefs(rows, list) {
   const ps = prefixes(list), rx = ps.filter(p => p.includes('*')).map(glob), at = new Set(ps.filter(p => !p.includes('*'))), seen = new Set();
-  return ps.length ? rows.filter(r => r.type === 'sig' && r.tr && (at.has(r.full) || at.has(r.name) || rx.some(x => x.test(r.full))) &&
+  const abs = r => (r.src && r.src.abs) || r.full;
+  const hit = r => at.has(r.full) || at.has(r.name) || at.has(abs(r)) || rx.some(x => x.test(r.full) || x.test(abs(r)));
+  return ps.length ? rows.filter(r => r.type === 'sig' && r.tr && hit(r) &&
     !seen.has(r.full) && seen.add(r.full)) : [];
 }
 // a signal in a gap [p, q): its rising edges (kind "rise"), falling ("fall"), both ("edges"), or changes ("any"; a bus: its
@@ -3388,7 +3392,7 @@ class WaveView {
   }
   // a signal by its full path: a row of the model, else a bit of a bus ("data[3]", shown or not)
   sigByPath(p) {
-    const s = this.M.rows.find(r => r.type === 'sig' && r.full === p); if (s || typeof p !== 'string') return s || null;
+    const s = this.M.rows.find(r => r.type === 'sig' && (r.full === p || (r.src && r.src.abs === p))); if (s || typeof p !== 'string') return s || null;
     const m = /^(.+)\[(0|[1-9]\d*)\]$/.exec(p), v = m && this.M.rows.find(r => r.full === m[1] && isVec(r));
     return v && +m[2] < v.width ? this.bitsOf(v)[v.width - 1 - m[2]] : null;
   }
@@ -4762,7 +4766,8 @@ Object.assign(WaveView.prototype, {
     const gby = gp.gapBy ? gp.gapBy.length : 0;   // the expressions the waves are cut to
     const gref = sigs.length && sigs.every(x => this.gapRefSet().has(x));   // the signals clicked: the gaps follow them already
     const gck = this.gapClockRow(), isGck = !!sig && sig === gck;   // the clock the gaps count cycles of
-    const co = this.cycOpt(), cd = this.cycData(), cda = this.cycData(true), isCyc = !!sig && co.cycles && co.cycleClock === sig.full;   // the cycles
+    const co = this.cycOpt(), cd = this.cycData(), cda = this.cycData(true);
+    const isCyc = !!sig && co.cycles && (co.cycleClock === sig.full || co.cycleClock === (sig.src && sig.src.abs));   // the cycles
     const gaux = sigs.length && sigs.every(x => this.gapRows().aux.has(x)), naux = this.gapRows().aux.size;   // the signals counted in the gaps
     // one role per signal: the gaps follow it (gapSignals), count its changes (gapAux) or count its cycles (gapClock)
     const role = (key, on) => { const fs = sigs.map(x => x.full).filter(Boolean), g = this.gapOpt(), o = { gaps: true };
@@ -8323,7 +8328,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.37',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.38',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,

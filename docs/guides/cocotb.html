@@ -67,7 +67,7 @@ async def test_wait_states(dut):
 <table>
   <tr><th>Call</th><th>Does</th></tr>
   <tr><td><code>@wl.test(…)</code></td><td><code>cocotb.test(…)</code> around the test: its number on <code>TEST_CASE</code>, a bookmark at its start and end, a span in the colour of its result</td></tr>
-  <tr><td><code>wl.phase(label, signals=None)</code></td><td><code>with</code>, not awaited: the time inside it is <code>label</code> on <code>TEST_STEP</code>; <code>signals</code>: a span on those rows instead</td></tr>
+  <tr><td><code>wl.phase(label, signals=None)</code></td><td><code>with</code>, not awaited: the time inside it is <code>label</code> on <code>TEST_STEP</code>; <code>signals</code>: a span on those rows instead In <code>ReadOnly</code>, where nothing can be written, its time stays exact: begun there it is a span on the <code>TEST_STEP</code> row.</td></tr>
   <tr><td><code>wl.note(text, signal, label, color)</code></td><td>a bookmark now</td></tr>
   <tr><td><code>wl.check(got, expected, text, signal, show)</code></td><td>a bookmark with both values; a mismatch fails the test; <code>show='fail'</code>: no bookmark when they agree, for a check in a loop</td></tr>
 </table>
@@ -141,7 +141,7 @@ except ImportError:
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.37 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.38 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

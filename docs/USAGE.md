@@ -72,7 +72,7 @@ may be the default). What the tab does differently from a page in a browser:
   what they mean in VS Code (ctrl+F find, ctrl+C copy, ctrl+Z / ctrl+Y undo / redo, alt+C W R in the find field);
   `wavelens.keysToVSCode` (default `ctrl+G`, Go to Line) are left to VS Code — the list of your groups is `gl` then; the
   others (ctrl+P, F1, ctrl+tab, ctrl+shift+…) are VS Code's.
-- **The version** in the bar's title line: `0.37 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
+- **The version** in the bar's title line: `0.38 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
   committed), so a tab of a development build says which one it is.
 - **An agent** on the host (`tools/wavemcp.py`, below): when it starts its live link, every open tab connects (**●
   live**); `view_live` with `page` a `.vcd` / `.fst` and `open: true` opens it in the VS Code window that has the file
@@ -190,11 +190,13 @@ page). The checks:
 |---|---|
 | `bookmark-bad`, `arrow-bad` | an entry of `bookmarks` / `arrows` is not an object: left out |
 | `bookmark-outside-view` | a bookmark's time is outside its view's window: not drawn (the list still has it) |
-| `bookmark-signal-missing` | its `signal` is no row of the view: the circle goes on the time axis (a row is named by its full path, or as the config gave it with `scope`; the warning names the row whose last part matches) |
+| `bookmark-signal-missing` | its `signal` is no row of the view: the circle goes on the time axis (a row is named by its full path, or as the config gave it, in a group too, or by its path in the dump; the warning names the row whose last part matches) |
 | `bookmark-duplicate`, `bookmark-time`, `bookmark-key` | a number twice (arrows take the first), a `t` that is no time, an unknown key (`lable`) |
 | `bookmark-link-missing` | a `link` to a view the page has not got |
 | `arrow-end-missing`, `arrow-key` | an arrow from or to no bookmark of the view (not drawn), an unknown key |
 | `marker-no-match`, `marker-key` | a marker's event matches nothing in the window, an unknown key |
+| `expr-name-missing`, `exprs-no-engine` | an expression reads a name the page will not find (its row would stay empty and look like "never true"); expressions on a page without the engine (`--no-sva`, `"sva": false`) |
+| `gap-view-off`, `setting-signal-missing` | `gapView` without `gaps` does nothing; `cycleClock`, `gapClock`, `gapSignals` or `gapAux` name no row of the view, with the cycles or the gaps on |
 | `bind-unknown` | a binding to an assertion that is not in the files (`mc_fsm_gap` for `mc_fsm_from_gap`) |
 | `svashow-no-match` | an `svaShow` name or pattern that matches no assertion |
 | `bookmarks-close` | two circles on one row nearer than 16 px at 1000 px of the whole window: they overlap (a heuristic; `"lift": true` puts one in the lane above, `"below"` in the one under) |
@@ -333,7 +335,7 @@ add theirs (`WaveLens.registerDefaults`).
 | `menuTipDelay` | 2000 | ms before a tooltip in that menu shows (the bar's: 350 ms) |
 | `cursorSnap` | 8 | px: a click on the waves puts the cursor on an edge of the signal under the pointer this near (alt+click: not); 0 = off |
 | `showWidth` | true | a bus's width after its name (`[7:0]`, a field's `[msb:lsb]`; a click on it: the bus bit by bit), in the viewer and the pictures; false: none |
-| `gapView` | false | the viewer's waves themselves with the gaps cut out, every change of a gap setting shown at once (**Gaps ▸ on the waves**, `gv`); a picture saved cuts where the waves do; a range or the cursors measured through gaps count the time and the clocks hidden, the clock of the gaps said on any row, an end on a gap's column at the side nearer (alt: inside it) |
+| `gapView` | false | with `gaps`: the viewer's waves themselves with the gaps cut out, every change of a gap setting shown at once (**Gaps ▸ on the waves**, `gv`); a picture saved cuts where the waves do; a range or the cursors measured through gaps count the time and the clocks hidden, the clock of the gaps said on any row, an end on a gap's column at the side nearer (alt: inside it) |
 | `gaps`, `gapIdle`, `gapKeep` | false, 16, 2 | the pictures and WaveDrom saved from the viewer's menu (and static SVGs) leave out the stretches where no signal but a clock changes for `gapIdle`, all but `gapKeep` after the last change and before the next one, a break `\|` in their place; lengths in clock cycles (`16`) or a time (`"2us"`); the menu's **Gaps** rows change them (kept in the browser) |
 | `gapSignals`, `gapClock`, `gapAux`, `gapOnly`, `gapCount`, `gapLine` | none, none, none, false, `clock`, `dashdot` | the signals the gaps follow (paths, names, `*` patterns; none: every signal drawn); the clock whose cycles `gapIdle`, `gapKeep` and the texts count (none: the selected clock, else the nearest `*clk*`); the signals counted in a gap (with any texts; none: with `edges` every one but those and the clock); the viewer's picture and WaveDrom of those three kinds alone; the texts of a gap: `clock` (under the axis the time left out and the clock's cycles), `edges` (also a thin row under each signal counted with its rising and falling edges in the stretch left out, a bus its changes; none marked: every one), `rise`, `fall`, `any` (that row with these edges alone, or any change), `off`; the line of a gap: `dashdot`, `wave`, `waves`, `zigzag`, `double` |
 | `radix` | `auto` | bus values from `tv`: `auto` (≤ 6 bits decimal, else hex) `hex dec signed bin oct ascii`, `float` (IEEE 754 of a 16-, 32- or 64-bit bus), fixed point `q<F>` / `sq<F>` (unsigned / signed, F fraction bits: `q8`, `sq15`) |
@@ -345,7 +347,7 @@ add theirs (`WaveLens.registerDefaults`).
 | `toolsFolded` | false | the bar's tools folded to its title line (**▴** / **▾ tools** in the bar) |
 | `toolsHidden` | `[]` | the bar's tool groups left out by their labels (`["style", "dump"]`; the right button on the bar) |
 | `themeButton` | `auto` | **◐** in the bar's title line: the page's theme (auto, light, white, dark; kept in this browser; in VS Code its list, VS Code's colours too); `auto`: when the page has no theme button of its own (`viewer.html`, the VS Code tab) |
-| `version` | true | the version in the bar's title line, and the build the page was made from (`0.37 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
+| `version` | true | the version in the bar's title line, and the build the page was made from (`0.38 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
 | `keysLeft` | `[]` | keys the viewer leaves to its host: `["ctrl+G"]` (`ctrl+` is `cmd+` too, a letter by its place); the VS Code tab: `wavelens.keysToVSCode` |
 | `log` | `auto` | the log under the viewer (§ A dump straight in the browser): `auto` from the first thing done in the page (a dump read, Sources…, Load…), `true` always, `false` never |
 | `savePage` | true | the bar's **Save page**: this page as a `.view.html` with your view in it (§ Save and Load); false hides it and keeps no copy of the page's text |
@@ -1125,7 +1127,7 @@ Over the example the marks files of the two simulators are identical (checked on
 | `wl.check(got, expected, text='', signal=None, show='all')` | a bookmark with both values; a mismatch is an `AssertionError`, which fails the test; `show='fail'`: no bookmark when they agree, for a check in a loop |
 
 Warnings and errors logged during a test are bookmarks too (`logs=False`: not). A test keeps 200 bookmarks; past that only failed checks
-and errors, and its last bookmark says how many were left out. Nothing but `check` fails a test: outside a test the calls do nothing, a marks file that cannot be written is a
+and errors, and its last bookmark says how many were left out. A phase in cocotb's `ReadOnly`, where no signal can be written, keeps its exact time: begun there it is a span on the `TEST_STEP` row instead of a value, ended there the row goes back at the test's next call. Nothing but `check` fails a test: outside a test the calls do nothing, a marks file that cannot be written is a
 warning. A test's result is what cocotb says of it: `expect_fail` and `expect_error` count the same way (a test with `expect_fail`
 that fails is **FAIL (expected)** in orange, red when it fails unexpectedly). A test stopped by a timeout or a failed task cannot see the reason from
 inside: it is a FAIL that says what the log said last, even under an `expect_error` that names that reason.

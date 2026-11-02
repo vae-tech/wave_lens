@@ -6150,6 +6150,7 @@ def spike(browser, build):
 
 
 SECTIONS = {   # section: what it checks (smoke.py --list)
+    'names': 'a config\'s names on a page without "hierarchy": an expression and the clocks of the cycles and the gaps by a path, expressions with no binding, rows named the same whatever the waves',
     'pages': 'every page in both schemes: no console errors, no error boxes, drawn canvases, static SVGs, a PNG',
     'units': 'the pure functions of the viewer (WaveLens.internal), the VCD reader, the bus decoders, sva.js expressions: a table of cases',
     'readers': 'the page\'s VCD reader against the tools\' on every fixture of tests/unit/vcd (one rule, the same transitions)',
@@ -6209,6 +6210,62 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
 
 
 VERSION = re.search(r"version: '([^']+)'", (ROOT / 'wavelens' / 'src' / 'boot.js').read_text()).group(1)
+
+
+def names(browser, build):
+    """A view without "hierarchy" has flat rows: what looks for them by a path finds them by "abs", on pages built here."""
+    import tempfile
+    print('names: paths of the dump on a flat view')
+    lines = ['$timescale 1ns $end', '$scope module tb $end', '$var wire 1 c clk $end', '$var wire 1 d o_done $end', '$scope module dut_i $end', '$var wire 3 y fsm [2:0] $end', '$var wire 1 d o_done $end',
+             '$upscope $end', '$upscope $end', '$enddefinitions $end', '#0', '0c', 'b000 y', '0d']
+    for i in range(1, 41):
+        lines += [f'#{i * 5}', f'{i % 2}c'] + ([f'b{(i // 10) % 4:03b} y', f'{(i // 10) % 2}d'] if i % 10 == 0 else [])
+    with tempfile.TemporaryDirectory(prefix='wavelens-names-') as d:
+        vcd = pathlib.Path(d) / 'n.vcd'
+        vcd.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+        def page_of(tag, view, cfg=None):
+            c = pathlib.Path(d) / f'{tag}.json'
+            c.write_text(json.dumps({'waves': str(vcd), 'config': cfg or {}, 'views': {'v': {'scope': 'tb', 'exact': True, **view}}}), encoding='utf-8')
+            html = pathlib.Path(d) / f'{tag}.html'
+            r = subprocess.run([sys.executable, '-I', str(ROOT / 'tools' / 'mkhtml.py'), '--config', str(c), '--out', str(html)], capture_output=True, text=True)
+            check(r.returncode == 0, f'{tag}: built {r.stderr[-200:] if r.returncode else ""}')
+            page = browser.new_page()
+            page.goto(html.as_uri()); page.wait_for_load_state('networkidle')
+            return page, r.stderr
+        rows = ['clk', 'dut_i.fsm', 'dut_i.o_done']
+        exprs = [{'expr': 'dut_i.fsm == 1', 'label': 'below'}, {'expr': 'tb.dut_i.fsm == 1', 'label': 'full'}, {'expr': 'fsm == 1', 'label': 'leaf'}]
+        p, err = page_of('expr', {'signals': rows, 'exprs': exprs})
+        run = "(async () => { const v = document.querySelector('.wv').waveView; await SVA.ready(); return (await v.run([{op: 'expr_matches'}]))[0].exprs.map(x => [x.label, x.error || null, x.n]); })()"
+        got = p.evaluate(run)
+        check(got[0] == ['below', None, 1] and got[1] == ['full', None, 1], f'an expression by a path below the scope and by the full path, with no binding {got}')
+        check(got[2][1] == 'not found: fsm' and 'expr-name-missing' in err and '"fsm"' in err, f'a name that is not there: said in the page and by lint {got[2]}')
+        check(p.locator('.names .row', has_text='ƒ full').count() == 1, 'its row is on the page')
+        p.close()
+        p, _ = page_of('alias', {'signals': ['clk', 'dut_i.fsm=state'], 'exprs': ['tb.dut_i.fsm == 1', 'state == 1']})
+        got = p.evaluate(run.replace('x.label', 'x.expr'))
+        check([g[1:] for g in got] == [[None, 1], [None, 1]], f'an alias: its path and its name {got}')
+        p.close()
+        for name in ('tb.clk', 'clk'):
+            p, _ = page_of('cyc' + name.replace('.', ''), {'signals': rows}, {'cycles': True, 'cycleClock': name})
+            got = p.evaluate("WaveLens.views()[0].run([{op: 'cycles'}]).then(r => [r[0].clock, r[0].cycle])")
+            check(got[0] == 'clk' and got[1] is not None, f'cycleClock {name}: the band {got}')
+            p.close()
+        p, _ = page_of('gap', {'signals': rows}, {'gaps': True, 'gapClock': 'tb.clk', 'gapSignals': 'tb.dut_i.o_done'})
+        got = p.evaluate("(v => [v.gapClockRow() && v.gapClockRow().full, [...v.gapRows().ref].map(r => r.full)])(WaveLens.views()[0])")
+        check(got == ['clk', ['dut_i.o_done']], f'gapClock and gapSignals by a path of the dump {got}')
+        p.close()
+        p, _ = page_of('sel', {'signals': rows})
+        check(p.evaluate("WaveLens.views()[0].sigByPath('tb.dut_i.fsm').full") == 'dut_i.fsm', 'sigByPath: a path of the dump')
+        p.close()
+        p, _ = page_of('same', {'signals': ['clk', 'o_done', 'dut_i.o_done'], 'group': {'ctrl': ['o_done', 'dut_i.o_done']}})   # one net at two levels
+        got = p.evaluate("WaveLens.views()[0].M.rows.filter(r => r.type === 'sig').map(r => [r.full, r.tr.length])")
+        check([g[0] for g in got] == ['clk', 'ctrl.o_done', 'ctrl.dut_i.o_done'] and got[1][1] == got[2][1] > 2, f'one net at two levels: the rows keep their names, the copy its waves {got}')
+        p.close()
+        p, err = page_of('group', {'signals': ['clk', 'dut_i.fsm', 'dut_i.o_done'], 'group': {'ctrl': ['dut_i.fsm', 'dut_i.o_done']},
+                                   'bookmarks': [{'n': 1, 't': 10000, 'signal': 'dut_i.o_done', 'text': 'x'}, {'n': 2, 't': 20000, 'signal': 'tb.dut_i.fsm', 'text': 'y'}]})
+        got = p.evaluate("(v => v.bms.map(b => [b.signal, v.M.rows.some(r => r.type === 'sig' && r.full === b.signal)]))(WaveLens.views()[0])")
+        check(all(g[1] for g in got) and 'bookmark-signal-missing' not in err, f'bookmarks on rows of a group, by the name of the config and a path of the dump {got}')
+        p.close()
 
 
 def state_reload(page, v, st):
@@ -6380,6 +6437,7 @@ def main():
         run('lazy_dump', lazy_dump, b, build)
         run('readers', readers, b, build)
         run('vscode', vscode_tab, b, build)
+        run('names', names, b, build)
         run('marker_lanes', marker_lanes, b, build)
         run('ranges', ranges, b, build)
         run('buses', buses, b, build)

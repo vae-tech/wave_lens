@@ -544,6 +544,53 @@ class Compare(unittest.TestCase):
             self.assertIn('no "from" / "to" with it', err)
 
 
+class RowNames(unittest.TestCase):
+    """A row is called the same whatever the waves (WL-007), a config's name finds it in a group (WL-005), its path in the dump goes with it."""
+    VCD = ('$timescale 1ns $end\n$scope module tb $end\n$var wire 1 c clk $end\n$var wire 1 d o_done $end\n$var wire 1 e i_other $end\n'
+           '$upscope $end\n$enddefinitions $end\n#0\n0c\n0d\n0e\n')
+
+    def page(self, d, same, sig='ctrl.o_done', **view):
+        seq = ((10, 1, 1), (20, 0, 0), (30, 1, 1), (40, 0, 0), (50, 1, 1)) if same else ((10, 1, 0), (20, 0, 1), (30, 1, 1), (40, 0, 0), (50, 1, 0))
+        vcd, cfg = os.path.join(d, 'x.vcd'), os.path.join(d, 'x.json')
+        with open(vcd, 'w', encoding='utf-8') as f:
+            f.write(self.VCD + ''.join(f'#{t}\n{t // 30 % 2}c\n{a}d\n{b}e\n' for t, a, b in seq))
+        with open(cfg, 'w', encoding='utf-8') as f:
+            json.dump({'waves': vcd, 'scope': 'tb', 'exact': True, 'signals': ['clk', 'o_done', 'i_other'], 'group': {'ctrl': ['o_done', 'i_other']},
+                       'bookmarks': [{'n': 1, 't': 10000, 'signal': sig, 'text': 'x'}], **view}, f)
+        rc, out, err = H.run_tool('vcd2wavedrom', '--config', cfg)
+        self.assertEqual(rc, 0, err)
+        return json.loads(out), err
+
+    def test_the_waves_of_another_row_change_no_name(self):
+        with H.tmp() as d:
+            for same in (False, True):
+                doc, err = self.page(d, same)
+                self.assertEqual(V.row_paths(doc['signal']), ['clk', 'ctrl.o_done', 'ctrl.i_other'], f'same waves: {same}')
+                self.assertEqual(doc['bookmarks'][0]['signal'], 'ctrl.o_done')
+                self.assertNotIn('bookmark-signal-missing', err)
+            ctrl = doc['signal'][1]
+            self.assertEqual((ctrl[1]['abs'], ctrl[2]['same']), ('tb.o_done', 'tb.o_done'), 'the copy finds its net by "abs"')
+            self.assertNotIn('path', ctrl[1])
+
+    def test_a_config_name_or_a_dump_path_finds_a_row_in_a_group(self):
+        with H.tmp() as d:
+            for sig in ('o_done', 'tb.o_done'):
+                doc, err = self.page(d, False, sig)
+                self.assertEqual(doc['bookmarks'][0]['signal'], 'ctrl.o_done', sig)
+                self.assertNotIn('bookmark-signal-missing', err)
+
+    def test_a_name_of_no_row_still_warns(self):
+        with H.tmp() as d:
+            doc, err = self.page(d, False, 'o_gone')
+            self.assertEqual(doc['bookmarks'][0]['signal'], 'o_gone')
+            self.assertIn('bookmark-signal-missing', err)
+
+    def test_a_name_two_rows_answer_to_stays_and_warns(self):
+        specs = [{'abs': 'tb.a.x', 'path': 'a.x', 'name': 'x'}, {'abs': 'tb.b.x', 'path': 'b.x', 'name': 'x'}]
+        doc = {'signal': [{'name': 'x', 'path': 'tb.a.x', 'tv': []}, {'name': 'x', 'path': 'tb.b.x', 'tv': []}], 'bookmarks': [{'n': 1, 'signal': 'x'}]}
+        self.assertEqual(V.bookmarks_on_rows(doc, specs)[0]['signal'], 'x')
+
+
 class Lint(unittest.TestCase):
     """lint(): each check by itself, on a WaveJSON as convert() writes it (meta, signal, config) and the options."""
     import argparse
@@ -556,6 +603,47 @@ class Lint(unittest.TestCase):
 
     def codes(self, *a, **doc):
         return [w.split(':', 1)[0] for w in self.lint(*a, **doc)]
+
+    def exprs(self, *exprs, source='', **a):
+        import argparse
+        doc = {'sva': {'exprs': list(exprs), 'files': [{'path': 'x.sv', 'source': source}]}}
+        sig = [{'name': 'clk', 'abs': 'tb.clk', 'tv': []}, {'name': 'u.fsm', 'abs': 'tb.u.fsm', 'tv': [], 'enum': {'0': 'IDLE'}}, {'name': 'o_valid', 'abs': 'tb.o_valid', 'tv': []}]
+        return self.lint(argparse.Namespace(marker=[], no_match=[], scope='tb', **a), signal=sig, **doc)
+
+    def test_an_expression_reads_what_the_page_finds(self):
+        ok = ['clk', 'u.fsm == 3', 'tb.u.fsm == 3', "u.fsm == 2'b01 && $rose(clk)", '@(posedge clk) u.fsm == IDLE', 'u.fsm[1:0] == WIDTH', '##1 clk and not u.fsm', {'expr': 'fsm', 'scope': 'tb.u'}]
+        self.assertEqual(self.exprs(*ok, source='parameter WIDTH = 2;'), [])
+
+    def test_an_expression_of_a_name_nobody_has(self):
+        w = self.exprs('fsm == 3', 'u.gone && clk')
+        self.assertEqual([x.split(':')[0] for x in w], ['expr-name-missing'] * 2)
+        self.assertIn('views.v.exprs[0]: "fsm" is no signal of the view', w[0])
+        self.assertIn('u.fsm', w[0], 'names the row it may be')
+        self.assertIn('"u.gone"', w[1])
+
+    def test_an_expression_by_the_page_s_prefixes(self):
+        self.assertEqual(self.exprs('valid', sva_prefixes=['o_', 'i_']), [])
+
+    def test_no_engine_for_the_expressions(self):
+        self.assertEqual([x.split(':')[0] for x in self.exprs('clk', no_engine=True)], ['exprs-no-engine'])
+
+    def settings(self, **cfg):
+        import argparse
+        sig = [{'name': 'clk', 'abs': 'tb.clk', 'tv': []}, {'name': 'u.a', 'abs': 'tb.u.a', 'tv': []}]
+        return self.lint(argparse.Namespace(marker=[], no_match=[], page_config=cfg), signal=sig)
+
+    def test_gapview_alone(self):
+        self.assertEqual([x.split(':')[0] for x in self.settings(gapView=True)], ['gap-view-off'])
+        self.assertEqual(self.settings(gapView=True, gaps=True), [])
+
+    def test_a_setting_that_names_no_row(self):
+        self.assertEqual(self.settings(cycles=True, cycleClock='tb.clk'), [], 'its path in the dump')
+        self.assertEqual(self.settings(cycles=True, cycleClock='clk'), [])
+        self.assertEqual(self.settings(gaps=True, gapSignals='*.a, tb.clk', gapClock='clk'), [])
+        self.assertEqual(self.settings(cycleClock='gone'), [], 'the cycles are off')
+        w = self.settings(cycles=True, cycleClock='gone')
+        self.assertEqual(w, ['setting-signal-missing: views.v.config.cycleClock: "gone" is no row of the view: not used'])
+        self.assertEqual(len(self.settings(gaps=True, gapSignals='gone*, clk', gapAux='no')), 2)
 
     def test_clean(self):
         self.assertEqual(self.lint(bookmarks=[{'n': 1, 't': '100ns', 'signal': 'u.state'}, {'n': 2, 't': 500000, 'signal': 'tb.d.x'}],

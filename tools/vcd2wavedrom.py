@@ -686,7 +686,6 @@ def exact_mode(a, rd, specs, t_from, t_to):
         key = (s['width'], len(j['tv']), hash(tuple(j['tv'])))
         if key in first and len(j['tv']) > 2 and sig_json[first[key]]['tv'] == j['tv']:
             del j['tv']; j['same'] = first[key]
-            sig_json[first[key]]['path'] = first[key]
         else:
             first.setdefault(key, s['abs'])
     doc['head'] = {'text': a.title or os.path.basename(a.waves)}
@@ -707,8 +706,7 @@ def signal_settings(a, specs, sig_json):
         for k in ('radix', 'color', 'fill', 'style', 'enumColors', 'analog', 'height', 'fields'):
             if s['set'].get(k) not in (None, ''):   # "" = the global setting
                 j[k] = s['set'][k]
-        if a.hierarchy:
-            j['path'] = s['abs']
+        j['path' if a.hierarchy else 'abs'] = s['abs']   # "path" names the row; "abs" only says where it is in the dump, what names may find
 
 
 def group(a, rd, specs, sig_json):
@@ -779,6 +777,8 @@ def finish(a, rd, doc, specs, marks, t_from, t_to):
         doc['sva'] = svabuild.build(a.sva, a.bind, a.waves, a.sva_bin, t_from, t_to, [pfx] if isinstance(pfx, str) else pfx, a.sva_aliases)
     if any(isinstance(b, dict) and 'at' in b for b in doc.get('bookmarks') or []):   # after the assertions: an "at" of a binding's attempt
         doc['bookmarks'] = bookmarks_at(a, rd, doc['bookmarks'], specs, t_from, t_to)
+    if isinstance(doc.get('bookmarks'), list):
+        doc['bookmarks'] = bookmarks_on_rows(doc, specs)
     if span_list(a):
         doc['spans'] = spans_of(a, rd, doc.get('bookmarks') or [], specs, t_from, t_to)
     if getattr(a, 'compare', None):
@@ -1048,16 +1048,102 @@ def row_paths(items, anc=()):
     return out
 
 
-def row_items(items, anc=()):
-    """As row_paths: (the row's full path, id of its JSON) of each signal."""
+def row_walk(items, anc=()):
+    """As row_paths: (the row's full path, its JSON) of each signal."""
     out = []
     for it in items:
         if isinstance(it, list) and it and isinstance(it[0], str):
-            out += row_items(it[1:], anc + (it[0],))
+            out += row_walk(it[1:], anc + (it[0],))
         elif isinstance(it, list):
-            out += row_items(it, anc)
+            out += row_walk(it, anc)
         elif isinstance(it, dict) and 'name' in it:
-            out.append((it.get('path') or '.'.join(anc + (it['name'],)), id(it)))
+            out.append((it.get('path') or '.'.join(anc + (it['name'],)), it))
+    return out
+
+
+def row_items(items):
+    """As row_paths: (the row's full path, id of its JSON) of each signal."""
+    return [(full, id(it)) for full, it in row_walk(items)]
+
+
+def bookmarks_on_rows(doc, specs):
+    """The bookmarks with their "signal" as the rows of the page are called: a config says a signal as it said it in "signals", or by
+    its path in the dump, whatever group holds it. A name two rows answer to stays as it is: lint says so."""
+    rows = row_walk(doc.get('signal') or [])
+    have, by, names = {f for f, _ in rows}, {s['abs']: s for s in specs}, {}
+    for full, it in rows:
+        path = it.get('abs') or it.get('path')
+        s = by.get(path) or {}
+        for n in (path, s.get('path'), s.get('name')):
+            if n:
+                names.setdefault(n, set()).add(full)
+    def row(b):
+        hit = names.get(b.get('signal')) if isinstance(b, dict) and b.get('signal') not in have else None
+        return {**b, 'signal': next(iter(hit))} if hit and len(hit) == 1 else b
+    return [row(b) for b in doc['bookmarks']]
+
+
+SV_WORDS = frozenset('posedge negedge edge and or not iff intersect throughout within first_match disable if else inside dist strong weak always '
+                     'eventually nexttime until until_with implies s_always s_eventually s_nexttime s_until s_until_with'.split())
+SV_NAME = re.compile(r"(?<![\w$'.])[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)*")
+SV_NOISE = re.compile(r'''"[^"]*"|\d*'[sS]?[bBoOdDhH][0-9a-fA-F_xXzZ?]+''')
+
+
+def expr_names(text):
+    """The names an expression reads (the engine's list is the page's; this one is for lint, which has no engine): no literal, no $function, no keyword."""
+    return [n for n in SV_NAME.findall(SV_NOISE.sub(' ', str(text))) if n not in SV_WORDS]
+
+
+def expr_lint(doc, a, at):
+    """An expression's name the page will not find (sva.js resolveUp: from its scope up to the top, a full path; a row's shown name; package constants of
+    the sources) -> warnings: a row "ƒ" that stays empty looks like "never true"."""
+    sva = doc.get('sva') or {}
+    rows = row_walk(doc.get('signal') or [])
+    paths = {it.get('abs') or it.get('path') for _, it in rows}
+    shown = {it['name'] for _, it in rows} | {f for f, _ in rows}
+    labels = {v for _, it in rows for v in (it.get('enum') or {}).values()}
+    text = ' '.join(f.get('source') or '' for f in sva.get('files') or [])
+    pfx = getattr(a, 'sva_prefixes', None) or (getattr(a, 'wave_config', None) or {}).get('sortIgnore') or []
+    pfx = [p.strip() for p in (pfx.split(',') if isinstance(pfx, str) else pfx)]
+    bare = lambda n: next((n[len(p):] for p in pfx if p and n.startswith(p) and len(n) > len(p)), n)
+    tops = {p.split('.')[0] for p in paths if p}
+    def found(x, n):
+        chain, s = [], x.get('scope') or ''
+        while s:
+            chain.append(s)
+            s = s.rpartition('.')[0]
+        chain += [getattr(a, 'scope', None) or '', ''] + list(tops if len(tops) == 1 else ())
+        return n in shown or any(f'{s}.{n}' in paths if s else n in paths for s in chain) or bare(n) in {bare(k) for k in shown}
+    out = []
+    for i, x in enumerate(sva.get('exprs') or []):
+        x = x if isinstance(x, dict) else {'expr': x}
+        for n in dict.fromkeys(expr_names(x.get('expr', ''))):
+            ps = n.split('.')
+            if n in labels or re.search(rf'\b{re.escape(n)}\b', text) or any(found(x, '.'.join(ps[:k])) for k in range(len(ps), 0, -1)):   # (a shorter one: a struct's field)
+                continue
+            like = [f for f, it in rows if (it.get('abs') or it.get('path') or f).endswith('.' + ps[-1]) or f == ps[-1]]
+            out.append(f'expr-name-missing: {at}exprs[{i}]: "{n}" is no signal of the view: its row stays empty'
+                       + (f' (a row, or a path from the scope or the top: {" or ".join(like[:3])})' if like else ''))
+    if sva.get('exprs') and getattr(a, 'no_engine', False):
+        out.append(f'exprs-no-engine: {at}exprs: the page has no assertion engine (--no-sva, "sva": false): the expressions are left out')
+    return out
+
+
+def settings_lint(doc, a, at):
+    """A setting that does nothing, without a word: a clock or a signal of the gaps and the cycles no row answers to, gapView alone."""
+    st = {**(getattr(a, 'page_config', None) or {}), **(doc.get('config') or {})}
+    rows = row_walk(doc.get('signal') or [])
+    names = {n for f, it in rows for n in (f, it['name'], it.get('abs'), it.get('path')) if n}
+    hit = lambda p: any(glob_re(p).fullmatch(n) for n in names) if '*' in p else p in names
+    out = []
+    by_expr = any(isinstance(x, dict) and x.get('gap') for x in (doc.get('sva') or {}).get('exprs') or [])
+    if st.get('gapView') and not st.get('gaps') and not by_expr:
+        out.append(f'gap-view-off: {at}config.gapView: the waves are cut with "gaps": true too; alone it does nothing')
+    for key, on in (('cycleClock', st.get('cycles')), ('gapClock', st.get('gaps')), ('gapSignals', st.get('gaps')), ('gapAux', st.get('gaps'))):
+        v = st.get(key)
+        for p in filter(None, (x.strip() for x in (v if isinstance(v, list) else str(v or '').split(',')))) if on else ():
+            if not hit(p):
+                out.append(f'setting-signal-missing: {at}config.{key}: "{p}" is no row of the view: not used')
     return out
 
 
@@ -1148,6 +1234,7 @@ def lint(doc, a, where=None):
             bad = sorted(set(mk) - set(MK_KEYS))
             if bad:
                 out.append(f'marker-key: {at}marker[{i}]: unknown key(s) {", ".join(bad)} (have: {", ".join(MK_KEYS)})')
+    out += expr_lint(doc, a, at) + settings_lint(doc, a, at)
     for i, expr in getattr(a, 'no_match', []):
         out.append(f'marker-no-match: {at}marker[{i}]: "{expr}" matches nothing in the window: no marker')
     for where, expr in getattr(a, 'span_no_match', []):

@@ -12,7 +12,7 @@
 Lint (printed at every build, "mkhtml: lint: <code>: <JSON path>: <text>"; docs/USAGE.md "Lint"): bookmark-bad, arrow-bad, bookmark-outside-view,
 bookmark-signal-missing, bookmark-duplicate, bookmark-time, bookmark-key, bookmark-link-missing, arrow-end-missing, arrow-key, marker-no-match,
 marker-key, bind-unknown, svashow-no-match, bookmarks-close (a heuristic), enum-colors-hex, span-outside-view,
-span-signal-missing, span-key, span-every-no-match, compare-spans-cut. A marker or a span "every" on a signal the dump has not got
+span-signal-missing, span-key, span-every-no-match, compare-spans-cut, expr-name-missing, exprs-no-engine, gap-view-off, setting-signal-missing. A marker or a span "every" on a signal the dump has not got
 is no warning: the build stops there, as for any name of the config (marker-no-match: the signal is there, the event never happens).
 
 Config keys used here (the rest is vcd2wavedrom.py's, see its --help):
@@ -194,6 +194,8 @@ def build_views(a, cfg, base):
                 vcfg.pop('sva')
             o = vcd2wavedrom.resolve(vcd2wavedrom.parser().parse_args(argv), vcfg, base)
             o.sva_prefixes = vcfg['config'].get('sortIgnore', (cfg.get('config') or {}).get('sortIgnore'))   # the page's, for the names
+            o.page_config = {**(cfg.get('config') or {}), **vcfg['config']}   # what lint reads of the settings
+            o.no_engine = a.no_sva or cfg.get('sva') is False
             o.lint_at, o.prog, o.views_known = f'views.{key}' if key else None, 'mkhtml', list(views)   # (a bookmark's link: one of them)
             if a.no_sva:   # no engine in the page: nothing to evaluate either
                 o.sva, o.bind = [], []
@@ -226,7 +228,7 @@ def collect_sva(a, cfg, docs):
             if not any(g['path'] == f['path'] and g['source'] == f['source'] for g in sva_files):
                 sva_files.append(f)
         sva_notes += [n for n in x.pop('notes', []) if n not in sva_notes]
-        if not x.get('bind'):
+        if not x.get('bind') and not x.get('exprs'):
             del d['sva']
     return with_sva, sva_files, sva_notes
 

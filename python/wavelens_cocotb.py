@@ -100,7 +100,7 @@ class Marks:
 
     def __init__(self, signal='TEST_CASE', step='TEST_STEP', path=None, logs=True):
         self.signal, self.step, self.logs = signal, step, logs
-        self.steps, self.step_now, self.step_handle = {}, 0, None   # label -> its number on the waves; 0: no phase
+        self.steps, self.step_now, self.step_handle, self.step_late = {}, 0, None, None   # label -> its number on the waves; 0: no phase
         self.path = path or os.environ.get('WAVELENS_MARKS') or 'wavelens.marks.json'
         self.tests, self.now_test, self.dut = [], None, None
         self.warned, self.last_log = False, ''
@@ -120,6 +120,7 @@ class Marks:
     def check(self, got, expected, text='', signal=None, show='all'):
         """got == expected: a bookmark with both (`show='fail'`: only when they differ, for a check in a loop); else AssertionError,
         which fails the test."""
+        self.step_catch_up()
         ok = same(got, expected)
         g, e = text_of(got), text_of(expected)
         if not ok or show == 'all':
@@ -173,7 +174,7 @@ class Marks:
         self.tests.append(self.now_test)
         self.save()   # a crash inside the test leaves it, result "run"
         handle = self.signal and getattr(dut, self.signal, None)
-        self.step_handle = self.step and getattr(dut, self.step, None)
+        self.step_handle, self.step_late = self.step and getattr(dut, self.step, None), None
         self.set_step(0)
         if handle is not None:
             handle.value = n
@@ -200,15 +201,32 @@ class Marks:
                 t['where'] = where_of(exc)
         self.save()
 
-    def set_step(self, n):
-        self.step_now = n
-        if self.step_handle is not None:
+    def set_step(self, n, wait=True):
+        """The step signal to n -> False in cocotb's ReadOnly, where nothing can be written, and a description must not fail a test: with `wait` the
+        value goes at the test's next call. Never a task that writes later: a task primed in ReadOnly and cancelled at the test's end crashes Verilator 5."""
+        if self.step_handle is None:
+            self.step_now = n
+            return True
+        try:
             self.step_handle.value = n
+        except RuntimeError as e:
+            if 'ReadOnly' not in str(e):
+                raise
+            if wait:
+                self.step_now, self.step_late = n, n
+            return False
+        self.step_now, self.step_late = n, None
+        return True
+
+    def step_catch_up(self):
+        if self.step_late is not None:
+            self.set_step(self.step_late)
 
     def add(self, mark, keep=False):
         t = self.now_test
         if t is None:   # outside a test: nothing to hang it on, and no reason to fail
             return
+        self.step_catch_up()
         if len(t['marks']) >= MAX_MARKS and not keep:
             t['dropped'] += 1
             return
@@ -249,8 +267,8 @@ class Phase:
         m = self.marks
         self.t, self.start, self.before, self.number = m.now_test, m.now(), m.step_now, None
         if self.t is not None and m.step_handle is not None and not self.signals:
-            self.number = m.steps.setdefault(self.label, len(m.steps) + 1)
-            m.set_step(self.number)
+            n = m.steps.setdefault(self.label, len(m.steps) + 1)
+            self.number = n if m.set_step(n, wait=False) else None   # in ReadOnly: no value on the row, its span says the phase
         return self
 
     def __exit__(self, *exc):

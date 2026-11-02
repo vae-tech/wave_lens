@@ -111,8 +111,9 @@ def marks_of(doc):
         enum[str(t['n'])] = t['name']
         spans.append({'from': t['from'], 'to': end, 'label': f'{name} {t["name"]} · {word}', 'color': color})
         for p in t['phases']:
-            if 'step' not in p:   # on its value of the step signal the row says it
-                spans.append({'from': p['from'], 'to': p['to'], 'label': p['label'], 'signals': p.get('signals') or ([tc] if tc else []), 'color': 'c7'})
+            if 'step' not in p:   # on its value of the step signal the row says it (none: it began where no signal can be written, ReadOnly)
+                row = doc.get('step') or tc
+                spans.append({'from': p['from'], 'to': p['to'], 'label': p['label'], 'signals': p.get('signals') or ([row] if row else []), 'color': 'c7'})
         start = {'t': t['from'], 'label': name, 'color': MARK_COLOR, 'lift': 'below', 'text': f'{name} {t["name"]} starts' + (f': {t["doc"]}' if t['doc'] else '')}
         bms.append({**start, 'signal': tc} if tc else start)
         bms += [bookmark(m, tc) for m in t['marks']]

@@ -123,9 +123,10 @@ def wavejson_of(path, *args):
             elif isinstance(it, dict) and ('tv' in it or 'wave' in it or 'same' in it):
                 sigs[it.get('path') or it['name']] = it
     walk(doc['signal'])
+    by = {s.get('abs') or s.get('path'): s for s in sigs.values()}
     for s in sigs.values():
         if 'same' in s:
-            s['tv'] = sigs[s['same']]['tv']
+            s['tv'] = by[s['same']]['tv']
     return sigs
 
 

@@ -35,7 +35,8 @@ Object.assign(WaveView.prototype, {
     const gby = gp.gapBy ? gp.gapBy.length : 0;   // the expressions the waves are cut to
     const gref = sigs.length && sigs.every(x => this.gapRefSet().has(x));   // the signals clicked: the gaps follow them already
     const gck = this.gapClockRow(), isGck = !!sig && sig === gck;   // the clock the gaps count cycles of
-    const co = this.cycOpt(), cd = this.cycData(), cda = this.cycData(true), isCyc = !!sig && co.cycles && co.cycleClock === sig.full;   // the cycles
+    const co = this.cycOpt(), cd = this.cycData(), cda = this.cycData(true);
+    const isCyc = !!sig && co.cycles && (co.cycleClock === sig.full || co.cycleClock === (sig.src && sig.src.abs));   // the cycles
     const gaux = sigs.length && sigs.every(x => this.gapRows().aux.has(x)), naux = this.gapRows().aux.size;   // the signals counted in the gaps
     // one role per signal: the gaps follow it (gapSignals), count its changes (gapAux) or count its cycles (gapClock)
     const role = (key, on) => { const fs = sigs.map(x => x.full).filter(Boolean), g = this.gapOpt(), o = { gaps: true };

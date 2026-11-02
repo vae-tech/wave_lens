@@ -376,7 +376,7 @@ class WaveView {
   }
   // a signal by its full path: a row of the model, else a bit of a bus ("data[3]", shown or not)
   sigByPath(p) {
-    const s = this.M.rows.find(r => r.type === 'sig' && r.full === p); if (s || typeof p !== 'string') return s || null;
+    const s = this.M.rows.find(r => r.type === 'sig' && (r.full === p || (r.src && r.src.abs === p))); if (s || typeof p !== 'string') return s || null;
     const m = /^(.+)\[(0|[1-9]\d*)\]$/.exec(p), v = m && this.M.rows.find(r => r.full === m[1] && isVec(r));
     return v && +m[2] < v.width ? this.bitsOf(v)[v.width - 1 - m[2]] : null;
   }

@@ -2,17 +2,17 @@
 window.APB_WAVES = {
 "transfers": {
   "signal": [
-   {"name": "PCLK", "wave": "p..................."},
-   {"name": "PRESETn", "wave": "0.1................."},
-   {"name": "phase", "wave": "3...453.45..3.453...", "data": ["IDLE", "SETUP", "ACCESS", "IDLE", "SETUP", "ACCESS", "IDLE", "SETUP", "ACCESS", "IDLE"], "width": 2, "enum": {"0": "IDLE", "1": "SETUP", "2": "ACCESS"}},
-   {"name": "PSEL", "wave": "0...1.0.1...0.1.0..."},
-   {"name": "PENABLE", "wave": "0....10..1..0..10..."},
-   {"name": "PWRITE", "wave": "0...1...0.....1....."},
-   {"name": "PADDR", "wave": "=...=.........=.....", "data": ["0x00", "0x04", "0x40"], "width": 8},
-   {"name": "PWDATA", "wave": "=...=...=.....=.....", "data": ["0x00000000", "0xCAFE0001", "0x00000000", "0xDEADBEEF"], "width": 32},
-   {"name": "PRDATA", "wave": "=..........==.......", "data": ["0x00000000", "0xCAFE0001", "0x00000000"], "width": 32},
-   {"name": "PREADY", "wave": "0....10....10..10..."},
-   {"name": "PSLVERR", "wave": "0..............10..."}
+   {"name": "PCLK", "wave": "p...................", "abs": "apb_tb.PCLK"},
+   {"name": "PRESETn", "wave": "0.1.................", "abs": "apb_tb.PRESETn"},
+   {"name": "phase", "wave": "3...453.45..3.453...", "data": ["IDLE", "SETUP", "ACCESS", "IDLE", "SETUP", "ACCESS", "IDLE", "SETUP", "ACCESS", "IDLE"], "width": 2, "enum": {"0": "IDLE", "1": "SETUP", "2": "ACCESS"}, "abs": "apb_tb.phase"},
+   {"name": "PSEL", "wave": "0...1.0.1...0.1.0...", "abs": "apb_tb.PSEL"},
+   {"name": "PENABLE", "wave": "0....10..1..0..10...", "abs": "apb_tb.PENABLE"},
+   {"name": "PWRITE", "wave": "0...1...0.....1.....", "abs": "apb_tb.PWRITE"},
+   {"name": "PADDR", "wave": "=...=.........=.....", "data": ["0x00", "0x04", "0x40"], "width": 8, "abs": "apb_tb.PADDR"},
+   {"name": "PWDATA", "wave": "=...=...=.....=.....", "data": ["0x00000000", "0xCAFE0001", "0x00000000", "0xDEADBEEF"], "width": 32, "abs": "apb_tb.PWDATA"},
+   {"name": "PRDATA", "wave": "=..........==.......", "data": ["0x00000000", "0xCAFE0001", "0x00000000"], "width": 32, "abs": "apb_tb.PRDATA"},
+   {"name": "PREADY", "wave": "0....10....10..10...", "abs": "apb_tb.PREADY"},
+   {"name": "PSLVERR", "wave": "0..............10...", "abs": "apb_tb.PSLVERR"}
   ],
   "head": {"text": "APB3 · three transfers · clock-sampled", "tick": 0},
   "time": {"t0": 5000, "t1": 205000, "cycle": 10000, "unit": "ps"},

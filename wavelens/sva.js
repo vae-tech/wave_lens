@@ -497,8 +497,9 @@ const parent = p => parts(p).slice(0, -1).join('.');
 // sigs: Map(scope -> [rows]), scopes: [path] in display order, group(path) -> its group (null: the root or none)}
 function scopeInfo(M) {
   if (M.svaScopes) return M.svaScopes;
-  const abs = new Map(), of = new Map(), sigs = new Map();
+  const abs = new Map(), of = new Map(), sigs = new Map(), dump = new Map();
   let root = (M.src.meta && M.src.meta.scope) || null;
+  for (const r of M.rows) if (r.type === 'sig' && r.src && r.src.abs && !dump.has(r.src.abs)) dump.set(r.src.abs, r);   // by its path in the dump
   for (const r of M.rows) {
     if (r.type !== 'sig' || !(r.src && r.src.path)) continue;
     let p = r.src.path;
@@ -517,7 +518,7 @@ function scopeInfo(M) {
   const scopes = [...(sigs.has(root) ? [root] : []), ...M.rows.filter(r => abs.has(r)).map(g => abs.get(g))];
   const byPath = new Map();
   for (const [g, p] of abs) if (!byPath.has(p)) byPath.set(p, g);
-  return (M.svaScopes = { root, abs, of, sigs, scopes: [...new Set(scopes)], group: p => (p === root ? null : byPath.get(p) || null) });
+  return (M.svaScopes = { root, abs, of, sigs, dump, scopes: [...new Set(scopes)], group: p => (p === root ? null : byPath.get(p) || null) });
 }
 const leaf = r => (r.src && r.src.path ? parts(r.src.path).pop() : r.name);
 const strip = (n, pfx) => { const p = pfx.find(p => n.startsWith(p) && n.length > p.length); return p ? n.slice(p.length) : n; };
@@ -525,7 +526,7 @@ const strip = (n, pfx) => { const p = pfx.find(p => n.startsWith(p) && n.length 
 // a hierarchical name (u_fifo.full) below S -> {row, how?} | null
 function lookup(I, S, name, pfx) {
   const ps = parts(name), base = ps.pop(), rows = I.sigs.get(join(S, ps.join('.'))) || [];
-  let r = rows.find(r => leaf(r) === base);
+  let r = I.dump.get(join(S, name)) || rows.find(r => leaf(r) === base);
   if (r) return { row: r };
   r = rows.find(r => r.name === base);
   if (r) return { row: r, how: `${name} → ${r.full} (shown as ${r.name})` };
@@ -2372,7 +2373,7 @@ function rowsOf(M, o) {
   const out = {}, pre = o && o.scope ? o.scope + '.' : null;
   for (const [n, p] of Object.entries((o && o.signals) || {})) {
     const rel = pre && p.startsWith(pre) ? p.slice(pre.length) : null;
-    const r = M.rows.find(r => r.type === 'sig' && !r.same && (r.full === p || (r.src && r.src.path === p))) ||
+    const r = M.rows.find(r => r.type === 'sig' && !r.same && (r.full === p || (r.src && (r.src.path === p || r.src.abs === p)))) ||
       (rel && M.rows.find(r => r.type === 'sig' && !r.same && r.full === rel));
     if (r) out[n] = r;
   }

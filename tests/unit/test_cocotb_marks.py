@@ -27,6 +27,20 @@ class Sig:
         self.values.append(v)
 
 
+class ReadOnlySig(Sig):   # as cocotb 2.0 in ReadOnly: a write raises
+    frozen, error = False, 'Attempting settings a value during the ReadOnly phase.'
+
+    @property
+    def value(self):
+        return self.values[-1]
+
+    @value.setter
+    def value(self, v):
+        if self.frozen:
+            raise RuntimeError(self.error)
+        self.values.append(v)
+
+
 class Dut:
     _path = 'tb'
 
@@ -194,6 +208,69 @@ class Library(Harness):
         t = self.run_test(wl, bad, dut)['tests'][0]
         self.assertEqual(t['phases'], [{'label': 'p', 'from': 0, 'to': 30, 'step': 1}])
         self.assertEqual(dut.TEST_STEP.values[-1], 0)
+
+    def test_a_phase_in_readonly_fails_nothing(self):   # WL-004: cocotb refuses a write in ReadOnly; a description must not fail a test
+        wl = self.marks()
+        dut = Dut('TEST_CASE', 'TEST_STEP')
+        dut.TEST_STEP = ReadOnlySig('dut.TEST_STEP')
+
+        async def one(dut):
+            dut.TEST_STEP.frozen = True
+            self.t = 10
+            with wl.phase('look'):
+                self.t = 20
+            wl.note('seen')
+        t = self.run_test(wl, one, dut)['tests'][0]
+        self.assertEqual(t['result'], 'pass')
+        self.assertEqual(t['phases'], [{'label': 'look', 'from': 10, 'to': 20}], 'its time exact; no number: the row never had it')
+        self.assertEqual(dut.TEST_STEP.values, [0], 'nothing written, nothing to restore')
+
+    def test_a_phase_left_in_readonly_catches_up(self):
+        wl = self.marks()
+        dut = Dut('TEST_CASE', 'TEST_STEP')
+        dut.TEST_STEP = ReadOnlySig('dut.TEST_STEP')
+
+        async def one(dut):
+            with wl.phase('look'):
+                self.t = 20
+                dut.TEST_STEP.frozen = True
+            self.t = 30
+            dut.TEST_STEP.frozen = False
+            wl.check(1, 1, show='fail')   # (a check leaves no bookmark: it is still the test's next call)
+        t = self.run_test(wl, one, dut)['tests'][0]
+        self.assertEqual(t['result'], 'pass')
+        self.assertEqual(t['phases'], [{'label': 'look', 'from': 0, 'to': 20, 'step': 1}])
+        self.assertEqual(dut.TEST_STEP.values, [0, 1, 0], 'the value back at the next call')
+
+    def test_a_late_step_goes_with_the_test(self):
+        wl = self.marks()
+        dut = Dut('TEST_CASE', 'TEST_STEP')
+        dut.TEST_STEP = ReadOnlySig('dut.TEST_STEP')
+
+        async def one(dut):
+            with wl.phase('look'):
+                dut.TEST_STEP.frozen = True
+
+        async def two(dut):
+            dut.TEST_STEP.frozen = False
+            wl.note('here')
+        self.run_test(wl, one, dut)
+        dut.TEST_STEP.frozen = False
+        self.run_test(wl, two, dut)
+        self.assertEqual(dut.TEST_STEP.values, [0, 1, 0], 'the next test begins at 0, nothing left over')
+
+    def test_another_error_of_a_write_is_not_hidden(self):
+        wl = self.marks()
+        dut = Dut('TEST_CASE', 'TEST_STEP')
+        dut.TEST_STEP = ReadOnlySig('dut.TEST_STEP')
+        dut.TEST_STEP.error = 'the simulator is gone'
+
+        async def one(dut):
+            dut.TEST_STEP.frozen = True
+            with wl.phase('look'):
+                pass
+        t = self.run_test(wl, one, dut)['tests'][0]
+        self.assertEqual((t['result'], t['message']), ('fail', 'RuntimeError: the simulator is gone'))
 
     def test_expect_fail_and_cancel(self):
         wl = self.marks()
@@ -433,6 +510,15 @@ class Merge(unittest.TestCase):
     def test_config_without_views(self):
         with self.assertRaisesRegex(testmarks.WaveError, 'views'):
             testmarks.merge({}, DOC)
+
+
+class ReadOnlyPhase(unittest.TestCase):
+    def test_its_span_goes_on_the_step_row(self):   # no value on TEST_STEP says it, and the test's row keeps the test's name
+        doc = {'signal': 'TEST_CASE', 'step': 'TEST_STEP', 'steps': {'1': 'a'}, 'tests': [{'n': 1, 'name': 't', 'doc': '', 'from': 0, 'to': 30, 'result': 'pass',
+               'message': '', 'where': '', 'marks': [], 'phases': [{'label': 'look', 'from': 10, 'to': 20}, {'label': 'a', 'from': 20, 'to': 30, 'step': 1}]}]}
+        spans = testmarks.marks_of(doc)[1]
+        self.assertEqual([s['signals'] for s in spans if s.get('label') == 'look'], [['TEST_STEP']])
+        self.assertFalse([s for s in spans if s.get('label') == 'a'], 'one the row says needs no span')
 
 
 class Split(unittest.TestCase):
