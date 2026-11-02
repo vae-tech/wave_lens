@@ -6,6 +6,8 @@
   mkhtml.py cyc=cyc.json exact=exact.json --settings cfg.json --out page.html   # from WaveJSON files
   mkhtml.py --config x.config.json --sva checks.sv --bind a_req_ack@tb.dut --out x.html   # assertions bound (make html SVA= BIND=)
   mkhtml.py --config x.config.json --lint [--strict]       # the warnings of every view, no page (--strict: exit 1 on one)
+  mkhtml.py --config x.config.json --waves dump.vcd --marks run.marks.json --out x.html   # a cocotb test's marks on the waves
+  mkhtml.py … --marks run.marks.json --marks-views tests                                  # each test apart: the page shows one at a time
 
 Lint (printed at every build, "mkhtml: lint: <code>: <JSON path>: <text>"; docs/USAGE.md "Lint"): bookmark-bad, arrow-bad, bookmark-outside-view,
 bookmark-signal-missing, bookmark-duplicate, bookmark-time, bookmark-key, bookmark-link-missing, arrow-end-missing, arrow-key, marker-no-match,
@@ -16,6 +18,10 @@ is no warning: the build stops there, as for any name of the config (marker-no-m
 Config keys used here (the rest is vcd2wavedrom.py's, see its --help):
   "config"  global wavelens settings for the page: theme, colors, rowHeight, nameWidth, fontSize, sort, sortIgnore, …
   "page"    {"title": "...", "intro": "..."}
+  "marks"   a marks file of a cocotb test (python/wavelens_cocotb.py; --marks): its tests as spans, bookmarks and jumps in every
+            view; a view's "marks": false keeps it out (docs/USAGE.md "Marks from a cocotb test")
+  "marksViews"  whole (default): all the tests on one waveform; tests: a view of each test and the page shows one at a time, with a
+            button per test; both: those and the whole run (--marks-views)
   views[k]  "render": "view" (interactive, default) | "svg" (static figure) | "both"; "note": text under the heading
   "sva"     ["checks.sv", …] (top level or in a view) SystemVerilog assertion files: parsed with the sva CLI (one
             compilation unit), inlined as window.SVA for the assertions panel; parse errors are shown in the page.
@@ -32,7 +38,7 @@ import argparse, datetime, html, json, os, sys
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)   # -I drops the script dir from sys.path
-import common, svabuild, vcd2wavedrom, wavejson  # noqa: E402
+import common, svabuild, testmarks, vcd2wavedrom, wavejson  # noqa: E402
 from common import WaveError, add_sva_bin_arg, check_config, run_main  # noqa: E402
 
 FW = os.path.join(os.path.dirname(HERE), 'wavelens')   # the framework files inlined into the page
@@ -68,10 +74,17 @@ p {{ max-width: 80ch; margin: 0 0 10px; }}
 .sva-report .notes, .sva-report .more {{ font-size: 12.5px; color: var(--muted); }}
 @media print {{
   h2, .note {{ break-after: avoid; }} button.theme, .wv .bar .tools, .wv .sva {{ display: none; }}   /* a tall viewer breaks over pages; its title and cursor stay */
+  section[data-view][hidden] {{ display: block; }} .tests {{ display: none; }}
   .sva-report {{ break-before: page; }} .sva-report table {{ font-size: 9.5px; width: 100%; table-layout: auto; }}
   .sva-report th, .sva-report td {{ white-space: normal; padding: 2px 4px; overflow-wrap: anywhere; }}
 }}
 .bench {{ background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; margin-block: 10px 18px; min-width: 0; }}
+.tests {{ display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; }}
+.tests button {{ font: inherit; font-size: 13px; text-align: left; border: 1px solid var(--line); border-left: 4px solid var(--tc, var(--line)); background: var(--panel); color: var(--fg);
+  border-radius: 4px; padding: 4px 10px; cursor: pointer; }}
+.tests button small {{ color: var(--tc, var(--muted)); font-weight: 600; margin-left: 6px; font-size: inherit; }}
+.tests button:hover {{ border-color: var(--accent); }}
+.tests button.on {{ background: var(--panel-2); font-weight: 600; box-shadow: inset 0 -2px 0 var(--tc, var(--accent)); }}
 button.theme {{ font: inherit; font-size: 12.5px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); border-radius: 4px; padding: 3px 10px; cursor: pointer; }}
 button.theme:hover {{ border-color: var(--accent); color: var(--accent); }}
 </style>
@@ -81,7 +94,7 @@ button.theme:hover {{ border-color: var(--accent); color: var(--accent); }}
   <div class="row1"><h1>{title}</h1><button type="button" class="theme" id="theme">Theme: {theme_name}</button></div>
   {intro}
   <div class="facts">{facts}</div>
-</header>
+{nav}</header>
 {sections}
 <script>window.WAVELENS_CONFIG = {settings};</script>{build}
 <script>
@@ -90,7 +103,7 @@ window.WAVES = {data};
 <script>
 {js}
 </script>
-{bus}{sva}<script>
+{bus}{sva}{nav_js}<script>
 (function () {{ // page theme button: auto -> light -> white -> dark
   const b = document.getElementById('theme'), modes = ['auto', 'light', 'white', 'dark'];
   let i = Math.max(0, modes.indexOf(document.documentElement.dataset.theme || 'auto'));
@@ -100,6 +113,30 @@ window.WAVES = {data};
 </body>
 </html>
 '''
+
+
+NAV_JS = '''<script>
+(function () { // the tests' buttons: one view of the page at a time; #tc3 in the address opens that one
+  const secs = [...document.querySelectorAll('section[data-view]')], btns = [...document.querySelectorAll('.tests button')];
+  const show = k => { secs.forEach(s => { s.hidden = s.dataset.view !== k; }); btns.forEach(b => b.classList.toggle('on', b.dataset.view === k)); };
+  btns.forEach(b => b.addEventListener('click', () => {
+    show(b.dataset.view);
+    try { history.replaceState(null, '', '#' + b.dataset.view); } catch (e) { /* a file: page that may not */ }
+  }));
+  const k = decodeURIComponent(location.hash.slice(1));
+  show(secs.some(s => s.dataset.view === k) ? k : secs[0].dataset.view);
+})();
+</script>
+'''
+
+
+def nav_html(nav):
+    """The buttons of a page with a view per test."""
+    def one(e):
+        style = f' style="--tc: {html.escape(e["color"], quote=True)}"' if e.get('color') else ''
+        return (f'<button type="button" data-view="{html.escape(e["key"], quote=True)}"{style}>{html.escape(e["label"])}'
+                f'<small>{html.escape(e["word"])}</small></button>')
+    return f'<nav class="tests">{"".join(one(e) for e in nav)}</nav>\n'
 
 
 def script_json(text):
@@ -232,6 +269,10 @@ def render_page(a, cfg, docs, renders, sva_views, with_sva, sva_files, sva_notes
     if sva_files:
         n = sum(len((f.get('parsed') or {}).get('assertions', [])) for f in sva_files)
         facts.insert(3, ('Assertions', f'{n} in {", ".join(f["name"] for f in sva_files)}' if n else ', '.join(f['name'] for f in sva_files)))
+    nav = [e for e in getattr(a, 'nav', None) or [] if e['key'] in docs]
+    nav = nav if len(nav) > 1 else []   # (--view left one: nothing to choose)
+    shown = {e['key'] for e in nav}
+    wrap = lambda k, text: f'<section data-view="{html.escape(k, quote=True)}">\n{text}\n</section>' if k in shown else text
     theme = settings.get('theme')
     with open(os.path.join(FW, 'wavelens.css'), encoding='utf-8') as f:
         css = f.read()
@@ -284,7 +325,8 @@ def render_page(a, cfg, docs, renders, sva_views, with_sva, sva_files, sva_notes
         theme_name=theme if theme in ('light', 'white', 'dark') else 'auto', css=css.replace('</style', '<\\/style'), js=js.replace('</script', '<\\/script'),
         intro=f'<p class="muted">{html.escape(page["intro"])}</p>' if page.get('intro') else '',
         facts=''.join(f'<div><b>{html.escape(k)}</b>{html.escape(v)}</div>' for k, v in facts),
-        sections='\n\n'.join([section(k, d, *renders[k]) for k, d in docs.items()] + ([report] if report else [])),
+        sections='\n\n'.join([wrap(k, section(k, d, *renders[k])) for k, d in docs.items()] + ([report] if report else [])),
+        nav=nav_html(nav) if nav else '', nav_js=NAV_JS if nav else '',
         settings=safe(json.dumps({k: v for k, v in settings.items() if k != 'theme'}, ensure_ascii=False)), sva=sva, bus=bus,
         build=f'\n<script>window.WAVELENS_BUILD = {safe(json.dumps(build, ensure_ascii=False))};</script>' if build else '',
         data=safe(wavejson.dumps_many(docs)))
@@ -311,12 +353,16 @@ def main():
     ap.add_argument('--bind', action='append', metavar='NAME@SCOPE', help='binding for every view (repeatable, NAME may be a pattern; replaces the top-level "bind")')
     ap.add_argument('--report', action='append', metavar='NAME@SCOPE', help='binding for the printable "Assertions" section only, over the whole '
                     'dump, in no view (repeatable, NAME may be a pattern; replaces the top-level "report")')
+    ap.add_argument('--marks-views', choices=testmarks.SPLITS, help='whole (default): all the tests on one waveform; tests: a view of each test, the '
+                    'page shows one at a time; both: that and the whole run (replaces the top-level "marksViews")')
     ap.add_argument('--no-sva', action='store_true', help='leave the assertion engine (wavelens/sva.js + sva.wasm.js, ~440 kB) out of the page, and evaluate nothing')
     ap.add_argument('--reproducible', action='store_true', help='no "Generated" time in the page: the same inputs give the same bytes '
                     '(or set SOURCE_DATE_EPOCH: that time, in UTC)')
     ap.add_argument('--lint', action='store_true', help='check the config: the views are converted and their warnings printed '
                     '(they are printed at every build too); without --out no page is written')
     ap.add_argument('--strict', action='store_true', help='a lint warning is an error (exit 1, no page)')
+    ap.add_argument('--marks', metavar='FILE', help='the marks of a cocotb test (python/wavelens_cocotb.py): its tests as spans, bookmarks and jumps '
+                    'in every view (a view\'s "marks": false keeps it out; replaces the top-level "marks")')
     ap.add_argument('--out', help='output .html (required unless --lint)')
     a = ap.parse_args()
     if not a.config and not a.files:
@@ -333,6 +379,15 @@ def main():
         cfg['bind'] = a.bind
     if a.report:
         cfg['report'] = {'bind': a.report}
+    marks = a.marks or (cfg.get('marks') and os.path.join(base, os.path.expanduser(cfg['marks'])))
+    split = a.marks_views or cfg.get('marksViews') or 'whole'
+    cfg.pop('marks', None), cfg.pop('marksViews', None)
+    if marks:
+        doc = testmarks.load(marks)
+        a.nav = testmarks.merge(cfg, doc, split)
+        print(f'mkhtml: marks: {testmarks.summary(doc)}', file=sys.stderr)
+    for view in (cfg.get('views') or {}).values():
+        view.pop('marks', None)   # (false, and no marks to keep it from)
     docs, renders, sva_views = build_views(a, cfg, base)
     n = getattr(a, 'lint_count', 0)
     if a.lint or a.strict:

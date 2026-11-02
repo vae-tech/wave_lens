@@ -37,7 +37,8 @@ tools/                        what you run: python3 -I tools/<tool>.py
   wavemcp.py                  the tools as an MCP server for AI agents (stdio; USAGE § AI agents); the live link to a page
   viewedit.py                 the viewer's commands on a page's edits or a saved state (USAGE § Commands and edits)
   base.config.json            base settings for generated configs (make config / make html WAVES=x.vcd)
-examples/                     apb/ axi_lite/ fsm/ demo/: testbench, config, README; *.sva: assertions for each;
+python/wavelens_cocotb.py      what a user's cocotb test imports: its marks (guides/cocotb.html); tools/testmarks.py puts them in a config
+examples/                     apb/ axi_lite/ fsm/ demo/: testbench, config, README; *.sva: assertions for each; cocotb_apb/: five cocotb tests;
                               test_video/: the CoaXPress checkers (cxp_sva.sv) and a demo of the operators with
                               deliberate failures (cxp_sva_demo.sv) over a real dump; the dump and page are not in
                               git: put your test_stream_video.fst there, make html
@@ -84,7 +85,7 @@ What each part needs:
 |---|---|
 | open the pages | a browser |
 | the tools | python3 ≥ 3.9 (standard library only) |
-| the examples | Verilator ≥ 5 (`make examples`) |
+| the examples | Verilator ≥ 5 (`make examples`); for the cocotb example (`make cocotb`, in `make check`) also Verilator ≥ 5.036 and `pip install cocotb` ≥ 2.0; `make cocotb SIM=questa` needs `vsim` on PATH, is not in `make check`, and smoke checks its page when it is built (checked on Questa 2021.1) |
 | the assertion engine | cargo ≥ 1.82 and `rustup target add wasm32-unknown-unknown` (`make sva-build`); musl for `make dist-linux`, mingw-w64 for `make dist-windows` |
 | the tests and the pictures | `pip install playwright`, `python3 -m playwright install chromium` (`make smoke`, `make check`); `fonts-ibm-plex` (or the network) for `make shots`, `make guide-shots`; GTKWave's `vcd2fst` and `fst2vcd` (`apt install gtkwave`) for `make check`: `sva fst` is compared with them (`tests/unit/test_svafst.py`, `sva/cli/tests/cli.rs`) |
 | the SystemVerilog style | verible (`make fmt`) and Verilator (`make lint`) |

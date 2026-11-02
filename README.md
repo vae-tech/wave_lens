@@ -116,6 +116,7 @@ and an agent live in the tab: [the VS Code guide](docs/guides/vscode.html).
 | [WaveDrom](docs/guides/wavedrom.html) | diagrams in your own page, the supported subset and the extensions |
 | [VS Code](docs/guides/vscode.html) | the extension over Remote-SSH or WSL |
 | [Commands and scripts](docs/guides/commands.html) | the viewer's commands from the console, a script or a live page |
+| [cocotb tests](docs/guides/cocotb.html) | a test marks up its own waves on Verilator or Questa, each test apart, PASS or FAIL with the expected value |
 | [AI agents (MCP)](docs/guides/mcp.html) | the MCP server: questions about a dump, a page marked up for a person |
 
 **Reference**: [`docs/USAGE.md`](docs/USAGE.md) has every setting, key, option and format;
@@ -129,6 +130,9 @@ and an agent live in the tab: [the VS Code guide](docs/guides/vscode.html).
 hand-written config, assertions (one deliberately wrong, so a failure trace shows) and a README; `make example EX=<ex>`
 builds its VCD, FST and two pages: `<ex>.html` from the config and `<ex>_all.html` from the whole hierarchy.
 [`demo`](examples/demo) is the Manchester transmitter behind [`docs/index.html`](docs/index.html) (`make demo`).
+[`cocotb_apb`](examples/cocotb_apb) is an APB3 slave under five cocotb tests on Verilator or Questa: each test marks up its own
+waves, with `TEST_CASE` and `TEST_STEP` in the testbench and PASS or FAIL with the expected value on bookmarks (`make cocotb`,
+`make cocotb SIM=questa`).
 [`test_video`](examples/test_video) binds the checkers of a CoaXPress device IP
 ([CoaxPress-RTL-core](https://github.com/vae-tech/CoaxPress-RTL-core), its PyUVM test `test_stream_video`) to its
 stream-video dump, which is not in git: with your `test_stream_video.fst` next to the config,

@@ -5,6 +5,26 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.36 — 2 November 2026
+
+A cocotb test marks up its own waves, on Verilator and on Questa, and each test can stand apart on the page.
+
+- **Marks from a cocotb test.** `python/wavelens_cocotb.py`: `@wl.test()` writes each test's number into the testbench's `TEST_CASE`,
+  `wl.phase` its phase's into `TEST_STEP`, `wl.note` and `wl.check` leave bookmarks, warnings and errors of the logs too. The run leaves a
+  marks file beside the dump. A test's result is what cocotb says of it, `expect_fail` and `expect_error` counted the same way.
+- **The page of a run.** `mkhtml.py --marks` (the config's `"marks"`): a span per test in the colour of its result, bookmarks at its start and
+  end, PASS or FAIL with the expected value and the line of the test, names on `TEST_CASE` and `TEST_STEP`, jumps made of the changes of
+  `TEST_CASE` in the dump. The window goes past the last test, so a failure where the dump ends stays in sight.
+- **Each test apart.** `--marks-views` (`"marksViews"`): `whole`, all the tests on one waveform; `tests`, a view of each with a button per test
+  and its result, one shown at a time, `page.html#tc3` opens that one; `both`, that and the whole run.
+- **Without WaveLens.** `WAVELENS_MARKS=off` is plain cocotb; a tree without the library takes the same calls from a few lines under
+  `except ImportError`. Either way `note` and `phase` do nothing and `check` still compares and fails the test.
+- **Verilator and Questa.** `examples/cocotb_apb`: an APB3 slave under five tests, one finding a deliberate bug. `run.py [--sim questa]` (`make cocotb
+  [SIM=questa]`) runs them and builds the page; its directory can be copied to a design of your own. Over the example the marks of the two
+  simulators are identical (Verilator 5.046, Questa 2021.1).
+- **MCP.** `wave_tests` reads a marks file: which tests failed, their windows, what they expected. `wave_page` takes `marks` and `marks_views`.
+- **Docs.** The guide *cocotb tests*, with USAGE, the README, DEVELOPMENT, the reference and the MCP guide.
+
 ## 0.35 — 1 November 2026
 
 The expressions as a list like the assertions', the waves cut to what they find, and the docs read against the code.

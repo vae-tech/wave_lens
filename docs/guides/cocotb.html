@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cocotb tests · WaveLens guides</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="guide.css">
+</head>
+<body>
+<header class="top"><nav>
+  <a class="home" href="index.html">WaveLens guides</a>
+  <a href="pages.html">Dump → page</a> <a href="types.html">State names</a> <a href="viewer.html">Viewer</a> <a href="modules.html">Modules</a>
+  <a href="compare.html">Compare</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
+  <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="vscode.html">VS Code</a>
+  <a href="commands.html">Commands</a> <a href="cocotb.html" aria-current="page">cocotb tests</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
+</nav></header>
+<div class="page toc-side">
+<main>
+<header class="hero"><div class="kicker">Guide</div><h1>cocotb tests on the waves</h1>
+<p class="lead">A test says what it does, and the page of the run shows it: which test ran when, its phases, what it checked, PASS or FAIL
+  with the expected value and the line of the test. On Verilator and on Questa, with the same five lines in the test, and the test still
+  runs where WaveLens is not.</p></header>
+
+<h2 id="example">The example</h2>
+<p><code>examples/cocotb_apb</code> is an APB3 register slave under five tests. The last finds a deliberate bug of the slave (bit 17 of
+  <code>SCRATCH</code> is lost) and is <code>expect_fail</code>, so the regression stays green with a failure on the page.</p>
+<pre><code>pip install cocotb                                     # 2.0 or later
+python3 examples/cocotb_apb/run.py                     # Verilator (5.036 or later)
+python3 examples/cocotb_apb/run.py --sim questa        # Questa: vlog and vsim on PATH
+# or from the repository's Makefile:
+make cocotb                                            # out/examples/cocotb_apb/cocotb_apb.html
+make cocotb SIM=questa                                 # out/examples/cocotb_apb_questa/cocotb_apb.html</code></pre>
+<p>Each leaves the simulator's files and <code>dump.vcd</code> in <code>out/sim/</code>, the marks in <code>out/apb.marks.json</code> and the
+  page in <code>out/cocotb_apb.html</code>. <code>run.py --help</code> has the rest: <code>--out</code>, <code>--views</code>, <code>--test</code>, <code>--no-marks</code>.</p>
+<figure><img src="img/cocotb-whole.png" alt="Five tests on one waveform: green spans, an orange one, bookmarks with the checks">
+  <figcaption>All the tests on one waveform: a span in the colour of each test's result, a row for the test, a row for its phase.</figcaption></figure>
+
+<h2 id="testbench">The testbench</h2>
+<p>Two variables nothing in the design reads, one the number of the running test, the other of its phase. So the run is in the dump itself,
+  also for what does not know the marks: <code>sva diff --segment TEST_CASE</code>, a span with <code>"every": "TEST_CASE"</code>.</p>
+<pre><code>logic [15:0] TEST_CASE /* verilator public_flat_rw */;
+logic [15:0] TEST_STEP /* verilator public_flat_rw */;
+
+`ifndef VERILATOR                    // Verilator traces by itself; another simulator writes the VCD here
+    initial begin
+        $dumpfile("dump.vcd");
+        $dumpvars(0, cocotb_apb_tb);
+    end
+`endif</code></pre>
+<p>The comment is for Verilator, which keeps only public variables within reach of cocotb; Questa takes it as a comment. Without the two the marks
+  are still written: a warning says so, and a phase is a span on the test's row instead.</p>
+
+<h2 id="test">The test</h2>
+<pre><code>from wavelens_cocotb import Marks
+wl = Marks()
+
+@wl.test()                                        # cocotb.test(), the same arguments
+async def test_wait_states(dut):
+    """A read of DATA is stretched by two wait states."""   # into the test's first bookmark
+    await start(dut)
+    with wl.phase('read'):                        # a value of TEST_STEP
+        got, _, waits = await read(dut, DATA)
+        wl.check(waits, 2, 'wait states', signal=dut.PREADY)   # a bookmark; a mismatch fails the test
+        wl.note('the slave stretched it', signal=dut.PREADY, label='wait')</code></pre>
+<table>
+  <tr><th>Call</th><th>Does</th></tr>
+  <tr><td><code>@wl.test(…)</code></td><td><code>cocotb.test(…)</code> around the test: its number on <code>TEST_CASE</code>, a bookmark at its start and end, a span in the colour of its result</td></tr>
+  <tr><td><code>wl.phase(label, signals=None)</code></td><td><code>with</code>, not awaited: the time inside it is <code>label</code> on <code>TEST_STEP</code>; <code>signals</code>: a span on those rows instead</td></tr>
+  <tr><td><code>wl.note(text, signal, label, color)</code></td><td>a bookmark now</td></tr>
+  <tr><td><code>wl.check(got, expected, text, signal, show)</code></td><td>a bookmark with both values; a mismatch fails the test; <code>show='fail'</code>: no bookmark when they agree, for a check in a loop</td></tr>
+</table>
+<p>Warnings and errors logged during a test are bookmarks too. A test's result on the page is what cocotb says of it, <code>expect_fail</code> and
+  <code>expect_error</code> counted the same way: <b>PASS</b> green, <b>FAIL</b> red, <b>FAIL (expected)</b> orange.</p>
+
+<h2 id="page">The page</h2>
+<p>The dump is not finished while the test runs, so the page is built after the simulation, from the dump and the marks file the run left beside it
+  (<code>WAVELENS_MARKS</code>, default <code>wavelens.marks.json</code>):</p>
+<pre><code>python3 -I tools/mkhtml.py --config x.config.json --waves dump.vcd --marks wavelens.marks.json --out x.html</code></pre>
+<p>A config needs only the view's signals: the example's is one view by hand; one that <code>mkconfig.py</code> made from the whole dump works too. The buttons
+  <span class="ui">→ TC1</span> … in the bar's <b>go to</b> are the changes of <code>TEST_CASE</code> in the dump, so a marks file of another run shows at once.</p>
+
+<h2 id="apart">Each test apart</h2>
+<p><code>--marks-views</code> (the config's <code>"marksViews"</code>) says how the tests are laid out:</p>
+<table>
+  <tr><th>Value</th><th>The page</th></tr>
+  <tr><td><code>whole</code> (default)</td><td>all the tests on one waveform</td></tr>
+  <tr><td><code>tests</code></td><td>a view of each test: its window, its marks, its doc and failure under the title; a button per test with its result, <b>one test shown at a time</b>; <code>page.html#tc3</code> opens that one, a print has them all</td></tr>
+  <tr><td><code>both</code></td><td>that, and the whole run as the first button</td></tr>
+</table>
+<figure><img src="img/cocotb-test.png" alt="One test alone: its failed check on PRDATA with the expected value">
+  <figcaption>The test that failed, alone: the red bookmark on <code>PRDATA</code> says what was expected.</figcaption></figure>
+<p>Each view holds its own window, so <code>tests</code> is about the size of <code>whole</code> and <code>both</code> twice that. A test's window goes a little
+  past its end, for the text of its last bookmark: that bit is the start of the next test, unmarked.</p>
+
+<h2 id="sims">Verilator and Questa</h2>
+<p>The test does not change. What differs is in the build, and <code>run.py</code> holds it in one table:</p>
+<table>
+  <tr><th></th><th>Verilator</th><th>Questa</th></tr>
+  <tr><td>the dump</td><td><code>--trace</code>, from the build</td><td><code>$dumpvars</code> in the testbench (cocotb's own <code>waves</code> gives a <code>.wlf</code>)</td></tr>
+  <tr><td>what cocotb reaches</td><td>public variables: the comment above</td><td><code>-voptargs=+acc</code></td></tr>
+  <tr><td>the timescale</td><td>an option of the build</td><td><code>`timescale</code> in the source</td></tr>
+  <tr><td>where it runs</td><td colspan="2">the build's directory, for both: <code>vsim</code> finds its library there</td></tr>
+</table>
+<p>The page is the same: over the example the marks files of the two are identical, every time and value, and the dumps agree up to the last time step, where
+  Questa ends before the test's last writes. Questa writes a port bit by bit (<code>PADDR [7]</code> …); the page shows the bus. Checked on Questa 2021.1.</p>
+
+<h2 id="without">A test that runs without WaveLens</h2>
+<p>The calls can stay in a test wherever it runs:</p>
+<ul>
+  <li><code>WAVELENS_MARKS=off</code> (<code>run.py --no-marks</code>): plain cocotb. No signal written, no file, the logs left alone.</li>
+  <li>A tree without <code>wavelens_cocotb.py</code>: the same calls from a few lines in the tests' common module:</li>
+</ul>
+<pre><code>try:
+    from wavelens_cocotb import Marks
+except ImportError:
+    class Marks:
+        def __init__(self, *args, **kw): pass
+        def test(self, *args, **kw): return cocotb.test(*args, **kw)
+        def phase(self, *args, **kw): return contextlib.nullcontext()
+        def note(self, *args, **kw): pass
+        def check(self, got, expected, text='', **kw):
+            assert got == expected, f'{text}: got {got}, expected {expected}'</code></pre>
+<p>Either way <code>note</code> and <code>phase</code> do nothing and <b><code>check</code> still compares and fails the test</b>: a check that went quiet would
+  pass anything.</p>
+
+<h2 id="own">Your own design</h2>
+<ol class="steps">
+  <li>Copy <code>run.py</code>, the test and the config of the example. <code>HDL</code>, <code>TOP</code>, <code>MODULE</code> and <code>CONFIG</code> at the top of <code>run.py</code> are all it knows of the design.</li>
+  <li>Add <code>TEST_CASE</code>, <code>TEST_STEP</code> and the dump to your testbench, as above.</li>
+  <li>Point it at WaveLens: <code>--wavelens PATH</code>, or <code>WAVELENS_HOME</code>. Its <code>python/</code> goes on the path of the simulator's Python, <code>tools/mkhtml.py</code> makes the page.</li>
+  <li>With a Makefile of cocotb's instead of <code>run.py</code>: put <code>python/</code> on <code>PYTHONPATH</code>, and call <code>mkhtml.py</code> after the simulation.</li>
+</ol>
+
+<h2 id="agents">For an AI agent</h2>
+<p><code>wave_tests</code> reads the marks file: which tests failed, when, what they expected. The window it gives is the one to ask
+  <code>wave_changes</code>, <code>wave_find</code> or <code>wave_sample</code> about. <code>wave_page</code> with <code>marks</code> and <code>marks_views</code> makes the page
+  (<a href="mcp.html">AI agents (MCP)</a>).</p>
+<p>All the options: <a href="../USAGE.md">USAGE.md</a> § Marks from a cocotb test.</p>
+</main>
+<nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
+</div>
+<footer>WaveLens 0.36 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+  <a href="../index.html">docs/index.html</a></footer>
+<script src="guide.js"></script>
+</body>
+</html>

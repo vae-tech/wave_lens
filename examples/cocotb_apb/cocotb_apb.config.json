@@ -1,0 +1,14 @@
+{
+  "description": "make cocotb: an APB3 slave under five cocotb tests. The marks of the run (test_apb.py, python/wavelens_cocotb.py) go into the view with --marks; the Makefile passes the dump with --waves.",
+  "scope": "cocotb_apb_tb",
+  "config": { "radix": "hex", "nameWidth": 170, "rowHeight": 26 },
+  "page": { "title": "APB3 · five cocotb tests marked up on the waves",
+            "intro": "cocotb drives an APB3 register slave. Each test writes its number into the testbench's TEST_CASE, its phases into TEST_STEP, and says what it does: its span and bookmarks come from the run, in the colour of its result. The last test finds a bug of the slave." },
+  "views": {
+    "run": {
+      "exact": true,
+      "signals": ["TEST_CASE", "TEST_STEP", "PCLK", "PRESETn", "PSEL", "PENABLE", "PWRITE", "PADDR", "PWDATA", "PRDATA", "PREADY", "PSLVERR"],
+      "title": "The whole regression · exact transitions"
+    }
+  }
+}

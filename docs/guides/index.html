@@ -14,12 +14,12 @@
   <a href="pages.html">Dump → page</a> <a href="types.html">State names</a> <a href="viewer.html">Viewer</a> <a href="modules.html">Modules</a>
   <a href="compare.html">Compare</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
   <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="vscode.html">VS Code</a>
-  <a href="commands.html">Commands</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
+  <a href="commands.html">Commands</a> <a href="cocotb.html">cocotb tests</a> <a href="mcp.html">AI agents (MCP)</a> <a href="../index.html">Reference</a>
 </nav></header>
 <div class="page">
 <main>
 <header class="hero">
-  <div class="kicker">WaveLens 0.35</div>
+  <div class="kicker">WaveLens 0.36</div>
   <h1>Guides</h1>
   <p class="lead">WaveLens turns a simulator dump (VCD or FST) or a
     <a href="https://wavedrom.com">WaveDrom</a> diagram into one self-contained HTML page: an interactive wave viewer,
@@ -58,8 +58,11 @@
   <a class="card" href="commands.html"><img src="img/commands-after.png" alt="" loading="lazy"><div>
     <h3>10 · Commands and scripts</h3>
     <p>What the buttons do, by name: from the console, <code>viewedit.py</code> on a page's file, an agent live in an open page.</p></div></a>
+  <a class="card" href="cocotb.html"><img src="img/cocotb-test.png" alt="" loading="lazy"><div>
+    <h3>11 · cocotb tests</h3>
+    <p>A test marks up its own waves on Verilator or Questa: its phases, checks, PASS or FAIL with the expected value, each test apart.</p></div></a>
   <a class="card" href="mcp.html"><img src="img/mcp-page.png" alt="" loading="lazy"><div>
-    <h3>11 · AI agents (MCP)</h3>
+    <h3>12 · AI agents (MCP)</h3>
     <p>The MCP server for Claude Code, Codex or any client: questions about a dump as short JSON answers, assertions, a page to show a person.</p></div></a>
   <a class="card" href="types.html"><img src="img/types-fsm.png" alt="" loading="lazy"><div>
     <h3>12 · State names and structs</h3>
@@ -78,6 +81,7 @@
   <li>Your dumps are on a server or in WSL and you work in VS Code: <a href="vscode.html">VS Code</a>.</li>
   <li>You write documentation with timing diagrams: <a href="wavedrom.html">WaveDrom</a>.</li>
   <li>You mark up pages from a script or a CI job: <a href="commands.html">Commands and scripts</a>.</li>
+  <li>You test with cocotb and want each test on the waves: <a href="cocotb.html">cocotb tests</a>.</li>
   <li>You let an AI agent debug a simulation: <a href="mcp.html">AI agents</a>.</li>
 </ul>
 <p>The complete lists — every setting, key and option — are in <a href="../USAGE.md">USAGE.md</a>; the reference with live examples is
@@ -86,7 +90,7 @@
   (<code>tests/guide_shots.py</code>) from the examples' pages; the VS Code one by <code>make vscode-e2e</code>.</p>
 </main>
 </div>
-<footer>WaveLens 0.35 · <a href="../../README.md">README</a> · <a href="../USAGE.md">USAGE.md</a> · <a href="../index.html">docs/index.html</a></footer>
+<footer>WaveLens 0.36 · <a href="../../README.md">README</a> · <a href="../USAGE.md">USAGE.md</a> · <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>
 </html>

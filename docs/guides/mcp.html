@@ -14,7 +14,7 @@
   <a href="pages.html">Dump → page</a> <a href="types.html">State names</a> <a href="viewer.html">Viewer</a> <a href="modules.html">Modules</a>
   <a href="compare.html">Compare</a> <a href="gaps.html">Gaps</a> <a href="sva.html">Assertions</a>
   <a href="buses.html">Bus transactions</a> <a href="wavedrom.html">WaveDrom</a> <a href="vscode.html">VS Code</a>
-  <a href="commands.html">Commands</a> <a href="mcp.html" aria-current="page">AI agents (MCP)</a> <a href="../index.html">Reference</a>
+  <a href="commands.html">Commands</a> <a href="cocotb.html">cocotb tests</a> <a href="mcp.html" aria-current="page">AI agents (MCP)</a> <a href="../index.html">Reference</a>
 </nav></header>
 <div class="page toc-side">
 <main>
@@ -67,7 +67,10 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
   <tr><td><code>sva_check</code></td><td>assertion files and / or text evaluated over the dump in a scope: the failed ones with their first
     failures, passed, vacuous, not evaluated, the covers</td></tr>
   <tr><td><code>wave_page</code></td><td>a viewer page (<code>.html</code>) or WaveJSON (<code>.json</code>) of signals over a window, with
-    assertions bound, to show a person; <code>compare</code>: a second dump's differences on it (<a href="compare.html">Compare</a>)</td></tr>
+    assertions bound, to show a person; <code>compare</code>: a second dump's differences on it (<a href="compare.html">Compare</a>); <code>marks</code>,
+    <code>marks_views</code>: the tests of a cocotb run on it (<a href="cocotb.html">cocotb tests</a>)</td></tr>
+  <tr><td><code>wave_tests</code></td><td>the tests of a cocotb run from its marks file: which failed, their windows, what they expected; <code>test</code>: one, with its
+    phases and marks (<a href="cocotb.html#agents">cocotb tests</a>)</td></tr>
   <tr><td><code>wave_to_fst</code></td><td>the VCD as an FST beside it (<code>sva fst</code>; <code>out</code>: another file), the FSM states of its types file in it
     (<code>types</code>, <code>no_types</code>): what was written, the notes with their lines</td></tr>
   <tr><td><code>wave_diff</code></td><td>two dumps compared change by change (<code>sva diff</code>, streamed: hundreds of MB): equal or not,
@@ -319,7 +322,7 @@ make mcp-bench AGENT=codex TASKS=a1,b3                 <span class="c"># some ta
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.35 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.36 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

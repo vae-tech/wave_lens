@@ -730,6 +730,92 @@ class Review(unittest.TestCase):
                 W.ps_of(bad)
 
 
+class Tests(unittest.TestCase):
+    """wave_tests and wave_page over the marks of a cocotb run."""
+    DOC = {'wavelens': 'marks', 'version': 1, 'signal': 'TEST_CASE', 'tests': [
+        {'n': 1, 'name': 'a', 'doc': 'first', 'from': 0, 'to': 100000, 'result': 'pass', 'message': '', 'where': '', 'dropped': 0, 'phases': [],
+         'marks': [{'t': 50000, 'kind': 'check', 'ok': True, 'got': '5', 'expected': '5', 'text': 'five', 'signal': 'PSEL'}]},
+        {'n': 2, 'name': 'b', 'doc': '', 'from': 100001, 'to': 300000, 'result': 'fail', 'message': 'got 0, expected 1', 'where': 't.py:9', 'dropped': 0,
+         'phases': [{'label': 'p', 'from': 100001, 'to': 200000}],
+         'marks': [{'t': 300000, 'kind': 'check', 'ok': False, 'got': '0', 'expected': '1', 'text': '', 'signal': 'PSEL'}, {'t': 150000, 'kind': 'note', 'text': 'n'}]}]}
+
+    def setUp(self):
+        d = H.tmp()
+        self.addCleanup(d.cleanup)
+        self.dir = d.name
+        self.marks, self.vcd = os.path.join(d.name, 'x.marks.json'), os.path.join(d.name, 'x.vcd')
+        with open(self.marks, 'w', encoding='utf-8') as f:
+            json.dump(self.DOC, f)
+        with open(self.vcd, 'w', encoding='utf-8') as f:
+            f.write('$timescale 1ps $end\n$scope module tb $end\n$var wire 8 ! TEST_CASE [7:0] $end\n$var wire 1 " PSEL $end\n$upscope $end\n'
+                    '$enddefinitions $end\n#0\nb1 !\n0"\n#50000\n1"\n#100001\nb10 !\n#300000\n0"\n')
+
+    def call(self, tool, **a):
+        text, err = W.call(tool, a)
+        self.assertFalse(err, text)
+        return json.loads(text)
+
+    def test_the_tests_of_a_run(self):
+        r = self.call('wave_tests', marks=self.marks)
+        self.assertEqual(r['summary'], '2 tests: 1 passed, 1 failed')
+        a, b = r['tests']
+        self.assertEqual((a['name'], a['result'], a['from'], a['to'], a['checks'], a['failed_checks'], a['doc']), ('a', 'pass', 0, 100, 1, 0, 'first'))
+        self.assertEqual((b['from'], b['to'], b['failed_checks'], b['message'], b['where']), (100.001, 300, 1, 'got 0, expected 1', 't.py:9'))
+        self.assertNotIn('marks', a, 'the list is short')
+
+    def test_one_test(self):
+        for key in (2, '2', 'b'):
+            t = self.call('wave_tests', marks=self.marks, test=key)['test']
+            self.assertEqual(t['name'], 'b')
+        self.assertEqual((t['marks'][0]['t'], t['marks'][0]['got'], t['marks'][0]['expected']), (300, '0', '1'))
+        self.assertEqual((t['phases'][0]['from'], t['phases'][0]['to']), (100.001, 200))
+        t = self.call('wave_tests', marks=self.marks, test='b', limit=1)['test']
+        self.assertEqual((len(t['marks']), t['more']), (1, 1))
+
+    def test_errors(self):
+        text, err = W.call('wave_tests', {'marks': self.marks, 'test': 'nope'})
+        self.assertTrue(err)
+        self.assertIn('have: a, b', text)
+        text, err = W.call('wave_tests', {'marks': self.marks + '.no'})
+        self.assertTrue(err)
+        self.assertIn('no such file', text)
+        with open(self.marks, 'w', encoding='utf-8') as f:
+            f.write('{}')
+        self.assertIn('not a marks file', W.call('wave_tests', {'marks': self.marks})[0])
+
+    def page(self, **a):
+        out = os.path.join(self.dir, 'x.html')
+        r = self.call('wave_page', dump=self.vcd, signals=['TEST_CASE', 'PSEL'], marks=self.marks, out=out, **a)
+        with open(out, encoding='utf-8') as f:
+            return r, f.read()
+
+    def test_a_page_with_the_marks(self):
+        r, text = self.page()
+        self.assertEqual(r['summary'], '2 tests: 1 passed, 1 failed')
+        self.assertNotIn('notes', r, 'the marks found their rows')
+        self.assertIn('TC2 b · FAIL', text)
+        self.assertNotIn('<nav class="tests">', text)
+        doc = json.loads(text[text.index('window.WAVES = ') + 15:text.index('};\n</script>', text.index('window.WAVES = ')) + 1])
+        rows = {x['name']: x for x in doc['view']['signal']}
+        self.assertEqual(rows['TEST_CASE']['enum'], {'1': 'a', '2': 'b'})
+        self.assertEqual(sorted({b.get('signal') for b in doc['view']['bookmarks']}), ['PSEL', 'TEST_CASE'], 'on the rows, by the names they have')
+        self.assertEqual([m['label'] for m in doc['view']['markers']], ['TC1', 'TC2'])
+
+    def test_each_test_apart(self):
+        _, text = self.page(marks_views='tests')
+        self.assertIn('<nav class="tests">', text)
+        self.assertEqual(text.count('<section data-view='), 2)
+
+    def test_not_with_what_a_page_of_marks_has_not(self):
+        out = os.path.join(self.dir, 'x.html')
+        text, err = W.call('wave_page', {'dump': self.vcd, 'signals': ['PSEL'], 'marks': self.marks, 'out': out, 'compare': self.vcd})
+        self.assertTrue(err)
+        self.assertIn('"compare" does not go with "marks"', text)
+        text, err = W.call('wave_page', {'dump': self.vcd, 'signals': ['PSEL'], 'marks': self.marks, 'out': out + '.json'})
+        self.assertTrue(err)
+        self.assertIn('makes a page', text)
+
+
 class Protocol(unittest.TestCase):
     def talk(self, *msgs):
         out = io.StringIO()

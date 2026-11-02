@@ -46,6 +46,7 @@ help:
 	@echo 'make demo-fst   the same testbench as FST -> $$(BUILD)/demo_fst.config.json + demo_fst.html (FSM names from the dump)'
 	@echo 'make examples   every example (apb axi_lite fsm): VCD + FST, pages in $$(BUILD)/examples/<ex>/'
 	@echo 'make example    EX=apb|axi_lite|fsm: one of them'
+	@echo 'make cocotb     the cocotb example: five tests on Verilator (SIM=questa: on Questa) -> $$(BUILD)/examples/cocotb_apb[_questa]/cocotb_apb.html'
 	@echo 'make questa     EX=fsm: the example in QuestaSim (vsim on PATH): VCD + its types (tools/questa/wavelens_types.tcl) + page in $$(BUILD)/questa/<ex>/'
 	@echo 'make types-fixture  tests/unit/types in QuestaSim again: questa.vcd, questa.types.json (another Questa version: read the diff)'
 	@echo 'make missing-fixture  tests/unit/types/missing.* in QuestaSim again: what its VCD (vcd add without -r) lacks of the types'
@@ -155,6 +156,13 @@ example: wavelens/wavelens.js $(EXB)/$(EX).vcd $(EXB)/$(EX).fst $(EXB)/$(EX).typ
 
 examples:
 	@for ex in $(EXAMPLES); do $(MAKE) --no-print-directory example EX=$$ex || exit 1; done
+
+# The cocotb example, on Verilator or Questa (make cocotb SIM=questa): run.py runs the five tests and builds the page from the dump
+# and the marks they leave. SIM=questa is not in make check (it needs vsim), but smoke checks its page when it is there
+SIM ?= verilator
+CB  := $(B)/examples/cocotb_apb$(if $(filter questa,$(SIM)),_questa)
+cocotb: wavelens/wavelens.js
+	PYTHONDONTWRITEBYTECODE=1 python3 examples/cocotb_apb/run.py --sim $(SIM) --out $(CB)
 
 # An example in QuestaSim (vlog, vsim on PATH): $(BUILD)/questa/<ex>/ gets Questa's VCD, its types
 # (tools/questa/wavelens_types.tcl: describe of every signal) and <ex>.html made from them, as for a design of your own.
@@ -375,7 +383,7 @@ check:
 	@mkdir -p $(B) && cp wavelens/sva.wasm.js $(B)/sva.wasm.js.committed
 	$(MAKE) sva-build
 	@cmp -s $(B)/sva.wasm.js.committed wavelens/sva.wasm.js || { echo 'check: wavelens/sva.wasm.js is not the build of sva/: commit the one sva-build wrote'; exit 1; }
-	$(MAKE) examples demo demo-fst sva-spike html
+	$(MAKE) examples cocotb demo demo-fst sva-spike html
 	$(MAKE) sva-test WAVELENS_STRICT=1
 	$(MAKE) unit WAVELENS_STRICT=1
 	$(MAKE) sva-verify mcp-bench
@@ -393,7 +401,7 @@ fmt:
 
 # -Wall on the testbenches; DECLFILENAME off: a testbench file carries its package and its DUT next to the tb module
 lint:
-	@for ex in demo $(EXAMPLES); do d=examples/$$ex; echo "== $$ex"; \
+	@for ex in demo $(EXAMPLES) cocotb_apb; do d=examples/$$ex; echo "== $$ex"; \
 	  verilator --lint-only -Wall -Wno-DECLFILENAME --timing --top-module $${ex}_tb $$(ls $$d/*_pkg.sv 2>/dev/null) $$(ls $$d/*.sv | grep -v _pkg.sv) || exit 1; done
 
 clean:
@@ -407,4 +415,4 @@ clean-all:
 	$(if $(filter $(B),/ $(CURDIR) $(HOME) $(abspath $(HOME)/..)),$(error clean-all: BUILD=$(B) is not a build directory))
 	rm -rf $(B)
 
-.PHONY: pageshot unit-bless unit-shuffle vsix vscode-e2e wavelens help demo demo-fst fst diff example examples questa types-fixture missing-fixture shots guide-shots html config sva-build dist dist-linux dist-windows sva-test sva-bless sva-examples sva-verify sva-eval sva-spike mcp-bench smoke shots-check unit check fmt lint clean clean-all
+.PHONY: cocotb pageshot unit-bless unit-shuffle vsix vscode-e2e wavelens help demo demo-fst fst diff example examples questa types-fixture missing-fixture shots guide-shots html config sva-build dist dist-linux dist-windows sva-test sva-bless sva-examples sva-verify sva-eval sva-spike mcp-bench smoke shots-check unit check fmt lint clean clean-all

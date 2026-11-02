@@ -71,7 +71,7 @@ may be the default). What the tab does differently from a page in a browser:
   what they mean in VS Code (ctrl+F find, ctrl+C copy, ctrl+Z / ctrl+Y undo / redo, alt+C W R in the find field);
   `wavelens.keysToVSCode` (default `ctrl+G`, Go to Line) are left to VS Code — the list of your groups is `gl` then; the
   others (ctrl+P, F1, ctrl+tab, ctrl+shift+…) are VS Code's.
-- **The version** in the bar's title line: `0.35 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
+- **The version** in the bar's title line: `0.36 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
   committed), so a tab of a development build says which one it is.
 - **An agent** on the host (`tools/wavemcp.py`, below): when it starts its live link, every open tab connects (**●
   live**); `view_live` with `page` a `.vcd` / `.fst` and `open: true` opens it in the VS Code window that has the file
@@ -344,7 +344,7 @@ add theirs (`WaveLens.registerDefaults`).
 | `toolsFolded` | false | the bar's tools folded to its title line (**▴** / **▾ tools** in the bar) |
 | `toolsHidden` | `[]` | the bar's tool groups left out by their labels (`["style", "dump"]`; the right button on the bar) |
 | `themeButton` | `auto` | **◐** in the bar's title line: the page's theme (auto, light, white, dark; kept in this browser; in VS Code its list, VS Code's colours too); `auto`: when the page has no theme button of its own (`viewer.html`, the VS Code tab) |
-| `version` | true | the version in the bar's title line, and the build the page was made from (`0.35 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
+| `version` | true | the version in the bar's title line, and the build the page was made from (`0.36 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
 | `keysLeft` | `[]` | keys the viewer leaves to its host: `["ctrl+G"]` (`ctrl+` is `cmd+` too, a letter by its place); the VS Code tab: `wavelens.keysToVSCode` |
 | `log` | `auto` | the log under the viewer (§ A dump straight in the browser): `auto` from the first thing done in the page (a dump read, Sources…, Load…), `true` always, `false` never |
 | `savePage` | true | the bar's **Save page**: this page as a `.view.html` with your view in it (§ Save and Load); false hides it and keeps no copy of the page's text |
@@ -1064,7 +1064,109 @@ from the dump (the whole hierarchy).
 | [`apb`](../examples/apb) | APB3 write, read with two wait states, `PSLVERR` on an unmapped address; enum `phase`; a static-SVG view | [hero](img/hero.png), [light](img/light.png), [svg](img/svg.png), [range](img/range.png), [cursors](img/cursors.png), [why](img/why.png) |
 | [`axi_lite`](../examples/axi_lite) | AXI4-Lite write (`AWREADY` a cycle late) and read; channel groups with a colour each, highlight from the config, latency arrows; three module levels in `_all` | [axi](img/axi.png), [hierarchy](img/hierarchy.png), [buses](img/buses.png) |
 | [`fsm`](../examples/fsm) | UART receiver with `typedef enum` states in a package: names from the FST and, for the VCD, from its types file; questa edges | [fsm](img/fsm.png), [struct](img/struct.png) |
+| [`cocotb_apb`](../examples/cocotb_apb) | an APB3 slave under five cocotb tests on Verilator or Questa, each marking up its own waves (`make cocotb`, `make cocotb SIM=questa`, [§ Marks from a cocotb test](#marks-from-a-cocotb-test)) | [guide](guides/cocotb.html) |
 | [`demo`](../examples/demo) | the Manchester transmitter behind [`docs/index.html`](index.html) (`make demo`) | [cursor](img/cursor.png) |
+
+## Marks from a cocotb test
+
+A test says what it does, and the page of the run shows it on the waves: which test ran when, its phases, what it checked,
+PASS or FAIL with the expected value, on Verilator and on Questa. The [guide](guides/cocotb.html) walks through it. `python/wavelens_cocotb.py` is
+one file: put `python/` on `PYTHONPATH`; it needs nothing but cocotb ≥ 2.0. The example runs by one command, `python3 examples/cocotb_apb/run.py
+[--sim verilator|questa] [--out DIR] [--views whole|tests|both] [--wavelens PATH] [--no-marks] [--test NAME]` (or `make cocotb [SIM=questa]`): its
+directory can be copied, `HDL`, `TOP`, `MODULE` and `CONFIG` at the top of `run.py` are all it knows of the design.
+
+```python
+from wavelens_cocotb import Marks
+wl = Marks()                                 # Marks(signal='TEST_CASE', step='TEST_STEP', path=None, logs=True)
+
+@wl.test()                                   # cocotb.test(), the same arguments
+async def test_read_back(dut):
+    """The register keeps what was written."""  # the first line goes into the test's first bookmark
+    await start(dut)
+    with wl.phase('write'):                  # a named stretch of time
+        await apb_write(dut, 0x08, 0xCAFE)
+    wl.note('stretched by the slave', signal=dut.PREADY, label='wait')
+    got = await apb_read(dut, 0x08)
+    wl.check(got, 0xCAFE, 'DATA reads back', signal=dut.PRDATA)   # a bookmark; a mismatch fails the test
+```
+
+The testbench holds two variables for it, which nothing in the design reads:
+
+```systemverilog
+logic [15:0] TEST_CASE /* verilator public_flat_rw */;   // the running test's number
+logic [15:0] TEST_STEP /* verilator public_flat_rw */;   // its phase's
+```
+
+The decorator writes the number of each test into `TEST_CASE`, `wl.phase` the number of its label into `TEST_STEP` (0 outside a
+phase). So the run is in the dump itself: `sva diff --segment TEST_CASE` or a span with `"every": "TEST_CASE"` work without the
+rest. Without `TEST_CASE` in the design the marks are still written (one warning says so); without `TEST_STEP` a phase is a span on the
+test's row. Verilator needs the two to be public for cocotb and traces by itself. Questa takes the comment as a comment, needs `-voptargs=+acc`, and
+writes the VCD from the testbench (cocotb's own `waves` gives a `.wlf`), so the testbench says it, and the build's directory must be the run's, where `vsim` finds its library:
+
+```systemverilog
+`ifndef VERILATOR
+    initial begin
+        $dumpfile("dump.vcd");
+        $dumpvars(0, cocotb_apb_tb);
+    end
+`endif
+```
+
+Over the example the marks files of the two simulators are identical (checked on Questa 2021.1, Verilator 5.046), and their dumps agree up to the last time step.
+
+| Call | Does |
+|---|---|
+| `@wl.test(…)` | `cocotb.test(…)` around the test: its number, a bookmark at its start, a span in the colour of its result, a bookmark at its end |
+| `wl.phase(label, signals=None)` | `with`, not awaited: the time inside it is `label` on `TEST_STEP`; a phase inside a phase comes back to it; `signals`: a span on those rows instead |
+| `wl.note(text, signal=None, label=None, color=None)` | a bookmark now, on `signal` (a handle, or a row's name; none: the test's row); `label`: the short text by the circle |
+| `wl.check(got, expected, text='', signal=None, show='all')` | a bookmark with both values; a mismatch is an `AssertionError`, which fails the test; `show='fail'`: no bookmark when they agree, for a check in a loop |
+
+Warnings and errors logged during a test are bookmarks too (`logs=False`: not). A test keeps 200 bookmarks; past that only failed checks
+and errors, and its last bookmark says how many were left out. Nothing but `check` fails a test: outside a test the calls do nothing, a marks file that cannot be written is a
+warning. A test's result is what cocotb says of it: `expect_fail` and `expect_error` count the same way (a test with `expect_fail`
+that fails is **FAIL (expected)** in orange, red when it fails unexpectedly). A test stopped by a timeout or a failed task cannot see the reason from
+inside: it is a FAIL that says what the log said last, even under an `expect_error` that names that reason.
+
+**A test that also runs without WaveLens.** The calls can stay in a test wherever it runs. With `WAVELENS_MARKS=off` the test is plain
+cocotb: no signal written, no file, the logs left alone. A tree without `wavelens_cocotb.py` takes the same calls from a few lines in
+the tests' common module (they are in [`test_apb.py`](../examples/cocotb_apb/test_apb.py), to copy):
+
+```python
+try:
+    from wavelens_cocotb import Marks
+except ImportError:
+    class Marks:
+        def __init__(self, *args, **kw): pass
+        def test(self, *args, **kw): return cocotb.test(*args, **kw)
+        def phase(self, *args, **kw): return contextlib.nullcontext()
+        def note(self, *args, **kw): pass
+        def check(self, got, expected, text='', **kw):
+            assert got == expected, f'{text}: got {got}, expected {expected}'
+```
+
+Either way `note` and `phase` do nothing and **`check` still compares and fails the test**: a check that went quiet would pass anything.
+`TEST_CASE` and `TEST_STEP` stay in the testbench, unwritten.
+
+The dump is not finished while the test runs, so the page is built after the simulation. The run leaves the marks in
+`WAVELENS_MARKS` (default `wavelens.marks.json`), written after each test, so a crash keeps the tests before it (the one
+that crashed: **NOT FINISHED**):
+
+```sh
+python3 -I tools/mkhtml.py --config x.config.json --waves dump.vcd --marks wavelens.marks.json --out x.html
+```
+
+**All the tests on one waveform, or each apart.** `--marks-views` (the config's `"marksViews"`): `whole` (default) is the run on one
+waveform; `tests` makes a view of each test from the first view that takes the marks (its signals and settings, what it marks by hand stays out): only that
+test's window, marks, and its doc and failure under the title; the page has a button per test with its result and shows **one test at a time**
+(`page.html#tc3` opens that one, a print has them all); `both` adds the whole run as a first button. Each view holds its own window, so `tests` is
+about the size of `whole`, `both` twice that. A test's window goes a little past its end, for its last bookmark's text: that bit is the start of the next test, unmarked.
+
+`--marks` (or the config's top-level `"marks"`, a path beside it) goes into every view; a view's `"marks": false` stays out, one with
+a window takes what is in it. A view gets a span per test, the bookmarks, a jump button per test (**go to**, up to six; beyond that `gm`): these are the
+changes of `TEST_CASE` in the dump, so a marks file of another run shows at once. `enum` names the tests and the phases on their rows, the line
+under the view's title counts the results, and a view with no `"to"` goes a little past the last test: a failure is where a dump ends.
+A signal is named from the top of the test (`dut.u_x.sig`: `u_x.sig`); a view's row is found by that end of its path, also in a config
+`mkconfig.py` made from the whole dump. `make cocotb` is the example: [`examples/cocotb_apb`](../examples/cocotb_apb).
 
 ## Commands and edits
 
@@ -1176,7 +1278,8 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
 | `wave_find` | `expr`: an SV expression or sequence matched on every clock cycle by the sva engine (`req && !ack`, `req ##[1:3] ack`, `$rose(x)`); or a signal's edges (`rise`, `fall`, `change`) or value (a number, `'h40`, `'b10x1` bit for bit, an enum label) at their exact times; the count and the first matches (the rules of a bookmark's `at`: one module, `tools/wavefind.py`) |
 | `wave_stats` | over a window: a bit's rises, falls, high time, pulse widths and period; a bus's changes, distinct values, the longest-held ones, minimum and maximum |
 | `sva_check` | assertion files and / or text evaluated over the dump in a scope: the failed ones with their first failures (`cycle`, `t`, `start_cycle`, `start_t`, the reason), passed, vacuous, not evaluated (names missing), the covers |
-| `wave_page` | a viewer page (`out` `.html`) or WaveJSON (`.json`) of signals over a window, assertions bound, to show a person; `compare`: a second dump (or `{dump, map, offset, segment, align, show}`, the config's `"compare"`), its differences on the page, `show` the run it opens with |
+| `wave_page` | a viewer page (`out` `.html`) or WaveJSON (`.json`) of signals over a window, assertions bound, to show a person; `marks`, `marks_views`: the tests of a cocotb run on it (not with `compare` or `auto_gap`; a mark that found no row is in `notes`); `compare`: a second dump (or `{dump, map, offset, segment, align, show}`, the config's `"compare"`), its differences on the page, `show` the run it opens with |
+| `wave_tests` | the tests of a cocotb run from its marks file ([§ Marks from a cocotb test](#marks-from-a-cocotb-test)): the summary, each test's result, window, counts of checks, message and line; `test` (a number or name): one, with its phases and marks, each check with `got` and `expected` (`limit`, 50: `more`). The window is the one to ask `wave_changes`, `wave_find` or `wave_sample` about |
 | `wave_to_fst` | the VCD as an FST beside it (`out`: another file) with `sva fst`, the FSM states of its types file in it (`types`, `no_types`); what was written and the notes with their lines |
 | `wave_diff` | two dumps `a` and `b` (`dump` is `a`) compared change by change with `sva diff` (*Compare two runs from the shell*: streamed, neither read by the server): `equal`, `compared`, `differ`, `first` (`t`, `signal`, `a`, `b`; a bus in hex), the first `limit` `differences`, the signals that differ (`signals_more`: the rest), `only_a`, `only_b`, `segments`; `map` an object (`{"tb_a.if": "tb_b.if"}`), `offset`, `segment`, `align`, `spans` (the stretches kept per signal); times in ns |
 | `wave_cut` | a window (`from`, `to`) and some `signals` of a dump as a small VCD at `out` (`sva vcd --from --to --signals`; a long list: `--signals-from FILE`, one a line): the values at `from` first; `out`, `bytes`, `variables`, its `from` and `to` |
@@ -1260,7 +1363,7 @@ All tools are `python3 -I tools/<tool>.py --help`; the Makefile calls them for y
 | `mkconfig.py` | dump → editable config with every signal (`--update` says when what went and what came look like a renamed scope; `--map OLD=NEW` keeps their settings) | `DUMP`, `--out`, `--update`, `--map OLD=NEW`, `--force`, `--base`, `--depth`, `--types FILE` (default `<dump>.types.json`), `--types-map DUMP=TYPES`, `--sv FILES`, `--sva FILES`, `--sva-bin` |
 | `svtypes.py` | the design's types by path ([§ FSM state names](#fsm-state-names-fst-or-vcd--the-designs-types)): Verilator's, and a check of a types file against a dump | `verilator --top --out --verilator -- ARGS`, `check TYPES [DUMP] --map` |
 | `questa/wavelens_types.tcl` | in `vsim`: the types of a Questa design (`describe` of every signal) | `source` it, `wavelens_types FILE [ROOT]` |
-| `mkhtml.py` | config (every view) or WaveJSON files → one self-contained page | `--config`, `--view`, `--waves`, `--render`, `--out`, `--settings`, `--title`, `--sva FILE`, `--bind NAME@SCOPE`, `--report NAME@SCOPE`, `--sva-bin`, `--no-sva`, `--reproducible`, `--lint`, `--strict` |
+| `mkhtml.py` | config (every view) or WaveJSON files → one self-contained page | `--config`, `--view`, `--waves`, `--marks`, `--marks-views`, `--render`, `--out`, `--settings`, `--title`, `--sva FILE`, `--bind NAME@SCOPE`, `--report NAME@SCOPE`, `--sva-bin`, `--no-sva`, `--reproducible`, `--lint`, `--strict` |
 | `vcd2wavedrom.py` | one window of a dump → WaveJSON | `--config` + `--view`, or `--waves --scope --signals --clock/--exact --from --to --marker --group --enum`; `--gap A:B` / `--auto-gap IDLE[:KEEP]` (`--clock`: a window, or every stretch of IDLE cycles where nothing but a clock changes, as one `\|` cell); `--sva FILE --bind NAME@SCOPE`; `--cycle`, `--hscale`, `--hierarchy`, `--title`, `--bookmarks`, `--arrows`, `--spans`, `--expr` |
 | `pageshot.py` | a page → a PNG per view and theme, made in a headless Chromium, and a manifest (`make pageshot HTML=…`); the one tool outside the standard library, optional (playwright, run without `-I`) | `--view KEY`, `--theme dark\|light\|both`, `--out DIR`, `--width` |
 | `svabuild.py` | the `"sva"` / `"bind"` of a config: files parsed, bindings evaluated with the `sva` CLI (used by the two above) | `--waves --sva --bind --out` |

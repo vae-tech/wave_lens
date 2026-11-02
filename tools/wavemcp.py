@@ -32,7 +32,7 @@ import argparse, atexit, bisect, collections, contextlib, fnmatch, hmac, http.se
 import tempfile, threading, time, traceback, urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
-import dumpscan, svabuild, svtypes, vcd2wavedrom, viewedit, wavefind  # noqa: E402
+import dumpscan, svabuild, svtypes, testmarks, vcd2wavedrom, viewedit, wavefind  # noqa: E402
 from common import ROOT, UNIT_PS, WaveError, version  # noqa: E402
 
 PROTOCOLS = ('2025-06-18', '2025-03-26', '2024-11-05')
@@ -46,7 +46,7 @@ INSTRUCTIONS = (
     'or a value / edge of one signal), count with wave_stats, check SystemVerilog assertions with sva_check, compare two runs with wave_diff. Sampled '
     'values are the ones just before the clock edge, as SVA samples; cycle numbers are the clock\'s rising edges from '
     'the start of the dump (the same as sva_check\'s). Long answers are cut at "limit" ("more", "next_from" / '
-    '"next_offset" say how to go on). wave_page writes a viewer page to show a person; view_edit marks it up for them '
+    '"next_offset" say how to go on). wave_tests says which tests of a cocotb run failed, when, and what they expected. wave_page writes a viewer page to show a person; view_edit marks it up for them '
     '(bookmarks with a text, arrows, markers, expressions, groups, highlight, colours, cursor, window), live in their browser after '
     'view_live, else in the page\'s file (they reload it); view_get reads what is there, their own edits too.')
 
@@ -699,6 +699,71 @@ def converter_args(w, a, scope):
     return argv
 
 
+def marks_file(a):
+    p = os.path.abspath(os.path.expanduser(str(a.get('marks') or '')))
+    if not a.get('marks') or not os.path.isfile(p):
+        raise WaveError(f'"marks": no such file {a.get("marks")!r} (what a cocotb test with wavelens_cocotb leaves: WAVELENS_MARKS, default wavelens.marks.json)')
+    return p
+
+
+def t_tests(a):
+    """The tests of a cocotb run, from its marks file: what ran when and how it ended; `test`: one, with its phases and marks."""
+    doc = testmarks.load(marks_file(a))
+    tests = doc.get('tests') or []
+    def row(t):
+        marks = t.get('marks') or []
+        out = {'n': t['n'], 'name': t['name'], 'result': t['result'], 'from': ns(t['from']), 'to': None if t['to'] is None else ns(t['to']),
+               'checks': sum(m.get('kind') == 'check' for m in marks), 'failed_checks': sum(m.get('kind') == 'check' and not m['ok'] for m in marks)}
+        return {**out, **{k: t[k] for k in ('doc', 'message', 'where') if t.get(k)}}
+    head = {'summary': testmarks.summary(doc), 'signal': doc.get('signal'), 'step': doc.get('step')}
+    if a.get('test') is None:
+        return {**head, 'tests': [row(t) for t in tests]}
+    t = next((t for t in tests if a['test'] in (t['n'], t['name'], str(t['n']))), None)
+    if t is None:
+        raise WaveError(f'"test": no test {a["test"]!r} (have: {", ".join(t["name"] for t in tests)})')
+    limit = a.get('limit') or 50
+    marks = [{**m, 't': ns(m['t'])} for m in t.get('marks') or []]
+    phases = [{**p, 'from': ns(p['from']), 'to': ns(p['to'])} for p in t.get('phases') or []]
+    return {**head, 'test': {**row(t), 'phases': phases, 'marks': marks[:limit], **({'more': len(marks) - limit} if len(marks) > limit else {})}}
+
+
+def marks_page(a, argv, out):
+    """wave_page with the marks of a cocotb run: a config of one view through mkhtml.py, which puts the tests on it."""
+    for k in ('compare', 'auto_gap'):
+        if a.get(k):
+            raise WaveError(f'"{k}" does not go with "marks": a page with marks has the view mkhtml.py makes of them')
+    if out.lower().endswith('.json'):
+        raise WaveError('"marks" makes a page: "out" is an .html')
+    opt = vcd2wavedrom.parser().parse_args(argv)
+    paths = [x for chunk in opt.signals for x in chunk.split(',')]
+    view = {'signals': [f'{p}={vcd2wavedrom.svabuild.split_path(p)[-1]}' if '[' not in p else p for p in paths], 'title': a.get('title') or 'The whole run', **({'clock': opt.clock} if opt.clock else {'exact': True})}
+    view.update({k: f'{ps_of(a[k], k)}ps' for k in ('from', 'to') if a.get(k) is not None})   # (else the marks' own: past the last test)
+    cfg = {'waves': opt.waves, 'views': {'view': view}}
+    enum = {}
+    for e in opt.enum or []:
+        p, _, body = e.partition('=')
+        enum[p] = dict(x.split(':', 1) for x in body.split(','))
+    if enum:
+        cfg['enum'] = enum
+    for key, name in (('sva', 'sva'), ('bind', 'bind')):
+        if a.get(name):
+            cfg[key] = [a[name]] if isinstance(a[name], str) else a[name]
+    with tempfile.TemporaryDirectory(prefix='wavemcp-') as d:
+        c = os.path.join(d, 'page.config.json')
+        with open(c, 'w', encoding='utf-8') as f:
+            json.dump(cfg, f)
+        cmd = [sys.executable, '-I', os.path.join(ROOT, 'tools', 'mkhtml.py'), '--config', c, '--marks', marks_file(a), '--out', out]
+        if a.get('marks_views'):
+            cmd += ['--marks-views', str(a['marks_views'])]
+        if a.get('title'):
+            cmd += ['--title', a['title']]
+        r = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    if r.returncode:
+        raise WaveError('mkhtml: ' + r.stderr.strip()[-400:])
+    notes = [x.split('lint: ', 1)[1] for x in r.stderr.splitlines() if 'lint: ' in x and 'bookmarks-close' not in x]
+    return {'page': out, 'bytes': os.path.getsize(out), 'summary': testmarks.summary(testmarks.load(marks_file(a))), **({'notes': notes} if notes else {})}
+
+
 def t_page(a):
     w = wave(a.get('dump'), a)
     out = a.get('out')
@@ -708,6 +773,8 @@ def t_page(a):
     if not os.path.isdir(os.path.dirname(out)):
         raise WaveError(f'"out": no such directory {os.path.dirname(out)}')
     argv = converter_args(w, a, a.get('scope') or '')
+    if a.get('marks'):
+        return marks_page(a, argv, out)
     for f in [a['sva']] if isinstance(a.get('sva'), str) else a.get('sva') or []:
         argv += ['--sva', f]
     for b in [a['bind']] if isinstance(a.get('bind'), str) else a.get('bind') or []:
@@ -1725,9 +1792,15 @@ TOOLS = [
           'details': B, 'defines': {'type': ['object', 'array'], 'items': S}}),
     tool('wave_page', t_page, 'Write a WaveLens viewer page (out .html) or WaveJSON (out .json) of signals to show a person; clock '
          '(name or "auto"): a cell per cycle, auto_gap "16:2" folds idle cycles; sva files + bind ["name@scope"]; compare: a second dump '
-         '(or {dump, map, offset, segment, align, show}: show the run it opens with, a, b or overlay) whose differences the page shows.',
+         '(or {dump, map, offset, segment, align, show}: show the run it opens with, a, b or overlay) whose differences the page shows; '
+         'marks: the marks file of a cocotb run, its tests as spans and bookmarks (marks_views "tests": each test apart, "both": and the whole run).',
          {'dump': None, 'types': None, 'no_types': None, 'signals': None, 'out': S, 'clock': S, 'from': None, 'to': None, 'scope': None, 'auto_gap': S, 'sva': L,
-          'bind': L, 'title': S, 'compare': {'type': ['string', 'object']}}, ('dump', 'signals', 'out'), ro=False),
+          'bind': L, 'title': S, 'compare': {'type': ['string', 'object']}, 'marks': S, 'marks_views': {'type': 'string', 'enum': list(testmarks.SPLITS)}},
+         ('dump', 'signals', 'out'), ro=False),
+    tool('wave_tests', t_tests, 'The tests of a cocotb run from the marks file it left (wavelens_cocotb, the same times as its dump) -> summary, '
+         'tests [n, name, result pass/fail/xfail/run, from, to, checks, failed_checks, message, where]; test (a number or name): one, with '
+         'its phases and marks, each check with got and expected. from / to are a test\'s window for wave_changes, wave_find, wave_sample.',
+         {'marks': S, 'test': {'type': ['integer', 'string']}, 'limit': None}, ('marks',)),
     tool('wave_to_fst', t_to_fst, 'Convert a VCD to an FST beside it (tb.vcd -> tb.fst; out: another file), as GTKWave\'s vcd2fst, '
          'keeping the enum tables (FSM states) and attributes; the states of tb.types.json beside it go in too (types: another file, '
          'no_types: none) -> fst, what was written, notes (file:line).',

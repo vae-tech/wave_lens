@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import shots  # noqa: E402  (its raster flags, the page opener, settle, js)
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-GUIDES = ['viewer', 'modules', 'compare', 'commands', 'gaps', 'sva', 'wavedrom', 'pages', 'types', 'buses', 'mcp']
+GUIDES = ['viewer', 'modules', 'compare', 'commands', 'gaps', 'sva', 'wavedrom', 'pages', 'types', 'buses', 'cocotb', 'mcp']
 
 # the gaps guide's dump: clk 100 MHz for 1000 cycles; packets of a valid / ready stream (start cycle, beats, cycles of
 # the packet with ready low), the state of the sender, an irq two cycles after each packet, a packet counter, and a
@@ -696,6 +696,19 @@ def buses(S, ex, build):
 
 
 # ---------------------------------------------------------------- the AI agents guide: a page made by wave_page
+def cocotb(S, ex, build):
+    page = S.page(ex / 'cocotb_apb' / 'cocotb_apb.html')
+    v = page.locator('section[data-view=run] .wv')
+    S.quiet(page)
+    S.save('cocotb-whole', v, upto=v.locator('.notes'))
+    page.locator('.tests button').nth(5).click()
+    v = page.locator('section[data-view=tc5] .wv')
+    shots.settle(page)
+    S.quiet(page)
+    S.save('cocotb-test', v, upto=v.locator('.notes'))
+    page.close()
+
+
 def mcp(S, ex, build):
     d = build / 'guides'
     d.mkdir(parents=True, exist_ok=True)

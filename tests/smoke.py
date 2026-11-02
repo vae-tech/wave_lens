@@ -631,6 +631,48 @@ def fst(page):
 EXAMPLES = {'apb': (6, 3), 'axi_lite': (5, 3), 'fsm': (4, 3)}   # bookmarks and arrows of the first view
 
 
+def cocotb_page(page):
+    """The cocotb example: the tests of the run on the waves, their marks and the dump agreeing to the picosecond."""
+    x = page.evaluate("""(() => { const v = document.querySelector('.wv').waveView, M = v.M, row = n => M.rows.find(r => r.name === n);
+        return { jumps: v.jumps.map(j => [j.label, j.t]), spans: (M.spans || []).map(s => [s.label, s.from, s.to, s.color]), bms: v.bookmarks().map(b => [b.signal, b.label, b.text, b.t]),
+                 enumCase: row('TEST_CASE').enum, enumStep: row('TEST_STEP').enum, end: M.t1,
+                 note: document.querySelector('h2 + p').textContent }; })()""")
+    names = ['test_reset_values', 'test_write_read', 'test_wait_states', 'test_slave_error', 'test_scratch_walking_one']
+    check([v for k, v in sorted(x['enumCase'].items()) if k != '0'] == names, f'cocotb: the five tests are the values of TEST_CASE {x["enumCase"]}')
+    check([j[0] for j in x['jumps']] == [f'→ TC{i}' for i in range(1, 6)], f'cocotb: a jump to each test {x["jumps"]}')
+    check([j[1] for j in x['jumps']] == [s[1] for s in x['spans']], f'cocotb: the changes of TEST_CASE in the dump are the times the test said {x["jumps"]} {x["spans"]}')
+    check(all(s[0].endswith('PASS') for s in x['spans'][:4]) and x['spans'][4][0].endswith('FAIL (expected)'), f'cocotb: each span says its result {[s[0] for s in x["spans"]]}')
+    check(len({s[3] for s in x['spans']}) == 2, f'cocotb: the result is the colour of the span {[s[3] for s in x["spans"]]}')
+    starts = [b for b in x['bms'] if re.fullmatch(r'TC\d', b[1] or '')]
+    check([b[0] for b in starts] == ['TEST_CASE'] * 5 and 'Every register reads its reset value' in starts[0][2], f'cocotb: a bookmark at each start with the test\'s doc {starts[:1]}')
+    fail = [b for b in x['bms'] if (b[1] or '').startswith('✗')]
+    check(len(fail) == 1 and fail[0][0] == 'PRDATA' and 'bit 17' in fail[0][2] and 'expected 0x20000' in fail[0][2], f'cocotb: the failed check says what was expected, on its signal {fail}')
+    last = x['bms'][-1]
+    check('FAIL' in last[1] and 'test_apb.py:' in last[2], f'cocotb: the test\'s end says the result and the line {last}')
+    check('reset' in x['enumStep'].values() and 'walking one' in x['enumStep'].values(), f'cocotb: the phases are the values of TEST_STEP {x["enumStep"]}')
+    check(any((b[1] or '') == 'warning' and 'not mapped' in b[2] for b in x['bms']), 'cocotb: a warning of the log is a bookmark')
+    check(x['end'] > last[3], f'cocotb: the window goes past the failure at the end of the dump ({x["end"]} > {last[3]})')
+    check('5 tests: 4 passed, 1 failed as expected' in x['note'], f'cocotb: the view says the run ({x["note"]})')
+    # a view of each test, one shown at a time
+    shown = lambda: page.evaluate("""[...document.querySelectorAll('section[data-view]')].filter(s => !s.hidden).map(s => s.dataset.view)""")
+    btn = page.locator('.tests button')
+    check(btn.count() == 6 and shown() == ['run'], f'cocotb: a button per test and the whole run, the whole run first ({btn.count()}, {shown()})')
+    btn.nth(5).click()
+    page.wait_for_timeout(150)
+    y = page.evaluate("""(() => { const s = document.querySelector('section[data-view=tc5]'), w = s.querySelector('.wv'), v = w.waveView, M = v.M;
+        return { hash: location.hash, t0: M.t0, t1: M.t1, tc: M.rows.find(r => r.name === 'TEST_CASE').enum[5], w: v.canvas.getBoundingClientRect().width,
+                 h2: s.querySelector('h2').textContent, on: document.querySelector('.tests button.on').dataset.view,
+                 bms: v.bookmarks().map(b => [b.label, b.t]), spans: (M.spans || []).map(s => s.label), note: s.querySelector('h2 + p').textContent }; })()""")
+    check(shown() == ['tc5'] and y['on'] == 'tc5' and y['hash'] == '#tc5', f'cocotb: the button shows that test alone {shown()} {y["on"]} {y["hash"]}')
+    check(y['t0'] == 420004 and 1170004 < y['t1'] < 1270000, f'cocotb: its view is its window, with room past the failure ({y["t0"]}…{y["t1"]})')
+    check(y['w'] > 400, f'cocotb: a view hidden at the start draws when shown ({y["w"]} px)')
+    check(y['h2'] == 'TC5 test_scratch_walking_one · FAIL (expected)' and 'expected 0x20000' in y['note'], f'cocotb: its title and note say the result {y["h2"]} {y["note"]}')
+    check(y['spans'] == ['TC5 test_scratch_walking_one · FAIL (expected)'] and all(b[1] >= 420004 for b in y['bms']) and len(y['bms']) == 3,
+          f'cocotb: only this test\'s marks {y["spans"]} {y["bms"]}')
+    btn.nth(0).click()
+    check(shown() == ['run'], 'cocotb: back to the whole run')
+
+
 def example(page, ex):
     v = page.locator('.wv').first
     bms, ars = EXAMPLES[ex]
@@ -951,7 +993,7 @@ def modules(page, P):
 def big(page):
     t = page.evaluate('() => { const t0 = performance.now(); WaveLens.redrawAll(); return performance.now() - t0; }')
     check(t < 60 * SCALE, f'redraw of all viewers takes {t:.0f} ms (< {60 * SCALE:.0f})')
-    v = page.locator('.wv').last
+    v = page.locator('.wv:visible').last   # (a page of tests shows one view at a time)
     v.locator('button[data-act=sort]').click()
     check(v.locator('button[data-act=sort]').inner_text() == 'Sort: A→Z', 'Sort works on the generated page')
 
@@ -6151,12 +6193,14 @@ def main():
     # the build products smoke expects (missing: SKIPPED) and the user's own pages under work/ (checked when there)
     expected = {build / 'demo.html': 'make html', build / 'demo_fst.html': 'make demo-fst'}
     expected.update({build / 'examples' / ex / f'{ex}{s}.html': 'make examples' for ex in EXAMPLES for s in ('', '_all')})
+    expected[build / 'examples' / 'cocotb_apb' / 'cocotb_apb.html'] = 'make cocotb'
     user = [x for x in (ROOT / 'work' / 'dump.html', ROOT / 'work' / 'test_stream_video.html') if x.exists()]
+    user += [x for x in (build / 'examples' / 'cocotb_apb_questa' / 'cocotb_apb.html',) if x.exists()]   # make cocotb SIM=questa: the same checks, the same numbers
     for path, how in expected.items():
         if not path.exists():
             skip(path, how)
     BUILT[:] = [x for x in expected if x.exists()] + user + ([synth] if synth and synth.exists() else [])
-    print('user pages: ' + (', '.join(str(x.relative_to(ROOT)) for x in user) or 'none under work/ (make html WAVES=work/x.vcd)'))
+    print('user pages: ' + (', '.join(x.name for x in user) or 'none under work/ (make html WAVES=work/x.vcd)'))
     os.makedirs(a.out, exist_ok=True)
     with sync_playwright() as p:
         b = p.chromium.launch()
@@ -6165,7 +6209,7 @@ def main():
             tsv = path.name == 'test_stream_video.html'
             own = (['docs', 'sva_docs', 'viewer', 'wavelens', 'plugin_api', 'api_docs', 'markup'] if path == PAGES[0] else ['conformance'] if path == PAGES[1] else
                    ['hierarchy', 'find', 'deep', 'viewer'] + (['modules', 'bar_tools'] if path == synth else []) if path == synth or tsv else ['fst'] if path.name == 'demo_fst.html' else
-                   ['examples'] if path.stem in EXAMPLES or path.stem == 'fsm_all' else [])
+                   ['examples'] if path.stem in EXAMPLES or path.stem in ('fsm_all', 'cocotb_apb') else [])
             own += ['big'] if path in BUILT else []
             if not want('pages') and not any(want(x) for x in own):
                 continue
@@ -6227,6 +6271,8 @@ def main():
                         run('examples', sva_page, page, path.stem)
                     if path.stem == 'fsm_all':
                         run('examples', fsm_vcd, page)
+                    if path.stem == 'cocotb_apb':
+                        run('examples', cocotb_page, page)
                     if path in BUILT:
                         run('big', big, page)
                 if want('pages'):
