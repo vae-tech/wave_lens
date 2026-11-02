@@ -26,7 +26,7 @@ const TIPS = {
   'act:expand': ['Open every module', ['zR']], 'act:collapse': ['Fold every module', ['zM']],
   'act:hl': ['Clear the highlight', ['Esc']], 'act:unhide': ['Show the hidden rows again'],
   'act:prev': ['Previous edge of the selected signal', ['shift+Tab', '[e']], '.edge': ['Edge kind: any, rising, falling, a value, X / Z', ['e']],
-  'act:next': ['Next edge of the selected signal', ['Tab', ']e']], 'act:mark': ['Bookmark at the cursor', ['m']],
+  'act:next': ['Next edge of the selected signal', ['Tab', ']e']], 'act:mark': ['Bookmark at the cursor', ['b']],
   'act:ssave': ['Save the view to a file (.view.json)'], 'act:sload': ['Load a saved view'],
   'act:spage': ['This page as a file (.view.html) with your view in it — bookmarks, groups, colours, cursor, window, assertions: whoever opens ' +
     'it sees what you see, no other file needed'],
@@ -39,7 +39,7 @@ const TIPS = {
   'act:tools': ['Fold the tools to this line, or open them (/ opens them for the find field)'], 'jump': ['Go to this marker'],
   '.mk': ['Highlight: in front, the rest dimmed', ['ctrl+click', 'ctrl+shift+click: every row to here']],
   'bm:json': ['The bookmarks and arrows as JSON for a config'], 'bm:clear': ['Remove this browser\'s bookmarks'],
-  'bm:go': ['Go to this bookmark', [']m', '[m']], 'bm:here': ['Move it to the cursor'],
+  'bm:go': ['Go to this bookmark', [']b', '[b']], 'bm:here': ['Move it to the cursor'],
   'bm:lift': ['Into a lane of its own: over its signal, then under it, then on the row again (or drag the circle to the top or the bottom of its row)'],
     'bm:del': ['Delete the bookmark and its arrows'],
   'bm:addar': ['Arrow between the last two bookmarks', ['shift+drag a circle']], 'bm:adel': ['Delete the arrow'],
@@ -53,7 +53,9 @@ const TIPS = {
     'm:svg': ['Save the picture as SVG'],
   'm:c2': ['A second cursor: Δ to the cursor in time and clock cycles', ['shift+click']], 'm:c2x': ['No second cursor', ['Esc']],
   'm:analog': ['The bus as a step plot, three rows high (its radix: signed, float, fixed)'],
-  'm:bits': ['The bus bit by bit: a row per bit under it, the highest first (a click on its width [7:0] does it too)', ['b']],
+  'm:dup': ['The same signal again in a row under it, with a radix, an analog form and a colour of its own'],
+  'm:undup': ['This copy out of the waves: a bookmark on it goes to its signal'],
+  'm:bits': ['The bus bit by bit: a row per bit under it, the highest first (a click on its width [7:0] does it too)', ['B']],
   'm:wdjson': ['The range as a WaveDrom file (.json): the highlighted signals, else the ones on the screen, a cell per clock cycle'],
     'm:wdcopy': ['The same WaveDrom to the clipboard'],
   '.gon': ['Gaps: the picture and WaveDrom leave out the stretches where the signals (the clocks aside) do not change, a break "|" there'],
@@ -78,11 +80,11 @@ const TIPS = {
   'm:hl': ['Highlight', ['ctrl+click']], 'm:hide': ['Leave it out of the view'], 'm:unhide': ['Show the hidden rows'],
   'm:fold': ['Fold / open this module'], 'm:foldup': ['Fold its module', ['zc']], 'm:zM': ['Fold every module', ['zM']], 'm:zR': ['Open every module', ['zR']],
   'm:types': ['Where its labels or fields come from: the types file and the path in it, the width, why it has none'],
-  'm:mark': ['Bookmark on this signal here: its text asked here, then in the list', ['m']],
+  'm:mark': ['Bookmark on this signal here: its text asked here, then in the list', ['b']],
   'm:copyname': ['Copy the path', ['yy']], 'm:clear': ['Clear the range', ['Esc', 'ctrl+click']],
   'm:unpaint': ['Its own colour back'],
   'm:umark': ['A marker here: a dashed line across the rows; its label asked here. Drag the text to a line over or under any signal; the right ' +
-    'button on it: its colour'],
+    'button on it: its colour', ['m']],
   'm:mlist': ['The markers and bookmarks in a list: ↑ ↓ go through them, the waves follow', ['gm']],
   'm:ugnew': ['A group of your own at the top of the names'],
   'm:ugout': ['Out of your group (the signal stays in its module)'], 'm:ugdel': ['Delete your group; its signals stay where they are'],
@@ -130,7 +132,7 @@ const HELP = [
     [['ctrl+click', '○'], 'highlight'], [['ctrl+shift+click'], 'highlight every row from the last one to it'],
     [['zM', 'zR'], 'fold / open every module'], [['t'], 'the modules as a tree: a click goes to one, a box keeps Only those (again: the selected one\'s)'],
     [['T'], 'the state machines in the tree of their modules: go to one, Only them, add them to the view'],
-    [['zc', 'zo', 'za'], 'the selected signal\'s module'], [['b', 'click [7:0]'], 'the selected bus bit by bit (again: folded)'],
+    [['zc', 'zo', 'za'], 'the selected signal\'s module'], [['B', 'click [7:0]'], 'the selected bus bit by bit (again: folded)'],
     [['s'], 'sort'], [['yy', 'ctrl+C'], 'copy the path'],
       [['Esc'], 'reset: search, highlight, selection']]],
   ['Find', [[['/', 'ctrl+F'], 'find (the bar scrolled away: it floats over the waves)'],
@@ -143,10 +145,11 @@ const HELP = [
     [['D'], 'a dump compared: both runs over each other where they differ, again one'],
     [['1', '…', '9'], 'go to bookmark 1 … 9'], [['ctrl+drag'], 'measure a range: Δ, the edges or changes of that signal'],
     [['alt+drag'], 'a box: its time and its signals, then the menu (picture, WaveDrom, colour)'], [['ctrl+click'], 'clear the range'],
-    [['right button'], 'a range and the menu: picture, colour, radix, hide'], [['m'], 'bookmark at the cursor'],
-    [[']m', '[m'], 'next / previous bookmark'],
+    [['right button'], 'a range and the menu: picture, colour, radix, duplicate, hide'], [['b'], 'bookmark at the cursor'],
+    [[']b', '[b'], 'next / previous bookmark'], [['m'], 'marker at the cursor: its label asked'], [[']m', '[m'], 'next / previous marker'],
     [['gm'], 'the markers and bookmarks: a list, ↑ ↓ go through them'], [['drag a bookmark'], 'move it'],
     [['drag a marker\'s text'], 'to a line over or under a signal, along the time (alt: the time stays)'],
+    [['drag a Δ'], 'between markers (Δ between markers in their list): up and down, to a line over or under a signal; its dot along, to another marker'],
     [['shift+drag a bookmark'], 'an arrow to another one']]],
   ['The bar', [[['right button'], 'on the bar: which of its tool groups it shows (Show all, Hide all, a tick each)'],
     [['▴', '▾ tools'], 'fold the tools to the title line / open them'], [['r'], 'the last state loaded, read again (Reload)']]],
@@ -286,7 +289,7 @@ class Bar {
       'alt+drag: a box of time and signals · click: cursor (on a near edge; alt: not) + select a signal · keys on the waves (as in Questa): ' +
       'i o zoom in / out, f full, l last, c in on the cursor · ← → pan, Home End · shift+← → cursor · ↑ ↓ (j k) select, gg G first / last · ' +
       'Tab shift+Tab next / previous edge, e edge kind · / ctrl+F find, n N next / previous match, * # the selected name · ' +
-      `m bookmark, ]m [m next / previous · zM zR fold / open all, zc zo the selected module${groups ? ' · t modules' : ''} · ` +
+      `b bookmark, ]b [b next / previous, m marker, ]m [m · zM zR fold / open all, zc zo the selected module${groups ? ' · t modules' : ''} · ` +
       `yy ctrl+C copy${S.sortButton ? ' · s sort' : ''} · ` +
       `Esc reset${groups ? ' · click a module to fold it' : ''} · shift+click a name: select every signal to it · ` +
       '○ or ctrl+click a name: highlight, ctrl+shift+click: every row to it';

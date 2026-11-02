@@ -30,8 +30,8 @@ function pickRows(v, spec, o = {}) {
   const list = prefixes(spec), M = v.M, what = o.scopes ? 'module' : o.groups ? 'signal or module' : 'signal';
   if (!list.length) fail(`no ${o.scopes ? 'modules' : o.groups ? 'signals or modules' : 'signals'} given`);
   // your groups as they are now (one made by a command before this one in the same run is there too)
-  const pool = o.scopes ? v.scopes() : M.rows.filter(r => r.type === 'sig' && r.tr).concat(o.groups ? Object.values(M.groups).filter(g => g.full && !g.user) :
-    [], o.groups ? v.ugRows().filter(r => r.type === 'group') : []);
+  const pool = o.scopes ? v.scopes() : v.sigPool().filter(r => r.type === 'sig' && r.tr).concat(o.groups ?
+    Object.values(M.groups).filter(g => g.full && !g.user) : [], o.groups ? v.ugRows().filter(r => r.type === 'group') : []);
   const out = [];
   for (const s of list) {
     let hit;
@@ -63,7 +63,7 @@ function pickRows(v, spec, o = {}) {
 }
 // the signals of rows: a module's below it, your group's in it, a signal itself
 const sigsOf = (v, rows) => [...new Set(rows.flatMap(r => (r.type !== 'group' ? [r] : r.user
-  ? (v.ugroups.find(g => '@' + g.name === r.full) || { signals: [] }).signals.map(f => v.M.rows.find(x => x.type === 'sig' && x.full === f)).filter(Boolean)
+  ? (v.ugroups.find(g => '@' + g.name === r.full) || { signals: [] }).signals.map(f => v.sigPool().find(x => x.type === 'sig' && x.full === f)).filter(Boolean)
   : v.M.rows.filter(x => x.type === 'sig' && x.tr && x.anc.includes(r.id)))))];
 const nums = v => v.bms.map(b => b.n).join(', ') || 'none';
 // a number as listed (1, 2 …): a positive integer (2.0 is 2) or its digits as a text; not true, not 1.5 (as viewedit.py)
@@ -161,15 +161,16 @@ command('arrow', 'id? from? to? shape? head? line? color? label? delete?', 'an a
   if (a.label !== undefined) x.label = a.label == null ? '' : String(a.label);
   v.changed(true); return { id: i + 1 };
 });
-command('marker', 'id? t? label? color? signal? lift? delete?', 'a marker: a dashed line across every row, pale unless it has a color (null: pale ' +
+command('marker', 'id? t? label? color? signal? lift? hidden? delete?', 'a marker: a dashed line across every row, pale unless it has a color (null: pale ' +
   'again), with its label at the top of the rows, or with signal in a lane over that row (lift "below": under it, the lanes of the bookmarks; signal ' +
-  'null: at the top again): a new one (t default the cursor), or marker id (1, 2 … as listed) changed; delete: id or "all"', (v, a) => {
+  'null: at the top again; hidden: true: kept in its list, not on the waves, and the Δ goes through it): a new one (t default the cursor), or marker id ' +
+  '(1, 2 … as listed) changed; delete: id or "all"', (v, a) => {
   idOk(a.id, 'marker');
   if (a.id === 'all' && !a.delete) fail('marker: id "all" is for delete (a new one: no id)');
   if (a.id != null && a.id !== 'all' && !v.umarks[+a.id - 1]) fail(`no marker ${a.id} (there are ${v.umarks.length})`);
   if (a.delete) {
     if (a.id == null) fail('marker: delete takes id or "all"');
-    if (a.id === 'all') v.umarks = []; else v.umarks.splice(+a.id - 1, 1);
+    if (a.id === 'all') v.umarks = []; else { v.umarks.splice(+a.id - 1, 1); markGone(v.umarks, +a.id); }
     v.setMarks(); return { id: a.id, deleted: true };
   }
   const t = a.t != null ? cmdTime(v, a.t) : null, sig = a.signal ? pickRows(v, a.signal, { one: true })[0].full : null;
@@ -182,8 +183,34 @@ command('marker', 'id? t? label? color? signal? lift? delete?', 'a marker: a das
   if (a.color !== undefined) m.color = cmdColor(a);
   if (a.signal !== undefined) m.signal = sig;
   if (a.lift != null) m.lift = a.lift;
+  if (a.hidden != null) m.hidden = !!a.hidden;
   m.lift = markLift(m);
   v.setMarks(); return { id: v.umarks.indexOf(m) + 1 };
+});
+command('deltas', 'on? id? to? signal? lift? color?', 'the Δ between your markers: an arrow from each to the next in time with the time on it, in a line ' +
+  'over the rows; on: shown or not; id (a marker as listed: the arrow from it) with to: to that marker, through the ones between ("next": the next in ' +
+  'time again; null: no arrow from it), with signal: in the lane over that row (lift "below": under it, the lanes of the bookmarks; signal null: over ' +
+  'the rows again), with color (null: its own again) -> on, deltas [{from, to, dt}] (marker ids, dt in the units of t)',
+(v, a) => {
+  if (a.on != null && typeof a.on !== 'boolean') fail('on: true or false');
+  idOk(a.id, 'marker');
+  if (a.id === 'all') fail('deltas: id is one marker');
+  if (a.lift != null && ![true, 'above', 'below'].includes(a.lift)) fail(`lift: true, "above" or "below", not ${JSON.stringify(a.lift)}`);
+  if ((a.signal !== undefined || a.lift != null || a.to !== undefined || a.color !== undefined) && a.id == null) {
+    fail('deltas: to, signal, lift and color go with id'); }
+  const m = a.id != null ? v.umarks[+a.id - 1] : null;
+  if (a.id != null && !m) fail(`no marker ${a.id} (there are ${v.umarks.length})`);
+  if (a.to != null && a.to !== 'next' && !(Number.isInteger(a.to) && v.umarks[a.to - 1])) {
+    fail(`to: a marker as listed (there are ${v.umarks.length}), "next" or null, not ${JSON.stringify(a.to)}`); }
+  if (a.to != null && a.to === +a.id) fail('deltas: to is the marker it starts from');
+  if (m && a.to === undefined && !markDeltas(v.umarks).some(d => d.a === m)) fail(`marker ${a.id}: no Δ from it (the last in time, hidden, or none set)`);
+  const sig = a.signal ? pickRows(v, a.signal, { one: true })[0].full : null;
+  if (a.lift != null && !(a.signal !== undefined ? sig : m && m.dsignal)) fail('deltas: lift is the lane of a signal: give signal');
+  if (a.on != null) { v.deltas = a.on; v.saveRows(); }
+  if (m) { if (a.signal !== undefined) m.dsignal = sig; if (a.lift != null) m.dlift = a.lift === 'below' ? 'below' : null; if (!m.dsignal) m.dlift = null;
+    if (a.to !== undefined) m.dto = a.to === null ? 0 : a.to === 'next' ? null : a.to; if (a.color !== undefined) m.dcolor = cmdColor(a); }
+  v.setMarks();
+  return { on: v.deltas, deltas: markDeltas(v.umarks).map(d => ({ from: v.umarks.indexOf(d.a) + 1, to: v.umarks.indexOf(d.b) + 1, dt: d.dt })) };
 });
 // the expressions of the page: its list is the plugin's (wavelens/sva.js), which needs the engine
 const exprs = v => v.svaExprs || fail('expressions need the assertion engine in the page (sva.js and sva.wasm.js: no mkhtml.py --no-sva)');
@@ -383,6 +410,20 @@ command('analog', 'signals rows', 'buses drawn as a step plot that many rows hig
   if (n != null && n !== false && !(Number.isInteger(n) && n >= 0)) fail('rows: a number of rows, true, false or null');
   rows.forEach(r => v.setAnalog(r, n == null ? null : n || false, true)); v.saveRows(); v.renderNames(); v.draw(); return { signals: rows.length };
 });
+command('duplicate', 'signals radix? rows? delete?', 'a signal again in a row under it, with a radix, an analog form and a colour of its own ("data#2" ' +
+  'in every command); radix, rows: of the copy, as the commands of those names; delete: the copies named, or the copies of the signals named, gone', (v, a) => {
+  if (a.radix != null && !isRadix(a.radix)) fail(`radix: one of ${RADIX.join(' ')}, q<F> or sq<F> (fixed point), or null`);
+  const n = a.rows === true ? 3 : a.rows; if (n != null && n !== false && !(Number.isInteger(n) && n >= 0)) fail('rows: a number of rows, true, false or null');
+  const rows = pickRows(v, a.signals);
+  if (a.delete) { const gone = rows.flatMap(r => (r.dupOf ? [r] : v.dupsBy.get(r) || []));
+    if (!gone.length) fail(`no copies of ${rows.map(r => r.full).join(', ')}`);
+    const fs = gone.map(r => r.full); gone.forEach(r => v.dupDrop(r)); v.dupDone(); return { deleted: fs }; }
+  const bad = rows.filter(r => r.bit != null); if (bad.length) fail(`a bit has no copy: ${bad.map(r => r.full).join(', ')}`);
+  const flat = rows.filter(r => (r.width || 1) < 2 && r.kind !== 'real'); if (flat.length && n) fail(`not a bus: ${flat.map(r => r.full).join(', ')}`);
+  const out = rows.map(r => v.dupAdd(r));
+  for (const d of out) { if (a.radix != null) v.setRadix(d, a.radix, true); if (n != null) v.setAnalog(d, n || false, true); }
+  v.dupDone(); return { copies: out.map(d => d.full) };
+});
 command('bits', 'signals on?', 'buses shown bit by bit, a row per bit under each (the highest first, "data[3]"); on: false folds them', (v, a) => {
   if (a.on != null && typeof a.on !== 'boolean') fail('on: true or false');
   const rows = pickRows(v, a.signals), bad = rows.filter(r => !isVec(r)); if (bad.length) fail(`not a bus: ${bad.map(r => r.full).join(', ')}`);
@@ -513,7 +554,7 @@ Object.assign(WaveView.prototype, {
     const groups = this.groupList().map((g, i) => Object.assign(g, { uid: this.ugroups[i].uid || (this.ugroups[i].uid = ++XID) }));   // a group over a rename
     return JSON.stringify({ bookmarks: this.bookmarks(), arrows: this.arrowList(), markers: this.markList(), spans: this.spanList(), groups,
       paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs), hidden: [...this.hiddenRows],
-      bits: [...this.bitsOpen], only: this.onlyState(), fsm: this.fsmState(),
+      dups: [...this.dups.keys()], deltas: this.deltas, bits: [...this.bitsOpen], only: this.onlyState(), fsm: this.fsmState(),
       config: Object.assign({ style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded,
         toolsHidden: toolNames(this.S.toolsHidden), sort: this.sort, sortIgnore: [...this.sortIgnore] }, this.gapOpt(true), this.cycOpt()),
       hl: [...this.picks].map(([r, i]) => [r.full, i]).sort((a, b) => a[1] - b[1]) });
@@ -653,7 +694,7 @@ Object.assign(WaveView.prototype, {
   setGroups() { this.ugMemo = null; this.saveRows(); if (this.cmp) this.cmpMarks(); this.renderNames(); this.draw(); return this; },
   ugRows() {
     if (this.ugMemo) return this.ugMemo;
-    const by = new Map(this.M.rows.filter(r => r.type === 'sig' && r.tr).map(r => [r.full, r])), cache = this.ugCache = this.ugCache || new Map(), out = [];
+    const by = new Map(this.sigPool().filter(r => r.type === 'sig' && r.tr).map(r => [r.full, r])), cache = this.ugCache = this.ugCache || new Map(), out = [];
     for (const g of this.ugroups) {
       let c = cache.get(g);
       if (!c) { c = { row: { type: 'group', id: ++XID, user: true }, kids: new Map() }; cache.set(g, c); }
@@ -684,7 +725,7 @@ Object.assign(WaveView.prototype, {
 // (wavelens.edits:<page>), so what you change here afterwards stays until a newer one (Save keeps yours in a file). The
 // rest (cursor, window, highlight, selection, folding, order, search), which a page opened again starts from anyway,
 // is applied every time, as the page's own settings are.
-const KEPT = ['bookmarks', 'arrows', 'markers', 'spans', 'groups', 'paint', 'radix', 'analog', 'hidden', 'bits'];
+const KEPT = ['dups', 'deltas', 'bookmarks', 'arrows', 'markers', 'spans', 'groups', 'paint', 'radix', 'analog', 'hidden', 'bits'];
 const KEPT_CFG = ['style', 'maxHeight', 'toolsFolded', 'toolsHidden', ...GAP_KEYS, ...CYC_KEYS];
 // what undo takes back: the above and Only (not kept in this browser: a page opened again applies a revision's Only anew)
 const UNDO_KEYS = [...KEPT, 'only', 'fsm'];

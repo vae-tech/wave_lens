@@ -261,15 +261,19 @@
   <tr><td>Analog (step plot)</td><td>the bus as a step plot three rows high, between its smallest and largest value in its radix (signed,
     float, fixed); <span class="ui">As a bus</span> turns it back</td></tr>
   <tr><td>Bits: N rows</td><td>the bus bit by bit: a row per bit under it, the highest first (<code>[7]</code> … <code>[0]</code>, the path
-    <code>PADDR[7]</code>); as a click on its width <code>[7:0]</code> after the name (<code>showWidth: false</code> leaves the widths out), or <kbd>b</kbd>; <span class="ui">Fold the bits</span>
+    <code>PADDR[7]</code>); as a click on its width <code>[7:0]</code> after the name (<code>showWidth: false</code> leaves the widths out), or <kbd>B</kbd>; <span class="ui">Fold the bits</span>
     folds them; kept in this browser and in the saved state</td></tr>
+  <tr><td>Duplicate</td><td>the same signal again in a row under it, <code>PADDR #2</code>: the same changes, with a radix, an analog form and a colour of
+    its own, so a bus shows in hex and as a step plot at once; on the names and on the waves, for every row selected or highlighted. An enum's copy shows the
+    names until you give it a radix, then the numbers. <span class="ui">Remove the copy</span> takes it away, a bookmark on it goes to its signal; kept in this
+    browser and in the saved state</td></tr>
   <tr><td>Highlight</td><td>as ctrl+click (<a href="#highlight">Highlight</a>)</td></tr>
   <tr><td>Hide</td><td>leaves the row out; <span class="ui">Hidden: N ✕</span> in the bar, or <span class="ui">Show the hidden</span> in this
     menu, brings it back</td></tr>
   <tr><td>Fold its module</td><td>on a signal; on a module row: <span class="ui">Fold this module</span> / <span class="ui">Open this module</span>
     (and Highlight, Hide it all)</td></tr>
   <tr><td>Bookmark here</td><td>a bookmark on this signal at the time clicked: a small box there asks its text (<kbd>Enter</kbd> adds it, <kbd>Esc</kbd> leaves it out), then it is in the list under the waves</td></tr>
-  <tr><td>Marker here</td><td>a dashed line across every row with a label at the top, yours: its label asked where you clicked, as for a bookmark; edited later in the Markers list (<a href="#bookmarks">Bookmarks and arrows</a>)</td></tr>
+  <tr><td>Marker here</td><td>(<kbd>m</kbd>: at the cursor) a dashed line across every row with a label at the top, yours: its label asked where you clicked, as for a bookmark; edited later in the Markers list (<a href="#bookmarks">Bookmarks and arrows</a>)</td></tr>
   <tr><td>Markers…</td><td>the markers and bookmarks in a list over the waves (<kbd>gm</kbd>): <kbd>↑</kbd> <kbd>↓</kbd> go through them, the waves follow</td></tr>
   <tr><td>Groups ▸</td><td><span class="ui">Into “…”</span> a group of yours, <span class="ui">New group with it</span> (of the N
     selected), <span class="ui">Out of …</span>, <span class="ui">Delete this group</span>, <span class="ui">Go to</span> any group
@@ -429,7 +433,7 @@
 <p>A bookmark is a numbered circle on a signal at a time, with a colour and a text: the event you want someone to look at. An arrow joins
   two bookmarks with a label — a latency, a cause and its effect.</p>
 <ol class="steps">
-  <li>Select a signal, put the cursor near the event and press <span class="ui">+ Mark</span> or <kbd>m</kbd>: a bookmark, snapped to an
+  <li>Select a signal, put the cursor near the event and press <span class="ui">+ Mark</span> or <kbd>b</kbd>: a bookmark, snapped to an
     edge of that signal. <span class="ui">Bookmark here</span> in the right button's menu puts one where you clicked.</li>
   <li>Type its text in the list under the waves, a short label by the circle too; change its time (<code>250ns</code>, <code>85.12us</code>), its signal (empty: the time axis)
     or its colour there. <span class="ui">cursor</span> moves it to the cursor; the Δ column shows its distance from the cursor.</li>
@@ -451,8 +455,21 @@
   the cursor on it with its label ready in the Markers list, which has its signal, ↥ ↧ and colour too. The markers of the page itself stay where the page puts them.</p>
 <figure><img src="img/viewer-marker-lines.png" alt="Three markers: a pale text on the line over PENABLE, a coloured text on the line under PRDATA, a pale text at the top of the rows" loading="lazy">
   <figcaption><b>Marker texts on the lines of signals.</b> Pale by default, in a colour when you pick one, at the top of the rows when no signal is given.</figcaption></figure>
+<p><b>The time between markers.</b> <span class="ui">Δ between markers</span> in the head of the Markers list draws an arrow from each of your markers to the next in time, the time in
+  its middle, on a line of its own over the rows; the list says the same beside each marker. Drag an arrow up or down: it goes to the line over or under a signal, the lines of the
+  markers' texts and the bookmarks, and stays there; above the first signal it is over the rows again. The markers make its ends: moving one moves it. The option and the places are kept
+  in this browser and in the saved state, and a picture has them.</p>
+<p><b>To any marker.</b> Beside each marker in the list a <span class="ui">→</span> choice says where its arrow goes: <span class="ui">next</span>, <span class="ui">none</span> or any other
+  marker, through the ones between. Or drag the dot at the arrow's far end along the waves: it snaps to the nearest marker as you go. Each marker has one arrow, so A → C takes the place of A → B;
+  the last marker in time has none to give up and can go back, C → A. Arrows over the rows that cross in time take lines of their own.</p>
+<p><b>Colour on a line.</b> The right button on a line between the rows has <span class="ui">This line</span>: <span class="ui">Colour</span> paints the Δ arrows, the markers' texts, the
+  bookmarks and the arrow's label on it, <span class="ui">Their own colours</span> takes that off. On a Δ arrow: its <span class="ui">Colour</span>, <span class="ui">Its own colour</span>,
+  <span class="ui">No arrow from this marker</span>. The bar's <span class="ui">Paint</span> stays for signals.</p>
+<p><b>Hidden and clearing.</b> <span class="ui">hidden</span> beside a marker keeps it in the list and takes it off the waves, the pictures and <kbd>]m</kbd> <kbd>[m</kbd>: the Δ of its
+  neighbours goes through it. <span class="ui">Clear all</span> in the head of the Markers list, and <span class="ui">Clear bookmarks and markers</span> at the end of the right button's
+  menu, delete every bookmark, arrow and marker of yours; undo brings them back.</p>
 
-<p><kbd>1</kbd> … <kbd>9</kbd> go to that bookmark, <kbd>]m</kbd> / <kbd>[m</kbd> to the next / previous one in time;
+<p><kbd>1</kbd> … <kbd>9</kbd> go to that bookmark, <kbd>]b</kbd> / <kbd>[b</kbd> to the next / previous one in time;
   a click on a number in the list does the same. Going to a bookmark shows the waves as they were when you made it: its time a fifth of the
   waves from the left (<code>bookmarkLeft</code>, 0.2), the span you have now, its signal selected, and the rows scrolled so that the row
   that was at the top under the time axis is at the top again — a module folded since is opened on the way to it and to its signal (<code>"top"</code> in the JSON; that row gone, the signal is brought into sight). <kbd>gm</kbd> (or <span class="ui">Markers…</span> in the right button's menu) lists the
@@ -465,7 +482,7 @@
 <h2 id="state">Save and Load</h2>
 <p><span class="ui">Save</span> downloads what you did in the viewer as <code>&lt;title&gt;.view.json</code>: the time window and the
   cursor, the order and its prefixes, the folded modules, the highlight, the paint, the selected signal, the search, the bookmarks and
-  arrows, the radix, analog and hidden rows, the buses shown bit by bit, the second cursor and the range, the gap settings, the assertions (files loaded or edited in
+  arrows, the radix, analog and hidden rows, the copies of signals, the buses shown bit by bit, the second cursor and the range, the gap settings, the assertions (files loaded or edited in
   the page, with their text, and the bindings) and the expressions. <span class="ui">Load…</span> (or dropping the file on a viewer) reads it
   back — after a reload, in another browser, or on other waves: what they lack is left out and counted in the title line. The last file loaded
   stays: <span class="ui">Reload</span> in the bar, or <kbd>r</kbd>, reads it again with no dialog, and Load… opens in its folder. A state says
@@ -482,7 +499,7 @@
   <span class="ui">Save</span>. The file carries what you did: your assertion files' text, notes, the search.</p>
 <h3 id="undo">Undo and redo</h3>
 <p><kbd>ctrl+Z</kbd> (or <span class="ui">↶</span> in the bar's title line, there with the tools folded too) takes back the last change of what you edit in a viewer: bookmarks and
-  arrows, markers, spans, your groups, colours, radix, analog and hidden rows, the buses bit by bit, the highlight, the sort, Only, the FSM layer, the edge style,
+  arrows, markers, spans, your groups, colours, radix, analog and hidden rows, the copies of signals, the buses bit by bit, the highlight, the sort, Only, the FSM layer, the edge style,
   the scroll and the folded tools, the gaps and the cycles. <kbd>ctrl+shift+Z</kbd> or <kbd>ctrl+Y</kbd> (<span class="ui">↷</span>) does it again. A step is what one
   action changed: a menu item, a colour picked, a bookmark dragged, a batch of commands from a script or a live agent; the toast names
   it (<code>undone: radix, hidden</code>). The cursor, the window, the selection and the search are not steps (move them back with
@@ -535,8 +552,9 @@
     <td>select a run of signals</td></tr>
   <tr><td>○, <kbd>ctrl+click</kbd> a name</td><td>highlight</td><td><kbd>ctrl+shift+click</kbd></td><td>highlight every row to here</td></tr>
   <tr><td><kbd>r</kbd></td><td>the last state loaded, read again (<span class="ui">Reload</span>)</td><td></td></tr>
-  <tr><td><kbd>m</kbd></td><td>bookmark at the cursor</td><td><kbd>]m</kbd> <kbd>[m</kbd>, <kbd>1</kbd> … <kbd>9</kbd></td>
+  <tr><td><kbd>b</kbd></td><td>bookmark at the cursor</td><td><kbd>]b</kbd> <kbd>[b</kbd>, <kbd>1</kbd> … <kbd>9</kbd></td>
     <td>next / previous bookmark, bookmark n</td></tr>
+  <tr><td><kbd>m</kbd></td><td>marker at the cursor: its label asked</td><td><kbd>]m</kbd> <kbd>[m</kbd></td><td>next / previous marker</td></tr>
   <tr><td><kbd>gm</kbd></td><td>the markers and bookmarks: a list, <kbd>↑</kbd> <kbd>↓</kbd> go through them</td><td><kbd>gl</kbd>, <kbd>ctrl+G</kbd></td>
     <td>your groups: a list</td></tr>
   <tr><td><kbd>gv</kbd></td><td>the waves with the gaps cut out, or in continuous time (<a href="gaps.html#live">Gaps</a>)</td><td></td><td></td></tr>
@@ -558,14 +576,14 @@
     <kbd>[</kbd> alone</td><td>nothing: the first key of a pair</td></tr>
   <tr><td><kbd>?</kbd></td><td>the keys box</td><td>hover a control</td><td>what it does, its keys</td></tr>
   <tr><td><kbd>d</kbd> / <kbd>D</kbd></td><td>a dump compared: the other run / both over each other (<a href="compare.html#flip">Compare</a>)</td>
-    <td><kbd>b</kbd></td><td>the selected bus bit by bit</td></tr>
+    <td><kbd>B</kbd></td><td>the selected bus bit by bit</td></tr>
   <tr><td><kbd>T</kbd></td><td>the state machines panel (<a href="types.html">Types</a>)</td><td><kbd>c</kbd></td><td>zoom in on the cursor</td></tr>
   <tr><td><kbd>G</kbd></td><td>the last signal</td><td><kbd>N</kbd></td><td>the previous match</td></tr>
 </table>
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.38 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.39 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

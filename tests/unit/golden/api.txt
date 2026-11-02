@@ -47,6 +47,8 @@ command compare: result? dump? a? map? offset? off? show?
 command cursor: t
 command cursor2: t
 command cycles: on? clock? zero? reset?
+command deltas: on? id? to? signal? lift? color?
+command duplicate: signals radix? rows? delete?
 command edge: dir? kind? value? signal?
 command expr: id? text? scope? label? color? on? row? mark? gap? delete?
 command expr_go: id? dir? n?
@@ -62,7 +64,7 @@ command group: name signals? add? remove? color? rename? delete? go? move?
 command hide: signals
 command highlight: add? remove? set? clear?
 command layout: scroll? height? tools?
-command marker: id? t? label? color? signal? lift? delete?
+command marker: id? t? label? color? signal? lift? hidden? delete?
 command only: modules? on? clear? open?
 command paint: signals? color? clear?
 command picture: format? from? to? rows?

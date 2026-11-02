@@ -198,7 +198,7 @@ from a real dump: real time, exact transitions, value labels, notes.</p>
   <code>fill</code></td><td>a bus's width, value labels (<code>{"0": "IDLE"}</code>), radix, edge style, trace and fill colours</td></tr>
 <tr><td><code>enumColors</code>, <code>analog</code>, <code>fields</code>, <code>height</code>, <code>kind</code></td><td>fill by
   value, a bus as a step plot, a packed struct as rows of fields, the row's height, <code>real</code> / <code>string</code> texts</td></tr>
-<tr><td><code>path</code>, <code>same</code></td><td>the full hierarchical path (the name's tooltip); <code>"same": "tb.clk"</code>: the
+<tr><td><code>path</code>, <code>abs</code>, <code>same</code></td><td>the full hierarchical path (the name's tooltip); <code>"abs"</code>: the same path where the row keeps another name; <code>"same": "tb.clk"</code>: the
   <code>tv</code> of the signal with that path, stored once</td></tr>
 <tr><td><code>config: {…}</code></td><td>the settings of this diagram (theme, colours, sizes, sort, gaps …)</td></tr>
 <tr><td><code>bookmarks</code>, <code>arrows</code></td><td>numbered notes on signal rows and arrows between them</td></tr>
@@ -258,7 +258,7 @@ no <code>jumps</code>. The static SVG puts the bookmark texts in a legend under 
 <div data-wave="#bm-src" data-title="bookmarks, arrows and a marker"></div>
 <div data-wave="#bm-src" data-mode="svg"></div>
 </div>
-<p>You rarely type bookmarks by hand: put them on in the viewer (<kbd>m</kbd>, drag, shift+drag for an arrow) and press
+<p>You rarely type bookmarks by hand: put them on in the viewer (<kbd>b</kbd>, drag, shift+drag for an arrow) and press
 <span class="ui">JSON</span> under the waves; it gives the <code>"bookmarks"</code> and <code>"arrows"</code> lists to paste
 (<a href="viewer.html">Viewer</a>).</p>
 
@@ -425,7 +425,7 @@ are written by hand).</p>
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.38 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live
+<footer>WaveLens 0.39 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live
 reference: <a href="../index.html">docs/index.html</a></footer>
 <script src="../../wavelens/wavelens.js"></script>
 <script>

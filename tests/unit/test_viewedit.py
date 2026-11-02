@@ -458,6 +458,140 @@ class Twin(unittest.TestCase):
         self.assertEqual(V.parse_t('3as'), 3e-6)                 # one table: a dump's resolution may be below fs
 
 
+class Deltas(unittest.TestCase):
+    """The Δ between markers on a page that is not open: neighbours in time, the place on the one it starts from."""
+    def three(self):
+        e = ed()
+        for t in ('30ns', '10ns', '60ns'):
+            self.assertNotIn('error', e.run([{'op': 'marker', 't': t}])[0])
+        return e
+
+    def test_neighbours_in_time(self):
+        r = self.three().run([{'op': 'deltas', 'on': True}])[0]
+        self.assertEqual((r['on'], r['deltas']), (True, [{'from': 2, 'to': 1, 'dt': 20000}, {'from': 1, 'to': 3, 'dt': 30000}]))
+
+    def pairs(self, e):
+        return [(d['from'], d['to'], d['dt']) for d in e.run([{'op': 'deltas'}])[0]['deltas']]
+
+    def test_to_any_marker(self):
+        e = self.three()     # 1 at 30, 2 at 10, 3 at 60: in time 2, 1, 3
+        self.assertNotIn('error', e.run([{'op': 'deltas', 'id': 2, 'to': 3}])[0])
+        self.assertEqual(e.st['markers'][1]['dto'], 3)
+        self.assertEqual(self.pairs(e), [(2, 3, 50000), (1, 3, 30000)])
+        self.assertNotIn('error', e.run([{'op': 'deltas', 'id': 3, 'to': 2}])[0])
+        self.assertEqual(self.pairs(e), [(2, 3, 50000), (1, 3, 30000), (3, 2, 50000)])
+        e.run([{'op': 'deltas', 'id': 1, 'to': None}])
+        self.assertEqual(e.st['markers'][0]['dto'], 0)
+        self.assertEqual(self.pairs(e), [(2, 3, 50000), (3, 2, 50000)])
+        e.run([{'op': 'deltas', 'id': 1, 'to': 'next'}, {'op': 'deltas', 'id': 2, 'to': 'next'}, {'op': 'deltas', 'id': 3, 'to': 'next'}])
+        self.assertTrue(all('dto' not in m for m in e.st['markers']))
+
+    def test_a_delete_moves_the_numbers(self):
+        e = self.three()
+        e.run([{'op': 'marker', 't': '70ns'}, {'op': 'deltas', 'id': 1, 'to': 4}, {'op': 'deltas', 'id': 3, 'to': 2}, {'op': 'marker', 'id': 2, 'delete': True}])
+        self.assertEqual([m.get('dto') for m in e.st['markers']], [3, None, None])
+
+    def test_hidden_goes_through(self):
+        e = self.three()
+        self.assertNotIn('error', e.run([{'op': 'marker', 'id': 1, 'hidden': True}])[0])
+        self.assertIs(e.st['markers'][0]['hidden'], True)
+        self.assertEqual(self.pairs(e), [(2, 3, 50000)])
+        self.assertIn('no Δ', e.run([{'op': 'deltas', 'id': 1, 'signal': 'tb.dut.data'}])[0]['error'])
+        e.run([{'op': 'deltas', 'id': 2, 'to': 1}])
+        self.assertEqual(self.pairs(e), [])
+        e.run([{'op': 'marker', 'id': 1, 'hidden': False}])
+        self.assertNotIn('hidden', e.st['markers'][0])
+        self.assertEqual(self.pairs(e), [(2, 1, 20000), (1, 3, 30000)])
+
+    def test_a_colour(self):
+        e = self.three()
+        e.run([{'op': 'deltas', 'id': 1, 'color': '#112233'}])
+        self.assertEqual(e.st['markers'][0]['dcolor'], '#112233')
+        e.run([{'op': 'deltas', 'id': 1, 'color': None}])
+        self.assertNotIn('dcolor', e.st['markers'][0])
+
+    def test_a_place_on_a_line(self):
+        e = self.three()
+        self.assertNotIn('error', e.run([{'op': 'deltas', 'id': 1, 'signal': 'tb.dut.data', 'lift': 'below'}])[0])
+        self.assertEqual((e.st['markers'][0]['dsignal'], e.st['markers'][0]['dlift']), ('tb.dut.data', 'below'))
+        self.assertNotIn('error', e.run([{'op': 'deltas', 'id': 1, 'signal': None}])[0])
+        self.assertNotIn('dsignal', e.st['markers'][0])
+        self.assertNotIn('dlift', e.st['markers'][0])
+
+    def test_what_it_refuses(self):
+        e = self.three()
+        err = lambda **a: e.run([{'op': 'deltas', **a}])[0]['error']
+        self.assertEqual(err(on='yes'), 'on: true or false')
+        self.assertEqual(err(signal='clk'), 'deltas: to, signal, lift and color go with id')
+        self.assertTrue(err(id=9).startswith('no marker 9'))
+        self.assertEqual(err(id=3), 'marker 3: no Δ from it (the last in time, hidden, or none set)')
+        self.assertEqual(err(id=1, to=1), 'deltas: to is the marker it starts from')
+        self.assertTrue(err(id=1, to=9).startswith('to: a marker as listed'))
+        self.assertTrue(err(id=1, to=True).startswith('to: a marker as listed'))
+        self.assertEqual(err(to=1), 'deltas: to, signal, lift and color go with id')
+        self.assertEqual(err(id=1, lift='below'), 'deltas: lift is the lane of a signal: give signal')
+
+    def test_a_copy_gone_leaves_the_line_to_its_signal(self):
+        e = self.three()
+        e.run([{'op': 'duplicate', 'signals': 'tb.dut.data'}, {'op': 'deltas', 'id': 1, 'signal': 'tb.dut.data#2'}, {'op': 'duplicate', 'signals': 'tb.dut.data', 'delete': True}])
+        self.assertEqual(e.st['markers'][0]['dsignal'], 'tb.dut.data')
+
+
+class Duplicate(unittest.TestCase):
+    """A signal's copy without a browser: the commands of the viewer on a page that is not open."""
+    def run_ok(self, e, *ops):
+        out = e.run(list(ops))
+        for o in out:
+            self.assertNotIn('error', o, o)
+        return out
+
+    def test_a_copy_is_a_row_under_its_signal(self):
+        e = ed()
+        r = self.run_ok(e, {'op': 'duplicate', 'signals': 'tb.dut.data'})[0]
+        self.assertEqual(r['copies'], ['tb.dut.data#2'])
+        self.assertEqual(e.st['dups'], ['tb.dut.data#2'])
+        rows = [x[0] for x in e.run([{'op': 'rows', 'limit': 100}])[0]['rows']]
+        self.assertEqual(rows[rows.index('tb.dut.data') + 1], 'tb.dut.data#2')
+
+    def test_every_command_names_it(self):
+        e = ed()
+        self.run_ok(e, {'op': 'duplicate', 'signals': 'tb.dut.data', 'radix': 'dec', 'rows': 2}, {'op': 'radix', 'signals': 'tb.dut.data#2', 'radix': 'bin'},
+                    {'op': 'paint', 'signals': 'tb.dut.data#2', 'color': '#123456'}, {'op': 'hide', 'signals': 'tb.dut.data#2'}, {'op': 'show', 'signals': 'tb.dut.data#2'},
+                    {'op': 'bookmark', 't': '5ns', 'signal': 'tb.dut.data#2'}, {'op': 'group', 'name': 'g', 'signals': ['tb.dut.data#2']})
+        self.assertEqual((e.st['radix'], e.st['analog']), ({'tb.dut.data#2': 'bin'}, {'tb.dut.data#2': 2}))
+        self.assertEqual(e.missing(e.st), [])
+
+    def test_it_starts_as_that_row_looks(self):
+        e = ed()
+        self.run_ok(e, {'op': 'radix', 'signals': 'tb.dut.data', 'radix': 'dec'}, {'op': 'duplicate', 'signals': 'tb.dut.data'}, {'op': 'radix', 'signals': 'tb.dut.data#2', 'radix': 'bin'},
+                    {'op': 'duplicate', 'signals': 'tb.dut.data#2'})
+        self.assertEqual(e.st['radix'], {'tb.dut.data': 'dec', 'tb.dut.data#2': 'bin', 'tb.dut.data#3': 'bin'})
+
+    def test_gone_with_what_was_its(self):
+        e = ed()
+        self.run_ok(e, {'op': 'duplicate', 'signals': 'tb.dut.data', 'radix': 'dec'}, {'op': 'bookmark', 't': '5ns', 'signal': 'tb.dut.data#2'},
+                    {'op': 'marker', 't': '6ns', 'signal': 'tb.dut.data#2'}, {'op': 'select', 'signal': 'tb.dut.data#2'})
+        r = self.run_ok(e, {'op': 'duplicate', 'signals': 'tb.dut.data', 'delete': True})[0]
+        self.assertEqual(r['deleted'], ['tb.dut.data#2'])
+        self.assertEqual((e.st['dups'], e.st['radix'], e.st['bookmarks'][-1]['signal'], e.st['markers'][-1]['signal'], e.st['select']),
+                         ([], {}, 'tb.dut.data', 'tb.dut.data', 'tb.dut.data'))
+
+    def test_what_it_refuses(self):
+        e = ed()
+        self.assertEqual(e.run([{'op': 'duplicate', 'signals': 'tb.dut.data', 'delete': True}])[0]['error'], 'no copies of tb.dut.data')
+        self.assertEqual(e.run([{'op': 'duplicate', 'signals': 'clk', 'rows': 3}])[0]['error'], 'not a bus: clk')
+        self.assertIn('a bit has no copy', e.run([{'op': 'duplicate', 'signals': 'tb.dut.data[1]'}])[0]['error'])
+        self.assertIn('radix: one of', e.run([{'op': 'duplicate', 'signals': 'tb.dut.data', 'radix': 'nope'}])[0]['error'])
+        self.assertIn('rows:', e.run([{'op': 'duplicate', 'signals': 'tb.dut.data', 'rows': 'x'}])[0]['error'])
+        self.assertFalse(e.st.get('dups'))
+
+    def test_a_state_of_other_waves(self):
+        e = ed()
+        r = e.run([{'op': 'set_state', 'state': {'wavelens': 'state', 'dups': ['tb.dut.data#2', 'gone#2', 'clk']}}])[0]
+        self.assertEqual(e.st['dups'], ['tb.dut.data#2'])
+        self.assertEqual(r['missing'], ['gone#2', 'clk'])
+
+
 class Bits(unittest.TestCase):
     """review 0.31 S1, T1: `bits` without a browser: only a bus, in the order given, off by name, once each."""
     def bits(self, e, signals, **a):

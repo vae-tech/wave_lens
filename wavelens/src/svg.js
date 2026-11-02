@@ -146,6 +146,7 @@ const WaveSVG = {
       paintTimeMarks(P, timeMarks, X, from, to, top, bodyEnd, (to - from) / Math.max(1, xR - xL));
       paintSpans(P, V ? V.spans : M.spans, X, from, to, lay, top, bodyEnd);
       paintMarkers(P, marks, X, from, to, top, bodyEnd, laneY(lay, S.laneHeight));
+      if (V) paintDeltas(P, V.deltaList(), X, from, to, laneY(lay, S.laneHeight), top, dt => V.deltaText(dt));
       paintBookmarks(P, bms, ars, X, from, to, rowY, top, bodyEnd, showAxis ? axisY + 10 : top + 10, null, laneY(lay, S.laneHeight), arrowFill(M, M.rows));
       if (V && V.cursor >= from && V.cursor <= to) P.path([['M', X(V.cursor), top], ['L', X(V.cursor), bodyEnd]], { stroke: 'acc', w: 1.2 });
       if (V) V.paintMeasures(P, X, from, to, xL, xR, top, bodyEnd, showAxis ? [axisY, 20] : null, true);   // the second cursor, the measured range

@@ -45,6 +45,14 @@ def summary(doc):
     return f'{len(tests)} test{"s" * (len(tests) != 1)}: ' + ', '.join(parts)
 
 
+def checks_of(t):
+    """A test's checks -> (all, failed): what it counted; a file of before these counts: what left a bookmark."""
+    if 'passed' in t:
+        return t['passed'] + t['failed'], t['failed']
+    marks = [m for m in t.get('marks') or [] if m.get('kind') == 'check']
+    return len(marks), sum(not m['ok'] for m in marks)
+
+
 def rows_of(view, cfg):
     """The names the rows of a view answer to -> {path or name: the row's name}."""
     sig = view.get('signals') or cfg.get('signals')
@@ -89,7 +97,7 @@ def bookmark(m, tc):
         head = f'{m["text"]}: ' if m.get('text') else ''
         return {'t': m['t'], 'signal': m.get('signal') or tc, 'color': RESULTS['pass' if ok else 'fail'][1],
                 'label': f'✓ {m["got"]}' if ok else f'✗ {m["got"]} ≠ {m["expected"]}',
-                'text': f'{head}{m["got"]}' + (' as expected' if ok else f', expected {m["expected"]}')}
+                'text': f'{head}{m.get("got_all", m["got"])}' + (' as expected' if ok else f', expected {m.get("expected_all", m["expected"])}{m.get("at", "")}')}
     if kind == 'log':
         return {'t': m['t'], 'signal': tc, 'color': LOG_COLOR.get(m.get('level'), RESULTS['fail'][1]), 'label': m.get('level', 'log').lower(),
                 'text': f'{m.get("level", "LOG")}: {m.get("text", "")}'}
@@ -114,7 +122,7 @@ def marks_of(doc):
             if 'step' not in p:   # on its value of the step signal the row says it (none: it began where no signal can be written, ReadOnly)
                 row = doc.get('step') or tc
                 spans.append({'from': p['from'], 'to': p['to'], 'label': p['label'], 'signals': p.get('signals') or ([row] if row else []), 'color': 'c7'})
-        start = {'t': t['from'], 'label': name, 'color': MARK_COLOR, 'lift': 'below', 'text': f'{name} {t["name"]} starts' + (f': {t["doc"]}' if t['doc'] else '')}
+        start = {'t': t['from'], 'label': name, 'color': MARK_COLOR, 'lift': 'below', 'text': f'{name} {t["name"]} starts' + (f': {" ".join(t.get("text", t["doc"]).split())}' if t['doc'] else '')}
         bms.append({**start, 'signal': tc} if tc else start)
         bms += [bookmark(m, tc) for m in t['marks']]
         said = t['message'] + (f' ({t["where"]})' if t['where'] else '')
@@ -157,11 +165,15 @@ def test_views(cfg, doc, template):
             key += '_'
         word, color = RESULTS.get(t['result'], RESULTS['run'])
         view = {**copy.deepcopy(tmpl), 'from': f'{t["from"]}ps', 'title': f'TC{t["n"]} {t["name"]} · {word}'}
+        if t.get('signals'):   # the test's own rows, after the ones every test shares
+            view['also'] = (view.get('also') or []) + t['signals']
         if t['to'] is not None:   # (not finished: to the end of the dump)
             view['to'] = f'{int(t["to"] + max((t["to"] - t["from"]) * TAIL, 1))}ps'
         mark_view(view, cfg, {**doc, 'tests': [t]}, jumps=False)
         said = t['message'] + (f' ({t["where"]})' if t['where'] else '')
-        note = ' · '.join(x for x in (t['doc'], said) if x)
+        n, bad = checks_of(t)
+        count = '' if not n else f'{n - bad} of {n} checks passed' if bad else f'{n} check{"s" * (n != 1)} passed'
+        note = ' · '.join(x for x in (t['doc'], said, count) if x)
         if note:
             view['note'] = note
         out[key] = view

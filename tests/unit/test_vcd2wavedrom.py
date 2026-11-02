@@ -191,7 +191,7 @@ class Options(unittest.TestCase):
 
     def test_parse_enums_markers_groups(self):
         self.assertEqual(V.parse_enums(['st=0:IDLE,1:RUN', {'q': {'0x2': 'B', '010': 'T'}}]), {'st': {0: 'IDLE', 1: 'RUN'}, 'q': {2: 'B', 10: 'T'}})
-        self.assertEqual(V.parse_markers(['posedge done=done', {'on': 'x'}]), [('posedge done', 'done'), ('x', 'x')])
+        self.assertEqual(V.parse_markers(['posedge done=done', {'on': 'x'}]), [('posedge done', 'done', None), ('x', 'x', None)])
         self.assertEqual(V.parse_groups(['tx=a,b', {'rx': ['c']}]), [('tx', ['a', 'b']), ('rx', ['c'])])
 
     def test_bad_time_is_an_error(self):
@@ -578,6 +578,33 @@ class RowNames(unittest.TestCase):
                 doc, err = self.page(d, False, sig)
                 self.assertEqual(doc['bookmarks'][0]['signal'], 'ctrl.o_done', sig)
                 self.assertNotIn('bookmark-signal-missing', err)
+
+    def test_also_adds_rows_by_name_and_pattern(self):
+        with H.tmp() as d:
+            doc, err = self.page(d, False, also=['*_other', 'o_done', 'gone', '*nothing*'])
+            self.assertEqual(V.row_paths(doc['signal']), ['clk', 'ctrl.o_done', 'ctrl.i_other'], 'what is shown stays once')
+            doc, err = self.page(d, False, signals=['clk'], group={}, bookmarks=[], also=['*_other', 'o_done', 'gone'])
+            self.assertEqual(V.row_paths(doc['signal']), ['clk', 'i_other', 'o_done'])
+            self.assertIn('also-no-match', err)
+            self.assertIn('"gone"', err)
+
+    def test_also_says_when_a_pattern_is_cut(self):
+        with H.tmp() as d:
+            vcd = os.path.join(d, 'm.vcd')
+            with open(vcd, 'w', encoding='utf-8') as f:
+                names = [chr(33 + i) for i in range(V.ALSO_MAX + 3)]
+                f.write('$scope module tb $end\n' + ''.join(f'$var wire 1 {c} s{i} $end\n' for i, c in enumerate(names)) + '$upscope $end\n$enddefinitions $end\n#0\n'
+                        + ''.join(f'0{c}\n' for c in names) + '#5\n' + ''.join(f'1{c}\n' for c in names))
+            rc, out, err = H.run_tool('vcd2wavedrom', '--waves', vcd, '--scope', 'tb', '--exact', '--signals', 's0', '--also', 's*')
+            self.assertEqual(rc, 0, err)
+            self.assertIn('also-cut', err)
+            self.assertLessEqual(len(V.row_paths(json.loads(out)['signal'])), V.ALSO_MAX + 1)
+
+    def test_a_marker_with_on_keeps_its_colour(self):
+        with H.tmp() as d:
+            doc, err = self.page(d, False, marker=[{'on': 'posedge o_done', 'label': 'm', 'color': '#c03030'}])
+            self.assertEqual({m.get('color') for m in doc['markers']}, {'#c03030'})
+            self.assertNotIn('marker-key', err)
 
     def test_a_name_of_no_row_still_warns(self):
         with H.tmp() as d:

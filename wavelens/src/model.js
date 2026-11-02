@@ -373,8 +373,9 @@ function decode(sig, v, radix) {
   return '0x' + v.toUpperCase();
 }
 // bus label of transition o with the radix in effect (re-decoded only when the radix changes)
-const vtext = (s, o, radix) => o.raw == null ? o.v : (s.radix || radix || 'auto') === o.rk ? o.vr : (o.rk = s.radix || radix || 'auto',
-  o.vr = o.bits && o.rk === 'bin' ? o.bits : decode(s, o.raw, o.rk));
+const vtext = (s, o, radix) => { if (o.raw == null) return o.v; const r = s.radix || radix || 'auto';
+  if (s.dupOf) return o.bits && r === 'bin' ? o.bits : decode(s, o.raw, r);   // a copy shares the changes, not the memo: another radix, no enum
+  if (r !== o.rk) { o.rk = r; o.vr = o.bits && r === 'bin' ? o.bits : decode(s, o.raw, r); } return o.vr; };
 
 // where JSON.parse stopped in a text -> {line, col (1 the first), text: that line}, from its message (V8: "… at position 12
 // (line 2 column 5)", Firefox: "… at line 2 column 5 …"; an end too soon: the end), null when it says no place (Safari)
@@ -526,6 +527,16 @@ function bitRows(sig) {
     return r;
   });
 }
+// Duplicate: a signal's row again, under it: the changes, the place and the path read through to the signal (a large dump's
+// read later, a compare's swap come with them), the name, the radix, the analog form, the enum table its own; "data#2" in every list
+function dupRow(s, n) {
+  const e = s.enum || ENUMS[s.full] || ENUMS[s.name];
+  return Object.assign(Object.create(s), { dupOf: s, dupN: n, full: `${s.full}#${n}`, name: `${s.name} #${n}`, enum: e, enum0: e, radix: s.radix,
+    analog: s.analog, an: null });
+}
+const dupId = id => { const m = /^(.+)#([1-9]\d*)$/.exec(id); return m && +m[2] > 1 ? { of: m[1], n: +m[2] } : null; };
+// what a row stands for: the signal under its row in your group, under a copy
+const rowBase = r => { const o = r.orig || r; return o.dupOf || o; };
 // the width after a name: a vector's [w-1:0], a field's place in its vector [msb:lsb], a struct's whole value's; none
 // for a bit, a real, a string
 const widthTag = r => { const s = r && r.type === 'group' ? r.sig : r;
@@ -670,7 +681,7 @@ function rowsMade(M, got) {
   }
 }
 // the rows a row on the screen needs read (lazy): itself, the vector of a field, every signal of a struct
-const lazyOf = (M, r) => (r.type === 'sig' ? (r.lazy ? [r] : r.field && r.of && r.of.lazy ? [r.of] : []) :
+const lazyOf = (M, r0, r = r0.dupOf || r0) => (r.type === 'sig' ? (r.lazy ? [r] : r.field && r.of && r.of.lazy ? [r.of] : []) :
   r.type === 'group' && r.sig && r.sig.struct ? M.rows.slice(M.rows.indexOf(r) + 1, r.last + 1).filter(q => q.lazy) : []);
 // template.html's dump format ({ t0, t1, signals: [{ name, w, t: [[ps, value]] }] }) -> WaveJSON with the time extension
 function fromTV(wave, extra = {}) {
@@ -943,9 +954,19 @@ const pageMark = m => ({ ...m, lift: markLift(m) });   // of a document or a pag
 function markNorm(list) {
   return (Array.isArray(list) ? list : []).map(m => { const signal = m && m.signal ? String(m.signal) : null;
     return { t: num(parseT(m && m.t)), label: m && m.label != null ? String(m.label) : '', color: colorOk(m && m.color), signal,
-      lift: markLift({ signal, lift: m && m.lift }) }; })
+      lift: markLift({ signal, lift: m && m.lift }), dsignal: m && m.dsignal ? String(m.dsignal) : null, dlift: m && m.dlift === 'below' ? 'below' : null,
+      dto: m && Number.isInteger(m.dto) && m.dto >= 0 ? m.dto : null, dcolor: colorOk(m && m.dcolor), hidden: !!(m && m.hidden) }; })
     .filter(m => isFinite(m.t));
 }
+// the Δ of the markers: an arrow from each to the next in time, or to the marker its dto names (a number of the list; 0: none), its
+// place (dsignal, dlift) and colour (dcolor) kept on the one it starts from; a hidden marker is left out, the next goes through it
+function markDeltas(ms) {
+  const s = ms.filter(m => !m.hidden).sort((a, b) => a.t - b.t);
+  return s.flatMap((a, i) => { const to = ms[a.dto - 1], b = a.dto === 0 ? null : to && to !== a ? (to.hidden ? null : to) : s[i + 1];
+    return b ? [{ a, b, dt: Math.abs(b.t - a.t) }] : []; });
+}
+// marker id deleted: the numbers after it move
+const markGone = (ms, id) => { for (const m of ms) if (m.dto === id) m.dto = null; else if (m.dto > id) m.dto--; };
 function groupNorm(list) {
   const seen = new Set();
   return (Array.isArray(list) ? list : []).filter(g => g && String(g.name ?? '').trim() && !seen.has(String(g.name).trim()) && seen.add(String(g.name).trim()))

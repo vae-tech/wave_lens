@@ -169,8 +169,10 @@ key and adds its own. The APB example's config, written by hand:</p>
 <tr><td><code>clock</code> / <code>exact</code></td><td>one cell per clock cycle (plain WaveDrom, the value after the edge) / every
   transition at its time (<a href="wavedrom.html#from-a-dump">WaveDrom guide</a>)</td></tr>
 <tr><td><code>group</code>, <code>hierarchy</code></td><td>named groups <code>{"aw": ["AWVALID", …]}</code>; or every scope a group</td></tr>
+<tr><td><code>also</code></td><td>more rows, names or patterns (<code>"*fifo_full"</code>): unlike <code>signals</code>, one the dump has not got is a lint warning
+  (<code>also-no-match</code>), not an error; a pattern adds 32 rows at most</td></tr>
 <tr><td><code>marker</code></td><td><code>"posedge done=done"</code>: dashed markers, the <span class="ui">go to</span> buttons;
-  <code>{"on": EVENT, "label"}</code> at every match of an event (below)</td></tr>
+  <code>{"on": EVENT, "label", "color"}</code> at every match of an event (below); pale without a colour</td></tr>
 <tr><td><code>bookmarks</code>, <code>arrows</code></td><td>numbered notes and arrows (the viewer's <span class="ui">JSON</span> button writes
   them for you). A bookmark's <code>"at"</code> instead of <code>"t"</code> is an event whose time the build finds in the dump, so a
   changed test moves it along: <code>"posedge X"</code>, <code>{"signal": "state", "value": "ERROR"}</code> (a label, a number,
@@ -340,7 +342,7 @@ config <code>mkconfig.py</code> makes from the dump (the whole hierarchy). <code
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.38 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live
+<footer>WaveLens 0.39 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live
 reference: <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

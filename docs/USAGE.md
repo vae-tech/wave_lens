@@ -72,7 +72,7 @@ may be the default). What the tab does differently from a page in a browser:
   what they mean in VS Code (ctrl+F find, ctrl+C copy, ctrl+Z / ctrl+Y undo / redo, alt+C W R in the find field);
   `wavelens.keysToVSCode` (default `ctrl+G`, Go to Line) are left to VS Code — the list of your groups is `gl` then; the
   others (ctrl+P, F1, ctrl+tab, ctrl+shift+…) are VS Code's.
-- **The version** in the bar's title line: `0.38 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
+- **The version** in the bar's title line: `0.39 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
   committed), so a tab of a development build says which one it is.
 - **An agent** on the host (`tools/wavemcp.py`, below): when it starts its live link, every open tab connects (**●
   live**); `view_live` with `page` a `.vcd` / `.fst` and `open: true` opens it in the VS Code window that has the file
@@ -169,7 +169,8 @@ FST before); a time that goes back before the end is the error it is.
 
 Next to `signals`: `"config"` (page settings, below), `"page"` (title,
 intro), and `"views"` — named variants, each with its own `signals` (patterns such as `"tb.*_valid"`), `from` / `to`,
-`clock` (one cell per clock) or `exact`, `group`, `marker`, `bookmarks`, `arrows` and `render` (`view`, `svg`, `both`).
+`clock` (one cell per clock) or `exact`, `group`, `also` (more rows by name or pattern: unlike `signals`, one the dump has not got is a lint
+warning, `also-no-match`, not an error; a pattern adds 32 rows at most), `marker`, `bookmarks`, `arrows` and `render` (`view`, `svg`, `both`).
 The starting values come from `tools/base.config.json` (`BASE=`): which scope depth starts shown, which paths are hidden,
 how many value changes fit on a page, and rules by path pattern and width (`python3 -I tools/mkconfig.py --help`).
 The example configs in [`examples/`](../examples) are written by hand and show every key.
@@ -194,6 +195,7 @@ page). The checks:
 | `bookmark-duplicate`, `bookmark-time`, `bookmark-key` | a number twice (arrows take the first), a `t` that is no time, an unknown key (`lable`) |
 | `bookmark-link-missing` | a `link` to a view the page has not got |
 | `arrow-end-missing`, `arrow-key` | an arrow from or to no bookmark of the view (not drawn), an unknown key |
+| `also-no-match`, `also-cut` | an `"also"` name or pattern with no signal in the dump, a pattern past 32 rows |
 | `marker-no-match`, `marker-key` | a marker's event matches nothing in the window, an unknown key |
 | `expr-name-missing`, `exprs-no-engine` | an expression reads a name the page will not find (its row would stay empty and look like "never true"); expressions on a page without the engine (`--no-sva`, `"sva": false`) |
 | `gap-view-off`, `setting-signal-missing` | `gapView` without `gaps` does nothing; `cycleClock`, `gapClock`, `gapSignals` or `gapAux` name no row of the view, with the cycles or the gaps on |
@@ -347,7 +349,7 @@ add theirs (`WaveLens.registerDefaults`).
 | `toolsFolded` | false | the bar's tools folded to its title line (**▴** / **▾ tools** in the bar) |
 | `toolsHidden` | `[]` | the bar's tool groups left out by their labels (`["style", "dump"]`; the right button on the bar) |
 | `themeButton` | `auto` | **◐** in the bar's title line: the page's theme (auto, light, white, dark; kept in this browser; in VS Code its list, VS Code's colours too); `auto`: when the page has no theme button of its own (`viewer.html`, the VS Code tab) |
-| `version` | true | the version in the bar's title line, and the build the page was made from (`0.38 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
+| `version` | true | the version in the bar's title line, and the build the page was made from (`0.39 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
 | `keysLeft` | `[]` | keys the viewer leaves to its host: `["ctrl+G"]` (`ctrl+` is `cmd+` too, a letter by its place); the VS Code tab: `wavelens.keysToVSCode` |
 | `log` | `auto` | the log under the viewer (§ A dump straight in the browser): `auto` from the first thing done in the page (a dump read, Sources…, Load…), `true` always, `false` never |
 | `savePage` | true | the bar's **Save page**: this page as a `.view.html` with your view in it (§ Save and Load); false hides it and keeps no copy of the page's text |
@@ -356,7 +358,7 @@ add theirs (`WaveLens.registerDefaults`).
 | `highlight`, `dim` | none, 0.3 | instances in front at start (paths, names, `*` patterns) and the opacity of the rest |
 | `findHighlight`, `findOpen`, `findMask` | true, true, false | starting state of the find options **Highlight**, **Open**, **Mask** |
 | `findCase`, `findWord`, `findRegex` | false | starting state of **Aa** (match case), **Full** (whole name; `a.b`: the end of the full path), **.\*** (a regular expression) |
-| `bookmarkLeft` | 0.2 | going to a bookmark (`1`–`9`, `]m [m`, **Markers…**, a number in its list, the command's `go`): its time this far from the left of the waves (0 … 0.9; 0.5: the middle; not a number: 0.2) |
+| `bookmarkLeft` | 0.2 | going to a bookmark (`1`–`9`, `]b [b`, **Markers…**, a number in its list, the command's `go`): its time this far from the left of the waves (0 … 0.9; 0.5: the middle; not a number: 0.2) |
 | `arrowLabels`, `laneHeight` | `lane`, 16 | arrow labels in a lane of their own between the signals, or `overlay` |
 | `svaSignals`, `svaShow` | `view`, all | assertion groups: repeat the bound signals under the steps (`view`: in viewers, `true`: also in static SVGs, `false`); which assertions are drawn (labels, `*` patterns) |
 
@@ -616,12 +618,13 @@ setting is the start; a find left out still floats over the waves on `/`). Navig
 | edge kind **= value** | a field: `0x40`, `'h40`, `8'd64`, `64`, `-3`, `'b101`, a literal with x / z compared bit for bit (`'b10x1`, `8'hx5`: x and z apart) or a text (an enum label: `ACCESS`); Enter / ◀ ▶ / Tab: the next / previous time the selected signal becomes it (none selected: any shown signal) | edge kind **X / Z** | the next / previous x or z (a bus with x / z bits too) of the selected signal or of any shown one: the first X after reset from the reset's edge |
 | shift+`← →` | move the cursor a hundredth of the view | the pointer on a signal | its value there, the change into it and the next one (tooltip) |
 | `/`, ctrl+F | find (the bar scrolled away: the find group floats over the waves; ✕ or Esc puts it back) | `n N`, `*` `#` | next / previous match; find the selected signal's name and go to its next / previous match |
-| `m` | bookmark at the cursor | `]m [m` | the next / previous bookmark |
+| `b` | bookmark at the cursor | `]b [b` | the next / previous bookmark |
+| `m` | marker at the cursor: its label asked (Enter) | `]m [m` | the next / previous marker |
 | `r` | the last state loaded, read again (Reload) | | |
 | `gm` (the right button's **Markers…**) | the markers (the page's, yours) and the bookmarks in a list over the waves, by time: `↓` the first (`↑` the last), then `↑ ↓` Home End step through them, a click picks one — the cursor on it and the waves at its time with the span they have: a marker in the middle, a bookmark as going to it does (below); Enter or Esc closes it there | `gl`, ctrl+G | your groups: a list |
 | shift+click the waves | a second cursor (dashed, on an edge): Δ to the cursor in time, its frequency (`Δ 40 ns / 25 MHz`) and in cycles of the clock (the cycles band's when it is on, else the selected signal's, else the nearest `*clk*`) on the axis and in the readout; `x` swaps the two; Esc clears it | `1` … `9` | go to that bookmark (each bookmark's line shows its Δ from the cursor; the bookmarks and markers at the cursor are marked in their lists) |
 | `zM` / `zR` | fold / open every module | `zc` / `zo` / `za` | fold / open / toggle the module of the selected signal |
-| `b`, a click on a bus's `[7:0]` | the selected bus bit by bit: a row per bit under it (§ below); again, or on one of its bits: folded | | |
+| `B`, a click on a bus's `[7:0]` | the selected bus bit by bit: a row per bit under it (§ below); again, or on one of its bits: folded | | |
 | `t` | the Modules panel: the modules as a tree (§ below); again: the selected signal's module in it; `T`: the state machines | **Only: N modules ‖ ✕** in the bar | ‖ pauses Only (every module), ▶ resumes it, ✕ clears it |
 | `yy`, ctrl+C | copy the selected signal (or the highlighted ones); while searching ctrl+C ends the search | `s` | sort off → A→Z → Z→A |
 | ○ or ctrl+click a name | highlight the signal or instance; ctrl+shift+click: every row from the last one to it | Esc | reset: no search, highlight or selection |
@@ -635,11 +638,19 @@ setting is the start; a find left out still floats over the waves on `/`). Navig
 
 **Bus widths and bits.** A bus has its width after its name, as declared: `PADDR [7:0]` (a field of a packed struct its
 place in the vector, `[15:13]`; a struct's row its whole value's; none on a bit, a real or a string; `"showWidth": false`
-leaves them out, in the viewer and the pictures). A click on the width (or `b` on the selected bus, or the right button's
+leaves them out, in the viewer and the pictures). A click on the width (or `B` on the selected bus, or the right button's
 **Bits: N rows**) shows the bus bit by bit: a row per bit under it, the highest first, named `[7]` … `[0]` with the full
-path `PADDR[7]`, each the 0 / 1 / x / z of its bit of the value; again (or `b` on one of its bits) folds them. The
+path `PADDR[7]`, each the 0 / 1 / x / z of its bit of the value; again (or `B` on one of its bits) folds them. The
 buses shown so are kept in the browser and in the saved state (`"bits": ["PADDR"]`); a bit is a signal like any other —
 selected, searched for its edges, bookmarked (`"signal": "PADDR[2]"`: going to it shows the bits), in the picture.
+
+**One signal, two forms.** The right button's **Duplicate**, on a name or on the waves, puts the same signal again in a row under it, `PADDR #2`:
+the same changes, with a radix, an analog form and a colour of its own, so a bus shows in hex and as a step plot at once. It starts as the row it
+came from looks; an enum's copy shows the names until you give it a radix, then the numbers. Duplicate takes every row selected or highlighted;
+**Remove the copy** takes it away, and a bookmark or a marker on it goes to its signal (Hide only leaves it out). A copy is named `PADDR#2` in
+every command; it can go into your groups, be shown bit by bit, carry bookmarks; it is kept in the browser and in the saved state
+(`"dups": ["PADDR#2"]`), and gaps, cycles, a compare and the state machines take it as its signal. A clock-sampled view gives the values as
+texts: its rows have no radix, in a copy either; open the dump itself.
 
 **Hierarchy and module shading.** With `"hierarchy": true` (generated configs) every scope is a group: module rows are
 bold on a darker band, the signals of neighbouring modules alternate between two backgrounds, a click on a module folds
@@ -744,13 +755,13 @@ that width around the cursor. Cycle diagrams count in cycles.
 
 ![Cursor at 1.2 µs, a 100 ns window around it](img/cursor.png)
 
-**Bookmarks and arrows.** **+ Mark** (`m`) puts a numbered bookmark on the selected signal at the cursor, snapped to an
+**Bookmarks and arrows.** **+ Mark** (`b`) puts a numbered bookmark on the selected signal at the cursor, snapped to an
 edge. Below the waves each bookmark has a time, a signal, a colour and a text; drag a circle to move it, shift+drag from
 one circle to another to draw an arrow (shape `- ~ -~ ~- -| |- -|-`, head, line, colour, label). Labels get a thin
 lane of their own between the signals; an arrow between two bookmarks of one signal is a dimension line in that lane,
 above the signal. A circle dragged onto the top quarter of its row (or **↥** in its line) is **lifted** into such a lane
 above the signal, with a leader down to it, so it covers no value (`"lift": true` in the JSON); dragged lower, it is
-on the row again. Bookmarks are kept in the browser (**Clear** forgets them and the arrows, your markers stay; the page's own
+on the row again. Bookmarks are kept in the browser (**Clear** forgets them and the arrows, your markers stay, **Clear all** in the Markers list takes those too; the page's own
 come back on reload); **JSON** gives the `"bookmarks"` and
 `"arrows"` lists to paste into a config, so the built page (and its static SVG) carries them. The AXI-Lite picture
 above shows arrows between handshakes with the latency as the label.
@@ -809,19 +820,37 @@ A bookmark's `"link"` opens another view of the page: `"link": "crc"` (that sect
 section; the viewer only: a static SVG has no buttons); `bookmark-link-missing` when the config has no such view.
 No match is an error naming the bookmark: `views.gap.bookmarks[3] (n 4): no match for {"signal": "r_state", "value":
 "FRAME_ERROR"} in 790us…842us`. A marker's `"on"` takes the same events: `{"on": {"signal": "state", "value": "ERR"},
-"label": "err"}` puts a marker at every match (`"nth"`: that one).
+"label": "err"}` puts a marker at every match (`"nth"`: that one; `"color"`: its colour, pale without it).
 
 ![The bookmark and arrow lists under the waves](img/bookmarks.png)
 
-**Markers and your groups.** The right button's **Marker here** draws a dashed line across every row with a label at
+**Markers and your groups.** The right button's **Marker here** (`m`: at the cursor) draws a dashed line across every row with a label at
 the top (yours, next to the page's own markers): a small box asks its label where you clicked — **Enter** (or **Add**)
 puts it in, also empty, **Esc** or a click elsewhere leaves it out — and it goes into the Markers list under the waves,
 edited there. A marker is pale until you give it a colour. **Its text goes on any line**: drag it (a marker without a text: by the top of its dashed line)
 onto a signal and it sits on the thin line over that row (the upper half) or under it (the lower half), the line lifted bookmarks use, one line for all of them; the
 drag also moves it along the time, on the edges of that signal (straight up or down, or with alt: the time stays), and up to the axis it goes back to the top. A click
 on the text puts the cursor there with its label ready in the list; the right button on it: **Its text…**, **Colour**, **Pale again**, **Delete the marker**. The markers
-of the page itself stay where the page puts them. **Markers…** (`gm`) lists them all over the waves to step through with ↑ ↓, the waves following; the waves stay where they are (**Bookmark here** asks a bookmark's text the same way).
-**Going to a bookmark** (`1`–`9`, `]m [m`, **Markers…**, a number in the list under the waves) shows the waves as they
+of the page itself stay where the page puts them.
+
+**The time between markers.** **Δ between markers** in the head of the list under the waves draws an arrow from each of your markers to the next in time, with
+the time in its middle, on a line of its own over the rows; the list says the same beside each marker. Drag an arrow up or down: it goes to the line over or under
+a signal, the lines of the markers' texts and the bookmarks, and stays there (back over the rows: drag it above the first one). The markers make its ends, so
+moving one moves it. The option and the places are kept in the browser and in the saved state (`"deltas": true`, a marker's `dsignal`, `dlift`, `dto`, `dcolor`), and go into a picture.
+
+An arrow can go to **any marker**, through the ones between. Each marker in the list has a **→** choice beside it (**next**, **none**, or a marker), or drag the dot at the arrow's far end along the waves: it snaps to the nearest
+marker as you go (dragging that dot up and down moves the line, as anywhere else on the arrow). Each marker has one arrow: A → C through B takes the place of A → B, and the last marker in time, which has none, can go back (C → A, the third distance).
+Arrows over the rows that cross in time take lines of their own. A marker that names another goes to it wherever they are moved; **→ next** is the neighbour in time again.
+
+**Colour on the lines between the rows.** The right button on such a line has **This line**: **Colour** paints all that is on it — the Δ arrows, the markers' texts, the bookmarks, an arrow's label — and **Their own colours** takes that off; each keeps the colour
+when it is moved. On a Δ arrow: its **Colour**, **Its own colour**, **No arrow from this marker**. (The bar's **Paint** stays for signals.)
+
+**Hidden markers.** **hidden** beside a marker keeps it in the list and takes it off the waves, the pictures and `]m [m`, and out of the Δ: its neighbours' arrows go through it, one aimed at it is not drawn (`"hidden": true` in the state; still in **Markers…**).
+
+**Clear all** in the head of the Markers list, and **Clear bookmarks and markers** at the end of the right button's menu, delete every bookmark, arrow and marker of yours (undo brings them back); the page's own markers stay.
+
+**Markers…** (`gm`) lists them all over the waves to step through with ↑ ↓, the waves following; the waves stay where they are (**Bookmark here** asks a bookmark's text the same way).
+**Going to a bookmark** (`1`–`9`, `]b [b`, **Markers…**, a number in the list under the waves) shows the waves as they
 were when it was made: its time `bookmarkLeft` (0.2) of the waves from the left, the span you have now, its signal
 selected, and the rows scrolled so that the row that was at the top under the time axis is at the top again (`"top"`
 in the bookmarks' JSON: a signal's or module's path; the other rows as they are now: what you hid or left out with
@@ -935,7 +964,7 @@ that does not read, a signal asked for without its pair, no time in common — a
 golden.vcd run.vcd --junit diff.xml`.
 
 **Undo and redo.** **ctrl+Z** (or **↶** in the bar's title line) takes back the last change of what you edit: bookmarks, arrows,
-markers, your groups, colours, radix, analog and hidden rows, the highlight, the edge style, the scroll and the folded
+markers, your groups, colours, radix, analog and hidden rows, the copies of signals, the highlight, the edge style, the scroll and the folded
 tools, the gaps and the cycles; **ctrl+shift+Z** / **ctrl+Y** (**↷**) redo. A step is what one action changed (a menu
 item, a colour, a dragged bookmark, a batch of commands from a script or a live agent); the toast names it. The cursor,
 the window, the selection and the search are not steps; a text typed is one step when its field is left, and in a text
@@ -1082,7 +1111,7 @@ directory can be copied, `HDL`, `TOP`, `MODULE` and `CONFIG` at the top of `run.
 
 ```python
 from wavelens_cocotb import Marks
-wl = Marks()                                 # Marks(signal='TEST_CASE', step='TEST_STEP', path=None, logs=True)
+wl = Marks()                                 # Marks(signal='TEST_CASE', step='TEST_STEP', path=None, logs=True, hide=())
 
 @wl.test()                                   # cocotb.test(), the same arguments
 async def test_read_back(dut):
@@ -1123,8 +1152,11 @@ Over the example the marks files of the two simulators are identical (checked on
 |---|---|
 | `@wl.test(…)` | `cocotb.test(…)` around the test: its number, a bookmark at its start, a span in the colour of its result, a bookmark at its end |
 | `wl.phase(label, signals=None)` | `with`, not awaited: the time inside it is `label` on `TEST_STEP`; a phase inside a phase comes back to it; `signals`: a span on those rows instead |
+| `wl.step(label, signals=None)` | the same phase in one line, until the next `step` or the end of the test: nothing to re-indent |
 | `wl.note(text, signal=None, label=None, color=None)` | a bookmark now, on `signal` (a handle, or a row's name; none: the test's row); `label`: the short text by the circle |
-| `wl.check(got, expected, text='', signal=None, show='all')` | a bookmark with both values; a mismatch is an `AssertionError`, which fails the test; `show='fail'`: no bookmark when they agree, for a check in a loop |
+| `wl.check(got, expected, text='', signal=None, show='all', why=None)` | a bookmark with both values; a mismatch is an `AssertionError`, which fails the test; every check is counted (`wave_tests`, the note of a test's view); a long value is short by its circle, whole in the list, and two lists say where they part; `why`: the text of a failure instead of `text`, a string or a function called only then; `show='fail'`: no bookmark when they agree, for a check in a loop |
+
+`@wl.test(signals=["*fifo_full", "u_x.state"])` names the test's own rows, patterns too: with `--marks-views tests` its view has them after the template's (the `"also"` of the view: one the dump has not got is a lint warning, not an error; a pattern adds 32 rows at most). A docstring's first paragraph is the test's line, the whole of it its first bookmark and `wave_tests` of that test. The line of a failure is the last frame outside the library, past the files of `Marks(hide=["my_checks.py"])` (names or patterns) and any frame that sets `__tracebackhide__`.
 
 Warnings and errors logged during a test are bookmarks too (`logs=False`: not). A test keeps 200 bookmarks; past that only failed checks
 and errors, and its last bookmark says how many were left out. A phase in cocotb's `ReadOnly`, where no signal can be written, keeps its exact time: begun there it is a span on the `TEST_STEP` row instead of a value, ended there the row goes back at the test's next call. Nothing but `check` fails a test: outside a test the calls do nothing, a marks file that cannot be written is a
@@ -1142,14 +1174,15 @@ try:
 except ImportError:
     class Marks:
         def __init__(self, *args, **kw): pass
-        def test(self, *args, **kw): return cocotb.test(*args, **kw)
+        def test(self, *args, signals=None, **kw): return cocotb.test(*args, **kw)
         def phase(self, *args, **kw): return contextlib.nullcontext()
+        def step(self, *args, **kw): pass
         def note(self, *args, **kw): pass
         def check(self, got, expected, text='', **kw):
             assert got == expected, f'{text}: got {got}, expected {expected}'
 ```
 
-Either way `note` and `phase` do nothing and **`check` still compares and fails the test**: a check that went quiet would pass anything.
+Either way `note`, `phase` and `step` do nothing and **`check` still compares and fails the test**: a check that went quiet would pass anything.
 `TEST_CASE` and `TEST_STEP` stay in the testbench, unwritten.
 
 The dump is not finished while the test runs, so the page is built after the simulation. The run leaves the marks in
@@ -1199,7 +1232,7 @@ await v.run([
 |---|---|---|
 | `bookmark` | `n? t? signal? text? label? color? lift? top? link? go? delete?` | a numbered circle on a signal (none: the time axis) with its text: a new one (`n` free or left out, `t` the cursor by default) or bookmark `n` changed; `label`: a short text by the circle; `lift`: `true` (or `"above"`) in a lane above its signal, `"below"` in one under it; `top`: the row going to it puts at the top of the waves (a signal's or module's path, or a name as `signal` takes it — a row there is, else an error; null: none — the command takes none by itself, as its file twin has no screen; the viewer's own **Bookmark here**, `m` and a range's bookmarks take the row at the top then); `link`: a button to another view (`"crc"` or `{view, bookmark}`); `go: true`: the waves to it, as `1`–`9` go (in a file: the cursor, the window within the waves and the selection); `delete: true`: bookmark `n` goes (`n: "all"`: every one; its arrows go too) |
 | `arrow` | `id? from? to? shape? head? line? color? label? delete?` | an arrow between bookmarks `from` → `to` with its label: new, or arrow `id` (1, 2 … as listed; or the one from → to) changed; shape `~ - -~ ~- -\| \|- -\|-`, head `> <> < ""`, line `solid dashed dotted` |
-| `marker` | `id? t? label? color? signal? lift? delete?` | a dashed line across the rows, pale unless `color` is given (`null`: pale again), with its label at the top, or with `signal` in the lane over that row (`lift: "below"`: under it; `signal: null`: at the top again): new, or marker `id` changed; `delete`: `id` or `"all"` (`"all"` without `delete` is an error) |
+| `marker` | `id? t? label? color? signal? lift? hidden? delete?` | a dashed line across the rows, pale unless `color` is given (`null`: pale again), with its label at the top, or with `signal` in the lane over that row (`lift: "below"`: under it; `signal: null`: at the top again): new, or marker `id` changed; `delete`: `id` or `"all"` (`"all"` without `delete` is an error); `hidden: true`: kept in its list, not on the waves, the Δ goes through it |
 | `expr` | `id? text? scope? label? color? on? row? mark? gap? delete?` | an expression of the signals in the [list](#assertions-sva): new (`text`, refused when it does not value; in a file not checked, an error shows in the page), or expression `id` changed; `scope`: the module its names start from, `label` its text on the waves, `color` (`null`: the colour of its place), `on` its marks, `mark` `band`, `line` or `strip`, `row` drawn as a signal, `gap` the waves cut to its matches, with the others that have it (idle and keep of `gaps`); `delete`: `id` or `"all"`; answers what it found: `n`, `time`, `share`, `first`, `last`, `min`, `max`, with `gap` also `cut` as `gaps` (in a file: `id` only, it is valued when the page opens) |
 | `expr_go` | `id? dir? n?` | the cursor to the next (`dir` 1) or previous (−1) match of an expression, round the ends, or to match `n`; answers `t`, `k` (which one), `n` (how many; 0: never true); in a page only |
 | `expr_matches` | `id? from? to? limit? offset?` | what the expressions found: without `id` everyone's numbers (`exprs`), with `id` also its stretches in the window (`matches: [[from, to], …]`, `total`, `next_offset`; `limit` default 100); in a page only |
@@ -1218,6 +1251,8 @@ await v.run([
 | `only` | `modules? on? clear? open?` | only these modules on the waves, with their submodules (the way to them as headers; the Modules panel's box): `modules` replaces the set and turns it on (`[]`: none kept) and opens the modules named with the ones above them (`open: false`: the folding as it is), `on: false` pauses it, `true` resumes it, `clear` every module again; a name of a signal or a struct is an error; answers the set (`{modules, on}`, `null`: none) |
 | `fold`, `unfold` | `groups? all?` | modules and your groups folded or opened |
 | `radix`, `analog` | `signals radix` / `signals rows` | the radix of buses (`null`: the page's), a bus as a step plot |
+| `duplicate` | `signals radix? rows? delete?` | a signal again in a row under it (`PADDR#2` in every command), starting as that row looks, its radix, analog form and colour its own; `radix`, `rows`: of the copy, as those commands; `delete`: the copies named, or all the copies of the signals named, gone -> `copies` or `deleted` |
+| `deltas` | `on? id? to? signal? lift? color?` | the Δ between your markers: `on` shows them; with `id` (the arrow from that marker): `to`: to that marker, through the ones between (`"next"`: the next in time again; `null`: no arrow from it); `signal`: in the lane over that row (`lift: "below"`: under it; `signal: null`: over the rows again); `color` (`null`: its own again) -> `on`, `deltas` [{`from`, `to`, `dt`}] |
 | `bits` | `signals on?` | buses bit by bit, a row per bit under each (`on: false`: folded again); a bit is named by its path (`PADDR[2]`) in every command |
 | `cursor`, `cursor2`, `view`, `fit`, `range` | `t` / `t` / `from? to? at? span?` / — / `from? to? signal?` | the cursors, the window, the measured range (cut to the waves; one wholly outside them is an error) |
 | `sort`, `style`, `find`, `gaps` | `dir ignore?` / `name` / `query case? word? regex? highlight? open? mask?` / `on? idle? keep? signals? clock? aux? only? count? view? reset?` | the order of the names, the edge style, the find field and its options (answers the rows `found`, the first 50, and their `count`), the gaps of the picture, and with `view` of the waves (`reset`: the page's own; answers every gap setting, on the waves also `cut`: `gaps`, `kept`, `total`, the first 50 `parts`, `partsAll` when more; while expressions have `gap` it is on and `gapBy` lists them, `on` or `view` false or `reset` takes `gap` off them) |
@@ -1284,12 +1319,12 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
 | `wave_stats` | over a window: a bit's rises, falls, high time, pulse widths and period; a bus's changes, distinct values, the longest-held ones, minimum and maximum |
 | `sva_check` | assertion files and / or text evaluated over the dump in a scope: the failed ones with their first failures (`cycle`, `t`, `start_cycle`, `start_t`, the reason), passed, vacuous, not evaluated (names missing), the covers |
 | `wave_page` | a viewer page (`out` `.html`) or WaveJSON (`.json`) of signals over a window, assertions bound, to show a person; `marks`, `marks_views`: the tests of a cocotb run on it (not with `compare` or `auto_gap`; a mark that found no row is in `notes`); `compare`: a second dump (or `{dump, map, offset, segment, align, show}`, the config's `"compare"`), its differences on the page, `show` the run it opens with |
-| `wave_tests` | the tests of a cocotb run from its marks file ([§ Marks from a cocotb test](#marks-from-a-cocotb-test)): the summary, each test's result, window, counts of checks, message and line; `test` (a number or name): one, with its phases and marks, each check with `got` and `expected` (`limit`, 50: `more`). The window is the one to ask `wave_changes`, `wave_find` or `wave_sample` about |
+| `wave_tests` | the tests of a cocotb run from its marks file ([§ Marks from a cocotb test](#marks-from-a-cocotb-test)): the summary, each test's result, window, counts of checks, message and line; `test` (a number or name): one, with the whole docstring (`text`), its own rows (`signals`), its phases and marks, each check with `got` and `expected`, `got_all`, `expected_all` and `at` where a long value was cut (`limit`, 50: `more`). The window is the one to ask `wave_changes`, `wave_find` or `wave_sample` about |
 | `wave_to_fst` | the VCD as an FST beside it (`out`: another file) with `sva fst`, the FSM states of its types file in it (`types`, `no_types`); what was written and the notes with their lines |
 | `wave_diff` | two dumps `a` and `b` (`dump` is `a`) compared change by change with `sva diff` (*Compare two runs from the shell*: streamed, neither read by the server): `equal`, `compared`, `differ`, `first` (`t`, `signal`, `a`, `b`; a bus in hex), the first `limit` `differences`, the signals that differ (`signals_more`: the rest), `only_a`, `only_b`, `segments`; `map` an object (`{"tb_a.if": "tb_b.if"}`), `offset`, `segment`, `align`, `spans` (the stretches kept per signal); times in ns |
 | `wave_cut` | a window (`from`, `to`) and some `signals` of a dump as a small VCD at `out` (`sva vcd --from --to --signals`; a long list: `--signals-from FILE`, one a line): the values at `from` first; `out`, `bytes`, `variables`, its `from` and `to` |
 | `view_edit` | marks up a page for a person with the [commands](#commands-and-edits) (`ops`): bookmarks with a text, arrows, markers, expressions (their list, marks on the waves, the cursor on a match), groups, highlight, colours, hidden and folded rows, radix, cursor, window — live in their browser when the page is connected, else into the page's file (they see it when they open or reload it); `save`: a live page's state into its file too; `config` (instead of `page`): `bookmark`, `arrow` and `span` on a view of a `mkhtml.py` config, so a rebuild keeps them (a bookmark's `"at"` stays until a `t` replaces it; the whole list checked first, the file written at once) |
-| `view_get` | what a page shows: bookmarks, arrows, markers, spans, expressions (`exprs`), groups, highlight, colours, hidden, cursor and window, a dump compared (`compare`: `name`, `compared`, `differ`, `first`, `missing`, `show`), the gaps (`gaps`; live, on the waves, with `cut`; `by`: the expressions that cut) (live: with what the person changed); `full`: the whole state; `view`: which view, on a page of several; `rows`: its signals (a pattern, `limit`, `offset`); `picture`: a PNG of the view (live: the screen; a page's file: made in a headless Chromium by `tools/pageshot.py`, when playwright is there) |
+| `view_get` | what a page shows: bookmarks, arrows, markers, spans, expressions (`exprs`), groups, highlight, colours, hidden, the copies of signals (`dups`), cursor and window, a dump compared (`compare`: `name`, `compared`, `differ`, `first`, `missing`, `show`), the gaps (`gaps`; live, on the waves, with `cut`; `by`: the expressions that cut) (live: with what the person changed); `full`: the whole state; `view`: which view, on a page of several; `rows`: its signals (a pattern, `limit`, `offset`); `picture`: a PNG of the view (live: the screen; a page's file: made in a headless Chromium by `tools/pageshot.py`, when playwright is there) |
 | `view_live` | connects a page to this server: the link is written into it, the person opens or reloads it (`open`: in their browser); `off`: disconnects; `rotate`: a new key, so a copy of a page that carried the old one no longer connects (the pages linked before need `view_live` again); `page` a `.vcd` / `.fst`: its tab in VS Code (the extension connects by itself; `open`: VS Code opens it); without a page: the pages connected |
 
 The conventions are in the server's `instructions`: times are ns (a number) or a text with a unit, read as the viewer
@@ -1369,7 +1404,7 @@ All tools are `python3 -I tools/<tool>.py --help`; the Makefile calls them for y
 | `svtypes.py` | the design's types by path ([§ FSM state names](#fsm-state-names-fst-or-vcd--the-designs-types)): Verilator's, and a check of a types file against a dump | `verilator --top --out --verilator -- ARGS`, `check TYPES [DUMP] --map` |
 | `questa/wavelens_types.tcl` | in `vsim`: the types of a Questa design (`describe` of every signal) | `source` it, `wavelens_types FILE [ROOT]` |
 | `mkhtml.py` | config (every view) or WaveJSON files → one self-contained page | `--config`, `--view`, `--waves`, `--marks`, `--marks-views`, `--render`, `--out`, `--settings`, `--title`, `--sva FILE`, `--bind NAME@SCOPE`, `--report NAME@SCOPE`, `--sva-bin`, `--no-sva`, `--reproducible`, `--lint`, `--strict` |
-| `vcd2wavedrom.py` | one window of a dump → WaveJSON | `--config` + `--view`, or `--waves --scope --signals --clock/--exact --from --to --marker --group --enum`; `--gap A:B` / `--auto-gap IDLE[:KEEP]` (`--clock`: a window, or every stretch of IDLE cycles where nothing but a clock changes, as one `\|` cell); `--sva FILE --bind NAME@SCOPE`; `--cycle`, `--hscale`, `--hierarchy`, `--title`, `--bookmarks`, `--arrows`, `--spans`, `--expr` |
+| `vcd2wavedrom.py` | one window of a dump → WaveJSON | `--config` + `--view`, or `--waves --scope --signals --clock/--exact --from --to --marker --group --enum --also`; `--gap A:B` / `--auto-gap IDLE[:KEEP]` (`--clock`: a window, or every stretch of IDLE cycles where nothing but a clock changes, as one `\|` cell); `--sva FILE --bind NAME@SCOPE`; `--cycle`, `--hscale`, `--hierarchy`, `--title`, `--bookmarks`, `--arrows`, `--spans`, `--expr` |
 | `pageshot.py` | a page → a PNG per view and theme, made in a headless Chromium, and a manifest (`make pageshot HTML=…`); the one tool outside the standard library, optional (playwright, run without `-I`) | `--view KEY`, `--theme dark\|light\|both`, `--out DIR`, `--width` |
 | `svabuild.py` | the `"sva"` / `"bind"` of a config: files parsed, bindings evaluated with the `sva` CLI (used by the two above) | `--waves --sva --bind --out` |
 | `embed.py` | WaveJSON → `data.js` for `file://` pages, or into an HTML placeholder | `--var NAME key=file.json`, `--html --placeholder`, `--out`, `--compact` |
@@ -1428,7 +1463,7 @@ too); here what the tools write.
 | `time: {t0, cycle, t1?, skip?}` | cycle *c* starts at `t0 + c·cycle` ps, so the axis shows real time; `skip: [[k, n]]` = the `\|` cell at index *k* stands for *n* cycles |
 | `signal[i].tv: [[t, v], …]` | exact transitions in model time (ps when `time` is set). 1-bit: `0 1 x z`; bus: hex (`x` / `z` a nibble all unknown, one letter the whole bus), or `'b` and the bus's binary digits when a nibble mixes x / z with known bits (`'b10x1`: hex would make bit 0 unknown; labels still show the hex, `x` for that nibble, and radix `bin` the bits). Takes precedence over `wave` |
 | `signal[i].width / enum / radix / style / color / fill` | bus width, value labels (`{"0": "IDLE"}`), radix, edge style, colours |
-| `signal[i].path`, `same` | full hierarchical path (the name's tooltip); `"same": "tb.clk"` = the `tv` of the signal with that `path` (one net seen at several levels is stored once) |
+| `signal[i].path`, `abs`, `same` | full hierarchical path (the name's tooltip; it names the row); `"abs"`: the same path where the row keeps another name, what looks for a dump's path finds it and it names nothing; `"same": "tb.clk"` = the `tv` of the signal with that `path` or `abs` (one net seen at several levels is stored once) |
 | `config: {…}` | the settings of this diagram (see *Settings*) |
 | `bookmarks: [{n, t, at, signal, label, text, color, lift, top, link}]` | numbered events on signal rows (`signal` = full path, `group.name` without one; `t` in model units or `"85.12us"`; `at`: the event the build took `t` from; `label`: by the circle; `lift`: `true` / `"above"`, `"below"`; `link`: a button to another view) |
 | `arrows: [{from, to, shape, head, line, color, label}]` | arrows between bookmarks: shape `- ~ -~ ~- -\| \|- -\|-`, head `> <> <` or `""`, line `solid dashed dotted`; `label` with `{dt}`, `{cycles}`, `{cycles:NAME}` filled at its ends |

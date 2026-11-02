@@ -711,9 +711,8 @@ def t_tests(a):
     doc = testmarks.load(marks_file(a))
     tests = doc.get('tests') or []
     def row(t):
-        marks = t.get('marks') or []
-        out = {'n': t['n'], 'name': t['name'], 'result': t['result'], 'from': ns(t['from']), 'to': None if t['to'] is None else ns(t['to']),
-               'checks': sum(m.get('kind') == 'check' for m in marks), 'failed_checks': sum(m.get('kind') == 'check' and not m['ok'] for m in marks)}
+        n, bad = testmarks.checks_of(t)
+        out = {'n': t['n'], 'name': t['name'], 'result': t['result'], 'from': ns(t['from']), 'to': None if t['to'] is None else ns(t['to']), 'checks': n, 'failed_checks': bad}
         return {**out, **{k: t[k] for k in ('doc', 'message', 'where') if t.get(k)}}
     head = {'summary': testmarks.summary(doc), 'signal': doc.get('signal'), 'step': doc.get('step')}
     if a.get('test') is None:
@@ -724,7 +723,7 @@ def t_tests(a):
     limit = a.get('limit') or 50
     marks = [{**m, 't': ns(m['t'])} for m in t.get('marks') or []]
     phases = [{**p, 'from': ns(p['from']), 'to': ns(p['to'])} for p in t.get('phases') or []]
-    return {**head, 'test': {**row(t), 'phases': phases, 'marks': marks[:limit], **({'more': len(marks) - limit} if len(marks) > limit else {})}}
+    return {**head, 'test': {**row(t), **{k: t[k] for k in ('text', 'signals') if t.get(k)}, 'phases': phases, 'marks': marks[:limit], **({'more': len(marks) - limit} if len(marks) > limit else {})}}
 
 
 def marks_page(a, argv, out):
@@ -1284,7 +1283,7 @@ def summary(st, timed, base=None):
     for k in ('paint', 'radix', 'analog'):
         if st.get(k):
             out[k] = st[k]
-    for k in ('hidden', 'bits'):
+    for k in ('hidden', 'dups', 'deltas', 'bits'):
         if st.get(k):
             out[k] = st[k]
     fold = ed.fold()
@@ -1799,7 +1798,7 @@ TOOLS = [
          ('dump', 'signals', 'out'), ro=False),
     tool('wave_tests', t_tests, 'The tests of a cocotb run from the marks file it left (wavelens_cocotb, the same times as its dump) -> summary, '
          'tests [n, name, result pass/fail/xfail/run, from, to, checks, failed_checks, message, where]; test (a number or name): one, with '
-         'its phases and marks, each check with got and expected. from / to are a test\'s window for wave_changes, wave_find, wave_sample.',
+         'its whole docstring (text), its own rows (signals), phases and marks, each check with got and expected (got_all, expected_all, at where a long value was cut). from / to are a test\'s window for wave_changes, wave_find, wave_sample.',
          {'marks': S, 'test': {'type': ['integer', 'string']}, 'limit': None}, ('marks',)),
     tool('wave_to_fst', t_to_fst, 'Convert a VCD to an FST beside it (tb.vcd -> tb.fst; out: another file), as GTKWave\'s vcd2fst, '
          'keeping the enum tables (FSM states) and attributes; the states of tb.types.json beside it go in too (types: another file, '

@@ -5,6 +5,26 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.39 — 2 November 2026
+
+One signal in two forms, markers that measure, and marks that ask less of a test. Two keys changed: `b` is a bookmark now and the bits are on `B`.
+
+- **Duplicate.** The right button on a name or on the waves shows a signal again in a row under it, `PADDR #2`, with its own radix, analog form and colour: a bus in hex
+  and as a step plot at once, an enum's numbers beside its names. **Remove the copy** leaves its bookmarks and markers on the signal. Kept in a state, a reload, your groups and undo; `data#2` names it in
+  the commands, and the command `duplicate` works on a page that is not open too.
+- **Keys.** `m` a marker at the cursor, with its label asked; `b` a bookmark; `B` a bus bit by bit (it was `b`). `]b [b` step through the bookmarks, `]m [m` through the markers (`]m` was the bookmarks).
+- **The time between markers.** **Δ between markers** in the head of their list draws an arrow with the time in its middle on a line of its own over the rows. Drag it up and
+  down to the line over or under a signal. Each marker's arrow goes to the next in time or to any other, through the ones between: the **→** choice in the list, or the dot at its
+  far end dragged to a marker. One arrow per marker: A → C takes the place of A → B, and the last marker can go back. The command `deltas`.
+- **Colour on the lines between the rows.** The right button there paints what is on the line: Δ arrows, markers' texts, bookmarks, an arrow's label. On a Δ arrow: its colour.
+- **Hidden markers.** **hidden** keeps a marker in its list, off the waves, the pictures and `]m [m`; the Δ goes through it.
+- **Clear all** in the Markers list, **Clear bookmarks and markers** in the right button's menu: every bookmark, arrow and marker of yours; undo brings them back.
+- **Cocotb marks.** `@wl.test(signals=[...])` adds a test's rows to its view (the view key `"also"`, a missing name is a lint warning, not an error); `wl.step` is a phase in one line; every
+  check is counted, in a loop too; the docstring's first paragraph is the test's line and all of it is in the first bookmark; a long value is short by its circle and whole in the list, and two lists say
+  where they part; `check(why=)` is read only on a failure; `Marks(hide=)` and `__tracebackhide__` pass a project's own check functions. A marker with `"on"` keeps its `"color"`.
+  The attribute `step` of the marks is `step_name` now: `step` is the method. Old marks files still read.
+- **The docs' fallback** for a run without the library failed on `@wl.test(signals=...)`: fixed, and a test runs what the docs print.
+
 ## 0.38 — 2 November 2026
 
 The bugs found by moving 42 cocotb benches to the marks: a description no longer fails a test, a row keeps its name, and names find rows by one rule.

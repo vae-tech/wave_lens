@@ -356,7 +356,7 @@ class Views(unittest.TestCase):
         self.assertEqual(ms[0]['signal'], 'tb.valid')
         self.assertEqual((ms[0]['id'], ms[0]['t'], ms[0]['label'], ms[0]['lift'], ms[0]['color']), (1, 35, 'here', 'below', '#2f9e44'))
         self.assertEqual(ms[1], {'id': 2, 't': 45})   # at the top, pale
-        self.assertIn('marker(id? t? label? color? signal? lift? delete?)', next(t for t in W.TOOLS if t['name'] == 'view_edit')['description'])
+        self.assertIn('marker(id? t? label? color? signal? lift? hidden? delete?)', next(t for t in W.TOOLS if t['name'] == 'view_edit')['description'])
 
     def test_view_exprs(self):   # after test_file: it counts the revisions of the page
         """The expressions in the agent's words: into a page's file, what they found in ns, go and matches only live."""
@@ -733,8 +733,10 @@ class Review(unittest.TestCase):
 class Tests(unittest.TestCase):
     """wave_tests and wave_page over the marks of a cocotb run."""
     DOC = {'wavelens': 'marks', 'version': 1, 'signal': 'TEST_CASE', 'tests': [
-        {'n': 1, 'name': 'a', 'doc': 'first', 'from': 0, 'to': 100000, 'result': 'pass', 'message': '', 'where': '', 'dropped': 0, 'phases': [],
-         'marks': [{'t': 50000, 'kind': 'check', 'ok': True, 'got': '5', 'expected': '5', 'text': 'five', 'signal': 'PSEL'}]},
+        {'n': 1, 'name': 'a', 'doc': 'first', 'text': 'first\n\nthe rest', 'signals': ['*fifo_full'], 'passed': 189, 'failed': 0,
+         'from': 0, 'to': 100000, 'result': 'pass', 'message': '', 'where': '', 'dropped': 0, 'phases': [],
+         'marks': [{'t': 50000, 'kind': 'check', 'ok': True, 'got': '5', 'expected': '5', 'text': 'five', 'signal': 'PSEL',
+                    'got_all': '[5, 5]', 'expected_all': '[5, 6]', 'at': 'at [1]: 5, 6'}]},
         {'n': 2, 'name': 'b', 'doc': '', 'from': 100001, 'to': 300000, 'result': 'fail', 'message': 'got 0, expected 1', 'where': 't.py:9', 'dropped': 0,
          'phases': [{'label': 'p', 'from': 100001, 'to': 200000}],
          'marks': [{'t': 300000, 'kind': 'check', 'ok': False, 'got': '0', 'expected': '1', 'text': '', 'signal': 'PSEL'}, {'t': 150000, 'kind': 'note', 'text': 'n'}]}]}
@@ -759,9 +761,12 @@ class Tests(unittest.TestCase):
         r = self.call('wave_tests', marks=self.marks)
         self.assertEqual(r['summary'], '2 tests: 1 passed, 1 failed')
         a, b = r['tests']
-        self.assertEqual((a['name'], a['result'], a['from'], a['to'], a['checks'], a['failed_checks'], a['doc']), ('a', 'pass', 0, 100, 1, 0, 'first'))
+        self.assertEqual((a['name'], a['result'], a['from'], a['to'], a['checks'], a['failed_checks'], a['doc']), ('a', 'pass', 0, 100, 189, 0, 'first'))
+        self.assertEqual((a['checks'], b['checks']), (189, 1), 'the counts of the run, in a loop with no bookmark too')
         self.assertEqual((b['from'], b['to'], b['failed_checks'], b['message'], b['where']), (100.001, 300, 1, 'got 0, expected 1', 't.py:9'))
         self.assertNotIn('marks', a, 'the list is short')
+        self.assertNotIn('text', a)
+        self.assertNotIn('signals', a)
 
     def test_one_test(self):
         for key in (2, '2', 'b'):
@@ -771,6 +776,12 @@ class Tests(unittest.TestCase):
         self.assertEqual((t['phases'][0]['from'], t['phases'][0]['to']), (100.001, 200))
         t = self.call('wave_tests', marks=self.marks, test='b', limit=1)['test']
         self.assertEqual((len(t['marks']), t['more']), (1, 1))
+
+    def test_one_test_says_all_it_left(self):
+        t = self.call('wave_tests', marks=self.marks, test='a')['test']
+        self.assertEqual((t['doc'], t['text'], t['signals']), ('first', 'first\n\nthe rest', ['*fifo_full']))
+        m = t['marks'][0]
+        self.assertEqual((m['got'], m['got_all'], m['expected_all'], m['at']), ('5', '[5, 5]', '[5, 6]', 'at [1]: 5, 6'))
 
     def test_errors(self):
         text, err = W.call('wave_tests', {'marks': self.marks, 'test': 'nope'})

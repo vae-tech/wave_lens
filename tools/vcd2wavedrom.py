@@ -13,8 +13,8 @@ Modes
 
 Config file (--config cfg.json): every option can be a key (dashes or underscores), command-line options win.
   "signals" list or comma string, or a catalog {full.path: {per-signal settings}} (what mkconfig.py writes),
-  "enum" {sig: {"0": "IDLE"}}, "group" {name: [sigs]}, "hierarchy" true (nest signals in groups by scope),
-  "gap" ["A:B"], "marker" ["EXPR=label", {"on": EVENT, "label"}], "bookmarks" [{"n": 1, "t": 85120000, "signal": "tb.x", "text": "…"}]
+  "enum" {sig: {"0": "IDLE"}}, "group" {name: [sigs]}, "hierarchy" true (nest signals in groups by scope), "also" [names or patterns: more rows, none in the dump: lint],
+  "gap" ["A:B"], "marker" ["EXPR=label", {"on": EVENT, "label", "color"}], "bookmarks" [{"n": 1, "t": 85120000, "signal": "tb.x", "text": "…"}]
   (or "at": EVENT instead of "t": the time found in the dump; EVENT is "posedge X", {"signal", "value" | "edge"}, {"expr",
   "clock"}, {"assert", "result", "point"}, with "nth", "from", "to": tools/wavefind.py), "arrows" [{"from": 1, "to": 2}],
   "config" {...} (copied into the WaveJSON "config": theme, colors,
@@ -354,7 +354,7 @@ def nice_floor(x):
 
 
 # ---------------- options: command line + config file ----------------
-LIST_KEYS = ('signals', 'gap', 'enum', 'group', 'marker', 'sva', 'bind', 'exprs')
+LIST_KEYS = ('signals', 'also', 'gap', 'enum', 'group', 'marker', 'sva', 'bind', 'exprs')
 SKIP_KEYS = ('views', 'page', 'config', 'description', 'comment', 'render', 'note', 'select', 'rules', 'typed', 'report', 'compare')   # not converter options
 SIG_KEYS = ('show', 'alias', 'radix', 'color', 'fill', 'style', 'enum', 'width', 'changes', 'enumColors', 'analog', 'height', 'fields')   # catalog entry keys
 
@@ -383,6 +383,7 @@ def parser():
     ap.add_argument('--bookmarks', help='JSON list [{"n", "t", "signal", "text", "color", "lift", "top"}] (usually in the config file; the viewer\'s JSON button writes it)')
     ap.add_argument('--arrows', help='JSON list [{"from", "to", "shape", "head", "line", "color", "label"}] between bookmarks (label: {dt}, {cycles}, '
                     '{cycles:CLK} filled at the ends)')
+    ap.add_argument('--also', action='append', help='more rows by name or pattern ("*fifo_full"); one the dump has not got is a lint warning, not an error')
     ap.add_argument('--spans', help='JSON list [{"from", "to", "label", "color", "signals"}]: coloured stretches of time; from / to a time, an event '
                     '(as a bookmark\'s "at") or {"bookmark": n}')
     ap.add_argument('--sva', action='append', help='SystemVerilog assertion file for the page (repeatable; one compilation unit, in order)')
@@ -516,16 +517,16 @@ def parse_groups(items):  # -> [(name, [members])]
     return out
 
 
-def parse_markers(items):  # -> [(expr or an event object (wavefind), label)]
+def parse_markers(items):  # -> [(expr or an event object (wavefind), label, colour or None)]
     out = []
     for mk in items:
         if isinstance(mk, dict):
             if 'on' not in mk:
                 raise WaveError(f'vcd2wavedrom: a marker {{"on": EVENT, "label"}}, not {json.dumps(mk)[:80]}')
-            out.append((mk['on'], mk.get('label', mk['on'] if isinstance(mk['on'], str) else 'marker')))
+            out.append((mk['on'], mk.get('label', mk['on'] if isinstance(mk['on'], str) else 'marker'), mk.get('color')))
         else:
             expr, _, lab = mk.rpartition('=')
-            out.append((expr, lab) if expr else (lab, lab))
+            out.append((expr, lab, None) if expr else (lab, lab, None))
     return out
 
 
@@ -533,6 +534,37 @@ def parse_markers(items):  # -> [(expr or an event object (wavefind), label)]
 def leaf_name(a, path):
     """The name a signal is shown under: the path as given with --scope (and no hierarchy), else its last part."""
     return path if a.scope and not a.hierarchy else (svabuild.split_path(path) or [path])[-1]
+
+
+ALSO_MAX = 32   # the rows one pattern of "also" adds
+
+
+def also_rows(a, rd, specs, leaf):
+    """"also": more rows, by name or pattern ("*fifo_full"): what a test asks for its own view. Unlike "signals", a name the dump has not got stops nothing, one
+    test's slip is not the end of a page: lint says so."""
+    a.also_missing, a.also_cut = [], []
+    root = (a.scope + '.') if a.scope else ''
+    rel = lambda p: p[len(root):] if root and p.startswith(root) else p
+    seen = {rd.resolve(s['path'])[0] for s in specs}
+    for p in getattr(a, 'also', None) or []:
+        p = str(p).strip()
+        if '*' in p:
+            rx = glob_re(p)
+            hits = [q for q in rd.decl.vars if q.startswith(root) and '$' not in q and (rx.fullmatch(q) or rx.fullmatch(rel(q)))]
+            if len(hits) > ALSO_MAX:
+                a.also_cut.append((p, len(hits)))
+            found = [(q, rel(q)) for q in hits[:ALSO_MAX]]
+        else:
+            try:
+                found = [(rd.resolve(p)[0], p)]
+            except WaveError:
+                found = []
+        if not found:
+            a.also_missing.append(p)
+        for q, name in found:
+            if q not in seen:
+                seen.add(q)
+                specs.append({'path': name, 'name': leaf(name), 'set': {}})
 
 
 def collect_specs(a, rd):
@@ -557,9 +589,10 @@ def collect_specs(a, rd):
             specs.append({'path': path, 'name': alias or leaf(path), 'set': {}})
     if not specs:
         raise WaveError('vcd2wavedrom: no signals to show (all "show": false?)')
+    also_rows(a, rd, specs, leaf)
     paths = [s['path'] for s in specs]
     marks = parse_markers(a.marker)
-    events = [e for e, _ in marks if isinstance(e, str)] + [n for e, _ in marks if not isinstance(e, str) for n in wavefind.signals_of(e)]
+    events = [e for e, *_ in marks if isinstance(e, str)] + [n for e, *_ in marks if not isinstance(e, str) for n in wavefind.signals_of(e)]
     events += [n for b in bookmark_list(a) if isinstance(b, dict) and b.get('at') is not None for n in wavefind.signals_of(b['at'])]
     events += [n for sp in span_list(a) if isinstance(sp, dict) for k in ('from', 'to', 'every') if isinstance(sp.get(k), (str, dict)) and not is_time(sp[k])
                for n in wavefind.signals_of(sp[k])]
@@ -752,7 +785,7 @@ def finish(a, rd, doc, specs, marks, t_from, t_to):
     # ---- markers from event expressions (posedge / negedge / edge / any change of a signal) ----
     markers = []
     a.no_match = []   # the markers that matched nothing (lint)
-    for i, (expr, lab) in enumerate(marks):
+    for i, (expr, lab, color) in enumerate(marks):
         if isinstance(expr, str):
             hits = rd.events(expr, t_from, t_to)
         else:   # an event object: every match, or the nth one
@@ -763,7 +796,7 @@ def finish(a, rd, doc, specs, marks, t_from, t_to):
         if not hits:
             a.no_match.append((i, expr if isinstance(expr, str) else json.dumps(expr, ensure_ascii=False)))
         for k, t in enumerate(hits):
-            markers.append({'t': t, 'label': lab if len(hits) == 1 else f'{lab} {k + 1}'})
+            markers.append({'t': t, 'label': lab if len(hits) == 1 else f'{lab} {k + 1}', **({'color': color} if color else {})})
     if markers:
         doc['markers'] = sorted(markers, key=lambda m: m['t'])
     if a.bookmarks:
@@ -1029,7 +1062,7 @@ def bookmarks_at(a, rd, bms, specs, t_from, t_to):
 # ---------------- lint: what the page would draw otherwise than meant, or not at all, said at build time ----------------
 BM_KEYS = ('n', 't', 'at', 'signal', 'text', 'color', 'lift', 'top', 'link', 'to', 'shape', 'label')   # model.js bmNorm (to, shape, label: an old arrow)
 AR_KEYS = ('from', 'to', 'shape', 'head', 'line', 'color', 'label')                     # model.js arNorm
-MK_KEYS = ('on', 'label')
+MK_KEYS = ('on', 'label', 'color')
 SPAN_KEYS = ('from', 'to', 'label', 'color', 'signals')
 CLOSE_PX = 16   # two circles of one row nearer than this at 1000 px of waves overlap (a circle is 16 px wide)
 HEX = re.compile(r'#[0-9a-fA-F]{3,8}')
@@ -1235,6 +1268,8 @@ def lint(doc, a, where=None):
             if bad:
                 out.append(f'marker-key: {at}marker[{i}]: unknown key(s) {", ".join(bad)} (have: {", ".join(MK_KEYS)})')
     out += expr_lint(doc, a, at) + settings_lint(doc, a, at)
+    out += [f'also-no-match: {at}also: "{p}" is no signal of the dump: no row' for p in getattr(a, 'also_missing', [])]
+    out += [f'also-cut: {at}also: "{p}" matches {n} signals; the first {ALSO_MAX} are rows' for p, n in getattr(a, 'also_cut', [])]
     for i, expr in getattr(a, 'no_match', []):
         out.append(f'marker-no-match: {at}marker[{i}]: "{expr}" matches nothing in the window: no marker')
     for where, expr in getattr(a, 'span_no_match', []):

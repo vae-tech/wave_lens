@@ -184,6 +184,10 @@
 .wv .notes { border-top: 1px solid var(--line); padding: 6px 10px 8px; font-size: 12.5px; background: var(--panel); }
 .wv .notes .nh { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; margin-bottom: 6px; }
 .wv .notes .nh .muted { color: var(--muted); font-size: 11.5px; margin-right: auto; }
+.wv .notes .mdl { display: inline-flex; gap: 4px; align-items: center; font-size: 11.5px; }
+.wv .notes .md { color: var(--accent); font-size: 11.5px; white-space: nowrap; }
+.wv .notes .mhl { display: inline-flex; gap: 3px; align-items: center; font-size: 11.5px; white-space: nowrap; }
+.wv .notes .mto { font-size: 11.5px; max-width: 130px; }
 .wv .notes button { font: inherit; font-size: 12px; padding: 1px 8px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); border-radius: 4px; cursor: pointer; }
 .wv .notes button:hover { border-color: var(--accent); color: var(--accent); }
 .wv .notes ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }

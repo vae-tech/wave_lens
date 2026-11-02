@@ -6,17 +6,64 @@ Object.assign(WaveView.prototype, {
     try { o = JSON.parse(localStorage.getItem(this.rowsKey) || '{}') || {}; } catch (e) { /* no storage */ }
     this.hiddenRows = new Set(Array.isArray(o.hidden) ? o.hidden : []); this.ugroups = groupNorm(o.groups);
     this.bitsOpen = new Set(Array.isArray(o.bits) ? o.bits.map(String) : []);
-    for (const [p, n] of Object.entries(o.analog || {})) { const r = this.M.rows.find(x => x.type === 'sig' && x.full === p);
+    if (Array.isArray(o.dups)) this.setDups(o.dups);
+    this.deltas = !!o.deltas;
+    for (const [p, n] of Object.entries(o.analog || {})) { const r = this.sigPool().find(x => x.type === 'sig' && x.full === p);
       if (r) { if (!('analog0' in r)) r.analog0 = r.analog; r.analog = n || false; this.analogs.set(p, n); } }
-    for (const [p, rx] of Object.entries(o.radix || {})) { const r = this.M.rows.find(x => x.type === 'sig' && x.full === p);
-      if (r && isRadix(rx)) { r.radix0 = r.radix; r.radix = rx; this.radixes.set(p, rx); } }
+    for (const [p, rx] of Object.entries(o.radix || {})) { const r = this.sigPool().find(x => x.type === 'sig' && x.full === p);
+      if (r && isRadix(rx)) { r.radix0 = r.radix; r.radix = rx; if (r.dupOf) r.enum = undefined; this.radixes.set(p, rx); } }
+  },
+  // Duplicate: the rows of the model and the copies: where a name, a highlight or a run of selected rows is looked for
+  sigPool() { return this.dups.size ? [...this.M.rows, ...this.dups.values()] : this.M.rows; },
+  withDups(rows) { return this.dups.size ? rows.flatMap(r => (this.dupsBy.has(r) ? [r, ...this.dupsBy.get(r)] : [r])) : rows; },
+  dupPut(base, n) {
+    const d = dupRow(base, n), list = this.dupsBy.get(base) || [];
+    this.dupsBy.set(base, [...list, d].sort((a, b) => a.dupN - b.dupN)); this.dups.set(d.full, d); this.rowsStale = true; this.ugMemo = null; return d;
+  },
+  // a copy of a row (a signal, its row in your group, a copy), as that row looks now; made from a row of your group it stays beside it
+  // -> the copy, null: not a signal
+  dupAdd(r) {
+    const from = r.orig || r, base = rowBase(r); if (base.type !== 'sig' || !base.tr || base.bit != null || base.same) return null;
+    const d = this.dupPut(base, Math.max(1, ...(this.dupsBy.get(base) || []).map(x => x.dupN)) + 1);
+    if (this.radixes.has(from.full)) this.setRadix(d, this.radixes.get(from.full), true);
+    if (this.analogs.has(from.full)) this.setAnalog(d, this.analogs.get(from.full), true);
+    if (this.painted.has(from.full)) { this.painted.set(d.full, this.painted.get(from.full)); this.savePaint(); }
+    const g = r.ug && this.ugroups.find(x => x.name === r.ug.name);
+    if (g) g.signals.splice(g.signals.indexOf(from.full) + 1, 0, d.full);
+    return d;
+  },
+  // a copy gone, and what was its: its colour, its radix; a bookmark on it goes to its signal
+  dupDrop(d) {
+    const base = d.dupOf, f = d.full, list = this.dupsBy.get(base).filter(x => x !== d), to = p => (p === f ? base.full : typeof p === 'string' &&
+      p.startsWith(f + '[') ? base.full + p.slice(f.length) : p);
+    if (list.length) this.dupsBy.set(base, list); else this.dupsBy.delete(base);
+    this.dups.delete(f); this.radixes.delete(f); this.analogs.delete(f); this.painted.delete(f); this.hiddenRows.delete(f); this.bitsOpen.delete(f);
+    for (const g of this.ugroups) g.signals = g.signals.filter(p => p !== f);
+    for (const b of this.bms) b.signal = to(b.signal);
+    for (const m of this.umarks) { m.signal = to(m.signal); m.dsignal = to(m.dsignal); }
+    for (const s of this.spans) if (s.signals) s.signals = s.signals.map(to);
+    this.picks.delete(d); this.selRun.delete(d);
+    if (this.sel && (this.sel === d || this.sel.of === d || (this.sel.orig && this.sel.orig === d))) this.sel = base;
+    if (this.rangeRow === d) this.rangeRow = base;
+    this.rowsStale = true; this.ugMemo = null;
+  },
+  dupDone() { this.savePaint(); this.saveBookmarks(); this.saveRows(); if (this.cmp) this.cmpMarks(); this.renderNames(); this.renderNotes(); this.draw(); },
+  // the copies a state names, none other -> the ones of signals these waves have not got
+  setDups(ids) {
+    const want = (Array.isArray(ids) ? ids : []).map(String), bad = [];
+    for (const d of [...this.dups.values()]) if (!want.includes(d.full)) this.dupDrop(d);
+    for (const id of want) {
+      const p = dupId(id), base = p && !this.dups.has(id) && this.M.rows.find(r => r.type === 'sig' && r.tr && r.full === p.of);
+      if (base) this.dupPut(base, p.n); else if (!this.dups.has(id)) bad.push(id); }
+    return bad;
   },
   saveRows() {
     try {
-      if (this.radixes.size || this.hiddenRows.size || this.analogs.size || this.ugroups.length || this.bitsOpen.size) localStorage.setItem(this.rowsKey,
+      if (this.radixes.size || this.hiddenRows.size || this.analogs.size || this.ugroups.length || this.bitsOpen.size || this.dups.size || this.deltas) {
+        localStorage.setItem(this.rowsKey,
         JSON.stringify({ radix: Object.fromEntries(this.radixes), hidden: [...this.hiddenRows], analog: Object.fromEntries(this.analogs),
-          groups: this.groupList(), bits: [...this.bitsOpen] }));
-      else localStorage.removeItem(this.rowsKey);
+          groups: this.groupList(), bits: [...this.bitsOpen], dups: [...this.dups.keys()], deltas: this.deltas }));
+      } else localStorage.removeItem(this.rowsKey);
     } catch (e) { /* private mode */ }
   },
   loadPaint() {

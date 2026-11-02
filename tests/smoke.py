@@ -386,8 +386,8 @@ def bookmarks(page):
     check(v.locator('.names .row.sel').inner_text().startswith('ack'), 'clicking a row on the waves selects that signal')
     v.locator('canvas').focus(); page.keyboard.press('ArrowDown')
     check(v.locator('.names .row.sel').inner_text().startswith('data'), 'ArrowDown moves the selection')
-    page.keyboard.press('m')
-    check(bl.count() == 4, 'key m bookmarks too')
+    page.keyboard.press('b')
+    check(bl.count() == 4, 'key b bookmarks too')
     ex = page.locator('.bench > div.wv[data-wave="DEMO_WAVES.exact"]')
     ex.locator('.names .row', has_text='txd').locator('.n').click()
     ex.locator('select.edge').select_option('rise'); ex.locator('button[data-act=next]').click()
@@ -653,6 +653,11 @@ def cocotb_page(page):
     check(any((b[1] or '') == 'warning' and 'not mapped' in b[2] for b in x['bms']), 'cocotb: a warning of the log is a bookmark')
     check(x['end'] > last[3], f'cocotb: the window goes past the failure at the end of the dump ({x["end"]} > {last[3]})')
     check('5 tests: 4 passed, 1 failed as expected' in x['note'], f'cocotb: the view says the run ({x["note"]})')
+    check('unmapped' in x['enumStep'].values() and 'read back' in x['enumStep'].values(), f'cocotb: wl.step gives a phase like wl.phase {x["enumStep"]}')
+    tc3 = page.evaluate("""(() => { const v = document.querySelector('section[data-view=tc3] .wv').waveView, w = document.querySelector('section[data-view=run] .wv').waveView;
+        return [v.M.rows.filter(r => r.type === 'sig').map(r => r.full), w.M.rows.some(r => r.full === 'u_slave.waited'), document.querySelector('section[data-view=tc3]').textContent.includes('3 checks passed')]; })()""")
+    check('u_slave.waited' in tc3[0] and 'PCLK' in tc3[0] and not tc3[1], f'cocotb: a test\'s own row in its view, not in the whole run {tc3[:2]}')
+    check(tc3[2], 'cocotb: its view counts its checks')
     # a view of each test, one shown at a time
     shown = lambda: page.evaluate("""[...document.querySelectorAll('section[data-view]')].filter(s => !s.hidden).map(s => s.dataset.view)""")
     btn = page.locator('.tests button')
@@ -1079,8 +1084,8 @@ def viewer(page):
     vk = []
     keep = js('[v.bookmarks(), v.arrowList()]'); bt = js('[v.M.t0 + v.span * 0.3, v.M.t0 + v.span * 0.6]')
     js(f'(v.setBookmarks([{{n: 1, t: {bt[0]}}}, {{n: 2, t: {bt[1]}}}]), v.cursor = v.M.t0, 0)')
-    press(']', 'm'); vk.append(js('v.cursor') == bt[0]); press(']', 'm'); vk.append(js('v.cursor') == bt[1]); press(']', 'm'); vk.append(js('v.cursor') == bt[0])
-    press('[', 'm'); vk.append(js('v.cursor') == bt[1])
+    press(']', 'b'); vk.append(js('v.cursor') == bt[0]); press(']', 'b'); vk.append(js('v.cursor') == bt[1]); press(']', 'b'); vk.append(js('v.cursor') == bt[0])
+    press('[', 'b'); vk.append(js('v.cursor') == bt[1])
     page.evaluate(f"document.querySelector('{ex}').waveView.setBookmarks(...{json.dumps(keep)})")
     press('g', 'g', '*'); vk.append(js('[v.q, v.found.size > 0]') == [js('v.sel ? v.sel.name : v.q'), True]); press('Escape'); c.focus()
     page.evaluate("window.__c = null; navigator.clipboard.writeText = t => (window.__c = t, Promise.resolve())")
@@ -2282,6 +2287,10 @@ def lazy_dump(browser, build):
     js("(v.collapseAll(), 0)"); settle(page)
     lazy_sv = page.evaluate(bind)
     read = js("v.M.rows.filter(r => r.full.startsWith('tb.sub1.mod2.') && r.depth === 3 && !r.lazy).map(r => r.name).sort()")
+    dup = page.evaluate("""async () => { const v = document.querySelector('.wv').waveView, s = v.M.rows.find(r => r.type === 'sig' && r.lazy), c = v.dupAdd(s), was = c.lazy;
+      await v.need([c]); for (let i = 0; i < 100 && s.lazy; i++) await new Promise(r => setTimeout(r, 20));
+      const out = [was, s.lazy, c.lazy, c.tr === s.tr, c.tr.length > 0]; v.dupDrop(c); v.dupDone(); return out; }""")
+    check(dup == [True, False, False, True, True], f'a large dump: a copy of a signal not read yet asks for its signal, and has its changes {dup}')
     page.evaluate(open_, ['design', whole, False]); settle(page)
     whole_sv = page.evaluate(bind)
     check(lazy_sv == whole_sv and lazy_sv[0][4] > 100 and {'clk', 'state'} <= set(read), f'an assertion bound to a folded module reads its signals first: '
@@ -2355,7 +2364,7 @@ def bookmark_view(browser, build):
           f'the command: no top of its own, top: v.topNow() the row at the top of the box {t2} {top2}')
     js("(v.bodyEl.scrollTop = 0, v.t0 = v.M.t0, v.cursor = v.M.t0, v.draw(), v.canvas.focus({preventScroll: true}), 0)"); settle(page)
     want = sorted([(b1['t'], top1), (js(f"v.bms.find(b => b.n === {n2}).t"), top2)])
-    page.keyboard.press(']'); page.keyboard.press('m'); settle(page)
+    page.keyboard.press(']'); page.keyboard.press('b'); settle(page)
     g2 = [js("v.cursor") == want[0][0], js(frac), js(f"{at}({json.dumps(want[0][1])})")]
     check(g2[0] and g2[1] == 0.2 and abs(g2[2]) <= 1, f']m in the own box: the first bookmark in time, where it was made {g2}')
     js("(v.bodyEl.scrollTop = 0, v.draw(), 0)"); settle(page)
@@ -2942,8 +2951,135 @@ EDIT_OPS = [   # every command that changes a state, with the arguments in their
     {'op': 'layout', 'scroll': 'page', 'tools': 'fold'}, {'op': 'group', 'name': 'ctl', 'go': True},
     {'op': 'cycles', 'on': True, 'clock': 'PCLK', 'zero': '50ns'}, {'op': 'group', 'name': 'payload', 'move': 1},
     {'op': 'bits', 'signals': ['PADDR', 'PWDATA']}, {'op': 'bits', 'signals': 'PWDATA', 'on': False},
-    {'op': 'bookmark', 't': '60ns', 'signal': 'PADDR[2]', 'text': 'a bit'},
+    {'op': 'bookmark', 't': '60ns', 'signal': 'PADDR[2]', 'text': 'a bit'}, {'op': 'deltas', 'on': True}, {'op': 'deltas', 'id': 1, 'signal': 'PADDR', 'lift': 'below'}, {'op': 'deltas', 'id': 1, 'color': '#123456'}, {'op': 'marker', 't': '170ns', 'hidden': True},
+    {'op': 'deltas', 'id': 1, 'to': 3}, {'op': 'deltas', 'id': 2, 'to': None}, {'op': 'marker', 'id': 3, 'hidden': False}, {'op': 'deltas', 'id': 2, 'to': 1}, {'op': 'marker', 'id': 3, 'delete': True},
+    {'op': 'duplicate', 'signals': 'PADDR', 'radix': 'bin'}, {'op': 'duplicate', 'signals': 'PWDATA', 'rows': 2}, {'op': 'duplicate', 'signals': 'PADDR#2'},
+    {'op': 'duplicate', 'signals': 'PWDATA#2', 'delete': True}, {'op': 'paint', 'signals': 'PADDR#3', 'color': '#123456'},
+    {'op': 'marker', 't': '160ns', 'signal': 'PADDR#3', 'label': 'on a copy'}, {'op': 'duplicate', 'signals': 'PADDR#3', 'delete': True}, {'op': 'marker', 'id': 3, 'delete': True},
 ]
+
+
+def duplicates(browser, build):
+    """Duplicate: a signal's row again under it, from the names and from the waves; its radix, analog form, colour its own, an enum's numbers;
+    a run of rows, your groups, Hide, the pictures, a compare; a reload, a state, undo; a copy gone and what stood on it."""
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('viewer: duplicate a signal')
+    ctx = browser.new_context(viewport={'width': 1400, 'height': 1000})
+    page = ctx.new_page()
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+    wv = page.locator('.wv').nth(1); wv.scroll_into_view_if_needed()
+    js = lambda e: page.evaluate(f"(async () => {{ const v = document.querySelectorAll('.wv')[1].waveView, I = WaveLens.internal; const by = p => v.sigByPath(p); {e} }})()")
+    vis = "I.peek(v).vis.filter(r => r.type === 'sig').map(r => r.full)"
+    menu = page.locator('.wv-menu')
+    name = lambda n: wv.locator('.names .row').filter(has_text=n).first
+
+    # from the names
+    check(js(f"return {vis}.includes('PADDR#2')") is False, 'no copy to begin with')
+    name('PADDR').click(button='right')
+    check(menu.locator('button[data-m=undup]').count() == 0, 'a signal has no "Remove the copy"')
+    menu.locator('button[data-m=dup]').click(); settle(page)
+    a = js(f"const l = {vis}, i = l.indexOf('PADDR'); return [l[i + 1], v.sel && v.sel.full, by('PADDR#2').name, by('PADDR#2').src === by('PADDR').src, by('PADDR#2').tr === by('PADDR').tr, v.state().dups]")
+    check(a == ['PADDR#2', 'PADDR#2', 'PADDR #2', True, True, ['PADDR#2']], f'the right button on a name: the copy under it, selected, the same changes, the same source {a}')
+
+    # from the waves
+    box = page.evaluate("(() => { const v = document.querySelectorAll('.wv')[1].waveView, r = v.canvas.getBoundingClientRect(), o = WaveLens.internal.peek(v).lay.find(o => o.row.full === 'PWDATA'); "
+                        "return [r.x + 300, r.y + o.y + o.h / 2 - (WaveLens.internal.peek(v).oy || 0)]; })()")
+    page.mouse.click(box[0], box[1], button='right')
+    check(menu.locator('button[data-m=dup]').inner_text().strip() == 'Duplicate', 'the right button on the waves has it too')
+    menu.locator('button[data-m=dup]').click(); settle(page)
+    a = js(f"const l = {vis}; return [l[l.indexOf('PWDATA') + 1], v.state().dups]")
+    check(a == ['PWDATA#2', ['PADDR#2', 'PWDATA#2']], f'the right button on the waves: the copy under it {a}')
+
+    # a form of its own
+    a = js("""v.setRadix('PADDR', 'hex'); v.setRadix('PADDR#2', 'dec'); v.setRadix('PWDATA#2', 'signed'); v.setAnalog('PWDATA#2', 3); v.select('PADDR');
+        await new Promise(r => requestAnimationFrame(r)); const H = n => I.peek(v).lay.find(o => o.row.full === n).h, T = n => v.valueAt(by(n), 60000);
+        return [T('PADDR'), T('PADDR#2'), T('PADDR'), T('PWDATA#2'), by('PWDATA').analog ?? null, by('PADDR').radix, H('PWDATA#2') === 3 * H('PWDATA'),
+          WaveLens.internal.analogValue(by('PWDATA#2'), by('PWDATA#2').tr.find(o => /^cafe/i.test(o.raw || '')), 'auto') < 0];""")
+    check(a == ['0x04', '4', '0x04', '-889323519', None, 'hex', True, True], f'a radix and an analog form of its own: the signal keeps its, read in turn neither takes the other\'s {a}')
+    a = js("""v.painted.set('PADDR#2', '#123456'); v.savePaint(); return [...v.painted.keys()]""")
+    check(a == ['PADDR#2'], f'a colour of its own {a}')
+    name('PADDR #2').click(button='right')
+    check(menu.locator('button[data-m=undup]').inner_text().strip() == 'Remove the copy', 'a copy says it can go')
+    page.keyboard.press('Escape')
+
+    # a run of rows, a copy of a copy starts as it looks now, your group, Hide
+    a = js("""await v.run([{ op: 'duplicate', signals: 'PADDR#2' }, { op: 'group', name: 'mine', signals: ['PADDR#2', 'PWDATA'] }]);
+        const c = by('PADDR#3'), g = v.ugRows(); await v.run([{ op: 'hide', signals: 'PADDR' }]); await new Promise(r => requestAnimationFrame(r));
+        const l = I.peek(v).vis.map(r => r.full); const r = [c.radix, v.painted.get('PADDR#3'), g.filter(r => r.type === 'sig').map(r => r.full), l.includes('PADDR'), l.includes('PADDR#3')];
+        await v.run([{ op: 'show', signals: 'PADDR' }]); return r;""")
+    check(a == ['dec', '#123456', ['PADDR#2', 'PWDATA'], False, True], f'a copy of a copy as it looks, a copy in your group, a signal hidden keeps its copies {a}')
+    a = js("""const k = v.ugRows().find(r => r.ug && r.full === 'PADDR#2'); v.setRadix(k, 'bin'); const m = by('PADDR#2').radix; v.setRadix(k, 'dec'); const d = v.dupAdd(k);
+        const l = v.ugroups[0].signals.slice(); v.dupDrop(d); v.dupDone(); return [m, l, v.ugroups[0].signals];""")
+    check(a == ['bin', ['PADDR#2', 'PADDR#4', 'PWDATA'], ['PADDR#2', 'PWDATA']], f'a copy\'s row in your group is that copy; a copy made there stays there {a}')
+
+    # the pictures and WaveDrom take it as it is shown
+    a = js("""const s = v.toSVG({ rows: [by('PADDR'), by('PADDR#2')] }), d = v.toWaveDrom(0, 120000, [by('PADDR'), by('PADDR#2')]);
+        const R = n => d.signal.find(x => x.name === n); return [s.includes('PADDR #2'), R('PADDR #2').data, R('PADDR').data];""")
+    check(a[0] and '4' in a[1] and '0x04' in a[2], f'the picture and WaveDrom have the copy in its radix {a}')
+
+    # kept: a reload, a state, undo
+    keep = "[v.state().dups, v.state().radix, v.state().analog, v.state().paint, by('PWDATA#2').analog, by('PADDR#2').radix]"
+    before = js(f"return {keep}")
+    page.reload(); page.wait_for_load_state('networkidle')
+    check(js(f"return {keep}") == before, f'a reload keeps the copies with what is theirs {before}')
+    a = js("""const st = JSON.parse(JSON.stringify(v.state())); await v.run([{ op: 'duplicate', signals: 'PADDR', delete: true }, { op: 'duplicate', signals: 'PWDATA', delete: true }]);
+        const none = [v.state().dups, v.state().radix, Object.keys(v.state().paint)]; const miss = await v.setState(st);
+        const back = [v.state().dups, by('PWDATA#2').analog, by('PADDR#2').radix], kept = v.ugRows().some(r => r.ug && r.full === 'PADDR#2');
+        const old = await v.setState({ wavelens: 'state', version: 3, dups: ['nothing#2', 'PADDR#2', 'PADDR'], radix: { 'nothing#2': 'hex' } }); return [none, miss, back, old, v.state().dups, kept];""")
+    check(a[0] == [[], {'PADDR': 'hex'}, []] and a[1] == [] and a[2] == [['PADDR#2', 'PWDATA#2', 'PADDR#3'], 3, 'dec'] and 'nothing#2' in a[3] and 'PADDR' in a[3] and a[4] == ['PADDR#2'] and a[5],
+          f'a copy gone takes what was its; a state brings them back; one of a signal these waves have not got is said, left out {a}')
+    a = js("""await v.setState({ wavelens: 'state', version: 3, dups: [] }); v.undoTick(true); await v.run([{ op: 'duplicate', signals: 'PWDATA', radix: 'signed', rows: 2 }]);
+        const made = v.state().dups; await v.undo(); const un = v.state().dups; await v.undo(1); return [made, un, v.state().dups, v.state().radix['PWDATA#2'], by('PWDATA#2').analog];""")
+    check(a == [['PWDATA#2'], [], ['PWDATA#2'], 'signed', 2], f'undo and redo take a copy with its form {a}')
+
+    # what stood on a copy goes to its signal
+    a = js("""await v.run([{ op: 'bits', signals: 'PWDATA#2' }, { op: 'bookmark', t: '60ns', signal: 'PWDATA#2', text: 'b' }, { op: 'bookmark', t: '70ns', signal: 'PWDATA#2[3]', text: 'c' },
+          { op: 'marker', t: '80ns', signal: 'PWDATA#2', label: 'm' }, { op: 'select', signal: 'PWDATA#2' }]);
+        const bit = by('PWDATA#2[3]') && by('PWDATA#2[3]').of.full; await v.run([{ op: 'duplicate', signals: 'PWDATA#2', delete: true }]);
+        const st = v.state(); return [bit, st.bookmarks.map(b => b.signal), st.markers.map(m => m.signal), st.select, st.bits, st.hidden];""")
+    check(a == ['PWDATA#2', ['PWDATA', 'PWDATA[3]'], ['PWDATA'], 'PWDATA', [], []], f'the copy\'s bits; a bookmark, a marker, the selection on a copy gone go to its signal {a}')
+
+    # what is not of a copy stays the signal's
+    a = js("""await v.setState({ wavelens: 'state', version: 3, dups: ['PWRITE#2'] }); const o = v.gapRefSet().size;
+        const c = by('PWRITE#2'); return [I.peek(v).vis.some(r => r.full === 'PWRITE#2'), v.M.rows.some(r => r === c)];""")
+    check(a == [True, False], f'a copy is a row of the view, no signal of the model: a list of signals, the state machines, the gaps do not count it twice {a}')
+    r = js("""const out = await v.run([{ op: 'duplicate', signals: 'PADDR[2]' }, { op: 'duplicate', signals: 'PCLK', rows: 3 }, { op: 'duplicate', signals: 'PADDR', delete: true },
+          { op: 'duplicate', signals: 'PADDR', radix: 'nope' }]); return out.map(o => o.error);""")
+    check(r == ['a bit has no copy: PADDR[2]', 'not a bus: PCLK', 'no copies of PADDR', 'radix: one of ' + ' '.join(js('return WaveLens.radixes')) + ', q<F> or sq<F> (fixed point), or null'], f'duplicate: what it refuses {r}')
+
+    # a compare: the copy is its signal; B's changes show on it too
+    vcd = build / 'examples' / 'apb' / 'apb.vcd'
+    if need(vcd, how='make examples'):
+        lines = vcd.read_text().split('\n'); t, out = 0, []
+        for ln in lines:   # B: PREADY never rises after 100 ns
+            t = int(ln[1:]) if ln.startswith('#') else t
+            if ln != '1%' or t <= 100000:
+                out.append(ln)
+        d = build / 'smoke' / 'duplicates'; d.mkdir(parents=True, exist_ok=True); bv = d / 'b.vcd'; bv.write_text('\n'.join(out))
+        a = page.evaluate("""async text => { const v = document.querySelectorAll('.wv')[1].waveView, I = WaveLens.internal;
+          await v.run([{ op: 'duplicate', signals: 'PREADY', radix: 'bin' }]); await v.compare(new File([text], 'b.vcd'));
+          const c = v.sigByPath('PREADY#2'), s = v.sigByPath('PREADY'), same = !!v.cmpOf(s) && v.cmpOf(c) === v.cmpOf(s), n = c.tr.length;
+          await v.compareView('b', true); const swapped = c.tr === s.tr && c.tr.length !== n; await v.compareView('a', true); return [same, swapped, c.tr.length === n]; }""", bv.read_text())
+        check(a == [True, True, True], f'a compare: a copy shows what its signal shows, B\'s changes too, and back {a}')
+
+    # an enum: its copy in a radix shows the numbers, the page's radix the names; the memo of a change does not mix them
+    fsm = build / 'examples' / 'fsm' / 'fsm.html'
+    if need(fsm, how='make examples'):
+        p2 = ctx.new_page(); p2.on('pageerror', lambda e: errs.append(str(e)))
+        p2.goto(fsm.as_uri()); p2.wait_for_load_state('networkidle'); p2.evaluate('localStorage.clear()'); p2.reload(); p2.wait_for_load_state('networkidle')
+        a = p2.evaluate("""(async () => { const v = [...document.querySelectorAll('.wv')].map(e => e.waveView).find(v => v.M.rows.some(r => r.enum && r.tr.some(o => o.raw != null)));
+          const s = v.M.rows.find(r => r.enum && r.tr.some(o => o.raw != null)), t = s.tr.filter(o => o.raw != null).pop().t;
+          const fs = (await v.run([{ op: 'duplicate', signals: s.full }]))[0].copies[0], d = v.sigByPath(fs), T = r => v.valueAt(r, t);
+          const label = T(s), same = T(d); v.setRadix(d, 'hex'); v.setRadix(s, 'hex'); const still = T(s), num = T(d), back = T(s), again = T(d); v.setRadix(s, null); v.setRadix(d, null);
+          return [label === same, /^0x/.test(num), still === label && back === label, num === again, T(d) === label, v.fsms().includes(d)]; })()""")
+        check(a == [True, True, True, True, True, False], f'an enum: the copy starts with its names, in a radix shows the number, the page\'s radix the names again; the signal keeps its; no second state machine {a}')
+        p2.close()
+    check(not errs, f'no page errors {errs[:2]}')
+    ctx.close()
 
 
 def bits(browser, build):
@@ -2974,9 +3110,9 @@ def bits(browser, build):
           f'a click on [7:0]: the bus bit by bit under it, the highest first, each its bit of the value (0x04 at 60 ns), in the state {got}')
     page.reload(); page.wait_for_load_state('networkidle')
     kept = js("return [v.state().bits, WaveLens.internal.peek(v).vis.filter(r => r.bit != null).length]")
-    js("(v.select(v.sigByPath('PADDR[2]')), v.canvas.focus(), 0)"); page.keyboard.press('b')
+    js("(v.select(v.sigByPath('PADDR[2]')), v.canvas.focus(), 0)"); page.keyboard.press('B')
     key = js("return [v.state().bits, v.sel && v.sel.full]")
-    js("(v.select('PWDATA'), v.canvas.focus(), 0)"); page.keyboard.press('b'); key2 = js("return v.state().bits"); page.keyboard.press('b')
+    js("(v.select('PWDATA'), v.canvas.focus(), 0)"); page.keyboard.press('B'); key2 = js("return v.state().bits"); page.keyboard.press('B')
     check(kept == [['PADDR'], 8] and key == [[], 'PADDR'] and key2 == ['PWDATA'],
           f'kept over a reload; b on a bit folds its bus (the bus selected), on a bus shows its bits {kept} {key} {key2}')
     c = page.locator('.wv canvas').first; c.scroll_into_view_if_needed(); box = c.bounding_box()
@@ -4199,6 +4335,229 @@ def edit(browser, build):
     finally:
         mcp.stdin.close(); mcp.wait(10)
     ctx.close()
+
+
+def marker_deltas(browser, build):
+    """The keys of 0.39: m a marker, b a bookmark, B the bits, ]m ]b; the Δ between markers: the option of their list, a line of its own over the rows, an arrow with the
+    time in its middle, dragged up and down to the lines of signals with the mouse; in the state, a reload, undo, a picture; what the command refuses."""
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('viewer: the keys of markers, the Δ between them')
+    page = browser.new_page(viewport={'width': 1400, 'height': 1000})
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+    js = lambda e: page.evaluate(f"(async () => {{ const v = document.querySelectorAll('.wv')[1].waveView, I = WaveLens.internal; {e} }})()")
+    w = page.locator('.wv').nth(1); w.scroll_into_view_if_needed()
+    # the keys
+    js("v.setCursor(60000); v.canvas.focus(); v.select('PSEL');")
+    n0 = js("return [v.umarks.length, v.bms.length];")
+    page.keyboard.press('m'); box = page.locator('.wv-ask')
+    check(box.count() == 1 and js("return v.umarks.length") == n0[0], 'm: a marker, its label asked first')
+    page.keyboard.type('first'); page.keyboard.press('Enter'); settle(page)
+    a = js("return [v.umarks.length, v.umarks[v.umarks.length - 1].label, v.bms.length];")
+    check(a == [n0[0] + 1, 'first', n0[1]], f'm: a marker with the label typed, no bookmark {a}')
+    js("v.setCursor(100000); v.canvas.focus();"); page.keyboard.press('b'); settle(page)
+    a = js("return [v.umarks.length, v.bms.length];")
+    check(a == [n0[0] + 1, n0[1] + 1], f'b: a bookmark, no marker {a}')
+    page.keyboard.press('Escape')
+    js("""await v.run([{ op: 'bits', signals: 'PADDR', on: false }]); v.select('PADDR'); v.canvas.focus();""")
+    page.keyboard.press('B'); settle(page)
+    a = js("return v.state().bits;")
+    check(a == ['PADDR'], f'B: the selected bus bit by bit {a}')
+    page.keyboard.press('B'); settle(page)
+    a = js("""await v.run([{ op: 'marker', t: '120ns', label: 'second' }, { op: 'marker', t: '30ns', label: 'zero' }]); v.setCursor(0); v.canvas.focus(); return v.markers.map(m => m.t).sort((p, q) => p - q);""")
+    page.keyboard.press(']'); page.keyboard.press('m'); t1 = js("return v.cursor;"); page.keyboard.press(']'); page.keyboard.press('m'); t2 = js("return v.cursor;")
+    page.keyboard.press('['); page.keyboard.press('m'); t3 = js("return v.cursor;")
+    check([t1, t2, t3] == [a[0], a[1], a[0]], f']m [m: the next and previous marker {a} {[t1, t2, t3]}')
+    b0 = js("v.setCursor(0); v.canvas.focus(); return v.bms.map(b => b.t).sort((p, q) => p - q);")
+    page.keyboard.press(']'); page.keyboard.press('b'); t1 = js("return v.cursor;")
+    check(t1 == b0[0], f']b: the next bookmark {b0} {t1}')
+
+    # the option: a line of its own over the rows, the list says the same
+    a = js("return [I.peek(v).lay[0].row.type, v.deltaList().length];")
+    check(a == ['sig', 0], f'off: no line for them {a}')
+    w.locator('.notes input.mdeltas').check(); settle(page)
+    a = js("""const l = I.peek(v).lay; return [l[0].row.type, l[0].row.ids, l[1].row.full, v.state().deltas, v.deltaList().map(d => d.dt)];""")
+    check(a[:4] == ['lane', ['d:top'], 'PCLK', True] and a[4] == [30000, 60000], f'on: a line over the rows, the arrows between neighbours in time {a}')
+    a = [x.inner_text() for x in w.locator('.notes .mks .md').all()]
+    check(len(a) == 2 and all(x.startswith('Δ ') for x in a), f'the list says each Δ {a}')
+    svg = js("return v.toSVG({ from: 0, to: 200000 });")
+    check(js("return v.deltaText(30000);") in svg, 'a picture has them')
+    # dragged by the mouse: up and down only, it stays
+    at = """(() => { const r = v.canvas.getBoundingClientRect(), g = I.peek(v).bmGeo.dtags.find(d => d.m.label === 'zero'); return [r.x + (g.x0 + g.x1) / 2, r.y + g.y - (I.peek(v).oy || 0)]; })()"""
+    row = lambda n, f: js(f"const r = v.canvas.getBoundingClientRect(), o = I.peek(v).lay.find(o => o.row.full === '{n}'); return r.y + o.y + o.h * {f} - (I.peek(v).oy || 0);")
+    drag = lambda to: (lambda p: (page.mouse.move(p[0], p[1]), page.mouse.down(), page.mouse.move(p[0] + 90, to(), steps=6), page.mouse.up(), settle(page)))(js(f"return {at};"))
+    top = lambda: (js("v.root.scrollIntoView();"), settle(page))   # the line over the rows in sight, not under the bar
+    ts = js("return v.umarks.map(m => m.t);")
+    top(); drag(lambda: row('PADDR', 0.25))
+    a = js("""const m = v.umarks.find(x => x.label === 'zero'); return [m.dsignal, m.dlift, m.signal, v.umarks.map(x => x.t), v.rowsL.flatMap(r => r.ids || [])];""")
+    check(a[0] == 'PADDR' and a[1] is None and a[2] is None and a[3] == ts and 'b:PADDR' in a[4] and 'd:top' in a[4], f'dragged: on the line over the signal, the other arrows stay over the rows, the markers do not move {a}')
+    top(); drag(lambda: row('PRDATA', 0.75))
+    a = js("""const m = v.umarks.find(x => x.label === 'zero'); return [m.dsignal, m.dlift, v.rowsL.flatMap(r => r.ids || []), v.markList().find(x => x.label === 'zero')];""")
+    check(a[0] == 'PRDATA' and a[1] == 'below' and 'b:PRDATA:below' in a[2] and 'b:PADDR' not in a[2] and a[3].get('dsignal') == 'PRDATA' and a[3].get('dlift') == 'below', f'and under another, it leaves the first line {a}')
+    # kept
+    keep = "[v.state().deltas, v.state().markers]"
+    before = js(f"return {keep};")
+    page.reload(); page.wait_for_load_state('networkidle')
+    a = js(f"return [{keep}, v.deltaList().length, v.rowsL.flatMap(r => r.ids || []).filter(x => typeof x === 'string').sort()];")
+    check(a[0] == before and a[1] == 2 and 'd:top' in a[2] and 'b:PRDATA:below' in a[2], f'a reload keeps the option and the places {a}')
+    w.scroll_into_view_if_needed(); top(); drag(lambda: js("return v.canvas.getBoundingClientRect().y + (I.peek(v).lay[0].y + 3) - (I.peek(v).oy || 0);"))
+    a = js("return (m => [m.dsignal, m.dlift])(v.umarks.find(x => x.label === 'zero'));")
+    check(a == [None, None], f'dragged back onto the line over the rows {a}')
+    a = js("""v.undoTick(true); const st = JSON.parse(JSON.stringify(v.state())); await v.run([{ op: 'deltas', id: 1, signal: 'PSEL', lift: 'below' }, { op: 'deltas', on: false }]);
+        const off = [v.state().deltas, v.deltaList().length, I.peek(v).lay[0].row.type, !!v.notesEl.querySelector('.mks .md')]; await v.undo(); const un = [v.state().deltas, v.markList()[0].dsignal ?? null];
+        await v.setState(st); await v.run([{ op: 'marker', id: 3, t: '10ns' }]); return [off, un, v.deltaList().map(d => d.dt)];""")
+    check(a[0] == [False, 0, 'sig', False] and a[1] == [True, None] and a[2] == [50000, 60000], f'off: gone; undo: back; a marker moved: the neighbours change {a}')
+    r = js("""const o = await v.run([{ op: 'deltas', on: 'yes' }, { op: 'deltas', id: 99 }, { op: 'deltas', signal: 'PSEL' }, { op: 'deltas', id: 1, lift: 'sideways' }, { op: 'deltas', id: 1, lift: 'below' }]); return o.map(x => x.error);""")
+    check(r[0] == 'on: true or false' and r[1].startswith('no marker 99') and r[2] == 'deltas: to, signal, lift and color go with id' and r[3].startswith('lift:') and r[4] == 'deltas: lift is the lane of a signal: give signal', f'deltas: what it refuses {r}')
+    a = js("""const m = [...v.umarks].sort((p, q) => q.t - p.t)[0], id = v.umarks.indexOf(m) + 1; return (await v.run([{ op: 'deltas', id }]))[0].error;""")
+    check('the last in time' in (a or ''), f'the last marker has no Δ from it {a}')
+    check(not errs, f'no page errors {errs[:2]}')
+    page.close()
+
+
+def marker_delta_ends(browser, build):
+    """An arrow of the Δ to any marker, through the ones between: the list's choice and its end dragged with the mouse, lines of their own over the rows; the colour of
+    an arrow and of a whole line between the rows; a hidden marker; the clearing of bookmarks and markers; in the state, a reload, undo, a picture, a delete."""
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('viewer: the Δ to any marker, the colour of a line, a hidden marker, clearing')
+    page = browser.new_page(viewport={'width': 1400, 'height': 1000})
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+    w = page.locator('.wv').first
+    w.scroll_into_view_if_needed(); settle(page)
+    js = lambda s: page.evaluate("async () => { const v = document.querySelector('.wv').waveView, I = WaveLens.internal; " + s + " }")
+    pairs = "v.deltaList().map(d => [v.umarks.indexOf(d.a) + 1, v.umarks.indexOf(d.b) + 1, d.dt])"
+    tops = "I.peek(v).lay.filter(o => o.row.type === 'lane').flatMap(o => o.row.ids).filter(x => String(x).startsWith('d:top'))"
+    js("""await v.run([{ op: 'bookmark', n: 'all', delete: true }, { op: 'view', from: '0ns', to: '200ns' }, { op: 'deltas', on: true }, { op: 'marker', t: '20ns', label: 'a' },
+        { op: 'marker', t: '60ns', label: 'b' }, { op: 'marker', t: '120ns', label: 'c' }]); v.undoTick(true);""")
+    settle(page)
+    a = js(f"return {pairs};")
+    check(a == [[1, 2, 40000], [2, 3, 60000]], f'to begin with: neighbours {a}')
+
+    # the list: the arrow of the first through the second; the two cross, so they take two lines
+    li = w.locator('.notes .mks li').first
+    check(li.locator('select.mto option').all_inner_texts() == ['→ next', '→ none', '→ 2 b', '→ 3 c'], 'each marker chooses among the others')
+    li.locator('select.mto').select_option('3'); settle(page)
+    a = js(f"return [{pairs}, {tops}, v.state().markers[0].dto];")
+    check(a == [[[1, 3, 100000], [2, 3, 60000]], ['d:top', 'd:top:1'], 3], f'through a marker: the arrows that cross on lines of their own {a}')
+    check(js("return v.notesEl.querySelector('.mks li .md').textContent;") == 'Δ ' + js("return v.deltaText(100000);"), 'the list says the time to it')
+    # the last in time goes back: all the three distances
+    w.locator('.notes .mks li').nth(2).locator('select.mto').select_option('2'); settle(page)
+    a = js(f"return {pairs};")
+    check([x[:2] for x in a] == [[1, 3], [2, 3], [3, 2]] and a[2][2] == 60000, f'to an earlier one, the time positive {a}')
+    w.locator('.notes .mks li').nth(2).locator('select.mto').select_option('1'); settle(page)
+    w.locator('.notes .mks li').nth(1).locator('select.mto').select_option('none'); settle(page)
+    a = js(f"return [{pairs}, v.state().markers[1].dto];")
+    check(a == [[[1, 3, 100000], [3, 1, 100000]], 0], f'none: no arrow from it {a}')
+    li.locator('select.mto').select_option('next'); settle(page)
+    w.locator('.notes .mks li').nth(1).locator('select.mto').select_option('next'); settle(page)
+    w.locator('.notes .mks li').nth(2).locator('select.mto').select_option('next'); settle(page)
+    a = js(f"return [{pairs}, v.state().markers.map(m => m.dto ?? null), {tops}];")
+    check(a == [[[1, 2, 40000], [2, 3, 60000]], [None, None, None], ['d:top']], f'next again: as it was, nothing kept {a}')
+
+    # the end dragged with the mouse: the dot, along; the arrow snaps to the nearest marker
+    js("v.root.scrollIntoView();"); settle(page)
+    end = "(() => { const r = v.canvas.getBoundingClientRect(), g = I.peek(v).bmGeo.dtags.find(d => d.m.label === '%s'); return [r.x + g.e, r.y + g.y - (I.peek(v).oy || 0), r.x]; })()"
+    xat = lambda ns: js(f"const r = v.canvas.getBoundingClientRect(); return r.x + (({ns * 1000} - v.t0) / v.span) * r.width;")
+    p = js(f"return {end % 'a'};")
+    check(p[0] == xat(60), f'the dot is at the marker it goes to {p}')
+    check('ew-resize' == (page.mouse.move(p[0], p[1]), settle(page), js("return v.canvas.style.cursor;"))[2], 'the pointer says so')
+    page.mouse.down(); page.mouse.move(p[0] + 30, p[1], steps=3); page.mouse.move(xat(115), p[1] + 1, steps=6); settle(page)
+    a = js(f"return [{pairs}, v.state().markers[0].dto ?? null];")
+    check(a == [[[1, 3, 100000], [2, 3, 60000]], 3], f'dragged along: it snaps to the marker as you go {a}')
+    page.mouse.up(); settle(page)
+    a = js(f"return [{pairs}, {tops}, v.umarks.map(m => m.t), v.notesEl.querySelector('.mks li select.mto').value];")
+    check(a[0][0] == [1, 3, 100000] and a[1] == ['d:top', 'd:top:1'] and a[2] == [20000, 60000, 120000] and a[3] == '3', f'dropped: kept, the markers stay, the list says it {a}')
+    a = js("await v.undo(); return v.state().markers[0].dto ?? null;")
+    check(a is None, f'undo: the arrow back {a}')
+    js("await v.undo(1);"); settle(page)
+    check(js("return v.state().markers[0].dto;") == 3, 'redo')
+    # away from its dot the drag stays up and down; on the dot, up and down too
+    p = js(f"return {end % 'a'};")
+    py = js("const r = v.canvas.getBoundingClientRect(), o = I.peek(v).lay.find(o => o.row.full === 'PADDR'); return r.y + o.y + o.h * 0.25 - (I.peek(v).oy || 0);")
+    page.mouse.move(p[0], p[1]); page.mouse.down(); page.mouse.move(p[0] + 2, py, steps=6); page.mouse.up(); settle(page)
+    a = js("return (m => [m.dsignal, m.dto])(v.umarks[0]);")
+    check(a == ['PADDR', 3], f'its end dragged up: the line changes, not the marker {a}')
+
+    # the numbers follow a delete
+    a = js(f"await v.run([{{ op: 'marker', t: '40ns', label: 'x' }}]); await v.run([{{ op: 'marker', id: 1, signal: null }}, {{ op: 'deltas', id: 4, to: 3 }}, {{ op: 'marker', id: 2, delete: true }}]); return [v.state().markers.map(m => m.dto ?? null), {pairs}];")
+    check(a[0] == [2, None, 2], f'a marker deleted: the numbers move with it {a}')
+    a = js("await v.run({ op: 'marker', id: 2, delete: true }); return v.state().markers.map(m => m.dto ?? null);")
+    check(a == [None, None], f'its target deleted: the next in time again {a}')
+    js("""await v.run({ op: 'marker', id: 'all', delete: true }); await v.run([{ op: 'marker', t: '20ns', label: 'a' }, { op: 'marker', t: '60ns', label: 'b' }, { op: 'marker', t: '120ns', label: 'c' },
+        { op: 'deltas', id: 1, to: 3 }]);""")
+
+    # hidden: in the list, not on the waves; the Δ goes through it
+    tags = "I.peek(v).bmGeo.tags.map(g => v.markers[g.i].label)"
+    w.locator('.notes .mks li').nth(1).locator('input.mhid').check(); settle(page)
+    a = js(f"return [{tags}, {pairs}, v.state().markers[1].hidden, v.notesEl.querySelectorAll('.mks li').length];")
+    check(a[0] == ['a', 'c'] and a[1] == [[1, 3, 100000]] and a[2] is True and a[3] == 3, f'hidden: in the list, off the waves, out of the arrows {a}')
+    svg = js("return v.toSVG({ from: 0, to: 200000 });")
+    check('>b<' not in svg and '>a<' in svg, 'a picture leaves it out')
+    a = js("""await v.run({ op: 'deltas', id: 1, to: 'next' }); return [v.deltaList().map(d => d.b.label), v.setCursor(0) && 0, v.canvas.focus()];""")
+    check(a[0] == ['c'], f'the next in time goes through it {a}')
+    t = js("v.canvas.focus(); return v.cursor;"); page.keyboard.press(']'); page.keyboard.press('m'); t1 = js("return v.cursor;"); page.keyboard.press(']'); page.keyboard.press('m'); t2 = js("return v.cursor;")
+    check([t1, t2] == [20000, 120000], f']m steps over it {t} {t1} {t2}')
+    a = js("""await v.run({ op: 'deltas', id: 1, to: 2 }); return [v.deltaList().length, (await v.run({ op: 'deltas', id: 1, signal: 'PSEL' }))[0].error];""")
+    check(a[0] == 0 and 'no Δ' in (a[1] or ''), f'an arrow to a hidden marker is not drawn {a}')
+    js("await v.run([{ op: 'deltas', id: 1, to: 'next' }, { op: 'marker', id: 2, hidden: false }]);"); settle(page)
+    check(js(f"return {tags};") == ['a', 'b', 'c'], 'shown again')
+    page.reload(); page.wait_for_load_state('networkidle')
+
+    # the colour: of an arrow, of a whole line between the rows, right button
+    js("""await v.run([{ op: 'bookmark', t: '30ns', signal: 'PADDR', text: 'n', lift: true }, { op: 'marker', t: '140ns', signal: 'PADDR', label: 'on it' }, { op: 'deltas', id: 1, signal: 'PADDR' }]);
+        v.undoTick(true); v.root.scrollIntoView();""")
+    settle(page)
+    at = lambda id_: js(f"const r = v.canvas.getBoundingClientRect(), l = I.peek(v).lay.find(o => o.row.type === 'lane' && o.row.ids.includes('{id_}')); return [r.x + 500, r.y + l.y + l.row.ids.indexOf('{id_}') * v.S.laneHeight + v.S.laneHeight / 2 - (I.peek(v).oy || 0)];")
+    p = at('b:PADDR')
+    page.mouse.move(p[0], p[1]); page.mouse.down(button='right'); page.mouse.up(button='right'); settle(page)
+    a = js("""const l = I.peek(v).menuEl || document.querySelector('.wv-menu'); return [l.querySelector('.mh').textContent, !!l.querySelector('.lnc')];""")
+    check(a[0].startswith('This line · 3') and a[1], f'the right button on a line: the things on it {a}')
+    page.locator('.wv-menu input.lnc').evaluate("(e) => { e.value = '#112233'; e.dispatchEvent(new Event('input', { bubbles: true })); e.dispatchEvent(new Event('change', { bubbles: true })); }"); settle(page)
+    page.keyboard.press('Escape'); settle(page)
+    colours = "[v.umarks[0].dcolor, v.umarks[3].color, v.bms[0].color]"
+    a = js(f"return [{colours}, v.umarks[1].dcolor, v.umarks[1].color, v.state().markers[0].dcolor];")
+    check(a[0] == ['#112233'] * 3 and a[1] is None and a[2] is None and a[3] == '#112233', f'all on the line in that colour, nothing else {a}')
+    check('#112233' in js("return v.toSVG({ from: 0, to: 200000 });"), 'a picture has it')
+    a = js(f"await v.undo(); return {colours};")
+    check(a == [None, None, None], f'one undo takes it all off {a}')
+    js("await v.undo(1);")
+    a = js(f"await v.run(v.lineOps(v.lineAt(I.peek(v).lay.find(o => o.row.type === 'lane' && o.row.ids.includes('b:PADDR')).y + 1), null)); return {colours};")
+    check(a == [None, None, None], f'their own colours again {a}')
+    # on an arrow: that arrow, and no arrow
+    p = js("const r = v.canvas.getBoundingClientRect(), g = I.peek(v).bmGeo.dtags.find(d => d.m.label === 'b'); return [r.x + (g.x0 + g.x1) / 2, r.y + g.y - (I.peek(v).oy || 0)];")
+    page.mouse.move(p[0], p[1]); page.mouse.down(button='right'); page.mouse.up(button='right'); settle(page)
+    check(page.locator('.wv-menu .mh').first.inner_text().startswith('Δ '), 'the right button on an arrow')
+    page.locator('.wv-menu input.dlc').evaluate("(e) => { e.value = '#445566'; e.dispatchEvent(new Event('input', { bubbles: true })); e.dispatchEvent(new Event('change', { bubbles: true })); }"); settle(page)
+    page.locator('.wv-menu button[data-m=dlnone]').click(); settle(page)
+    a = js("return (m => [m.dcolor, m.dto])(v.umarks[1]);")
+    check(a == ['#445566', 0], f'its colour; no arrow from this marker {a}')
+
+    # clearing: both, from the list and from the menu; undo
+    w.locator('.notes button[data-bm=clearall]').click(); settle(page)
+    a = js("return [v.bms.length, v.arrows.length, v.umarks.length, v.notesEl.hidden];")
+    check(a == [0, 0, 0, True], f'Clear all: the bookmarks, the arrows, the markers {a}')
+    a = js("await v.undo(); return [v.bms.length, v.umarks.length];")
+    check(a == [1, 4], f'undo brings them back {a}')
+    js("v.root.scrollIntoView();"); settle(page)
+    b = js("const r = v.canvas.getBoundingClientRect(); return [r.x + 300, r.y + 200];")
+    page.mouse.move(b[0], b[1]); page.mouse.down(button='right'); page.mouse.up(button='right'); settle(page)
+    page.locator('.wv-menu button[data-m=clearmarks]').click(); settle(page)
+    a = js("return [v.bms.length, v.umarks.length];")
+    check(a == [0, 0], f'the right button clears them too {a}')
+    page.mouse.move(b[0], b[1]); page.mouse.down(button='right'); page.mouse.up(button='right'); settle(page)
+    check(page.locator('.wv-menu button[data-m=clearmarks]').count() == 0, 'nothing left: no such item')
+    page.keyboard.press('Escape')
+    r = js("""const o = await v.run([{ op: 'marker', t: 1000 }, { op: 'marker', t: 2000 }, { op: 'deltas', to: 1 }, { op: 'deltas', id: 1, to: 9 }, { op: 'deltas', id: 1, to: 1 }, { op: 'deltas', id: 1, to: 'x' }]); return o.slice(2).map(x => x.error);""")
+    check(r[0] == 'deltas: to, signal, lift and color go with id' and r[1].startswith('to: a marker') and r[2] == 'deltas: to is the marker it starts from' and r[3].startswith('to: a marker'), f'what it refuses {r}')
+    check(not errs, f'no page errors {errs[:2]}')
+    page.close()
 
 
 def marker_lanes(browser, build):
@@ -6196,6 +6555,9 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'undo': 'ctrl+Z / ctrl+shift+Z and ↶ ↷: the edits undone and redone a step at a time (a batch of commands, a menu action), not the cursor',
     'cycles': 'the clock cycles under the time axis: numbers, the cursor\'s cycle, c147, cycle 0, Δ, the menu, the pictures, kept',
     'bits': 'a bus\'s width after its name and the bus bit by bit: a click on [7:0], b, the menu, the command, kept, a bookmark on a bit, the pictures',
+    'duplicates': 'a signal again in a row of its own: its radix, analog, colour, a reload, undo',
+    'marker_deltas': 'the keys m b B ]m ]b; the Δ between markers: the option, its line, dragged with the mouse, kept, undo',
+    'marker_delta_ends': 'the Δ to any marker (list, its end dragged), the colour of a line, a hidden marker, clearing',
     'marker_lanes': 'the text of a marker on a line over or under a signal: the mouse, the colour, the list, the picture, undo',
     'ranges': 'a range on the waves (shift+drag, the right button) and its menu: zoom, bookmarks, the picture, a colour',
     'tips': 'every control has a tooltip with its keys; ? shows the keys and the mouse',
@@ -6420,6 +6782,9 @@ def main():
         run('edit', edit, b, build)
         run('cycles', cycles, b, build)
         run('bits', bits, b, build)
+        run('duplicates', duplicates, b, build)
+        run('marker_deltas', marker_deltas, b, build)
+        run('marker_delta_ends', marker_delta_ends, b, build)
         run('undo', undo, b, build)
         run('order', order, b, build)
         run('savepage', savepage, b, build)

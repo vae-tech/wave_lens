@@ -71,9 +71,9 @@ class Names {
     v.vis = v.visible();
     // your own picks keep their colour
     const picks = (v.findPicks && v.findPicks.size) || v.extraPicks.size ? new Map([...v.findPicks, ...v.extraPicks, ...v.picks]) : v.picks;
-    const C = compose(v.M, v.S, v.vis, v.bms, v.arrows, picks, v.rowsAll || v.M.rows, v.markers);
+    const C = compose(v.M, v.S, v.vis, v.bms, v.arrows, picks, v.rowsAll || v.M.rows, v.laneMarks());
     v.lanes = C.lanes; v.rowsL = C.rows; v.band = C.band; v.hl = C.hl;
-    v.laneSig = JSON.stringify([...v.lanes]); v.laneKey = laneKey(v.bms, v.arrows, v.markers);
+    v.laneSig = JSON.stringify([...v.lanes]); v.laneKey = laneKey(v.bms, v.arrows, v.laneMarks());
     if (v.hlBtn) { v.hlBtn.hidden = !v.picks.size; v.hlBtn.textContent = `Highlight: ${v.picks.size} ✕`; }
     if (v.unhideBtn) { v.unhideBtn.hidden = !v.hiddenRows.size; v.unhideBtn.textContent = `Hidden: ${v.hiddenRows.size} ✕`; }
     if (v.sortBtn) { v.sortBtn.textContent = 'Sort: ' + { none: 'off', asc: 'A→Z', desc: 'Z→A' }[v.sort];
@@ -216,6 +216,7 @@ class Notes {
     const v = this.v;
     const el = v.notesEl, M = v.M, any = v.bms.length || v.umarks.length || v.ugroups.length; el.hidden = !any; v.notesGen = (v.notesGen || 0) + 1;
     if (!any) { el.innerHTML = ''; return; }
+    const deltas = v.deltaList();
     const sigs = M.rows.filter(r => r.type === 'sig'), byFull = new Map(sigs.map(r => [r.full, r]));
     v.sigList = v.sigList || 'wvf-sigs-' + (++LIST_ID);   // one list of the signals for every bookmark's field
     const acc = getComputedStyle(v.root).getPropertyValue('--accent').trim(), six = c => String(c || '').replace(/^#([0-9a-f])([0-9a-f])([0-9a-f])$/i,
@@ -262,7 +263,10 @@ class Notes {
       '</ol><textarea class="json" readonly hidden aria-label="bookmarks as JSON"></textarea>' : '') +
       // your markers: a dashed line across the rows with its label; your groups: a folder of signals at the top of the names
       (v.umarks.length ? `<div class="nh"><b>Markers</b><span class="muted">time · signal · label · colour · drag a text on the waves to a line ` +
-        `over or under a signal, along the time</span></div><ol class="mks">` +
+        `over or under a signal, along the time</span><label class="mdl" title="An arrow between neighbouring markers with the time between them, at the top ` +
+        `of the rows: drag it up and down to the line over or under a signal, its dot along to another marker"><input type="checkbox" class="mdeltas" ` +
+        `aria-label="the Δ between markers"${v.deltas ? ' checked' : ''}> Δ between markers</label><button type="button" data-bm="clearall" ` +
+        `title="Delete every bookmark, arrow and marker of yours (undo brings them back)">Clear all</button></div><ol class="mks">` +
         v.umarks.map((m, i) => `<li data-k="${i}"><span class="mn">${i + 1}</span>
         <input type="text" class="mt" value="${esc(v.when(m.t))}" spellcheck="false" aria-label="marker ${i + 1} time" title="Time: 250ns, 85.12us">
         <input type="text" class="msig" list="${v.sigList}" value="${esc(m.signal || '')}" placeholder="— top" spellcheck="false"
@@ -272,6 +276,12 @@ class Notes {
         <input type="text" class="ml" value="${esc(m.label)}" placeholder="label" aria-label="marker ${i + 1} label">
         <input type="color" class="col" value="${hex(m.color, pale)}" aria-label="marker ${i + 1} colour" title="Colour">
         <button type="button" class="ic" data-bm="mpale" title="The pale colour again"${m.color ? '' : ' disabled'}>pale</button>
+        <label class="mhl" title="Kept in this list, not on the waves; the Δ goes through it"><input type="checkbox" class="mhid"
+          aria-label="marker ${i + 1} hidden"${m.hidden ? ' checked' : ''}> hidden</label>
+        ${v.deltas ? `<select class="mto" aria-label="marker ${i + 1}: the Δ goes to" title="The marker its Δ goes to, through the ones between">` +
+          opt('next', '→ next', m.dto == null ? 'next' : m.dto === 0 ? 'none' : String(m.dto)) + opt('none', '→ none', m.dto === 0 ? 'none' : '') +
+          v.umarks.map((o, k) => (k === i ? '' : opt(String(k + 1), `→ ${k + 1}${o.label ? ' ' + o.label : ''}`, String(m.dto)))).join('') + '</select>' : ''}
+        ${(d => (d ? `<span class="md" title="The time to the marker it goes to">Δ ${esc(v.deltaText(d.dt))}</span>` : ''))(deltas.find(d => d.a === m))}
         <button type="button" class="ic" data-bm="mdel" title="Delete marker ${i + 1}">✕</button></li>`).join('') + '</ol>' : '') +
       (v.ugroups.length ? `<div class="nh"><b>Groups</b><span class="muted">yours, at the top of the names · name · colour</span></div><ol class="ugs">` +
         v.ugroups.map((g, i) => `<li data-g="${i}"><input type="text" class="ugn" value="${esc(g.name)}" spellcheck="false" aria-label="group ${i + 1} name"
@@ -285,6 +295,7 @@ class Notes {
     const b = e.target.closest('button[data-bm]'); if (!b) return;
     const li = b.closest('li'), n = li ? +li.dataset.n : NaN, bm = v.bms.find(x => x.n === n), act = b.dataset.bm;
     if (act === 'mdel') return v.run({ op: 'marker', id: +li.dataset.k + 1, delete: true });
+    if (act === 'clearall') return v.clearMarks();
     if (act === 'mlift') return v.run({ op: 'marker', id: +li.dataset.k + 1, lift: v.umarks[+li.dataset.k].lift === 'below' ? 'above' : 'below' });
     if (act === 'mpale') return v.run({ op: 'marker', id: +li.dataset.k + 1, color: null });
     if (act === 'gdel') return v.run({ op: 'group', name: v.ugroups[+li.dataset.g].name, delete: true });
@@ -307,9 +318,14 @@ class Notes {
   }
   input(e) {
     const v = this.v; // text, colours, arrow settings: live
-    const T = e.target, li = T.closest('li'); if (!li) return;
-    if (li.dataset.k != null) { const m = v.umarks[+li.dataset.k]; if (!m) return;
-      if (T.matches('input.ml')) m.label = T.value;
+    const T = e.target, li = T.closest('li');
+    if (T.matches('input.mdeltas')) return v.run({ op: 'deltas', on: T.checked });
+    if (!li) return;
+    if (li.dataset.k != null) { const k = +li.dataset.k, m = v.umarks[k]; if (!m) return;
+      if (T.matches('select.mto')) return v.run({ op: 'deltas', id: k + 1, to: T.value === 'next' ? 'next' : T.value === 'none' ? null : +T.value });
+      if (T.matches('input.mhid')) return v.run({ op: 'marker', id: k + 1, hidden: T.checked });
+      if (T.matches('input.ml')) { m.label = T.value;
+        v.notesEl.querySelectorAll(`select.mto option[value="${k + 1}"]`).forEach(o => { o.textContent = `→ ${k + 1}${m.label ? ' ' + m.label : ''}`; }); }
       else if (T.matches('input.col')) { m.color = T.value; li.querySelector('[data-bm=mpale]').disabled = false; } else return;
       v.markers = v.pageMarks.concat(v.umarks); v.saveBookmarks(); return v.draw(); }
     if (li.dataset.g != null) { const g = v.ugroups[+li.dataset.g]; if (g && T.matches('input.col')) { g.color = T.value; v.setGroups(); } return; }

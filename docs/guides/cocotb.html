@@ -68,9 +68,11 @@ async def test_wait_states(dut):
   <tr><th>Call</th><th>Does</th></tr>
   <tr><td><code>@wl.test(…)</code></td><td><code>cocotb.test(…)</code> around the test: its number on <code>TEST_CASE</code>, a bookmark at its start and end, a span in the colour of its result</td></tr>
   <tr><td><code>wl.phase(label, signals=None)</code></td><td><code>with</code>, not awaited: the time inside it is <code>label</code> on <code>TEST_STEP</code>; <code>signals</code>: a span on those rows instead In <code>ReadOnly</code>, where nothing can be written, its time stays exact: begun there it is a span on the <code>TEST_STEP</code> row.</td></tr>
+  <tr><td><code>wl.step(label, signals=None)</code></td><td>the same phase in one line, until the next <code>step</code> or the end of the test: nothing to re-indent</td></tr>
   <tr><td><code>wl.note(text, signal, label, color)</code></td><td>a bookmark now</td></tr>
-  <tr><td><code>wl.check(got, expected, text, signal, show)</code></td><td>a bookmark with both values; a mismatch fails the test; <code>show='fail'</code>: no bookmark when they agree, for a check in a loop</td></tr>
+  <tr><td><code>wl.check(got, expected, text, signal, show, why)</code></td><td>a bookmark with both values; a mismatch fails the test; <code>show='fail'</code>: no bookmark when they agree, for a check in a loop, and the test still counts it; <code>why</code>: the text of a failure, a string or a function called only then</td></tr>
 </table>
+<p><code>@wl.test(signals=["*fifo_full", "u_x.state"])</code>: the test's own rows, names or patterns, added to its view when each test stands apart; a name the dump has not got is a lint warning. <code>Marks(hide=["my_checks.py"])</code>: a file that is not the line of a failure, as a frame that sets <code>__tracebackhide__</code>.</p>
 <p>Warnings and errors logged during a test are bookmarks too. A test's result on the page is what cocotb says of it, <code>expect_fail</code> and
   <code>expect_error</code> counted the same way: <b>PASS</b> green, <b>FAIL</b> red, <b>FAIL (expected)</b> orange.</p>
 
@@ -117,12 +119,13 @@ async def test_wait_states(dut):
 except ImportError:
     class Marks:
         def __init__(self, *args, **kw): pass
-        def test(self, *args, **kw): return cocotb.test(*args, **kw)
+        def test(self, *args, signals=None, **kw): return cocotb.test(*args, **kw)
         def phase(self, *args, **kw): return contextlib.nullcontext()
+        def step(self, *args, **kw): pass
         def note(self, *args, **kw): pass
         def check(self, got, expected, text='', **kw):
             assert got == expected, f'{text}: got {got}, expected {expected}'</code></pre>
-<p>Either way <code>note</code> and <code>phase</code> do nothing and <b><code>check</code> still compares and fails the test</b>: a check that went quiet would
+<p>Either way <code>note</code>, <code>phase</code> and <code>step</code> do nothing and <b><code>check</code> still compares and fails the test</b>: a check that went quiet would
   pass anything.</p>
 
 <h2 id="own">Your own design</h2>
@@ -141,7 +144,7 @@ except ImportError:
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.38 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.39 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

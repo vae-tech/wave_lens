@@ -3,7 +3,8 @@
 Object.assign(WaveView.prototype, {
   // the right button's menu at (cx, cy) on the screen: the range (zoom, bookmarks at its ends, copy Δ), the picture (copy,
   // PNG, SVG), the signal under the pointer (colour, highlight, copy its path); Esc, a click elsewhere or a choice closes it
-  menu(cx, cy, row, at = this.cursor, mk = null) {   // mk: your marker whose text was clicked (its text, colour)
+  // mk: your marker whose text was clicked (its text, colour); on: the Δ arrow clicked (dl), the line between the rows (line)
+  menu(cx, cy, row, at = this.cursor, mk = null, on = {}) {
     this.closeMenu(); this.menuAt = [cx, cy];   // where it was opened: a text asked there after (Bookmark here, Marker here)
     const r = this.range, sig = row && row.type === 'sig' && row.tr ? row : null, grp = row && row.type === 'group' &&
       this.M.groups[row.id] === row ? row : null, it = row && (sig || grp);
@@ -17,8 +18,10 @@ Object.assign(WaveView.prototype, {
     // or a row of the shift+click run: every row of the run
     const run = !!sig && this.selRun.size > 1 && this.selRun.has(sig);
     const many = run || (it && (this.picks.has(it) || sig && picked(sig)) && this.picks.size > 1);
-    const sigs = run ? [...this.selRun] : many ? this.M.rows.filter(r => r.type === 'sig' && r.tr && picked(r) && this.shown(r)) : sig ? [sig] : [];
+    const sigs = run ? [...this.selRun] : many ? this.sigPool().filter(r => r.type === 'sig' && r.tr && picked(r) && this.shown(r)) : sig ? [sig] : [];
     const vecs = sigs.map(r => r.orig || r).filter(isVec);   // Bits: the buses bit by bit
+    // Duplicate: every signal but a bit, a plugin's copy; a copy's own row goes
+    const dupable = sigs.filter(r => rowBase(r).bit == null && !rowBase(r).same), copies = [...new Set(sigs.map(r => r.orig || r).filter(r => r.dupOf))];
     const buses = sigs.filter(r => r.width > 1 && r.tr.some(o => o.raw != null)),
       rows = run ? sigs : many ? [...this.picks.keys()].filter(r => r.full && (r.type === 'sig' || this.M.groups[r.id] === r) && this.shown(r)) : [it];
     const acc = getComputedStyle(this.root).getPropertyValue('--wave-paint').trim(), col = sig && this.painted.get(sig.full) ||
@@ -33,15 +36,16 @@ Object.assign(WaveView.prototype, {
     const gp = this.gapOpt(), [ga, gb] = r || [this.t0, this.t0 + this.span], gaps = () => this.cutsOf(ga, gb, pic.rows || this.screenRows()).length - 1;
     const gn = () => (this.gapOpt().gaps ? `Gaps: ${gaps()}` : 'Gaps'), nref = this.gapRefSet().size;
     const gby = gp.gapBy ? gp.gapBy.length : 0;   // the expressions the waves are cut to
-    const gref = sigs.length && sigs.every(x => this.gapRefSet().has(x));   // the signals clicked: the gaps follow them already
-    const gck = this.gapClockRow(), isGck = !!sig && sig === gck;   // the clock the gaps count cycles of
+    const bases = sigs.map(rowBase), sig0 = sig && rowBase(sig);   // gaps and cycles go by the signal: a copy is its signal there
+    const gref = sigs.length && bases.every(x => this.gapRefSet().has(x));   // the signals clicked: the gaps follow them already
+    const gck = this.gapClockRow(), isGck = !!sig && sig0 === gck;   // the clock the gaps count cycles of
     const co = this.cycOpt(), cd = this.cycData(), cda = this.cycData(true);
-    const isCyc = !!sig && co.cycles && (co.cycleClock === sig.full || co.cycleClock === (sig.src && sig.src.abs));   // the cycles
-    const gaux = sigs.length && sigs.every(x => this.gapRows().aux.has(x)), naux = this.gapRows().aux.size;   // the signals counted in the gaps
+    const isCyc = !!sig && co.cycles && (co.cycleClock === sig0.full || co.cycleClock === (sig.src && sig.src.abs));   // the cycles
+    const gaux = sigs.length && bases.every(x => this.gapRows().aux.has(x)), naux = this.gapRows().aux.size;   // the signals counted in the gaps
     // one role per signal: the gaps follow it (gapSignals), count its changes (gapAux) or count its cycles (gapClock)
-    const role = (key, on) => { const fs = sigs.map(x => x.full).filter(Boolean), g = this.gapOpt(), o = { gaps: true };
+    const role = (key, on) => { const fs = bases.map(x => x.full).filter(Boolean), g = this.gapOpt(), o = { gaps: true };
       for (const k of ['gapSignals', 'gapAux']) o[k] = g[k].filter(x => !fs.includes(x));
-      if (key === 'gapClock') o.gapClock = on ? sig.full : null; else { if (on) o[key].push(...fs); if (fs.includes(g.gapClock)) o.gapClock = null; }
+      if (key === 'gapClock') o.gapClock = on ? sig0.full : null; else { if (on) o[key].push(...fs); if (fs.includes(g.gapClock)) o.gapClock = null; }
       if (key === 'gapAux' && on && g.gapCount === 'off') o.gapCount = 'clock';   // counted: its counts in the picture
       this.setGaps(o); };
     const b = (m, label) => { const k = (TIPS['m:' + m] || [])[1];
@@ -51,8 +55,17 @@ Object.assign(WaveView.prototype, {
       (mvAt[0] > 0 ? b('mvtop', `To the top of ${where}`) : '') + (mvAt[0] < mvAt[1] - 1 ? b('mvbot', `To the bottom of ${where}`) : '');
     const el = document.createElement('div'); el.className = 'wv-menu'; el.setAttribute('role', 'menu');
     const mkId = mk ? this.umarks.indexOf(mk) + 1 : 0, pale = getComputedStyle(this.root).getPropertyValue('--muted').trim();
-    const six = c => /^#[0-9a-f]{6}$/i.test(c || '');
-    el.innerHTML = (mk ? `<div class="mh">Marker ${mkId}${mk.label ? ' · ' + esc(mk.label) : ''}</div>` + b('mktext', 'Its text…') +
+    const six = c => /^#[0-9a-f]{6}$/i.test(c || ''), acc6 = getComputedStyle(this.root).getPropertyValue('--accent').trim();
+    const dm = on.dl ? on.dl.m : null, dlId = dm ? this.umarks.indexOf(dm) + 1 : 0, dd = dm && this.deltaList().find(d => d.a === dm);
+    const ln = on.line && on.line.n > (dm || mk ? 1 : 0) ? on.line : null, pick0 = c => esc(six(c) ? c : six(acc6) ? acc6 : '#808080');
+    el.innerHTML = (dm && dd ? `<div class="mh">Δ ${esc(this.deltaText(dd.dt))} · from marker ${dlId}</div>` +
+      `<label class="mi">Colour <input type="color" class="dlc" value="${pick0(dm.dcolor)}" aria-label="the colour of this Δ"></label>` +
+      (dm.dcolor ? b('dlown', 'Its own colour') : '') +
+      b('dlnone', 'No arrow from this marker') + '<hr>' : '') +
+      (ln ? `<div class="mh">This line · ${ln.n} thing${ln.n === 1 ? '' : 's'}</div>` +
+      `<label class="mi">Colour <input type="color" class="lnc" value="${pick0()}" aria-label="the colour of this line"></label>` +
+      b('lnown', 'Their own colours') + '<hr>' : '') +
+      (mk ? `<div class="mh">Marker ${mkId}${mk.label ? ' · ' + esc(mk.label) : ''}</div>` + b('mktext', 'Its text…') +
       `<label class="mi">Colour <input type="color" class="mkc" value="${esc(six(mk.color) ? mk.color : six(pale) ? pale : '#808080')}" ` +
       `aria-label="marker ${mkId} colour"></label>` + (mk.color ? b('mkpale', 'Pale again') : '') + b('mkdel', 'Delete the marker') + '<hr>' : '') +
       (r ? `<div class="mh">${esc(this.rangeText())}</div>` + b('zoom', 'Zoom to the range') + b('marks', 'Bookmarks at its ends',
@@ -108,6 +121,8 @@ Object.assign(WaveView.prototype, {
         (sig && buses.length ? b('analog', buses.every(r => r.analog) ? 'As a bus' : many ? `Analog: ${buses.length}` : 'Analog (step plot)') : '') +
         (vecs.length ? b('bits', vecs.every(r => this.bitsOpen.has(r.full)) ? (many ? `Fold the bits of ${vecs.length}` : 'Fold the bits') :
           many ? `Bits of ${vecs.length}` : `Bits: ${vecs[0].width} rows`) : '') +
+        (dupable.length ? b('dup', dupable.length > 1 ? `Duplicate ${dupable.length}` : 'Duplicate') : '') +
+        (copies.length ? b('undup', copies.length > 1 ? `Remove the ${copies.length} copies` : 'Remove the copy') : '') +
         b('hl', this.picks.has(it) ? 'Remove the highlight' : 'Highlight') + b('hide',
           many ? `Hide the ${rows.length} ${run ? 'selected' : 'highlighted'}` : grp ? 'Hide this module' : 'Hide',
           'Leave it out of the view (Hidden: N ✕ in the bar shows it again)') +
@@ -129,7 +144,8 @@ Object.assign(WaveView.prototype, {
       (this.scopes().length ? '<hr>' + b('mods', 'Modules…') + (it && this.scopeOfRow(it) ? b('locate', 'Locate module in tree') : '') +
         (this.only ? b('onlyp', this.only.on ? 'Pause Only' : 'Resume Only') + b('onlyx', 'Clear Only') : '') : '') +
       (this.fsms().length ? '<hr>' + b('fsms', 'State machines…') + (this.fsm ? b('fsmx', 'Clear the FSM layer') : '') : '') +
-      (r ? '<hr>' + b('clear', 'Clear the range') : '');
+      (r ? '<hr>' + b('clear', 'Clear the range') : '') +
+      (this.bms.length || this.umarks.length ? '<hr>' + b('clearmarks', 'Clear bookmarks and markers') : '');
     this.root.append(el); this.menuEl = el;
     const box = el.getBoundingClientRect();
     el.style.left = Math.max(4, Math.min(cx, innerWidth - box.width - 4)) + 'px'; el.style.top = Math.max(4, Math.min(cy, innerHeight - box.height - 4)) + 'px';
@@ -151,6 +167,10 @@ Object.assign(WaveView.prototype, {
       const m = e.target.closest('button[data-m]'); if (!m) return;
       const act = m.dataset.m;
       if (act === 'zoom') this.zoomTo(...r);
+      else if (act === 'dlown') this.run({ op: 'deltas', id: dlId, color: null });
+      else if (act === 'dlnone') this.run({ op: 'deltas', id: dlId, to: null });
+      else if (act === 'lnown') this.run(this.lineOps(ln, null));
+      else if (act === 'clearmarks') this.clearMarks();
       else if (act === 'marks') {
         const n = Math.max(0, ...this.bms.map(x => x.n)) + 1, s = sig ? sig.full : null;
         const top = this.topNow(); this.bms.push(...bmNorm([{ n, t: r[0], signal: s, top }, { n: n + 1, t: r[1], signal: s, top }]));
@@ -179,6 +199,10 @@ Object.assign(WaveView.prototype, {
       else if (act === 'hl') this.toggleHighlight(it);
       else if (act === 'analog') { const on = !buses.every(r => r.analog); buses.forEach(r => this.setAnalog(r, on ? 3 : false)); }
       else if (act === 'bits') this.setBits(vecs, !vecs.every(r => this.bitsOpen.has(r.full)));
+      else if (act === 'dup') { const out = dupable.map(r => this.dupAdd(r)).filter(Boolean); this.dupDone();
+        if (out.length) { this.select(out[0]);
+          this.toast(`${out.length > 1 ? `${out.length} copies: each` : `${out[0].name}:`} its own radix, analog, colour`); } }
+      else if (act === 'undup') { copies.forEach(r => this.dupDrop(r)); this.dupDone(); }
       else if (act === 'hide') this.hide(rows);
       else if (act === 'unhide') this.unhide();
       else if (act === 'fold') { if (this.collapsed.has(grp.id)) this.collapsed.delete(grp.id); else this.collapsed.add(grp.id); this.foldTouched = true;
@@ -197,7 +221,7 @@ Object.assign(WaveView.prototype, {
           const n = Math.max(0, ...this.bms.map(b => b.n)) + 1; this.bms.push({ n, t, signal: sig.full, text, color: null, top }); this.changed(true); });
         return this; }
       else if (act === 'copyname') this.copyRows([it]);
-      else if (act === 'types') { const x = this.menuEl.getBoundingClientRect(); this.closeMenu(); this.typesBox(sig.orig || sig, x.left, x.top); return this; }
+      else if (act === 'types') { const x = this.menuEl.getBoundingClientRect(); this.closeMenu(); this.typesBox(sig0, x.left, x.top); return this; }
       else if (act === 'mlist') { this.closeMenu(); this.marksMenu(); return this; }
       else if (act === 'mktext') { const [x, y] = this.menuAt;
         this.askText(x, y, `Marker ${mkId} · ${this.fmtCursor(mk.t)}`, 'its label', label => this.run({ op: 'marker', id: mkId, label }), mk.label);
@@ -227,7 +251,7 @@ Object.assign(WaveView.prototype, {
       else if (act === 'gauxx') this.setGaps({ gapAux: null });
       else if (act === 'gclk') role('gapClock', !isGck);
       else if (act === 'cycon') this.setCycles({ cycles: !co.cycles });
-      else if (act === 'cyclk') this.setCycles(isCyc ? { cycleClock: null } : { cycles: true, cycleClock: sig.full, cycleZero: null });
+      else if (act === 'cyclk') this.setCycles(isCyc ? { cycleClock: null } : { cycles: true, cycleClock: sig0.full, cycleZero: null });
       else if (act === 'cyc0') { const u = cda.ups, i = Math.max(0, lastBefore(u.length, j => u[j], at + timeEps(at)));   // the edge at or before
         this.setCycles({ cycles: true, cycleZero: u[i] }); }
       else if (act === 'cycx') this.setCycles(null);
@@ -256,6 +280,15 @@ Object.assign(WaveView.prototype, {
         ...(only ? { gapOnly: only.checked } : {}), gapCount: el.querySelector('.gcnt').value });
       for (const x of el.querySelectorAll('.gn, .gh')) x.textContent = gn();
     });
+    if (dm && dd) {   // as a marker's below
+      el.querySelector('.dlc').addEventListener('input', e => { dm.dcolor = e.target.value; this.draw(); });
+      el.querySelector('.dlc').addEventListener('change', e => this.run({ op: 'deltas', id: dlId, color: e.target.value }));
+    }
+    if (ln) {
+      el.querySelector('.lnc').addEventListener('input', e => { const c = e.target.value; ln.ds.forEach(m => { m.dcolor = c; });
+        [...ln.ms, ...ln.bs, ...ln.as].forEach(x => { x.color = c; }); this.draw(); });
+      el.querySelector('.lnc').addEventListener('change', e => this.run(this.lineOps(ln, e.target.value)));
+    }
     if (mk) {   // its colour: seen as it is picked, one step of undo when the picker closes
       el.querySelector('.mkc').addEventListener('input', e => { mk.color = e.target.value; this.draw(); });
       el.querySelector('.mkc').addEventListener('change', e => this.run({ op: 'marker', id: mkId, color: e.target.value }));

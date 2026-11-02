@@ -1,6 +1,6 @@
 """python/wavelens_cocotb.py under a stand-in for cocotb (the real one runs in make cocotb, checked by smoke) and
 tools/testmarks.py on what it writes: a test's result as cocotb says it, the marks file, the marks in a config and a page."""
-import ast, asyncio, contextlib, inspect, json, logging, os, sys, tempfile, types, unittest
+import ast, asyncio, contextlib, inspect, json, logging, os, re, sys, tempfile, textwrap, types, unittest
 
 from . import helpers as H
 
@@ -105,7 +105,30 @@ class Verdict(unittest.TestCase):
                 self.assertEqual(wc.verdict(exc, **opts), want)
 
 
+def helper_that_checks(wl, a, b):   # a project's own check: not the line of a failure when hidden
+    wl.check(a, b)
+
+
+def helper_that_hides(wl, a, b):
+    __tracebackhide__ = True  # noqa: F841
+    wl.check(a, b)
+
+
 class Where(unittest.TestCase):
+    def where(self, fn, *hide):
+        try:
+            fn(wc.Marks(path='off'), 1, 2)
+        except AssertionError as e:
+            return wc.where_of(e, hide)
+        return self.fail('no failure')
+
+    def test_past_what_a_project_hides(self):
+        self.assertEqual(self.where(helper_that_checks), f'test_cocotb_marks.py:{helper_that_checks.__code__.co_firstlineno + 1}', 'a helper of no mark: its own line')
+        self.assertEqual(self.where(helper_that_hides), f'test_cocotb_marks.py:{Where.where.__code__.co_firstlineno + 2}', '__tracebackhide__: the caller\'s line')
+
+    def test_all_hidden_says_nothing(self):
+        self.assertEqual(self.where(helper_that_checks, 'test_cocotb_*.py'), '')
+
     def test_the_line_of_the_test_under_a_stale_compile(self):
         # compiled under another path than the module's __file__, as a cached compile reached through a symlink: its frames are still its own
         with open(wc.__file__, encoding='utf-8') as f:
@@ -208,6 +231,123 @@ class Library(Harness):
         t = self.run_test(wl, bad, dut)['tests'][0]
         self.assertEqual(t['phases'], [{'label': 'p', 'from': 0, 'to': 30, 'step': 1}])
         self.assertEqual(dut.TEST_STEP.values[-1], 0)
+
+    def test_a_step_lasts_to_the_next_and_the_test_s_end(self):
+        wl = self.marks()
+        dut = Dut('TEST_CASE', 'TEST_STEP')
+
+        async def one(dut):
+            wl.step('first')
+            self.t = 10
+            wl.step('second')
+            self.t = 30
+        t = self.run_test(wl, one, dut)['tests'][0]
+        self.assertEqual(t['phases'], [{'label': 'first', 'from': 0, 'to': 10, 'step': 1}, {'label': 'second', 'from': 10, 'to': 30, 'step': 2}])
+        self.assertEqual(dut.TEST_STEP.values[-1], 0, 'the row back at the end')
+        self.assertIsNone(wl.step_open)
+
+    def test_a_step_ended_by_a_failure_is_kept(self):
+        wl = self.marks()
+        dut = Dut('TEST_CASE', 'TEST_STEP')
+
+        async def one(dut):
+            wl.step('it')
+            self.t = 7
+            raise AssertionError('no')
+        self.assertEqual(self.run_test(wl, one, dut)['tests'][0]['phases'], [{'label': 'it', 'from': 0, 'to': 7, 'step': 1}])
+
+    def test_a_step_outside_a_test_does_nothing(self):
+        wl = self.marks()
+        wl.step('nowhere')
+        self.assertIsNone(wl.step_open)
+
+    def test_the_whole_docstring(self):
+        wl = self.marks()
+
+        async def one(dut):
+            """After reset both FSMs idle with no start
+            and no resend update, data alone.
+
+            The second paragraph
+            says more.
+            """
+        t = self.run_test(wl, one, Dut('TEST_CASE', 'TEST_STEP'))['tests'][0]
+        self.assertEqual(t['doc'], 'After reset both FSMs idle with no start and no resend update, data alone.')
+        self.assertTrue(t['text'].endswith('The second paragraph\nsays more.'), t['text'])
+
+    def test_a_one_line_docstring_needs_no_text(self):
+        wl = self.marks()
+
+        async def one(dut):
+            """One line."""
+        self.assertNotIn('text', self.run_test(wl, one, Dut('TEST_CASE', 'TEST_STEP'))['tests'][0])
+
+    def test_checks_are_counted_with_no_bookmark(self):
+        wl = self.marks()
+
+        async def one(dut):
+            for i in range(188):
+                wl.check(i, i, show='fail')
+            wl.check(1, 2)
+        t = self.run_test(wl, one, Dut('TEST_CASE', 'TEST_STEP'))['tests'][0]
+        self.assertEqual((t['passed'], t['failed'], len(t['marks'])), (188, 1, 1))
+
+    def test_why_is_read_only_on_a_failure(self):
+        wl = self.marks()
+        read = []
+
+        async def one(dut):
+            wl.check(1, 1, 'the frame', why=lambda: read.append(1) or 'never')
+            wl.check(1, 2, 'the frame', why=lambda: read.append(2) or f'word {[][1:] or "none"}')
+        t = self.run_test(wl, one, Dut('TEST_CASE', 'TEST_STEP'))['tests'][0]
+        self.assertEqual(read, [2])
+        self.assertEqual(t['marks'][0]['text'], 'the frame', 'the green one keeps its text')
+        self.assertEqual(t['marks'][1]['text'], 'word none')
+        self.assertEqual(t['message'], 'word none: got 1, expected 2')
+
+    def test_a_why_that_raises_changes_nothing(self):
+        wl = self.marks()
+
+        async def one(dut):
+            wl.check(1, 2, 'the frame', why=lambda: [][3])
+        t = self.run_test(wl, one, Dut('TEST_CASE', 'TEST_STEP'))['tests'][0]
+        self.assertEqual(t['result'], 'fail')
+        self.assertIn('the frame (why: IndexError', t['message'])
+        self.assertIn('got 1, expected 2', t['message'])
+
+    def test_a_long_list(self):
+        wl = self.marks()
+        a, b = list(range(256)), list(range(256))
+        b[17] = 0xFF
+
+        async def one(dut):
+            wl.check(a, b, 'every word')
+        t = self.run_test(wl, one, Dut('TEST_CASE', 'TEST_STEP'))['tests'][0]
+        m = t['marks'][0]
+        self.assertEqual(m['got'], '[0, 1, 2, … 256 items]')
+        self.assertEqual(m['at'], ' (at [17]: 0x11, 0xFF)')
+        self.assertTrue(m['got_all'].startswith('[0, 1, 2, 3, 4'))
+        self.assertEqual(t['message'], 'every word: got [0, 1, 2, … 256 items], expected [0, 1, 2, … 256 items] (at [17]: 0x11, 0xFF)')
+
+    def test_a_long_text_is_cut_a_short_one_is_not(self):
+        self.assertEqual(wc.short_of('abc', 'abc'), 'abc')
+        self.assertEqual(wc.short_of(None, 'x' * 100), 'x' * 39 + '… (100 chars)')
+
+    def test_lists_of_other_lengths(self):
+        self.assertEqual(wc.first_diff([1, 2], [1, 2, 3]), ' (lengths 2, 3)')
+        self.assertEqual(wc.first_diff(1, 2), '')
+
+    def test_the_test_s_own_rows(self):
+        wl = self.marks()
+
+        async def one(dut):
+            pass
+        wl.begin(Dut('TEST_CASE', 'TEST_STEP'), one, ['*fifo_full', ' u_x.state'])
+        self.assertEqual(wl.now_test['signals'], ['*fifo_full', 'u_x.state'])
+        wl.end(None, {})
+        wl.begin(Dut('TEST_CASE', 'TEST_STEP'), one, 'a, b')
+        self.assertEqual(wl.now_test['signals'], ['a', 'b'])
+        wl.end(None, {})
 
     def test_a_phase_in_readonly_fails_nothing(self):   # WL-004: cocotb refuses a write in ReadOnly; a description must not fail a test
         wl = self.marks()
@@ -401,7 +541,7 @@ class WithoutTheLibrary(Harness):
 
     def test_the_same_calls(self):
         Off = self.fallback()
-        real = {n for n in ('test', 'phase', 'note', 'check')}
+        real = {n for n in ('test', 'phase', 'step', 'note', 'check')}
         self.assertEqual({n for n in vars(Off) if not n.startswith('_')}, real)
         public = {n for n in vars(wc.Marks) if n in real or n == 'note'}
         self.assertEqual(public, real, 'a call of the library the fallback has not')
@@ -412,6 +552,22 @@ class WithoutTheLibrary(Harness):
             kw = {n: None for n, p in params.items() if n != 'self' and p.default is not p.empty and n != 'show'}
             getattr(wl, name)(*[1] * len(required), **kw)
         self.assertEqual(wl.check(1, 1, 'text', signal=None, show='fail'), None)
+
+    def test_the_docs_copy_it(self):
+        """The lines the docs give to copy take what the library takes: a copy made from an old one fails on `signals=`."""
+        for name in ('docs/USAGE.md', 'docs/guides/cocotb.html'):
+            with open(os.path.join(H.ROOT, name), encoding='utf-8') as f:
+                text = re.search(r'    class Marks:\n(.*?assert got == expected[^\n<]*)', f.read(), re.S).group(0)
+            cocotb = types.SimpleNamespace(test=lambda *a, **kw: kw)
+            space = {'cocotb': cocotb, 'contextlib': contextlib}
+            exec(textwrap.dedent(text), space)
+            wl = space['Marks']()
+            self.assertEqual(wl.test(timeout_time=5, signals=['x']), {'timeout_time': 5}, name)
+            self.assertEqual(wl.step('s', signals=None), None, name)
+            with wl.phase('p'):
+                wl.note('n', signal=None)
+            with self.assertRaises(AssertionError):
+                wl.check(1, 2, 'text', why=None)
 
     def test_it_runs_a_test(self):
         Off = self.fallback()
@@ -512,6 +668,33 @@ class Merge(unittest.TestCase):
             testmarks.merge({}, DOC)
 
 
+class Report(unittest.TestCase):   # what the marks of a test give the page and the agents
+    DOC = {'signal': 'TEST_CASE', 'tests': [{'n': 1, 'name': 'a', 'doc': 'One line.', 'text': 'One line.\n\nThe rest.', 'from': 0, 'to': 100, 'result': 'pass', 'message': '',
+           'where': '', 'phases': [], 'passed': 188, 'failed': 0, 'signals': ['*fifo_full', 'u_x.state'],
+           'marks': [{'t': 5, 'kind': 'check', 'ok': False, 'got': '[1, 2, 3, … 256 items]', 'expected': '[1, 2, 3, … 256 items]', 'got_all': '[1, 2, 3, 4]',
+                      'expected_all': '[1, 2, 3, 5]', 'at': ' (at [3]: 4, 5)', 'text': 'words'}]}]}
+
+    def test_a_long_value_short_by_its_circle_whole_in_the_list(self):
+        b = testmarks.bookmark(self.DOC['tests'][0]['marks'][0], None)
+        self.assertEqual(b['label'], '✗ [1, 2, 3, … 256 items] ≠ [1, 2, 3, … 256 items]')
+        self.assertEqual(b['text'], 'words: [1, 2, 3, 4], expected [1, 2, 3, 5] (at [3]: 4, 5)')
+
+    def test_the_whole_text_in_the_first_bookmark(self):
+        self.assertIn('starts: One line. The rest.', testmarks.marks_of(self.DOC)[0][0]['text'])
+
+    def test_the_count_under_the_title_and_the_rows_of_the_test(self):
+        cfg = {'signals': ['clk'], 'views': {'run': {'exact': True}}}
+        nav = testmarks.merge(cfg, json.loads(json.dumps(self.DOC)), 'tests')
+        v = cfg['views'][nav[0]['key']]
+        self.assertEqual(v['note'], 'One line. · 188 checks passed')
+        self.assertEqual(v['also'], ['*fifo_full', 'u_x.state'])
+
+    def test_checks_of_a_file_of_before(self):
+        t = {'marks': [{'kind': 'check', 'ok': True}, {'kind': 'check', 'ok': False}, {'kind': 'note'}]}
+        self.assertEqual(testmarks.checks_of(t), (2, 1))
+        self.assertEqual(testmarks.checks_of({'passed': 188, 'failed': 1, 'marks': []}), (189, 1))
+
+
 class ReadOnlyPhase(unittest.TestCase):
     def test_its_span_goes_on_the_step_row(self):   # no value on TEST_STEP says it, and the test's row keeps the test's name
         doc = {'signal': 'TEST_CASE', 'step': 'TEST_STEP', 'steps': {'1': 'a'}, 'tests': [{'n': 1, 'name': 't', 'doc': '', 'from': 0, 'to': 30, 'result': 'pass',
@@ -543,8 +726,8 @@ class Split(unittest.TestCase):
         self.assertEqual({x['t'] for x in b['bookmarks']}, {101, 200, 210, 300})
         self.assertEqual([x['label'] for x in a['spans']], ['TC1 a · PASS', 'on'], 'not the template\'s, of the whole run')
         self.assertNotIn('marker', a)
-        self.assertEqual(a['note'], 'first')
-        self.assertEqual(b['note'], 'got 0, expected 1 (t.py:9)')
+        self.assertEqual(a['note'], 'first · 1 check passed')
+        self.assertEqual(b['note'], 'got 0, expected 1 (t.py:9) · 0 of 1 checks passed')
         self.assertEqual([(e['key'], e['label'], e['word']) for e in nav], [('tc1', 'TC1 a', 'PASS'), ('tc2', 'TC2 b', 'FAIL')])
         self.assertEqual(c['enum']['TEST_CASE'], {'1': 'a', '2': 'b'})
 

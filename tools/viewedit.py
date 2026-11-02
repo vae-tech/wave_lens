@@ -55,11 +55,12 @@ CYC_DEFAULTS = {'cycles': False, 'cycleClock': None, 'cycleZero': None}
 COMMANDS = {
     'cursor': 't', 'cursor2': 't', 'view': 'from? to? at? span?', 'fit': '', 'range': 'from? to? signal?',
     'bookmark': 'n? t? signal? text? label? color? lift? top? link? go? delete?', 'arrow': 'id? from? to? shape? head? line? color? label? delete?',
-    'marker': 'id? t? label? color? signal? lift? delete?', 'span': 'id? from? to? label? color? signals? delete?',
+    'marker': 'id? t? label? color? signal? lift? hidden? delete?', 'deltas': 'on? id? to? signal? lift? color?', 'span': 'id? from? to? label? color? signals? delete?',
     'expr': 'id? text? scope? label? color? on? row? mark? gap? delete?', 'expr_go': 'id? dir? n?', 'expr_matches': 'id? from? to? limit? offset?',
     'group': 'name signals? add? remove? color? rename? delete? go? move?',
     'highlight': 'add? remove? set? clear?', 'paint': 'signals? color? clear?', 'select': 'signal? signals?', 'hide': 'signals', 'show': 'signals?',
     'fold': 'groups? all?', 'unfold': 'groups? all?', 'radix': 'signals radix', 'analog': 'signals rows', 'bits': 'signals on?',
+    'duplicate': 'signals radix? rows? delete?',
     'sort': 'dir ignore?', 'style': 'name',
     'layout': 'scroll? height? tools?', 'find': 'query case? word? regex? highlight? open? mask?', 'gaps': 'on? idle? keep? signals? clock? aux? only? count? view? reset?',
     'cycles': 'on? clock? zero? reset?', 'only': 'modules? on? clear? open?', 'fsm': 'mode? signals? fields? clear?',
@@ -255,10 +256,19 @@ class Model:
     def sigs(self):
         return [r for r in self.rows if r['type'] == 'sig']
 
-    def bit(self, p):
+    def dup_rows(self, state):
+        """look.js setDups: the copies a state keeps ("data#2"), of signals of these waves, as rows."""
+        by, out = {r['full']: r for r in self.sigs()}, []
+        for d in state.get('dups') or []:
+            m = re.fullmatch(r'(.+)#([1-9]\d*)', str(d))
+            if m and int(m[2]) > 1 and m[1] in by:
+                out.append({**by[m[1]], 'full': str(d), 'name': f'{by[m[1]]["name"]} #{m[2]}', 'dup': m[1]})
+        return out
+
+    def bit(self, p, state=None):
         """view.js sigByPath: a bit of a bus by its path ("data[3]"), shown or not; None when it is not one."""
         m = re.fullmatch(r'(.+)\[(0|[1-9]\d*)\]', p) if isinstance(p, str) else None
-        v = m and next((r for r in self.sigs() if r['full'] == m[1] and is_vec(r)), None)
+        v = m and next((r for r in self.sigs() + self.dup_rows(state or {}) if r['full'] == m[1] and is_vec(r)), None)
         if not v or int(m[2]) >= v['width']:
             return None
         return {'type': 'sig', 'name': f'[{m[2]}]', 'full': p, 'anc': v['anc'], 'width': 1, 'kind': None, 'bit': int(m[2])}
@@ -279,7 +289,7 @@ class Model:
         scopes: the modules only."""
         if scopes:
             return self.scopes()
-        out = self.sigs()
+        out = self.sigs() + self.dup_rows(state)
         if groups:
             out = out + self.groups + [{'type': 'group', 'user': True, 'name': g['name'], 'full': '@' + g['name'], 'path': '@' + g['name']}
                                        for g in state.get('groups') or []]
@@ -303,8 +313,8 @@ class Model:
                 if not hit:   # the dump's path of a signal the page shows under a shorter one (wave_page: "tb.aclk" for "aclk")
                     at = [r for r in pool if s.endswith('.' + r['full'])]
                     hit = [r for r in at if len(r['full']) == max(len(x['full']) for x in at)]
-            if not hit and not scopes and self.bit(s):   # a bit of a bus: "data[3]"
-                hit = [self.bit(s)]
+            if not hit and not scopes and self.bit(s, state):   # a bit of a bus: "data[3]"
+                hit = [self.bit(s, state)]
             if not hit:
                 low = s.lower().replace('*', '')
                 near = [r['full'] for r in pool if low and low in r['name'].lower()][:5]
@@ -333,7 +343,7 @@ class Model:
                 got = [r]
             elif r.get('user'):
                 g = next((g for g in state.get('groups') or [] if '@' + g['name'] == r['full']), {'signals': []})
-                by = {s['full']: s for s in self.sigs()}
+                by = {s['full']: s for s in self.sigs() + self.dup_rows(state)}
                 got = [by[f] for f in g['signals'] if f in by] if self.doc else [{'full': f} for f in g['signals']]
             else:
                 got = [s for s in self.sigs() if r['id'] in s['anc']]
@@ -461,7 +471,33 @@ def ar_list(ars):
 
 def mark_list(ms):
     return [{k: v for k, v in (('t', m['t']), ('label', m['label']), ('color', m['color']), ('signal', m['signal']),
-                               ('lift', 'below' if m['signal'] and m['lift'] == 'below' else None)) if v is not None and v != ''} for m in ms]
+                               ('lift', 'below' if m['signal'] and m['lift'] == 'below' else None), ('dsignal', m.get('dsignal')),
+                               ('dlift', 'below' if m.get('dsignal') and m.get('dlift') == 'below' else None), ('dto', m.get('dto')),
+                               ('dcolor', m.get('dcolor')), ('hidden', m.get('hidden') or None)) if v is not None and v != ''} for m in ms]
+
+
+def mark_deltas(ms):
+    """model.js markDeltas -> [(index from, index to)]."""
+    s, out = sorted((i for i, m in enumerate(ms) if not m.get('hidden')), key=lambda i: ms[i]['t']), []
+    for k, i in enumerate(s):
+        d = ms[i].get('dto')
+        if d == 0:
+            continue
+        if d and d - 1 < len(ms) and d - 1 != i:
+            if not ms[d - 1].get('hidden'):
+                out.append((i, d - 1))
+        elif k + 1 < len(s):
+            out.append((i, s[k + 1]))
+    return out
+
+
+def mark_gone(ms, mid):
+    """Marker mid deleted: the numbers after it move (model.js markGone)."""
+    for m in ms:
+        if m.get('dto') == mid:
+            m['dto'] = None
+        elif (m.get('dto') or 0) > mid:
+            m['dto'] -= 1
 
 
 def expr_norm(x):
@@ -497,7 +533,7 @@ def clean_state(state):
             st[k] = [x for x in st[k] if isinstance(x, dict)]
         elif k in st:
             st.pop(k)
-    for k in ('hidden', 'bits', 'exprs'):
+    for k in ('hidden', 'dups', 'bits', 'exprs'):
         if k in st and not isinstance(st[k], list):
             st.pop(k)
     for k in ('config', 'paint', 'radix', 'analog', 'folds'):
@@ -528,7 +564,8 @@ class Editor:
 
     def marks(self):
         return [{'t': parse_t(x.get('t')), 'label': str(x.get('label') or ''), 'color': x.get('color') or None, 'signal': x.get('signal') or None,
-                 'lift': x.get('lift')} for x in self.st.get('markers') or []]
+                 'lift': x.get('lift'), 'dsignal': x.get('dsignal') or None, 'dlift': x.get('dlift'), 'dto': x.get('dto'),
+                 'dcolor': x.get('dcolor') or None, 'hidden': bool(x.get('hidden'))} for x in self.st.get('markers') or []]
 
     def exprs(self):
         """The list of expressions: the state's, else the page's "sva".exprs."""
@@ -799,6 +836,8 @@ class Editor:
             if mid is None:
                 fail('marker: delete takes id or "all"')
             ms = [] if mid == 'all' else ms[:mid - 1] + ms[mid:]
+            if mid != 'all':
+                mark_gone(ms, mid)
             self.st['markers'] = mark_list(ms)
             return {'id': mid, 'deleted': True}
         if mid == 'all':
@@ -825,6 +864,8 @@ class Editor:
             m['signal'] = sig
         if a.get('lift') is not None:
             m['lift'] = a['lift']
+        if a.get('hidden') is not None:
+            m['hidden'] = bool(a['hidden'])
         self.st['markers'] = mark_list(ms)
         return {'id': ms.index(m) + 1}
 
@@ -1144,6 +1185,113 @@ class Editor:
         self.put_map('analog', p)
         return {'signals': len(rows)}
 
+    def c_deltas(self, a):
+        if a.get('on') is not None and not isinstance(a['on'], bool):
+            fail('on: true or false')
+        mid = self.id_ok(a.get('id'), 'marker')
+        if mid == 'all':
+            fail('deltas: id is one marker')
+        if a.get('lift') is not None and a['lift'] not in (True, 'above', 'below'):
+            fail(f'lift: true, "above" or "below", not {json.dumps(a["lift"])}')
+        if ('signal' in a or a.get('lift') is not None or 'to' in a or 'color' in a) and mid is None:
+            fail('deltas: to, signal, lift and color go with id')
+        ms = self.marks()
+        if mid is not None and not mid <= len(ms):
+            fail(f'no marker {a["id"]} (there are {len(ms)})')
+        m = ms[mid - 1] if mid is not None else None
+        to = a.get('to')
+        if to is not None and to != 'next' and not (isinstance(to, int) and not isinstance(to, bool) and 1 <= to <= len(ms)):
+            fail(f'to: a marker as listed (there are {len(ms)}), "next" or null, not {json.dumps(to)}')
+        if to is not None and to == mid:
+            fail('deltas: to is the marker it starts from')
+        if m and 'to' not in a and not any(i == mid - 1 for i, _ in mark_deltas(ms)):
+            fail(f'marker {a["id"]}: no Δ from it (the last in time, hidden, or none set)')
+        sig = self.m.pick(self.st, a['signal'], one=True)[0]['full'] if a.get('signal') else None
+        if a.get('lift') is not None and not (sig if 'signal' in a else m and m['dsignal']):
+            fail('deltas: lift is the lane of a signal: give signal')
+        if a.get('on') is not None:
+            self.st['deltas'] = a['on']
+        if m:
+            if 'signal' in a:
+                m['dsignal'] = sig
+            if a.get('lift') is not None:
+                m['dlift'] = 'below' if a['lift'] == 'below' else None
+            if not m['dsignal']:
+                m['dlift'] = None
+            if 'to' in a:
+                m['dto'] = 0 if to is None else None if to == 'next' else to
+            if 'color' in a:
+                m['dcolor'] = a['color'] or None
+            self.st['markers'] = mark_list(ms)
+        return {'on': bool(self.st.get('deltas')), 'deltas': [{'from': i + 1, 'to': j + 1, 'dt': abs(ms[j]['t'] - ms[i]['t'])} for i, j in mark_deltas(ms)]}
+
+    def c_duplicate(self, a):
+        rx = a.get('radix')
+        if rx is not None and not (rx in RADIX or re.fullmatch(r's?q\d{1,3}', str(rx))):
+            fail(f'radix: one of {" ".join(RADIX)}, q<F> or sq<F> (fixed point), or null')
+        n = 3 if a.get('rows') is True else a.get('rows')
+        if isinstance(n, float) and finite(n) and n.is_integer():   # 2.0: a number as JavaScript has it
+            n = int(n)
+        if n is not None and n is not False and not (isinstance(n, int) and n >= 0):
+            fail('rows: a number of rows, true, false or null')
+        rows = self.m.pick(self.st, a.get('signals'))
+        have = [str(d) for d in self.st.get('dups') or []]
+        of = lambda d: d.rsplit('#', 1)[0]
+        if a.get('delete'):
+            gone = list(dict.fromkeys(x for r in rows for x in ([r['full']] if r.get('dup') else [d for d in have if of(d) == r['full']])))
+            if not gone:
+                fail(f'no copies of {", ".join(r["full"] for r in rows)}')
+            for d in gone:
+                self.dup_drop(d)
+            return {'deleted': gone}
+        bad = [r['full'] for r in rows if r.get('bit') is not None]
+        if bad:
+            fail(f'a bit has no copy: {", ".join(bad)}')
+        flat = [r['full'] for r in rows if (r.get('width') or 1) < 2 and r.get('kind') != 'real']
+        if flat and n:
+            fail(f'not a bus: {", ".join(flat)}')
+        out = []
+        for r in rows:
+            base = r.get('dup') or r['full']
+            d = f'{base}#{max([1] + [int(x.rsplit("#", 1)[1]) for x in have if of(x) == base]) + 1}'
+            have.append(d)
+            out.append(d)
+            for k in ('radix', 'analog', 'paint'):   # as that row looks now
+                m = self.st.get(k)
+                if isinstance(m, dict) and r['full'] in m:
+                    m[d] = m[r['full']]
+        self.st['dups'] = have
+        if rx is not None:
+            self.c_radix({'signals': out, 'radix': rx})
+        if n is not None:
+            self.c_analog({'signals': out, 'rows': n})
+        return {'copies': out}
+
+    def dup_drop(self, d):
+        """look.js dupDrop: a copy gone, and what was its; what stood on it goes to its signal."""
+        base = d.rsplit('#', 1)[0]
+        to = lambda p: base if p == d else base + p[len(d):] if isinstance(p, str) and p.startswith(d + '[') else p
+        self.st['dups'] = [x for x in self.st.get('dups') or [] if x != d]
+        for k in ('radix', 'analog', 'paint'):
+            if isinstance(self.st.get(k), dict):
+                self.st[k].pop(d, None)
+        for k in ('hidden', 'bits'):
+            if k in self.st:
+                self.st[k] = [x for x in self.st[k] if x != d]
+        for g in self.st.get('groups') or []:
+            g['signals'] = [x for x in g.get('signals') or [] if x != d]
+        for b in (self.st.get('bookmarks') or []) + (self.st.get('markers') or []):
+            for k in ('signal', 'dsignal'):
+                if b.get(k):
+                    b[k] = to(b[k])
+        for s in self.st.get('spans') or []:
+            if s.get('signals'):
+                s['signals'] = [to(x) for x in s['signals']]
+        if self.st.get('select'):
+            self.st['select'] = to(self.st['select'])
+        if isinstance(self.st.get('range'), dict) and self.st['range'].get('signal') == d:
+            self.st['range']['signal'] = base
+
     def c_bits(self, a):
         on = a.get('on')
         if on is not None and not isinstance(on, bool):
@@ -1299,6 +1447,8 @@ class Editor:
                     self.config().update(v)
             elif k not in ('wavelens', 'version', 'title'):
                 self.st[k] = v
+        if 'dups' in s and self.m.doc:   # as the viewer keeps them: the copies of signals of these waves
+            self.st['dups'] = [r['full'] for r in self.m.dup_rows(s)]
         if 'bits' in s and self.m.doc:   # as the viewer keeps them: the buses of these waves
             vec = {r['full'] for r in self.m.sigs() if is_vec(r)}
             self.st['bits'] = [p for p in dict.fromkeys(map(str, s['bits'] if isinstance(s['bits'], list) else [])) if p in vec]
@@ -1311,13 +1461,15 @@ class Editor:
         """view.js setState: the paths a state names that these waves do not have."""
         if not self.m.doc:
             return []
-        sigs = {r['full'] for r in self.m.sigs()}
+        sigs = {r['full'] for r in self.m.sigs() + self.m.dup_rows(self.st)}
         paths, out = sigs | {g['path'] for g in self.m.groups}, []
         c = s['config'] if isinstance(s.get('config'), dict) else {}
         lst = lambda x: x if isinstance(x, list) else []
         def see(p, pool=paths):
-            if isinstance(p, str) and p and not p.startswith('@') and p not in pool and p not in out and not (pool is paths and self.m.bit(p)):
+            if isinstance(p, str) and p and not p.startswith('@') and p not in pool and p not in out and not (pool is paths and self.m.bit(p, self.st)):
                 out.append(p)
+        for p in lst(s.get('dups')):
+            see(p, {r['full'] for r in self.m.dup_rows(self.st)})
         for g in lst(s.get('groups')):
             for p in lst(g.get('signals')) if isinstance(g, dict) else []:
                 see(p, sigs)
@@ -1342,7 +1494,7 @@ class Editor:
 
     def user_rows(self):
         """Your groups as the viewer shows them (edit.js ugRows): a header "@name", then its signals."""
-        by, out = {r['full']: r for r in self.m.sigs()}, []
+        by, out = {r['full']: r for r in self.m.sigs() + self.m.dup_rows(self.st)}, []
         for i, g in enumerate(self.groups()):
             gid = -1 - i
             out.append({'type': 'group', 'user': True, 'id': gid, 'name': g['name'], 'full': '@' + g['name'], 'path': '@' + g['name'], 'anc': []})
@@ -1353,7 +1505,12 @@ class Editor:
         """view.js allRows: your groups at the top, then the rows in the order of "sort"; hidden rows and what is under a
         hidden module left out, then (only) the rows Only leaves out."""
         sort, ign = self.opt('sort', 'none'), sorted(prefixes(self.opt('sortIgnore')), key=lambda p: -len(p))
-        rows = self.user_rows() + order_rows(self.m.rows, sort, ign, self.m.cfg.get('groupOrder', 'file'))
+        rows = order_rows(self.m.rows, sort, ign, self.m.cfg.get('groupOrder', 'file'))
+        copies = self.m.dup_rows(self.st)
+        if copies:   # (look.js withDups) under their signal, in their order
+            copies.sort(key=lambda d: int(d['full'].rsplit('#', 1)[1]))
+            rows = [x for r in rows for x in [r] + (([d for d in copies if d['dup'] == r['full']]) if r['type'] == 'sig' else [])]
+        rows = self.user_rows() + rows
         h = set(self.st.get('hidden') or [])
         ids = {g['id'] for g in self.m.groups if g['path'] in h}
         out = [r for r in rows if not (r['type'] != 'space' and r.get('full') and not r.get('ug') and r['full'] in h) and not ids & set(r['anc'])]
@@ -1417,7 +1574,7 @@ class Editor:
         mark = lambda r: (['≠'] if ((sigs.get(r.get('path') or r['full']) or {}).get('spans')) else
                           ['missing'] if (r.get('path') or r['full']) in miss else []) if r['type'] == 'sig' else []
         rows = [[r['full'], 'group' if r.get('user') else 'module' if r['type'] == 'group' else r['width'], *mark(r)]
-                for r in shown + [r for r in self.m.rows if r.get('full') and r['full'] in h]]
+                for r in shown + [r for r in self.m.rows + self.m.dup_rows(self.st) if r.get('full') and r['full'] in h]]
         rows = [r for r in rows if not pat or (rx.match(r[0]) if rx else pat.lower() in r[0].lower())]
         off, n = max(0, int(a.get('offset') or 0)), max(1, int(a.get('limit') or 200))
         out = {'total': len(rows), 'rows': rows[off:off + n]}

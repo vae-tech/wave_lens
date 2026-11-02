@@ -180,7 +180,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.38',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.39',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,
@@ -197,6 +197,6 @@ G.WaveLens = { version: '0.38',   // the project's version: VERSION (make check 
     idleCuts, keepCuts, gapKeeps, gapLen, gapText, gapRefs, warpOf, warpV, warpT, warpFit, clipCuts, fmtFreq, gfmt, toFloat, fieldRow, bitRows, widthTag,
     stripPfx, trimNum,
     peek: v => ({ get lay() { return v.lay; }, get oy() { return v.oy; }, get vis() { return v.vis; }, get collapsed() { return v.collapsed; },
-      get rowEls() { return v.rowEls; }, get namesEl() { return v.namesEl; } }) } };
+      get bmGeo() { return v.bmGeo; }, get rowEls() { return v.rowEls; }, get namesEl() { return v.namesEl; } }) } };
 G.WaveView = WaveView; G.WaveSVG = WaveSVG;
 })(window);

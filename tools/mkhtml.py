@@ -12,7 +12,7 @@
 Lint (printed at every build, "mkhtml: lint: <code>: <JSON path>: <text>"; docs/USAGE.md "Lint"): bookmark-bad, arrow-bad, bookmark-outside-view,
 bookmark-signal-missing, bookmark-duplicate, bookmark-time, bookmark-key, bookmark-link-missing, arrow-end-missing, arrow-key, marker-no-match,
 marker-key, bind-unknown, svashow-no-match, bookmarks-close (a heuristic), enum-colors-hex, span-outside-view,
-span-signal-missing, span-key, span-every-no-match, compare-spans-cut, expr-name-missing, exprs-no-engine, gap-view-off, setting-signal-missing. A marker or a span "every" on a signal the dump has not got
+span-signal-missing, span-key, span-every-no-match, compare-spans-cut, expr-name-missing, exprs-no-engine, gap-view-off, setting-signal-missing, also-no-match, also-cut. A marker or a span "every" on a signal the dump has not got
 is no warning: the build stops there, as for any name of the config (marker-no-match: the signal is there, the event never happens).
 
 Config keys used here (the rest is vcd2wavedrom.py's, see its --help):

@@ -234,12 +234,12 @@ Object.assign(WaveView.prototype, {
   cmpOf(r) {
     if (!this.cmp) return null;
     const k = r.sig || r.orig || r;
-    return k.bit != null ? this.cmpBit(k) : this.cmp.rows.get(k);
+    return k.bit != null ? this.cmpBit(k) : this.cmp.rows.get(k.dupOf || k);
   },
   // a bit of a bus: its own stretches and B's bit, the changes of the bits of a bus read once for all of them; without B's
   // values, a row of another width: the bus's
   cmpBit(r) {
-    const c = this.cmp, x = c.rows.get(r.of); if (!x) return null;
+    const c = this.cmp, x = c.rows.get(r.of.dupOf || r.of); if (!x) return null;
     if (this.cmpCan()) this.cmpLoad();
     if (!x.row) return x;
     const w = r.of.width || 1, j = w - 1 - r.bit, tr = x.atr || r.of.tr, memo = c.bits || (c.bits = new WeakMap());
@@ -250,7 +250,7 @@ Object.assign(WaveView.prototype, {
   },
   // the rows' marks in the names (≠ differs, struck: not in B; your groups' rows and the bits of a bus too) and their tooltips
   cmpMarks() {
-    const all = [...this.M.rows, ...Object.values(this.M.groups), ...this.ugRows()], bits = new Set(this.cmpBits);
+    const all = [...this.sigPool(), ...Object.values(this.M.groups), ...this.ugRows()], bits = new Set(this.cmpBits);
     if (this.bitsOpen.size) {
       for (const r of all) if (r.type === 'sig' && this.bitsOpen.has((r.orig || r).full) && isVec(r)) for (const k of this.bitsOf(r)) bits.add(k);
     }
@@ -319,6 +319,7 @@ Object.assign(WaveView.prototype, {
       if (on) { x.atr = a.tr; a.tr = x.row ? x.row.tr : []; } else a.tr = x.atr;
       a.an = null; RISES.delete(a); got.add(a);
       for (const k of this.bitMemo.get(a) || []) RISES.delete(k);   // its bits follow its changes
+      for (const d of this.dupsBy.get(a) || []) { RISES.delete(d); for (const k of this.bitMemo.get(d) || []) RISES.delete(k); }
     }
     rowsMade(this.M, got);
     this.clkMemo = null; this.cycMemo = null; this.fsmSt = null; this.rangeKey = null; this.valsAt = null;

@@ -18,11 +18,14 @@ except ImportError:
         def __init__(self, *args, **kw):
             pass
 
-        def test(self, *args, **kw):
+        def test(self, *args, signals=None, **kw):
             return cocotb.test(*args, **kw)
 
         def phase(self, *args, **kw):
             return contextlib.nullcontext()
+
+        def step(self, *args, **kw):
+            pass
 
         def note(self, *args, **kw):
             pass
@@ -101,7 +104,7 @@ async def test_write_read(dut):
         wl.check(got, ID_VALUE, 'ID is unchanged', signal=dut.PRDATA)
 
 
-@wl.test()
+@wl.test(signals=['u_slave.waited'])
 async def test_wait_states(dut):
     """A read of DATA is stretched by two wait states, its write is not."""
     await start(dut)
@@ -119,10 +122,11 @@ async def test_slave_error(dut):
     """An unmapped address ends with PSLVERR and changes nothing."""
     await start(dut)
     await write(dut, CTRL, 0x55)
-    with wl.phase('unmapped'):
-        dut._log.warning('address %#x is not mapped: PSLVERR comes next', UNMAPPED)
-        _, err, _ = await write(dut, UNMAPPED, 0xFFFFFFFF)
-        wl.check(err, 1, 'PSLVERR on the unmapped write', signal=dut.PSLVERR)
+    wl.step('unmapped')
+    dut._log.warning('address %#x is not mapped: PSLVERR comes next', UNMAPPED)
+    _, err, _ = await write(dut, UNMAPPED, 0xFFFFFFFF)
+    wl.check(err, 1, 'PSLVERR on the unmapped write', signal=dut.PSLVERR)
+    wl.step('read back')
     got, _, _ = await read(dut, CTRL)
     wl.check(got, 0x55, 'CTRL is untouched', signal=dut.PRDATA)
 

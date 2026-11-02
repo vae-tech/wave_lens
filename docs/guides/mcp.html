@@ -69,7 +69,7 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
   <tr><td><code>wave_page</code></td><td>a viewer page (<code>.html</code>) or WaveJSON (<code>.json</code>) of signals over a window, with
     assertions bound, to show a person; <code>compare</code>: a second dump's differences on it (<a href="compare.html">Compare</a>); <code>marks</code>,
     <code>marks_views</code>: the tests of a cocotb run on it (<a href="cocotb.html">cocotb tests</a>)</td></tr>
-  <tr><td><code>wave_tests</code></td><td>the tests of a cocotb run from its marks file: which failed, their windows, what they expected; <code>test</code>: one, with its
+  <tr><td><code>wave_tests</code></td><td>the tests of a cocotb run from its marks file (<code>checks</code>: all that ran, in a loop too): which failed, their windows, what they expected; <code>test</code>: one, with its
     phases and marks (<a href="cocotb.html#agents">cocotb tests</a>)</td></tr>
   <tr><td><code>wave_to_fst</code></td><td>the VCD as an FST beside it (<code>sva fst</code>; <code>out</code>: another file), the FSM states of its types file in it
     (<code>types</code>, <code>no_types</code>): what was written, the notes with their lines</td></tr>
@@ -322,7 +322,7 @@ make mcp-bench AGENT=codex TASKS=a1,b3                 <span class="c"># some ta
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.38 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.39 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

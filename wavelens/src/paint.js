@@ -104,8 +104,8 @@ function analogValue(s, o, radix) {
 // x / z as a gap with an x mark; its range at the left
 function paintAnalog(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk) {
   const a = s.tr, S = P.S, r = s.radix || S.radix || 'auto';
-  if (!s.an || s.an.r !== r) { let lo = Infinity, hi = -Infinity; for (const o of a) { const v = analogValue(s, o, S.radix);
-    if (isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); } } s.an = { r, lo, hi }; }
+  if (!s.an || s.an.r !== r || s.an.tr !== a) { let lo = Infinity, hi = -Infinity; for (const o of a) { const v = analogValue(s, o, S.radix);
+    if (isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); } } s.an = { r, lo, hi, tr: a }; }
   const { lo, hi } = s.an, yh = y + 6, yl = y + h - 6, span = hi > lo ? hi - lo : 1, Y = v => (hi > lo ? yl - (v - lo) / span * (yl - yh) : (yh + yl) / 2);
   const cl = x => Math.min(Math.max(x, xL - 8), xR + 8), col = sk || 'bus', line = [], fill = [];
   let pv = null;
@@ -388,7 +388,7 @@ function paintTimeMarks(P, marks, X, tA, tB, y0, y1, px) {
 function paintMarkers(P, markers, X, tA, tB, y0, y1, lanes) {
   const tags = [];
   markers.forEach((m, i) => {
-    if (m.t < tA || m.t > tB) return;
+    if (m.t < tA || m.t > tB || m.hidden) return;
     const x = X(m.t), c = m.color || 'muted', ly = m.signal && lanes ? lanes.get(laneId(m)) : null, y = ly ?? y0 + 8;
     const w = m.label ? P.measure(m.label, { size: 10 }) + 4 : 7;
     P.path([['M', x, y0], ['L', x, y1]], { stroke: c, w: m.color ? 1.2 : 1, dash: [3, 3] });
@@ -396,6 +396,36 @@ function paintMarkers(P, markers, X, tA, tB, y0, y1, lanes) {
     else if (ly != null) P.path(circle(x, y, 3), { fill: c });   // no text yet: a dot to find it by
     tags.push({ i, x, y, w });
   });
+  return tags;
+}
+
+// the arrows over the rows that cross in time take lines of their own, "d:top", "d:top:1" …: the left ends in order, each on the first
+// line free there (arrows that only touch at a marker share one)
+const dTop = k => (k ? 'd:top:' + k : 'd:top');
+function deltaLevels(ds) {
+  const lo = d => Math.min(d.a.t, d.b.t), ends = [];
+  return ds.slice().sort((p, q) => lo(p) - lo(q)).map(d => { if (d.a.dsignal || !(d.dt > 0)) return d;
+    const k = ends.findIndex(e => e <= lo(d)), level = k < 0 ? ends.length : k; ends[level] = Math.max(d.a.t, d.b.t); return { ...d, level }; });
+}
+// the Δ between markers: a horizontal arrow from one to the other, the time in its middle, on a line "d:top…" over the rows or in the
+// lane of a signal (an end out of the window: no head there); grip: a dot on the end that can be dragged to another marker.
+// -> [{m, x0, x1, y, e}]: where each is, for the hit tests (e: x of that end)
+function paintDeltas(P, ds, X, tA, tB, lanes, y0, text, grip = false) {
+  const tags = [];
+  for (const d of ds) {
+    const lo = Math.min(d.a.t, d.b.t), hi = Math.max(d.a.t, d.b.t), c = d.a.dcolor || 'acc';
+    if (!(d.dt > 0) || hi < tA || lo > tB) continue;
+    const head = (x, y, s) => P.path([['M', x, y], ['L', x + s * 6, y - 3], ['L', x + s * 6, y + 3], ['Z']], { fill: c });
+    const sig = d.a.dsignal, ly = lanes.get(sig ? laneId({ signal: sig, lift: d.a.dlift || true }) : dTop(d.level)), y = ly ?? lanes.get('d:top') ?? y0 + 8;
+    const p = X(Math.max(lo, tA)), q = X(Math.min(hi, tB)), label = text(d.dt), w = P.measure(label, { size: 10 }) + 8, xm = (p + q) / 2;
+    const e = d.b.t >= tA && d.b.t <= tB ? X(d.b.t) : null;
+    P.path([['M', p, y], ['L', q, y]], { stroke: c, w: 1 });
+    if (lo >= tA) head(p, y, 1);
+    if (hi <= tB) head(q, y, -1);
+    if (grip && e != null) P.path(circle(e, y, 3), { fill: c, stroke: 'panel', w: 1 });
+    P.rect(xm - w / 2, y - 6, w, 12, 'panel'); P.text(xm, y, label, { size: 10, fill: c, anchor: 'middle' });
+    tags.push({ m: d.a, x0: Math.min(p, xm - w / 2), x1: Math.max(q, xm + w / 2), y, e });
+  }
   return tags;
 }
 
@@ -420,7 +450,12 @@ function arrowLanes(rows, bms, arrows, marks = []) {
     lanes.get(at).push(i);
   });
   for (const b of [...bms, ...marks]) {   // "below": the lane under its row ("b:" + path + ":below"), the nearest to it
-    const r = b.lift ? rowAt(b) : -1, below = b.lift === 'below', id = laneId(b), at = below ? r : r - 1; if (r < 0) continue;
+    const r = b.lift ? rowAt(b) : -1, below = b.lift === 'below', id = laneId(b), at = below ? r : r - 1;
+    if (r < 0 && b.delta) {   // over the rows
+      if (!lanes.has(-1)) lanes.set(-1, []);
+      if (!lanes.get(-1).includes(dTop(b.level))) lanes.get(-1).push(dTop(b.level));
+    }
+    if (r < 0) continue;
     if (!lanes.has(at)) lanes.set(at, []);
     const l = lanes.get(at); if (!l.includes(id)) { if (below) l.unshift(id); else l.push(id); }
   }
@@ -461,7 +496,7 @@ function layoutRows(rows, rh, laneH, y = 0) {
 // the bookmarks and arrows as far as the lanes depend on them: the lanes are worked out again only when this changes
 const laneKey = (bms, arrows, marks) => JSON.stringify([(bms || []).map(b => [b.n, b.signal, b.lift || false]),
   (arrows || []).map(a => [a.from, a.to, !!a.label]),
-  (marks || []).map(m => [m.signal || null, m.lift || false])]);
+  (marks || []).map(m => [m.signal || null, m.lift || false, m.delta ? 1 + (m.level || 0) : 0])]);
 const laneY = (lay, h) => { const m = new Map(); for (const o of lay) if (o.row.type === 'lane') o.row.ids.forEach((a, k) => m.set(a, o.y + h * k + h / 2));
   return m; };
 // an arrow's label with its placeholders filled at the times of its ends: {dt} the time between them (cycles, "3T", in
