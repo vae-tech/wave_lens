@@ -6,7 +6,7 @@ from . import helpers as H
 
 sys.path.insert(0, os.path.join(H.ROOT, 'python'))
 sys.path.insert(0, H.TOOLS)
-import testmarks  # noqa: E402
+import common, testmarks, vcd2wavedrom  # noqa: E402
 import wavelens_cocotb as wc  # noqa: E402
 
 
@@ -194,6 +194,45 @@ class Library(Harness):
         self.assertEqual(t['marks'][0], {'t': 200, 'kind': 'note', 'text': 'here', 'signal': 'u_x.sig', 'label': 'l'}, 'a handle: its path under the top')
         self.assertEqual(t['marks'][1]['got'], '5')
         self.assertEqual([p['step'] for p in t['phases']], [2, 1, 1])
+
+    def test_measure(self):
+        """Stage 17: wl.measure as a context and by start / stop: the pairs in the test, their bound checked when it is a time."""
+        wl = self.marks()
+
+        async def one(dut):
+            self.t = 100
+            async with wl.measure('req→ack', max='30ns', signal='PREADY'):
+                self.t = 120
+            m = wl.measure('beat', min=50000)
+            for a, b in ((200, 300), (400, 410)):
+                self.t = a; m.start(); self.t = b; m.stop()
+            with wl.measure('in cycles', max='3 cycles'):
+                self.t = 500
+            with wl.measure('plain'):
+                self.t = 600
+            wl.measure('left open').start()
+            self.t = 700
+        t = self.run_test(wl, one)['tests'][0]
+        self.assertEqual([(m['label'], m['from'], m['to'], m.get('ok')) for m in t['measures']],
+                         [('req→ack', 100, 120, True), ('beat 1', 200, 300, False), ('beat 2', 400, 410, False), ('in cycles', 410, 500, None),
+                          ('plain', 500, 600, None), ('left open', 600, None, None)])
+        self.assertEqual((t['measures'][0]['max'], t['measures'][0]['signal'], t['measures'][1]['min']), ('30ns', 'PREADY', 50000))
+        self.assertEqual(t['result'], 'pass', 'a measure out of its bound fails nothing by itself')
+        self.assertEqual((t['passed'], t['failed']), (0, 0))
+
+    def test_measure_check_and_misuse(self):
+        wl = self.marks()
+
+        async def one(dut):
+            with wl.measure('slow', max='10ps', check=True):
+                self.t = 50
+        t = self.run_test(wl, one)['tests'][0]
+        self.assertEqual((t['result'], t['failed'], t['measures'][0]['ok']), ('fail', 1, False))
+        self.assertIn('slow: 0.05 ns, outside', t['message'])
+        with self.assertRaisesRegex(RuntimeError, 'stop\\(\\) without start'):
+            wl.measure('x').stop()
+        with self.assertRaisesRegex(ValueError, 'no bound'):
+            wl.measure('x', max='soon')
 
     def test_a_label_that_is_no_text(self):
         """B-19 of the review of 2026-11-03: a label or colour that is no JSON text does not take the test's verdict."""
@@ -567,7 +606,7 @@ class WithoutTheLibrary(Harness):
 
     def test_the_same_calls(self):
         Off = self.fallback()
-        real = {n for n in ('test', 'phase', 'step', 'note', 'check')}
+        real = {n for n in ('test', 'phase', 'step', 'note', 'check', 'measure')}
         self.assertEqual({n for n in vars(Off) if not n.startswith('_')}, real)
         public = {n for n in vars(wc.Marks) if n in real or n == 'note'}
         self.assertEqual(public, real, 'a call of the library the fallback has not')
@@ -592,6 +631,8 @@ class WithoutTheLibrary(Harness):
             self.assertEqual(wl.step('s', signals=None), None, name)
             with wl.phase('p'):
                 wl.note('n', signal=None)
+            with wl.measure('m', max='3 cycles', signal=None, check=True) as m:
+                m.stop()
             with self.assertRaises(AssertionError):
                 wl.check(1, 2, 'text', why=None)
 
@@ -740,6 +781,28 @@ class Split(unittest.TestCase):
         self.assertEqual(testmarks.merge(c, DOC), [])
         self.assertEqual(list(c['views']), ['v'])
 
+    def test_measures_into_the_views(self):
+        """Stage 17: a test's measurements -> the view's "measures" (vcd2wavedrom: the WaveJSON's) in the test's colour, on its row; the
+        summary and the test's view say them; its steps by length."""
+        doc = json.loads(json.dumps(DOC))
+        doc['tests'][0]['measures'] = [{'label': 'r', 'from': 10, 'to': 40, 'max': '20ps', 'ok': False}, {'label': 'q', 'from': 50, 'to': 60, 'signal': 'PSEL'}]
+        c = self.cfg()
+        testmarks.merge(c, doc)
+        self.assertEqual(c['views']['v']['measures'], [{'label': 'r', 'from': 10, 'to': 40, 'color': '#2f9e44', 'max': '20ps', 'signal': 'TEST_CASE'},
+                                                      {'label': 'q', 'from': 50, 'to': 60, 'color': '#2f9e44', 'signal': 'PSEL'}])
+        self.assertIn('2 measures, 1 out of bounds', testmarks.summary(doc))
+        c = self.cfg()
+        testmarks.merge(c, doc, 'tests')
+        self.assertIn('2 measures, 1 out of bounds', c['views']['tc1']['note'])
+        self.assertEqual(c['views']['tc2']['measures'], c['views']['tc1']['measures'], 'stage 24: every view of the tests has them all (shared markers)')
+        self.assertIs(c.get('config', {}).get('sharedMarkers'), None, 'testmarks leaves the setting to mkhtml.py')
+        self.assertEqual([p['label'] for p in testmarks.steps({'phases': [{'label': 'a', 'from': 0, 'to': 5}, {'label': 'b', 'from': 5, 'to': 30}]})], ['b', 'a'])
+        a = vcd2wavedrom.parser().parse_args(['--measures', json.dumps([{'label': 'r', 'from': '10ns', 'to': 40000}])])
+        self.assertEqual(vcd2wavedrom.measures_of(a), [{'label': 'r', 'from': 10000, 'to': 40000}])
+        a = vcd2wavedrom.parser().parse_args(['--measures', '[{"from": "soon"}]'])
+        with self.assertRaisesRegex(common.WaveError, 'measures\\[0\\]'):
+            vcd2wavedrom.measures_of(a)
+
     def test_a_view_of_each_test(self):
         c = self.cfg()
         nav = testmarks.merge(c, DOC, 'tests')
@@ -752,7 +815,7 @@ class Split(unittest.TestCase):
         self.assertEqual({x['t'] for x in b['bookmarks']}, {101, 200, 210, 300})
         self.assertEqual([x['label'] for x in a['spans']], ['TC1 a · PASS', 'on'], 'not the template\'s, of the whole run')
         self.assertNotIn('marker', a)
-        self.assertEqual(a['note'], 'first · 1 check passed')
+        self.assertEqual(a['note'], 'first · 1 check passed · 2 steps, longest reset 10 ps')
         self.assertEqual(b['note'], 'got 0, expected 1 (t.py:9) · 0 of 1 checks passed')
         self.assertEqual([(e['key'], e['label'], e['word']) for e in nav], [('tc1', 'TC1 a', 'PASS'), ('tc2', 'TC2 b', 'FAIL')])
         self.assertEqual(c['enum']['TEST_CASE'], {'1': 'a', '2': 'b'})

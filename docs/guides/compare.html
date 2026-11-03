@@ -123,11 +123,16 @@ B: apb_b.vcd  0 ps … 205 ns, 58 signals
   <li>To look at one case on a page: cut it out, <code>sva vcd b.vcd --from 4783.174us --to 7426.132us --signals 'tb.if_x.*'
     --out case4.vcd</code>, and give that to <span class="ui">Compare…</span>.</li>
 </ul>
+<p><b>Who differed first.</b> <code>sva diff A B --rank</code> lists the signals by their first difference: <code>first to differ: tb.c at 10 ns;
+  then tb.a (+8 ns), tb.b (+20 ns)</code> — the order in time only, no cause. Compare… on a page says it in its toast.</p>
+<p><b>The assertions of two runs.</b> <code>sva diff --results a.json b.json</code> compares the results of <code>sva eval --json</code> of two runs:
+  per assertion its failures that are <b>new</b> in B, <b>gone</b>, or <b>moved</b> to another cycle (paired by the start of the attempt), as a table,
+  JSON or JUnit; exit 1 when one is. For CI: the regression that fails somewhere else, the check that stopped failing.</p>
 <p>All the options: <a href="../USAGE.md">USAGE.md</a> § Compare two runs from the shell.</p>
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.40 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.41 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

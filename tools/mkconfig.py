@@ -43,7 +43,7 @@ import argparse, hashlib, json, os, re, sys
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)   # -I drops the script dir from sys.path
-import dumpscan, svabuild, svtypes, vcd2wavedrom  # noqa: E402
+import dumpscan, gtkw, svabuild, svtypes, vcd2wavedrom  # noqa: E402
 from common import SELECT_KEYS, WaveError, add_sva_bin_arg, check_config, glob_re, run_main  # noqa: E402
 
 ROOT = os.path.dirname(HERE)
@@ -536,7 +536,11 @@ def apply_sv(files, sigs):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('waves', help='VCD or FST dump')
+    ap.add_argument('waves', nargs='?', help='VCD or FST dump (with --gtkw: default the save file\'s [dumpfile])')
+    ap.add_argument('--gtkw', metavar='FILE', help='a GTKWave save file: a view of it in the config (its signals in order, groups, radix, colours, '
+                    'analog, the start of its window, its markers; tools/gtkw.py); a trace not in the dump is said and left out')
+    ap.add_argument('--view', metavar='NAME', default='gtkw', help='with --gtkw: the name of its view (default gtkw)')
+    ap.add_argument('--strict', action='store_true', help='with --gtkw: a trace not in the dump is an error')
     ap.add_argument('--base', help='base settings (default: tools/base.config.json, if present)')
     ap.add_argument('--out', help='config file to write (default: <dump>.config.json next to the dump)')
     ap.add_argument('--update', action='store_true', help='the output exists: sync its signals with the dump, keep all edits')
@@ -552,6 +556,19 @@ def main():
     ap.add_argument('--sva', nargs='+', action='extend', metavar='FILE', help='SystemVerilog assertion files: "sva" and a "bind" line per instance that has every signal of an assertion')
     add_sva_bin_arg(ap)
     a = ap.parse_args()
+    g = None
+    if a.gtkw:
+        try:
+            with open(a.gtkw, encoding='utf-8', errors='replace') as f:
+                g = gtkw.parse(f.read())
+        except OSError as e:
+            die(f'cannot read {a.gtkw}: {e.strerror}')
+        if not a.waves:
+            if not g['waves']:
+                die(f'{a.gtkw} names no [dumpfile]: give the dump')
+            a.waves = g['waves'] if os.path.isabs(g['waves']) else os.path.join(os.path.dirname(os.path.abspath(a.gtkw)), g['waves'])
+    if not a.waves:
+        ap.error('the dump (or --gtkw with its [dumpfile])')
     if not os.path.exists(a.waves):
         die(f'no such dump: {a.waves}')
     out = a.out or re.sub(r'\.(vcd|fst|fsdb)$', '', a.waves, flags=re.I) + '.config.json'
@@ -630,6 +647,18 @@ def main():
             cfg['bind'], n = got
             print(f'mkconfig: --sva: {n["assertions"]} assertions: {n["only"]} bound to their only instance, {n["chosen"]} chosen among several, '
                   f'{n["open"]} with several candidates to choose ("show": false), {n["none"]} without an instance', file=sys.stderr)
+    if g is not None:   # the save file's view: rewritten from it (--update keeps the rest)
+        view, notes = gtkw.view_of(g, a.decl.unit_ps or 1, set(cat))
+        for path, alias in gtkw.aliases_of(g).items():   # +{name} path: the row's name, as GTKWave showed it
+            if isinstance(cat.get(path), dict):
+                cat[path]['alias'] = alias
+        for n in notes:
+            print(f'mkconfig: --gtkw: {n}', file=sys.stderr)
+        if a.strict and any(n.endswith('not in the dump, left out') for n in notes):
+            die('--strict: a trace of the save file is not in the dump')
+        cfg['views'] = {**(cfg.get('views') or {}), a.view: view}
+        print(f'mkconfig: --gtkw: view "{a.view}": {len(view["signals"].split(",")) if view["signals"] else 0} signals'
+              + (f', {len(view.get("state", {}).get("groups", []))} groups' if view.get('state', {}).get('groups') else ''), file=sys.stderr)
     with open(out, 'w', encoding='utf-8') as f:
         f.write(dumps(cfg))
     shown = [e for e in cat.values() if e.get('show')]

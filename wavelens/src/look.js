@@ -7,11 +7,13 @@ Object.assign(WaveView.prototype, {
     this.hiddenRows = new Set(Array.isArray(o.hidden) ? o.hidden : []); this.ugroups = groupNorm(o.groups);
     this.bitsOpen = new Set(Array.isArray(o.bits) ? o.bits.map(String) : []);
     if (Array.isArray(o.dups)) this.setDups(o.dups);
-    this.deltas = !!o.deltas;
+    this.deltas = o.deltas !== undefined ? !!o.deltas : (this.M.measures || []).length > 0;   // a page with measurements: their Δ shown
     for (const [p, n] of Object.entries(o.analog || {})) { const r = this.sigPool().find(x => x.type === 'sig' && x.full === p);
-      if (r) { if (!('analog0' in r)) r.analog0 = r.analog; r.analog = n || false; this.analogs.set(p, n); } }
+      if (r) { if (!('analog0' in r)) r.analog0 = r.analog; r.analog = n || false; this.analogs.set(p, n); }
+      else if (p.startsWith('ƒ ')) this.analogs.set(p, n); }
     for (const [p, rx] of Object.entries(o.radix || {})) { const r = this.sigPool().find(x => x.type === 'sig' && x.full === p);
-      if (r && isRadix(rx)) { r.radix0 = r.radix; r.radix = rx; if (r.dupOf) r.enum = undefined; this.radixes.set(p, rx); } }
+      if (r && isRadix(rx)) { r.radix0 = r.radix; r.radix = rx; if (r.dupOf) r.enum = undefined; this.radixes.set(p, rx); }
+      else if (!r && p.startsWith('ƒ ') && isRadix(rx)) this.radixes.set(p, rx); }   // an expression's row (sva.js): it takes it when it is made
   },
   // Duplicate: the rows of the model and the copies: where a name, a highlight or a run of selected rows is looked for
   sigPool() { return this.dups.size ? [...this.M.rows, ...this.dups.values()] : this.M.rows; },
@@ -31,6 +33,23 @@ Object.assign(WaveView.prototype, {
     const g = r.ug && this.ugroups.find(x => x.name === r.ug.name);
     if (g) g.signals.splice(g.signals.indexOf(from.full) + 1, 0, d.full);
     return d;
+  },
+  // a slice [msb:lsb] of a bus (a signal, a copy's, its row in your group) as a row of its own under it; the one there is again -> the row,
+  // or why not
+  // why bits [msb:lsb] of row r make no slice (a text), or null: they do
+  sliceWhy(r, msb, lsb) {
+    const o = r.orig || r, base = rowBase(r);
+    if (o.slice) return 'slice the bus, not a slice';
+    if (!isVec(base) || base.bit != null || base.same) return 'not a bus';
+    if (!(msb >= lsb && msb < base.width)) return `[${msb}:${lsb}] is not in its ${base.width} bits (msb first, lsb 0)`;
+    return null;
+  },
+  dupSlice(r, msb, lsb) {
+    const why = this.sliceWhy(r, msb, lsb); if (why) return why;
+    const base = rowBase(r), id = `${base.full}[${msb}:${lsb}]`; if (this.dups.has(id)) return this.dups.get(id);
+    const d = sliceRow(base, msb, lsb), list = this.dupsBy.get(base) || [];
+    this.dupsBy.set(base, [...list, d].sort((a, b) => a.dupN - b.dupN || (b.slice ? b.slice[0] : 0) - (a.slice ? a.slice[0] : 0)));
+    this.dups.set(d.full, d); this.rowsStale = true; this.ugMemo = null; return d;
   },
   // a copy gone, and what was its: its colour, its radix; a bookmark on it goes to its signal
   dupDrop(d) {
@@ -54,13 +73,16 @@ Object.assign(WaveView.prototype, {
     const want = (Array.isArray(ids) ? ids : []).map(String), bad = [];
     for (const d of [...this.dups.values()]) if (!want.includes(d.full)) this.dupDrop(d);
     for (const id of want) {
+      const sl = !this.dups.has(id) && sliceId(id), sb = sl && this.M.rows.find(r => r.type === 'sig' && r.tr && r.full === sl.of);
+      if (sl) { if (!(sb && typeof this.dupSlice(sb, sl.msb, sl.lsb) === 'object')) bad.push(id); continue; }
       const p = dupId(id), base = p && !this.dups.has(id) && this.M.rows.find(r => r.type === 'sig' && r.tr && r.full === p.of);
       if (base) this.dupPut(base, p.n); else if (!this.dups.has(id)) bad.push(id); }
     return bad;
   },
   saveRows() {
     try {
-      if (this.radixes.size || this.hiddenRows.size || this.analogs.size || this.ugroups.length || this.bitsOpen.size || this.dups.size || this.deltas) {
+      if (this.radixes.size || this.hiddenRows.size || this.analogs.size || this.ugroups.length || this.bitsOpen.size || this.dups.size || this.deltas ||
+        (this.M.measures || []).length) {   // (the Δ off on a page with measurements: kept off)
         localStorage.setItem(this.rowsKey,
         JSON.stringify({ radix: Object.fromEntries(this.radixes), hidden: [...this.hiddenRows], analog: Object.fromEntries(this.analogs),
           groups: this.groupList(), bits: [...this.bitsOpen], dups: [...this.dups.keys()], deltas: this.deltas }));
@@ -191,7 +213,7 @@ Object.assign(WaveView.prototype, {
       JSON.stringify(this.S[k] ?? null));
     if (own.length) this.local.cyc = Object.fromEntries(own); else delete this.local.cyc;
     this.saveLook(); this.cycMemo = null; this.hdrH = this.headH();
-    this.renderNames(); this.draw(); this.settingsChanged(); return this;
+    this.renderNames(); if (this.umarks.length) this.renderNotes(); this.draw(); this.settingsChanged(); return this;   // the Δ of the markers in cycles
   },
   // the clock the cycles count (cycleClock, else the clock found) and its rising edges, cycle 0 at iz; null: no band (off,
   // or no clock); any: the clock even with the band off (the cursor field's c147)

@@ -43,15 +43,17 @@ command analog: signals rows
 command arrow: id? from? to? shape? head? line? color? label? delete?
 command bits: signals on?
 command bookmark: n? t? signal? text? label? color? lift? top? link? go? delete?
+command bus_list: port? kind? from? to? limit?
 command compare: result? dump? a? map? offset? off? show?
 command cursor: t
 command cursor2: t
 command cycles: on? clock? zero? reset?
-command deltas: on? id? to? signal? lift? color?
-command duplicate: signals radix? rows? delete?
+command deltas: on? id? to? signal? lift? color? dmin? dmax?
+command duplicate: signals bits? radix? rows? delete?
 command edge: dir? kind? value? signal?
-command expr: id? text? scope? label? color? on? row? mark? gap? delete?
+command expr: id? text? scope? label? color? on? row? mark? gap? radix? analog? delete?
 command expr_go: id? dir? n?
+command expr_markers: id? label? color? signal? limit? deltas? delete?
 command expr_matches: id? from? to? limit? offset?
 command find: query case? word? regex? highlight? open? mask?
 command fit: 
@@ -60,11 +62,13 @@ command fsm: mode? signals? fields? clear?
 command fsm_go: signal state? from? to? dir? first?
 command fsm_stats: signal
 command gaps: on? idle? keep? signals? clock? aux? only? count? view? reset?
-command group: name signals? add? remove? color? rename? delete? go? move?
+command goto: t? sel? view? bm?
+command group: name signals? add? remove? color? rename? delete? go? move? divider?
 command hide: signals
 command highlight: add? remove? set? clear?
 command layout: scroll? height? tools?
-command marker: id? t? label? color? signal? lift? hidden? delete?
+command marker: id? t? label? color? signal? lift? hidden? dmin? dmax? delete?
+command measures: 
 command only: modules? on? clear? open?
 command paint: signals? color? clear?
 command picture: format? from? to? rows?

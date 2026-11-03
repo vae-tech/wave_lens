@@ -124,6 +124,14 @@
     read.</td></tr>
 </table>
 
+<h2 id="log-links">Links from a log</h2>
+<p>A time in the terminal, a <code>.log</code> / <code>.txt</code> / <code>.out</code> file or a task's output is a link (ctrl+click): <code>@ 1234 ns</code>,
+  <code>at 1.2 us</code>, <code>time=5ns</code>, a bare <code>1234 ns</code>. The dump's WaveLens tab — the one in sight, else the one used last, else a dump
+  opened in this workspace before, picked — puts the cursor there and selects the first <code>a.b.c</code> signal of the line. <span class="ui">Copy link</span>
+  in the tab (<kbd>yl</kbd>, # of a bookmark) gives <code>dump.vcd#t=60ns&amp;sel=PSEL</code>, a link to that dump in a log or a note (the links run <i>WaveLens: Go to a moment of the dump</i>).
+  <code>wavelens.logLinks</code> adds patterns of your own (the groups <code>t</code>, <code>unit</code>, <code>sig</code>):
+  <code>\[(?&lt;t&gt;\d+)(?&lt;unit&gt;ns)\] (?&lt;sig&gt;\S+)</code> for <code>[1234ns] tb.u.req</code>.</p>
+
 <h2 id="agent">With an AI agent on the host</h2>
 <p>An agent working on the host with the MCP server (<code>tools/wavemcp.py</code>, see <a href="mcp.html">AI agents</a>) can show a
   person what it found in the tab they have open. When it starts its live link (<code>view_live</code>), every open tab connects
@@ -144,6 +152,8 @@
     (<code>ctrl+G</code>: Go to Line; the list of your groups is <kbd>gl</kbd> then)</td></tr>
   <tr><td><code>wavelens.verilator</code></td><td>verilator</td><td>the Verilator 5 of <i>Make the types with Verilator</i>, on the
     extension's host</td></tr>
+  <tr><td><code>wavelens.logLinks</code></td><td><code>[]</code></td><td>more patterns of a time in a log or the terminal (regular expressions
+    with the groups <code>t</code>, <code>unit</code>, <code>sig</code>): links to the dump's tab, <a href="#log-links">below</a></td></tr>
   <tr><td><code>wavelens.autoReload</code></td><td>false</td><td>after a new simulation: read the dump at once (false: offer ⟳)</td></tr>
   <tr><td><code>wavelens.openLastState</code></td><td>true</td><td>a dump seen for the first time takes the state loaded last (false: only Reload offers it)</td></tr>
   <tr><td><code>wavelens.lazy</code></td><td>auto</td><td>a large dump read as it is needed (auto: an FST of 4 MB, a VCD of 64 MB
@@ -157,7 +167,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.40 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.41 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

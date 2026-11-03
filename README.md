@@ -12,8 +12,11 @@ transactions are three plugin scripts more, inlined into a page): no build step,
 - **A wave window in the browser**: zoom, two cursors, measured ranges, fuzzy find, the hierarchy, bus widths and buses
   bit by bit, a signal twice in two forms (hex and a step plot), a Modules tree that keeps only the modules you pick, your groups and order, clock cycles, undo, bookmarks and
   arrows with notes (in a config at
-  an event: `"at": {"signal": "state", "value": "ERROR"}`, the build finds the time); a log
-  under the waves of what was read and what went wrong (a JSON file's error at its line and column).
+  an event: `"at": {"signal": "state", "value": "ERROR"}`, the build finds the time); markers with the Δ between them
+  measured, in time and cycles, against a bound (a latency requirement drawn red when it is not kept); a link to a moment
+  (`page.html#t=…&sel=…`, and the times in a VS Code log or terminal as links); your own keys; a log
+  under the waves of what was read and what went wrong (a JSON file's error at its line and column), the dump's busiest
+  signals and the ones that never change.
 - **SystemVerilog assertions** bound to instances, evaluated over the dump (in the page and by a CLI for CI), every
   attempt drawn on the waves, a failure taken apart step by step.
 - **Expressions**: a list of conditions like the assertions', their matches marked on the waves and stepped through, the
@@ -23,14 +26,18 @@ transactions are three plugin scripts more, inlined into a page): no build step,
   them or added to your view, each with its states, its changes and a diagram of them (a click: the next time it happens;
   [the guide](docs/guides/types.html)).
 - **Bus transactions**: AXI, AXI-Stream, APB, AHB, Avalon, Wishbone and OBI ports found by their names and drawn as
-  transfers; **two runs compared** signal by signal: the red bands, a key that flips the waves between the runs, both over each other.
+  transfers, and a list of them (CSV); **two runs compared** signal by signal: the red bands, a key that flips the waves between the runs,
+  both over each other; and their assertion results (`sva diff --results`: new, gone, moved failures, covers lost).
 - **Pictures for documents**: PNG, SVG and WaveDrom out of any window, long idle stretches cut out, a static
   WaveDrom-style SVG next to the viewer.
 - **VS Code over Remote-SSH or WSL**: a dump on the Linux host opens in a tab, nothing else installed there
   ([installing it](#the-vs-code-extension)).
 - **Scripts and AI agents**: whatever the buttons do, a command does by name — from the console, `tools/viewedit.py`
   or an MCP server, live in an open page, into the page's file or into its config (a rebuild keeps them); a PNG of each
-  view without a browser open (`tools/pageshot.py`); warnings at the build for what the page would not show.
+  view without a browser open (`tools/pageshot.py`); warnings at the build for what the page would not show; one call from
+  a moment to what to look at (`wave_explain`: a match, an assertion's failure, a difference); an FSM's coverage in CI
+  (`tools/fsmstats.py --strict`); a GTKWave save file as a view (`mkconfig.py --gtkw`); JUnit and PNGs from the build of a
+  page (`mkhtml.py --junit --png`).
 
 ## Try it in a minute
 

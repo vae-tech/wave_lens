@@ -30,7 +30,8 @@ macro_rules! outln {
 }
 
 const USAGE: &str = "usage: sva diff A B [--signals PAT,...] [--signals-from FILE] [--scope S] [--from T] [--to T] [--offset [-]T] [--map A=B ...]
-                [--segment SIGNAL [--align]] [--json [FILE.json|-]] [--junit FILE] [--limit N] [--spans N] [--quiet]
+                [--segment SIGNAL [--align]] [--json [FILE.json|-]] [--junit FILE] [--limit N] [--spans N] [--rank [N]] [--quiet]
+       sva diff --results A.json B.json …: the assertions' results of two runs (sva diff --results --help)
 Two dumps (VCD or FST) compared change by change, streamed: neither is held in memory. A signal of A pairs with the one
 of B at its path; --map A=B renames A's paths for B: a scope (the longest one that matches) or one signal's path (an
 exact pair wins); no `=` in a name. Two dumps with one top scope each, named apart, pair their tops without a map.
@@ -42,7 +43,8 @@ in B, is listed (not_in_a, only_a), not an error.
 in A; --align: segment k of B starts at the k-th change of the signal in B and compares on the length both have (the
 rest of a longer segment is not compared). --json: the result as JSON (times in ps) to FILE (a name ending with .json, as
 the dumps can follow), or stdout instead of the text; --junit: a JUnit XML report, a test case per segment. --limit: differences listed (default 20, 0 all); --spans:
-per signal its stretches that differ in the JSON (default 0: none). TIME is a number with a unit (100ns, 2.5us; ps without one).
+per signal its stretches that differ in the JSON (default 0: none). --rank: the signals by their first difference (the first N,
+default 20): who differed first and what followed, by time only (no cause: the dumps have no netlist). TIME is a number with a unit (100ns, 2.5us; ps without one).
 Exit status: 0 the dumps are equal over the window; 1 they differ; 2 usage, a dump that does not read, a signal not
 in it, no time in common.";
 
@@ -148,6 +150,7 @@ struct Opt {
     junit: Option<String>,
     limit: usize,
     spans: usize,
+    rank: usize,
     quiet: bool,
 }
 
@@ -195,6 +198,13 @@ fn opts(args: &[String]) -> Result<Opt, String> {
             "--junit" => o.junit = Some(val(&mut i, a)?),
             "--limit" => o.limit = crate::count(&val(&mut i, a)?, "--limit")? as usize,
             "--spans" => o.spans = crate::count(&val(&mut i, a)?, "--spans")? as usize,
+            "--rank" => {
+                let n = args.get(i + 1).and_then(|s| s.parse::<usize>().ok());
+                o.rank = n.unwrap_or(20).max(1);
+                if n.is_some() {
+                    i += 1;
+                }
+            }
             "--quiet" | "-q" => o.quiet = true,
             s if s.starts_with('-') && s.len() > 1 => return Err(format!("unknown option {s}\n{USAGE}")),
             s => files.push(s.to_string()),
@@ -627,6 +637,9 @@ fn t_text(t: i64) -> String {
 }
 
 pub fn diff_cmd(args: &[String]) -> ExitCode {
+    if args.iter().any(|a| a == "--results") {
+        return crate::resdiff::results_cmd(args);
+    }
     let o = match opts(args) {
         Ok(o) => o,
         Err(e) if e == USAGE => {
@@ -1066,6 +1079,14 @@ fn run(o: &Opt) -> Result<bool, String> {
         }).collect::<Vec<_>>(),
         "notes": notes,
     });
+    let mut doc = doc;
+    if o.rank > 0 {   // the signals by their first difference: who differed first, what followed
+        let mut ps: Vec<&Pair> = m.pairs.iter().filter(|p| p.first.is_some()).collect();
+        ps.sort_by(|x, y| x.first.as_ref().map(|d| d.t).cmp(&y.first.as_ref().map(|d| d.t)).then_with(|| x.a.cmp(&y.a)));
+        let t0 = ps.first().and_then(|p| p.first.as_ref()).map_or(0, |d| d.t);
+        doc["rank"] = ps.iter().take(o.rank).map(|p| { let d = p.first.as_ref().unwrap_or_else(|| unreachable!());
+            json!({"signal": p.a, "t": d.t, "a": shown(&d.a), "b": shown(&d.b), "after_first_ps": d.t - t0}) }).collect::<Vec<_>>().into();
+    }
     if let Some(f) = &o.junit {
         write_file(f, &junit(&doc, &m, o))?;
     }
@@ -1149,6 +1170,12 @@ fn text(d: &Value, m: &Merge, other: usize, o: &Opt) {
         let first = s.first.as_ref().map_or(String::new(), |f| format!("; the first at {}: {} A={} B={}", t_text(f.t), m.pairs[f.pair].a, pretty(&f.a), pretty(&f.b)));
         outln!("segment {} ({} = {}): {} … {}{extra}: {} changes, {} differ{first}", s.n, o.segment.as_deref().unwrap_or(""), s.value, t_text(s.from),
             t_text(s.to), s.changes, s.differ);
+    }
+    if let Some(r) = d["rank"].as_array().filter(|r| !r.is_empty()) {
+        let then: Vec<String> = r.iter().skip(1).map(|x| format!("{} (+{})", x["signal"].as_str().unwrap_or(""),
+            t_text(x["after_first_ps"].as_i64().unwrap_or(0)))).collect();
+        outln!("first to differ: {} at {}{}", r[0]["signal"].as_str().unwrap_or(""), t(&r[0]["t"]),
+            if then.is_empty() { String::new() } else { format!("; then {}", then.join(", ")) });
     }
     for x in d["notes"].as_array().into_iter().flatten() {
         outln!("note: {}", x.as_str().unwrap_or(""));

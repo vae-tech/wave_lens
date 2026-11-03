@@ -81,7 +81,8 @@ const TIPS = {
   'm:fold': ['Fold / open this module'], 'm:foldup': ['Fold its module', ['zc']], 'm:zM': ['Fold every module', ['zM']], 'm:zR': ['Open every module', ['zR']],
   'm:types': ['Where its labels or fields come from: the types file and the path in it, the width, why it has none'],
   'm:mark': ['Bookmark on this signal here: its text asked here, then in the list', ['b']],
-  'm:copyname': ['Copy the path', ['yy']], 'm:clear': ['Clear the range', ['Esc', 'ctrl+click']],
+  'm:copyname': ['Copy the path', ['yy']], 'm:copylink': ['Copy a link to this moment: the page opened by it goes here', ['yl']],
+  'm:clear': ['Clear the range', ['Esc', 'ctrl+click']],
   'm:unpaint': ['Its own colour back'],
   'm:umark': ['A marker here: a dashed line across the rows; its label asked here. Drag the text to a line over or under any signal; the right ' +
     'button on it: its colour', ['m']],
@@ -177,7 +178,7 @@ const KEY_MENUS = {
     ['More'], ['v', v => (v.gapLive() ? 'the waves in continuous time' : 'the gaps cut out of the waves')], ['p', 'save the page', onBar('spage')]]],
   z: ['Fold the modules', [['R', 'open every module'], ['M', 'fold every module'], ['o', 'open the selected signal\'s'], ['c', 'fold the selected signal\'s'],
     ['a', 'open or fold it']]],
-  y: ['Copy', [['y', 'the selected signal\'s path'], ['n', 'its name'], ['t', 'the time of the cursor']]],
+  y: ['Copy', [['y', 'the selected signal\'s path'], ['n', 'its name'], ['t', 'the time of the cursor'], ['l', 'a link to here (the cursor, the signal)']]],
   ']': ['Next', [['b', 'bookmark'], ['m', 'marker'], ['e', 'edge'], ['d', 'difference', v => v.cmp]]],
   '[': ['Previous', [['b', 'bookmark'], ['m', 'marker'], ['e', 'edge'], ['d', 'difference', v => v.cmp]]],
 };

@@ -20,6 +20,7 @@
 //! (the preponed region), so a value written at the edge counts from the next sampling point, as in a simulator.
 
 mod diff;
+mod resdiff;
 mod fst;
 mod vcd;
 
@@ -96,8 +97,10 @@ const USAGE: &str = "usage: sva parse [--json] [--expand] [-D NAME[=VALUE]] FILE
        sva vcd DUMP --from T --to T [--signals PAT,...] [--signals-from FILE] [--out cut.vcd]   (a cut of a dump: a window, some signals)
        sva vcd DUMP.fst --header | --codes FILE    (the declarations alone; the changes of those id codes)
        sva diff A B [--signals PAT,...] [--signals-from FILE] [--scope S] [--from T --to T] [--offset T] [--map A=B ...]
-                [--segment SIGNAL [--align]] [--json [FILE.json|-]] [--junit FILE] [--limit N] [--spans N] [--quiet]
+                [--segment SIGNAL [--align]] [--rank [N]] [--json [FILE.json|-]] [--junit FILE] [--limit N] [--spans N] [--quiet]
                 (two dumps compared change by change: sva diff --help)
+       sva diff --results A.json B.json [--map A=B ...] [--json [FILE.json|-]] [--junit FILE] [--limit N]
+                (two runs' assertion results: new, gone, moved failures, covers lost)
        sva report [--title T] [--md F] [--junit F] [--html F] [--json F] [--max-failures N] RESULTS.json...   (- for stdout)
 TIME is a number with a unit (100ns, 2.5us; ps without one). --alias: a shown name of a config (the page's alias) for
 the variable at PATH. --report: .md, .html, .xml (JUnit), .json (the results with the meta, as a page's report.json;

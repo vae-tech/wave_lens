@@ -24,7 +24,8 @@ vscode/                       the VS Code extension (a workspace extension: Remo
                               live relay), media/host.js (the tab's half, before wavelens.js: localStorage, downloads,
                               pickers, clipboard, keys, theme, live link to the host), svtypes.js (the twin of
                               svtypes.py verilator: the command Make the types with Verilator; tests/unit compares
-                              the two), test/e2e.js (in a real VS Code)
+                              the two), links.js (times and signals of a log as links: pure, the smoke loads it in a
+                              page), test/e2e.js (in a real VS Code)
 tools/                        what you run: python3 -I tools/<tool>.py
   mkconfig.py vcd2wavedrom.py mkhtml.py embed.py dumpscan.py wavejson.py svabuild.py wavefind.py common.py
   wavelenscat.py              wavelens/wavelens.js from wavelens/src/*.js (make wavelens)
@@ -36,6 +37,8 @@ tools/                        what you run: python3 -I tools/<tool>.py
   mkvsix.py                   vscode/ + wavelens/ + the static sva -> one .vsix (a zip: no node, no npm)
   wavemcp.py                  the tools as an MCP server for AI agents (stdio; USAGE § AI agents); the live link to a page
   viewedit.py                 the viewer's commands on a page's edits or a saved state (USAGE § Commands and edits)
+  gtkw.py                     a GTKWave save file read (mkconfig.py --gtkw: a view of it; nested groups, aliases, times)
+  fsmstats.py                 an FSM's states in a dump, the page's rule (fsm.js fsmStats; smoke fsm_shell compares them)
   base.config.json            base settings for generated configs (make config / make html WAVES=x.vcd)
 python/wavelens_cocotb.py      what a user's cocotb test imports: its marks (guides/cocotb.html); tools/testmarks.py puts them in a config
 examples/                     apb/ axi_lite/ fsm/ demo/: testbench, config, README; *.sva: assertions for each; cocotb_apb/: five cocotb tests;

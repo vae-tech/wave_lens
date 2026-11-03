@@ -12,7 +12,7 @@
 Lint (printed at every build, "mkhtml: lint: <code>: <JSON path>: <text>"; docs/USAGE.md "Lint"): bookmark-bad, arrow-bad, bookmark-outside-view,
 bookmark-signal-missing, bookmark-duplicate, bookmark-time, bookmark-key, bookmark-link-missing, arrow-end-missing, arrow-key, marker-no-match,
 marker-key, bind-unknown, svashow-no-match, bookmarks-close (a heuristic), enum-colors-hex, span-outside-view,
-span-signal-missing, span-key, span-every-no-match, compare-spans-cut, expr-name-missing, exprs-no-engine, gap-view-off, setting-signal-missing, also-no-match, also-cut. A marker or a span "every" on a signal the dump has not got
+span-signal-missing, span-key, span-every-no-match, compare-spans-cut, measure-no-clock, state-signal-missing, state-svg, expr-name-missing, exprs-no-engine, gap-view-off, setting-signal-missing, also-no-match, also-cut. A marker or a span "every" on a signal the dump has not got
 is no warning: the build stops there, as for any name of the config (marker-no-match: the signal is there, the event never happens).
 
 Config keys used here (the rest is vcd2wavedrom.py's, see its --help):
@@ -33,12 +33,12 @@ Config keys used here (the rest is vcd2wavedrom.py's, see its --help):
             only: evaluated over the whole dump with the top-level "sva", drawn in no view (a view's own "bind" is drawn and
             reported); false: no printable section. --report NAME@SCOPE (repeatable)
 """
-import argparse, datetime, html, json, os, sys
+import argparse, datetime, hashlib, html, json, os, re, sys
 
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)   # -I drops the script dir from sys.path
-import common, svabuild, testmarks, vcd2wavedrom, wavejson  # noqa: E402
+import common, dumpscan, svabuild, testmarks, vcd2wavedrom, viewedit, wavejson  # noqa: E402
 from common import WaveError, add_sva_bin_arg, check_config, run_main  # noqa: E402
 
 FW = os.path.join(os.path.dirname(HERE), 'wavelens')   # the framework files inlined into the page
@@ -123,7 +123,7 @@ NAV_JS = '''<script>
     show(b.dataset.view);
     try { history.replaceState(null, '', '#' + b.dataset.view); } catch (e) { /* a file: page that may not */ }
   }));
-  const k = decodeURIComponent(location.hash.slice(1));
+  const v = /[#&]view=([^&]*)/.exec(location.hash), k = decodeURIComponent(v ? v[1] : location.hash.slice(1));   // #tc3, or a link's &view=tc3
   show(secs.some(s => s.dataset.view === k) ? k : secs[0].dataset.view);
 })();
 </script>
@@ -178,6 +178,31 @@ def generated(reproducible):
     return datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
 
 
+STATS_MAX = 64e6   # a dump read once more for its statistics up to this size (bytes)
+_STATS = {}
+
+
+def dump_stats(path):
+    """A dump's statistics (dumpscan.stats) as the page's meta.stats: counts and the ten busiest; None for a large dump (a second pass)."""
+    if path in _STATS:
+        return _STATS[path]
+    s = None
+    try:
+        if os.path.getsize(path) > STATS_MAX:   # said once: the page's log has no line of the dump's statistics
+            print(f'mkhtml: {os.path.basename(path)}: {os.path.getsize(path) / 1e6:.0f} MB, over {STATS_MAX / 1e6:.0f} MB: no statistics of the dump '
+                  '(dumpscan.py --stats gives them)', file=sys.stderr)
+        else:
+            d = dumpscan.read(path, 'count')
+            if d is not None:
+                x = dumpscan.stats(d, 10)
+                s = {'signals': x['signals'], 'changing': x['changing'], 'dead': len(x['dead']), 'busiest': [[b['path'], b['changes']] for b in x['busiest']],
+                     'never': x['dead'][:20]}
+    except (OSError, WaveError):
+        s = None
+    _STATS[path] = s
+    return s
+
+
 def build_views(a, cfg, base):
     """Every view of the config converted (vcd2wavedrom.convert), or the WaveJSON files read -> (docs, renders,
     sva_views: the views with bindings, for the printable section)."""
@@ -204,14 +229,54 @@ def build_views(a, cfg, base):
                 sva_views.append((name, o))
             print(f'mkhtml: view {name}: {o.waves} ({"clock " + o.clock if o.clock else "exact"})', file=sys.stderr)
             docs[name] = vcd2wavedrom.convert(o)
+            st = dump_stats(o.waves)   # what the dump has, for the page's log: its signals that change, never change, the busiest
+            if st:
+                docs[name].setdefault('meta', {})['stats'] = st
             a.lint_count = getattr(a, 'lint_count', 0) + len(o.lint)
             renders[name] = (a.render or own.get('render') or cfg.get('render') or 'view', own.get('note'))
+            st = own.get('state')   # the view's state as the page opens (viewedit.py --config): into the page's edits
+            if st is not None:
+                bad = [k for k in st if k not in viewedit.STATE_KEYS | {'config'}] if isinstance(st, dict) else None
+                if bad is None or bad:
+                    raise WaveError(f'mkhtml: views.{key}.state: a viewer\'s state {{"groups", "radix", "markers", …}}' + (f', not {", ".join(bad)}' if bad else ''))
+                rd = renders[name][0]
+                if rd == 'svg':   # the static figure draws its WaveJSON: a viewer's state is the viewer's (review S19-3)
+                    raise WaveError(f'mkhtml: views.{key}.state: a view rendered as "svg" draws its WaveJSON only, no viewer\'s state: '
+                                    '"render": "view" or "both", or no "state"')
+                if rd == 'both':
+                    print(f'mkhtml: lint: state-svg: views.{key}.state: the viewer opens with it, the static figure beside it draws the WaveJSON as it is',
+                          file=sys.stderr)
+                    a.lint_count += 1
+                a.view_states = {**getattr(a, 'view_states', {}), name: st}
+                for w in state_lint(st, docs[name], f'views.{key}.state'):   # a name of the state the view has not got: the page leaves it out
+                    print(f'mkhtml: lint: {w}', file=sys.stderr)
+                    a.lint_count += 1
     for spec in a.files:
         key, _, path = spec.rpartition('=')
         key = key or os.path.splitext(os.path.basename(path))[0]
         docs[key] = vcd2wavedrom.load_config(path)
         renders[key] = (a.render or 'view', None)
     return docs, renders, sva_views
+
+
+def state_lint(st, doc, at):
+    """The names of a view's "state" that are no row of its WaveJSON (hidden, radix, analog, paint, groups, dups, the markers' and bookmarks'
+    signals) -> lint lines "state-signal-missing": the page leaves them out (its toast and log say it too). A copy ("data#2"), a slice or a bit
+    ("data[7:4]") by its bus; a row of an expression ("ƒ …") or a group ("@g") is not checked."""
+    rows = vcd2wavedrom.row_walk(doc.get('signal') or [])
+    have = {f for f, _ in rows} | {x for _, it in rows for x in (it.get('abs'), it.get('path')) if x}
+    base = lambda n: re.sub(r'(#\d+)?(\[\d+(:\d+)?\])*$', '', str(n))
+    names = [('hidden', n) for n in st.get('hidden') or []] + [(k, n) for k in ('radix', 'analog', 'paint') for n in (st.get(k) or {})]
+    names += [(f'groups[{i}].signals', n) for i, g in enumerate(st.get('groups') or []) if isinstance(g, dict) for n in g.get('signals') or []]
+    names += [('dups', n) for n in st.get('dups') or []]
+    names += [(f'{k}[{i}].{f}', m[f]) for k in ('markers', 'bookmarks') for i, m in enumerate(st.get(k) or []) if isinstance(m, dict)
+              for f in ('signal', 'dsignal') if m.get(f)]
+    out = []
+    for where, n in names:
+        if not isinstance(n, str) or n.startswith(('ƒ ', '@')) or n in have or base(n) in have:
+            continue
+        out.append(f'state-signal-missing: {at}.{where}: "{n}" is no row of the view: the page leaves it out')
+    return out
 
 
 def collect_sva(a, cfg, docs):
@@ -332,6 +397,10 @@ def render_page(a, cfg, docs, renders, sva_views, with_sva, sva_files, sva_notes
         settings=safe(json.dumps({k: v for k, v in settings.items() if k != 'theme'}, ensure_ascii=False)), sva=sva, bus=bus,
         build=f'\n<script>window.WAVELENS_BUILD = {safe(json.dumps(build, ensure_ascii=False))};</script>' if build else '',
         data=safe(wavejson.dumps_many(docs)))
+    states = getattr(a, 'view_states', None)
+    if states:   # the views' state from the config: the page's edits, a revision of what they say (applied once, as viewedit.py's)
+        text = viewedit.put_block(text, 'edits', {'views': {k: {'rev': 'cfg-' + hashlib.sha1(json.dumps(st, sort_keys=True).encode()).hexdigest()[:10],
+                                                                'state': st} for k, st in states.items()}})
     try:
         with open(a.out, 'w', encoding='utf-8') as f:
             f.write(text)
@@ -365,8 +434,19 @@ def main():
     ap.add_argument('--strict', action='store_true', help='a lint warning is an error (exit 1, no page)')
     ap.add_argument('--marks', metavar='FILE', help='the marks of a cocotb test (python/wavelens_cocotb.py): its tests as spans, bookmarks and jumps '
                     'in every view (a view\'s "marks": false keeps it out; replaces the top-level "marks")')
+    ap.add_argument('--junit', metavar='FILE', help='the assertions of every view as JUnit XML (a testsuite per view, a testcase per binding, '
+                    'a failure for one that failed, an error for one that could not run: its signals not in the dump, or capped; skipped: not '
+                    'evaluated or 0 attempts): CI gets the page and the report from one build; the exit stays 0 (the page is written)')
+    ap.add_argument('--png', metavar='DIR', help='a PNG of every view of the page into DIR (tools/pageshot.py: needs playwright), a test view each '
+                    'with --marks-views tests: the CI artifacts')
+    ap.add_argument('--png-theme', choices=('dark', 'light', 'both'), default='light', help='with --png: the colour scheme (default light)')
+    ap.add_argument('--png-width', type=int, default=1280, metavar='PX', help='with --png: the browser window\'s width in px (default 1280)')
     ap.add_argument('--out', help='output .html (required unless --lint)')
     a = ap.parse_args()
+    if (a.junit or a.png) and not a.out:
+        ap.error('--junit and --png go with --out (the page they are of)')
+    if a.junit and a.no_sva:
+        ap.error('--junit is of the assertions: not with --no-sva')
     if not a.config and not a.files:
         ap.error('need --config or WaveJSON files')
     if not a.out and not a.lint:
@@ -387,6 +467,8 @@ def main():
     if marks:
         doc = testmarks.load(marks)
         a.nav = testmarks.merge(cfg, doc, split)
+        if split != 'whole':   # the views of the tests are of one dump: a marker of yours in one is in each (the setting sharedMarkers)
+            cfg.setdefault('config', {}).setdefault('sharedMarkers', True)
         print(f'mkhtml: marks: {testmarks.summary(doc)}', file=sys.stderr)
     for view in (cfg.get('views') or {}).values():
         view.pop('marks', None)   # (false, and no marks to keep it from)
@@ -400,6 +482,90 @@ def main():
         return
     with_sva, sva_files, sva_notes = collect_sva(a, cfg, docs)
     render_page(a, cfg, docs, renders, sva_views, with_sva, sva_files, sva_notes)
+    if a.junit:
+        write_junit(a, docs)
+    if a.png:
+        page_pngs(a)
+
+
+def junit_cases(page, key, binds):
+    """The testcases of a view's bindings -> [(xml, outcome)], outcome one of pass / failure / error / skipped. A check that did not
+    run is never a pass: its signals not in the dump -> an error "missing"; an attempt without verdict (the thread limit) -> an error
+    "capped"; a binding without results (no such assertion in the sva files) or with no attempt -> skipped."""
+    from xml.sax.saxutils import escape, quoteattr
+    out = []
+    cls = quoteattr(f'{page}.{key}')
+    for b in binds:
+        r = b.get('results') or {}
+        xs = r.get('assertions') or []
+        if not xs:
+            name = f'{b.get("assert") or ""}@{b.get("scope") or ""}'
+            out.append((f'  <testcase classname={cls} name={quoteattr(name)} time="0"><skipped message="not evaluated: no such assertion '
+                        f'in the sva files, or no results"/></testcase>', 'skipped'))
+        for x in xs:
+            if x.get('kind') == 'cover':   # a cover that did not match is no failure
+                continue
+            st, cyc = x.get('stats') or {}, x.get('cycles') or r.get('cycles') or []
+            fails = [t for t in x.get('attempts') or [] if t.get('result') == 'fail']
+            nfail = max(len(fails), int(st.get('fail') or 0))
+            at = lambda c: f'{cyc[c] / 1000:g} ns' if isinstance(c, int) and 0 <= c < len(cyc) else f'cycle {c}'
+            name = (x.get('name') or b.get('assert') or '') + '@' + (x.get('scope') or b.get('scope') or '')
+            end = lambda t: t.get('failed_at', t.get('end'))
+            if x.get('missing'):
+                msg = 'missing: ' + ', '.join(x['missing'])
+                body, how = f'<error type="missing" message={quoteattr(msg)}>{escape(msg)}: not in the dump, the check did not run</error>', 'error'
+            elif nfail:
+                msg = f'{nfail} failed attempts' + (f', the first at {at(end(fails[0]))}' if fails else '')
+                lines = '\n'.join(f'{at(t.get("start"))} -> {at(end(t))}: {t.get("note", "")}' for t in fails[:20])
+                body, how = f'<failure type="fail" message={quoteattr(msg)}>{escape(lines)}</failure>', 'failure'
+            elif st.get('capped'):
+                msg = f'{st["capped"]} attempts without verdict (the thread limit)'
+                body, how = f'<error type="capped" message={quoteattr(msg)}/>', 'error'
+            elif not st.get('attempts'):
+                body, how = '<skipped message="0 attempts: the antecedent never started one"/>', 'skipped'
+            else:
+                body, how = '', 'pass'
+            stats = ', '.join(f'{k} {st[k]}' for k in ('attempts', 'pass', 'fail', 'vacuous', 'capped') if k in st)
+            out.append((f'  <testcase classname={cls} name={quoteattr(name)} time="0">{body}<system-out>{escape(stats)}</system-out></testcase>', how))
+    return out
+
+
+def write_junit(a, docs):
+    """--junit: the bindings of every view (their results evaluated at the build) as JUnit XML, a testsuite per view: a failure per
+    assertion that failed, an error per one that could not run (signals missing, capped), skipped when it was not evaluated."""
+    from xml.sax.saxutils import quoteattr
+    page = os.path.splitext(os.path.basename(a.out))[0]
+    suites, total = [], {'tests': 0, 'failure': 0, 'error': 0, 'skipped': 0}
+    for key, doc in docs.items():
+        cases = junit_cases(page, key, svabuild.inflate(doc.get('sva')))
+        if cases:
+            n = {k: sum(h == k for _, h in cases) for k in ('failure', 'error', 'skipped')}
+            total['tests'] += len(cases)
+            for k in n:
+                total[k] += n[k]
+            suites.append(f' <testsuite name={quoteattr(f"{page} · {key}")} tests="{len(cases)}" failures="{n["failure"]}" errors="{n["error"]}" '
+                          f'skipped="{n["skipped"]}" time="0">\n' + '\n'.join(c for c, _ in cases) + '\n </testsuite>')
+    text = '<?xml version="1.0" encoding="UTF-8"?>\n<testsuites>\n' + '\n'.join(suites) + '\n</testsuites>\n'
+    try:
+        with open(a.junit, 'w', encoding='utf-8') as f:
+            f.write(text)
+    except OSError as e:
+        raise WaveError(f'cannot write {a.junit}: {e.strerror}') from None
+    print(f'mkhtml: JUnit: {total["tests"]} bindings in {len(suites)} views, {total["failure"]} failing, {total["error"]} not run (errors), '
+          f'{total["skipped"]} skipped -> {a.junit}', file=sys.stderr)
+
+
+def page_pngs(a):
+    """--png: tools/pageshot.py over the page written (a PNG per view; playwright is the one tool outside the standard library)."""
+    import subprocess
+    tool = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pageshot.py')
+    r = subprocess.run([sys.executable, tool, a.out, '--out', a.png, '--theme', a.png_theme, '--width', str(a.png_width)], capture_output=True, text=True,
+                       env={**os.environ, 'PYTHONDONTWRITEBYTECODE': '1'})
+    if r.returncode:
+        err = r.stderr.strip()
+        raise WaveError('--png: ' + (err.splitlines()[-1] if err else f'pageshot.py: exit {r.returncode}') +
+                        (' (pip install playwright; playwright install chromium)' if 'playwright' in err.lower() else ''))
+    sys.stderr.write(r.stderr)
 
 if __name__ == '__main__':
     run_main(main, 'mkhtml')

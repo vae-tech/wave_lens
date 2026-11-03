@@ -66,6 +66,9 @@ const cmpView = (c, s) => c.view || (c.view = Object.create(s, { tr: { value: c.
 // the first difference: a row of another width differs from the start, which says nothing of where it goes wrong (as sva diff)
 const cmpFirst = rows => { let f = null; for (const x of rows.values()) if (!x.other && x.spans.length && (f == null || x.spans[0][0] < f)) f = x.spans[0][0];
   return f; };
+// who differed first, and what followed: the rows by the start of their first difference -> [{row, t}] (the first n)
+const cmpRank = (rows, n = 5) => [...rows].filter(([, x]) => !x.other && x.spans.length).map(([r, x]) => ({ row: r, t: x.spans[0][0] }))
+  .sort((p, q) => p.t - q.t || (p.row.full < q.row.full ? -1 : 1)).slice(0, n);
 const cmpStarts = rows => [...new Set([...rows.values()].flatMap(x => x.spans.map(([t]) => t)))].sort((x, y) => x - y);
 // which run the waves show, on a picture's axis: the run's letter and name on its colour, the two of the overlay in the colours of their
 // waves; a strip under the axis while B is shown. names: [A's, B's]
@@ -212,12 +215,19 @@ Object.assign(WaveView.prototype, {
     this.cmp = { name: nm, rows, differ, missing, omitted, compared: rows.size - missing - omitted, from, to, starts: cmpStarts(rows), first: cmpFirst(rows),
       byName, waves: true };
     this.cmpMarks(); this.cmpShow(); this.draw();
-    const c = this.cmp;
-    const said = `${nm}: ${differ} of ${c.compared} signals differ${c.first == null ? '' : `, the first at ${f(c.first)}`}` +
+    const c = this.cmp, who = this.cmpWho();
+    const said = `${nm}: ${differ} of ${c.compared} signals differ${c.first == null ? '' : `, the first at ${f(c.first)}`}${who}` +
       (missing ? ` · ${missing} not in it` : '') + (omitted ? ` · ${omitted} not read (dumpBudget)` : '') +
       (from > this.M.t0 || to < this.M.t1 ? ` · compared ${f(from)} … ${f(to)} (both dumps)` : '') + (byName.length ? ' · ' + cmpByName(c) : '');
     this.toast(said + (differ ? ' · ]d [d go to them' : '')); this.log('ok', 'compared with ' + said);
-    return { name: nm, compared: c.compared, differ, missing, omitted, first: c.first, from, to, byName: byName.length };
+    return { name: nm, compared: c.compared, differ, missing, omitted, first: c.first, from, to, byName: byName.length, rank: c.rank };
+  },
+  // who differed first and what followed (the compare's rank), for its toast: " · first PSEL, then PENABLE +10 ns"
+  cmpWho() {
+    const rank = cmpRank(this.cmp.rows), d = q => this.fmt(q, (this.M.t1 - this.M.t0) / 1000, this.M.t1 - this.M.t0);
+    this.cmp.rank = rank.map(o => ({ signal: o.row.full, t: o.t }));
+    const then = rank.slice(1).map(o => `${o.row.name} +${d(o.t - rank[0].t)}`).join(', ');
+    return rank.length ? ` · first ${rank[0].row.name}${then ? `, then ${then}` : ''}` : '';
   },
   // the compare as a result (the saved state's "compare", as the WaveJSON's): the one given, else the one of a dump read here
   cmpState() {
@@ -388,11 +398,12 @@ Object.assign(WaveView.prototype, {
       byName: [], result: Object.assign({}, c, { from, to }) };
     this.cmpMarks(); this.cmpShow(); this.draw();
     const f = t => this.fmt(t, (this.M.t1 - this.M.t0) / 1000, this.M.t1 - this.M.t0), x = this.cmp;
-    const said = `${x.name}: ${differ} of ${x.compared} signals differ${x.first == null ? '' : `, the first at ${f(x.first)}`}` +
+    const who = this.cmpWho();
+    const said = `${x.name}: ${differ} of ${x.compared} signals differ${x.first == null ? '' : `, the first at ${f(x.first)}`}${who}` +
       (missing ? ` · ${missing} not in it` : '') + (from > t0 || to < t1 ? ` · compared ${f(from)} … ${f(to)}` : '');
     if (!quiet) this.toast(said + (differ ? ' · ]d [d go to them' : ''));
     this.log('ok', 'compared with ' + said);
-    return { name: x.name, compared: x.compared, differ, missing, omitted: 0, first: x.first, from, to, byName: 0 };
+    return { name: x.name, compared: x.compared, differ, missing, omitted: 0, first: x.first, from, to, byName: 0, rank: this.cmp.rank };
   },
   // ]d [d: the cursor to the next / previous start of a difference: of the selected signal when it has some, else of all
   // the signals in the view (hidden ones and the ones Only leaves out: not stepped to)

@@ -288,6 +288,16 @@ def viewer(S, ex, build):
     S.save('viewer-cursors', v, upto=v.locator('.notes'))
     js("(v.setCycles({ cycles: true, cycleZero: v.cycData(true).ups[4] }), 0)"); shots.settle(page)   # the clock cycles: cycle 0 at the 5th edge
     S.save('viewer-cycles', v, upto=v.locator('.notes'))
+    js("(v.setCycles(null), v.run([{ op: 'duplicate', signals: 'PADDR', bits: [7, 2] }]), v.cursor = 30000, v.setCursor2(150000), 0)"); shots.settle(page)
+    S.save('viewer-slice', v, upto=v.locator('.notes'))
+    js("(v.run([{ op: 'duplicate', signals: 'PADDR[7:2]', delete: true }]), v.cursor = 35000, v.setCursor2(115000), "
+       "v.setCycles({ cycles: true, cycleZero: v.cycData(true).ups[4] }), 0)"); shots.settle(page)   # as the shots after it had it
+    # the Δ of the markers in cycles, one over its bound (dmax) drawn red, the list saying so
+    js("""(v.setCursor2(null), v.setCycles({ cycles: true }), v.run([{ op: 'marker', t: '45ns', label: 'req 1', color: '#d9822b' },
+        { op: 'marker', t: '85ns', label: 'req 2', color: '#d9822b' }, { op: 'marker', t: '145ns', label: 'req 3', color: '#d9822b' },
+        { op: 'deltas', on: true }, { op: 'deltas', dmax: '50ns' }]), 0)"""); shots.settle(page)
+    S.save('viewer-measure', v)
+    js("(v.run([{ op: 'marker', id: 'all', delete: true }, { op: 'deltas', on: false }]), 0)")
     js("(v.setCycles(null), 0)")
     js("(v.setCursor2(null), v.setAnalog(v.M.rows.find(r => r.name === 'PADDR'), 3), v.setAnalog(v.M.rows.find(r => r.name === 'PWDATA'), 3), 0)")
     S.save('viewer-analog', v, upto=v.locator('.notes'))
@@ -695,6 +705,8 @@ def buses(S, ex, build):
     shots.js(page, 0, "(p => (p && v.buses.select(p, p.D.tx[2]), 0))(v.buses.list()[0])"); shots.settle(page)
     S.quiet(page)
     S.save('buses-apb', v, upto=v.locator('.notes'))
+    shots.js(page, 0, "(v.buses.txl.open = true, v.buses.txl.render(), v.buses.txl.mark(), 0)"); shots.settle(page)
+    S.save('buses-list', v.locator('.txl'))
     page.close()
 
 
@@ -709,6 +721,11 @@ def cocotb(S, ex, build):
     shots.settle(page)
     S.quiet(page)
     S.save('cocotb-test', v, upto=v.locator('.notes'))
+    page.locator('.tests button').nth(3).click()   # the test with a wl.measure: its pair of markers, the Δ between them
+    v = page.locator('section[data-view=tc3] .wv')
+    shots.settle(page)
+    S.quiet(page)
+    S.save('cocotb-measure', page.locator('section[data-view=tc3]'))
     page.close()
 
 

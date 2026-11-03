@@ -149,6 +149,98 @@ class MkHtml(unittest.TestCase):
         waves = json.loads(re.search(r'window\.WAVES = (\{.*?\n\});', text, re.S).group(1).replace('<\\/', '</'))
         self.assertEqual(waves['v']['config'], {'hscale': 1, 'dim': 0.5})           # the view's own layer
 
+    def test_junit_and_png_arguments(self):
+        """Stage 24: --junit and --png go with --out; --junit is of the assertions (not with --no-sva); a page without bindings: an empty report."""
+        with H.tmp() as d:
+            c = os.path.join(d, 'c.json')
+            H.dump(self.CFG, c)
+            rc, _, err = H.run_tool('mkhtml', '--config', c, '--lint', '--junit', os.path.join(d, 'r.xml'))
+            self.assertNotEqual(rc, 0)
+            self.assertIn('go with --out', err)
+            rc, _, err = H.run_tool('mkhtml', '--config', c, '--out', os.path.join(d, 'p.html'), '--no-sva', '--junit', os.path.join(d, 'r.xml'))
+            self.assertIn('not with --no-sva', err)
+            rc, _, err = H.run_tool('mkhtml', '--config', c, '--out', os.path.join(d, 'p.html'), '--junit', os.path.join(d, 'r.xml'))
+            self.assertEqual(rc, 0, err)
+            self.assertEqual(H.text(os.path.join(d, 'r.xml')), '<?xml version="1.0" encoding="UTF-8"?>\n<testsuites>\n\n</testsuites>\n')
+
+    @H.needs(__import__('svabuild').find_bin(), 'the sva CLI (make sva-build)')
+    def test_junit_of_every_view(self):
+        """Stage 24: --junit: a testsuite per view, a testcase per binding, a failure for the one that failed (apb_demo_no_wait)."""
+        apb = os.path.join(H.ROOT, 'examples', 'apb')
+        vcd = os.path.join(os.environ.get('BUILD', os.path.join(H.ROOT, 'out')), 'examples', 'apb', 'apb.vcd')
+        if not os.path.isfile(vcd):
+            self.skipTest('make examples')
+        with H.tmp() as d:
+            rc, _, err = H.run_tool('mkhtml', '--config', os.path.join(apb, 'apb.config.json'), '--waves', vcd, '--out', os.path.join(d, 'p.html'),
+                                    '--junit', os.path.join(d, 'r.xml'), '--reproducible')
+            self.assertEqual(rc, 0, err)
+            x = H.text(os.path.join(d, 'r.xml'))
+        suites = re.findall(r'<testsuite name="p · (\w+)" tests="(\d+)" failures="(\d+)"', x)
+        self.assertEqual([s[0] for s in suites], ['transfers', 'write', 'exact'])
+        self.assertTrue(all(int(t) > 0 for _, t, _ in suites) and sum(int(f) for _, _, f in suites) >= 1, suites)
+        self.assertIn('name="apb_demo_no_wait@apb_tb"', x)
+        self.assertRegex(x, r'apb_demo_no_wait@apb_tb" time="0"><failure type="fail" message="2 failed attempts')
+
+    @H.needs(__import__('svabuild').find_bin(), 'the sva CLI (make sva-build)')
+    def test_junit_a_check_that_did_not_run_is_no_pass(self):
+        """Review S24-1: an assertion whose signal is not in the dump is an error "missing" counted in errors=, not a green testcase."""
+        import xml.etree.ElementTree as ET
+        apb = os.path.join(H.ROOT, 'examples', 'apb')
+        vcd = os.path.join(os.environ.get('BUILD', os.path.join(H.ROOT, 'out')), 'examples', 'apb', 'apb.vcd')
+        if not os.path.isfile(vcd):
+            self.skipTest('make examples')
+        with H.tmp() as d:
+            extra = os.path.join(d, 'extra.sva')
+            with open(extra, 'w') as f:
+                f.write('module extra_checks (input logic PCLK, input logic NOPE);\n    default clocking @(posedge PCLK); endclocking\n'
+                        '    extra_missing: assert property (NOPE |-> 1);\nendmodule\n')
+            c = os.path.join(d, 'c.json')
+            H.dump({'scope': 'apb_tb', 'sva': [os.path.join(apb, 'apb_tb.sv'), os.path.join(apb, 'apb.sva'), extra],
+                    'bind': [{'assert': '*', 'scope': 'apb_tb'}],
+                    'views': {'v': {'clock': 'PCLK', 'from': '0ns', 'to': '200ns', 'signals': ['PCLK', 'PSEL', 'PREADY']}}}, c)
+            rc, _, err = H.run_tool('mkhtml', '--config', c, '--waves', vcd, '--out', os.path.join(d, 'p.html'), '--junit', os.path.join(d, 'r.xml'),
+                                    '--reproducible')
+            self.assertEqual(rc, 0, err)
+            root = ET.parse(os.path.join(d, 'r.xml')).getroot()
+        suite = root.find('testsuite')
+        case = {c.get('name'): c for c in suite.iter('testcase')}
+        self.assertEqual([e.get('type') for e in case['extra_missing@apb_tb'].findall('error')], ['missing'])
+        self.assertIn('NOPE', case['extra_missing@apb_tb'].find('error').get('message'))
+        self.assertEqual(suite.get('errors'), '1')
+        self.assertEqual(suite.get('failures'), '1')
+        self.assertIsNotNone(case['apb_demo_no_wait@apb_tb'].find('failure'))
+
+    def test_junit_outcomes_of_a_binding(self):
+        """Review S24-1: not evaluated / 0 attempts -> skipped, capped -> an error; a failure's note with " < & é reads back."""
+        import xml.etree.ElementTree as ET
+        import mkhtml
+        st = lambda **k: {'attempts': 3, 'pass': 3, 'fail': 0, 'vacuous': 0, 'capped': 0, **k}
+        res = lambda x: {'results': {'cycles': [0, 10000, 20000], 'assertions': [x]}}
+        binds = [{'assert': 'gone', 'scope': 'tb'},
+                 {'assert': 'none', 'scope': 'tb', **res({'name': 'none', 'stats': st(attempts=0, **{'pass': 0})})},
+                 {'assert': 'cap', 'scope': 'tb', **res({'name': 'cap', 'stats': st(capped=2)})},
+                 {'assert': 'ok', 'scope': 'tb', **res({'name': 'ok', 'stats': st()})},
+                 {'assert': 'bad', 'scope': 'tb', **res({'name': 'bad', 'stats': st(fail=1),
+                                                         'attempts': [{'result': 'fail', 'start': 1, 'failed_at': 2, 'note': 'a "q" <b> & é'}]})}]
+        cases = mkhtml.junit_cases('p', 'v', binds)
+        self.assertEqual([h for _, h in cases], ['skipped', 'skipped', 'error', 'pass', 'failure'])
+        xml = ET.fromstring('<testsuite>' + ''.join(c for c, _ in cases) + '</testsuite>')
+        self.assertEqual(xml.findall('testcase')[2].find('error').get('type'), 'capped')
+        self.assertIn('10 ns -> 20 ns: a "q" <b> & é', xml.findall('testcase')[4].find('failure').text)
+
+    def test_state_of_an_svg_view(self):
+        """Review S19-3: a view drawn as "svg" with a "state" is refused (the figure draws its WaveJSON only); "both" is a lint line."""
+        vcd = os.path.join(os.environ.get('BUILD', os.path.join(H.ROOT, 'out')), 'examples', 'apb', 'apb.vcd')
+        if not os.path.isfile(vcd):
+            self.skipTest('make examples')
+        with H.tmp() as d:
+            c = os.path.join(d, 'c.json')
+            for render, rc_want, said in (('svg', 1, 'rendered as "svg"'), ('both', 0, 'state-svg: views.v.state')):
+                H.dump({'scope': 'apb_tb', 'views': {'v': {'signals': ['PCLK', 'PWDATA'], 'exact': True, 'render': render, 'state': {'hidden': ['PWDATA']}}}}, c)
+                rc, _, err = H.run_tool('mkhtml', '--config', c, '--waves', vcd, '--no-sva', '--out', os.path.join(d, 'p.html'))
+                self.assertEqual(rc, rc_want, err)
+                self.assertIn(said, err)
+
     def test_hostile_data(self):
         """"<!--<script>" or "</script>" in a name, a value, an enum label, the settings, the title: the page's JSON blocks
         have no "<" (it would end them, or make the parser swallow the page up to a later </script>)."""

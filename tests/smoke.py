@@ -28,7 +28,7 @@ a slow or loaded one.
   python3 tests/smoke.py [--build out] [--out out/shots] [--strict] [--only find,sva_bind] [--list]
   (no -I: playwright is usually a user-site install)
 """
-import argparse, json, os, pathlib, re, subprocess, sys
+import argparse, json, os, pathlib, re, shutil, subprocess, sys, time
 from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -451,6 +451,20 @@ def pageshot(browser, build):
     one = json.loads(r1.stdout or '[]')
     check(r1.returncode == 0 and [(m['view'], m['theme']) for m in one] == [('exact', 'dark')] and r2.returncode == 1 and 'no view "nope"' in r2.stderr,
           f'pageshot --view exact: one PNG; a view not there: exit 1 with the views it has {r2.stderr.strip()[:200]}')
+    # review S24-4: mkhtml --png (the build's pictures for CI) with --png-width; both themes: twice as many
+    cfg, vcd = ROOT / 'examples' / 'apb' / 'apb.config.json', build / 'examples' / 'apb' / 'apb.vcd'
+    out, pd = build / 'smoke' / 'png' / 'p.html', build / 'smoke' / 'png' / 'shots'
+    out.parent.mkdir(parents=True, exist_ok=True)
+    mk = lambda *a: subprocess.run([sys.executable, '-I', str(ROOT / 'tools' / 'mkhtml.py'), '--config', str(cfg), '--waves', str(vcd), '--no-sva', '--out', str(out),
+                                    '--png', str(pd), *a], capture_output=True, text=True, env=dict(os.environ, PYTHONDONTWRITEBYTECODE='1'), timeout=300 * SCALE)
+    r = mk('--png-width', '900')
+    made = json.loads((pd / 'manifest.json').read_text()) if (pd / 'manifest.json').exists() else []
+    made = made if isinstance(made, list) else made.get('shots', [])
+    r2 = mk('--png-theme', 'both')
+    made2 = json.loads((pd / 'manifest.json').read_text()) if (pd / 'manifest.json').exists() else []
+    made2 = made2 if isinstance(made2, list) else made2.get('shots', [])
+    check(r.returncode == 0 and len(made) == 3 and all(m['width'] <= 900 for m in made) and r2.returncode == 0 and len(made2) == 6,
+          f'mkhtml --png: a PNG per view at --png-width, both themes twice as many {[m.get("width") for m in made]} {len(made2)} {r.stderr.strip()[-160:]}')
 
 
 def markup(page):
@@ -681,6 +695,11 @@ def cocotb_page(page):
         return [v.M.rows.filter(r => r.type === 'sig').map(r => r.full), w.M.rows.some(r => r.full === 'u_slave.waited'), document.querySelector('section[data-view=tc3]').textContent.includes('3 checks passed')]; })()""")
     check('u_slave.waited' in tc3[0] and 'PCLK' in tc3[0] and not tc3[1], f'cocotb: a test\'s own row in its view, not in the whole run {tc3[:2]}')
     check(tc3[2], 'cocotb: its view counts its checks')
+    me = page.evaluate("""(() => { const v = document.querySelector('section[data-view=tc3] .wv').waveView, I = WaveLens.internal;
+        return [v.umarks.map(m => [m.label, m.signal, m.dto, m.dmax]), v.deltas, v.umarks[0].dsignal, v.deltaList().map(d => [d.dt, d.cyc, d.bad]),
+          document.querySelector('section[data-view=tc3]').textContent.includes('1 measure'), (I.peek(v).bmGeo.dtags || []).length]; })()""")
+    check(me[0] == [['read', None, 2, {'cycles': 6}], ['', None, 0, None]] and me[1] is True and me[2] == 'PRDATA' and me[3] == [[40000, 4, False]] and me[4] and me[5] == 1,
+          f'cocotb: wl.measure is two markers of its test on its signal, the Δ between them drawn (4 cycles, in its bound of 6), its view says it {me}')
     # a view of each test, one shown at a time
     shown = lambda: page.evaluate("""[...document.querySelectorAll('section[data-view]')].filter(s => !s.hidden).map(s => s.dataset.view)""")
     btn = page.locator('.tests button')
@@ -798,7 +817,7 @@ def modules(page, P):
     vis = lambda: js("WaveLens.internal.peek(v).vis.map(r => r.full || r.name)")
     page.locator('.wv canvas').first.click(); page.keyboard.press('t'); settle(page)
     first = [rows.nth(i).locator('.nm').inner_text() for i in range(rows.count())]
-    check(page.locator('.wv-mods').count() == 1 and first == ['tb_top', 'dut_i', 'dev0_i', 'dev1_i'] and rows.nth(0).locator('.ct').inner_text() == '12 / 2060',
+    check(page.locator('.wv-mods').count() == 1 and first == ['tb_top', 'dut_i', 'dev0_i', 'dev1_i'] and rows.nth(0).locator('.ct').inner_text() == '11 / 2057',   # 3 bits written again with one value: constants (S27-5)
           f't opens the Modules panel: the modules two levels deep, the counts own / with the submodules {first} {rows.nth(0).locator(".ct").inner_text()}')
     js("(v.hide(['tb_top.dut_i.dev1_i']), 0)")
     name('dev1_i').click(); settle(page)
@@ -1946,6 +1965,11 @@ def vscode_tab(browser, build):
     check(fresh_got == [True, False, title], f'a new dump: the last state of the workspace taken at once, Reload there {fresh_got}')
     check(tab({'wavelens.given': 'yes'}) == [False, False, title], 'a dump with a view of its own keeps it: Reload there, nothing loaded')
     check(tab({}, False) == [False, False, title], 'wavelens.openLastState off: Reload there, nothing loaded')
+    # a link of a log (vscode/links.js): the extension runs goto in the tab
+    page.evaluate("window.postMessage({ type: 'run', rid: 777, ops: [{ op: 'goto', t: '12000ps', sel: 'tb.state' }] }, '*')")
+    page.wait_for_function("window.__sent.some(m => m.type === 'result' && m.rid === 777)", timeout=5000)
+    r = page.evaluate("window.__sent.find(m => m.type === 'result' && m.rid === 777).results[0]")
+    check(r.get('t') == 12000 and (r.get('sel') or '').endswith('state') and 'error' not in r, f'a link of a log: goto in the tab, the cursor and the signal {r}')
     page.close()
 
 
@@ -2984,6 +3008,10 @@ EDIT_OPS = [   # every command that changes a state, with the arguments in their
     {'op': 'duplicate', 'signals': 'PADDR#2', 'delete': True}, {'op': 'arrow', 'id': 1, 'delete': True}, {'op': 'paint', 'clear': True},
     {'op': 'gaps', 'on': True, 'clock': 'PCLK', 'aux': 'PREADY'}, {'op': 'view', 'at': '5ns', 'span': '40ns'}, {'op': 'rows', 'limit': 4, 'offset': 2},
     {'op': 'bookmark', 't': '70ns', 'text': [1, 2], 'label': True}, {'op': 'deltas', 'id': 1, 'to': 2.0},
+    {'op': 'marker', 'id': 1, 'dmax': '30ns'}, {'op': 'deltas', 'dmin': '1 cycle'}, {'op': 'measures'}, {'op': 'deltas', 'id': 2, 'dmin': None},
+    # review X-2: a command of stages 22 and 26 (21's expressions need the engine: smoke expr_bus)
+    {'op': 'duplicate', 'signals': 'PWDATA', 'bits': [31, 28], 'radix': 'bin'}, {'op': 'group', 'name': '— Bus —', 'divider': True},
+    {'op': 'group', 'name': '— Bus —', 'move': 'top'},
 ]
 
 
@@ -3330,6 +3358,18 @@ def undo(browser, build):
         await v.run([{ op: 'group', name: 'gr', rename: 'gs' }]); await v.undo(); const g2 = v.ugRows().find(r => r.name === 'gr');
         return [a, h, busy, g2 === g, WaveLens.internal.peek(v).collapsed.has(g.id), v.state().paint.PSEL, sp];""")
     check(got == [True, True, '', True, True, '#ff00ff', True], f'arrows kept, highlight colours, no undo in a batch not done, a rename undone: the same group, a span undone {got}')
+    # stage 21: the expressions and the assertions' bindings are steps too; the bus selection is not
+    got = js("""await SVA.ready(); const x = v.svaExprs, P = v.sva;
+        await v.run([{ op: 'expr', text: 'PSEL && !PREADY' }, { op: 'marker', t: '30ns' }]); const n1 = v.undoS.length;
+        await v.run([{ op: 'expr', id: 1, text: 'PSEL && PREADY' }]); await v.undo(); const t1 = x.list[0].text;
+        await v.run([{ op: 'expr', id: 1, delete: true }]); await v.undo(); const back = x.list.length === 1 && !!x.list[0].res;
+        const toast = v.root.querySelector('.bar .toast').textContent;
+        const b0 = P.bindings.length; P.unbind(P.bindings[0]); const b1 = P.bindings.length; await v.undo(); const b2 = P.bindings.length;
+        await v.undo(1); const b3 = P.bindings.length; await v.undo();
+        const s0 = v.undoS.length; if (v.buses && v.buses.list()[0]) { const p = v.buses.list()[0]; v.buses.select(p, p.D.tx[0]); } v.undoTick();
+        return [n1 > 0, t1, back, toast.includes('expressions'), [b0, b1, b2, b3], v.undoS.length === s0];""")
+    check(got[0] and got[1] == 'PSEL && !PREADY' and got[2] and got[3] and got[4][1] == got[4][0] - 1 and got[4][2] == got[4][0] and got[4][3] == got[4][1] and got[5],
+          f'undo: an expression changed and deleted comes back (its toast says expressions); a binding taken off comes back, redo takes it off; a transfer selected is no step {got}')
     page.evaluate('localStorage.clear()')
     check(not errs, 'no page errors (undo)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
     ctx.close()
@@ -3556,6 +3596,8 @@ def compare(browser, build):
     check(wd == ['1', '0'], f'≠ comes before the width of a bus, which wraps out of sight first {wd}')
     check(got and got[0] == 1 and got[1] == 1 and got[2] == moved and got[3] and got[4] and not got[5] and got[6] == '≠ 1 ✕' and got[7] == [[moved, moved + 10000]],
           f'B ({bv.name}): PREADY ≠ from {moved} for 10 ns, PSLVERR struck (not in B), PSEL the same; ≠ 1 ✕ in the bar {got}')
+    rk = page.evaluate(f"(v => [v.cmp.rank, v.root.querySelector('.toast').textContent])({V})")
+    check(rk[0] == [{'signal': 'PREADY', 't': moved}] and 'first PREADY' in rk[1], f'stage 23: who differed first, in the toast and the result {rk}')
     page.evaluate(f"(v => {{ v.cursor = 0; v.canvas.focus(); }})({V})")
     page.keyboard.press(']'); page.keyboard.press('d'); page.wait_for_timeout(50); c1 = page.evaluate(f"{V}.cursor")
     page.keyboard.press('['); page.keyboard.press('d'); page.wait_for_timeout(50); c2 = page.evaluate(f"{V}.cursor")
@@ -4178,8 +4220,13 @@ def edit(browser, build):
     mine = lambda r, o: {k: v for k, v in r.items() if v is not None and not (o == 'rows' and k == 'total')}   # what the file cannot know: null
     apart = [(i, o['op'], run['res'][i], py[i]) for i, o in enumerate(EDIT_OPS) if i < len(py)
              and {k: run['res'][i].get(k) for k in mine(py[i], o['op'])} != mine(py[i], o['op'])
-             and o['op'] not in ('expr', 'picture', 'find', 'fold', 'unfold') and not (o['op'] in ('view', 'bookmark') and i <= at)]
+             and o['op'] not in ('expr', 'picture', 'find', 'fold', 'unfold', 'measures') and not (o['op'] in ('view', 'bookmark') and i <= at)]
     check(not apart, f'the page and viewedit.py answer each command alike ({len(apart)} apart: {apart[:4]})')
+    # the measures: the page counts the cycles (and so says ok of a bound in cycles), the file does not; the rest alike
+    k = next(i for i, o in enumerate(EDIT_OPS) if o['op'] == 'measures')
+    pm = [{f: x for f, x in r.items() if f != 'cycles' and (f != 'ok' or 'ok' in q)} for r, q in zip(run['res'][k]['measures'], py[k]['measures'])]
+    check(pm == py[k]['measures'] and len(pm) > 0 and all('cycles' in r for r in run['res'][k]['measures']),
+          f'measures: the page and viewedit.py give one table, the page with the cycles {run["res"][k]} {py[k]}')
     # go once the file knows the window (the view command before it): at the start and the end of the waves, clamped alike
     at = next(i for i, o in enumerate(EDIT_OPS) if o['op'] == 'view')
     gos = [(run['res'][i], py[i]) for i, o in enumerate(EDIT_OPS) if o['op'] == 'bookmark' and o.get('go') and at < i < len(py)]
@@ -4293,7 +4340,7 @@ def edit(browser, build):
     page.evaluate(f"{V}.run([{{op: 'group', name: 'gA', signals: 'PSEL'}}, {{op: 'group', name: 'gB', signals: 'PWDATA,PRDATA'}}])")
     w.locator('canvas').click(position={'x': 300, 'y': 80}); page.keyboard.press('Control+g')
     items = page.locator('.wv-groups button').all_inner_texts()
-    page.keyboard.press('ArrowDown'); page.keyboard.press('Enter')
+    page.keyboard.press('ArrowDown'); page.keyboard.press('ArrowDown'); page.keyboard.press('Enter')   # (stage 26: the focus starts in its filter line)
     went = page.evaluate(f"(v => [v.sel && v.sel.full, !!(v.sel && v.sel.ug)])({V})")
     page.evaluate(f"(v => v.menu(200, 200, v.M.rows.find(r => r.name === 'PWRITE'), 70000))({V})")
     page.locator('.wv-menu .subg').hover()
@@ -4616,6 +4663,634 @@ def key_hints(browser, build):
     page.close()
 
 
+def marker_measure(browser, build):
+    """Stage 16: the matches of an expression as markers (|Δ| on its line, expr_markers), the Δ in cycles, a bound dmin / dmax drawn red (the list,
+    the picture), the measures table; undo takes a batch back in one step."""
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('viewer: matches as markers, the Δ in cycles and with a bound, the measures')
+    page = browser.new_page(viewport={'width': 1400, 'height': 1000})
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('SVA.ready()'); page.evaluate('localStorage.clear()'); page.reload()
+    page.wait_for_load_state('networkidle'); page.evaluate('SVA.ready()')
+    w = page.locator('.wv').nth(1)   # the whole run, exact: the Δ counts the edges of PCLK
+    w.scroll_into_view_if_needed(); settle(page)
+    js = lambda s: page.evaluate("async () => { const v = document.querySelectorAll('.wv')[1].waveView, I = WaveLens.internal; " + s + " }")
+    js("""await v.run([{ op: 'bookmark', n: 'all', delete: true }, { op: 'fit' }, { op: 'expr', text: 'PSEL && !PREADY' }]); v.svaExprs.toggle(true);
+        v.undoTick(true);""")
+    settle(page)
+    btn = w.locator('.sva.xpanel ol.xl > li').first.locator('[data-x=mk]')
+    check(btn.get_attribute('aria-pressed') == 'false', 'the |Δ| button of an expression: not pressed while it has no markers')
+    btn.click(); settle(page)
+    a = js("return [v.umarks.map(m => [m.t, m.label, m.expr, m.dto]), v.deltas, v.deltaList().map(d => d.dt)];")
+    check([m[0] for m in a[0]] == [45000, 85000, 145000] and [m[1] for m in a[0]] == ['ƒ1 1', 'ƒ1 2', 'ƒ1 3'] and all(m[2] == 'PSEL && !PREADY' for m in a[0])
+          and [m[3] for m in a[0]] == [2, 3, 0] and a[1] is True and a[2] == [40000, 60000] and btn.get_attribute('aria-pressed') == 'true',
+          f'|Δ|: a marker at the start of each match, each Δ to the next one of it, the Δ on, the button pressed {a}')
+    a = js("""await v.undo(); return [v.umarks.length, v.deltas];""")
+    check(a == [0, False], f'undo: the whole batch back in one step {a}')
+    js("await v.undo(1);")
+    r = js("""return await v.run([{ op: 'expr_markers', id: 1, limit: 2, label: 'req' }]);""")
+    a = js("return v.umarks.map(m => m.label);")
+    check(r[0].get('markers') == 2 and r[0].get('more') == 1 and a == ['req 1', 'req 2'] and 'narrow the window' in js("return v.root.querySelector('.bar .toast').textContent;"),
+          f'again: they take the place of its markers there were; limit says how many more, a toast {r} {a}')
+    btn.click(); settle(page)
+    check(js("return v.umarks.length;") == 0 and btn.get_attribute('aria-pressed') == 'false', 'its button pressed again: its markers go')
+    r = js("""return await v.run([{ op: 'expr_markers', id: 1 }, { op: 'marker', t: '10ns', label: 'mine' }, { op: 'expr_markers', id: 1, delete: true },
+        { op: 'expr_markers', id: 4 }]);""")
+    check(r[2].get('deleted') == 3 and js("return v.umarks.map(m => m.label);") == ['mine'] and 'no expression 4' in r[3].get('error', ''),
+          f'delete: only its markers go; an expression not there is said {r}')
+    # the Δ in cycles, a bound
+    js("""await v.run([{ op: 'marker', id: 'all', delete: true }, { op: 'expr_markers', id: 1 }]);""")
+    a = js("return v.deltaList().map(d => v.deltaText(d));")
+    check(a == ['40 ns', '60 ns'], f'no cycles band: the Δ in time only {a}')
+    js("await v.run([{ op: 'cycles', on: true }]);"); settle(page)
+    a = [js("return v.deltaList().map(d => v.deltaText(d));"), [x.inner_text() for x in w.locator('.notes .mks .md').all()]]
+    check(a[0] == ['40 ns · 4 cycles', '60 ns · 6 cycles'] and a[1] == ['Δ 40 ns · 4 cycles', 'Δ 60 ns · 6 cycles'], f'the cycles band on: the Δ in cycles too, the list the same {a}')
+    r = js("""return await v.run([{ op: 'deltas', dmax: '50ns' }]);""")
+    a = js("return [v.deltaList().map(d => d.bad), v.umarks.map(m => m.dmax)];")
+    md = w.locator('.notes .mks .md')
+    check('error' not in r[0] and a == [[False, True], [50000, 50000, 50000]] and md.nth(1).get_attribute('class') == 'md bad' and '✗ > 50 ns' in md.nth(1).inner_text()
+          and md.nth(0).get_attribute('class') == 'md', f'deltas dmax without id: on every marker; the Δ over it red in the list, said "✗ > 50 ns" {a}')
+    svg = js("return v.toSVG({ from: 0, to: 200000 });")
+    red = js("return getComputedStyle(v.root).getPropertyValue('--sva-fail').trim();")
+    check(red and svg.count(red) >= 2, f'the picture draws the Δ over its bound red (its arrow and text) {red}')
+    r = js("""return await v.run([{ op: 'deltas', dmax: null }, { op: 'marker', id: 1, dmin: '5 cycles' }, { op: 'measures' }]);""")
+    m = r[2].get('measures') or []
+    check(js("return v.umarks.map(m => m.dmax);") == [None, None, None] and len(m) == 2 and m[0].get('dmin') == {'cycles': 5} and m[0].get('cycles') == 4 and m[0].get('ok') is False
+          and 'ok' not in m[1] and m[0]['from'] == {'id': 1, 'label': 'ƒ1 1', 't': 45000} and m[1]['dt'] == 60000,
+          f'null: no bound; a bound in cycles counts the clock; measures: the table, ok with a bound only {m}')
+    r = js("""return await v.run([{ op: 'marker', id: 1, dmin: 'fast' }, { op: 'deltas', dmax: true }]);""")
+    check('not "fast"' in r[0].get('error', '') and 'error' in r[1], f'a bound that is no time and no cycles: refused {r}')
+    js("await v.run([{ op: 'cycles', on: false }]);")
+    a = js("return [v.deltaList().map(d => v.deltaText(d)), v.deltaList()[0].bad, v.markList()[0].dmin];")
+    check(a == [['40 ns', '60 ns'], True, {'cycles': 5}], f'the band off: the Δ in time, the bound in cycles still checked; the state keeps it {a}')
+    r = js("""return await v.run([{ op: 'marker', id: 1, dmin: '100ns', dmax: '10ns' }, { op: 'span', from: '20ns', to: '20ns' }]);""")
+    check('over dmax' in r[0].get('error', '') and 'no stretch' in r[1].get('error', ''), f'dmin over dmax, a span of no length: refused, as the twin (S16-3, S26-5) {r}')
+    # review S16-1: a bound in cycles on a page with no clock is not checked: ok null, "? no clock" on the arrow and in the list
+    d = build / 'smoke_measure'
+    d.mkdir(exist_ok=True)
+    (d / 'v.json').write_text(json.dumps({'signal': [{'name': 'data', 'wave': '01.0.1..'}], 'time': {'t0': 0, 't1': 80000, 'cycle': 10000, 'unit': 'ps'}}))
+    subprocess.run([sys.executable, '-I', str(ROOT / 'tools' / 'mkhtml.py'), f'one={d / "v.json"}', '--no-sva', '--out', str(d / 'p.html')], capture_output=True)
+    page.goto((d / 'p.html').as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()')
+    a = page.evaluate("""(async () => { const v = WaveLens.views()[0];
+        await v.run([{ op: 'marker', t: '10ns' }, { op: 'marker', t: '40ns' }, { op: 'marker', id: 1, dmax: '1 cycle' }, { op: 'deltas', on: true }]);
+        const m = (await v.run([{ op: 'measures' }]))[0].measures; v.renderNotes();
+        return [m[0].ok == null && m[1] === undefined, v.deltaText(v.deltaList()[0]), !!v.root.querySelector('.md') && v.root.querySelector('.md').textContent]; })()""")
+    check(a[0] and 'no clock' in a[1] and 'no clock' in (a[2] or ''), f'a bound in cycles, no clock: ok null, "? no clock" on the arrow and in the list {a}')
+    check(not errs, f'no page errors {errs[:3]}')
+    page.close()
+
+
+def moment_link(browser, build):
+    """Stage 18: a link to a moment (#t=…&sel=…&view=…&bm=…): opened, after this browser's state; hashchange; what is not there said;
+    Copy link of a bookmark, yl; the goto command; a page of a view per test shows the test linked."""
+    apb, cb = build / 'examples' / 'apb' / 'apb.html', build / 'examples' / 'cocotb_apb' / 'cocotb_apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('page: a link to a moment')
+    page = browser.new_page(viewport={'width': 1400, 'height': 900})
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()')
+    # a bookmark of this browser's: the link goes after the state it keeps
+    page.evaluate("""(async () => { const v = document.querySelector('.wv').waveView; await v.run([{ op: 'bookmark', n: 7, t: '175ns', signal: 'PWRITE', text: 'mine' }]); })()""")
+    page.goto(apb.as_uri() + '#view=exact&sel=PADDR&t=85ns'); page.reload(); page.wait_for_load_state('networkidle')
+    get = lambda i: page.evaluate(f"""(() => {{ const v = document.querySelectorAll('.wv')[{i}].waveView;
+        const r = v.root.getBoundingClientRect();
+        return {{ c: v.cursor, sel: v.sel && v.sel.full, inw: v.cursor >= v.t0 && v.cursor <= v.t0 + v.span, seen: r.top < innerHeight && r.bottom > 0,
+                 undo: v.undoS.length, toast: (v.root.querySelector('.bar .toast') || {{}}).textContent }}; }})()""")
+    until(page, "document.querySelectorAll('.wv')[1].waveView.cursor === 85000")
+    a = get(1)
+    check(a['c'] == 85000 and a['sel'] == 'PADDR' and a['inw'] and a['seen'] and a['undo'] == 0 and get(0)['c'] != 85000,
+          f'#view=exact&sel=PADDR&t=85ns: that viewer in sight, the cursor in its window, the signal selected; nothing to undo {a}')
+    page.evaluate("location.hash = '#bm=7&sel=PSEL'")
+    until(page, "document.querySelector('.wv').waveView.cursor === 175000")
+    a = get(0)
+    check(a['c'] == 175000 and a['sel'] == 'PSEL', f'hashchange: bm 7, a bookmark this browser keeps, then sel {a}')
+    page.evaluate("location.hash = '#t=40ns&sel=nope'")
+    until(page, "(document.querySelector('.wv .bar .toast') || {}).textContent.includes('the link')")
+    check('no signal "nope"' in get(0)['toast'] and not errs, f'a signal that is not there: said in a toast, the page alive {get(0)["toast"]}')
+    r = page.evaluate("""(async () => { const v = document.querySelector('.wv').waveView; return v.run([{ op: 'goto', view: 'nope' }, { op: 'goto', bm: 99 }]); })()""")
+    check('no section "nope"' in r[0].get('error', '') and 'transfers, exact' in r[0]['error'] and 'no bookmark 99' in r[1].get('error', ''), f'goto: what is not there {r}')
+    a = page.evaluate("""(async () => { const v = document.querySelector('.wv').waveView, c = v.cursor;
+        const r = (await v.run([{ op: 'goto', t: '77ns', sel: 'cocotb.regression' }]))[0]; return [!!r.error, v.cursor === c]; })()""")
+    check(a == [True, True], f'goto with a signal that is none: an error, the cursor where it was (S18-2) {a}')
+    # Copy link: a bookmark's #, yl
+    page.evaluate("document.querySelectorAll('.wv').forEach(w => { w.waveView.copyText = t => { window.__copied = t; }; })")
+    w = page.locator('.wv').first
+    w.locator('.notes ol.bms > li[data-n="2"] [data-bm=blink]').click()
+    got = page.evaluate('window.__copied')
+    check(got.endswith('apb.html#t=60ns&sel=PENABLE&view=transfers&bm=2') and got.startswith('file://'), f'# of bookmark 2: a link to it {got}')
+    page.evaluate("(() => { const v = document.querySelector('.wv').waveView; v.cursor = 95000; v.select('PRDATA'); v.canvas.focus(); })()")
+    page.keyboard.press('y'); page.keyboard.press('l')
+    got = page.evaluate('window.__copied')
+    check(got.endswith('#t=95ns&sel=PRDATA&view=transfers'), f'yl: the cursor and the selected signal {got}')
+    p = page.evaluate("[WaveLens.internal.parseHash('#tc3'), WaveLens.internal.parseHash('#wavelens-live=1:x&t=1.5us'), WaveLens.internal.parseHash('#sel=a%5B3%5D&bm=2')]")
+    check(p == [None, {'t': '1.5us'}, {'sel': 'a[3]', 'bm': '2'}], f'parseHash: a view key alone is none, the live link left alone, decoded {p}')
+    check(not errs, f'no page errors {errs[:3]}')
+    # the links of a log or the terminal in VS Code (vscode/links.js, pure: run here)
+    page.goto('about:blank'); page.add_script_tag(path=str(ROOT / 'vscode' / 'links.js'))
+    L = lambda line, own=None: page.evaluate("([l, o]) => WaveLensLinks.linksOf(l, o || []).map(x => [l.slice(x.start, x.end), x.ps, x.sig, x.dump, x.hash])", [line, own])
+    cases = [
+        ('UVM_ERROR @ 1234 ns: tb.u_dma.req stuck (test_apb.py:88)', [['@ 1234 ns', 1234000, 'tb.u_dma.req', None, None]]),
+        ('at 1.5 us the FIFO top.f.full rose', [['at 1.5 us', 1500000, 'top.f.full', None, None]]),
+        ('time=250ns state ok', [['time=250ns', 250000, None, None, None]]),
+        ('see dump.vcd#t=60ns&sel=PSEL&bm=2 and 3 ps later', [['dump.vcd#t=60ns&sel=PSEL&bm=2', None, None, 'dump.vcd', '#t=60ns&sel=PSEL&bm=2'], ['3 ps', 3, None, None, None]]),
+        ('version 1.2.3 of x.py, 5 items', []),
+        ('top.gen[2].u_dma.req at 10 ns', [['at 10 ns', 10000, 'top.gen[2].u_dma.req', None, None]]),   # review S18-1, S18-2
+        ('Finished in 3 s, 100 ms timeout', []),
+        ('   10.00ns INFO  cocotb.regression  running test_x', [['10.00ns', 10000, None, None, None]]),
+        ('at -5 ns the reset', []),
+        ('UVM_INFO @ 50 ns: uvm_test_top.env.x tb.dut.ack rose', [['@ 50 ns', 50000, 'tb.dut.ack', None, None]]),
+        ('C:\\x\\dump.vcd#t=1ns', [['C:\\x\\dump.vcd#t=1ns', None, None, 'C:\\x\\dump.vcd', '#t=1ns']]),
+    ]
+    for line, want in cases:
+        got = L(line)
+        check(got == want, f'links of "{line}": {got}')
+    got = L('[1234ns] tb.a.b went high', [r'\[(?<t>\d+)(?<unit>ns)\] (?<sig>\S+)'])
+    check(got == [['[1234ns] tb.a.b', 1234000, 'tb.a.b', None, None]], f'wavelens.logLinks: a pattern of the user, first {got}')
+    check(page.evaluate("WaveLensLinks.gotoOf({ hash: '#t=60ns&sel=PSEL&view=x&bm=2' })") == {'t': '60ns', 'sel': 'PSEL', 'bm': '2'}, 'a Copy link: its hash is the goto')
+    bad = page.evaluate("WaveLensLinks.badPatterns(['(', 'x(?<unit>ns)', '(?<t>\\\\d+)'])")
+    check(len(bad) == 2 and 'no group "t"' in bad[1], f'wavelens.logLinks: a pattern that is no regex or has no time is said (S18-8) {bad}')
+    if cb.exists():   # a page of a view per test: the test linked is the one shown
+        page.goto(cb.as_uri() + '#view=tc3&t=300ns&sel=PRDATA'); page.wait_for_load_state('networkidle')
+        until(page, "document.querySelector('section[data-view=tc3] .wv').waveView.cursor === 300000")
+        a = page.evaluate("[...document.querySelectorAll('section[data-view]')].filter(s => !s.hidden).map(s => s.dataset.view)")
+        check(a == ['tc3'], f'a view per test: the link shows its test {a}')
+    page.close()
+
+
+def cfg_round(browser, build):
+    """Stage 19: the look of a view written into its config (viewedit.py --config: its "state") opens the page built of it, with no toast;
+    the project's expressions (exprLibrary): the editor's completion offers them, Library… adds one."""
+    apb, vcd = build / 'examples' / 'apb' / 'apb.html', build / 'examples' / 'apb' / 'apb.vcd'
+    if not need(apb, vcd, how='make examples'):
+        return
+    import shutil, tempfile
+    print('config: the look of a view, the library of expressions')
+    d = pathlib.Path(tempfile.mkdtemp(prefix='wavelens-cfg-'))
+    cfg = d / 'apb.config.json'
+    shutil.copy(ROOT / 'examples' / 'apb' / 'apb.config.json', cfg)
+    ops = [{'op': 'group', 'name': 'bus', 'signals': ['PADDR', 'PWDATA']}, {'op': 'radix', 'signals': 'PWDATA', 'radix': 'dec'},
+           {'op': 'marker', 't': '45ns', 'label': 'req'}, {'op': 'marker', 't': '85ns'}, {'op': 'deltas', 'on': True}, {'op': 'view', 'from': '20ns', 'to': '180ns'}]
+    r = subprocess.run([sys.executable, '-I', str(ROOT / 'tools' / 'viewedit.py'), '--config', str(cfg), '--view', 'exact', '--ops', json.dumps(ops)],
+                       capture_output=True, text=True)
+    out = d / 'p.html'
+    r2 = subprocess.run([sys.executable, '-I', str(ROOT / 'tools' / 'mkhtml.py'), '--config', str(cfg), '--waves', str(vcd), '--no-sva', '--out', str(out)],
+                        capture_output=True, text=True)
+    check(r.returncode == 0 and r2.returncode == 0, f'viewedit.py --config, then mkhtml.py {r.stderr.strip()[-200:]} {r2.stderr.strip()[-200:]}')
+    page = browser.new_page(viewport={'width': 1400, 'height': 900})
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(out.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+    a = page.evaluate("""(() => { const v = WaveLens.views().find(x => x.editKey() === 'exact'), st = v.state();
+        return [st.groups, st.radix, st.markers, v.deltaList().map(d => d.dt), [v.t0, v.t0 + v.span], (v.root.querySelector('.bar .toast') || {}).textContent || '']; })()""")
+    check(a[0] == [{'name': 'bus', 'signals': ['PADDR', 'PWDATA']}] and a[1] == {'PWDATA': 'dec'} and [m['t'] for m in a[2]] == [45000, 85000]
+          and a[3] == [40000] and a[4] == [20000, 180000] and 'edits applied' not in a[5],
+          f'the page built of the config opens with the look of its view, its window; no toast of edits {a}')
+    # review S19-2: a name of the state the view has not got: the lint at the build, the page's toast and log
+    c = json.loads(cfg.read_text())
+    c['views']['exact']['state']['hidden'] = ['nope']
+    cfg.write_text(json.dumps(c))
+    r2 = subprocess.run([sys.executable, '-I', str(ROOT / 'tools' / 'mkhtml.py'), '--config', str(cfg), '--waves', str(vcd), '--no-sva', '--out', str(out)],
+                        capture_output=True, text=True)
+    page.goto(out.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+    a = page.evaluate("""(() => { const v = WaveLens.views().find(x => x.editKey() === 'exact');
+        return [(v.root.querySelector('.bar .toast') || {}).textContent || '', v.logList().filter(e => e.text.includes('nope')).map(e => e.level)]; })()""")
+    check('state-signal-missing: views.exact.state.hidden: "nope"' in r2.stderr and 'nope' in a[0] and a[1] == ['warning'],
+          f'a name of the state not in the waves: the lint, the toast and the log say it {r2.stderr.strip()[-160:]} {a}')
+    page.close()
+    shutil.rmtree(d, ignore_errors=True)
+    # the library of expressions
+    page = browser.new_page(viewport={'width': 1400, 'height': 1000})
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('SVA.ready()'); page.evaluate('localStorage.clear()'); page.reload()
+    page.wait_for_load_state('networkidle'); page.evaluate('SVA.ready()')
+    page.evaluate("""WaveLens.configure({ exprLibrary: [{ text: 'PSEL && !PREADY', label: 'wait states' }, '$rose(PENABLE)'] })""")
+    w = page.locator('.wv').first
+    w.locator('.bar .svx-tool [data-x=open]').click()
+    ed = w.locator('.sva.xpanel textarea.src'); ed.wait_for(); ed.click(); page.keyboard.type('wai')
+    lib = w.locator('.sva.xpanel ul.xac li.lib')
+    lib.first.wait_for()
+    check(lib.count() == 1 and 'wait states' in lib.first.inner_text(), f'the completion offers the expression of the library by its label {lib.all_inner_texts()}')
+    for _ in range(w.locator('.sva.xpanel ul.xac li').count() - 1):
+        page.keyboard.press('ArrowDown')
+    page.keyboard.press('Tab')
+    got = [ed.input_value(), w.locator('.sva.xpanel .xed .xlb').input_value()]
+    check(got == ['PSEL && !PREADY', 'wait states'], f'taken: the whole expression, its label {got}')
+    page.keyboard.press('Escape')
+    sel = w.locator('.sva.xpanel select.xlib')
+    check(sel.count() == 1 and sel.locator('option').count() == 3, 'Library…: the expressions of the project')
+    sel.select_option('1'); page.wait_for_function("document.querySelector('.wv').waveView.svaExprs.list.length === 1")
+    a = page.evaluate("document.querySelector('.wv').waveView.svaExprs.json()")
+    check(a == [{'expr': '$rose(PENABLE)', 'row': False}] and w.locator('.sva.xpanel select.xlib option[value="1"]').is_disabled(), f'one picked: in the list, not offered again {a}')
+    check(not errs, f'no page errors {errs[:3]}')
+    page.close()
+
+
+def bus_list(browser, build):
+    """Stage 20: the transfers of the buses as a list under the waves (bus.js): folded at first, a row per transfer, a click puts the cursor
+    and the range, ]t marks the row, the port and kind filters, CSV; the bus_list command; a page without buses has no list."""
+    axi, apb, fsm = (build / 'examples' / e / f'{e}.html' for e in ('axi_lite', 'apb', 'fsm'))
+    if not need(axi, apb, how='make examples'):
+        return
+    print('buses: the list of transfers')
+    page = browser.new_page(viewport={'width': 1400, 'height': 1000}, accept_downloads=True)
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+    w = page.locator('.wv').nth(1)
+    js = lambda e: page.evaluate(f"(async () => {{ const v = document.querySelectorAll('.wv')[1].waveView; {e} }})()")
+    txl = w.locator('.txl')
+    n = js("return v.buses.list().reduce((k, p) => k + p.D.tx.length, 0);")
+    check(txl.is_visible() and txl.locator('tbody tr').count() == 0 and f'{n} transfers' in txl.locator('.nh').inner_text(), f'folded at first: its head says the count ({n})')
+    txl.locator('[data-t=tw]').click()
+    rows = txl.locator('tbody tr')
+    check(rows.count() == n and n >= 3, f'open: a row per transfer ({rows.count()} of {n})')
+    rows.nth(1).click()
+    a = js("const x = v.buses.sel; return [v.cursor === x.t0, v.range && v.range[0] === x.t0 && v.range[1] === x.t1, x.label];")
+    check(a[0] and a[1] and rows.nth(1).get_attribute('class').strip().endswith('here'), f'a click: the cursor at its start, its range, the row marked {a}')
+    js("v.canvas.focus();"); page.keyboard.press(']'); page.keyboard.press('t')
+    check('here' in (rows.nth(2).get_attribute('class') or ''), ']t: the next transfer, its row marked')
+    txl.locator('select[data-t=kind]').select_option('W')
+    w_n = js("return v.buses.list().reduce((k, p) => k + p.D.tx.filter(x => x.kind === 'W').length, 0);")
+    check(txl.locator('tbody tr').count() == w_n and all('W' in c for c in txl.locator('tbody tr td:nth-child(5)').all_inner_texts()), f'kind W: the writes only ({w_n})')
+    with page.expect_download() as dl:
+        txl.locator('[data-t=csv]').click()
+    d = dl.value
+    raw = open(d.path(), 'rb').read()
+    text = raw.decode('utf-8-sig').splitlines()
+    check(d.suggested_filename == 'apb-all.csv' and text[0] == 't0_ns,t1_ns,port,kind,addr,data,beats,cycles,err,label' and len(text) == w_n + 1
+          and all(',W,' in r for r in text[1:]), f'CSV: the rows shown, times in ns {d.suggested_filename} {text[:2]}')
+    check(raw.startswith(b'\xef\xbb\xbf') and b'\r\n' in raw and b'\n' not in raw.replace(b'\r\n', b''), 'the CSV for Excel: UTF-8 by its BOM, CR LF (S20-4)')
+    r = js("return v.run([{ op: 'bus_list', limit: 1 }, { op: 'bus_list', kind: 'err' }, { op: 'bus_list', port: 'nope' }, { op: 'bus_list', kind: 'X' }]);")
+    check(len(r[0]['transactions']) == 1 and r[0]['more'] == n - 1 and r[0]['ports'][0]['proto'] == 'APB' and all(x['err'] for x in r[1]['transactions'])
+          and len(r[1]['transactions']) >= 1 and 'no port "nope"' in r[2].get('error', '') and 'kind is' in r[3].get('error', ''),
+          f'bus_list: limit and more, errors only, what is not there {r[0].get("more")} {r[1]} {r[2:]}')
+    if fsm.exists():
+        page.goto(fsm.as_uri()); page.wait_for_load_state('networkidle')
+        check(page.locator('.wv .txl:not([hidden])').count() == 0, 'a page without buses: no list')
+    check(not errs, f'no page errors {errs[:3]}')
+    page.close()
+
+
+def expr_bus(browser, build):
+    """Stage 21: an expression wider than a bit is a bus row (its width from the engine), its radix and plot by the command, kept over a reload;
+    the SVG draws its values; one bit as before."""
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('expressions: a bus row')
+    page = browser.new_page(viewport={'width': 1400, 'height': 1000})
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('SVA.ready()'); page.evaluate('localStorage.clear()'); page.reload()
+    page.wait_for_load_state('networkidle'); page.evaluate('SVA.ready()')
+    js = lambda e: page.evaluate(f"(async () => {{ await SVA.ready(); const v = document.querySelectorAll('.wv')[1].waveView, I = WaveLens.internal; {e} }})()")
+    rows = "I.peek(v).vis.filter(r => (r.cls || '').startsWith('sva-expr'))"
+    r = js("""return v.run([{ op: 'expr', text: '{PADDR[3:0], PWRITE}', row: true, radix: 'bin' }, { op: 'expr', text: "PADDR - 8'h10", row: true, analog: 3 },
+        { op: 'expr', text: 'PSEL', row: true, radix: 'dec' }, { op: 'expr', text: 'PREADY', radix: 'hex' }]);""")
+    a = js(f"return {rows}.map(r => [r.full, r.width, r.radix, r.analog]);")
+    check(a == [['ƒ {PADDR[3:0], PWRITE}', 5, 'bin', None], ["ƒ PADDR - 8'h10", 8, None, 3], ['ƒ PSEL', 1, 'dec', None]] or
+          [x[:4] for x in a] == [['ƒ {PADDR[3:0], PWRITE}', 5, 'bin', False], ["ƒ PADDR - 8'h10", 8, None, 3], ['ƒ PSEL', 1, 'dec', False]],
+          f'a concatenation of 5 bits and a difference of 8 are buses, in the radix and the plot given {a}')
+    check('row: true' in r[3].get('error', ''), f'radix of an expression without its row: said {r[3]}')
+    # review S21-1: a refused command leaves nothing: no phantom PREADY, an edit refused keeps the text
+    a = js("""const X = v.svaExprs, n = X.list.length;
+        const r1 = (await v.run([{ op: 'expr', text: 'PREADY' }]))[0];
+        const r2 = (await v.run([{ op: 'expr', id: 1, text: 'PENABLE', analog: 3, row: true }]))[0];
+        const r3 = (await v.run([{ op: 'expr', id: 1, text: '{PADDR[3:0], PENABLE}' }]))[0];
+        return [n, r1.error || null, X.list.length, !!r2.error, X.list[0].text, r3.error || null, v.radixes.get('ƒ {PADDR[3:0], PENABLE}') || null,
+          v.radixes.has('ƒ {PADDR[3:0], PWRITE}')];""")
+    check(a[0] == 3 and a[1] is None and a[2] == 4 and a[3] and a[5] is None and a[6] == 'bin' and a[7] is False,
+          f'a refused expr leaves the list as it was (a second PREADY is added); a new text takes its row\'s radix along (S21-1, S21-2) {a}')
+    js("await v.run([{ op: 'expr', id: 4, delete: true }]);")
+    svg = js("return v.toSVG({ from: 0, to: 200000 });")
+    check('01001' in svg, 'the SVG draws the bus in its radix (0b01001: PADDR 4, PENABLE 1)')
+    page.reload(); page.wait_for_load_state('networkidle')
+    a = js(f"await new Promise(r => setTimeout(r, 300)); return {rows}.map(r => [r.full, r.width, r.radix, r.analog]);")
+    check(len(a) == 3 and a[0][:3] == ['ƒ {PADDR[3:0], PENABLE}', 5, 'bin'] and a[1][3] == 3, f'a reload: the rows in their radix and plot again {a}')
+    check(not errs, f'no page errors {errs[:3]}')
+    page.close()
+
+
+def bus_slices(browser, build):
+    """Stage 22: a slice of a bus as a row (duplicate bits, Duplicate bits… in the menu): its values, radix, bits, a reload, the SVG, undo;
+    two cursors: the value at each and the change (A · B · Δ), the rules of the change."""
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('buses: a slice as a row, the values at two cursors')
+    page = browser.new_page(viewport={'width': 1400, 'height': 1000})
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+    js = lambda e: page.evaluate(f"(async () => {{ const v = document.querySelectorAll('.wv')[1].waveView, I = WaveLens.internal; {e} }})()")
+    r = js("return v.run([{ op: 'duplicate', signals: 'PADDR', bits: [7, 2] }, { op: 'duplicate', signals: 'PWDATA', bits: '31:28', radix: 'bin' }]);")
+    a = js("""const d = v.dups.get('PADDR[7:2]'), e = v.dups.get('PWDATA[31:28]'), vis = I.peek(v).vis;
+        return [d.width, d.tr.map(o => [o.t, o.raw]), vis.indexOf(d) === vis.findIndex(x => x.full === 'PADDR') + 1, e.radix, v.valueAt(e, 150000), v.state().dups];""")
+    check(r[0].get('copies') == ['PADDR[7:2]'] and a[0] == 6 and a[1] == [[0, '00'], [45000, '01'], [145000, '10']] and a[2] and a[3] == 'bin' and a[4] == '1101'
+          and a[5] == ['PADDR[7:2]', 'PWDATA[31:28]'], f'duplicate bits: the slice under its bus, its values the bits it names, in its radix {a}')
+    a = js("""await v.run([{ op: 'bits', signals: 'PADDR[7:2]' }]); return I.peek(v).vis.filter(r => r.of && r.of.full === 'PADDR[7:2]').map(r => r.name);""")
+    check(a == ['[7]', '[6]', '[5]', '[4]', '[3]', '[2]'], f'its bits, by the numbers of the bus {a}')
+    check('PADDR[7:2]' in js("return v.toSVG({ from: 0, to: 200000 });"), 'the SVG has the slice')
+    a = js("""const r = (await v.run([{ op: 'duplicate', signals: ['PADDR', 'PSEL'], bits: [7, 4] }]))[0];
+        return [r.error || null, v.dups.has('PADDR[7:4]'), v.state().dups.includes('PADDR[7:4]')];""")
+    check(a == ['PSEL: not a bus', False, False], f'duplicate bits of a bus and a bit: refused, no slice made (S22-2; the twin says the same) {a}')
+    page.reload(); page.wait_for_load_state('networkidle')
+    a = js("return [[...v.dups.keys()], v.dups.get('PWDATA[31:28]').radix];")
+    check(a == [['PADDR[7:2]', 'PWDATA[31:28]'], 'bin'], f'a reload: the slices and their radix again {a}')
+    a = js("""await v.undo(); return [...v.dups.keys()];""")
+    # the menu: Duplicate bits…
+    js("v.menu(600, 400, v.M.rows.find(r => r.name === 'PRDATA'), null);")
+    page.locator('.wv-menu button', has_text='Duplicate bits…').click()
+    page.keyboard.type('15:8'); page.keyboard.press('Enter'); page.wait_for_timeout(200)
+    a = js("return [v.dups.has('PRDATA[15:8]'), v.sel && v.sel.full];")
+    check(a == [True, 'PRDATA[15:8]'], f'Duplicate bits…: msb:lsb typed, the slice made and selected {a}')
+    # two cursors
+    js("v.setCursor(30000); v.setCursor2(150000);"); page.wait_for_timeout(150)
+    vals = js("return Object.fromEntries([...v.root.querySelectorAll('.names .row')].map(e => [(e.querySelector('.n') || {}).textContent, (e.querySelector('.v') || {}).title || (e.querySelector('.v') || {}).textContent]));")
+    check(vals.get('PADDR[7:0]') == '0x00 · 0x40 · +0x40 (−0xc0)' and vals.get('PSEL') == '0 · 1 · ↑' and vals.get('phase[1:0]') == 'IDLE → SETUP'
+          and vals.get('PREADY') == '0 · 0 · =' and vals.get('PADDR[7:2]', '').endswith('· +0x10 (−0x30)'), f'two cursors: A · B · the change (a bus, a bit, an enum, the same, a slice) {[(k, vals.get(k)) for k in ("PADDR[7:0]", "PSEL", "phase[1:0]", "PADDR[7:2]")]}')
+    js("v.menu(500, 300, v.M.rows.find(r => r.name === 'PADDR'), 30000);")
+    page.locator('.wv-menu button', has_text='Copy A · B · Δ').click(); page.wait_for_timeout(150)
+    a = js("return v.root.querySelector('.bar .toast').textContent;")
+    check('PADDR: 0x00 · 0x40 · +0x40 (−0xc0)' in a, f'Copy A · B · Δ: the values at both cursors and the change (S22-3) {a}')
+    js("v.setCursor2(null);"); page.wait_for_timeout(100)
+    a = js("return [...v.root.querySelectorAll('.names .row .v')].map(e => e.textContent).filter(t => t.includes(' · ')).length;")
+    check(a == 0, 'the second cursor gone: one value again')
+    D = page.evaluate("""(() => { const D = WaveLens.internal.cursorDiff, o = raw => ({ k: '=', raw });
+        return [D({ width: 8 }, o('fe'), o('02')), D({ width: 8, radix: 'dec' }, o('fe'), o('02')), D({ width: 8, radix: 'signed' }, o('02'), o('fe')),
+          D({ width: 8 }, o('0x'), o('02')), D({ width: 1 }, { k: '0' }, { k: '1' }), D({ kind: 'real' }, { k: '=', v: '1.5' }, { k: '=', v: '0.25' })]; })()""")
+    check(D == ['+0x4', '+4', '−4', '?', '↑', '−1.25'], f'the change: modulo the width (a counter round 0), signed, x, a bit, a real {D}')
+    D = page.evaluate("""(() => { const D = WaveLens.internal.cursorDiff, o = raw => ({ k: '=', raw });
+        return [D({ width: 32, radix: 'float' }, o('3f800000'), o('40000000')), D({ width: 16, radix: 'q8' }, o('0100'), o('0180')),
+          D({ width: 8, radix: 'bin' }, o('03'), o('08')), D({ width: 8, radix: 'ascii' }, o('41'), o('43')), D({ width: 8, radix: 'oct' }, o('00'), o('09')),
+          D({ width: 8 }, o('40'), o('00'), 'auto', true), D({ width: 8, radix: 'signed' }, o('40'), o('00'), 'auto', true)]; })()""")
+    check(D == ['+1', '+0.5', '+0b101', 'A → C', '+0o11', '+0xc0 (−0x40)', '−64 (+192)'],
+          f'the change in its radix: a float and a fixed point as values, bin, ascii, oct; both forms for the title (S22-1, S22-3) {D}')
+    check(not errs, f'no page errors {errs[:3]}')
+    page.close()
+
+
+def shared_marks(browser, build):
+    """Stage 24: sharedMarkers (a page of a view per test sets it): a marker of yours made in one viewer is in every viewer of the same dump,
+    the Δ too, undo takes it back in all; a page without the setting keeps them apart."""
+    cb, apb = build / 'examples' / 'cocotb_apb' / 'cocotb_apb.html', build / 'examples' / 'apb' / 'apb.html'
+    if not need(cb, apb, how='make examples cocotb'):
+        return
+    print('markers shared by the viewers of one dump')
+    page = browser.new_page(viewport={'width': 1400, 'height': 900})
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(cb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+    js = lambda e: page.evaluate(f"(async () => {{ const V = k => document.querySelector(`section[data-view=${{k}}] .wv`).waveView; {e} }})()")
+    a = js("""const a = V('tc2'), b = V('tc3'); const n0 = [a.umarks.length, b.umarks.length];
+        await a.run([{ op: 'marker', t: '200ns', label: 'mine' }]);
+        return [a.S.sharedMarkers, n0, b.umarks.map(m => m.label), a.umarks.map(m => m.label), V('run').umarks.length];""")
+    check(a[0] is True and a[1][0] == a[1][1] and 'mine' in a[2] and a[2] == a[3] and a[4] == len(a[3]),
+          f'a test page shares: a marker made in one view is in every view of the dump (the measures there in each already) {a}')
+    a = js("""const a = V('tc2'), b = V('tc3'); await a.undo(); return [a.umarks.some(m => m.label === 'mine'), b.umarks.some(m => m.label === 'mine')];""")
+    check(a == [False, False], f'undo in one: gone in each {a}')
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle')
+    a = page.evaluate("""(async () => { const [x, y] = WaveLens.views(); await x.run([{ op: 'marker', t: '50ns', label: 'own' }]);
+        return [x.S.sharedMarkers, y.umarks.some(m => m.label === 'own')]; })()""")
+    check(a == [False, False], f'a page without the setting: the viewers keep their own {a}')
+    # review S24-2: a marker dragged with the mouse is shared too (and stays so after a reload)
+    d = build / 'smoke_shared'
+    d.mkdir(exist_ok=True)
+    copy = d / 'cb.html'
+    shutil.copy(cb, copy)
+    page.goto(copy.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+    page.click('.tests button[data-view=tc2]'); page.wait_for_timeout(200)
+    g = js("""const a = V('tc2'); await a.run([{ op: 'marker', t: '200ns', label: 'drag' }]); a.draw();
+        const n = a.pageMarks.length, k = a.umarks.findIndex(m => m.label === 'drag'), t = a.bmGeo.tags.find(x => x.i === n + k), r = a.canvas.getBoundingClientRect();
+        return [r.left + t.x + 4, r.top + t.y, a.umarks[k].t];""")
+    page.mouse.move(g[0], g[1]); page.mouse.down(); page.mouse.move(g[0] + 20, g[1], steps=4); page.mouse.move(g[0] + 40, g[1], steps=4); page.mouse.up()
+    at = "const f = v => (v.umarks.find(m => m.label === 'drag') || {}).t; return [f(V('tc2')), f(V('tc3'))];"
+    a = js(at)
+    page.reload(); page.wait_for_load_state('networkidle')
+    b2 = js(at)
+    check(a[0] != g[2] and a[0] == a[1] and b2 == a, f'a marker dragged in tc2: tc3 has its new time, after a reload too {g[2]} {a} {b2}')
+    # review S17-1: the page rebuilt with another measure's time: the new pair shows, the marker of yours stays
+    js("await V('tc3').run([{ op: 'marker', t: '250ns', label: 'mine' }]);")
+    copy.write_text(copy.read_text(encoding='utf-8').replace('"to": 330002', '"to": 340002'), encoding='utf-8')
+    page.reload(); page.wait_for_load_state('networkidle')
+    a = js("const ts = V('tc3').umarks.map(m => m.t); return [ts.includes(340002), ts.includes(330002), V('tc3').umarks.some(m => m.label === 'mine')];")
+    check(a == [True, False, True], f'a rebuilt page: its new measure in the markers, the old one gone, yours kept {a}')
+    # review S24-3: with sharedMarkers the newest edits of the dump's markers win (tc1's newer [A] over tc2's older [])
+    copy2 = d / 'cb2.html'
+    shutil.copy(cb, copy2)
+    ve = lambda view, ops: subprocess.run([sys.executable, '-I', str(ROOT / 'tools' / 'viewedit.py'), str(copy2), '--view', view, '--ops', json.dumps(ops)],
+                                          capture_output=True, text=True)
+    ve('tc2', [{'op': 'marker', 'id': 'all', 'delete': True}])
+    time.sleep(0.05)
+    ve('tc1', [{'op': 'marker', 'id': 'all', 'delete': True}, {'op': 'marker', 't': '100ns', 'label': 'A'}])
+    page.goto(copy2.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+    a = js("return ['tc1', 'tc2'].map(k => V(k).umarks.map(m => m.label));")
+    check(a == [['A'], ['A']], f'edits of two views: the newest markers in both {a}')
+    # review S24-5: shared within one dump only (meta.waves)
+    for k, w in (('a1', 'a.vcd'), ('b', 'b.vcd'), ('a2', 'a.vcd')):
+        (d / f'{k}.json').write_text(json.dumps({'signal': [{'name': 'clk', 'wave': 'p.......'}], 'time': {'t0': 0, 't1': 80000, 'cycle': 10000, 'unit': 'ps'},
+                                                 'meta': {'waves': w}}))
+    subprocess.run([sys.executable, '-I', str(ROOT / 'tools' / 'mkhtml.py')] + [f'{k}={d / (k + ".json")}' for k in ('a1', 'b', 'a2')] +
+                   ['--no-sva', '--out', str(d / 'two.html')], capture_output=True)
+    page.goto((d / 'two.html').as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()')
+    a = page.evaluate("""(async () => { WaveLens.configure({ sharedMarkers: true }); const [x, y, z] = WaveLens.views();
+        await x.run([{ op: 'marker', t: '30ns', label: 'one' }]); return [y.umarks.length, z.umarks.map(m => m.label)]; })()""")
+    check(a == [0, ['one']], f'two dumps on a page: a marker goes to the views of its own dump only {a}')
+    check(not errs, f'no page errors {errs[:3]}')
+    page.close()
+
+
+def fsm_shell(browser, build):
+    """Stage 25: tools/fsmstats.py counts an FSM in a dump as the page's FSM panel does (fsm_stats): the same states, entries, time and changes."""
+    fsm, vcd = build / 'examples' / 'fsm' / 'fsm.html', build / 'examples' / 'fsm' / 'fsm.vcd'
+    if not need(fsm, vcd, how='make examples'):
+        return
+    print('fsm: the statistics from the shell and the page')
+    page = browser.new_page()
+    page.goto(fsm.as_uri()); page.wait_for_load_state('networkidle')
+    js = page.evaluate("""(async () => { const v = WaveLens.views().find(x => x.editKey() === 'run');
+        return [(await v.run([{ op: 'fsm_stats', signal: 'state' }]))[0], v.M.t0, v.M.t1]; })()""")
+    r = subprocess.run([sys.executable, '-I', str(ROOT / 'tools' / 'fsmstats.py'), str(vcd), '--signal', 'state', '--from', f'{js[1]}ps', '--to', f'{js[2]}ps', '--json'],
+                       capture_output=True, text=True)
+    py = json.loads(r.stdout or '{}')
+    pick = lambda d: [[x['state'], x['entries'], x['time'], x['first']] for x in d.get('states', [])] + [[c['from'], c['to'], c['count'], c['first']] for c in d.get('changes', [])]
+    check(r.returncode == 0 and pick(py) == pick(js[0]) and py.get('never') == js[0].get('never'), f'fsmstats.py and the page: one count {pick(py)} {pick(js[0])} {r.stderr.strip()}')
+    r = subprocess.run([sys.executable, '-I', str(ROOT / 'tools' / 'fsmstats.py'), str(vcd), '--signal', 'state', '--to', '400ns', '--strict'], capture_output=True, text=True)
+    check(r.returncode == 1 and 'never enters ERROR' in r.stderr, f'--strict: a state never reached is exit 1 (CI) {r.returncode} {r.stderr.strip()}')
+    # review S25-4: a state with no value when the dump starts (first written at #10): x until then, on both sides
+    d = build / 'smoke_fsm_x'
+    d.mkdir(exist_ok=True)
+    xv = d / 'xfirst.vcd'
+    xv.write_text('$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! clk $end\n$var wire 2 " state [1:0] $end\n$upscope $end\n'
+                  '$enddefinitions $end\n#0\n0!\n#10\n1!\nb1 "\n#20\n0!\n#30\n1!\nb10 "\n#40\n0!\nb0 "\n#50\n')
+    cfg = d / 'xfirst.config.json'
+    cfg.write_text(json.dumps({'waves': str(xv), 'scope': 'tb', 'enum': {'state': {'0': 'IDLE', '1': 'RUN', '2': 'DONE', '3': 'ERR'}},
+                               'views': {'v': {'signals': ['clk', 'state'], 'exact': True}}}))
+    r = subprocess.run([sys.executable, '-I', str(ROOT / 'tools' / 'mkhtml.py'), '--config', str(cfg), '--out', str(d / 'xfirst.html'), '--no-sva'],
+                       capture_output=True, text=True)
+    page.goto((d / 'xfirst.html').as_uri()); page.wait_for_load_state('networkidle')
+    js = page.evaluate("""(async () => { const v = WaveLens.views()[0];
+        return [(await v.run([{ op: 'fsm_stats', signal: 'state' }]))[0], v.M.t0, v.M.t1]; })()""")
+    r = subprocess.run([sys.executable, '-I', str(ROOT / 'tools' / 'fsmstats.py'), str(xv), '--signal', 'state', '--enum', 'tb.state=0:IDLE,1:RUN,2:DONE,3:ERR',
+                        '--from', f'{js[1]}ps', '--to', f'{js[2]}ps', '--json'], capture_output=True, text=True)
+    py = json.loads(r.stdout or '{}')
+    inv = lambda d: [[x['state'], x['entries'], x['time']] for x in d.get('invalid', [])]
+    check(r.returncode == 0 and pick(py) == pick(js[0]) and inv(py) == inv(js[0]) == [['X', 1, 10000]],
+          f'a state first written at 10 ns: x before it, one count {inv(py)} {inv(js[0])} {pick(py)} {pick(js[0])} {r.stderr.strip()}')
+    page.close()
+
+
+def small_ui(browser, build):
+    """Stage 26: a filter line in Markers… (gm) and the groups' list (ctrl+G); Keep as span… / As range in the menus; a divider among your groups."""
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('viewer: the menus\' filter, a range kept as a span, a divider')
+    page = browser.new_page(viewport={'width': 1400, 'height': 1000})
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+    js = lambda e: page.evaluate(f"(async () => {{ const v = document.querySelectorAll('.wv')[1].waveView, I = WaveLens.internal; {e} }})()")
+    js("""await v.run([{ op: 'marker', t: '45ns', label: 'request' }, { op: 'marker', t: '85ns', label: 'ack' }, { op: 'marker', t: '145ns', label: 'retry' }]);
+        v.marksMenu();""")
+    f = page.locator('.wv-marks input.mf')
+    check(f.count() == 1 and page.evaluate("document.activeElement.classList.contains('mf')"), 'gm: a filter line at the top, the focus in it')
+    page.keyboard.type('rq')
+    shown = lambda sel: page.evaluate(f"[...document.querySelectorAll('{sel} button[data-i], {sel} button[data-g]')].filter(b => !b.hidden).map(b => b.textContent)")
+    a = shown('.wv-marks')
+    check(len(a) == 1 and 'request' in a[0] and page.locator('.wv-marks button:not([hidden]) u').count() == 2, f'typed "rq": only request, its letters marked {a}')
+    page.keyboard.press('Enter')
+    a = js("return [v.cursor, !!document.querySelector('.wv-marks')];")
+    check(a == [45000, False], f'Enter: the first match, the menu closed {a}')
+    js("v.marksMenu();"); page.keyboard.type('zzz')
+    check(page.locator('.wv-marks .mfn:not([hidden])').count() == 1, 'nothing matches: said')
+    page.keyboard.press('Escape')
+    js("""await v.run([{ op: 'group', name: 'handshake', signals: ['PSEL', 'PENABLE'] }, { op: 'group', name: 'data', signals: ['PWDATA'] }]); v.groupsMenu();""")
+    page.keyboard.type('dt'); page.keyboard.press('Enter'); page.wait_for_timeout(100)
+    a = js("return v.sel && v.sel.full;")
+    check(a == 'PWDATA', f'ctrl+G: filtered, Enter goes to the group (its first signal) {a}')
+    # Keep as span…, As range
+    js("v.setRange(55000, 95000); v.menu(500, 300, v.M.rows.find(r => r.name === 'PADDR'), 70000);")
+    page.locator('.wv-menu button', has_text='Keep as span…').click()
+    page.keyboard.type('the read'); page.keyboard.press('Enter'); page.wait_for_timeout(150)
+    a = js("return [v.spans.map(s => [s.from, s.to, s.label]), v.range];")
+    check(a == [[[55000, 95000, 'the read']], [55000, 95000]], f'Keep as span…: a span over the range with its label, the range stays {a}')
+    js("v.setRange(null); v.menu(500, 300, v.M.rows.find(r => r.name === 'PADDR'), 70000);")
+    page.locator('.wv-menu button', has_text='As range').click()
+    a = js("return [v.range, (await v.undo(), v.spans.length)];")
+    check(a == [[55000, 95000], 0], f'As range: the span measured; undo takes the span back {a}')
+    # a divider
+    r = js("""return v.run([{ op: 'group', name: '— Handshake —', divider: true }, { op: 'group', name: 'bad', divider: true, signals: 'PSEL' }]);""")
+    a = js("""const row = I.peek(v).vis.find(r => r.name === '— Handshake —'), el = I.peek(v).rowEls[I.peek(v).vis.indexOf(row)];
+        return [row && row.cls, el && el.classList.contains('ugdiv'), v.state().groups.find(g => g.name === '— Handshake —'), v.toSVG({ from: 0, to: 200000 }).includes('Handshake')];""")
+    check(a[0] == 'ugdiv' and a[1] and a[2] == {'name': '— Handshake —', 'signals': [], 'divider': True} and a[3] and 'no signals' in r[1].get('error', ''),
+          f'a divider: a row of its own in the names, kept in the state, in the picture; with signals refused {a} {r[1]}')
+    # review S26-2: the divider is a line through the waves in the picture too, its name muted, not a bold group
+    svg = js("return v.toSVG({ from: 0, to: 200000 });")
+    m = re.search(r'<text x="[\d.]+" y="([\d.]+)"[^>]*font-weight:(\d+)[^>]*>— Handshake —</text>', svg)
+    y = m and float(m.group(1))
+    lines = m and re.findall(r'<path d="M[\d.]+ ' + re.escape(f'{round(y) + 0.5:g}') + r'L', svg)
+    check(m and m.group(2) == '400' and len(lines) >= 3, f'the SVG: the divider a line across the names and the waves, its name not bold {m and m.groups()} {lines and len(lines)}')
+    # review S26-3: a divider is no row to hide, no group to go to
+    a = js("""await v.run([{ op: 'hide', signals: '@— Handshake —' }]); v.groupsMenu();
+        const t = [...document.querySelectorAll('.wv-groups button[data-g]')].map(b => b.textContent); v.closeMenu();
+        return [I.peek(v).vis.some(r => r.name === '— Handshake —'), t.some(x => x.includes('Handshake')), t.length];""")
+    check(a == [True, False, 2], f'hide leaves a divider; ctrl+G lists the groups, not the divider {a}')
+    # review S26-1, S26-4: the filter hides in place (the order and the headers come back); Enter with nothing typed closes
+    js("v.setCursor(10000); v.marksMenu();")
+    order = lambda: page.evaluate("[...document.querySelectorAll('.wv-marks > *')].map(e => e.tagName + (e.dataset.i || '') + (e.hidden ? '-' : ''))")
+    o0 = order()
+    page.keyboard.type('re'); page.keyboard.press('Backspace'); page.keyboard.press('Backspace')
+    o1 = order()
+    page.keyboard.press('Enter')
+    a = js("return [v.cursor, !!document.querySelector('.wv-marks')];")
+    check(o0 == o1 and a == [10000, False], f'typed and cleared: the list as it was; Enter with nothing typed closes, the cursor stays {a} {o0[:6]} {o1[:6]}')
+    check(not errs, f'no page errors {errs[:3]}')
+    page.close()
+
+
+def dump_stats(browser, build):
+    """Stage 27: the dump's statistics (mkhtml.py, meta.stats) in the page's log: a line, the busiest and the never changing under it, quiet."""
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('the dump\'s statistics in the log')
+    page = browser.new_page()
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle')
+    a = page.evaluate("""(() => { const v = WaveLens.views()[0], e = v.logList().find(x => x.text.startsWith('the dump:'));
+        return e && [e.text, e.items.length, e.items[0], e.quiet, e.items.some(x => x.startsWith('never changes'))]; })()""")
+    check(a and a[0].startswith('the dump: 61 signals, 58 change, 3 never change · the busiest apb_tb.PCLK (41)') and a[1] == 13 and a[3] is True and a[4],
+          f'a line of the log with the busiest and the ones that never change under it, quiet (the strip not shown for it) {a}')
+    page.close()
+
+
+def your_keys(browser, build):
+    """Stage 28: the setting keys — a sequence of your own (gx as gm), a key taken away (m), one key as another (M as m), ctrl+k as ctrl+g; the box
+    of g and ? list them; the layers merge key by key; what it cannot take is said in the log."""
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('viewer: your keys')
+    page = browser.new_page(viewport={'width': 1400, 'height': 1000})
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+    page.evaluate("""WaveLens.configure({ keys: { gx: 'gm', m: null, M: 'm', 'ctrl+k': 'ctrl+g', g: 'f' } });
+        const v = WaveLens.views()[0]; v.run([{ op: 'group', name: 'gr', signals: 'PSEL' }]); v.canvas.focus();""")
+    js = lambda e: page.evaluate(f"(async () => {{ const v = WaveLens.views()[0], I = WaveLens.internal; {e} }})()")
+    page.keyboard.press('g'); page.wait_for_selector('.wv-keys', timeout=3000)
+    box = page.locator('.wv-keys').inner_text()
+    page.keyboard.press('x'); page.wait_for_timeout(150)
+    check('Your keys' in box and 'the list of them' in box and 'list of expressions' not in box and page.locator('.wv-marks').count() == 1,
+          f'gx as gm: the list of markers; the box of g lists it with what it does, not the plugin\'s gx {box[-80:]!r}')
+    page.keyboard.press('Escape'); js("v.canvas.focus();")
+    page.keyboard.press('m'); page.wait_for_timeout(100)
+    a = [page.locator('.wv-ask').count(), js("return v.root.querySelector('.bar .toast').textContent;")]
+    check(a[0] == 0 and 'not a key here' in a[1], f'm taken away: nothing asked, said {a}')
+    page.keyboard.press('Shift+M'); page.wait_for_timeout(100)
+    check(page.locator('.wv-ask').count() == 1, 'M as m: a marker, its label asked')
+    page.keyboard.press('Escape'); js("v.canvas.focus();")
+    page.keyboard.press('Control+k'); page.wait_for_timeout(100)
+    check(page.locator('.wv-groups').count() == 1, 'ctrl+k as ctrl+g: the list of your groups')
+    page.keyboard.press('Escape'); js("v.canvas.focus();")
+    page.keyboard.press('?'); page.wait_for_timeout(100)
+    hp = page.locator('.wv-help').inner_text()
+    check('your keys' in hp.lower() and 'none (taken away)' in hp, f'Help (?) lists your keys {hp[-120:]!r}')
+    a = js("""return [WaveLens.internal.settings({ keys: { a: 'b', c: 'd' } }, { keys: '{"a": null}' }).keys, v.logList().some(e => e.text.startsWith('the setting keys'))];""")
+    check(a == [{'a': None, 'c': 'd'}, True], f'the layers key by key (a text of data-keys too); g, the viewer\'s own, said in the log {a}')
+    # review S28-1..4
+    page.keyboard.press('Escape')
+    js("WaveLens.configure({ keys: { x: 'q', m: null } }); v.canvas.focus();")
+    page.keyboard.press('x'); page.wait_for_timeout(100)
+    a = js("return [v.root.querySelector('.bar .toast').textContent, v.logList().some(e => e.text.includes('x → q'))];")
+    check('no such key' in a[0] and 'q' in a[0] and a[1], f'a key standing for no key of the viewer: said in a toast and the log (S28-1) {a}')
+    page.keyboard.press('?'); page.wait_for_timeout(100)
+    a = page.evaluate("[...document.querySelectorAll('.wv-help kbd')].filter(k => k.textContent === 'm').length")
+    check(a == 1, f'Help: a key taken away is listed once, under your keys, not as the viewer\'s (S28-2) {a}')
+    page.keyboard.press('Escape')
+    a = js("""WaveLens.configure({ keys: { ArrowUp: 'k', 'ctrl+z': 'f' } }); await v.run([{ op: 'group', name: 'hs', signals: ['PSEL', 'PENABLE'] }]);
+        v.select(I.peek(v).vis.find(r => r.full === 'PENABLE' && r.ug)); v.canvas.focus(); return true;""")
+    page.keyboard.press('Alt+ArrowUp'); page.wait_for_timeout(100)
+    a = js("return v.ugroups.find(g => g.name === 'hs').signals;")
+    check(a == ['PENABLE', 'PSEL'], f'alt+↑ is the viewer\'s, not your ↑ (S28-3) {a}')
+    a = js("WaveLens.configure({ keys: { abc: 'x' } }); return v.logList().some(e => e.items && e.items.some(i => i.startsWith('abc')));")
+    check(a, 'a key it cannot take: said in the log at once, before any key (S28-4)')
+    a = js("""WaveLens.configure({ keys: { x: 'f' } }); const h = document.createElement('div'); h.dataset.wave = v.root.dataset.wave;
+        h.dataset.keys = '{"x": "gm"}'; document.body.append(h); WaveLens.upgrade(document.body); const w = h.waveView || WaveLens.views().slice(-1)[0];
+        const r = [w.keymap().x, v.keymap().x]; w.destroy(); h.remove(); WaveLens.configure({ keys: null }); return r;""")
+    check(a == ['gm', 'f'], f'data-keys on the element over the configuration (a real viewer) {a}')
+    a = js("""const K = WaveLens.internal.keymapOf; const r = K({ 'Ctrl+K': 'ctrl+g', gq: 'z', zz: null, abc: 'x', '?': 'h', x: 'gm' });
+        return [r.map, r.bad.length];""")
+    check(a == [{'ctrl+k': 'ctrl+g', 'gq': 'z', 'zz': None, 'x': 'gm'}, 2], f'keymapOf: ctrl+ in small letters, g / z sequences; abc and ? not taken {a}')
+    check(not errs, f'no page errors {errs[:3]}')
+    page.close()
+
+
 def marker_delta_ends(browser, build):
     """An arrow of the Δ to any marker, through the ones between: the list's choice and its end dragged with the mouse, lines of their own over the rows; the colour of
     an arrow and of a whole line between the rows; a hidden marker; the clearing of bookmarks and markers; in the state, a reload, undo, a picture, a delete."""
@@ -4904,7 +5579,7 @@ def ranges(browser, build):
     page.mouse.move(box['x'] + r[1] + 3, box['y'] + r[0]); page.mouse.down(button='right'); page.mouse.move(box['x'] + r[2] + 2, box['y'] + r[0], steps=5); page.mouse.up(button='right')
     menu = page.locator('.wv-menu')
     items = menu.locator('button[data-m]').evaluate_all('bs => bs.map(b => b.dataset.m)')
-    check(js('v.range') == [r[3], r[4]] and items[:6] == ['zoom', 'marks', 'copyd', 'copyimg', 'png', 'svg'] and {'hl', 'hide', 'mark', 'copyname', 'clear'} <= set(items) and 'PSEL' in menu.inner_text(),
+    check(js('v.range') == [r[3], r[4]] and items[:4] == ['zoom', 'marks', 'copyd', 'keepsp'] and {'copyimg', 'png', 'svg', 'hl', 'hide', 'mark', 'copyname', 'clear'} <= set(items) and 'PSEL' in menu.inner_text(),
           f'the right button: the same range, then its menu (range, picture, the signal under the pointer) {items}')
     with page.expect_download() as dl:
         menu.locator('button[data-m=svg]').click()
@@ -6758,6 +7433,17 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'review_1103': 'what the review of 2026-11-03 found on the page: B-01, B-03, B-04, B-06, B-07, B-08, B-10, B-12, B-13, B-21 to B-24',
     'key_hints': 'r R, the box after the first key of a sequence: keys, clicks, Esc; keyHints; the menu g; Help',
     'marker_delta_ends': 'the Δ to any marker (list, its end dragged), the colour of a line, a hidden marker, clearing',
+    'moment_link': 'a link to a moment: #t=…&sel=…&view=…&bm=… opened and changed, after this browser\'s state; Copy link, yl, goto',
+    'cfg_round': 'the look of a view in its config (viewedit.py --config: "state") opens the page built of it; exprLibrary in the editor',
+    'bus_list': 'the transfers of the buses as a list under the waves: a click, ]t, the filters, CSV, the bus_list command',
+    'expr_bus': 'an expression wider than a bit as a bus row: its radix and plot by the command, a reload, the SVG',
+    'bus_slices': 'a slice of a bus as a row (duplicate bits, Duplicate bits…), the values at two cursors and their change',
+    'shared_marks': 'sharedMarkers: a marker of yours in one viewer is in each of the same dump (a page of a view per test); undo; apart without it',
+    'fsm_shell': 'tools/fsmstats.py counts an FSM in a dump as the page does; --strict exits 1 on a state never reached',
+    'small_ui': 'a filter line in Markers… and the groups\' list, Keep as span… / As range, a divider among your groups',
+    'dump_stats': 'the dump\'s statistics (mkhtml.py meta.stats) as a quiet line of the log',
+    'your_keys': 'the setting keys: a sequence of your own, a key taken away, one as another, ctrl+; the boxes and ? list them; the layers',
+    'marker_measure': 'the matches of an expression as markers (|Δ|, expr_markers), the Δ in cycles, a bound dmin / dmax red, the measures table',
     'marker_lanes': 'the text of a marker on a line over or under a signal: the mouse, the colour, the list, the picture, undo',
     'ranges': 'a range on the waves (shift+drag, the right button) and its menu: zoom, bookmarks, the picture, a colour',
     'tips': 'every control has a tooltip with its keys; ? shows the keys and the mouse',
@@ -6986,6 +7672,17 @@ def main():
         run('duplicates', duplicates, b, build)
         run('marker_deltas', marker_deltas, b, build)
         run('marker_delta_ends', marker_delta_ends, b, build)
+        run('marker_measure', marker_measure, b, build)
+        run('moment_link', moment_link, b, build)
+        run('cfg_round', cfg_round, b, build)
+        run('bus_list', bus_list, b, build)
+        run('expr_bus', expr_bus, b, build)
+        run('bus_slices', bus_slices, b, build)
+        run('shared_marks', shared_marks, b, build)
+        run('fsm_shell', fsm_shell, b, build)
+        run('small_ui', small_ui, b, build)
+        run('dump_stats', dump_stats, b, build)
+        run('your_keys', your_keys, b, build)
         run('key_hints', key_hints, b, build)
         run('review_1103', review_1103, b, build)
         run('undo', undo, b, build)

@@ -25,6 +25,7 @@ V2W := $(PY) tools/vcd2wavedrom.py --config $(DEMO_CONFIG) --waves $(VCD)
 #   make html WAVES=work/x.vcd   -> work/x.html (makes work/x.config.json first if it does not exist yet, updates it
 #                                   when work/x.types.json is newer: the design's types by path, svtypes.py)
 #   make html WAVES=x.vcd SVA="checks/*.sv" BIND="a_req_ack@tb.dut,apb_*@tb.u_apb"   assertions bound and evaluated
+#   make html WAVES=x.vcd PNG=artifacts JUNIT=artifacts/report.xml   a PNG of every view, the assertions as JUnit (CI)
 #   make config WAVES=x.vcd SVA="checks/*.sv"   the config gets "sva" and a "bind" line per matching instance
 #   WAVES may be a VCD or an FST (read by GTKWave's fst2vcd, else by the sva CLI of bin/: the same text, enums too).
 #   FSM state names: an FST brings its enum tables; for a VCD work/x.types.json beside it (tools/svtypes.py: Questa's
@@ -69,6 +70,8 @@ help:
 	@echo 'make sva-examples  sva parse + sva eval of the assertion files of examples/ (apb, axi_lite, fsm; after make examples)'
 	@echo 'make sva-verify the checkers of the examples in Verilator --assert against sva eval (after make examples; skipped without verilator)'
 	@echo 'make sva-eval   WAVES=dump.vcd|fst SVA="pkg.sv checks.sva" SCOPE=tb.dut [OUT=results.json] [ARGS=...]: sva eval'
+	@echo 'make fsm-stats  WAVES=dump.vcd|fst SIGNAL=u_ctl.state [ARGS="--strict --json"]: an FSM'"'"'s states (tools/fsmstats.py)'
+	@echo 'make diff-results A=a.json B=b.json [ARGS=...]: two runs'"'"' assertion results compared (sva diff --results)'
 	@echo 'make fst        WAVES=tb.vcd [OUT=tb.fst] [ARGS=--no-types]: sva fst, the VCD as an FST beside it (FSM states of tb.types.json in it)'
 	@echo 'make diff       REF=a.vcd|fst WAVES=b.vcd|fst [ARGS="--map a.top=b.top --segment tb_test --json d.json"]: sva diff, two runs change by change'
 	@echo 'make sva-spike  the spike page $$(BUILD)/sva/spike.html (the WebAssembly build and wavelens/sva.js in a page)'
@@ -233,7 +236,8 @@ SVA_GLOB = $(if $(SVA),$(or $(wildcard $(SVA)),$(error no file matches SVA=$(SVA
 SVA_FILES = $(foreach f,$(SVA_GLOB),--sva $(f))
 SVA_BINDS = $(foreach b,$(subst $(comma), ,$(BIND)),--bind '$(b)')
 html: wavelens/wavelens.js $(CONFIG) $(if $(filter $(DEMO_CONFIG),$(CONFIG)),$(VCD))
-	$(PY) tools/mkhtml.py --config $(CONFIG) $(if $(HTML_WAVES),--waves $(HTML_WAVES)) $(SVA_OPT) $(SVA_FILES) $(SVA_BINDS) --out $(HTML)
+	$(PY) tools/mkhtml.py --config $(CONFIG) $(if $(HTML_WAVES),--waves $(HTML_WAVES)) $(SVA_OPT) $(SVA_FILES) $(SVA_BINDS) --out $(HTML) \
+		$(if $(PNG),--png $(PNG)) $(if $(JUNIT),--junit $(JUNIT))
 
 config:
 	$(if $(WAVES),,$(error make config needs WAVES=dump.vcd))
@@ -329,6 +333,17 @@ sva-eval: sva-build
 	$(if $(SVA),,$(error make sva-eval needs SVA=checks.sva (several: SVA="pkg.sv checks.sva")))
 	$(SVA_BIN) eval --waves $(WAVES) $(foreach f,$(SVA),--sva $(f)) $(if $(SCOPE),--scope $(SCOPE)) $(if $(OUT),--out $(OUT)) $(ARGS)
 
+# an FSM's states in a dump (entries, time, never reached; --strict: exit 1 on one never reached): make fsm-stats WAVES=x.fst SIGNAL=u.state
+fsm-stats:
+	$(if $(WAVES),,$(error make fsm-stats needs WAVES=dump.vcd|fst))
+	$(if $(SIGNAL),,$(error make fsm-stats needs SIGNAL=the state signal))
+	$(PY) tools/fsmstats.py $(WAVES) --signal $(SIGNAL) $(ARGS)
+
+# the assertions' results of two runs (sva eval --json): new, gone, moved failures, covers lost: make diff-results A=a.json B=b.json
+diff-results: sva-build
+	$(if $(and $(A),$(B)),,$(error make diff-results needs A=a.json B=b.json))
+	$(SVA_BIN) diff --results $(A) $(B) $(ARGS)
+
 sva-spike: sva-build $(VCD)
 	mkdir -p $(B)/sva
 	$(PY) sva/spike/mkspike.py $(SVA_WASM) $(B)/sva/spike.html
@@ -422,4 +437,4 @@ clean-all:
 	$(if $(filter $(B),/ $(CURDIR) $(HOME) $(abspath $(HOME)/..)),$(error clean-all: BUILD=$(B) is not a build directory))
 	rm -rf $(B)
 
-.PHONY: cocotb pageshot unit-bless unit-shuffle vsix dist-vsix vscode-e2e wavelens help demo demo-fst fst diff example examples questa types-fixture missing-fixture shots guide-shots html config sva-build dist dist-linux dist-windows sva-test sva-bless sva-examples sva-verify sva-eval sva-spike mcp-bench smoke shots-check unit check fmt lint clean clean-all
+.PHONY: fsm-stats diff-results cocotb pageshot unit-bless unit-shuffle vsix dist-vsix vscode-e2e wavelens help demo demo-fst fst diff example examples questa types-fixture missing-fixture shots guide-shots html config sva-build dist dist-linux dist-windows sva-test sva-bless sva-examples sva-verify sva-eval sva-spike mcp-bench smoke shots-check unit check fmt lint clean clean-all

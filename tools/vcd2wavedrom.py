@@ -355,7 +355,7 @@ def nice_floor(x):
 
 # ---------------- options: command line + config file ----------------
 LIST_KEYS = ('signals', 'also', 'gap', 'enum', 'group', 'marker', 'sva', 'bind', 'exprs')
-SKIP_KEYS = ('views', 'page', 'config', 'description', 'comment', 'render', 'note', 'select', 'rules', 'typed', 'report', 'compare')   # not converter options
+SKIP_KEYS = ('views', 'page', 'config', 'description', 'comment', 'render', 'note', 'select', 'rules', 'typed', 'report', 'compare', 'state')   # not converter options
 SIG_KEYS = ('show', 'alias', 'radix', 'color', 'fill', 'style', 'enum', 'width', 'changes', 'enumColors', 'analog', 'height', 'fields')   # catalog entry keys
 
 
@@ -386,6 +386,8 @@ def parser():
     ap.add_argument('--also', action='append', help='more rows by name or pattern ("*fifo_full"); one the dump has not got is a lint warning, not an error')
     ap.add_argument('--spans', help='JSON list [{"from", "to", "label", "color", "signals"}]: coloured stretches of time; from / to a time, an event '
                     '(as a bookmark\'s "at") or {"bookmark": n}')
+    ap.add_argument('--measures', help='JSON list [{"label", "from", "to", "min"?, "max"?, "signal"?, "color"?}]: times measured (a cocotb test\'s '
+                    'wl.measure, tools/testmarks.py): a pair of markers each with the Δ between them, red out of min / max ("120ns", "3 cycles")')
     ap.add_argument('--sva', action='append', help='SystemVerilog assertion file for the page (repeatable; one compilation unit, in order)')
     ap.add_argument('--bind', action='append', help='NAME@SCOPE: bind assertion NAME to instance SCOPE, evaluated over the dump (repeatable)')
     ap.add_argument('--expr', dest='exprs', action='append', help='an expression of the signals on the page\'s list, marked on the waves and drawn as a row (ƒ expressions; repeatable), e.g. "PSEL && !PREADY"')
@@ -814,6 +816,8 @@ def finish(a, rd, doc, specs, marks, t_from, t_to):
         doc['bookmarks'] = bookmarks_on_rows(doc, specs)
     if span_list(a):
         doc['spans'] = spans_of(a, rd, doc.get('bookmarks') or [], specs, t_from, t_to)
+    if getattr(a, 'measures', None):
+        doc['measures'] = measures_of(a)
     if getattr(a, 'compare', None):
         doc['compare'] = compare_of(a, doc, t_from, t_to)
     if a.exprs:   # the page values them (the rows "ƒ expressions"); a scope: {"expr", "scope"}
@@ -871,6 +875,24 @@ def bookmark_list(a):
             raise WaveError(f'vcd2wavedrom: --bookmarks: {e}') from None
     a.bookmarks = v if isinstance(v, list) else [] if v is None else v
     return a.bookmarks if isinstance(a.bookmarks, list) else []
+
+
+def measures_of(a):
+    """The measurements of the options (a list, or its JSON text from --measures), their ends in ps -> the WaveJSON's "measures"."""
+    v = a.measures
+    if isinstance(v, str):
+        try:
+            v = json.loads(v)
+        except json.JSONDecodeError as e:
+            raise WaveError(f'vcd2wavedrom: --measures: {e}') from None
+    out = []
+    for i, m in enumerate(v if isinstance(v, list) else [v]):
+        if not isinstance(m, dict) or bm_time(m.get('from')) is None or (m.get('to') is not None and bm_time(m['to']) is None):
+            raise WaveError(f'vcd2wavedrom: {where_of(a)}measures[{i}]: {{"label", "from", "to", "min"?, "max"?, "signal"?, "color"?}} with times, '
+                            f'not {json.dumps(m, ensure_ascii=False)[:80]}')
+        x = {**m, 'from': bm_time(m['from']), 'to': None if m.get('to') is None else bm_time(m['to'])}
+        out.append({k: (int(t) if isinstance(t, float) and t.is_integer() else t) for k, t in x.items()})
+    return out
 
 
 def span_list(a):
@@ -1293,6 +1315,19 @@ def lint(doc, a, where=None):
                 out.append(f'bookmarks-close: {at}bookmarks (n {n1}, n {n2}): {(tb - ta) * 1000 / (t1 - t0):.0f} px apart at 1000 px of the whole window on '
                            f'{s1}: they overlap (a heuristic: zoomed in they part); lift one of them ("lift": true)')
     cfg = doc.get('config') or {}
+    cyc_bound = lambda b: (isinstance(b, dict) and 'cycles' in b) or (isinstance(b, str) and re.fullmatch(r'\s*\d+(\.\d+)?\s*(cycles?|clk)\s*', b, re.I))
+    meas = [i for i, x in enumerate(doc.get('measures') or []) if isinstance(x, dict) and (cyc_bound(x.get('min')) or cyc_bound(x.get('max')))]
+    if meas:   # the page counts cycles on cycleClock, else a clock it finds (a 1-bit row named clk / clock, or a wave of p / n)
+        def clockish(items):
+            for it in items:
+                if isinstance(it, list) and clockish([x for x in it if not isinstance(x, str)]):
+                    return True
+                if isinstance(it, dict) and (re.search('clk|clock', str(it.get('name', '')), re.I) or str(it.get('wave', ''))[:1] in ('p', 'n', 'P', 'N')):
+                    return True
+            return False
+        if not (cfg.get('cycleClock') in have or clockish(doc.get('signal') or [])):
+            out.append(f'measure-no-clock: {at}measures[{meas[0]}]: a bound in cycles on a view with no clock to count them on: the Δ is not '
+                       'checked ("? no clock"); add the clock to the view, or set cycleClock')
     if cfg.get('theme') in (None, 'auto'):
         sigs = []
         def walk(items):

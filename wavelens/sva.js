@@ -1003,7 +1003,9 @@ class Panel {
     v.listen('names', 'drop', e => { const t = this.dropTarget(e); if (!t) return; e.preventDefault(); this.dragEnd(); this.drop(t); });
     v.root.addEventListener('wavelens:settings', () => this.sync(), { signal: v.ac.signal });   // sortIgnore prefixes: the names resolve again
     if (v.extraJSON) v.extraJSON.push(() => this.bindings.length ? `"bind": [\n${this.bindJSON().map(x => '  ' + JSON.stringify(x)).join(',\n')}\n]` : null);
-    if (v.extraState) v.extraState.push({ key: 'sva', get: () => this.snapshot(), set: s => this.restore(s) });
+    // undo: the bindings and the hidden ones (not the files read: a load is no step of its own)
+    if (v.extraState) v.extraState.push({ key: 'sva', get: () => this.snapshot(), set: s => this.restore(s),
+      undo: () => ({ bind: this.bindJSON(), hidden: [...this.hidden] }) });
     // on the waves: the rows of the bindings, f / F through the failures, Esc unselects
     this.selA = null; this.dirty = true; this.at = new Map(); this.sumN = 0;
     this.el.addEventListener('change', e => { if (e.target.matches('select[data-sv=ffilter]')) { this.failFilter = e.target.value;
@@ -1036,6 +1038,7 @@ class Panel {
     if (Object.keys(results).length) rec.wave = this.wave();
     if (JSON.stringify(results).length > 200000) delete rec.results;
     if (!store.set(this.key, rec)) this.toast('not kept in this browser: its storage is full or off');
+    if (this.v.undoTick) this.v.undoTick();   // a binding changed: a step of undo
     this.saved = rec;
   }
   bindJSON() { return this.bindings.map(b => ({ assert: b.assert, scope: b.scope })); }
@@ -1949,16 +1952,20 @@ class Exprs {
     this.el.addEventListener('keydown', e => this.keyDown(e));
     // before the names are drawn again
     v.listen('names', 'click', e => { const r = v.rowAt(e.target); if (r && r.x && this.list.includes(r.x)) this.pick(r.x); }, { capture: true });
-    if (v.extraRows) v.extraRows.push(grp => (grp ? [] : exprRows(this.st, this.list)));
+    // the rows ƒ; a bus of them in the radix and the plot this browser keeps for it (the menu, expr radix / analog), as a signal's
+    if (v.extraRows) v.extraRows.push(grp => (grp ? [] : exprRows(this.st, this.list).map(r => this.look(r))));
     v.extraMarks.push(() => exprMarks(this.list, this.cur));
     v.extraKeep = { by: () => this.list.flatMap((x, i) => (x.gap ? [i + 1] : [])), spans: () => this.keeps(), off: cut => this.noGaps(cut) };
-    if (v.extraState) v.extraState.push({ key: 'exprs', get: () => this.json(), set: l => this.setList(l) });
+    if (v.extraState) v.extraState.push({ key: 'exprs', get: () => this.json(), set: l => this.setList(l), undo: true });
     if (v.extraJSON) v.extraJSON.push(() => (this.list.length ? this.jsonText() : null));
     v.addKey(']x', () => this.step(1), ']x [x next / previous match of the expression').addKey('[x', () => this.step(-1));
     v.addKey(']X', () => this.stepList(1), ']X [X next / previous expression').addKey('[X', () => this.stepList(-1));
     v.addKey('gx', () => this.toggle(), 'gx the list of expressions');
     v.root.addEventListener('wavelens:settings', () => this.settings(), { signal: v.ac.signal });
     v.root.addEventListener('wavelens:reset', () => this.unpick(), { signal: v.ac.signal });
+    // the markers changed (a command, the Markers list, undo): the |Δ| buttons say whose are there
+    v.root.addEventListener('wavelens:edit', () => { for (const b of this.el.querySelectorAll('ol.xl > li > .ab [data-x=mk]')) {
+      const x = this.list[+b.closest('li').dataset.i]; if (x) b.setAttribute('aria-pressed', this.marked(x)); } }, { signal: v.ac.signal });
     v.root.addEventListener('wavelens:destroy', () => { this.el.remove(); v.svaExprs = null; }, { once: true });
     const page = (v.M.src.sva && v.M.src.sva.exprs) || [], kept = store.get(this.key);
     this.list = (kept || page).map(exprNorm).filter(x => x.text);
@@ -1983,7 +1990,7 @@ class Exprs {
   // the settings changed: the names read otherwise (the prefixes), or only what the gaps leave
   settings() {
     const names = (this.v.sortIgnore || []).join();
-    if (names !== this.names) { this.names = names; this.again(); } else this.cutText();
+    if (names !== this.names) { this.names = names; this.again(); } else { this.cutText(); if (!this.el.hidden) this.render(); }   // (the library)
   }
   redraw() {
     const cut = this.list.some(x => x.gap);
@@ -2009,7 +2016,7 @@ class Exprs {
   }
   json() { return this.list.map(exprJSON); }
   jsonText() { return `"exprs": [\n${this.json().map(x => '  ' + JSON.stringify(x)).join(',\n')}\n]`; }
-  save() { if (!store.set(this.key, this.json())) this.v.toast('not kept in this browser'); }
+  save() { if (!store.set(this.key, this.json())) this.v.toast('not kept in this browser'); if (this.v.undoTick) this.v.undoTick(); }   // a step of undo
   told(detail) { this.v.root.dispatchEvent(new CustomEvent('wavelens:sva-exprs', { detail })); }
   // a saved list (Load… of the viewer's state, the page's edits): these expressions
   async setList(l) {
@@ -2053,6 +2060,7 @@ class Exprs {
           title="On the waves: a pale band where it holds, a line where it starts, or only the strip at the top">${MARK_KINDS.map(k =>
     `<option${k === x.mark ? ' selected' : ''}>${k}</option>`).join('')}</select>${btn('gap', '✂', 'Cut the waves to its matches, with the others that ' +
     'have ✂: idle and keep on the bar, a gap between them', x.gap)}${btn('row', 'ƒ row', 'Draw it as a signal (ƒ expressions)', x.row)}${
+  btn('mk', '|Δ|', 'Each match in the window as a marker, the Δ between them on (again: they go)', this.marked(x))}${
   btn('list', '≡', 'List its matches', !!x.open)}${btn('edit', '✎', 'Edit it (ctrl+Enter applies)')}${btn('del', '✕', 'Remove it')}</span>
       ${list}${this.ed && this.ed.x === x ? this.editHTML() : ''}</li>`;
   }
@@ -2060,7 +2068,7 @@ class Exprs {
     const g = document.createElement('canvas').getContext('2d'); g.fillStyle = c; return /^#/.test(g.fillStyle) ? g.fillStyle : '#808080'; }
   render() {
     const el = this.el, n = this.list.length, on = this.list.filter(x => x.on).length;
-    el.hidden = !n && !this.ed;
+    el.hidden = !n && !this.ed && !(this.open && this.library().length);   // (open with a library: its Library…)
     this.btn.setAttribute('aria-pressed', !el.hidden && this.open); this.cnt.textContent = n ? ` (${n})` : '';
     this.bar();
     if (el.hidden) { el.innerHTML = ''; return; }
@@ -2068,7 +2076,11 @@ class Exprs {
     el.innerHTML = `<div class="nh"><button type="button" class="tw" data-x="tw" aria-expanded="${this.open}"
       aria-label="${this.open ? 'fold' : 'open'} the expressions">${this.open ? '▾' : '▸'} <b>Expressions</b></button><span class="muted">${n} · ${on} ` +
       `marked on the waves · click a line to go to its next match · kept in this browser</span><span class="xcut" aria-live="polite"></span>` +
-      `<button type="button" data-x="new" title="Write a new expression">+ New</button>` +
+      `<button type="button" data-x="new" title="Write a new expression">+ New</button>` + (this.library().length ? `<select class="xlib" ` +
+        `aria-label="the project's expressions" title="The project's expressions (exprLibrary): one into the list"><option value="">Library…</option>${
+          this.library().map((x, i) => `<option value="${i}"${this.list.some(y => y.text === x.text) ? ' disabled' : ''}>${
+            esc(x.label ? x.label + ' — ' : '')}${
+            esc(exprLine(x))}</option>`).join('')}</select>` : '') +
       (this.list.some(x => x.gap) ? `<button type="button" data-x="nogap" title="The waves whole again: ✂ off every expression">✂ off</button>` : '') +
       (n ? `<button type="button" data-x="all" title="Every expression's marks on, or off when they all are">${on === n ? 'All off' : 'All on'}</button>` +
         `<button type="button" data-x="json" aria-pressed="${this.jsonOpen}" title="The list for the config file">JSON</button>` : '') + '</div>' +
@@ -2150,6 +2162,7 @@ class Exprs {
         if (a === 'forth' || a === 'back') this.go(x, a === 'forth' ? 1 : -1);
         else if (a === 'row') { x.row = !x.row; this.save(); this.render(); this.redraw(); }
         else if (a === 'gap') this.setGap(x, !x.gap);
+        else if (a === 'mk') this.v.run({ op: 'expr_markers', id: this.list.indexOf(x) + 1, delete: this.marked(x) || undefined });
         else if (a === 'list') { x.open = !x.open; this.render(); }
         else if (a === 'edit') this.edit(x);
         else if (a === 'del') this.remove(x);
@@ -2161,6 +2174,8 @@ class Exprs {
     if (x && !e.target.closest('input, select, textarea, .sve, code.at, ol.atl') && !String(G.getSelection())) this.go(x, 1);
   }
   changed(e) {
+    if (e.target.matches('select.xlib')) { const x = this.library()[+e.target.value]; e.target.value = '';
+      if (x) this.v.run({ op: 'expr', text: x.text, label: x.label || null }).then(r => { if (r[0].error) this.v.toast(r[0].error); }); return; }
     const c = e.target.dataset.c, li = e.target.closest('ol.xl > li'), x = li && this.list[+li.dataset.i]; if (!c || !x) return;
     if (c === 'on') { x.on = e.target.checked; this.render(); }
     else if (c === 'mark') x.mark = e.target.value;
@@ -2218,19 +2233,32 @@ class Exprs {
     }
     return this.wordsOf.get(scope);
   }
-  // the list under the field for the word before the caret (Tab or Enter takes it)
+  // the project's expressions (the setting exprLibrary): [{text, label}]
+  library() { const l = this.v.S.exprLibrary; return (Array.isArray(l) ? l : []).map(x => (typeof x === 'string' ? { text: x, label: '' } :
+    x && typeof x === 'object' ? { text: exprText(x.text ?? x.expr), label: x.label != null ? String(x.label) : '' } : null)).filter(x => x && x.text); }
+  // the list under the field for the word before the caret (Tab or Enter takes it); the library's expressions whose label or text has it
+  // after the names (one taken: the whole field is its text, its label the label's)
   complete(ta) {
     const box = ta.parentElement.querySelector('ul.xac'), w = (ta.value.slice(0, ta.selectionStart).match(/[$\w.]+$/) || [''])[0];
     const low = w.toLowerCase(), all = w[0] === '$' ? SYS_FUNCS : w ? this.words(this.ed.scope) : [];
     const hit = !w || /^\d/.test(w) ? [] : all.filter(n => n.toLowerCase().includes(low) && n !== w)
       .sort((a, b) => a.toLowerCase().indexOf(low) - b.toLowerCase().indexOf(low) || a.length - b.length).slice(0, 8);
+    const lib = !w || w[0] === '$' ? [] : this.library().filter(x => (x.label + ' ' + x.text).toLowerCase().includes(low) && x.text !== ta.value.trim())
+      .slice(0, 4);
+    hit.push(...lib.map(x => ({ lib: x })));
     this.ac = hit.length ? { w, hit, k: 0, box } : null;
     box.hidden = !hit.length;
-    box.innerHTML = hit.map((n, i) => `<li role="option" data-k="${i}" aria-selected="${i === 0}">${esc(n)}</li>`).join('');
+    box.innerHTML = hit.map((n, i) => `<li role="option" data-k="${i}" aria-selected="${i === 0}"${n.lib ? ' class="lib"' : ''}>${n.lib ?
+      `<b>${esc(n.lib.label || 'library')}</b> — ${esc(exprLine(n.lib))}` : esc(n)}</li>`).join('');
     box.onpointerdown = e => { const li = e.target.closest('li[data-k]'); if (li) { e.preventDefault(); this.ac.k = +li.dataset.k; this.takeWord(ta); } };
   }
   takeWord(ta) {
-    const { w, hit, k, box } = this.ac, at = ta.selectionStart, text = hit[k] + (hit[k][0] === '$' ? '(' : '');
+    const { w, hit, k, box } = this.ac;
+    if (hit[k].lib) {   // the library's: the whole expression, its label
+      const x = hit[k].lib; ta.value = x.text; if (x.label) { const lb = this.el.querySelector('.xed .xlb'); if (lb && !lb.value) lb.value = x.label; }
+      this.ac = null; box.hidden = true; this.keepEd(); this.check(); return;
+    }
+    const at = ta.selectionStart, text = hit[k] + (hit[k][0] === '$' ? '(' : '');
     ta.setRangeText(text, at - w.length, at, 'end');
     this.ac = null; box.hidden = true; this.keepEd(); this.check();
   }
@@ -2330,7 +2358,11 @@ class Exprs {
     const same = this.list.findIndex(y => y !== was && y.text === text && y.scope === scope);
     if (same >= 0) throw new Error(`expr: it is there already (id ${same + 1})`);
     const res = await this.value({ text, scope }); if (res.err) throw new Error(`expr: ${res.err}`);
-    const x = was || exprNorm({ expr: text, row: false });
+    if (a.radix !== undefined || a.analog !== undefined) {   // checked before anything changes: a refused command leaves the list as it was
+      if (!(a.row !== undefined ? a.row : was && was.row)) throw new Error('expr: radix and analog are of its row: give row: true');
+      if (a.analog && (res.width || 1) < 2) throw new Error('expr: analog is of a bus (wider than a bit)');
+    }
+    const x = was || exprNorm({ expr: text, row: false }), before = was && { ...was }, oldKey = was && 'ƒ ' + was.text;
     Object.assign(x, { text, scope, res, k: null });
     if (a.label !== undefined) x.label = a.label == null ? '' : String(a.label);
     if (a.color !== undefined) x.color = a.color || null;
@@ -2339,6 +2371,12 @@ class Exprs {
     if (a.mark != null) x.mark = a.mark;
     if (a.gap !== undefined) x.gap = !!a.gap;
     if (!was) this.list.push(x);
+    if (was && oldKey !== 'ƒ ' + text) this.moveLook(oldKey, 'ƒ ' + text);   // its row's radix / analog go with its new text
+    try { this.rowLook(x, a); } catch (e) {   // undone: the list and the expression as they were
+      if (was) { for (const k of Object.keys(x)) if (!(k in before)) delete x[k]; Object.assign(x, before);
+        if (oldKey !== 'ƒ ' + text) this.moveLook('ƒ ' + text, oldKey); } else this.list.splice(this.list.indexOf(x), 1);
+      throw e;
+    }
     this.save(); this.render(); this.redraw();
     this.told(was ? { changed: x.text } : { added: x.text });
     const cut = a.gap !== undefined && this.v.gapParts(50);   // what the waves leave now
@@ -2353,6 +2391,37 @@ class Exprs {
     const r = await this.go(x, a.dir || 1, a.n);
     return Object.assign({ id: this.list.indexOf(x) + 1 }, r || { n: 0 });
   }
+  look(r) {
+    const v = this.v; if (r.type !== 'sig') return r;
+    const rx = v.radixes.get(r.full), an = v.analogs.get(r.full);
+    if (rx && r.radix !== rx) { if (!('radix0' in r)) r.radix0 = r.radix; r.radix = rx; }
+    if (an !== undefined && r.analog !== an) { if (!('analog0' in r)) r.analog0 = r.analog; r.analog = an; }
+    return r;
+  }
+  // a row ƒ renamed (its expression's text changed): its radix and analog kept under the new name
+  moveLook(from, to) {
+    const v = this.v; let n = 0;
+    for (const M of [v.radixes, v.analogs]) if (M.has(from)) { M.set(to, M.get(from)); M.delete(from); n++; }
+    if (n) v.saveRows();
+  }
+  // expr radix / analog: of its row ƒ (a bus: wider than a bit), as the menu gives a signal's
+  rowLook(x, a) {
+    if (a.radix === undefined && a.analog === undefined) return;
+    if (!x.row) throw new Error('expr: radix and analog are of its row: give row: true');
+    const r = exprRows(this.st, this.list).find(q => q.x === x); if (!r) return;
+    if (a.radix !== undefined) this.v.setRadix(r, a.radix, true);   // (checked by the command)
+    if (a.analog !== undefined) { if ((r.width || 1) < 2 && a.analog) throw new Error('expr: analog is of a bus (wider than a bit)');
+      this.v.setAnalog(r, a.analog == null ? null : +a.analog || false, true); }
+    this.v.saveRows();
+  }
+  // what expr_markers puts markers by: its id, text, label, colour and stretches
+  async spansOf(id, op) {
+    const x = this.byId(id, op); x.res = x.res || await this.value(x);
+    if (x.res.err) throw new Error(`${op}: ${x.res.err}`);
+    return { id: this.list.indexOf(x) + 1, text: x.text, label: x.label, color: this.color(x), spans: x.res.spans };
+  }
+  // its markers are on the waves (expr_markers, → Δ)
+  marked(x) { return this.v.umarks.some(m => m.expr === x.text); }
   // every expression's numbers; with id its stretches in [from, to], limit of them from offset on
   async matchesOf(a, from, to) {
     await Promise.all(this.list.map(async x => { x.res = x.res || await this.value(x); }));

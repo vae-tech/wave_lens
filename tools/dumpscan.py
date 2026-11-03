@@ -9,7 +9,7 @@ read(path, body=…, want=…) -> Dump with
                       or (msb, lsb): its bits in the vector, bit 0 the vector's last)], enum, order, kind (the $var
                       type: wire reg integer … real realtime shortreal string event)
   alias  {other spelling: path}  ("mem[1]", "sig[7:0]")
-  unit_ps, t_start, t_end (ps; t_* need body), changes {path: value changes} (body='count'),
+  unit_ps, t_start, t_end (ps; t_* need body), changes {path: value changes; a value written again is none} (body='count'),
   trans  {id code: [(time in dump units, raw value bytes)]} for the id codes in `want` (body='collect')
 scan(path, body=True) -> {path or alias: {'order', 'changes', 'enum', 'width', 'kind'}} (mkconfig.py, enum lookup).
 
@@ -325,6 +325,7 @@ def _scan(lines, first, name, cnt, tr, fast=True, widths=None, last=None):
     word (_last_word)."""
     widths = widths or {}
     st = {'t': 0, 'first': None}
+    prev = {}   # counting: each code's last value, a value written again is no change (Questa, VCS write a register on every assignment)
     def at(v):
         tn = int(v)
         if tn < st['t']:
@@ -338,7 +339,9 @@ def _scan(lines, first, name, cnt, tr, fast=True, widths=None, last=None):
             st['first'] = 0 if (cnt if cnt is not None else any(tr.values())) else tn
     def put(code, v):   # v as written: b'0', b'U', b'b0101', b'r1.5', b'sHello'
         if cnt is not None:
-            cnt[code] += 1
+            if prev.get(code) != v:
+                prev[code] = v
+                cnt[code] += 1
             return
         q = tr.get(code)
         if q is not None:
@@ -385,7 +388,10 @@ def _scan(lines, first, name, cnt, tr, fast=True, widths=None, last=None):
         for l in lines:
             c = l[:1]
             if c in b'01xzXZ':
-                cnt[l[1:].rstrip()] += 1
+                k = l[1:].rstrip()
+                if prev.get(k) != c:
+                    prev[k] = c
+                    cnt[k] += 1
             elif c == b'#':
                 s = l.rstrip()
                 if b' ' in s or b'\t' in s:
@@ -396,7 +402,9 @@ def _scan(lines, first, name, cnt, tr, fast=True, widths=None, last=None):
                 v, _, k = l.partition(b' ')
                 k = k.rstrip()
                 if k and b'\t' not in v:
-                    cnt[k] += 1
+                    if prev.get(k) != v:
+                        prev[k] = v
+                        cnt[k] += 1
                 else:   # b0101\t" or its code on the next line
                     slow(l)
             elif c != b'$' or l.strip() not in DUMP_KW:
@@ -452,3 +460,42 @@ def scan(path: str, body: bool = True) -> Dict[str, dict]:
     for a, p in d.alias.items():
         info.setdefault(a, info[p])
     return info
+
+
+def stats(d, top=20):
+    """A dump read with its counts (read(path, 'count')) -> {signals, changing, dead: [paths], busiest: [{path, changes, rate}]}: the signals that
+    change and the ones that never do after their first value (a constant, a tie-off, a net nothing drives), the busiest by their
+    changes (rate: changes per µs of the dump)."""
+    span = max((d.t_end or 0) - (d.t_start or 0), 0) * (d.unit_ps or 1)
+    ch = {p: d.changes.get(p) or 0 for p, v in d.vars.items() if v.kind != 'event'}
+    busy = sorted(((p, n) for p, n in ch.items() if n), key=lambda x: (-x[1], x[0]))
+    return {'signals': len(ch), 'changing': len(busy), 'dead': sorted(p for p, n in ch.items() if not n),
+            'busiest': [{'path': p, 'changes': n, 'rate': round(n / (span / 1e6), 3) if span else None} for p, n in busy[:top]]}
+
+
+def main():
+    import argparse, json
+    ap = argparse.ArgumentParser(description='dumpscan.py: a dump\'s statistics: the signals that change, the busiest, the ones that never change')
+    ap.add_argument('dump', help='a VCD or FST')
+    ap.add_argument('--stats', action='store_true', help='the statistics: the one thing it prints, with or without it (kept for scripts that say it)')
+    ap.add_argument('--top', type=int, default=20, help='the busiest signals listed (default 20); the ones that never change are listed whole')
+    ap.add_argument('--json', action='store_true', help='as JSON')
+    a = ap.parse_args()
+    d = read(a.dump, 'count')
+    if d is None:
+        raise WaveError(f'cannot read {a.dump}: an FST is read through fst2vcd (GTKWave) or the sva CLI, and neither is there')
+    s = stats(d, a.top)
+    if a.json:
+        print(json.dumps(s, indent=1))
+        return 0
+    print(f'{a.dump}: {s["signals"]} signals, {s["changing"]} change, {len(s["dead"])} never change')
+    for b in s['busiest']:
+        print(f'  {b["changes"]:>10}  {b["path"]}' + (f'  ({b["rate"]:g} per µs)' if b['rate'] else ''))
+    if s['dead']:
+        print('  never change: ' + ', '.join(s['dead'][:20]) + (f' … (+{len(s["dead"]) - 20})' if len(s['dead']) > 20 else ''))
+    return 0
+
+
+if __name__ == '__main__':
+    from common import run_main
+    sys.exit(run_main(main, 'dumpscan'))

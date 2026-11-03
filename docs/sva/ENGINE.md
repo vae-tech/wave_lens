@@ -279,6 +279,11 @@ the CLI's output to it.
 - Covers: `attempts` lists the matches (only the first `cover_traces`, so a drawing has fewer bars than
   `stats.matches` when there are more), `stats.matches` counts them all; `pass` counts the attempts that matched,
   `fail` the ones that did not (not an error), `vacuous` the vacuous ones (which do not cover).
+- Two runs compared (`sva diff --results A.json B.json`, `cli/src/resdiff.rs`): an assertion pairs with the one of the other run
+  of its name and scope (A's scope through `--map`); one name present twice in a scope pairs by its order. Failed attempts pair
+  by their start cycle's time: a start with a failure in both runs is the same failure (moved when `failed_at` differs), a start
+  in one run only is new or gone; as many new as gone at other starts pair by their order and are moved. A cover compares
+  `stats.matches` (else `pass`): matched in A and never in B is lost (exit 1), never in A and matched in B found.
 - `missing` (signals not in the trace: not evaluated) and `notes` (a thread limit was reached, a short column, values
   cut to 64 bits) appear when not empty.
 

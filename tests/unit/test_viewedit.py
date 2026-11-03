@@ -1,7 +1,7 @@
 """tools/viewedit.py: the viewer's commands on a state (names, every command, its errors), a page's edits (the block,
 revisions), a saved state and the command line. That the browser gets the same state from them as from view.run is
 the smoke test's (section edit)."""
-import json, os, re, unittest
+import json, os, shutil, re, unittest
 
 from tests.unit import helpers as H
 import svabuild
@@ -317,6 +317,31 @@ class Commands(unittest.TestCase):
         self.assertEqual(e.st['exprs'], ['a && b', 'd'])
         self.run_ok(e, {'op': 'expr', 'id': 'all', 'delete': True})
         self.assertEqual(e.st['exprs'], [])
+
+    def test_expr_new_text_keeps_its_look(self):
+        """Review S21-2: a row ƒ's radix and analog go with its expression's new text, as sva.js moves them."""
+        e = ed()
+        self.run_ok(e, {'op': 'expr', 'text': 'a + b', 'row': True, 'radix': 'bin', 'analog': 3}, {'op': 'expr', 'id': 1, 'text': 'a - b'})
+        self.assertEqual((e.st.get('radix'), e.st.get('analog')), ({'ƒ a - b': 'bin'}, {'ƒ a - b': 3}))
+
+    def test_duplicate_bits_refused_makes_none(self):
+        """Review S22-2: a bus and a bit sliced together: the page's error, no slice in the state."""
+        e = ed()
+        r = e.run([{'op': 'duplicate', 'signals': ['tb.dut.data', 'clk'], 'bits': [7, 4]}])[0]
+        self.assertEqual((r.get('error'), e.st.get('dups')), ('clk: not a bus', None))
+
+    def test_bounds_spans_dividers(self):
+        """Review S16-3, S26-5, S26-6: dmin over dmax refused, two markers at one time no Δ row; a span of no length refused (a reversed one
+        swapped); a divider: no signals, kept as one."""
+        e = ed()
+        r = e.run([{'op': 'marker', 't': '10ns', 'dmin': '100ns', 'dmax': '10ns'}, {'op': 'marker', 't': '10ns'}, {'op': 'marker', 't': '10ns'},
+                   {'op': 'measures'}, {'op': 'span', 'from': '20ns', 'to': '20ns'}, {'op': 'span', 'from': '40ns', 'to': '20ns'},
+                   {'op': 'group', 'name': '— D —', 'divider': True}, {'op': 'group', 'name': 'x', 'divider': True, 'signals': 'clk'}])
+        self.assertIn('over dmax', r[0]['error'])
+        self.assertEqual(r[3]['measures'], [])
+        self.assertIn('no stretch', r[4]['error'])
+        self.assertEqual([(x['from'], x['to']) for x in e.st['spans']], [(20000, 40000)])
+        self.assertEqual((e.st['groups'], 'no signals' in r[7].get('error', '')), ([{'name': '— D —', 'signals': [], 'divider': True}], True))
 
     def test_expr_gap(self):
         """The waves cut to the matches of expressions, as sva.js and look.js setGaps: on while one has gap, your settings apart, the gaps off end it."""
@@ -829,9 +854,9 @@ class Config(unittest.TestCase):
             self.assertEqual(list(got), list(cfg))
             res, _, changed = V.edit_config(c, [{'op': 'bookmark', 'n': 1, 't': '15ns'}], 'b')   # a t replaces the event
             self.assertNotIn('at', H.load(c)['views']['b']['bookmarks'][0])
-            res, _, changed = V.edit_config(c, [{'op': 'bookmark', 'n': 3, 't': '5ns'}, {'op': 'marker', 't': 1}], 'a')
+            res, _, changed = V.edit_config(c, [{'op': 'bookmark', 'n': 3, 't': '5ns'}, {'op': 'cursor', 't': 1}], 'a')
             self.assertEqual(changed, [])   # a bad command: nothing written
-            self.assertIn('a config\'s markers are events', res[1]['error'])
+            self.assertIn('give "page"', res[1]['error'])
             self.assertNotIn('bookmarks', H.load(c)['views']['a'])
             V.edit_config(c, [{'op': 'bookmark', 'n': 2, 't': '15ns', 'text': 'mine'}], 'a')   # the top level's become the view's own
             self.assertEqual([b['n'] for b in H.load(c)['views']['a']['bookmarks']], [1, 2])
@@ -844,6 +869,60 @@ class Config(unittest.TestCase):
                 self.assertEqual(waves['b']['spans'], [{'label': 'x', 'from': 15000, 'to': 25000}])
                 self.assertEqual(waves['a']['bookmarks'][1]['text'], 'mine')
 
+    def test_the_look_of_a_view(self):
+        """Stage 19: group, radix, hide, marker, deltas, paint … on a config's view: its "state", the page built opens with it (its edits,
+        rev cfg-…); view: its window; a bad command in the list: the file as it was, byte for byte."""
+        with H.tmp() as d:
+            c, out = os.path.join(d, 'c.config.json'), os.path.join(d, 'p.html')
+            H.dump({k: v for k, v in self.CFG.items() if k != 'note_key'}, c, indent=2)
+            ops = [{'op': 'group', 'name': 'g', 'signals': ['tb.dut.state']}, {'op': 'radix', 'signals': 'tb.dut.state', 'radix': 'dec'},
+                   {'op': 'marker', 't': '15ns', 'label': 'm', 'dmax': '5ns'}, {'op': 'deltas', 'on': True}, {'op': 'hide', 'signals': 'tb.clk'},
+                   {'op': 'view', 'from': '5ns', 'to': '35ns'}]
+            res, view, changed = V.edit_config(c, ops, 'a')
+            self.assertFalse([r for r in res if 'error' in r], res)
+            self.assertEqual(changed, ['views.a.state', 'views.a.from', 'views.a.to'])
+            st = H.load(c)['views']['a']['state']
+            self.assertEqual((st['groups'], st['radix'], st['hidden'], st['deltas'], st['markers']),
+                             ([{'name': 'g', 'signals': ['tb.dut.state']}], {'tb.dut.state': 'dec'}, ['tb.clk'], True, [{'t': 15000, 'label': 'm', 'dmax': 5000}]))
+            before = open(c, 'rb').read()
+            res, _, changed = V.edit_config(c, [{'op': 'radix', 'signals': 'tb.clk', 'radix': 'hex'}, {'op': 'radix', 'signals': 'x', 'radix': 'nope'}], 'a')
+            self.assertEqual((changed, open(c, 'rb').read() == before), ([], True), 'a bad command: nothing written')
+            rc, _, err = H.run_tool('mkhtml', '--config', c, '--out', out, '--no-sva', '--reproducible')
+            self.assertEqual(rc, 0, err)
+            p = V.Page(out)
+            self.assertTrue(str(p.rev('a')).startswith('cfg-'))
+            self.assertEqual(p.state('a')['radix'], {'tb.dut.state': 'dec'})
+            self.assertEqual(V.Editor(p.model('a'), p.state('a')).run([{'op': 'measures'}])[0]['measures'], [], 'one marker: no Δ')
+            # the page's view back into a config: --from-page, --keys
+            V.edit_page(out, [{'op': 'paint', 'signals': 'tb.clk', 'color': '#123456'}, {'op': 'marker', 't': '25ns'}], 'a')
+            c2 = os.path.join(d, 'c2.config.json')
+            H.dump({k: v for k, v in self.CFG.items() if k != 'note_key'}, c2, indent=2)
+            res, _, changed = V.edit_config(c2, [], 'a', out, ['markers', 'paint'])
+            self.assertEqual((res[0]['taken'], changed), (['markers', 'paint'], ['views.a.state']))
+            st = H.load(c2)['views']['a']['state']
+            self.assertEqual((sorted(st), [m['t'] for m in st['markers']]), (['markers', 'paint'], [15000, 25000]))
+            with self.assertRaisesRegex(V.WaveError, 'no key of a page'):
+                V.edit_config(c2, [], 'a', out, ['cursor'])
+            with self.assertRaisesRegex(V.WaveError, 'no view "nope"'):   # review S19-1: a view the page has not got is said, not another taken
+                V.page_into({}, out, 'nope')
+
+    def test_from_page_keeps_the_config_form(self):
+        """Review S19-4: --from-page writes the config's bookmarks / arrows / spans as they were written, a new one with a time "…ns"."""
+        apb = os.path.join(os.environ.get('BUILD', os.path.join(H.ROOT, 'out')), 'examples', 'apb', 'apb.html')
+        if not os.path.isfile(apb):
+            self.skipTest('make examples')
+        with H.tmp() as d:
+            page, c = os.path.join(d, 'apb.html'), os.path.join(d, 'apb.config.json')
+            shutil.copy(apb, page)
+            shutil.copy(os.path.join(H.ROOT, 'examples', 'apb', 'apb.config.json'), c)
+            before = H.load(c)['views']['transfers']
+            V.edit_page(page, [{'op': 'bookmark', 't': '170ns', 'text': 'new one'}], 'transfers')
+            V.edit_config(c, [], 'transfers', page, ['bookmarks', 'arrows', 'spans'])
+            after = H.load(c)['views']['transfers']
+        self.assertEqual(after['bookmarks'][:-1], before['bookmarks'])
+        self.assertEqual(after['bookmarks'][-1], {'n': 7, 'text': 'new one', 't': '170ns'})
+        self.assertEqual((after['arrows'], after.get('spans')), (before['arrows'], before.get('spans')))
+
     def test_mcp_view_edit_config(self):
         import wavemcp
         with H.tmp() as d:
@@ -854,6 +933,69 @@ class Config(unittest.TestCase):
             self.assertEqual(H.load(c)['views']['b']['bookmarks'][1]['t'], '35ns')   # its ns as a time with a unit
             text, err = wavemcp.call('view_edit', {'config': c, 'page': c, 'ops': [{'op': 'bookmark', 't': 1}]})
             self.assertTrue(err)
+
+class Slices(unittest.TestCase):
+    """Stage 22: duplicate bits: a slice of a bus as a row, "data[7:4]"; its radix; the forms and what is refused."""
+    def test_slices(self):
+        e = ed()
+        r = e.run([{'op': 'duplicate', 'signals': 'tb.dut.data', 'bits': [7, 4], 'radix': 'bin'}, {'op': 'duplicate', 'signals': 'tb.dut.data', 'bits': ' 3 : 0 '},
+                   {'op': 'duplicate', 'signals': 'tb.dut.data', 'bits': [7, 4]}])
+        self.assertEqual([x.get('copies') for x in r], [['tb.dut.data[7:4]'], ['tb.dut.data[3:0]'], ['tb.dut.data[7:4]']])
+        self.assertEqual((e.st['dups'], e.st['radix']), (['tb.dut.data[7:4]', 'tb.dut.data[3:0]'], {'tb.dut.data[7:4]': 'bin'}))
+        bad = e.run([{'op': 'duplicate', 'signals': 'tb.dut.data', 'bits': [8, 0]}, {'op': 'duplicate', 'signals': 'tb.dut.data', 'bits': [2, 5]},
+                     {'op': 'duplicate', 'signals': 'tb.dut.valid', 'bits': [0, 0]}, {'op': 'duplicate', 'signals': 'tb.dut.data[7:4]', 'bits': [1, 0]},
+                     {'op': 'duplicate', 'signals': 'tb.dut.data', 'bits': 'x'}])
+        self.assertEqual([('not in its 8 bits' in b.get('error', ''), 'not in' in b.get('error', ''), 'not a bus' in b.get('error', ''),
+                           'not a slice' in b.get('error', ''), 'msb, lsb' in b.get('error', ''))[i] for i, b in enumerate(bad)], [True] * 5)
+        self.assertEqual(e.run([{'op': 'duplicate', 'signals': 'tb.dut.data[7:4]', 'delete': True}])[0]['deleted'], ['tb.dut.data[7:4]'])
+        self.assertEqual(e.st['dups'], ['tb.dut.data[3:0]'])
+
+
+class Measures(unittest.TestCase):
+    """Stage 16: a bound on a marker's Δ (dmin, dmax: a time or cycles), the measures table, --measure / --csv."""
+    def three(self):
+        e = ed()
+        for t in ('10ns', '30ns', '60ns'):
+            e.run([{'op': 'marker', 't': t, 'label': 'm' + t}])
+        return e
+
+    def test_bound_forms(self):
+        for x, want in (('150ns', 150000), (2000, 2000), ('3 cycles', {'cycles': 3}), ('1 cycle', {'cycles': 1}), ({'cycles': 4}, {'cycles': 4}),
+                        ('fast', None), (True, None), (-5, None), ({'cycles': -1}, None), (None, None)):
+            self.assertEqual(V.bound_of(x), want, x)
+
+    def test_marker_and_deltas_bounds(self):
+        e = self.three()
+        self.assertNotIn('error', e.run([{'op': 'marker', 'id': 1, 'dmax': '15ns'}])[0])
+        self.assertEqual(e.st['markers'][0]['dmax'], 15000)
+        self.assertIn('not "fast"', e.run([{'op': 'marker', 'id': 1, 'dmin': 'fast'}])[0]['error'])
+        self.assertIn('error', e.run([{'op': 'marker', 'dmin': 'fast'}])[0])
+        self.assertEqual(len(e.st['markers']), 3, 'a bad bound makes no marker')
+        self.assertIn('over dmax', e.run([{'op': 'deltas', 'dmin': '25ns'}])[0]['error'], 'marker 1 keeps dmax 15ns: no Δ could keep both')
+        e.run([{'op': 'marker', 'id': 1, 'dmax': None}, {'op': 'deltas', 'dmin': '25ns'}])   # without id: every marker
+        self.assertEqual([m.get('dmin') for m in e.st['markers']], [25000] * 3)
+        m = e.run([{'op': 'measures'}])[0]['measures']
+        self.assertEqual([(r['from']['id'], r['to']['id'], r['dt'], r.get('ok')) for r in m], [(1, 2, 20000, False), (2, 3, 30000, True)])
+        e.run([{'op': 'deltas', 'id': 2, 'dmin': '3 cycles'}, {'op': 'deltas', 'dmin': None, 'dmax': None}])
+        self.assertTrue(all('dmin' not in m and 'dmax' not in m for m in e.st['markers']))
+        e.run([{'op': 'marker', 'id': 2, 'dmax': '3 cycles'}])
+        self.assertNotIn('ok', e.run([{'op': 'measures'}])[0]['measures'][1], 'a bound in cycles: the page counts them')
+
+    def test_measure_cli(self):
+        e = self.three()
+        e.run([{'op': 'marker', 'id': 2, 'dmax': '20ns'}])
+        rows = V.measure_list(e.marks())
+        text = V.measure_text(rows)
+        self.assertIn('2 measurements', text)
+        self.assertIn('Δ 30 ns', text)
+        self.assertIn('✗', text)
+        csv = V.measure_text(rows, csv_out=True).splitlines()
+        self.assertEqual(csv[0], ','.join(V.MEASURE_CSV))
+        self.assertEqual(csv[1:], ['1,m10ns,10,2,m30ns,30,20,,,,,', '2,m30ns,30,3,m60ns,60,30,,,20,false,'])
+
+    def test_expr_markers_live_only(self):
+        r = ed().run([{'op': 'expr_markers', 'id': 1}])[0]
+        self.assertIn('runs in the page only', r['error'])
 
 
 if __name__ == '__main__':

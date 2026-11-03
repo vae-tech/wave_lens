@@ -140,7 +140,7 @@ class Names {
     const alt = r => v.band && v.band.get(r) === 1 ? ' alt' : '', pad = r => `padding-left:${17 + r.depth * 12}px`;
     const mk = '<span class="mk" role="checkbox" tabindex="0" aria-checked="false"></span>';
     v.rowLab = new Map(); v.rowCol = new Map(); v.rowKey = new Map();
-    const lab = r => { const t = (r.type === 'group' ? (v.collapsed.has(r.id) ? '▸ ' : '▾ ') : '') + this.label(r); v.rowLab.set(r, t);
+    const lab = r => { const t = (r.type === 'group' && r.cls !== 'ugdiv' ? (v.collapsed.has(r.id) ? '▸ ' : '▾ ') : '') + this.label(r); v.rowLab.set(r, t);
       v.rowCol.set(r, v.strokeOf(r) || ''); return t; };
     const col = r => v.strokeOf(r) ? ` style="color:${esc(v.strokeOf(r))}"` : '';
     const spacer = h => (h > 0 ? `<div class="vsp" style="height:${h}px"></div>` : '');
@@ -190,7 +190,7 @@ class Names {
       m.setAttribute('aria-label', 'highlight ' + (r.full || r.name));
     } else if (!m.title) { m.title = 'Highlight (the other rows dim; several at once)'; m.setAttribute('aria-label', 'highlight ' + (r.full || r.name)); }
     const n = m.nextSibling, open = r.type === 'group' && !v.collapsed.has(r.id);
-    const lab = (r.type === 'group' ? (open ? '▾ ' : '▸ ') : '') + this.label(r);
+    const lab = (r.type === 'group' && r.cls !== 'ugdiv' ? (open ? '▾ ' : '▸ ') : '') + this.label(r);   // (a divider: its name alone)
     if (v.rowLab.get(r) !== lab) { v.rowLab.set(r, lab); n.innerHTML = lab; }
     const col = v.strokeOf(r) || '';
     if ((v.rowCol.get(r) || '') !== col) { v.rowCol.set(r, col); n.style.color = col; }
@@ -203,6 +203,9 @@ class Names {
     if (el.tabIndex !== ti) el.tabIndex = ti;
   }
 }
+// a marker's bound on its Δ, for the title of the Δ in its list: "\nbound: 40 ns … 3 cycles", or ''
+const boundTip = (m, v) => (m.dmin == null && m.dmax == null ? '' : `\nbound: ${m.dmin == null ? '—' : boundText(m.dmin, x => v.when(x))} … ${
+  m.dmax == null ? '—' : boundText(m.dmax, x => v.when(x))}`);
 class Notes {
   constructor(v) {
     this.v = v;
@@ -249,6 +252,7 @@ class Notes {
         ${b.link ? `<button type="button" class="ic lk" data-bm="link"${v.linkTarget(b.link) ? '' : ' disabled'} title="${v.linkTarget(b.link) ?
           `Open the view ${esc(b.link.view)} of this page${b.link.bookmark ? ` at its bookmark ${b.link.bookmark}` : ''}` :
           `No section ${esc(b.link.view)} on this page`}">→ ${esc(b.link.view)}</button>` : ''}
+        <button type="button" class="ic" data-bm="blink" title="Copy a link to bookmark ${b.n}: the page opened by it goes there">#</button>
         <button type="button" class="ic" data-bm="del" title="Delete bookmark ${b.n} (and its arrows)">✕</button></li>`; }).join('') +
       (`</ol><div class="nh"><b>Arrows</b><span class="muted">from → to · shape · head · line · colour · label</span><button type="button" ` +
           `data-bm="addar"${v.bms.length < 2 ? ' disabled' : ''}>+ Arrow</button></div><ol class="ars">`) +
@@ -281,7 +285,8 @@ class Notes {
         ${v.deltas ? `<select class="mto" aria-label="marker ${i + 1}: the Δ goes to" title="The marker its Δ goes to, through the ones between">` +
           opt('next', '→ next', m.dto == null ? 'next' : m.dto === 0 ? 'none' : String(m.dto)) + opt('none', '→ none', m.dto === 0 ? 'none' : '') +
           v.umarks.map((o, k) => (k === i ? '' : opt(String(k + 1), `→ ${k + 1}${o.label ? ' ' + o.label : ''}`, String(m.dto)))).join('') + '</select>' : ''}
-        ${(d => (d && d.dt > 0 ? `<span class="md" title="The time to the marker it goes to">Δ ${esc(v.deltaText(d.dt))}</span>` : ''))(
+        ${(d => (d && d.dt > 0 ? `<span class="md${d.bad ? ' bad' : ''}" title="The time to the marker it goes to${boundTip(m, v)}">Δ ${
+          esc(v.deltaText(d))}${d.bad ? ' ' + esc(v.deltaBound(d)) : ''}</span>` : ''))(
           deltas.find(d => d.a === m))}
         <button type="button" class="ic" data-bm="mdel" title="Delete marker ${i + 1}">✕</button></li>`).join('') + '</ol>' : '') +
       (v.ugroups.length ? `<div class="nh"><b>Groups</b><span class="muted">yours, at the top of the names · name · colour</span></div><ol class="ugs">` +
@@ -302,6 +307,7 @@ class Notes {
     if (act === 'gdel') return v.run({ op: 'group', name: v.ugroups[+li.dataset.g].name, delete: true });
     if (act === 'go' && bm) v.goBm(bm);
     else if (act === 'link' && bm && bm.link) v.followLink(bm);
+    else if (act === 'blink' && bm) v.copyText(v.linkTo({ t: bm.t, sel: bm.signal, bm: bm.n }));
     else if (act === 'here' && bm) { bm.t = v.cursor; delete bm.at; bm.top = v.topNow(); v.changed(true); }   // the screen of now, as a new one
     else if (act === 'lift' && bm && bm.signal) { bm.lift = !bm.lift ? true : bm.lift === true ? 'below' : false; v.changed(true); }   // off, above, under
     else if (act === 'del') { v.bms = v.bms.filter(x => x.n !== n); v.arrows = v.arrows.filter(a => a.from !== n && a.to !== n); v.changed(true); }

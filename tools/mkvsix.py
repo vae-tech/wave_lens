@@ -9,7 +9,7 @@ Two files: OUT (the last build, the same install line each time) and beside it a
 --plain: without the build of the bar (the checkout's commit), so that the package depends on the tree alone: bin/wavelens.vsix,
 committed with a version (make dist-linux); publish.py refuses a version whose package is not of its tree (stale()).
 
-Into extension/: vscode/package.json (its "version" from VERSION: 0.17 -> 0.17.0), vscode/extension.js, vscode/media/
+Into extension/: vscode/package.json (its "version" from VERSION: 0.17 -> 0.17.0), vscode/extension.js, vscode/links.js, vscode/media/
 host.js, the viewer's files of wavelens/ under media/ (wavelens.css, wavelens.config.js, wavelens.js, sva.wasm.js, bus.js,
 sva.js), the static sva CLI as bin/sva (mode 755; FST -> VCD text on the host), vscode/README.md. The
 package is for one platform of the host that runs the extension (Remote-SSH / WSL: the Linux machine): --target.
@@ -77,7 +77,7 @@ def content_types(names):
 
 def sources():
     """The package's files as they are in the tree: [(name under extension/, path in the repository)]."""
-    return [('extension.js', 'vscode/extension.js'), ('svtypes.js', 'vscode/svtypes.js'), ('media/host.js', 'vscode/media/host.js'),
+    return [('extension.js', 'vscode/extension.js'), ('svtypes.js', 'vscode/svtypes.js'), ('links.js', 'vscode/links.js'), ('media/host.js', 'vscode/media/host.js'),
             ('README.md', 'vscode/README.md')] + [('media/' + m, 'wavelens/' + m) for m in MEDIA]
 
 

@@ -714,6 +714,42 @@ async function liveOpens() {   // view_live {page: a dump, open: true}: the tab 
   } finally { OPENING = false; }
 }
 
+/* ---------------- links from a log or the terminal (links.js): a time and a signal -> the dump's tab, goto ---------------- */
+const LINKS = require('./links.js');
+let linksSaid = '';   // the bad patterns of wavelens.logLinks said once (again when they change)
+const ownLinks = () => { const l = vscode.workspace.getConfiguration('wavelens').get('logLinks'), list = Array.isArray(l) ? l : [];
+  const bad = LINKS.badPatterns(list), key = bad.join('\n');
+  if (key && key !== linksSaid) log(`wavelens.logLinks: left out: ${bad.join('; ')}`);
+  linksSaid = key; return list; };
+const linkTip = l => (l.hash ? `WaveLens: open ${path.basename(l.dump)} at ${l.hash}` :
+  `WaveLens: go to ${+(l.ps / 1000).toPrecision(12)} ns${l.sig ? ' · ' + l.sig : ''}`);
+// the tab a link goes to: the dump it names (opened if it is not), else the tab in sight, else the one used last, else one of the
+// dumps opened in this workspace before, picked
+async function linkTab(l, base) {
+  const wait = async file => { for (let i = 0; i < 100; i++) { const t = [...TABS].find(x => x.file === file); if (t && t.ready) return t;
+    await new Promise(r => setTimeout(r, 100)); } return null; };
+  let file = l.dump ? (path.isAbsolute(l.dump) ? l.dump : path.resolve(base || ((vscode.workspace.workspaceFolders || [])[0] || { uri: { fsPath: os.homedir() } }).uri.fsPath, l.dump)) : null;
+  if (file && !fs.existsSync(file)) { const w = (vscode.workspace.workspaceFolders || []).map(f => path.join(f.uri.fsPath, l.dump)).find(f => fs.existsSync(f));
+    if (!w) { vscode.window.showWarningMessage(`WaveLens: no dump ${l.dump}`); return null; } file = w; }
+  if (!file) {
+    const t = [...TABS].find(x => x.panel.active) || [...TABS].find(x => x.panel.visible) || [...TABS].pop();
+    if (t) return t;
+    const seen = CTX.workspaceState.keys().filter(k => k.startsWith('store:')).map(k => vscode.Uri.parse(k.slice(6)).fsPath).filter(f => fs.existsSync(f));
+    if (!seen.length) { vscode.window.showInformationMessage('WaveLens: no dump open: open one in WaveLens first'); return null; }
+    file = seen.length === 1 ? seen[0] : await vscode.window.showQuickPick(seen, { placeHolder: `Open which dump at ${linkTip(l).slice(10)}?` });
+    if (!file) return null;
+  }
+  const open = [...TABS].find(x => x.file === file);
+  if (!open) await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(file), VIEW);
+  return wait(file);
+}
+async function followLink(l, base) {
+  const t = await linkTab(l, base); if (!t) return;
+  t.panel.reveal();
+  const r = (await t.run([{ op: 'goto', ...LINKS.gotoOf(l) }]))[0] || {};
+  if (r.error) vscode.window.showWarningMessage(`WaveLens: ${r.error}`);
+}
+
 /* ---------------- activation ---------------- */
 function activate(ctx) {
   CTX = ctx; OUT = vscode.window.createOutputChannel('WaveLens'); DIAG = vscode.languages.createDiagnosticCollection('wavelens');
@@ -742,6 +778,23 @@ function activate(ctx) {
       if (e.affectsConfiguration('wavelens.keysToVSCode')) {
         const keysLeft = vscode.workspace.getConfiguration('wavelens').get('keysToVSCode') || [];
         for (const tab of TABS) tab.post({ type: 'keys', keysLeft }); } }),
+    vscode.commands.registerCommand('wavelens.goto', (l, base) => (l ? followLink(l, base) : null)),
+    vscode.window.registerTerminalLinkProvider({
+      provideTerminalLinks: c => LINKS.linksOf(c.line, ownLinks()).map(l => ({ startIndex: l.start, length: l.end - l.start, tooltip: linkTip(l), data: l })),
+      handleTerminalLink: link => followLink(link.data),
+    }),
+    vscode.languages.registerDocumentLinkProvider([{ scheme: 'file', pattern: '**/*.{log,txt,out}' }, { language: 'log' }], {
+      provideDocumentLinks: doc => {
+        const out = [], own = ownLinks(), base = path.dirname(doc.uri.fsPath);
+        for (let i = 0; i < Math.min(doc.lineCount, 200000); i++) {
+          for (const l of LINKS.linksOf(doc.lineAt(i).text, own)) {
+            const a = vscode.Uri.parse(`command:wavelens.goto?${encodeURIComponent(JSON.stringify([l, base]))}`);
+            const d = new vscode.DocumentLink(new vscode.Range(i, l.start, i, l.end), a); d.tooltip = linkTip(l); out.push(d);
+          }
+        }
+        return out;
+      },
+    }),
     vscode.commands.registerCommand('wavelens.live', () => {
       liveCheck(); const t = active();
       if (!liveOn()) vscode.window.showInformationMessage('WaveLens: the setting wavelens.live is off');

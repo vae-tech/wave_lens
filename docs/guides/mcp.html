@@ -70,20 +70,31 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
     assertions bound, to show a person; <code>compare</code>: a second dump's differences on it (<a href="compare.html">Compare</a>); <code>marks</code>,
     <code>marks_views</code>: the tests of a cocotb run on it (<a href="cocotb.html">cocotb tests</a>)</td></tr>
   <tr><td><code>wave_tests</code></td><td>the tests of a cocotb run from its marks file (<code>checks</code>: all that ran, in a loop too): which failed, their windows, what they expected; <code>test</code>: one, with its
-    phases and marks (<a href="cocotb.html#agents">cocotb tests</a>)</td></tr>
+    phases and marks (<a href="cocotb.html#agents">cocotb tests</a>); each test's <code>measures</code> (<code>wl.measure</code>), the run's <code>slowest</code> steps,
+    a test's <code>steps</code> by length (<code>steps: true</code>: only them)</td></tr>
   <tr><td><code>wave_to_fst</code></td><td>the VCD as an FST beside it (<code>sva fst</code>; <code>out</code>: another file), the FSM states of its types file in it
     (<code>types</code>, <code>no_types</code>): what was written, the notes with their lines</td></tr>
   <tr><td><code>wave_diff</code></td><td>two dumps compared change by change (<code>sva diff</code>, streamed: hundreds of MB): equal or not,
     the first difference and the signals that differ, the signals of one dump only; <code>signals</code>, <code>scope</code>, <code>from</code>, <code>to</code> narrow it,
     <code>map</code> pairs scopes or signals named apart, <code>offset</code> a run that starts later, <code>segment</code> the counts per test case (<code>align</code>: case k on
-    case k), <code>limit</code> and <code>spans</code> the differences and stretches listed</td></tr>
+    case k), <code>limit</code> and <code>spans</code> the differences and stretches listed; its <code>rank</code>: the signals by their first difference;
+    <code>results_a</code>, <code>results_b</code>: two runs' assertion results instead (new, gone, moved failures, covers lost)</td></tr>
+  <tr><td><code>wave_explain</code></td><td>one call from a moment to what to look at: an expression's match (<code>expr</code>, <code>nth</code>), an assertion's
+    failure (<code>assert: "name@scope"</code> with <code>sva</code>, its files: the window from the attempt's start), the first difference with another
+    dump (<code>b</code>; <code>table_b</code>: its values), or a time (<code>t</code>) — its window, its signals and their values there, and with <code>out</code>
+    (a <code>.html</code>) a page marked at it</td></tr>
+  <tr><td><code>wave_fsm</code></td><td>an FSM's states in a dump: entries, time held, the states never reached, the values of no state, its changes
+    (the page's FSM panel's count; <code>tools/fsmstats.py --strict</code> for CI)</td></tr>
   <tr><td><code>wave_cut</code></td><td>a window (<code>from</code>, <code>to</code>) and some <code>signals</code> of a dump as a small VCD at <code>out</code>: for <span class="ui">Compare…</span> on a page,
     a fixture, one test case to send</td></tr>
   <tr><td><code>view_edit</code></td><td>marks a page up for a person: bookmarks with an explanation, arrows between them, markers, expressions, a group
     of the signals that matter, highlight, colours, the cursor and the window — live in their browser, else in the page's file;
-    <code>config</code>: bookmarks, arrows and spans into a view of the page's config, so a rebuild keeps them</td></tr>
+    <code>config</code>: bookmarks, arrows, spans and the look (groups, radix, paint, markers … as its <code>"state"</code>) into a view of the page's config, so a
+    rebuild keeps them; <code>from_page</code>: a page's view into it, in the config's form; the <code>measures</code> and <code>bus_list</code> commands (the
+    Δ of the markers as a table, the transfers of the buses: a live page)</td></tr>
   <tr><td><code>view_get</code></td><td>what a page shows, the person's own edits too (<code>full</code>: the whole state); its signals (<code>rows</code>: a pattern, <code>limit</code>, <code>offset</code>); a picture (live: the screen; a page's file: made in
-    a headless Chromium by <code>tools/pageshot.py</code>, playwright); a dump compared, as <code>compare</code> in its answer</td></tr>
+    a headless Chromium by <code>tools/pageshot.py</code>, playwright); a dump compared, as <code>compare</code> in its answer; <code>measures</code>: the Δ of
+    the markers, the page's own (<code>page: true</code>) too, with their bound and <code>ok</code></td></tr>
   <tr><td><code>view_live</code></td><td>connects a page to the agent: what it does there appears as it happens; <code>rotate</code>: a new key; <code>page</code> a dump: its VS Code
     tab; no <code>page</code>: the pages connected</td></tr>
 </table>
@@ -322,7 +333,7 @@ make mcp-bench AGENT=codex TASKS=a1,b3                 <span class="c"># some ta
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.40 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.41 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

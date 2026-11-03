@@ -32,7 +32,8 @@
       { "command": "wavelens.theme", "title": "Choose the theme of the waves", "category": "WaveLens", "icon": "$(symbol-color)" },
       { "command": "wavelens.log", "title": "Show the log", "category": "WaveLens", "icon": "$(output)" },
       { "command": "wavelens.verilatorTypes", "title": "Make the types with Verilator (FSM states, structs)", "category": "WaveLens" },
-      { "command": "wavelens.toFst", "title": "Convert to FST (beside the VCD, FSM states kept)", "category": "WaveLens" }
+      { "command": "wavelens.toFst", "title": "Convert to FST (beside the VCD, FSM states kept)", "category": "WaveLens" },
+      { "command": "wavelens.goto", "title": "Go to a moment of the dump (a link of a log)", "category": "WaveLens" }
     ],
     "menus": {
       "explorer/context": [
@@ -49,6 +50,7 @@
       "commandPalette": [
         { "command": "wavelens.reload", "when": "activeCustomEditorId == wavelens.waves" },
         { "command": "wavelens.live", "when": "activeCustomEditorId == wavelens.waves" },
+        { "command": "wavelens.goto", "when": "false" },
         { "command": "wavelens.verilatorTypes", "when": "activeCustomEditorId == wavelens.waves" },
         { "command": "wavelens.toFst", "when": "activeCustomEditorId == wavelens.waves && resourceExtname =~ /^\\.vcd$/i" }
       ]
@@ -56,6 +58,10 @@
     "configuration": {
       "title": "WaveLens",
       "properties": {
+        "wavelens.logLinks": {
+          "type": "array", "items": { "type": "string" }, "default": [],
+          "markdownDescription": "More patterns of a time in a log or the terminal that go to the dump's WaveLens tab: regular expressions with the named groups `t` (a number), `unit` (`ns`, `us`, …) and `sig` (a signal's path), tried before the built-in ones (`@ 1234 ns`, `at 1.2 us`, `time=5ns`, a bare `1234 ns` with the first `a.b.c` of the line as the signal, and `dump.vcd#t=…&sel=…` of Copy link). Example: `\\[(?<t>\\d+)(?<unit>ns)\\] (?<sig>\\S+)`"
+        },
         "wavelens.verilator": {
           "type": "string", "default": "verilator",
           "markdownDescription": "The Verilator 5 of *WaveLens: Make the types with Verilator* (`verilator --json-only`: nothing is built). On the host of the extension (Remote - WSL / SSH: there)."

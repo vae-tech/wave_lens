@@ -325,7 +325,10 @@ make config WAVES=work/x.vcd SVA="checks/*.sv"                                  
   <tr><td><code>line</code></td><td>a dashed line where each stretch starts</td></tr>
   <tr><td><code>strip</code></td><td>only the strip: for what holds so often that a band would cover the waves</td></tr>
   <tr><td><span class="ui">ƒ row</span></td><td>drawn as a signal in the group <b>ƒ expressions</b> under the top (a bus when it is wider than a bit); a click on the row finds its line</td></tr>
+  <tr><td><span class="ui">|Δ|</span></td><td>a marker at the start of each match in the window (at most 200), in its colour, with the Δ between them on (<a href="viewer.html#measure">the Δ, its bound</a>); again: they go</td></tr>
 </table>
+<p><b>The project's expressions.</b> The setting <code>exprLibrary</code> (a config's <code>"config"</code>: <code>[{"text": "PSEL &amp;&amp; !PREADY", "label": "wait"}]</code>)
+  lists the conditions a project looks for: the editor offers them as you type, by label or text, and <span class="ui">Library…</span> adds one to the list.</p>
 <h3 id="expr-gap">The waves cut to the matches</h3>
 <p>✂ on a line (<kbd>c</kbd> with the line in focus) leaves on the waves what the expression finds, with a gap between: the <a href="gaps.html#live">gaps on
   the waves</a>, by the matches of an expression in place of the changes of signals. On several lines their matches go together. You keep scrolling, zooming and
@@ -442,7 +445,7 @@ make sva-eval WAVES=x.fst SVA="pkg.sv checks.sva" SCOPE=tb.dut ARGS="--junit rep
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.40 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.41 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

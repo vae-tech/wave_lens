@@ -178,6 +178,13 @@
 <figure><img src="img/viewer-cursors.png" alt="Cursor at 35 ns, second cursor at 115 ns: Δ 80.00 ns / 12.5 MHz · 8 PCLK on the axis" loading="lazy">
   <figcaption><b>Two cursors.</b> PCLK selected, the cursor at 35 ns, the second at 115 ns: <code>Δ 80.00 ns / 12.5 MHz · 8 PCLK</code>
   on the axis and in the title line.</figcaption></figure>
+<p><b>The values at both cursors.</b> With a second cursor the value column says each row at the cursor, at the second cursor and the change:
+  <code>0x00 · 0x40 · +0x40</code> for a bus (modulo its width: a counter round zero gives what it counted), <code>0 · 1 · ↑</code> for a bit,
+  <code>IDLE → SETUP</code> for an enum, <code>=</code> for the same value, <code>?</code> with x or z.</p>
+<p id="slice"><b>Some bits as a row.</b> <span class="ui">Duplicate bits…</span> in the right button's menu asks <code>msb:lsb</code> (<code>7:2</code>) and puts that slice
+  under the bus, <code>PADDR[7:2]</code>, with a radix, a plot and a colour of its own; the command is <code>{op: 'duplicate', signals: 'PADDR', bits: [7, 2]}</code>.</p>
+<figure><img src="img/viewer-slice.png" alt="PADDR[7:2] under PADDR, and the value column with the two cursors: 0x00 · 0x40 · +0x40" loading="lazy">
+  <figcaption><b>A slice and two cursors.</b> <code>PADDR[7:2]</code> under its bus; cursors at 30 and 150 ns: each row's two values and the change.</figcaption></figure>
 
 <h3 id="cycles">Clock cycles</h3>
 <p>A failure is often told as <i>“cycle 147 after reset”</i>, not as a time. <span class="ui">Cycles ▸</span> in the right button's menu
@@ -468,7 +475,17 @@
 <p><b>Hidden and clearing.</b> <span class="ui">hidden</span> beside a marker keeps it in the list and takes it off the waves, the pictures and <kbd>]m</kbd> <kbd>[m</kbd>: the Δ of its
   neighbours goes through it. <span class="ui">Clear all</span> in the head of the Markers list, and <span class="ui">Clear bookmarks and markers</span> at the end of the right button's
   menu, delete every bookmark, arrow and marker of yours; undo brings them back.</p>
+<p id="measure"><b>Cycles, a bound, measurements.</b> With the cycles band on each Δ says its clock cycles too (<code>40 ns · 4 cycles</code>). A marker's
+  <code>dmin</code> / <code>dmax</code> (<code>{op: 'deltas', dmax: '50ns'}</code> for every one, or <code>'3 cycles'</code>) is a bound on its Δ: one that leaves it is drawn red,
+  in the list with <code>✗ &gt; 50 ns</code>, and in a picture. <span class="ui">|Δ|</span> on a line of the <a href="sva.html#expressions">expressions</a> puts a marker at the start
+  of each of its matches with the Δ between them on. The <code>measures</code> command, <code>view_get</code> and <code>viewedit.py page.html --measure --csv</code> give the table.</p>
+<figure><img src="img/viewer-measure.png" alt="Three markers req 1, req 2, req 3; Δ 40 ns · 4 cycles, and Δ 60 ns · 6 cycles in red over its bound of 50 ns" loading="lazy">
+  <figcaption><b>The Δ in cycles, a bound.</b> <code>dmax: '50ns'</code> on every marker: the second Δ, 60 ns, is drawn red and the list says <code>✗ &gt; 50 ns</code>.</figcaption></figure>
 
+<p id="link"><b>A link to a moment.</b> <code>page.html#t=1234ns&amp;sel=u_dma.req&amp;view=crc&amp;bm=2</code> — any part of it — opens the page
+  at that section, its bookmark, the cursor in the middle of the window and the signal selected and in sight; a changed hash in an open page goes
+  there too. <span class="ui">#</span> beside a bookmark, <span class="ui">Copy link to here</span> in the right button's menu and <kbd>yl</kbd> copy
+  one; it is not kept in the state: reloaded, the page goes there while the hash says so. Mail it with the page, paste it in a review.</p>
 <p><kbd>1</kbd> … <kbd>9</kbd> go to that bookmark, <kbd>]b</kbd> / <kbd>[b</kbd> to the next / previous one in time;
   a click on a number in the list does the same. Going to a bookmark shows the waves as they were when you made it: its time a fifth of the
   waves from the left (<code>bookmarkLeft</code>, 0.2), the span you have now, its signal selected, and the rows scrolled so that the row
@@ -532,6 +549,13 @@
 <p id="key-menu"><b>The box of what can follow.</b> A moment after the first key of a sequence (<kbd>g</kbd>, <kbd>z</kbd>, <kbd>y</kbd>, <kbd>[</kbd>, <kbd>]</kbd>) a box in the corner lists what can
   follow, as LazyVim does. Press the key or click it; it waits as long as it is open, <kbd>Esc</kbd> or a click elsewhere closes it, and so does a key it does not list (that key does nothing then; another first key starts its own box). <kbd>g</kbd> is the menu of nearly everything: going to things, the
   markers and bookmarks, the state, the dump. It lists only what this page can do now. Fast typing does not show it; <code>keyHints</code> sets the moment (<code>false</code>: never).</p>
+  <p><b>Your keys.</b> The setting <code>keys</code> (the global config, the config file's <code>"config"</code>, an element's
+  <code>data-keys</code> as JSON; the layers merge key by key) maps a key you type to one the viewer has:
+  <code>{"gx": "gm", "M": "m", "ctrl+k": "ctrl+g", "m": null}</code> — <kbd>g</kbd> <kbd>x</kbd> opens the markers, <kbd>M</kbd>
+  puts a marker, <kbd>ctrl</kbd>+<kbd>k</kbd> lists your groups, and <kbd>m</kbd> does nothing. A key of your own is one key, a
+  sequence after <kbd>g</kbd> <kbd>z</kbd> <kbd>y</kbd> <kbd>[</kbd> <kbd>]</kbd>, or <code>ctrl+</code> one; <kbd>Esc</kbd>,
+  <kbd>?</kbd> and the prefixes themselves stay the viewer's. The box after a prefix and Help (<kbd>?</kbd>) list them under
+  "Your keys"; an entry it cannot take is said in the log.</p>
 <figure><img src="img/viewer-keys.png" alt="The box after g: go to, markers and bookmarks, the state, the dump, more" loading="lazy">
   <figcaption><b>After <kbd>g</kbd>.</b> Each line is a key to press or a button to click.</figcaption></figure>
 <table>
@@ -558,7 +582,7 @@
   <tr><td>○, <kbd>ctrl+click</kbd> a name</td><td>highlight</td><td><kbd>ctrl+shift+click</kbd></td><td>highlight every row to here</td></tr>
   <tr><td><kbd>r</kbd></td><td>the last state loaded, read again (<span class="ui">Reload</span>)</td><td><kbd>R</kbd></td><td>the dump read again from the disk, the view kept (⟳)</td></tr>
   <tr><td><kbd>g</kbd></td><td>a box of what can follow, to press or to click: <kbd>gg</kbd> <kbd>gl</kbd> <kbd>gt</kbd> <kbd>gT</kbd>, <kbd>gm</kbd> <kbd>gM</kbd> <kbd>gB</kbd> <kbd>gd</kbd> <kbd>gc</kbd>,
-    <kbd>gs</kbd> <kbd>gL</kbd> <kbd>gr</kbd>, <kbd>gO</kbd> <kbd>gR</kbd> <kbd>gC</kbd>, <kbd>gv</kbd>, <kbd>gp</kbd></td><td><kbd>z</kbd> <kbd>y</kbd> <kbd>[</kbd> <kbd>]</kbd></td><td>the same box; <kbd>yn</kbd> <kbd>yt</kbd>: copy the name, the time of the cursor</td></tr>
+    <kbd>gs</kbd> <kbd>gL</kbd> <kbd>gr</kbd>, <kbd>gO</kbd> <kbd>gR</kbd> <kbd>gC</kbd>, <kbd>gv</kbd>, <kbd>gp</kbd></td><td><kbd>z</kbd> <kbd>y</kbd> <kbd>[</kbd> <kbd>]</kbd></td><td>the same box; <kbd>yn</kbd> <kbd>yt</kbd> <kbd>yl</kbd>: copy the name, the time of the cursor, a link to here (the cursor and the signal)</td></tr>
   <tr><td><kbd>b</kbd></td><td>bookmark at the cursor</td><td><kbd>]b</kbd> <kbd>[b</kbd>, <kbd>1</kbd> … <kbd>9</kbd></td>
     <td>next / previous bookmark, bookmark n</td></tr>
   <tr><td><kbd>m</kbd></td><td>marker at the cursor: its label asked</td><td><kbd>]m</kbd> <kbd>[m</kbd></td><td>next / previous marker</td></tr>
@@ -590,7 +614,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.40 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.41 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

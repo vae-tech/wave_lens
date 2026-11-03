@@ -213,6 +213,19 @@ class Dump(unittest.TestCase):
         self.assertEqual(sum(x['changes'] for x in g['segments']), g['compared'])
         self.assertIn('no such file', self.error('wave_diff', b='/nope.vcd'))
         self.assertIn('no argument "nope"', self.error('wave_diff', b=b, nope=1))
+        self.assertEqual([x['signal'] for x in r['rank']][:1], ['tb.dut.s_tdata'], 'who differed first')
+        # stage 23: the assertions' results of two runs
+        doc = lambda fails: {'unit': 'ps', 'cycles': [k * 10000 for k in range(10)], 'assertions': [{'name': 'p', 'scope': 'tb', 'stats': {},
+                             'attempts': [{'start': s, 'end': f, 'result': 'fail', 'failed_at': f} for s, f in fails]}]}
+        ra, rb = os.path.join(self.d.name, 'ra.json'), os.path.join(self.d.name, 'rb.json')
+        for f, x in ((ra, doc([(1, 2)])), (rb, doc([(1, 3), (5, 6)]))):
+            with open(f, 'w', encoding='utf-8') as h:
+                json.dump(x, h)
+        d = W.call('wave_diff', {'results_a': ra, 'results_b': rb})
+        d = json.loads(d[0])
+        self.assertEqual((d['same'], d['new'], d['moved'], d['assertions'][0]['new'], d['assertions'][0]['moved'][0]['b']['failed_at']),
+                         (False, 1, 1, [{'start': 50, 'failed_at': 60}], 30), d)
+        self.assertIn('one or the other', self.error('wave_diff', results_a=ra, results_b=rb, a=self.vcd))
         self.assertIn('no signal', self.error('wave_diff', b=b, signals=['zz_nope']))
 
     @H.needs(svabuild.find_bin(), 'no sva CLI')
@@ -356,7 +369,7 @@ class Views(unittest.TestCase):
         self.assertEqual(ms[0]['signal'], 'tb.valid')
         self.assertEqual((ms[0]['id'], ms[0]['t'], ms[0]['label'], ms[0]['lift'], ms[0]['color']), (1, 35, 'here', 'below', '#2f9e44'))
         self.assertEqual(ms[1], {'id': 2, 't': 45})   # at the top, pale
-        self.assertIn('marker(id? t? label? color? signal? lift? hidden? delete?)', next(t for t in W.TOOLS if t['name'] == 'view_edit')['description'])
+        self.assertIn('marker(id? t? label? color? signal? lift? hidden? dmin? dmax? delete?)', next(t for t in W.TOOLS if t['name'] == 'view_edit')['description'])
 
     def test_view_exprs(self):   # after test_file: it counts the revisions of the page
         """The expressions in the agent's words: into a page's file, what they found in ns, go and matches only live."""
@@ -378,7 +391,7 @@ class Views(unittest.TestCase):
         self.assertEqual((out[0]['t'], out[0]['k'], out[1]['time'], out[1]['n'], out[1]['share'], out[2]['first'], out[2]['matches'], out[3]['exprs']),
                          (5, 1, 3, 2, 0.5, 1, [[1, 2]], [{'id': 1, 'n': 1, 'first': 4, 'share': 0.25}]))
         self.assertEqual(W.ns_out([{'op': 'expr', 'cut': {'gaps': 2, 'kept': 5000, 'total': 20000, 'parts': [[2000, 7000]]}}], True)[0]['cut'], {'gaps': 2, 'kept': 5, 'total': 20, 'parts': [[2, 7]]})
-        self.assertIn('expr(id? text? scope? label? color? on? row? mark? gap? delete?)', next(t for t in W.TOOLS if t['name'] == 'view_edit')['description'])
+        self.assertIn('expr(id? text? scope? label? color? on? row? mark? gap? radix? analog? delete?)', next(t for t in W.TOOLS if t['name'] == 'view_edit')['description'])
 
     def test_gaps_view(self):
         """The gaps on the waves in the agent's words: view_get says them, a cut (the page's) in ns."""
@@ -757,6 +770,23 @@ class Tests(unittest.TestCase):
         self.assertFalse(err, text)
         return json.loads(text)
 
+    def test_measures_and_steps(self):
+        """Stage 17: a test's measures (ns, ok), the run's measures_failed and slowest steps; a test's steps by length, steps: true alone."""
+        doc = json.loads(json.dumps(self.DOC))
+        doc['tests'][0]['measures'] = [{'label': 'r', 'from': 10000, 'to': 40000, 'max': '20ns', 'ok': False}, {'label': 'c', 'from': 50000, 'to': 60000, 'max': '3 cycles'}]
+        doc['tests'][1]['phases'].append({'label': 'q', 'from': 200000, 'to': 290000})
+        with open(self.marks, 'w', encoding='utf-8') as f:
+            json.dump(doc, f)
+        r = self.call('wave_tests', marks=self.marks)
+        self.assertEqual((r['measures'], r['measures_failed']), (2, 1))
+        self.assertIn('2 measures, 1 out of bounds', r['summary'])
+        self.assertEqual(r['tests'][0]['measures'], [{'label': 'r', 'from': 10, 'to': 40, 'dt': 30, 'max': '20ns', 'ok': False},
+                                                     {'label': 'c', 'from': 50, 'to': 60, 'dt': 10, 'max': '3 cycles', 'ok': None}])
+        self.assertNotIn('measures', r['tests'][1])
+        self.assertEqual([(x['test'], x['step'], x['dt']) for x in r['slowest']], [('b', 'p', 99.999), ('b', 'q', 90)])
+        t = self.call('wave_tests', marks=self.marks, test='b', steps=True)['test']
+        self.assertEqual(([p['step'] for p in t['steps']], t['total'], t['longest'], set(t)), (['p', 'q'], 189.999, 'p', {'n', 'name', 'steps', 'total', 'longest'}))
+
     def test_the_tests_of_a_run(self):
         r = self.call('wave_tests', marks=self.marks)
         self.assertEqual(r['summary'], '2 tests: 1 passed, 1 failed')
@@ -848,7 +878,7 @@ class Protocol(unittest.TestCase):
         self.assertTrue(all('fn' not in t and t['inputSchema']['type'] == 'object' for t in r[1]['result']['tools']))
         # codex exec calls a tool without approval only when it says it reads: every tool but the ones that write a file
         self.assertEqual([t['name'] for t in r[1]['result']['tools'] if not t['annotations']['readOnlyHint']],
-                         ['wave_page', 'wave_to_fst', 'wave_cut', 'view_edit', 'view_live'])
+                         ['wave_explain', 'wave_page', 'wave_to_fst', 'wave_cut', 'view_edit', 'view_live'])
         arrays = [(t['name'], k) for t in r[1]['result']['tools'] for k, v in t['inputSchema']['properties'].items()
                   if 'array' in str(v.get('type')) and 'items' not in v]
         self.assertEqual(arrays, [])   # an array without items is refused by OpenAI's function schemas
@@ -1037,6 +1067,48 @@ class Arguments(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class Measures(unittest.TestCase):
+    """Stage 16: view_get's measures (the Δ of the markers as a table, in ns), a bound given in ns, the measures command."""
+    def test_measures_in_ns(self):
+        with H.tmp() as d:
+            page, j = os.path.join(d, 'p.html'), os.path.join(d, 'v.json')
+            with open(j, 'w', encoding='utf-8') as f:
+                json.dump({'signal': [{'name': 'clk', 'wave': 'p.......'}], 'time': {'t0': 0, 't1': 80000, 'cycle': 10000, 'unit': 'ps'}}, f)
+            self.assertEqual(H.run_tool('mkhtml', f'one={j}', '--no-sva', '--out', page)[0], 0)
+            text, bad = W.call('view_edit', {'page': page, 'ops': [{'op': 'marker', 't': 10, 'label': 'req'}, {'op': 'marker', 't': 40, 'label': 'ack', 'dmin': 5},
+                                                                    {'op': 'marker', 't': 50}, {'op': 'marker', 'id': 1, 'dmax': 20}, {'op': 'measures'}]})
+            self.assertFalse(bad, text)
+            m = json.loads(text)['results'][-1]['measures']
+            self.assertEqual([(r['from']['t'], r['to']['t'], r['dt'], r.get('dmax'), r.get('ok')) for r in m], [(10, 40, 30, 20, False), (40, 50, 10, None, True)])
+            g = json.loads(W.call('view_get', {'page': page})[0])
+            self.assertEqual(g['measures'], m)
+            self.assertEqual([x.get('dmin') for x in g['markers']], [None, 5, None])
+
+    def test_the_page_own_measures(self):
+        """Review S16-2: a page whose markers are its own "measures" (a cocotb test's wl.measure): view_get and viewedit --measure give
+        them before any marker by hand; S16-1: a bound in cycles on a view with no clock -> the lint measure-no-clock."""
+        with H.tmp() as d:
+            page, j = os.path.join(d, 'p.html'), os.path.join(d, 'v.json')
+            with open(j, 'w', encoding='utf-8') as f:
+                json.dump({'signal': [{'name': 'data', 'wave': '01.0.1..'}], 'time': {'t0': 0, 't1': 80000, 'cycle': 10000, 'unit': 'ps'},
+                           'measures': [{'label': 'r', 'from': 10000, 'to': 40000, 'max': '20ns'}, {'label': 'c', 'from': 40000, 'to': 60000, 'max': '1 cycle'}]}, f)
+            rc, _, err = H.run_tool('mkhtml', f'one={j}', '--no-sva', '--out', page)
+            self.assertEqual(rc, 0, err)
+            import types, vcd2wavedrom
+            doc = json.loads(H.text(j))
+            self.assertEqual([x.split(':')[0] for x in vcd2wavedrom.lint(doc, types.SimpleNamespace(marker=[]), 'views.one')], ['measure-no-clock'])
+            doc['signal'].append({'name': 'clk', 'wave': 'p.......'})
+            self.assertEqual(vcd2wavedrom.lint(doc, types.SimpleNamespace(marker=[]), 'views.one'), [], 'a clock in the view: no warning')
+            g = json.loads(W.call('view_get', {'page': page})[0])
+            self.assertEqual([(r['dt'], r.get('ok')) for r in g.get('measures', [])], [(30, False), (20, None)], g)
+            self.assertTrue(g['markers'] and all(x.get('page') for x in g['markers']), g.get('markers'))
+            rc, out, err = H.run_tool('viewedit', page, '--measure')
+            self.assertEqual(rc, 0, err)
+            self.assertIn('2 measurements', out)
+            rc, out, _ = H.run_tool('viewedit', page, '--measure', '--csv')
+            self.assertEqual(len(out.splitlines()), 3)
 
 
 class Review1103(unittest.TestCase):

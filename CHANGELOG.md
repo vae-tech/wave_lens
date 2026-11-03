@@ -5,6 +5,29 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.41 — 3 November 2026
+
+Measurements, links to a moment, your own keys, tools for CI, and the fixes of the review of all of them.
+
+- **Measurements.** The matches of an expression as markers; the Δ between markers in cycles and against a bound
+  (`dmin` / `dmax`, a time or `"3 cycles"`; red when it is not kept, `? no clock` when it cannot be counted); the
+  `measures` table (`view_get`, `viewedit.py --measure [--csv]`); `wl.measure` in a cocotb test, its pairs on the page
+  (a rebuilt page shows its new ones, yours kept); `sharedMarkers` on a page of a view per test.
+- **Links.** `page.html#t=…&sel=…&view=…&bm=…`, Copy link, `yl`, the `goto` command; times in a VS Code log or terminal
+  as links to the dump's tab (`wavelens.logLinks`).
+- **The page.** A config's view keeps its look (`"state"`, `viewedit.py --config`, `--from-page`); the library of
+  expressions (`exprLibrary`); the transfers of the buses as a list (CSV, `bus_list`); a slice of a bus as a row
+  (`duplicate bits`), the values at two cursors with the change in the row's radix (Copy A · B · Δ); undo of
+  expressions and bindings; a filter in the menus' lists, Keep as span, a divider among your groups; the dump's
+  statistics in the log; your own keys (`keys`, `data-keys`).
+- **Tools.** `sva diff --results [--rank]` (two runs' assertion results), `mkhtml.py --junit --png [--png-width]`
+  (`make html PNG= JUNIT=`), `wave_explain` (an expression's match, an assertion's failure, a difference, a time),
+  `tools/fsmstats.py` / `wave_fsm` (`make fsm-stats`), `mkconfig.py --gtkw` (a GTKWave save file), `dumpscan.py --stats`,
+  `make diff-results`.
+- **The review of stages 16–28** (`docs/reviews/review-2026-11-03/stages-16-28/`): a check that did not run is no pass in
+  the JUnit; a cover that stops matching fails `sva diff --results`; a refused command leaves nothing; what the SVG
+  draws (a divider), what GTKWave writes (nested groups, aliases, marker names), the keys' corners.
+
 ## 0.40 — 3 November 2026
 
 Keys that say what can follow them, and the bugs of an independent review fixed. `R` reads the dump again; a moment after `g` a box lists the menu.

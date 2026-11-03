@@ -9,6 +9,9 @@ Object.assign(WaveView.prototype, {
     const r = this.range, sig = row && row.type === 'sig' && row.tr ? row : null, grp = row && row.type === 'group' &&
       this.M.groups[row.id] === row ? row : null, it = row && (sig || grp);
     const up = sig && sig.anc.length ? sig.anc[sig.anc.length - 1] : null, nh = this.hiddenRows.size, ng = Object.keys(this.M.groups).length;
+    // a span of yours where it was opened (the time clicked, on its rows): As range
+    const onSpan = sp => !sp.signals || !sp.signals.length || (row && (sp.signals.includes(row.full) || sp.signals.includes(row.name)));
+    const spAt = this.spans.filter(sp => at >= sp.from && at <= sp.to && onSpan(sp)).pop() || null, spId = spAt ? this.spans.indexOf(spAt) + 1 : 0;
     // a row of your groups (its place there) or a header of one (its place among yours): Move up / down, to the top / bottom
     const ugh = row && row.user ? row : null, mine = sig && sig.ug ? sig : null, ugOf = n => this.ugroups.find(g => g.name === n);
     const mvAt = ugh ? [this.ugroups.indexOf(ugOf(ugh.name)), this.ugroups.length] : mine ? [ugOf(mine.ug.name).signals.indexOf(mine.orig.full),
@@ -58,7 +61,7 @@ Object.assign(WaveView.prototype, {
     const six = c => /^#[0-9a-f]{6}$/i.test(c || ''), acc6 = getComputedStyle(this.root).getPropertyValue('--accent').trim();
     const dm = on.dl ? on.dl.m : null, dlId = dm ? this.umarks.indexOf(dm) + 1 : 0, dd = dm && this.deltaList().find(d => d.a === dm);
     const ln = on.line && on.line.n > (dm || mk ? 1 : 0) ? on.line : null, pick0 = c => esc(six(c) ? c : six(acc6) ? acc6 : '#808080');
-    el.innerHTML = (dm && dd ? `<div class="mh">Δ ${esc(this.deltaText(dd.dt))} · from marker ${dlId}</div>` +
+    el.innerHTML = (dm && dd ? `<div class="mh">Δ ${esc(this.deltaText(dd))}${dd.bad ? ' ' + esc(this.deltaBound(dd)) : ''} · from marker ${dlId}</div>` +
       `<label class="mi">Colour <input type="color" class="dlc" value="${pick0(dm.dcolor)}" aria-label="the colour of this Δ"></label>` +
       (dm.dcolor ? b('dlown', 'Its own colour') : '') +
       b('dlnone', 'No arrow from this marker') + '<hr>' : '') +
@@ -69,7 +72,10 @@ Object.assign(WaveView.prototype, {
       `<label class="mi">Colour <input type="color" class="mkc" value="${esc(six(mk.color) ? mk.color : six(pale) ? pale : '#808080')}" ` +
       `aria-label="marker ${mkId} colour"></label>` + (mk.color ? b('mkpale', 'Pale again') : '') + b('mkdel', 'Delete the marker') + '<hr>' : '') +
       (r ? `<div class="mh">${esc(this.rangeText())}</div>` + b('zoom', 'Zoom to the range') + b('marks', 'Bookmarks at its ends',
-      'Two bookmarks and an arrow with the Δ between them') + b('copyd', 'Copy Δ') + '<hr>' : '') +
+      'Two bookmarks and an arrow with the Δ between them') + b('copyd', 'Copy Δ') + b('keepsp', 'Keep as span…',
+      'A span of yours over this range, its label asked (empty: none); the range stays') + '<hr>' : '') +
+      (spAt ? `<div class="mh">Span ${spId}${spAt.label ? ' · ' + esc(spAt.label) : ''}</div>` + b('asrange', 'As range', 'This span measured as the range') +
+        b('spdel', 'Delete the span') + '<hr>' : '') +
       (np ? `<div class="mh">${np} ${this.selRun.size > 1 ? 'selected' : 'highlighted'} rows</div>` : '') + b('copyimg', 'Copy image') + b('png',
         'Save image as PNG') + b('svg', 'Save image as SVG') + b('wdjson', 'Save as WaveDrom') + b('wdcopy', 'Copy WaveDrom') +
       // the gaps: a submenu (its settings, the role of the signals clicked, a reset)
@@ -122,23 +128,29 @@ Object.assign(WaveView.prototype, {
         (vecs.length ? b('bits', vecs.every(r => this.bitsOpen.has(r.full)) ? (many ? `Fold the bits of ${vecs.length}` : 'Fold the bits') :
           many ? `Bits of ${vecs.length}` : `Bits: ${vecs[0].width} rows`) : '') +
         (dupable.length ? b('dup', dupable.length > 1 ? `Duplicate ${dupable.length}` : 'Duplicate') : '') +
+        (vecs.length && !vecs.some(r => r.slice) ? b('dupbits', 'Duplicate bits…', 'Some bits of the bus as a row of their own: 7:4') : '') +
         (copies.length ? b('undup', copies.length > 1 ? `Remove the ${copies.length} copies` : 'Remove the copy') : '') +
-        b('hl', this.picks.has(it) ? 'Remove the highlight' : 'Highlight') + b('hide',
+        (grp && grp.cls === 'ugdiv' ? '' : b('hl', this.picks.has(it) ? 'Remove the highlight' : 'Highlight') + b('hide',   // a divider: neither
           many ? `Hide the ${rows.length} ${run ? 'selected' : 'highlighted'}` : grp ? 'Hide this module' : 'Hide',
-          'Leave it out of the view (Hidden: N ✕ in the bar shows it again)') +
+          'Leave it out of the view (Hidden: N ✕ in the bar shows it again)')) +
         (grp && !ugh ? b('fold', this.collapsed.has(grp.id) ? 'Open this module' : 'Fold this module') : up != null ? b('foldup', 'Fold its module') : '') +
         (sig ? b('mark', 'Bookmark here', 'A bookmark on this signal at the time clicked') : '') +
         // your groups: a submenu (into / out of a group, a new one, delete; go to any of them)
         (`<div class="msub"><button type="button" role="menuitem" class="subg" aria-haspopup="menu" aria-expanded="false">` +
           `<span>Groups${this.ugroups.length ? ` (${this.ugroups.length})` : ''}</span><span class="kk">▸</span></button><div class="sub" role="menu" hidden>` +
           (sig && !mine ? '<div class="mh">to move it: into a group of yours, any order there</div>' : '') +
-          (sigs.length ? this.ugroups.map((g, i) => (sigs.every(r => g.signals.includes((r.orig || r).full)) ? ugb('ugoff', i, `Out of “${g.name}”`) :
+          (sigs.length ? this.ugroups.map((g, i) => (g.divider ? '' : sigs.every(r => g.signals.includes((r.orig || r).full)) ?
+            ugb('ugoff', i, `Out of “${g.name}”`) :
             ugb('ugto', i, `Into “${g.name}”`))).join('') + b('ugnew', many ? `New group of the ${sigs.length}` : 'New group with it') : '') +
           (sig && sig.ug ? b('ugout', `Out of “${sig.ug.name}” (this row)`) : '') + (grp && grp.user ? b('ugdel', 'Delete this group') : '') +
-          (this.ugroups.length ? '<hr><div class="mh">Go to</div>' + this.ugroups.map((g, i) => ugb('ugo', i, `${g.name} · ${g.signals.length}`)).join('') :
+          (this.ugroups.length ? '<hr><div class="mh">Go to</div>' +
+            this.ugroups.map((g, i) => (g.divider ? '' : ugb('ugo', i, `${g.name} · ${g.signals.length}`))).join('') :
             '<div class="mh">no groups yet</div>') + '</div></div>') +
         b('umark', 'Marker here') + b('mlist', 'Markers…') + b('c2',
-          'Second cursor here') + (this.cursor2 != null ? b('c2x', 'Clear the second cursor') : '') + b('copyname', 'Copy the path') +
+          'Second cursor here') + (this.cursor2 != null ? b('c2x', 'Clear the second cursor') +
+          (sig && sig.tr ? b('copyv', 'Copy A · B · Δ', 'The value at each cursor and the change between them, as the value column shows them') : '') : '') +
+          b('copyname', 'Copy the path') +
+        b('copylink', 'Copy link to here', 'A link to this moment: the page opened by it puts the cursor here and selects this signal') +
         b('types', 'Type…') : '') +
       (ng || nh ? '<hr>' + (ng ? b('zM', 'Fold every module') + b('zR', 'Open every module') : '') + (nh ? b('unhide', `Show the hidden (${nh})`) : '') : '') +
       (this.scopes().length ? '<hr>' + b('mods', 'Modules…') + (it && this.scopeOfRow(it) ? b('locate', 'Locate module in tree') : '') +
@@ -176,6 +188,12 @@ Object.assign(WaveView.prototype, {
         const top = this.topNow(); this.bms.push(...bmNorm([{ n, t: r[0], signal: s, top }, { n: n + 1, t: r[1], signal: s, top }]));
         this.arrows.push(...arNorm([{ from: n, to: n + 1, shape: '-', head: '<>', label: this.rangeText().replace(/^Δ /, '') }])); this.changed(true);
       }
+      else if (act === 'keepsp') { const [x, y] = this.menuAt, [a, z] = r;
+        this.askText(x, y, `Span · ${this.fmtCursor(a)} … ${this.fmtCursor(z)}`, 'its label (empty: none)',
+          label => this.run(Object.assign({ op: 'span', from: a, to: z }, label ? { label } : {})));
+        return this; }
+      else if (act === 'asrange') this.setRange(spAt.from, spAt.to);
+      else if (act === 'spdel') this.run({ op: 'span', id: spId, delete: true });
       else if (act === 'copyd') this.copyText(this.rangeText().replace(/^Δ /, '').split(' · ')[0].split(' / ')[0]);
       else if (act === 'copyimg') {
         const png = this.toPNG(pic);
@@ -202,6 +220,16 @@ Object.assign(WaveView.prototype, {
       else if (act === 'dup') { const out = dupable.map(r => this.dupAdd(r)).filter(Boolean); this.dupDone();
         if (out.length) { this.select(out[0]);
           this.toast(`${out.length > 1 ? `${out.length} copies: each` : `${out[0].name}:`} its own radix, analog, colour`); } }
+      else if (act === 'dupbits') {
+        const w = Math.min(...vecs.map(r => r.width)), [x, y] = this.menuAt;
+        const what = vecs.length > 1 ? `the ${vecs.length} buses` : vecs[0].name;
+        this.askText(x, y, `Bits of ${what} as a row`, `msb:lsb, e.g. ${w - 1}:${Math.floor(w / 2)}`, text => {
+          if (!text) return;
+          this.run({ op: 'duplicate', signals: vecs.map(r => (r.orig || r).full), bits: text.trim() }).then(r => {
+            if (r[0].error) this.toast(r[0].error); else { const d = this.dups.get(r[0].copies[0]); if (d) this.select(d); } });
+        });
+        return this;   // (the box stays: the menu is not closed over it)
+      }
       else if (act === 'undup') { copies.forEach(r => this.dupDrop(r)); this.dupDone(); }
       else if (act === 'hide') this.hide(rows);
       else if (act === 'unhide') this.unhide();
@@ -221,6 +249,8 @@ Object.assign(WaveView.prototype, {
           const n = Math.max(0, ...this.bms.map(b => b.n)) + 1; this.bms.push({ n, t, signal: sig.full, text, color: null, top }); this.changed(true); });
         return this; }
       else if (act === 'copyname') this.copyRows([it]);
+      else if (act === 'copyv') this.copyText(`${sig.name}: ${this.valueTwo(sig, true)}`);
+      else if (act === 'copylink') this.copyText(this.linkTo({ t: this.cursor, sel: it && it.type === 'sig' ? it.full : this.sel && this.sel.full }));
       else if (act === 'types') { const x = this.menuEl.getBoundingClientRect(); this.closeMenu(); this.typesBox(sig0, x.left, x.top); return this; }
       else if (act === 'mlist') { this.closeMenu(); this.marksMenu(); return this; }
       else if (act === 'mktext') { const [x, y] = this.menuAt;
@@ -343,7 +373,8 @@ Object.assign(WaveView.prototype, {
     const el = document.createElement('div'); el.className = 'wv-menu wv-groups'; el.setAttribute('role', 'menu');
     const item = (g, i) => `<button type="button" role="menuitem" data-m="ugo" data-g="${i}"><span><i class="sw" style="background:${
       esc(g.color || 'var(--accent)')}"></i>${esc(g.name)}</span><span class="kk">${g.signals.length}</span></button>`;
-    el.innerHTML = '<div class="mh">Your groups</div>' + (this.ugroups.length ? this.ugroups.map(item).join('') :
+    el.innerHTML = '<div class="mh">Your groups</div>' + (this.ugroups.some(g => !g.divider) ?   // a divider is no group to go to
+      this.ugroups.map((g, i) => (g.divider ? '' : item(g, i))).join('') :
       '<div class="mh">none yet: the right button on a signal, Groups ▸ New group</div>');
     this.root.append(el); this.menuEl = el;
     const n = this.namesEl.getBoundingClientRect(), box = el.getBoundingClientRect();
@@ -351,14 +382,15 @@ Object.assign(WaveView.prototype, {
     el.style.top = Math.max(4, Math.min(Math.max(n.top, 0) + this.hdrH + 8, innerHeight - box.height - 4)) + 'px';
     el.addEventListener('click', e => { const m = e.target.closest('button[data-g]'); if (!m) return; this.closeMenu();
       this.goGroup(this.ugroups[+m.dataset.g].name); });
+    const f = this.menuFilter(el, (b, take) => { if (take) b.click(); else b.focus(); });
     el.addEventListener('keydown', e => {
-      const bs = [...el.querySelectorAll('button')], k = bs.indexOf(document.activeElement);
+      const bs = [...el.querySelectorAll('button')].filter(b => !b.hidden), k = bs.indexOf(document.activeElement);
       if (e.key === 'Escape') { e.stopPropagation(); this.closeMenu(); this.refocus(); }
       else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault();
         bs[(k + (e.key === 'ArrowDown' ? 1 : -1) + bs.length) % bs.length]?.focus(); }
     });
     this.menuOff(el);
-    (el.querySelector('button') || el).focus({ preventScroll: true });
+    (f || el.querySelector('button') || el).focus({ preventScroll: true });
     return el;
   },
   // gm (the right button's Markers…): the markers (the page's and yours) and the bookmarks in a list over the waves, by
@@ -396,17 +428,50 @@ Object.assign(WaveView.prototype, {
       this.renderNames(); this.draw();
     };
     el.addEventListener('click', e => { const b = e.target.closest('button[data-i]'); if (b) pick(+b.dataset.i); });
+    const shown = () => [...el.querySelectorAll('button[data-i]')].filter(b => !b.hidden).map(b => +b.dataset.i);   // in the order shown
+    const f = this.menuFilter(el, (b, take) => { pick(+b.dataset.i); if (take) { this.closeMenu(); this.refocus(); } });
     el.addEventListener('keydown', e => {
-      const k = e.key;
+      const k = e.key, s = shown(), p = s.indexOf(at), d = k === 'ArrowDown' ? 1 : -1;
       if (k === 'Escape' || k === 'Enter') { e.preventDefault(); e.stopPropagation(); this.closeMenu(); this.refocus(); }
-      else if (k === 'ArrowDown' || k === 'ArrowUp') {
-        e.preventDefault(); pick(at < 0 ? (k === 'ArrowDown' ? 0 : items.length - 1) : at + (k === 'ArrowDown' ? 1 : -1)); }
-      else if (k === 'Home' || k === 'End') { e.preventDefault(); pick(k === 'Home' ? 0 : items.length - 1); }
+      else if ((k === 'ArrowDown' || k === 'ArrowUp') && s.length) {
+        e.preventDefault(); pick(s[p < 0 ? (d > 0 ? 0 : s.length - 1) : Math.min(Math.max(p + d, 0), s.length - 1)]); }
+      else if ((k === 'Home' || k === 'End') && s.length) { e.preventDefault(); pick(s[k === 'Home' ? 0 : s.length - 1]); }
     });
     el.addEventListener('contextmenu', e => e.preventDefault());
     this.menuOff(el, false);
-    el.focus({ preventScroll: true });
+    (f || el).focus({ preventScroll: true });
     return el;
+  },
+  // a line to type in at the top of a list menu (Markers…, your groups): its items as you type (fuzzy, as the find: the best first, the
+  // letters marked, in place), ↓ to the first, Enter takes the best match (go; nothing typed: closes), Esc closes; nothing matches: said
+  menuFilter(el, go) {
+    const bs = [...el.querySelectorAll('button[data-i], button[data-g]')]; if (bs.length < 2) return null;
+    const f = document.createElement('input'); f.className = 'mf'; f.type = 'search'; f.placeholder = 'filter…';
+    f.setAttribute('aria-label', 'filter the list');
+    f.title = 'Type a part of its name: the list keeps what matches';
+    const none = document.createElement('div'); none.className = 'mh mfn'; none.textContent = 'no match'; none.hidden = true;
+    const base = new Map(bs.map(b => [b, b.querySelector('span').innerHTML])), first = el.querySelector('.mh');
+    (first || el.firstChild).after(f, none);
+    const mark = (s, idx) => { const at = new Set(idx); return [...s].map((c, i) => (at.has(i) ? `<u>${esc(c)}</u>` : esc(c))).join(''); };
+    let best = null;   // the best match: Enter takes it (the list keeps its order, the others hidden in place)
+    f.addEventListener('input', () => {
+      const q = f.value.trim(); let n = 0; best = null;
+      for (const b of bs) { const m = q ? fuzzy(q, b.textContent) : { score: 0, idx: [] }; b.hidden = !m; b.querySelector('span').innerHTML = base.get(b);
+        if (!m) continue; n++; if (q && (!best || m.score > best.m.score)) best = { b, m };
+        const sp = b.querySelector('span'), sw = sp.querySelector('i'), lab = sp.textContent, mm = q && fuzzy(q, lab);   // its letters marked
+        if (mm) sp.innerHTML = (sw ? sw.outerHTML : '') + mark(lab, mm.idx); }
+      for (const h of el.querySelectorAll('hr, .mh')) h.hidden = h === none || (!!q && h !== first);
+      none.hidden = !!n;
+    });
+    f.addEventListener('keydown', e => {
+      const shown = bs.filter(b => !b.hidden);
+      if (e.key === 'ArrowDown') { e.preventDefault(); e.stopPropagation(); if (shown[0]) go(shown[0], false); }
+      else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation();   // nothing typed: closes, as the header says; else the best match
+        if (!f.value.trim()) { this.closeMenu(); this.refocus(); } else if (best) go(best.b, true); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); this.closeMenu(); this.refocus(); }
+      else e.stopPropagation();   // typed: not a key of the menu
+    });
+    return f;
   },
   // your group by its name: opened (and shown when hidden), in the middle of the waves, its first signal selected
   goGroup(name) {
@@ -461,11 +526,15 @@ Object.assign(WaveView.prototype, {
   keyRows(pre) {
     const rows = KEY_MENUS[pre][1].filter(r => r.length === 1 || !r[2] || r[2](this))
       .map(r => (typeof r[1] === 'function' ? [r[0], r[1](this)] : r.slice(0, 2)));
+    const km = Object.entries(this.keymap()).filter(([s]) => s.length === 2 && s[0] === pre);
+    const gone = new Set(km.map(([s]) => s[1]));   // a key of the setting keys: the viewer's or a plugin's row of it is not there
     const own = new Set(KEY_MENUS[pre][1].map(r => r[0]));
-    const more = Object.keys(this.keys).filter(s => s.length === 2 && s[0] === pre && !own.has(s[1])).map(s => [s[1],
+    const more = Object.keys(this.keys).filter(s => s.length === 2 && s[0] === pre && !own.has(s[1]) && !gone.has(s[1])).map(s => [s[1],
       (this.keyHelp || []).find(h => h.split(' ').includes(s))]).filter(r => r[1]);
     more.forEach(r => { r[1] = r[1].replace(/^(\S\S )+/, '').replace('next / previous ', ''); });   // ']f [f next / previous …'
-    return rows.concat(more.length && pre === 'g' ? [['Plugins']] : [], more).filter((r, i, l) => r.length > 1 || (l[i + 1] && l[i + 1].length > 1));
+    const mine = km.filter(([, t]) => t != null).map(([s, t]) => [s[1], this.keyCaption(t) || `as ${t}`]);   // the setting keys: what they do
+    return rows.filter(r => r.length === 1 || !gone.has(r[0])).concat(more.length && pre === 'g' ? [['Plugins']] : [], more,
+      mine.length ? [['Your keys']] : [], mine).filter((r, i, l) => r.length > 1 || (l[i + 1] && l[i + 1].length > 1));
   },
   keyHintShow(k) {
     if (!this.kpre || this.kpre.k !== k || this.keysEl) return;

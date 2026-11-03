@@ -45,9 +45,11 @@ is turned into VCD text with it, kept in the extension's storage).
   each on the open tabs.
 - **The version** in the bar: `0.35 · dev@5470d89*`, the extension's branch and commit (`*`: changes not committed).
 
+**Links from a log.** A time in the terminal, a `.log` / `.txt` / `.out` file or a task's output — `@ 1234 ns`, `at 1.2 us`, `time=5ns`, a bare `1234 ns` (fs, ps, ns, us: "3 s" or "100 ms" in a log is no time of a dump) — is a link (ctrl+click): the dump's WaveLens tab (the one in sight, else the one used last, else a dump opened in this workspace before, picked) puts the cursor there and selects the line's `a.b.c` signal after the time (else the first; `top.gen[2].u.req` too; a logger's name — `cocotb.…`, `uvm_…` — is none; a name the dump has not got moves nothing); `dump.vcd#t=…&sel=…` (Copy link in the tab) opens that dump (the command *WaveLens: Go to a moment of the dump*, which the links run). `wavelens.logLinks`: more patterns, regular expressions with the groups `t`, `unit`, `sig`, tried first (no `unit`: ps; one that is no regex or has no `t` is said once in the WaveLens output).
+
 The keys are the viewer's (`?` in the tab): the plain ones, and the ctrl / alt ones that mean what they mean in VS Code
 (ctrl+F, ctrl+C, ctrl+Z, alt+C W R); `wavelens.keysToVSCode` (`ctrl+G`: Go to Line) go to VS Code — the list of your
-groups is `gl` then. Settings: `wavelens.theme` (auto), `wavelens.keysToVSCode` (`["ctrl+G"]`), `wavelens.openLastState` (true), `wavelens.verilator` (verilator), `wavelens.sources` (`**/*.sv`, `**/*.svh`), `wavelens.lazy` (auto: a large dump read as it is needed; always, never), `wavelens.autoReload` (false: the tab offers ⟳ after a new
+groups is `gl` then. Settings: `wavelens.logLinks` (`[]`: more patterns of a log's links), `wavelens.theme` (auto), `wavelens.keysToVSCode` (`["ctrl+G"]`), `wavelens.openLastState` (true), `wavelens.verilator` (verilator), `wavelens.sources` (`**/*.sv`, `**/*.svh`), `wavelens.lazy` (auto: a large dump read as it is needed; always, never), `wavelens.autoReload` (false: the tab offers ⟳ after a new
 simulation; true: it reads the dump at once), `wavelens.live` (true), `wavelens.sva` (another sva program).
 
 **Install.** Build the package from the repository (`make vsix`: `out/wavelens.vsix`, a copy as `wavelens-<version>.vsix`, for a Linux x86-64 host;

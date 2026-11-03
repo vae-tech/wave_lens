@@ -564,6 +564,132 @@ def find_expr(w, a, scope, t0, t1, n):
     return out
 
 
+def t_fsm(a):
+    """wave_fsm: an FSM's states in a dump (tools/fsmstats.py, the rule of the page's FSM panel) -> its states, never, invalid, changes in ns."""
+    import fsmstats
+    w = wave(a.get('dump'), a)
+    if not a.get('signal'):
+        raise WaveError('"signal": the FSM\'s state signal')
+    enum = None
+    if a.get('enum') is not None:
+        e = a['enum']
+        try:
+            enum = {int(k, 0) if isinstance(k, str) else int(k): str(x) for k, x in (e.items() if isinstance(e, dict) else [])}
+        except ValueError:
+            raise WaveError('"enum": {code: label}, the codes numbers ("0", "0x2")') from None
+        if not enum:
+            raise WaveError('"enum": {code: label} of its states')
+    t0, t1 = window(w, a)
+    p, s = fsmstats.of_dump(w, a['signal'], enum, t0, t1, a.get('scope') or '')
+    t = lambda v: None if v is None else ns(v)
+    for x in s['states'] + s['invalid']:
+        x['first'], x['time'] = t(x['first']), t(x['time'])
+    for c in s['changes']:
+        c['first'] = t(c['first'])
+    return {'signal': p, 'unit': 'ns', 'from': ns(t0), 'to': ns(t1), **s}
+
+
+EXPLAIN_SIGS = re.compile(r'(?<![\w$.\'])([A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)*)')
+
+
+def t_explain(a):
+    """wave_explain: a moment to look at — an expression's nth match, an assertion's nth failure (assert "name@scope" with its sva files), the
+    first difference of two dumps (b), or a time t — with its signals -> its window (before / after cycles of the clock; an assertion's from
+    the start of the attempt), the values there (wave_sample's table), and with out a page marked there."""
+    if a.get('out') and not str(a['out']).lower().endswith('.html'):
+        raise WaveError(f'"out": a .html page (the window marked there), not {a["out"]}')
+    w = wave(a.get('dump'), a)
+    scope = a.get('scope') or ''
+    kinds = [k for k in ('expr', 'assert', 'b', 't') if a.get(k) is not None]
+    if len(kinds) != 1:
+        raise WaveError('one of "expr" (its match), "assert" (its failure), "b" (the first difference with that dump) or "t" (a time)' +
+                        (f', not {" and ".join(kinds)}' if kinds else ''))
+    kind, nth = kinds[0], a.get('nth') or 1
+    if not (isinstance(nth, int) and nth >= 1):
+        raise WaveError('"nth": 1, 2 …')
+    sigs, why = list(a.get('signals') or []) if not isinstance(a.get('signals'), str) else [x for x in re.split(r'[,\s]+', a['signals']) if x], {}
+    if kind == 'expr':
+        r = find_expr(w, {**a, 'limit': nth}, scope, w.t_start, w.t_end, nth)
+        if len(r['rows']) < nth:
+            raise WaveError(f'"{r["expr"]}" matches {r["matches"]} time{"s" if r["matches"] != 1 else ""} in the dump: no match {nth}')
+        at, why = r['rows'][nth - 1][1], {'expr': r['expr'], 'match': nth, 'matches': r['matches'], 'clock': r['clock']}
+        scope = scope or r.get('scope') or ''
+        if not sigs:
+            for n in EXPLAIN_SIGS.findall(re.sub(r'\$\w+|\d+\'[sS]?[bBhHdDoO][0-9a-fA-FxXzZ_]+', ' ', r['expr'])):
+                try:
+                    w.find(n, scope)
+                    sigs.append(n)
+                except WaveError:
+                    pass
+    elif kind == 'assert':   # its nth failed attempt (sva_check): from its start to where it failed
+        name, _, sc = str(a['assert']).partition('@')
+        sc = sc or scope
+        files = a.get('sva') or a.get('files')
+        if not files:
+            raise WaveError('"assert" needs "sva": its assertion files (packages first)')
+        r = t_sva({'dump': a.get('dump'), 'types': a.get('types'), 'no_types': a.get('no_types'), 'files': files, 'scope': sc, 'assertions': [name],
+                   'max_failures': nth, 'sva_bin': a.get('sva_bin')})
+        x = next((f for f in r.get('failed') or [] if f.get('name') == name), None)
+        if x is None or len(x.get('failures') or []) < nth:
+            raise WaveError(f'{name}@{sc}: no failure {nth}' + (f' (it fails {x["stats"]["fail"]} times)' if x else ' (it does not fail here)'))
+        cyc, at, c0, t_start, note = x['failures'][nth - 1][:5]
+        why = {'assert': name, 'scope': sc, 'failure': nth, 'failures': x['stats'].get('fail'), 'start': t_start, 'note': note,
+               'text': x.get('text'), 'clock': r.get('clock')}
+        scope = sc
+        if not sigs:
+            for n in EXPLAIN_SIGS.findall(re.sub(r'\$\w+|\d+\'[sS]?[bBhHdDoO][0-9a-fA-FxXzZ_]+', ' ', x.get('text') or '')):
+                try:
+                    w.find(n, scope)
+                    sigs.append(n)
+                except WaveError:
+                    pass
+    elif kind == 'b':
+        d = t_diff({('a' if k == 'dump' else k): a[k] for k in ('dump', 'b', 'map', 'offset', 'scope', 'sva_bin') if a.get(k) is not None})
+        if d.get('first') is None:
+            raise WaveError('the two dumps do not differ: nothing to explain')
+        at = d['first']['t']
+        why = {'first': d['first'], 'rank': d.get('rank', [])}
+        sigs = sigs or [x['signal'] for x in d.get('rank', [])][:8] or [d['first']['signal']]
+    else:
+        at = ns(ps_of(a['t'], 't'))
+        if not sigs:
+            raise WaveError('"t" needs "signals": the ones to look at')
+    if not sigs:
+        raise WaveError('no signals found to look at: give "signals"')
+    names, res = w.signals(sigs, scope)
+    clk = w.clock_for(a.get('clock') or why.get('clock'), scope, [p for p, _ in res])
+    rises = w.edges(clk, 'posedge', float('-inf'), float('inf'))
+    t_at = ps_of(at, 't')
+    i = bisect.bisect_left(rises, t_at)
+    before, after = a.get('before', 2), a.get('after', 2 if kind != 'expr' else 4)
+    for k, v in (('before', before), ('after', after)):
+        if not (isinstance(v, int) and v >= 0):
+            raise WaveError(f'"{k}": a number of cycles')
+    if kind == 'assert':   # the attempt's start: the window opens before it
+        i = bisect.bisect_left(rises, ps_of(why['start'], 'start'))
+    i0 = i if i < len(rises) and rises[i] == (ps_of(why['start'], 'start') if kind == 'assert' else t_at) else i - 1   # the last edge at or before it
+    lo = rises[max(0, i0 - before)] if rises else w.t_start
+    if kind == 'assert':
+        i = bisect.bisect_left(rises, t_at)
+    hi = rises[i + after] if i + after < len(rises) else w.t_end
+    table = t_sample({'dump': a.get('dump'), 'types': a.get('types'), 'no_types': a.get('no_types'), 'signals': names, 'scope': scope, 'clock': clk,
+                      'from': f'{lo}ps', 'to': f'{hi}ps', 'limit': a.get('limit') or 40})
+    out = {'kind': {'expr': 'match', 'assert': 'assertion', 'b': 'difference', 't': 'time'}[kind], 'at': at, 'unit': 'ns', 'window': {'from': ns(lo), 'to': ns(hi)},
+           'clock': clk, 'signals': names, **why, 'table': table}
+    if kind == 'b':   # the other run's values in the same window, its clock's cycles (the same names after map)
+        bmap = {x: y for x, y in (a.get('map') or {}).items()}
+        out['table_b'] = t_sample({'dump': a['b'], 'types': a.get('types'), 'no_types': a.get('no_types'), 'clock': bmap.get(clk, clk),
+                                   'signals': [bmap.get(n, n) for n in names], 'scope': scope, 'from': f'{lo}ps', 'to': f'{hi}ps',
+                                   'limit': a.get('limit') or 40})
+    if a.get('out'):
+        page = t_page({'dump': a.get('dump'), 'types': a.get('types'), 'no_types': a.get('no_types'), 'signals': names, 'scope': scope,
+                       'from': f'{lo}ps', 'to': f'{hi}ps', 'out': a['out'], 'title': a.get('title') or f'{out["kind"]} at {at} ns'})
+        label = {'expr': f'match {nth}', 'assert': f'{why.get("assert")} fails', 'b': 'first difference', 't': 'here'}[kind]
+        viewedit.edit_page(page['page'], [{'op': 'marker', 't': f'{at}ns', 'label': label, 'color': '#e03131'}, {'op': 'cursor', 't': f'{at}ns'}])
+        out['page'] = page['page']
+    return out
+
+
 def t_stats(a):
     w = wave(a.get('dump'), a)
     scope, radix = a.get('scope') or '', a.get('radix')
@@ -708,22 +834,43 @@ def marks_file(a):
 
 def t_tests(a):
     """The tests of a cocotb run, from its marks file: what ran when and how it ended; `test`: one, with its phases and marks."""
+    if a.get('steps') and a.get('test') is None:
+        raise WaveError('"steps": of one test: give "test" (a number or a name); every test\'s slowest steps: "slowest" in the summary')
     doc = testmarks.load(marks_file(a))
     tests = doc.get('tests') or []
     def row(t):
         n, bad = testmarks.checks_of(t)
         out = {'n': t['n'], 'name': t['name'], 'result': t['result'], 'from': ns(t['from']), 'to': None if t['to'] is None else ns(t['to']), 'checks': n, 'failed_checks': bad}
+        k, off = testmarks.measures(t)
+        if k:
+            out.update(measures=[measure(m) for m in t['measures']], measures_failed=off)
         return {**out, **{k: t[k] for k in ('doc', 'message', 'where') if t.get(k)}}
+    def measure(m):   # ns; the bound as the test wrote it; ok: null for a bound in cycles (the page counts them)
+        dt = None if m.get('to') is None else ns(m['to'] - m['from'])
+        return {'label': m['label'], 'from': ns(m['from']), 'to': None if m.get('to') is None else ns(m['to']), 'dt': dt,
+                **{k: m[k] for k in ('min', 'max', 'signal') if m.get(k) is not None}, 'ok': m.get('ok')}
+    step = lambda p, t=None: {**({'test': t['name']} if t else {}), 'step': p['label'], 'from': ns(p['from']), 'to': ns(p['to']), 'dt': ns(p['dt'])}
+    every = [m for t in tests for m in t.get('measures') or []]
     head = {'summary': testmarks.summary(doc), 'signal': doc.get('signal'), 'step': doc.get('step')}
+    if every:
+        head.update(measures=len(every), measures_failed=sum(m.get('ok') is False for m in every))
+    slow = sorted(((p, t) for t in tests for p in testmarks.steps(t)), key=lambda x: -x[0]['dt'])[:5]
+    if slow:
+        head['slowest'] = [step(p, t) for p, t in slow]
     if a.get('test') is None:
         return {**head, 'tests': [row(t) for t in tests]}
     t = next((t for t in tests if a['test'] in (t['n'], t['name'], str(t['n']))), None)
     if t is None:
         raise WaveError(f'"test": no test {a["test"]!r} (have: {", ".join(t["name"] for t in tests)})')
+    st = testmarks.steps(t)
+    took = {'steps': [step(p) for p in st], 'total': ns(sum(p['dt'] for p in st)), 'longest': st[0]['label']} if st else {'steps': []}
+    if a.get('steps'):   # the steps' table alone
+        return {'test': {'n': t['n'], 'name': t['name'], **took}}
     limit = a.get('limit') or 50
     marks = [{**m, 't': ns(m['t'])} for m in t.get('marks') or []]
     phases = [{**p, 'from': ns(p['from']), 'to': ns(p['to'])} for p in t.get('phases') or []]
-    return {**head, 'test': {**row(t), **{k: t[k] for k in ('text', 'signals') if t.get(k)}, 'phases': phases, 'marks': marks[:limit], **({'more': len(marks) - limit} if len(marks) > limit else {})}}
+    return {**head, 'test': {**row(t), **{k: t[k] for k in ('text', 'signals') if t.get(k)}, 'phases': phases, **took, 'marks': marks[:limit],
+                             **({'more': len(marks) - limit} if len(marks) > limit else {})}}
 
 
 def marks_page(a, argv, out):
@@ -1187,6 +1334,14 @@ def ns_out(results, timed):
                 r['range'] = [t(x) for x in r['range']]
             if r.get('op') == 'state' and isinstance(r.get('state'), dict):
                 r['state'] = state_ns(r['state'])
+            if r.get('op') == 'bus_list' and isinstance(r.get('transactions'), list):
+                r['transactions'] = [dict(x, t0=t(x.get('t0')), t1=t(x.get('t1'))) for x in r['transactions']]
+            if r.get('op') == 'measures' and isinstance(r.get('measures'), list):
+                r['measures'] = measures_out(r['measures'], t)
+            if r.get('op') == 'expr_markers':
+                for k in ('from', 'to'):
+                    if k in r:
+                        r[k] = t(r[k])
             if r.get('op') == 'deltas' and isinstance(r.get('deltas'), list):
                 r['deltas'] = [dict(x, dt=t(x.get('dt'))) if isinstance(x, dict) else x for x in r['deltas']]
             if r.get('op') == 'cycles' and isinstance(r.get('cycles'), dict):
@@ -1221,10 +1376,11 @@ def state_conv(st, f):
             st[k] = t(st[k])
     if isinstance(st.get('range'), dict):
         st['range'] = dict(st['range'], **{k: t(st['range'][k]) for k in ('from', 'to') if k in st['range']})
+    num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)   # a span's end may be {"bookmark": n}, a bound {"cycles": n}
     for k in ('bookmarks', 'markers'):
         if isinstance(st.get(k), list):
-            st[k] = [dict(x, t=t(x['t'])) if isinstance(x, dict) and 't' in x else x for x in st[k]]
-    num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)   # a span's end may be {"bookmark": n}
+            st[k] = [dict(x, t=t(x['t']), **{b: t(x[b]) for b in ('dmin', 'dmax') if num(x.get(b))}) if isinstance(x, dict) and 't' in x else x
+                     for x in st[k]]
     if isinstance(st.get('spans'), list):
         st['spans'] = [dict(x, **{e: t(x[e]) for e in ('from', 'to') if num(x.get(e))}) if isinstance(x, dict) else x for x in st['spans']]
     if isinstance(st.get('config'), dict) and st['config'].get('cycleZero') is not None:
@@ -1251,6 +1407,13 @@ def state_ps(st):
     return state_conv(st, ps)
 
 
+def measures_out(rows, t):
+    """The measurements (viewedit.measure_list, the measures command) with their times through t."""
+    tb = lambda b: t(b) if isinstance(b, (int, float)) and not isinstance(b, bool) else b
+    return [dict(r, **{'from': dict(r['from'], t=t(r['from']['t'])), 'to': dict(r['to'], t=t(r['to']['t'])), 'dt': t(r['dt'])},
+                 **{k: tb(r[k]) for k in ('dmin', 'dmax') if k in r}) for r in rows]
+
+
 def summary(st, timed, base=None):
     """A viewer's state (a page's edits over its own, or a live viewer's) as the agent reads it: times in ns, what is
     empty or default left out."""
@@ -1272,8 +1435,16 @@ def summary(st, timed, base=None):
     if ars:
         out['arrows'] = [dict(a, id=i + 1) for i, a in enumerate(ars)]
     ms = st.get('markers') or []
+    tb = lambda b: t(b) if isinstance(b, (int, float)) and not isinstance(b, bool) else b   # a bound: a time, or {"cycles": n}
     if ms:
-        out['markers'] = [dict(m, id=i + 1, t=t(m.get('t'))) for i, m in enumerate(ms)]
+        out['markers'] = [dict(m, id=i + 1, t=t(m.get('t')), **{k: tb(m[k]) for k in ('dmin', 'dmax') if k in m}) for i, m in enumerate(ms)]
+    mk = ed.marks()   # the state's markers, else the page's own (its "measures": a cocotb test's wl.measure pairs)
+    if mk and 'markers' not in st:
+        out['markers'] = [dict({k: v for k, v in m.items() if v is not None and v is not False}, id=i + 1, t=t(m['t']), page=True,
+                               **{k: tb(m[k]) for k in ('dmin', 'dmax') if m.get(k) is not None}) for i, m in enumerate(mk)]
+    me = measures_out(viewedit.measure_list(mk), t)
+    if me:
+        out['measures'] = me
     ss = viewedit.span_list(ed.spans())
     if ss:
         out['spans'] = [dict(x, id=i + 1, **{'from': t(x['from']), 'to': t(x['to'])}) for i, x in enumerate(ss)]
@@ -1505,8 +1676,33 @@ def bits_text(v):
 def t_diff(a):
     """sva diff: two dumps compared change by change (streamed: neither read here) -> its JSON with the times in ns, the
     signals listed those that differ."""
+    if a.get('results_a') or a.get('results_b'):   # the assertions' results of two runs: new, gone, moved failures
+        if a.get('a') or a.get('b'):
+            raise WaveError('"results_a" / "results_b" or "a" / "b" (dumps): one or the other')
+        ra, rb = (os.path.abspath(os.path.expanduser(str(a.get(k) or ''))) for k in ('results_a', 'results_b'))
+        for f in (ra, rb):
+            if not os.path.isfile(f):
+                raise WaveError(f'no such results JSON {f} (sva eval --json, sva_check)')
+        cmd = [sva_exe(a, 'wave_diff'), 'diff', '--results', ra, rb, '--json', '-', '--limit', str(limit(a, 20))]
+        for x, y in (a.get('map') or {}).items():
+            cmd += ['--map', f'{x}={y}']
+        r = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        if r.returncode not in (0, 1):
+            raise WaveError(r.stderr.strip() or f'sva diff --results: exit {r.returncode}')
+        d = json.loads(r.stdout)
+        tf = lambda f: {k: ns(v) for k, v in f.items()}
+        for x in d.get('assertions', []):
+            x['new'], x['gone'] = [tf(f) for f in x.get('new', [])], [tf(f) for f in x.get('gone', [])]
+            x['moved'] = [{'a': tf(m['a']), 'b': tf(m['b'])} for m in x.get('moved', [])]
+            if x.get('first_new') is not None:
+                x['first_new'] = ns(x['first_new'])
+        d['assertions'] = [x for x in d.get('assertions', []) if x['new'] or x['gone'] or x['moved'] or x.get('lost') or x.get('found')]
+        d.update(unit='ns', same=r.returncode == 0)
+        d.pop('wavelens', None)
+        d.pop('version', None)
+        return d
     da, db = dump_path(a, 'a'), dump_path(a, 'b')
-    cmd = [sva_exe(a, 'wave_diff'), 'diff', da, db, '--json', '-', '--quiet', '--limit', str(limit(a, 20))]
+    cmd = [sva_exe(a, 'wave_diff'), 'diff', da, db, '--json', '-', '--quiet', '--limit', str(limit(a, 20)), '--rank', '5']
     for k in ('from', 'to', 'offset'):
         t = cli_time(a, k)
         if t is not None:
@@ -1543,6 +1739,7 @@ def t_diff(a):
     d['signals'] = sigs[:n]
     if len(sigs) > n:
         d['signals_more'] = len(sigs) - n
+    d['rank'] = [{**x, 't': ns(x['t']), 'after_first': ns(x.pop('after_first_ps')), 'a': bits_text(x['a']), 'b': bits_text(x['b'])} for x in d.get('rank', [])]
     for g in d.get('segments', []):
         for k in ('from', 'to', 'b_from', 'compared_to'):
             if k in g:
@@ -1594,7 +1791,10 @@ def t_view_edit(a):
         if a.get('page') or a.get('save'):
             raise WaveError('"config" or "page": one of them (a config: its views\' bookmarks, arrows, spans)')
         path = os.path.abspath(os.path.expanduser(str(a['config'])))
-        res, key, changed = viewedit.edit_config(path, ops_in(a.get('ops'), True), a.get('view'))
+        fp = a.get('from_page')
+        keys = a.get('keys') if isinstance(a.get('keys'), list) or a.get('keys') is None else str(a['keys']).split(',')
+        res, key, changed = viewedit.edit_config(path, ops_in(a.get('ops') or [], True) if a.get('ops') or not fp else [], a.get('view'),
+                                                 os.path.abspath(os.path.expanduser(str(fp))) if fp else None, keys)
         errs = sum(1 for r in res if 'error' in r)
         out = {'config': path, 'view': key, 'results': res, 'changed': changed,
                'note': 'nothing written: a command failed' if errs else 'written into the config: mkhtml.py builds the page with them' if changed else
@@ -1787,6 +1987,15 @@ TOOLS = [
          '"req && !ack", "req ##[1:3] ack", "$rose(x)"; names under scope). Or signal + edge (rise fall change) or value: exact times.',
          {'dump': None, 'types': None, 'no_types': None, 'expr': S, 'clock': S, 'signal': S, 'edge': S, 'value': T, 'from': None, 'to': None, 'scope': None,
           'limit': None, 'radix': None, 'defines': {'type': ['object', 'array'], 'items': S}}),
+    tool('wave_explain', t_explain, 'One call from a moment to what to look at: expr (its nth match), assert ("name@scope" with sva: its files; its '
+         'nth failure, the window from the attempt\'s start), b (the first difference with that dump, '
+         'and who differed next) or t (a time, with signals) -> at, its window (before / after cycles of the clock), its signals and their values '
+         'there (a wave_sample table; with b, table_b: the other run\'s); out (.html): a page of that window with a marker and the cursor there.',
+         {'dump': None, 'types': None, 'no_types': None, 'expr': S, 'assert': S, 'sva': L, 'clock': S, 'nth': N, 'b': S, 'map': {'type': 'object'}, 'offset': T, 't': T,
+          'signals': None, 'scope': None, 'before': N, 'after': N, 'limit': None, 'out': S, 'title': S}, ('dump',), ro=False),
+    tool('wave_fsm', t_fsm, 'An FSM\'s states in a dump: each state\'s entries, first entry, time held and share, the states never reached, '
+         'the values of no state (x, z, a code without a label), its changes by count. Its table: the dump\'s (FST), the types file, or enum {code: label}.',
+         {'dump': None, 'types': None, 'no_types': None, 'signal': S, 'enum': {'type': 'object'}, 'from': None, 'to': None, 'scope': None}, ('dump', 'signal')),
     tool('wave_stats', t_stats, 'Aggregates over a window. Bit: rises, falls, high %, pulse widths, period. Bus: changes, distinct, '
          'longest-held values, min, max.', {'dump': None, 'types': None, 'no_types': None, 'signals': None, 'from': None, 'to': None, 'scope': None, 'radix': None},
          ('dump', 'signals')),
@@ -1803,8 +2012,10 @@ TOOLS = [
          ('dump', 'signals', 'out'), ro=False),
     tool('wave_tests', t_tests, 'The tests of a cocotb run from the marks file it left (wavelens_cocotb, the same times as its dump) -> summary, '
          'tests [n, name, result pass/fail/xfail/run, from, to, checks, failed_checks, message, where]; test (a number or name): one, with '
-         'its whole docstring (text), its own rows (signals), phases and marks, each check with got and expected (got_all, expected_all, at where a long value was cut). from / to are a test\'s window for wave_changes, wave_find, wave_sample.',
-         {'marks': S, 'test': {'type': ['integer', 'string']}, 'limit': None}, ('marks',)),
+         'its whole docstring (text), its own rows (signals), phases and marks, each check with got and expected (got_all, expected_all, at where a long value was cut); '
+         'its steps by length, the longest first (steps, total, longest; steps: true: only them). A test\'s measures (wl.measure: label, from, to, dt, min, max, ok; '
+         'ok null: a bound in cycles), measures_failed; slowest: the five longest steps of the run. from / to are a test\'s window for wave_changes, wave_find, wave_sample.',
+         {'marks': S, 'test': {'type': ['integer', 'string']}, 'limit': None, 'steps': B}, ('marks',)),
     tool('wave_to_fst', t_to_fst, 'Convert a VCD to an FST beside it (tb.vcd -> tb.fst; out: another file), as GTKWave\'s vcd2fst, '
          'keeping the enum tables (FSM states) and attributes; the states of tb.types.json beside it go in too (types: another file, '
          'no_types: none) -> fst, what was written, notes (file:line).',
@@ -1812,9 +2023,10 @@ TOOLS = [
     tool('wave_diff', t_diff, 'Compare two dumps a and b (VCD/FST, streamed: hundreds of MB) change by change, as the viewer\'s Compare… '
          'does -> compared, differ, first [t, signal, a, b], the signals that differ, only_a, only_b, segments. map {"tb_a.if": "tb_b.if"}: '
          'a\'s scope or path -> b\'s; offset: b later by that much; segment: a signal (a test case number), counts per value; align: '
-         'segment k of b on segment k of a.',
+         'segment k of b on segment k of a; rank: the first five signals by their first difference (who differed first, what followed). '
+         'results_a, results_b (instead of a, b): the assertions\' results of two runs (sva eval --json) -> new, gone, moved failures per assertion.',
          {'a': S, 'b': S, 'signals': None, 'scope': None, 'from': None, 'to': None, 'offset': T, 'map': {'type': 'object'}, 'segment': S,
-          'align': B, 'limit': None, 'spans': N}, ('a', 'b')),
+          'align': B, 'limit': None, 'spans': N, 'results_a': S, 'results_b': S}, ()),
     tool('wave_cut', t_cut, 'Cut a window (and some signals) out of a dump into a small VCD (out): the values at "from" first, '
          'then the changes up to "to" -> out, bytes, variables, from, to. For Compare… on a page, a fixture, sending one test case.',
          {'dump': None, 'out': S, 'from': None, 'to': None, 'signals': None}, ('dump', 'out'), ro=False),
@@ -1825,14 +2037,17 @@ TOOLS = [
          ' (·live: in a connected page only). t/from/to in ns; signals: path, name, path tail or * pattern; bookmark: a numbered circle with a text (no signal: on the time '
          'axis); arrow from/to: bookmark numbers; group: a folder of signals at the top; only: just these modules on the waves (with their '
          'submodules); edge: the cursor to the next edge. config (instead of page): a mkhtml config file, bookmark / arrow / span '
-         'on its view, kept by a rebuild (a bookmark\'s "at" event stays until a t replaces it). gaps with on and view true: the waves themselves '
+         'on its view, kept by a rebuild (a bookmark\'s "at" event stays until a t replaces it), the rest of its look (group, radix, marker, '
+         'deltas, hide, paint, expr …) its "state" the page opens with, view its window; from_page: a page\'s whole view into it (keys: some). '
+         'gaps with on and view true: the waves themselves '
          'with the idle stretches cut out, as the person scrolls them (live: its answer has cut, what is left). marker: pale unless it has a '
          'color (null: pale again), its label at the top of the rows, with signal in a thin line over that row (lift "below": under it, the lines '
          'lifted bookmarks use; signal null: at the top again); the person drags it from line to line. expr: a condition in the page\'s list '
          '(text), marked band, line or strip, gap: the waves cut to its matches with the others that have it, answers n, time, share, first, '
          'last, min, max, on a file only id.',
-         {'page': S, 'config': S, 'view': S, 'ops': {'type': 'array', 'items': {'type': 'object'}}, 'save': B}, ('ops',), ro=False),
-    tool('view_get', t_view_get, 'What a page shows: bookmarks, arrows, markers, expressions, groups, highlight, colours, hidden, cursor, window (live: '
+         {'page': S, 'config': S, 'view': S, 'ops': {'type': 'array', 'items': {'type': 'object'}}, 'save': B, 'from_page': S,
+          'keys': {'type': 'array', 'items': S}}, (), ro=False),
+    tool('view_get', t_view_get, 'What a page shows: bookmarks, arrows, markers (measures: the Δ between them, ok of a bound), expressions, groups, highlight, colours, hidden, cursor, window (live: '
          'with the person\'s own edits), the gaps (live, on the waves: cut, the gaps and the parts kept). rows: list its signals (a pattern, "" all; limit, '
          'offset); full: the whole state; picture: a PNG of the view (live: the screen; a file: '
          'made in a headless Chromium, tools/pageshot.py).',

@@ -61,7 +61,8 @@ class WaveView {
       ? this.pageMarks.map(m => ({ label: '→ ' + m.label, t: m.t, span: this.span / 5 })) : []);
     this.sel = null; this.edgeKind = 'any';   // selected signal row (edge search, bookmarks), edge kind
     this.extraJSON = [];   // plugins: () -> '"key": …' lines for the bookmarks JSON (or null)
-    this.extraState = [];   // plugins: {key, get() -> a JSON value, set(value) (may be async)}: their part of the saved state
+    // plugins: {key, get() -> a JSON value, set(value) (may be async), undo?}: their part of the saved state (undo: undo takes it back too)
+    this.extraState = [];
     this.extraRows = [Object.assign(g => (g ? [] : this.ugRows()), { head: true })];   // plugins: rows under a group (withExtra); yours at the top
     // a plugin: what the gaps on the waves keep in place of the signals, {by() -> who says so ([]: nobody), spans() -> [[from, to], …], off()}
     this.extraKeep = null;
@@ -100,7 +101,11 @@ class WaveView {
     VIEWS.add(this);
     for (const p of PLUGINS) try { p(this); } catch (e) { console.error('wavelens plugin:', e); }
     // the page's edits (tools/viewedit.py), then undo starts from the page as it opens; a live page: the agent hears of this viewer
-    this.applyEdits().finally(() => this.undoTick(true)); liveHello(); liveShow();
+    this.ready = this.applyEdits().finally(() => this.undoTick(true)); liveHello(); liveShow();   // (a link to a moment goes after it)
+    const ds = M.src && M.src.meta && M.src.meta.stats;   // the dump's statistics (mkhtml.py): a line of the log, the busiest under it
+    if (ds) this.log('info', `the dump: ${ds.signals} signals, ${ds.changing} change, ${ds.dead} never change` + (ds.busiest && ds.busiest[0] ?
+      ` · the busiest ${ds.busiest[0][0]} (${ds.busiest[0][1]})` : ''), { items: (ds.busiest || []).map(([p, n]) => `${n} changes  ${p}`)
+      .concat((ds.never || []).map(p => `never changes  ${p}`)), what: 'the busiest, the ones that never change', quiet: true });
   }
   // what this viewer's bookmarks, paint and bindings are stored under in this browser: the page, then opts.key, the id,
   // the data-wave reference or the title; several viewers of one data-wave (a bench and its lazy cards) are told apart by
@@ -131,6 +136,7 @@ class WaveView {
     if (redraw) { const i = this.root.querySelector('input.pfx'); if (i) i.value = S.sortIgnore.join(','); this.fitPfx(); this.renderNames(); this.draw();
       this.logRender();   // "log": shown or not
       this.settingsChanged(); }
+    this.keymap();   // the setting keys read now: what is wrong in them said in the log at once
   }
   build() {
     const r = this.root; r.classList.add('wv');
@@ -264,7 +270,8 @@ class WaveView {
         const to = this.bmAt(x, y); this.rubber = null;
         if (to && to.n !== drag.bm.n) { this.arrows.push(arNorm([{ from: drag.bm.n, to: to.n }])[0]); this.saveBookmarks(); this.renderNotes(); }
         this.draw();
-      } else if (drag && drag.moved && (drag.bm || drag.mk || drag.dl)) { c.style.cursor = 'grab'; this.saveBookmarks(); this.renderNotes(); }
+      } else if (drag && drag.moved && (drag.bm || drag.mk || drag.dl)) { c.style.cursor = 'grab';   // a marker or a Δ: shared (sharedMarkers)
+        if (drag.bm) { this.saveBookmarks(); this.renderNotes(); } else this.setMarks(); }
       else if (drag && !drag.moved && drag.mk) {   // a click on a marker's text: the cursor on it, its label in the list
         this.cursor = drag.mk.m.t; this.draw(); this.notesEl.querySelector(`li[data-k="${this.umarks.indexOf(drag.mk.m)}"] input.ml`)?.focus(); }
       else if (drag && !drag.moved) {
@@ -294,6 +301,7 @@ class WaveView {
       const k = e.key, ctl = e.ctrlKey || e.metaKey; let h = true;
       if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock'].includes(k)) return;   // a modifier alone: a sequence goes on (z, shift+M)
       if (keyLeft(this.S, e)) return;   // the host's (keysLeft: VS Code's ctrl+G)
+      if (!e.wlKey && this.keyMine(e, k, ctl)) return;   // your keys (the setting keys)
       if (e.altKey && !ctl && (k === 'ArrowUp' || k === 'ArrowDown')) { e.preventDefault(); this.moveKey(k === 'ArrowUp' ? -1 : 1, e.shiftKey); return; }
       if (e.altKey || (ctl && !['c', 'C', 'f', 'F', 'g', 'G'].includes(k))) return;   // ctrl+S, ctrl+M … stay the browser's
       // ctrl+F: find (Questa), ctrl+C: copy (nothing to copy: the browser's), ctrl+G: the list of your groups
@@ -343,6 +351,41 @@ class WaveView {
       else h = false;
       if (h) e.preventDefault();
     });
+  }
+  // your keys: the typed key or sequence that the setting keys names -> what it stands for done (a key of the viewer's, sent again as
+  // that key; a sequence run), or nothing (null) -> handled
+  keyMine(e, k, ctl) {
+    if (e.altKey) return false;   // alt+key: the viewer's own (alt+↑ moves a row), never one of yours
+    const km = this.keymap(), pre = this.kpre && Date.now() - this.kpre.t < 1000 ? this.kpre.k : '';
+    const typed = ctl ? 'ctrl+' + (e.shiftKey ? 'shift+' : '') + k.toLowerCase() : pre ? pre + k : k;
+    if (!hasKey(km, typed)) return false;
+    e.preventDefault(); this.keyHintOff();
+    const t = km[typed];
+    if (t == null) { this.toast(`${typed}: not a key here (the setting keys)`); return true; }
+    if (t.length === 2 && KEY_PRE.includes(t[0])) { if (!this.seq(t)) this.toast(`${typed} → ${t}: no such sequence`); return true; }
+    const c = /^ctrl\+(shift\+)?(.)$/.exec(t);
+    const ev = new KeyboardEvent('keydown', { key: c ? c[2] : t, ctrlKey: !!c, shiftKey: c ? !!c[1] : t.length === 1 && t !== t.toLowerCase(), bubbles: true,
+      cancelable: true });
+    ev.wlKey = true; this.canvas.dispatchEvent(ev);   // the viewer's key it stands for (not yours again)
+    if (!ev.defaultPrevented) {   // the viewer took nothing: no key of it
+      this.toast(`${typed} → ${t}: no such key (see ?)`); this.log('warning', `the setting keys: ${typed} → ${t}: no such key of the viewer`); }
+    return true;
+  }
+  // what a key of the viewer does, as Help or the box after a prefix says it ("gm": the list of them…); null: none known
+  keyCaption(t) {
+    if (t.length === 2 && KEY_MENUS[t[0]]) { const r = KEY_MENUS[t[0]][1].find(x => x.length > 1 && x[0] === t[1]);
+      if (r) return typeof r[1] === 'function' ? r[1](this) : r[1]; }
+    const low = s => (/^ctrl\+/i.test(s) ? s.toLowerCase() : s);
+    for (const [, rows] of HELP) for (const [ks, text] of rows) if (ks.some(x => low(x) === low(t))) return text;
+    return null;
+  }
+  // the keys of the setting keys, read once per settings -> {typed: target | null}; what is wrong in it said in the log once
+  keymap() {
+    if (this.kmOf !== this.S.keys) {
+      const { map, bad } = keymapOf(this.S.keys); this.kmOf = this.S.keys; this.km = map;
+      if (bad.length) this.log('warning', `the setting keys: ${bad.length} not taken`, { items: bad });
+    }
+    return this.km;
   }
   fitPfx() { const i = this.root.querySelector('input.pfx'); if (i) i.style.width = Math.max(7, i.value.length + 2) + 'ch'; }
   // every row in display order (the model's and the plugins'), and the ones not folded away
@@ -1014,6 +1057,8 @@ class WaveView {
     if (!on) { if (inside) this.refocus(); return this; }
     const kb = ks => ks.map(x => `<kbd>${esc(x)}</kbd>`).join(' ');
     const plug = (this.keyHelp || []).map(h => { const m = h.match(/^((?:\S{1,3}\s+)+?)([a-z(].*)$/); return m ? [m[1].trim().split(/\s+/), m[2]] : [[], h]; });
+    const km = this.keymap(), gone = new Set(Object.keys(km));   // your keys: the viewer's rows of them left out, yours with what they do
+    const mine = Object.entries(km).map(([k, t]) => [[k], t == null ? 'none (taken away)' : `${this.keyCaption(t) || 'as ' + t} (${t})`]);
     const sec = ([title, rows]) =>
       `<section><h4>${esc(title)}</h4><table>${rows.map(([k, t]) => `<tr><td>${kb(k)}</td><td>${esc(t)}</td></tr>`).join('')}</table></section>`;
     const el = this.helpEl = document.createElement('div'); el.className = 'wv-help'; el.setAttribute('role', 'dialog');
@@ -1021,7 +1066,8 @@ class WaveView {
     el.innerHTML =
       (`<div class="hh"><b>Keys and mouse</b><span class="muted">on the waves (a click there gives them the keys); hover a button for what it ` +
         `does</span><button type="button" class="ic" aria-label="close">✕</button></div>`) +
-      `<div class="hg">${HELP.concat(plug.length ? [['Plugins', plug]] : []).map(sec).join('')}</div>`;
+      `<div class="hg">${HELP.map(([h, rows]) => [h, rows.map(([ks, t]) => [ks.filter(x => !gone.has(ctrlKey(x))), t]).filter(([ks]) => ks.length)])
+        .concat(plug.length ? [['Plugins', plug]] : [], mine.length ? [['Your keys', mine]] : []).map(sec).join('')}</div>`;
     this.root.append(el);
     el.querySelector('button').addEventListener('click', () => this.help(false));
     el.addEventListener('keydown', e => { if (e.key === 'Escape' || e.key === '?') { e.preventDefault(); e.stopPropagation(); this.help(false);
@@ -1115,8 +1161,31 @@ class WaveView {
     if (o && (!at || at.b !== o)) { d.m.dto = this.umarks.indexOf(o) + 1; this.draw(); }
   }
   moveDelta(d, y, lay) { const p = this.markPlace(y, lay); if (p) { d.m.dsignal = p[0]; d.m.dlift = p[1] === 'below' ? 'below' : null; } this.draw(); }
-  deltaList() { return this.deltas ? deltaLevels(markDeltas(this.umarks)) : []; }
-  deltaText(dt) { return this.M.timed ? fmtExact(dt) : trimNum(dt) + ' cycles'; }
+  deltaList() { return this.deltas ? deltaLevels(this.deltaCheck(markDeltas(this.umarks))) : []; }
+  // each Δ with its cycles (cyc: rising edges of the cycles' clock, the band's or the one found; null: none) and its bound kept or
+  // not (bad: below dmin or over dmax of the marker it starts from, which may be in cycles)
+  deltaCheck(ds) {
+    const cy = this.M.timed ? this.cycData(true) : null;
+    return ds.map(d => { const cyc = cy ? this.cycles(cy.clk, d.a.t, d.b.t) : null, of = b => (typeof b === 'object' ? (this.M.timed ? cyc : d.dt) : d.dt);
+      const lo = d.a.dmin, hi = d.a.dmax, bad = (lo != null && of(lo) != null && of(lo) < (typeof lo === 'object' ? lo.cycles : lo)) ||
+        (hi != null && of(hi) != null && of(hi) > (typeof hi === 'object' ? hi.cycles : hi));
+      const unchecked = this.M.timed && cyc == null && [lo, hi].some(b => b != null && typeof b === 'object');   // cycles with no clock
+      return { ...d, cyc, bad: !!bad, unchecked }; });
+  }
+  // "120 ns · 12 cycles" (the cycles when their band is on); d: a Δ of deltaList, or a time alone
+  deltaText(d) {
+    const dt = typeof d === 'number' ? d : d.dt;
+    if (!this.M.timed) return trimNum(dt) + ' cycles';
+    return fmtExact(dt) + (typeof d === 'object' && d.cyc != null && this.cycData() ? ` · ${d.cyc} cycle${d.cyc === 1 ? '' : 's'}` : '') +
+      (typeof d === 'object' && d.unchecked ? ' · ? no clock' : '');   // a bound in cycles not checked: the page has no clock
+  }
+  // the bound a Δ leaves: "✗ > 150 ns", or ''
+  deltaBound(d) {
+    if (!d.bad) return '';
+    const f = b => boundText(b, x => (this.M.timed ? fmtExact(x) : trimNum(x) + ' cycles')), lo = d.a.dmin, hi = d.a.dmax;
+    const val = b => (typeof b === 'object' ? (this.M.timed ? d.cyc : d.dt) : d.dt);
+    return hi != null && val(hi) > (typeof hi === 'object' ? hi.cycles : hi) ? `✗ > ${f(hi)}` : `✗ < ${f(lo)}`;
+  }
   // what takes a lane: the markers' texts, and the Δ between them
   laneMarks() { const ms = this.markers.filter(m => !m.hidden);
     return this.deltas ? ms.concat(this.deltaList().map(d => ({ delta: true, level: d.level, signal: d.a.dsignal,
@@ -1201,7 +1270,7 @@ class WaveView {
   // your markers and groups as a state has them (empty and null left out)
   markList() { return this.umarks.map(m => Object.fromEntries(Object.entries({ t: m.t, label: m.label, color: m.color, signal: m.signal,
     lift: m.lift === 'below' ? m.lift : null, dsignal: m.dsignal, dlift: m.dsignal ? m.dlift : null, dto: m.dto, dcolor: m.dcolor,
-    hidden: m.hidden || null }).filter(([, x]) => x != null && x !== ''))); }
+    hidden: m.hidden || null, dmin: m.dmin, dmax: m.dmax, expr: m.expr }).filter(([, x]) => x != null && x !== ''))); }
   spanTip(t, row) {
     const on = s => !s.signals || !s.signals.length || (row && (s.signals.includes(row.full) || s.signals.includes(row.name)));
     const line = (name, a, b) => `${name}: ${this.when(a)} … ${this.when(b)} (Δ ${this.M.timed ? fmtExact(b - a) : trimNum(b - a) + ' cycles'})`;
@@ -1212,18 +1281,24 @@ class WaveView {
   timeMarks() { return this.extraMarks.flatMap(f => f() || []); }   // what the plugins mark on the waves now
   spanList() { return this.spans.map(s => Object.fromEntries(Object.entries({ from: s.from, to: s.to, label: s.label, color: s.color,
     signals: s.signals && s.signals.length ? [...s.signals] : null }).filter(([, x]) => x != null && x !== ''))); }
-  groupList() { return this.ugroups.map(g => Object.fromEntries(Object.entries({ name: g.name, signals: [...g.signals], color: g.color })
+  groupList() { return this.ugroups.map(g => Object.fromEntries(Object.entries({ name: g.name, signals: [...g.signals], color: g.color,
+    divider: g.divider || null })
     .filter(([, x]) => x != null))); }
   setBookmarks(list, arrows = []) { this.bms = bmNorm(list); this.arrows = arNorm(arrows, list); this.saveBookmarks(); this.renderNotes(); this.draw();
     return this; }
   loadBookmarks() { // this browser's copy (localStorage) wins over the page's "bookmarks" / "arrows"; a copy of the markers only (Clear): the page's
-    const page = { bms: this.M.bookmarks.map(b => Object.assign({}, b)), arrows: this.M.arrows.map(a => Object.assign({}, a)), umarks: [],
+    const page = { bms: this.M.bookmarks.map(b => Object.assign({}, b)), arrows: this.M.arrows.map(a => Object.assign({}, a)),
+      umarks: measureMarks(this.M.measures),
       spans: this.M.spans.map(s => Object.assign({}, s)) };
     try {   // the spans: this browser's when it has them (the span command), else the page's
       const v = localStorage.getItem(this.bmKey), o = v == null ? null : JSON.parse(v);
-      if (Array.isArray(o)) return { bms: bmNorm(o), arrows: arNorm([], o), umarks: [], spans: page.spans };
-      if (o && typeof o === 'object') return Object.assign(o.bookmarks === undefined ? Object.assign(page, { umarks: markNorm(o.markers) }) :
-        { bms: bmNorm(o.bookmarks), arrows: arNorm(o.arrows, o.bookmarks), umarks: markNorm(o.markers) }, { spans: o.spans ? spanNorm(o.spans) : page.spans });
+      if (Array.isArray(o)) return { bms: bmNorm(o), arrows: arNorm([], o), umarks: page.umarks, spans: page.spans };
+      if (o && typeof o === 'object') {   // stored with the page's measures of then: the page rebuilt with others, its new pairs (yours kept)
+        const now = JSON.stringify(this.M.measures || []), um = typeof o.meas === 'string' && o.meas !== now ?
+          remeasure(markNorm(o.markers), jsonOr(o.meas) || [], this.M.measures) : markNorm(o.markers);
+        return Object.assign(o.bookmarks === undefined ? Object.assign(page, { umarks: um }) :
+          { bms: bmNorm(o.bookmarks), arrows: arNorm(o.arrows, o.bookmarks), umarks: um }, { spans: o.spans ? spanNorm(o.spans) : page.spans });
+      }
     } catch (e) { /* no storage: page bookmarks */ }
     return page;
   }
@@ -1232,6 +1307,7 @@ class WaveView {
     try {
       const o = bms ? { bookmarks: this.bookmarks(), arrows: this.arrowList(), markers: this.markList(), spans: this.spanList() } :
         { markers: this.markList() };
+      o.meas = JSON.stringify(this.M.measures || []);   // the page's measures these markers began from (loadBookmarks)
       if (!bms && !o.markers.length) localStorage.removeItem(this.bmKey); else localStorage.setItem(this.bmKey, JSON.stringify(o));
     } catch (e) { /* private mode */ }
   }
@@ -1310,6 +1386,7 @@ class WaveView {
     else if (s === 'gC') bar('dcmp');
     else if (s === 'yn') { if (this.sel) this.copyText(this.sel.name); }
     else if (s === 'yt') this.copyText(this.when(this.cursor));
+    else if (s === 'yl') this.copyText(this.linkTo({ t: this.cursor, sel: this.sel && this.sel.full }));
     else if (s === 'gv') { const on = !this.gapLive(); this.setGaps(on ? { gaps: true, gapView: true } : { gapView: false });
       this.toast(on ? 'the gaps on the waves' : 'the waves in continuous time'); }
     else if (s === 'zR') this.expandAll();
@@ -1584,6 +1661,14 @@ class WaveView {
     document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   }
   picName(ext) { return (String(this.opts.title || this.M.title || 'waves').replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'waves') + '.' + ext; }
+  // a link to a moment of this page (t, sel, bm; the section when the page has several viewers): the address without its hash and this one;
+  // in the VS Code tab the dump's name and the hash (its logs' links read it)
+  linkTo(o) {
+    const many = [...VIEWS].filter(x => x.root.isConnected).length > 1, h = hashOf({ t: o.t == null ? null : this.M.timed ? `${trimNum(o.t / 1000)}ns` : o.t,
+      sel: o.sel, view: many ? this.editKey() : null, bm: o.bm });
+    const tab = /^vscode-webview:/.test(location.protocol) && this.opts.dumpSrc;
+    return (tab ? this.opts.dumpSrc.name : location.href.replace(/#.*$/, '')) + h;
+  }
   copyText(t) { try { navigator.clipboard.writeText(t).then(() => this.toast('copied: ' + t), () => this.toast(t)); } catch (e) { this.toast(t); } }
   copyKey() {   // ctrl+C / yy: while searching it ends the search; else the selected signal (or the highlighted ones) to the clipboard
     if (this.q) { this.clearFind(); return true; }
@@ -1644,6 +1729,14 @@ class WaveView {
     const o = a[i], p = a[i - 1], n = a[i + 1];
     return `${r.name} = ${txt(o)}` + (p ? `\n${txt(p)} → ${txt(o)} @ ${this.when(o.t)}` : '') + (n ? `\nnext ${txt(n)} @ ${this.when(n.t)}` : '') +
       this.cmpTip(r, t);
+  }
+  // a row's value at the cursor, at the second cursor, and the change between them: "0x04 · 0x40 · +0x3c"
+  valueTwo(sig, both = false) {   // both: the change in both forms, modulo and signed (the title)
+    const a = String(this.valueAt(sig, this.cursor)), b = String(this.valueAt(sig, this.cursor2));
+    if (sig.value || !sig.tr) return `${a} · ${b}`;
+    const o = t => { const i = lastLE(sig.tr, t); return i < 0 ? null : sig.tr[i]; };
+    const d = cursorDiff(sig, o(this.cursor), o(this.cursor2), this.S.radix, both);
+    return d.includes(' → ') ? d : `${a} · ${b} · ${d}`;   // an enum's names: the change says both
   }
   valueAt(sig, t) {
     if (sig.value) return sig.value(t);
@@ -1710,7 +1803,7 @@ class WaveView {
     paintTimeMarks(P, this.timeMarks(), X, this.t0, tB, oy + hdr, oy + Hc, this.span / W);
     paintSpans(P, this.spans, X, this.t0, tB, shown, oy + hdr, oy + Hc);
     const tags = paintMarkers(P, this.markers, X, this.t0, tB, oy + hdr, oy + Hc, laneY(lay, this.S.laneHeight));
-    const dtags = paintDeltas(P, this.deltaList(), X, this.t0, tB, laneY(lay, this.S.laneHeight), oy + hdr, dt => this.deltaText(dt), true);
+    const dtags = paintDeltas(P, this.deltaList(), X, this.t0, tB, laneY(lay, this.S.laneHeight), oy + hdr, d => this.deltaText(d), true);
     if (!WP) this.paintDiff(P, shown, X, this.t0, tB);   // a second dump compared (diff.js): where it differs
     g.restore();
     if (this.cursor >= this.t0 && this.cursor <= tB) P.path([['M', X(this.cursor), 0], ['L', X(this.cursor), Hc]], { stroke: 'acc', w: 1.2 });
@@ -1781,12 +1874,16 @@ class WaveView {
         const m = this.umarks[+li.dataset.k]; li.classList.toggle('here', !!m && m.t === this.cursor); }
     }
     if (this.fsmP) this.fsmP.values();   // the FSM panel's states at the cursor
-    if (this.valsAt !== this.cursor || this.valsGen !== this.namesGen || this.valsRadix !== this.S.radix) {   // value column: only when it changes
-      this.valsAt = this.cursor; this.valsGen = this.namesGen; this.valsRadix = this.S.radix;
+    const at = this.cursor2 == null ? this.cursor : `${this.cursor}|${this.cursor2}`;
+    if (this.valsAt !== at || this.valsGen !== this.namesGen || this.valsRadix !== this.S.radix) {   // value column: only when it changes
+      this.valsAt = at; this.valsGen = this.namesGen; this.valsRadix = this.S.radix;
       let vi = 0;
-      for (const r of this.valRows) {   // a struct's row: its whole value
-        const el = this.vals[vi++], v = this.valueBoth(r.sig || r, this.cursor), w = v.length > 14 && v.includes(' ≠ ') ? v.split(' ≠ ')[0] : v;
-        if (el.textContent !== w) { el.textContent = w; el.title = v.length > 6 ? v : ''; }   // cut to its column: the title has it all
+      for (const r of this.valRows) {   // a struct's row: its whole value; two cursors: the value at each and the change, A · B · Δ
+        const el = this.vals[vi++], s = r.sig || r, v = this.cursor2 == null ? this.valueBoth(s, this.cursor) : this.valueTwo(s);
+        const w = v.length > 14 && v.includes(' ≠ ') ? v.split(' ≠ ')[0] : v;
+        const tip = this.cursor2 == null ? v : this.valueTwo(s, true);   // cut to its column: the title has it all (the change both ways)
+        if (el.textContent !== w || el.title !== (tip.length > 6 ? tip : '')) { el.textContent = w; el.title = tip.length > 6 ? tip : ''; }
+        el.classList.toggle('two', this.cursor2 != null);
       }
     }
   }

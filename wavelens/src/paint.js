@@ -291,6 +291,8 @@ function paintBody(P, M, lay, X, tA, tB, xL, xR, hl, sel, allLay, band, late, st
     P.fade = hl && row.type !== 'lane' && !hl.on.has(row) ? hl.dim : 1;
     if (row.type === 'lane') { P.rect(xL, y, xR - xL, h, 'panel2', 0.45); continue; }
     // a folded module: the plain background
+    if (row.type === 'group' && row.cls === 'ugdiv') {   // a divider of your groups: a muted line through the waves at mid-height
+      P.path([['M', xL, Math.round(y + h / 2) + 0.5], ['L', xR, Math.round(y + h / 2) + 0.5]], { stroke: 'line', w: 1 }); pb = undefined; continue; }
     if (row.type === 'group') { if (!folded(row)) { P.rect(xL, y, xR - xL, h, 'panel2'); P.rect(xL, y, xR - xL, h, 'fg', 0.08); } edge.push(['M', xL, y + 0.5],
       ['L', xR, y + 0.5]); pb = undefined; }
     // a struct: its whole value
@@ -413,11 +415,11 @@ function deltaLevels(ds) {
 function paintDeltas(P, ds, X, tA, tB, lanes, y0, text, grip = false) {
   const tags = [];
   for (const d of ds) {
-    const lo = Math.min(d.a.t, d.b.t), hi = Math.max(d.a.t, d.b.t), c = d.a.dcolor || 'acc';
+    const lo = Math.min(d.a.t, d.b.t), hi = Math.max(d.a.t, d.b.t), c = d.bad ? '--sva-fail' : d.a.dcolor || 'acc';   // a bound left: red
     if (!(d.dt > 0) || hi < tA || lo > tB) continue;
     const head = (x, y, s) => P.path([['M', x, y], ['L', x + s * 6, y - 3], ['L', x + s * 6, y + 3], ['Z']], { fill: c });
     const sig = d.a.dsignal, ly = lanes.get(sig ? laneId({ signal: sig, lift: d.a.dlift || true }) : dTop(d.level)), y = ly ?? lanes.get('d:top') ?? y0 + 8;
-    const p = X(Math.max(lo, tA)), q = X(Math.min(hi, tB)), label = text(d.dt), w = P.measure(label, { size: 10 }) + 8, xm = (p + q) / 2;
+    const p = X(Math.max(lo, tA)), q = X(Math.min(hi, tB)), label = text(d), w = P.measure(label, { size: 10 }) + 8, xm = (p + q) / 2;
     const e = d.b.t >= tA && d.b.t <= tB ? X(d.b.t) : null;
     P.path([['M', p, y], ['L', q, y]], { stroke: c, w: 1 });
     if (lo >= tA) head(p, y, 1);

@@ -70,6 +70,8 @@ async def test_wait_states(dut):
   <tr><td><code>wl.phase(label, signals=None)</code></td><td><code>with</code>, not awaited: the time inside it is <code>label</code> on <code>TEST_STEP</code>; <code>signals</code>: a span on those rows instead In <code>ReadOnly</code>, where nothing can be written, its time stays exact: begun there it is a span on the <code>TEST_STEP</code> row.</td></tr>
   <tr><td><code>wl.step(label, signals=None)</code></td><td>the same phase in one line, until the next <code>step</code> or the end of the test: nothing to re-indent</td></tr>
   <tr><td><code>wl.note(text, signal, label, color)</code></td><td>a bookmark now</td></tr>
+  <tr><td><code>wl.measure(label, min, max, signal, check)</code></td><td>a time measured, as <code>async with</code> / <code>with</code> or <code>m.start()</code> …
+    <code>m.stop()</code>: a pair of markers with the Δ between them, red out of <code>min</code> / <code>max</code> (<a href="#measure">below</a>)</td></tr>
   <tr><td><code>wl.check(got, expected, text, signal, show, why)</code></td><td>a bookmark with both values; a mismatch fails the test; <code>show='fail'</code>: no bookmark when they agree, for a check in a loop, and the test still counts it; <code>why</code>: the text of a failure, a string or a function called only then</td></tr>
 </table>
 <p><code>@wl.test(signals=["*fifo_full", "u_x.state"])</code>: the test's own rows, names or patterns, added to its view when each test stands apart; a name the dump has not got is a lint warning. <code>Marks(hide=["my_checks.py"])</code>: a file that is not the line of a failure, as a frame that sets <code>__tracebackhide__</code>.</p>
@@ -95,6 +97,27 @@ async def test_wait_states(dut):
   <figcaption>The test that failed, alone: the red bookmark on <code>PRDATA</code> says what was expected.</figcaption></figure>
 <p>Each view holds its own window, so <code>tests</code> is about the size of <code>whole</code> and <code>both</code> twice that. A test's window goes a little
   past its end, for the text of its last bookmark: that bit is the start of the next test, unmarked.</p>
+
+<h2 id="measure">Measure</h2>
+<p><code>wl.measure</code> takes the time of what is inside it, with a bound the page checks:</p>
+<pre><code>async with wl.measure('read', max='6 cycles', signal=dut.PRDATA):
+    got, _, waits = await read(dut, DATA)
+
+m = wl.measure('beat', min='40ns')     # or by hand, where the measure does not start at a block
+await RisingEdge(dut.req); m.start()
+await RisingEdge(dut.ack); m.stop()</code></pre>
+<p>On the page each is a pair of markers on the line of its signal with the Δ between them (<code>40 ns · 4 cycles</code> with the cycles band), red when
+  it is out of <code>min</code> / <code>max</code> — a time, or cycles counted on the page's clock. It fails nothing unless <code>check=True</code>. The view of
+  a test says <code>1 measure</code>, and its <code>steps</code>: how many, the longest; <code>wave_tests</code> lists both, with the five slowest steps of the run.</p>
+<figure><img src="img/cocotb-measure.png" alt="The test test_wait_states alone: the read measured as two markers on PRDATA with 40 ns between them">
+  <figcaption><code>test_wait_states</code> alone: its read measured on <code>PRDATA</code>, 4 cycles in a bound of 6; the note says its checks, its measure, its steps.</figcaption></figure>
+
+<h2 id="ci">In CI</h2>
+<p>One build gives the page, a JUnit report of its assertions and a picture of every test:</p>
+<pre><code>python3 -I tools/mkhtml.py --config x.config.json --waves dump.vcd --marks wavelens.marks.json --marks-views tests \
+    --out artifacts/run.html --junit artifacts/report.xml --png artifacts/</code></pre>
+<p><code>--png</code> takes <code>tools/pageshot.py</code> (playwright), a PNG per view; <code>--junit</code> a testsuite per view. The views of the tests share
+  your markers: one made in a test is in every test (<code>sharedMarkers</code>).</p>
 
 <h2 id="sims">Verilator and Questa</h2>
 <p>The test does not change. What differs is in the build, and <code>run.py</code> holds it in one table:</p>
@@ -123,9 +146,11 @@ except ImportError:
         def phase(self, *args, **kw): return contextlib.nullcontext()
         def step(self, *args, **kw): pass
         def note(self, *args, **kw): pass
+        def measure(self, *args, **kw):
+            m = contextlib.nullcontext(); m.start = m.stop = lambda: m; m.enter_result = m; return m
         def check(self, got, expected, text='', **kw):
             assert got == expected, f'{text}: got {got}, expected {expected}'</code></pre>
-<p>Either way <code>note</code>, <code>phase</code> and <code>step</code> do nothing and <b><code>check</code> still compares and fails the test</b>: a check that went quiet would
+<p>Either way <code>note</code>, <code>phase</code>, <code>step</code> and <code>measure</code> do nothing and <b><code>check</code> still compares and fails the test</b>: a check that went quiet would
   pass anything.</p>
 
 <h2 id="own">Your own design</h2>
@@ -137,14 +162,14 @@ except ImportError:
 </ol>
 
 <h2 id="agents">For an AI agent</h2>
-<p><code>wave_tests</code> reads the marks file: which tests failed, when, what they expected. The window it gives is the one to ask
+<p><code>wave_tests</code> reads the marks file: which tests failed, when, what they expected, what they measured and which steps took longest. The window it gives is the one to ask
   <code>wave_changes</code>, <code>wave_find</code> or <code>wave_sample</code> about. <code>wave_page</code> with <code>marks</code> and <code>marks_views</code> makes the page
   (<a href="mcp.html">AI agents (MCP)</a>).</p>
 <p>All the options: <a href="../USAGE.md">USAGE.md</a> § Marks from a cocotb test.</p>
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.40 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.41 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

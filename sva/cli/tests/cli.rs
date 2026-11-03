@@ -1366,3 +1366,87 @@ fn vcd_cuts_a_window_out_of_a_dump() {
     assert!(t.contains("$var wire 2 ! q [1:0] $end\n$var wire 1 \" b $end\n$upscope"), "{t}");
     assert_eq!(sva(&["vcd", &late, "--signals-from", "cut_no_such_list.txt"]).status.code(), Some(2));
 }
+
+/// Stage 23: `sva diff --rank`: the signals by the time of their first difference, with the time from the first one;
+/// N cuts the list.
+#[test]
+fn diff_ranks_who_differed_first() {
+    let head = "$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! a $end\n$var wire 1 \" b $end\n$var wire 1 # c $end\n$upscope $end\n$enddefinitions $end\n";
+    let a = write("rka.vcd", &format!("{head}#0\n0!\n0\"\n0#\n#40\n"));
+    let b = write("rkb.vcd", &format!("{head}#0\n0!\n0\"\n0#\n#10\n1#\n#18\n1!\n#30\n1\"\n#40\n"));
+    let (code, v, e) = diff_json(&[&a, &b, "--rank"]);
+    assert_eq!(code, Some(1), "{e}");
+    let r: Vec<(String, i64)> = v["rank"].as_array().unwrap().iter().map(|x| (x["signal"].as_str().unwrap().to_string(), x["after_first_ps"].as_i64().unwrap())).collect();
+    assert_eq!(r, vec![("tb.c".into(), 0), ("tb.a".into(), 8000), ("tb.b".into(), 20000)], "by time, not by name: {v}");
+    let (_, v, _) = diff_json(&[&a, &b, "--rank", "2"]);
+    assert_eq!(v["rank"].as_array().unwrap().len(), 2);
+    let t = out(&sva(&["diff", &a, &b, "--rank"]));
+    assert!(t.contains("first to differ: tb.c at 10 ns; then tb.a (+8 ns), tb.b (+20 ns)"), "{t}");
+    let (_, v, _) = diff_json(&[&a, &b]);
+    assert!(v.get("rank").is_none(), "no rank unless asked");
+}
+
+/// A results JSON of `sva eval` as the test writes it: assertion name -> [(start cycle, failed cycle)], cycles every 10 ns.
+fn results(name: &str, fails: &[(&str, &[(u64, u64)])]) -> String {
+    let cycles: Vec<u64> = (0..20).map(|k| k * 10_000).collect();
+    let asr: Vec<serde_json::Value> = fails.iter().map(|(n, f)| serde_json::json!({"name": n, "kind": "assert", "scope": "tb",
+        "stats": {"fail": f.len()}, "attempts": f.iter().map(|(s, a)| serde_json::json!({"start": s, "end": a, "result": "fail", "failed_at": a}))
+            .chain(std::iter::once(serde_json::json!({"start": 1, "end": 2, "result": "pass"}))).collect::<Vec<_>>()})).collect();
+    write(name, &serde_json::json!({"clock": "tb.clk", "unit": "ps", "cycles": cycles, "assertions": asr}).to_string())
+}
+
+/// Stage 23: `sva diff --results`: the failures of two runs paired by their start: new, gone, moved; the exit; JUnit; a
+/// dump with them is refused.
+#[test]
+fn diff_results_new_gone_moved() {
+    let a = results("ra.json", &[("p", &[(3, 5), (8, 9)]), ("q", &[]), ("old", &[(2, 4)])]);
+    let same = sva(&["diff", "--results", &a, &a]);
+    assert_eq!(same.status.code(), Some(0), "{}", err(&same));
+    assert!(out(&same).contains("0 new, 0 gone, 0 moved"));
+    let b = results("rb.json", &[("p", &[(3, 6), (8, 9)]), ("q", &[(4, 7)]), ("fresh", &[(1, 2), (5, 6)])]);
+    let o = sva(&["diff", "--results", &a, &b, "--json", "-", "--junit", &format!("{}/r.xml", dir().display())]);
+    assert_eq!(o.status.code(), Some(1), "{}", err(&o));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!((v["new"].as_u64(), v["gone"].as_u64(), v["moved"].as_u64()), (Some(3), Some(1), Some(1)), "{v}");
+    let row = |n: &str| v["assertions"].as_array().unwrap().iter().find(|r| r["name"] == n).unwrap().clone();
+    assert_eq!(row("p")["moved"], serde_json::json!([{"a": {"start": 30_000, "failed_at": 50_000}, "b": {"start": 30_000, "failed_at": 60_000}}]));
+    assert_eq!((row("q")["new"].as_array().unwrap().len(), row("fresh")["new"].as_array().unwrap().len(), row("old")["gone"].as_array().unwrap().len()), (1, 2, 1));
+    assert_eq!(row("q")["first_new"].as_u64(), Some(40_000));
+    let x = std::fs::read_to_string(dir().join("r.xml")).unwrap();
+    assert!(x.contains("tests=\"4\" failures=\"3\"") && x.contains("1 gone"), "p moved, q and fresh new; old gone in its system-out: {x}");
+    // as many new as gone: moved
+    let c = results("rc.json", &[("p", &[(4, 5), (9, 9)]), ("q", &[]), ("old", &[(2, 4)])]);
+    let (code, v, _) = diff_json(&["--results", &a, &c]);
+    assert_eq!((code, v["moved"].as_u64(), v["new"].as_u64(), v["gone"].as_u64()), (Some(1), Some(2), Some(0), Some(0)), "{v}");
+    let d = write("rd.vcd", "$timescale 1ns $end\n$enddefinitions $end\n#0\n");
+    assert_eq!(sva(&["diff", "--results", &a, &d]).status.code(), Some(2), "a dump is not a results JSON");
+    assert_eq!(sva(&["diff", "--results", &a, &b, "--rank"]).status.code(), Some(2), "--rank is of two dumps");
+}
+
+/// Review S23-1, S23-3: a cover compares its matches (one that stops matching in B is lost: exit 1, a coverage regression);
+/// one name present twice in a scope pairs by its order (a file against itself: exit 0).
+#[test]
+fn diff_results_covers_and_twice_one_name() {
+    let cover = |name: &str, m: u64| {
+        let asr = serde_json::json!([{"name": "c", "kind": "cover", "scope": "tb", "stats": {"attempts": 19, "pass": m, "fail": 19 - m, "matches": m},
+            "attempts": (0..m).map(|k| serde_json::json!({"start": k, "end": k + 1, "result": "pass"})).collect::<Vec<_>>()}]);
+        write(name, &serde_json::json!({"clock": "tb.clk", "unit": "ps", "cycles": (0..20).map(|k| k * 10_000).collect::<Vec<u64>>(),
+            "assertions": asr}).to_string())
+    };
+    let (a, b) = (cover("ca.json", 2), cover("cb.json", 0));
+    assert_eq!(sva(&["diff", "--results", &a, &a]).status.code(), Some(0));
+    let (code, v, _) = diff_json(&["--results", &a, &b]);
+    assert_eq!((code, v["lost"].as_u64(), v["found"].as_u64()), (Some(1), Some(1), Some(0)), "{v}");
+    assert_eq!((v["assertions"][0]["lost"].as_bool(), v["assertions"][0]["a"]["matches"].as_u64()), (Some(true), Some(2)), "{v}");
+    let o = sva(&["diff", "--results", &a, &b]);
+    assert!(out(&o).contains("cover c @ tb: lost — matches A 2, B 0"), "{}", out(&o));
+    let (code, v, _) = diff_json(&["--results", &b, &a]);
+    assert_eq!((code, v["found"].as_u64()), (Some(0), Some(1)), "a cover that starts matching is no failure: {v}");
+    // one name twice in one scope (two files bound the same label): the same file is no change
+    let twice = write("tw.json", &serde_json::json!({"clock": "tb.clk", "unit": "ps", "cycles": [0, 10_000, 20_000, 30_000], "assertions": [
+        {"name": "p", "kind": "assert", "scope": "tb", "stats": {"fail": 1}, "attempts": [{"start": 0, "end": 1, "result": "fail", "failed_at": 1}]},
+        {"name": "p", "kind": "assert", "scope": "tb", "stats": {"fail": 1}, "attempts": [{"start": 2, "end": 3, "result": "fail", "failed_at": 3}]}]})
+        .to_string());
+    let (code, v, _) = diff_json(&["--results", &twice, &twice]);
+    assert_eq!((code, v["new"].as_u64(), v["gone"].as_u64(), v["moved"].as_u64()), (Some(0), Some(0), Some(0), Some(0)), "{v}");
+}

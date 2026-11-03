@@ -36,7 +36,8 @@
 <p>The runs of a compare and the bits of a bus are commands like the others: <code>{op: 'compare', show: 'overlay'}</code> (<code>a</code>,
   <code>b</code> or <code>overlay</code>; <a href="compare.html#flip">Compare</a>), <code>{op: 'bits', signals: 'PADDR'}</code> (<code>on: false</code> folds them),
   <code>{op: 'duplicate', signals: 'PWDATA', radix: 'signed', rows: 3}</code> (the signal again under it, <code>PWDATA#2</code> in every command; <code>delete: true</code> takes the copies away),
-  <code>{op: 'deltas', on: true}</code> (the time between neighbouring markers; <code>{op: 'deltas', id: 1, signal: 'PADDR'}</code> puts the arrow from marker 1 on the line over that signal, <code>{op: 'deltas', id: 1, to: 3}</code> sends it to marker 3 through the ones between, <code>color</code> gives it a colour; <code>{op: 'marker', id: 2, hidden: true}</code> keeps a marker in its list only).
+  <code>{op: 'deltas', on: true}</code> (the time between neighbouring markers; <code>{op: 'deltas', id: 1, signal: 'PADDR'}</code> puts the arrow from marker 1 on the line over that signal, <code>{op: 'deltas', id: 1, to: 3}</code> sends it to marker 3 through the ones between, <code>color</code> gives it a colour; <code>{op: 'marker', id: 2, hidden: true}</code> keeps a marker in its list only; <code>{op: 'deltas', dmax: '50ns'}</code> a bound on every Δ, red when left;
+  <code>{op: 'expr_markers', id: 1}</code> a marker at each match of expression 1; <code>{op: 'measures'}</code> the Δ as a table; <code>{op: 'goto', t: '85ns', sel: 'PADDR', view: 'exact'}</code> a moment, as a link to it says; <code>{op: 'duplicate', signals: 'PADDR', bits: [7, 4]}</code> a slice of a bus as a row).
   So are the gaps on the waves: <code>{op: 'gaps', on: true, view: true, idle: 8}</code> (<a href="gaps.html#live-api">Gaps</a>).</p>
 <p>Every command and its arguments are listed by <code>WaveLens.commands()</code>, in the table of
   <a href="../USAGE.md#commands-and-edits">USAGE.md § Commands and edits</a> and in <a href="../index.html#api">docs/index.html § API</a>.</p>
@@ -127,7 +128,7 @@ python3 -I tools/viewedit.py saved.view.json --model page.html --ops '[{"op": "b
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.40 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.41 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

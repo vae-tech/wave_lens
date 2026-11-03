@@ -186,6 +186,12 @@
 .wv .notes .nh .muted { color: var(--muted); font-size: 11.5px; margin-right: auto; }
 .wv .notes .mdl { display: inline-flex; gap: 4px; align-items: center; font-size: 11.5px; }
 .wv .notes .md { color: var(--accent); font-size: 11.5px; white-space: nowrap; }
+.wv .notes .md.bad { color: var(--sva-fail); font-weight: 600; }
+.wv-menu input.mf { display: block; width: calc(100% - 12px); margin: 2px 6px 6px; font: inherit; font-size: 12px; padding: 2px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--fg); }
+.wv-menu button u { text-decoration: none; color: var(--accent); font-weight: 700; }
+.wv .names .row.grp.ugdiv { justify-content: center; gap: 8px; color: var(--muted); }   /* a divider of your groups: a line with its name */
+.wv .names .row.grp.ugdiv::before, .wv .names .row.grp.ugdiv::after { content: ''; flex: 1 1 auto; border-top: 1px solid var(--line); }
+.wv .names .row.grp.ugdiv .tw, .wv .names .row.grp.ugdiv .wd { display: none; }
 .wv .notes .mhl { display: inline-flex; gap: 3px; align-items: center; font-size: 11.5px; white-space: nowrap; }
 .wv .notes .mto { font-size: 11.5px; max-width: 130px; }
 .wv .notes button { font: inherit; font-size: 12px; padding: 1px 8px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); border-radius: 4px; cursor: pointer; }
@@ -210,6 +216,20 @@
 .wv .notes input.txt { flex: 1 1 18ch; min-width: 12ch; border-radius: 4px; }
 .wv .notes input.lab { width: 14ch; border-radius: 4px; }
 .wv .notes button:disabled { opacity: 0.45; cursor: default; }
+/* bus.js: the transfers under the waves */
+.wv .txl { border-top: 1px solid var(--line); padding: 6px 10px 8px; font-size: 12.5px; background: var(--panel); }
+.wv .txl .nh { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.wv .txl .nh .muted, .wv .txl p.muted { color: var(--muted); font-size: 11.5px; margin-right: auto; }
+.wv .txl button, .wv .txl select { font: inherit; font-size: 12px; padding: 1px 8px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); border-radius: 4px; }
+.wv .txl button { cursor: pointer; }
+.wv .txl button.tw { border: 0; padding: 1px 2px; }
+.wv .txl table.txt { width: 100%; border-collapse: collapse; margin-top: 6px; font-family: var(--font-mono); font-size: 11.5px; }
+.wv .txl table.txt th { text-align: left; font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--line); padding: 2px 8px 2px 0; }
+.wv .txl table.txt td { padding: 1px 8px 1px 0; white-space: nowrap; max-width: 36ch; overflow: hidden; text-overflow: ellipsis; }
+.wv .txl table.txt tbody tr { cursor: pointer; }
+.wv .txl table.txt tbody tr:hover { background: var(--panel-2); }
+.wv .txl table.txt tr.here { background: var(--panel-2); box-shadow: inset 3px 0 0 var(--accent); }
+.wv .txl table.txt tr.err td { color: var(--sva-fail); }
 .wv .notes select { border-radius: 4px; }
 .wv .notes textarea.json { display: block; width: 100%; margin-top: 6px; font: 11.5px/1.4 var(--font-mono); background: var(--panel-2); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 6px; resize: vertical; }
 /* assertions panel (wavelens/sva.js): under the bar, the look of the bookmarks; module rows as drop targets while dragging */
@@ -329,6 +349,8 @@
 .wv .sva ul.xac { position: absolute; z-index: 3; left: 8px; bottom: -2px; transform: translateY(100%); margin: 0; padding: 2px; list-style: none; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25); font-family: var(--font-mono); font-size: 11.5px; max-width: min(60ch, 90%); }
 .wv .sva ul.xac li { padding: 1px 6px; border-radius: 3px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wv .sva ul.xac li[aria-selected="true"] { background: var(--panel-2); color: var(--accent); }
+.wv .sva ul.xac li.lib { border-top: 1px dashed var(--line); font-family: var(--font-body); }
+.wv .sva select.xlib { max-width: 24ch; }
 .wv .sva .xp { font-family: var(--font-mono); font-size: 11.5px; }
 @media (max-width: 720px) { .wv .sva ol.xl > li { grid-template-columns: 2.2em auto minmax(0, 1fr); } .wv .sva ol.xl > li > .ab { grid-column: 1 / -1; justify-content: flex-end; } }
 .wv .names .row.sva-xg .n { color: var(--accent); }
@@ -441,6 +463,7 @@
 /* the roles in the gaps: a mark of the row between the name and the value, never cut with a long name or a bus's width */
 .wv .names .row.gref::after, .wv .names .row.gclk::after, .wv .names .row.gaux::after { order: 1; flex: none; margin: 0 auto 0 -2px; font-weight: 600; }
 .wv .names .row .v { order: 2; }
+.wv .names .row .v.two { max-width: 68%; font-weight: 500; }   /* two cursors: A · B · Δ */
 .wv .names .row.gref::after { content: '//'; color: var(--accent); }   /* the gaps follow this signal */
 .wv .names .row.gclk::after { content: '↑'; color: var(--accent); }   /* the gaps count its cycles */
 .wv .names .row.gaux::after { content: '+'; color: var(--muted); }   /* the gaps count its changes */

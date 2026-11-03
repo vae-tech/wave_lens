@@ -40,6 +40,15 @@ make html WAVES=work/my.fst          <span class="c"># FST (read through fst2vcd
 Windows, with <code>py</code> for <code>python3</code>):</p>
 <pre><code>python3 tools/mkconfig.py work/my.vcd --out work/my.config.json     <span class="c"># every signal of the dump, one line each</span>
 python3 tools/mkhtml.py --config work/my.config.json --out work/my.html   <span class="c"># every view of the config -> one page</span></code></pre>
+<p><b>From GTKWave.</b> <code>mkconfig.py --gtkw run.gtkw</code> (the dump: its <code>[dumpfile]</code>, or given) adds a view of the save file to the config:
+  its signals in order, the groups, radix (<code>@22</code> hex, <code>@24</code> dec …), colours, analog traces, where its window starts and its markers. A trace
+  the dump has not got is said and left out (<code>--strict</code>: an error).</p>
+<p><b>What the dump has.</b> A page says in its log how many signals change, the busiest and the ones that never change
+  (<code>dumpscan.py dump.vcd --stats</code> from the shell).</p>
+<p><b>A rebuilt page keeps your view.</b> What you did on a page — groups, colours, radix, hidden rows, markers, bookmarks, expressions — goes into its
+  config with <code>viewedit.py --config work/my.config.json --view v --from-page work/my.html</code> (its edits: <span class="ui">Save page</span>, an agent,
+  <code>viewedit.py</code>), or command by command with <code>--ops</code>: the view's <code>"state"</code>, which the next build opens with. The project's
+  expressions for the editor: the setting <code>exprLibrary</code> in the config's <code>"config"</code>.</p>
 <table>
 <tr><th>Make variable</th><th>Does</th></tr>
 <tr><td><code>WAVES=x.vcd|x.fst</code></td><td>the dump; the config and the page are named after it</td></tr>
@@ -342,7 +351,7 @@ config <code>mkconfig.py</code> makes from the dump (the whole hierarchy). <code
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.40 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live
+<footer>WaveLens 0.41 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live
 reference: <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

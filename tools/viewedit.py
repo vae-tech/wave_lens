@@ -25,7 +25,7 @@ Times: model units (ps of timed waves, else cycles) or a text with a unit ("2.5u
 arrows and markers are whole (2, 2.0, "2"). set_state keeps what the state it is given does not have (null clears).
 Signals: a full path, a name,
 the end of a path ("u_regs.PSEL") or a * pattern. The commands that need the waves' values, their labels or the screen
-(edge, picture, fit, fsm, fsm_stats, fsm_go, types, expr_go, expr_matches) run only in a page (live). docs/USAGE.md § "Commands and edits" has them all; the smoke test checks that a
+({live}) run only in a page (live). docs/USAGE.md § "Commands and edits" has them all; the smoke test checks that a
 page with these edits and the same commands run in it give the same state.
 """
 import argparse, collections, datetime, functools, json, math, os, re, sys, unicodedata
@@ -55,12 +55,14 @@ CYC_DEFAULTS = {'cycles': False, 'cycleClock': None, 'cycleZero': None}
 COMMANDS = {
     'cursor': 't', 'cursor2': 't', 'view': 'from? to? at? span?', 'fit': '', 'range': 'from? to? signal?',
     'bookmark': 'n? t? signal? text? label? color? lift? top? link? go? delete?', 'arrow': 'id? from? to? shape? head? line? color? label? delete?',
-    'marker': 'id? t? label? color? signal? lift? hidden? delete?', 'deltas': 'on? id? to? signal? lift? color?', 'span': 'id? from? to? label? color? signals? delete?',
-    'expr': 'id? text? scope? label? color? on? row? mark? gap? delete?', 'expr_go': 'id? dir? n?', 'expr_matches': 'id? from? to? limit? offset?',
-    'group': 'name signals? add? remove? color? rename? delete? go? move?',
+    'marker': 'id? t? label? color? signal? lift? hidden? dmin? dmax? delete?', 'deltas': 'on? id? to? signal? lift? color? dmin? dmax?',
+    'measures': '', 'goto': 't? sel? view? bm?', 'bus_list': 'port? kind? from? to? limit?', 'span': 'id? from? to? label? color? signals? delete?',
+    'expr': 'id? text? scope? label? color? on? row? mark? gap? radix? analog? delete?', 'expr_go': 'id? dir? n?', 'expr_matches': 'id? from? to? limit? offset?',
+    'expr_markers': 'id? label? color? signal? limit? deltas? delete?',
+    'group': 'name signals? add? remove? color? rename? delete? go? move? divider?',
     'highlight': 'add? remove? set? clear?', 'paint': 'signals? color? clear?', 'select': 'signal? signals?', 'hide': 'signals', 'show': 'signals?',
     'fold': 'groups? all?', 'unfold': 'groups? all?', 'radix': 'signals radix', 'analog': 'signals rows', 'bits': 'signals on?',
-    'duplicate': 'signals radix? rows? delete?',
+    'duplicate': 'signals bits? radix? rows? delete?',
     'sort': 'dir ignore?', 'style': 'name',
     'layout': 'scroll? height? tools?', 'find': 'query case? word? regex? highlight? open? mask?', 'gaps': 'on? idle? keep? signals? clock? aux? only? count? view? reset?',
     'cycles': 'on? clock? zero? reset?', 'only': 'modules? on? clear? open?', 'fsm': 'mode? signals? fields? clear?',
@@ -70,9 +72,10 @@ COMMANDS = {
 }
 LIVE_ONLY = {'fit': 'the time of the waves', 'edge': 'the values of the signals', 'picture': 'the screen',
              'fsm': 'the enum labels of the signals', 'fsm_stats': 'the transitions of the signals', 'fsm_go': 'the transitions of the signals',
-             'types': 'the types file read in the page', 'expr_go': 'the values of the signals', 'expr_matches': 'the values of the signals'}
+             'types': 'the types file read in the page', 'expr_go': 'the values of the signals', 'expr_matches': 'the values of the signals',
+             'expr_markers': 'the values of the signals', 'goto': 'the page scrolls', 'bus_list': 'the decoders of bus.js'}
 # the arguments of each command that are times (wavemcp.py turns its ns into "…ns" for these)
-TIME_ARGS = {'cursor': ('t',), 'cursor2': ('t',), 'view': ('from', 'to', 'at', 'span'), 'range': ('from', 'to'), 'bookmark': ('t',), 'marker': ('t',),
+TIME_ARGS = {'cursor': ('t',), 'cursor2': ('t',), 'view': ('from', 'to', 'at', 'span'), 'range': ('from', 'to'), 'bookmark': ('t',), 'goto': ('t',), 'bus_list': ('from', 'to'), 'marker': ('t', 'dmin', 'dmax'), 'deltas': ('dmin', 'dmax'),
              'span': ('from', 'to'),
              'picture': ('from', 'to'), 'cycles': ('zero',), 'compare': ('offset',), 'expr_matches': ('from', 'to')}
 def block_re(name):
@@ -290,6 +293,11 @@ class Model:
         """look.js setDups: the copies a state keeps ("data#2"), of signals of these waves, as rows."""
         by, out = {r['full']: r for r in self.sigs()}, []
         for d in state.get('dups') or []:
+            sl = re.fullmatch(r'(.+)\[(\d+):(\d+)\]', str(d))   # a slice of a bus: "PADDR[7:4]"
+            if sl and sl[1] in by and is_vec(by[sl[1]]) and int(sl[3]) <= int(sl[2]) < by[sl[1]]['width']:
+                out.append({**by[sl[1]], 'full': str(d), 'name': by[sl[1]]['name'] + str(d)[len(sl[1]):], 'dup': sl[1], 'slice': [int(sl[2]), int(sl[3])],
+                            'width': int(sl[2]) - int(sl[3]) + 1})
+                continue
             m = re.fullmatch(r'(.+)#([1-9]\d*)', str(d))
             if m and int(m[2]) > 1 and m[1] in by:
                 out.append({**by[m[1]], 'full': str(d), 'name': f'{by[m[1]]["name"]} #{m[2]}', 'dup': m[1]})
@@ -408,6 +416,9 @@ class Model:
     def base_spans(self):
         return span_norm(self.doc.get('spans'))
 
+    def base_marks(self):
+        return measure_marks(self.doc.get('measures'))
+
 
 def bm_norm(lst):
     """model.js bmNorm."""
@@ -503,7 +514,65 @@ def mark_list(ms):
     return [{k: v for k, v in (('t', m['t']), ('label', m['label']), ('color', m['color']), ('signal', m['signal']),
                                ('lift', 'below' if m['signal'] and m['lift'] == 'below' else None), ('dsignal', m.get('dsignal')),
                                ('dlift', 'below' if m.get('dsignal') and m.get('dlift') == 'below' else None), ('dto', m.get('dto')),
-                               ('dcolor', m.get('dcolor')), ('hidden', m.get('hidden') or None)) if v is not None and v != ''} for m in ms]
+                               ('dcolor', m.get('dcolor')), ('hidden', m.get('hidden') or None), ('dmin', m.get('dmin')), ('dmax', m.get('dmax')),
+                               ('expr', m.get('expr'))) if v is not None and v != ''} for m in ms]
+
+
+BOUND_RE = re.compile(r'^\s*(\d+(?:\.\d+)?)\s*(?:cycles?|clk)\s*$', re.I)
+
+
+def bound_of(x):
+    """model.js boundOf: a bound of a marker's Δ (dmin, dmax) -> a number (model units), {"cycles": n} or None (none, or not one)."""
+    if x is None or x == '' or isinstance(x, bool):
+        return None
+    if isinstance(x, dict):
+        c = x.get('cycles')
+        return {'cycles': whole(c) if whole(c) is not None else c} if isinstance(c, (int, float)) and not isinstance(c, bool) and math.isfinite(c) and c >= 0 else None
+    m = BOUND_RE.match(str(x))
+    if m:
+        c = float(m.group(1))
+        return {'cycles': int(c) if c.is_integer() else c}
+    t = x if isinstance(x, (int, float)) else parse_t(x)
+    return (int(t) if float(t).is_integer() else t) if t is not None and math.isfinite(t) and t >= 0 else None
+
+
+def bound_ok(m, dt):
+    """The Δ dt of marker m kept in its bound: True / False; None: no bound, or one in cycles (the clock's edges are the page's)."""
+    lo, hi = m.get('dmin'), m.get('dmax')
+    if lo is None and hi is None or isinstance(lo, dict) or isinstance(hi, dict):
+        return None
+    return not ((lo is not None and dt < lo) or (hi is not None and dt > hi))
+
+
+def measure_list(ms):
+    """edit.js measureList without the cycles: every Δ of the markers (shown or not) as a table."""
+    out = []
+    for i, j in mark_deltas(ms):
+        a, b, end = ms[i], ms[j], lambda k: {'id': k + 1, 'label': ms[k]['label'], 't': ms[k]['t']}
+        dt = abs(b['t'] - a['t'])
+        if not dt > 0:   # two markers at one time: no Δ (as the page draws it)
+            continue
+        out.append({k: v for k, v in (('from', end(i)), ('to', end(j)), ('dt', dt), ('dmin', a.get('dmin')), ('dmax', a.get('dmax')),
+                                      ('ok', bound_ok(a, dt)), ('signal', a.get('dsignal'))) if v is not None})
+    return out
+
+
+def measure_marks(lst):
+    """model.js measureMarks: the WaveJSON's "measures" (a cocotb test's wl.measure) -> markers, a pair each: the first with its Δ to the
+    second and the bound on the line of its signal (their texts at the top); one not ended: a marker alone."""
+    out = []
+    for x in lst if isinstance(lst, list) else []:
+        a = parse_t(x.get('from')) if isinstance(x, dict) else None
+        if a is None:
+            continue
+        b = parse_t(x['to']) if x.get('to') is not None else None
+        at = {'color': x.get('color'), 'dsignal': x.get('signal')}
+        if b is not None:
+            out += [{**at, 't': a, 'label': x.get('label') or '', 'dto': len(out) + 2, 'dmin': x.get('dmin', x.get('min')), 'dmax': x.get('dmax', x.get('max'))},
+                    {**at, 't': b, 'label': '', 'dto': 0}]
+        else:
+            out.append({**at, 't': a, 'label': x.get('label') or '', 'dto': 0})
+    return out
 
 
 def mark_deltas(ms):
@@ -550,7 +619,8 @@ def expr_json(x):
 
 
 def group_list(gs):
-    return [{k: v for k, v in (('name', g['name']), ('signals', list(g['signals'])), ('color', g['color'])) if v is not None} for g in gs]
+    return [{k: v for k, v in (('name', g['name']), ('signals', list(g['signals'])), ('color', g['color']), ('divider', g.get('divider') or None))
+             if v is not None} for g in gs]
 
 
 # ---------------- the commands on a state ----------------
@@ -595,7 +665,8 @@ class Editor:
     def marks(self):
         return [{'t': parse_t(x.get('t')), 'label': str(x.get('label') or ''), 'color': x.get('color') or None, 'signal': x.get('signal') or None,
                  'lift': x.get('lift'), 'dsignal': x.get('dsignal') or None, 'dlift': x.get('dlift'), 'dto': x.get('dto'),
-                 'dcolor': x.get('dcolor') or None, 'hidden': bool(x.get('hidden'))} for x in self.st.get('markers') or []]
+                 'dcolor': x.get('dcolor') or None, 'hidden': bool(x.get('hidden')), 'dmin': bound_of(x.get('dmin')), 'dmax': bound_of(x.get('dmax')),
+                 'expr': str(x['expr']) if x.get('expr') else None} for x in (self.st.get('markers') or [] if 'markers' in self.st else self.m.base_marks())]
 
     def exprs(self):
         """The list of expressions: the state's, else the page's "sva".exprs."""
@@ -603,7 +674,8 @@ class Editor:
         return [x for x in map(expr_norm, l) if x['text']]
 
     def groups(self):
-        return [{'name': g['name'], 'signals': list(g.get('signals') or []), 'color': g.get('color') or None} for g in self.st.get('groups') or []]
+        return [{'name': g['name'], 'signals': list(g.get('signals') or []), 'color': g.get('color') or None, **({'divider': True} if g.get('divider') else {})}
+                for g in self.st.get('groups') or []]
 
     def config(self):
         return self.st.setdefault('config', {})
@@ -893,6 +965,8 @@ class Editor:
         m = ms[mid - 1] if mid is not None else None
         if a.get('lift') is not None and not (sig if 'signal' in a else m and m['signal']):
             fail('marker: lift is the lane of a signal: give signal')
+        bd = {k: self.bound(a[k], k) for k in ('dmin', 'dmax') if k in a}
+        self.bounds_ok(bd, [m or {}])
         if not m:
             if t is None and self.st.get('cursor') is None:
                 fail('marker: t (the cursor here is not known)')
@@ -910,8 +984,31 @@ class Editor:
             m['lift'] = a['lift']
         if a.get('hidden') is not None:
             m['hidden'] = bool(a['hidden'])
+        m.update(bd)
         self.st['markers'] = mark_list(ms)
         return {'id': ms.index(m) + 1}
+
+    @staticmethod
+    def bounds_ok(bd, ms):
+        """edit.js boundsOk: dmin over dmax of one kind is refused."""
+        for x in ms:
+            lo, hi = bd.get('dmin', x.get('dmin')), bd.get('dmax', x.get('dmax'))
+            if lo is not None and hi is not None and isinstance(lo, dict) == isinstance(hi, dict) and \
+                    ((lo['cycles'] > hi['cycles']) if isinstance(lo, dict) else lo > hi):
+                fail(f'dmin {json.dumps(lo)} is over dmax {json.dumps(hi)}: no Δ keeps it')
+
+    @staticmethod
+    def bound(x, what):
+        """edit.js cmdBound."""
+        if x is None:
+            return None
+        b = bound_of(x)
+        if b is None:
+            fail(f'{what}: a time ("150ns", a number in the units of t) or cycles ("3 cycles"), not {json.dumps(x)}')
+        return b
+
+    def c_measures(self, a):
+        return {'measures': measure_list(self.marks())}
 
     def c_expr(self, a):
         xid, xs = self.id_ok(a.get('id'), 'expression'), self.exprs()
@@ -936,6 +1033,7 @@ class Editor:
         if same:
             fail(f'expr: it is there already (id {same[0] + 1})')
         x = was or expr_norm({'expr': text, 'row': False})
+        old = was['text'] if was else None
         x.update(text=text, scope=scope)
         if 'label' in a:
             x['label'] = '' if a['label'] is None else js_str(a['label'])
@@ -946,6 +1044,22 @@ class Editor:
                 x[k] = bool(a[k])
         if a.get('mark') is not None:
             x['mark'] = a['mark']
+        if a.get('radix') is not None and not (a['radix'] in RADIX or re.fullmatch(r's?q\d{1,3}', str(a['radix']))):
+            fail(f'radix: one of {", ".join(RADIX)}, q8, sq15 …, not {json.dumps(a["radix"])}')
+        if ('radix' in a or 'analog' in a) and not x['row']:
+            fail('expr: radix and analog are of its row: give row: true')
+        for k in ('radix', 'analog'):   # of its row ƒ, by its name, as the menu keeps a signal's
+            if old is not None and old != text and 'ƒ ' + old in (self.st.get(k) or {}):   # its text changed: its row's look goes with it
+                m = dict(self.st[k])
+                m['ƒ ' + text] = m.pop('ƒ ' + old)
+                self.put_map(k, m)
+            if k in a:
+                m = dict(self.st.get(k) or {})
+                if a[k] is None:
+                    m.pop('ƒ ' + text, None)
+                else:
+                    m['ƒ ' + text] = a[k] if k == 'radix' else (int(a[k]) if whole(a[k]) else False)
+                self.put_map(k, m)
         if not was:
             xs.append(x)
         self.st['exprs'] = [expr_json(y) for y in xs]
@@ -967,6 +1081,8 @@ class Editor:
         given = a.get('signals')
         sigs = None if given is None else [self.m.pick(self.st, x, one=True)[0]['full'] for x in (given if isinstance(given, list) else [given])]
         s = ss[sid - 1] if sid is not None else None
+        if (t0 is not None or t1 is not None) and (t0 if t0 is not None else s and s['from']) == (t1 if t1 is not None else s and s['to']):
+            fail('span: from and to at one time: no stretch')
         if not s:
             if t0 is None or t1 is None:
                 fail('span: from and to')
@@ -1010,9 +1126,18 @@ class Editor:
             mv = int(mv)
         if mv is not None and mv not in ('up', 'down', 'top', 'bottom') and not (isinstance(mv, int) and not isinstance(mv, bool) and mv >= 1):
             fail('move: up, down, top, bottom or a number (1: the first)')
+        if a.get('divider') is not None and not isinstance(a['divider'], bool):
+            fail('divider: true or false')
+        if (a.get('divider') or (g and g.get('divider') and a.get('divider') is not False)) and (new or add):
+            fail('a divider has no signals')
         if not g:
             g = {'name': name, 'signals': [], 'color': None}
             gs.append(g)
+        if a.get('divider') is not None:   # a line with its name between your groups
+            if a['divider']:
+                g.update(divider=True, signals=[])
+            else:
+                g.pop('divider', None)
         if mv is not None:   # its place among your groups (edit.js)
             i, n = gs.index(g), len(gs)
             j = i - 1 if mv == 'up' else i + 1 if mv == 'down' else 0 if mv == 'top' else n - 1 if mv == 'bottom' else mv - 1
@@ -1255,8 +1380,14 @@ class Editor:
         sig = self.m.pick(self.st, a['signal'], one=True)[0]['full'] if a.get('signal') else None
         if a.get('lift') is not None and not (sig if 'signal' in a else m and m['dsignal']):
             fail('deltas: lift is the lane of a signal: give signal')
+        bd = {k: self.bound(a[k], k) for k in ('dmin', 'dmax') if k in a}
+        self.bounds_ok(bd, [m] if m else ms)
         if a.get('on') is not None:
             self.st['deltas'] = a['on']
+        for x in [m] if m else ms:
+            x.update(bd)
+        if bd and not m:
+            self.st['markers'] = mark_list(ms)
         if m:
             if 'signal' in a:
                 m['dsignal'] = sig
@@ -1293,6 +1424,31 @@ class Editor:
         bad = [r['full'] for r in rows if r.get('bit') is not None]
         if bad:
             fail(f'a bit has no copy: {", ".join(bad)}')
+        if a.get('bits') is not None:   # edit.js: a slice of the bus as a row
+            b = a['bits']
+            sl = b if isinstance(b, list) else [p.strip() for p in b.split(':')] if isinstance(b, str) and re.fullmatch(r'\s*\d+\s*:\s*\d+\s*', b) else None
+            if not (isinstance(sl, list) and len(sl) == 2 and all(whole(x) is not None and whole(x) >= 0 for x in sl)):
+                fail(f'bits: [msb, lsb] or "7:4", not {json.dumps(b)}')
+            msb, lsb = (whole(x) for x in sl)
+            out = []
+            for r in rows:
+                if r.get('slice'):
+                    fail(f'{r["full"]}: slice the bus, not a slice')
+                base = r.get('dup') or r['full']
+                if not is_vec(r):
+                    fail(f'{r["full"]}: not a bus')
+                if not (lsb <= msb < r['width']):
+                    fail(f'{r["full"]}: [{msb}:{lsb}] is not in its {r["width"]} bits (msb first, lsb 0)')
+                d = f'{base}[{msb}:{lsb}]'
+                if d not in have:
+                    have.append(d)
+                out.append(d)
+            self.st['dups'] = have
+            if rx is not None:
+                self.c_radix({'signals': out, 'radix': rx})
+            if n is not None:
+                self.c_analog({'signals': out, 'rows': n})
+            return {'copies': out}
         flat = [r['full'] for r in rows if (r.get('width') or 1) < 2 and r.get('kind') != 'real']
         if flat and n:
             fail(f'not a bus: {", ".join(flat)}')
@@ -1914,15 +2070,37 @@ def config_time(x, what):
     fail(f'{what}: "{x}" is not a time (ps, or a text with a unit: "250ns")')
 
 
+# the commands a config's "state" of a view takes (the view's state as the page opens: the Editor of a page's edits on it); not what a
+# session is (the cursors, the range, the selection, the find, Only, the FSM layer, the order) nor what reads the page
+STATE_OPS = [k for k in COMMANDS if k not in LIVE_ONLY and k not in CONFIG_OPS and k not in
+             ('cursor', 'cursor2', 'range', 'select', 'find', 'only', 'fsm', 'sort', 'reset', 'state', 'rows', 'picture', 'compare', 'view', 'fold', 'unfold')]
+# what --from-page takes of a page's state into its config: what this browser keeps of a viewer, the expressions
+FROM_PAGE = ['groups', 'paint', 'radix', 'analog', 'hidden', 'dups', 'bits', 'markers', 'deltas', 'spans', 'bookmarks', 'arrows', 'exprs']
+
+
 def config_ops(view, ops):
-    """The commands bookmark, arrow and span on a view of a config (its "bookmarks", "arrows", "spans", as written:
-    a bookmark's "at" stays until a "t" replaces it, and the other way) -> results; view changed in place."""
+    """The commands on a view of a config: bookmark, arrow and span on its "bookmarks", "arrows", "spans", as written (a
+    bookmark's "at" stays until a "t" replaces it, and the other way); the rest of a view's look (group, radix, analog, hide,
+    duplicate, bits, paint, highlight, marker, deltas, expr, gaps, cycles, style …) on its "state", the state the page opens
+    with (mkhtml.py puts it in the page's edits), by the commands of a page's edits; view: the window ("from", "to") ->
+    results; view changed in place."""
     res = []
     for o in ops:
         try:
+            if isinstance(o, dict) and o.get('op') == 'view':
+                res.append({'op': 'view', **cfg_view(view, {k: v for k, v in o.items() if k != 'op'})})
+                continue
+            if isinstance(o, dict) and o.get('op') in STATE_OPS:
+                e = Editor(Model(), view.get('state') if isinstance(view.get('state'), dict) else {})
+                r = e.run([o])[0]
+                if 'error' in r:
+                    fail(r['error'])
+                view['state'] = tidy({k: v for k, v in e.st.items() if v is not None})
+                res.append(r)
+                continue
             if not isinstance(o, dict) or o.get('op') not in CONFIG_OPS:
-                fail(f'{json.dumps((o or {}).get("op") if isinstance(o, dict) else o)}: in a config only {", ".join(CONFIG_OPS)} (the rest is a page\'s: '
-                     'give "page"); a config\'s markers are events ("marker": ["posedge X=label"])')
+                fail(f'{json.dumps((o or {}).get("op") if isinstance(o, dict) else o)}: in a config {", ".join(list(CONFIG_OPS) + ["view"] + STATE_OPS)} '
+                     '(the rest is a page\'s session or reads the page: give "page")')
             op, a = o['op'], {k: v for k, v in o.items() if k != 'op'}
             bad = sorted(set(a) - set(CONFIG_OPS[op]))
             if bad:
@@ -1931,6 +2109,19 @@ def config_ops(view, ops):
         except WaveError as e:
             res.append({'op': o.get('op') if isinstance(o, dict) else None, 'error': str(e)})
     return res
+
+
+def cfg_view(view, a):
+    """view on a config: its window, "from" and "to" (a time with a unit; a number: ps)."""
+    bad = sorted(set(a) - {'from', 'to'})
+    if bad or a.get('from') is None or a.get('to') is None:
+        fail('view: from and to in a config (its window)' + (f', not {", ".join(bad)}' if bad else ''))
+    p, q = (parse_t(a[k]) for k in ('from', 'to'))
+    if p is None or q is None or not q > p:
+        fail('view: from and to are times, to after from')
+    for k, t in (('from', p), ('to', q)):
+        view[k] = f'{t / 1000:g}ns'
+    return {'from': view['from'], 'to': view['to']}
 
 
 def cfg_bookmark(view, a):
@@ -2049,10 +2240,11 @@ def cfg_span(view, a):
     return {'id': sid}
 
 
-def edit_config(path, ops, view=None):
+def edit_config(path, ops, view=None, from_page=None, keys=None):
     """The commands on a view of a config file (mkhtml.py's, its "views"; none: the top level) -> (results, view, the
     JSON paths changed). The whole list is checked first: a bad command writes nothing. The file is written atomically,
-    its keys and the other views as they were; bookmarks a view takes from the top level become its own."""
+    its keys and the other views as they were; bookmarks a view takes from the top level become its own. from_page: a
+    page made of it, whose state (its edits: viewedit.py, Save page) goes into the view first (keys: only those of FROM_PAGE)."""
     try:
         with open(path, encoding='utf-8') as f:
             cfg = json.load(f)
@@ -2073,16 +2265,25 @@ def edit_config(path, ops, view=None):
         target, at = cfg, ''
     import copy
     work = copy.deepcopy(target)
-    for k in ('bookmarks', 'arrows', 'spans'):   # the top level's, made the view's own
-        if views and k not in work and isinstance(cfg.get(k), list):
+    marks = (from_page and (keys is None or any(k in keys for k in ('bookmarks', 'arrows', 'spans')))) or \
+        any(isinstance(o, dict) and o.get('op') in CONFIG_OPS for o in ops)
+    for k in ('bookmarks', 'arrows', 'spans'):   # the top level's, made the view's own (when it is given its own)
+        if marks and views and k not in work and isinstance(cfg.get(k), list):
             work[k] = copy.deepcopy(cfg[k])
-    res = config_ops(work, ops)
+    res = []
+    if from_page:
+        res.append(page_into(work, from_page, view, keys, cfg.get('waves')))
+    res += config_ops(work, ops)
     if any('error' in r for r in res):
         return res, view, []
-    keys = [k for k in ('bookmarks', 'arrows', 'spans') if (work.get(k) or None) != (target.get(k) or None)]   # (none and [] alike)
-    for k in keys:
-        target[k] = work.get(k) or []
-    changed = [f'{at}.{k}' if at else k for k in keys]
+    same = lambda a, b: (a or None) == (b or None)   # (none and [] alike)
+    changed_keys = [k for k in ('bookmarks', 'arrows', 'spans', 'state', 'from', 'to') if not same(work.get(k), target.get(k))]
+    for k in changed_keys:
+        if k in ('state', 'from', 'to') and not work.get(k):
+            target.pop(k, None)
+        else:
+            target[k] = work.get(k) or ([] if k in ('bookmarks', 'arrows', 'spans') else work.get(k))
+    changed = [f'{at}.{k}' if at else k for k in changed_keys]
     if not changed:
         return res, view, []
     tmp = path + '.part'
@@ -2091,6 +2292,79 @@ def edit_config(path, ops, view=None):
         f.write('\n')
     os.replace(tmp, path)
     return res, view, changed
+
+
+PAGE_CFG = ['style', 'maxHeight', *ALL_GAP_KEYS, *CYC_KEYS]   # the settings of a page's state a config keeps (edit.js KEPT_CFG)
+
+
+def cfg_time(t):
+    """A time of a page's state (ps) as a config writes it: "50ns", else "12500ps"."""
+    t = whole(t) if whole(t) is not None else t
+    return f'{t // 1000}ns' if isinstance(t, int) and t % 1000 == 0 else f'{t}ps'
+
+
+def cfg_form(kind, page_list, orig):
+    """--from-page: the page's bookmarks / arrows / spans in a config's form: an entry the config had and the page did not change stays as it
+    was written ("at": an event, "t": "50ns", "link": "exact"); a new or changed one gets its times as "…ns" and its link as a view's name."""
+    times = {'bookmarks': ('t',), 'spans': ('from', 'to'), 'arrows': ()}[kind]
+    def norm(x):   # its fields but the times, the link as a name
+        o = {k: v for k, v in x.items() if k not in times + ('at', 'n') and v is not None}
+        if isinstance(o.get('link'), dict) and set(o['link']) == {'view'}:
+            o['link'] = o['link']['view']
+        return o
+    def same_t(a, b):   # a time of the config (an event: the same as long as the rest is) and the page's
+        return not isinstance(a, (int, float, str)) or (parse_t(a) is not None and parse_t(a) == parse_t(b))
+    by = {}
+    for i, o in enumerate(orig or []):
+        if isinstance(o, dict):
+            by.setdefault(o.get('n', i + 1) if kind == 'bookmarks' else i, o)
+    out = []
+    for i, x in enumerate(page_list or []):
+        o = by.get(x.get('n', i + 1) if kind == 'bookmarks' else i)
+        if o is not None and norm(o) == norm(x) and ('at' in o or all(same_t(o.get(k), x.get(k)) for k in times)):
+            out.append(o)
+            continue
+        y = norm(x)
+        if kind == 'bookmarks':
+            y = {'n': x.get('n', i + 1), **y}
+        out.append({**y, **{k: cfg_time(x[k]) for k in times if isinstance(x.get(k), (int, float))}})
+    return out
+
+
+def page_into(work, page, view, keys=None, waves=None):
+    """--from-page: the state of a page's view (its edits) into a config's view: bookmarks, arrows, spans as its own keys, the
+    rest (FROM_PAGE, the settings of PAGE_CFG) into its "state" -> a result {op: "from_page", taken, note}."""
+    p = Page(page)
+    key = p.view(view or None)   # a view the page has not got: said, with the page's views
+    st = clean_state(p.state(key))
+    want = FROM_PAGE + ['config'] if keys is None else list(keys)
+    bad = [k for k in want if k not in FROM_PAGE + ['config']]
+    if bad:
+        fail(f'--keys: {", ".join(bad)} is no key of a page\'s view here (have: {", ".join(FROM_PAGE + ["config"])})')
+    out, taken = dict(work['state']) if isinstance(work.get('state'), dict) else {}, []
+    for k in want:
+        if k == 'config':
+            c = {n: v for n, v in (st.get('config') or {}).items() if n in PAGE_CFG}
+            if c:
+                out['config'] = {**(out.get('config') or {}), **c}; taken.append('config')
+        elif k in st:
+            if k in ('bookmarks', 'arrows', 'spans'):   # the config's own keys, in its form
+                work[k] = cfg_form(k, st[k], work.get(k))
+            else:
+                out[k] = st[k]
+            taken.append(k)
+    if out:
+        work['state'] = out
+    else:
+        work.pop('state', None)
+    n = lambda k: len(st.get(k) or [])
+    note = ', '.join(x for x in (f'{n("markers")} markers' if 'markers' in taken else '', f'{n("groups")} groups' if 'groups' in taken else '',
+                                  f'radix on {len(st.get("radix") or {})}' if 'radix' in taken else '', f'{n("bookmarks")} bookmarks' if 'bookmarks' in taken else '',
+                                  f'{n("exprs")} expressions' if 'exprs' in taken else '') if x)
+    meta = (p.waves[key].get('meta') or {}).get('waves')
+    other = waves and meta and os.path.basename(str(waves)) != meta
+    return {'op': 'from_page', 'view': key, 'taken': taken, **({'note': note} if note else {}),
+            **({'warning': f'the page is of {meta}, the config of {os.path.basename(str(waves))}'} if other else {})}
 
 
 def read_ops(text):
@@ -2107,8 +2381,35 @@ def read_ops(text):
     return ops if isinstance(ops, list) else [ops]
 
 
+MEASURE_CSV = ('n_from', 'label_from', 't_from_ns', 'n_to', 'label_to', 't_to_ns', 'dt_ns', 'cycles', 'dmin', 'dmax', 'ok', 'signal')
+
+
+def measure_text(rows, timed=True, csv_out=False):
+    """The table of measure_list as text lines (--measure) or CSV (--csv): times in ns (timed waves), else in cycles."""
+    ns = (lambda t: f'{t / 1000:g}') if timed else (lambda t: f'{t:g}')
+    bd = lambda b: '' if b is None else f'{b["cycles"]:g} cycles' if isinstance(b, dict) else ns(b) + (' ns' if timed and not csv_out else '')
+    if csv_out:
+        import csv, io
+        buf = io.StringIO()
+        w = csv.writer(buf, lineterminator='\n')
+        w.writerow(MEASURE_CSV)
+        for r in rows:
+            w.writerow([r['from']['id'], r['from']['label'], ns(r['from']['t']), r['to']['id'], r['to']['label'], ns(r['to']['t']), ns(r['dt']),
+                        r.get('cycles', ''), bd(r.get('dmin')), bd(r.get('dmax')), '' if r.get('ok') is None else str(r['ok']).lower(), r.get('signal') or ''])
+        return buf.getvalue()
+    u = ' ns' if timed else ' cycles'
+    out = [f'{len(rows)} measurement{"" if len(rows) == 1 else "s"} (the Δ between the markers)']
+    for r in rows:
+        a, b = r['from'], r['to']
+        lim = ' … '.join([bd(r.get('dmin')) or '—', bd(r.get('dmax')) or '—']) if r.get('dmin') is not None or r.get('dmax') is not None else ''
+        out.append(f'{a["id"]:>3} → {b["id"]:<3} {ns(a["t"]) + u:>14} → {ns(b["t"]) + u:<14} Δ {ns(r["dt"]) + u:<12}' +
+                   (f' {r["cycles"]} cycles' if 'cycles' in r else '') + (f'  [{lim}] {"ok" if r.get("ok") else "✗" if r.get("ok") is False else "?"}' if lim else '') +
+                   (f'  {a["label"]} → {b["label"]}' if a['label'] or b['label'] else ''))
+    return '\n'.join(out) + '\n'
+
+
 def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(description=__doc__.replace('{live}', ', '.join(LIVE_ONLY)), formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('file', nargs='?', help='a page (.html) or a saved state (.view.json)')
     ap.add_argument('--ops', help='the commands: JSON (one {"op": …} or a list), @file.json, or - for stdin')
     ap.add_argument('--view', help='the view of a page of several (its key: WAVES.<key>)')
@@ -2116,11 +2417,21 @@ def main():
     ap.add_argument('--get', action='store_true', help='print the edits (a page: of every view, or --view) as JSON')
     ap.add_argument('--views', action='store_true', help='print the views of a page: key, title, signals, revision of its edits')
     ap.add_argument('--commands', action='store_true', help='print the commands and their arguments')
-    ap.add_argument('--config', metavar='FILE', help='a config file (mkhtml.py\'s): bookmark, arrow and span on its view --view (a rebuild keeps '
-                    'them; a bookmark\'s "at" stays until a "t" replaces it)')
+    ap.add_argument('--config', metavar='FILE', help='a config file (mkhtml.py\'s): bookmark, arrow and span on its view --view, and the look '
+                    '(group, radix, paint, hide, marker, deltas, duplicate, expr, … into its "state"): a rebuild keeps them; a bookmark\'s "at" stays '
+                    'until a "t" replaces it')
+    ap.add_argument('--from-page', metavar='PAGE', help='with --config: the view of a page made of it (its edits: viewedit.py, Save page) into '
+                    'the config: groups, colours, radix, analog, hidden, copies, bits, markers, the Δ, bookmarks, arrows, spans, expressions, the '
+                    'look (its "state"; mkhtml.py opens the page with it)')
+    ap.add_argument('--keys', help='with --from-page: only these (' + ','.join(FROM_PAGE + ['config']) + ')')
+    ap.add_argument('--measure', action='store_true', help='print the Δ between the markers of the view as a table (the bound kept or not: ok; '
+                    'cycles: in the page, view_edit measures live)')
+    ap.add_argument('--csv', action='store_true', help='with --measure: CSV (' + ','.join(MEASURE_CSV) + ')')
     a = ap.parse_args()
+    if a.csv and not a.measure:
+        ap.error('--csv goes with --measure')
     if a.config:
-        res, key, changed = edit_config(a.config, read_ops(a.ops or '[]'), a.view)
+        res, key, changed = edit_config(a.config, read_ops(a.ops or '[]'), a.view, a.from_page, a.keys.split(',') if a.keys else None)
         print(json.dumps(res, ensure_ascii=False))
         bad = any('error' in r for r in res)
         print(f'viewedit: {a.config}: ' + (f'{key}: ' if key else '') + ('nothing written: a command failed' if bad else ', '.join(changed) or 'nothing changed'),
@@ -2132,6 +2443,17 @@ def main():
         return 0
     if not a.file:
         ap.error('a page or a .view.json')
+    if a.measure:
+        if a.file.endswith('.json'):
+            with open(a.file, encoding='utf-8') as f:
+                st, timed, md = json.load(f), True, Model(None)
+        else:   # a page: its own measures (a cocotb test's wl.measure) when the state has no markers
+            p = Page(a.file)
+            k = p.view(a.view)
+            md = p.model(k)
+            st, timed = p.state(k), md.timed
+        sys.stdout.write(measure_text(measure_list(Editor(md, st if isinstance(st, dict) else {}).marks()), timed, a.csv))
+        return 0
     if a.file.endswith('.json'):
         if a.views or a.get and not a.ops:
             with open(a.file, encoding='utf-8') as f:

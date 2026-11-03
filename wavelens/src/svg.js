@@ -90,6 +90,12 @@ const WaveSVG = {
       P.fade = hl && !hl.on.has(row) ? hl.dim : 1;
       if (typeof c === 'string') { P.rect(0, ry, xL, h, c, 0.1); P.rect(0, ry, 3, h, c); }   // a plugin's highlight
       if (!row.name) return;
+      if (row.cls === 'ugdiv') {   // a divider: its name muted, a line on either side across the names (the waves' part: paintRows)
+        const tw = P.measure(row.name, { size: fs }), my = Math.round(ry + h / 2) + 0.5, cx = xL / 2;
+        P.path([['M', 4, my], ['L', cx - tw / 2 - 6, my]], { stroke: 'line', w: 1 });
+        P.path([['M', cx + tw / 2 + 6, my], ['L', xL - 4, my]], { stroke: 'line', w: 1 });
+        P.text(cx, ry + h / 2, row.name, { size: fs, fill: 'muted', anchor: 'middle' }); return;
+      }
       const g = row.type === 'group';
       const nx = 6 + row.depth * 12 + (g ? 0 : 8), nst = { size: fs, weight: g ? 700 : 400, fill: strokeOf(row) || 'fg' };
       P.text(nx, ry + h / 2, row.name, nst);
@@ -146,7 +152,7 @@ const WaveSVG = {
       paintTimeMarks(P, timeMarks, X, from, to, top, bodyEnd, (to - from) / Math.max(1, xR - xL));
       paintSpans(P, V ? V.spans : M.spans, X, from, to, lay, top, bodyEnd);
       paintMarkers(P, marks, X, from, to, top, bodyEnd, laneY(lay, S.laneHeight));
-      if (V) paintDeltas(P, V.deltaList(), X, from, to, laneY(lay, S.laneHeight), top, dt => V.deltaText(dt));
+      if (V) paintDeltas(P, V.deltaList(), X, from, to, laneY(lay, S.laneHeight), top, d => V.deltaText(d));
       paintBookmarks(P, bms, ars, X, from, to, rowY, top, bodyEnd, showAxis ? axisY + 10 : top + 10, null, laneY(lay, S.laneHeight), arrowFill(M, M.rows));
       if (V && V.cursor >= from && V.cursor <= to) P.path([['M', X(V.cursor), top], ['L', X(V.cursor), bodyEnd]], { stroke: 'acc', w: 1.2 });
       if (V) V.paintMeasures(P, X, from, to, xL, xR, top, bodyEnd, showAxis ? [axisY, 20] : null, true);   // the second cursor, the measured range

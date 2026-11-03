@@ -71,7 +71,7 @@ const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight
   labelSize: 11, fontSize: 11.5, sort: 'none', sortIgnore: [], sortButton: true, hint: true, style: 'auto', radix: 'auto', fold: null,
   highlight: null, dim: 0.3, groupColors: null, bookmarkLeft: 0.2, arrowLabels: 'lane', laneHeight: 16, maxHeight: null, toolsFolded: false, toolsHidden: [],
   groupOrder: 'file', moduleShading: true, findHighlight: true, findOpen: true, findMask: false, findCase: false, findWord: false,
-  findRegex: false, cursorSnap: 8, keyHints: 200, showWidth: true,
+  findRegex: false, cursorSnap: 8, keyHints: 200, showWidth: true, exprLibrary: [], sharedMarkers: false, keys: {},
     wheel: 'scroll', contextMenu: true, enumColors: null, dumpBudget: 3000000, gaps: false, gapIdle: 16, gapKeep: 2,
     gapSignals: null, gapClock: null, gapAux: null, gapOnly: false, gapCount: 'clock', gapLine: 'dashdot', gapView: false, menuTipDelay: 2000, cycles: false,
     cycleClock: null, cycleZero: null, savePage: true, themeButton: 'auto', version: true, keysLeft: [], log: 'auto' };
@@ -85,9 +85,34 @@ const STYLE_VAR = { nameWidth: '--wv-names', fontSize: '--wv-font-size', fontMon
 // the bar's tool groups left out (toolsHidden): their labels, lower case, sorted ("cursor,go to" or a list)
 const toolNames = v => [...new Set((Array.isArray(v) ? v : String(v ?? '').split(',')).map(s => String(s).trim().toLowerCase()).filter(Boolean))].sort();
 const prefixes = v => (Array.isArray(v) ? v : String(v ?? '').split(',')).map(s => String(s).trim()).filter(Boolean);
+const jsonOr = t => { try { return JSON.parse(t); } catch (e) { return null; } };
+// your keys (the setting "keys": {"gx": "gm", "m": null, "ctrl+k": "ctrl+g"}): a key or a sequence typed -> the key it stands for (one of
+// the viewer's: a key, a sequence of g z y [ ], ctrl+g ctrl+f; null: none) -> {map: {typed: target | null}, bad: [why]}. A sequence of your
+// own starts with g z y [ or ]; g z y [ ] alone, Esc and ? stay the viewer's
+const KEY_PRE = 'gzy[]', KEY_FIXED = new Set(['Escape', '?', ...KEY_PRE]);
+// a key of the setting as typed ("Ctrl+Shift+Z" -> "ctrl+shift+z"); the named keys a key may be (no chord of them: ctrl+ a key only)
+const ctrlKey = k => (/^ctrl\+/i.test(k) ? k.toLowerCase() : k);
+const KEY_NAMED = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown', 'Tab', 'Enter', 'Backspace',
+  'Delete', 'Insert', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12']);
+function keymapOf(keys) {
+  const map = {}, bad = [];
+  for (const [k, t] of Object.entries(keys && typeof keys === 'object' ? keys : {})) {
+    const key = ctrlKey(k);
+    if (KEY_FIXED.has(key)) { bad.push(`${k}: the viewer's own`); continue; }
+    if (!(key.length === 1 || (key.length === 2 && KEY_PRE.includes(key[0])) || /^ctrl\+(shift\+)?.$/.test(key) || KEY_NAMED.has(key))) {
+      bad.push(`${k}: a key, a sequence of g z y [ ], ctrl+ (ctrl+shift+) a key, or a named key (${[...KEY_NAMED].slice(0, 6).join(' ')} …)`); continue; }
+    if (t !== null && typeof t !== 'string') { bad.push(`${k}: a key it stands for, or null`); continue; }
+    if (t === key) { bad.push(`${k}: itself`); continue; }
+    map[key] = t === null ? null : ctrlKey(t);
+  }
+  return { map, bad };
+}
 function settings(...layers) {
   const S = Object.assign({}, DEFAULTS);
   for (const l of layers) for (const [k, v] of Object.entries(l || {})) if (v != null && k !== 'theme' && k !== 'colors') S[k] = v;
+  // your keys: key by key over the layers (a later layer's key wins, null takes a key away)
+  S.keys = Object.assign({}, ...layers.map(l => l && l.keys).filter(Boolean).map(k => (typeof k === 'string' ? jsonOr(k) : k))
+    .filter(k => k && typeof k === 'object'));
   for (const k of ['rowHeight', 'groupHeight', 'spaceHeight', 'headerHeight', 'traceWidth', 'busWidth', 'labelSize', 'fontSize', 'dim',
     'laneHeight']) S[k] = num(S[k]) || DEFAULTS[k];
   S.sort = sortDir(S.sort); S.sortIgnore = prefixes(S.sortIgnore).sort((a, b) => b.length - a.length);
@@ -377,6 +402,29 @@ const vtext = (s, o, radix) => { if (o.raw == null) return o.v; const r = s.radi
   if (s.dupOf) return o.bits && r === 'bin' ? o.bits : decode(s, o.raw, r);   // a copy shares the changes, not the memo: another radix, no enum
   if (r !== o.rk) { o.rk = r; o.vr = o.bits && r === 'bin' ? o.bits : decode(s, o.raw, r); } return o.vr; };
 
+// the change of a row's value from one cursor to the other (a at the first, b at the second, changes of its tr): a bit ↑ ↓ =, a number of a
+// bus or a counter b − a modulo 2^width with + (in its radix: hex, bin, oct, else decimal; signed: as signed), a float or a fixed point
+// the difference of the values, a real the difference, ascii and an enum's names a → b; x / z or none: ?; the same: =; both: the
+// other form after it too, "+0xc0 (−0x40)" (the title)
+function cursorDiff(s, a, b, radix, both = false) {
+  if (!a || !b) return '?';
+  if (a.k !== '=' || b.k !== '=') { if (a.k === b.k && a.k !== 'x' && a.k !== 'z') return '=';
+    return a.k === '0' && b.k === '1' ? '↑' : a.k === '1' && b.k === '0' ? '↓' : '?'; }
+  if (a.raw == null || b.raw == null) { const x = parseFloat(a.v), y = parseFloat(b.v);   // a real, a string
+    return a.v === b.v ? '=' : isFinite(x) && isFinite(y) ? (y - x >= 0 ? '+' : '−') + trimNum(Math.abs(y - x), 6) : '≠'; }
+  if (/[xz]/i.test(a.raw + b.raw)) return '?';
+  if (a.raw === b.raw) return '=';
+  const e = s.enum || ENUMS[s.full] || ENUMS[s.name], r = s.radix || radix || 'auto';
+  if (e && !s.dupOf && !s.radix) return `${vtext(s, a, radix)} → ${vtext(s, b, radix)}`;   // its names (no radix of its own)
+  const real = x => { const y = parseFloat(decode(s, x, r)); return isFinite(y) ? y : NaN; };
+  if (r === 'float' || /^s?q\d+$/.test(r)) { const x = real(a.raw), y = real(b.raw);   // its values' difference
+    return isFinite(x) && isFinite(y) ? (y - x === 0 ? '=' : (y - x > 0 ? '+' : '−') + trimNum(Math.abs(y - x), 6)) : '≠'; }
+  if (r === 'ascii') { const t = x => decode(s, x, 'ascii').replace(/^"|"$/g, ''); return `${t(a.raw)} → ${t(b.raw)}`; }
+  const w = BigInt(s.width || 1), m = 1n << w, d = ((BigInt('0x' + b.raw) - BigInt('0x' + a.raw)) % m + m) % m;
+  const num = n => (r === 'hex' || r === 'auto' ? '0x' + n.toString(16) : r === 'bin' ? '0b' + n.toString(2) : r === 'oct' ? '0o' + n.toString(8) : String(n));
+  const up = '+' + num(d), down = '−' + num(m - d), neg = r === 'signed' && d >= m >> 1n;
+  return (neg ? down : up) + (both && w > 1n ? ` (${neg ? up : down})` : '');
+}
 // where JSON.parse stopped in a text -> {line, col (1 the first), text: that line}, from its message (V8: "… at position 12
 // (line 2 column 5)", Firefox: "… at line 2 column 5 …"; an end too soon: the end), null when it says no place (Safari)
 function jsonWhere(text, e) {
@@ -521,7 +569,8 @@ function bitRows(sig) {
   const w = sig.width || 1; let from = null, trs = [];
   const get = j => { if (from !== sig.tr) { from = sig.tr; trs = bitTrs(sig); } return trs[j]; };
   return Array.from({ length: w }, (_, j) => {
-    const i = w - 1 - j, r = { type: 'sig', name: `[${i}]`, full: `${sig.full}[${i}]`, path: null, width: 1, depth: sig.depth + 1, anc: sig.anc,
+    const i = w - 1 - j, at = i + (sig.slice ? sig.slice[1] : 0);   // (a slice's bits by the bus's numbers)
+    const r = { type: 'sig', name: `[${at}]`, full: `${sig.full}[${i}]`, path: null, width: 1, depth: sig.depth + 1, anc: sig.anc,
       gaps: [], src: {}, fromTv: !!sig.tv, field: [i, i], bit: i, of: sig };
     Object.defineProperty(r, 'tr', { get: () => get(j), enumerable: true });
     return r;
@@ -535,12 +584,26 @@ function dupRow(s, n) {
     analog: s.analog, an: null });
 }
 const dupId = id => { const m = /^(.+)#([1-9]\d*)$/.exec(id); return m && +m[2] > 1 ? { of: m[1], n: +m[2] } : null; };
+// Duplicate ▸ Bits…: bits [msb:lsb] of a bus as a row under it, "PADDR[7:4]" (an address decode, a nibble, a byte lane): its changes read
+// through the bus's (a large dump's read later too), a radix, an analog form and a colour of its own
+function sliceRow(s, msb, lsb) {
+  const nm = `[${msb}:${lsb}]`; let from = null, tr = [];
+  const r = Object.assign(Object.create(s), { dupOf: s, dupN: 0, slice: [msb, lsb], field: [msb, lsb], full: s.full + nm, name: s.name + nm,
+    width: msb - lsb + 1, enum: undefined, enum0: undefined, radix: undefined, analog: false, an: null });
+  Object.defineProperty(r, 'tr', { get: () => { if (from !== s.tr) { from = s.tr; tr = fieldRow(s, { name: nm, msb, lsb }, 0, []).tr; } return tr; },
+    enumerable: true });
+  return r;
+}
+const sliceId = id => { const m = /^(.+)\[(\d+):(\d+)\]$/.exec(id); return m ? { of: m[1], msb: +m[2], lsb: +m[3] } : null; };
+// a slice of a bus: [msb, lsb] of [7, 4], "7:4" -> [msb, lsb], null: not one
+const sliceOf = x => { const a = Array.isArray(x) ? x : typeof x === 'string' && /^\s*\d+\s*:\s*\d+\s*$/.test(x) ? x.split(':') : null;
+  return a && a.length === 2 && a.every(n => Number.isInteger(+n) && +n >= 0) ? [+a[0], +a[1]] : null; };
 // what a row stands for: the signal under its row in your group, under a copy
 const rowBase = r => { const o = r.orig || r; return o.dupOf || o; };
 // the width after a name: a vector's [w-1:0], a field's place in its vector [msb:lsb], a struct's whole value's; none
 // for a bit, a real, a string
 const widthTag = r => { const s = r && r.type === 'group' ? r.sig : r;
-  if (!isVec(s) || (r.type === 'sig' && r.bit != null)) return '';
+  if (!isVec(s) || (r.type === 'sig' && (r.bit != null || r.slice))) return '';   // (a slice's name has it)
   return s.field && r === s ? `[${s.field[0]}:${s.field[1]}]` : `[${s.width - 1}:0]`; };
 function parseTV(s, sig) { // extension: exact transitions [[time, value], …]; bit values 0/1/x/z, bus values hex or "'b" + bits;
   // "kind": "real" / "string": the values are texts shown as they are (a real's number, a string), null unknown
@@ -652,7 +715,7 @@ function parse(src) {
   M.jumps = j.jumps ? j.jumps.map(m => ({ t: mt(m), span: num(parseT(m.span)) || (M.t1 - M.t0) / 5, label: m.label || '' })) : null;
   M.cursor = j.cursor != null ? num(parseT(j.cursor)) : null;
   M.bookmarks = bmNorm(j.bookmarks); M.arrows = arNorm(j.arrows, j.bookmarks); M.spans = spanNorm(j.spans);
-  M.compare = cmpNorm(j.compare);
+  M.compare = cmpNorm(j.compare); M.measures = Array.isArray(j.measures) ? j.measures : [];
   return M;
 }
 // lazy rows (a large dump read as it is needed, "lazy": the id codes of a signal not read yet): the WaveJSON signals read
@@ -955,8 +1018,55 @@ function markNorm(list) {
   return (Array.isArray(list) ? list : []).map(m => { const signal = m && m.signal ? String(m.signal) : null;
     return { t: num(parseT(m && m.t)), label: m && m.label != null ? String(m.label) : '', color: colorOk(m && m.color), signal,
       lift: markLift({ signal, lift: m && m.lift }), dsignal: m && m.dsignal ? String(m.dsignal) : null, dlift: m && m.dlift === 'below' ? 'below' : null,
-      dto: m && Number.isInteger(m.dto) && m.dto >= 0 ? m.dto : null, dcolor: colorOk(m && m.dcolor), hidden: !!(m && m.hidden) }; })
+      dto: m && Number.isInteger(m.dto) && m.dto >= 0 ? m.dto : null, dcolor: colorOk(m && m.dcolor), hidden: !!(m && m.hidden),
+      dmin: boundOf(m && m.dmin), dmax: boundOf(m && m.dmax), expr: m && m.expr ? String(m.expr) : null }; })
     .filter(m => isFinite(m.t));
+}
+// a bound of a marker's Δ (dmin, dmax): a time (a number in model units, "150ns") or cycles of the clock ("3 cycles", {cycles: 3})
+// -> a number, {cycles: n} or null (none, or not a bound: the edit commands say why)
+function boundOf(x) {
+  if (x == null || x === '' || typeof x === 'boolean') return null;
+  if (typeof x === 'object') return Number.isFinite(x.cycles) && x.cycles >= 0 ? { cycles: x.cycles } : null;
+  const c = /^\s*(\d+(?:\.\d+)?)\s*(?:cycles?|clk)\s*$/i.exec(String(x));
+  if (c) return { cycles: +c[1] };
+  const t = typeof x === 'number' ? x : parseT(x);
+  return t != null && isFinite(t) && t >= 0 ? t : null;
+}
+const boundText = (b, fmt) => (b == null ? '' : typeof b === 'object' ? `${trimNum(b.cycles)} cycle${b.cycles === 1 ? '' : 's'}` : fmt(b));
+// a link to a moment: "#t=1234ns&sel=u_dma.req&view=crc&bm=2" (any order; the page's other hashes left alone) -> {t, sel, view, bm} as
+// texts, of what it has; null: none of t, sel, bm (a view's key alone is the page's own: #tc3 of mkhtml.py's buttons)
+function parseHash(h) {
+  const o = {};
+  for (const part of String(h || '').replace(/^#/, '').split('&')) {
+    const k = part.indexOf('='), key = k < 0 ? '' : part.slice(0, k);
+    if (!['t', 'sel', 'view', 'bm'].includes(key)) continue;
+    try { o[key] = decodeURIComponent(part.slice(k + 1).replace(/\+/g, ' ')); } catch (e) { o[key] = part.slice(k + 1); }
+  }
+  return o.t != null || o.sel != null || o.bm != null ? o : null;
+}
+// …and the hash of one: what is given, in that order
+const hashOf = o => '#' + ['t', 'sel', 'view', 'bm'].filter(k => o[k] != null && o[k] !== '').map(k => `${k}=${encodeURIComponent(o[k])}`).join('&');
+// extension "measures" [{label, from, to, dmin?, dmax?, signal?, color?}] (a cocotb test's wl.measure, tools/testmarks.py): each a
+// pair of your markers, the first with its Δ to the second and the bound on the line of signal (none: the top); not ended
+// (to null): one marker -> markers as markNorm gives them, the page's starting ones of yours
+function measureMarks(list) {
+  const out = [];
+  for (const x of Array.isArray(list) ? list : []) {
+    const a = num(parseT(x && x.from)), b = x && x.to != null ? num(parseT(x.to)) : NaN; if (!isFinite(a)) continue;
+    const at = { color: x.color, dsignal: x.signal };   // the texts at the top, the Δ on the signal's line
+    if (isFinite(b)) out.push({ ...at, t: a, label: x.label, dto: out.length + 2, dmin: x.dmin ?? x.min, dmax: x.dmax ?? x.max },
+      { ...at, t: b, label: '', dto: 0 });
+    else out.push({ ...at, t: a, label: x.label, dto: 0 });
+  }
+  return markNorm(out);
+}
+// a page rebuilt with other "measures" (the next run of its test): the new pairs in place of the old ones (oldList, as stored with
+// your markers), yours kept, their Δ renumbered (one to an old pair's marker: none)
+function remeasure(stored, oldList, newList) {
+  const key = m => `${m.t}|${m.label}`, old = new Set(measureMarks(oldList).map(key)), fresh = measureMarks(newList), keep = [], at = new Map();
+  stored.forEach((m, i) => { if (!old.has(key(m))) { at.set(i + 1, keep.length); keep.push(Object.assign({}, m)); } });
+  for (const m of keep) if (m.dto) m.dto = at.has(m.dto) ? fresh.length + at.get(m.dto) + 1 : null;
+  return fresh.concat(keep);
 }
 // the Δ of the markers: an arrow from each to the next in time, or to the marker its dto names (a number of the list; 0: none), its
 // place (dsignal, dlift) and colour (dcolor) kept on the one it starts from; a hidden marker is left out, the next goes through it
@@ -970,5 +1080,6 @@ const markGone = (ms, id) => { for (const m of ms) if (m.dto === id) m.dto = nul
 function groupNorm(list) {
   const seen = new Set();
   return (Array.isArray(list) ? list : []).filter(g => g && String(g.name ?? '').trim() && !seen.has(String(g.name).trim()) && seen.add(String(g.name).trim()))
-    .map(g => Object.assign({ name: String(g.name).trim(), signals: [...new Set(prefixes(g.signals))], color: colorOk(g.color) }, g.uid ? { uid: g.uid } : {}));
+    .map(g => Object.assign({ name: String(g.name).trim(), signals: g.divider ? [] : [...new Set(prefixes(g.signals))], color: colorOk(g.color) },
+      g.uid ? { uid: g.uid } : {}, g.divider ? { divider: true } : {}));   // divider: a line with its name between your groups, no signals
 }

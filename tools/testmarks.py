@@ -15,6 +15,14 @@ LOG_COLOR = {'WARNING': '#e8590c'}
 MARK_COLOR = '#1971c2'
 
 
+def fmt_ps(ps):
+    """A length in ps in its unit: "1.2 us", "40 ns"."""
+    for u, k in (('s', 1e12), ('ms', 1e9), ('us', 1e6), ('ns', 1e3)):
+        if abs(ps) >= k:
+            return f'{ps / k:.4g} {u}'
+    return f'{ps:g} ps'
+
+
 def load(path):
     """The marks file, checked."""
     try:
@@ -42,7 +50,36 @@ def summary(doc):
         parts.append(f'{n["xfail"]} failed as expected')
     if n['run']:
         parts.append(f'{n["run"]} not finished')
-    return f'{len(tests)} test{"s" * (len(tests) != 1)}: ' + ', '.join(parts)
+    ms = [m for t in tests for m in t.get('measures') or []]
+    bad = sum(m.get('ok') is False for m in ms)
+    more = f'; {len(ms)} measure{"s" * (len(ms) != 1)}' + (f', {bad} out of bounds' if bad else '') if ms else ''
+    return f'{len(tests)} test{"s" * (len(tests) != 1)}: ' + ', '.join(parts) + more
+
+
+def measures(t):
+    """A test's measurements (wl.measure) -> (all, out of their bounds)."""
+    ms = t.get('measures') or []
+    return len(ms), sum(m.get('ok') is False for m in ms)
+
+
+def steps(t):
+    """A test's phases (wl.phase, wl.step) by their length, the longest first -> [{label, from, to, dt}] in ps."""
+    out = [{'label': p['label'], 'from': p['from'], 'to': p['to'], 'dt': p['to'] - p['from']} for p in t.get('phases') or [] if p.get('to') is not None]
+    return sorted(out, key=lambda p: -p['dt'])
+
+
+def measures_of(doc):
+    """Every test's measurements as the WaveJSON's "measures" (vcd2wavedrom --measures): in the colour of the test's result, on the line of
+    their signal (none: the test's row)."""
+    tc, out = doc.get('signal'), []
+    for t in doc.get('tests') or []:
+        color = RESULTS.get(t['result'], RESULTS['run'])[1]
+        for m in t.get('measures') or []:
+            x = {'label': m['label'], 'from': m['from'], 'to': m.get('to'), 'color': color, **{k: m[k] for k in ('min', 'max') if m.get(k) is not None}}
+            if m.get('signal') or tc:
+                x['signal'] = m.get('signal') or tc
+            out.append(x)
+    return out
 
 
 def checks_of(t):
@@ -149,6 +186,9 @@ def mark_view(view, cfg, doc, jumps=True):
     view['spans'] = (view.get('spans') or []) + [
         {**s, **({'signals': [row_for(rows, x) for x in s['signals']]} if s.get('signals') else {})} for s in spans
         if (t0 is None or s['to'] >= t0) and (t1 is None or s['from'] <= t1)]
+    ms = [{**m, **({'signal': row_for(rows, m['signal'])} if m.get('signal') else {})} for m in measures_of(doc) if inside(m['from'])]
+    if ms:
+        view['measures'] = (view.get('measures') or []) + ms
     if tc and jumps:
         old = view.get('marker') or []
         view['marker'] = (old if isinstance(old, list) else [old]) + [{**m, 'on': {**m['on'], 'signal': path_for(rows, tc)}} for m in markers]   # (an event is of the dump: a path)
@@ -170,10 +210,18 @@ def test_views(cfg, doc, template):
         if t['to'] is not None:   # (not finished: to the end of the dump)
             view['to'] = f'{int(t["to"] + max((t["to"] - t["from"]) * TAIL, 1))}ps'
         mark_view(view, cfg, {**doc, 'tests': [t]}, jumps=False)
+        rows = rows_of(view, cfg)   # every measure of the run in each test's view: the markers of yours they share (sharedMarkers) are one list
+        ms = [{**m, **({'signal': row_for(rows, m['signal'])} if m.get('signal') else {})} for m in measures_of(doc)]
+        if ms:
+            view['measures'] = ms
         said = t['message'] + (f' ({t["where"]})' if t['where'] else '')
         n, bad = checks_of(t)
         count = '' if not n else f'{n - bad} of {n} checks passed' if bad else f'{n} check{"s" * (n != 1)} passed'
-        note = ' · '.join(x for x in (t['doc'], said, count) if x)
+        k, off = measures(t)
+        meas = '' if not k else f'{k} measure{"s" * (k != 1)}' + (f', {off} out of bounds' if off else '')
+        st = steps(t)
+        took = '' if not st else f'{len(st)} step{"s" * (len(st) != 1)}, longest {st[0]["label"]} {fmt_ps(st[0]["dt"])}'
+        note = ' · '.join(x for x in (t['doc'], said, count, meas, took) if x)
         if note:
             view['note'] = note
         out[key] = view

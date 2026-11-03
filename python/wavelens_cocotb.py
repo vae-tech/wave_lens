@@ -23,6 +23,8 @@ too; the two signals carry the names of the tests and the phases. Nothing here f
 by design. Without TEST_CASE in the design the marks are still made (a warning says so), without TEST_STEP a phase is a
 span on the test's row.
 
+`wl.measure('req→ack', max='3 cycles')`: a time measured with a bound, as `async with`/`with` (in, out) or `m.start()` … `m.stop()`: two
+markers on the page with the Δ between them, red when it leaves the bound (`check=True`: a failure of the test too).
 `@wl.test(signals=["*fifo_full", "u_x.state"])`: the test's own rows, added to its view with --marks-views tests. `wl.step('…')`: a phase
 in one line, until the next step or the test's end. `check(…, why=lambda: …)`: the text of a failure, read only then. `Marks(hide=["my_checks.py"])`:
 a file that is not the line of a failure.
@@ -36,11 +38,37 @@ cocotb itself is imported only inside a running test's module, as this file's fi
 """
 import fnmatch, functools, inspect, json, logging, os
 
-__all__ = ['Marks']
+__all__ = ['Marks', 'Measure']
 FORMAT = 1
 MAX_MARKS = 200   # a test's bookmarks kept; past it only failures and errors (a check in a loop of thousands stays a page)
 SHORT = 40   # a value's text by a circle, in characters
 LONG = 4000  # and in the list, where the whole of it goes
+
+
+UNIT_PS = {'fs': 1e-3, 'ps': 1, 'ns': 1e3, 'us': 1e6, 'µs': 1e6, 'ms': 1e9, 's': 1e12}
+
+
+def bound_ps(x):
+    """A bound of a measurement (min, max) -> ps; None: none, or one in cycles (the page counts them: "3 cycles"); a number is in ps."""
+    if x is None or isinstance(x, bool):
+        return None
+    if isinstance(x, (int, float)):
+        if x < 0:
+            raise ValueError(f'wl.measure: {x!r}: a bound is no negative time')
+        return x
+    t = str(x).strip().lower().replace(' ', '')
+    for u in sorted(UNIT_PS, key=len, reverse=True):
+        if t.endswith(u):
+            try:
+                v = float(t[:-len(u)]) * UNIT_PS[u]
+            except ValueError:
+                break
+            if v < 0:
+                raise ValueError(f'wl.measure: {x!r}: a bound is no negative time')
+            return v
+    if t.rstrip('s').endswith('cycle') or t.endswith('clk'):
+        return None
+    raise ValueError(f'wl.measure: {x!r} is no bound ("120ns", a number in ps, or "3 cycles")')
 
 
 def text_of(v):
@@ -136,6 +164,7 @@ class Marks:
         self.steps, self.step_now, self.step_handle, self.step_late = {}, 0, None, None   # label -> its number on the waves; 0: no phase
         self.path = path or os.environ.get('WAVELENS_MARKS') or 'wavelens.marks.json'
         self.tests, self.now_test, self.dut = [], None, None
+        self.open_measures = []   # the measurements started and not stopped
         self.warned, self.last_log = False, ''
         self.tap = LogTap(self)
 
@@ -162,6 +191,13 @@ class Marks:
         p, self.step_open = self.step_open, None
         if p is not None:
             p.__exit__()
+
+    def measure(self, label, *, min=None, max=None, signal=None, check=False):
+        """A time measured from start() to stop() (or the body of `with` / `async with`): two markers on the page and the Δ between them;
+        `min` / `max` a bound ("120ns", ps, or "3 cycles": the clock of the page counts them), red when it leaves it; `check=True`: a failure of
+        the test too. Several start / stop on one: several pairs, numbered."""
+        bound_ps(min), bound_ps(max)   # a bound that is none: said at once
+        return Measure(self, str(label), min, max, signal, check)
 
     def check(self, got, expected, text='', signal=None, show='all', why=None):
         """got == expected: a bookmark with both (`show='fail'`: only when they differ, for a check in a loop; the test still counts it); else
@@ -253,6 +289,10 @@ class Marks:
     def end(self, exc, opts):
         """The test's end: its result from what it raised, what cocotb will say of it (`expect_fail`, `expect_error`)."""
         self.step_end()
+        for m in list(self.open_measures):   # a measurement not stopped: kept with no end, said in the log
+            logging.getLogger('wavelens').warning('wl.measure(%r): not stopped by the end of the test', m.label)
+            m.record(None)
+        self.open_measures = []
         logging.getLogger().removeHandler(self.tap)
         t, self.now_test = self.now_test, None
         if t is None:
@@ -349,3 +389,72 @@ class Phase:
                 p['signals'] = [self.marks.row(s) for s in one]
             self.t['phases'].append(p)
         return False
+
+
+class Measure:
+    """wl.measure(): start() … stop(), or the body of `with` / `async with`; each pair into the test's "measures" with its bound and ok
+    (null: a bound in cycles, which the page counts)."""
+
+    def __init__(self, marks, label, lo, hi, signal, check):
+        self.marks, self.label, self.min, self.max, self.signal, self.check = marks, label, lo, hi, signal, check
+        self.t, self.start_t, self.pairs = None, None, []
+
+    def start(self):
+        m = self.marks
+        if self.start_t is not None:
+            raise RuntimeError(f'wl.measure({self.label!r}): start() again before stop()')
+        self.t, self.start_t = m.now_test, m.now()
+        if self.t is not None:
+            m.open_measures.append(self)
+        return self
+
+    def stop(self):
+        if self.start_t is None:
+            raise RuntimeError(f'wl.measure({self.label!r}): stop() without start()')
+        return self.record(self.marks.now())
+
+    def record(self, end):
+        """The pair ends at end (None: not stopped) -> its dt (None) ; the bound checked when it is a time."""
+        m, t, a = self.marks, self.t, self.start_t
+        self.start_t = None
+        if self in m.open_measures:
+            m.open_measures.remove(self)
+        if t is None:
+            return None
+        dt = None if end is None else end - a
+        lo, hi = bound_ps(self.min), bound_ps(self.max)
+        cyc = (self.min is not None and lo is None) or (self.max is not None and hi is None)
+        ok = None if dt is None or cyc or (self.min is None and self.max is None) else not ((lo is not None and dt < lo) or (hi is not None and dt > hi))
+        rec = {'label': self.label, 'from': a, 'to': end, **{k: v for k, v in (('min', self.min), ('max', self.max)) if v is not None}}
+        if self.signal is not None:
+            rec['signal'] = m.row(self.signal)
+        if ok is not None:
+            rec['ok'] = ok
+        self.pairs.append(rec)
+        if len(self.pairs) > 1:   # several: numbered
+            for i, p in enumerate(self.pairs):
+                p['label'] = f'{self.label} {i + 1}'
+        t.setdefault('measures', []).append(rec)
+        if self.check and ok is not None:
+            t['passed' if ok else 'failed'] += 1
+            if not ok:
+                bound = ' … '.join(str(x) if x is not None else '—' for x in (self.min, self.max))
+                raise AssertionError(f'{self.label}: {dt / 1000:g} ns, outside {bound}')
+        return dt
+
+    def __enter__(self):
+        return self.start()
+
+    def __exit__(self, kind, exc, tb):
+        if self.start_t is not None:
+            if kind is None:
+                self.stop()
+            else:
+                self.record(self.marks.now())   # a failure inside: the time it took until then, the failure its own
+        return False
+
+    async def __aenter__(self):
+        return self.start()
+
+    async def __aexit__(self, kind, exc, tb):
+        return self.__exit__(kind, exc, tb)

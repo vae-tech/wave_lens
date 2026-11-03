@@ -429,6 +429,80 @@ function portRows(st, p, D, opt) {
   return [g, tx, ...chs];
 }
 
+/* ---------------- the list of transfers under the waves, bus_list ---------------- */
+const TX_MAX = 500, KINDS = ['R', 'W', 'P', 'err'];   // the rows the list draws (the rest: CSV, bus_list); its kind filter
+// a transfer's columns, out of its label ("W 0x4 ← 0xcafe ×2", "R 0x8 → 0x1 …"; a packet: its label is the data)
+const txCols = x => {
+  const m = /^([RW]) (\S+) [←→] (\S+?)(?: ×(\d+))?(?: …)?$/.exec(x.label || '');
+  return { addr: m ? m[2] : '', data: m ? m[3] : x.kind === 'P' ? x.label : '', len: m && m[4] ? +m[4] : 1 };
+};
+const csvCell = v => { const t = v == null ? '' : String(v); return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+class TxList {
+  constructor(b) {
+    const v = b.v; this.b = b; this.v = v; this.port = ''; this.kind = ''; this.open = false;
+    this.el = document.createElement('div'); this.el.className = 'txl'; this.el.hidden = true; v.notesEl.after(this.el);
+    this.el.addEventListener('click', e => this.click(e));
+    this.el.addEventListener('change', e => { const t = e.target.dataset.t; if (t === 'port' || t === 'kind') { this[t] = e.target.value; this.render(); } });
+    v.root.addEventListener('wavelens:destroy', () => this.el.remove(), { once: true });
+  }
+  // [{p, x}] of the port and kind picked, by time
+  rows(port = this.port, kind = this.kind) {
+    return this.b.list().filter(p => !port || p.key === port).flatMap(p => p.D.tx.map(x => ({ p, x })))
+      .filter(({ x }) => !kind || (kind === 'err' ? x.err : x.kind === kind)).sort((a, b) => a.x.t0 - b.x.t0);
+  }
+  render() {
+    const v = this.v, ports = this.b.list(), el = this.el; el.hidden = !ports.length; if (!ports.length) { el.innerHTML = ''; return; }
+    const all = this.rows(), n = ports.reduce((k, p) => k + p.D.tx.length, 0), sel = this.b.sel;
+    const opt = (val, text, cur) => `<option value="${esc(val)}"${val === cur ? ' selected' : ''}>${esc(text)}</option>`;
+    const s = k => (k === 1 ? '' : 's');
+    el.innerHTML = `<div class="nh"><button type="button" class="tw" data-t="tw" aria-expanded="${this.open}" ` +
+      `title="The transfers of the buses, a row each: open or fold">${this.open ? '▾' : '▸'} ` +
+      `<b>Transactions</b></button><span class="muted">${ports.length} port${s(ports.length)} · ${n} transfer${s(n)}${all.length !== n ?
+        ` · ${all.length} shown` : ''}` +
+      ' · click one to go to it, ]t [t step</span>' +
+      `<select data-t="port" aria-label="the port" title="The transfers of one port">${opt('', 'every port', this.port)}${
+        ports.map(p => opt(p.key, p.name, this.port)).join('')}</select>` +
+      `<select data-t="kind" aria-label="the kind" title="Reads, writes, packets, the errors">${opt('', 'every kind', this.kind)}${
+        KINDS.map(k => opt(k, k === 'err' ? 'errors' : k, this.kind)).join('')}</select>` +
+      `<button type="button" data-t="csv" title="The transfers of this port and kind as a CSV file (all of them)">CSV</button></div>` +
+      (this.open ? `<table class="txt"><thead><tr><th>#</th><th>start</th><th>end</th><th>port</th><th>kind</th><th>address</th><th>data</th><th>beats</th>` +
+        `<th>cycles</th><th>label</th></tr></thead><tbody>${all.slice(0, TX_MAX).map(({ p, x }, i) => { const c = txCols(x);
+        return `<tr data-i="${i}" class="${x.err ? 'err' : ''}${x === sel ? ' here' : ''}" title="${esc(p.D.tip(x))}"><td>${i + 1}</td>` +
+          `<td>${esc(v.when(x.t0))}</td><td>${x.open ? '…' : esc(v.when(x.t1))}</td><td>${esc(p.name)}</td><td>${x.kind}${x.err ? ' ✗' : ''}</td>` +
+          `<td>${esc(c.addr)}</td><td>${esc(c.data)}</td>` +
+          `<td>${c.len}</td><td>${x.lat ?? ''}</td><td>${esc(x.label)}</td></tr>`; }).join('')}</tbody></table>` +
+        (all.length > TX_MAX ? `<p class="muted">… ${all.length - TX_MAX} more: a port or a kind, CSV or the bus_list command</p>` : '') : '');
+    this.shown = all;
+  }
+  click(e) {
+    const b = e.target.closest('button[data-t]');
+    if (b && b.dataset.t === 'tw') { this.open = !this.open; this.render(); return; }
+    if (b && b.dataset.t === 'csv') { this.csv(); return; }
+    const tr = e.target.closest('tbody tr[data-i]'), r = tr && this.shown && this.shown[+tr.dataset.i];
+    if (r) { this.b.select(r.p, r.x); this.mark(); }
+  }
+  mark() {   // the selected transfer's row (a click, ]t [t)
+    for (const tr of this.el.querySelectorAll('tbody tr')) {
+      const r = this.shown && this.shown[+tr.dataset.i]; tr.classList.toggle('here', !!r && r.x === this.b.sel); }
+  }
+  // the table of bus_list and the CSV: times in the waves' units
+  table(rows) {
+    return rows.map(({ p, x }) => ({ t0: x.t0, t1: x.open ? null : x.t1, port: p.name, kind: x.kind, ...txCols(x), lat: x.lat, err: !!x.err, label: x.label }));
+  }
+  csv() {
+    const v = this.v, t = v.M.timed ? (x => (x == null ? '' : x / 1000)) : (x => x ?? ''), rows = this.table(this.rows());
+    const text = ['t0_ns,t1_ns,port,kind,addr,data,beats,cycles,err,label'.replace(/_ns/g, v.M.timed ? '_ns' : '_cycles')]
+      .concat(rows.map(r => [t(r.t0), t(r.t1), r.port, r.kind, r.addr, r.data, r.len, r.lat, r.err ? 1 : 0, r.label].map(csvCell).join(','))).join('\n') + '\n';
+    const port = this.port ? (this.b.list().find(p => p.key === this.port) || {}).name : 'all';
+    const base = (location.pathname.split('/').pop() || 'waves').replace(/\.html?$/i, '');
+    const a = document.createElement('a'); a.download = `${base}-${String(port).replace(/[^\w.-]+/g, '_')}.csv`;
+    // the file for Excel too: UTF-8 by its BOM, CR LF
+    a.href = URL.createObjectURL(new Blob(['\ufeff' + text.replace(/\n/g, '\r\n')], { type: 'text/csv' })); document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000); v.toast(`${rows.length} transfers: ${a.download}`);
+    return text;
+  }
+}
+
 /* ---------------- a viewer's buses ---------------- */
 class Buses {
   constructor(v) {
@@ -439,7 +513,21 @@ class Buses {
     // the selected transaction in a saved viewer state: its port and its start
     v.extraState.push({ key: 'bus', get: () => (this.sel && this.selPort ? { port: this.selPort.key, t0: this.sel.t0 } : undefined),
       set: s => { const p = s && this.list().find(q => q.key === s.port), x = p && p.D.tx.find(q => q.t0 === s.t0); if (x) this.select(p, x); } });
-    v.root.addEventListener('wavelens:settings', () => { this.ports = null; }, { signal: v.ac.signal });
+    v.root.addEventListener('wavelens:settings', () => { this.ports = null; if (this.txl) this.txl.render(); }, { signal: v.ac.signal });
+    this.txl = v.notesEl ? new TxList(this) : null;
+    if (this.txl) setTimeout(() => { if (v.root.isConnected) this.txl.render(); }, 0);
+  }
+  // bus_list: the ports and their transfers (port: a name or a * pattern; kind: R W P err; from / to: their start in it; limit) -> {ports,
+  // transactions, more}
+  busList(a, from, to) {
+    const ports = this.list(), lim = a.limit == null ? 100 : +a.limit, rx = a.port != null && U.glob ? U.glob(String(a.port)) : null;
+    if (a.kind != null && !KINDS.includes(a.kind)) throw new Error(`bus_list: kind is ${KINDS.join(', ')}, not ${JSON.stringify(a.kind)}`);
+    if (!(Number.isInteger(lim) && lim >= 0)) throw new Error(`bus_list: limit is a number of rows, not ${JSON.stringify(a.limit)}`);
+    const pick = ports.filter(p => a.port == null || p.name === a.port || p.key === a.port || (rx && rx.test(p.name)));
+    if (a.port != null && !pick.length) throw new Error(`bus_list: no port "${a.port}" (${ports.map(p => p.name).join(', ') || 'none on this page'})`);
+    const rows = pick.flatMap(p => this.txl.rows(p.key, a.kind || '')).sort((x, y) => x.x.t0 - y.x.t0).filter(({ x }) => x.t0 >= from && x.t0 <= to);
+    return Object.assign({ ports: ports.map(p => ({ name: p.name, proto: p.label || PROTO[p.proto].label, summary: summary(p.D) })),
+      transactions: this.txl.table(rows.slice(0, lim)) }, rows.length > lim ? { more: rows.length - lim } : {});
   }
   // the ports and their transactions, found once (again when the settings change)
   list() {
@@ -466,7 +554,7 @@ class Buses {
     const v = this.v; this.sel = x; this.selPort = p;
     v.extraPicks = new Map(Object.values(p.sig).concat(p.clk).map(r => [r, 'hl8']));
     v.moveTo(x.t0, x.t0 < v.t0 || x.t1 > v.t0 + v.span ? { left: x.t0 - v.span * 0.2 } : {});
-    v.renderNames(); v.setRange(x.t0, x.t1);
+    v.renderNames(); v.setRange(x.t0, x.t1); if (this.txl) this.txl.mark();
     v.toast(`${p.name}: ${x.label}${x.lat != null ? ` · ${x.lat} cycles` : ''}${x.err ? ' · error' : ''}`);
   }
   // ]t / [t: the next / previous transaction of every port from the cursor (round the ends)

@@ -75,6 +75,18 @@
   <figcaption><b>An APB error.</b> <kbd>]t</kbd> to the third transfer: <code>APB: W 0x40 ← 0xdeadbeef · 2 cycles · error</code>; the port's
   phase row shows <code>setup</code> and <code>access</code> of each transfer (<code>access +2</code>: two wait states).</figcaption></figure>
 
+<h2 id="list">The list of transfers</h2>
+<p>Under the waves, after the bookmarks and markers, <span class="ui">Transactions</span> says how many ports and transfers the page has; opened,
+  a row per transfer by time: start, end, port, kind (<code>R W P</code>, ✗ and red an error), address, data, beats, cycles and its label. The
+  first 500 are drawn; a port or a kind narrows the list. A click on a row selects the transfer as a click on the waves does, and
+  <kbd>]t</kbd> <kbd>[t</kbd> mark its row. <span class="ui">CSV</span> saves the rows of that port and kind as <code>page-port.csv</code>
+  (<code>t0_ns, t1_ns, port, kind, addr, data, beats, cycles, err, label</code>), for a spreadsheet.</p>
+<figure><img src="img/buses-list.png" alt="The APB example: the list of its three transfers under the waves, the write with PSLVERR red and selected" loading="lazy">
+  <figcaption><b>The list.</b> The APB example's three transfers; the write to 0x40 ended by <code>PSLVERR</code> is red and selected.</figcaption></figure>
+<p>An agent reads the same table with the command <code>bus_list</code> on a live page (<code>view_edit</code>):
+  <code>{op: 'bus_list', port: 'APB', kind: 'W', limit: 20}</code> → <code>ports</code>, <code>transactions</code> (<code>t0</code>, <code>t1</code>
+  in ns, <code>addr</code>, <code>data</code>, <code>lat</code>, <code>err</code> …), <code>more</code>.</p>
+
 <h2 id="detect">How a port is found</h2>
 <p>For every scope of the dump (every module instance), the viewer looks at its signals' names, lower-cased:</p>
 <ol class="steps">
@@ -155,7 +167,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.40 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.41 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

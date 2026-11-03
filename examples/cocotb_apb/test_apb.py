@@ -30,6 +30,12 @@ except ImportError:
         def note(self, *args, **kw):
             pass
 
+        def measure(self, *args, **kw):   # with / async with, or start() … stop()
+            m = contextlib.nullcontext()
+            m.start = m.stop = lambda: m
+            m.enter_result = m
+            return m
+
         def check(self, got, expected, text='', **kw):
             assert got == expected, f'{text}: got {got}, expected {expected}'
 
@@ -112,7 +118,8 @@ async def test_wait_states(dut):
         _, _, waits = await write(dut, DATA, 0xCAFE0001)
         wl.check(waits, 0, 'wait states of the write', signal=dut.PENABLE)
     with wl.phase('read'):
-        got, _, waits = await read(dut, DATA)
+        async with wl.measure('read', max='6 cycles', signal=dut.PRDATA):   # the transfer's length: two markers, the Δ between them
+            got, _, waits = await read(dut, DATA)
         wl.check(waits, 2, 'PREADY low for two cycles of ACCESS', signal=dut.PREADY)
         wl.check(got, 0xCAFE0001, 'DATA reads back', signal=dut.PRDATA)
 

@@ -73,7 +73,7 @@ const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight
   labelSize: 11, fontSize: 11.5, sort: 'none', sortIgnore: [], sortButton: true, hint: true, style: 'auto', radix: 'auto', fold: null,
   highlight: null, dim: 0.3, groupColors: null, bookmarkLeft: 0.2, arrowLabels: 'lane', laneHeight: 16, maxHeight: null, toolsFolded: false, toolsHidden: [],
   groupOrder: 'file', moduleShading: true, findHighlight: true, findOpen: true, findMask: false, findCase: false, findWord: false,
-  findRegex: false, cursorSnap: 8, keyHints: 200, showWidth: true,
+  findRegex: false, cursorSnap: 8, keyHints: 200, showWidth: true, exprLibrary: [], sharedMarkers: false, keys: {},
     wheel: 'scroll', contextMenu: true, enumColors: null, dumpBudget: 3000000, gaps: false, gapIdle: 16, gapKeep: 2,
     gapSignals: null, gapClock: null, gapAux: null, gapOnly: false, gapCount: 'clock', gapLine: 'dashdot', gapView: false, menuTipDelay: 2000, cycles: false,
     cycleClock: null, cycleZero: null, savePage: true, themeButton: 'auto', version: true, keysLeft: [], log: 'auto' };
@@ -87,9 +87,34 @@ const STYLE_VAR = { nameWidth: '--wv-names', fontSize: '--wv-font-size', fontMon
 // the bar's tool groups left out (toolsHidden): their labels, lower case, sorted ("cursor,go to" or a list)
 const toolNames = v => [...new Set((Array.isArray(v) ? v : String(v ?? '').split(',')).map(s => String(s).trim().toLowerCase()).filter(Boolean))].sort();
 const prefixes = v => (Array.isArray(v) ? v : String(v ?? '').split(',')).map(s => String(s).trim()).filter(Boolean);
+const jsonOr = t => { try { return JSON.parse(t); } catch (e) { return null; } };
+// your keys (the setting "keys": {"gx": "gm", "m": null, "ctrl+k": "ctrl+g"}): a key or a sequence typed -> the key it stands for (one of
+// the viewer's: a key, a sequence of g z y [ ], ctrl+g ctrl+f; null: none) -> {map: {typed: target | null}, bad: [why]}. A sequence of your
+// own starts with g z y [ or ]; g z y [ ] alone, Esc and ? stay the viewer's
+const KEY_PRE = 'gzy[]', KEY_FIXED = new Set(['Escape', '?', ...KEY_PRE]);
+// a key of the setting as typed ("Ctrl+Shift+Z" -> "ctrl+shift+z"); the named keys a key may be (no chord of them: ctrl+ a key only)
+const ctrlKey = k => (/^ctrl\+/i.test(k) ? k.toLowerCase() : k);
+const KEY_NAMED = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown', 'Tab', 'Enter', 'Backspace',
+  'Delete', 'Insert', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12']);
+function keymapOf(keys) {
+  const map = {}, bad = [];
+  for (const [k, t] of Object.entries(keys && typeof keys === 'object' ? keys : {})) {
+    const key = ctrlKey(k);
+    if (KEY_FIXED.has(key)) { bad.push(`${k}: the viewer's own`); continue; }
+    if (!(key.length === 1 || (key.length === 2 && KEY_PRE.includes(key[0])) || /^ctrl\+(shift\+)?.$/.test(key) || KEY_NAMED.has(key))) {
+      bad.push(`${k}: a key, a sequence of g z y [ ], ctrl+ (ctrl+shift+) a key, or a named key (${[...KEY_NAMED].slice(0, 6).join(' ')} …)`); continue; }
+    if (t !== null && typeof t !== 'string') { bad.push(`${k}: a key it stands for, or null`); continue; }
+    if (t === key) { bad.push(`${k}: itself`); continue; }
+    map[key] = t === null ? null : ctrlKey(t);
+  }
+  return { map, bad };
+}
 function settings(...layers) {
   const S = Object.assign({}, DEFAULTS);
   for (const l of layers) for (const [k, v] of Object.entries(l || {})) if (v != null && k !== 'theme' && k !== 'colors') S[k] = v;
+  // your keys: key by key over the layers (a later layer's key wins, null takes a key away)
+  S.keys = Object.assign({}, ...layers.map(l => l && l.keys).filter(Boolean).map(k => (typeof k === 'string' ? jsonOr(k) : k))
+    .filter(k => k && typeof k === 'object'));
   for (const k of ['rowHeight', 'groupHeight', 'spaceHeight', 'headerHeight', 'traceWidth', 'busWidth', 'labelSize', 'fontSize', 'dim',
     'laneHeight']) S[k] = num(S[k]) || DEFAULTS[k];
   S.sort = sortDir(S.sort); S.sortIgnore = prefixes(S.sortIgnore).sort((a, b) => b.length - a.length);
@@ -379,6 +404,29 @@ const vtext = (s, o, radix) => { if (o.raw == null) return o.v; const r = s.radi
   if (s.dupOf) return o.bits && r === 'bin' ? o.bits : decode(s, o.raw, r);   // a copy shares the changes, not the memo: another radix, no enum
   if (r !== o.rk) { o.rk = r; o.vr = o.bits && r === 'bin' ? o.bits : decode(s, o.raw, r); } return o.vr; };
 
+// the change of a row's value from one cursor to the other (a at the first, b at the second, changes of its tr): a bit ↑ ↓ =, a number of a
+// bus or a counter b − a modulo 2^width with + (in its radix: hex, bin, oct, else decimal; signed: as signed), a float or a fixed point
+// the difference of the values, a real the difference, ascii and an enum's names a → b; x / z or none: ?; the same: =; both: the
+// other form after it too, "+0xc0 (−0x40)" (the title)
+function cursorDiff(s, a, b, radix, both = false) {
+  if (!a || !b) return '?';
+  if (a.k !== '=' || b.k !== '=') { if (a.k === b.k && a.k !== 'x' && a.k !== 'z') return '=';
+    return a.k === '0' && b.k === '1' ? '↑' : a.k === '1' && b.k === '0' ? '↓' : '?'; }
+  if (a.raw == null || b.raw == null) { const x = parseFloat(a.v), y = parseFloat(b.v);   // a real, a string
+    return a.v === b.v ? '=' : isFinite(x) && isFinite(y) ? (y - x >= 0 ? '+' : '−') + trimNum(Math.abs(y - x), 6) : '≠'; }
+  if (/[xz]/i.test(a.raw + b.raw)) return '?';
+  if (a.raw === b.raw) return '=';
+  const e = s.enum || ENUMS[s.full] || ENUMS[s.name], r = s.radix || radix || 'auto';
+  if (e && !s.dupOf && !s.radix) return `${vtext(s, a, radix)} → ${vtext(s, b, radix)}`;   // its names (no radix of its own)
+  const real = x => { const y = parseFloat(decode(s, x, r)); return isFinite(y) ? y : NaN; };
+  if (r === 'float' || /^s?q\d+$/.test(r)) { const x = real(a.raw), y = real(b.raw);   // its values' difference
+    return isFinite(x) && isFinite(y) ? (y - x === 0 ? '=' : (y - x > 0 ? '+' : '−') + trimNum(Math.abs(y - x), 6)) : '≠'; }
+  if (r === 'ascii') { const t = x => decode(s, x, 'ascii').replace(/^"|"$/g, ''); return `${t(a.raw)} → ${t(b.raw)}`; }
+  const w = BigInt(s.width || 1), m = 1n << w, d = ((BigInt('0x' + b.raw) - BigInt('0x' + a.raw)) % m + m) % m;
+  const num = n => (r === 'hex' || r === 'auto' ? '0x' + n.toString(16) : r === 'bin' ? '0b' + n.toString(2) : r === 'oct' ? '0o' + n.toString(8) : String(n));
+  const up = '+' + num(d), down = '−' + num(m - d), neg = r === 'signed' && d >= m >> 1n;
+  return (neg ? down : up) + (both && w > 1n ? ` (${neg ? up : down})` : '');
+}
 // where JSON.parse stopped in a text -> {line, col (1 the first), text: that line}, from its message (V8: "… at position 12
 // (line 2 column 5)", Firefox: "… at line 2 column 5 …"; an end too soon: the end), null when it says no place (Safari)
 function jsonWhere(text, e) {
@@ -523,7 +571,8 @@ function bitRows(sig) {
   const w = sig.width || 1; let from = null, trs = [];
   const get = j => { if (from !== sig.tr) { from = sig.tr; trs = bitTrs(sig); } return trs[j]; };
   return Array.from({ length: w }, (_, j) => {
-    const i = w - 1 - j, r = { type: 'sig', name: `[${i}]`, full: `${sig.full}[${i}]`, path: null, width: 1, depth: sig.depth + 1, anc: sig.anc,
+    const i = w - 1 - j, at = i + (sig.slice ? sig.slice[1] : 0);   // (a slice's bits by the bus's numbers)
+    const r = { type: 'sig', name: `[${at}]`, full: `${sig.full}[${i}]`, path: null, width: 1, depth: sig.depth + 1, anc: sig.anc,
       gaps: [], src: {}, fromTv: !!sig.tv, field: [i, i], bit: i, of: sig };
     Object.defineProperty(r, 'tr', { get: () => get(j), enumerable: true });
     return r;
@@ -537,12 +586,26 @@ function dupRow(s, n) {
     analog: s.analog, an: null });
 }
 const dupId = id => { const m = /^(.+)#([1-9]\d*)$/.exec(id); return m && +m[2] > 1 ? { of: m[1], n: +m[2] } : null; };
+// Duplicate ▸ Bits…: bits [msb:lsb] of a bus as a row under it, "PADDR[7:4]" (an address decode, a nibble, a byte lane): its changes read
+// through the bus's (a large dump's read later too), a radix, an analog form and a colour of its own
+function sliceRow(s, msb, lsb) {
+  const nm = `[${msb}:${lsb}]`; let from = null, tr = [];
+  const r = Object.assign(Object.create(s), { dupOf: s, dupN: 0, slice: [msb, lsb], field: [msb, lsb], full: s.full + nm, name: s.name + nm,
+    width: msb - lsb + 1, enum: undefined, enum0: undefined, radix: undefined, analog: false, an: null });
+  Object.defineProperty(r, 'tr', { get: () => { if (from !== s.tr) { from = s.tr; tr = fieldRow(s, { name: nm, msb, lsb }, 0, []).tr; } return tr; },
+    enumerable: true });
+  return r;
+}
+const sliceId = id => { const m = /^(.+)\[(\d+):(\d+)\]$/.exec(id); return m ? { of: m[1], msb: +m[2], lsb: +m[3] } : null; };
+// a slice of a bus: [msb, lsb] of [7, 4], "7:4" -> [msb, lsb], null: not one
+const sliceOf = x => { const a = Array.isArray(x) ? x : typeof x === 'string' && /^\s*\d+\s*:\s*\d+\s*$/.test(x) ? x.split(':') : null;
+  return a && a.length === 2 && a.every(n => Number.isInteger(+n) && +n >= 0) ? [+a[0], +a[1]] : null; };
 // what a row stands for: the signal under its row in your group, under a copy
 const rowBase = r => { const o = r.orig || r; return o.dupOf || o; };
 // the width after a name: a vector's [w-1:0], a field's place in its vector [msb:lsb], a struct's whole value's; none
 // for a bit, a real, a string
 const widthTag = r => { const s = r && r.type === 'group' ? r.sig : r;
-  if (!isVec(s) || (r.type === 'sig' && r.bit != null)) return '';
+  if (!isVec(s) || (r.type === 'sig' && (r.bit != null || r.slice))) return '';   // (a slice's name has it)
   return s.field && r === s ? `[${s.field[0]}:${s.field[1]}]` : `[${s.width - 1}:0]`; };
 function parseTV(s, sig) { // extension: exact transitions [[time, value], …]; bit values 0/1/x/z, bus values hex or "'b" + bits;
   // "kind": "real" / "string": the values are texts shown as they are (a real's number, a string), null unknown
@@ -654,7 +717,7 @@ function parse(src) {
   M.jumps = j.jumps ? j.jumps.map(m => ({ t: mt(m), span: num(parseT(m.span)) || (M.t1 - M.t0) / 5, label: m.label || '' })) : null;
   M.cursor = j.cursor != null ? num(parseT(j.cursor)) : null;
   M.bookmarks = bmNorm(j.bookmarks); M.arrows = arNorm(j.arrows, j.bookmarks); M.spans = spanNorm(j.spans);
-  M.compare = cmpNorm(j.compare);
+  M.compare = cmpNorm(j.compare); M.measures = Array.isArray(j.measures) ? j.measures : [];
   return M;
 }
 // lazy rows (a large dump read as it is needed, "lazy": the id codes of a signal not read yet): the WaveJSON signals read
@@ -957,8 +1020,55 @@ function markNorm(list) {
   return (Array.isArray(list) ? list : []).map(m => { const signal = m && m.signal ? String(m.signal) : null;
     return { t: num(parseT(m && m.t)), label: m && m.label != null ? String(m.label) : '', color: colorOk(m && m.color), signal,
       lift: markLift({ signal, lift: m && m.lift }), dsignal: m && m.dsignal ? String(m.dsignal) : null, dlift: m && m.dlift === 'below' ? 'below' : null,
-      dto: m && Number.isInteger(m.dto) && m.dto >= 0 ? m.dto : null, dcolor: colorOk(m && m.dcolor), hidden: !!(m && m.hidden) }; })
+      dto: m && Number.isInteger(m.dto) && m.dto >= 0 ? m.dto : null, dcolor: colorOk(m && m.dcolor), hidden: !!(m && m.hidden),
+      dmin: boundOf(m && m.dmin), dmax: boundOf(m && m.dmax), expr: m && m.expr ? String(m.expr) : null }; })
     .filter(m => isFinite(m.t));
+}
+// a bound of a marker's Δ (dmin, dmax): a time (a number in model units, "150ns") or cycles of the clock ("3 cycles", {cycles: 3})
+// -> a number, {cycles: n} or null (none, or not a bound: the edit commands say why)
+function boundOf(x) {
+  if (x == null || x === '' || typeof x === 'boolean') return null;
+  if (typeof x === 'object') return Number.isFinite(x.cycles) && x.cycles >= 0 ? { cycles: x.cycles } : null;
+  const c = /^\s*(\d+(?:\.\d+)?)\s*(?:cycles?|clk)\s*$/i.exec(String(x));
+  if (c) return { cycles: +c[1] };
+  const t = typeof x === 'number' ? x : parseT(x);
+  return t != null && isFinite(t) && t >= 0 ? t : null;
+}
+const boundText = (b, fmt) => (b == null ? '' : typeof b === 'object' ? `${trimNum(b.cycles)} cycle${b.cycles === 1 ? '' : 's'}` : fmt(b));
+// a link to a moment: "#t=1234ns&sel=u_dma.req&view=crc&bm=2" (any order; the page's other hashes left alone) -> {t, sel, view, bm} as
+// texts, of what it has; null: none of t, sel, bm (a view's key alone is the page's own: #tc3 of mkhtml.py's buttons)
+function parseHash(h) {
+  const o = {};
+  for (const part of String(h || '').replace(/^#/, '').split('&')) {
+    const k = part.indexOf('='), key = k < 0 ? '' : part.slice(0, k);
+    if (!['t', 'sel', 'view', 'bm'].includes(key)) continue;
+    try { o[key] = decodeURIComponent(part.slice(k + 1).replace(/\+/g, ' ')); } catch (e) { o[key] = part.slice(k + 1); }
+  }
+  return o.t != null || o.sel != null || o.bm != null ? o : null;
+}
+// …and the hash of one: what is given, in that order
+const hashOf = o => '#' + ['t', 'sel', 'view', 'bm'].filter(k => o[k] != null && o[k] !== '').map(k => `${k}=${encodeURIComponent(o[k])}`).join('&');
+// extension "measures" [{label, from, to, dmin?, dmax?, signal?, color?}] (a cocotb test's wl.measure, tools/testmarks.py): each a
+// pair of your markers, the first with its Δ to the second and the bound on the line of signal (none: the top); not ended
+// (to null): one marker -> markers as markNorm gives them, the page's starting ones of yours
+function measureMarks(list) {
+  const out = [];
+  for (const x of Array.isArray(list) ? list : []) {
+    const a = num(parseT(x && x.from)), b = x && x.to != null ? num(parseT(x.to)) : NaN; if (!isFinite(a)) continue;
+    const at = { color: x.color, dsignal: x.signal };   // the texts at the top, the Δ on the signal's line
+    if (isFinite(b)) out.push({ ...at, t: a, label: x.label, dto: out.length + 2, dmin: x.dmin ?? x.min, dmax: x.dmax ?? x.max },
+      { ...at, t: b, label: '', dto: 0 });
+    else out.push({ ...at, t: a, label: x.label, dto: 0 });
+  }
+  return markNorm(out);
+}
+// a page rebuilt with other "measures" (the next run of its test): the new pairs in place of the old ones (oldList, as stored with
+// your markers), yours kept, their Δ renumbered (one to an old pair's marker: none)
+function remeasure(stored, oldList, newList) {
+  const key = m => `${m.t}|${m.label}`, old = new Set(measureMarks(oldList).map(key)), fresh = measureMarks(newList), keep = [], at = new Map();
+  stored.forEach((m, i) => { if (!old.has(key(m))) { at.set(i + 1, keep.length); keep.push(Object.assign({}, m)); } });
+  for (const m of keep) if (m.dto) m.dto = at.has(m.dto) ? fresh.length + at.get(m.dto) + 1 : null;
+  return fresh.concat(keep);
 }
 // the Δ of the markers: an arrow from each to the next in time, or to the marker its dto names (a number of the list; 0: none), its
 // place (dsignal, dlift) and colour (dcolor) kept on the one it starts from; a hidden marker is left out, the next goes through it
@@ -972,7 +1082,8 @@ const markGone = (ms, id) => { for (const m of ms) if (m.dto === id) m.dto = nul
 function groupNorm(list) {
   const seen = new Set();
   return (Array.isArray(list) ? list : []).filter(g => g && String(g.name ?? '').trim() && !seen.has(String(g.name).trim()) && seen.add(String(g.name).trim()))
-    .map(g => Object.assign({ name: String(g.name).trim(), signals: [...new Set(prefixes(g.signals))], color: colorOk(g.color) }, g.uid ? { uid: g.uid } : {}));
+    .map(g => Object.assign({ name: String(g.name).trim(), signals: g.divider ? [] : [...new Set(prefixes(g.signals))], color: colorOk(g.color) },
+      g.uid ? { uid: g.uid } : {}, g.divider ? { divider: true } : {}));   // divider: a line with its name between your groups, no signals
 }
 /* ======================== src/vcd.js ======================== */
 /* ---------------- VCD -> WaveJSON ---------------- */
@@ -2018,6 +2129,8 @@ function paintBody(P, M, lay, X, tA, tB, xL, xR, hl, sel, allLay, band, late, st
     P.fade = hl && row.type !== 'lane' && !hl.on.has(row) ? hl.dim : 1;
     if (row.type === 'lane') { P.rect(xL, y, xR - xL, h, 'panel2', 0.45); continue; }
     // a folded module: the plain background
+    if (row.type === 'group' && row.cls === 'ugdiv') {   // a divider of your groups: a muted line through the waves at mid-height
+      P.path([['M', xL, Math.round(y + h / 2) + 0.5], ['L', xR, Math.round(y + h / 2) + 0.5]], { stroke: 'line', w: 1 }); pb = undefined; continue; }
     if (row.type === 'group') { if (!folded(row)) { P.rect(xL, y, xR - xL, h, 'panel2'); P.rect(xL, y, xR - xL, h, 'fg', 0.08); } edge.push(['M', xL, y + 0.5],
       ['L', xR, y + 0.5]); pb = undefined; }
     // a struct: its whole value
@@ -2140,11 +2253,11 @@ function deltaLevels(ds) {
 function paintDeltas(P, ds, X, tA, tB, lanes, y0, text, grip = false) {
   const tags = [];
   for (const d of ds) {
-    const lo = Math.min(d.a.t, d.b.t), hi = Math.max(d.a.t, d.b.t), c = d.a.dcolor || 'acc';
+    const lo = Math.min(d.a.t, d.b.t), hi = Math.max(d.a.t, d.b.t), c = d.bad ? '--sva-fail' : d.a.dcolor || 'acc';   // a bound left: red
     if (!(d.dt > 0) || hi < tA || lo > tB) continue;
     const head = (x, y, s) => P.path([['M', x, y], ['L', x + s * 6, y - 3], ['L', x + s * 6, y + 3], ['Z']], { fill: c });
     const sig = d.a.dsignal, ly = lanes.get(sig ? laneId({ signal: sig, lift: d.a.dlift || true }) : dTop(d.level)), y = ly ?? lanes.get('d:top') ?? y0 + 8;
-    const p = X(Math.max(lo, tA)), q = X(Math.min(hi, tB)), label = text(d.dt), w = P.measure(label, { size: 10 }) + 8, xm = (p + q) / 2;
+    const p = X(Math.max(lo, tA)), q = X(Math.min(hi, tB)), label = text(d), w = P.measure(label, { size: 10 }) + 8, xm = (p + q) / 2;
     const e = d.b.t >= tA && d.b.t <= tB ? X(d.b.t) : null;
     P.path([['M', p, y], ['L', q, y]], { stroke: c, w: 1 });
     if (lo >= tA) head(p, y, 1);
@@ -2384,7 +2497,8 @@ const TIPS = {
   'm:fold': ['Fold / open this module'], 'm:foldup': ['Fold its module', ['zc']], 'm:zM': ['Fold every module', ['zM']], 'm:zR': ['Open every module', ['zR']],
   'm:types': ['Where its labels or fields come from: the types file and the path in it, the width, why it has none'],
   'm:mark': ['Bookmark on this signal here: its text asked here, then in the list', ['b']],
-  'm:copyname': ['Copy the path', ['yy']], 'm:clear': ['Clear the range', ['Esc', 'ctrl+click']],
+  'm:copyname': ['Copy the path', ['yy']], 'm:copylink': ['Copy a link to this moment: the page opened by it goes here', ['yl']],
+  'm:clear': ['Clear the range', ['Esc', 'ctrl+click']],
   'm:unpaint': ['Its own colour back'],
   'm:umark': ['A marker here: a dashed line across the rows; its label asked here. Drag the text to a line over or under any signal; the right ' +
     'button on it: its colour', ['m']],
@@ -2480,7 +2594,7 @@ const KEY_MENUS = {
     ['More'], ['v', v => (v.gapLive() ? 'the waves in continuous time' : 'the gaps cut out of the waves')], ['p', 'save the page', onBar('spage')]]],
   z: ['Fold the modules', [['R', 'open every module'], ['M', 'fold every module'], ['o', 'open the selected signal\'s'], ['c', 'fold the selected signal\'s'],
     ['a', 'open or fold it']]],
-  y: ['Copy', [['y', 'the selected signal\'s path'], ['n', 'its name'], ['t', 'the time of the cursor']]],
+  y: ['Copy', [['y', 'the selected signal\'s path'], ['n', 'its name'], ['t', 'the time of the cursor'], ['l', 'a link to here (the cursor, the signal)']]],
   ']': ['Next', [['b', 'bookmark'], ['m', 'marker'], ['e', 'edge'], ['d', 'difference', v => v.cmp]]],
   '[': ['Previous', [['b', 'bookmark'], ['m', 'marker'], ['e', 'edge'], ['d', 'difference', v => v.cmp]]],
 };
@@ -2888,7 +3002,7 @@ class Names {
     const alt = r => v.band && v.band.get(r) === 1 ? ' alt' : '', pad = r => `padding-left:${17 + r.depth * 12}px`;
     const mk = '<span class="mk" role="checkbox" tabindex="0" aria-checked="false"></span>';
     v.rowLab = new Map(); v.rowCol = new Map(); v.rowKey = new Map();
-    const lab = r => { const t = (r.type === 'group' ? (v.collapsed.has(r.id) ? '▸ ' : '▾ ') : '') + this.label(r); v.rowLab.set(r, t);
+    const lab = r => { const t = (r.type === 'group' && r.cls !== 'ugdiv' ? (v.collapsed.has(r.id) ? '▸ ' : '▾ ') : '') + this.label(r); v.rowLab.set(r, t);
       v.rowCol.set(r, v.strokeOf(r) || ''); return t; };
     const col = r => v.strokeOf(r) ? ` style="color:${esc(v.strokeOf(r))}"` : '';
     const spacer = h => (h > 0 ? `<div class="vsp" style="height:${h}px"></div>` : '');
@@ -2938,7 +3052,7 @@ class Names {
       m.setAttribute('aria-label', 'highlight ' + (r.full || r.name));
     } else if (!m.title) { m.title = 'Highlight (the other rows dim; several at once)'; m.setAttribute('aria-label', 'highlight ' + (r.full || r.name)); }
     const n = m.nextSibling, open = r.type === 'group' && !v.collapsed.has(r.id);
-    const lab = (r.type === 'group' ? (open ? '▾ ' : '▸ ') : '') + this.label(r);
+    const lab = (r.type === 'group' && r.cls !== 'ugdiv' ? (open ? '▾ ' : '▸ ') : '') + this.label(r);   // (a divider: its name alone)
     if (v.rowLab.get(r) !== lab) { v.rowLab.set(r, lab); n.innerHTML = lab; }
     const col = v.strokeOf(r) || '';
     if ((v.rowCol.get(r) || '') !== col) { v.rowCol.set(r, col); n.style.color = col; }
@@ -2951,6 +3065,9 @@ class Names {
     if (el.tabIndex !== ti) el.tabIndex = ti;
   }
 }
+// a marker's bound on its Δ, for the title of the Δ in its list: "\nbound: 40 ns … 3 cycles", or ''
+const boundTip = (m, v) => (m.dmin == null && m.dmax == null ? '' : `\nbound: ${m.dmin == null ? '—' : boundText(m.dmin, x => v.when(x))} … ${
+  m.dmax == null ? '—' : boundText(m.dmax, x => v.when(x))}`);
 class Notes {
   constructor(v) {
     this.v = v;
@@ -2997,6 +3114,7 @@ class Notes {
         ${b.link ? `<button type="button" class="ic lk" data-bm="link"${v.linkTarget(b.link) ? '' : ' disabled'} title="${v.linkTarget(b.link) ?
           `Open the view ${esc(b.link.view)} of this page${b.link.bookmark ? ` at its bookmark ${b.link.bookmark}` : ''}` :
           `No section ${esc(b.link.view)} on this page`}">→ ${esc(b.link.view)}</button>` : ''}
+        <button type="button" class="ic" data-bm="blink" title="Copy a link to bookmark ${b.n}: the page opened by it goes there">#</button>
         <button type="button" class="ic" data-bm="del" title="Delete bookmark ${b.n} (and its arrows)">✕</button></li>`; }).join('') +
       (`</ol><div class="nh"><b>Arrows</b><span class="muted">from → to · shape · head · line · colour · label</span><button type="button" ` +
           `data-bm="addar"${v.bms.length < 2 ? ' disabled' : ''}>+ Arrow</button></div><ol class="ars">`) +
@@ -3029,7 +3147,8 @@ class Notes {
         ${v.deltas ? `<select class="mto" aria-label="marker ${i + 1}: the Δ goes to" title="The marker its Δ goes to, through the ones between">` +
           opt('next', '→ next', m.dto == null ? 'next' : m.dto === 0 ? 'none' : String(m.dto)) + opt('none', '→ none', m.dto === 0 ? 'none' : '') +
           v.umarks.map((o, k) => (k === i ? '' : opt(String(k + 1), `→ ${k + 1}${o.label ? ' ' + o.label : ''}`, String(m.dto)))).join('') + '</select>' : ''}
-        ${(d => (d && d.dt > 0 ? `<span class="md" title="The time to the marker it goes to">Δ ${esc(v.deltaText(d.dt))}</span>` : ''))(
+        ${(d => (d && d.dt > 0 ? `<span class="md${d.bad ? ' bad' : ''}" title="The time to the marker it goes to${boundTip(m, v)}">Δ ${
+          esc(v.deltaText(d))}${d.bad ? ' ' + esc(v.deltaBound(d)) : ''}</span>` : ''))(
           deltas.find(d => d.a === m))}
         <button type="button" class="ic" data-bm="mdel" title="Delete marker ${i + 1}">✕</button></li>`).join('') + '</ol>' : '') +
       (v.ugroups.length ? `<div class="nh"><b>Groups</b><span class="muted">yours, at the top of the names · name · colour</span></div><ol class="ugs">` +
@@ -3050,6 +3169,7 @@ class Notes {
     if (act === 'gdel') return v.run({ op: 'group', name: v.ugroups[+li.dataset.g].name, delete: true });
     if (act === 'go' && bm) v.goBm(bm);
     else if (act === 'link' && bm && bm.link) v.followLink(bm);
+    else if (act === 'blink' && bm) v.copyText(v.linkTo({ t: bm.t, sel: bm.signal, bm: bm.n }));
     else if (act === 'here' && bm) { bm.t = v.cursor; delete bm.at; bm.top = v.topNow(); v.changed(true); }   // the screen of now, as a new one
     else if (act === 'lift' && bm && bm.signal) { bm.lift = !bm.lift ? true : bm.lift === true ? 'below' : false; v.changed(true); }   // off, above, under
     else if (act === 'del') { v.bms = v.bms.filter(x => x.n !== n); v.arrows = v.arrows.filter(a => a.from !== n && a.to !== n); v.changed(true); }
@@ -3177,7 +3297,8 @@ class WaveView {
       ? this.pageMarks.map(m => ({ label: '→ ' + m.label, t: m.t, span: this.span / 5 })) : []);
     this.sel = null; this.edgeKind = 'any';   // selected signal row (edge search, bookmarks), edge kind
     this.extraJSON = [];   // plugins: () -> '"key": …' lines for the bookmarks JSON (or null)
-    this.extraState = [];   // plugins: {key, get() -> a JSON value, set(value) (may be async)}: their part of the saved state
+    // plugins: {key, get() -> a JSON value, set(value) (may be async), undo?}: their part of the saved state (undo: undo takes it back too)
+    this.extraState = [];
     this.extraRows = [Object.assign(g => (g ? [] : this.ugRows()), { head: true })];   // plugins: rows under a group (withExtra); yours at the top
     // a plugin: what the gaps on the waves keep in place of the signals, {by() -> who says so ([]: nobody), spans() -> [[from, to], …], off()}
     this.extraKeep = null;
@@ -3216,7 +3337,11 @@ class WaveView {
     VIEWS.add(this);
     for (const p of PLUGINS) try { p(this); } catch (e) { console.error('wavelens plugin:', e); }
     // the page's edits (tools/viewedit.py), then undo starts from the page as it opens; a live page: the agent hears of this viewer
-    this.applyEdits().finally(() => this.undoTick(true)); liveHello(); liveShow();
+    this.ready = this.applyEdits().finally(() => this.undoTick(true)); liveHello(); liveShow();   // (a link to a moment goes after it)
+    const ds = M.src && M.src.meta && M.src.meta.stats;   // the dump's statistics (mkhtml.py): a line of the log, the busiest under it
+    if (ds) this.log('info', `the dump: ${ds.signals} signals, ${ds.changing} change, ${ds.dead} never change` + (ds.busiest && ds.busiest[0] ?
+      ` · the busiest ${ds.busiest[0][0]} (${ds.busiest[0][1]})` : ''), { items: (ds.busiest || []).map(([p, n]) => `${n} changes  ${p}`)
+      .concat((ds.never || []).map(p => `never changes  ${p}`)), what: 'the busiest, the ones that never change', quiet: true });
   }
   // what this viewer's bookmarks, paint and bindings are stored under in this browser: the page, then opts.key, the id,
   // the data-wave reference or the title; several viewers of one data-wave (a bench and its lazy cards) are told apart by
@@ -3247,6 +3372,7 @@ class WaveView {
     if (redraw) { const i = this.root.querySelector('input.pfx'); if (i) i.value = S.sortIgnore.join(','); this.fitPfx(); this.renderNames(); this.draw();
       this.logRender();   // "log": shown or not
       this.settingsChanged(); }
+    this.keymap();   // the setting keys read now: what is wrong in them said in the log at once
   }
   build() {
     const r = this.root; r.classList.add('wv');
@@ -3380,7 +3506,8 @@ class WaveView {
         const to = this.bmAt(x, y); this.rubber = null;
         if (to && to.n !== drag.bm.n) { this.arrows.push(arNorm([{ from: drag.bm.n, to: to.n }])[0]); this.saveBookmarks(); this.renderNotes(); }
         this.draw();
-      } else if (drag && drag.moved && (drag.bm || drag.mk || drag.dl)) { c.style.cursor = 'grab'; this.saveBookmarks(); this.renderNotes(); }
+      } else if (drag && drag.moved && (drag.bm || drag.mk || drag.dl)) { c.style.cursor = 'grab';   // a marker or a Δ: shared (sharedMarkers)
+        if (drag.bm) { this.saveBookmarks(); this.renderNotes(); } else this.setMarks(); }
       else if (drag && !drag.moved && drag.mk) {   // a click on a marker's text: the cursor on it, its label in the list
         this.cursor = drag.mk.m.t; this.draw(); this.notesEl.querySelector(`li[data-k="${this.umarks.indexOf(drag.mk.m)}"] input.ml`)?.focus(); }
       else if (drag && !drag.moved) {
@@ -3410,6 +3537,7 @@ class WaveView {
       const k = e.key, ctl = e.ctrlKey || e.metaKey; let h = true;
       if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock'].includes(k)) return;   // a modifier alone: a sequence goes on (z, shift+M)
       if (keyLeft(this.S, e)) return;   // the host's (keysLeft: VS Code's ctrl+G)
+      if (!e.wlKey && this.keyMine(e, k, ctl)) return;   // your keys (the setting keys)
       if (e.altKey && !ctl && (k === 'ArrowUp' || k === 'ArrowDown')) { e.preventDefault(); this.moveKey(k === 'ArrowUp' ? -1 : 1, e.shiftKey); return; }
       if (e.altKey || (ctl && !['c', 'C', 'f', 'F', 'g', 'G'].includes(k))) return;   // ctrl+S, ctrl+M … stay the browser's
       // ctrl+F: find (Questa), ctrl+C: copy (nothing to copy: the browser's), ctrl+G: the list of your groups
@@ -3459,6 +3587,41 @@ class WaveView {
       else h = false;
       if (h) e.preventDefault();
     });
+  }
+  // your keys: the typed key or sequence that the setting keys names -> what it stands for done (a key of the viewer's, sent again as
+  // that key; a sequence run), or nothing (null) -> handled
+  keyMine(e, k, ctl) {
+    if (e.altKey) return false;   // alt+key: the viewer's own (alt+↑ moves a row), never one of yours
+    const km = this.keymap(), pre = this.kpre && Date.now() - this.kpre.t < 1000 ? this.kpre.k : '';
+    const typed = ctl ? 'ctrl+' + (e.shiftKey ? 'shift+' : '') + k.toLowerCase() : pre ? pre + k : k;
+    if (!hasKey(km, typed)) return false;
+    e.preventDefault(); this.keyHintOff();
+    const t = km[typed];
+    if (t == null) { this.toast(`${typed}: not a key here (the setting keys)`); return true; }
+    if (t.length === 2 && KEY_PRE.includes(t[0])) { if (!this.seq(t)) this.toast(`${typed} → ${t}: no such sequence`); return true; }
+    const c = /^ctrl\+(shift\+)?(.)$/.exec(t);
+    const ev = new KeyboardEvent('keydown', { key: c ? c[2] : t, ctrlKey: !!c, shiftKey: c ? !!c[1] : t.length === 1 && t !== t.toLowerCase(), bubbles: true,
+      cancelable: true });
+    ev.wlKey = true; this.canvas.dispatchEvent(ev);   // the viewer's key it stands for (not yours again)
+    if (!ev.defaultPrevented) {   // the viewer took nothing: no key of it
+      this.toast(`${typed} → ${t}: no such key (see ?)`); this.log('warning', `the setting keys: ${typed} → ${t}: no such key of the viewer`); }
+    return true;
+  }
+  // what a key of the viewer does, as Help or the box after a prefix says it ("gm": the list of them…); null: none known
+  keyCaption(t) {
+    if (t.length === 2 && KEY_MENUS[t[0]]) { const r = KEY_MENUS[t[0]][1].find(x => x.length > 1 && x[0] === t[1]);
+      if (r) return typeof r[1] === 'function' ? r[1](this) : r[1]; }
+    const low = s => (/^ctrl\+/i.test(s) ? s.toLowerCase() : s);
+    for (const [, rows] of HELP) for (const [ks, text] of rows) if (ks.some(x => low(x) === low(t))) return text;
+    return null;
+  }
+  // the keys of the setting keys, read once per settings -> {typed: target | null}; what is wrong in it said in the log once
+  keymap() {
+    if (this.kmOf !== this.S.keys) {
+      const { map, bad } = keymapOf(this.S.keys); this.kmOf = this.S.keys; this.km = map;
+      if (bad.length) this.log('warning', `the setting keys: ${bad.length} not taken`, { items: bad });
+    }
+    return this.km;
   }
   fitPfx() { const i = this.root.querySelector('input.pfx'); if (i) i.style.width = Math.max(7, i.value.length + 2) + 'ch'; }
   // every row in display order (the model's and the plugins'), and the ones not folded away
@@ -4130,6 +4293,8 @@ class WaveView {
     if (!on) { if (inside) this.refocus(); return this; }
     const kb = ks => ks.map(x => `<kbd>${esc(x)}</kbd>`).join(' ');
     const plug = (this.keyHelp || []).map(h => { const m = h.match(/^((?:\S{1,3}\s+)+?)([a-z(].*)$/); return m ? [m[1].trim().split(/\s+/), m[2]] : [[], h]; });
+    const km = this.keymap(), gone = new Set(Object.keys(km));   // your keys: the viewer's rows of them left out, yours with what they do
+    const mine = Object.entries(km).map(([k, t]) => [[k], t == null ? 'none (taken away)' : `${this.keyCaption(t) || 'as ' + t} (${t})`]);
     const sec = ([title, rows]) =>
       `<section><h4>${esc(title)}</h4><table>${rows.map(([k, t]) => `<tr><td>${kb(k)}</td><td>${esc(t)}</td></tr>`).join('')}</table></section>`;
     const el = this.helpEl = document.createElement('div'); el.className = 'wv-help'; el.setAttribute('role', 'dialog');
@@ -4137,7 +4302,8 @@ class WaveView {
     el.innerHTML =
       (`<div class="hh"><b>Keys and mouse</b><span class="muted">on the waves (a click there gives them the keys); hover a button for what it ` +
         `does</span><button type="button" class="ic" aria-label="close">✕</button></div>`) +
-      `<div class="hg">${HELP.concat(plug.length ? [['Plugins', plug]] : []).map(sec).join('')}</div>`;
+      `<div class="hg">${HELP.map(([h, rows]) => [h, rows.map(([ks, t]) => [ks.filter(x => !gone.has(ctrlKey(x))), t]).filter(([ks]) => ks.length)])
+        .concat(plug.length ? [['Plugins', plug]] : [], mine.length ? [['Your keys', mine]] : []).map(sec).join('')}</div>`;
     this.root.append(el);
     el.querySelector('button').addEventListener('click', () => this.help(false));
     el.addEventListener('keydown', e => { if (e.key === 'Escape' || e.key === '?') { e.preventDefault(); e.stopPropagation(); this.help(false);
@@ -4231,8 +4397,31 @@ class WaveView {
     if (o && (!at || at.b !== o)) { d.m.dto = this.umarks.indexOf(o) + 1; this.draw(); }
   }
   moveDelta(d, y, lay) { const p = this.markPlace(y, lay); if (p) { d.m.dsignal = p[0]; d.m.dlift = p[1] === 'below' ? 'below' : null; } this.draw(); }
-  deltaList() { return this.deltas ? deltaLevels(markDeltas(this.umarks)) : []; }
-  deltaText(dt) { return this.M.timed ? fmtExact(dt) : trimNum(dt) + ' cycles'; }
+  deltaList() { return this.deltas ? deltaLevels(this.deltaCheck(markDeltas(this.umarks))) : []; }
+  // each Δ with its cycles (cyc: rising edges of the cycles' clock, the band's or the one found; null: none) and its bound kept or
+  // not (bad: below dmin or over dmax of the marker it starts from, which may be in cycles)
+  deltaCheck(ds) {
+    const cy = this.M.timed ? this.cycData(true) : null;
+    return ds.map(d => { const cyc = cy ? this.cycles(cy.clk, d.a.t, d.b.t) : null, of = b => (typeof b === 'object' ? (this.M.timed ? cyc : d.dt) : d.dt);
+      const lo = d.a.dmin, hi = d.a.dmax, bad = (lo != null && of(lo) != null && of(lo) < (typeof lo === 'object' ? lo.cycles : lo)) ||
+        (hi != null && of(hi) != null && of(hi) > (typeof hi === 'object' ? hi.cycles : hi));
+      const unchecked = this.M.timed && cyc == null && [lo, hi].some(b => b != null && typeof b === 'object');   // cycles with no clock
+      return { ...d, cyc, bad: !!bad, unchecked }; });
+  }
+  // "120 ns · 12 cycles" (the cycles when their band is on); d: a Δ of deltaList, or a time alone
+  deltaText(d) {
+    const dt = typeof d === 'number' ? d : d.dt;
+    if (!this.M.timed) return trimNum(dt) + ' cycles';
+    return fmtExact(dt) + (typeof d === 'object' && d.cyc != null && this.cycData() ? ` · ${d.cyc} cycle${d.cyc === 1 ? '' : 's'}` : '') +
+      (typeof d === 'object' && d.unchecked ? ' · ? no clock' : '');   // a bound in cycles not checked: the page has no clock
+  }
+  // the bound a Δ leaves: "✗ > 150 ns", or ''
+  deltaBound(d) {
+    if (!d.bad) return '';
+    const f = b => boundText(b, x => (this.M.timed ? fmtExact(x) : trimNum(x) + ' cycles')), lo = d.a.dmin, hi = d.a.dmax;
+    const val = b => (typeof b === 'object' ? (this.M.timed ? d.cyc : d.dt) : d.dt);
+    return hi != null && val(hi) > (typeof hi === 'object' ? hi.cycles : hi) ? `✗ > ${f(hi)}` : `✗ < ${f(lo)}`;
+  }
   // what takes a lane: the markers' texts, and the Δ between them
   laneMarks() { const ms = this.markers.filter(m => !m.hidden);
     return this.deltas ? ms.concat(this.deltaList().map(d => ({ delta: true, level: d.level, signal: d.a.dsignal,
@@ -4317,7 +4506,7 @@ class WaveView {
   // your markers and groups as a state has them (empty and null left out)
   markList() { return this.umarks.map(m => Object.fromEntries(Object.entries({ t: m.t, label: m.label, color: m.color, signal: m.signal,
     lift: m.lift === 'below' ? m.lift : null, dsignal: m.dsignal, dlift: m.dsignal ? m.dlift : null, dto: m.dto, dcolor: m.dcolor,
-    hidden: m.hidden || null }).filter(([, x]) => x != null && x !== ''))); }
+    hidden: m.hidden || null, dmin: m.dmin, dmax: m.dmax, expr: m.expr }).filter(([, x]) => x != null && x !== ''))); }
   spanTip(t, row) {
     const on = s => !s.signals || !s.signals.length || (row && (s.signals.includes(row.full) || s.signals.includes(row.name)));
     const line = (name, a, b) => `${name}: ${this.when(a)} … ${this.when(b)} (Δ ${this.M.timed ? fmtExact(b - a) : trimNum(b - a) + ' cycles'})`;
@@ -4328,18 +4517,24 @@ class WaveView {
   timeMarks() { return this.extraMarks.flatMap(f => f() || []); }   // what the plugins mark on the waves now
   spanList() { return this.spans.map(s => Object.fromEntries(Object.entries({ from: s.from, to: s.to, label: s.label, color: s.color,
     signals: s.signals && s.signals.length ? [...s.signals] : null }).filter(([, x]) => x != null && x !== ''))); }
-  groupList() { return this.ugroups.map(g => Object.fromEntries(Object.entries({ name: g.name, signals: [...g.signals], color: g.color })
+  groupList() { return this.ugroups.map(g => Object.fromEntries(Object.entries({ name: g.name, signals: [...g.signals], color: g.color,
+    divider: g.divider || null })
     .filter(([, x]) => x != null))); }
   setBookmarks(list, arrows = []) { this.bms = bmNorm(list); this.arrows = arNorm(arrows, list); this.saveBookmarks(); this.renderNotes(); this.draw();
     return this; }
   loadBookmarks() { // this browser's copy (localStorage) wins over the page's "bookmarks" / "arrows"; a copy of the markers only (Clear): the page's
-    const page = { bms: this.M.bookmarks.map(b => Object.assign({}, b)), arrows: this.M.arrows.map(a => Object.assign({}, a)), umarks: [],
+    const page = { bms: this.M.bookmarks.map(b => Object.assign({}, b)), arrows: this.M.arrows.map(a => Object.assign({}, a)),
+      umarks: measureMarks(this.M.measures),
       spans: this.M.spans.map(s => Object.assign({}, s)) };
     try {   // the spans: this browser's when it has them (the span command), else the page's
       const v = localStorage.getItem(this.bmKey), o = v == null ? null : JSON.parse(v);
-      if (Array.isArray(o)) return { bms: bmNorm(o), arrows: arNorm([], o), umarks: [], spans: page.spans };
-      if (o && typeof o === 'object') return Object.assign(o.bookmarks === undefined ? Object.assign(page, { umarks: markNorm(o.markers) }) :
-        { bms: bmNorm(o.bookmarks), arrows: arNorm(o.arrows, o.bookmarks), umarks: markNorm(o.markers) }, { spans: o.spans ? spanNorm(o.spans) : page.spans });
+      if (Array.isArray(o)) return { bms: bmNorm(o), arrows: arNorm([], o), umarks: page.umarks, spans: page.spans };
+      if (o && typeof o === 'object') {   // stored with the page's measures of then: the page rebuilt with others, its new pairs (yours kept)
+        const now = JSON.stringify(this.M.measures || []), um = typeof o.meas === 'string' && o.meas !== now ?
+          remeasure(markNorm(o.markers), jsonOr(o.meas) || [], this.M.measures) : markNorm(o.markers);
+        return Object.assign(o.bookmarks === undefined ? Object.assign(page, { umarks: um }) :
+          { bms: bmNorm(o.bookmarks), arrows: arNorm(o.arrows, o.bookmarks), umarks: um }, { spans: o.spans ? spanNorm(o.spans) : page.spans });
+      }
     } catch (e) { /* no storage: page bookmarks */ }
     return page;
   }
@@ -4348,6 +4543,7 @@ class WaveView {
     try {
       const o = bms ? { bookmarks: this.bookmarks(), arrows: this.arrowList(), markers: this.markList(), spans: this.spanList() } :
         { markers: this.markList() };
+      o.meas = JSON.stringify(this.M.measures || []);   // the page's measures these markers began from (loadBookmarks)
       if (!bms && !o.markers.length) localStorage.removeItem(this.bmKey); else localStorage.setItem(this.bmKey, JSON.stringify(o));
     } catch (e) { /* private mode */ }
   }
@@ -4426,6 +4622,7 @@ class WaveView {
     else if (s === 'gC') bar('dcmp');
     else if (s === 'yn') { if (this.sel) this.copyText(this.sel.name); }
     else if (s === 'yt') this.copyText(this.when(this.cursor));
+    else if (s === 'yl') this.copyText(this.linkTo({ t: this.cursor, sel: this.sel && this.sel.full }));
     else if (s === 'gv') { const on = !this.gapLive(); this.setGaps(on ? { gaps: true, gapView: true } : { gapView: false });
       this.toast(on ? 'the gaps on the waves' : 'the waves in continuous time'); }
     else if (s === 'zR') this.expandAll();
@@ -4700,6 +4897,14 @@ class WaveView {
     document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   }
   picName(ext) { return (String(this.opts.title || this.M.title || 'waves').replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'waves') + '.' + ext; }
+  // a link to a moment of this page (t, sel, bm; the section when the page has several viewers): the address without its hash and this one;
+  // in the VS Code tab the dump's name and the hash (its logs' links read it)
+  linkTo(o) {
+    const many = [...VIEWS].filter(x => x.root.isConnected).length > 1, h = hashOf({ t: o.t == null ? null : this.M.timed ? `${trimNum(o.t / 1000)}ns` : o.t,
+      sel: o.sel, view: many ? this.editKey() : null, bm: o.bm });
+    const tab = /^vscode-webview:/.test(location.protocol) && this.opts.dumpSrc;
+    return (tab ? this.opts.dumpSrc.name : location.href.replace(/#.*$/, '')) + h;
+  }
   copyText(t) { try { navigator.clipboard.writeText(t).then(() => this.toast('copied: ' + t), () => this.toast(t)); } catch (e) { this.toast(t); } }
   copyKey() {   // ctrl+C / yy: while searching it ends the search; else the selected signal (or the highlighted ones) to the clipboard
     if (this.q) { this.clearFind(); return true; }
@@ -4760,6 +4965,14 @@ class WaveView {
     const o = a[i], p = a[i - 1], n = a[i + 1];
     return `${r.name} = ${txt(o)}` + (p ? `\n${txt(p)} → ${txt(o)} @ ${this.when(o.t)}` : '') + (n ? `\nnext ${txt(n)} @ ${this.when(n.t)}` : '') +
       this.cmpTip(r, t);
+  }
+  // a row's value at the cursor, at the second cursor, and the change between them: "0x04 · 0x40 · +0x3c"
+  valueTwo(sig, both = false) {   // both: the change in both forms, modulo and signed (the title)
+    const a = String(this.valueAt(sig, this.cursor)), b = String(this.valueAt(sig, this.cursor2));
+    if (sig.value || !sig.tr) return `${a} · ${b}`;
+    const o = t => { const i = lastLE(sig.tr, t); return i < 0 ? null : sig.tr[i]; };
+    const d = cursorDiff(sig, o(this.cursor), o(this.cursor2), this.S.radix, both);
+    return d.includes(' → ') ? d : `${a} · ${b} · ${d}`;   // an enum's names: the change says both
   }
   valueAt(sig, t) {
     if (sig.value) return sig.value(t);
@@ -4826,7 +5039,7 @@ class WaveView {
     paintTimeMarks(P, this.timeMarks(), X, this.t0, tB, oy + hdr, oy + Hc, this.span / W);
     paintSpans(P, this.spans, X, this.t0, tB, shown, oy + hdr, oy + Hc);
     const tags = paintMarkers(P, this.markers, X, this.t0, tB, oy + hdr, oy + Hc, laneY(lay, this.S.laneHeight));
-    const dtags = paintDeltas(P, this.deltaList(), X, this.t0, tB, laneY(lay, this.S.laneHeight), oy + hdr, dt => this.deltaText(dt), true);
+    const dtags = paintDeltas(P, this.deltaList(), X, this.t0, tB, laneY(lay, this.S.laneHeight), oy + hdr, d => this.deltaText(d), true);
     if (!WP) this.paintDiff(P, shown, X, this.t0, tB);   // a second dump compared (diff.js): where it differs
     g.restore();
     if (this.cursor >= this.t0 && this.cursor <= tB) P.path([['M', X(this.cursor), 0], ['L', X(this.cursor), Hc]], { stroke: 'acc', w: 1.2 });
@@ -4897,12 +5110,16 @@ class WaveView {
         const m = this.umarks[+li.dataset.k]; li.classList.toggle('here', !!m && m.t === this.cursor); }
     }
     if (this.fsmP) this.fsmP.values();   // the FSM panel's states at the cursor
-    if (this.valsAt !== this.cursor || this.valsGen !== this.namesGen || this.valsRadix !== this.S.radix) {   // value column: only when it changes
-      this.valsAt = this.cursor; this.valsGen = this.namesGen; this.valsRadix = this.S.radix;
+    const at = this.cursor2 == null ? this.cursor : `${this.cursor}|${this.cursor2}`;
+    if (this.valsAt !== at || this.valsGen !== this.namesGen || this.valsRadix !== this.S.radix) {   // value column: only when it changes
+      this.valsAt = at; this.valsGen = this.namesGen; this.valsRadix = this.S.radix;
       let vi = 0;
-      for (const r of this.valRows) {   // a struct's row: its whole value
-        const el = this.vals[vi++], v = this.valueBoth(r.sig || r, this.cursor), w = v.length > 14 && v.includes(' ≠ ') ? v.split(' ≠ ')[0] : v;
-        if (el.textContent !== w) { el.textContent = w; el.title = v.length > 6 ? v : ''; }   // cut to its column: the title has it all
+      for (const r of this.valRows) {   // a struct's row: its whole value; two cursors: the value at each and the change, A · B · Δ
+        const el = this.vals[vi++], s = r.sig || r, v = this.cursor2 == null ? this.valueBoth(s, this.cursor) : this.valueTwo(s);
+        const w = v.length > 14 && v.includes(' ≠ ') ? v.split(' ≠ ')[0] : v;
+        const tip = this.cursor2 == null ? v : this.valueTwo(s, true);   // cut to its column: the title has it all (the change both ways)
+        if (el.textContent !== w || el.title !== (tip.length > 6 ? tip : '')) { el.textContent = w; el.title = tip.length > 6 ? tip : ''; }
+        el.classList.toggle('two', this.cursor2 != null);
       }
     }
   }
@@ -4940,6 +5157,9 @@ Object.assign(WaveView.prototype, {
     const r = this.range, sig = row && row.type === 'sig' && row.tr ? row : null, grp = row && row.type === 'group' &&
       this.M.groups[row.id] === row ? row : null, it = row && (sig || grp);
     const up = sig && sig.anc.length ? sig.anc[sig.anc.length - 1] : null, nh = this.hiddenRows.size, ng = Object.keys(this.M.groups).length;
+    // a span of yours where it was opened (the time clicked, on its rows): As range
+    const onSpan = sp => !sp.signals || !sp.signals.length || (row && (sp.signals.includes(row.full) || sp.signals.includes(row.name)));
+    const spAt = this.spans.filter(sp => at >= sp.from && at <= sp.to && onSpan(sp)).pop() || null, spId = spAt ? this.spans.indexOf(spAt) + 1 : 0;
     // a row of your groups (its place there) or a header of one (its place among yours): Move up / down, to the top / bottom
     const ugh = row && row.user ? row : null, mine = sig && sig.ug ? sig : null, ugOf = n => this.ugroups.find(g => g.name === n);
     const mvAt = ugh ? [this.ugroups.indexOf(ugOf(ugh.name)), this.ugroups.length] : mine ? [ugOf(mine.ug.name).signals.indexOf(mine.orig.full),
@@ -4989,7 +5209,7 @@ Object.assign(WaveView.prototype, {
     const six = c => /^#[0-9a-f]{6}$/i.test(c || ''), acc6 = getComputedStyle(this.root).getPropertyValue('--accent').trim();
     const dm = on.dl ? on.dl.m : null, dlId = dm ? this.umarks.indexOf(dm) + 1 : 0, dd = dm && this.deltaList().find(d => d.a === dm);
     const ln = on.line && on.line.n > (dm || mk ? 1 : 0) ? on.line : null, pick0 = c => esc(six(c) ? c : six(acc6) ? acc6 : '#808080');
-    el.innerHTML = (dm && dd ? `<div class="mh">Δ ${esc(this.deltaText(dd.dt))} · from marker ${dlId}</div>` +
+    el.innerHTML = (dm && dd ? `<div class="mh">Δ ${esc(this.deltaText(dd))}${dd.bad ? ' ' + esc(this.deltaBound(dd)) : ''} · from marker ${dlId}</div>` +
       `<label class="mi">Colour <input type="color" class="dlc" value="${pick0(dm.dcolor)}" aria-label="the colour of this Δ"></label>` +
       (dm.dcolor ? b('dlown', 'Its own colour') : '') +
       b('dlnone', 'No arrow from this marker') + '<hr>' : '') +
@@ -5000,7 +5220,10 @@ Object.assign(WaveView.prototype, {
       `<label class="mi">Colour <input type="color" class="mkc" value="${esc(six(mk.color) ? mk.color : six(pale) ? pale : '#808080')}" ` +
       `aria-label="marker ${mkId} colour"></label>` + (mk.color ? b('mkpale', 'Pale again') : '') + b('mkdel', 'Delete the marker') + '<hr>' : '') +
       (r ? `<div class="mh">${esc(this.rangeText())}</div>` + b('zoom', 'Zoom to the range') + b('marks', 'Bookmarks at its ends',
-      'Two bookmarks and an arrow with the Δ between them') + b('copyd', 'Copy Δ') + '<hr>' : '') +
+      'Two bookmarks and an arrow with the Δ between them') + b('copyd', 'Copy Δ') + b('keepsp', 'Keep as span…',
+      'A span of yours over this range, its label asked (empty: none); the range stays') + '<hr>' : '') +
+      (spAt ? `<div class="mh">Span ${spId}${spAt.label ? ' · ' + esc(spAt.label) : ''}</div>` + b('asrange', 'As range', 'This span measured as the range') +
+        b('spdel', 'Delete the span') + '<hr>' : '') +
       (np ? `<div class="mh">${np} ${this.selRun.size > 1 ? 'selected' : 'highlighted'} rows</div>` : '') + b('copyimg', 'Copy image') + b('png',
         'Save image as PNG') + b('svg', 'Save image as SVG') + b('wdjson', 'Save as WaveDrom') + b('wdcopy', 'Copy WaveDrom') +
       // the gaps: a submenu (its settings, the role of the signals clicked, a reset)
@@ -5053,23 +5276,29 @@ Object.assign(WaveView.prototype, {
         (vecs.length ? b('bits', vecs.every(r => this.bitsOpen.has(r.full)) ? (many ? `Fold the bits of ${vecs.length}` : 'Fold the bits') :
           many ? `Bits of ${vecs.length}` : `Bits: ${vecs[0].width} rows`) : '') +
         (dupable.length ? b('dup', dupable.length > 1 ? `Duplicate ${dupable.length}` : 'Duplicate') : '') +
+        (vecs.length && !vecs.some(r => r.slice) ? b('dupbits', 'Duplicate bits…', 'Some bits of the bus as a row of their own: 7:4') : '') +
         (copies.length ? b('undup', copies.length > 1 ? `Remove the ${copies.length} copies` : 'Remove the copy') : '') +
-        b('hl', this.picks.has(it) ? 'Remove the highlight' : 'Highlight') + b('hide',
+        (grp && grp.cls === 'ugdiv' ? '' : b('hl', this.picks.has(it) ? 'Remove the highlight' : 'Highlight') + b('hide',   // a divider: neither
           many ? `Hide the ${rows.length} ${run ? 'selected' : 'highlighted'}` : grp ? 'Hide this module' : 'Hide',
-          'Leave it out of the view (Hidden: N ✕ in the bar shows it again)') +
+          'Leave it out of the view (Hidden: N ✕ in the bar shows it again)')) +
         (grp && !ugh ? b('fold', this.collapsed.has(grp.id) ? 'Open this module' : 'Fold this module') : up != null ? b('foldup', 'Fold its module') : '') +
         (sig ? b('mark', 'Bookmark here', 'A bookmark on this signal at the time clicked') : '') +
         // your groups: a submenu (into / out of a group, a new one, delete; go to any of them)
         (`<div class="msub"><button type="button" role="menuitem" class="subg" aria-haspopup="menu" aria-expanded="false">` +
           `<span>Groups${this.ugroups.length ? ` (${this.ugroups.length})` : ''}</span><span class="kk">▸</span></button><div class="sub" role="menu" hidden>` +
           (sig && !mine ? '<div class="mh">to move it: into a group of yours, any order there</div>' : '') +
-          (sigs.length ? this.ugroups.map((g, i) => (sigs.every(r => g.signals.includes((r.orig || r).full)) ? ugb('ugoff', i, `Out of “${g.name}”`) :
+          (sigs.length ? this.ugroups.map((g, i) => (g.divider ? '' : sigs.every(r => g.signals.includes((r.orig || r).full)) ?
+            ugb('ugoff', i, `Out of “${g.name}”`) :
             ugb('ugto', i, `Into “${g.name}”`))).join('') + b('ugnew', many ? `New group of the ${sigs.length}` : 'New group with it') : '') +
           (sig && sig.ug ? b('ugout', `Out of “${sig.ug.name}” (this row)`) : '') + (grp && grp.user ? b('ugdel', 'Delete this group') : '') +
-          (this.ugroups.length ? '<hr><div class="mh">Go to</div>' + this.ugroups.map((g, i) => ugb('ugo', i, `${g.name} · ${g.signals.length}`)).join('') :
+          (this.ugroups.length ? '<hr><div class="mh">Go to</div>' +
+            this.ugroups.map((g, i) => (g.divider ? '' : ugb('ugo', i, `${g.name} · ${g.signals.length}`))).join('') :
             '<div class="mh">no groups yet</div>') + '</div></div>') +
         b('umark', 'Marker here') + b('mlist', 'Markers…') + b('c2',
-          'Second cursor here') + (this.cursor2 != null ? b('c2x', 'Clear the second cursor') : '') + b('copyname', 'Copy the path') +
+          'Second cursor here') + (this.cursor2 != null ? b('c2x', 'Clear the second cursor') +
+          (sig && sig.tr ? b('copyv', 'Copy A · B · Δ', 'The value at each cursor and the change between them, as the value column shows them') : '') : '') +
+          b('copyname', 'Copy the path') +
+        b('copylink', 'Copy link to here', 'A link to this moment: the page opened by it puts the cursor here and selects this signal') +
         b('types', 'Type…') : '') +
       (ng || nh ? '<hr>' + (ng ? b('zM', 'Fold every module') + b('zR', 'Open every module') : '') + (nh ? b('unhide', `Show the hidden (${nh})`) : '') : '') +
       (this.scopes().length ? '<hr>' + b('mods', 'Modules…') + (it && this.scopeOfRow(it) ? b('locate', 'Locate module in tree') : '') +
@@ -5107,6 +5336,12 @@ Object.assign(WaveView.prototype, {
         const top = this.topNow(); this.bms.push(...bmNorm([{ n, t: r[0], signal: s, top }, { n: n + 1, t: r[1], signal: s, top }]));
         this.arrows.push(...arNorm([{ from: n, to: n + 1, shape: '-', head: '<>', label: this.rangeText().replace(/^Δ /, '') }])); this.changed(true);
       }
+      else if (act === 'keepsp') { const [x, y] = this.menuAt, [a, z] = r;
+        this.askText(x, y, `Span · ${this.fmtCursor(a)} … ${this.fmtCursor(z)}`, 'its label (empty: none)',
+          label => this.run(Object.assign({ op: 'span', from: a, to: z }, label ? { label } : {})));
+        return this; }
+      else if (act === 'asrange') this.setRange(spAt.from, spAt.to);
+      else if (act === 'spdel') this.run({ op: 'span', id: spId, delete: true });
       else if (act === 'copyd') this.copyText(this.rangeText().replace(/^Δ /, '').split(' · ')[0].split(' / ')[0]);
       else if (act === 'copyimg') {
         const png = this.toPNG(pic);
@@ -5133,6 +5368,16 @@ Object.assign(WaveView.prototype, {
       else if (act === 'dup') { const out = dupable.map(r => this.dupAdd(r)).filter(Boolean); this.dupDone();
         if (out.length) { this.select(out[0]);
           this.toast(`${out.length > 1 ? `${out.length} copies: each` : `${out[0].name}:`} its own radix, analog, colour`); } }
+      else if (act === 'dupbits') {
+        const w = Math.min(...vecs.map(r => r.width)), [x, y] = this.menuAt;
+        const what = vecs.length > 1 ? `the ${vecs.length} buses` : vecs[0].name;
+        this.askText(x, y, `Bits of ${what} as a row`, `msb:lsb, e.g. ${w - 1}:${Math.floor(w / 2)}`, text => {
+          if (!text) return;
+          this.run({ op: 'duplicate', signals: vecs.map(r => (r.orig || r).full), bits: text.trim() }).then(r => {
+            if (r[0].error) this.toast(r[0].error); else { const d = this.dups.get(r[0].copies[0]); if (d) this.select(d); } });
+        });
+        return this;   // (the box stays: the menu is not closed over it)
+      }
       else if (act === 'undup') { copies.forEach(r => this.dupDrop(r)); this.dupDone(); }
       else if (act === 'hide') this.hide(rows);
       else if (act === 'unhide') this.unhide();
@@ -5152,6 +5397,8 @@ Object.assign(WaveView.prototype, {
           const n = Math.max(0, ...this.bms.map(b => b.n)) + 1; this.bms.push({ n, t, signal: sig.full, text, color: null, top }); this.changed(true); });
         return this; }
       else if (act === 'copyname') this.copyRows([it]);
+      else if (act === 'copyv') this.copyText(`${sig.name}: ${this.valueTwo(sig, true)}`);
+      else if (act === 'copylink') this.copyText(this.linkTo({ t: this.cursor, sel: it && it.type === 'sig' ? it.full : this.sel && this.sel.full }));
       else if (act === 'types') { const x = this.menuEl.getBoundingClientRect(); this.closeMenu(); this.typesBox(sig0, x.left, x.top); return this; }
       else if (act === 'mlist') { this.closeMenu(); this.marksMenu(); return this; }
       else if (act === 'mktext') { const [x, y] = this.menuAt;
@@ -5274,7 +5521,8 @@ Object.assign(WaveView.prototype, {
     const el = document.createElement('div'); el.className = 'wv-menu wv-groups'; el.setAttribute('role', 'menu');
     const item = (g, i) => `<button type="button" role="menuitem" data-m="ugo" data-g="${i}"><span><i class="sw" style="background:${
       esc(g.color || 'var(--accent)')}"></i>${esc(g.name)}</span><span class="kk">${g.signals.length}</span></button>`;
-    el.innerHTML = '<div class="mh">Your groups</div>' + (this.ugroups.length ? this.ugroups.map(item).join('') :
+    el.innerHTML = '<div class="mh">Your groups</div>' + (this.ugroups.some(g => !g.divider) ?   // a divider is no group to go to
+      this.ugroups.map((g, i) => (g.divider ? '' : item(g, i))).join('') :
       '<div class="mh">none yet: the right button on a signal, Groups ▸ New group</div>');
     this.root.append(el); this.menuEl = el;
     const n = this.namesEl.getBoundingClientRect(), box = el.getBoundingClientRect();
@@ -5282,14 +5530,15 @@ Object.assign(WaveView.prototype, {
     el.style.top = Math.max(4, Math.min(Math.max(n.top, 0) + this.hdrH + 8, innerHeight - box.height - 4)) + 'px';
     el.addEventListener('click', e => { const m = e.target.closest('button[data-g]'); if (!m) return; this.closeMenu();
       this.goGroup(this.ugroups[+m.dataset.g].name); });
+    const f = this.menuFilter(el, (b, take) => { if (take) b.click(); else b.focus(); });
     el.addEventListener('keydown', e => {
-      const bs = [...el.querySelectorAll('button')], k = bs.indexOf(document.activeElement);
+      const bs = [...el.querySelectorAll('button')].filter(b => !b.hidden), k = bs.indexOf(document.activeElement);
       if (e.key === 'Escape') { e.stopPropagation(); this.closeMenu(); this.refocus(); }
       else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault();
         bs[(k + (e.key === 'ArrowDown' ? 1 : -1) + bs.length) % bs.length]?.focus(); }
     });
     this.menuOff(el);
-    (el.querySelector('button') || el).focus({ preventScroll: true });
+    (f || el.querySelector('button') || el).focus({ preventScroll: true });
     return el;
   },
   // gm (the right button's Markers…): the markers (the page's and yours) and the bookmarks in a list over the waves, by
@@ -5327,17 +5576,50 @@ Object.assign(WaveView.prototype, {
       this.renderNames(); this.draw();
     };
     el.addEventListener('click', e => { const b = e.target.closest('button[data-i]'); if (b) pick(+b.dataset.i); });
+    const shown = () => [...el.querySelectorAll('button[data-i]')].filter(b => !b.hidden).map(b => +b.dataset.i);   // in the order shown
+    const f = this.menuFilter(el, (b, take) => { pick(+b.dataset.i); if (take) { this.closeMenu(); this.refocus(); } });
     el.addEventListener('keydown', e => {
-      const k = e.key;
+      const k = e.key, s = shown(), p = s.indexOf(at), d = k === 'ArrowDown' ? 1 : -1;
       if (k === 'Escape' || k === 'Enter') { e.preventDefault(); e.stopPropagation(); this.closeMenu(); this.refocus(); }
-      else if (k === 'ArrowDown' || k === 'ArrowUp') {
-        e.preventDefault(); pick(at < 0 ? (k === 'ArrowDown' ? 0 : items.length - 1) : at + (k === 'ArrowDown' ? 1 : -1)); }
-      else if (k === 'Home' || k === 'End') { e.preventDefault(); pick(k === 'Home' ? 0 : items.length - 1); }
+      else if ((k === 'ArrowDown' || k === 'ArrowUp') && s.length) {
+        e.preventDefault(); pick(s[p < 0 ? (d > 0 ? 0 : s.length - 1) : Math.min(Math.max(p + d, 0), s.length - 1)]); }
+      else if ((k === 'Home' || k === 'End') && s.length) { e.preventDefault(); pick(s[k === 'Home' ? 0 : s.length - 1]); }
     });
     el.addEventListener('contextmenu', e => e.preventDefault());
     this.menuOff(el, false);
-    el.focus({ preventScroll: true });
+    (f || el).focus({ preventScroll: true });
     return el;
+  },
+  // a line to type in at the top of a list menu (Markers…, your groups): its items as you type (fuzzy, as the find: the best first, the
+  // letters marked, in place), ↓ to the first, Enter takes the best match (go; nothing typed: closes), Esc closes; nothing matches: said
+  menuFilter(el, go) {
+    const bs = [...el.querySelectorAll('button[data-i], button[data-g]')]; if (bs.length < 2) return null;
+    const f = document.createElement('input'); f.className = 'mf'; f.type = 'search'; f.placeholder = 'filter…';
+    f.setAttribute('aria-label', 'filter the list');
+    f.title = 'Type a part of its name: the list keeps what matches';
+    const none = document.createElement('div'); none.className = 'mh mfn'; none.textContent = 'no match'; none.hidden = true;
+    const base = new Map(bs.map(b => [b, b.querySelector('span').innerHTML])), first = el.querySelector('.mh');
+    (first || el.firstChild).after(f, none);
+    const mark = (s, idx) => { const at = new Set(idx); return [...s].map((c, i) => (at.has(i) ? `<u>${esc(c)}</u>` : esc(c))).join(''); };
+    let best = null;   // the best match: Enter takes it (the list keeps its order, the others hidden in place)
+    f.addEventListener('input', () => {
+      const q = f.value.trim(); let n = 0; best = null;
+      for (const b of bs) { const m = q ? fuzzy(q, b.textContent) : { score: 0, idx: [] }; b.hidden = !m; b.querySelector('span').innerHTML = base.get(b);
+        if (!m) continue; n++; if (q && (!best || m.score > best.m.score)) best = { b, m };
+        const sp = b.querySelector('span'), sw = sp.querySelector('i'), lab = sp.textContent, mm = q && fuzzy(q, lab);   // its letters marked
+        if (mm) sp.innerHTML = (sw ? sw.outerHTML : '') + mark(lab, mm.idx); }
+      for (const h of el.querySelectorAll('hr, .mh')) h.hidden = h === none || (!!q && h !== first);
+      none.hidden = !!n;
+    });
+    f.addEventListener('keydown', e => {
+      const shown = bs.filter(b => !b.hidden);
+      if (e.key === 'ArrowDown') { e.preventDefault(); e.stopPropagation(); if (shown[0]) go(shown[0], false); }
+      else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation();   // nothing typed: closes, as the header says; else the best match
+        if (!f.value.trim()) { this.closeMenu(); this.refocus(); } else if (best) go(best.b, true); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); this.closeMenu(); this.refocus(); }
+      else e.stopPropagation();   // typed: not a key of the menu
+    });
+    return f;
   },
   // your group by its name: opened (and shown when hidden), in the middle of the waves, its first signal selected
   goGroup(name) {
@@ -5392,11 +5674,15 @@ Object.assign(WaveView.prototype, {
   keyRows(pre) {
     const rows = KEY_MENUS[pre][1].filter(r => r.length === 1 || !r[2] || r[2](this))
       .map(r => (typeof r[1] === 'function' ? [r[0], r[1](this)] : r.slice(0, 2)));
+    const km = Object.entries(this.keymap()).filter(([s]) => s.length === 2 && s[0] === pre);
+    const gone = new Set(km.map(([s]) => s[1]));   // a key of the setting keys: the viewer's or a plugin's row of it is not there
     const own = new Set(KEY_MENUS[pre][1].map(r => r[0]));
-    const more = Object.keys(this.keys).filter(s => s.length === 2 && s[0] === pre && !own.has(s[1])).map(s => [s[1],
+    const more = Object.keys(this.keys).filter(s => s.length === 2 && s[0] === pre && !own.has(s[1]) && !gone.has(s[1])).map(s => [s[1],
       (this.keyHelp || []).find(h => h.split(' ').includes(s))]).filter(r => r[1]);
     more.forEach(r => { r[1] = r[1].replace(/^(\S\S )+/, '').replace('next / previous ', ''); });   // ']f [f next / previous …'
-    return rows.concat(more.length && pre === 'g' ? [['Plugins']] : [], more).filter((r, i, l) => r.length > 1 || (l[i + 1] && l[i + 1].length > 1));
+    const mine = km.filter(([, t]) => t != null).map(([s, t]) => [s[1], this.keyCaption(t) || `as ${t}`]);   // the setting keys: what they do
+    return rows.filter(r => r.length === 1 || !gone.has(r[0])).concat(more.length && pre === 'g' ? [['Plugins']] : [], more,
+      mine.length ? [['Your keys']] : [], mine).filter((r, i, l) => r.length > 1 || (l[i + 1] && l[i + 1].length > 1));
   },
   keyHintShow(k) {
     if (!this.kpre || this.kpre.k !== k || this.keysEl) return;
@@ -5426,11 +5712,13 @@ Object.assign(WaveView.prototype, {
     this.hiddenRows = new Set(Array.isArray(o.hidden) ? o.hidden : []); this.ugroups = groupNorm(o.groups);
     this.bitsOpen = new Set(Array.isArray(o.bits) ? o.bits.map(String) : []);
     if (Array.isArray(o.dups)) this.setDups(o.dups);
-    this.deltas = !!o.deltas;
+    this.deltas = o.deltas !== undefined ? !!o.deltas : (this.M.measures || []).length > 0;   // a page with measurements: their Δ shown
     for (const [p, n] of Object.entries(o.analog || {})) { const r = this.sigPool().find(x => x.type === 'sig' && x.full === p);
-      if (r) { if (!('analog0' in r)) r.analog0 = r.analog; r.analog = n || false; this.analogs.set(p, n); } }
+      if (r) { if (!('analog0' in r)) r.analog0 = r.analog; r.analog = n || false; this.analogs.set(p, n); }
+      else if (p.startsWith('ƒ ')) this.analogs.set(p, n); }
     for (const [p, rx] of Object.entries(o.radix || {})) { const r = this.sigPool().find(x => x.type === 'sig' && x.full === p);
-      if (r && isRadix(rx)) { r.radix0 = r.radix; r.radix = rx; if (r.dupOf) r.enum = undefined; this.radixes.set(p, rx); } }
+      if (r && isRadix(rx)) { r.radix0 = r.radix; r.radix = rx; if (r.dupOf) r.enum = undefined; this.radixes.set(p, rx); }
+      else if (!r && p.startsWith('ƒ ') && isRadix(rx)) this.radixes.set(p, rx); }   // an expression's row (sva.js): it takes it when it is made
   },
   // Duplicate: the rows of the model and the copies: where a name, a highlight or a run of selected rows is looked for
   sigPool() { return this.dups.size ? [...this.M.rows, ...this.dups.values()] : this.M.rows; },
@@ -5450,6 +5738,23 @@ Object.assign(WaveView.prototype, {
     const g = r.ug && this.ugroups.find(x => x.name === r.ug.name);
     if (g) g.signals.splice(g.signals.indexOf(from.full) + 1, 0, d.full);
     return d;
+  },
+  // a slice [msb:lsb] of a bus (a signal, a copy's, its row in your group) as a row of its own under it; the one there is again -> the row,
+  // or why not
+  // why bits [msb:lsb] of row r make no slice (a text), or null: they do
+  sliceWhy(r, msb, lsb) {
+    const o = r.orig || r, base = rowBase(r);
+    if (o.slice) return 'slice the bus, not a slice';
+    if (!isVec(base) || base.bit != null || base.same) return 'not a bus';
+    if (!(msb >= lsb && msb < base.width)) return `[${msb}:${lsb}] is not in its ${base.width} bits (msb first, lsb 0)`;
+    return null;
+  },
+  dupSlice(r, msb, lsb) {
+    const why = this.sliceWhy(r, msb, lsb); if (why) return why;
+    const base = rowBase(r), id = `${base.full}[${msb}:${lsb}]`; if (this.dups.has(id)) return this.dups.get(id);
+    const d = sliceRow(base, msb, lsb), list = this.dupsBy.get(base) || [];
+    this.dupsBy.set(base, [...list, d].sort((a, b) => a.dupN - b.dupN || (b.slice ? b.slice[0] : 0) - (a.slice ? a.slice[0] : 0)));
+    this.dups.set(d.full, d); this.rowsStale = true; this.ugMemo = null; return d;
   },
   // a copy gone, and what was its: its colour, its radix; a bookmark on it goes to its signal
   dupDrop(d) {
@@ -5473,13 +5778,16 @@ Object.assign(WaveView.prototype, {
     const want = (Array.isArray(ids) ? ids : []).map(String), bad = [];
     for (const d of [...this.dups.values()]) if (!want.includes(d.full)) this.dupDrop(d);
     for (const id of want) {
+      const sl = !this.dups.has(id) && sliceId(id), sb = sl && this.M.rows.find(r => r.type === 'sig' && r.tr && r.full === sl.of);
+      if (sl) { if (!(sb && typeof this.dupSlice(sb, sl.msb, sl.lsb) === 'object')) bad.push(id); continue; }
       const p = dupId(id), base = p && !this.dups.has(id) && this.M.rows.find(r => r.type === 'sig' && r.tr && r.full === p.of);
       if (base) this.dupPut(base, p.n); else if (!this.dups.has(id)) bad.push(id); }
     return bad;
   },
   saveRows() {
     try {
-      if (this.radixes.size || this.hiddenRows.size || this.analogs.size || this.ugroups.length || this.bitsOpen.size || this.dups.size || this.deltas) {
+      if (this.radixes.size || this.hiddenRows.size || this.analogs.size || this.ugroups.length || this.bitsOpen.size || this.dups.size || this.deltas ||
+        (this.M.measures || []).length) {   // (the Δ off on a page with measurements: kept off)
         localStorage.setItem(this.rowsKey,
         JSON.stringify({ radix: Object.fromEntries(this.radixes), hidden: [...this.hiddenRows], analog: Object.fromEntries(this.analogs),
           groups: this.groupList(), bits: [...this.bitsOpen], dups: [...this.dups.keys()], deltas: this.deltas }));
@@ -5610,7 +5918,7 @@ Object.assign(WaveView.prototype, {
       JSON.stringify(this.S[k] ?? null));
     if (own.length) this.local.cyc = Object.fromEntries(own); else delete this.local.cyc;
     this.saveLook(); this.cycMemo = null; this.hdrH = this.headH();
-    this.renderNames(); this.draw(); this.settingsChanged(); return this;
+    this.renderNames(); if (this.umarks.length) this.renderNotes(); this.draw(); this.settingsChanged(); return this;   // the Δ of the markers in cycles
   },
   // the clock the cycles count (cycleClock, else the clock found) and its rising edges, cycle 0 at iz; null: no band (off,
   // or no clock); any: the clock even with the band off (the cursor field's c147)
@@ -5878,7 +6186,7 @@ function command(name, args, doc, run) {
   CMDS[name] = { args, keys: args.split(/\s+/).filter(Boolean).map(k => k.replace(/\?$/, '')), doc, run };
 }
 const fail = msg => { throw new Error(msg); };
-const READ_CMDS = new Set(['state', 'rows', 'picture', 'expr_matches']);   // they change nothing (no toast in a live page)
+const READ_CMDS = new Set(['state', 'rows', 'picture', 'expr_matches', 'measures', 'bus_list']);   // they change nothing (no toast in a live page)
 const LAY_CMDS = new Set(['picture', 'edge', 'rows']);   // they read the rows laid out: what the run held back is done before them
 // a time of a command: a number (model units) or a text with a unit; untimed waves take cycles only
 function cmdTime(v, x, what = 't') {
@@ -6030,10 +6338,18 @@ command('arrow', 'id? from? to? shape? head? line? color? label? delete?', 'an a
   if (a.label !== undefined) x.label = a.label == null ? '' : String(a.label);
   v.changed(true); return { id: i + 1 };
 });
-command('marker', 'id? t? label? color? signal? lift? hidden? delete?', 'a marker: a dashed line across every row, pale unless it has a color (null: pale ' +
-  'again), with its label at the top of the rows, or with signal in a lane over that row (lift "below": under it, the lanes of the bookmarks; signal ' +
-  'null: at the top again; hidden: true: kept in its list, not on the waves, and the Δ goes through it): a new one (t default the cursor), or marker id ' +
-  '(1, 2 … as listed) changed; delete: id or "all"', (v, a) => {
+// dmin over dmax of one kind (two times, or two counts of cycles): a bound no Δ keeps, refused
+const boundsCross = (lo, hi) => lo != null && hi != null && typeof lo === typeof hi && (typeof lo === 'object' ? lo.cycles > hi.cycles : lo > hi);
+const boundsOk = (bd, a, ms) => { for (const x of ms) { const lo = a.dmin !== undefined ? bd[0] : x.dmin, hi = a.dmax !== undefined ? bd[1] : x.dmax;
+  if (boundsCross(lo, hi)) fail(`dmin ${JSON.stringify(lo)} is over dmax ${JSON.stringify(hi)}: no Δ keeps it`); } };
+// a bound of a Δ (dmin, dmax): null none, a time, or cycles of the clock ("3 cycles")
+const cmdBound = (x, what) => (x == null ? null : boundOf(x) ?? fail(`${what}: a time ("150ns", a number in the units of t) or cycles ("3 cycles"), ` +
+  `not ${JSON.stringify(x)}`));
+command('marker', 'id? t? label? color? signal? lift? hidden? dmin? dmax? delete?', 'a marker: a dashed line across every row, pale unless it has a color ' +
+  '(null: pale again), with its label at the top of the rows, or with signal in a lane over that row (lift "below": under it, the lanes of the bookmarks; ' +
+  'signal null: at the top again; hidden: true: kept in its list, not on the waves, and the Δ goes through it; dmin, dmax: the bound of its Δ, a time or ' +
+  '"3 cycles", red when the Δ leaves it, null none): a new one (t default the cursor), or marker id (1, 2 … as listed) changed; delete: id or "all"',
+(v, a) => {
   idOk(a.id, 'marker');
   if (a.id === 'all' && !a.delete) fail('marker: id "all" is for delete (a new one: no id)');
   if (a.id != null && a.id !== 'all' && !v.umarks[+a.id - 1]) fail(`no marker ${a.id} (there are ${v.umarks.length})`);
@@ -6046,6 +6362,8 @@ command('marker', 'id? t? label? color? signal? lift? hidden? delete?', 'a marke
   if (a.lift != null && ![true, 'above', 'below'].includes(a.lift)) fail(`lift: true, "above" or "below", not ${JSON.stringify(a.lift)}`);
   let m = a.id != null ? v.umarks[+a.id - 1] : null;
   if (a.lift != null && !(a.signal !== undefined ? sig : m && m.signal)) fail('marker: lift is the lane of a signal: give signal');
+  const bd = ['dmin', 'dmax'].map(k => a[k] !== undefined && cmdBound(a[k], k));   // checked before a new one is made
+  boundsOk(bd, a, [m || {}]);
   if (!m) { m = { t: v.cursor, label: '', color: null, signal: null, lift: false }; v.umarks.push(m); }
   if (t != null) m.t = t;
   if (a.label !== undefined) m.label = a.label == null ? '' : String(a.label);
@@ -6053,13 +6371,15 @@ command('marker', 'id? t? label? color? signal? lift? hidden? delete?', 'a marke
   if (a.signal !== undefined) m.signal = sig;
   if (a.lift != null) m.lift = a.lift;
   if (a.hidden != null) m.hidden = !!a.hidden;
+  ['dmin', 'dmax'].forEach((k, i) => { if (a[k] !== undefined) m[k] = bd[i]; });
   m.lift = markLift(m);
   v.setMarks(); return { id: v.umarks.indexOf(m) + 1 };
 });
-command('deltas', 'on? id? to? signal? lift? color?', 'the Δ between your markers: an arrow from each to the next in time with the time on it, in a line ' +
-  'over the rows; on: shown or not; id (a marker as listed: the arrow from it) with to: to that marker, through the ones between ("next": the next in ' +
-  'time again; null: no arrow from it), with signal: in the lane over that row (lift "below": under it, the lanes of the bookmarks; signal null: over ' +
-  'the rows again), with color (null: its own again) -> on, deltas [{from, to, dt}] (marker ids, dt in the units of t)',
+command('deltas', 'on? id? to? signal? lift? color? dmin? dmax?', 'the Δ between your markers: an arrow from each to the next in time with the time on ' +
+  'it (and the cycles when their band is on), in a line over the rows; on: shown or not; id (a marker as listed: the arrow from it) with to: to that ' +
+  'marker, through the ones between ("next": the next in time again; null: no arrow from it), with signal: in the lane over that row (lift "below": ' +
+  'under it, the lanes of the bookmarks; signal null: over the rows again), with color (null: its own again); dmin, dmax: the bound of its Δ (without ' +
+  'id: of every one), a time or "3 cycles", the arrow red when it leaves it, null none -> on, deltas [{from, to, dt}] (marker ids, dt in the units of t)',
 (v, a) => {
   if (a.on != null && typeof a.on !== 'boolean') fail('on: true or false');
   idOk(a.id, 'marker');
@@ -6075,21 +6395,73 @@ command('deltas', 'on? id? to? signal? lift? color?', 'the Δ between your marke
   if (m && a.to === undefined && !markDeltas(v.umarks).some(d => d.a === m)) fail(`marker ${a.id}: no Δ from it (the last in time, hidden, or none set)`);
   const sig = a.signal ? pickRows(v, a.signal, { one: true })[0].full : null;
   if (a.lift != null && !(a.signal !== undefined ? sig : m && m.dsignal)) fail('deltas: lift is the lane of a signal: give signal');
+  const bd = ['dmin', 'dmax'].map(k => a[k] !== undefined && cmdBound(a[k], k));
+  boundsOk(bd, a, m ? [m] : v.umarks);
   if (a.on != null) { v.deltas = a.on; v.saveRows(); }
+  for (const x of m ? [m] : v.umarks) ['dmin', 'dmax'].forEach((k, i) => { if (a[k] !== undefined) x[k] = bd[i]; });
   if (m) { if (a.signal !== undefined) m.dsignal = sig; if (a.lift != null) m.dlift = a.lift === 'below' ? 'below' : null; if (!m.dsignal) m.dlift = null;
     if (a.to !== undefined) m.dto = a.to === null ? 0 : a.to === 'next' ? null : a.to; if (a.color !== undefined) m.dcolor = cmdColor(a); }
   v.setMarks();
   return { on: v.deltas, deltas: markDeltas(v.umarks).map(d => ({ from: v.umarks.indexOf(d.a) + 1, to: v.umarks.indexOf(d.b) + 1, dt: d.dt })) };
 });
+// a moment of the page (the link of #t=…&sel=…&view=…&bm=…): the section, its bookmark, the cursor, the signal selected and in sight
+command('goto', 't? sel? view? bm?', 'a moment of the page, as a link to it says (#t=…&sel=…&view=…&bm=…): view: the section (its key, the id ' +
+  'of its title) scrolled to and shown, its viewer the one that goes; bm: its bookmark n, as 1–9 go; t: the cursor there in the middle of the ' +
+  'window; sel: that signal selected, its modules opened, in sight -> {view, t, sel}', (v, a) => {
+  let w = v;
+  if (a.view != null && String(a.view) !== v.editKey()) {
+    const key = String(a.view), T = v.linkTarget({ view: key });
+    if (!T) fail(`no section "${key}" on this page (${[...VIEWS].filter(x => x.root.isConnected).map(x => x.editKey()).join(', ')})`);
+    const sec = T.h.closest('section[data-view]'), btn = sec && sec.hidden && document.querySelector(`.tests button[data-view="${CSS.escape(key)}"]`);
+    if (btn) btn.click();   // a page of a view per test: that one shown
+    T.h.scrollIntoView({ block: 'start' });
+    if (!T.view) fail(`section "${key}": no viewer in it`);
+    w = T.view;
+  }
+  const s = a.sel != null ? pickRows(w, a.sel, { one: true })[0] : null;   // the signal first: a name that is none moves nothing
+  if (a.bm != null) { if (!isNum(a.bm)) fail(`bm: a bookmark number (1, 2 …), not ${JSON.stringify(a.bm)}`);
+    const b = w.bms.find(x => x.n === +a.bm); if (!b) fail(`no bookmark ${a.bm} (there are: ${nums(w)})`); w.goBm(b); }
+  if (a.t != null) { const t = cmdIn(w, a.t); w.cursor = t; w.center(t); }
+  if (s) {
+    if (s.bit != null && s.of && !w.bitsOpen.has(s.of.full)) { w.setBits(s.of, true, true); w.saveRows(); }   // a bit of a bus folded: shown
+    if (s.anc.some(id => w.collapsed.has(id))) { s.anc.forEach(id => w.collapsed.delete(id)); w.foldTouched = true; }
+    w.select(s); w.renderNamesNow(); w.draw();
+    if (w.vis.includes(s) && !w.inSight(s)) w.centerRow(s);
+  }
+  w.draw();
+  return { view: w.editKey(), t: w.cursor, sel: w.sel ? w.sel.full : null };
+});
+// the transfers of the buses (wavelens/bus.js, the list under the waves)
+command('bus_list', 'port? kind? from? to? limit?', 'the transfers of the buses of the page (bus.js): ports [{name, proto, summary}], transactions ' +
+  '[{t0, t1, port, kind (R W P), addr, data, len, lat (cycles), err, label}] by time; port: a name or a * pattern, kind: R W P or err, ' +
+  'from / to: their start in it, limit (100) -> more', (v, a) => {
+  if (!v.buses) fail('bus_list: no bus.js on this page');
+  return v.buses.busList(a, a.from != null ? cmdTime(v, a.from, 'from') : -Infinity, a.to != null ? cmdTime(v, a.to, 'to') : Infinity);
+});
+// the measurements: every Δ of your markers (shown or not), as a table (view_get's "measures", viewedit.py --measure)
+function measureList(v) {
+  const id = m => v.umarks.indexOf(m) + 1, end = m => ({ id: id(m), label: m.label, t: m.t });
+  // (two markers at one time: no Δ, as drawn)
+  return v.deltaCheck(markDeltas(v.umarks)).filter(d => d.dt > 0).map(d => Object.fromEntries(Object.entries({ from: end(d.a), to: end(d.b), dt: d.dt,
+    cycles: d.cyc, dmin: d.a.dmin, dmax: d.a.dmax, ok: (d.a.dmin == null && d.a.dmax == null) || d.unchecked ? null : !d.bad, signal: d.a.dsignal })
+    .filter(([, x]) => x != null)));
+}
+command('measures', '', 'the Δ of your markers as a table (shown or not): [{from: {id, label, t}, to, dt, cycles (the rising edges of the clock of the ' +
+  'cycles, when there is one), dmin, dmax, ok (the bound kept; with a bound only; none: a bound in cycles with no clock), signal}]',
+v => ({ measures: measureList(v) }));
 // the expressions of the page: its list is the plugin's (wavelens/sva.js), which needs the engine
 const exprs = v => v.svaExprs || fail('expressions need the assertion engine in the page (sva.js and sva.wasm.js: no mkhtml.py --no-sva)');
-command('expr', 'id? text? scope? label? color? on? row? mark? gap? delete?', 'an expression of the signals in the list of expressions (SystemVerilog, as ' +
+command('expr', 'id? text? scope? label? color? on? row? mark? gap? radix? analog? delete?', 'an expression of the signals in the list of expressions ' +
+  '(SystemVerilog, as ' +
   'in an assertion; @(posedge clk) … samples it at a clock; names from scope up to the top, a full path too): a new one (text; a text that does not value ' +
   'is refused), or expression id (1, 2 … as listed) changed; label: its text on the waves, color (null: the colour of its place), on: its marks, mark: ' +
   'band (a pale band where it holds), line (where it starts) or strip (only the strip at the top), row: drawn as a signal too; gap: the waves cut to the ' +
-  'matches of the expressions that have it (idle and keep of the gaps command; the gaps on, on the waves, for as long as one has it); delete: id or "all"; ' +
+  'matches of the expressions that have it (idle and keep of the gaps command; the gaps on, on the waves, for as long as one has it); radix, analog (rows, ' +
+  'null: none): of its row, a bus when the value is wider than a bit ({a, b}, addr - base); delete: id or "all"; ' +
   '-> what it found (n, time, share, first, last, min, max), with gap what the waves leave (cut)', (v, a) => {
-  idOk(a.id, 'expression'); cmdColor(a); return exprs(v).set(a);
+  idOk(a.id, 'expression'); cmdColor(a);
+  if (a.radix != null && !isRadix(a.radix)) fail(`radix: one of ${RADIX.join(', ')}, q8, sq15 …, not ${JSON.stringify(a.radix)}`);
+  return exprs(v).set(a);
 });
 command('expr_go', 'id? dir? n?', 'the cursor to the next (dir 1) or previous (-1) match of an expression from the cursor, round the ends, or to match n ' +
   '(1 …); its signals highlighted, its marks stronger; id default the one picked, else the first marked -> {id, t, k, n}: the time, which match, how many ' +
@@ -6098,6 +6470,27 @@ command('expr_matches', 'id? from? to? limit? offset?', 'what the expressions fo
   'first, last, min, max} | {… error}]), with id its stretches in [from, to] too (matches: [[from, to], …], limit default 100, next_offset)', (v, a) => {
   idOk(a.id, 'expression');
   return exprs(v).matchesOf(a, a.from != null ? cmdTime(v, a.from) : v.M.t0, a.to != null ? cmdTime(v, a.to) : v.M.t1);
+});
+const EXPR_MARKERS = 200;   // the markers one expression puts at most (limit)
+command('expr_markers', 'id? label? color? signal? limit? deltas? delete?', 'a marker at the start of each match of an expression in the window (at most ' +
+  `limit, default ${EXPR_MARKERS}; narrow the window for the others), each with its Δ to the next one of it, the Δ on (deltas: false: not turned on); ` +
+  'label default the expression\'s label or ƒ and its id, a number after it; color default the expression\'s; signal: their texts in the lane over that ' +
+  'row; again: its markers there were go first; delete: they go -> {id, markers, more, from, to}', async (v, a) => {
+  idOk(a.id, 'expression'); cmdColor(a);
+  if (a.limit != null && !isNum(a.limit)) fail(`limit: a number of markers (1, 2 …), not ${JSON.stringify(a.limit)}`);
+  if (a.deltas != null && typeof a.deltas !== 'boolean') fail('deltas: true or false');
+  const sig = a.signal ? pickRows(v, a.signal, { one: true })[0].full : null, x = await exprs(v).spansOf(a.id, 'expr_markers');
+  const gone = v.umarks.map((m, i) => (m.expr === x.text ? i + 1 : 0)).filter(Boolean).reverse();
+  for (const id of gone) { v.umarks.splice(id - 1, 1); markGone(v.umarks, id); }
+  if (a.delete) { v.setMarks(); return { id: x.id, deleted: gone.length }; }
+  const from = v.t0, to = v.t0 + v.span, S = x.spans.map(p => p[0]).filter(t => t >= from && t <= to), n = Math.min(S.length, +(a.limit ?? EXPR_MARKERS));
+  const base = a.label != null ? String(a.label) : x.label || `ƒ${x.id}`, color = a.color !== undefined ? a.color || null : x.color, k0 = v.umarks.length;
+  v.umarks.push(...markNorm(S.slice(0, n).map((t, k) => ({ t, label: `${base} ${k + 1}`, color, signal: sig, dto: k + 1 < n ? k0 + k + 2 : 0,
+    expr: x.text }))));
+  if (n && a.deltas !== false) { v.deltas = true; v.saveRows(); }
+  v.setMarks();
+  if (S.length > n) v.toast(`${n} of ${S.length} matches: narrow the window for the others`);
+  return { id: x.id, markers: n, more: S.length - n, from, to };
 });
 command('compare', 'result? dump? a? map? offset? off? show?', 'a second dump over these waves, where its values differ (red bands, ≠, ]d [d): ' +
   'result (sva diff\'s, as the page\'s "compare": tools/viewedit.py and view_edit make it of dump); off: compared no more; show: which run the waves ' +
@@ -6133,6 +6526,8 @@ command('span', 'id? from? to? label? color? signals? delete?', 'a coloured stre
   const from = a.from != null ? cmdIn(v, a.from, 'from') : null, to = a.to != null ? cmdIn(v, a.to, 'to') : null;
   const sigs = a.signals == null ? undefined : (Array.isArray(a.signals) ? a.signals : [a.signals]).map(x => pickRows(v, x, { one: true })[0].full);
   let s = a.id != null ? v.spans[+a.id - 1] : null;
+  // (from after to: swapped; at one time: no stretch)
+  if ((from ?? (s && s.from)) === (to ?? (s && s.to)) && (from != null || to != null)) fail('span: from and to at one time: no stretch');
   if (!s) { if (from == null || to == null) fail('span: from and to'); s = { from, to, label: '', color: null, signals: null }; v.spans.push(s); }
   if (from != null) s.from = from;
   if (to != null) s.to = to;
@@ -6142,8 +6537,9 @@ command('span', 'id? from? to? label? color? signals? delete?', 'a coloured stre
   if (sigs !== undefined) s.signals = sigs.length ? sigs : null;
   v.changed(true); return { id: v.spans.indexOf(s) + 1 };
 });
-command('group', 'name signals? add? remove? color? rename? delete? go? move?', 'your group of signals, a folder at the top of the names (the ' +
-  'signals stay where they are too): made or changed — signals: its signals in this order, add, remove, color, rename; delete; go: opened, shown, ' +
+command('group', 'name signals? add? remove? color? rename? delete? go? move? divider?', 'your group of signals, a folder at the top of the names (the ' +
+  'signals stay where they are too): made or changed — signals: its signals in this order, add, remove, color, rename; divider: true: no signals, ' +
+  'a line with its name between your groups (a page others read: "— Handshake —"); delete; go: opened, shown, ' +
   'its first signal selected (ctrl+G); move: its place among your groups, up, down, top, bottom or a number (1: the first)', (v, a) => {
   const name = String(a.name ?? '').trim(); if (!name) fail('group: a name');
   let g = v.ugroups.find(x => x.name === name);
@@ -6155,7 +6551,10 @@ command('group', 'name signals? add? remove? color? rename? delete? go? move?', 
   const mv = a.move;
   if (mv != null && !['up', 'down', 'top', 'bottom'].includes(mv) && !(Number.isInteger(mv) && mv >= 1)) {
     fail('move: up, down, top, bottom or a number (1: the first)'); }
+  if (a.divider != null && typeof a.divider !== 'boolean') fail('divider: true or false');
+  if ((a.divider || (g && g.divider && a.divider !== false)) && ((set && set.length) || add.length)) fail('a divider has no signals');
   if (!g) { g = { name, signals: [], color: null }; v.ugroups.push(g); }
+  if (a.divider != null) { if (a.divider) { g.divider = true; g.signals = []; } else delete g.divider; }
   if (mv != null) {   // its place among your groups
     const i = v.ugroups.indexOf(g), n = v.ugroups.length, j = mv === 'up' ? i - 1 : mv === 'down' ? i + 1 : mv === 'top' ? 0 : mv === 'bottom' ? n - 1 : mv - 1;
     v.ugroups.splice(i, 1); v.ugroups.splice(Math.min(Math.max(j, 0), n - 1), 0, g);
@@ -6250,7 +6649,8 @@ command('types', 'signals?', 'where the labels or fields of signals come from (t
   return { types: rows.filter(r => r.type === 'sig').slice(0, 500).map(r => { const o = v.typesOf(r); delete o.run; return o; }),
     run: v.opts.svRun || [] };
 });
-command('hide', 'signals', 'signals, modules or your groups out of the view', (v, a) => { v.hide(pickRows(v, a.signals, { groups: true }));
+command('hide', 'signals', 'signals, modules or your groups out of the view (a divider stays)', (v, a) => {
+  v.hide(pickRows(v, a.signals, { groups: true }).filter(r => r.cls !== 'ugdiv'));
   return { hidden: v.hiddenRows.size }; });
 command('show', 'signals?', 'hidden ones back (none given: every one)', (v, a) => {
   v.unhide(a.signals == null ? undefined : pickRows(v, a.signals, { groups: true }).map(r => r.full)); return { hidden: v.hiddenRows.size };
@@ -6279,8 +6679,9 @@ command('analog', 'signals rows', 'buses drawn as a step plot that many rows hig
   if (n != null && n !== false && !(Number.isInteger(n) && n >= 0)) fail('rows: a number of rows, true, false or null');
   rows.forEach(r => v.setAnalog(r, n == null ? null : n || false, true)); v.saveRows(); v.renderNames(); v.draw(); return { signals: rows.length };
 });
-command('duplicate', 'signals radix? rows? delete?', 'a signal again in a row under it, with a radix, an analog form and a colour of its own ("data#2" ' +
-  'in every command); radix, rows: of the copy, as the commands of those names; delete: the copies named, or the copies of the signals named, gone', (v, a) => {
+command('duplicate', 'signals bits? radix? rows? delete?', 'a signal again in a row under it, with a radix, an analog form and a colour of its own ("data#2" ' +
+  'in every command); bits: [msb, lsb] or "7:4": a slice of the bus as that row, "PADDR[7:4]"; radix, rows: of the copy, as the commands of those names; ' +
+  'delete: the copies named, or the copies of the signals named, gone', (v, a) => {
   if (a.radix != null && !isRadix(a.radix)) fail(`radix: one of ${RADIX.join(' ')}, q<F> or sq<F> (fixed point), or null`);
   const n = a.rows === true ? 3 : a.rows; if (n != null && n !== false && !(Number.isInteger(n) && n >= 0)) fail('rows: a number of rows, true, false or null');
   const rows = pickRows(v, a.signals);
@@ -6288,6 +6689,13 @@ command('duplicate', 'signals radix? rows? delete?', 'a signal again in a row un
     if (!gone.length) fail(`no copies of ${rows.map(r => r.full).join(', ')}`);
     const fs = gone.map(r => r.full); gone.forEach(r => v.dupDrop(r)); v.dupDone(); return { deleted: fs }; }
   const bad = rows.filter(r => r.bit != null); if (bad.length) fail(`a bit has no copy: ${bad.map(r => r.full).join(', ')}`);
+  if (a.bits != null) {
+    const sl = sliceOf(a.bits); if (!sl) fail(`bits: [msb, lsb] or "7:4", not ${JSON.stringify(a.bits)}`);
+    for (const r of rows) { const why = v.sliceWhy(r, sl[0], sl[1]); if (why) fail(`${r.full}: ${why}`); }   // every row first: a refusal makes none
+    const out = rows.map(r => v.dupSlice(r, sl[0], sl[1]));
+    for (const d of out) { if (a.radix != null) v.setRadix(d, a.radix, true); if (n != null) v.setAnalog(d, n || false, true); }
+    v.dupDone(); return { copies: out.map(d => d.full) };
+  }
   const flat = rows.filter(r => (r.width || 1) < 2 && r.kind !== 'real'); if (flat.length && n) fail(`not a bus: ${flat.map(r => r.full).join(', ')}`);
   const out = rows.map(r => v.dupAdd(r));
   for (const d of out) { if (a.radix != null) v.setRadix(d, a.radix, true); if (n != null) v.setAnalog(d, n || false, true); }
@@ -6426,7 +6834,13 @@ Object.assign(WaveView.prototype, {
       dups: [...this.dups.keys()], deltas: this.deltas, bits: [...this.bitsOpen], only: this.onlyState(), fsm: this.fsmState(),
       config: Object.assign({ style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded,
         toolsHidden: toolNames(this.S.toolsHidden), sort: this.sort, sortIgnore: [...this.sortIgnore] }, this.gapOpt(true), this.cycOpt()),
-      hl: this.hlOrder().map(r => [r.full, this.picks.get(r)]) });
+      hl: this.hlOrder().map(r => [r.full, this.picks.get(r)]), ext: this.undoExt() });
+  },
+  // the plugins' parts that undo takes back: an extraState with undo (true: its state; a function: what of it, for its set)
+  undoExt() {
+    const out = {};
+    for (const x of this.extraState) if (x.undo) { try { out[x.key] = typeof x.undo === 'function' ? x.undo() : x.get(); } catch (e) { /* not now */ } }
+    return out;
   },
   undoTick(base = false) {
     if (!base && (this.undoCur == null || this.undoing || this.held || PTR.down)) return;   // no history yet, or a step not done
@@ -6456,14 +6870,16 @@ Object.assign(WaveView.prototype, {
     for (const k of UNDO_KEYS) if (diff(A[k], B[k])) st[k] = A[k];
     if ('bookmarks' in st || 'arrows' in st) { st.bookmarks = A.bookmarks; st.arrows = A.arrows; }   // setState takes the two together
     for (const k of Object.keys(A.config)) if (diff(A.config[k], B.config[k])) st.config[k] = A.config[k];
+    const ext = Object.keys(A.ext || {}).filter(k => diff(A.ext[k], (B.ext || {})[k]));
+    for (const k of ext) st[k] = A.ext[k];
     const hl = diff(A.hl, B.hl), fi = this.fi, fiRow = this.fiRow;
     if (hl) st.config.highlight = A.hl.map(([f]) => f);
     await this.setState(st);
     if (hl) { const at = new Map(A.hl); this.picks = new Map([...this.picks.keys()].map(r => [r, at.get(r.full) ?? this.picks.get(r)]));
       this.renderNames(); this.draw(); }   // the highlight's colours worked out again
     if (fiRow && this.found.has(fiRow)) { this.fi = fi; this.fiRow = fiRow; }
-    return [...new Set([...UNDO_KEYS.filter(k => k in st), ...Object.keys(st.config).map(k => (GAP_KEYS.includes(k) ? 'gaps' : CYC_KEYS.includes(k) ? 'cycles' :
-      k))])];
+    return [...new Set([...UNDO_KEYS.filter(k => k in st), ...ext.map(k => ({ exprs: 'expressions', sva: 'assertions' })[k] || k),
+      ...Object.keys(st.config).map(k => (GAP_KEYS.includes(k) ? 'gaps' : CYC_KEYS.includes(k) ? 'cycles' : k))])];
   },
   undoShow() { for (const [act, s] of [['undo', this.undoS], ['redo', this.redoS]]) { const b = this.root.querySelector(`button[data-act=${act}]`);
     if (b) b.disabled = !(s && s.length); } },
@@ -6556,7 +6972,17 @@ Object.assign(WaveView.prototype, {
     el.addEventListener('lostpointercapture', e => { if (d && d.on) end(e, false); });
   },
   // your markers (the marker command, the menu's Marker here, the Markers list) over the page's own: drawn, kept in this browser
-  setMarks() { this.markers = this.pageMarks.concat(this.umarks); this.saveBookmarks(); this.renderNotes(); this.draw(); return this; },
+  setMarks() { this.markers = this.pageMarks.concat(this.umarks); this.saveBookmarks(); this.renderNotes(); this.draw(); this.shareMarks(); return this; },
+  // sharedMarkers: your markers (and the Δ shown) are the same in every viewer of the page of the same dump (a page of a view per test)
+  shareMarks() {
+    const w = this.M.src && this.M.src.meta && this.M.src.meta.waves; if (!this.S.sharedMarkers || SHARE.on || !w) return;
+    SHARE.on = true;
+    try {
+      const ms = this.markList();
+      for (const v of VIEWS) if (v !== this && v.root.isConnected && v.S.sharedMarkers && v.M.src && v.M.src.meta && v.M.src.meta.waves === w) {
+        v.umarks = markNorm(ms); if (v.deltas !== this.deltas) { v.deltas = this.deltas; v.saveRows(); } v.setMarks(); }
+    } finally { SHARE.on = false; }
+  },
   // your groups: a folder per group at the top of the names, its signals (the model's rows under them, live: radix,
   // values) in your order; the same objects while the group stays (its folding, a highlight)
   // your groups changed: their rows again (a compare's marks on the new ones), kept, drawn
@@ -6568,7 +6994,9 @@ Object.assign(WaveView.prototype, {
       let c = cache.get(g);
       if (!c) { c = { row: { type: 'group', id: ++XID, user: true }, kids: new Map() }; cache.set(g, c); }
       const gr = c.row, kids = g.signals.map(f => by.get(f)).filter(Boolean);
-      Object.assign(gr, { name: g.name, path: '@' + g.name, full: '@' + g.name, title: `your group: ${kids.length} signal${kids.length === 1 ? '' : 's'}` });
+      Object.assign(gr, { name: g.name, path: '@' + g.name, full: '@' + g.name, title: g.divider ? 'a divider of your groups' :
+        `your group: ${kids.length} signal${kids.length === 1 ? '' : 's'}` });
+      if (g.divider) gr.cls = 'ugdiv'; else delete gr.cls;
       if (g.color) gr.stroke = g.color; else delete gr.stroke;
       out.push(gr);
       for (const s of kids) {
@@ -6594,6 +7022,7 @@ Object.assign(WaveView.prototype, {
 // (wavelens.edits:<page>), so what you change here afterwards stays until a newer one (Save keeps yours in a file). The
 // rest (cursor, window, highlight, selection, folding, order, search), which a page opened again starts from anyway,
 // is applied every time, as the page's own settings are.
+const SHARE = { on: false };   // markers being shared (shareMarks): the others do not share them back
 const KEPT = ['dups', 'deltas', 'bookmarks', 'arrows', 'markers', 'spans', 'groups', 'paint', 'radix', 'analog', 'hidden', 'bits'];
 const KEPT_CFG = ['style', 'maxHeight', 'toolsFolded', 'toolsHidden', ...GAP_KEYS, ...CYC_KEYS];
 // what undo takes back: the above and Only (not kept in this browser: a page opened again applies a revision's Only anew)
@@ -6678,6 +7107,12 @@ Object.assign(WaveView.prototype, {
     if (!e || !e.state) return null;
     let st = e.state, seen = false;
     try { seen = localStorage.getItem(key) === String(e.rev); } catch (err) { /* no storage: all of it every time */ }
+    const w = this.M.src && this.M.src.meta && this.M.src.meta.waves, stamp = x => String(x.rev).split('@')[1] || '';
+    if (this.S.sharedMarkers && w && st.markers !== undefined && typeof WAVES !== 'undefined') {   // shared: the newest edits of the dump's markers win
+      const best = Object.entries(E).filter(([k, x]) => x && x.state && x.state.markers !== undefined && WAVES[k] && WAVES[k].meta && WAVES[k].meta.waves === w)
+        .map(([, x]) => x).sort((p, q) => (stamp(q) > stamp(p) ? 1 : stamp(q) < stamp(p) ? -1 : 0))[0];
+      if (best && best !== e) st = Object.assign({}, st, { markers: best.state.markers }, best.state.deltas !== undefined ? { deltas: best.state.deltas } : {});
+    }
     if (seen) {   // applied before: only what this browser does not keep (the plugins' parts too: assertions, expressions)
       const plug = this.extraState.map(x => x.key);
       st = Object.fromEntries(Object.entries(st).filter(([k]) => !KEPT.includes(k) && !plug.includes(k)));
@@ -6690,8 +7125,10 @@ Object.assign(WaveView.prototype, {
       if (c != null && st.from == null && (this.cursor < this.t0 || this.cursor > this.t0 + this.span)) {
         this.center(this.cursor); this.draw(); }
       try { localStorage.setItem(key, String(e.rev)); } catch (err) { /* private mode */ }
-      if (!seen) this.toast(`the page's edits applied (${String(e.rev).split('@')[0]})` +
+      const cfg = String(e.rev).startsWith('cfg-');   // its config's state: no toast unless a name of it is not here
+      if (!seen && (!cfg || miss.length)) this.toast((cfg ? 'the config\'s state' : `the page's edits applied (${String(e.rev).split('@')[0]})`) +
         (miss.length ? ` · not in these waves: ${miss.slice(0, 3).join(', ')}` : ''));
+      if (!seen && miss.length) this.log('warning', `${cfg ? 'the config\'s state' : 'the page\'s edits'}: not in these waves: ${miss.join(', ')}`);
       return miss;
     } catch (err) { this.toast('the page\'s edits: ' + err.message); return null; }
   },
@@ -6834,6 +7271,9 @@ const cmpView = (c, s) => c.view || (c.view = Object.create(s, { tr: { value: c.
 // the first difference: a row of another width differs from the start, which says nothing of where it goes wrong (as sva diff)
 const cmpFirst = rows => { let f = null; for (const x of rows.values()) if (!x.other && x.spans.length && (f == null || x.spans[0][0] < f)) f = x.spans[0][0];
   return f; };
+// who differed first, and what followed: the rows by the start of their first difference -> [{row, t}] (the first n)
+const cmpRank = (rows, n = 5) => [...rows].filter(([, x]) => !x.other && x.spans.length).map(([r, x]) => ({ row: r, t: x.spans[0][0] }))
+  .sort((p, q) => p.t - q.t || (p.row.full < q.row.full ? -1 : 1)).slice(0, n);
 const cmpStarts = rows => [...new Set([...rows.values()].flatMap(x => x.spans.map(([t]) => t)))].sort((x, y) => x - y);
 // which run the waves show, on a picture's axis: the run's letter and name on its colour, the two of the overlay in the colours of their
 // waves; a strip under the axis while B is shown. names: [A's, B's]
@@ -6980,12 +7420,19 @@ Object.assign(WaveView.prototype, {
     this.cmp = { name: nm, rows, differ, missing, omitted, compared: rows.size - missing - omitted, from, to, starts: cmpStarts(rows), first: cmpFirst(rows),
       byName, waves: true };
     this.cmpMarks(); this.cmpShow(); this.draw();
-    const c = this.cmp;
-    const said = `${nm}: ${differ} of ${c.compared} signals differ${c.first == null ? '' : `, the first at ${f(c.first)}`}` +
+    const c = this.cmp, who = this.cmpWho();
+    const said = `${nm}: ${differ} of ${c.compared} signals differ${c.first == null ? '' : `, the first at ${f(c.first)}`}${who}` +
       (missing ? ` · ${missing} not in it` : '') + (omitted ? ` · ${omitted} not read (dumpBudget)` : '') +
       (from > this.M.t0 || to < this.M.t1 ? ` · compared ${f(from)} … ${f(to)} (both dumps)` : '') + (byName.length ? ' · ' + cmpByName(c) : '');
     this.toast(said + (differ ? ' · ]d [d go to them' : '')); this.log('ok', 'compared with ' + said);
-    return { name: nm, compared: c.compared, differ, missing, omitted, first: c.first, from, to, byName: byName.length };
+    return { name: nm, compared: c.compared, differ, missing, omitted, first: c.first, from, to, byName: byName.length, rank: c.rank };
+  },
+  // who differed first and what followed (the compare's rank), for its toast: " · first PSEL, then PENABLE +10 ns"
+  cmpWho() {
+    const rank = cmpRank(this.cmp.rows), d = q => this.fmt(q, (this.M.t1 - this.M.t0) / 1000, this.M.t1 - this.M.t0);
+    this.cmp.rank = rank.map(o => ({ signal: o.row.full, t: o.t }));
+    const then = rank.slice(1).map(o => `${o.row.name} +${d(o.t - rank[0].t)}`).join(', ');
+    return rank.length ? ` · first ${rank[0].row.name}${then ? `, then ${then}` : ''}` : '';
   },
   // the compare as a result (the saved state's "compare", as the WaveJSON's): the one given, else the one of a dump read here
   cmpState() {
@@ -7156,11 +7603,12 @@ Object.assign(WaveView.prototype, {
       byName: [], result: Object.assign({}, c, { from, to }) };
     this.cmpMarks(); this.cmpShow(); this.draw();
     const f = t => this.fmt(t, (this.M.t1 - this.M.t0) / 1000, this.M.t1 - this.M.t0), x = this.cmp;
-    const said = `${x.name}: ${differ} of ${x.compared} signals differ${x.first == null ? '' : `, the first at ${f(x.first)}`}` +
+    const who = this.cmpWho();
+    const said = `${x.name}: ${differ} of ${x.compared} signals differ${x.first == null ? '' : `, the first at ${f(x.first)}`}${who}` +
       (missing ? ` · ${missing} not in it` : '') + (from > t0 || to < t1 ? ` · compared ${f(from)} … ${f(to)}` : '');
     if (!quiet) this.toast(said + (differ ? ' · ]d [d go to them' : ''));
     this.log('ok', 'compared with ' + said);
-    return { name: x.name, compared: x.compared, differ, missing, omitted: 0, first: x.first, from, to, byName: 0 };
+    return { name: x.name, compared: x.compared, differ, missing, omitted: 0, first: x.first, from, to, byName: 0, rank: this.cmp.rank };
   },
   // ]d [d: the cursor to the next / previous start of a difference: of the selected signal when it has some, else of all
   // the signals in the view (hidden ones and the ones Only leaves out: not stepped to)
@@ -8426,6 +8874,12 @@ const WaveSVG = {
       P.fade = hl && !hl.on.has(row) ? hl.dim : 1;
       if (typeof c === 'string') { P.rect(0, ry, xL, h, c, 0.1); P.rect(0, ry, 3, h, c); }   // a plugin's highlight
       if (!row.name) return;
+      if (row.cls === 'ugdiv') {   // a divider: its name muted, a line on either side across the names (the waves' part: paintRows)
+        const tw = P.measure(row.name, { size: fs }), my = Math.round(ry + h / 2) + 0.5, cx = xL / 2;
+        P.path([['M', 4, my], ['L', cx - tw / 2 - 6, my]], { stroke: 'line', w: 1 });
+        P.path([['M', cx + tw / 2 + 6, my], ['L', xL - 4, my]], { stroke: 'line', w: 1 });
+        P.text(cx, ry + h / 2, row.name, { size: fs, fill: 'muted', anchor: 'middle' }); return;
+      }
       const g = row.type === 'group';
       const nx = 6 + row.depth * 12 + (g ? 0 : 8), nst = { size: fs, weight: g ? 700 : 400, fill: strokeOf(row) || 'fg' };
       P.text(nx, ry + h / 2, row.name, nst);
@@ -8482,7 +8936,7 @@ const WaveSVG = {
       paintTimeMarks(P, timeMarks, X, from, to, top, bodyEnd, (to - from) / Math.max(1, xR - xL));
       paintSpans(P, V ? V.spans : M.spans, X, from, to, lay, top, bodyEnd);
       paintMarkers(P, marks, X, from, to, top, bodyEnd, laneY(lay, S.laneHeight));
-      if (V) paintDeltas(P, V.deltaList(), X, from, to, laneY(lay, S.laneHeight), top, dt => V.deltaText(dt));
+      if (V) paintDeltas(P, V.deltaList(), X, from, to, laneY(lay, S.laneHeight), top, d => V.deltaText(d));
       paintBookmarks(P, bms, ars, X, from, to, rowY, top, bodyEnd, showAxis ? axisY + 10 : top + 10, null, laneY(lay, S.laneHeight), arrowFill(M, M.rows));
       if (V && V.cursor >= from && V.cursor <= to) P.path([['M', X(V.cursor), top], ['L', X(V.cursor), bodyEnd]], { stroke: 'acc', w: 1.2 });
       if (V) V.paintMeasures(P, X, from, to, xL, xR, top, bodyEnd, showAxis ? [axisY, 20] : null, true);   // the second cursor, the measured range
@@ -8566,6 +9020,7 @@ function optsFrom(ds) {
   if (ds.width) o.width = +ds.width;
   if (ds.fit != null) o.fit = true;
   if (ds.theme) o.theme = ds.theme;
+  if (ds.keys) o.keys = ds.keys;   // data-keys='{"gx": "gm"}': the element's layer of your keys (settings reads the JSON)
   if (ds.colors) o.colors = parseText(ds.colors);
   if (ds.sort != null) o.sort = ds.sort || 'asc';
   if (ds.sortIgnore != null) o.sortIgnore = ds.sortIgnore;
@@ -8645,8 +9100,19 @@ const takeSrc = () => {
 const keptTheme = () => { if (!themeButtonOn(settings(GLOBAL)) || document.documentElement.dataset.theme) return;
   let t = null; try { t = localStorage.getItem('wavelens-theme'); } catch (e) { /* none */ }
   if (THEMES.includes(t)) applyLook(document.documentElement, t, null); };
+// a link to a moment (#t=…&sel=…&view=…&bm=…, model.js parseHash): the goto command on the viewer of its section (else the first), once
+// that viewer has its state (this browser's, the page's edits) and the fonts; not kept in a state: the page stays there while the hash says so
+const hashGo = async () => {
+  const o = parseHash(location.hash), vs = [...VIEWS].filter(v => v.root.isConnected); if (!o || !vs.length) return null;
+  const v = (o.view != null && vs.find(x => x.editKey() === o.view)) || vs[0];
+  await v.ready; if (document.fonts && document.fonts.ready) await document.fonts.ready;
+  const r = (await v.run([{ op: 'goto', ...o }]))[0];
+  if (r.error) { v.toast('the link: ' + r.error); console.warn('wavelens: the link ' + location.hash + ': ' + r.error); }
+  return r;
+};
+G.addEventListener('hashchange', hashGo);
 const start = () => {   // built already: no Save page
-  takeSrc(); keptTheme(); if (PAGE.why) VIEWS.forEach(v => v.layoutShow()); if (!manual) upgrade(); liveHash(); };
+  takeSrc(); keptTheme(); if (PAGE.why) VIEWS.forEach(v => v.layoutShow()); if (!manual) upgrade(); liveHash(); hashGo(); };
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 
 /* ---------------- tooltips: what a control of a viewer does and its keys ---------------- */
@@ -8693,7 +9159,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.40',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.41',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,
@@ -8708,7 +9174,7 @@ G.WaveLens = { version: '0.40',   // the project's version: VERSION (make check 
     diffSpans, cmpKey, cmpFind, svTypes, svApply, fsmStats, svFingerprint, svMissing, svMissingNotes, svRemap, svLookupKey, jsonParse, jsonWhere,
     cycMarks, enumColor, analogValue, niceStep, cycMap, parseWave, paintTimeMarks,
     idleCuts, keepCuts, gapKeeps, gapLen, gapText, gapRefs, warpOf, warpV, warpT, warpFit, clipCuts, fmtFreq, gfmt, toFloat, fieldRow, bitRows, widthTag,
-    stripPfx, trimNum,
+    stripPfx, trimNum, parseHash, hashOf, hashGo, cursorDiff, sliceRow, sliceOf, keymapOf, settings,
     peek: v => ({ get lay() { return v.lay; }, get oy() { return v.oy; }, get vis() { return v.vis; }, get collapsed() { return v.collapsed; },
       get bmGeo() { return v.bmGeo; }, get rowEls() { return v.rowEls; }, get namesEl() { return v.namesEl; } }) } };
 G.WaveView = WaveView; G.WaveSVG = WaveSVG;

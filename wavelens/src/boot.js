@@ -54,6 +54,7 @@ function optsFrom(ds) {
   if (ds.width) o.width = +ds.width;
   if (ds.fit != null) o.fit = true;
   if (ds.theme) o.theme = ds.theme;
+  if (ds.keys) o.keys = ds.keys;   // data-keys='{"gx": "gm"}': the element's layer of your keys (settings reads the JSON)
   if (ds.colors) o.colors = parseText(ds.colors);
   if (ds.sort != null) o.sort = ds.sort || 'asc';
   if (ds.sortIgnore != null) o.sortIgnore = ds.sortIgnore;
@@ -133,8 +134,19 @@ const takeSrc = () => {
 const keptTheme = () => { if (!themeButtonOn(settings(GLOBAL)) || document.documentElement.dataset.theme) return;
   let t = null; try { t = localStorage.getItem('wavelens-theme'); } catch (e) { /* none */ }
   if (THEMES.includes(t)) applyLook(document.documentElement, t, null); };
+// a link to a moment (#t=…&sel=…&view=…&bm=…, model.js parseHash): the goto command on the viewer of its section (else the first), once
+// that viewer has its state (this browser's, the page's edits) and the fonts; not kept in a state: the page stays there while the hash says so
+const hashGo = async () => {
+  const o = parseHash(location.hash), vs = [...VIEWS].filter(v => v.root.isConnected); if (!o || !vs.length) return null;
+  const v = (o.view != null && vs.find(x => x.editKey() === o.view)) || vs[0];
+  await v.ready; if (document.fonts && document.fonts.ready) await document.fonts.ready;
+  const r = (await v.run([{ op: 'goto', ...o }]))[0];
+  if (r.error) { v.toast('the link: ' + r.error); console.warn('wavelens: the link ' + location.hash + ': ' + r.error); }
+  return r;
+};
+G.addEventListener('hashchange', hashGo);
 const start = () => {   // built already: no Save page
-  takeSrc(); keptTheme(); if (PAGE.why) VIEWS.forEach(v => v.layoutShow()); if (!manual) upgrade(); liveHash(); };
+  takeSrc(); keptTheme(); if (PAGE.why) VIEWS.forEach(v => v.layoutShow()); if (!manual) upgrade(); liveHash(); hashGo(); };
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 
 /* ---------------- tooltips: what a control of a viewer does and its keys ---------------- */
@@ -181,7 +193,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.40',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.41',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,
@@ -196,7 +208,7 @@ G.WaveLens = { version: '0.40',   // the project's version: VERSION (make check 
     diffSpans, cmpKey, cmpFind, svTypes, svApply, fsmStats, svFingerprint, svMissing, svMissingNotes, svRemap, svLookupKey, jsonParse, jsonWhere,
     cycMarks, enumColor, analogValue, niceStep, cycMap, parseWave, paintTimeMarks,
     idleCuts, keepCuts, gapKeeps, gapLen, gapText, gapRefs, warpOf, warpV, warpT, warpFit, clipCuts, fmtFreq, gfmt, toFloat, fieldRow, bitRows, widthTag,
-    stripPfx, trimNum,
+    stripPfx, trimNum, parseHash, hashOf, hashGo, cursorDiff, sliceRow, sliceOf, keymapOf, settings,
     peek: v => ({ get lay() { return v.lay; }, get oy() { return v.oy; }, get vis() { return v.vis; }, get collapsed() { return v.collapsed; },
       get bmGeo() { return v.bmGeo; }, get rowEls() { return v.rowEls; }, get namesEl() { return v.namesEl; } }) } };
 G.WaveView = WaveView; G.WaveSVG = WaveSVG;
