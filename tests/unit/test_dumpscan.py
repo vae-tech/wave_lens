@@ -223,3 +223,22 @@ class Body(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class Review1103(unittest.TestCase):
+    """B-17, B-18 of the review of 2026-11-03: a byte order mark before the header; a scope with no name."""
+    def scan(self, text, bom=False):
+        with H.tmp() as d:
+            p = os.path.join(d, 'x.vcd')
+            with open(p, 'wb') as f:
+                f.write((b'\xef\xbb\xbf' if bom else b'') + text.encode())
+            return dumpscan.read(p, None)
+
+    def test_a_bom_keeps_the_timescale(self):
+        d = self.scan('$timescale 1us $end\n$scope module tb $end\n$var wire 1 ! a $end\n$upscope $end\n$enddefinitions $end\n#10\n1!\n', bom=True)
+        self.assertEqual(d.unit_ps, 1000000)
+
+    def test_a_scope_with_no_name(self):
+        d = self.scan('$timescale 1ns $end\n$scope module $end\n$scope module tb $end\n$var wire 1 ! a $end\n$upscope $end\n$upscope $end\n'
+                      '$enddefinitions $end\n#0\n1!\n')
+        self.assertEqual((sorted(d.vars), sorted(d.modules)), (['tb.a'], ['', 'tb']))

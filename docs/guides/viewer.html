@@ -529,6 +529,11 @@
 </ul>
 
 <h2 id="keys">All the keys</h2>
+<p id="key-menu"><b>The box of what can follow.</b> A moment after the first key of a sequence (<kbd>g</kbd>, <kbd>z</kbd>, <kbd>y</kbd>, <kbd>[</kbd>, <kbd>]</kbd>) a box in the corner lists what can
+  follow, as LazyVim does. Press the key or click it; it waits as long as it is open, <kbd>Esc</kbd> or a click elsewhere closes it, and so does a key it does not list (that key does nothing then; another first key starts its own box). <kbd>g</kbd> is the menu of nearly everything: going to things, the
+  markers and bookmarks, the state, the dump. It lists only what this page can do now. Fast typing does not show it; <code>keyHints</code> sets the moment (<code>false</code>: never).</p>
+<figure><img src="img/viewer-keys.png" alt="The box after g: go to, markers and bookmarks, the state, the dump, more" loading="lazy">
+  <figcaption><b>After <kbd>g</kbd>.</b> Each line is a key to press or a button to click.</figcaption></figure>
 <table>
   <tr><th>Key</th><th>Action</th><th>Key</th><th>Action</th></tr>
   <tr><td><kbd>wheel</kbd></td><td>scroll the rows</td><td><kbd>ctrl+wheel</kbd>, pinch</td><td>zoom at the pointer</td></tr>
@@ -551,7 +556,9 @@
   <tr><td><kbd>alt+drag</kbd></td><td>a box: time range and signals, then the menu</td><td><kbd>shift+click</kbd> a name</td>
     <td>select a run of signals</td></tr>
   <tr><td>○, <kbd>ctrl+click</kbd> a name</td><td>highlight</td><td><kbd>ctrl+shift+click</kbd></td><td>highlight every row to here</td></tr>
-  <tr><td><kbd>r</kbd></td><td>the last state loaded, read again (<span class="ui">Reload</span>)</td><td></td></tr>
+  <tr><td><kbd>r</kbd></td><td>the last state loaded, read again (<span class="ui">Reload</span>)</td><td><kbd>R</kbd></td><td>the dump read again from the disk, the view kept (⟳)</td></tr>
+  <tr><td><kbd>g</kbd></td><td>a box of what can follow, to press or to click: <kbd>gg</kbd> <kbd>gl</kbd> <kbd>gt</kbd> <kbd>gT</kbd>, <kbd>gm</kbd> <kbd>gM</kbd> <kbd>gB</kbd> <kbd>gd</kbd> <kbd>gc</kbd>,
+    <kbd>gs</kbd> <kbd>gL</kbd> <kbd>gr</kbd>, <kbd>gO</kbd> <kbd>gR</kbd> <kbd>gC</kbd>, <kbd>gv</kbd>, <kbd>gp</kbd></td><td><kbd>z</kbd> <kbd>y</kbd> <kbd>[</kbd> <kbd>]</kbd></td><td>the same box; <kbd>yn</kbd> <kbd>yt</kbd>: copy the name, the time of the cursor</td></tr>
   <tr><td><kbd>b</kbd></td><td>bookmark at the cursor</td><td><kbd>]b</kbd> <kbd>[b</kbd>, <kbd>1</kbd> … <kbd>9</kbd></td>
     <td>next / previous bookmark, bookmark n</td></tr>
   <tr><td><kbd>m</kbd></td><td>marker at the cursor: its label asked</td><td><kbd>]m</kbd> <kbd>[m</kbd></td><td>next / previous marker</td></tr>
@@ -583,7 +590,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.39 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.40 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

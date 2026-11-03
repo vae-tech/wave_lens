@@ -281,7 +281,8 @@ class Notes {
         ${v.deltas ? `<select class="mto" aria-label="marker ${i + 1}: the Δ goes to" title="The marker its Δ goes to, through the ones between">` +
           opt('next', '→ next', m.dto == null ? 'next' : m.dto === 0 ? 'none' : String(m.dto)) + opt('none', '→ none', m.dto === 0 ? 'none' : '') +
           v.umarks.map((o, k) => (k === i ? '' : opt(String(k + 1), `→ ${k + 1}${o.label ? ' ' + o.label : ''}`, String(m.dto)))).join('') + '</select>' : ''}
-        ${(d => (d ? `<span class="md" title="The time to the marker it goes to">Δ ${esc(v.deltaText(d.dt))}</span>` : ''))(deltas.find(d => d.a === m))}
+        ${(d => (d && d.dt > 0 ? `<span class="md" title="The time to the marker it goes to">Δ ${esc(v.deltaText(d.dt))}</span>` : ''))(
+          deltas.find(d => d.a === m))}
         <button type="button" class="ic" data-bm="mdel" title="Delete marker ${i + 1}">✕</button></li>`).join('') + '</ol>' : '') +
       (v.ugroups.length ? `<div class="nh"><b>Groups</b><span class="muted">yours, at the top of the names · name · colour</span></div><ol class="ugs">` +
         v.ugroups.map((g, i) => `<li data-g="${i}"><input type="text" class="ugn" value="${esc(g.name)}" spellcheck="false" aria-label="group ${i + 1} name"

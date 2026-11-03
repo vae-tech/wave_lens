@@ -152,11 +152,35 @@ const HELP = [
     [['drag a Δ'], 'between markers (Δ between markers in their list): up and down, to a line over or under a signal; its dot along, to another marker'],
     [['shift+drag a bookmark'], 'an arrow to another one']]],
   ['The bar', [[['right button'], 'on the bar: which of its tool groups it shows (Show all, Hide all, a tick each)'],
-    [['▴', '▾ tools'], 'fold the tools to the title line / open them'], [['r'], 'the last state loaded, read again (Reload)']]],
+    [['▴', '▾ tools'], 'fold the tools to the title line / open them'], [['r'], 'the last state loaded, read again (Reload)'],
+    [['R'], 'the dump read again from the disk, the view kept (⟳)']]],
+  ['Menus', [[['g'], 'a moment after it: a box with what can follow, press the key or click it: go to, markers and bookmarks, the state, the dump'],
+    [['z', 'y', '[', ']'], 'the same box: fold, copy, next, previous'], [['Esc'], 'with the box open: closes it, nothing else'],
+    [['t', 'T'], 'the panels of the modules, the state machines'], [['gm', 'gl'], 'the lists of the markers and bookmarks, your groups'],
+    [['right button'], 'on the waves or a name: the menu of what is there']]],
   ['Undo', [[['ctrl+Z'], 'undo the last change of bookmarks, arrows, groups, colours, radix, hidden rows, highlight'],
     [['ctrl+shift+Z', 'ctrl+Y'], 'redo']]],
   ['Help', [[['?'], 'this box'], [['hover a button'], 'what it does, its keys']]],
 ];
+
+// what the box shows after the first key of a sequence (keyHintOn): prefix -> [title, rows]; a row: [heading], or [second key, its text
+// (or fn(view)), shown? (fn(view))]. The keys are seq()'s; a plugin's sequences with a help text come after them
+const barBtn = (v, a) => { const b = v.root.querySelector(`.bar [data-act=${a}]`); return b && !b.hidden ? b : null; };
+const onBar = a => v => !!barBtn(v, a), anyMark = v => v.bms.length || v.umarks.length;
+const KEY_MENUS = {
+  g: ['Menu', [['Go to'], ['g', 'the first signal'], ['l', 'your groups…'], ['t', 'the modules…', v => v.scopes().length],
+    ['T', 'the state machines…', v => v.fsms().length],
+    ['Markers and bookmarks'], ['m', 'the list of them…', anyMark], ['M', 'a marker at the cursor'], ['B', 'a bookmark at the cursor'],
+    ['d', v => (v.deltas ? 'hide the Δ between markers' : 'show the Δ between markers'), v => v.umarks.length], ['c', 'clear them all', anyMark],
+    ['The state'], ['s', 'save…', onBar('ssave')], ['L', 'load…', onBar('sload')], ['r', 'reload', v => v.root.wlState],
+    ['The dump'], ['O', 'open…', onBar('dopen')], ['R', 'reload', v => v.opts.dumpSrc], ['C', 'compare…', onBar('dcmp')],
+    ['More'], ['v', v => (v.gapLive() ? 'the waves in continuous time' : 'the gaps cut out of the waves')], ['p', 'save the page', onBar('spage')]]],
+  z: ['Fold the modules', [['R', 'open every module'], ['M', 'fold every module'], ['o', 'open the selected signal\'s'], ['c', 'fold the selected signal\'s'],
+    ['a', 'open or fold it']]],
+  y: ['Copy', [['y', 'the selected signal\'s path'], ['n', 'its name'], ['t', 'the time of the cursor']]],
+  ']': ['Next', [['b', 'bookmark'], ['m', 'marker'], ['e', 'edge'], ['d', 'difference', v => v.cmp]]],
+  '[': ['Previous', [['b', 'bookmark'], ['m', 'marker'], ['e', 'edge'], ['d', 'difference', v => v.cmp]]],
+};
 
 const WD_CELLS = 2048;   // the cycles a WaveDrom export keeps at most (the rest of the range is said, not dropped silently)
 const KIND_MARK = { struct: '{}', union: '∪', interface: '⊟' };
@@ -258,7 +282,7 @@ class Bar {
           ('0x40, \'h40, 8\'d64, 64, -3, \'b101, or a text (an enum label); Enter / shift+Enter: the next / previous time the selected signal (none: any ' +
           'shown) becomes it">')),
       '<button type="button" data-act="next" title="Next edge (]e)">▶</button>'),
-        '<button type="button" data-act="mark" title="Bookmark at the cursor, on the selected signal (m)">+ Mark</button>');
+        '<button type="button" data-act="mark" title="Bookmark at the cursor, on the selected signal (b)">+ Mark</button>');
     const state = grp('state',
       ('<button type="button" data-act="ssave" title="Save what you did in this viewer to a file: the window, the cursor, the order, the folding, the ' +
         'highlight, the paint, the bookmarks and arrows, the search, the assertions and the expressions">Save</button>'),
@@ -271,7 +295,7 @@ class Bar {
     const dump = grp('dump',
       ('<button type="button" data-act="dopen" title="Open a VCD dump in this viewer (or drop one on it): its signals by scope, exact ' +
         'transitions">Open…</button>'),
-      ('<button type="button" data-act="dreload" title="Read the dump again from the disk; the view, the folding and the bookmarks stay" ' +
+      ('<button type="button" data-act="dreload" title="Read the dump again from the disk; the view, the folding and the bookmarks stay (R)" ' +
           'hidden>⟳</button><input type="file" class="dfile" accept=".vcd,.fst" hidden>'),
       ('<button type="button" data-act="dcmp">Compare…</button><button type="button" data-act="dcmpx" class="cmpx" hidden></button>' +
         '<span class="seg cmpv" hidden><button type="button" data-act="dcmpv" data-run="a" aria-pressed="true">A</button>' +

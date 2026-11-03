@@ -2291,7 +2291,8 @@ class Exprs {
       return;
     }
     if (e.target.closest('.xed')) {   // its label, its module
-      if (e.key === 'Escape') { e.preventDefault(); this.noEdit(); } else if (e.key === 'Enter') { e.preventDefault(); this.apply(); }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); this.noEdit(); }   // not the viewer's reset
+      else if (e.key === 'Enter') { e.preventDefault(); this.apply(); }
       return;
     }
     const li = e.target.matches('ol.xl > li') ? e.target : null, x = li && this.list[+li.dataset.i]; if (!x) return;

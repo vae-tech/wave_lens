@@ -281,6 +281,9 @@ def viewer(S, ex, build):
     S.save('viewer-menu', clip=union(page.locator('.wv-menu').bounding_box(), {'x': bb['x'] - 160, 'y': bb['y'], 'width': 900, 'height': 10}),
            page=page, pad=6)
     js('(v.closeMenu(), v.setRange(null), 0)')
+    js('(v.keyHintOn("g"), v.keyHintShow("g"), 0)'); shots.settle(page)
+    S.save('viewer-keys', clip=page.locator('.wv-keys').bounding_box(), page=page, pad=6)
+    js('(v.keyHintOff(), 0)')
     js("(v.select('PCLK'), v.cursor = 35000, v.setCursor2(115000), 0)"); shots.settle(page)
     S.save('viewer-cursors', v, upto=v.locator('.notes'))
     js("(v.setCycles({ cycles: true, cycleZero: v.cycData(true).ups[4] }), 0)"); shots.settle(page)   # the clock cycles: cycle 0 at the 5th edge

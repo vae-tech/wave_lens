@@ -161,7 +161,7 @@ Object.assign(WaveView.prototype, {
     const mine = this.cmpRows();
     if (!this.M.timed || !mine.length) {
       this.toast('compare: these waves are clock-sampled (one cell per cycle): open the dump itself (Open…) and compare that'); return null; }
-    const nm = name || file.name || 'B';
+    const nm = name || file.name || 'B'; this.cmpSrc = { file, name: nm };   // what ⟳ reads again (openDump)
     // a compare that fails leaves the one before as it was, and says so (its bands are still drawn)
     const still = () => (this.cmp ? `; still compared with ${this.cmp.name}` : '');
     let doc;

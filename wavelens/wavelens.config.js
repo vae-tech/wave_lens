@@ -49,6 +49,7 @@ window.WAVELENS_CONFIG = {
   buses: null,                  // bus.js: ports of your own [{protocol, scope, prefix?, map?: {role: name}, clock?, name?}] (busDetect: false: only these)
   menuTipDelay: 2000,           // ms: the wait before a tooltip in that menu (the bar's: 350 ms)
   contextMenu: true,            // the right button on the waves (a range and the viewer's menu: picture, colour, …) and on the names; false: the browser's
+  keyHints: 200,                // ms after the first key of a sequence (g z y [ ]): a box says what can follow, to press or to click; false = never
   cursorSnap: 8,                // px: a click on the waves puts the cursor on an edge of that signal this near (alt+click: not); 0 = off
   showWidth: true,              // a bus's width after its name ([7:0], a field's [msb:lsb]; a click on it: the bus bit by bit); false: none
   moduleShading: true,          // signals of neighbouring modules on alternating backgrounds, a line where the module changes

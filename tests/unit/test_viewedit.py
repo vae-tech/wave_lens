@@ -441,12 +441,13 @@ class Twin(unittest.TestCase):
         self.assertEqual(r[5], {'op': 'cycles', 'cycles': {'cycles': True, 'cycleClock': None, 'cycleZero': None}, 'clock': 'clk', 'cycle': None})
 
     def test_rows_order(self):
-        """rows in the order the names column shows them (sort, ignored prefixes), your groups first, the hidden at the end."""
+        """rows in the order the names column shows them (sort, ignored prefixes), your groups first, the hidden where they would be (edit.js:
+        allRows(true); review 2026-11-03 B-14)."""
         doc = {'signal': [{'name': 'b10', 'wave': '01'}, {'name': 'i_b2', 'wave': '01'}, {'name': 'a', 'wave': '01'}, ['m', {'name': 'z', 'wave': '0'}]]}
         e = ed(doc=doc)
         r = e.run([{'op': 'group', 'name': 'g', 'signals': 'a'}, {'op': 'sort', 'dir': 'asc', 'ignore': 'i_'}, {'op': 'hide', 'signals': 'b10'},
                    {'op': 'rows'}])[-1]
-        self.assertEqual(r['rows'], [['@g', 'group'], ['a', 1], ['i_b2', 1], ['m', 'module'], ['m.z', 1], ['b10', 1]])
+        self.assertEqual(r['rows'], [['@g', 'group'], ['a', 1], ['i_b2', 1], ['b10', 1], ['m', 'module'], ['m.z', 1]])
 
     def test_times(self):
         """One time parser (model.js parseT) for viewedit.py and wavemcp.py: units in any case, µs, an exponent."""
@@ -857,3 +858,69 @@ class Config(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class Review1103(unittest.TestCase):
+    """What the review of 2026-11-03 found the file's side doing apart from the page (B-05, B-07, B-09, B-10, B-11, B-15, B-23)."""
+    def err(self, e, *ops):
+        return e.run(list(ops))[-1].get('error') or ''
+
+    def test_colours_the_page_refuses(self):
+        e = ed()
+        for op in ({'op': 'bookmark', 't': '10ns', 'color': 'red; x'}, {'op': 'marker', 't': '10ns', 'color': 'not a colour!'},
+                   {'op': 'paint', 'signals': 'clk', 'color': 'a b'}, {'op': 'group', 'name': 'g', 'signals': 'clk', 'color': '{}'}):
+            self.assertIn('is no colour', self.err(e, op), op)
+        for c in ('#a0b0c0', 'teal', 'rgb(1, 2, 3)', 'hsl(10 50% 50%)'):
+            self.assertEqual(self.err(e, {'op': 'marker', 't': '10ns', 'color': c}), '', c)
+
+    def test_times_outside_the_waves(self):
+        e = ed()
+        for op in ({'op': 'bookmark', 't': '5s'}, {'op': 'marker', 't': -5}, {'op': 'span', 'from': 0, 'to': '5s'}):
+            self.assertIn('outside these waves (0ns … 80ns)', self.err(e, op), op)
+        self.assertEqual(self.err(e, {'op': 'marker', 't': '80ns'}), '')
+
+    def test_set_state_takes_a_state_only(self):
+        e = ed()
+        r = e.run([{'op': 'set_state', 'state': {'wavelens': 'state', 'foo': 1, 'bookmarks': [None, {'n': 1, 't': 5000}],
+                                                  'config': {'highlight': 'clk,tb.dut.valid'}}},
+                   {'op': 'bookmark', 't': '10ns'}, {'op': 'highlight', 'add': 'tb.dut.data'}])
+        self.assertEqual([x.get('error') for x in r], [None] * 3)
+        self.assertNotIn('foo', e.st)
+        self.assertEqual([b['n'] for b in e.st['bookmarks']], [1, 2])
+        self.assertEqual(e.st['config']['highlight'][:2], ['clk', 'tb.dut.valid'])
+
+    def test_a_copy_gone_leaves_no_highlight_nor_hidden_bit(self):
+        e = ed()
+        r = e.run([{'op': 'duplicate', 'signals': 'tb.dut.data'}, {'op': 'highlight', 'set': 'tb.dut.data#2'}, {'op': 'bits', 'signals': 'tb.dut.data#2'},
+                   {'op': 'hide', 'signals': 'tb.dut.data#2[3]'}, {'op': 'duplicate', 'signals': 'tb.dut.data#2', 'delete': True}])
+        self.assertEqual([x.get('error') for x in r], [None] * 5)
+        self.assertEqual((e.st['config']['highlight'], e.st.get('hidden')), ([], []))
+
+    def test_the_window_within_the_waves(self):
+        e = ed()
+        e.run([{'op': 'cursor', 't': '5ns'}, {'op': 'view', 'span': '40ns'}])
+        self.assertEqual((e.st['from'], e.st['to']), (0, 40000))
+        e.run([{'op': 'view', 'at': '79ns', 'span': '500ns'}])
+        self.assertEqual((e.st['from'], e.st['to']), (0, 80000))
+
+    def test_texts_and_numbers_as_the_page(self):
+        e = ed()
+        self.assertEqual(e.run([{'op': 'bookmark', 't': '10ns', 'text': [1, 2.0, None], 'label': True}])[0].get('error'), None)
+        b = e.st['bookmarks'][-1]
+        self.assertEqual((b['text'], b['label']), ('1,2,', 'true'))
+        self.assertIn('a bookmark number', self.err(e, {'op': 'bookmark', 'n': ' 3', 't': '10ns'}))
+        e.run([{'op': 'marker', 't': '10ns'}, {'op': 'marker', 't': '30ns'}, {'op': 'marker', 't': '50ns'}])
+        self.assertEqual(self.err(e, {'op': 'deltas', 'id': 1, 'to': 3.0}), '')
+        self.assertEqual(e.st['markers'][0]['dto'], 3)
+        self.assertEqual(e.run([{'op': 'rows', 'offset': 'abc', 'limit': 2}])[0]['rows'][:1], e.run([{'op': 'rows', 'limit': 1}])[0]['rows'])   # +"abc" || 0
+
+    def test_arrows_deleted_and_a_window_not_known(self):
+        """M-13 of the review: what no test ran: an arrow deleted (by id, by its ends), view span / at on a file whose window is not known."""
+        e = ed()
+        e.run([{'op': 'bookmark', 't': '30ns'}, {'op': 'arrow', 'from': 1, 'to': 2}, {'op': 'arrow', 'from': 2, 'to': 1}])
+        self.assertEqual(e.run([{'op': 'arrow', 'id': 1, 'delete': True}])[0], {'op': 'arrow', 'id': 1, 'deleted': True})
+        self.assertEqual(e.run([{'op': 'arrow', 'from': 2, 'to': 1, 'delete': True}])[0].get('deleted'), True)
+        self.assertEqual(self.err(e, {'op': 'arrow', 'from': 1, 'to': 2, 'delete': True}), 'no arrow 1 → 2')
+        self.assertEqual(self.err(ed(), {'op': 'view', 'span': '10ns'}), 'view: at (the cursor here is not known)')
+        self.assertEqual(self.err(ed(), {'op': 'view', 'at': '10ns'}), 'view: span (the window here is not known)')
+        self.assertEqual(self.err(ed(), {'op': 'view', 'from': '20ns', 'to': '10ns'}), 'view: "to" is not after "from"')

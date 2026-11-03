@@ -105,7 +105,7 @@ Object.assign(WaveView.prototype, {
       (ugh ? `<hr><div class="mh">${esc(ugh.name)} · your group</div>` + mvs('your groups') + b('ugfold', this.collapsed.has(ugh.id) ? 'Open this group' :
         'Fold this group') : '') +
       (it ? `<hr><div class="mh">${esc(it.full || it.name)}${many ? `<br>+ every ${run ? 'selected' : 'highlighted'} row: ${sigs.length} signals` : ''}</div>` +
-        (mine ? mvs(`“${esc(mine.ug.name)}”`) : '') +
+        (mine ? mvs(`“${mine.ug.name}”`) : '') +   // (b() escapes it)
         (sigs.length ?
           `<label class="mi">${many ? `Colour of ${sigs.length}` : 'Colour'} <input type="color" value="${esc(col)}"
             aria-label="colour of ${esc(of)}"></label>` +
@@ -447,6 +447,40 @@ Object.assign(WaveView.prototype, {
       if (blur) window.addEventListener('blur', off, { signal: this.ac.signal }); }, 0);
   },
   refocus() { this.canvas.focus({ preventScroll: true }); return this; },
+  // the first key of a sequence: a moment after it (keyHints ms, false: never) a box says what can follow; a key or a click on it goes on,
+  // as long as it is open (the keys stay on the waves), Esc or a click elsewhere closes it
+  keyHintOn(k) {
+    this.kpre = { k, t: Date.now() };
+    if (this.S.keyHints !== false) this.keysT = setTimeout(() => this.keyHintShow(k), +this.S.keyHints || 0);
+  },
+  keyHintOff() {
+    clearTimeout(this.keysT); this.kpre = null;
+    if (!this.keysEl) return;
+    this.keysEl.remove(); this.keysEl = null; document.removeEventListener('pointerdown', this.keysOff, true);
+  },
+  keyRows(pre) {
+    const rows = KEY_MENUS[pre][1].filter(r => r.length === 1 || !r[2] || r[2](this))
+      .map(r => (typeof r[1] === 'function' ? [r[0], r[1](this)] : r.slice(0, 2)));
+    const own = new Set(KEY_MENUS[pre][1].map(r => r[0]));
+    const more = Object.keys(this.keys).filter(s => s.length === 2 && s[0] === pre && !own.has(s[1])).map(s => [s[1],
+      (this.keyHelp || []).find(h => h.split(' ').includes(s))]).filter(r => r[1]);
+    more.forEach(r => { r[1] = r[1].replace(/^(\S\S )+/, '').replace('next / previous ', ''); });   // ']f [f next / previous …'
+    return rows.concat(more.length && pre === 'g' ? [['Plugins']] : [], more).filter((r, i, l) => r.length > 1 || (l[i + 1] && l[i + 1].length > 1));
+  },
+  keyHintShow(k) {
+    if (!this.kpre || this.kpre.k !== k || this.keysEl) return;
+    this.kpre.t = Infinity;   // it waits for you
+    const el = document.createElement('div'); el.className = 'wv-keys'; el.setAttribute('role', 'menu'); el.setAttribute('aria-label', `after ${k}`);
+    const line = r => (r.length === 1 ? `<div class="ks">${esc(r[0])}</div>` :
+      `<button type="button" role="menuitem" data-k="${esc(r[0])}"><kbd>${esc(r[0])}</kbd><span>${esc(r[1])}</span></button>`);
+    el.innerHTML = `<div class="kh"><kbd>${esc(k)}</kbd><b>${esc(KEY_MENUS[k][0])}</b><span class="muted">Esc</span></div>` +
+      `<div class="kg">${this.keyRows(k).map(line).join('')}</div>`;
+    el.addEventListener('pointerdown', e => e.preventDefault());
+    el.addEventListener('click', e => { const b = e.target.closest('button[data-k]'); if (!b) return; this.keyHintOff(); this.seq(k + b.dataset.k); });
+    this.keysOff = e => { if (!el.contains(e.target)) this.keyHintOff(); };
+    document.addEventListener('pointerdown', this.keysOff, true);
+    this.root.append(el); this.keysEl = el;
+  },
   closeMenu() {
     if (!this.menuEl) return;
     this.menuEl.remove(); this.menuEl = null;

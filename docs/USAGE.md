@@ -72,7 +72,7 @@ may be the default). What the tab does differently from a page in a browser:
   what they mean in VS Code (ctrl+F find, ctrl+C copy, ctrl+Z / ctrl+Y undo / redo, alt+C W R in the find field);
   `wavelens.keysToVSCode` (default `ctrl+G`, Go to Line) are left to VS Code — the list of your groups is `gl` then; the
   others (ctrl+P, F1, ctrl+tab, ctrl+shift+…) are VS Code's.
-- **The version** in the bar's title line: `0.39 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
+- **The version** in the bar's title line: `0.40 · dev@5470d89*` — the extension's branch and commit (`*`: changes not
   committed), so a tab of a development build says which one it is.
 - **An agent** on the host (`tools/wavemcp.py`, below): when it starts its live link, every open tab connects (**●
   live**); `view_live` with `page` a `.vcd` / `.fst` and `open: true` opens it in the VS Code window that has the file
@@ -335,6 +335,7 @@ add theirs (`WaveLens.registerDefaults`).
 | `busDetect`, `buses` | true, none | bus transactions (`bus.js`): the ports found by their names; ports of your own `[{protocol, scope, prefix, map, clock, name}]` |
 | `contextMenu` | true | the right button on the waves (a range and the viewer's menu) and on the names (the menu of that row); false: the browser's |
 | `menuTipDelay` | 2000 | ms before a tooltip in that menu shows (the bar's: 350 ms) |
+| `keyHints` | 200 | ms after the first key of a sequence (`g z y [ ]`): a box says what can follow, to press or to click; `false`: never, and the second key within a second, as before |
 | `cursorSnap` | 8 | px: a click on the waves puts the cursor on an edge of the signal under the pointer this near (alt+click: not); 0 = off |
 | `showWidth` | true | a bus's width after its name (`[7:0]`, a field's `[msb:lsb]`; a click on it: the bus bit by bit), in the viewer and the pictures; false: none |
 | `gapView` | false | with `gaps`: the viewer's waves themselves with the gaps cut out, every change of a gap setting shown at once (**Gaps ▸ on the waves**, `gv`); a picture saved cuts where the waves do; a range or the cursors measured through gaps count the time and the clocks hidden, the clock of the gaps said on any row, an end on a gap's column at the side nearer (alt: inside it) |
@@ -349,7 +350,7 @@ add theirs (`WaveLens.registerDefaults`).
 | `toolsFolded` | false | the bar's tools folded to its title line (**▴** / **▾ tools** in the bar) |
 | `toolsHidden` | `[]` | the bar's tool groups left out by their labels (`["style", "dump"]`; the right button on the bar) |
 | `themeButton` | `auto` | **◐** in the bar's title line: the page's theme (auto, light, white, dark; kept in this browser; in VS Code its list, VS Code's colours too); `auto`: when the page has no theme button of its own (`viewer.html`, the VS Code tab) |
-| `version` | true | the version in the bar's title line, and the build the page was made from (`0.39 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
+| `version` | true | the version in the bar's title line, and the build the page was made from (`0.40 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
 | `keysLeft` | `[]` | keys the viewer leaves to its host: `["ctrl+G"]` (`ctrl+` is `cmd+` too, a letter by its place); the VS Code tab: `wavelens.keysToVSCode` |
 | `log` | `auto` | the log under the viewer (§ A dump straight in the browser): `auto` from the first thing done in the page (a dump read, Sources…, Load…), `true` always, `false` never |
 | `savePage` | true | the bar's **Save page**: this page as a `.view.html` with your view in it (§ Save and Load); false hides it and keeps no copy of the page's text |
@@ -620,7 +621,12 @@ setting is the start; a find left out still floats over the waves on `/`). Navig
 | `/`, ctrl+F | find (the bar scrolled away: the find group floats over the waves; ✕ or Esc puts it back) | `n N`, `*` `#` | next / previous match; find the selected signal's name and go to its next / previous match |
 | `b` | bookmark at the cursor | `]b [b` | the next / previous bookmark |
 | `m` | marker at the cursor: its label asked (Enter) | `]m [m` | the next / previous marker |
-| `r` | the last state loaded, read again (Reload) | | |
+| `r` | the last state loaded, read again (Reload) | `R` | the dump read again from the disk, the view kept (⟳) |
+| `g` | a moment after it (`keyHints`) a box says what can follow, to press or to click, as long as it stays open (Esc, or a key it does not list: it closes, nothing else): go to `gg gl gt gT`, markers and bookmarks `gm gM gB gd gc`, the state `gs gL gr`, the dump `gO gR gC`, `gv`, `gp` | `z y [ ]` | the same box: fold, copy, next, previous |
+| `gM` `gB` | a marker, a bookmark at the cursor (as `m`, `b`) | `gd` `gc` | the Δ between markers on / off; clear every bookmark, arrow and marker of yours |
+| `gt` `gT` | the Modules panel, the state machines (as `t`, `T`) | `gs` `gL` `gr` | the state: Save, Load…, Reload |
+| `gO` `gR` `gC` | the dump: Open…, ⟳, Compare… | `gp` | Save page |
+| `yn` `yt` | copy the selected signal's name; the time of the cursor | | |
 | `gm` (the right button's **Markers…**) | the markers (the page's, yours) and the bookmarks in a list over the waves, by time: `↓` the first (`↑` the last), then `↑ ↓` Home End step through them, a click picks one — the cursor on it and the waves at its time with the span they have: a marker in the middle, a bookmark as going to it does (below); Enter or Esc closes it there | `gl`, ctrl+G | your groups: a list |
 | shift+click the waves | a second cursor (dashed, on an edge): Δ to the cursor in time, its frequency (`Δ 40 ns / 25 MHz`) and in cycles of the clock (the cycles band's when it is on, else the selected signal's, else the nearest `*clk*`) on the axis and in the readout; `x` swaps the two; Esc clears it | `1` … `9` | go to that bookmark (each bookmark's line shows its Δ from the cursor; the bookmarks and markers at the cursor are marked in their lists) |
 | `zM` / `zR` | fold / open every module | `zc` / `zo` / `za` | fold / open / toggle the module of the selected signal |
@@ -1258,9 +1264,9 @@ await v.run([
 | `sort`, `style`, `find`, `gaps` | `dir ignore?` / `name` / `query case? word? regex? highlight? open? mask?` / `on? idle? keep? signals? clock? aux? only? count? view? reset?` | the order of the names, the edge style, the find field and its options (answers the rows `found`, the first 50, and their `count`), the gaps of the picture, and with `view` of the waves (`reset`: the page's own; answers every gap setting, on the waves also `cut`: `gaps`, `kept`, `total`, the first 50 `parts`, `partsAll` when more; while expressions have `gap` it is on and `gapBy` lists them, `on` or `view` false or `reset` takes `gap` off them) |
 | `cycles` | `on? clock? zero? reset?` | the clock cycles under the time axis: on, the clock counted (a 1-bit signal), the time of cycle 0 (`null`: the first edge), `reset`: the page's; answers the settings, the clock and the cursor's cycle (in the page; `null` from a file) |
 | `edge`, `reset` | `dir? kind? value? signal?` / — | the cursor to the next / previous edge; what Esc does |
-| `state`, `set_state`, `rows`, `picture` | / `state` / `pattern? limit? offset?` / `format? from? to? rows?` | read: the state (Save); a state back (Load…): a key it has replaces this one's (`config` key by key), a key it does not have stays, `null` clears; the signals of the page in display order (your groups first, as sorted, the hidden ones at the end; a dump compared: `"≠"` or `"missing"` third); the screen as PNG (base64), SVG or WaveDrom (`rows`: `screen`, `all`, `picked` or signals, at most 5000) |
+| `state`, `set_state`, `rows`, `picture` | / `state` / `pattern? limit? offset?` / `format? from? to? rows?` | read: the state (Save); a state back (Load…): a key it has replaces this one's (`config` key by key), a key it does not have stays, `null` clears; the signals of the page in display order (your groups first, as sorted, the hidden ones where they would be; a dump compared: `"≠"` or `"missing"` third); the screen as PNG (base64), SVG or WaveDrom (`rows`: `screen`, `all`, `picked` or signals, at most 5000) |
 
-Times are model units (ps of timed waves, else cycles) or a text with a unit (`"2.5us"`, `"100NS"`, `"0.1µs"`). A
+Times are model units (ps of timed waves, else cycles) or a text with a unit (`"2.5us"`, `"100NS"`, `"0.1µs"`). A bookmark, a marker or a span's end goes inside the waves (from 0 when they start later): a time outside them is refused. A
 bookmark's `n`, the `id` of an arrow or a marker and an arrow's `from` / `to` are whole numbers (`2`, `2.0`, `"2"`;
 `true` or `1.5` is an error). A signal is its full path,
 its name, the end of its path (`u_regs.PSEL`), the dump's longer path of a row the page names shorter, or a `*`

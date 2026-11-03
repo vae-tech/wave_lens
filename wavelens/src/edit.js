@@ -24,6 +24,12 @@ function cmdTime(v, x, what = 't') {
   if (t == null || !isFinite(t)) fail(`${what}: "${x}" is not a time (a number in ${v.M.timed ? 'ps' : 'cycles'}, or "250ns")`);
   return t;
 }
+// a time something is put at (a bookmark, a marker, a span's end): inside the waves (from 0 when they start later: a test's mark at its start)
+function cmdIn(v, x, what = 't') {
+  const t = cmdTime(v, x, what), lo = Math.min(0, v.M.t0);
+  if (t < lo || t > v.M.t1) fail(`${what}: ${v.when(t)} is outside these waves (${v.when(lo)} … ${v.when(v.M.t1)})`);
+  return t;
+}
 // rows by what a person or an agent writes (see above); o.groups: modules and your groups too; o.scopes: the modules
 // only (not a struct, your groups or a plugin's); o.one: exactly one
 function pickRows(v, spec, o = {}) {
@@ -111,7 +117,7 @@ command('bookmark', 'n? t? signal? text? label? color? lift? top? link? go? dele
     v.bms = v.bms.filter(x => x !== b); v.arrows = v.arrows.filter(x => x.from !== b.n && x.to !== b.n); v.changed(true);
     return { n: b.n, deleted: true };
   }
-  const t = a.t != null ? cmdTime(v, a.t) : null, sig = a.signal ? pickRows(v, a.signal, { one: true })[0].full : null;
+  const t = a.t != null ? cmdIn(v, a.t) : null, sig = a.signal ? pickRows(v, a.signal, { one: true })[0].full : null;
   let b = a.n != null ? v.bms.find(x => x.n === +a.n) : null;
   const touch = !b || ['t', 'signal', 'text', 'label', 'color', 'lift', 'top', 'link'].some(k => a[k] !== undefined);   // go alone changes nothing of it
   if (a.link != null && !linkOf(a.link)) fail(`link: a view's key ("crc") or {view, bookmark}, not ${JSON.stringify(a.link)}`);
@@ -173,7 +179,7 @@ command('marker', 'id? t? label? color? signal? lift? hidden? delete?', 'a marke
     if (a.id === 'all') v.umarks = []; else { v.umarks.splice(+a.id - 1, 1); markGone(v.umarks, +a.id); }
     v.setMarks(); return { id: a.id, deleted: true };
   }
-  const t = a.t != null ? cmdTime(v, a.t) : null, sig = a.signal ? pickRows(v, a.signal, { one: true })[0].full : null;
+  const t = a.t != null ? cmdIn(v, a.t) : null, sig = a.signal ? pickRows(v, a.signal, { one: true })[0].full : null;
   if (a.lift != null && ![true, 'above', 'below'].includes(a.lift)) fail(`lift: true, "above" or "below", not ${JSON.stringify(a.lift)}`);
   let m = a.id != null ? v.umarks[+a.id - 1] : null;
   if (a.lift != null && !(a.signal !== undefined ? sig : m && m.signal)) fail('marker: lift is the lane of a signal: give signal');
@@ -261,7 +267,7 @@ command('span', 'id? from? to? label? color? signals? delete?', 'a coloured stre
     if (a.id === 'all') v.spans = []; else v.spans.splice(+a.id - 1, 1);
     v.changed(true); return { id: a.id, deleted: true };
   }
-  const from = a.from != null ? cmdTime(v, a.from) : null, to = a.to != null ? cmdTime(v, a.to) : null;
+  const from = a.from != null ? cmdIn(v, a.from, 'from') : null, to = a.to != null ? cmdIn(v, a.to, 'to') : null;
   const sigs = a.signals == null ? undefined : (Array.isArray(a.signals) ? a.signals : [a.signals]).map(x => pickRows(v, x, { one: true })[0].full);
   let s = a.id != null ? v.spans[+a.id - 1] : null;
   if (!s) { if (from == null || to == null) fail('span: from and to'); s = { from, to, label: '', color: null, signals: null }; v.spans.push(s); }
@@ -557,7 +563,7 @@ Object.assign(WaveView.prototype, {
       dups: [...this.dups.keys()], deltas: this.deltas, bits: [...this.bitsOpen], only: this.onlyState(), fsm: this.fsmState(),
       config: Object.assign({ style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded,
         toolsHidden: toolNames(this.S.toolsHidden), sort: this.sort, sortIgnore: [...this.sortIgnore] }, this.gapOpt(true), this.cycOpt()),
-      hl: [...this.picks].map(([r, i]) => [r.full, i]).sort((a, b) => a[1] - b[1]) });
+      hl: this.hlOrder().map(r => [r.full, this.picks.get(r)]) });
   },
   undoTick(base = false) {
     if (!base && (this.undoCur == null || this.undoing || this.held || PTR.down)) return;   // no history yet, or a step not done

@@ -121,11 +121,41 @@ def finite(x):
     return isinstance(x, (int, float)) and not isinstance(x, bool) and x == x and x not in (float('inf'), float('-inf'))
 
 
+# what a saved state has (view.js state(), the plugins' addState): set_state takes these, nothing else
+STATE_KEYS = {'from', 'to', 'cursor', 'cursor2', 'range', 'edge', 'paint', 'radix', 'analog', 'hidden', 'dups', 'deltas', 'bits', 'select', 'find',
+              'bookmarks', 'arrows', 'markers', 'spans', 'groups', 'only', 'fsm', 'compare', 'compareShow', 'folds', 'exprs', 'sva', 'bus'}
+COLOR_FN = re.compile(r'(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\([^;{}()]*\)', re.I)
+
+
+def color_ok(c):
+    """model.js colorOk / edit.js cmdColor: a colour the page takes (a name, #hex, a CSS colour function), None to clear; else an error."""
+    if c is None or c == '':
+        return None
+    if isinstance(c, str) and (re.fullmatch(r'[\w#-]+', c) or COLOR_FN.fullmatch(c.strip())):
+        return c
+    fail(f'"{c}" is no colour')
+
+
+def js_str(x):
+    """A text as the page's String(x) makes it (true, 1,2, [object Object])."""
+    if isinstance(x, bool):
+        return 'true' if x else 'false'
+    if x is None:
+        return 'null'
+    if isinstance(x, float) and finite(x) and x.is_integer():
+        return str(int(x))
+    if isinstance(x, list):
+        return ','.join('' if y is None else js_str(y) for y in x)
+    if isinstance(x, dict):
+        return '[object Object]'
+    return str(x)
+
+
 def whole(x):
     """A number as JavaScript's Number.isInteger takes it (1, 1.0, "1"; not true, 1.5, "x") -> the int, or None."""
     if isinstance(x, bool):
         return None
-    if isinstance(x, str) and re.fullmatch(r'\s*\d+\s*', x):
+    if isinstance(x, str) and re.fullmatch(r'\d+', x):   # edit.js isNum: digits only
         return int(x)
     if isinstance(x, float) and finite(x) and x.is_integer():
         return int(x)
@@ -589,7 +619,7 @@ class Editor:
 
     def highlight(self):
         c = self.st.get('config') or {}
-        return list(c['highlight']) if 'highlight' in c else self.m.base_highlight()
+        return prefixes(c['highlight']) if 'highlight' in c else self.m.base_highlight()   # a text "a,b" too, as hlPick
 
     def fold(self):
         """The folded groups as far as known here: the state's "fold", else the page's setting, then "folds"."""
@@ -623,6 +653,15 @@ class Editor:
         t = parse_t(x)
         if t is None or t != t or t in (float('inf'), float('-inf')):
             fail(f'{what}: "{x}" is not a time (a number in {"ps" if self.m.timed or not self.m.doc else "cycles"}, or "250ns")')
+        return t
+
+    def time_in(self, x, what='t'):
+        """edit.js cmdIn: a time something is put at, inside the waves (when they are known)."""
+        t = self.time(x, what)
+        lo = min(0, self.m.t0 or 0)   # from 0 when they start later, as edit.js cmdIn
+        if self.m.doc and self.m.t1 is not None and not lo <= t <= self.m.t1:
+            ft = (lambda x: f'{x / 1000:g}ns') if self.m.timed else (lambda x: f'{x:g}')
+            fail(f'{what}: {ft(t)} is outside these waves ({ft(lo)} … {ft(self.m.t1)})')
         return t
 
     def run(self, ops):
@@ -676,6 +715,11 @@ class Editor:
             p, q = at - s / 2, at + s / 2
         else:
             fail('view: from and to, or span (and at)')
+        if self.m.doc and self.m.t1 is not None and a.get('from') is None:   # edit.js: the span within the waves, centred, clamped
+            full = self.m.t1 - self.m.t0
+            s = min(q - p, full) if full > 0 else q - p
+            p = min(max(p + (q - p - s) / 2, self.m.t0), self.m.t1 - s)
+            q = p + s
         self.st['from'], self.st['to'] = p, q
         return {'from': p, 'to': q}
 
@@ -711,7 +755,7 @@ class Editor:
                 fail(f'no bookmark {n} (there are: {nums})')
             self.put_marks([x for x in bms if x is not b], [x for x in self.ars() if b['n'] not in (x['from'], x['to'])])
             return {'n': b['n'], 'deleted': True}
-        t = self.time(a['t']) if a.get('t') is not None else None
+        t = self.time_in(a['t']) if a.get('t') is not None else None
         sig = self.m.pick(self.st, a['signal'], one=True)[0]['full'] if a.get('signal') else None
         b = next((b for b in bms if n is not None and b['n'] == n), None)
         touch = not b or any(k in a for k in ('t', 'signal', 'text', 'label', 'color', 'lift', 'top', 'link'))   # go alone changes nothing of it
@@ -734,11 +778,11 @@ class Editor:
         if 'signal' in a:
             b['signal'] = sig
         if 'text' in a:
-            b['text'] = '' if a['text'] is None else str(a['text'])
+            b['text'] = '' if a['text'] is None else js_str(a['text'])
         if 'label' in a:
-            b['label'] = '' if a['label'] is None else str(a['label'])
+            b['label'] = '' if a['label'] is None else js_str(a['label'])
         if 'color' in a:
-            b['color'] = a['color'] or None
+            b['color'] = color_ok(a['color'])
         if 'lift' in a:
             b['lift'] = lift_of(a['lift'])
         if 'top' in a:
@@ -822,9 +866,9 @@ class Editor:
             if a.get(k) is not None:
                 x[k] = a[k]
         if 'color' in a:
-            x['color'] = a['color'] or None
+            x['color'] = color_ok(a['color'])
         if 'label' in a:
-            x['label'] = '' if a['label'] is None else str(a['label'])
+            x['label'] = '' if a['label'] is None else js_str(a['label'])
         self.put_marks(None, ars)
         return {'id': i + 1}
 
@@ -842,7 +886,7 @@ class Editor:
             return {'id': mid, 'deleted': True}
         if mid == 'all':
             fail('marker: id "all" goes with delete (every marker deleted); one to change: its number')
-        t = self.time(a['t']) if a.get('t') is not None else None
+        t = self.time_in(a['t']) if a.get('t') is not None else None
         sig = self.m.pick(self.st, a['signal'], one=True)[0]['full'] if a.get('signal') else None
         if a.get('lift') is not None and a['lift'] not in (True, 'above', 'below'):
             fail(f'lift: true, "above" or "below", not {json.dumps(a["lift"])}')
@@ -857,9 +901,9 @@ class Editor:
         if t is not None:
             m['t'] = t
         if 'label' in a:
-            m['label'] = '' if a['label'] is None else str(a['label'])
+            m['label'] = '' if a['label'] is None else js_str(a['label'])
         if 'color' in a:
-            m['color'] = a['color'] or None
+            m['color'] = color_ok(a['color'])
         if 'signal' in a:
             m['signal'] = sig
         if a.get('lift') is not None:
@@ -894,9 +938,9 @@ class Editor:
         x = was or expr_norm({'expr': text, 'row': False})
         x.update(text=text, scope=scope)
         if 'label' in a:
-            x['label'] = '' if a['label'] is None else str(a['label'])
+            x['label'] = '' if a['label'] is None else js_str(a['label'])
         if 'color' in a:
-            x['color'] = a['color'] or None
+            x['color'] = color_ok(a['color'])
         for k in ('on', 'row', 'gap'):
             if k in a:
                 x[k] = bool(a[k])
@@ -918,8 +962,8 @@ class Editor:
                 fail('span: delete takes id or "all"')
             self.st['spans'] = span_list([] if sid == 'all' else ss[:sid - 1] + ss[sid:])
             return {'id': sid, 'deleted': True}
-        t0 = self.time(a['from'], 'from') if a.get('from') is not None else None
-        t1 = self.time(a['to'], 'to') if a.get('to') is not None else None
+        t0 = self.time_in(a['from'], 'from') if a.get('from') is not None else None
+        t1 = self.time_in(a['to'], 'to') if a.get('to') is not None else None
         given = a.get('signals')
         sigs = None if given is None else [self.m.pick(self.st, x, one=True)[0]['full'] for x in (given if isinstance(given, list) else [given])]
         s = ss[sid - 1] if sid is not None else None
@@ -935,9 +979,9 @@ class Editor:
         if s['from'] > s['to']:
             s['from'], s['to'] = s['to'], s['from']
         if 'label' in a:
-            s['label'] = '' if a['label'] is None else str(a['label'])
+            s['label'] = '' if a['label'] is None else js_str(a['label'])
         if 'color' in a:
-            s['color'] = a['color'] or None
+            s['color'] = color_ok(a['color'])
         if a.get('signals') is not None:
             s['signals'] = sigs or None
         self.st['spans'] = span_list(ss)
@@ -982,7 +1026,7 @@ class Editor:
         if rm:
             g['signals'] = [f for f in g['signals'] if f not in rm]
         if 'color' in a:
-            g['color'] = a['color'] or None
+            g['color'] = color_ok(a['color'])
         if to:
             g['name'] = to
         self.st['groups'] = group_list(gs)
@@ -1019,7 +1063,7 @@ class Editor:
         rows = self.m.sigs_of(self.st, self.m.pick(self.st, a['signals'], groups=True)) if a.get('signals') is not None else []
         for r in rows:
             if a.get('color'):
-                p[r['full']] = str(a['color'])
+                p[r['full']] = str(color_ok(a['color']))
             else:
                 p.pop(r['full'], None)
         if a.get('clear'):   # every colour off, the browser's own too
@@ -1200,6 +1244,8 @@ class Editor:
             fail(f'no marker {a["id"]} (there are {len(ms)})')
         m = ms[mid - 1] if mid is not None else None
         to = a.get('to')
+        if to not in (None, 'next') and whole(to) is not None and not isinstance(to, str):   # 3.0: 3, as Number.isInteger
+            to = whole(to)
         if to is not None and to != 'next' and not (isinstance(to, int) and not isinstance(to, bool) and 1 <= to <= len(ms)):
             fail(f'to: a marker as listed (there are {len(ms)}), "next" or null, not {json.dumps(to)}')
         if to is not None and to == mid:
@@ -1221,7 +1267,7 @@ class Editor:
             if 'to' in a:
                 m['dto'] = 0 if to is None else None if to == 'next' else to
             if 'color' in a:
-                m['dcolor'] = a['color'] or None
+                m['dcolor'] = color_ok(a['color'])
             self.st['markers'] = mark_list(ms)
         return {'on': bool(self.st.get('deltas')), 'deltas': [{'from': i + 1, 'to': j + 1, 'dt': abs(ms[j]['t'] - ms[i]['t'])} for i, j in mark_deltas(ms)]}
 
@@ -1275,9 +1321,12 @@ class Editor:
         for k in ('radix', 'analog', 'paint'):
             if isinstance(self.st.get(k), dict):
                 self.st[k].pop(d, None)
-        for k in ('hidden', 'bits'):
+        for k in ('hidden', 'bits'):   # its bits hidden too
             if k in self.st:
-                self.st[k] = [x for x in self.st[k] if x != d]
+                self.st[k] = [x for x in self.st[k] if not (x == d or (k == 'hidden' and isinstance(x, str) and x.startswith(d + '[')))]
+        c = self.st.get('config')
+        if isinstance(c, dict) and 'highlight' in c:   # look.js: picks.delete
+            c['highlight'] = [x for x in prefixes(c['highlight']) if x != d]
         for g in self.st.get('groups') or []:
             g['signals'] = [x for x in g.get('signals') or [] if x != d]
         for b in (self.st.get('bookmarks') or []) + (self.st.get('markers') or []):
@@ -1445,8 +1494,11 @@ class Editor:
             if k == 'config':
                 if isinstance(v, dict):
                     self.config().update(v)
-            elif k not in ('wavelens', 'version', 'title'):
+            elif k in STATE_KEYS:   # what a state has (view.js state()); another key is not the viewer's
                 self.st[k] = v
+        for k in ('bookmarks', 'markers', 'arrows', 'spans', 'groups'):   # an entry that is no object: left out, as the page does
+            if isinstance(self.st.get(k), list):
+                self.st[k] = [x for x in self.st[k] if isinstance(x, dict)]
         if 'dups' in s and self.m.doc:   # as the viewer keeps them: the copies of signals of these waves
             self.st['dups'] = [r['full'] for r in self.m.dup_rows(s)]
         if 'bits' in s and self.m.doc:   # as the viewer keeps them: the buses of these waves
@@ -1501,7 +1553,7 @@ class Editor:
             out += [dict(by[f], anc=[gid], ug=True, oanc=by[f]['anc']) for f in g['signals'] if f in by]
         return out
 
-    def ordered(self, only=True):
+    def ordered(self, only=True, hidden=False):
         """view.js allRows: your groups at the top, then the rows in the order of "sort"; hidden rows and what is under a
         hidden module left out, then (only) the rows Only leaves out."""
         sort, ign = self.opt('sort', 'none'), sorted(prefixes(self.opt('sortIgnore')), key=lambda p: -len(p))
@@ -1513,7 +1565,8 @@ class Editor:
         rows = self.user_rows() + rows
         h = set(self.st.get('hidden') or [])
         ids = {g['id'] for g in self.m.groups if g['path'] in h}
-        out = [r for r in rows if not (r['type'] != 'space' and r.get('full') and not r.get('ug') and r['full'] in h) and not ids & set(r['anc'])]
+        out = rows if hidden else [r for r in rows if not (r['type'] != 'space' and r.get('full') and not r.get('ug') and r['full'] in h) and
+                                   not ids & set(r['anc'])]
         keep = self.only_filter() if only else None
         return [r for r in out if keep(r)] if keep else out
 
@@ -1564,19 +1617,25 @@ class Editor:
         self.st['compareShow'] = show
 
     def c_rows(self, a):
-        """edit.js rows: in display order, the hidden ones at the end."""
+        """edit.js rows: in display order, the hidden ones where they would be."""
         pat = str(a.get('pattern') or '')
         rx = glob_re(pat) if '*' in pat else None
         h = set(self.st.get('hidden') or [])
-        shown = [r for r in self.ordered(only=False) if (r['type'] == 'sig' and not r.get('ug')) or (r['type'] == 'group' and r.get('full'))]
+        shown = [r for r in self.ordered(only=False, hidden=True) if (r['type'] == 'sig' and not r.get('ug')) or (r['type'] == 'group' and r.get('full'))]
         c = self.compare() or {}
         sigs, miss = c.get('signals') or {}, set(c.get('missing') or [])
         mark = lambda r: (['≠'] if ((sigs.get(r.get('path') or r['full']) or {}).get('spans')) else
                           ['missing'] if (r.get('path') or r['full']) in miss else []) if r['type'] == 'sig' else []
         rows = [[r['full'], 'group' if r.get('user') else 'module' if r['type'] == 'group' else r['width'], *mark(r)]
-                for r in shown + [r for r in self.m.rows + self.m.dup_rows(self.st) if r.get('full') and r['full'] in h]]
+                for r in shown]
         rows = [r for r in rows if not pat or (rx.match(r[0]) if rx else pat.lower() in r[0].lower())]
-        off, n = max(0, int(a.get('offset') or 0)), max(1, int(a.get('limit') or 200))
+        def num(x, d):   # the page's +x || d
+            try:
+                f = float(x) if not isinstance(x, bool) else float(x)
+            except (TypeError, ValueError):
+                return d
+            return int(f) if finite(f) and f else d
+        off, n = max(0, num(a.get('offset'), 0)), max(1, num(a.get('limit'), 200) or 200)
         out = {'total': len(rows), 'rows': rows[off:off + n]}
         if off + n < len(rows):
             out['next_offset'] = off + n

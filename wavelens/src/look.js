@@ -37,7 +37,8 @@ Object.assign(WaveView.prototype, {
     const base = d.dupOf, f = d.full, list = this.dupsBy.get(base).filter(x => x !== d), to = p => (p === f ? base.full : typeof p === 'string' &&
       p.startsWith(f + '[') ? base.full + p.slice(f.length) : p);
     if (list.length) this.dupsBy.set(base, list); else this.dupsBy.delete(base);
-    this.dups.delete(f); this.radixes.delete(f); this.analogs.delete(f); this.painted.delete(f); this.hiddenRows.delete(f); this.bitsOpen.delete(f);
+    this.dups.delete(f); this.radixes.delete(f); this.analogs.delete(f); this.painted.delete(f); this.bitsOpen.delete(f);
+    for (const p of [...this.hiddenRows]) if (p === f || p.startsWith(f + '[')) this.hiddenRows.delete(p);   // its bits hidden too
     for (const g of this.ugroups) g.signals = g.signals.filter(p => p !== f);
     for (const b of this.bms) b.signal = to(b.signal);
     for (const m of this.umarks) { m.signal = to(m.signal); m.dsignal = to(m.dsignal); }

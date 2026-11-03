@@ -130,8 +130,10 @@ def _commands(lines, rest):
     """The header one command per item (`$scope module tb $end`), however the lines break it: several on one line
     (`$upscope $end $upscope $end`), one over several lines. Stops after $enddefinitions; what follows it on the same
     line (`$enddefinitions $end #0 0!`) goes to rest[0]."""
-    buf = []
+    buf, first = [], True
     for line in lines:
+        if first:   # a byte order mark (Windows tools) before the first command
+            line, first = line[3:] if line.startswith(b'\xef\xbb\xbf') else line, False
         toks = line.split()
         for i, t in enumerate(toks):
             buf.append(t)
@@ -171,12 +173,12 @@ def _header(lines, d, path):
         elif t0 == b'$date':
             d.date = b' '.join(tok[1:-1] if tok[-1] == b'$end' else tok[1:]).decode(errors='replace') or None
         elif t0 == b'$scope' and len(tok) > 2:
-            scope.append(tok[2].decode(errors='replace'))
+            scope.append(tok[2].decode(errors='replace') if tok[2] != b'$end' else '')   # no name: a level with an empty one
             kind = tok[1].decode(errors='replace').lower()
             if kind not in ('module', '$end'):
-                d.scopes['.'.join(scope)] = kind
+                d.scopes['.'.join(filter(None, scope))] = kind
             else:
-                d.modules.add('.'.join(scope))
+                d.modules.add('.'.join(filter(None, scope)))
         elif t0 == b'$upscope' and scope:
             scope.pop()
         elif t0 == b'$attrbegin' and len(tok) > 4 and tok[1] == b'misc' and tok[2] in (b'07', b'7'):
@@ -191,7 +193,7 @@ def _header(lines, d, path):
             size = size or 1   # a string's size 0 (fst2vcd, sva vcd): one value, as the page reads it
             ref, rng = parse_ref([t.decode(errors='replace') for t in tok[4:-1]])
             enum, pending = tables.get(pending), None
-            pre = '.'.join(scope) + '.' if scope else ''
+            pre = '.'.join(filter(None, scope)) + '.' if scope else ''
             esc = ref.startswith('\\')
             m = None if esc else re.fullmatch(r'(.+)\[(\d+)\]', ref)
             if m and not rng and size == 1 and kind not in TEXT_KINDS and kind != 'event':  # one bit of a bit-blasted vector

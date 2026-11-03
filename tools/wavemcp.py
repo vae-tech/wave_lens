@@ -1187,6 +1187,8 @@ def ns_out(results, timed):
                 r['range'] = [t(x) for x in r['range']]
             if r.get('op') == 'state' and isinstance(r.get('state'), dict):
                 r['state'] = state_ns(r['state'])
+            if r.get('op') == 'deltas' and isinstance(r.get('deltas'), list):
+                r['deltas'] = [dict(x, dt=t(x.get('dt'))) if isinstance(x, dict) else x for x in r['deltas']]
             if r.get('op') == 'cycles' and isinstance(r.get('cycles'), dict):
                 r['cycles'] = dict(r['cycles'], cycleZero=t(r['cycles'].get('cycleZero')))
             if r.get('op') == 'expr_matches':
@@ -1222,6 +1224,9 @@ def state_conv(st, f):
     for k in ('bookmarks', 'markers'):
         if isinstance(st.get(k), list):
             st[k] = [dict(x, t=t(x['t'])) if isinstance(x, dict) and 't' in x else x for x in st[k]]
+    num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)   # a span's end may be {"bookmark": n}
+    if isinstance(st.get('spans'), list):
+        st['spans'] = [dict(x, **{e: t(x[e]) for e in ('from', 'to') if num(x.get(e))}) if isinstance(x, dict) else x for x in st['spans']]
     if isinstance(st.get('config'), dict) and st['config'].get('cycleZero') is not None:
         st['config'] = dict(st['config'], cycleZero=t(st['config']['cycleZero']))
     return st

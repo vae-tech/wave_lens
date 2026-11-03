@@ -1037,3 +1037,45 @@ class Arguments(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class Review1103(unittest.TestCase):
+    """B-02 of the review of 2026-11-03: every time of the server in ns, the spans and the Δ of the markers too."""
+    def test_spans_and_deltas_in_ns(self):
+        with H.tmp() as d:
+            page, j = os.path.join(d, 'p.html'), os.path.join(d, 'v.json')
+            with open(j, 'w', encoding='utf-8') as f:
+                json.dump({'signal': [{'name': 'clk', 'wave': 'p.......'}], 'time': {'t0': 0, 't1': 80000, 'cycle': 10000, 'unit': 'ps'}}, f)
+            rc, _, err = H.run_tool('mkhtml', f'one={j}', '--no-sva', '--out', page)
+            self.assertEqual(rc, 0, err)
+            text, bad = W.call('view_edit', {'page': page, 'ops': [{'op': 'span', 'from': 10, 'to': 20}, {'op': 'marker', 't': 10},
+                                                                    {'op': 'marker', 't': 30}, {'op': 'deltas', 'on': True}]})
+            self.assertFalse(bad, text)
+            self.assertEqual(json.loads(text)['results'][-1]['deltas'], [{'from': 1, 'to': 2, 'dt': 20}])
+            text, bad = W.call('view_get', {'page': page, 'full': True})
+            g = json.loads(text)   # full: the state's keys in the answer
+            self.assertEqual([(s['from'], s['to']) for s in g['spans']], [(10, 20)])
+            st = {'wavelens': 'state', 'spans': g['spans'], 'markers': g['markers']}   # read, given back: where it was
+            text, bad = W.call('view_edit', {'page': page, 'ops': [{'op': 'set_state', 'state': st}]})
+            self.assertFalse(bad, text)
+            st2 = json.loads(W.call('view_get', {'page': page, 'full': True})[0])
+            self.assertEqual(([(s['from'], s['to']) for s in st2['spans']], [m['t'] for m in st2['markers']]), ([(10, 20)], [10, 30]))
+
+    def test_what_an_agent_reads_of_a_state(self):
+        """T-04 of the review (M-04): view_get's summary of a state: the second cursor, the range, spans, groups, highlight, sort, style."""
+        with H.tmp() as d:
+            page, j = os.path.join(d, 'p.html'), os.path.join(d, 'v.json')
+            with open(j, 'w', encoding='utf-8') as f:
+                json.dump({'signal': [{'name': 'clk', 'wave': 'p.......'}, ['tb', {'name': 'valid', 'wave': '0.1.0...'}]],
+                           'time': {'t0': 0, 't1': 80000, 'cycle': 10000, 'unit': 'ps'}}, f)
+            self.assertEqual(H.run_tool('mkhtml', f'one={j}', '--no-sva', '--out', page)[0], 0)
+            st = {'wavelens': 'state', 'cursor': 15, 'cursor2': 40, 'range': {'from': 20, 'to': 50, 'signal': 'tb.valid'},
+                  'spans': [{'from': 10, 'to': 30, 'label': 's'}], 'groups': [{'name': 'g', 'signals': ['clk']}],
+                  'config': {'sort': 'asc', 'style': 'questa', 'highlight': ['tb.valid']}}
+            text, bad = W.call('view_edit', {'page': page, 'ops': [{'op': 'set_state', 'state': st}]})
+            self.assertFalse(bad, text)
+            g = json.loads(W.call('view_get', {'page': page})[0])
+            self.assertEqual({k: g.get(k) for k in ('cursor', 'cursor2', 'range', 'sort', 'style', 'highlight')},
+                             {'cursor': 15, 'cursor2': 40, 'range': [20, 50, 'tb.valid'], 'sort': 'asc', 'style': 'questa', 'highlight': ['tb.valid']})
+            self.assertEqual([(x['id'], x['from'], x['to'], x['label']) for x in g['spans']], [(1, 10, 30, 's')])
+            self.assertEqual(g['groups'], [{'name': 'g', 'signals': ['clk']}])

@@ -42,7 +42,8 @@ function resolveSrc(el) {
   if (el.tagName === 'SCRIPT') return el.textContent;
   const ref = el.dataset.wave;
   if (ref.startsWith('#')) { const s = document.querySelector(ref); if (!s) throw new Error(`data-wave="${ref}": no such element`); return s.textContent; }
-  const v = ref.split('.').reduce((o, key) => (o == null ? o : o[key]), G);
+  const sq = /^WAVES\[(".*")\]$/.exec(ref);   // a view key that is no name (mkhtml.py: WAVES["my-view"])
+  const v = sq ? (G.WAVES || {})[JSON.parse(sq[1])] : ref.split('.').reduce((o, key) => (o == null ? o : o[key]), G);
   if (v == null) throw new Error(`data-wave="${ref}": not found (is the data <script src> loaded?)`);
   return v;
 }
@@ -180,7 +181,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.39',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.40',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,

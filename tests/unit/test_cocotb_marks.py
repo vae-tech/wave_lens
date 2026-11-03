@@ -195,6 +195,32 @@ class Library(Harness):
         self.assertEqual(t['marks'][1]['got'], '5')
         self.assertEqual([p['step'] for p in t['phases']], [2, 1, 1])
 
+    def test_a_label_that_is_no_text(self):
+        """B-19 of the review of 2026-11-03: a label or colour that is no JSON text does not take the test's verdict."""
+        wl = self.marks()
+
+        async def odd(dut):
+            wl.note('odd', label=b'bytes', color=7)
+            wl.check(1, 1, 'one')
+        t = self.run_test(wl, odd)['tests'][0]
+        self.assertEqual((t['result'], t['marks'][0]['label'], t['marks'][0]['color']), ('pass', "b'bytes'", '7'))
+        self.assertFalse(os.path.exists(self.path + '.tmp'))
+
+    def test_a_test_awaited_inside_another(self):
+        """B-20: one test awaited by another is a part of it: the outer keeps its marks and its verdict."""
+        wl = self.marks()
+
+        async def inner(dut):
+            wl.note('in')
+        go_inner = wl.test()(inner)
+
+        async def outer(dut):
+            await go_inner(dut)
+            wl.check(2, 2, 'after')
+        t = self.run_test(wl, outer)['tests']
+        self.assertEqual([(x['name'], x['result'], x['passed']) for x in t], [('outer', 'pass', 1)])
+        self.assertEqual([m['text'] for m in t[0]['marks'] if m['kind'] == 'note'], ['in'])
+
     def test_numbers_run_on(self):
         wl = self.marks()
         dut = Dut('TEST_CASE', 'TEST_STEP')

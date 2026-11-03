@@ -5,6 +5,30 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.40 — 3 November 2026
+
+Keys that say what can follow them, and the bugs of an independent review fixed. `R` reads the dump again; a moment after `g` a box lists the menu.
+
+- **The box of what can follow.** A moment after the first key of a sequence (`g`, `z`, `y`, `[`, `]`) a box lists what can come next, as LazyVim
+  does: press the key or click it; it waits as long as it is open; Esc closes it and only it. Typed fast it never shows. `keyHints` sets the moment
+  (200 ms; `false`: never). A key it does not list does nothing and says so; another first key starts its own box.
+- **`g` is a menu of nearly everything**, listing what the page can do now: go to (`gg gl gt gT`), the markers and bookmarks (`gm`, `gM` a marker,
+  `gB` a bookmark, `gd` the Δ on / off, `gc` clear them), the state (`gs gL gr`), the dump (`gO gR gC`), `gv`, `gp`. `yn` and `yt` copy the
+  selected signal's name and the cursor's time. Help has a section Menus.
+- **`r` the state again, `R` the dump again** (⟳). With a second dump compared, ⟳ reads it again too and shows the run it showed.
+- **From the review of 2026-11-03** (`docs/reviews` on dev): a view key that is no name (`my-view`) builds a page that opens; a highlight of more
+  than six rows keeps its colours through a state; Esc in the expression editor's fields no longer resets the viewer; Clear all leaves the page's
+  own bookmarks for the next load; a marker on a signal not in these waves goes to the top and is said; no "Δ 0"; Set on the cursor field as it
+  shows the cursor keeps it exact; a copy gone takes its hidden bits.
+- **A time outside the waves is refused** for a bookmark, a marker or a span's end (from 0 when the waves start later), in the page and in
+  `viewedit.py`; going to a bookmark made for other waves stops at their end.
+- **`viewedit.py` answers as the page:** colours the page refuses are refused, `set_state` takes a state's keys only, `rows` gives the hidden rows
+  where they would be (they came last), `view span / at` keeps the window within the waves, texts and numbers as the page reads them. The smoke
+  test now compares the two sides' answers command by command.
+- **`wavemcp.py`:** spans and the Δ of `deltas` in ns, as every other time. **`dumpscan.py`:** a byte order mark before `$timescale` no longer
+  loses the unit; a scope with no name. **`wavelens_cocotb`:** a label or colour that is no text no longer takes the test's verdict; a test awaited
+  inside another is a part of it.
+
 ## 0.39 — 2 November 2026
 
 One signal in two forms, markers that measure, and marks that ask less of a test. Two keys changed: `b` is a bookmark now and the bits are on `B`.

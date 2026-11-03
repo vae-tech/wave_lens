@@ -71,6 +71,29 @@ def want(name):
     return not ONLY or name in ONLY
 
 
+# the bar's version says the branch and the commit: a long branch name made the bar wrap and moved every row under it (ranges, pixel
+# positions). Every page of the run gets a fixed width for it (its text stays whole for the checks that read it); tests/shots.py hides it
+STEADY = ("document.addEventListener('DOMContentLoaded', () => { const s = document.createElement('style'); s.textContent = "
+          "'.wv .bar .ver { display: inline-block; width: 24ch; overflow: hidden; white-space: nowrap; vertical-align: bottom; }'; "
+          "document.head.appendChild(s); });")
+
+
+def steady(browser):
+    """browser.new_page / new_context with STEADY on every page."""
+    np, nc = browser.new_page, browser.new_context
+
+    def new_page(*a, **k):
+        pg = np(*a, **k)
+        pg.add_init_script(STEADY)
+        return pg
+
+    def new_context(*a, **k):
+        cx = nc(*a, **k)
+        cx.add_init_script(STEADY)
+        return cx
+    browser.new_page, browser.new_context = new_page, new_context
+
+
 def run(name, fn, *args):
     """One section: skipped by --only, named in its FAIL lines. An exception in it (a playwright timeout, a locator
     that matches two elements, a KeyError) is one FAIL of that section with a PNG of its pages, and the run goes on."""
@@ -2956,6 +2979,11 @@ EDIT_OPS = [   # every command that changes a state, with the arguments in their
     {'op': 'duplicate', 'signals': 'PADDR', 'radix': 'bin'}, {'op': 'duplicate', 'signals': 'PWDATA', 'rows': 2}, {'op': 'duplicate', 'signals': 'PADDR#2'},
     {'op': 'duplicate', 'signals': 'PWDATA#2', 'delete': True}, {'op': 'paint', 'signals': 'PADDR#3', 'color': '#123456'},
     {'op': 'marker', 't': '160ns', 'signal': 'PADDR#3', 'label': 'on a copy'}, {'op': 'duplicate', 'signals': 'PADDR#3', 'delete': True}, {'op': 'marker', 'id': 3, 'delete': True},
+    # review 2026-11-03: arguments no test ran, and what the two sides did apart (B-09, B-11, B-14, B-15, B-23)
+    {'op': 'duplicate', 'signals': 'PADDR'}, {'op': 'highlight', 'add': 'PADDR#2'}, {'op': 'bits', 'signals': 'PADDR#2'}, {'op': 'hide', 'signals': 'PADDR#2[3]'},
+    {'op': 'duplicate', 'signals': 'PADDR#2', 'delete': True}, {'op': 'arrow', 'id': 1, 'delete': True}, {'op': 'paint', 'clear': True},
+    {'op': 'gaps', 'on': True, 'clock': 'PCLK', 'aux': 'PREADY'}, {'op': 'view', 'at': '5ns', 'span': '40ns'}, {'op': 'rows', 'limit': 4, 'offset': 2},
+    {'op': 'bookmark', 't': '70ns', 'text': [1, 2], 'label': True}, {'op': 'deltas', 'id': 1, 'to': 2.0},
 ]
 
 
@@ -4144,6 +4172,14 @@ def edit(browser, build):
                        capture_output=True, text=True)
     py = json.loads(r.stdout or '[]')
     check(r.returncode == 0 and len(py) == len(EDIT_OPS) and not [x for x in py if 'error' in x], f'viewedit.py: the same commands on the page\'s file {r.stderr.strip()}')
+    # the answers too, command by command, in what the file can know (the page says more: a gap's cut, a range's text): the window once the file
+    # knows it; not an expression (no engine in Python), a picture, nor find and fold, which count the assertions' rows of the page too
+    at = next(i for i, o in enumerate(EDIT_OPS) if o['op'] == 'view')
+    mine = lambda r, o: {k: v for k, v in r.items() if v is not None and not (o == 'rows' and k == 'total')}   # what the file cannot know: null
+    apart = [(i, o['op'], run['res'][i], py[i]) for i, o in enumerate(EDIT_OPS) if i < len(py)
+             and {k: run['res'][i].get(k) for k in mine(py[i], o['op'])} != mine(py[i], o['op'])
+             and o['op'] not in ('expr', 'picture', 'find', 'fold', 'unfold') and not (o['op'] in ('view', 'bookmark') and i <= at)]
+    check(not apart, f'the page and viewedit.py answer each command alike ({len(apart)} apart: {apart[:4]})')
     # go once the file knows the window (the view command before it): at the start and the end of the waves, clamped alike
     at = next(i for i, o in enumerate(EDIT_OPS) if o['op'] == 'view')
     gos = [(run['res'][i], py[i]) for i, o in enumerate(EDIT_OPS) if o['op'] == 'bookmark' and o.get('go') and at < i < len(py)]
@@ -4414,6 +4450,168 @@ def marker_deltas(browser, build):
     check(r[0] == 'on: true or false' and r[1].startswith('no marker 99') and r[2] == 'deltas: to, signal, lift and color go with id' and r[3].startswith('lift:') and r[4] == 'deltas: lift is the lane of a signal: give signal', f'deltas: what it refuses {r}')
     a = js("""const m = [...v.umarks].sort((p, q) => q.t - p.t)[0], id = v.umarks.indexOf(m) + 1; return (await v.run([{ op: 'deltas', id }]))[0].error;""")
     check('the last in time' in (a or ''), f'the last marker has no Δ from it {a}')
+    check(not errs, f'no page errors {errs[:2]}')
+    page.close()
+
+
+def review_1103(browser, build):
+    """The page's side of the review of 2026-11-03: a view key that is no name, a highlight of eight, ⟳ with a compare, Esc in the expression
+    editor's fields and after a first key, a key the box did not offer, times outside the waves, Clear all and the page's bookmarks, a group's
+    name in the menu, the cursor field rounded, markers on a signal not here and at one time, a bit of a copy hidden."""
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('viewer: what the review of 2026-11-03 found')
+    d = build / 'smoke' / 'review_1103'; d.mkdir(parents=True, exist_ok=True)
+    page = browser.new_page(viewport={'width': 1400, 'height': 1000})
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    # B-01: a view key that is no name of JavaScript
+    j, p = d / 'v.json', d / 'key.html'
+    j.write_text(json.dumps({'signal': [{'name': 'clk', 'wave': 'p...'}], 'time': {'t0': 0, 't1': 40000, 'cycle': 10000, 'unit': 'ps'}}))
+    r = subprocess.run([sys.executable, '-I', str(ROOT / 'tools' / 'mkhtml.py'), f'my-view={j}', '--no-sva', '--out', str(p)], capture_output=True, text=True)
+    page.goto(p.as_uri()); page.wait_for_load_state('load'); settle(page)
+    a = page.evaluate("[WaveLens.views().length, WaveLens.views()[0] && WaveLens.views()[0].editKey(), document.querySelectorAll('.wvf-err').length]")
+    check(r.returncode == 0 and a == [1, 'my-view', 0], f'B-01: a view "my-view" mounts, its key read back {a} {r.stderr[-200:]}')
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+    js = lambda s: page.evaluate("async () => { const v = document.querySelector('.wv').waveView, I = WaveLens.internal; " + s + " }")
+    focus = lambda: (js("v.root.scrollIntoView(); v.canvas.focus();"), settle(page))
+    # B-03: a highlight of eight keeps its colours through a state
+    a = js("""await v.run({ op: 'highlight', set: 'PCLK,PRESETn,PSEL,PENABLE,PWRITE,PADDR,PWDATA,PRDATA' }); const c = () => [...v.picks].map(([r, i]) => r.name + i).sort();
+        const before = c(); await v.setState(JSON.parse(JSON.stringify(v.state()))); return [before, c()];""")
+    check(a[0] == a[1] and len(a[0]) == 8, f'B-03: eight highlighted rows keep their colours through a state {a}')
+    # B-07: a time outside the waves
+    a = js("""const r = await v.run([{ op: 'bookmark', t: '5s' }, { op: 'marker', t: -5 }, { op: 'span', from: 0, to: '5s' }, { op: 'marker', t: 0 }]);
+        v.goBm({ t: 5e12 }); await v.run({ op: 'marker', id: 'all', delete: true }); return [r.map(x => x.error || ''), v.cursor, v.M.t1, v.M.t0];""")
+    check(all('outside these waves' in e for e in a[0][:3]) and a[0][3] == '' and a[1] == a[2] and a[3] > 0,
+          f'B-07: refused (0 taken where the waves start later); going to one made for other waves stops at their end {a}')
+    # B-24: a marker on a signal not here; two at one time
+    a = js("""await v.run({ op: 'marker', id: 'all', delete: true }); let miss = null; v.root.addEventListener('wavelens:state', e => { miss = e.detail; }, { once: true });
+        await v.setState({ wavelens: 'state', markers: [{ t: 50000, signal: 'nope.sig' }, { t: 50000 }], deltas: true });
+        return [v.umarks.map(m => m.signal), v.notesEl.querySelectorAll('.mks .md').length];""")
+    check(a == [[None, None], 0], f'B-24: a signal not here: at the top; two markers at one time: no "Δ 0" {a}')
+    # B-10: a bookmark that is no object
+    a = js("try { await v.setState({ wavelens: 'state', bookmarks: [null, { n: 1, t: 5000 }] }); return v.bms.map(b => b.n); } catch (e) { return String(e); }")
+    check(a == [1], f'B-10: an entry that is no object is left out {a}')
+    # B-23: a bit of a copy hidden goes with the copy
+    a = js("""await v.run([{ op: 'duplicate', signals: 'PADDR' }, { op: 'bits', signals: 'PADDR#2' }, { op: 'hide', signals: 'PADDR#2[3]' },
+        { op: 'duplicate', signals: 'PADDR#2', delete: true }]); return [...v.hiddenRows];""")
+    check(a == [], f'B-23: the hidden bit of a copy goes with it {a}')
+    # B-21: a group's name once escaped
+    a = js("""await v.run([{ op: 'group', name: 'a&b <x>', signals: 'PSEL,PENABLE' }]); const r = v.allRows().find(x => x.ug && x.name === 'PENABLE');
+        v.menu(300, 300, r); const t = v.menuEl.innerText; v.closeMenu(); return t;""")
+    check('To the top of “a&b <x>”' in a and '&amp;' not in a, f'B-21: a group\'s name in the menu as it is {a[-120:]!r}')
+    # B-22: the cursor field shows the cursor rounded; Set without a change keeps it
+    a = js("v.cursor = 123456.789; v.syncCursorFields(true); v.setCursor(v.ctEl.value); return [v.cursor, v.ctEl.value];")
+    check(a[0] == 123456.789, f'B-22: Set on the field as it showed the cursor keeps it {a}')
+    # B-12, B-13: Esc after a first key; a key the open box did not offer
+    js("v.select(I.peek(v).vis.find(r => r.type === 'sig' && r.tr)); v.toggleHighlight('PSEL');"); focus()
+    page.keyboard.press('g'); page.keyboard.press('Escape'); settle(page)
+    a = js("return [!!v.sel, v.picks.size > 0, !!v.keysEl];")
+    check(a == [True, True, False], f'B-12: Esc right after g ends the sequence only {a}')
+    page.keyboard.press('g'); page.wait_for_selector('.wv-keys'); s0 = js("return v.span;"); page.keyboard.press('i'); settle(page)
+    a = js(f"return [v.span === {s0}, v.root.querySelector('.bar .toast').textContent];")
+    check(a[0] and 'gi: no such sequence' in a[1], f'B-13: a key the box did not offer does nothing but say so {a}')
+    page.keyboard.press('g'); page.wait_for_selector('.wv-keys'); page.keyboard.press('z'); page.wait_for_selector('.wv-keys')
+    check('Fold' in page.locator('.wv-keys .kh').inner_text(), 'B-13: another first key starts its own sequence')
+    page.keyboard.press('Escape'); settle(page)
+    # B-06: Esc in the expression editor's label field
+    a = js("""v.svaExprs.edit(null); await new Promise(r => setTimeout(r, 50)); v.root.querySelector('.xed .xlb').focus(); return !!document.activeElement.closest('.xed');""")
+    page.keyboard.press('Escape'); settle(page)
+    a = js("return [!!v.sel, v.picks.size > 0, !!v.svaExprs.ed];") if a else ['no editor']
+    check(a == [True, True, False], f'B-06: Esc in the editor\'s label: the editor closes, the selection and highlight stay {a}')
+    # B-08: Clear all, then a reload: the page's own bookmarks again
+    n0 = js("return v.M.bookmarks.length;")
+    js("await v.clearMarks();"); page.reload(); page.wait_for_load_state('networkidle')
+    a = js("return [v.bms.length, v.umarks.length];")
+    check(n0 > 0 and a == [n0, 0], f'B-08: Clear all, reloaded: the page\'s {n0} bookmarks back, no markers {a}')
+    # B-04: ⟳ with a second dump compared keeps it
+    vcd = lambda x: ('$timescale 1ns $end\n$scope module top $end\n$var wire 8 ! data $end\n$var wire 1 " clk $end\n$upscope $end\n$enddefinitions $end\n'
+                     f'#0\nb00000000 !\n0"\n#10\nb{x:08b} !\n1"\n#20\n0"\n#30\n1"\n')
+    a = js(f"""await v.openDump(new File([{json.dumps(vcd(0xAA))}], 'a.vcd')); const w = () => document.querySelector('.wv').waveView;
+        await w().compare(new File([{json.dumps(vcd(0xAB))}], 'b.vcd')); await w().compareView('b'); const b0 = [w().cmpRun, w().cmpCan()];
+        await w().reloadDump(); await new Promise(r => setTimeout(r, 200)); return [b0, w().cmpRun, w().cmpCan(), !!w().cmp];""")
+    check(a == [['b', True], 'b', True, True], f'B-04: ⟳ reads the compared dump again, B still shown {a}')
+    check(not errs, f'no page errors {errs[:2]}')
+    page.close()
+
+
+def key_hints(browser, build):
+    """r the state, R the dump; the box after the first key of a sequence: it waits, a key or a click goes on, Esc closes it and only it, what it lists follows the page;
+    keyHints false; the sequences of the menu g; Help's section."""
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('viewer: r R, the box of what can follow a key')
+    page = browser.new_page(viewport={'width': 1400, 'height': 1000})
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+    js = lambda s: page.evaluate("async () => { const v = document.querySelector('.wv').waveView, I = WaveLens.internal; " + s + " }")
+    focus = lambda: (js("v.root.scrollIntoView(); v.canvas.focus();"), settle(page))
+    box = page.locator('.wv-keys')
+    keys = lambda: box.locator('button kbd').all_inner_texts()
+    js("await v.run({ op: 'marker', id: 'all', delete: true }); await v.run({ op: 'bookmark', n: 'all', delete: true });")
+    focus()
+    # quick: no box, as ever
+    a = js("return I.peek(v).vis.filter(r => r.type === 'sig' && r.tr)[3].full;")
+    js("v.select(I.peek(v).vis.filter(r => r.type === 'sig' && r.tr)[3]); v.canvas.focus();")
+    page.keyboard.press('g'); page.keyboard.press('g'); page.wait_for_timeout(350)
+    check(box.count() == 0 and js("return v.sel === I.peek(v).vis.filter(r => r.type === 'sig' && r.tr)[0];"), 'gg typed fast: done, no box')
+    # slow: it comes and waits past the second of a sequence
+    page.keyboard.press('g'); page.wait_for_selector('.wv-keys', timeout=1000)
+    k0 = keys()
+    check({'g', 'l', 'M', 'B', 'v'} <= set(k0) and 'm' not in k0 and 'c' not in k0 and 'r' not in k0 and 'R' not in k0 and 'd' not in k0, f'g: what this page can do now {k0}')
+    check('x' in k0 and 'T' in k0 and 't' not in k0, f'the plugins\' sequences, and no modules on a page without them {k0}')
+    check(box.locator('.ks').all_inner_texts()[:2] == ['Go to', 'Markers and bookmarks'] and 'undefined' not in box.inner_text(), f'headings between them {box.inner_text()!r}')
+    page.wait_for_timeout(1300)
+    check(box.count() == 1, 'it waits')
+    page.keyboard.press('Escape'); settle(page)
+    check(box.count() == 0 and js("return !!v.sel;"), 'Esc: it closes, the selection stays')
+    page.keyboard.press('g'); box.wait_for(); page.keyboard.press('M'); settle(page)
+    check(box.count() == 0 and page.locator('.wv-ask, .wv-menu input, .wv input.ask').count() + js("return document.activeElement.tagName === 'INPUT' ? 1 : 0;") >= 1, 'a key on it: gM asks a marker\'s label')
+    page.keyboard.press('Enter'); settle(page); focus()
+    check(js("return v.umarks.length;") == 1, 'the marker is there')
+    # a click: the keys stay on the waves
+    page.keyboard.press('g'); box.wait_for()
+    k1 = keys()
+    check({'m', 'c', 'd'} <= set(k1), f'with a marker: its lines come {k1}')
+    t = box.locator('button[data-k=d]').inner_text()
+    box.locator('button[data-k=d]').click(); settle(page)
+    check(box.count() == 0 and js("return v.deltas;") is True and 'show' in t, f'a click: done {t}')
+    page.keyboard.press('g'); box.wait_for()
+    check('hide' in box.locator('button[data-k=d]').inner_text(), 'its text says what it does now')
+    # a click elsewhere, a key that does not follow
+    page.mouse.click(20, 500); settle(page)
+    check(box.count() == 0, 'a click elsewhere closes it')
+    focus(); page.keyboard.press('g'); box.wait_for(); s0 = js("return v.span;"); page.keyboard.press('i'); settle(page)
+    check(box.count() == 0 and js("return v.span;") == s0, 'a key that does not follow: it closes, does nothing, says so (review 2026-11-03 B-13)')
+    # the others
+    for p, want_ in ((']', {'b', 'm', 'e', 'f', 't', 'x', 'X', 'a'}), ('[', {'b', 'm', 'e', 'f'}), ('z', {'R', 'M', 'o', 'c', 'a'}), ('y', {'y', 'n', 't'})):
+        focus(); page.keyboard.press(p); box.wait_for(); k = keys()
+        check(want_ <= set(k), f'{p}: {k}'); page.keyboard.press('Escape'); settle(page)
+    check('d' not in (focus(), page.keyboard.press(']'), box.wait_for(), keys())[3], ']d only with a compare'); page.keyboard.press('Escape')
+    # the sequences through the bar's buttons, the copies
+    a = js("""const out = []; v.copyText = t => { out.push(t); return v; }; v.setCursor(5000); v.select(I.peek(v).vis.find(r => r.type === 'sig' && r.tr)); v.seq('yn'); v.seq('yt');
+        let saved = 0; v.saveState = () => { saved++; }; v.seq('gs'); return [out, saved, I.peek(v).vis.find(r => r.type === 'sig' && r.tr).name, v.when(5000)];""")
+    check(a[0] == [a[2], a[3]] and a[1] == 1, f'yn yt copy; gs the bar\'s Save {a}')
+    a = js("await v.run({ op: 'bookmark', t: 1000 }); v.seq('gc'); await new Promise(r => setTimeout(r, 50)); return [v.bms.length, v.umarks.length];")
+    check(a == [0, 0], f'gc clears them {a}')
+    # r R
+    focus(); page.keyboard.press('r'); settle(page)
+    check('no state' in page.locator('.wv .bar .toast').first.inner_text(), 'r: nothing loaded, it says so')
+    page.keyboard.press('R'); settle(page)
+    check('no dump' in page.locator('.wv .bar .toast').first.inner_text(), 'R: a page\'s own waves, it says so')
+    a = js("let n = 0; v.opts.dumpSrc = { file: 1 }; const r0 = v.reloadDump; v.reloadDump = () => { n++; }; v.canvas.focus(); window.__n = () => n; window.__u = () => { v.reloadDump = r0; delete v.opts.dumpSrc; };")
+    page.keyboard.press('R'); settle(page)
+    check(js("return window.__n();") == 1, 'R: the dump again'); js("window.__u();")
+    # keyHints false: the second within a second, no box
+    js("v.S.keyHints = false; v.canvas.focus();"); page.keyboard.press('g'); page.wait_for_timeout(350)
+    check(box.count() == 0, 'keyHints false: no box')
+    page.keyboard.press('g'); settle(page)
+    js("v.S.keyHints = 200; v.help();"); settle(page)
+    h = page.locator('.wv-help').first.inner_text()
+    check('menus' in h.lower() and 'a box with what can follow' in h, f'Help has the section {h[:80]!r}')
     check(not errs, f'no page errors {errs[:2]}')
     page.close()
 
@@ -6557,6 +6755,8 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'bits': 'a bus\'s width after its name and the bus bit by bit: a click on [7:0], b, the menu, the command, kept, a bookmark on a bit, the pictures',
     'duplicates': 'a signal again in a row of its own: its radix, analog, colour, a reload, undo',
     'marker_deltas': 'the keys m b B ]m ]b; the Δ between markers: the option, its line, dragged with the mouse, kept, undo',
+    'review_1103': 'what the review of 2026-11-03 found on the page: B-01, B-03, B-04, B-06, B-07, B-08, B-10, B-12, B-13, B-21 to B-24',
+    'key_hints': 'r R, the box after the first key of a sequence: keys, clicks, Esc; keyHints; the menu g; Help',
     'marker_delta_ends': 'the Δ to any marker (list, its end dragged), the colour of a line, a hidden marker, clearing',
     'marker_lanes': 'the text of a marker on a line over or under a signal: the mouse, the colour, the list, the picture, undo',
     'ranges': 'a range on the waves (shift+drag, the right button) and its menu: zoom, bookmarks, the picture, a colour',
@@ -6695,6 +6895,7 @@ def main():
     os.makedirs(a.out, exist_ok=True)
     with sync_playwright() as p:
         b = p.chromium.launch()
+        steady(b)
         sva_open(b)
         for path in PAGES + BUILT:
             tsv = path.name == 'test_stream_video.html'
@@ -6785,6 +6986,8 @@ def main():
         run('duplicates', duplicates, b, build)
         run('marker_deltas', marker_deltas, b, build)
         run('marker_delta_ends', marker_delta_ends, b, build)
+        run('key_hints', key_hints, b, build)
+        run('review_1103', review_1103, b, build)
         run('undo', undo, b, build)
         run('order', order, b, build)
         run('savepage', savepage, b, build)

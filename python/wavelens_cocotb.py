@@ -143,7 +143,8 @@ class Marks:
     def note(self, text, signal=None, label=None, color=None):
         """A bookmark now: on `signal` (a handle or a row's name; none: the test's row, or the time axis), `label` the short text
         beside the circle, `text` the long one of the list."""
-        self.add({'kind': 'note', 'text': str(text), 'signal': self.row(signal), 'label': label, 'color': color})
+        self.add({'kind': 'note', 'text': str(text), 'signal': self.row(signal), 'label': None if label is None else str(label),
+                  'color': None if color is None else str(color)})
 
     def phase(self, label, signals=None):
         """`with wl.phase('write'): …`: a stretch of time with a name: a value of TEST_STEP (`signals`, or no such signal: a span on
@@ -198,6 +199,8 @@ class Marks:
         def wrap(fn):
             @functools.wraps(fn)
             async def run(dut, *a, **k):
+                if self.now_test is not None:   # awaited inside another test: a part of that one
+                    return await fn(dut, *a, **k)
                 self.begin(dut, fn, rows)
                 try:
                     await fn(dut, *a, **k)
@@ -317,7 +320,7 @@ class Marks:
             with open(tmp, 'w', encoding='utf-8') as f:
                 json.dump(doc, f, ensure_ascii=False, indent=1)
             os.replace(tmp, self.path)
-        except OSError as e:
+        except (OSError, TypeError, ValueError) as e:   # a value that is no JSON: said, the test's verdict stays its own
             logging.getLogger('wavelens').warning('marks not written: %s', e)
 
 

@@ -71,7 +71,7 @@ const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight
   labelSize: 11, fontSize: 11.5, sort: 'none', sortIgnore: [], sortButton: true, hint: true, style: 'auto', radix: 'auto', fold: null,
   highlight: null, dim: 0.3, groupColors: null, bookmarkLeft: 0.2, arrowLabels: 'lane', laneHeight: 16, maxHeight: null, toolsFolded: false, toolsHidden: [],
   groupOrder: 'file', moduleShading: true, findHighlight: true, findOpen: true, findMask: false, findCase: false, findWord: false,
-  findRegex: false, cursorSnap: 8, showWidth: true,
+  findRegex: false, cursorSnap: 8, keyHints: 200, showWidth: true,
     wheel: 'scroll', contextMenu: true, enumColors: null, dumpBudget: 3000000, gaps: false, gapIdle: 16, gapKeep: 2,
     gapSignals: null, gapClock: null, gapAux: null, gapOnly: false, gapCount: 'clock', gapLine: 'dashdot', gapView: false, menuTipDelay: 2000, cycles: false,
     cycleClock: null, cycleZero: null, savePage: true, themeButton: 'auto', version: true, keysLeft: [], log: 'auto' };

@@ -288,7 +288,8 @@ class WaveView {
   }
   keyInput(c) {
     // The keys on the waves: navigation as in Questa's wave window, the lists and the text as in vim. Two-key sequences
-    // (gg, zR, yy, ]f …) start with g z y [ ]: the second key within a second
+    // (gg, zR, yy, ]f …) start with g z y [ ]: the second key within a second, or as long as the box of what can follow is open (keyHintOn)
+    c.addEventListener('blur', () => this.keyHintOff());
     c.addEventListener('keydown', e => {
       const k = e.key, ctl = e.ctrlKey || e.metaKey; let h = true;
       if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock'].includes(k)) return;   // a modifier alone: a sequence goes on (z, shift+M)
@@ -298,9 +299,11 @@ class WaveView {
       // ctrl+F: find (Questa), ctrl+C: copy (nothing to copy: the browser's), ctrl+G: the list of your groups
       if (ctl && (k === 'g' || k === 'G')) { e.preventDefault(); this.groupsMenu(); return; }
       if (ctl) { if (k === 'f' || k === 'F' ? (this.focusFind(), true) : this.copyKey()) e.preventDefault(); return; }
-      const pre = this.kpre && Date.now() - this.kpre.t < 1000 ? this.kpre.k : ''; this.kpre = null;
+      const pre = this.kpre && Date.now() - this.kpre.t < 1000 ? this.kpre.k : '', open = !!this.keysEl; this.keyHintOff();
+      if (pre && k === 'Escape') { e.preventDefault(); e.stopPropagation(); return; }   // the sequence ends, not the search or the highlight
       if (pre && this.seq(pre + k)) { e.preventDefault(); return; }
-      if (!pre && 'gzy[]'.includes(k) && k.length === 1) { this.kpre = { k, t: Date.now() }; e.preventDefault(); return; }
+      if ('gzy[]'.includes(k) && k.length === 1) { this.keyHintOn(k); e.preventDefault(); return; }   // (after another first key: this one starts)
+      if (open) { e.preventDefault(); this.toast(`${pre}${k}: no such sequence`); return; }   // the box was open: the key was meant for it
       const sigStep = d => { const sigs = this.vis.filter(r => r.type === 'sig' && r.tr), i = sigs.indexOf(this.sel);
         this.select(sigs[Math.min(Math.max(i < 0 ? 0 : i + d, 0), sigs.length - 1)] || null); };
       if (k === 'i' || k === 'I' || k === '+' || k === '=') { this.markView(); this.zoom(0.5, 0.5); }
@@ -334,6 +337,7 @@ class WaveView {
       else if (k === 't') this.modules(true, !!this.mods || !!this.sel);   // the Modules panel; open: the selected signal's module in it
       else if (k === 'T') this.fsmPanel(true);   // the state machines
       else if (k === 'r') this.reloadState();
+      else if (k === 'R') this.reloadDump();
       else if (k === 'Escape') h = false;   // handled by the viewer (reset)
       else if (this.keys[k]) this.keys[k](e);
       else h = false;
@@ -415,6 +419,13 @@ class WaveView {
     this.renderNames(); this.draw(); return this;
   }
   highlighted() { return [...this.picks.keys()].map(r => r.full); }
+  // the highlight in an order that gives each row its colour back (hlPick: the i-th takes i % HL_N); when no order can, as picked
+  hlOrder() {
+    const all = [...this.picks], q = Array.from({ length: HL_N }, () => []), out = [];
+    for (const [r, c] of all) q[(typeof c === 'number' ? c : 0) % HL_N].push(r);
+    for (let i = 0; i < all.length; i++) { const r = q[i % HL_N].shift(); if (!r) return all.map(([x]) => x); out.push(r); }
+    return out;
+  }
   // every signal and module shown from row a to row b (either way round) highlighted too (ctrl+shift+click a name)
   // shift+click a name: the signals from a (the last one clicked) to b in display order are selected (no dimming, as one
   // selected signal); b is the selected one for the keys; the right button's colour, radix, hide and Paint take them all
@@ -535,7 +546,8 @@ class WaveView {
   }
   bad(inp) { inp.classList.add('bad'); setTimeout(() => inp.classList.remove('bad'), 900); }
   setCursor(v) { // cursor at a typed time; the view follows when it is outside
-    const t = typeof v === 'number' ? v : this.parseIn(v, this.cuEl, true);
+    const same = typeof v === 'string' && this.ctSaid === `${v}|${this.cuEl && this.cuEl.value}`;   // the field as it showed the cursor: rounded
+    const t = same ? this.cursor : typeof v === 'number' ? v : this.parseIn(v, this.cuEl, true);
     if (t == null || !isFinite(t)) { this.bad(this.ctEl); return this; }
     this.cursor = Math.min(Math.max(t, this.M.t0), this.M.t1);
     if (this.cursor < this.t0 || this.cursor > this.t0 + this.span) this.center(this.cursor);
@@ -551,7 +563,7 @@ class WaveView {
     if (!this.ctEl) return;
     const show = (inp, sel, t) => { if (force || document.activeElement !== inp) inp.value = String(Number((t / (this.M.timed &&
       sel ? UNIT_PS[sel.value] : 1)).toPrecision(7))); };
-    show(this.ctEl, this.cuEl, this.cursor); show(this.csEl, this.suEl, this.span);
+    show(this.ctEl, this.cuEl, this.cursor); show(this.csEl, this.suEl, this.span); this.ctSaid = `${this.ctEl.value}|${this.cuEl && this.cuEl.value}`;
   }
   clearFind() { // the search ends; the selection and time stay, the folding from before it (the way to the selection open)
     if (this.qEl) this.qEl.value = '';
@@ -641,7 +653,7 @@ class WaveView {
       cursor: this.cursor, config: { style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded,
         toolsHidden: toolNames(this.S.toolsHidden), sort: this.sort, sortIgnore: [...this.sortIgnore],
         fold: [...folded].map(id => M.groups[id] && M.groups[id].path).filter(Boolean),
-        highlight: [...this.picks].sort((a, b) => a[1] - b[1]).map(([r]) => r.full).filter(Boolean), findHighlight: !!this.findHl, findOpen: !!this.findOpen,
+        highlight: this.hlOrder().map(r => r.full).filter(Boolean), findHighlight: !!this.findHl, findOpen: !!this.findOpen,
         findMask: !!this.findMask,
           ...Object.fromEntries(FIND_OPTS.map(o => [o[1], !!this[o[1]]])), ...this.gapOpt(true), ...this.cycOpt() },
       paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs),
@@ -731,11 +743,15 @@ class WaveView {
       const sigs = ps.filter(p => have.has(p));
       this.fsm = o && sigs.length ? { mode: FSM_MODES.includes(o.mode) ? o.mode : 'only', signals: sigs } : null; this.fsmMemo = null; this.fsmShow(); }
     if (st.bookmarks !== undefined || st.arrows !== undefined) {
-      const bms = (st.bookmarks || []).filter(b => !b.signal || seen(b.signal) || (b.signal = null, true));   // on the time axis when its signal is not here
+      const bms = (Array.isArray(st.bookmarks) ? st.bookmarks : []).filter(b => b && typeof b === 'object')
+        .filter(b => !b.signal || seen(b.signal) || (b.signal = null, true));   // on the time axis when its signal is not here
       this.bms = bmNorm(bms); this.arrows = arNorm(st.arrows || [], bms); this.saveBookmarks(); this.renderNotes();
     }
     if (st.deltas !== undefined) { this.deltas = !!st.deltas; this.saveRows(); }
-    if (st.markers !== undefined) { this.umarks = markNorm(st.markers); this.setMarks(); } else if (st.deltas !== undefined) this.setMarks();
+    if (st.markers !== undefined) {   // a signal not in these waves: at the top, and said
+      const ms = (Array.isArray(st.markers) ? st.markers : []).filter(m => m && typeof m === 'object').map(m => Object.assign({}, m,
+        { signal: m.signal && !seen(m.signal) ? null : m.signal, dsignal: m.dsignal && !seen(m.dsignal) ? null : m.dsignal }));
+      this.umarks = markNorm(ms); this.setMarks(); } else if (st.deltas !== undefined) this.setMarks();
     if (st.spans !== undefined) { this.spans = spanNorm(st.spans); this.saveBookmarks(); this.draw(); }
     if (st.compare !== undefined && (st.compare || this.cmp)) this.compareResult(st.compare, true);   // a second dump compared (diff.js)
     if (st.compareShow && this.cmp && !this.cmpCant(st.compareShow) && st.compareShow !== this.cmpRun) {
@@ -841,12 +857,16 @@ class WaveView {
       for (const n of ((this.opts.sv && this.opts.sv.notes) || []).concat(said, run)) r.log.push({ level: 'warning', text: 'types: ' + n });
       if (!r.shown) { this.toast(`${file.name}: no signals`); this.dumpSaid(file.name, { error: 'no signals', log: r.log, info: r.info });
         this.log('error', `${file.name}: no signals`, { items: r.log.map(logLine) }); return this; }
+      // a second dump compared (read here, not a saved result) is read again too, and shown as it was
+      const cmpAgain = keep && this.cmp && !this.cmp.result && this.cmpSrc ? { ...this.cmpSrc, run: this.cmpRun } : null;
       const st = keep ? this.state() : null, root = this.root, opts = Object.assign({}, this.opts,
         { title: file.name, dumpSrc: { name: file.name, handle, file }, dumpDate: r.info.date, svWhy: why, svRun: run, loadCodes: file.wlLoad || null }),
         panel = keep && this.fsmPanelOf();
       this.destroy(); root.innerHTML = '';
       const v = new WaveView(root, r.doc, opts); v.panelBox = this.panelBox;   // the panels open where they were
-      if (st) { delete st.title; await v.setState(st); }
+      if (st) { delete st.title; if (cmpAgain) { delete st.compare; delete st.compareShow; } await v.setState(st); }
+      if (cmpAgain) { const c = await v.compare(cmpAgain.file, cmpAgain.name);
+        if (c && cmpAgain.run && cmpAgain.run !== 'a') await v.compareView(cmpAgain.run); }
       v.fsmPanelAgain(panel);   // the FSM panel stays open (⟳)
       const bad = r.log.filter(x => x.level !== 'info').length;
       v.toast((file.wlLazy ? `${file.name}: ${r.total} signals in ${r.info.scopes} modules, read as you open them` : `${file.name}: ${r.shown} of ${r.total} ` +
@@ -928,7 +948,7 @@ class WaveView {
     this.root.dispatchEvent(new CustomEvent('wavelens:dumperror', { detail: Object.assign({ name }, d) })); }
   // ⟳: the dump again from the disk (its handle; else the file as picked, if the browser still reads it), the view kept
   async reloadDump() {
-    const d = this.opts.dumpSrc; if (!d) return this;
+    const d = this.opts.dumpSrc; if (!d) { this.toast('R: no dump read here: Open… first'); return this; }
     try { const f = d.handle ? await d.handle.getFile() : d.file; return this.openDump(f, d.handle, true); }
     catch (e) { this.toast('cannot read it again (pick it with Open…): ' + e.message); return this; }
   }
@@ -1113,7 +1133,9 @@ class WaveView {
   lineOps(l, color) { const id = m => this.umarks.indexOf(m) + 1;
     return [...l.ds.map(m => ({ op: 'deltas', id: id(m), color })), ...l.ms.map(m => ({ op: 'marker', id: id(m), color })),
     ...l.bs.map(b => ({ op: 'bookmark', n: b.n, color })), ...l.as.map(a => ({ op: 'arrow', id: this.arrows.indexOf(a) + 1, color }))]; }
-  clearMarks() { return this.run([{ op: 'bookmark', n: 'all', delete: true }, { op: 'marker', id: 'all', delete: true }]); }
+  // Clear all: yours go; the page's own bookmarks come back on the next load (as the Bookmarks list's Clear); undo brings all back
+  async clearMarks() { const r = await this.run([{ op: 'bookmark', n: 'all', delete: true }, { op: 'marker', id: 'all', delete: true }]);
+    this.saveBookmarks(false); return r; }
   // m: a marker at the cursor, on an edge of the selected signal as a bookmark; its label asked over it
   markerKey() {
     const t = this.cursor = this.snap(this.sel, this.cursor), r = this.canvas.getBoundingClientRect();
@@ -1267,11 +1289,27 @@ class WaveView {
   zoomTo(a, b) { this.markView(); this.span = Math.min(Math.max(b - a, this.minSpan), this.M.t1 - this.M.t0); this.t0 = this.clamp(a); this.draw(); return this;
     }
   // a two-key sequence (vim): gg first signal, zR / zM open / fold every module, zc fold / zo open the selected signal's
-  // module, yy copy, ]b [b next / previous bookmark, ]m [m marker, ]e [e next / previous edge; plugins add theirs (addKey(']f', …)).
-  // -> whether it was one
+  // module, yy copy, ]b [b next / previous bookmark, ]m [m marker, ]e [e next / previous edge; g: a menu of the rest (KEY_MENUS says
+  // what the box shows); plugins add theirs (addKey(']f', …)). -> whether it was one
   seq(s) {
     const sigs = () => this.vis.filter(r => r.type === 'sig' && r.tr), up = this.sel && this.sel.anc[this.sel.anc.length - 1];
+    const bar = a => { const b = barBtn(this, a); if (b) b.click(); else this.toast('that tool is not on this bar'); };
     if (s === 'gg') this.select(sigs()[0] || null);
+    else if (s === 'gt') this.modules(true, !!this.mods || !!this.sel);
+    else if (s === 'gT') this.fsmPanel(true);
+    else if (s === 'gM') this.markerKey();
+    else if (s === 'gB') this.mark();
+    else if (s === 'gd') this.run({ op: 'deltas', on: !this.deltas });
+    else if (s === 'gc') this.clearMarks();
+    else if (s === 'gs') bar('ssave');
+    else if (s === 'gL') bar('sload');
+    else if (s === 'gr') this.reloadState();
+    else if (s === 'gp') bar('spage');
+    else if (s === 'gO') bar('dopen');
+    else if (s === 'gR') this.reloadDump();
+    else if (s === 'gC') bar('dcmp');
+    else if (s === 'yn') { if (this.sel) this.copyText(this.sel.name); }
+    else if (s === 'yt') this.copyText(this.when(this.cursor));
     else if (s === 'gv') { const on = !this.gapLive(); this.setGaps(on ? { gaps: true, gapView: true } : { gapView: false });
       this.toast(on ? 'the gaps on the waves' : 'the waves in continuous time'); }
     else if (s === 'zR') this.expandAll();
@@ -1303,7 +1341,7 @@ class WaveView {
   // else (no top, or that row is gone) the signal in sight; bookmarkLeft not a number (null, '', 'abc'): 0.2, as viewedit.py
   goBm(b) {
     const raw = this.S.bookmarkLeft, n = raw == null || raw === '' ? NaN : Number(raw), f = isFinite(n) ? Math.min(Math.max(n, 0), 0.9) : 0.2;
-    this.cursor = b.t; this.center(b.t, f);
+    this.cursor = Math.min(Math.max(b.t, this.M.t0), this.M.t1); this.center(this.cursor, f);   // one made for other waves: their end
     const s = b.signal ? this.sigByPath(b.signal) : null;
     if (s) { if (s.bit != null && !this.bitsOpen.has(s.of.full)) { this.setBits(s.of, true, true); this.saveRows(); }   // a bit of a bus folded: shown
       if (s.anc.some(id => this.collapsed.has(id))) { s.anc.forEach(id => this.collapsed.delete(id)); this.foldTouched = true; }

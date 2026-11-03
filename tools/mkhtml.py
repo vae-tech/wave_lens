@@ -155,7 +155,7 @@ def fmt_ps(ps):
 
 def section(key, doc, render, note):
     title = (doc.get('head') or {}).get('text') or key
-    ref = html.escape(f'WAVES.{json.dumps(key) if not key.isidentifier() else key}', quote=True)
+    ref = html.escape(f'WAVES[{json.dumps(key)}]' if not key.isidentifier() else f'WAVES.{key}', quote=True)   # boot.js resolveSrc reads both
     out = [f'<h2 id="{html.escape(key, quote=True)}">{html.escape(str(title))}</h2>']
     m = doc.get('meta') or {}
     sub = [f'{m["mode"]} mode' if 'mode' in m else '', f'{fmt_ps(m["to_ps"] - m["from_ps"])} window from {fmt_ps(m["from_ps"])}' if 'from_ps' in m else '',

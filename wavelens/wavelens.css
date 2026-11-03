@@ -481,6 +481,16 @@
 .wv .wv-help td:first-child { white-space: nowrap; width: 1%; }
 .wv .wv-help kbd { border: 1px solid var(--line); background: var(--panel-2); }
 .wv .wv-help:focus { outline: none; }
+.wv .wv-keys { position: fixed; right: 16px; bottom: 16px; z-index: 50; width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; padding: 8px;
+  background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 4px 16px rgb(0 0 0 / 25%); font: 12px var(--font-body); }
+.wv .wv-keys .kh { display: flex; align-items: baseline; gap: 8px; padding: 0 6px 6px; }
+.wv .wv-keys .kh .muted { margin-left: auto; font-size: 11px; }
+.wv .wv-keys .kg { columns: 2; column-gap: 12px; }
+.wv .wv-keys .ks { padding: 6px 6px 2px; color: var(--muted); font-size: 11px; break-after: avoid; }
+.wv .wv-keys button { all: unset; display: flex; gap: 10px; align-items: baseline; box-sizing: border-box; width: 100%; padding: 3px 6px; border-radius: 4px; cursor: pointer;
+  break-inside: avoid; }
+.wv .wv-keys button:hover { background: var(--accent-soft); }
+.wv .wv-keys kbd { min-width: 1.2em; color: var(--accent); font: 12px var(--font-mono); font-weight: 600; }
 .wv .wv-menu .kk { color: var(--muted); font: 11px var(--font-mono); margin-left: 16px; }
 /* where the rows scroll (the maxHeight setting, the bar's Scroll button): with the page the bar sticks to the top while
    its rows go by, the canvas and the names' header under it (--wv-bar-h: its height); ▴ folds the tools to the title line */
