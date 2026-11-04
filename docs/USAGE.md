@@ -98,6 +98,8 @@ may be the default). What the tab does differently from a page in a browser:
   title) opens the channel, with the errors of the viewer's log (a types file that is not JSON: its line and column). The
   same notes are in the log under the viewer, and in a browser in the console (`WaveLens.vcdToWave(text).log`).
 
+**Your configuration of the viewer.** *WaveLens: Open the configuration* (⚙ in the tab's title) opens a JSONC file of the extension (`wavelens.config.jsonc` in its global storage) made of the viewer's defaults, every key of `wavelens.config.js` with its comment; saved, it is checked and applied to every tab at once (not JSON: marked, the last good one stays; a wrong value or key: marked and left out, the rest applies; a key taken out: its default; `theme` and `keysLeft` are VS Code's settings here). One that breaks the viewer: the defaults again, said. *WaveLens: Reset the configuration to the defaults* writes it anew.
+
 **Links from a log.** A time in the terminal, a `.log` / `.txt` / `.out` file or a task's output — `@ 1234 ns`, `at 1.2 us`, `time=5ns`, a bare `1234 ns` (fs, ps, ns, us: "3 s" or "100 ms" in a log is no time of a dump) — is a link (ctrl+click): the dump's WaveLens tab (the one in sight, else the one used last, else a dump opened in this workspace before, picked) puts the cursor there and selects the line's `a.b.c` signal after the time (else the first; `top.gen[2].u.req` too; a logger's name — `cocotb.…`, `uvm_…` — is none; a name the dump has not got moves nothing); `dump.vcd#t=…&sel=…` (Copy link in the tab) opens that dump. `wavelens.logLinks`: more patterns, regular expressions with the groups `t`, `unit`, `sig`, tried first (no `unit`: ps; one that is no regex or has no `t` is said once in the WaveLens output).
 
 Settings: `wavelens.logLinks`, `wavelens.theme`, `wavelens.sources`, `wavelens.autoReload`, `wavelens.openLastState`, `wavelens.lazy` (auto, always, never), `wavelens.live`, `wavelens.sva` (another sva program), `wavelens.verilator` (for *Make the types with Verilator*), `wavelens.keysToVSCode` (the keys left to VS Code, ctrl+G by default). A dump read whole (smaller than the `wavelens.lazy` sizes, or `never`) is cut to `dumpBudget`, and its whole VCD text crosses to your machine once per read.
@@ -186,6 +188,10 @@ with the config path of the entry; the page is still written:
 mkhtml: lint: bookmark-outside-view: views.drop.bookmarks[0] (n 1): 1133.8us is outside the view 1.155ms…1.2ms: not drawn
 ```
 
+For a script, `mkhtml.py --lint-json FILE` (`-`: stdout) writes them as JSON at every build, nothing to parse: `{"count", "warnings":
+[{"code", "where", "message", "view", …}]}`, and what a warning is about where it says it: `"signal"` (a bookmark's or a span's, of
+`bookmark-signal-missing`, `span-signal-missing`) or `"name"` (`expr-name-missing`), and `"rows"`, the rows of the view it may mean.
+
 **For CI.** `--junit report.xml`: the assertions of every view as JUnit XML (a testsuite per view, a testcase per binding, a failure
 for one that failed; an error for one that could not run: `missing` — its signals are not in the dump — or `capped`, attempts
 without verdict; skipped: a binding not evaluated — no such assertion in the sva files — or one with 0 attempts; never a pass for a
@@ -210,9 +216,10 @@ page). The checks:
 | `marker-no-match`, `marker-key` | a marker's event matches nothing in the window, an unknown key |
 | `expr-name-missing`, `exprs-no-engine` | an expression reads a name the page will not find (its row would stay empty and look like "never true"); expressions on a page without the engine (`--no-sva`, `"sva": false`) |
 | `gap-view-off`, `setting-signal-missing` | `gapView` without `gaps` does nothing; `cycleClock`, `gapClock`, `gapSignals` or `gapAux` name no row of the view, with the cycles or the gaps on |
+| `cycle-zero-window` | a window (`--from`) with `cycleZero` before it: the page counts the edges before the window at the clock's period, and the dump's own count differs (the clock stops or changes its period between): set `cycleZero` inside the window |
 | `bind-unknown` | a binding to an assertion that is not in the files (`mc_fsm_gap` for `mc_fsm_from_gap`) |
 | `svashow-no-match` | an `svaShow` name or pattern that matches no assertion |
-| `bookmarks-close` | two circles on one row nearer than 16 px at 1000 px of the whole window: they overlap (a heuristic; `"lift": true` puts one in the lane above, `"below"` in the one under) |
+| `bookmarks-close` | two circles on one row nearer than 16 px at 1000 px of the whole window: they overlap (a heuristic; `"lift": true` puts one in the lane above, `"below"` in the one under; the marks of a cocotb test at one time are put apart by themselves: § Marks from a cocotb test) |
 | `span-outside-view`, `span-signal-missing`, `span-key` | a span outside the window (not drawn), on no row of the view, an unknown key |
 | `span-every-no-match` | a span's `every` matches nothing in the window: no span |
 | `compare-spans-cut` | a signal differs in more stretches than the page keeps (the first 1000) |
@@ -371,7 +378,7 @@ add theirs (`WaveLens.registerDefaults`).
 | `keysLeft` | `[]` | keys the viewer leaves to its host: `["ctrl+G"]` (`ctrl+` is `cmd+` too, a letter by its place); the VS Code tab: `wavelens.keysToVSCode` |
 | `log` | `auto` | the log under the viewer (§ A dump straight in the browser): `auto` from the first thing done in the page (a dump read, Sources…, Load…), `true` always, `false` never |
 | `savePage` | true | the bar's **Save page**: this page as a `.view.html` with your view in it (§ Save and Load); false hides it and keeps no copy of the page's text |
-| `cycles`, `cycleClock`, `cycleZero` | false, null, null | the clock cycles in a band under the time axis (§ Clock cycles): on, the clock counted (null: the `*clk*` found), the time of cycle 0 (`"50ns"` or ps; null: the first rising edge) |
+| `cycles`, `cycleClock`, `cycleZero` | false, null, null | the clock cycles in a band under the time axis (§ Clock cycles): on, the clock counted (null: the `*clk*` found), the time of cycle 0 (`"50ns"` or ps; null: the first rising edge; before the first edge: counted at the clock's period) |
 | `groupColors` | none | one colour per group: `{"aw": "#339af0", "tb.dut.u_rx": "#37b24d"}` (names, paths, `*` patterns) |
 | `highlight`, `dim` | none, 0.3 | instances in front at start (paths, names, `*` patterns) and the opacity of the rest |
 | `findHighlight`, `findOpen`, `findMask` | true, true, false | starting state of the find options **Highlight**, **Open**, **Mask** |
@@ -761,8 +768,8 @@ has them (a click on it, or Tab from the tree): **↑ ↓ Home End** the rows of
 (**shift+Enter** the previous), **← →** the tabs, **Esc** back to the tree. The right button on an FSM: go there, its details,
 **Only this FSM**, **Add it to the view**, pick, copy the path; on a module: **Only its FSMs**, **Add its FSMs to the
 view**, pick them. A box drawn over the tree picks the FSMs in it (ctrl: adds them). The commands
-[`fsm_stats`](#commands-and-edits) (the same numbers) and `fsm_go` (the cursor to a state or a change) do it from a script
-or an agent.
+[`fsm_stats`](#commands-and-edits) (the same numbers), `fsm_go` (the cursor to a state or a change) and `fsm_panel` (the panel
+open on an FSM's States, Changes or Diagram) do it from a script or an agent.
 
 **Highlight.** The ○ mark in front of a name (or ctrl+click) puts that signal or whole instance in front (the mark
 filled, the background as it was); the rest is dimmed but stays visible. Several instances at once; **Highlight: N ✕** or Esc clears it.
@@ -834,6 +841,9 @@ through them, a marker `{"on": "tb_test", "label": "case"}` and **Markers…** (
 **Measures** (the `"measures"` of a view or of the WaveJSON, `vcd2wavedrom.py --measures`; a cocotb test's `wl.measure` gives them):
 `[{"label", "from", "to", "min"?, "max"?, "signal"?, "color"?}]`, each a pair of your markers on the page with the Δ between them on (the
 first marker's `dmin` / `dmax`: red out of the bound, `"3 cycles"` counted on the clock of the cycles), a measure with no `to` one marker.
+In a config `from` and `to` are what a span's ends take: a time, `{"bookmark": n}` or an event (a bookmark's `"at"` below), so a measure
+written in a document moves with the next run: `{"label": "to DONE", "from": "posedge start", "to": {"signal": "u.state", "value": 5,
+"from": "1300ns"}, "max": "20 cycles"}`; an event with no match in the view is an error that names the measure.
 
 **A bookmark at an event.** In a config a bookmark may give `"at"` instead of `"t"`: the build finds its time in the
 dump, so a test changed later moves it with the event (both `"t"` and `"at"` are an error). The forms are `wave_find`'s
@@ -1123,7 +1133,10 @@ edge, numbered from cycle 0 (every 1st, 2nd, 5th, 10th … as the zoom leaves ro
 names. **Show the cycles** counts the 1-bit `*clk*` / `*clock*` found, **Cycles of X** on a 1-bit row counts X, **Cycle 0 at
 this edge** makes the rising edge at or before the time clicked cycle 0, **Reset the cycles** gives back the page's
 settings (`cycles`, `cycleClock`, `cycleZero`). With the band on, the readout says the cursor's cycle (`cycle 6 ↑PCLK`, negative
-before cycle 0) and the second cursor's Δ counts that clock. `c147`, `cycle 147` or `c-3` in the cursor field go to that
+before cycle 0) and the second cursor's Δ counts that clock. A `cycleZero` before the clock's first edge (a window cut out of a
+long dump with `--from`) counts the edges before the window at the clock's mean period in it: the window's edges keep the
+numbers of the whole dump, as `wave_sample`, `wave_find` and `sva_check` give them (a clock that stops or changes its period
+between them: set `cycleZero` inside the window). `c147`, `cycle 147` or `c-3` in the cursor field go to that
 cycle's rising edge (the band off: of the clock found). Kept in the browser and the saved state; the pictures and a static
 SVG with `"cycles": true` draw the band; the command `{"op": "cycles", "on": true, "clock": "PCLK", "zero": "50ns"}`
 (`view.run`, `viewedit.py`, `view_edit`).
@@ -1238,8 +1251,9 @@ Over the example the marks files of the two simulators are identical (checked on
 | `@wl.test(…)` | `cocotb.test(…)` around the test: its number, a bookmark at its start, a span in the colour of its result, a bookmark at its end |
 | `wl.phase(label, signals=None)` | `with`, not awaited: the time inside it is `label` on `TEST_STEP`; a phase inside a phase comes back to it; `signals`: a span on those rows instead |
 | `wl.step(label, signals=None)` | the same phase in one line, until the next `step` or the end of the test: nothing to re-indent |
-| `wl.note(text, signal=None, label=None, color=None)` | a bookmark now, on `signal` (a handle, or a row's name; none: the test's row); `label`: the short text by the circle |
-| `wl.check(got, expected, text='', signal=None, show='all', why=None)` | a bookmark with both values; a mismatch is an `AssertionError`, which fails the test; every check is counted (`wave_tests`, the note of a test's view); a long value is short by its circle, whole in the list, and two lists say where they part; `why`: the text of a failure instead of `text`, a string or a function called only then; `show='fail'`: no bookmark when they agree, for a check in a loop |
+| `wl.note(text, signal=None, label=None, color=None)` | a bookmark now, on `signal` (a handle, a row's name, or a pattern, `"*fifo_full"`: the first row of the view it matches when the page is built, none: the bookmark on the time axis and `bookmark-signal-missing`; none given: the test's row); `label`: the short text by the circle |
+| `wl.check(got, expected, text='', signal=None, show=None, why=None)` | a bookmark with both values; a mismatch is an `AssertionError`, which fails the test; every check is counted (`wave_tests`, the note of a test's view); a long value is short by its circle, whole in the list, and two lists say where they part (a list in hex item by item, short or long); `why`: the text of a failure instead of `text`, a string or a function called only then; `show='fail'`: no bookmark when they agree, for a check in a loop (the default inside `wl.checks`; `show='all'` there: its own bookmark too) |
+| `with wl.checks(text, signal=None):` (or `async with`) | the checks inside leave one bookmark at the end: "every word of the frame: 188 checks passed" (✓ 188 checks), or "17 of 18 checks passed" (✗ 1 of 18 failed) beside the failure's own; each check still counted; nested groups each count theirs |
 | `wl.measure(label, min=None, max=None, signal=None, check=False)` | a time measured: `async with` / `with` around what takes it, or `m = wl.measure(…)`, `m.start()` … `m.stop()` (several: `label 1`, `label 2`); on the page a pair of markers on `signal`'s line (none: the test's row) with the Δ between them, red out of `min` / `max` (`"120ns"`, a number in ps, or `"3 cycles"`: the page counts the clock of its cycles); `ok` in the marks file when the bound is a time; a measure out of its bound fails nothing unless `check=True`; one not stopped by the test's end is kept with no end and said in the log |
 
 `@wl.test(signals=["*fifo_full", "u_x.state"])` names the test's own rows, patterns too: with `--marks-views tests` its view has them after the template's (the `"also"` of the view: one the dump has not got is a lint warning, not an error; a pattern adds 32 rows at most). A docstring's first paragraph is the test's line, the whole of it its first bookmark and `wave_tests` of that test. The line of a failure is the last frame outside the library, past the files of `Marks(hide=["my_checks.py"])` (names or patterns) and any frame that sets `__tracebackhide__`.
@@ -1286,6 +1300,19 @@ waveform; `tests` makes a view of each test from the first view that takes the m
 test's window, marks, and its doc and failure under the title, with its checks, its measures and its steps (`4 steps, longest reset 1.2 us`); the page has a button per test with its result and shows **one test at a time**
 (`page.html#tc3` opens that one, a print has them all); `both` adds the whole run as a first button. Each view holds its own window, so `tests` is
 about the size of `whole`, `both` twice that. A test's window goes a little past its end, for its last bookmark's text: that bit is the start of the next test, unmarked.
+
+**The colours of the marks.** The config's top-level `"marksColors"` sets them: `{"pass", "fail", "xfail", "run", "note", "warning",
+"log"}` (a result's span, its last bookmark and a check's circle; a note and a test's start; a logged warning; another log line), each
+`"#2f9e44"`, a token of the theme (`"c3"`, `"hl2"`: it follows dark and light), a CSS variable `"--my-mark"` or a CSS name; a key left
+out keeps its colour. The buttons of `--marks-views tests` take them too.
+
+**Marks of one time.** A test's bookmarks at one instant on one row (checks made in one cycle) take a lane each: on the row, above it,
+under it, beside the ones that chose theirs; more than that, the last lane holds one circle `+k` (red when one of them failed) whose
+text lists the rest. On the time axis, with no lanes, they are one circle. `with wl.checks(…)` keeps many to one in the first place.
+
+**Phases as markers.** `--marks-phases` (the config's `"marksPhases": true`): a labelled marker at the start of each phase of a test
+(`wl.phase`, `wl.step`) as well, the phases to step through with `]m` / `[m` and to measure from; a phase of no time has none. A
+marker of a config may be at a time too: `{"t": "1.2us", "label": "x"}` (outside the window: none, without a word).
 
 `--marks` (or the config's top-level `"marks"`, a path beside it) goes into every view; a view's `"marks": false` stays out, one with
 a window takes what is in it. A view gets a span per test, the bookmarks, a jump button per test (**go to**, up to six; beyond that `gm`): these are the
@@ -1334,6 +1361,7 @@ await v.run([
 | `select` | `signal? signals?` | the selected signal (edges, new bookmarks), or several |
 | `hide`, `show` | `signals` / `signals?` | rows out of the view and back (none given: every one) |
 | `fsm_stats` | `signal` | an FSM on the waves: each state of its table with its `entries`, the `time` it held it (`share` of the whole), its `first` entry; `never` (the states it does not reach), `invalid` (x, z, codes without a label), `changes` (`from`, `to`, `count`, `first`), the most frequent first; in a page only |
+| `fsm_panel` | `signal? tab? off?` | the FSM panel (**T**) open, with the details of an FSM (`signal`: its path or a pattern; one the list leaves out turns on its **all** and **fields**) on a `tab`: `states`, `changes` or `graph` (the diagram); `off`: closed; answers `open`, `signal`, `tab`; in a page only |
 | `fsm_go` | `signal state? from? to? dir? first?` | the cursor to the next (`dir` 1) or previous (−1) time an FSM enters a `state` (its label or value) or makes a change `from` → `to`; `first`: the first time; answers `t`; in a page only |
 | `types` | `signals?` | where their labels or fields come from (the right button's **Type…**): `status` `typed` (the types file's path, `key`), `own` (its own labels, an FST's or the config's, stay before the file's), `width` (it does not fit), `plain` (a plain vector in the types), `none` (no entry: the paths of its name the file has), null (the page's own); `why` in words; `run`: why the types may be of another run; none given: the selected signal, else every one the types file was asked about; in a page only |
 | `fsm` | `mode? signals? fields? clear?` | the state machines (signals with enum labels, the FSM panel): `mode: "only"` — the waves keep these FSMs and the modules on the way to them; `"add"` — they join the view as Hide, Only and the find's Mask leave it; `signals` which ones (patterns; left out: the ones it has, none yet: every FSM; `fields`: the fields of structs too); `clear` the layer off; answers the layer (`{mode, signals}`, `null`: none) and every FSM (`fsms`); in a page only |
@@ -1378,7 +1406,7 @@ A page carries its edits per view (a JSON block next to its data, a new revision
 them when it is opened: what this browser keeps of a viewer (bookmarks, arrows, markers, spans, groups, colours, radix, analog and
 hidden rows, the buses bit by bit, expressions, edge style, gaps) once per revision — what you change afterwards stays yours until a newer revision replaces the
 parts it names; the rest (cursor, window, highlight, selection, folding, order, search) every time it is opened, as the
-page's own settings. The commands that need the waves' values or the screen (`edge`, `fit`, `picture`, `fsm`, `fsm_stats`, `fsm_go`, `types`, `expr_go`, `expr_matches`) run only in the
+page's own settings. The commands that need the waves' values or the screen (`edge`, `fit`, `picture`, `fsm`, `fsm_stats`, `fsm_go`, `fsm_panel`, `types`, `expr_go`, `expr_matches`) run only in the
 page. The smoke test checks that a page with these edits and the same commands run in it give the same state.
 
 **A rebuilt page keeps your view: the config.** `--config x.config.json --view v` runs the commands on a view of a config instead of a
@@ -1425,7 +1453,7 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
 | `wave_stats` | over a window: a bit's rises, falls, high time, pulse widths and period; a bus's changes, distinct values, the longest-held ones, minimum and maximum |
 | `sva_check` | assertion files and / or text evaluated over the dump in a scope: the failed ones with their first failures (`cycle`, `t`, `start_cycle`, `start_t`, the reason), passed, vacuous, not evaluated (names missing), the covers |
 | `wave_page` | a viewer page (`out` `.html`) or WaveJSON (`.json`) of signals over a window, assertions bound, to show a person; `marks`, `marks_views`: the tests of a cocotb run on it (not with `compare` or `auto_gap`; a mark that found no row is in `notes`); `compare`: a second dump (or `{dump, map, offset, segment, align, show}`, the config's `"compare"`), its differences on the page, `show` the run it opens with |
-| `wave_tests` | the tests of a cocotb run from its marks file ([§ Marks from a cocotb test](#marks-from-a-cocotb-test)): the summary, each test's result, window, counts of checks, message and line, its `measures` (`wl.measure`: `label`, `from`, `to`, `dt` in ns, `min`, `max`, `ok`; `ok` null: a bound in cycles) and `measures_failed`; `slowest`: the five longest steps of the run; `test` (a number or name): one, with the whole docstring (`text`), its own rows (`signals`), its phases and marks, each check with `got` and `expected`, `got_all`, `expected_all` and `at` where a long value was cut (`limit`, 50: `more`), its `steps` by length, the longest first, with `total` and `longest` (`steps: true`: only them). The window is the one to ask `wave_changes`, `wave_find` or `wave_sample` about |
+| `wave_tests` | the tests of a cocotb run from its marks file ([§ Marks from a cocotb test](#marks-from-a-cocotb-test)): the summary, each test's result, window, counts of checks, message and line, its `measures` (`wl.measure`: `label`, `from`, `to`, `dt` in ns, `min`, `max`, `ok`; `ok` null: a bound in cycles) and `measures_failed`; `slowest`: the five longest steps of the run; `test` (a number or name): one, with the whole docstring (`text`), its own rows (`signals`), its phases and marks, each check with `got` and `expected`, `got_all`, `expected_all` and `at` where a long value was cut (`limit`, 50: `more`), its `steps` by length, the longest first, with `total` and `longest` (`steps: true`: only them). The window is the one to ask `wave_changes`, `wave_find` or `wave_sample` about. `marks` a directory: a regression, every marks file under it (any depth) in one answer: `summary`, `totals`, the `failures` first (`file`, `n`, `name`, `result`, `from`, `message`, `where`; `limit`), `runs` (each file's `summary`, `tests`, `failed`, the failed ones first), `notes` for a file it could not read |
 | `wave_to_fst` | the VCD as an FST beside it (`out`: another file) with `sva fst`, the FSM states of its types file in it (`types`, `no_types`); what was written and the notes with their lines |
 | `wave_diff` | two dumps `a` and `b` (`dump` is `a`) compared change by change with `sva diff` (*Compare two runs from the shell*: streamed, neither read by the server): `equal`, `compared`, `differ`, `first` (`t`, `signal`, `a`, `b`; a bus in hex), the first `limit` `differences`, the signals that differ (`signals_more`: the rest), `only_a`, `only_b`, `segments`; `map` an object (`{"tb_a.if": "tb_b.if"}`), `offset`, `segment`, `align`, `spans` (the stretches kept per signal), `rank` (the first five signals by their first difference); `results_a`, `results_b` instead of the dumps: the assertions' results of two runs, `new`, `gone`, `moved` failures per assertion; times in ns |
 | `wave_explain` | one call from a moment to what to look at: `expr` (its `nth` match; its signals from the expression), `assert` (`"name@scope"` with `sva`, its files: its `nth` failure, the window from the attempt's start to where it failed, its signals from the property, its `note`), `b` (the first difference with that dump, and the signals that differed next) or `t` (a time, with `signals`) -> `at`, the window `before` / `after` cycles of the clock around it (2 / 2, an expression 2 / 4), the clock, the signals and their values there (a `wave_sample` table; with `b`, `table_b`: the other run's in the same window); `out` (a `.html`): a page of that window with a marker and the cursor there |
@@ -1606,7 +1634,8 @@ value (313 kB and 0.01 s of a 127 MB FST of 10 000 signals); `--codes FILE` (`-`
 codes as the whole text numbers them — their declarations in their scopes, their enum tables, their changes, the end
 (50 signals of it: 0.06 s); a reader of a part gets what it gets of the whole text for them. Of any dump a **cut**:
 `sva vcd DUMP --from T --to T [--signals PAT,…] [--out cut.vcd]` writes the declarations of those signals (paths or `*`
-`?` patterns; none: all) in their scopes with their enum tables, then under `#from` a `$dumpvars` with the value each of
+`?` patterns; none: all; an element of an unpacked array by either name, `mem[1]` as Verilator's FST holds it or `mem.[1]`
+as `wave_signals` and the page list it) in their scopes with their enum tables, then under `#from` a `$dumpvars` with the value each of
 them has at `--from` (x on every bit when it has none yet), its changes after it up to `--to`, and `#to`, the end (not
 past the dump's); a window of 1 ms of a 214 MB VCD: 1.7 s. For **Compare…** with a large B, for sending one test case,
 for a small fixture. The cut of a VCD and the cut of its FST read the same (`tests/unit/test_svafst.py`). `sva eval` and

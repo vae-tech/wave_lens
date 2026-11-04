@@ -579,6 +579,47 @@ class RowNames(unittest.TestCase):
                 self.assertEqual(doc['bookmarks'][0]['signal'], 'ctrl.o_done', sig)
                 self.assertNotIn('bookmark-signal-missing', err)
 
+    def test_a_span_finds_its_rows_as_a_bookmark_does(self):   # WL-010
+        with H.tmp() as d:
+            for group, row in (({'ctrl': ['o_done', 'i_other']}, 'ctrl.o_done'), ({}, 'o_done')):
+                for sig in ('o_done', 'tb.o_done', row):
+                    with self.subTest(group=bool(group), sig=sig):
+                        doc, err = self.page(d, False, sig, group=group, spans=[{'from': 10, 'to': 30, 'label': 's', 'signals': [sig, 'clk']},
+                                                                                {'from': 10, 'to': 30, 'signals': sig}])
+                        self.assertEqual([sp['signals'] for sp in doc['spans']], [[row, 'clk'], row])
+                        self.assertNotIn('span-signal-missing', err)
+            doc, err = self.page(d, False, spans=[{'from': 10, 'to': 30, 'signals': ['tb.nope']}])
+            self.assertEqual(doc['spans'][0]['signals'], ['tb.nope'])
+            self.assertIn('span-signal-missing', err)
+
+    def test_a_bookmark_on_a_pattern(self):   # P-10: wl.note(text, signal="*done"): the first row the pattern matches
+        with H.tmp() as d:
+            for sig, row in (('*done', 'ctrl.o_done'), ('tb.*_other', 'ctrl.i_other'), ('*', 'clk'), ('c?k', 'clk')):
+                with self.subTest(sig=sig):
+                    doc, err = self.page(d, False, sig)
+                    self.assertEqual(doc['bookmarks'][0]['signal'], row)
+                    self.assertNotIn('bookmark-signal-missing', err)
+            doc, err = self.page(d, False, '*nothing*')
+            self.assertEqual(doc['bookmarks'][0]['signal'], '*nothing*')
+            self.assertIn('bookmark-signal-missing', err)
+
+    def test_a_measure_by_events(self):   # P-21: the ends of a measure as a span's: a time, an event, a bookmark
+        with H.tmp() as d:
+            ms = [{'label': 'a', 'from': {'signal': 'o_done', 'edge': 'rise'}, 'to': {'signal': 'o_done', 'value': 0, 'from': '15ns'}, 'max': '5ns'},
+                  {'label': 'b', 'from': {'bookmark': 1}, 'to': '45ns'}, {'label': 'c', 'from': {'signal': 'o_done', 'edge': 'rise', 'nth': 2}}]
+            doc, err = self.page(d, False, measures=ms)
+            self.assertEqual([(m['label'], m['from'], m['to']) for m in doc['measures']], [('a', 10000, 20000), ('b', 10000, 45000), ('c', 30000, None)])
+            self.assertEqual(doc['measures'][0]['max'], '5ns')
+            cfg = os.path.join(d, 'x.json')
+            with open(cfg) as f:
+                c = json.load(f)
+            c['measures'] = [{'label': 'z', 'from': {'signal': 'o_done', 'value': 7}}]
+            with open(cfg, 'w') as f:
+                json.dump(c, f)
+            rc, out, err = H.run_tool('vcd2wavedrom', '--config', cfg)
+            self.assertNotEqual(rc, 0)
+            self.assertIn('measures[0].from', err)
+
     def test_also_adds_rows_by_name_and_pattern(self):
         with H.tmp() as d:
             doc, err = self.page(d, False, also=['*_other', 'o_done', 'gone', '*nothing*'])
@@ -671,6 +712,27 @@ class Lint(unittest.TestCase):
         w = self.settings(cycles=True, cycleClock='gone')
         self.assertEqual(w, ['setting-signal-missing: views.v.config.cycleClock: "gone" is no row of the view: not used'])
         self.assertEqual(len(self.settings(gaps=True, gapSignals='gone*, clk', gapAux='no')), 2)
+
+    def test_cycle_zero_before_a_window(self):
+        """AU-WL-001: a window with cycleZero before it: the page counts the edges before it at the clock's period; the dump's
+        own count differs only when the clock stops between (cycle-zero-window), and the build says so."""
+        hdr = '$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! clk $end\n$upscope $end\n$enddefinitions $end\n'
+        def run(stop):
+            ts = [t for t in range(5, 200, 10) if not (stop and 30 < t < 80)]   # rises every 10 ns from 5 ns (stop: none in 35..75)
+            body = '#0\n0!\n' + ''.join(f'#{t}\n1!\n#{t + 5}\n0!\n' for t in ts)
+            with H.tmp() as d:
+                cfg = os.path.join(d, 'w.config.json')
+                with open(cfg, 'w', encoding='utf-8') as f:
+                    json.dump({'waves': H.vcd(d, body, hdr), 'exact': True, 'from': '100ns', 'to': '160ns', 'signals': ['tb.clk'],
+                               'config': {'cycles': True, 'cycleClock': 'clk', 'cycleZero': '5ns'}}, f)
+                rc, _, err = H.run_tool('vcd2wavedrom', '--config', cfg, '--out', os.path.join(d, 'w.json'))
+            self.assertEqual(rc, 0, err)
+            return [x for x in err.splitlines() if 'cycle-zero-window' in x]
+        self.assertEqual(run(False), [], 'a steady clock: the page\'s numbers are the dump\'s (the edge at 105 ns: cycle 10)')
+        w = run(True)
+        self.assertEqual(len(w), 1, w)
+        self.assertIn('config.cycleZero: before the window', w[0])
+        self.assertIn('cycle 10, the dump\'s 5', w[0])   # edges 5 15 25, none to 75, 85 95 105
 
     def test_clean(self):
         self.assertEqual(self.lint(bookmarks=[{'n': 1, 't': '100ns', 'signal': 'u.state'}, {'n': 2, 't': 500000, 'signal': 'tb.d.x'}],

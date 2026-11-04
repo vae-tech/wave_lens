@@ -20,6 +20,7 @@ Without it the sources go into the page unparsed and the page parses and evaluat
 """
 import argparse, fnmatch, json, os, re, shutil, subprocess, sys, tempfile
 
+sys.dont_write_bytecode = True   # a shared checkout stays as it is: -I ignores PYTHONDONTWRITEBYTECODE (AU-WL-003)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
 from common import WaveError, add_sva_bin_arg, run_main  # noqa: E402
 

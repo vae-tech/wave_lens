@@ -685,13 +685,17 @@ fn run(o: &Opt) -> Result<bool, String> {
     // A's signals compared: --signals, else all (under --scope)
     let under = |p: &str| o.scope.is_empty() || p == o.scope || p.starts_with(&format!("{}.", o.scope));
     // a name: its path under --scope, or as it is, else the one path of A that ends with it (more: ambiguous)
+    // an array element by either name (`mem.[1]` as wellen names it, `mem[1]` as the dump does)
+    let glued = crate::vcd::glued;
+    let by_glued: HashMap<String, &String> = a_list.iter().map(|(p, _)| (glued(p), p)).collect();
+    let path_of = |p: &str| a_by.get_key_value(p).map(|(k, _)| k.clone()).or_else(|| by_glued.get(&glued(p)).map(|k| (*k).clone()));
     let named = |n: &str| -> Result<String, String> {
-        let exact = [if o.scope.is_empty() { None } else { Some(format!("{}.{n}", o.scope)) }, Some(n.to_string())].into_iter().flatten().find(|p| a_by.contains_key(p));
+        let exact = [if o.scope.is_empty() { None } else { Some(format!("{}.{n}", o.scope)) }, Some(n.to_string())].into_iter().flatten().find_map(|p| path_of(&p));
         if let Some(p) = exact {
             return Ok(p);
         }
-        let tail = format!(".{n}");
-        let hits: Vec<&String> = a_list.iter().map(|(p, _)| p).filter(|p| p.ends_with(&tail) && under(p)).collect();
+        let tail = glued(&format!(".{n}"));
+        let hits: Vec<&String> = a_list.iter().map(|(p, _)| p).filter(|p| glued(p).ends_with(&tail) && under(p)).collect();
         match hits.as_slice() {
             [p] => Ok((*p).clone()),
             [] => Err(format!("{}: no signal {n}{}", o.a, if o.scope.is_empty() { String::new() } else { format!(" under {}", o.scope) })),
@@ -709,7 +713,7 @@ fn run(o: &Opt) -> Result<bool, String> {
             std::fs::read_to_string(f)
         }.map_err(|e| format!("{f}: {e}"))?;
         for p in text.lines().map(str::trim).filter(|l| !l.is_empty()) {
-            if a_by.contains_key(p) { chosen.push(p.to_string()) } else { not_in_a.push(p.to_string()) }
+            if let Some(q) = path_of(p) { chosen.push(q) } else { not_in_a.push(p.to_string()) }
         }
     }
     if o.signals_from.is_some() && o.signals.is_empty() {
@@ -720,7 +724,7 @@ fn run(o: &Opt) -> Result<bool, String> {
         for s in &o.signals {
             if s.contains(['*', '?']) {
                 let pat = if o.scope.is_empty() || s.starts_with('*') { s.clone() } else { format!("{}.{s}", o.scope) };
-                let hit: Vec<String> = a_list.iter().map(|(p, _)| p.clone()).filter(|p| glob(pat.as_bytes(), p.as_bytes())).collect();
+                let hit: Vec<String> = a_list.iter().map(|(p, _)| p.clone()).filter(|p| crate::vcd::glob_either(&pat, p)).collect();
                 if hit.is_empty() {
                     return Err(format!("{}: no signal matches {s}", o.a));
                 }

@@ -649,10 +649,11 @@ class WaveView {
     this.paintRows().forEach(r => this.painted.set(r.full, color));
     this.savePaint(); this.renderNames(); this.draw(); return this;
   }
-  paintRows() {
-    const rows = this.sigPool().filter(r => r.type === 'sig' && (this.found.has(r) || this.picks.has(r) || this.selRun.has(r) ||
+  paintRows() {   // a row of your groups selected (shift+click) or highlighted (ctrl+click) stands for its signal (.orig)
+    const base = r => (r && r.orig) || r, run = new Set([...this.selRun].map(base)), pk = new Set([...this.picks.keys()].map(base));
+    const rows = this.sigPool().filter(r => r.type === 'sig' && (this.found.has(r) || pk.has(r) || run.has(r) ||
       r.anc.some(id => this.picks.has(this.M.groups[id]))) && this.shown(r));   // not what you do not see (Hide, Only)
-    return rows.length ? rows : this.sel && this.sel.type === 'sig' ? [this.sel] : [];
+    return rows.length ? rows : this.sel && this.sel.type === 'sig' ? [base(this.sel)] : [];
   }
   unpaint() { this.painted.clear(); this.savePaint(); this.renderNames(); this.draw(); return this; }
   // the radix of a signal (a row or its path; one of RADIX, null: the page's) and hidden rows (signals, modules: all of

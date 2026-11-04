@@ -195,7 +195,9 @@
   settings. With the band on, the title line says the cursor's cycle (<code>cycle 6 ↑PCLK</code>) and the second cursor's Δ counts that
   clock. Type <code>c147</code> (or <code>cycle 147</code>, <code>c-3</code>) in the cursor field to go to that cycle's edge; it works with
   the band off too. The pictures (PNG, SVG) draw the band; the settings are <code>cycles</code>, <code>cycleClock</code>,
-  <code>cycleZero</code>, and the command is <code>{"op": "cycles", "on": true, "clock": "PCLK", "zero": "50ns"}</code>.</p>
+  <code>cycleZero</code>, and the command is <code>{"op": "cycles", "on": true, "clock": "PCLK", "zero": "50ns"}</code>. A figure of a window
+  cut out of a long dump (<code>--from</code> / <code>--to</code>) with <code>cycleZero</code> before it counts the edges before the window at
+  the clock's period: its edges keep the numbers of the whole dump.</p>
 <figure><img src="img/viewer-cycles.png" alt="The cycles of PCLK under the time axis, cycle 0 at the fifth rising edge" loading="lazy">
   <figcaption><b>Clock cycles.</b> Cycle 0 at the fifth rising edge of PCLK: the band numbers the edges, the title line says the cursor's
   cycle, the Δ of the two cursors is in PCLK cycles.</figcaption></figure>
@@ -614,7 +616,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.41 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.42 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

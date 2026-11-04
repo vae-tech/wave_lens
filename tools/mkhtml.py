@@ -6,13 +6,14 @@
   mkhtml.py cyc=cyc.json exact=exact.json --settings cfg.json --out page.html   # from WaveJSON files
   mkhtml.py --config x.config.json --sva checks.sv --bind a_req_ack@tb.dut --out x.html   # assertions bound (make html SVA= BIND=)
   mkhtml.py --config x.config.json --lint [--strict]       # the warnings of every view, no page (--strict: exit 1 on one)
+  mkhtml.py --config x.config.json --lint --lint-json -    # the same as JSON: code, where, view, the signal and the rows it may mean
   mkhtml.py --config x.config.json --waves dump.vcd --marks run.marks.json --out x.html   # a cocotb test's marks on the waves
   mkhtml.py … --marks run.marks.json --marks-views tests                                  # each test apart: the page shows one at a time
 
 Lint (printed at every build, "mkhtml: lint: <code>: <JSON path>: <text>"; docs/USAGE.md "Lint"): bookmark-bad, arrow-bad, bookmark-outside-view,
 bookmark-signal-missing, bookmark-duplicate, bookmark-time, bookmark-key, bookmark-link-missing, arrow-end-missing, arrow-key, marker-no-match,
 marker-key, bind-unknown, svashow-no-match, bookmarks-close (a heuristic), enum-colors-hex, span-outside-view,
-span-signal-missing, span-key, span-every-no-match, compare-spans-cut, measure-no-clock, state-signal-missing, state-svg, expr-name-missing, exprs-no-engine, gap-view-off, setting-signal-missing, also-no-match, also-cut. A marker or a span "every" on a signal the dump has not got
+span-signal-missing, span-key, span-every-no-match, compare-spans-cut, measure-no-clock, state-signal-missing, state-svg, expr-name-missing, exprs-no-engine, gap-view-off, setting-signal-missing, cycle-zero-window, also-no-match, also-cut. A marker or a span "every" on a signal the dump has not got
 is no warning: the build stops there, as for any name of the config (marker-no-match: the signal is there, the event never happens).
 
 Config keys used here (the rest is vcd2wavedrom.py's, see its --help):
@@ -22,6 +23,9 @@ Config keys used here (the rest is vcd2wavedrom.py's, see its --help):
             view; a view's "marks": false keeps it out (docs/USAGE.md "Marks from a cocotb test")
   "marksViews"  whole (default): all the tests on one waveform; tests: a view of each test and the page shows one at a time, with a
             button per test; both: those and the whole run (--marks-views)
+  "marksColors"  the colours of the marks: {"pass", "fail", "xfail", "run", "note", "warning", "log"}: "#2f9e44", a token of the theme
+            ("c3", "hl2": it follows dark and light), "--my-var" or a CSS name (the rest keep theirs)
+  "marksPhases"  true: a labelled marker at the start of each phase of a test (of some time) too, to jump to with ]m [m (--marks-phases)
   views[k]  "render": "view" (interactive, default) | "svg" (static figure) | "both"; "note": text under the heading
   "sva"     ["checks.sv", …] (top level or in a view) SystemVerilog assertion files: parsed with the sva CLI (one
             compilation unit), inlined as window.SVA for the assertions panel; parse errors are shown in the page.
@@ -133,7 +137,7 @@ NAV_JS = '''<script>
 def nav_html(nav):
     """The buttons of a page with a view per test."""
     def one(e):
-        style = f' style="--tc: {html.escape(e["color"], quote=True)}"' if e.get('color') else ''
+        style = f' style="--tc: {html.escape(css_color(e["color"]), quote=True)}"' if e.get('color') else ''
         return (f'<button type="button" data-view="{html.escape(e["key"], quote=True)}"{style}>{html.escape(e["label"])}'
                 f'<small>{html.escape(e["word"])}</small></button>')
     return f'<nav class="tests">{"".join(one(e) for e in nav)}</nav>\n'
@@ -233,6 +237,7 @@ def build_views(a, cfg, base):
             if st:
                 docs[name].setdefault('meta', {})['stats'] = st
             a.lint_count = getattr(a, 'lint_count', 0) + len(o.lint)
+            a.lint_items = getattr(a, 'lint_items', []) + [vcd2wavedrom.lint_item(w, name) for w in o.lint]
             renders[name] = (a.render or own.get('render') or cfg.get('render') or 'view', own.get('note'))
             st = own.get('state')   # the view's state as the page opens (viewedit.py --config): into the page's edits
             if st is not None:
@@ -243,20 +248,28 @@ def build_views(a, cfg, base):
                 if rd == 'svg':   # the static figure draws its WaveJSON: a viewer's state is the viewer's (review S19-3)
                     raise WaveError(f'mkhtml: views.{key}.state: a view rendered as "svg" draws its WaveJSON only, no viewer\'s state: '
                                     '"render": "view" or "both", or no "state"')
-                if rd == 'both':
-                    print(f'mkhtml: lint: state-svg: views.{key}.state: the viewer opens with it, the static figure beside it draws the WaveJSON as it is',
-                          file=sys.stderr)
-                    a.lint_count += 1
+                more = [f'state-svg: views.{key}.state: the viewer opens with it, the static figure beside it draws the WaveJSON as it is'] if rd == 'both' else []
                 a.view_states = {**getattr(a, 'view_states', {}), name: st}
-                for w in state_lint(st, docs[name], f'views.{key}.state'):   # a name of the state the view has not got: the page leaves it out
+                for w in more + state_lint(st, docs[name], f'views.{key}.state'):   # a name of the state the view has not got: the page leaves it out
                     print(f'mkhtml: lint: {w}', file=sys.stderr)
                     a.lint_count += 1
+                    a.lint_items.append(vcd2wavedrom.lint_item(w, name))
     for spec in a.files:
         key, _, path = spec.rpartition('=')
         key = key or os.path.splitext(os.path.basename(path))[0]
         docs[key] = vcd2wavedrom.load_config(path)
         renders[key] = (a.render or 'view', None)
     return docs, renders, sva_views
+
+
+def css_color(c):
+    """A colour as the page takes it (model.js tokVar) as CSS: a token of the theme ("c3", "hl2", "fg") its variable, "--x" var(--x)."""
+    tok = {'fg': '--fg', 'muted': '--muted', 'line': '--line', 'acc': '--accent', 'paint': '--wave-paint'}
+    if c in tok:
+        return f'var({tok[c]})'
+    if re.fullmatch(r'(?:c|hl)\d|one|bus|x|z|band', c):
+        return f'var(--wave-{c})'
+    return f'var({c})' if c.startswith('--') else c
 
 
 def state_lint(st, doc, at):
@@ -426,12 +439,16 @@ def main():
                     'dump, in no view (repeatable, NAME may be a pattern; replaces the top-level "report")')
     ap.add_argument('--marks-views', choices=testmarks.SPLITS, help='whole (default): all the tests on one waveform; tests: a view of each test, the '
                     'page shows one at a time; both: that and the whole run (replaces the top-level "marksViews")')
+    ap.add_argument('--marks-phases', action='store_true', help='with marks: a labelled marker at the start of each phase of a test too '
+                    '(the top-level "marksPhases": true), the phases to jump to with ]m [m')
     ap.add_argument('--no-sva', action='store_true', help='leave the assertion engine (wavelens/sva.js + sva.wasm.js, ~440 kB) out of the page, and evaluate nothing')
     ap.add_argument('--reproducible', action='store_true', help='no "Generated" time in the page: the same inputs give the same bytes '
                     '(or set SOURCE_DATE_EPOCH: that time, in UTC)')
     ap.add_argument('--lint', action='store_true', help='check the config: the views are converted and their warnings printed '
                     '(they are printed at every build too); without --out no page is written')
     ap.add_argument('--strict', action='store_true', help='a lint warning is an error (exit 1, no page)')
+    ap.add_argument('--lint-json', metavar='FILE', help='the lint warnings as JSON into FILE (- stdout): {"count", "warnings": [{"code", "where", '
+                    '"message", "view", and what it is about: "signal" / "name", "rows" it may mean}]}, written at every build')
     ap.add_argument('--marks', metavar='FILE', help='the marks of a cocotb test (python/wavelens_cocotb.py): its tests as spans, bookmarks and jumps '
                     'in every view (a view\'s "marks": false keeps it out; replaces the top-level "marks")')
     ap.add_argument('--junit', metavar='FILE', help='the assertions of every view as JUnit XML (a testsuite per view, a testcase per binding, '
@@ -463,10 +480,11 @@ def main():
         cfg['report'] = {'bind': a.report}
     marks = a.marks or (cfg.get('marks') and os.path.join(base, os.path.expanduser(cfg['marks'])))
     split = a.marks_views or cfg.get('marksViews') or 'whole'
-    cfg.pop('marks', None), cfg.pop('marksViews', None)
+    phases, colors = a.marks_phases or cfg.get('marksPhases') is True, cfg.get('marksColors')
+    cfg.pop('marks', None), cfg.pop('marksViews', None), cfg.pop('marksPhases', None), cfg.pop('marksColors', None)
     if marks:
         doc = testmarks.load(marks)
-        a.nav = testmarks.merge(cfg, doc, split)
+        a.nav = testmarks.merge(cfg, doc, split, phases, colors)
         if split != 'whole':   # the views of the tests are of one dump: a marker of yours in one is in each (the setting sharedMarkers)
             cfg.setdefault('config', {}).setdefault('sharedMarkers', True)
         print(f'mkhtml: marks: {testmarks.summary(doc)}', file=sys.stderr)
@@ -474,6 +492,13 @@ def main():
         view.pop('marks', None)   # (false, and no marks to keep it from)
     docs, renders, sva_views = build_views(a, cfg, base)
     n = getattr(a, 'lint_count', 0)
+    if a.lint_json:
+        text = json.dumps({'count': n, 'warnings': getattr(a, 'lint_items', [])}, ensure_ascii=False, indent=1) + '\n'
+        if a.lint_json == '-':
+            sys.stdout.write(text)
+        else:
+            with open(a.lint_json, 'w', encoding='utf-8') as f:
+                f.write(text)
     if a.lint or a.strict:
         print(f'mkhtml: lint: {n} warning{"s" if n != 1 else ""}' + (' (--strict: no page)' if n and a.strict and a.out else ''), file=sys.stderr)
     if n and a.strict:

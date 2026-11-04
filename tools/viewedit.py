@@ -30,6 +30,7 @@ page with these edits and the same commands run in it give the same state.
 """
 import argparse, collections, datetime, functools, json, math, os, re, sys, unicodedata
 
+sys.dont_write_bytecode = True   # a shared checkout stays as it is: -I ignores PYTHONDONTWRITEBYTECODE (AU-WL-003)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
 from common import UNIT_PS, WaveError, glob_re as path_re, parse_time, run_main  # noqa: E402
 
@@ -66,12 +67,13 @@ COMMANDS = {
     'sort': 'dir ignore?', 'style': 'name',
     'layout': 'scroll? height? tools?', 'find': 'query case? word? regex? highlight? open? mask?', 'gaps': 'on? idle? keep? signals? clock? aux? only? count? view? reset?',
     'cycles': 'on? clock? zero? reset?', 'only': 'modules? on? clear? open?', 'fsm': 'mode? signals? fields? clear?',
-    'fsm_stats': 'signal', 'fsm_go': 'signal state? from? to? dir? first?', 'types': 'signals?',
+    'fsm_stats': 'signal', 'fsm_panel': 'signal? tab? off?', 'fsm_go': 'signal state? from? to? dir? first?', 'types': 'signals?',
     'edge': 'dir? kind? value? signal?', 'reset': '', 'state': '', 'set_state': 'state', 'rows': 'pattern? limit? offset?',
     'picture': 'format? from? to? rows?', 'compare': 'result? dump? a? map? offset? off? show?',
 }
 LIVE_ONLY = {'fit': 'the time of the waves', 'edge': 'the values of the signals', 'picture': 'the screen',
              'fsm': 'the enum labels of the signals', 'fsm_stats': 'the transitions of the signals', 'fsm_go': 'the transitions of the signals',
+             'fsm_panel': 'the panels of the page',
              'types': 'the types file read in the page', 'expr_go': 'the values of the signals', 'expr_matches': 'the values of the signals',
              'expr_markers': 'the values of the signals', 'goto': 'the page scrolls', 'bus_list': 'the decoders of bus.js'}
 # the arguments of each command that are times (wavemcp.py turns its ns into "…ns" for these)

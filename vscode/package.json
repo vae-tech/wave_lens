@@ -33,7 +33,9 @@
       { "command": "wavelens.log", "title": "Show the log", "category": "WaveLens", "icon": "$(output)" },
       { "command": "wavelens.verilatorTypes", "title": "Make the types with Verilator (FSM states, structs)", "category": "WaveLens" },
       { "command": "wavelens.toFst", "title": "Convert to FST (beside the VCD, FSM states kept)", "category": "WaveLens" },
-      { "command": "wavelens.goto", "title": "Go to a moment of the dump (a link of a log)", "category": "WaveLens" }
+      { "command": "wavelens.goto", "title": "Go to a moment of the dump (a link of a log)", "category": "WaveLens" },
+      { "command": "wavelens.openConfig", "title": "Open the configuration (colours, sizes, radix …)", "category": "WaveLens", "icon": "$(settings-gear)" },
+      { "command": "wavelens.resetConfig", "title": "Reset the configuration to the defaults", "category": "WaveLens" }
     ],
     "menus": {
       "explorer/context": [
@@ -44,6 +46,7 @@
         { "command": "wavelens.reload", "when": "activeCustomEditorId == wavelens.waves", "group": "navigation" },
         { "command": "wavelens.theme", "when": "activeCustomEditorId == wavelens.waves", "group": "navigation@2" },
         { "command": "wavelens.log", "when": "activeCustomEditorId == wavelens.waves", "group": "navigation@3" },
+        { "command": "wavelens.openConfig", "when": "activeCustomEditorId == wavelens.waves", "group": "navigation@4" },
         { "command": "wavelens.verilatorTypes", "when": "activeCustomEditorId == wavelens.waves", "group": "types@1" },
         { "command": "wavelens.toFst", "when": "activeCustomEditorId == wavelens.waves && resourceExtname =~ /^\\.vcd$/i", "group": "types@2" }
       ],

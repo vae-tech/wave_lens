@@ -814,7 +814,16 @@ const riseTimes = clk => RISES.get(clk) || (RISES.set(clk, clk.tr.filter(o => o.
 // the cycle at t, the last edge at or before t (negative before cycle 0); the time of cycle n, or null past the ends
 // the setting cycleZero: a time ("50ns", as gapIdle and the cursor take it) or model units; null / "": the first edge
 const zeroTime = z => (z == null || z === '' ? null : typeof z === 'number' ? z : num(parseT(z)));
-const cycZero = (ups, zero) => (zero == null || !isFinite(zero) ? 0 : lastBefore(ups.length, j => ups[j], zero - timeEps(zero), true) + 1);
+// a zero before the first edge (a window cut out of a long dump, AU-WL-001): the edges before it counted at the clock's mean
+// period over the edges there are, so the first edge is cycle (ups[0] − zero) / period, as the tools number it on the whole
+// dump (a zero within 2 % of a period after an edge counts as on it: the period is measured)
+const cycZero = (ups, zero) => {
+  if (zero == null || !isFinite(zero)) return 0;
+  if (ups.length > 1 && zero < ups[0] - timeEps(ups[0])) {
+    const per = (ups[ups.length - 1] - ups[0]) / (ups.length - 1); if (per > 0) return -Math.floor((ups[0] - zero) / per + 0.02);
+  }
+  return lastBefore(ups.length, j => ups[j], zero - timeEps(zero), true) + 1;
+};
 const cycAt = (ups, iz, t) => lastBefore(ups.length, j => ups[j], t + timeEps(t)) - iz;
 // the rising edges the cycles count: a dump's first value 1 ("tv") is its level at the start, not an edge (a wave's p is one)
 const cycUps = clk => ((clk.tv || clk.fromTv) && clk.tr[0] && clk.tr[0].k === '1' ? riseTimes(clk).slice(1) : riseTimes(clk));

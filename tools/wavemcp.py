@@ -31,6 +31,7 @@ docs/USAGE.md § "AI agents (MCP)" has the tools; tests/mcp_bench.py measures wh
 import argparse, atexit, bisect, collections, contextlib, fnmatch, hmac, http.server, json, os, queue, re, secrets, shutil, socket, statistics, subprocess, sys
 import tempfile, threading, time, traceback, urllib.parse
 
+sys.dont_write_bytecode = True   # a shared checkout stays as it is: -I ignores PYTHONDONTWRITEBYTECODE (AU-WL-003)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
 import dumpscan, svabuild, svtypes, testmarks, vcd2wavedrom, viewedit, wavefind  # noqa: E402
 from common import ROOT, UNIT_PS, WaveError, version  # noqa: E402
@@ -135,10 +136,11 @@ class Wave(vcd2wavedrom.Builtin):
                                     else f'"{name}": {path} is a {self.decl.vars[path].kind}, it has no bits to select')
                 return path, (hi, lo)
         under = [p for p in self.decl.vars if not scope or p.startswith(scope.rstrip('.') + '.')]
-        tails = sorted((p for p in under if p.endswith('.' + name)), key=lambda p: (p.count('.'), p))
+        glued = lambda p: p.replace('.[', '[')   # an array element either way: "ptr[1]", "ptr.[1]" (WL-009)
+        tails = sorted((p for p in under if glued(p).endswith('.' + glued(name))), key=lambda p: (glued(p).count('.'), p))
         if len(tails) == 1:
             return tails[0], None
-        if len(tails) > 1 and tails[0].count('.') < tails[1].count('.'):   # one at the shallowest level: that one, said
+        if len(tails) > 1 and glued(tails[0]).count('.') < glued(tails[1]).count('.'):   # one at the shallowest level: that one, said
             NOTES.append(f'{name} = {tails[0]} (+{len(tails) - 1} deeper)')
             return tails[0], None
         if tails:
@@ -832,8 +834,68 @@ def marks_file(a):
     return p
 
 
+def marks_files(d):
+    """The marks files under a directory (any depth, in name order): every .json that is one; the others skipped."""
+    out = []
+    for root, dirs, files in os.walk(d):
+        dirs[:] = sorted(x for x in dirs if not x.startswith('.'))
+        for f in sorted(files):
+            if f.endswith('.json'):
+                try:
+                    with open(os.path.join(root, f), encoding='utf-8') as fh:
+                        head = fh.read(200)
+                except OSError:
+                    continue
+                if '"wavelens"' in head and '"marks"' in head:
+                    out.append(os.path.join(root, f))
+    return out
+
+
+def regression(a, d):
+    """wave_tests of a directory: every marks file under it as one answer: the totals, the failures first (file, test, message, where), each
+    file's line, the failed ones first."""
+    if a.get('test') is not None or a.get('steps'):
+        raise WaveError('"test" / "steps" are of one marks file; "marks" is a directory here (its failures: the "failures" of this answer)')
+    paths = marks_files(d)
+    if not paths:
+        raise WaveError(f'"marks": no marks file under {d} (a .json with "wavelens": "marks", what wavelens_cocotb writes)')
+    files, fails, tot, notes = [], [], dict.fromkeys(('tests', 'pass', 'fail', 'xfail', 'run', 'checks', 'failed_checks'), 0), []
+    for p in paths:
+        try:
+            doc = testmarks.load(p)
+        except WaveError as e:
+            notes.append(str(e))
+            continue
+        rel, tests = os.path.relpath(p, d), doc.get('tests') or []
+        bad = [t for t in tests if t['result'] in ('fail', 'run')]
+        for t in tests:
+            n, b = testmarks.checks_of(t)
+            tot['tests'] += 1
+            tot[t['result']] = tot.get(t['result'], 0) + 1
+            tot['checks'] += n
+            tot['failed_checks'] += b
+        fails += [{'file': rel, 'n': t['n'], 'name': t['name'], 'result': t['result'], 'from': ns(t['from']),
+                   **{k: t[k] for k in ('message', 'where') if t.get(k)}} for t in bad]
+        files.append({'file': rel, 'summary': testmarks.summary(doc), 'tests': len(tests), 'failed': len(bad)})
+    files.sort(key=lambda f: (-f['failed'], f['file']))
+    limit = a.get('limit') or 50
+    out = {'dir': d, 'files': len(files), 'totals': tot,
+           'summary': f'{len(files)} file{"s" * (len(files) != 1)}, {tot["tests"]} tests: {tot["pass"]} passed, {tot["fail"]} failed'
+                      + (f', {tot["xfail"]} failed as expected' if tot['xfail'] else '') + (f', {tot["run"]} not finished' if tot['run'] else ''),
+           'failures': fails[:limit], 'runs': files}
+    if len(fails) > limit:
+        out['more_failures'] = len(fails) - limit
+    if notes:
+        out['notes'] = notes
+    return out
+
+
 def t_tests(a):
-    """The tests of a cocotb run, from its marks file: what ran when and how it ended; `test`: one, with its phases and marks."""
+    """The tests of a cocotb run, from its marks file: what ran when and how it ended; `test`: one, with its phases and marks; a directory: every
+    marks file under it (regression)."""
+    d = os.path.abspath(os.path.expanduser(str(a.get('marks') or '')))
+    if a.get('marks') and os.path.isdir(d):
+        return regression(a, d)
     if a.get('steps') and a.get('test') is None:
         raise WaveError('"steps": of one test: give "test" (a number or a name); every test\'s slowest steps: "slowest" in the summary')
     doc = testmarks.load(marks_file(a))
@@ -867,7 +929,7 @@ def t_tests(a):
     if a.get('steps'):   # the steps' table alone
         return {'test': {'n': t['n'], 'name': t['name'], **took}}
     limit = a.get('limit') or 50
-    marks = [{**m, 't': ns(m['t'])} for m in t.get('marks') or []]
+    marks = [{**m, 't': ns(m['t']), **({'from': ns(m['from'])} if m.get('from') is not None else {})} for m in t.get('marks') or []]   # (wl.checks: its first)
     phases = [{**p, 'from': ns(p['from']), 'to': ns(p['to'])} for p in t.get('phases') or []]
     return {**head, 'test': {**row(t), **{k: t[k] for k in ('text', 'signals') if t.get(k)}, 'phases': phases, **took, 'marks': marks[:limit],
                              **({'more': len(marks) - limit} if len(marks) > limit else {})}}
@@ -2014,7 +2076,9 @@ TOOLS = [
          'tests [n, name, result pass/fail/xfail/run, from, to, checks, failed_checks, message, where]; test (a number or name): one, with '
          'its whole docstring (text), its own rows (signals), phases and marks, each check with got and expected (got_all, expected_all, at where a long value was cut); '
          'its steps by length, the longest first (steps, total, longest; steps: true: only them). A test\'s measures (wl.measure: label, from, to, dt, min, max, ok; '
-         'ok null: a bound in cycles), measures_failed; slowest: the five longest steps of the run. from / to are a test\'s window for wave_changes, wave_find, wave_sample.',
+         'ok null: a bound in cycles), measures_failed; slowest: the five longest steps of the run. from / to are a test\'s window for wave_changes, wave_find, wave_sample. '
+         'marks a directory: a regression, every marks file under it -> summary, totals, failures first [file, n, name, result, from, message, where], '
+         'runs [file, summary, tests, failed] the failed first.',
          {'marks': S, 'test': {'type': ['integer', 'string']}, 'limit': None, 'steps': B}, ('marks',)),
     tool('wave_to_fst', t_to_fst, 'Convert a VCD to an FST beside it (tb.vcd -> tb.fst; out: another file), as GTKWave\'s vcd2fst, '
          'keeping the enum tables (FSM states) and attributes; the states of tb.types.json beside it go in too (types: another file, '

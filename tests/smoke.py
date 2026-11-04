@@ -317,6 +317,10 @@ def bookmarks(page):
     check(bl.count() == 3 and al.count() == 2 and v.locator('.notes').is_visible(), f'bookmarks and arrows from the JSON listed below the waves ({bl.count()}, {al.count()})')
     svg = page.locator('#ex-bm-svg svg').inner_html()
     check('request raised with data A1' in svg and '#1c7ed6' in svg, 'static SVG draws the legend, bookmark and arrow colours')
+    tx = bl.first.locator('input.txt'); t0 = tx.get_attribute('title')
+    tx.fill('a long text ' * 20); t1 = tx.get_attribute('title'); tx.fill(t0 or '')   # back as it was: the checks below read it
+    check(t0 and t0 == tx.input_value() and t1 == 'a long text ' * 20,
+          f'AU-WL-002: a bookmark\'s text field has the whole text as its title, a new text too ({t0!r}, {(t1 or "")[:24]!r}…)')
     rows = v.locator('.names .row:not(.lane)')
     n0 = rows.count()
     v.locator('button[data-act=collapse]').click()
@@ -1734,6 +1738,30 @@ def gen_vcd(seed):
     return '\n'.join(head + body) + '\n', model
 
 
+def vscode_config(browser, build):
+    """vscode/userconfig.js (WaveLens: Open the configuration): the file made of wavelens.config.js (every key, its default and comment;
+    read back: the defaults), JSON with comments and trailing commas, an error at its line and column, the values checked against the
+    defaults' kinds (what is wrong left out, said; the rest kept), VS Code's own keys refused, a key taken out: its default."""
+    print('vscode: your configuration (userconfig.js)')
+    page = browser.new_page()
+    page.goto('about:blank'); page.add_script_tag(path=str(ROOT / 'wavelens' / 'wavelens.config.js')); page.add_script_tag(path=str(ROOT / 'vscode' / 'userconfig.js'))
+    js = lambda e: page.evaluate(f"(() => {{ const U = WaveLensUserConfig, D = window.WAVELENS_CONFIG; {e} }})()")
+    cfg_js = (ROOT / 'wavelens' / 'wavelens.config.js').read_text(encoding='utf-8')
+    a = page.evaluate("([js]) => { const U = WaveLensUserConfig, D = window.WAVELENS_CONFIG, n = U.notesOf(js), t = U.template(D, n), r = U.parse(t);"
+                      "  const want = Object.fromEntries(Object.entries(D).filter(([k]) => !(k in U.VSCODE_OWN)));"
+                      "  return [JSON.stringify(r.value) === JSON.stringify(want), t.includes('// px: signal row'), n.rowHeight, Object.keys(r.value).includes('theme')]; }",
+                      [cfg_js])
+    check(a == [True, True, 'px: signal row', False], f'the file of the defaults: every key with its comment, read back the defaults (theme: VS Code\'s) {a}')
+    a = js("""const r = U.parse('// mine\\n{\\n  "rowHeight": 30, /* a block */\\n  "colors": {"accent": "#f00",},\\n  "url": "http://x//y",\\n}\\n');
+        const e = U.parse('{\\n  "rowHeight": 30\\n  "dim": 0.5\\n}'), c = U.check({ rowHeight: '30', dim: 0.5, colors: [], nope: 1, theme: 'dark', fold: true, keys: { gx: 'gm' },
+          traceWidth: Infinity }, D);
+        return [r.value, [e.line, !!e.error], c.config, c.problems.map(p => p.key), U.effective(D, { dim: 0.5 }).rowHeight, U.check([], D).problems[0].message];""")
+    check(a[0] == {'rowHeight': 30, 'colors': {'accent': '#f00'}, 'url': 'http://x//y'} and a[1] == [3, True]
+          and a[2] == {'dim': 0.5, 'fold': True, 'keys': {'gx': 'gm'}} and a[3] == ['rowHeight', 'colors', 'nope', 'theme', 'traceWidth'] and a[4] == 26
+          and 'an object' in a[5], f'JSON with comments and trailing commas; an error at its line; wrong kinds, unknown and VS Code\'s keys left out {a}')
+    page.close()
+
+
 def vscode_tab(browser, build):
     """The VS Code extension's tab (vscode/media/host.js before the viewer) under the CSP of vscode/extension.js, with a
     fake acquireVsCodeApi answering as the extension host does: the dump fetched by its URI and opened (an enum table
@@ -1942,6 +1970,14 @@ def vscode_tab(browser, build):
     page.evaluate("window.__cancel = true")
     js("(v.saveState(), 0)"); page.wait_for_timeout(400)
     check(js("v.root.querySelector('.bar .toast').textContent") == 'not saved', 'a save cancelled says so')
+    # your configuration (WaveLens: Open the configuration): saved -> applied to the tab; one that breaks the viewer -> the defaults, the extension told
+    page.evaluate("window.postMessage({ type: 'config', config: { rowHeight: 40, colors: { accent: '#ff0000' } } }, '*')"); page.wait_for_timeout(200)
+    a = js("[v.S.rowHeight, v.root.querySelector('.bar .toast').textContent]")
+    page.evaluate("""(() => { const f = WaveLens.configure; WaveLens.configure = c => { if (c && c.boom) throw new Error('boom'); return f(c); };
+        window.postMessage({ type: 'config', config: { boom: 1, rowHeight: 50 } }, '*'); })()"""); page.wait_for_timeout(200)
+    b = js("[v.S.rowHeight, v.root.querySelector('.bar .toast').textContent]")
+    check(a == [40, 'your configuration applied'] and b[0] == 26 and 'defaults' in b[1] and any(m.get('text') == 'boom' for m in sent('configerror')),
+          f'your configuration applied when saved; one that breaks the viewer: the defaults, the extension told {a} {b}')
     check(not page.evaluate('window.__csp || []') and not errs, f'no CSP violation, no error: {page.evaluate("window.__csp || []")} {errs[:3]}')
     # a dump seen for the first time takes the state loaded last; one with a view of its own keeps it; wavelens.openLastState off: Reload only
     def tab(store, opened=True):
@@ -2646,6 +2682,24 @@ def fsm_panel(browser, build):
           s2['n'] < 12 * s1['n'] and s2['open'] < 25 * max(s1['open'], 5),
           f'1500 FSMs: the panel opens in {s2["open"]:.0f} ms, ↓ in {s2["key"]:.1f} ms at most, the cursor in {s2["cur"]:.0f} ms, {s2["n"]} elements '
           f'(150 FSMs: {s1["n"]}, {s1["open"]:.0f} ms)')
+    # AU-WL-006: an FSM row with a "path" of its own in a group: its own name in the tree and the details, not a slice of
+    # its path; AU-WL-005: fsm_panel opens the panel on an FSM's tab, the diagram too, and closes it
+    au = page.evaluate("""async () => { const el = document.createElement('div'); document.body.append(el);
+        const fsm = g => [g, { name: 'region', path: 'slot.region', width: 2, enum: { 0: 'IDLE', 1: 'PREP', 2: 'ACT' },
+          tv: [[0, '0'], [2, '1'], [4, '2'], [6, '0']] }];
+        const v = new WaveLens.WaveView(el, { signal: [fsm('планировщик'), ['bench', { name: 'clk', path: 'slot.clk', tv: [[0, '0'], [2, '1'], [6, '0']] }]] }, {});
+        const r0 = await v.run([{ op: 'fsm_panel' }]), p = v.fsmP, names = [...p.el.querySelectorAll('.mn .nm')].map(e => e.textContent);
+        const r1 = await v.run([{ op: 'fsm_panel', signal: 'slot.region', tab: 'graph' }]);
+        const det = [p.el.querySelector('.fdn').textContent, !!p.el.querySelector('.fdb svg.fsg')];
+        const bad = (await v.run([{ op: 'fsm_panel', tab: 'diagram' }]))[0].error || '';
+        const r2 = await v.run([{ op: 'fsm_panel', off: true }]), closed = !v.fsmP; v.destroy(); el.remove();
+        return { r0, names, r1, det, bad, r2, closed }; }""")
+    check(au['names'] == ['планировщик', 'region'] and au['det'] == ['планировщик.region', True],
+          f'AU-WL-006: an FSM row with a path of its own in a group: its name in the tree and the details {au["names"]} {au["det"]}')
+    pan = lambda o, sig, tab: o == {'op': 'fsm_panel', 'open': sig is not False, 'signal': sig or None, 'tab': tab}
+    check(pan(au['r0'][0], None, None) and pan(au['r1'][0], 'slot.region', 'graph') and 'tab "diagram"' in au['bad'] and
+          pan(au['r2'][0], False, None) and au['closed'],
+          f'AU-WL-005: fsm_panel opens the panel, an FSM on its diagram, a wrong tab refused, off closes it {au}')
     page.locator('.wv-fsms .mn.mm').first.click(button='right'); settle(page)
     menu = js("[...document.querySelectorAll('.wv-menu button')].map(b => b.querySelector('span').textContent)")
     page.locator('.wv-menu button[data-mm=only]').click(); settle(page)
@@ -3224,6 +3278,19 @@ def cycles(browser, build):
         return [a, b, / · 7 PCLK$/.test(d), bad === undefined, v.state().config.cycleZero === ups[3]];""")
     check(got == [' · cycle 2 ↑PCLK', True, True, True, True], f'cycle 0 at edge 3: edge 5 is cycle 2, c-1 is edge 2, Δ of the cursors in cycles, '
           f'past the last edge refused, kept in the state {got}')
+    # AU-WL-001: a window cut out of a dump (vcd2wavedrom --exact --from 100ns --to 160ns), cycleZero 5 ns before it: the edge
+    # at 115 ns is cycle 11, as wave_sample and sva_check number it; the band, the cursor's title, c11, the static SVG
+    got = js("""const el = document.createElement('div'); document.body.append(el), tv = [[100e3, '0']];
+        for (let t = 105e3; t < 160e3; t += 10e3) tv.push([t, '1'], [t + 5e3, '0']);
+        const doc = { signal: [{ name: 'PCLK', path: 'apb_tb.PCLK', tv }], time: { t0: 100e3, t1: 160e3, cycle: 5e3, unit: 'ps' },
+          config: { cycles: true, cycleClock: 'PCLK', cycleZero: '5ns' } };
+        const w = new WaveLens.WaveView(el, doc, {}), r = await w.run([{ op: 'cursor', t: '115ns' }, { op: 'cycles' }]), t = w.cycText();
+        w.setCursor(101e3); const before = w.cycText(); w.setCursor('c11'); const c11 = w.cursor;
+        const svg = WaveLens.WaveSVG.toString(doc, {}), nums = [...svg.matchAll(/<text[^>]*>(\\d+)<\\/text>/g)].map(m => +m[1]);
+        w.destroy(); el.remove();
+        return [r[1].cycle, t, before, c11, nums.includes(10) && nums.includes(15) && !nums.includes(0)];""")
+    check(got == [11, ' · cycle 11 ↑PCLK', ' · cycle 9 ↑PCLK', 115e3, True],
+          f'AU-WL-001: a window with cycleZero before it: its first edge cycle 10, 115 ns cycle 11, c11, the SVG\'s band from 10 {got}')
     svg = js("return [v.toSVG(), WaveLens.WaveSVG.toString(v.M.src, { cycles: true }), WaveLens.WaveSVG.toString(v.M.src, {})];")
     check('cycles ↑ PCLK' in svg[0] and 'cycles ↑ PCLK' in svg[1] and 'cycles ↑' not in svg[2],
           'the picture of the viewer and a static WaveSVG with cycles: true draw the band; without it, none')
@@ -3452,6 +3519,14 @@ def order(browser, build):
         await v.moveRows([...v.selRun], v.ugRows().find(r => r.user && r.name === 'gC')); v.selRun = new Set();
         return v.ugroups.map(g => [g.name, ...g.signals.map(f => f.split('.').pop())]);""")
     check(got[:3] == [['gA', 'PSEL'], ['gB'], ['gC', 'PADDR', 'PWRITE', 'PSEL']], f'a run from two groups: PSEL stays in gA where it was not picked {got}')
+    # Paint (the bar) and the menu's colour on rows of your groups selected (shift+click) or highlighted (ctrl+click): every one, not only the current
+    got = js("""const R = n => v.ugRows().find(r => r.ug && r.ug.name === 'gC' && r.orig.name === n), names = () => [...v.painted.keys()].map(f => f.split('.').pop()).sort();
+        const out = []; v.unpaint(); v.selectRun(R('PADDR'), R('PSEL')); v.paint('#2f9e44'); out.push(names());
+        v.unpaint(); v.select(null); v.highlight(null); v.toggleHighlight(R('PADDR')); v.toggleHighlight(R('PSEL')); v.paint('#2f9e44'); out.push(names());
+        v.unpaint(); v.menu(300, 300, R('PSEL')); const c = document.querySelector('.wv-menu input[type=color]'); c.value = '#1971c2';
+        c.dispatchEvent(new Event('input', { bubbles: true })); out.push(names()); v.closeMenu(); v.unpaint(); v.highlight(null); return out;""")
+    check(got == [['PADDR', 'PSEL', 'PWRITE'], ['PADDR', 'PSEL'], ['PADDR', 'PSEL']],
+          f'Paint and the menu colour: every row of your groups selected (shift+click) or highlighted (ctrl+click) {got}')
     got = js("return [(await v.run([{ op: 'group', name: 'gA', move: 1 }]))[0].at, (await v.run([{ op: 'group', name: 'gA', move: 'sideways' }]))[0].error];")
     check(got[0] == 1 and 'move: up, down, top, bottom' in got[1], f'group move: a number, a bad one said {got}')
     # the right button on a name: the viewer's menu for that row; your group's row: Move up / down, to the top / bottom; its
@@ -6117,7 +6192,11 @@ UNITS = [   # (JavaScript expression, its JSON value); NaN / ±Infinity / undefi
     ("I.cmpKey({ width: 1 }, { k: 'z' }) === I.cmpKey({ width: 1 }, { k: 'x' })", False),   # x and z apart, on a bit and in a nibble
     ("(P => I.diffSpans(P('z01x'), P('x01x'), 0, 20))(v => F.parse({ signal: [{ name: 'a', width: 4, tv: [[0, \"'b\" + v]] }] }).rows[0])", [[0, 20]]),
     # the clock cycles: cycle 0, the cycle at a time, the time of a cycle, the edges counted, the clock by a name, the band's marks
-    ("[null, 20, 21, 35].map(z => I.cycZero([10, 20, 30], z))", [0, 1, 2, 3]), ("[5, 10, 25, 30].map(t => I.cycAt([10, 20, 30], 1, t))", [-2, -1, 0, 1]),
+    ("[null, 20, 21, 35].map(z => I.cycZero([10, 20, 30], z))", [0, 1, 2, 3]),
+    # AU-WL-001: a zero before a window's first edge: the edges before it at the mean period (on one: cycle 0 on it; 2 % after one: on it)
+    ("[10, 0, -10, 5, 9.9, 0.1, -0.5].map(z => I.cycZero([10, 20, 30], z))", [0, -1, -2, 0, 0, -1, -1]), ("I.cycZero([10], -50)", 0),
+    ("[5e3, 76258.78e3 - 915 * 83.332e3].map(z => I.cycZero(z === 5e3 ? [105e3, 115e3, 125e3, 135e3, 145e3, 155e3] : [76258.78e3, 76342.112e3, "
+     "76425.444e3, 76508.776e3], z))", [-10, -915]), ("[5, 10, 25, 30].map(t => I.cycAt([10, 20, 30], 1, t))", [-2, -1, 0, 1]),
     ("[-1, -2, 1, 2].map(n => I.cycTime([10, 20, 30], 1, n))", [10, None, 30, None]),
     ("[[[0, '1'], [5, '0'], [10, '1']], [[0, '1']], [[0, '0'], [5, '1']]].map(tv => I.cycUps(F.parse({ signal: [{ name: 'c', tv }] }).rows[0]))",
      [[10], [], [5]]),
@@ -7390,6 +7469,7 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'pageshot': 'tools/pageshot.py: a PNG per view and theme of a page in a headless Chromium, the manifest, a view by key, a view not there',
     'markup': 'markup on the waves: a bookmark lifted under its signal, its label by the circle, {dt} / {cycles} in arrow labels, spans; the SVG the same',
     'bookmark_view': 'going to a bookmark: the rows scrolled as when it was made, its time bookmarkLeft from the left (1–9, ]m, Markers…, the command)',
+    'vscode_config': 'vscode/userconfig.js: your configuration of the viewer in VS Code: the file of the defaults, JSONC, the values checked',
     'vscode': 'the VS Code extension\'s tab (host.js, its CSP) with a fake VS Code: the dump, the store, save, pick, clipboard, reload, live',
     'docs': 'docs/index.html: cursor, zoom, sorting, settings, styles, highlight, cursor fields, themes, bookmarks',
     'sva_docs': 'docs/index.html: the assertions section and the unit checks of wavelens/sva.js',
@@ -7701,6 +7781,7 @@ def main():
         run('pageshot', pageshot, b, build)
         run('lazy_dump', lazy_dump, b, build)
         run('readers', readers, b, build)
+        run('vscode_config', vscode_config, b, build)
         run('vscode', vscode_tab, b, build)
         run('names', names, b, build)
         run('marker_lanes', marker_lanes, b, build)

@@ -72,9 +72,14 @@ def bound_ps(x):
 
 
 def text_of(v):
-    """A value as the waves show it: an integer in hex (below 10 as it is), a logic vector the same when it has no x or z."""
+    """A value as the waves show it: an integer in hex (below 10 as it is), a logic vector the same when it has no x or z; a list,
+    a tuple or bytes item by item the same way, whatever its length (WL-008: "[0x10000000]", as its long form "[0x10000000, …")."""
     if isinstance(v, bool):
         return str(int(v))
+    if isinstance(v, (list, bytes, bytearray)):
+        return f'[{", ".join(text_of(x) for x in v)}]'
+    if isinstance(v, tuple):
+        return f'({", ".join(text_of(x) for x in v)}{"," if len(v) == 1 else ""})'
     if not isinstance(v, int):
         try:
             v = v.to_unsigned()   # cocotb's LogicArray
@@ -165,12 +170,14 @@ class Marks:
         self.path = path or os.environ.get('WAVELENS_MARKS') or 'wavelens.marks.json'
         self.tests, self.now_test, self.dut = [], None, None
         self.open_measures = []   # the measurements started and not stopped
+        self.groups = []   # the `with wl.checks(…)` open, the innermost last
         self.warned, self.last_log = False, ''
         self.tap = LogTap(self)
 
     # ---------------- inside a test ----------------
     def note(self, text, signal=None, label=None, color=None):
-        """A bookmark now: on `signal` (a handle or a row's name; none: the test's row, or the time axis), `label` the short text
+        """A bookmark now: on `signal` (a handle, a row's name, or a pattern "*fifo_full": the first row it matches when the page is built; none:
+        the test's row, or the time axis), `label` the short text
         beside the circle, `text` the long one of the list."""
         self.add({'kind': 'note', 'text': str(text), 'signal': self.row(signal), 'label': None if label is None else str(label),
                   'color': None if color is None else str(color)})
@@ -199,14 +206,23 @@ class Marks:
         bound_ps(min), bound_ps(max)   # a bound that is none: said at once
         return Measure(self, str(label), min, max, signal, check)
 
-    def check(self, got, expected, text='', signal=None, show='all', why=None):
-        """got == expected: a bookmark with both (`show='fail'`: only when they differ, for a check in a loop; the test still counts it); else
-        AssertionError, which fails the test. `why`: the text of a failure in place of `text`, a string or a function called only then, for what can be
-        read only when it failed."""
+    def checks(self, text, signal=None):
+        """`with wl.checks('every word of the frame'): …`: the checks inside leave one bookmark at the end, "every word of the frame: 188 checks
+        passed" (a failure keeps its own and the group says how many passed before it); each is still counted for the test."""
+        return Checks(self, str(text), signal)
+
+    def check(self, got, expected, text='', signal=None, show=None, why=None):
+        """got == expected: a bookmark with both (`show='fail'`: only when they differ, for a check in a loop; the test still counts it; inside
+        `wl.checks` that is the default); else AssertionError, which fails the test. `why`: the text of a failure in place of `text`, a string or a
+        function called only then, for what can be read only when it failed."""
         self.step_catch_up()
         ok = same(got, expected)
         got_all, want_all = text_of(got), text_of(expected)
         g, e = short_of(got, got_all), short_of(expected, want_all)
+        if show is None:
+            show = 'fail' if self.groups else 'all'
+        for grp in self.groups:
+            grp.counted(ok)
         if self.now_test is not None:
             self.now_test['passed' if ok else 'failed'] += 1
         if not ok and why is not None:
@@ -389,6 +405,39 @@ class Phase:
                 p['signals'] = [self.marks.row(s) for s in one]
             self.t['phases'].append(p)
         return False
+
+
+class Checks:
+    """`with wl.checks(text)`: the checks inside counted, one bookmark of kind "checks" at the end (n, failed, the time of the first)."""
+
+    def __init__(self, marks, text, signal):
+        self.marks, self.text, self.signal = marks, text, signal
+        self.n = self.failed = 0
+        self.t0 = None
+
+    def counted(self, ok):
+        if self.t0 is None and self.marks.now_test is not None:
+            self.t0 = self.marks.now()
+        self.n += 1
+        self.failed += not ok
+
+    def __enter__(self):
+        self.marks.groups.append(self)
+        return self
+
+    def __exit__(self, kind, exc, tb):
+        if self in self.marks.groups:
+            self.marks.groups.remove(self)
+        if self.n or exc is None:
+            self.marks.add({'kind': 'checks', 'ok': not self.failed, 'n': self.n, 'failed': self.failed, 'text': self.text,
+                            'signal': self.marks.row(self.signal), 'from': self.t0}, keep=bool(self.failed))
+        return False   # a failure goes on: the test fails as it would
+
+    async def __aenter__(self):
+        return self.__enter__()
+
+    async def __aexit__(self, kind, exc, tb):
+        return self.__exit__(kind, exc, tb)
 
 
 class Measure:

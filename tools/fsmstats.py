@@ -14,6 +14,7 @@ never reached; 2 an error.
 """
 import argparse, json, os, re, sys
 
+sys.dont_write_bytecode = True   # a shared checkout stays as it is: -I ignores PYTHONDONTWRITEBYTECODE (AU-WL-003)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import WaveError, run_main  # noqa: E402
 

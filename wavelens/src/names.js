@@ -248,7 +248,8 @@ class Notes {
         <input type="color" class="col" value="${hex(b.color)}" aria-label="bookmark ${b.n} colour" title="Colour">
         <input type="text" class="lbl" value="${esc(b.label || '')}" placeholder="label" aria-label="bookmark ${b.n} label" spellcheck="false"
           title="A short label by the circle on the waves">
-        <input type="text" class="txt" value="${esc(b.text)}" placeholder="describe the event" aria-label="bookmark ${b.n} text">
+        <input type="text" class="txt" value="${esc(b.text)}" placeholder="describe the event" aria-label="bookmark ${b.n} text"${b.text ?
+          ` title="${esc(b.text)}"` : ''}>
         ${b.link ? `<button type="button" class="ic lk" data-bm="link"${v.linkTarget(b.link) ? '' : ' disabled'} title="${v.linkTarget(b.link) ?
           `Open the view ${esc(b.link.view)} of this page${b.link.bookmark ? ` at its bookmark ${b.link.bookmark}` : ''}` :
           `No section ${esc(b.link.view)} on this page`}">→ ${esc(b.link.view)}</button>` : ''}
@@ -345,7 +346,7 @@ class Notes {
       return v.changed(false);
     }
     const bm = v.bms.find(x => x.n === +li.dataset.n); if (!bm) return;
-    if (T.matches('input.txt')) { bm.text = T.value; v.saveBookmarks(); }
+    if (T.matches('input.txt')) { bm.text = T.title = T.value; v.saveBookmarks(); }   // the whole text on hover too (AU-WL-002)
     if (T.matches('input.lbl')) { bm.label = T.value; v.saveBookmarks(); v.draw(); }
     else if (T.matches('input.col')) { bm.color = T.value; li.querySelector('.bn').style.background = T.value; v.changed(false); }
   }

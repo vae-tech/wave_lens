@@ -210,6 +210,31 @@ class Cuts(unittest.TestCase):
                         cuts.append(dumpscan.scan(out))
                     self.assertEqual(cuts[0], cuts[1], f'seed {seed}: dumpscan of the two cuts')
 
+    def test_an_array_element_by_either_name(self):
+        # WL-009: Verilator's FST names an element of an unpacked array "ptr[0]", wellen and the readers "ptr.[0]": a cut
+        # of the FST, of its VCD and of a cut takes both
+        text = ('$timescale 1ps $end\n$scope module tb $end\n$var logic 32 ! ptr[0] [31:0] $end\n$var logic 32 " ptr[1] [31:0] $end\n'
+                '$var logic 4 # m[1][2] [3:0] $end\n$upscope $end\n$enddefinitions $end\n#0\nb0 !\nb1 "\nb0 #\n#10\nb101 !\nb11 #\n#20\n')
+        with H.tmp() as d:
+            vcd = os.path.join(d, 'arr.vcd')
+            with open(vcd, 'w', newline='') as f:
+                f.write(text)
+            subprocess.run([self.sva, 'fst', vcd, '-q'], check=True)
+            srcs = [vcd, vcd[:-4] + '.fst']
+            first = os.path.join(d, 'first.vcd')
+            subprocess.run([self.sva, 'vcd', srcs[1], '--signals', 'tb.ptr[0],tb.m[1][2]', '--out', first], check=True)
+            srcs.append(first)
+            for src in srcs:
+                for names in ('tb.ptr[0],tb.m[1][2]', 'tb.ptr.[0],tb.m.[1][2]', 'ptr.[0],m[1][2]', 'tb.ptr.*,*m.[1]*'):
+                    with self.subTest(src=os.path.basename(src), names=names):
+                        p = subprocess.run([self.sva, 'vcd', src, '--signals', names], capture_output=True, text=True)
+                        self.assertEqual(p.returncode, 0, p.stderr)
+                        got = re.findall(r'^\$var \S+ \d+ \S+ (.*) \$end$', p.stdout, re.M)
+                        self.assertEqual(got[-1], 'm[1][2] [3:0]', got)
+                        self.assertIn('ptr[0] [31:0]', got)
+            p = subprocess.run([self.sva, 'vcd', vcd, '--signals', 'tb.ptr.[7]'], capture_output=True, text=True)
+            self.assertIn('no signal tb.ptr.[7]', p.stderr)
+
 
 if __name__ == '__main__':
     unittest.main()

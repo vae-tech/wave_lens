@@ -14,7 +14,9 @@
    - a key the viewer took does not go on to VS Code (its webview forwards every keydown to the workbench);
    - the design's types beside the dump (tb.types.json: Questa, Verilator; by path), else the workspace's SystemVerilog sources
      (wavelens.sources): the enum names of a VCD's state buses (Sources… in the bar too);
-   - what the reader noticed in the dump (wavelens:dump, wavelens:dumperror) -> the extension's log and Problems panel.
+   - what the reader noticed in the dump (wavelens:dump, wavelens:dumperror) -> the extension's log and Problems panel;
+   - your configuration (WaveLens: Open the configuration, a JSONC file of the extension): at the start and each time it is saved;
+     one that breaks the viewer: the defaults, the extension told.
    Then it opens the dump (fetched by its webview URI) in the viewer: ⟳ fetches it again, the view kept. */
 (() => {
   'use strict';
@@ -149,6 +151,19 @@
   theme(); new MutationObserver(theme).observe(document.body, { attributes: true, attributeFilter: ['class'] });
   on.theme = m => { themeSet = looks(m.theme); theme(); };
   on.keys = m => { if (G.WaveLens) WaveLens.configure({ keysLeft: m.keysLeft || [] }); };
+  // your configuration (WaveLens: Open the configuration): applied over wavelens.config.js; one that breaks the viewer: the defaults
+  // again (its own wavelens.config.js) and the extension told
+  let cfgBase = null;
+  const userConfig = (c, said) => {
+    if (!G.WaveLens || !c) return;
+    if (!cfgBase) cfgBase = Object.assign({}, G.WAVELENS_CONFIG || {});
+    try { WaveLens.configure(c); const v = view(); if (v) { v.draw(); if (said) v.toast('your configuration applied'); } }
+    catch (e) {
+      try { WaveLens.configure(Object.assign(Object.fromEntries(Object.keys(c).map(k => [k, null])), cfgBase)); } catch (e2) { /* the defaults: as they are */ }
+      vscode.postMessage({ type: 'configerror', text: String(e.message || e) }); toast('your configuration does not work here: the defaults are applied');
+    }
+  };
+  on.config = m => userConfig(m.config, true);
   document.addEventListener('wavelens:theme', e => { e.preventDefault(); vscode.postMessage({ type: 'theme' }); }, true);   // the bar's ◐: VS Code's list
   if (H.build) G.WAVELENS_BUILD = H.build;   // the bar's version line: the extension's branch and commit
 
@@ -205,6 +220,7 @@
     // the viewer leaves alone (keysLeft), so they reach VS Code (the viewer's ctrl keys do not look at shift: ctrl+shift+F
     // / G / C stay VS Code's, ctrl+shift+Z is the viewer's redo)
     WaveLens.configure({ keysLeft: H.keysLeft || [] });
+    userConfig(H.config, false);   // your configuration, as the extension last read it
     document.addEventListener('keydown', e => {
       if (e.defaultPrevented && !((e.ctrlKey || e.metaKey) && e.shiftKey && e.code !== 'KeyZ')) e.stopPropagation(); });
     const P = WaveLens.WaveView.prototype; RELOAD = P.reloadDump; P.reloadDump = function () { return reload(); };   // ⟳ of the bar too

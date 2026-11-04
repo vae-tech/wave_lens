@@ -60,6 +60,7 @@ command fit:
 command fold: groups? all?
 command fsm: mode? signals? fields? clear?
 command fsm_go: signal state? from? to? dir? first?
+command fsm_panel: signal? tab? off?
 command fsm_stats: signal
 command gaps: on? idle? keep? signals? clock? aux? only? count? view? reset?
 command goto: t? sel? view? bm?

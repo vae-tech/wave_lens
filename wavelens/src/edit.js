@@ -461,6 +461,20 @@ command('fsm_stats', 'signal', 'an FSM on these waves: each state of its table w
     changes: [...st.trans.values()].map(x => ({ from: st.name(x.from), to: st.name(x.to), count: x.times.length, first: x.times[0] }))
       .sort((x, y) => y.count - x.count) };
 });
+command('fsm_panel', 'signal? tab? off?', 'the FSM panel (T): open, with an FSM\'s details (signal: its path or a pattern) on a tab ' +
+  '(states, changes or graph: the diagram); off: closed; none given: open, as it was', (v, a) => {   // FSM_TABS: fsm.js, after this file
+  if (a.tab != null && !FSM_TABS.some(t => t[0] === a.tab)) fail(`fsm_panel: tab "${a.tab}" (${FSM_TABS.map(t => t[0]).join(', ')})`);
+  if (a.off) v.fsmPanel(false);
+  else {
+    const r = a.signal != null ? fsmRow(v, a.signal) : null;
+    if (!v.fsms().length) fail('fsm_panel: no state machines on these waves (no signal has enum labels)');
+    v.fsmPanel(true); const p = v.fsmP;
+    if (r && !p.mine.includes(r)) { p.all = p.el.querySelector('.fa').checked = true; if (r.fsmField) p.fields = p.el.querySelector('.ff').checked = true;
+      p.build(); p.render(true); }   // an FSM the panel's list leaves out (not named *state*, a struct's field): the list of all
+    if (r || a.tab != null) p.detail(r || p.det || p.mine[0] || null, a.tab ?? p.tab);
+  }
+  const p = v.fsmP; return { open: !!p, signal: p && p.det ? p.det.full : null, tab: p && p.det ? p.tab : null };
+});
 command('fsm_go', 'signal state? from? to? dir? first?', 'the cursor to the next (dir 1) or previous (-1) time an FSM enters a state (its ' +
   'label or value) or makes a change (from, to: labels or values); first: the first time; past the last it rounds to the first', async (v, a) => {
   const r = fsmRow(v, a.signal); await v.need([r]);

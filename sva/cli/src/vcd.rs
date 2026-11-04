@@ -36,8 +36,8 @@ Of an FST a part: --header the declarations and the first and last times only; -
 of those id codes (as the whole text numbers them, apart by white space) with their changes.
 A cut: --from/--to a window (TIME: 100ns, 2.5us; ps without one): each signal's value at --from as $dumpvars under
 #from (x when it has none yet), its changes up to --to, then #to; --signals only those (paths, * ? patterns, or
-the one path that ends with a name); --signals-from FILE (- stdin): the same, one a line (a name may hold a comma,
-and a list too long for a command line goes this way).";
+the one path that ends with a name; an element of an unpacked array either way, mem[1] or mem.[1]); --signals-from
+FILE (- stdin): the same, one a line (a name may hold a comma, and a list too long for a command line goes this way).";
 
 /// The VCD id code of signal `index` (an FST handle less one): base 94 over the printable characters `!`..`~`, as
 /// fst2vcd numbers its handles.
@@ -687,26 +687,44 @@ pub(crate) struct Cut {
     pub signals: Vec<String>,
 }
 
+/// A path with an array element glued to its array: `mem.[1]` (wellen's array scope, the name WaveLens's readers give)
+/// and `mem[1]` (the name in the dump, an FST's as Verilator writes it) are one signal, whichever reader has the dump.
+pub(crate) fn glued(p: &str) -> String {
+    p.replace(".[", "[")
+}
+
+/// A `*` `?` pattern against a path, the path either way (`tb.ptr.*` and `tb.ptr*` both take `tb.ptr[0]`): as it is, glued,
+/// or with its last name's element apart (`ptr[0]` -> `ptr.[0]`, as dumpscan.py names it).
+pub(crate) fn glob_either(pat: &str, path: &str) -> bool {
+    let g = glued(path);
+    let (scope, leaf) = g.rsplit_once('.').map_or(("", g.as_str()), |(a, b)| (a, b));
+    let apart = leaf.find('[').filter(|&i| i > 0).map(|i| format!("{scope}{}{}.{}", if scope.is_empty() { "" } else { "." }, &leaf[..i], &leaf[i..]));
+    [Some(path.to_string()), Some(g.clone()), apart].into_iter().flatten().any(|q| crate::diff::glob(pat.as_bytes(), q.as_bytes()))
+}
+
 /// The paths a cut keeps, of (path, item) -> the items: a path, a `*` `?` pattern, or the one path that ends with the
-/// name (`PSEL`, `u_regs.PSEL`); a name that keeps none, or a tail of several paths, is an error.
+/// name (`PSEL`, `u_regs.PSEL`); a name that keeps none, or a tail of several paths, is an error. An array element by
+/// either name (`mem.[1]`, `mem[1]`).
 fn chosen<T: Copy>(all: &[(String, T)], pats: &[String]) -> Result<Vec<T>, String> {
     if pats.is_empty() {
         return Ok(all.iter().map(|(_, x)| *x).collect());
     }
+    let all: Vec<(String, T)> = all.iter().map(|(q, x)| (glued(q), *x)).collect();
     let mut out = Vec::new();
-    for p in pats {
+    for p0 in pats {
+        let p = &glued(p0);
         let n0 = out.len();
-        out.extend(all.iter().filter(|(q, _)| if p.contains(['*', '?']) { crate::diff::glob(p.as_bytes(), q.as_bytes()) } else { q == p }).map(|(_, x)| *x));
+        out.extend(all.iter().filter(|(q, _)| if p.contains(['*', '?']) { glob_either(p0, q) } else { q == p }).map(|(_, x)| *x));
         if out.len() == n0 && !p.contains(['*', '?']) {
             let tail = format!(".{p}");
             let hits: Vec<&(String, T)> = all.iter().filter(|(q, _)| q.ends_with(&tail)).collect();
             if hits.len() > 1 {
-                return Err(format!("{p} is ambiguous: {} (give its path)", hits.iter().take(4).map(|(q, _)| q.as_str()).collect::<Vec<_>>().join(", ")));
+                return Err(format!("{p0} is ambiguous: {} (give its path)", hits.iter().take(4).map(|(q, _)| q.as_str()).collect::<Vec<_>>().join(", ")));
             }
             out.extend(hits.iter().map(|(_, x)| *x));
         }
         if out.len() == n0 {
-            return Err(format!("no signal {p} (--signals)"));
+            return Err(format!("no signal {p0} (--signals)"));
         }
     }
     Ok(out)
@@ -932,6 +950,22 @@ mod tests {
             assert_eq!(index_of(&code(i)), Some(i), "{i}");
         }
         assert_eq!(index_of("a b"), None);
+    }
+
+    #[test]
+    fn an_array_element_by_either_name() {
+        let fst = [("tb.u.ptr[0]".to_string(), 1), ("tb.u.ptr[1]".to_string(), 2), ("tb.u.cnt".to_string(), 3)];
+        let vcd = [("tb.u.ptr.[0]".to_string(), 1), ("tb.u.ptr.[1]".to_string(), 2), ("tb.u.cnt".to_string(), 3)];
+        for all in [&fst[..], &vcd[..]] {
+            for p in ["tb.u.ptr[0]", "tb.u.ptr.[0]", "ptr[0]", "u.ptr.[0]"] {
+                assert_eq!(chosen(all, &[p.to_string()]), Ok(vec![1]), "{p}");
+            }
+            assert_eq!(chosen(all, &["*ptr.[1]".to_string()]), Ok(vec![2]));
+            assert_eq!(chosen(all, &["tb.u.ptr*".to_string()]), Ok(vec![1, 2]));
+            assert_eq!(chosen(all, &["tb.u.ptr.*".to_string()]), Ok(vec![1, 2]));
+            assert_eq!(chosen(all, &["tb.u.*".to_string()]), Ok(vec![1, 2, 3]));
+            assert_eq!(chosen(all, &["tb.u.ptr.[7]".to_string()]), Err("no signal tb.u.ptr.[7] (--signals)".to_string()));
+        }
     }
 
     #[test]

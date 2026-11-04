@@ -217,8 +217,12 @@ class Fsms {
     if (this.v.fsmP === this) this.v.fsmP = null; this.v.refocus(); }
   // an FSM's states the waves reach, of its table's
   seenOf(r) { const st = this.v.fsmStatsOf(r); return [st.states.length - st.unseen.length, st.states.length]; }
-  // its name under its module (a struct's field: struct.field)
-  label(r) { const up = r.anc.map(id => this.v.M.groups[id]).filter(g => this.nodes.has(g.id)).pop(); return up ? r.full.slice(up.path.length + 1) : r.full; }
+  // its name under its module (a struct's field: struct.field); a row whose path is not under its group's (a WaveJSON's
+  // "path" of its own, AU-WL-006): its own name
+  label(r) {
+    const up = r.anc.map(id => this.v.M.groups[id]).filter(g => this.nodes.has(g.id)).pop();
+    return !up ? r.full : r.full.startsWith(up.path + '.') ? r.full.slice(up.path.length + 1) : r.name;
+  }
   // the FSMs under a module of the tree, all its levels
   under(nd) { return [...nd.fsms, ...nd.kids.flatMap(k => this.under(k))]; }
   // the rows as shown: ['m', node, depth] and ['f', row, depth] (a filter: the matches and the way to them)

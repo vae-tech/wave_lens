@@ -216,7 +216,8 @@ class Tab {
     const json = s => JSON.stringify(s).replace(/</g, '\\u003c');
     const host = { name, path: this.file, store: this.store, autoReload: !!vscode.workspace.getConfiguration('wavelens').get('autoReload'),
       theme: themeOf(), build: buildOf(), keysLeft: vscode.workspace.getConfiguration('wavelens').get('keysToVSCode') || [],
-      lastState: CTX.workspaceState.get(LAST_STATE) || null, openLastState: !!vscode.workspace.getConfiguration('wavelens').get('openLastState') };
+      lastState: CTX.workspaceState.get(LAST_STATE) || null, openLastState: !!vscode.workspace.getConfiguration('wavelens').get('openLastState'),
+      config: cfgNow() };
     const scripts = MEDIA.filter(f => f.endsWith('.js')).map(f => `<script nonce="${nonce}" src="${u(r.wavelens, f)}"></script>`).join('\n');
     return `<!doctype html>
 <html lang="en">
@@ -297,6 +298,12 @@ ${scripts}
         return;
       case 'dumperror': this.report(m); EVENTS.fire(Object.assign({}, m, { tab: this })); return;
       case 'log': log(`${path.basename(this.file)}: ${m.text}`); return;
+      case 'configerror':   // your configuration broke the viewer: the tab went back to the defaults
+        log(`${path.basename(this.file)}: the configuration: ${m.text}`);
+        vscode.window.showErrorMessage(`WaveLens: the configuration does not work in the viewer (${m.text}): the defaults are applied; ` +
+          'WaveLens: Open the configuration to mend it, or Reset it', 'Open', 'Reset')
+          .then(a => (a === 'Open' ? cfgOpen() : a === 'Reset' ? cfgReset() : null));
+        return;
       case 'es-open': return this.esOpen(m.sid, String(m.url));
       case 'es-close': { const s = this.streams.get(m.sid); this.streams.delete(m.sid); if (s) s.close(); return; }
       case 'http': return reply(await relay(this, String(m.url), m.body == null ? '' : String(m.body)));
@@ -716,6 +723,72 @@ async function liveOpens() {   // view_live {page: a dump, open: true}: the tab 
 
 /* ---------------- links from a log or the terminal (links.js): a time and a signal -> the dump's tab, goto ---------------- */
 const LINKS = require('./links.js');
+
+/* ---------------- your configuration of the viewer (userconfig.js): a JSONC file, checked and applied when saved ---------------- */
+const UCFG = require('./userconfig.js');
+const configFile = () => path.join(CTX.globalStorageUri.fsPath, 'wavelens.config.jsonc');
+let cfgGood = null;   // the configuration the tabs have: the last one that read (a file that does not read leaves it)
+// wavelens.config.js of the viewer the tabs load: its values (the defaults here) and its comments
+function cfgDefaults() {
+  const js = fs.readFileSync(path.join(roots().wavelens, 'wavelens.config.js'), 'utf8'), win = {};
+  require('vm').runInNewContext(js, { window: win }, { timeout: 1000 });
+  return { values: win.WAVELENS_CONFIG || {}, notes: UCFG.notesOf(js) };
+}
+// the file read and checked -> {config} (what applies) and the marks in the editor (Problems); a file that does not read: null
+function cfgRead(text) {
+  const d = cfgDefaults(), r = UCFG.parse(text), uri = vscode.Uri.file(configFile()), lines = String(text).split('\n');
+  const at = (line, col, len) => new vscode.Range(line, col, line, col + Math.max(1, len));
+  if (r.error) {
+    DIAG.set(uri, [Object.assign(new vscode.Diagnostic(at(r.line - 1, r.col - 1, 1), `not JSON: ${r.error} — not applied, the tabs keep the last one that read`,
+      vscode.DiagnosticSeverity.Error), { source: 'WaveLens' })]);
+    return null;
+  }
+  const c = UCFG.check(r.value, d.values);
+  DIAG.set(uri, c.problems.map(p => { const k = p.key == null ? -1 : lines.findIndex(l => l.includes(JSON.stringify(p.key)));
+    const line = Math.max(0, k), col = k < 0 ? 0 : lines[k].indexOf(JSON.stringify(p.key));
+    return Object.assign(new vscode.Diagnostic(at(line, col, p.key ? p.key.length + 2 : 1), `${p.message} — left out`, vscode.DiagnosticSeverity.Warning),
+      { source: 'WaveLens' }); }));
+  return { config: UCFG.effective(d.values, c.config), problems: c.problems, own: Object.keys(c.config).length };
+}
+// the configuration every tab starts with: the file's when it reads, else none (the viewer's own)
+function cfgNow() {
+  if (cfgGood) return cfgGood;
+  try { const r = cfgRead(fs.readFileSync(configFile(), 'utf8')); if (r) cfgGood = r.config; } catch (e) { /* no file yet: the defaults */ }
+  return cfgGood;
+}
+// saved: checked, applied to every tab (what is wrong said, the rest applied)
+function cfgApply(text, quiet = false) {
+  let r;
+  try { r = cfgRead(text); } catch (e) {
+    log(`the configuration: ${e.message}`); vscode.window.showErrorMessage(`WaveLens: the configuration: ${e.message}`); return; }
+  if (!r) { if (!quiet) vscode.window.showErrorMessage('WaveLens: the configuration is not JSON (see the mark in it): not applied, the tabs keep the last one');
+    return; }
+  cfgGood = r.config;
+  for (const tab of TABS) tab.post({ type: 'config', config: r.config });
+  const said = `WaveLens: the configuration applied to ${TABS.size} tab${TABS.size === 1 ? '' : 's'} (${r.own} of your values)` +
+    (r.problems.length ? `; ${r.problems.length} left out: ${r.problems.map(p => p.key || 'the file').join(', ')} (marked in the file)` : '');
+  log(said.replace(/^WaveLens: /, ''));
+  if (!quiet) (r.problems.length ? vscode.window.showWarningMessage : vscode.window.showInformationMessage)(said);
+}
+// Open the configuration: the file (made of the defaults the first time) in an editor beside the tab
+async function cfgOpen() {
+  const f = configFile();
+  if (!exists(f)) {
+    const d = cfgDefaults(); await fs.promises.mkdir(path.dirname(f), { recursive: true }); await fs.promises.writeFile(f, UCFG.template(d.values, d.notes)); }
+  const doc = await vscode.workspace.openTextDocument(f);
+  await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.Beside, preview: false });
+  try { cfgRead(doc.getText()); } catch (e) { /* marks only */ }
+}
+// Reset to the defaults: the file written anew (asked first), applied
+async function cfgReset() {
+  const yes = 'Reset';
+  const ask = 'WaveLens: the configuration back to the defaults? Your values in it are lost.';
+  if (await vscode.window.showWarningMessage(ask, { modal: true }, yes) !== yes) return;
+  const d = cfgDefaults(), text = UCFG.template(d.values, d.notes), f = configFile();
+  await fs.promises.mkdir(path.dirname(f), { recursive: true }); await fs.promises.writeFile(f, text);
+  cfgApply(text, true);
+  vscode.window.showInformationMessage('WaveLens: the configuration is the defaults again (applied to every tab)');
+}
 let linksSaid = '';   // the bad patterns of wavelens.logLinks said once (again when they change)
 const ownLinks = () => { const l = vscode.workspace.getConfiguration('wavelens').get('logLinks'), list = Array.isArray(l) ? l : [];
   const bad = LINKS.badPatterns(list), key = bad.join('\n');
@@ -769,6 +842,9 @@ function activate(ctx) {
     vscode.commands.registerCommand('wavelens.reload', () => { const t = active(); if (t) t.post({ type: 'reload' }); }),
     vscode.commands.registerCommand('wavelens.theme', chooseTheme),
     vscode.commands.registerCommand('wavelens.log', () => OUT.show(true)),
+    vscode.commands.registerCommand('wavelens.openConfig', cfgOpen),
+    vscode.commands.registerCommand('wavelens.resetConfig', cfgReset),
+    vscode.workspace.onDidSaveTextDocument(doc => { if (CTX && doc.uri.fsPath === configFile()) cfgApply(doc.getText()); }),
     vscode.commands.registerCommand('wavelens.verilatorTypes', opts => verilatorTypes(active(), opts || {})),
     vscode.commands.registerCommand('wavelens.toFst', (uri, opts) => {   // the explorer's file, else the active tab's dump
       const t = active();

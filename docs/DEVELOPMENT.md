@@ -25,7 +25,8 @@ vscode/                       the VS Code extension (a workspace extension: Remo
                               pickers, clipboard, keys, theme, live link to the host), svtypes.js (the twin of
                               svtypes.py verilator: the command Make the types with Verilator; tests/unit compares
                               the two), links.js (times and signals of a log as links: pure, the smoke loads it in a
-                              page), test/e2e.js (in a real VS Code)
+                              page), userconfig.js (your configuration: the JSONC of the defaults, read and
+                              checked; pure, as links.js), test/e2e.js (in a real VS Code)
 tools/                        what you run: python3 -I tools/<tool>.py
   mkconfig.py vcd2wavedrom.py mkhtml.py embed.py dumpscan.py wavejson.py svabuild.py wavefind.py common.py
   wavelenscat.py              wavelens/wavelens.js from wavelens/src/*.js (make wavelens)

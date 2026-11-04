@@ -216,6 +216,22 @@ class Docs(unittest.TestCase):
                 self.assertEqual(rc, 0)
                 self.assertIn('usage:', out)
 
+    def test_tools_write_no_bytecode(self):
+        """AU-WL-003: a tool run as python3 -I (PYTHONDONTWRITEBYTECODE ignored) writes no tools/__pycache__ into a shared
+        checkout: each script that imports a module of tools/ sets sys.dont_write_bytecode before that import."""
+        mods = {f[:-3] for f in os.listdir(H.TOOLS) if f.endswith('.py')}
+        late = []
+        for f in sorted(os.listdir(H.TOOLS)):
+            src = read('tools', f) if f.endswith('.py') else ''
+            if "__name__ == '__main__'" not in src:
+                continue
+            imp = [m.start() for m in re.finditer(r'^\s*(?:import ([\w, ]+)|from (\w+) import)', src, re.M)
+                   if mods & {x.strip() for x in (m.group(1) or m.group(2)).split(',')}]
+            flag = src.find('sys.dont_write_bytecode = True')
+            if imp and not 0 <= flag < imp[0]:
+                late.append(f)
+        self.assertEqual(late, [])
+
     def test_no_version_in_prose(self):   # review 0.31 D8: a number of now is wrong by the next release
         self.assertEqual(re.findall(r'\(\d+\.\d+ now', read('docs', 'DEVELOPMENT.md')), [])
 

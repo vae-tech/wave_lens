@@ -69,10 +69,11 @@ async def test_wait_states(dut):
   <tr><td><code>@wl.test(…)</code></td><td><code>cocotb.test(…)</code> around the test: its number on <code>TEST_CASE</code>, a bookmark at its start and end, a span in the colour of its result</td></tr>
   <tr><td><code>wl.phase(label, signals=None)</code></td><td><code>with</code>, not awaited: the time inside it is <code>label</code> on <code>TEST_STEP</code>; <code>signals</code>: a span on those rows instead In <code>ReadOnly</code>, where nothing can be written, its time stays exact: begun there it is a span on the <code>TEST_STEP</code> row.</td></tr>
   <tr><td><code>wl.step(label, signals=None)</code></td><td>the same phase in one line, until the next <code>step</code> or the end of the test: nothing to re-indent</td></tr>
-  <tr><td><code>wl.note(text, signal, label, color)</code></td><td>a bookmark now</td></tr>
+  <tr><td><code>wl.note(text, signal, label, color)</code></td><td>a bookmark now; <code>signal</code> a handle, a row's name or a pattern (<code>"*fifo_full"</code>: the first row it matches)</td></tr>
   <tr><td><code>wl.measure(label, min, max, signal, check)</code></td><td>a time measured, as <code>async with</code> / <code>with</code> or <code>m.start()</code> …
     <code>m.stop()</code>: a pair of markers with the Δ between them, red out of <code>min</code> / <code>max</code> (<a href="#measure">below</a>)</td></tr>
   <tr><td><code>wl.check(got, expected, text, signal, show, why)</code></td><td>a bookmark with both values; a mismatch fails the test; <code>show='fail'</code>: no bookmark when they agree, for a check in a loop, and the test still counts it; <code>why</code>: the text of a failure, a string or a function called only then</td></tr>
+  <tr><td><code>with wl.checks(text, signal):</code></td><td>the checks inside leave one bookmark at the end, <em>every word of the frame: 188 checks passed</em>; a failure keeps its own and the group says how many passed</td></tr>
 </table>
 <p><code>@wl.test(signals=["*fifo_full", "u_x.state"])</code>: the test's own rows, names or patterns, added to its view when each test stands apart; a name the dump has not got is a lint warning. <code>Marks(hide=["my_checks.py"])</code>: a file that is not the line of a failure, as a frame that sets <code>__tracebackhide__</code>.</p>
 <p>Warnings and errors logged during a test are bookmarks too. A test's result on the page is what cocotb says of it, <code>expect_fail</code> and
@@ -97,6 +98,10 @@ async def test_wait_states(dut):
   <figcaption>The test that failed, alone: the red bookmark on <code>PRDATA</code> says what was expected.</figcaption></figure>
 <p>Each view holds its own window, so <code>tests</code> is about the size of <code>whole</code> and <code>both</code> twice that. A test's window goes a little
   past its end, for the text of its last bookmark: that bit is the start of the next test, unmarked.</p>
+<p>The colours are the config's <code>"marksColors"</code>: <code>{"pass": "c3", "fail": "#c92a2a", "note": "hl2"}</code>, a hex colour or a token of the
+  theme that follows dark and light; the rest keep theirs.</p>
+<p><code>--marks-phases</code> (the config's <code>"marksPhases": true</code>) puts a labelled marker at the start of each phase too: the value of
+  <code>TEST_STEP</code> on its row is easy to miss among forty rows, a marker is not, and <code>]m</code> / <code>[m</code> step through them.</p>
 
 <h2 id="measure">Measure</h2>
 <p><code>wl.measure</code> takes the time of what is inside it, with a bound the page checks:</p>
@@ -162,14 +167,15 @@ except ImportError:
 </ol>
 
 <h2 id="agents">For an AI agent</h2>
-<p><code>wave_tests</code> reads the marks file: which tests failed, when, what they expected, what they measured and which steps took longest. The window it gives is the one to ask
+<p><code>wave_tests</code> reads the marks file: which tests failed, when, what they expected, what they measured and which steps took longest;
+  given a directory, every marks file under it as one regression: the totals, the failures first, the benches that failed first. The window it gives is the one to ask
   <code>wave_changes</code>, <code>wave_find</code> or <code>wave_sample</code> about. <code>wave_page</code> with <code>marks</code> and <code>marks_views</code> makes the page
   (<a href="mcp.html">AI agents (MCP)</a>).</p>
 <p>All the options: <a href="../USAGE.md">USAGE.md</a> § Marks from a cocotb test.</p>
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.41 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.42 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

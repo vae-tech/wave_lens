@@ -18,6 +18,7 @@ least one attempt that is not vacuous. One of the list that Verilator takes now 
 """
 import argparse, json, os, re, shutil, subprocess, sys
 
+sys.dont_write_bytecode = True   # a shared checkout stays as it is: -I ignores PYTHONDONTWRITEBYTECODE (AU-WL-003)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
 from common import ROOT, UNIT_PS, WaveError, add_sva_bin_arg, run_main  # noqa: E402
 import svabuild  # noqa: E402

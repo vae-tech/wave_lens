@@ -220,6 +220,37 @@ class Library(Harness):
         self.assertEqual(t['result'], 'pass', 'a measure out of its bound fails nothing by itself')
         self.assertEqual((t['passed'], t['failed']), (0, 0))
 
+    def test_checks_in_a_group_leave_one_bookmark(self):   # P-05b
+        wl = self.marks()
+
+        async def one(dut):
+            self.t = 100
+            with wl.checks('every word of the frame'):
+                for i in range(188):
+                    wl.check(i, i)
+                    self.t += 1
+            wl.check(1, 1, 'alone')
+            async with wl.checks('the tail', signal='PREADY'):
+                wl.check(2, 2, show='all')   # said: its own bookmark too
+            with wl.checks('nothing'):
+                pass
+            with wl.checks('the next frame'):
+                self.t = 400
+                wl.check(5, 5)
+                wl.check(6, 7, 'word 1')
+        t = self.run_test(wl, one, Dut('TEST_CASE', 'TEST_STEP'))['tests'][0]
+        got = [(m['kind'], m.get('text'), m.get('n'), m.get('failed'), m['t'], m.get('from')) for m in t['marks'] if m['kind'] in ('check', 'checks')]
+        self.assertEqual(got, [('checks', 'every word of the frame', 188, 0, 288, 100), ('check', 'alone', None, None, 288, None),
+                               ('check', '', None, None, 288, None), ('checks', 'the tail', 1, 0, 288, 288), ('checks', 'nothing', 0, 0, 288, None),
+                               ('check', 'word 1', None, None, 400, None), ('checks', 'the next frame', 2, 1, 400, 400)])
+        self.assertEqual((t['result'], t['passed'], t['failed']), ('fail', 191, 1), 'every check counted, the group or not')
+        self.assertEqual(t['marks'][3]['signal'], 'PREADY')
+        import testmarks
+        b = [testmarks.bookmark(m, 'TEST_CASE') for m in t['marks'] if m['kind'] == 'checks']
+        self.assertEqual([(x['label'], x['text'], x['color']) for x in b],
+                         [('✓ 188 checks', 'every word of the frame: 188 checks passed', '#2f9e44'), ('✓ 1 check', 'the tail: 1 check passed', '#2f9e44'),
+                          ('✓ 0 checks', 'nothing: 0 checks passed', '#2f9e44'), ('✗ 1 of 2 failed', 'the next frame: 1 of 2 checks passed', '#e03131')])
+
     def test_measure_check_and_misuse(self):
         wl = self.marks()
 
@@ -393,6 +424,20 @@ class Library(Harness):
         self.assertEqual(m['at'], ' (at [17]: 0x11, 0xFF)')
         self.assertTrue(m['got_all'].startswith('[0, 1, 2, 3, 4'))
         self.assertEqual(t['message'], 'every word: got [0, 1, 2, … 256 items], expected [0, 1, 2, … 256 items] (at [17]: 0x11, 0xFF)')
+
+    def test_a_list_in_one_radix_short_or_long(self):   # WL-008
+        for v in ([0x10000000] * 4, [0x10000000], 0x10000000):
+            self.assertNotIn('268435456', wc.short_of(v, wc.text_of(v)))
+        self.assertEqual(wc.text_of([0x10000000]), '[0x10000000]')
+        self.assertEqual(wc.short_of([0x10000000] * 4, wc.text_of([0x10000000] * 4)), '[0x10000000, 0x10000000, 0x10000000, … 4 items]')
+        self.assertEqual(wc.text_of([1, [16, -16], (255,), (1, 2), b'\x10', True, 'ok']), "[1, [0x10, -0x10], (0xFF,), (1, 2), [0x10], 1, ok]")
+        self.assertEqual(wc.text_of([Vector(255), Vector(None)]), '[0xFF, xxxx]')
+        wl = self.marks()
+
+        async def one(dut):
+            wl.check([0x10000000] * 4, [0x10000000], 'words')
+        t = self.run_test(wl, one, Dut('TEST_CASE', 'TEST_STEP'))['tests'][0]
+        self.assertEqual(t['message'], 'words: got [0x10000000, 0x10000000, 0x10000000, … 4 items], expected [0x10000000] (lengths 4, 1)')
 
     def test_a_long_text_is_cut_a_short_one_is_not(self):
         self.assertEqual(wc.short_of('abc', 'abc'), 'abc')
@@ -781,6 +826,64 @@ class Split(unittest.TestCase):
         self.assertEqual(testmarks.merge(c, DOC), [])
         self.assertEqual(list(c['views']), ['v'])
 
+    def test_bookmarks_of_one_moment_apart(self):   # P-15
+        ok, bad = testmarks.RESULTS['pass'][1], testmarks.RESULTS['fail'][1]
+        b = [{'t': 5, 'signal': 'A', 'text': f'c{i}', 'color': ok} for i in range(4)] + [{'t': 5, 'signal': 'A', 'text': 'end', 'lift': 'above'},
+             {'t': 5, 'signal': 'A', 'text': 'x', 'color': bad}, {'t': 6, 'signal': 'A', 'text': 'later'}, {'t': 5, 'signal': 'B', 'text': 'b1'},
+             {'t': 5, 'signal': 'B', 'text': 'b2'}, {'t': 9, 'text': 'axis 1'}, {'t': 9, 'text': 'axis 2'}]
+        got = testmarks.one_moment(b)
+        self.assertEqual([(x['signal'] if 'signal' in x else None, x.get('lift'), x.get('label'), x['text']) for x in got],
+                         [('A', None, None, 'c0'), ('A', 'below', '+4', '4 more at this time: c1 · c2 · c3 · x'), ('A', 'above', None, 'end'),
+                          ('A', None, None, 'later'), ('B', None, None, 'b1'), ('B', 'above', None, 'b2'), (None, None, '+2', '2 at this time: axis 1 · axis 2')])
+        self.assertEqual(got[1]['color'], bad, 'a failure among them: the circle is red')
+        self.assertEqual(testmarks.one_moment(b[6:7]), b[6:7])
+        c = Split.cfg(self)
+        doc = json.loads(json.dumps(DOC))
+        doc['tests'][0]['marks'] = [{'t': 7, 'kind': 'check', 'ok': True, 'got': str(i), 'expected': str(i), 'text': '', 'signal': 'PSEL'} for i in range(6)]
+        testmarks.merge(c, doc)
+        on = [x for x in c['views']['v']['bookmarks'] if x['t'] == 7]
+        self.assertEqual([(x.get('lift'), x.get('label')) for x in on], [(None, '✓ 0'), ('above', '✓ 1'), ('below', '+4')])
+
+    def test_colours_of_the_marks(self):   # P-13: "marksColors"
+        doc = json.loads(json.dumps(DOC))
+        doc['tests'][0]['marks'] = [{'t': 7, 'kind': 'note', 'text': 'n'}, {'t': 8, 'kind': 'log', 'level': 'WARNING', 'text': 'w'},
+                                    {'t': 9, 'kind': 'log', 'level': 'ERROR', 'text': 'e'}, {'t': 10, 'kind': 'check', 'ok': True, 'got': '1', 'expected': '1', 'text': ''}]
+        plain, c = self.cfg(), self.cfg()
+        testmarks.merge(plain, doc)
+        testmarks.merge(c, doc, 'both', colors={'pass': 'c3', 'fail': '#aa0000', 'note': '--my-note', 'warning': 'orange'})
+        by = lambda v, t: next(b['color'] for b in v['bookmarks'] if b['t'] == t and b.get('text') != 'by hand' and not b.get('label', '').startswith('TC'))
+        v, p = c['views']['v'], plain['views']['v']
+        self.assertEqual([by(v, t) for t in (7, 8, 9, 10)], ['--my-note', 'orange', '#e03131', 'c3'], 'a key not given keeps its colour (log)')
+        self.assertEqual([by(p, t) for t in (7, 8, 9, 10)], ['#1971c2', '#e8590c', '#e03131', '#2f9e44'])
+        self.assertEqual([s['color'] for s in v['spans'] if s.get('label', '').startswith('TC')], ['c3', '#aa0000'])
+        self.assertEqual(c['views']['tc2']['title'], 'TC2 b · FAIL')
+        self.assertEqual(testmarks.COLORS, testmarks.COLORS0, 'the defaults again after the merge')
+        for bad, msg in (({'pass': 'red; x'}, 'marksColors".pass'), ({'ok': '#fff'}, 'unknown key'), ('red', 'an object')):
+            with self.assertRaisesRegex(common.WaveError, msg):
+                testmarks.merge(self.cfg(), doc, colors=bad)
+        import mkhtml
+        self.assertEqual([mkhtml.css_color(x) for x in ('c3', 'hl2', 'fg', '--mine', '#abc', 'orange')],
+                         ['var(--wave-c3)', 'var(--wave-hl2)', 'var(--fg)', 'var(--mine)', '#abc', 'orange'])
+
+    def test_phases_as_markers(self):   # P-14
+        doc = json.loads(json.dumps(DOC))
+        doc['tests'][0]['phases'].append({'label': 'none', 'from': 20, 'to': 20})   # of no time: no marker
+        c = self.cfg()
+        testmarks.merge(c, doc)
+        self.assertFalse([m for m in c['views']['v']['marker'] if 't' in m], 'off by default')
+        c = self.cfg()
+        testmarks.merge(c, doc, phases=True)
+        self.assertEqual([m for m in c['views']['v']['marker'] if 't' in m], [{'t': '0ps', 'label': 'reset'}, {'t': '10ps', 'label': 'on'}])
+        c = self.cfg()
+        testmarks.merge(c, doc, 'tests', phases=True)
+        self.assertEqual(c['views']['tc1']['marker'], [{'t': '0ps', 'label': 'reset'}, {'t': '10ps', 'label': 'on'}])
+        self.assertNotIn('marker', c['views']['tc2'])
+        self.assertEqual(vcd2wavedrom.parse_markers([{'t': '10ns', 'label': 'x'}]), [({'t': 10000}, 'x', None)])
+        with self.assertRaisesRegex(common.WaveError, '"t": TIME'):
+            vcd2wavedrom.parse_markers([{'t': 'soon'}])
+        with self.assertRaisesRegex(common.WaveError, '"t": TIME'):
+            vcd2wavedrom.parse_markers([{'t': 5, 'on': 'clk'}])
+
     def test_measures_into_the_views(self):
         """Stage 17: a test's measurements -> the view's "measures" (vcd2wavedrom: the WaveJSON's) in the test's colour, on its row; the
         summary and the test's view say them; its steps by length."""
@@ -874,6 +977,47 @@ class Page(unittest.TestCase):
         text = self.page()
         self.assertIn('TC2 b · FAIL', text)
         self.assertIn('got 0, expected 1 (t.py:9)', text)
+
+    def test_a_note_on_a_pattern(self):   # P-10
+        doc = {**DOC, 'step': None, 'steps': {}}
+        doc = json.loads(json.dumps(doc))
+        doc['tests'][0]['marks'].append({'t': 60, 'kind': 'note', 'text': 'pattern', 'signal': '*SEL'})
+        with open(self.marks, 'w', encoding='utf-8') as f:
+            json.dump(doc, f)
+        rc, _, err = self.build('--marks', self.marks)
+        self.assertEqual(rc, 0, err)
+        self.assertNotIn('bookmark-signal-missing', err)
+        waves = json.loads(re.search(r'window\.WAVES = (\{.*?\n\});', self.page(), re.S).group(1).replace('<\\/', '</'))
+        self.assertEqual([b['signal'] for b in waves['v']['bookmarks'] if b.get('text') == 'pattern'], ['PSEL'])
+
+    def test_colours_of_the_marks_on_the_page(self):   # P-13
+        with open(self.cfg, encoding='utf-8') as f:
+            c = json.load(f)
+        with open(self.cfg, 'w', encoding='utf-8') as f:
+            json.dump({**c, 'marksColors': {'pass': 'c3', 'fail': '#aa0000'}}, f)
+        rc, _, err = self.build('--marks', self.marks, '--marks-views', 'tests')
+        self.assertEqual(rc, 0, err)
+        text = self.page()
+        self.assertIn('data-view="tc1" style="--tc: var(--wave-c3)"', text)
+        self.assertIn('data-view="tc2" style="--tc: #aa0000"', text)
+        self.assertNotIn('marksColors', text, 'a key of the build, not of the page')
+
+    def test_phases_as_markers_on_the_page(self):   # P-14: --marks-phases, the config's "marksPhases"
+        rc, _, err = self.build('--marks', self.marks, '--marks-phases')
+        self.assertEqual(rc, 0, err)
+        self.assertNotIn('lint:', err.replace('bookmarks-close', ''))
+        waves = json.loads(re.search(r'window\.WAVES = (\{.*?\n\});', self.page(), re.S).group(1).replace('<\\/', '</'))
+        self.assertEqual([(m['t'], m['label']) for m in waves['v']['markers'] if not m['label'].startswith('TC')], [(0, 'reset'), (10, 'on')])
+        rc, _, err = self.build('--marks', self.marks)
+        waves = json.loads(re.search(r'window\.WAVES = (\{.*?\n\});', self.page(), re.S).group(1).replace('<\\/', '</'))
+        self.assertEqual([m['label'] for m in waves['v']['markers']], ['TC1', 'TC2'])
+        with open(self.cfg, encoding='utf-8') as f:
+            c = json.load(f)
+        with open(self.cfg, 'w', encoding='utf-8') as f:
+            json.dump({**c, 'marksPhases': True}, f)
+        rc, _, err = self.build('--marks', self.marks)
+        self.assertEqual(rc, 0, err)
+        self.assertIn('"label": "reset"', self.page())
 
     def test_a_page_of_tests(self):
         rc, _, err = self.build('--marks', self.marks, '--marks-views', 'tests')

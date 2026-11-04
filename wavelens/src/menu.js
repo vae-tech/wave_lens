@@ -17,10 +17,11 @@ Object.assign(WaveView.prototype, {
     const mvAt = ugh ? [this.ugroups.indexOf(ugOf(ugh.name)), this.ugroups.length] : mine ? [ugOf(mine.ug.name).signals.indexOf(mine.orig.full),
       ugOf(mine.ug.name).signals.length] : null;
     // a highlighted row clicked: colour, radix and hide go to every highlighted one (a highlighted module: its signals)
-    const picked = r => this.picks.has(r) || r.anc.some(id => this.picks.has(this.M.groups[id]));
+    // (a row of your groups stands for its signal: .orig)
+    const pk = new Set([...this.picks.keys()].map(r => r.orig || r)), picked = r => pk.has(r.orig || r) || r.anc.some(id => this.picks.has(this.M.groups[id]));
     // or a row of the shift+click run: every row of the run
     const run = !!sig && this.selRun.size > 1 && this.selRun.has(sig);
-    const many = run || (it && (this.picks.has(it) || sig && picked(sig)) && this.picks.size > 1);
+    const many = run || (it && (pk.has(it.orig || it) || sig && picked(sig)) && this.picks.size > 1);
     const sigs = run ? [...this.selRun] : many ? this.sigPool().filter(r => r.type === 'sig' && r.tr && picked(r) && this.shown(r)) : sig ? [sig] : [];
     const vecs = sigs.map(r => r.orig || r).filter(isVec);   // Bits: the buses bit by bit
     // Duplicate: every signal but a bit, a plugin's copy; a copy's own row goes

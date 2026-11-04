@@ -5,6 +5,34 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.42 — 4 November 2026
+
+Your configuration in VS Code, and the fixes and small requests of the cl_gev_eval_offload and au_psi5 reports: the cycles
+of a window, the FSM panel by a command, checks in one radix, array elements under one name.
+
+- **Your configuration in VS Code.** *WaveLens: Open the configuration* (⚙ in the tab's title): a JSONC file of the viewer's defaults,
+  every key with its comment; saved, it is checked (not JSON, a wrong kind, a key that is none: marked in the file) and applied to every tab
+  at once; one that breaks the viewer gives the defaults back; *Reset the configuration to the defaults*.
+- **The bugs of the cl_gev_eval_offload report of 3 November.** WL-008: a check's list is in one radix, short or long
+  (`expected [0x10000000]`, not `[268435456]`). WL-009: an element of an unpacked array has one name for every tool:
+  `sva vcd --signals`, `sva diff --signals`, `wave_cut` and the `wave_` tools take `mem[1]` (Verilator's FST) and
+  `mem.[1]` (what `wave_signals` lists) of an FST, a VCD and a cut. WL-010: a span's `signals` find their rows by the
+  rule of the bookmarks (a row's name, a config's name, the dump's path), no `span-signal-missing` for a phase begun in
+  ReadOnly.
+- **The small requests of the cl_gev_eval_offload report.** `with wl.checks("…")`: one bookmark for the checks inside, "188 checks
+  passed" (P-05b). A view's `"measures"` by events, as a span's ends (P-21). `mkhtml.py --lint-json`: the warnings with their fields
+  and the rows they may mean (P-20). `wave_tests` of a directory: a regression in one answer, the failures first (P-19).
+  `--marks-phases` / `"marksPhases"`: a marker at each phase; a config's marker at a time, `{"t", "label"}` (P-14). The marks of one
+  time take a lane each, the rest one circle `+k` (P-15). A bookmark's `signal` by pattern, `wl.note(text, signal="*full")` (P-10).
+  `"marksColors"`: the colours of the marks, hex or the theme's tokens (P-13).
+- **The au_psi5 report of 4 November.** AU-WL-001: a window cut out of a long dump with `cycleZero` before it numbers its
+  cycles as the whole dump does (the edges before it counted at the clock's period), not from 0. AU-WL-006: an FSM row with a
+  `path` of its own in a group has its name in the FSM panel, not a slice of its path. AU-WL-005: the command
+  `fsm_panel {signal?, tab?, off?}` opens the panel on an FSM's States, Changes or Diagram. AU-WL-002: a bookmark's text field
+  shows the whole text on hover. AU-WL-003: every tool run as `python3 -I` writes no `tools/__pycache__` into the checkout.
+- **Paint on the rows of your groups.** Paint (the find bar) and the menu's colour take every row selected with
+  shift+click or highlighted with ctrl+click in your groups, not only the current one.
+
 ## 0.41 — 3 November 2026
 
 Measurements, links to a moment, your own keys, tools for CI, and the fixes of the review of all of them.

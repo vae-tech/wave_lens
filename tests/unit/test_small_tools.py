@@ -163,6 +163,27 @@ class MkHtml(unittest.TestCase):
             self.assertEqual(rc, 0, err)
             self.assertEqual(H.text(os.path.join(d, 'r.xml')), '<?xml version="1.0" encoding="UTF-8"?>\n<testsuites>\n\n</testsuites>\n')
 
+    def test_lint_as_json(self):
+        """P-20: --lint-json: each warning with its code, path, view and what it is about (the name, the rows it may mean), no text to parse."""
+        cfg = {**self.CFG, 'views': {'v': {'title': 'one', 'bookmarks': [{'n': 1, 't': 0, 'signal': 'x.s', 'text': 'a'}, {'n': 1, 't': 0, 'signal': 'tb.b'}],
+                                           'spans': [{'from': 0, 'to': 1, 'signals': ['nope']}]}}}
+        with H.tmp() as d:
+            c, j = os.path.join(d, 'c.json'), os.path.join(d, 'lint.json')
+            H.dump(cfg, c)
+            rc, out, err = H.run_tool('mkhtml', '--config', c, '--lint', '--lint-json', j)
+            self.assertEqual(rc, 0, err)
+            got = json.loads(H.text(j))
+            self.assertEqual(got['count'], len(got['warnings']))
+            self.assertEqual(got['count'], err.count('mkhtml: lint: ') - 1, 'every warning printed is in the file')
+            by = {w['code']: w for w in got['warnings']}
+            self.assertEqual({k: by['bookmark-signal-missing'][k] for k in ('where', 'view', 'signal', 'rows')},
+                             {'where': 'views.v.bookmarks[0] (n 1)', 'view': 'v', 'signal': 'x.s', 'rows': ['s']})
+            self.assertTrue(by['bookmark-signal-missing']['message'].startswith('"x.s" is no row of the view'))
+            self.assertEqual((by['span-signal-missing']['signal'], 'rows' in by['span-signal-missing']), ('nope', False))
+            self.assertIn('bookmark-duplicate', by)
+            rc, out, err = H.run_tool('mkhtml', '--config', c, '--lint', '--lint-json', '-')
+            self.assertEqual(json.loads(out)['warnings'], got['warnings'])
+
     @H.needs(__import__('svabuild').find_bin(), 'the sva CLI (make sva-build)')
     def test_junit_of_every_view(self):
         """Stage 24: --junit: a testsuite per view, a testcase per binding, a failure for the one that failed (apb_demo_no_wait)."""

@@ -121,7 +121,7 @@ class Bookmarks(unittest.TestCase):
             self.assertEqual(doc['spans'], [{'label': 'run', 'from': 30000, 'to': 60000}, {'signals': ['state'], 'from': 100000, 'to': 140000},
                                             {'from': 95000, 'to': 120000}])
             rc, _, err = self.convert(d, fsm_vcd(d), {'spans': [{'from': {'bookmark': 7}, 'to': '5ns'}]})
-            self.assertIn('spans[0]: "from": no bookmark 7', err)
+            self.assertIn('spans[0].from: no bookmark 7', err)
 
     def test_two_scopes_with_one_leaf(self):
         with H.tmp() as d:

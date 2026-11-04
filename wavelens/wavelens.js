@@ -816,7 +816,16 @@ const riseTimes = clk => RISES.get(clk) || (RISES.set(clk, clk.tr.filter(o => o.
 // the cycle at t, the last edge at or before t (negative before cycle 0); the time of cycle n, or null past the ends
 // the setting cycleZero: a time ("50ns", as gapIdle and the cursor take it) or model units; null / "": the first edge
 const zeroTime = z => (z == null || z === '' ? null : typeof z === 'number' ? z : num(parseT(z)));
-const cycZero = (ups, zero) => (zero == null || !isFinite(zero) ? 0 : lastBefore(ups.length, j => ups[j], zero - timeEps(zero), true) + 1);
+// a zero before the first edge (a window cut out of a long dump, AU-WL-001): the edges before it counted at the clock's mean
+// period over the edges there are, so the first edge is cycle (ups[0] − zero) / period, as the tools number it on the whole
+// dump (a zero within 2 % of a period after an edge counts as on it: the period is measured)
+const cycZero = (ups, zero) => {
+  if (zero == null || !isFinite(zero)) return 0;
+  if (ups.length > 1 && zero < ups[0] - timeEps(ups[0])) {
+    const per = (ups[ups.length - 1] - ups[0]) / (ups.length - 1); if (per > 0) return -Math.floor((ups[0] - zero) / per + 0.02);
+  }
+  return lastBefore(ups.length, j => ups[j], zero - timeEps(zero), true) + 1;
+};
 const cycAt = (ups, iz, t) => lastBefore(ups.length, j => ups[j], t + timeEps(t)) - iz;
 // the rising edges the cycles count: a dump's first value 1 ("tv") is its level at the start, not an edge (a wave's p is one)
 const cycUps = clk => ((clk.tv || clk.fromTv) && clk.tr[0] && clk.tr[0].k === '1' ? riseTimes(clk).slice(1) : riseTimes(clk));
@@ -3110,7 +3119,8 @@ class Notes {
         <input type="color" class="col" value="${hex(b.color)}" aria-label="bookmark ${b.n} colour" title="Colour">
         <input type="text" class="lbl" value="${esc(b.label || '')}" placeholder="label" aria-label="bookmark ${b.n} label" spellcheck="false"
           title="A short label by the circle on the waves">
-        <input type="text" class="txt" value="${esc(b.text)}" placeholder="describe the event" aria-label="bookmark ${b.n} text">
+        <input type="text" class="txt" value="${esc(b.text)}" placeholder="describe the event" aria-label="bookmark ${b.n} text"${b.text ?
+          ` title="${esc(b.text)}"` : ''}>
         ${b.link ? `<button type="button" class="ic lk" data-bm="link"${v.linkTarget(b.link) ? '' : ' disabled'} title="${v.linkTarget(b.link) ?
           `Open the view ${esc(b.link.view)} of this page${b.link.bookmark ? ` at its bookmark ${b.link.bookmark}` : ''}` :
           `No section ${esc(b.link.view)} on this page`}">→ ${esc(b.link.view)}</button>` : ''}
@@ -3207,7 +3217,7 @@ class Notes {
       return v.changed(false);
     }
     const bm = v.bms.find(x => x.n === +li.dataset.n); if (!bm) return;
-    if (T.matches('input.txt')) { bm.text = T.value; v.saveBookmarks(); }
+    if (T.matches('input.txt')) { bm.text = T.title = T.value; v.saveBookmarks(); }   // the whole text on hover too (AU-WL-002)
     if (T.matches('input.lbl')) { bm.label = T.value; v.saveBookmarks(); v.draw(); }
     else if (T.matches('input.col')) { bm.color = T.value; li.querySelector('.bn').style.background = T.value; v.changed(false); }
   }
@@ -3885,10 +3895,11 @@ class WaveView {
     this.paintRows().forEach(r => this.painted.set(r.full, color));
     this.savePaint(); this.renderNames(); this.draw(); return this;
   }
-  paintRows() {
-    const rows = this.sigPool().filter(r => r.type === 'sig' && (this.found.has(r) || this.picks.has(r) || this.selRun.has(r) ||
+  paintRows() {   // a row of your groups selected (shift+click) or highlighted (ctrl+click) stands for its signal (.orig)
+    const base = r => (r && r.orig) || r, run = new Set([...this.selRun].map(base)), pk = new Set([...this.picks.keys()].map(base));
+    const rows = this.sigPool().filter(r => r.type === 'sig' && (this.found.has(r) || pk.has(r) || run.has(r) ||
       r.anc.some(id => this.picks.has(this.M.groups[id]))) && this.shown(r));   // not what you do not see (Hide, Only)
-    return rows.length ? rows : this.sel && this.sel.type === 'sig' ? [this.sel] : [];
+    return rows.length ? rows : this.sel && this.sel.type === 'sig' ? [base(this.sel)] : [];
   }
   unpaint() { this.painted.clear(); this.savePaint(); this.renderNames(); this.draw(); return this; }
   // the radix of a signal (a row or its path; one of RADIX, null: the page's) and hidden rows (signals, modules: all of
@@ -5165,10 +5176,11 @@ Object.assign(WaveView.prototype, {
     const mvAt = ugh ? [this.ugroups.indexOf(ugOf(ugh.name)), this.ugroups.length] : mine ? [ugOf(mine.ug.name).signals.indexOf(mine.orig.full),
       ugOf(mine.ug.name).signals.length] : null;
     // a highlighted row clicked: colour, radix and hide go to every highlighted one (a highlighted module: its signals)
-    const picked = r => this.picks.has(r) || r.anc.some(id => this.picks.has(this.M.groups[id]));
+    // (a row of your groups stands for its signal: .orig)
+    const pk = new Set([...this.picks.keys()].map(r => r.orig || r)), picked = r => pk.has(r.orig || r) || r.anc.some(id => this.picks.has(this.M.groups[id]));
     // or a row of the shift+click run: every row of the run
     const run = !!sig && this.selRun.size > 1 && this.selRun.has(sig);
-    const many = run || (it && (this.picks.has(it) || sig && picked(sig)) && this.picks.size > 1);
+    const many = run || (it && (pk.has(it.orig || it) || sig && picked(sig)) && this.picks.size > 1);
     const sigs = run ? [...this.selRun] : many ? this.sigPool().filter(r => r.type === 'sig' && r.tr && picked(r) && this.shown(r)) : sig ? [sig] : [];
     const vecs = sigs.map(r => r.orig || r).filter(isVec);   // Bits: the buses bit by bit
     // Duplicate: every signal but a bit, a plugin's copy; a copy's own row goes
@@ -6631,6 +6643,20 @@ command('fsm_stats', 'signal', 'an FSM on these waves: each state of its table w
   return { signal: r.full, states: st.states.map(one), never: st.unseen.map(k => st.name(k)), invalid: st.bad.map(one),
     changes: [...st.trans.values()].map(x => ({ from: st.name(x.from), to: st.name(x.to), count: x.times.length, first: x.times[0] }))
       .sort((x, y) => y.count - x.count) };
+});
+command('fsm_panel', 'signal? tab? off?', 'the FSM panel (T): open, with an FSM\'s details (signal: its path or a pattern) on a tab ' +
+  '(states, changes or graph: the diagram); off: closed; none given: open, as it was', (v, a) => {   // FSM_TABS: fsm.js, after this file
+  if (a.tab != null && !FSM_TABS.some(t => t[0] === a.tab)) fail(`fsm_panel: tab "${a.tab}" (${FSM_TABS.map(t => t[0]).join(', ')})`);
+  if (a.off) v.fsmPanel(false);
+  else {
+    const r = a.signal != null ? fsmRow(v, a.signal) : null;
+    if (!v.fsms().length) fail('fsm_panel: no state machines on these waves (no signal has enum labels)');
+    v.fsmPanel(true); const p = v.fsmP;
+    if (r && !p.mine.includes(r)) { p.all = p.el.querySelector('.fa').checked = true; if (r.fsmField) p.fields = p.el.querySelector('.ff').checked = true;
+      p.build(); p.render(true); }   // an FSM the panel's list leaves out (not named *state*, a struct's field): the list of all
+    if (r || a.tab != null) p.detail(r || p.det || p.mine[0] || null, a.tab ?? p.tab);
+  }
+  const p = v.fsmP; return { open: !!p, signal: p && p.det ? p.det.full : null, tab: p && p.det ? p.tab : null };
 });
 command('fsm_go', 'signal state? from? to? dir? first?', 'the cursor to the next (dir 1) or previous (-1) time an FSM enters a state (its ' +
   'label or value) or makes a change (from, to: labels or values); first: the first time; past the last it rounds to the first', async (v, a) => {
@@ -8308,8 +8334,12 @@ class Fsms {
     if (this.v.fsmP === this) this.v.fsmP = null; this.v.refocus(); }
   // an FSM's states the waves reach, of its table's
   seenOf(r) { const st = this.v.fsmStatsOf(r); return [st.states.length - st.unseen.length, st.states.length]; }
-  // its name under its module (a struct's field: struct.field)
-  label(r) { const up = r.anc.map(id => this.v.M.groups[id]).filter(g => this.nodes.has(g.id)).pop(); return up ? r.full.slice(up.path.length + 1) : r.full; }
+  // its name under its module (a struct's field: struct.field); a row whose path is not under its group's (a WaveJSON's
+  // "path" of its own, AU-WL-006): its own name
+  label(r) {
+    const up = r.anc.map(id => this.v.M.groups[id]).filter(g => this.nodes.has(g.id)).pop();
+    return !up ? r.full : r.full.startsWith(up.path + '.') ? r.full.slice(up.path.length + 1) : r.name;
+  }
   // the FSMs under a module of the tree, all its levels
   under(nd) { return [...nd.fsms, ...nd.kids.flatMap(k => this.under(k))]; }
   // the rows as shown: ['m', node, depth] and ['f', row, depth] (a filter: the matches and the way to them)
@@ -9159,7 +9189,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.41',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.42',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,

@@ -265,6 +265,28 @@ class Dump(unittest.TestCase):
         self.assertIn('no signal "zz_nope"', self.error('wave_cut', out=out, signals=['zz_nope']))
 
     @H.needs(svabuild.find_bin(), 'no sva CLI')
+    def test_cut_of_an_array_element(self):
+        """WL-009: an element of an unpacked array (Verilator's FST: "ptr[0]", wave_signals: "ptr.[0]") by either name,
+        of the FST, of its VCD and of a cut."""
+        import subprocess
+        vcd = os.path.join(self.d.name, 'arr.vcd')
+        with open(vcd, 'w') as f:
+            f.write('$timescale 1ns $end\n$scope module tb $end\n$var logic 32 ! ptr[0] [31:0] $end\n$var logic 32 " ptr[1] [31:0] $end\n'
+                    '$upscope $end\n$enddefinitions $end\n#0\nb0 !\nb1 "\n#10\nb101 !\n#20\n')
+        subprocess.run([svabuild.find_bin(), 'fst', vcd, '-q'], check=True)
+        fst, cut, again = vcd[:-4] + '.fst', os.path.join(self.d.name, 'arr.cut.vcd'), os.path.join(self.d.name, 'arr.again.vcd')
+        listed = [r[0] for r in json.loads(W.call('wave_signals', {'dump': fst})[0])['signals']]
+        self.assertEqual(listed, ['tb.ptr.[0]', 'tb.ptr.[1]'])
+        for src in (fst, vcd):
+            for name in ('tb.ptr.[0]', 'tb.ptr[0]', 'ptr[0]', 'ptr.[0]'):
+                with self.subTest(src=src[-3:], name=name):
+                    text, err = W.call('wave_cut', {'dump': src, 'out': cut, 'to': 15, 'signals': [name]})
+                    self.assertFalse(err, text)
+                    text, err = W.call('wave_cut', {'dump': cut, 'out': again, 'signals': [name]})
+                    self.assertFalse(err, text)
+                    self.assertEqual(json.loads(W.call('wave_values', {'dump': again, 'signals': [name], 'at': 12})[0])['rows'], [[12, '0x00000005']])
+
+    @H.needs(svabuild.find_bin(), 'no sva CLI')
     def test_sva(self):
         t = self.truth
         r = self.call('sva_check', scope='tb.dut.ctl', source='req_ack: assert property (@(posedge clk) req |-> ##[1:4] ack);\n'
@@ -786,6 +808,33 @@ class Tests(unittest.TestCase):
         self.assertEqual([(x['test'], x['step'], x['dt']) for x in r['slowest']], [('b', 'p', 99.999), ('b', 'q', 90)])
         t = self.call('wave_tests', marks=self.marks, test='b', steps=True)['test']
         self.assertEqual(([p['step'] for p in t['steps']], t['total'], t['longest'], set(t)), (['p', 'q'], 189.999, 'p', {'n', 'name', 'steps', 'total', 'longest'}))
+
+    def test_a_regression_of_a_directory(self):
+        """P-19: wave_tests of a directory: every marks file under it, the totals, the failures first, the failed files first."""
+        good = {**self.DOC, 'tests': [self.DOC['tests'][0]]}
+        for sub, doc in (('a_bench', good), ('z_bench', self.DOC), ('m_bench/deep', good)):
+            os.makedirs(os.path.join(self.dir, 'reg', sub))
+            with open(os.path.join(self.dir, 'reg', sub, 'wavelens.marks.json'), 'w', encoding='utf-8') as f:
+                json.dump(doc, f)
+        with open(os.path.join(self.dir, 'reg', 'other.json'), 'w', encoding='utf-8') as f:
+            json.dump({'not': 'marks'}, f)
+        with open(os.path.join(self.dir, 'reg', 'old.marks.json'), 'w', encoding='utf-8') as f:
+            json.dump({**self.DOC, 'version': 9}, f)
+        r = self.call('wave_tests', marks=os.path.join(self.dir, 'reg'))
+        self.assertEqual(r['summary'], '3 files, 4 tests: 3 passed, 1 failed')
+        self.assertEqual(r['totals'], {'tests': 4, 'pass': 3, 'fail': 1, 'xfail': 0, 'run': 0, 'checks': 189 * 3 + 1, 'failed_checks': 1})
+        self.assertEqual(r['failures'], [{'file': os.path.join('z_bench', 'wavelens.marks.json'), 'n': 2, 'name': 'b', 'result': 'fail', 'from': 100.001,
+                                          'message': 'got 0, expected 1', 'where': 't.py:9'}])
+        self.assertEqual([(x['file'].split(os.sep)[0], x['failed']) for x in r['runs']], [('z_bench', 1), ('a_bench', 0), ('m_bench', 0)])
+        self.assertEqual(len(r['notes']), 1)
+        self.assertIn('version 9', r['notes'][0])
+        text, err = W.call('wave_tests', {'marks': os.path.join(self.dir, 'reg'), 'test': 'b'})
+        self.assertTrue(err)
+        self.assertIn('directory', text)
+        os.makedirs(os.path.join(self.dir, 'empty'))
+        text, err = W.call('wave_tests', {'marks': os.path.join(self.dir, 'empty')})
+        self.assertTrue(err)
+        self.assertIn('no marks file', text)
 
     def test_the_tests_of_a_run(self):
         r = self.call('wave_tests', marks=self.marks)

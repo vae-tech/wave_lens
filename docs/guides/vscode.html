@@ -132,6 +132,22 @@
   <code>wavelens.logLinks</code> adds patterns of your own (the groups <code>t</code>, <code>unit</code>, <code>sig</code>):
   <code>\[(?&lt;t&gt;\d+)(?&lt;unit&gt;ns)\] (?&lt;sig&gt;\S+)</code> for <code>[1234ns] tb.u.req</code>.</p>
 
+<h2 id="config">Your configuration of the viewer</h2>
+<p><i>WaveLens: Open the configuration</i> (⚙ in the tab's title, or the command palette) opens your configuration of the viewer beside the
+  tab: a file of the extension (<code>wavelens.config.jsonc</code> in its global storage: every window and workspace of this host), made the
+  first time of the viewer's defaults — every key of <code>wavelens.config.js</code> with its value and its comment: colours
+  (<code>colors</code>, <code>enumColors</code>, <code>groupColors</code>), sizes (<code>rowHeight</code>, <code>nameWidth</code>, <code>fontSize</code> …),
+  the radix, the edges' style, the sort, your keys (<code>keys</code>) and the rest. Change a value and save: it is checked and applied at once
+  to every open tab, and to every tab opened after.</p>
+<ul>
+  <li>Not JSON (a comma missing): marked at its line, nothing applied — the tabs keep the last configuration that read.</li>
+  <li>A value of the wrong kind (<code>"rowHeight": "30"</code>), a key that is no setting, <code>theme</code> or <code>keysLeft</code>
+    (VS Code's here: <code>wavelens.theme</code>, <code>wavelens.keysToVSCode</code>): marked (the Problems panel), left out; the rest applies.</li>
+  <li>A key taken out of the file: its default again. Comments (<code>//</code>, <code>/* */</code>) and a comma before <code>}</code> are fine.</li>
+  <li>One that breaks the viewer anyway: the tab goes back to the defaults and says so (<span class="ui">Open</span> or <span class="ui">Reset</span>).</li>
+  <li><i>WaveLens: Reset the configuration to the defaults</i> writes the file anew (asked first) and applies it.</li>
+</ul>
+
 <h2 id="agent">With an AI agent on the host</h2>
 <p>An agent working on the host with the MCP server (<code>tools/wavemcp.py</code>, see <a href="mcp.html">AI agents</a>) can show a
   person what it found in the tab they have open. When it starts its live link (<code>view_live</code>), every open tab connects
@@ -167,7 +183,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.41 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.42 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>
