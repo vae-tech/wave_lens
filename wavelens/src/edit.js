@@ -422,16 +422,18 @@ command('select', 'signal? signals?', 'the selected signal (edge search, new boo
   else v.select(a.signal ? pickRows(v, a.signal, { one: true })[0] : null);
   return { select: v.sel ? v.sel.full : null };
 });
-command('only', 'modules? on? clear? open?', 'only these modules on the waves, with their submodules (the way to them as headers; the ' +
+command('only', 'modules? on? clear? open? groups?', 'only these modules on the waves, with their submodules (the way to them as headers; the ' +
   'Modules panel\'s box): modules replaces the set and turns it on, [] keeps none, and opens the modules named with the ones above them (open ' +
-  'false: the folding as it is); on false pauses it (every module), true resumes it; clear: every module; none given: the set as it is', (v, a) => {
+  'false: the folding as it is); on false pauses it (every module), true resumes it; clear: every module; groups: your groups whole (true, the ' +
+  'setting onlyGroups) or their signals by module (false); none given: the set as it is', (v, a) => {
+  if (a.groups != null) v.setOnly({ groups: !!a.groups });
   if (a.clear) v.setOnly(null);
   else if (a.modules !== undefined) {
     if (a.modules == null) fail('modules: a list of modules (clear: every module again)');
     const ms = Array.isArray(a.modules) && !a.modules.length ? [] : pickRows(v, a.modules, { scopes: true }).map(g => g.path);
     v.setOnly({ modules: ms, on: a.on == null ? true : !!a.on, open: a.open === false || a.on === false ? null : ms });
   } else if (a.on != null) { if (!v.only) fail('only: no set to pause or resume (modules: […] first)'); v.setOnly({ on: !!a.on }); }
-  return { only: v.onlyState() };
+  return { only: v.onlyState(), groups: v.onlyGroups() };
 });
 command('fsm', 'mode? signals? fields? clear?', 'the state machines (signals with enum labels; the FSM panel): mode only — the waves ' +
   'keep these FSMs (the modules on the way as headers), add — they join the view as Hide, Only and the find\'s Mask leave it; signals: ' +
@@ -613,14 +615,16 @@ command('state', '', 'the viewer\'s state (what Save writes)', v => ({ state: v.
 command('set_state', 'state', 'a state back (what Load… does); every key it has replaces this viewer\'s', async (v, a) =>
   ({ missing: await v.setState(a.state) }));
 command('rows', 'pattern? limit? offset?', 'the signals and modules of the page in display order: [full path, width | "module" | "group"], ' +
-  'hidden and folded ones too; a dump compared: "≠" (it differs) or "missing" (not in it) third', (v, a) => {
+  'hidden and folded ones too; a dump compared: "≠" (it differs) or "missing" (not in it) third; a bus shown bit by bit (bits): its bits ' +
+  'under it, [path[i], 1, "bit"]', (v, a) => {
   const rx = a.pattern ? (String(a.pattern).includes('*') ? glob(String(a.pattern)) : null) : null, low = String(a.pattern || '').toLowerCase();
   const all = v.allRows(true)   // the hidden ones too (a signal under a hidden module), where they would be
-    .filter(r => (r.type === 'sig' && r.tr && !r.ug && r.bit == null) || (r.type === 'group' && r.full))   // a bus's bits: by their paths
+    .filter(r => (r.type === 'sig' && r.tr && !r.ug && !(r.bit != null && r.orig)) || (r.type === 'group' && r.full))   // a bit of your group's copy: its bus's
     .filter(r => !a.pattern || (rx ? rx.test(r.full) : r.full.toLowerCase().includes(low)));
   const off = Math.max(0, +a.offset || 0), n = Math.max(1, +a.limit || 200), page = all.slice(off, off + n);
   const mark = r => { const c = v.cmpOf(r); return !c ? [] : c.spans.length ? ['≠'] : c.missing || c.omitted ? ['missing'] : []; };
-  return { total: all.length, rows: page.map(r => [r.full, r.type === 'group' ? (r.user ? 'group' : 'module') : r.width || 1, ...mark(r)]),
+  return { total: all.length, rows: page.map(r => (r.bit != null ? [r.full, 1, 'bit'] :   // a bus's bits shown (bits; review 2026-11-05 B-20)
+    [r.full, r.type === 'group' ? (r.user ? 'group' : 'module') : r.width || 1, ...mark(r)])),
     ...(off + n < all.length ? { next_offset: off + n } : {}) };
 });
 const PICTURE_ROWS = 5000;   // a picture of 20 000 rows is 400 MB of text and 13 s

@@ -150,16 +150,31 @@
     h.classList.toggle('wl-vscode', themeSet === 'vscode'); };
   theme(); new MutationObserver(theme).observe(document.body, { attributes: true, attributeFilter: ['class'] });
   on.theme = m => { themeSet = looks(m.theme); theme(); };
-  on.keys = m => { if (G.WaveLens) WaveLens.configure({ keysLeft: m.keysLeft || [] }); };
+  on.keys = m => { H.keysLeft = m.keysLeft || []; if (G.WaveLens) WaveLens.configure({ keysLeft: H.keysLeft }); };
   // your configuration (WaveLens: Open the configuration): applied over wavelens.config.js; one that breaks the viewer: the defaults
-  // again (its own wavelens.config.js) and the extension told
-  let cfgBase = null;
+  // again (its own wavelens.config.js) and the extension told. The theme and the keys left to VS Code are VS Code's (wavelens.theme,
+  // wavelens.keysToVSCode): not in the defaults put back, set again after them. A colour you sent and took out: back to the page's
+  // (applyLook sets only the names it is given, null takes one away)
+  let cfgBase = null, cfgLast = null, colorsSent = new Set();
+  const baseColors = () => (cfgBase.colors && typeof cfgBase.colors === 'object' ? cfgBase.colors : {});
+  const colorsGone = names => Object.fromEntries([...names].map(n => [n, n in baseColors() ? baseColors()[n] : null]));
   const userConfig = (c, said) => {
     if (!G.WaveLens || !c) return;
-    if (!cfgBase) cfgBase = Object.assign({}, G.WAVELENS_CONFIG || {});
-    try { WaveLens.configure(c); const v = view(); if (v) { v.draw(); if (said) v.toast('your configuration applied'); } }
-    catch (e) {
-      try { WaveLens.configure(Object.assign(Object.fromEntries(Object.keys(c).map(k => [k, null])), cfgBase)); } catch (e2) { /* the defaults: as they are */ }
+    if (!cfgBase) { const { theme: t, keysLeft: k, ...rest } = G.WAVELENS_CONFIG || {}; cfgBase = rest; }
+    cfgLast = c;
+    const mine = c.colors && typeof c.colors === 'object' ? c.colors : {};
+    const colors = Object.assign(colorsGone([...colorsSent].filter(n => !(n in mine))), mine);
+    try {
+      WaveLens.configure(Object.assign({}, c, { colors }));
+      colorsSent = new Set(Object.keys(mine).filter(n => mine[n] != null && mine[n] !== ''));
+      const v = view(); if (v) { v.draw(); if (said) v.toast('your configuration applied'); }
+    } catch (e) {
+      const nulls = Object.fromEntries(Object.keys(c).filter(k => k !== 'theme' && k !== 'keysLeft').map(k => [k, null]));
+      const colorsBack = Object.assign(colorsGone(new Set([...colorsSent, ...Object.keys(mine)])), baseColors());
+      try { WaveLens.configure(Object.assign(nulls, cfgBase, { colors: colorsBack })); } catch (e2) { /* the defaults: as they are */ }
+      colorsSent = new Set();
+      try { WaveLens.configure({ keysLeft: H.keysLeft || [] }); } catch (e2) { /* as they are */ }
+      theme();
       vscode.postMessage({ type: 'configerror', text: String(e.message || e) }); toast('your configuration does not work here: the defaults are applied');
     }
   };
@@ -220,7 +235,9 @@
     // the viewer leaves alone (keysLeft), so they reach VS Code (the viewer's ctrl keys do not look at shift: ctrl+shift+F
     // / G / C stay VS Code's, ctrl+shift+Z is the viewer's redo)
     WaveLens.configure({ keysLeft: H.keysLeft || [] });
-    userConfig(H.config, false);   // your configuration, as the extension last read it
+    userConfig(H.config, false);   // your configuration, as the extension read it when it made this page
+    // and as it is now: one saved while the tab loaded (its message before the viewer was there, or the baked copy after it) wins
+    call('config', {}).then(m => { if (m && m.config && JSON.stringify(m.config) !== JSON.stringify(cfgLast)) userConfig(m.config, false); });
     document.addEventListener('keydown', e => {
       if (e.defaultPrevented && !((e.ctrlKey || e.metaKey) && e.shiftKey && e.code !== 'KeyZ')) e.stopPropagation(); });
     const P = WaveLens.WaveView.prototype; RELOAD = P.reloadDump; P.reloadDump = function () { return reload(); };   // ⟳ of the bar too

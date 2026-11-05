@@ -184,6 +184,31 @@ class MkHtml(unittest.TestCase):
             rc, out, err = H.run_tool('mkhtml', '--config', c, '--lint', '--lint-json', '-')
             self.assertEqual(json.loads(out)['warnings'], got['warnings'])
 
+    def test_lint_as_json_of_a_failed_build(self):
+        """B-13: --lint-json on a failed build still gives an object, with the error (the text on stderr, exit 1); a clean config: no warnings."""
+        with H.tmp() as d:
+            c, j = os.path.join(d, 'c.json'), os.path.join(d, 'lint.json')
+            H.dump(self.CFG, c)
+            rc, out, err = H.run_tool('mkhtml', '--config', c, '--lint', '--lint-json', '-')
+            self.assertEqual((rc, json.loads(out)), (0, {'count': 0, 'warnings': []}), err)
+            bad = os.path.join(d, 'bad.json')
+            with open(bad, 'w', encoding='utf-8') as f:
+                f.write('{"views": ')
+            for cfg, why in ((bad, 'bad.json'), (os.path.join(d, 'none.json'), 'none.json'),
+                             (c, 'nowhere.vcd')):
+                extra = ('--waves', os.path.join(d, 'nowhere.vcd')) if cfg == c else ()
+                rc, out, err = H.run_tool('mkhtml', '--config', cfg, '--lint', '--lint-json', '-', *extra)
+                self.assertEqual(rc, 1, err)
+                got = json.loads(out)
+                self.assertEqual((got['count'], got['warnings']), (0, []), why)
+                self.assertIn(why, got['error'])
+                self.assertTrue(got['error'].startswith('mkhtml: '), got['error'])
+                self.assertIn(got['error'], err, 'the same text on stderr')
+            H.dump({**self.CFG, 'marksPhases': 'yes'}, c)
+            rc, out, err = H.run_tool('mkhtml', '--config', c, '--lint', '--lint-json', j)
+            self.assertEqual(rc, 1, err)
+            self.assertEqual(H.load(j), {'count': 0, 'warnings': [], 'error': 'mkhtml: "marksPhases": true or false, not "yes"'}, 'into a file the same')
+
     @H.needs(__import__('svabuild').find_bin(), 'the sva CLI (make sva-build)')
     def test_junit_of_every_view(self):
         """Stage 24: --junit: a testsuite per view, a testcase per binding, a failure for the one that failed (apb_demo_no_wait)."""

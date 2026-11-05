@@ -13,7 +13,7 @@
 Lint (printed at every build, "mkhtml: lint: <code>: <JSON path>: <text>"; docs/USAGE.md "Lint"): bookmark-bad, arrow-bad, bookmark-outside-view,
 bookmark-signal-missing, bookmark-duplicate, bookmark-time, bookmark-key, bookmark-link-missing, arrow-end-missing, arrow-key, marker-no-match,
 marker-key, bind-unknown, svashow-no-match, bookmarks-close (a heuristic), enum-colors-hex, span-outside-view,
-span-signal-missing, span-key, span-every-no-match, compare-spans-cut, measure-no-clock, state-signal-missing, state-svg, expr-name-missing, exprs-no-engine, gap-view-off, setting-signal-missing, cycle-zero-window, also-no-match, also-cut. A marker or a span "every" on a signal the dump has not got
+span-signal-missing, span-key, span-every-no-match, compare-spans-cut, measure-no-clock, state-signal-missing, state-svg, expr-name-missing, exprs-no-engine, gap-view-off, setting-signal-missing, cycle-zero-window, measure-no-match, also-no-match, also-cut. A marker or a span "every" on a signal the dump has not got
 is no warning: the build stops there, as for any name of the config (marker-no-match: the signal is there, the event never happens).
 
 Config keys used here (the rest is vcd2wavedrom.py's, see its --help):
@@ -24,7 +24,7 @@ Config keys used here (the rest is vcd2wavedrom.py's, see its --help):
   "marksViews"  whole (default): all the tests on one waveform; tests: a view of each test and the page shows one at a time, with a
             button per test; both: those and the whole run (--marks-views)
   "marksColors"  the colours of the marks: {"pass", "fail", "xfail", "run", "note", "warning", "log"}: "#2f9e44", a token of the theme
-            ("c3", "hl2": it follows dark and light), "--my-var" or a CSS name (the rest keep theirs)
+            ("c3", "hl2": it follows dark and light), "--my-var" or a CSS colour name (another word: an error; the rest keep theirs)
   "marksPhases"  true: a labelled marker at the start of each phase of a test (of some time) too, to jump to with ]m [m (--marks-phases)
   views[k]  "render": "view" (interactive, default) | "svg" (static figure) | "both"; "note": text under the heading
   "sva"     ["checks.sv", …] (top level or in a view) SystemVerilog assertion files: parsed with the sva CLI (one
@@ -264,11 +264,8 @@ def build_views(a, cfg, base):
 
 def css_color(c):
     """A colour as the page takes it (model.js tokVar) as CSS: a token of the theme ("c3", "hl2", "fg") its variable, "--x" var(--x)."""
-    tok = {'fg': '--fg', 'muted': '--muted', 'line': '--line', 'acc': '--accent', 'paint': '--wave-paint'}
-    if c in tok:
-        return f'var({tok[c]})'
-    if re.fullmatch(r'(?:c|hl)\d|one|bus|x|z|band', c):
-        return f'var(--wave-{c})'
+    if c in testmarks.TOKENS:
+        return f'var({testmarks.TOKENS[c]})'
     return f'var({c})' if c.startswith('--') else c
 
 
@@ -448,7 +445,8 @@ def main():
                     '(they are printed at every build too); without --out no page is written')
     ap.add_argument('--strict', action='store_true', help='a lint warning is an error (exit 1, no page)')
     ap.add_argument('--lint-json', metavar='FILE', help='the lint warnings as JSON into FILE (- stdout): {"count", "warnings": [{"code", "where", '
-                    '"message", "view", and what it is about: "signal" / "name", "rows" it may mean}]}, written at every build')
+                    '"message", "view", and what it is about: "signal" / "name", "rows" it may mean}]}, written at every build, '
+                    'a failed one too with "error": its message (exit 1)')
     ap.add_argument('--marks', metavar='FILE', help='the marks of a cocotb test (python/wavelens_cocotb.py): its tests as spans, bookmarks and jumps '
                     'in every view (a view\'s "marks": false keeps it out; replaces the top-level "marks")')
     ap.add_argument('--junit', metavar='FILE', help='the assertions of every view as JUnit XML (a testsuite per view, a testcase per binding, '
@@ -468,7 +466,32 @@ def main():
         ap.error('need --config or WaveJSON files')
     if not a.out and not a.lint:
         ap.error('need --out (or --lint: the check alone)')
+    try:
+        build(a)
+    except WaveError as e:   # B-13: a script reading --lint-json gets an object on a failed build too (the text on stderr, exit 1)
+        if a.lint_json:
+            msg = str(e)
+            write_lint_json(a, {**getattr(a, 'lint_obj', {'count': 0, 'warnings': []}), 'error': msg if msg.startswith('mkhtml:') else f'mkhtml: {msg}'})
+        raise
+    if a.lint_json:
+        write_lint_json(a, a.lint_obj)
 
+
+def write_lint_json(a, obj):
+    """--lint-json: obj as JSON into the file (- stdout)."""
+    text = json.dumps(obj, ensure_ascii=False, indent=1) + '\n'
+    if a.lint_json == '-':
+        sys.stdout.write(text)
+        return
+    try:
+        with open(a.lint_json, 'w', encoding='utf-8') as f:
+            f.write(text)
+    except OSError as e:
+        sys.exit(f'mkhtml: cannot write {a.lint_json}: {e.strerror}')
+
+
+def build(a):
+    """main() after the arguments: the config read, the views built, the lint, the page (WaveError on a failure)."""
     cfg = vcd2wavedrom.load_config(a.config or a.settings) if (a.config or a.settings) else {}
     check_config(cfg.get('config'), f'mkhtml: {a.config or a.settings}: "config"')
     base = os.path.dirname(os.path.abspath(a.config or a.settings or '.'))
@@ -480,6 +503,8 @@ def main():
         cfg['report'] = {'bind': a.report}
     marks = a.marks or (cfg.get('marks') and os.path.join(base, os.path.expanduser(cfg['marks'])))
     split = a.marks_views or cfg.get('marksViews') or 'whole'
+    if 'marksPhases' in cfg and not isinstance(cfg['marksPhases'], bool):   # B-18: "yes" was silently nothing
+        raise WaveError(f'mkhtml: "marksPhases": true or false, not {json.dumps(cfg["marksPhases"], ensure_ascii=False)}')
     phases, colors = a.marks_phases or cfg.get('marksPhases') is True, cfg.get('marksColors')
     cfg.pop('marks', None), cfg.pop('marksViews', None), cfg.pop('marksPhases', None), cfg.pop('marksColors', None)
     if marks:
@@ -492,16 +517,12 @@ def main():
         view.pop('marks', None)   # (false, and no marks to keep it from)
     docs, renders, sva_views = build_views(a, cfg, base)
     n = getattr(a, 'lint_count', 0)
-    if a.lint_json:
-        text = json.dumps({'count': n, 'warnings': getattr(a, 'lint_items', [])}, ensure_ascii=False, indent=1) + '\n'
-        if a.lint_json == '-':
-            sys.stdout.write(text)
-        else:
-            with open(a.lint_json, 'w', encoding='utf-8') as f:
-                f.write(text)
+    a.lint_obj = {'count': n, 'warnings': getattr(a, 'lint_items', [])}   # --lint-json: written by main() at the end, an "error" with it on a failure
     if a.lint or a.strict:
         print(f'mkhtml: lint: {n} warning{"s" if n != 1 else ""}' + (' (--strict: no page)' if n and a.strict and a.out else ''), file=sys.stderr)
     if n and a.strict:
+        if a.lint_json:
+            write_lint_json(a, a.lint_obj)
         sys.exit(1)
     if not a.out:   # --lint alone: the check, no page
         return

@@ -292,9 +292,19 @@ class Commands(unittest.TestCase):
         t0 = __import__('time').perf_counter()
         self.assertEqual([x['full'] for x in b.ordered()], ['top', 'top.m7', 'top.m7.a'])
         self.assertLess(__import__('time').perf_counter() - t0, 1.0)
-        # your group's signal: by the signal it shows
+        # your groups whole under Only (onlyGroups): every signal of them; groups false: by the signal each shows; kept with no set too
         e.run([{'op': 'group', 'name': 'g', 'signals': ['clk', 'tb.dut.valid']}])
+        self.assertEqual([x['full'] for x in e.ordered()[:4]], ['@g', 'clk', 'tb.dut.valid', 'tb'])
+        r = e.run([{'op': 'only', 'groups': False}])[0]
+        self.assertEqual((r['only'], r['groups']), ({'modules': ['tb.dut'], 'on': True, 'groups': False}, False))
         self.assertEqual([x['full'] for x in e.ordered()[:3]], ['@g', 'tb.dut.valid', 'tb'])
+        r = e.run([{'op': 'only', 'clear': True}, {'op': 'only', 'modules': 'dut'}])
+        self.assertEqual(r[1]['only'], {'modules': ['tb.dut'], 'on': True, 'groups': False})   # cleared: the next set takes it
+        self.assertEqual(e.run([{'op': 'only', 'groups': True}])[0]['only'], {'modules': ['tb.dut'], 'on': True})   # the setting's: left out
+        p = ed(settings={'onlyGroups': False})
+        p.run([{'op': 'group', 'name': 'g', 'signals': ['clk', 'tb.dut.valid']}, {'op': 'only', 'modules': 'dut'}])
+        self.assertEqual([x['full'] for x in p.ordered()[:3]], ['@g', 'tb.dut.valid', 'tb'])    # the page's setting off
+        self.assertEqual(p.run([{'op': 'only', 'groups': True}])[0]['only'], {'modules': ['tb.dut'], 'on': True, 'groups': True})
 
     def test_exprs(self):
         """The list of expressions: as sva.js writes it (a text alone only when it draws its row), the page's first; no evaluation here."""
@@ -448,8 +458,8 @@ class Twin(unittest.TestCase):
         e = ed()
         self.assertEqual(e.run([{'op': 'range', 'from': '-10ns', 'to': '30ns'}])[0]['range'], [0, 30000])
         bad = e.run([{'op': 'range', 'from': '1ms', 'to': '2ms'}, {'op': 'range', 'from': -5000, 'to': -1000}])
-        self.assertEqual(bad[0]['error'], 'range: 1e+06ns … 2e+06ns is outside the waves (0ns … 80ns)')
-        self.assertIn('outside the waves', bad[1]['error'])
+        self.assertEqual(bad[0]['error'], 'range: 1 ms … 2 ms is outside these waves (0 ps … 80 ns)')   # as edit.js (review 2026-11-05 B-21)
+        self.assertIn('outside these waves', bad[1]['error'])
         self.assertEqual(e.st['range'], {'from': 0, 'to': 30000, 'signal': None})
 
     def test_result_shapes(self):
@@ -460,9 +470,11 @@ class Twin(unittest.TestCase):
                    {'op': 'cycles', 'on': True}])
         self.assertEqual(r[0], {'op': 'layout', 'scroll': 'window', 'height': 400, 'tools': 'open'})
         self.assertEqual(r[1], {'op': 'layout', 'scroll': 'page', 'height': None, 'tools': 'fold'})
-        self.assertEqual(r[2], {'op': 'find', 'found': ['tb.dut.state'], 'count': 1})
-        self.assertEqual(r[3], {'op': 'find', 'found': ['clk', 'tb.dut.valid'], 'count': 2})
-        self.assertEqual(r[4], {'op': 'find', 'found': ['tb.dut.state', 'tb.other.state'], 'count': 2})
+        pl = {'plugins': V.Editor(V.Model()).run([{'op': 'find', 'query': 'x'}])[0]['plugins']}   # (the plugins' rows: not counted, B-19)
+        self.assertEqual(r[2], {'op': 'find', 'found': ['tb.dut.state'], 'count': 1, **pl})
+        self.assertEqual(r[3], {'op': 'find', 'found': ['clk', 'tb.dut.valid'], 'count': 2, **pl})
+        self.assertEqual(r[4], {'op': 'find', 'found': ['tb.dut.state', 'tb.other.state'], 'count': 2, **pl})
+        self.assertIn('not counted', pl['plugins'])
         self.assertEqual(r[5], {'op': 'cycles', 'cycles': {'cycles': True, 'cycleClock': None, 'cycleZero': None}, 'clock': 'clk', 'cycle': None})
 
     def test_rows_order(self):
@@ -1018,7 +1030,7 @@ class Review1103(unittest.TestCase):
     def test_times_outside_the_waves(self):
         e = ed()
         for op in ({'op': 'bookmark', 't': '5s'}, {'op': 'marker', 't': -5}, {'op': 'span', 'from': 0, 'to': '5s'}):
-            self.assertIn('outside these waves (0ns … 80ns)', self.err(e, op), op)
+            self.assertIn('outside these waves (0 ps … 80 ns)', self.err(e, op), op)   # (view.js when: review 2026-11-05 B-21)
         self.assertEqual(self.err(e, {'op': 'marker', 't': '80ns'}), '')
 
     def test_set_state_takes_a_state_only(self):
@@ -1066,3 +1078,93 @@ class Review1103(unittest.TestCase):
         self.assertEqual(self.err(ed(), {'op': 'view', 'span': '10ns'}), 'view: at (the cursor here is not known)')
         self.assertEqual(self.err(ed(), {'op': 'view', 'at': '10ns'}), 'view: span (the window here is not known)')
         self.assertEqual(self.err(ed(), {'op': 'view', 'from': '20ns', 'to': '10ns'}), 'view: "to" is not after "from"')
+
+
+class Review1105(unittest.TestCase):
+    """What the review of 2026-11-05 found the file's side doing apart from the page (B-02, B-03, B-11, B-19, B-21, B-23; T-01, T-10)."""
+    D = 'tb.dut.data'
+
+    def err(self, e, *ops):
+        return e.run(list(ops))[-1].get('error') or ''
+
+    def test_rows_with_a_slice_copy(self):
+        """B-02: rows after duplicate bits: no traceback; the copies under their bus in the page's order (look.js dupsBy: the slices,
+        the highest msb first, then #2, #3)."""
+        e = ed()
+        r = e.run([{'op': 'duplicate', 'signals': self.D}, {'op': 'duplicate', 'signals': self.D, 'bits': [3, 0]},
+                   {'op': 'duplicate', 'signals': self.D, 'bits': [7, 4]}, {'op': 'duplicate', 'signals': self.D}, {'op': 'rows', 'pattern': 'tb.dut.d*'}])
+        self.assertEqual([x.get('error') for x in r], [None] * 5)
+        self.assertEqual(r[-1]['rows'], [[self.D, 8], [self.D + '[7:4]', 4], [self.D + '[3:0]', 4], [self.D + '#2', 8], [self.D + '#3', 8]])
+        self.assertEqual([V.copy_base(x) for x in (self.D + '#2', self.D + '[7:4]', self.D, 'x#1', 'x[1]')], [self.D, self.D, None, None, None])
+
+    def test_a_signal_deleted_with_its_slices(self):
+        """B-03, scenario 1: duplicate delete of a signal takes its slices too, in the page's order."""
+        e = ed()
+        r = e.run([{'op': 'duplicate', 'signals': self.D, 'bits': [7, 4]}, {'op': 'duplicate', 'signals': self.D},
+                   {'op': 'duplicate', 'signals': self.D, 'delete': True}])
+        self.assertEqual(r[-1].get('deleted'), [self.D + '[7:4]', self.D + '#2'])
+        self.assertEqual(e.st['dups'], [])
+        self.assertEqual(e.run([{'op': 'duplicate', 'signals': self.D, 'bits': [7, 4]}, {'op': 'duplicate', 'signals': self.D}])[1]['copies'],
+                         [self.D + '#2'])   # a slice is no #n: the first copy is #2 again
+
+    def test_what_stood_on_a_slice_goes_to_its_bus(self):
+        """B-03, scenario 2: a bookmark, a marker (its Δ lane too), a span, the selection, a highlight, a colour on a slice deleted: as
+        look.js dupDrop (the bus; the highlight and the colour gone)."""
+        e, s = ed(), self.D + '[7:4]'
+        r = e.run([{'op': 'duplicate', 'signals': self.D, 'bits': [7, 4]}, {'op': 'bookmark', 't': '20ns', 'signal': s, 'text': 'b'},
+                   {'op': 'marker', 't': '30ns', 'signal': s}, {'op': 'marker', 't': '60ns'}, {'op': 'deltas', 'id': 1, 'signal': s},
+                   {'op': 'span', 'from': '10ns', 'to': '30ns', 'signals': s}, {'op': 'highlight', 'set': s}, {'op': 'paint', 'signals': s, 'color': '#123456'},
+                   {'op': 'select', 'signal': s}, {'op': 'duplicate', 'signals': s, 'delete': True}])
+        self.assertEqual([x.get('error') for x in r], [None] * len(r))
+        st = e.st
+        self.assertEqual((st['bookmarks'][-1]['signal'], st['markers'][0]['signal'], st['markers'][0].get('dsignal'), st['spans'][0]['signals'],
+                          st['select'], st['config']['highlight'], st.get('paint') or {}, st['dups']),
+                         (self.D, self.D, self.D, [self.D], self.D, [], {}, []))
+        e = ed()
+        e.run([{'op': 'duplicate', 'signals': self.D}, {'op': 'bits', 'signals': self.D + '#2'}, {'op': 'select', 'signal': self.D + '#2[3]'},
+               {'op': 'duplicate', 'signals': self.D + '#2', 'delete': True}])
+        self.assertEqual(e.st['select'], self.D)   # a bit of a copy selected: its signal (look.js: sel.of === d)
+
+    def test_the_id_answered_is_the_one_made(self):
+        """B-11, T-10: two equal spans, two markers at one time, a copy of a copy: the id answered, edited by the next command,
+        changes the entry just made."""
+        e = ed()
+        r = e.run([{'op': 'span', 'from': '10ns', 'to': '30ns'}, {'op': 'span', 'from': '10ns', 'to': '30ns'}])
+        self.assertEqual([x['id'] for x in r], [1, 2])
+        e.run([{'op': 'span', 'id': r[1]['id'], 'label': 'second'}])
+        self.assertEqual([x.get('label') for x in e.st['spans']], [None, 'second'])
+        r = e.run([{'op': 'marker', 't': '50ns'}, {'op': 'marker', 't': '50ns'}])
+        self.assertEqual([x['id'] for x in r], [1, 2])
+        e.run([{'op': 'marker', 'id': r[1]['id'], 'label': 'second'}])
+        self.assertEqual([x.get('label') for x in e.st['markers']], [None, 'second'])
+        r = e.run([{'op': 'duplicate', 'signals': self.D}, {'op': 'duplicate', 'signals': self.D + '#2'}])
+        self.assertEqual([x['copies'] for x in r], [[self.D + '#2'], [self.D + '#3']])
+        e.run([{'op': 'radix', 'signals': r[1]['copies'][0], 'radix': 'bin'}])
+        self.assertEqual(e.st['radix'], {self.D + '#3': 'bin'})
+
+    def test_times_as_the_page_says_them(self):
+        """B-21: view.js when (fmtExact): the unit of the value, every digit to 1 ps; cycles as numbers."""
+        self.assertEqual([V.when(t) for t in (0, 1e13, -5000, 205000, 1234567, 0.5, 1500, 1e9)],
+                         ['0 ps', '10 s', '-5 ns', '205 ns', '1.234567 µs', '500 fs', '1.5 ns', '1 ms'])
+        self.assertEqual([V.when(t, False) for t in (3, 2.5, 1 / 3)], ['3', '2.5', '0.333'])
+        e = ed()
+        self.assertEqual(self.err(e, {'op': 'marker', 't': '10s'}), 't: 10 s is outside these waves (0 ps … 80 ns)')
+        self.assertEqual(self.err(e, {'op': 'range', 'from': '1s', 'to': '2s'}), 'range: 1 s … 2 s is outside these waves (0 ps … 80 ns)')
+        cyc = ed(doc={'signal': [{'name': 'a', 'wave': '0101'}]})
+        self.assertEqual(self.err(cyc, {'op': 'marker', 't': 9}), 't: 9 is outside these waves (0 … 4)')
+        self.assertEqual(ed().run([{'op': 'range', 'from': '80ns', 'to': '90ns'}])[0], {'op': 'range', 'range': None})   # touching: none (edit.js)
+
+    def test_style_null_is_the_settings(self):
+        """B-23 of 2026-11-03: style null is the settings' style (look.js setStyle), in the answer and the state, never null."""
+        e = ed()
+        r = e.run([{'op': 'style', 'name': 'questa'}, {'op': 'style', 'name': None}])
+        self.assertEqual(([x['style'] for x in r], e.st['config']['style']), (['questa', 'auto'], 'auto'))
+        e = ed(settings={'style': 'square'})
+        self.assertEqual(e.run([{'op': 'style', 'name': None}])[0]['style'], 'square')
+
+    def test_find_says_what_it_counts(self):
+        """B-19: the file does not know a plugin's rows (the assertions): its answer says so, and no folding is written."""
+        e = ed()
+        r = e.run([{'op': 'find', 'query': 'state'}])[0]
+        self.assertEqual((r['count'], 'not counted' in r['plugins']), (2, True))
+        self.assertNotIn('fold', e.st.get('config') or {})

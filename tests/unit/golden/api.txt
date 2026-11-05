@@ -70,7 +70,7 @@ command highlight: add? remove? set? clear?
 command layout: scroll? height? tools?
 command marker: id? t? label? color? signal? lift? hidden? dmin? dmax? delete?
 command measures: 
-command only: modules? on? clear? open?
+command only: modules? on? clear? open? groups?
 command paint: signals? color? clear?
 command picture: format? from? to? rows?
 command radix: signals radix

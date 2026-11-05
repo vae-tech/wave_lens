@@ -73,7 +73,7 @@ async def test_wait_states(dut):
   <tr><td><code>wl.measure(label, min, max, signal, check)</code></td><td>a time measured, as <code>async with</code> / <code>with</code> or <code>m.start()</code> …
     <code>m.stop()</code>: a pair of markers with the Δ between them, red out of <code>min</code> / <code>max</code> (<a href="#measure">below</a>)</td></tr>
   <tr><td><code>wl.check(got, expected, text, signal, show, why)</code></td><td>a bookmark with both values; a mismatch fails the test; <code>show='fail'</code>: no bookmark when they agree, for a check in a loop, and the test still counts it; <code>why</code>: the text of a failure, a string or a function called only then</td></tr>
-  <tr><td><code>with wl.checks(text, signal):</code></td><td>the checks inside leave one bookmark at the end, <em>every word of the frame: 188 checks passed</em>; a failure keeps its own and the group says how many passed</td></tr>
+  <tr><td><code>with wl.checks(text, signal):</code></td><td>the checks inside leave one bookmark at the end, <em>every word of the frame: 188 checks passed</em>; a failure keeps its own and the group says how many passed; with no check inside, no bookmark</td></tr>
 </table>
 <p><code>@wl.test(signals=["*fifo_full", "u_x.state"])</code>: the test's own rows, names or patterns, added to its view when each test stands apart; a name the dump has not got is a lint warning. <code>Marks(hide=["my_checks.py"])</code>: a file that is not the line of a failure, as a frame that sets <code>__tracebackhide__</code>.</p>
 <p>Warnings and errors logged during a test are bookmarks too. A test's result on the page is what cocotb says of it, <code>expect_fail</code> and
@@ -98,9 +98,10 @@ async def test_wait_states(dut):
   <figcaption>The test that failed, alone: the red bookmark on <code>PRDATA</code> says what was expected.</figcaption></figure>
 <p>Each view holds its own window, so <code>tests</code> is about the size of <code>whole</code> and <code>both</code> twice that. A test's window goes a little
   past its end, for the text of its last bookmark: that bit is the start of the next test, unmarked.</p>
-<p>The colours are the config's <code>"marksColors"</code>: <code>{"pass": "c3", "fail": "#c92a2a", "note": "hl2"}</code>, a hex colour or a token of the
-  theme that follows dark and light; the rest keep theirs.</p>
-<p><code>--marks-phases</code> (the config's <code>"marksPhases": true</code>) puts a labelled marker at the start of each phase too: the value of
+<p>The colours are the config's <code>"marksColors"</code>: <code>{"pass": "c3", "fail": "#c92a2a", "note": "hl2"}</code>, a hex colour, a token of the
+  theme that follows dark and light (<code>c3</code>…<code>c9</code>, <code>hl1</code>…<code>hl8</code>, <code>fg</code>, <code>acc</code>, …) or a CSS colour name;
+  another word is an error. The rest keep theirs.</p>
+<p><code>--marks-phases</code> (the config's <code>"marksPhases": true</code>, a boolean) puts a labelled marker at the start of each phase too: the value of
   <code>TEST_STEP</code> on its row is easy to miss among forty rows, a marker is not, and <code>]m</code> / <code>[m</code> step through them.</p>
 
 <h2 id="measure">Measure</h2>
@@ -175,7 +176,7 @@ except ImportError:
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.42 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.43 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

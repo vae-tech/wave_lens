@@ -66,7 +66,7 @@ COMMANDS = {
     'duplicate': 'signals bits? radix? rows? delete?',
     'sort': 'dir ignore?', 'style': 'name',
     'layout': 'scroll? height? tools?', 'find': 'query case? word? regex? highlight? open? mask?', 'gaps': 'on? idle? keep? signals? clock? aux? only? count? view? reset?',
-    'cycles': 'on? clock? zero? reset?', 'only': 'modules? on? clear? open?', 'fsm': 'mode? signals? fields? clear?',
+    'cycles': 'on? clock? zero? reset?', 'only': 'modules? on? clear? open? groups?', 'fsm': 'mode? signals? fields? clear?',
     'fsm_stats': 'signal', 'fsm_panel': 'signal? tab? off?', 'fsm_go': 'signal state? from? to? dir? first?', 'types': 'signals?',
     'edge': 'dir? kind? value? signal?', 'reset': '', 'state': '', 'set_state': 'state', 'rows': 'pattern? limit? offset?',
     'picture': 'format? from? to? rows?', 'compare': 'result? dump? a? map? offset? off? show?',
@@ -200,6 +200,50 @@ def is_vec(r):
     return (r.get('width') or 1) > 1 and r.get('kind') not in ('real', 'string')
 
 
+def slice_id(d):
+    """model.js sliceId: "PADDR[7:4]" -> ("PADDR", 7, 4), a slice copy of a bus; else None."""
+    m = re.fullmatch(r'(.+)\[(\d+):(\d+)\]', str(d))
+    return (m[1], int(m[2]), int(m[3])) if m else None
+
+
+def dup_id(d):
+    """model.js dupId: "PADDR#2" -> ("PADDR", 2), a copy of a signal; else None."""
+    m = re.fullmatch(r'(.+)#([1-9]\d*)', str(d))
+    return (m[1], int(m[2])) if m and int(m[2]) > 1 else None
+
+
+def at(lst, x):
+    """A list's indexOf by identity, from 1: the entry itself, not the first one equal to it."""
+    return next(i for i, y in enumerate(lst) if y is x) + 1
+
+
+def copy_base(d):
+    """The signal a copy is of (look.js rowBase / dupOf): "PADDR#2" and "PADDR[7:4]" -> "PADDR"; None: no copy's name."""
+    c = slice_id(d) or dup_id(d)
+    return c[0] if c else None
+
+
+def copy_order(d):
+    """look.js dupPut / dupSlice: the copies of a signal sorted by dupN (a slice's is 0), the slices by their msb, the highest
+    first (a stable sort: equal keys keep the order they were made in)."""
+    s = slice_id(d)
+    return (0, -s[1]) if s else ((dup_id(d) or (None, 0))[1], 0)
+
+
+def when(t, timed=True):
+    """view.js when: a time as the page prints it in a message (model.js fmtExact: every digit down to 1 ps in the unit of the
+    value, "10 s", "0 ps", "-5 ns"); cycles as a number (trimNum)."""
+    if not timed:
+        v = math.floor(t * 1000 + 0.5) / 1000   # Math.round
+        return str(int(v)) if float(v).is_integer() else repr(v)
+    f, u = next(((f, u) for f, u in ((1e12, 's'), (1e9, 'ms'), (1e6, 'µs'), (1e3, 'ns'), (1, 'ps'), (1e-3, 'fs')) if (abs(t) or 1) >= f),
+                (1e-3, 'fs'))
+    s = f'{t / f:.{max(0, round(math.log10(f)))}f}'
+    if '.' in s:
+        s = s.rstrip('0').rstrip('.')
+    return f'{s} {u}'
+
+
 class Model:
     """The rows of one WaveJSON (signals with their full path and width, groups with their id and path) and the
     settings the viewer starts from (highlight, fold, sort), for names, the base of a state and the order of folding."""
@@ -295,14 +339,14 @@ class Model:
         """look.js setDups: the copies a state keeps ("data#2"), of signals of these waves, as rows."""
         by, out = {r['full']: r for r in self.sigs()}, []
         for d in state.get('dups') or []:
-            sl = re.fullmatch(r'(.+)\[(\d+):(\d+)\]', str(d))   # a slice of a bus: "PADDR[7:4]"
-            if sl and sl[1] in by and is_vec(by[sl[1]]) and int(sl[3]) <= int(sl[2]) < by[sl[1]]['width']:
-                out.append({**by[sl[1]], 'full': str(d), 'name': by[sl[1]]['name'] + str(d)[len(sl[1]):], 'dup': sl[1], 'slice': [int(sl[2]), int(sl[3])],
-                            'width': int(sl[2]) - int(sl[3]) + 1})
+            sl = slice_id(d)   # a slice of a bus: "PADDR[7:4]"
+            if sl and sl[0] in by and is_vec(by[sl[0]]) and sl[2] <= sl[1] < by[sl[0]]['width']:
+                out.append({**by[sl[0]], 'full': str(d), 'name': by[sl[0]]['name'] + str(d)[len(sl[0]):], 'dup': sl[0], 'slice': [sl[1], sl[2]],
+                            'width': sl[1] - sl[2] + 1})
                 continue
-            m = re.fullmatch(r'(.+)#([1-9]\d*)', str(d))
-            if m and int(m[2]) > 1 and m[1] in by:
-                out.append({**by[m[1]], 'full': str(d), 'name': f'{by[m[1]]["name"]} #{m[2]}', 'dup': m[1]})
+            m = dup_id(d)
+            if m and m[0] in by:
+                out.append({**by[m[0]], 'full': str(d), 'name': f'{by[m[0]]["name"]} #{m[1]}', 'dup': m[0]})
         return out
 
     def bit(self, p, state=None):
@@ -729,13 +773,16 @@ class Editor:
             fail(f'{what}: "{x}" is not a time (a number in {"ps" if self.m.timed or not self.m.doc else "cycles"}, or "250ns")')
         return t
 
+    def when(self, t):
+        """view.js when: a time in a message as the page prints it."""
+        return when(t, self.m.timed or not self.m.doc)
+
     def time_in(self, x, what='t'):
         """edit.js cmdIn: a time something is put at, inside the waves (when they are known)."""
         t = self.time(x, what)
         lo = min(0, self.m.t0 or 0)   # from 0 when they start later, as edit.js cmdIn
         if self.m.doc and self.m.t1 is not None and not lo <= t <= self.m.t1:
-            ft = (lambda x: f'{x / 1000:g}ns') if self.m.timed else (lambda x: f'{x:g}')
-            fail(f'{what}: {ft(t)} is outside these waves ({ft(lo)} … {ft(self.m.t1)})')
+            fail(f'{what}: {self.when(t)} is outside these waves ({self.when(lo)} … {self.when(self.m.t1)})')
         return t
 
     def run(self, ops):
@@ -804,13 +851,12 @@ class Editor:
         p, q = self.time(a.get('from'), 'from'), self.time(a.get('to'), 'to')
         sig = self.m.pick(self.st, a['signal'], one=True)[0]['full'] if a.get('signal') else None
         lo, hi = min(p, q), max(p, q)
-        if p != q and self.m.t0 is not None:   # cut to the waves (view.js setRange); wholly outside them: said
+        if self.m.t0 is not None:   # edit.js range: wholly outside the waves said, else cut to them (view.js setRange)
+            if hi < self.m.t0 or lo > self.m.t1:
+                fail(f'range: {self.when(lo)} … {self.when(hi)} is outside these waves ({self.when(self.m.t0)} … {self.when(self.m.t1)})')
             lo, hi = max(lo, self.m.t0), min(hi, self.m.t1)
-            if not lo < hi:
-                ft = (lambda x: f'{x / 1000:g}ns') if self.m.timed else (lambda x: f'{x:g}')
-                fail(f'range: {ft(min(p, q))} … {ft(max(p, q))} is outside the waves ({ft(self.m.t0)} … {ft(self.m.t1)})')
-        self.st['range'] = None if p == q else {'from': lo, 'to': hi, 'signal': sig}
-        return {'range': None if p == q else [lo, hi]}
+        self.st['range'] = None if lo == hi else {'from': lo, 'to': hi, 'signal': sig}
+        return {'range': None if lo == hi else [lo, hi]}
 
     def c_bookmark(self, a):
         n = a.get('n')
@@ -988,7 +1034,7 @@ class Editor:
             m['hidden'] = bool(a['hidden'])
         m.update(bd)
         self.st['markers'] = mark_list(ms)
-        return {'id': ms.index(m) + 1}
+        return {'id': at(ms, m)}   # the one made or changed, not the first equal to it (view.umarks.indexOf)
 
     @staticmethod
     def bounds_ok(bd, ms):
@@ -1065,7 +1111,7 @@ class Editor:
         if not was:
             xs.append(x)
         self.st['exprs'] = [expr_json(y) for y in xs]
-        return {'id': xs.index(x) + 1}
+        return {'id': at(xs, x)}
 
     def c_span(self, a):
         sid, ss = self.id_ok(a.get('id'), 'span'), self.spans()
@@ -1103,7 +1149,7 @@ class Editor:
         if a.get('signals') is not None:
             s['signals'] = sigs or None
         self.st['spans'] = span_list(ss)
-        return {'id': ss.index(s) + 1}
+        return {'id': at(ss, s)}   # (two equal spans: the second is the new one, B-11)
 
     def c_group(self, a):
         name = str(a.get('name') if a.get('name') is not None else '').strip()
@@ -1269,12 +1315,24 @@ class Editor:
         return self._fold(a, False)
 
     def only(self):
-        """The state's Only as the viewer keeps it ({modules, on}; None: every module)."""
+        """The state's Only as the viewer keeps it ({modules, on, groups?}: groups when not the page's onlyGroups; None:
+        every module)."""
         o = self.st.get('only')
         if not isinstance(o, dict):
             return None
         ms = [p for p in o.get('modules') or [] if isinstance(p, str)]
-        return {'modules': self.m.only_norm(ms) if self.m.doc else list(dict.fromkeys(ms)), 'on': o.get('on') is not False}
+        out = {'modules': self.m.only_norm(ms) if self.m.doc else list(dict.fromkeys(ms)), 'on': o.get('on') is not False}
+        g = o.get('groups')
+        return dict(out, groups=g) if isinstance(g, bool) and g != self.only_groups_default() else out
+
+    def only_groups_default(self):
+        return self.m.cfg.get('onlyGroups', True) is not False
+
+    def only_groups(self):
+        """modules.js onlyGroups: your groups whole under Only (the state's, else the page's setting onlyGroups)."""
+        o = self.st.get('only')
+        g = o.get('groups') if isinstance(o, dict) else getattr(self, 'grp_next', None)
+        return g if isinstance(g, bool) else self.only_groups_default()
 
     def only_filter(self):
         """modules.js onlyKeep: a test of a row of the page (your group's signal: by the signal it shows) — whether Only
@@ -1285,9 +1343,10 @@ class Editor:
         sel = {g['id'] for g in self.m.groups if g['path'] in o['modules']}   # onlyIds: inn (picked, under them), way (above them)
         inn = {g['id'] for g in self.m.groups if g['id'] in sel or sel & set(g['anc'])}
         way = {a for i in sel for a in self.m.groups[i]['anc']} - inn
+        whole = self.only_groups()   # your groups whole: every signal of them
 
         def keep(r):
-            if r.get('user') or (r['type'] == 'group' and (r['id'] in way or r['id'] in inn)):
+            if r.get('user') or (whole and r.get('ug')) or (r['type'] == 'group' and (r['id'] in way or r['id'] in inn)):
                 return True
             anc = r.get('oanc', r['anc'])
             return bool(anc) and anc[-1] in inn
@@ -1298,13 +1357,23 @@ class Editor:
         return f is None or f(r)
 
     def c_only(self, a):
+        # groups: in the set; with no set (or cleared) the viewer keeps it for the next one (onlyGrp): so does this session
+        cur = self.st.get('only') if isinstance(self.st.get('only'), dict) else None
+        if a.get('groups') is not None:
+            self.grp_next = bool(a['groups'])
+            if cur:
+                self.st['only'] = dict(cur, groups=self.grp_next)
+        elif cur and isinstance(cur.get('groups'), bool):
+            self.grp_next = cur['groups']
         if a.get('clear'):
             self.st['only'] = None
         elif 'modules' in a:
             if a['modules'] is None:
                 fail('modules: a list of modules (clear: every module again)')
             ms = [] if isinstance(a['modules'], list) and not a['modules'] else [g['path'] for g in self.m.pick(self.st, a['modules'], scopes=True)]
-            self.st['only'] = {'modules': self.m.only_norm(ms) if self.m.doc else list(dict.fromkeys(ms)), 'on': True if a.get('on') is None else bool(a['on'])}
+            g = getattr(self, 'grp_next', None)
+            self.st['only'] = {'modules': self.m.only_norm(ms) if self.m.doc else list(dict.fromkeys(ms)), 'on': True if a.get('on') is None else bool(a['on']),
+                               **({'groups': g} if isinstance(g, bool) else {})}
             if a.get('open') is not False and a.get('on') is not False and ms:   # modules.js onlyOpen: the modules named and the ones above them
                 by, f = {g['path']: g for g in self.m.groups}, dict(self.st.get('folds') or {})
                 for p in dict.fromkeys(q for m in ms if m in by for q in [self.m.groups[i]['path'] for i in by[m]['anc']] + [m]):
@@ -1321,7 +1390,7 @@ class Editor:
         if 'only' in self.st and self.st['only'] is not None:
             self.st['only'] = self.only()
         self.unselect_gone()
-        return {'only': self.only()}
+        return {'only': self.only(), 'groups': self.only_groups()}
 
     def c_radix(self, a):
         rx = a.get('radix')
@@ -1415,9 +1484,9 @@ class Editor:
             fail('rows: a number of rows, true, false or null')
         rows = self.m.pick(self.st, a.get('signals'))
         have = [str(d) for d in self.st.get('dups') or []]
-        of = lambda d: d.rsplit('#', 1)[0]
-        if a.get('delete'):
-            gone = list(dict.fromkeys(x for r in rows for x in ([r['full']] if r.get('dup') else [d for d in have if of(d) == r['full']])))
+        if a.get('delete'):   # a copy named, or every copy of a signal named (its slices too), in the page's order (dupsBy)
+            mine = lambda f: sorted((d for d in have if copy_base(d) == f), key=copy_order)
+            gone = list(dict.fromkeys(x for r in rows for x in ([r['full']] if r.get('dup') else mine(r['full']))))
             if not gone:
                 fail(f'no copies of {", ".join(r["full"] for r in rows)}')
             for d in gone:
@@ -1457,7 +1526,7 @@ class Editor:
         out = []
         for r in rows:
             base = r.get('dup') or r['full']
-            d = f'{base}#{max([1] + [int(x.rsplit("#", 1)[1]) for x in have if of(x) == base]) + 1}'
+            d = f'{base}#{max([1] + [c[1] for c in map(dup_id, have) if c and c[0] == base]) + 1}'   # (a slice's dupN is 0)
             have.append(d)
             out.append(d)
             for k in ('radix', 'analog', 'paint'):   # as that row looks now
@@ -1472,8 +1541,8 @@ class Editor:
         return {'copies': out}
 
     def dup_drop(self, d):
-        """look.js dupDrop: a copy gone, and what was its; what stood on it goes to its signal."""
-        base = d.rsplit('#', 1)[0]
+        """look.js dupDrop: a copy gone ("PADDR#2", a slice "PADDR[7:4]"), and what was its; what stood on it goes to its signal."""
+        base = copy_base(d) or d
         to = lambda p: base if p == d else base + p[len(d):] if isinstance(p, str) and p.startswith(d + '[') else p
         self.st['dups'] = [x for x in self.st.get('dups') or [] if x != d]
         for k in ('radix', 'analog', 'paint'):
@@ -1494,8 +1563,8 @@ class Editor:
         for s in self.st.get('spans') or []:
             if s.get('signals'):
                 s['signals'] = [to(x) for x in s['signals']]
-        if self.st.get('select'):
-            self.st['select'] = to(self.st['select'])
+        if self.st.get('select') == d or (isinstance(self.st.get('select'), str) and self.st['select'].startswith(d + '[')):
+            self.st['select'] = base   # the copy or a bit of it selected: its signal (look.js: sel.of === d)
         if isinstance(self.st.get('range'), dict) and self.st['range'].get('signal') == d:
             self.st['range']['signal'] = base
 
@@ -1528,8 +1597,9 @@ class Editor:
     def c_style(self, a):
         if a.get('name') is not None and a['name'] not in STYLES:
             fail(f'name: one of {" ".join(STYLES)}')
-        self.config()['style'] = a.get('name')
-        return {'style': a.get('name')}
+        base = self.m.cfg.get('style') if self.m.cfg.get('style') in STYLES else 'auto'   # look.js setStyle: null is the settings' style
+        self.config()['style'] = a['name'] if a.get('name') is not None else base   # (as state() has it: never null)
+        return {'style': self.config()['style']}
 
     def c_layout(self, a):
         """Where the rows scroll and the bar's tools folded (view.js setScroll, setTools): as the state's maxHeight, toolsFolded."""
@@ -1563,8 +1633,9 @@ class Editor:
             if a.get(k) is not None:
                 c[key] = bool(a[k])
         self.st['find'] = str(a.get('query') if a.get('query') is not None else '')
-        found = self.found(self.st['find'])
-        return {'found': [r['full'] or r['name'] for r in found][:50], 'count': len(found)}
+        found = self.found(self.st['find'])   # (no "fold" written: the page folds what the find leaves out when it opens, B-19)
+        return {'found': [r['full'] or r['name'] for r in found][:50], 'count': len(found),
+                'plugins': "not counted: a plugin's rows (the assertions) are the page's only"}
 
     def found(self, q):
         """view.js find: the rows the query matches, in display order (the rows of plugins, not known here, left out)."""
@@ -1718,7 +1789,7 @@ class Editor:
         rows = order_rows(self.m.rows, sort, ign, self.m.cfg.get('groupOrder', 'file'))
         copies = self.m.dup_rows(self.st)
         if copies:   # (look.js withDups) under their signal, in their order
-            copies.sort(key=lambda d: int(d['full'].rsplit('#', 1)[1]))
+            copies.sort(key=lambda d: copy_order(d['full']))   # the slices first, the highest msb first, then #2, #3 … (B-02)
             rows = [x for r in rows for x in [r] + (([d for d in copies if d['dup'] == r['full']]) if r['type'] == 'sig' else [])]
         rows = self.user_rows() + rows
         h = set(self.st.get('hidden') or [])
@@ -1784,8 +1855,10 @@ class Editor:
         sigs, miss = c.get('signals') or {}, set(c.get('missing') or [])
         mark = lambda r: (['≠'] if ((sigs.get(r.get('path') or r['full']) or {}).get('spans')) else
                           ['missing'] if (r.get('path') or r['full']) in miss else []) if r['type'] == 'sig' else []
-        rows = [[r['full'], 'group' if r.get('user') else 'module' if r['type'] == 'group' else r['width'], *mark(r)]
-                for r in shown]
+        bits = set(self.st.get('bits') or [])   # a bus shown bit by bit: its bits under it, MSB first (edit.js rows; B-20)
+        vec = lambda r: is_vec(r) and r['full'] in bits
+        rows = [x for r in shown for x in [[r['full'], 'group' if r.get('user') else 'module' if r['type'] == 'group' else r['width'], *mark(r)]] +
+                ([[f"{r['full']}[{i}]", 1, 'bit'] for i in range(r['width'] - 1, -1, -1)] if vec(r) else [])]
         rows = [r for r in rows if not pat or (rx.match(r[0]) if rx else pat.lower() in r[0].lower())]
         def num(x, d):   # the page's +x || d
             try:

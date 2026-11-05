@@ -333,9 +333,11 @@ def t_signals(a):
     w = wave(a.get('dump'), a)
     scope = (a.get('scope') or '').rstrip('.')
     pat = (a.get('pattern') or '').strip()
-    rx = None
-    if pat and any(c in pat for c in '*?['):
-        rx = re.compile(fnmatch.translate(pat), re.I)
+    # * and ? as wildcards, [ as it is: an array element either way, q[0] / q.[0] (WL-009; review 2026-11-05 B-06)
+    G = lambda s: s.replace('.[', '[')
+    gp, rx = G(pat), None
+    if pat and any(c in pat for c in '*?'):
+        rx = re.compile(''.join('.*' if c == '*' else '.' if c == '?' else re.escape(c) for c in gp), re.I)
     items = []
     for p, v in w.decl.vars.items():
         if scope and not p.startswith(scope + '.'):
@@ -343,9 +345,9 @@ def t_signals(a):
         rel = p[len(scope) + 1:] if scope else p
         if a.get('depth') is not None and rel.count('.') >= int(a['depth']):
             continue
-        if rx and not (rx.fullmatch(p) or rx.fullmatch(rel) or rx.fullmatch(p.rsplit('.', 1)[-1])):
+        if rx and not (rx.fullmatch(G(p)) or rx.fullmatch(G(rel)) or rx.fullmatch(G(p).rsplit('.', 1)[-1])):
             continue
-        if pat and not rx and pat.lower() not in p.lower():
+        if pat and not rx and gp.lower() not in G(p).lower():
             continue
         if a.get('active') and not w.decl.changes.get(p):
             continue
@@ -834,21 +836,38 @@ def marks_file(a):
     return p
 
 
+MARKS_MAX = 64 << 20   # a .json of a directory read to know a marks file: larger ones are skipped (and named)
+
+
 def marks_files(d):
-    """The marks files under a directory (any depth, in name order): every .json that is one; the others skipped."""
-    out = []
+    """The marks files under a directory (any depth, in name order) -> [(path, its JSON)], the notes on the .json files skipped. A file is one
+    by what it holds ("wavelens": "marks"), wherever its keys are (B-14: a file written with sorted keys was skipped by its first bytes)."""
+    out, skipped = [], {}
     for root, dirs, files in os.walk(d):
         dirs[:] = sorted(x for x in dirs if not x.startswith('.'))
         for f in sorted(files):
-            if f.endswith('.json'):
-                try:
-                    with open(os.path.join(root, f), encoding='utf-8') as fh:
-                        head = fh.read(200)
-                except OSError:
-                    continue
-                if '"wavelens"' in head and '"marks"' in head:
-                    out.append(os.path.join(root, f))
-    return out
+            if not f.endswith('.json'):
+                continue
+            p = os.path.join(root, f)
+            why = None
+            try:
+                if os.path.getsize(p) > MARKS_MAX:
+                    why = f'over {MARKS_MAX >> 20} MB'
+                else:
+                    with open(p, encoding='utf-8') as fh:
+                        doc = json.load(fh)
+            except OSError as e:
+                why = e.strerror or 'not readable'
+            except ValueError:   # (a UnicodeDecodeError too)
+                why = 'not JSON'
+            if why is None and not (isinstance(doc, dict) and doc.get('wavelens') == 'marks'):
+                why = 'no marks file'
+            if why:
+                skipped.setdefault(why, []).append(os.path.relpath(p, d))
+            else:
+                out.append((p, doc))
+    notes = [f'skipped, {why}: {", ".join(names[:20])}' + (f' and {len(names) - 20} more' if len(names) > 20 else '') for why, names in skipped.items()]
+    return out, notes
 
 
 def regression(a, d):
@@ -856,13 +875,14 @@ def regression(a, d):
     file's line, the failed ones first."""
     if a.get('test') is not None or a.get('steps'):
         raise WaveError('"test" / "steps" are of one marks file; "marks" is a directory here (its failures: the "failures" of this answer)')
-    paths = marks_files(d)
-    if not paths:
-        raise WaveError(f'"marks": no marks file under {d} (a .json with "wavelens": "marks", what wavelens_cocotb writes)')
-    files, fails, tot, notes = [], [], dict.fromkeys(('tests', 'pass', 'fail', 'xfail', 'run', 'checks', 'failed_checks'), 0), []
-    for p in paths:
+    found, notes = marks_files(d)
+    if not found:
+        raise WaveError(f'"marks": no marks file under {d} (a .json with "wavelens": "marks", what wavelens_cocotb writes)'
+                        + (f'; {"; ".join(notes)}' if notes else ''))
+    files, fails, tot = [], [], dict.fromkeys(('tests', 'pass', 'fail', 'xfail', 'run', 'checks', 'failed_checks'), 0)
+    for p, doc in found:
         try:
-            doc = testmarks.load(p)
+            testmarks.check(doc, p)
         except WaveError as e:
             notes.append(str(e))
             continue
@@ -1384,7 +1404,8 @@ def ns_out(results, timed):
         return results
     t = lambda v: ns(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else v
     keys = {'cursor': ('t',), 'cursor2': ('t',), 'edge': ('t',), 'view': ('from', 'to'), 'fit': ('from', 'to'), 'expr_go': ('t',),
-            'expr': EXPR_TIMES, 'expr_matches': EXPR_TIMES, 'bookmark': ('t', 'from'), 'fsm_go': ('t',), 'compare': ('first',)}
+            'expr': EXPR_TIMES, 'expr_matches': EXPR_TIMES, 'bookmark': ('t', 'from'), 'fsm_go': ('t',), 'compare': ('first',),
+            'goto': ('t',)}   # (review 2026-11-05 B-12)
     out = []
     for r in results:
         if isinstance(r, dict) and 'error' not in r:

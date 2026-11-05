@@ -35,6 +35,7 @@ window.WAVELENS_CONFIG = {
   arrowLabels: 'lane',          // bookmark arrow labels: 'lane' (a thin row of their own between signals) | 'overlay' (on the arrow)
   laneHeight: 16,               // px per label in such a lane
   groupOrder: 'file',           // inside every group: 'last' = signals first, then the sub-groups (modules); 'first'; 'file' = as given
+  onlyGroups: true,             // Only (the Modules panel's box): your groups stay whole, every signal of them; false: their signals by module
   findHighlight: true,          // fuzzy find: found rows in front, the rest dimmed
   findOpen: true,               // fuzzy find: every module folded except the ones with a match
   findMask: false,              // fuzzy find: the found rows only, with the modules on the way to them
@@ -80,7 +81,7 @@ window.WAVELENS_CONFIG = {
   cycles: false,                //   the band of cycle numbers on; the cursor's cycle in the title, Δ of the second cursor in them
   cycleClock: null,             //   the clock counted (a full path or a name); null: the clock found (a 1-bit *clk* / *clock*)
   cycleZero: null,              //   the time of cycle 0 (its rising edge at or after it); null: the clock's first rising edge;
-                                //   before the first edge (a window of a long dump): the edges before counted at the clock's period
+                                //   before the waves begin (a window of a long dump): the edges before counted at the clock's period
   log: 'auto',                  // the log under the viewer (what was done, what went wrong, a JSON file's error with its line): 'auto'
                                 //   from the first thing done in the page (a dump read, Sources…, Load…), true / false: always / never
   savePage: true,               // the bar's Save page: this page as a file with your view in it (false: off; the page's text is kept for it)

@@ -18,6 +18,23 @@ MARK_COLOR = '#1971c2'
 COLORS0 = {**{k: c for k, (_, c) in RESULTS.items()}, 'note': MARK_COLOR, 'warning': LOG_COLOR['WARNING'], 'log': RESULTS['fail'][1]}
 COLORS = dict(COLORS0)   # the ones of the merge going on (merge sets them)
 COLOR_RE = r'#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?|--[\w-]+|[a-zA-Z][\w-]*'   # a hex colour, a CSS variable, a token of the theme (c3, hl2) or a CSS name
+# the tokens of the theme -> their CSS variables, as the page resolves them (wavelens/src/model.js TOK, the variables of wavelens.css)
+TOKENS = {'fg': '--fg', 'muted': '--muted', 'line': '--line', 'panel': '--panel', 'panel2': '--panel-2', 'acc': '--accent',
+          'one': '--wave-1', 'bus': '--wave-bus', 'x': '--wave-x', 'xsoft': '--wave-x-soft', 'z': '--wave-z',
+          **{f'c{i}': f'--wave-c{i}' for i in range(3, 10)}, 'band': '--wave-band', 'cursor2': '--wave-cursor2', 'runb': '--wave-run-b',
+          **{f'hl{i}': f'--wave-hl{i}' for i in range(1, 9)}, 'hl7': '--accent', 'paint': '--wave-paint'}
+# the named colours of CSS (a word that is no token goes into the page as it is: one of these, or the mark has no colour)
+CSS_NAMES = set('''aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood cadetblue
+chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki
+darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise
+darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod
+gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral
+lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey
+lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen
+mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive
+olivedrab orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple
+rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue slategray slategrey snow
+springgreen steelblue tan teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen transparent currentcolor'''.split())
 
 
 def colors_of(given):
@@ -32,6 +49,8 @@ def colors_of(given):
     for k, v in given.items():
         if not isinstance(v, str) or not re.fullmatch(COLOR_RE, v):
             raise WaveError(f'testmarks: "marksColors".{k}: a colour ("#2f9e44", a token of the theme as "c3", "--my-var" or a CSS name), not {json.dumps(v)}')
+        if re.fullmatch(r'[a-zA-Z][\w-]*', v) and v not in TOKENS and v.lower() not in CSS_NAMES:   # B-18: "foo", "c99" drew no colour
+            raise WaveError(f'testmarks: "marksColors".{k}: {json.dumps(v)} is no token of the theme ({", ".join(TOKENS)}) nor a CSS colour name')
     return {**COLORS0, **given}
 
 
@@ -58,6 +77,11 @@ def load(path):
         raise WaveError(f'{path}: {e.strerror}') from None
     except ValueError as e:
         raise WaveError(f'{path}: not JSON: {e}') from None
+    return check(doc, path)
+
+
+def check(doc, path):
+    """A marks file's JSON, checked -> itself."""
     if not isinstance(doc, dict) or doc.get('wavelens') != 'marks':
         raise WaveError(f'{path}: not a marks file ({{"wavelens": "marks", …}}, python/wavelens_cocotb.py writes it)')
     if doc.get('version') != 1:
@@ -207,8 +231,8 @@ LANES = (None, 'above', 'below')   # where a circle sits: on its row, in the lan
 
 
 def one_moment(bms):
-    """The bookmarks at one instant on one row (checks made at one time) apart: each in a lane of its own (on the row, above, below) beside
-    the ones that chose theirs; more than the lanes left: the last lane holds one bookmark "+k" whose text lists the rest (P-15: 433
+    """The bookmarks at one instant on one row (checks made at one time; their signals already the rows of the view, row_for) apart: each in
+    a lane of its own (on the row, above, below) beside the ones that chose theirs; more than the lanes left: the last lane holds one bookmark "+k" whose text lists the rest (P-15: 433
     bookmarks-close on a bench of many checks at one time)."""
     lane = lambda b: 'above' if b.get('lift') is True else b.get('lift') or None
     at = {}
@@ -244,10 +268,10 @@ def mark_view(view, cfg, doc, jumps=True, phases=False):
     t0, t1 = window(view)
     rows = rows_of(view, cfg)
     inside = lambda t: (t0 is None or t >= t0) and (t1 is None or t <= t1)
-    fresh = one_moment([b for b in bms if inside(b['t'])])
+    # on the rows of the view first: "PWDATA" and "tb.PWDATA" at one time are one row's marks, lifted apart as one group (B-17)
+    fresh = one_moment([{**b, **({'signal': row_for(rows, b['signal'])} if 'signal' in b else {})} for b in bms if inside(b['t'])])
     n = max([b.get('n', 0) for b in view.get('bookmarks') or []] + [len(view.get('bookmarks') or [])])
-    view['bookmarks'] = (view.get('bookmarks') or []) + [
-        {**b, 'n': n + i + 1, **({'signal': row_for(rows, b['signal'])} if 'signal' in b else {})} for i, b in enumerate(fresh)]
+    view['bookmarks'] = (view.get('bookmarks') or []) + [{**b, 'n': n + i + 1} for i, b in enumerate(fresh)]
     view['spans'] = (view.get('spans') or []) + [
         {**s, **({'signals': [row_for(rows, x) for x in s['signals']]} if s.get('signals') else {})} for s in spans
         if (t0 is None or s['to'] >= t0) and (t1 is None or s['from'] <= t1)]

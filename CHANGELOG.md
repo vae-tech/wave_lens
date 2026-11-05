@@ -5,6 +5,35 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.43 — 5 November 2026
+
+Your groups whole under Only, and the fixes of the review of 5 November: measures and cycles in a cut window, array
+elements either way, the VS Code configuration, the tools of a test run and `viewedit.py` as the page.
+
+- **Your groups whole under Only.** Only (the Modules panel's box, the command `only`) keeps your groups with every signal of
+  them, whatever module it is of, folded or open as you left them: a group of signals of several modules stays in full while
+  Only keeps a few modules. **Your groups whole** in the panel (the setting `onlyGroups`, true; `only {groups}`) turns it off:
+  a group keeps the signals of the modules Only keeps, as before. In the saved state when not the page's setting.
+- **The fixes of the review of 5 November** (`docs/reviews/review-2026-11-05`). B-04: `cycleZero` before the clock's
+  first edge counts the edges before it at the clock's period only in a window cut out of a dump (the waves begin after the
+  zero); a whole dump whose clock starts late numbers its first edge 0 again, as 0.41 and `wave_sample`. B-01: a measure's
+  event on a signal that is no row builds (the signal read). B-16: a measure's ends in order; an event that never happens is
+  the lint `measure-no-match` (a `to`: an open pair; a `from`: no measure), not a stopped build. B-06: `wave_signals` takes
+  `[` as it is (`q[0]`, `q.[0]`, `top.q[*`). B-07: a view's signals, bookmarks and spans name an array element either way,
+  two-dimensional ones too (`m[1].[2]`). B-12: a live `goto`'s `t` in ns. shift+← → never leaves the cursor inside a gap
+  on the waves (B-16 of 3 November, half). B-20: `rows` lists the bits of a bus shown bit by bit, `["PADDR[7]", 1, "bit"]`.
+  The VS Code configuration: a key takes every kind its comment names (`"log": false`, `"gapIdle": "2us"`), a colour taken
+  out goes back, a configuration that breaks the viewer keeps VS Code's theme and keys, a file with a BOM is read, a save
+  while a tab opens wins, a mark lands on its key's line (B-05, B-08, B-09, B-10). The tools of a test run: `--lint-json`
+  prints `{"error"}` on a failed build (B-13); `wave_tests` of a directory reads every marks file by its content and names
+  the files skipped (B-14); `wl.check` texts of dicts, sets and ranges in one radix (B-15); two spellings of one row at
+  one time are one moment (B-17); a `marksColors` word that is no theme token or CSS colour and a `marksPhases` that is no
+  boolean are refused (B-18); `with wl.checks()` with no check writes no bookmark (B-22). `viewedit.py` as the page: slice
+  copies in `rows`, deleted with their signal's copies, what stood on one goes to its bus (B-02, B-03); the id answered is
+  the new span's, marker's, expression's (B-11); times in refusals as the page writes them (B-21); `style name: null` the
+  settings' style (B-23 of 3 November); `find` says the plugins' rows are not counted, and a plugin's group folded during a
+  search stays folded in the state (B-19).
+
 ## 0.42 — 4 November 2026
 
 Your configuration in VS Code, and the fixes and small requests of the cl_gev_eval_offload and au_psi5 reports: the cycles

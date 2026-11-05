@@ -286,6 +286,21 @@ class Dump(unittest.TestCase):
                     self.assertFalse(err, text)
                     self.assertEqual(json.loads(W.call('wave_values', {'dump': again, 'signals': [name], 'at': 12})[0])['rows'], [[12, '0x00000005']])
 
+    def test_signals_of_an_array_by_pattern(self):
+        """Review 2026-11-05 B-06: wave_signals takes [ as it is, an element either way (q[0], q.[0]); * and ? stay wildcards."""
+        vcd = os.path.join(self.d.name, 'arr2.vcd')
+        with open(vcd, 'w') as f:
+            f.write('$timescale 1ns $end\n$scope module top $end\n$var logic 8 ! q[0] [7:0] $end\n$var logic 8 " q[1] [7:0] $end\n'
+                    '$var logic 4 # m[1][2] [3:0] $end\n$var wire 1 $ qx $end\n$upscope $end\n$enddefinitions $end\n#0\nb0 !\nb0 "\nb0 #\n0$\n#10\n')
+        got = lambda pat: [r[0] for r in json.loads(W.call('wave_signals', {'dump': vcd, 'pattern': pat})[0])['signals']]
+        for pat, want in (('q[0]', ['top.q.[0]']), ('q.[0]', ['top.q.[0]']), ('[0]', ['top.q.[0]']), ('m[1]', ['top.m.[1][2]']),
+                          ('top.q[*', ['top.q.[0]', 'top.q.[1]']), ('q?1]', ['top.q.[1]']), ('q*', ['top.q.[0]', 'top.q.[1]', 'top.qx'])):
+            with self.subTest(pat=pat):
+                self.assertEqual(sorted(got(pat)), want)
+
+    def test_goto_time_in_ns(self):   # review 2026-11-05 B-12: a live goto's t in ns, as the cursor's
+        self.assertEqual(W.ns_out([{'op': 'goto', 't': 100000, 'view': 'v', 'sel': None}], True)[0]['t'], 100)
+
     @H.needs(svabuild.find_bin(), 'no sva CLI')
     def test_sva(self):
         t = self.truth
@@ -820,14 +835,23 @@ class Tests(unittest.TestCase):
             json.dump({'not': 'marks'}, f)
         with open(os.path.join(self.dir, 'reg', 'old.marks.json'), 'w', encoding='utf-8') as f:
             json.dump({**self.DOC, 'version': 9}, f)
+        # B-14: a marks file is one by what it holds: "wavelens" last (sorted keys) is one; a cut one, an empty one are named as skipped
+        os.makedirs(os.path.join(self.dir, 'reg', 's_bench'))
+        with open(os.path.join(self.dir, 'reg', 's_bench', 'run.json'), 'w', encoding='utf-8') as f:
+            json.dump({**good, 'zz': 'x' * 300}, f, sort_keys=True)
+        with open(os.path.join(self.dir, 'reg', 'cut.json'), 'w', encoding='utf-8') as f:
+            f.write(json.dumps(good)[:150])
+        open(os.path.join(self.dir, 'reg', 'empty.json'), 'w', encoding='utf-8').close()
         r = self.call('wave_tests', marks=os.path.join(self.dir, 'reg'))
-        self.assertEqual(r['summary'], '3 files, 4 tests: 3 passed, 1 failed')
-        self.assertEqual(r['totals'], {'tests': 4, 'pass': 3, 'fail': 1, 'xfail': 0, 'run': 0, 'checks': 189 * 3 + 1, 'failed_checks': 1})
+        self.assertEqual(r['summary'], '4 files, 5 tests: 4 passed, 1 failed')
+        self.assertEqual(r['totals'], {'tests': 5, 'pass': 4, 'fail': 1, 'xfail': 0, 'run': 0, 'checks': 189 * 4 + 1, 'failed_checks': 1})
         self.assertEqual(r['failures'], [{'file': os.path.join('z_bench', 'wavelens.marks.json'), 'n': 2, 'name': 'b', 'result': 'fail', 'from': 100.001,
                                           'message': 'got 0, expected 1', 'where': 't.py:9'}])
-        self.assertEqual([(x['file'].split(os.sep)[0], x['failed']) for x in r['runs']], [('z_bench', 1), ('a_bench', 0), ('m_bench', 0)])
-        self.assertEqual(len(r['notes']), 1)
-        self.assertIn('version 9', r['notes'][0])
+        self.assertEqual([(x['file'].split(os.sep)[0], x['failed']) for x in r['runs']], [('z_bench', 1), ('a_bench', 0), ('m_bench', 0), ('s_bench', 0)])
+        self.assertEqual(r['notes'][:2], ['skipped, not JSON: cut.json, empty.json', 'skipped, no marks file: other.json'])
+        self.assertEqual(len(r['notes']), 3)
+        self.assertIn('version 9', r['notes'][2])
+        self.assertEqual(len(self.call('wave_tests', marks=os.path.join(self.dir, 'reg'), limit=0)['failures']), 1, 'limit 0: the default, not none')
         text, err = W.call('wave_tests', {'marks': os.path.join(self.dir, 'reg'), 'test': 'b'})
         self.assertTrue(err)
         self.assertIn('directory', text)

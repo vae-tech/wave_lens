@@ -71,15 +71,35 @@ def bound_ps(x):
     raise ValueError(f'wl.measure: {x!r} is no bound ("120ns", a number in ps, or "3 cycles")')
 
 
+def items_of(v):
+    """A container's items in its order; a set's sorted when they sort (got and expected read alike)."""
+    if isinstance(v, dict):
+        return list(v.values())
+    if isinstance(v, (set, frozenset)):
+        try:
+            return sorted(v)
+        except TypeError:
+            return list(v)
+    return list(v)
+
+
 def text_of(v):
     """A value as the waves show it: an integer in hex (below 10 as it is), a logic vector the same when it has no x or z; a list,
-    a tuple or bytes item by item the same way, whatever its length (WL-008: "[0x10000000]", as its long form "[0x10000000, …")."""
+    a tuple, bytes or a set item by item the same way, whatever its length (WL-008: "[0x10000000]", as its long form "[0x10000000, …"),
+    a dict its values so (its keys as they are), a range its bounds (B-15: one radix in one message)."""
     if isinstance(v, bool):
         return str(int(v))
     if isinstance(v, (list, bytes, bytearray)):
         return f'[{", ".join(text_of(x) for x in v)}]'
     if isinstance(v, tuple):
         return f'({", ".join(text_of(x) for x in v)}{"," if len(v) == 1 else ""})'
+    if isinstance(v, dict):
+        return '{' + ', '.join(f'{k!r}: {text_of(x)}' for k, x in v.items()) + '}'
+    if isinstance(v, (set, frozenset)):
+        inner = '{' + ', '.join(text_of(x) for x in items_of(v)) + '}' if v else ''
+        return f'frozenset({inner})' if isinstance(v, frozenset) else inner or 'set()'
+    if isinstance(v, range):
+        return f'range({text_of(v.start)}, {text_of(v.stop)}' + (f', {text_of(v.step)})' if v.step != 1 else ')')
     if not isinstance(v, int):
         try:
             v = v.to_unsigned()   # cocotb's LogicArray
@@ -89,11 +109,15 @@ def text_of(v):
 
 
 def short_of(v, text):
-    """A value's text as a label: a long list "[1, 2, 3, … 256 items]", another long text cut."""
+    """A value's text as a label: a long list "[1, 2, 3, … 256 items]", a tuple, a set or a dict so in its own brackets
+    ("(1, 2, 3, … 256 items)", "{'a': 1, … 9 items}"), another long text cut."""
     if len(text) <= SHORT:
         return text
-    if isinstance(v, (list, tuple, bytes, bytearray)):
-        return f'[{", ".join(text_of(x) for x in v[:3])}, … {len(v)} items]'
+    if isinstance(v, dict):
+        return '{' + ', '.join(f'{k!r}: {text_of(x)}' for k, x in list(v.items())[:3]) + f', … {len(v)} items}}'
+    if isinstance(v, (list, tuple, bytes, bytearray, set, frozenset)):
+        a, b = '()' if isinstance(v, tuple) else '{}' if isinstance(v, (set, frozenset)) else '[]'
+        return f'{a}{", ".join(text_of(x) for x in items_of(v)[:3])}, … {len(v)} items{b}'
     return f'{text[:SHORT - 1]}… ({len(text)} chars)'
 
 
@@ -208,7 +232,8 @@ class Marks:
 
     def checks(self, text, signal=None):
         """`with wl.checks('every word of the frame'): …`: the checks inside leave one bookmark at the end, "every word of the frame: 188 checks
-        passed" (a failure keeps its own and the group says how many passed before it); each is still counted for the test."""
+        passed" (a failure keeps its own and the group says how many passed before it); each is still counted for the test. No check inside:
+        no bookmark."""
         return Checks(self, str(text), signal)
 
     def check(self, got, expected, text='', signal=None, show=None, why=None):
@@ -428,7 +453,7 @@ class Checks:
     def __exit__(self, kind, exc, tb):
         if self in self.marks.groups:
             self.marks.groups.remove(self)
-        if self.n or exc is None:
+        if self.n:   # no check inside (a loop that ran zero times): no bookmark, "0 checks passed" read as a pass (B-22)
             self.marks.add({'kind': 'checks', 'ok': not self.failed, 'n': self.n, 'failed': self.failed, 'text': self.text,
                             'signal': self.marks.row(self.signal), 'from': self.t0}, keep=bool(self.failed))
         return False   # a failure goes on: the test fails as it would

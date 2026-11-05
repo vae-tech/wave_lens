@@ -72,7 +72,7 @@ const flatText = t => Array.isArray(t) ? t.slice(typeof t[1] === 'object' && !Ar
 const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight: 24, traceWidth: 1.4, busWidth: 1.2,
   labelSize: 11, fontSize: 11.5, sort: 'none', sortIgnore: [], sortButton: true, hint: true, style: 'auto', radix: 'auto', fold: null,
   highlight: null, dim: 0.3, groupColors: null, bookmarkLeft: 0.2, arrowLabels: 'lane', laneHeight: 16, maxHeight: null, toolsFolded: false, toolsHidden: [],
-  groupOrder: 'file', moduleShading: true, findHighlight: true, findOpen: true, findMask: false, findCase: false, findWord: false,
+  groupOrder: 'file', onlyGroups: true, moduleShading: true, findHighlight: true, findOpen: true, findMask: false, findCase: false, findWord: false,
   findRegex: false, cursorSnap: 8, keyHints: 200, showWidth: true, exprLibrary: [], sharedMarkers: false, keys: {},
     wheel: 'scroll', contextMenu: true, enumColors: null, dumpBudget: 3000000, gaps: false, gapIdle: 16, gapKeep: 2,
     gapSignals: null, gapClock: null, gapAux: null, gapOnly: false, gapCount: 'clock', gapLine: 'dashdot', gapView: false, menuTipDelay: 2000, cycles: false,
@@ -816,12 +816,13 @@ const riseTimes = clk => RISES.get(clk) || (RISES.set(clk, clk.tr.filter(o => o.
 // the cycle at t, the last edge at or before t (negative before cycle 0); the time of cycle n, or null past the ends
 // the setting cycleZero: a time ("50ns", as gapIdle and the cursor take it) or model units; null / "": the first edge
 const zeroTime = z => (z == null || z === '' ? null : typeof z === 'number' ? z : num(parseT(z)));
-// a zero before the first edge (a window cut out of a long dump, AU-WL-001): the edges before it counted at the clock's mean
-// period over the edges there are, so the first edge is cycle (ups[0] − zero) / period, as the tools number it on the whole
-// dump (a zero within 2 % of a period after an edge counts as on it: the period is measured)
-const cycZero = (ups, zero) => {
+// a zero before the waves begin (t0: a window cut out of a long dump, AU-WL-001): the edges before them counted at the clock's
+// mean period over the edges there are, so the first edge is cycle (ups[0] − zero) / period, as the tools number it on the
+// whole dump (a zero within 2 % of a period after an edge counts as on it: the period is measured). Waves that begin at the
+// zero or before it (a whole dump, a clock that starts late): cycle 0 is the first edge at or after it (review 2026-11-05 B-04)
+const cycZero = (ups, zero, t0 = -Infinity) => {
   if (zero == null || !isFinite(zero)) return 0;
-  if (ups.length > 1 && zero < ups[0] - timeEps(ups[0])) {
+  if (ups.length > 1 && zero < t0 - timeEps(t0) && zero < ups[0] - timeEps(ups[0])) {
     const per = (ups[ups.length - 1] - ups[0]) / (ups.length - 1); if (per > 0) return -Math.floor((ups[0] - zero) / per + 0.02);
   }
   return lastBefore(ups.length, j => ups[j], zero - timeEps(zero), true) + 1;
@@ -3292,7 +3293,7 @@ class WaveView {
     this.selRun = new Set(); this.selAnchor = null;   // shift+click: a run of selected signals (selectRun)
     this.found = new Map(); this.findPicks = new Map(); this.findHl = this.S.findHighlight; this.findOpen = this.S.findOpen;   // fuzzy find
     this.findMask = this.S.findMask;
-    this.only = null;   // Only: {modules: [paths], on} (modules.js)
+    this.only = null;   // Only: {modules: [paths], on} (modules.js); onlyGrp: your groups whole under it (undefined: the setting)
     for (const [, k] of FIND_OPTS) this[k] = !!this.S[k];   // its options: the case, the whole name, a regular expression
     this.paintKey = 'wavelens.paint:' + this.storeId;
     this.painted = new Map(); this.loadPaint();
@@ -4026,7 +4027,9 @@ class WaveView {
     // "only": {modules: [paths], on} (on left out: on), null: every module; a path not of a module here: left out (said)
     if (st.only !== undefined) { const o = st.only && typeof st.only === 'object' ? st.only : null, ms = o && Array.isArray(o.modules) ? o.modules : [];
       ms.forEach(p => { if (!this.scopeOf(p)) miss.add(String(p)); });
-      this.only = o ? { modules: this.onlyNorm(ms), on: o.on !== false } : null; this.onlyMemo = null; this.onlyShow(); }
+      this.only = o ? { modules: this.onlyNorm(ms), on: o.on !== false } : null; this.onlyMemo = null;
+      if (o) this.onlyGrp = typeof o.groups === 'boolean' ? o.groups : undefined;   // left out: the setting onlyGroups
+      this.onlyShow(); }
     // "fsm": {mode: only | add, signals: [paths]}, null: off; a path that is no FSM here: left out (said)
     if (st.fsm !== undefined) { const o = st.fsm && typeof st.fsm === 'object' ? st.fsm : null, ps = o && Array.isArray(o.signals) ? o.signals.map(String) : [];
       const have = new Set(this.fsms().map(r => r.full)); ps.forEach(p => { if (!have.has(p)) miss.add(p); });
@@ -4290,9 +4293,12 @@ class WaveView {
     if (cursor) this.cursor = Math.min(Math.max(t, this.M.t0), this.M.t1);
     this.draw(); return this;
   }
-  // fold (on) or open a group by its id; quiet: no render (a plugin building its rows)
+  // fold (on) or open a group by its id; quiet: no render (a plugin building its rows). A plugin's group folded while a search
+  // holds the folding from before it (foldSaved) is folded there too: the search's end (and state()) keep it folded, as on a page
+  // whose plugin came before the search (a page's edits with a find, opened: review 2026-11-05 B-19)
   fold(id, on, quiet = false) {
     if (on) this.collapsed.add(id); else this.collapsed.delete(id);
+    if (on && quiet && this.foldSaved) this.foldSaved.add(id);
     if (!quiet) { this.foldTouched = true; this.renderNames(); this.draw(); }
     return this;
   }
@@ -4934,8 +4940,9 @@ class WaveView {
     let q = [1, 2, 5, 10].find(m => m * e >= tpp) * e; if (this.M.timed) q = Math.max(1, q);
     return Math.min(Math.max(Math.round(Math.round(t / q) * q * 1e6) / 1e6, this.M.t0), this.M.t1);
   }
-  nudge(dir) { // shift+← / →: the cursor a hundredth of the view, the view follows
-    const F = this.warpSync(), t = F ? F.T(F.X(this.cursor) + dir * F.W / 100) : this.cursor + dir * this.span / 100;
+  nudge(dir) { // shift+← / →: the cursor a hundredth of the view, the view follows; into a gap's column: its far side (review B-16)
+    const F = this.warpSync(), x = F && F.X(this.cursor) + dir * F.W / 100, h = F && this.gapAt(x);
+    const t = F ? (h ? (dir > 0 ? h.q : h.p) : F.T(x)) : this.cursor + dir * this.span / 100;
     this.cursor = Math.min(Math.max(t, this.M.t0), this.M.t1);
     if (this.cursor < this.t0 || this.cursor > this.t0 + this.span) this.center(this.cursor);
     this.draw(); return this;
@@ -5940,7 +5947,7 @@ Object.assign(WaveView.prototype, {
     if (!this.cycMemo || this.cycMemo.key !== key) {
       const clk = cycClock(this.M.rows, o.cycleClock), ups = clk ? cycUps(clk) : [];
       if (clk && clk.lazy) this.need([clk]);   // a large dump: the clock read, the band drawn when it is there (need resets the memo)
-      this.cycMemo = { key, d: clk && ups.length ? { clk, ups, iz: cycZero(ups, o.cycleZero) } : null };
+      this.cycMemo = { key, d: clk && ups.length ? { clk, ups, iz: cycZero(ups, o.cycleZero, this.M.t0) } : null };
     }
     return this.cycMemo.d;
   },
@@ -6605,16 +6612,18 @@ command('select', 'signal? signals?', 'the selected signal (edge search, new boo
   else v.select(a.signal ? pickRows(v, a.signal, { one: true })[0] : null);
   return { select: v.sel ? v.sel.full : null };
 });
-command('only', 'modules? on? clear? open?', 'only these modules on the waves, with their submodules (the way to them as headers; the ' +
+command('only', 'modules? on? clear? open? groups?', 'only these modules on the waves, with their submodules (the way to them as headers; the ' +
   'Modules panel\'s box): modules replaces the set and turns it on, [] keeps none, and opens the modules named with the ones above them (open ' +
-  'false: the folding as it is); on false pauses it (every module), true resumes it; clear: every module; none given: the set as it is', (v, a) => {
+  'false: the folding as it is); on false pauses it (every module), true resumes it; clear: every module; groups: your groups whole (true, the ' +
+  'setting onlyGroups) or their signals by module (false); none given: the set as it is', (v, a) => {
+  if (a.groups != null) v.setOnly({ groups: !!a.groups });
   if (a.clear) v.setOnly(null);
   else if (a.modules !== undefined) {
     if (a.modules == null) fail('modules: a list of modules (clear: every module again)');
     const ms = Array.isArray(a.modules) && !a.modules.length ? [] : pickRows(v, a.modules, { scopes: true }).map(g => g.path);
     v.setOnly({ modules: ms, on: a.on == null ? true : !!a.on, open: a.open === false || a.on === false ? null : ms });
   } else if (a.on != null) { if (!v.only) fail('only: no set to pause or resume (modules: […] first)'); v.setOnly({ on: !!a.on }); }
-  return { only: v.onlyState() };
+  return { only: v.onlyState(), groups: v.onlyGroups() };
 });
 command('fsm', 'mode? signals? fields? clear?', 'the state machines (signals with enum labels; the FSM panel): mode only — the waves ' +
   'keep these FSMs (the modules on the way as headers), add — they join the view as Hide, Only and the find\'s Mask leave it; signals: ' +
@@ -6796,14 +6805,16 @@ command('state', '', 'the viewer\'s state (what Save writes)', v => ({ state: v.
 command('set_state', 'state', 'a state back (what Load… does); every key it has replaces this viewer\'s', async (v, a) =>
   ({ missing: await v.setState(a.state) }));
 command('rows', 'pattern? limit? offset?', 'the signals and modules of the page in display order: [full path, width | "module" | "group"], ' +
-  'hidden and folded ones too; a dump compared: "≠" (it differs) or "missing" (not in it) third', (v, a) => {
+  'hidden and folded ones too; a dump compared: "≠" (it differs) or "missing" (not in it) third; a bus shown bit by bit (bits): its bits ' +
+  'under it, [path[i], 1, "bit"]', (v, a) => {
   const rx = a.pattern ? (String(a.pattern).includes('*') ? glob(String(a.pattern)) : null) : null, low = String(a.pattern || '').toLowerCase();
   const all = v.allRows(true)   // the hidden ones too (a signal under a hidden module), where they would be
-    .filter(r => (r.type === 'sig' && r.tr && !r.ug && r.bit == null) || (r.type === 'group' && r.full))   // a bus's bits: by their paths
+    .filter(r => (r.type === 'sig' && r.tr && !r.ug && !(r.bit != null && r.orig)) || (r.type === 'group' && r.full))   // a bit of your group's copy: its bus's
     .filter(r => !a.pattern || (rx ? rx.test(r.full) : r.full.toLowerCase().includes(low)));
   const off = Math.max(0, +a.offset || 0), n = Math.max(1, +a.limit || 200), page = all.slice(off, off + n);
   const mark = r => { const c = v.cmpOf(r); return !c ? [] : c.spans.length ? ['≠'] : c.missing || c.omitted ? ['missing'] : []; };
-  return { total: all.length, rows: page.map(r => [r.full, r.type === 'group' ? (r.user ? 'group' : 'module') : r.width || 1, ...mark(r)]),
+  return { total: all.length, rows: page.map(r => (r.bit != null ? [r.full, 1, 'bit'] :   // a bus's bits shown (bits; review 2026-11-05 B-20)
+    [r.full, r.type === 'group' ? (r.user ? 'group' : 'module') : r.width || 1, ...mark(r)])),
     ...(off + n < all.length ? { next_offset: off + n } : {}) };
 });
 const PICTURE_ROWS = 5000;   // a picture of 20 000 rows is 400 MB of text and 13 s
@@ -7664,9 +7675,11 @@ PLUGINS.push(v => {
 // Only (state "only": {modules: [paths], on}; the command only): the waves keep the signals of the modules picked and of
 // their submodules; the modules on the way to them stay as headers (their own signals go), every other module goes.
 // A layer of its own: Hide stays as it is under it, the highlight comes back with the rows; paused (on: false) the set
-// is kept and every module shows. Your groups stay (their signals by the signal they show), the rows of plugins follow
-// the module they are under; the ones above every module (ƒ expressions) stay. In the saved state, Save page and undo,
-// not in this browser's storage: a page opened again starts without it.
+// is kept and every module shows. Your groups stay whole, every signal of them whatever its module (groups: the setting
+// onlyGroups, the Modules panel's "Your groups whole"; off: their signals by the module of the signal they show), the
+// rows of plugins follow the module they are under; the ones above every module (ƒ expressions) stay. In the saved
+// state, Save page and undo (groups there when not the page's setting), not in this browser's storage: a page opened
+// again starts without it.
 Object.assign(WaveView.prototype, {
   // the page's scopes (modules, interfaces …) in the model's order: its own groups, not the value of a struct or a union
   scopes() {
@@ -7688,7 +7701,12 @@ Object.assign(WaveView.prototype, {
     return gs.filter(g => !g.anc.some(id => ids.has(id))).sort((a, b) => a.id - b.id).map(g => g.path);
   },
   onlyOn() { return !!(this.only && this.only.on); },
-  onlyState() { return this.only ? { modules: [...this.only.modules], on: this.only.on } : null; },
+  // your groups whole under Only (onlyGrp: set by the panel's box or the command, else the setting onlyGroups)
+  onlyGroups() { return this.onlyGrp ?? this.S.onlyGroups !== false; },
+  onlyState() {
+    if (!this.only) return null;
+    const g = this.onlyGroups(); return { modules: [...this.only.modules], on: this.only.on, ...(g !== (this.S.onlyGroups !== false) ? { groups: g } : {}) };
+  },
   // the groups Only keeps: inn — the modules picked and every group under them; path — the modules on the way to them
   onlyIds() {
     const key = this.only ? this.only.modules.join('\n') : '';
@@ -7707,7 +7725,8 @@ Object.assign(WaveView.prototype, {
       for (let i = r.anc.length - 1; i >= 0 && up == null; i--) if (G[r.anc[i]] && model.has(G[r.anc[i]])) up = r.anc[i];
       return up != null ? inn.has(up) : !model.has(r);   // above every module: a plugin's rows stay, the page's top signals go
     };
-    return rows.filter(r => r.user || (r.ug ? test(r.orig) : test(r) && (!r.of || test(r.of))));
+    const whole = this.onlyGroups();   // your groups whole: every signal of them; else by the signal each shows
+    return rows.filter(r => r.user || (r.ug ? whole || test(r.orig) : test(r) && (!r.of || test(r.of))));
   },
   // whether a row is in the view: not hidden, not left out by Only (folded away it still is)
   shown(r) {
@@ -7716,13 +7735,15 @@ Object.assign(WaveView.prototype, {
     return !!r && this.shownS.has(r);
   },
   // Only set: {modules: [paths]} (they replace the set and turn it on, unless on says otherwise), {on: bool} (pause /
-  // resume the set there is); null: every module again. open: the modules a gesture named (a box: every one it touched,
-  // the nested ones too), opened on the waves with the modules on the way to them; Clear, pause and resume fold nothing
+  // resume the set there is), {groups: bool} (your groups whole or by their signals' modules; kept with no set too);
+  // null: every module again. open: the modules a gesture named (a box: every one it touched, the nested ones too),
+  // opened on the waves with the modules on the way to them; Clear, pause and resume fold nothing
   setOnly(o) {
+    if (o && o.groups != null) this.onlyGrp = !!o.groups;
     if (o == null) this.only = null;
     else {
       const mods = o.modules !== undefined ? this.onlyNorm([].concat(o.modules || [])) : this.only && this.only.modules;
-      if (!mods) return this;
+      if (!mods) { if (o.groups != null) { this.onlyShow(); this.settingsChanged(); } return this; }
       this.only = { modules: mods, on: o.on !== undefined ? !!o.on : o.modules !== undefined || this.only.on };
     }
     if (o && o.open && o.open.length) this.onlyOpen(o.open);
@@ -7893,11 +7914,13 @@ class Mods {
         'title="Close (Esc)">✕</button></div><div class="mf"><input type="search" class="mq" spellcheck="false" autocomplete="off" ' +
         'placeholder="Filter modules…" aria-label="filter modules" ' +
         'title="Fuzzy, as the find: Enter goes to the first, shift+Enter keeps Only the matches, ↓ into the tree"><button type="button" data-a="om" ' +
-        'title="Only the modules that match (shift+Enter)">Only matches</button></div><div class="ms"></div>' +
+        'title="Only the modules that match (shift+Enter)">Only matches</button><label title="Under Only, your groups keep every signal of them, ' +
+        'whatever module it is of (off: only the signals of the modules Only keeps); the setting onlyGroups"><input type="checkbox" class="mgw"> ' +
+        'Your groups whole</label></div><div class="ms"></div>' +
         '<div class="mtr" role="tree" aria-label="modules" aria-multiselectable="true"><div class="mbox" hidden></div><div class="mrows"></div></div>');
     v.root.append(el);
     this.tree = el.querySelector('.mtr'); this.rowsEl = el.querySelector('.mrows'); this.box = el.querySelector('.mbox');
-    this.qEl = el.querySelector('.mq'); this.stEl = el.querySelector('.ms');
+    this.qEl = el.querySelector('.mq'); this.stEl = el.querySelector('.ms'); this.gwEl = el.querySelector('.mgw');
     panelPlace(this, 'mods');   // where it was last (its size too), first at the right of the waves (the names stay in sight), under the axis
     this.events(); this.render(true);   // drawn again with the names column (Names.render): Hide, Only, the selection
   }
@@ -7919,6 +7942,7 @@ class Mods {
   // the panel drawn again when what it shows changed (force: anyway)
   render(force = false) {
     const v = this.v, o = v.only, cur = v.scopeOfRow(v.sel);
+    this.gwEl.checked = v.onlyGroups();
     const key = JSON.stringify([o, [...v.hiddenRows].join('\n'), cur && cur.id, this.q, [...this.open].length, this.openGen || 0, this.fi, this.pv || null]);
     if (!force && key === this.key) return;
     this.key = key;
@@ -7999,6 +8023,8 @@ class Mods {
       else if (a === 'ox') { v.setOnly(null); v.toast('Only: every module again'); }
     });
     this.qEl.addEventListener('input', () => { this.q = this.qEl.value; this.fi = 0; this.render(); });
+    this.gwEl.addEventListener('change', () => { v.setOnly({ groups: this.gwEl.checked });
+      v.toast(this.gwEl.checked ? 'Only: your groups whole, every signal of them' : 'Only: your groups keep the signals of the modules Only keeps'); });
     this.qEl.addEventListener('keydown', e => {
       if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); this.matches(); }
       else if (e.key === 'Enter') { e.preventDefault(); const h = this.hits && this.hits[0];
@@ -8862,7 +8888,7 @@ const WaveSVG = {
       return [r, sub]; });
     // the clock cycles under the axis (the viewer's Cycles, else the settings cycles, cycleClock, cycleZero); its clock under the names
     const cy = V ? V.cycData() : S.cycles ? (c => { const ups = c ? cycUps(c) : []; return ups.length ? { clk: c, ups, iz: cycZero(ups,
-      zeroTime(S.cycleZero)) } : null; })(cycClock(M.rows, S.cycleClock)) : null, cyLab = cy && `cycles ↑ ${cy.clk.name}`;
+      zeroTime(S.cycleZero), M.t0) } : null; })(cycClock(M.rows, S.cycleClock)) : null, cyLab = cy && `cycles ↑ ${cy.clk.name}`;
     // a bus's width after its name (showWidth: [7:0], a field's [msb:lsb]), a little smaller and muted, as in the viewer
     const wTag = r => (S.showWidth !== false && r.name ? widthTag(r) : ''), wSt = { size: fs - 1, fill: 'muted' };
     const nameOf = r => P.measure(r.name || '', { size: fs, weight: r.type === 'group' ? 600 : 400 }), tagW = r => (wTag(r) ? 5 + P.measure(wTag(r), wSt) : 0);
@@ -9189,7 +9215,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.42',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.43',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,

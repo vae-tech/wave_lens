@@ -46,7 +46,7 @@ class WaveView {
     this.selRun = new Set(); this.selAnchor = null;   // shift+click: a run of selected signals (selectRun)
     this.found = new Map(); this.findPicks = new Map(); this.findHl = this.S.findHighlight; this.findOpen = this.S.findOpen;   // fuzzy find
     this.findMask = this.S.findMask;
-    this.only = null;   // Only: {modules: [paths], on} (modules.js)
+    this.only = null;   // Only: {modules: [paths], on} (modules.js); onlyGrp: your groups whole under it (undefined: the setting)
     for (const [, k] of FIND_OPTS) this[k] = !!this.S[k];   // its options: the case, the whole name, a regular expression
     this.paintKey = 'wavelens.paint:' + this.storeId;
     this.painted = new Map(); this.loadPaint();
@@ -780,7 +780,9 @@ class WaveView {
     // "only": {modules: [paths], on} (on left out: on), null: every module; a path not of a module here: left out (said)
     if (st.only !== undefined) { const o = st.only && typeof st.only === 'object' ? st.only : null, ms = o && Array.isArray(o.modules) ? o.modules : [];
       ms.forEach(p => { if (!this.scopeOf(p)) miss.add(String(p)); });
-      this.only = o ? { modules: this.onlyNorm(ms), on: o.on !== false } : null; this.onlyMemo = null; this.onlyShow(); }
+      this.only = o ? { modules: this.onlyNorm(ms), on: o.on !== false } : null; this.onlyMemo = null;
+      if (o) this.onlyGrp = typeof o.groups === 'boolean' ? o.groups : undefined;   // left out: the setting onlyGroups
+      this.onlyShow(); }
     // "fsm": {mode: only | add, signals: [paths]}, null: off; a path that is no FSM here: left out (said)
     if (st.fsm !== undefined) { const o = st.fsm && typeof st.fsm === 'object' ? st.fsm : null, ps = o && Array.isArray(o.signals) ? o.signals.map(String) : [];
       const have = new Set(this.fsms().map(r => r.full)); ps.forEach(p => { if (!have.has(p)) miss.add(p); });
@@ -1044,9 +1046,12 @@ class WaveView {
     if (cursor) this.cursor = Math.min(Math.max(t, this.M.t0), this.M.t1);
     this.draw(); return this;
   }
-  // fold (on) or open a group by its id; quiet: no render (a plugin building its rows)
+  // fold (on) or open a group by its id; quiet: no render (a plugin building its rows). A plugin's group folded while a search
+  // holds the folding from before it (foldSaved) is folded there too: the search's end (and state()) keep it folded, as on a page
+  // whose plugin came before the search (a page's edits with a find, opened: review 2026-11-05 B-19)
   fold(id, on, quiet = false) {
     if (on) this.collapsed.add(id); else this.collapsed.delete(id);
+    if (on && quiet && this.foldSaved) this.foldSaved.add(id);
     if (!quiet) { this.foldTouched = true; this.renderNames(); this.draw(); }
     return this;
   }
@@ -1688,8 +1693,9 @@ class WaveView {
     let q = [1, 2, 5, 10].find(m => m * e >= tpp) * e; if (this.M.timed) q = Math.max(1, q);
     return Math.min(Math.max(Math.round(Math.round(t / q) * q * 1e6) / 1e6, this.M.t0), this.M.t1);
   }
-  nudge(dir) { // shift+← / →: the cursor a hundredth of the view, the view follows
-    const F = this.warpSync(), t = F ? F.T(F.X(this.cursor) + dir * F.W / 100) : this.cursor + dir * this.span / 100;
+  nudge(dir) { // shift+← / →: the cursor a hundredth of the view, the view follows; into a gap's column: its far side (review B-16)
+    const F = this.warpSync(), x = F && F.X(this.cursor) + dir * F.W / 100, h = F && this.gapAt(x);
+    const t = F ? (h ? (dir > 0 ? h.q : h.p) : F.T(x)) : this.cursor + dir * this.span / 100;
     this.cursor = Math.min(Math.max(t, this.M.t0), this.M.t1);
     if (this.cursor < this.t0 || this.cursor > this.t0 + this.span) this.center(this.cursor);
     this.draw(); return this;

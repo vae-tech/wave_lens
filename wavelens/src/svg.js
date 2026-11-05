@@ -48,7 +48,7 @@ const WaveSVG = {
       return [r, sub]; });
     // the clock cycles under the axis (the viewer's Cycles, else the settings cycles, cycleClock, cycleZero); its clock under the names
     const cy = V ? V.cycData() : S.cycles ? (c => { const ups = c ? cycUps(c) : []; return ups.length ? { clk: c, ups, iz: cycZero(ups,
-      zeroTime(S.cycleZero)) } : null; })(cycClock(M.rows, S.cycleClock)) : null, cyLab = cy && `cycles ↑ ${cy.clk.name}`;
+      zeroTime(S.cycleZero), M.t0) } : null; })(cycClock(M.rows, S.cycleClock)) : null, cyLab = cy && `cycles ↑ ${cy.clk.name}`;
     // a bus's width after its name (showWidth: [7:0], a field's [msb:lsb]), a little smaller and muted, as in the viewer
     const wTag = r => (S.showWidth !== false && r.name ? widthTag(r) : ''), wSt = { size: fs - 1, fill: 'muted' };
     const nameOf = r => P.measure(r.name || '', { size: fs, weight: r.type === 'group' ? 600 : 400 }), tagW = r => (wTag(r) ? 5 + P.measure(wTag(r), wSt) : 0);

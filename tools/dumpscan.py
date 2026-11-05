@@ -51,7 +51,23 @@ class Dump:
         self.date = None   # its $date, as written
 
     def find(self, path):
-        return path if path in self.vars else self.alias.get(path)
+        """A variable by its path or an alias; an array element by either spelling, ptr[1] / ptr.[1], m[1][2] / m.[1].[2]
+        (WL-009, review 2026-11-05 B-07): the paths compared without the dot before a [."""
+        hit = path if path in self.vars else self.alias.get(path)
+        if hit or '[' not in path:
+            return hit
+        by = getattr(self, '_glued', None)
+        if by is None or by[0] != len(self.vars):
+            by = (len(self.vars), {})
+            for p in self.vars:
+                by[1].setdefault(glued(p), p)
+            self._glued = by
+        return by[1].get(glued(path))
+
+
+def glued(path):
+    """A path with no dot before a [: one spelling of an array element (q.[0] and q[0] -> q[0])."""
+    return path.replace('.[', '[')
 
 
 def fst_reader():

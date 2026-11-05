@@ -907,8 +907,32 @@ def modules(page, P):
           f'the command only: the same in the page and in tools/viewedit.py (a submodule of one picked: in it; a signal it leaves out: not selected) {res} {py}')
     bad = page.evaluate("document.querySelector('.wv').waveView.run([{op: 'only', modules: 'nope'}, {op: 'only', clear: true}])")
     check('no module "nope"' in bad[0].get('error', '') and bad[1]['only'] is None and not chip.is_visible(), f'a name that is no module: said; clear {bad}')
-    # what Only leaves out stays out (review of the implementation, O1 O2 O4 O6 O7 O13)
+    # your groups whole under Only (onlyGroups): a group of signals of two modules keeps both with Only one of them; the
+    # panel's "Your groups whole" off: by module; the same in tools/viewedit.py; in the saved state; kept with no set
     D0, D1 = 'tb_top.dut_i.dev0_i', 'tb_top.dut_i.dev1_i'
+    ug_ops = [{'op': 'group', 'name': 'mix', 'signals': [f'{D0}.ready', f'{D1}.err']}, {'op': 'only', 'modules': [D0]}]
+    ug_rows = "WaveLens.internal.peek(v).vis.filter(r => r.ug && r.ug.name === 'mix').map(r => r.full)"
+    page.evaluate("ops => document.querySelector('.wv').waveView.run(ops)", ug_ops)
+    js("(v.modules(true), 0)"); settle(page)
+    box = page.locator('.wv-mods input.mgw')
+    whole = [box.is_checked(), js(ug_rows)]
+    box.uncheck(); settle(page)
+    part = [box.is_checked(), js(ug_rows), js("v.onlyState()")]
+    pe = viewedit.Editor(viewedit.Model(page.evaluate("WAVES.all"))); pe.run(ug_ops)
+    pyw = [r['full'] for r in pe.ordered() if r.get('ug')]
+    pe.run([{'op': 'only', 'groups': False}]); pyp = [r['full'] for r in pe.ordered() if r.get('ug')]
+    back = page.evaluate("""(async () => { const v = document.querySelector('.wv').waveView, st = v.state();
+        await v.run([{ op: 'only', clear: true }, { op: 'only', groups: true }]); await v.setState(st);
+        const a = [v.onlyGroups(), v.onlyState()]; const r = await v.run([{ op: 'only', clear: true }, { op: 'only', modules: ['dev1_i'] }]);
+        return [a, r[1], document.querySelector('.wv-mods input.mgw').checked]; })()""")
+    check(whole == [True, [f'{D0}.ready', f'{D1}.err']] and part[:2] == [False, [f'{D0}.ready']] and
+          part[2] == {'modules': [D0], 'on': True, 'groups': False} and pyw == whole[1] and pyp == part[1],
+          f'Only: your groups whole (both modules\' signals), the panel\'s box off: by module; viewedit.py the same {whole} {part} {pyw} {pyp}')
+    check(back[0] == [False, part[2]] and back[1]['only'] == {'modules': [D1], 'on': True, 'groups': False} and back[1]['groups'] is False and
+          back[2] is False, f'your groups whole: in the saved state and back, kept over Clear for the next set, the panel\'s box says it {back}')
+    page.evaluate("document.querySelector('.wv').waveView.run([{op: 'only', clear: true, groups: true}, {op: 'group', name: 'mix', delete: true}])")
+    js("(v.modules(false), 0)")
+    # what Only leaves out stays out (review of the implementation, O1 O2 O4 O6 O7 O13)
     got = page.evaluate(f"""(async () => {{ const v = document.querySelector('.wv').waveView, out = [];
         await v.run([{{op: 'only', modules: '{D0}'}}, {{op: 'select', signals: ['{D0}.ready', '{D1}.ready']}}]);
         out.push([...v.selRun].map(r => r.full), JSON.stringify(v.toWaveDrom()).includes('"ready"'), v.toWaveDrom().signal.length);
@@ -1101,7 +1125,9 @@ def viewer(page):
     keep = js('[v.bookmarks(), v.arrowList()]'); js('(v.setBookmarks([{n: 1, t: 1234567}]), 0)')
     check(v.locator('.notes input.tm').input_value() == '1.234567 µs', f'a bookmark shows its exact time ({v.locator(".notes input.tm").input_value()})')
     page.evaluate(f"document.querySelector('{ex}').waveView.setBookmarks(...{json.dumps(keep)})")
-    # the right button: no cursor, no pan; the middle one (Questa): a drag zooms into the range, l the window before
+    # the right button: no cursor, no pan; the middle one (Questa): a drag zooms into the range, l the window before. The
+    # canvas taken again: the fields above may have scrolled the page (review 2026-11-05 T-18)
+    c.scroll_into_view_if_needed(); box = c.bounding_box()
     t0, cur = js('v.t0'), js('v.cursor')
     page.mouse.move(box['x'] + 100, box['y'] + 60); page.mouse.down(button='right'); page.mouse.move(box['x'] + 300, box['y'] + 60); page.mouse.up(button='right')
     check(js('[v.t0, v.cursor]') == [t0, cur], 'the right button neither pans nor moves the cursor')
@@ -1791,6 +1817,7 @@ def vscode_tab(browser, build):
         if (m.type === 'codes') window.lazyCodes(m.codes).then(text => reply({ id: m.id, text }));
         if (m.type === 'save') reply(window.__cancel ? { id: m.id, cancel: true } : { id: m.id, path: '/host/dumps/' + m.name });
         if (m.type === 'clip') reply({ id: m.id, ok: true });
+        if (m.type === 'config') reply({ id: m.id, config: window.__CFG || null });
         if (m.type === 'sources') reply(window.__TYPES ? { id: m.id, types: window.__TYPES, typesName: 'enum.types.json', texts: [] } : { id: m.id,
           texts: window.__SRC || ['package p; typedef enum logic [1:0] {OFF, ON = 2, HOLD} mode_t; endpackage', 'module m; p::mode_t plain, state; endmodule'] });
         if (m.type === 'pick') reply({ id: m.id, files: /fst/.test(m.accept) ? [] : [{ name: 's.view.json', path: '/states/s.view.json', mtime: 1, b64: btoa(JSON.stringify(window.__S)) }] });
@@ -1978,6 +2005,16 @@ def vscode_tab(browser, build):
     b = js("[v.S.rowHeight, v.root.querySelector('.bar .toast').textContent]")
     check(a == [40, 'your configuration applied'] and b[0] == 26 and 'defaults' in b[1] and any(m.get('text') == 'boom' for m in sent('configerror')),
           f'your configuration applied when saved; one that breaks the viewer: the defaults, the extension told {a} {b}')
+    # B-08: the defaults put back keep VS Code's theme (data-theme by its kind) and keysToVSCode (keysLeft), and take your colour away
+    accent = "document.documentElement.style.getPropertyValue('--accent')"
+    c = page.evaluate(f"[document.documentElement.dataset.theme, WaveLens.configure({{}}).keysLeft, {accent}]")
+    check(c == ['dark', ['ctrl+G'], ''], f'after the defaults put back: VS Code\'s theme, its keys and no colour of yours [theme, keysLeft, --accent] {c}')
+    # a colour set, then taken out of the file (colors: {}): gone, not kept until the tab is reopened
+    page.evaluate("window.postMessage({ type: 'config', config: { colors: { accent: '#00ff00' } } }, '*')"); page.wait_for_timeout(200)
+    c = [page.evaluate(accent)]
+    page.evaluate("window.postMessage({ type: 'config', config: { colors: {} } }, '*')"); page.wait_for_timeout(200)
+    c.append(page.evaluate(accent))
+    check(c == ['#00ff00', ''], f'a colour of your configuration taken out of it: gone {c}')
     check(not page.evaluate('window.__csp || []') and not errs, f'no CSP violation, no error: {page.evaluate("window.__csp || []")} {errs[:3]}')
     # a dump seen for the first time takes the state loaded last; one with a view of its own keeps it; wavelens.openLastState off: Reload only
     def tab(store, opened=True):
@@ -2001,6 +2038,21 @@ def vscode_tab(browser, build):
     check(fresh_got == [True, False, title], f'a new dump: the last state of the workspace taken at once, Reload there {fresh_got}')
     check(tab({'wavelens.given': 'yes'}) == [False, False, title], 'a dump with a view of its own keeps it: Reload there, nothing loaded')
     check(tab({}, False) == [False, False, title], 'wavelens.openLastState off: Reload there, nothing loaded')
+    # B-10: the configuration saved while the tab loaded (the page's copy older than the extension's): the tab asks at its load, the newer wins
+    one = browser.new_page()
+    one.add_init_script(fake + "window.__CFG = { rowHeight: 34 };")
+    page_html = html.replace(json.dumps(host), json.dumps({**host, 'config': {'rowHeight': 30}}))
+    one.route(src + '/**', lambda r: r.fulfill(path=str(files[urllib.parse.urlparse(r.request.url).path])) if urllib.parse.urlparse(r.request.url).path in files
+              else r.fulfill(status=404))
+    one.route(src + '/', lambda r: r.fulfill(body=page_html, content_type='text/html'))
+    one.goto(src + '/')
+    rh, end = None, time.monotonic() + 15
+    while rh != 34 and time.monotonic() < end:
+        one.wait_for_timeout(50)
+        rh = one.evaluate("(v => v && window.__sent.some(m => m.type === 'ready') ? v.S.rowHeight : null)(WaveLens.views().find(x => x.root.isConnected))")
+    asked = one.evaluate("window.__sent.filter(m => m.type === 'config').length")
+    one.close()
+    check(rh == 34 and asked == 1, f'a configuration saved while the tab loaded: asked once at its load, the newer one applied (rowHeight {rh}, asked {asked})')
     # a link of a log (vscode/links.js): the extension runs goto in the tab
     page.evaluate("window.postMessage({ type: 'run', rid: 777, ops: [{ op: 'goto', t: '12000ps', sel: 'tb.state' }] }, '*')")
     page.wait_for_function("window.__sent.some(m => m.type === 'result' && m.rid === 777)", timeout=5000)
@@ -3066,6 +3118,17 @@ EDIT_OPS = [   # every command that changes a state, with the arguments in their
     # review X-2: a command of stages 22 and 26 (21's expressions need the engine: smoke expr_bus)
     {'op': 'duplicate', 'signals': 'PWDATA', 'bits': [31, 28], 'radix': 'bin'}, {'op': 'group', 'name': '— Bus —', 'divider': True},
     {'op': 'group', 'name': '— Bus —', 'move': 'top'},
+    # review 2026-11-05: a slice copy beside a #2 copy, its rows, what stood on it, deleted alone and with its signal's copies (B-02, B-03,
+    # T-01); two equal spans, the second edited by the id answered (B-11, T-10); a find with Open last (B-19: its own page below)
+    {'op': 'bits', 'signals': 'PADDR', 'on': False},   # (folded: the rows below are the copies, the bits come with B-20's pair)
+    {'op': 'duplicate', 'signals': 'PADDR', 'bits': [7, 4]}, {'op': 'duplicate', 'signals': 'PADDR'}, {'op': 'rows', 'pattern': 'PADDR*', 'limit': 3},
+    {'op': 'bookmark', 't': '20ns', 'signal': 'PADDR[7:4]', 'text': 'on a slice'}, {'op': 'marker', 't': '30ns', 'signal': 'PADDR[7:4]', 'label': 'slice'},
+    {'op': 'highlight', 'add': 'PADDR[7:4]'}, {'op': 'select', 'signal': 'PADDR[7:4]'}, {'op': 'duplicate', 'signals': 'PADDR[7:4]', 'delete': True},
+    {'op': 'duplicate', 'signals': 'PADDR', 'bits': [3, 0]}, {'op': 'duplicate', 'signals': 'PADDR', 'delete': True},
+    {'op': 'span', 'from': '10ns', 'to': '30ns'}, {'op': 'span', 'from': '10ns', 'to': '30ns'}, {'op': 'span', 'id': 4, 'label': 'the second'},
+    {'op': 'bits', 'signals': 'PADDR', 'on': True}, {'op': 'rows', 'pattern': 'PADDR*', 'limit': 4},   # B-20: the bits under their bus
+    {'op': 'bits', 'signals': 'PADDR', 'on': False},
+    {'op': 'find', 'query': 'PADDR', 'open': True},
 ]
 
 
@@ -3287,9 +3350,13 @@ def cycles(browser, build):
         const w = new WaveLens.WaveView(el, doc, {}), r = await w.run([{ op: 'cursor', t: '115ns' }, { op: 'cycles' }]), t = w.cycText();
         w.setCursor(101e3); const before = w.cycText(); w.setCursor('c11'); const c11 = w.cursor;
         const svg = WaveLens.WaveSVG.toString(doc, {}), nums = [...svg.matchAll(/<text[^>]*>(\\d+)<\\/text>/g)].map(m => +m[1]);
-        w.destroy(); el.remove();
-        return [r[1].cycle, t, before, c11, nums.includes(10) && nums.includes(15) && !nums.includes(0)];""")
-    check(got == [11, ' · cycle 11 ↑PCLK', ' · cycle 9 ↑PCLK', 115e3, True],
+        w.destroy();
+        // B-04 (review 2026-11-05): the whole dump (from 0), its clock first rising at 105 ns, cycleZero 0: that edge is cycle 0
+        const whole = { ...doc, signal: [{ name: 'PCLK', path: 'apb_tb.PCLK', tv: [[0, '0'], ...tv.slice(1)] }],
+          time: { t0: 0, t1: 160e3, cycle: 5e3, unit: 'ps' }, config: { cycles: true, cycleClock: 'PCLK', cycleZero: 0 } };
+        const w2 = new WaveLens.WaveView(el, whole, {}), r2 = await w2.run([{ op: 'cursor', t: '105ns' }, { op: 'cycles' }]); w2.destroy(); el.remove();
+        return [r[1].cycle, t, before, c11, nums.includes(10) && nums.includes(15) && !nums.includes(0), r2[1].cycle];""")
+    check(got == [11, ' · cycle 11 ↑PCLK', ' · cycle 9 ↑PCLK', 115e3, True, 0],
           f'AU-WL-001: a window with cycleZero before it: its first edge cycle 10, 115 ns cycle 11, c11, the SVG\'s band from 10 {got}')
     svg = js("return [v.toSVG(), WaveLens.WaveSVG.toString(v.M.src, { cycles: true }), WaveLens.WaveSVG.toString(v.M.src, {})];")
     check('cycles ↑ PCLK' in svg[0] and 'cycles ↑ PCLK' in svg[1] and 'cycles ↑' not in svg[2],
@@ -4315,13 +4382,33 @@ def edit(browser, build):
     diff = sorted(k for k in set(run['st']) | set(st) if run['st'].get(k) != st.get(k))
     diff += [f'config.{k}: {run["st"]["config"].get(k)!r} / {st["config"].get(k)!r}' for k in sorted(set(run['st']['config']) | set(st['config']))
              if run['st']['config'].get(k) != st['config'].get(k)]
-    check(not diff and 'edits applied (r1)' in page.evaluate(f"{V}.root.querySelector('.toast').textContent"),
-          f'a page with these edits opens with the state the commands give in the page (differs: {diff})')
+    toast = page.evaluate(f"{V}.root.querySelector('.toast').textContent")
+    check(not diff and 'edits applied (r1)' in toast and 'not in these waves' not in toast,
+          f'a page with these edits opens with the state the commands give in the page, every name of it known (differs: {diff}; {toast!r})')
+    # a slice copy on both sides (review 2026-11-05 B-02, B-03, T-01): its row under its bus, deleted alone and with the #n copies (the
+    # page's order: the slices first, then #3, #4), what stood on it gone to its bus in the file's page as in the live one; two equal
+    # spans: the second answered and edited (B-11)
+    last = lambda f: max(i for i, o in enumerate(EDIT_OPS) if f(o))
+    kr, k1, k2 = (last(lambda o: o['op'] == 'rows' and o.get('limit') == 3), last(lambda o: o.get('signals') == 'PADDR[7:4]' and o.get('delete')),
+                  last(lambda o: o.get('signals') == 'PADDR' and o.get('delete')))
+    ks = [i for i, o in enumerate(EDIT_OPS) if o['op'] == 'span' and o.get('from') == '10ns']
+    sl = [[x[k].get(f) if k < len(x) else None for x in (run['res'], py)]
+          for k, f in ((kr, 'rows'), (k1, 'deleted'), (k2, 'deleted'), (ks[0], 'id'), (ks[1], 'id'))]
+    on = lambda s: ([b.get('signal') for b in s['bookmarks'] if b.get('text') == 'on a slice'],
+                    [m.get('signal') for m in s['markers'] if m.get('label') == 'slice'], s['select'], [d for d in s['dups'] if d.startswith('PADDR')],
+                    s['config']['highlight'], [x.get('label') for x in s['spans'][-2:]])
+    want = (['PADDR'], ['PADDR'], 'PADDR', [], ['@payload', 'PREADY'], [None, 'the second'])
+    kb = last(lambda o: o['op'] == 'rows' and o.get('limit') == 4)   # B-20: a bus's bits under it in rows, the same on both sides
+    sl.append([x[kb].get('rows') if kb < len(x) else None for x in (run['res'], py)])
+    check(sl == [[[['PADDR', 8], ['PADDR[7:4]', 4], ['PADDR#3', 8]]] * 2, [['PADDR[7:4]']] * 2, [['PADDR[3:0]', 'PADDR#3', 'PADDR#4']] * 2, [3, 3], [4, 4],
+                 [[['PADDR', 8], ['PADDR[7]', 1, 'bit'], ['PADDR[6]', 1, 'bit'], ['PADDR[5]', 1, 'bit']]] * 2]
+          and on(run['st']) == want and on(st) == want, f'a slice copy: rows, deleted, what stood on it to its bus; the ids of two equal spans {sl} '
+          f'{on(run["st"])} {on(st)}')
     # the person changes what the browser keeps; a reload keeps it, and the edits' cursor, window, highlight again
     page.evaluate(f"{V}.run([{{op: 'bookmark', n: 1, text: 'mine'}}, {{op: 'highlight', clear: true}}, {{op: 'cursor', t: 5000}}])")
     open_(pa)
     got = page.evaluate(f"(v => [v.bms[0].text, v.highlighted(), v.cursor, v.umarks.length])({V})")
-    check(got == ['mine', ['@payload', 'PREADY'], 150000, 2], f'reloaded: your bookmark text stays, the edits\' highlight and cursor come again {got}')
+    check(got == ['mine', ['@payload', 'PREADY'], 150000, 3], f'reloaded: your bookmark text stays, the edits\' highlight and cursor come again {got}')
     viewedit.edit_page(str(pa), [{'op': 'bookmark', 'n': 1, 'text': 'agent again'}], 'exact')
     open_(pa)
     check(page.evaluate(f"{V}.bms[0].text") == 'agent again', 'a newer revision of the edits replaces what it names')
@@ -4329,6 +4416,19 @@ def edit(browser, build):
     bad = page.evaluate(f"{V}.run([{{op: 'nope'}}, {{op: 'cursor', t: 1, x: 2}}, {{op: 'bookmark', signal: 'P'}}, {{op: 'hide', signals: 'PRESETn'}}])")
     check([('error' in x) for x in bad] == [True, True, True, False] and 'no signal "P"' in bad[2]['error'],
           f'a bad command is said, the others run {[x.get("error", "ok")[:40] for x in bad]}')
+    # a find among a page's edits (review 2026-11-05 B-19, T-11): the page opened from the file folds the assertions' groups as the
+    # live page that ran it (they are folded while the search holds the folding from before it); the file's answer says what it counts
+    pf, fops = d / 'find.html', [{'op': 'find', 'query': 'P', 'highlight': True}]
+    pf.write_bytes(apb.read_bytes())
+    fpy = viewedit.edit_page(str(pf), fops, 'exact')
+    page.evaluate('localStorage.clear()'); open_(pf)
+    page.wait_for_function(f"localStorage.getItem('wavelens.edits:' + {V}.storeId)")
+    fst = page.evaluate(f"{V}.state()")
+    page.evaluate('localStorage.clear()'); open_(pb)
+    flive = page.evaluate(f"ops => {V}.run(ops).then(res => ({{res, st: {V}.state()}}))", fops)
+    fold = [sorted(x['config']['fold']) for x in (flive['st'], fst)]
+    check(fold[0] == fold[1] and len(fold[0]) > 1 and fst['find'] == 'P' and 'not counted' in str(fpy),
+          f'a find in the edits: the page opened folds what the live one folds; the file says the plugins\' rows are not counted {fold} {fpy}')
     # your groups: at the top, their rows read through to the signal (radix), out of the group by the menu; markers drawn in the picture
     page.evaluate('localStorage.clear()'); open_(pb)
     ui = page.evaluate(f"""(async v => {{
@@ -5768,6 +5868,13 @@ def ranges(browser, build):
         v.fit(); return [pts[0], k1 === k2, k2 === k3, k3 === k4, end, home, seen >= 0 && seen <= v.wf.W + 1e-6 || [seen], inHole]; })()""")
     check(pn[0] < 40 and pn[1] and pn[2] and pn[3] and abs(pn[4] - js('v.M.t1')) < 1e-3 and pn[5] == js('v.M.t0') and pn[6] is True and pn[7] == [True] * 4,
           f'the gaps on the waves: a zoom stays at the pointer, a pan keeps the scale up to the ends, a cursor far away comes into the window, a zoom into a gap holds {pn}')
+    # review 2026-11-05 (B-16 of 2026-11-03): shift+← → over a gap's column lands on its far side, never inside it
+    nd = js("""(() => { const out = []; for (const into of [false, true]) { v.fit(); v.draw(); const c = v.wf.w.cuts, p = c[0][1], q = c[1][0], mid = (p + q) / 2;
+          if (into) { v.zoomTo(p + 0.25 * (q - p), p + 0.3 * (q - p)); v.draw(); }   // the window zoomed into the gap (as c there)
+          v.cursor = mid; v.draw(); v.nudge(1); const fwd = v.cursor; v.cursor = mid; v.draw(); v.nudge(-1); const bwd = v.cursor;
+          out.push([fwd >= q - 1e-6 || fwd <= p + 1e-6, bwd <= p + 1e-6 || bwd >= q - 1e-6, [p, q, fwd, bwd]]); }
+        v.fit(); return out; })()""")
+    check(all(x[:2] == [True, True] for x in nd), f'gaps on the waves: shift+← → from inside a gap lands on a side of it, never in it {nd}')
     wh = js('[v.zoom(0.25, 0.5), v.draw(), v.t0, v.wf.k, v.wf.T(100)]'); bx = c.bounding_box(); page.mouse.move(bx['x'] + 200, bx['y'] + 80); page.keyboard.down('Shift')
     page.mouse.wheel(0, 120); page.keyboard.up('Shift'); page.wait_for_timeout(100); page.mouse.click(bx['x'] + 100, bx['y'] + 80)
     wa = js('[v.t0, v.wf.k, v.wf.X(v.cursor)]')
@@ -6194,9 +6301,11 @@ UNITS = [   # (JavaScript expression, its JSON value); NaN / ±Infinity / undefi
     # the clock cycles: cycle 0, the cycle at a time, the time of a cycle, the edges counted, the clock by a name, the band's marks
     ("[null, 20, 21, 35].map(z => I.cycZero([10, 20, 30], z))", [0, 1, 2, 3]),
     # AU-WL-001: a zero before a window's first edge: the edges before it at the mean period (on one: cycle 0 on it; 2 % after one: on it)
-    ("[10, 0, -10, 5, 9.9, 0.1, -0.5].map(z => I.cycZero([10, 20, 30], z))", [0, -1, -2, 0, 0, -1, -1]), ("I.cycZero([10], -50)", 0),
+    ("[10, 0, -10, 5, 9.9, 0.1, -0.5].map(z => I.cycZero([10, 20, 30], z, 10))", [0, -1, -2, 0, 0, -1, -1]), ("I.cycZero([10], -50, 10)", 0),
     ("[5e3, 76258.78e3 - 915 * 83.332e3].map(z => I.cycZero(z === 5e3 ? [105e3, 115e3, 125e3, 135e3, 145e3, 155e3] : [76258.78e3, 76342.112e3, "
-     "76425.444e3, 76508.776e3], z))", [-10, -915]), ("[5, 10, 25, 30].map(t => I.cycAt([10, 20, 30], 1, t))", [-2, -1, 0, 1]),
+     "76425.444e3, 76508.776e3], z, z === 5e3 ? 100e3 : 76200e3))", [-10, -915]),
+    # B-04 (review 2026-11-05): waves that begin at the zero or before it (a whole dump, a clock that starts late): the first edge
+    ("[0, 5, 100].map(z => I.cycZero([105, 115, 125], z, 0))", [0, 0, 0]), ("[0, 5].map(z => I.cycZero([105, 115, 125], z))", [0, 0]), ("[5, 10, 25, 30].map(t => I.cycAt([10, 20, 30], 1, t))", [-2, -1, 0, 1]),
     ("[-1, -2, 1, 2].map(n => I.cycTime([10, 20, 30], 1, n))", [10, None, 30, None]),
     ("[[[0, '1'], [5, '0'], [10, '1']], [[0, '1']], [[0, '0'], [5, '1']]].map(tv => I.cycUps(F.parse({ signal: [{ name: 'c', tv }] }).rows[0]))",
      [[10], [], [5]]),

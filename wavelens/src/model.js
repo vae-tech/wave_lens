@@ -70,7 +70,7 @@ const flatText = t => Array.isArray(t) ? t.slice(typeof t[1] === 'object' && !Ar
 const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight: 24, traceWidth: 1.4, busWidth: 1.2,
   labelSize: 11, fontSize: 11.5, sort: 'none', sortIgnore: [], sortButton: true, hint: true, style: 'auto', radix: 'auto', fold: null,
   highlight: null, dim: 0.3, groupColors: null, bookmarkLeft: 0.2, arrowLabels: 'lane', laneHeight: 16, maxHeight: null, toolsFolded: false, toolsHidden: [],
-  groupOrder: 'file', moduleShading: true, findHighlight: true, findOpen: true, findMask: false, findCase: false, findWord: false,
+  groupOrder: 'file', onlyGroups: true, moduleShading: true, findHighlight: true, findOpen: true, findMask: false, findCase: false, findWord: false,
   findRegex: false, cursorSnap: 8, keyHints: 200, showWidth: true, exprLibrary: [], sharedMarkers: false, keys: {},
     wheel: 'scroll', contextMenu: true, enumColors: null, dumpBudget: 3000000, gaps: false, gapIdle: 16, gapKeep: 2,
     gapSignals: null, gapClock: null, gapAux: null, gapOnly: false, gapCount: 'clock', gapLine: 'dashdot', gapView: false, menuTipDelay: 2000, cycles: false,
@@ -814,12 +814,13 @@ const riseTimes = clk => RISES.get(clk) || (RISES.set(clk, clk.tr.filter(o => o.
 // the cycle at t, the last edge at or before t (negative before cycle 0); the time of cycle n, or null past the ends
 // the setting cycleZero: a time ("50ns", as gapIdle and the cursor take it) or model units; null / "": the first edge
 const zeroTime = z => (z == null || z === '' ? null : typeof z === 'number' ? z : num(parseT(z)));
-// a zero before the first edge (a window cut out of a long dump, AU-WL-001): the edges before it counted at the clock's mean
-// period over the edges there are, so the first edge is cycle (ups[0] − zero) / period, as the tools number it on the whole
-// dump (a zero within 2 % of a period after an edge counts as on it: the period is measured)
-const cycZero = (ups, zero) => {
+// a zero before the waves begin (t0: a window cut out of a long dump, AU-WL-001): the edges before them counted at the clock's
+// mean period over the edges there are, so the first edge is cycle (ups[0] − zero) / period, as the tools number it on the
+// whole dump (a zero within 2 % of a period after an edge counts as on it: the period is measured). Waves that begin at the
+// zero or before it (a whole dump, a clock that starts late): cycle 0 is the first edge at or after it (review 2026-11-05 B-04)
+const cycZero = (ups, zero, t0 = -Infinity) => {
   if (zero == null || !isFinite(zero)) return 0;
-  if (ups.length > 1 && zero < ups[0] - timeEps(ups[0])) {
+  if (ups.length > 1 && zero < t0 - timeEps(t0) && zero < ups[0] - timeEps(ups[0])) {
     const per = (ups[ups.length - 1] - ups[0]) / (ups.length - 1); if (per > 0) return -Math.floor((ups[0] - zero) / per + 0.02);
   }
   return lastBefore(ups.length, j => ups[j], zero - timeEps(zero), true) + 1;

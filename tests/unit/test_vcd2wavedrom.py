@@ -613,12 +613,44 @@ class RowNames(unittest.TestCase):
             cfg = os.path.join(d, 'x.json')
             with open(cfg) as f:
                 c = json.load(f)
-            c['measures'] = [{'label': 'z', 'from': {'signal': 'o_done', 'value': 7}}]
+            c['measures'] = [{'label': 'z', 'from': {'signal': 'o_done', 'value': 7}}, {'label': 'q', 'from': {'bookmark': 9}}]
             with open(cfg, 'w') as f:
                 json.dump(c, f)
             rc, out, err = H.run_tool('vcd2wavedrom', '--config', cfg)
-            self.assertNotEqual(rc, 0)
-            self.assertIn('measures[0].from', err)
+            self.assertNotEqual(rc, 0)   # a bookmark that is none: still an error
+            self.assertIn('measures[1].from', err)
+
+    def test_array_elements_either_way(self):   # review 2026-11-05 B-07: a view's signals, a bookmark's and a span's by either spelling
+        hdr = ('$timescale 1ns $end\n$scope module tb $end\n$var logic 8 ! q[0] [7:0] $end\n$var logic 8 " q[1] [7:0] $end\n'
+               '$var logic 4 # m[1][2] [3:0] $end\n$upscope $end\n$enddefinitions $end\n')
+        with H.tmp() as d:
+            vcd, cfg = H.vcd(d, '#0\nb0 !\nb1 "\nb10 #\n#10\nb11 !\n#20\n', hdr), os.path.join(d, 'a.json')
+            with open(cfg, 'w', encoding='utf-8') as f:
+                json.dump({'waves': vcd, 'scope': 'tb', 'exact': True, 'signals': ['q.[0]', 'q[1]', 'tb.m[1].[2]'],
+                           'bookmarks': [{'n': 1, 't': 10000, 'signal': 'q[0]', 'text': 'a'}, {'n': 2, 't': 10000, 'signal': 'tb.q.[1]', 'text': 'b'}],
+                           'spans': [{'from': 0, 'to': 10000, 'signals': ['q[1]']}]}, f)
+            rc, out, err = H.run_tool('vcd2wavedrom', '--config', cfg)
+            self.assertEqual(rc, 0, err)
+            doc = json.loads(out)
+            rows = V.row_paths(doc['signal'])
+            self.assertEqual(len(rows), 3, rows)
+            self.assertEqual([b['signal'] in rows for b in doc['bookmarks']], [True, True], doc['bookmarks'])
+            self.assertIn(doc['spans'][0]['signals'][0], rows)
+            self.assertNotIn('signal-missing', err)
+
+    def test_a_measure_on_a_signal_that_is_no_row(self):   # review 2026-11-05 B-01, B-16
+        with H.tmp() as d:
+            ms = [{'label': 'a', 'from': '5ns', 'to': {'signal': 'i_other', 'edge': 'rise'}},             # no row: loaded for its event
+                  {'label': 'rev', 'from': {'signal': 'o_done', 'edge': 'rise', 'nth': 2}, 'to': {'signal': 'o_done', 'edge': 'rise'}},
+                  {'label': 'open', 'from': '5ns', 'to': {'signal': 'o_done', 'value': 7}},                # never: an open pair
+                  {'label': 'gone', 'from': {'signal': 'i_other', 'edge': 'rise', 'nth': 9}, 'to': '45ns'}]   # never: no measure
+            doc, err = self.page(d, False, signals=['clk', 'o_done'], group={}, measures=ms)
+            self.assertEqual([(m['label'], m['from'], m['to']) for m in doc['measures']],
+                             [('a', 5000, 20000), ('rev', 10000, 30000), ('open', 5000, None)])   # rev: its ends in order
+            lint = [x.split('lint: ', 1)[1] for x in err.splitlines() if 'measure-no-match' in x]
+            self.assertEqual([x.split(':')[1].strip() for x in lint], ['measures[2].to', 'measures[3].from'])
+            self.assertIn('open pair', lint[0])
+            self.assertIn('no measure', lint[1])
 
     def test_also_adds_rows_by_name_and_pattern(self):
         with H.tmp() as d:

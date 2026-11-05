@@ -5,9 +5,11 @@
 // Only (state "only": {modules: [paths], on}; the command only): the waves keep the signals of the modules picked and of
 // their submodules; the modules on the way to them stay as headers (their own signals go), every other module goes.
 // A layer of its own: Hide stays as it is under it, the highlight comes back with the rows; paused (on: false) the set
-// is kept and every module shows. Your groups stay (their signals by the signal they show), the rows of plugins follow
-// the module they are under; the ones above every module (ƒ expressions) stay. In the saved state, Save page and undo,
-// not in this browser's storage: a page opened again starts without it.
+// is kept and every module shows. Your groups stay whole, every signal of them whatever its module (groups: the setting
+// onlyGroups, the Modules panel's "Your groups whole"; off: their signals by the module of the signal they show), the
+// rows of plugins follow the module they are under; the ones above every module (ƒ expressions) stay. In the saved
+// state, Save page and undo (groups there when not the page's setting), not in this browser's storage: a page opened
+// again starts without it.
 Object.assign(WaveView.prototype, {
   // the page's scopes (modules, interfaces …) in the model's order: its own groups, not the value of a struct or a union
   scopes() {
@@ -29,7 +31,12 @@ Object.assign(WaveView.prototype, {
     return gs.filter(g => !g.anc.some(id => ids.has(id))).sort((a, b) => a.id - b.id).map(g => g.path);
   },
   onlyOn() { return !!(this.only && this.only.on); },
-  onlyState() { return this.only ? { modules: [...this.only.modules], on: this.only.on } : null; },
+  // your groups whole under Only (onlyGrp: set by the panel's box or the command, else the setting onlyGroups)
+  onlyGroups() { return this.onlyGrp ?? this.S.onlyGroups !== false; },
+  onlyState() {
+    if (!this.only) return null;
+    const g = this.onlyGroups(); return { modules: [...this.only.modules], on: this.only.on, ...(g !== (this.S.onlyGroups !== false) ? { groups: g } : {}) };
+  },
   // the groups Only keeps: inn — the modules picked and every group under them; path — the modules on the way to them
   onlyIds() {
     const key = this.only ? this.only.modules.join('\n') : '';
@@ -48,7 +55,8 @@ Object.assign(WaveView.prototype, {
       for (let i = r.anc.length - 1; i >= 0 && up == null; i--) if (G[r.anc[i]] && model.has(G[r.anc[i]])) up = r.anc[i];
       return up != null ? inn.has(up) : !model.has(r);   // above every module: a plugin's rows stay, the page's top signals go
     };
-    return rows.filter(r => r.user || (r.ug ? test(r.orig) : test(r) && (!r.of || test(r.of))));
+    const whole = this.onlyGroups();   // your groups whole: every signal of them; else by the signal each shows
+    return rows.filter(r => r.user || (r.ug ? whole || test(r.orig) : test(r) && (!r.of || test(r.of))));
   },
   // whether a row is in the view: not hidden, not left out by Only (folded away it still is)
   shown(r) {
@@ -57,13 +65,15 @@ Object.assign(WaveView.prototype, {
     return !!r && this.shownS.has(r);
   },
   // Only set: {modules: [paths]} (they replace the set and turn it on, unless on says otherwise), {on: bool} (pause /
-  // resume the set there is); null: every module again. open: the modules a gesture named (a box: every one it touched,
-  // the nested ones too), opened on the waves with the modules on the way to them; Clear, pause and resume fold nothing
+  // resume the set there is), {groups: bool} (your groups whole or by their signals' modules; kept with no set too);
+  // null: every module again. open: the modules a gesture named (a box: every one it touched, the nested ones too),
+  // opened on the waves with the modules on the way to them; Clear, pause and resume fold nothing
   setOnly(o) {
+    if (o && o.groups != null) this.onlyGrp = !!o.groups;
     if (o == null) this.only = null;
     else {
       const mods = o.modules !== undefined ? this.onlyNorm([].concat(o.modules || [])) : this.only && this.only.modules;
-      if (!mods) return this;
+      if (!mods) { if (o.groups != null) { this.onlyShow(); this.settingsChanged(); } return this; }
       this.only = { modules: mods, on: o.on !== undefined ? !!o.on : o.modules !== undefined || this.only.on };
     }
     if (o && o.open && o.open.length) this.onlyOpen(o.open);
@@ -234,11 +244,13 @@ class Mods {
         'title="Close (Esc)">✕</button></div><div class="mf"><input type="search" class="mq" spellcheck="false" autocomplete="off" ' +
         'placeholder="Filter modules…" aria-label="filter modules" ' +
         'title="Fuzzy, as the find: Enter goes to the first, shift+Enter keeps Only the matches, ↓ into the tree"><button type="button" data-a="om" ' +
-        'title="Only the modules that match (shift+Enter)">Only matches</button></div><div class="ms"></div>' +
+        'title="Only the modules that match (shift+Enter)">Only matches</button><label title="Under Only, your groups keep every signal of them, ' +
+        'whatever module it is of (off: only the signals of the modules Only keeps); the setting onlyGroups"><input type="checkbox" class="mgw"> ' +
+        'Your groups whole</label></div><div class="ms"></div>' +
         '<div class="mtr" role="tree" aria-label="modules" aria-multiselectable="true"><div class="mbox" hidden></div><div class="mrows"></div></div>');
     v.root.append(el);
     this.tree = el.querySelector('.mtr'); this.rowsEl = el.querySelector('.mrows'); this.box = el.querySelector('.mbox');
-    this.qEl = el.querySelector('.mq'); this.stEl = el.querySelector('.ms');
+    this.qEl = el.querySelector('.mq'); this.stEl = el.querySelector('.ms'); this.gwEl = el.querySelector('.mgw');
     panelPlace(this, 'mods');   // where it was last (its size too), first at the right of the waves (the names stay in sight), under the axis
     this.events(); this.render(true);   // drawn again with the names column (Names.render): Hide, Only, the selection
   }
@@ -260,6 +272,7 @@ class Mods {
   // the panel drawn again when what it shows changed (force: anyway)
   render(force = false) {
     const v = this.v, o = v.only, cur = v.scopeOfRow(v.sel);
+    this.gwEl.checked = v.onlyGroups();
     const key = JSON.stringify([o, [...v.hiddenRows].join('\n'), cur && cur.id, this.q, [...this.open].length, this.openGen || 0, this.fi, this.pv || null]);
     if (!force && key === this.key) return;
     this.key = key;
@@ -340,6 +353,8 @@ class Mods {
       else if (a === 'ox') { v.setOnly(null); v.toast('Only: every module again'); }
     });
     this.qEl.addEventListener('input', () => { this.q = this.qEl.value; this.fi = 0; this.render(); });
+    this.gwEl.addEventListener('change', () => { v.setOnly({ groups: this.gwEl.checked });
+      v.toast(this.gwEl.checked ? 'Only: your groups whole, every signal of them' : 'Only: your groups keep the signals of the modules Only keeps'); });
     this.qEl.addEventListener('keydown', e => {
       if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); this.matches(); }
       else if (e.key === 'Enter') { e.preventDefault(); const h = this.hits && this.hits[0];

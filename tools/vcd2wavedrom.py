@@ -602,6 +602,8 @@ def collect_specs(a, rd):
     events += [n for b in bookmark_list(a) if isinstance(b, dict) and b.get('at') is not None for n in wavefind.signals_of(b['at'])]
     events += [n for sp in span_list(a) if isinstance(sp, dict) for k in ('from', 'to', 'every') if isinstance(sp.get(k), (str, dict)) and not is_time(sp[k])
                for n in wavefind.signals_of(sp[k])]
+    events += [n for m in measure_list(a) for k in ('from', 'to') if isinstance(m.get(k), (str, dict)) and not is_time(m[k])
+               for n in wavefind.signals_of(m[k])]   # a measure's events on signals that are no row (review 2026-11-05 B-01)
     for s, (absp, w), k in zip(specs, rd.prepare(paths, a.clock, events), getattr(rd, 'kinds', None) or [None] * len(specs)):
         s['abs'], s['width'], s['kind'] = absp, w, k
     t_from = to_ps(a.t_from) if a.t_from else rd.t_start
@@ -886,10 +888,22 @@ def bookmark_list(a):
     return a.bookmarks if isinstance(a.bookmarks, list) else []
 
 
+def measure_list(a):
+    """The measurements of the options as dicts (a JSON text that is none: [], measures_of says why)."""
+    v = getattr(a, 'measures', None)
+    if isinstance(v, str):
+        try:
+            v = json.loads(v)
+        except json.JSONDecodeError:
+            return []
+    return [m for m in (v if isinstance(v, list) else [v]) if isinstance(m, dict)]
+
+
 def measures_of(a, rd=None, bms=(), specs=(), t_from=None, t_to=None):   # (rd None: times and bookmarks only)
     """The measurements of the options (a list, or its JSON text from --measures), their ends in ps -> the WaveJSON's "measures"; an end
     is a time, {"bookmark": n} or an event as a span's ends take it ({"signal": "u.state", "value": 5, "from": "1300ns"}), so a measure in a
-    document holds the next run too (P-21)."""
+    document holds the next run too (P-21). Its ends in order, as a span's (review 2026-11-05 B-16); an event that never happens in the
+    window is the lint measure-no-match, not an error: a "to" leaves an open pair (one marker), a "from" leaves the measure out."""
     v = a.measures
     if isinstance(v, str):
         try:
@@ -897,12 +911,26 @@ def measures_of(a, rd=None, bms=(), specs=(), t_from=None, t_to=None):   # (rd N
         except json.JSONDecodeError as e:
             raise WaveError(f'vcd2wavedrom: --measures: {e}') from None
     out = []
+    a.measure_no_match = []
     for i, m in enumerate(v if isinstance(v, list) else [v]):
         where = f'{where_of(a)}measures[{i}]'
         if not isinstance(m, dict) or m.get('from') is None:
             raise WaveError(f'vcd2wavedrom: {where}: {{"label", "from", "to", "min"?, "max"?, "signal"?, "color"?}}, the ends a time, {{"bookmark": n}} '
                             f'or an event, not {json.dumps(m, ensure_ascii=False)[:80]}')
-        ends = {k: None if m.get(k) is None else end_time(a, rd, m[k], f'{where}.{k}', bms, specs, t_from, t_to) for k in ('from', 'to')}
+        ends = {}
+        for k in ('from', 'to'):
+            try:
+                ends[k] = None if m.get(k) is None else end_time(a, rd, m[k], f'{where}.{k}', bms, specs, t_from, t_to)
+            except WaveError as err:
+                if rd is None or is_time(m[k]) or (isinstance(m[k], dict) and set(m[k]) == {'bookmark'}) or \
+                        not re.search(r': (no match|\d+ match\(es\), no number \d+) for ', str(err)):
+                    raise
+                a.measure_no_match.append((f'{where}.{k}', str(err).split(': ', 1)[-1], k))
+                ends[k] = None
+        if ends['from'] is None:
+            continue
+        if ends['to'] is not None and ends['to'] < ends['from']:
+            ends['from'], ends['to'] = ends['to'], ends['from']
         x = {**m, **ends}
         out.append({k: (int(t) if isinstance(t, float) and t.is_integer() else t) for k, t in x.items()})
     return out
@@ -1142,13 +1170,16 @@ def row_namer(doc, specs):
     """name -> the row of the page it means, by the rule of the bookmarks: a row's own name, or a signal as the config said it in
     "signals", or its path in the dump, whatever group holds it; a name that is a row, no row or two rows comes back as it is (lint says)."""
     rows = row_walk(doc.get('signal') or [])
-    have, by, names = {f for f, _ in rows}, {s['abs']: s for s in specs}, {}
+    have, by, names, gl = {f for f, _ in rows}, {s['abs']: s for s in specs}, {}, {}
     for full, it in rows:
         path = it.get('abs') or it.get('path')
         s = by.get(path) or {}
         for n in (path, s.get('path'), s.get('name')):
             if n:
                 names.setdefault(n, set()).add(full)
+        for n in (full, path, s.get('path'), s.get('name')):   # an array element either way, q[0] / q.[0] (review 2026-11-05 B-07)
+            if n and '[' in n:
+                gl.setdefault(dumpscan.glued(n), set()).add(full)
     def row(n):
         if isinstance(n, str) and n not in have and ('*' in n or '?' in n):   # a pattern (wl.note(signal="*full")): the first row it matches, in the page's order
             rx = glob_re(n)
@@ -1158,6 +1189,8 @@ def row_namer(doc, specs):
                     return full
             return n
         hit = names.get(n) if isinstance(n, str) and n not in have else None
+        if not hit and isinstance(n, str) and n not in have and '[' in n:
+            hit = gl.get(dumpscan.glued(n))
         return next(iter(hit)) if hit and len(hit) == 1 else n
     return row
 
@@ -1379,6 +1412,8 @@ def lint(doc, a, where=None):
         out.append(f'marker-no-match: {at}marker[{i}]: "{expr}" matches nothing in the window: no marker')
     for where, expr in getattr(a, 'span_no_match', []):
         out.append(f'span-every-no-match: {where}: "every" {expr} matches nothing in the window: no span')
+    for where, what, k in getattr(a, 'measure_no_match', []):
+        out.append(f'measure-no-match: {where}: {what}: ' + ('the measure is an open pair (one marker)' if k == 'to' else 'no measure'))
     sva = doc.get('sva') or {}
     for note in sva.get('notes') or []:
         if note.startswith('bind: no assertion') or note.endswith('matches no assertion'):

@@ -176,6 +176,8 @@ class Version(unittest.TestCase):
             if f.endswith('.html'):
                 said = set(re.findall(r'WaveLens (\d+\.\d+)', read('docs', 'guides', f)))
                 self.assertEqual(said, {v}, f'docs/guides/{f}')
+        said = re.search(r"version: 'The version of wavelens\.js[^\n]*?<code>\"(\d+\.\d+)\"</code>", read('docs', 'index.html'))
+        self.assertEqual(said and said.group(1), v, 'docs/index.html: the API table names the version')
 
 
 class Docs(unittest.TestCase):

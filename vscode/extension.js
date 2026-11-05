@@ -287,6 +287,7 @@ ${scripts}
       case 'state-read': return reply(await this.stateRead());
       case 'compare': return reply(await this.compare(Array.isArray(m.signals) ? m.signals.map(String) : [], +m.from, +m.to));
       case 'sources': return reply(await this.sources());
+      case 'config': return reply({ config: cfgNow() });   // the tab loaded: the configuration now (one saved since its HTML was made)
       case 'clip': await vscode.env.clipboard.writeText(String(m.text ?? '')); return reply({ ok: true });
       case 'theme': chooseTheme(); return;   // the bar's ◐: the list of themes, as the command
       case 'result': { const w = this.wait.get(m.rid); if (w) { this.wait.delete(m.rid); w(m.results); } return; }
@@ -736,7 +737,7 @@ function cfgDefaults() {
 }
 // the file read and checked -> {config} (what applies) and the marks in the editor (Problems); a file that does not read: null
 function cfgRead(text) {
-  const d = cfgDefaults(), r = UCFG.parse(text), uri = vscode.Uri.file(configFile()), lines = String(text).split('\n');
+  const d = cfgDefaults(), r = UCFG.parse(text), uri = vscode.Uri.file(configFile());
   const at = (line, col, len) => new vscode.Range(line, col, line, col + Math.max(1, len));
   if (r.error) {
     DIAG.set(uri, [Object.assign(new vscode.Diagnostic(at(r.line - 1, r.col - 1, 1), `not JSON: ${r.error} — not applied, the tabs keep the last one that read`,
@@ -744,8 +745,9 @@ function cfgRead(text) {
     return null;
   }
   const c = UCFG.check(r.value, d.values);
-  DIAG.set(uri, c.problems.map(p => { const k = p.key == null ? -1 : lines.findIndex(l => l.includes(JSON.stringify(p.key)));
-    const line = Math.max(0, k), col = k < 0 ? 0 : lines[k].indexOf(JSON.stringify(p.key));
+  // a key's mark where the parser found it (the last of a key given twice: its value is the one read), not a comment naming it
+  DIAG.set(uri, c.problems.map(p => { const k = p.key == null ? null : r.keys.filter(x => x.key === p.key).pop();
+    const line = k ? k.line - 1 : 0, col = k ? k.col - 1 : 0;
     return Object.assign(new vscode.Diagnostic(at(line, col, p.key ? p.key.length + 2 : 1), `${p.message} — left out`, vscode.DiagnosticSeverity.Warning),
       { source: 'WaveLens' }); }));
   return { config: UCFG.effective(d.values, c.config), problems: c.problems, own: Object.keys(c.config).length };

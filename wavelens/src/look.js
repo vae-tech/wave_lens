@@ -223,7 +223,7 @@ Object.assign(WaveView.prototype, {
     if (!this.cycMemo || this.cycMemo.key !== key) {
       const clk = cycClock(this.M.rows, o.cycleClock), ups = clk ? cycUps(clk) : [];
       if (clk && clk.lazy) this.need([clk]);   // a large dump: the clock read, the band drawn when it is there (need resets the memo)
-      this.cycMemo = { key, d: clk && ups.length ? { clk, ups, iz: cycZero(ups, o.cycleZero) } : null };
+      this.cycMemo = { key, d: clk && ups.length ? { clk, ups, iz: cycZero(ups, o.cycleZero, this.M.t0) } : null };
     }
     return this.cycMemo.d;
   },
