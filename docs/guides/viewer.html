@@ -241,7 +241,9 @@
 <h2 id="menu">The right button's menu</h2>
 <p>The right button does what ctrl+drag does — a drag measures a range, a click takes none — and then opens a menu for the range, the
   picture and the row under the pointer. <kbd>Esc</kbd>, a click elsewhere or a choice closes it; <code>"contextMenu": false</code> leaves
-  the right button to the browser.</p>
+  the right button to the browser. A click of the left button while the right one is down puts a marker there at once,
+  labelled <code>M1</code>, <code>M2</code> …, with no question: on a signal its text goes on the line over it (under it when that place is
+  taken); the menu then does not open, and the labels are filled in the Markers list.</p>
 <figure><img src="img/viewer-menu.png" loading="lazy"
   alt="The right button's menu over PADDR with a range: range items, picture items, Gaps, PADDR's items, module items">
   <figcaption><b>The menu on PADDR with a range.</b> The range's Δ on top, then the picture, the gaps submenu, the signal, the modules,
@@ -616,7 +618,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.47 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.48 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

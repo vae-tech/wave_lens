@@ -6155,6 +6155,26 @@ def marker_lanes(browser, build):
         await v.run([{ op: 'gaps', view: false, on: false }]); return ok && near && far || [!!F, !!t, near, far];""")
     check(gp is True, f'with gaps on the waves a text stands at its time, dropped on a gap\'s column at the side nearer {gp}')
     check(n0 == 0, f'the page starts without markers of yours {n0}')
+    # the left button while the right one draws a range: a marker at once, M1 M2 …, no question; on a signal's row over it,
+    # under it when over it is taken there, both taken: over it; on the axis at the top; no menu at the end of that range
+    js('await v.run([{ op: "marker", id: "all", delete: true }]); v.fit(); v.draw();')
+    def row_mid(full):
+        return js(f"const b = v.canvas.getBoundingClientRect(), {{ lay, oy }} = WaveLens.internal.peek(v), o = lay.find(o => o.row.full === {full}); "
+                  "return [b.x, b.y + o.y - oy + o.h / 2, b.y + v.hdrH / 2];")
+    c.scroll_into_view_if_needed(); page.wait_for_timeout(50)
+    on = json.dumps(js("const { lay, oy } = WaveLens.internal.peek(v); return lay.find(o => o.row.type === 'sig' && o.row.tr && o.y - oy > v.hdrH + 30).row.full;"))
+    x0, y, _ = row_mid(on); page.mouse.move(x0 + 200, y); page.mouse.down(button='right')
+    for dx in (400, 408, 416, 760):
+        x0, y, _ = row_mid(on); page.mouse.move(x0 + dx, y); page.mouse.down(button='left'); page.mouse.up(button='left'); page.wait_for_timeout(30)
+    x0, _, ya = row_mid(on); page.mouse.move(x0 + 600, ya); page.mouse.down(button='left'); page.mouse.up(button='left'); page.wait_for_timeout(30)
+    page.mouse.move(x0 + 820, y); page.mouse.up(button='right'); page.wait_for_timeout(100)
+    ch = js("return [v.markList().map(m => [m.label, m.signal || null, m.lift || (m.signal ? 'above' : null)]), !!document.querySelector('.wv-menu'), !!v.range, "
+            "v.umarks.every(m => Number.isInteger(m.t))];")
+    sel = json.loads(on)
+    check(ch == [[['M1', sel, 'above'], ['M2', sel, 'below'], ['M3', sel, 'above'], ['M4', sel, 'above'], ['M5', None, None]], False, True, True],
+          f'the left button within a right-button range: markers at once, over the signal, under it when over it is taken, the axis; no menu {ch}')
+    js('await v.undo(); v.draw();'); un = js('return v.markList().map(m => m.label);')
+    check(un == ['M1', 'M2', 'M3', 'M4'], f'each such marker is one step of undo {un}')
     check(not errs, f'no page error {errs}')
     page.close()
 

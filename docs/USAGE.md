@@ -652,7 +652,7 @@ setting is the start; a find left out still floats over the waves on `/`). Navig
 |---|---|---|---|
 | wheel | scroll the rows (as in Questa; `"wheel": "zoom"`: zoom) | ctrl+wheel, pinch | zoom at the pointer by how far it turned (a notch ×1.22) |
 | shift+wheel, a sideways swipe, drag, `← →` | pan | shift+drag, middle-button drag | zoom into the range dragged over |
-| ctrl+drag | measure a range: its ends on the edges of the signal under the pointer, Δ on the axis and in the readout; ctrl+click clears it | right button (drag or click) | the same range, then the menu: zoom, bookmarks at its ends, copy Δ, copy / save the picture (PNG, SVG); the colour, radix, highlight, hiding, folding of the row under it |
+| ctrl+drag | measure a range: its ends on the edges of the signal under the pointer, Δ on the axis and in the readout; ctrl+click clears it | right button (drag or click) | the same range, then the menu: zoom, bookmarks at its ends, copy Δ, copy / save the picture (PNG, SVG); the colour, radix, highlight, hiding, folding of the row under it; a click of the left button while the right one is down: a marker there at once (below) |
 | `i` `+` / `o` `-` | zoom in / out | `f` / `l` | zoom full / last (the window before the last zoom) |
 | `c` | zoom in on the cursor (half the span, the cursor in the middle) | `Home` / `End` | the start / end of the dump |
 | click | cursor (on an edge of that signal within 8 px, else a round time at the zoom; alt+click: no edge) + select the signal | `↑ ↓`, `j k` | select the previous / next signal (in the names column: the arrows) |
@@ -897,6 +897,13 @@ onto a signal and it sits on the thin line over that row (the upper half) or und
 drag also moves it along the time, on the edges of that signal (straight up or down, or with alt: the time stays), and up to the axis it goes back to the top. A click
 on the text puts the cursor there with its label ready in the list; the right button on it: **Its text…**, **Colour**, **Pale again**, **Delete the marker**. The markers
 of the page itself stay where the page puts them.
+
+**Markers at once, with the mouse.** While the right button is down (drawing a range), each click of the left button puts a
+marker where it is, asking nothing: its label is the next of `M1`, `M2` …, its time as the cursor's (on an edge of the
+signal there; alt: not). Clicked on a signal's row, its text goes on the thin line over that row, or under it when over it
+something is there already at that place (a text, a bookmark, a Δ; both taken: over it); clicked on such a line, on that
+line; on the axis, at the top. Releasing the right button then opens no menu (the range stays); the labels, colours and Δ
+bounds are filled in the Markers list under the waves. Each marker is one step of undo.
 
 **The time between markers.** **Δ between markers** in the head of the list under the waves draws an arrow from each of your markers to the next in time, with
 the time in its middle, on a line of its own over the rows; the list says the same beside each marker. Drag an arrow up or down: it goes to the line over or under

@@ -5,6 +5,16 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.48 — 6 November 2026
+
+Markers at once, with the mouse: the left button clicked while the right one draws a range.
+
+- **A marker at each click of the left button while the right one is down**, asking nothing: its label the next of `M1`,
+  `M2` …, its time as the cursor's (on an edge of the signal there; alt: not). On a signal's row its text goes on the line
+  over that row, or under it when over it something is drawn there already (a text, a bookmark, a Δ), so the texts do not
+  overlap (both taken: over it); on such a line, on it; on the axis, at the top. The right button released then opens no
+  menu (the range stays); the labels, colours and Δ bounds are filled in the Markers list. Each marker is one step of undo.
+
 ## 0.47 — 6 November 2026
 
 Colours as hex codes beside their pickers; a piece of the waves saved as `x.wavelens.json` and opened on its own.

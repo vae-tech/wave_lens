@@ -2585,6 +2585,7 @@ const HELP = [
     [['alt+drag'], 'a box: its time and its signals, then the menu (picture, WaveDrom, colour)'], [['ctrl+click'], 'clear the range'],
     [['right button'], 'a range and the menu: picture, colour, radix, duplicate, hide'], [['b'], 'bookmark at the cursor'],
     [[']b', '[b'], 'next / previous bookmark'], [['m'], 'marker at the cursor: its label asked'], [[']m', '[m'], 'next / previous marker'],
+    [['right button + click'], 'the left button while the right one is down: a marker there at once (M1, M2 …; over the signal, else under it)'],
     [['gm'], 'the markers and bookmarks: a list, ↑ ↓ go through them'], [['drag a bookmark'], 'move it'],
     [['drag a marker\'s text'], 'to a line over or under a signal, along the time (alt: the time stays)'],
     [['drag a Δ'], 'between markers (Δ between markers in their list): up and down, to a line over or under a signal; its dot along, to another marker'],
@@ -3497,6 +3498,9 @@ class WaveView {
         return;
       }
       if (drag.range != null) {
+        // the left button pressed while the right one draws the range (a chord: a move whose button is the left): a marker
+        // there, no question asked; the menu does not open at the end of this range
+        if (drag.menu && e.button === 0 && e.buttons & 1) { drag.placed = (drag.placed || 0) + 1; this.markerAt(x, y, e.altKey); return; }
         if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 3) drag.moved = true;
         if (drag.moved) { this.setRange(drag.range, this.pickTime(x, y, drag.free), drag.row); }
         return;
@@ -3515,6 +3519,7 @@ class WaveView {
       if (drag && drag.range != null) {   // a range ends; the right button opens the menu (on it, or on the signal under it)
         const d = drag; drag = null;
         if (!d.moved && !d.menu) this.setRange(null);   // ctrl+click: no range
+        if (d.placed) { this.toast(`${d.placed} marker${d.placed > 1 ? 's' : ''} placed: their labels and Δ bounds in the Markers list`); return; }
         if (d.menu) this.menu(e.clientX, e.clientY, d.mk && !d.moved ? null : d.row, d.range, d.mk && !d.moved ? d.mk.m : null, d.moved ? {} : d);
         return;
       }
@@ -4507,6 +4512,26 @@ class WaveView {
     this.askText(r.left + Math.min(Math.max((t - this.t0) / this.span, 0), 1) * r.width, r.top + this.hdrH + 8, `Marker · ${this.fmtCursor(t)}`, 'its label',
       label => this.run(Object.assign({ op: 'marker', t }, label ? { label } : {})));
     return this;
+  }
+  // a marker at (x, y) at once (the left button while the right one draws a range): the time as the cursor's, on an edge of
+  // the signal there (free: not); its label the next of M1, M2 …; its text on a signal's row in the line over it, or under it
+  // when over it something is there already (both taken: over it), on a line or the axis there (markPlace)
+  markerAt(x, y, free) {
+    const lay = this.lay || [], o = lay.find(q => y >= q.y && y < q.y + q.h), p = this.markPlace(y, lay) || [null, false];
+    const s = p[0] != null ? this.sigByPath(p[0]) : null;
+    const raw = this.tOfX(x), at = free ? raw : this.gapSide(x) ?? (s && this.S.cursorSnap > 0 ? this.snap(s, raw, this.S.cursorSnap) : raw);
+    const t = Math.min(Math.max(at !== raw ? at : this.timeAt(x), this.M.t0), this.M.t1);
+    const n = Math.max(0, ...this.umarks.map(m => +(/^M(\d+)$/.exec(m.label || '') || [])[1] || 0)) + 1, label = `M${n}`;
+    if (o && o.row.type === 'sig' && s) p[1] = [true, 'below'].find(lift => !this.laneTaken(laneId({ signal: p[0], lift }), x, label)) || true;
+    return this.run(Object.assign({ op: 'marker', t, label }, p[0] != null ? { signal: p[0], lift: p[1] } : {}));
+  }
+  // something drawn on the line id (a marker's text, a bookmark and its label, a Δ) where a text from x would be; a line not drawn: free
+  laneTaken(id, x, text) {
+    const h = this.S.laneHeight, yc = laneY(this.lay || [], h).get(id), G = this.bmGeo || {}; if (yc == null) return false;
+    const x1 = x + text.length * 7 + 8, on = y => Math.abs(y - yc) < h / 2, over = (a, b) => a < x1 + 4 && b > x - 4;
+    const ws = new Map(this.bms.map(b => [b.n, 10 + (b.label ? b.label.length * 7 + 8 : 0)]));
+    return (G.tags || []).some(g => on(g.y) && over(g.x, g.x + g.w + 2)) || (G.dtags || []).some(g => on(g.y) && over(g.x0, g.x1)) ||
+      [...(G.pos || new Map())].some(([k, [px, py]]) => on(py) && over(px - 9, px + (ws.get(k) || 10)));
   }
   // dragged (d: markAt with where it started): the line from y, the time from x as a bookmark's, edges of its signal; a drag
   // straight up or down and free (alt) leave the time
@@ -9748,7 +9773,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.47',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.48',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,
