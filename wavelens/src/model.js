@@ -817,11 +817,14 @@ const zeroTime = z => (z == null || z === '' ? null : typeof z === 'number' ? z 
 // a zero before the waves begin (t0: a window cut out of a long dump, AU-WL-001): the edges before them counted at the clock's
 // mean period over the edges there are, so the first edge is cycle (ups[0] − zero) / period, as the tools number it on the
 // whole dump (a zero within 2 % of a period after an edge counts as on it: the period is measured). Waves that begin at the
-// zero or before it (a whole dump, a clock that starts late): cycle 0 is the first edge at or after it (review 2026-11-05 B-04)
+// zero or before it (a whole dump, a clock that starts late): cycle 0 is the first edge at or after it (review 2026-11-05 B-04).
+// The period count only for a clock running at t0 (its first edge in the window within a period of t0): one that starts later in
+// the window had no edge before it, its first edge is cycle 0 (review 2026-11-05 runs B-25; vcd2wavedrom.py cycle_window)
 const cycZero = (ups, zero, t0 = -Infinity) => {
   if (zero == null || !isFinite(zero)) return 0;
   if (ups.length > 1 && zero < t0 - timeEps(t0) && zero < ups[0] - timeEps(ups[0])) {
-    const per = (ups[ups.length - 1] - ups[0]) / (ups.length - 1); if (per > 0) return -Math.floor((ups[0] - zero) / per + 0.02);
+    const per = (ups[ups.length - 1] - ups[0]) / (ups.length - 1);
+    if (per > 0 && ups[0] - t0 <= per * 1.02 + timeEps(ups[0])) return -Math.floor((ups[0] - zero) / per + 0.02);
   }
   return lastBefore(ups.length, j => ups[j], zero - timeEps(zero), true) + 1;
 };

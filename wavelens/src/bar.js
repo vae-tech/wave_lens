@@ -17,6 +17,8 @@ const TIPS = {
   'act:dsrc': ['SystemVerilog sources: the names of "typedef enum" on the state buses of a VCD (it has none), "typedef struct packed" as ' +
     'fields; kept for the next read (⟳)'],
   'act:dcmp': ['Compare with a second dump (a VCD of another run): where its values differ, a red band on the row, ≠ on the name', [']d', '[d']],
+  'act:druns': ['The runs kept of this dump (VS Code): keep this one with a name, tags, a comment; compare with one over the waves in sight ' +
+    'or a span of yours', ['gu', ']r', '[r']],
   'act:dcmpx': ['Compare no more'], 'act:dcmpv': ['Which run the waves show: this one, the second, both over each other', ['d', 'D']],
   'act:fprev': ['Previous match', ['N', 'shift+Enter']], 'act:fnext': ['Next match', ['n', 'Enter']],
   'act:fhl': ['Found rows in front, the rest dimmed'], 'act:fopen': ['Fold the modules without a match'],
@@ -144,6 +146,8 @@ const HELP = [
     [[']d', '[d'], 'next / previous difference from a dump compared (Compare… in the bar)'],
     [['d'], 'a dump compared: flip the waves between the two runs (the time axis names the one shown)'],
     [['D'], 'a dump compared: both runs over each other where they differ, again one'],
+    [['gu'], 'the runs kept of this dump (VS Code): keep this one, compare with one over the waves in sight or a span'],
+    [[']r', '[r'], 'compare with the next (older) / previous run kept, over the same window'],
     [['1', '…', '9'], 'go to bookmark 1 … 9'], [['ctrl+drag'], 'measure a range: Δ, the edges or changes of that signal'],
     [['alt+drag'], 'a box: its time and its signals, then the menu (picture, WaveDrom, colour)'], [['ctrl+click'], 'clear the range'],
     [['right button'], 'a range and the menu: picture, colour, radix, duplicate, hide'], [['b'], 'bookmark at the cursor'],
@@ -175,12 +179,13 @@ const KEY_MENUS = {
     ['d', v => (v.deltas ? 'hide the Δ between markers' : 'show the Δ between markers'), v => v.umarks.length], ['c', 'clear them all', anyMark],
     ['The state'], ['s', 'save…', onBar('ssave')], ['L', 'load…', onBar('sload')], ['r', 'reload', v => v.root.wlState],
     ['The dump'], ['O', 'open…', onBar('dopen')], ['R', 'reload', v => v.opts.dumpSrc], ['C', 'compare…', onBar('dcmp')],
+    ['u', 'the runs kept…', onBar('druns')],
     ['More'], ['v', v => (v.gapLive() ? 'the waves in continuous time' : 'the gaps cut out of the waves')], ['p', 'save the page', onBar('spage')]]],
   z: ['Fold the modules', [['R', 'open every module'], ['M', 'fold every module'], ['o', 'open the selected signal\'s'], ['c', 'fold the selected signal\'s'],
     ['a', 'open or fold it']]],
   y: ['Copy', [['y', 'the selected signal\'s path'], ['n', 'its name'], ['t', 'the time of the cursor'], ['l', 'a link to here (the cursor, the signal)']]],
-  ']': ['Next', [['b', 'bookmark'], ['m', 'marker'], ['e', 'edge'], ['d', 'difference', v => v.cmp]]],
-  '[': ['Previous', [['b', 'bookmark'], ['m', 'marker'], ['e', 'edge'], ['d', 'difference', v => v.cmp]]],
+  ']': ['Next', [['b', 'bookmark'], ['m', 'marker'], ['e', 'edge'], ['d', 'difference', v => v.cmp], ['r', 'run kept (compared)', v => v.runsHost()]]],
+  '[': ['Previous', [['b', 'bookmark'], ['m', 'marker'], ['e', 'edge'], ['d', 'difference', v => v.cmp], ['r', 'run kept (compared)', v => v.runsHost()]]],
 };
 
 const WD_CELLS = 2048;   // the cycles a WaveDrom export keeps at most (the rest of the range is said, not dropped silently)
@@ -302,7 +307,8 @@ class Bar {
         '<span class="seg cmpv" hidden><button type="button" data-act="dcmpv" data-run="a" aria-pressed="true">A</button>' +
         '<button type="button" data-act="dcmpv" data-run="b" aria-pressed="false">B</button>' +
         '<button type="button" data-act="dcmpv" data-run="overlay" aria-pressed="false">A+B</button></span>' +
-        '<input type="file" class="cfile" accept=".vcd" hidden>'),
+        '<input type="file" class="cfile" accept=".vcd" hidden>' +
+        `<button type="button" data-act="druns"${v.runsHost() ? '' : ' hidden'}>Runs…</button>`),
       '<button type="button" data-act="dsrc" title="SystemVerilog sources, or the design\'s types (x.types.json: Questa, Verilator)">Sources…</button>' +
       '<input type="file" class="srcfile" accept=".sv,.svh,.v,.vh,.json" multiple hidden>');
     const zoom = seg('<button type="button" data-act="out" title="Zoom out (−)">−</button>',
@@ -409,6 +415,7 @@ class Bar {
       else if (b.dataset.act === 'dopen') v.openDump();
       else if (b.dataset.act === 'gapvx') v.setGaps({ gapView: false });
       else if (b.dataset.act === 'dcmp') v.cfile.click();
+      else if (b.dataset.act === 'druns') v.runsPanel();
       else if (b.dataset.act === 'dcmpx') { if (v.cmpReading) v.compareStop(); else v.compare(null); }
       else if (b.dataset.act === 'dcmpv') v.compareView(b.dataset.run);
       else if (b.dataset.act === 'dsrc') v.srcfile.click();

@@ -876,6 +876,19 @@ class Split(unittest.TestCase):
         self.assertEqual([(x['signal'], x.get('lift'), x.get('label')) for x in on],
                          [('tb.PSEL', None, '✓ 0'), ('tb.PSEL', 'above', '✓ 1'), ('tb.PSEL', 'below', '+2')], 'one group, not two circles on one spot')
 
+    def test_a_pattern_of_a_row_is_its_moment(self):   # review 2026-11-05 (runs) B-29: a pattern resolved before grouping
+        c = Split.cfg(self)
+        doc = json.loads(json.dumps(DOC))
+        doc['tests'][0]['marks'] = [{'t': 7, 'kind': 'check', 'ok': True, 'got': str(i), 'expected': str(i), 'text': '', 'signal': s}
+                                    for i, s in enumerate(('PSEL', '*PSEL', 'PSEL', 'PS?L'))]
+        testmarks.merge(c, doc)
+        on = [x for x in c['views']['v']['bookmarks'] if x['t'] == 7]
+        self.assertEqual([(x['signal'], x.get('lift'), x.get('label')) for x in on],
+                         [('PSEL', None, '✓ 0'), ('PSEL', 'above', '✓ 1'), ('PSEL', 'below', '+2')], 'one group of PSEL\'s row')
+        rows = {p: p for p in ('$rootio.PSEL', 'tb.PSEL', 'tb.u_x.PSEL', 'tb.TEST_CASE')}
+        self.assertEqual([testmarks.row_for(rows, p) for p in ('*TEST_*', 'tb.u_*.PSEL', '*PSEL', '*nothing*')],
+                         ['tb.TEST_CASE', 'tb.u_x.PSEL', '*PSEL', '*nothing*'], 'the one row it matches; several or none: as it is (the page decides)')
+
     def test_many_marks_of_one_moment(self):   # more than the lanes hold: one "+k", red when one of them failed
         c = Split.cfg(self)
         doc = json.loads(json.dumps(DOC))
@@ -1123,6 +1136,14 @@ class Page(unittest.TestCase):
             f.write('{"wavelens": "marks", "version": 9}')
         self.assertIn('version 9', self.build('--marks', self.marks)[2])
         self.assertEqual(self.build('--marks', self.marks + '.none')[0], 1)
+
+    def test_a_marks_file_with_a_bom(self):   # review 2026-11-05 (runs) B-27: saved again by a Windows editor, a BOM before it
+        with open(self.marks, 'w', encoding='utf-8-sig') as f:
+            json.dump({**DOC, 'step': None, 'steps': {}}, f)
+        self.assertEqual(testmarks.load(self.marks)['wavelens'], 'marks')
+        rc, _, err = self.build('--marks', self.marks)
+        self.assertEqual(rc, 0, err)
+        self.assertIn('mkhtml: marks: 2 tests: 1 passed, 1 failed', err)
 
 
 if __name__ == '__main__':

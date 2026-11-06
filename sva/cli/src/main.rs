@@ -8,6 +8,7 @@
 //!   sva fst DUMP.vcd [--out FILE.fst]                              the VCD as an FST beside it, as vcd2fst writes it
 //!   sva vcd DUMP --from T --to T [--signals PAT,...]               a cut: the values at T as $dumpvars, the changes to T
 //!   sva diff A B [--map A=B] [--segment SIGNAL [--align]] [...]   two dumps compared change by change, streamed
+//!   sva runs [keep DUMP | list | set RUN | rm RUN | diff DUMP] [...]   the runs kept of a dump, compared over a window
 //!   sva report [--md F] [--junit F] [--html F] [--json F] RESULTS.json...   the report of results documents
 //!
 //! Exit status: 0 everything evaluated passed; 1 a failure, or an attempt without verdict (capped: the thread limit);
@@ -22,6 +23,7 @@
 mod diff;
 mod resdiff;
 mod fst;
+mod runs;
 mod vcd;
 
 use std::collections::BTreeMap;
@@ -101,6 +103,9 @@ const USAGE: &str = "usage: sva parse [--json] [--expand] [-D NAME[=VALUE]] FILE
                 (two dumps compared change by change: sva diff --help)
        sva diff --results A.json B.json [--map A=B ...] [--json [FILE.json|-]] [--junit FILE] [--limit N]
                 (two runs' assertion results: new, gone, moved failures, covers lost)
+       sva runs keep DUMP [--name N] [--tags T,...] [--comment C] | list | set RUN ... | rm RUN... | path RUN
+       sva runs diff DUMP [--run RUN ...] [--from T --to T] [--signals PAT,...] [--signals-from FILE] [--json]
+                (the runs kept of a dump in .wavelens-runs beside it, the dump compared with them: sva runs --help)
        sva report [--title T] [--md F] [--junit F] [--html F] [--json F] [--max-failures N] RESULTS.json...   (- for stdout)
 TIME is a number with a unit (100ns, 2.5us; ps without one). --alias: a shown name of a config (the page's alias) for
 the variable at PATH. --report: .md, .html, .xml (JUnit), .json (the results with the meta, as a page's report.json;
@@ -164,7 +169,7 @@ fn time(s: &str) -> Result<u64, String> {
     Ok((n * f).round() as u64)
 }
 
-fn count(v: &str, what: &str) -> Result<u64, String> {
+pub(crate) fn count(v: &str, what: &str) -> Result<u64, String> {
     v.parse().map_err(|_| format!("{what} is a number, not '{v}'"))
 }
 
@@ -446,7 +451,7 @@ fn edges(w: &simple::Waveform, clk: SignalRef, edge: &str) -> Vec<TimeTableIdx> 
     out
 }
 
-fn ns(ps: u64) -> String {
+pub(crate) fn ns(ps: u64) -> String {
     time_text(ps, "ps")
 }
 
@@ -922,6 +927,7 @@ fn run() -> ExitCode {
         Some("vcd") => return vcd::vcd_cmd(&argv[1..]),
         Some("fst") => return fst::fst_cmd(&argv[1..]),
         Some("diff") => return diff::diff_cmd(&argv[1..]),
+        Some("runs") => return runs::runs_cmd(&argv[1..]),
         Some("eval") => &argv[1..],
         _ => &argv[..],
     };

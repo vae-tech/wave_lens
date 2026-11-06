@@ -208,6 +208,12 @@ class MkHtml(unittest.TestCase):
             rc, out, err = H.run_tool('mkhtml', '--config', c, '--lint', '--lint-json', j)
             self.assertEqual(rc, 1, err)
             self.assertEqual(H.load(j), {'count': 0, 'warnings': [], 'error': 'mkhtml: "marksPhases": true or false, not "yes"'}, 'into a file the same')
+            # review 2026-11-05 (runs) B-26: a view built with a warning, a later one that fails: the warning kept with the error
+            H.dump({**self.CFG, 'views': {'a': {'bookmarks': [{'n': 1, 't': 1, 'signal': 'nope', 'text': 'x'}]}, 'b': {'signals': 'tb.nothing'}}}, c)
+            rc, out, err = H.run_tool('mkhtml', '--config', c, '--lint', '--lint-json', '-')
+            got = json.loads(out)
+            self.assertEqual((rc, got['count'], [(w['code'], w['view']) for w in got['warnings']]), (1, 1, [('bookmark-signal-missing', 'a')]), err)
+            self.assertIn('tb.nothing', got['error'])
 
     @H.needs(__import__('svabuild').find_bin(), 'the sva CLI (make sva-build)')
     def test_junit_of_every_view(self):

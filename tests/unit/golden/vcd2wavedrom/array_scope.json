@@ -1,0 +1,21 @@
+{
+ "signal": [
+  ["top",
+    ["q",
+      {"name": "[0]", "width": 8, "wave": "==.", "data": ["0x00", "0x03"], "tv": [[0, "00"], [10000, "03"]], "path": "top.q.[0]"},
+      {"name": "[1]", "width": 8, "wave": "=..", "data": ["0x01"], "tv": [[0, "01"]], "path": "top.q.[1]"}
+    ],
+    ["m",
+      {"name": "[1][2]", "width": 4, "wave": "=..", "data": ["2"], "tv": [[0, "2"]], "path": "top.m.[1][2]"}
+    ],
+    ["ptr",
+      {"name": "[0]", "width": 1, "wave": "01.", "tv": [[0, "0"], [10000, "1"]], "path": "top.ptr.[0]"},
+      {"name": "[1]", "width": 1, "wave": "1.0", "tv": [[0, "1"], [20000, "0"]], "path": "top.ptr.[1]"}
+    ]
+  ]
+ ],
+ "head": {"text": "array_scope.vcd"},
+ "time": {"t0": 0, "t1": 30000, "cycle": 10000, "unit": "ps"},
+ "config": {"hscale": 1},
+ "meta": {"waves": "array_scope.vcd", "tool": "wavelens reader", "mode": "exact", "from_ps": 0, "to_ps": 30000}
+}

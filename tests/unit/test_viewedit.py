@@ -1168,3 +1168,17 @@ class Review1105(unittest.TestCase):
         r = e.run([{'op': 'find', 'query': 'state'}])[0]
         self.assertEqual((r['count'], 'not counted' in r['plugins']), (2, True))
         self.assertNotIn('fold', e.st.get('config') or {})
+
+    def test_only_groups_after_a_state(self):
+        """B-30 of the review of 2026-11-05 (runs): a state with only and no groups sets the next set's groups to the setting's,
+        as view.js setState (onlyGrp undefined); with groups: that one; a state without only: the one before stays."""
+        e = ed()
+        r = e.run([{'op': 'group', 'name': 'mix', 'signals': ['clk', 'tb.dut.valid']}, {'op': 'only', 'groups': False},
+                   {'op': 'set_state', 'state': {'wavelens': 'state', 'only': {'modules': ['tb.dut'], 'on': True}}},
+                   {'op': 'only', 'clear': True}, {'op': 'only', 'modules': ['tb.dut']}])
+        self.assertEqual((r[-1]['only'], r[-1]['groups']), ({'modules': ['tb.dut'], 'on': True}, True))
+        self.assertEqual(e.st['only'], {'modules': ['tb.dut'], 'on': True})
+        r = e.run([{'op': 'set_state', 'state': {'wavelens': 'state', 'only': {'modules': ['tb.dut'], 'groups': False}}},
+                   {'op': 'only', 'clear': True}, {'op': 'set_state', 'state': {'wavelens': 'state', 'only': None}},
+                   {'op': 'only', 'modules': ['tb.dut']}])
+        self.assertEqual(r[-1]['only'], {'modules': ['tb.dut'], 'on': True, 'groups': False})   # only null: the groups kept

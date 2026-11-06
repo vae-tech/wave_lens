@@ -82,6 +82,7 @@ window.WAVELENS_CONFIG = {
   cycleClock: null,             //   the clock counted (a full path or a name); null: the clock found (a 1-bit *clk* / *clock*)
   cycleZero: null,              //   the time of cycle 0 (its rising edge at or after it); null: the clock's first rising edge;
                                 //   before the waves begin (a window of a long dump): the edges before counted at the clock's period
+                                //   (a clock that starts later than a period into the window: its first edge is cycle 0)
   log: 'auto',                  // the log under the viewer (what was done, what went wrong, a JSON file's error with its line): 'auto'
                                 //   from the first thing done in the page (a dump read, Sources…, Load…), true / false: always / never
   savePage: true,               // the bar's Save page: this page as a file with your view in it (false: off; the page's text is kept for it)

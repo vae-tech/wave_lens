@@ -907,13 +907,15 @@ class WaveView {
       const cmpAgain = keep && this.cmp && !this.cmp.result && this.cmpSrc ? { ...this.cmpSrc, run: this.cmpRun } : null;
       const st = keep ? this.state() : null, root = this.root, opts = Object.assign({}, this.opts,
         { title: file.name, dumpSrc: { name: file.name, handle, file }, dumpDate: r.info.date, svWhy: why, svRun: run, loadCodes: file.wlLoad || null }),
-        panel = keep && this.fsmPanelOf();
+        panel = keep && this.fsmPanelOf(), runs = keep && this.runsOf();
+      if (this.runsP) this.runsP.close(true);   // its listeners go with it (the root is emptied)
       this.destroy(); root.innerHTML = '';
       const v = new WaveView(root, r.doc, opts); v.panelBox = this.panelBox;   // the panels open where they were
       if (st) { delete st.title; if (cmpAgain) { delete st.compare; delete st.compareShow; } await v.setState(st); }
       if (cmpAgain) { const c = await v.compare(cmpAgain.file, cmpAgain.name);
         if (c && cmpAgain.run && cmpAgain.run !== 'a') await v.compareView(cmpAgain.run); }
       v.fsmPanelAgain(panel);   // the FSM panel stays open (⟳)
+      await v.runsAgain(runs);   // the Runs panel too, and the run compared is compared again with the new waves
       const bad = r.log.filter(x => x.level !== 'info').length;
       v.toast((file.wlLazy ? `${file.name}: ${r.total} signals in ${r.info.scopes} modules, read as you open them` : `${file.name}: ${r.shown} of ${r.total} ` +
           `signals${r.shown < r.total ? ` (dumpBudget ${this.S.dumpBudget} changes: the levels nearest the top)` : ''}`) +
@@ -1316,6 +1318,7 @@ class WaveView {
       o.meas = JSON.stringify(this.M.measures || []);   // the page's measures these markers began from (loadBookmarks)
       if (!bms && !o.markers.length) localStorage.removeItem(this.bmKey); else localStorage.setItem(this.bmKey, JSON.stringify(o));
     } catch (e) { /* private mode */ }
+    if (this.runsP) this.runsP.windows();   // the Runs panel's spans as they are now
   }
   when(t) { return this.M.timed ? fmtExact(t) : trimNum(t); }
   // typed time: "250ns", "85.12us"; a plain number is in the unit shown (µs for "85.120 µs"), or cycles
@@ -1390,6 +1393,7 @@ class WaveView {
     else if (s === 'gO') bar('dopen');
     else if (s === 'gR') this.reloadDump();
     else if (s === 'gC') bar('dcmp');
+    else if (s === 'gu') this.runsPanel(true);
     else if (s === 'yn') { if (this.sel) this.copyText(this.sel.name); }
     else if (s === 'yt') this.copyText(this.when(this.cursor));
     else if (s === 'yl') this.copyText(this.linkTo({ t: this.cursor, sel: this.sel && this.sel.full }));

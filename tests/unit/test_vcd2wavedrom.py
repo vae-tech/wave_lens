@@ -652,6 +652,16 @@ class RowNames(unittest.TestCase):
             self.assertIn('open pair', lint[0])
             self.assertIn('no measure', lint[1])
 
+    def test_a_measure_of_nothing(self):   # review 2026-11-05 (runs) B-28: its two ends one time (one event at both): measure-empty
+        with H.tmp() as d:
+            ms = [{'label': 'same', 'from': '20ns', 'to': 20000}, {'from': {'signal': 'o_done', 'edge': 'rise'}, 'to': {'signal': 'o_done', 'edge': 'rise'}},
+                  {'label': 'ok', 'from': '20ns', 'to': '30ns'}]
+            doc, err = self.page(d, False, signals=['clk', 'o_done'], group={}, measures=ms)
+            self.assertEqual([(m['from'], m['to']) for m in doc['measures']], [(20000, 20000), (10000, 10000), (20000, 30000)])   # kept, said
+            lint = [x.split('lint: ', 1)[1] for x in err.splitlines() if 'measure-empty' in x]
+            self.assertEqual([x.split(': ')[1] for x in lint], ['measures[0] (same)', 'measures[1]'])
+            self.assertIn('one time (20ns)', lint[0])
+
     def test_also_adds_rows_by_name_and_pattern(self):
         with H.tmp() as d:
             doc, err = self.page(d, False, also=['*_other', 'o_done', 'gone', '*nothing*'])
@@ -749,8 +759,10 @@ class Lint(unittest.TestCase):
         """AU-WL-001: a window with cycleZero before it: the page counts the edges before it at the clock's period; the dump's
         own count differs only when the clock stops between (cycle-zero-window), and the build says so."""
         hdr = '$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! clk $end\n$upscope $end\n$enddefinitions $end\n'
-        def run(stop):
+        def run(stop, late=None):
             ts = [t for t in range(5, 200, 10) if not (stop and 30 < t < 80)]   # rises every 10 ns from 5 ns (stop: none in 35..75)
+            if late:   # none from late[0] to late[1]: the clock off at the window's start (100 ns), on inside it
+                ts = [t for t in ts if not late[0] < t < late[1]]
             body = '#0\n0!\n' + ''.join(f'#{t}\n1!\n#{t + 5}\n0!\n' for t in ts)
             with H.tmp() as d:
                 cfg = os.path.join(d, 'w.config.json')
@@ -765,6 +777,13 @@ class Lint(unittest.TestCase):
         self.assertEqual(len(w), 1, w)
         self.assertIn('config.cycleZero: before the window', w[0])
         self.assertIn('cycle 10, the dump\'s 5', w[0])   # edges 5 15 25, none to 75, 85 95 105
+        # review 2026-11-05 (runs) B-25: a clock that starts inside the window (the first edge at 125 ns, two periods in): the page
+        # numbers that edge 0 (model.js cycZero: no period count), as the dump does: no lint; edges before it, the clock off over
+        # the window's start: the page's 0 is not the dump's 3, said
+        self.assertEqual(run(False, (0, 120)), [])
+        w = run(False, (30, 120))
+        self.assertEqual(len(w), 1, w)
+        self.assertIn('cycle 0, the dump\'s 3', w[0])   # edges 5 15 25, none to 115, 125
 
     def test_clean(self):
         self.assertEqual(self.lint(bookmarks=[{'n': 1, 't': '100ns', 'signal': 'u.state'}, {'n': 2, 't': 500000, 'signal': 'tb.d.x'}],

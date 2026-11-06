@@ -5,6 +5,41 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.44 — 6 November 2026
+
+The runs kept of a dump: keep a run by hand, compare the run of now with it over one window, in VS Code, the shell and for an
+agent; and the fixes of the review of the runs.
+
+- **The runs kept of a dump.** A simulator writes its dump over the last one; now you keep the runs you want to look back at,
+  by hand, and compare the run of now with them over one window. In VS Code **Runs…** (`gu`, *WaveLens: The runs kept of this
+  dump*): **Keep this dump…** with a name, tags and a comment — the dump as an FST in `.wavelens-runs` beside it (`runs.json`,
+  a `.gitignore` of its own; `wavelens.runsDir` elsewhere); a click on a run (↑ ↓, `]r` `[r` anywhere) compares these waves
+  with it over the waves in sight or a span of yours, only that window of the run read (`sva diff`, then its values of the
+  signals that differ there): the compare's bands, ≠, `]d [d`, A / B / A+B, the view kept from run to run; **Δ all**: every
+  run's differences in the window on its row. In the shell `sva runs keep | list | set | rm | path | diff` (a line per run:
+  how many signals differ, the first difference); for an agent `wave_runs`.
+- **The fixes of the review of the runs** (`docs/reviews/review-2026-11-05-runs`). B-01: `sva runs diff` holds the first
+  difference of a run, not every one (`sva diff --limit` bounds the differences held; `only_a`, `only_b` whole whatever it
+  is): its memory is `sva diff`'s. B-02: VS Code's tab no longer throws EPIPE when the CLI exits before reading its input (one
+  way to run it, its stdin guarded). B-03: a `.gitignore` of `*` only in a directory of runs of its own; a folder of yours gets
+  one of the runs' files. B-04: `rm` finds every run first. B-05 … B-12, B-19 … B-21: the panel follows your span by what it is,
+  comes back with the dump read again and compares with the run again, lists the runs of this dump (the others counted; `--all`),
+  reads the list again for `]r [r` and when `runs.json` changes, compares once the list's keys stop (the compare before
+  stopped), says equal or why the run's values are not shown, drops the compare of a run removed, keeps ✎ ✕ in reach of a long
+  name, greys Δ numbers of another window. B-10, B-13 … B-18, B-22, B-23: `sva runs` takes DUMP for set, rm, path, keeps a
+  run's FST kept again in its directory, checks `runs.json` (a file a plain name, a newer version refused), refuses an empty
+  name and the options of another verb, takes `--opt=value`, says a wrong window once, a run that does not cover the window
+  "not in this window", the signals of one side and a kind change in its text; old `.part` files swept; `wave_runs` `rm` in ns.
+- **onlyGroups and 0.43's leftovers** (the same review). B-08: `]d [d` step to the differences of a group's row that Only keeps
+  whole (the rows drawn, not the model's). B-30: `viewedit.py` sets the next Only set's `groups` from a state's `only` as the
+  page does. B-24: an array element declared in its own scope (`$scope module ptr` + `$var … [0]`) is `top.ptr.[0]`, found as
+  `ptr[0]`, `ptr.[0]`, `top.ptr[0]` by `wave_signals`, `wave_values` and `sva vcd --signals` (one `glued()` rule in the tools
+  and the CLI). B-25: a window whose clock starts inside it numbers its first edge 0, as `wave_sample`; the period count with
+  `cycleZero` before the window only for a clock running at its start. B-26: `mkhtml --lint-json` of a build that fails in a
+  later view keeps the warnings of the views built. B-27: a marks file with a BOM is read (`--marks`, `wave_tests`). B-28: the
+  lint `measure-empty` for a measure whose two ends are one time. B-29: a pattern spelling of a row (`wl.note(signal="*PSEL")`)
+  at one moment shares that row's lanes.
+
 ## 0.43 — 5 November 2026
 
 Your groups whole under Only, and the fixes of the review of 5 November: measures and cycles in a cut window, array

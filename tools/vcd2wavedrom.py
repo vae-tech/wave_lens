@@ -903,7 +903,8 @@ def measures_of(a, rd=None, bms=(), specs=(), t_from=None, t_to=None):   # (rd N
     """The measurements of the options (a list, or its JSON text from --measures), their ends in ps -> the WaveJSON's "measures"; an end
     is a time, {"bookmark": n} or an event as a span's ends take it ({"signal": "u.state", "value": 5, "from": "1300ns"}), so a measure in a
     document holds the next run too (P-21). Its ends in order, as a span's (review 2026-11-05 B-16); an event that never happens in the
-    window is the lint measure-no-match, not an error: a "to" leaves an open pair (one marker), a "from" leaves the measure out."""
+    window is the lint measure-no-match, not an error: a "to" leaves an open pair (one marker), a "from" leaves the measure out; its
+    two ends at one time (one event at both): the lint measure-empty (review 2026-11-05 runs B-28)"""
     v = a.measures
     if isinstance(v, str):
         try:
@@ -911,7 +912,7 @@ def measures_of(a, rd=None, bms=(), specs=(), t_from=None, t_to=None):   # (rd N
         except json.JSONDecodeError as e:
             raise WaveError(f'vcd2wavedrom: --measures: {e}') from None
     out = []
-    a.measure_no_match = []
+    a.measure_no_match, a.measure_empty = [], []
     for i, m in enumerate(v if isinstance(v, list) else [v]):
         where = f'{where_of(a)}measures[{i}]'
         if not isinstance(m, dict) or m.get('from') is None:
@@ -931,6 +932,8 @@ def measures_of(a, rd=None, bms=(), specs=(), t_from=None, t_to=None):   # (rd N
             continue
         if ends['to'] is not None and ends['to'] < ends['from']:
             ends['from'], ends['to'] = ends['to'], ends['from']
+        if ends['to'] is not None and ends['to'] == ends['from']:
+            a.measure_empty.append((where, m.get('label'), ends['from']))
         x = {**m, **ends}
         out.append({k: (int(t) if isinstance(t, float) and t.is_integer() else t) for k, t in x.items()})
     return out
@@ -1307,8 +1310,9 @@ def lint_item(w, view=None):
 
 def cycle_window(a, rd, doc, specs, t_from, t_to):
     """AU-WL-001: the page numbers the cycles of a window with cycleZero before it by the clock's mean period in the window
-    (model.js cycZero); the dump has the edges themselves: [(the page's number of the window's first edge, the dump's, its time)]
-    when they differ (the clock stopped or changed its period between), else []."""
+    (model.js cycZero) when the clock runs at the window's start (its first edge within a period), else that edge is its cycle 0;
+    the dump has the edges themselves: [(the page's number of the window's first edge, the dump's, its time)] when they differ
+    (the clock stopped or changed its period between), else []."""
     st = {**(getattr(a, 'page_config', None) or {}), **(doc.get('config') or {})}
     z, cc = st.get('cycleZero'), st.get('cycleClock')
     zero = z if isinstance(z, (int, float)) and not isinstance(z, bool) else parse_time(z) if isinstance(z, str) and z.strip() else None
@@ -1321,7 +1325,8 @@ def cycle_window(a, rd, doc, specs, t_from, t_to):
     per = (ups[-1] - ups[0]) / (len(ups) - 1) if len(ups) > 1 else 0
     if per <= 0:
         return []
-    page, dump = math.floor((ups[0] - zero) / per + 0.02), len(rd.edges(abs_, 'posedge', zero, ups[0])) - 1
+    run = ups[0] - t_from <= per * 1.02   # the clock running at the window's start; else its first edge is cycle 0 (B-25)
+    page, dump = math.floor((ups[0] - zero) / per + 0.02) if run else 0, len(rd.edges(abs_, 'posedge', zero, ups[0])) - 1
     return [(page, dump, ups[0])] if page != dump else []
 
 
@@ -1414,6 +1419,8 @@ def lint(doc, a, where=None):
         out.append(f'span-every-no-match: {where}: "every" {expr} matches nothing in the window: no span')
     for where, what, k in getattr(a, 'measure_no_match', []):
         out.append(f'measure-no-match: {where}: {what}: ' + ('the measure is an open pair (one marker)' if k == 'to' else 'no measure'))
+    for where, label, t in getattr(a, 'measure_empty', []):
+        out.append(f'measure-empty: {where}' + (f' ({label})' if label else '') + f': its two ends are one time ({fmt_t(t)}): a measure of nothing')
     sva = doc.get('sva') or {}
     for note in sva.get('notes') or []:
         if note.startswith('bind: no assertion') or note.endswith('matches no assertion'):

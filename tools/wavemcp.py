@@ -136,7 +136,7 @@ class Wave(vcd2wavedrom.Builtin):
                                     else f'"{name}": {path} is a {self.decl.vars[path].kind}, it has no bits to select')
                 return path, (hi, lo)
         under = [p for p in self.decl.vars if not scope or p.startswith(scope.rstrip('.') + '.')]
-        glued = lambda p: p.replace('.[', '[')   # an array element either way: "ptr[1]", "ptr.[1]" (WL-009)
+        glued = dumpscan.glued   # an array element either way: "ptr[1]", "ptr.[1]" (WL-009), one rule with sva vcd's
         tails = sorted((p for p in under if glued(p).endswith('.' + glued(name))), key=lambda p: (glued(p).count('.'), p))
         if len(tails) == 1:
             return tails[0], None
@@ -334,7 +334,7 @@ def t_signals(a):
     scope = (a.get('scope') or '').rstrip('.')
     pat = (a.get('pattern') or '').strip()
     # * and ? as wildcards, [ as it is: an array element either way, q[0] / q.[0] (WL-009; review 2026-11-05 B-06)
-    G = lambda s: s.replace('.[', '[')
+    G = dumpscan.glued
     gp, rx = G(pat), None
     if pat and any(c in pat for c in '*?'):
         rx = re.compile(''.join('.*' if c == '*' else '.' if c == '?' else re.escape(c) for c in gp), re.I)
@@ -854,7 +854,7 @@ def marks_files(d):
                 if os.path.getsize(p) > MARKS_MAX:
                     why = f'over {MARKS_MAX >> 20} MB'
                 else:
-                    with open(p, encoding='utf-8') as fh:
+                    with open(p, encoding='utf-8-sig') as fh:   # a BOM: as testmarks.load (B-27)
                         doc = json.load(fh)
             except OSError as e:
                 why = e.strerror or 'not readable'
@@ -1835,6 +1835,86 @@ def t_diff(a):
     return d
 
 
+RUN_ACTIONS = ('list', 'keep', 'set', 'rm', 'diff')
+
+
+def t_runs(a):
+    """sva runs: the runs kept of a dump (.wavelens-runs beside it, as the VS Code Runs panel keeps them) -> list: dir, runs
+    (newest first); keep: the run kept; set: the run changed; rm: removed; diff: the dump against each run (or "run") over a
+    window, times in ns."""
+    act = a.get('action') or 'list'
+    if act not in RUN_ACTIONS:
+        raise WaveError(f'"action": one of {", ".join(RUN_ACTIONS)}')
+    exe = sva_exe(a, 'wave_runs')
+    cmd = [exe, 'runs', act]
+    d = os.path.abspath(os.path.expanduser(str(a['dir']))) if a.get('dir') else None
+    dump = dump_path(a) if act in ('keep', 'diff') or (a.get('dump') and not d) else None
+    if not d:
+        d = os.path.join(os.path.dirname(dump), '.wavelens-runs') if dump else None
+    if not d:
+        raise WaveError('"dump" (the runs beside it) or "dir" (the directory of runs)')
+    if act in ('set', 'rm') and a.get('run') in (None, ''):
+        raise WaveError('"run": its number or name')
+    runs = a.get('run') if isinstance(a.get('run'), list) else [] if a.get('run') in (None, '') else [a['run']]
+    if act in ('keep', 'diff') or (act == 'list' and dump):
+        cmd.append(dump)
+    if act in ('set', 'rm'):
+        cmd += [str(x) for x in runs]
+    cmd += ['--dir', d] + (['--json'] if act != 'path' else [])
+    if a.get('all') and act in ('list', 'diff'):
+        cmd.append('--all')
+    if act in ('keep', 'set'):
+        if a.get('name'):
+            cmd += ['--name', str(a['name'])]
+        if a.get('tags') is not None:
+            tags = a['tags'] if isinstance(a['tags'], list) else str(a['tags']).split(',')
+            cmd += ['--tags', ','.join(str(t).strip() for t in tags)]
+        if a.get('comment') is not None:
+            cmd += ['--comment', str(a['comment'])]
+    if act == 'diff':
+        for x in runs:
+            cmd += ['--run', str(x)]
+        for k in ('from', 'to'):
+            t = cli_time(a, k)
+            if t is not None:
+                cmd += [f'--{k}', t]
+        if a.get('signals'):
+            cmd += ['--signals', cli_names(dump, a['signals'], a.get('scope') or '')]
+        elif a.get('scope'):
+            cmd += ['--scope', a['scope']]
+        for x, y in (a.get('map') or {}).items():
+            cmd += ['--map', f'{x}={y}']
+        cmd += ['--limit', str(limit(a, 20))]
+    r = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    try:
+        out = json.loads(r.stdout) if r.stdout.strip() else None
+    except ValueError:
+        out = None
+    if out is None or (r.returncode not in (0, 1) and act != 'diff'):
+        raise WaveError('; '.join(fst_notes(r.stderr)) or f'sva runs {act}: exit {r.returncode}')
+    t = lambda v: None if v is None else ns(v)
+    run = lambda x: {**x, 'start': t(x.get('start')), 'end': t(x.get('end'))} if 'start' in x else x
+    if act == 'list':
+        return {'dir': out.get('dir', d), 'unit': 'ns', 'runs': [run(x) for x in reversed(out.get('runs', []))], 'others': out.get('others', 0)}
+    if act in ('keep', 'set'):
+        return {'unit': 'ns', **run(out)}
+    if act == 'rm':
+        return {'unit': 'ns', 'removed': [run(x) for x in out.get('removed', [])]}
+    first = lambda f: f and {**f, 't': ns(f['t']), 'a': bits_text(f['a']), 'b': bits_text(f['b'])}
+    for x in out.get('runs', []):
+        for k in ('from', 'to'):
+            if k in x:
+                x[k] = t(x[k])
+        if 'first' in x:
+            x['first'] = first(x['first'])
+        for s in x.get('signals', []):
+            s['first'] = first(s.get('first'))
+    out.update(unit='ns', **{k: t(out.get(k)) for k in ('from', 'to')})
+    out.pop('wavelens', None)
+    out.pop('version', None)
+    return out
+
+
 def t_cut(a):
     """sva vcd --from --to --signals: a window of a dump as a small VCD (the values at "from" as $dumpvars)."""
     src = dump_path(a)
@@ -2112,6 +2192,16 @@ TOOLS = [
          'results_a, results_b (instead of a, b): the assertions\' results of two runs (sva eval --json) -> new, gone, moved failures per assertion.',
          {'a': S, 'b': S, 'signals': None, 'scope': None, 'from': None, 'to': None, 'offset': T, 'map': {'type': 'object'}, 'segment': S,
           'align': B, 'limit': None, 'spans': N, 'results_a': S, 'results_b': S}, ()),
+    tool('wave_runs', t_runs, 'The runs kept of a dump (.wavelens-runs beside it, FSTs with a name, tags, a comment: the ones the VS Code '
+         'Runs panel keeps) -> action list: dir, runs of this dump [id, name, tags, comment, kept, dump, start, end] newest first '
+         '(others: of other dumps, all: true lists them); keep: the dump as a '
+         'run (name, tags, comment); set: a run\'s name, tags, comment; rm: runs removed; diff: the dump against each run (run: a number, '
+         'a name or a list of them) over a window (from, to; signals, scope, map) -> per run signals_compared, signals_differ, first '
+         '[t, signal, a, b], the signals that differ (limit). Which run before broke it: diff over the test\'s window. '
+         'Then wave_diff with b = dir/file of a run for the details.',
+         {'action': {'type': 'string', 'enum': list(RUN_ACTIONS)}, 'dump': S, 'dir': S, 'run': {'type': ['integer', 'string', 'array'], 'items': {'type': ['integer', 'string']}},
+          'all': B, 'name': S, 'tags': {'type': ['string', 'array'], 'items': S}, 'comment': S, 'from': None, 'to': None, 'signals': None, 'scope': None,
+          'map': {'type': 'object'}, 'limit': None}, (), ro=False),
     tool('wave_cut', t_cut, 'Cut a window (and some signals) out of a dump into a small VCD (out): the values at "from" first, '
          'then the changes up to "to" -> out, bytes, variables, from, to. For Compare… on a page, a fixture, sending one test case.',
          {'dump': None, 'out': S, 'from': None, 'to': None, 'signals': None}, ('dump', 'out'), ro=False),

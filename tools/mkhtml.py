@@ -13,7 +13,7 @@
 Lint (printed at every build, "mkhtml: lint: <code>: <JSON path>: <text>"; docs/USAGE.md "Lint"): bookmark-bad, arrow-bad, bookmark-outside-view,
 bookmark-signal-missing, bookmark-duplicate, bookmark-time, bookmark-key, bookmark-link-missing, arrow-end-missing, arrow-key, marker-no-match,
 marker-key, bind-unknown, svashow-no-match, bookmarks-close (a heuristic), enum-colors-hex, span-outside-view,
-span-signal-missing, span-key, span-every-no-match, compare-spans-cut, measure-no-clock, state-signal-missing, state-svg, expr-name-missing, exprs-no-engine, gap-view-off, setting-signal-missing, cycle-zero-window, measure-no-match, also-no-match, also-cut. A marker or a span "every" on a signal the dump has not got
+span-signal-missing, span-key, span-every-no-match, compare-spans-cut, measure-no-clock, state-signal-missing, state-svg, expr-name-missing, exprs-no-engine, gap-view-off, setting-signal-missing, cycle-zero-window, measure-no-match, measure-empty, also-no-match, also-cut. A marker or a span "every" on a signal the dump has not got
 is no warning: the build stops there, as for any name of the config (marker-no-match: the signal is there, the event never happens).
 
 Config keys used here (the rest is vcd2wavedrom.py's, see its --help):
@@ -446,7 +446,7 @@ def main():
     ap.add_argument('--strict', action='store_true', help='a lint warning is an error (exit 1, no page)')
     ap.add_argument('--lint-json', metavar='FILE', help='the lint warnings as JSON into FILE (- stdout): {"count", "warnings": [{"code", "where", '
                     '"message", "view", and what it is about: "signal" / "name", "rows" it may mean}]}, written at every build, '
-                    'a failed one too with "error": its message (exit 1)')
+                    'a failed one too with "error": its message (exit 1) and the warnings of the views built before it')
     ap.add_argument('--marks', metavar='FILE', help='the marks of a cocotb test (python/wavelens_cocotb.py): its tests as spans, bookmarks and jumps '
                     'in every view (a view\'s "marks": false keeps it out; replaces the top-level "marks")')
     ap.add_argument('--junit', metavar='FILE', help='the assertions of every view as JUnit XML (a testsuite per view, a testcase per binding, '
@@ -471,10 +471,16 @@ def main():
     except WaveError as e:   # B-13: a script reading --lint-json gets an object on a failed build too (the text on stderr, exit 1)
         if a.lint_json:
             msg = str(e)
-            write_lint_json(a, {**getattr(a, 'lint_obj', {'count': 0, 'warnings': []}), 'error': msg if msg.startswith('mkhtml:') else f'mkhtml: {msg}'})
+            write_lint_json(a, {**lint_obj(a), 'error': msg if msg.startswith('mkhtml:') else f'mkhtml: {msg}'})
         raise
     if a.lint_json:
-        write_lint_json(a, a.lint_obj)
+        write_lint_json(a, lint_obj(a))
+
+
+def lint_obj(a):
+    """--lint-json: the warnings of the views built so far (build_views collects them view by view: a later view that fails
+    keeps the earlier ones' warnings, review 2026-11-05 runs B-26)."""
+    return {'count': getattr(a, 'lint_count', 0), 'warnings': getattr(a, 'lint_items', [])}
 
 
 def write_lint_json(a, obj):
@@ -516,13 +522,12 @@ def build(a):
     for view in (cfg.get('views') or {}).values():
         view.pop('marks', None)   # (false, and no marks to keep it from)
     docs, renders, sva_views = build_views(a, cfg, base)
-    n = getattr(a, 'lint_count', 0)
-    a.lint_obj = {'count': n, 'warnings': getattr(a, 'lint_items', [])}   # --lint-json: written by main() at the end, an "error" with it on a failure
+    n = getattr(a, 'lint_count', 0)   # --lint-json: written by main() at the end, an "error" with it on a failure (lint_obj)
     if a.lint or a.strict:
         print(f'mkhtml: lint: {n} warning{"s" if n != 1 else ""}' + (' (--strict: no page)' if n and a.strict and a.out else ''), file=sys.stderr)
     if n and a.strict:
         if a.lint_json:
-            write_lint_json(a, a.lint_obj)
+            write_lint_json(a, lint_obj(a))
         sys.exit(1)
     if not a.out:   # --lint alone: the check, no page
         return

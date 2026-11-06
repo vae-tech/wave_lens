@@ -13,7 +13,8 @@ wavelens/                     what a page needs, nothing else
                               and what they draw), bar.js (the bar: Bar, tooltips, help), names.js (the names column Names, the lists Notes), view.js (WaveView), menu.js (its menus), look.js (what it keeps in this browser, gaps, cycles), warp.js (the gaps on the waves: time ↔ screen, its frame and painting), edit.js (the
                               viewer's commands view.run, your groups and markers, undo, Save page, the live link),
                               diff.js (a second dump compared: bands, A / B / overlay), modules.js (the Modules panel and Only), fsm.js (the
-                              state machines panel and its layer), log.js (the log under the viewer), svg.js
+                              state machines panel and its layer), runs.js (the runs kept: the Runs panel, ]r [r; its
+                              host is VS Code's), log.js (the log under the viewer), svg.js
                               (WaveSVG), boot.js (themes, configure, upgrade, exports): one scope, in this order
   wavelens.config.js          global settings file (all keys, with defaults), loaded before wavelens.js
   sva.js, sva.wasm.js         assertions and expressions in the page: their panels, binding, evaluation, marks; the engine (generated, make sva-build)
@@ -74,7 +75,8 @@ tests/
 work/                         your dumps and their configs: configs tracked, dumps and pages git-ignored
 sva/                          the SVA engine (Rust: core, native CLI, WebAssembly); the CLI's sva vcd (cli/src/vcd.rs:
                               a dump as VCD text, a cut of it), sva fst (cli/src/fst.rs: a VCD as an FST, as vcd2fst
-                              writes it) and sva diff (cli/src/diff.rs: two dumps streamed and merged by time)
+                              writes it), sva diff (cli/src/diff.rs: two dumps streamed and merged by time) and sva runs
+                              (cli/src/runs.rs: the runs kept of a dump, .wavelens-runs/runs.json, diff over a window)
 prompts/                      the roadmap as a series of prompts (on dev only)
 bin/                          the prebuilt sva CLI, committed: linux-x86_64/sva (static); windows-x86_64/sva.exe by make dist-windows
 out/                          build products (make's BUILD, git-ignored): cargo target, example dumps and pages, shots

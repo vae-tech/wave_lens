@@ -95,6 +95,31 @@
 <p>A large B is read once, only its signals that could be the page's rows and only over the page's time; the toast says how far
   it is, and <span class="ui">≠ … ✕</span> in the bar stops the read.</p>
 
+<h2 id="runs">The runs kept (VS Code)</h2>
+<p>A simulator writes its dump over the last one, so the run before is gone once you run again. Keep the runs you want to
+  look back at, by hand, and step through them over one window:</p>
+<ol class="steps">
+  <li><span class="ui">Runs…</span> in the bar's <b>dump</b> group (<kbd>g</kbd> <kbd>u</kbd>, or <i>WaveLens: The runs kept of this
+    dump</i>) opens the Runs panel. <span class="ui">Keep this dump…</span>: a name (the dump's by default), tags and a comment;
+    the dump as it is on the disk goes into <code>.wavelens-runs</code> beside it as an FST (a VCD converted, the FSM states of
+    its <code>x.types.json</code> kept), listed in <code>runs.json</code>. The directory has a <code>.gitignore</code> of its own:
+    git leaves it out. <code>wavelens.runsDir</code> puts it elsewhere (a folder of yours: only the runs' files ignored, and the
+    panel lists this dump's runs).</li>
+  <li>Choose the window: <span class="ui">over</span> the waves in sight, or one of your spans (a test case: the spans of
+    cocotb's marks, <code>"every"</code> in a config).</li>
+  <li>Click a run (or ↑ ↓ in the list, <kbd>]</kbd> <kbd>r</kbd> / <kbd>[</kbd> <kbd>r</kbd> anywhere): these waves are compared with
+    it over that window only, and only that window of the run is read — a run of gigabytes costs the window, not its size. Then
+    it is a compare as above: the bands, ≠, <kbd>]d</kbd> <kbd>[d</kbd>, A / B / A+B, and the view you chose stays from run to run.</li>
+  <li>↑ ↓ in the list compare once you stop on a run. The dump read again after a new simulation keeps the panel and compares
+    with the run again; the status says equal, or what differs first, and why the run's values are not shown when they are not.</li>
+  <li><span class="ui">Δ all</span> asks every run at once: how many signals differ in the window and the first difference, on each
+    run's row (red: some). The run where it broke stands out.</li>
+</ol>
+<p>✎ changes a run's name, tags or comment, ✕ removes it with its file (VS Code asks first). The runs are of the same test:
+  signals by their path, the same time. In the shell the same list: <code>sva runs keep tb.vcd --name golden --tags seed1</code>,
+  <code>sva runs</code>, <code>sva runs diff tb.vcd --from 4us --to 6us</code> (a line per run), <code>sva runs path golden</code> for
+  <code>sva diff</code>; an agent has <code>wave_runs</code>.</p>
+
 <h2 id="shell">From the shell</h2>
 <p>The page keeps B's signals in memory. For dumps of hundreds of MB, for CI, or for two testbenches whose scopes are named apart,
   compare them in the shell: <code>sva diff</code> reads both as streams, neither in memory, and compares their values as
@@ -132,7 +157,7 @@ B: apb_b.vcd  0 ps … 205 ns, 58 signals
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.43 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.44 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

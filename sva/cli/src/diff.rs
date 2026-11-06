@@ -42,7 +42,7 @@ in B, is listed (not_in_a, only_a), not an error.
 --offset: B's time is A's time plus this. --segment: the counts per segment, a segment from each change of that signal
 in A; --align: segment k of B starts at the k-th change of the signal in B and compares on the length both have (the
 rest of a longer segment is not compared). --json: the result as JSON (times in ps) to FILE (a name ending with .json, as
-the dumps can follow), or stdout instead of the text; --junit: a JUnit XML report, a test case per segment. --limit: differences listed (default 20, 0 all); --spans:
+the dumps can follow), or stdout instead of the text; --junit: a JUnit XML report, a test case per segment. --limit: differences listed and kept (default 20, 0 all: each one held in memory; only_a / only_b are whole); --spans:
 per signal its stretches that differ in the JSON (default 0: none). --rank: the signals by their first difference (the first N,
 default 20): who differed first and what followed, by time only (no cause: the dumps have no netlist). TIME is a number with a unit (100ns, 2.5us; ps without one).
 Exit status: 0 the dumps are equal over the window; 1 they differ; 2 usage, a dump that does not read, a signal not
@@ -152,6 +152,8 @@ struct Opt {
     spans: usize,
     rank: usize,
     quiet: bool,
+    /// the document returned, nothing written (sva runs diff: one per run kept)
+    silent: bool,
 }
 
 fn opts(args: &[String]) -> Result<Opt, String> {
@@ -652,7 +654,7 @@ pub fn diff_cmd(args: &[String]) -> ExitCode {
         }
     };
     match run(&o) {
-        Ok(equal) => ExitCode::from(if equal { 0 } else { 1 }),
+        Ok((equal, _)) => ExitCode::from(if equal { 0 } else { 1 }),
         Err(e) if e.is_empty() => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("sva: {e}");
@@ -661,8 +663,8 @@ pub fn diff_cmd(args: &[String]) -> ExitCode {
     }
 }
 
-/// The comparison -> the dumps are equal over the window.
-fn run(o: &Opt) -> Result<bool, String> {
+/// The comparison -> the dumps are equal over the window, and the JSON document.
+fn run(o: &Opt) -> Result<(bool, Value), String> {
     let da = open(&o.a, o.quiet)?;
     let db = open(&o.b, o.quiet)?;
     let (ha, hb) = (da.w.hierarchy(), db.w.hierarchy());
@@ -1071,7 +1073,8 @@ fn run(o: &Opt) -> Result<bool, String> {
             }
             x
         }).collect::<Vec<_>>(),
-        "only_a": limited(&only_a, o.limit), "only_b": limited(&only_b, o.limit),
+        // whole whatever --limit (names, as many as the signals): --limit bounds the differences kept, not these
+        "only_a": only_a.clone(), "only_b": only_b.clone(),
         "only_a_count": only_a.len(), "only_b_count": only_b.len(), "not_in_a": not_in_a,
         "segments": m.segs.iter().map(|s| {
             let mut x = json!({"n": s.n, "value": s.value, "from": s.from, "to": s.to, "changes": s.changes, "differ": s.differ, "first": diff_json(&s.first)});
@@ -1091,6 +1094,9 @@ fn run(o: &Opt) -> Result<bool, String> {
         doc["rank"] = ps.iter().take(o.rank).map(|p| { let d = p.first.as_ref().unwrap_or_else(|| unreachable!());
             json!({"signal": p.a, "t": d.t, "a": shown(&d.a), "b": shown(&d.b), "after_first_ps": d.t - t0}) }).collect::<Vec<_>>().into();
     }
+    if o.silent {
+        return Ok((equal, doc));
+    }
     if let Some(f) = &o.junit {
         write_file(f, &junit(&doc, &m, o))?;
     }
@@ -1104,7 +1110,15 @@ fn run(o: &Opt) -> Result<bool, String> {
         }
         None => text(&doc, &m, other, o),
     }
-    Ok(equal)
+    Ok((equal, doc))
+}
+
+/// `sva diff A B` with these options as the JSON document it writes, nothing printed (sva runs diff): Err a usage error
+/// or a dump that does not read.
+pub(crate) fn diff_doc(args: &[String]) -> Result<Value, String> {
+    let mut o = opts(args)?;
+    (o.silent, o.quiet) = (true, true);
+    run(&o).map(|(_, d)| d)
 }
 
 /// The cut between the segments of --align: A's segment start plus the length both have.
@@ -1124,10 +1138,6 @@ fn cut_of(a0: Option<i64>, b0: Option<i64>, a_next: i64, b_next: Option<i64>, b_
 
 fn plural(n: u64, what: &str) -> String {
     format!("{n} {what}{}", if n == 1 { "" } else { "s" })
-}
-
-fn limited(v: &[String], limit: usize) -> Vec<String> {
-    v.iter().take(if limit == 0 { usize::MAX } else { limit }).cloned().collect()
 }
 
 fn write_file(f: &str, text: &str) -> Result<(), String> {

@@ -8,6 +8,8 @@
      (wavelens.openLastState);
    - Compare… -> an open dialog on the host and sva diff there (the second dump, VCD or FST, never sent here): its result
      over the tab's waves (compareResult);
+   - the runs kept (WAVELENS_RUNS, the Runs panel): sva runs on the host (.wavelens-runs beside the dump), a run compared
+     over a window as Compare… compares;
    - navigator.clipboard.writeText -> the client's clipboard through VS Code;
    - the live link's EventSource / fetch / sendBeacon to 127.0.0.1 -> the host's 127.0.0.1 (the agent's wavemcp.py);
    - the theme: VS Code's light / dark, its own colours (wavelens.theme: vscode) or one of the viewer's;
@@ -93,6 +95,17 @@
       for (const f of m.files) dt.items.add(new File([unb64(f.b64)], f.name, { lastModified: f.mtime }));
       this.files = dt.files; this.dispatchEvent(new Event('change', { bubbles: true }));
     });
+  };
+
+  /* ---- the runs kept (the Runs panel, gu): sva runs on the host, in .wavelens-runs beside the dump ---- */
+  G.WAVELENS_RUNS = {
+    list: () => call('runs', { op: 'list' }),
+    keep: b => call('runs', Object.assign({}, b, { op: 'keep' })),
+    // a run's number goes as "run" (the message's "id" is its answer's)
+    set: (run, b) => call('runs', Object.assign({}, b, { op: 'set', run })),
+    rm: run => call('runs', { op: 'rm', run }),
+    diff: b => call('runs', Object.assign({}, b, { op: 'diff' })),
+    compare: b => call('runs', Object.assign({}, b, { op: 'compare', run: b.id, id: undefined })),
   };
 
   /* ---- clipboard ---- */
@@ -225,6 +238,9 @@
   on.changed = m => { const v = view(); if (!v) return;
     if (m.auto) reload(); else v.toast(`${H.name} changed on the disk: ⟳ (or wavelens: Read the dump again) reads it, the view kept`); };
   on.reload = () => reload();
+  on['runs-panel'] = () => { const v = view(); if (v) v.runsPanel(true); };
+  // runs.json changed (a keep in a shell, an agent's wave_runs, another tab): the list read again
+  on['runs-changed'] = () => { const v = view(); if (!v || !v.runsL) return; if (v.runsP) v.runsP.load(); else v.runsList(true).catch(() => {}); };
   on.run = async m => { let results; const v = view();
     try { results = v ? await v.run(m.ops || []) : { error: 'no viewer' }; } catch (e) { results = { error: e.message }; }
     vscode.postMessage({ type: 'result', rid: m.rid, results }); };

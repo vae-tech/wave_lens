@@ -6,7 +6,7 @@ buttons are its changes in the dump, so a page whose marks and dump are of diffe
 """
 import copy, json, re
 
-from common import WaveError, parse_time
+from common import WaveError, glob_re, parse_time
 
 RESULTS = {'pass': ('PASS', '#2f9e44'), 'fail': ('FAIL', '#e03131'), 'xfail': ('FAIL (expected)', '#e8590c'), 'run': ('NOT FINISHED', '#e03131')}
 TAIL = 0.12   # of the run, or of a test in its own view: the window past its end, where the last bookmark's text goes
@@ -69,9 +69,9 @@ def fmt_ps(ps):
 
 
 def load(path):
-    """The marks file, checked."""
+    """The marks file, checked (a BOM before it, as a Windows editor saves it again, is no error: review 2026-11-05 runs B-27)."""
     try:
-        with open(path, encoding='utf-8') as f:
+        with open(path, encoding='utf-8-sig') as f:
             doc = json.load(f)
     except OSError as e:
         raise WaveError(f'{path}: {e.strerror}') from None
@@ -159,6 +159,10 @@ def path_for(rows, sig):
     top, the rows of a whole dump's config from the dump's; the top's port and the same one further down are two rows); none: sig."""
     if sig is None or sig in rows or not rows:
         return sig
+    if '*' in sig or '?' in sig:   # a pattern (wl.note(signal="*PSEL")): the one row it matches, by its path, name or alias, so that
+        rx = glob_re(sig)          # one_moment groups it with the row's other marks (B-29); several: as it is (the page's first)
+        hit = [p for p, a in rows.items() if not set('*?$') & set(p) and any(rx.fullmatch(x) for x in (p, p.rsplit('.', 1)[-1], a))]
+        return hit[0] if len(hit) == 1 else sig
     ends = sorted((p.count('.'), p) for p in rows if p.endswith('.' + sig) and '$' not in p)   # ($rootio: Verilator's copy of the top's ports)
     return ends[0][1] if ends and (len(ends) == 1 or ends[0][0] < ends[1][0]) else sig
 

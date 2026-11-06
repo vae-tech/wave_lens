@@ -191,7 +191,8 @@ mkhtml: lint: bookmark-outside-view: views.drop.bookmarks[0] (n 1): 1133.8us is 
 For a script, `mkhtml.py --lint-json FILE` (`-`: stdout) writes them as JSON at every build, nothing to parse: `{"count", "warnings":
 [{"code", "where", "message", "view", …}]}`, and what a warning is about where it says it: `"signal"` (a bookmark's or a span's, of
 `bookmark-signal-missing`, `span-signal-missing`) or `"name"` (`expr-name-missing`), and `"rows"`, the rows of the view it may mean.
-A build that fails (a bad config, a dump or a signal not there) writes the object too, with `"error"`: the message it prints, exit 1.
+A build that fails (a bad config, a dump or a signal not there) writes the object too, with `"error"`: the message it prints, exit 1;
+the warnings of the views built before the one that failed are in it.
 
 **For CI.** `--junit report.xml`: the assertions of every view as JUnit XML (a testsuite per view, a testcase per binding, a failure
 for one that failed; an error for one that could not run: `missing` — its signals are not in the dump — or `capped`, attempts
@@ -218,7 +219,8 @@ page). The checks:
 | `expr-name-missing`, `exprs-no-engine` | an expression reads a name the page will not find (its row would stay empty and look like "never true"); expressions on a page without the engine (`--no-sva`, `"sva": false`) |
 | `gap-view-off`, `setting-signal-missing` | `gapView` without `gaps` does nothing; `cycleClock`, `gapClock`, `gapSignals` or `gapAux` name no row of the view, with the cycles or the gaps on |
 | `measure-no-match` | an end of a measure (an event) never happens in the window: a `to` leaves an open pair (one marker), a `from` leaves the measure out; a measure whose end comes before its start is taken in order |
-| `cycle-zero-window` | a window (`--from`) with `cycleZero` before it: the page counts the edges before the window at the clock's period, and the dump's own count differs (the clock stops or changes its period between): set `cycleZero` inside the window |
+| `measure-empty` | a measure whose two ends are one time (one event at both, a bookmark twice): a Δ of 0, measuring nothing |
+| `cycle-zero-window` | a window (`--from`) with `cycleZero` before it: the page counts the edges before the window at the clock's period (its first edge in it: cycle 0 when the clock starts later than a period in), and the dump's own count differs (the clock stops or changes its period between): set `cycleZero` inside the window |
 | `bind-unknown` | a binding to an assertion that is not in the files (`mc_fsm_gap` for `mc_fsm_from_gap`) |
 | `svashow-no-match` | an `svaShow` name or pattern that matches no assertion |
 | `bookmarks-close` | two circles on one row nearer than 16 px at 1000 px of the whole window: they overlap (a heuristic; `"lift": true` puts one in the lane above, `"below"` in the one under; the marks of a cocotb test at one time are put apart by themselves: § Marks from a cocotb test) |
@@ -626,7 +628,7 @@ Time: **cursor** (a time and its unit, **Set**; a span, **Show** = that window a
 **edges** (◀ edge kind ▶, + Mark), **go to** (marker jumps, the assertions' failures). Find: the field, **Aa Full .\***,
 count, ‹ ›, Highlight / Open / Mask, colour + Paint (Unpaint when something is painted), Select, Copy. Expression (`sva.js`, on the same line): **ƒ Expressions** opens their list, ◀ ▶ through the matches of the one you are on. Rows and files:
 **list** (Sort and the ignored prefixes, Expand / Collapse, Modules, FSMs, clear highlight, show the hidden rows, Only), **style** (the edges:
-auto, slanted, vertical, square), **state** (Save, Load…, Reload, Save page), **dump** (Open…, Compare…, Sources…), **assertions** (Load file…). Keys work once the waves have the focus (a click on the
+auto, slanted, vertical, square), **state** (Save, Load…, Reload, Save page), **dump** (Open…, Compare…, Runs… in VS Code, Sources…), **assertions** (Load file…). Keys work once the waves have the focus (a click on the
 waves or on a name); with ctrl, alt or ⌘ held they stay the browser's (ctrl+S saves the page, it does not sort), except
 ctrl+C, ctrl+F, ctrl+G (`gl` too: your groups), ctrl+Z / ctrl+shift+Z / ctrl+Y (undo, redo), alt+↑ ↓ and alt+shift+↑ ↓ (the order of your groups). Hover any button, field or list for what it does and its keys; **?** at the right of the title line
 (key `?`) opens the box of all the keys and the mouse, the plugins' too.
@@ -661,10 +663,11 @@ setting is the start; a find left out still floats over the waves on `/`). Navig
 | `b` | bookmark at the cursor | `]b [b` | the next / previous bookmark |
 | `m` | marker at the cursor: its label asked (Enter) | `]m [m` | the next / previous marker |
 | `r` | the last state loaded, read again (Reload) | `R` | the dump read again from the disk, the view kept (⟳) |
-| `g` | a moment after it (`keyHints`) a box says what can follow, to press or to click, as long as it stays open (Esc, or a key it does not list: it closes, nothing else): go to `gg gl gt gT`, markers and bookmarks `gm gM gB gd gc`, the state `gs gL gr`, the dump `gO gR gC`, `gv`, `gp` | `z y [ ]` | the same box: fold, copy, next, previous |
+| `g` | a moment after it (`keyHints`) a box says what can follow, to press or to click, as long as it stays open (Esc, or a key it does not list: it closes, nothing else): go to `gg gl gt gT`, markers and bookmarks `gm gM gB gd gc`, the state `gs gL gr`, the dump `gO gR gC gu`, `gv`, `gp` | `z y [ ]` | the same box: fold, copy, next, previous |
 | `gM` `gB` | a marker, a bookmark at the cursor (as `m`, `b`) | `gd` `gc` | the Δ between markers on / off; clear every bookmark, arrow and marker of yours |
 | `gt` `gT` | the Modules panel, the state machines (as `t`, `T`) | `gs` `gL` `gr` | the state: Save, Load…, Reload |
 | `gO` `gR` `gC` | the dump: Open…, ⟳, Compare… | `gp` | Save page |
+| `gu` | the runs kept of the dump (VS Code: the Runs panel, *The runs kept of a dump*) | `]r` `[r` | compare with the next (older) / previous run kept, over the same window |
 | `yn` `yt` | copy the selected signal's name; the time of the cursor | `yl` | copy a link to here: the cursor and the selected signal ([§ A link to a moment](#a-link-to-a-moment)) |
 | `gm` (the right button's **Markers…**) | the markers (the page's, yours) and the bookmarks in a list over the waves, by time (a line at its top filters them as you type, the list in its order, the others hidden; ↓ the first shown, Enter the best match; Enter with nothing typed closes it): `↓` the first (`↑` the last), then `↑ ↓` Home End step through them, a click picks one — the cursor on it and the waves at its time with the span they have: a marker in the middle, a bookmark as going to it does (below); Enter or Esc closes it there | `gl`, ctrl+G | your groups: a list (filtered as you type) |
 | shift+click the waves | a second cursor (dashed, on an edge): Δ to the cursor in time, its frequency (`Δ 40 ns / 25 MHz`) and in cycles of the clock (the cycles band's when it is on, else the selected signal's, else the nearest `*clk*`) on the axis and in the readout; the value column says each row at both and the change, `0x04 · 0x40 · +0x3c` (a bus modulo its width, in hex or its radix — bin `+0b101`, oct, signed `−64`; a float or a fixed point `q8` the difference of the values, `+0.5`; ascii and an enum `IDLE → SETUP`; a bit ↑ ↓ =; x or z: ?; its title both forms, `+0xc0 (−0x40)`; the right button's **Copy A · B · Δ** copies them); `x` swaps the two; Esc clears it | `1` … `9` | go to that bookmark (each bookmark's line shows its Δ from the cursor; the bookmarks and markers at the cursor are marked in their lists) |
@@ -735,7 +738,8 @@ or open as you left them: pick signals of several modules into a group, then Onl
 is still there in full. **Your groups whole** in the panel (the setting `onlyGroups`, true) turns it off: then a group
 keeps only the signals of the modules Only keeps, as every row. The find counts the matches it leaves out (**no match · 8 outside Only**); the picture,
 WaveDrom, Paint, `]d [d` and the assertions' steps take only what is in the view (a clock left out still gives
-WaveDrom its cells). It is in the saved state (`"only": {"modules": [...], "on": true}`, `"groups"` when not the page's `onlyGroups`), Save page and undo, and not
+WaveDrom its cells; a signal of your group whole is in it, its module left out or not). It is in the saved state (`"only": {"modules": [...], "on": true}`,
+`"groups"` when not the page's `onlyGroups`; a state with `"only"` and no `"groups"` sets the next set to the setting's too), Save page and undo, and not
 kept in this browser: a page opened again starts with every module. The command [`only`](#commands-and-edits) does the
 same from a script or an agent.
 
@@ -1047,6 +1051,50 @@ one: `first to differ: tb.c at 10 ns; then tb.a (+8 ns), tb.b (+20 ns)`, and `"r
 Only the order in time: the dumps have no netlist to say what caused what. On a page, Compare… says the same in its toast (`first PSEL,
 then PENABLE +10 ns`).
 
+**The runs kept of a dump (VS Code).** The dump of a run is gone when the simulator writes the next one over it; to compare the
+run of now with the ones before, keep them by hand: **Runs…** in the bar's dump group (`gu`, the command *WaveLens: The runs
+kept of this dump*, `$(history)` in the tab's title) opens the Runs panel, and **Keep this dump…** keeps the dump as it is on the
+disk with a name (the dump's by default), tags (a comma between them) and a comment: as an FST (a VCD converted as `sva fst`
+does it, its `x.types.json` read; an FST copied) in `.wavelens-runs` beside the dump (`wavelens.runsDir`: another directory,
+relative to the workspace folder or absolute), listed in its `runs.json`. A directory keep made, or one named `.wavelens-runs`,
+gets a `.gitignore` of `*` (git leaves it out); another one without a `.gitignore` (a folder of yours named by
+`wavelens.runsDir`) gets one of the runs' files only (`*.fst`, `*.part`, `runs.json*`), never more. The panel lists the runs of
+this dump (by its file name; a shared `wavelens.runsDir` holds others, counted in the panel's header). It lists them newest first (#number, name, tags, when kept, the dump, the comment); a click on one
+(Enter; ↑ ↓ Home End PgUp PgDn in the list: once they stop) compares these waves with it over a window — **over** the waves in sight, or one of your spans (a test
+case's: `"every"` in a config, cocotb's marks): `sva diff` of the dump and the run's FST over that window only, then the run's
+values of the signals that differ there (at most 32 MB, as Compare… takes them), so a large run costs its window, not its
+size; the status says equal, or how many signals differ and the first, the rows the run has not, and when the run's values
+could not be loaded (too many changes in the window: bands only) why. A compare asked while another runs stops it. What
+follows is a compare as Compare… makes it: red bands, ≠ on the names, `]d [d`, A / B / A+B (`d`, `D`) — the
+view you had (B, A+B) is kept from one run to the next. `]r` `[r` compare with the next (older) and the previous run in the
+same window, the panel open or not; **Δ all** lists for every run how many signals differ in the window and the first
+difference (red: some, `= equal`: none, `not in this window`: the run does not cover it; numbers of another window than the
+one now are greyed with their window); ⟳ compares again over the window as it is now; your span chosen is followed by what
+it is (deleted: the waves in sight again, said); the dump read again (⟳, a new simulation) keeps the panel and compares
+with the run again; a run kept meanwhile in a shell or by an agent is listed at once (`runs.json` watched); ✎ (`e`) changes a run's name, tags,
+comment; ✕ (Delete) removes it and its file (asked first; the run compared: the compare goes too). The runs are the same dump's runs: its signals by their paths,
+the same time (two runs of one test; a run of another length is compared on the time both cover). In a browser there is no
+Runs panel: the runs are kept by `sva runs`.
+
+**The runs kept, in the shell.** `sva runs keep DUMP [--name N] [--tags T,...] [--comment C]` keeps a run (the same directory,
+`--dir` another; a dump inside a directory of runs, a run's FST kept again: that directory); `sva runs [list] [DUMP | DIR]`
+lists them (DUMP: its runs, the others counted; `--all` every one), `sva runs set RUN [DUMP] --name … --tags … --comment …`
+changes one (RUN: its number, `3` or `#3`, or its name; an empty name refused), `sva runs rm RUN... [DUMP]` removes them
+(every RUN found first: one not there removes none), `sva runs path RUN [DUMP]` prints its FST's path (for `sva diff`,
+`sva vcd`); for set, rm and path the last word is DUMP when it is a file or a directory. `sva runs diff DUMP [--run RUN ...]
+[--all] [--from T --to T] [--signals …|--signals-from FILE] [--json]` compares the dump with each of its runs (or those of
+`--run`) as `sva diff` does over the window, holding the first difference only (its memory is `sva diff`'s, whatever the
+run): per run how many signals differ, the first difference, the signals that differ (`--limit`, default 20; one of another
+kind with its kind), the signals of one side only; a run that does not cover the window is "not in this window". A window
+whose end is before its start, an empty `--signals-from`, a list of signals no run has: said once. An option of another verb
+is refused; `--opt=value` is taken. Exit status 0 every run equal, 1 one differs or does not cover the window, 2 a usage
+error, a dump or run that does not read. `runs.json` is checked as it is read: a run's file a plain name in the directory, a
+version this WaveLens reads. A keep killed leaves a `.part` file: the next keep or rm removes it after ten minutes. `--json` everywhere: the run (keep, set), the list (`{"wavelens": "runs", "others": N, "runs":
+[{id, file, name, tags, comment, dump, source, kept, bytes, source_bytes, start, end, signals}]}`, times in ps), the
+comparison (`{"wavelens": "runs-diff", "from", "to" (the window asked), "others", "runs": [{id, name, equal, outside?, from, to,
+signals_compared, signals_differ, first, signals, more, only_a, only_b}]}`). `sva diff --limit` bounds the differences listed
+and held; `only_a` and `only_b` are whole whatever it is.
+
 **The assertions' results of two runs.** `sva diff --results A.json B.json` compares two results JSON of `sva eval --json`: an assertion
 of A pairs with the one of B of its name and scope (`--map` renames A's scopes); their failed attempts pair by their start — a failure of
 B with none of A at its start is **new**, one of A with none in B **gone**, a pair whose failure came at another cycle **moved**; as many
@@ -1142,7 +1190,8 @@ settings (`cycles`, `cycleClock`, `cycleZero`). With the band on, the readout sa
 before cycle 0) and the second cursor's Δ counts that clock. A `cycleZero` before the waves begin (a window cut out of a
 long dump with `--from`) counts the edges before the window at the clock's mean period in it: the window's edges keep the
 numbers of the whole dump, as `wave_sample`, `wave_find` and `sva_check` give them (a clock that stops or changes its period
-between them: set `cycleZero` inside the window). `c147`, `cycle 147` or `c-3` in the cursor field go to that
+between them: set `cycleZero` inside the window; a clock that starts later than a period into the window had no edge
+before it: its first edge is cycle 0). `c147`, `cycle 147` or `c-3` in the cursor field go to that
 cycle's rising edge (the band off: of the clock found). Kept in the browser and the saved state; the pictures and a static
 SVG with `"cycles": true` draw the band; the command `{"op": "cycles", "on": true, "clock": "PCLK", "zero": "50ns"}`
 (`view.run`, `viewedit.py`, `view_edit`).
@@ -1313,7 +1362,7 @@ about the size of `whole`, `both` twice that. A test's window goes a little past
 `"--my-mark"` or a CSS colour name (`"orange"`); another word is an error. A key left out keeps its colour. The buttons of
 `--marks-views tests` take them too.
 
-**Marks of one time.** A test's bookmarks at one instant on one row (checks made in one cycle; `PWDATA` and `tb.PWDATA` are one row when the view has one of them) take a lane each: on the row, above it,
+**Marks of one time.** A test's bookmarks at one instant on one row (checks made in one cycle; `PWDATA` and `tb.PWDATA` are one row when the view has one of them, and so is a pattern, `*PWDATA`, that matches that row alone) take a lane each: on the row, above it,
 under it, beside the ones that chose theirs; more than that, the last lane holds one circle `+k` (red when one of them failed) whose
 text lists the rest. On the time axis, with no lanes, they are one circle. `with wl.checks(…)` keeps many to one in the first place.
 
@@ -1439,7 +1488,7 @@ live**: no agent there (a click tries again). From the console: `WaveLens.live('
 
 `tools/wavemcp.py` gives an AI agent (Claude Code, Codex, any MCP client) the tools of WaveLens as an MCP server over
 stdio: it asks questions of a dump and gets short JSON answers instead of reading the dump or writing a parser for it.
-Standard library only; the assertions, the expression search, `wave_to_fst`, `wave_diff`, `wave_cut` and `compare` with a `dump` need the `sva` CLI (found as `svabuild.py` finds it),
+Standard library only; the assertions, the expression search, `wave_to_fst`, `wave_diff`, `wave_runs`, `wave_cut` and `compare` with a `dump` need the `sva` CLI (found as `svabuild.py` finds it),
 an FST needs `fst2vcd` or the `sva` CLI.
 
 ```sh
@@ -1460,11 +1509,12 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
 | `wave_stats` | over a window: a bit's rises, falls, high time, pulse widths and period; a bus's changes, distinct values, the longest-held ones, minimum and maximum |
 | `sva_check` | assertion files and / or text evaluated over the dump in a scope: the failed ones with their first failures (`cycle`, `t`, `start_cycle`, `start_t`, the reason), passed, vacuous, not evaluated (names missing), the covers |
 | `wave_page` | a viewer page (`out` `.html`) or WaveJSON (`.json`) of signals over a window, assertions bound, to show a person; `marks`, `marks_views`: the tests of a cocotb run on it (not with `compare` or `auto_gap`; a mark that found no row is in `notes`); `compare`: a second dump (or `{dump, map, offset, segment, align, show}`, the config's `"compare"`), its differences on the page, `show` the run it opens with |
-| `wave_tests` | the tests of a cocotb run from its marks file ([§ Marks from a cocotb test](#marks-from-a-cocotb-test)): the summary, each test's result, window, counts of checks, message and line, its `measures` (`wl.measure`: `label`, `from`, `to`, `dt` in ns, `min`, `max`, `ok`; `ok` null: a bound in cycles) and `measures_failed`; `slowest`: the five longest steps of the run; `test` (a number or name): one, with the whole docstring (`text`), its own rows (`signals`), its phases and marks, each check with `got` and `expected`, `got_all`, `expected_all` and `at` where a long value was cut (`limit`, 50: `more`), its `steps` by length, the longest first, with `total` and `longest` (`steps: true`: only them). The window is the one to ask `wave_changes`, `wave_find` or `wave_sample` about. `marks` a directory: a regression, every marks file under it (any depth) in one answer: `summary`, `totals`, the `failures` first (`file`, `n`, `name`, `result`, `from`, `message`, `where`; `limit`), `runs` (each file's `summary`, `tests`, `failed`, the failed ones first), `notes` for a file it could not read and the `.json` files skipped (not JSON, no marks file, over 64 MB), named; a marks file is one by its `"wavelens": "marks"`, wherever it is in the file |
+| `wave_tests` | the tests of a cocotb run from its marks file ([§ Marks from a cocotb test](#marks-from-a-cocotb-test)): the summary, each test's result, window, counts of checks, message and line, its `measures` (`wl.measure`: `label`, `from`, `to`, `dt` in ns, `min`, `max`, `ok`; `ok` null: a bound in cycles) and `measures_failed`; `slowest`: the five longest steps of the run; `test` (a number or name): one, with the whole docstring (`text`), its own rows (`signals`), its phases and marks, each check with `got` and `expected`, `got_all`, `expected_all` and `at` where a long value was cut (`limit`, 50: `more`), its `steps` by length, the longest first, with `total` and `longest` (`steps: true`: only them). The window is the one to ask `wave_changes`, `wave_find` or `wave_sample` about. `marks` a directory: a regression, every marks file under it (any depth) in one answer: `summary`, `totals`, the `failures` first (`file`, `n`, `name`, `result`, `from`, `message`, `where`; `limit`), `runs` (each file's `summary`, `tests`, `failed`, the failed ones first), `notes` for a file it could not read and the `.json` files skipped (not JSON, no marks file, over 64 MB), named; a marks file is one by its `"wavelens": "marks"`, wherever it is in the file (a BOM before it, as an editor of Windows saves it, is no error) |
 | `wave_to_fst` | the VCD as an FST beside it (`out`: another file) with `sva fst`, the FSM states of its types file in it (`types`, `no_types`); what was written and the notes with their lines |
 | `wave_diff` | two dumps `a` and `b` (`dump` is `a`) compared change by change with `sva diff` (*Compare two runs from the shell*: streamed, neither read by the server): `equal`, `compared`, `differ`, `first` (`t`, `signal`, `a`, `b`; a bus in hex), the first `limit` `differences`, the signals that differ (`signals_more`: the rest), `only_a`, `only_b`, `segments`; `map` an object (`{"tb_a.if": "tb_b.if"}`), `offset`, `segment`, `align`, `spans` (the stretches kept per signal), `rank` (the first five signals by their first difference); `results_a`, `results_b` instead of the dumps: the assertions' results of two runs, `new`, `gone`, `moved` failures per assertion; times in ns |
 | `wave_explain` | one call from a moment to what to look at: `expr` (its `nth` match; its signals from the expression), `assert` (`"name@scope"` with `sva`, its files: its `nth` failure, the window from the attempt's start to where it failed, its signals from the property, its `note`), `b` (the first difference with that dump, and the signals that differed next) or `t` (a time, with `signals`) -> `at`, the window `before` / `after` cycles of the clock around it (2 / 2, an expression 2 / 4), the clock, the signals and their values there (a `wave_sample` table; with `b`, `table_b`: the other run's in the same window); `out` (a `.html`): a page of that window with a marker and the cursor there |
 | `wave_fsm` | an FSM's states in a dump (`tools/fsmstats.py`, the rule of the page's FSM panel): each state's `entries`, `first`, `time` held and `share`, `never` (the states not reached), `invalid` (x, z, a code without a label), `changes` by count; its table the dump's (an FST's), the types file or `enum` `{code: label}`; `from` / `to` |
+| `wave_runs` | the runs kept of a dump (`sva runs`, the VS Code Runs panel's, in `.wavelens-runs` beside it; `dir` another): `action` `list` (the default: `dir`, `runs` newest first with their `start`, `end` in ns), `keep` (`name`, `tags`, `comment`), `set`, `rm` (`run`: a number or a name), `all` (the runs of every dump of the directory, not this one's only), `diff` (the dump against each run, or those of `run`, a list too, over `from` … `to`, `signals`, `scope`, `map`: per run `signals_differ`, `first`, the signals that differ, `limit`); then `wave_diff` with `b` the run's FST for the details |
 | `wave_cut` | a window (`from`, `to`) and some `signals` of a dump as a small VCD at `out` (`sva vcd --from --to --signals`; a long list: `--signals-from FILE`, one a line): the values at `from` first; `out`, `bytes`, `variables`, its `from` and `to` |
 | `view_edit` | marks up a page for a person with the [commands](#commands-and-edits) (`ops`): bookmarks with a text, arrows, markers, expressions (their list, marks on the waves, the cursor on a match), groups, highlight, colours, hidden and folded rows, radix, cursor, window — live in their browser when the page is connected, else into the page's file (they see it when they open or reload it); `save`: a live page's state into its file too; `config` (instead of `page`): the commands on a view of a `mkhtml.py` config, so a rebuild keeps them: `bookmark`, `arrow`, `span` on its own keys (a bookmark's `"at"` stays until a `t` replaces it), `view` its window, the rest of its look (`group`, `radix`, `marker`, `deltas`, `hide`, `paint`, `expr` …) its `"state"`; `from_page`: a page's view into it (`keys`: some); the whole list checked first, the file written at once |
 | `view_get` | what a page shows (a live page's transfers of the buses: `view_edit` `bus_list`): bookmarks, arrows, markers (with `measures`: the Δ between them as a table in ns, the bound kept or not), spans, expressions (`exprs`), groups, highlight, colours, hidden, the copies of signals (`dups`), cursor and window, a dump compared (`compare`: `name`, `compared`, `differ`, `first`, `missing`, `show`), the gaps (`gaps`; live, on the waves, with `cut`; `by`: the expressions that cut) (live: with what the person changed); `full`: the whole state; `view`: which view, on a page of several; `rows`: its signals (a pattern, `limit`, `offset`); `picture`: a PNG of the view (live: the screen; a page's file: made in a headless Chromium by `tools/pageshot.py`, when playwright is there) |
@@ -1559,7 +1609,7 @@ All tools are `python3 -I tools/<tool>.py --help`; the Makefile calls them for y
 | `fsmstats.py` | an FSM's states in a dump from the shell and in CI: entries, time held, share, first entry, the states never reached, the values of no state, the changes (the page's rule) | `DUMP --signal S`, `--types`, `--enum PATH=K:L,…`, `--from`, `--to`, `--json`, `--strict` (exit 1 when a state is never reached: a CI gate of FSM coverage) |
 | `viewedit.py` | the viewer's [commands](#commands-and-edits) on a page's edits or a saved state (`.view.json`) | `PAGE --ops JSON\|@file`, `--config FILE` (a view of a config: its bookmarks, arrows, spans, window and look), `--from-page PAGE` `--keys`, `--view`, `--get`, `--views`, `--model`, `--commands`, `--measure [--csv]` (the Δ of the markers as a table) |
 | `svaverify.py` | the examples' checkers in Verilator `--assert` against `sva eval` (`make sva-verify`) | `--build`, `--only`, `--keep`, `--sva-bin` |
-| `sva` (the engine's CLI, Rust: `make sva-build`, or `bin/linux-x86_64/sva`) | `sva parse` an assertion file, `sva eval` assertions over a dump, `sva report` results, `sva --waves DUMP --info` a dump's scopes and variables, `sva vcd DUMP [--out x.vcd] [--header \| --codes FILE] [--from --to --signals]` an FST as VCD text (as `fst2vcd -e` writes it: its names, enum tables, escaped strings, its end; *Formats*; of an FST a part: its header, or the variables of some id codes; of any dump a cut: a window, some signals), `sva fst DUMP.vcd [--out x.fst]` a VCD as an FST beside it (as `vcd2fst` writes it, enum tables and the types file's FSM states kept; *Formats*), `sva diff A B` two dumps compared change by change (*Compare two runs from the shell*) | `sva <command> --help`; diff: `--signals --signals-from --scope --from --to --offset --map --segment --align --json --junit --limit --spans --quiet`; vcd: `--signals-from` too; fst: `--types --no-types --map --quiet`; report: `--title --md --junit --html --json --max-failures`; eval: `--waves --scope --sva [--assert NAME] [--from --to] [--out] [--json] [--attempts] [--x fail\|false] [--vacuous] [--no-lane] [--resolve up\|scope] [--ignore-prefix] [--alias] [--max-threads] [--report] [--junit] [--max-failures] [-D]`; parse: `--json --expand -D` |
+| `sva` (the engine's CLI, Rust: `make sva-build`, or `bin/linux-x86_64/sva`) | `sva parse` an assertion file, `sva eval` assertions over a dump, `sva report` results, `sva --waves DUMP --info` a dump's scopes and variables, `sva vcd DUMP [--out x.vcd] [--header \| --codes FILE] [--from --to --signals]` an FST as VCD text (as `fst2vcd -e` writes it: its names, enum tables, escaped strings, its end; *Formats*; of an FST a part: its header, or the variables of some id codes; of any dump a cut: a window, some signals), `sva fst DUMP.vcd [--out x.fst]` a VCD as an FST beside it (as `vcd2fst` writes it, enum tables and the types file's FSM states kept; *Formats*), `sva diff A B` two dumps compared change by change (*Compare two runs from the shell*), `sva runs` the runs kept of a dump and the dump compared with them over a window (*The runs kept, in the shell*) | `sva <command> --help`; diff: `--signals --signals-from --scope --from --to --offset --map --segment --align --json --junit --limit --spans --quiet`; vcd: `--signals-from` too; fst: `--types --no-types --map --quiet`; runs: `keep list set rm path diff`, `--dir --name --tags --comment --run --from --to --signals --signals-from --scope --map --limit --json`; report: `--title --md --junit --html --json --max-failures`; eval: `--waves --scope --sva [--assert NAME] [--from --to] [--out] [--json] [--attempts] [--x fail\|false] [--vacuous] [--no-lane] [--resolve up\|scope] [--ignore-prefix] [--alias] [--max-threads] [--report] [--junit] [--max-failures] [-D]`; parse: `--json --expand -D` |
 
 `sva eval --attempts` adds a line per attempt under an assertion's summary: its cycles, the time it started, the result
 and its trace (the elements `s1`, `s2` … and the cycle each matched at), a failure's reason after `--`:
@@ -1642,7 +1692,7 @@ codes as the whole text numbers them — their declarations in their scopes, the
 (50 signals of it: 0.06 s); a reader of a part gets what it gets of the whole text for them. Of any dump a **cut**:
 `sva vcd DUMP --from T --to T [--signals PAT,…] [--out cut.vcd]` writes the declarations of those signals (paths or `*`
 `?` patterns; none: all; an element of an unpacked array by either name, `mem[1]` as Verilator's FST holds it or `mem.[1]`
-as `wave_signals` and the page list it) in their scopes with their enum tables, then under `#from` a `$dumpvars` with the value each of
+as `wave_signals` and the page list it, a `$var … [1]` in `$scope module mem` too) in their scopes with their enum tables, then under `#from` a `$dumpvars` with the value each of
 them has at `--from` (x on every bit when it has none yet), its changes after it up to `--to`, and `#to`, the end (not
 past the dump's); a window of 1 ms of a 214 MB VCD: 1.7 s. For **Compare…** with a large B, for sending one test case,
 for a small fixture. The cut of a VCD and the cut of its FST read the same (`tests/unit/test_svafst.py`). `sva eval` and

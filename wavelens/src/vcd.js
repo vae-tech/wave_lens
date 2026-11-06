@@ -139,7 +139,8 @@ function* vcdRead(opts = {}, size = 0) {
         path = scope.concat(m[1]).join('.'); d = [code, [+m[2], +m[2]], 1, true];
         if (!decls.has(path)) decls.set(path, { path, name: m[1], scope: scope.slice(), kind: null, depth: scope.length, ds: [] });
       } else {
-        const leaf = !esc && ref.includes('[') ? ref.replace('[', '.[') : ref, r = /^\[(\d+)(?::(\d+))?\]$/.exec(rng);
+        // an element of an array under its name (q[0] -> q.[0]); in the scope form ($scope module q + $var [0]) as it is: q.[0]
+        const leaf = !esc && ref.includes('[') && ref[0] !== '[' ? ref.replace('[', '.[') : ref, r = /^\[(\d+)(?::(\d+))?\]$/.exec(rng);
         path = scope.concat(leaf).join('.'); d = [code, r ? [+r[1], +(r[2] ?? r[1])] : null, size, false];
         if (!decls.has(path)) decls.set(path, { path, name: esc ? leaf : leaf.split('.').pop(), depth: scope.length, kind: VCD_TEXT[kind] || null,
           scope: !esc && leaf.includes('.') ? scope.concat(leaf.split('.').slice(0, -1)) : scope.slice(), ds: [], num: VCD_INT.has(kind) });

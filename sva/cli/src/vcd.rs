@@ -36,8 +36,9 @@ Of an FST a part: --header the declarations and the first and last times only; -
 of those id codes (as the whole text numbers them, apart by white space) with their changes.
 A cut: --from/--to a window (TIME: 100ns, 2.5us; ps without one): each signal's value at --from as $dumpvars under
 #from (x when it has none yet), its changes up to --to, then #to; --signals only those (paths, * ? patterns, or
-the one path that ends with a name; an element of an unpacked array either way, mem[1] or mem.[1]); --signals-from
-FILE (- stdin): the same, one a line (a name may hold a comma, and a list too long for a command line goes this way).";
+the one path that ends with a name; an element of an unpacked array either way, mem[1] or mem.[1], a [1] in the
+scope mem too); --signals-from FILE (- stdin): the same, one a line (a name may hold a comma, and a list too long
+for a command line goes this way).";
 
 /// The VCD id code of signal `index` (an FST handle less one): base 94 over the printable characters `!`..`~`, as
 /// fst2vcd numbers its handles.
@@ -689,8 +690,19 @@ pub(crate) struct Cut {
 
 /// A path with an array element glued to its array: `mem.[1]` (wellen's array scope, the name WaveLens's readers give)
 /// and `mem[1]` (the name in the dump, an FST's as Verilator writes it) are one signal, whichever reader has the dump.
+/// Every dot before a `[` goes: an element in the scope form (`$scope module mem` + `$var … [1]`) is `mem..[1]` by
+/// wellen. One rule with `glued()` of tools/dumpscan.py.
 pub(crate) fn glued(p: &str) -> String {
-    p.replace(".[", "[")
+    let mut out = String::with_capacity(p.len());
+    for c in p.chars() {
+        if c == '[' {
+            while out.ends_with('.') {
+                out.pop();
+            }
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// A `*` `?` pattern against a path, the path either way (`tb.ptr.*` and `tb.ptr*` both take `tb.ptr[0]`): as it is, glued,
@@ -956,7 +968,11 @@ mod tests {
     fn an_array_element_by_either_name() {
         let fst = [("tb.u.ptr[0]".to_string(), 1), ("tb.u.ptr[1]".to_string(), 2), ("tb.u.cnt".to_string(), 3)];
         let vcd = [("tb.u.ptr.[0]".to_string(), 1), ("tb.u.ptr.[1]".to_string(), 2), ("tb.u.cnt".to_string(), 3)];
-        for all in [&fst[..], &vcd[..]] {
+        // the scope form ($scope module ptr + $var … [0]): wellen's path has two dots (review 2026-11-05 runs B-24)
+        let scoped = [("tb.u.ptr..[0]".to_string(), 1), ("tb.u.ptr..[1]".to_string(), 2), ("tb.u.cnt".to_string(), 3)];
+        assert_eq!(glued("tb.u.ptr..[0]"), "tb.u.ptr[0]");
+        assert_eq!(glued("m.[1].[2]"), "m[1][2]");
+        for all in [&fst[..], &vcd[..], &scoped[..]] {
             for p in ["tb.u.ptr[0]", "tb.u.ptr.[0]", "ptr[0]", "u.ptr.[0]"] {
                 assert_eq!(chosen(all, &[p.to_string()]), Ok(vec![1]), "{p}");
             }

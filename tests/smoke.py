@@ -930,6 +930,38 @@ def modules(page, P):
           f'Only: your groups whole (both modules\' signals), the panel\'s box off: by module; viewedit.py the same {whole} {part} {pyw} {pyp}')
     check(back[0] == [False, part[2]] and back[1]['only'] == {'modules': [D1], 'on': True, 'groups': False} and back[1]['groups'] is False and
           back[2] is False, f'your groups whole: in the saved state and back, kept over Clear for the next set, the panel\'s box says it {back}')
+    # ]d [d under Only with your groups whole: a group's row of a signal whose module Only leaves out is in the view, its differences
+    # stepped to (review 2026-11-05 runs B-08: the model's row was asked, not the row drawn); groups off: the row gone, skipped
+    dstep = page.evaluate(f"""(async () => {{ const v = document.querySelector('.wv').waveView, t0 = v.M.t0, T = v.M.t1 - t0;
+        const a = t0 + Math.round(T / 5), b = t0 + Math.round(T / 2), sp = x => ({{ spans: [[x, x + Math.round(T / 20)]] }});
+        await v.run([{{ op: 'compare', result: {{ name: 'b.vcd', from: t0, to: v.M.t1, missing: [],
+          signals: {{ '{D1}.err': sp(a), '{D0}.ready': sp(b) }} }} }}, {{ op: 'only', clear: true, groups: true }}, {{ op: 'only', modules: ['{D0}'] }},
+          {{ op: 'select', signal: null }}]);
+        const go = d => (v.setCursor(d > 0 ? t0 : v.M.t1), v.diffStep(d), v.cursor), out = [[a, b], go(1), go(-1)];
+        await v.run([{{ op: 'only', groups: false }}]); out.push(go(1), go(-1));
+        await v.run([{{ op: 'compare', off: true }}, {{ op: 'only', groups: true }}]); return out; }})()""")
+    (a, b), dstep = dstep[0], dstep[1:]
+    check(dstep == [a, b, b, b], f']d [d under Only, your groups whole: a group\'s row outside Only is stepped to, by module: not ({a}, {b}: {dstep})')
+    # the groups of the next set on both sides (T-05, B-30): a state's only with no groups, Clear and groups true with no set, a hidden
+    # signal of the group; the answers of every only and the set left alike in the page and viewedit.py
+    seqs = [[{'op': 'only', 'groups': False}, {'op': 'set_state', 'state': {'wavelens': 'state', 'only': {'modules': [D0], 'on': True}}},
+             {'op': 'only', 'clear': True}, {'op': 'only', 'modules': [D0]}],
+            [{'op': 'only', 'modules': [D0], 'groups': False}, {'op': 'only', 'clear': True}, {'op': 'only', 'groups': True},
+             {'op': 'only', 'modules': [D1]}],
+            [{'op': 'hide', 'signals': [f'{D1}.err']}, {'op': 'only', 'modules': [D0], 'groups': False}, {'op': 'only', 'groups': True},
+             {'op': 'show', 'signals': [f'{D1}.err']}]]
+    apart = []
+    for ops in seqs:
+        pre = [{'op': 'only', 'clear': True, 'groups': True}]
+        res = page.evaluate("ops => document.querySelector('.wv').waveView.run(ops).then(r => [r, document.querySelector('.wv').waveView.onlyState()])",
+                            pre + ops)
+        pe = viewedit.Editor(viewedit.Model(page.evaluate("WAVES.all"))); pe.run(ug_ops[:1])
+        py = pe.run(pre + ops)
+        mine = [(o['op'], a.get('only'), a.get('groups')) for o, a in zip(pre + ops, res[0]) if o['op'] == 'only']
+        theirs = [(o['op'], a.get('only'), a.get('groups')) for o, a in zip(pre + ops, py) if o['op'] == 'only']
+        if mine != theirs or res[1] != pe.only():
+            apart.append((ops, mine, theirs, res[1], pe.only()))
+    check(not apart, f'Only and your groups: the page and viewedit.py answer alike over a state, Clear, a hidden signal {apart[:1]}')
     page.evaluate("document.querySelector('.wv').waveView.run([{op: 'only', clear: true, groups: true}, {op: 'group', name: 'mix', delete: true}])")
     js("(v.modules(false), 0)")
     # what Only leaves out stays out (review of the implementation, O1 O2 O4 O6 O7 O13)
@@ -1822,7 +1854,24 @@ def vscode_tab(browser, build):
           texts: window.__SRC || ['package p; typedef enum logic [1:0] {OFF, ON = 2, HOLD} mode_t; endpackage', 'module m; p::mode_t plain, state; endmodule'] });
         if (m.type === 'pick') reply({ id: m.id, files: /fst/.test(m.accept) ? [] : [{ name: 's.view.json', path: '/states/s.view.json', mtime: 1, b64: btoa(JSON.stringify(window.__S)) }] });
         if (m.type === 'state-read') reply(window.__S ? { id: m.id, name: 's.view.json', mtime: 2, b64: btoa(JSON.stringify(window.__S)) } : { id: m.id, error: 'gone' });
-        if (m.type === 'http') reply({ id: m.id, status: 200, text: 'ok' }); } }); })();""" % src
+        if (m.type === 'runs') reply(Object.assign({ id: m.id }, window.runsAnswer(m)));
+        if (m.type === 'http') reply({ id: m.id, status: 200, text: 'ok' }); } });
+      // the runs kept, as the extension's sva runs answers (newest last in the list, as runs.json has them)
+      window.__RUNS = [{ id: 1, name: 'golden', tags: ['base'], comment: 'before the fix', kept: '2026-11-01T10:00:00Z', dump: 'enum.vcd', file: '1-enum.fst' },
+        { id: 2, name: 'seed 7', tags: [], comment: '', kept: '2026-11-02T10:00:00Z', dump: 'enum.vcd', file: '2-enum.fst' }];
+      window.runsAnswer = m => {
+        if (m.op === 'list') return { dir: '/host/dumps/.wavelens-runs', runs: window.__RUNS };
+        if (m.op === 'keep') { const r = { id: 3, name: m.name, tags: m.tags, comment: m.comment, kept: '2026-11-05T10:00:00Z', dump: 'enum.vcd', file: '3-enum.fst' };
+          window.__RUNS = window.__RUNS.concat([r]); return { run: r }; }
+        if (m.op === 'diff') return { runs: window.__RUNS.map(r => ({ id: r.id, name: r.name, from: m.from, to: m.to, signals_compared: 4,
+          signals_differ: r.id === 1 ? 1 : 0, first: r.id === 1 ? { t: 5000, signal: 'tb.plain' } : null })) };
+        if (m.op === 'compare') return window.__RUNFAIL ? { error: 'the run does not read' } : { result: Object.assign({ name: 'x', from: m.from, to: m.to,
+          compared: 4, differ: m.run === 1 ? 1 : 0, first: m.run === 1 ? 5000 : null,
+          signals: Object.fromEntries(m.signals.map(p => [p, { spans: m.run === 1 && p === 'tb.plain' ? [[5000, 10000]] : [] }])), missing: [], map: [] },
+          m.run === 1 ? { cutError: 'more than 32 MB of changes of the signals that differ' } : {}) };
+        if (m.op === 'rm') { const r = window.__RUNS.find(x => x.id === m.run); window.__RUNS = window.__RUNS.filter(x => x.id !== m.run); return { removed: r }; }
+        return { error: 'no ' + m.op };
+      }; })();""" % src
     page = browser.new_page()
     errs = []
     page.on('console', lambda m: errs.append(m.text) if m.type == 'error' else None)
@@ -2053,6 +2102,96 @@ def vscode_tab(browser, build):
     asked = one.evaluate("window.__sent.filter(m => m.type === 'config').length")
     one.close()
     check(rh == 34 and asked == 1, f'a configuration saved while the tab loaded: asked once at its load, the newer one applied (rowHeight {rh}, asked {asked})')
+    # the runs kept (the Runs panel, gu): the host lists them, a click compares over the window in sight, ]r the next, Δ all, Keep this dump…
+    page.bring_to_front()
+    check(js("!v.root.querySelector('.bar [data-act=druns]').hidden"), 'the bar has Runs… where the host keeps runs')
+    page.locator('.wv canvas').first.click(); page.keyboard.press('g'); page.keyboard.press('u')
+    until("document.querySelectorAll('.wv-runs .rn').length === 2")
+    check(js("[...v.root.querySelectorAll('.wv-runs .rn b')].map(b => b.textContent).join(' ')") == '#2 #1', 'gu: the panel lists the runs, newest first')
+    js("v.zoomTo(5000, 10000), 0")
+    page.click('.wv-runs .rn[data-i="1"]')
+    until("window.__sent.some(m => m.type === 'runs' && m.op === 'compare')")
+    until("(v => v && v.cmp && v.cmp.name === '#1 golden')(WaveLens.views().find(x => x.root.isConnected))")
+    c = sent('runs')[-1]
+    check(c['op'] == 'compare' and c['run'] == 1 and abs(c['from'] - 5000) < 1 and abs(c['to'] - 10000) < 1 and 'tb.plain' in c['signals'],
+          f'a click on a run: compared over the waves in sight only ({c.get("from")} … {c.get("to")}, {c.get("signals")})')
+    t = js("v.root.querySelector('button[data-act=dcmpx]').textContent")
+    check(t == '≠ 1 ✕', f'its differences on the waves, as Compare… shows them ({t})')
+    page.locator('.wv-runs .rl').focus(); page.keyboard.press('ArrowUp')
+    until("(v => v.cmp && v.cmp.name === '#2 seed 7')(WaveLens.views().find(x => x.root.isConnected))")
+    check(js("v.root.querySelector('button[data-act=dcmpx]').textContent") == '≠ 0 ✕', '↑ in the list: the newer run compared')
+    sp = js("v.run([{ op: 'span', from: '5ns', to: '15ns', label: 'tc1' }]).then(r => [r, v.spans.length])")
+    page.locator('.wv-runs .rw').focus()
+    check(js("v.root.querySelectorAll('.wv-runs .rw option').length") == 2, f'your spans in the window\'s choices {sp}')
+    page.select_option('.wv-runs .rw', '0')
+    page.click('.wv-runs [data-a=all]')
+    until("document.querySelectorAll('.wv-runs .rd').length === 2")
+    d = sent('runs')[-1]
+    check(d['op'] == 'diff' and d['from'] == 5000 and d['to'] == 15000, f'Δ all over your span ({d.get("from")} … {d.get("to")})')
+    check(js("[...v.root.querySelectorAll('.wv-runs .rd')].map(x => x.classList.contains('bad')).join()") == 'false,true', 'each run\'s numbers on its row')
+    page.click('.bar [data-act=druns]'); page.wait_for_timeout(100)
+    check(js("!document.querySelector('.wv-runs')"), 'Runs… again closes it')
+    page.locator('.wv canvas').first.click(); page.keyboard.press(']'); page.keyboard.press('r')
+    until("(v => v.cmp && v.cmp.name === '#1 golden')(WaveLens.views().find(x => x.root.isConnected))")
+    check(sent('runs')[-1]['from'] == 5000, ']r: the next (older) run, over the same window (your span)')
+    page.click('.bar [data-act=druns]')
+    until("document.querySelectorAll('.wv-runs .rn').length === 2")
+    page.click('.wv-runs [data-a=keep]')
+    page.fill('.wv-runs .rfn', 'after fix'); page.fill('.wv-runs .rft', 'fix, b-12'); page.fill('.wv-runs .rfc', 'the counter')
+    page.click('.wv-runs .rfo')
+    until("document.querySelectorAll('.wv-runs .rn').length === 3")
+    k = [m for m in sent('runs') if m['op'] == 'keep'][-1]
+    check((k['name'], k['tags'], k['comment']) == ('after fix', ['fix', 'b-12'], 'the counter'), f'Keep this dump…: its name, tags, comment to the host {k}')
+    # review of the runs (2026-11-05): the list's keys compare once they stop (B-19)
+    n0 = len([m for m in sent('runs') if m['op'] == 'compare'])
+    page.locator('.wv-runs .rl').focus()
+    for k in ('Home', 'End', 'PageUp', 'PageDown', 'ArrowDown', 'ArrowUp'):
+        page.keyboard.press(k)
+    page.wait_for_timeout(600)
+    check(len([m for m in sent('runs') if m['op'] == 'compare']) - n0 == 1, 'six keys of the list in a row: one compare, of the row they stop on')
+    # an equal run says equal, not "bands only"; a run whose cut failed says why (B-11)
+    js("v.runCompare(2, true)")
+    st = js("v.root.querySelector('.wv-runs .ms').textContent")
+    check('equal' in st and 'bands only' not in st, f'an equal run: equal, no note of values ({st})')
+    js("v.runCompare(1, true)")
+    st = js("v.root.querySelector('.wv-runs .ms').textContent")
+    check('more than 32 MB' in st, f'a cut that failed: its reason said ({st})')
+    # a failed compare leaves the run compared as it was (B-21)
+    js("(window.__RUNFAIL = true, v.runCompare(3, true)).then(() => (window.__RUNFAIL = false))")
+    check(js("v.runCur") == 1, 'a compare that failed: the run compared stays the one before')
+    # the span chosen, then deleted: the waves in sight, said (B-05)
+    page.select_option('.wv-runs .rw', '0')
+    js("v.run([{ op: 'span', id: 1, delete: true }])")
+    check(js("v.root.querySelector('.wv-runs .rw').value") == 'view', 'the span deleted: the select says the waves in sight')
+    js("v.zoomTo(2000, 4000), v.runCompare(1, true)")
+    c = sent('runs')[-1]
+    check(c['op'] == 'compare' and abs(c['from'] - 2000) < 1 and abs(c['to'] - 4000) < 1, f'and the compare is over them ({c.get("from")} … {c.get("to")})')
+    # a long tag keeps the row's buttons in the panel (B-20)
+    js("(window.__RUNS[0].tags = ['x'.repeat(300)], v.runsP.load())")
+    page.wait_for_timeout(100)
+    inside = js("(() => { const p = v.root.querySelector('.wv-runs').getBoundingClientRect(), b = v.root.querySelector('.wv-runs .rn [data-a=rm]')"
+                ".getBoundingClientRect(); return b.right <= p.right + 1; })()")
+    check(inside, 'a 300-character tag: ✕ stays inside the panel')
+    # the dump read again with the panel open: the panel back, the run compared again (B-06)
+    js("v.runCompare(1, true)")
+    n1 = len([m for m in sent('runs') if m['op'] == 'compare'])
+    page.evaluate("window.postMessage({ type: 'changed', auto: true }, '*')")
+    until("(v => v && v.runsP && v.runCur === 1)(WaveLens.views().find(x => x.root.isConnected))", timeout=15000)
+    until(f"window.__sent.filter(m => m.type === 'runs' && m.op === 'compare').length > {n1}")
+    check(js("!!document.querySelector('.wv-runs') && v.cmp && v.cmp.name === '#1 golden'"), 'the dump read again: the panel back, compared with the run again')
+    # the run compared removed: the compare goes with it (B-12)
+    page.locator('.wv-runs .rl').focus()
+    i = js("v.runsL.findIndex(r => r.id === 1)")
+    js(f"v.runsP.pick({i}, false)")
+    page.keyboard.press('Delete')
+    until("(v => v && v.runCur == null)(WaveLens.views().find(x => x.root.isConnected))")
+    check(js("!v.cmp && v.root.querySelector('button[data-act=dcmpx]').hidden"), 'the run compared removed: no compare left, no ≠ in the bar')
+    # a run kept elsewhere: ]r reads the list again (B-09)
+    js("(window.__RUNS = window.__RUNS.concat([{ id: 9, name: 'from a shell', tags: [], kept: '2026-11-05T12:00:00Z', dump: 'enum.vcd', file: '9-enum.fst' }]), 0)")
+    page.keyboard.press('Escape'); page.locator('.wv canvas').first.click(); page.keyboard.press(']'); page.keyboard.press('r')
+    until("(v => v && v.runCur === 9)(WaveLens.views().find(x => x.root.isConnected))")
+    check(True, ']r with no run compared: the newest, a run kept in a shell meanwhile')
+    page.keyboard.press('Escape')
     # a link of a log (vscode/links.js): the extension runs goto in the tab
     page.evaluate("window.postMessage({ type: 'run', rid: 777, ops: [{ op: 'goto', t: '12000ps', sel: 'tb.state' }] }, '*')")
     page.wait_for_function("window.__sent.some(m => m.type === 'result' && m.rid === 777)", timeout=5000)
@@ -3128,6 +3267,9 @@ EDIT_OPS = [   # every command that changes a state, with the arguments in their
     {'op': 'span', 'from': '10ns', 'to': '30ns'}, {'op': 'span', 'from': '10ns', 'to': '30ns'}, {'op': 'span', 'id': 4, 'label': 'the second'},
     {'op': 'bits', 'signals': 'PADDR', 'on': True}, {'op': 'rows', 'pattern': 'PADDR*', 'limit': 4},   # B-20: the bits under their bus
     {'op': 'bits', 'signals': 'PADDR', 'on': False},
+    # review 2026-11-05 (runs) B-30: a state's only without groups sets the next set's to the setting's on both sides
+    {'op': 'only', 'groups': False}, {'op': 'set_state', 'state': {'wavelens': 'state', 'only': {'modules': [], 'on': False}}},
+    {'op': 'only', 'clear': True}, {'op': 'only', 'modules': [], 'on': False}, {'op': 'only', 'clear': True},
     {'op': 'find', 'query': 'PADDR', 'open': True},
 ]
 
@@ -3358,6 +3500,27 @@ def cycles(browser, build):
         return [r[1].cycle, t, before, c11, nums.includes(10) && nums.includes(15) && !nums.includes(0), r2[1].cycle];""")
     check(got == [11, ' · cycle 11 ↑PCLK', ' · cycle 9 ↑PCLK', 115e3, True, 0],
           f'AU-WL-001: a window with cycleZero before it: its first edge cycle 10, 115 ns cycle 11, c11, the SVG\'s band from 10 {got}')
+    # review 2026-11-05 (runs) B-25: a window (--from 50ns) whose clock starts inside it (0 until 105 ns), cycleZero 0 before it:
+    # no edge before the window, its first edge is cycle 0 as wave_sample numbers it (not 10 by the period); no lint either
+    sys.path.insert(0, str(ROOT / 'tools'))
+    import wavemcp
+    late = build / 'smoke' / 'late_clock.vcd'; late.parent.mkdir(parents=True, exist_ok=True)
+    late.write_text('$timescale 1ns $end\n$scope module top $end\n$var wire 1 ! clk $end\n$var wire 1 " d $end\n$upscope $end\n'
+                    '$enddefinitions $end\n#0\n0!\n0"\n' + ''.join(f'#{t}\n1!\n' + ('1"\n' if t == 155 else '') + f'#{t + 5}\n0!\n'
+                                                                    for t in range(105, 300, 10)) + '#300\n', encoding='utf-8')
+    cfg = late.with_suffix('.json')
+    cfg.write_text(json.dumps({'waves': str(late), 'scope': 'top', 'exact': True, 'signals': ['clk', 'd'], 'from': '50ns',
+                               'config': {'cycles': True, 'cycleClock': 'clk', 'cycleZero': 0}}), encoding='utf-8')
+    r = subprocess.run([sys.executable, '-I', str(ROOT / 'tools' / 'vcd2wavedrom.py'), '--config', str(cfg)], capture_output=True, text=True)
+    smp = json.loads(wavemcp.call('wave_sample', {'dump': str(late), 'clock': 'clk', 'signals': ['d'], 'from': 100, 'to': 170,
+                                                  'only_changes': False})[0])
+    want = [[row[0], row[1] * 1000] for row in smp['rows']]
+    got = page.evaluate("""([doc, ts]) => { const el = document.createElement('div'); document.body.append(el);
+        const w = new WaveLens.WaveView(el, doc, {}), cyc = ts.map(t => (w.setCursor(t), +(/cycle (-?\\d+)/.exec(w.cycText()) || [])[1]));
+        w.destroy(); el.remove(); return [doc.time.t0, cyc]; }""", [json.loads(r.stdout or 'null'), [t for _, t in want]])
+    check(r.returncode == 0 and got[0] == 50000 and len(want) == 7 and want[0] == [0, 105000] and got[1] == [c for c, _ in want] and
+          'cycle-zero-window' not in r.stderr, f'B-25: a window whose clock starts inside it: its first edge cycle 0, as wave_sample {want} {got}'
+          f' {r.stderr.strip()[-200:]}')
     svg = js("return [v.toSVG(), WaveLens.WaveSVG.toString(v.M.src, { cycles: true }), WaveLens.WaveSVG.toString(v.M.src, {})];")
     check('cycles ↑ PCLK' in svg[0] and 'cycles ↑ PCLK' in svg[1] and 'cycles ↑' not in svg[2],
           'the picture of the viewer and a static WaveSVG with cycles: true draw the band; without it, none')

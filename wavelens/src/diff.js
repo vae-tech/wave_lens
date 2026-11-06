@@ -406,13 +406,15 @@ Object.assign(WaveView.prototype, {
     return { name: x.name, compared: x.compared, differ, missing, omitted: 0, first: x.first, from, to, byName: 0, rank: this.cmp.rank };
   },
   // ]d [d: the cursor to the next / previous start of a difference: of the selected signal when it has some, else of all
-  // the signals in the view (hidden ones and the ones Only leaves out: not stepped to)
+  // the signals in the view (hidden ones and the ones Only leaves out: not stepped to). In the view: a row drawn, a row of your
+  // groups standing for its signal (.orig: Only keeps your groups whole, the signal's module left out)
   diffStep(dir) {
     if (!this.cmp) { this.toast(']d [d: compare with a second dump first (Compare… in the bar)'); return this; }
     const s = this.sel && this.cmpOf(this.sel), some = this.onlyOn() || this.hiddenRows.size;
+    const drawn = () => { if (this.rowsStale) this.allRows(); return new Set((this.rowsAll || []).map(r => r.orig || r)); };
     const ts = s && s.spans.length ? s.spans.map(([a]) => a) : !some ? this.cmp.starts :
-      (bySig => [...new Set([...this.cmp.rows].filter(([r]) => this.shown(r) || this.shown(bySig.get(r))).flatMap(([, c]) => c.spans.map(([a]) => a)))]
-        .sort((x, y) => x - y))(new Map(Object.values(this.M.groups).filter(g => g.sig).map(g => [g.sig, g])));   // a struct's value: by its row
+      ((bySig, on) => [...new Set([...this.cmp.rows].filter(([r]) => on.has(r) || on.has(bySig.get(r))).flatMap(([, c]) => c.spans.map(([a]) => a)))]
+        .sort((x, y) => x - y))(new Map(Object.values(this.M.groups).filter(g => g.sig).map(g => [g.sig, g])), drawn());   // a struct's value: by its row
     if (!ts.length) { this.toast(`no difference from ${this.cmp.name}`); return this; }
     const t = Math.min(Math.max(ts[stepTo(ts, this.cursor, dir)], this.M.t0), this.M.t1);
     this.cursor = t; if (t < this.t0 || t > this.t0 + this.span) this.center(t);

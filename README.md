@@ -27,7 +27,9 @@ transactions are three plugin scripts more, inlined into a page): no build step,
   [the guide](docs/guides/types.html)).
 - **Bus transactions**: AXI, AXI-Stream, APB, AHB, Avalon, Wishbone and OBI ports found by their names and drawn as
   transfers, and a list of them (CSV); **two runs compared** signal by signal: the red bands, a key that flips the waves between the runs,
-  both over each other; and their assertion results (`sva diff --results`: new, gone, moved failures, covers lost).
+  both over each other; and their assertion results (`sva diff --results`: new, gone, moved failures, covers lost); **the runs
+  kept** of a dump in VS Code (Runs…: keep this one with a name, tags, a comment; compare with one, or all, over the waves in
+  sight or a span: only that window of the run read; `sva runs`, `wave_runs`).
 - **Pictures for documents**: PNG, SVG and WaveDrom out of any window, long idle stretches cut out, a static
   WaveDrom-style SVG next to the viewer.
 - **VS Code over Remote-SSH or WSL**: a dump on the Linux host opens in a tab, nothing else installed there
@@ -100,7 +102,7 @@ and an agent live in the tab: [the VS Code guide](docs/guides/vscode.html).
 | make pages from dumps (`tools/*.py`) | Python ≥ 3.9, standard library only |
 | read an FST with the tools | GTKWave's `fst2vcd`, or the `sva` CLI committed in `bin/linux-x86_64/` (static, any Linux x86-64; the tools find it) |
 | turn a VCD into an FST (FSM states kept) | the `sva` CLI: `sva fst tb.vcd` writes `tb.fst`; in VS Code *Convert to FST* on a `.vcd` |
-| compare two runs in the shell or in CI, cut a window out of a dump | the `sva` CLI: `sva diff a.vcd b.vcd [--map …] [--segment tb_test] [--junit diff.xml]` (streamed: dumps of hundreds of MB), `sva vcd x.vcd --from T --to T --signals …` |
+| compare two runs in the shell or in CI, cut a window out of a dump | the `sva` CLI: `sva diff a.vcd b.vcd [--map …] [--segment tb_test] [--junit diff.xml]` (streamed: dumps of hundreds of MB), `sva vcd x.vcd --from T --to T --signals …`; the runs kept: `sva runs keep tb.vcd --name golden`, `sva runs diff tb.vcd --from T --to T` |
 | check assertions from the tools or in CI (`mkhtml.py --sva`, `mkconfig.py --sva`, `sva eval`) | the `sva` CLI: `bin/linux-x86_64/sva`; on Windows `make dist-windows` builds it (mingw-w64). Without it a page still evaluates its assertions in the browser |
 | build the examples | Make and Verilator ≥ 5 |
 | state names on a VCD from the design's types | Questa (`tools/questa/wavelens_types.tcl` in `vsim`) or Verilator ≥ 5 (`tools/svtypes.py verilator`) |

@@ -15,7 +15,8 @@ scan(path, body=True) -> {path or alias: {'order', 'changes', 'enum', 'width', '
 
 The reference of a $var (parse_ref, the same rule as the page's wavelens/src/vcd.js): an escaped identifier (\\a.b) is a
 name as it is, to its end; a range glued to the name (data[7:0]) or given apart (data [7:0]) is the vector's, not a
-child; a 1-bit "err[3]" is a bit of the vector "err"; another "mem[1]" an element of the array "mem" (path "mem.[1]").
+child; a 1-bit "err[3]" is a bit of the vector "err"; another "mem[1]" an element of the array "mem" (path "mem.[1]"),
+as a "[1]" in the scope "mem" (the scope form) is.
 The same path under two id codes with the same range (a simulator declares some nets twice) is one signal whose changes
 are merged. A path declared in parts (the bits "err[0]" "err[1]", or ranges apart "err [0]" "err [1]", "data [7:0]"
 "data [15:8]") is one vector from its lowest declared index to its highest (bits not declared: x), merged bit by bit;
@@ -66,8 +67,9 @@ class Dump:
 
 
 def glued(path):
-    """A path with no dot before a [: one spelling of an array element (q.[0] and q[0] -> q[0])."""
-    return path.replace('.[', '[')
+    """A path with no dot before a [: one spelling of an array element (q.[0] and q[0] -> q[0]; every dot, as a path of the
+    scope form by wellen, ptr..[0]). One rule with sva/cli/src/vcd.rs glued()."""
+    return re.sub(r'\.+\[', '[', path)
 
 
 def fst_reader():
@@ -216,7 +218,8 @@ def _header(lines, d, path):
             if m and not rng and size == 1 and kind not in TEXT_KINDS and kind != 'event':  # one bit of a bit-blasted vector
                 decls.setdefault(pre + m.group(1), []).append((code, (int(m.group(2)),) * 2, 1, kind, None, n, True, {pre + ref}))
             else:
-                path = pre + ref.replace('[', '.[', 1) if not esc and '[' in ref else pre + ref
+                # an element of an array: under its name (q[0] -> q.[0]); in the scope form ($scope module q + $var [0]) as it is
+                path = pre + ref.replace('[', '.[', 1) if not esc and '[' in ref and not ref.startswith('[') else pre + ref
                 r = re.fullmatch(r'\[(\d+)(?::(\d+))?\]', rng)
                 part = (int(r.group(1)), int(r.group(2) or r.group(1))) if r else None
                 decls.setdefault(path, []).append((code, part, size, kind, enum, n, False, {pre + ref, pre + ref + rng, path + rng} - {path}))

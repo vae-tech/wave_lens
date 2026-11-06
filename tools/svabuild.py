@@ -333,7 +333,8 @@ def compare(exe, a, b, rows, t_from=None, t_to=None, mp=None, offset=None, segme
     row_of = {}
     for r, p in rows or ():
         row_of.setdefault(p, []).append(r)
-    cmd = [exe, 'diff', a, b, '--json', '-', '--quiet', '--spans', str(COMPARE_SPANS), '--limit', '0'] + (['--signals-from', '-'] if rows is not None else [])
+    # --limit 1: the differences listed are held in memory (the first is read); only_a, only_b are whole whatever it is
+    cmd = [exe, 'diff', a, b, '--json', '-', '--quiet', '--spans', str(COMPARE_SPANS), '--limit', '1'] + (['--signals-from', '-'] if rows is not None else [])
     if t_from is not None:
         cmd += ['--from', f'{round(t_from)}ps']
     if t_to is not None:

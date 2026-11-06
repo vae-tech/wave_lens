@@ -4,6 +4,7 @@ import io, json, os, shutil, subprocess, sys, threading, time, unittest
 
 from tests.unit import helpers as H
 from tests import mcp_bench as B
+import dumpscan
 import svabuild
 import viewedit as E
 import wavemcp as W
@@ -297,6 +298,32 @@ class Dump(unittest.TestCase):
                           ('top.q[*', ['top.q.[0]', 'top.q.[1]']), ('q?1]', ['top.q.[1]']), ('q*', ['top.q.[0]', 'top.q.[1]', 'top.qx'])):
             with self.subTest(pat=pat):
                 self.assertEqual(sorted(got(pat)), want)
+
+    def test_an_array_element_in_the_scope_form(self):
+        """Review 2026-11-05 (runs) B-24: an element written as a scope of its own ($scope module ptr + $var … [0]) is
+        top.ptr.[0] (not top.ptr..[0]) and found by every spelling, by wave_signals, wave_values and sva vcd --signals,
+        of the VCD and of its FST."""
+        vcd = os.path.join(self.d.name, 'scoped.vcd')
+        with open(vcd, 'w') as f:
+            f.write('$timescale 1ns $end\n$scope module top $end\n$var logic 8 ! q[0] [7:0] $end\n$scope module ptr $end\n'
+                    '$var wire 1 $ [0] $end\n$var wire 1 % [1] $end\n$upscope $end\n$upscope $end\n$enddefinitions $end\n'
+                    '#0\nb0 !\n0$\n0%\n#10\n1$\n#20\n')
+        self.assertEqual(sorted(dumpscan.read(vcd, 'count').vars), ['top.ptr.[0]', 'top.ptr.[1]', 'top.q.[0]'])
+        self.assertEqual([dumpscan.glued(p) for p in ('top.ptr..[0]', 'm.[1].[2]', 'q[0]')], ['top.ptr[0]', 'm[1][2]', 'q[0]'])
+        sva = svabuild.find_bin()
+        if sva:
+            subprocess.run([sva, 'fst', vcd, '-q'], check=True)
+        for src in [vcd] + ([vcd[:-4] + '.fst'] if sva else []):
+            sig = lambda pat: [r[0] for r in json.loads(W.call('wave_signals', {'dump': src, 'pattern': pat})[0])['signals']]
+            for name in ('top.ptr.[0]', 'top.ptr[0]', 'ptr[0]', 'ptr.[0]', 'top.ptr..[0]'):
+                with self.subTest(src=src[-3:], name=name):
+                    self.assertEqual(sig(name), ['top.ptr.[0]'])
+                    text, err = W.call('wave_values', {'dump': src, 'signals': [name], 'at': 12})
+                    self.assertFalse(err, text)
+                    self.assertEqual(json.loads(text)['rows'], [[12, '1']])
+                    if sva:
+                        r = subprocess.run([sva, 'vcd', src, '--signals', name], capture_output=True, text=True)
+                        self.assertEqual((r.returncode, r.stdout.count('$var'), '[0] $end' in r.stdout), (0, 1, True), r.stderr)
 
     def test_goto_time_in_ns(self):   # review 2026-11-05 B-12: a live goto's t in ns, as the cursor's
         self.assertEqual(W.ns_out([{'op': 'goto', 't': 100000, 'view': 'v', 'sel': None}], True)[0]['t'], 100)
@@ -860,6 +887,16 @@ class Tests(unittest.TestCase):
         self.assertTrue(err)
         self.assertIn('no marks file', text)
 
+    def test_marks_with_a_bom(self):
+        """Review 2026-11-05 (runs) B-27: a marks file saved again by a Windows editor (a BOM before it) is one, of a directory and alone."""
+        os.makedirs(os.path.join(self.dir, 'bom'))
+        bom = os.path.join(self.dir, 'bom', 'bom.json')
+        with open(bom, 'w', encoding='utf-8-sig') as f:
+            json.dump(self.DOC, f)
+        r = self.call('wave_tests', marks=os.path.join(self.dir, 'bom'))
+        self.assertEqual((r['files'], r.get('notes')), (1, None), r)
+        self.assertEqual(self.call('wave_tests', marks=bom)['summary'], self.call('wave_tests', marks=self.marks)['summary'])
+
     def test_the_tests_of_a_run(self):
         r = self.call('wave_tests', marks=self.marks)
         self.assertEqual(r['summary'], '2 tests: 1 passed, 1 failed')
@@ -951,7 +988,7 @@ class Protocol(unittest.TestCase):
         self.assertTrue(all('fn' not in t and t['inputSchema']['type'] == 'object' for t in r[1]['result']['tools']))
         # codex exec calls a tool without approval only when it says it reads: every tool but the ones that write a file
         self.assertEqual([t['name'] for t in r[1]['result']['tools'] if not t['annotations']['readOnlyHint']],
-                         ['wave_explain', 'wave_page', 'wave_to_fst', 'wave_cut', 'view_edit', 'view_live'])
+                         ['wave_explain', 'wave_page', 'wave_to_fst', 'wave_runs', 'wave_cut', 'view_edit', 'view_live'])
         arrays = [(t['name'], k) for t in r[1]['result']['tools'] for k, v in t['inputSchema']['properties'].items()
                   if 'array' in str(v.get('type')) and 'items' not in v]
         self.assertEqual(arrays, [])   # an array without items is refused by OpenAI's function schemas

@@ -1450,3 +1450,201 @@ fn diff_results_covers_and_twice_one_name() {
     let (code, v, _) = diff_json(&["--results", &twice, &twice]);
     assert_eq!((code, v["new"].as_u64(), v["gone"].as_u64(), v["moved"].as_u64()), (Some(0), Some(0), Some(0), Some(0)), "{v}");
 }
+
+// ------------------------------------------------------------------------------------------------ sva runs (review 2026-11-05 runs)
+
+/// A directory of its own for a test of sva runs (they run in parallel).
+fn runs_dir(name: &str) -> PathBuf {
+    let d = dir().join(format!("runs-{name}"));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+/// 40 ns of a counter: cnt counts each rising edge of clk; from `bad` on, ok goes 0; `extra`: one more signal.
+fn counter(bad: Option<u64>, extra: bool) -> String {
+    let mut s = String::from("$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! clk $end\n$var wire 4 \" cnt [3:0] $end\n$var wire 1 # ok $end\n");
+    if extra {
+        s += "$var wire 1 $ extra $end\n";
+    }
+    s += "$upscope $end\n$enddefinitions $end\n#0\n0!\nb0 \"\n1#\n";
+    if extra {
+        s += "0$\n";
+    }
+    for t in (5..=40).step_by(5) {
+        s += &format!("#{t}\n{}!\n", t / 5 % 2);
+        if t % 10 == 5 {
+            s += &format!("b{:b} \"\n", t / 10);
+        }
+        if bad == Some(t) {
+            s += "0#\n";
+        }
+    }
+    s
+}
+
+fn put(d: &std::path::Path, name: &str, text: &str) -> String {
+    let p = d.join(name);
+    std::fs::write(&p, text).unwrap();
+    p.to_string_lossy().into_owned()
+}
+
+fn runs_json(d: &std::path::Path) -> serde_json::Value {
+    serde_json::from_str(&std::fs::read_to_string(d.join("runs.json")).unwrap()).unwrap()
+}
+
+#[test]
+fn runs_gitignore_only_of_their_own() {
+    let d = runs_dir("gitignore");
+    let dump = put(&d, "d.vcd", &counter(None, false));
+    put(&d, "main.sv", "module m; endmodule\n");
+    let o = sva(&["runs", "keep", &dump, "--dir", &d.to_string_lossy()]);
+    assert!(o.status.success(), "{}", err(&o));
+    let gi = std::fs::read_to_string(d.join(".gitignore")).unwrap();
+    assert!(!gi.lines().any(|l| l == "*") && gi.contains("*.fst") && gi.contains("runs.json*"), "a folder of yours: only the runs' files\n{gi}");
+    assert!(err(&o).contains(".gitignore"), "said: {}", err(&o));
+    let sub = d.join("made");
+    assert!(sva(&["runs", "keep", &dump, "--dir", &sub.to_string_lossy()]).status.success());
+    assert!(std::fs::read_to_string(sub.join(".gitignore")).unwrap().lines().any(|l| l == "*"), "a directory keep made: ignored whole");
+}
+
+#[test]
+fn runs_rm_finds_every_run_first() {
+    let d = runs_dir("rm");
+    let dump = put(&d, "d.vcd", &counter(None, false));
+    for n in ["a", "b"] {
+        assert!(sva(&["runs", "keep", &dump, "--name", n]).status.success());
+    }
+    let r = d.join(".wavelens-runs");
+    let rs = r.to_string_lossy();
+    let o = sva(&["runs", "rm", "a", "nope", "--dir", &rs]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(r.join("1-d.fst").exists(), "a run not found: nothing removed");
+    assert_eq!(runs_json(&r)["runs"].as_array().unwrap().len(), 2);
+    assert!(sva(&["runs", "rm", "a", "#2", "--dir", &rs]).status.success());
+    assert!(!r.join("1-d.fst").exists() && !r.join("2-d.fst").exists());
+    assert_eq!(runs_json(&r)["runs"].as_array().unwrap().len(), 0);
+    let empty = runs_dir("rm-empty");
+    let o = sva(&["runs", "rm", "1", "--dir", &empty.join(".wavelens-runs").to_string_lossy()]);
+    assert!(err(&o).contains("no runs kept"), "{}", err(&o));
+}
+
+#[test]
+fn runs_index_checked() {
+    let d = runs_dir("index");
+    let ds = d.to_string_lossy().into_owned();
+    std::fs::write(d.join("runs.json"), r#"{"wavelens": "runs", "version": 1, "next": 2, "runs": [{"id": 1, "name": "x", "file": "../victim.fst"}]}"#).unwrap();
+    put(&d.join(".."), "victim.fst", "x");
+    for args in [vec!["runs", "--dir", &ds], vec!["runs", "rm", "1", "--dir", &ds], vec!["runs", "path", "1", "--dir", &ds]] {
+        let o = sva(&args);
+        assert_eq!(o.status.code(), Some(2), "{args:?}");
+        assert!(err(&o).contains("runs.json") && err(&o).contains("a file name"), "{args:?}: {}", err(&o));
+    }
+    assert!(d.join("../victim.fst").exists(), "never reached");
+    std::fs::write(d.join("runs.json"), r#"{"wavelens": "runs", "version": 2, "runs": []}"#).unwrap();
+    assert!(err(&sva(&["runs", "--dir", &ds])).contains("newer WaveLens"));
+}
+
+#[test]
+fn runs_the_directory_rule() {
+    let d = runs_dir("rule");
+    let dump = put(&d, "d.vcd", &counter(None, false));
+    assert!(sva(&["runs", "keep", &dump, "--name", "one"]).status.success());
+    // set / path / rm take the dump, from another directory
+    let o = sva(&["runs", "set", "1", &dump, "--name", "two"]);
+    assert!(o.status.success(), "{}", err(&o));
+    assert_eq!(out(&sva(&["runs", "path", "two", &dump])).trim(), d.join(".wavelens-runs").join("1-d.fst").to_string_lossy());
+    // a run's FST kept again: into its own directory, not a nested one
+    let fst = d.join(".wavelens-runs").join("1-d.fst");
+    assert!(sva(&["runs", "keep", &fst.to_string_lossy(), "--name", "again"]).status.success());
+    assert!(!d.join(".wavelens-runs").join(".wavelens-runs").exists());
+    assert_eq!(runs_json(&d.join(".wavelens-runs"))["runs"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn runs_of_one_dump_in_a_shared_directory() {
+    let d = runs_dir("shared");
+    let ds = d.join("shared").to_string_lossy().into_owned();
+    let a = put(&d, "a.vcd", &counter(None, false));
+    let b = put(&d, "b.vcd", &counter(Some(25), false));
+    assert!(sva(&["runs", "keep", &a, "--dir", &ds, "--name", "A1"]).status.success());
+    assert!(sva(&["runs", "keep", &b, "--dir", &ds, "--name", "B1"]).status.success());
+    let l: serde_json::Value = serde_json::from_str(&out(&sva(&["runs", "list", &a, "--dir", &ds, "--json"]))).unwrap();
+    assert_eq!((l["runs"].as_array().unwrap().len(), l["others"].as_u64()), (1, Some(1)), "{l}");
+    let o = sva(&["runs", "diff", &a, "--dir", &ds]);
+    assert_eq!(o.status.code(), Some(0), "only a's run: equal\n{}", out(&o));
+    assert!(out(&o).contains("1 of other dumps not compared"), "{}", out(&o));
+    assert_eq!(sva(&["runs", "diff", &a, "--dir", &ds, "--all"]).status.code(), Some(1), "--all: b's run too");
+}
+
+#[test]
+fn runs_options_and_edges() {
+    let d = runs_dir("edges");
+    let dump = put(&d, "d.vcd", &counter(None, false));
+    assert!(err(&sva(&["runs", "keep", &dump, "--from", "5ns"])).contains("not an option of sva runs keep"));
+    assert!(sva(&["runs", "keep", &dump, "--name=eq"]).status.success(), "--opt=value");
+    let r = d.join(".wavelens-runs").to_string_lossy().into_owned();
+    assert_eq!(runs_json(&d.join(".wavelens-runs"))["runs"][0]["name"], "eq");
+    let o = sva(&["runs", "set", "1", "--dir", &r, "--name", ""]);
+    assert_eq!(o.status.code(), Some(2), "an empty name refused");
+    let o = sva(&["runs", "diff", &dump, "--from", "30ns", "--to", "10ns"]);
+    assert_eq!((o.status.code(), err(&o).matches("before --from").count()), (Some(2), 1), "said once: {}", err(&o));
+    let o = sva(&["runs", "diff", &dump, "--from", "50ns", "--to", "80ns", "--json"]);
+    let v: serde_json::Value = serde_json::from_str(&out(&o)).unwrap();
+    assert_eq!((o.status.code(), v["runs"][0]["outside"].as_bool(), v["from"].as_u64()), (Some(1), Some(true), Some(50000)), "{v}");
+    // the signals one side has, in the text
+    let extra = put(&d, "d.vcd", &counter(None, true));
+    let o = sva(&["runs", "diff", &extra]);
+    assert!(out(&o).contains("equal (3 signals; 1 of the dump not in the run)"), "{}", out(&o));
+    // a long stem leaves room for the part's suffix
+    let long = put(&d, &format!("{}.vcd", "x".repeat(240)), &counter(None, false));
+    assert!(sva(&["runs", "keep", &long]).status.success(), "a long name kept");
+}
+
+#[test]
+fn runs_diff_holds_the_first_difference_only() {
+    // 400 signals, 2000 steps, every value other in the run: the counts whole, no difference list kept
+    let d = runs_dir("wide");
+    let gen = |seed: u64| {
+        let mut s = String::from("$timescale 1ns $end\n$scope module tb $end\n");
+        for i in 0..400 {
+            s += &format!("$var wire 8 s{i} sig{i} [7:0] $end\n");
+        }
+        s += "$upscope $end\n$enddefinitions $end\n";
+        for t in 0..2000u64 {
+            s += &format!("#{t}\n");
+            for i in 0..400u64 {
+                s += &format!("b{:b} s{i}\n", (t * 7 + i * 13 + seed) % 256);
+            }
+        }
+        s
+    };
+    let a = put(&d, "a.vcd", &gen(0));
+    assert!(sva(&["runs", "keep", &a]).status.success());
+    let a = put(&d, "a.vcd", &gen(1));
+    let o = sva(&["runs", "diff", &a, "--json", "--limit", "0"]);
+    assert_eq!(o.status.code(), Some(1), "{}", err(&o));
+    let v: serde_json::Value = serde_json::from_str(&out(&o)).unwrap();
+    let r = &v["runs"][0];
+    assert_eq!((r["signals_differ"].as_u64(), r["signals"].as_array().unwrap().len()), (Some(400), 400));
+    assert!(r["differences"].is_null(), "no list of differences carried");
+    // sva diff --limit 1: only_a whole
+    let b = put(&d, "b.vcd", &counter(None, true));
+    let c = put(&d, "c.vcd", &counter(None, false));
+    let v: serde_json::Value = serde_json::from_str(&out(&sva(&["diff", &b, &c, "--json", "-", "--limit", "1"]))).unwrap();
+    assert_eq!(v["only_a"].as_array().unwrap().len(), 1, "{v}");
+}
+
+#[test]
+fn runs_two_keeps_at_once() {
+    let d = runs_dir("lock");
+    let dump = put(&d, "d.vcd", &counter(None, false));
+    let ks: Vec<_> = (0..4).map(|_| Command::new(env!("CARGO_BIN_EXE_sva")).args(["runs", "keep", &dump]).spawn().unwrap()).collect();
+    for mut k in ks {
+        assert!(k.wait().unwrap().success());
+    }
+    let v = runs_json(&d.join(".wavelens-runs"));
+    let mut ids: Vec<u64> = v["runs"].as_array().unwrap().iter().map(|r| r["id"].as_u64().unwrap()).collect();
+    ids.sort_unstable();
+    assert_eq!(ids, [1, 2, 3, 4], "each its own number, every one listed");
+}

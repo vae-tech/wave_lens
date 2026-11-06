@@ -571,6 +571,28 @@
 .wv .wv-mods .mbox { position: absolute; left: 2px; right: 2px; z-index: 1; border: 1px dashed var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent);
   pointer-events: none; }
 /* the drawer's size wins over a size the panel was given on a wide window (inline, kept for the next time) */
+.wv .wv-runs { width: 420px; }
+.wv .wv-runs .mf select { font: inherit; font-size: 11.5px; max-width: 14em; background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; }
+.wv .wv-runs .rf { display: flex; flex-direction: column; gap: 4px; padding: 0 6px 6px; }
+.wv .wv-runs .rf input, .wv .wv-runs .rf textarea { font: inherit; font-size: 12px; padding: 2px 6px; border: 1px solid var(--line); border-radius: 4px;
+  background: var(--panel); color: var(--fg); resize: vertical; }
+.wv .wv-runs .rfb { display: flex; gap: 6px; justify-content: flex-end; }
+.wv .wv-runs .rl:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.wv .wv-runs .rn { height: 40px; flex-direction: column; align-items: stretch; justify-content: center; gap: 1px; padding: 0 6px 0 8px; cursor: pointer;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 50%, transparent); }
+.wv .wv-runs .rn .r1 { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.wv .wv-runs .rn .r2 { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wv .wv-runs .rn button { padding: 0 4px; font-size: 11px; opacity: 0.6; }
+.wv .wv-runs .rn:hover button, .wv .wv-runs .rn.pv button { opacity: 1; }
+.wv .wv-runs .rtag { font-size: 10.5px; padding: 0 5px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); }
+.wv .wv-runs .rn .nm { flex: 0 1 auto; min-width: 2em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wv .wv-runs .rn .rtags { display: flex; gap: 3px; min-width: 0; flex: 0 1 auto; overflow: hidden; }
+.wv .wv-runs .rtag { flex: 0 1 auto; min-width: 1.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wv .wv-runs .rd.old { opacity: 0.55; }
+.wv .wv-runs .rn .r1 > button { flex: none; }
+.wv .wv-runs .rd { font-size: 11px; white-space: nowrap; color: var(--muted); }
+.wv .wv-runs .rn .r1 > button:first-of-type { margin-left: auto; }
+.wv .wv-runs .rd.bad { color: var(--wave-x); }
 @media (max-width: 600px) { .wv .wv-mods { left: 0 !important; top: 0 !important; bottom: 0; width: min(88vw, 340px) !important;
   height: auto !important; max-width: none !important; max-height: none !important; border-radius: 0 6px 6px 0; }
   .wv .wv-mods .mh { cursor: default; } .wv .wv-mods .rz { display: none; } }

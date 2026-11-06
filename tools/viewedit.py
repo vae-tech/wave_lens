@@ -1734,6 +1734,8 @@ class Editor:
             vec = {r['full'] for r in self.m.sigs() if is_vec(r)}
             self.st['bits'] = [p for p in dict.fromkeys(map(str, s['bits'] if isinstance(s['bits'], list) else [])) if p in vec]
         if 'only' in s:   # as the viewer keeps it: its known modules, on unless false; a selection it leaves out goes
+            if isinstance(s['only'], dict):   # view.js setState: its groups, else the setting's, for the next set too (onlyGrp)
+                self.grp_next = s['only']['groups'] if isinstance(s['only'].get('groups'), bool) else None
             self.st['only'] = self.only()
             self.unselect_gone()
         return {'missing': self.missing(s)}

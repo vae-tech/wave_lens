@@ -1,0 +1,23 @@
+$timescale 1ns $end
+$scope module top $end
+$var logic 8 ! q[0] [7:0] $end
+$var logic 8 " q[1] [7:0] $end
+$var logic 4 # m[1][2] [3:0] $end
+$scope module ptr $end
+$var wire 1 $ [0] $end
+$var wire 1 % [1] $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+#0
+b0 !
+b1 "
+b10 #
+0$
+1%
+#10
+b11 !
+1$
+#20
+0%
+#30

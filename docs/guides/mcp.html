@@ -26,7 +26,7 @@
 <h2 id="what">What it is</h2>
 <p><code>tools/wavemcp.py</code> is an MCP server (Model Context Protocol, JSON-RPC over stdio). Python standard library only, like the
   other tools. It reads a VCD, or an FST through GTKWave's <code>fst2vcd</code> or the <code>sva</code> CLI. Some tools need the <code>sva</code> engine's CLI —
-  <code>sva_check</code>, <code>wave_find</code> with an expression, <code>wave_to_fst</code>, <code>wave_diff</code>, <code>wave_cut</code> and <code>compare</code> with a <code>dump</code> — and find it the way <code>svabuild.py</code> does:
+  <code>sva_check</code>, <code>wave_find</code> with an expression, <code>wave_to_fst</code>, <code>wave_diff</code>, <code>wave_runs</code>, <code>wave_cut</code> and <code>compare</code> with a <code>dump</code> — and find it the way <code>svabuild.py</code> does:
   <code>$WAVELENS_SVA</code>, the build (<code>make sva-build</code>), the committed <code>bin/&lt;os&gt;-x86_64/sva</code>, the
   <code>PATH</code>.</p>
 <p>A dump is read once per server (its declarations and the change counts) and kept; the transitions of a signal are read when a tool
@@ -85,6 +85,10 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
     (a <code>.html</code>) a page marked at it</td></tr>
   <tr><td><code>wave_fsm</code></td><td>an FSM's states in a dump: entries, time held, the states never reached, the values of no state, its changes
     (the page's FSM panel's count; <code>tools/fsmstats.py --strict</code> for CI)</td></tr>
+  <tr><td><code>wave_runs</code></td><td>the runs kept of a dump (<code>sva runs</code>, the ones the VS Code Runs panel keeps in
+    <code>.wavelens-runs</code>): <code>action</code> <code>list</code>, <code>keep</code> (a name, tags, a comment), <code>set</code>,
+    <code>rm</code>, <code>diff</code>: the dump against each run over a window (<code>from</code>, <code>to</code>, <code>signals</code>) —
+    which run before differs, and where first</td></tr>
   <tr><td><code>wave_cut</code></td><td>a window (<code>from</code>, <code>to</code>) and some <code>signals</code> of a dump as a small VCD at <code>out</code>: for <span class="ui">Compare…</span> on a page,
     a fixture, one test case to send</td></tr>
   <tr><td><code>view_edit</code></td><td>marks a page up for a person: bookmarks with an explanation, arrows between them, markers, expressions, a group
@@ -333,7 +337,7 @@ make mcp-bench AGENT=codex TASKS=a1,b3                 <span class="c"># some ta
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.43 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.44 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>
