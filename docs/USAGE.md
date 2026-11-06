@@ -326,7 +326,9 @@ it.
 for modules of a generated config (the hierarchy picture below). One signal: `"color"` in its entry of a generated config,
 `"color"` / `"stroke"` and `"fill"` in WaveJSON. Many signals by name: a rule in `tools/base.config.json`, e.g.
 `{"match": ["*_valid", "*_ready"], "width": 1, "color": "#f59f00"}`, colours them in every config `mkconfig.py` writes.
-Interactively: find the signals and **Paint** them (see *Fuzzy find*).
+Interactively: find the signals and **Paint** them (see *Fuzzy find*). Every colour picker of the viewer (the bar's Paint, a signal's, a marker's, a bookmark's, a group's, a Δ's)
+has its hex code beside it (`#c2255c`): select it to copy, type or paste a code (`#abc`, `C2255C` too) and Enter picks it
+(a wrong one is marked and put back).
 
 ### Settings
 
@@ -1183,7 +1185,11 @@ a longer range is cut there, and the head, the foot and the toast say where), ea
 after the cycle's edge — what holds during the cycle, as `vcd2wavedrom.py --clock` writes it (the assertions and the
 bus decoders read the value just before the edge, as a simulator samples: the same data, one cycle apart at a change
 on the edge), buses as `=` with
-their values in the radix shown, a group per module; **Gaps ▸** (a submenu: a check box, *idle*, *keep*) — the picture and WaveDrom
+their values in the radix shown, a group per module; **Save as WaveLens (JSON)** (exact waves only) — the same signals over the range as waves of their own
+(`<title>.wavelens.json`): each signal's value at the range's start and its changes to its end, exact, with its width,
+kind, enum and radix, in its modules, and your view of them (paint, radix, hidden, groups, Only) with the markers,
+bookmarks and spans inside the range; Open… (or a drop, or Load…) opens it in any viewer, VS Code's *Open in WaveLens* in
+a tab: a piece of a large dump to keep, send or look at again on its own; **Gaps ▸** (a submenu: a check box, *idle*, *keep*) — the picture and WaveDrom
 leave out the stretches where none of their signals (the clocks aside) changes for *idle*, all but *keep* after the
 last change and before the next one: a long range of rare transfers becomes its transfers side by side with a break
 between them (the time axis goes on with the real time after each break), and in WaveDrom one `|` cell per break

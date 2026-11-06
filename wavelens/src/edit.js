@@ -1059,3 +1059,54 @@ function live(url) {
   liveShow();
   return url ? LIVE.base : null;
 }
+
+/* ---------------- a piece of the waves (the box's Save as WaveLens) ---------------- */
+Object.assign(WaveView.prototype, {
+  // the waves of rows (each one's signal: a bit's, a field's, a copy's its own) over [a, b] as a file this viewer opens on its
+  // own (x.wavelens.json: Open…, a drop, VS Code's Open in WaveLens): every signal's value at a and its changes up to b,
+  // exact, with its width, kind, enum and radix, in its modules; the view of them (paint, radix, hidden, groups, Only …) and
+  // your marks inside [a, b] as its state -> that WaveJSON ({wavelens: 'waves'}); a large dump's signals read first
+  async toPiece(a = this.t0, b = this.t0 + this.span, rows = null) {
+    if (!this.M.timed) throw new Error('these waves are clock-sampled (one cell per cycle): Save as WaveDrom');
+    const base = r => { const x = rowBase(r); return x.field && x.of ? x.of : x; };
+    const pick = (rows || this.screenRows()).map(r => (r.type === 'group' && r.sig ? r.sig : r)).filter(r => r.type === 'sig').map(base);
+    let sigs = [...new Set(pick)].filter(r => r.tr && r.src && !r.same);
+    if (sigs.some(r => r.lazy)) { await this.need(sigs); sigs = sigs.filter(r => !r.lazy); }
+    if (!sigs.length) throw new Error('no signal of the dump in it');
+    const tvOf = r => {
+      const text = r.src.kind === 'real' || r.src.kind === 'string';
+      const val = o => (text ? (o.k === '=' ? o.v : null) : o.k === '=' ? (o.bits ? "'b" + o.bits : o.raw ?? String(o.v)) :
+        '01xz'.includes(o.k) ? o.k : 'x');
+      const i = lastLE(r.tr, a), out = i < 0 ? [] : [[a, val(r.tr[i])]];
+      for (let j = i + 1; j < r.tr.length && r.tr[j].t <= b; j++) if (r.tr[j].t > a) out.push([r.tr[j].t, val(r.tr[j])]);
+      return out;
+    };
+    const out = [], node = new Map([['', out]]);
+    for (const r of sigs) {
+      const { lazy, wave, data, node: nd, tv, ...s } = r.src, name = s.name || r.name, path = s.path || r.full || name;
+      const scope = path.endsWith('.' + name) ? path.slice(0, -name.length - 1) : path.split('.').slice(0, -1).join('.');
+      let key = '';
+      for (const p of scope ? scope.split('.') : []) {
+        const k = key ? key + '.' + p : p; if (!node.has(k)) { const g = [p]; node.get(key).push(g); node.set(k, g); }
+        key = k; }
+      node.get(key).push(Object.assign(s, { name, path, tv: tvOf(r) }, r.width > 1 && !s.width ? { width: r.width } : {}));
+    }
+    // the view: its rows', and your marks of [a, b] (arrows between the bookmarks kept); not the compare, not the runs
+    const st = this.state(), inT = t => t >= a && t <= b;
+    for (const k of ['compare', 'compareShow', 'runsOver', 'title']) delete st[k];
+    Object.assign(st, { from: a, to: b, cursor: inT(this.cursor) ? this.cursor : a, cursor2: this.cursor2 != null && inT(this.cursor2) ? this.cursor2 : null,
+      markers: (st.markers || []).filter(m => inT(m.t)), bookmarks: (st.bookmarks || []).filter(m => inT(m.t)),
+      spans: (st.spans || []).filter(s => s.to > a && s.from < b).map(s => Object.assign(s, { from: Math.max(s.from, a), to: Math.min(s.to, b) })) });
+    const kept = new Set(st.bookmarks.map(m => m.n));
+    st.arrows = (st.arrows || []).filter(x => kept.has(x.from) && kept.has(x.to));
+    if (st.range && !(inT(st.range.from) && inT(st.range.to))) st.range = null;
+    const title = String(this.opts.title || this.M.title || 'waves'), f = t => this.fmt(t, (b - a) / 1000, b - a);
+    const doc = { wavelens: 'waves', version: 1, signal: out, head: { text: `${title} · ${f(a)} … ${f(b)}` },
+      time: Object.assign({}, this.M.src.time, { t0: a, t1: b }), config: {} };
+    const scopes = this.M.src.scopes && Object.fromEntries(Object.entries(this.M.src.scopes).filter(([p]) => node.has(p)));
+    if (scopes && Object.keys(scopes).length) doc.scopes = scopes;
+    doc.meta = { piece: { of: title, from: a, to: b, signals: sigs.length, saved: new Date().toISOString() } };
+    doc.state = st;
+    return doc;
+  },
+});

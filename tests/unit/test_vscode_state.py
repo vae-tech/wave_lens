@@ -89,6 +89,33 @@ F.run(async () => {
 '''
 
 
+PIECE = r'''
+const path = require('path');
+const [F, ext, dir] = process.argv.slice(1).map((x, i) => (i ? x : require(x)));
+const h = F.host({ ext, dir, workspaceState: new Map(), config: { lazy: 'always' } });
+F.run(async () => {
+  const A = await h.tab(path.join(dir, 'p.wavelens.json'));
+  await A.send({ type: 'source', id: 1 }); return A.reply(1);
+});
+'''
+
+
+class Piece(unittest.TestCase):
+    @H.needs(NODE, 'node (or VS Code\'s, ~/.vscode-server/bin/*/node)')
+    def test_a_piece_of_waves_served_as_it_is(self):
+        """A piece of waves (x.wavelens.json, the box's Save as WaveLens) in a tab: served as it is, read whole (no FST, never
+        lazy, wavelens.lazy "always" or not); package.json opens it with WaveLens."""
+        with H.tmp() as d:
+            with open(os.path.join(d, 'p.wavelens.json'), 'w', encoding='utf-8') as f:
+                json.dump({'wavelens': 'waves', 'version': 1, 'signal': [{'name': 'a', 'path': 't.a', 'tv': [[0, '1']]}], 'time': {'t0': 0, 't1': 10}}, f)
+            r = subprocess.run([NODE, '-e', PIECE, FAKE, os.path.join(H.ROOT, 'vscode', 'extension.js'), d], capture_output=True, text=True, timeout=30)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            o = json.loads(next(x for x in r.stdout.splitlines() if x.startswith('RESULT'))[6:])
+            self.assertTrue(o['src'].endswith('p.wavelens.json') and o['lazy'] is False, o)
+        pk = json.loads(H.text(os.path.join(H.ROOT, 'vscode', 'package.json')))
+        self.assertIn({'filenamePattern': '*.wavelens.json'}, pk['contributes']['customEditors'][0]['selector'])
+
+
 class MovedTab(unittest.TestCase):
     """A tab moved to a window of its own: VS Code makes its webview again with the html of when the tab opened; over a remote
     connection its resource loads answer 404. source() gives the store of now, bytes the dump the page could not fetch; the

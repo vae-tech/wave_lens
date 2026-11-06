@@ -290,7 +290,7 @@
   // a dump dropped on the tab would replace its waves under this tab's name, store and watcher: a tab of its own instead
   document.addEventListener('drop', e => {
     const fs = [...((e.dataTransfer && e.dataTransfer.files) || [])];
-    if (!fs.some(f => /\.(vcd|fst)$/i.test(f.name))) return;
+    if (!fs.some(f => /\.(vcd|fst)$|\.wavelens\.json$/i.test(f.name))) return;
     e.preventDefault(); e.stopPropagation(); toast('open a dump from the Explorer: Open in WaveLens (a tab of its own)');
   }, true);
   G.addEventListener('error', e => vscode.postMessage({ type: 'log', text: `${e.message} (${e.filename}:${e.lineno})` }));

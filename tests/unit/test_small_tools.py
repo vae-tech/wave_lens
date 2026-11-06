@@ -142,6 +142,18 @@ class WavelensCat(unittest.TestCase):
                                                         'WaveView.prototype.w: wavelens/src/view.js:6 and wavelens/src/runs.js:7'])
         self.assertEqual(wavelenscat.proto_twice(wavelenscat.sources()), [], 'the sources of now: each key once')
 
+    def test_a_name_declared_twice_at_the_top(self):
+        """The sources are one scope once put together: a const of menu.js named as one of model.js (hexOf) was a SyntaxError,
+        no viewer on any page; --check names both places. A name inside a function, or a key, is none; an accessor of
+        Object.defineProperty is a key of WaveView.prototype too."""
+        src = [('wavelens/src/model.js', 'const hexOf = b => b;\nfunction f() {\n  const hexOf = 1;\n}\n'),
+               ('wavelens/src/menu.js', 'const hexOf = s => s;\nasync function g() {}\n'),
+               ('wavelens/src/runs.js', "class R {}\nfunction g() {}\nObject.defineProperty(WaveView.prototype, 'runCur', { get() { return 1; } });\n")]
+        self.assertEqual(wavelenscat.top_twice(src), ['hexOf: wavelens/src/model.js:1 and wavelens/src/menu.js:1',
+                                                      'g: wavelens/src/menu.js:2 and wavelens/src/runs.js:2'])
+        self.assertEqual([k for k, _, _ in wavelenscat.proto_keys(src)], ['runCur'])
+        self.assertEqual(wavelenscat.top_twice(wavelenscat.sources()), [], 'the sources of now: each name once')
+
     def test_a_name_declared_nowhere(self):
         """Review 2026-11-05 runs A-09: a name read that nothing declares and no browser has (a misspelt global) fails --check,
         with its source file and line; strings, templates, regular expressions, keys, members and parameters are no reads."""

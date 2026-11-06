@@ -71,6 +71,7 @@ const CONV = new Map();   // the conversions running: their output -> Promise
 const LAZY_FST = 4 << 20, LAZY_VCD = 64 << 20;
 function lazyFor(file, size) {
   const set = vscode.workspace.getConfiguration('wavelens').get('lazy') || 'auto';
+  if (/\.json$/i.test(file)) return false;   // a piece of waves (x.wavelens.json): read whole
   return set === 'always' || (set !== 'never' && size >= (/\.fst$/i.test(file) ? LAZY_FST : LAZY_VCD));
 }
 const vcdOf = file => (/\.fst$/i.test(file) ? convert(file, 'vcd', 'VCD text', (bin, tmp) => ['vcd', file, '--out', tmp]) : Promise.resolve(file));
@@ -965,7 +966,7 @@ function activate(ctx) {
     vscode.commands.registerCommand('wavelens.open', uri => {
       uri = uri || (vscode.window.activeTextEditor && vscode.window.activeTextEditor.document.uri);
       if (uri) return vscode.commands.executeCommand('vscode.openWith', uri, VIEW);
-      return vscode.window.showOpenDialog({ filters: { dumps: ['vcd', 'fst'] } })
+      return vscode.window.showOpenDialog({ filters: { dumps: ['vcd', 'fst'], 'pieces of waves': ['wavelens.json'] } })
         .then(u => u && u[0] && vscode.commands.executeCommand('vscode.openWith', u[0], VIEW));
     }),
     vscode.commands.registerCommand('wavelens.reload', () => { const t = active(); if (t) t.post({ type: 'reload' }); }),

@@ -84,6 +84,10 @@ class WaveView {
       this.span = Math.min(Math.max(b - a, this.minSpan), M.t1 - M.t0); this.t0 = this.clamp(a); this.draw();
     }
     this.ro = new ResizeObserver(() => this.draw()); this.ro.observe(this.wcol); this.ro.observe(this.root.querySelector('.bar'));
+    // every colour picker of the viewer (the bar's, its menus, panels and lists) with its hex code beside it (menu.js hexFields)
+    hexFields(this.root);
+    this.hexObs = new MutationObserver(ms => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1) hexFields(n); });
+    this.hexObs.observe(this.root, { childList: true, subtree: true });
     // the canvas is only as tall as the visible part of the rows (sticky in its column): redraw when that part moves
     this.onScroll = () => { if (!this.raf && this.lay && this.lay.H > this.hc + 1) this.raf = requestAnimationFrame(() =>
       { this.raf = 0; if (this.root.isConnected) this.draw(); }); };
@@ -843,7 +847,9 @@ class WaveView {
   // handle: what Reload reads again (a Promise of it: a dropped file's); none: the file as picked, while the browser still reads it
   async loadState(file, handle = null) {
     try {
-      const name = file.name || 'state', text = typeof file === 'string' ? file : await file.text(), miss = await this.setState(jsonParse(text, name));
+      const name = file.name || 'state', text = typeof file === 'string' ? file : await file.text(), j = jsonParse(text, name);
+      if (j && j.wavelens === 'waves' && typeof file !== 'string') return this.openDump(file, handle);   // a piece of waves: opened
+      const miss = await this.setState(j);
       this.undoTick();   // the load is one step to undo
       if (handle && handle.then) handle = await handle.catch(() => null);
       if (typeof file !== 'string') this.keepState(handle || { name, getFile: async () => file });
@@ -880,7 +886,8 @@ class WaveView {
     if (!VIEWS.has(this) && this.root.waveView && this.root.waveView !== this) return this.root.waveView.openDump(file, handle, keep);   // replaced meanwhile
     try {
       if (!file && G.showOpenFilePicker) { const [h] = await G.showOpenFilePicker({ id: 'wavelens-dump',
-        types: [{ description: 'VCD dump', accept: { 'text/plain': ['.vcd'] } }] }); handle = h; file = await h.getFile(); }
+        types: [{ description: 'VCD dump, WaveLens waves', accept: { 'text/plain': ['.vcd'], 'application/json': ['.json'] } }] });
+        handle = h; file = await h.getFile(); }
       else if (!file) { this.dfile.click(); return this; }
       const gen = this.root.wlOpen = (this.root.wlOpen || 0) + 1;   // the latest Open… on this element wins, whichever reads first
       if (handle && handle.then) handle = await handle.catch(() => null);
@@ -893,10 +900,22 @@ class WaveView {
       if (!VIEWS.has(this)) return this.root.waveView && this.root.waveView !== this ? this.root.waveView.openDump(file, handle, keep) : this;   // Sources…
       if (/\.fst$/i.test(file.name) && !/^\s*\$/.test(head)) { const m = 'an FST is binary: sva vcd x.fst --out x.vcd (or fst2vcd), or make html WAVES=x.fst';
         this.toast(m); this.log('warning', `${file.name}: not read: ${m}`); return this; }
-      let r; const t0 = performance.now();
-      // a large dump given lazy (the VS Code tab): its header, every signal read later through file.wlLoad (need, lazyAsk)
-      try { const o = { name: file.name, budget: this.S.dumpBudget, lazy: !!file.wlLazy }; r = pieces ? await vcdToWaveFile(file, o) : vcdToWave(text, o); }
-      catch (e) { this.dumpSaid(file.name, { error: e.message, line: e.line }); throw e; }
+      let r, piece = null; const t0 = performance.now();
+      // a piece of waves saved here (Save as WaveLens: x.wavelens.json): its WaveJSON as it is, its view (state) after
+      if (/^\s*\{/.test(head)) {
+        let doc; try { doc = JSON.parse(pieces ? await file.text() : text); } catch (e) { doc = null; }
+        if (!doc || doc.wavelens !== 'waves' || !Array.isArray(doc.signal)) {
+          const m = `${file.name}: not waves of WaveLens (Save as WaveLens: x.wavelens.json); a saved view: Load…`;
+          this.toast(m); this.log('warning', m); return this; }
+        piece = doc.state && typeof doc.state === 'object' ? doc.state : null; delete doc.state;
+        const n = vcdSignals(doc.signal).length;
+        r = { doc, shown: n, total: n, log: [], info: { t0: doc.time && doc.time.t0, t1: doc.time && doc.time.t1, date: null, timescale: '',
+          scopes: new Set(vcdSignals(doc.signal).map(x => String(x.path || x.name).split('.').slice(0, -1).join('.'))).size } };
+      } else {
+        // a large dump given lazy (the VS Code tab): its header, every signal read later through file.wlLoad (need, lazyAsk)
+        try { const o = { name: file.name, budget: this.S.dumpBudget, lazy: !!file.wlLazy }; r = pieces ? await vcdToWaveFile(file, o) : vcdToWave(text, o); }
+        catch (e) { this.dumpSaid(file.name, { error: e.message, line: e.line }); throw e; }
+      }
       if (gen !== this.root.wlOpen || !VIEWS.has(this)) return this;
       const said = [], why = new Map(), nsv = svApply(r.doc, this.opts.sv, said, why);   // the sources' labels (Sources…, the VS Code tab's wavelens.sources)
       const run = this.opts.sv && this.opts.sv.paths ? svFingerprint(this.opts.sv, r.info.date, svScopes(r.doc)).concat(svMissSaid(this.opts.sv, r.doc)) :
@@ -916,6 +935,8 @@ class WaveView {
       this.destroy(); root.innerHTML = '';
       const v = new WaveView(root, r.doc, opts); v.panelBox = this.panelBox;   // the panels open where they were
       if (st) { delete st.title; if (cmpAgain) { delete st.compare; delete st.compareShow; } v.runsMiss = await v.setState(st); }
+      else if (piece) {
+        try { await v.setState(Object.assign({}, piece, { wavelens: 'state' })); } catch (e) { v.logError(e, `${file.name}: its view: ${e.message}`); } }
       if (cmpAgain) { const c = await v.compare(cmpAgain.file, cmpAgain.name);
         if (c && cmpAgain.run && cmpAgain.run !== 'a') await v.compareView(cmpAgain.run); }
       v.fsmPanelAgain(panel);   // the FSM panel stays open (⟳)
@@ -1916,7 +1937,7 @@ class WaveView {
   // the viewer leaves: observers, window listeners and pending frames go; plugins hear wavelens:destroy and take their part
   destroy() {
     if (!VIEWS.has(this)) return;
-    this.ro.disconnect(); this.ac.abort();   // every listener on the root, the window and the document
+    this.ro.disconnect(); this.hexObs.disconnect(); this.ac.abort();   // every listener on the root, the window and the document
     this.help(false);
     cancelAnimationFrame(this.raf); cancelAnimationFrame(this.inv); clearTimeout(this.toastT); clearTimeout(this.gapTypeT);
     if (ACTIVE.view === this) ACTIVE.view = null;

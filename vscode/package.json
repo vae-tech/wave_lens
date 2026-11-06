@@ -21,7 +21,7 @@
       {
         "viewType": "wavelens.waves",
         "displayName": "WaveLens",
-        "selector": [{ "filenamePattern": "*.vcd" }, { "filenamePattern": "*.fst" }],
+        "selector": [{ "filenamePattern": "*.vcd" }, { "filenamePattern": "*.fst" }, { "filenamePattern": "*.wavelens.json" }],
         "priority": "option"
       }
     ],
@@ -40,7 +40,7 @@
     ],
     "menus": {
       "explorer/context": [
-        { "command": "wavelens.open", "when": "resourceExtname =~ /^\\.(vcd|fst)$/i", "group": "navigation@9" },
+        { "command": "wavelens.open", "when": "resourceExtname =~ /^\\.(vcd|fst)$/i || resourceFilename =~ /\\.wavelens\\.json$/i", "group": "navigation@9" },
         { "command": "wavelens.toFst", "when": "resourceExtname =~ /^\\.vcd$/i", "group": "navigation@10" }
       ],
       "editor/title": [

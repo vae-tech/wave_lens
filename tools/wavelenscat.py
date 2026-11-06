@@ -6,7 +6,7 @@ of a source file. Each source file starts with a comment that says what it holds
 separated by a banner with the file's name. --check: exit 1 when wavelens.js is not what the sources give, a line of
 the sources (and of the plugins sva.js, bus.js) is longer than WIDTH columns, or two places of the sources define one
 key of WaveView.prototype (the class body in view.js, Object.assign(WaveView.prototype, {…}) in the others: the later
-would win without a word), or a name is read that nothing declares and no browser / node has (jsnames.py: a misspelt
+would win without a word), or two declare one name at the top (one scope: a SyntaxError, nothing runs), or a name is read that nothing declares and no browser / node has (jsnames.py: a misspelt
 global; over wavelens.js, the plugins and the extension's files) (smoke and make check call it).
 
   python3 -I tools/wavelenscat.py [--check]
@@ -80,6 +80,23 @@ def proto_keys(texts) -> list:
     return out
 
 
+TOP_DECL = re.compile(r'^(?:async\s+)?(?:const|let|var|function\*?|class)\s+([A-Za-z_$][\w$]*)')
+
+
+def top_twice(texts) -> list:
+    """'name: file:line and file:line' for every name declared twice at the top of the sources (one scope once put
+    together: a const or let declared again is a SyntaxError, the whole of wavelens.js not run; a function the later)."""
+    seen, out = {}, []
+    for rel, text in texts:
+        for i, ln in enumerate(text.split('\n'), 1):
+            m = TOP_DECL.match(ln)
+            if m:
+                if m.group(1) in seen:
+                    out.append(f'{m.group(1)}: {seen[m.group(1)]} and {rel}:{i}')
+                seen.setdefault(m.group(1), f'{rel}:{i}')
+    return out
+
+
 def proto_twice(texts) -> list:
     """'key: file:line and file:line' for every key of WaveView.prototype defined twice (the later silently wins: Object.assign
     and a class body raise nothing); a getter with its setter is one key."""
@@ -144,6 +161,9 @@ def main():
         long = too_long()
         if long:
             sys.exit('\n'.join(f'wavelenscat: {x} (at most {WIDTH})' for x in long))
+        top = top_twice(sources())
+        if top:
+            sys.exit('\n'.join(f'wavelenscat: {x}: declared twice at the top (one scope: wavelens.js would not run)' for x in top))
         twice = proto_twice(sources())
         if twice:
             sys.exit('\n'.join(f'wavelenscat: {x}: defined twice, the later wins' for x in twice))

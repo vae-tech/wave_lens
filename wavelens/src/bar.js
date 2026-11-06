@@ -59,6 +59,8 @@ const TIPS = {
   'm:undup': ['This copy out of the waves: a bookmark on it goes to its signal'],
   'm:bits': ['The bus bit by bit: a row per bit under it, the highest first (a click on its width [7:0] does it too)', ['B']],
   'm:wdjson': ['The range as a WaveDrom file (.json): the highlighted signals, else the ones on the screen, a cell per clock cycle'],
+  'm:wlpiece': ['The range as waves WaveLens opens on its own (.wavelens.json): the highlighted signals, else the ones on the screen, ' +
+    'exact, with your view of them (colours, radix, marks inside it)'],
     'm:wdcopy': ['The same WaveDrom to the clipboard'],
   '.gon': ['Gaps: the picture and WaveDrom leave out the stretches where the signals (the clocks aside) do not change, a break "|" there'],
   '.gview': ['The waves themselves with the gaps cut out: scroll and zoom them, every change of a gap setting shows at once; a picture saved is what ' +
@@ -305,7 +307,7 @@ class Bar {
       ('<button type="button" data-act="dopen" title="Open a VCD dump in this viewer (or drop one on it): its signals by scope, exact ' +
         'transitions">Open…</button>'),
       ('<button type="button" data-act="dreload" title="Read the dump again from the disk; the view, the folding and the bookmarks stay (R)" ' +
-          'hidden>⟳</button><input type="file" class="dfile" accept=".vcd,.fst" hidden>'),
+          'hidden>⟳</button><input type="file" class="dfile" accept=".vcd,.fst,.json" hidden>'),
       ('<button type="button" data-act="dcmp">Compare…</button><button type="button" data-act="dcmpx" class="cmpx" hidden></button>' +
         '<span class="seg cmpv" hidden><button type="button" data-act="dcmpv" data-run="a" aria-pressed="true">A</button>' +
         '<button type="button" data-act="dcmpv" data-run="b" aria-pressed="false">B</button>' +

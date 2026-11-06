@@ -1,5 +1,30 @@
 /* wavelens/src/menu.js — the menus of a viewer: the right button's, the tools', your groups', your markers', a text asked for. */
 
+// a colour picker's hex code beside it (#rrggbb): read, copied, typed or pasted (#abc, abc, C2255C too); a code typed is
+// a pick to the picker's own listeners (its input and change events), a wrong one marked and put back when the field is left
+const colorHex = s => { const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(s || '').trim());
+  return m ? '#' + (m[1].length === 3 ? [...m[1]].map(c => c + c).join('') : m[1]).toLowerCase() : null; };
+function hexFields(el) {
+  const all = el.matches && el.matches('input[type=color]') ? [el] : el.querySelectorAll ? el.querySelectorAll('input[type=color]') : [];
+  for (const c of all) {
+    if (c.wlHex) continue;
+    const t = c.wlHex = document.createElement('input');
+    Object.assign(t, { type: 'text', className: 'wv-hex', spellcheck: false, maxLength: 7, value: c.value,
+      title: 'The colour as a hex code: copy it, or type or paste one (#c2255c)' });
+    t.setAttribute('aria-label', `${c.getAttribute('aria-label') || 'colour'}: hex code`);
+    c.after(t);
+    let own = false;   // a pick of the field's own: the text being typed stays as it is
+    const back = () => { if (own) return; t.value = c.value; t.classList.remove('bad'); };
+    const pick = type => { own = true; try { c.dispatchEvent(new Event(type, { bubbles: true })); } finally { own = false; } };
+    c.addEventListener('input', back); c.addEventListener('change', back);
+    t.addEventListener('focus', () => t.select());
+    t.addEventListener('input', () => { const h = colorHex(t.value); t.classList.toggle('bad', !h);
+      if (h && h !== c.value) { c.value = h; pick('input'); } });
+    t.addEventListener('change', () => { const h = colorHex(t.value); if (h) { c.value = h; pick('change'); } back(); });
+    // its keys are the field's (not the viewer's, not the menu's Esc); Enter and Esc leave it (Esc: the code of before)
+    t.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Escape') { back(); t.blur(); } else if (e.key === 'Enter') t.blur(); });
+  }
+}
 Object.assign(WaveView.prototype, {
   // the right button's menu at (cx, cy) on the screen: the range (zoom, bookmarks at its ends, copy Δ), the picture (copy,
   // PNG, SVG), the signal under the pointer (colour, highlight, copy its path); Esc, a click elsewhere or a choice closes it
@@ -79,6 +104,7 @@ Object.assign(WaveView.prototype, {
         b('spdel', 'Delete the span') + '<hr>' : '') +
       (np ? `<div class="mh">${np} ${this.selRun.size > 1 ? 'selected' : 'highlighted'} rows</div>` : '') + b('copyimg', 'Copy image') + b('png',
         'Save image as PNG') + b('svg', 'Save image as SVG') + b('wdjson', 'Save as WaveDrom') + b('wdcopy', 'Copy WaveDrom') +
+        (this.M.timed ? b('wlpiece', 'Save as WaveLens (JSON)') : '') +
       // the gaps: a submenu (its settings, the role of the signals clicked, a reset)
       (`<div class="msub"><button type="button" role="menuitem" class="subh" aria-haspopup="menu" aria-expanded="false"><span class="gh">${gn()}</span>` +
         `<span class="kk">▸</span></button><div class="sub" role="menu" hidden>`) +
@@ -213,6 +239,12 @@ Object.assign(WaveView.prototype, {
           } catch (e) { this.toast('not copied'); } }
         else { this.download(new Blob([text + '\n'], { type: 'application/json' }), this.picName('wavedrom.json'));
           this.toast('saved ' + this.picName('wavedrom.json') + cut); }
+      }
+      else if (act === 'wlpiece') {   // the range of these signals as waves of their own (x.wavelens.json), opened by Open… or a drop
+        const [ta, tb] = r || [this.t0, this.t0 + this.span], name = this.picName('wavelens.json');
+        this.toPiece(ta, tb, pic.rows || null).then(doc => { this.download(new Blob([JSON.stringify(doc) + '\n'], { type: 'application/json' }), name);
+          this.toast(`saved ${name}: ${doc.meta.piece.signals} signals over ${this.fmt(ta, (tb - ta) / 1000, tb - ta)} … ` +
+            `${this.fmt(tb, (tb - ta) / 1000, tb - ta)} (Open… or a drop opens it)`); }, e => this.toast('not saved: ' + e.message));
       }
       else if (act === 'unpaint') { sigs.forEach(r => this.painted.delete(r.full)); this.savePaint(); this.renderNames(); this.draw(); }
       else if (act === 'hl') this.toggleHighlight(it);

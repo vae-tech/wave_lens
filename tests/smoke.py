@@ -6099,6 +6099,21 @@ def marker_lanes(browser, build):
         i.dispatchEvent(new Event('change', { bubbles: true })); await new Promise(r => setTimeout(r, 30)); v.closeMenu(); v.draw(); return [live, v.markList()[1].color, v.toSVG().toLowerCase().includes('#d6336c')];""")
     check(pale0[0] is None and mh[0].startswith('Marker 2') and mh[1] and not mh[2] and picked == ['#d6336c', '#d6336c', True],
           f'the right button on a text: its menu; no colour of its own by default, a colour picked shows at once and goes into the state and the picture {pale0} {mh} {picked}')
+    # a colour's hex code beside its picker (the menu's, the bar's, the lists'): read; typed (its keys not the viewer's: b is
+    # no bookmark here) and Enter: the colour picked, as the picker picks it
+    page.mouse.click(x, y, button='right'); page.wait_for_function("document.querySelector('.wv').waveView.menuEl", timeout=3000 * SCALE)
+    hx = page.locator('.wv-menu input.mkc + input.wv-hex'); seen = hx.input_value(); nb = js('return v.bms.length;')
+    hx.fill('#19z'); bad = js("return document.querySelector('.wv-menu .wv-hex').classList.contains('bad');")
+    hx.click(); page.keyboard.press('Control+a'); page.keyboard.type('#1971CB'); page.keyboard.press('Enter'); page.wait_for_timeout(60)
+    got = [js('return v.markList()[1].color;'), js('return v.bms.length;') == nb, js("return document.querySelector('.wv-menu input.mkc').value;")]
+    page.keyboard.press('Escape'); js('v.closeMenu();')
+    lists = js("return [...v.root.querySelectorAll('input[type=color]')].map(c => !!c.nextElementSibling && c.nextElementSibling.matches('.wv-hex') && "
+               "c.nextElementSibling.value === c.value);")
+    check(seen == '#d6336c' and bad and got == ['#1971cb', True, '#1971cb'] and lists and all(lists),
+          f'a colour\'s hex code beside its picker: read ({seen}), a wrong one marked ({bad}), typed and Enter picks it, its keys the field\'s {got}; '
+          f'every picker of the viewer has one {lists}')
+    hx = page.locator('.wv').first.locator('input.fcol + input.wv-hex'); hx.fill('#abc'); hx.press('Enter')
+    check(js("return v.root.querySelector('input.fcol').value;") == '#aabbcc', 'the bar\'s Paint colour: #abc typed, #aabbcc picked')
     page.mouse.click(x, y, button='right'); page.wait_for_timeout(60); page.locator('.wv-menu button[data-m=mkpale]').click(); page.wait_for_timeout(40)
     pl = js('return v.markList()[1].color ?? null;'); g, t, x, y = tag(1)
     page.mouse.click(x, y, button='right'); page.wait_for_timeout(60); page.locator('.wv-menu button[data-m=mktext]').click(); page.wait_for_timeout(40)
@@ -6140,6 +6155,51 @@ def marker_lanes(browser, build):
         await v.run([{ op: 'gaps', view: false, on: false }]); return ok && near && far || [!!F, !!t, near, far];""")
     check(gp is True, f'with gaps on the waves a text stands at its time, dropped on a gap\'s column at the side nearer {gp}')
     check(n0 == 0, f'the page starts without markers of yours {n0}')
+    check(not errs, f'no page error {errs}')
+    page.close()
+
+
+def wave_piece(browser, build):
+    """A piece of the waves saved (the box's Save as WaveLens, x.wavelens.json) and opened on its own: the range's signals, each
+    one's value at its start and its changes to its end, exact; the view of them (paint, radix) and the marks inside it; a piece
+    given to Load… or dropped opens as waves; a JSON that is neither is refused, the viewer as it was."""
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('viewer: a piece of the waves as a file of its own')
+    page = browser.new_page(viewport={'width': 1400, 'height': 1000})
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle')
+    sel = "[...document.querySelectorAll('.wv')].map(e => e.waveView).find(v => v && v.M.timed)"
+    js = lambda e: page.evaluate(f"(async () => {{ const v = {sel}; {e} }})()")
+    got = js("""const R = n => v.M.rows.find(r => r.name === n), row = R('PADDR'); v.painted.set(row.full, '#2f9e44'); v.setRadix(row, 'dec', true);
+        await v.run([{ op: 'marker', t: '60ns', label: 'in' }, { op: 'marker', t: '190ns', label: 'out' }]);
+        await v.setState({ wavelens: 'state', version: 3, range: { from: 40000, to: 120000 } });
+        v.toggleHighlight(R('PADDR')); v.toggleHighlight(R('PSEL'));
+        let saved = null; v.download = (blob, name) => { saved = [name, blob]; };
+        v.menu(300, 300, R('PADDR'), 50000); const it = v.menuEl.querySelector('button[data-m=wlpiece]'); it.click();
+        for (let i = 0; i < 50 && !saved; i++) await new Promise(r => setTimeout(r, 20));
+        const text = saved && await saved[1].text(), doc = text && JSON.parse(text);
+        const sig = n => doc.signal.flat(9).find(x => x && x.name === n);
+        return { name: saved && saved[0], kind: doc && doc.wavelens, time: doc && [doc.time.t0, doc.time.t1],
+          names: doc && doc.signal.flat(9).filter(x => x && x.tv).map(x => x.name).sort(),
+          first: doc && sig('PADDR').tv[0][0], inside: doc && sig('PADDR').tv.every(([t]) => t >= 40000 && t <= 120000),
+          marks: doc && doc.state.markers.map(m => m.label), paint: doc && doc.state.paint, text };""")
+    check(got['kind'] == 'waves' and got['name'].endswith('.wavelens.json') and got['time'] == [40000, 120000] and got['names'] == ['PADDR', 'PSEL']
+          and got['first'] == 40000 and got['inside'], f'Save as WaveLens: the range\'s highlighted signals, from its start (their value there) to its end '
+          f'{[got[k] for k in ("name", "kind", "time", "names", "first", "inside")]}')
+    check(got['marks'] == ['in'] and '#2f9e44' in got['paint'].values(), f'with your view of them: the paint, the marks inside the range {got["marks"]}')
+    o = js(f"""const f = new File([{json.dumps(got['text'])}], 'apb_piece.wavelens.json'); v.root.id = v.root.id || 'pieceRoot';
+        const nv = await v.loadState(f), w = nv && nv.M ? nv : v.root.waveView;
+        const row = w.M.rows.find(r => r.name === 'PADDR');
+        return [w.M.t0, w.M.t1, w.M.rows.filter(r => r.type === 'sig').map(r => r.name).sort(), w.painted.get(row.full), w.radixes.get(row.full),
+          w.markList().map(m => m.label), w.opts.title];""")
+    check(o[:3] == [40000, 120000, ['PADDR', 'PSEL']] and o[3] == '#2f9e44' and o[4] == 'dec' and o[5] == ['in'],
+          f'the piece given to Load…: opened as waves, its time and signals, the paint, radix and marker back {o}')
+    bad = js("""const f = new File(['{"signal": 1}'], 'other.json'); const w = v.root.waveView; await w.openDump(f);
+        return [v.root.waveView === w, w.M.t0];""")
+    check(bad == [True, 40000], f'a JSON that is no waves of WaveLens: refused, the viewer as it was {bad}')
     check(not errs, f'no page error {errs}')
     page.close()
 
@@ -8052,6 +8112,7 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'your_keys': 'the setting keys: a sequence of your own, a key taken away, one as another, ctrl+; the boxes and ? list them; the layers',
     'marker_measure': 'the matches of an expression as markers (|Δ|, expr_markers), the Δ in cycles, a bound dmin / dmax red, the measures table',
     'marker_lanes': 'the text of a marker on a line over or under a signal: the mouse, the colour, the list, the picture, undo',
+    'wave_piece': 'a piece of the waves saved as x.wavelens.json (the box\'s Save as WaveLens) and opened on its own, its view with it',
     'ranges': 'a range on the waves (shift+drag, the right button) and its menu: zoom, bookmarks, the picture, a colour',
     'tips': 'every control has a tooltip with its keys; ? shows the keys and the mouse',
     'buses': 'stage 11: bus transactions (AXI4, AXI4-Stream, APB, AHB, Avalon-MM / ST, Wishbone, OBI) on a dump of every protocol and the examples',
@@ -8315,6 +8376,7 @@ def main():
         run('vscode', vscode_tab, b, build)
         run('names', names, b, build)
         run('marker_lanes', marker_lanes, b, build)
+        run('wave_piece', wave_piece, b, build)
         run('ranges', ranges, b, build)
         run('buses', buses, b, build)
         run('tips', tips, b, build)

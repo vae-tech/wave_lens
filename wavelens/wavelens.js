@@ -2489,6 +2489,8 @@ const TIPS = {
   'm:undup': ['This copy out of the waves: a bookmark on it goes to its signal'],
   'm:bits': ['The bus bit by bit: a row per bit under it, the highest first (a click on its width [7:0] does it too)', ['B']],
   'm:wdjson': ['The range as a WaveDrom file (.json): the highlighted signals, else the ones on the screen, a cell per clock cycle'],
+  'm:wlpiece': ['The range as waves WaveLens opens on its own (.wavelens.json): the highlighted signals, else the ones on the screen, ' +
+    'exact, with your view of them (colours, radix, marks inside it)'],
     'm:wdcopy': ['The same WaveDrom to the clipboard'],
   '.gon': ['Gaps: the picture and WaveDrom leave out the stretches where the signals (the clocks aside) do not change, a break "|" there'],
   '.gview': ['The waves themselves with the gaps cut out: scroll and zoom them, every change of a gap setting shows at once; a picture saved is what ' +
@@ -2735,7 +2737,7 @@ class Bar {
       ('<button type="button" data-act="dopen" title="Open a VCD dump in this viewer (or drop one on it): its signals by scope, exact ' +
         'transitions">Open…</button>'),
       ('<button type="button" data-act="dreload" title="Read the dump again from the disk; the view, the folding and the bookmarks stay (R)" ' +
-          'hidden>⟳</button><input type="file" class="dfile" accept=".vcd,.fst" hidden>'),
+          'hidden>⟳</button><input type="file" class="dfile" accept=".vcd,.fst,.json" hidden>'),
       ('<button type="button" data-act="dcmp">Compare…</button><button type="button" data-act="dcmpx" class="cmpx" hidden></button>' +
         '<span class="seg cmpv" hidden><button type="button" data-act="dcmpv" data-run="a" aria-pressed="true">A</button>' +
         '<button type="button" data-act="dcmpv" data-run="b" aria-pressed="false">B</button>' +
@@ -3345,6 +3347,10 @@ class WaveView {
       this.span = Math.min(Math.max(b - a, this.minSpan), M.t1 - M.t0); this.t0 = this.clamp(a); this.draw();
     }
     this.ro = new ResizeObserver(() => this.draw()); this.ro.observe(this.wcol); this.ro.observe(this.root.querySelector('.bar'));
+    // every colour picker of the viewer (the bar's, its menus, panels and lists) with its hex code beside it (menu.js hexFields)
+    hexFields(this.root);
+    this.hexObs = new MutationObserver(ms => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1) hexFields(n); });
+    this.hexObs.observe(this.root, { childList: true, subtree: true });
     // the canvas is only as tall as the visible part of the rows (sticky in its column): redraw when that part moves
     this.onScroll = () => { if (!this.raf && this.lay && this.lay.H > this.hc + 1) this.raf = requestAnimationFrame(() =>
       { this.raf = 0; if (this.root.isConnected) this.draw(); }); };
@@ -4104,7 +4110,9 @@ class WaveView {
   // handle: what Reload reads again (a Promise of it: a dropped file's); none: the file as picked, while the browser still reads it
   async loadState(file, handle = null) {
     try {
-      const name = file.name || 'state', text = typeof file === 'string' ? file : await file.text(), miss = await this.setState(jsonParse(text, name));
+      const name = file.name || 'state', text = typeof file === 'string' ? file : await file.text(), j = jsonParse(text, name);
+      if (j && j.wavelens === 'waves' && typeof file !== 'string') return this.openDump(file, handle);   // a piece of waves: opened
+      const miss = await this.setState(j);
       this.undoTick();   // the load is one step to undo
       if (handle && handle.then) handle = await handle.catch(() => null);
       if (typeof file !== 'string') this.keepState(handle || { name, getFile: async () => file });
@@ -4141,7 +4149,8 @@ class WaveView {
     if (!VIEWS.has(this) && this.root.waveView && this.root.waveView !== this) return this.root.waveView.openDump(file, handle, keep);   // replaced meanwhile
     try {
       if (!file && G.showOpenFilePicker) { const [h] = await G.showOpenFilePicker({ id: 'wavelens-dump',
-        types: [{ description: 'VCD dump', accept: { 'text/plain': ['.vcd'] } }] }); handle = h; file = await h.getFile(); }
+        types: [{ description: 'VCD dump, WaveLens waves', accept: { 'text/plain': ['.vcd'], 'application/json': ['.json'] } }] });
+        handle = h; file = await h.getFile(); }
       else if (!file) { this.dfile.click(); return this; }
       const gen = this.root.wlOpen = (this.root.wlOpen || 0) + 1;   // the latest Open… on this element wins, whichever reads first
       if (handle && handle.then) handle = await handle.catch(() => null);
@@ -4154,10 +4163,22 @@ class WaveView {
       if (!VIEWS.has(this)) return this.root.waveView && this.root.waveView !== this ? this.root.waveView.openDump(file, handle, keep) : this;   // Sources…
       if (/\.fst$/i.test(file.name) && !/^\s*\$/.test(head)) { const m = 'an FST is binary: sva vcd x.fst --out x.vcd (or fst2vcd), or make html WAVES=x.fst';
         this.toast(m); this.log('warning', `${file.name}: not read: ${m}`); return this; }
-      let r; const t0 = performance.now();
-      // a large dump given lazy (the VS Code tab): its header, every signal read later through file.wlLoad (need, lazyAsk)
-      try { const o = { name: file.name, budget: this.S.dumpBudget, lazy: !!file.wlLazy }; r = pieces ? await vcdToWaveFile(file, o) : vcdToWave(text, o); }
-      catch (e) { this.dumpSaid(file.name, { error: e.message, line: e.line }); throw e; }
+      let r, piece = null; const t0 = performance.now();
+      // a piece of waves saved here (Save as WaveLens: x.wavelens.json): its WaveJSON as it is, its view (state) after
+      if (/^\s*\{/.test(head)) {
+        let doc; try { doc = JSON.parse(pieces ? await file.text() : text); } catch (e) { doc = null; }
+        if (!doc || doc.wavelens !== 'waves' || !Array.isArray(doc.signal)) {
+          const m = `${file.name}: not waves of WaveLens (Save as WaveLens: x.wavelens.json); a saved view: Load…`;
+          this.toast(m); this.log('warning', m); return this; }
+        piece = doc.state && typeof doc.state === 'object' ? doc.state : null; delete doc.state;
+        const n = vcdSignals(doc.signal).length;
+        r = { doc, shown: n, total: n, log: [], info: { t0: doc.time && doc.time.t0, t1: doc.time && doc.time.t1, date: null, timescale: '',
+          scopes: new Set(vcdSignals(doc.signal).map(x => String(x.path || x.name).split('.').slice(0, -1).join('.'))).size } };
+      } else {
+        // a large dump given lazy (the VS Code tab): its header, every signal read later through file.wlLoad (need, lazyAsk)
+        try { const o = { name: file.name, budget: this.S.dumpBudget, lazy: !!file.wlLazy }; r = pieces ? await vcdToWaveFile(file, o) : vcdToWave(text, o); }
+        catch (e) { this.dumpSaid(file.name, { error: e.message, line: e.line }); throw e; }
+      }
       if (gen !== this.root.wlOpen || !VIEWS.has(this)) return this;
       const said = [], why = new Map(), nsv = svApply(r.doc, this.opts.sv, said, why);   // the sources' labels (Sources…, the VS Code tab's wavelens.sources)
       const run = this.opts.sv && this.opts.sv.paths ? svFingerprint(this.opts.sv, r.info.date, svScopes(r.doc)).concat(svMissSaid(this.opts.sv, r.doc)) :
@@ -4177,6 +4198,8 @@ class WaveView {
       this.destroy(); root.innerHTML = '';
       const v = new WaveView(root, r.doc, opts); v.panelBox = this.panelBox;   // the panels open where they were
       if (st) { delete st.title; if (cmpAgain) { delete st.compare; delete st.compareShow; } v.runsMiss = await v.setState(st); }
+      else if (piece) {
+        try { await v.setState(Object.assign({}, piece, { wavelens: 'state' })); } catch (e) { v.logError(e, `${file.name}: its view: ${e.message}`); } }
       if (cmpAgain) { const c = await v.compare(cmpAgain.file, cmpAgain.name);
         if (c && cmpAgain.run && cmpAgain.run !== 'a') await v.compareView(cmpAgain.run); }
       v.fsmPanelAgain(panel);   // the FSM panel stays open (⟳)
@@ -5177,7 +5200,7 @@ class WaveView {
   // the viewer leaves: observers, window listeners and pending frames go; plugins hear wavelens:destroy and take their part
   destroy() {
     if (!VIEWS.has(this)) return;
-    this.ro.disconnect(); this.ac.abort();   // every listener on the root, the window and the document
+    this.ro.disconnect(); this.hexObs.disconnect(); this.ac.abort();   // every listener on the root, the window and the document
     this.help(false);
     cancelAnimationFrame(this.raf); cancelAnimationFrame(this.inv); clearTimeout(this.toastT); clearTimeout(this.gapTypeT);
     if (ACTIVE.view === this) ACTIVE.view = null;
@@ -5188,6 +5211,31 @@ class WaveView {
   }
 }
 /* ======================== src/menu.js ======================== */
+// a colour picker's hex code beside it (#rrggbb): read, copied, typed or pasted (#abc, abc, C2255C too); a code typed is
+// a pick to the picker's own listeners (its input and change events), a wrong one marked and put back when the field is left
+const colorHex = s => { const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(s || '').trim());
+  return m ? '#' + (m[1].length === 3 ? [...m[1]].map(c => c + c).join('') : m[1]).toLowerCase() : null; };
+function hexFields(el) {
+  const all = el.matches && el.matches('input[type=color]') ? [el] : el.querySelectorAll ? el.querySelectorAll('input[type=color]') : [];
+  for (const c of all) {
+    if (c.wlHex) continue;
+    const t = c.wlHex = document.createElement('input');
+    Object.assign(t, { type: 'text', className: 'wv-hex', spellcheck: false, maxLength: 7, value: c.value,
+      title: 'The colour as a hex code: copy it, or type or paste one (#c2255c)' });
+    t.setAttribute('aria-label', `${c.getAttribute('aria-label') || 'colour'}: hex code`);
+    c.after(t);
+    let own = false;   // a pick of the field's own: the text being typed stays as it is
+    const back = () => { if (own) return; t.value = c.value; t.classList.remove('bad'); };
+    const pick = type => { own = true; try { c.dispatchEvent(new Event(type, { bubbles: true })); } finally { own = false; } };
+    c.addEventListener('input', back); c.addEventListener('change', back);
+    t.addEventListener('focus', () => t.select());
+    t.addEventListener('input', () => { const h = colorHex(t.value); t.classList.toggle('bad', !h);
+      if (h && h !== c.value) { c.value = h; pick('input'); } });
+    t.addEventListener('change', () => { const h = colorHex(t.value); if (h) { c.value = h; pick('change'); } back(); });
+    // its keys are the field's (not the viewer's, not the menu's Esc); Enter and Esc leave it (Esc: the code of before)
+    t.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Escape') { back(); t.blur(); } else if (e.key === 'Enter') t.blur(); });
+  }
+}
 Object.assign(WaveView.prototype, {
   // the right button's menu at (cx, cy) on the screen: the range (zoom, bookmarks at its ends, copy Δ), the picture (copy,
   // PNG, SVG), the signal under the pointer (colour, highlight, copy its path); Esc, a click elsewhere or a choice closes it
@@ -5267,6 +5315,7 @@ Object.assign(WaveView.prototype, {
         b('spdel', 'Delete the span') + '<hr>' : '') +
       (np ? `<div class="mh">${np} ${this.selRun.size > 1 ? 'selected' : 'highlighted'} rows</div>` : '') + b('copyimg', 'Copy image') + b('png',
         'Save image as PNG') + b('svg', 'Save image as SVG') + b('wdjson', 'Save as WaveDrom') + b('wdcopy', 'Copy WaveDrom') +
+        (this.M.timed ? b('wlpiece', 'Save as WaveLens (JSON)') : '') +
       // the gaps: a submenu (its settings, the role of the signals clicked, a reset)
       (`<div class="msub"><button type="button" role="menuitem" class="subh" aria-haspopup="menu" aria-expanded="false"><span class="gh">${gn()}</span>` +
         `<span class="kk">▸</span></button><div class="sub" role="menu" hidden>`) +
@@ -5401,6 +5450,12 @@ Object.assign(WaveView.prototype, {
           } catch (e) { this.toast('not copied'); } }
         else { this.download(new Blob([text + '\n'], { type: 'application/json' }), this.picName('wavedrom.json'));
           this.toast('saved ' + this.picName('wavedrom.json') + cut); }
+      }
+      else if (act === 'wlpiece') {   // the range of these signals as waves of their own (x.wavelens.json), opened by Open… or a drop
+        const [ta, tb] = r || [this.t0, this.t0 + this.span], name = this.picName('wavelens.json');
+        this.toPiece(ta, tb, pic.rows || null).then(doc => { this.download(new Blob([JSON.stringify(doc) + '\n'], { type: 'application/json' }), name);
+          this.toast(`saved ${name}: ${doc.meta.piece.signals} signals over ${this.fmt(ta, (tb - ta) / 1000, tb - ta)} … ` +
+            `${this.fmt(tb, (tb - ta) / 1000, tb - ta)} (Open… or a drop opens it)`); }, e => this.toast('not saved: ' + e.message));
       }
       else if (act === 'unpaint') { sigs.forEach(r => this.painted.delete(r.full)); this.savePaint(); this.renderNames(); this.draw(); }
       else if (act === 'hl') this.toggleHighlight(it);
@@ -7271,6 +7326,57 @@ function live(url) {
   liveShow();
   return url ? LIVE.base : null;
 }
+
+/* ---------------- a piece of the waves (the box's Save as WaveLens) ---------------- */
+Object.assign(WaveView.prototype, {
+  // the waves of rows (each one's signal: a bit's, a field's, a copy's its own) over [a, b] as a file this viewer opens on its
+  // own (x.wavelens.json: Open…, a drop, VS Code's Open in WaveLens): every signal's value at a and its changes up to b,
+  // exact, with its width, kind, enum and radix, in its modules; the view of them (paint, radix, hidden, groups, Only …) and
+  // your marks inside [a, b] as its state -> that WaveJSON ({wavelens: 'waves'}); a large dump's signals read first
+  async toPiece(a = this.t0, b = this.t0 + this.span, rows = null) {
+    if (!this.M.timed) throw new Error('these waves are clock-sampled (one cell per cycle): Save as WaveDrom');
+    const base = r => { const x = rowBase(r); return x.field && x.of ? x.of : x; };
+    const pick = (rows || this.screenRows()).map(r => (r.type === 'group' && r.sig ? r.sig : r)).filter(r => r.type === 'sig').map(base);
+    let sigs = [...new Set(pick)].filter(r => r.tr && r.src && !r.same);
+    if (sigs.some(r => r.lazy)) { await this.need(sigs); sigs = sigs.filter(r => !r.lazy); }
+    if (!sigs.length) throw new Error('no signal of the dump in it');
+    const tvOf = r => {
+      const text = r.src.kind === 'real' || r.src.kind === 'string';
+      const val = o => (text ? (o.k === '=' ? o.v : null) : o.k === '=' ? (o.bits ? "'b" + o.bits : o.raw ?? String(o.v)) :
+        '01xz'.includes(o.k) ? o.k : 'x');
+      const i = lastLE(r.tr, a), out = i < 0 ? [] : [[a, val(r.tr[i])]];
+      for (let j = i + 1; j < r.tr.length && r.tr[j].t <= b; j++) if (r.tr[j].t > a) out.push([r.tr[j].t, val(r.tr[j])]);
+      return out;
+    };
+    const out = [], node = new Map([['', out]]);
+    for (const r of sigs) {
+      const { lazy, wave, data, node: nd, tv, ...s } = r.src, name = s.name || r.name, path = s.path || r.full || name;
+      const scope = path.endsWith('.' + name) ? path.slice(0, -name.length - 1) : path.split('.').slice(0, -1).join('.');
+      let key = '';
+      for (const p of scope ? scope.split('.') : []) {
+        const k = key ? key + '.' + p : p; if (!node.has(k)) { const g = [p]; node.get(key).push(g); node.set(k, g); }
+        key = k; }
+      node.get(key).push(Object.assign(s, { name, path, tv: tvOf(r) }, r.width > 1 && !s.width ? { width: r.width } : {}));
+    }
+    // the view: its rows', and your marks of [a, b] (arrows between the bookmarks kept); not the compare, not the runs
+    const st = this.state(), inT = t => t >= a && t <= b;
+    for (const k of ['compare', 'compareShow', 'runsOver', 'title']) delete st[k];
+    Object.assign(st, { from: a, to: b, cursor: inT(this.cursor) ? this.cursor : a, cursor2: this.cursor2 != null && inT(this.cursor2) ? this.cursor2 : null,
+      markers: (st.markers || []).filter(m => inT(m.t)), bookmarks: (st.bookmarks || []).filter(m => inT(m.t)),
+      spans: (st.spans || []).filter(s => s.to > a && s.from < b).map(s => Object.assign(s, { from: Math.max(s.from, a), to: Math.min(s.to, b) })) });
+    const kept = new Set(st.bookmarks.map(m => m.n));
+    st.arrows = (st.arrows || []).filter(x => kept.has(x.from) && kept.has(x.to));
+    if (st.range && !(inT(st.range.from) && inT(st.range.to))) st.range = null;
+    const title = String(this.opts.title || this.M.title || 'waves'), f = t => this.fmt(t, (b - a) / 1000, b - a);
+    const doc = { wavelens: 'waves', version: 1, signal: out, head: { text: `${title} · ${f(a)} … ${f(b)}` },
+      time: Object.assign({}, this.M.src.time, { t0: a, t1: b }), config: {} };
+    const scopes = this.M.src.scopes && Object.fromEntries(Object.entries(this.M.src.scopes).filter(([p]) => node.has(p)));
+    if (scopes && Object.keys(scopes).length) doc.scopes = scopes;
+    doc.meta = { piece: { of: title, from: a, to: b, signals: sigs.length, saved: new Date().toISOString() } };
+    doc.state = st;
+    return doc;
+  },
+});
 /* ======================== src/diff.js ======================== */
 /* ---------------- compare with a second dump ---------------- */
 // The same test before and after a change of the RTL, two seeds: the second dump (B, a VCD read by the page's reader)
@@ -9642,7 +9748,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.46',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.47',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,

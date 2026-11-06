@@ -5,6 +5,20 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.47 — 6 November 2026
+
+Colours as hex codes beside their pickers; a piece of the waves saved as `x.wavelens.json` and opened on its own.
+
+- **Every colour picker has its hex code beside it** (Paint, the menus, the lists of bookmarks, markers and groups): the
+  code of the colour shown (`#c2255c`), to copy; a code typed or pasted in is applied as soon as it is one (`#c25` too), a
+  text that is not one is marked and not applied, Esc puts the picker's code back.
+- **Save as WaveLens (JSON)** in the menu of a box selected on the waves (the right button): the selected signals' exact
+  changes over the box (the value at its start and every change in it), their colours, radix, enums and groups, and the
+  markers, bookmarks, spans and arrows inside it, as `name.wavelens.json`. It opens on its own: Open…, a drop or Load… in a
+  page; in VS Code *Open in WaveLens* (or as the editor of `*.wavelens.json`), read whole, never lazy.
+- `wavelenscat --check` (in `make check`) catches a name declared at the top of two sources: `wavelens.js` is the sources
+  in one scope, and one such name stopped every viewer.
+
 ## 0.46 — 6 November 2026
 
 Who is compared with whom: the runs kept, A and B on the list; a walk through the runs (review 2026-11-06, the run pick).

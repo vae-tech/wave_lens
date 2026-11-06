@@ -656,3 +656,7 @@
 .wv .wv-menu.wv-types p { margin: 4px 10px; font-size: 12px; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
 .wv .wv-menu.wv-types p.run { color: var(--wave-x); }
 .wv .wv-menu.wv-types button { display: inline-block; width: auto; margin: 4px 0 0 10px; }
+/* a colour picker's hex code beside it (menu.js hexFields): to copy, type or paste */
+.wv .wv-hex { width: 5.4em; margin-left: 3px; padding: 0 3px; font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; vertical-align: middle;
+  border: 1px solid var(--line); border-radius: 3px; background: var(--panel); color: var(--fg); }
+.wv .wv-hex.bad { border-color: var(--wave-x); color: var(--wave-x); }
