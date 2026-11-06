@@ -1061,6 +1061,9 @@ function live(url) {
 }
 
 /* ---------------- a piece of the waves (the box's Save as WaveLens) ---------------- */
+// the keys of a saved state a piece of waves (toPiece) carries: its rows' look and your marks, not the page's settings
+const PIECE_KEYS = ['paint', 'radix', 'analog', 'hidden', 'dups', 'bits', 'groups', 'only', 'select', 'markers', 'bookmarks', 'arrows', 'spans',
+  'range', 'cursor', 'cursor2', 'from', 'to', 'deltas'];
 Object.assign(WaveView.prototype, {
   // the waves of rows (each one's signal: a bit's, a field's, a copy's its own) over [a, b] as a file this viewer opens on its
   // own (x.wavelens.json: Open…, a drop, VS Code's Open in WaveLens): every signal's value at a and its changes up to b,
@@ -1091,9 +1094,11 @@ Object.assign(WaveView.prototype, {
         key = k; }
       node.get(key).push(Object.assign(s, { name, path, tv: tvOf(r) }, r.width > 1 && !s.width ? { width: r.width } : {}));
     }
-    // the view: its rows', and your marks of [a, b] (arrows between the bookmarks kept); not the compare, not the runs
-    const st = this.state(), inT = t => t >= a && t <= b;
-    for (const k of ['compare', 'compareShow', 'runsOver', 'title']) delete st[k];
+    // the view: its rows', and your marks of [a, b] (arrows between the bookmarks kept) — not the page's own settings (its
+    // style, tools, sort, find, gaps, cycles), not the compare, the runs, the FSM layer: who opens it keeps theirs
+    const all = this.state(), inT = t => t >= a && t <= b, st = { wavelens: all.wavelens, version: all.version };
+    for (const k of PIECE_KEYS) if (all[k] !== undefined) st[k] = all[k];
+    st.config = { fold: all.config.fold, highlight: all.config.highlight };
     Object.assign(st, { from: a, to: b, cursor: inT(this.cursor) ? this.cursor : a, cursor2: this.cursor2 != null && inT(this.cursor2) ? this.cursor2 : null,
       markers: (st.markers || []).filter(m => inT(m.t)), bookmarks: (st.bookmarks || []).filter(m => inT(m.t)),
       spans: (st.spans || []).filter(s => s.to > a && s.from < b).map(s => Object.assign(s, { from: Math.max(s.from, a), to: Math.min(s.to, b) })) });
@@ -1105,7 +1110,7 @@ Object.assign(WaveView.prototype, {
       time: Object.assign({}, this.M.src.time, { t0: a, t1: b }), config: {} };
     const scopes = this.M.src.scopes && Object.fromEntries(Object.entries(this.M.src.scopes).filter(([p]) => node.has(p)));
     if (scopes && Object.keys(scopes).length) doc.scopes = scopes;
-    doc.meta = { piece: { of: title, from: a, to: b, signals: sigs.length, saved: new Date().toISOString() } };
+    doc.meta = { piece: { version: 1, of: title, from: a, to: b, signals: sigs.length, saved: new Date().toISOString() } };
     doc.state = st;
     return doc;
   },

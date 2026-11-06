@@ -20,18 +20,20 @@
     pick: { ask: 'accept multiple? state?', reply: ['files'] },    // a file picker: an open dialog on the host
     'state-kept': { ask: '', reply: null },                        // the state picked is loaded: Reload reads it
     'state-read': { ask: '', reply: ['name mtime b64'] },          // Reload (r): the last state read on the host
-    compare: { ask: 'signals from to', reply: ['result', ''] },    // Compare…: a dump picked, sva diff --page ('' the dialog closed)
+    compare: { ask: 'signals from to path? of?', reply: ['result', ''] },   // Compare…: A the waves shown (of: a run), B a dump picked (path:
+    //   the one picked before, compared again with a new A), sva diff --page ('' the dialog closed)
     runs: { ask: 'op', ops: {                                      // the Runs panel: sva runs
       list: { ask: '', reply: ['dir runs others? now? shown?'] },
       open: { ask: 'run', reply: ['src name lazy store?'] },     // A: a run's waves served as the tab's (0: the dump of now)
-      keep: { ask: 'name? tags? comment? cases? from? to?', reply: ['run'] },   // from, to: a slice of the waves shown, its times from 0
-      cut: { ask: 'from to', reply: ['path', 'cancel'] },          // that window as an FST of its own (a save dialog), its times from 0
+      keep: { ask: 'name? tags? comment? cases? from? to? of?', reply: ['run'] },   // from, to: a slice of the waves of (a run; 0 the dump)
+      cut: { ask: 'from to of?', reply: ['path', 'cancel'] },      // that window as an FST of its own (a save dialog), its times from 0
       set: { ask: 'run name? tags? comment?', reply: ['run'] },
       rm: { ask: 'run', reply: ['removed', 'cancelled'] },
       diff: { ask: 'signals from to case? against?', reply: ['runs wavelens? version? unit? dump? dir? from? to? others? case? against?'] },
       compare: { ask: 'run signals from to case? against?', reply: ['result'] },   // A (against; none: the waves shown) with B (run)
       cancel: { ask: '', reply: ['ok'] },
     } },
+    open: { ask: 'path', reply: ['ok'] },                          // a file opened with WaveLens in a tab of its own (a piece of waves)
     sources: { ask: '', reply: ['texts', 'types typesName texts'] },   // the workspace's .sv sources, or the types beside the dump
     config: { ask: '', reply: ['config'] },                        // your configuration now
     clip: { ask: 'text', reply: ['ok'] },                          // navigator.clipboard.writeText

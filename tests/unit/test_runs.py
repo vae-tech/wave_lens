@@ -129,6 +129,8 @@ class Mcp(unittest.TestCase):
                              'keep from, to: a slice, its times from 0, its window in ns')
             x = call(action='diff', dump=p, against=s1['id'], run=s2['id'], signals=['tb.clk'])['runs'][0]
             self.assertEqual(x['signals_differ'], 0, ('two slices from their first sample: clk the same', x))
+            x = call(action='diff', dump=p, against=s2['id'], run='now', signals=['tb.cnt'])['runs'][0]
+            self.assertTrue(x['equal'], ('a slice against the dump: at its place in it', x))
             bad = W.call('wave_runs', {'action': 'set', 'dump': p})
             self.assertTrue(bad[1] and '"run"' in bad[0], bad)
 
@@ -162,7 +164,7 @@ class Mcp(unittest.TestCase):
             call(action='keep', dump=p, name='broken')
             r = call(action='diff', dump=p, against='golden')
             self.assertEqual((r['against']['id'], r['against']['name'], r['against']['file']), (1, 'golden', '1-waves.fst'), r)
-            self.assertEqual([(x['name'], x['equal']) for x in r['runs']], [('broken', False)], 'A not compared with itself')
+            self.assertEqual([(x['name'], x['equal']) for x in r['runs']], [('broken', False), ('now', False)], 'A not compared with itself; now one of the others')
             self.assertEqual((r['runs'][0]['first']['t'], r['runs'][0]['first']['signal']), (25, 'tb.ok'), 'times in ns')
             n = call(action='diff', dump=p, against=1, run='now')
             self.assertEqual([(x['id'], x['name'], x['equal']) for x in n['runs']], [(0, 'now', False)], n)
@@ -201,8 +203,10 @@ process.on('uncaughtException', e => { console.error('UNCAUGHT ' + e.message); p
     out.bad = await ask({ op: 'keep', from: 30000, to: 30000 });
     out.same = await ask({ op: 'compare', run: 2, against: 1, signals: ['tb.clk', 'tb.ok'], from: 0, to: 10000 });
     out.cnt = await ask({ op: 'compare', run: 2, against: 1, signals: ['tb.cnt'], from: 0, to: 10000 });
+    out.now = await ask({ op: 'compare', run: 0, against: 2, signals: ['tb.cnt'], from: 0, to: 10000 });
+    out.asB = await ask({ op: 'compare', run: 2, against: 0, signals: ['tb.cnt'], from: 20000, to: 30000 });
     await ask({ op: 'open', run: 2 });
-    out.s3 = await ask({ op: 'keep', from: 2000, to: 6000 });
+    out.s3 = await ask({ op: 'keep', from: 2000, to: 6000, of: 2 });
     await ask({ op: 'open', run: 0 });
     out.cancel = await ask({ op: 'cut', from: 20000, to: 30000 }); out.asked = saveAsked;
     saveTo = require('path').join(dir, 'piece.fst'); out.cut = await ask({ op: 'cut', from: 20000, to: 30000 });
@@ -223,13 +227,19 @@ process.on('uncaughtException', e => { console.error('UNCAUGHT ' + e.message); p
     out.listShown = (await ask({ op: 'list' })).shown;
     out.compare = await ask({ op: 'compare', run: 1, signals: ['tb.ok', 'tb.cnt'], from: 0, to: 40000 });
     out.against = await ask({ op: 'compare', run: 1, against: 2, signals: ['tb.ok', 'tb.cnt'], from: 0, to: 40000 });
-    out.nowB = await ask({ op: 'compare', run: 0, signals: ['tb.ok', 'tb.cnt'], from: 0, to: 40000 });
-    out.same = await ask({ op: 'compare', run: 2, signals: ['tb.ok'], from: 0, to: 40000 });
-    out.diff = await ask({ op: 'diff', signals: ['tb.ok', 'tb.cnt'], from: 0, to: 40000 });
+    out.nowB = await ask({ op: 'compare', run: 0, against: 2, signals: ['tb.ok', 'tb.cnt'], from: 0, to: 40000 });
+    out.same = await ask({ op: 'compare', run: 2, against: 2, signals: ['tb.ok'], from: 0, to: 40000 });
+    out.diff = await ask({ op: 'diff', against: 2, signals: ['tb.ok', 'tb.cnt'], from: 0, to: 40000 });
     out.source = await ask1({ type: 'source' });
     out.sourceText = out.source.src ? text(out.source.src) : '';
     out.listAfter = (await ask({ op: 'list' })).shown;
-    out.back = await ask({ op: 'open', run: 2 }); out.zero = await ask({ op: 'open', run: 0 }); out.zeroShown = (await ask({ op: 'list' })).shown;
+    out.back = await ask({ op: 'open', run: 2 });
+    // the page owns A (review 2026-11-06-latest B-04): a slice of the dump asked while the extension's shown is #2
+    out.sliceNow = await ask({ op: 'keep', from: 0, to: 10000, of: 0 });
+    out.sliceRun = await ask({ op: 'keep', from: 0, to: 10000, of: 2 });
+    out.fileA = await ask1({ type: 'compare', signals: ['tb.ok'], from: 0, to: 40000, path: process.env.DUMP2, of: 0 });
+    out.fileB = await ask1({ type: 'compare', signals: ['tb.ok'], from: 0, to: 40000, path: process.env.DUMP2, of: 2 });
+    out.zero = await ask({ op: 'open', run: 0 }); out.zeroShown = (await ask({ op: 'list' })).shown;
     out.none = await ask({ op: 'open', run: 9 });
     console.log('RESULT' + JSON.stringify(out)); process.exit(0);
   }
@@ -266,7 +276,8 @@ class VsCode(unittest.TestCase):
         takes A from against or the run shown, B from run (0: the dump), one sva runs diff --page; source brings the dump back."""
         with H.tmp() as d:
             p = H.vcd(d, body(), HEAD, name='waves.vcd')
-            env = dict(os.environ, WAVELENS_SVA=SVA, GOOD=HEAD + body(), BROKEN=HEAD + body(25))
+            q = H.vcd(d, body(25), HEAD, name='broken.vcd')
+            env = dict(os.environ, WAVELENS_SVA=SVA, GOOD=HEAD + body(), BROKEN=HEAD + body(25), DUMP2=q)
             r = subprocess.run([NODE, '-e', EXT, FAKE, os.path.join(H.ROOT, 'vscode', 'extension.js'), d, p, 'pick'], capture_output=True, text=True,
                                timeout=90, env=env)
             o = result(r)
@@ -278,18 +289,27 @@ class VsCode(unittest.TestCase):
             self.assertIn('$var', o['openText'])
             self.assertEqual(o['bytes'], o['openText'], 'bytes: the file shown')
             self.assertEqual(o['listShown'], 2)
-            for k in ('compare', 'against'):
-                c = o[k].get('result') or {}
-                self.assertEqual((c.get('a'), c.get('run'), c.get('differ')), (2, 1, 1), (k, o[k]))
-                self.assertEqual(c['signals']['tb.ok']['spans'], [[25000, 40000]], k)
+            c = o['compare'].get('result') or {}
+            self.assertEqual((c.get('a'), c.get('run'), c.get('differ')), (None, 1, 0), ('no against: A the dump (the page names its A), not the run shown', o['compare']))
+            c = o['against'].get('result') or {}
+            self.assertEqual((c.get('a'), c.get('run'), c.get('differ')), (2, 1, 1), o['against'])
+            self.assertEqual(c['signals']['tb.ok']['spans'], [[25000, 40000]])
             c = o['nowB'].get('result') or {}
             self.assertEqual((c.get('a'), c.get('run'), c.get('differ')), (2, 0, 1), o['nowB'])
             self.assertIn('same', o['same'].get('error', ''), 'A and B the same run: refused')
             by = {x['id']: x for x in o['diff']['runs']}
             self.assertEqual(by[1]['signals_differ'], 1, o['diff'])
-            self.assertEqual((o['diff'].get('against') or {}).get('id'), 2, 'Δ all against the run shown')
+            self.assertEqual((o['diff'].get('against') or {}).get('id'), 2, 'Δ all against the A the page sends')
+            self.assertEqual(sorted(x['id'] for x in o['diff']['runs']), [0, 1], 'A a run: now among the others (B-06)')
             self.assertNotEqual(o['sourceText'], o['openText'], 'source: the dump of now again, not the run (ok falls at 25 ns in it)')
             self.assertEqual((o['listAfter'], o['zeroShown']), (0, 0))
+            sn, sr = o['sliceNow']['run'], o['sliceRun']['run']
+            self.assertEqual((sn['slice'], sn['source'], sn['dump']), ({'from': 0, 'to': 10000}, os.path.realpath(p), 'waves.vcd'), sn)
+            self.assertEqual((sr['slice'], sr['dump']), ({'from': 0, 'to': 10000}, 'waves.vcd'), sr)
+            self.assertNotEqual(sn['bytes'], 0)
+            fa, fb = o['fileA'].get('result') or {}, o['fileB'].get('result') or {}
+            self.assertEqual((fa.get('differ'), (fa.get('src') or {}).get('path')), (1, os.path.join(d, 'broken.vcd')), ('Compare… again by its path, A the dump', o['fileA']))
+            self.assertEqual(fb.get('differ'), 0, ('the same file against A #2 (broken too): equal', o['fileB']))
             self.assertEqual(o['zero']['name'], 'waves.vcd')
             self.assertIn('no run #9', o['none']['error'])
 
@@ -308,6 +328,8 @@ class VsCode(unittest.TestCase):
             self.assertIn('error', o['bad'], 'an empty window: refused')
             self.assertEqual(o['same']['result']['differ'], 0, ('0–10 ns and 20–30 ns from their first sample: clk and ok the same', o['same']))
             self.assertEqual(o['cnt']['result']['differ'], 1, o['cnt'])
+            self.assertEqual((o['now']['result']['differ'], o['now']['result'].get('shift')), (0, 20000), ('a slice A, the dump B: at its place', o['now']))
+            self.assertEqual((o['asB']['result']['differ'], o['asB']['result'].get('shift')), (0, -20000), ('the dump A, a slice B', o['asB']))
             self.assertEqual((s3['name'], s3['slice'], s3['dump']), ('waves.vcd 22 ns–26 ns', {'from': 22000, 'to': 26000}, 'waves.vcd'), s3)
             self.assertTrue(o['cancel'].get('cancel') and o['asked'] == os.path.join(d, 'waves.20000-30000ps.fst'), o)
             self.assertEqual(o['cut']['path'], os.path.join(d, 'piece.fst'))

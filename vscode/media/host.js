@@ -83,7 +83,7 @@
     if (this.classList.contains('cfile')) {   // Compare…: sva diff on the host over this view's signals and time
       const root = this.closest('.wv'), v = (root && root.waveView) || view(); if (!v) return;
       const signals = v.cmpRows().map(r => (r.src && r.src.path) || r.path || r.full);
-      call('compare', { signals, from: v.M.t0, to: v.M.t1 }).then(m => {
+      call('compare', { signals, from: v.M.t0, to: v.M.t1, of: v.runsA() }).then(m => {
         if (m.error) { toast(m.error); return; }
         if (m.result) v.compareResult(m.result);
       });
@@ -106,7 +106,9 @@
   G.WAVELENS_RUNS = {
     list: () => call('runs', { op: 'list' }),
     keep: b => call('runs', Object.assign({}, b, { op: 'keep' })),   // b.from, b.to: a slice of the waves shown
-    cut: (from, to) => call('runs', { op: 'cut', from, to }),          // that window as an FST of its own (a save dialog)
+    cut: (from, to, of) => call('runs', { op: 'cut', from, to, of }),  // that window of the waves of (a run; 0 the dump) as an FST of its own
+    // Compare… again: the file picked before (path) with the waves of now (of), over the view's signals and time
+    compareFile: (path, signals, from, to, of) => call('compare', { path, signals, from, to, of }),
     // a run's number goes as "run" (the message's "id" is its answer's)
     set: (run, b) => call('runs', Object.assign({}, b, { op: 'set', run })),
     rm: run => call('runs', { op: 'rm', run }),
@@ -116,6 +118,9 @@
     open: async run => { const m = await call('runs', { op: 'open', run });
       return m.error ? m : { file: await fileOf(m), handle, name: m.name }; },
   };
+
+  // a file the page cannot show in this tab (a piece of waves Load… picked): opened in a tab of its own
+  G.WAVELENS_OPEN = path => call('open', { path });
 
   /* ---- clipboard ---- */
   if (navigator.clipboard) {

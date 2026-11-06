@@ -84,10 +84,9 @@ class WaveView {
       this.span = Math.min(Math.max(b - a, this.minSpan), M.t1 - M.t0); this.t0 = this.clamp(a); this.draw();
     }
     this.ro = new ResizeObserver(() => this.draw()); this.ro.observe(this.wcol); this.ro.observe(this.root.querySelector('.bar'));
-    // every colour picker of the viewer (the bar's, its menus, panels and lists) with its hex code beside it (menu.js hexFields)
+    // every colour picker with its hex code beside it (menu.js hexFields): the bar's here; the menu's and the lists' where they
+    // are made (menu, the lists' render), none other makes one
     hexFields(this.root);
-    this.hexObs = new MutationObserver(ms => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1) hexFields(n); });
-    this.hexObs.observe(this.root, { childList: true, subtree: true });
     // the canvas is only as tall as the visible part of the rows (sticky in its column): redraw when that part moves
     this.onScroll = () => { if (!this.raf && this.lay && this.lay.H > this.hc + 1) this.raf = requestAnimationFrame(() =>
       { this.raf = 0; if (this.root.isConnected) this.draw(); }); };
@@ -852,7 +851,17 @@ class WaveView {
   async loadState(file, handle = null) {
     try {
       const name = file.name || 'state', text = typeof file === 'string' ? file : await file.text(), j = jsonParse(text, name);
-      if (j && j.wavelens === 'waves' && typeof file !== 'string') return this.openDump(file, handle);   // a piece of waves: opened
+      if (j && j.wavelens === 'waves' && typeof file !== 'string') {   // a piece of waves: waves of its own, not a view of these
+        // a host (VS Code): the tab's waves are its dump's — the piece opens in a tab of its own (its path known), else said
+        if (this.runsHost()) { const h = handle && handle.then ? await handle.catch(() => null) : handle, p = h && h.path;
+          if (p && G.WAVELENS_OPEN) { G.WAVELENS_OPEN(p); this.toast(`${name}: a piece of waves, opened in a tab of its own`); }
+          else this.toast(`${name}: a piece of waves — Open in WaveLens opens it in a tab of its own`);
+          return null; }
+        if (handle && handle.then) handle = await handle.catch(() => null);
+        const v = await this.openDump(file, handle);   // r: the piece read again (its view with it)
+        if (v) v.keepState(handle || { name, getFile: async () => file });
+        return v;
+      }
       const miss = await this.setState(j);
       this.undoTick();   // the load is one step to undo
       if (handle && handle.then) handle = await handle.catch(() => null);
@@ -1961,7 +1970,7 @@ class WaveView {
   // the viewer leaves: observers, window listeners and pending frames go; plugins hear wavelens:destroy and take their part
   destroy() {
     if (!VIEWS.has(this)) return;
-    this.ro.disconnect(); this.hexObs.disconnect(); this.ac.abort();   // every listener on the root, the window and the document
+    this.ro.disconnect(); this.ac.abort();   // every listener on the root, the window and the document
     this.help(false);
     cancelAnimationFrame(this.raf); cancelAnimationFrame(this.inv); clearTimeout(this.toastT); clearTimeout(this.gapTypeT);
     if (ACTIVE.view === this) ACTIVE.view = null;

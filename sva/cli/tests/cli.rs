@@ -803,6 +803,27 @@ fn fst_reads_words_across_its_buffer() {
     }
 }
 
+/// A slice keeps the enum tables: of a VCD with its types file (the tables written from it), and a slice of that slice (its
+/// FST, no types file beside it: the tables it has).
+#[test]
+fn slices_keep_the_enum_tables() {
+    let vcd = own("slice-types", "tb.vcd", "$timescale 1ns $end\n$scope module tb $end\n$var reg 3 ! state [2:0] $end\n$upscope $end\n\
+        $enddefinitions $end\n#0\nb0 !\n#10\nb1 !\n#20\nb100 !\n#30\nb0 !\n");
+    std::fs::write(vcd.with_extension("types.json"), r#"{"wavelens": "types", "version": 1,
+        "describe": {"tb.state": "Verilog enum: (2 downto 0) [3 enumeration values]\n  (IDLE=0,RUN=1,\n DONE=4)"}}"#).unwrap();
+    let v = vcd.to_string_lossy().into_owned();
+    let o = sva(&["runs", "keep", &v, "--from", "5ns", "--to", "25ns"]);
+    assert!(o.status.success(), "{}", err(&o));
+    let runs = vcd.parent().unwrap().join(".wavelens-runs");
+    let table = "$attrbegin misc 07 state_t 3 IDLE RUN DONE 000 001 100";
+    let t = out(&sva(&["vcd", &runs.join("1-tb.fst").to_string_lossy()]));
+    assert!(t.contains(table), "{t}");
+    let o = sva(&["runs", "keep", &runs.join("1-tb.fst").to_string_lossy(), "--from", "2ns", "--to", "10ns"]);
+    assert!(o.status.success(), "{}", err(&o));
+    let t = out(&sva(&["vcd", &runs.join("2-tb.fst").to_string_lossy()]));
+    assert!(t.contains(table), "a slice of a slice: {t}");
+}
+
 /// The FSM states of the types file beside the VCD (tb.types.json by tb.vcd) become enum tables of the variables of
 /// their paths whose width is the type's: Questa's describe and "signals", an instance's own table, an array element
 /// the array's; a width that differs gets none, and a table the VCD gives stays.
@@ -1617,11 +1638,26 @@ fn slices_from_their_first_sample() {
     assert!(j["runs"][0].get("cases").is_none());
     assert!(sva(&["runs", "diff", &dump, "--against", "1", "--run", "2", "--signals", "tb.clk,tb.ok"]).status.success(), "the same from 0");
     assert_eq!(sva(&["runs", "diff", &dump, "--against", "1", "--run", "2", "--signals", "tb.cnt"]).status.code(), Some(1));
+    // a slice against the dump (or the dump against a slice): read at its place in the dump, B offset by the slice's start
+    let o = sva(&["runs", "diff", &dump, "--run", "2", "--from", "20ns", "--to", "30ns", "--signals", "tb.cnt"]);
+    assert_eq!(o.status.code(), Some(0), "{}{}", out(&o), err(&o));
+    assert!(out(&o).contains("(B −20 ns)"), "{}", out(&o));
+    let o = sva(&["runs", "diff", &dump, "--run", "2", "--from", "20ns", "--to", "30ns", "--signals", "tb.cnt", "--json"]);
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&out(&o)).unwrap()["runs"][0]["offset"].as_i64(), Some(-20000));
+    let o = sva(&["runs", "diff", &dump, "--against", "2", "--run", "now", "--signals", "tb.cnt"]);
+    assert_eq!(o.status.code(), Some(0), "{}{}", out(&o), err(&o));
     // a slice of a slice (a tab shows a run): of the dump, its window in the dump's time
     let fst = d.join(".wavelens-runs").join("2-d.fst").to_string_lossy().into_owned();
     assert!(sva(&["runs", "keep", &fst, "--from", "2ns", "--to", "6ns"]).status.success());
-    let r = &runs_json(&d.join(".wavelens-runs"))["runs"][2];
+    let j = runs_json(&d.join(".wavelens-runs"));
+    let r = &j["runs"][2];
     assert_eq!((r["dump"].as_str(), r["slice"]["from"].as_u64(), r["slice"]["to"].as_u64()), (Some("d.vcd"), Some(22000), Some(26000)));
+    assert_eq!((&r["source_bytes"], &r["source_mtime"]), (&j["runs"][0]["source_bytes"], &j["runs"][0]["source_mtime"]), "the dump's, not the run FST's");
+    assert!(r["file"].as_str().unwrap().starts_with("3-d."), "{r}");
+    // vcd --zero: the value at --from is the one at #0
+    let z = out(&sva(&["vcd", &dump, "--from", "20ns", "--to", "30ns", "--zero", "--signals", "tb.cnt"]));
+    let at0 = z.lines().skip_while(|l| *l != "#0").find(|l| l.ends_with(" \"")).unwrap_or("");
+    assert_eq!(at0, "b0001 \"", "the counter's 1 of 20 ns, at 0: {z}");
     assert!(err(&sva(&["runs", "keep", &dump, "--from", "5ns"])).contains("--from and --to"));
     assert!(err(&sva(&["runs", "set", "1", &dump, "--from", "5ns"])).contains("not an option of sva runs set"));
 }
@@ -1971,9 +2007,10 @@ fn runs_diff_against_a_run() {
     let v = json_of(&o);
     assert_eq!(v["against"], serde_json::json!({"id": 1, "name": "golden", "file": "1-d.fst"}), "{v}");
     let rows: Vec<(u64, bool)> = v["runs"].as_array().unwrap().iter().map(|x| (x["id"].as_u64().unwrap(), x["equal"].as_bool().unwrap())).collect();
-    assert_eq!(rows, [(3, true), (2, false)], "A not compared with itself: {v}");
+    assert_eq!(rows[..2], [(3, true), (2, false)], "A not compared with itself: {v}");
+    assert_eq!(rows[2].0, 0, "A a run: the dump of now one of the others (the panel's now, Δ all): {v}");
     let text = out(&sva(&["runs", "diff", &dump, "--against", "golden"]));
-    assert!(text.starts_with("#1 golden against 2 runs over 0 ps … 40 ns:"), "{text}");
+    assert!(text.starts_with("#1 golden against 3 runs over 0 ps … 40 ns:") && text.contains("\n  now: "), "{text}");
     assert!(text.contains("#2 broken: 1 of 3 signals differ, first at 25 ns (tb.ok)"), "{text}");
     // the dump of now: A by default, and "now"
     assert_eq!(sva(&["runs", "diff", &dump, "--json"]).status.code(), Some(1));
@@ -2023,7 +2060,7 @@ fn runs_diff_against_a_run_by_test_case() {
     assert_eq!((r["id"].as_u64(), r["case"]["offset"].as_i64(), r["equal"].as_bool()), (Some(2), Some(10000), Some(true)), "{r}");
     assert!(r["case"]["note"].as_str().unwrap().contains("5 ns longer") && r["case"].get("shorter").is_none(), "{r}");
     let text = out(&sva(&["runs", "diff", &dump, "--against", "1", "--case", "test_b"]));
-    assert!(text.starts_with("#1 first against 1 run over the case test_b (20 ns … 40 ns of #1):"), "{text}");
+    assert!(text.starts_with("#1 first against 2 runs over the case test_b (20 ns … 40 ns of #1):") && text.contains("\n  now: equal"), "{text}");
     // B = now over the dump's own case (its marks)
     let n = json_of(&sva(&["runs", "diff", &dump, "--against", "1", "--run", "now", "--case", "test_b", "--json"]));
     assert_eq!((n["runs"][0]["case"]["from"].as_u64(), n["runs"][0]["equal"].as_bool()), (Some(30000), Some(true)), "{n}");

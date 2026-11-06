@@ -199,6 +199,9 @@ pub(crate) fn page_of(o: &Opt, d: &Value) -> Value {
             out[k] = d[k].clone();
         }
     }
+    if o.offset != 0 && !o.align {
+        out["shift"] = o.offset.into();   // B's time less A's: the page says it (a slice read at its place, a case)
+    }
     let mut diff: Vec<String> = d["signals"].as_array().into_iter().flatten()
         .filter(|x| x["spans"].as_array().is_some_and(|s| !s.is_empty()))
         .map(|x| x["b"].as_str().or(x["path"].as_str()).unwrap_or("").to_string()).collect();

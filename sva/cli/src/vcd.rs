@@ -1060,6 +1060,24 @@ pub fn vcd_cmd(args: &[String]) -> ExitCode {
 mod tests {
     use super::*;
 
+    /// --zero: the first time line after the declarations is the origin; a time line before them (none is) and a line that
+    /// only starts with # (a value of a string) stay; text split anywhere across writes reads the same
+    #[test]
+    fn zero_takes_the_first_time_as_the_origin() {
+        let run = |chunks: &[&str]| {
+            let mut buf = Vec::new();
+            let mut z = Zero { o: &mut buf, line: Vec::new(), body: false, origin: None };
+            for c in chunks {
+                z.write_all(c.as_bytes()).unwrap();
+            }
+            z.flush().unwrap();
+            String::from_utf8(buf).unwrap()
+        };
+        assert_eq!(run(&["$enddefinitions $end\n#5\n1!\n#7\n0!\n"]), "$enddefinitions $end\n#0\n1!\n#2\n0!\n");
+        assert_eq!(run(&["#9\n$enddefinitions $end\n#9\n#12"]), "#9\n$enddefinitions $end\n#0\n#3");
+        assert_eq!(run(&["$enddefin", "itions $end\n#1", "00\ns#1x ", "!\n#105\n"]), "$enddefinitions $end\n#0\ns#1x !\n#5\n");
+    }
+
     #[test]
     fn strings_escape_as_fstapi_does() {
         assert_eq!(escape(b"a b"), "a\\040b");

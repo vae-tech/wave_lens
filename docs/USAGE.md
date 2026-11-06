@@ -1091,18 +1091,19 @@ letters on the list, `A · name` and `B · name` on the time axis, both names in
   `]d [d`, A / B / A+B (`d`, `D`) — the view you had (B, A+B) is kept from one run to the next. `]r` `[r` make the next
   (older) and the previous run B, the panel open or not (the row lit follows). The compare dropped (the bar's ✕, `x` or
   **no B** in the panel, the `B` of the row B, `compare off`) is no B: nothing comes back by itself. The dump of now can be
-  B while A is a run ("how far has #1 drifted from the file on disk").
+  B while A is a run ("how far has #1 drifted from the file on disk"): `]r` and Δ all count it then. A file of Compare… compared
+  when A moves is compared again with the new A.
 - **A**: `w` on a row (its `A`) reads that run's waves into the tab — the run's FST read on the host as the dump is
   (converted once: a run's file does not change; a large one lazy) — and keeps the view: the window, the rows and their
   order, hidden, radix, paint, groups, Only, the markers, spans, the panels; B, if one is chosen, is compared with the new
   A. `]w` `[w` (anywhere) step A through the list — now, then the runs, wrapping. With no B, that is the walk through the
   runs: each one's waves in the same window, nothing compared; with a B, each step compares again. A run that has not got a
-  row of yours (a signal added since): the toast says which, and the rows come back on the next waves that have them (the
-  view is taken on now, and again on each run that has every row of it). A run shorter than the window: said
+  row of yours (a signal added since): the toast says which, and the rows come back on the next waves that have them, with
+  their colour, radix, places in your groups; what you change meanwhile on the other rows stays. A run shorter than the window: said
   (`it ends at 30 µs`). ⟳ (`R`) and a new simulation read the dump of now: A is now again (said).
 - **Δ all** lists for every run how many signals differ from A in the window and the first difference (red: some,
   `= equal`: none, `not in this window`: the run does not cover it; numbers of another window or another A than the one now
-  are greyed with theirs); ⟳ compares A with B again over the window as it is now.
+  are greyed with theirs; the dump read again keeps them); ⟳ compares A with B again over the window as it is now.
 
 Your span chosen is followed by what it is (deleted: the waves in sight again, said), and kept in a saved state with the
 run compared (B, `compare.run`); the dump read again (⟳, a new simulation) keeps the panel and compares with B again; a run
@@ -1123,8 +1124,10 @@ signal, **its times from 0**: its first sample (the range's start, on the edge t
 `slice 120 ns … 145 ns, from 0`, its name by default `tb.vcd 120 ns–145 ns` (✎ renames it), no test cases. Two slices — of
 one dump (two bursts, two packets, two calls of a task) or of two runs — compared as two runs are (one A, the other B: `w`,
 a click, `]r`, Δ all) line up on their first samples, so a difference is a difference of behaviour, not of when it
-happened; `]w` walks through them in one window. While a slice is A the view's times go with it: from the dump to its slice
-the window, the cursor, your markers, bookmarks and spans move by the slice's start, and back again on now. **Save as FST…**
+happened; `]w` walks through them in one window. A slice compared with the dump or a whole run is read at its place in
+it (B offset by the slice's start, said in the status: `B's 120 ns … 145 ns: a slice at its place`). While a slice is A the
+view's times go with it: from the dump to its slice the window, the cursor, your markers, bookmarks and spans move by the
+slice's start, and back again on now (slice to slice: both from 0, nothing moves). **Save as FST…**
 writes the range as an FST file of its own, its times from 0, where the save dialog says (`sva fst --from --to --zero`).
 
 **The runs kept, in the shell.** `sva runs keep DUMP [--name N] [--tags T,...] [--comment C]` keeps a run (a VCD as an FST
@@ -1208,8 +1211,9 @@ on the edge), buses as `=` with
 their values in the radix shown, a group per module; **Save as WaveLens (JSON)** (exact waves only) — the same signals over the range as waves of their own
 (`<title>.wavelens.json`): each signal's value at the range's start and its changes to its end, exact, with its width,
 kind, enum and radix, in its modules, and your view of them (paint, radix, hidden, groups, Only) with the markers,
-bookmarks and spans inside the range; Open… (or a drop, or Load…) opens it in any viewer, VS Code's *Open in WaveLens* in
-a tab: a piece of a large dump to keep, send or look at again on its own; **Gaps ▸** (a submenu: a check box, *idle*, *keep*) — the picture and WaveDrom
+bookmarks and spans inside the range — not the page's style, tools or find: who opens it keeps theirs; Open… (or a drop, or
+Load…, then `r` reads it again) opens it in any viewer, VS Code's *Open in WaveLens* in a tab (Load… of a piece in a VS Code
+tab opens it in a tab of its own: the tab's waves are its dump's): a piece of a large dump to keep, send or look at again on its own; **Gaps ▸** (a submenu: a check box, *idle*, *keep*) — the picture and WaveDrom
 leave out the stretches where none of their signals (the clocks aside) changes for *idle*, all but *keep* after the
 last change and before the next one: a long range of rare transfers becomes its transfers side by side with a break
 between them (the time axis goes on with the real time after each break), and in WaveDrom one `|` cell per break

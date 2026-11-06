@@ -5,6 +5,28 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.50 — 6 November 2026
+
+The review of 0.46–0.49 (`docs/reviews/review-2026-11-06-latest/`): a slice compared with the dump at its place, the page
+owns A, the snapshot fills the rows a run lacks, a piece of waves carries its own state only.
+
+- **A slice against the dump or a whole run is read at its place** (B-01): a slice made A with now as B (or the dump A, a
+  slice B) compared the slice's 0 with the dump's 0 — identical waves said "differ". Now B is offset by the slice's start
+  (`sva runs diff`: `(B −20 ns)`, JSON `offset`; the page's status: `B's … : a slice at its place`); two slices still
+  compare from their first samples. While a slice is A the view moves by its start only between a slice and a whole one.
+- **Edits on a run that lacks a row stay** (A-03): the view taken for the next run filled the missing rows by replacing
+  every row's colour, radix, groups with the snapshot's; now only the rows the waves lack are taken from it.
+- **The page names A** (A-05, B-04): Compare…, keep with a window, Save as FST… and the runs' compares send the run shown;
+  the extension no longer guesses it from its own `shown` (a read that failed left the two apart: a slice of the wrong
+  file). A file of Compare… is compared again with a new A (B-03: dropped without a word before).
+- **now among the Bs while A is a run** (B-06, B-07): `sva runs diff --against RUN` and Δ all list it, `]r` reaches it;
+  Δ all's numbers survive ⟳ (B-08); a slice of a run records its dump's size, time and file name (B-02).
+- **A piece of waves** (A-07, B-05): its state is its rows' look and your marks (`PIECE_KEYS`) — no longer the saver's
+  style, tools, find, FSM layer applied to whoever opens it; `r` reads a piece Load… opened; Load… of a piece in a VS Code
+  tab opens it in a tab of its own instead of replacing the tab's dump.
+- The hex fields of the colour pickers without a `MutationObserver` on the viewer (A-06). New checks for each of the above,
+  the hex fields, the chord markers' edge snap, the `--zero` writer and the enum tables of slices.
+
 ## 0.49 — 6 November 2026
 
 Slices: a range of the waves kept as a run of its own whose times start at 0, or saved as an FST; pieces compared with each

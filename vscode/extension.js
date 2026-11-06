@@ -327,8 +327,14 @@ ${scripts}
       case 'pick': return reply(await this.pick(String(m.accept || ''), !!m.multiple, !!m.state));
       case 'state-kept': return this.stateKept();
       case 'state-read': return reply(await this.stateRead());
-      case 'compare': return reply(await this.compare(Array.isArray(m.signals) ? m.signals.map(String) : [], +m.from, +m.to));
+      case 'compare': return reply(await this.compare(Array.isArray(m.signals) ? m.signals.map(String) : [], +m.from, +m.to,
+        typeof m.path === 'string' && m.path ? m.path : null, m.of));
       case 'runs': return reply(await this.runs(m));
+      case 'open': {   // a piece of waves Load… picked: in a tab of its own (the path is the host's dialog's, a .json only)
+        const p = String(m.path || '');
+        if (!/\.json$/i.test(p) || !fs.existsSync(p)) return reply({ error: `not a piece of waves: ${p}` });
+        await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(p), VIEW); return reply({ ok: true });
+      }
       case 'sources': return reply(await this.sources());
       case 'config': return reply({ config: cfgNow() });   // the tab loaded: the configuration now (one saved since its HTML was made)
       case 'clip': await vscode.env.clipboard.writeText(String(m.text ?? '')); return reply({ ok: true });
@@ -440,12 +446,19 @@ ${scripts}
   // Compare…: a second dump picked on the host, sva diff of this one and it over the tab's signals and window (neither read
   // here: the CLI streams both) -> {result}: the WaveJSON extension "compare" the viewer takes (compareResult), as the
   // build makes it of a config's "compare" (tools/svabuild.py compare)
-  async compare(signals, from, to) {
-    const a = this.shown ? this.shown.file : this.file;   // A: the waves shown (a run kept, or the dump)
-    const got = await vscode.window.showOpenDialog({ defaultUri: vscode.Uri.file(path.dirname(this.file)), canSelectMany: false,
-      title: `Compare ${path.basename(a)} with`, filters: { 'vcd, fst': ['vcd', 'fst'], 'every file': ['*'] } });
-    if (!got || !got.length) return {};
-    const b = got[0].fsPath, bin = svaBin();
+  // Compare…: A the waves the page shows (of: a run kept, 0 or none the dump), B a file picked — or path, the one picked
+  // before (the page compares it again with a new A)
+  async compare(signals, from, to, path0, of) {
+    const a = await this.fileOf(of);
+    if (!a) return { error: `compare: no run #${of}` };
+    let b = path0;
+    if (!b) {
+      const got = await vscode.window.showOpenDialog({ defaultUri: vscode.Uri.file(path.dirname(this.file)), canSelectMany: false,
+        title: `Compare ${path.basename(a)} with`, filters: { 'vcd, fst': ['vcd', 'fst'], 'every file': ['*'] } });
+      if (!got || !got.length) return {};
+      b = got[0].fsPath;
+    }
+    const bin = svaBin();
     // sva diff --page: the compare as the tab takes it, the run's values of the signals that differ in it (at most 32 MiB:
     // else cutError says why), the same shape as a config's "compare" (tools/svabuild.py)
     const args = ['diff', a, b, '--page', '--quiet', '--signals-from', '-'];
@@ -458,7 +471,18 @@ ${scripts}
     let d;
     try { d = cliJson(r.text); } catch (e) { return { error: `compare: sva diff wrote no JSON (${e.message})` }; }
     if (d.cutError) log(`${path.basename(this.file)}: the values of ${path.basename(b)} are not in the tab: ${d.cutError}`);
+    d.src = { path: b };   // what the page compares again when A moves
     return { result: d };
+  }
+  // the file of the waves the page names (of: a run kept, its FST; 0, none: the dump) -> its path, or null (no such run).
+  // The page owns A: the extension's shown follows it for the log and the list only
+  async fileOf(of) {
+    const id = parseInt(of, 10);
+    if (!(id > 0)) return this.file;
+    const dir = this.runsDir(), r = await this.sva(['runs', 'list', '--dir', dir, '--json']);
+    let l = null; try { l = cliJson(r.out); } catch (e) { /* none */ }
+    const run = l && (l.runs || []).find(x => x.id === id);
+    return run ? path.join(dir, run.file) : null;
   }
   // the runs kept of this dump (the Runs panel): sva runs over .wavelens-runs beside it (wavelens.runsDir: another directory).
   // list -> {dir, runs, others, now: the dump's {name, mtime, bytes}, shown: the run shown (0: the dump)}; keep {name, tags,
@@ -488,7 +512,7 @@ ${scripts}
       [`${Math.round(x.from)}ps`, `${Math.round(x.to)}ps`] : null);
     const id = String(parseInt(m.run, 10)), nowOr = x => (x === 'now' || !(parseInt(x, 10) > 0) ? 'now' : String(parseInt(x, 10)));
     // A: the run asked (against), else the one shown
-    const against = () => (m.against != null ? nowOr(m.against) : this.shown ? String(this.shown.id) : 'now');
+    const against = () => (m.against != null ? nowOr(m.against) : 'now');   // the page sends its A (a shell's ask: the dump)
     this.watchRuns(dir);
     // a compare (or Δ all) asked while another runs: the older one's processes killed, its answer "stopped"
     const own = () => { if (this.runsBusy) this.runsBusy.forEach(p => p.kill()); const set = this.runsBusy = new Set();
@@ -512,9 +536,10 @@ ${scripts}
       }
       case 'cancel': if (this.runsBusy) this.runsBusy.forEach(p => p.kill()); return { ok: true };
       case 'keep': {   // the dump of now; with from, to: a slice of the waves shown (the dump or a run), its times from 0
-        const sl = win(m), src = sl && this.shown ? this.shown.file : this.file;
+        const sl = win(m), src = sl ? await this.fileOf(m.of) : this.file;
+        if (!src) return { error: `no run #${m.of}` };
         if (!sl && (m.from != null || m.to != null)) return { error: 'a slice: from and to, from before to' };
-        log(`${name}: ${sl ? `a slice ${sl.join(' … ')} of ${this.shown ? this.shown.name : 'the dump'}` : 'the dump'} kept as a run in ${dir}`);
+        log(`${name}: ${sl ? `a slice ${sl.join(' … ')} of ${src === this.file ? 'the dump' : path.basename(src)}` : 'the dump'} kept as a run in ${dir}`);
         const cases = !sl && Array.isArray(m.cases) && m.cases.length ? m.cases.filter(c => c && typeof c.label === 'string' && isFinite(c.from) &&
           isFinite(c.to)).map(c => ({ label: c.label, from: Math.round(c.from), to: Math.round(c.to) })) : null;
         const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification,
@@ -525,7 +550,8 @@ ${scripts}
       }
       case 'cut': {   // a window of the waves shown as an FST of its own, its times from 0, where the save dialog says
         const sl = win(m); if (!sl) return { error: 'cut: from and to, from before to' };
-        const src = this.shown ? this.shown.file : this.file, stem = path.basename(this.file).replace(/\.[^.]*$/, '');
+        const src = await this.fileOf(m.of), stem = path.basename(this.file).replace(/\.[^.]*$/, '');
+        if (!src) return { error: `no run #${m.of}` };
         const nm = `${stem}.${sl.map(t => t.replace(/ps$/, '')).join('-')}ps.fst`;
         const to = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(path.join(path.dirname(this.file), nm)), saveLabel: 'Save',
           filters: { FST: ['fst'] }, title: `WaveLens: the window ${sl.join(' … ')} as an FST (its times from 0)` });

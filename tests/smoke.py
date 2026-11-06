@@ -1898,7 +1898,10 @@ def vscode_tab(browser, build):
         save: m => (window.__cancel ? { cancel: true } : { path: '/host/dumps/' + m.name }),
         pick: m => ({ files: /fst/.test(m.accept) ? [] : [{ name: 's.view.json', path: '/states/s.view.json', mtime: 1, b64: btoa(JSON.stringify(window.__S)) }] }),
         'state-read': () => (window.__S ? { name: 's.view.json', mtime: 2, b64: btoa(JSON.stringify(window.__S)) } : { error: 'gone' }),
-        compare: () => ({}),   // the dialog closed
+        // the dialog closed; path (Compare… again, A moved): a result of that file, its path back
+        compare: m => (m.path ? { result: { name: 'other.vcd', from: m.from, to: m.to, compared: 1, differ: 1, first: 1000, src: { path: m.path },
+          signals: { 'tb.plain': { spans: [[1000, 2000]] } }, missing: [], map: [] } } : {}),
+        open: m => { window.__OPENED = m.path; return { ok: true }; },
         runs: m => window.runsAnswer(m),
         sources: () => (window.__TYPES ? { types: window.__TYPES, typesName: 'enum.types.json', texts: [] } : {
           texts: window.__SRC || ['package p; typedef enum logic [1:0] {OFF, ON = 2, HOLD} mode_t; endpackage', 'module m; p::mode_t plain, state; endmodule'] }),
@@ -2407,11 +2410,14 @@ def vscode_tab(browser, build):
     js("v.runsShow(9)")
     until("(v => v && v.runsShown === 9)(WaveLens.views().find(x => x.root.isConnected))", timeout=15000)
     a = [js("v.M.rows.some(r => r.full === 'tb.plain')"), js("v.root.querySelector('.wv-runs .ms').textContent")]
+    # an edit made while A lacks a row (review 2026-11-06-latest A-03): kept on the next run, the row lacking back too
+    pr = js("(r => (v.painted.set(r.full, '#2f9e44'), v.savePaint(), r.full))(v.M.rows.find(r => r.type === 'sig' && r.tr && r.full !== 'tb.plain'))")
     page.evaluate("window.__OPENFILE = null")
     js("v.runsShow(3)")
     until("(v => v && v.runsShown === 3)(WaveLens.views().find(x => x.root.isConnected))", timeout=15000)
     check(not a[0] and 'tb.plain' in a[1] and js("v.hiddenRows.has('tb.plain')"),
           f'a run without a row of yours: said ({a[1]}); the next run that has it: hidden again, as on now')
+    check(js(f"v.painted.get({json.dumps(pr)})") == '#2f9e44', f'the colour given on the run that lacked a row: kept on the next ({pr})')
     js("v.runsShow(0)")
     until("(v => v && v.runsShown === 0)(WaveLens.views().find(x => x.root.isConnected))", timeout=15000)
     # a slice: the right button's Slice ▸ keeps the range as a run of its own (its times from 0) or saves it as an FST; A a
@@ -2442,13 +2448,42 @@ def vscode_tab(browser, build):
     check((c.get('from'), c.get('to')) == (5000, 10000), f'Slice ▸ Save as FST…: cut with the range, the path said {c}')
     js(f"v.run([{{ op: 'marker', id: v.umarks.findIndex(m => m.label === 'sl') + 1, delete: true }}])")
     page.locator('.wv-runs .rl').focus(); page.keyboard.press('Escape')
+    # review 2026-11-06-latest: a file of Compare… compared again when A moves (B-03); now one of the Bs of ]r while A is a run
+    # (B-07); Δ all's numbers kept over ⟳ (B-08); a piece given to Load… in this tab opens in a tab of its own (B-05)
+    js("(v.compareResult({ name: 'other.vcd', from: 0, to: 20000, compared: 1, differ: 1, first: 1000, src: { path: '/host/other.vcd' }, " +
+       "signals: { 'tb.plain': { spans: [[1000, 2000]] } }, missing: [], map: [] }), 0)")
+    js("v.runsShow(3)")
+    until("(v => v && v.runsShown === 3 && v.cmp && v.cmp.name === 'other.vcd')(WaveLens.views().find(x => x.root.isConnected))", timeout=15000)
+    fc = [m for m in sent('compare') if m.get('path')][-1]
+    check(fc['path'] == '/host/other.vcd' and fc['of'] == 3, f'A moved: the file of Compare… compared again with the new A {fc}')
+    js("v.compare(null)")
+    seen = []
+    for _ in range(len(js("v.runsL")) + 1):
+        page.locator('.wv canvas').first.click(); page.keyboard.press(']'); page.keyboard.press('r')
+        prev = json.dumps(seen[-1] if seen else None)
+        until(f"(v => v && v.runCur != null && v.runCur !== {prev})(WaveLens.views().find(x => x.root.isConnected))"); seen.append(js("v.runCur"))
+    check(0 in seen and 3 not in seen, f']r with A a run: now is one of the Bs, A is not {seen}')
+    js("v.compare(null)")
+    js("v.runsShow(0)")
+    until("(v => v && v.runsShown === 0)(WaveLens.views().find(x => x.root.isConnected))", timeout=15000)
+    js("(v.runsPanel(true, false), 0)"); until("(v => v && v.runsP)(WaveLens.views().find(x => x.root.isConnected))")
+    js("(v.runsP.got(2, { from: 0, to: 20000 }, { differ: 1, compared: 4, first: 5000 }), v.runsP.render(), 0)")
+    page.evaluate("window.postMessage({ type: 'reload' }, '*')")   # ⟳ as the extension asks it (a new simulation, R)
+    until("(v => v && v.runsP && v.runsP.deltas && v.runsP.deltas.has(2) && v.root.querySelector('.wv-runs .rd.bad'))(WaveLens.views().find(x => x.root.isConnected))",
+          timeout=15000)
+    check(True, '⟳: Δ all\'s numbers on the rows kept')
+    title = js("v.opts.title")
+    js("v.loadState(new File(['{\"wavelens\": \"waves\", \"version\": 1, \"signal\": []}'], 'p.wavelens.json'), { name: 'p.wavelens.json', path: '/host/p.wavelens.json' })")
+    page.wait_for_timeout(100)
+    check(js("v.opts.title") == title and page.evaluate("window.__OPENED") == '/host/p.wavelens.json',
+          f'Load… of a piece of waves in the VS Code tab: opened in a tab of its own, this tab\'s waves stay ({page.evaluate("window.__OPENED")})')
     # every runs message host.js sent, by operation: its keys (T-03: rm with id in place of run passed before), and against the table
     shapes = {}
     for m in sent('runs'):
         shapes.setdefault(m['op'], set()).add(tuple(sorted(set(m) - {'type', 'id', 'op'})))
     sig = ('from', 'signals', 'to')
-    want = {'list': {()}, 'keep': {('comment', 'name', 'tags'), ('cases', 'comment', 'name', 'tags'), ('from', 'to')}, 'set': {('comment', 'name', 'run', 'tags')},
-            'cut': {('from', 'to')},
+    want = {'list': {()}, 'keep': {('comment', 'name', 'tags'), ('cases', 'comment', 'name', 'tags'), ('from', 'of', 'to')}, 'set': {('comment', 'name', 'run', 'tags')},
+            'cut': {('from', 'of', 'to')},
             'rm': {('run',)}, 'diff': {('against',) + sig, ('against', 'case') + sig}, 'open': {('run',)},
             'compare': {('against', 'from', 'run', 'signals', 'to'), ('against', 'case', 'from', 'run', 'signals', 'to')}}
     check(set(shapes) == set(want) and all(shapes[k] <= want[k] for k in want) and all(type(m['run']) is int for m in sent('runs') if 'run' in m),
@@ -6188,6 +6223,24 @@ def marker_lanes(browser, build):
         await v.run([{ op: 'gaps', view: false, on: false }]); return ok && near && far || [!!F, !!t, near, far];""")
     check(gp is True, f'with gaps on the waves a text stands at its time, dropped on a gap\'s column at the side nearer {gp}')
     check(n0 == 0, f'the page starts without markers of yours {n0}')
+    # every colour picker with its hex code beside it (review 2026-11-06-latest T-03): the lists' and the menu's, bound where they
+    # are made; a code typed applies as soon as it is one, a wrong one is marked and not applied, Esc puts the picker's back
+    js('await v.run([{ op: "marker", id: "all", delete: true }, { op: "marker", t: "60ns", label: "hx" }]); v.renderNotes();')
+    hx = js("""const cs = [...v.notesEl.querySelectorAll('input[type=color]')];
+        v.menu(200, 200, v.M.rows.find(r => r.type === 'sig' && r.tr), v.cursor); const ms = [...v.menuEl.querySelectorAll('input[type=color]')];
+        const ok = c => c.nextElementSibling && c.nextElementSibling.classList.contains('wv-hex') && c.nextElementSibling.value === c.value &&
+          c.parentNode.querySelectorAll('.wv-hex').length === c.parentNode.querySelectorAll('input[type=color]').length;
+        const r = [cs.length, cs.every(ok), ms.length, ms.every(ok)]; v.closeMenu(); return r;""")
+    check(hx[0] >= 1 and hx[1] and hx[2] >= 1 and hx[3], f'each colour picker of the lists and the menu has one hex field with its code {hx}')
+    f = page.locator('.wv .notes li[data-k="0"] .wv-hex').first
+    f.click(); page.keyboard.press('Control+A'); page.keyboard.type('c25'); page.wait_for_timeout(50)
+    t1 = js("const c = v.notesEl.querySelector('li[data-k=\"0\"] input[type=color]'); return [c.value, v.umarks[0].color];")
+    f.click(); page.keyboard.press('Control+A'); page.keyboard.type('zz'); page.wait_for_timeout(50)
+    t2 = js("const c = v.notesEl.querySelector('li[data-k=\"0\"] input[type=color]'); return [c.value, c.nextElementSibling.classList.contains('bad')];")
+    page.keyboard.press('Escape'); page.wait_for_timeout(50)
+    t3 = js("const c = v.notesEl.querySelector('li[data-k=\"0\"] input[type=color]'); return [c.nextElementSibling.value, c.nextElementSibling.classList.contains('bad')];")
+    check(t1 == ['#cc2255', '#cc2255'] and t2 == ['#cc2255', True] and t3 == ['#cc2255', False],
+          f'a code typed: the colour (#c25 too); a wrong one marked, not applied; Esc: the code back {t1} {t2} {t3}')
     # the left button while the right one draws a range: a marker at once, M1 M2 …, no question; on a signal's row over it,
     # under it when over it is taken there, both taken: over it; on the axis at the top; no menu at the end of that range
     js('await v.run([{ op: "marker", id: "all", delete: true }]); v.fit(); v.draw();')
@@ -6208,6 +6261,11 @@ def marker_lanes(browser, build):
           f'the left button within a right-button range: markers at once, over the signal, under it when over it is taken, the axis; no menu {ch}')
     js('await v.undo(); v.draw();'); un = js('return v.markList().map(m => m.label);')
     check(un == ['M1', 'M2', 'M3', 'M4'], f'each such marker is one step of undo {un}')
+    sn = js(f"""const {{ lay }} = WaveLens.internal.peek(v), o = lay.find(o => o.row.full === {on}), r = o.row;
+        const e = r.tr.find(x => x.t > v.t0 + v.span * 0.2 && x.t < v.t0 + v.span * 0.8), x = (e.t - v.t0) * v.pxPerT() + 3, y = o.y + o.h / 2;
+        await v.markerAt(x, y, false); await v.markerAt(x, y, true); const n = v.umarks.length;
+        return [v.umarks[n - 2].t === e.t, v.umarks[n - 1].t !== e.t];""")
+    check(sn == [True, True], f'a chord marker: on the edge of the signal under it; with alt: the time as it is {sn}')
     check(not errs, f'no page error {errs}')
     page.close()
 
@@ -6238,18 +6296,26 @@ def wave_piece(browser, build):
         return { name: saved && saved[0], kind: doc && doc.wavelens, time: doc && [doc.time.t0, doc.time.t1],
           names: doc && doc.signal.flat(9).filter(x => x && x.tv).map(x => x.name).sort(),
           first: doc && sig('PADDR').tv[0][0], inside: doc && sig('PADDR').tv.every(([t]) => t >= 40000 && t <= 120000),
-          marks: doc && doc.state.markers.map(m => m.label), paint: doc && doc.state.paint, text };""")
+          marks: doc && doc.state.markers.map(m => m.label), paint: doc && doc.state.paint, text,
+          keys: doc && Object.keys(doc.state).filter(k => !['wavelens', 'version', 'config'].includes(k) && !WaveLens.internal.PIECE_KEYS.includes(k)),
+          config: doc && Object.keys(doc.state.config || {}).sort(), pv: doc && doc.meta.piece.version,
+          at40: (r => { const t = r.tr[WaveLens.util.lastLE(r.tr, 40000)]; return [t.k, String(t.v)]; })(R('PADDR')) };""")
     check(got['kind'] == 'waves' and got['name'].endswith('.wavelens.json') and got['time'] == [40000, 120000] and got['names'] == ['PADDR', 'PSEL']
           and got['first'] == 40000 and got['inside'], f'Save as WaveLens: the range\'s highlighted signals, from its start (their value there) to its end '
           f'{[got[k] for k in ("name", "kind", "time", "names", "first", "inside")]}')
     check(got['marks'] == ['in'] and '#2f9e44' in got['paint'].values(), f'with your view of them: the paint, the marks inside the range {got["marks"]}')
+    check(got['keys'] == [] and got['config'] == ['fold', 'highlight'] and got['pv'] == 1,
+          f'its state: the rows\' look and your marks only — not the page\'s style, tools, find, FSM layer (review 2026-11-06-latest A-07) {got["keys"]} {got["config"]}')
+
     o = js(f"""const f = new File([{json.dumps(got['text'])}], 'apb_piece.wavelens.json'); v.root.id = v.root.id || 'pieceRoot';
         const nv = await v.loadState(f), w = nv && nv.M ? nv : v.root.waveView;
         const row = w.M.rows.find(r => r.name === 'PADDR');
         return [w.M.t0, w.M.t1, w.M.rows.filter(r => r.type === 'sig').map(r => r.name).sort(), w.painted.get(row.full), w.radixes.get(row.full),
-          w.markList().map(m => m.label), w.opts.title];""")
+          w.markList().map(m => m.label), w.opts.title, (t => [t.k, String(t.v)])(row.tr[WaveLens.util.lastLE(row.tr, 40000)])];""")
     check(o[:3] == [40000, 120000, ['PADDR', 'PSEL']] and o[3] == '#2f9e44' and o[4] == 'dec' and o[5] == ['in'],
           f'the piece given to Load…: opened as waves, its time and signals, the paint, radix and marker back {o}')
+    check(js("return (v.root.wlState || {}).name") == 'apb_piece.wavelens.json', 'the piece Load… opened: r reads it again (its Reload)')
+    check(o[7] == got['at40'] and got['first'] == 40000, f'PADDR at the range\'s start: in the piece as in the dump (T-07) {o[7]} {got["at40"]}')
     bad = js("""const f = new File(['{"signal": 1}'], 'other.json'); const w = v.root.waveView; await w.openDump(f);
         return [v.root.waveView === w, w.M.t0];""")
     check(bad == [True, 40000], f'a JSON that is no waves of WaveLens: refused, the viewer as it was {bad}')

@@ -52,7 +52,7 @@ F.run(async () => {
   const REQ = {
     page: {}, source: {}, bytes: {}, codes: { codes: [] }, store: { key: 'k', value: 'v' }, save: { name: 'x.txt', b64: Buffer.from('hi').toString('base64') },
     pick: { accept: '.json', multiple: false, state: true }, 'state-kept': {}, 'state-read': {},
-    compare: { signals: ['tb.s', 'tb.cnt'], from: 0, to: 30000 }, sources: {}, config: {}, clip: { text: 'PSEL' }, theme: {},
+    compare: { signals: ['tb.s', 'tb.cnt'], from: 0, to: 30000, of: 0 }, open: { path: state }, sources: {}, config: {}, clip: { text: 'PSEL' }, theme: {},
     result: { rid: 99, results: [] }, ready: { title: 't' }, loaded: { name: 't.vcd', shown: 2, total: 2 },
     dumperror: { name: 't.vcd', error: 'the time goes back', line: 9 }, log: { text: 'a line' }, configerror: { text: 'boom' },
     'es-open': { sid: 1, url: 'http://127.0.0.1:1/events?token=x' }, 'es-close': { sid: 1 },
@@ -61,7 +61,7 @@ F.run(async () => {
   const OPS = [['list', {}], ['keep', { name: 'golden', tags: ['base'], comment: 'before' }], ['set', { run: 1, name: 'gold' }],
     ['open', { run: 1 }], ['open', { run: 0 }], ['diff', { signals: ['tb.s'], from: 0, to: 30000, against: 0 }],
     ['compare', { run: 1, signals: ['tb.s', 'tb.cnt'], from: 0, to: 30000 }], ['compare', { run: 1, against: 0, signals: ['tb.s'], from: 0, to: 30000 }],
-    ['keep', { from: 0, to: 10000 }], ['cut', { from: 0, to: 10000 }], ['cancel', {}], ['rm', { run: 1 }]];
+    ['keep', { from: 0, to: 10000, of: 0 }], ['cut', { from: 0, to: 10000, of: 1 }], ['cancel', {}], ['rm', { run: 1 }]];
   const walked = [];
   for (const type of Object.keys(P.PAGE)) {
     const p = P.PAGE[type];

@@ -3188,6 +3188,7 @@ class Notes {
         <input type="color" class="col" value="${hex(g.color)}" aria-label="group ${i + 1} colour" title="Colour of its signals">
         <button type="button" class="ic" data-bm="gdel" title="Delete the group (its signals stay where they are)">✕</button></li>`).join('') + '</ol>' : '') +
       `<datalist id="${v.sigList}">${sigs.map(r => `<option value="${esc(r.full)}">`).join('')}</datalist>`;
+    hexFields(el);   // each colour with its hex code (menu.js)
   }
   click(e) {
     const v = this.v;
@@ -3351,10 +3352,9 @@ class WaveView {
       this.span = Math.min(Math.max(b - a, this.minSpan), M.t1 - M.t0); this.t0 = this.clamp(a); this.draw();
     }
     this.ro = new ResizeObserver(() => this.draw()); this.ro.observe(this.wcol); this.ro.observe(this.root.querySelector('.bar'));
-    // every colour picker of the viewer (the bar's, its menus, panels and lists) with its hex code beside it (menu.js hexFields)
+    // every colour picker with its hex code beside it (menu.js hexFields): the bar's here; the menu's and the lists' where they
+    // are made (menu, the lists' render), none other makes one
     hexFields(this.root);
-    this.hexObs = new MutationObserver(ms => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1) hexFields(n); });
-    this.hexObs.observe(this.root, { childList: true, subtree: true });
     // the canvas is only as tall as the visible part of the rows (sticky in its column): redraw when that part moves
     this.onScroll = () => { if (!this.raf && this.lay && this.lay.H > this.hc + 1) this.raf = requestAnimationFrame(() =>
       { this.raf = 0; if (this.root.isConnected) this.draw(); }); };
@@ -4119,7 +4119,17 @@ class WaveView {
   async loadState(file, handle = null) {
     try {
       const name = file.name || 'state', text = typeof file === 'string' ? file : await file.text(), j = jsonParse(text, name);
-      if (j && j.wavelens === 'waves' && typeof file !== 'string') return this.openDump(file, handle);   // a piece of waves: opened
+      if (j && j.wavelens === 'waves' && typeof file !== 'string') {   // a piece of waves: waves of its own, not a view of these
+        // a host (VS Code): the tab's waves are its dump's — the piece opens in a tab of its own (its path known), else said
+        if (this.runsHost()) { const h = handle && handle.then ? await handle.catch(() => null) : handle, p = h && h.path;
+          if (p && G.WAVELENS_OPEN) { G.WAVELENS_OPEN(p); this.toast(`${name}: a piece of waves, opened in a tab of its own`); }
+          else this.toast(`${name}: a piece of waves — Open in WaveLens opens it in a tab of its own`);
+          return null; }
+        if (handle && handle.then) handle = await handle.catch(() => null);
+        const v = await this.openDump(file, handle);   // r: the piece read again (its view with it)
+        if (v) v.keepState(handle || { name, getFile: async () => file });
+        return v;
+      }
       const miss = await this.setState(j);
       this.undoTick();   // the load is one step to undo
       if (handle && handle.then) handle = await handle.catch(() => null);
@@ -5228,7 +5238,7 @@ class WaveView {
   // the viewer leaves: observers, window listeners and pending frames go; plugins hear wavelens:destroy and take their part
   destroy() {
     if (!VIEWS.has(this)) return;
-    this.ro.disconnect(); this.hexObs.disconnect(); this.ac.abort();   // every listener on the root, the window and the document
+    this.ro.disconnect(); this.ac.abort();   // every listener on the root, the window and the document
     this.help(false);
     cancelAnimationFrame(this.raf); cancelAnimationFrame(this.inv); clearTimeout(this.toastT); clearTimeout(this.gapTypeT);
     if (ACTIVE.view === this) ACTIVE.view = null;
@@ -5429,7 +5439,7 @@ Object.assign(WaveView.prototype, {
       (this.fsms().length ? '<hr>' + b('fsms', 'State machines…') + (this.fsm ? b('fsmx', 'Clear the FSM layer') : '') : '') +
       (r ? '<hr>' + b('clear', 'Clear the range') : '') +
       (this.bms.length || this.umarks.length ? '<hr>' + b('clearmarks', 'Clear bookmarks and markers') : '');
-    this.root.append(el); this.menuEl = el;
+    this.root.append(el); this.menuEl = el; hexFields(el);   // each colour with its hex code
     const box = el.getBoundingClientRect();
     el.style.left = Math.max(4, Math.min(cx, innerWidth - box.width - 4)) + 'px'; el.style.top = Math.max(4, Math.min(cy, innerHeight - box.height - 4)) + 'px';
     const done = () => { this.closeMenu(); this.refocus(); };
@@ -7363,6 +7373,9 @@ function live(url) {
 }
 
 /* ---------------- a piece of the waves (the box's Save as WaveLens) ---------------- */
+// the keys of a saved state a piece of waves (toPiece) carries: its rows' look and your marks, not the page's settings
+const PIECE_KEYS = ['paint', 'radix', 'analog', 'hidden', 'dups', 'bits', 'groups', 'only', 'select', 'markers', 'bookmarks', 'arrows', 'spans',
+  'range', 'cursor', 'cursor2', 'from', 'to', 'deltas'];
 Object.assign(WaveView.prototype, {
   // the waves of rows (each one's signal: a bit's, a field's, a copy's its own) over [a, b] as a file this viewer opens on its
   // own (x.wavelens.json: Open…, a drop, VS Code's Open in WaveLens): every signal's value at a and its changes up to b,
@@ -7393,9 +7406,11 @@ Object.assign(WaveView.prototype, {
         key = k; }
       node.get(key).push(Object.assign(s, { name, path, tv: tvOf(r) }, r.width > 1 && !s.width ? { width: r.width } : {}));
     }
-    // the view: its rows', and your marks of [a, b] (arrows between the bookmarks kept); not the compare, not the runs
-    const st = this.state(), inT = t => t >= a && t <= b;
-    for (const k of ['compare', 'compareShow', 'runsOver', 'title']) delete st[k];
+    // the view: its rows', and your marks of [a, b] (arrows between the bookmarks kept) — not the page's own settings (its
+    // style, tools, sort, find, gaps, cycles), not the compare, the runs, the FSM layer: who opens it keeps theirs
+    const all = this.state(), inT = t => t >= a && t <= b, st = { wavelens: all.wavelens, version: all.version };
+    for (const k of PIECE_KEYS) if (all[k] !== undefined) st[k] = all[k];
+    st.config = { fold: all.config.fold, highlight: all.config.highlight };
     Object.assign(st, { from: a, to: b, cursor: inT(this.cursor) ? this.cursor : a, cursor2: this.cursor2 != null && inT(this.cursor2) ? this.cursor2 : null,
       markers: (st.markers || []).filter(m => inT(m.t)), bookmarks: (st.bookmarks || []).filter(m => inT(m.t)),
       spans: (st.spans || []).filter(s => s.to > a && s.from < b).map(s => Object.assign(s, { from: Math.max(s.from, a), to: Math.min(s.to, b) })) });
@@ -7407,7 +7422,7 @@ Object.assign(WaveView.prototype, {
       time: Object.assign({}, this.M.src.time, { t0: a, t1: b }), config: {} };
     const scopes = this.M.src.scopes && Object.fromEntries(Object.entries(this.M.src.scopes).filter(([p]) => node.has(p)));
     if (scopes && Object.keys(scopes).length) doc.scopes = scopes;
-    doc.meta = { piece: { of: title, from: a, to: b, signals: sigs.length, saved: new Date().toISOString() } };
+    doc.meta = { piece: { version: 1, of: title, from: a, to: b, signals: sigs.length, saved: new Date().toISOString() } };
     doc.state = st;
     return doc;
   },
@@ -8918,14 +8933,36 @@ Object.assign(WaveView.prototype, {
   },
 });
 /* ======================== src/runs.js ======================== */
+// the snapshot's part of the rows these waves lack (miss: their paths) put back into the state st of now — their colour, radix,
+// plot, hidden, copies, bits, places in your groups, the selection, the signals of your marks; the rest is st's (the edits
+// made meanwhile)
+function runsMerge(st, snap, miss) {
+  const m = new Set(miss), lost = p => typeof p === 'string' && m.has(p);
+  for (const k of ['paint', 'radix', 'analog']) { const o = snap[k] || {}; st[k] = Object.assign({}, st[k] || {});
+    for (const p of Object.keys(o)) if (lost(p) && !(p in st[k])) st[k][p] = o[p]; }
+  for (const k of ['hidden', 'dups', 'bits']) { const now = st[k] || []; st[k] = now.concat((snap[k] || []).filter(p => lost(p) && !now.includes(p))); }
+  if (snap.config && st.config) for (const k of ['fold', 'highlight']) { const now = st.config[k] || [];
+    st.config[k] = now.concat((snap.config[k] || []).filter(p => lost(p) && !now.includes(p))); }
+  if (st.select == null && lost(snap.select)) st.select = snap.select;
+  // a group: the signals it had there, back at their places (one of yours made meanwhile: as it is); a group with only lost ones: back
+  const gs = (st.groups || []).map(g => Object.assign({}, g, { signals: [...(g.signals || [])] }));
+  for (const g of snap.groups || []) { const h = gs.find(x => x.name === g.name);
+    if (!h) { if ((g.signals || []).length && g.signals.every(lost)) gs.push(Object.assign({}, g)); continue; }
+    (g.signals || []).forEach((p, i) => { if (lost(p) && !h.signals.includes(p)) h.signals.splice(Math.min(i, h.signals.length), 0, p); }); }
+  st.groups = gs;
+  if (snap.only && st.only) { const ms = st.only.modules || []; st.only = Object.assign({}, st.only,
+    { modules: ms.concat((snap.only.modules || []).filter(p => lost(p) && !ms.includes(p))) }); }
+  // a mark whose signal these waves lacked went to the top: the same mark (its place in the list, its label) takes it back
+  for (const k of ['markers', 'bookmarks']) (st[k] || []).forEach((x, i) => { const o = (snap[k] || [])[i];
+    if (!o || (o.label || '') !== (x.label || '') || (o.text || '') !== (x.text || '')) return;
+    for (const s of ['signal', 'dsignal']) if (x[s] == null && lost(o[s])) { x[s] = o[s]; if (s === 'signal' && o.lift != null) x.lift = o.lift;
+      if (s === 'dsignal' && o.dlift != null) x.dlift = o.dlift; } });
+}
 /* ---------------- the viewer's side ---------------- */
 const RUN_SETTLE = 250;   // ms: the list's keys move the row, the compare goes when they stop (Enter at once)
 // a case's name of a span's label: without "TC3 " before it and " · PASS" after it (cocotb's marks); sva runs.rs case_name
 const caseName = l => { const s = String(l || '').split(' · ')[0].trim(), m = /^TC\d+ (.*)$/.exec(s); return (m ? m[1] : s).trim(); };
 const sameSpan = (s, w) => !!s && !!w && s.from === w.from && s.to === w.to && (s.label || '') === (w.label || '');
-// the keys of a view's state that are of its time, not of its rows: a step of A keeps them as they are on the screen (the rest
-// from the snapshot when the run shown lacked rows of it)
-const RUN_TIME_KEYS = ['from', 'to', 'cursor', 'cursor2', 'range', 'markers', 'spans', 'bookmarks', 'arrows', 'compare', 'compareShow', 'runsOver'];
 // B: the run compared (its id; 0 the dump of now, while A is a run), the compare's own: dropped with it (✕, compare off,
 // Compare… with a file), kept with it in a saved state
 Object.defineProperty(WaveView.prototype, 'runCur', { configurable: true,
@@ -8951,7 +8988,7 @@ Object.assign(WaveView.prototype, {
   async keepSlice(a, b) {
     const h = this.runsHost(); if (!h) { this.toast('the slices are kept by VS Code (or sva runs keep DUMP --from T --to T)'); return null; }
     const w = `${this.fmtCursor(a)} … ${this.fmtCursor(b)}`; this.toast(`keeping ${w} as a slice…`);
-    let m; try { m = await h.keep({ from: a, to: b }); } catch (e) { m = { error: e.message }; }
+    let m; try { m = await h.keep({ from: a, to: b, of: this.runsA() }); } catch (e) { m = { error: e.message }; }
     if (m.error || !m.run) { this.toast(`not kept: ${m.error || 'no answer'}`); return null; }
     this.runsPanel(true, false); if (this.runsP) { await this.runsP.load(); this.runsP.fi = this.runsP.rowOf(m.run.id); this.runsP.render(); }
     const s = `#${m.run.id} ${m.run.name} kept: ${w}, its times from 0 (w shows it, B compares it with A)`;
@@ -8962,7 +8999,7 @@ Object.assign(WaveView.prototype, {
   async saveSlice(a, b) {
     const h = this.runsHost();
     if (!h || !h.cut) { this.toast('an FST is written by VS Code (or sva fst DUMP --from T --to T --zero --out X.fst)'); return null; }
-    let m; try { m = await h.cut(a, b); } catch (e) { m = { error: e.message }; }
+    let m; try { m = await h.cut(a, b, this.runsA()); } catch (e) { m = { error: e.message }; }
     if (m.cancel) return null;
     this.toast(m.error ? `not saved: ${m.error}` : `saved ${m.path}: ${this.fmtCursor(a)} … ${this.fmtCursor(b)}, its times from 0`);
     return m.path || null;
@@ -9030,7 +9067,7 @@ Object.assign(WaveView.prototype, {
       if (ids.length < 2) { this.toast('no run kept: Keep this dump… in the Runs panel (gu)'); return this; }
       return this.runsShow(ids[i < 0 ? 0 : (i + dir + ids.length) % ids.length]);
     }
-    const ids = runs.map(r => r.id).filter(x => x !== a);
+    const ids = [...runs.map(r => r.id), ...(a ? [0] : [])].filter(x => x !== a);   // A a run: now is a B too (the panel's row)
     if (!ids.length) {
       this.toast(runs.length ? 'the one run kept is A, the waves shown: ]w back to now' : 'no run kept: Keep this dump… in the Runs panel (gu)');
       return this; }
@@ -9059,19 +9096,23 @@ Object.assign(WaveView.prototype, {
     this.runsTo = undefined;
     return v;
   },
-  // the snapshot of the view the runs shown take their rows from: taken on now, and on a run that has every row of it
-  runsSnapTake() { if (!this.runsA() || !this.runsSnap || !(this.runsMiss || []).length) this.runsSnap = this.state(); },
+  // the snapshot of the view the runs shown take their rows from: the view of now, and what the snapshot of before said of
+  // the rows these waves lack (runsMiss): an edit made meanwhile stays, a row missing twice in a row is not forgotten
+  runsSnapTake() {
+    const st = this.state(), miss = this.runsMiss || [];
+    if (this.runsA() && this.runsSnap && miss.length) runsMerge(st, this.runsSnap, miss);
+    return (this.runsSnap = st);
+  },
   // the view's state for the next waves (openDump keep): its time as it is, its rows from the snapshot while A is a run
   // (A moves: a run shown, or ⟳ — the dump of now — while a run is)
   runsKeep() {
     const move = (this.runsTo !== undefined ? this.runsTo : 0) !== this.runsA();
-    if (move) this.runsSnapTake();
-    const st = this.state(), snap = move && this.runsSnap;
-    if (snap) for (const k of Object.keys(snap)) if (!RUN_TIME_KEYS.includes(k)) st[k] = snap[k];
+    const st = move ? JSON.parse(JSON.stringify(this.runsSnapTake())) : this.state();
     if (move) { delete st.compare; delete st.compareShow; }   // the compare of the A of before: made again with the new one (runsAgain)
-    // a slice's times are from 0: from the dump to a slice of it (or back, or to a slice elsewhere in it) the times of the view
-    // go with it — the same place of the dump in sight, your markers on the same moments
-    const d = move ? this.runOrigin(this.runsA()) - this.runOrigin(this.runsTo || 0) : 0;
+    // a slice's times are from 0: from a whole one (the dump, a whole run) to a slice and back the times of the view go with
+    // it — the same place of the dump in sight, your markers on the same moments; slice to slice: both from 0, as they compare
+    const oa = move ? this.runOrigin(this.runsA()) : null, ob = move ? this.runOrigin(this.runsTo || 0) : null;
+    const d = (oa == null) !== (ob == null) ? (oa || 0) - (ob || 0) : 0;
     if (d) {
       const t = x => (typeof x === 'number' && isFinite(x) ? x + d : x);
       for (const k of ['from', 'to', 'cursor', 'cursor2']) st[k] = t(st[k]);
@@ -9082,15 +9123,19 @@ Object.assign(WaveView.prototype, {
     }
     return st;
   },
-  // where a run's time 0 is in the time of the dump: a slice's from (ps), else 0 (the dump of now, a whole run)
-  runOrigin(id) { const r = id && (this.runsL || []).find(x => x.id === id); return r && r.slice && isFinite(r.slice.from) ? +r.slice.from : 0; },
+  // where a slice's time 0 is in the time of its dump (ps); null: a whole run, the dump of now (sva runs.rs origin)
+  runOrigin(id) { const r = id && (this.runsL || []).find(x => x.id === id); return r && r.slice && isFinite(r.slice.from) ? +r.slice.from : null; },
   // the runs' part of the view, kept over a dump read again (⟳, a run shown): the panel, the window, the run compared and
   // how, A (a read again of the dump: now), the snapshot, the list
   runsOf() {
     const to = this.runsTo !== undefined ? this.runsTo : 0;
-    if (!this.runsP && this.runCur == null && !this.runsWin && !this.runsA() && !to) return null;
+    // a compare with a file of the host's Compare… (no run): its name, and its path when the host gave one (compared again)
+    const res = this.cmp && this.runCur == null ? this.cmp.result : null, file = res ? { name: this.cmp.name || res.name || 'B',
+      path: res.src && typeof res.src.path === 'string' ? res.src.path : null } : null;
+    if (!this.runsP && this.runCur == null && !this.runsWin && !this.runsA() && !to && !file) return null;
     return { open: !!this.runsP, win: this.runsWin, cur: this.runCur, show: this.cmp ? this.cmpRun : null, shown: to, was: this.runsA(),
-      to: this.t0 + this.span, focus: !!this.runsP && this.runsP.el.contains(document.activeElement),
+      to: this.t0 + this.span, focus: !!this.runsP && this.runsP.el.contains(document.activeElement), file,
+      deltas: this.runsP ? [...this.runsP.deltas] : null,   // Δ all's numbers on the rows (still of the window and A they say)
       snap: this.runsSnap || null, list: this.runsL || null, now: this.runsNow || null, dir: this.runsDir, others: this.runsOthers };
   },
   async runsAgain(o) {
@@ -9098,13 +9143,24 @@ Object.assign(WaveView.prototype, {
     Object.assign(this, { runsWin: o.win || null, runsShown: o.shown || 0, runsSnap: o.snap, runsL: o.list, runsNow: o.now, runsDir: o.dir,
       runsOthers: o.others });
     if (o.open) this.runsPanel(true, o.focus);   // the keys where they were: the list, or the waves (]w ]w … walks on)
+    if (o.deltas && this.runsP) { this.runsP.deltas = new Map(o.deltas); this.runsP.render(); }
     // what openDump's toast adds (runsNote): A now again, or a run's rows and end
     if (!o.shown && o.was) { this.runsNote = `the dump of now again (${this.runName(o.was)} was shown)`; if (this.runsP) this.runsP.status(this.runsNote); }
     else if (o.shown) this.runsSaid(o);
     const cur = o.cur === this.runsA() ? null : o.cur;   // B made A: compared no more
     if (cur != null) await this.runCompare(cur, true, o.show);   // compared with the new A, over the new waves
     else if (o.cur != null && this.runsP) this.runsP.status(`${this.runName(o.cur)} is A now: no B (click a run to compare)`);
+    if (o.file && o.shown !== o.was) await this.runsFileAgain(o.file, o.show);
     return this;
+  },
+  // A moved while a file of Compare… was compared: that file with the new A (the host has its path), else said that it went
+  async runsFileAgain(f, show) {
+    const h = this.runsHost(), say = s => { this.toast(s); if (this.runsP) this.runsP.status(s); };
+    if (!f.path || !h || !h.compareFile) { say(`the compare with ${f.name} dropped: A moved (Compare… again)`); return; }
+    let m; try { m = await h.compareFile(f.path, this.runsSignals(), this.M.t0, this.M.t1, this.runsA()); } catch (e) { m = { error: e.message }; }
+    if (m.error || !m.result) { say(`the compare with ${f.name} dropped: ${m.error || 'no answer'}`); return; }
+    this.compareResult(m.result);
+    if (show && show !== 'a' && !this.cmpCant(show)) await this.compareView(show, true);
   },
   // a run shown: its name, the rows of the snapshot it has not got, where it ends against the window
   runsSaid(o) {
@@ -9120,7 +9176,9 @@ Object.assign(WaveView.prototype, {
 // what a compare of A with B says: equal, or how many differ and the first; the rows B has not; B's values not loaded and why
 function runSaid(na, nb, r, res, w, f, can) {
   const c = res.case, miss = (res.missing || []).length, over = c ? `over the case ${c.name} (B's at ${f(c.from)}` +
-    `${c.shorter != null ? `; over the shorter, ${f(c.shorter)}` : ''})` : `over ${f(w.from)} … ${f(w.to)}`;
+    `${c.shorter != null ? `; over the shorter, ${f(c.shorter)}` : ''})` : `over ${f(w.from)} … ${f(w.to)}` +
+    // a slice and a whole one (the dump, a whole run): B read at A's moment of the dump
+    (res.shift ? ` (B's ${f(w.from + res.shift)} … ${f(w.to + res.shift)}: a slice at its place)` : '');
   const head = r.differ ? `${na} ≠ ${nb}: ${r.differ} of ${r.compared} signals differ ${over}${r.first == null ? '' : `, the first at ${f(r.first)}`}` :
     `${na} = ${nb}: equal ${over} (${r.compared} signals)`;
   return head + (miss ? ` · ${miss} row${miss === 1 ? '' : 's'} B has not` : '') + ((res.notes || []).length ? ` · ${res.notes.join('; ')}` : '') +
@@ -9818,7 +9876,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.49',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.50',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,
@@ -9833,7 +9891,7 @@ G.WaveLens = { version: '0.49',   // the project's version: VERSION (make check 
     diffSpans, cmpKey, cmpFind, svTypes, svApply, fsmStats, svFingerprint, svMissing, svMissingNotes, svRemap, svLookupKey, jsonParse, jsonWhere,
     cycMarks, enumColor, analogValue, niceStep, cycMap, parseWave, paintTimeMarks,
     idleCuts, keepCuts, gapKeeps, gapLen, gapText, gapRefs, warpOf, warpV, warpT, warpFit, clipCuts, fmtFreq, gfmt, toFloat, fieldRow, bitRows, widthTag,
-    stripPfx, trimNum, parseHash, hashOf, hashGo, cursorDiff, sliceRow, sliceOf, keymapOf, settings,
+    stripPfx, trimNum, parseHash, hashOf, hashGo, cursorDiff, sliceRow, sliceOf, keymapOf, settings, PIECE_KEYS,
     peek: v => ({ get lay() { return v.lay; }, get oy() { return v.oy; }, get vis() { return v.vis; }, get collapsed() { return v.collapsed; },
       get bmGeo() { return v.bmGeo; }, get rowEls() { return v.rowEls; }, get namesEl() { return v.namesEl; } }) } };
 G.WaveView = WaveView; G.WaveSVG = WaveSVG;

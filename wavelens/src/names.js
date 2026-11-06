@@ -296,6 +296,7 @@ class Notes {
         <input type="color" class="col" value="${hex(g.color)}" aria-label="group ${i + 1} colour" title="Colour of its signals">
         <button type="button" class="ic" data-bm="gdel" title="Delete the group (its signals stay where they are)">✕</button></li>`).join('') + '</ol>' : '') +
       `<datalist id="${v.sigList}">${sigs.map(r => `<option value="${esc(r.full)}">`).join('')}</datalist>`;
+    hexFields(el);   // each colour with its hex code (menu.js)
   }
   click(e) {
     const v = this.v;

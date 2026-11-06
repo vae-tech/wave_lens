@@ -39,8 +39,8 @@ and their FSTs. path: the FST's path (for sva diff, sva vcd). diff: DUMP (A) aga
 the signals that differ (--limit, default 20, 0 all), the signals of one side only; a run that does not cover the window
 is \"not in this window\". --json: the result as JSON (times in ps). --opt=value is taken as --opt value. keep writes the
 dump's time on the disk too (source_mtime); a line of the list says \"of a dump of HH:MM\" when it is not the time kept.
---against RUN: A is that run's FST, not DUMP (now, or none: DUMP), against the other runs of DUMP or the ones of --run (the
-run that is A, named in --run, is skipped and said); the window is in A's time. --run now: DUMP itself as a B (with
+--against RUN: A is that run's FST, not DUMP (now, or none: DUMP), against the other runs of DUMP and DUMP itself (now), or
+the ones of --run (the run that is A, named in --run, is skipped and said); the window is in A's time. --run now: DUMP itself as a B (with
 --against a run only); --run 1,3: a comma list. The JSON's \"against\": {id, name, file}, null for DUMP. --page: the
 compare of one run (one --run, or the one run of DUMP; more: usage) as sva diff --page writes it for a page (B's values at
 most --cut-bytes, 32 MiB), with run (B's number, 0 for now), a (A's number, null for DUMP) and with --case, case {name,
@@ -54,7 +54,8 @@ cases as keep finds them), B's time offset to the run's case, over the shorter o
 NAME is that run's.
 A slice: keep --from T --to T keeps that window of DUMP alone, its times from 0 (its first sample, --from, is 0), with
 slice {from, to} (ps of DUMP) in runs.json, its name by default \"DUMP FROM–TO\", no cases: slices of one dump (or of
-several) compared with each other from their first sample (diff --against SLICE --run SLICE).
+several) compared with each other from their first sample (diff --against SLICE --run SLICE); a slice and a whole one (the
+dump, a whole run) at the slice's place in the dump (B offset by its start: \"(B −20 ns)\", the JSON's offset).
 TIME is a number with a unit (100ns, 2.5us; ps without one).
 Exit status: 0 done (diff: every run equal over the window); 1 diff: a run differs or does not cover the window; 2 usage,
 a dump or run that does not read, a run that is not there, a window or signal list that is empty;
@@ -660,6 +661,15 @@ fn keep(o: &Opt) -> Result<u8, String> {
         }
     }
     sweep(&dir);
+    // a slice of a run kept (its FST, the waves a tab shows): of that run's dump — its name, file, size and time, its window
+    // in that dump's time
+    let parent = slice.and_then(|_| {
+        let me = std::fs::canonicalize(dump).ok()?;
+        load(&dir).ok()?["runs"].as_array()?.iter()
+            .find(|r| r["file"].as_str().and_then(|f| std::fs::canonicalize(dir.join(f)).ok()).as_ref() == Some(&me)).cloned()
+    });
+    let of = |k: &str, own: String| parent.as_ref().and_then(|p| p[k].as_str().map(String::from)).unwrap_or(own);
+    let base = of("dump", Path::new(dump).file_name().map_or(dump.clone(), |n| n.to_string_lossy().into_owned()));
     let is_fst = {
         let mut f = std::io::BufReader::new(std::fs::File::open(dump).map_err(|e| format!("{dump}: {e}"))?);
         fst_reader::is_fst_file(&mut f)
@@ -672,7 +682,7 @@ fn keep(o: &Opt) -> Result<u8, String> {
         v["next"] = (id + 1).into();
         v["version"] = VERSION.into();
         save(&dir, &v)?;
-        let stem = Path::new(dump).file_stem().map_or("dump".into(), |s| s.to_string_lossy().into_owned());
+        let stem = Path::new(&base).file_stem().map_or("dump".into(), |s| s.to_string_lossy().into_owned());
         let stem: String = stem.chars().map(|c| if c.is_alphanumeric() || "-_.".contains(c) { c } else { '_' }).take(STEM).collect();
         (id, format!("{id}-{stem}.fst"))
     };
@@ -696,19 +706,11 @@ fn keep(o: &Opt) -> Result<u8, String> {
     }
     let (start, end, signals) = fst_facts(&target)?;
     let source = std::fs::canonicalize(dump).map_or_else(|_| dump.clone(), |p| p.to_string_lossy().into_owned());
-    // a slice of a run kept (its FST, the waves a tab shows): of that run's dump, its window in that dump's time
-    let parent = slice.and_then(|_| {
-        let me = std::fs::canonicalize(dump).ok()?;
-        load(&dir).ok()?["runs"].as_array()?.iter()
-            .find(|r| r["file"].as_str().and_then(|f| std::fs::canonicalize(dir.join(f)).ok()).as_ref() == Some(&me)).cloned()
-    });
     let slice = slice.map(|(f, t)| {
         let d = parent.as_ref().and_then(|p| p["slice"]["from"].as_u64()).unwrap_or(0);
         (f + d, t + d)
     });
-    let of = |k: &str, own: String| parent.as_ref().and_then(|p| p[k].as_str().map(String::from)).unwrap_or(own);
     let source = of("source", source);
-    let base = of("dump", Path::new(dump).file_name().map_or(dump.clone(), |n| n.to_string_lossy().into_owned()));
     let name = o.name.clone().filter(|n| !n.is_empty()).unwrap_or_else(|| match slice {
         Some((f, t)) => format!("{base} {}–{}", crate::ns(f), crate::ns(t)),
         None => base.clone(),
@@ -716,8 +718,9 @@ fn keep(o: &Opt) -> Result<u8, String> {
     let run = json!({
         "id": id, "file": file, "name": name, "tags": o.tags.clone().unwrap_or_default(), "comment": o.comment.clone().unwrap_or_default(),
         "dump": base, "source": source,
-        "kept": now_utc(), "bytes": std::fs::metadata(&target).map_or(0, |m| m.len()), "source_bytes": meta.len(),
-        "source_mtime": meta.modified().map_or(Value::Null, |t| utc_of(t).into()),
+        "kept": now_utc(), "bytes": std::fs::metadata(&target).map_or(0, |m| m.len()),
+        "source_bytes": parent.as_ref().map_or(Value::from(meta.len()), |p| p["source_bytes"].clone()),
+        "source_mtime": parent.as_ref().map_or_else(|| meta.modified().map_or(Value::Null, |t| utc_of(t).into()), |p| p["source_mtime"].clone()),
         "start": start, "end": end, "signals": signals,
     });
     let mut run = run;
@@ -888,6 +891,13 @@ fn diff(o: &Opt) -> Result<u8, String> {
             let f = file_of(&dir, &r);
             (r, f)
         }).collect();
+        // A a run: the dump of now is one of the others too (the panel's row now, Δ all's); by --case only when it has cases
+        if a_id.is_some() {
+            let r = now_record(&base_name, o, dump, true)?;
+            if o.case.is_none() || r["cases"].is_array() {
+                runs.push((r, PathBuf::from(dump)));
+            }
+        }
         if runs.is_empty() && a_id.is_some() && others == 0 {
             return Err(format!("{}: no run of {dump} but {who}, the run compared against (--run now: the dump)", dir.display()));
         }
@@ -902,13 +912,7 @@ fn diff(o: &Opt) -> Result<u8, String> {
                 if a_id.is_none() {
                     return Err("--run now: the dump itself, compared against a run (--against RUN)".into());
                 }
-                let mut r = json!({"id": 0, "name": "now", "tags": [], "kept": null, "file": base_name, "dump": base_name});
-                if o.case.is_some() {
-                    if let Some(c) = cases_for(o.cases.as_deref(), dump, quiet)? {
-                        r["cases"] = c.into();
-                    }
-                }
-                runs.push((r, PathBuf::from(dump)));
+                runs.push((now_record(&base_name, o, dump, quiet)?, PathBuf::from(dump)));
                 continue;
             }
             let r = all[find(&v, k)?].clone();
@@ -988,7 +992,14 @@ fn diff(o: &Opt) -> Result<u8, String> {
         if let Some(n) = o.cut_bytes {
             a.cut_bytes = n;
         }
-        let (Some(name), Some((af, at))) = (&case, case_a) else { return Ok((a, None)) };
+        // a slice starts at 0 where its dump had its from: a slice and a whole one (the dump, a whole run) are read at the same
+        // moment of the dump (B's time is A's plus A's origin less B's); two slices from their first samples (both 0)
+        let Some(name) = &case else {
+            let (sa, sb) = (origin(against.as_ref()), origin(Some(r)));
+            a.offset = if sa.is_some() != sb.is_some() { sa.unwrap_or(0) - sb.unwrap_or(0) } else { 0 };
+            return Ok((a, None));
+        };
+        let Some((af, at)) = case_a else { return Ok((a, None)) };
         let Some(c) = case_in(&r["cases"], name) else {
             return Err(if r["cases"].is_array() { format!("no case {name} in this run (its cases: {})", case_names(&r["cases"])) }
                 else if r["id"] == 0 { format!("no cases of {dump} (cocotb's {MARKS} beside it, --cases FILE)") }
@@ -1043,7 +1054,8 @@ fn diff(o: &Opt) -> Result<u8, String> {
             Ok(d) => {
                 let sigs = differing(&d);
                 let n = sigs.len();
-                for k in ["from", "to", "signals_compared", "signals_differ", "compared", "differ", "first", "only_a", "only_b", "only_a_count", "only_b_count"] {
+                for k in ["from", "to", "offset", "signals_compared", "signals_differ", "compared", "differ", "first", "only_a", "only_b", "only_a_count",
+                          "only_b_count"] {
                     x[k] = d[k].clone();
                 }
                 x["equal"] = (n == 0).into();
@@ -1086,6 +1098,22 @@ fn diff(o: &Opt) -> Result<u8, String> {
     Ok(if errors > 0 { 2 } else if differ { 1 } else { 0 })
 }
 
+/// The dump of now as a B of `diff` (id 0, "now"), with its cases for --case.
+fn now_record(base_name: &str, o: &Opt, dump: &str, quiet: bool) -> Result<Value, String> {
+    let mut r = json!({"id": 0, "name": "now", "tags": [], "kept": null, "file": base_name, "dump": base_name});
+    if o.case.is_some() {
+        if let Some(c) = cases_for(o.cases.as_deref(), dump, quiet)? {
+            r["cases"] = c.into();
+        }
+    }
+    Ok(r)
+}
+
+/// Where a slice's time 0 is in its dump's time (ps); None: a whole run, the dump of now.
+fn origin(r: Option<&Value>) -> Option<i64> {
+    r.and_then(|r| r["slice"]["from"].as_u64()).map(|f| f as i64)
+}
+
 /// A run as a diff names it: #3 golden (DUMP itself as a B: now).
 fn run_label(r: &Value) -> String {
     match r["id"].as_u64() {
@@ -1114,6 +1142,9 @@ fn text(who: &str, a_word: &str, out: &[Value], others: usize, case: Option<&str
         let mut at = if one { String::new() } else { win(x).map_or(String::new(), |(f, u)| format!(" over {} … {}", t(f), t(u))) };
         if let Some(c) = x.get("case").filter(|c| c["offset"].as_i64().unwrap_or(0) != 0 || !c["note"].is_null()) {
             at += &format!(" (its case at {}{})", t(c["from"].as_i64().unwrap_or(0)), c["note"].as_str().map_or(String::new(), |n| format!("; {n}")));
+        } else if let Some(d) = x["offset"].as_i64().filter(|d| *d != 0) {
+            // a slice against the dump or a whole run: B read at A's moment of the dump
+            at += &format!(" (B {}{})", if d > 0 { "+" } else { "−" }, t(d.abs()));
         }
         let (oa, ob) = (x["only_a_count"].as_u64().unwrap_or(0), x["only_b_count"].as_u64().unwrap_or(0));
         let sides = [(oa, &only_a), (ob, &only_b)].iter().filter(|(n, _)| *n > 0)

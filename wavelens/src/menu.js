@@ -190,7 +190,7 @@ Object.assign(WaveView.prototype, {
       (this.fsms().length ? '<hr>' + b('fsms', 'State machines…') + (this.fsm ? b('fsmx', 'Clear the FSM layer') : '') : '') +
       (r ? '<hr>' + b('clear', 'Clear the range') : '') +
       (this.bms.length || this.umarks.length ? '<hr>' + b('clearmarks', 'Clear bookmarks and markers') : '');
-    this.root.append(el); this.menuEl = el;
+    this.root.append(el); this.menuEl = el; hexFields(el);   // each colour with its hex code
     const box = el.getBoundingClientRect();
     el.style.left = Math.max(4, Math.min(cx, innerWidth - box.width - 4)) + 'px'; el.style.top = Math.max(4, Math.min(cy, innerHeight - box.height - 4)) + 'px';
     const done = () => { this.closeMenu(); this.refocus(); };

@@ -135,7 +135,8 @@
   long run reads the blocks from there on, as fast as one at its start.</p>
 <p><b>Slices.</b> The right button over a range: <span class="ui">Slice ▸ Keep as a slice (Runs)</span> keeps that piece of the
   waves shown as a run of its own whose times start at 0 — its first sample is 0. Cut two bursts (two packets, two calls) and
-  compare them like two runs, A one and B the other: they line up on their first samples. <span class="ui">Save as FST…</span>
+  compare them like two runs, A one and B the other: they line up on their first samples (a slice against the whole dump
+  is read at its place in it). <span class="ui">Save as FST…</span>
   writes the piece as an FST file; in the shell <code>sva runs keep tb.vcd --from 4us --to 6us</code> and
   <code>sva fst tb.vcd --from 4us --to 6us --zero --out burst1.fst</code>.</p>
 
@@ -176,7 +177,7 @@ B: apb_b.vcd  0 ps … 205 ns, 58 signals
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.49 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.50 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>
