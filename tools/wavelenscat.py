@@ -54,6 +54,7 @@ def too_long() -> list:
 # member is a line indented by two spaces, as the sources are written (a method, a getter / setter, a key: value)
 PROTO_OPEN = re.compile(r'^(?:class WaveView \{|Object\.assign\(WaveView\.prototype, \{)\s*$')
 PROTO_KEY = re.compile(r'^  (static\s+)?(?:async\s+)?(?:(get|set)\s+(?=[\w$]+\s*\())?(?:\*\s*)?([A-Za-z_$][\w$]*)\s*(?:\(|:|,\s*$|$)')
+PROTO_DEF = re.compile(r"^Object\.defineProperty\(WaveView\.prototype, '([A-Za-z_$][\w$]*)'")
 
 
 def proto_keys(texts) -> list:
@@ -63,6 +64,10 @@ def proto_keys(texts) -> list:
     for rel, text in texts:
         inside = False
         for i, ln in enumerate(text.split('\n'), 1):
+            d = PROTO_DEF.match(ln)   # Object.defineProperty(WaveView.prototype, 'key', { get() … }): an accessor of its own
+            if d:
+                out.append((d.group(1), f'{rel}:{i}', 'get'))
+                continue
             if not inside:
                 inside = bool(PROTO_OPEN.match(ln))
                 continue

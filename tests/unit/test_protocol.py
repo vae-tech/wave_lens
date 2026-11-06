@@ -59,7 +59,8 @@ F.run(async () => {
     http: { url: 'http://127.0.0.1:1/hello?token=x', method: 'POST', body: '{}' },
   };
   const OPS = [['list', {}], ['keep', { name: 'golden', tags: ['base'], comment: 'before' }], ['set', { run: 1, name: 'gold' }],
-    ['diff', { signals: ['tb.s'], from: 0, to: 30000 }], ['compare', { run: 1, signals: ['tb.s', 'tb.cnt'], from: 0, to: 30000 }],
+    ['open', { run: 1 }], ['open', { run: 0 }], ['diff', { signals: ['tb.s'], from: 0, to: 30000, against: 0 }],
+    ['compare', { run: 1, signals: ['tb.s', 'tb.cnt'], from: 0, to: 30000 }], ['compare', { run: 1, against: 0, signals: ['tb.s'], from: 0, to: 30000 }],
     ['cancel', {}], ['rm', { run: 1 }]];
   const walked = [];
   for (const type of Object.keys(P.PAGE)) {
@@ -134,7 +135,7 @@ class Walk(unittest.TestCase):
             o = node(d, PROTO, p)
         walked = o['walked']
         runs = next(w for w in walked if 'walkedOps' in w)
-        self.assertEqual(sorted(runs['ops']), sorted(runs['walkedOps']), 'every operation of runs walked')
+        self.assertEqual(sorted(runs['ops']), sorted(set(runs['walkedOps'])), 'every operation of runs walked')
         bad = [w for w in walked if 'walkedOps' not in w and not w.get('ok')]
         self.assertFalse(bad, 'answered as the table says (an answer where it names one, none where not)')
         self.assertEqual({w['type'] for w in walked}, set(table()['page']), 'every type of the table walked')

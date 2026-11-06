@@ -214,7 +214,12 @@ between the page and the extension are one table, `vscode/protocol.js` (each typ
 gets; for `runs`, per operation): the extension answers a message none of it with an error, `test_protocol` walks every
 type of it through the extension (and a large dump's `source` / `codes`, an FST's VCD text, over the real CLI) and
 checks that `extension.js` and `media/host.js` name its types and no other; the smoke's fake host (section `vscode`)
-answers by it and fails on a message or an answer it does not name. A new message: its row in the table first.
+answers by it and fails on a message or an answer it does not name. A new message: its row in the table first. A tab
+shows one file at a time, the dump or a run kept (`runs open`: `Tab.shown`, the run's FST served by `srcOf` as the dump is,
+so `bytes` and `codes` read the file shown); `source` (⟳, the dump changed) serves the dump of now and clears it. On the
+page the run shown is `runsShown` (A), the run compared is the compare's own (`cmp.result.run`, the getter `runCur`: B);
+a step of A (`runsShow`, `openDump(keep)`) takes the view's time as it is and its rows from a snapshot taken on now and on
+each run that had every row of it (`runsKeep`), so a run without a row does not lose it for the next one.
 `wavelenscat.py --check` also fails on
 a key of `WaveView.prototype` defined twice (the class in `view.js`, `Object.assign(WaveView.prototype, …)` elsewhere: the
 later would win without a word), and on a name read that nothing declares and no browser or node has (`tools/jsnames.py`:

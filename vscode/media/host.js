@@ -9,7 +9,8 @@
    - Compare… -> an open dialog on the host and sva diff there (the second dump, VCD or FST, never sent here): its result
      over the tab's waves (compareResult);
    - the runs kept (WAVELENS_RUNS, the Runs panel): sva runs on the host (.wavelens-runs beside the dump), a run compared
-     over a window as Compare… compares;
+     with A (the dump, or a run shown) over a window as Compare… compares; a run's waves shown in the tab (A: its FST read on
+     the host as the dump is; ⟳ reads the dump of now);
    - navigator.clipboard.writeText -> the client's clipboard through VS Code;
    - the live link's EventSource / fetch / sendBeacon to 127.0.0.1 -> the host's 127.0.0.1 (the agent's wavemcp.py);
    - the theme: VS Code's light / dark, its own colours (wavelens.theme: vscode) or one of the viewer's;
@@ -110,6 +111,9 @@
     rm: run => call('runs', { op: 'rm', run }),
     diff: b => call('runs', Object.assign({}, b, { op: 'diff' })),
     compare: b => call('runs', Object.assign({}, b, { op: 'compare', run: b.id, id: undefined })),
+    // A: a run's waves (0: the dump of now) as the dump's are served -> {file, handle}: ⟳ (the handle) reads the dump of now
+    open: async run => { const m = await call('runs', { op: 'open', run });
+      return m.error ? m : { file: await fileOf(m), handle, name: m.name }; },
   };
 
   /* ---- clipboard ---- */
@@ -207,6 +211,11 @@
     const s = await call('source', {});
     if (s.error) throw new Error(s.error);
     if (s.store && typeof s.store === 'object') { data.clear(); for (const [k, v] of Object.entries(s.store)) data.set(k, String(v)); }
+    return fileOf(s);
+  };
+  // the File of what the extension serves ({src, name, lazy}: the dump of now, or a run shown): fetched by its URI, else its bytes
+  // through the extension; a large one lazy (its header, the signals read as they are needed: codes of the file served)
+  const fileOf = async s => {
     let blob = null, why = '';
     try { const r = await nativeFetch(s.src, { cache: 'no-store' }); if (r.ok) blob = await r.blob(); else why = `${r.status} ${r.statusText}`.trim(); }
     catch (e) { why = e.message; }

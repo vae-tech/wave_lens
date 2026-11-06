@@ -1672,7 +1672,9 @@ fn runs_diff_holds_the_first_difference_only() {
 fn runs_two_keeps_at_once() {
     let d = runs_dir("lock");
     let dump = put(&d, "d.vcd", &counter(None, false));
-    let ks: Vec<_> = (0..4).map(|_| Command::new(env!("CARGO_BIN_EXE_sva")).args(["runs", "keep", &dump]).spawn().unwrap()).collect();
+    // their output not the test's (T-05 of the review 2026-11-06): --json, to nowhere
+    let ks: Vec<_> = (0..4).map(|_| Command::new(env!("CARGO_BIN_EXE_sva")).args(["runs", "keep", &dump, "--json"])
+        .stdout(std::process::Stdio::null()).spawn().unwrap()).collect();
     for mut k in ks {
         assert!(k.wait().unwrap().success());
     }
@@ -1907,4 +1909,170 @@ fn runs_go_where_the_workspace_says() {
     assert!(!d.join("sim/.wavelens-runs").exists());
     assert!(out(&sva(&["runs", "list", &dump])).contains("1 run"), "list finds it the same way");
     assert!(out(&sva(&["runs", "path", "1", &dump])).contains("kept/runs/1-d.fst"));
+}
+
+// ------------------------------------------------------------------------------------------------ the run pick (review 2026-11-06)
+
+/// Three runs of the counter: #1 golden, #2 broken at 25 ns, #3 golden again; the dump of now golden -> (dir, dump).
+fn three_runs(name: &str) -> (PathBuf, String) {
+    let d = runs_dir(name);
+    let dump = put(&d, "d.vcd", &counter(None, false));
+    assert!(sva(&["runs", "keep", &dump, "--name", "golden", "--json"]).status.success());
+    put(&d, "d.vcd", &counter(Some(25), false));
+    assert!(sva(&["runs", "keep", &dump, "--name", "broken", "--json"]).status.success());
+    put(&d, "d.vcd", &counter(None, false));
+    assert!(sva(&["runs", "keep", &dump, "--name", "again", "--json"]).status.success());
+    (d, dump)
+}
+
+fn json_of(o: &Output) -> serde_json::Value {
+    serde_json::from_str(&out(o)).unwrap_or_else(|e| panic!("{e}: {}{}", out(o), err(o)))
+}
+
+/// A chosen: `--against RUN` compares that run's FST with the other runs of the dump (or the ones of --run; the run that
+/// is A skipped and said), `--run now` the dump itself against it.
+#[test]
+fn runs_diff_against_a_run() {
+    let (_d, dump) = three_runs("against");
+    let o = sva(&["runs", "diff", &dump, "--against", "1", "--json"]);
+    assert_eq!(o.status.code(), Some(1), "{}", err(&o));
+    let v = json_of(&o);
+    assert_eq!(v["against"], serde_json::json!({"id": 1, "name": "golden", "file": "1-d.fst"}), "{v}");
+    let rows: Vec<(u64, bool)> = v["runs"].as_array().unwrap().iter().map(|x| (x["id"].as_u64().unwrap(), x["equal"].as_bool().unwrap())).collect();
+    assert_eq!(rows, [(3, true), (2, false)], "A not compared with itself: {v}");
+    let text = out(&sva(&["runs", "diff", &dump, "--against", "golden"]));
+    assert!(text.starts_with("#1 golden against 2 runs over 0 ps … 40 ns:"), "{text}");
+    assert!(text.contains("#2 broken: 1 of 3 signals differ, first at 25 ns (tb.ok)"), "{text}");
+    // the dump of now: A by default, and "now"
+    assert_eq!(sva(&["runs", "diff", &dump, "--json"]).status.code(), Some(1));
+    assert!(json_of(&sva(&["runs", "diff", &dump, "--against", "now", "--json"]))["against"].is_null());
+    let one = json_of(&sva(&["runs", "diff", &dump, "--against", "1", "--run", "3", "--json"]));
+    assert_eq!(one["runs"].as_array().unwrap().len(), 1, "{one}");
+    // A named in --run too: skipped, said
+    let o = sva(&["runs", "diff", &dump, "--against", "1", "--run", "1"]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(err(&o).contains("the run compared against"), "{}", err(&o));
+    let o = sva(&["runs", "diff", &dump, "--against", "1", "--run", "1,3"]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    assert!(err(&o).contains("#1 golden: the run compared against, skipped") && out(&o).contains("against 1 run "), "{}{}", out(&o), err(&o));
+    assert_eq!(json_of(&sva(&["runs", "diff", &dump, "--against", "1", "--run", "1", "--run", "2", "--json"]))["notes"][0],
+               "#1 golden: the run compared against, skipped");
+    let o = sva(&["runs", "diff", &dump, "--against", "9"]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(err(&o).contains("no run 9"), "{}", err(&o));
+    // the dump of now as a B: against a run only
+    let o = sva(&["runs", "diff", &dump, "--run", "now"]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(err(&o).contains("--against RUN"), "{}", err(&o));
+    let now = json_of(&sva(&["runs", "diff", &dump, "--against", "broken", "--run", "now", "--json"]));
+    let r = &now["runs"][0];
+    assert_eq!((r["id"].as_u64(), r["name"].as_str(), r["first"]["t"].as_u64()), (Some(0), Some("now"), Some(25000)), "{now}");
+    assert!(out(&sva(&["runs", "diff", &dump, "--against", "2", "--run", "now"])).contains("  now: 1 of 3 signals differ"));
+}
+
+/// A's case of --case NAME is the A run's (not the dump's marks); B = now takes the dump's.
+#[test]
+fn runs_diff_against_a_run_by_test_case() {
+    let d = runs_dir("against-case");
+    let (v0, m0) = two_cases(0, 0);
+    let dump = put(&d, "d.vcd", &v0);
+    put(&d, "wavelens.marks.json", &m0);
+    assert!(sva(&["runs", "keep", &dump, "--name", "first", "--json"]).status.success());
+    // now: test_b 10 ns later and 5 ns longer, kept as #2
+    let (v1, m1) = two_cases(10, 5);
+    put(&d, "d.vcd", &v1);
+    put(&d, "wavelens.marks.json", &m1);
+    assert!(sva(&["runs", "keep", &dump, "--name", "second", "--json"]).status.success());
+    let o = sva(&["runs", "diff", &dump, "--against", "1", "--case", "test_b", "--json"]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    let v = json_of(&o);
+    assert_eq!(v["case"], serde_json::json!({"name": "test_b", "from": 20000, "to": 40000}), "#1's case, not the dump's: {v}");
+    let r = &v["runs"][0];
+    assert_eq!((r["id"].as_u64(), r["case"]["offset"].as_i64(), r["equal"].as_bool()), (Some(2), Some(10000), Some(true)), "{r}");
+    assert!(r["case"]["note"].as_str().unwrap().contains("5 ns longer") && r["case"].get("shorter").is_none(), "{r}");
+    let text = out(&sva(&["runs", "diff", &dump, "--against", "1", "--case", "test_b"]));
+    assert!(text.starts_with("#1 first against 1 run over the case test_b (20 ns … 40 ns of #1):"), "{text}");
+    // B = now over the dump's own case (its marks)
+    let n = json_of(&sva(&["runs", "diff", &dump, "--against", "1", "--run", "now", "--case", "test_b", "--json"]));
+    assert_eq!((n["runs"][0]["case"]["from"].as_u64(), n["runs"][0]["equal"].as_bool()), (Some(30000), Some(true)), "{n}");
+    // the page's compare of one run by its case: the spelling the page reads (case.shorter: the length compared)
+    let p = sva(&["runs", "diff", &dump, "--against", "1", "--run", "2", "--case", "test_b", "--page"]);
+    assert_eq!(p.status.code(), Some(0), "{}", err(&p));
+    let p = json_of(&p);
+    assert_eq!(p["case"], serde_json::json!({"name": "test_b", "from": 30000, "to": 55000, "offset": 10000, "shorter": 20000}), "{p}");
+    assert_eq!((p["run"].as_u64(), p["a"].as_u64(), p["from"].as_u64(), p["to"].as_u64()), (Some(2), Some(1), Some(20000), Some(40000)), "{p}");
+    // A kept without cases: said as a run without them is
+    assert!(sva(&["runs", "set", "1", &dump, "--cases", "none"]).status.success());
+    let o = sva(&["runs", "diff", &dump, "--against", "1", "--case", "test_b"]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(err(&o).contains("#1 first: kept without cases"), "{}", err(&o));
+}
+
+/// `--page`: one run's compare in the page's shape, as `sva diff --page` of the two files writes it, with the run and A.
+#[test]
+fn runs_diff_page_of_one_run() {
+    let (d, dump) = three_runs("page-one");
+    let o = sva(&["runs", "diff", &dump, "--run", "2", "--page", "--quiet"]);
+    assert_eq!(o.status.code(), Some(1), "{}", err(&o));
+    let v = json_of(&o);
+    assert!(v["vcd"].as_str().is_some_and(|t| t.contains("$var")), "B's values: {v}");
+    assert_eq!((v["run"].as_u64(), v["a"].is_null()), (Some(2), true), "{v}");
+    assert_eq!(v["signals"]["tb.ok"]["spans"], serde_json::json!([[25000, 40000]]), "{v}");
+    // the same as sva diff --page of the dump and the run's FST (what the extension asked before)
+    let fst = d.join(".wavelens-runs").join("2-d.fst").to_string_lossy().into_owned();
+    let same = json_of(&sva(&["diff", &dump, &fst, "--page", "--from", "10ns", "--to", "35ns"]));
+    let mut page = json_of(&sva(&["runs", "diff", &dump, "--run", "2", "--page", "--from", "10ns", "--to", "35ns"]));
+    for k in ["run", "a"] {
+        page.as_object_mut().unwrap().remove(k);
+    }
+    assert_eq!(page, same);
+    let a = json_of(&sva(&["runs", "diff", &dump, "--against", "1", "--run", "2", "--page"]));
+    assert_eq!((a["a"].as_u64(), a["run"].as_u64(), a["first"].as_u64()), (Some(1), Some(2), Some(25000)), "{a}");
+    // --cut-bytes passed on: the bands stay, why the values are not there
+    let small = json_of(&sva(&["runs", "diff", &dump, "--run", "2", "--page", "--cut-bytes", "10"]));
+    assert!(small["vcd"].is_null() && small["cutError"].is_string(), "{small}");
+    // more than one run: a usage error
+    let o = sva(&["runs", "diff", &dump, "--page"]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(err(&o).contains("--page: the compare of one run (3 here"), "{}", err(&o));
+    assert_eq!(sva(&["runs", "diff", &dump, "--run", "1,2", "--page"]).status.code(), Some(2));
+}
+
+/// keep writes the dump's time on the disk (source_mtime); the list says it when it is not the time kept.
+#[test]
+fn runs_keep_writes_the_dump_time() {
+    let d = runs_dir("mtime");
+    let dump = put(&d, "d.vcd", &counter(None, false));
+    let new_year = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_577_836_800);   // 2020-01-01T00:00:00Z
+    std::fs::File::options().write(true).open(&dump).unwrap().set_modified(new_year).unwrap();
+    let k = json_of(&sva(&["runs", "keep", &dump, "--json"]));
+    assert_eq!(k["source_mtime"], "2020-01-01T00:00:00Z", "{k}");
+    assert_eq!(runs_json(&d.join(".wavelens-runs"))["runs"][0]["source_mtime"], "2020-01-01T00:00:00Z");
+    assert!(out(&sva(&["runs", "list", &dump])).contains("(of a dump of 2020-01-01 00:00)"));
+    assert_eq!(json_of(&sva(&["runs", "list", &dump, "--json"]))["runs"][0]["source_mtime"], "2020-01-01T00:00:00Z");
+    // a dump kept as it is written: no word of it
+    put(&d, "d.vcd", &counter(None, false));
+    let k = json_of(&sva(&["runs", "keep", &dump, "--json"]));
+    assert!(k["source_mtime"].as_str().is_some_and(|t| t.starts_with("20") && t.ends_with('Z')), "{k}");
+    let l = out(&sva(&["runs", "list", &dump]));
+    assert_eq!(l.matches("of a dump of").count(), 1, "{l}");
+}
+
+/// T-04: the text of runs whose windows differ: the window on each line, the note of a case of another length.
+#[test]
+fn runs_diff_text_of_windows_apart() {
+    let d = runs_dir("windows");
+    let (v0, m0) = two_cases(0, 0);
+    let dump = put(&d, "d.vcd", &v0);
+    put(&d, "wavelens.marks.json", &m0);
+    assert!(sva(&["runs", "keep", &dump, "--name", "whole", "--json"]).status.success());
+    let short = put(&d, "short.json", r#"[{"name": "test_b", "from": 20000, "to": 35000}]"#);
+    assert!(sva(&["runs", "keep", &dump, "--name", "short", "--cases", &short, "--json"]).status.success());
+    let o = sva(&["runs", "diff", &dump, "--case", "test_b"]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    let text = out(&o);
+    assert!(text.starts_with(&format!("{dump} against 2 runs over the case test_b:\n")), "no window in the header: {text}");
+    assert!(text.contains("  #2 short: equal over 20 ns … 35 ns (its case at 20 ns; the run's case is 5 ns shorter: compared over the shorter) (2 signals)"),
+            "{text}");
+    assert!(text.contains("  #1 whole: equal over 20 ns … 40 ns (2 signals)"), "{text}");
 }

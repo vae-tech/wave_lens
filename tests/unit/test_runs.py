@@ -92,6 +92,12 @@ class Cli(unittest.TestCase):
             self.assertEqual((code, [x['signals_compared'] for x in json.loads(out)['runs']]), (0, [1]), 'the signals of stdin, one run')
             code, out, _ = sva('runs', 'diff', p)
             self.assertIn('#2 broken: 1 of 3 signals differ, first at 25 ns (tb.ok)', out)
+            code, out, err = sva('runs', 'diff', p, '--against', 'golden', '--run', 'broken,now', '--json')
+            v = json.loads(out)
+            self.assertEqual((code, v['against']['id'], [(x['id'], x['equal']) for x in v['runs']]), (1, 1, [(2, False), (0, True)]), err)
+            code, out, err = sva('runs', 'diff', p, '--run', 'broken', '--page', '--quiet')
+            v = json.loads(out)
+            self.assertEqual((code, v['run'], v['a'], v['signals']['tb.ok']['spans']), (1, 2, None, [[25000, 40000]]), err)
 
 
 @H.needs(SVA, 'the sva CLI ($WAVELENS_SVA)')
@@ -137,6 +143,25 @@ class Mcp(unittest.TestCase):
             self.assertEqual((r['case']['name'], x['equal'], x['case']['offset'], x['case']['from']), ('t_b', True, -10, 20), r)
             self.assertFalse(call(action='diff', dump=p, **{'from': b, 'to': b + 20})['runs'][0]['equal'], 'the same window without the case differs')
 
+    def test_wave_runs_against_a_run(self):
+        """A chosen (the run pick, review 2026-11-06): against a run's name compares that run with the others; run "now" adds the dump."""
+        os.environ.setdefault('WAVELENS_SVA', SVA)
+        from tools import wavemcp as W
+        call = lambda **a: (lambda r: json.loads(r[0]) if not r[1] else self.fail(r[0]))(W.call('wave_runs', a))
+        with H.tmp() as d:
+            p = H.vcd(d, body(), HEAD, name='waves.vcd')
+            call(action='keep', dump=p, name='golden')
+            with open(p, 'w', encoding='utf-8') as f:
+                f.write(HEAD + body(25))
+            call(action='keep', dump=p, name='broken')
+            r = call(action='diff', dump=p, against='golden')
+            self.assertEqual((r['against']['id'], r['against']['name'], r['against']['file']), (1, 'golden', '1-waves.fst'), r)
+            self.assertEqual([(x['name'], x['equal']) for x in r['runs']], [('broken', False)], 'A not compared with itself')
+            self.assertEqual((r['runs'][0]['first']['t'], r['runs'][0]['first']['signal']), (25, 'tb.ok'), 'times in ns')
+            n = call(action='diff', dump=p, against=1, run='now')
+            self.assertEqual([(x['id'], x['name'], x['equal']) for x in n['runs']], [(0, 'now', False)], n)
+            self.assertIsNone(call(action='diff', dump=p)['against'], 'no against: the dump')
+
 
 EXT = r'''
 const [F, ext, dir, dump, mode] = process.argv.slice(1).map((x, i) => (i ? x : require(x)));
@@ -163,6 +188,30 @@ process.on('uncaughtException', e => { console.error('UNCAUGHT ' + e.message); p
     out.none = await ask({ op: 'compare', run: 1, case: 't_z', signals: ['tb.cnt'], from: 30000, to: 50000 });
     console.log('RESULT' + JSON.stringify(out)); process.exit(0);
   }
+  if (mode === 'pick') {   // the run pick: A a run (its waves served as the dump's), B compared with it, A back to now
+    const text = src => require('fs').readFileSync(src.replace(/^file:\/\//, ''), 'utf8'), ask1 = m => { const id = ++n; return A.send(Object.assign({ id }, m))
+      .then(() => A.reply(id)); };
+    out.keep = await ask({ op: 'keep', name: 'golden' });
+    require('fs').writeFileSync(dump, process.env.BROKEN);
+    out.keep2 = await ask({ op: 'keep', name: 'broken' });
+    require('fs').writeFileSync(dump, process.env.GOOD);
+    out.list = await ask({ op: 'list' });
+    out.open = await ask({ op: 'open', run: 2 });
+    out.openText = out.open.src ? text(out.open.src) : '';
+    out.bytes = await ask1({ type: 'bytes' }); out.bytes = out.bytes.data ? Buffer.from(out.bytes.data).toString('utf8') : out.bytes;
+    out.listShown = (await ask({ op: 'list' })).shown;
+    out.compare = await ask({ op: 'compare', run: 1, signals: ['tb.ok', 'tb.cnt'], from: 0, to: 40000 });
+    out.against = await ask({ op: 'compare', run: 1, against: 2, signals: ['tb.ok', 'tb.cnt'], from: 0, to: 40000 });
+    out.nowB = await ask({ op: 'compare', run: 0, signals: ['tb.ok', 'tb.cnt'], from: 0, to: 40000 });
+    out.same = await ask({ op: 'compare', run: 2, signals: ['tb.ok'], from: 0, to: 40000 });
+    out.diff = await ask({ op: 'diff', signals: ['tb.ok', 'tb.cnt'], from: 0, to: 40000 });
+    out.source = await ask1({ type: 'source' });
+    out.sourceText = out.source.src ? text(out.source.src) : '';
+    out.listAfter = (await ask({ op: 'list' })).shown;
+    out.back = await ask({ op: 'open', run: 2 }); out.zero = await ask({ op: 'open', run: 0 }); out.zeroShown = (await ask({ op: 'list' })).shown;
+    out.none = await ask({ op: 'open', run: 9 });
+    console.log('RESULT' + JSON.stringify(out)); process.exit(0);
+  }
   out.empty = await ask({ op: 'list' });
   out.keep = await ask({ op: 'keep', name: 'golden', tags: ['base'], comment: 'before' });
   require('fs').writeFileSync(dump, process.env.BROKEN);
@@ -180,16 +229,56 @@ process.on('uncaughtException', e => { console.error('UNCAUGHT ' + e.message); p
 '''
 
 
+def result(r):
+    """The RESULT line of the EXT script, or why there is none: its exit, stderr and the end of its stdout (T-03 of the run pick)."""
+    line = next((x for x in r.stdout.splitlines() if x.startswith('RESULT')), None)
+    if line is None:
+        raise AssertionError(f'no RESULT (exit {r.returncode})\nstderr: {r.stderr[-2000:]}\nstdout: {r.stdout[-2000:]}')
+    return json.loads(line[6:])
+
+
 @H.needs(SVA, 'the sva CLI ($WAVELENS_SVA)')
 @H.needs(NODE, 'node (or VS Code\'s, ~/.vscode-server/bin/*/node)')
 class VsCode(unittest.TestCase):
+    def test_a_run_shown_and_compared_with_another(self):
+        """The run pick (review 2026-11-06): open serves a run's FST as the tab's waves (A; bytes and the list say it), compare
+        takes A from against or the run shown, B from run (0: the dump), one sva runs diff --page; source brings the dump back."""
+        with H.tmp() as d:
+            p = H.vcd(d, body(), HEAD, name='waves.vcd')
+            env = dict(os.environ, WAVELENS_SVA=SVA, GOOD=HEAD + body(), BROKEN=HEAD + body(25))
+            r = subprocess.run([NODE, '-e', EXT, FAKE, os.path.join(H.ROOT, 'vscode', 'extension.js'), d, p, 'pick'], capture_output=True, text=True,
+                               timeout=90, env=env)
+            o = result(r)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            now = o['list']['now']
+            self.assertEqual((now['name'], now['bytes'], o['list']['shown']), ('waves.vcd', os.path.getsize(p), 0), o['list'])
+            self.assertGreater(now['mtime'], 0)
+            self.assertEqual((o['open']['name'], o['open']['lazy']), ('#2 broken', False), o['open'])
+            self.assertIn('$var', o['openText'])
+            self.assertEqual(o['bytes'], o['openText'], 'bytes: the file shown')
+            self.assertEqual(o['listShown'], 2)
+            for k in ('compare', 'against'):
+                c = o[k].get('result') or {}
+                self.assertEqual((c.get('a'), c.get('run'), c.get('differ')), (2, 1, 1), (k, o[k]))
+                self.assertEqual(c['signals']['tb.ok']['spans'], [[25000, 40000]], k)
+            c = o['nowB'].get('result') or {}
+            self.assertEqual((c.get('a'), c.get('run'), c.get('differ')), (2, 0, 1), o['nowB'])
+            self.assertIn('same', o['same'].get('error', ''), 'A and B the same run: refused')
+            by = {x['id']: x for x in o['diff']['runs']}
+            self.assertEqual(by[1]['signals_differ'], 1, o['diff'])
+            self.assertEqual((o['diff'].get('against') or {}).get('id'), 2, 'Δ all against the run shown')
+            self.assertNotEqual(o['sourceText'], o['openText'], 'source: the dump of now again, not the run (ok falls at 25 ns in it)')
+            self.assertEqual((o['listAfter'], o['zeroShown']), (0, 0))
+            self.assertEqual(o['zero']['name'], 'waves.vcd')
+            self.assertIn('no run #9', o['none']['error'])
+
     def test_the_runs_panel_host(self):
         with H.tmp() as d:
             p = H.vcd(d, body(), HEAD, name='waves.vcd')
             env = dict(os.environ, WAVELENS_SVA=SVA, GOOD=HEAD + body(), BROKEN=HEAD + body(25))
             r = subprocess.run([NODE, '-e', EXT, FAKE, os.path.join(H.ROOT, 'vscode', 'extension.js'), d, p], capture_output=True, text=True, timeout=60, env=env)
             self.assertEqual(r.returncode, 0, r.stderr)
-            o = json.loads(next(x for x in r.stdout.splitlines() if x.startswith('RESULT'))[6:])
+            o = result(r)
             runs = os.path.join(d, '.wavelens-runs')
             self.assertEqual((o['empty']['dir'], o['empty']['runs']), (runs, []), 'none yet: an empty list, beside the dump')
             self.assertEqual((o['keep']['run']['id'], o['keep']['run']['tags']), (1, ['base']))
@@ -211,8 +300,8 @@ class VsCode(unittest.TestCase):
             p = H.vcd(d, early, HEAD, name='waves.vcd')
             env = dict(os.environ, WAVELENS_SVA=SVA, LATER=HEAD + later)
             r = subprocess.run([NODE, '-e', EXT, FAKE, os.path.join(H.ROOT, 'vscode', 'extension.js'), d, p, 'cases'], capture_output=True, text=True, timeout=60, env=env)
+            o = result(r)
             self.assertEqual(r.returncode, 0, r.stderr)
-            o = json.loads(next(x for x in r.stdout.splitlines() if x.startswith('RESULT'))[6:])
             self.assertEqual([c['name'] for c in o['keep']['run']['cases']], ['t_a', 't_b'], 'the page\'s span labels as the cases\' names')
             c = o['compare']['result']
             self.assertEqual((c['differ'], c['case']['offset'], c['case']['from']), (0, -10000, 20000), o['compare'])

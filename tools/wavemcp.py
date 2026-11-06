@@ -1418,7 +1418,8 @@ RUN_ACTIONS = ('list', 'keep', 'set', 'rm', 'diff')
 def t_runs(a):
     """sva runs: the runs kept of a dump (.wavelens-runs beside it, as the VS Code Runs panel keeps them) -> list: dir, runs
     (newest first); keep: the run kept; set: the run changed; rm: removed; diff: the dump against each run (or "run") over a
-    window, times in ns; "case" NAME: each run over its test case of that name against the dump's (cocotb's marks)."""
+    window, times in ns; "case" NAME: each run over its test case of that name against the dump's (cocotb's marks);
+    "against" RUN: that run is A instead of the dump (run "now": the dump as a B), the answer's "against" names it."""
     act = a.get('action') or 'list'
     if act not in RUN_ACTIONS:
         raise WaveError(f'"action": one of {", ".join(RUN_ACTIONS)}')
@@ -1462,6 +1463,8 @@ def t_runs(a):
     if act == 'diff' and a.get('case'):
         cmd += ['--case', str(a['case'])]
     if act == 'diff':
+        if a.get('against') not in (None, ''):
+            cmd += ['--against', str(a['against'])]
         for x in runs:
             cmd += ['--run', str(x)]
         for k, flag in (('from', '--from'), ('to', '--to')):
@@ -1505,6 +1508,8 @@ def t_runs(a):
             x['case'] = case(x['case'])
     if out.get('case'):
         out['case'] = case(out['case'])
+    if out.get('against'):   # A, a run: {id, name, file} (null: the dump)
+        out['against'] = run(out['against'])
     out.update(unit='ns', **{k: t(out.get(k)) for k in ('from', 'to')})
     out.pop('wavelens', None)
     out.pop('version', None)
@@ -1797,10 +1802,12 @@ TOOLS = [
          'Test cases: keep stores a run\'s cases (cocotb\'s wavelens.marks.json beside the dump, or cases: a file, "none", or '
          '[{name, from, to}]; set changes them); diff case: NAME compares each run\'s case NAME with the dump\'s (from/to: the '
          'dump\'s window of it, else its cases), wherever it is in the run (case.offset), over the shorter. '
+         'diff against: a run (number or name) compared with the others instead of the dump (run: "now" adds the dump), '
+         'the window in its time, the answer\'s against: {id, name, file}. '
          'Then wave_diff with b = dir/file of a run for the details.',
          {'action': {'type': 'string', 'enum': list(RUN_ACTIONS)}, 'dump': S, 'dir': S, 'run': {'type': ['integer', 'string', 'array'], 'items': {'type': ['integer', 'string']}},
           'all': B, 'name': S, 'tags': {'type': ['string', 'array'], 'items': S}, 'comment': S, 'from': None, 'to': None, 'signals': None, 'scope': None,
-          'map': {'type': 'object'}, 'limit': None, 'case': S,
+          'map': {'type': 'object'}, 'limit': None, 'case': S, 'against': {'type': ['integer', 'string']},
           'cases': {'type': ['string', 'array'], 'items': {'type': 'object'}}}, (), ro=False),
     tool('wave_cut', t_cut, 'Cut a window (and some signals) out of a dump into a small VCD (out): the values at "from" first, '
          'then the changes up to "to" -> out, bytes, variables, from, to. For Compare… on a page, a fixture, sending one test case.',

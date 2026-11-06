@@ -136,8 +136,9 @@ const USAGE: &str = "usage: sva parse [--json] [--expand] [-D NAME[=VALUE]] FILE
        sva diff --results A.json B.json [--map A=B ...] [--json [FILE.json|-]] [--junit FILE] [--limit N]
                 (two runs' assertion results: new, gone, moved failures, covers lost)
        sva runs keep DUMP [--name N] [--tags T,...] [--comment C] | list | set RUN ... | rm RUN... | path RUN
-       sva runs diff DUMP [--run RUN ...] [--from T --to T] [--signals PAT,...] [--signals-from FILE] [--json]
-                (the runs kept of a dump in .wavelens-runs beside it, the dump compared with them: sva runs --help)
+       sva runs diff DUMP [--against RUN] [--run RUN ...] [--from T --to T] [--signals PAT,...] [--signals-from FILE] [--json]
+                [--page]
+                (the runs kept of a dump in .wavelens-runs beside it, the dump or a run compared with them: sva runs --help)
        sva report [--title T] [--md F] [--junit F] [--html F] [--json F] [--max-failures N] RESULTS.json...   (- for stdout)
 TIME is a number with a unit (100ns, 2.5us; ps without one). --alias: a shown name of a config (the page's alias) for
 the variable at PATH. --report: .md, .html, .xml (JUnit), .json (the results with the meta, as a page's report.json;

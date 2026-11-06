@@ -177,7 +177,7 @@ const PAGE_SPANS: usize = 1000;
 /// changes, first, signals: {path: {spans, b, other?, more?}}, missing, map, segments?, notes?}, ps; with B's values of
 /// the signals that differ over the window (not with --align: no one offset) as `vcd` and `shift` (B's time less A's), or
 /// `cutError` saying why they are not there.
-fn page_of(o: &Opt, d: &Value) -> Value {
+pub(crate) fn page_of(o: &Opt, d: &Value) -> Value {
     let mut sig = serde_json::Map::new();
     for x in d["signals"].as_array().into_iter().flatten() {
         let mut e = json!({"spans": x.get("spans").cloned().unwrap_or_else(|| json!([])), "b": x["b"]});
@@ -745,7 +745,7 @@ pub fn diff_cmd(args: &[String]) -> ExitCode {
     if args.iter().any(|a| a == "--results") {
         return crate::resdiff::results_cmd(args);
     }
-    let mut o = match opts(args) {
+    let o = match opts(args) {
         Ok(o) => o,
         Err(e) if e == USAGE => {
             outln!("{USAGE}");
@@ -758,12 +758,8 @@ pub fn diff_cmd(args: &[String]) -> ExitCode {
     };
     if o.page {
         // the page's compare: the first difference held, its stretches kept, the JSON where --json says (stdout)
-        (o.silent, o.quiet, o.limit) = (true, true, 1);
-        if o.spans == 0 {
-            o.spans = PAGE_SPANS;
-        }
-        let r = run(&o).and_then(|(equal, d)| {
-            let text = serde_json::to_string(&page_of(&o, &d)).unwrap_or_default();
+        let r = page_doc(&o).and_then(|(equal, d)| {
+            let text = serde_json::to_string(&d).unwrap_or_default();
             match o.json.as_deref() {
                 None | Some("-") => outln!("{text}"),
                 Some(f) => write_file(f, &(text + "\n"))?,
@@ -786,6 +782,17 @@ pub fn diff_cmd(args: &[String]) -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+/// The page's compare of `o` (sva diff --page; sva runs diff --page, one run): the first difference held, the stretches
+/// kept -> whether the dumps are equal, and the page's shape (`page_of`).
+pub(crate) fn page_doc(o: &Opt) -> Result<(bool, Value), String> {
+    let mut o = o.clone();
+    (o.silent, o.quiet, o.limit) = (true, true, 1);
+    if o.spans == 0 {
+        o.spans = PAGE_SPANS;
+    }
+    run(&o).map(|(equal, d)| (equal, page_of(&o, &d)))
 }
 
 /// The comparison -> the dumps are equal over the window, and the JSON document.

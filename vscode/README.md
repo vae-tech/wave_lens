@@ -23,9 +23,11 @@ is turned into VCD text with it, kept in the extension's storage).
 - **Saving** (state, PNG, SVG, WaveDrom, the report) asks where on the host; **Load…**, the `.sv` files and Compare
   pick on the host too. Bookmarks, groups, colours are kept per dump in the workspace (the store of a dump that no longer exists goes at the next start).
 - **The runs kept** (Runs…, `gu`, *WaveLens: The runs kept of this dump*): keep the dump of now with a name, tags and a comment
-  (an FST in `.wavelens-runs` beside it), then compare with a run — or Δ all of them — over the waves in sight or a span of
-  yours (a test case: each run's case of that name, wherever it is in the run): only that window of a run is read, by `sva` on
-  the host; `]r` `[r` step through them.
+  (an FST in `.wavelens-runs` beside it). The list holds the dump of now and the runs; two rows carry a letter: **A**, the
+  waves shown in the tab (`w`: a run's waves read here, the window and rows kept; `]w` `[w` walk through the runs), and **B**,
+  the run compared with A (a click, `]r` `[r`; `x`: none, the waves only) — or Δ all of them against A — over the waves in
+  sight or a span of yours (a test case: each run's case of that name, wherever it is in the run): only that window of a run
+  is read, by `sva` on the host.
 - **An agent** (Claude Code, Codex with `tools/wavemcp.py`) on the same host: when it starts its live link
   (`view_live`), the open tabs connect (● live in the bar); `view_live` with a dump and `open` opens it here, and
   `view_edit` / `view_get` with `page` = the dump's path work on its tab. *WaveLens: Connect to the agent* connects the tab now. On by default; `"wavelens.live": false`

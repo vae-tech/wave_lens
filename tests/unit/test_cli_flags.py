@@ -99,6 +99,8 @@ class Flags(unittest.TestCase):
         self.assertNotIn('--no-such', usage('diff'))
         self.assertTrue(BUILT.search("cmd += [f'--{k}', t]") and BUILT.search('args.push(`--${k}`)'))
         self.assertLessEqual({'--page', '--signals-from', '--cut-bytes', '--quiet'}, usage('diff'))
+        # the runs' compare of one run as the extension asks it (the run pick, review 2026-11-06)
+        self.assertLessEqual({'--against', '--run', '--page', '--cut-bytes', '--quiet', '--signals-from'}, usage('runs'))
         self.assertTrue(ARGV.search("cmd = [exe, 'runs', act]") and ARGV.search("spawnRun(bin, ['vcd', fst, '--codes', '-'])"))
         self.assertFalse(ARGV.search("filters: { dumps: ['vcd', 'fst'] }"))
 

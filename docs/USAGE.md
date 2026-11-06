@@ -667,7 +667,8 @@ setting is the start; a find left out still floats over the waves on `/`). Navig
 | `gM` `gB` | a marker, a bookmark at the cursor (as `m`, `b`) | `gd` `gc` | the Δ between markers on / off; clear every bookmark, arrow and marker of yours |
 | `gt` `gT` | the Modules panel, the state machines (as `t`, `T`) | `gs` `gL` `gr` | the state: Save, Load…, Reload |
 | `gO` `gR` `gC` | the dump: Open…, ⟳, Compare… | `gp` | Save page |
-| `gu` | the runs kept of the dump (VS Code: the Runs panel, *The runs kept of a dump*) | `]r` `[r` | compare with the next (older) / previous run kept, over the same window |
+| `gu` | the runs kept of the dump (VS Code: the Runs panel, *The runs kept of a dump*) | `]r` `[r` | B: compare A with the next (older) / previous run kept, over the same window |
+| `]w` `[w` | A: the next (older) / previous run kept shown here (now among them), the view kept; with no B the walk through the runs | | |
 | `yn` `yt` | copy the selected signal's name; the time of the cursor | `yl` | copy a link to here: the cursor and the selected signal ([§ A link to a moment](#a-link-to-a-moment)) |
 | `gm` (the right button's **Markers…**) | the markers (the page's, yours) and the bookmarks in a list over the waves, by time (a line at its top filters them as you type, the list in its order, the others hidden; ↓ the first shown, Enter the best match; Enter with nothing typed closes it): `↓` the first (`↑` the last), then `↑ ↓` Home End step through them, a click picks one — the cursor on it and the waves at its time with the span they have: a marker in the middle, a bookmark as going to it does (below); Enter or Esc closes it there | `gl`, ctrl+G | your groups: a list (filtered as you type) |
 | shift+click the waves | a second cursor (dashed, on an edge): Δ to the cursor in time, its frequency (`Δ 40 ns / 25 MHz`) and in cycles of the clock (the cycles band's when it is on, else the selected signal's, else the nearest `*clk*`) on the axis and in the readout; the value column says each row at both and the change, `0x04 · 0x40 · +0x3c` (a bus modulo its width, in hex or its radix — bin `+0b101`, oct, signed `−64`; a float or a fixed point `q8` the difference of the values, `+0.5`; ascii and an enum `IDLE → SETUP`; a bit ↑ ↓ =; x or z: ?; its title both forms, `+0xc0 (−0x40)`; the right button's **Copy A · B · Δ** copies them); `x` swaps the two; Esc clears it | `1` … `9` | go to that bookmark (each bookmark's line shows its Δ from the cursor; the bookmarks and markers at the cursor are marked in their lists) |
@@ -1064,28 +1065,47 @@ disk with a name (the dump's by default), tags (a comma between them) and a comm
 does it, its `x.types.json` read; an FST copied) in `.wavelens-runs` beside the dump (`wavelens.runsDir`: another directory,
 relative to the workspace folder or absolute), listed in its `runs.json`. A directory keep made, or one named `.wavelens-runs`,
 gets a `.gitignore` of `*` (git leaves it out); another one without a `.gitignore` (a folder of yours named by
-`wavelens.runsDir`) gets one of the runs' files only (`*.fst`, `*.part`, `runs.json*`), never more. The panel lists the runs of
-this dump (by its file name; a shared `wavelens.runsDir` holds others, counted in the panel's header). It lists them newest first (#number, name, tags, when kept, the dump, the comment); a click on one
-(Enter; ↑ ↓ Home End PgUp PgDn in the list: once they stop) compares these waves with it over a window — **over** the waves in sight, or one of your spans (a test
-case's: `"every"` in a config, cocotb's marks): `sva diff` of the dump and the run's FST over that window only, then the run's
-values of the signals that differ there (at most 32 MB, as Compare… takes them), so a large run costs its window, not its
-size; the status says equal, or how many signals differ and the first, the rows the run has not, and when the run's values
-could not be loaded (too many changes in the window: bands only) why. A compare asked while another runs stops it. What
-follows is a compare as Compare… makes it: red bands, ≠ on the names, `]d [d`, A / B / A+B (`d`, `D`) — the
-view you had (B, A+B) is kept from one run to the next. `]r` `[r` compare with the next (older) and the previous run in the
-same window, the panel open or not; **Δ all** lists for every run how many signals differ in the window and the first
-difference (red: some, `= equal`: none, `not in this window`: the run does not cover it; numbers of another window than the
-one now are greyed with their window); ⟳ compares again over the window as it is now; your span chosen is followed by what
-it is (deleted: the waves in sight again, said); the dump read again (⟳, a new simulation) keeps the panel and compares
-with the run again; a run kept meanwhile in a shell or by an agent is listed at once (`runs.json` watched); ✎ (`e`) changes a run's name, tags,
-comment; ✕ (Delete) removes it and its file (asked first; the run compared: the compare goes too). The runs are the same dump's runs: its signals by their paths,
-the same time (two runs of one test; a run of another length is compared on the time both cover). **Test cases**: a run keeps
-its test cases — a name and a window each: the spans of yours with a label when Keep this dump… keeps it (none: cocotb's
-`wavelens.marks.json` beside the dump) — listed on its row ("3 cases"). A span of yours whose name is a case of a run (its label
-without the `TC3 ` before it and the ` · PASS` after it, as cocotb's marks label their spans; the window's choice says "· a
-case") is compared with that case of the run, wherever it is in the run: B offset to it, over the shorter of the two (said),
-for a click, `]r [r` and Δ all (a run without that case: an error on its row); a run that has cases but not this one is
-compared over the window as it is (said). Two runs whose earlier cases took longer still compare case by case. In a browser
+`wavelens.runsDir`) gets one of the runs' files only (`*.fst`, `*.part`, `runs.json*`), never more. The panel lists the dump of now first (the row **now**: its file, its time and size on the disk), then the runs of
+this dump (by its file name; a shared `wavelens.runsDir` holds others, counted in the panel's header), newest first (#number,
+name, tags, when kept — and "of a dump of 12:03" when the dump was written earlier than it was kept —, its size, the comment).
+Two rows have a role, a letter on the left of the row, lit where it is (each row has both, as buttons): **A**, the waves
+shown in the tab (now at first), and **B**, the run compared with A. Who is compared with whom is on the screen: the two
+letters on the list, `A · name` and `B · name` on the time axis, both names in the status line (`A #3 golden ≠ B #1 golden:
+4 of 40 signals differ over …`).
+
+- **B**: a click on a row (Enter; ↑ ↓ Home End PgUp PgDn in the list: once they stop; its `B`) compares A with it over a
+  window — **over** the waves in sight, or one of your spans (a test case's: `"every"` in a config, cocotb's marks): `sva runs
+  diff --page` of the two over that window only, then B's values of the signals that differ there (at most 32 MB, as
+  Compare… takes them), so a large run costs its window, not its size; the status says equal, or how many signals differ and
+  the first, the rows B has not, and when B's values could not be loaded (too many changes in the window: bands only) why.
+  A compare asked while another runs stops it. What follows is a compare as Compare… makes it: red bands, ≠ on the names,
+  `]d [d`, A / B / A+B (`d`, `D`) — the view you had (B, A+B) is kept from one run to the next. `]r` `[r` make the next
+  (older) and the previous run B, the panel open or not (the row lit follows). The compare dropped (the bar's ✕, `x` or
+  **no B** in the panel, the `B` of the row B, `compare off`) is no B: nothing comes back by itself. The dump of now can be
+  B while A is a run ("how far has #1 drifted from the file on disk").
+- **A**: `w` on a row (its `A`) reads that run's waves into the tab — the run's FST read on the host as the dump is
+  (converted once: a run's file does not change; a large one lazy) — and keeps the view: the window, the rows and their
+  order, hidden, radix, paint, groups, Only, the markers, spans, the panels; B, if one is chosen, is compared with the new
+  A. `]w` `[w` (anywhere) step A through the list — now, then the runs, wrapping. With no B, that is the walk through the
+  runs: each one's waves in the same window, nothing compared; with a B, each step compares again. A run that has not got a
+  row of yours (a signal added since): the toast says which, and the rows come back on the next waves that have them (the
+  view is taken on now, and again on each run that has every row of it). A run shorter than the window: said
+  (`it ends at 30 µs`). ⟳ (`R`) and a new simulation read the dump of now: A is now again (said).
+- **Δ all** lists for every run how many signals differ from A in the window and the first difference (red: some,
+  `= equal`: none, `not in this window`: the run does not cover it; numbers of another window or another A than the one now
+  are greyed with theirs); ⟳ compares A with B again over the window as it is now.
+
+Your span chosen is followed by what it is (deleted: the waves in sight again, said), and kept in a saved state with the
+run compared (B, `compare.run`); the dump read again (⟳, a new simulation) keeps the panel and compares with B again; a run
+kept meanwhile in a shell or by an agent is listed at once (`runs.json` watched); ✎ (`e`) changes a run's name, tags,
+comment; ✕ (Delete) removes it and its file (asked first; B: the compare goes too; A: the dump of now shown again). The
+runs are the same dump's runs: its signals by their paths, the same time (two runs of one test; a run of another length is
+compared on the time both cover). **Test cases**: a run keeps its test cases — a name and a window each: the spans of
+yours with a label when Keep this dump… keeps it (none: cocotb's `wavelens.marks.json` beside the dump) — listed on its row
+("3 cases"). A span of yours whose name is a case of a run (its label without the `TC3 ` before it and the ` · PASS` after
+it, as cocotb's marks label their spans; the window's choice says "· a case") is compared with that case of the run,
+wherever it is in the run: B offset to it, over the shorter of the two (said), for a click, `]r [r` and Δ all (a run
+without that case: an error on its row); a run that has cases but not this one is compared over the window as it is (said). Two runs whose earlier cases took longer still compare case by case. In a browser
 there is no Runs panel: the runs are kept by `sva runs`.
 
 **The runs kept, in the shell.** `sva runs keep DUMP [--name N] [--tags T,...] [--comment C]` keeps a run (a VCD as an FST
@@ -1110,11 +1130,21 @@ two; a run without the case: an error on its row; the JSON's `case` (the dump's)
 run): per run how many signals differ, the first difference, the signals that differ (`--limit`, default 20; one of another
 kind with its kind), the signals of one side only; a run that does not cover the window is "not in this window". A window
 whose end is before its start, an empty `--signals-from`, a list of signals no run has: said once. An option of another verb
-is refused; `--opt=value` is taken. Exit status 0 every run equal, 1 one differs or does not cover the window, 2 a usage
-error, a dump or run that does not read. `runs.json` is checked as it is read: a run's file a plain name in the directory, a
+is refused; `--opt=value` is taken. **A run as A:** `--against RUN` compares that run's FST with the other runs of the dump
+(`#1 golden against 2 runs over …`; or with the ones of `--run`: the run that is A, named there too, is skipped and said;
+`now`, or no `--against`: the dump is A), the window in A's time, `--case NAME` A's case from that run's `cases`; `--run now`
+is the dump itself as a B (with `--against` a run only); `--run 1,3` a comma list. `--page` writes one run's compare (one
+`--run`, or the one run of the dump; more is a usage error) as `sva diff --page` writes it for a page, with `run` (B's number,
+0 for now), `a` (A's number, null for the dump) and with `--case` a `case` `{name, from, to, offset, shorter}` (B's case;
+`shorter` the length compared when the two cases differ, else null): the Runs panel's compare asks it so; `--cut-bytes`
+passes on, `--quiet` says no notes. Exit status 0 every run equal, 1 one differs or does not cover the window, 2 a usage
+error, a dump or run that does not read; 2 also when a run has an error row (a case it has not got: the other runs compared,
+their rows in the output). `runs.json` is checked as it is read: a run's file a plain name in the directory, a
 version this WaveLens reads. A keep killed leaves a `.part` file: the next keep or rm removes it after ten minutes. `--json` everywhere: the run (keep, set), the list (`{"wavelens": "runs", "others": N, "runs":
-[{id, file, name, tags, comment, dump, source, kept, bytes, source_bytes, start, end, signals}]}`, times in ps), the
-comparison (`{"wavelens": "runs-diff", "from", "to" (the window asked), "others", "runs": [{id, name, equal, outside?, from, to,
+[{id, file, name, tags, comment, dump, source, source_mtime, kept, bytes, source_bytes, start, end, signals}]}`, times in ps;
+`source_mtime` the dump's time on the disk at keep, ISO UTC as `kept`: the text list says `of a dump of 12:03` when it is
+not the time kept; a run kept by an older sva has none), the comparison (`{"wavelens": "runs-diff", "against" ({id, name, file}
+of A, null for the dump), "from", "to" (the window asked), "others", "notes"?, "runs": [{id, name, equal, outside?, from, to,
 signals_compared, signals_differ, first, signals, more, only_a, only_b}]}`). `sva diff --limit` bounds the differences listed
 and held; `only_a` and `only_b` are whole whatever it is.
 
@@ -1539,7 +1569,7 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
 | `wave_diff` | two dumps `a` and `b` (`dump` is `a`) compared change by change with `sva diff` (*Compare two runs from the shell*: streamed, neither read by the server): `equal`, `compared`, `differ`, `first` (`t`, `signal`, `a`, `b`; a bus in hex), the first `limit` `differences`, the signals that differ (`signals_more`: the rest), `only_a`, `only_b`, `segments`; `map` an object (`{"tb_a.if": "tb_b.if"}`), `offset`, `segment`, `align`, `spans` (the stretches kept per signal), `rank` (the first five signals by their first difference); `results_a`, `results_b` instead of the dumps: the assertions' results of two runs, `new`, `gone`, `moved` failures per assertion; times in ns |
 | `wave_explain` | one call from a moment to what to look at: `expr` (its `nth` match; its signals from the expression), `assert` (`"name@scope"` with `sva`, its files: its `nth` failure, the window from the attempt's start to where it failed, its signals from the property, its `note`), `b` (the first difference with that dump, and the signals that differed next) or `t` (a time, with `signals`) -> `at`, the window `before` / `after` cycles of the clock around it (2 / 2, an expression 2 / 4), the clock, the signals and their values there (a `wave_sample` table; with `b`, `table_b`: the other run's in the same window); `out` (a `.html`): a page of that window with a marker and the cursor there |
 | `wave_fsm` | an FSM's states in a dump (`tools/fsmstats.py`, the rule of the page's FSM panel): each state's `entries`, `first`, `time` held and `share`, `never` (the states not reached), `invalid` (x, z, a code without a label), `changes` by count; its table the dump's (an FST's), the types file or `enum` `{code: label}`; `from` / `to` |
-| `wave_runs` | the runs kept of a dump (`sva runs`, the VS Code Runs panel's, in `.wavelens-runs` beside it; `dir` another): `action` `list` (the default: `dir`, `runs` newest first with their `start`, `end`, `cases` in ns), `keep` (`name`, `tags`, `comment`, `cases`: a file, `"none"` or `[{name, from, to}]` in ns; none: cocotb's marks beside the dump), `set`, `rm` (`run`: a number or a name), `all` (the runs of every dump of the directory, not this one's only), `diff` (the dump against each run, or those of `run`, a list too, over `from` … `to`, `signals`, `scope`, `map`: per run `signals_differ`, `first`, the signals that differ, `limit`; `case` NAME: each run's test case of that name against the dump's, wherever it is in the run, `case.offset`); then `wave_diff` with `b` the run's FST for the details |
+| `wave_runs` | the runs kept of a dump (`sva runs`, the VS Code Runs panel's, in `.wavelens-runs` beside it; `dir` another): `action` `list` (the default: `dir`, `runs` newest first with their `start`, `end`, `cases` in ns), `keep` (`name`, `tags`, `comment`, `cases`: a file, `"none"` or `[{name, from, to}]` in ns; none: cocotb's marks beside the dump), `set`, `rm` (`run`: a number or a name), `all` (the runs of every dump of the directory, not this one's only), `diff` (the dump against each run, or those of `run`, a list too, over `from` … `to`, `signals`, `scope`, `map`: per run `signals_differ`, `first`, the signals that differ, `limit`; `case` NAME: each run's test case of that name against the dump's, wherever it is in the run, `case.offset`; `against`: a run, a number or a name, is A instead of the dump, compared with the others, `run` `"now"` the dump as a B, the answer's `against` `{id, name, file}`); then `wave_diff` with `b` the run's FST for the details |
 | `wave_cut` | a window (`from`, `to`) and some `signals` of a dump as a small VCD at `out` (`sva vcd --from --to --signals`; a long list: `--signals-from FILE`, one a line): the values at `from` first; `out`, `bytes`, `variables`, its `from` and `to` |
 | `view_edit` | marks up a page for a person with the [commands](#commands-and-edits) (`ops`): bookmarks with a text, arrows, markers, expressions (their list, marks on the waves, the cursor on a match), groups, highlight, colours, hidden and folded rows, radix, cursor, window — live in their browser when the page is connected, else into the page's file (they see it when they open or reload it); `save`: a live page's state into its file too; `config` (instead of `page`): the commands on a view of a `mkhtml.py` config, so a rebuild keeps them: `bookmark`, `arrow`, `span` on its own keys (a bookmark's `"at"` stays until a `t` replaces it), `view` its window, the rest of its look (`group`, `radix`, `marker`, `deltas`, `hide`, `paint`, `expr` …) its `"state"`; `from_page`: a page's view into it (`keys`: some); the whole list checked first, the file written at once |
 | `view_get` | what a page shows (a live page's transfers of the buses: `view_edit` `bus_list`): bookmarks, arrows, markers (with `measures`: the Δ between them as a table in ns, the bound kept or not), spans, expressions (`exprs`), groups, highlight, colours, hidden, the copies of signals (`dups`), cursor and window, a dump compared (`compare`: `name`, `compared`, `differ`, `first`, `missing`, `show`), the gaps (`gaps`; live, on the waves, with `cut`; `by`: the expressions that cut) (live: with what the person changed); `full`: the whole state; `view`: which view, on a page of several; `rows`: its signals (a pattern, `limit`, `offset`); `picture`: a PNG of the view (live: the screen; a page's file: made in a headless Chromium by `tools/pageshot.py`, when playwright is there) |
@@ -1636,7 +1666,7 @@ All tools are `python3 -I tools/<tool>.py --help`; the Makefile calls them for y
 | `fsmstats.py` | an FSM's states in a dump from the shell and in CI: entries, time held, share, first entry, the states never reached, the values of no state, the changes (the page's rule) | `DUMP --signal S`, `--types`, `--enum PATH=K:L,…`, `--from`, `--to`, `--json`, `--strict` (exit 1 when a state is never reached: a CI gate of FSM coverage) |
 | `viewedit.py` | the viewer's [commands](#commands-and-edits) on a page's edits or a saved state (`.view.json`) | `PAGE --ops JSON\|@file`, `--config FILE` (a view of a config: its bookmarks, arrows, spans, window and look), `--from-page PAGE` `--keys`, `--view`, `--get`, `--views`, `--model`, `--commands`, `--measure [--csv]` (the Δ of the markers as a table) |
 | `svaverify.py` | the examples' checkers in Verilator `--assert` against `sva eval` (`make sva-verify`) | `--build`, `--only`, `--keep`, `--sva-bin` |
-| `sva` (the engine's CLI, Rust: `make sva-build`, or `bin/linux-x86_64/sva`) | `sva parse` an assertion file, `sva eval` assertions over a dump, `sva report` results, `sva --waves DUMP --info` a dump's scopes and variables, `sva vcd DUMP [--out x.vcd] [--header \| --codes FILE] [--from --to --signals]` an FST as VCD text (as `fst2vcd -e` writes it: its names, enum tables, escaped strings, its end; *Formats*; of an FST a part: its header, or the variables of some id codes; of any dump a cut: a window, some signals), `sva fst DUMP.vcd [--out x.fst]` a VCD as an FST beside it (as `vcd2fst` writes it, enum tables and the types file's FSM states kept; *Formats*), `sva diff A B` two dumps compared change by change (*Compare two runs from the shell*), `sva runs` the runs kept of a dump and the dump compared with them over a window (*The runs kept, in the shell*) | `sva <command> --help`; diff: `--signals --signals-from --scope --from --to --offset --map --segment --align --json --junit --limit --spans --quiet`; vcd: `--signals-from` too; fst: `--types --no-types --map --quiet`; runs: `keep list set rm path diff`, `--dir --name --tags --comment --run --from --to --signals --signals-from --scope --map --limit --json`; report: `--title --md --junit --html --json --max-failures`; eval: `--waves --scope --sva [--assert NAME] [--from --to] [--out] [--json] [--attempts] [--x fail\|false] [--vacuous] [--no-lane] [--resolve up\|scope] [--ignore-prefix] [--alias] [--max-threads] [--report] [--junit] [--max-failures] [-D]`; parse: `--json --expand -D` |
+| `sva` (the engine's CLI, Rust: `make sva-build`, or `bin/linux-x86_64/sva`) | `sva parse` an assertion file, `sva eval` assertions over a dump, `sva report` results, `sva --waves DUMP --info` a dump's scopes and variables, `sva vcd DUMP [--out x.vcd] [--header \| --codes FILE] [--from --to --signals]` an FST as VCD text (as `fst2vcd -e` writes it: its names, enum tables, escaped strings, its end; *Formats*; of an FST a part: its header, or the variables of some id codes; of any dump a cut: a window, some signals), `sva fst DUMP.vcd [--out x.fst]` a VCD as an FST beside it (as `vcd2fst` writes it, enum tables and the types file's FSM states kept; *Formats*), `sva diff A B` two dumps compared change by change (*Compare two runs from the shell*), `sva runs` the runs kept of a dump and the dump (or one of them, `--against`) compared with them over a window (*The runs kept, in the shell*) | `sva <command> --help`; diff: `--signals --signals-from --scope --from --to --offset --map --segment --align --json --junit --limit --spans --quiet`; vcd: `--signals-from` too; fst: `--types --no-types --map --quiet`; runs: `keep list set rm path diff`, `--dir --name --tags --comment --cases --run --against --case --from --to --signals --signals-from --scope --map --limit --json --page --cut-bytes --quiet`; report: `--title --md --junit --html --json --max-failures`; eval: `--waves --scope --sva [--assert NAME] [--from --to] [--out] [--json] [--attempts] [--x fail\|false] [--vacuous] [--no-lane] [--resolve up\|scope] [--ignore-prefix] [--alias] [--max-threads] [--report] [--junit] [--max-failures] [-D]`; parse: `--json --expand -D` |
 
 `sva eval --attempts` adds a line per attempt under an assertion's summary: its cycles, the time it started, the result
 and its trace (the elements `s1`, `s2` … and the cycle each matched at), a failure's reason after `--`:

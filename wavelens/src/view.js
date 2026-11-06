@@ -705,7 +705,8 @@ class WaveView {
         find: this.q || '',
         bookmarks: this.bookmarks(), arrows: this.arrowList(),
         markers: this.markList(), spans: this.spanList(),
-        groups: this.groupList(), only: this.onlyState(), fsm: this.fsmState(), compare: this.cmpState(), compareShow: this.cmp ? this.cmpRun : null };
+        groups: this.groupList(), only: this.onlyState(), fsm: this.fsmState(), compare: this.cmpState(), compareShow: this.cmp ? this.cmpRun : null,
+        runsOver: this.runsWin ? Object.assign({}, this.runsWin) : null };
     // none is said (null, the kind "any"): a state loaded later clears what is there then (a key left out keeps it)
     st.cursor2 = this.cursor2 ?? null;
     st.range = this.range ? { from: this.range[0], to: this.range[1], signal: (this.rangeRow && this.rangeRow.full) || null } : null;
@@ -800,6 +801,9 @@ class WaveView {
       this.umarks = markNorm(ms); this.setMarks(); } else if (st.deltas !== undefined) this.setMarks();
     if (st.spans !== undefined) { this.spans = spanNorm(st.spans); this.saveBookmarks(); this.draw(); }
     if (st.compare !== undefined && (st.compare || this.cmp)) this.compareResult(st.compare, true);   // a second dump compared (diff.js)
+    if (st.runsOver !== undefined) { const w = st.runsOver;   // the window the runs are compared over (runs.js): one of the spans
+      this.runsWin = w && typeof w === 'object' && isFinite(w.from) && isFinite(w.to) ? { label: String(w.label || ''), from: +w.from, to: +w.to } : null;
+      if (this.runsP) this.runsP.windows(); }
     if (st.compareShow && this.cmp && !this.cmpCant(st.compareShow) && st.compareShow !== this.cmpRun) {
       await this.compareView(st.compareShow, true); }
 
@@ -905,13 +909,13 @@ class WaveView {
         this.log('error', `${file.name}: no signals`, { items: r.log.map(logLine) }); return this; }
       // a second dump compared (read here, not a saved result) is read again too, and shown as it was
       const cmpAgain = keep && this.cmp && !this.cmp.result && this.cmpSrc ? { ...this.cmpSrc, run: this.cmpRun } : null;
-      const st = keep ? this.state() : null, root = this.root, opts = Object.assign({}, this.opts,
+      const st = keep ? this.runsKeep() : null, root = this.root, opts = Object.assign({}, this.opts,
         { title: file.name, dumpSrc: { name: file.name, handle, file }, dumpDate: r.info.date, svWhy: why, svRun: run, loadCodes: file.wlLoad || null }),
         panel = keep && this.fsmPanelOf(), runs = keep && this.runsOf();
       if (this.runsP) this.runsP.close(true);   // its listeners go with it (the root is emptied)
       this.destroy(); root.innerHTML = '';
       const v = new WaveView(root, r.doc, opts); v.panelBox = this.panelBox;   // the panels open where they were
-      if (st) { delete st.title; if (cmpAgain) { delete st.compare; delete st.compareShow; } await v.setState(st); }
+      if (st) { delete st.title; if (cmpAgain) { delete st.compare; delete st.compareShow; } v.runsMiss = await v.setState(st); }
       if (cmpAgain) { const c = await v.compare(cmpAgain.file, cmpAgain.name);
         if (c && cmpAgain.run && cmpAgain.run !== 'a') await v.compareView(cmpAgain.run); }
       v.fsmPanelAgain(panel);   // the FSM panel stays open (⟳)
@@ -919,7 +923,7 @@ class WaveView {
       const bad = r.log.filter(x => x.level !== 'info').length;
       v.toast((file.wlLazy ? `${file.name}: ${r.total} signals in ${r.info.scopes} modules, read as you open them` : `${file.name}: ${r.shown} of ${r.total} ` +
           `signals${r.shown < r.total ? ` (dumpBudget ${this.S.dumpBudget} changes: the levels nearest the top)` : ''}`) +
-          (bad ? ` · ${bad} warning${bad === 1 ? '' : 's'} (the browser's console)` : ''));
+          (bad ? ` · ${bad} warning${bad === 1 ? '' : 's'} (the browser's console)` : '') + (v.runsNote ? ` · ${v.runsNote}` : ''));
       v.dumpLog = r.log;
       const ms = Math.round(performance.now() - t0), notes = r.log.filter(x => x.level !== 'info');
       v.log('ok', (file.wlLazy ? `${file.name}: ${r.total} signals in ${r.info.scopes} modules (read as you open them)` : `${file.name}: ${r.shown} of ` +

@@ -5,6 +5,31 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.46 — 6 November 2026
+
+Who is compared with whom: the runs kept, A and B on the list; a walk through the runs (review 2026-11-06, the run pick).
+
+- **The Runs panel names A and B.** The list holds the dump of now (the row `now`: its time and size on the disk) and the
+  runs; two rows carry a letter, lit where it is and a button on every row: **A**, the waves shown in the tab, and **B**, the
+  run compared with A. The two names stand on the time axis (`A · #3 golden`, also with bands only, B-05) and in the status
+  (`A #3 golden ≠ B #1 golden: 4 of 40 signals differ over …`). With three runs kept the list read `#3 tb.vcd · tb.vcd`
+  three times under `A · tb.vcd` and nothing said which was compared (A-01, U-01, U-02); a run's second line now says when
+  it was kept, the dump's time when it was written earlier ("of a dump of 12:03", `source_mtime`), its size.
+- **A: a run's waves shown in the tab** (`w` on a row, its `A`; `]w` `[w` anywhere: now, then the runs, wrapping). The run's
+  FST is read on the host as the dump is (converted once; a large one lazy), the view kept — the window, the rows, hidden,
+  radix, paint, groups, Only, markers, spans, the panels — and B, if any, compared with the new A: two runs kept are compared
+  with each other. With no B (`x`, *no B*) `]w` is the walk through the runs, each one's waves in the same window, nothing
+  compared. A run that has not got a row of yours says which, and the row is back on the next run that has it (the view
+  taken on now and on each run that had every row of it). ⟳ and a new simulation read the dump of now: A is now again.
+- **B is the compare's** (B-01, B-02, B-03): the bar's ✕, `compare off` and Compare… with a file dropped the compare but left
+  the run "compared" — its row lit, ⟳ in the panel and a new simulation compared with it again; a saved state did not
+  carry it; `]r` `[r` lit one row and left the focus on another. B is now read from the compare (`compare.run` in the saved
+  state, the window `runsOver` too) and `]r` moves the focus with it.
+- **One compare made by the CLI.** The extension compares A with B by one `sva runs diff DUMP --run B --against A --page`
+  (the test-case arithmetic was written twice, in the extension and in the CLI: A-02); `sva runs diff --against RUN` (every
+  run, or the ones of `--run`, against a run kept; `--run now` the dump itself), `wave_runs` `against`; Δ all is against A.
+- The panel lists once on a reload (B-06); a run asked by its number that the list has not yet is read again (B-07).
+
 ## 0.45 — 6 November 2026
 
 A late window of a run read from its block, a run compared by test case, one compare made by the CLI; the leftovers of the

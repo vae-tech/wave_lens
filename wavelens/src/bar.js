@@ -17,8 +17,8 @@ const TIPS = {
   'act:dsrc': ['SystemVerilog sources: the names of "typedef enum" on the state buses of a VCD (it has none), "typedef struct packed" as ' +
     'fields; kept for the next read (⟳)'],
   'act:dcmp': ['Compare with a second dump (a VCD of another run): where its values differ, a red band on the row, ≠ on the name', [']d', '[d']],
-  'act:druns': ['The runs kept of this dump (VS Code): keep this one with a name, tags, a comment; compare with one over the waves in sight ' +
-    'or a span of yours', ['gu', ']r', '[r']],
+  'act:druns': ['The runs kept of this dump (VS Code): keep this one with a name, tags, a comment; show one here (A), compare one with it (B) ' +
+    'over the waves in sight or a span of yours', ['gu', ']w', ']r']],
   'act:dcmpx': ['Compare no more'], 'act:dcmpv': ['Which run the waves show: this one, the second, both over each other', ['d', 'D']],
   'act:fprev': ['Previous match', ['N', 'shift+Enter']], 'act:fnext': ['Next match', ['n', 'Enter']],
   'act:fhl': ['Found rows in front, the rest dimmed'], 'act:fopen': ['Fold the modules without a match'],
@@ -146,8 +146,9 @@ const HELP = [
     [[']d', '[d'], 'next / previous difference from a dump compared (Compare… in the bar)'],
     [['d'], 'a dump compared: flip the waves between the two runs (the time axis names the one shown)'],
     [['D'], 'a dump compared: both runs over each other where they differ, again one'],
-    [['gu'], 'the runs kept of this dump (VS Code): keep this one, compare with one over the waves in sight or a span'],
-    [[']r', '[r'], 'compare with the next (older) / previous run kept, over the same window'],
+    [['gu'], 'the runs kept of this dump (VS Code): keep this one, show one (A), compare one with it (B) over the waves in sight or a span'],
+    [[']r', '[r'], 'B: compare A with the next (older) / previous run kept, over the same window'],
+    [[']w', '[w'], 'A: the waves of the next (older) / previous run kept shown here, the view kept (now among them)'],
     [['1', '…', '9'], 'go to bookmark 1 … 9'], [['ctrl+drag'], 'measure a range: Δ, the edges or changes of that signal'],
     [['alt+drag'], 'a box: its time and its signals, then the menu (picture, WaveDrom, colour)'], [['ctrl+click'], 'clear the range'],
     [['right button'], 'a range and the menu: picture, colour, radix, duplicate, hide'], [['b'], 'bookmark at the cursor'],
@@ -184,8 +185,10 @@ const KEY_MENUS = {
   z: ['Fold the modules', [['R', 'open every module'], ['M', 'fold every module'], ['o', 'open the selected signal\'s'], ['c', 'fold the selected signal\'s'],
     ['a', 'open or fold it']]],
   y: ['Copy', [['y', 'the selected signal\'s path'], ['n', 'its name'], ['t', 'the time of the cursor'], ['l', 'a link to here (the cursor, the signal)']]],
-  ']': ['Next', [['b', 'bookmark'], ['m', 'marker'], ['e', 'edge'], ['d', 'difference', v => v.cmp], ['r', 'run kept (compared)', v => v.runsHost()]]],
-  '[': ['Previous', [['b', 'bookmark'], ['m', 'marker'], ['e', 'edge'], ['d', 'difference', v => v.cmp], ['r', 'run kept (compared)', v => v.runsHost()]]],
+  ']': ['Next', [['b', 'bookmark'], ['m', 'marker'], ['e', 'edge'], ['d', 'difference', v => v.cmp], ['r', 'run kept (B, compared)', v => v.runsHost()],
+    ['w', 'run kept (A, the waves shown)', v => v.runsHost()]]],
+  '[': ['Previous', [['b', 'bookmark'], ['m', 'marker'], ['e', 'edge'], ['d', 'difference', v => v.cmp], ['r', 'run kept (B, compared)', v => v.runsHost()],
+    ['w', 'run kept (A, the waves shown)', v => v.runsHost()]]],
 };
 
 const WD_CELLS = 2048;   // the cycles a WaveDrom export keeps at most (the rest of the range is said, not dropped silently)

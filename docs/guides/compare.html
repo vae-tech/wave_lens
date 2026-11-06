@@ -107,13 +107,22 @@
     panel lists this dump's runs).</li>
   <li>Choose the window: <span class="ui">over</span> the waves in sight, or one of your spans (a test case: the spans of
     cocotb's marks, <code>"every"</code> in a config).</li>
-  <li>Click a run (or ↑ ↓ in the list, <kbd>]</kbd> <kbd>r</kbd> / <kbd>[</kbd> <kbd>r</kbd> anywhere): these waves are compared with
-    it over that window only, and only that window of the run is read — a run of gigabytes costs the window, not its size. Then
+  <li>The list starts with <b>now</b>, the dump on the disk, then the runs, newest first. Two rows carry a letter on the left:
+    <b>A</b>, the waves shown in the tab (now at first), and <b>B</b>, the run compared with A. The same two names stand on the
+    time axis and in the status line, so who is compared with whom is always on the screen.</li>
+  <li>Click a run (or ↑ ↓ in the list, <kbd>]</kbd> <kbd>r</kbd> / <kbd>[</kbd> <kbd>r</kbd> anywhere): it becomes B, compared with A
+    over that window only, and only that window of the run is read — a run of gigabytes costs the window, not its size. Then
     it is a compare as above: the bands, ≠, <kbd>]d</kbd> <kbd>[d</kbd>, A / B / A+B, and the view you chose stays from run to run.</li>
+  <li><kbd>w</kbd> on a row (its <b>A</b>) shows that run's waves in the tab instead, with your window, rows, markers and spans
+    kept; B, if there is one, is compared with it. Two runs kept are compared with each other this way: one A, the other B.
+    <kbd>]</kbd> <kbd>w</kbd> / <kbd>[</kbd> <kbd>w</kbd> step A through now and the runs. With no B (<kbd>x</kbd>, or
+    <span class="ui">no B</span>) that is a walk through the runs: each one's waves in the same window, nothing compared.
+    A run without a row of yours says so, and the row is back on the next run that has it. ⟳ reads the dump of now: A is now
+    again.</li>
   <li>↑ ↓ in the list compare once you stop on a run. The dump read again after a new simulation keeps the panel and compares
     with the run again; the status says equal, or what differs first, and why the run's values are not shown when they are not.</li>
-  <li><span class="ui">Δ all</span> asks every run at once: how many signals differ in the window and the first difference, on each
-    run's row (red: some). The run where it broke stands out.</li>
+  <li><span class="ui">Δ all</span> asks every run at once: how many signals differ from A in the window and the first difference, on
+    each run's row (red: some). The run where it broke stands out; make a golden run A first to ask "which run left it".</li>
   <li>Test cases: a run keeps its cases (your labelled spans when kept, or cocotb's <code>wavelens.marks.json</code> beside the
     dump). Choose the span of a case (the choice says <i>· a case</i>) and each run is compared over <i>its</i> case of that name,
     wherever it is in the run — the cases before it may have taken longer — over the shorter of the two.
@@ -162,7 +171,7 @@ B: apb_b.vcd  0 ps … 205 ns, 58 signals
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.45 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.46 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

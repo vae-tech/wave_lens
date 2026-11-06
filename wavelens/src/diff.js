@@ -278,7 +278,8 @@ Object.assign(WaveView.prototype, {
   // a second dump being read stopped (≠ … ✕): the compare before it stays
   compareStop() { this.cmpReq = (this.cmpReq || 0) + 1; this.cmpReading = 0; this.cmpShow(); this.toast(`compare: stopped${this.cmp ? `; still compared ` +
     `with ${this.cmp.name}` : ''}`); },
-  cmpShow() {   // the bar's ≠ N ✕ (no compare: hidden; a dump being read: ≠ … ✕ stops it) and its A B A+B
+  cmpShow() {   // the bar's ≠ N ✕ (no compare: hidden; a dump being read: ≠ … ✕ stops it) and its A B A+B; the Runs panel's B
+    if (this.runsP) this.runsP.render();
     const b = this.root.querySelector('button[data-act=dcmpx]'), seg = this.root.querySelector('.cmpv'); if (!b) return;
     const has = this.cmpCan(), names = this.cmp ? { a: this.cmpNames()[0], b: this.cmpNames()[1] } : null;
     if (seg) { seg.hidden = !this.cmp; if (this.cmp) for (const x of seg.querySelectorAll('button')) { const s = x.dataset.run, on = s === this.cmpRun;
@@ -302,8 +303,8 @@ Object.assign(WaveView.prototype, {
     return [cmpNameA(this.M, this.opts.title), this.cmp ? this.cmp.name : 'B'];
   },
   // which run the waves show, on the time axis at the right, always in sight (the bar may be folded or off the screen) and in
-  // the picture; none while a compare has bands only
-  paintRunTag(P, xR, y, h) { if (this.cmpCan()) paintRunTagOf(P, xR, y, h, this.cmpRun, this.cmpNames()); },
+  // the picture: with a compare (bands only: A's), and while a run kept is shown (runs.js: A)
+  paintRunTag(P, xR, y, h) { if (this.cmp || this.runsShown) paintRunTagOf(P, xR, y, h, this.cmp && this.cmpCan() ? this.cmpRun : 'a', this.cmpNames()); },
   // B's values here (a dump read here, a result's "vcd")?
   cmpCan() { const c = this.cmp; return !!c && !!(c.waves || (c.result && c.result.vcd)); },
   // a result's "vcd" read, at its first use: its rows to the ones that differ

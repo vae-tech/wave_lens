@@ -22,12 +22,13 @@
     'state-read': { ask: '', reply: ['name mtime b64'] },          // Reload (r): the last state read on the host
     compare: { ask: 'signals from to', reply: ['result', ''] },    // Compare…: a dump picked, sva diff --page ('' the dialog closed)
     runs: { ask: 'op', ops: {                                      // the Runs panel: sva runs
-      list: { ask: '', reply: ['dir runs others?'] },
+      list: { ask: '', reply: ['dir runs others? now? shown?'] },
+      open: { ask: 'run', reply: ['src name lazy store?'] },     // A: a run's waves served as the tab's (0: the dump of now)
       keep: { ask: 'name? tags? comment? cases?', reply: ['run'] },
       set: { ask: 'run name? tags? comment?', reply: ['run'] },
       rm: { ask: 'run', reply: ['removed', 'cancelled'] },
-      diff: { ask: 'signals from to case?', reply: ['runs wavelens? version? unit? dump? dir? from? to? others? case?'] },
-      compare: { ask: 'run signals from to case?', reply: ['result'] },
+      diff: { ask: 'signals from to case? against?', reply: ['runs wavelens? version? unit? dump? dir? from? to? others? case? against?'] },
+      compare: { ask: 'run signals from to case? against?', reply: ['result'] },   // A (against; none: the waves shown) with B (run)
       cancel: { ask: '', reply: ['ok'] },
     } },
     sources: { ask: '', reply: ['texts', 'types typesName texts'] },   // the workspace's .sv sources, or the types beside the dump

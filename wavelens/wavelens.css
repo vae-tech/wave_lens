@@ -593,6 +593,14 @@
 .wv .wv-runs .rd { font-size: 11px; white-space: nowrap; color: var(--muted); }
 .wv .wv-runs .rn .r1 > button:first-of-type { margin-left: auto; }
 .wv .wv-runs .rd.bad { color: var(--wave-x); }
+/* the roles on a row: A (the waves shown, the accent) and B (compared with A, the second run's colour), lit where they are */
+.wv .wv-runs .rn .rab { display: flex; gap: 2px; flex: none; }
+.wv .wv-runs .rn .rab button { width: 16px; height: 16px; padding: 0; font-size: 10.5px; font-weight: 700; line-height: 14px; border-radius: 3px;
+  opacity: 0.35; border: 1px solid var(--line); background: transparent; color: var(--muted); }
+.wv .wv-runs .rn:hover .rab button, .wv .wv-runs .rn.pv .rab button { opacity: 0.8; }
+.wv .wv-runs .rn .rab .rA.on { opacity: 1; background: var(--accent); border-color: var(--accent); color: var(--panel); }
+.wv .wv-runs .rn .rab .rB.on { opacity: 1; background: var(--wave-run-b); border-color: var(--wave-run-b); color: var(--panel); }
+.wv .wv-runs .rn.rnow .r1 b { font-style: italic; }
 @media (max-width: 600px) { .wv .wv-mods { left: 0 !important; top: 0 !important; bottom: 0; width: min(88vw, 340px) !important;
   height: auto !important; max-width: none !important; max-height: none !important; border-radius: 0 6px 6px 0; }
   .wv .wv-mods .mh { cursor: default; } .wv .wv-mods .rz { display: none; } }

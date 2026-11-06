@@ -275,16 +275,21 @@ ${scripts}
     return cur;
   }
   // -> {src, name, lazy, store}: the URI the webview fetches now (an FST: its VCD text, converted when it changed; a large dump:
-  // the header of its FST, lazy), the dump's store
+  // the header of its FST, lazy), the dump's store. The dump of now: a run shown (runs open) is A no more
   async source() {
-    let f, lazy = false;
-    try {
-      lazy = lazyFor(this.file, (await fs.promises.stat(this.file)).size);
-      this.fst = lazy ? await fstOf(this.file) : null;
-      f = this.src = lazy ? await headerOf(this.fst) : await vcdOf(this.file);
-    } catch (e) { this.report({ error: e.message }); throw e; }
-    if (lazy) log(`${path.basename(this.file)}: large: its modules and signals first, the values of the ones shown as they are needed`);
-    return { src: this.panel.webview.asWebviewUri(vscode.Uri.file(f)).toString(), name: path.basename(this.file), lazy, store: this.storeNow() };
+    this.shown = null;
+    let o;
+    try { o = await this.srcOf(this.file, path.basename(this.file)); } catch (e) { this.report({ error: e.message }); throw e; }
+    return Object.assign(o, { store: this.storeNow() });
+  }
+  // the file the tab shows (the dump, or a run kept) served: this.src the text the webview reads (bytes()), this.fst the FST
+  // its signals are read from when lazy (codes()) -> {src, name, lazy}
+  async srcOf(file, name) {
+    const lazy = lazyFor(file, (await fs.promises.stat(file)).size), fst = lazy ? await fstOf(file) : null;
+    const f = lazy ? await headerOf(fst) : await vcdOf(file);
+    this.fst = fst; this.src = f;
+    if (lazy) log(`${name}: large: its modules and signals first, the values of the ones shown as they are needed`);
+    return { src: this.panel.webview.asWebviewUri(vscode.Uri.file(f)).toString(), name, lazy };
   }
   // the bytes of what source() named, for a webview that could not fetch its URI (a tab moved to a window of its own over a
   // remote connection: its resource loads answer 404) -> {data: Uint8Array}
@@ -353,6 +358,11 @@ ${scripts}
      FST's first line, the line of the text with them. One it could not read: also a message with the way to the line. */
   report(m) {
     const fst = /\.fst$/i.test(this.file), text = fst && this.src ? this.src : this.file, name = path.basename(this.file);
+    if (this.shown) {   // a run kept read as the waves (A): said in the log; the Problems panel stays the dump's
+      log(`${this.shown.name} (${path.basename(this.shown.file)}) shown in ${name}'s tab` +
+        (m.info ? `: ${dumpInfo(m.info, m.shown)}` : m.error ? `: ${m.error}` : ''));
+      return;
+    }
     const notes = (m.log || []).concat(m.error ? [{ level: 'error', text: m.error, line: m.line }] : []);
     if (m.info) log(`${name}: ${dumpInfo(m.info, m.shown)}`);
     else if (m.error) log(`${name}: not read`);
@@ -429,23 +439,19 @@ ${scripts}
   // Compare…: a second dump picked on the host, sva diff of this one and it over the tab's signals and window (neither read
   // here: the CLI streams both) -> {result}: the WaveJSON extension "compare" the viewer takes (compareResult), as the
   // build makes it of a config's "compare" (tools/svabuild.py compare)
-  async compare(signals, from, to, other, keep = p => p, offset = 0) {
-    let b = other;
-    if (!b) {
-      const got = await vscode.window.showOpenDialog({ defaultUri: vscode.Uri.file(path.dirname(this.file)), canSelectMany: false,
-        title: `Compare ${path.basename(this.file)} with`, filters: { 'vcd, fst': ['vcd', 'fst'], 'every file': ['*'] } });
-      if (!got || !got.length) return {};
-      b = got[0].fsPath;
-    }
-    const bin = svaBin();
+  async compare(signals, from, to) {
+    const a = this.shown ? this.shown.file : this.file;   // A: the waves shown (a run kept, or the dump)
+    const got = await vscode.window.showOpenDialog({ defaultUri: vscode.Uri.file(path.dirname(this.file)), canSelectMany: false,
+      title: `Compare ${path.basename(a)} with`, filters: { 'vcd, fst': ['vcd', 'fst'], 'every file': ['*'] } });
+    if (!got || !got.length) return {};
+    const b = got[0].fsPath, bin = svaBin();
     // sva diff --page: the compare as the tab takes it, the run's values of the signals that differ in it (at most 32 MiB:
     // else cutError says why), the same shape as a config's "compare" (tools/svabuild.py)
-    const args = ['diff', this.file, b, '--page', '--quiet', '--signals-from', '-'];
+    const args = ['diff', a, b, '--page', '--quiet', '--signals-from', '-'];
     if (isFinite(from)) args.push('--from', `${Math.round(from)}ps`);
     if (isFinite(to)) args.push('--to', `${Math.round(to)}ps`);
-    if (offset) args.push('--offset', `${Math.round(offset)}ps`);   // B's time is A's plus it (a run's test case elsewhere in it)
-    log(`${path.basename(this.file)}: compare with ${b}`);
-    const x = await spawnRun(bin, args, { input: signals.join('\n') + '\n', keep: p => this.proc(keep(p)) });
+    log(`${path.basename(this.file)}: compare ${path.basename(a)} with ${b}`);
+    const x = await spawnRun(bin, args, { input: signals.join('\n') + '\n', keep: p => this.proc(p) });
     const r = x.code === 0 || x.code === 1 ? { text: x.out } : { error: x.sig ? 'stopped' : x.err || `${bin} diff: exit ${x.code}` };
     if (r.error) { log(`${path.basename(this.file)}: compare: ${r.error}`); return { error: `compare: ${r.error}` }; }
     let d;
@@ -454,11 +460,14 @@ ${scripts}
     return { result: d };
   }
   // the runs kept of this dump (the Runs panel): sva runs over .wavelens-runs beside it (wavelens.runsDir: another directory).
-  // list -> {dir, runs}; keep {name, tags, comment} -> {run} (the dump as it is on the disk, an FST in the directory); set {run, …};
-  // rm {run} (asked first) -> {removed | cancelled}; diff {signals, from, to, case} -> sva runs diff's JSON; compare {run, signals,
-  // from, to, case} -> {result}: Compare… with the run's FST over that window only (its values of the signals that differ there).
-  // keep {cases}: the page's spans with a label, the run's test cases (none sent: the marks beside the dump, sva runs keep);
-  // case: the window's name, a run's case of that name compared, wherever it is in the run (B offset to it, the shorter length)
+  // list -> {dir, runs, others, now: the dump's {name, mtime, bytes}, shown: the run shown (0: the dump)}; keep {name, tags,
+  // comment} -> {run} (the dump as it is on the disk, an FST in the directory); set {run, …}; rm {run} (asked first) ->
+  // {removed | cancelled}; open {run} -> {src, name, lazy}: a run's FST served as the tab's waves (A; 0: the dump of now);
+  // diff {signals, from, to, case, against} -> sva runs diff's JSON (each run against A); compare {run, signals, from, to, case,
+  // against} -> {result}: A (against: a run's id, 0 the dump; none: the waves shown) with B (run; 0: the dump) over that window
+  // only, B's values of the signals that differ there (sva runs diff --page). keep {cases}: the page's spans with a label,
+  // the run's test cases (none sent: the marks beside the dump, sva runs keep); case: the window's name, a run's case of that
+  // name compared, wherever it is in the run (B offset to it, the shorter length)
   runsDir() {
     const set = vscode.workspace.getConfiguration('wavelens').get('runsDir');
     if (!set) return path.join(path.dirname(this.file), '.wavelens-runs');
@@ -471,7 +480,9 @@ ${scripts}
     const fail = (r, what) => ({ error: r.err || `sva runs ${what}: exit ${r.code}` });
     const said = b => [...(typeof b.name === 'string' && b.name.trim() ? ['--name', b.name.trim()] : []),
       ...(Array.isArray(b.tags) ? ['--tags', b.tags.map(String).join(',')] : []), ...(typeof b.comment === 'string' ? ['--comment', b.comment] : [])];
-    const id = String(parseInt(m.run, 10));
+    const id = String(parseInt(m.run, 10)), nowOr = x => (x === 'now' || !(parseInt(x, 10) > 0) ? 'now' : String(parseInt(x, 10)));
+    // A: the run asked (against), else the one shown
+    const against = () => (m.against != null ? nowOr(m.against) : this.shown ? String(this.shown.id) : 'now');
     this.watchRuns(dir);
     // a compare (or Δ all) asked while another runs: the older one's processes killed, its answer "stopped"
     const own = () => { if (this.runsBusy) this.runsBusy.forEach(p => p.kill()); const set = this.runsBusy = new Set();
@@ -479,7 +490,19 @@ ${scripts}
     switch (m.op) {
       case 'list': {   // this dump's runs (by its file name), the ones of other dumps counted
         const r = await this.sva(['runs', 'list', this.file, '--dir', dir, '--json']), d = json(r);
-        return r.code === 0 && d ? { dir, runs: d.runs || [], others: d.others || 0 } : fail(r, 'list');
+        let st = null; try { st = await fs.promises.stat(this.file); } catch (e) { /* gone meanwhile */ }
+        const now = { name, mtime: st ? st.mtimeMs : null, bytes: st ? st.size : null };
+        return r.code === 0 && d ? { dir, runs: d.runs || [], others: d.others || 0, now, shown: this.shown ? this.shown.id : 0 } : fail(r, 'list');
+      }
+      case 'open': {   // A: a run's waves served as the dump's are (converted once: its FST does not change); 0 the dump of now
+        if (!(parseInt(m.run, 10) > 0)) return this.source();
+        const l = json(await this.sva(['runs', 'list', '--dir', dir, '--json'])), run = l && (l.runs || []).find(x => String(x.id) === id);
+        if (!run) return { error: `no run #${id} in ${dir}` };
+        const file = path.join(dir, run.file), nm = `#${run.id} ${run.name}`;
+        let o; try { o = await this.srcOf(file, nm); } catch (e) { return { error: `${nm}: ${e.message}` }; }
+        this.shown = { id: run.id, file, name: nm };
+        log(`${name}: ${nm} (${run.file}) shown in the tab`);
+        return o;
       }
       case 'cancel': if (this.runsBusy) this.runsBusy.forEach(p => p.kill()); return { ok: true };
       case 'keep': {
@@ -504,25 +527,28 @@ ${scripts}
         return r.code === 0 ? { removed: run } : fail(r, 'rm');
       }
       case 'diff': {
-        const args = ['runs', 'diff', this.file, '--dir', dir, '--json', '--signals-from', '-'];
+        const args = ['runs', 'diff', this.file, '--dir', dir, '--json', '--against', against(), '--signals-from', '-'];
         if (isFinite(m.from)) args.push('--from', `${Math.round(m.from)}ps`);
         if (isFinite(m.to)) args.push('--to', `${Math.round(m.to)}ps`);
         if (typeof m.case === 'string' && m.case) args.push('--case', m.case);
         const r = await this.sva(args, (Array.isArray(m.signals) ? m.signals.map(String) : []).join('\n') + '\n', own()), d = json(r);
         return d && d.runs ? d : r.sig ? { error: 'stopped' } : fail(r, 'diff');
       }
-      case 'compare': {
-        const l = json(await this.sva(['runs', 'list', '--dir', dir, '--json'])), run = l && (l.runs || []).find(x => String(x.id) === id);
-        if (!run) return { error: `no run #${id} in ${dir}` };
-        const sigs = Array.isArray(m.signals) ? m.signals.map(String) : [];
-        if (typeof m.case !== 'string' || !m.case) return this.compare(sigs, +m.from, +m.to, path.join(dir, run.file), own());
-        // the run's case of that name: B offset to it, over the shorter of the two
-        const c = (run.cases || []).find(x => x.name === m.case);
-        if (!c) return { error: run.cases ? `no case ${m.case} in the run #${id}` : `the run #${id} was kept without its test cases` };
-        const len = Math.min(+m.to - +m.from, c.to - c.from), offset = c.from - +m.from;
-        const r = await this.compare(sigs, +m.from, +m.from + len, path.join(dir, run.file), own(), offset);
-        if (r.result) r.result.case = { name: m.case, from: c.from, to: c.to, offset, shorter: c.to - c.from !== +m.to - +m.from ? len : null };
-        return r;
+      case 'compare': {   // A with B over the window in one sva runs diff --page (a case: B's of that name, offset to it)
+        const b = nowOr(m.run), a = against();
+        if (a === b) return { error: 'A and B are the same run' };
+        const args = ['runs', 'diff', this.file, '--dir', dir, '--run', b, '--against', a, '--page', '--quiet', '--signals-from', '-'];
+        if (isFinite(m.from)) args.push('--from', `${Math.round(m.from)}ps`);
+        if (isFinite(m.to)) args.push('--to', `${Math.round(m.to)}ps`);
+        if (typeof m.case === 'string' && m.case) args.push('--case', m.case);
+        log(`${name}: compare ${a === 'now' ? 'the dump' : '#' + a} with ${b === 'now' ? 'the dump' : '#' + b}`);
+        const r = await this.sva(args, (Array.isArray(m.signals) ? m.signals.map(String) : []).join('\n') + '\n', own());
+        if (r.sig) return { error: 'stopped' };
+        if (r.code !== 0 && r.code !== 1) return fail(r, 'diff --page');
+        const d = json(r);
+        if (!d) return { error: 'sva runs diff --page wrote no JSON' };
+        if (d.cutError) log(`${name}: the values of B are not in the tab: ${d.cutError}`);
+        return { result: d };
       }
     }
     return { error: `runs: no operation ${m.op}` };

@@ -6,7 +6,9 @@
 //! `sva runs diff` compares the dump with each run of it (or the ones named) as `sva diff` does, over a window: the
 //! dumps streamed, nothing of them held but the values of now and the first difference. A run keeps its test cases too
 //! (a name, a window: cocotb's marks beside the dump, `--cases`): `sva runs diff --case NAME` compares the case of the
-//! dump of now with that case of each run, wherever it is in the run.
+//! dump of now with that case of each run, wherever it is in the run. `--against RUN` makes a run A (the waves shown in
+//! the Runs panel), `--run now` the dump a B; `--page` writes one run's compare in the shape a page takes (`sva diff
+//! --page`'s), which the extension hands the viewer as it is.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -21,8 +23,9 @@ const USAGE: &str = "usage: sva runs [list] [DUMP | DIR] [--dir D] [--all] [--js
        sva runs set RUN [DUMP] [--dir D] [--name N] [--tags T,...] [--comment C] [--cases FILE|-|none] [--json]
        sva runs rm RUN... [DUMP] [--dir D] [--json]
        sva runs path RUN [DUMP] [--dir D]
-       sva runs diff DUMP [--dir D] [--run RUN ...] [--all] [--from T] [--to T] [--signals PAT,...] [--signals-from FILE]
-                [--scope S] [--map A=B ...] [--limit N] [--case NAME [--cases FILE|-]] [--json]
+       sva runs diff DUMP [--dir D] [--against RUN|now] [--run RUN|now ...] [--all] [--from T] [--to T] [--signals PAT,...]
+                [--signals-from FILE] [--scope S] [--map A=B ...] [--limit N] [--case NAME [--cases FILE|-]] [--json]
+                [--page [--cut-bytes N]] [--quiet]
 The runs you keep of a dump, to compare the dump of now with them. keep: the dump (VCD or FST) as an FST in the
 directory of runs: --dir, else .wavelens-runs beside DUMP (a dump inside a directory of runs: that one), else
 ./.wavelens-runs. A directory keep makes, or one named .wavelens-runs, has a .gitignore of * (git leaves it out);
@@ -34,16 +37,25 @@ and their FSTs. path: the FST's path (for sva diff, sva vcd). diff: DUMP (A) aga
 --run, as sva diff over the window --from … --to (default: the time both cover), the signals of --signals /
 --signals-from (- stdin; default every one of DUMP the run has): per run how many signals differ, the first difference,
 the signals that differ (--limit, default 20, 0 all), the signals of one side only; a run that does not cover the window
-is \"not in this window\". --json: the result as JSON (times in ps). --opt=value is taken as --opt value.
+is \"not in this window\". --json: the result as JSON (times in ps). --opt=value is taken as --opt value. keep writes the
+dump's time on the disk too (source_mtime); a line of the list says \"of a dump of HH:MM\" when it is not the time kept.
+--against RUN: A is that run's FST, not DUMP (now, or none: DUMP), against the other runs of DUMP or the ones of --run (the
+run that is A, named in --run, is skipped and said); the window is in A's time. --run now: DUMP itself as a B (with
+--against a run only); --run 1,3: a comma list. The JSON's \"against\": {id, name, file}, null for DUMP. --page: the
+compare of one run (one --run, or the one run of DUMP; more: usage) as sva diff --page writes it for a page (B's values at
+most --cut-bytes, 32 MiB), with run (B's number, 0 for now), a (A's number, null for DUMP) and with --case, case {name,
+from, to, offset, shorter} (B's case, shorter: the length compared when the two differ, else null). --quiet: no notes.
 Test cases: keep stores the run's cases, a name and a window each: --cases FILE (a marks file of python/wavelens_cocotb.py,
 a list [{\"name\", \"from\", \"to\"}], or {\"spans\": [{\"label\", \"from\", \"to\"}]}; times in ps or with a unit; - stdin),
 else wavelens.marks.json beside DUMP when it is not older than DUMP by 10 minutes; none: no cases. A case's name is its
 name or label without a \"TC<n> \" before it and a \" · …\" after it (the result), the second of one name \"name (2)\". diff
 --case NAME: each run over its case NAME against the dump's case NAME (--from/--to: that window of the dump; else its
-cases as keep finds them), B's time offset to the run's case, over the shorter of the two.
+cases as keep finds them), B's time offset to the run's case, over the shorter of the two; with --against RUN, A's case
+NAME is that run's.
 TIME is a number with a unit (100ns, 2.5us; ps without one).
 Exit status: 0 done (diff: every run equal over the window); 1 diff: a run differs or does not cover the window; 2 usage,
-a dump or run that does not read, a run that is not there, a window or signal list that is empty.";
+a dump or run that does not read, a run that is not there, a window or signal list that is empty;
+2 also when a run has an error row (a case it has not got: the other runs compared, their rows in the output).";
 
 const INDEX: &str = "runs.json";
 const DIR: &str = ".wavelens-runs";
@@ -65,6 +77,12 @@ struct Opt {
     limit: usize,
     cases: Option<String>,
     case: Option<String>,
+    /// diff --against: A is this run (None or "now": DUMP)
+    against: Option<String>,
+    /// diff --page: the page's compare of one run; --cut-bytes passed to it
+    page: bool,
+    cut_bytes: Option<usize>,
+    quiet: bool,
 }
 
 /// The bytes of changes in a block of a run kept from a VCD: the size grows 0.2 %, a late window of a 37 MB VCD is read
@@ -78,14 +96,15 @@ fn takes(cmd: &str, opt: &str) -> bool {
         "keep" | "set" => &["--name", "--tags", "--tag", "--comment", "--cases", "--json"],
         "rm" => &["--json"],
         "path" => &[],
-        _ => &["--run", "--all", "--from", "--to", "--signals", "--signals-from", "--scope", "--map", "--limit", "--case", "--cases", "--json"],
+        _ => &["--run", "--all", "--from", "--to", "--signals", "--signals-from", "--scope", "--map", "--limit", "--case", "--cases", "--json",
+               "--against", "--page", "--cut-bytes", "--quiet"],
     };
     opt == "--dir" || own.contains(&opt)
 }
 
 fn opts(args: &[String]) -> Result<Opt, String> {
     let mut o = Opt { cmd: String::new(), pos: vec![], dir: None, name: None, tags: None, comment: None, json: false, all: false, runs: vec![],
-                      diff: vec![], limit: 20, cases: None, case: None };
+                      diff: vec![], limit: 20, cases: None, case: None, against: None, page: false, cut_bytes: None, quiet: false };
     // --opt=value as --opt value
     let args: Vec<String> = args.iter().flat_map(|a| match a.split_once('=') {
         Some((k, v)) if k.starts_with("--") && !k.contains(' ') => vec![k.to_string(), v.to_string()],
@@ -109,7 +128,7 @@ fn opts(args: &[String]) -> Result<Opt, String> {
         }
         if a.starts_with("--") && !takes(&o.cmd, a) {
             let known = ["--dir", "--name", "--tags", "--tag", "--comment", "--json", "--all", "--run", "--limit", "--from", "--to", "--signals",
-                         "--signals-from", "--scope", "--map", "--case", "--cases"];
+                         "--signals-from", "--scope", "--map", "--case", "--cases", "--against", "--page", "--cut-bytes", "--quiet"];
             return Err(if known.contains(&a) { format!("{a}: not an option of sva runs {}\n{USAGE}", o.cmd) } else { format!("unknown option {a}\n{USAGE}") });
         }
         match a {
@@ -123,6 +142,10 @@ fn opts(args: &[String]) -> Result<Opt, String> {
             "--limit" => o.limit = crate::count(&val(&mut i, a)?, "--limit")? as usize,
             "--cases" => o.cases = Some(val(&mut i, a)?),
             "--case" => o.case = Some(val(&mut i, a)?),
+            "--against" => o.against = Some(val(&mut i, a)?.trim().to_string()),
+            "--page" => o.page = true,
+            "--cut-bytes" => o.cut_bytes = Some(crate::count(&val(&mut i, a)?, "--cut-bytes")? as usize),
+            "--quiet" => o.quiet = true,
             // sva diff's own, passed on as they are
             "--from" | "--to" | "--signals" | "--signals-from" | "--scope" | "--map" => {
                 let v = val(&mut i, a)?;
@@ -371,7 +394,15 @@ fn of_dump(r: &Value, dump: &str) -> bool {
 
 /// The time of now as UTC, ISO 8601 (2026-11-05T13:20:07Z).
 fn now_utc() -> String {
-    let s = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) as i64;
+    utc_of(std::time::SystemTime::now())
+}
+
+/// A time as UTC, ISO 8601 (a file's mtime: the dump's time on the disk, kept as source_mtime).
+fn utc_of(t: std::time::SystemTime) -> String {
+    let s = match t.duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => d.as_secs() as i64,
+        Err(e) => -(e.duration().as_secs() as i64),
+    };
     let (days, rem) = (s.div_euclid(86_400), s.rem_euclid(86_400));
     // civil from days (Howard Hinnant)
     let z = days + 719_468;
@@ -384,6 +415,23 @@ fn now_utc() -> String {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = yoe + era * 400 + i64::from(m <= 2);
     format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", rem / 3600, rem % 3600 / 60, rem % 60)
+}
+
+/// An ISO 8601 UTC time as `utc_of` writes it -> seconds since 1970 (None: not that shape).
+fn secs_of(t: &str) -> Option<i64> {
+    let b = t.as_bytes();
+    if b.len() < 19 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T' || b[13] != b':' || b[16] != b':' {
+        return None;
+    }
+    let n = |r: std::ops::Range<usize>| t.get(r)?.parse::<i64>().ok();
+    let (y, m, d) = (n(0..4)?, n(5..7)?, n(8..10)?);
+    // days from civil (Howard Hinnant)
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    Some((era * 146_097 + doe - 719_468) * 86_400 + n(11..13)? * 3600 + n(14..16)? * 60 + n(17..19)?)
 }
 
 fn bytes_text(n: u64) -> String {
@@ -399,7 +447,18 @@ fn bytes_text(n: u64) -> String {
 fn line(r: &Value) -> String {
     let tags = r["tags"].as_array().map(|t| t.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")).unwrap_or_default();
     let kept = r["kept"].as_str().unwrap_or("").replace('T', " ");
-    let mut s = format!("#{:<3} {}  {}{}  {} ({}, {} … {})", r["id"].as_u64().unwrap_or(0), kept.trim_end_matches('Z').get(..16).unwrap_or(&kept),
+    let kept = kept.trim_end_matches('Z').get(..16).unwrap_or(&kept);
+    // the dump's time on the disk when it is not the time kept (a run kept later than its simulation): HH:MM, the day too
+    // when it is another
+    let src = r["source_mtime"].as_str().unwrap_or("");
+    let of = match (secs_of(r["kept"].as_str().unwrap_or("")), secs_of(src)) {
+        (Some(k), Some(m)) if k.abs_diff(m) > 60 => {
+            let m = src.replace('T', " ");
+            format!(" (of a dump of {})", if m.get(..10) == kept.get(..10) { m.get(11..16) } else { m.get(..16) }.unwrap_or(""))
+        }
+        _ => String::new(),
+    };
+    let mut s = format!("#{:<3} {kept}{of}  {}{}  {} ({}, {} … {})", r["id"].as_u64().unwrap_or(0),
                         r["name"].as_str().unwrap_or(""), if tags.is_empty() { String::new() } else { format!("  [{tags}]") },
                         r["dump"].as_str().unwrap_or(""), bytes_text(r["bytes"].as_u64().unwrap_or(0)),
                         crate::ns(r["start"].as_u64().unwrap_or(0)), crate::ns(r["end"].as_u64().unwrap_or(0)));
@@ -618,6 +677,7 @@ fn keep(o: &Opt) -> Result<u8, String> {
         "id": id, "file": file, "name": name, "tags": o.tags.clone().unwrap_or_default(), "comment": o.comment.clone().unwrap_or_default(),
         "dump": Path::new(dump).file_name().map_or(dump.clone(), |n| n.to_string_lossy().into_owned()), "source": source,
         "kept": now_utc(), "bytes": std::fs::metadata(&target).map_or(0, |m| m.len()), "source_bytes": meta.len(),
+        "source_mtime": meta.modified().map_or(Value::Null, |t| utc_of(t).into()),
         "start": start, "end": end, "signals": signals,
     });
     let mut run = run;
@@ -760,20 +820,83 @@ fn diff(o: &Opt) -> Result<u8, String> {
     let dir = dir_of(o, Some(dump));
     let v = load(&dir)?;
     let all = v["runs"].as_array().cloned().unwrap_or_default();
+    let quiet = o.quiet || o.json || o.page;
+    // A: the run of --against (its FST), or DUMP (none, now)
+    let against = match o.against.as_deref() {
+        None | Some("now") => None,
+        Some("") => return Err("--against: a run's number or name, or now (the dump)".into()),
+        Some(k) => Some(all[find(&v, k)?].clone()),
+    };
+    let a_id = against.as_ref().and_then(|r| r["id"].as_u64());
+    let a_file = against.as_ref().map_or_else(|| dump.clone(), |r| file_of(&dir, r).to_string_lossy().into_owned());
+    let (who, a_word) = match &against {
+        Some(r) => (run_label(r), format!("#{}", r["id"].as_u64().unwrap_or(0))),
+        None => (dump.clone(), "the dump".to_string()),
+    };
+    let base_name = Path::new(dump).file_name().map_or(dump.clone(), |n| n.to_string_lossy().into_owned());
     let mut others = 0;
-    let runs: Vec<Value> = if o.runs.is_empty() {
+    let mut notes: Vec<String> = Vec::new();
+    // B: each run of DUMP (but A), or the ones of --run (a comma list too; now: DUMP itself, against a run only)
+    let mut runs: Vec<(Value, PathBuf)> = Vec::new();
+    if o.runs.is_empty() {
         let mine: Vec<Value> = all.iter().rev().filter(|r| o.all || of_dump(r, dump)).cloned().collect();
         others = all.len() - mine.len();
-        mine
+        runs = mine.into_iter().filter(|r| a_id.is_none() || r["id"].as_u64() != a_id).map(|r| {
+            let f = file_of(&dir, &r);
+            (r, f)
+        }).collect();
+        if runs.is_empty() && a_id.is_some() && others == 0 {
+            return Err(format!("{}: no run of {dump} but {who}, the run compared against (--run now: the dump)", dir.display()));
+        }
     } else {
-        o.runs.iter().map(|k| find(&v, k).map(|i| all[i].clone())).collect::<Result<_, _>>()?
-    };
+        let keys: Vec<String> = o.runs.iter().flat_map(|k| if k.contains(',') && find(&v, k).is_err() {
+            k.split(',').map(str::trim).filter(|s| !s.is_empty()).map(String::from).collect()
+        } else {
+            vec![k.trim().to_string()]
+        }).collect();
+        for k in &keys {
+            if k == "now" {
+                if a_id.is_none() {
+                    return Err("--run now: the dump itself, compared against a run (--against RUN)".into());
+                }
+                let mut r = json!({"id": 0, "name": "now", "tags": [], "kept": null, "file": base_name, "dump": base_name});
+                if o.case.is_some() {
+                    if let Some(c) = cases_for(o.cases.as_deref(), dump, quiet)? {
+                        r["cases"] = c.into();
+                    }
+                }
+                runs.push((r, PathBuf::from(dump)));
+                continue;
+            }
+            let r = all[find(&v, k)?].clone();
+            if a_id.is_some() && r["id"].as_u64() == a_id {
+                let n = format!("{}: the run compared against, skipped", run_label(&r));
+                if !notes.contains(&n) {
+                    notes.push(n);
+                }
+                continue;
+            }
+            let f = file_of(&dir, &r);
+            runs.push((r, f));
+        }
+        if runs.is_empty() {
+            return Err(format!("no run to compare: {who} is the run compared against (--run another, or now: the dump)"));
+        }
+    }
     if runs.is_empty() {
         return Err(format!("{}: no run of {dump} kept (sva runs keep {dump}){}", dir.display(),
                            if others > 0 { format!("; {others} of other dumps: --all") } else { String::new() }));
     }
+    if o.page && runs.len() > 1 {
+        return Err(format!("--page: the compare of one run ({} here: name one with --run)", runs.len()));
+    }
+    if !quiet {
+        for n in &notes {
+            eprintln!("sva: {n}");
+        }
+    }
     // the comparison's options parsed and checked once, before any run is read (B: each run's FST in turn)
-    let mut base = crate::diff::opts(&[&[dump.clone(), String::new()][..], &o.diff].concat())?;
+    let mut base = crate::diff::opts(&[&[a_file.clone(), String::new()][..], &o.diff].concat())?;
     let (from, to) = (base.from, base.to);
     // --signals-from read once (stdin can be read once): every run takes the same paths
     if let Some(src) = base.signals_from.take() {
@@ -801,37 +924,78 @@ fn diff(o: &Opt) -> Result<u8, String> {
         case_a = Some(match (from, to) {
             (Some(f), Some(t)) => (f, t),
             (None, None) => {
-                let c: Value = cases_for(o.cases.as_deref(), dump, o.json)?
-                    .ok_or_else(|| format!("{dump}: no cases (cocotb's {MARKS} beside it, --cases FILE, or --from/--to: the window of the case)"))?.into();
-                let x = case_in(&c, name).ok_or_else(|| format!("{dump}: no case {name} (its cases: {})", case_names(&c)))?;
+                // A's cases: the run's of --against, else the dump's
+                let c: Value = match &against {
+                    Some(r) if r["cases"].is_array() => r["cases"].clone(),
+                    Some(_) => return Err(format!("{who}: kept without cases (sva runs set {a_word} --cases FILE, or --from/--to: the window of the case)")),
+                    None => cases_for(o.cases.as_deref(), dump, quiet)?
+                        .ok_or_else(|| format!("{dump}: no cases (cocotb's {MARKS} beside it, --cases FILE, or --from/--to: the window of the case)"))?.into(),
+                };
+                let x = case_in(&c, name).ok_or_else(|| format!("{who}: no case {name} (its cases: {})", case_names(&c)))?;
                 (x["from"].as_u64().unwrap_or(0), x["to"].as_u64().unwrap_or(0))
             }
             _ => return Err("--case with --from and --to (the dump's window of the case), or neither (its cases)".into()),
         });
     }
-    let mut out = Vec::new();
-    for r in &runs {
+    // a run's comparison: B its FST (or DUMP), with --case its case of that name (B offset to it, over the shorter) ->
+    // the options and the case ({name, from, to, offset, shorter, note?}: B's case), or why the run is not compared
+    let prep = |r: &Value, f: &Path| -> Result<(crate::diff::Opt, Option<Value>), String> {
         let mut a = base.clone();
-        a.b = file_of(&dir, r).to_string_lossy().into_owned();
+        a.b = f.to_string_lossy().into_owned();
+        if let Some(n) = o.cut_bytes {
+            a.cut_bytes = n;
+        }
+        let (Some(name), Some((af, at))) = (&case, case_a) else { return Ok((a, None)) };
+        let Some(c) = case_in(&r["cases"], name) else {
+            return Err(if r["cases"].is_array() { format!("no case {name} in this run (its cases: {})", case_names(&r["cases"])) }
+                else if r["id"] == 0 { format!("no cases of {dump} (cocotb's {MARKS} beside it, --cases FILE)") }
+                else { "kept without cases (sva runs set RUN --cases FILE)".to_string() });
+        };
+        let (bf, bt) = (c["from"].as_u64().unwrap_or(0), c["to"].as_u64().unwrap_or(0));
+        let len = (at - af).min(bt - bf);
+        let offset = bf as i64 - af as i64;
+        (a.from, a.to, a.offset) = (Some(af), Some(af + len), offset);
+        // shorter: the length compared when the two cases differ (the page's spelling), note: the same in words
+        let mut x = json!({"name": name, "from": bf, "to": bt, "offset": offset, "shorter": if bt - bf != at - af { Value::from(len) } else { Value::Null }});
+        if bt - bf != at - af {
+            let d = (bt - bf).abs_diff(at - af);
+            x["note"] = format!("the run's case is {} {}: compared over the shorter", crate::ns(d),
+                                if bt - bf > at - af { "longer" } else { "shorter" }).into();
+        }
+        Ok((a, Some(x)))
+    };
+    let a_json = a_id.map_or(Value::Null, Value::from);
+    if o.page {
+        // the page's compare of the one run (sva diff --page's shape), the run and A named on it
+        let (r, f) = &runs[0];
+        let (a, c) = prep(r, f).map_err(|e| format!("{}: {e}", run_label(r)))?;
+        let (equal, mut d) = crate::diff::page_doc(&a)?;
+        d["run"] = r["id"].clone();
+        d["a"] = a_json;
+        if let Some(mut c) = c {
+            c.as_object_mut().map(|m| m.remove("note"));
+            d["case"] = c;
+        }
+        outln!("{}", serde_json::to_string(&d).unwrap_or_default());
+        return Ok(if equal { 0 } else { 1 });
+    }
+    let mut out = Vec::new();
+    for (r, f) in &runs {
         let mut x = json!({"id": r["id"], "name": r["name"], "tags": r["tags"], "kept": r["kept"], "file": r["file"], "dump": r["dump"]});
-        if let (Some(name), Some((af, at))) = (&case, case_a) {
-            let Some(c) = case_in(&r["cases"], name) else {
-                x["error"] = if r["cases"].is_array() { format!("no case {name} in this run (its cases: {})", case_names(&r["cases"])) }
-                    else { "kept without cases (sva runs set RUN --cases FILE)".to_string() }.into();
+        let a = match prep(r, f) {
+            Ok((a, c)) => {
+                if let Some(mut c) = c {
+                    c.as_object_mut().map(|m| m.remove("shorter"));
+                    x["case"] = c;
+                }
+                a
+            }
+            Err(e) => {
+                x["error"] = e.into();
                 out.push(x);
                 continue;
-            };
-            let (bf, bt) = (c["from"].as_u64().unwrap_or(0), c["to"].as_u64().unwrap_or(0));
-            let len = (at - af).min(bt - bf);
-            let offset = bf as i64 - af as i64;
-            (a.from, a.to, a.offset) = (Some(af), Some(af + len), offset);
-            x["case"] = json!({"name": name, "from": bf, "to": bt, "offset": offset});
-            if bt - bf != at - af {
-                let d = (bt - bf).abs_diff(at - af);
-                x["case"]["note"] = format!("the run's case is {} {}: compared over the shorter", crate::ns(d),
-                                            if bt - bf > at - af { "longer" } else { "shorter" }).into();
             }
-        }
+        };
         match crate::diff::run_doc(&a) {
             Ok(d) => {
                 let sigs = differing(&d);
@@ -858,44 +1022,58 @@ fn diff(o: &Opt) -> Result<u8, String> {
     let errs: Vec<&str> = out.iter().filter_map(|x| x["error"].as_str()).collect();
     if errs.len() == out.len() && errs.windows(2).all(|w| w[0] == w[1]) {
         let first = errs[0].to_string();
-        return Err(first.replace(&file_of(&dir, &runs[0]).to_string_lossy().into_owned(), "the run"));
+        return Err(first.replace(&runs[0].1.to_string_lossy().into_owned(), "the run"));
     }
     let errors = errs.len();
     let differ = out.iter().any(|x| x["equal"].as_bool() == Some(false) && x["error"].is_null());
     if o.json {
-        let mut doc = json!({"wavelens": "runs-diff", "version": 1, "unit": "ps", "dump": dump, "dir": dir.to_string_lossy(),
+        let against = against.as_ref().map_or(Value::Null, |r| json!({"id": r["id"], "name": r["name"], "file": r["file"]}));
+        let mut doc = json!({"wavelens": "runs-diff", "version": 1, "unit": "ps", "dump": dump, "dir": dir.to_string_lossy(), "against": against,
                          "from": from, "to": to, "others": others, "runs": out});
         if let (Some(name), Some((af, at))) = (&case, case_a) {
             doc["case"] = json!({"name": name, "from": af, "to": at});
         }
+        if !notes.is_empty() {
+            doc["notes"] = notes.into();
+        }
         outln!("{}", serde_json::to_string_pretty(&doc).unwrap_or_default());
     } else {
-        text(dump, &out, others, case.as_deref());
+        text(&who, &a_word, &out, others, case.as_deref());
     }
     Ok(if errors > 0 { 2 } else if differ { 1 } else { 0 })
 }
 
+/// A run as a diff names it: #3 golden (DUMP itself as a B: now).
+fn run_label(r: &Value) -> String {
+    match r["id"].as_u64() {
+        Some(0) => "now".into(),
+        id => format!("#{} {}", id.unwrap_or(0), r["name"].as_str().unwrap_or("")),
+    }
+}
+
 /// sva runs diff as text: a line per run; the window in the header when every run has the same, else on each line.
-fn text(dump: &str, out: &[Value], others: usize, case: Option<&str>) {
+/// `who`: A as the header names it (the dump, or `#1 golden` of --against); `a_word`: A in a run's line (the dump, #1).
+fn text(who: &str, a_word: &str, out: &[Value], others: usize, case: Option<&str>) {
     let win = |x: &Value| x["from"].as_i64().zip(x["to"].as_i64());
     let wins: Vec<(i64, i64)> = out.iter().filter_map(win).collect();
     let one = !wins.is_empty() && wins.windows(2).all(|w| w[0] == w[1]) && out.iter().all(|x| win(x).is_some() || !x["error"].is_null());
     let t = |v: i64| crate::ns(v.max(0) as u64);
     let header = match case {
-        Some(c) => format!(" over the case {c}{}", if one { format!(" ({} … {} of the dump)", t(wins[0].0), t(wins[0].1)) } else { String::new() }),
+        Some(c) => format!(" over the case {c}{}", if one { format!(" ({} … {} of {a_word})", t(wins[0].0), t(wins[0].1)) } else { String::new() }),
         None if one => format!(" over {} … {}", t(wins[0].0), t(wins[0].1)),
         None => String::new(),
     };
-    outln!("{dump} against {} run{}{header}{}:", out.len(), if out.len() == 1 { "" } else { "s" },
+    outln!("{who} against {} run{}{header}{}:", out.len(), if out.len() == 1 { "" } else { "s" },
            if others > 0 { format!(" ({others} of other dumps not compared: --all)") } else { String::new() });
+    let (only_a, only_b) = (format!("of {a_word} not in the run"), format!("of the run not in {a_word}"));
     for x in out {
-        let id = format!("#{} {}", x["id"].as_u64().unwrap_or(0), x["name"].as_str().unwrap_or(""));
+        let id = run_label(x);
         let mut at = if one { String::new() } else { win(x).map_or(String::new(), |(f, u)| format!(" over {} … {}", t(f), t(u))) };
         if let Some(c) = x.get("case").filter(|c| c["offset"].as_i64().unwrap_or(0) != 0 || !c["note"].is_null()) {
             at += &format!(" (its case at {}{})", t(c["from"].as_i64().unwrap_or(0)), c["note"].as_str().map_or(String::new(), |n| format!("; {n}")));
         }
         let (oa, ob) = (x["only_a_count"].as_u64().unwrap_or(0), x["only_b_count"].as_u64().unwrap_or(0));
-        let sides = [(oa, "of the dump not in the run"), (ob, "of the run not in the dump")].iter().filter(|(n, _)| *n > 0)
+        let sides = [(oa, &only_a), (ob, &only_b)].iter().filter(|(n, _)| *n > 0)
             .map(|(n, w)| format!("; {n} {w}")).collect::<String>();
         if let Some(e) = x["error"].as_str() {
             outln!("  {id}: {e}");
@@ -940,6 +1118,13 @@ mod tests {
         let t = now_utc();
         assert_eq!(t.len(), 20, "{t}");
         assert!(t.starts_with("20") && t.ends_with('Z') && &t[10..11] == "T", "{t}");
+        // a file's time and back (source_mtime against kept)
+        for s in [0u64, 951_782_400, 1_577_836_799, 1_798_000_007] {
+            let iso = utc_of(std::time::UNIX_EPOCH + std::time::Duration::from_secs(s));
+            assert_eq!(secs_of(&iso), Some(s as i64), "{iso}");
+        }
+        assert_eq!(utc_of(std::time::UNIX_EPOCH + std::time::Duration::from_secs(951_782_400)), "2000-02-29T00:00:00Z");
+        assert_eq!(secs_of("2026-11-06"), None);
     }
 
     #[test]

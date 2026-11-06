@@ -1924,7 +1924,12 @@ def vscode_tab(browser, build):
         { id: 2, name: 'seed 7', tags: [], comment: '', kept: '2026-11-02T10:00:00Z', dump: 'enum.vcd', file: '2-enum.fst' }];
       window.runsAnswer = m => {
         if (window.__RUNERR && window.__RUNERR[m.op]) return { error: window.__RUNERR[m.op] };
-        if (m.op === 'list') return { dir: '/host/dumps/.wavelens-runs', runs: window.__RUNS };
+        if (m.op === 'list') return { dir: '/host/dumps/.wavelens-runs', runs: window.__RUNS, now: { name: 'enum.vcd', mtime: 1762423380000, bytes: 1234 },
+          shown: window.__SHOWN || 0 };
+        // A: a run's waves served as the dump's (the same dump under the run's name; __OPENFILE: another, e.g. one without tb.plain)
+        if (m.op === 'open') { window.__SHOWN = m.run; if (!m.run) return ANSWER.source();
+          const r = window.__RUNS.find(x => x.id === m.run); if (!r) return { error: 'no run #' + m.run };
+          return { src: ANSWER.source().src.replace(/\/[^/]*$/, window.__OPENFILE || '/dump.vcd'), name: '#' + r.id + ' ' + r.name, lazy: false }; }
         if (m.op === 'keep') { const r = { id: 3, name: m.name, tags: m.tags, comment: m.comment, kept: '2026-11-05T10:00:00Z', dump: 'enum.vcd', file: '3-enum.fst' };
           window.__RUNS = window.__RUNS.concat([r]); return { run: r }; }
         if (m.op === 'set') { const r = window.__RUNS.find(x => x.id === m.run); if (!r) return { error: 'no run #' + m.run };
@@ -1950,6 +1955,9 @@ def vscode_tab(browser, build):
                else r.fulfill(status=404))
     page.route(src + '/', lambda r: r.fulfill(body=html, content_type='text/html'))
     page.route(src + '/dump2.vcd', lambda r: r.fulfill(body=dump2, content_type='text/plain'))   # (the last route first)
+    less = ''.join(ln for ln in (ROOT / 'tests' / 'unit' / 'vcd' / 'enum.vcd').read_text().splitlines(True)
+                   if not (ln.rstrip().endswith(' #') or ' # plain ' in ln))   # a run without tb.plain (the run pick: the snapshot)
+    page.route(src + '/less.vcd', lambda r: r.fulfill(body=less, content_type='text/plain'))
     page.goto(src + '/')
 
     def until(expr, timeout=5000):   # wait_for_function evaluates a string: the CSP refuses it (no 'unsafe-eval')
@@ -2183,10 +2191,13 @@ def vscode_tab(browser, build):
     page.bring_to_front()
     check(js("!v.root.querySelector('.bar [data-act=druns]').hidden"), 'the bar has Runs… where the host keeps runs')
     page.locator('.wv canvas').first.click(); page.keyboard.press('g'); page.keyboard.press('u')
-    until("document.querySelectorAll('.wv-runs .rn').length === 2")
-    check(js("[...v.root.querySelectorAll('.wv-runs .rn b')].map(b => b.textContent).join(' ')") == '#2 #1', 'gu: the panel lists the runs, newest first')
+    until("document.querySelectorAll('.wv-runs .rn').length === 3")
+    check(js("[...v.root.querySelectorAll('.wv-runs .rn b')].map(b => b.textContent).join(' ')") == 'now #2 #1',
+          'gu: the panel lists the dump of now, then the runs, newest first')
+    check(js("[...v.root.querySelectorAll('.wv-runs .rn .rA.on')].map(e => e.closest('.rn').dataset.i).join()") == '0' and
+          not js("v.root.querySelector('.wv-runs .rn .rB.on')"), 'the row now is A (the waves shown), no B yet')
     js("v.zoomTo(5000, 10000), 0")
-    page.click('.wv-runs .rn[data-i="1"]')
+    page.click('.wv-runs .rn[data-i="2"]')
     until("window.__sent.some(m => m.type === 'runs' && m.op === 'compare')")
     until("(v => v && v.cmp && v.cmp.name === '#1 golden')(WaveLens.views().find(x => x.root.isConnected))")
     c = sent('runs')[-1]
@@ -2220,11 +2231,11 @@ def vscode_tab(browser, build):
     c = sent('runs')[-1]
     check(c['run'] == 2 and 'case' not in c, 'a run without that case: over the window as it is')
     page.click('.bar [data-act=druns]')
-    until("document.querySelectorAll('.wv-runs .rn').length === 2")
+    until("document.querySelectorAll('.wv-runs .rn').length === 3")
     page.click('.wv-runs [data-a=keep]')
     page.fill('.wv-runs .rfn', 'after fix'); page.fill('.wv-runs .rft', 'fix, b-12'); page.fill('.wv-runs .rfc', 'the counter')
     page.click('.wv-runs .rfo')
-    until("document.querySelectorAll('.wv-runs .rn').length === 3")
+    until("document.querySelectorAll('.wv-runs .rn').length === 4")
     k = [m for m in sent('runs') if m['op'] == 'keep'][-1]
     check((k['name'], k['tags'], k['comment']) == ('after fix', ['fix', 'b-12'], 'the counter'), f'Keep this dump…: its name, tags, comment to the host {k}')
     check(k.get('cases') == [{'label': 'tc1', 'from': 5000, 'to': 15000}], f'and your spans with a label as its test cases ({k.get("cases")})')
@@ -2238,7 +2249,7 @@ def vscode_tab(browser, build):
     b = js("[v.runsP.form.hidden, !!document.querySelector('.wv-runs'), document.activeElement === v.runsP.list]")
     check(a == [True, True, 'Keep'] and b == [True, True, True] and len(ops('keep')) == 1,
           f'k: the form to keep the dump of now; Esc in it: cancelled, nothing kept, the panel stays, the list focused {a} {b}')
-    js("(v.runsP.pick(v.runsL.findIndex(r => r.id === 2), false), 0)"); rl.focus(); page.keyboard.press('e')
+    js("(v.runsP.pick(v.runsP.rowOf(2), false), 0)"); rl.focus(); page.keyboard.press('e')
     a = js("[v.runsP.form.querySelector('.rfn').value, v.runsP.form.querySelector('.rfo').textContent]")
     page.fill('.wv-runs .rfn', 'seed 7b'); page.fill('.wv-runs .rft', 'x, y'); page.click('.wv-runs .rfo')
     until("[...document.querySelectorAll('.wv-runs .rn .nm')].some(e => e.textContent === 'seed 7b')")
@@ -2259,7 +2270,7 @@ def vscode_tab(browser, build):
     check(len(ops('diff')) == n0 + 2 and page.evaluate(status) == 'Δ all: sva runs diff: exit 2',
           f'a: Δ all, each run\'s numbers; the host\'s error said ({page.evaluate(status)})')
     page.evaluate("window.__RUNERR = null; window.__RMNO = true")
-    js("(v.runsP.pick(v.runsL.findIndex(r => r.id === 3), false), 0)"); rl.focus(); page.keyboard.press('Delete')
+    js("(v.runsP.pick(v.runsP.rowOf(3), false), 0)"); rl.focus(); page.keyboard.press('Delete')
     until("window.__sent.some(m => m.type === 'runs' && m.op === 'rm')"); page.wait_for_timeout(100)
     a = [ops('rm')[-1].get('run'), js("v.runsL.map(r => r.id).join()"), page.evaluate(status)]
     page.evaluate("window.__RMNO = false; window.__RUNERR = { rm: 'the file is in use' }")
@@ -2279,7 +2290,7 @@ def vscode_tab(browser, build):
     rl.focus(); page.keyboard.press('Escape')
     gone = js("!document.querySelector('.wv-runs') && !v.runsP")
     page.click('.bar [data-act=druns]')
-    until("document.querySelectorAll('.wv-runs .rn').length === 3")
+    until("document.querySelectorAll('.wv-runs .rn').length === 4")
     check(gone, 'Esc in the list closes the panel')
     # review of the runs (2026-11-05): the list's keys compare once they stop (B-19)
     n0 = len([m for m in sent('runs') if m['op'] == 'compare'])
@@ -2320,7 +2331,7 @@ def vscode_tab(browser, build):
     check(js("!!document.querySelector('.wv-runs') && v.cmp && v.cmp.name === '#1 golden'"), 'the dump read again: the panel back, compared with the run again')
     # the run compared removed: the compare goes with it (B-12)
     page.locator('.wv-runs .rl').focus()
-    i = js("v.runsL.findIndex(r => r.id === 1)")
+    i = js("v.runsP.rowOf(1)")
     js(f"v.runsP.pick({i}, false)")
     page.keyboard.press('Delete')
     until("(v => v && v.runCur == null)(WaveLens.views().find(x => x.root.isConnected))")
@@ -2331,15 +2342,84 @@ def vscode_tab(browser, build):
     until("(v => v && v.runCur === 9)(WaveLens.views().find(x => x.root.isConnected))")
     check(True, ']r with no run compared: the newest, a run kept in a shell meanwhile')
     page.keyboard.press('Escape')
+    # the run pick (review 2026-11-06): A and B on the list. B is the compare's: dropped with it (B-01), kept in a saved state
+    # (B-02), the row ]r lands on is the one lit (B-03); w makes a run A (its waves here, the window and rows kept, B compared
+    # with the new A), x no B (]w then walks the runs, nothing compared); the rows a run lacks come back on the next (snapshot)
+    page.click('.bar [data-act=druns]')
+    until("document.querySelector('.wv-runs .rn .rB.on')")
+    lit = js("[...v.root.querySelectorAll('.wv-runs .rn')].filter(e => e.querySelector('.rB.on')).map(e => +e.dataset.i)")
+    check(lit == [js("v.runsP.rowOf(9)")], f'B lit on the run compared ({lit})')
+    page.click('.bar [data-act=dcmpx]')
+    until("(v => v && (!v.root.querySelector('.wv-runs .rn .rB.on')))(WaveLens.views().find(x => x.root.isConnected))")
+    check(js("v.runCur") is None, 'the bar\'s ✕: no B (the row unlit, ⟳ and ]r start afresh)')
+    js("v.runCompare(2, true)")
+    st = js("v.state()")
+    js("v.run([{ op: 'compare', off: true }])")
+    a = js("v.runCur")
+    js(f"v.setState({json.dumps(st)})")
+    until("(v => v && (v.runCur === 2 && v.root.querySelector('.wv-runs .rn .rB.on')))(WaveLens.views().find(x => x.root.isConnected))")
+    check(st['compare'].get('run') == 2 and a is None, f'the saved state keeps B (compare.run {st["compare"].get("run")}); compare off drops it ({a})')
+    page.locator('.wv-runs .rl').focus(); page.keyboard.press('Escape')
+    page.locator('.wv canvas').first.click(); page.keyboard.press('g'); page.keyboard.press('u')
+    until("(v => v && (v.runsP))(WaveLens.views().find(x => x.root.isConnected))")
+    page.locator('.wv canvas').first.click(); page.keyboard.press(']'); page.keyboard.press('r')
+    until("(v => v && (v.runCur !== 2 && v.runCur != null))(WaveLens.views().find(x => x.root.isConnected))")
+    page.keyboard.press(']'); page.keyboard.press('r'); page.wait_for_timeout(50)
+    until("(v => v && (v.runsP && v.runsP.fi === v.runsP.rowOf(v.runCur)))(WaveLens.views().find(x => x.root.isConnected))")
+    check(js("v.root.querySelectorAll('.wv-runs .rn.pv').length") == 1, ']r twice, the panel open: the row focused is the run compared')
+    js("v.runCompare(2, true)")
+    before = js("[v.t0, v.span, v.M.rows.map(r => r.full).join()]")
+    n0 = len([m for m in sent('runs') if m['op'] == 'compare'])
+    js(f"(v.runsP.pick(v.runsP.rowOf(3), false), 0)"); page.locator('.wv-runs .rl').focus(); page.keyboard.press('w')
+    until("(v => v && v.runsShown === 3 && v.runCur === 2)(WaveLens.views().find(x => x.root.isConnected))", timeout=15000)
+    o = [m for m in sent('runs') if m['op'] == 'open'][-1]
+    c = [m for m in sent('runs') if m['op'] == 'compare'][-1]
+    after = js("[v.t0, v.span, v.M.rows.map(r => r.full).join()]")
+    check(o['run'] == 3 and after == before and js("v.opts.title") == '#3 after fix' and js("v.cmpNames()[0]") == '#3 after fix',
+          f'w on a run: its waves read here (open {o}), the window and rows kept ({before[:2]} → {after[:2]}), A named #3')
+    check(c['against'] == 3 and c['run'] == 2 and len([m for m in sent('runs') if m['op'] == 'compare']) == n0 + 1,
+          f'B kept: compared with the new A ({c.get("against")} with {c.get("run")})')
+    lit = js("[...v.root.querySelectorAll('.wv-runs .rn')].map(e => (e.querySelector('.rA.on') ? 'A' : '') + (e.querySelector('.rB.on') ? 'B' : '')).join()")
+    check(lit == js("v.runsP.rows().map(r => r.id === 3 ? 'A' : r.id === 2 ? 'B' : '').join()"), f'the letters on their rows: A on #3, B on #2 ({lit})')
+    st = js("v.root.querySelector('.wv-runs .ms').textContent")
+    js("v.runCompare(2, true)")
+    st = js("v.root.querySelector('.wv-runs .ms').textContent")
+    check(st.startswith('A #3 after fix = B #2 seed 7b') or st.startswith('A #3 after fix ≠ B #2 seed 7b'), f'the status names both, with their letters ({st})')
+    js("v.runCompare(3, true)")
+    check('#3 is A' in js("v.root.querySelector('.wv-runs .ms').textContent"), 'B = A refused, said')
+    page.locator('.wv-runs .rl').focus(); page.keyboard.press('x')
+    n0 = len([m for m in sent('runs') if m['op'] == 'compare'])
+    page.locator('.wv canvas').first.click(); page.keyboard.press(']'); page.keyboard.press('w')
+    until("(v => v && v.runsShown === 2)(WaveLens.views().find(x => x.root.isConnected))", timeout=15000)
+    page.wait_for_timeout(100)
+    check(js("v.runCur") is None and len([m for m in sent('runs') if m['op'] == 'compare']) == n0, ']w with no B: the next run\'s waves, nothing compared')
+    check(js("document.activeElement === v.canvas"), ']w from the waves: the keys stay on the waves (]w ]w … walks on)')
+    page.keyboard.press(']'); page.keyboard.press('w')
+    until("(v => v && v.runsShown === 0)(WaveLens.views().find(x => x.root.isConnected))", timeout=15000)
+    check([m for m in sent('runs') if m['op'] == 'open'][-1]['run'] == 0 and js("v.opts.title") == 'enum.vcd', ']w past the last run: the dump of now')
+    js("v.setState({ wavelens: 'state', version: 3, hidden: ['tb.plain'] })")
+    page.evaluate("window.__OPENFILE = '/less.vcd'")
+    js("v.runsShow(9)")
+    until("(v => v && v.runsShown === 9)(WaveLens.views().find(x => x.root.isConnected))", timeout=15000)
+    a = [js("v.M.rows.some(r => r.full === 'tb.plain')"), js("v.root.querySelector('.wv-runs .ms').textContent")]
+    page.evaluate("window.__OPENFILE = null")
+    js("v.runsShow(3)")
+    until("(v => v && v.runsShown === 3)(WaveLens.views().find(x => x.root.isConnected))", timeout=15000)
+    check(not a[0] and 'tb.plain' in a[1] and js("v.hiddenRows.has('tb.plain')"),
+          f'a run without a row of yours: said ({a[1]}); the next run that has it: hidden again, as on now')
+    js("v.runsShow(0)")
+    until("(v => v && v.runsShown === 0)(WaveLens.views().find(x => x.root.isConnected))", timeout=15000)
+    page.locator('.wv-runs .rl').focus(); page.keyboard.press('Escape')
     # every runs message host.js sent, by operation: its keys (T-03: rm with id in place of run passed before), and against the table
     shapes = {}
     for m in sent('runs'):
         shapes.setdefault(m['op'], set()).add(tuple(sorted(set(m) - {'type', 'id', 'op'})))
     sig = ('from', 'signals', 'to')
     want = {'list': {()}, 'keep': {('comment', 'name', 'tags'), ('cases', 'comment', 'name', 'tags')}, 'set': {('comment', 'name', 'run', 'tags')},
-            'rm': {('run',)}, 'diff': {sig, ('case',) + sig}, 'compare': {('from', 'run', 'signals', 'to'), ('case', 'from', 'run', 'signals', 'to')}}
+            'rm': {('run',)}, 'diff': {('against',) + sig, ('against', 'case') + sig}, 'open': {('run',)},
+            'compare': {('against', 'from', 'run', 'signals', 'to'), ('against', 'case', 'from', 'run', 'signals', 'to')}}
     check(set(shapes) == set(want) and all(shapes[k] <= want[k] for k in want) and all(type(m['run']) is int for m in sent('runs') if 'run' in m),
-          f'every runs message of host.js with its keys: list, keep, set, rm, diff, compare {shapes}')
+          f'every runs message of host.js with its keys: list, keep, set, rm, diff, compare, open {shapes}')
     bad = page.evaluate('window.__bad')
     check(not bad, f'every message of host.js one of vscode/protocol.js with its keys, every answer of the fake host one its type gets {bad[:3]}')
     # a link of a log (vscode/links.js): the extension runs goto in the tab
@@ -4265,7 +4345,9 @@ def compare_view(browser, build):
       await hd.run([{ op: 'show' }, { op: 'only', modules: 'tb.u' }]); hd.cursor = 30; hd.diffStep(1); out.step = [s0, s1, hd.cursor];
       const sp = Array.from({ length: 1000 }, (_, i) => [i * 10, i * 10 + 5]);
       const big = o => mk({ signal: [{ name: 'a', path: 'tb.a', tv: [[0, '0']] }], time: { t0: 0, t1: 100000, unit: 'ps' }, ...o });
-      const n1 = big({ compare: { name: 'r.vcd', from: 0, to: 100000, signals: { 'tb.a': { spans: sp } } } }), n2 = big({});
+      // (n2: compared too, nothing differs: the axis's tag A in both, the bands counted alone)
+      const n1 = big({ compare: { name: 'r.vcd', from: 0, to: 100000, signals: { 'tb.a': { spans: sp } } } }),
+        n2 = big({ compare: { name: 'r.vcd', from: 0, to: 100000, signals: { 'tb.a': { spans: [] } } } });
       out.px = nrect(n1.toSVG()) - nrect(n2.toSVG());
       return out; })()""")
     check(got['none'][0] and got['none'][1] is None and got['none'][2] == 'a', f'no compare: no A B in the bar, none shown {got["none"]}')
