@@ -31,6 +31,7 @@ macro_rules! outln {
 
 const USAGE: &str = "usage: sva diff A B [--signals PAT,...] [--signals-from FILE] [--scope S] [--from T] [--to T] [--offset [-]T] [--map A=B ...]
                 [--segment SIGNAL [--align]] [--json [FILE.json|-]] [--junit FILE] [--limit N] [--spans N] [--rank [N]] [--quiet]
+                [--page [--cut-bytes N]]
        sva diff --results A.json B.json …: the assertions' results of two runs (sva diff --results --help)
 Two dumps (VCD or FST) compared change by change, streamed: neither is held in memory. A signal of A pairs with the one
 of B at its path; --map A=B renames A's paths for B: a scope (the longest one that matches) or one signal's path (an
@@ -44,7 +45,10 @@ in A; --align: segment k of B starts at the k-th change of the signal in B and c
 rest of a longer segment is not compared). --json: the result as JSON (times in ps) to FILE (a name ending with .json, as
 the dumps can follow), or stdout instead of the text; --junit: a JUnit XML report, a test case per segment. --limit: differences listed and kept (default 20, 0 all: each one held in memory; only_a / only_b are whole); --spans:
 per signal its stretches that differ in the JSON (default 0: none). --rank: the signals by their first difference (the first N,
-default 20): who differed first and what followed, by time only (no cause: the dumps have no netlist). TIME is a number with a unit (100ns, 2.5us; ps without one).
+default 20): who differed first and what followed, by time only (no cause: the dumps have no netlist). --page: the
+compare as a page takes it (Compare…, the Runs panel, a config's \"compare\": {name, from, to, compared, differ, changes,
+first, signals {path: {spans, b}}, missing, map, notes?, segments?}), with B's values of the signals that differ over the
+window (vcd, shift; at most --cut-bytes, 32 MiB: else cutError says why), JSON on stdout (or --json FILE). TIME is a number with a unit (100ns, 2.5us; ps without one).
 Exit status: 0 the dumps are equal over the window; 1 they differ; 2 usage, a dump that does not read, a signal not
 in it, no time in common.";
 
@@ -133,31 +137,89 @@ pub(crate) fn glob(p: &[u8], s: &[u8]) -> bool {
     }
 }
 
-#[derive(Default)]
-struct Opt {
-    a: String,
-    b: String,
-    signals: Vec<String>,
-    signals_from: Option<String>,
-    scope: String,
-    from: Option<u64>,
-    to: Option<u64>,
-    offset: i64,
-    map: Vec<(String, String)>,
-    segment: Option<String>,
-    align: bool,
-    json: Option<String>,
-    junit: Option<String>,
-    limit: usize,
-    spans: usize,
-    rank: usize,
-    quiet: bool,
+/// The options of a comparison: `sva diff`'s arguments, or built by `sva runs diff` (one per run, B swapped).
+#[derive(Default, Clone)]
+pub(crate) struct Opt {
+    pub(crate) a: String,
+    pub(crate) b: String,
+    pub(crate) signals: Vec<String>,
+    pub(crate) signals_from: Option<String>,
+    pub(crate) scope: String,
+    pub(crate) from: Option<u64>,
+    pub(crate) to: Option<u64>,
+    pub(crate) offset: i64,
+    pub(crate) map: Vec<(String, String)>,
+    pub(crate) segment: Option<String>,
+    pub(crate) align: bool,
+    pub(crate) json: Option<String>,
+    pub(crate) junit: Option<String>,
+    pub(crate) limit: usize,
+    pub(crate) spans: usize,
+    pub(crate) rank: usize,
+    pub(crate) quiet: bool,
     /// the document returned, nothing written (sva runs diff: one per run kept)
-    silent: bool,
+    pub(crate) silent: bool,
+    /// the paths of --signals-from as read already (sva runs diff reads them once for every run)
+    pub(crate) listed: Option<Vec<String>>,
+    /// --page: the page's shape of a compare (Compare…, the Runs panel, a config's "compare"), B's values in it
+    pub(crate) page: bool,
+    pub(crate) cut_bytes: usize,
+    /// --large-bytes (for the tests; None: 64 MiB): two dumps this large together say how far the comparison is
+    pub(crate) large: Option<u64>,
 }
 
-fn opts(args: &[String]) -> Result<Opt, String> {
-    let mut o = Opt { limit: 20, ..Opt::default() };
+/// The bytes of B's values a page carries at most (its "vcd": B, A+B on the page).
+const PAGE_CUT: usize = 32 << 20;
+/// The stretches that differ kept per signal of a page.
+const PAGE_SPANS: usize = 1000;
+
+/// A comparison's document in the shape a page takes (wavelens model.js cmpNorm): {name, from, to, compared, differ,
+/// changes, first, signals: {path: {spans, b, other?, more?}}, missing, map, segments?, notes?}, ps; with B's values of
+/// the signals that differ over the window (not with --align: no one offset) as `vcd` and `shift` (B's time less A's), or
+/// `cutError` saying why they are not there.
+fn page_of(o: &Opt, d: &Value) -> Value {
+    let mut sig = serde_json::Map::new();
+    for x in d["signals"].as_array().into_iter().flatten() {
+        let mut e = json!({"spans": x.get("spans").cloned().unwrap_or_else(|| json!([])), "b": x["b"]});
+        if !x["other"].is_null() {
+            e["other"] = x["other"].clone();
+        }
+        if x["more"].as_u64().unwrap_or(0) > 0 {
+            e["more"] = x["more"].clone();
+        }
+        sig.insert(x["path"].as_str().unwrap_or("").to_string(), e);
+    }
+    let missing: Vec<Value> = d["only_a"].as_array().into_iter().flatten().chain(d["not_in_a"].as_array().into_iter().flatten()).cloned().collect();
+    let name = std::path::Path::new(&o.b).file_name().map_or(o.b.clone(), |n| n.to_string_lossy().into_owned());
+    let mut out = json!({"name": name, "from": d["from"], "to": d["to"], "compared": d["signals_compared"], "differ": d["signals_differ"],
+                         "changes": d["compared"], "first": d["first"].get("t").cloned().unwrap_or(Value::Null), "signals": sig,
+                         "missing": missing, "map": d["map"]});
+    for k in ["segments", "notes"] {
+        if d[k].as_array().is_some_and(|a| !a.is_empty()) {
+            out[k] = d[k].clone();
+        }
+    }
+    let mut diff: Vec<String> = d["signals"].as_array().into_iter().flatten()
+        .filter(|x| x["spans"].as_array().is_some_and(|s| !s.is_empty()))
+        .map(|x| x["b"].as_str().or(x["path"].as_str()).unwrap_or("").to_string()).collect();
+    diff.sort();
+    diff.dedup();
+    if !diff.is_empty() && !o.align {
+        let shift = o.offset;
+        let (f, t) = (d["from"].as_i64().unwrap_or(0) + shift, d["to"].as_i64().unwrap_or(0) + shift);
+        match crate::vcd::cut_text(&o.b, f.max(0) as u64, t.max(0) as u64, diff, o.cut_bytes) {
+            Ok(v) => {
+                out["vcd"] = v.into();
+                out["shift"] = shift.into();
+            }
+            Err(e) => out["cutError"] = e.into(),
+        }
+    }
+    out
+}
+
+pub(crate) fn opts(args: &[String]) -> Result<Opt, String> {
+    let mut o = Opt { limit: 20, cut_bytes: PAGE_CUT, ..Opt::default() };
     let mut files = Vec::new();
     let mut i = 0;
     let val = |i: &mut usize, f: &str| -> Result<String, String> {
@@ -208,6 +270,9 @@ fn opts(args: &[String]) -> Result<Opt, String> {
                 }
             }
             "--quiet" | "-q" => o.quiet = true,
+            "--page" => o.page = true,
+            "--cut-bytes" => o.cut_bytes = crate::count(&val(&mut i, a)?, "--cut-bytes")? as usize,
+            "--large-bytes" => o.large = Some(crate::count(&val(&mut i, a)?, "--large-bytes")?),
             s if s.starts_with('-') && s.len() > 1 => return Err(format!("unknown option {s}\n{USAGE}")),
             s => files.push(s.to_string()),
         }
@@ -238,12 +303,23 @@ struct Dump {
     ps: f64,
     end: Option<i64>,
     bytes: u64,
+    /// An FST's start (the dump's unit): only an FST can be read from a later time on (its blocks found by time)
+    fst_start: Option<u64>,
     _tmp: Option<crate::fst::TempFst>,
 }
 
 /// A time of the dump in ps.
 fn to_ps(t: u64, ps: f64) -> i64 {
     if ps.fract() == 0.0 { (t as i64).saturating_mul(ps as i64) } else { (t as f64 * ps).round() as i64 }
+}
+
+/// An FST's start in its unit (its header), None for another kind of dump.
+fn fst_start(path: &str) -> Option<u64> {
+    let mut f = BufReader::new(std::fs::File::open(path).ok()?);
+    if !fst_reader::is_fst_file(&mut f) {
+        return None;
+    }
+    fst_reader::FstReader::open(f).ok().map(|r| r.get_header().start_time)
 }
 
 /// The last time of a dump: an FST's header (its last block), a VCD's last `#time` (the tail read, more of it until one is
@@ -262,13 +338,20 @@ pub(crate) fn end_time(path: &str) -> Option<u64> {
         let mut tail = Vec::new();
         f.read_to_end(&mut tail).ok()?;
         let text = String::from_utf8_lossy(&tail);
-        let mut words = text.split_ascii_whitespace().collect::<Vec<_>>();
-        if k < len && !words.is_empty() {
-            words.remove(0);   // the first word may be cut
+        // read forwards from a line's start (the first line of a tail may be cut): a vector's, a real's or a string's value
+        // is followed by its code, which may look like a time (`b101 #5`) or like a string (`b101 s0` then `#50`)
+        let text = if k < len { text.split_once('\n').map_or("", |p| p.1) } else { &text };
+        // the header's codes are no times (`$var wire 8 #5 b $end`)
+        let text = text.rsplit_once("$enddefinitions").map_or(text, |p| p.1);
+        let mut t = None;
+        let mut words = text.split_ascii_whitespace();
+        while let Some(w) = words.next() {
+            if w.starts_with(['b', 'B', 'r', 'R', 's', 'S']) {
+                words.next();
+            } else if let Some(n) = w.strip_prefix('#').and_then(|n| n.parse().ok()) {
+                t = Some(n);
+            }
         }
-        // `b101 #5`: an id code that looks like a time, the word after a vector's, a real's or a string's value
-        let code = |i: usize| i > 0 && words[i - 1].starts_with(['b', 'B', 'r', 'R', 's', 'S']);
-        let t = (0..words.len()).rev().find_map(|i| if code(i) { None } else { words[i].strip_prefix('#').and_then(|n| n.parse().ok()) });
         if t.is_some() || k == len {
             return t;
         }
@@ -289,27 +372,47 @@ fn open(file: &str, quiet: bool) -> Result<Dump, String> {
     let h = w.hierarchy();
     let ps = h.timescale().and_then(|t| t.unit.to_exponent().map(|e| t.factor as f64 * 10f64.powi(e as i32 + 12))).unwrap_or(1.0);
     let end = end_time(&path).map(|t| to_ps(t, ps));
-    Ok(Dump { file: file.to_string(), w, ps, end, bytes, _tmp: tmp })
+    Ok(Dump { file: file.to_string(), w, ps, end, bytes, fst_start: fst_start(&path), _tmp: tmp })
 }
 
 /// A time step of one dump: its time in ps, the changes (index into the side's signals, value).
 type Step = (i64, Vec<(u32, String)>);
 
-/// The reader of one dump in a thread of its own: its changes of `refs`, a time step at a time, into a bounded channel.
-/// It stops when the receiver is gone (the merge had enough).
-fn spawn(d: Dump, refs: Vec<SignalRef>, kinds: Vec<Kind>) -> (Receiver<Result<Step, String>>, JoinHandle<()>, Option<crate::fst::TempFst>) {
+/// Where to read a dump from for a window from `from` (ps, the dump's time): an FST's block of changes holding it, with the
+/// values at the block's start (`crate::fst::frame_at`) as the signals' first values -> (the block's start, its values by
+/// index into `refs`); None: from the start (a VCD cannot seek, an FST's first block, a real or a string among the signals).
+fn seek(d: &Dump, refs: &[SignalRef], events: &[bool], from: Option<i64>) -> Option<(u64, Vec<(u32, String)>)> {
+    let f = from.filter(|&f| f > 0 && d.end.is_none_or(|e| f <= e))?;
+    d.fst_start?;
+    let t = (f as f64 / d.ps).floor() as u64;
+    let want: Vec<(u32, usize)> = refs.iter().enumerate().filter(|(i, _)| !events[*i]).map(|(i, r)| (i as u32, r.index())).collect();
+    let path = d._tmp.as_ref().map_or(d.file.clone(), |g| g.0.to_string_lossy().into_owned());
+    let (start, values) = crate::fst::frame_at(&path, t, Some(&want.iter().map(|w| w.1).collect::<Vec<_>>()))?;
+    // the bits as wellen gives them: lower case
+    Some((start, want.into_iter().map(|w| w.0).zip(values.into_iter().map(|b| b.iter().map(|c| c.to_ascii_lowercase() as char).collect())).collect()))
+}
+
+/// The reader of one dump in a thread of its own: its changes of `refs`, a time step at a time, into a bounded channel;
+/// from a later block of an FST with `at` (its start, the values there: the first time step). It stops when the receiver
+/// is gone (the merge had enough).
+fn spawn(d: Dump, refs: Vec<SignalRef>, kinds: Vec<Kind>, at: Option<(u64, Vec<(u32, String)>)>) -> (Receiver<Result<Step, String>>, JoinHandle<()>, Option<crate::fst::TempFst>) {
     let (tx, rx) = sync_channel::<Result<Step, String>>(64);
     let Dump { file, mut w, ps, _tmp, .. } = d;
     let h = std::thread::spawn(move || {
-        let mut at = vec![u32::MAX; refs.iter().map(|r| r.index() + 1).max().unwrap_or(0)];
+        let mut at_ix = vec![u32::MAX; refs.iter().map(|r| r.index() + 1).max().unwrap_or(0)];
         for (i, r) in refs.iter().enumerate() {
-            at[r.index()] = i as u32;
+            at_ix[r.index()] = i as u32;
         }
-        let mut now: Option<u64> = None;
-        let mut batch: Vec<(u32, String)> = Vec::new();
-        let r = crate::catching(|| w.stream_changes(Filter::include_signals(&refs), |t, s, v| -> Result<(), ()> {
-            let i = at.get(s.index()).copied().unwrap_or(u32::MAX);
-            if i == u32::MAX {
+        let (mut now, mut batch, start): (Option<u64>, Vec<(u32, String)>, u64) = match at {
+            // the block's changes after its start (the block before, ending there, not read); the values at its start first
+            Some((t, values)) => (Some(t), values, t + 1),
+            None => (None, Vec::new(), 0),
+        };
+        let first = now;
+        let filter = Filter { start, end: None, signals: Some(&refs) };
+        let r = crate::catching(|| w.stream_changes(filter, |t, s, v| -> Result<(), ()> {
+            let i = at_ix.get(s.index()).copied().unwrap_or(u32::MAX);
+            if i == u32::MAX || first.is_some_and(|f| t < f) {
                 return Ok(());
             }
             if now != Some(t) {
@@ -642,7 +745,7 @@ pub fn diff_cmd(args: &[String]) -> ExitCode {
     if args.iter().any(|a| a == "--results") {
         return crate::resdiff::results_cmd(args);
     }
-    let o = match opts(args) {
+    let mut o = match opts(args) {
         Ok(o) => o,
         Err(e) if e == USAGE => {
             outln!("{USAGE}");
@@ -653,6 +756,28 @@ pub fn diff_cmd(args: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    if o.page {
+        // the page's compare: the first difference held, its stretches kept, the JSON where --json says (stdout)
+        (o.silent, o.quiet, o.limit) = (true, true, 1);
+        if o.spans == 0 {
+            o.spans = PAGE_SPANS;
+        }
+        let r = run(&o).and_then(|(equal, d)| {
+            let text = serde_json::to_string(&page_of(&o, &d)).unwrap_or_default();
+            match o.json.as_deref() {
+                None | Some("-") => outln!("{text}"),
+                Some(f) => write_file(f, &(text + "\n"))?,
+            }
+            Ok(equal)
+        });
+        return match r {
+            Ok(equal) => ExitCode::from(if equal { 0 } else { 1 }),
+            Err(e) => {
+                eprintln!("sva: {e}");
+                ExitCode::from(2)
+            }
+        };
+    }
     match run(&o) {
         Ok((equal, _)) => ExitCode::from(if equal { 0 } else { 1 }),
         Err(e) if e.is_empty() => ExitCode::SUCCESS,
@@ -707,18 +832,15 @@ fn run(o: &Opt) -> Result<(bool, Value), String> {
     let mut chosen: Vec<String> = Vec::new();
     let mut explicit: Vec<String> = Vec::new();
     let mut not_in_a: Vec<String> = Vec::new();
-    if let Some(f) = &o.signals_from {
-        let text = if f == "-" {
-            let mut t = String::new();
-            std::io::stdin().read_to_string(&mut t).map(|_| t)
-        } else {
-            std::fs::read_to_string(f)
-        }.map_err(|e| format!("{f}: {e}"))?;
-        for p in text.lines().map(str::trim).filter(|l| !l.is_empty()) {
-            if let Some(q) = path_of(p) { chosen.push(q) } else { not_in_a.push(p.to_string()) }
-        }
+    let listed = match (&o.listed, &o.signals_from) {
+        (Some(l), _) => Some(l.clone()),
+        (None, Some(f)) => Some(read_list(f)?),
+        (None, None) => None,
+    };
+    for p in listed.iter().flatten() {
+        if let Some(q) = path_of(p) { chosen.push(q) } else { not_in_a.push(p.to_string()) }
     }
-    if o.signals_from.is_some() && o.signals.is_empty() {
+    if listed.is_some() && o.signals.is_empty() {
         // the listed paths only
     } else if o.signals.is_empty() {
         chosen.extend(a_list.iter().map(|(p, _)| p.clone()).filter(|p| under(p)));
@@ -798,7 +920,7 @@ fn run(o: &Opt) -> Result<(bool, Value), String> {
     }
     // B's signals nobody paired (all of B, or under the scope --scope maps to); none listed for --signals
     let b_scope = if o.scope.is_empty() { String::new() } else { partner(&o.scope, &rules).0 };
-    let only_b: Vec<String> = if o.signals.is_empty() && o.signals_from.is_none() {
+    let only_b: Vec<String> = if o.signals.is_empty() && listed.is_none() {
         b_list.iter().map(|(p, _)| p.clone())
             .filter(|p| !paired_b.contains(p) && (b_scope.is_empty() || p == &b_scope || p.starts_with(&format!("{b_scope}."))))
             .collect()
@@ -835,7 +957,7 @@ fn run(o: &Opt) -> Result<(bool, Value), String> {
     let summary_a = json!({"file": o.a, "signals": a_list.len()});
     let summary_b = json!({"file": o.b, "signals": b_list.len()});
     let (end_a, end_b) = (da.end, db.end);
-    let big = !o.quiet && da.bytes + db.bytes >= 64 << 20;
+    let big = !o.quiet && da.bytes + db.bytes >= o.large.unwrap_or(64 << 20);
     let files = (da.file.clone(), db.file.clone());
 
     let mut by_a = vec![Vec::new(); refs_a.len()];
@@ -848,8 +970,21 @@ fn run(o: &Opt) -> Result<(bool, Value), String> {
     }
     let va: Vec<String> = kinds_a.iter().map(|k| k.unknown()).collect();
     let vb: Vec<String> = kinds_b.iter().map(|k| k.unknown()).collect();
-    let (rxa, ja, tmp_a) = spawn(da, refs_a, kinds_a);
-    let (rxb, jb, tmp_b) = spawn(db, refs_b, kinds_b);
+    // a late window of an FST: its blocks before the window's not read (segments need the dump from its start)
+    let late = o.segment.is_none() && o.from.is_some();
+    let events = |h: &Hierarchy, refs: &[SignalRef]| -> Vec<bool> {
+        let ev: std::collections::HashSet<SignalRef> =
+            h.all_vars().filter(|&v| matches!(h[v].var_type(), VarType::Event)).map(|v| h[v].signal_ref()).collect();
+        refs.iter().map(|r| ev.contains(r)).collect()
+    };
+    let at_a = if late { seek(&da, &refs_a, &events(da.w.hierarchy(), &refs_a), o.from.map(|f| f as i64)) } else { None };
+    let at_b = if late { seek(&db, &refs_b, &events(db.w.hierarchy(), &refs_b), o.from.map(|f| f as i64 + o.offset)) } else { None };
+    let read_a = at_a.as_ref().map_or(0, |a| to_ps(a.0, da.ps));
+    let read_b = at_b.as_ref().map_or(0, |b| to_ps(b.0, db.ps));
+    let first_a = da.fst_start.filter(|_| at_a.is_some()).map(|t| to_ps(t, da.ps));
+    let first_b = db.fst_start.filter(|_| at_b.is_some()).map(|t| to_ps(t, db.ps));
+    let (rxa, ja, tmp_a) = spawn(da, refs_a, kinds_a, at_a);
+    let (rxb, jb, tmp_b) = spawn(db, refs_b, kinds_b, at_b);
     let mut a = Stream { rx: rxa, join: Some(ja), next: None, done: false, last: None, file: files.0.clone() };
     let mut b = Stream { rx: rxb, join: Some(jb), next: None, done: false, last: None, file: files.1.clone() };
     a.fill()?;
@@ -857,6 +992,8 @@ fn run(o: &Opt) -> Result<(bool, Value), String> {
     let (Some(sa), Some(sb)) = (a.peek(), b.peek()) else {
         return Err(format!("{}: no value change to compare", if a.peek().is_none() { &files.0 } else { &files.1 }));
     };
+    // read from a later block: the dump's start is its header's
+    let (sa, sb) = (first_a.map_or(sa, |f| f.min(sa)), first_b.map_or(sb, |f| f.min(sb)));
 
     // the window, in A's time: what both dumps cover (with --align: all of A), within --from / --to
     let ea = end_a.unwrap_or(i64::MAX);
@@ -982,7 +1119,7 @@ fn run(o: &Opt) -> Result<(bool, Value), String> {
         if big && m.to > m.from && m.to != i64::MAX {
             let tenth = ((t - m.from).max(0) as f64 / (m.to - m.from) as f64 * 10.0) as i64;
             if tenth >= next_tenth && tenth < 10 {
-                eprintln!("sva: {} ~ {}: progress: {tenth}/10 ({})", files.0, files.1, t_text(t));
+                crate::progress(&format!("{} ~ {}", files.0, files.1), format_args!("{tenth}/10 ({})", t_text(t)));
                 next_tenth = tenth + 1;
             }
         }
@@ -1050,8 +1187,8 @@ fn run(o: &Opt) -> Result<(bool, Value), String> {
     };
     let doc = json!({
         "wavelens": "diff", "version": 1, "unit": "ps",
-        "a": {"file": summary_a["file"], "start": sa, "end": end_a.unwrap_or(to), "signals": summary_a["signals"]},
-        "b": {"file": summary_b["file"], "start": sb, "end": end_b.unwrap_or(to + o.offset), "signals": summary_b["signals"]},
+        "a": {"file": summary_a["file"], "start": sa, "end": end_a.unwrap_or(to), "signals": summary_a["signals"], "read_from": read_a},
+        "b": {"file": summary_b["file"], "start": sb, "end": end_b.unwrap_or(to + o.offset), "signals": summary_b["signals"], "read_from": read_b},
         "from": from, "to": to, "offset": o.offset,
         "map": rules.iter().filter(|r| r.used > 0 || !r.auto).map(|r| {
             let mut x = json!({"a": r.a, "b": r.b, "signals": r.used});
@@ -1113,12 +1250,22 @@ fn run(o: &Opt) -> Result<(bool, Value), String> {
     Ok((equal, doc))
 }
 
-/// `sva diff A B` with these options as the JSON document it writes, nothing printed (sva runs diff): Err a usage error
-/// or a dump that does not read.
-pub(crate) fn diff_doc(args: &[String]) -> Result<Value, String> {
-    let mut o = opts(args)?;
+/// The comparison of `o` as a document, nothing written (sva runs diff: one per run kept).
+pub(crate) fn run_doc(o: &Opt) -> Result<Value, String> {
+    let mut o = o.clone();
     (o.silent, o.quiet) = (true, true);
     run(&o).map(|(_, d)| d)
+}
+
+/// The paths of --signals-from: a file, or - stdin (once), a path a line.
+pub(crate) fn read_list(f: &str) -> Result<Vec<String>, String> {
+    let text = if f == "-" {
+        let mut t = String::new();
+        std::io::stdin().read_to_string(&mut t).map(|_| t)
+    } else {
+        std::fs::read_to_string(f)
+    }.map_err(|e| format!("{f}: {e}"))?;
+    Ok(text.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect())
 }
 
 /// The cut between the segments of --align: A's segment start plus the length both have.
@@ -1249,6 +1396,32 @@ fn junit(d: &Value, m: &Merge, o: &Opt) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_last_time_of_a_vcd_whatever_its_codes_look_like() {
+        let dir = std::env::temp_dir().join(format!("sva-end-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let head = "$timescale 1ns $end\n$scope module t $end\n$var wire 8 s0 a $end\n$var wire 8 #5 b $end\n$upscope $end\n$enddefinitions $end\n";
+        for (name, body, end) in [
+            ("s", "#0\nb0 s0\n#10\nb1 s0\n#20\n", Some(20)),
+            ("hash", "#0\nb0 #5\n#10\nb1 #5\n", Some(10)),
+            ("string", "#0\nsabc s0\n#30\nsx #5\n", Some(30)),
+            ("none", "b0 s0\n", None),
+        ] {
+            let f = dir.join(format!("{name}.vcd"));
+            std::fs::write(&f, format!("{head}{body}")).unwrap();
+            assert_eq!(end_time(f.to_str().unwrap()), end, "{name}");
+        }
+        // a tail read in parts: the first line of a part may be cut
+        let f = dir.join("long.vcd");
+        let mut body = String::from(head);
+        for t in 0..20000 {
+            body.push_str(&format!("#{}\nb{:b} s0\n", t * 10, t & 255));
+        }
+        std::fs::write(&f, body).unwrap();
+        assert_eq!(end_time(f.to_str().unwrap()), Some(199_990));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn buses_show_in_hex() {

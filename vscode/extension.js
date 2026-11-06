@@ -6,13 +6,13 @@
    browser would do itself: the downloads (a save dialog on the host), the file pickers, the clipboard, localStorage
    (this dump's store in workspaceState), the agent's live link (tools/wavemcp.py listens on the host's 127.0.0.1, which
    the client cannot reach: this side relays it), the theme (wavelens.theme). Nothing is installed on the host: node is VS Code's, sva is static. */
-const COMPARE_WAVES = 32 << 20;   // bytes: the second dump's values a tab takes at most (tools/svabuild.py)
 const vscode = require('vscode'), fs = require('fs'), path = require('path'), os = require('os'), crypto = require('crypto');
 const http = require('http'), cp = require('child_process');
 
 const VIEW = 'wavelens.waves';
 const MEDIA = ['wavelens.css', 'wavelens.config.js', 'wavelens.js', 'sva.wasm.js', 'bus.js', 'sva.js'];
 const TABS = new Set();
+const PROTO = require('./protocol.js');   // the messages of a tab's page, checked as they come (A-05)
 const EVENTS = new vscode.EventEmitter();   // {type, tab, …} from the webviews (ready, loaded): the tests listen
 let CTX, OUT, DIAG;
 
@@ -26,17 +26,25 @@ function roots() {
   const ext = CTX.extensionPath, inside = path.join(ext, 'media');
   return { host: inside, wavelens: exists(path.join(inside, 'wavelens.js')) ? inside : path.join(ext, '..', 'wavelens') };
 }
+// the CLI: wavelens.sva, else the package's (bin/sva: the .vsix carries the Linux one), else the repository's (make dist-linux:
+// bin/linux-x86_64/sva, make dist-windows: bin/windows-x86_64/sva.exe), else sva on the PATH (none: noCli says so)
+const OS_DIR = { linux: 'linux', win32: 'windows' };
 function svaBin() {
   const set = vscode.workspace.getConfiguration('wavelens').get('sva');
   if (set) return set;
-  const ext = CTX.extensionPath;
-  for (const p of [path.join(ext, 'bin', 'sva'), path.join(ext, '..', 'bin', `${process.platform}-x86_64`, 'sva')]) {
+  const ext = CTX.extensionPath, exe = process.platform === 'win32' ? 'sva.exe' : 'sva';
+  for (const p of [path.join(ext, 'bin', exe), path.join(ext, '..', 'bin', `${OS_DIR[process.platform] || process.platform}-x86_64`, exe)]) {
     if (!exists(p)) continue;
     try { fs.accessSync(p, fs.constants.X_OK); } catch (e) { try { fs.chmodSync(p, 0o755); } catch (e2) { /* read-only */ } }   // a vsix keeps no mode
     return p;
   }
   return 'sva';   // on the PATH
 }
+// a CLI that did not start: none bundled for this platform (the .vsix carries the Linux one) and none on the PATH -> wavelens.sva named
+const noCli = (bin, e) => (e.code === 'ENOENT' ? `there is no sva CLI on this host (${bin}; none bundled for ${process.platform}): set wavelens.sva ` +
+  'to its path (the repository builds one: make dist-linux, make dist-windows)' : `${bin}: ${e.message}`);
+// the JSON the CLI wrote on stdout: where sva cannot put fd 1 aside (Windows) wellen's "WARN: …" lines stand before it
+const cliJson = s => JSON.parse(s.slice(Math.max(0, s.search(/^[{[]/m))));
 
 // The CLI run with what it reads on stdin -> {code, out, err} (code -1: it did not start; big: its output passed maxOut and it
 // was killed). Its stdin guarded: a CLI that exits before node has written (sva runs list reads none) is no EPIPE thrown
@@ -48,8 +56,7 @@ function spawnRun(bin, args, { input = '', maxOut = Infinity, keep = p => p } = 
     p.stdin.on('error', () => { /* it closed its stdin: what it says comes on stdout, stderr and its exit */ });
     p.stdout.on('data', d => { size += d.length; if (size > maxOut) { big = true; p.kill(); } else out.push(d); });
     p.stderr.on('data', d => err.push(d));
-    p.on('error', e => ok({ code: -1, out: '', err: e.code === 'ENOENT' ? `there is no sva CLI on this host (${bin}): set wavelens.sva, or make ` +
-      'dist-linux in the repository' : `${bin}: ${e.message}` }));
+    p.on('error', e => ok({ code: -1, out: '', err: noCli(bin, e) }));
     p.on('close', (code, sig) => ok({ code: code == null ? -1 : code, sig, big, out: Buffer.concat(out).toString('utf8'),
       err: Buffer.concat(err).toString('utf8').trim().replace(/^sva: /, '') }));
     p.stdin.end(input);
@@ -68,7 +75,7 @@ function lazyFor(file, size) {
 }
 const vcdOf = file => (/\.fst$/i.test(file) ? convert(file, 'vcd', 'VCD text', (bin, tmp) => ['vcd', file, '--out', tmp]) : Promise.resolve(file));
 const fstOf = file => (/\.fst$/i.test(file) ? Promise.resolve(file) :
-  convert(file, 'fst', 'FST', (bin, tmp) => ['fst', file, '--no-types', '-q', '--out', tmp]));
+  convert(file, 'fst', 'FST', (bin, tmp) => ['fst', file, '--no-types', '--quiet', '--out', tmp]));
 const headerOf = fst => convert(fst, 'head.vcd', 'its modules and signals', (bin, tmp) => ['vcd', fst, '--header', '--out', tmp]);
 // the file sva makes of `file` (ext: vcd, fst, head.vcd), kept by the file's path, size, time and the program
 async function convert(file, ext, what, args) {
@@ -86,7 +93,7 @@ async function convert(file, ext, what, args) {
         new Promise((ok, no) => {
           const p = cp.spawn(bin, args(bin, tmp), { stdio: ['ignore', 'ignore', 'pipe'] });
           let err = ''; p.stderr.on('data', d => { err += d; });
-          p.on('error', e => no(new Error(`${bin}: ${e.message}`)));
+          p.on('error', e => no(new Error(noCli(bin, e))));
           p.on('close', code => (code === 0 ? ok() : no(new Error(err.trim() || `${bin} ${args(bin, tmp)[0]}: exit ${code}`))));
         }));
       await fs.promises.rename(tmp, out);   // a revision's file is whole or not there (other windows share the directory)
@@ -131,7 +138,7 @@ async function toFst(file, opts = {}) {
     p.stdout.on('data', d => { said += d; });
     p.stderr.on('data', lines);
     if (token) token.onCancellationRequested(() => p.kill());
-    p.on('error', e => no(new Error(`${bin}: ${e.message}`)));
+    p.on('error', e => no(new Error(noCli(bin, e))));
     p.on('close', (code, sig) => { if (err) lines('\n'); said = said.trim(); if (said) log(said);
       if (code !== 0 && p.pid) fs.unlink(`${fst}.${p.pid}.part`, () => {});
       if (code === 0) ok(); else no(new Error(sig ? 'stopped' : notes[notes.length - 1] || `${bin} fst: exit ${code}`)); });
@@ -215,7 +222,7 @@ const LAST_STATE = 'lastState';   // workspaceState: the path of the state loade
 class Tab {
   constructor(uri, panel) {
     this.uri = uri; this.file = uri.fsPath; this.panel = panel; this.wait = new Map(); this.rid = 0; this.streams = new Map(); this.procs = new Set();
-    this.storeKey = 'store:' + uri.toString(); this.store = Object.assign({}, CTX.workspaceState.get(this.storeKey) || {}); this.changed = new Map();
+    this.storeKey = 'store:' + uri.toString(); this.changed = new Map();
     const r = roots();
     panel.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.file(r.host), vscode.Uri.file(r.wavelens),
       vscode.Uri.file(path.dirname(this.file)), vscode.Uri.file(path.join(CTX.globalStorageUri.fsPath, 'fst'))] };
@@ -232,7 +239,7 @@ class Tab {
     const u = (root, f) => w.asWebviewUri(vscode.Uri.file(path.join(root, f))).toString();
     const name = path.basename(this.file), esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
     const json = s => JSON.stringify(s).replace(/</g, '\\u003c');
-    const host = { name, path: this.file, store: this.store, autoReload: !!vscode.workspace.getConfiguration('wavelens').get('autoReload'),
+    const host = { name, path: this.file, store: this.storeNow(), autoReload: !!vscode.workspace.getConfiguration('wavelens').get('autoReload'),
       theme: themeOf(), build: buildOf(), keysLeft: vscode.workspace.getConfiguration('wavelens').get('keysToVSCode') || [],
       lastState: CTX.workspaceState.get(LAST_STATE) || null, openLastState: !!vscode.workspace.getConfiguration('wavelens').get('openLastState'),
       config: cfgNow() };
@@ -260,8 +267,15 @@ ${scripts}
 </body>
 </html>`;
   }
-  // -> {src, name, lazy}: the URI the webview fetches now (an FST: its VCD text, converted when it changed; a large dump:
-  // the header of its FST, lazy)
+  // the dump's store as it is now: the kept keys and this tab's changes not written yet. The page of a webview VS Code made
+  // again (the tab moved to a window of its own) has the html of when the tab opened: source() gives it the keys of now
+  storeNow() {
+    const cur = Object.assign({}, CTX.workspaceState.get(this.storeKey) || {});
+    for (const [k, v] of this.changed) if (v == null) delete cur[k]; else cur[k] = v;
+    return cur;
+  }
+  // -> {src, name, lazy, store}: the URI the webview fetches now (an FST: its VCD text, converted when it changed; a large dump:
+  // the header of its FST, lazy), the dump's store
   async source() {
     let f, lazy = false;
     try {
@@ -270,7 +284,14 @@ ${scripts}
       f = this.src = lazy ? await headerOf(this.fst) : await vcdOf(this.file);
     } catch (e) { this.report({ error: e.message }); throw e; }
     if (lazy) log(`${path.basename(this.file)}: large: its modules and signals first, the values of the ones shown as they are needed`);
-    return { src: this.panel.webview.asWebviewUri(vscode.Uri.file(f)).toString(), name: path.basename(this.file), lazy };
+    return { src: this.panel.webview.asWebviewUri(vscode.Uri.file(f)).toString(), name: path.basename(this.file), lazy, store: this.storeNow() };
+  }
+  // the bytes of what source() named, for a webview that could not fetch its URI (a tab moved to a window of its own over a
+  // remote connection: its resource loads answer 404) -> {data: Uint8Array}
+  async bytes() {
+    if (!this.src) return { error: 'no dump read yet' };
+    const b = await fs.promises.readFile(this.src);
+    return { data: new Uint8Array(b.buffer, b.byteOffset, b.length) };
   }
   proc(p) { this.procs.add(p); p.on('close', () => this.procs.delete(p)); p.on('error', () => this.procs.delete(p)); return p; }   // killed with the tab
   // the VCD text of some signals of the large dump (their id codes in its header): sva vcd --codes of its FST -> {text}
@@ -281,10 +302,14 @@ ${scripts}
     return r.code === 0 ? { text: r.out } : { error: r.err || `${bin} vcd --codes: exit ${r.code}` };
   }
   async message(m) {
-    if (!m || typeof m.type !== 'string') return;
+    // vscode/protocol.js: a message that is none of the page's (its type unknown, a key it needs not there) is said in the
+    // log and, asked with an id, answered with the error; nothing below sees it
+    const bad = PROTO.check(m);
+    if (bad) { log(`${path.basename(this.file)}: ${bad}`); if (m && typeof m === 'object' && m.id) this.post({ id: m.id, error: bad }); return; }
     const reply = o => this.post(Object.assign({ id: m.id }, o));
     switch (m.type) {
       case 'source': return reply(await this.source());
+      case 'bytes': return reply(await this.bytes());
       case 'codes': return reply(await this.codes(Array.isArray(m.codes) ? m.codes : []));
       case 'store': {   // a localStorage key of this dump (null: removed), kept in the workspace: the keys changed, not a snapshot
         if (typeof m.key !== 'string') return;
@@ -317,7 +342,8 @@ ${scripts}
           'WaveLens: Open the configuration to mend it, or Reset it', 'Open', 'Reset')
           .then(a => (a === 'Open' ? cfgOpen() : a === 'Reset' ? cfgReset() : null));
         return;
-      case 'es-open': return this.esOpen(m.sid, String(m.url));
+      case 'page': for (const x of this.streams.values()) x.close(); this.streams.clear(); return;   // a page (again): its own streams
+      case 'es-open': { const old = this.streams.get(m.sid); if (old) old.close(); return this.esOpen(m.sid, String(m.url)); }
       case 'es-close': { const s = this.streams.get(m.sid); this.streams.delete(m.sid); if (s) s.close(); return; }
       case 'http': return reply(await relay(this, String(m.url), m.body == null ? '' : String(m.body)));
     }
@@ -403,7 +429,7 @@ ${scripts}
   // Compare…: a second dump picked on the host, sva diff of this one and it over the tab's signals and window (neither read
   // here: the CLI streams both) -> {result}: the WaveJSON extension "compare" the viewer takes (compareResult), as the
   // build makes it of a config's "compare" (tools/svabuild.py compare)
-  async compare(signals, from, to, other, keep = p => p) {
+  async compare(signals, from, to, other, keep = p => p, offset = 0) {
     let b = other;
     if (!b) {
       const got = await vscode.window.showOpenDialog({ defaultUri: vscode.Uri.file(path.dirname(this.file)), canSelectMany: false,
@@ -412,31 +438,27 @@ ${scripts}
       b = got[0].fsPath;
     }
     const bin = svaBin();
-    // --limit: the differences listed, held in memory; only_a, only_b (the signals missing) are whole whatever it is
-    const args = ['diff', this.file, b, '--json', '-', '--quiet', '--spans', '1000', '--limit', '1', '--signals-from', '-'];
+    // sva diff --page: the compare as the tab takes it, the run's values of the signals that differ in it (at most 32 MiB:
+    // else cutError says why), the same shape as a config's "compare" (tools/svabuild.py)
+    const args = ['diff', this.file, b, '--page', '--quiet', '--signals-from', '-'];
     if (isFinite(from)) args.push('--from', `${Math.round(from)}ps`);
     if (isFinite(to)) args.push('--to', `${Math.round(to)}ps`);
+    if (offset) args.push('--offset', `${Math.round(offset)}ps`);   // B's time is A's plus it (a run's test case elsewhere in it)
     log(`${path.basename(this.file)}: compare with ${b}`);
     const x = await spawnRun(bin, args, { input: signals.join('\n') + '\n', keep: p => this.proc(keep(p)) });
     const r = x.code === 0 || x.code === 1 ? { text: x.out } : { error: x.sig ? 'stopped' : x.err || `${bin} diff: exit ${x.code}` };
     if (r.error) { log(`${path.basename(this.file)}: compare: ${r.error}`); return { error: `compare: ${r.error}` }; }
     let d;
-    try { d = JSON.parse(r.text); } catch (e) { return { error: `compare: sva diff wrote no JSON (${e.message})` }; }
-    const sig = {};
-    for (const x of d.signals || []) {
-      sig[x.path] = Object.assign({ spans: x.spans || [], b: x.b }, x.other ? { other: x.other } : {}, x.more ? { more: x.more } : {});
-    }
-    const shift = d.offset || 0, diff = [...new Set((d.signals || []).filter(x => x.spans && x.spans.length).map(x => x.b || x.path))];
-    const cut = diff.length ? await this.compareCut(bin, b, diff, d.from + shift, d.to + shift, keep) : null;
-    const vcd = cut && cut.text != null ? cut.text : null;
-    return { result: Object.assign({ name: path.basename(b), from: d.from, to: d.to, compared: d.signals_compared, differ: d.signals_differ, changes: d.compared,
-      first: d.first && d.first.t, signals: sig, missing: [...(d.only_a || []), ...(d.not_in_a || [])], map: d.map || [] }, vcd != null ? { vcd, shift } : {},
-      cut && cut.error ? { cutError: cut.error } : {}) };
+    try { d = cliJson(r.text); } catch (e) { return { error: `compare: sva diff wrote no JSON (${e.message})` }; }
+    if (d.cutError) log(`${path.basename(this.file)}: the values of ${path.basename(b)} are not in the tab: ${d.cutError}`);
+    return { result: d };
   }
   // the runs kept of this dump (the Runs panel): sva runs over .wavelens-runs beside it (wavelens.runsDir: another directory).
   // list -> {dir, runs}; keep {name, tags, comment} -> {run} (the dump as it is on the disk, an FST in the directory); set {run, …};
-  // rm {run} (asked first) -> {removed | cancelled}; diff {signals, from, to} -> sva runs diff's JSON; compare {run, signals, from,
-  // to} -> {result}: Compare… with the run's FST over that window only (its values of the signals that differ there)
+  // rm {run} (asked first) -> {removed | cancelled}; diff {signals, from, to, case} -> sva runs diff's JSON; compare {run, signals,
+  // from, to, case} -> {result}: Compare… with the run's FST over that window only (its values of the signals that differ there).
+  // keep {cases}: the page's spans with a label, the run's test cases (none sent: the marks beside the dump, sva runs keep);
+  // case: the window's name, a run's case of that name compared, wherever it is in the run (B offset to it, the shorter length)
   runsDir() {
     const set = vscode.workspace.getConfiguration('wavelens').get('runsDir');
     if (!set) return path.join(path.dirname(this.file), '.wavelens-runs');
@@ -445,7 +467,7 @@ ${scripts}
   }
   sva(args, input, keep = p => p) { return spawnRun(svaBin(), args, { input: input || '', keep: p => this.proc(keep(p)) }); }
   async runs(m) {
-    const dir = this.runsDir(), name = path.basename(this.file), json = r => { try { return JSON.parse(r.out); } catch (e) { return null; } };
+    const dir = this.runsDir(), name = path.basename(this.file), json = r => { try { return cliJson(r.out); } catch (e) { return null; } };
     const fail = (r, what) => ({ error: r.err || `sva runs ${what}: exit ${r.code}` });
     const said = b => [...(typeof b.name === 'string' && b.name.trim() ? ['--name', b.name.trim()] : []),
       ...(Array.isArray(b.tags) ? ['--tags', b.tags.map(String).join(',')] : []), ...(typeof b.comment === 'string' ? ['--comment', b.comment] : [])];
@@ -462,8 +484,11 @@ ${scripts}
       case 'cancel': if (this.runsBusy) this.runsBusy.forEach(p => p.kill()); return { ok: true };
       case 'keep': {
         log(`${name}: kept as a run in ${dir}`);
+        const cases = Array.isArray(m.cases) && m.cases.length ? m.cases.filter(c => c && typeof c.label === 'string' && isFinite(c.from) && isFinite(c.to))
+          .map(c => ({ label: c.label, from: Math.round(c.from), to: Math.round(c.to) })) : null;
         const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `WaveLens: keeping ${name} as a run…` },
-          () => this.sva(['runs', 'keep', this.file, '--dir', dir, ...said(m), '--json'])), d = json(r);
+          () => this.sva(['runs', 'keep', this.file, '--dir', dir, ...said(m), ...(cases ? ['--cases', '-'] : []), '--json'],
+            cases ? JSON.stringify(cases) : '')), d = json(r);
         return r.code === 0 && d ? { run: d } : fail(r, 'keep');
       }
       case 'set': {
@@ -482,13 +507,22 @@ ${scripts}
         const args = ['runs', 'diff', this.file, '--dir', dir, '--json', '--signals-from', '-'];
         if (isFinite(m.from)) args.push('--from', `${Math.round(m.from)}ps`);
         if (isFinite(m.to)) args.push('--to', `${Math.round(m.to)}ps`);
+        if (typeof m.case === 'string' && m.case) args.push('--case', m.case);
         const r = await this.sva(args, (Array.isArray(m.signals) ? m.signals.map(String) : []).join('\n') + '\n', own()), d = json(r);
         return d && d.runs ? d : r.sig ? { error: 'stopped' } : fail(r, 'diff');
       }
       case 'compare': {
         const l = json(await this.sva(['runs', 'list', '--dir', dir, '--json'])), run = l && (l.runs || []).find(x => String(x.id) === id);
         if (!run) return { error: `no run #${id} in ${dir}` };
-        return this.compare(Array.isArray(m.signals) ? m.signals.map(String) : [], +m.from, +m.to, path.join(dir, run.file), own());
+        const sigs = Array.isArray(m.signals) ? m.signals.map(String) : [];
+        if (typeof m.case !== 'string' || !m.case) return this.compare(sigs, +m.from, +m.to, path.join(dir, run.file), own());
+        // the run's case of that name: B offset to it, over the shorter of the two
+        const c = (run.cases || []).find(x => x.name === m.case);
+        if (!c) return { error: run.cases ? `no case ${m.case} in the run #${id}` : `the run #${id} was kept without its test cases` };
+        const len = Math.min(+m.to - +m.from, c.to - c.from), offset = c.from - +m.from;
+        const r = await this.compare(sigs, +m.from, +m.from + len, path.join(dir, run.file), own(), offset);
+        if (r.result) r.result.case = { name: m.case, from: c.from, to: c.to, offset, shorter: c.to - c.from !== +m.to - +m.from ? len : null };
+        return r;
       }
     }
     return { error: `runs: no operation ${m.op}` };
@@ -501,17 +535,6 @@ ${scripts}
     this.runsWatched = f;
     this.onRuns = (cur, prev) => { if (cur.mtimeMs !== prev.mtimeMs || cur.size !== prev.size) this.post({ type: 'runs-changed' }); };
     fs.watchFile(f, { interval: 1000 }, this.onRuns);
-  }
-  // the second dump's values of the signals that differ (the tab's A B A+B, as svabuild.compare_cut): sva vcd -> {text} or
-  // {error} (too much, or why it failed)
-  async compareCut(bin, b, signals, from, to, keep = p => p) {
-    const name = path.basename(b);
-    const x = await spawnRun(bin, ['vcd', b, '--from', `${Math.round(from)}ps`, '--to', `${Math.round(to)}ps`, '--signals-from', '-'],
-      { input: signals.join('\n') + '\n', maxOut: COMPARE_WAVES, keep: p => this.proc(keep(p)) });
-    const r = x.big ? { error: `more than ${COMPARE_WAVES >> 20} MB of changes of the signals that differ` } : x.code === 0 ? { text: x.out } :
-      { error: x.sig ? 'stopped' : x.err || `exit ${x.code}` };
-    if (r.error) log(`${path.basename(this.file)}: the values of ${name} are not in the tab: ${r.error}`);
-    return r;
   }
   // the design's types beside the dump (tb.vcd -> tb.types.json: tools/questa/wavelens_types.tcl, svtypes.py verilator), by
   // path; without them the workspace's SystemVerilog sources (wavelens.sources): their enum names label a VCD's state buses

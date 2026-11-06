@@ -42,6 +42,7 @@ SCALE = float(os.environ.get('SMOKE_TIME_SCALE', '1'))   # time limits × SCALE
 
 
 COUNT = [0, 0]   # checks, pages opened
+RAN = set()   # the sections run (--only: those asked)
 ERRDIR = ['.']   # where a failed section's PNGs go (BUILD/smoke, set in main)
 TIMEOUT = 15000 * SCALE   # ms: an action or a wait without its own timeout (playwright's default is 30 s)
 
@@ -79,27 +80,32 @@ STEADY = ("document.addEventListener('DOMContentLoaded', () => { const s = docum
 
 
 def steady(browser):
-    """browser.new_page / new_context with STEADY on every page."""
+    """browser.new_page / new_context with STEADY on every page; every page opened counted (COUNT[1]: a section's own too)."""
     np, nc = browser.new_page, browser.new_context
 
     def new_page(*a, **k):
         pg = np(*a, **k)
         pg.add_init_script(STEADY)
+        COUNT[1] += 1
         return pg
 
     def new_context(*a, **k):
         cx = nc(*a, **k)
         cx.add_init_script(STEADY)
+        cx.on('page', lambda _: COUNT.__setitem__(1, COUNT[1] + 1))
         return cx
     browser.new_page, browser.new_context = new_page, new_context
 
 
 def run(name, fn, *args):
     """One section: skipped by --only, named in its FAIL lines. An exception in it (a playwright timeout, a locator
-    that matches two elements, a KeyError) is one FAIL of that section with a PNG of its pages, and the run goes on."""
+    that matches two elements, a KeyError) is one FAIL of that section with a PNG of its pages, and the run goes on. A part
+    skipped is said on the section's own line too (a section is not green while part of it did not run: T-17 of 11-05)."""
     if not want(name):
         return
+    RAN.add(name)
     SECTION[0], prev = name, SECTION[0]
+    n, k = COUNT[0], len(skips)
     try:
         fn(*args)
     except Exception as e:   # noqa: BLE001 — any error of a section is its failure, not the end of the run
@@ -110,6 +116,8 @@ def run(name, fn, *args):
         error_shots(name, args)
     finally:
         SECTION[0] = prev
+    if len(skips) > k:
+        print(f'  [{name}] {COUNT[0] - n} checks, {len(skips) - k} parts SKIPPED ({", ".join(sorted({h for _, _, h in skips[k:]}))})')
 
 
 def error_shots(name, args):
@@ -962,7 +970,40 @@ def modules(page, P):
         if mine != theirs or res[1] != pe.only():
             apart.append((ops, mine, theirs, res[1], pe.only()))
     check(not apart, f'Only and your groups: the page and viewedit.py answer alike over a state, Clear, a hidden signal {apart[:1]}')
-    page.evaluate("document.querySelector('.wv').waveView.run([{op: 'only', clear: true, groups: true}, {op: 'group', name: 'mix', delete: true}])")
+    # T-05 of the review of the runs: a copy and a bus's bits in your group under Only (whole: they stay with it; by module: gone
+    # with their signal), the group's rows the same in viewedit.py; the panel's box undone and redone
+    ug_full = "WaveLens.internal.peek(v).vis.filter(r => r.ug && r.ug.name === 'mix').map(r => r.full + (r.dup ? '#' + r.dup : ''))"
+    ug_bits = f"WaveLens.internal.peek(v).vis.filter(r => r.bit != null && r.of && r.of.full === '{D1}.cnt').length"
+    cb_ops = [{'op': 'only', 'clear': True, 'groups': True}, {'op': 'group', 'name': 'mix', 'add': [f'{D1}.cnt']},
+              {'op': 'duplicate', 'signals': f'{D1}.err'}, {'op': 'group', 'name': 'mix', 'add': [f'{D1}.err#2']},
+              {'op': 'bits', 'signals': f'{D1}.cnt', 'on': True}, {'op': 'only', 'modules': [D0]}]
+    page.evaluate("ops => document.querySelector('.wv').waveView.run(ops)", cb_ops)
+    whole = [js(ug_full), js(ug_bits)]
+    page.evaluate("document.querySelector('.wv').waveView.run([{op: 'only', groups: false}])")
+    part = [js(ug_full), js(ug_bits)]
+    pe = viewedit.Editor(viewedit.Model(page.evaluate("WAVES.all"))); pe.run(ug_ops[:1] + cb_ops)
+    pyw = [r['full'] for r in pe.ordered() if r.get('ug')]
+    pe.run([{'op': 'only', 'groups': False}]); pyp = [r['full'] for r in pe.ordered() if r.get('ug')]
+    check(whole == [[f'{D0}.ready', f'{D1}.err', f'{D1}.cnt', f'{D1}.err#2'], 4] and part == [[f'{D0}.ready'], 0] and pyw == whole[0] and pyp == part[0],
+          f'Only: a copy and a bus\'s bits in your group stay with it whole, go by module; viewedit.py the same {whole} {part} {pyw} {pyp}')
+    page.evaluate("document.querySelector('.wv').waveView.run([{op: 'only', groups: true}])")
+    js("(v.modules(true), 0)"); settle(page)
+    page.locator('.wv-mods input.mgw').uncheck(); settle(page)
+    state = "[v.onlyGroups(), document.querySelector('.wv-mods input.mgw').checked, " + ug_full + "]"
+    off = js(state)
+    un = [js("v.undo(-1)"), js(state)]
+    re_ = [js("v.undo(1)"), js(state)]
+    check(off == [False, False, [f'{D0}.ready']] and un == ['only', [True, True, whole[0]]] and re_ == ['only', off],
+          f'the panel\'s box "Your groups whole": undone (whole again, the box checked), redone {off} {un} {re_}')
+    page.evaluate(f"""document.querySelector('.wv').waveView.run([{{op: 'only', clear: true, groups: true}}, {{op: 'group', name: 'mix', delete: true}},
+        {{op: 'bits', signals: '{D1}.cnt', on: false}}, {{op: 'duplicate', signals: '{D1}.err', delete: true}}])""")
+    # the box with no Only set: a step of its own (undoPart keeps onlyGrp; onlyState is null then)
+    js("(v.modules(true), 0)"); settle(page)
+    page.locator('.wv-mods input.mgw').uncheck(); settle(page)
+    box = "[v.only, v.onlyGroups(), document.querySelector('.wv-mods input.mgw').checked]"
+    off0 = js(box); un0 = [js("v.undo(-1)"), js(box)]; re0 = [js("v.undo(1)"), js(box)]; js("(v.setOnly({ groups: true }), 0)")
+    check(off0 == [None, False, False] and un0 == ['only', [None, True, True]] and re0 == ['only', off0],
+          f'the box "Your groups whole" with no Only set: undone, redone {off0} {un0} {re0}')
     js("(v.modules(false), 0)")
     # what Only leaves out stays out (review of the implementation, O1 O2 O4 O6 O7 O13)
     got = page.evaluate(f"""(async () => {{ const v = document.querySelector('.wv').waveView, out = [];
@@ -1843,35 +1884,62 @@ def vscode_tab(browser, build):
             f'<script type="application/json" id="wavelens-host">{json.dumps(host)}</script>'
             '<script type="application/wavedrom">{ "signal": [{ "name": "reading…", "wave": "x..." }] }</script>'
             f'<script nonce="N0NCE" src="{src}/host.js"></script>{scripts}</body></html>')
-    fake = """(() => { window.__sent = []; const reply = m => setTimeout(() => window.postMessage(m, '*'), 0);
+    # the fake host answers by vscode/protocol.js (review 2026-11-05 runs A-05): a message of host.js none of the table's (its
+    # type, a key it needs) and an answer of the fake none of the ones its type gets go to window.__bad, checked at the end
+    fake = (ROOT / 'vscode' / 'protocol.js').read_text(encoding='utf-8') + """(() => { window.__sent = []; window.__bad = [];
+      const P = window.WaveLensProtocol, reply = m => setTimeout(() => window.postMessage(m, '*'), 0);
+      // what the extension answers, by type (every type of the table with an answer has one here)
+      const ANSWER = {
+        source: () => ({ src: '%s' + (window.__LAZY ? '/head.vcd' : window.__DUMP || '/dump.vcd'), name: 'enum.vcd', lazy: !!window.__LAZY,
+          store: Object.assign({}, window.__STORE) }),
+        // the dump the page could not fetch (a moved tab over a remote connection: 404), as the extension reads it: dump.vcd
+        bytes: () => fetch('%s/dump.vcd').then(r => r.arrayBuffer()).then(b => ({ data: new Uint8Array(b) })),
+        codes: m => window.lazyCodes(m.codes).then(text => ({ text })),
+        save: m => (window.__cancel ? { cancel: true } : { path: '/host/dumps/' + m.name }),
+        pick: m => ({ files: /fst/.test(m.accept) ? [] : [{ name: 's.view.json', path: '/states/s.view.json', mtime: 1, b64: btoa(JSON.stringify(window.__S)) }] }),
+        'state-read': () => (window.__S ? { name: 's.view.json', mtime: 2, b64: btoa(JSON.stringify(window.__S)) } : { error: 'gone' }),
+        compare: () => ({}),   // the dialog closed
+        runs: m => window.runsAnswer(m),
+        sources: () => (window.__TYPES ? { types: window.__TYPES, typesName: 'enum.types.json', texts: [] } : {
+          texts: window.__SRC || ['package p; typedef enum logic [1:0] {OFF, ON = 2, HOLD} mode_t; endpackage', 'module m; p::mode_t plain, state; endmodule'] }),
+        config: () => ({ config: window.__CFG || null }),
+        clip: () => ({ ok: true }),
+        http: () => ({ status: 200, text: 'ok' }),
+      };
+      window.__STORE = { 'wavelens.given': 'yes' };   // the dump's store as the extension keeps it (the html's, then each write)
       window.acquireVsCodeApi = () => ({ getState() {}, setState() {}, postMessage(m) { window.__sent.push(m);
-        if (m.type === 'source') reply({ id: m.id, src: '%s' + (window.__LAZY ? '/head.vcd' : window.__DUMP || '/dump.vcd'), name: 'enum.vcd', lazy: !!window.__LAZY });
-        if (m.type === 'codes') window.lazyCodes(m.codes).then(text => reply({ id: m.id, text }));
-        if (m.type === 'save') reply(window.__cancel ? { id: m.id, cancel: true } : { id: m.id, path: '/host/dumps/' + m.name });
-        if (m.type === 'clip') reply({ id: m.id, ok: true });
-        if (m.type === 'config') reply({ id: m.id, config: window.__CFG || null });
-        if (m.type === 'sources') reply(window.__TYPES ? { id: m.id, types: window.__TYPES, typesName: 'enum.types.json', texts: [] } : { id: m.id,
-          texts: window.__SRC || ['package p; typedef enum logic [1:0] {OFF, ON = 2, HOLD} mode_t; endpackage', 'module m; p::mode_t plain, state; endmodule'] });
-        if (m.type === 'pick') reply({ id: m.id, files: /fst/.test(m.accept) ? [] : [{ name: 's.view.json', path: '/states/s.view.json', mtime: 1, b64: btoa(JSON.stringify(window.__S)) }] });
-        if (m.type === 'state-read') reply(window.__S ? { id: m.id, name: 's.view.json', mtime: 2, b64: btoa(JSON.stringify(window.__S)) } : { id: m.id, error: 'gone' });
-        if (m.type === 'runs') reply(Object.assign({ id: m.id }, window.runsAnswer(m)));
-        if (m.type === 'http') reply({ id: m.id, status: 200, text: 'ok' }); } });
-      // the runs kept, as the extension's sva runs answers (newest last in the list, as runs.json has them)
-      window.__RUNS = [{ id: 1, name: 'golden', tags: ['base'], comment: 'before the fix', kept: '2026-11-01T10:00:00Z', dump: 'enum.vcd', file: '1-enum.fst' },
+        if (m && m.type === 'store') { if (m.value == null) delete window.__STORE[m.key]; else window.__STORE[m.key] = m.value; }
+        const bad = P.check(m), what = m && m.type + (m.op ? ' ' + m.op : '');
+        if (bad) { window.__bad.push(bad); if (m && m.id) reply({ id: m.id, error: bad }); return; }
+        if (!P.spec(m).reply || !m.id) return;
+        if (!ANSWER[m.type]) { window.__bad.push('the fake host has no answer to ' + what); return; }
+        Promise.resolve(ANSWER[m.type](m)).then(r => {
+          if (!P.answers(m, r)) window.__bad.push(`${what}: the fake's answer {${Object.keys(r)}} is none of the table's`);
+          reply(Object.assign({ id: m.id }, r)); });
+      } });
+      // the runs kept, as the extension's sva runs answers (newest last in the list, as runs.json has them); __RUNERR {op: error}:
+      // the host's error for that operation; __RMNO: the removal not confirmed
+      window.__RUNS = [{ id: 1, name: 'golden', tags: ['base'], comment: 'before the fix', kept: '2026-11-01T10:00:00Z', dump: 'enum.vcd', file: '1-enum.fst',
+        cases: [{ name: 'tc1', from: 7000, to: 17000 }] },
         { id: 2, name: 'seed 7', tags: [], comment: '', kept: '2026-11-02T10:00:00Z', dump: 'enum.vcd', file: '2-enum.fst' }];
       window.runsAnswer = m => {
+        if (window.__RUNERR && window.__RUNERR[m.op]) return { error: window.__RUNERR[m.op] };
         if (m.op === 'list') return { dir: '/host/dumps/.wavelens-runs', runs: window.__RUNS };
         if (m.op === 'keep') { const r = { id: 3, name: m.name, tags: m.tags, comment: m.comment, kept: '2026-11-05T10:00:00Z', dump: 'enum.vcd', file: '3-enum.fst' };
           window.__RUNS = window.__RUNS.concat([r]); return { run: r }; }
+        if (m.op === 'set') { const r = window.__RUNS.find(x => x.id === m.run); if (!r) return { error: 'no run #' + m.run };
+          Object.assign(r, { name: m.name, tags: m.tags, comment: m.comment }); return { run: r }; }
         if (m.op === 'diff') return { runs: window.__RUNS.map(r => ({ id: r.id, name: r.name, from: m.from, to: m.to, signals_compared: 4,
           signals_differ: r.id === 1 ? 1 : 0, first: r.id === 1 ? { t: 5000, signal: 'tb.plain' } : null })) };
         if (m.op === 'compare') return window.__RUNFAIL ? { error: 'the run does not read' } : { result: Object.assign({ name: 'x', from: m.from, to: m.to,
           compared: 4, differ: m.run === 1 ? 1 : 0, first: m.run === 1 ? 5000 : null,
           signals: Object.fromEntries(m.signals.map(p => [p, { spans: m.run === 1 && p === 'tb.plain' ? [[5000, 10000]] : [] }])), missing: [], map: [] },
           m.run === 1 ? { cutError: 'more than 32 MB of changes of the signals that differ' } : {}) };
-        if (m.op === 'rm') { const r = window.__RUNS.find(x => x.id === m.run); window.__RUNS = window.__RUNS.filter(x => x.id !== m.run); return { removed: r }; }
+        if (m.op === 'rm') { if (window.__RMNO) return { cancelled: true };
+          const r = window.__RUNS.find(x => x.id === m.run); window.__RUNS = window.__RUNS.filter(x => x.id !== m.run); return { removed: r }; }
+        if (m.op === 'cancel') return { ok: true };
         return { error: 'no ' + m.op };
-      }; })();""" % src
+      }; })();""" % (src, src)
     page = browser.new_page()
     errs = []
     page.on('console', lambda m: errs.append(m.text) if m.type == 'error' else None)
@@ -1960,6 +2028,15 @@ def vscode_tab(browser, build):
     now = page.evaluate(plain); page.evaluate("window.__DUMP = null")
     check(len(sent('source')) == n_src + 1 and len(sent('loaded')) == n_load + 1 and was != now,
           f'changed with autoReload: the dump fetched once more and its new values shown ({was} -> {now})')
+    # a tab moved to a window of its own over a remote connection: its URI answers 404, the dump comes as bytes; the store of now
+    n_load, n_err = len(sent('loaded')), len(errs)
+    page.evaluate("window.__DUMP = '/gone.vcd'; window.__STORE['wavelens.moved'] = 'now'; window.postMessage({ type: 'reload' }, '*')")
+    until(f"window.__sent.filter(m => m.type === 'loaded').length > {n_load}", timeout=5000)
+    page.evaluate("window.__DUMP = null")
+    errs[n_err:] = [e for e in errs[n_err:] if 'status of 404' not in e]   # the browser's line of the 404 itself
+    check(page.evaluate(plain) == was and any('could not fetch it (404' in m.get('text', '') for m in sent('log')) and sent('bytes'),
+          'a URI that answers 404: the dump read through the extension as bytes, the log says so')
+    check(page.evaluate("localStorage.getItem('wavelens.moved')") == 'now', 'the store as the extension has it now (a page made again)')
     page.evaluate("window.postMessage({ type: 'live', link: '8742:tok123' }, '*')")
     until("window.__sent.some(m => m.type === 'es-open')", timeout=5000)
     es = sent('es-open')[0]
@@ -2123,17 +2200,25 @@ def vscode_tab(browser, build):
     sp = js("v.run([{ op: 'span', from: '5ns', to: '15ns', label: 'tc1' }]).then(r => [r, v.spans.length])")
     page.locator('.wv-runs .rw').focus()
     check(js("v.root.querySelectorAll('.wv-runs .rw option').length") == 2, f'your spans in the window\'s choices {sp}')
+    opt = js("v.root.querySelectorAll('.wv-runs .rw option')[1].textContent")
+    check(opt.endswith('· a case'), f'a span a run has a case of says so ({opt})')
     page.select_option('.wv-runs .rw', '0')
     page.click('.wv-runs [data-a=all]')
     until("document.querySelectorAll('.wv-runs .rd').length === 2")
     d = sent('runs')[-1]
     check(d['op'] == 'diff' and d['from'] == 5000 and d['to'] == 15000, f'Δ all over your span ({d.get("from")} … {d.get("to")})')
+    check(d.get('case') == 'tc1', f'your span tc1 a case of a run: Δ all compares each run\'s case tc1 ({d.get("case")})')
     check(js("[...v.root.querySelectorAll('.wv-runs .rd')].map(x => x.classList.contains('bad')).join()") == 'false,true', 'each run\'s numbers on its row')
     page.click('.bar [data-act=druns]'); page.wait_for_timeout(100)
     check(js("!document.querySelector('.wv-runs')"), 'Runs… again closes it')
     page.locator('.wv canvas').first.click(); page.keyboard.press(']'); page.keyboard.press('r')
     until("(v => v.cmp && v.cmp.name === '#1 golden')(WaveLens.views().find(x => x.root.isConnected))")
-    check(sent('runs')[-1]['from'] == 5000, ']r: the next (older) run, over the same window (your span)')
+    c = sent('runs')[-1]
+    check(c['from'] == 5000, ']r: the next (older) run, over the same window (your span)')
+    check(c.get('case') == 'tc1', f'the run #1 has a case tc1: compared with its case, not its same time ({c.get("case")})')
+    js("v.runCompare(2, true)")
+    c = sent('runs')[-1]
+    check(c['run'] == 2 and 'case' not in c, 'a run without that case: over the window as it is')
     page.click('.bar [data-act=druns]')
     until("document.querySelectorAll('.wv-runs .rn').length === 2")
     page.click('.wv-runs [data-a=keep]')
@@ -2142,6 +2227,60 @@ def vscode_tab(browser, build):
     until("document.querySelectorAll('.wv-runs .rn').length === 3")
     k = [m for m in sent('runs') if m['op'] == 'keep'][-1]
     check((k['name'], k['tags'], k['comment']) == ('after fix', ['fix', 'b-12'], 'the counter'), f'Keep this dump…: its name, tags, comment to the host {k}')
+    check(k.get('cases') == [{'label': 'tc1', 'from': 5000, 'to': 15000}], f'and your spans with a label as its test cases ({k.get("cases")})')
+    # T-03 of the review of the runs: the panel's keys, the host's errors and refusals (each message read back with its keys below)
+    rl = page.locator('.wv-runs .rl')
+    status = "document.querySelector('.wv-runs .ms').textContent"
+    ops = lambda op: [m for m in sent('runs') if m['op'] == op]
+    rl.focus(); page.keyboard.press('k')
+    a = js("[!v.runsP.form.hidden, document.activeElement === v.runsP.form.querySelector('.rfn'), v.runsP.form.querySelector('.rfo').textContent]")
+    page.keyboard.press('Escape')
+    b = js("[v.runsP.form.hidden, !!document.querySelector('.wv-runs'), document.activeElement === v.runsP.list]")
+    check(a == [True, True, 'Keep'] and b == [True, True, True] and len(ops('keep')) == 1,
+          f'k: the form to keep the dump of now; Esc in it: cancelled, nothing kept, the panel stays, the list focused {a} {b}')
+    js("(v.runsP.pick(v.runsL.findIndex(r => r.id === 2), false), 0)"); rl.focus(); page.keyboard.press('e')
+    a = js("[v.runsP.form.querySelector('.rfn').value, v.runsP.form.querySelector('.rfo').textContent]")
+    page.fill('.wv-runs .rfn', 'seed 7b'); page.fill('.wv-runs .rft', 'x, y'); page.click('.wv-runs .rfo')
+    until("[...document.querySelectorAll('.wv-runs .rn .nm')].some(e => e.textContent === 'seed 7b')")
+    st = ops('set')[-1]
+    check(a == ['seed 7', 'Save'] and (st['run'], st['name'], st['tags'], st['comment']) == (2, 'seed 7b', ['x', 'y'], '') and
+          page.evaluate(status) == '#2 saved', f'e: the run\'s form; saved: set with its number as run, the list read again {a} {st}')
+    page.evaluate("window.__RUNERR = { set: 'runs.json is locked' }")
+    rl.focus(); page.keyboard.press('e'); page.click('.wv-runs .rfo')
+    until(f"{status}.includes('locked')")
+    check(page.evaluate(status) == 'not saved: runs.json is locked', f'the host\'s error to a set: said ({page.evaluate(status)})')
+    n0 = len(ops('diff'))
+    page.evaluate("window.__RUNERR = null"); js("(v.runsP.deltas.clear(), v.runsP.render(), 0)")
+    rl.focus(); page.keyboard.press('a')
+    until("document.querySelectorAll('.wv-runs .rd').length === 3")
+    page.evaluate("window.__RUNERR = { diff: 'sva runs diff: exit 2' }")
+    rl.focus(); page.keyboard.press('a')
+    until(f"{status}.startsWith('Δ all: ')")
+    check(len(ops('diff')) == n0 + 2 and page.evaluate(status) == 'Δ all: sva runs diff: exit 2',
+          f'a: Δ all, each run\'s numbers; the host\'s error said ({page.evaluate(status)})')
+    page.evaluate("window.__RUNERR = null; window.__RMNO = true")
+    js("(v.runsP.pick(v.runsL.findIndex(r => r.id === 3), false), 0)"); rl.focus(); page.keyboard.press('Delete')
+    until("window.__sent.some(m => m.type === 'runs' && m.op === 'rm')"); page.wait_for_timeout(100)
+    a = [ops('rm')[-1].get('run'), js("v.runsL.map(r => r.id).join()"), page.evaluate(status)]
+    page.evaluate("window.__RMNO = false; window.__RUNERR = { rm: 'the file is in use' }")
+    rl.focus(); page.keyboard.press('Delete')
+    until(f"{status}.startsWith('not removed')")
+    check(a[:2] == [3, '3,2,1'] and 'removed' not in a[2] and page.evaluate(status) == 'not removed: the file is in use' and len(ops('rm')) == 2,
+          f'Delete: rm with the run\'s number; not confirmed (cancelled): kept, nothing said; the host\'s error: said {a}')
+    page.evaluate("window.__RUNERR = { list: 'no directory .wavelens-runs' }"); js("v.runsP.load()")
+    a = page.evaluate(status)
+    page.evaluate("window.__RUNERR = null"); js("(v.runCompare(2, true), 0)")
+    until("(v => v.cmp && v.cmp.name === '#2 seed 7b')(WaveLens.views().find(x => x.root.isConnected))")
+    n0 = len(ops('compare'))
+    page.click('.wv-runs [data-a=again]')
+    until(f"window.__sent.filter(m => m.type === 'runs' && m.op === 'compare').length > {n0}")
+    c = ops('compare')[-1]
+    check(a == 'runs: no directory .wavelens-runs' and c['run'] == 2, f'the list refused by the host: said ({a}); ⟳: the run compared again ({c})')
+    rl.focus(); page.keyboard.press('Escape')
+    gone = js("!document.querySelector('.wv-runs') && !v.runsP")
+    page.click('.bar [data-act=druns]')
+    until("document.querySelectorAll('.wv-runs .rn').length === 3")
+    check(gone, 'Esc in the list closes the panel')
     # review of the runs (2026-11-05): the list's keys compare once they stop (B-19)
     n0 = len([m for m in sent('runs') if m['op'] == 'compare'])
     page.locator('.wv-runs .rl').focus()
@@ -2192,6 +2331,17 @@ def vscode_tab(browser, build):
     until("(v => v && v.runCur === 9)(WaveLens.views().find(x => x.root.isConnected))")
     check(True, ']r with no run compared: the newest, a run kept in a shell meanwhile')
     page.keyboard.press('Escape')
+    # every runs message host.js sent, by operation: its keys (T-03: rm with id in place of run passed before), and against the table
+    shapes = {}
+    for m in sent('runs'):
+        shapes.setdefault(m['op'], set()).add(tuple(sorted(set(m) - {'type', 'id', 'op'})))
+    sig = ('from', 'signals', 'to')
+    want = {'list': {()}, 'keep': {('comment', 'name', 'tags'), ('cases', 'comment', 'name', 'tags')}, 'set': {('comment', 'name', 'run', 'tags')},
+            'rm': {('run',)}, 'diff': {sig, ('case',) + sig}, 'compare': {('from', 'run', 'signals', 'to'), ('case', 'from', 'run', 'signals', 'to')}}
+    check(set(shapes) == set(want) and all(shapes[k] <= want[k] for k in want) and all(type(m['run']) is int for m in sent('runs') if 'run' in m),
+          f'every runs message of host.js with its keys: list, keep, set, rm, diff, compare {shapes}')
+    bad = page.evaluate('window.__bad')
+    check(not bad, f'every message of host.js one of vscode/protocol.js with its keys, every answer of the fake host one its type gets {bad[:3]}')
     # a link of a log (vscode/links.js): the extension runs goto in the tab
     page.evaluate("window.postMessage({ type: 'run', rid: 777, ops: [{ op: 'goto', t: '12000ps', sel: 'tb.state' }] }, '*')")
     page.wait_for_function("window.__sent.some(m => m.type === 'result' && m.rid === 777)", timeout=5000)
@@ -4221,6 +4371,8 @@ def view_031(browser, build):
       v.menu(10, 10, R('z')); const m = v.menuEl;
       out.menu = [!!m, m.querySelector('b'), [...m.querySelectorAll('span')].some(s => s.textContent.includes('<b>x</b>'))];
       v.closeMenu();
+      // the window's blur (VS Code: the focus out of the webview) closes a menu: its target is the window, no node
+      v.menu(10, 10, R('z')); await new Promise(r => setTimeout(r, 0)); window.dispatchEvent(new Event('blur')); out.blur = !v.menuEl;
       // X2: what is no colour goes
       const r2 = await v.run([{ op: 'bookmark', t: 5, color: 'red;background:url(http://h/x)' }, { op: 'bookmark', t: 6, color: 'rgb(1, 2, 3)' }, { op: 'bookmark', t: 7, color: 'c5' },
         { op: 'paint', signals: 'tb.b', color: 'a;b:c' }]);
@@ -4247,6 +4399,7 @@ def view_031(browser, build):
       out.pic = [p.error, p2.error, p3];
       return out; })()""")
     check(got['menu'][0] and got['menu'][1] is None and got['menu'][2], f'a group named <b>x</b> is text in the menu {got["menu"]}')
+    check(got['blur'], 'the window\'s blur closes a menu (no "parameter 1 is not of type Node")')
     check(got['color'] == [[True, False, False, True], None, None, 0],
           f'a colour of a command or a state: a token or what the browser takes, nothing else {got["color"]}')
     check(got['sort'] == ['none', 'asc', 'none'], f'undo takes the sort back, not the step before it {got["sort"]}')
@@ -4509,6 +4662,26 @@ def edit(browser, build):
     got = page.evaluate("[WaveLens.views().length, WaveLens.views()[0].M.rows[0].name, WaveLens.views()[0].markList()[0].label, "
                         "typeof WaveBus !== 'undefined']")   # bus.js: a script after the data
     check(r.returncode == 0 and got == [1, '<!--<script>', '<!--<script>', True], f'a page with "<!--<script>" in its data opens whole {got} {r.stderr[-200:]}')
+    # one rule of naming (tools/common.py pick; review 2026-11-05 runs A-07): pickRows and viewedit.py take the same row for each
+    # spelling: a full path, a name, the end of a path, a longer path, a bit, an array element either way, the one nearest the top
+    nj, nh = d / 'names.json', d / 'names.html'
+    nj.write_text(json.dumps({'signal': [['top', {'name': 'clk', 'wave': 'p.'}, ['u', {'name': 'clk', 'wave': 'p.'}],
+                                          ['dut', {'name': 'state', 'wave': '==', 'data': ['A', 'B'], 'width': 2},
+                                           {'name': 'data', 'wave': '==', 'data': ['1', '2'], 'width': 8}],
+                                          ['other', {'name': 'state', 'wave': '01'}], ['mem', {'name': '[1]', 'wave': '==', 'data': ['3', '4'], 'width': 8}]]]}))
+    r = subprocess.run([sys.executable, '-I', str(ROOT / 'tools' / 'mkhtml.py'), f'k={nj}', '--out', str(nh)], capture_output=True, text=True)
+    open_(nh)
+    names = ['top.dut.state', 'clk', 'state', 'dut.state', 'x.top.dut.state', 'mem[1]', 'top.mem[1]', 'mem.[1]', '[1]', 'top.dut.data[3]', 'data[3]', 'nosuch']
+    nops = [{'op': 'bookmark', 't': 0, 'signal': n} for n in names]
+    def said(res, st):   # each name: the row its bookmark went on, or the error's first part
+        bms = iter(st.get('bookmarks') or [])
+        return [x['error'].split(':')[0] if 'error' in x else next(bms).get('signal') for x in res]
+    pg = page.evaluate("ops => WaveLens.views()[0].run(ops).then(res => ({res, st: WaveLens.views()[0].state()}))", nops)
+    ne = viewedit.Editor(viewedit.Model(page.evaluate("WAVES.k")))
+    want = ['top.dut.state', 'top.clk', '"state" is ambiguous', 'top.dut.state', 'top.dut.state', 'top.mem.[1]', 'top.mem.[1]', 'top.mem.[1]',
+            'top.mem.[1]', 'top.dut.data[3]', 'no signal "data[3]"', 'no signal "nosuch"']
+    got = [said(pg['res'], pg['st']), said(ne.run(nops), ne.st)]
+    check(r.returncode == 0 and got == [want, want], f'names: the page and viewedit.py take the same row by one rule {got}')
     open_(pb); page.evaluate('localStorage.clear()'); open_(pb)
     cmds = page.evaluate("Object.fromEntries(Object.entries(WaveLens.commands()).map(([k, c]) => [k, c.args]))")
     check(cmds == viewedit.COMMANDS, f'WaveLens.commands() and tools/viewedit.py COMMANDS: one list (differ: '
@@ -7925,8 +8098,15 @@ def main():
     expected[build / 'examples' / 'cocotb_apb' / 'cocotb_apb.html'] = 'make cocotb'
     user = [x for x in (ROOT / 'work' / 'dump.html', ROOT / 'work' / 'test_stream_video.html') if x.exists()]
     user += [x for x in (build / 'examples' / 'cocotb_apb_questa' / 'cocotb_apb.html',) if x.exists()]   # make cocotb SIM=questa: the same checks, the same numbers
-    for path, how in expected.items():
-        if not path.exists():
+    def owners(path):   # the sections that check this page, besides "pages" (and "big": every page built)
+        tsv = path.name == 'test_stream_video.html'
+        return (['docs', 'sva_docs', 'viewer', 'wavelens', 'plugin_api', 'api_docs', 'markup'] if path == PAGES[0] else ['conformance'] if path == PAGES[1] else
+                ['hierarchy', 'find', 'deep', 'viewer'] + (['modules', 'bar_tools'] if path == synth else []) if path == synth or tsv else
+                ['fst'] if path.name == 'demo_fst.html' else ['examples'] if path.stem in EXAMPLES or path.stem in ('fsm_all', 'cocotb_apb') else [])
+    if want('pages'):
+        RAN.add('pages')   # run here, not through run()
+    for path, how in expected.items():   # missing: a skip when a section run checks it (--only find: the examples are not needed)
+        if not path.exists() and any(want(x) for x in ['pages', 'big'] + owners(path)):
             skip(path, how)
     BUILT[:] = [x for x in expected if x.exists()] + user + ([synth] if synth and synth.exists() else [])
     print('user pages: ' + (', '.join(x.name for x in user) or 'none under work/ (make html WAVES=work/x.vcd)'))
@@ -7937,16 +8117,12 @@ def main():
         sva_open(b)
         for path in PAGES + BUILT:
             tsv = path.name == 'test_stream_video.html'
-            own = (['docs', 'sva_docs', 'viewer', 'wavelens', 'plugin_api', 'api_docs', 'markup'] if path == PAGES[0] else ['conformance'] if path == PAGES[1] else
-                   ['hierarchy', 'find', 'deep', 'viewer'] + (['modules', 'bar_tools'] if path == synth else []) if path == synth or tsv else ['fst'] if path.name == 'demo_fst.html' else
-                   ['examples'] if path.stem in EXAMPLES or path.stem in ('fsm_all', 'cocotb_apb') else [])
-            own += ['big'] if path in BUILT else []
+            own = owners(path) + (['big'] if path in BUILT else [])
             if not want('pages') and not any(want(x) for x in own):
                 continue
             for scheme in ('light', 'dark') if want('pages') else ('light',):
                 print(f'{path.name} [{scheme}]')
-                page = b.new_page(color_scheme=scheme, viewport={'width': 1360, 'height': 900})
-                COUNT[1] += 1
+                page = b.new_page(color_scheme=scheme, viewport={'width': 1360, 'height': 900})   # counted by steady
                 errs = []
                 page.on('console', lambda m: errs.append(m.text) if m.type == 'error' else None)
                 page.on('pageerror', lambda e: errs.append(str(e)))
@@ -8076,7 +8252,11 @@ def main():
               + (': a failure with --strict' if a.strict else ''))
     else:
         print('SKIPPED 0 pages / 0 sections')
-    print(f'{COUNT[0]} checks on {COUNT[1]} pages, ' + (f'FAILED: {len(fails)}' if fails else 'all checks passed'))
+    # the last line says what ran and what the run is: a skip under --strict fails it and says so here too (T-17 of 11-05)
+    ran = f'{COUNT[0]} checks in {len(RAN)} of {len(SECTIONS)} sections, {COUNT[1]} pages opened'
+    verdict = (f'FAILED: {len(fails)}' if fails else f'FAILED: {len(skips)} skipped with --strict' if a.strict and skips else
+               f'all checks passed, {len(skips)} skipped' if skips else 'all checks passed')
+    print(f'{ran}, {verdict}')
     for f in fails:
         print('  FAIL ' + f)
     sys.exit(1 if fails or (a.strict and skips) else 0)

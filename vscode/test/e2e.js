@@ -158,6 +158,37 @@ async function run() {
       { result: r[0], error: got.error });
     await closeAll();
   } catch (e) { ok('compare: the second dump through sva diff on the host', false, { error: e.message }); }
+  // the runs kept (review 2026-11-05 runs T-03): the dump kept as a run by sva runs on the host (as Keep this dump… asks), the
+  // Runs panel opened by its command lists it through host.js (its message and the extension's answer read back), the next
+  // simulation compared with the run over a window (a bit that rises 5 ns later: one signal differs), the run removed (asked first)
+  const RUNS = 'runs: kept, listed through the page, compared, removed';
+  try {
+    const head = '$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! a $end\n$upscope $end\n$enddefinitions $end\n';
+    const dir = path.join(OUT, 'runs');
+    fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir, { recursive: true });
+    const a = path.join(dir, 'run.vcd');
+    fs.writeFileSync(a, head + '#0\n0!\n#10\n1!\n#20\n');
+    const o = await open(api, a), seen = [], said = [];
+    const message = o.tab.message.bind(o.tab), post = o.tab.post.bind(o.tab);
+    o.tab.message = m => { seen.push(m); return message(m); };
+    o.tab.post = m => { said.push(m); return post(m); };
+    const kept = await o.tab.runs({ op: 'keep', name: 'e2e before' }), id = kept.run && kept.run.id;
+    fs.writeFileSync(a, head + '#0\n0!\n#15\n1!\n#20\n');
+    await vscode.commands.executeCommand('wavelens.runs');
+    let list = null;
+    for (let i = 0; i < 100 && !(list && said.some(m => m.id === list.id)); i++) {
+      await sleep(100); list = seen.find(m => m.type === 'runs' && m.op === 'list'); }
+    const listed = list && said.find(m => m.id === list.id);
+    const got = await o.tab.runs({ op: 'compare', run: id, signals: ['tb.a'], from: 0, to: 20000 });
+    const r = got.result ? await o.tab.run([{ op: 'compare', result: got.result }]) : [];
+    const was = vscode.window.showWarningMessage;
+    let rm;
+    try { vscode.window.showWarningMessage = async () => 'Remove'; rm = await o.tab.runs({ op: 'rm', run: id }); }
+    finally { vscode.window.showWarningMessage = was; }
+    ok(RUNS, id && listed && (listed.runs || []).some(x => x.id === id) && r[0] && r[0].differ === 1 && rm && rm.removed && rm.removed.id === id,
+      { kept: kept.run || kept.error, listed: listed && (listed.runs || listed.error), compared: r[0] || got.error, removed: rm && (rm.removed || rm.error) });
+    await closeAll();
+  } catch (e) { ok(RUNS, false, { error: e.message }); }
   // the log: what the reader noticed in a dump goes to the Problems panel on its line; one it cannot read, an error there
   try {
     const head = '$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! a $end\n$upscope $end\n$enddefinitions $end\n';

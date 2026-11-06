@@ -88,7 +88,8 @@
     compare is converted too); <span class="ui">Open…</span> a dump opens a tab of its own.</td></tr>
   <tr><td>the runs kept</td><td><span class="ui">Runs…</span> (<kbd>g</kbd> <kbd>u</kbd>, <i>WaveLens: The runs kept of this dump</i>):
     keep the dump of now with a name, tags and a comment (an FST in <code>.wavelens-runs</code> beside it), and compare with one
-    run, or all of them, over the waves in sight or a span of yours — only that window of a run is read, on the host
+    run, or all of them, over the waves in sight or a span of yours (a test case: the run's case of that name, wherever it is) —
+    only that window of a run is read, on the host
     (<a href="compare.html#runs">Compare two runs</a>).</td></tr>
   <tr><td>the last state</td><td>the state loaded last is the workspace's, whichever dump it was: <span class="ui">Load…</span> opens on that file,
     <span class="ui">Reload</span> (<kbd>r</kbd>) reads it in every tab, and a dump seen for the first time takes it at once (ctrl+Z undoes it);
@@ -182,7 +183,8 @@
     and more; always; never: read whole, cut to <code>dumpBudget</code>)</td></tr>
   <tr><td><code>wavelens.live</code></td><td>true</td><td>the tabs connect to an agent's live link (false: they do not); <i>WaveLens: Connect to the agent</i> connects the tab now</td></tr>
   <tr><td><code>wavelens.runsDir</code></td><td></td><td>where the Runs panel keeps the runs (empty: <code>.wavelens-runs</code> beside the
-    dump; relative to the workspace folder, or absolute: one directory for every dump)</td></tr>
+    dump; relative to the workspace folder, or absolute: one directory for every dump; in the workspace's settings,
+    <code>sva runs</code> in a shell and an agent's <code>wave_runs</code> find it too)</td></tr>
   <tr><td><code>wavelens.sva</code></td><td></td><td>another <code>sva</code> program than the one the extension carries</td></tr>
 </table>
 <p>The output channel <b>WaveLens</b> (View → Output, or <i>WaveLens: Show the log</i>) logs each read and what went wrong: a
@@ -191,7 +193,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.44 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.45 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

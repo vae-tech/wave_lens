@@ -163,6 +163,43 @@ class Dump(unittest.TestCase):
                          ['tb.vcd:12: a value of "%", which no $var declares: left out'])
 
     @H.needs(svabuild.find_bin(), 'no sva CLI')
+    def test_progress_is_no_note(self):
+        """Review of the runs T-08 b: the CLI's lines of how far it is, as `sva fst` and `sva diff` write them (one function of
+        main.rs, its marker W.PROGRESS; --large-bytes: a small dump says them), are no note; a note between them stays."""
+        exe = svabuild.find_bin()
+        with H.tmp() as d:
+            v = H.vcd(d, ''.join(f'#{t}\n{t // 10 % 2}!\n' for t in range(0, 100, 10)) + '#100\n0', name='p.vcd')   # a value cut off at the end: a note
+            f = os.path.join(d, 'p.fst')
+            a = subprocess.run([exe, 'fst', v, '--out', f, '--large-bytes', '1'], capture_output=True, text=True, stdin=subprocess.DEVNULL)
+            b = subprocess.run([exe, 'diff', f, f, '--json', '-', '--large-bytes', '1'], capture_output=True, text=True, stdin=subprocess.DEVNULL)
+            self.assertEqual((a.returncode, b.returncode), (0, 0), a.stderr + b.stderr)
+            fst = [x for x in a.stderr.splitlines() if 'progress' in x]
+            diff = [x for x in b.stderr.splitlines() if 'progress' in x]
+            self.assertTrue(len(fst) >= 2 and all(x.startswith(f'sva: {v}: progress: ') for x in fst), a.stderr)   # the declarations, a tenth
+            self.assertTrue(diff and all(x.startswith(f'sva: {f} ~ {f}: progress: ') for x in diff), b.stderr)
+            notes = W.fst_notes(a.stderr + b.stderr)
+            self.assertEqual(len(notes), 1, notes)
+            self.assertTrue(notes[0].startswith(v + ':') and 'left out' in notes[0], notes)
+
+    @H.needs(svabuild.find_bin(), 'no sva CLI')
+    def test_json_after_the_warnings_of_wellen(self):
+        """Review of the runs T-08 c: where sva cannot put wellen's "WARN: …" aside (fd 1 on Windows) they stand on stdout before
+        the JSON: wave_diff and wave_runs read the JSON after them (the CLI wrapped to say one first)."""
+        with H.tmp() as d:
+            stub = os.path.join(d, 'sva')
+            with open(stub, 'w', encoding='utf-8') as f:
+                f.write(f'#!/bin/sh\necho "WARN: time decreased from 20 to 5"\nexec \'{svabuild.find_bin()}\' "$@"\n')
+            os.chmod(stub, 0o755)
+            r = self.call('wave_diff', b=self.vcd, signals=['s_tvalid'], sva_bin=stub)
+            self.assertEqual((r['equal'], r['signals_compared']), (True, 1))
+            v, runs = H.vcd(d, '#0\n0!\n#10\n1!\n', name='r.vcd'), os.path.join(d, 'runs')
+            text, err = W.call('wave_runs', {'action': 'keep', 'dump': v, 'dir': runs, 'sva_bin': stub})
+            self.assertFalse(err, text)
+            text, err = W.call('wave_runs', {'action': 'list', 'dir': runs, 'sva_bin': stub})
+            self.assertFalse(err, text)
+            self.assertEqual([x['id'] for x in json.loads(text)['runs']], [1])
+
+    @H.needs(svabuild.find_bin(), 'no sva CLI')
     def test_diff(self):
         """wave_diff (stage 14.2): the dump against itself, one value other, a signal taken out, the scope renamed (map),
         the run 5 ns later (offset), counts per state (segment), dump for a; times in ns, a bus in hex."""

@@ -30,8 +30,11 @@ function cmdIn(v, x, what = 't') {
   if (t < lo || t > v.M.t1) fail(`${what}: ${v.when(t)} is outside these waves (${v.when(lo)} … ${v.when(v.M.t1)})`);
   return t;
 }
-// rows by what a person or an agent writes (see above); o.groups: modules and your groups too; o.scopes: the modules
-// only (not a struct, your groups or a plugin's); o.one: exactly one
+// a path with no dot before a [: one spelling of an array element (mem.[1] and mem[1] -> mem[1]; tools/common.py glued)
+const gluedPath = p => p.replace(/\.+\[/g, '[');
+// rows by what a person or an agent writes (see above), the rule of tools/common.py pick: a full path, a name, the end of a
+// path, a longer path ending with one, a bit of a bus; an array element either way; of several the one nearest the top;
+// o.groups: modules and your groups too; o.scopes: the modules only (not a struct, your groups or a plugin's); o.one: one
 function pickRows(v, spec, o = {}) {
   const list = prefixes(spec), M = v.M, what = o.scopes ? 'module' : o.groups ? 'signal or module' : 'signal';
   if (!list.length) fail(`no ${o.scopes ? 'modules' : o.groups ? 'signals or modules' : 'signals'} given`);
@@ -43,12 +46,14 @@ function pickRows(v, spec, o = {}) {
     let hit;
     if (s.includes('*')) { const rx = glob(s); hit = pool.filter(r => rx.test(r.full)); }
     else {
+      const g = gluedPath(s), G = r => gluedPath(r.full);
       hit = pool.filter(r => r.full === s);
+      if (!hit.length && s.includes('[')) hit = pool.filter(r => G(r) === g);
       if (!hit.length) hit = pool.filter(r => r.name === s);
-      if (!hit.length) hit = pool.filter(r => r.full.endsWith('.' + s));
+      if (!hit.length) hit = pool.filter(r => G(r).endsWith('.' + g));
       // the dump's path of a signal the page shows under a shorter one (wave_page: "tb.aclk" for "aclk"): the longest
-      if (!hit.length) { const at = pool.filter(r => s.endsWith('.' + r.full)), n = Math.max(0, ...at.map(r => r.full.length));
-        hit = at.filter(r => r.full.length === n); }
+      if (!hit.length) { const at = pool.filter(r => g.endsWith('.' + G(r))), n = Math.max(0, ...at.map(r => G(r).length));
+        hit = at.filter(r => G(r).length === n); }
     }
     if (!hit.length && !o.scopes) { const b = v.sigByPath(s); if (b) hit = [b]; }   // a bit of a bus: "data[3]"
     if (!hit.length) {
@@ -57,7 +62,7 @@ function pickRows(v, spec, o = {}) {
     }
     let fulls = [...new Set(hit.map(r => r.full))];
     if (!s.includes('*') && fulls.length > 1) {   // one net at several levels: the one nearest the top, when it is one (as wavemcp.py)
-      const dots = f => f.split('.').length, top = Math.min(...fulls.map(dots)), near = fulls.filter(f => dots(f) === top);
+      const dots = f => gluedPath(f).split('.').length, top = Math.min(...fulls.map(dots)), near = fulls.filter(f => dots(f) === top);
       if (near.length === 1) { hit = hit.filter(r => r.full === near[0]); fulls = near; }
     }
     if (!s.includes('*') && fulls.length > 1) fail(`"${s}" is ambiguous: ${fulls.slice(0, 6).join(', ')}${fulls.length > 6 ? ` (+${fulls.length - 6})` : ''}` +
@@ -679,6 +684,7 @@ Object.assign(WaveView.prototype, {
     return JSON.stringify({ bookmarks: this.bookmarks(), arrows: this.arrowList(), markers: this.markList(), spans: this.spanList(), groups,
       paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs), hidden: [...this.hiddenRows],
       dups: [...this.dups.keys()], deltas: this.deltas, bits: [...this.bitsOpen], only: this.onlyState(), fsm: this.fsmState(),
+      onlyGrp: this.onlyGrp ?? null,   // the panel's "Your groups whole" with no Only set too (onlyState is null then)
       config: Object.assign({ style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded,
         toolsHidden: toolNames(this.S.toolsHidden), sort: this.sort, sortIgnore: [...this.sortIgnore] }, this.gapOpt(true), this.cycOpt()),
       hl: this.hlOrder().map(r => [r.full, this.picks.get(r)]), ext: this.undoExt() });
@@ -722,10 +728,12 @@ Object.assign(WaveView.prototype, {
     const hl = diff(A.hl, B.hl), fi = this.fi, fiRow = this.fiRow;
     if (hl) st.config.highlight = A.hl.map(([f]) => f);
     await this.setState(st);
+    const grp = diff(A.onlyGrp ?? null, B.onlyGrp ?? null);
+    if (grp) { this.onlyGrp = A.onlyGrp ?? undefined; if (this.only) this.setOnly({}); else { this.onlyShow(); this.settingsChanged(); } }
     if (hl) { const at = new Map(A.hl); this.picks = new Map([...this.picks.keys()].map(r => [r, at.get(r.full) ?? this.picks.get(r)]));
       this.renderNames(); this.draw(); }   // the highlight's colours worked out again
     if (fiRow && this.found.has(fiRow)) { this.fi = fi; this.fiRow = fiRow; }
-    return [...new Set([...UNDO_KEYS.filter(k => k in st), ...ext.map(k => ({ exprs: 'expressions', sva: 'assertions' })[k] || k),
+    return [...new Set([...UNDO_KEYS.filter(k => k in st), ...(grp ? ['only'] : []), ...ext.map(k => ({ exprs: 'expressions', sva: 'assertions' })[k] || k),
       ...Object.keys(st.config).map(k => (GAP_KEYS.includes(k) ? 'gaps' : CYC_KEYS.includes(k) ? 'cycles' : k))])];
   },
   undoShow() { for (const [act, s] of [['undo', this.undoS], ['redo', this.redoS]]) { const b = this.root.querySelector(`button[data-act=${act}]`);

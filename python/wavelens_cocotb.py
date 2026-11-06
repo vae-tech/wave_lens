@@ -53,8 +53,8 @@ def bound_ps(x):
     if x is None or isinstance(x, bool):
         return None
     if isinstance(x, (int, float)):
-        if x < 0:
-            raise ValueError(f'wl.measure: {x!r}: a bound is no negative time')
+        if not x >= 0 or x == float('inf'):   # NaN and inf too: the page reads no NaN / Infinity of its JSON
+            raise ValueError(f'wl.measure: {x!r}: a bound is a finite time of 0 or more')
         return x
     t = str(x).strip().lower().replace(' ', '')
     for u in sorted(UNIT_PS, key=len, reverse=True):
@@ -63,8 +63,8 @@ def bound_ps(x):
                 v = float(t[:-len(u)]) * UNIT_PS[u]
             except ValueError:
                 break
-            if v < 0:
-                raise ValueError(f'wl.measure: {x!r}: a bound is no negative time')
+            if not v >= 0 or v == float('inf'):   # "infns", "nanns", "1e400ns": float() reads them
+                raise ValueError(f'wl.measure: {x!r}: a bound is a finite time of 0 or more')
             return v
     if t.rstrip('s').endswith('cycle') or t.endswith('clk'):
         return None

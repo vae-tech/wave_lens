@@ -4,6 +4,7 @@ import json, os, re, subprocess, sys, unittest
 from tests.unit import helpers as H
 import wavejson as WJ
 import wavelenscat
+from tests.unit.test_vscode_state import NODE
 
 
 class WaveJson(unittest.TestCase):
@@ -127,6 +128,54 @@ class WavelensCat(unittest.TestCase):
 
     def test_check_exit_code(self):
         self.assertEqual(H.run_tool('wavelenscat', '--check')[0], 0)
+
+    def test_a_key_of_waveview_twice(self):
+        """Review 2026-11-05 runs A-09: a method of WaveView defined in two files (or twice in one), the later silently winning, fails
+        --check; a getter with its setter is one key, a static member and a method body's lines are none."""
+        src = [('wavelens/src/view.js', 'class WaveView {\n  constructor() {\n    if (x) y();\n  }\n  static of() {}\n  get w() { return 1; }\n'
+                '  set w(v) {}\n  draw() {\n  }\n}\n'),
+               ('wavelens/src/look.js', 'Object.assign(WaveView.prototype, {\n  async load(f) {\n    of();\n  },\n  zoom: null,\n  of() {},\n});\n'),
+               ('wavelens/src/runs.js', 'Object.assign(Other.prototype, {\n  draw() {},\n});\nObject.assign(WaveView.prototype, {\n  draw() {\n  },\n'
+                '  w: 2,\n});\n')]
+        self.assertEqual([k for k, _, _ in wavelenscat.proto_keys(src)], ['constructor', 'w', 'w', 'draw', 'load', 'zoom', 'of', 'draw', 'w'])
+        self.assertEqual(wavelenscat.proto_twice(src), ['WaveView.prototype.draw: wavelens/src/view.js:8 and wavelens/src/runs.js:5',
+                                                        'WaveView.prototype.w: wavelens/src/view.js:6 and wavelens/src/runs.js:7'])
+        self.assertEqual(wavelenscat.proto_twice(wavelenscat.sources()), [], 'the sources of now: each key once')
+
+    def test_a_name_declared_nowhere(self):
+        """Review 2026-11-05 runs A-09: a name read that nothing declares and no browser has (a misspelt global) fails --check,
+        with its source file and line; strings, templates, regular expressions, keys, members and parameters are no reads."""
+        import jsnames
+        text = ('const a = 1, of = new Map(), b = { k: a, [a]: 2 };\n'
+                'function f(x, y = document.body) { return x.typo + y; }\n'
+                'const re = /typo2[/]/g, s = `${/^#[0-9a-f]{6}$/i.test(a) ? \'typo3\' : `${of}`}`;\n'
+                'const o = { m(z) { return z; }, get g() { return 1; } }; for (const [k, v] of of) f(k, v);\n'
+                'x => x; (p, { q }) => p + q; try { f(); } catch (err) { console.log(err); }\n'
+                'redrawAl(); a / b / of;\n')
+        self.assertEqual(jsnames.undeclared(text, jsnames.BROWSER), [('redrawAl', 6)])
+        built = wavelenscat.build()
+        self.assertEqual(wavelenscat.unknown_names(built), [], 'the sources of now: every name declared or a global')
+        i = built.index('redrawAll(); }')
+        with open(os.path.join(H.ROOT, 'wavelens', 'src', 'boot.js'), encoding='utf-8') as f:
+            line = next(n for n, x in enumerate(f, 1) if 'redrawAll(); }' in x)   # the first in boot.js is the first of the build
+        self.assertEqual(wavelenscat.unknown_names(built[:i] + 'redrawAl(); }' + built[i + 14:]), [f'wavelens/src/boot.js:{line}: redrawAl'])
+
+    @H.needs(NODE, 'node (or VS Code\'s, ~/.vscode-server/bin/*/node)')
+    def test_the_keys_read_are_the_prototype(self):
+        """The keys --check reads off the sources are the keys WaveView.prototype has once wavelens.js runs (in node, up to svg.js,
+        every global a fake): none missed by the reading of lines, none made up."""
+        script = r'''
+const all = require('fs').readFileSync(process.argv[1], 'utf8'), src = all.slice(0, all.indexOf('/* ======================== src/svg.js'));
+const fake = name => new Proxy(function () {}, { get: (t, k) => (k === 'then' || typeof k === 'symbol' ? undefined : fake(name + '.' + String(k))),
+  apply: () => fake(name + '()'), construct: () => fake('new ' + name) });
+const g = new Proxy({}, { has: (t, k) => typeof k === 'string' && !(k in globalThis), get: (t, k) => (typeof k === 'symbol' ? undefined : fake(k)) });
+const WV = new Function('__g', 'with (__g) { return (' + src + '\nreturn WaveView; })(window)); }')(g);
+console.log('RESULT' + JSON.stringify(Object.getOwnPropertyNames(WV.prototype)));
+'''
+        r = subprocess.run([NODE, '-e', script, os.path.join(H.ROOT, 'wavelens', 'wavelens.js')], capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        have = json.loads(next(x for x in r.stdout.splitlines() if x.startswith('RESULT'))[6:])
+        self.assertEqual(sorted({k for k, _, _ in wavelenscat.proto_keys(wavelenscat.sources())}), sorted(have))
 
 
 class MkHtml(unittest.TestCase):
@@ -334,7 +383,7 @@ class MkHtml(unittest.TestCase):
         import common
         b = common.build_info('mkhtml.py')
         if b is None:
-            self.skipTest('not a git checkout')
+            H.skip(self, 'not a git checkout', built=False)
         self.assertRegex(b['commit'], r'^[0-9a-f]{7,}$')
         with H.tmp() as d:
             c, out = os.path.join(d, 'c.json'), os.path.join(d, 'p.html')

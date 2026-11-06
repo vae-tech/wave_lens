@@ -29,7 +29,8 @@ transactions are three plugin scripts more, inlined into a page): no build step,
   transfers, and a list of them (CSV); **two runs compared** signal by signal: the red bands, a key that flips the waves between the runs,
   both over each other; and their assertion results (`sva diff --results`: new, gone, moved failures, covers lost); **the runs
   kept** of a dump in VS Code (Runs…: keep this one with a name, tags, a comment; compare with one, or all, over the waves in
-  sight or a span: only that window of the run read; `sva runs`, `wave_runs`).
+  sight or a span — a test case: the run's case of that name, wherever it is in it; only that window of the run read; `sva runs`,
+  `wave_runs`).
 - **Pictures for documents**: PNG, SVG and WaveDrom out of any window, long idle stretches cut out, a static
   WaveDrom-style SVG next to the viewer.
 - **VS Code over Remote-SSH or WSL**: a dump on the Linux host opens in a tab, nothing else installed there

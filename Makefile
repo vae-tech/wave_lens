@@ -85,7 +85,8 @@ help:
 	@echo 'make smoke      headless Chromium checks of docs/index.html, tests/conformance.html and the built pages (needs'
 	@echo '                make examples demo demo-fst sva-build sva-spike html first; what is missing is reported as SKIPPED);'
 	@echo '                STRICT=1: a skip fails; ONLY=sec1,sec2: those sections only (smoke.py --list)'
-	@echo 'make unit       the Python unit tests of the tools (tests/unit: unittest, standard library, a few seconds)'
+	@echo 'make unit       the Python unit tests of the tools (tests/unit: unittest, standard library; ~5.5 min on /mnt/c, the slowest and the skips said)'
+	@echo '                STRICT=1: a skip fails (but one of another program than the gate builds)'
 	@echo 'make unit-shuffle the unit tests one by one in the order of a seed (SEED=n: that order again): a test that needs another first fails'
 	@echo 'make unit-bless the goldens of tests/unit/golden (the bytes of wavejson.py, vcd2wavedrom.py over the fixtures) written anew: read the diff'
 	@echo 'make check      the gate before a commit: sva.wasm.js the build of sva/, the pages smoke needs, sva-test and unit (no skips), sva-verify, mcp-bench, smoke STRICT=1, shots-check'
@@ -392,9 +393,11 @@ unit-bless:
 	WAVELENS_BLESS=1 $(PY) -m unittest discover -s tests/unit -t . -p 'test_repo.py'
 	git status --short tests/unit/golden
 
+# tests/unit/run.py: unittest discover, the 10 slowest tests and every skip with its reason said; STRICT=1 (make check: WAVELENS_STRICT)
+# fails a skip, but one of another program than the gate builds (helpers.skip(built=False))
 unit:
-	BUILD=$(B) $(if $(WAVELENS_STRICT),WAVELENS_STRICT=1) $(if $(WAVELENS_SVA),,$(if $(wildcard $(SVA_BIN)),WAVELENS_SVA=$(abspath $(SVA_BIN)))) \
-	  $(PY) -m unittest discover -s tests/unit -t .
+	BUILD=$(B) $(if $(or $(STRICT),$(WAVELENS_STRICT)),WAVELENS_STRICT=1) $(if $(WAVELENS_SVA),,$(if $(wildcard $(SVA_BIN)),WAVELENS_SVA=$(abspath $(SVA_BIN)))) \
+	  $(PY) tests/unit/run.py
 
 # The gate: the committed engine of the page is the build of its sources (wavelens/sva.wasm.js before and after
 # sva-build), every page smoke checks and the fixtures (built first: the engine's goldens over the examples' FST and the

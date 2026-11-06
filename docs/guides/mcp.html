@@ -88,7 +88,8 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
   <tr><td><code>wave_runs</code></td><td>the runs kept of a dump (<code>sva runs</code>, the ones the VS Code Runs panel keeps in
     <code>.wavelens-runs</code>): <code>action</code> <code>list</code>, <code>keep</code> (a name, tags, a comment), <code>set</code>,
     <code>rm</code>, <code>diff</code>: the dump against each run over a window (<code>from</code>, <code>to</code>, <code>signals</code>) —
-    which run before differs, and where first</td></tr>
+    which run before differs, and where first; <code>case</code>: each run's test case of that name (cocotb's marks, kept with
+    the run) against the dump's, wherever it is in the run — "which run first broke test_x" is one call</td></tr>
   <tr><td><code>wave_cut</code></td><td>a window (<code>from</code>, <code>to</code>) and some <code>signals</code> of a dump as a small VCD at <code>out</code>: for <span class="ui">Compare…</span> on a page,
     a fixture, one test case to send</td></tr>
   <tr><td><code>view_edit</code></td><td>marks a page up for a person: bookmarks with an explanation, arrows between them, markers, expressions, a group
@@ -269,7 +270,7 @@ view_get  {"page": "tb.html", "view": "drop", "picture": true}   <span class="c"
   <li><b>Times</b> are ns: a number, or a text with a unit (<code>"2.5us"</code>, <code>"55ns"</code>). Answers give
     <code>"unit":"ns"</code>.</li>
   <li><b>A signal</b> is its full path, its path under <code>scope</code>, or the unique tail of a path (<code>PSEL</code>,
-    <code>u_regs.PSEL</code>). Of several matches the one nearest the top is taken and named in <code>notes</code>; two at the same
+    <code>u_regs.PSEL</code>); an element of an array either way (<code>mem[1]</code>, <code>mem.[1]</code>). Of several matches the one nearest the top is taken and named in <code>notes</code>; two at the same
     depth are an error naming both. Of several signals asked for, one not found is left out and named in <code>missing</code>.</li>
   <li><b>Bits</b>: <code>x[7:4]</code> and <code>x[3]</code> select bits.</li>
   <li><b>State names</b> come from the dump (an FST's tables) and from the types file beside it (<code>tb.vcd</code> →
@@ -337,7 +338,7 @@ make mcp-bench AGENT=codex TASKS=a1,b3                 <span class="c"># some ta
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.44 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.45 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

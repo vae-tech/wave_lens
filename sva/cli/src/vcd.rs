@@ -260,20 +260,37 @@ fn dumpvars(from: u64, state: &mut [Option<String>], widths: &[Option<u32>], o: 
 }
 
 /// A cut of an FST, after its declarations: the values at `from` as `$dumpvars`, the changes after it up to `to`, `#to`.
-fn fst_cut<R: BufRead + Seek>(r: &mut FstReader<R>, part: &Part, strings: &[bool], widths: &[Option<u32>], from: u64, to: u64, o: &mut impl Write)
-    -> std::io::Result<()> {
-    let include = match part {
+/// `path`: the FST's file, a late cut read from the block holding `from` (its values at its start, `crate::fst::frame_at`).
+#[allow(clippy::too_many_arguments)]
+fn fst_cut<R: BufRead + Seek>(r: &mut FstReader<R>, path: Option<&str>, part: &Part, strings: &[bool], widths: &[Option<u32>], from: u64, to: u64,
+    o: &mut impl Write) -> std::io::Result<()> {
+    let handles: Option<Vec<usize>> = match part {
         Part::Codes(want) => {
             let mut v: Vec<usize> = want.iter().copied().filter(|&i| i < widths.len()).collect();
             v.sort_unstable();
-            Some(v.into_iter().map(fst_reader::FstSignalHandle::from_index).collect())
+            Some(v)
         }
         _ => None,
     };
+    let include = handles.as_ref().map(|v| v.iter().map(|&i| fst_reader::FstSignalHandle::from_index(i)).collect());
     let mut state: Vec<Option<String>> = vec![None; widths.len()];
     let mut now: Option<u64> = None;
-    let res = r.read_signals(&FstFilter { start: 0, end: Some(to), include }, |t, handle, v| -> std::io::Result<()> {
-        if t > to {
+    // a late cut: the blocks before the one holding `from` not read
+    let seed = path.filter(|_| from > 0).and_then(|p| crate::fst::frame_at(p, from, handles.as_deref()));
+    let first = seed.as_ref().map(|s| s.0);
+    if let Some((_, values)) = &seed {
+        let every: Vec<usize> = (0..values.len()).collect();
+        for (&h, b) in handles.as_ref().unwrap_or(&every).iter().zip(values) {
+            // a bit as fst-reader gives a bit's change: lower case (a vector's bytes as they are, as its changes)
+            let one = [b.first().map_or(b'x', u8::to_ascii_lowercase)];
+            if let Some(s) = state.get_mut(h) {
+                *s = Some(fst_line(strings, h, FstSignalValue::String(if b.len() == 1 { &one } else { b })));
+            }
+        }
+    }
+    let start = first.map_or(0, |f| f + 1);
+    let res = r.read_signals(&FstFilter { start, end: Some(to), include }, |t, handle, v| -> std::io::Result<()> {
+        if t > to || first.is_some_and(|f| t < f) {
             return Ok(());
         }
         let line = fst_line(strings, handle.get_index(), v);
@@ -310,7 +327,7 @@ fn fst_cut<R: BufRead + Seek>(r: &mut FstReader<R>, part: &Part, strings: &[bool
 
 /// An FST as VCD text: the header, the declarations, the value changes, the end time; of `part` only; `win`: a cut
 /// of it (in the FST's time unit).
-fn fst_text<R: BufRead + Seek>(r: &mut FstReader<R>, part: &Part, win: Option<(u64, u64)>, o: &mut impl Write) -> std::io::Result<()> {
+fn fst_text<R: BufRead + Seek>(r: &mut FstReader<R>, path: Option<&str>, part: &Part, win: Option<(u64, u64)>, o: &mut impl Write) -> std::io::Result<()> {
     let h = r.get_header();
     if !h.date.trim().is_empty() {
         writeln!(o, "$date\n\t{}\n$end", h.date.trim())?;
@@ -362,7 +379,7 @@ fn fst_text<R: BufRead + Seek>(r: &mut FstReader<R>, part: &Part, win: Option<(u
     let end = times.last().map_or(h.end_time, |&t| t.max(h.end_time));
     let start = times.first().map_or(h.start_time, |&t| t.min(h.start_time));
     if let Some((from, to)) = win {
-        return fst_cut(r, part, &strings, &widths, from.max(start), to.min(end).max(from.max(start)), o);
+        return fst_cut(r, path, part, &strings, &widths, from.max(start), to.min(end).max(from.max(start)), o);
     }
     if let Part::Header = part {
         // the span of the dump: its first and its last time, no value
@@ -747,6 +764,39 @@ fn units(ps: u64, ppu: f64) -> u64 {
     if ppu == 1.0 { ps } else { (ps as f64 / ppu).round() as u64 }
 }
 
+/// A writer into memory that stops past `cap` bytes.
+struct Capped {
+    buf: Vec<u8>,
+    cap: usize,
+    over: bool,
+}
+
+impl Write for Capped {
+    fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+        if self.buf.len() + b.len() > self.cap {
+            self.over = true;
+            return Err(std::io::Error::other("past the cap"));
+        }
+        self.buf.extend_from_slice(b);
+        Ok(b.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// A cut of a dump as VCD text (`sva vcd --from --to --signals-from`), in memory, at most `cap` bytes (`sva diff --page`:
+/// B's values of the signals that differ) -> the text, or why there is none.
+pub(crate) fn cut_text(waves: &str, from: u64, to: u64, signals: Vec<String>, cap: usize) -> Result<String, String> {
+    let mut o = Capped { buf: Vec::new(), cap, over: false };
+    let r = convert(waves, &Part::All, Some(&Cut { from: Some(from), to: Some(to), signals }), &mut o);
+    if o.over {
+        return Err(format!("more than {} MB of changes of the signals that differ: compare fewer signals or a shorter window", cap >> 20));
+    }
+    r?;
+    String::from_utf8(o.buf).map_err(|e| e.to_string())
+}
+
 /// The dump as VCD text into `o`: an FST by fst-reader, anything else by wellen; a part of an FST only; a cut of either.
 fn convert(waves: &str, part: &Part, cut: Option<&Cut>, o: &mut impl Write) -> Result<(), String> {
     // a VCD whose vectors are glued to their codes (Questa 2023's integers): wellen stops at one, its FST is read instead
@@ -756,11 +806,11 @@ fn convert(waves: &str, part: &Part, cut: Option<&Cut>, o: &mut impl Write) -> R
     let mut f = std::io::BufReader::new(std::fs::File::open(waves).map_err(|e| e.to_string())?);
     if fst_reader::is_fst_file(&mut f) {
         let mut r = FstReader::open_and_read_time_table(f).map_err(|e| e.to_string())?;
-        let Some(c) = cut else { return fst_text(&mut r, part, None, o).map_err(io_text) };
+        let Some(c) = cut else { return fst_text(&mut r, None, part, None, o).map_err(io_text) };
         let ppu = 10f64.powi(i32::from(r.get_header().timescale_exponent) + 12);
         let win = (units(c.from.unwrap_or(0), ppu), c.to.map_or(u64::MAX, |t| units(t, ppu)));
         if c.signals.is_empty() {
-            return fst_text(&mut r, &Part::All, Some(win), o).map_err(io_text);
+            return fst_text(&mut r, Some(waves), &Part::All, Some(win), o).map_err(io_text);
         }
         // the signals by their paths: the scopes' names and the variable's without its range (`data [7:0]`)
         let mut all: Vec<(String, usize)> = Vec::new();
@@ -777,7 +827,7 @@ fn convert(waves: &str, part: &Part, cut: Option<&Cut>, o: &mut impl Write) -> R
             _ => {}
         }).map_err(|e| e.to_string())?;
         let want = chosen(&all, &c.signals)?.into_iter().collect();
-        return fst_text(&mut r, &Part::Codes(want), Some(win), o).map_err(io_text);
+        return fst_text(&mut r, Some(waves), &Part::Codes(want), Some(win), o).map_err(io_text);
     }
     if !matches!(part, Part::All) {
         return Err("--header and --codes read an FST (sva fst makes one of a VCD)".into());

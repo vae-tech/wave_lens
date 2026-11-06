@@ -4,7 +4,7 @@ compared over a window only, Δ all, rm asked first."""
 import json, os, subprocess, unittest
 
 from . import helpers as H
-from .test_vscode_state import NODE
+from .test_vscode_state import FAKE, NODE
 
 SVA = os.environ.get('WAVELENS_SVA')
 HEAD = ('$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! clk $end\n$var wire 4 " cnt [3:0] $end\n$var wire 1 # ok $end\n'
@@ -21,6 +21,15 @@ def body(bad_at=None):
         if bad_at is not None and t == bad_at:
             out.append('0#')
     return '\n'.join(out) + '\n'
+
+
+def cases(longer=0):
+    """Two test cases: t_a holds cnt at 0 for 20 ns (+ longer), t_b counts it up every 5 ns for 20 ns -> (the VCD's body, t_b's start
+    in ns)."""
+    b, out = 20 + longer, ['#0', '0!', 'b0 "', '1#']
+    for t in range(5, b + 21, 5):
+        out += [f'#{t}', f'{t // 5 % 2}!'] + ([f'b{bin((t - b) // 5)[2:]} "'] if t > b else [])
+    return '\n'.join(out) + '\n', b
 
 
 def sva(*args, stdin=None):
@@ -111,37 +120,48 @@ class Mcp(unittest.TestCase):
             bad = W.call('wave_runs', {'action': 'set', 'dump': p})
             self.assertTrue(bad[1] and '"run"' in bad[0], bad)
 
+    def test_wave_runs_by_test_case(self):
+        os.environ.setdefault('WAVELENS_SVA', SVA)
+        from tools import wavemcp as W
+        call = lambda **a: (lambda r: json.loads(r[0]) if not r[1] else self.fail(r[0]))(W.call('wave_runs', a))
+        with H.tmp() as d:
+            text, b = cases()
+            p = H.vcd(d, text, HEAD, name='waves.vcd')
+            k = call(action='keep', dump=p, name='before', cases=[{'name': 't_a', 'from': 0, 'to': b}, {'name': 't_b', 'from': b, 'to': b + 20}])
+            self.assertEqual(k['cases'][1], {'name': 't_b', 'from': 20, 'to': 40}, 'cases in ns, as every time of the tool')
+            text, b = cases(10)
+            with open(p, 'w', encoding='utf-8') as f:
+                f.write(HEAD + text)
+            r = call(action='diff', dump=p, case='t_b', **{'from': b, 'to': b + 20})
+            x = r['runs'][0]
+            self.assertEqual((r['case']['name'], x['equal'], x['case']['offset'], x['case']['from']), ('t_b', True, -10, 20), r)
+            self.assertFalse(call(action='diff', dump=p, **{'from': b, 'to': b + 20})['runs'][0]['equal'], 'the same window without the case differs')
+
 
 EXT = r'''
-const Module = require('module'), path = require('path');
-const [ext, dir, dump, mode] = process.argv.slice(1);
-const fake = (name, over = {}) => new Proxy(function () {}, {
-  get: (t, k) => (k in over ? over[k] : k === 'then' || typeof k === 'symbol' ? undefined : fake(`${name}.${String(k)}`)),
-  apply: () => fake(`${name}()`), construct: () => fake(`new ${name}`),
-});
-let provider = null, warned = null, answer = 'Remove';
-const Uri = { file: p => ({ fsPath: p, toString: () => 'file://' + p, scheme: 'file' }), parse: s => ({ fsPath: s.replace('file://', '') }), joinPath: () => ({ fsPath: dir }) };
-const vscode = fake('vscode', { Uri, ProgressLocation: { Notification: 15 },
-  window: fake('window', { registerCustomEditorProvider: (id, p) => { provider = p; return { dispose() {} }; },
-    withProgress: async (o, f) => f(), showWarningMessage: async (m) => { warned = m; return answer; }, createOutputChannel: () => fake('out') }),
-  workspace: fake('workspace', { getConfiguration: () => ({ get: k => ({ sva: process.env.WAVELENS_SVA, keysToVSCode: [] })[k] }),
-    getWorkspaceFolder: () => undefined }) });
-const load = Module._load; Module._load = (r, ...a) => (r === 'vscode' ? vscode : load(r, ...a));
-const ctx = { subscriptions: [], extensionUri: Uri.file(dir), extensionPath: dir, globalStorageUri: Uri.file(dir), storageUri: Uri.file(dir),
-  extension: { packageJSON: {} }, globalState: { get() {}, update() {} }, workspaceState: { get() {}, update: async () => {}, keys: () => [] } };
-require(ext).activate(ctx);
+const [F, ext, dir, dump, mode] = process.argv.slice(1).map((x, i) => (i ? x : require(x)));
+let warned = null, answer = 'Remove';
+const h = F.host({ ext, dir, config: { sva: process.env.WAVELENS_SVA }, vscode: { ProgressLocation: { Notification: 15 } },
+  window: { withProgress: async (o, f) => f(), showWarningMessage: async (m) => { warned = m; return answer; } },
+  workspace: { getWorkspaceFolder: () => undefined } });
 process.on('uncaughtException', e => { console.error('UNCAUGHT ' + e.message); process.exit(3); });
 (async () => {
-  const said = [], on = {}, webview = { options: {}, html: '', cspSource: 'x', asWebviewUri: u => u, postMessage: async m => { said.push(m); return true; },
-    onDidReceiveMessage: f => { on.message = f; return { dispose() {} }; } };
-  await provider.resolveCustomEditor({ uri: Uri.file(dump) }, { webview, onDidDispose: () => ({ dispose() {} }), onDidChangeViewState: () => ({ dispose() {} }),
-    reveal() {}, active: true, title: '' });
-  let n = 100; const ask = async m => { const id = ++n; await on.message(Object.assign({ type: 'runs', id }, m)); return said.find(x => x.id === id); };
+  const A = await h.tab(dump);
+  let n = 100; const ask = async m => { const id = ++n; await A.send(Object.assign({ type: 'runs', id }, m)); return A.reply(id); };
   const out = {};
   if (mode === 'stress') {   // a CLI that exits before it reads: 50 asks with a large stdin each, every one answered
     const big = Array.from({ length: 20000 }, (_, i) => 'tb.s' + i), got = await Promise.all(Array.from({ length: 50 }, (_, i) =>
       ask({ op: i % 2 ? 'diff' : 'compare', run: 1, signals: big, from: 0, to: 1000 })));
     console.log('RESULT' + JSON.stringify({ answered: got.filter(Boolean).length })); process.exit(0);
+  }
+  if (mode === 'cases') {   // a run's test cases: kept from the page's spans, then its case compared wherever it is in the run
+    out.keep = await ask({ op: 'keep', name: 'before', cases: [{ label: 'TC1 t_a \u00b7 PASS', from: 0, to: 20000 }, { label: 'TC2 t_b \u00b7 PASS', from: 20000, to: 40000 }] });
+    require('fs').writeFileSync(dump, process.env.LATER);
+    out.compare = await ask({ op: 'compare', run: 1, case: 't_b', signals: ['tb.cnt'], from: 30000, to: 50000 });
+    out.plain = await ask({ op: 'compare', run: 1, signals: ['tb.cnt'], from: 30000, to: 50000 });
+    out.diff = await ask({ op: 'diff', case: 't_b', signals: ['tb.cnt'], from: 30000, to: 50000 });
+    out.none = await ask({ op: 'compare', run: 1, case: 't_z', signals: ['tb.cnt'], from: 30000, to: 50000 });
+    console.log('RESULT' + JSON.stringify(out)); process.exit(0);
   }
   out.empty = await ask({ op: 'list' });
   out.keep = await ask({ op: 'keep', name: 'golden', tags: ['base'], comment: 'before' });
@@ -167,7 +187,7 @@ class VsCode(unittest.TestCase):
         with H.tmp() as d:
             p = H.vcd(d, body(), HEAD, name='waves.vcd')
             env = dict(os.environ, WAVELENS_SVA=SVA, GOOD=HEAD + body(), BROKEN=HEAD + body(25))
-            r = subprocess.run([NODE, '-e', EXT, os.path.join(H.ROOT, 'vscode', 'extension.js'), d, p], capture_output=True, text=True, timeout=60, env=env)
+            r = subprocess.run([NODE, '-e', EXT, FAKE, os.path.join(H.ROOT, 'vscode', 'extension.js'), d, p], capture_output=True, text=True, timeout=60, env=env)
             self.assertEqual(r.returncode, 0, r.stderr)
             o = json.loads(next(x for x in r.stdout.splitlines() if x.startswith('RESULT'))[6:])
             runs = os.path.join(d, '.wavelens-runs')
@@ -185,6 +205,21 @@ class VsCode(unittest.TestCase):
             self.assertEqual(o['rm']['removed']['id'], 2)
             self.assertEqual([x['id'] for x in o['after']['runs']], [1])
 
+    def test_a_run_compared_by_its_test_case(self):
+        with H.tmp() as d:
+            (early, _), (later, _) = cases(), cases(10)
+            p = H.vcd(d, early, HEAD, name='waves.vcd')
+            env = dict(os.environ, WAVELENS_SVA=SVA, LATER=HEAD + later)
+            r = subprocess.run([NODE, '-e', EXT, FAKE, os.path.join(H.ROOT, 'vscode', 'extension.js'), d, p, 'cases'], capture_output=True, text=True, timeout=60, env=env)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            o = json.loads(next(x for x in r.stdout.splitlines() if x.startswith('RESULT'))[6:])
+            self.assertEqual([c['name'] for c in o['keep']['run']['cases']], ['t_a', 't_b'], 'the page\'s span labels as the cases\' names')
+            c = o['compare']['result']
+            self.assertEqual((c['differ'], c['case']['offset'], c['case']['from']), (0, -10000, 20000), o['compare'])
+            self.assertGreater(o['plain']['result']['differ'], 0, 'the same window, not by the case: it differs')
+            self.assertEqual((o['diff']['runs'][0]['equal'], o['diff']['runs'][0]['case']['offset']), (True, -10000), o['diff'])
+            self.assertIn('no case t_z', o['none']['error'])
+
     def test_a_cli_that_exits_before_reading(self):
         """B-02 of the review of the runs: the CLI's stdin guarded — a CLI that exits at once (here a stub) with a large
         stdin to write is no EPIPE thrown out of the extension; every ask is answered."""
@@ -197,7 +232,7 @@ class VsCode(unittest.TestCase):
             with open(os.path.join(d, '.wavelens-runs', 'runs.json'), 'w', encoding='utf-8') as f:
                 json.dump({'wavelens': 'runs', 'version': 1, 'runs': [{'id': 1, 'name': 'a', 'file': '1-t.fst'}]}, f)
             p = H.vcd(d, body(), HEAD, name='t.vcd')
-            r = subprocess.run([NODE, '-e', EXT, os.path.join(H.ROOT, 'vscode', 'extension.js'), d, p, 'stress'], capture_output=True, text=True,
+            r = subprocess.run([NODE, '-e', EXT, FAKE, os.path.join(H.ROOT, 'vscode', 'extension.js'), d, p, 'stress'], capture_output=True, text=True,
                                timeout=120, env=dict(os.environ, WAVELENS_SVA=stub))
             self.assertEqual(r.returncode, 0, r.stderr[-2000:])
             self.assertEqual(json.loads(next(x for x in r.stdout.splitlines() if x.startswith('RESULT'))[6:])['answered'], 50)

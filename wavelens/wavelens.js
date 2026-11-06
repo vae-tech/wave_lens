@@ -5685,7 +5685,7 @@ Object.assign(WaveView.prototype, {
   // the click that opened it; not for a menu closed meanwhile (its listener would close the next one). blur false: a box to type in stays
   menuOff(el, blur = true) {
     const off = this.offMenu = e => {
-      if (el.contains(e.target)) return;
+      if (e.target instanceof Node && el.contains(e.target)) return;   // the window's blur: its target is the window, no node
       this.closeMenu();
       if (e.type === 'pointerdown') setTimeout(() => { const a = document.activeElement;
         if (VIEWS.has(this) && (a === document.body || (this.root.contains(a) && !a.matches('input, select, textarea')))) this.refocus(); }, 0);
@@ -6235,8 +6235,11 @@ function cmdIn(v, x, what = 't') {
   if (t < lo || t > v.M.t1) fail(`${what}: ${v.when(t)} is outside these waves (${v.when(lo)} … ${v.when(v.M.t1)})`);
   return t;
 }
-// rows by what a person or an agent writes (see above); o.groups: modules and your groups too; o.scopes: the modules
-// only (not a struct, your groups or a plugin's); o.one: exactly one
+// a path with no dot before a [: one spelling of an array element (mem.[1] and mem[1] -> mem[1]; tools/common.py glued)
+const gluedPath = p => p.replace(/\.+\[/g, '[');
+// rows by what a person or an agent writes (see above), the rule of tools/common.py pick: a full path, a name, the end of a
+// path, a longer path ending with one, a bit of a bus; an array element either way; of several the one nearest the top;
+// o.groups: modules and your groups too; o.scopes: the modules only (not a struct, your groups or a plugin's); o.one: one
 function pickRows(v, spec, o = {}) {
   const list = prefixes(spec), M = v.M, what = o.scopes ? 'module' : o.groups ? 'signal or module' : 'signal';
   if (!list.length) fail(`no ${o.scopes ? 'modules' : o.groups ? 'signals or modules' : 'signals'} given`);
@@ -6248,12 +6251,14 @@ function pickRows(v, spec, o = {}) {
     let hit;
     if (s.includes('*')) { const rx = glob(s); hit = pool.filter(r => rx.test(r.full)); }
     else {
+      const g = gluedPath(s), G = r => gluedPath(r.full);
       hit = pool.filter(r => r.full === s);
+      if (!hit.length && s.includes('[')) hit = pool.filter(r => G(r) === g);
       if (!hit.length) hit = pool.filter(r => r.name === s);
-      if (!hit.length) hit = pool.filter(r => r.full.endsWith('.' + s));
+      if (!hit.length) hit = pool.filter(r => G(r).endsWith('.' + g));
       // the dump's path of a signal the page shows under a shorter one (wave_page: "tb.aclk" for "aclk"): the longest
-      if (!hit.length) { const at = pool.filter(r => s.endsWith('.' + r.full)), n = Math.max(0, ...at.map(r => r.full.length));
-        hit = at.filter(r => r.full.length === n); }
+      if (!hit.length) { const at = pool.filter(r => g.endsWith('.' + G(r))), n = Math.max(0, ...at.map(r => G(r).length));
+        hit = at.filter(r => G(r).length === n); }
     }
     if (!hit.length && !o.scopes) { const b = v.sigByPath(s); if (b) hit = [b]; }   // a bit of a bus: "data[3]"
     if (!hit.length) {
@@ -6262,7 +6267,7 @@ function pickRows(v, spec, o = {}) {
     }
     let fulls = [...new Set(hit.map(r => r.full))];
     if (!s.includes('*') && fulls.length > 1) {   // one net at several levels: the one nearest the top, when it is one (as wavemcp.py)
-      const dots = f => f.split('.').length, top = Math.min(...fulls.map(dots)), near = fulls.filter(f => dots(f) === top);
+      const dots = f => gluedPath(f).split('.').length, top = Math.min(...fulls.map(dots)), near = fulls.filter(f => dots(f) === top);
       if (near.length === 1) { hit = hit.filter(r => r.full === near[0]); fulls = near; }
     }
     if (!s.includes('*') && fulls.length > 1) fail(`"${s}" is ambiguous: ${fulls.slice(0, 6).join(', ')}${fulls.length > 6 ? ` (+${fulls.length - 6})` : ''}` +
@@ -6884,6 +6889,7 @@ Object.assign(WaveView.prototype, {
     return JSON.stringify({ bookmarks: this.bookmarks(), arrows: this.arrowList(), markers: this.markList(), spans: this.spanList(), groups,
       paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs), hidden: [...this.hiddenRows],
       dups: [...this.dups.keys()], deltas: this.deltas, bits: [...this.bitsOpen], only: this.onlyState(), fsm: this.fsmState(),
+      onlyGrp: this.onlyGrp ?? null,   // the panel's "Your groups whole" with no Only set too (onlyState is null then)
       config: Object.assign({ style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded,
         toolsHidden: toolNames(this.S.toolsHidden), sort: this.sort, sortIgnore: [...this.sortIgnore] }, this.gapOpt(true), this.cycOpt()),
       hl: this.hlOrder().map(r => [r.full, this.picks.get(r)]), ext: this.undoExt() });
@@ -6927,10 +6933,12 @@ Object.assign(WaveView.prototype, {
     const hl = diff(A.hl, B.hl), fi = this.fi, fiRow = this.fiRow;
     if (hl) st.config.highlight = A.hl.map(([f]) => f);
     await this.setState(st);
+    const grp = diff(A.onlyGrp ?? null, B.onlyGrp ?? null);
+    if (grp) { this.onlyGrp = A.onlyGrp ?? undefined; if (this.only) this.setOnly({}); else { this.onlyShow(); this.settingsChanged(); } }
     if (hl) { const at = new Map(A.hl); this.picks = new Map([...this.picks.keys()].map(r => [r, at.get(r.full) ?? this.picks.get(r)]));
       this.renderNames(); this.draw(); }   // the highlight's colours worked out again
     if (fiRow && this.found.has(fiRow)) { this.fi = fi; this.fiRow = fiRow; }
-    return [...new Set([...UNDO_KEYS.filter(k => k in st), ...ext.map(k => ({ exprs: 'expressions', sva: 'assertions' })[k] || k),
+    return [...new Set([...UNDO_KEYS.filter(k => k in st), ...(grp ? ['only'] : []), ...ext.map(k => ({ exprs: 'expressions', sva: 'assertions' })[k] || k),
       ...Object.keys(st.config).map(k => (GAP_KEYS.includes(k) ? 'gaps' : CYC_KEYS.includes(k) ? 'cycles' : k))])];
   },
   undoShow() { for (const [act, s] of [['undo', this.undoS], ['redo', this.redoS]]) { const b = this.root.querySelector(`button[data-act=${act}]`);
@@ -8763,6 +8771,8 @@ Object.assign(WaveView.prototype, {
 /* ======================== src/runs.js ======================== */
 /* ---------------- the viewer's side ---------------- */
 const RUN_SETTLE = 250;   // ms: the list's keys move the row, the compare goes when they stop (Enter at once)
+// a case's name of a span's label: without "TC3 " before it and " · PASS" after it (cocotb's marks); sva runs.rs case_name
+const caseName = l => { const s = String(l || '').split(' \u00b7 ')[0].trim(), m = /^TC\d+ (.*)$/.exec(s); return (m ? m[1] : s).trim(); };
 const sameSpan = (s, w) => !!s && !!w && s.from === w.from && s.to === w.to && (s.label || '') === (w.label || '');
 Object.assign(WaveView.prototype, {
   // who keeps the runs: the page's host (VS Code), null in a browser
@@ -8804,10 +8814,14 @@ Object.assign(WaveView.prototype, {
     if (!run) { this.toast(`no run #${id}`); return null; }
     const w = this.runsWindow(), req = this.runReq = (this.runReq || 0) + 1, show = this.cmp ? this.cmpRun : 'a';
     const f = t => this.fmt(t, (this.M.t1 - this.M.t0) / 1000, this.M.t1 - this.M.t0);
-    if (!quiet) this.toast(`#${id} ${run.name}: comparing ${f(w.from)} … ${f(w.to)}…`);
-    if (this.runsP) this.runsP.status(`comparing with #${id} ${run.name} over ${f(w.from)} … ${f(w.to)}…`);
+    // your span is a test case of the run (its name): the run's case compared, wherever it is in the run
+    const cn = w.span && w.span.label ? caseName(w.span.label) : '', byCase = !!cn && (run.cases || []).some(c => c.name === cn);
+    const what = byCase ? `its case ${cn}` : `${f(w.from)} … ${f(w.to)}`;
+    if (!quiet) this.toast(`#${id} ${run.name}: comparing ${what}…`);
+    if (this.runsP) this.runsP.status(`comparing with #${id} ${run.name} over ${what}…`);
     let m;
-    try { m = await h.compare({ id, signals: this.runsSignals(), from: w.from, to: w.to }); } catch (e) { m = { error: e.message }; }
+    try { m = await h.compare(Object.assign({ id, signals: this.runsSignals(), from: w.from, to: w.to }, byCase ? { case: cn } : {})); }
+    catch (e) { m = { error: e.message }; }
     if (req !== this.runReq) return null;   // another run asked meanwhile
     if (m.error || !m.result) { const e = m.error || 'no result'; this.toast(`#${id}: ${e}`); if (this.runsP) this.runsP.status(`#${id} ${run.name}: ${e}`);
       return null; }
@@ -8816,7 +8830,8 @@ Object.assign(WaveView.prototype, {
     if (!r) return null;
     this.runCur = id;   // the run compared: set once it is
     if (show !== 'a' && this.cmpCan()) await this.compareView(show, true);
-    if (this.runsP) { this.runsP.got(id, w, r); this.runsP.status(runSaid(`#${id} ${run.name}`, r, m.result, w, f, this.cmpCan())); }
+    if (this.runsP) { this.runsP.got(id, w, r);
+      this.runsP.status(runSaid(`#${id} ${run.name}`, r, m.result, w, f, this.cmpCan()) + (cn && !byCase && run.cases ? ` · no case ${cn} in it` : '')); }
     return r;
   },
   // ]r [r: the next (older) / previous (newer) run of the list (read again: a run kept in a shell is there) over the window
@@ -8846,7 +8861,8 @@ Object.assign(WaveView.prototype, {
 });
 // what a compare with a run says: equal, or how many differ and the first; the rows the run has not; the run's values not loaded and why
 function runSaid(who, r, res, w, f, can) {
-  const miss = (res.missing || []).length, over = `over ${f(w.from)} … ${f(w.to)}`;
+  const c = res.case, miss = (res.missing || []).length, over = c ? `over the case ${c.name} (the run's at ${f(c.from)}` +
+    `${c.shorter != null ? `; over the shorter, ${f(c.shorter)}` : ''})` : `over ${f(w.from)} … ${f(w.to)}`;
   const head = r.differ ? `${who}: ${r.differ} of ${r.compared} signals differ ${over}${r.first == null ? '' : `, the first at ${f(r.first)}`}` :
     `${who}: equal ${over} (${r.compared} signals)`;
   return head + (miss ? ` · ${miss} row${miss === 1 ? '' : 's'} the run has not` : '') +
@@ -8901,8 +8917,10 @@ class Runs {
     const v = this.v, f = t => v.fmt(t, (v.M.t1 - v.M.t0) / 1000, v.M.t1 - v.M.t0);
     const i = v.runsWin ? v.spans.findIndex(x => sameSpan(x, v.runsWin)) : -1;
     if (v.runsWin && i < 0) v.runsWin = null;
+    const cases = new Set((v.runsL || []).flatMap(r => (r.cases || []).map(c => c.name)));
     this.win.innerHTML = '<option value="view">the waves in sight</option>' + v.spans.map((s, k) =>
-      `<option value="${k}">${esc(s.label || 'span')} (${esc(f(s.from))} … ${esc(f(s.to))})</option>`).join('');
+      `<option value="${k}">${esc(s.label || 'span')} (${esc(f(s.from))} … ${esc(f(s.to))})` +
+      `${s.label && cases.has(caseName(s.label)) ? ' · a case' : ''}</option>`).join('');
     this.win.value = i < 0 ? 'view' : String(i);
   }
   // a compare's numbers for the run, of that window
@@ -8926,6 +8944,7 @@ class Runs {
         '<button type="button" data-a="ed" title="Name, tags, comment (e)">✎</button>' +
         '<button type="button" data-a="rm" title="Remove the run and its file (Delete)">✕</button></span>' +
         `<span class="r2">${esc((r.kept || '').slice(0, 16).replace('T', ' '))} · ${esc(r.dump || '')}` +
+        `${r.cases && r.cases.length ? ` · ${r.cases.length} case${r.cases.length === 1 ? '' : 's'}` : ''}` +
         `${r.comment ? ' · ' + esc(r.comment.split('\n')[0]) : ''}</span></div>`;
     }).join('');
     const cur = this.rowsEl.children[this.fi];
@@ -8947,7 +8966,10 @@ class Runs {
     const body = { name: q('.rfn').trim(), tags: q('.rft').split(',').map(s => s.trim()).filter(Boolean), comment: q('.rfc') };
     const run = this.edit; this.closeForm();
     this.status(run ? `#${run.id}: saving…` : 'keeping the dump of now (written as an FST in the runs\' directory)…');
-    let m; try { m = run ? await h.set(run.id, body) : await h.keep(body); } catch (e) { m = { error: e.message }; }
+    // a run kept: your spans with a label as its test cases (none: the host takes cocotb's marks beside the dump)
+    const cases = this.v.spans.filter(s => s.label && caseName(s.label)).map(s => ({ label: s.label, from: s.from, to: s.to }));
+    let m;
+    try { m = run ? await h.set(run.id, body) : await h.keep(cases.length ? Object.assign({ cases }, body) : body); } catch (e) { m = { error: e.message }; }
     if (m.error) { this.status((run ? 'not saved: ' : 'not kept: ') + m.error); return; }
     await this.load(); if (!run && m.run) { this.fi = Math.max(0, this.v.runsL.findIndex(r => r.id === m.run.id)); this.render(); }
     this.status(run ? `#${run.id} saved` : m.run ? `kept as #${m.run.id} ${m.run.name}` : 'kept');
@@ -8962,8 +8984,11 @@ class Runs {
   // Δ all: sva runs diff over the window, each run's numbers on its row
   async all() {
     const v = this.v, w = v.runsWindow(), f = t => v.fmt(t, (v.M.t1 - v.M.t0) / 1000, v.M.t1 - v.M.t0);
-    this.status(`each run against these waves over ${f(w.from)} … ${f(w.to)}…`);
-    let m; try { m = await v.runsHost().diff({ signals: v.runsSignals(), from: w.from, to: w.to }); } catch (e) { m = { error: e.message }; }
+    // your span a case of some run: each run over its case of that name (a run without it: said on its row)
+    const cn = w.span && w.span.label ? caseName(w.span.label) : '', byCase = !!cn && (v.runsL || []).some(r => (r.cases || []).some(c => c.name === cn));
+    this.status(`each run against these waves over ${byCase ? `the case ${cn}` : `${f(w.from)} … ${f(w.to)}`}…`);
+    let m; try { m = await v.runsHost().diff(Object.assign({ signals: v.runsSignals(), from: w.from, to: w.to }, byCase ? { case: cn } : {})); }
+    catch (e) { m = { error: e.message }; }
     if (m.error) { this.status('Δ all: ' + m.error); return; }
     let n = 0;
     for (const x of m.runs || []) {
@@ -8973,7 +8998,7 @@ class Runs {
         first: x.first ? x.first.t : null, outside: !!x.outside });
     }
     this.render();
-    this.status(`${n} of ${(m.runs || []).length} runs differ over ${f(w.from)} … ${f(w.to)}`);
+    this.status(`${n} of ${(m.runs || []).length} runs differ over ${byCase ? `the case ${cn}` : `${f(w.from)} … ${f(w.to)}`}`);
   }
   // a row chosen: compared at once (a click, Enter) or when the keys stop (settle: ↑ ↓ Home End PgUp PgDn held down
   // compare once, the row they stop on)
@@ -9495,7 +9520,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.44',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.45',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,

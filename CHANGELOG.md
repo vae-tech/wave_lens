@@ -5,6 +5,84 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.45 — 6 November 2026
+
+A late window of a run read from its block, a run compared by test case, one compare made by the CLI; the leftovers of the
+review of the runs (the page ↔ extension protocol in one table, the tests that hold the parts together, what breaks for a
+reason other than a code change); a VS Code tab moved to a window of its own reads its dump, a VCD whose codes start with
+`s` is read to its end.
+
+- **VS Code: a tab moved to a window of its own reads its dump.** VS Code makes a moved tab's webview again, with the page
+  of when the tab opened; over a remote connection (SSH, WSL) its loads from the dump's folder or the converted FST then
+  answered 404 ("cannot read x.vcd"). The page now takes the dump from the extension as bytes when its URI does not come
+  (said in the log), and the dump's store (the rows, the markers, the look) as it is now, not as it was when the tab opened.
+
+- **The Modules panel's "Your groups whole" is a step of undo with no Only set too**: ctrl+Z undid the change before it.
+
+- **A menu closes when the window loses the focus.** Its listener read the blur's target, the window, as a node: "Failed to
+  execute 'contains' on 'Node'" in VS Code's log each time the focus left a tab with a menu open, the menu left open.
+
+- **A VCD whose id codes start with `s` (or `b`, `r`) is cut to its end.** `sva vcd --signals`, `--from`, `sva diff` and
+  the runs took the last `#time` of such a VCD for an id code (`b101 s0` then `#50`: `s0` read as a string's value) and
+  stopped at its first time; the tail is now read forwards from a line's start, the header's codes no times.
+
+- **`wavelenscat --check` finds a name declared nowhere** (A-09 of the review of the runs): a name read in `wavelens.js`,
+  the plugins or the extension's files that nothing declares and no browser or node has (`tools/jsnames.py`, no eslint).
+
+- **One compare, made by the CLI** (A-01, A-02, A-03 of the review of the runs). `sva diff --page` writes the compare in the
+  shape a page takes, B's values of the signals that differ in it (at most 32 MiB, else `cutError`): a config's `"compare"`
+  (svabuild), VS Code's Compare… and the Runs panel are one call each, the shape and the cut made in one place (the panel's
+  compare now carries the notes and segments a config's has). `sva runs` calls the comparison and the FST writer as
+  functions, not through argument lists (the signals read once, a case's window set on the options). `sva runs` and
+  `wave_runs` find VS Code's `wavelens.runsDir` in the workspace's `.vscode/settings.json` above the dump: the shell, an
+  agent and the panel keep and list the same directory.
+
+- **A run compared by test case** (F-02 of the review of the runs, the phase 2 of the runs kept). A run keeps its test cases,
+  a name and a window each: cocotb's `wavelens.marks.json` beside the dump (not older than it by ten minutes), `--cases FILE`
+  (marks, a list, spans) or, in VS Code, your spans with a label when Keep this dump… keeps it. A span whose name is a case of a
+  run (`TC3 ` and ` · PASS` left out, as cocotb's spans are labelled) is compared with that case of the run, wherever it is in
+  the run: B offset to it, over the shorter of the two — a click, `]r [r`, Δ all; the window's choice says "· a case", a run's
+  row its cases. `sva runs diff DUMP --case NAME` (`--from/--to` the dump's window, else its cases), `sva runs set RUN --cases`,
+  `wave_runs` `case` and `cases`; a run without the case is an error on its row.
+
+- **A late window of a run as fast as an early one** (F-01 of the review of the runs). `sva diff --from` and `sva vcd
+  --from` read an FST written in several blocks from the block that holds the window on, with every signal's value at that
+  block's start (the blocks before it not unpacked; fst-reader skips that frame, so `sva` reads it); `sva runs keep` writes
+  a VCD's FST in blocks of 1 MiB (+0.2 %). A window at 1.9 ms of a 2 ms run of a 37 MB VCD: 0.12 s, not 1.3 s, 10 MB, not
+  27. `sva diff --json` says `read_from` for each dump. A VCD is still read from its start; so is an FST when a real or a
+  string is among the signals (no frame of theirs) or with `--segment`.
+
+- **Tests that hold the readers together** (A-05 part, A-08, A-09 of the review of the runs). One table of times
+  (`tests/unit/times.json`) run against the seven readers of a time (the tools, the page's `parseT`, `links.js`, the cocotb
+  library, the CLI), each one's own rule for a plain number or a sign written in the table; `wl.measure` refuses a bound
+  of `inf` / `nan` / `1e400ns` (taken before: a number NaN went into the marks as JSON's NaN, a text one judged nothing). The extension's unit tests share one fake `vscode`
+  (`tests/unit/vscode_fake.js`). `wavelenscat --check` (so `make check`) fails on a key of `WaveView.prototype` defined twice.
+- **One rule of naming a signal** (A-07 of the review of the runs). A name means the same row in the viewer's commands (the
+  page and `viewedit.py`), a config's `signals` (`vcd2wavedrom.py`, under `--scope` first) and an agent's `wave_*` tools:
+  the full path, the row's name, the end of a path, a longer path ending with one, a bit, of several the one nearest the
+  top (`tools/common.py` `pick`). Where they differed: a config takes the end of a path (`fifo.count`), a bit (`data[3]`)
+  and the nearest of one net (`clk`), and refuses bits a bus has not got; the commands take an array element either way
+  (`mem[1]`, `mem.[1]`); an agent takes a longer path ending with one. `wavemcp.py`'s live link is `tools/wavelive.py`,
+  `viewedit.py`'s page and config files `tools/wavepage.py` (A-10; every name where it was).
+- **One table of the messages between a VS Code tab and the extension** (A-05, T-03, T-05, T-09 of the review of the runs).
+  `vscode/protocol.js`: each message of the page, the keys it sends and the answers it gets (the Runs panel's per
+  operation). The extension answers a message none of it (an unknown type, a key missing) with an error and goes on; the
+  smoke's fake host answers by the table and fails on a message or an answer it does not name; a unit test walks every
+  type through the real extension and the CLI. The smoke drives the Runs panel's keys (`k` `e` `a` Delete, Esc in the form
+  and in the list, ⟳), the host's errors and a removal not confirmed, each runs message read back with its keys; a run step
+  in `vscode/test/e2e.js`; your groups under Only with a copy and a bus's bits in them, the panel's box undone and redone.
+
+- **What breaks for a reason other than a code change** (T-04, T-06, T-07, T-08 of the review of the runs). A flag the
+  tools or the extension give `sva diff` / `runs` / `vcd` / `fst` that the CLI's usage does not name fails `make unit`
+  (`test_cli_flags.py`). The VS Code extension on a Windows host runs `bin/windows-x86_64/sva.exe` (`make dist-windows`) and,
+  with none, says to set `wavelens.sva`; it and `wave_diff` / `wave_runs` read the CLI's JSON after wellen's `WARN:` lines
+  (Windows, where sva cannot put them aside). The CLI's lines of progress come from one function (`sva diff --large-bytes`
+  shows them on a small dump, for the tests); the next `sva fst` / `sva vcd` removes the part or temporary FST a killed run
+  left (its process gone, 10 minutes old). `make unit` says its 10 slowest tests and every skip with its reason; under
+  `make check` (or `STRICT=1`) a skip fails unless it is of a program the gate does not build. The smoke's last line counts
+  the pages a section opens and says "FAILED: n skipped with --strict" or "all checks passed, n skipped"; `--only` skips
+  only the pages its sections read. `rows` after `bits` has its unit test.
+
 ## 0.44 — 6 November 2026
 
 The runs kept of a dump: keep a run by hand, compare the run of now with it over one window, in VS Code, the shell and for an

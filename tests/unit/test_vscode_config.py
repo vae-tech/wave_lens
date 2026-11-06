@@ -5,7 +5,7 @@ naming it, the configuration now given to a tab that asks at its load (B-10)."""
 import json, os, re, subprocess, unittest
 
 from . import helpers as H
-from .test_vscode_state import NODE
+from .test_vscode_state import FAKE, NODE
 
 UCFG = os.path.join(H.ROOT, 'vscode', 'userconfig.js')
 CFG_JS = os.path.join(H.ROOT, 'wavelens', 'wavelens.config.js')
@@ -26,44 +26,28 @@ console.log('RESULT' + JSON.stringify(out));
 '''
 
 EXT = r'''
-const Module = require('module'), fs = require('fs'), path = require('path');
-const [ext, dir] = process.argv.slice(1);
-const fake = (name, over = {}) => new Proxy(function () {}, {
-  get: (t, k) => (k in over ? over[k] : k === 'then' || typeof k === 'symbol' ? undefined : fake(`${name}.${String(k)}`)),
-  apply: () => fake(`${name}()`), construct: () => fake(`new ${name}`),
-});
-let provider = null, saved = null;
+const path = require('path');
+const [F, ext, dir] = process.argv.slice(1).map((x, i) => (i ? x : require(x)));
+let saved = null;
 const diags = new Map();
 class Range { constructor(l0, c0, l1, c1) { Object.assign(this, { line: l0, col: c0, endLine: l1, endCol: c1 }); } }
 class Diagnostic { constructor(range, message, severity) { Object.assign(this, { range, message, severity }); } }
-const Uri = { file: p => ({ fsPath: p, toString: () => 'file://' + p, scheme: 'file' }), parse: s => ({ fsPath: s.replace('file://', '') }), joinPath: () => ({ fsPath: dir }) };
-const vscode = fake('vscode', { Uri, Range, Diagnostic, DiagnosticSeverity: { Error: 0, Warning: 1 },
-  languages: fake('languages', { createDiagnosticCollection: () => ({ set: (u, d) => diags.set(u.fsPath, d), get: u => diags.get(u.fsPath), delete() {},
-    dispose() {} }) }),
-  window: fake('window', { registerCustomEditorProvider: (id, p) => { provider = p; return { dispose() {} }; }, createOutputChannel: () => fake('out') }),
-  workspace: fake('workspace', { getConfiguration: () => ({ get: k => ({ keysToVSCode: [], openLastState: false })[k] }),
-    onDidSaveTextDocument: f => { saved = f; return { dispose() {} }; } }) });
-const load = Module._load; Module._load = (r, ...a) => (r === 'vscode' ? vscode : load(r, ...a));
-const ctx = { subscriptions: [], extensionUri: Uri.file(path.dirname(ext)), extensionPath: path.dirname(ext), globalStorageUri: Uri.file(dir),
-  storageUri: Uri.file(dir), extension: { packageJSON: {} }, globalState: { get() {}, update() {} },
-  workspaceState: { get() {}, update: async () => {}, keys: () => [] } };
-require(ext).activate(ctx);
+const h = F.host({ ext, dir, extensionPath: path.dirname(ext), config: { openLastState: false },
+  vscode: { Range, Diagnostic, DiagnosticSeverity: { Error: 0, Warning: 1 } },
+  languages: { createDiagnosticCollection: () => ({ set: (u, d) => diags.set(u.fsPath, d), get: u => diags.get(u.fsPath), delete() {}, dispose() {} }) },
+  workspace: { onDidSaveTextDocument: f => { saved = f; return { dispose() {} }; } } });
+const Uri = h.Uri, tab = h.tab;
 const file = path.join(dir, 'wavelens.config.jsonc');
-const tab = async f => { const said = [], on = {}; const webview = { options: {}, html: '', cspSource: 'x', asWebviewUri: u => u,
-    postMessage: async m => { said.push(m); return true; }, onDidReceiveMessage: g => { on.message = g; return { dispose() {} }; } };
-  await provider.resolveCustomEditor({ uri: Uri.file(f) }, { webview, onDidDispose: () => ({ dispose() {} }), onDidChangeViewState: () => ({ dispose() {} }),
-    reveal() {}, active: true, title: '' });
-  return { said, send: m => on.message(m), html: () => webview.html, reply: id => said.find(x => x.id === id) }; };
-(async () => {
+F.run(async () => {
   const out = {}, A = await tab(path.join(dir, 'a.vcd'));
-  out.host = JSON.parse(/id="wavelens-host">(.*?)<\/script>/s.exec(A.html())[1].replace(/\\u003c/g, '<')).config;
+  out.host = A.host().config;
   out.marks = (diags.get(file) || []).map(d => [d.range.line, d.range.col, d.message]);
   saved({ uri: Uri.file(file), getText: () => '{"rowHeight": 33}' });
   out.pushed = A.said.filter(m => m.type === 'config').map(m => m.config.rowHeight);
   await A.send({ type: 'config', id: 7 }); const r = A.reply(7);
   out.asked = r && r.config ? r.config.rowHeight : null;
-  console.log('RESULT' + JSON.stringify(out)); process.exit(0);
-})().catch(e => { console.error(e.stack); process.exit(1); });
+  return out;
+});
 '''
 
 
@@ -179,7 +163,7 @@ class ExtensionConfig(unittest.TestCase):
                 f.write('$enddefinitions $end\n')
             with open(os.path.join(d, 'wavelens.config.jsonc'), 'w', encoding='utf-8', newline='') as f:   # saved by a Windows tool
                 f.write('﻿// mine\r\n{\r\n  // "sort": "asc" names it\r\n  "rowHeight": 30,\r\n  "sort": 5,\r\n  "constructor": 1\r\n}\r\n')
-            o = node(EXT, os.path.join(H.ROOT, 'vscode', 'extension.js'), d)
+            o = node(EXT, FAKE, os.path.join(H.ROOT, 'vscode', 'extension.js'), d)
         self.assertEqual((o['host'] or {}).get('rowHeight'), 30, 'B-09: the file with a BOM applied at start')
         self.assertEqual([m[:2] for m in o['marks']], [[4, 2], [5, 2]], f'B-10: the marks on the keys\' lines, not the comment {o["marks"]}')
         self.assertIn('no setting', o['marks'][1][2])

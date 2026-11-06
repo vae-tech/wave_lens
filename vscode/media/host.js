@@ -25,8 +25,12 @@
   const vscode = acquireVsCodeApi(), G = window;
   const H = JSON.parse(document.getElementById('wavelens-host').textContent);
   G.WAVELENS_PATH = H.path;   // the page's path for the live link (edit.js liveHello): the dump's, as the agent names it
+  // a page starts (the tab opened, or VS Code made its webview again: moved to a window of its own): the streams the page
+  // before had opened are closed (this page numbers its own from 1 again)
+  vscode.postMessage({ type: 'page' });
 
-  /* ---- messages: a request and its answer by id, or a message of the host ---- */
+  /* ---- messages: a request and its answer by id, or a message of the host; each type, its keys and its answers in
+     vscode/protocol.js (the extension answers one none of it with an error): a new one goes there first ---- */
   let seq = 0; const wait = new Map(), on = {};
   const call = (type, body) => new Promise(ok => { const id = ++seq; wait.set(id, ok); vscode.postMessage(Object.assign({}, body, { type, id })); });
   G.addEventListener('message', e => {
@@ -196,12 +200,23 @@
   if (H.build) G.WAVELENS_BUILD = H.build;   // the bar's version line: the extension's branch and commit
 
   /* ---- the dump ---- */
+  // The dump's store comes with it: a webview VS Code made again (the tab moved to a window of its own) has the page of when
+  // the tab opened, its store of then. The dump by its webview URI; one that does not come (a moved tab over a remote
+  // connection: 404) through the extension, as bytes
   const fetchDump = async () => {
     const s = await call('source', {});
     if (s.error) throw new Error(s.error);
-    const r = await nativeFetch(s.src, { cache: 'no-store' });
-    if (!r.ok) throw new Error(`${s.name}: ${r.status} ${r.statusText}`);
-    const f = new File([await r.blob()], s.name);
+    if (s.store && typeof s.store === 'object') { data.clear(); for (const [k, v] of Object.entries(s.store)) data.set(k, String(v)); }
+    let blob = null, why = '';
+    try { const r = await nativeFetch(s.src, { cache: 'no-store' }); if (r.ok) blob = await r.blob(); else why = `${r.status} ${r.statusText}`.trim(); }
+    catch (e) { why = e.message; }
+    if (!blob) {
+      const b = await call('bytes', {});
+      if (b.error || !(b.data instanceof ArrayBuffer || ArrayBuffer.isView(b.data))) throw new Error(`${s.name}: ${why}${b.error ? '; ' + b.error : ''}`);
+      vscode.postMessage({ type: 'log', text: `${s.name}: the webview could not fetch it (${why}): read through the extension` });
+      blob = new Blob([b.data]);
+    }
+    const f = new File([blob], s.name);
     // a large dump: its header now, the signals the viewer shows read by the extension as they are needed
     if (s.lazy) Object.assign(f, { wlLazy: true, wlLoad: async codes => { const x = await call('codes', { codes }); if (x.error) throw new Error(x.error);
       return x.text; } });

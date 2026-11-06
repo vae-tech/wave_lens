@@ -27,18 +27,26 @@ vscode/                       the VS Code extension (a workspace extension: Remo
                               svtypes.py verilator: the command Make the types with Verilator; tests/unit compares
                               the two), links.js (times and signals of a log as links: pure, the smoke loads it in a
                               page), userconfig.js (your configuration: the JSONC of the defaults, read and
-                              checked; pure, as links.js), test/e2e.js (in a real VS Code)
+                              checked; pure, as links.js), protocol.js (the messages between the page and the
+                              extension: each type's keys and answers, checked by the extension as they come; pure,
+                              the smoke's fake host answers by it), test/e2e.js (in a real VS Code)
 tools/                        what you run: python3 -I tools/<tool>.py
-  mkconfig.py vcd2wavedrom.py mkhtml.py embed.py dumpscan.py wavejson.py svabuild.py wavefind.py common.py
-  wavelenscat.py              wavelens/wavelens.js from wavelens/src/*.js (make wavelens)
+  mkconfig.py vcd2wavedrom.py mkhtml.py embed.py dumpscan.py wavejson.py svabuild.py wavefind.py
+  wavelenscat.py              wavelens/wavelens.js from wavelens/src/*.js (make wavelens); --check (jsnames.py: names declared nowhere)
   publish.py                  master's commit of a version (§ Versions)
   svaverify.py                the examples' checkers in Verilator against sva eval (make sva-verify)
   svtypes.py                  the design's types by path (Questa's describe read, Verilator --json-only walked); its
                               twin in the page is wavelens/src/vcd.js svTypes
   questa/wavelens_types.tcl   in vsim: describe of every signal and the module of every instance -> <dump>.types.json
   mkvsix.py                   vscode/ + wavelens/ + the static sva -> one .vsix (a zip: no node, no npm)
-  wavemcp.py                  the tools as an MCP server for AI agents (stdio; USAGE § AI agents); the live link to a page
+  common.py                   what they share; pick: the one rule of naming a signal (viewedit, vcd2wavedrom, wavemcp,
+                              svabuild's full path; its twin in the page is edit.js pickRows, tests/unit/test_naming.py)
+  wavemcp.py                  the tools as an MCP server for AI agents (stdio; USAGE § AI agents)
+  wavelive.py                 wavemcp's live link to a page: the HTTP / SSE server (Bridge, LiveHandler), the token, the
+                              port file and VS Code's open requests in ~/.cache/wavelens/live, where a view tool works
   viewedit.py                 the viewer's commands on a page's edits or a saved state (USAGE § Commands and edits)
+  wavepage.py                 the files viewedit edits: a page's blocks (Page, put_block), a config's bookmarks, arrows,
+                              spans and window (cfg_*)
   gtkw.py                     a GTKWave save file read (mkconfig.py --gtkw: a view of it; nested groups, aliases, times)
   fsmstats.py                 an FSM's states in a dump, the page's rule (fsm.js fsmStats; smoke fsm_shell compares them)
   base.config.json            base settings for generated configs (make config / make html WAVES=x.vcd)
@@ -97,8 +105,8 @@ What each part needs:
 | the SystemVerilog style | verible (`make fmt`) and Verilator (`make lint`) |
 
 ```sh
-make check                  # the gate before a commit: wavelens.js current and its sources ≤ 160 columns, the committed sva.wasm.js the build of sva/, every page smoke needs, sva-test and unit (WAVELENS_STRICT: a test lacking what the gate builds fails, the engine's goldens over the examples too), sva-verify, mcp-bench, smoke STRICT=1, shots-check
-make unit                   # tests/unit: the tools on small VCDs of what simulators write (~20 s, standard library)
+make check                  # the gate before a commit: wavelens.js current, its sources ≤ 160 columns and no key of WaveView twice, the committed sva.wasm.js the build of sva/, every page smoke needs, sva-test and unit (WAVELENS_STRICT: a test lacking what the gate builds fails, the engine's goldens over the examples too), sva-verify, mcp-bench, smoke STRICT=1, shots-check
+make unit                   # tests/unit: the tools on small VCDs of what simulators write (standard library; 566 tests, 5.5 min with the tree on /mnt/c, measured 2026-11-06), the slowest and the skips said
 make unit-bless             # rewrite tests/unit/golden (the bytes wavejson.py and vcd2wavedrom.py write for the fixtures, the public names of api.txt) after a meant change of them: read the diff
 make mcp-bench              # tools/wavemcp.py on the benchmark tasks by a script (answers checked); AGENT=claude|codex: agents
 make wavelens               # wavelens/wavelens.js from wavelens/src/*.js (after editing them; make html / example do it too; lines ≤ 160 columns)
@@ -195,7 +203,23 @@ changes; the fixtures where `vcd2fst` writes another FST are listed with the rea
 `tests/unit/golden` keeps the bytes `wavejson.py` and `vcd2wavedrom.py` write and, in `api.txt`, the public names: the exports of
 `WaveLens` and the commands with their arguments, so a name removed or renamed fails until it is meant (`make unit-bless`). The
 commands are held without a browser too: `test_viewedit.py` checks `bits`, `reset`, `unfold` and `state` ↔ `set_state`, and
-`COMMANDS` against the `command(…)` calls of `edit.js`; `test_svabuild.py` every option of `sva diff` that `compare` passes on. `svaverify.py` does
+`COMMANDS` against the `command(…)` calls of `edit.js`; `test_svabuild.py` every option of `sva diff` that `compare` passes on.
+`tests/unit/times.json` is one table of times as a person writes them, run by `test_times.py` against every reader of one:
+`common.parse_time` with its callers' plain-number conventions (viewedit, testmarks, wavemcp's ns, vcd2wavedrom's unit
+needed), the page's `parseT` and `vscode/links.js` in node, the cocotb library's `bound_ps` and the CLI through `sva diff
+--from`; a reader that reads a case otherwise says so in the case. The extension's unit tests (`test_vscode_state`,
+`test_vscode_config`, `test_runs`, `test_protocol`) run the real `vscode/extension.js` over one fake `vscode`,
+`tests/unit/vscode_fake.js` (a tab opened as VS Code opens one, the page's messages sent, the replies kept). The messages
+between the page and the extension are one table, `vscode/protocol.js` (each type: the keys it sends, the answers it
+gets; for `runs`, per operation): the extension answers a message none of it with an error, `test_protocol` walks every
+type of it through the extension (and a large dump's `source` / `codes`, an FST's VCD text, over the real CLI) and
+checks that `extension.js` and `media/host.js` name its types and no other; the smoke's fake host (section `vscode`)
+answers by it and fails on a message or an answer it does not name. A new message: its row in the table first.
+`wavelenscat.py --check` also fails on
+a key of `WaveView.prototype` defined twice (the class in `view.js`, `Object.assign(WaveView.prototype, …)` elsewhere: the
+later would win without a word), and on a name read that nothing declares and no browser or node has (`tools/jsnames.py`:
+a misspelt global; over `wavelens.js`, the plugins and the extension's files; no eslint, no npm in the repository; scopes
+are not followed). `svaverify.py` does
 not let the comparison with Verilator shrink: only the assertions of an example's `unsupported` list may be put out,
 the simulation must reach `$finish`, every compared assertion must be evaluated (not capped, not vacuous only). The
 smoke section `examples` evaluates the exact views' bindings again in the page (WebAssembly, a worker for the first) and
@@ -203,6 +227,14 @@ compares them attempt by attempt with `sva eval`'s, and `sva_third_party` pins t
 evaluation (`THIRD_PARTY`). Budgets (`tests/unit/test_perf.py`, smoke `readers` and `fsm`): the converter on two sizes of
 a generated dump (time, peak memory, both growing with the dump), the page's reader of 18 MB in pieces, the FSM panel
 over 1500 FSMs (`WAVELENS_TIME_SCALE` and `SMOKE_TIME_SCALE` multiply their times on a loaded machine). `make unit-shuffle SEED=n` runs the unit tests one by one in another order.
+`make unit` runs them through `tests/unit/run.py` (unittest discover; `-k NAME`, `-p 'test_x*.py'`, `-v`): before unittest's
+"Ran N tests … OK" it prints the 10 slowest tests and every skip with its reason. Under `make check` (`WAVELENS_STRICT`, or
+`make unit STRICT=1`) a skip fails, except one of a program the gate does not build (`helpers.skip(…, built=False)`: GTKWave's
+`fst2vcd`, a checkout that is no git one; its reason starts with `optional:`). `test_cli_flags.py` holds every flag the tools
+and the extension give `sva diff` / `runs` / `vcd` / `fst` to the `USAGE` of `sva/cli/src/*.rs` (an argument list of sva
+added must be put in its table `BUILDERS`). The smoke's last line counts the checks, the sections run of all and the pages
+opened (a section's own too), and says `FAILED: n skipped with --strict` or `all checks passed, n skipped`; a section with a
+part skipped says so on its own line, and `--only` skips only the missing pages its sections read.
 
 `make shots` checks looks rather than
 behaviour: fixed viewport, fixed clicks, two animation frames after each, one element per image; it stops when IBM Plex
@@ -325,6 +357,20 @@ into memory, the page cache's to take back):
 | 27 MB × 2 FST of the 214 MB VCD (`sva fst`, blocks of 64 MiB) | 10.5 s | 255 MB | 258 MB |
 | the same FST written in blocks of 8 MB (`--block-bytes`) | — | 99 MB | — |
 | `sva vcd --from 10ms --to 11ms` of the 214 MB VCD / of its FST (a 10.9 MB cut) | 1.7 s / 0.95 s | — | 109 / 153 MB |
+
+A late window (F-01 of the review of the runs; a 37 MB VCD of 301 signals, 200 000 steps, 8 changes a step; its FST 5.1 MB;
+`sva diff A B --from 1.9ms --to 1.9001ms`, the dump 2 ms long; RSS as `/usr/bin/time` says it):
+
+| A, B | time | RSS |
+|---|---|---|
+| VCD × 2 (read from the start) | 1.39 s | 73 MB |
+| FST × 2 in one block (`sva fst`: 64 MiB of changes) | 1.27 s | 27 MB |
+| FST × 2 in blocks of 1 MiB (`sva runs keep`; 5.11 MB, +0.2 %) | 0.12 s | 10 MB |
+| the same window at the start of the dump, either | 0.06–0.15 s | — |
+
+An FST is read from the block holding `--from` (`diff.rs seek`, `vcd.rs fst_cut`): its frame, every signal's value at the
+block's start, read by `fst.rs frame_at` — fst-reader reads the frame of the first block it reads only when that block
+has no time step at its start, and a block written by `sva fst` or fstapi begins at the time before, so it has one.
 
 A VCD costs the heap nothing that grows with it: the values held are one per compared signal and side. An FST is read a
 block at a time, each reader holding one block of changes unpacked and the time table (8 bytes a time step): its heap

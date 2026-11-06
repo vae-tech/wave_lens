@@ -22,7 +22,7 @@ import argparse, fnmatch, json, os, re, shutil, subprocess, sys, tempfile
 
 sys.dont_write_bytecode = True   # a shared checkout stays as it is: -I ignores PYTHONDONTWRITEBYTECODE (AU-WL-003)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
-from common import WaveError, add_sva_bin_arg, run_main  # noqa: E402
+from common import WaveError, add_sva_bin_arg, glued, pick, run_main  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXE = '.exe' if os.name == 'nt' else ''
@@ -90,23 +90,32 @@ class Names:
     def __init__(self, widths: dict, aliases: dict = None, prefixes=()):
         self.widths, self.aliases = widths, aliases or {}
         self.pfx = sorted(prefixes or [], key=len, reverse=True)
-        self.by = {}
+        self.by, self.at = {}, {}   # by: scope -> [(leaf, path)]; at: a path by its parts, either spelling of an element
         for path in widths:
             *sc, leaf = split_path(path)
             self.by.setdefault('.'.join(sc), []).append((leaf, path))
+            key = '.'.join([*sc, leaf])
+            self.at.setdefault(key, path)
+            self.at.setdefault(glued(key), path)
         self.scopes = list(dict.fromkeys('.'.join(split_path(p)[:k]) for p in widths for k in range(1, len(split_path(p)))))
 
     def lookup(self, scope, name):
-        """name (maybe u_fifo.full) in scope: the variable, else the one shown under that name, else the one equal
-        without the ignored prefixes -> path | [paths] (several equal without the prefixes: ambiguous) | None"""
+        """name (maybe u_fifo.full) in scope: the variable (the full path of common.pick: an assertion's names are its
+        instance's own, no tail), else the one shown under that name, else the one equal without the ignored prefixes ->
+        path | [paths] (several equal without the prefixes: ambiguous) | None"""
         *sub, base = split_path(name)
         rows = self.by.get('.'.join(x for x in [scope, *sub] if x), [])
-        hit = next((p for leaf, p in rows if leaf == base), None) or next((p for leaf, p in rows if self.aliases.get(p) == base), None)
+        own = pick(self.widths, '.'.join(x for x in [scope, *sub, base] if x), exact=self.exact, tails=False)[0]
+        hit = (own[0] if own else None) or next((p for leaf, p in rows if self.aliases.get(p) == base), None)
         if hit or not self.pfx:
             return hit
         b = _strip(base, self.pfx)
         hits = [p for leaf, p in rows if _strip(leaf, self.pfx) == b or _strip(self.aliases.get(p, ''), self.pfx) == b]
         return hits if len(hits) > 1 else hits[0] if hits else None
+
+    def exact(self, q):
+        """The variable of path q (its parts joined as split_path cuts them; an element as q[0] or q.[0]), or None."""
+        return self.at.get(q) or self.at.get(glued(q))
 
     def resolve(self, scope: str, signals: list) -> tuple:
         """signals [{name, width?}] (the clock first) -> ({name: path}, [problems]); the clock also above the scope"""
@@ -307,34 +316,18 @@ def whole(files, binds, waves, exe=None, prefixes=None, aliases=None):
     return [b['results'] for b in bs if b.get('results')]
 
 
-COMPARE_SPANS = 1000   # the stretches that differ kept per signal of a page
-COMPARE_WAVES = 32 << 20   # bytes: the cut of the second dump a page carries at most (its "vcd": the overlay, A B on the page)
-
-
-def compare_cut(exe, b, paths, t_from, t_to):
-    """`sva vcd` of dump b: the signals `paths` over [t_from, t_to] (B's time, ps), or a note when it is not to be had."""
-    cmd = [exe, 'vcd', b, '--from', f'{round(t_from)}ps', '--to', f'{round(t_to)}ps', '--signals-from', '-']
-    r = subprocess.run(cmd, input='\n'.join(paths) + '\n', capture_output=True, text=True)
-    if r.returncode:
-        return None, f'the values of {os.path.basename(b)} are not on the page: ' + (r.stderr.strip().removeprefix('sva: ') or f'sva vcd: exit {r.returncode}')
-    if len(r.stdout) > COMPARE_WAVES:
-        return None, (f'the values of {os.path.basename(b)} are not on the page: {len(r.stdout) >> 20} MB of changes of the signals that differ '
-                      f'(at most {COMPARE_WAVES >> 20}): compare fewer signals or a shorter window')
-    return r.stdout, None
-
-
 def compare(exe, a, b, rows, t_from=None, t_to=None, mp=None, offset=None, segment=None, align=False, show=None):
-    """`sva diff` of dump a and dump b over [t_from, t_to] (ps) for rows [(the row as the page names it, its path in a)] (None:
-    every signal of a, by its path) ->
+    """`sva diff --page` of dump a and dump b over [t_from, t_to] (ps) for rows [(the row as the page names it, its path in a)]
+    (None: every signal of a, by its path) ->
     the WaveJSON extension "compare" (wavelens model.js cmpNorm): {name, from, to, compared, differ, changes, first,
     signals: {row: {spans, b, other?, more?}}, missing: [the rows b has not got], map, segments?, notes?}, times in ps;
-    vcd, shift: the cut of b of the signals that differ, its time less a's (not with --align: no one offset); show: what the
-    page opens with (a, b, overlay)."""
+    vcd, shift: the cut of b of the signals that differ, its time less a's (not with --align: no one offset; too large: a
+    note); show: what the page opens with (a, b, overlay). The CLI makes the shape (the same as VS Code's Compare… and Runs
+    panel take); here the rows by the page's names and wellen's warnings as notes."""
     row_of = {}
     for r, p in rows or ():
         row_of.setdefault(p, []).append(r)
-    # --limit 1: the differences listed are held in memory (the first is read); only_a, only_b are whole whatever it is
-    cmd = [exe, 'diff', a, b, '--json', '-', '--quiet', '--spans', str(COMPARE_SPANS), '--limit', '1'] + (['--signals-from', '-'] if rows is not None else [])
+    cmd = [exe, 'diff', a, b, '--page', '--quiet'] + (['--signals-from', '-'] if rows is not None else [])
     if t_from is not None:
         cmd += ['--from', f'{round(t_from)}ps']
     if t_to is not None:
@@ -352,33 +345,17 @@ def compare(exe, a, b, rows, t_from=None, t_to=None, mp=None, offset=None, segme
     i = r.stdout.find('{')
     head = (r.stdout[:i] if i > 0 else '').splitlines() + [x for x in r.stderr.splitlines() if x.startswith('WARN: ')]
     try:
-        d = json.loads(r.stdout[max(i, 0):])
+        out = json.loads(r.stdout[max(i, 0):])
     except ValueError:
         raise WaveError(f'compare with {os.path.basename(b)}: sva diff wrote no JSON: {(r.stdout or r.stderr).strip()[:200]}') from None
-    out = {'name': os.path.basename(b), 'from': d['from'], 'to': d['to'], 'compared': d['signals_compared'], 'differ': d['signals_differ'],
-           'changes': d['compared'], 'first': d['first'] and d['first']['t'], 'signals': {},
-           'missing': [x for p in d['only_a'] + d.get('not_in_a', []) for x in row_of.get(p, [p])], 'map': d['map']}
-    for x in d['signals']:
-        e = {'spans': x.get('spans', []), 'b': x['b']}
-        if x.get('other'):
-            e['other'] = x['other']
-        if x.get('more'):
-            e['more'] = x['more']
-        for row in row_of.get(x['path'], [x['path']]):
-            out['signals'][row] = e
-    if d.get('segments'):
-        out['segments'] = d['segments']
-    warned = [f'{os.path.basename(a)} or {os.path.basename(b)}: {x.removeprefix("WARN: ")}' for x in head if x.strip()]
-    if d.get('notes') or warned:
-        out['notes'] = (d.get('notes') or []) + warned
-    diff = sorted({x.get('b') or x['path'] for x in d.get('signals', ()) if x.get('spans')})
-    if diff and not align:
-        shift = d.get('offset') or 0
-        cut, note = compare_cut(exe, b, diff, d['from'] + shift, d['to'] + shift)
-        if cut is not None:
-            out['vcd'], out['shift'] = cut, shift
-        else:
-            out['notes'] = (out.get('notes') or []) + [note]
+    out['signals'] = {row: e for p, e in out['signals'].items() for row in row_of.get(p, [p])}
+    out['missing'] = [x for p in out['missing'] for x in row_of.get(p, [p])]
+    warned = list(dict.fromkeys(f'{os.path.basename(a)} or {os.path.basename(b)}: {x.removeprefix("WARN: ")}' for x in head if x.strip()))
+    notes = (out.get('notes') or []) + warned
+    if out.get('cutError'):   # B's values too many for a page: said, the bands stay
+        notes.append(f'the values of {os.path.basename(b)} are not on the page: ' + out.pop('cutError'))
+    if notes:
+        out['notes'] = notes
     if show:
         out['show'] = show
     return out

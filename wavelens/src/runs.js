@@ -5,10 +5,14 @@
    dump… adds the dump of now; a click on a run (Enter, ↑ ↓ in the list, ]r [r anywhere) compares with it, the compare's
    A B A+B and ]d [d as Compare… has them; Δ all: how many signals of each run differ in the window. The page asks its host
    (window.WAVELENS_RUNS: list, keep, set, rm, diff, compare; the VS Code extension's media/host.js gives it); without
-   one (a page in a browser) there are none. */
+   one (a page in a browser) there are none. A run keeps its test cases (your spans with a label when kept, or cocotb's
+   marks beside the dump): a span of yours a run has a case of (by name) is compared with that case of the run, wherever
+   it is in the run (B offset to it, over the shorter of the two). */
 
 /* ---------------- the viewer's side ---------------- */
 const RUN_SETTLE = 250;   // ms: the list's keys move the row, the compare goes when they stop (Enter at once)
+// a case's name of a span's label: without "TC3 " before it and " · PASS" after it (cocotb's marks); sva runs.rs case_name
+const caseName = l => { const s = String(l || '').split(' \u00b7 ')[0].trim(), m = /^TC\d+ (.*)$/.exec(s); return (m ? m[1] : s).trim(); };
 const sameSpan = (s, w) => !!s && !!w && s.from === w.from && s.to === w.to && (s.label || '') === (w.label || '');
 Object.assign(WaveView.prototype, {
   // who keeps the runs: the page's host (VS Code), null in a browser
@@ -50,10 +54,14 @@ Object.assign(WaveView.prototype, {
     if (!run) { this.toast(`no run #${id}`); return null; }
     const w = this.runsWindow(), req = this.runReq = (this.runReq || 0) + 1, show = this.cmp ? this.cmpRun : 'a';
     const f = t => this.fmt(t, (this.M.t1 - this.M.t0) / 1000, this.M.t1 - this.M.t0);
-    if (!quiet) this.toast(`#${id} ${run.name}: comparing ${f(w.from)} … ${f(w.to)}…`);
-    if (this.runsP) this.runsP.status(`comparing with #${id} ${run.name} over ${f(w.from)} … ${f(w.to)}…`);
+    // your span is a test case of the run (its name): the run's case compared, wherever it is in the run
+    const cn = w.span && w.span.label ? caseName(w.span.label) : '', byCase = !!cn && (run.cases || []).some(c => c.name === cn);
+    const what = byCase ? `its case ${cn}` : `${f(w.from)} … ${f(w.to)}`;
+    if (!quiet) this.toast(`#${id} ${run.name}: comparing ${what}…`);
+    if (this.runsP) this.runsP.status(`comparing with #${id} ${run.name} over ${what}…`);
     let m;
-    try { m = await h.compare({ id, signals: this.runsSignals(), from: w.from, to: w.to }); } catch (e) { m = { error: e.message }; }
+    try { m = await h.compare(Object.assign({ id, signals: this.runsSignals(), from: w.from, to: w.to }, byCase ? { case: cn } : {})); }
+    catch (e) { m = { error: e.message }; }
     if (req !== this.runReq) return null;   // another run asked meanwhile
     if (m.error || !m.result) { const e = m.error || 'no result'; this.toast(`#${id}: ${e}`); if (this.runsP) this.runsP.status(`#${id} ${run.name}: ${e}`);
       return null; }
@@ -62,7 +70,8 @@ Object.assign(WaveView.prototype, {
     if (!r) return null;
     this.runCur = id;   // the run compared: set once it is
     if (show !== 'a' && this.cmpCan()) await this.compareView(show, true);
-    if (this.runsP) { this.runsP.got(id, w, r); this.runsP.status(runSaid(`#${id} ${run.name}`, r, m.result, w, f, this.cmpCan())); }
+    if (this.runsP) { this.runsP.got(id, w, r);
+      this.runsP.status(runSaid(`#${id} ${run.name}`, r, m.result, w, f, this.cmpCan()) + (cn && !byCase && run.cases ? ` · no case ${cn} in it` : '')); }
     return r;
   },
   // ]r [r: the next (older) / previous (newer) run of the list (read again: a run kept in a shell is there) over the window
@@ -92,7 +101,8 @@ Object.assign(WaveView.prototype, {
 });
 // what a compare with a run says: equal, or how many differ and the first; the rows the run has not; the run's values not loaded and why
 function runSaid(who, r, res, w, f, can) {
-  const miss = (res.missing || []).length, over = `over ${f(w.from)} … ${f(w.to)}`;
+  const c = res.case, miss = (res.missing || []).length, over = c ? `over the case ${c.name} (the run's at ${f(c.from)}` +
+    `${c.shorter != null ? `; over the shorter, ${f(c.shorter)}` : ''})` : `over ${f(w.from)} … ${f(w.to)}`;
   const head = r.differ ? `${who}: ${r.differ} of ${r.compared} signals differ ${over}${r.first == null ? '' : `, the first at ${f(r.first)}`}` :
     `${who}: equal ${over} (${r.compared} signals)`;
   return head + (miss ? ` · ${miss} row${miss === 1 ? '' : 's'} the run has not` : '') +
@@ -147,8 +157,10 @@ class Runs {
     const v = this.v, f = t => v.fmt(t, (v.M.t1 - v.M.t0) / 1000, v.M.t1 - v.M.t0);
     const i = v.runsWin ? v.spans.findIndex(x => sameSpan(x, v.runsWin)) : -1;
     if (v.runsWin && i < 0) v.runsWin = null;
+    const cases = new Set((v.runsL || []).flatMap(r => (r.cases || []).map(c => c.name)));
     this.win.innerHTML = '<option value="view">the waves in sight</option>' + v.spans.map((s, k) =>
-      `<option value="${k}">${esc(s.label || 'span')} (${esc(f(s.from))} … ${esc(f(s.to))})</option>`).join('');
+      `<option value="${k}">${esc(s.label || 'span')} (${esc(f(s.from))} … ${esc(f(s.to))})` +
+      `${s.label && cases.has(caseName(s.label)) ? ' · a case' : ''}</option>`).join('');
     this.win.value = i < 0 ? 'view' : String(i);
   }
   // a compare's numbers for the run, of that window
@@ -172,6 +184,7 @@ class Runs {
         '<button type="button" data-a="ed" title="Name, tags, comment (e)">✎</button>' +
         '<button type="button" data-a="rm" title="Remove the run and its file (Delete)">✕</button></span>' +
         `<span class="r2">${esc((r.kept || '').slice(0, 16).replace('T', ' '))} · ${esc(r.dump || '')}` +
+        `${r.cases && r.cases.length ? ` · ${r.cases.length} case${r.cases.length === 1 ? '' : 's'}` : ''}` +
         `${r.comment ? ' · ' + esc(r.comment.split('\n')[0]) : ''}</span></div>`;
     }).join('');
     const cur = this.rowsEl.children[this.fi];
@@ -193,7 +206,10 @@ class Runs {
     const body = { name: q('.rfn').trim(), tags: q('.rft').split(',').map(s => s.trim()).filter(Boolean), comment: q('.rfc') };
     const run = this.edit; this.closeForm();
     this.status(run ? `#${run.id}: saving…` : 'keeping the dump of now (written as an FST in the runs\' directory)…');
-    let m; try { m = run ? await h.set(run.id, body) : await h.keep(body); } catch (e) { m = { error: e.message }; }
+    // a run kept: your spans with a label as its test cases (none: the host takes cocotb's marks beside the dump)
+    const cases = this.v.spans.filter(s => s.label && caseName(s.label)).map(s => ({ label: s.label, from: s.from, to: s.to }));
+    let m;
+    try { m = run ? await h.set(run.id, body) : await h.keep(cases.length ? Object.assign({ cases }, body) : body); } catch (e) { m = { error: e.message }; }
     if (m.error) { this.status((run ? 'not saved: ' : 'not kept: ') + m.error); return; }
     await this.load(); if (!run && m.run) { this.fi = Math.max(0, this.v.runsL.findIndex(r => r.id === m.run.id)); this.render(); }
     this.status(run ? `#${run.id} saved` : m.run ? `kept as #${m.run.id} ${m.run.name}` : 'kept');
@@ -208,8 +224,11 @@ class Runs {
   // Δ all: sva runs diff over the window, each run's numbers on its row
   async all() {
     const v = this.v, w = v.runsWindow(), f = t => v.fmt(t, (v.M.t1 - v.M.t0) / 1000, v.M.t1 - v.M.t0);
-    this.status(`each run against these waves over ${f(w.from)} … ${f(w.to)}…`);
-    let m; try { m = await v.runsHost().diff({ signals: v.runsSignals(), from: w.from, to: w.to }); } catch (e) { m = { error: e.message }; }
+    // your span a case of some run: each run over its case of that name (a run without it: said on its row)
+    const cn = w.span && w.span.label ? caseName(w.span.label) : '', byCase = !!cn && (v.runsL || []).some(r => (r.cases || []).some(c => c.name === cn));
+    this.status(`each run against these waves over ${byCase ? `the case ${cn}` : `${f(w.from)} … ${f(w.to)}`}…`);
+    let m; try { m = await v.runsHost().diff(Object.assign({ signals: v.runsSignals(), from: w.from, to: w.to }, byCase ? { case: cn } : {})); }
+    catch (e) { m = { error: e.message }; }
     if (m.error) { this.status('Δ all: ' + m.error); return; }
     let n = 0;
     for (const x of m.runs || []) {
@@ -219,7 +238,7 @@ class Runs {
         first: x.first ? x.first.t : null, outside: !!x.outside });
     }
     this.render();
-    this.status(`${n} of ${(m.runs || []).length} runs differ over ${f(w.from)} … ${f(w.to)}`);
+    this.status(`${n} of ${(m.runs || []).length} runs differ over ${byCase ? `the case ${cn}` : `${f(w.from)} … ${f(w.to)}`}`);
   }
   // a row chosen: compared at once (a click, Enter) or when the keys stop (settle: ↑ ↓ Home End PgUp PgDn held down
   // compare once, the row they stop on)

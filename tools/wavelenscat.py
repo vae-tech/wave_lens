@@ -3,14 +3,20 @@
 
 The page needs one file and no build step, so wavelens.js stays committed; this only puts it together after a change
 of a source file. Each source file starts with a comment that says what it holds: it is left out, the parts are
-separated by a banner with the file's name. --check: exit 1 when wavelens.js is not what the sources give, or a line of
-the sources (and of the plugins sva.js, bus.js) is longer than WIDTH columns (smoke and make check call it).
+separated by a banner with the file's name. --check: exit 1 when wavelens.js is not what the sources give, a line of
+the sources (and of the plugins sva.js, bus.js) is longer than WIDTH columns, or two places of the sources define one
+key of WaveView.prototype (the class body in view.js, Object.assign(WaveView.prototype, {…}) in the others: the later
+would win without a word), or a name is read that nothing declares and no browser / node has (jsnames.py: a misspelt
+global; over wavelens.js, the plugins and the extension's files) (smoke and make check call it).
 
   python3 -I tools/wavelenscat.py [--check]
 """
-import argparse, os, sys
+import argparse, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.dont_write_bytecode = True   # a shared checkout stays as it is: -I ignores PYTHONDONTWRITEBYTECODE (AU-WL-003)
+sys.path.insert(0, HERE)   # -I drops the script dir from sys.path
+import jsnames  # noqa: E402
 FW = os.path.join(os.path.dirname(HERE), 'wavelens')
 PARTS = ['model', 'vcd', 'paint', 'bar', 'names', 'view', 'menu', 'look', 'warp', 'edit', 'diff', 'modules', 'fsm', 'runs', 'log', 'svg', 'boot']
 PLUGINS = ['sva.js', 'bus.js']
@@ -44,10 +50,85 @@ def too_long() -> list:
     return out
 
 
+# WaveView's members: the class body of view.js and the Object.assign(WaveView.prototype, {…}) blocks of the other files; a
+# member is a line indented by two spaces, as the sources are written (a method, a getter / setter, a key: value)
+PROTO_OPEN = re.compile(r'^(?:class WaveView \{|Object\.assign\(WaveView\.prototype, \{)\s*$')
+PROTO_KEY = re.compile(r'^  (static\s+)?(?:async\s+)?(?:(get|set)\s+(?=[\w$]+\s*\())?(?:\*\s*)?([A-Za-z_$][\w$]*)\s*(?:\(|:|,\s*$|$)')
+
+
+def proto_keys(texts) -> list:
+    """[(key, 'file:line', kind)] of every member WaveView.prototype gets; texts: [(file, text)] in the order of PARTS.
+    kind: 'get' / 'set' for an accessor, else ''; static members (the class's own) are left out."""
+    out = []
+    for rel, text in texts:
+        inside = False
+        for i, ln in enumerate(text.split('\n'), 1):
+            if not inside:
+                inside = bool(PROTO_OPEN.match(ln))
+                continue
+            if ln.startswith('}'):   # the block's end: "});" or the class's "}"
+                inside = False
+                continue
+            m = PROTO_KEY.match(ln)
+            if m and not m.group(1):
+                out.append((m.group(3), f'{rel}:{i}', m.group(2) or ''))
+    return out
+
+
+def proto_twice(texts) -> list:
+    """'key: file:line and file:line' for every key of WaveView.prototype defined twice (the later silently wins: Object.assign
+    and a class body raise nothing); a getter with its setter is one key."""
+    seen, out = {}, []
+    for key, where, kind in proto_keys(texts):
+        for w, k in seen.get(key, []):
+            if {k, kind} != {'get', 'set'}:
+                out.append(f'WaveView.prototype.{key}: {w} and {where}')
+                break
+        seen.setdefault(key, []).append((where, kind))
+    return out
+
+
+def unknown_names(text=None) -> list:
+    """'file:line: name' of every name read that nothing declares (jsnames.py): wavelens.js (text: its build; the line given
+    in its source file), the plugins and the VS Code extension's files."""
+    text = build() if text is None else text
+    # wavelens.js's line -> its source file and line, by the banners
+    starts = [(i, m.group(1)) for i, ln in enumerate(text.split('\n'), 1) for m in [re.match(r'/\* =+ (src/\w+\.js) =+ \*/$', ln)] if m]
+    def where(line):
+        for i, name in reversed(starts):
+            if line > i:
+                with open(os.path.join(FW, name), encoding='utf-8') as f:
+                    t = f.read()
+                skip = t[:t.index('*/') + 2].count('\n') + len(t[t.index('*/') + 2:]) - len(t[t.index('*/') + 2:].lstrip('\n')) if t.startswith('/*') else 0
+                return f'wavelens/{name}:{line - i + skip}'
+        return f'wavelens/wavelens.js:{line}'
+    page = jsnames.BROWSER | jsnames.PAGE
+    out = [f'{where(ln)}: {n}' for n, ln in jsnames.undeclared(text, page)]
+    root = os.path.dirname(FW)
+    for rel, known in [('wavelens/sva.js', page), ('wavelens/bus.js', page), ('vscode/media/host.js', page),
+                       ('vscode/extension.js', jsnames.NODE), ('vscode/links.js', jsnames.NODE), ('vscode/userconfig.js', jsnames.NODE),
+                       ('vscode/svtypes.js', jsnames.NODE), ('vscode/protocol.js', jsnames.NODE | page)]:
+        p = os.path.join(root, rel)
+        if os.path.exists(p):
+            with open(p, encoding='utf-8') as f:
+                out += [f'{rel}:{ln}: {n}' for n, ln in jsnames.undeclared(f.read(), known)]
+    return out
+
+
+def sources() -> list:
+    """[(wavelens/src/name.js, its text)] in the order of PARTS."""
+    out = []
+    for name in PARTS:
+        with open(os.path.join(FW, 'src', name + '.js'), encoding='utf-8') as f:
+            out.append((f'wavelens/src/{name}.js', f.read()))
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--check', action='store_true',
-                    help=f'only check: exit 1 when wavelens/wavelens.js is out of date or a source line is over {WIDTH} columns')
+                    help=f'only check: exit 1 when wavelens/wavelens.js is out of date, a source line is over {WIDTH} columns, '
+                         'a key of WaveView.prototype is defined twice or a name is read that nothing declares')
     a = ap.parse_args()
     text, path = build(), os.path.join(FW, 'wavelens.js')
     with open(path, encoding='utf-8') as f:
@@ -58,6 +139,12 @@ def main():
         long = too_long()
         if long:
             sys.exit('\n'.join(f'wavelenscat: {x} (at most {WIDTH})' for x in long))
+        twice = proto_twice(sources())
+        if twice:
+            sys.exit('\n'.join(f'wavelenscat: {x}: defined twice, the later wins' for x in twice))
+        unknown = unknown_names(text)
+        if unknown:
+            sys.exit('\n'.join(f'wavelenscat: {x}: declared nowhere (a misspelling? a global: tools/jsnames.py BROWSER / NODE)' for x in unknown))
         return
     if now != text:
         with open(path, 'w', encoding='utf-8') as f:

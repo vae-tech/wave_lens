@@ -10,12 +10,16 @@ GOLDEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'golden')
 BLESS = bool(os.environ.get('WAVELENS_BLESS'))   # make unit-bless: the goldens written anew (then read the diff)
 
 
+OPTIONAL = 'optional: '   # the reason of a skip that STRICT lets pass (tests/unit/run.py): another program than the gate builds
+
+
 def skip(case, why, built=True):
     """case.skipTest(why); under make check (WAVELENS_STRICT) a test that lacks what the gate builds (built) fails instead:
-    a parity test skipped on a clean tree passed the gate before (review IV B7). Other programs (GTKWave): built=False."""
+    a parity test skipped on a clean tree passed the gate before (review IV B7). Other programs (GTKWave): built=False, its
+    reason marked OPTIONAL, the one skip tests/unit/run.py lets pass under STRICT."""
     if STRICT and built:
         case.fail(f'not there though make check builds it: {why}')
-    case.skipTest(why)
+    case.skipTest(why if built else OPTIONAL + why)
 
 
 def needs(cond, why):

@@ -100,7 +100,7 @@
         "wavelens.runsDir": {
           "type": "string",
           "default": "",
-          "description": "Where the Runs panel (gu) keeps the runs of a dump: empty, .wavelens-runs beside the dump; a path relative to the workspace folder, or absolute (one directory for every dump). It has runs.json and a .gitignore of its own."
+          "description": "Where the Runs panel (gu) keeps the runs of a dump: empty, .wavelens-runs beside the dump; a path relative to the workspace folder, or absolute (one directory for every dump). It has runs.json and a .gitignore of its own. Set in the workspace's settings, sva runs in a shell and an agent's wave_runs use it too."
         },
         "wavelens.theme": {
           "type": "string",
@@ -124,7 +124,7 @@
         "wavelens.sva": {
           "type": "string",
           "default": "",
-          "description": "The sva program that turns an FST into VCD text (empty: the one inside the extension)."
+          "description": "The sva program: an FST as VCD text, Make an FST, Compare…, the runs kept (empty: the one inside the extension, for a Linux host; a Windows host has none bundled: the path of sva.exe, which make dist-windows builds)."
         }
       }
     }

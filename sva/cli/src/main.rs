@@ -79,6 +79,38 @@ pub(crate) fn write_out(args: std::fmt::Arguments, newline: bool) {
     }
 }
 
+/// How far a long job is, on stderr: `sva: <what>: progress: <how far>`. Every such line is written here, so its marker
+/// `: progress: ` is one: the tools show these lines and count no note of them by it (tools/wavemcp.py fst_notes,
+/// vscode/extension.js; tests/unit/test_wavemcp.py pins the lines of `sva fst` and `sva diff`).
+pub(crate) fn progress(what: &str, how: std::fmt::Arguments) {
+    eprintln!("sva: {what}: progress: {how}");
+}
+
+/// The files a killed sva left in `dir` (`pid_of(name)`: the pid in a name of this program's, else None): removed when
+/// their process is gone (Linux: no /proc/<pid>; elsewhere the time alone) and untouched for 10 minutes, so a run killed
+/// leaves none for good (an FST's part beside it, a glued VCD's FST in the temp directory; review of the runs T-08 d).
+pub(crate) fn sweep_left(dir: &std::path::Path, pid_of: impl Fn(&str) -> Option<u32>) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let proc = std::path::Path::new("/proc");
+    let linux = proc.join("self").exists();
+    for e in rd.flatten() {
+        let Some(pid) = pid_of(&e.file_name().to_string_lossy()) else { continue };
+        if pid == std::process::id() || (linux && proc.join(pid.to_string()).exists()) {
+            continue;
+        }
+        let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|d| d.as_secs() > 600);
+        if old {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
+/// `<file>.<pid>.part` -> (file, pid): the part sva writes beside a file before it renames it over the file.
+pub(crate) fn part_pid(name: &str) -> Option<(&str, u32)> {
+    let (file, pid) = name.strip_suffix(".part")?.rsplit_once('.')?;
+    Some((file, pid.parse().ok()?))
+}
+
 macro_rules! outln {
     () => { write_out(format_args!(""), true) };
     ($($t:tt)*) => { write_out(format_args!($($t)*), true) };

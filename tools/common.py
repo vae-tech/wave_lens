@@ -1,5 +1,5 @@
-"""common.py — what the tools share: time units, * / ? patterns, the sva command-line option, the settings
-keys of wavelens/wavelens.config.js, and WaveError.
+"""common.py — what the tools share: time units, * / ? patterns, the one rule of naming a signal (pick), the sva
+command-line option, the settings keys of wavelens/wavelens.config.js, and WaveError.
 
 A library function raises WaveError with a one-line message; each tool's main() catches it once (run_main) and exits
 with that message, so a mistake in a config or a missing file is one line, not a traceback. Python >= 3.9.
@@ -79,6 +79,76 @@ def glob_re(pattern, one=True):
     """A full-path pattern with * (any run) and ? (one character; one False: a ? as it is, the viewer's rows) -> compiled
     regex that must match the whole path."""
     return re.compile(''.join('.*' if c == '*' else '.' if c == '?' and one else re.escape(c) for c in pattern) + r'\Z')
+
+
+def glued(path):
+    """A path with no dot before a [: one spelling of an array element (q.[0] and q[0] -> q[0]; every dot, as a path of the
+    scope form by wellen, ptr..[0]). One rule with sva/cli/src/vcd.rs glued()."""
+    return re.sub(r'\.+\[', '[', path)
+
+
+def depth(path):
+    """How deep a path is: its dots, an array element at its array's level (glued)."""
+    return glued(path).count('.')
+
+
+def nearest(hits, full):
+    """Of the rows found for a name: one net at several levels -> the one nearest the top, when it is one -> (rows, how many
+    deeper paths were left out)."""
+    fulls = list(dict.fromkeys(full(r) for r in hits))
+    if len(fulls) < 2:
+        return hits, 0
+    top = min(depth(f) for f in fulls)
+    near = [f for f in fulls if depth(f) == top]
+    if len(near) != 1:
+        return hits, 0
+    return [r for r in hits if full(r) == near[0]], len(fulls) - 1
+
+
+def pick(pool, s, full=None, name=None, exact=None, bit=None, scope='', tails=True):
+    """The one rule of naming a signal on the Python side (tools/viewedit.py Model.pick over a page's rows, vcd2wavedrom.py
+    Builtin.find / resolve and wavemcp.py Wave.find over a dump's paths, svabuild.py Names.lookup; the page's twin is
+    wavelens/src/edit.js pickRows): one name s (not a pattern) -> (the rows it means, how many deeper paths were left out).
+    The first of these that finds any:
+      1. the full path: under the scope (scope.s), then s as it is;
+      2. a row's own name (name(r): the page's shown name);
+      3. the end of a path (… .s), under the scope;
+      4. the longest path s ends with (s = … .path: the dump's path of a row the page shows under a shorter one);
+      5. a bit of a bus or a select of it (bit(s): the caller's, None when s is none);
+    an array element by either spelling at each step (glued: mem.[1] = mem[1]); of several, one net at several levels:
+    the one nearest the top when it is one (nearest). pool: the rows; full(r): a row's path (default: the row is its path);
+    exact(q): the row of path q or None (a dump's index: its aliases too), else the pool is searched; tails False: step 1
+    only (an assertion's names are its instance's own). Several rows left: the caller says it is ambiguous."""
+    F = full or (lambda r: r)
+    sc = scope.rstrip('.') if scope else ''
+    for q in dict.fromkeys(([s if s.startswith(sc + '.') else f'{sc}.{s}'] if sc else []) + [s]):
+        if exact:
+            r = exact(q)
+            hit = [] if r is None else [r]
+        else:
+            hit = [r for r in pool if F(r) == q]
+            if not hit and '[' in q:
+                g = glued(q)
+                hit = [r for r in pool if glued(F(r)) == g]
+        if hit:
+            return nearest(hit, F)
+    if not tails:
+        return [], 0
+    under = [r for r in pool if F(r).startswith(sc + '.')] if sc else list(pool)
+    hit = [r for r in under if name(r) == s] if name else []
+    if not hit:
+        tail = '.' + glued(s)
+        hit = [r for r in under if glued(F(r)).endswith(tail)]
+    if not hit:
+        g = glued(s)
+        at = [r for r in under if g.endswith('.' + glued(F(r)))]
+        n = max((len(glued(F(r))) for r in at), default=0)
+        hit = [r for r in at if len(glued(F(r))) == n]
+    if not hit and bit:
+        b = bit(s)
+        if b is not None:
+            return [b], 0
+    return nearest(hit, F)
 
 
 def add_sva_bin_arg(ap):

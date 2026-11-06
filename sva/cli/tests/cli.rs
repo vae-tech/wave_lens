@@ -540,6 +540,39 @@ fn parts(vcd: &std::path::Path) -> Vec<String> {
         .filter(|n| n.ends_with(".part")).collect()
 }
 
+/// A file written with its time an hour back (a part a run killed long ago left).
+fn old_file(p: &std::path::Path) {
+    std::fs::write(p, "x").unwrap();
+    let back = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    std::fs::File::options().write(true).open(p).unwrap().set_modified(back).unwrap();
+}
+
+/// The files a killed sva left (review of the runs T-08 d): its FST's part beside the target (`tb.fst.<pid>.part`) and
+/// the FST of a glued VCD in the temp directory are removed by the next run once their process is gone and they are
+/// 10 minutes old; a young part (a run going on), another target's and another program's file stay.
+#[test]
+fn the_files_a_killed_run_left_are_removed() {
+    let vcd = own("parts-left", "tb.vcd", ALL_KINDS);
+    let d = vcd.parent().unwrap();
+    // a pid no system gives (Linux: at most 4194304)
+    let (gone, young, other, theirs) = (d.join("tb.fst.4000000001.part"), d.join("tb.fst.4000000002.part"), d.join("tb.vcd.4000000003.part"),
+                                       d.join("tb.fst.4000000004.bak"));
+    for p in [&gone, &other, &theirs] {
+        old_file(p);
+    }
+    std::fs::write(&young, "x").unwrap();
+    let o = sva(&["fst", &vcd.to_string_lossy()]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    assert!(!gone.exists(), "an old part of a process gone: removed");
+    assert!(young.exists() && other.exists() && theirs.exists(), "a young part, another target's, another file: kept");
+    let glued = std::env::temp_dir().join("sva-glued-4000000005-1.fst");
+    old_file(&glued);
+    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/unit/vcd/glued.vcd");
+    let o = sva(&["vcd", &src.to_string_lossy(), "--out", &d.join("glued.vcd").to_string_lossy()]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    assert!(!glued.exists(), "the FST of a glued VCD a killed run left in the temp directory: removed");
+}
+
 /// GTKWave's fst2vcd of an FST, None when it is not installed; under make check (WAVELENS_STRICT) it must be: the
 /// gate's machine has GTKWave, the FST's other reader.
 fn fst2vcd(fst: &std::path::Path) -> Option<String> {
@@ -1647,4 +1680,231 @@ fn runs_two_keeps_at_once() {
     let mut ids: Vec<u64> = v["runs"].as_array().unwrap().iter().map(|r| r["id"].as_u64().unwrap()).collect();
     ids.sort_unstable();
     assert_eq!(ids, [1, 2, 3, 4], "each its own number, every one listed");
+}
+
+/// A dump of 24 signals over 3000 ns: buses, bits with x and z, one changed in B late (`bad`); `shift`: every time later
+/// by it; `real`: a real signal too.
+fn many_changes(bad: bool, shift: u64, real: bool) -> String {
+    let mut s = String::from("$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! clk $end\n");
+    for i in 0..20 {
+        s += &format!("$var wire 12 a{i} bus{i} [11:0] $end\n");
+    }
+    s += "$var wire 1 q bit0 $end\n$var wire 1 w bit1 $end\n$var wire 3 e tri [2:0] $end\n";
+    if real {
+        s += "$var real 64 r level $end\n";
+    }
+    s += "$upscope $end\n$enddefinitions $end\n";
+    let mut x = 12345u64;
+    for t in 0..3000u64 {
+        s += &format!("#{}\n{}!\n", t + shift, t % 2);
+        for k in 0..3 {
+            x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let i = (x >> 33) % 20;
+            let mut v = (x >> 40) % 4096;
+            if bad && t == 2500 && k == 0 {
+                v ^= 1;
+            }
+            s += &format!("b{v:b} a{i}\n");
+        }
+        if t % 97 == 0 {
+            s += &format!("{}q\n{}w\nb{} e\n", ["0", "1", "x", "z"][(t / 97 % 4) as usize], ["X", "1", "0", "Z"][(t / 97 % 4) as usize],
+                ["x1z", "101", "zz0", "X0X"][(t / 97 % 4) as usize]);
+        }
+        if real && t % 50 == 0 {
+            s += &format!("r{}.25 r\n", t);
+        }
+    }
+    s += &format!("#{}\n", 3000 + shift);
+    s
+}
+
+/// `sva diff --json` without what differs by the files read: their names, where each was read from.
+fn diff_doc(args: &[&str]) -> serde_json::Value {
+    let o = sva(args);
+    assert!(o.status.code().is_some_and(|c| c < 2), "{args:?}: {}", err(&o));
+    let mut v: serde_json::Value = serde_json::from_str(&out(&o)).unwrap();
+    for k in ["a", "b"] {
+        let side = v[k].as_object_mut().unwrap();
+        side.remove("file");
+        side.remove("read_from");
+    }
+    v
+}
+
+#[test]
+fn a_late_window_of_an_fst_reads_its_blocks_from_there() {
+    let d = runs_dir("late");
+    let (a, b) = (put(&d, "a.vcd", &many_changes(false, 0, false)), put(&d, "b.vcd", &many_changes(true, 0, false)));
+    let fst = |v: &str, name: &str, block: Option<&str>| {
+        let p = d.join(name).to_string_lossy().into_owned();
+        let mut args = vec!["fst", v, "--out", &p, "--quiet"];
+        args.extend(block.map(|b| ["--block-bytes", b]).into_iter().flatten());
+        assert!(sva(&args).status.success());
+        p
+    };
+    let (am, bm) = (fst(&a, "am.fst", Some("2000")), fst(&b, "bm.fst", Some("2000")));
+    let a1 = fst(&a, "a1.fst", None);
+    for (from, to) in [("2400ns", "2600ns"), ("1000ns", "1003ns"), ("2999ns", "3000ns"), ("0ns", "50ns"), ("2500ns", "2500ns")] {
+        let w = ["--from", from, "--to", to, "--json", "-", "--limit", "0"];
+        let whole = diff_doc(&[&["diff", &a, &b][..], &w].concat());
+        assert_eq!(diff_doc(&[&["diff", &am, &bm][..], &w].concat()), whole, "{from} … {to}: the FSTs of many blocks");
+        assert_eq!(diff_doc(&[&["diff", &a, &bm][..], &w].concat()), whole, "{from} … {to}: a VCD and an FST");
+        // the cut of the run's values (the panel's second half): the same text from one block or many
+        for sig in [None, Some("tb.bus7,tb.bit1,tb.tri,tb.clk")] {
+            let mut c = vec!["vcd", &a1, "--from", from, "--to", to];
+            c.extend(sig.map(|s| ["--signals", s]).into_iter().flatten());
+            // the changes of a time step in any order (as the blocks hold them)
+            let steps = |t: String| -> Vec<Vec<String>> {
+                t.split('#').map(|s| {
+                    let mut l: Vec<String> = s.lines().map(String::from).collect();
+                    l.sort();
+                    l
+                }).collect()
+            };
+            let one = steps(out(&sva(&c)));
+            c[1] = &am;
+            assert_eq!(steps(out(&sva(&c))), one, "{from} … {to} {sig:?}: the cut of the FST of many blocks");
+        }
+    }
+    let late: serde_json::Value = serde_json::from_str(&out(&sva(&["diff", &am, &bm, "--from", "2400ns", "--json", "-"]))).unwrap();
+    assert_eq!(late["differ"], 1, "{late}");
+    let (ra, rb) = (late["a"]["read_from"].as_i64().unwrap(), late["b"]["read_from"].as_i64().unwrap());
+    assert!(ra > 0 && ra <= 2_400_000 && rb > 0, "read from a block near the window: {late}");
+    assert_eq!(late["a"]["start"], 0, "the dump's start, not the block's");
+    // B later by 7 ns: --offset reads B from its own block
+    let bs = fst(&put(&d, "bs.vcd", &many_changes(true, 7, false)), "bs.fst", Some("2000"));
+    let w = ["--from", "2400ns", "--to", "2600ns", "--offset", "7ns", "--json", "-", "--limit", "0"];
+    let whole = diff_doc(&[&["diff", &a, &d.join("bs.vcd").to_string_lossy()][..], &w].concat());
+    assert_eq!(diff_doc(&[&["diff", &am, &bs][..], &w].concat()), whole, "--offset");
+    // a real among the signals has no value in a block's frame here: read from the start, the same counts
+    let (ar, br) = (put(&d, "ar.vcd", &many_changes(false, 0, true)), put(&d, "br.vcd", &many_changes(true, 0, true)));
+    let (arm, brm) = (fst(&ar, "arm.fst", Some("2000")), fst(&br, "brm.fst", Some("2000")));
+    let w = ["--from", "2400ns", "--to", "2600ns", "--json", "-", "--limit", "0"];
+    let v: serde_json::Value = serde_json::from_str(&out(&sva(&[&["diff", &arm, &brm][..], &w].concat()))).unwrap();
+    assert_eq!(v["a"]["read_from"], 0, "{v}");
+    assert_eq!(diff_doc(&[&["diff", &arm, &brm][..], &w].concat()), diff_doc(&[&["diff", &ar, &br][..], &w].concat()));
+}
+
+#[test]
+fn runs_keep_writes_blocks_a_late_window_reads_from() {
+    let d = runs_dir("blocks");
+    let dump = put(&d, "d.vcd", &many_changes(false, 0, false));
+    assert!(sva(&["runs", "keep", &dump]).status.success());
+    let v = runs_json(&d.join(".wavelens-runs"));
+    assert_eq!(v["runs"][0]["end"], 3_000_000, "{v}");
+    let o = sva(&["runs", "diff", &dump, "--from", "2900ns", "--json"]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+}
+
+/// Two test cases: test_a holds cnt at 0 for 20 ns (+ `longer`), test_b counts cnt up every 5 ns for 20 ns (+ `tail`).
+/// -> the dump and its marks (python/wavelens_cocotb.py's file).
+fn two_cases(longer: u64, tail: u64) -> (String, String) {
+    let mut s = String::from("$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! clk $end\n$var wire 4 \" cnt [3:0] $end\n");
+    s += "$upscope $end\n$enddefinitions $end\n#0\n0!\nb0 \"\n";
+    let b = 20 + longer;
+    let end = b + 20 + tail;
+    let mut t = 5;
+    while t <= end {
+        s += &format!("#{t}\n{}!\n", t / 5 % 2);
+        if t > b {
+            s += &format!("b{:b} \"\n", ((t - b) / 5) % 16);
+        }
+        t += 5;
+    }
+    let marks = format!(r#"{{"wavelens": "marks", "version": 1, "signal": "tb.test", "tests": [
+        {{"n": 1, "name": "test_a", "result": "pass", "from": 0, "to": {}}},
+        {{"n": 2, "name": "test_b", "result": "pass", "from": {}, "to": {}}}]}}"#, b * 1000, b * 1000, end * 1000);
+    (s, marks)
+}
+
+#[test]
+fn runs_compared_by_test_case() {
+    let d = runs_dir("cases");
+    let (v0, m0) = two_cases(0, 0);
+    let dump = put(&d, "d.vcd", &v0);
+    put(&d, "wavelens.marks.json", &m0);
+    let o = sva(&["runs", "keep", &dump, "--name", "first"]);
+    assert!(o.status.success(), "{}", err(&o));
+    assert!(err(&o).contains("the cases of") && err(&o).contains(": 2"), "said: {}", err(&o));
+    let runs = runs_json(&d.join(".wavelens-runs"));
+    assert_eq!(runs["runs"][0]["cases"][1], serde_json::json!({"name": "test_b", "from": 20000, "to": 40000}));
+    assert!(out(&sva(&["runs", "list", &dump])).contains("2 cases"));
+    // the run of now: test_a 10 ns longer, test_b 5 ns longer: test_b later, the same values from its start
+    let (v1, m1) = two_cases(10, 5);
+    put(&d, "d.vcd", &v1);
+    put(&d, "wavelens.marks.json", &m1);
+    let by_case = sva(&["runs", "diff", &dump, "--case", "TC2 test_b \u{b7} PASS", "--json"]);
+    assert_eq!(by_case.status.code(), Some(0), "{}{}", out(&by_case), err(&by_case));
+    let v: serde_json::Value = serde_json::from_str(&out(&by_case)).unwrap();
+    assert_eq!(v["case"], serde_json::json!({"name": "test_b", "from": 30000, "to": 55000}));
+    let r = &v["runs"][0];
+    assert_eq!((r["case"]["offset"].as_i64(), r["equal"].as_bool()), (Some(-10000), Some(true)), "{r}");
+    assert_eq!((r["from"].as_i64(), r["to"].as_i64()), (Some(30000), Some(50000)), "over the shorter: {r}");
+    assert!(r["case"]["note"].as_str().unwrap().contains("5 ns shorter"), "{r}");
+    let text = out(&sva(&["runs", "diff", &dump, "--case", "test_b"]));
+    assert!(text.contains("over the case test_b") && text.contains("its case at 20 ns"), "{text}");
+    // the same window without the case: the run's test_b is 10 ns earlier
+    assert_eq!(sva(&["runs", "diff", &dump, "--from", "30ns", "--to", "50ns"]).status.code(), Some(1));
+    // the dump's window given, the case of the run by its name
+    let w = sva(&["runs", "diff", &dump, "--case", "test_b", "--from", "30ns", "--to", "40ns", "--json"]);
+    assert_eq!(w.status.code(), Some(0), "{}", err(&w));
+    // a case nowhere: said with the cases there are
+    let no = sva(&["runs", "diff", &dump, "--case", "test_z"]);
+    assert_eq!(no.status.code(), Some(2));
+    assert!(err(&no).contains("no case test_z (its cases: test_a, test_b)"), "{}", err(&no));
+    assert_eq!(sva(&["runs", "diff", &dump, "--case", "test_b", "--from", "30ns"]).status.code(), Some(2));
+    assert!(err(&sva(&["runs", "diff", &dump, "--cases", "x.json"])).contains("--cases gives the dump's cases for --case"));
+    // a run without its cases: an error on its row
+    assert!(sva(&["runs", "set", "1", &dump, "--cases", "none"]).status.success());
+    let none = sva(&["runs", "diff", &dump, "--case", "test_b"]);
+    assert_eq!(none.status.code(), Some(2));
+    assert!(err(&none).contains("kept without cases"), "{}", err(&none));
+    // cases given back from a list on stdin, times with units, a label as a page's span has it
+    let mut p = Command::new(env!("CARGO_BIN_EXE_sva")).args(["runs", "set", "1", &dump, "--cases", "-"])
+        .stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).spawn().unwrap();
+    std::io::Write::write_all(p.stdin.as_mut().unwrap(), "[{\"label\": \"TC2 test_b \u{b7} FAIL\", \"from\": \"20ns\", \"to\": \"40ns\"}, {\"label\": \"x\", \"from\": 5, \"to\": 1}]".as_bytes()).unwrap();
+    assert!(p.wait_with_output().unwrap().status.success());
+    assert_eq!(runs_json(&d.join(".wavelens-runs"))["runs"][0]["cases"], serde_json::json!([{"name": "test_b", "from": 20000, "to": 40000}]));
+    assert_eq!(sva(&["runs", "diff", &dump, "--case", "test_b"]).status.code(), Some(0));
+    // marks older than the dump by more than 10 minutes: another run's, not taken
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    std::fs::File::options().write(true).open(d.join("wavelens.marks.json")).unwrap().set_modified(old).unwrap();
+    let k = sva(&["runs", "keep", &dump]);
+    assert!(err(&k).contains("older than"), "{}", err(&k));
+    assert!(runs_json(&d.join(".wavelens-runs"))["runs"][1]["cases"].is_null());
+}
+
+#[test]
+fn diff_page_is_the_shape_a_page_takes() {
+    let d = runs_dir("page");
+    let (a, b) = (put(&d, "a.vcd", &counter(None, true)), put(&d, "b.vcd", &counter(Some(25), false)));
+    let o = sva(&["diff", &a, &b, "--page", "--from", "20ns"]);
+    assert_eq!(o.status.code(), Some(1), "{}", err(&o));
+    let v: serde_json::Value = serde_json::from_str(&out(&o)).unwrap();
+    assert_eq!((v["name"].as_str(), v["from"].as_i64(), v["differ"].as_u64(), v["first"].as_i64()), (Some("b.vcd"), Some(20000), Some(1), Some(25000)), "{v}");
+    assert_eq!(v["signals"]["tb.ok"], serde_json::json!({"spans": [[25000, 40000]], "b": "tb.ok"}));
+    assert_eq!(v["missing"], serde_json::json!(["tb.extra"]), "the rows B has not got");
+    assert!(v["vcd"].as_str().unwrap().contains("$var") && v["shift"] == 0, "B's values of the signals that differ: {v}");
+    assert!(!v["vcd"].as_str().unwrap().contains(" cnt "), "only the ones that differ");
+    // more than the page takes: why, the bands stay
+    let small: serde_json::Value = serde_json::from_str(&out(&sva(&["diff", &a, &b, "--page", "--cut-bytes", "10"]))).unwrap();
+    assert!(small["vcd"].is_null() && small["cutError"].as_str().unwrap().contains("compare fewer signals"), "{small}");
+    // equal: no values of B
+    let eq: serde_json::Value = serde_json::from_str(&out(&sva(&["diff", &a, &a, "--page"]))).unwrap();
+    assert!(eq["vcd"].is_null() && eq["differ"] == 0, "{eq}");
+}
+
+#[test]
+fn runs_go_where_the_workspace_says() {
+    let d = runs_dir("workspace");
+    std::fs::create_dir_all(d.join(".vscode")).unwrap();
+    std::fs::create_dir_all(d.join("sim")).unwrap();
+    put(&d.join(".vscode"), "settings.json", "{\n  // where the Runs panel keeps them\n  \"wavelens.runsDir\": \"kept/runs\",\n}\n");
+    let dump = put(&d.join("sim"), "d.vcd", &counter(None, false));
+    let o = sva(&["runs", "keep", &dump, "--json"]);
+    assert!(o.status.success(), "{}", err(&o));
+    assert!(d.join("kept/runs/runs.json").is_file(), "the workspace's wavelens.runsDir, as the panel");
+    assert!(!d.join("sim/.wavelens-runs").exists());
+    assert!(out(&sva(&["runs", "list", &dump])).contains("1 run"), "list finds it the same way");
+    assert!(out(&sva(&["runs", "path", "1", &dump])).contains("kept/runs/1-d.fst"));
 }

@@ -34,7 +34,7 @@ from typing import Dict, Iterable, Optional
 
 sys.dont_write_bytecode = True   # a shared checkout stays as it is: -I ignores PYTHONDONTWRITEBYTECODE (AU-WL-003)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
-from common import TS_RE, UNIT_PS, WaveError  # noqa: E402
+from common import TS_RE, UNIT_PS, WaveError, glued  # noqa: E402
 
 Var = collections.namedtuple('Var', 'width members enum order kind', defaults=('wire',))
 TEXT_KINDS = {'real': 'real', 'realtime': 'real', 'shortreal': 'real', 'real_parameter': 'real', 'string': 'string'}
@@ -64,12 +64,6 @@ class Dump:
                 by[1].setdefault(glued(p), p)
             self._glued = by
         return by[1].get(glued(path))
-
-
-def glued(path):
-    """A path with no dot before a [: one spelling of an array element (q.[0] and q[0] -> q[0]; every dot, as a path of the
-    scope form by wellen, ptr..[0]). One rule with sva/cli/src/vcd.rs glued()."""
-    return re.sub(r'\.+\[', '[', path)
 
 
 def fst_reader():

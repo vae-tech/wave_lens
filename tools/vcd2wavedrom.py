@@ -53,7 +53,7 @@ import argparse, bisect, collections, decimal, functools, json, math, os, re, st
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
 import dumpscan, svabuild, wavefind, wavejson  # noqa: E402
-from common import WaveError, add_sva_bin_arg, check_config, glob_re, parse_time, run_main  # noqa: E402
+from common import WaveError, add_sva_bin_arg, check_config, depth, glob_re, parse_time, pick, run_main  # noqa: E402
 
 INT_KINDS = {'integer', 'int', 'shortint', 'longint', 'byte'}   # $var types read as signed decimal without an enum (wavelens/src/vcd.js VCD_INT)
 X_TEXT = object()   # an unknown value of a "kind" real / string signal in a clock-sampled row (None there is a "|" gap)
@@ -64,6 +64,10 @@ def to_ps(s):
     if t is None or t < 0:
         raise WaveError(f'vcd2wavedrom: bad time "{s}" (need a unit, e.g. 250ns)')
     return t
+
+
+class NoSignal(WaveError):
+    """A name that is no signal of the dump (Builtin.find)."""
 
 
 class Builtin:
@@ -78,15 +82,55 @@ class Builtin:
         self.tool = 'wavelens reader' + ('' if waves.lower().endswith('.vcd') else f' ({dumpscan.fst_tool()})')
         self.streams = {}
 
+    def find(self, name, scope='', note=None):
+        """A signal by the one rule of naming (common.pick): its path under scope or as it is, the end of a path (under
+        scope), a longer path ending with one, a [msb:lsb] or [bit] select of one; of several at different levels the
+        shallowest (note: told "name = path (+n deeper)") -> (path, select or None). None found: NoSignal."""
+        name = str(name).strip()
+        hits, deeper = pick(self.decl.vars, name, exact=self.decl.find, bit=lambda s: self.select(s, scope, note), scope=scope)
+        if len(hits) == 1:
+            if deeper and note:
+                note(f'{name} = {hits[0]} (+{deeper} deeper)')
+            return hits[0] if isinstance(hits[0], tuple) else (hits[0], None)
+        if hits:
+            hits = sorted(hits, key=lambda p: (depth(p), p))
+            raise WaveError(f'"{name}" is ambiguous: {", ".join(hits[:8])}' + (f' (+{len(hits) - 8})' if len(hits) > 8 else '')
+                            + ' — give more of its path or a scope')
+        under = [p for p in self.decl.vars if not scope or p.startswith(scope.rstrip('.') + '.')]
+        low = name.lower().split('.')[-1]
+        leaf = lambda p: p.rsplit('.', 1)[-1].lower()
+        near = sorted((p for p in under if low in leaf(p) or (len(leaf(p)) > 2 and leaf(p) in low)), key=len)[:6]
+        raise NoSignal(f'no signal "{name}"' + (f' under {scope}' if scope else '') + (f'; similar: {", ".join(near)}' if near else ''))
+
+    def select(self, name, scope, note=None):
+        """The step "bit" of common.pick on a dump: name[msb:lsb] or name[bit] of a vector found by the rule -> (path, (msb,
+        lsb)); None when it is no select of one; bits it has not got: an error."""
+        m = re.fullmatch(r'(.+?)\[(\d+)(?::(\d+))?\]', name)
+        if not m:
+            return None
+        try:
+            path, sl = Builtin.find(self, m.group(1), scope, note)
+        except WaveError:
+            return None
+        if sl:
+            return None
+        hi = int(m.group(2))
+        lo = int(m.group(3)) if m.group(3) is not None else hi
+        v = self.decl.vars[path]
+        if v.kind in dumpscan.TEXT_KINDS:
+            raise WaveError(f'"{name}": {path} is a {v.kind}, it has no bits to select')
+        if lo > hi or hi >= v.width:
+            raise WaveError(f'"{name}": {path} has bits [{v.width - 1}:0]')
+        return path, (hi, lo)
+
     def resolve(self, p):
-        for q in dict.fromkeys([p if not self.scope or p.startswith(self.scope + '.') else self.scope + '.' + p, p]):   # under the scope, else a full path
-            hit = self.decl.find(q)
-            if hit:
-                return hit, None
-            m = re.fullmatch(r'(.+)\[(\d+):(\d+)\]', q)
-            if m and self.decl.find(m.group(1)):
-                return self.decl.find(m.group(1)), (int(m.group(2)), int(m.group(3)))
-        raise WaveError(f'vcd2wavedrom: no signal "{p}" in {os.path.basename(self.waves)}' + (f' (scope {self.scope})' if self.scope else ''))
+        """A signal of the options under the converter's --scope, by the rule of find -> (path, select or None)."""
+        try:
+            return Builtin.find(self, p, self.scope)
+        except NoSignal:
+            raise WaveError(f'vcd2wavedrom: no signal "{p}" in {os.path.basename(self.waves)}' + (f' (scope {self.scope})' if self.scope else '')) from None
+        except WaveError as e:
+            raise WaveError(f'vcd2wavedrom: {e}') from None
 
     def event_signal(self, expr):
         m = self.EVENT.fullmatch(expr)

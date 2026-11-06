@@ -19,16 +19,17 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: sva fst [--waves] DUMP.vcd [--out FILE.fst] [--types FILE.types.json | --no-types] [--map DUMP=TYPES ...] [--quiet]
+const USAGE: &str = "usage: sva fst [--waves] DUMP.vcd [--out FILE.fst] [--types FILE.types.json | --no-types] [--map DUMP=TYPES ...] [--block-bytes N] [--quiet]
 The VCD as an FST, as GTKWave's vcd2fst writes it, by default beside the dump under its name (tb.vcd -> tb.fst; an
 FST there is replaced, the file appears only when it is complete). Every scope and variable with its type and name,
 one id code at several places as aliases, the attributes ($attrbegin: the enum tables of FSM states and their
 references), the $comment lines of the header, $timezero, $dumpoff / $dumpon. The FSM states of the design's types
 file (tb.types.json beside tb.vcd, or --types; --map as in svtypes.py check) become enum tables of the variables
 whose width is the type's (or an integer wider than the enum: a Questa VCD of an enum type); a table the VCD gives a
-variable stays. The last line says what was written.";
+variable stays. --block-bytes: a block of changes every N bytes of them (64 MiB; smaller: a reader holds less, a late
+window of sva diff / sva vcd --from reads only the blocks from there). The last line says what was written.";
 
-/// Bytes of value changes held before a block is written (`--block-bytes`, for the tests: many small blocks).
+/// Bytes of value changes held before a block is written (`--block-bytes`; `sva runs keep` writes 1 MiB).
 const BLOCK: usize = 64 << 20;
 
 // ------------------------------------------------------------------------------------------------- FST encoding
@@ -385,7 +386,7 @@ impl Log {
             return;
         }
         let pct = (read.min(self.size) * 100 / self.size.max(1)).min(99);
-        eprintln!("sva: {}: progress: {pct}% (line {line}{})", self.file, now.map_or(String::new(), |t| format!(", #{t}")));
+        crate::progress(&self.file, format_args!("{pct}% (line {line}{})", now.map_or(String::new(), |t| format!(", #{t}"))));
         self.next = read + self.size / 10;
     }
 
@@ -1185,6 +1186,112 @@ impl Drop for TempFst {
     }
 }
 
+// ------------------------------------------------------------------------------------------------- a block's frame
+
+/// A varint (LEB128, as `varint` writes it) at the reader's place.
+fn read_varint(r: &mut impl Read) -> Option<u64> {
+    let mut v = 0u64;
+    for k in 0..10 {
+        let mut b = [0u8];
+        r.read_exact(&mut b).ok()?;
+        v |= u64::from(b[0] & 0x7f) << (7 * k);
+        if b[0] & 0x80 == 0 {
+            return Some(v);
+        }
+    }
+    None
+}
+
+fn read_u64be(r: &mut impl Read) -> Option<u64> {
+    let mut b = [0u8; 8];
+    r.read_exact(&mut b).ok()?;
+    Some(u64::from_be_bytes(b))
+}
+
+/// Bytes of a block, zlib packed unless the two lengths are one.
+fn unpacked(r: &mut impl Read, raw: u64, packed: u64) -> Option<Vec<u8>> {
+    let mut b = vec![0u8; usize::try_from(packed).ok()?];
+    r.read_exact(&mut b).ok()?;
+    if raw == packed {
+        return Some(b);
+    }
+    miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(&b, usize::try_from(raw).ok()?).ok().filter(|v| v.len() as u64 == raw)
+}
+
+/// The values at the start of the FST's block of changes holding time `t` (the dump's unit), of the signals `wanted`
+/// (handles from 0; None: every one), each its bytes as the frame has them (a bit a character): the block's start and the values, for a reader that goes on
+/// from that block (fst-reader reads a block's frame only when no change is at its start: the block a writer begins at the
+/// time before, as fstapi and `sva fst`, has none). None: not an FST (or one packed whole), `t` in its first block (read
+/// it from the start), a signal wanted that is a real or a string (no frame of its own here) or not in the file.
+pub(crate) fn frame_at(path: &str, t: u64, wanted: Option<&[usize]>) -> Option<(u64, Vec<Vec<u8>>)> {
+    let mut f = std::io::BufReader::new(std::fs::File::open(path).ok()?);
+    let len = f.get_ref().metadata().ok()?.len();
+    let (mut off, mut block, mut blocks, mut geom) = (0u64, None, 0usize, None);
+    while off + 9 <= len {
+        f.seek(SeekFrom::Start(off)).ok()?;
+        let mut kind = [0u8];
+        f.read_exact(&mut kind).ok()?;
+        let size = read_u64be(&mut f)?;
+        match kind[0] {
+            1 | 5 | 8 => {
+                let start = read_u64be(&mut f)?;
+                blocks += 1;
+                if start <= t {
+                    block = Some((off + 1, start, blocks));
+                }
+            }
+            3 => geom = Some(off + 1),
+            254 => return None,   // the whole file packed: fst-reader unpacks it apart
+            _ => {}
+        }
+        if size < 8 {
+            return None;
+        }
+        off += 1 + size;
+    }
+    let (at, start, n) = block?;
+    if n == 1 {
+        return None;
+    }
+    // each signal's bytes in a frame: the geometry (0 a real's 8, u32::MAX a string's none, else its bits)
+    f.seek(SeekFrom::Start(geom?)).ok()?;
+    let size = read_u64be(&mut f)?;
+    let raw = read_u64be(&mut f)?;
+    let count = read_u64be(&mut f)?;
+    let g = unpacked(&mut f, raw, size.checked_sub(24)?)?;
+    let mut gr: &[u8] = &g;
+    let mut lens = Vec::with_capacity(usize::try_from(count).ok()?);
+    for _ in 0..count {
+        lens.push(read_varint(&mut gr)?);
+    }
+    let every: Vec<usize> = (0..lens.len()).collect();
+    let wanted = wanted.unwrap_or(&every);
+    if wanted.iter().any(|&h| lens.get(h).is_none_or(|&l| l == 0 || l >= u64::from(u32::MAX))) {
+        return None;
+    }
+    f.seek(SeekFrom::Start(at + 32)).ok()?;
+    let raw = read_varint(&mut f)?;
+    let packed = read_varint(&mut f)?;
+    if read_varint(&mut f)? != count {
+        return None;
+    }
+    let frame = unpacked(&mut f, raw, packed)?;
+    let mut place = Vec::with_capacity(lens.len());
+    let mut p = 0usize;
+    for &l in &lens {
+        place.push(p);
+        p += match l {
+            0 => 8,
+            l if l >= u64::from(u32::MAX) => 0,
+            l => usize::try_from(l).ok()?,
+        };
+    }
+    if p > frame.len() {
+        return None;
+    }
+    Some((start, wanted.iter().map(|&h| frame[place[h]..place[h] + lens[h] as usize].to_vec()).collect()))
+}
+
 /// A VCD with a vector glued to its code in its first PROBE tokens (`glued`: Questa 2023's integers): wellen, which reads
 /// a VCD for `sva eval` and `sva vcd`, stops at the first one, so the VCD is written as an FST in the temporary
 /// directory by this writer, which reads them -> that FST (removed when dropped); None: read the VCD itself (an FST,
@@ -1212,6 +1319,9 @@ pub fn glued_fst(vcd: &str) -> Result<Option<TempFst>, String> {
     if !found {
         return Ok(None);
     }
+    // the ones of a run killed while it read (TempFst's drop never ran): gone first
+    let glued_pid = |n: &str| n.strip_prefix("sva-glued-")?.split_once('-').filter(|(_, r)| r.ends_with(".fst"))?.0.parse().ok();
+    crate::sweep_left(&std::env::temp_dir(), glued_pid);
     let tmp = TempFst(std::env::temp_dir().join(format!("sva-glued-{}-{}.fst", std::process::id(),
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos()))));
     let file = std::fs::File::create(&tmp.0).map_err(|e| format!("{}: {e}", tmp.0.display()))?;
@@ -1224,7 +1334,7 @@ pub fn glued_fst(vcd: &str) -> Result<Option<TempFst>, String> {
 }
 
 /// What `convert` wrote.
-struct Done {
+pub(crate) struct Done {
     vars: u64,
     signals: usize,
     changes: u64,
@@ -1241,8 +1351,8 @@ fn convert(vcd: &str, out: &mut (impl Write + Seek), types: Option<&Types>, limi
     let from_types = types.map_or((0, 0), |t| add_types(&mut h, t));
     let tables = h.entries.iter().filter(|e| matches!(e, Entry::Attr { tpe: 0, sub: MT_ENUMTABLE, name, .. } if !name.is_empty())).count();
     if log.large() {
-        eprintln!("sva: {file}: progress: {} variables ({} signals) in {} scopes, {tables} enum tables; the values next ({} MB)", h.vars,
-                  h.kinds.len(), h.scopes, log.size >> 20);
+        crate::progress(file, format_args!("{} variables ({} signals) in {} scopes, {tables} enum tables; the values next ({} MB)", h.vars,
+                                           h.kinds.len(), h.scopes, log.size >> 20));
     }
     let io = |e: std::io::Error| format!("{file}: {e}");
     let mut b = Blocks::new(h.kinds.clone(), limit);
@@ -1421,28 +1531,103 @@ fn types_beside(vcd: &str) -> Option<PathBuf> {
     p.exists().then_some(p)
 }
 
+/// One VCD to write as an FST: `sva fst`'s arguments, or `sva runs keep`'s run.
+pub(crate) struct FstJob {
+    pub(crate) waves: String,
+    /// None: beside the dump under its name
+    pub(crate) out: Option<PathBuf>,
+    pub(crate) types: Option<String>,
+    pub(crate) no_types: bool,
+    pub(crate) map: Vec<(String, String)>,
+    /// bytes of changes a block holds (`--block-bytes`)
+    pub(crate) limit: usize,
+    /// a dump this large says how far it is (`--large-bytes`)
+    pub(crate) large: u64,
+    pub(crate) quiet: bool,
+}
+
+impl FstJob {
+    pub(crate) fn new(waves: &str) -> FstJob {
+        FstJob { waves: waves.into(), out: None, types: None, no_types: false, map: Vec::new(), limit: BLOCK, large: LARGE, quiet: false }
+    }
+}
+
+/// The FST written (part beside the target, renamed over it when complete) -> its path and what was written; its types
+/// file's notes on stderr.
+pub(crate) fn write_fst(job: FstJob) -> Result<(PathBuf, Done, Option<PathBuf>), String> {
+    let waves = job.waves.as_str();
+    {
+        let mut f = std::io::BufReader::new(std::fs::File::open(waves).map_err(|e| format!("{waves}: {e}"))?);
+        if fst_reader::is_fst_file(&mut f) {
+            return Err(format!("{waves}: already an FST (sva vcd writes it as VCD text)"));
+        }
+    }
+    let target = job.out.unwrap_or_else(|| fst_name(waves));
+    if target.canonicalize().ok().is_some_and(|t| Path::new(waves).canonicalize().ok() == Some(t)) {
+        return Err(format!("{waves}: the FST would replace the dump: --out another file"));
+    }
+    let tfile = if job.no_types { None } else { job.types.map(PathBuf::from).or_else(|| types_beside(waves)) };
+    if !job.map.is_empty() && tfile.is_none() {
+        eprintln!("sva: {waves}: --map given, but no types file ({} beside the dump, or --types){}",
+                  Path::new(waves).with_extension("types.json").file_name().unwrap_or_default().to_string_lossy(),
+                  if job.no_types { ": --no-types" } else { "" });
+    }
+    let loaded = match &tfile {
+        Some(p) => {
+            let mut t = types_enums(p).map_err(|e| format!("{}: {e}", p.display()))?;
+            t.map.extend(job.map);
+            Some(t)
+        }
+        None => None,
+    };
+    // written beside the target, renamed over it when complete: a reader never sees half an FST. The part is this
+    // run's (tb.fst.<pid>.part, made new: never another run's file, nor the dump): two runs at once each write their
+    // own, the last one renamed stays; a run killed leaves its part, which no other run takes and the next run beside it
+    // removes (one of a target of this extension: tb.fst.<pid>.part, VS Code's x.fst.<pid>.<ms>.part.<pid>.part too)
+    let ext = target.extension().map(|e| format!(".{}", e.to_string_lossy()));
+    let dir = target.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    crate::sweep_left(dir, |n| crate::part_pid(n).filter(|(f, _)| ext.as_ref().is_some_and(|e| f.ends_with(e.as_str()))).map(|(_, p)| p));
+    let part = target.with_file_name(format!("{}.{}.part", target.file_name().unwrap_or_default().to_string_lossy(), std::process::id()));
+    let file = std::fs::OpenOptions::new().write(true).create_new(true).open(&part).map_err(|e| format!("{}: {e}", part.display()))?;
+    let mut o = std::io::BufWriter::with_capacity(1 << 20, file);
+    let mut log = Log::new(waves, job.quiet, job.large);
+    let r = convert(waves, &mut o, loaded.as_ref(), job.limit, &mut log);
+    log.finish();
+    let r = r.and_then(|d| {
+        o.into_inner().map_err(|e| format!("{}: {e}", part.display()))?.sync_all().map_err(|e| format!("{}: {e}", part.display()))?;
+        std::fs::rename(&part, &target).map_err(|e| format!("{}: {e}", target.display()))?;
+        Ok(d)
+    });
+    match r {
+        Ok(d) => Ok((target, d, tfile)),
+        Err(e) => {
+            let _ = std::fs::remove_file(&part);
+            Err(e)
+        }
+    }
+}
+
 pub fn fst_cmd(args: &[String]) -> ExitCode {
-    let (mut waves, mut out, mut types, mut no_types, mut quiet) = (None::<String>, None::<String>, None::<String>, false, false);
-    let mut map: Vec<(String, String)> = Vec::new();
-    let (mut limit, mut large) = (BLOCK, LARGE);
+    let mut job = FstJob::new("");
+    let mut waves = None::<String>;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--waves" => waves = it.next().cloned(),
-            "--out" | "-o" => out = it.next().cloned(),
-            "--types" => types = it.next().cloned(),
-            "--no-types" => no_types = true,
-            "--quiet" | "-q" => quiet = true,
+            "--out" | "-o" => job.out = it.next().map(PathBuf::from),
+            "--types" => job.types = it.next().cloned(),
+            "--no-types" => job.no_types = true,
+            "--quiet" | "-q" => job.quiet = true,
             "--block-bytes" | "--large-bytes" => match it.next().and_then(|n| n.parse::<u64>().ok()) {
-                Some(n) if a == "--block-bytes" => limit = n as usize,
-                Some(n) => large = n,
+                Some(n) if a == "--block-bytes" => job.limit = n as usize,
+                Some(n) => job.large = n,
                 None => {
                     eprintln!("sva: {a} N, a number of bytes");
                     return ExitCode::from(2);
                 }
             },
             "--map" => match it.next().and_then(|m| m.split_once('=')) {
-                Some((a, b)) if !a.is_empty() && !b.is_empty() => map.push((a.into(), b.into())),
+                Some((a, b)) if !a.is_empty() && !b.is_empty() => job.map.push((a.into(), b.into())),
                 _ => {
                     eprintln!("sva: --map DUMP=TYPES, a scope of the dump and the one of the types file (top.dut_i=dut)");
                     return ExitCode::from(2);
@@ -1463,58 +1648,10 @@ pub fn fst_cmd(args: &[String]) -> ExitCode {
         eprintln!("{USAGE}");
         return ExitCode::from(2);
     };
-    let fail = |e: String| {
-        eprintln!("sva: {e}");
-        ExitCode::from(2)
-    };
-    {
-        let mut f = match std::fs::File::open(&waves) {
-            Ok(f) => std::io::BufReader::new(f),
-            Err(e) => return fail(format!("{waves}: {e}")),
-        };
-        if fst_reader::is_fst_file(&mut f) {
-            return fail(format!("{waves}: already an FST (sva vcd writes it as VCD text)"));
-        }
-    }
-    let target = out.map_or_else(|| fst_name(&waves), PathBuf::from);
-    if target.canonicalize().ok().is_some_and(|t| Path::new(&waves).canonicalize().ok() == Some(t)) {
-        return fail(format!("{waves}: the FST would replace the dump: --out another file"));
-    }
-    let tfile = if no_types { None } else { types.map(PathBuf::from).or_else(|| types_beside(&waves)) };
-    if !map.is_empty() && tfile.is_none() {
-        eprintln!("sva: {waves}: --map given, but no types file ({} beside the dump, or --types){}",
-                  Path::new(&waves).with_extension("types.json").file_name().unwrap_or_default().to_string_lossy(),
-                  if no_types { ": --no-types" } else { "" });
-    }
-    let loaded = match &tfile {
-        Some(p) => match types_enums(p) {
-            Ok(mut t) => {
-                t.map.extend(map);
-                Some(t)
-            }
-            Err(e) => return fail(format!("{}: {e}", p.display())),
-        },
-        None => None,
-    };
-    // written beside the target, renamed over it when complete: a reader never sees half an FST. The part is this
-    // run's (tb.fst.<pid>.part, made new: never another run's file, nor the dump): two runs at once each write their
-    // own, the last one renamed stays; a run killed leaves its part, which no other run takes
-    let part = target.with_file_name(format!("{}.{}.part", target.file_name().unwrap_or_default().to_string_lossy(), std::process::id()));
-    let file = match std::fs::OpenOptions::new().write(true).create_new(true).open(&part) {
-        Ok(f) => f,
-        Err(e) => return fail(format!("{}: {e}", part.display())),
-    };
-    let mut o = std::io::BufWriter::with_capacity(1 << 20, file);
-    let mut log = Log::new(&waves, quiet, large);
-    let r = convert(&waves, &mut o, loaded.as_ref(), limit, &mut log);
-    log.finish();
-    let r = r.and_then(|d| {
-        o.into_inner().map_err(|e| format!("{}: {e}", part.display()))?.sync_all().map_err(|e| format!("{}: {e}", part.display()))?;
-        std::fs::rename(&part, &target).map_err(|e| format!("{}: {e}", target.display()))?;
-        Ok(d)
-    });
-    match r {
-        Ok(d) => {
+    job.waves = waves;
+    let quiet = job.quiet;
+    match write_fst(job) {
+        Ok((target, d, tfile)) => {
             if !quiet {
                 let types = match (&tfile, d.from_types) {
                     (Some(p), (t, n)) if n > 0 => format!(", {t} of them from {} ({n} variable{})",
@@ -1528,8 +1665,8 @@ pub fn fst_cmd(args: &[String]) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(e) => {
-            let _ = std::fs::remove_file(&part);
-            fail(e)
+            eprintln!("sva: {e}");
+            ExitCode::from(2)
         }
     }
 }

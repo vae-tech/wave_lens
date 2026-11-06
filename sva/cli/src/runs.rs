@@ -4,7 +4,9 @@
 //! dump by default, with a name, tags and a comment in its `runs.json`. A directory keep makes (or one named
 //! `.wavelens-runs`) ignores itself in git; another one gets a `.gitignore` of the runs' files only, when it has none.
 //! `sva runs diff` compares the dump with each run of it (or the ones named) as `sva diff` does, over a window: the
-//! dumps streamed, nothing of them held but the values of now and the first difference.
+//! dumps streamed, nothing of them held but the values of now and the first difference. A run keeps its test cases too
+//! (a name, a window: cocotb's marks beside the dump, `--cases`): `sva runs diff --case NAME` compares the case of the
+//! dump of now with that case of each run, wherever it is in the run.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -15,12 +17,12 @@ macro_rules! outln {
 }
 
 const USAGE: &str = "usage: sva runs [list] [DUMP | DIR] [--dir D] [--all] [--json]
-       sva runs keep DUMP [--dir D] [--name N] [--tags T,...] [--comment C] [--json]
-       sva runs set RUN [DUMP] [--dir D] [--name N] [--tags T,...] [--comment C] [--json]
+       sva runs keep DUMP [--dir D] [--name N] [--tags T,...] [--comment C] [--cases FILE|-|none] [--json]
+       sva runs set RUN [DUMP] [--dir D] [--name N] [--tags T,...] [--comment C] [--cases FILE|-|none] [--json]
        sva runs rm RUN... [DUMP] [--dir D] [--json]
        sva runs path RUN [DUMP] [--dir D]
        sva runs diff DUMP [--dir D] [--run RUN ...] [--all] [--from T] [--to T] [--signals PAT,...] [--signals-from FILE]
-                [--scope S] [--map A=B ...] [--limit N] [--json]
+                [--scope S] [--map A=B ...] [--limit N] [--case NAME [--cases FILE|-]] [--json]
 The runs you keep of a dump, to compare the dump of now with them. keep: the dump (VCD or FST) as an FST in the
 directory of runs: --dir, else .wavelens-runs beside DUMP (a dump inside a directory of runs: that one), else
 ./.wavelens-runs. A directory keep makes, or one named .wavelens-runs, has a .gitignore of * (git leaves it out);
@@ -33,6 +35,12 @@ and their FSTs. path: the FST's path (for sva diff, sva vcd). diff: DUMP (A) aga
 --signals-from (- stdin; default every one of DUMP the run has): per run how many signals differ, the first difference,
 the signals that differ (--limit, default 20, 0 all), the signals of one side only; a run that does not cover the window
 is \"not in this window\". --json: the result as JSON (times in ps). --opt=value is taken as --opt value.
+Test cases: keep stores the run's cases, a name and a window each: --cases FILE (a marks file of python/wavelens_cocotb.py,
+a list [{\"name\", \"from\", \"to\"}], or {\"spans\": [{\"label\", \"from\", \"to\"}]}; times in ps or with a unit; - stdin),
+else wavelens.marks.json beside DUMP when it is not older than DUMP by 10 minutes; none: no cases. A case's name is its
+name or label without a \"TC<n> \" before it and a \" · …\" after it (the result), the second of one name \"name (2)\". diff
+--case NAME: each run over its case NAME against the dump's case NAME (--from/--to: that window of the dump; else its
+cases as keep finds them), B's time offset to the run's case, over the shorter of the two.
 TIME is a number with a unit (100ns, 2.5us; ps without one).
 Exit status: 0 done (diff: every run equal over the window); 1 diff: a run differs or does not cover the window; 2 usage,
 a dump or run that does not read, a run that is not there, a window or signal list that is empty.";
@@ -55,23 +63,29 @@ struct Opt {
     runs: Vec<String>,
     diff: Vec<String>,
     limit: usize,
+    cases: Option<String>,
+    case: Option<String>,
 }
+
+/// The bytes of changes in a block of a run kept from a VCD: the size grows 0.2 %, a late window of a 37 MB VCD is read
+/// in 0.15 s, not 1.3 s (`docs/DEVELOPMENT.md`).
+const RUN_BLOCK: usize = 1 << 20;
 
 /// The options each verb takes (--json and --dir: every one but path's --json).
 fn takes(cmd: &str, opt: &str) -> bool {
     let own: &[&str] = match cmd {
         "list" => &["--all", "--json"],
-        "keep" | "set" => &["--name", "--tags", "--tag", "--comment", "--json"],
+        "keep" | "set" => &["--name", "--tags", "--tag", "--comment", "--cases", "--json"],
         "rm" => &["--json"],
         "path" => &[],
-        _ => &["--run", "--all", "--from", "--to", "--signals", "--signals-from", "--scope", "--map", "--limit", "--json"],
+        _ => &["--run", "--all", "--from", "--to", "--signals", "--signals-from", "--scope", "--map", "--limit", "--case", "--cases", "--json"],
     };
     opt == "--dir" || own.contains(&opt)
 }
 
 fn opts(args: &[String]) -> Result<Opt, String> {
     let mut o = Opt { cmd: String::new(), pos: vec![], dir: None, name: None, tags: None, comment: None, json: false, all: false, runs: vec![],
-                      diff: vec![], limit: 20 };
+                      diff: vec![], limit: 20, cases: None, case: None };
     // --opt=value as --opt value
     let args: Vec<String> = args.iter().flat_map(|a| match a.split_once('=') {
         Some((k, v)) if k.starts_with("--") && !k.contains(' ') => vec![k.to_string(), v.to_string()],
@@ -95,7 +109,7 @@ fn opts(args: &[String]) -> Result<Opt, String> {
         }
         if a.starts_with("--") && !takes(&o.cmd, a) {
             let known = ["--dir", "--name", "--tags", "--tag", "--comment", "--json", "--all", "--run", "--limit", "--from", "--to", "--signals",
-                         "--signals-from", "--scope", "--map"];
+                         "--signals-from", "--scope", "--map", "--case", "--cases"];
             return Err(if known.contains(&a) { format!("{a}: not an option of sva runs {}\n{USAGE}", o.cmd) } else { format!("unknown option {a}\n{USAGE}") });
         }
         match a {
@@ -107,6 +121,8 @@ fn opts(args: &[String]) -> Result<Opt, String> {
             "--all" => o.all = true,
             "--run" => o.runs.push(val(&mut i, a)?),
             "--limit" => o.limit = crate::count(&val(&mut i, a)?, "--limit")? as usize,
+            "--cases" => o.cases = Some(val(&mut i, a)?),
+            "--case" => o.case = Some(val(&mut i, a)?),
             // sva diff's own, passed on as they are
             "--from" | "--to" | "--signals" | "--signals-from" | "--scope" | "--map" => {
                 let v = val(&mut i, a)?;
@@ -156,11 +172,73 @@ fn is_runs_dir(p: &Path) -> bool {
     p.file_name().is_some_and(|n| n == DIR) || p.join(INDEX).is_file()
 }
 
-/// The directory of runs: --dir, else the one a dump lies in (a run's FST kept again), else .wavelens-runs beside the
-/// dump (a file) or in it (a directory), else here.
+/// JSON with comments (VS Code's settings.json): the comments and the commas before `}` `]` left out.
+fn jsonc(t: &str) -> Option<Value> {
+    let b = t.as_bytes();
+    let (mut out, mut i, mut s) = (Vec::with_capacity(b.len()), 0, false);
+    while i < b.len() {
+        let c = b[i];
+        if s {
+            out.push(c);
+            if c == b'\\' && i + 1 < b.len() {
+                out.push(b[i + 1]);
+                i += 1;
+            } else if c == b'"' {
+                s = false;
+            }
+        } else if c == b'"' {
+            s = true;
+            out.push(c);
+        } else if b[i..].starts_with(b"//") {
+            while i < b.len() && b[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        } else if b[i..].starts_with(b"/*") {
+            i += 2;
+            while i + 1 < b.len() && !b[i..].starts_with(b"*/") {
+                i += 1;
+            }
+            i += 2;
+            continue;
+        } else if c == b',' && b[i + 1..].iter().find(|x| !x.is_ascii_whitespace()).is_some_and(|x| *x == b'}' || *x == b']') {
+            // a trailing comma (comments after it already gone below: rare, then the file does not read)
+        } else {
+            out.push(c);
+        }
+        i += 1;
+    }
+    serde_json::from_slice(&out).ok()
+}
+
+/// VS Code's `wavelens.runsDir` of the workspace folder that holds `p` (the nearest `.vscode/settings.json` above it; a
+/// relative one from that folder), as the Runs panel takes it: the shell and an agent use the panel's directory. A
+/// setting of the user's profile only is VS Code's (it passes --dir).
+fn setting_dir(p: &Path) -> Option<PathBuf> {
+    let start = std::fs::canonicalize(p).ok()?;
+    for folder in start.ancestors().skip(1) {
+        let f = folder.join(".vscode").join("settings.json");
+        if f.is_file() {
+            let v = jsonc(&std::fs::read_to_string(&f).ok()?)?;
+            let d = v.get("wavelens.runsDir")?.as_str().filter(|d| !d.trim().is_empty())?;
+            let d = Path::new(d.trim());
+            return Some(if d.is_absolute() { d.to_path_buf() } else { folder.join(d) });
+        }
+    }
+    None
+}
+
+/// The directory of runs: --dir, else the one a dump lies in (a run's FST kept again), else VS Code's `wavelens.runsDir`
+/// of the workspace (its .vscode/settings.json), else .wavelens-runs beside the dump (a file) or in it (a directory),
+/// else here.
 fn dir_of(o: &Opt, dump: Option<&str>) -> PathBuf {
     if let Some(d) = &o.dir {
         return PathBuf::from(d);
+    }
+    let set = dump.map(Path::new).filter(|p| !(p.is_dir() && is_runs_dir(p)) && !p.parent().is_some_and(|q| !q.as_os_str().is_empty() && is_runs_dir(q)))
+        .and_then(setting_dir);
+    if let Some(d) = set {
+        return d;
     }
     match dump.map(Path::new) {
         Some(p) if p.is_dir() => if is_runs_dir(p) { p.to_path_buf() } else { p.join(DIR) },
@@ -325,6 +403,10 @@ fn line(r: &Value) -> String {
                         r["name"].as_str().unwrap_or(""), if tags.is_empty() { String::new() } else { format!("  [{tags}]") },
                         r["dump"].as_str().unwrap_or(""), bytes_text(r["bytes"].as_u64().unwrap_or(0)),
                         crate::ns(r["start"].as_u64().unwrap_or(0)), crate::ns(r["end"].as_u64().unwrap_or(0)));
+    let n = r["cases"].as_array().map_or(0, Vec::len);
+    if n > 0 {
+        s += &format!(", {n} case{}", if n == 1 { "" } else { "s" });
+    }
     if let Some(c) = r["comment"].as_str().filter(|c| !c.is_empty()) {
         s += &format!("\n      {}", c.replace('\n', "\n      "));
     }
@@ -363,6 +445,104 @@ fn list(o: &Opt) -> Result<u8, String> {
     Ok(0)
 }
 
+// ------------------------------------------------------------------------------------------------------------ test cases
+
+/// The marks file python/wavelens_cocotb.py writes beside the dump (WAVELENS_MARKS: another name, given with --cases).
+const MARKS: &str = "wavelens.marks.json";
+
+/// A case's name of a test's name or a span's label: without the number before it (`TC3 `) and the result after it
+/// (` · FAIL`), as a page of cocotb's marks labels its spans; the same rule as runs.js caseName.
+pub(crate) fn case_name(label: &str) -> String {
+    let s = label.split(" \u{b7} ").next().unwrap_or("").trim();
+    let s = match s.split_once(' ') {
+        Some((tc, rest)) if tc.len() > 2 && tc.starts_with("TC") && tc[2..].bytes().all(|c| c.is_ascii_digit()) => rest.trim(),
+        _ => s,
+    };
+    s.to_string()
+}
+
+/// A time of a case: ps as a number, or a text with a unit.
+fn case_time(v: &Value) -> Option<u64> {
+    match v {
+        Value::Number(n) => n.as_u64().or_else(|| n.as_f64().filter(|f| *f >= 0.0).map(|f| f.round() as u64)),
+        Value::String(t) => crate::time(t).ok(),
+        _ => None,
+    }
+}
+
+/// The cases of a JSON text: a marks file's tests, a list of {name|label, from, to}, or {"spans": [...]} -> [{name, from,
+/// to}] (ps; a case without its end or with an end before its start left out; the second of a name "name (2)").
+fn cases_of(text: &str, src: &str) -> Result<Vec<Value>, String> {
+    let v: Value = serde_json::from_str(text.trim_start_matches('\u{feff}')).map_err(|e| format!("{src}: not JSON: {e}"))?;
+    let items = if v["wavelens"] == "marks" {
+        v["tests"].as_array().cloned().unwrap_or_default()
+    } else if let Some(a) = v.as_array() {
+        a.clone()
+    } else if let Some(a) = v["spans"].as_array() {
+        a.clone()
+    } else {
+        return Err(format!("{src}: no cases in it (a marks file, a list [{{\"name\", \"from\", \"to\"}}], or {{\"spans\": [...]}})"));
+    };
+    let mut out: Vec<Value> = Vec::new();
+    for it in &items {
+        let label = it["name"].as_str().or_else(|| it["label"].as_str()).unwrap_or("");
+        let name = case_name(label);
+        let (Some(from), Some(to)) = (case_time(&it["from"]), case_time(&it["to"])) else { continue };
+        if name.is_empty() || to < from {
+            continue;
+        }
+        let same = out.iter().filter(|c| c["base"] == name.as_str()).count();
+        let shown = if same == 0 { name.clone() } else { format!("{name} ({})", same + 1) };
+        out.push(json!({"name": shown, "from": from, "to": to, "base": name}));
+    }
+    for c in &mut out {
+        c.as_object_mut().map(|o| o.remove("base"));
+    }
+    Ok(out)
+}
+
+/// The cases of a dump: --cases (a file, - stdin, none), else the marks beside it when they are not older than it by 10
+/// minutes (said on stderr) -> None when there are none to take.
+fn cases_for(given: Option<&str>, dump: &str, quiet: bool) -> Result<Option<Vec<Value>>, String> {
+    match given {
+        Some("none") => return Ok(None),
+        Some("-") => {
+            let mut t = String::new();
+            std::io::Read::read_to_string(&mut std::io::stdin(), &mut t).map_err(|e| format!("stdin: {e}"))?;
+            return cases_of(&t, "--cases -").map(Some);
+        }
+        Some(f) => return cases_of(&std::fs::read_to_string(f).map_err(|e| format!("{f}: {e}"))?, f).map(Some),
+        None => {}
+    }
+    let marks = Path::new(dump).parent().map_or_else(|| PathBuf::from(MARKS), |d| d.join(MARKS));
+    let (Ok(mm), Ok(dm)) = (std::fs::metadata(&marks).and_then(|m| m.modified()), std::fs::metadata(dump).and_then(|m| m.modified())) else {
+        return Ok(None);
+    };
+    if dm.duration_since(mm).is_ok_and(|d| d.as_secs() > 600) {
+        if !quiet {
+            eprintln!("sva: {}: older than {dump} (another run's?): its cases not taken (--cases it)", marks.display());
+        }
+        return Ok(None);
+    }
+    let text = std::fs::read_to_string(&marks).map_err(|e| format!("{}: {e}", marks.display()))?;
+    let cases = cases_of(&text, &marks.to_string_lossy())?;
+    if !quiet {
+        eprintln!("sva: the cases of {}: {} (--cases none: no cases)", marks.display(), cases.len());
+    }
+    Ok(Some(cases))
+}
+
+/// A case of a list by its name (as `case_name` makes it).
+fn case_in<'a>(cases: &'a Value, name: &str) -> Option<&'a Value> {
+    cases.as_array()?.iter().find(|c| c["name"].as_str() == Some(name))
+}
+
+/// The names of a list of cases, for a message.
+fn case_names(cases: &Value) -> String {
+    let n: Vec<&str> = cases.as_array().map(|a| a.iter().filter_map(|c| c["name"].as_str()).collect()).unwrap_or_default();
+    if n.is_empty() { "none".into() } else if n.len() > 8 { format!("{} … ({} cases)", n[..8].join(", "), n.len()) } else { n.join(", ") }
+}
+
 // ------------------------------------------------------------------------------------------------------------ keep, set, rm
 
 /// The FST of a run: its header's times (ps) and the number of its signals.
@@ -384,6 +564,7 @@ fn keep(o: &Opt) -> Result<u8, String> {
     if !meta.is_file() {
         return Err(format!("{dump}: not a file"));
     }
+    let cases = cases_for(o.cases.as_deref(), dump, o.json)?;
     let dir = dir_of(o, Some(dump));
     let made = !dir.exists();
     if made {
@@ -425,11 +606,10 @@ fn keep(o: &Opt) -> Result<u8, String> {
             format!("{}: {e}", target.display())
         })?;
     } else {
-        let args = [dump.clone(), "--out".into(), target.to_string_lossy().into_owned(), "--quiet".into()];
-        let _ = crate::fst::fst_cmd(&args);   // its error said on stderr
-        if !target.exists() {
-            return Err(format!("{dump}: not kept (the FST was not written)"));
-        }
+        // blocks of 1 MiB of changes (sva fst's are 64): a late window reads the blocks from it on, one block held at a time
+        let mut job = crate::fst::FstJob::new(dump);
+        (job.out, job.limit, job.quiet) = (Some(target.clone()), RUN_BLOCK, true);
+        crate::fst::write_fst(job).map_err(|e| format!("{e} (not kept)"))?;
     }
     let (start, end, signals) = fst_facts(&target)?;
     let source = std::fs::canonicalize(dump).map_or_else(|_| dump.clone(), |p| p.to_string_lossy().into_owned());
@@ -440,6 +620,10 @@ fn keep(o: &Opt) -> Result<u8, String> {
         "kept": now_utc(), "bytes": std::fs::metadata(&target).map_or(0, |m| m.len()), "source_bytes": meta.len(),
         "start": start, "end": end, "signals": signals,
     });
+    let mut run = run;
+    if let Some(c) = cases.filter(|c| !c.is_empty()) {
+        run["cases"] = c.into();
+    }
     {
         let _l = Lock::take(&dir)?;
         let mut v = load(&dir)?;
@@ -464,18 +648,35 @@ fn set(o: &Opt) -> Result<u8, String> {
     let [key] = keys.as_slice() else {
         return Err(format!("sva runs set RUN [DUMP]: one run ({} given)\n{USAGE}", keys.len()));
     };
-    if o.name.is_none() && o.tags.is_none() && o.comment.is_none() {
-        return Err(format!("sva runs set {key}: --name, --tags or --comment"));
+    if o.name.is_none() && o.tags.is_none() && o.comment.is_none() && o.cases.is_none() {
+        return Err(format!("sva runs set {key}: --name, --tags, --comment or --cases"));
     }
     if o.name.as_deref() == Some("") {
         return Err(format!("sva runs set {key}: a run has a name (--name with a text)"));
     }
     let dir = dir_of(o, dump.as_deref());
     load_some(&dir)?;
+    // --cases none: the run's cases gone; a file (- stdin): these (the marks beside a dump: --cases them)
+    let cases = match o.cases.as_deref() {
+        None => None,
+        Some("none") => Some(Vec::new()),
+        Some(src) => cases_for(Some(src), "", true)?,
+    };
     let _l = Lock::take(&dir)?;
     let mut v = load(&dir)?;
     let i = find(&v, key)?;
     let r = &mut v["runs"][i];
+    if let Some(c) = cases {
+        match r.as_object_mut() {
+            Some(m) if c.is_empty() => {
+                m.remove("cases");
+            }
+            Some(m) => {
+                m.insert("cases".into(), c.into());
+            }
+            None => {}
+        }
+    }
     if let Some(n) = &o.name {
         r["name"] = n.clone().into();
     }
@@ -571,41 +772,67 @@ fn diff(o: &Opt) -> Result<u8, String> {
         return Err(format!("{}: no run of {dump} kept (sva runs keep {dump}){}", dir.display(),
                            if others > 0 { format!("; {others} of other dumps: --all") } else { String::new() }));
     }
-    // the window and the signals checked once, before any run is read
-    let mut args = o.diff.clone();
-    let at = |k: &str| args.iter().position(|a| a == k).map(|i| args[i + 1].clone());
-    let (from, to) = (at("--from").map(|t| crate::time(&t)).transpose()?, at("--to").map(|t| crate::time(&t)).transpose()?);
-    if let (Some(f), Some(t)) = (from, to) {
-        if t < f {
-            return Err(format!("--to {} is before --from {}", crate::ns(t), crate::ns(f)));
-        }
-    }
-    // --signals-from is read once (stdin: it can be read once): every run takes the same paths
-    let mut _tmp = None;
-    if let Some(k) = args.iter().position(|a| a == "--signals-from") {
-        let src = args[k + 1].clone();
-        let text = if src == "-" {
-            let mut t = String::new();
-            std::io::Read::read_to_string(&mut std::io::stdin(), &mut t).map_err(|e| format!("stdin: {e}"))?;
-            t
-        } else {
-            std::fs::read_to_string(&src).map_err(|e| format!("{src}: {e}"))?
-        };
-        if text.lines().all(|l| l.trim().is_empty()) {
+    // the comparison's options parsed and checked once, before any run is read (B: each run's FST in turn)
+    let mut base = crate::diff::opts(&[&[dump.clone(), String::new()][..], &o.diff].concat())?;
+    let (from, to) = (base.from, base.to);
+    // --signals-from read once (stdin can be read once): every run takes the same paths
+    if let Some(src) = base.signals_from.take() {
+        let l = crate::diff::read_list(&src)?;
+        if l.is_empty() {
             return Err(format!("--signals-from {src}: no signal in it"));
         }
-        let p = std::env::temp_dir().join(format!("sva-runs-{}.signals", std::process::id()));
-        std::fs::write(&p, text).map_err(|e| format!("{}: {e}", p.display()))?;
-        args[k + 1] = p.to_string_lossy().into_owned();
-        _tmp = Some(TempFile(p));
+        base.listed = Some(l);
+    }
+    // --limit 1: the first difference is what is read of the differences; none of the others is held
+    base.limit = 1;
+    // --case: the dump's window of that case (--from/--to, else its cases), each run's window its own case of that name
+    let case = o.case.as_deref().map(case_name);
+    if case.as_deref() == Some("") {
+        return Err("--case: a case's name".into());
+    }
+    if o.cases.is_some() && case.is_none() {
+        return Err("--cases gives the dump's cases for --case NAME".into());
+    }
+    if o.cases.as_deref() == Some("-") && base.listed.is_some() && o.diff.windows(2).any(|w| w[0] == "--signals-from" && w[1] == "-") {
+        return Err("--cases - and --signals-from -: one of them on stdin".into());
+    }
+    let mut case_a: Option<(u64, u64)> = None;
+    if let Some(name) = &case {
+        case_a = Some(match (from, to) {
+            (Some(f), Some(t)) => (f, t),
+            (None, None) => {
+                let c: Value = cases_for(o.cases.as_deref(), dump, o.json)?
+                    .ok_or_else(|| format!("{dump}: no cases (cocotb's {MARKS} beside it, --cases FILE, or --from/--to: the window of the case)"))?.into();
+                let x = case_in(&c, name).ok_or_else(|| format!("{dump}: no case {name} (its cases: {})", case_names(&c)))?;
+                (x["from"].as_u64().unwrap_or(0), x["to"].as_u64().unwrap_or(0))
+            }
+            _ => return Err("--case with --from and --to (the dump's window of the case), or neither (its cases)".into()),
+        });
     }
     let mut out = Vec::new();
     for r in &runs {
-        // --limit 1: the first difference is what is read of the differences; none of the others is held
-        let mut a = vec![dump.clone(), file_of(&dir, r).to_string_lossy().into_owned(), "--limit".into(), "1".into()];
-        a.extend(args.iter().cloned());
+        let mut a = base.clone();
+        a.b = file_of(&dir, r).to_string_lossy().into_owned();
         let mut x = json!({"id": r["id"], "name": r["name"], "tags": r["tags"], "kept": r["kept"], "file": r["file"], "dump": r["dump"]});
-        match crate::diff::diff_doc(&a) {
+        if let (Some(name), Some((af, at))) = (&case, case_a) {
+            let Some(c) = case_in(&r["cases"], name) else {
+                x["error"] = if r["cases"].is_array() { format!("no case {name} in this run (its cases: {})", case_names(&r["cases"])) }
+                    else { "kept without cases (sva runs set RUN --cases FILE)".to_string() }.into();
+                out.push(x);
+                continue;
+            };
+            let (bf, bt) = (c["from"].as_u64().unwrap_or(0), c["to"].as_u64().unwrap_or(0));
+            let len = (at - af).min(bt - bf);
+            let offset = bf as i64 - af as i64;
+            (a.from, a.to, a.offset) = (Some(af), Some(af + len), offset);
+            x["case"] = json!({"name": name, "from": bf, "to": bt, "offset": offset});
+            if bt - bf != at - af {
+                let d = (bt - bf).abs_diff(at - af);
+                x["case"]["note"] = format!("the run's case is {} {}: compared over the shorter", crate::ns(d),
+                                            if bt - bf > at - af { "longer" } else { "shorter" }).into();
+            }
+        }
+        match crate::diff::run_doc(&a) {
             Ok(d) => {
                 let sigs = differing(&d);
                 let n = sigs.len();
@@ -636,27 +863,37 @@ fn diff(o: &Opt) -> Result<u8, String> {
     let errors = errs.len();
     let differ = out.iter().any(|x| x["equal"].as_bool() == Some(false) && x["error"].is_null());
     if o.json {
-        let doc = json!({"wavelens": "runs-diff", "version": 1, "unit": "ps", "dump": dump, "dir": dir.to_string_lossy(),
+        let mut doc = json!({"wavelens": "runs-diff", "version": 1, "unit": "ps", "dump": dump, "dir": dir.to_string_lossy(),
                          "from": from, "to": to, "others": others, "runs": out});
+        if let (Some(name), Some((af, at))) = (&case, case_a) {
+            doc["case"] = json!({"name": name, "from": af, "to": at});
+        }
         outln!("{}", serde_json::to_string_pretty(&doc).unwrap_or_default());
     } else {
-        text(dump, &out, others);
+        text(dump, &out, others, case.as_deref());
     }
     Ok(if errors > 0 { 2 } else if differ { 1 } else { 0 })
 }
 
 /// sva runs diff as text: a line per run; the window in the header when every run has the same, else on each line.
-fn text(dump: &str, out: &[Value], others: usize) {
+fn text(dump: &str, out: &[Value], others: usize, case: Option<&str>) {
     let win = |x: &Value| x["from"].as_i64().zip(x["to"].as_i64());
     let wins: Vec<(i64, i64)> = out.iter().filter_map(win).collect();
     let one = !wins.is_empty() && wins.windows(2).all(|w| w[0] == w[1]) && out.iter().all(|x| win(x).is_some() || !x["error"].is_null());
     let t = |v: i64| crate::ns(v.max(0) as u64);
-    let header = if one { format!(" over {} … {}", t(wins[0].0), t(wins[0].1)) } else { String::new() };
+    let header = match case {
+        Some(c) => format!(" over the case {c}{}", if one { format!(" ({} … {} of the dump)", t(wins[0].0), t(wins[0].1)) } else { String::new() }),
+        None if one => format!(" over {} … {}", t(wins[0].0), t(wins[0].1)),
+        None => String::new(),
+    };
     outln!("{dump} against {} run{}{header}{}:", out.len(), if out.len() == 1 { "" } else { "s" },
            if others > 0 { format!(" ({others} of other dumps not compared: --all)") } else { String::new() });
     for x in out {
         let id = format!("#{} {}", x["id"].as_u64().unwrap_or(0), x["name"].as_str().unwrap_or(""));
-        let at = if one { String::new() } else { win(x).map_or(String::new(), |(f, u)| format!(" over {} … {}", t(f), t(u))) };
+        let mut at = if one { String::new() } else { win(x).map_or(String::new(), |(f, u)| format!(" over {} … {}", t(f), t(u))) };
+        if let Some(c) = x.get("case").filter(|c| c["offset"].as_i64().unwrap_or(0) != 0 || !c["note"].is_null()) {
+            at += &format!(" (its case at {}{})", t(c["from"].as_i64().unwrap_or(0)), c["note"].as_str().map_or(String::new(), |n| format!("; {n}")));
+        }
         let (oa, ob) = (x["only_a_count"].as_u64().unwrap_or(0), x["only_b_count"].as_u64().unwrap_or(0));
         let sides = [(oa, "of the dump not in the run"), (ob, "of the run not in the dump")].iter().filter(|(n, _)| *n > 0)
             .map(|(n, w)| format!("; {n} {w}")).collect::<String>();
@@ -681,13 +918,6 @@ fn text(dump: &str, out: &[Value], others: usize) {
                 outln!("      {}{}", names.join(" "), if more > 0 { format!(" … {more} more") } else { String::new() });
             }
         }
-    }
-}
-
-struct TempFile(PathBuf);
-impl Drop for TempFile {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
     }
 }
 
@@ -720,5 +950,24 @@ mod tests {
         let o = opts(&a("set 1 --name=eq --dir=r")).unwrap();
         assert_eq!((o.name.as_deref(), o.dir.as_deref()), (Some("eq"), Some("r")));
         assert_eq!(opts(&a("d.vcd --all")).unwrap().cmd, "list");
+    }
+
+    #[test]
+    fn settings_with_comments() {
+        let v = jsonc("{\n  // the runs\n  \"wavelens.runsDir\": \"runs//x\", /* here */\n  \"a\": [1, 2,],\n}").unwrap();
+        assert_eq!(v["wavelens.runsDir"], "runs//x");
+        assert_eq!(v["a"], json!([1, 2]));
+    }
+
+    #[test]
+    fn cases_by_name() {
+        assert_eq!(case_name("TC3 test_scratch \u{b7} FAIL (expected)"), "test_scratch");
+        assert_eq!(case_name("  reset "), "reset");
+        assert_eq!(case_name("TC test"), "TC test");
+        assert_eq!(case_name("TC12x y"), "TC12x y");
+        let c = cases_of(r#"[{"name": "a", "from": 0, "to": 5}, {"label": "TC2 a", "from": "1ns", "to": "2ns"}, {"name": "", "from": 0, "to": 1},
+                             {"name": "b", "from": 3}]"#, "x").unwrap();
+        assert_eq!(c, vec![json!({"name": "a", "from": 0, "to": 5}), json!({"name": "a (2)", "from": 1000, "to": 2000})]);
+        assert!(cases_of("{}", "x").unwrap_err().contains("no cases in it"));
     }
 }

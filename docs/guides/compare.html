@@ -114,11 +114,16 @@
     with the run again; the status says equal, or what differs first, and why the run's values are not shown when they are not.</li>
   <li><span class="ui">Δ all</span> asks every run at once: how many signals differ in the window and the first difference, on each
     run's row (red: some). The run where it broke stands out.</li>
+  <li>Test cases: a run keeps its cases (your labelled spans when kept, or cocotb's <code>wavelens.marks.json</code> beside the
+    dump). Choose the span of a case (the choice says <i>· a case</i>) and each run is compared over <i>its</i> case of that name,
+    wherever it is in the run — the cases before it may have taken longer — over the shorter of the two.
+    <code>sva runs diff tb.vcd --case test_scratch</code> in the shell, <code>case</code> for <code>wave_runs</code>.</li>
 </ol>
 <p>✎ changes a run's name, tags or comment, ✕ removes it with its file (VS Code asks first). The runs are of the same test:
   signals by their path, the same time. In the shell the same list: <code>sva runs keep tb.vcd --name golden --tags seed1</code>,
   <code>sva runs</code>, <code>sva runs diff tb.vcd --from 4us --to 6us</code> (a line per run), <code>sva runs path golden</code> for
-  <code>sva diff</code>; an agent has <code>wave_runs</code>.</p>
+  <code>sva diff</code>; an agent has <code>wave_runs</code>. A run kept from a VCD is written in blocks of 1 MiB: a window late in a
+  long run reads the blocks from there on, as fast as one at its start.</p>
 
 <h2 id="shell">From the shell</h2>
 <p>The page keeps B's signals in memory. For dumps of hundreds of MB, for CI, or for two testbenches whose scopes are named apart,
@@ -157,7 +162,7 @@ B: apb_b.vcd  0 ps … 205 ns, 58 signals
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.44 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.45 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

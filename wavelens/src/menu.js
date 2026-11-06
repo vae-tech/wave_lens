@@ -504,7 +504,7 @@ Object.assign(WaveView.prototype, {
   // the click that opened it; not for a menu closed meanwhile (its listener would close the next one). blur false: a box to type in stays
   menuOff(el, blur = true) {
     const off = this.offMenu = e => {
-      if (el.contains(e.target)) return;
+      if (e.target instanceof Node && el.contains(e.target)) return;   // the window's blur: its target is the window, no node
       this.closeMenu();
       if (e.type === 'pointerdown') setTimeout(() => { const a = document.activeElement;
         if (VIEWS.has(this) && (a === document.body || (this.root.contains(a) && !a.matches('input, select, textarea')))) this.refocus(); }, 0);

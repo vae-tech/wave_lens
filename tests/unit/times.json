@@ -1,0 +1,43 @@
+{
+ "why": "One table of times as a person writes them, run by test_times.py against every reader of one (review 2026-11-05 runs A-08). ps: what the grammar gives in ps (null: no time); except: a reader that reads it otherwise, by its own documented convention (readers).",
+ "readers": {
+  "common": "tools/common.py parse_time(text): a plain number in model units (1), as viewedit.parse_t and testmarks read a view; any unit of UNIT_PS (zs, as too)",
+  "wavemcp": "tools/wavemcp.py ps_of(text): parse_time(text, 1000), a plain number in ns",
+  "vcd2wavedrom": "tools/vcd2wavedrom.py to_ps(text): parse_time(text, None), a unit needed, no negative time",
+  "parseT": "wavelens/src/model.js parseT: a plain number in model units, fs … s",
+  "links": "vscode/links.js linksOf('@ ' + text), one link the whole line: a time of a log, a unit needed, no sign, digits before the point",
+  "cocotb": "python/wavelens_cocotb.py bound_ps(text): a unit needed (a number is ps but no text), no negative, '3 cycles' none (the page counts them); float() reads the number",
+  "cli": "sva/cli/src/main.rs time() through sva diff --from: a plain number in ps, no negative, a + sign taken; whole ps (rounded)"
+ },
+ "cases": [
+  {"t": "100ns", "ps": 100000},
+  {"t": "100NS", "ps": 100000},
+  {"t": "2.5us", "ps": 2500000},
+  {"t": "0.1µs", "ps": 100000},
+  {"t": " 7 ns ", "ps": 7000},
+  {"t": "1.5ms", "ps": 1500000000},
+  {"t": "2s", "ps": 2000000000000},
+  {"t": "2 S", "ps": 2000000000000},
+  {"t": "250fs", "ps": 0.25},
+  {"t": "1e-3ns", "ps": 1},
+  {"t": "1E2ns", "ps": 100000},
+  {"t": ".5ns", "ps": 500, "except": {"links": null}},
+  {"t": "5.ns", "ps": 5000, "except": {"links": null}},
+  {"t": "+5ns", "ps": null, "except": {"cli": 5000, "cocotb": 5000}},
+  {"t": "-5ns", "ps": -5000, "except": {"vcd2wavedrom": null, "links": null, "cocotb": null, "cli": null}},
+  {"t": "0", "ps": 0, "except": {"wavemcp": 0, "vcd2wavedrom": null, "links": null, "cocotb": null}},
+  {"t": "40", "ps": 40, "except": {"wavemcp": 40000, "vcd2wavedrom": null, "links": null, "cocotb": null}},
+  {"t": "1e3", "ps": 1000, "except": {"wavemcp": 1000000, "vcd2wavedrom": null, "links": null, "cocotb": null}},
+  {"t": "3as", "ps": null, "except": {"common": 3e-6, "wavemcp": 3e-6, "vcd2wavedrom": 3e-6}},
+  {"t": "1_000ns", "ps": null, "except": {"cocotb": 1000000}},
+  {"t": "ns", "ps": null},
+  {"t": "", "ps": null},
+  {"t": "1.2.3ns", "ps": null},
+  {"t": "5 parsecs", "ps": null},
+  {"t": "0.1μs", "ps": null},
+  {"t": "3 cycles", "ps": null},
+  {"t": "infns", "ps": null},
+  {"t": "nanns", "ps": null},
+  {"t": "1e400ns", "ps": null}
+ ]
+}

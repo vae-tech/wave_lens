@@ -1097,6 +1097,20 @@ class Review1105(unittest.TestCase):
         self.assertEqual(r[-1]['rows'], [[self.D, 8], [self.D + '[7:4]', 4], [self.D + '[3:0]', 4], [self.D + '#2', 8], [self.D + '#3', 8]])
         self.assertEqual([V.copy_base(x) for x in (self.D + '#2', self.D + '[7:4]', self.D, 'x#1', 'x[1]')], [self.D, self.D, None, None, None])
 
+    def test_rows_after_bits(self):
+        """B-20 (review of the runs T-06): rows lists the bits of a bus shown bit by bit under it, MSB first, [path[i], 1, "bit"] (edit.js
+        rows), a copy's bits under the copy; a pattern finds one bit; bits off: the bus alone again."""
+        e, bit = ed(), lambda p, i: [f'{p}[{i}]', 1, 'bit']
+        r = e.run([{'op': 'bits', 'signals': self.D}, {'op': 'rows', 'pattern': 'tb.dut.d*'}])
+        self.assertEqual(r[-1]['rows'], [[self.D, 8]] + [bit(self.D, i) for i in range(7, -1, -1)])
+        self.assertEqual(r[-1]['total'], 9)
+        self.assertEqual(e.run([{'op': 'rows', 'pattern': self.D + '[3]'}])[0]['rows'], [bit(self.D, 3)])
+        r = e.run([{'op': 'duplicate', 'signals': self.D}, {'op': 'bits', 'signals': self.D + '#2'}, {'op': 'bits', 'signals': self.D, 'on': False},
+                   {'op': 'rows', 'pattern': 'tb.dut.d*'}])
+        self.assertEqual(r[-1]['rows'], [[self.D, 8], [self.D + '#2', 8]] + [bit(self.D + '#2', i) for i in range(7, -1, -1)])
+        self.assertEqual(e.run([{'op': 'rows', 'pattern': 'tb.dut.d*', 'offset': 2, 'limit': 2}])[0],
+                         {'op': 'rows', 'total': 10, 'rows': [bit(self.D + '#2', 7), bit(self.D + '#2', 6)], 'next_offset': 4})
+
     def test_a_signal_deleted_with_its_slices(self):
         """B-03, scenario 1: duplicate delete of a signal takes its slices too, in the page's order."""
         e = ed()
@@ -1182,3 +1196,20 @@ class Review1105(unittest.TestCase):
                    {'op': 'only', 'clear': True}, {'op': 'set_state', 'state': {'wavelens': 'state', 'only': None}},
                    {'op': 'only', 'modules': ['tb.dut']}])
         self.assertEqual(r[-1]['only'], {'modules': ['tb.dut'], 'on': True, 'groups': False})   # only null: the groups kept
+
+    def test_only_groups_with_a_copy_in_a_group(self):
+        """T-05 of the review of 2026-11-05 (runs): a copy (data#2) in your group stays with it under Only when the groups are
+        whole, goes with its module's signal when not; a set_state of only with groups puts the next set's groups (the smoke
+        modules: the page alike, with a bus's bits)."""
+        e = ed()
+        e.run([{'op': 'group', 'name': 'g', 'signals': ['tb.dut.data', 'tb.dut.valid']}, {'op': 'duplicate', 'signals': 'tb.dut.data'},
+               {'op': 'group', 'name': 'g', 'add': ['tb.dut.data#2']}, {'op': 'only', 'modules': 'tb.other'}])
+        ug = lambda: [r['full'] for r in e.ordered() if r.get('ug')]
+        self.assertEqual(ug(), ['tb.dut.data', 'tb.dut.valid', 'tb.dut.data#2'])
+        e.run([{'op': 'only', 'groups': False}])
+        self.assertEqual(ug(), [])
+        self.assertNotIn('tb.dut.data#2', [r['full'] for r in e.ordered()], 'the copy goes with its module')
+        r = e.run([{'op': 'set_state', 'state': {'wavelens': 'state', 'only': {'modules': ['tb.other'], 'on': True, 'groups': True}}},
+                   {'op': 'only', 'clear': True}, {'op': 'only', 'modules': ['tb.dut']}])
+        self.assertEqual((r[-1]['only'], r[-1]['groups']), ({'modules': ['tb.dut'], 'on': True}, True))
+        self.assertEqual(ug(), ['tb.dut.data', 'tb.dut.valid', 'tb.dut.data#2'])
