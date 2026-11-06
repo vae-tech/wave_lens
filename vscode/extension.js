@@ -475,12 +475,17 @@ ${scripts}
     const ws = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(this.file));
     return path.isAbsolute(set) ? set : path.join(ws ? ws.uri.fsPath : path.dirname(this.file), set);
   }
+  // a window [from, to] of a dump as an FST of its own at out, its times from 0 (the runs' cut)
+  cutOf(src, [from, to], out) { return this.sva(['fst', src, '--from', from, '--to', to, '--zero', '--out', out, '--quiet']); }
   sva(args, input, keep = p => p) { return spawnRun(svaBin(), args, { input: input || '', keep: p => this.proc(keep(p)) }); }
   async runs(m) {
     const dir = this.runsDir(), name = path.basename(this.file), json = r => { try { return cliJson(r.out); } catch (e) { return null; } };
     const fail = (r, what) => ({ error: r.err || `sva runs ${what}: exit ${r.code}` });
     const said = b => [...(typeof b.name === 'string' && b.name.trim() ? ['--name', b.name.trim()] : []),
       ...(Array.isArray(b.tags) ? ['--tags', b.tags.map(String).join(',')] : []), ...(typeof b.comment === 'string' ? ['--comment', b.comment] : [])];
+    // a window of the page (ps): from before to -> ['Nps', 'Nps'], else null
+    const win = x => (isFinite(x.from) && isFinite(x.to) && Math.round(x.from) >= 0 && Math.round(x.to) > Math.round(x.from) ?
+      [`${Math.round(x.from)}ps`, `${Math.round(x.to)}ps`] : null);
     const id = String(parseInt(m.run, 10)), nowOr = x => (x === 'now' || !(parseInt(x, 10) > 0) ? 'now' : String(parseInt(x, 10)));
     // A: the run asked (against), else the one shown
     const against = () => (m.against != null ? nowOr(m.against) : this.shown ? String(this.shown.id) : 'now');
@@ -506,14 +511,29 @@ ${scripts}
         return o;
       }
       case 'cancel': if (this.runsBusy) this.runsBusy.forEach(p => p.kill()); return { ok: true };
-      case 'keep': {
-        log(`${name}: kept as a run in ${dir}`);
-        const cases = Array.isArray(m.cases) && m.cases.length ? m.cases.filter(c => c && typeof c.label === 'string' && isFinite(c.from) && isFinite(c.to))
-          .map(c => ({ label: c.label, from: Math.round(c.from), to: Math.round(c.to) })) : null;
-        const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `WaveLens: keeping ${name} as a run…` },
-          () => this.sva(['runs', 'keep', this.file, '--dir', dir, ...said(m), ...(cases ? ['--cases', '-'] : []), '--json'],
-            cases ? JSON.stringify(cases) : '')), d = json(r);
+      case 'keep': {   // the dump of now; with from, to: a slice of the waves shown (the dump or a run), its times from 0
+        const sl = win(m), src = sl && this.shown ? this.shown.file : this.file;
+        if (!sl && (m.from != null || m.to != null)) return { error: 'a slice: from and to, from before to' };
+        log(`${name}: ${sl ? `a slice ${sl.join(' … ')} of ${this.shown ? this.shown.name : 'the dump'}` : 'the dump'} kept as a run in ${dir}`);
+        const cases = !sl && Array.isArray(m.cases) && m.cases.length ? m.cases.filter(c => c && typeof c.label === 'string' && isFinite(c.from) &&
+          isFinite(c.to)).map(c => ({ label: c.label, from: Math.round(c.from), to: Math.round(c.to) })) : null;
+        const r = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification,
+          title: `WaveLens: keeping ${sl ? 'a slice of ' : ''}${name} as a run…` },
+        () => this.sva(['runs', 'keep', src, '--dir', dir, ...said(m), ...(sl ? ['--from', sl[0], '--to', sl[1]] : []), ...(cases ? ['--cases', '-'] : []),
+          '--json'], cases ? JSON.stringify(cases) : '')), d = json(r);
         return r.code === 0 && d ? { run: d } : fail(r, 'keep');
+      }
+      case 'cut': {   // a window of the waves shown as an FST of its own, its times from 0, where the save dialog says
+        const sl = win(m); if (!sl) return { error: 'cut: from and to, from before to' };
+        const src = this.shown ? this.shown.file : this.file, stem = path.basename(this.file).replace(/\.[^.]*$/, '');
+        const nm = `${stem}.${sl.map(t => t.replace(/ps$/, '')).join('-')}ps.fst`;
+        const to = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(path.join(path.dirname(this.file), nm)), saveLabel: 'Save',
+          filters: { FST: ['fst'] }, title: `WaveLens: the window ${sl.join(' … ')} as an FST (its times from 0)` });
+        if (!to) return { cancel: true };
+        const r = await this.cutOf(src, sl, to.fsPath);
+        if (r.code !== 0) return fail(r, 'fst');
+        log(`${name}: ${sl.join(' … ')} saved as ${to.fsPath}`);
+        return { path: to.fsPath };
       }
       case 'set': {
         const r = await this.sva(['runs', 'set', id, '--dir', dir, ...said(m), '--json']), d = json(r);

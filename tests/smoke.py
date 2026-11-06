@@ -1930,6 +1930,11 @@ def vscode_tab(browser, build):
         if (m.op === 'open') { window.__SHOWN = m.run; if (!m.run) return ANSWER.source();
           const r = window.__RUNS.find(x => x.id === m.run); if (!r) return { error: 'no run #' + m.run };
           return { src: ANSWER.source().src.replace(/\/[^/]*$/, window.__OPENFILE || '/dump.vcd'), name: '#' + r.id + ' ' + r.name, lazy: false }; }
+        if (m.op === 'keep' && m.from != null) { const id = Math.max(...window.__RUNS.map(x => x.id)) + 1;   // a slice: its times from 0
+          const r = { id, name: `enum.vcd ${m.from}–${m.to}`, tags: [], comment: '', kept: '2026-11-06T10:00:00Z', dump: 'enum.vcd', file: id + '-enum.fst',
+            slice: { from: m.from, to: m.to }, bytes: 300 };
+          window.__RUNS = window.__RUNS.concat([r]); return { run: r }; }
+        if (m.op === 'cut') return window.__CUTNO ? { cancel: true } : { path: '/host/dumps/enum.' + m.from + '-' + m.to + 'ps.fst' };
         if (m.op === 'keep') { const r = { id: 3, name: m.name, tags: m.tags, comment: m.comment, kept: '2026-11-05T10:00:00Z', dump: 'enum.vcd', file: '3-enum.fst' };
           window.__RUNS = window.__RUNS.concat([r]); return { run: r }; }
         if (m.op === 'set') { const r = window.__RUNS.find(x => x.id === m.run); if (!r) return { error: 'no run #' + m.run };
@@ -2409,17 +2414,45 @@ def vscode_tab(browser, build):
           f'a run without a row of yours: said ({a[1]}); the next run that has it: hidden again, as on now')
     js("v.runsShow(0)")
     until("(v => v && v.runsShown === 0)(WaveLens.views().find(x => x.root.isConnected))", timeout=15000)
+    # a slice: the right button's Slice ▸ keeps the range as a run of its own (its times from 0) or saves it as an FST; A a
+    # slice: the view's times go with it (the same moment of the dump in sight, a marker on it), A now again: back
+    js("v.run([{ op: 'marker', t: 6000, label: 'sl' }])"); page.wait_for_timeout(50)
+    js("(v.zoomTo(5500, 12000), v.setRange(5000, 10000), v.menu(200, 200, null, 5000), 0)")
+    sub = js("[...v.menuEl.querySelectorAll('.subs + .sub [data-m]')].map(b => b.dataset.m)")
+    js("(v.menuEl.querySelector('[data-m=slkeep]').click(), 0)")
+    until("(v => v && v.runsL && v.runsL.some(r => r.slice))(WaveLens.views().find(x => x.root.isConnected))")
+    k = [m for m in sent('runs') if m['op'] == 'keep'][-1]
+    sid = js("v.runsL.find(r => r.slice).id")
+    page.wait_for_timeout(50)
+    check(sub == ['slkeep', 'slfst'] and (k.get('from'), k.get('to')) == (5000, 10000) and js(f"v.runsP.fi === v.runsP.rowOf({sid})") and
+          'slice 5' in js(f"v.root.querySelector('.wv-runs .rn[data-i=\"' + v.runsP.rowOf({sid}) + '\"] .r2').textContent"),
+          f'Slice ▸ Keep as a slice: keep with the range, the panel on its row, "slice …" on it ({sub}, {k})')
+    t0 = js("[v.t0, v.span]")
+    js(f"v.runsShow({sid})")
+    until(f"(v => v && v.runsShown === {sid})(WaveLens.views().find(x => x.root.isConnected))", timeout=15000)
+    sl = js("[v.t0, v.span, v.umarks.find(m => m.label === 'sl').t]")
+    js("v.runsShow(0)")
+    until("(v => v && v.runsShown === 0)(WaveLens.views().find(x => x.root.isConnected))", timeout=15000)
+    back = js("[v.t0, v.span, v.umarks.find(m => m.label === 'sl').t]")
+    check(sl == [t0[0] - 5000, t0[1], 1000] and back == [t0[0], t0[1], 6000],
+          f'A a slice: the window and the markers go with its time (from 0), back on now ({t0} → {sl} → {back})')
+    js("(v.setRange(5000, 10000), v.menu(200, 200, null, 5000), v.menuEl.querySelector('[data-m=slfst]').click(), 0)")
+    until("[...document.querySelectorAll('.wv-toast, .toast')].some(e => e.textContent.includes('enum.5000-10000ps.fst'))")
+    c = [m for m in sent('runs') if m['op'] == 'cut'][-1]
+    check((c.get('from'), c.get('to')) == (5000, 10000), f'Slice ▸ Save as FST…: cut with the range, the path said {c}')
+    js(f"v.run([{{ op: 'marker', id: v.umarks.findIndex(m => m.label === 'sl') + 1, delete: true }}])")
     page.locator('.wv-runs .rl').focus(); page.keyboard.press('Escape')
     # every runs message host.js sent, by operation: its keys (T-03: rm with id in place of run passed before), and against the table
     shapes = {}
     for m in sent('runs'):
         shapes.setdefault(m['op'], set()).add(tuple(sorted(set(m) - {'type', 'id', 'op'})))
     sig = ('from', 'signals', 'to')
-    want = {'list': {()}, 'keep': {('comment', 'name', 'tags'), ('cases', 'comment', 'name', 'tags')}, 'set': {('comment', 'name', 'run', 'tags')},
+    want = {'list': {()}, 'keep': {('comment', 'name', 'tags'), ('cases', 'comment', 'name', 'tags'), ('from', 'to')}, 'set': {('comment', 'name', 'run', 'tags')},
+            'cut': {('from', 'to')},
             'rm': {('run',)}, 'diff': {('against',) + sig, ('against', 'case') + sig}, 'open': {('run',)},
             'compare': {('against', 'from', 'run', 'signals', 'to'), ('against', 'case', 'from', 'run', 'signals', 'to')}}
     check(set(shapes) == set(want) and all(shapes[k] <= want[k] for k in want) and all(type(m['run']) is int for m in sent('runs') if 'run' in m),
-          f'every runs message of host.js with its keys: list, keep, set, rm, diff, compare, open {shapes}')
+          f'every runs message of host.js with its keys: list, keep, set, rm, diff, compare, open, cut {shapes}')
     bad = page.evaluate('window.__bad')
     check(not bad, f'every message of host.js one of vscode/protocol.js with its keys, every answer of the fake host one its type gets {bad[:3]}')
     # a link of a log (vscode/links.js): the extension runs goto in the tab

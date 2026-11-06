@@ -1450,6 +1450,11 @@ def t_runs(a):
             cmd += ['--tags', ','.join(str(t).strip() for t in tags)]
         if a.get('comment') is not None:
             cmd += ['--comment', str(a['comment'])]
+    if act == 'keep':   # from and to: a slice, that window alone, its times from 0
+        for k, flag in (('from', '--from'), ('to', '--to')):
+            t = cli_time(a, k)
+            if t is not None:
+                cmd += [flag, t]
     # cases: a file (a marks file, a list), "none", or a list [{name, from, to}] (times in ns or with a unit) on stdin
     feed = None
     cases = a.get('cases')
@@ -1487,7 +1492,8 @@ def t_runs(a):
         raise WaveError('; '.join(fst_notes(r.stderr)) or f'sva runs {act}: exit {r.returncode}')
     t = lambda v: None if v is None else ns(v)
     case = lambda c: c and {**c, 'from': t(c.get('from')), 'to': t(c.get('to')), **({'offset': t(c['offset'])} if 'offset' in c else {})}
-    run = lambda x: {**x, 'start': t(x.get('start')), 'end': t(x.get('end')), **({'cases': [case(c) for c in x['cases']]} if x.get('cases') else {})} \
+    run = lambda x: {**x, 'start': t(x.get('start')), 'end': t(x.get('end')), **({'cases': [case(c) for c in x['cases']]} if x.get('cases') else {}),
+                     **({'slice': {'from': t(x['slice'].get('from')), 'to': t(x['slice'].get('to'))}} if x.get('slice') else {})} \
         if 'start' in x else x
     if act == 'list':
         return {'dir': out.get('dir', d), 'unit': 'ns', 'runs': [run(x) for x in reversed(out.get('runs', []))], 'others': out.get('others', 0)}
@@ -1802,6 +1808,8 @@ TOOLS = [
          'Test cases: keep stores a run\'s cases (cocotb\'s wavelens.marks.json beside the dump, or cases: a file, "none", or '
          '[{name, from, to}]; set changes them); diff case: NAME compares each run\'s case NAME with the dump\'s (from/to: the '
          'dump\'s window of it, else its cases), wherever it is in the run (case.offset), over the shorter. '
+         'keep from, to: a slice, that window of the dump alone as a run, its times from 0 (slice: its window in the dump), so slices '
+         'compare with each other from their first sample (diff against: one slice, run: another). '
          'diff against: a run (number or name) compared with the others instead of the dump (run: "now" adds the dump), '
          'the window in its time, the answer\'s against: {id, name, file}. '
          'Then wave_diff with b = dir/file of a run for the details.',

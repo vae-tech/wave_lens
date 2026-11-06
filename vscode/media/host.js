@@ -105,7 +105,8 @@
   /* ---- the runs kept (the Runs panel, gu): sva runs on the host, in .wavelens-runs beside the dump ---- */
   G.WAVELENS_RUNS = {
     list: () => call('runs', { op: 'list' }),
-    keep: b => call('runs', Object.assign({}, b, { op: 'keep' })),
+    keep: b => call('runs', Object.assign({}, b, { op: 'keep' })),   // b.from, b.to: a slice of the waves shown
+    cut: (from, to) => call('runs', { op: 'cut', from, to }),          // that window as an FST of its own (a save dialog)
     // a run's number goes as "run" (the message's "id" is its answer's)
     set: (run, b) => call('runs', Object.assign({}, b, { op: 'set', run })),
     rm: run => call('runs', { op: 'rm', run }),

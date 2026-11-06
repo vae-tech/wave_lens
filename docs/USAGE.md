@@ -1117,11 +1117,23 @@ wherever it is in the run: B offset to it, over the shorter of the two (said), f
 without that case: an error on its row); a run that has cases but not this one is compared over the window as it is (said). Two runs whose earlier cases took longer still compare case by case. In a browser
 there is no Runs panel: the runs are kept by `sva runs`.
 
+**Slices: pieces of the waves compared with each other.** The right button over a range has **Slice ▸** (VS Code):
+**Keep as a slice (Runs)** keeps the range of the waves shown — the dump, or the run that is A — as a run of its own, every
+signal, **its times from 0**: its first sample (the range's start, on the edge the range snapped to) is 0. Its row says
+`slice 120 ns … 145 ns, from 0`, its name by default `tb.vcd 120 ns–145 ns` (✎ renames it), no test cases. Two slices — of
+one dump (two bursts, two packets, two calls of a task) or of two runs — compared as two runs are (one A, the other B: `w`,
+a click, `]r`, Δ all) line up on their first samples, so a difference is a difference of behaviour, not of when it
+happened; `]w` walks through them in one window. While a slice is A the view's times go with it: from the dump to its slice
+the window, the cursor, your markers, bookmarks and spans move by the slice's start, and back again on now. **Save as FST…**
+writes the range as an FST file of its own, its times from 0, where the save dialog says (`sva fst --from --to --zero`).
+
 **The runs kept, in the shell.** `sva runs keep DUMP [--name N] [--tags T,...] [--comment C]` keeps a run (a VCD as an FST
 in blocks of 1 MiB of changes — a window late in it reads only the blocks from there; an FST copied as it is; the directory:
 `--dir`, else a dump inside a directory of runs (a run's FST kept again) that directory, else VS Code's `wavelens.runsDir` of
 the workspace folder above the dump (its `.vscode/settings.json`: the Runs panel's directory, relative to that folder), else
-`.wavelens-runs` beside the dump — `wave_runs` without `dir` the same); `sva runs [list] [DUMP | DIR]`
+`.wavelens-runs` beside the dump — `wave_runs` without `dir` the same); `sva runs keep DUMP --from T --to T` keeps a slice
+(that window alone, its times from 0, `slice: {from, to}` in `runs.json`; a run's FST as DUMP: a slice of that run, of its
+dump at its time there); `sva runs [list] [DUMP | DIR]`
 lists them (DUMP: its runs, the others counted; `--all` every one), `sva runs set RUN [DUMP] --name … --tags … --comment …`
 changes one (RUN: its number, `3` or `#3`, or its name; an empty name refused), `sva runs rm RUN... [DUMP]` removes them
 (every RUN found first: one not there removes none), `sva runs path RUN [DUMP]` prints its FST's path (for `sva diff`,
@@ -1182,7 +1194,8 @@ cycles (`Δ 20 ns / 50 MHz · 2 ↑ PCLK`: the length and the frequency of a per
 values it took (`Δ 80 ns / 12.5 MHz · 7 changes of PADDR (4 values)`); a
 ctrl+click or Esc clears it. The right button
 does the same and opens a menu: **Zoom to the range**, **Bookmarks at its ends** (an arrow with the Δ between them),
-**Copy Δ**, **Keep as span…** (a span of yours over the range, its label asked; undo takes it back); on a span of yours, **As range** (it
+**Copy Δ**, **Keep as span…** (a span of yours over the range, its label asked; undo takes it back), **Slice ▸** (VS Code: the
+range kept as a run of its own from 0, or saved as an FST — *Slices* under the runs kept); on a span of yours, **As range** (it
 measured as the range) and **Delete the span**; **Copy image** (PNG to the clipboard), **Save image as PNG / SVG** — the range (else the window) of the rows
 on the screen, or of the highlighted rows when there are some, drawn as the viewer shows them (folding, colours,
 bookmarks, cursor) with names and axis, the page's colours put in, so the SVG opens anywhere (a PNG stops at 16384 px a side: fewer rows, or SVG); **Save as WaveDrom** /
@@ -1765,7 +1778,8 @@ codes as the whole text numbers them — their declarations in their scopes, the
 as `wave_signals` and the page list it, a `$var … [1]` in `$scope module mem` too) in their scopes with their enum tables, then under `#from` a `$dumpvars` with the value each of
 them has at `--from` (x on every bit when it has none yet), its changes after it up to `--to`, and `#to`, the end (not
 past the dump's); a window of 1 ms of a 214 MB VCD: 1.7 s. For **Compare…** with a large B, for sending one test case,
-for a small fixture. The cut of a VCD and the cut of its FST read the same (`tests/unit/test_svafst.py`). `sva eval` and
+for a small fixture. `--zero`: the times from 0 (`#from` is `#0`); `sva fst DUMP --from T --to T [--zero] --out PIECE.fst`
+writes the same cut (every signal, of a VCD or an FST, the enum tables and the types file's FSM states kept) as an FST. The cut of a VCD and the cut of its FST read the same (`tests/unit/test_svafst.py`). `sva eval` and
 `sva --info` read every dump with wellen (*ENGINE.md*: the merged selects, the escaped names that end in one).
 
 ### What a Questa VCD lacks

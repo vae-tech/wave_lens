@@ -5,6 +5,22 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.49 — 6 November 2026
+
+Slices: a range of the waves kept as a run of its own whose times start at 0, or saved as an FST; pieces compared with each
+other from their first sample.
+
+- **Slice ▸ in the right button's menu over a range** (VS Code). **Keep as a slice (Runs)** keeps the range of the waves
+  shown (the dump, or the run that is A) as a run of its own, every signal, its times from 0: its first sample is 0. Two
+  slices (two bursts of one dump, or of two runs) compared as A and B line up on their first samples; `]w` walks through
+  them in one window. The row says `slice 120 ns … 145 ns, from 0`, the name by default `tb.vcd 120 ns–145 ns`. While a
+  slice is A the view's times (the window, the cursor, your markers, bookmarks, spans) go with its start, and back on now.
+  **Save as FST…** writes the range as an FST file of its own, its times from 0, where the save dialog says.
+- **The CLI**: `sva vcd --zero` (a cut's times from 0), `sva fst DUMP --from T --to T [--zero] --out PIECE.fst` (a window of a
+  VCD or an FST as an FST, the enum tables and the types file's FSM states kept), `sva runs keep DUMP --from T --to T` (a
+  slice: `slice {from, to}` in `runs.json`; a run's FST as DUMP: a slice of that run, of its dump at its time there);
+  `wave_runs` `keep` takes `from`, `to`. The extension's runs ops: `keep` with `from`, `to`, and `cut`.
+
 ## 0.48 — 6 November 2026
 
 Markers at once, with the mouse: the left button clicked while the right one draws a range.

@@ -19,7 +19,7 @@ macro_rules! outln {
 }
 
 const USAGE: &str = "usage: sva runs [list] [DUMP | DIR] [--dir D] [--all] [--json]
-       sva runs keep DUMP [--dir D] [--name N] [--tags T,...] [--comment C] [--cases FILE|-|none] [--json]
+       sva runs keep DUMP [--dir D] [--name N] [--tags T,...] [--comment C] [--cases FILE|-|none] [--from T --to T] [--json]
        sva runs set RUN [DUMP] [--dir D] [--name N] [--tags T,...] [--comment C] [--cases FILE|-|none] [--json]
        sva runs rm RUN... [DUMP] [--dir D] [--json]
        sva runs path RUN [DUMP] [--dir D]
@@ -52,6 +52,9 @@ name or label without a \"TC<n> \" before it and a \" · …\" after it (the res
 --case NAME: each run over its case NAME against the dump's case NAME (--from/--to: that window of the dump; else its
 cases as keep finds them), B's time offset to the run's case, over the shorter of the two; with --against RUN, A's case
 NAME is that run's.
+A slice: keep --from T --to T keeps that window of DUMP alone, its times from 0 (its first sample, --from, is 0), with
+slice {from, to} (ps of DUMP) in runs.json, its name by default \"DUMP FROM–TO\", no cases: slices of one dump (or of
+several) compared with each other from their first sample (diff --against SLICE --run SLICE).
 TIME is a number with a unit (100ns, 2.5us; ps without one).
 Exit status: 0 done (diff: every run equal over the window); 1 diff: a run differs or does not cover the window; 2 usage,
 a dump or run that does not read, a run that is not there, a window or signal list that is empty;
@@ -93,7 +96,8 @@ const RUN_BLOCK: usize = 1 << 20;
 fn takes(cmd: &str, opt: &str) -> bool {
     let own: &[&str] = match cmd {
         "list" => &["--all", "--json"],
-        "keep" | "set" => &["--name", "--tags", "--tag", "--comment", "--cases", "--json"],
+        "keep" => &["--name", "--tags", "--tag", "--comment", "--cases", "--json", "--from", "--to"],
+        "set" => &["--name", "--tags", "--tag", "--comment", "--cases", "--json"],
         "rm" => &["--json"],
         "path" => &[],
         _ => &["--run", "--all", "--from", "--to", "--signals", "--signals-from", "--scope", "--map", "--limit", "--case", "--cases", "--json",
@@ -462,6 +466,9 @@ fn line(r: &Value) -> String {
                         r["name"].as_str().unwrap_or(""), if tags.is_empty() { String::new() } else { format!("  [{tags}]") },
                         r["dump"].as_str().unwrap_or(""), bytes_text(r["bytes"].as_u64().unwrap_or(0)),
                         crate::ns(r["start"].as_u64().unwrap_or(0)), crate::ns(r["end"].as_u64().unwrap_or(0)));
+    if let (Some(f), Some(t)) = (r["slice"]["from"].as_u64(), r["slice"]["to"].as_u64()) {
+        s += &format!(", a slice of {} … {}", crate::ns(f), crate::ns(t));
+    }
     let n = r["cases"].as_array().map_or(0, Vec::len);
     if n > 0 {
         s += &format!(", {n} case{}", if n == 1 { "" } else { "s" });
@@ -623,7 +630,19 @@ fn keep(o: &Opt) -> Result<u8, String> {
     if !meta.is_file() {
         return Err(format!("{dump}: not a file"));
     }
-    let cases = cases_for(o.cases.as_deref(), dump, o.json)?;
+    // a slice: the window --from … --to of DUMP, its times from 0
+    let mut win = (None, None);
+    for p in o.diff.chunks(2) {
+        let t = crate::time(&p[1]).map_err(|e| format!("{}: {e}", p[0]))?;
+        if p[0] == "--from" { win.0 = Some(t) } else { win.1 = Some(t) }
+    }
+    let slice = match win {
+        (None, None) => None,
+        (Some(f), Some(t)) if t > f => Some((f, t)),
+        (Some(f), Some(t)) => return Err(format!("--to {} is not after --from {}", crate::ns(t), crate::ns(f))),
+        _ => return Err("a slice: --from and --to, its window".into()),
+    };
+    let cases = if slice.is_some() { None } else { cases_for(o.cases.as_deref(), dump, o.json)? };
     let dir = dir_of(o, Some(dump));
     let made = !dir.exists();
     if made {
@@ -658,7 +677,12 @@ fn keep(o: &Opt) -> Result<u8, String> {
         (id, format!("{id}-{stem}.fst"))
     };
     let target = dir.join(&file);
-    if is_fst {
+    if let Some((from, to)) = slice {
+        let mut job = crate::fst::FstJob::new(dump);
+        (job.out, job.limit, job.quiet) = (Some(target.clone()), RUN_BLOCK, true);
+        crate::fst::write_cut_fst(job, &crate::vcd::Cut { from: Some(from), to: Some(to), signals: Vec::new(), zero: true })
+            .map_err(|e| format!("{e} (not kept)"))?;
+    } else if is_fst {
         let part = dir.join(format!("{file}.{}.part", std::process::id()));
         std::fs::copy(dump, &part).and_then(|_| std::fs::rename(&part, &target)).map_err(|e| {
             let _ = std::fs::remove_file(&part);
@@ -672,10 +696,26 @@ fn keep(o: &Opt) -> Result<u8, String> {
     }
     let (start, end, signals) = fst_facts(&target)?;
     let source = std::fs::canonicalize(dump).map_or_else(|_| dump.clone(), |p| p.to_string_lossy().into_owned());
-    let name = o.name.clone().filter(|n| !n.is_empty()).unwrap_or_else(|| Path::new(dump).file_name().map_or(dump.clone(), |n| n.to_string_lossy().into_owned()));
+    // a slice of a run kept (its FST, the waves a tab shows): of that run's dump, its window in that dump's time
+    let parent = slice.and_then(|_| {
+        let me = std::fs::canonicalize(dump).ok()?;
+        load(&dir).ok()?["runs"].as_array()?.iter()
+            .find(|r| r["file"].as_str().and_then(|f| std::fs::canonicalize(dir.join(f)).ok()).as_ref() == Some(&me)).cloned()
+    });
+    let slice = slice.map(|(f, t)| {
+        let d = parent.as_ref().and_then(|p| p["slice"]["from"].as_u64()).unwrap_or(0);
+        (f + d, t + d)
+    });
+    let of = |k: &str, own: String| parent.as_ref().and_then(|p| p[k].as_str().map(String::from)).unwrap_or(own);
+    let source = of("source", source);
+    let base = of("dump", Path::new(dump).file_name().map_or(dump.clone(), |n| n.to_string_lossy().into_owned()));
+    let name = o.name.clone().filter(|n| !n.is_empty()).unwrap_or_else(|| match slice {
+        Some((f, t)) => format!("{base} {}–{}", crate::ns(f), crate::ns(t)),
+        None => base.clone(),
+    });
     let run = json!({
         "id": id, "file": file, "name": name, "tags": o.tags.clone().unwrap_or_default(), "comment": o.comment.clone().unwrap_or_default(),
-        "dump": Path::new(dump).file_name().map_or(dump.clone(), |n| n.to_string_lossy().into_owned()), "source": source,
+        "dump": base, "source": source,
         "kept": now_utc(), "bytes": std::fs::metadata(&target).map_or(0, |m| m.len()), "source_bytes": meta.len(),
         "source_mtime": meta.modified().map_or(Value::Null, |t| utc_of(t).into()),
         "start": start, "end": end, "signals": signals,
@@ -683,6 +723,9 @@ fn keep(o: &Opt) -> Result<u8, String> {
     let mut run = run;
     if let Some(c) = cases.filter(|c| !c.is_empty()) {
         run["cases"] = c.into();
+    }
+    if let Some((from, to)) = slice {
+        run["slice"] = json!({"from": from, "to": to});
     }
     {
         let _l = Lock::take(&dir)?;
@@ -1130,7 +1173,7 @@ mod tests {
     #[test]
     fn options_by_verb() {
         let a = |s: &str| s.split(' ').map(String::from).collect::<Vec<_>>();
-        assert!(opts(&a("keep d.vcd --from 5ns")).err().unwrap().starts_with("--from: not an option of sva runs keep"));
+        assert!(opts(&a("set 1 --from 5ns")).err().unwrap().starts_with("--from: not an option of sva runs set"));
         assert!(opts(&a("list d.vcd --name x")).is_err());
         let o = opts(&a("set 1 --name=eq --dir=r")).unwrap();
         assert_eq!((o.name.as_deref(), o.dir.as_deref()), (Some("eq"), Some("r")));

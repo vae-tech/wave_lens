@@ -219,7 +219,10 @@ shows one file at a time, the dump or a run kept (`runs open`: `Tab.shown`, the 
 so `bytes` and `codes` read the file shown); `source` (⟳, the dump changed) serves the dump of now and clears it. On the
 page the run shown is `runsShown` (A), the run compared is the compare's own (`cmp.result.run`, the getter `runCur`: B);
 a step of A (`runsShow`, `openDump(keep)`) takes the view's time as it is and its rows from a snapshot taken on now and on
-each run that had every row of it (`runsKeep`), so a run without a row does not lose it for the next one.
+each run that had every row of it (`runsKeep`), so a run without a row does not lose it for the next one. A slice
+(`runs keep` with `from`, `to`: `sva runs keep --from --to`, the cut of `vcd.rs` with `Cut::zero` written as an FST by
+`fst::write_cut_fst`) starts at 0; its `slice.from` is `runOrigin`, and a step of A between origins moves the state's
+times by their difference (`runsKeep`). `runs cut` saves a window as an FST (`sva fst --from --to --zero`).
 `wavelenscat.py --check` also fails on
 a key of `WaveView.prototype` defined twice (the class in `view.js`, `Object.assign(WaveView.prototype, …)` elsewhere: the
 later would win without a word), and on a name read that nothing declares and no browser or node has (`tools/jsnames.py`:

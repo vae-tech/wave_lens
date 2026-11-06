@@ -61,7 +61,7 @@ F.run(async () => {
   const OPS = [['list', {}], ['keep', { name: 'golden', tags: ['base'], comment: 'before' }], ['set', { run: 1, name: 'gold' }],
     ['open', { run: 1 }], ['open', { run: 0 }], ['diff', { signals: ['tb.s'], from: 0, to: 30000, against: 0 }],
     ['compare', { run: 1, signals: ['tb.s', 'tb.cnt'], from: 0, to: 30000 }], ['compare', { run: 1, against: 0, signals: ['tb.s'], from: 0, to: 30000 }],
-    ['cancel', {}], ['rm', { run: 1 }]];
+    ['keep', { from: 0, to: 10000 }], ['cut', { from: 0, to: 10000 }], ['cancel', {}], ['rm', { run: 1 }]];
   const walked = [];
   for (const type of Object.keys(P.PAGE)) {
     const p = P.PAGE[type];

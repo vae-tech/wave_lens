@@ -26,6 +26,7 @@ BUILDERS = [
     ('vscode/extension.js', '  async codes(list) {', None, 'vcd', False),
     ('vscode/extension.js', '  async compare(signals,', None, 'diff', False),
     ('vscode/extension.js', '  async runs(m) {', None, 'runs', False),
+    ('vscode/extension.js', '  cutOf(src,', None, 'fst', False),
     ('vscode/extension.js', 'async function toFst(', None, 'fst', True),
 ]
 FLAG = re.compile(r'''['"`](--?[A-Za-z][\w-]*)''')   # a string that starts with a flag ('--from', '--from=…', '-q')

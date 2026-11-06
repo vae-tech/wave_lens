@@ -40,6 +40,27 @@ Object.assign(WaveView.prototype, {
     if (focus) this.runsP.focusRow(); else this.refocus();
     return this;
   },
+  // the range a … b of the waves shown kept as a slice: a run of its own, its times from 0 (its first sample is 0), so slices
+  // compare with each other from their first sample (A one, B another); the panel opens on it
+  async keepSlice(a, b) {
+    const h = this.runsHost(); if (!h) { this.toast('the slices are kept by VS Code (or sva runs keep DUMP --from T --to T)'); return null; }
+    const w = `${this.fmtCursor(a)} … ${this.fmtCursor(b)}`; this.toast(`keeping ${w} as a slice…`);
+    let m; try { m = await h.keep({ from: a, to: b }); } catch (e) { m = { error: e.message }; }
+    if (m.error || !m.run) { this.toast(`not kept: ${m.error || 'no answer'}`); return null; }
+    this.runsPanel(true, false); if (this.runsP) { await this.runsP.load(); this.runsP.fi = this.runsP.rowOf(m.run.id); this.runsP.render(); }
+    const s = `#${m.run.id} ${m.run.name} kept: ${w}, its times from 0 (w shows it, B compares it with A)`;
+    this.toast(s); if (this.runsP) this.runsP.status(s);
+    return m.run;
+  },
+  // the range a … b of the waves shown as an FST of its own (its times from 0), where the host's save dialog says
+  async saveSlice(a, b) {
+    const h = this.runsHost();
+    if (!h || !h.cut) { this.toast('an FST is written by VS Code (or sva fst DUMP --from T --to T --zero --out X.fst)'); return null; }
+    let m; try { m = await h.cut(a, b); } catch (e) { m = { error: e.message }; }
+    if (m.cancel) return null;
+    this.toast(m.error ? `not saved: ${m.error}` : `saved ${m.path}: ${this.fmtCursor(a)} … ${this.fmtCursor(b)}, its times from 0`);
+    return m.path || null;
+  },
   // the window a run is compared over: your span chosen (runsWin: its label, from and to — the span followed by what it is,
   // not by its place in the list), else the waves in sight; inside the page's time. A span gone: the waves in sight again (said)
   runsWindow() {
@@ -142,8 +163,21 @@ Object.assign(WaveView.prototype, {
     const st = this.state(), snap = move && this.runsSnap;
     if (snap) for (const k of Object.keys(snap)) if (!RUN_TIME_KEYS.includes(k)) st[k] = snap[k];
     if (move) { delete st.compare; delete st.compareShow; }   // the compare of the A of before: made again with the new one (runsAgain)
+    // a slice's times are from 0: from the dump to a slice of it (or back, or to a slice elsewhere in it) the times of the view
+    // go with it — the same place of the dump in sight, your markers on the same moments
+    const d = move ? this.runOrigin(this.runsA()) - this.runOrigin(this.runsTo || 0) : 0;
+    if (d) {
+      const t = x => (typeof x === 'number' && isFinite(x) ? x + d : x);
+      for (const k of ['from', 'to', 'cursor', 'cursor2']) st[k] = t(st[k]);
+      if (st.range) st.range = Object.assign({}, st.range, { from: t(st.range.from), to: t(st.range.to) });
+      st.markers = (st.markers || []).map(m => Object.assign({}, m, { t: t(m.t) }));
+      st.bookmarks = (st.bookmarks || []).map(b => Object.assign({}, b, { t: t(b.t) }));
+      st.spans = (st.spans || []).map(x => Object.assign({}, x, { from: t(x.from), to: t(x.to) }));
+    }
     return st;
   },
+  // where a run's time 0 is in the time of the dump: a slice's from (ps), else 0 (the dump of now, a whole run)
+  runOrigin(id) { const r = id && (this.runsL || []).find(x => x.id === id); return r && r.slice && isFinite(r.slice.from) ? +r.slice.from : 0; },
   // the runs' part of the view, kept over a dump read again (⟳, a run shown): the panel, the window, the run compared and
   // how, A (a read again of the dump: now), the snapshot, the list
   runsOf() {
@@ -276,8 +310,9 @@ class Runs {
       const when = r.now ? `${r.mtime ? new Date(r.mtime).toISOString().slice(0, 16).replace('T', ' ') + ' on the disk' : 'the dump on the disk'}` :
         `kept ${hm(r.kept)}${r.source_mtime && Math.abs(Date.parse(r.source_mtime) - Date.parse(r.kept)) > 60000 ?
           ` of a dump of ${hm(r.source_mtime).slice(11)}` : ''}`;
-      const size = r.now ? r.bytes : r.source_bytes;
-      const line2 = [r.now ? r.dump : r.dump && r.dump !== me ? r.dump : '', when, size ? mb(size) : '',
+      const size = r.now || r.slice ? r.bytes : r.source_bytes, sl = r.slice && isFinite(r.slice.from) && isFinite(r.slice.to) ?
+        `slice ${f(r.slice.from)} … ${f(r.slice.to)}, from 0` : '';
+      const line2 = [r.now ? r.dump : r.dump && r.dump !== me ? r.dump : '', sl, when, size ? mb(size) : '',
         r.cases && r.cases.length ? `${r.cases.length} case${r.cases.length === 1 ? '' : 's'}` : '', r.comment ? r.comment.split('\n')[0] : '']
         .filter(Boolean).map(esc).join(' · ');
       return `<div class="mn rn${r.now ? ' rnow' : ''}${i === this.fi ? ' pv' : ''}" role="option" data-i="${i}" style="top:${i * RUN_H}px" ` +

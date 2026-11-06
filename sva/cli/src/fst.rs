@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 const USAGE: &str = "usage: sva fst [--waves] DUMP.vcd [--out FILE.fst] [--types FILE.types.json | --no-types] [--map DUMP=TYPES ...] [--block-bytes N] [--quiet]
+       sva fst DUMP --from T --to T [--zero] --out PIECE.fst   (a window of a dump, VCD or FST, as an FST of its own)
 The VCD as an FST, as GTKWave's vcd2fst writes it, by default beside the dump under its name (tb.vcd -> tb.fst; an
 FST there is replaced, the file appears only when it is complete). Every scope and variable with its type and name,
 one id code at several places as aliases, the attributes ($attrbegin: the enum tables of FSM states and their
@@ -27,7 +28,10 @@ references), the $comment lines of the header, $timezero, $dumpoff / $dumpon. Th
 file (tb.types.json beside tb.vcd, or --types; --map as in svtypes.py check) become enum tables of the variables
 whose width is the type's (or an integer wider than the enum: a Questa VCD of an enum type); a table the VCD gives a
 variable stays. --block-bytes: a block of changes every N bytes of them (64 MiB; smaller: a reader holds less, a late
-window of sva diff / sva vcd --from reads only the blocks from there). The last line says what was written.";
+window of sva diff / sva vcd --from reads only the blocks from there). The last line says what was written.
+A window (--from/--to, TIME 100ns, 2.5us; ps without one): the cut sva vcd --from --to writes (every signal's value at
+--from, its changes to --to) as an FST to --out; --zero: its times from 0 (--from is 0: pieces of one or several dumps
+compared with each other from their first sample, sva diff A.fst B.fst).";
 
 /// Bytes of value changes held before a block is written (`--block-bytes`; `sva runs keep` writes 1 MiB).
 const BLOCK: usize = 64 << 20;
@@ -1552,6 +1556,27 @@ impl FstJob {
     }
 }
 
+/// A cut of a dump (FST or VCD: a window, its times from 0 with `zero`) written as an FST to `job.out`: the cut as VCD
+/// text in a file beside it first, gone after; the dump's types file kept (its FSM states) -> as write_fst.
+pub(crate) fn write_cut_fst(mut job: FstJob, cut: &crate::vcd::Cut) -> Result<(PathBuf, Done, Option<PathBuf>), String> {
+    let dump = job.waves.clone();
+    let Some(target) = job.out.clone() else { return Err(format!("{dump}: a cut is written where --out says")) };
+    if target.canonicalize().ok().is_some_and(|t| Path::new(&dump).canonicalize().ok() == Some(t)) {
+        return Err(format!("{dump}: the cut would replace the dump: --out another file"));
+    }
+    let name = target.file_name().map_or("cut".into(), |n| n.to_string_lossy().into_owned());
+    let text = target.with_file_name(format!("{name}.{}.cut.vcd", std::process::id()));
+    if !job.no_types && job.types.is_none() {
+        job.types = types_beside(&dump).map(|p| p.to_string_lossy().into_owned());
+    }
+    let r = crate::vcd::cut_file(&dump, cut, &text).and_then(|_| {
+        job.waves = text.to_string_lossy().into_owned();
+        write_fst(job)
+    });
+    let _ = std::fs::remove_file(&text);
+    r
+}
+
 /// The FST written (part beside the target, renamed over it when complete) -> its path and what was written; its types
 /// file's notes on stderr.
 pub(crate) fn write_fst(job: FstJob) -> Result<(PathBuf, Done, Option<PathBuf>), String> {
@@ -1610,10 +1635,24 @@ pub(crate) fn write_fst(job: FstJob) -> Result<(PathBuf, Done, Option<PathBuf>),
 pub fn fst_cmd(args: &[String]) -> ExitCode {
     let mut job = FstJob::new("");
     let mut waves = None::<String>;
+    let mut cut = crate::vcd::Cut { from: None, to: None, signals: Vec::new(), zero: false };
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--waves" => waves = it.next().cloned(),
+            "--zero" => cut.zero = true,
+            "--from" | "--to" => match it.next().map(|v| crate::time(v)) {
+                Some(Ok(t)) if a == "--from" => cut.from = Some(t),
+                Some(Ok(t)) => cut.to = Some(t),
+                Some(Err(e)) => {
+                    eprintln!("sva: {a}: {e}");
+                    return ExitCode::from(2);
+                }
+                None => {
+                    eprintln!("sva: {a} needs a time\n{USAGE}");
+                    return ExitCode::from(2);
+                }
+            },
             "--out" | "-o" => job.out = it.next().map(PathBuf::from),
             "--types" => job.types = it.next().cloned(),
             "--no-types" => job.no_types = true,
@@ -1650,7 +1689,14 @@ pub fn fst_cmd(args: &[String]) -> ExitCode {
     };
     job.waves = waves;
     let quiet = job.quiet;
-    match write_fst(job) {
+    let cutting = cut.from.is_some() || cut.to.is_some() || cut.zero;
+    if let (Some(f), Some(t)) = (cut.from, cut.to) {
+        if t <= f {
+            eprintln!("sva: --to {} is not after --from {}", crate::ns(t), crate::ns(f));
+            return ExitCode::from(2);
+        }
+    }
+    match if cutting { write_cut_fst(job, &cut) } else { write_fst(job) } {
         Ok((target, d, tfile)) => {
             if !quiet {
                 let types = match (&tfile, d.from_types) {

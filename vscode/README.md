@@ -23,7 +23,8 @@ is turned into VCD text with it, kept in the extension's storage).
 - **Saving** (state, PNG, SVG, WaveDrom, the report) asks where on the host; **Load…**, the `.sv` files and Compare
   pick on the host too. Bookmarks, groups, colours are kept per dump in the workspace (the store of a dump that no longer exists goes at the next start).
 - **A piece of the waves** (the right button on a range: *Save as WaveLens (JSON)*): `x.wavelens.json` opens in a tab
-  of its own (*Open in WaveLens*), its view with it.
+  of its own (*Open in WaveLens*), its view with it. *Slice ▸* keeps the range as a run of its own whose times start at 0
+  (pieces compared with each other from their first sample in the Runs panel), or saves it as an FST.
 - **The runs kept** (Runs…, `gu`, *WaveLens: The runs kept of this dump*): keep the dump of now with a name, tags and a comment
   (an FST in `.wavelens-runs` beside it). The list holds the dump of now and the runs; two rows carry a letter: **A**, the
   waves shown in the tab (`w`: a run's waves read here, the window and rows kept; `]w` `[w` walk through the runs), and **B**,

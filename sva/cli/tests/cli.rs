@@ -1595,6 +1595,38 @@ fn runs_the_directory_rule() {
 }
 
 #[test]
+fn slices_from_their_first_sample() {
+    let d = runs_dir("slice");
+    let dump = put(&d, "d.vcd", &counter(None, false));
+    // sva vcd --zero: the cut's first sample is #0; sva fst of a window (--out only)
+    let o = sva(&["vcd", &dump, "--from", "20ns", "--to", "30ns", "--zero"]);
+    let times: Vec<String> = out(&o).lines().filter(|l| l.starts_with('#')).map(String::from).collect();
+    assert_eq!(times, ["#0", "#5", "#10"], "{}", err(&o));
+    let piece = d.join("p.fst").to_string_lossy().into_owned();
+    assert!(sva(&["fst", &dump, "--from", "20ns", "--to", "30ns", "--zero", "--out", &piece, "--quiet"]).status.success());
+    assert_eq!(out(&sva(&["vcd", &piece])).lines().filter(|l| l.starts_with('#')).collect::<Vec<_>>(), ["#0", "#5", "#10"]);
+    assert!(err(&sva(&["fst", &dump, "--from", "20ns", "--to", "30ns"])).contains("--out"), "a cut: where --out says");
+    // sva runs keep --from --to: slices, compared with each other from their first sample (clk the same, cnt not)
+    for (f, t) in [("0ns", "10ns"), ("20ns", "30ns")] {
+        assert!(sva(&["runs", "keep", &dump, "--from", f, "--to", t]).status.success());
+    }
+    let j = runs_json(&d.join(".wavelens-runs"));
+    let r = &j["runs"][1];
+    assert_eq!((r["name"].as_str(), r["slice"]["from"].as_u64(), r["start"].as_u64(), r["end"].as_u64()),
+               (Some("d.vcd 20 ns–30 ns"), Some(20000), Some(0), Some(10000)));
+    assert!(j["runs"][0].get("cases").is_none());
+    assert!(sva(&["runs", "diff", &dump, "--against", "1", "--run", "2", "--signals", "tb.clk,tb.ok"]).status.success(), "the same from 0");
+    assert_eq!(sva(&["runs", "diff", &dump, "--against", "1", "--run", "2", "--signals", "tb.cnt"]).status.code(), Some(1));
+    // a slice of a slice (a tab shows a run): of the dump, its window in the dump's time
+    let fst = d.join(".wavelens-runs").join("2-d.fst").to_string_lossy().into_owned();
+    assert!(sva(&["runs", "keep", &fst, "--from", "2ns", "--to", "6ns"]).status.success());
+    let r = &runs_json(&d.join(".wavelens-runs"))["runs"][2];
+    assert_eq!((r["dump"].as_str(), r["slice"]["from"].as_u64(), r["slice"]["to"].as_u64()), (Some("d.vcd"), Some(22000), Some(26000)));
+    assert!(err(&sva(&["runs", "keep", &dump, "--from", "5ns"])).contains("--from and --to"));
+    assert!(err(&sva(&["runs", "set", "1", &dump, "--from", "5ns"])).contains("not an option of sva runs set"));
+}
+
+#[test]
 fn runs_of_one_dump_in_a_shared_directory() {
     let d = runs_dir("shared");
     let ds = d.join("shared").to_string_lossy().into_owned();
@@ -1614,7 +1646,7 @@ fn runs_of_one_dump_in_a_shared_directory() {
 fn runs_options_and_edges() {
     let d = runs_dir("edges");
     let dump = put(&d, "d.vcd", &counter(None, false));
-    assert!(err(&sva(&["runs", "keep", &dump, "--from", "5ns"])).contains("not an option of sva runs keep"));
+    assert!(err(&sva(&["runs", "keep", &dump, "--signals", "tb.ok"])).contains("not an option of sva runs keep"));
     assert!(sva(&["runs", "keep", &dump, "--name=eq"]).status.success(), "--opt=value");
     let r = d.join(".wavelens-runs").to_string_lossy().into_owned();
     assert_eq!(runs_json(&d.join(".wavelens-runs"))["runs"][0]["name"], "eq");

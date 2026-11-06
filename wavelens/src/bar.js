@@ -59,6 +59,9 @@ const TIPS = {
   'm:undup': ['This copy out of the waves: a bookmark on it goes to its signal'],
   'm:bits': ['The bus bit by bit: a row per bit under it, the highest first (a click on its width [7:0] does it too)', ['B']],
   'm:wdjson': ['The range as a WaveDrom file (.json): the highlighted signals, else the ones on the screen, a cell per clock cycle'],
+  'm:slkeep': ['The range of the waves shown (the dump, or the run shown) kept among the runs as a slice of its own: every signal, its times ' +
+    'from 0, so slices (of this dump or of others) compare with each other from their first sample: w shows one, B compares it (VS Code)'],
+  'm:slfst': ['The range of the waves shown as an FST file of its own, every signal, its times from 0 (a save dialog; sva fst --from --to --zero)'],
   'm:wlpiece': ['The range as waves WaveLens opens on its own (.wavelens.json): the highlighted signals, else the ones on the screen, ' +
     'exact, with your view of them (colours, radix, marks inside it)'],
     'm:wdcopy': ['The same WaveDrom to the clipboard'],

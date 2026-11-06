@@ -123,6 +123,12 @@ class Mcp(unittest.TestCase):
             self.assertEqual(len(call(dump=p, all=True)['runs']), 2)
             rm = call(action='rm', dir=os.path.join(d, '.wavelens-runs'), run='golden')
             self.assertEqual((rm['removed'][0]['id'], rm['removed'][0]['end'], rm['unit']), (1, 40, 'ns'), 'rm answers in ns (B-23)')
+            s1 = call(action='keep', dump=p, **{'from': 0, 'to': 10})
+            s2 = call(action='keep', dump=p, name='b', **{'from': 20, 'to': 30})
+            self.assertEqual((s1['slice'], s1['start'], s1['end'], s2['slice'], s2['name']), ({'from': 0, 'to': 10}, 0, 10, {'from': 20, 'to': 30}, 'b'),
+                             'keep from, to: a slice, its times from 0, its window in ns')
+            x = call(action='diff', dump=p, against=s1['id'], run=s2['id'], signals=['tb.clk'])['runs'][0]
+            self.assertEqual(x['signals_differ'], 0, ('two slices from their first sample: clk the same', x))
             bad = W.call('wave_runs', {'action': 'set', 'dump': p})
             self.assertTrue(bad[1] and '"run"' in bad[0], bad)
 
@@ -165,9 +171,10 @@ class Mcp(unittest.TestCase):
 
 EXT = r'''
 const [F, ext, dir, dump, mode] = process.argv.slice(1).map((x, i) => (i ? x : require(x)));
-let warned = null, answer = 'Remove';
+let warned = null, answer = 'Remove', saveTo = null, saveAsked = null;
 const h = F.host({ ext, dir, config: { sva: process.env.WAVELENS_SVA }, vscode: { ProgressLocation: { Notification: 15 } },
-  window: { withProgress: async (o, f) => f(), showWarningMessage: async (m) => { warned = m; return answer; } },
+  window: { withProgress: async (o, f) => f(), showWarningMessage: async (m) => { warned = m; return answer; },
+    showSaveDialog: async o => { saveAsked = o.defaultUri.fsPath; return saveTo ? h.Uri.file(saveTo) : undefined; } },
   workspace: { getWorkspaceFolder: () => undefined } });
 process.on('uncaughtException', e => { console.error('UNCAUGHT ' + e.message); process.exit(3); });
 (async () => {
@@ -186,6 +193,20 @@ process.on('uncaughtException', e => { console.error('UNCAUGHT ' + e.message); p
     out.plain = await ask({ op: 'compare', run: 1, signals: ['tb.cnt'], from: 30000, to: 50000 });
     out.diff = await ask({ op: 'diff', case: 't_b', signals: ['tb.cnt'], from: 30000, to: 50000 });
     out.none = await ask({ op: 'compare', run: 1, case: 't_z', signals: ['tb.cnt'], from: 30000, to: 50000 });
+    console.log('RESULT' + JSON.stringify(out)); process.exit(0);
+  }
+  if (mode === 'slice') {   // pieces of the waves kept as runs, their times from 0, compared with each other; one saved as an FST
+    out.s1 = await ask({ op: 'keep', from: 0, to: 10000 });
+    out.s2 = await ask({ op: 'keep', from: 20000, to: 30000, name: 'second' });
+    out.bad = await ask({ op: 'keep', from: 30000, to: 30000 });
+    out.same = await ask({ op: 'compare', run: 2, against: 1, signals: ['tb.clk', 'tb.ok'], from: 0, to: 10000 });
+    out.cnt = await ask({ op: 'compare', run: 2, against: 1, signals: ['tb.cnt'], from: 0, to: 10000 });
+    await ask({ op: 'open', run: 2 });
+    out.s3 = await ask({ op: 'keep', from: 2000, to: 6000 });
+    await ask({ op: 'open', run: 0 });
+    out.cancel = await ask({ op: 'cut', from: 20000, to: 30000 }); out.asked = saveAsked;
+    saveTo = require('path').join(dir, 'piece.fst'); out.cut = await ask({ op: 'cut', from: 20000, to: 30000 });
+    out.nocut = await ask({ op: 'cut', from: 5, to: 5 });
     console.log('RESULT' + JSON.stringify(out)); process.exit(0);
   }
   if (mode === 'pick') {   // the run pick: A a run (its waves served as the dump's), B compared with it, A back to now
@@ -271,6 +292,28 @@ class VsCode(unittest.TestCase):
             self.assertEqual((o['listAfter'], o['zeroShown']), (0, 0))
             self.assertEqual(o['zero']['name'], 'waves.vcd')
             self.assertIn('no run #9', o['none']['error'])
+
+    def test_slices_kept_compared_and_saved(self):
+        """A range of the page kept as a slice (keep with from, to): its times from 0, so two slices compare from their first
+        sample; a slice of a run shown is of that run's dump at its time there; cut saves the window as an FST of its own."""
+        with H.tmp() as d:
+            p = H.vcd(d, body(), HEAD, name='waves.vcd')
+            r = subprocess.run([NODE, '-e', EXT, FAKE, os.path.join(H.ROOT, 'vscode', 'extension.js'), d, p, 'slice'], capture_output=True, text=True,
+                               timeout=90, env=dict(os.environ, WAVELENS_SVA=SVA))
+            o = result(r)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            s1, s2, s3 = o['s1']['run'], o['s2']['run'], o['s3']['run']
+            self.assertEqual((s1['name'], s1['slice'], s1['start'], s1['end']), ('waves.vcd 0 ps–10 ns', {'from': 0, 'to': 10000}, 0, 10000), s1)
+            self.assertEqual((s2['name'], s2['slice'], s2['start'], s2['end']), ('second', {'from': 20000, 'to': 30000}, 0, 10000), s2)
+            self.assertIn('error', o['bad'], 'an empty window: refused')
+            self.assertEqual(o['same']['result']['differ'], 0, ('0–10 ns and 20–30 ns from their first sample: clk and ok the same', o['same']))
+            self.assertEqual(o['cnt']['result']['differ'], 1, o['cnt'])
+            self.assertEqual((s3['name'], s3['slice'], s3['dump']), ('waves.vcd 22 ns–26 ns', {'from': 22000, 'to': 26000}, 'waves.vcd'), s3)
+            self.assertTrue(o['cancel'].get('cancel') and o['asked'] == os.path.join(d, 'waves.20000-30000ps.fst'), o)
+            self.assertEqual(o['cut']['path'], os.path.join(d, 'piece.fst'))
+            code, text, _ = sva('vcd', os.path.join(d, 'piece.fst'))
+            self.assertEqual([x for x in text.splitlines() if x.startswith('#')], ['#0', '#5', '#10'], 'the piece from 0')
+            self.assertIn('error', o['nocut'])
 
     def test_the_runs_panel_host(self):
         with H.tmp() as d:

@@ -29,13 +29,13 @@ use fst_reader::{FstFilter, FstHierarchyEntry, FstReader, FstScopeType, FstSigna
 use wellen::stream::{self, Filter};
 use wellen::{Hierarchy, ItemRef, LoadOptions, ScopeType, SignalRef, SignalValueRef, TimescaleUnit, VarRef, VarType};
 
-const USAGE: &str = "usage: sva vcd [--waves] DUMP [--out FILE.vcd] [--header | --codes FILE] [--from T] [--to T] [--signals PAT,...] [--signals-from FILE]
+const USAGE: &str = "usage: sva vcd [--waves] DUMP [--out FILE.vcd] [--header | --codes FILE] [--from T] [--to T] [--zero] [--signals PAT,...] [--signals-from FILE]
 The dump (FST or VCD) as VCD text, to FILE or stdout, as GTKWave's fst2vcd -e writes it: the names as the FST holds
 them, FST enum tables included, strings escaped as fstapi does (\\040 for a space), the end time of the dump kept.
 Of an FST a part: --header the declarations and the first and last times only; --codes FILE (- stdin) the variables
 of those id codes (as the whole text numbers them, apart by white space) with their changes.
 A cut: --from/--to a window (TIME: 100ns, 2.5us; ps without one): each signal's value at --from as $dumpvars under
-#from (x when it has none yet), its changes up to --to, then #to; --signals only those (paths, * ? patterns, or
+#from (x when it has none yet), its changes up to --to, then #to (--zero: the times from 0, #from is #0); --signals only those (paths, * ? patterns, or
 the one path that ends with a name; an element of an unpacked array either way, mem[1] or mem.[1], a [1] in the
 scope mem too); --signals-from FILE (- stdin): the same, one a line (a name may hold a comma, and a list too long
 for a command line goes this way).";
@@ -703,6 +703,69 @@ pub(crate) struct Cut {
     pub from: Option<u64>,
     pub to: Option<u64>,
     pub signals: Vec<String>,
+    /// the times from 0: the cut's first time (its first sample, `from`) is 0 (`--zero`; a slice of the runs)
+    pub zero: bool,
+}
+
+/// The cut's times from 0 (`Cut::zero`): the first time line `#t` after the declarations is the origin, each one `#(t -
+/// origin)`; every other line as it is.
+struct Zero<'a, W: Write> {
+    o: &'a mut W,
+    line: Vec<u8>,
+    body: bool,
+    origin: Option<u64>,
+}
+
+impl<W: Write> Zero<'_, W> {
+    fn line_out(&mut self) -> std::io::Result<()> {
+        let l = std::mem::take(&mut self.line);
+        let text = l.strip_suffix(b"\n").unwrap_or(&l);
+        let t = (self.body && text.len() > 1 && text[0] == b'#' && text[1..].iter().all(u8::is_ascii_digit))
+            .then(|| std::str::from_utf8(&text[1..]).ok().and_then(|x| x.parse::<u64>().ok())).flatten();
+        match t {
+            Some(t) => {
+                let o = *self.origin.get_or_insert(t);
+                write!(self.o, "#{}", t.saturating_sub(o))?;
+                if text.len() < l.len() {
+                    self.o.write_all(b"\n")?;
+                }
+            }
+            None => {
+                if text.starts_with(b"$enddefinitions") {
+                    self.body = true;
+                }
+                self.o.write_all(&l)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<W: Write> Write for Zero<'_, W> {
+    fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+        let mut rest = b;
+        while let Some(k) = rest.iter().position(|&c| c == b'\n') {
+            self.line.extend_from_slice(&rest[..=k]);
+            self.line_out()?;
+            rest = &rest[k + 1..];
+        }
+        self.line.extend_from_slice(rest);
+        Ok(b.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        if !self.line.is_empty() {
+            self.line_out()?;
+        }
+        self.o.flush()
+    }
+}
+
+/// A cut of a dump as a VCD file (`sva fst --from --to`, a slice kept by `sva runs keep --from --to`).
+pub(crate) fn cut_file(waves: &str, cut: &Cut, out: &std::path::Path) -> Result<(), String> {
+    let f = std::fs::File::create(out).map_err(|e| format!("{}: {e}", out.display()))?;
+    let mut o = std::io::BufWriter::with_capacity(1 << 20, f);
+    convert(waves, &Part::All, Some(cut), &mut o)?;
+    o.flush().map_err(|e| format!("{}: {e}", out.display()))
 }
 
 /// A path with an array element glued to its array: `mem.[1]` (wellen's array scope, the name WaveLens's readers give)
@@ -789,7 +852,7 @@ impl Write for Capped {
 /// B's values of the signals that differ) -> the text, or why there is none.
 pub(crate) fn cut_text(waves: &str, from: u64, to: u64, signals: Vec<String>, cap: usize) -> Result<String, String> {
     let mut o = Capped { buf: Vec::new(), cap, over: false };
-    let r = convert(waves, &Part::All, Some(&Cut { from: Some(from), to: Some(to), signals }), &mut o);
+    let r = convert(waves, &Part::All, Some(&Cut { from: Some(from), to: Some(to), signals, zero: false }), &mut o);
     if o.over {
         return Err(format!("more than {} MB of changes of the signals that differ: compare fewer signals or a shorter window", cap >> 20));
     }
@@ -797,8 +860,18 @@ pub(crate) fn cut_text(waves: &str, from: u64, to: u64, signals: Vec<String>, ca
     String::from_utf8(o.buf).map_err(|e| e.to_string())
 }
 
-/// The dump as VCD text into `o`: an FST by fst-reader, anything else by wellen; a part of an FST only; a cut of either.
+/// The dump as VCD text into `o`: an FST by fst-reader, anything else by wellen; a part of an FST only; a cut of either
+/// (its times from 0: `Cut::zero`).
 fn convert(waves: &str, part: &Part, cut: Option<&Cut>, o: &mut impl Write) -> Result<(), String> {
+    if cut.is_some_and(|c| c.zero) {
+        let mut z = Zero { o, line: Vec::new(), body: false, origin: None };
+        convert_as(waves, part, cut, &mut z)?;
+        return z.flush().map_err(io_text);
+    }
+    convert_as(waves, part, cut, o)
+}
+
+fn convert_as(waves: &str, part: &Part, cut: Option<&Cut>, o: &mut impl Write) -> Result<(), String> {
     // a VCD whose vectors are glued to their codes (Questa 2023's integers): wellen stops at one, its FST is read instead
     let glued = if matches!(part, Part::All) { crate::fst::glued_fst(waves)? } else { None };
     let waves = glued.as_ref().map_or(waves.to_string(), |g| g.0.to_string_lossy().into_owned());
@@ -852,13 +925,14 @@ fn io_text(e: std::io::Error) -> String {
 
 pub fn vcd_cmd(args: &[String]) -> ExitCode {
     let (mut waves, mut out, mut header, mut codes) = (None::<String>, None::<String>, false, None::<String>);
-    let mut cut = Cut { from: None, to: None, signals: Vec::new() };
+    let mut cut = Cut { from: None, to: None, signals: Vec::new(), zero: false };
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--waves" => waves = it.next().cloned(),
             "--out" | "-o" => out = it.next().cloned(),
             "--header" => header = true,
+            "--zero" => cut.zero = true,
             "--codes" => codes = it.next().cloned(),
             "--from" | "--to" => {
                 let t = match it.next().map(|v| crate::time(v)) {
@@ -913,7 +987,7 @@ pub fn vcd_cmd(args: &[String]) -> ExitCode {
         eprintln!("sva: {waves}: {e}");
         return ExitCode::from(2);
     }
-    let cutting = cut.from.is_some() || cut.to.is_some() || !cut.signals.is_empty();
+    let cutting = cut.from.is_some() || cut.to.is_some() || !cut.signals.is_empty() || cut.zero;
     if cutting && (header || codes.is_some()) {
         eprintln!("sva: --header / --codes and a cut (--from --to --signals), not together\n{USAGE}");
         return ExitCode::from(2);

@@ -99,7 +99,12 @@ Object.assign(WaveView.prototype, {
       `aria-label="marker ${mkId} colour"></label>` + (mk.color ? b('mkpale', 'Pale again') : '') + b('mkdel', 'Delete the marker') + '<hr>' : '') +
       (r ? `<div class="mh">${esc(this.rangeText())}</div>` + b('zoom', 'Zoom to the range') + b('marks', 'Bookmarks at its ends',
       'Two bookmarks and an arrow with the Δ between them') + b('copyd', 'Copy Δ') + b('keepsp', 'Keep as span…',
-      'A span of yours over this range, its label asked (empty: none); the range stays') + '<hr>' : '') +
+      'A span of yours over this range, its label asked (empty: none); the range stays') +
+      // the range as waves of their own: a slice among the runs kept, an FST file (its times from 0: its first sample is 0)
+      (this.M.timed && this.runsHost() ? `<div class="msub"><button type="button" role="menuitem" class="subs" aria-haspopup="menu" ` +
+        `aria-expanded="false"><span>Slice</span><span class="kk">▸</span></button><div class="sub" role="menu" hidden>` +
+        '<div class="mh">the range alone, its times from 0</div>' + b('slkeep', 'Keep as a slice (Runs)') + b('slfst', 'Save as FST…') +
+        '</div></div>' : '') + '<hr>' : '') +
       (spAt ? `<div class="mh">Span ${spId}${spAt.label ? ' · ' + esc(spAt.label) : ''}</div>` + b('asrange', 'As range', 'This span measured as the range') +
         b('spdel', 'Delete the span') + '<hr>' : '') +
       (np ? `<div class="mh">${np} ${this.selRun.size > 1 ? 'selected' : 'highlighted'} rows</div>` : '') + b('copyimg', 'Copy image') + b('png',
@@ -191,7 +196,7 @@ Object.assign(WaveView.prototype, {
     const done = () => { this.closeMenu(); this.refocus(); };
     // the submenu: open on the pointer or a click, beside the menu (the left side when the right has no room)
     for (const msub of el.querySelectorAll('.msub')) {   // the gaps, the cycles, your groups
-      const sub = msub.querySelector('.sub'), subh = msub.querySelector('.subh, .subc, .subg');
+      const sub = msub.querySelector('.sub'), subh = msub.querySelector('.subh, .subc, .subg, .subs');
       const subOpen = on => {
         sub.hidden = !on; subh.setAttribute('aria-expanded', on); if (!on) return;
         Object.assign(sub.style, { left: '100%', right: 'auto', top: '-5px' }); const s = sub.getBoundingClientRect();
@@ -215,6 +220,8 @@ Object.assign(WaveView.prototype, {
         const top = this.topNow(); this.bms.push(...bmNorm([{ n, t: r[0], signal: s, top }, { n: n + 1, t: r[1], signal: s, top }]));
         this.arrows.push(...arNorm([{ from: n, to: n + 1, shape: '-', head: '<>', label: this.rangeText().replace(/^Δ /, '') }])); this.changed(true);
       }
+      else if (act === 'slkeep') this.keepSlice(...r);
+      else if (act === 'slfst') this.saveSlice(...r);
       else if (act === 'keepsp') { const [x, y] = this.menuAt, [a, z] = r;
         this.askText(x, y, `Span · ${this.fmtCursor(a)} … ${this.fmtCursor(z)}`, 'its label (empty: none)',
           label => this.run(Object.assign({ op: 'span', from: a, to: z }, label ? { label } : {})));
