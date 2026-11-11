@@ -96,7 +96,10 @@ operand        = number | ''0' | ''1' | ''x' | ''z' | hier | pkg '::' name | '('
 ```
 
 Numbers: `12`, `1_000`, `8'hFF`, `4'b10x1`, `6'o17`, `10'd1023`, `'hDEAD_BEEF`, `8'sd5`, with `x` / `z` / `?` digits;
-at most 64 bits. A size cast `N'(expr)` is in, also with a constant name for `N` (`p_PTR_W'(p_DEPTH)`, a parameter); type
+at most 64 bits. A leading `x` / `z` fills the size (`8'hx` is 8 x bits); an unsized one (`'hx`, `'bz`, `'dx`) is x in
+every bit of its context (IEEE 1800-2017 5.7.1), so `d != 'hx` is unknown as `d != 8'hx` is; a leading known digit is
+zero-extended (`'h1x` is `0001xxxx`).
+A size cast `N'(expr)` is in, also with a constant name for `N` (`p_PTR_W'(p_DEPTH)`, a parameter); type
 casts `int'(x)` are not.
 
 ## Constructs, one example each
@@ -179,7 +182,8 @@ resolution*).
   the instance is written), a sequence or property declaration (an instance without arguments), a constant (a
   `Const` node with its value), or a signal. Declarations may come after their use in the file.
 - Actual arguments: positional, then named (`.x(a)`); an empty one (`s(a, , c)`) takes the default; a missing one
-  without a default, an extra one, an unknown name or one given twice is an error. A formal typed `sequence` takes a
+  without a default, an extra one, an unknown name or one given twice is an error. A default is expanded where the
+  declaration is, a formal before it standing for its actual (`sequence s(r, q = r[*2])`: `s(x)` has `x[*2]`). A formal typed `sequence` takes a
   sequence; a formal with a data type (`logic`, `int`, ...) takes an expression; `untyped` and `property` take anything.
 - A sequence or property used where it does not fit is an error: a property where a sequence is needed, a sequence
   name inside a boolean (`s && x`: use the sequence as an operand of `and` or `##`), `.triggered` / `.matched`.
@@ -210,7 +214,8 @@ An error inside a declaration that an assertion led to says which: `... (in asse
 
 Token-based, before parsing: `` `define NAME body`` (to the end of the line, `\` continues it, also at the end of a
 `//` comment line inside the body; a comment without it ends the body; directives in a body act where it is used),
-`` `define NAME(a, b = 1) body `` (arguments split at top-level commas, defaults, empty arguments), uses `` `NAME `` /
+`` `define NAME(a, b = 1) body `` (arguments split at top-level commas — `[*`, `[->`, `[=`, `'(` and `'{` open a bracket
+as `(` `[` `{` do, so `` `CHK(x1, a |-> b[*2]) `` has two —, defaults, empty arguments), uses `` `NAME `` /
 `` `NAME(x, y) `` expanded and scanned again (32 levels at most), `` `undef ``, `` `ifdef `` / `` `ifndef `` /
 `` `elsif `` / `` `else `` / `` `endif `` (nested), `sva parse -D NAME[=VALUE]`. `` `timescale ``,
 `` `default_nettype ``, `` `resetall ``, `` `celldefine `` and the like are ignored. `` `include `` is not followed (a
@@ -281,8 +286,9 @@ docs/sva/ENGINE.md has the evaluator, its results and every decision in full; in
 - **Several matches.** A sequence with a range can match in several ways; an implication passes only when every match
   of the antecedent has a matching consequent (each match is its own thread); `first_match` keeps the earliest;
   `intersect` needs both to end at the same tick; `and` ends at the later of the two ends; `or` at either; `within`
-  needs the left one to start and end inside the right one.
-- **Covers** count every attempt that matches (`cover sequence`: every match, also several from one attempt).
+  needs the left one to start and end inside the right one (and to match a cycle: an empty match of it is none).
+- **Covers** count every attempt that matches (`cover sequence`: every match, also several from one attempt; one start
+  and end counted once).
 - **Widths.** Values are unsigned, at most 64 bits; operators size their operands as IEEE 1800-2017 11.6 does for
   unsigned operands (the context width for arithmetic and bitwise operators, the larger side for comparisons).
 

@@ -62,3 +62,33 @@ module decls (
         req ##2 gnt;
     endsequence
 endmodule
+
+//==============================================================================
+// c_dflt
+//==============================================================================
+
+// a sequence formal whose default holds [*: the [* opens a bracket, so the ',' after
+// its ']' ends the default (bughunt B-03)
+checker c_dflt (logic clk, a, sequence s = a[*2], logic b);
+    // the default sequence, then b
+    c_seq: assert property (@(posedge clk) s |-> b);
+endchecker
+
+//==============================================================================
+// m_dflt_formal
+//==============================================================================
+
+// a default that names a formal before it takes that formal's actual (bughunt B-96)
+module m_dflt_formal (
+    input logic clk,
+    input logic req,
+    input logic gnt
+);
+    // q is two cycles of r unless given
+    sequence s_twice_then(r, q = r[*2]);
+        q ##1 r;
+    endsequence
+
+    // q from the actual of r: req[*2] ##1 req, then gnt
+    i_dflt_formal: assert property (@(posedge clk) s_twice_then(req) |-> gnt);
+endmodule

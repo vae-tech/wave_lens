@@ -70,4 +70,7 @@ module booleans (
     b_unary:    assert property (@(posedge clk) -data != +addr);
     // a size cast 4'(...)
     b_cast:     assert property (@(posedge clk) 4'(data) == be);
+    // an unsized 'hx is x in every bit of its context, as 8'hx is: never known to differ
+    // (bughunt B-06)
+    b_unsz_x:   cover property (@(posedge clk) data != 'hx);
 endmodule

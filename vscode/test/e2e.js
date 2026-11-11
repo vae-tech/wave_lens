@@ -173,6 +173,14 @@ async function run() {
     o.tab.message = m => { seen.push(m); return message(m); };
     o.tab.post = m => { said.push(m); return post(m); };
     const kept = await o.tab.runs({ op: 'keep', name: 'e2e before' }), id = kept.run && kept.run.id;
+    // a slice (review of 0.50 T-08): 10–20 ns kept from 0, compared with its whole run at its place (B offset by its start)
+    const sl = await o.tab.runs({ op: 'keep', from: 10000, to: 20000 }), sid = sl.run && sl.run.id;
+    const sc = sid ? await o.tab.runs({ op: 'compare', run: sid, against: id, signals: ['tb.a'], from: 0, to: 20000 }) : sl;
+    ok('runs: a slice kept from 0, compared with its whole run at its place', sl.run && sl.run.slice && sl.run.slice.from === 10000 &&
+      sl.run.end === 10000 && sc.result && sc.result.differ === 0 && sc.result.shift === -10000,
+      { slice: sl.run || sl.error, compared: sc.result ? { differ: sc.result.differ, shift: sc.result.shift } : sc.error });
+    if (sid) { const was = vscode.window.showWarningMessage; vscode.window.showWarningMessage = async () => 'Remove';
+      try { await o.tab.runs({ op: 'rm', run: sid }); } finally { vscode.window.showWarningMessage = was; } }
     fs.writeFileSync(a, head + '#0\n0!\n#15\n1!\n#20\n');
     await vscode.commands.executeCommand('wavelens.runs');
     let list = null;

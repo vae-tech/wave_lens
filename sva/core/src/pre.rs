@@ -161,13 +161,13 @@ fn expand(t: &Token, name: &str, input: &mut VecDeque<Token>, macros: &HashMap<S
                     input.push_front(a);
                     return;
                 }
-                Tok::Sym("(" | "[" | "{") => depth += 1,
+                ref o if o.opens() => depth += 1,
                 Tok::Sym(")") if depth == 0 => {
                     at = t.at.to(a.at);
                     args.push(std::mem::take(&mut cur));
                     break;
                 }
-                Tok::Sym(")" | "]" | "}") => depth -= 1,
+                ref c if c.closes() => depth -= 1,
                 Tok::Sym(",") if depth == 0 => {
                     args.push(std::mem::take(&mut cur));
                     continue;

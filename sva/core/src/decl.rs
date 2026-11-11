@@ -22,8 +22,8 @@ impl Parser<'_> {
             match self.tok() {
                 Tok::End => return,
                 Tok::Sym(s) if br == 0 && stops.contains(s) => return,
-                Tok::Sym("(" | "[" | "{" | "'{" | "'(") => br += 1,
-                Tok::Sym(")" | "]" | "}") => br -= 1,
+                t if t.opens() => br += 1,
+                t if t.closes() => br -= 1,
                 _ => {}
             }
             self.i += 1;

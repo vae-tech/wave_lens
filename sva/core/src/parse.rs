@@ -327,8 +327,8 @@ impl<'a> Parser<'a> {
         loop {
             match self.tok() {
                 Tok::End => return,
-                Tok::Sym("(" | "[" | "{") => br += 1,
-                Tok::Sym(")" | "]" | "}") => br = (br - 1).max(0),
+                t if t.opens() => br += 1,
+                t if t.closes() => br = (br - 1).max(0),
                 Tok::Sym(";") if br == 0 => {
                     self.i += 1;
                     return;
@@ -420,8 +420,8 @@ impl<'a> Parser<'a> {
         loop {
             match self.tok().clone() {
                 Tok::End => return,
-                Tok::Sym("(" | "[" | "{" | "'{" | "'(") => br += 1,
-                Tok::Sym(")" | "]" | "}") => br = (br - 1).max(0),
+                ref t if t.opens() => br += 1,
+                ref t if t.closes() => br = (br - 1).max(0),
                 Tok::Sym(";") if br == 0 && depth == 0 => {
                     self.i += 1;
                     return;

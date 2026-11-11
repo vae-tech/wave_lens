@@ -21,6 +21,8 @@
   {"t": "250fs", "ps": 0.25},
   {"t": "1e-3ns", "ps": 1},
   {"t": "1E2ns", "ps": 100000},
+  {"t": "1e+3ns", "ps": 1000000},
+  {"t": "2E+1 ps", "ps": 20},
   {"t": ".5ns", "ps": 500, "except": {"links": null}},
   {"t": "5.ns", "ps": 5000, "except": {"links": null}},
   {"t": "+5ns", "ps": null, "except": {"cli": 5000, "cocotb": 5000}},

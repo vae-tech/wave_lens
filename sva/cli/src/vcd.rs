@@ -18,9 +18,10 @@
 //! codes (as the whole text numbers them, apart by white space): their declarations in their scopes, their enum
 //! tables, their changes. A reader of the parts gets what it gets of the whole text, those variables only.
 //!
-//! Of any dump a cut (`--from`, `--to`, `--signals`): the declarations of those signals only (their scopes, their enum
-//! tables), the value of each of them at `from` under `#from` as `$dumpvars` (x when it has none yet), its changes
-//! after `from` up to `to`, and `#to`, the end. A cut of a VCD and the cut of its FST give a reader the same signals.
+//! Of any dump a cut (`--from`, `--to`: floored to the dump's unit; `--signals`: by the names `sva diff` gives, wellen's,
+//! or as the dump declares them): the declarations of those signals only (their scopes, their enum tables), the value
+//! of each of them at `from` under `#from` as `$dumpvars` (x when it has none yet), its changes after `from` up to
+//! `to`, and `#to`, the end. A cut of a VCD and the cut of its FST give a reader the same signals.
 
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, Read, Seek, Write};
@@ -34,11 +35,13 @@ The dump (FST or VCD) as VCD text, to FILE or stdout, as GTKWave's fst2vcd -e wr
 them, FST enum tables included, strings escaped as fstapi does (\\040 for a space), the end time of the dump kept.
 Of an FST a part: --header the declarations and the first and last times only; --codes FILE (- stdin) the variables
 of those id codes (as the whole text numbers them, apart by white space) with their changes.
-A cut: --from/--to a window (TIME: 100ns, 2.5us; ps without one): each signal's value at --from as $dumpvars under
-#from (x when it has none yet), its changes up to --to, then #to (--zero: the times from 0, #from is #0); --signals only those (paths, * ? patterns, or
-the one path that ends with a name; an element of an unpacked array either way, mem[1] or mem.[1], a [1] in the
-scope mem too); --signals-from FILE (- stdin): the same, one a line (a name may hold a comma, and a list too long
-for a command line goes this way).";
+A cut: --from/--to a window (TIME: 100ns, 2.5us; ps without one; both floored to the dump's time unit): each
+signal's value at --from as $dumpvars under #from (x when it has none yet), its changes up to --to, then #to (--zero:
+the times from 0, #from is #0); --signals only those (paths, * ? patterns, or the one path that ends with a name; the
+names sva diff gives, tb.err for the bits err[0] err[1] an FST declares apart, or as the dump declares them; an
+element of an unpacked array either way, mem[1] or mem.[1], a [1] in the scope mem too); --signals-from FILE (-
+stdin): the same, one a line (a name may hold a comma, and a list too long for a command line goes this way).
+--out is never the dump; it is written whole or not at all.";
 
 /// The VCD id code of signal `index` (an FST handle less one): base 94 over the printable characters `!`..`~`, as
 /// fst2vcd numbers its handles.
@@ -379,7 +382,8 @@ fn fst_text<R: BufRead + Seek>(r: &mut FstReader<R>, path: Option<&str>, part: &
     let end = times.last().map_or(h.end_time, |&t| t.max(h.end_time));
     let start = times.first().map_or(h.start_time, |&t| t.min(h.start_time));
     if let Some((from, to)) = win {
-        return fst_cut(r, path, part, &strings, &widths, from.max(start), to.min(end).max(from.max(start)), o);
+        // no clamp to the dump's start: a cut from before it has x until the first value, as a VCD's cut
+        return fst_cut(r, path, part, &strings, &widths, from, to.min(end).max(from), o);
     }
     if let Part::Header = part {
         // the span of the dump: its first and its last time, no value
@@ -705,6 +709,8 @@ pub(crate) struct Cut {
     pub signals: Vec<String>,
     /// the times from 0: the cut's first time (its first sample, `from`) is 0 (`--zero`; a slice of the runs)
     pub zero: bool,
+    /// a name of `signals` the dump has not got is left out, not an error (`sva diff --page`: B's values)
+    pub lenient: bool,
 }
 
 /// The cut's times from 0 (`Cut::zero`): the first time line `#t` after the declarations is the origin, each one `#(t -
@@ -795,14 +801,15 @@ pub(crate) fn glob_either(pat: &str, path: &str) -> bool {
 }
 
 /// The paths a cut keeps, of (path, item) -> the items: a path, a `*` `?` pattern, or the one path that ends with the
-/// name (`PSEL`, `u_regs.PSEL`); a name that keeps none, or a tail of several paths, is an error. An array element by
-/// either name (`mem.[1]`, `mem[1]`).
-fn chosen<T: Copy>(all: &[(String, T)], pats: &[String]) -> Result<Vec<T>, String> {
+/// name (`PSEL`, `u_regs.PSEL`); a name that keeps none, or a tail of several paths, is an error (`lenient`: one that
+/// keeps none is left out, and listed). An array element by either name (`mem.[1]`, `mem[1]`). A path may name several
+/// items (the bits of a vector an FST declares apart: `tb.err` is `err[0]` and `err[1]`).
+fn chosen<T: Copy>(all: &[(String, T)], pats: &[String], lenient: bool) -> Result<(Vec<T>, Vec<String>), String> {
     if pats.is_empty() {
-        return Ok(all.iter().map(|(_, x)| *x).collect());
+        return Ok((all.iter().map(|(_, x)| *x).collect(), Vec::new()));
     }
     let all: Vec<(String, T)> = all.iter().map(|(q, x)| (glued(q), *x)).collect();
-    let mut out = Vec::new();
+    let (mut out, mut missing) = (Vec::new(), Vec::new());
     for p0 in pats {
         let p = &glued(p0);
         let n0 = out.len();
@@ -810,21 +817,47 @@ fn chosen<T: Copy>(all: &[(String, T)], pats: &[String]) -> Result<Vec<T>, Strin
         if out.len() == n0 && !p.contains(['*', '?']) {
             let tail = format!(".{p}");
             let hits: Vec<&(String, T)> = all.iter().filter(|(q, _)| q.ends_with(&tail)).collect();
-            if hits.len() > 1 {
-                return Err(format!("{p0} is ambiguous: {} (give its path)", hits.iter().take(4).map(|(q, _)| q.as_str()).collect::<Vec<_>>().join(", ")));
+            let mut paths: Vec<&str> = hits.iter().map(|(q, _)| q.as_str()).collect();
+            paths.dedup();
+            if paths.len() > 1 {
+                return Err(format!("{p0} is ambiguous: {} (give its path)", paths.iter().take(4).copied().collect::<Vec<_>>().join(", ")));
             }
             out.extend(hits.iter().map(|(_, x)| *x));
         }
         if out.len() == n0 {
-            return Err(format!("no signal {p0} (--signals)"));
+            if !lenient {
+                return Err(format!("no signal {p0} (--signals)"));
+            }
+            missing.push(p0.clone());
         }
     }
-    Ok(out)
+    Ok((out, missing))
 }
 
-/// A time in ps in a dump's unit (ps per unit `ppu`), rounded.
+/// A variable's name without the index of its bits, as wellen names it (and `sva diff`): `err[0]` of 1 bit -> `err`,
+/// `x [3:0]` of 4 bits -> `x`; an index that is not the variable's width (`mem[1]` of 8 bits: an array element) stays.
+fn bare(name: &str, length: u32) -> &str {
+    let t = name.trim_end();
+    let Some(body) = t.strip_suffix(']') else { return name };
+    let Some(open) = body.rfind('[') else { return name };
+    let num = |x: &str| x.trim().parse::<i64>().ok();
+    let width = match body[open + 1..].split_once(':') {
+        Some((m, l)) => num(m).zip(num(l)).map(|(m, l)| m.abs_diff(l) + 1),
+        None => num(&body[open + 1..]).map(|_| 1),
+    };
+    let base = body[..open].trim_end();
+    if base.is_empty() || width != Some(u64::from(length)) { name } else { base }
+}
+
+/// A time in ps in a dump's unit (ps per unit `ppu`, a power of 10 times 1, 10 or 100), floored: a cut's ends are the
+/// unit's time at or before them (the value held at --from is the one of that time).
 fn units(ps: u64, ppu: f64) -> u64 {
-    if ppu == 1.0 { ps } else { (ps as f64 / ppu).round() as u64 }
+    if ppu >= 1.0 { ps / (ppu.round() as u64).max(1) } else { ps.saturating_mul((1.0 / ppu).round() as u64) }
+}
+
+/// A time of a dump's unit in ps, floored (`units` back).
+fn back(t: u64, ppu: f64) -> u64 {
+    if ppu >= 1.0 { t.saturating_mul(ppu.round() as u64) } else { t / ((1.0 / ppu).round() as u64).max(1) }
 }
 
 /// A writer into memory that stops past `cap` bytes.
@@ -849,29 +882,53 @@ impl Write for Capped {
 }
 
 /// A cut of a dump as VCD text (`sva vcd --from --to --signals-from`), in memory, at most `cap` bytes (`sva diff --page`:
-/// B's values of the signals that differ) -> the text, or why there is none.
-pub(crate) fn cut_text(waves: &str, from: u64, to: u64, signals: Vec<String>, cap: usize) -> Result<String, String> {
+/// B's values of the signals that differ; a name the dump has not got left out) -> the text and the names left out, or
+/// why there is none.
+pub(crate) fn cut_text(waves: &str, from: u64, to: u64, signals: Vec<String>, cap: usize) -> Result<(String, Vec<String>), String> {
     let mut o = Capped { buf: Vec::new(), cap, over: false };
-    let r = convert(waves, &Part::All, Some(&Cut { from: Some(from), to: Some(to), signals, zero: false }), &mut o);
+    let r = convert(waves, &Part::All, Some(&Cut { from: Some(from), to: Some(to), signals, zero: false, lenient: true }), &mut o);
     if o.over {
         return Err(format!("more than {} MB of changes of the signals that differ: compare fewer signals or a shorter window", cap >> 20));
     }
-    r?;
-    String::from_utf8(o.buf).map_err(|e| e.to_string())
+    let missing = r?;
+    String::from_utf8(o.buf).map(|t| (t, missing)).map_err(|e| e.to_string())
+}
+
+/// The time unit of a dump in ps (an FST's by its header, another's by wellen's), 1 when it has none.
+fn unit_ps(waves: &str) -> Result<f64, String> {
+    let mut f = std::io::BufReader::new(std::fs::File::open(waves).map_err(|e| e.to_string())?);
+    if fst_reader::is_fst_file(&mut f) {
+        let r = FstReader::open(f).map_err(|e| e.to_string())?;
+        return Ok(10f64.powi(i32::from(r.get_header().timescale_exponent) + 12));
+    }
+    let w = stream::read_from_file(waves, &LoadOptions::default()).map_err(|e| e.to_string())?;
+    Ok(ps_per_unit(w.hierarchy()))
+}
+
+fn ps_per_unit(h: &Hierarchy) -> f64 {
+    h.timescale().and_then(|t| t.unit.to_exponent().map(|e| t.factor as f64 * 10f64.powi(e as i32 + 12))).unwrap_or(1.0)
+}
+
+/// A window in ps as a cut of the dump has it: its ends floored to the dump's unit (`sva runs keep --from --to`: the
+/// slice's own window, its first sample).
+pub(crate) fn cut_window(waves: &str, from: u64, to: u64) -> Result<(u64, u64), String> {
+    let ppu = unit_ps(waves)?;
+    Ok((back(units(from, ppu), ppu), back(units(to, ppu), ppu)))
 }
 
 /// The dump as VCD text into `o`: an FST by fst-reader, anything else by wellen; a part of an FST only; a cut of either
-/// (its times from 0: `Cut::zero`).
-fn convert(waves: &str, part: &Part, cut: Option<&Cut>, o: &mut impl Write) -> Result<(), String> {
+/// (its times from 0: `Cut::zero`) -> the names of the cut's signals left out (`Cut::lenient`).
+fn convert(waves: &str, part: &Part, cut: Option<&Cut>, o: &mut impl Write) -> Result<Vec<String>, String> {
     if cut.is_some_and(|c| c.zero) {
         let mut z = Zero { o, line: Vec::new(), body: false, origin: None };
-        convert_as(waves, part, cut, &mut z)?;
-        return z.flush().map_err(io_text);
+        let missing = convert_as(waves, part, cut, &mut z)?;
+        z.flush().map_err(io_text)?;
+        return Ok(missing);
     }
     convert_as(waves, part, cut, o)
 }
 
-fn convert_as(waves: &str, part: &Part, cut: Option<&Cut>, o: &mut impl Write) -> Result<(), String> {
+fn convert_as(waves: &str, part: &Part, cut: Option<&Cut>, o: &mut impl Write) -> Result<Vec<String>, String> {
     // a VCD whose vectors are glued to their codes (Questa 2023's integers): wellen stops at one, its FST is read instead
     let glued = if matches!(part, Part::All) { crate::fst::glued_fst(waves)? } else { None };
     let waves = glued.as_ref().map_or(waves.to_string(), |g| g.0.to_string_lossy().into_owned());
@@ -879,13 +936,15 @@ fn convert_as(waves: &str, part: &Part, cut: Option<&Cut>, o: &mut impl Write) -
     let mut f = std::io::BufReader::new(std::fs::File::open(waves).map_err(|e| e.to_string())?);
     if fst_reader::is_fst_file(&mut f) {
         let mut r = FstReader::open_and_read_time_table(f).map_err(|e| e.to_string())?;
-        let Some(c) = cut else { return fst_text(&mut r, None, part, None, o).map_err(io_text) };
+        let Some(c) = cut else { return fst_text(&mut r, None, part, None, o).map(|_| Vec::new()).map_err(io_text) };
         let ppu = 10f64.powi(i32::from(r.get_header().timescale_exponent) + 12);
         let win = (units(c.from.unwrap_or(0), ppu), c.to.map_or(u64::MAX, |t| units(t, ppu)));
         if c.signals.is_empty() {
-            return fst_text(&mut r, Some(waves), &Part::All, Some(win), o).map_err(io_text);
+            return fst_text(&mut r, Some(waves), &Part::All, Some(win), o).map(|_| Vec::new()).map_err(io_text);
         }
-        // the signals by their paths: the scopes' names and the variable's without its range (`data [7:0]`)
+        // the signals by their paths: the scopes' names and the variable's without the index of its bits, as wellen and
+        // `sva diff` name them (`tb.err` the bits `err[0]` `err[1]`, `data [7:0]` `tb.data`), and as the FST declares it
+        // (`tb.err[0]`)
         let mut all: Vec<(String, usize)> = Vec::new();
         let mut scopes: Vec<String> = Vec::new();
         r.read_hierarchy(|e| match e {
@@ -893,29 +952,50 @@ fn convert_as(waves: &str, part: &Part, cut: Option<&Cut>, o: &mut impl Write) -
             FstHierarchyEntry::UpScope => {
                 scopes.pop();
             }
-            FstHierarchyEntry::Var { name, handle, .. } => {
-                let n = name.split(' ').next().unwrap_or(&name);
-                all.push((scopes.iter().map(String::as_str).chain([n]).collect::<Vec<_>>().join("."), handle.get_index()));
+            FstHierarchyEntry::Var { name, handle, length, .. } => {
+                let path = |n: &str| scopes.iter().map(String::as_str).chain([n]).collect::<Vec<_>>().join(".");
+                let (own, wellen) = (name.split(' ').next().unwrap_or(&name), bare(&name, length));
+                all.push((path(wellen), handle.get_index()));
+                if own != wellen {
+                    all.push((path(own), handle.get_index()));
+                }
             }
             _ => {}
         }).map_err(|e| e.to_string())?;
-        let want = chosen(&all, &c.signals)?.into_iter().collect();
-        return fst_text(&mut r, Some(waves), &Part::Codes(want), Some(win), o).map_err(io_text);
+        let (want, missing) = chosen(&all, &c.signals, c.lenient)?;
+        if want.is_empty() {
+            return Err(format!("none of the signals is in the dump: {}", missing.join(", ")));
+        }
+        fst_text(&mut r, Some(waves), &Part::Codes(want.into_iter().collect()), Some(win), o).map_err(io_text)?;
+        return Ok(missing);
     }
     if !matches!(part, Part::All) {
         return Err("--header and --codes read an FST (sva fst makes one of a VCD)".into());
     }
     let mut w = stream::read_from_file(waves, &LoadOptions::default()).map_err(|e| e.to_string())?;
-    let Some(c) = cut else { return header(w.hierarchy(), None, o).and_then(|_| body(&mut w, o)).map_err(io_text) };
+    let Some(c) = cut else { return header(w.hierarchy(), None, o).and_then(|_| body(&mut w, o)).map(|_| Vec::new()).map_err(io_text) };
     let h = w.hierarchy();
-    let ppu = h.timescale().and_then(|t| t.unit.to_exponent().map(|e| t.factor as f64 * 10f64.powi(e as i32 + 12))).unwrap_or(1.0);
-    let all: Vec<(String, VarRef)> = h.all_vars().map(|v| (h[v].full_name(h), v)).collect();
-    let keep: HashSet<VarRef> = chosen(&all, &c.signals)?.into_iter().collect();
+    let ppu = ps_per_unit(h);
+    // the paths as wellen names them (`sva diff`), a lone bit of a vector also as the dump declares it (`bit[5]`)
+    let mut all: Vec<(String, VarRef)> = Vec::new();
+    for v in h.all_vars() {
+        let p = h[v].full_name(h);
+        if let Some(i) = h[v].index().filter(|i| i.msb() == i.lsb() && h[v].length(h) == Some(1)) {
+            all.push((format!("{p}[{}]", i.lsb()), v));
+        }
+        all.push((p, v));
+    }
+    let (keep, missing) = chosen(&all, &c.signals, c.lenient)?;
+    if keep.is_empty() {
+        return Err(format!("none of the signals is in the dump: {}", missing.join(", ")));
+    }
+    let keep: HashSet<VarRef> = keep.into_iter().collect();
     // the end: the dump's last time, else --to as given (a dump with no time at all, no --to: nothing after --from)
     let end = crate::diff::end_time(waves);
     let from = units(c.from.unwrap_or(0), ppu);
     let to = c.to.map(|t| units(t, ppu)).map_or(end.unwrap_or(from), |t| end.map_or(t, |e| t.min(e))).max(from);
-    header(h, Some(&keep), o).and_then(|_| cut_body(&mut w, &keep, from, to, o)).map_err(io_text)
+    header(h, Some(&keep), o).and_then(|_| cut_body(&mut w, &keep, from, to, o)).map_err(io_text)?;
+    Ok(missing)
 }
 
 /// An I/O error as text; a closed pipe (`sva vcd x.fst | head`: the reader had enough) as the empty text.
@@ -923,9 +1003,28 @@ fn io_text(e: std::io::Error) -> String {
     if e.kind() == std::io::ErrorKind::BrokenPipe { String::new() } else { e.to_string() }
 }
 
+/// `--signals PAT,...` or `--signals-from FILE` (- stdin: one a line, a name may hold a comma) of a cut (`sva vcd`, `sva fst`)
+/// into `into` -> why it cannot be read.
+pub(crate) fn signals_arg(flag: &str, v: Option<&String>, into: &mut Vec<String>) -> Result<(), String> {
+    let Some(v) = v else { return Err(format!("{flag} needs {}", if flag == "--signals" { "the signals" } else { "a file" })) };
+    if flag == "--signals" {
+        into.extend(v.split(',').map(str::trim).filter(|s| !s.is_empty()).map(String::from));
+        return Ok(());
+    }
+    let text = if v == "-" {
+        let mut t = String::new();
+        std::io::stdin().read_to_string(&mut t).map(|_| t)
+    } else {
+        std::fs::read_to_string(v)
+    };
+    let t = text.map_err(|e| format!("--signals-from {v}: {e}"))?;
+    into.extend(t.lines().map(str::trim).filter(|s| !s.is_empty()).map(String::from));
+    Ok(())
+}
+
 pub fn vcd_cmd(args: &[String]) -> ExitCode {
     let (mut waves, mut out, mut header, mut codes) = (None::<String>, None::<String>, false, None::<String>);
-    let mut cut = Cut { from: None, to: None, signals: Vec::new(), zero: false };
+    let mut cut = Cut { from: None, to: None, signals: Vec::new(), zero: false, lenient: false };
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -948,24 +1047,10 @@ pub fn vcd_cmd(args: &[String]) -> ExitCode {
                 };
                 if a == "--from" { cut.from = Some(t) } else { cut.to = Some(t) }
             }
-            "--signals" => cut.signals.extend(it.next().into_iter().flat_map(|v| v.split(',')).map(str::trim).filter(|s| !s.is_empty()).map(String::from)),
-            "--signals-from" => {
-                let Some(f) = it.next() else {
-                    eprintln!("sva: --signals-from needs a file\n{USAGE}");
+            "--signals" | "--signals-from" => {
+                if let Err(e) = signals_arg(a, it.next(), &mut cut.signals) {
+                    eprintln!("sva: {e}\n{USAGE}");
                     return ExitCode::from(2);
-                };
-                let text = if f == "-" {
-                    let mut t = String::new();
-                    std::io::stdin().read_to_string(&mut t).map(|_| t)
-                } else {
-                    std::fs::read_to_string(f)
-                };
-                match text {
-                    Ok(t) => cut.signals.extend(t.lines().map(str::trim).filter(|s| !s.is_empty()).map(String::from)),
-                    Err(e) => {
-                        eprintln!("sva: --signals-from {f}: {e}");
-                        return ExitCode::from(2);
-                    }
                 }
             }
             "-h" | "--help" => {
@@ -998,7 +1083,7 @@ pub fn vcd_cmd(args: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     }
-    let part = match (header, codes) {
+    let part_of = match (header, codes) {
         (true, Some(_)) => {
             eprintln!("sva: --header or --codes, not both\n{USAGE}");
             return ExitCode::from(2);
@@ -1034,9 +1119,22 @@ pub fn vcd_cmd(args: &[String]) -> ExitCode {
             Part::Codes(want)
         }
     };
+    // --out: never the dump itself (it would be emptied before it is read); written beside it as a part, renamed over it
+    // when complete (a failed convert leaves no --out)
+    let target = out.as_ref().map(std::path::PathBuf::from);
+    if let Some(t) = &target {
+        if t.canonicalize().ok().is_some_and(|t| std::path::Path::new(&waves).canonicalize().ok() == Some(t)) {
+            eprintln!("sva: {waves}: --out is the dump: --out another file");
+            return ExitCode::from(2);
+        }
+    }
+    let part = target.as_ref().map(|t| {
+        let name = t.file_name().map_or("out.vcd".into(), |n| n.to_string_lossy().into_owned());
+        t.with_file_name(format!("{name}.{}.part", std::process::id()))
+    });
     crate::reading(&waves);
-    let sink: Box<dyn Write> = match &out {
-        Some(f) => match std::fs::File::create(f) {
+    let sink: Box<dyn Write> = match &part {
+        Some(p) => match std::fs::File::create(p) {
             Ok(f) => Box::new(f),
             Err(e) => {
                 eprintln!("sva: {}: {e}", out.as_deref().unwrap_or(""));
@@ -1046,7 +1144,16 @@ pub fn vcd_cmd(args: &[String]) -> ExitCode {
         None => crate::out_stream(),
     };
     let mut o = std::io::BufWriter::with_capacity(1 << 20, sink);
-    match convert(&waves, &part, cutting.then_some(&cut), &mut o) {
+    let r = convert(&waves, &part_of, cutting.then_some(&cut), &mut o).and_then(|_| o.flush().map_err(io_text));
+    drop(o);
+    let r = match (r, &part, &target) {
+        (Ok(()), Some(p), Some(t)) => std::fs::rename(p, t).map_err(|e| format!("{}: {e}", t.display())),
+        (r, _, _) => r,
+    };
+    if let (Err(_), Some(p)) = (&r, &part) {
+        let _ = std::fs::remove_file(p);
+    }
+    match r {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) if e.is_empty() => ExitCode::SUCCESS,
         Err(e) => {
@@ -1108,6 +1215,7 @@ mod tests {
 
     #[test]
     fn an_array_element_by_either_name() {
+        let pick = |all: &[(String, i32)], pats: &[String]| chosen(all, pats, false).map(|x| x.0);
         let fst = [("tb.u.ptr[0]".to_string(), 1), ("tb.u.ptr[1]".to_string(), 2), ("tb.u.cnt".to_string(), 3)];
         let vcd = [("tb.u.ptr.[0]".to_string(), 1), ("tb.u.ptr.[1]".to_string(), 2), ("tb.u.cnt".to_string(), 3)];
         // the scope form ($scope module ptr + $var … [0]): wellen's path has two dots (review 2026-11-05 runs B-24)
@@ -1116,14 +1224,33 @@ mod tests {
         assert_eq!(glued("m.[1].[2]"), "m[1][2]");
         for all in [&fst[..], &vcd[..], &scoped[..]] {
             for p in ["tb.u.ptr[0]", "tb.u.ptr.[0]", "ptr[0]", "u.ptr.[0]"] {
-                assert_eq!(chosen(all, &[p.to_string()]), Ok(vec![1]), "{p}");
+                assert_eq!(pick(all, &[p.to_string()]), Ok(vec![1]), "{p}");
             }
-            assert_eq!(chosen(all, &["*ptr.[1]".to_string()]), Ok(vec![2]));
-            assert_eq!(chosen(all, &["tb.u.ptr*".to_string()]), Ok(vec![1, 2]));
-            assert_eq!(chosen(all, &["tb.u.ptr.*".to_string()]), Ok(vec![1, 2]));
-            assert_eq!(chosen(all, &["tb.u.*".to_string()]), Ok(vec![1, 2, 3]));
-            assert_eq!(chosen(all, &["tb.u.ptr.[7]".to_string()]), Err("no signal tb.u.ptr.[7] (--signals)".to_string()));
+            assert_eq!(pick(all, &["*ptr.[1]".to_string()]), Ok(vec![2]));
+            assert_eq!(pick(all, &["tb.u.ptr*".to_string()]), Ok(vec![1, 2]));
+            assert_eq!(pick(all, &["tb.u.ptr.*".to_string()]), Ok(vec![1, 2]));
+            assert_eq!(pick(all, &["tb.u.*".to_string()]), Ok(vec![1, 2, 3]));
+            assert_eq!(pick(all, &["tb.u.ptr.[7]".to_string()]), Err("no signal tb.u.ptr.[7] (--signals)".to_string()));
         }
+    }
+
+    /// bughunt B-09: an FST's variable by wellen's name too (the bits of a vector declared apart are one path); a name of
+    /// several items is one path, not an ambiguity; lenient: a name not there left out and listed
+    #[test]
+    fn names_as_wellen_gives_them() {
+        assert_eq!(bare("err[0]", 1), "err");
+        assert_eq!(bare("x [3:0]", 4), "x");
+        assert_eq!(bare("bit[5]", 1), "bit");
+        assert_eq!(bare("ptr[0] [31:0]", 32), "ptr[0]");
+        assert_eq!(bare("mem[1]", 8), "mem[1]", "an array element: the index is not its bits");
+        assert_eq!(bare("d [-1:-4]", 4), "d");
+        assert_eq!(bare("[3]", 1), "[3]");
+        assert_eq!(bare("a[x]", 1), "a[x]");
+        let all = [("tb.err".to_string(), 1), ("tb.err[0]".to_string(), 1), ("tb.err".to_string(), 2), ("tb.err[1]".to_string(), 2)];
+        assert_eq!(chosen(&all, &["err".to_string()], false), Ok((vec![1, 2], vec![])));
+        assert_eq!(chosen(&all, &["tb.err[1]".to_string()], false), Ok((vec![2], vec![])));
+        assert_eq!(chosen(&all, &["tb.no".to_string(), "tb.err".to_string()], true), Ok((vec![1, 2], vec!["tb.no".to_string()])));
+        assert!(chosen(&all, &["tb.no".to_string()], false).is_err());
     }
 
     #[test]

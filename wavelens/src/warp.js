@@ -26,10 +26,14 @@ function warpFit(w, a, b, W) {
   const kept = warpV(w, b, 1, 0) - warpV(w, a, 1, 0), holes = warpV(w, b, 0, 1) - warpV(w, a, 0, 1), g = Math.min(GAP, 0.35 * W / Math.max(1, holes));
   return { k: kept > 0 ? (W - g * holes) / kept : 0, g };
 }
-// the parts of [a, b] among the parts kept; none: [a, b]
+// the parts of [a, b] among the parts kept; none: [a, b]. An end in a gap keeps that gap's column, as the window shows it (the
+// waves' own ends too: their cuts start and end with a part of no length): a part of no length at that end (B-78)
 function clipCuts(cuts, a, b) {
   const out = cuts.filter(([p, q]) => q > a && p < b).map(([p, q]) => [Math.max(p, a), Math.min(q, b)]);
-  return out.length ? out : [[a, b]];
+  if (!out.length) return [[a, b]];
+  if (out[0][0] > a) out.unshift([a, a]);
+  if (out[out.length - 1][1] < b) out.push([b, b]);
+  return out;
 }
 // the frame's parts in the window, its gaps (p, q: all of the gap; x0, x1: its column) and the runs painted together
 function warpParts(F) {
@@ -203,7 +207,7 @@ Object.assign(WaveView.prototype, {
   gapTip(x) { const h = this.gapAt(x, 1); return h ? `gap: ${this.gapTextsNow().hole(h.p, h.q)} left out` : ''; },
   gapReadout() {
     if (!this.wf) return '';
-    const w = this.wf.w, m = this.M, len = d => (m.timed ? fmtTime(d, d / 10, d) : d.toFixed(1) + ' cycles');
+    const w = this.wf.w, m = this.M, len = d => this.fmtLen(d, d / 10, d);
     return ` · ${w.n - 1} gap${w.n === 2 ? '' : 's'}, ${len(w.kept)} of ${len(m.t1 - m.t0)} kept`;
   },
   // the bar's idle and keep, in sight with the gaps on the waves: they change the waves while the waves stay in reach

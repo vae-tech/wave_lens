@@ -26,23 +26,29 @@ function roots() {
   const ext = CTX.extensionPath, inside = path.join(ext, 'media');
   return { host: inside, wavelens: exists(path.join(inside, 'wavelens.js')) ? inside : path.join(ext, '..', 'wavelens') };
 }
-// the CLI: wavelens.sva, else the package's (bin/sva: the .vsix carries the Linux one), else the repository's (make dist-linux:
-// bin/linux-x86_64/sva, make dist-windows: bin/windows-x86_64/sva.exe), else sva on the PATH (none: noCli says so)
+// the CLI: wavelens.sva, else the package's (bin/sva: the .vsix carries the Linux x86_64 one), else the repository's (make
+// dist-linux: bin/linux-x86_64/sva, make dist-windows: bin/windows-x86_64/sva.exe), else sva on the PATH (none: noCli says so).
+// The bundled ones only on the host they are built for: on macOS or Linux arm64 the Linux x86_64 one does not start (B-67)
 const OS_DIR = { linux: 'linux', win32: 'windows' };
+const hostOf = () => `${process.platform} ${process.arch}`;
 function svaBin() {
   const set = vscode.workspace.getConfiguration('wavelens').get('sva');
   if (set) return set;
+  if (!OS_DIR[process.platform] || process.arch !== 'x64') return 'sva';   // none bundled for this host: the PATH's
   const ext = CTX.extensionPath, exe = process.platform === 'win32' ? 'sva.exe' : 'sva';
-  for (const p of [path.join(ext, 'bin', exe), path.join(ext, '..', 'bin', `${OS_DIR[process.platform] || process.platform}-x86_64`, exe)]) {
+  for (const p of [path.join(ext, 'bin', exe), path.join(ext, '..', 'bin', `${OS_DIR[process.platform]}-x86_64`, exe)]) {
     if (!exists(p)) continue;
     try { fs.accessSync(p, fs.constants.X_OK); } catch (e) { try { fs.chmodSync(p, 0o755); } catch (e2) { /* read-only */ } }   // a vsix keeps no mode
     return p;
   }
   return 'sva';   // on the PATH
 }
-// a CLI that did not start: none bundled for this platform (the .vsix carries the Linux one) and none on the PATH -> wavelens.sva named
-const noCli = (bin, e) => (e.code === 'ENOENT' ? `there is no sva CLI on this host (${bin}; none bundled for ${process.platform}): set wavelens.sva ` +
-  'to its path (the repository builds one: make dist-linux, make dist-windows)' : `${bin}: ${e.message}`);
+// a CLI that did not start: none bundled for this host (the .vsix carries the Linux x86_64 one) and none on the PATH, or one
+// that cannot run here (not executable, built for another system) -> wavelens.sva named
+const noCli = (bin, e) => (e.code === 'ENOENT' ? `there is no sva CLI on this host (${bin}; none bundled for ${hostOf()}): set wavelens.sva ` +
+  'to its path (the repository builds one: make dist-linux, make dist-windows)' : e.code === 'EACCES' || e.code === 'ENOEXEC' || e.errno === -8 ?
+  `${bin} cannot run on this host (${hostOf()}: ${e.code || e.message}; not executable, or built for another system): set wavelens.sva to ` +
+  'an sva built for it (cargo build --release -p sva-cli in sva/ of the repository)' : `${bin}: ${e.message}`);
 // the JSON the CLI wrote on stdout: where sva cannot put fd 1 aside (Windows) wellen's "WARN: …" lines stand before it
 const cliJson = s => JSON.parse(s.slice(Math.max(0, s.search(/^[{[]/m))));
 
@@ -74,6 +80,7 @@ function lazyFor(file, size) {
   if (/\.json$/i.test(file)) return false;   // a piece of waves (x.wavelens.json): read whole
   return set === 'always' || (set !== 'never' && size >= (/\.fst$/i.test(file) ? LAZY_FST : LAZY_VCD));
 }
+const stamp = st => `${st.size}:${st.mtimeMs}`;   // a file's size and time: the same file, or written since
 const vcdOf = file => (/\.fst$/i.test(file) ? convert(file, 'vcd', 'VCD text', (bin, tmp) => ['vcd', file, '--out', tmp]) : Promise.resolve(file));
 const fstOf = file => (/\.fst$/i.test(file) ? Promise.resolve(file) :
   convert(file, 'fst', 'FST', (bin, tmp) => ['fst', file, '--no-types', '--quiet', '--out', tmp]));
@@ -224,6 +231,9 @@ class Tab {
   constructor(uri, panel) {
     this.uri = uri; this.file = uri.fsPath; this.panel = panel; this.wait = new Map(); this.rid = 0; this.streams = new Map(); this.procs = new Set();
     this.storeKey = 'store:' + uri.toString(); this.changed = new Map();
+    // the tab's first page takes the last state when the dump has no view of its own; a page VS Code makes again later (the
+    // tab moved to a window of its own: the html of when it opened) does not (source() says it, B-66)
+    this.fresh = !Object.keys(this.storeNow()).length;
     const r = roots();
     panel.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.file(r.host), vscode.Uri.file(r.wavelens),
       vscode.Uri.file(path.dirname(this.file)), vscode.Uri.file(path.join(CTX.globalStorageUri.fsPath, 'fst'))] };
@@ -284,11 +294,12 @@ ${scripts}
     return Object.assign(o, { store: this.storeNow() });
   }
   // the file the tab shows (the dump, or a run kept) served: this.src the text the webview reads (bytes()), this.fst the FST
-  // its signals are read from when lazy (codes()) -> {src, name, lazy}
+  // its signals are read from when lazy (codes()), this.fstAt its size and time when its header was read -> {src, name, lazy}
   async srcOf(file, name) {
     const lazy = lazyFor(file, (await fs.promises.stat(file)).size), fst = lazy ? await fstOf(file) : null;
+    const at = fst ? stamp(await fs.promises.stat(fst)) : null;   // before the header: a file written meanwhile is "changed"
     const f = lazy ? await headerOf(fst) : await vcdOf(file);
-    this.fst = fst; this.src = f;
+    this.fst = fst; this.fstAt = at; this.src = f;
     if (lazy) log(`${name}: large: its modules and signals first, the values of the ones shown as they are needed`);
     return { src: this.panel.webview.asWebviewUri(vscode.Uri.file(f)).toString(), name, lazy };
   }
@@ -300,10 +311,14 @@ ${scripts}
     return { data: new Uint8Array(b.buffer, b.byteOffset, b.length) };
   }
   proc(p) { this.procs.add(p); p.on('close', () => this.procs.delete(p)); p.on('error', () => this.procs.delete(p)); return p; }   // killed with the tab
-  // the VCD text of some signals of the large dump (their id codes in its header): sva vcd --codes of its FST -> {text}
+  // the VCD text of some signals of the large dump (their id codes in its header): sva vcd --codes of its FST -> {text}; the
+  // FST another since its header was read (the user's .fst written over by a new run): an error, never another file's
+  // signals under these codes (bughunt B-17); the page says it once, ⟳ (R) reads the dump again
   async codes(list) {
     const bin = svaBin(), fst = this.fst;
     if (!fst) return { error: 'this dump is read whole' };
+    const now = await fs.promises.stat(fst).then(stamp, () => 'gone');
+    if (now !== this.fstAt) return { error: `${path.basename(this.file)} changed on the disk since it was read: ⟳ (R) reads it again` };
     const r = await spawnRun(bin, ['vcd', fst, '--codes', '-'], { input: list.map(String).join('\n'), keep: p => this.proc(p) });
     return r.code === 0 ? { text: r.out } : { error: r.err || `${bin} vcd --codes: exit ${r.code}` };
   }
@@ -314,7 +329,7 @@ ${scripts}
     if (bad) { log(`${path.basename(this.file)}: ${bad}`); if (m && typeof m === 'object' && m.id) this.post({ id: m.id, error: bad }); return; }
     const reply = o => this.post(Object.assign({ id: m.id }, o));
     switch (m.type) {
-      case 'source': return reply(await this.source());
+      case 'source': return reply(Object.assign(await this.source(), { fresh: this.fresh, lastState: CTX.workspaceState.get(LAST_STATE) || null }));
       case 'bytes': return reply(await this.bytes());
       case 'codes': return reply(await this.codes(Array.isArray(m.codes) ? m.codes : []));
       case 'store': {   // a localStorage key of this dump (null: removed), kept in the workspace: the keys changed, not a snapshot
@@ -342,7 +357,7 @@ ${scripts}
       case 'result': { const w = this.wait.get(m.rid); if (w) { this.wait.delete(m.rid); w(m.results); } return; }
       case 'ready': case 'loaded':
         this.info = { shown: m.shown, total: m.total, title: m.title };
-        if (m.type === 'ready') { this.ready = true; liveTo(this); }
+        if (m.type === 'ready') { this.ready = true; this.fresh = false; liveTo(this); }
         if (m.type === 'loaded') this.report(m);
         EVENTS.fire(Object.assign({}, m, { tab: this }));
         return;
@@ -361,10 +376,11 @@ ${scripts}
     }
   }
   /* A read of the dump -> the output channel (its parameters, then each note as "path:line: level: text", a link there) and
-     the Problems panel (a note on its line: a click opens the dump there). An FST's notes are about its VCD text: on the
-     FST's first line, the line of the text with them. One it could not read: also a message with the way to the line. */
+     the Problems panel (a note on its line: a click opens the dump there). The notes of a text that is not the dump's own (an
+     FST's VCD text, the header made of a large dump read lazy: bughunt B-23) are about that text: on the dump's first line, the
+     line of that text with them. One it could not read: also a message with the way to the line. */
   report(m) {
-    const fst = /\.fst$/i.test(this.file), text = fst && this.src ? this.src : this.file, name = path.basename(this.file);
+    const fst = !!this.src && path.resolve(this.src) !== path.resolve(this.file), text = fst ? this.src : this.file, name = path.basename(this.file);
     if (this.shown) {   // a run kept read as the waves (A): said in the log; the Problems panel stays the dump's
       log(`${this.shown.name} (${path.basename(this.shown.file)}) shown in ${name}'s tab` +
         (m.info ? `: ${dumpInfo(m.info, m.shown)}` : m.error ? `: ${m.error}` : ''));
@@ -377,10 +393,10 @@ ${scripts}
     const SEV = { error: vscode.DiagnosticSeverity.Error, warning: vscode.DiagnosticSeverity.Warning, info: vscode.DiagnosticSeverity.Information };
     DIAG.set(this.uri, notes.map(x => {
       const at = x.line && !fst ? x.line - 1 : 0, d = new vscode.Diagnostic(new vscode.Range(at, 0, at, 4096),
-        x.text + (fst && x.line ? ` (line ${x.line} of its VCD text)` : ''), SEV[x.level] ?? vscode.DiagnosticSeverity.Warning);
+        x.text + (fst && x.line ? ` (line ${x.line} of the VCD text read)` : ''), SEV[x.level] ?? vscode.DiagnosticSeverity.Warning);
       d.source = 'WaveLens';
-      if (fst && x.line && this.src) d.relatedInformation = [new vscode.DiagnosticRelatedInformation(
-        new vscode.Location(vscode.Uri.file(this.src), new vscode.Position(x.line - 1, 0)), 'the line in the VCD text of the FST')];
+      if (fst && x.line) d.relatedInformation = [new vscode.DiagnosticRelatedInformation(
+        new vscode.Location(vscode.Uri.file(this.src), new vscode.Position(x.line - 1, 0)), 'the line in the VCD text read')];
       return d;
     }));
     if (!m.error) { this.lastErr = null; return; }
@@ -449,8 +465,10 @@ ${scripts}
   // Compare…: A the waves the page shows (of: a run kept, 0 or none the dump), B a file picked — or path, the one picked
   // before (the page compares it again with a new A)
   async compare(signals, from, to, path0, of) {
-    const a = await this.fileOf(of);
+    const rec = await this.recordOf(of), a = rec && rec.file;
     if (!a) return { error: `compare: no run #${of}` };
+    // a slice as A is read at its place in the file (a whole one, from 0): B's time is A's plus the slice's start (runs.rs prep)
+    const sl = rec.run && rec.run.slice, off = sl ? Math.round(+sl.from || 0) : 0;
     let b = path0;
     if (!b) {
       const got = await vscode.window.showOpenDialog({ defaultUri: vscode.Uri.file(path.dirname(this.file)), canSelectMany: false,
@@ -464,7 +482,8 @@ ${scripts}
     const args = ['diff', a, b, '--page', '--quiet', '--signals-from', '-'];
     if (isFinite(from)) args.push('--from', `${Math.round(from)}ps`);
     if (isFinite(to)) args.push('--to', `${Math.round(to)}ps`);
-    log(`${path.basename(this.file)}: compare ${path.basename(a)} with ${b}`);
+    if (off) args.push('--offset', `${off}ps`);
+    log(`${path.basename(this.file)}: compare ${path.basename(a)} with ${b}${off ? ` (B +${off / 1000} ns: a slice at its place)` : ''}`);
     const x = await spawnRun(bin, args, { input: signals.join('\n') + '\n', keep: p => this.proc(p) });
     const r = x.code === 0 || x.code === 1 ? { text: x.out } : { error: x.sig ? 'stopped' : x.err || `${bin} diff: exit ${x.code}` };
     if (r.error) { log(`${path.basename(this.file)}: compare: ${r.error}`); return { error: `compare: ${r.error}` }; }
@@ -477,12 +496,17 @@ ${scripts}
   // the file of the waves the page names (of: a run kept, its FST; 0, none: the dump) -> its path, or null (no such run).
   // The page owns A: the extension's shown follows it for the log and the list only
   async fileOf(of) {
+    const r = await this.recordOf(of);
+    return r && r.file;
+  }
+  // the same with the run's record: {file, run} (run.slice when a slice; run null: the dump), or null (no such run)
+  async recordOf(of) {
     const id = parseInt(of, 10);
-    if (!(id > 0)) return this.file;
+    if (!(id > 0)) return { file: this.file, run: null };
     const dir = this.runsDir(), r = await this.sva(['runs', 'list', '--dir', dir, '--json']);
     let l = null; try { l = cliJson(r.out); } catch (e) { /* none */ }
     const run = l && (l.runs || []).find(x => x.id === id);
-    return run ? path.join(dir, run.file) : null;
+    return run ? { file: path.join(dir, run.file), run } : null;
   }
   // the runs kept of this dump (the Runs panel): sva runs over .wavelens-runs beside it (wavelens.runsDir: another directory).
   // list -> {dir, runs, others, now: the dump's {name, mtime, bytes}, shown: the run shown (0: the dump)}; keep {name, tags,
@@ -885,7 +909,7 @@ async function liveOpens() {   // view_live {page: a dump, open: true}: the tab 
       log(`the agent opens ${req.path}`);
       try {
         await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.file(req.path), VIEW);
-        const tab = [...TABS].find(t => t.file === req.path);
+        const file = vscode.Uri.file(req.path).fsPath, tab = [...TABS].find(t => t.file === file);   // as the tab's (B-68)
         if (tab && req.port) { tab.pin = String(req.port); if (tab.ready) liveTo(tab); }
         fs.unlink(claimed, () => {});
       } catch (e) {
@@ -980,6 +1004,7 @@ async function linkTab(l, base) {
   let file = l.dump ? (path.isAbsolute(l.dump) ? l.dump : path.resolve(base || ((vscode.workspace.workspaceFolders || [])[0] || { uri: { fsPath: os.homedir() } }).uri.fsPath, l.dump)) : null;
   if (file && !fs.existsSync(file)) { const w = (vscode.workspace.workspaceFolders || []).map(f => path.join(f.uri.fsPath, l.dump)).find(f => fs.existsSync(f));
     if (!w) { vscode.window.showWarningMessage(`WaveLens: no dump ${l.dump}`); return null; } file = w; }
+  if (file) file = vscode.Uri.file(file).fsPath;   // as a tab's (its URI's): on Windows the drive letter lower case (B-68)
   if (!file) {
     const t = [...TABS].find(x => x.panel.active) || [...TABS].find(x => x.panel.visible) || [...TABS].pop();
     if (t) return t;
@@ -995,7 +1020,9 @@ async function linkTab(l, base) {
 async function followLink(l, base) {
   const t = await linkTab(l, base); if (!t) return;
   t.panel.reveal();
-  const r = (await t.run([{ op: 'goto', ...LINKS.gotoOf(l) }]))[0] || {};
+  // the page's answer: the results of its ops, or {error} (no viewer, the ops refused); a tab that does not answer: said (B-69)
+  let res; try { res = await t.run([{ op: 'goto', ...LINKS.gotoOf(l) }]); } catch (e) { res = { error: e.message }; }
+  const r = (Array.isArray(res) ? res[0] : res) || {};
   if (r.error) vscode.window.showWarningMessage(`WaveLens: ${r.error}`);
 }
 

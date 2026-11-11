@@ -98,15 +98,20 @@ command('view', 'from? to? at? span?', 'the window: from … to, or span around 
     if (!(s > 0)) fail('view: span is not a length');
     v.markView(); v.span = Math.min(Math.max(s, v.minSpan), full); v.center(at); v.draw();
   } else fail('view: from and to, or span (and at)');
+  v.warpSync();   // the gaps on the waves: the window they show (one wholly in a gap moves), not the one asked (B-77)
   return { from: v.t0, to: v.t0 + v.span };
 });
 command('fit', '', 'the whole time in the window', v => { v.markView(); v.fit(); return { from: v.t0, to: v.t0 + v.span }; });
-command('range', 'from? to? signal?', 'the measured range (Δ, the edges or changes of the signal); from null: none', (v, a) => {
+command('range', 'from? to? signal?', 'the measured range (Δ, the edges or changes of the signal, then of the one selected after it); ' +
+  'from null: none; from and to one time: an error', (v, a) => {
   if (a.from == null && a.to == null) { v.setRange(null); return { range: null }; }
   const p = cmdTime(v, a.from, 'from'), q = cmdTime(v, a.to, 'to'), row = a.signal ? pickRows(v, a.signal, { one: true })[0] : null;
   if (Math.max(p, q) < v.M.t0 || Math.min(p, q) > v.M.t1) fail(`range: ${v.when(Math.min(p, q))} … ${v.when(Math.max(p, q))} is outside these waves ` +
     `(${v.when(v.M.t0)} … ${v.when(v.M.t1)})`);
-  v.setRange(Math.max(Math.min(p, q), v.M.t0), Math.min(Math.max(p, q), v.M.t1), row);
+  const lo = Math.max(Math.min(p, q), v.M.t0), hi = Math.min(Math.max(p, q), v.M.t1);   // cut to the waves
+  if (lo === hi) fail(p === q ? `range: from and to are one time (${v.when(p)}): no length (from null: no range)` :
+    `range: ${v.when(Math.min(p, q))} … ${v.when(Math.max(p, q))} only touches these waves (${v.when(v.M.t0)} … ${v.when(v.M.t1)})`);
+  v.setRange(lo, hi, row);
   return { range: v.range, text: v.rangeText() };
 });
 command('bookmark', 'n? t? signal? text? label? color? lift? top? link? go? delete?', 'a numbered circle on a signal (none: the time axis) with its text: a ' +
@@ -255,7 +260,7 @@ command('goto', 't? sel? view? bm?', 'a moment of the page, as a link to it says
   const s = a.sel != null ? pickRows(w, a.sel, { one: true })[0] : null;   // the signal first: a name that is none moves nothing
   if (a.bm != null) { if (!isNum(a.bm)) fail(`bm: a bookmark number (1, 2 …), not ${JSON.stringify(a.bm)}`);
     const b = w.bms.find(x => x.n === +a.bm); if (!b) fail(`no bookmark ${a.bm} (there are: ${nums(w)})`); w.goBm(b); }
-  if (a.t != null) { const t = cmdIn(w, a.t); w.cursor = t; w.center(t); }
+  if (a.t != null) { const t = Math.min(Math.max(cmdIn(w, a.t), w.M.t0), w.M.t1); w.cursor = t; w.center(t); }   // before the waves: their start (B-74)
   if (s) {
     if (s.bit != null && s.of && !w.bitsOpen.has(s.of.full)) { w.setBits(s.of, true, true); w.saveRows(); }   // a bit of a bus folded: shown
     if (s.anc.some(id => w.collapsed.has(id))) { s.anc.forEach(id => w.collapsed.delete(id)); w.foldTouched = true; }
@@ -377,7 +382,8 @@ command('group', 'name signals? add? remove? color? rename? delete? go? move? di
   'its first signal selected (ctrl+G); move: its place among your groups, up, down, top, bottom or a number (1: the first)', (v, a) => {
   const name = String(a.name ?? '').trim(); if (!name) fail('group: a name');
   let g = v.ugroups.find(x => x.name === name);
-  if (a.delete) { if (!g) fail(`no group "${name}"`); v.ugroups = v.ugroups.filter(x => x !== g); v.setGroups(); return { name, deleted: true }; }
+  if (a.delete) { if (!g) fail(`no group "${name}"`); v.ugroups = v.ugroups.filter(x => x !== g); v.hiddenRows.delete('@' + name); v.rowsStale = true;
+    v.setGroups(); return { name, deleted: true }; }   // hidden: a new group of that name is shown
   const fulls = spec => sigsOf(v, pickRows(v, spec, { groups: true })).map(r => r.full);
   const set = a.signals != null ? fulls(a.signals) : null, add = a.add != null ? fulls(a.add) : [], rm = a.remove != null ? fulls(a.remove) : [];
   const to = a.rename != null ? String(a.rename).trim() : null;
@@ -397,6 +403,7 @@ command('group', 'name signals? add? remove? color? rename? delete? go? move? di
   for (const f of add) if (!g.signals.includes(f)) g.signals.push(f);
   if (rm.length) g.signals = g.signals.filter(f => !rm.includes(f));
   if (a.color !== undefined) g.color = cmdColor(a);
+  if (to && to !== name && v.hiddenRows.delete('@' + name)) { v.hiddenRows.add('@' + to); v.rowsStale = true; }   // hidden under its new name
   if (to) g.name = to;
   v.setGroups();
   if (a.go) { v.held.names = false; v.renderNamesNow(); v.goGroup(g.name); }
@@ -414,14 +421,14 @@ command('highlight', 'add? remove? set? clear?', 'signals and modules in front, 
 command('paint', 'signals? color? clear?', 'signals (a module: its signals) in a colour, trace, outline and name; color null: their own again; ' +
   'clear: every one', (v, a) => {
   if (a.signals == null && !a.clear) fail('paint: signals and a color, or clear');
-  if (a.clear) v.painted.clear();
+  cmdColor(a);   // before anything is cleared (B-48)
   const rows = a.signals != null ? sigsOf(v, pickRows(v, a.signals, { groups: true })) : [];
-  cmdColor(a);
+  if (a.clear) v.painted.clear();
   for (const r of rows) if (a.color) v.painted.set(r.full, String(a.color)); else v.painted.delete(r.full);
   v.savePaint(); v.renderNames(); v.draw(); return { painted: rows.length };
 });
-command('select', 'signal? signals?', 'the selected signal (edge search, new bookmarks; null: none), or several (the right button and Paint ' +
-  'take them all)', (v, a) => {
+command('select', 'signal? signals?', 'the selected signal (edge search, new bookmarks, a measured range counted on it; null: none), or ' +
+  'several (the right button and Paint take them all)', (v, a) => {
   if (a.signals != null) { const rows = pickRows(v, a.signals).filter(r => v.shown(r) || !(v.onlyOn() || v.hiddenRows.size));   // the ones in the view
     v.select(rows[rows.length - 1] || null); v.selRun = new Set(rows); v.selAnchor = rows[0] || null; }
   else v.select(a.signal ? pickRows(v, a.signal, { one: true })[0] : null);
@@ -584,9 +591,21 @@ command('find', 'query case? word? regex? highlight? open? mask?', 'the find fie
     if (v.qEl) v.qEl.value = String(a.query ?? '');
     v.find(String(a.query ?? '')); return { found: [...v.found.keys()].map(r => r.full || r.name).slice(0, 50), count: v.found.size };
   });
+// the gaps command's values, each checked before anything changes (B-49; tools/viewedit.py gaps_ok): idle and keep as the menu takes them
+const gapLenOk = (x, zero) => (typeof x === 'number' || typeof x === 'string') && (n => isFinite(n) && (zero ? n >= 0 : n > 0))(gapLen(x, 1));
+function gapsOk(a) {
+  for (const k of ['on', 'only', 'view']) if (a[k] != null && typeof a[k] !== 'boolean') fail(`gaps: ${k}: true or false`);
+  for (const [k, lo] of [['idle', 'more than 0'], ['keep', null]]) if (a[k] !== undefined && !gapLenOk(a[k], !lo))
+    fail(`gaps: ${k}: clock cycles${lo ? ` (${lo})` : ''} or a time ("100ns"), not ${JSON.stringify(a[k])}`);
+  if (a.count != null && !GAP_COUNTS.includes(a.count)) fail(`gaps: count: one of ${GAP_COUNTS.join(', ')}, not ${JSON.stringify(a.count)}`);
+  for (const k of ['signals', 'aux']) if (a[k] != null && typeof a[k] !== 'string' && !(Array.isArray(a[k]) && a[k].every(s => typeof s === 'string')))
+    fail(`gaps: ${k}: names or * patterns (a list, or a text with commas), not ${JSON.stringify(a[k])}`);
+  if (a.clock != null && typeof a.clock !== 'string') fail(`gaps: clock: a signal's name, not ${JSON.stringify(a.clock)}`);
+}
 command('gaps', 'on? idle? keep? signals? clock? aux? only? count? view? reset?', 'the gaps of the picture and WaveDrom (the menu\'s Gaps): on, ' +
   'idle and keep (cycles or a time), the signals they follow, the clock they count, aux (changes counted), only, count (clock edges off), view (on the ' +
   'waves too); reset. Expressions with gap (expr) have them on, gapBy says which; on or view false, or reset, takes it off them', (v, a) => {
+  gapsOk(a);
   if (a.reset) v.setGaps(null);
   const map = { on: 'gaps', idle: 'gapIdle', keep: 'gapKeep', signals: 'gapSignals', clock: 'gapClock', aux: 'gapAux', only: 'gapOnly', count: 'gapCount',
     view: 'gapView' };
@@ -617,7 +636,8 @@ command('edge', 'dir? kind? value? signal?', 'the cursor to the next (dir 1) or 
 });
 command('reset', '', 'what Esc does: no search, highlight, selection, range or second cursor', v => { v.reset(); return {}; });
 command('state', '', 'the viewer\'s state (what Save writes)', v => ({ state: v.state() }));
-command('set_state', 'state', 'a state back (what Load… does); every key it has replaces this viewer\'s', async (v, a) =>
+command('set_state', 'state', 'a state back (what Load… does); every key it has replaces this viewer\'s; one of another kind: an error, ' +
+  'nothing applied', async (v, a) =>
   ({ missing: await v.setState(a.state) }));
 command('rows', 'pattern? limit? offset?', 'the signals and modules of the page in display order: [full path, width | "module" | "group"], ' +
   'hidden and folded ones too; a dump compared: "≠" (it differs) or "missing" (not in it) third; a bus shown bit by bit (bits): its bits ' +
@@ -626,7 +646,7 @@ command('rows', 'pattern? limit? offset?', 'the signals and modules of the page 
   const all = v.allRows(true)   // the hidden ones too (a signal under a hidden module), where they would be
     .filter(r => (r.type === 'sig' && r.tr && !r.ug && !(r.bit != null && r.orig)) || (r.type === 'group' && r.full))   // a bit of your group's copy: its bus's
     .filter(r => !a.pattern || (rx ? rx.test(r.full) : r.full.toLowerCase().includes(low)));
-  const off = Math.max(0, +a.offset || 0), n = Math.max(1, +a.limit || 200), page = all.slice(off, off + n);
+  const off = Math.max(0, Math.trunc(+a.offset) || 0), n = Math.max(1, Math.trunc(+a.limit) || 200), page = all.slice(off, off + n);   // whole (B-50)
   const mark = r => { const c = v.cmpOf(r); return !c ? [] : c.spans.length ? ['≠'] : c.missing || c.omitted ? ['missing'] : []; };
   return { total: all.length, rows: page.map(r => (r.bit != null ? [r.full, 1, 'bit'] :   // a bus's bits shown (bits; review 2026-11-05 B-20)
     [r.full, r.type === 'group' ? (r.user ? 'group' : 'module') : r.width || 1, ...mark(r)])),
@@ -638,6 +658,8 @@ command('picture', 'format? from? to? rows?', 'the waves as a picture: png (base
   const f = a.format || 'png', o = {};
   if (a.from != null) o.from = cmdTime(v, a.from, 'from');
   if (a.to != null) o.to = cmdTime(v, a.to, 'to');
+  const [ra, rb] = f === 'wavedrom' || !v.range ? [v.t0, v.t0 + v.span] : v.range, p = o.from ?? ra, q = o.to ?? rb;   // the ends the picture takes
+  if (!(q > p)) fail(`picture: "to" ${v.when(q)} is not after "from" ${v.when(p)}`);
   if (a.rows === 'all' && v.rowsL.length > PICTURE_ROWS) fail(`${v.rowsL.length} rows: at most ${PICTURE_ROWS} in a picture: give rows or a pattern`);
   if (a.rows != null) o.rows = ['screen', 'all', 'picked'].includes(a.rows) ? (a.rows === 'screen' ? undefined : a.rows) : sigsOf(v, pickRows(v, a.rows,
     { groups: true })).map(r => v.rowsL.find(x => x === r) || r).filter(r => v.shown(r));   // the ones in the view (Hide, Only)
@@ -841,7 +863,8 @@ Object.assign(WaveView.prototype, {
   // your groups: a folder per group at the top of the names, its signals (the model's rows under them, live: radix,
   // values) in your order; the same objects while the group stays (its folding, a highlight)
   // your groups changed: their rows again (a compare's marks on the new ones), kept, drawn
-  setGroups() { this.ugMemo = null; this.saveRows(); if (this.cmp) this.cmpMarks(); this.renderNames(); this.draw(); return this; },
+  setGroups() { this.ugMemo = null; this.allRows(); this.onlyFix(); this.saveRows(); if (this.cmp) this.cmpMarks(); this.renderNames(); this.draw();
+    return this; },
   ugRows() {
     if (this.ugMemo) return this.ugMemo;
     const by = new Map(this.sigPool().filter(r => r.type === 'sig' && r.tr).map(r => [r.full, r])), cache = this.ugCache = this.ugCache || new Map(), out = [];
@@ -1102,6 +1125,9 @@ Object.assign(WaveView.prototype, {
     Object.assign(st, { from: a, to: b, cursor: inT(this.cursor) ? this.cursor : a, cursor2: this.cursor2 != null && inT(this.cursor2) ? this.cursor2 : null,
       markers: (st.markers || []).filter(m => inT(m.t)), bookmarks: (st.bookmarks || []).filter(m => inT(m.t)),
       spans: (st.spans || []).filter(s => s.to > a && s.from < b).map(s => Object.assign(s, { from: Math.max(s.from, a), to: Math.min(s.to, b) })) });
+    // a marker's Δ (dto: a number of the list) renumbered by the markers kept; one to a marker cut out: none (0), not another's
+    const ms0 = all.markers || [], at = new Map(st.markers.map((m, i) => [ms0.indexOf(m) + 1, i + 1]));
+    st.markers = st.markers.map(m => (m.dto > 0 ? Object.assign({}, m, { dto: at.get(m.dto) || 0 }) : m));
     const kept = new Set(st.bookmarks.map(m => m.n));
     st.arrows = (st.arrows || []).filter(x => kept.has(x.from) && kept.has(x.to));
     if (st.range && !(inT(st.range.from) && inT(st.range.to))) st.range = null;

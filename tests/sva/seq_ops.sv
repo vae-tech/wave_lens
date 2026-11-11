@@ -50,4 +50,9 @@ module seq_ops (
     q_nested:     assert property (@(posedge clk) ((a ##1 b) or (c ##1 d)) ##1 e |=> !e);
     // named arguments with an expression actual; an instance as the consequent
     q_inst_args:  assert property (@(posedge clk) s_cd(.x(a), .y(b && c)) |=> s_burst(4));
+    // every (start, end) counted once, however many threads reach it
+    // (bughunt B-04: a ##1 b after two cycles of a was counted twice)
+    q_cover_once: cover sequence (@(posedge clk) a[*1:2] ##1 b);
+    // the left side of within must match a cycle, as for and / intersect (bughunt B-07)
+    q_within_one: cover sequence (@(posedge clk) a[*0:1] within (c ##1 d));
 endmodule

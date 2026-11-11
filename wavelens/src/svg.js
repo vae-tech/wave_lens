@@ -1,6 +1,7 @@
 /* wavelens/src/svg.js — the static SVG figure (WaveSVG). */
 
 /* ---------------- static SVG ---------------- */
+const SVG_MIN_WAVES = 80;   // px: the waves of a figure whose width leaves less room beside its names
 const WaveSVG = {
   // opts: from/to (model units or "12us"), width (px, fits the wave area), cyclePx (default 40·hscale), axis (force), bg, markers;
   // view: a viewer, drawn as it shows its waves (its rows — opts.rows, a part of them —, folding, colours, highlight,
@@ -9,9 +10,12 @@ const WaveSVG = {
     const V = opts.view, M = V ? V.M : parse(model), docShow = V ? null : cmpDocShow(M);
     const S = V ? V.S : settings(SVG_DEFAULTS, GLOBAL, M.cfg, opts), P = new SvgPainter(S);
     const gp = groupPaint(M, S.groupColors), strokeOf = V ? r => V.strokeOf(r) : r => r.stroke ?? gp.get(r);
-    const from = parseT(opts.from) ?? M.t0, to = parseT(opts.to) ?? M.t1, fs = S.fontSize;
+    let from = parseT(opts.from) ?? M.t0, to = parseT(opts.to) ?? M.t1;   // reversed ends: in order; equal: the whole waves (B-75)
+    if (from > to) [from, to] = [to, from];
+    if (!(to > from)) [from, to] = [M.t0, M.t1];
+    const fs = S.fontSize;
     const rh = { sig: S.rowHeight, group: S.groupHeight, space: S.spaceHeight }, bms = V ? V.bms : M.bookmarks, ars = V ? V.arrows : M.arrows;
-    const marks = V ? V.markers : (opts.markers || []).map(pageMark).concat(M.markers);
+    const marks = V ? V.markers : optTimes(opts.markers, 'a marker', []).map(pageMark).concat(M.markers);
     let C, timeMarks = V ? V.timeMarks() : [], keeps = null;
     if (V) C = { rows: opts.rows || V.rowsL, band: V.band, hl: V.hl };
     else {
@@ -54,7 +58,7 @@ const WaveSVG = {
     const nameOf = r => P.measure(r.name || '', { size: fs, weight: r.type === 'group' ? 600 : 400 }), tagW = r => (wTag(r) ? 5 + P.measure(wTag(r), wSt) : 0);
     const nameW = Math.ceil(Math.max(40, cy ? P.measure(cyLab, { size: 10 }) + 12 : 0, ...rows.map(r => nameOf(r) + tagW(r) + 22 + r.depth * 12)));
     let k = ((opts.cyclePx || 40) * M.hscale) / M.cycle;
-    if (opts.width) k = (opts.width - nameW - 8 - ng * GAP) / kept;
+    if (opts.width) k = Math.max(opts.width - nameW - 8 - ng * GAP, SVG_MIN_WAVES) / kept;   // under the names' column: the least waves (B-76)
     const waveW = kept * k + ng * GAP, Wt = Math.ceil(nameW + waveW + 8);
     const showAxis = opts.axis ?? (M.timed || M.tick != null), showTock = M.tock != null;
     let y = 4;

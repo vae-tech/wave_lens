@@ -15,7 +15,11 @@ vectors built of bits ("#{name} …"), the [sst_*] lines.
 Times: GTKWave keeps a VCD's times in the dimension of its $timescale (a tick of "10 ns" is 10 ns: the number multiplies
 the ticks), so a time of the file is in that dimension (ns), not in ticks; view_of turns it into ps (dim_ps).
 """
-import json, re, sys
+import json, os, re, sys
+
+sys.dont_write_bytecode = True   # python3 -I ignores PYTHONDONTWRITEBYTECODE: no tools/__pycache__ (AU-WL-003)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
+from common import run_main  # noqa: E402
 
 TR_HEX, TR_DEC, TR_BIN, TR_OCT, TR_BLANK, TR_SIGNED, TR_ASCII = 0x2, 0x4, 0x8, 0x10, 0x200, 0x400, 0x800
 TR_ANALOG = 0x8000 | 0x10000
@@ -193,5 +197,7 @@ if __name__ == '__main__':
     if len(sys.argv) != 2 or sys.argv[1] in ('-h', '--help'):
         print(__doc__)
         sys.exit(0 if len(sys.argv) == 2 else 2)
-    with open(sys.argv[1], encoding='utf-8', errors='replace') as f:
-        print(json.dumps(parse(f.read()), indent=1, ensure_ascii=False))
+    def main():
+        with open(sys.argv[1], encoding='utf-8', errors='replace') as f:
+            print(json.dumps(parse(f.read()), indent=1, ensure_ascii=False))
+    run_main(main, 'gtkw')   # a file not there or a directory: one line (B-92)

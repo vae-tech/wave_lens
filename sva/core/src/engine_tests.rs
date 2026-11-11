@@ -251,6 +251,9 @@ fn fail_notes_and_traces() {
 fn bus_compares_show_the_value() {
     let o = outcome("a |-> d == 8'h5 ##1 d != 0", "a=10 d=5,7", &Options::default());
     assert_eq!(steps(&o), "s1@0 s2@0=5 s3@1=7");
+    // the left side at the compare's width: x + y of two 8'h80 is 256 against 9'h100, not 0 (bughunt B-08)
+    let o = outcome("a |-> x + y == 9'h100", "a=1 x:8=128 y:8=128", &Options::default());
+    assert_eq!(steps(&o), "s1@0 s2@0=256");
     let o = outcome("a |-> st inside {1, 2}", "a=1 st:2=3", &Options::default());
     assert_eq!(steps(&o), "s1@0", "a failed compare is not a step");
     assert_eq!(o.attempts[0].note.as_deref(), Some("expected st inside {1, 2} at cycle 0"));
@@ -608,4 +611,77 @@ fn a_pass_decided_by_an_unknown_has_a_note() {
     assert_eq!(o.attempts[0].note.as_deref(), Some("m is unknown (x) at cycle 0, read as false: the attempt passed with it"));
     let o = outcome("a |-> if (m) b else c", "a=1 m=0 b=0 c=1", &Options::default());
     assert_eq!(o.attempts[0].note, None);
+}
+
+fn cover(seq: &str, sigs: &str) -> (String, Option<usize>) {
+    let o = outcome(&format!("c: cover sequence (@(posedge clk) {seq});"), sigs, &Options::default());
+    (summary(&o), o.stats.matches)
+}
+
+#[test]
+fn goto_range_then_delay() {
+    // b hits at 0 and 4, c never a cycle after a hit: b[->1:2] ##1 c has no match (bughunt B-01: the residual of the
+    // goto after its hit matched empty at every later cycle, so c was checked at cycles with no hit)
+    check("a |-> b[->1:2] ##1 c", "a=1000000 b=1000100 c=0010000", "0-5F");
+    check("a |-> (b[->1] ##1 c) or (b[->2] ##1 c)", "a=1000000 b=1000100 c=0010000", "0-5F");
+    check("a |-> b[->1:$] ##1 c", "a=1000000 b=1000100 c=0010000", "0-6A");
+    check("a |-> b[->0:2] ##1 c", "a=1000000 b=1000100 c=0010000", "0-5F");
+    assert_eq!(cover("a ##0 b[->1:2] ##1 c", "a=1000000 b=1000100 c=0010000"), (String::new(), Some(0)));
+    assert_eq!(cover("a ##0 b[->1:2] ##1 c", "a=1000000 b=1000100 c=0100010"), ("0-1P 0-5P".into(), Some(2)));
+    // b[->0:2]: empty (c at the start), or a hit then c; a cycle without a hit ends the empty choice
+    assert_eq!(cover("b[->0:2] ##1 c", "b=0100 c=0010"), ("0-2P 1-2P 2-2P".into(), Some(3)));
+}
+
+#[test]
+fn delay_into_empty() {
+    // ##n empty is ##(n-1) 1 (ENGINE.md, Empty matches; bughunt B-02): the matches were dropped for n >= 2
+    check("a |-> ##2 b[*0] ##1 c", "a=10000 b=00000 c=00100", "0-2P");
+    assert_eq!(cover("a ##2 b[->0] ##1 c", "a=10000 b=00000 c=00100"), ("0-2P".into(), Some(1)));
+    assert_eq!(cover("a ##[2:3] b[*0] ##1 c", "a=10000 b=00000 c=00110"), ("0-2P 0-3P".into(), Some(2)));
+    // s ##[1:2] empty is s ##[0:1] 1: it ends at s's cycle and the next
+    assert_eq!(cover("a ##[1:2] b[*0]", "a=1000 b=0000"), ("0-0P 0-1P".into(), Some(2)));
+}
+
+#[test]
+fn a_match_is_counted_once() {
+    // one (start, end) is one match, however many threads reach it (bughunt B-04)
+    assert_eq!(cover("a[*1:2] ##1 b", "a=0110000 b=0001000"), ("1-3P 2-3P".into(), Some(2)));
+    assert_eq!(cover("a[*1:$] ##1 b", "a=0110000 b=0001000"), ("1-3P 2-3P".into(), Some(2)));
+    assert_eq!(cover("(a or a) ##1 b", "a=1000 b=0100"), ("0-1P".into(), Some(1)));
+}
+
+#[test]
+fn within_needs_a_cycle_of_its_left_side() {
+    // as and / intersect: an operand matching only empty is no match (ENGINE.md, Empty matches; bughunt B-07)
+    assert_eq!(cover("b[*0:1] within c", "b=000 c=111"), (String::new(), Some(0)));
+    assert_eq!(cover("b[*0:1] within (c ##1 c)", "b=010 c=111"), ("0-1P 1-2P".into(), Some(2)));
+}
+
+#[test]
+fn unsized_unknown_literals_fill_their_context() {
+    // 'hx, 'bz, 'ox are x in all the bits, as 'dx and 8'hx (IEEE 1800-2017 5.7.1; bughunt B-06): with x read as
+    // false, d != 'hx never holds
+    let f = Options { x: XMode::False, ..Default::default() };
+    for lit in ["'hx", "'bz", "'ox", "'dx", "8'hx", "'hX", "'b?"] {
+        let o = outcome(&format!("c: cover property (@(posedge clk) d != {lit});"), "d:8=240,15", &f);
+        assert_eq!(o.stats.matches, Some(0), "d != {lit}");
+    }
+    // a leading known digit is zero-extended: 'h1x is 0001xxxx
+    let o = outcome("c: cover property (@(posedge clk) d != 'h1x);", "d:8=240,31", &f);
+    assert_eq!(summary(&o), "0-0P");
+}
+
+#[test]
+fn vacuity_of_always_and_eventually_as_documented() {
+    // ENGINE.md Decisions, "Vacuity of always / eventually" (bughunt D-2: written down as it is, not changed)
+    let all = Options { vacuous: true, ..Default::default() };
+    // always [m:n]: a pass after its range even when every instance passed vacuously; so it covers
+    check("s |-> always [0:1] (a |-> b)", "s=100 a=000 b=000", "0-1P");
+    let o = outcome("c: cover property (@(posedge clk) always [0:1] (a |-> b));", "a=000 b=000", &Options::default());
+    assert_eq!((summary(&o), o.stats.matches), ("0-1P 1-2P".into(), Some(2)));
+    // eventually [m:n] and s_eventually: the first instance that passes decides, a vacuous one too
+    // (a is 1 and b 1 at cycle 1, a non-vacuous pass there is not waited for)
+    for p in ["s |-> eventually [0:2] (a |-> b)", "s |-> s_eventually (a |-> b)"] {
+        assert_eq!(summary(&outcome(p, "s=100 a=010 b=010", &all)), "0-0V 1-1V 2-2V", "{p}");
+    }
 }

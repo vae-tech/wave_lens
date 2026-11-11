@@ -71,7 +71,7 @@ help:
 	@echo 'make sva-verify the checkers of the examples in Verilator --assert against sva eval (after make examples; skipped without verilator)'
 	@echo 'make sva-eval   WAVES=dump.vcd|fst SVA="pkg.sv checks.sva" SCOPE=tb.dut [OUT=results.json] [ARGS=...]: sva eval'
 	@echo 'make fsm-stats  WAVES=dump.vcd|fst SIGNAL=u_ctl.state [ARGS="--strict --json"]: an FSM'"'"'s states (tools/fsmstats.py)'
-	@echo 'make diff-results A=a.json B=b.json [ARGS=...]: two runs'"'"' assertion results compared (sva diff --results)'
+	@echo 'make diff-results REF=a.json NEW=b.json [ARGS=...]: two runs'"'"' assertion results compared (sva diff --results)'
 	@echo 'make fst        WAVES=tb.vcd [OUT=tb.fst] [ARGS=--no-types]: sva fst, the VCD as an FST beside it (FSM states of tb.types.json in it)'
 	@echo 'make diff       REF=a.vcd|fst WAVES=b.vcd|fst [ARGS="--map a.top=b.top --segment tb_test --json d.json"]: sva diff, two runs change by change'
 	@echo 'make sva-spike  the spike page $$(BUILD)/sva/spike.html (the WebAssembly build and wavelens/sva.js in a page)'
@@ -340,10 +340,17 @@ fsm-stats:
 	$(if $(SIGNAL),,$(error make fsm-stats needs SIGNAL=the state signal))
 	$(PY) tools/fsmstats.py $(WAVES) --signal $(SIGNAL) $(ARGS)
 
-# the assertions' results of two runs (sva eval --json): new, gone, moved failures, covers lost: make diff-results A=a.json B=b.json
+# the assertions' results of two runs (sva eval --json): new, gone, moved failures, covers lost: make diff-results
+# REF=a.json NEW=b.json. Not A= B= (the old form): B is the Makefile's own build directory, and a command-line B built
+# the engine into a directory named after the results file (bughunt B-90): refused before anything is built
+ifneq ($(filter diff-results,$(MAKECMDGOALS)),)
+  ifneq ($(or $(A),$(filter command line,$(origin B))),)
+    $(error make diff-results takes REF=a.json NEW=b.json now (B is the build directory), not A= B=)
+  endif
+  $(if $(and $(REF),$(NEW)),,$(error make diff-results needs REF=a.json NEW=b.json))
+endif
 diff-results: sva-build
-	$(if $(and $(A),$(B)),,$(error make diff-results needs A=a.json B=b.json))
-	$(SVA_BIN) diff --results $(A) $(B) $(ARGS)
+	$(SVA_BIN) diff --results $(REF) $(NEW) $(ARGS)
 
 sva-spike: sva-build $(VCD)
 	mkdir -p $(B)/sva

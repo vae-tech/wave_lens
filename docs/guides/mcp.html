@@ -40,7 +40,7 @@ claude mcp add wavelens -- python3 -I /path/to/wavelens/tools/wavemcp.py --lean 
   its <code>instructions</code> (start with <code>wave_info</code>, then <code>wave_signals</code> to find names …), so the agent needs no
   prompt of yours to use it. The tools that only read are marked read-only (<code>readOnlyHint</code>); <code>wave_page</code>,
   <code>view_edit</code> and <code>view_live</code> write only the page you name (<code>view_edit</code> with <code>config</code>: that config), <code>wave_to_fst</code> the FST beside the VCD,
-  <code>wave_cut</code> the VCD you name (<code>destructiveHint: false</code>).</p>
+  <code>wave_cut</code> the VCD or FST you name (<code>destructiveHint: false</code>).</p>
 <h3>From the shell</h3>
 <p>The same tools work without an agent — for a script, a test, or an agent that prefers its shell:</p>
 <pre><code>python3 -I tools/wavemcp.py --list                                                  <span class="c"># the tools and their input schemas</span>
@@ -61,11 +61,12 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
   <tr><td><code>wave_sample</code></td><td>a table per clock cycle, the values sampled just before the edge (as SVA samples), by default only
     the cycles where a value changes</td></tr>
   <tr><td><code>wave_find</code></td><td>an SV expression or sequence matched on every clock cycle; or a signal's edges or value at their
-    exact times: the count and the first matches</td></tr>
+    exact times: the count and the first matches; <code>values</code>: the values of some signals at each match, a table in one call</td></tr>
   <tr><td><code>wave_stats</code></td><td>over a window: a bit's rises, falls, high time, pulse widths and period; a bus's changes, distinct
     values, the longest-held ones, minimum and maximum</td></tr>
   <tr><td><code>sva_check</code></td><td>assertion files and / or text evaluated over the dump in a scope: the failed ones with their first
-    failures, passed, vacuous, not evaluated, the covers</td></tr>
+    failures, passed, vacuous, not evaluated, the covers; <code>per</code>: a verdict test by test (<code>"tests"</code> of a
+    marks file) or window by window, in one pass</td></tr>
   <tr><td><code>wave_page</code></td><td>a viewer page (<code>.html</code>) or WaveJSON (<code>.json</code>) of signals over a window, with
     assertions bound, to show a person; <code>compare</code>: a second dump's differences on it (<a href="compare.html">Compare</a>); <code>marks</code>,
     <code>marks_views</code>: the tests of a cocotb run on it (<a href="cocotb.html">cocotb tests</a>)</td></tr>
@@ -92,8 +93,9 @@ python3 -I tools/wavemcp.py --call wave_info '{"dump": "out/examples/apb/apb.vcd
     the run) against the dump's, wherever it is in the run — "which run first broke test_x" is one call; <code>against</code>: a run
     (its number or name) is A instead of the dump, the others compared with it (<code>run: "now"</code> adds the dump) — "which
     runs differ from the golden one"; the answer's <code>against</code> names it</td></tr>
-  <tr><td><code>wave_cut</code></td><td>a window (<code>from</code>, <code>to</code>) and some <code>signals</code> of a dump as a small VCD at <code>out</code>: for <span class="ui">Compare…</span> on a page,
-    a fixture, one test case to send</td></tr>
+  <tr><td><code>wave_cut</code></td><td>a window (<code>from</code>, <code>to</code>) and some <code>signals</code> of a dump as a small dump at <code>out</code>, a VCD or an FST as its name says
+    (<code>x.vcd</code>, <code>x.fst</code>; another name is refused), <code>zero</code>: its times from 0: for <span class="ui">Compare…</span> on a page,
+    a fixture, a report, one test case to send</td></tr>
   <tr><td><code>view_edit</code></td><td>marks a page up for a person: bookmarks with an explanation, arrows between them, markers, expressions, a group
     of the signals that matter, highlight, colours, the cursor and the window — live in their browser, else in the page's file;
     <code>config</code>: bookmarks, arrows, spans and the look (groups, radix, paint, markers … as its <code>"state"</code>) into a view of the page's config, so a
@@ -340,7 +342,7 @@ make mcp-bench AGENT=codex TASKS=a1,b3                 <span class="c"># some ta
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.50 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.51 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

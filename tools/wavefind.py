@@ -175,16 +175,23 @@ def cover_hits(res, msgs, scope=''):
     r = res['assertions'][0]
     if r.get('missing'):
         raise WaveError(f'no {", ".join(r["missing"])} in scope {scope or "(top)"} — give "scope" or full names')
-    cyc, u = res.get('cycles') or [], UNIT_PS.get(res.get('unit', 'ps'), 1)
-    tm = lambda c: cyc[c] * u if 0 <= c < len(cyc) else None
+    cyc = cycle_ps(r, res)
+    tm = lambda c: cyc[c] if 0 <= c < len(cyc) else None
     return [(x['start'], tm(x['start']), x['end'], tm(x['end'])) for x in r.get('attempts', []) if x.get('result') == 'pass'], r, res
+
+
+def cycle_ps(o, results):
+    """The times (ps) of an assertion's cycles: its own clock's (an assertion on another clock than the first one's carries its
+    own "cycles" in sva eval's JSON: bughunt B-53), else the document's."""
+    u = UNIT_PS.get(results.get('unit', 'ps'), 1)
+    return [c * u for c in o.get('cycles') or results.get('cycles') or []]
 
 
 def attempt_times(results, result='fail', point=None):
     """A binding's results document (one assertion) -> the times of its attempts of that result, in order: a fail at its
     failed_at (else its end), a pass at its end; point "start" / "end" / "failed_at" says which."""
     o = results['assertions'][0]
-    cyc, u = o.get('cycles') or results.get('cycles') or [], UNIT_PS.get(results.get('unit', 'ps'), 1)
+    cyc = cycle_ps(o, results)
     out = []
     for x in o.get('attempts', []):
         if x.get('result') != result:
@@ -194,7 +201,7 @@ def attempt_times(results, result='fail', point=None):
         if c is None:
             c = x.get('end')
         if c is not None and 0 <= c < len(cyc):
-            out.append(cyc[c] * u)
+            out.append(cyc[c])
     return out
 
 

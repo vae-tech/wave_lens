@@ -47,7 +47,7 @@ Object.assign(WaveView.prototype, {
     // or a row of the shift+click run: every row of the run
     const run = !!sig && this.selRun.size > 1 && this.selRun.has(sig);
     const many = run || (it && (pk.has(it.orig || it) || sig && picked(sig)) && this.picks.size > 1);
-    const sigs = run ? [...this.selRun] : many ? this.sigPool().filter(r => r.type === 'sig' && r.tr && picked(r) && this.shown(r)) : sig ? [sig] : [];
+    const sigs = run ? [...this.selRun] : many ? this.rowPool().filter(r => r.type === 'sig' && r.tr && picked(r) && this.shown(r)) : sig ? [sig] : [];
     const vecs = sigs.map(r => r.orig || r).filter(isVec);   // Bits: the buses bit by bit
     // Duplicate: every signal but a bit, a plugin's copy; a copy's own row goes
     const dupable = sigs.filter(r => rowBase(r).bit == null && !rowBase(r).same), copies = [...new Set(sigs.map(r => r.orig || r).filter(r => r.dupOf))];
@@ -197,12 +197,15 @@ Object.assign(WaveView.prototype, {
     // the submenu: open on the pointer or a click, beside the menu (the left side when the right has no room)
     for (const msub of el.querySelectorAll('.msub')) {   // the gaps, the cycles, your groups
       const sub = msub.querySelector('.sub'), subh = msub.querySelector('.subh, .subc, .subg, .subs');
+      // fixed on the screen by its item's place (the menu scrolls: an absolute one would be cut by it, B-83), placed again
+      // when the menu scrolls
       const subOpen = on => {
         sub.hidden = !on; subh.setAttribute('aria-expanded', on); if (!on) return;
-        Object.assign(sub.style, { left: '100%', right: 'auto', top: '-5px' }); const s = sub.getBoundingClientRect();
-        if (s.right > innerWidth - 4) Object.assign(sub.style, { left: 'auto', right: '100%' });
-        if (s.bottom > innerHeight - 4) sub.style.top = -5 - (s.bottom - innerHeight + 4) + 'px';
+        const m = msub.getBoundingClientRect(), s = sub.getBoundingClientRect();
+        const left = m.right + s.width > innerWidth - 4 ? Math.max(4, m.left - s.width) : m.right;
+        Object.assign(sub.style, { left: left + 'px', top: Math.max(4, Math.min(m.top - 5, innerHeight - 4 - s.height)) + 'px' });
       };
+      el.addEventListener('scroll', () => { if (!sub.hidden) subOpen(true); });
       msub.addEventListener('mouseenter', () => subOpen(true));
       msub.addEventListener('mouseleave', () => { if (!sub.contains(document.activeElement)) subOpen(false); });   // not while typing in it
       subh.addEventListener('click', () => subOpen(true));   // (the pointer opened it already: stays open)
@@ -218,7 +221,7 @@ Object.assign(WaveView.prototype, {
       else if (act === 'marks') {
         const n = Math.max(0, ...this.bms.map(x => x.n)) + 1, s = sig ? sig.full : null;
         const top = this.topNow(); this.bms.push(...bmNorm([{ n, t: r[0], signal: s, top }, { n: n + 1, t: r[1], signal: s, top }]));
-        this.arrows.push(...arNorm([{ from: n, to: n + 1, shape: '-', head: '<>', label: this.rangeText().replace(/^Δ /, '') }])); this.changed(true);
+        this.arrows.push(...arNorm([{ from: n, to: n + 1, shape: '-', head: '<>', label: this.rangeText(false).replace(/^Δ /, '') }])); this.changed(true);
       }
       else if (act === 'slkeep') this.keepSlice(...r);
       else if (act === 'slfst') this.saveSlice(...r);

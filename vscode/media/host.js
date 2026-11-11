@@ -70,11 +70,13 @@
   };
 
   /* ---- the last state: what Reload reads, whichever tab loaded it; the file is the extension's to name ---- */
-  const fresh = !data.size;   // a dump seen here before has a view of its own: a new one takes the last state
+  // a dump seen here before has a view of its own: a new one takes the last state. The html's word until the extension's: a
+  // page VS Code made again (the tab moved to a window of its own) has the html of when the tab opened (B-66)
+  let fresh = !data.size, lastPath = H.lastState || null;
   const lastState = p => ({ kind: 'file', name: p.replace(/^.*[\\/]/, ''), path: p, getFile: async () => { const m = await call('state-read', {});
     if (m.error) throw new Error(m.error);
     return new File([unb64(m.b64)], m.name, { lastModified: m.mtime }); } });
-  on.laststate = m => { const v = view(); if (v) v.keepState(lastState(m.path)); };
+  on.laststate = m => { lastPath = m.path; const v = view(); if (v) v.keepState(lastState(m.path)); };
 
   /* ---- file pickers ---- */
   const iclick = HTMLInputElement.prototype.click;
@@ -82,8 +84,9 @@
     if (this.type !== 'file') return iclick.call(this);
     if (this.classList.contains('cfile')) {   // Compare…: sva diff on the host over this view's signals and time
       const root = this.closest('.wv'), v = (root && root.waveView) || view(); if (!v) return;
-      const signals = v.cmpRows().map(r => (r.src && r.src.path) || r.path || r.full);
+      const signals = v.cmpRows().map(r => (r.src && r.src.path) || r.path || r.full), still = v.cmpAsk();
       call('compare', { signals, from: v.M.t0, to: v.M.t1, of: v.runsA() }).then(m => {
+        if (!still()) return;   // no B since (✕, no B), or another compare asked: the later wins (B-63)
         if (m.error) { toast(m.error); return; }
         if (m.result) v.compareResult(m.result);
       });
@@ -114,6 +117,7 @@
     rm: run => call('runs', { op: 'rm', run }),
     diff: b => call('runs', Object.assign({}, b, { op: 'diff' })),
     compare: b => call('runs', Object.assign({}, b, { op: 'compare', run: b.id, id: undefined })),
+    cancel: () => call('runs', { op: 'cancel' }),   // the compare asked is not wanted any more (no B, ✕): its sva stopped
     // A: a run's waves (0: the dump of now) as the dump's are served -> {file, handle}: ⟳ (the handle) reads the dump of now
     open: async run => { const m = await call('runs', { op: 'open', run });
       return m.error ? m : { file: await fileOf(m), handle, name: m.name }; },
@@ -217,6 +221,8 @@
     const s = await call('source', {});
     if (s.error) throw new Error(s.error);
     if (s.store && typeof s.store === 'object') { data.clear(); for (const [k, v] of Object.entries(s.store)) data.set(k, String(v)); }
+    if (typeof s.fresh === 'boolean') fresh = s.fresh;
+    if (s.lastState !== undefined) lastPath = s.lastState;
     return fileOf(s);
   };
   // the File of what the extension serves ({src, name, lazy}: the dump of now, or a run shown): fetched by its URI, else its bytes
@@ -290,7 +296,7 @@
     const v = view(); let nv = v;
     try { await sources(); nv = await view().openDump(await fetchDump(), handle); }
     catch (e) { if (v) v.toast('cannot read ' + H.name + ': ' + e.message); vscode.postMessage({ type: 'log', text: String(e.stack || e) }); nv = null; }
-    if (nv && H.lastState) { nv.keepState(lastState(H.lastState)); if (fresh && H.openLastState) await nv.reloadState(); }
+    if (nv && lastPath) { nv.keepState(lastState(lastPath)); if (fresh && H.openLastState) await nv.reloadState(); }
     vscode.postMessage(Object.assign({ type: 'ready', title: nv && nv.opts.title }, last));
   });
   // a dump dropped on the tab would replace its waves under this tab's name, store and watcher: a tab of its own instead

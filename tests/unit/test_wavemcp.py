@@ -103,6 +103,11 @@ class Dump(unittest.TestCase):
         self.assertEqual(s['tb.clk']['period'], {'median': 10, 'min': 10, 'max': 10})
         mx = self.call('wave_find', signal='tb.dut.fifo.count', value=t['fifo_max'], limit=1)
         self.assertEqual(mx['rows'][0][0], t['fifo_max_ns'])
+        # P-25: values, a table of the match's values in the same call (at the edge's time, after the changes there)
+        e = self.call('wave_find', signal='rst_n', edge='rise', values=['tb.rst_n', 'tb.dut.fifo.count'], radix='dec')
+        self.assertEqual((e['columns'], e['rows'], 'times' in e), (['t', 'tb.rst_n', 'tb.dut.fifo.count'], [[t['reset_release_ns'], '1', '0']], False))
+        mx = self.call('wave_find', signal='tb.dut.fifo.count', value=t['fifo_max'], limit=1, values=['tb.dut.fifo.count'], radix='dec')
+        self.assertEqual((mx['columns'][2:], mx['rows'][0][2]), (['tb.dut.fifo.count'], str(t['fifo_max'])))
 
     def test_sample(self):
         s = self.call('wave_sample', signals=['tb.rst_n'], clock='tb.clk', to=200, only_changes=False)
@@ -303,6 +308,54 @@ class Dump(unittest.TestCase):
         self.assertIn('no signal "zz_nope"', self.error('wave_cut', out=out, signals=['zz_nope']))
 
     @H.needs(svabuild.find_bin(), 'no sva CLI')
+    def test_sva_check_per_window(self):
+        """P-26: sva_check's per: a verdict a window in one pass, the windows of the marks file's tests or given; a failed
+        assertion's "in" names its windows; an attempt counts where it starts."""
+        last = 'assert property (@(posedge clk) !(s_tvalid && s_tready && s_tlast));'
+        find = lambda f, t: self.call('wave_find', expr='s_tvalid && s_tready && s_tlast', scope='tb.dut', limit=1, **{'from': f, 'to': t})['matches']
+        k1, k2 = find(0, 19999), find(20000, 25000)
+        self.assertTrue(k1 and k2, (k1, k2))
+        wins = [{'name': 'one', 'from': 0, 'to': 20000}, {'name': 'two', 'from': 20000, 'to': 25001}, {'name': 'idle', 'from': 0, 'to': 100}]
+        r = self.call('sva_check', scope='tb.dut', assertions=[last, 'assert property (@(posedge clk) 1);'], per=wins)
+        per = {x['name']: x for x in r['per']}
+        self.assertEqual((per['one']['failed'], per['two']['failed']), ([['wavemcp_0', k1]], [['wavemcp_0', k2]]))
+        self.assertEqual((per['one']['passed'], per['idle']['passed'], 'failed' in per['idle']), (1, 2, False))
+        self.assertEqual(r['failed'][0]['in'], ['one', 'two'])
+        marks = os.path.join(self.d.name, 'per.marks.json')
+        with open(marks, 'w', encoding='utf-8') as f:   # the same windows as tests of a cocotb run (ps)
+            json.dump({'wavelens': 'marks', 'version': 1, 'tests': [
+                {'n': i + 1, 'name': w['name'], 'from': w['from'] * 1000, 'to': w['to'] * 1000, 'result': 'pass', 'marks': [], 'phases': []}
+                for i, w in enumerate(wins[:2])]}, f)
+        t = self.call('sva_check', scope='tb.dut', assertions=[last], per='tests', marks=marks)
+        self.assertEqual([x.get('failed') for x in t['per']], [[['wavemcp_0', k1]], [['wavemcp_0', k2]]])
+        self.assertIn('"per"', self.error('sva_check', scope='tb.dut', assertions=[last], per='nope'))
+        self.assertIn('"marks"', self.error('sva_check', scope='tb.dut', assertions=[last], per='tests'))
+        self.assertIn('"per"[0]', self.error('sva_check', scope='tb.dut', assertions=[last], per=[{'from': 5, 'to': 1}]))
+
+    @H.needs(svabuild.find_bin(), 'no sva CLI')
+    def test_cut_as_its_name_says(self):
+        """WL-011: out x.fst is an FST the tools read (no VCD under that name), with zero its times from 0 (P-22); a name
+        neither .vcd nor .fst is refused before anything is written."""
+        fst = os.path.join(self.d.name, 'cut.fst')
+        r = self.call('wave_cut', out=fst, signals=['tb.dut.fifo.*', 'cyc_cnt'], zero=True, **{'from': 1000, 'to': '2us'})
+        self.assertEqual((r['out'], r['variables'], r['from'], r['to']), (fst, 4, 0, 1000))
+        with open(fst, 'rb') as f:
+            self.assertNotEqual(f.read(1), b'$', 'a VCD under an FST name')
+        i = json.loads(W.call('wave_info', {'dump': fst})[0])
+        self.assertEqual((i['start'], i['end'], i['signals']), (0, 1000, 4))
+        full = self.call('wave_values', signals=['tb.dut.perf.cyc_cnt'], at=1500)
+        cut = json.loads(W.call('wave_values', {'dump': fst, 'signals': ['tb.dut.perf.cyc_cnt'], 'at': 500})[0])
+        self.assertEqual([v for _, v in full['rows']], [v for _, v in cut['rows']])
+        again = os.path.join(self.d.name, 'again.fst')   # an FST, nothing to cut: the whole of it again
+        self.assertEqual(self.call('wave_cut', dump=fst, out=again)['variables'], 4)
+        vcd = os.path.join(self.d.name, 'zero.vcd')
+        self.assertEqual(self.call('wave_cut', out=vcd, zero=True, **{'from': 1000, 'to': '2us'})['from'], 0)
+        for bad in ('cut.txt', 'cut'):
+            with self.subTest(out=bad):
+                self.assertIn('a .vcd or a .fst name', self.error('wave_cut', out=os.path.join(self.d.name, bad)))
+                self.assertFalse(os.path.exists(os.path.join(self.d.name, bad)))
+
+    @H.needs(svabuild.find_bin(), 'no sva CLI')
     def test_cut_of_an_array_element(self):
         """WL-009: an element of an unpacked array (Verilator's FST: "ptr[0]", wave_signals: "ptr.[0]") by either name,
         of the FST, of its VCD and of a cut."""
@@ -382,6 +435,13 @@ class Dump(unittest.TestCase):
         self.assertEqual(r['not_evaluated'], [['miss', 'no nosuch']])
         f = self.call('wave_find', expr='s_tvalid && s_tready && s_tlast', scope='tb.dut', limit=2)
         self.assertEqual((f['matches'], len(f['rows']), f['more']), (t['frames'], 2, t['frames'] - 2))
+        v = self.call('wave_find', expr='s_tvalid && s_tready && s_tlast', scope='tb.dut', limit=2, values=['s_tlast', 'tb.dut.fifo.count'])
+        self.assertEqual(v['columns'], ['cycle', 't', 'end_cycle', 'end_t', 's_tlast', 'tb.dut.fifo.count'])   # the names as given
+        for row in v['rows']:   # sampled as the expression is: what wave_values says just before the edge
+            self.assertEqual(row[:2], row[2:4])
+            at = self.call('wave_values', signals=['tb.dut.s_tlast', 'tb.dut.fifo.count'], at=row[3], side='before')['rows'][0][1:]
+            self.assertEqual(row[4:], at)
+            self.assertEqual(row[4], '1')
         self.assertIn('did not evaluate', self.error('wave_find', expr='s_tvalid &&', scope='tb.dut'))
 
 
@@ -605,12 +665,45 @@ class Views(unittest.TestCase):
         self.assertEqual((r['page'], r['results']), (self.page, [{'op': 'marker', 'id': 1}]))
 
     def test_live_gone(self):
+        """The commands never taken by the page (its stream not read): it is gone, the file again (B-52: only then)."""
         b = W.Bridge(port=0, token='t' * 20)
         W.BRIDGE.append(b)
-        self.fake_page(b, self.page, answer=False)
+        b.attach('abcd1234')   # connected, said hello, its stream not read: nothing delivered
+        b.hello('abcd1234', {'path': self.page, 'title': 't', 'views': [{'key': 'one', 'timed': True}]})
         with self.assertRaisesRegex(W.LiveGone, 'did not answer in 0.3 s'):
             b.send('abcd1234', 'one', [{'op': 'state'}], timeout=0.3)
         self.assertEqual(b.pages(), [])   # taken for gone
+
+    def test_live_late(self):
+        """B-52: a page that took the commands and answers after the time: not dropped, the commands not done again on the
+        file (the page runs them), the answer says the results are not known; its late answer then counts for nothing."""
+        page = os.path.join(self.d.name, 'late.html')
+        shutil.copy(self.page, page)
+        b = W.Bridge(port=0, token='t' * 20)
+        W.BRIDGE.append(b)
+        self.fake_page(b, page, answer=False)
+        with self.assertRaisesRegex(W.LiveLate, 'took the commands and did not answer in 0.3 s'):
+            b.send('abcd1234', 'one', [{'op': 'state'}], timeout=0.3)
+        self.assertEqual(len(b.pages()), 1)   # still connected
+        before = H.text(page)
+        was, W.LIVE_TIMEOUT[0] = W.LIVE_TIMEOUT[0], 0.3
+        try:
+            r = self.call('view_edit', page=page, ops=[{'op': 'marker', 't': 5}])
+        finally:
+            W.LIVE_TIMEOUT[0] = was
+        self.assertEqual((r['live'], r['results']), (page, None))
+        self.assertIn('results unknown', r['note'])
+        self.assertEqual(H.text(page), before)   # not done again on the file
+
+    def test_state_runs_and_compare_in_ns(self):
+        """B-51: view_get full gives the window of the runs (runsOver) and the compare's from / to in ns as the other times;
+        set_state takes them back in ns."""
+        st = {'wavelens': 'state', 'cursor': 30000, 'runsOver': {'label': 'w', 'from': 10000, 'to': 50000},
+              'compare': {'name': 'B', 'from': 0, 'to': 80000, 'signals': {}}}
+        out = W.state_ns(st)
+        self.assertEqual((out['cursor'], out['runsOver'], out['compare']['from'], out['compare']['to']), (30, {'label': 'w', 'from': 10, 'to': 50}, 0, 80))
+        back = W.state_ps(out)
+        self.assertEqual((back['runsOver'], back['compare']['from'], back['compare']['to']), (st['runsOver'], 0, 80000))
 
     def test_state_times_both_ways(self):
         """M5: a state the agent read (view_get full: ns) and gives back (set_state) is in ns too: the same times again."""
@@ -1298,3 +1391,140 @@ class Review1103(unittest.TestCase):
                              {'cursor': 15, 'cursor2': 40, 'range': [20, 50, 'tb.valid'], 'sort': 'asc', 'style': 'questa', 'highlight': ['tb.valid']})
             self.assertEqual([(x['id'], x['from'], x['to'], x['label']) for x in g['spans']], [(1, 10, 30, 's')])
             self.assertEqual(g['groups'], [{'name': 'g', 'signals': ['clk']}])
+
+
+def two_runs(d, shift=0, name='a.vcd'):
+    """A small dump of the bug hunt of 2026-11-10: clk (posedge at 5, 15, … ns), a (1, 0 from 50 ns, 1 from 90 ns), bus[3:0];
+    `shift` ns later for a B that starts later."""
+    ev = {}
+    for t in range(0, 201, 5):
+        ev.setdefault(t, []).append(('1' if (t // 5) % 2 else '0') + '!')
+    for t, v in ((0, '1"'), (50, '0"'), (90, '1"'), (0, 'b0 #'), (40, 'b11 #'), (120, 'b1001 #')):
+        ev.setdefault(t + shift, []).append(v)
+    if shift:
+        ev[0] += ['0"', 'b0 #']
+    path = os.path.join(d, name)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! clk $end\n$var wire 1 " a $end\n$var wire 4 # bus [3:0] $end\n'
+                '$upscope $end\n$enddefinitions $end\n' + ''.join(f'#{t}\n' + '\n'.join(ev[t]) + '\n' for t in sorted(ev)))
+    return path
+
+
+@H.needs(svabuild.find_bin(), 'no sva CLI')
+class Bughunt1110(unittest.TestCase):
+    """The MCP tools over the sva binary, the bug hunt of 2026-11-10 (B-53, B-55..B-60)."""
+    @classmethod
+    def setUpClass(cls):
+        cls.d = H.tmp()
+        cls.a, cls.b = two_runs(cls.d.name), two_runs(cls.d.name, 20, 'b.vcd')
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.d.cleanup()
+
+    def call(self, tool, **a):
+        text, err = W.call(tool, {'dump': self.a, **a})
+        self.assertFalse(err, text)
+        return json.loads(text)
+
+    def error(self, tool, **a):
+        text, err = W.call(tool, {'dump': self.a, **a})
+        self.assertTrue(err, text)
+        return text
+
+    def test_sva_check_each_assertion_on_its_own_clock(self):
+        """B-53: an assertion on another clock than the first's: its failures, first cover and windows at its own edges, as
+        sva eval says them (a fails from 50 ns: the posedges 55, 65 …, the negedges 60, 70 …)."""
+        src = ('n_1: assert property (@(negedge clk) a);\np_1: assert property (@(posedge clk) a);\n'
+               'c_1: cover property (@(posedge clk) !a);\n')
+        sva = os.path.join(self.d.name, 'two.sv')
+        with open(sva, 'w', encoding='utf-8') as f:
+            f.write(src)
+        cli = json.loads(subprocess.run([svabuild.find_bin(), 'eval', '--waves', self.a, '--scope', 'tb', '--sva', sva, '--json'],
+                                        capture_output=True, text=True).stdout)
+        want = {}
+        for o in cli['assertions']:
+            cyc = o.get('cycles') or cli['cycles']
+            want[o['name']] = [cyc[x.get('failed_at', x['end'])] / 1000 for x in o['attempts'] if x['result'] == 'fail'][:3]
+        self.assertEqual((want['n_1'], want['p_1']), ([60, 70, 80], [55, 65, 75]))
+        r = self.call('sva_check', scope='tb', source=src, per=[{'name': 'early', 'from': 0, 'to': 56}, {'name': 'late', 'from': 56, 'to': 200}])
+        got = {e['name']: [x[1] for x in e['failures']] for e in r['failed']}
+        self.assertEqual(got, {'n_1': want['n_1'], 'p_1': want['p_1']})
+        self.assertEqual(r['covered'][0][::2], ['c_1', 55])
+        per = {x['name']: dict(x['failed']) for x in r['per']}
+        self.assertEqual((per['early'], per['late']['p_1'], per['late']['n_1']), ({'p_1': 1}, 3, 4))   # (a is 1 again from 90 ns)
+
+    def test_wave_diff_rank_in_ns_only(self):   # B-55: no after_first_ps beside after_first
+        rank = self.call('wave_diff', b=self.b)['rank']
+        self.assertTrue(rank)
+        self.assertEqual({k for x in rank for k in x}, {'signal', 't', 'after_first', 'a', 'b'})
+
+    def test_page_compare_offset_in_ns(self):
+        """B-56: a number for compare.offset is ns, as every other time of the server: 20 and "20ns" the same."""
+        out = os.path.join(self.d.name, 'pg.json')
+        for off in (20, '20ns'):
+            with self.subTest(offset=off):
+                self.call('wave_page', signals=['a', 'bus'], out=out, compare={'dump': self.b, 'offset': off})
+                c = H.load(out)['compare']
+                self.assertEqual((c['shift'], c['differ']), (20000, 0))
+        res = W.live_compare({'op': 'compare', 'dump': 'b.vcd', 'offset': 20}, {'path': self.a}, {}, {})['result']
+        self.assertEqual((res['shift'], res['differ']), (20000, 0))
+
+    def test_bit_select_refused(self):   # B-57: the CLI compares and cuts whole signals: a bit-select is not widened in silence
+        for tool, a in (('wave_cut', {'out': os.path.join(self.d.name, 'c.vcd')}), ('wave_diff', {'b': self.b})):
+            with self.subTest(tool=tool):
+                self.assertIn('"tb.bus"', self.error(tool, signals=['bus[0]'], **a))
+        self.assertEqual(self.call('wave_diff', b=self.b, signals=['bus'])['signals_compared'], 1)
+        # after WP3 (B-09): the whole name the error gives is the one the CLI takes of an FST too, its bits declared apart
+        head = ('$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! err[0] $end\n$var wire 1 " err[1] $end\n$upscope $end\n'
+                '$enddefinitions $end\n')
+        v = H.vcd(self.d.name, '#0\n0!\n1"\n#10\n1!\n#20\n', head, name='apart.vcd')
+        subprocess.run([svabuild.find_bin(), 'fst', v, '-q', '--no-types'], check=True)
+        f = v[:-4] + '.fst'
+        self.assertIn('give "tb.err"', self.error('wave_cut', dump=f, signals=['err[0]'], out=os.path.join(self.d.name, 'e.vcd')))
+        r = self.call('wave_cut', dump=f, signals=['tb.err'], out=os.path.join(self.d.name, 'e.vcd'))
+        self.assertIn('err[1]', H.text(r['out']))
+
+    def test_runs_keep_outside_the_dump(self):   # B-58: no empty run kept
+        runs = os.path.join(self.d.name, 'runs')
+        self.assertIn('outside the dump', self.error('wave_runs', action='keep', dir=runs, **{'from': 5000, 'to': 6000}))
+        self.assertEqual(self.call('wave_runs', dir=runs).get('runs') or [], [])
+
+    def test_find_expr_rows_as_its_columns(self):   # B-59: a match of one cycle has its end too
+        r = self.call('wave_find', expr='a', limit=3)
+        self.assertEqual(r['columns'], ['cycle', 't', 'end_cycle', 'end_t'])
+        self.assertEqual(r['rows'], [[0, 5, 0, 5], [1, 15, 1, 15], [2, 25, 2, 25]])
+
+    def test_sva_check_per_names_the_missing_key(self):   # B-60
+        src = 'x: assert property (@(posedge clk) a);'
+        self.assertIn('"per"[0]: no "to"', self.error('sva_check', source=src, per=[{'from': 5}]))
+        self.assertIn('"per"[1]: no "from"', self.error('sva_check', source=src, per=[{'from': 5, 'to': 9}, {'to': 9}]))
+        self.assertIn('"to" before "from"', self.error('sva_check', source=src, per=[{'from': 9, 'to': 5}]))
+
+    def test_page_rows_of_one_name_told_apart(self):
+        """B-43: signals of several scopes with one last name: their rows named by as much of their path as tells them apart
+        (the rest by their name), said in notes; a name of the page then finds the row of that signal, or says it is ambiguous."""
+        head = ('$timescale 1ns $end\n$scope module apb_tb $end\n$var wire 1 ! PSEL $end\n$var wire 1 # PCLK $end\n$scope module u_master $end\n'
+                '$var wire 1 " PSEL $end\n$upscope $end\n$scope module u_regs $end\n$var wire 1 $ PSEL $end\n$upscope $end\n$upscope $end\n'
+                '$enddefinitions $end\n')
+        v = H.vcd(self.d.name, '#0\n0!\n0"\n1$\n0#\n#10\n1"\n1#\n#20\n', head, name='psel.vcd')
+        out = os.path.join(self.d.name, 'psel.json')
+        r = self.call('wave_page', dump=v, signals=['PCLK', 'apb_tb.PSEL', 'u_master.PSEL', 'u_regs.PSEL'], out=out)
+        doc = H.load(out)
+        names = [s['name'] for s in doc['signal']]
+        self.assertEqual(names, ['PCLK', 'apb_tb.PSEL', 'u_master.PSEL', 'u_regs.PSEL'])
+        self.assertIn('apb_tb.PSEL, u_master.PSEL, u_regs.PSEL', ' '.join(r['notes']))
+        e = E.Editor(E.Model(doc))
+        res = e.run([{'op': 'select', 'signal': 'u_regs.PSEL'}, {'op': 'select', 'signal': 'apb_tb.u_master.PSEL'}, {'op': 'select', 'signal': 'PSEL'}])
+        self.assertEqual([x.get('select') for x in res[:2]], ['u_regs.PSEL', 'u_master.PSEL'])
+        self.assertIn('"PSEL" is ambiguous', res[2]['error'])
+        r = self.call('wave_page', dump=v, signals=['PCLK', 'u_regs.PSEL'], out=out)   # one of them: its name
+        self.assertEqual(([s['name'] for s in H.load(out)['signal']], r.get('notes')), (['PCLK', 'PSEL'], None))
+
+    def test_page_of_marks_without_their_signal(self):   # B-54: the page is made, the answer says the signal is not there
+        marks = os.path.join(self.d.name, 'x.marks.json')
+        with open(marks, 'w', encoding='utf-8') as f:
+            json.dump({'wavelens': 'marks', 'version': 1, 'signal': 'TEST_CASE', 'tests': [
+                {'n': 1, 'name': 'a', 'doc': '', 'from': 0, 'to': 100000, 'result': 'pass', 'message': '', 'where': '', 'phases': [], 'marks': []}]}, f)
+        r = self.call('wave_page', signals=['a'], marks=marks, out=os.path.join(self.d.name, 'm.html'))
+        self.assertEqual(r['notes'], ['no signal TEST_CASE in a.vcd: the tests on the time axis'])

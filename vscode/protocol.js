@@ -12,7 +12,8 @@
 (function (root) {
   const PAGE = {
     page: { ask: '', reply: null },                                // a page starts (again: a tab moved to a window): the streams before closed
-    source: { ask: '', reply: ['src name lazy store'] },           // the dump's URI now (an FST: its VCD text; lazy: its header), its store
+    source: { ask: '', reply: ['src name lazy store fresh? lastState?'] },   // the dump's URI now (an FST: its VCD text; lazy: its header), its
+    //   store; fresh: the tab's first page (a page made again takes no last state), lastState: the path of the state loaded last
     bytes: { ask: '', reply: ['data'] },                           // what source named, as bytes (a URI the webview could not fetch)
     codes: { ask: 'codes', reply: ['text'] },                      // a lazy dump's signals by their id codes: sva vcd --codes
     store: { ask: 'key value', reply: null },                      // a localStorage key of this dump (value null: removed)
@@ -29,7 +30,7 @@
       cut: { ask: 'from to of?', reply: ['path', 'cancel'] },      // that window as an FST of its own (a save dialog), its times from 0
       set: { ask: 'run name? tags? comment?', reply: ['run'] },
       rm: { ask: 'run', reply: ['removed', 'cancelled'] },
-      diff: { ask: 'signals from to case? against?', reply: ['runs wavelens? version? unit? dump? dir? from? to? others? case? against?'] },
+      diff: { ask: 'signals from to case? against?', reply: ['runs wavelens? version? unit? dump? dir? from? to? others? case? against? notes?'] },
       compare: { ask: 'run signals from to case? against?', reply: ['result'] },   // A (against; none: the waves shown) with B (run)
       cancel: { ask: '', reply: ['ok'] },
     } },

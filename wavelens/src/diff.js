@@ -159,7 +159,7 @@ Object.assign(WaveView.prototype, {
   // a second dump (a File, or a VCD's text and its name) over these waves; null: none again -> { name, compared, differ,
   // missing, omitted, first, from, to } (null: nothing compared; a newer call or the viewer gone meanwhile: null)
   async compare(file, name) {
-    const req = this.cmpReq = (this.cmpReq || 0) + 1;
+    const req = this.cmpReq = (this.cmpReq || 0) + 1; this.runsDrop();
     if (file == null) { this.cmpBack(); this.cmp = null; this.cmpMarks(); this.cmpShow(); this.draw(); return null; }
     const mine = this.cmpRows();
     if (!this.M.timed || !mine.length) {
@@ -224,7 +224,7 @@ Object.assign(WaveView.prototype, {
   },
   // who differed first and what followed (the compare's rank), for its toast: " · first PSEL, then PENABLE +10 ns"
   cmpWho() {
-    const rank = cmpRank(this.cmp.rows), d = q => this.fmt(q, (this.M.t1 - this.M.t0) / 1000, this.M.t1 - this.M.t0);
+    const rank = cmpRank(this.cmp.rows), d = q => this.fmtLen(q, (this.M.t1 - this.M.t0) / 1000, this.M.t1 - this.M.t0);
     this.cmp.rank = rank.map(o => ({ signal: o.row.full, t: o.t }));
     const then = rank.slice(1).map(o => `${o.row.name} +${d(o.t - rank[0].t)}`).join(', ');
     return rank.length ? ` · first ${rank[0].row.name}${then ? `, then ${then}` : ''}` : '';
@@ -275,6 +275,9 @@ Object.assign(WaveView.prototype, {
       else if (this.cmpTitled && this.cmpTitled.delete(r)) this.rowTitle(r, null);
     }
   },
+  // a compare asked by the host (VS Code's Compare…: its dialog, sva diff there): the ones asked before it dropped -> whether it is
+  // still the last asked when its result comes (no B, ✕ or another compare meanwhile: not taken; B-63)
+  cmpAsk() { const req = this.cmpReq = (this.cmpReq || 0) + 1; this.runsDrop(); return () => req === this.cmpReq && VIEWS.has(this) && this.root.isConnected; },
   // a second dump being read stopped (≠ … ✕): the compare before it stays
   compareStop() { this.cmpReq = (this.cmpReq || 0) + 1; this.cmpReading = 0; this.cmpShow(); this.toast(`compare: stopped${this.cmp ? `; still compared ` +
     `with ${this.cmp.name}` : ''}`); },
@@ -328,13 +331,18 @@ Object.assign(WaveView.prototype, {
     for (const [a, x] of c.rows) {
       if (!x.row && !x.missing && !x.omitted && !x.other) continue;
       if (on) { x.atr = a.tr; a.tr = x.row ? x.row.tr : []; } else a.tr = x.atr;
-      a.an = null; RISES.delete(a); got.add(a);
-      for (const k of this.bitMemo.get(a) || []) RISES.delete(k);   // its bits follow its changes
-      for (const d of this.dupsBy.get(a) || []) { RISES.delete(d); for (const k of this.bitMemo.get(d) || []) RISES.delete(k); }
+      a.an = null; got.add(a);   // (its bits, its copies and the rises read through to its changes: riseTimes)
     }
     rowsMade(this.M, got);
-    this.clkMemo = null; this.cycMemo = null; this.fsmSt = null; this.rangeKey = null; this.valsAt = null;
-    if (this.fsmP) this.fsmP.render(true);
+    this.dataChanged();
+  },
+  // rows of a large dump read while B is shown (need): their changes are A's, kept for A; B's shown on them again (bughunt B-22)
+  cmpTake(rows) {
+    const c = this.cmp; if (!c || !c.swapped) return;
+    const got = new Set();
+    for (const a of rows) { const x = c.rows.get(a); if (!x || (!x.row && !x.missing && !x.omitted && !x.other)) continue;
+      x.atr = a.tr; a.tr = x.row ? x.row.tr : []; a.an = null; got.add(a); }
+    if (got.size) rowsMade(this.M, got);
   },
   // these waves again, before the compare changes
   cmpBack() { this.cmpSwap(false); this.cmpRun = 'a'; this.valsAt = null; },
@@ -376,7 +384,7 @@ Object.assign(WaveView.prototype, {
   // extension "compare" {name, from, to, signals: {path: {spans, other, b}}, missing: [path]} over these waves, as compare()
   // puts a dump read here; null: compared no more. quiet: no toast (the page opens with it) -> as compare()
   compareResult(c, quiet) {
-    this.cmpReq = (this.cmpReq || 0) + 1;
+    this.cmpReq = (this.cmpReq || 0) + 1; this.runsDrop();
     if (c == null) { this.cmpBack(); this.cmp = null; this.cmpMarks(); this.cmpShow(); this.draw(); return null; }
     c = cmpNorm(c);
     if (!c) throw new Error('compare: a result {name, from, to, signals: {path: {spans}}} (sva diff\'s, as the page\'s "compare")');

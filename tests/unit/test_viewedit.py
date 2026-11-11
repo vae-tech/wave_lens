@@ -186,6 +186,16 @@ class Commands(unittest.TestCase):
         self.assertEqual((st['cursor'], st['cursor2'], st['from'], st['to'], st['range']), (25000, 45000, 10000, 70000,
                                                                                             {'from': 20000, 'to': 40000, 'signal': 'clk'}))
         self.assertEqual(e.fold(), ['tb.dut'])
+        # the range follows the signal selected after it (view.js rangeFollow); none selected: it stays on the last one
+        self.run_ok(e, {'op': 'unfold', 'groups': 'tb.dut'}, {'op': 'select', 'signal': 'valid'})
+        self.assertEqual(st['range'], {'from': 20000, 'to': 40000, 'signal': 'tb.dut.valid'})
+        self.run_ok(e, {'op': 'select', 'signal': None})
+        self.assertEqual((st['select'], st['range']['signal']), (None, 'tb.dut.valid'))
+        self.run_ok(e, {'op': 'select', 'signals': ['clk', 'data']})
+        self.assertEqual(st['range']['signal'], 'tb.dut.data')
+        self.run_ok(e, {'op': 'range', 'from': None}, {'op': 'select', 'signal': 'clk'})
+        self.assertIsNone(st['range'])
+        self.run_ok(e, {'op': 'fold', 'groups': 'tb.dut'})
         self.run_ok(e, {'op': 'view', 'span': '20ns'}, {'op': 'show'}, {'op': 'fold', 'all': True}, {'op': 'reset'},
                     {'op': 'gaps', 'on': True, 'idle': 8}, {'op': 'gaps', 'reset': True})
         self.assertEqual((st['from'], st['to'], st['hidden'], st['folds'], st['select'], st['find'], st['range']),
@@ -211,6 +221,9 @@ class Commands(unittest.TestCase):
         r = self.run_ok(e, {'op': 'set_state', 'state': st}, {'op': 'state'})
         self.assertEqual((r[0]['missing'], r[1]['state']), (['gone'], {'cursor': 1.5, 'bookmarks': [{'n': 4, 't': 7}], 'paint': {'gone': '#fff'}}))
         self.assertEqual(e.run([{'op': 'set_state', 'state': [1]}])[0]['error'], 'set_state: not a saved viewer state ({"wavelens": "state", …})')
+        over = {'label': 'w', 'from': 5000, 'to': 10000}   # the Runs panel's window (review of 0.50 B-08): carried as the page keeps it
+        r = self.run_ok(e, {'op': 'set_state', 'state': {'wavelens': 'state', 'version': 3, 'runsOver': over}}, {'op': 'state'})
+        self.assertEqual(r[1]['state'].get('runsOver'), over, r)
         rows = self.run_ok(ed(), {'op': 'group', 'name': 'g', 'signals': 'clk'}, {'op': 'rows', 'pattern': 'st', 'limit': 1})[1]
         self.assertEqual(rows, {'op': 'rows', 'total': 2, 'rows': [['tb.dut.state', 2]], 'next_offset': 1})
 
@@ -422,7 +435,7 @@ class Twin(unittest.TestCase):
     def test_gaps_view(self):
         """gaps view: gapView in the state as a boolean, as view.js gapOpt says it."""
         e = ed()
-        r = e.run([{'op': 'gaps', 'on': True, 'view': 1}, {'op': 'gaps', 'view': False}])
+        r = e.run([{'op': 'gaps', 'on': True, 'view': True}, {'op': 'gaps', 'view': False}])
         self.assertIs(r[0]['gaps']['gapView'], True)
         self.assertIs(r[1]['gaps']['gapView'], False)
         self.assertIs(r[1]['gaps']['gaps'], True)
@@ -1027,6 +1040,14 @@ class Review1103(unittest.TestCase):
         for c in ('#a0b0c0', 'teal', 'rgb(1, 2, 3)', 'hsl(10 50% 50%)'):
             self.assertEqual(self.err(e, {'op': 'marker', 't': '10ns', 'color': c}), '', c)
 
+    def test_a_word_that_is_no_colour(self):
+        """B-86 (bug hunt 2026-11-10): a word only when the page draws it: a token, --x, #hex, a CSS name (any case); "blu" is an error."""
+        e = ed()
+        for c in ('blu', 'accent', 'c2', 'c10', '#abcde', '#xyz', 'bluu'):
+            self.assertEqual(self.err(e, {'op': 'paint', 'signals': 'clk', 'color': c}), f'"{c}" is no colour', c)
+        for c in ('c5', 'hl2', 'acc', 'sva-pass', '--my-mark', 'var(--wave-c5)', 'Teal', 'currentColor', '#abcd', '#a0b0c0d0', 'Canvas'):
+            self.assertEqual(self.err(e, {'op': 'paint', 'signals': 'clk', 'color': c}), '', c)
+
     def test_times_outside_the_waves(self):
         e = ed()
         for op in ({'op': 'bookmark', 't': '5s'}, {'op': 'marker', 't': -5}, {'op': 'span', 'from': 0, 'to': '5s'}):
@@ -1166,7 +1187,6 @@ class Review1105(unittest.TestCase):
         self.assertEqual(self.err(e, {'op': 'range', 'from': '1s', 'to': '2s'}), 'range: 1 s … 2 s is outside these waves (0 ps … 80 ns)')
         cyc = ed(doc={'signal': [{'name': 'a', 'wave': '0101'}]})
         self.assertEqual(self.err(cyc, {'op': 'marker', 't': 9}), 't: 9 is outside these waves (0 … 4)')
-        self.assertEqual(ed().run([{'op': 'range', 'from': '80ns', 'to': '90ns'}])[0], {'op': 'range', 'range': None})   # touching: none (edit.js)
 
     def test_style_null_is_the_settings(self):
         """B-23 of 2026-11-03: style null is the settings' style (look.js setStyle), in the answer and the state, never null."""
@@ -1213,3 +1233,188 @@ class Review1105(unittest.TestCase):
                    {'op': 'only', 'clear': True}, {'op': 'only', 'modules': ['tb.dut']}])
         self.assertEqual((r[-1]['only'], r[-1]['groups']), ({'modules': ['tb.dut'], 'on': True}, True))
         self.assertEqual(ug(), ['tb.dut.data', 'tb.dut.valid', 'tb.dut.data#2'])
+
+
+class Bughunt1110(unittest.TestCase):
+    """The bug hunt of 2026-11-10, WP5 (the sets of selection) and WP6 (the range after the selection): what the page does, here
+    too (smoke: bus_slices, duplicates, order, ranges, edit)."""
+    D = 'tb.dut.data'
+
+    def err(self, e, *ops):
+        return e.run(list(ops))[-1].get('error') or ''
+
+    def run_ok(self, e, *ops):
+        r = e.run(list(ops))
+        self.assertEqual([x.get('error') for x in r], [None] * len(r))
+        return r
+
+    def test_a_slice_gone_puts_its_bit_on_the_bus_bit(self):
+        """B-30: a bookmark, a marker, a span on bit 2 of the slice [7:4] (bus bit 6) go to bit 6 of the bus, not to bit 2."""
+        e, s = ed(), self.D + '[7:4]'
+        r = e.run([{'op': 'duplicate', 'signals': self.D, 'bits': [7, 4]}, {'op': 'bits', 'signals': s},
+                   {'op': 'bookmark', 't': '20ns', 'signal': s + '[2]', 'text': 'b'}, {'op': 'marker', 't': '30ns', 'signal': s + '[0]'},
+                   {'op': 'span', 'from': '10ns', 'to': '30ns', 'signals': [s + '[3]']}, {'op': 'duplicate', 'signals': s, 'delete': True}])
+        self.assertEqual([x.get('error') for x in r], [None] * len(r))
+        self.assertEqual((e.st['bookmarks'][-1]['signal'], e.st['markers'][0]['signal'], e.st['spans'][0]['signals']),
+                         (self.D + '[6]', self.D + '[4]', [self.D + '[7]']))
+        e = ed()   # a copy #2: its bit i is the bus's bit i
+        e.run([{'op': 'duplicate', 'signals': self.D}, {'op': 'bits', 'signals': self.D + '#2'},
+               {'op': 'bookmark', 't': '20ns', 'signal': self.D + '#2[2]', 'text': 'b'}, {'op': 'duplicate', 'signals': self.D + '#2', 'delete': True}])
+        self.assertEqual(e.st['bookmarks'][-1]['signal'], self.D + '[2]')
+
+    def test_a_copy_gone_takes_the_colours_of_its_bits(self):
+        """B-31: the colour, the radix of a copy's bit go with the copy (the next copy of that name starts without them); its bits'
+        highlight too."""
+        e, c = ed(), self.D + '#2'
+        r = e.run([{'op': 'duplicate', 'signals': self.D}, {'op': 'bits', 'signals': c}, {'op': 'paint', 'signals': c + '[3]', 'color': '#ff0000'},
+                   {'op': 'paint', 'signals': self.D, 'color': '#00ff00'}, {'op': 'highlight', 'set': [c + '[3]', self.D]},
+                   {'op': 'duplicate', 'signals': c, 'delete': True}])
+        self.assertEqual([x.get('error') for x in r], [None] * len(r))
+        self.assertEqual((e.st.get('paint'), e.st['config']['highlight']), ({self.D: '#00ff00'}, [self.D]))
+
+    def test_a_hidden_group_deleted_or_renamed(self):
+        """B-32: your group hidden ("@g1"), deleted: no longer in hidden (a new g1 is shown); renamed: hidden under its new name;
+        its highlight alike."""
+        e = ed()
+        r = e.run([{'op': 'group', 'name': 'g1', 'signals': ['clk']}, {'op': 'hide', 'signals': '@g1'}, {'op': 'highlight', 'set': '@g1'},
+                   {'op': 'group', 'name': 'g1', 'delete': True}])
+        self.assertEqual([x.get('error') for x in r], [None] * len(r))
+        self.assertEqual((e.st.get('hidden'), e.st['config']['highlight']), ([], []))
+        e.run([{'op': 'group', 'name': 'g1', 'signals': ['clk']}, {'op': 'hide', 'signals': '@g1'}, {'op': 'highlight', 'set': '@g1'},
+               {'op': 'group', 'name': 'g1', 'rename': 'g2'}])
+        self.assertEqual((e.st.get('hidden'), e.st['config']['highlight']), (['@g2'], ['@g2']))
+
+    def test_a_hidden_signal_is_not_followed(self):
+        """B-24: the range's signal hidden (itself or its module): the range stays, on no signal (modules.js onlyFix); shown again: still none."""
+        for hide in ('tb.dut.valid', 'tb.dut'):
+            e = ed()
+            r = e.run([{'op': 'range', 'from': '10ns', 'to': '30ns', 'signal': 'tb.dut.valid'}, {'op': 'hide', 'signals': hide}, {'op': 'show'}])
+            self.assertEqual([x.get('error') for x in r], [None] * 3)
+            self.assertEqual((e.st['range']['from'], e.st['range']['signal']), (10000, None))
+
+    def test_the_range_after_the_selection(self):
+        """B-33: a signal folded away is not selected, the range stays on its signal; B-34: a group's go selects its first
+        signal and the range follows it, Only (and a state with Only) leaving the range's signal out drops it; B-37: a
+        bookmark's go moves it; B-42: a range with no length is an error."""
+        rg = {'op': 'range', 'from': '10ns', 'to': '30ns', 'signal': 'clk'}
+        e = ed()
+        r = e.run([rg, {'op': 'fold', 'groups': 'tb.dut'}, {'op': 'select', 'signal': 'valid'}])
+        self.assertEqual((r[2].get('select', 'error'), e.st['select'], e.st['range']['signal']), (None, None, 'clk'))
+        e = ed()
+        self.run_ok(e, rg, {'op': 'fold', 'groups': 'tb.dut'}, {'op': 'group', 'name': 'g', 'signals': ['data'], 'go': True})
+        self.assertEqual((e.st['select'], e.st['range']['signal']), ('tb.dut.data', 'tb.dut.data'))   # the group's row: shown
+        e = ed()
+        self.run_ok(e, rg, {'op': 'only', 'modules': ['tb.dut']})
+        self.assertEqual((e.st['range']['from'], e.st['range']['signal']), (10000, None))
+        e = ed()
+        self.run_ok(e, {'op': 'range', 'from': '10ns', 'to': '30ns', 'signal': 'tb.other.state'},
+                    {'op': 'set_state', 'state': {'wavelens': 'state', 'only': {'modules': ['tb.dut'], 'on': True}}})
+        self.assertEqual(e.st['range']['signal'], None)
+        e = ed()
+        self.run_ok(e, rg, {'op': 'bookmark', 'n': 1, 'go': True})
+        self.assertEqual((e.st['select'], e.st['range']['signal']), ('tb.dut.valid', 'tb.dut.valid'))
+        e = ed()
+        self.run_ok(e, rg, {'op': 'hide', 'signals': 'tb.dut.valid'}, {'op': 'bookmark', 'n': 1, 'go': True})
+        self.assertEqual((e.st['select'], e.st['range']['signal']), (None, 'clk'))   # hidden: not selected, not followed
+        e = ed()
+        self.assertEqual(self.err(e, {'op': 'range', 'from': '20ns', 'to': 20000}), 'range: from and to are one time (20 ns): no length (from null: no range)')
+        self.assertEqual(self.err(e, {'op': 'range', 'from': '80ns', 'to': '90ns'}), 'range: 80 ns … 90 ns only touches these waves (0 ps … 80 ns)')
+        self.assertIsNone(e.st.get('range'))
+
+
+class Bughunt1110Parity(unittest.TestCase):
+    """The bug hunt of 2026-11-10, WP7: the page, the file and the MCP agree (B-43..B-49); the same ops lists run on the page in
+    the smoke test (section edit)."""
+
+    def err(self, e, *ops):
+        return e.run(list(ops))[-1].get('error') or ''
+
+    def run_ok(self, e, *ops):
+        r = e.run(list(ops))
+        self.assertEqual([x.get('error') for x in r], [None] * len(r))
+        return r
+
+    def test_rows_of_one_name_are_told_apart(self):
+        """B-43: three rows named PSEL (a wave_page of signals of several scopes before the fix): one signal is three, as
+        pickRows says, not the first of them."""
+        doc = {'signal': [{'name': 'PSEL', 'abs': f'apb_tb.{p}PSEL', 'tv': [[0, '0'], [10000, '1']]} for p in ('', 'u_master.', 'u_regs.')],
+               'time': {'t0': 0, 't1': 20000, 'unit': 'ps'}}
+        e = ed(doc=doc)
+        for op in ({'op': 'select', 'signal': 'PSEL'}, {'op': 'bookmark', 't': 0, 'signal': 'PSEL'}):
+            self.assertEqual(self.err(e, op), 'one signal, not 3 (PSEL, PSEL, PSEL)')
+        self.assertEqual(self.run_ok(e, {'op': 'hide', 'signals': 'PSEL'})[0]['hidden'], 1)   # (one path: the page's set of paths)
+
+    def test_cursors_and_window_within_the_waves(self):
+        """B-44: the cursor, cursor 2 and the window clamped to the waves (0 … 80 ns) as setCursor, setCursor2, zoomTo (with
+        minSpan: 10 ps here); what defaults to the cursor (a bookmark, a marker) with it; a state's out of range on load."""
+        e = ed()
+        r = self.run_ok(e, {'op': 'cursor', 't': '-5ns'}, {'op': 'bookmark', 'text': 'here'}, {'op': 'marker'}, {'op': 'cursor2', 't': '1us'},
+                        {'op': 'view', 'from': '-100ns', 'to': '1us'}, {'op': 'view', 'from': 10000, 'to': 10000.1},
+                        {'op': 'view', 'from': 79999, 'to': 79999.5}, {'op': 'view', 'at': 40000, 'span': 0.1}, {'op': 'cursor', 't': '90ns'})
+        self.assertEqual((r[0]['t'], r[3]['t']), (0, 80000))
+        self.assertEqual([(x['from'], x['to']) for x in r[4:8]], [(0, 80000), (10000, 10010), (79990, 80000), (39995, 40005)])
+        self.assertEqual((r[8]['t'], e.st['bookmarks'][-1]['t'], e.st['markers'][-1]['t'], e.st['cursor2']), (80000, 0, 0, 80000))
+        e = ed({'cursor': -5000, 'cursor2': 1e6, 'from': -100000, 'to': 1e6})
+        self.assertEqual((e.st['cursor'], e.st['cursor2'], e.st['from'], e.st['to']), (0, 80000, 0, 80000))
+        e = ed()
+        self.run_ok(e, {'op': 'set_state', 'state': {'wavelens': 'state', 'cursor': -1, 'from': 70000, 'to': 70000}})
+        self.assertEqual((e.st['cursor'], e.st['from'], e.st['to']), (0, 70000, 70010))
+        e = ed({'cursor': -5000}, doc=None)   # no page: nothing known to clamp to
+        self.assertEqual(e.run([{'op': 'cursor', 't': -7}])[0]['t'], -7)
+
+    def test_a_junk_state_applies_nothing(self):
+        """B-45: set_state with a key of another kind: an error naming it, nothing of the state applied (view.js setState
+        checks first); a state of the right kinds is cleaned after the merge."""
+        for k, v, what in (('hidden', 'tb.dut.valid', 'a list'), ('radix', ['hex'], 'an object'), ('cursor', '30ns', 'a time (a number)'),
+                           ('bookmarks', {'n': 1}, 'a list')):
+            e = ed()
+            self.assertEqual(self.err(e, {'op': 'set_state', 'state': {'wavelens': 'state', 'cursor': 5000, k: v}}),
+                             f'"{k}" is not {what}: nothing of the state applied')
+            self.assertEqual(e.st, {})
+        e = ed()
+        self.run_ok(e, {'op': 'set_state', 'state': {'wavelens': 'state', 'hidden': ['tb.dut.valid'], 'bookmarks': [5, {'n': 1, 't': 0}]}},
+                    {'op': 'hide', 'signals': 'clk'})
+        self.assertEqual((e.st['hidden'], len(e.st['bookmarks'])), (['tb.dut.valid', 'clk'], 1))
+
+    def test_a_states_fold_wins(self):
+        """B-46: set_state's config.fold is the folding (view.js: foldSet of it; "folds" only of the state itself)."""
+        e = ed()
+        self.run_ok(e, {'op': 'unfold', 'groups': 'tb.other'}, {'op': 'fold', 'groups': 'tb.dut'},
+                    {'op': 'set_state', 'state': {'wavelens': 'state', 'config': {'fold': ['tb.other']}}})
+        self.assertEqual(e.fold(), ['tb.other'])
+        self.run_ok(e, {'op': 'set_state', 'state': {'wavelens': 'state', 'config': {'fold': []}, 'folds': {'tb.dut': True}}})
+        self.assertEqual(e.fold(), ['tb.dut'])
+
+    def test_a_divider_is_not_hidden(self):
+        """B-47: hide leaves a divider (edit.js hide: cls ugdiv), the others of the same command go."""
+        e = ed()
+        r = self.run_ok(e, {'op': 'group', 'name': '— Bus —', 'divider': True}, {'op': 'group', 'name': 'g', 'signals': 'clk'},
+                        {'op': 'hide', 'signals': ['@— Bus —', '@g']})
+        self.assertEqual((r[-1]['hidden'], e.st['hidden']), (1, ['@g']))
+
+    def test_paint_clear_with_a_bad_colour(self):
+        """B-48: the colour checked before anything: clear with a bad colour is an error and clears nothing."""
+        e = ed()
+        self.run_ok(e, {'op': 'paint', 'signals': 'clk', 'color': '#123456'})
+        self.assertEqual(self.err(e, {'op': 'paint', 'clear': True, 'color': 'not a colour!'}), '"not a colour!" is no colour')
+        self.assertEqual(e.st['paint'], {'clk': '#123456'})
+
+    def test_gaps_values_checked(self):
+        """B-49: on / only / view true or false, idle and keep cycles or a time, count one of the kinds, signals and aux names:
+        an error, nothing changed; the signals kept as a list (gapOpt)."""
+        bad = [({'on': 'yes'}, 'gaps: on: true or false'), ({'view': 1}, 'gaps: view: true or false'),
+               ({'idle': 'bogus'}, 'gaps: idle: clock cycles (more than 0) or a time ("100ns"), not "bogus"'),
+               ({'idle': 0}, 'gaps: idle: clock cycles (more than 0) or a time ("100ns"), not 0'),
+               ({'keep': -1}, 'gaps: keep: clock cycles or a time ("100ns"), not -1'),
+               ({'count': 'bogus'}, 'gaps: count: one of off, clock, edges, rise, fall, any, not "bogus"'),
+               ({'signals': 5}, 'gaps: signals: names or * patterns (a list, or a text with commas), not 5'),
+               ({'clock': ['clk']}, 'gaps: clock: a signal\'s name, not ["clk"]')]
+        for a, msg in bad:
+            e = ed()
+            self.assertEqual(self.err(e, dict(a, op='gaps', on=a.get('on', True), reset=True)), msg)
+            self.assertEqual(e.st, {})
+        e = ed()
+        r = self.run_ok(e, {'op': 'gaps', 'on': True, 'idle': '100ns', 'keep': 0, 'signals': 'clk, valid', 'aux': 'state', 'count': 'rise'})
+        self.assertEqual({k: r[0]['gaps'][k] for k in ('gapIdle', 'gapKeep', 'gapSignals', 'gapAux', 'gapCount')},
+                         {'gapIdle': '100ns', 'gapKeep': 0, 'gapSignals': ['clk', 'valid'], 'gapAux': ['state'], 'gapCount': 'rise'})
+        self.assertEqual((e.st['config']['gapSignals'], e.st['config']['gapAux']), (['clk', 'valid'], ['state']))

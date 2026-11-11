@@ -44,4 +44,7 @@ module repetition (
     r_seq:       assert property (@(posedge clk) (a ##1 b)[*2] |=> c);
     // the repetition of a parenthesized boolean: one step, not a sequence
     r_bool:      assert property (@(posedge clk) (a && !b)[*2] |-> c);
+    // a goto range then a delay: c only one cycle after the first or the second hit,
+    // never at a cycle without one (bughunt B-01: this passed where it fails)
+    r_goto_then: assert property (@(posedge clk) a |-> b[->1:2] ##1 c);
 endmodule

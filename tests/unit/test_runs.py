@@ -1,7 +1,7 @@
 """The runs kept of a dump: `sva runs` (keep, list, set, rm, path, diff over a window), wave_runs of the MCP server over it, and
 the VS Code extension's half of the Runs panel (vscode/extension.js over a fake vscode, the real CLI): keep, list, set, a run
 compared over a window only, Δ all, rm asked first."""
-import json, os, subprocess, unittest
+import json, os, shlex, subprocess, unittest
 
 from . import helpers as H
 from .test_vscode_state import FAKE, NODE
@@ -99,6 +99,34 @@ class Cli(unittest.TestCase):
             v = json.loads(out)
             self.assertEqual((code, v['run'], v['a'], v['signals']['tb.ok']['spans']), (1, 2, None, [[25000, 40000]]), err)
 
+    def test_a_dump_equals_its_own_slice_off_the_grid(self):
+        # bughunt B-10: a slice's ends floored to the dump's unit (10 ns here): its window is the one it holds, so the dump
+        # compares equal with it at its place
+        head = HEAD.replace('1ns', '10ns')
+        with H.tmp() as d:
+            p = H.vcd(d, '\n'.join(f'#{t}\n{t % 2}!\nb{t % 16:b} "\n1#' for t in range(7)) + '\n', head, name='c10.vcd')
+            code, out, err = sva('runs', 'keep', p, '--from', '15ns', '--to', '45ns', '--json')
+            self.assertEqual(code, 0, err)
+            self.assertEqual((json.loads(out)['slice'], json.loads(out)['end']), ({'from': 10000, 'to': 40000}, 30000))
+            code, out, err = sva('runs', 'diff', p, '--run', '1')
+            self.assertEqual(code, 0, out + err)
+
+    def test_runs_of_bits_declared_apart_carry_their_values(self):
+        # bughunt B-09: a run's FST of a dump that declares a vector's bits apart (err[0], err[1]) and a lone bit (bit[5]):
+        # the page's compare has B's values of them (the cut of the FST knows them by sva diff's names)
+        head = ('$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! clk $end\n$var wire 1 " err[0] $end\n'
+                '$var wire 1 # err[1] $end\n$var wire 1 % bit[5] $end\n$upscope $end\n$enddefinitions $end\n')
+        with H.tmp() as d:
+            p = H.vcd(d, '#0\n0!\n0"\n0#\n0%\n#10\n1!\n#20\n', head, name='g.vcd')
+            self.assertEqual(sva('runs', 'keep', p)[0], 0)
+            with open(p, 'w', encoding='utf-8') as f:
+                f.write(head + '#0\n0!\n0"\n0#\n0%\n#10\n1!\n1"\n1%\n#20\n')
+            code, out, err = sva('runs', 'diff', p, '--run', '1', '--page', '--quiet')
+            v = json.loads(out)
+            self.assertEqual((code, sorted(v['signals']), v.get('cutError')), (1, ['tb.bit', 'tb.clk', 'tb.err'], None), err)
+            self.assertIn('err[0]', v.get('vcd', ''))
+            self.assertIn('bit[5]', v.get('vcd', ''))
+
 
 @H.needs(SVA, 'the sva CLI ($WAVELENS_SVA)')
 class Mcp(unittest.TestCase):
@@ -131,8 +159,59 @@ class Mcp(unittest.TestCase):
             self.assertEqual(x['signals_differ'], 0, ('two slices from their first sample: clk the same', x))
             x = call(action='diff', dump=p, against=s2['id'], run='now', signals=['tb.cnt'])['runs'][0]
             self.assertTrue(x['equal'], ('a slice against the dump: at its place in it', x))
+            self.assertEqual(x.get('offset'), 20, ('the slice\'s place in ns, as from and to (review of 0.50 B-05)', x))
+            x = call(action='diff', dump=p, run=s2['id'], signals=['tb.cnt'])['runs'][0]
+            self.assertEqual((x['equal'], x.get('offset')), (True, -20), x)
             bad = W.call('wave_runs', {'action': 'set', 'dump': p})
             self.assertTrue(bad[1] and '"run"' in bad[0], bad)
+
+    def test_wave_runs_times_in_ns(self):
+        """Every time of wave_runs' answers is the CLI's --json value in ns (review of 0.50 T-04): the CLI's answer and the tool's
+        walked side by side over list, keep (a slice, cases) and diff (a slice's offset, a case, the first difference)."""
+        os.environ.setdefault('WAVELENS_SVA', SVA)
+        from tools import wavemcp as W
+        clis, run0 = [], subprocess.run
+        def run(cmd, *a, **k):   # the CLI's own answer beside the tool's
+            r = run0(cmd, *a, **k)
+            if cmd[1:2] == ['runs']:
+                clis.append(json.loads(r.stdout) if r.stdout.strip() else None)
+            return r
+        TIMES = {'from', 'to', 'offset', 'start', 'end', 't', 'shorter'}
+        def walk(c, w, at):
+            if isinstance(c, dict):
+                for k, v in c.items():
+                    if k not in w or k in ('a', 'b'):
+                        continue
+                    if k in TIMES and isinstance(v, (int, float)) and not isinstance(v, bool):
+                        self.assertEqual(w[k], v / 1000, f'{at}.{k}: the CLI {v} ps')
+                    else:
+                        walk(v, w[k], f'{at}.{k}')
+            elif isinstance(c, list) and isinstance(w, list):
+                for i, (x, y) in enumerate(zip(c, w)):
+                    walk(x, y, f'{at}[{i}]')
+        with H.tmp() as d:
+            text, b = cases()
+            p = H.vcd(d, text, HEAD, name='waves.vcd')
+            W.subprocess.run = run
+            try:
+                got = []
+                def call(**a):
+                    r = W.call('wave_runs', a)
+                    self.assertFalse(r[1], r[0])
+                    got.append((a, json.loads(r[0]), clis[-1]))
+                call(action='keep', dump=p, name='whole', cases=[{'name': 't_a', 'from': 0, 'to': b}, {'name': 't_b', 'from': b, 'to': b + 20}])
+                call(action='keep', dump=p, **{'from': b, 'to': b + 20})
+                call(action='list', dump=p)
+                call(action='diff', dump=p, run=2, signals=['tb.cnt'])
+                call(action='diff', dump=p, against=2, run='now', signals=['tb.cnt'])
+                call(action='diff', dump=p, case='t_b', **{'from': b, 'to': b + 20})
+            finally:
+                W.subprocess.run = run0
+            for a, w, c in got:
+                if a.get('action') == 'list':
+                    c = dict(c, runs=list(reversed(c['runs'])))
+                walk(c, w, a.get('action'))
+            self.assertEqual([x.get('offset') for x in got[3][1]['runs']], [-b], got[3][1])
 
     def test_wave_runs_by_test_case(self):
         os.environ.setdefault('WAVELENS_SVA', SVA)
@@ -205,6 +284,10 @@ process.on('uncaughtException', e => { console.error('UNCAUGHT ' + e.message); p
     out.cnt = await ask({ op: 'compare', run: 2, against: 1, signals: ['tb.cnt'], from: 0, to: 10000 });
     out.now = await ask({ op: 'compare', run: 0, against: 2, signals: ['tb.cnt'], from: 0, to: 10000 });
     out.asB = await ask({ op: 'compare', run: 2, against: 0, signals: ['tb.cnt'], from: 20000, to: 30000 });
+    // Compare… with a file while a slice is A (review of 0.50 B-01): the file read at the slice's place, as the runs' compare
+    const ask1 = m => { const id = ++n; return A.send(Object.assign({ id }, m)).then(() => A.reply(id)); };
+    out.file = await ask1({ type: 'compare', signals: ['tb.cnt'], from: 0, to: 10000, path: dump, of: 2 });
+    out.file0 = await ask1({ type: 'compare', signals: ['tb.cnt'], from: 0, to: 10000, path: dump, of: 0 });
     await ask({ op: 'open', run: 2 });
     out.s3 = await ask({ op: 'keep', from: 2000, to: 6000, of: 2 });
     await ask({ op: 'open', run: 0 });
@@ -318,8 +401,12 @@ class VsCode(unittest.TestCase):
         sample; a slice of a run shown is of that run's dump at its time there; cut saves the window as an FST of its own."""
         with H.tmp() as d:
             p = H.vcd(d, body(), HEAD, name='waves.vcd')
+            log, stub = os.path.join(d, 'args.log'), os.path.join(d, 'sva-log')
+            with open(stub, 'w', encoding='utf-8') as f:   # the real CLI, its arguments logged
+                f.write('#!/bin/sh\nprintf \'%%s\\n\' "$*" >> %s\nexec %s "$@"\n' % (shlex.quote(log), shlex.quote(os.path.abspath(SVA))))
+            os.chmod(stub, 0o755)
             r = subprocess.run([NODE, '-e', EXT, FAKE, os.path.join(H.ROOT, 'vscode', 'extension.js'), d, p, 'slice'], capture_output=True, text=True,
-                               timeout=90, env=dict(os.environ, WAVELENS_SVA=SVA))
+                               timeout=90, env=dict(os.environ, WAVELENS_SVA=stub))
             o = result(r)
             self.assertEqual(r.returncode, 0, r.stderr)
             s1, s2, s3 = o['s1']['run'], o['s2']['run'], o['s3']['run']
@@ -330,6 +417,12 @@ class VsCode(unittest.TestCase):
             self.assertEqual(o['cnt']['result']['differ'], 1, o['cnt'])
             self.assertEqual((o['now']['result']['differ'], o['now']['result'].get('shift')), (0, 20000), ('a slice A, the dump B: at its place', o['now']))
             self.assertEqual((o['asB']['result']['differ'], o['asB']['result'].get('shift')), (0, -20000), ('the dump A, a slice B', o['asB']))
+            f, f0 = o['file']['result'], o['file0']['result']
+            self.assertEqual((f['differ'], f.get('shift')), (0, 20000), ('Compare… with a file, a slice A: the file at the slice\'s place', o['file']))
+            self.assertEqual((f0['differ'], f0.get('shift') or 0), (0, 0), ('the dump A, the same file: from 0', o['file0']))
+            with open(log, encoding='utf-8') as fh:
+                diffs = [x for x in fh.read().splitlines() if x.startswith('diff ') and '--page' in x]
+            self.assertTrue(any('--offset 20000ps' in x for x in diffs), diffs)
             self.assertEqual((s3['name'], s3['slice'], s3['dump']), ('waves.vcd 22 ns–26 ns', {'from': 22000, 'to': 26000}, 'waves.vcd'), s3)
             self.assertTrue(o['cancel'].get('cancel') and o['asked'] == os.path.join(d, 'waves.20000-30000ps.fst'), o)
             self.assertEqual(o['cut']['path'], os.path.join(d, 'piece.fst'))

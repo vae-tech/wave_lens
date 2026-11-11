@@ -53,7 +53,8 @@ name or label without a \"TC<n> \" before it and a \" · …\" after it (the res
 cases as keep finds them), B's time offset to the run's case, over the shorter of the two; with --against RUN, A's case
 NAME is that run's.
 A slice: keep --from T --to T keeps that window of DUMP alone, its times from 0 (its first sample, --from, is 0), with
-slice {from, to} (ps of DUMP) in runs.json, its name by default \"DUMP FROM–TO\", no cases: slices of one dump (or of
+slice {from, to} (ps of DUMP) in runs.json, its name by default \"DUMP FROM–TO\", the cases of --cases inside the window
+(their times from 0 too; set --cases the same; the marks beside DUMP are not taken): slices of one dump (or of
 several) compared with each other from their first sample (diff --against SLICE --run SLICE); a slice and a whole one (the
 dump, a whole run) at the slice's place in the dump (B offset by its start: \"(B −20 ns)\", the JSON's offset).
 TIME is a number with a unit (100ns, 2.5us; ps without one).
@@ -599,6 +600,28 @@ fn cases_for(given: Option<&str>, dump: &str, quiet: bool) -> Result<Option<Vec<
     Ok(Some(cases))
 }
 
+/// The cases of a slice of from … to (ps of its dump): those inside the window, their times from 0 as the slice's; the
+/// others said on stderr; none inside: an error (a file of another window).
+fn slice_cases(cases: Vec<Value>, from: u64, to: u64, src: &str) -> Result<Vec<Value>, String> {
+    let n = cases.len();
+    let (inside, out): (Vec<Value>, Vec<Value>) = cases.into_iter().partition(|c| {
+        let (f, t) = (c["from"].as_u64().unwrap_or(0), c["to"].as_u64().unwrap_or(0));
+        f >= from && t <= to
+    });
+    if !inside.is_empty() && !out.is_empty() {
+        eprintln!("sva: {} of {n} cases outside the slice, not kept: {}", out.len(), case_names(&Value::from(out)));
+    }
+    if inside.is_empty() && n > 0 {
+        return Err(format!("no case of {src} inside {} … {} (the slice's window)", crate::ns(from), crate::ns(to)));
+    }
+    Ok(inside.into_iter().map(|mut c| {
+        for k in ["from", "to"] {
+            c[k] = (c[k].as_u64().unwrap_or(0) - from).into();
+        }
+        c
+    }).collect())
+}
+
 /// A case of a list by its name (as `case_name` makes it).
 fn case_in<'a>(cases: &'a Value, name: &str) -> Option<&'a Value> {
     cases.as_array()?.iter().find(|c| c["name"].as_str() == Some(name))
@@ -643,7 +666,20 @@ fn keep(o: &Opt) -> Result<u8, String> {
         (Some(f), Some(t)) => return Err(format!("--to {} is not after --from {}", crate::ns(t), crate::ns(f))),
         _ => return Err("a slice: --from and --to, its window".into()),
     };
-    let cases = if slice.is_some() { None } else { cases_for(o.cases.as_deref(), dump, o.json)? };
+    // its ends as the cut has them: floored to the dump's unit (the slice's first sample is the dump's time at or before --from)
+    let slice = match slice {
+        Some((f, t)) => match crate::vcd::cut_window(dump, f, t)? {
+            (ff, tt) if tt > ff => Some((ff, tt)),
+            _ => return Err(format!("{} … {}: inside one time unit of {dump}", crate::ns(f), crate::ns(t))),
+        },
+        None => None,
+    };
+    // a slice's cases: only those --cases names (the marks beside the dump are not taken), inside its window, from 0
+    let cases = match slice {
+        None => cases_for(o.cases.as_deref(), dump, o.json)?,
+        Some(_) if o.cases.is_none() => None,
+        Some((f, t)) => cases_for(o.cases.as_deref(), dump, true)?.map(|c| slice_cases(c, f, t, o.cases.as_deref().unwrap_or(""))).transpose()?,
+    };
     let dir = dir_of(o, Some(dump));
     let made = !dir.exists();
     if made {
@@ -690,7 +726,7 @@ fn keep(o: &Opt) -> Result<u8, String> {
     if let Some((from, to)) = slice {
         let mut job = crate::fst::FstJob::new(dump);
         (job.out, job.limit, job.quiet) = (Some(target.clone()), RUN_BLOCK, true);
-        crate::fst::write_cut_fst(job, &crate::vcd::Cut { from: Some(from), to: Some(to), signals: Vec::new(), zero: true })
+        crate::fst::write_cut_fst(job, &crate::vcd::Cut { from: Some(from), to: Some(to), signals: Vec::new(), zero: true, lenient: false })
             .map_err(|e| format!("{e} (not kept)"))?;
     } else if is_fst {
         let part = dir.join(format!("{file}.{}.part", std::process::id()));
@@ -772,6 +808,12 @@ fn set(o: &Opt) -> Result<u8, String> {
     let mut v = load(&dir)?;
     let i = find(&v, key)?;
     let r = &mut v["runs"][i];
+    // a slice: the cases of its window, from 0 (as keep --from --to --cases)
+    let win = (r["slice"]["from"].as_u64(), r["slice"]["to"].as_u64());
+    let cases = match (cases, win) {
+        (Some(c), (Some(f), Some(t))) if !c.is_empty() => Some(slice_cases(c, f, t, o.cases.as_deref().unwrap_or(""))?),
+        (c, _) => c,
+    };
     if let Some(c) = cases {
         match r.as_object_mut() {
             Some(m) if c.is_empty() => {
@@ -974,6 +1016,8 @@ fn diff(o: &Opt) -> Result<u8, String> {
                 // A's cases: the run's of --against, else the dump's
                 let c: Value = match &against {
                     Some(r) if r["cases"].is_array() => r["cases"].clone(),
+                    Some(r) if r["slice"].is_object() => return Err(format!("{who}: a slice kept without cases (sva runs set {a_word} --cases FILE: \
+                        those of its window, or --from/--to: the window of the case)")),
                     Some(_) => return Err(format!("{who}: kept without cases (sva runs set {a_word} --cases FILE, or --from/--to: the window of the case)")),
                     None => cases_for(o.cases.as_deref(), dump, quiet)?
                         .ok_or_else(|| format!("{dump}: no cases (cocotb's {MARKS} beside it, --cases FILE, or --from/--to: the window of the case)"))?.into(),
@@ -1003,6 +1047,7 @@ fn diff(o: &Opt) -> Result<u8, String> {
         let Some(c) = case_in(&r["cases"], name) else {
             return Err(if r["cases"].is_array() { format!("no case {name} in this run (its cases: {})", case_names(&r["cases"])) }
                 else if r["id"] == 0 { format!("no cases of {dump} (cocotb's {MARKS} beside it, --cases FILE)") }
+                else if r["slice"].is_object() { "a slice kept without cases (sva runs set RUN --cases FILE: those of its window)".to_string() }
                 else { "kept without cases (sva runs set RUN --cases FILE)".to_string() });
         };
         let (bf, bt) = (c["from"].as_u64().unwrap_or(0), c["to"].as_u64().unwrap_or(0));

@@ -40,6 +40,8 @@ Config file (--config cfg.json): every option can be a key (dashes or underscore
 Warnings ("vcd2wavedrom: lint: <code>: <JSON path>: <text>", on stderr; mkhtml.py --lint / --strict, docs/USAGE.md "Lint"): a
 bookmark outside the window or on no row of the view, a number twice, an arrow to no bookmark, a marker that matches
 nothing, a binding to no assertion, an svaShow name of none, two circles that overlap, unknown keys, hex enum fills.
+--lint-json FILE: the same as JSON, the fields mkhtml.py --lint-json gives (code, where, message, signal / name, rows) but "view":
+one view a run; "where" starts with views.<name>. only with --view.
 
 Examples
   python3 -I tools/vcd2wavedrom.py --waves dump.vcd --scope tb --clock clk --from 0ns --to 400ns \
@@ -439,6 +441,10 @@ def parser():
     add_sva_bin_arg(ap)
     ap.add_argument('--hscale', type=float)
     ap.add_argument('--out', help='output file (default: stdout)')
+    ap.add_argument('--lint-json', metavar='FILE', help='the lint warnings as JSON into FILE (- stdout, with --out only), as mkhtml.py '
+                    '--lint-json writes them: {"count", "warnings": [{"code", "where", "message", and what it is about: "signal" / "name", '
+                    '"rows" it may mean}]}; a failed conversion too, with "error": its message (exit 1). One view a run: no "view" (mkhtml.py '
+                    'has it), "where" starts with views.<name>. only with --view')
     return ap
 
 
@@ -451,6 +457,10 @@ def load_config(path):
         raise WaveError(f'no such file: {path}') from None
     except json.JSONDecodeError as e:
         raise WaveError(f'{path}: {e}') from None
+    except UnicodeDecodeError as e:
+        raise WaveError(f'{path}: not UTF-8 text ({e.reason} at byte {e.start})') from None
+    except OSError as e:   # a directory, not readable (B-92: a traceback)
+        raise WaveError(f'{path}: {e.strerror or e}') from None
     if not isinstance(cfg, dict):
         raise WaveError(f'{path}: a JSON object {{…}} expected, not a {type(cfg).__name__}')
     views = cfg.get('views')
@@ -1541,10 +1551,33 @@ def convert(a: argparse.Namespace) -> dict:
     return doc
 
 
+def write_lint_json(path, obj, tool='vcd2wavedrom'):
+    """--lint-json (here and mkhtml.py): obj as JSON into the file (- stdout)."""
+    text = json.dumps(obj, ensure_ascii=False, indent=1) + '\n'
+    if path == '-':
+        sys.stdout.write(text)
+        return
+    try:
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(text)
+    except OSError as e:
+        sys.exit(f'{tool}: cannot write {path}: {e.strerror}')
+
+
 def main():
-    """The command line: options, conversion, the WaveJSON text to --out or stdout."""
+    """The command line: options, conversion, the WaveJSON text to --out or stdout (--lint-json: the warnings as JSON, P-23)."""
     a = options()
-    doc = convert(a)
+    if a.lint_json == '-' and not a.out:
+        sys.exit('vcd2wavedrom: --lint-json - writes on stdout, where the WaveJSON goes without --out: give --out, or a file')
+    try:
+        doc = convert(a)
+    except WaveError as e:   # a script reading --lint-json gets an object on a failure too (the text on stderr, exit 1)
+        if a.lint_json:
+            msg = str(e)
+            write_lint_json(a.lint_json, {'count': 0, 'warnings': [], 'error': msg if msg.startswith('vcd2wavedrom:') else f'vcd2wavedrom: {msg}'})
+        raise
+    if a.lint_json:
+        write_lint_json(a.lint_json, {'count': len(a.lint), 'warnings': [lint_item(w) for w in a.lint]})
     text = wavejson.dumps(doc) + '\n'
     if a.out:
         with open(a.out, 'w', encoding='utf-8') as f:

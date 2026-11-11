@@ -5,6 +5,182 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.51 — 11 November 2026
+
+The range follows the signal you select (walk the names, read each one's edges or changes in the same range), the bar's
+Paint colour goes on at once, the review of 0.50, the cl_gev report of 2026-11-07 (WL-011, P-22/23/25/26), and the bug
+hunt of 2026-11-10 (`docs/reviews/bughunt-2026-11-10/`): 96 bugs closed — the SVA engine's goto ranges and empty
+matches (verdicts and cover counts change), the `sva` CLI's cuts and names, lazy dumps, the sets of selection, the
+page / `viewedit.py` / MCP parity, runs and compare races, odd times, the small things of the page and the tools.
+
+**The range follows the signal you select** (`docs/reviews/feature-2026-11-10-range-steps/`): a range measured with
+ctrl+drag or the right button stays when you click another name, shift+click, or step with ↑ ↓ (j k) on the waves or in
+the names, and its readout (the tag on the axis, the line in the bar, the menu's head, the picture) counts that signal now:
+its rising edges or its changes in the same range. One with none in it says so (`· 0 ↑ PSEL`, `· 0 changes of PADDR
+(1 value)`; the bookmarks' arrow keeps the Δ alone). `wavelens:range` carries the `signal`; the state's `range.signal`
+follows (`viewedit.py` `select` too); a lazy row read later is counted again. The readout stays on one line (cut with …,
+the whole in its tooltip), so a longer text does not move the waves.
+
+**The bar's Paint colour goes on at once**: picking the colour next to Paint (or typing its hex) recolours the found,
+highlighted (ctrl+click, the ○) and shift+click selected signals as you pick it — none of them: the selected one —, as the
+right button's colour does; with none at all it is only kept for Paint.
+
+The review of 0.50 (`docs/reviews/review-2026-11-06-bugs-tests/`): slices on the remaining paths, `]w` past a run that
+does not open, a piece's Δ, the state's keys on the file side.
+
+- **Compare… with a file while a slice is A** (B-01): the file is read at the slice's place (`sva diff --offset` its
+  start), as the runs' compare does since 0.50 — identical waves said "differ" from 0 ps; the redo when A moves too.
+- **The Runs panel's window goes with a slice** (B-02, B-03): a span chosen as the compare window was dropped without a
+  word when a slice became A (the spans moved, the window did not), and lost on the way back; a slice shown said "it ends at
+  … (the window reached …)" when the window fitted it. A span chosen and gone while the panel was closed is said.
+- **`]w` past a run that does not open** (B-04): the next `]w` goes on to the run after it instead of asking it again.
+- **A slice keeps its test cases** (B-06): `sva runs keep --from --to --cases FILE` (and `runs set --cases` on a slice)
+  keeps the cases inside the window, their times from 0, the others said; none inside: refused. `--cases` was dropped.
+- `wave_runs diff`: a run's `offset` in ns as every other time (B-05); a piece of waves: a marker's Δ to one cut out goes
+  with it, the others renumbered (B-07); `viewedit.py` keeps the Runs panel's window (`runsOver`) of a state (B-08).
+- Tests: the smoke's fake host serves a slice of its own length; every time of `wave_runs` checked against the CLI's; the
+  page's state keys and `viewedit.STATE_KEYS` one set; `vscode_e2e` keeps and compares a slice (by hand, as before); the
+  smoke prints its slowest sections and `--list` the last time of each.
+- **`wave_cut` writes the format its `out` names** (WL-011 of `bug_report/2026-11-07-cl_gev_eval_offload`): an `out`
+  ending in `.fst` got VCD text under that name, which no tool then read ("no $enddefinitions: not a VCD"); now it is an
+  FST (`sva fst`, which takes `--signals` / `--signals-from` for it), a name neither `.vcd` nor `.fst` is refused before
+  anything is written. `zero`: the cut's times from 0, as `sva fst --zero` (P-22).
+- **`wave_find` with `values`** (P-25): the values of some signals at each match, as a table, in the same call (an
+  expression's at its last cycle, sampled as it is; an edge's or a value's at its time) — the pair wave_find + wave_values
+  per match in one.
+- **`sva_check` with `per`** (P-26): a verdict a window in one pass, the tests of a marks file (`per: "tests"`, `marks`)
+  or a list of windows: each window's failed assertions with their counts, and a failed assertion's `in`, its windows.
+- **`vcd2wavedrom.py --lint-json FILE`** (P-23): the lint warnings as JSON, the fields `mkhtml.py --lint-json` gives.
+
+The bug hunt of 2026-11-10 (`docs/reviews/bughunt-2026-11-10/`), the MCP tools over `sva` and the Makefile:
+**`sva_check` times an assertion at its own clock's edges** (B-53: one on another clock than the first got the first's
+times, so wrong failure times, first covers and `per` windows); **`wave_page` `compare.offset` as a number is ns** as every
+other time of the server (B-56: it went to `sva diff` as ps; an agent that sent ps sends `"…ps"` now); `wave_cut`,
+`wave_diff`, `wave_runs diff` refuse a bit-select in `signals` instead of taking the whole bus (B-57); `wave_runs keep`
+refuses a window outside the dump (B-58); `wave_find` rows have the four cells of its `columns` (B-59); `wave_diff`'s
+`rank` has no `after_first_ps` (B-55); `per` names the key a window lacks (B-60). The cocotb marks of a design without
+`TEST_CASE` name no signal (`"signal": null`), and a page of marks whose test or step signal the dump lacks is made, with a
+line (B-54). `make diff-results` takes `REF= NEW=` (B-90: `B=` replaced the Makefile's own build directory, the engine
+was built and `wavelens/sva.wasm.js` packed into a directory named after the results file; `A= B=` is refused).
+
+The SVA engine (the bug hunt's WP2; **verdicts and cover counts change**, all checked against a brute-force matcher over
+random sequences and traces, `sva/core/tests/reference.rs`): **`a |-> b[->1:2] ##1 c` fails where it fails** (B-01:
+the rest of a goto range matched empty at every cycle after a hit, so `c` was checked at cycles with no hit and the
+assertion passed); **`##n` into an empty operand** (`##2 b[*0] ##1 c`, `x[*DLY]` with `DLY = 0`) is `##(n-1) 1`, as
+ENGINE.md says (B-02: it never matched for n ≥ 2), also `s ##[1:2] empty`; `first_match` of a sequence that can match
+empty, `and` / `intersect` of two such operands and `within` with an empty left side (B-07) no longer add matches;
+**`cover sequence` counts each (start, end) once** (B-04: two threads reaching one end counted twice, the listed matches
+too). Macro arguments and declarations with `[*`, `[->`, `[=`, `'(` split at the right commas (B-03: the rest of the
+file was lost); unsized `'hx` / `'bz` are x in every bit (B-06); the CLI's "first fail" is the first found, by
+`failed_at`, as the report and JUnit (B-05); Why and a step's shown value give `a + b` at its compare's width (B-08:
+`0 == 256 → true`). The vacuity of `always [m:n]` / `eventually` is written down in ENGINE.md as it is (D-2).
+
+The `sva` CLI's cuts, diff and FST (the bug hunt's WP3): **a cut of an FST knows its signals by the names `sva diff` gives
+them** (B-09: the bits of a vector declared apart, `err[0]` `err[1]`, are `tb.err`, a lone `bit[5]` is `tb.blk.bit`; the
+FST's cut knew only its own names, so `sva diff --page` / `sva runs diff --page` of FSTs — every run — had no values of B
+for them: Runs and Compare showed bands only); the FST's own names still cut it, a lone bit of a VCD is cut by its
+declared name too, and a name of B the page's cut does not find is a note, not a failed cut. **A cut's `--from` / `--to`
+are floored to the dump's unit** (B-10: rounded, a 10 ns dump cut at 15 ns started with the value of 20 ns, and a dump
+differed from its own slice); a slice kept records the window it holds (`slice.from` 10 ns there; slices kept before
+are read as they are). An FST's cut from before its first time is x until its first value, as a VCD's (B-11: it started
+at the first time, 10 ns apart). `sva vcd DUMP --out DUMP` is refused (B-12: the dump was emptied); `--out` is written
+as a part and renamed when complete. `sva diff --from` of an FST read from a later block: the time steps of one ps are
+one (B-13: a 1 fs dump against its FST "differed"), the block's values are read as before the window (B-14: they were
+counted as changes at its start). `sva fst` writes a vector of other characters (`b0002`, `?`) as x with a note (B-15:
+the FST did not read). A time past 2^63 ps is not read as a negative one (B-16).
+
+Lazy dumps on the page and in the VS Code tab (the bug hunt's WP4): **a large FST rewritten by a new run under an open
+tab is not read under the old header** (B-17: the signals opened later were read from the new file by the old id codes,
+another signal's values; the tab says "changed on the disk since it was read: ⟳ (R)"). **A clock read late counts its
+cycles** (B-18: its rises were cached empty: no cycles band, every count of cycles 0) and the value column fills when
+the signals come (B-19); a read that fails is said once, not run again on every draw (B-20); the answer of a viewer
+replaced on its element does not reach the new one (B-21); a row read while a compare shows B keeps A's values for A
+(B-22). The notes of a large VCD (the header made of it) are on its first line with the line of that text (B-23: they
+were put on the VCD's own lines).
+
+The sets of selection on the page (the bug hunt's WP5): **Hide, a bus's bits folded, the find's Mask and a state loaded take
+the rows they leave out of the shift+click run, its anchor and the range's signal** (B-24: the menu said "Hide the 57
+selected" of 39 shown, Duplicate copied hidden signals; a hidden signal is no longer followed by the range, `viewedit.py`
+`hide` too). **A group of yours deleted, a row out of it or a copy removed leaves the highlight** (B-25: every row stayed
+dimmed, "Highlight: 1 ✕" with nothing lit). A highlighted bit of a bus shown bit by bit is kept by Load… and undo (B-26), and
+two of them take the menu's colour and Paint (B-27: "0 signals"); a state's `select` ends the run (B-28) and selects your
+group's row of it when the module is folded (B-29). Removing a slice puts a bookmark, marker or span of its bit 2 on the
+bus's bit `lsb + 2` (B-30: on bit 2), page and `viewedit.py`; a copy's bits' colours, radix and plot go with it (B-31:
+the next copy of that name came back painted; old ones in the browser are dropped on load); a hidden group of yours
+deleted leaves Hidden, renamed stays hidden under its name (B-32), `viewedit.py` too.
+
+The range after the selection (the bug hunt's WP6): **a signal folded away is not selected** — the `select` command answers
+`null` and the range stays on its signal (B-33: it moved onto a row that ended up unselected). `viewedit.py`: a group's
+`go` moves the range to its first signal, Only and a state with Only drop a range's signal they leave out, a bookmark's
+`go` moves it (B-34); on the page a bookmark's go moves it too, and a bus's bits folded put it on the bus (B-37: it stayed on
+the hidden bit). A followed bit is named with its bus, `PADDR[0]` (B-38). **`wavelens:range` fires once per real change
+wherever it happens** — a click or alt+click on the waves, Esc, a state, undo, the range's signal hidden (B-39: none), and
+not for your group's row of the same signal or the same range again (B-40): a plugin that listens gets more events, each
+a change; a range cleared takes its signal with it. **The readout on a narrow bar** (under about 960 px, a VS Code side tab)
+goes under the title and the buttons, a line for each of its parts, each cut on its own: the range's text is no longer cut
+to "cursor 0 ns · view 80 ns · cu…" (B-35), and the waves still never move as you walk the signals; the short messages sit
+by the readout again (B-36: beside the title), at the right of its first line when narrow; print cuts nothing. A `range`
+whose ends are one time, or that only touches the waves, is an error (B-42: it cleared the range and said ok), page and
+`viewedit.py`. The Paint colour's words (B-41): it goes on to the found, highlighted and shift+click selected signals, the
+selected one only when there are none of those.
+
+The commands three times, the page, `viewedit.py` on its file and the MCP (the bug hunt's WP7): **`wave_page` names the
+rows of signals of one last name in several scopes by as much of their path as tells them apart** (`apb_tb.PSEL`,
+`u_master.PSEL`, `u_regs.PSEL`; said in `notes`); B-43: three rows "PSEL", and `viewedit.py` took the first of them where
+the page said "one signal, not 3" — now it says so too. On a file the cursor, cursor 2 and the window are within the waves
+and the window `minSpan` long at least, as on the page, a file's out-of-range ones too (B-44: −5 ns, a bookmark there).
+**A state with a key of another kind** (`"hidden": "PSEL"`, `radix` as a list, a cursor as a text) **is applied in
+nothing**, said by its key, page and file (B-45: the page threw half-way, the file stored it); a state's `config.fold` is
+the folding (B-46). `hide` leaves a divider on a file too (B-47); `paint` checks its colour before `clear` clears (B-48);
+`gaps` checks its values: `on` / `only` / `view` true or false, `idle` / `keep` cycles or a time, `count` one of its kinds,
+`signals` / `aux` names (B-49: `"yes"` and `"bogus"` were taken); `rows` takes a fractional `limit` / `offset` whole
+(B-50). `view_get full` gives the runs' window (`runsOver`) and a compare's `from` / `to` in ns as the other times, and
+`set_state` takes them back so (B-51). A live page that took the commands and answers after 10 s is no longer dropped and
+the commands are not run again on its file: `view_edit` says they were applied there, the results unknown (B-52).
+
+Runs, compare and the VS Code extension's small things (the bug hunt's WP8): **two runs asked to be A one after the other
+show the one asked last, and it is A** (B-61: the answer that came last won, and A was "now" over a run's waves). The slice
+shown as A removed (Delete, or a shell, then ⟳) brings the dump of now back at the same moments (B-62: 5 ns early by the
+slice's start, markers too); Keep this dump… while a slice is A keeps your spans as cases in the dump's time (B-65). A run
+compare still pending when B is dropped (no B, the bar's ✕, compare off) or replaced (Compare…, another result) is not
+taken when it comes, and the extension stops its `sva` (`runs cancel`, B-63, B-64); a Compare… pending when B is dropped
+neither. A tab moved to a window of its own takes the last state again no more, and Reload reads the state loaded last,
+not the one of when the tab opened (B-66: from the code, a real VS Code not run). The bundled `sva` (Linux x86_64) is used
+on Linux x86_64 only; elsewhere `wavelens.sva`, else `sva` on the PATH, and a CLI that cannot run says to set
+`wavelens.sva` (B-67: macOS and Linux arm64 started it and failed with ENOEXEC). A log's link to a dump open in a tab
+reaches it by the tab's spelling of the path (B-68: on Windows an upper-case drive letter never did; not run on Windows);
+a link the page answers with an error, or does not answer, says so (B-69). The protocol's `runs diff` answer has the
+`notes` `sva runs diff --json` writes (B-70).
+
+Odd times on the page (the bug hunt's WP9): **a marker, a jump or a cursor that is no time is left out and said in the log**
+(B-71: a "→ m" button set the window to NaN; B-72: `cursor: "abc"` read "cursor NaN µs"); a cursor outside the waves, a
+jump past their end and `goto` (a link's `#t=`) before their start put the cursor at their end (B-72, B-74). **Untimed
+waves count a length in cycles**: `Δ 10 cycles`, a bookmark's `+20 cycles`, the WaveDrom foot's cells and gaps (B-73: with
+`head.tick` 100 they read "Δ cycle 110.00"); the cursor field counts as the axis does (B-79). AU-WL-007's unit name stays
+"cycles": the untimed texts go through one formatter, where a setting would name it. `picture` with `to` not after `from`
+is an error, a static WaveSVG puts reversed ends in order and gets 80 px of waves at least (B-75, B-76: NaN or negative
+widths, a 1.9 MB figure); `data-from` ≥ `data-to` opens on the whole waves with a log line, not a 10 ps sliver (B-80). With
+the gaps on the waves `view` answers the window shown (B-77) and a picture with an end in a gap keeps that gap's column
+as the waves show it, the gaps before the first change and after the last of a whole window too (B-78). The time axis leaves out a label over another (B-81: far from 0 in a narrow window); a click far from 0 gives a
+round time (B-82: 7102436724999.999). USAGE.md says that a declared `[0:7]` or `[15:8]` shows as `[7:0]` (D-1) and
+that ps is the finest resolution (D-4).
+
+Small things of the page (the bug hunt's WP10): **the right button's menu taller than the window scrolls** (B-83: on
+1366×768 "Clear the range", "Modules…", "State machines…" were off the screen), its submenus beside it, whole. N or
+shift+Enter right after a search goes to the last match, not the one before it (B-84); a plain number typed over "0 ps" in a
+bookmark's or a marker's time is in ps, not fs (B-85); `1e+3ns` is a time on the page and in the tools (B-87, `parseT`,
+`common.parse_time`, the cursor field). **A colour word that is none (`blu`) is an error** of `paint` and the other colour
+commands, the same in `tools/viewedit.py`; a saved state's one is left out with a log line (B-86). `data-fit="false"` does
+not fit (B-88); `dim: 0`, `traceWidth: 0`, `busWidth: 0` are taken (no line; a size of 0 or less: its default) (B-89).
+
+The small Python tools (WP11): a file a tool cannot read or write (an `--out` in a directory not there or not writable,
+an input that is a directory or not UTF-8) is one line with its path, exit 1, not a traceback (B-92: `mkconfig`, `embed`,
+`mkhtml`, `vcd2wavedrom`, `gtkw`, `svtypes`, `svabuild`, `svaverify`); a marks file made by hand is checked test by test,
+the texts and lists left out filled (B-91: a traceback of `mkhtml --marks`); `embed.py --var` takes a JavaScript name only
+(B-93); `svabuild.py --waves` of a dump not there is an error, not an empty result (B-94); the `--help` of `mkhtml.py` and
+`vcd2wavedrom.py` and USAGE.md say how their `--lint-json` differ (B-95). **A sequence's or property's default that names a
+formal before it takes that formal's actual** (B-96: `sequence s(r, q = r[*2])` as `s(x)` was `r[*2]` of a signal `r`).
+
 ## 0.50 — 6 November 2026
 
 The review of 0.46–0.49 (`docs/reviews/review-2026-11-06-latest/`): a slice compared with the dump at its place, the page

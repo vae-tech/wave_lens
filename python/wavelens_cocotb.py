@@ -196,6 +196,7 @@ class Marks:
         self.open_measures = []   # the measurements started and not stopped
         self.groups = []   # the `with wl.checks(…)` open, the innermost last
         self.warned, self.last_log = False, ''
+        self.signal_seen = False   # the design has the test signal (a test found its handle): else the file names none (B-54)
         self.tap = LogTap(self)
 
     # ---------------- inside a test ----------------
@@ -315,8 +316,9 @@ class Marks:
             one = rows.split(',') if isinstance(rows, str) else rows
             self.now_test['signals'] = [s.strip() if isinstance(s, str) else self.row(s) for s in one]
         self.tests.append(self.now_test)
-        self.save()   # a crash inside the test leaves it, result "run"
         handle = self.signal and getattr(dut, self.signal, None)
+        self.signal_seen = self.signal_seen or handle is not None
+        self.save()   # a crash inside the test leaves it, result "run"
         self.step_handle, self.step_late = self.step_name and getattr(dut, self.step_name, None), None
         self.set_step(0)
         if handle is not None:
@@ -393,7 +395,7 @@ class Marks:
                 self.in_log = False
 
     def save(self):
-        doc = {'wavelens': 'marks', 'version': FORMAT, 'signal': self.signal, 'tests': self.tests}
+        doc = {'wavelens': 'marks', 'version': FORMAT, 'signal': self.signal if self.signal_seen else None, 'tests': self.tests}
         if self.steps:
             doc.update(step=self.step_name, steps={str(n): label for label, n in self.steps.items()})
         tmp = f'{self.path}.tmp'

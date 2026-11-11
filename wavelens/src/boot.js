@@ -52,7 +52,7 @@ function optsFrom(ds) {
   if (ds.title) o.title = ds.title;
   for (const k of ['cursor', 'from', 'to']) if (ds[k] != null) o[k] = parseT(ds[k]);
   if (ds.width) o.width = +ds.width;
-  if (ds.fit != null) o.fit = true;
+  if (ds.fit != null) o.fit = !/^\s*(false|0|no|off)\s*$/i.test(ds.fit);   // data-fit, data-fit="true": fit; "false" not (B-88)
   if (ds.theme) o.theme = ds.theme;
   if (ds.keys) o.keys = ds.keys;   // data-keys='{"gx": "gm"}': the element's layer of your keys (settings reads the JSON)
   if (ds.colors) o.colors = parseText(ds.colors);
@@ -193,7 +193,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.50',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.51',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,

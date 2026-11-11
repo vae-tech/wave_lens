@@ -236,5 +236,33 @@ class Cuts(unittest.TestCase):
             self.assertIn('no signal tb.ptr.[7]', p.stderr)
 
 
+class Values(unittest.TestCase):
+    """What `sva fst` writes of a value: an FST every reader reads."""
+
+    def setUp(self):
+        import svabuild
+        self.sva = svabuild.find_bin()
+        if not self.sva:
+            H.skip(self, 'the sva CLI')
+
+    def test_a_vector_of_other_characters_is_x(self):
+        # bughunt B-15: b0002 (and ?, which no reader takes) became an FST that did not read; x with a note, the rest kept
+        text = ('$timescale 1ns $end\n$scope module tb $end\n$var wire 4 ! v [3:0] $end\n$var wire 4 # w [3:0] $end\n$upscope $end\n'
+                '$enddefinitions $end\n#0\nb0002 !\nb0?1x #\n#5\nbXZ01 !\nb-uwl #\n#10\n')
+        with H.tmp() as d:
+            vcd = os.path.join(d, 'odd.vcd')
+            with open(vcd, 'w', newline='') as f:
+                f.write(text)
+            p = subprocess.run([self.sva, 'fst', vcd, '--no-types'], capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertIn('odd.vcd:8: "0002" is not a value of bits', p.stderr)
+            self.assertIn('odd.vcd:9: "0?1x" is not a value of bits', p.stderr)
+            fst = vcd[:-4] + '.fst'
+            r = subprocess.run([self.sva, 'diff', fst, fst, '--quiet'], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            t = subprocess.run([self.sva, 'vcd', fst], capture_output=True, text=True, check=True).stdout
+            self.assertIn('#0\nbxxxx "\nbxxxx !\n#5\nbXZ01 !\nb-uwl "\n', t)
+
+
 if __name__ == '__main__':
     unittest.main()

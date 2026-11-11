@@ -1324,7 +1324,7 @@ fn cuts_rounding_and_stdin_lists() {
     let head = "$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! a $end\n$var wire 1 \" late $end\n$upscope $end\n$enddefinitions $end\n";
     let v = write("cr.vcd", &format!("{head}#0\n0!\n#10\n1\"\n#20\n1!\n#30\n"));
     let t = out(&sva(&["vcd", &v, "--from", "2.6ns", "--to", "20ns"]));
-    assert!(t.contains("#3\n$dumpvars\n0!\nx\"\n$end") || t.contains("#3\n"), "{t}");
+    assert!(t.contains("#2\n$dumpvars\n0!\nx\"\n$end\n#10\n"), "--from floored to the dump's unit (bughunt B-10): {t}");
     assert!(t.contains("x\""), "a bit without a value yet: {t}");
     let piped = |args: &[&str], input: &str| {
         use std::io::Write;
@@ -1627,6 +1627,14 @@ fn slices_from_their_first_sample() {
     assert!(sva(&["fst", &dump, "--from", "20ns", "--to", "30ns", "--zero", "--out", &piece, "--quiet"]).status.success());
     assert_eq!(out(&sva(&["vcd", &piece])).lines().filter(|l| l.starts_with('#')).collect::<Vec<_>>(), ["#0", "#5", "#10"]);
     assert!(err(&sva(&["fst", &dump, "--from", "20ns", "--to", "30ns"])).contains("--out"), "a cut: where --out says");
+    // WL-011: sva fst --signals (wave_cut's out *.fst): some signals only, of a VCD and of an FST, a cut with no window too
+    let some = d.join("s.fst").to_string_lossy().into_owned();
+    for src in [dump.as_str(), piece.as_str()] {
+        let o = sva(&["fst", src, "--signals", "tb.cnt", "--out", &some, "--quiet"]);
+        assert!(o.status.success(), "{}", err(&o));
+        assert_eq!(out(&sva(&["vcd", &some, "--header"])).matches("$var ").count(), 1, "{src}");
+    }
+    assert!(err(&sva(&["fst", &dump, "--signals", "zz", "--out", &some])).contains("no signal zz"));
     // sva runs keep --from --to: slices, compared with each other from their first sample (clk the same, cnt not)
     for (f, t) in [("0ns", "10ns"), ("20ns", "30ns")] {
         assert!(sva(&["runs", "keep", &dump, "--from", f, "--to", t]).status.success());
@@ -1660,6 +1668,36 @@ fn slices_from_their_first_sample() {
     assert_eq!(at0, "b0001 \"", "the counter's 1 of 20 ns, at 0: {z}");
     assert!(err(&sva(&["runs", "keep", &dump, "--from", "5ns"])).contains("--from and --to"));
     assert!(err(&sva(&["runs", "set", "1", &dump, "--from", "5ns"])).contains("not an option of sva runs set"));
+}
+
+#[test]
+fn slices_keep_their_cases() {
+    // review of 0.50 B-06: keep --from --to --cases FILE keeps the cases inside the window, their times from 0 as the slice's
+    let d = runs_dir("slice-cases");
+    let dump = put(&d, "d.vcd", &counter(None, false));
+    let cases = put(&d, "c.json", r#"[{"name": "t_a", "from": 22000, "to": 26000}, {"name": "t_z", "from": 0, "to": 5000}]"#);
+    let o = sva(&["runs", "keep", &dump, "--from", "20ns", "--to", "30ns", "--cases", &cases, "--json"]);
+    assert!(o.status.success(), "{}", err(&o));
+    let r: serde_json::Value = serde_json::from_str(&out(&o)).unwrap();
+    assert_eq!(r["cases"], serde_json::json!([{"name": "t_a", "from": 2000, "to": 6000}]), "{r}");
+    assert!(err(&o).contains("1 of 2 cases outside the slice") && err(&o).contains("t_z"), "{}", err(&o));
+    // the dump's case t_a against the slice's: the same counter at the same moment of the dump
+    let o = sva(&["runs", "diff", &dump, "--against", "1", "--run", "now", "--case", "t_a", "--cases", &cases, "--signals", "tb.cnt", "--json"]);
+    assert_eq!(o.status.code(), Some(0), "{}{}", out(&o), err(&o));
+    let j: serde_json::Value = serde_json::from_str(&out(&o)).unwrap();
+    assert_eq!(j["runs"][0]["case"]["offset"].as_i64(), Some(20000), "{j}");
+    // none of them inside: refused, nothing kept
+    let far = put(&d, "far.json", r#"[{"name": "t_z", "from": 0, "to": 5000}]"#);
+    let o = sva(&["runs", "keep", &dump, "--from", "20ns", "--to", "30ns", "--cases", &far]);
+    assert!(!o.status.success() && err(&o).contains("no case of") && err(&o).contains("inside 20 ns"), "{}", err(&o));
+    assert_eq!(runs_json(&d.join(".wavelens-runs"))["runs"].as_array().map(Vec::len), Some(1));
+    // set --cases on a slice: the same window rule; a slice without cases says how to give them
+    assert!(sva(&["runs", "keep", &dump, "--from", "0ns", "--to", "10ns"]).status.success());
+    let o = sva(&["runs", "diff", &dump, "--against", "2", "--run", "now", "--case", "t_a", "--cases", &cases]);
+    assert!(err(&o).contains("a slice kept without cases"), "{}", err(&o));
+    let o = sva(&["runs", "set", "1", &dump, "--cases", &cases, "--json"]);
+    assert!(o.status.success(), "{}", err(&o));
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&out(&o)).unwrap()["cases"][0]["from"].as_u64(), Some(2000));
 }
 
 #[test]
@@ -2144,4 +2182,180 @@ fn runs_diff_text_of_windows_apart() {
     assert!(text.contains("  #2 short: equal over 20 ns … 35 ns (its case at 20 ns; the run's case is 5 ns shorter: compared over the shorter) (2 signals)"),
             "{text}");
     assert!(text.contains("  #1 whole: equal over 20 ns … 40 ns (2 signals)"), "{text}");
+}
+
+#[test]
+fn the_first_fail_is_the_earliest_found() {
+    // attempt 0 waits [1:4] cycles and fails at cycle 4, attempt 1 fails at once at cycle 1: the first fail is the one
+    // found first (by failed_at, as the report and JUnit say), not the one started first (bughunt B-05)
+    let d = clock_dump("first.vcd", "1ns", "#0\n0!\n1\"\n1#\n#5\n1!\n#10\n0!\n#11\n0#\n#15\n1!\n#20\n0!\n#25\n1!\n#30\n0!\n#35\n1!\n#40\n0!\n#45\n1!\n#50\n0!\n");
+    let f = write("first.sva", "module tb;\n  a_ff: assert property (@(posedge clk) req |-> if (ack) ##[1:4] 1'b0 else 1'b0);\nendmodule\n");
+    let junit = dir().join("first.xml");
+    let o = sva(&["eval", "--waves", &d, "--scope", "tb", "--sva", &f, "--junit", junit.to_str().unwrap()]);
+    assert_eq!(o.status.code(), Some(1), "{}", err(&o));
+    assert!(out(&o).contains("first fail at cycle 1 (15 ns)"), "{}", out(&o));
+    let x = std::fs::read_to_string(&junit).unwrap();
+    assert!(x.contains("first at 15 ns"), "{x}");
+}
+
+/// Bit-blasted bits (`err[0]`, `err[1]`), a lone bit of a vector (`bit[5]`) and a range (`x [3:0]`): a VCD whose
+/// signals differ from the other's by `v` (bughunt B-09).
+fn blasted(v: bool) -> String {
+    let (e, x) = if v { ("1", "0110") } else { ("0", "0101") };
+    format!("$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! clk $end\n$var wire 1 \" err[0] $end\n$var wire 1 # err[1] $end\n\
+        $var wire 4 $ x [3:0] $end\n$scope module blk $end\n$var wire 1 % bit[5] $end\n$upscope $end\n$upscope $end\n$enddefinitions $end\n\
+        #0\n0!\n0\"\n0#\nb0000 $\n0%\n#10\n1!\n{e}\"\n1#\nb{x} $\n{e}%\n#20\n0!\n#30\n")
+}
+
+/// bughunt B-09: the cut of an FST knows its signals by the names `sva diff` gives them (wellen's: `tb.err`,
+/// `tb.blk.bit`), as the cut of a VCD does: `diff --page` of two FSTs carries B's values; a name the dump declares
+/// (`tb.err[0]`) still cuts the FST; one name for a VCD and its FST in `--signals`.
+#[test]
+fn cut_names_of_a_vcd_and_its_fst() {
+    let d = runs_dir("blasted");
+    let (a, b) = (put(&d, "g0.vcd", &blasted(false)), put(&d, "g1.vcd", &blasted(true)));
+    for v in [&a, &b] {
+        assert_eq!(sva(&["fst", v, "-q", "--no-types"]).status.code(), Some(0));
+    }
+    let (fa, fb) = (a.replace(".vcd", ".fst"), b.replace(".vcd", ".fst"));
+    for (x, y) in [(&a, &b), (&fa, &fb), (&a, &fb)] {
+        let o = sva(&["diff", x, y, "--page"]);
+        assert_eq!(o.status.code(), Some(1), "{}", err(&o));
+        let v: serde_json::Value = serde_json::from_str(&out(&o)).unwrap();
+        assert!(v["cutError"].is_null(), "{x} {y}: {v}");
+        let t = v["vcd"].as_str().unwrap_or("");
+        for n in ["err", "bit", " x "] {
+            assert!(t.contains(n), "{y}: B's values of {n}: {t}");
+        }
+        assert!(!t.contains(" clk "), "only the ones that differ: {t}");
+    }
+    for n in ["tb.err", "tb.blk.bit", "tb.x", "blk.bit", "err", "tb.*"] {
+        let (v, f) = (sva(&["vcd", &b, "--signals", n]), sva(&["vcd", &fb, "--signals", n]));
+        assert_eq!((v.status.code(), f.status.code()), (Some(0), Some(0)), "{n}: {}{}", err(&v), err(&f));
+        assert_eq!(changes(&out(&v)).len(), changes(&out(&f)).len(), "{n}");
+    }
+    assert!(out(&sva(&["vcd", &fb, "--signals", "tb.err"])).contains("err[0] $end\n$var wire 1 # err[1]"), "both bits of tb.err");
+    assert_eq!(sva(&["vcd", &fb, "--signals", "tb.err[0]"]).status.code(), Some(0), "the FST's own name");
+    assert_eq!(sva(&["vcd", &b, "--signals", "tb.blk.bit[5]"]).status.code(), Some(0), "a lone bit by the name the dump declares");
+    assert_eq!(sva(&["vcd", &fb, "--signals", "tb.zz"]).status.code(), Some(2));
+}
+
+/// bughunt B-10, B-11: a cut's ends are floored to the dump's unit (the value held at --from, no change after --to), and
+/// an FST's cut is not clamped to its first time: the cut of a VCD and the cut of its FST read the same.
+#[test]
+fn cuts_floor_their_ends_and_a_vcd_cuts_as_its_fst() {
+    let d = runs_dir("floor");
+    let c10 = put(&d, "c10.vcd", "$timescale 10ns $end\n$scope module tb $end\n$var wire 1 ! a $end\n$upscope $end\n$enddefinitions $end\n\
+        #0\n0!\n#1\n1!\n#2\n0!\n#3\n1!\n#4\n0!\n#5\n1!\n#6\n");
+    let late = put(&d, "late.vcd", "$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! a $end\n$var wire 2 \" q [1:0] $end\n$upscope $end\n\
+        $enddefinitions $end\n#10\n0!\nb01 \"\n#20\n1!\n#30\n0!\nb10 \"\n#40\n");
+    for v in [&c10, &late] {
+        assert_eq!(sva(&["fst", v, "-q", "--no-types"]).status.code(), Some(0));
+    }
+    let t = out(&sva(&["vcd", &c10, "--from", "15ns", "--to", "25ns"]));
+    assert_eq!(changes(&t), [("#1".to_string(), vec!["1!".to_string()]), ("#2".to_string(), vec!["0!".to_string()])], "{t}");
+    for (v, w) in [(&c10, ["15ns", "45ns"]), (&c10, ["0", "1us"]), (&late, ["0", "35ns"]), (&late, ["5ns", "25ns"]), (&late, ["12ns", "12ns"])] {
+        for zero in [false, true] {
+            let mut args = vec!["vcd", v.as_str(), "--from", w[0], "--to", w[1]];
+            if zero {
+                args.push("--zero");
+            }
+            let tv = out(&sva(&args));
+            let f = v.replace(".vcd", ".fst");
+            args[1] = &f;
+            assert_eq!(changes(&out(&sva(&args))), changes(&tv), "{v} {w:?} zero {zero}");
+        }
+    }
+    // a dump against its own slice off the grid: equal
+    let slice = d.join("s.fst").to_string_lossy().into_owned();
+    assert!(sva(&["fst", &c10, "--from", "15ns", "--to", "45ns", "--zero", "--out", &slice, "-q"]).status.success());
+    assert!(sva(&["runs", "keep", &c10, "--from", "15ns", "--to", "45ns"]).status.success());
+    let r = &runs_json(&d.join(".wavelens-runs"))["runs"][0];
+    assert_eq!((r["slice"]["from"].as_u64(), r["slice"]["to"].as_u64()), (Some(10000), Some(40000)), "the slice's own window: {r}");
+    let o = sva(&["runs", "diff", &c10, "--run", "1"]);
+    assert_eq!(o.status.code(), Some(0), "{}{}", out(&o), err(&o));
+}
+
+/// bughunt B-12: `sva vcd DUMP --out DUMP` is refused and leaves the dump; a convert that fails leaves no --out.
+#[test]
+fn vcd_out_is_not_the_dump() {
+    let d = runs_dir("vcdout");
+    let v = put(&d, "v.vcd", &counter(None, false));
+    assert_eq!(sva(&["fst", &v, "-q", "--no-types"]).status.code(), Some(0));
+    let f = v.replace(".vcd", ".fst");
+    for (x, cut) in [(&v, false), (&f, false), (&v, true)] {
+        let before = std::fs::read(x).unwrap();
+        let mut args = vec!["vcd", x.as_str(), "--out", x.as_str()];
+        if cut {
+            args.extend(["--from", "10ns"]);
+        }
+        let o = sva(&args);
+        assert_eq!(o.status.code(), Some(2), "{x}");
+        assert!(err(&o).contains("--out another file"), "{}", err(&o));
+        assert_eq!(std::fs::read(x).unwrap(), before, "{x} left as it was");
+    }
+    let bad = put(&d, "bad.vcd", "not a dump\n");
+    let o2 = d.join("o2.vcd");
+    assert_eq!(sva(&["vcd", &bad, "--out", &o2.to_string_lossy()]).status.code(), Some(2));
+    assert!(!o2.exists(), "no --out of a failed convert");
+    assert!(parts(&o2).is_empty(), "no part left");
+    let ok = d.join("ok.vcd");
+    assert!(sva(&["vcd", &f, "--out", &ok.to_string_lossy()]).status.success());
+    assert!(std::fs::read_to_string(&ok).unwrap().contains("$enddefinitions"));
+}
+
+/// A 1 fs dump: a time step every 139 fs, several of them in one ps (bughunt B-13).
+fn femto() -> String {
+    let mut s = String::from("$timescale 1fs $end\n$scope module tb $end\n$var wire 1 ! clk $end\n$var wire 8 \" bus [7:0] $end\n\
+        $var wire 1 # bit $end\n$upscope $end\n$enddefinitions $end\n");
+    let mut x = 7u64;
+    for t in 0..2000u64 {
+        s += &format!("#{}\n{}!\n", t * 139, t % 2);
+        x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        s += &format!("b{:b} \"\n", (x >> 40) % 256);
+        if t % 3 == 0 {
+            s += &format!("{}#\n", (x >> 50) % 2);
+        }
+    }
+    s += "#278000\n";
+    s
+}
+
+/// bughunt B-13, B-14: a late window of an FST read from a later block compares as the dump read from its start: the
+/// time steps of one ps are one, the block's frame is not counted as changes (also at a block that starts at --from).
+#[test]
+fn a_late_fst_window_counts_as_its_vcd() {
+    let d = runs_dir("femto");
+    let v = put(&d, "fz.vcd", &femto());
+    let f = d.join("fz.fst").to_string_lossy().into_owned();
+    assert!(sva(&["fst", &v, "--out", &f, "--block-bytes", "64", "-q", "--no-types"]).status.success());
+    for (from, to) in [("1ps", "278ps"), ("37ps", "120ps"), ("150ps", "151ps"), ("201ps", "260ps")] {
+        let w = ["--from", from, "--to", to, "--json", "-", "--limit", "0"];
+        let whole = diff_doc(&[&["diff", &v, &v][..], &w].concat());
+        assert_eq!(whole["signals_differ"], 0, "{whole}");
+        assert_eq!(diff_doc(&[&["diff", &v, &f][..], &w].concat()), whole, "{from} … {to}");
+    }
+    // a window that starts where a block does: the frame's values not counted as changes there
+    let (a, b) = (put(&d, "a.vcd", &many_changes(false, 0, false)), put(&d, "b.vcd", &many_changes(true, 0, false)));
+    let am = d.join("am.fst").to_string_lossy().into_owned();
+    assert!(sva(&["fst", &a, "--out", &am, "--block-bytes", "2000", "-q"]).status.success());
+    let probe: serde_json::Value = serde_json::from_str(&out(&sva(&["diff", &am, &b, "--from", "2400ns", "--json", "-"]))).unwrap();
+    let at = probe["a"]["read_from"].as_i64().unwrap();
+    assert!(at > 0, "{probe}");
+    let (from, to) = (format!("{at}ps"), format!("{}ps", at + 3000));
+    let w = ["--from", from.as_str(), "--to", to.as_str(), "--json", "-", "--limit", "0"];
+    let whole = diff_doc(&[&["diff", &a, &b][..], &w].concat());
+    assert_eq!(diff_doc(&[&["diff", &am, &b][..], &w].concat()), whole, "{from} … {to}");
+}
+
+/// bughunt B-16: a time past i64::MAX ps is not read as a negative one.
+#[test]
+fn a_time_past_i64_is_not_negative() {
+    let v = write("u64.vcd", "$timescale 1ps $end\n$scope module tb $end\n$var wire 1 ! a $end\n$upscope $end\n$enddefinitions $end\n\
+        #0\n0!\n#18446744073709551615\n1!\n");
+    let o = sva(&["diff", &v, &v]);
+    assert_eq!(o.status.code(), Some(0), "{}{}", out(&o), err(&o));
+    assert!(!out(&o).contains("-1 ps") && !out(&o).contains(" -"), "{}", out(&o));
+    let j: serde_json::Value = serde_json::from_str(&out(&sva(&["diff", &v, &v, "--json", "-"]))).unwrap();
+    assert!(j["to"].as_i64().is_some_and(|t| t > 0), "{j}");
 }

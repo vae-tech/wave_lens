@@ -57,3 +57,10 @@ assert d_chain in delays, line 45
   s3        ##1 done
   s4        !busy
   signals   clk:1 rst_n:1 start:1 busy:1 done:1
+assert d_empty in delays, line 51
+  clock     @(posedge clk)
+  expr      start |-> ##2 busy[*0] ##1 done
+  s1        start
+  s2        ##2 busy[*0]
+  s3        ##1 done
+  signals   clk:1 start:1 busy:1 done:1

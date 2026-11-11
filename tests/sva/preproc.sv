@@ -76,4 +76,8 @@ module preproc #(
     // not parsed: WIN was undefined just above
     m_never:   assert property (`CLK 0);
 `endif
+`define CHK(name, p) name: assert property (`CLK p);
+    // a macro argument holding [*, [->, [= and a size cast '(: each opens a bracket,
+    // so the argument ends at the macro's closing ')' (bughunt B-03)
+    `CHK(m_rep_arg, start |-> valid[*2] ##1 ready[->1] ##1 done[=1:2] ##1 data == 8'(TWO))
 endmodule

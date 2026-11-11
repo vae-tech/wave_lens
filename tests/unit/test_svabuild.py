@@ -74,6 +74,10 @@ class Binds(unittest.TestCase):
         with self.assertRaisesRegex(WaveError, 'bad "bind" entry'):
             SB.bind_list([{'scope': 'tb'}])
 
+    def test_a_dump_not_there(self):   # bughunt B-94: an empty result and exit 0 before
+        rc, out, err = H.run_tool('svabuild', '--waves', 'no/such.vcd')
+        self.assertEqual((rc, out, err.strip()), (1, '', 'svabuild: no such dump: no/such.vcd'))
+
     def test_find_bin_explicit_missing(self):
         with self.assertRaisesRegex(WaveError, 'no sva binary at /no/such/sva'):
             SB.find_bin('/no/such/sva')

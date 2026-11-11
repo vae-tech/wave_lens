@@ -28,14 +28,14 @@ get /dev/null as stdin (stdin and stdout are the protocol).
 Standard library only; the sva CLI as svabuild.py finds it ($WAVELENS_SVA, the build, bin/<os>/sva, PATH).
 docs/USAGE.md § "AI agents (MCP)" has the tools; tests/mcp_bench.py measures what they save.
 """
-import argparse, atexit, bisect, collections, contextlib, fnmatch, hmac, http.server, json, os, queue, re, secrets, shutil, socket, statistics, subprocess, sys
-import tempfile, threading, time, traceback, urllib.parse
+import argparse, atexit, bisect, collections, contextlib, fnmatch, hmac, http.server, io, json, os, queue, re, secrets, shutil, socket, statistics
+import subprocess, sys, tempfile, threading, time, traceback, urllib.parse
 
 sys.dont_write_bytecode = True   # a shared checkout stays as it is: -I ignores PYTHONDONTWRITEBYTECODE (AU-WL-003)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
 import dumpscan, svabuild, svtypes, testmarks, vcd2wavedrom, viewedit, wavefind  # noqa: E402
-from common import ROOT, UNIT_PS, WaveError, version  # noqa: E402
-from wavelive import (BRIDGE, CID_RE, DUMP_RE, LIVE_PORT, MAX_BODY, Bridge, LiveGone, LiveHandler, bridge, cache_dir,  # noqa: E402,F401
+from common import ROOT, WaveError, version  # noqa: E402
+from wavelive import (BRIDGE, CID_RE, DUMP_RE, LIVE_PORT, LIVE_TIMEOUT, MAX_BODY, Bridge, LiveGone, LiveHandler, LiveLate, bridge, cache_dir,  # noqa: E402,F401
                       has_live_block, live_page, live_token, live_view, open_browser, page_arg, same_file, target, vscode_open)
 
 PROTOCOLS = ('2025-06-18', '2025-03-26', '2024-11-05')
@@ -424,6 +424,16 @@ def t_sample(a):
 bits_value = wavefind.bits_value   # (tests, the bench)
 
 
+def find_values(w, a, scope):
+    """wave_find's values (P-25): the signals whose values each match's row carries -> (their names, the value at t:
+    before, as a clock samples them, or after the changes at t)."""
+    if not a.get('values'):
+        return [], None
+    names, res = w.signals(a['values'], scope)
+    sts = [w.stream(p, sl) for p, sl in res]
+    return list(names), lambda t, before: [w.text(p, sl, w.at(st, t, before), a.get('radix')) for (p, sl), st in zip(res, sts)]
+
+
 def t_find(a):
     w = wave(a.get('dump'), a)
     scope = a.get('scope') or ''
@@ -435,6 +445,7 @@ def t_find(a):
         raise WaveError('give "expr" (an SV expression or sequence, sampled on a clock) or "signal" with "edge" or "value"')
     _, ((p, sl),) = w.signals([a['signal']], scope)
     st, width = w.stream(p, sl), w.width(p, sl)
+    vnames, vals = find_values(w, a, scope)   # at t, after its changes: as the cursor there shows them
     if a.get('value') is not None:
         want = str(a['value'])
         hits = wavefind.value_times(st, want, width, t0, t1, lambda v: w.text(p, sl, v, a.get('radix')))   # the rules of a bookmark "at"
@@ -442,14 +453,18 @@ def t_find(a):
         for t in hits[:n]:
             j = bisect.bisect_right(st, (t, '\uffff'))
             end = st[j][0] if j < len(st) else None
-            rows.append([ns(t), ns(end - t) if end is not None else None])
-        out = {'unit': 'ns', 'signal': a['signal'], 'value': want, 'matches': len(hits), 'columns': ['t', 'lasts'], 'rows': rows}
+            rows.append([ns(t), ns(end - t) if end is not None else None] + (vals(t, False) if vals else []))
+        out = {'unit': 'ns', 'signal': a['signal'], 'value': want, 'matches': len(hits), 'columns': ['t', 'lasts'] + vnames, 'rows': rows}
     else:
         edge = wavefind.EDGES.get(a.get('edge') or 'change')
         if not edge:
             raise WaveError('"edge" is rise, fall or change')
         ts = w.edges(p, edge, t0, t1, sl)
-        out = {'unit': 'ns', 'signal': a['signal'], 'edge': a.get('edge') or 'change', 'matches': len(ts), 'times': [ns(t) for t in ts[:n]]}
+        out = {'unit': 'ns', 'signal': a['signal'], 'edge': a.get('edge') or 'change', 'matches': len(ts)}
+        if vals:   # a table: a row per edge with the values at it
+            out.update(columns=['t'] + vnames, rows=[[ns(t)] + vals(t, False) for t in ts[:n]])
+        else:
+            out['times'] = [ns(t) for t in ts[:n]]
         hits = ts
     if len(hits) > n:
         out['more'] = len(hits) - n
@@ -528,10 +543,14 @@ def find_expr(w, a, scope, t0, t1, n):
     res, msgs = wavefind.cover(exe, w.waves, expr, cname, scope, t0, t1, edge, args, w.t_start, w.t_end)   # the rules of a bookmark "at"
     hits, r, res = wavefind.cover_hits(res, msgs, scope)
     cyc = res.get('cycles') or []
-    rows = [[c, ns(t)] + ([e, ns(te)] if e != c else []) for c, t, e, te in hits[:n]]
+    vnames, vals = find_values(w, a, scope)
+    if vals:   # the values at the match's last cycle, sampled as the expression is: end_cycle, end_t always there
+        rows = [[c, ns(t), e, ns(te)] + vals(te, True) for c, t, e, te in hits[:n]]
+    else:
+        rows = [[c, ns(t), e, ns(te)] for c, t, e, te in hits[:n]]   # four cells, as the columns say, a match of one cycle too (B-59)
     out = {'unit': 'ns', 'expr': expr, 'clock': clk, 'scope': scope or None, 'sampled': 'just before the edge',
            'cycles': len(cyc), 'matches': r.get('stats', {}).get('matches', len(hits)),
-           'columns': ['cycle', 't', 'end_cycle', 'end_t'], 'rows': rows}
+           'columns': ['cycle', 't', 'end_cycle', 'end_t'] + vnames, 'rows': rows}
     if len(hits) > n:
         out['more'] = len(hits) - n
     return out
@@ -720,9 +739,47 @@ def t_stats(a):
     return out
 
 
+def sva_windows(a, w):
+    """sva_check's per (P-26): the windows a verdict is given for -> [(name, from ps, to ps)]: the tests of the marks file
+    ("tests"), or a list of {name, from, to}."""
+    per = a.get('per')
+    if per == 'tests':
+        tests = testmarks.load(marks_file(a)).get('tests') or []
+        if not tests:
+            raise WaveError(f'"per": "tests": no test in {a.get("marks")}')
+        return [(t['name'], t['from'], w.t_end if t['to'] is None else t['to']) for t in tests]
+    if isinstance(per, list) and per and all(isinstance(x, dict) for x in per):
+        out = []
+        for i, x in enumerate(per):
+            f, t = ps_of(x.get('from'), 'from'), ps_of(x.get('to'), 'to')
+            for k, v in (('from', f), ('to', t)):   # the key missing named (B-60)
+                if v is None:
+                    raise WaveError(f'"per"[{i}]: no "{k}": a window is {{name, from, to}} (ns)')
+            if t < f:
+                raise WaveError(f'"per"[{i}]: "to" before "from" ({ns(t)} < {ns(f)} ns)')
+            out.append((str(x.get('name') or i + 1), f, t))
+        return out
+    raise WaveError('"per": "tests" (the tests of "marks", a cocotb marks file) or a list of windows [{name, from, to}] (ns)')
+
+
+def per_window(r, wins, at, end):
+    """An assertion's attempts by the window each starts in (an end of a window is the next one's start, the dump's end
+    its own) -> [[failures, passes]] a window."""
+    n = [[0, 0] for _ in wins]
+    for x in r.get('attempts', []):
+        t = at(x.get('start'))
+        if t is None or x.get('result') not in ('fail', 'pass'):
+            continue
+        for i, (_, f, e) in enumerate(wins):
+            if f <= t < e or t == e >= end:
+                n[i][x['result'] == 'pass'] += 1
+    return n
+
+
 def t_sva(a):
     w = wave(a.get('dump'), a)
     t0, t1 = window(w, a)
+    wins = sva_windows(a, w) if a.get('per') is not None else []
     scope = a.get('scope') or default_scope(w)
     files = a.get('files') or []
     files = [files] if isinstance(files, str) else files
@@ -737,7 +794,7 @@ def t_sva(a):
     if not res:
         raise WaveError('nothing evaluated: ' + ' | '.join(msgs[:10]))
     cyc = res.get('cycles') or []
-    tm = lambda c: ns(cyc[c] * UNIT_PS.get(res.get('unit', 'ps'), 1)) if isinstance(c, int) and 0 <= c < len(cyc) else None
+    per = [{'name': n, 'from': ns(f), 'to': ns(e), 'failed': [], 'passed': 0} for n, f, e in wins]
     mf = max(0, a.get('max_failures') if a.get('max_failures') is not None else 3)
     out = {'unit': 'ns', 'scope': scope or None, 'clock': res.get('clock'), 'cycles': len(cyc), 'failed': [], 'passed': [],
            'vacuous': [], 'not_evaluated': [], 'covered': [], 'not_covered': []}
@@ -745,6 +802,15 @@ def t_sva(a):
         if pats and not any(fnmatch.fnmatchcase(r['name'], p) for p in pats):
             continue
         s = r.get('stats', {})
+        own = wavefind.cycle_ps(r, res)   # its own clock's edges, not the first assertion's (B-53)
+        at = lambda c, own=own: own[c] if isinstance(c, int) and 0 <= c < len(own) else None
+        tm = lambda c, at=at: None if at(c) is None else ns(at(c))
+        counts = per_window(r, wins, at, w.t_end) if wins and not r.get('missing') and r.get('kind') != 'cover' else []
+        for row, (nf, np) in zip(per, counts):
+            if nf:
+                row['failed'].append([r['name'], nf])
+            elif np:
+                row['passed'] += 1
         if r.get('missing'):
             out['not_evaluated'].append([r['name'], 'no ' + ', '.join(r['missing'])])
         elif r.get('kind') == 'cover':
@@ -760,6 +826,8 @@ def t_sva(a):
                  'columns': ['cycle', 't', 'start_cycle', 'start_t', 'note']}
             if len(fails) > mf:
                 e['more'] = len(fails) - mf
+            if wins:   # the windows it fails in: "test 14 and test 25 only"
+                e['in'] = [n for (n, _, _), (nf, _) in zip(wins, counts) if nf]
             out['failed'].append(e)
         elif s.get('pass'):
             out['passed'].append([r['name'], s.get('pass'), s.get('vacuous', 0)] if a.get('details') else r['name'])
@@ -770,14 +838,41 @@ def t_sva(a):
                 out.setdefault('no_verdict', []).append([r['name'], k, s[k]])
     for k in [k for k, v in out.items() if v == []]:
         del out[k]
+    if per:   # a verdict a window: failed [[assertion, failures]], passed: how many passed there (the others vacuous)
+        out['per'] = [{k: v for k, v in row.items() if v != []} for row in per]
     if msgs:
         out['messages'] = msgs[:12] + ([f'… {len(msgs) - 12} more'] if len(msgs) > 12 else [])
     return out
 
 
-def converter_args(w, a, scope):
+def telling_names(res):
+    """The rows of signals of one last name in several scopes (tb.PSEL, tb.u_regs.PSEL): named by as much of the end of their
+    path as tells them apart ("tb.PSEL", "u_regs.PSEL"), the same length for each of them -> {path: name} of those (B-43: rows
+    alike, a name of the page or of viewedit took one of them, or none)."""
+    parts = {p: svabuild.split_path(p) or [p] for p, _ in res}
+    by = collections.defaultdict(list)
+    for p, sl in res:
+        by[(parts[p][-1], sl)].append(p)
+    out = {}
+    for ps in by.values():
+        ps = list(dict.fromkeys(ps))
+        if len(ps) < 2:
+            continue
+        for n in range(2, max(len(parts[p]) for p in ps) + 1):
+            names = ['.'.join(parts[p][-n:]) for p in ps]
+            if len(set(names)) == len(ps):
+                out.update(zip(ps, names))
+                break
+    return out
+
+
+def converter_args(w, a, scope, notes=None):
     _, res = w.signals(a.get('signals'), scope)
-    argv = ['--waves', w.waves, '--signals', ','.join(p + (f'[{sl[0]}:{sl[1]}]' if sl else '') for p, sl in res)]
+    alias = {} if a.get('hierarchy') else telling_names(res)   # (with the hierarchy their rows are in their scopes' groups)
+    sl_text = lambda sl: f'[{sl[0]}:{sl[1]}]' if sl else ''
+    argv = ['--waves', w.waves, '--signals', ','.join(p + sl_text(sl) + (f'={alias[p]}{sl_text(sl)}' if p in alias else '') for p, sl in res)]
+    if alias and notes is not None:
+        notes.append('signals of one name in several scopes, their rows named by more of their path: ' + ', '.join(dict.fromkeys(alias.values())))
     for p, sl in res:   # the labels of the types file (the converter reads the dump's own tables itself)
         e = w.decl.vars[p].enum if p in w.typed and not sl else None
         if e and not any(c in str(x) for x in e.values() for c in ',:='):
@@ -958,6 +1053,7 @@ def marks_page(a, argv, out):
     if r.returncode:
         raise WaveError('mkhtml: ' + r.stderr.strip()[-400:])
     notes = [x.split('lint: ', 1)[1] for x in r.stderr.splitlines() if 'lint: ' in x and 'bookmarks-close' not in x]
+    notes += [x.split('marks: ', 1)[1] for x in r.stderr.splitlines() if 'marks: no signal' in x]   # (B-54: a test signal not in the dump)
     return {'page': out, 'bytes': os.path.getsize(out), 'summary': testmarks.summary(testmarks.load(marks_file(a))), **({'notes': notes} if notes else {})}
 
 
@@ -969,9 +1065,11 @@ def t_page(a):
     out = os.path.abspath(os.path.expanduser(str(out)))
     if not os.path.isdir(os.path.dirname(out)):
         raise WaveError(f'"out": no such directory {os.path.dirname(out)}')
-    argv = converter_args(w, a, a.get('scope') or '')
+    said = []
+    argv = converter_args(w, a, a.get('scope') or '', said)
     if a.get('marks'):
-        return marks_page(a, argv, out)
+        r = marks_page(a, argv, out)
+        return dict(r, notes=said + r.get('notes', [])) if said else r
     for f in [a['sva']] if isinstance(a.get('sva'), str) else a.get('sva') or []:
         argv += ['--sva', f]
     for b in [a['bind']] if isinstance(a.get('bind'), str) else a.get('bind') or []:
@@ -985,14 +1083,14 @@ def t_page(a):
             c = {'dump': c} if isinstance(c, str) else c
             if not isinstance(c, dict) or not c.get('dump'):
                 raise WaveError('"compare": a dump ("b.vcd"), or {"dump", "map"?, "offset"?, "segment"?, "align"?}')
-            o.compare = dict(c, dump=os.path.abspath(os.path.expanduser(str(c['dump']))))
+            o.compare = dict(c, dump=os.path.abspath(os.path.expanduser(str(c['dump']))), **offset_arg(c))
         doc = vcd2wavedrom.convert(o)
     except SystemExit as e:   # argparse of the converter in this process: its message is on stderr, the server goes on
         raise WaveError(f'the converter refused its arguments ({e.code}): {" ".join(argv[2:])}') from None
     if out.lower().endswith('.json'):   # the WaveJSON itself (WaveDrom, mkhtml.py, embed.py)
         with open(out, 'w', encoding='utf-8') as f:
             json.dump(doc, f, ensure_ascii=False)
-        return {'wavejson': out, 'bytes': os.path.getsize(out)}
+        return {'wavejson': out, 'bytes': os.path.getsize(out), **({'notes': said} if said else {})}
     with tempfile.TemporaryDirectory(prefix='wavemcp-') as d:
         j = os.path.join(d, 'view.json')
         with open(j, 'w', encoding='utf-8') as f:
@@ -1003,7 +1101,7 @@ def t_page(a):
         r = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     if r.returncode:
         raise WaveError('mkhtml: ' + r.stderr.strip()[-400:])
-    return {'page': out, 'bytes': os.path.getsize(out)}
+    return {'page': out, 'bytes': os.path.getsize(out), **({'notes': said} if said else {})}
 
 
 # ---------------- the views a person looks at: their edits and the live link ----------------
@@ -1107,6 +1205,9 @@ def state_conv(st, f):
         st['spans'] = [dict(x, **{e: t(x[e]) for e in ('from', 'to') if num(x.get(e))}) if isinstance(x, dict) else x for x in st['spans']]
     if isinstance(st.get('config'), dict) and st['config'].get('cycleZero') is not None:
         st['config'] = dict(st['config'], cycleZero=t(st['config']['cycleZero']))
+    for k in ('runsOver', 'compare'):   # the window the runs are compared over, the compare's (B-51)
+        if isinstance(st.get(k), dict):
+            st[k] = dict(st[k], **{e: t(st[k][e]) for e in ('from', 'to') if num(st[k].get(e))})
     return st
 
 
@@ -1316,6 +1417,13 @@ def cli_time(a, k):
     return None if t is None else f'{round(t)}ps'
 
 
+def offset_arg(c):
+    """A compare's "offset" of the agent as sva diff takes it -> {"offset": "<ps>ps"}, {} without one: a number is ns, as every
+    other time of the server (B-56: it went to the CLI bare, as ps), a text with a unit as it says."""
+    t = ps_of(c.get('offset'), 'compare offset')
+    return {} if t is None else {'offset': f'{round(t)}ps'}
+
+
 def names_arg(v):
     return ','.join(v) if isinstance(v, list) else str(v)
 
@@ -1325,7 +1433,16 @@ def cli_names(path, names, scope=''):
     takes them: full paths, a * ? pattern as it is."""
     w = wave(path, {})
     items = names if isinstance(names, list) else [x for x in str(names).split(',') if x.strip()]
-    return ','.join(x.strip() if re.search(r'[*?]', x) else w.signals([x], scope)[1][0][0] for x in items)
+    out = []
+    for x in items:
+        if re.search(r'[*?]', x):
+            out.append(x.strip())
+            continue
+        p, sl = w.signals([x], scope)[1][0]
+        if sl is not None:   # B-57: the CLI compares and cuts whole signals; the bus was taken in silence
+            raise WaveError(f'"{x}": a part of {json.dumps(p)}; this tool takes whole signals: give "{p}"')
+        out.append(p)
+    return ','.join(out)
 
 
 def bits_text(v):
@@ -1399,7 +1516,8 @@ def t_diff(a):
     d['signals'] = sigs[:n]
     if len(sigs) > n:
         d['signals_more'] = len(sigs) - n
-    d['rank'] = [{**x, 't': ns(x['t']), 'after_first': ns(x.pop('after_first_ps')), 'a': bits_text(x['a']), 'b': bits_text(x['b'])} for x in d.get('rank', [])]
+    d['rank'] = [{**{k: v for k, v in x.items() if k != 'after_first_ps'}, 't': ns(x['t']), 'after_first': ns(x['after_first_ps']),   # ns only (B-55)
+                  'a': bits_text(x['a']), 'b': bits_text(x['b'])} for x in d.get('rank', [])]
     for g in d.get('segments', []):
         for k in ('from', 'to', 'b_from', 'compared_to'):
             if k in g:
@@ -1418,7 +1536,7 @@ RUN_ACTIONS = ('list', 'keep', 'set', 'rm', 'diff')
 def t_runs(a):
     """sva runs: the runs kept of a dump (.wavelens-runs beside it, as the VS Code Runs panel keeps them) -> list: dir, runs
     (newest first); keep: the run kept; set: the run changed; rm: removed; diff: the dump against each run (or "run") over a
-    window, times in ns; "case" NAME: each run over its test case of that name against the dump's (cocotb's marks);
+    window, times in ns (a run's "offset" too: a slice read at its place in a whole one); "case" NAME: each run over its test case of that name against the dump's (cocotb's marks);
     "against" RUN: that run is A instead of the dump (run "now": the dump as a B), the answer's "against" names it."""
     act = a.get('action') or 'list'
     if act not in RUN_ACTIONS:
@@ -1451,6 +1569,8 @@ def t_runs(a):
         if a.get('comment') is not None:
             cmd += ['--comment', str(a['comment'])]
     if act == 'keep':   # from and to: a slice, that window alone, its times from 0
+        if dump and (a.get('from') is not None or a.get('to') is not None):
+            window(wave(dump, {}), a)   # a window outside the dump: refused, not kept as an empty run (B-58)
         for k, flag in (('from', '--from'), ('to', '--to')):
             t = cli_time(a, k)
             if t is not None:
@@ -1503,7 +1623,7 @@ def t_runs(a):
         return {'unit': 'ns', 'removed': [run(x) for x in out.get('removed', [])]}
     first = lambda f: f and {**f, 't': ns(f['t']), 'a': bits_text(f['a']), 'b': bits_text(f['b'])}
     for x in out.get('runs', []):
-        for k in ('from', 'to'):
+        for k in ('from', 'to', 'offset'):   # offset: a slice at its place (B's time is A's plus it)
             if k in x:
                 x[k] = t(x[k])
         if 'first' in x:
@@ -1523,12 +1643,18 @@ def t_runs(a):
 
 
 def t_cut(a):
-    """sva vcd --from --to --signals: a window of a dump as a small VCD (the values at "from" as $dumpvars)."""
+    """sva vcd (out *.vcd) or sva fst (out *.fst) --from --to --signals [--zero]: a window of a dump as a small dump of its own
+    (the values at "from" first), in the format its name says: the tools read a dump by its name."""
     src = dump_path(a)
     out = os.path.abspath(os.path.expanduser(str(a.get('out') or '')))
     if not a.get('out') or out == src:
-        raise WaveError('"out": the VCD to write (not the dump itself)')
-    cmd = [sva_exe(a, 'wave_cut'), 'vcd', src, '--out', out]
+        raise WaveError('"out": the dump to write, x.vcd or x.fst (not the dump itself)')
+    fst = out.lower().endswith('.fst')
+    if not fst and not out.lower().endswith('.vcd'):
+        raise WaveError(f'"out": {os.path.basename(out)}: a .vcd or a .fst name (the cut is written in the format its name says)')
+    exe = sva_exe(a, 'wave_cut')
+    cmd = [exe, 'fst' if fst else 'vcd', src, '--out', out]   # the same keys either way (sva fst's line on stdout: not read)
+    base = len(cmd)
     window(wave(src, {}), a)
     for k, flag in (('from', '--from'), ('to', '--to')):
         t = cli_time(a, k)
@@ -1536,12 +1662,20 @@ def t_cut(a):
             cmd += [flag, t]
     if a.get('signals'):
         cmd += ['--signals', cli_names(src, a['signals'])]
+    if a.get('zero'):
+        cmd.append('--zero')
+    if fst and len(cmd) == base:   # nothing to cut: sva fst copies a VCD, an FST is cut from its start
+        cmd += ['--from', '0ps']
     r = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     if r.returncode:
-        raise WaveError('; '.join(fst_notes(r.stderr)) or f'sva vcd: exit {r.returncode}')
+        raise WaveError('; '.join(fst_notes(r.stderr)) or f'sva {cmd[1]}: exit {r.returncode}')
     # what the cut holds: its declarations and its first and last time, read off its text
     head, times, nvar = True, [], 0
-    with open(out, encoding='utf-8', errors='replace') as f:
+    if fst:   # its declarations and its first and last times, as text
+        h = subprocess.run([exe, 'vcd', out, '--header'], capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        if h.returncode:
+            raise WaveError('; '.join(fst_notes(h.stderr)) or f'sva vcd --header: exit {h.returncode}')
+    with (io.StringIO(h.stdout) if fst else open(out, encoding='utf-8', errors='replace')) as f:
         for line in f:
             if head:
                 nvar += line.lstrip().startswith('$var ')
@@ -1579,6 +1713,9 @@ def t_view_edit(a):
     if mode == 'live':
         try:
             return live_edit(a, where, v)
+        except LiveLate as e:   # the page took them: never done again on the file, the page runs them (B-52)
+            return {'live': where['path'], 'view': v.get('key'), 'results': None, 'note': f'{e}: applied there, the results unknown '
+                    '(view_get reads the state when it is done)'}
         except LiveGone as e:   # the tab went before it answered the edit: the file, when there is one
             if not page_arg(a) or DUMP_RE.search(page_arg(a)):
                 raise
@@ -1601,7 +1738,7 @@ def live_compare(op, where, v, a):
     if not (isinstance(op, dict) and op.get('op') == 'compare' and op.get('dump') and op.get('result') is None):
         return op
     path = page_arg(a) or (where['path'] if os.path.isfile(where['path']) else None)
-    args = {k: x for k, x in op.items() if k != 'op'}
+    args = {**{k: x for k, x in op.items() if k != 'op'}, **offset_arg(op)}
     if path and DUMP_RE.search(path):
         exe = svabuild.find_bin(a.get('sva_bin'))
         if not exe:
@@ -1754,9 +1891,11 @@ TOOLS = [
          {'dump': None, 'types': None, 'no_types': None, 'signals': None, 'clock': S, 'edge': S, 'only_changes': B, 'from': None, 'to': None, 'scope': None,
           'radix': None, 'limit': None}, ('dump', 'signals')),
     tool('wave_find', t_find, 'Search -> match count and first matches. expr: SV expression or sequence per clock cycle (sva engine; '
-         '"req && !ack", "req ##[1:3] ack", "$rose(x)"; names under scope). Or signal + edge (rise fall change) or value: exact times.',
+         '"req && !ack", "req ##[1:3] ack", "$rose(x)"; names under scope). Or signal + edge (rise fall change) or value: exact times. '
+         'values: signals whose values each match\'s row carries (a table in one call: an expr\'s at its last cycle, sampled as it is; '
+         'an edge\'s or a value\'s at its time, after the changes there).',
          {'dump': None, 'types': None, 'no_types': None, 'expr': S, 'clock': S, 'signal': S, 'edge': S, 'value': T, 'from': None, 'to': None, 'scope': None,
-          'limit': None, 'radix': None, 'defines': {'type': ['object', 'array'], 'items': S}}),
+          'limit': None, 'radix': None, 'values': COMMON['signals'], 'defines': {'type': ['object', 'array'], 'items': S}}),
     tool('wave_explain', t_explain, 'One call from a moment to what to look at: expr (its nth match), assert ("name@scope" with sva: its files; its '
          'nth failure, the window from the attempt\'s start), b (the first difference with that dump, '
          'and who differed next) or t (a time, with signals) -> at, its window (before / after cycles of the clock), its signals and their values '
@@ -1770,12 +1909,17 @@ TOOLS = [
          'longest-held values, min, max.', {'dump': None, 'types': None, 'no_types': None, 'signals': None, 'from': None, 'to': None, 'scope': None, 'radix': None},
          ('dump', 'signals')),
     tool('sva_check', t_sva, 'Evaluate SystemVerilog assertions (files, packages first, and/or source text) over the dump in scope -> '
-         'failed with first failures [cycle, t, start_cycle, start_t, note], passed, vacuous, not_evaluated, covers.',
+         'failed with first failures [cycle, t, start_cycle, start_t, note], passed, vacuous, not_evaluated, covers. per: a verdict a '
+         'window in the same pass, "tests" (the tests of marks, the cocotb marks file) or [{name, from, to}] -> per [{name, from, to, '
+         'failed [[assertion, failures]], passed}] and each failed one\'s "in" (its windows); an attempt counts where it starts.',
          {'dump': None, 'files': L, 'source': S, 'scope': None, 'assertions': L, 'from': None, 'to': None, 'max_failures': N,
+          'per': {'type': ['string', 'array'], 'items': {'type': 'object'}}, 'marks': S,
           'details': B, 'defines': {'type': ['object', 'array'], 'items': S}}),
     tool('wave_page', t_page, 'Write a WaveLens viewer page (out .html) or WaveJSON (out .json) of signals to show a person; clock '
          '(name or "auto"): a cell per cycle, auto_gap "16:2" folds idle cycles; sva files + bind ["name@scope"]; compare: a second dump '
-         '(or {dump, map, offset, segment, align, show}: show the run it opens with, a, b or overlay) whose differences the page shows; '
+         '(or {dump, map, offset, segment, align, show}: offset B later by that much, ns as every time; show the run it opens with, a, b '
+         'or overlay) whose differences the page shows; signals of one name in several scopes: rows named by the end of their path that '
+         'tells them apart (notes); '
          'marks: the marks file of a cocotb run, its tests as spans and bookmarks (marks_views "tests": each test apart, "both": and the whole run).',
          {'dump': None, 'types': None, 'no_types': None, 'signals': None, 'out': S, 'clock': S, 'from': None, 'to': None, 'scope': None, 'auto_gap': S, 'sva': L,
           'bind': L, 'title': S, 'compare': {'type': ['string', 'object']}, 'marks': S, 'marks_views': {'type': 'string', 'enum': list(testmarks.SPLITS)}},
@@ -1795,7 +1939,8 @@ TOOLS = [
     tool('wave_diff', t_diff, 'Compare two dumps a and b (VCD/FST, streamed: hundreds of MB) change by change, as the viewer\'s Compare… '
          'does -> compared, differ, first [t, signal, a, b], the signals that differ, only_a, only_b, segments. map {"tb_a.if": "tb_b.if"}: '
          'a\'s scope or path -> b\'s; offset: b later by that much; segment: a signal (a test case number), counts per value; align: '
-         'segment k of b on segment k of a; rank: the first five signals by their first difference (who differed first, what followed). '
+         'segment k of b on segment k of a; rank: the first five signals by their first difference (who differed first, what followed); '
+         'signals: whole ones (a bit-select is refused, the CLI compares a bus whole). '
          'results_a, results_b (instead of a, b): the assertions\' results of two runs (sva eval --json) -> new, gone, moved failures per assertion.',
          {'a': S, 'b': S, 'signals': None, 'scope': None, 'from': None, 'to': None, 'offset': T, 'map': {'type': 'object'}, 'segment': S,
           'align': B, 'limit': None, 'spans': N, 'results_a': S, 'results_b': S}, ()),
@@ -1809,7 +1954,8 @@ TOOLS = [
          '[{name, from, to}]; set changes them); diff case: NAME compares each run\'s case NAME with the dump\'s (from/to: the '
          'dump\'s window of it, else its cases), wherever it is in the run (case.offset), over the shorter. '
          'keep from, to: a slice, that window of the dump alone as a run, its times from 0 (slice: its window in the dump), so slices '
-         'compare with each other from their first sample (diff against: one slice, run: another). '
+         'compare with each other from their first sample (diff against: one slice, run: another); a slice and a whole one: at its '
+         'place (the run\'s offset: B\'s time is A\'s plus it). Every time in ns. '
          'diff against: a run (number or name) compared with the others instead of the dump (run: "now" adds the dump), '
          'the window in its time, the answer\'s against: {id, name, file}. '
          'Then wave_diff with b = dir/file of a run for the details.',
@@ -1817,9 +1963,11 @@ TOOLS = [
           'all': B, 'name': S, 'tags': {'type': ['string', 'array'], 'items': S}, 'comment': S, 'from': None, 'to': None, 'signals': None, 'scope': None,
           'map': {'type': 'object'}, 'limit': None, 'case': S, 'against': {'type': ['integer', 'string']},
           'cases': {'type': ['string', 'array'], 'items': {'type': 'object'}}}, (), ro=False),
-    tool('wave_cut', t_cut, 'Cut a window (and some signals) out of a dump into a small VCD (out): the values at "from" first, '
-         'then the changes up to "to" -> out, bytes, variables, from, to. For Compare… on a page, a fixture, sending one test case.',
-         {'dump': None, 'out': S, 'from': None, 'to': None, 'signals': None}, ('dump', 'out'), ro=False),
+    tool('wave_cut', t_cut, 'Cut a window (and some signals) out of a dump into a small dump (out: x.vcd a VCD, x.fst an FST; another name '
+         'is refused): the values at "from" first, then the changes up to "to"; zero: its times from 0 (from is 0, a page needs no offset) '
+         '-> out, bytes, variables, from, to; signals: whole ones (a bit-select is refused). For Compare… on a page, a fixture, a report, '
+         'sending one test case.',
+         {'dump': None, 'out': S, 'from': None, 'to': None, 'signals': None, 'zero': B}, ('dump', 'out'), ro=False),
     tool('view_edit', t_view_edit, 'Mark up a WaveLens page for a person (live in their browser when connected by view_live, else in the '
          'page file: they reload it). ops in order, each {op, …}: ' +
          ' '.join(f'{k}({v})' + ('·live' if k in viewedit.LIVE_ONLY else '') for k, v in viewedit.COMMANDS.items()
@@ -1834,7 +1982,8 @@ TOOLS = [
          'color (null: pale again), its label at the top of the rows, with signal in a thin line over that row (lift "below": under it, the lines '
          'lifted bookmarks use; signal null: at the top again); the person drags it from line to line. expr: a condition in the page\'s list '
          '(text), marked band, line or strip, gap: the waves cut to its matches with the others that have it, answers n, time, share, first, '
-         'last, min, max, on a file only id.',
+         'last, min, max, on a file only id. A live page that took the ops and answers after 10 s: results null, applied there, '
+         'never again on the file.',
          {'page': S, 'config': S, 'view': S, 'ops': {'type': 'array', 'items': {'type': 'object'}}, 'save': B, 'from_page': S,
           'keys': {'type': 'array', 'items': S}}, (), ro=False),
     tool('view_get', t_view_get, 'What a page shows: bookmarks, arrows, markers (measures: the Δ between them, ok of a bound), expressions, groups, highlight, colours, hidden, cursor, window (live: '

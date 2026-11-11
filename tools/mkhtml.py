@@ -446,7 +446,8 @@ def main():
     ap.add_argument('--strict', action='store_true', help='a lint warning is an error (exit 1, no page)')
     ap.add_argument('--lint-json', metavar='FILE', help='the lint warnings as JSON into FILE (- stdout): {"count", "warnings": [{"code", "where", '
                     '"message", "view", and what it is about: "signal" / "name", "rows" it may mean}]}, written at every build, '
-                    'a failed one too with "error": its message (exit 1) and the warnings of the views built before it')
+                    'a failed one too with "error": its message (exit 1) and the warnings of the views built before it; "where" '
+                    'is the path in the config (views.<name>.…); vcd2wavedrom.py --lint-json: the same but "view", one view a run')
     ap.add_argument('--marks', metavar='FILE', help='the marks of a cocotb test (python/wavelens_cocotb.py): its tests as spans, bookmarks and jumps '
                     'in every view (a view\'s "marks": false keeps it out; replaces the top-level "marks")')
     ap.add_argument('--junit', metavar='FILE', help='the assertions of every view as JUnit XML (a testsuite per view, a testcase per binding, '
@@ -485,15 +486,7 @@ def lint_obj(a):
 
 def write_lint_json(a, obj):
     """--lint-json: obj as JSON into the file (- stdout)."""
-    text = json.dumps(obj, ensure_ascii=False, indent=1) + '\n'
-    if a.lint_json == '-':
-        sys.stdout.write(text)
-        return
-    try:
-        with open(a.lint_json, 'w', encoding='utf-8') as f:
-            f.write(text)
-    except OSError as e:
-        sys.exit(f'mkhtml: cannot write {a.lint_json}: {e.strerror}')
+    vcd2wavedrom.write_lint_json(a.lint_json, obj, 'mkhtml')
 
 
 def build(a):
@@ -515,6 +508,11 @@ def build(a):
     cfg.pop('marks', None), cfg.pop('marksViews', None), cfg.pop('marksPhases', None), cfg.pop('marksColors', None)
     if marks:
         doc = testmarks.load(marks)
+        waves = a.waves or (cfg.get('waves') and os.path.join(base, os.path.expanduser(cfg['waves'])))
+        dump = dumpscan.read(waves, body=None) if waves and os.path.isfile(waves) else None
+        gone = testmarks.drop_missing(doc, dump.vars) if dump else []
+        if gone:   # (B-54)
+            print(f'mkhtml: marks: no signal {", ".join(gone)} in {os.path.basename(waves)}: the tests on the time axis', file=sys.stderr)
         a.nav = testmarks.merge(cfg, doc, split, phases, colors)
         if split != 'whole':   # the views of the tests are of one dump: a marker of yours in one is in each (the setting sharedMarkers)
             cfg.setdefault('config', {}).setdefault('sharedMarkers', True)

@@ -209,11 +209,17 @@ pub(crate) fn page_of(o: &Opt, d: &Value) -> Value {
     diff.dedup();
     if !diff.is_empty() && !o.align {
         let shift = o.offset;
-        let (f, t) = (d["from"].as_i64().unwrap_or(0) + shift, d["to"].as_i64().unwrap_or(0) + shift);
+        let (f, t) = (d["from"].as_i64().unwrap_or(0).saturating_add(shift), d["to"].as_i64().unwrap_or(0).saturating_add(shift));
         match crate::vcd::cut_text(&o.b, f.max(0) as u64, t.max(0) as u64, diff, o.cut_bytes) {
-            Ok(v) => {
+            Ok((v, missing)) => {
                 out["vcd"] = v.into();
                 out["shift"] = shift.into();
+                if !missing.is_empty() {
+                    // a signal of B the cut does not know by that name: its bands stay, without B's values
+                    let mut notes = out["notes"].as_array().cloned().unwrap_or_default();
+                    notes.push(format!("no values of B for {}: not found in {} by that name", missing.join(", "), out["name"].as_str().unwrap_or("B")).into());
+                    out["notes"] = notes.into();
+                }
             }
             Err(e) => out["cutError"] = e.into(),
         }
@@ -244,7 +250,7 @@ pub(crate) fn opts(args: &[String]) -> Result<Opt, String> {
                     Some(t) => (true, t),
                     None => (false, v.strip_prefix('+').unwrap_or(&v)),
                 };
-                let t = crate::time(t)? as i64;
+                let t = i64::try_from(crate::time(t)?).unwrap_or(i64::MAX);
                 o.offset = if neg { -t } else { t };
             }
             "--map" => {
@@ -311,9 +317,18 @@ struct Dump {
     _tmp: Option<crate::fst::TempFst>,
 }
 
-/// A time of the dump in ps.
+/// The latest time a dump's time or a window's end is read as, in ps: i64::MAX is the window's "no end yet".
+const LATEST: i64 = i64::MAX - 1;
+
+/// A time in ps as a signed one (past `LATEST`: `LATEST`, never a negative one: bughunt B-16).
+fn sat(t: u64) -> i64 {
+    i64::try_from(t).unwrap_or(LATEST).min(LATEST)
+}
+
+/// A time of the dump in ps (past `LATEST`: `LATEST`).
 fn to_ps(t: u64, ps: f64) -> i64 {
-    if ps.fract() == 0.0 { (t as i64).saturating_mul(ps as i64) } else { (t as f64 * ps).round() as i64 }
+    let p = if ps.fract() == 0.0 { sat(t).saturating_mul(ps as i64) } else { (t as f64 * ps).round() as i64 };
+    p.min(LATEST)
 }
 
 /// An FST's start in its unit (its header), None for another kind of dump.
@@ -387,7 +402,12 @@ type Step = (i64, Vec<(u32, String)>);
 fn seek(d: &Dump, refs: &[SignalRef], events: &[bool], from: Option<i64>) -> Option<(u64, Vec<(u32, String)>)> {
     let f = from.filter(|&f| f > 0 && d.end.is_none_or(|e| f <= e))?;
     d.fst_start?;
-    let t = (f as f64 / d.ps).floor() as u64;
+    // the block that starts before the window, in ps: its frame (and the steps of its first ps) are read as the values
+    // before the window, not as changes in it (bughunt B-14)
+    let mut t = ((f as f64 / d.ps).ceil() as u64).saturating_sub(1);
+    while t > 0 && to_ps(t, d.ps) >= f {
+        t -= 1;
+    }
     let want: Vec<(u32, usize)> = refs.iter().enumerate().filter(|(i, _)| !events[*i]).map(|(i, r)| (i as u32, r.index())).collect();
     let path = d._tmp.as_ref().map_or(d.file.clone(), |g| g.0.to_string_lossy().into_owned());
     let (start, values) = crate::fst::frame_at(&path, t, Some(&want.iter().map(|w| w.1).collect::<Vec<_>>()))?;
@@ -406,23 +426,33 @@ fn spawn(d: Dump, refs: Vec<SignalRef>, kinds: Vec<Kind>, at: Option<(u64, Vec<(
         for (i, r) in refs.iter().enumerate() {
             at_ix[r.index()] = i as u32;
         }
-        let (mut now, mut batch, start): (Option<u64>, Vec<(u32, String)>, u64) = match at {
+        let (now, mut batch, start): (Option<u64>, Vec<(u32, String)>, u64) = match at {
             // the block's changes after its start (the block before, ending there, not read); the values at its start first
             Some((t, values)) => (Some(t), values, t + 1),
             None => (None, Vec::new(), 0),
         };
         let first = now;
+        // a time step per ps: the dump's steps of one ps (a fs dump's) as one, each signal's last value of them (the
+        // block's frame with the steps after it in its ps: bughunt B-13), as a dump read from its start gives them
+        let mut now = now.map(|t| to_ps(t, ps));
+        let last = |batch: Vec<(u32, String)>| -> Vec<(u32, String)> {
+            let mut seen = std::collections::HashSet::new();
+            let mut out: Vec<(u32, String)> = batch.into_iter().rev().filter(|(i, _)| seen.insert(*i)).collect();
+            out.reverse();
+            out
+        };
         let filter = Filter { start, end: None, signals: Some(&refs) };
         let r = crate::catching(|| w.stream_changes(filter, |t, s, v| -> Result<(), ()> {
             let i = at_ix.get(s.index()).copied().unwrap_or(u32::MAX);
             if i == u32::MAX || first.is_some_and(|f| t < f) {
                 return Ok(());
             }
-            if now != Some(t) {
+            let p = to_ps(t, ps);
+            if now != Some(p) {
                 if let Some(n) = now.filter(|_| !batch.is_empty()) {
-                    tx.send(Ok((to_ps(n, ps), std::mem::take(&mut batch)))).map_err(|_| ())?;
+                    tx.send(Ok((n, last(std::mem::take(&mut batch))))).map_err(|_| ())?;
                 }
-                now = Some(t);
+                now = Some(p);
             }
             if let Some(k) = key(kinds[i as usize], v) {
                 batch.push((i, k));
@@ -432,7 +462,7 @@ fn spawn(d: Dump, refs: Vec<SignalRef>, kinds: Vec<Kind>, at: Option<(u64, Vec<(
         match r {
             Ok(Ok(())) => {
                 if let Some(n) = now.filter(|_| !batch.is_empty()) {
-                    let _ = tx.send(Ok((to_ps(n, ps), batch)));
+                    let _ = tx.send(Ok((n, last(batch))));
                 }
             }
             Ok(Err(StreamError::Callback(()))) => {}
@@ -987,8 +1017,8 @@ fn run(o: &Opt) -> Result<(bool, Value), String> {
             h.all_vars().filter(|&v| matches!(h[v].var_type(), VarType::Event)).map(|v| h[v].signal_ref()).collect();
         refs.iter().map(|r| ev.contains(r)).collect()
     };
-    let at_a = if late { seek(&da, &refs_a, &events(da.w.hierarchy(), &refs_a), o.from.map(|f| f as i64)) } else { None };
-    let at_b = if late { seek(&db, &refs_b, &events(db.w.hierarchy(), &refs_b), o.from.map(|f| f as i64 + o.offset)) } else { None };
+    let at_a = if late { seek(&da, &refs_a, &events(da.w.hierarchy(), &refs_a), o.from.map(sat)) } else { None };
+    let at_b = if late { seek(&db, &refs_b, &events(db.w.hierarchy(), &refs_b), o.from.map(|f| sat(f).saturating_add(o.offset))) } else { None };
     let read_a = at_a.as_ref().map_or(0, |a| to_ps(a.0, da.ps));
     let read_b = at_b.as_ref().map_or(0, |b| to_ps(b.0, db.ps));
     let first_a = da.fst_start.filter(|_| at_a.is_some()).map(|t| to_ps(t, da.ps));
@@ -1011,10 +1041,10 @@ fn run(o: &Opt) -> Result<(bool, Value), String> {
     let mut from = if o.align { sa } else { sa.max(sb - o.offset) };
     let mut to = if o.align { ea } else { ea.min(eb) };
     if let Some(f) = o.from {
-        from = from.max(f as i64);
+        from = from.max(sat(f));
     }
     if let Some(t) = o.to {
-        to = to.min(t as i64);
+        to = to.min(sat(t));
     }
     if from > to {
         return Err(format!("no time in common (A {} … {}, B {} … {}{}{})", t_text(sa), end_a.map_or("?".into(), t_text), t_text(sb),

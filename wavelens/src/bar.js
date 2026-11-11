@@ -22,7 +22,9 @@ const TIPS = {
   'act:dcmpx': ['Compare no more'], 'act:dcmpv': ['Which run the waves show: this one, the second, both over each other', ['d', 'D']],
   'act:fprev': ['Previous match', ['N', 'shift+Enter']], 'act:fnext': ['Next match', ['n', 'Enter']],
   'act:fhl': ['Found rows in front, the rest dimmed'], 'act:fopen': ['Fold the modules without a match'],
-  '.fcol': ['Colour for Paint'], 'act:fpaint': ['Paint the found and highlighted signals'], 'act:funpaint': ['Their own colours back'],
+  '.fcol': ['Colour for Paint: at once on the found, highlighted and shift+click selected signals (none of them: the selected one)'],
+  'act:fpaint': ['Paint the found, highlighted and shift+click selected signals (none of them: the selected one)'],
+  'act:funpaint': ['Their own colours back'],
   'act:fcopy': ['Copy the paths of the found rows'],
   'act:sort': ['Sort: off → A→Z → Z→A', ['s']], '.pfx': ['Name prefixes ignored when sorting: i_,o_'],
   'act:expand': ['Open every module', ['zR']], 'act:collapse': ['Fold every module', ['zM']],
@@ -154,7 +156,8 @@ const HELP = [
     [['gu'], 'the runs kept of this dump (VS Code): keep this one, show one (A), compare one with it (B) over the waves in sight or a span'],
     [[']r', '[r'], 'B: compare A with the next (older) / previous run kept, over the same window'],
     [[']w', '[w'], 'A: the waves of the next (older) / previous run kept shown here, the view kept (now among them)'],
-    [['1', '…', '9'], 'go to bookmark 1 … 9'], [['ctrl+drag'], 'measure a range: Δ, the edges or changes of that signal'],
+    [['1', '…', '9'], 'go to bookmark 1 … 9'],
+    [['ctrl+drag'], 'measure a range: Δ, the edges or changes of that signal, then of each one you select (↑ ↓, a click on a name)'],
     [['alt+drag'], 'a box: its time and its signals, then the menu (picture, WaveDrom, colour)'], [['ctrl+click'], 'clear the range'],
     [['right button'], 'a range and the menu: picture, colour, radix, duplicate, hide'], [['b'], 'bookmark at the cursor'],
     [[']b', '[b'], 'next / previous bookmark'], [['m'], 'marker at the cursor: its label asked'], [[']m', '[m'], 'next / previous marker'],
@@ -255,8 +258,10 @@ class Bar {
       seg(`<button type="button" data-act="fhl" aria-pressed="${!!S.findHighlight}" title="Found rows in front, the rest dimmed">Highlight</button>`,
         `<button type="button" data-act="fopen" aria-pressed="${!!S.findOpen}" title="Every module folded except the ones with a match">Open</button>`,
         `<button type="button" data-act="fmask" aria-pressed="${!!S.findMask}" title="The found rows only (and the modules on the way to them)">Mask</button>`),
-      seg(`<input type="color" class="fcol" value="${/^#[0-9a-f]{6}$/i.test(paint) ? paint : '#d6336c'}" aria-label="paint colour" title="Colour for Paint">`,
-        ('<button type="button" data-act="fpaint" title="Paint the found and the highlighted signals in this colour (none: the selected one; kept in this ' +
+      seg(`<input type="color" class="fcol" value="${/^#[0-9a-f]{6}$/i.test(paint) ? paint : '#d6336c'}" aria-label="paint colour" ` +
+        'title="Colour for Paint: at once on the found, highlighted and shift+click selected signals (none of them: the selected one)">',
+        ('<button type="button" data-act="fpaint" title="Paint the found, the highlighted and the shift+click selected signals in this colour (none of ' +
+          'them: the selected one; kept in this ' +
           'browser)">Paint</button>')),
       (`<button type="button" data-act="funpaint" title="Back to the signals' own colours" hidden>Unpaint</button><button type="button" data-act="fselect" ` +
           `title="Select the found signals: the right button then takes them all (a new group, colour, radix, hide …); ctrl+click: add them to the ` +
@@ -335,8 +340,9 @@ class Bar {
       '○ or ctrl+click a name: highlight, ctrl+shift+click: every row to it';
     const [ver, verTip] = buildText();
     return `<div class="bar"><div class="head"><span
-      class="eyebrow">${esc(v.opts.title || v.M.title || 'Waveform').replace(/µ/g, '<span class="mu">µ</span>')}</span><span class="toast" role="status"
-        aria-live="polite"></span><span class="cur"></span>${S.version ? `<span class="ver" title="${esc(verTip)}">${esc(ver)}</span>` : ''}${
+      class="eyebrow">${esc(v.opts.title || v.M.title || 'Waveform').replace(/µ/g, '<span class="mu">µ</span>')}</span><span class="rd"><span
+        class="toast" role="status" aria-live="polite"></span><span class="cur"></span></span>${
+        S.version ? `<span class="ver" title="${esc(verTip)}">${esc(ver)}</span>` : ''}${
         themeButtonOn(S) ? '<button type="button" data-act="theme" class="lay" aria-label="theme">◐</button>' : ''}<button type="button"
         data-act="undo" class="lay undo" disabled aria-label="undo">↶</button><button
         type="button" data-act="redo" class="lay undo" disabled aria-label="redo">↷</button><button type="button" class="lay" data-act="scroll"></button><button
@@ -364,6 +370,9 @@ class Bar {
     for (const sel of [v.cuEl, v.suEl]) if (sel) sel.addEventListener('change', () => { v.syncCursorFields(true); });
     v.qEl = r.querySelector('input.q'); v.cntEl = r.querySelector('.find .cnt'); v.fcol = r.querySelector('input.fcol');
     v.unpaintBtn = r.querySelector('button[data-act=funpaint]'); v.unpaintBtn.hidden = !v.painted.size;
+    // the colour picked (or typed in its hex field) goes on at once to what Paint would take, as the right button's colour
+    // does; nothing found, highlighted or selected: only kept for Paint
+    v.fcol.addEventListener('input', () => { if (v.paintRows().length) v.paint(v.fcol.value); });
     let qt = 0;
     v.qEl.addEventListener('input', () => { cancelAnimationFrame(qt); qt = requestAnimationFrame(() => v.find(v.qEl.value)); });   // live, while typing
     v.qEl.addEventListener('keydown', e => {

@@ -70,3 +70,18 @@ assert q_inst_args in seq_ops, line 52
   s3        burst[*1:4]
   s4        ##1 !burst
   signals   clk:1 a:1 b:1 c:1 burst:1
+cover q_cover_once in seq_ops, line 55
+  clock     @(posedge clk)
+  expr      a[*1:2] ##1 b
+  s1        a[*1:2]
+  s2        ##1 b
+  signals   clk:1 a:1 b:1
+  note      cover sequence: every match counts
+cover q_within_one in seq_ops, line 57
+  clock     @(posedge clk)
+  expr      a[*0:1] within (c ##1 d)
+  s1        a[*0:1]
+  s2        c
+  s3        ##1 d
+  signals   clk:1 a:1 c:1 d:1
+  note      cover sequence: every match counts

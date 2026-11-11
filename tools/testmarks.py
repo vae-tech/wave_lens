@@ -6,7 +6,7 @@ buttons are its changes in the dump, so a page whose marks and dump are of diffe
 """
 import copy, json, re
 
-from common import WaveError, glob_re, parse_time
+from common import CSS_NAMES, WaveError, glob_re, parse_time
 
 RESULTS = {'pass': ('PASS', '#2f9e44'), 'fail': ('FAIL', '#e03131'), 'xfail': ('FAIL (expected)', '#e8590c'), 'run': ('NOT FINISHED', '#e03131')}
 TAIL = 0.12   # of the run, or of a test in its own view: the window past its end, where the last bookmark's text goes
@@ -23,18 +23,7 @@ TOKENS = {'fg': '--fg', 'muted': '--muted', 'line': '--line', 'panel': '--panel'
           'one': '--wave-1', 'bus': '--wave-bus', 'x': '--wave-x', 'xsoft': '--wave-x-soft', 'z': '--wave-z',
           **{f'c{i}': f'--wave-c{i}' for i in range(3, 10)}, 'band': '--wave-band', 'cursor2': '--wave-cursor2', 'runb': '--wave-run-b',
           **{f'hl{i}': f'--wave-hl{i}' for i in range(1, 9)}, 'hl7': '--accent', 'paint': '--wave-paint'}
-# the named colours of CSS (a word that is no token goes into the page as it is: one of these, or the mark has no colour)
-CSS_NAMES = set('''aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood cadetblue
-chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki
-darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise
-darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod
-gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral
-lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey
-lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen
-mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive
-olivedrab orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple
-rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue slategray slategrey snow
-springgreen steelblue tan teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen transparent currentcolor'''.split())
+# a word that is no token goes into the page as it is: one of the named colours of CSS (common.CSS_NAMES), or the mark has no colour
 
 
 def colors_of(given):
@@ -86,7 +75,70 @@ def check(doc, path):
         raise WaveError(f'{path}: not a marks file ({{"wavelens": "marks", …}}, python/wavelens_cocotb.py writes it)')
     if doc.get('version') != 1:
         raise WaveError(f'{path}: marks of version {doc.get("version")}, this build reads version 1')
+    check_tests(doc, path)
     return doc
+
+
+def check_tests(doc, path):
+    """The tests' entries of a marks file (one made by hand, an older or a broken one: B-91, a traceback before): each a {n, name,
+    from} with to, result, phases, marks of their kinds; the texts and lists left out filled as the library writes them; else a WaveError
+    naming the test and the key."""
+    num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and abs(v) != float('inf')
+    for k in ('signal', 'step'):
+        if doc.get(k) is not None and not isinstance(doc[k], str):
+            raise WaveError(f'{path}: "{k}" is a signal\'s name or null, not {json.dumps(doc[k])}')
+    if doc.get('steps') is not None and not isinstance(doc['steps'], dict):
+        raise WaveError(f'{path}: "steps" is an object of step names')
+    tests = doc.setdefault('tests', [])
+    if tests is None:
+        tests = doc['tests'] = []
+    if not isinstance(tests, list):
+        raise WaveError(f'{path}: "tests" is a list of tests')
+    for i, t in enumerate(tests, 1):
+        where = f'{path}: test {i}'
+        if not isinstance(t, dict):
+            raise WaveError(f'{where}: an object {{n, name, from, to, result, …}}, not {json.dumps(t)[:40]}')
+        if not isinstance(t.get('n'), int) or isinstance(t.get('n'), bool):
+            raise WaveError(f'{where}: "n" is its number')
+        if not isinstance(t.get('name'), str):
+            raise WaveError(f'{where}: "name" is a text')
+        if not num(t.get('from')):
+            raise WaveError(f'{where} ({t["name"]}): "from" is its start in ps')
+        if t.setdefault('to', None) is not None and not num(t['to']):
+            raise WaveError(f'{where} ({t["name"]}): "to" is its end in ps, or null (not finished)')
+        if t.setdefault('result', 'run') not in RESULTS:
+            raise WaveError(f'{where} ({t["name"]}): "result" is one of {", ".join(RESULTS)}')
+        for k in ('doc', 'message', 'where'):
+            if not isinstance(t.setdefault(k, ''), str):
+                raise WaveError(f'{where} ({t["name"]}): "{k}" is a text')
+        for k in ('phases', 'marks', 'measures'):
+            v = t.setdefault(k, []) if k != 'measures' else t.get(k) or []
+            if not isinstance(v, list) or not all(isinstance(x, dict) for x in v):
+                raise WaveError(f'{where} ({t["name"]}): "{k}" is a list of objects')
+        for p in t['phases'] + (t.get('measures') or []):
+            if not isinstance(p.get('label'), str) or not num(p.get('from')) or (p.get('to') is not None and not num(p['to'])):
+                raise WaveError(f'{where} ({t["name"]}): a phase or a measure is {{label, from, to}} (times in ps): {json.dumps(p)[:60]}')
+        for m in t['marks']:
+            if not num(m.get('t')):
+                raise WaveError(f'{where} ({t["name"]}): a mark has its time "t" in ps: {json.dumps(m)[:60]}')
+            if m.get('kind') == 'check' and not ('ok' in m and 'got' in m and 'expected' in m):
+                raise WaveError(f'{where} ({t["name"]}): a check has "ok", "got" and "expected": {json.dumps(m)[:60]}')
+
+
+def drop_missing(doc, paths):
+    """The test and step signals a dump does not have (B-54: an older marks file, another testbench; a page would fail on
+    "no signal TEST_CASE") left out of doc: the tests on the time axis, a phase of the step signal a span of its own -> the
+    names dropped. paths: the dump's variables; a name is there as a path or as the end of one (a test names it from its top)."""
+    there = lambda sig: any(p == sig or p.endswith('.' + sig) for p in paths)
+    gone = [doc[k] for k in ('signal', 'step') if doc.get(k) and not there(doc[k])]
+    if doc.get('signal') in gone:
+        doc['signal'] = None
+    if doc.get('step') in gone:
+        doc['step'], doc['steps'] = None, {}
+        for t in doc.get('tests') or []:
+            for p in t.get('phases') or []:
+                p.pop('step', None)
+    return gone
 
 
 def summary(doc):

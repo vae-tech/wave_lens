@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 const USAGE: &str = "usage: sva fst [--waves] DUMP.vcd [--out FILE.fst] [--types FILE.types.json | --no-types] [--map DUMP=TYPES ...] [--block-bytes N] [--quiet]
-       sva fst DUMP --from T --to T [--zero] --out PIECE.fst   (a window of a dump, VCD or FST, as an FST of its own)
+       sva fst DUMP [--from T] [--to T] [--zero] [--signals PAT,... | --signals-from FILE] --out PIECE.fst   (a cut, as an FST)
 The VCD as an FST, as GTKWave's vcd2fst writes it, by default beside the dump under its name (tb.vcd -> tb.fst; an
 FST there is replaced, the file appears only when it is complete). Every scope and variable with its type and name,
 one id code at several places as aliases, the attributes ($attrbegin: the enum tables of FSM states and their
@@ -31,7 +31,8 @@ variable stays. --block-bytes: a block of changes every N bytes of them (64 MiB;
 window of sva diff / sva vcd --from reads only the blocks from there). The last line says what was written.
 A window (--from/--to, TIME 100ns, 2.5us; ps without one): the cut sva vcd --from --to writes (every signal's value at
 --from, its changes to --to) as an FST to --out; --zero: its times from 0 (--from is 0: pieces of one or several dumps
-compared with each other from their first sample, sva diff A.fst B.fst).";
+compared with each other from their first sample, sva diff A.fst B.fst); --signals / --signals-from: only those, as
+sva vcd takes them (a dump, VCD or FST, cut to some signals only is a cut too).";
 
 /// Bytes of value changes held before a block is written (`--block-bytes`; `sva runs keep` writes 1 MiB).
 const BLOCK: usize = 64 << 20;
@@ -1173,10 +1174,19 @@ fn value(kind: Kind, k: u8, v: &[u8], out: &mut Vec<u8>) -> bool {
                 out.resize(n - v.len(), pad);
                 out.extend_from_slice(v);
             }
+            // a vector of other characters (`b0002`) would make an FST no reader reads: x on every bit (bughunt B-15)
+            if n > 1 && !out.iter().all(|c| BIT_CHARS.contains(&c.to_ascii_lowercase())) {
+                out.clear();
+                out.resize(n, b'x');
+                return false;
+            }
         }
     }
     true
 }
+
+/// The characters of a vector's bits an FST holds and its readers read (either case; `?` none of them reads).
+const BIT_CHARS: &[u8] = b"01xzuwlh-";
 
 /// Tokens of a VCD's body looked at for a glued vector before wellen reads it (`glued_fst`).
 const PROBE: usize = 1 << 20;
@@ -1471,7 +1481,11 @@ fn convert(vcd: &str, out: &mut (impl Write + Seek), types: Option<&Types>, limi
         for &handle in handles {
             let i = handle as usize - 1;
             if !value(b.kinds[i], kind, v, &mut fit) {
-                log.note("real", line, format!("\"{}\" is not a number: NaN taken", String::from_utf8_lossy(v)));
+                if b.kinds[i] == Kind::Real {
+                    log.note("real", line, format!("\"{}\" is not a number: NaN taken", String::from_utf8_lossy(v)));
+                } else {
+                    log.note("bits", line, format!("\"{}\" is not a value of bits (0 1 x z u w l h -): x taken", String::from_utf8_lossy(v)));
+                }
             }
             b.change(i, &fit);
         }
@@ -1635,12 +1649,18 @@ pub(crate) fn write_fst(job: FstJob) -> Result<(PathBuf, Done, Option<PathBuf>),
 pub fn fst_cmd(args: &[String]) -> ExitCode {
     let mut job = FstJob::new("");
     let mut waves = None::<String>;
-    let mut cut = crate::vcd::Cut { from: None, to: None, signals: Vec::new(), zero: false };
+    let mut cut = crate::vcd::Cut { from: None, to: None, signals: Vec::new(), zero: false, lenient: false };
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--waves" => waves = it.next().cloned(),
             "--zero" => cut.zero = true,
+            "--signals" | "--signals-from" => {
+                if let Err(e) = crate::vcd::signals_arg(a, it.next(), &mut cut.signals) {
+                    eprintln!("sva: {e}\n{USAGE}");
+                    return ExitCode::from(2);
+                }
+            }
             "--from" | "--to" => match it.next().map(|v| crate::time(v)) {
                 Some(Ok(t)) if a == "--from" => cut.from = Some(t),
                 Some(Ok(t)) => cut.to = Some(t),
@@ -1689,7 +1709,7 @@ pub fn fst_cmd(args: &[String]) -> ExitCode {
     };
     job.waves = waves;
     let quiet = job.quiet;
-    let cutting = cut.from.is_some() || cut.to.is_some() || cut.zero;
+    let cutting = cut.from.is_some() || cut.to.is_some() || cut.zero || !cut.signals.is_empty();
     if let (Some(f), Some(t)) = (cut.from, cut.to) {
         if t <= f {
             eprintln!("sva: --to {} is not after --from {}", crate::ns(t), crate::ns(f));

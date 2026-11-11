@@ -100,13 +100,19 @@ Object.assign(WaveView.prototype, {
     this.root.querySelector('button[data-act=fopen]')?.setAttribute('aria-pressed', false);
     return ' · the find\'s Open is off';
   },
-  // the selection among the rows that went goes (the highlight stays: it comes back with them)
+  // the sets of rows cleaned wherever rows go out of the view (Hide, Only, the FSM layer, the find's Mask, a bus's bits folded) or
+  // are gone (a group of yours deleted or changed, a copy removed): the selection, the shift+click run, the anchors, the find's
+  // place and the range's signal keep only rows in the view; the highlight keeps a hidden row (it comes back with it), not a gone
+  // one (every row would stay dimmed for it). Call it after allRows()
   onlyFix() {
     const ok = r => this.shown(r);
     if (this.sel && !ok(this.sel)) this.sel = null;
     if (this.selRun.size) this.selRun = new Set([...this.selRun].filter(ok));
     for (const k of ['selAnchor', 'hlAnchor', 'fiRow']) if (this[k] && !ok(this[k])) this[k] = null;
     if (this.rangeRow && !ok(this.rangeRow)) { this.rangeRow = null; this.rangeKey = null; }
+    if (this.picks.size) { const live = new Set(this.allRows(true));   // every row there is, the hidden ones too
+      for (const r of [...this.picks.keys()]) if (!live.has(r)) this.picks.delete(r); }
+    this.rangeSaid();   // its signal gone, or a state's range: wavelens:range
   },
   // the bar's Only: N modules ‖ (a click pauses it, ▶ resumes) and its ✕; the panel's marks
   onlyShow() {

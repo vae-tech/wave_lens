@@ -136,3 +136,160 @@ class MovedTab(unittest.TestCase):
             self.assertTrue(o['typed'], 'bytes as a typed array (VS Code posts it as one)')
             self.assertEqual(o['text'], text)
             self.assertEqual(o['streams'], [2, 0], 'a page again: the live link\'s streams of the page before closed')
+
+
+LAZY = r'''
+const fs = require('fs'), path = require('path');
+const [F, ext, dir] = process.argv.slice(1).map((x, i) => (i ? x : require(x)));
+const diags = new Map();
+class Range { constructor(a, b, c, d) { Object.assign(this, { line: a }); } }
+class Position { constructor(line) { this.line = line; } }
+class Location { constructor(uri, at) { Object.assign(this, { file: uri.fsPath, line: at.line }); } }
+class Diagnostic { constructor(range, message) { Object.assign(this, { line: range.line, message }); } }
+class DiagnosticRelatedInformation { constructor(at, message) { Object.assign(this, { at, message }); } }
+const h = F.host({ ext, dir, workspaceState: new Map(), config: { sva: process.env.WAVELENS_SVA, lazy: 'always' },
+  window: { withProgress: async (o, f) => f(), showErrorMessage: async () => undefined },
+  vscode: { Range, Position, Location, Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2 } },
+  languages: { createDiagnosticCollection: () => ({ set: (u, d) => diags.set(u.fsPath, d), get: u => diags.get(u.fsPath), delete() {}, dispose() {} }) } });
+F.run(async () => {
+  const f = path.join(dir, 'dump.fst'), out = {};
+  const A = await h.tab(f);
+  await A.send({ type: 'source', id: 1 }); out.lazy = A.reply(1).lazy;
+  await A.send({ type: 'codes', id: 2, codes: ['"'] }); out.before = A.reply(2);
+  fs.copyFileSync(path.join(dir, 'other.fst'), f);   // another run written over it, the tab not read again
+  await A.send({ type: 'codes', id: 3, codes: ['"'] }); out.after = A.reply(3);
+  await A.send({ type: 'source', id: 4 });   // read again (R, ⟳, autoReload): its codes again
+  await A.send({ type: 'codes', id: 5, codes: ['"'] }); out.again = A.reply(5);
+  // a large VCD read lazy: the page reads the header made of it, its notes' lines are that text's
+  const v = path.join(dir, 'big.vcd'), B = await h.tab(v);
+  await B.send({ type: 'source', id: 6 }); out.vlazy = B.reply(6).lazy;
+  await B.send({ type: 'loaded', log: [{ level: 'warning', text: 'odd', line: 3 }] });
+  out.notes = (diags.get(v) || []).map(d => [d.line, d.message, (d.relatedInformation || []).map(x => [x.at.file !== v, x.at.line])]);
+  return out;
+});
+'''
+
+
+class LazyDump(unittest.TestCase):
+    """A large dump read lazy in the VS Code tab: its signals read later (codes) from the FST of when the tab read it, never
+    from another run written over it since (bughunt B-17); the notes of a lazy VCD (the page read the header made of it) on
+    its first line, the line of that text beside them (B-23)."""
+    @H.needs(NODE, 'node (or VS Code\'s, ~/.vscode-server/bin/*/node)')
+    @H.needs(os.environ.get('WAVELENS_SVA'), 'the sva CLI ($WAVELENS_SVA)')
+    def test_codes_of_the_dump_read(self):
+        sva = os.environ['WAVELENS_SVA']
+        one = ('$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! clk $end\n$var wire 4 " cnt [3:0] $end\n$upscope $end\n'
+               '$enddefinitions $end\n#0\n0!\nb0 "\n#5\n1!\nb1 "\n#10\n0!\n')
+        two = ('$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! a $end\n$var wire 1 " s $end\n$var wire 1 # z $end\n$upscope $end\n'
+               '$enddefinitions $end\n#0\n0!\n1"\n0#\n#7\n1!\n0"\n#9\n1#\n')
+        with H.tmp() as d:
+            for name, text in (('dump', one), ('other', two), ('big', one)):
+                with open(os.path.join(d, name + '.vcd'), 'w', encoding='utf-8') as f:
+                    f.write(text)
+                if name != 'big':
+                    subprocess.run([sva, 'fst', os.path.join(d, name + '.vcd'), '--no-types', '-q'], check=True)
+            r = subprocess.run([NODE, '-e', LAZY, FAKE, os.path.join(H.ROOT, 'vscode', 'extension.js'), d], capture_output=True, text=True, timeout=60)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            o = json.loads(next(x for x in r.stdout.splitlines() if x.startswith('RESULT'))[6:])
+            self.assertTrue(o.get("lazy") and o.get("vlazy"), o)
+            self.assertIn('cnt', o['before'].get('text', ''), o['before'])
+            self.assertNotIn('text', o['after'], f'another run on the disk: not its signals as this header\'s {o["after"]}')
+            self.assertIn('changed', o['after'].get('error', ''), o['after'])
+            self.assertIn('$var wire 1 " s', o['again'].get('text', ''), 'read again: the codes of the new file')
+            self.assertEqual(len(o['notes']), 1, o['notes'])
+            line, msg, rel = o['notes'][0]
+            self.assertEqual(line, 0, 'not the header\'s line 3 on the user\'s VCD')
+            self.assertIn('line 3', msg)
+            self.assertEqual(rel, [[True, 2]], 'the line in the text read beside it')
+
+
+WP8 = r'''
+const fs = require('fs'), path = require('path');
+const [F, ext, dir, mode] = process.argv.slice(1).map((x, i) => (i ? x : require(x)));
+if (mode === 'arm64') Object.defineProperty(process, 'arch', { value: 'arm64' });
+// the tab's 20 s for a run and the link's 100 ms polls made short (a run never answered times out at once)
+const st = setTimeout; global.setTimeout = (f, ms, ...a) => st(f, ms >= 20000 ? 50 : ms === 100 ? 5 : ms, ...a);
+const out = { warned: [] }, cmds = {};
+process.on('unhandledRejection', e => { out.unhandled = String(e && e.message); });
+// VS Code's fsPath is normalized (on Windows: the drive letter lower case); a link's path may not be
+const Uri = { file: p => ({ fsPath: p.replace(/\/\/+/g, '/'), toString: () => 'file://' + p, scheme: 'file' }), parse: s => ({ fsPath: s.replace('file://', '') }),
+  joinPath: () => ({ fsPath: dir }) };
+const h = F.host({ ext, dir, extensionPath: path.join(dir, 'ext'), workspaceState: new Map([['lastState', '/s/now.view.json']]),
+  config: mode === 'eacces' ? { sva: path.join(dir, 'ext', 'bin', 'sva') } : {},
+  vscode: { Uri, commands: { registerCommand: (id, f) => { cmds[id] = f; return { dispose() {} }; }, executeCommand: async () => {} } },
+  window: { showWarningMessage: async s => { out.warned.push(s); }, showInformationMessage: async () => {} } });
+const until = async f => { for (let i = 0; i < 400 && !f(); i++) await new Promise(r => st(r, 5)); return f(); };
+F.run(async () => {
+  const f = path.join(dir, 'd.vcd'), A = await h.tab(f);
+  // B-66: the first page of a tab is fresh (its store empty), a page made again after it was ready is not; the last state of now
+  await A.send({ type: 'source', id: 1 }); const s1 = A.reply(1);
+  await A.send({ type: 'ready', title: 'd.vcd' });
+  await A.send({ type: 'source', id: 2 }); const s2 = A.reply(2);
+  out.source = [s1.fresh, s1.lastState, s2.fresh, s2.lastState];
+  // B-67: the CLI's error with the bundled one (or a wavelens.sva) that cannot run here
+  await A.send({ type: 'runs', op: 'list', id: 3 }); out.cli = A.reply(3).error || '';
+  if (mode) return out;
+  // B-68: a link naming the dump by another spelling of its path reaches the open tab
+  const runs = () => A.said.filter(m => m.type === 'run');
+  const go = cmds['wavelens.goto']({ dump: dir + '//d.vcd', ps: 1000 }, dir);
+  out.found = await until(() => runs().length === 1);
+  // B-69: the page's {error} answered to the run: said
+  if (out.found) await A.send({ type: 'result', rid: runs()[0].rid, results: { error: 'no viewer' } });
+  await go;
+  // a run the page never answers: its timeout said, not thrown
+  await cmds['wavelens.goto']({ dump: f, ps: 2000 }, dir).catch(e => { out.thrown = e.message; });
+  await new Promise(r => st(r, 20));
+  return out;
+});
+'''
+
+
+class Wp8(unittest.TestCase):
+    """bughunt WP8: a page made again (a tab moved to a window of its own) asks the extension whether it is the tab's first
+    (B-66); the bundled sva only where it runs, a CLI that does not run explained (B-67); a link reaches the open tab by the
+    URI's path (B-68), the page's error and a run's timeout said (B-69)."""
+    def node(self, d, mode=''):
+        r = subprocess.run([NODE, '-e', WP8, FAKE, os.path.join(H.ROOT, 'vscode', 'extension.js'), d, mode], capture_output=True, text=True,
+                           timeout=60, env=dict(os.environ, PATH='/usr/bin:/bin'))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(next(x for x in r.stdout.splitlines() if x.startswith('RESULT'))[6:])
+
+    def tree(self, d, mode=0o755):
+        os.makedirs(os.path.join(d, 'ext', 'bin'))
+        sva = os.path.join(d, 'ext', 'bin', 'sva')
+        with open(sva, 'w', encoding='utf-8') as f:
+            f.write('#!/bin/sh\necho "the bundled sva ran" >&2\nexit 2\n')
+        os.chmod(sva, mode)
+        with open(os.path.join(d, 'd.vcd'), 'w', encoding='utf-8') as f:
+            f.write('$timescale 1ns $end\n$scope module t $end\n$var wire 1 ! a $end\n$upscope $end\n$enddefinitions $end\n#0\n1!\n')
+        return sva
+
+    @H.needs(NODE, 'node (or VS Code\'s, ~/.vscode-server/bin/*/node)')
+    def test_the_page_again_and_links(self):
+        with H.tmp() as d:
+            self.tree(d)
+            o = self.node(d)
+        self.assertEqual(o['source'], [True, '/s/now.view.json', False, '/s/now.view.json'],
+                         'the tab\'s first page fresh, a page made again not; the last state of now with both (B-66)')
+        self.assertIn('the bundled sva ran', o['cli'], 'linux x64: the bundled sva')
+        self.assertTrue(o['found'], 'a link with another spelling of the open dump\'s path: run in its tab (B-68)')
+        self.assertFalse('unhandled' in o or 'thrown' in o, f'a run never answered: nothing thrown (B-69) {o}')
+        self.assertEqual(o['warned'], ['WaveLens: no viewer', 'WaveLens: the tab did not answer'], 'the page\'s error and the timeout said (B-69)')
+
+    @H.needs(NODE, 'node (or VS Code\'s, ~/.vscode-server/bin/*/node)')
+    def test_the_bundled_cli_only_where_it_runs(self):
+        with H.tmp() as d:
+            self.tree(d)
+            o = self.node(d, 'arm64')
+        self.assertNotIn('the bundled sva ran', o['cli'], 'linux arm64: not the bundled linux x86_64 one (B-67)')
+        self.assertIn('wavelens.sva', o['cli'])
+        self.assertIn('linux arm64', o['cli'], o['cli'])
+
+    @H.needs(NODE, 'node (or VS Code\'s, ~/.vscode-server/bin/*/node)')
+    def test_a_cli_that_does_not_run_explained(self):
+        with H.tmp() as d:
+            sva = self.tree(d, 0o644)
+            o = self.node(d, 'eacces')
+        self.assertIn(sva, o['cli'])
+        self.assertIn('cannot run', o['cli'], f'EACCES / ENOEXEC: said what to do (B-67) {o["cli"]}')
+        self.assertIn('wavelens.sva', o['cli'])

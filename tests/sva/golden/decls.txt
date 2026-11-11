@@ -1,7 +1,10 @@
 module decls ports clk:1 rst_n:1 req:1 ack:1 gnt:1 err:1 data:8
+checker c_dflt ports clk:1 a:1 s b:1
+module m_dflt_formal ports clk:1 req:1 gnt:1
 sequence s_req_ack(r, a, int lo = 1, int hi = 3): r ##[lo:hi] a
 sequence s_twice(sequence s): s ##1 s
 sequence s_after_use: req ##2 gnt
+sequence s_twice_then(r, q = r[*2]): q ##1 r
 property p_resp(logic r, logic k, property after = 1'b1) @(posedge clk) disable iff (!rst_n): r |-> s_req_ack(r, k) and after
 property p_seq_arg(sequence trig, v): trig |=> v
 assert i_positional in decls, line 48
@@ -54,4 +57,17 @@ assert i_nested in decls, line 58
   s3        req
   s4        ##[0:1] gnt
   s5        !req
+  signals   clk:1 req:1 gnt:1
+assert c_seq in c_dflt, line 74
+  clock     @(posedge clk)
+  expr      s |-> b
+  s1        s
+  s2        b
+  signals   clk:1 s b:1
+assert i_dflt_formal in m_dflt_formal, line 93
+  clock     @(posedge clk)
+  expr      s_twice_then(req) |-> gnt
+  s1        req[*2]
+  s2        ##1 req
+  s3        gnt
   signals   clk:1 req:1 gnt:1

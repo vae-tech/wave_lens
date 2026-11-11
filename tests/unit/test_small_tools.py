@@ -120,6 +120,58 @@ class Embed(unittest.TestCase):
         rc, _, err = H.run_tool('embed', 'k=nope.json')
         self.assertEqual((rc, err.strip()), (1, 'embed: no such file: nope.json'))
 
+    def test_var_is_a_javascript_name(self):   # bughunt B-93: "a b" wrote "window.a b = …", a data.js that does not run
+        with H.tmp() as d:
+            p = os.path.join(d, 'a.json')
+            H.dump({'signal': []}, p)
+            for v in ('a b', '1x', 'a.b', 'a-b', 'x;alert(1)', ''):
+                rc, out, err = H.run_tool('embed', '--var', v, p)
+                self.assertEqual((rc, out, 'a JavaScript name' in err, 'Traceback' in err), (1, '', True, False), v)
+            for v in ('W', '_w2', '$x', 'WAVES_2'):
+                rc, out, err = H.run_tool('embed', '--var', v, p)
+                self.assertEqual(rc, 0, err)
+                self.assertIn(f'window.{v} = ', out)
+
+
+class BadPaths(unittest.TestCase):
+    """bughunt B-92: a file a tool cannot write or read (an --out in a directory not there or not writable, an input that is a
+    directory or not UTF-8) is one line with its path and the system's words, exit 1, no traceback."""
+    def test_each_tool(self):
+        with H.tmp() as d:
+            vcd, sv = H.fixture('names'), os.path.join(H.ROOT, 'tests', 'unit', 'sv', 'names.sv')
+            nodir, binary = os.path.join(d, 'no', 'such', 'x.json'), os.path.join(d, 'bin.json')
+            with open(binary, 'wb') as f:
+                f.write(b'\xff\xfe{}')
+            cases = [('mkconfig', (vcd, '--out', nodir), nodir), ('embed', (binary,), binary), ('embed', (d,), d),
+                     ('mkhtml', ('--config', binary, '--out', os.path.join(d, 'x.html')), binary), ('mkhtml', ('--config', d, '--out', os.path.join(d, 'x.html')), d),
+                     ('vcd2wavedrom', ('--config', binary, '--out', os.path.join(d, 'x.json')), binary), ('gtkw', (os.path.join(d, 'none.gtkw'),), 'none.gtkw'),
+                     ('gtkw', (d,), d), ('embed', (vcd, '--out', nodir), None)]
+            if svabuild_bin():
+                cases.append(('svabuild', ('--waves', vcd, '--sva', sv, '--sva-bin', svabuild_bin(), '--out', nodir), nodir))
+            for tool, args, path in cases:
+                with self.subTest(tool=tool, args=args):
+                    rc, _, err = H.run_tool(tool, *args)
+                    self.assertEqual(rc, 1, err)
+                    self.assertNotIn('Traceback', err)
+                    self.assertEqual(len(err.strip().splitlines()), 1, err)
+                    self.assertTrue(err.startswith(f'{tool}: '), err)
+                    if path:
+                        self.assertIn(path, err)
+
+    def test_run_main_keeps_the_errno_text_and_the_path(self):
+        import common
+
+        def main():
+            open(os.path.join(H.ROOT, 'no', 'such', 'file'), encoding='utf-8')
+        with self.assertRaises(SystemExit) as e:
+            common.run_main(main, 'x')
+        self.assertEqual(str(e.exception.code), f'x: {os.path.join(H.ROOT, "no", "such", "file")}: No such file or directory')
+
+
+def svabuild_bin():
+    import svabuild
+    return svabuild.find_bin()
+
 
 class WavelensCat(unittest.TestCase):
     def test_build_matches_committed(self):
@@ -244,6 +296,33 @@ class MkHtml(unittest.TestCase):
             self.assertIn('bookmark-duplicate', by)
             rc, out, err = H.run_tool('mkhtml', '--config', c, '--lint', '--lint-json', '-')
             self.assertEqual(json.loads(out)['warnings'], got['warnings'])
+
+    def test_lint_as_json_of_vcd2wavedrom(self):
+        """P-23: vcd2wavedrom.py --lint-json: the warnings with the fields mkhtml gives (a script of its own building views reads
+        no stderr), a failed conversion with "error"; - is stdout only with --out (the WaveJSON goes there otherwise)."""
+        cfg = {'waves': H.fixture('crlf'), 'exact': True, 'signals': 'tb.s,tb.b',
+               'bookmarks': [{'n': 1, 't': 0, 'signal': 'x.s', 'text': 'a'}, {'n': 1, 't': 0, 'signal': 'tb.b'}]}
+        with H.tmp() as d:
+            c, j, w = os.path.join(d, 'c.json'), os.path.join(d, 'lint.json'), os.path.join(d, 'w.json')
+            H.dump(cfg, c)
+            rc, out, err = H.run_tool('vcd2wavedrom', '--config', c, '--lint-json', j)
+            self.assertEqual(rc, 0, err)
+            got = H.load(j)
+            self.assertEqual(got['count'], err.count('vcd2wavedrom: lint: '), 'every warning printed is in the file')
+            by = {x['code']: x for x in got['warnings']}
+            self.assertEqual({k: by['bookmark-signal-missing'][k] for k in ('signal', 'rows')}, {'signal': 'x.s', 'rows': ['s']})
+            self.assertIn('bookmark-duplicate', by)
+            self.assertIn('"signal"', out, 'the WaveJSON on stdout as before')
+            rc, out, err = H.run_tool('vcd2wavedrom', '--config', c, '--out', w, '--lint-json', '-')
+            self.assertEqual((rc, json.loads(out)['warnings']), (0, got['warnings']), err)
+            rc, out, err = H.run_tool('vcd2wavedrom', '--config', c, '--lint-json', '-')
+            self.assertEqual((rc, out), (1, ''))
+            self.assertIn('give --out', err)
+            H.dump({**cfg, 'waves': os.path.join(d, 'nowhere.vcd')}, c)
+            rc, out, err = H.run_tool('vcd2wavedrom', '--config', c, '--out', w, '--lint-json', '-')
+            got = json.loads(out)
+            self.assertEqual((rc, got['count'], got['warnings']), (1, 0, []), err)
+            self.assertTrue(got['error'].startswith('vcd2wavedrom: ') and 'nowhere.vcd' in got['error'], got)
 
     def test_lint_as_json_of_a_failed_build(self):
         """B-13: --lint-json on a failed build still gives an object, with the error (the text on stderr, exit 1); a clean config: no warnings."""

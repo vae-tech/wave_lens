@@ -77,7 +77,9 @@ impl Arena {
             Term::Del { lo, r, .. } => *lo == 0 && self.null(*r),
             Term::Rep { lo, .. } | Term::Goto { lo, .. } | Term::Non { lo, .. } => *lo == 0,
             Term::Or(a, b) => self.null(*a) || self.null(*b),
-            Term::And(a, b) | Term::Isect(a, b) => self.null(*a) && self.null(*b),
+            // both sides must match a cycle (ENGINE.md, Empty matches): never empty, so a first_match of one is not
+            // its empty match
+            Term::And(..) | Term::Isect(..) => false,
             Term::Thr { s, .. } => self.null(*s),
             Term::First(v) => v.iter().any(|x| self.null(*x)),
         };
@@ -138,12 +140,22 @@ impl Arena {
         map
     }
     pub(super) fn cat(&mut self, l: u32, lo: u32, hi: u32, r: u32) -> u32 {
-        if r == EMPTY && lo <= 1 && hi >= 1 {
-            return l; // `l ##1 empty` is `l`
+        if r == EMPTY && hi >= 1 {
+            // `l ##1 empty` is `l`; `l ##n empty` is `l ##(n-1) 1` (bughunt B-02), but for `n = 1` that drops the
+            // empty match of `l` (`empty ##1 empty` is empty), so it stays as `l`; `l ##0 empty` does not match: a
+            // Cat that never matches
+            if lo <= 1 && hi == 1 {
+                return l;
+            }
+            let rest = self.cat(l, sat(lo), dec(hi), ANY);
+            return if lo <= 1 && self.null(l) { self.mk(Term::Or(l, rest)) } else { rest };
         }
         self.mk(Term::Cat { l, lo, hi, r })
     }
     pub(super) fn del(&mut self, lo: u32, hi: u32, r: u32) -> u32 {
+        if r == EMPTY && hi >= 1 {
+            return self.del(sat(lo), dec(hi), ANY); // `##n empty` is `##(n-1) 1`
+        }
         if lo == 0 && hi == 0 {
             return r;
         }
@@ -261,18 +273,22 @@ impl Eng<'_> {
                     }
                 }
             }
+            // what is left after a cycle needs one more hit: the match at a hit is ended here (END), and the empty
+            // match of `b[->0:n]` is only before its first cycle (a residual that matched empty would end the goto
+            // again at every later cycle without a hit: bughunt B-01)
             Term::Goto { b, lo, hi } => {
                 if self.test(b) {
                     let ids = self.ids(b);
                     if lo <= 1 {
                         out.push((END, ids.clone()));
                     }
-                    let g = self.ar.goto(b, sat(lo), dec(hi));
+                    let g = self.ar.goto(b, sat(lo).max(1), dec(hi));
                     if g != EMPTY {
                         out.push((g, ids));
                     }
                 } else {
-                    out.push((t, Vec::new()));
+                    let g = self.ar.goto(b, lo.max(1), hi);
+                    out.push((g, Vec::new()));
                 }
             }
             Term::Non { b, lo, hi } => {
@@ -346,6 +362,9 @@ impl Eng<'_> {
                 }
             }
             Term::First(v) => {
+                if self.ar.null(t) {
+                    return; // its first match is the empty one: no later match
+                }
                 let mut tmp = Vec::new();
                 for x in v {
                     self.step(x, &mut tmp);

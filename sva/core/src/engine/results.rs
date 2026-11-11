@@ -292,9 +292,10 @@ pub struct Outcome {
 }
 
 impl Outcome {
-    /// The first failing attempt.
+    /// The failing attempt found first: the earliest `failed_at`, then the earliest start (as the report's
+    /// `first_fail` and JUnit; not the first attempt by start, which may fail later: bughunt B-05).
     pub fn first_fail(&self) -> Option<&Attempt> {
-        self.attempts.iter().find(|a| a.result == Status::Fail)
+        self.attempts.iter().filter(|a| a.result == Status::Fail).min_by_key(|a| (a.failed_at.unwrap_or(a.end), a.start))
     }
 }
 

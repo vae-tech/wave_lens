@@ -37,3 +37,12 @@ assert m_x in preproc, line 72
   s1        valid
   s2        !$isunknown(data)
   signals   clk:1 valid:1 data:8
+assert m_rep_arg in preproc, line 82
+  clock     @(posedge clk)
+  expr      start |-> valid[*2] ##1 ready[->1] ##1 done[=1:2] ##1 data == 8'(TWO)
+  s1        start
+  s2        valid[*2]
+  s3        ##1 ready[->1]
+  s4        ##1 done[=1:2]
+  s5        ##1 data == 8'(TWO)
+  signals   clk:1 start:1 valid:1 ready:1 done:1 data:8

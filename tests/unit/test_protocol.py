@@ -124,6 +124,21 @@ class Table(unittest.TestCase):
         runs = hjs[hjs.index('G.WAVELENS_RUNS = {'):hjs.index('/* ---- clipboard')]
         self.assertTrue(set(re.findall(r"op: '([a-z]+)'", runs)) <= ops)
 
+    def test_the_cli_documents_fit(self):
+        """bughunt B-70: what sva runs diff --json writes (notes: a run of --run skipped, or another note) is an answer of the
+        table; the keys of its document in runs.rs, all of them in the reply of the diff operation."""
+        js = ('const P = require(process.argv[1]), m = { type: "runs", op: "diff", signals: [], from: 0, to: 1 };'
+              'console.log(JSON.stringify([P.answers(m, { runs: [], notes: ["#2 golden: the run compared against, skipped"] }),'
+              'P.all(P.spec(m).reply[0])]))')
+        r = subprocess.run([NODE, '-e', js, PROTO], capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        ok, keys = json.loads(r.stdout)
+        self.assertTrue(ok, 'a runs diff answer with notes')
+        rs = H.text(os.path.join(H.ROOT, 'sva', 'cli', 'src', 'runs.rs'))
+        doc = re.search(r'let mut doc = json!\(\{"wavelens": "runs-diff",(.*?)\}\);', rs, re.S).group(1)
+        written = set(re.findall(r'"([a-z_]+)":', '"wavelens":' + doc)) | set(re.findall(r'doc\["([a-z_]+)"\] =', rs))
+        self.assertTrue(written and written <= set(keys), f'sva runs diff --json writes {written - set(keys)} the table has not')
+
 
 @H.needs(SVA, 'the sva CLI ($WAVELENS_SVA, make unit sets it)')
 @H.needs(NODE, 'node (or VS Code\'s, ~/.vscode-server/bin/*/node)')

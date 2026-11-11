@@ -112,7 +112,7 @@ make mcp-bench              # tools/wavemcp.py on the benchmark tasks by a scrip
 make wavelens               # wavelens/wavelens.js from wavelens/src/*.js (after editing them; make html / example do it too; lines ≤ 160 columns)
 make demo examples html     # rebuild docs/demo_waves.js, the example pages, the demo page
 make smoke                  # tests/smoke.py: every page in light and dark, checks by section (--list), PNGs in BUILD/shots
-make smoke ONLY=find,sva_bind   # some sections (python3 tests/smoke.py --list); STRICT=1: a skip fails
+make smoke ONLY=find,sva_bind   # some sections (python3 tests/smoke.py --list: with each one's last time, BUILD/smoke/times.json); STRICT=1: a skip fails
 make shots                  # tests/shots.py: docs/img/*.png, dark theme, and tests/visual/*.png (--set visual: white, 420 px, an FSM's details, a scale of 2) (after make examples; ~20 s, see below)
 make shots-check            # both into BUILD/img and BUILD/visual, compared with the committed ones by tests/pngdiff.py: a picture that changed (more than 48 pixels by more than 32 of 255 from the pixel there and the 8 around it: text a pixel off is the same) or one made and not committed fails, its difference in BUILD/*/diff
 make guide-shots            # tests/guide_shots.py: docs/guides/img/*.png (after make examples; ONLY=gaps,sva: those guides)
@@ -127,6 +127,7 @@ make sva-verify             # the examples' checkers in Verilator --assert again
 make sva-eval WAVES=work/x.fst SVA="pkg.sv checks.sva" SCOPE=tb.dut OUT=results.json   # assertions over any dump
 make fst WAVES=work/x.vcd     # sva fst: work/x.fst beside it, the FSM states of work/x.types.json in it
 make diff REF=work/a.vcd WAVES=work/b.vcd ARGS="--segment tb_test"   # sva diff: two runs change by change
+make diff-results REF=a.json NEW=b.json   # sva diff --results: two runs' assertion results (not A= B=: B is the build dir)
 make fmt lint               # verible-verilog-format (docs/SV_STYLE.md), verilator --lint-only -Wall on the testbenches
 make clean                  # the build products under BUILD; clean-all: BUILD entirely, the cargo target included
 ```
@@ -276,8 +277,8 @@ engine builds incrementally), then `cargo clippy --all-targets -D warnings`. A f
 `BUILD/shots` and the shots' diffs as an artifact (7 days). The machine needs what `make check` needs (§ Build and
 test); the runner inherits the `PATH` of the shell that configured it. A push while the machine is off waits in the
 queue (GitHub keeps a job 24 hours) and runs when the runner is back. What the gate does not run: the VS Code
-extension's end-to-end test (`make vscode-e2e`: VS Code itself in a window, Convert to FST among its checks), run by
-hand before a release that changes `vscode/`.
+extension's end-to-end test (`make vscode-e2e`: VS Code itself in a window, Convert to FST and a slice kept and compared
+among its checks), run by hand before a release that changes `vscode/`.
 
 Once, in WSL (systemd on: `/etc/wsl.conf` `[boot] systemd=true`), on the Linux file system — the token from GitHub,
 repository → Settings → Actions → Runners → New self-hosted runner (it is valid one hour):

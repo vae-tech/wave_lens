@@ -9,7 +9,7 @@
 
 The output has line breaks (one model per key, one signal per line, long "tv" lists wrapped); --compact writes one line.
 """
-import argparse, json, os, sys
+import argparse, json, os, re, sys
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
@@ -25,6 +25,10 @@ def read_json(path):
         raise WaveError(f'embed: no such file: {path}') from None
     except json.JSONDecodeError as e:
         raise WaveError(f'embed: {path}: {e}') from None
+    except UnicodeDecodeError as e:
+        raise WaveError(f'embed: {path}: not UTF-8 text ({e.reason} at byte {e.start})') from None
+    except OSError as e:   # a directory, not readable (B-92: a traceback)
+        raise WaveError(f'embed: {path}: {e.strerror or e}') from None
 
 
 def load(specs):
@@ -50,12 +54,14 @@ def text_of(data, keyed, compact):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('files', nargs='+', help='key=file.json (or a single file.json)')
-    ap.add_argument('--var', help='global variable name for the .js output')
+    ap.add_argument('--var', help='global variable name for the .js output (a JavaScript name: letters, digits, _ $; default WAVES)')
     ap.add_argument('--html', help='HTML file containing the placeholder')
     ap.add_argument('--placeholder', default='/*WAVE_DATA*/')
     ap.add_argument('--compact', action='store_true', help='one line, no spaces (smallest output)')
     ap.add_argument('--out', help='output file (default: stdout)')
     a = ap.parse_args()
+    if a.var is not None and not re.fullmatch(r'[A-Za-z_$][\w$]*', a.var, re.A):   # B-93: "a b" wrote a data.js that does not run
+        raise WaveError(f'embed: --var {a.var!r}: a JavaScript name (letters, digits, _ and $, not a digit first)')
     # every "<" as < (the same string to JSON and JavaScript): "</script>" or "<!--<script>" in a value cannot end the
     # script it goes into or make the HTML parser swallow the rest of the page
     text = text_of(*load(a.files), a.compact).replace('<', '\\u003c')

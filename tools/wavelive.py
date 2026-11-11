@@ -16,6 +16,7 @@ from common import WaveError  # noqa: E402
 
 LIVE_PORT = 8742   # the first port tried (WAVELENS_LIVE_PORT), then the next nine
 BRIDGE = []   # the one Bridge of this process, once a view tool started it
+LIVE_TIMEOUT = [10]   # s a live page has to answer a command (a list: the tests shorten it)
 
 
 def cache_dir():
@@ -128,6 +129,7 @@ class LiveHandler(http.server.BaseHTTPRequestHandler):
                     break
                 self.wfile.write(('event: cmd\ndata: ' + json.dumps(m, ensure_ascii=False) + '\n\n').encode())
                 self.wfile.flush()
+                self.bridge.delivered(m.get('rid'))   # the page has them: never sent to the file after this (B-52)
         except OSError:   # the page went (closed, reloaded)
             pass
         finally:
@@ -257,19 +259,23 @@ class Bridge:
                     return got
                 self.changed.wait(left)
 
-    def send(self, cid, view, ops, timeout=10):
-        """The commands to a page's viewer -> their results (view.run), or a WaveError (LiveGone: no answer, the page is
-        taken for gone)."""
+    def send(self, cid, view, ops, timeout=None):
+        """The commands to a page's viewer -> their results (view.run), or a WaveError (LiveGone: they never reached the page
+        in the time, it is taken for gone; LiveLate: it took them and did not answer in the time, it may still be running them)."""
+        timeout = LIVE_TIMEOUT[0] if timeout is None else timeout
         with self.lock:
             c = self.clients.get(cid)
             if not c:
                 raise WaveError('the page went (closed or reloaded): view_get lists the pages connected')
             self.rid += 1
             rid, ev = self.rid, threading.Event()
-            self.pending[rid] = [ev, None, cid]   # answered by this page only
+            self.pending[rid] = [ev, None, cid, False]   # answered by this page only; delivered (written to its stream)
             c['q'].put({'rid': rid, 'view': view, 'ops': ops})
         if not ev.wait(timeout):
-            self.pending.pop(rid, None)
+            with self.lock:
+                p = self.pending.pop(rid, None)
+            if p and p[3]:   # a slow page, not a gone one: kept (B-52)
+                raise LiveLate(f'the live page took the commands and did not answer in {timeout} s')
             self.drop(cid)
             raise LiveGone(f'the live page did not answer in {timeout} s (its tab closed?)')
         got = self.pending.pop(rid)[1]
@@ -278,6 +284,13 @@ class Bridge:
         if not isinstance(got, list) or len(got) != len(ops):
             raise WaveError(f'the live page answered {json.dumps(got)[:200]}, not a result per command')
         return got
+
+    def delivered(self, rid):
+        """Command rid written to its page's stream."""
+        with self.lock:
+            p = self.pending.get(rid) if isinstance(rid, int) else None
+            if p:
+                p[3] = True
 
     def resolve(self, cid, rid, results):
         """A page's answer to command rid -> whether it was one sent to that page and not answered yet."""
@@ -292,6 +305,10 @@ class Bridge:
 
 class LiveGone(WaveError):
     pass
+
+
+class LiveLate(WaveError):
+    """The page took the commands and did not answer in time: they may be done there; not to be done again on its file."""
 
 
 def bridge():

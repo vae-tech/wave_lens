@@ -7,7 +7,7 @@
    dump. A click on a row (Enter, ↑ ↓ in the list, ]r [r anywhere) makes it B; x: no B, the waves only (]w [w then walk
    the runs, nothing compared). The compare's A B A+B and ]d [d as Compare… has them; Δ all: how many signals of each run
    differ from A in the window. Keep this dump… adds the dump of now. The page asks its host (window.WAVELENS_RUNS: list,
-   keep, set, rm, diff, compare, open; the VS Code extension's media/host.js gives it); without one (a page in a browser)
+   keep, set, rm, diff, compare, cancel, open; the VS Code extension's media/host.js gives it); without one (a page in a browser)
    there are none. A run keeps its test cases (your spans with a label when kept, or cocotb's marks beside the dump): a span
    of yours a run has a case of (by name) is compared with that case of the run, wherever it is in the run (B offset to it,
    over the shorter of the two). */
@@ -52,7 +52,8 @@ Object.assign(WaveView.prototype, {
   // A: the run whose waves these are (0: the dump of now)
   runsA() { return this.runsShown || 0; },
   // a run's name as the list says it: "#3 golden"; the dump of now: "now"
-  runName(id) { if (!id) return 'now'; const r = (this.runsL || []).find(x => x.id === id); return r ? `#${id} ${r.name}` : `#${id}`; },
+  runName(id) { if (!id) return 'now'; const r = (this.runsL || []).find(x => x.id === id);
+    return r ? `#${id} ${r.name}` : id === this.runsA() && this.runsAOf ? this.runsAOf.name : `#${id}`; },
   // the Runs panel: open, closed (false), or as it is toggled
   runsPanel(on = !this.runsP, focus = true) {
     if (!on) { if (this.runsP) this.runsP.close(); return this; }
@@ -114,6 +115,7 @@ Object.assign(WaveView.prototype, {
     if (id && !run) { runs = await this.runsList(true); run = runs.find(r => r.id === id); }   // kept in a shell meanwhile
     if (id && !run) return say(`no run #${id}`);
     const w = this.runsWindow(), req = this.runReq = (this.runReq || 0) + 1, sh = show || (this.cmp ? this.cmpRun : 'a');
+    this.cmpReq = (this.cmpReq || 0) + 1;   // a compare asked before (Compare…, a dump read here) not taken when it comes
     const f = t => this.fmt(t, (this.M.t1 - this.M.t0) / 1000, this.M.t1 - this.M.t0), na = `A ${this.runName(a)}`, nb = `B ${this.runName(id)}`;
     // your span is a test case of the run (its name): the run's case compared, wherever it is in the run
     const cn = w.span && w.span.label ? caseName(w.span.label) : '', byCase = !!run && !!cn && (run.cases || []).some(c => c.name === cn);
@@ -121,9 +123,11 @@ Object.assign(WaveView.prototype, {
     if (!quiet) this.toast(`${nb}: comparing with ${na} over ${what}…`);
     if (this.runsP) this.runsP.status(`comparing ${na} with ${nb} over ${what}…`);
     let m;
+    this.runWait = req;
     try { m = await h.compare(Object.assign({ id, against: a, signals: this.runsSignals(), from: w.from, to: w.to }, byCase ? { case: cn } : {})); }
     catch (e) { m = { error: e.message }; }
-    if (req !== this.runReq) return null;   // another run asked meanwhile
+    if (this.runWait === req) this.runWait = 0;
+    if (req !== this.runReq) return null;   // another run asked meanwhile, or B dropped or replaced (runsDrop)
     if (m.error || !m.result) { const e = m.error || 'no result'; this.toast(`${nb}: ${e}`); if (this.runsP) this.runsP.status(`${nb}: ${e}`);
       return null; }
     Object.assign(m.result, { name: this.runName(id), run: id, a: a || null });   // B named, and both ids: the saved state has them
@@ -134,6 +138,14 @@ Object.assign(WaveView.prototype, {
       this.runsP.status(runSaid(na, nb, r, m.result, w, f, this.cmpCan()) + (cn && !byCase && run && run.cases ? ` · no case ${cn} in it` : '')); }
     return r;
   },
+  // B dropped or replaced (no B, ✕, compare off, Compare…, a result given): a run compare still asked is not taken when it comes,
+  // and the host stops it (runs cancel; B-63, B-64)
+  runsDrop() {
+    this.runReq = (this.runReq || 0) + 1;
+    if (!this.runWait) return;
+    this.runWait = 0; const h = this.runsHost();
+    if (h && h.cancel) Promise.resolve().then(() => h.cancel()).catch(() => {});
+  },
   // ]r [r: B, the next (older) / previous (newer) run of the list (read again: a run kept in a shell is there), A not among
   // them; ]w [w: A, the waves shown, through now and the runs (wrapping), B compared with each, if one is chosen
   async runStep(dir, what = 'b') {
@@ -142,9 +154,13 @@ Object.assign(WaveView.prototype, {
     if (this.runsP) this.runsP.render();
     const a = this.runsA();
     if (what === 'a') {
-      const ids = [0, ...runs.map(r => r.id)], i = ids.indexOf(a);
+      // the ring goes on from the run tried last when its waves did not open (a file gone): A stays, the one after it next
+      const ids = [0, ...runs.map(r => r.id)], from = this.runsTried != null && ids.includes(this.runsTried) ? this.runsTried : a;
       if (ids.length < 2) { this.toast('no run kept: Keep this dump… in the Runs panel (gu)'); return this; }
-      return this.runsShow(ids[i < 0 ? 0 : (i + dir + ids.length) % ids.length]);
+      const at = k => ids[(ids.indexOf(from) + k * dir + ids.length * 2) % ids.length];
+      const next = at(1) === a && from !== a && ids.length > 2 ? at(2) : at(1);
+      this.runsTried = next;
+      return this.runsShow(next);
     }
     const ids = [...runs.map(r => r.id), ...(a ? [0] : [])].filter(x => x !== a);   // A a run: now is a B too (the panel's row)
     if (!ids.length) {
@@ -162,6 +178,8 @@ Object.assign(WaveView.prototype, {
     const h = this.runsHost();
     if (!h || !h.open) { this.toast('a run shown here: VS Code\'s Runs panel (an older extension: update it)'); return this; }
     const say = s => { if (!quiet) this.toast(s); if (this.runsP) this.runsP.status(s); return this; };
+    // one ask at a time per element: an answer to an ask made before the last one is dropped (the later ask wins, B-61)
+    const tok = this.root.wlRunsAsk = (this.root.wlRunsAsk || 0) + 1, stale = () => tok !== this.root.wlRunsAsk;
     if (id === this.runsA()) return say(`${this.runName(id)} is A already: the waves shown`);
     let runs; try { runs = await this.runsList(); } catch (e) { return say('runs: ' + e.message); }
     if (id && !runs.some(r => r.id === id)) runs = await this.runsList(true).catch(() => runs);
@@ -169,11 +187,9 @@ Object.assign(WaveView.prototype, {
     const name = this.runName(id);
     if (this.runsP) this.runsP.status(`reading ${name}…`);
     let m; try { m = await h.open(id); } catch (e) { m = { error: e.message }; }
-    if (m.error || !m.file) return say(`${name}: ${m.error || 'not read'}`);
-    this.runsTo = id;
-    const v = await this.openDump(m.file, m.handle || null, true);
-    this.runsTo = undefined;
-    return v;
+    if (stale()) return this.root.waveView || this;
+    if (m.error || !m.file) return say(`${name}: ${m.error || 'not read'}${this.runsTried === id ? ' (]w goes on)' : ''}`);
+    return this.openDump(m.file, m.handle || null, { runs: id });   // the run asked goes with the open (to the viewer there then)
   },
   // the snapshot of the view the runs shown take their rows from: the view of now, and what the snapshot of before said of
   // the rows these waves lack (runsMiss): an edit made meanwhile stays, a row missing twice in a row is not forgotten
@@ -190,8 +206,7 @@ Object.assign(WaveView.prototype, {
     if (move) { delete st.compare; delete st.compareShow; }   // the compare of the A of before: made again with the new one (runsAgain)
     // a slice's times are from 0: from a whole one (the dump, a whole run) to a slice and back the times of the view go with
     // it — the same place of the dump in sight, your markers on the same moments; slice to slice: both from 0, as they compare
-    const oa = move ? this.runOrigin(this.runsA()) : null, ob = move ? this.runOrigin(this.runsTo || 0) : null;
-    const d = (oa == null) !== (ob == null) ? (oa || 0) - (ob || 0) : 0;
+    const d = move ? this.runsShift() : 0;
     if (d) {
       const t = x => (typeof x === 'number' && isFinite(x) ? x + d : x);
       for (const k of ['from', 'to', 'cursor', 'cursor2']) st[k] = t(st[k]);
@@ -199,11 +214,21 @@ Object.assign(WaveView.prototype, {
       st.markers = (st.markers || []).map(m => Object.assign({}, m, { t: t(m.t) }));
       st.bookmarks = (st.bookmarks || []).map(b => Object.assign({}, b, { t: t(b.t) }));
       st.spans = (st.spans || []).map(x => Object.assign({}, x, { from: t(x.from), to: t(x.to) }));
+      if (st.runsOver) st.runsOver = Object.assign({}, st.runsOver, { from: t(st.runsOver.from), to: t(st.runsOver.to) });   // still the span
     }
     return st;
   },
+  // how far the view's times move from A to the run asked (runsTo): a slice's start between a slice and a whole one, else 0
+  runsShift() {
+    const to = this.runsTo !== undefined ? this.runsTo : 0;
+    if (to === this.runsA()) return 0;
+    const oa = this.runOrigin(this.runsA()), ob = this.runOrigin(to || 0);
+    return (oa == null) !== (ob == null) ? (oa || 0) - (ob || 0) : 0;
+  },
   // where a slice's time 0 is in the time of its dump (ps); null: a whole run, the dump of now (sva runs.rs origin)
-  runOrigin(id) { const r = id && (this.runsL || []).find(x => x.id === id); return r && r.slice && isFinite(r.slice.from) ? +r.slice.from : null; },
+  // A's as it was when it became A (runsAOf): the run removed since (Delete, a shell) is still the waves shown (B-62)
+  runOrigin(id) { if (id && id === this.runsA() && this.runsAOf) return this.runsAOf.origin;
+    const r = id && (this.runsL || []).find(x => x.id === id); return r && r.slice && isFinite(r.slice.from) ? +r.slice.from : null; },
   // the runs' part of the view, kept over a dump read again (⟳, a run shown): the panel, the window, the run compared and
   // how, A (a read again of the dump: now), the snapshot, the list
   runsOf() {
@@ -212,19 +237,25 @@ Object.assign(WaveView.prototype, {
     const res = this.cmp && this.runCur == null ? this.cmp.result : null, file = res ? { name: this.cmp.name || res.name || 'B',
       path: res.src && typeof res.src.path === 'string' ? res.src.path : null } : null;
     if (!this.runsP && this.runCur == null && !this.runsWin && !this.runsA() && !to && !file) return null;
-    return { open: !!this.runsP, win: this.runsWin, cur: this.runCur, show: this.cmp ? this.cmpRun : null, shown: to, was: this.runsA(),
-      to: this.t0 + this.span, focus: !!this.runsP && this.runsP.el.contains(document.activeElement), file,
+    // the window and its end in the time of the waves asked (a slice's from 0), as runsKeep moved the spans
+    const d = this.runsShift(), w = this.runsWin && d ? Object.assign({}, this.runsWin, { from: this.runsWin.from + d, to: this.runsWin.to + d })
+      : this.runsWin;
+    return { open: !!this.runsP, win: w, cur: this.runCur, show: this.cmp ? this.cmpRun : null, shown: to, was: this.runsA(),
+      wasName: this.runName(this.runsA()),
+      aOf: to ? { origin: this.runOrigin(to), name: this.runName(to) } : null,   // A's slice origin and name, kept while it is A
+      to: this.t0 + this.span + d, focus: !!this.runsP && this.runsP.el.contains(document.activeElement), file,
       deltas: this.runsP ? [...this.runsP.deltas] : null,   // Δ all's numbers on the rows (still of the window and A they say)
       snap: this.runsSnap || null, list: this.runsL || null, now: this.runsNow || null, dir: this.runsDir, others: this.runsOthers };
   },
   async runsAgain(o) {
     if (!o || !this.runsHost()) return this;
     Object.assign(this, { runsWin: o.win || null, runsShown: o.shown || 0, runsSnap: o.snap, runsL: o.list, runsNow: o.now, runsDir: o.dir,
-      runsOthers: o.others });
+      runsOthers: o.others, runsAOf: o.shown ? o.aOf || null : null });
     if (o.open) this.runsPanel(true, o.focus);   // the keys where they were: the list, or the waves (]w ]w … walks on)
     if (o.deltas && this.runsP) { this.runsP.deltas = new Map(o.deltas); this.runsP.render(); }
     // what openDump's toast adds (runsNote): A now again, or a run's rows and end
-    if (!o.shown && o.was) { this.runsNote = `the dump of now again (${this.runName(o.was)} was shown)`; if (this.runsP) this.runsP.status(this.runsNote); }
+    if (!o.shown && o.was) { this.runsNote = `the dump of now again (${o.wasName || this.runName(o.was)} was shown)`;
+      if (this.runsP) this.runsP.status(this.runsNote); }
     else if (o.shown) this.runsSaid(o);
     const cur = o.cur === this.runsA() ? null : o.cur;   // B made A: compared no more
     if (cur != null) await this.runCompare(cur, true, o.show);   // compared with the new A, over the new waves
@@ -318,7 +349,7 @@ class Runs {
   windows() {
     const v = this.v, f = t => v.fmt(t, (v.M.t1 - v.M.t0) / 1000, v.M.t1 - v.M.t0);
     const i = v.runsWin ? v.spans.findIndex(x => sameSpan(x, v.runsWin)) : -1;
-    if (v.runsWin && i < 0) v.runsWin = null;
+    if (v.runsWin && i < 0) { const w = v.runsWin; v.runsWin = null; this.status(`the span ${w.label || ''} is gone: over the waves in sight`); }
     const cases = new Set((v.runsL || []).flatMap(r => (r.cases || []).map(c => c.name)));
     this.win.innerHTML = '<option value="view">the waves in sight</option>' + v.spans.map((s, k) =>
       `<option value="${k}">${esc(s.label || 'span')} (${esc(f(s.from))} … ${esc(f(s.to))})` +
@@ -388,7 +419,9 @@ class Runs {
     const run = this.edit; this.closeForm();
     this.status(run ? `#${run.id}: saving…` : 'keeping the dump of now (written as an FST in the runs\' directory)…');
     // a run kept: your spans with a label as its test cases (none: the host takes cocotb's marks beside the dump)
-    const cases = this.v.spans.filter(s => s.label && caseName(s.label)).map(s => ({ label: s.label, from: s.from, to: s.to }));
+    // (in the dump's time: a slice shown as A has its times from 0, B-65)
+    const d = run ? 0 : this.v.runOrigin(this.v.runsA()) || 0;
+    const cases = this.v.spans.filter(s => s.label && caseName(s.label)).map(s => ({ label: s.label, from: s.from + d, to: s.to + d }));
     let m;
     try { m = run ? await h.set(run.id, body) : await h.keep(cases.length ? Object.assign({ cases }, body) : body); } catch (e) { m = { error: e.message }; }
     if (m.error) { this.status((run ? 'not saved: ' : 'not kept: ') + m.error); return; }
@@ -437,7 +470,7 @@ class Runs {
     if (settle) this.settle = setTimeout(() => this.v.runCompare(id, true), RUN_SETTLE); else this.v.runCompare(id, true);
   }
   // no B: the compare dropped, the waves only
-  noB() { clearTimeout(this.settle); if (this.v.runCur != null) this.v.compare(null);
+  noB() { clearTimeout(this.settle); this.v.runsDrop(); if (this.v.runCur != null) this.v.compare(null);
     this.render(); this.status('no B: the waves only (]w [w walk the runs)'); }
   events() {
     const v = this.v, el = this.el, sig = { signal: this.ac.signal };

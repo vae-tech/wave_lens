@@ -14,6 +14,18 @@ CONFIG_JS = os.path.join(ROOT, 'wavelens', 'wavelens.config.js')
 # keys of a "config" object that are not in wavelens.config.js: WaveDrom's own, and an older name the viewer still reads
 CONFIG_EXTRA = ('hscale', 'skin', 'groupsFirst')
 SELECT_KEYS = ('depth', 'constants', 'hide', 'budget')   # mkconfig.py's "select" in a base file
+# the named colours of CSS, transparent and currentcolor (testmarks.py's marksColors, viewedit.py color_ok: what CSS reads as a colour)
+CSS_NAMES = set('''aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood cadetblue
+chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki
+darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise
+darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod
+gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral
+lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey
+lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen
+mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive
+olivedrab orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple
+rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue slategray slategrey snow
+springgreen steelblue tan teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen transparent currentcolor'''.split())
 
 
 class WaveError(Exception):
@@ -48,12 +60,19 @@ def build_info(by, date=None):
 
 
 def run_main(main, tool):
-    """Run a tool's main(); a WaveError ends it with its message (exit 1), as SystemExit(msg) did."""
+    """Run a tool's main(); a WaveError ends it with its message (exit 1), as SystemExit(msg) did; so does a file the tool cannot
+    read or write (an --out in a directory not there or not writable, an input that is a directory or not UTF-8: B-92), in one line
+    with the path and the system's words, not a traceback."""
     try:
         return main()
     except WaveError as e:
         msg = str(e)
         sys.exit(msg if msg.startswith(tool + ':') else f'{tool}: {msg}')
+    except UnicodeDecodeError as e:
+        sys.exit(f'{tool}: a file that is not UTF-8 text ({e.reason} at byte {e.start})')
+    except OSError as e:
+        names = ' -> '.join(str(x) for x in (e.filename, e.filename2) if x is not None)
+        sys.exit(f'{tool}: {names + ": " if names else ""}{e.strerror or e}')
 
 
 def parse_time(v, plain=1):
@@ -64,7 +83,7 @@ def parse_time(v, plain=1):
         return None
     if isinstance(v, (int, float)):
         return None if plain is None else v * plain
-    m = re.fullmatch(r'\s*(-?[\d.]+(?:e-?\d+)?)\s*([a-zµ]+)?\s*', str(v), re.I)
+    m = re.fullmatch(r'\s*(-?[\d.]+(?:e[-+]?\d+)?)\s*([a-zµ]+)?\s*', str(v), re.I)
     if not m or (m.group(2) and m.group(2).lower() not in UNIT_PS) or (plain is None and not m.group(2)):
         return None
     try:

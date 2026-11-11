@@ -21,6 +21,20 @@ const PLUGINS = [];   // WaveLens.plugin(fn): fn(viewer) for every viewer, now a
 const STATE_VERSION = 3;   // a saved viewer state (state()): 2 has range and edge, 3 your markers and groups
 // the settings of the gaps (the menu's Gaps rows)
 const GAP_KEYS = ['gaps', 'gapIdle', 'gapKeep', 'gapSignals', 'gapClock', 'gapAux', 'gapOnly', 'gapCount', 'gapLine', 'gapView'];
+const GAP_COUNTS = ['off', 'clock', 'edges', 'rise', 'fall', 'any'];   // gapCount: what the gaps' column counts (look.js gapOpt the same)
+// the kinds of a state's keys (null: each may be): a state with a key of another kind is applied in nothing (set_state, Load…;
+// tools/viewedit.py state_kinds) -> the first such key said, or null
+const STATE_LISTS = ['bookmarks', 'arrows', 'markers', 'groups', 'spans', 'hidden', 'dups', 'bits', 'exprs'];
+const STATE_MAPS = ['config', 'paint', 'radix', 'analog', 'folds'], STATE_TIMES = ['from', 'to', 'cursor', 'cursor2'];
+function stateKinds(st) {
+  for (const [k, v] of Object.entries(st)) {
+    const what = v == null ? null : STATE_LISTS.includes(k) && !Array.isArray(v) ? 'a list'
+      : STATE_MAPS.includes(k) && (typeof v !== 'object' || Array.isArray(v)) ? 'an object'
+      : STATE_TIMES.includes(k) && !(typeof v === 'number' && isFinite(v)) ? 'a time (a number)' : null;
+    if (what) return `"${k}" is not ${what}: nothing of the state applied`;
+  }
+  return null;
+}
 const CYC_KEYS = ['cycles', 'cycleClock', 'cycleZero'], CYC_H = 16;   // the band of clock cycles under the time axis, its height
 // the browser's database of this origin: fn(store) in a transaction -> what its request gave
 const stateDb = (mode, fn) => new Promise((ok, no) => {
@@ -55,9 +69,15 @@ class WaveView {
     this.bitsOpen = new Set(); this.bitMemo = new WeakMap(); this.dups = new Map(); this.dupsBy = new Map(); this.deltas = false; this.loadRows();
     this.t0 = M.t0; this.span = M.t1 - M.t0;
     this.minSpan = opts.minSpan ?? (M.timed ? Math.max(this.span / 1e6, 10) : 0.5);
-    this.cursor = opts.cursor ?? M.cursor ?? M.t0;
-    this.pageMarks = (opts.markers || []).map(pageMark).concat(M.markers);   // the page's markers; yours (umarks, the marker command) after them
-    this.jumps = opts.jumps || M.jumps || (this.pageMarks.length && this.pageMarks.length <= 6
+    // what the page gives that is no time is left out, a cursor outside the waves put at their end: said in the log (B-71, B-72, B-80)
+    const said = M.dropped.slice(), tOf = x => (typeof x === 'number' ? x : num(parseT(x)));
+    if (opts.cursor != null && !isFinite(tOf(opts.cursor))) said.push(noTime('the cursor of the page', null, opts.cursor));
+    const cur = [opts.cursor, M.cursor].map(x => (x == null ? NaN : tOf(x))).find(x => isFinite(x)) ?? M.t0;
+    this.cursor = Math.min(Math.max(cur, M.t0), M.t1);
+    if (this.cursor !== cur) said.push(`the cursor ${this.when(cur)} is outside these waves: at ${this.when(this.cursor)}`);
+    // the page's markers; yours (umarks, the marker command) after them
+    this.pageMarks = optTimes(opts.markers, 'a marker of the page', said).map(pageMark).concat(M.markers);
+    this.jumps = opts.jumps ? optTimes(opts.jumps, 'a jump of the page', said) : M.jumps || (this.pageMarks.length && this.pageMarks.length <= 6
       ? this.pageMarks.map(m => ({ label: '→ ' + m.label, t: m.t, span: this.span / 5 })) : []);
     this.sel = null; this.edgeKind = 'any';   // selected signal row (edge search, bookmarks), edge kind
     this.extraJSON = [];   // plugins: () -> '"key": …' lines for the bookmarks JSON (or null)
@@ -79,9 +99,11 @@ class WaveView {
     Object.assign(this, this.loadBookmarks()); root.waveView = this;   // this.bms, this.arrows, this.umarks
     this.markers = this.pageMarks.concat(this.umarks);
     this.build(); this.fit();
-    if (opts.from != null || opts.to != null) { // initial view window (Fit still shows everything)
-      const a = opts.from ?? M.t0, b = opts.to ?? M.t1;
-      this.span = Math.min(Math.max(b - a, this.minSpan), M.t1 - M.t0); this.t0 = this.clamp(a); this.draw();
+    if (opts.from != null || opts.to != null) { // initial view window (Fit still shows everything); an end that is no time: as not given
+      const end = (k, d) => { const t = opts[k] == null ? d : tOf(opts[k]); if (isFinite(t)) return t; said.push(noTime(k, null, opts[k])); return d; };
+      const a = end('from', M.t0), b = end('to', M.t1);
+      if (b > a) { this.span = Math.min(Math.max(b - a, this.minSpan), M.t1 - M.t0); this.t0 = this.clamp(a); this.draw(); }
+      else said.push(`from ${this.when(a)} … to ${this.when(b)}: "to" is not after "from": the whole waves shown`);
     }
     this.ro = new ResizeObserver(() => this.draw()); this.ro.observe(this.wcol); this.ro.observe(this.root.querySelector('.bar'));
     // every colour picker with its hex code beside it (menu.js hexFields): the bar's here; the menu's and the lists' where they
@@ -109,6 +131,7 @@ class WaveView {
     if (ds) this.log('info', `the dump: ${ds.signals} signals, ${ds.changing} change, ${ds.dead} never change` + (ds.busiest && ds.busiest[0] ?
       ` · the busiest ${ds.busiest[0][0]} (${ds.busiest[0][1]})` : ''), { items: (ds.busiest || []).map(([p, n]) => `${n} changes  ${p}`)
       .concat((ds.never || []).map(p => `never changes  ${p}`)), what: 'the busiest, the ones that never change', quiet: true });
+    if (said.length) this.log('warning', `the page: ${said[0]}${said.length > 1 ? ` (and ${said.length - 1} more)` : ''}`, { items: said });
   }
   // what this viewer's bookmarks, paint and bindings are stored under in this browser: the page, then opts.key, the id,
   // the data-wave reference or the title; several viewers of one data-wave (a bench and its lazy cards) are told apart by
@@ -262,7 +285,7 @@ class WaveView {
         const d = drag; drag = null; this.box = null;
         if (d.moved) { this.draw(); this.menu(e.clientX, e.clientY, this.sel, this.cursor); return; }
         const row = (this.lay || []).find(o => y >= o.y && y < o.y + o.h);
-        this.cursor = this.pickTime(x, y, true); this.range = null; this.selRun = new Set();
+        this.cursor = this.pickTime(x, y, true); this.rangeOff(); this.selRun = new Set();
         if (row && row.row.type === 'sig' && row.row.tr) this.sel = this.selAnchor = row.row;
         this.renderNames(); this.draw(); return;
       }
@@ -289,7 +312,7 @@ class WaveView {
           // under the pointer becomes the selected one (a row of a plugin may take the click)
           const row = (this.lay || []).find(o => y >= o.y && y < o.y + o.h);
           if (!(row && row.row.click && row.row.click(x, y - row.y, this))) {
-            this.cursor = this.pickTime(x, y, drag.free); this.range = null; this.selRun = new Set();
+            this.cursor = this.pickTime(x, y, drag.free); this.rangeOff(); this.selRun = new Set();
             if (row && row.row.type === 'sig' && row.row.tr) this.sel = this.selAnchor = row.row;
             this.renderNames(); this.draw();
           }
@@ -443,12 +466,19 @@ class WaveView {
     const m = /^(.+)\[(0|[1-9]\d*)\]$/.exec(p), v = m && [...this.M.rows, ...this.dups.values()].find(r => r.full === m[1] && isVec(r));
     return v && +m[2] < v.width ? this.bitsOf(v)[v.width - 1 - m[2]] : null;
   }
+  // the row of signal s to select: s in the view and not folded away, else its row in one of your groups that is, else s
+  rowInView(s) {
+    const open = r => this.shown(r) && !r.anc.some(id => this.collapsed.has(id));
+    return !s || open(s) ? s : this.allRows().find(r => r.orig === s && open(r)) || s;
+  }
   // rows: rows or paths of buses; on: true / false, none: each the other way -> the buses changed
   setBits(rows, on, quiet = false) {
     const vs = [].concat(rows).map(r => (typeof r === 'string' ? this.sigByPath(r) : r && (r.orig || r))).filter(isVec);
     for (const r of vs) { if (on ?? !this.bitsOpen.has(r.full)) this.bitsOpen.add(r.full); else this.bitsOpen.delete(r.full); }
-    if (this.sel && this.sel.bit != null && !this.bitsOpen.has((this.sel.orig || this.sel).of.full)) this.sel = this.sel.of;   // a bit folded away: its bus
-    this.rowsStale = true; if (this.cmp) this.cmpMarks();
+    const up = r => (r && r.bit != null && !this.bitsOpen.has((r.orig || r).of.full) ? r.of : r);   // a bit folded away: its bus
+    this.sel = up(this.sel); this.rangeRow = up(this.rangeRow);   // the range counted on the bus (its event: onlyFix below)
+    this.rowsStale = true; if (vs.length && on !== true) { this.allRows(); this.onlyFix(); }   // bits folded away: out of the run, the highlight …
+    if (this.cmp) this.cmpMarks();
     if (!quiet) { this.saveRows(); this.renderNames(); this.draw(); }
     return vs;
   }
@@ -460,7 +490,7 @@ class WaveView {
     this.renderNames(); this.draw(); this.settingsChanged(); return this;
   }
   // highlight: list of full paths / names / "*" patterns (one colour each), or null to clear; returns the viewer
-  highlight(list) { this.picks = hlPick(this.M, list, this.sigPool()); this.renderNames(); this.draw(); return this; }
+  highlight(list) { this.picks = hlPick(this.M, list, this.rowPool()); this.renderNames(); this.draw(); return this; }
   toggleHighlight(row) { // row: a model row, a full path or a name
     if (typeof row === 'string') row = this.M.rows.find(r => r.full === row) || this.M.rows.find(r => r.name === row);
     if (!row || row.type === 'space') return this;
@@ -482,7 +512,7 @@ class WaveView {
   selectRun(a, b) {
     const i = this.vis.indexOf(a), j = this.vis.indexOf(b); if (i < 0 || j < 0) return this.select(b);
     this.selRun = new Set(this.vis.slice(Math.min(i, j), Math.max(i, j) + 1).filter(r => r.type === 'sig' && r.tr));
-    this.sel = b && b.type === 'sig' && b.tr ? b : this.sel; this.renderNames(); this.draw(); return this;
+    this.sel = b && b.type === 'sig' && b.tr ? b : this.sel; this.rangeFollow(this.sel); this.renderNames(); this.draw(); return this;
   }
   // alt+drag from (x0, y0) to (x1, y1), layout px: the box drawn; its time the range (not snapped), the signal rows it
   // touches the selection (as shift+click), the last one the selected signal
@@ -500,7 +530,7 @@ class WaveView {
     const rows = this.allRows().filter(r => this.found.has(r) && r.type === 'sig' && r.tr);
     if (!rows.length) { this.toast(this.found.size ? 'no signal found' : 'nothing found'); return this; }
     this.selRun = new Set([...(add ? [...this.selRun, this.sel].filter(Boolean) : []), ...rows]);
-    this.sel = rows[rows.length - 1]; this.selAnchor = rows[0];
+    this.sel = rows[rows.length - 1]; this.selAnchor = rows[0]; this.rangeFollow(this.sel);
     this.renderNames(); this.draw(); this.toast(`${this.selRun.size} selected`); return this;
   }
   isSel(r) { return r === this.sel || (!!this.selRun && this.selRun.has(r)); }
@@ -539,6 +569,7 @@ class WaveView {
       this.foldSaved = null;
     }
     this.findPicks = terms.length && this.findHl ? new Map([...this.found.keys()].map(r => [r, 6])) : new Map();
+    if (this.findMask) { this.allRows(); this.onlyFix(); }   // the Mask leaves rows out: the selection, the run … among the rest
     this.fi = -1; this.fiRow = null;
     if (this.cntEl) { const n = this.found.size, miss = terms.length ? this.omitRows().filter(r => findRow(r, terms, this.M, o)) : [];
       const out = terms.length ? this.onlyOut(r => !!findRow(r, terms, this.M, o)) : 0;   // in the modules Only leaves out
@@ -577,7 +608,7 @@ class WaveView {
   reset() { // Esc: search, highlight and the selected signal go; scroll and time stay, the folding from before the search is back
     const keep = this.fiRow || this.sel;
     if (this.qEl) this.qEl.value = '';
-    this.picks = new Map(); this.sel = null; this.selRun = new Set(); this.extraPicks = new Map(); this.range = null; this.cursor2 = null; this.closeMenu();
+    this.picks = new Map(); this.sel = null; this.selRun = new Set(); this.extraPicks = new Map(); this.rangeOff(); this.cursor2 = null; this.closeMenu();
     this.root.dispatchEvent(new CustomEvent('wavelens:reset'));
     return this.find('', false, keep);
   }
@@ -589,7 +620,7 @@ class WaveView {
   parseIn(v, sel, at = false) {   // at: a time on the waves (the cursor), where c147 is cycle 147's edge
     v = String(v ?? '').trim();
     if (!v) return undefined;
-    if (/^-?[\d.]+(e-?\d+)?$/i.test(v)) return parseFloat(v) * (this.M.timed && sel ? UNIT_PS[sel.value] : 1);
+    if (/^-?[\d.]+(e[+-]?\d+)?$/i.test(v)) return parseFloat(v) * (this.M.timed && sel ? UNIT_PS[sel.value] : 1) - (at ? this.tickOff() : 0);
     const c = /^(?:c|cycle\s*)(-?\d+)$/i.exec(v);   // c147: the rising edge of cycle 147 of the cycles' clock (the band off: the clock found)
     if (c) { const d = at && this.cycData(true); return d ? cycTime(d.ups, d.iz, +c[1]) ?? undefined : undefined; }
     return this.M.timed ? parseT(v) : undefined;
@@ -613,7 +644,8 @@ class WaveView {
     if (!this.ctEl) return;
     const show = (inp, sel, t) => { if (force || document.activeElement !== inp) inp.value = String(Number((t / (this.M.timed &&
       sel ? UNIT_PS[sel.value] : 1)).toPrecision(7))); };
-    show(this.ctEl, this.cuEl, this.cursor); show(this.csEl, this.suEl, this.span); this.ctSaid = `${this.ctEl.value}|${this.cuEl && this.cuEl.value}`;
+    show(this.ctEl, this.cuEl, this.cursor + this.tickOff()); show(this.csEl, this.suEl, this.span);
+    this.ctSaid = `${this.ctEl.value}|${this.cuEl && this.cuEl.value}`;
   }
   clearFind() { // the search ends; the selection and time stay, the folding from before it (the way to the selection open)
     if (this.qEl) this.qEl.value = '';
@@ -622,7 +654,8 @@ class WaveView {
   findStep(dir) { // Enter / shift+Enter: the next / previous match in display order (its modules are opened)
     const order = this.allRows().filter(r => this.found.has(r));
     if (!order.length) return this;
-    this.fi = ((this.fi ?? -1) + dir + order.length) % order.length;
+    const fi = this.fi ?? -1;   // -1: before the first (a new search): n the first, N the last (B-84)
+    this.fi = fi < 0 ? (dir > 0 ? 0 : order.length - 1) : (fi + dir + order.length) % order.length;
     const r = this.fiRow = order[this.fi];
     r.anc.forEach(id => this.collapsed.delete(id));
     if (r.type === 'sig') this.select(r); else { this.renderNames(); this.draw(); }
@@ -658,7 +691,7 @@ class WaveView {
   }
   paintRows() {   // a row of your groups selected (shift+click) or highlighted (ctrl+click) stands for its signal (.orig)
     const base = r => (r && r.orig) || r, run = new Set([...this.selRun].map(base)), pk = new Set([...this.picks.keys()].map(base));
-    const rows = this.sigPool().filter(r => r.type === 'sig' && (this.found.has(r) || pk.has(r) || run.has(r) ||
+    const rows = this.rowPool().filter(r => r.type === 'sig' && (this.found.has(r) || pk.has(r) || run.has(r) ||
       r.anc.some(id => this.picks.has(this.M.groups[id]))) && this.shown(r));   // not what you do not see (Hide, Only)
     return rows.length ? rows : this.sel && this.sel.type === 'sig' ? [base(this.sel)] : [];
   }
@@ -687,12 +720,12 @@ class WaveView {
       if (rm.length) g.signals = g.signals.filter(f => !rm.includes(f)); }
     if (out.length) this.ugMemo = null;
     for (const r of [].concat(rows)) { const p = typeof r === 'string' ? r : r && !r.ug && (r.full || r.path); if (p) this.hiddenRows.add(p); }
-    if (this.sel && !this.allRows().includes(this.sel)) this.sel = null;
-    this.rowsStale = true; this.saveRows(); this.renderNames(); this.draw(); return this;
+    this.allRows(); this.onlyFix();   // the selection, the run, the anchors, the range's signal: what is shown (a row out of your group: gone)
+    this.saveRows(); this.renderNames(); this.draw(); return this;
   }
   unhide(paths) {   // these paths (none: every hidden row) back
     if (paths) [].concat(paths).forEach(p => this.hiddenRows.delete(p)); else this.hiddenRows.clear();
-    this.rowsStale = true; this.saveRows(); this.renderNames(); this.draw(); return this;
+    this.allRows(); this.onlyFix(); this.saveRows(); this.renderNames(); this.draw(); return this;
   }
   // what you did in this viewer as one JSON object (Save / Load… in the bar): the window, the cursor, the order and its
   // prefixes, the folding, the highlight (in its colours' order), the paint, the selected signal, the search, the
@@ -726,8 +759,14 @@ class WaveView {
   async setState(st) {
     if (!st || typeof st !== 'object' || Array.isArray(st) || st.wavelens !== 'state') throw new Error(st &&
       st.signal ? 'WaveDrom waves, not a saved viewer state (open them as a page)' : 'not a saved viewer state');
+    const bad = stateKinds(st); if (bad) throw new Error(bad);   // before anything is applied: never half of it (B-45)
     if (!(st.version <= STATE_VERSION)) this.log('warning', `a state of version ${st.version} (this viewer reads ${STATE_VERSION}): what it does not know is ` +
       'left out');
+    // a colour this browser does not read ("blu", B-86) is left out, the rest of its entry kept: said once, no error
+    const noCol = Object.entries(st.paint && typeof st.paint === 'object' ? st.paint : {}).filter(([, c]) => !colorOk(c)).map(([p, c]) => `paint ${p}: ${c}`);
+    for (const k of ['bookmarks', 'arrows', 'markers', 'spans', 'groups']) for (const x of Array.isArray(st[k]) ? st[k] : [])
+      for (const c of ['color', 'dcolor']) if (x && typeof x === 'object' && x[c] != null && x[c] !== '' && !colorOk(x[c])) noCol.push(`${k}: ${x[c]}`);
+    if (noCol.length) this.log('warning', `the state: ${noCol.length} colour${noCol.length === 1 ? '' : 's'} not read, left out`, { items: noCol });
     const M = this.M, C = st.config || {}, miss = new Set();
     for (const x of this.extraState) if (st[x.key] !== undefined) { try { await x.set(st[x.key]); } catch (e) { this.toast(`${x.key}: ${e.message}`); } }
     if (st.dups !== undefined) { this.setDups(st.dups).forEach(p => miss.add(p)); this.saveRows(); }   // first: all that follows may name a copy
@@ -769,8 +808,6 @@ class WaveView {
         if (p === '*') { this.collapsed = on ? new Set(Object.keys(M.groups).map(Number)) : new Set(); continue; }
         const g = seen(p) && Object.values(M.groups).find(x => x.path === p); if (g) { if (on) this.collapsed.add(g.id); else this.collapsed.delete(g.id); } }
       this.collapsed = new Set([...this.collapsed].sort((x, y) => x - y)); }
-    if (C.highlight !== undefined) { prefixes(C.highlight).filter(p => !p.includes('*')).forEach(p => seen(p));
-      this.picks = hlPick(M, C.highlight, this.sigPool().concat(this.ugRows().filter(r => r.type === 'group'))); }
     if (st.paint !== undefined) { this.painted = new Map(Object.entries(st.paint || {}).filter(([p, c]) => colorOk(c) && seen(p))); this.savePaint();
       }
     if (st.radix !== undefined) {
@@ -785,6 +822,10 @@ class WaveView {
     if (st.hidden !== undefined) { this.hiddenRows = new Set((st.hidden || []).filter(p => seen(p))); this.rowsStale = true; this.saveRows(); }
     if (st.bits !== undefined) { this.bitsOpen = new Set((st.bits || []).map(String).filter(p => seen(p) && isVec(this.sigByPath(p)))); this.rowsStale = true;
       this.saveRows(); }
+    // the highlight after the bits (a bit of a bus shown bit by bit: its row); a path not found (a bit of a bus folded) left out, said
+    if (C.highlight !== undefined) { const pk = this.picks = hlPick(M, C.highlight, this.rowPool().concat(this.ugRows().filter(r => r.type === 'group')));
+      const got = new Set([...pk.keys()].flatMap(r => [r.full, r.name]));
+      prefixes(C.highlight).filter(p => !p.includes('*')).forEach(p => { if (seen(p) && !got.has(p)) miss.add(p); }); }
     // "only": {modules: [paths], on} (on left out: on), null: every module; a path not of a module here: left out (said)
     if (st.only !== undefined) { const o = st.only && typeof st.only === 'object' ? st.only : null, ms = o && Array.isArray(o.modules) ? o.modules : [];
       ms.forEach(p => { if (!this.scopeOf(p)) miss.add(String(p)); });
@@ -814,7 +855,9 @@ class WaveView {
     if (st.compareShow && this.cmp && !this.cmpCant(st.compareShow) && st.compareShow !== this.cmpRun) {
       await this.compareView(st.compareShow, true); }
 
-    if (st.select !== undefined) this.sel = (st.select && seen(st.select) && this.sigByPath(st.select)) || null;
+    if (st.select !== undefined) {   // a new selection: no run of the one before, its row the anchor; the row of it in view (a copy in your group
+      const s = (st.select && seen(st.select) && this.sigByPath(st.select)) || null;   // under a folded module) before one folded away
+      this.sel = this.selAnchor = s && this.rowInView(s); this.selRun = new Set(); }
     if (st.from != null && st.to != null && isFinite(st.from) && isFinite(st.to)) { this.span = Math.min(Math.max(st.to - st.from, this.minSpan), M.t1 - M.t0);
       this.t0 = this.clamp(st.from); }
     if (st.cursor != null && isFinite(st.cursor)) this.cursor = Math.min(Math.max(st.cursor, M.t0), M.t1);
@@ -823,11 +866,11 @@ class WaveView {
       const g = st.range, row = g && g.signal ? (seen(g.signal) && this.sigByPath(g.signal)) || null : null;
       const cl = x => Math.min(Math.max(x, M.t0), M.t1), a = g && cl(Math.min(g.from, g.to)), b = g && cl(Math.max(g.from, g.to));
       if (g && isFinite(g.from) && isFinite(g.to) && b > a) { this.range = [a, b]; this.rangeRow = row; this.rangeKey = null; }
-      else this.range = null;   // none, or outside these waves: never one the wrong way round
+      else this.range = this.rangeRow = null;   // none, or outside these waves: never one the wrong way round
     }
     if (st.edge !== undefined) { this.setEdgeKind((st.edge && st.edge.kind) || 'any'); if (this.evEl) this.evEl.value = (st.edge && st.edge.value) || ''; }
     if (st.find !== undefined && this.qEl) this.qEl.value = st.find || '';
-    if (st.only !== undefined || st.fsm !== undefined) { this.allRows(); this.onlyFix(); }   // a selection the layers left out goes
+    this.allRows(); this.onlyFix();   // a selection the layers left out goes (Hide, Only, the FSMs, bits, a gone group or copy)
     this.find(st.find !== undefined ? st.find || '' : this.q || '');   // draws; with Open the folding above is the one from before the search
     this.settingsChanged();
     return [...miss];
@@ -894,7 +937,7 @@ class WaveView {
   /* ---------------- the plugin API (wavelens/sva.js uses only this, the rows of view.extraRows and the events) ---------------- */
   // Open… a dump: picked (with a handle where the browser keeps one: ⟳ reads the file again), a File, or a dropped one
   // (handle: a Promise of its handle) -> this viewer's waves replaced (a new viewer on the same element: the plugins
-  // take it as any other); keep: the view of these waves stays (⟳)
+  // take it as any other); keep: the view of these waves stays (⟳; {runs: id}: a run's waves, A that run — runsShow)
   async openDump(file, handle = null, keep = false) {
     if (!VIEWS.has(this) && this.root.waveView && this.root.waveView !== this) return this.root.waveView.openDump(file, handle, keep);   // replaced meanwhile
     try {
@@ -941,9 +984,11 @@ class WaveView {
         this.log('error', `${file.name}: no signals`, { items: r.log.map(logLine) }); return this; }
       // a second dump compared (read here, not a saved result) is read again too, and shown as it was
       const cmpAgain = keep && this.cmp && !this.cmp.result && this.cmpSrc ? { ...this.cmpSrc, run: this.cmpRun } : null;
+      this.runsTo = keep && typeof keep === 'object' ? keep.runs : undefined;   // a run shown (runsShow): the A asked, with this open
       const st = keep ? this.runsKeep() : null, root = this.root, opts = Object.assign({}, this.opts,
         { title: file.name, dumpSrc: { name: file.name, handle, file }, dumpDate: r.info.date, svWhy: why, svRun: run, loadCodes: file.wlLoad || null }),
         panel = keep && this.fsmPanelOf(), runs = keep && this.runsOf();
+      this.runsTo = undefined;
       if (this.runsP) this.runsP.close(true);   // its listeners go with it (the root is emptied)
       this.destroy(); root.innerHTML = '';
       const v = new WaveView(root, r.doc, opts); v.panelBox = this.panelBox;   // the panels open where they were
@@ -1133,8 +1178,10 @@ class WaveView {
   collapseAll() { this.collapsed = new Set(Object.keys(this.M.groups).map(Number)); this.foldTouched = true; this.renderNames(); this.draw(); return this; }
   select(row) { // the signal for edge search and bookmarks: a row, a full path / name, or null
     if (typeof row === 'string') row = this.M.rows.find(r => r.type === 'sig' && r.full === row) || this.M.rows.find(r => r.type === 'sig' && r.name === row);
-    const out = row && (this.onlyOn() || this.hiddenRows.size) && !this.shown(row);   // hidden, or left out by Only: not selected
-    this.sel = this.selAnchor = row && row.type === 'sig' && row.tr && !out ? row : null; this.selRun = new Set(); this.renderNames(); this.draw();
+    // hidden, left out by Only or folded away (draw would unselect it): not selected, the range not counted on it
+    const out = row && (((this.onlyOn() || this.hiddenRows.size) && !this.shown(row)) || (row.anc || []).some(id => this.collapsed.has(id)));
+    this.sel = this.selAnchor = row && row.type === 'sig' && row.tr && !out ? row : null; this.selRun = new Set(); this.rangeFollow(this.sel);
+    this.renderNames(); this.draw();
     const el = this.namesEl.querySelector('.row.sel');
     if (el) el.scrollIntoView({ block: 'nearest' }); else if (this.sel) this.centerRow(this.sel);   // a large column: not among its rows yet
     return this;
@@ -1221,14 +1268,14 @@ class WaveView {
   // "120 ns · 12 cycles" (the cycles when their band is on); d: a Δ of deltaList, or a time alone
   deltaText(d) {
     const dt = typeof d === 'number' ? d : d.dt;
-    if (!this.M.timed) return trimNum(dt) + ' cycles';
+    if (!this.M.timed) return cycLen(dt);
     return fmtExact(dt) + (typeof d === 'object' && d.cyc != null && this.cycData() ? ` · ${d.cyc} cycle${d.cyc === 1 ? '' : 's'}` : '') +
       (typeof d === 'object' && d.unchecked ? ' · ? no clock' : '');   // a bound in cycles not checked: the page has no clock
   }
   // the bound a Δ leaves: "✗ > 150 ns", or ''
   deltaBound(d) {
     if (!d.bad) return '';
-    const f = b => boundText(b, x => (this.M.timed ? fmtExact(x) : trimNum(x) + ' cycles')), lo = d.a.dmin, hi = d.a.dmax;
+    const f = b => boundText(b, x => (this.M.timed ? fmtExact(x) : cycLen(x))), lo = d.a.dmin, hi = d.a.dmax;
     const val = b => (typeof b === 'object' ? (this.M.timed ? d.cyc : d.dt) : d.dt);
     return hi != null && val(hi) > (typeof hi === 'object' ? hi.cycles : hi) ? `✗ > ${f(hi)}` : `✗ < ${f(lo)}`;
   }
@@ -1339,7 +1386,7 @@ class WaveView {
     hidden: m.hidden || null, dmin: m.dmin, dmax: m.dmax, expr: m.expr }).filter(([, x]) => x != null && x !== ''))); }
   spanTip(t, row) {
     const on = s => !s.signals || !s.signals.length || (row && (s.signals.includes(row.full) || s.signals.includes(row.name)));
-    const line = (name, a, b) => `${name}: ${this.when(a)} … ${this.when(b)} (Δ ${this.M.timed ? fmtExact(b - a) : trimNum(b - a) + ' cycles'})`;
+    const line = (name, a, b) => `${name}: ${this.when(a)} … ${this.when(b)} (Δ ${this.M.timed ? fmtExact(b - a) : cycLen(b - a)})`;
     const marks = this.timeMarks().map(m => { const s = m.spans[lastBefore(m.spans.length, k => m.spans[k][0], t)];
       return s && t <= s[1] ? line(m.tip || m.label, s[0], s[1]) : ''; });
     return this.spans.filter(s => t >= s.from && t <= s.to && on(s)).map(s => line(s.label || 'span', s.from, s.to)).concat(marks).filter(Boolean).join('\n');
@@ -1382,7 +1429,8 @@ class WaveView {
   // typed time: "250ns", "85.12us"; a plain number is in the unit shown (µs for "85.120 µs"), or cycles
   parseWhen(str, ref) {
     const v = String(str).trim().replace(/^cycle\s*/i, '');
-    if (this.M.timed && /^-?[\d.]+(e-?\d+)?$/i.test(v)) return parseFloat(v) * (UNITS.find(([f]) => Math.abs(ref) >= f) || UNITS[UNITS.length - 1])[0];
+    const u = (UNITS.find(([f]) => (Math.abs(ref) || 1) >= f) || UNITS[UNITS.length - 1])[0];   // fmtExact's unit: 0 is "0 ps", not fs (B-85)
+    if (this.M.timed && /^-?[\d.]+(e[+-]?\d+)?$/i.test(v)) return parseFloat(v) * u;
     return parseT(v);
   }
   // the bookmark, arrow, marker and group lists under the waves (Notes), the names column (Names); while view.run
@@ -1491,7 +1539,8 @@ class WaveView {
     if (s) { if (s.bit != null && !this.bitsOpen.has(s.of.full)) { this.setBits(s.of, true, true); this.saveRows(); }   // a bit of a bus folded: shown
       if (s.anc.some(id => this.collapsed.has(id))) { s.anc.forEach(id => this.collapsed.delete(id)); this.foldTouched = true; }
       this.sel = s; }
-    this.renderNamesNow(); this.draw();
+    this.renderNamesNow(); if (s && this.shown(s)) this.rangeFollow(s);   // the range counted on it as on a select
+    this.draw();
     if (!this.topTo(b.top) && s && this.vis.includes(s) && !this.inSight(s)) this.centerRow(s);
     this.draw(); return this;
   }
@@ -1551,7 +1600,7 @@ class WaveView {
   delta2() {   // "Δ 40 ns / 25 MHz · 4 clk" between the cursors, or ''
     if (this.cursor2 == null) return '';
     const cy = this.cycData(), d = this.cursor2 - this.cursor, clk = cy ? cy.clk : this.clockFor(), n = this.cycles(clk, this.cursor, this.cursor2);
-    return `Δ ${d < 0 ? '−' : ''}${this.fmt(Math.abs(d), Math.abs(d) / 1000 || 1, Math.abs(d) || 1)}` +
+    return `Δ ${d < 0 ? '−' : ''}${this.fmtLen(Math.abs(d), Math.abs(d) / 1000 || 1, Math.abs(d) || 1)}` +
       (this.M.timed && d ? ' / ' + fmtFreq(Math.abs(d)) : '') + (clk && n != null ? ` · ${n} ${clk.name}` : '');
   }
   stepMark(dir) {   // the cursor to the next / previous bookmark in time (round the ends)
@@ -1594,33 +1643,53 @@ class WaveView {
     const at = sig && this.S.cursorSnap > 0 && !free ? this.snap(sig, raw, this.S.cursorSnap) : raw;
     return at !== raw ? at : this.timeAt(x);
   }
-  // the measured range [a, b] (shift+drag, the right button; null: none): drawn over the waves with its Δ, in the readout
+  // the measured range [a, b] (ctrl+drag, the right button; null: none): drawn over the waves with its Δ, in the readout
+  // (none: no signal either, a range made later is not counted on a signal of before)
   setRange(a, b, row) {
     this.range = a == null || b == null || a === b ? null : [Math.min(a, b), Math.max(a, b)];
-    if (row !== undefined) this.rangeRow = row && row.type === 'sig' && row.tr ? row : null;
-    this.rangeKey = null;
-    this.draw(); this.root.dispatchEvent(new CustomEvent('wavelens:range', { detail: { range: this.range } })); return this;
+    if (!this.range) this.rangeRow = null; else if (row !== undefined) this.rangeRow = row && row.type === 'sig' && row.tr ? row : null;
+    this.rangeKey = null; this.draw(); this.rangeSaid(); return this;
+  }
+  rangeOff() { this.range = this.rangeRow = this.rangeKey = null; this.rangeSaid(); }   // no range (a click, Esc), no draw: the caller's
+  // the range counted on the signal selected after it was measured (a click on a name, ↑ ↓): the range stays, its text is
+  // this signal's; no draw (its callers draw after it)
+  rangeFollow(row) {
+    if (!this.range || !row || row.type !== 'sig' || !row.tr || row === this.rangeRow) return;
+    this.rangeRow = row; this.rangeKey = null; this.rangeSaid();
+  }
+  // wavelens:range once per change of the range or of the signal it is counted on, wherever it changed (setRange, a select,
+  // a click, Esc, a state, rows gone): compared by the times and the signal's path, so a row of your group standing for
+  // the same signal is no change
+  rangeSaid() {
+    const signal = this.range && this.rangeRow ? this.rangeRow.full : null, key = this.range ? `${this.range[0]}|${this.range[1]}|${signal}` : '';
+    if (key === (this.rangeEv || '')) return;
+    this.rangeEv = key; this.root.dispatchEvent(new CustomEvent('wavelens:range', { detail: { range: this.range, signal } }));
   }
   // "Δ 20 ns / 50 MHz · 2 ↑ PCLK" / "Δ 80 ns / 12.5 MHz · 7 changes of PADDR (4 values)": the range's length (and its
-  // frequency, a period that long) and, on the signal it was
-  // measured on (else the selected one), its rising edges (a bit) or its changes and the values it took (a bus). All of the
+  // frequency, a period that long) and, on the signal it was measured on, then on each one selected while it stays (else
+  // the selected one), its rising edges (a bit) or its changes and the values it took (a bus), none too ("0 ↑ PSEL"). All of the
   // range counts, what gaps on the waves hide too; with them the clock they count is said on any row, " · 11 ↑ PCLK": it is
   // what the band under the axis counts, and the cycles of a gap cannot be seen
-  rangeText() {
+  // (zero false: a count of none left out, the label of the bookmarks' arrow)
+  rangeText(zero = true) {
     if (!this.range) return '';
     const [a, b] = this.range, s = this.rangeRow && this.rangeRow.tr ? this.rangeRow : this.sel, clk = this.gapLive() ? this.liveCuts().clk : null;
-    const key = `${a}|${b}|${s ? s.full : ''}|${clk ? clk.full : ''}`;
+    const key = `${a}|${b}|${s ? s.full : ''}|${clk ? clk.full : ''}|${zero}`;
     if (this.rangeKey === key) return this.rangeTxt;
     let more = '';
     if (s && s.tr && s.tr.length) {
       const tr = s.tr, i0 = lastLE(tr, a) + 1, i1 = lastLE(tr, b), bus = s.width > 1 || tr.some(o => o.k === '=');
-      if (!bus) { let n = 0; for (let i = Math.max(i0, 1); i <= i1; i++) if (tr[i].k === '1' && tr[i - 1].k === '0') n++; if (n) more = ` · ${n} ↑ ${s.name}`; }
-      else if (i1 >= i0) { const vals = new Set(); for (let i = Math.max(i0 - 1, 0); i <= i1; i++) vals.add(tr[i].bits ?? tr[i].raw ?? tr[i].v ?? tr[i].k);
-        const n = i1 - i0 + 1; more = ` · ${n} change${n === 1 ? '' : 's'} of ${s.name} (${vals.size} value${vals.size === 1 ? '' : 's'})`; }
+      const nm = s.bit != null && s.of ? s.of.name + s.name : s.name;   // a bus's bit with its bus: "PADDR[0]", not "[0]"
+      if (!bus) { let n = 0; for (let i = Math.max(i0, 1); i <= i1; i++) if (tr[i].k === '1' && tr[i - 1].k === '0') n++;
+        if (n || zero) more = ` · ${n} ↑ ${nm}`; }
+      else {   // the value held at a counts: none changed is "0 changes of X (1 value)"
+        const vals = new Set(); for (let i = Math.max(i0 - 1, 0); i <= Math.max(i1, i0 - 1); i++) vals.add(tr[i].bits ?? tr[i].raw ?? tr[i].v ?? tr[i].k);
+        const n = Math.max(i1 - i0 + 1, 0), pl = k => k === 1 ? '' : 's';
+        if (n || zero) more = ` · ${n} change${pl(n)} of ${nm} (${vals.size} value${pl(vals.size)})`; }
     }
     if (clk && !(s && s.full === clk.full)) { const n = this.cycles(clk, a, b); if (n) more = ` · ${n} ↑ ${clk.name}${more}`; }
     this.rangeKey = key;
-    this.rangeTxt = 'Δ ' + (this.M.timed ? fmtExact(b - a) + (b > a ? ' / ' + fmtFreq(b - a) : '') : trimNum(b - a) + ' cycles') + more;
+    this.rangeTxt = 'Δ ' + (this.M.timed ? fmtExact(b - a) + (b > a ? ' / ' + fmtFreq(b - a) : '') : cycLen(b - a)) + more;
     return this.rangeTxt;
   }
   // the rows shown on the screen now (for a picture of what you see)
@@ -1690,8 +1759,8 @@ class WaveView {
     if (clk && !sigs.includes(clk) && cells.length > 1 && this.shown(clk)) signal.unshift(one(clk));   // a clock left out of the view: its cells only
     const title = String(this.opts.title || this.M.title || 'waves');
     return { signal, head: { text: `${title}: ${this.fmt(a, (b - a) / 1000, b - a)} … ${this.fmt(b, (b - a) / 1000, b - a)}` },
-      foot: { text: (clk && !cellT ? `one cell per ${clk.full || clk.name} cycle` : `one cell per ${this.fmt(cellT, 1, cellT || 1)}`) +
-        (ng ? `, | : ${ng} idle stretch${ng === 1 ? '' : 'es'} left out (` + cuts.slice(1).map(([q], i) => this.fmt(q - cuts[i][1], (q - cuts[i][1]) / 100,
+      foot: { text: (clk && !cellT ? `one cell per ${clk.full || clk.name} cycle` : `one cell per ${this.fmtLen(cellT, 1, cellT || 1)}`) +
+        (ng ? `, | : ${ng} idle stretch${ng === 1 ? '' : 'es'} left out (` + cuts.slice(1).map(([q], i) => this.fmtLen(q - cuts[i][1], (q - cuts[i][1]) / 100,
           q - cuts[i][1])).join(', ') + ')' : '') + (this.wdCut ? `; the first ${WD_CELLS} cycles of a range to ${this.fmt(this.wdCut.asked,
           (this.wdCut.asked - a) / 1000, this.wdCut.asked - a)}` : '') }, config: { hscale: 1 } };
   }
@@ -1743,17 +1812,23 @@ class WaveView {
     const rows = this.sel ? [this.sel] : [...this.picks.keys()]; if (rows.length) this.copyRows(rows);
     return rows.length > 0;
   }
-  goto(t, span) { this.markView(); this.span = Math.min(Math.max(span, this.minSpan), this.M.t1 - this.M.t0); this.center(t, 0.1);
-    this.cursor = t; this.draw(); }
+  goto(t, span) { this.markView(); this.span = Math.min(Math.max(span, this.minSpan), this.M.t1 - this.M.t0);   // a jump: the cursor in the waves
+    this.cursor = Math.min(Math.max(t, this.M.t0), this.M.t1); this.center(this.cursor, 0.1); this.draw(); }
+  // a place on the waves: a time, or the cycle of an untimed diagram in the axis's numbering (head.tick)
   fmt(t, ref, unitRef) { return this.M.timed ? fmtTime(t, ref, unitRef) : 'cycle ' + (t + (this.M.tick || 0)).toFixed(Math.max(0,
     Math.min(2, Math.ceil(-Math.log10(ref))))); }
+  // a length (a Δ, a bookmark's distance, a cell, a gap): a time, or cycles of an untimed diagram, never with the tick (B-73)
+  fmtLen(d, ref, unitRef) { return this.M.timed ? fmtTime(d, ref, unitRef) : cycLen(d); }
+  // where the cursor field's numbers start: head.tick of an untimed diagram (its axis's numbering, B-79), else 0
+  tickOff() { return this.M.timed ? 0 : this.M.tick || 0; }
   // the cursor as typed or clicked: exact (fmtExact), in the unit of the view span
   fmtCursor(t) { return this.M.timed ? fmtExact(t, this.span) : 'cycle ' + trimNum(t + (this.M.tick || 0)); }
   // a time from a click at x: rounded to a 1-2-5 step of about a pixel, so the cursor reads as a short exact number
   timeAt(x) {
     const t = this.tOfX(x), tpp = 1 / this.pxPerT(), e = 10 ** Math.floor(Math.log10(tpp));
     let q = [1, 2, 5, 10].find(m => m * e >= tpp) * e; if (this.M.timed) q = Math.max(1, q);
-    return Math.min(Math.max(Math.round(Math.round(t / q) * q * 1e6) / 1e6, this.M.t0), this.M.t1);
+    const r = Math.round(t / q) * q;   // a step under 1 (cycles): its float error rounded away; 1 and over: whole already (B-82)
+    return Math.min(Math.max(q < 1 ? Math.round(r * 1e6) / 1e6 : r, this.M.t0), this.M.t1);
   }
   nudge(dir) { // shift+← / →: the cursor a hundredth of the view, the view follows; into a gap's column: its far side (review B-16)
     const F = this.warpSync(), x = F && F.X(this.cursor) + dir * F.W / 100, h = F && this.gapAt(x);
@@ -1771,25 +1846,34 @@ class WaveView {
     if (want.size) this.need([...want]);
   }
   // the changes of these rows read (the ones not read yet; a row asked for already: that read) -> a promise, when they are
-  // there; the assertions, the FSM panel and the commands ask for theirs this way
+  // there; the assertions, the FSM panel and the commands ask for theirs this way. A read that failed is not run again on
+  // every draw: its rows wait for the dump read again (⟳, R; bughunt B-20); an answer for a viewer gone (destroyed, another
+  // on its element) is dropped (B-21)
   need(rows) {
     const M = this.M, all = new Set(rows.flatMap(r => lazyOf(M, r.orig || r))), ask = [...all].filter(r => !this.lazyWait.has(r));
+    const gone = () => !VIEWS.has(this) || this.root.waveView !== this;
     if (ask.length && this.opts.loadCodes) {
       const p = (async () => {
         const text = await this.opts.loadCodes([...new Set(ask.flatMap(r => r.src.lazy || []))]);
+        if (gone()) return [];
         const got = fillRows(M, vcdSignals(vcdToWave(text, { name: this.opts.title, budget: Infinity }).doc.signal));
         for (const r of ask) if (r.lazy) this.lazyWait.delete(r);   // not in what came: asked again when it is on the screen
-        if (got.length) { this.clkMemo = null; this.cycMemo = null; this.fsmSt = null; this.warpMemo = null; this.invalidate();
-          if (this.fsmP) this.fsmP.render(true); }
+        if (got.length) { this.cmpTake(got); this.dataChanged(); this.invalidate(); }
         return got;
-      })().catch(e => { for (const r of ask) this.lazyWait.delete(r); this.toast('reading the signals: ' + e.message);
+      })().catch(e => { if (gone()) return []; this.toast('reading the signals: ' + e.message);
         this.logError(e, 'reading the signals: ' + e.message); return []; });
       for (const r of ask) this.lazyWait.set(r, p);
     }
     return Promise.all([...all].map(r => this.lazyWait.get(r)).filter(Boolean)).then(() => this);
   }
+  // the changes of some rows are others (read late, a compare's B shown or not): what the viewer made of them made again —
+  // the clock and its cycles, the FSMs, the gaps' warp, the range, the value column (bughunt B-18, B-19)
+  dataChanged() {
+    this.clkMemo = null; this.cycMemo = null; this.fsmSt = null; this.warpMemo = null; this.rangeKey = null; this.valsAt = null;
+    if (this.fsmP) this.fsmP.render(true);
+  }
   invalidate() { // one redraw in the next frame, however many changes ask for it
-    if (!this.inv) this.inv = requestAnimationFrame(() => { this.inv = 0; if (this.root.isConnected) this.draw(); });
+    if (!this.inv) this.inv = requestAnimationFrame(() => { this.inv = 0; if (this.root.isConnected && VIEWS.has(this)) this.draw(); });
   }
   // the tooltip of a signal at t: its value there, the change into it and the next change ("prev → value @ t")
   valueTip(r, t) {
@@ -1924,21 +2008,33 @@ class WaveView {
     }
   }
   print(on) { this.printing = on; if (!on) this.wcol.querySelectorAll('canvas.wv-print').forEach(c => c.remove()); this.draw(); }
+  // the bar's readout in its pieces (each '' or " · …" after the first): one line cut with … (the whole in its title), so a
+  // longer text (another signal the range follows) never wraps the head and moves the waves; a narrow bar gives each piece a
+  // line of its own (wavelens.css), its " · " hidden: the lines come and go with the pieces, never with the length of a text
+  readout(parts) {
+    const el = this.curEl; let ps = this.curPs;
+    if (!ps || ps[0].parentNode !== el) { el.textContent = ''; ps = this.curPs = parts.map(() => { const s = document.createElement('span'); s.className = 'cp';
+      const sep = document.createElement('span'); sep.className = 'cs'; s.append(sep, document.createTextNode('')); el.append(s); return s; }); }
+    parts.forEach((t, i) => { const s = ps[i], sep = t.startsWith(' · '); s.hidden = !t;
+      s.firstChild.textContent = sep ? ' · ' : ''; s.lastChild.data = sep ? t.slice(3) : t; });
+    el.title = parts.join('');
+  }
   syncReadouts() { // the cursor fields, the cursor and span readout, the value column; the events of what changed
     const M = this.M, fire = (name, detail) => this.root.dispatchEvent(new CustomEvent('wavelens:' + name, { detail }));
     if (this.evCursor !== this.cursor) { this.evCursor = this.cursor; fire('cursor', { t: this.cursor }); }
     if (this.evT0 !== this.t0 || this.evSpan !== this.span) { this.evT0 = this.t0; this.evSpan = this.span; fire('view', { t0: this.t0, span: this.span }); }
     if (this.evSel !== this.sel) { this.evSel = this.sel; fire('select', { row: this.sel }); }
     this.syncCursorFields();
-    this.curEl.textContent = 'cursor ' + this.fmtCursor(this.cursor) + ' · view ' + (M.timed ? fmtTime(this.span, this.span / 10,
-      this.span) : this.span.toFixed(1) + ' cycles') + (this.cursor2 != null ? ' · cursor 2 ' + this.fmtCursor(this.cursor2) + ' · ' + this.delta2() : '') +
-      (this.range ? ' · ' + this.rangeText() : '') + this.cycText() + this.gapReadout();
+    const view = M.timed ? fmtTime(this.span, this.span / 10, this.span) : this.span.toFixed(1) + ' cycles';
+    this.readout(['cursor ' + this.fmtCursor(this.cursor) + ' · view ' + view,
+      this.cursor2 != null ? ' · cursor 2 ' + this.fmtCursor(this.cursor2) + ' · ' + this.delta2() : '', this.range ? ' · ' + this.rangeText() : '',
+      this.cycText(), this.gapReadout()]);
     // the bookmarks' Δ to the cursor; the bookmarks and markers at the cursor marked in their lists, as an assertion's attempt is
     if ((this.bms.length || this.umarks.length) && (this.dtAt !== this.cursor || this.dtGen !== this.notesGen)) {
       this.dtAt = this.cursor; this.dtGen = this.notesGen;
       for (const li of this.notesEl.querySelectorAll('li[data-n]')) { const b = this.bms.find(x => x.n === +li.dataset.n); if (!b) continue;
         const d = b.t - this.cursor, el = li.querySelector('.dt'); li.classList.toggle('here', d === 0);
-        el.textContent = d === 0 ? '' : `${d < 0 ? '−' : '+'}${this.fmt(Math.abs(d), Math.abs(d) / 1000 || 1, Math.abs(d) || 1)}`; }
+        el.textContent = d === 0 ? '' : `${d < 0 ? '−' : '+'}${this.fmtLen(Math.abs(d), Math.abs(d) / 1000 || 1, Math.abs(d) || 1)}`; }
       for (const li of this.notesEl.querySelectorAll('li[data-k]')) {
         const m = this.umarks[+li.dataset.k]; li.classList.toggle('here', !!m && m.t === this.cursor); }
     }

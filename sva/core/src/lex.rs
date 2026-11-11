@@ -57,6 +57,17 @@ pub enum Tok {
     End,
 }
 
+impl Tok {
+    /// A token that opens a bracket: `(` `[` `{` and the ones that end with one, `'(` `'{` `[*` `[=` `[->` (their
+    /// `]` / `)` closes them; `[+]` is whole). Every scan that skips over brackets counts these (bughunt B-03).
+    pub fn opens(&self) -> bool {
+        matches!(self, Tok::Sym("(" | "[" | "{" | "'(" | "'{" | "[*" | "[=" | "[->"))
+    }
+    pub fn closes(&self) -> bool {
+        matches!(self, Tok::Sym(")" | "]" | "}"))
+    }
+}
+
 /// `` `define NAME(a, b = 1) body ``: parameters with their default tokens, the body tokens.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Define {
@@ -527,8 +538,10 @@ impl<'a> Lexer<'a> {
                 value = (value << bpd) | v;
                 unknown = (unknown << bpd) | u;
             }
-            // a leading x / z fills the rest of the size
-            if let (Some(w), true) = (width, xz(digits[0])) {
+            // a leading x / z fills the rest of the size; unsized ('hx), every bit: it is x-extended to its context
+            // as 'dx is (IEEE 1800-2017 5.7.1; bughunt B-06)
+            if xz(digits[0]) {
+                let w = width.unwrap_or(64);
                 let have = digits.len() as u32 * bpd;
                 if w > have {
                     unknown |= mask128(w) & !mask128(have);

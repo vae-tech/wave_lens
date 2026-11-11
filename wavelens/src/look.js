@@ -14,9 +14,24 @@ Object.assign(WaveView.prototype, {
     for (const [p, rx] of Object.entries(o.radix || {})) { const r = this.sigPool().find(x => x.type === 'sig' && x.full === p);
       if (r && isRadix(rx)) { r.radix0 = r.radix; r.radix = rx; if (r.dupOf) r.enum = undefined; this.radixes.set(p, rx); }
       else if (!r && p.startsWith('ƒ ') && isRadix(rx)) this.radixes.set(p, rx); }   // an expression's row (sva.js): it takes it when it is made
+    // a colour of a copy not here (a copy's bits removed before B-31 left theirs: the next copy of that name took them): out, quietly
+    const stale = [...this.painted.keys()].filter(k => { const c = this.copyOfKey(k); return c && !this.dups.has(c); });
+    if (stale.length) { stale.forEach(k => this.painted.delete(k)); this.savePaint(); }
   },
   // Duplicate: the rows of the model and the copies: where a name, a highlight or a run of selected rows is looked for
   sigPool() { return this.dups.size ? [...this.M.rows, ...this.dups.values()] : this.M.rows; },
+  // and the bits of the buses shown bit by bit: where a highlight, Paint and the menu's rows are looked for (a bit highlighted is one)
+  rowPool() {
+    const p = this.sigPool();
+    return this.bitsOpen.size ? p.flatMap(r => (r.type === 'sig' && this.bitsOpen.has(r.full) && isVec(r) ? [r, ...this.bitsOf(r)] : [r])) : p;
+  },
+  // the copy a key of the colours names ("PADDR#2", "PADDR[7:4]", a bit of one: "PADDR#2[3]"), or null: none (a signal, a bit of one)
+  copyOfKey(k) {
+    for (const c of [k, typeof k === 'string' && /\[\d+\]$/.test(k) ? k.replace(/\[\d+\]$/, '') : null]) {
+      const id = c && (dupId(c) || sliceId(c));
+      if (id && this.M.rows.some(r => r.type === 'sig' && r.full === id.of) && !this.M.rows.some(r => r.full === c)) return c; }
+    return null;
+  },
   withDups(rows) { return this.dups.size ? rows.flatMap(r => (this.dupsBy.has(r) ? [r, ...this.dupsBy.get(r)] : [r])) : rows; },
   dupPut(base, n) {
     const d = dupRow(base, n), list = this.dupsBy.get(base) || [];
@@ -51,13 +66,17 @@ Object.assign(WaveView.prototype, {
     this.dupsBy.set(base, [...list, d].sort((a, b) => a.dupN - b.dupN || (b.slice ? b.slice[0] : 0) - (a.slice ? a.slice[0] : 0)));
     this.dups.set(d.full, d); this.rowsStale = true; this.ugMemo = null; return d;
   },
-  // a copy gone, and what was its: its colour, its radix; a bookmark on it goes to its signal
+  // a copy gone, and what was its (its bits' too): its colour, its radix; a bookmark on it goes to its signal, on its bit i to the bus's
+  // bit i (a slice's: lsb + i). What still names its rows (the highlight, the run …): onlyFix in dupDone
   dupDrop(d) {
-    const base = d.dupOf, f = d.full, list = this.dupsBy.get(base).filter(x => x !== d), to = p => (p === f ? base.full : typeof p === 'string' &&
-      p.startsWith(f + '[') ? base.full + p.slice(f.length) : p);
+    const base = d.dupOf, f = d.full, list = this.dupsBy.get(base).filter(x => x !== d);
+    const mine = p => typeof p === 'string' && (p === f || p.startsWith(f + '['));
+    const bit = p => { const i = /^\[(\d+)\]$/.exec(p.slice(f.length)); return i && d.slice ? `[${d.slice[1] + +i[1]}]` : p.slice(f.length); };
+    const to = p => (p === f ? base.full : mine(p) ? base.full + bit(p) : p);
     if (list.length) this.dupsBy.set(base, list); else this.dupsBy.delete(base);
-    this.dups.delete(f); this.radixes.delete(f); this.analogs.delete(f); this.painted.delete(f); this.bitsOpen.delete(f);
-    for (const p of [...this.hiddenRows]) if (p === f || p.startsWith(f + '[')) this.hiddenRows.delete(p);   // its bits hidden too
+    this.dups.delete(f); this.bitsOpen.delete(f);
+    for (const m of [this.radixes, this.analogs, this.painted]) for (const p of [...m.keys()]) if (mine(p)) m.delete(p);
+    for (const p of [...this.hiddenRows]) if (mine(p)) this.hiddenRows.delete(p);   // its bits hidden too
     for (const g of this.ugroups) g.signals = g.signals.filter(p => p !== f);
     for (const b of this.bms) b.signal = to(b.signal);
     for (const m of this.umarks) { m.signal = to(m.signal); m.dsignal = to(m.dsignal); }
@@ -67,7 +86,8 @@ Object.assign(WaveView.prototype, {
     if (this.rangeRow === d) this.rangeRow = base;
     this.rowsStale = true; this.ugMemo = null;
   },
-  dupDone() { this.savePaint(); this.saveBookmarks(); this.saveRows(); if (this.cmp) this.cmpMarks(); this.renderNames(); this.renderNotes(); this.draw(); },
+  dupDone() { this.allRows(); this.onlyFix(); this.savePaint(); this.saveBookmarks(); this.saveRows(); if (this.cmp) this.cmpMarks(); this.renderNames();
+    this.renderNotes(); this.draw(); },
   // the copies a state names, none other -> the ones of signals these waves have not got
   setDups(ids) {
     const want = (Array.isArray(ids) ? ids : []).map(String), bad = [];

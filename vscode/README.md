@@ -12,7 +12,8 @@ is turned into VCD text with it, kept in the extension's storage).
   default there for these files if you like).
 - **A large dump** (`wavelens.lazy`, auto: an FST of 4 MB, a VCD of 64 MB and more) opens with every module and signal
   at once, the top level open and its modules folded; the signals you open are read from its FST then (a VCD becomes an
-  FST once, kept). Assertions, the FSM panel and pictures read what they need first.
+  FST once, kept). Assertions, the FSM panel and pictures read what they need first. An FST a new run wrote over is
+  not read under the old header: the tab says so once, ⟳ reads it again.
 - **A tab in a window of its own** (*Move into New Window*, *Copy into New Window*): VS Code makes its page again; the dump is
   read again as it is (through the extension when the window's webview cannot load it, as over a remote connection: the
   log says so), with the view as you left it.
@@ -24,7 +25,8 @@ is turned into VCD text with it, kept in the extension's storage).
   pick on the host too. Bookmarks, groups, colours are kept per dump in the workspace (the store of a dump that no longer exists goes at the next start).
 - **A piece of the waves** (the right button on a range: *Save as WaveLens (JSON)*): `x.wavelens.json` opens in a tab
   of its own (*Open in WaveLens*), its view with it. *Slice ▸* keeps the range as a run of its own whose times start at 0
-  (pieces compared with each other from their first sample in the Runs panel), or saves it as an FST.
+  (pieces compared with each other from their first sample in the Runs panel; with the dump, a whole run or a file of
+  Compare…: at its place in it), or saves it as an FST.
 - **The runs kept** (Runs…, `gu`, *WaveLens: The runs kept of this dump*): keep the dump of now with a name, tags and a comment
   (an FST in `.wavelens-runs` beside it). The list holds the dump of now and the runs; two rows carry a letter: **A**, the
   waves shown in the tab (`w`: a run's waves read here, the window and rows kept; `]w` `[w` walk through the runs), and **B**,
@@ -68,7 +70,7 @@ that breaks the viewer: the defaults again, said. *WaveLens: Reset the configura
 The keys are the viewer's (`?` in the tab): the plain ones, and the ctrl / alt ones that mean what they mean in VS Code
 (ctrl+F, ctrl+C, ctrl+Z, alt+C W R); `wavelens.keysToVSCode` (`ctrl+G`: Go to Line) go to VS Code — the list of your
 groups is `gl` then. Settings: `wavelens.logLinks` (`[]`: more patterns of a log's links), `wavelens.theme` (auto), `wavelens.keysToVSCode` (`["ctrl+G"]`), `wavelens.openLastState` (true), `wavelens.verilator` (verilator), `wavelens.sources` (`**/*.sv`, `**/*.svh`), `wavelens.lazy` (auto: a large dump read as it is needed; always, never), `wavelens.autoReload` (false: the tab offers ⟳ after a new
-simulation; true: it reads the dump at once), `wavelens.live` (true), `wavelens.runsDir` (empty: `.wavelens-runs` beside the dump), `wavelens.sva` (another sva program; the package carries the Linux one: on a Windows host the path of `sva.exe`, `make dist-windows`).
+simulation; true: it reads the dump at once), `wavelens.live` (true), `wavelens.runsDir` (empty: `.wavelens-runs` beside the dump), `wavelens.sva` (another sva program; the package carries the Linux x86_64 one, used on such a host only: on a Windows host the path of `sva.exe`, `make dist-windows`; on macOS or Linux arm64 one built there, `cargo build --release -p sva-cli` in `sva/`; else `sva` on the PATH).
 
 **Install.** Build the package from the repository (`make vsix`: `out/wavelens.vsix`, a copy as `wavelens-<version>.vsix`, for a Linux x86-64 host;
 VS Code ≥ 1.80), then in a terminal of the **remote** window `code --install-extension out/wavelens.vsix` (or

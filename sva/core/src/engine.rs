@@ -383,8 +383,10 @@ impl Eng<'_> {
 
     // ---- thread sets
 
-    /// One cycle of a set of threads. Returns the paths of the matches at this cycle and the last boolean that was
-    /// false for a thread of this set; `dead` gets the longest path of a thread that ended without a match.
+    /// One cycle of a set of threads. Returns the path of the match at this cycle (one: the threads of a set share
+    /// their start, so the matches at one cycle are one match — several threads may reach it, the first path is kept;
+    /// bughunt B-04) and the last boolean that was false for a thread of this set; `dead` gets the longest path of a
+    /// thread that ended without a match.
     fn advance(&mut self, th: &mut Vec<Thread>, dead: &mut u32) -> (Vec<u32>, Option<u16>) {
         let mark = self.fails.len();
         let mut next: Vec<Thread> = Vec::with_capacity(th.len());
@@ -404,7 +406,9 @@ impl Eng<'_> {
             for (n, ids) in out.drain(..) {
                 let p = self.extend(x.p, &ids);
                 if n == END {
-                    ends.push(p);
+                    if ends.is_empty() {
+                        ends.push(p);
+                    }
                 } else if seen.insert(n) {
                     next.push(Thread { t: n, p });
                 }
@@ -753,12 +757,14 @@ impl Eng<'_> {
     fn cbool(&mut self, e: &Expr, id: Option<&str>, cm: &Compiler) -> CResult<u16> {
         let ce = cm.compile(e, 0)?;
         let elem = id.and_then(|id| self.a.elements.iter().position(|x| x.id == id)).map_or(NO_ELEM, |k| k as u16);
-        // the left side of a bus compare is shown with the step
+        // the left side of a bus compare is shown with the step, at the compare's width when that changes its value
+        // (bughunt B-08: `x + y == 9'h100` keeps the carry)
+        let at = |x: &Expr| if Compiler::takes_ctx(x) { cm.operand_ctx(e, 0, x) } else { 0 };
         let show = match e {
             Expr::Binary { op: BinOp::Eq | BinOp::Ne | BinOp::CaseEq | BinOp::CaseNe | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge, a, b, .. } => {
-                [a, b].into_iter().find_map(|x| cm.compile(x, 0).ok().filter(|c| c.w > 1 && c.constant().is_none()))
+                [a, b].into_iter().find_map(|x| cm.compile(x, at(x)).ok().filter(|c| c.w > 1 && c.constant().is_none()))
             }
-            Expr::Inside { a, .. } => cm.compile(a, 0).ok().filter(|c| c.w > 1 && c.constant().is_none()),
+            Expr::Inside { a, .. } => cm.compile(a, at(a)).ok().filter(|c| c.w > 1 && c.constant().is_none()),
             _ => None,
         };
         if self.bools.len() >= TRUNC as usize {
@@ -823,7 +829,14 @@ impl Eng<'_> {
                     SeqOp::And => self.ar.mk(Term::And(x, y)),
                     SeqOp::Intersect => self.ar.mk(Term::Isect(x, y)),
                     SeqOp::Within => {
-                        // a within b = (1[*0:$] ##1 a ##1 1[*0:$]) intersect b
+                        // a within b = (1[*0:$] ##1 a ##1 1[*0:$]) intersect b; as with and / intersect, an empty
+                        // match of a is no match (bughunt B-07): a that can match empty is a intersect 1[*1:$]
+                        let x = if self.ar.null(x) {
+                            let some = self.ar.rep(ANY, 1, INF);
+                            self.ar.mk(Term::Isect(x, some))
+                        } else {
+                            x
+                        };
                         let any = self.ar.rep(ANY, 0, INF);
                         let tail = self.ar.cat(x, 1, 1, any);
                         let w = self.ar.cat(any, 1, 1, tail);

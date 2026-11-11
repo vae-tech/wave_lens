@@ -124,7 +124,7 @@
         "wavelens.sva": {
           "type": "string",
           "default": "",
-          "description": "The sva program: an FST as VCD text, Make an FST, Compare…, the runs kept (empty: the one inside the extension, for a Linux host; a Windows host has none bundled: the path of sva.exe, which make dist-windows builds)."
+          "description": "The sva program: an FST as VCD text, Make an FST, Compare…, the runs kept (empty: the one inside the extension on a Linux x86_64 host, else sva on the PATH; a Windows host has none bundled: the path of sva.exe, which make dist-windows builds; macOS or Linux arm64: one built there, cargo build --release -p sva-cli in sva/)."
         }
       }
     }

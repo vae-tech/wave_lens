@@ -527,6 +527,23 @@ mod files {
     }
 
     #[test]
+    fn default_names_an_earlier_formal() {
+        // bughunt B-96: a default that names a formal before it takes that formal's actual (it was a signal of that name)
+        let a = one(&format!("sequence s(r, q = r[*2]); q ##1 r; endsequence {}", clocked("s(x) |-> y")));
+        assert_eq!(labels(&a), ["s1 x[*2]", "s2 ##1 x", "s3 y"]);
+        assert_eq!(sigs(&a), ["clk", "x", "y"]);
+        // given, the default is not used; an empty actual takes it
+        assert_eq!(labels(&one(&format!("sequence s(r, q = r[*2]); q ##1 r; endsequence {}", clocked("s(x, z) |-> y")))), ["s1 z", "s2 ##1 x", "s3 y"]);
+        assert_eq!(labels(&one(&format!("sequence s(r, q = r[*2], t = q); t ##1 r; endsequence {}", clocked("s(x, ) |-> y")))), ["s1 x[*2]", "s2 ##1 x", "s3 y"]);
+        // a constant formal in a default's delay; named actuals, in any order
+        let p = "property p(a, int n = 1, sequence b = a ##n a); b |-> a; endproperty";
+        assert_eq!(labels(&one(&format!("{p} {}", clocked("p(x)")))), ["s1 x", "s2 ##1 x", "s3 x"]);
+        assert_eq!(labels(&one(&format!("{p} {}", clocked("p(.n(3), .a(x))")))), ["s1 x", "s2 ##3 x", "s3 x"]);
+        // a default naming a formal after it: that name is not a formal there (a signal, as before)
+        assert_eq!(sigs(&one(&format!("sequence s(q = r, r = 1'b1); q ##1 r; endsequence {}", clocked("s()")))), ["clk", "r"]);
+    }
+
+    #[test]
     fn argument_errors() {
         let d = "property p(a, b); a |-> b; endproperty\nsequence s(sequence x, logic y); x ##1 y; endsequence\n";
         let e = |body: &str| errs(&format!("{d}{}", clocked(body)));
@@ -1116,4 +1133,16 @@ fn labels_qualified_by_module_when_repeated() {
     assert_eq!(a.assertions[0].label, "a_hold");
     assert_eq!(b.assertions.iter().map(|x| x.label.as_str()).collect::<Vec<_>>(), ["m2.a_hold", "x"]);
     assert!(a.errors.is_empty() && b.errors.is_empty());
+}
+
+#[test]
+fn recovery_counts_the_repetition_brackets() {
+    // after an error the parser skips to the item's ';' outside brackets: `[*`, `[->`, `[=` and `'(` open one, as `[`
+    // does (bughunt B-03); before, the `]` of `b[*2]` closed the `(` and the recovery stopped at the inner ';'
+    for rep in ["b[*2]", "b[->1]", "b[=1:2]", "4'(b)"] {
+        let src = format!("module m(input logic clk, a, b, c);\n  e: assert property (@(posedge clk) a |-> ) ({rep}; assert property (@(posedge clk) c));\n  ok: assert property (@(posedge clk) a |-> c);\nendmodule\n");
+        let p = parse(&src);
+        assert_eq!(errs(&src).len(), 1, "{rep}: {:?}", errs(&src));
+        assert_eq!(p.assertions.iter().map(|a| a.label.as_str()).collect::<Vec<_>>(), ["ok"], "{rep}");
+    }
 }

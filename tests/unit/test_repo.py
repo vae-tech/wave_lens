@@ -30,6 +30,27 @@ class Makefile(unittest.TestCase):
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual(re.findall(r'\$\((?!BUILD\))[^)]*\)', p.stdout), [])   # $(BUILD) is the variable's name; nothing else unexpanded
 
+    def test_documented_variables_are_not_internal(self):
+        # bughunt B-90: `make diff-results A=a.json B=b.json` overrode the Makefile's own B (the build directory): a
+        # command-line variable beats even `:=`, so no documented `make … X=` may name one the Makefile assigns for itself
+        mk = read('Makefile')
+        own = set(re.findall(r'^([A-Za-z_]\w*)\s*:?=', mk, re.M))   # `?=` ones are the user's knobs
+        texts = [mk, read('README.md')] + [read('docs', f) for f in sorted(os.listdir(os.path.join(H.ROOT, 'docs')))
+                                           if f.endswith(('.md', '.html'))]
+        said = set()
+        for t in texts:
+            for m in re.finditer(r'\bmake +[a-z][\w-]*((?: +[A-Z_]\w*=\S*)+)', t):
+                said |= set(re.findall(r'([A-Z_]\w*)=', m.group(1)))
+        self.assertIn('WAVES', said)
+        self.assertEqual(sorted(said & own), [])
+
+    def test_diff_results_old_names_refused(self):
+        p = subprocess.run(['make', '-n', 'BUILD=/tmp/wavelens-none', 'diff-results', 'A=a.json', 'B=b.json'], cwd=H.ROOT,
+                           capture_output=True, text=True)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn('REF=', p.stderr)
+        self.assertNotIn('cargo', p.stdout)
+
 
 class PublicNames(unittest.TestCase):
     """review 0.31 S7, T18: the names others build on, pinned: a name removed or renamed fails here and needs make unit-bless,

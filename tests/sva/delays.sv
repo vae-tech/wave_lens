@@ -46,4 +46,7 @@ module delays (
         @(posedge clk) disable iff (!rst_n)
         start ##1 busy[*2] ##1 done |=> !busy
     );
+    // ##2 into an empty repetition is ##1 1: done two cycles after start
+    // (bughunt B-02: it never matched)
+    d_empty:    assert property (@(posedge clk) start |-> ##2 busy[*0] ##1 done);
 endmodule

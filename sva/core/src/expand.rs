@@ -251,7 +251,9 @@ impl<'u, 's> X<'u, 's> {
                 Some(v) => v,
                 None => match &p.default {
                     Some(d) => {
-                        let mut x = X { u: self.u, scope: decl_scope, env: HashMap::new(), sh: &mut *self.sh };
+                        // where the declaration is, with the formals before it bound to their actuals: `s(r, q = r[*2])`
+                        // as s(x) is x[*2], not a signal r (IEEE 1800-2017 16.8; bughunt B-96)
+                        let mut x = X { u: self.u, scope: decl_scope, env: env.clone(), sh: &mut *self.sh };
                         Some(x.prop(d, false)?)
                     }
                     None => return err(at, format!("the argument '{}' of '{decl}' is missing", p.name)),

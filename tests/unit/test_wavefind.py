@@ -66,6 +66,14 @@ class Times(unittest.TestCase):
         self.assertEqual(F.edge_times(bit, 'negedge', 0, 20), [10])
         self.assertEqual(F.edge_times(bit, 'change', 6, 20), [10, 15])
 
+    def test_an_assertion_on_its_own_clock(self):   # bughunt B-53: sva eval's "cycles" of an assertion over the document's
+        doc = {'unit': 'ns', 'cycles': [10, 20, 30], 'assertions': [
+            {'name': 'p', 'cycles': [5, 15, 25], 'attempts': [{'result': 'fail', 'start': 1, 'end': 1, 'failed_at': 2}]}]}
+        self.assertEqual(F.cycle_ps(doc['assertions'][0], doc), [5000, 15000, 25000])
+        self.assertEqual(F.cycle_ps({'name': 'n'}, doc), [10000, 20000, 30000])
+        self.assertEqual(F.attempt_times(doc), [25000])
+        self.assertEqual(F.attempt_times(doc, point='start'), [15000])
+
 
 class Bookmarks(unittest.TestCase):
     """A bookmark "at" an event and a marker "on" one, through the converter (vcd2wavedrom.py, as mkhtml.py runs it)."""

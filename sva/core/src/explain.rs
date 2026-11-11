@@ -108,16 +108,19 @@ pub fn explain(a: &Assertion, tr: &Trace, from: usize, to: usize) -> Result<Vec<
         .into_iter()
         .filter_map(|(id, what, e)| {
             let mut n = 0;
-            node(e, &cm, &cols, from, to, &mut n).map(|tree| Explained { id, what, tree })
+            node(e, 0, &cm, &cols, from, to, &mut n).map(|tree| Explained { id, what, tree })
         })
         .collect())
 }
 
-fn node(e: &Expr, cm: &Compiler, s: &Cols, from: usize, to: usize, n: &mut usize) -> Option<Node> {
+/// `e` valued at the context width `ctx` its parent gives it when its value depends on it (`a + b` under `== 9'h100`
+/// keeps its carry: bughunt B-08), else at its own width (a signal, a select: the same value), its parts below.
+fn node(e: &Expr, ctx: u32, cm: &Compiler, s: &Cols, from: usize, to: usize, n: &mut usize) -> Option<Node> {
     if *n >= MAX_NODES {
         return None;
     }
-    let ce = cm.compile(e, 0).ok()?;
+    let ctx = if Compiler::takes_ctx(e) { ctx } else { 0 };
+    let ce = cm.compile(e, ctx).ok()?;
     if ce.constant().is_some() {
         return None;
     }
@@ -125,7 +128,11 @@ fn node(e: &Expr, cm: &Compiler, s: &Cols, from: usize, to: usize, n: &mut usize
     let values = (from..=to).map(|c| value_json(ce.eval(s, c as i64), ce.w)).collect();
     let mut parts = Vec::new();
     kids(e, &mut parts);
-    let kids = if matches!(e, Expr::Ident { .. }) { Vec::new() } else { parts.into_iter().filter_map(|k| node(k, cm, s, from, to, n)).collect() };
+    let kids = if matches!(e, Expr::Ident { .. }) {
+        Vec::new()
+    } else {
+        parts.into_iter().filter_map(|k| node(k, cm.operand_ctx(e, ctx, k), cm, s, from, to, n)).collect()
+    };
     Some(Node { text: e.to_string(), w: ce.w, values, kids })
 }
 
@@ -260,6 +267,25 @@ mod tests {
         assert_eq!(explain(&a, &trace(&[("a", &[1])]), 0, 0).err().unwrap(), "not in the trace: b, c, d");
         // a window starting far past the trace: no overflow (debug) and no wrap (release), an empty answer
         let _ = explain(&a, &t, usize::MAX, usize::MAX);
+    }
+
+    #[test]
+    fn explain_values_a_part_at_the_width_its_parent_gives_it() {
+        // a + b of two 8-bit 8'h80 under == 9'h100 is 9 bits wide: 256, not 0 (bughunt B-08: "0 == 256 -> true")
+        let src = "module m; a_p: assert property (@(posedge clk) a + b == 9'h100 && ~c == 9'h1FF); endmodule";
+        let a = crate::parse(src).assertions.remove(0);
+        let mut t = Trace::default();
+        for n in ["a", "b", "c"] {
+            t.add(n, Column::known(8, &[if n == "c" { 0 } else { 0x80 }]));
+        }
+        let x = explain(&a, &t, 0, 0).unwrap();
+        let [eq, not] = [&x[0].tree.kids[0], &x[0].tree.kids[1]];
+        assert_eq!((eq.values[0].clone(), not.values[0].clone()), (json!(1), json!(1)));
+        let sum = &eq.kids[0];
+        assert_eq!((sum.text.as_str(), sum.w, sum.values[0].clone()), ("a + b", 9, json!(256)));
+        // a signal keeps its own width (its value is the same)
+        assert_eq!((sum.kids[0].text.as_str(), sum.kids[0].w), ("a", 8));
+        assert_eq!((not.kids[0].text.as_str(), not.kids[0].w, not.kids[0].values[0].clone()), ("~c", 9, json!(511)));
     }
 
     #[test]

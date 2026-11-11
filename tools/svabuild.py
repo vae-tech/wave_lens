@@ -389,6 +389,8 @@ def main():
     add_sva_bin_arg(ap)
     ap.add_argument('--out', help='output JSON (default: stdout)')
     a = ap.parse_args()
+    if not os.path.isfile(a.waves):   # B-94: an empty result and exit 0 before
+        raise WaveError(f'no such dump: {a.waves}')
     doc = build([(p, p) for p in a.sva], a.bind, a.waves, a.sva_bin, a.t_from, a.t_to)
     text = json.dumps(doc, indent=1) + '\n'
     if a.out:

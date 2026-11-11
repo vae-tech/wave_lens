@@ -19,14 +19,15 @@ class CanvasPainter {
   }
   path(cmds, st) {
     const g = this.g; g.beginPath();
-    if (st.stroke && !st.fill) cmds = this.snap(cmds, st.w || 1);
+    if (st.stroke && !st.fill) cmds = this.snap(cmds, st.w ?? 1);
     for (const c of cmds) {
       if (c[0] === 'M') g.moveTo(c[1], c[2]); else if (c[0] === 'L') g.lineTo(c[1], c[2]);
       else if (c[0] === 'C') g.bezierCurveTo(c[1], c[2], c[3], c[4], c[5], c[6]); else g.closePath();
     }
     g.globalAlpha = (st.alpha ?? 1) * this.fade;
     if (st.fill) { g.fillStyle = this.col(st.fill); g.fill(); }
-    if (st.stroke) { g.strokeStyle = this.col(st.stroke); g.lineWidth = st.w || 1; g.setLineDash(st.dash || []); g.stroke(); g.setLineDash([]); }
+    // a width 0 (traceWidth: 0) is no line: the canvas would keep the width before it
+    if (st.stroke && st.w !== 0) { g.strokeStyle = this.col(st.stroke); g.lineWidth = st.w || 1; g.setLineDash(st.dash || []); g.stroke(); g.setLineDash([]); }
     g.globalAlpha = 1;
   }
   rect(x, y, w, h, fill, alpha = 1) { const g = this.g; g.globalAlpha = alpha * this.fade; g.fillStyle = this.col(fill); g.fillRect(x, y, w, h);
@@ -54,7 +55,7 @@ class SvgPainter {
     const f = v => Math.round(v * 100) / 100;
     const d = cmds.map(c => c[0] + c.slice(1).map(f).join(' ')).join('');
     let css = `fill:${st.fill ? this.col(st.fill) : 'none'}`;
-    if (st.stroke) css += `;stroke:${this.col(st.stroke)};stroke-width:${st.w || 1}` + (st.dash ? `;stroke-dasharray:${st.dash.join(' ')}` : '');
+    if (st.stroke) css += `;stroke:${this.col(st.stroke)};stroke-width:${st.w ?? 1}` + (st.dash ? `;stroke-dasharray:${st.dash.join(' ')}` : '');
     const op = (st.alpha ?? 1) * this.fade;
     if (op !== 1) css += `;opacity:${op}`;
     this.out.push(`<path d="${d}" style="${css}"/>`);
@@ -221,9 +222,11 @@ function paintAxis(P, o) { // o: { from, span, xL, xR, y, h, yEnd, X, timed, tic
     lab.push([x, o.timed ? fmtTime(t, step) : String(Math.round((t + (o.tick || 0)) * 100) / 100)]);
   }
   P.path(d, { stroke: 'line', w: 1, alpha: 0.6 });
-  for (const [x, s] of lab) { // keep edge labels inside the axis band
-    const hw = P.measure(s, { size: 10.5 }) / 2 + 2;
-    P.text(Math.min(Math.max(x, o.xL + hw), o.xR - hw), o.y + o.h / 2, s, { anchor: 'middle', size: 10.5, fill: 'muted' });
+  let end = -Infinity;
+  for (const [x, s] of lab) { // keep edge labels inside the axis band; a label over the one before is left out (long times: B-81)
+    const hw = P.measure(s, { size: 10.5 }) / 2 + 2, xm = Math.min(Math.max(x, o.xL + hw), o.xR - hw);
+    if (xm - hw < end) continue;
+    P.text(xm, o.y + o.h / 2, s, { anchor: 'middle', size: 10.5, fill: 'muted' }); end = xm + hw + 4;
   }
 }
 // the cycles of a clock in a band under the time axis: a tick at each rising edge when they are 3 px apart, every k-th

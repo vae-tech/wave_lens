@@ -234,7 +234,13 @@
   <li>a bus: its changes and the number of values it took (<code>Δ 80 ns / 12.5 MHz · 7 changes of PADDR (4 values)</code>).</li>
 </ul>
 <p>Through <a href="gaps.html#live">gaps on the waves</a> the range counts what they hide, and says the cycles of their clock on any row.</p>
-<p>The signal is the one the range was measured on, else the selected one. <kbd>ctrl+click</kbd> or <kbd>Esc</kbd> clears it.</p>
+<p>The signal is the one the range was measured on, else the selected one. Then the range stays and follows the signal you
+  select: click another name, or step with <kbd>↑</kbd> <kbd>↓</kbd> (<kbd>j</kbd> <kbd>k</kbd>) on the waves or in the names, and the
+  same range is counted on that signal — walk the list and read each one's edges or changes. A signal with none in it says so
+  (<code>· 0 ↑ PSEL</code>, <code>· 0 changes of PADDR (1 value)</code>); a bus's bit is named with its bus (<code>PADDR[0]</code>). A bookmark's
+  go (<kbd>1</kbd>–<kbd>9</kbd>) selects its signal and the range follows; a signal folded away is not selected, the range stays. A
+  click on the waves, <kbd>ctrl+click</kbd> or <kbd>Esc</kbd> clears it. On a narrow viewer the readout goes under the title, a line
+  for each part, so the waves stay where they are while you walk the signals.</p>
 <figure><img src="img/viewer-range.png" alt="A measured range from 45 to 105 ns on PADDR, Δ 60 ns / 16.67 MHz on the axis" loading="lazy">
   <figcaption><b>A measured range.</b> From 45 to 105 ns on PADDR: shaded, <code>Δ 60 ns / 16.67 MHz</code> on the axis.</figcaption></figure>
 
@@ -618,7 +624,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.50 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.51 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

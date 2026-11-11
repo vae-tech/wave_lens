@@ -436,6 +436,47 @@ impl Compiler<'_> {
         })
     }
 
+    /// The context width `compile(e, ctx)` gives its operand `k` (one of `e`'s own operands, by address): what the
+    /// explain tree and a step's shown value compile a part at, so it shows the value its parent computes with
+    /// (bughunt B-08). 0: self-determined.
+    pub fn operand_ctx(&self, e: &Expr, ctx: u32, k: &Expr) -> u32 {
+        let w = || self.width(e).map_or(0, |own| own.max(ctx).min(64));
+        let is = |x: &Expr| std::ptr::eq(x, k);
+        match e {
+            Expr::Unary { op: UnOp::BitNot | UnOp::Neg | UnOp::Plus, .. } => w(),
+            Expr::Binary { op, a, b, .. } => match op {
+                _ if is_ctx(*op) => w(),
+                BinOp::Pow | BinOp::Shl | BinOp::Shr | BinOp::AShl | BinOp::AShr if is(a) => w(),
+                BinOp::Pow | BinOp::Shl | BinOp::Shr | BinOp::AShl | BinOp::AShr | BinOp::LogAnd | BinOp::LogOr => 0,
+                _ => self.width(a).and_then(|x| Ok(x.max(self.width(b)?))).unwrap_or(0),
+            },
+            Expr::Cond { a, b, .. } if is(a) || is(b) => w(),
+            Expr::Inside { a, set, .. } if is(a) => {
+                let mut iw = self.width(a).unwrap_or(0);
+                for it in set {
+                    match it {
+                        InsideItem::Value(v) => iw = iw.max(self.width(v).unwrap_or(0)),
+                        InsideItem::Range { lo, hi } => iw = iw.max(self.width(lo).unwrap_or(0)).max(self.width(hi).unwrap_or(0)),
+                    }
+                }
+                iw
+            }
+            Expr::Cast { width, a, .. } if is(a) => (*width).clamp(1, 64).max(self.width(a).unwrap_or(0)),
+            _ => 0,
+        }
+    }
+
+    /// Whether the value of `e` depends on the width it is evaluated at (a carry, `~`, `-`): the operators that take
+    /// the context. A signal, a select, a concatenation, a call or a cast only gain zeros on the left.
+    pub fn takes_ctx(e: &Expr) -> bool {
+        match e {
+            Expr::Unary { op, .. } => matches!(op, UnOp::BitNot | UnOp::Neg | UnOp::Plus),
+            Expr::Binary { op, .. } => is_ctx(*op) || matches!(op, BinOp::Pow | BinOp::Shl | BinOp::Shr | BinOp::AShl | BinOp::AShr),
+            Expr::Cond { .. } => true,
+            _ => false,
+        }
+    }
+
     fn konst(&self, e: &Expr) -> CResult<u64> {
         let c = self.compile(e, 1)?;
         c.constant().ok_or_else(|| (e.at(), format!("'{e}' must be a constant here")))

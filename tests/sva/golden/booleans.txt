@@ -100,3 +100,8 @@ assert b_cast in booleans, line 72
   expr      4'(data) == be
   s1        4'(data) == be
   signals   clk:1 data:8 be:4
+cover b_unsz_x in booleans, line 75
+  clock     @(posedge clk)
+  expr      data != 'hx
+  s1        data != 'hx
+  signals   clk:1 data:8

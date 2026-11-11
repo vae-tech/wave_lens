@@ -195,6 +195,18 @@ class Library(Harness):
         self.assertEqual(t['marks'][1]['got'], '5')
         self.assertEqual([p['step'] for p in t['phases']], [2, 1, 1])
 
+    def test_no_test_signal_in_the_design(self):   # bughunt B-54: the marks name no signal the design does not have
+        wl = self.marks()
+
+        async def one(dut):
+            with wl.phase('p'):
+                self.t = 10
+        with self.assertLogs('wavelens', 'WARNING') as said:
+            d = self.run_test(wl, one, Dut('TEST_STEP'))
+        self.assertIn('no signal TEST_CASE', said.output[0])
+        self.assertEqual((d['signal'], d['step'], d['version']), (None, 'TEST_STEP', 1), 'the file\'s keys and version kept')
+        self.assertEqual(self.run_test(self.marks(), one)['signal'], 'TEST_CASE')
+
     def test_measure(self):
         """Stage 17: wl.measure as a context and by start / stop: the pairs in the test, their bound checked when it is a time."""
         wl = self.marks()
@@ -1055,6 +1067,23 @@ class Page(unittest.TestCase):
         waves = json.loads(re.search(r'window\.WAVES = (\{.*?\n\});', self.page(), re.S).group(1).replace('<\\/', '</'))
         self.assertEqual([b['signal'] for b in waves['v']['bookmarks'] if b.get('text') == 'pattern'], ['PSEL'])
 
+    def test_a_test_signal_not_in_the_dump(self):
+        """Bughunt B-54: marks that name a test or step signal the dump does not have (an older marks file, another
+        testbench): the page is made, the tests on the time axis, a line says it."""
+        with open(self.vcd, 'w', encoding='utf-8') as f:
+            f.write('$timescale 1ps $end\n$scope module tb $end\n$var wire 1 " PSEL $end\n$upscope $end\n$enddefinitions $end\n'
+                    '#0\n0"\n#50\n1"\n#300\n0"\n')
+        with open(self.cfg, 'w', encoding='utf-8') as f:
+            json.dump({'scope': 'tb', 'views': {'v': {'exact': True, 'signals': ['PSEL']}}}, f)
+        with open(self.marks, 'w', encoding='utf-8') as f:
+            json.dump(DOC, f)
+        rc, _, err = self.build('--marks', self.marks)
+        self.assertEqual(rc, 0, err)
+        self.assertIn('mkhtml: marks: no signal TEST_CASE, TEST_STEP in x.vcd', err)
+        waves = json.loads(re.search(r'window\.WAVES = (\{.*?\n\});', self.page(), re.S).group(1).replace('<\\/', '</'))
+        self.assertEqual({b.get('signal') for b in waves['v']['bookmarks']} - {None}, {'PSEL'})
+        self.assertIn('reset', [s['label'] for s in waves['v']['spans']], 'a phase of the step signal: a span of its own')
+
     def test_colours_of_the_marks_on_the_page(self):   # P-13
         with open(self.cfg, encoding='utf-8') as f:
             c = json.load(f)
@@ -1136,6 +1165,27 @@ class Page(unittest.TestCase):
             f.write('{"wavelens": "marks", "version": 9}')
         self.assertIn('version 9', self.build('--marks', self.marks)[2])
         self.assertEqual(self.build('--marks', self.marks + '.none')[0], 1)
+
+    def test_a_marks_file_made_by_hand(self):   # bughunt B-91: a traceback before; now the texts and lists left out filled, a wrong entry one line
+        def marks(tests):
+            with open(self.marks, 'w', encoding='utf-8') as f:
+                json.dump({'wavelens': 'marks', 'version': 1, 'signal': 'TEST_CASE', 'tests': tests}, f)
+        marks([{'n': 1, 'name': 'a', 'from': 0, 'to': 100, 'result': 'pass'}, {'n': 2, 'name': 'b', 'from': 101}])
+        rc, _, err = self.build('--marks', self.marks)
+        self.assertEqual(rc, 0, err)
+        self.assertIn('2 tests: 1 passed, 0 failed, 1 not finished', err)
+        for tests, said in (([{'n': 1, 'name': 'a'}], 'test 1 (a): "from" is its start in ps'), ([{'name': 'a', 'from': 0}], 'test 1: "n" is its number'),
+                            ([{'n': 1, 'name': 'a', 'from': 0, 'result': 'ok'}], '"result" is one of pass, fail, xfail, run'),
+                            ([{'n': 1, 'name': 'a', 'from': 0, 'marks': [{'kind': 'check', 't': 5}]}], 'a check has "ok", "got" and "expected"'),
+                            ([{'n': 1, 'name': 'a', 'from': 0, 'phases': [{'label': 'x'}]}], 'a phase or a measure is {label, from, to}'),
+                            ([{'n': 1, 'name': 'a', 'from': 0, 'marks': [{'kind': 'note'}]}], 'a mark has its time "t" in ps'),
+                            ('all', '"tests" is a list of tests'), ([5], 'test 1: an object')):
+            with self.subTest(said=said):
+                marks(tests)
+                rc, _, err = self.build('--marks', self.marks)
+                self.assertEqual(rc, 1, err)
+                self.assertIn(said, err)
+                self.assertNotIn('Traceback', err)
 
     def test_a_marks_file_with_a_bom(self):   # review 2026-11-05 (runs) B-27: saved again by a Windows editor, a BOM before it
         with open(self.marks, 'w', encoding='utf-8-sig') as f:

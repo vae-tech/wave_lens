@@ -113,8 +113,10 @@ function settings(...layers) {
   // your keys: key by key over the layers (a later layer's key wins, null takes a key away)
   S.keys = Object.assign({}, ...layers.map(l => l && l.keys).filter(Boolean).map(k => (typeof k === 'string' ? jsonOr(k) : k))
     .filter(k => k && typeof k === 'object'));
-  for (const k of ['rowHeight', 'groupHeight', 'spaceHeight', 'headerHeight', 'traceWidth', 'busWidth', 'labelSize', 'fontSize', 'dim',
-    'laneHeight']) S[k] = num(S[k]) || DEFAULTS[k];
+  // a size more than 0, a line width 0 (none) or more, dim (the opacity of the rows not highlighted) 0 … 1; else the default (B-89)
+  for (const k of ['rowHeight', 'groupHeight', 'spaceHeight', 'headerHeight', 'labelSize', 'fontSize', 'laneHeight'])
+    S[k] = num(S[k]) > 0 ? num(S[k]) : DEFAULTS[k];
+  for (const k of ['traceWidth', 'busWidth', 'dim']) S[k] = num(S[k]) >= 0 ? Math.min(num(S[k]), k === 'dim' ? 1 : Infinity) : DEFAULTS[k];
   S.sort = sortDir(S.sort); S.sortIgnore = prefixes(S.sortIgnore).sort((a, b) => b.length - a.length);
   if (!hasKey(EDGES, S.style)) S.style = 'auto';
   if (S.groupsFirst && S.groupOrder === 'file') S.groupOrder = 'first';   // older setting
@@ -325,6 +327,17 @@ function fmtExact(ps, unitRef) {
   return s + ' ' + u;
 }
 const trimNum = (v, d = 3) => String(Math.round(v * 10 ** d) / 10 ** d);
+// a length of an untimed diagram (a Δ, a cell, a gap): its cycles, no head.tick (that numbers places on the axis, not lengths: B-73)
+const cycLen = d => `${trimNum(d)} cycle${Math.abs(d) === 1 ? '' : 's'}`;
+// what a page gives that is no time (a marker, a jump, the cursor, a window's end): the line the viewer's log says
+const noTime = (what, m, x) => `${what}${m && m.label ? ` "${m.label}"` : ''}: ` +
+  `${typeof x === 'string' ? JSON.stringify(x) : String(x)} is not a time: left out`;
+// the markers or jumps of a page's opts ({t, …}: a number in model units or "12ns"): t read, one that is no time left out and said
+function optTimes(list, what, said) {
+  return (Array.isArray(list) ? list : []).flatMap(m => { const t = m && (typeof m.t === 'number' ? m.t : num(parseT(m.t)));
+    if (isFinite(t)) return [{ ...m, t }];
+    said.push(noTime(what, m, m && m.t)); return []; });
+}
 // a period (ps) as its frequency, four digits: 40000 -> "25 MHz", 6400 -> "156.3 MHz"
 function fmtFreq(ps) {
   const f = 1e12 / ps, [m, u] = [[1e9, 'GHz'], [1e6, 'MHz'], [1e3, 'kHz']].find(([m]) => f >= m) || [1, 'Hz'], v = f / m;
@@ -332,7 +345,7 @@ function fmtFreq(ps) {
 }
 function parseT(v) { // "1.5us" -> 1.5e6 (ps); plain numbers are model units
   if (v == null || v === '') return undefined;
-  const m = /^\s*(-?(?:\d+\.?\d*|\.\d+)(?:e-?\d+)?)\s*(fs|ps|ns|us|µs|ms|s)?\s*$/i.exec(String(v));
+  const m = /^\s*(-?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)\s*(fs|ps|ns|us|µs|ms|s)?\s*$/i.exec(String(v));
   if (!m) return undefined;
   const t = parseFloat(m[1]) * (m[2] ? UNIT_PS[m[2].toLowerCase()] : 1);
   return isFinite(t) ? t : undefined;
@@ -710,10 +723,16 @@ function parse(src) {
   M.t1 = Math.max(C(cyc), tm && tm.t1 != null ? num(tm.t1) : -Infinity, isFinite(tmax) ? tmax : -Infinity);
   if (!(M.t1 > M.t0)) M.t1 = M.t0 + (tm ? num(tm.cycle) || 1 : 1);
   M.cycle = tm ? num(tm.cycle) || (M.t1 - M.t0) / 40 : 1;
-  const mt = m => m.cycle != null ? C(num(m.cycle)) : num(parseT(m.t));
-  M.markers = (j.markers || []).map(m => pageMark({ t: mt(m), label: m.label || '', color: colorOk(m.color), signal: m.signal || null, lift: m.lift }));
-  M.jumps = j.jumps ? j.jumps.map(m => ({ t: mt(m), span: num(parseT(m.span)) || (M.t1 - M.t0) / 5, label: m.label || '' })) : null;
+  // the markers, jumps and cursor of the document: one that is no time left out, said in M.dropped (the viewer's log, B-71, B-72)
+  M.dropped = [];
+  const mt = m => (m.cycle != null ? C(num(m.cycle)) : num(parseT(m.t)));
+  const timed = (list, what) => (Array.isArray(list) ? list : []).filter(m => m && typeof m === 'object' && isFinite(mt(m)) ||
+    void M.dropped.push(noTime(what, m, m && typeof m === 'object' ? m.cycle ?? m.t : m)));
+  M.markers = timed(j.markers, 'a marker').map(m => pageMark({ t: mt(m), label: m.label || '', color: colorOk(m.color), signal: m.signal || null,
+    lift: m.lift }));
+  M.jumps = j.jumps ? timed(j.jumps, 'a jump').map(m => ({ t: mt(m), span: num(parseT(m.span)) || (M.t1 - M.t0) / 5, label: m.label || '' })) : null;
   M.cursor = j.cursor != null ? num(parseT(j.cursor)) : null;
+  if (M.cursor != null && !isFinite(M.cursor)) { M.dropped.push(noTime('the cursor', null, j.cursor)); M.cursor = null; }
   M.bookmarks = bmNorm(j.bookmarks); M.arrows = arNorm(j.arrows, j.bookmarks); M.spans = spanNorm(j.spans);
   M.compare = cmpNorm(j.compare); M.measures = Array.isArray(j.measures) ? j.measures : [];
   return M;
@@ -806,10 +825,11 @@ function edgeGlyph(s, t) { // ↑ / ↓ / value of the transition of s exactly a
   if (!o || i === 0 || Math.abs(o.t - t) > timeEps(t)) return '';
   return o.k === '=' ? '= ' + o.v : o.k === '1' ? '↑' : o.k === '0' ? '↓' : o.k;
 }
-// a clock by its name: a 1-bit *clk* / *clock* that toggles; the times it rises (cached per row)
+// a clock by its name: a 1-bit *clk* / *clock* that toggles; the times it rises (cached per list of changes: a row whose changes
+// are others — read late, a compare's B shown — has them made again; bughunt B-18)
 const isClkRow = r => r.type === 'sig' && r.width === 1 && r.tr && r.tr.length > 4 && /clk|clock/i.test(r.name);
 const RISES = new WeakMap();
-const riseTimes = clk => RISES.get(clk) || (RISES.set(clk, clk.tr.filter(o => o.k === '1').map(o => o.t)), RISES.get(clk));
+const riseTimes = clk => { const a = clk.tr; let u = RISES.get(a); if (!u) RISES.set(a, (u = a.filter(o => o.k === '1').map(o => o.t))); return u; };
 // the cycles of a clock (its rising edges ups): the index of cycle 0, the first edge at or after zero (null: the first edge);
 // the cycle at t, the last edge at or before t (negative before cycle 0); the time of cycle n, or null past the ends
 // the setting cycleZero: a time ("50ns", as gapIdle and the cursor take it) or model units; null / "": the first edge
@@ -974,8 +994,11 @@ function gapTexts(M, gc, clk, aux, refs) {
 const AR_SHAPES = { '~': 'curve', '-': 'straight', '-~': 'curve, late', '~-': 'curve, early', '-|': 'corner ┐', '|-': 'corner └', '-|-': 'step' };
 const AR_HEADS = { '>': '→ end', '<>': '↔ both', '<': '← start', '': '— none' };
 const AR_LINES = { solid: null, dashed: [6, 4], dotted: [1.5, 3] };
-// a colour from a state, a command or a page: a token or a colour the browser reads (it goes into style="…": nothing else)
-const colorOk = c => (typeof c === 'string' && (/^[\w#-]+$/.test(c) || (typeof CSS !== 'undefined' && CSS.supports('color', c))) ? c : null);
+// a colour from a state, a command or a page (it goes into style="…": nothing else): a token of the painters (fg, c5, hl2, a
+// plugin's), a custom property (--x), #hex or a colour the browser reads (red, rgb(…), var(--x)); a word that is none ("blu")
+// is not (B-86; tools/viewedit.py color_ok the same). With no CSS to ask (no browser): a word or #hex
+const colorOk = c => (typeof c === 'string' && (hasKey(TOK, c) || /^--[\w-]+$/.test(c) || /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(c) ||
+  (typeof CSS !== 'undefined' && CSS.supports ? CSS.supports('color', c) : /^[\w#-]+$/.test(c))) ? c : null);
 function bmNorm(list) {
   const obj = x => x && typeof x === 'object';   // an entry that is no object (a bad copy in this browser): left out
   // lift: false, true (the lane above its signal) or "below" (the lane under it); label: a short text by the circle (an

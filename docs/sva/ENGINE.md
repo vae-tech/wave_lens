@@ -168,7 +168,10 @@ Two more requests of `run_json` (`sva-core/src/explain.rs`), both in the unit of
 - `{"files", "trace", "explain": {"assert", "from", "to"}}` → `{"explain": [{"id"?, "what", "tree"}]}`: the booleans
   of the assertion in source order (sequence elements with their `steps` id, `if` conditions, `disable iff`), each a
   tree `{text, w, values, kids?}` of its sub-expressions (operands; a chain of `&&` / `||` as one list; the arguments of
-  a system function; constants left out; at most 64 nodes per boolean), valued at cycles `from..=to` (at most 512). The
+  a system function; constants left out; at most 64 nodes per boolean), valued at cycles `from..=to` (at most 512). A
+  part whose value depends on its width (`+ - * ~`, shifts, `?:`) is valued at the width its parent computes it at,
+  so `a + b == 9'h100` with 8-bit `a = b = 8'h80` shows `a + b` as 256 (9 bits), not 0 (B-08); a signal, a select or
+  a call keeps its own width. A step's shown value (the left side of a bus compare) follows the same rule. The
   page asks for the selected attempt with the trace of its binding (`plan` of that one assertion) and maps the attempt's
   cycles through their times, so build-time results over a window still find their columns.
 
@@ -183,7 +186,8 @@ sources}`:
 
 - `assertions`, one row per assertion of every document: `row` (its index), `source` (its file when several), `name`,
   `kind`, `scope`, `file`, `line`, `text`, `unit`, `stats`; `first_fail` / `last_fail` — the earliest and the latest
-  *found* (by `failed_at`, the simulator's `$error` time), each `{row, source, name, scope, start, failed_at, unit,
+  *found* (by `failed_at`, the simulator's `$error` time; the CLI's `first fail at cycle …` line is the same one, B-05),
+  each `{row, source, name, scope, start, failed_at, unit,
   t_start, t_fail, time, time_fail, note, kind}` (`kind` = `reason.kind`); `longest` (`{cycles, start, time}`: `end -
   start` of the longest decided attempt — active and capped ones have no end of their own); `latency` (`{min, avg, max,
   n, text}`: over the passing attempts of an implication, the last step of the outer consequent (`role: cons`, group 0)
@@ -307,12 +311,17 @@ is stepped once per cycle (its first step is its start cycle) until it is decide
 **Sequences** are threads: a thread is a residual sequence (what is left to match from the next cycle) and the path of
 the booleans it matched (the trace). Stepping a residual at a cycle gives the residuals for the next cycle and whether
 it matched here: `l ##[m:n] r` steps `l` and, when `l` matches, starts `r` 0 (fusion) to n cycles later; `[*m:n]`
-repeats; `[->m:n]` counts hits and ends at one; `[=m:n]` also ends at the cycles without a hit after enough hits; `and`
+repeats; `[->m:n]` counts hits and ends at one (what is left after a cycle needs one more hit: the match at a hit ends
+there, and the empty match of `[->0:n]` is only before its first cycle — until the bug hunt of 2026-11-10, B-01, the
+rest of a goto matched empty at every later cycle, so `a |-> b[->1:2] ##1 c` checked `c` at cycles with no hit and
+passed where it fails); `[=m:n]` also ends at the cycles without a hit after enough hits; `and`
 runs both sides and matches when both have (at the later end); `intersect` when both match at the same cycle;
 `within` is `(1[*0:$] ##1 a ##1 1[*0:$]) intersect b`; `throughout` stops the inner threads at a cycle where its
 boolean is false; `first_match` keeps the threads of one start together and ends them all at the first match.
 Residuals are hash-consed, so threads that reach the same state merge (the first path is kept) and the set of one
-sequence is bounded by its distinct states; `##[1:$]` is one thread, not one per cycle.
+sequence is bounded by its distinct states; `##[1:$]` is one thread, not one per cycle. The threads of a set share their
+start, so the matches of a set at one cycle are one match (the first path is kept): `cover sequence (a[*1:2] ##1 b)`
+counts each (start, end) once (B-04: two threads reaching the same end were counted and listed twice).
 
 **Booleans** are evaluated at most once per cycle (a cache shared by all attempts) on the sampled 4-state values.
 
@@ -378,11 +387,16 @@ not one attempt per cycle. Paths are linked lists of steps in an arena; a path t
   result (an `or` with a vacuous side, …) reports it. An implication whose antecedent can still match
   (`a ##[1:$] b |-> c`) is never decided before the end: write `first_match(a ##[1:$] b) |-> c`.
 - **Empty matches** (`[*0]`, `[*0:n]`, `[->0]`, `[=0]`): `empty ##n s` is `##(n-1) s`, `s ##n empty` is
-  `s ##(n-1) 1`, `empty ##0 s` and `s ##0 empty` do not match; an empty match is no match of an antecedent or of a
-  sequence property; a repeated sequence that can match empty may match empty in any iteration (IEEE 16.9.2):
+  `s ##(n-1) 1` and `##n empty` is `##(n-1) 1` (for every n ≥ 1, ranges too: `a |-> ##2 b[*0] ##1 c` checks `c` two
+  cycles after `a`, as `x[*DLY]` with `DLY = 0` does; until B-02 of the bug hunt of 2026-11-10 a delay of 2 or more into
+  an empty operand never matched), `empty ##1 empty` is empty, `empty ##0 s` and `s ##0 empty` do not match;
+  `first_match` of a sequence that can match empty is that empty match; an empty match is no match of an antecedent or
+  of a sequence property; a repeated sequence that can match empty may match empty in any iteration (IEEE 16.9.2):
   `(a[*0:1])[*2]` is `a[*0:2]` (until stage 12 its empty matches were ignored, so the first one failed where the second
   passed); `and` / `intersect` /
-  `within` need both operands to match at least one cycle. This deviates from the letter of IEEE 1800-2017 for an
+  `within` need both operands to match at least one cycle (`b[*0:1] within c` with `b` never true: no match; until B-07
+  `within` took the empty match of its left side, and `and` / `intersect` of two operands that can match empty
+  counted as an empty match before a delay). This deviates from the letter of IEEE 1800-2017 for an
   antecedent that can match empty: by 16.12.7 (`s |=> p` is `s ##1 1 |-> p`) and 16.9.2 (`empty ##1 s` is `s`),
   `a[*0:1] |=> b` would check `b` at the start cycle when `a` is false; here that attempt is vacuous. Nobody writes it
   on purpose; the choice keeps "the antecedent matched" meaning "a cycle of it matched".
@@ -411,7 +425,16 @@ not one attempt per cycle. Paths are linked lists of steps in an arena; a path t
   least 65 536. On the review's worst case it never grew (414 terms over 40 000 cycles of a capped `intersect`): the
   500 MB of that run are its results (39 900 capped attempts, 2.8 M trace steps), which stage 9.6's compact results
   address.
-- **Covers** count every attempt that matches non-vacuously (`cover property`), or every match (`cover sequence`).
+- **Covers** count every attempt that matches non-vacuously (`cover property`), or every match (`cover sequence`: each
+  start and end once).
+- **Vacuity of `always` and `eventually`** (written down as it is, bug hunt 2026-11-10 D-2; not changed): `always [m:n]
+  p` passes after offset n **non-vacuously** even when every instance of `p` passed vacuously, so `cover property
+  (always [0:1] (a |-> b))` covers with `a` never true, and `s |-> always [0:1] (a |-> b)` is a pass, not vacuous;
+  `always p` never passes (active at the end). `eventually [m:n] p` and `s_eventually p` pass at the **first** instance
+  that passes, a vacuous one too: `s |-> eventually [0:2] (a |-> b)` with `a` false at `s`'s cycle is vacuous there,
+  a later instance that would pass for real is not waited for. Other tools may propagate vacuity differently; a check
+  that should not pass this way states the condition outside (`s ##[0:2] a |-> b`). `engine_tests.rs`
+  `vacuity_of_always_and_eventually_as_documented` holds the behaviour.
 - **`sva fst`: an FST writer of our own** (`sva/cli/src/fst.rs`, review 2026-10-25 CD1), not the fst-writer crate (no
   attributes: no enum tables) nor fstapi.c through C (a C toolchain for the Windows build): the blocks as fstapi lays
   them out, about 1 400 lines. Measured against `vcd2fst` on the same dumps: 2.42 s against 2.22 s, 94 MB against
@@ -458,7 +481,12 @@ attempts (`0-3F 3-4P`: start, end, result) — the operators, the examples of LA
 ranges at the end of the dump, strong operators, 4-state values in both x modes (x in branches that do not decide),
 covers, lanes, options, the thread limit (capped attempts), full pass traces, step roles, antecedent matches, reasons,
 the trace and results JSON; merged attempts against unmerged ones (results, stats, lanes over 20 properties × 6 random
-traces), long truncated traces, 20 000 open attempts, the arena under load; `tests/schema.rs` validates the results
+traces), long truncated traces, 20 000 open attempts, the arena under load; `tests/reference.rs` checks the engine
+against a brute-force matcher written from this document's definitions over 1500 random sequences (`##`, `[*]`, `[->]`,
+`[=]`, `or`, `and`, `intersect`, `within`, `throughout`, `first_match`, nested 3 deep) × 3 random traces: the
+`(start, end)` pairs and the count of `cover sequence`, the verdicts of `a |-> s` and `a |=> s`, and the merged run
+against the attempts one by one (it found B-01 of the bug hunt of 2026-11-10 and the empty-match bugs with it);
+`tests/schema.rs` validates the results
 against `docs/sva/results.schema.json`; `value.rs` tests widths, unknown bits and the sampled-value functions;
 `sva/cli/tests/cli.rs` runs `sva eval` over a small VCD (summaries, JSON, `--out`, `--assert`, `--from/--to`, missing
 signals in the JSON, upward name resolution and `--resolve scope`, x, exit codes, the edges of IEEE 9.4.2 one per time

@@ -100,7 +100,23 @@
   background: var(--panel-2); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18); }
 .wv .bar .tg.find.float .fx { display: inline-block; padding: 2px 7px; }
 .wv .bar .eyebrow .mu { text-transform: none; }   /* uppercase would turn µs into ΜS */
-.wv .bar .cur { font-family: var(--font-mono); margin-left: 12px; color: var(--muted); }
+.wv .bar .head { container-type: inline-size; }
+/* the toast and the readout side by side at the right (.rd); the readout on one line, cut with … (the whole in its title): a
+   longer range text (another signal followed) does not wrap the head and move the waves */
+.wv .bar .rd { flex: 1 1 16em; min-width: 0; display: flex; align-items: baseline; justify-content: flex-end; gap: 12px; }
+.wv .bar .cur { font-family: var(--font-mono); color: var(--muted); min-width: 0; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wv .bar .cur .cp[hidden] { display: none; }
+/* a narrow bar (a side tab of VS Code, a phone; one line would cut the readout to its start): the readout under the title and the
+   buttons, a line per piece (the cursor and the view, cursor 2, the range, the cycle, the gaps), each cut with … on its own: the
+   lines come with what is on, not with the length of a text, so walking the signals with a range never moves the waves; the
+   toast at the right of the first line, the lines beside it make room */
+@container (max-width: 960px) {
+  .wv .bar .rd { order: 1; flex-basis: 100%; display: block; }
+  .wv .bar .toast { float: right; max-width: 60%; margin-left: 12px; text-align: right; }
+  .wv .bar .cur { display: block; overflow: visible; text-align: left; }
+  .wv .bar .cur .cp { display: block; overflow: hidden; text-overflow: ellipsis; }
+  .wv .bar .cur .cs { display: none; }
+}
 .wv .bar .ver { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); opacity: 0.8; white-space: nowrap; }   /* the version and build */
 .wv .body { display: grid; grid-template-columns: var(--wv-names, 200px) minmax(0, 1fr); }
 /* maxHeight setting: the rows scroll inside the viewer, the box no taller than the window under the bar (the bar and the
@@ -144,9 +160,8 @@
 .wv .bar button[data-act="fprev"], .wv .bar button[data-act="fnext"] { padding: 2px 8px; font-weight: 700; }
 .wv .bar input.fcol { width: 26px; padding: 1px 2px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; }
 .wv .names .row:not(.grp) .n { user-select: text; cursor: text; }   /* select names to copy their full paths */
-.wv .bar .toast { font-size: 11.5px; color: var(--accent); font-weight: 600; margin-left: auto; }
+.wv .bar .toast { font-size: 11.5px; color: var(--accent); font-weight: 600; flex: none; max-width: 100%; }   /* whole: the readout gives way */
 .wv .bar .toast:empty { display: none; }
-.wv .bar .toast:empty + .cur { margin-left: auto; }
 .wv .names .row .n b.fm { color: var(--accent); font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
 .wv .names .row.alt { background-color: var(--wave-band); }
 .wv .names .row.grp .kd { font: 600 10.5px var(--font-mono); color: var(--muted); margin-right: 4px; }   /* {} struct, ∪ union, ⊟ interface */
@@ -401,6 +416,7 @@
   .wv.wv-scroll .body { max-height: none; overflow: visible; }        /* every row, not the scroll box */
   .wv .wcol > canvas:not(.wv-print) { display: none; }
   .wv .bar .tools, .wv .hint { display: none; }                       /* the title and the cursor readout stay */
+  .wv .bar .cur, .wv .bar .cur .cp { white-space: normal; overflow: visible; }   /* whole on paper: no … */
   .wv, .wv .body { break-inside: auto; }
 }
 .wv .hint { font-size: 11.5px; color: var(--muted); padding: 4px 10px; border-top: 1px solid var(--line); }
@@ -440,16 +456,20 @@
 .wvf-lazy button { font: inherit; background: none; border: 1px solid var(--line); border-radius: 4px; color: var(--accent); padding: 3px 10px; cursor: pointer; }
 .wvf-lazy button:hover { border-color: var(--accent); }
 .wvf-err { border-left: 3px solid var(--wave-x); background: var(--wave-x-soft); padding: 8px 12px; border-radius: 0 6px 6px 0; font-family: var(--font-mono); font-size: 12.5px; white-space: pre-wrap; }
-/* the right button's menu on the waves (the range, the picture, the signal under the pointer) */
+/* the right button's menu on the waves (the range, the picture, the signal under the pointer); taller than the window it
+   scrolls (B-83: on 1366×768 its last items were off the screen), its submenus fixed beside it (menu.js subOpen) */
 .wv .wv-menu { position: fixed; z-index: 50; min-width: 200px; padding: 4px; display: flex; flex-direction: column; background: var(--panel); color: var(--fg);
-  border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18); font: 12.5px var(--font-body); }
+  border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18); font: 12.5px var(--font-body);
+  max-height: calc(100vh - 8px); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
+.wv .wv-menu > * { flex-shrink: 0; }
 .wv .wv-menu button, .wv .wv-menu .mi { all: unset; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 10px; border-radius: 4px; cursor: pointer; }
 .wv .wv-menu button:hover, .wv .wv-menu button:focus-visible, .wv .wv-menu .mi:hover { background: var(--accent-soft); }
 .wv .wv-menu .mi input { width: 34px; height: 18px; padding: 0; border: 1px solid var(--line); background: none; cursor: pointer; }
 /* the gaps of the picture and WaveDrom (a submenu): on / off, idle, keep (clock cycles or a time), the roles, a reset */
 .wv .wv-menu .msub { position: relative; display: flex; flex-direction: column; }
-.wv .wv-menu .sub { position: absolute; left: 100%; top: -5px; min-width: 330px; padding: 4px; display: flex; flex-direction: column; background: var(--panel);
-  border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18); }
+.wv .wv-menu .sub { position: fixed; min-width: 330px; max-width: min(460px, calc(100vw - 8px)); padding: 4px; display: flex; flex-direction: column; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18); max-height: calc(100vh - 8px); overflow-y: auto; }
+.wv .wv-menu .sub > * { flex-shrink: 0; }
 .wv .wv-menu .sub[hidden] { display: none; }
 .wv .wv-menu .subh[aria-expanded=true], .wv .wv-menu .subg[aria-expanded=true] { background: var(--accent-soft); }
 .wv .wv-menu .mi.gp { cursor: default; }

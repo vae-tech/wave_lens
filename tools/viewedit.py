@@ -22,7 +22,9 @@ view_live); here they change the file:
 
 Each command is {"op": name, …arguments}; the list runs in order, a bad one is said (exit 1) and the rest still run.
 Times: model units (ps of timed waves, else cycles) or a text with a unit ("2.5us", "100NS"). Numbers of bookmarks,
-arrows and markers are whole (2, 2.0, "2"). set_state keeps what the state it is given does not have (null clears).
+arrows and markers are whole (2, 2.0, "2"). The cursors and the window stay within the waves of the page (as the viewer
+keeps them). set_state keeps what the state it is given does not have (null clears); a key of another kind (hidden not a
+list, a cursor not a number) is an error, nothing of that state applied.
 Signals: a full path, a name,
 the end of a path ("u_regs.PSEL") or a * pattern. The commands that need the waves' values, their labels or the screen
 ({live}) run only in a page (live). docs/USAGE.md § "Commands and edits" has them all; the smoke test checks that a
@@ -32,7 +34,7 @@ import argparse, collections, functools, json, math, os, re, sys, unicodedata
 
 sys.dont_write_bytecode = True   # a shared checkout stays as it is: -I ignores PYTHONDONTWRITEBYTECODE (AU-WL-003)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # -I drops the script dir from sys.path
-from common import UNIT_PS, WaveError, glob_re as path_re, parse_time, pick, run_main  # noqa: E402
+from common import CSS_NAMES, UNIT_PS, WaveError, glob_re as path_re, parse_time, pick, run_main  # noqa: E402
 import wavepage  # noqa: E402
 from wavepage import (AR_HEADS, AR_LINES, AR_SHAPES, CONFIG_OPS, EDITS_RE, LIVE_RE, OLD_PAGE_RE, block_re, cfg_arrow, cfg_bookmark,  # noqa: E402,F401
                       cfg_form, cfg_span, cfg_time, cfg_view, config_time, fail, finite, parse_t, put_block, tidy, whole, write_text)
@@ -47,6 +49,7 @@ HL_N = 6
 GAP_KEYS = {'on': 'gaps', 'idle': 'gapIdle', 'keep': 'gapKeep', 'signals': 'gapSignals', 'clock': 'gapClock', 'aux': 'gapAux', 'only': 'gapOnly',
             'count': 'gapCount', 'view': 'gapView'}
 ALL_GAP_KEYS = ['gaps', 'gapIdle', 'gapKeep', 'gapSignals', 'gapClock', 'gapAux', 'gapOnly', 'gapCount', 'gapLine', 'gapView']   # view.js GAP_KEYS
+GAP_COUNTS = ['off', 'clock', 'edges', 'rise', 'fall', 'any']   # look.js gapOpt
 CYC_KEYS = ['cycles', 'cycleClock', 'cycleZero']   # view.js CYC_KEYS
 # their defaults, as wavelens/wavelens.config.js has them (tests/unit/test_viewedit.py reads them there)
 GAP_DEFAULTS = {'gaps': False, 'gapIdle': 16, 'gapKeep': 2, 'gapSignals': None, 'gapClock': None, 'gapAux': None, 'gapOnly': False,
@@ -82,17 +85,46 @@ TIME_ARGS = {'cursor': ('t',), 'cursor2': ('t',), 'view': ('from', 'to', 'at', '
              'picture': ('from', 'to'), 'cycles': ('zero',), 'compare': ('offset',), 'expr_matches': ('from', 'to')}
 # what a saved state has (view.js state(), the plugins' addState): set_state takes these, nothing else
 STATE_KEYS = {'from', 'to', 'cursor', 'cursor2', 'range', 'edge', 'paint', 'radix', 'analog', 'hidden', 'dups', 'deltas', 'bits', 'select', 'find',
-              'bookmarks', 'arrows', 'markers', 'spans', 'groups', 'only', 'fsm', 'compare', 'compareShow', 'folds', 'exprs', 'sva', 'bus'}
-COLOR_FN = re.compile(r'(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\([^;{}()]*\)', re.I)
+              'bookmarks', 'arrows', 'markers', 'spans', 'groups', 'only', 'fsm', 'compare', 'compareShow', 'runsOver', 'folds', 'exprs', 'sva', 'bus'}
+COLOR_FN = re.compile(r'(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\([^;{}()]*\)|var\(\s*--[\w-]+\s*\)', re.I)
+# the painters' colour names (model.js TOK, and the tokens bus.js and sva.js register): a word the page draws as a colour
+TOKENS = {'fg', 'muted', 'line', 'panel', 'panel2', 'acc', 'one', 'bus', 'x', 'xsoft', 'z', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9', 'band',
+          'cursor2', 'runb', 'hl1', 'hl2', 'hl3', 'hl4', 'hl5', 'hl6', 'hl7', 'hl8', 'paint',
+          'bus-w', 'bus-r', 'bus-e', 'bus-ch', 'sva-pass', 'sva-fail', 'sva-disabled', 'sva-active', 'sva-capped'}
+# the words CSS reads as a colour (the browser's CSS.supports('color', …), any case): the named colours, transparent,
+# currentcolor and the system colours
+CSS_COLORS = CSS_NAMES | set("""
+canvas canvastext linktext visitedtext activetext buttonface buttontext buttonborder field fieldtext highlight highlighttext selecteditem
+selecteditemtext mark marktext graytext activeborder activecaption appworkspace background buttonhighlight buttonshadow captiontext
+inactiveborder inactivecaption inactivecaptiontext infobackground infotext menu menutext scrollbar threeddarkshadow threedface
+threedhighlight threedlightshadow threedshadow window windowframe windowtext
+""".split())
 
 
 def color_ok(c):
-    """model.js colorOk / edit.js cmdColor: a colour the page takes (a name, #hex, a CSS colour function), None to clear; else an error."""
+    """model.js colorOk / edit.js cmdColor: a colour the page takes (a token, --x, #hex, a CSS colour name or function), None to clear;
+    else an error: a word that is no colour ("blu") too (B-86)."""
     if c is None or c == '':
         return None
-    if isinstance(c, str) and (re.fullmatch(r'[\w#-]+', c) or COLOR_FN.fullmatch(c.strip())):
+    if isinstance(c, str) and (c in TOKENS or re.fullmatch(r'--[\w-]+', c) or re.fullmatch(r'#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})', c, re.I)
+                               or c.lower() in CSS_COLORS or COLOR_FN.fullmatch(c.strip())):
         return c
     fail(f'"{c}" is no colour')
+
+
+def gap_len_ok(v, zero):
+    """warp.js gapFields: idle or keep a number of clock cycles (a text of one too) or a time ("100ns"), more than 0 (zero:
+    0 too) (model.js gapLen)."""
+    if isinstance(v, bool) or not isinstance(v, (int, float, str)):
+        return False
+    if re.fullmatch(r'\s*[\d.]+(e[-+]?\d+)?\s*', str(v), re.I):
+        try:
+            n = float(v)
+        except ValueError:
+            return False
+    else:
+        n = parse_t(v)
+    return finite(n) and (n >= 0 if zero else n > 0)
 
 
 def js_str(x):
@@ -337,7 +369,7 @@ class Model:
                 fail(f'"{s}" is ambiguous: {", ".join(fulls[:6])}' + (f' (+{len(fulls) - 6})' if len(fulls) > 6 else '') +
                      ' — give more of its path, or a * pattern for all of them')
             for r in hit:
-                if r not in out:
+                if not any(r is x for x in out):   # by identity, as pickRows: rows alike (one name of several scopes) are several (B-43)
                     out.append(r)
         if one and len(out) != 1:
             fail(f'one signal, not {len(out)} ({", ".join(r["full"] for r in out[:4])})')
@@ -368,9 +400,9 @@ class Model:
                     out.append(r['full'])
         return out
 
-    def base_fold(self):
-        """foldSet of the "fold" setting: the group paths in id order."""
-        f = self.cfg.get('fold')
+    def base_fold(self, f=None, own=False):
+        """foldSet of the "fold" setting (own: of f, a state's): the group paths in id order."""
+        f = f if own else self.cfg.get('fold')
         if f is None or f is False:
             return []
         names = set(map(str, f)) if isinstance(f, list) else set(prefixes(f)) if isinstance(f, str) else None
@@ -594,6 +626,22 @@ def group_list(gs):
 
 
 # ---------------- the commands on a state ----------------
+STATE_LISTS = ('bookmarks', 'arrows', 'markers', 'groups', 'spans', 'hidden', 'dups', 'bits', 'exprs')   # view.js STATE_KINDS
+STATE_MAPS = ('config', 'paint', 'radix', 'analog', 'folds')
+STATE_TIMES = ('from', 'to', 'cursor', 'cursor2')
+
+
+def state_kinds(st):
+    """view.js stateKinds: the first key of a state (in its order) of another kind than the viewer takes (null: each may be)
+    -> the error's text, or None (B-45: set_state applies nothing of such a state, as the page)."""
+    for k, v in st.items():
+        what = ('a list' if k in STATE_LISTS and not isinstance(v, list) else 'an object' if k in STATE_MAPS and not isinstance(v, dict)
+                else 'a time (a number)' if k in STATE_TIMES and not finite(v) else None) if v is not None else None
+        if what:
+            return f'"{k}" is not {what}: nothing of the state applied'
+    return None
+
+
 def clean_state(state):
     """A state as the viewer takes one on loading it: a key of another kind (a block edited by hand) is left out, not a traceback
     in a command that reads it."""
@@ -621,6 +669,7 @@ class Editor:
 
     def __init__(self, model, state=None):
         self.m, self.st = model, clean_state(state)
+        self.clamp_state()   # a file holding times out of the waves: as the page opens it (B-44)
 
     # what the state has, else the page's
     def bms(self):
@@ -666,7 +715,7 @@ class Editor:
     def fold(self):
         """The folded groups as far as known here: the state's "fold", else the page's setting, then "folds"."""
         c = self.st.get('config') or {}
-        cur = list(c['fold']) if 'fold' in c else self.m.base_fold()
+        cur = (list(map(str, c['fold'])) if isinstance(c['fold'], list) else self.m.base_fold(c['fold'], True)) if 'fold' in c else self.m.base_fold()
         order = [g['path'] for g in self.m.groups] + ['@' + g['name'] for g in self.st.get('groups') or []]
         for p, on in (self.st.get('folds') or {}).items():
             if p == '*':
@@ -709,6 +758,38 @@ class Editor:
             fail(f'{what}: {self.when(t)} is outside these waves ({self.when(lo)} … {self.when(self.m.t1)})')
         return t
 
+    def known(self):
+        """The time of the waves is known (a page's waves, not a state alone)."""
+        return bool(self.m.doc) and self.m.t0 is not None and self.m.t1 is not None
+
+    def in_waves(self, t):
+        """view.js setCursor / setCursor2: a time within the waves (when they are known)."""
+        return min(max(t, self.m.t0), self.m.t1) if self.known() else t
+
+    def span_of(self, s):
+        """view.js: a window's length minSpan at least (timed: a millionth of the waves and 10 ps; cycles: half a one), the
+        waves at most (when they are known)."""
+        if not self.known():
+            return s
+        full = self.m.t1 - self.m.t0
+        return min(max(s, max(full / 1e6, 10) if self.m.timed else 0.5), full)
+
+    def window(self, p, q):
+        """view.js zoomTo: the window from p, of span_of its length, within the waves (when they are known)."""
+        if not self.known():
+            return p, q
+        s = self.span_of(q - p)
+        p = min(max(p, self.m.t0), self.m.t1 - s)
+        return p, p + s
+
+    def clamp_state(self):
+        """view.js setState: the cursor, cursor 2 and the window within the waves (B-44)."""
+        for k in ('cursor', 'cursor2'):
+            if finite(self.st.get(k)):
+                self.st[k] = self.in_waves(self.st[k])
+        if finite(self.st.get('from')) and finite(self.st.get('to')):
+            self.st['from'], self.st['to'] = self.window(self.st['from'], self.st['to'])
+
     def run(self, ops):
         """The commands in order -> [{op, …result} | {op, error}] (view.run)."""
         out = []
@@ -733,11 +814,11 @@ class Editor:
 
     # the commands, as edit.js has them
     def c_cursor(self, a):
-        self.st['cursor'] = self.time(a.get('t'))
+        self.st['cursor'] = self.in_waves(self.time(a.get('t')))
         return {'t': self.st['cursor']}
 
     def c_cursor2(self, a):
-        self.st['cursor2'] = None if a.get('t') is None else self.time(a['t'])
+        self.st['cursor2'] = None if a.get('t') is None else self.in_waves(self.time(a['t']))
         return {'t': self.st['cursor2']}
 
     def c_view(self, a):
@@ -757,14 +838,11 @@ class Editor:
             at = self.time(a['at'], 'at') if a.get('at') is not None else self.st['cursor']
             if not s > 0:
                 fail('view: span is not a length')
+            s = self.span_of(s)   # edit.js: the span (minSpan … the waves) centred on at
             p, q = at - s / 2, at + s / 2
         else:
             fail('view: from and to, or span (and at)')
-        if self.m.doc and self.m.t1 is not None and a.get('from') is None:   # edit.js: the span within the waves, centred, clamped
-            full = self.m.t1 - self.m.t0
-            s = min(q - p, full) if full > 0 else q - p
-            p = min(max(p + (q - p - s) / 2, self.m.t0), self.m.t1 - s)
-            q = p + s
+        p, q = self.window(p, q)   # zoomTo, center: within the waves (B-44)
         self.st['from'], self.st['to'] = p, q
         return {'from': p, 'to': q}
 
@@ -775,12 +853,16 @@ class Editor:
         p, q = self.time(a.get('from'), 'from'), self.time(a.get('to'), 'to')
         sig = self.m.pick(self.st, a['signal'], one=True)[0]['full'] if a.get('signal') else None
         lo, hi = min(p, q), max(p, q)
+        if p == q:   # edit.js range: no length is an error (from null: no range)
+            fail(f'range: from and to are one time ({self.when(p)}): no length (from null: no range)')
         if self.m.t0 is not None:   # edit.js range: wholly outside the waves said, else cut to them (view.js setRange)
             if hi < self.m.t0 or lo > self.m.t1:
                 fail(f'range: {self.when(lo)} … {self.when(hi)} is outside these waves ({self.when(self.m.t0)} … {self.when(self.m.t1)})')
+            if max(lo, self.m.t0) == min(hi, self.m.t1):
+                fail(f'range: {self.when(lo)} … {self.when(hi)} only touches these waves ({self.when(self.m.t0)} … {self.when(self.m.t1)})')
             lo, hi = max(lo, self.m.t0), min(hi, self.m.t1)
-        self.st['range'] = None if lo == hi else {'from': lo, 'to': hi, 'signal': sig}
-        return {'range': None if lo == hi else [lo, hi]}
+        self.st['range'] = {'from': lo, 'to': hi, 'signal': sig}
+        return {'range': [lo, hi]}
 
     def c_bookmark(self, a):
         n = a.get('n')
@@ -848,8 +930,10 @@ class Editor:
                 if self.m.t0 is not None and self.m.t1 is not None:   # view.js clamp: the window within the waves
                     x = min(max(x, self.m.t0), self.m.t1 - span)
                 self.st['from'], self.st['to'] = x, x + span
-            if b['signal']:
-                self.st['select'] = b['signal']
+            if b['signal'] and self.in_signal_view(b['signal']):   # the page opens the way to it; the range counted on it (B-37)
+                self.set_select(b['signal'], gone=False)
+            elif b['signal']:   # hidden or out of Only: draw unselects it, no range follows it
+                self.st['select'] = None
             return {'n': b['n'], 't': b['t'], 'from': self.st.get('from'), 'top': b['top']}
         return {'n': b['n']}
 
@@ -1085,6 +1169,7 @@ class Editor:
             if not g:
                 fail(f'no group "{name}"')
             self.st['groups'] = group_list([x for x in gs if x is not g])
+            self.group_path('@' + name, None)
             return {'name': name, 'deleted': True}
         fulls = lambda spec: [r['full'] for r in self.m.sigs_of(self.st, self.m.pick(self.st, spec, groups=True))]
         new = fulls(a['signals']) if a.get('signals') is not None else None
@@ -1126,6 +1211,8 @@ class Editor:
             g['color'] = color_ok(a['color'])
         if to:
             g['name'] = to
+            if to != name:
+                self.group_path('@' + name, '@' + to)
         self.st['groups'] = group_list(gs)
         if a.get('go'):   # opened, shown, its first signal selected (view.js goGroup)
             path = '@' + g['name']
@@ -1135,9 +1222,18 @@ class Editor:
             self.st['folds'] = f
             if path in (self.st.get('hidden') or []):
                 self.st['hidden'] = [p for p in self.st['hidden'] if p != path]
-            if g['signals']:
-                self.st['select'] = g['signals'][0]
+            if g['signals']:   # its row in the group (opened, shown): no module's fold or Hide takes it
+                self.set_select(g['signals'][0], gone=False)
         return {'name': g['name'], 'signals': len(g['signals']), 'at': gs.index(g) + 1}
+
+    def group_path(self, old, new):
+        """edit.js group: your group deleted (new None) or renamed: "@name" out of hidden and the highlight, or under its new name (B-32)."""
+        put = lambda lst: [x for x in (new if x == old else x for x in lst) if x is not None]
+        if old in (self.st.get('hidden') or []):
+            self.st['hidden'] = put(self.st['hidden'])
+        c = self.st.get('config')
+        if isinstance(c, dict) and old in prefixes(c.get('highlight')):
+            c['highlight'] = put(prefixes(c['highlight']))
 
     def c_highlight(self, a):
         lst = [] if a.get('clear') else self.highlight()
@@ -1156,6 +1252,7 @@ class Editor:
     def c_paint(self, a):
         if a.get('signals') is None and not a.get('clear'):
             fail('paint: signals and a color, or clear')
+        color_ok(a.get('color'))   # before anything is cleared (B-48)
         p = {} if a.get('clear') else dict(self.st.get('paint') or {})
         rows = self.m.sigs_of(self.st, self.m.pick(self.st, a['signals'], groups=True)) if a.get('signals') is not None else []
         for r in rows:
@@ -1179,8 +1276,28 @@ class Editor:
             self.st['select'] = rows[-1]['full'] if rows else None
         else:
             self.st['select'] = self.m.pick(self.st, a['signal'], one=True)[0]['full'] if a.get('signal') else None
-        self.unselect_gone()
+        self.set_select(self.st['select'])
         return {'select': self.st['select']}
+
+    def set_select(self, full, gone=True):
+        """view.js select: the signal selected (gone: none when it is folded or hidden away, B-33), the range counted on it
+        (rangeFollow)."""
+        self.st['select'] = full
+        if gone:
+            self.unselect_gone()
+        if self.st.get('select') and isinstance(self.st.get('range'), dict):
+            self.st['range'] = dict(self.st['range'], signal=self.st['select'])
+
+    def in_signal_view(self, full):
+        """modules.js shown for a signal by its path (a path not among the signals: so it is)."""
+        r = next((r for r in self.m.sigs() if r['full'] == full), None) if self.m.doc else None
+        return not r or self.in_view(r)
+
+    def unfollow_gone(self):
+        """modules.js onlyFix: the range's signal hidden (itself or its module) or left out by Only is not followed (B-24, B-34)."""
+        g = self.st.get('range')
+        if isinstance(g, dict) and g.get('signal') and not self.in_signal_view(g['signal']):
+            self.st['range'] = dict(g, signal=None)
 
     def unselect_gone(self):
         """view.draw: the selected signal folded or hidden away is no longer selected."""
@@ -1196,13 +1313,15 @@ class Editor:
             self.st['select'] = None
 
     def c_hide(self, a):
-        rows = self.m.pick(self.st, a.get('signals'), groups=True)
+        div = {'@' + g['name'] for g in self.groups() if g.get('divider')}
+        rows = [r for r in self.m.pick(self.st, a.get('signals'), groups=True) if r['full'] not in div]   # a divider stays (edit.js, B-47)
         h = list(self.st.get('hidden') or [])
         for r in rows:
             if r['full'] not in h:
                 h.append(r['full'])
         self.st['hidden'] = h
         self.unselect_gone()
+        self.unfollow_gone()
         return {'hidden': len(h)}
 
     def c_show(self, a):
@@ -1314,6 +1433,7 @@ class Editor:
         if 'only' in self.st and self.st['only'] is not None:
             self.st['only'] = self.only()
         self.unselect_gone()
+        self.unfollow_gone()
         return {'only': self.only(), 'groups': self.only_groups()}
 
     def c_radix(self, a):
@@ -1466,18 +1586,22 @@ class Editor:
 
     def dup_drop(self, d):
         """look.js dupDrop: a copy gone ("PADDR#2", a slice "PADDR[7:4]"), and what was its; what stood on it goes to its signal."""
-        base = copy_base(d) or d
-        to = lambda p: base if p == d else base + p[len(d):] if isinstance(p, str) and p.startswith(d + '[') else p
+        base, sl = copy_base(d) or d, slice_id(d)
+        mine = lambda p: isinstance(p, str) and (p == d or p.startswith(d + '['))   # the copy or one of its bits
+        # its bit i: the bus's bit i, a slice's the bus's lsb + i (B-30)
+        bit = lambda p: base + (f'[{sl[2] + int(p[len(d) + 1:-1])}]' if sl and re.fullmatch(r'\[\d+\]', p[len(d):]) else p[len(d):])
+        to = lambda p: base if p == d else bit(p) if mine(p) else p
         self.st['dups'] = [x for x in self.st.get('dups') or [] if x != d]
-        for k in ('radix', 'analog', 'paint'):
+        for k in ('radix', 'analog', 'paint'):   # its bits' too (B-31)
             if isinstance(self.st.get(k), dict):
-                self.st[k].pop(d, None)
+                for p in [p for p in self.st[k] if mine(p)]:
+                    del self.st[k][p]
         for k in ('hidden', 'bits'):   # its bits hidden too
             if k in self.st:
                 self.st[k] = [x for x in self.st[k] if not (x == d or (k == 'hidden' and isinstance(x, str) and x.startswith(d + '[')))]
         c = self.st.get('config')
-        if isinstance(c, dict) and 'highlight' in c:   # look.js: picks.delete
-            c['highlight'] = [x for x in prefixes(c['highlight']) if x != d]
+        if isinstance(c, dict) and 'highlight' in c:   # look.js: picks.delete, the rows gone out of the highlight (onlyFix)
+            c['highlight'] = [x for x in prefixes(c['highlight']) if not mine(x)]
         for g in self.st.get('groups') or []:
             g['signals'] = [x for x in g.get('signals') or [] if x != d]
         for b in (self.st.get('bookmarks') or []) + (self.st.get('markers') or []):
@@ -1580,7 +1704,26 @@ class Editor:
         cs, word = bool(self.opt('findCase')), bool(self.opt('findWord'))
         return [r for r in self.ordered() if r['type'] != 'space' and find_row(r, terms, groups, cs, word, rx)]
 
+    @staticmethod
+    def gaps_ok(a):
+        """edit.js gapsOk: the gaps command's values, every one checked before anything changes (B-49)."""
+        for k in ('on', 'only', 'view'):
+            if a.get(k) is not None and not isinstance(a[k], bool):
+                fail(f'gaps: {k}: true or false')
+        for k, lo in (('idle', 'more than 0'), ('keep', None)):
+            if k in a and not gap_len_ok(a[k], lo is None):
+                fail(f'gaps: {k}: clock cycles{f" ({lo})" if lo else ""} or a time ("100ns"), not {json.dumps(a[k], ensure_ascii=False)}')
+        if a.get('count') is not None and a['count'] not in GAP_COUNTS:
+            fail(f'gaps: count: one of {", ".join(GAP_COUNTS)}, not {json.dumps(a["count"], ensure_ascii=False)}')
+        for k in ('signals', 'aux'):
+            v = a.get(k)
+            if v is not None and not isinstance(v, str) and not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
+                fail(f'gaps: {k}: names or * patterns (a list, or a text with commas), not {json.dumps(v, ensure_ascii=False)}')
+        if a.get('clock') is not None and not isinstance(a['clock'], str):
+            fail(f'gaps: clock: a signal\'s name, not {json.dumps(a["clock"], ensure_ascii=False)}')
+
     def c_gaps(self, a):
+        self.gaps_ok(a)
         c, xs = self.config(), self.exprs()
         by = any(x['gap'] for x in xs)
         if by and (a.get('reset') or a.get('on') is False or a.get('view') is False):   # look.js setGaps: the gaps off end the expressions'
@@ -1591,7 +1734,7 @@ class Editor:
             c.update({k: self.m.cfg.get(k, GAP_DEFAULTS[k]) for k in ALL_GAP_KEYS})
         for k, g in GAP_KEYS.items():
             if k in a and not (by and a[k] is True and k in ('on', 'view')):   # on already, by them: not your setting
-                c[g] = a[k]
+                c[g] = prefixes(a[k]) if k in ('signals', 'aux') and a[k] is not None else a[k]   # as gapOpt says them
         return {'gaps': self.gap_opt()}
 
     def gap_opt(self):
@@ -1599,7 +1742,7 @@ class Editor:
         o = {k: self.opt(k, GAP_DEFAULTS[k]) for k in ALL_GAP_KEYS}
         o['gaps'], o['gapOnly'], o['gapView'] = bool(o['gaps']), bool(o['gapOnly']), bool(o['gapView'])
         o['gapSignals'], o['gapAux'], o['gapClock'] = prefixes(o['gapSignals']), prefixes(o['gapAux']), o['gapClock'] or None
-        if o['gapCount'] not in ('off', 'clock', 'edges', 'rise', 'fall', 'any'):
+        if o['gapCount'] not in GAP_COUNTS:
             o['gapCount'] = 'clock'
         by = [i + 1 for i, x in enumerate(self.exprs()) if x['gap']]
         if by:   # expressions with gap have them on, on the waves
@@ -1643,15 +1786,19 @@ class Editor:
         s = a.get('state')
         if not isinstance(s, dict) or s.get('wavelens') != 'state':
             fail('set_state: not a saved viewer state ({"wavelens": "state", …})')
+        bad = state_kinds(s)   # before anything is applied (view.js setState, B-45)
+        if bad:
+            fail(bad)
         for k, v in s.items():
             if k == 'config':
                 if isinstance(v, dict):
                     self.config().update(v)
             elif k in STATE_KEYS:   # what a state has (view.js state()); another key is not the viewer's
                 self.st[k] = v
-        for k in ('bookmarks', 'markers', 'arrows', 'spans', 'groups'):   # an entry that is no object: left out, as the page does
-            if isinstance(self.st.get(k), list):
-                self.st[k] = [x for x in self.st[k] if isinstance(x, dict)]
+        if isinstance(s.get('config'), dict) and 'fold' in s['config'] and 'folds' not in s:   # its folding: foldSet of it (B-46)
+            self.st.pop('folds', None)
+        self.st = clean_state(self.st)   # an entry that is no object left out, as the page does
+        self.clamp_state()   # the times within the waves (B-44)
         if 'dups' in s and self.m.doc:   # as the viewer keeps them: the copies of signals of these waves
             self.st['dups'] = [r['full'] for r in self.m.dup_rows(s)]
         if 'bits' in s and self.m.doc:   # as the viewer keeps them: the buses of these waves
@@ -1662,6 +1809,7 @@ class Editor:
                 self.grp_next = s['only']['groups'] if isinstance(s['only'].get('groups'), bool) else None
             self.st['only'] = self.only()
             self.unselect_gone()
+        self.unfollow_gone()   # view.js setState: onlyFix after every state
         return {'missing': self.missing(s)}
 
     def missing(self, s):
