@@ -155,6 +155,15 @@ def settle(page):
     page.evaluate('new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))')
 
 
+def mclick(page, m=None, extra='', text=None):
+    """Click the right button's menu item data-m=m (or the button with that text) with the pointer, its submenu opened first
+    by the pointer on its header when it is in one (Range ▸, Show as ▸, Here ▸, Export ▸ …)."""
+    it = page.locator('.wv-menu button', has_text=text).first if text else page.locator(f'.wv-menu button[data-m={m}]{extra}')
+    if not it.is_visible():
+        it.locator('xpath=ancestor::*[contains(@class,"msub")][1]/button').hover()
+    it.click()
+
+
 def interact(page):
     v = page.locator('#ex-handshake-view')
     cur = v.locator('.cur')
@@ -568,7 +577,7 @@ def find(page, P):
     v.locator('button[data-act=fopen]').click()
     v.locator('button[data-act=fselect]').click(); settle(page)
     fs = js("[[...v.selRun].every(r => v.found.has(r)), v.selRun.size, [...v.found.keys()].filter(r => r.type === 'sig' && r.tr && v.shown(r)).length, v.found.has(v.sel)]")
-    mh, ug = js("(v.menu(300, 300, v.sel), ['.mh', 'button[data-m=ugnew]'].map(q => (document.querySelector('.wv-menu ' + q) || {}).textContent))")
+    mh, ug = js("(v.menu(300, 300, v.sel), ['.subp + .sub .mh', 'button[data-m=ugnew]'].map(q => (document.querySelector('.wv-menu ' + q) || {}).textContent))")
     js('(v.closeMenu(), 0)')
     one = fs[1] == 1   # a page where the path finds one signal: the menu names it
     check(fs[0] and fs[1] == fs[2] >= 1 and fs[3] and (one and ug == 'New group with it' or f'{fs[1]} selected' in mh and f'New group of the {fs[1]}' in ug),
@@ -2528,15 +2537,15 @@ def vscode_tab(browser, build):
     # slice: the view's times go with it (the same moment of the dump in sight, a marker on it), A now again: back
     js("v.run([{ op: 'marker', t: 6000, label: 'sl' }])"); page.wait_for_timeout(50)
     js("(v.zoomTo(5500, 9000), v.setRange(5000, 10000), v.menu(200, 200, null, 5000), 0)")   # a window inside the slice: not clamped
-    sub = js("[...v.menuEl.querySelectorAll('.subs + .sub [data-m]')].map(b => b.dataset.m)")
+    sub = js("[...v.menuEl.querySelectorAll('.subr + .sub [data-m]')].map(b => b.dataset.m)")
     js("(v.menuEl.querySelector('[data-m=slkeep]').click(), 0)")
     until("(v => v && v.runsL && v.runsL.some(r => r.slice))(WaveLens.views().find(x => x.root.isConnected))")
     k = [m for m in sent('runs') if m['op'] == 'keep'][-1]
     sid = js("v.runsL.find(r => r.slice).id")
     page.wait_for_timeout(50)
-    check(sub == ['slkeep', 'slfst'] and (k.get('from'), k.get('to')) == (5000, 10000) and js(f"v.runsP.fi === v.runsP.rowOf({sid})") and
+    check(sub == ['marks', 'copyd', 'keepsp', 'slkeep', 'slfst'] and (k.get('from'), k.get('to')) == (5000, 10000) and js(f"v.runsP.fi === v.runsP.rowOf({sid})") and
           'slice 5' in js(f"v.root.querySelector('.wv-runs .rn[data-i=\"' + v.runsP.rowOf({sid}) + '\"] .r2').textContent"),
-          f'Slice ▸ Keep as a slice: keep with the range, the panel on its row, "slice …" on it ({sub}, {k})')
+          f'Range ▸ Keep as a slice: keep with the range, the panel on its row, "slice …" on it ({sub}, {k})')
     t0 = js("[v.t0, v.span]")
     # review of 0.50 B-02: a span chosen as the panel's window goes with the slice's time too (no word of a span gone)
     js("(v.run([{ op: 'span', from: 5000, to: 10000, label: 'w' }]), v.runsWin = { label: 'w', from: 5000, to: 10000 }, v.runsP.windows(), 0)")
@@ -3978,7 +3987,7 @@ def bits(browser, build):
     c = page.locator('.wv canvas').first; c.scroll_into_view_if_needed(); box = c.bounding_box()
     y = js("const o = WaveLens.internal.peek(v).lay.find(o => o.row.full === 'PRDATA'); return o.y + o.h / 2 - (WaveLens.internal.peek(v).oy || 0)")
     page.mouse.click(box['x'] + 300, box['y'] + y, button='right'); menu = page.locator('.wv-menu')
-    lab = menu.locator('button[data-m=bits]').inner_text().split('\n')[0]; menu.locator('button[data-m=bits]').click()
+    menu.locator('.subv').hover(); lab = menu.locator('button[data-m=bits]').inner_text().split('\n')[0]; mclick(page, 'bits')
     m = js("return v.state().bits")
     r = js("""const r = await v.run([{ op: 'bits', signals: 'PRDATA', on: false }, { op: 'bits', signals: 'PCLK' }, { op: 'bits', signals: 'PADDR', on: 1 },
           { op: 'bookmark', t: 60000, signal: 'PADDR[2]', text: 'bit 2' }, { op: 'bookmark', t: 60000, signal: 'PADDR[8]' }]);
@@ -4324,13 +4333,14 @@ def order(browser, build):
     def names_menu(i):
         page.keyboard.press('Escape'); r = box(i)
         page.mouse.click(r['x'] + 30, r['y'] + r['height'] / 2, button='right'); page.wait_for_timeout(80)
-        return page.evaluate("[...document.querySelectorAll('.wv-menu > button[data-m]')].map(b => b.dataset.m)")
+        return page.evaluate("[...document.querySelectorAll('.wv-menu button[data-m]')].map(b => b.dataset.m)")
     def pick(i, m):
-        names_menu(i); page.locator(f'.wv-menu > button[data-m={m}]').click(); page.wait_for_timeout(100)
+        names_menu(i); mclick(page, m); page.wait_for_timeout(100)
     ms = names_menu(idx('gA', 'PENABLE'))
+    in_sub = page.evaluate("!!document.querySelector('.wv-menu .subg + .sub button[data-m=mvup]')")
     pick(idx('gA', 'PENABLE'), 'mvdn'); a = groups()[0]; pick(idx('gA', 'PENABLE'), 'mvtop'); b = groups()[0]
     pick(idx('gA', 'PSEL'), 'mvbot'); c = groups()[0]; pick(idx('gA', 'PWRITE'), 'mvup'); d = groups()[0]
-    check({'mvup', 'mvdn', 'mvtop', 'mvbot', 'copyname', 'hide'} <= set(ms) and a == ['gA', 'PSEL', 'PWRITE', 'PENABLE'] and
+    check({'mvup', 'mvdn', 'mvtop', 'mvbot', 'copyname', 'hide'} <= set(ms) and in_sub and a == ['gA', 'PSEL', 'PWRITE', 'PENABLE'] and
           b == ['gA', 'PENABLE', 'PSEL', 'PWRITE'] and c == ['gA', 'PENABLE', 'PWRITE', 'PSEL'] and d == ['gA', 'PWRITE', 'PENABLE', 'PSEL'],
           f'the right button on a name of your group: its menu moves it (down, to the top, to the bottom, up) {ms} {a} {b} {c} {d}')
     top = names_menu(idx('gA', 'PWRITE')); hm = names_menu(hdr('gA'))
@@ -5298,17 +5308,17 @@ def edit(browser, build):
     page.evaluate(f"(v => v.menu(200, 200, WaveLens.internal.peek(v).vis.find(r => r.user && r.name === 'group 2'), 70000))({V})")
     page.locator('.wv-menu .subg').hover(); page.locator('.wv-menu button[data-m=ugdel]').click()
     page.evaluate(f"(v => v.menu(200, 200, v.M.rows.find(r => r.name === 'PWRITE'), 70000))({V})")
-    y0 = page.evaluate('scrollY'); page.locator('.wv-menu button[data-m=umark]').click()
+    y0 = page.evaluate('scrollY'); mclick(page, 'umark')
     ask = page.locator('.wv-ask'); asked = [ask.count(), page.evaluate("document.activeElement.placeholder"), ask.locator('.mh').inner_text()]
     page.keyboard.type('burst'); page.keyboard.press('Enter')
     got = page.evaluate(f"(v => [v.ugroups.map(g => g.name), v.markList().map(m => [m.t, m.label || ''])])({V})")
     check(got == [['g1'], [[90000, 'mk'], [70000, 'burst']]] and asked[:2] == [1, 'its label'] and ask.count() == 0 and page.evaluate('scrollY') == y0,
           f'the menu: New group with it, Delete this group; Marker here asks its label over the waves (Enter: added, the page where it was) {got} {asked}')
     page.evaluate(f"(v => v.menu(200, 200, v.M.rows.find(r => r.name === 'PWRITE'), 70000))({V})")
-    page.locator('.wv-menu button[data-m=umark]').click(); page.keyboard.type('no'); page.keyboard.press('Escape')
+    mclick(page, 'umark'); page.keyboard.type('no'); page.keyboard.press('Escape')
     n_esc = page.evaluate(f"(v => v.markList().length)({V})")
     page.evaluate(f"(v => v.menu(200, 200, v.M.rows.find(r => r.name === 'PWRITE'), 70000))({V})")
-    page.locator('.wv-menu button[data-m=mark]').click(); page.keyboard.type('write'); page.locator('.wv-ask button[data-m=ok]').click()
+    mclick(page, 'mark'); page.keyboard.type('write'); page.locator('.wv-ask button[data-m=ok]').click()
     bm = page.evaluate(f"(v => {{ const b = v.bms[v.bms.length - 1]; return [b.signal, b.text, document.activeElement === v.canvas]; }})({V})")
     check(n_esc == 2 and bm[1:] == ['write', True] and bm[0].endswith('PWRITE'),
           f'Esc in it: no marker; Bookmark here asks its text too (Add: added, the keys back on the waves) {n_esc} {bm}')
@@ -5563,7 +5573,7 @@ def review_1103(browser, build):
     check(a == [], f'B-23: the hidden bit of a copy goes with it {a}')
     # B-21: a group's name once escaped
     a = js("""await v.run([{ op: 'group', name: 'a&b <x>', signals: 'PSEL,PENABLE' }]); const r = v.allRows().find(x => x.ug && x.name === 'PENABLE');
-        v.menu(300, 300, r); const t = v.menuEl.innerText; v.closeMenu(); return t;""")
+        v.menu(300, 300, r); const t = v.menuEl.textContent; v.closeMenu(); return t;""")
     check('To the top of “a&b <x>”' in a and '&amp;' not in a, f'B-21: a group\'s name in the menu as it is {a[-120:]!r}')
     # B-22: the cursor field shows the cursor rounded; Set without a change keeps it
     a = js("v.cursor = 123456.789; v.syncCursorFields(true); v.setCursor(v.ctEl.value); return [v.cursor, v.ctEl.value];")
@@ -6022,7 +6032,7 @@ def bus_slices(browser, build):
     a = js("""await v.undo(); return [...v.dups.keys()];""")
     # the menu: Duplicate bits…
     js("v.menu(600, 400, v.M.rows.find(r => r.name === 'PRDATA'), null);")
-    page.locator('.wv-menu button', has_text='Duplicate bits…').click()
+    mclick(page, text='Duplicate bits…')
     page.keyboard.type('15:8'); page.keyboard.press('Enter'); page.wait_for_timeout(200)
     a = js("return [v.dups.has('PRDATA[15:8]'), v.sel && v.sel.full];")
     check(a == [True, 'PRDATA[15:8]'], f'Duplicate bits…: msb:lsb typed, the slice made and selected {a}')
@@ -6032,7 +6042,7 @@ def bus_slices(browser, build):
     check(vals.get('PADDR[7:0]') == '0x00 · 0x40 · +0x40 (−0xc0)' and vals.get('PSEL') == '0 · 1 · ↑' and vals.get('phase[1:0]') == 'IDLE → SETUP'
           and vals.get('PREADY') == '0 · 0 · =' and vals.get('PADDR[7:2]', '').endswith('· +0x10 (−0x30)'), f'two cursors: A · B · the change (a bus, a bit, an enum, the same, a slice) {[(k, vals.get(k)) for k in ("PADDR[7:0]", "PSEL", "phase[1:0]", "PADDR[7:2]")]}')
     js("v.menu(500, 300, v.M.rows.find(r => r.name === 'PADDR'), 30000);")
-    page.locator('.wv-menu button', has_text='Copy A · B · Δ').click(); page.wait_for_timeout(150)
+    mclick(page, text='Copy A · B · Δ'); page.wait_for_timeout(150)
     a = js("return v.root.querySelector('.bar .toast').textContent;")
     check('PADDR: 0x00 · 0x40 · +0x40 (−0xc0)' in a, f'Copy A · B · Δ: the values at both cursors and the change (S22-3) {a}')
     js("v.setCursor2(null);"); page.wait_for_timeout(100)
@@ -6199,7 +6209,7 @@ def small_ui(browser, build):
     check(a == 'PWDATA', f'ctrl+G: filtered, Enter goes to the group (its first signal) {a}')
     # Keep as span…, As range
     js("v.setRange(55000, 95000); v.menu(500, 300, v.M.rows.find(r => r.name === 'PADDR'), 70000);")
-    page.locator('.wv-menu button', has_text='Keep as span…').click()
+    mclick(page, text='Keep as span…')
     page.keyboard.type('the read'); page.keyboard.press('Enter'); page.wait_for_timeout(150)
     a = js("return [v.spans.map(s => [s.from, s.to, s.label]), v.range];")
     check(a == [[[55000, 95000, 'the read']], [55000, 95000]], f'Keep as span…: a span over the range with its label, the range stays {a}')
@@ -6444,7 +6454,7 @@ def marker_delta_ends(browser, build):
     js("v.root.scrollIntoView();"); settle(page)
     b = js("const r = v.canvas.getBoundingClientRect(); return [r.x + 300, r.y + 200];")
     page.mouse.move(b[0], b[1]); page.mouse.down(button='right'); page.mouse.up(button='right'); settle(page)
-    page.locator('.wv-menu button[data-m=clearmarks]').click(); settle(page)
+    mclick(page, 'clearmarks'); settle(page)
     a = js("return [v.bms.length, v.umarks.length];")
     check(a == [0, 0], f'the right button clears them too {a}')
     page.mouse.move(b[0], b[1]); page.mouse.down(button='right'); page.mouse.up(button='right'); settle(page)
@@ -6724,21 +6734,21 @@ def ranges(browser, build):
     check(js('v.range') == [r[3], r[4]] and items[:4] == ['zoom', 'marks', 'copyd', 'keepsp'] and {'copyimg', 'png', 'svg', 'hl', 'hide', 'mark', 'copyname', 'clear'} <= set(items) and 'PSEL' in menu.inner_text(),
           f'the right button: the same range, then its menu (range, picture, the signal under the pointer) {items}')
     with page.expect_download() as dl:
-        menu.locator('button[data-m=svg]').click()
+        mclick(page, 'svg')
     svg = pathlib.Path(dl.value.path()).read_text(encoding='utf-8')
     ok = page.evaluate("s => !new DOMParser().parseFromString(s, 'image/svg+xml').querySelector('parsererror')", svg)
     check(menu.count() == 0 and ok and 'var(' not in svg and '>PSEL<' in svg and dl.value.suggested_filename.endswith('.svg'),
           f'Save image as SVG: a standalone picture (the colours put in, no var()), the names in it ({len(svg)} chars, {dl.value.suggested_filename})')
     page.mouse.click(box['x'] + 5, box['y'] + r[0], button='right')
     with page.expect_download() as dl:
-        menu.locator('button[data-m=png]').click()
+        mclick(page, 'png')
     png = pathlib.Path(dl.value.path()).read_bytes()
     page.evaluate("window.__img = null; navigator.clipboard.write = items => (window.__img = items.map(i => i.types).flat(), Promise.resolve()); 0")
     page.mouse.click(box['x'] + 5, box['y'] + r[0], button='right'); menu.locator('button[data-m=copyimg]').click()
     page.wait_for_function('window.__img')
     check(png[:8] == bytes([137, 80, 78, 71, 13, 10, 26, 10]) and len(png) > 5000 and page.evaluate('window.__img') == ['image/png'],
           f'Save image as PNG ({len(png)} bytes), Copy image: a PNG to the clipboard')
-    nb = js('v.bms.length'); page.mouse.click(box['x'] + 5, box['y'] + r[0], button='right'); menu.locator('button[data-m=marks]').click()
+    nb = js('v.bms.length'); page.mouse.click(box['x'] + 5, box['y'] + r[0], button='right'); mclick(page, 'marks')
     mk = js("[v.bms.length, v.bms.slice(-2).map(b => [b.t, b.signal]), v.arrows[v.arrows.length - 1].label]")
     lane = js("(() => { v.draw(); const m = v.bmGeo.mids.find(x => x[0] === v.arrows.length - 1), o = WaveLens.internal.peek(v).lay.find(o => o.row.name === 'PSEL'); return [m[2] < o.y, o.y]; })()")
     check(lane[0], f'the arrow between the two bookmarks of one signal runs in its label lane above the row, not through the signal {lane}')
@@ -6833,7 +6843,7 @@ def ranges(browser, build):
           f'shorter, kept in this browser and in the state {g} {menu.locator(".gn").inner_text()!r}')
     cm = menu.evaluate("m => !m.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))")
     check(cm, 'a contextmenu on the open menu (Windows: the release of the right button) opens no browser menu over it')
-    page.keyboard.press('Escape')
+    page.keyboard.press('Escape'); page.keyboard.press('Escape')   # (the focus in Gaps ▸: Esc closes it, again the menu)
     # the signals the gaps follow: Gaps by this signal (// in the names), only them in the picture, ✕: every signal again
     page.mouse.click(box['x'] + 5, box['y'] + y2, button='right'); menu.locator('.subh').click(); menu.locator('button[data-m=gref]').click()
     ref = js("[[...v.gapRefSet()].map(r => r.name), v.gapOpt().gaps, [...WaveLens.internal.peek(v).namesEl.querySelectorAll('.row.gref .n')].map(e => e.textContent)]")
@@ -7031,11 +7041,11 @@ def ranges(browser, build):
     check(qopen == [True, 1] and fx == ['sq16', '-13569.9999847412109375'] and fl == '-8323073' and '#ff00aa' in esvg,
           f'Radix: fixed sq with 16 fraction bits (the menu stays open for them), float; enumColors fill the ACCESS state {fx} {fl}')
     # Analog from the menu: the bus as a step plot three rows high, kept over a reload and in the state; As a bus: back
-    page.mouse.click(box['x'] + 300, c.bounding_box()['y'] + yb('n_done'), button='right'); menu.locator('button[data-m=analog]').click()
+    page.mouse.click(box['x'] + 300, c.bounding_box()['y'] + yb('n_done'), button='right'); mclick(page, 'analog')
     an = js("[(o => [o.h, v.rowH.sig])(WaveLens.internal.peek(v).lay.find(o => o.row.full === 'apb_tb.n_done')), v.state().analog, Math.round(v.rowEl(v.M.rows.find(r => r.full === 'apb_tb.n_done')).getBoundingClientRect().height)]")
     page.reload(); page.wait_for_load_state('networkidle'); c.scroll_into_view_if_needed(); box = c.bounding_box()
     kept = js("v.M.rows.find(r => r.full === 'apb_tb.n_done').analog")
-    page.mouse.click(box['x'] + 300, c.bounding_box()['y'] + yb('n_done'), button='right'); label = menu.locator('button[data-m=analog]').inner_text(); menu.locator('button[data-m=analog]').click()
+    page.mouse.click(box['x'] + 300, c.bounding_box()['y'] + yb('n_done'), button='right'); menu.locator('.subv').hover(); label = menu.locator('button[data-m=analog]').inner_text(); mclick(page, 'analog')
     off = js("[v.M.rows.find(r => r.full === 'apb_tb.n_done').analog, (o => o.h)(WaveLens.internal.peek(v).lay.find(o => o.row.full === 'apb_tb.n_done'))]")
     parsed = page.evaluate("WaveLens.parse({ signal: [{ name: 'lvl', wave: '=.=', data: ['1', '9'], analog: 2 }] }).rows[0].analog")
     check(an[0] == [3 * an[0][1], an[0][1]] and an[1] == {'apb_tb.n_done': 3} and an[2] == 3 * an[0][1] and kept == 3 and label == 'As a bus' and off == [False, an[0][1]] and parsed == 2,
@@ -7064,7 +7074,7 @@ def ranges(browser, build):
     bx = js("[[...v.selRun].map(r => r.name), v.range && v.range.map(t => Math.round(t)), Math.round(v.t0 + 120 / v.pxPerT()), Math.round(v.t0 + 420 / v.pxPerT()), v.box]")
     head2 = menu.locator('.mh').first.inner_text() if menu.count() else ''
     with page.expect_download() as dl:
-        menu.locator('button[data-m=wdjson]').click()
+        mclick(page, 'wdjson')
     wd2 = [x['name'] for x in json.loads(pathlib.Path(dl.value.path()).read_text(encoding='utf-8'))['signal']]
     check(drawn and bx[0] == ['PSEL', 'PENABLE', 'PWRITE', 'PREADY'] and abs(bx[1][0] - bx[2]) <= 1 and abs(bx[1][1] - bx[3]) <= 1 and bx[4] is None
           and wd2 == ['PCLK', 'PSEL', 'PENABLE', 'PWRITE', 'PREADY'],
@@ -7074,7 +7084,7 @@ def ranges(browser, build):
     js("(v.highlight(null), ['PADDR', 'PWDATA', 'PSEL'].forEach(n => v.toggleHighlight(v.M.rows.find(r => r.full === 'apb_tb.' + n))), v.setRange(0, 200000), 0)")
     pmenu = lambda: js("(v.menu(200, 200, v.M.rows.find(r => r.full === 'apb_tb.PADDR')), 0)")   # the right button itself: above
     settle(page)   # the highlight drawn before the picture
-    pick = lambda m: menu.locator(f'button[data-m={m}]').click()   # a menu opened right after another one closed (its stale listener closed it)
+    pick = lambda m: mclick(page, m)   # a menu opened right after another one closed (its stale listener closed it)
     pmenu()
     with page.expect_download() as dl:
         pick('svg')
@@ -8557,7 +8567,7 @@ def tips(browser, build):
     check(got == ['Zoom in', ['i', '+', 'ctrl+wheel'], None, 0], f'hover: "Zoom in" and its keys after a moment, no browser tooltip, gone when the pointer leaves {got}')
     # in the right button's menu a tooltip waits menuTipDelay (2 s)
     c = page.locator('.wv canvas').first; c.scroll_into_view_if_needed(); cb = c.bounding_box(); page.mouse.click(cb['x'] + 200, cb['y'] + 60, button='right')
-    page.locator('.wv-menu button[data-m=png]').hover(); page.wait_for_timeout(800); early = page.locator('.wv-tip').count()
+    page.locator('.wv-menu .subp').hover(); page.locator('.wv-menu button[data-m=png]').hover(); page.wait_for_timeout(800); early = page.locator('.wv-tip').count()
     until(page, "!!document.querySelector('.wv-tip')", 4000); late = page.locator('.wv-tip').count(); page.keyboard.press('Escape')
     check([early, late] == [0, 1], f'a tooltip in the menu waits menuTipDelay: none after 0.8 s, there after 2 s {[early, late]}')
     page.locator('.wv canvas').first.click(); page.keyboard.press('?')
@@ -8806,11 +8816,12 @@ def small_viewer(browser, build):
 
 def small_menu(browser, build):
     """WP10 (B-83): the right button's menu taller than the window (a range, a second cursor, a bus) scrolls inside the window
-    at 1366×768 and 1280×600: its last item reachable, a submenu opened after a scroll shown whole beside it, not clipped."""
+    (1366×440, 1280×380: in submenus it fits 600 px): its last item reachable, a submenu opened after a scroll shown whole
+    beside it, not clipped."""
     apb = build / 'examples' / 'apb' / 'apb.html'
     if not need(apb, how='make examples'):
         return
-    for w, h in ((1366, 768), (1280, 600)):
+    for w, h in ((1366, 440), (1280, 380)):
         page = browser.new_page(viewport={'width': w, 'height': h})
         errs = []
         page.on('pageerror', lambda e: errs.append(str(e)))
@@ -8819,9 +8830,9 @@ def small_menu(browser, build):
           v.setRange(v.M.t0 + (v.M.t1 - v.M.t0) / 4, v.M.t0 + (v.M.t1 - v.M.t0) / 2, s); v.setCursor2(v.M.t0 + (v.M.t1 - v.M.t0) / 3);
           v.run([{ op: 'bookmark', t: v.M.t0 + 1000 }]); v.menu(200, 300, s); })()""")
         settle(page)
-        got = page.evaluate("""(() => { const m = document.querySelector('.wv-menu'), b = m.getBoundingClientRect(), last = [...m.querySelectorAll('button[data-m]')].pop();
+        got = page.evaluate("""(() => { const m = document.querySelector('.wv-menu'), b = m.getBoundingClientRect(), last = [...m.querySelectorAll(':scope > button[data-m], :scope > .msub > button')].pop();
           m.scrollTop = m.scrollHeight; const l = last.getBoundingClientRect(), at = document.elementFromPoint(l.left + 8, l.top + l.height / 2);
-          return { tall: m.scrollHeight, top: b.top, bottom: b.bottom, last: last.dataset.m, lastIn: l.bottom <= innerHeight && l.top >= 0, hit: !!at && last.contains(at) }; })()""")
+          return { tall: m.scrollHeight, top: b.top, bottom: b.bottom, last: last.dataset.m || last.className, lastIn: l.bottom <= innerHeight && l.top >= 0, hit: !!at && last.contains(at) }; })()""")
         check(got['tall'] > h - 8 and got['top'] >= 0 and got['bottom'] <= h and got['lastIn'] and got['hit'],
               f'B-83 {w}×{h}: a menu of {got["tall"]} px inside the window, scrolled: its last item "{got["last"]}" on the screen and under the pointer {got}')
         sub = page.locator('.wv-menu .msub').last
@@ -8835,6 +8846,286 @@ def small_menu(browser, build):
         check(not errs, f'no page errors {errs[:3]}')
         page.close()
 
+
+def menus(browser, build):
+    """The right button's menu in submenus (docs/reviews/menus-2026-11-11): its shape in each mode (no scroll at 1280×600,
+    every item once, no submenu in a submenu, none empty), Here ▸ on the time axis, the keys (↑ ↓ → ← Enter Esc, one open
+    submenu), the pointer (a rest before another opens, a plain item closes it, a click toggles), its place by the window's
+    edge or inside the menu in a narrow window, the tips of the headers and of the items that had their own."""
+    apb = build / 'examples' / 'apb' / 'apb_all.html'
+    if not need(apb, how='make examples'):
+        return
+    print('the right button\'s menu in submenus')
+    page = browser.new_page(viewport={'width': 1280, 'height': 600})
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    fresh = lambda: (page.goto(apb.as_uri()), page.wait_for_load_state('networkidle'), page.evaluate('localStorage.clear()'), page.reload(),
+                     page.wait_for_load_state('networkidle'))
+    js = lambda e: page.evaluate(f"""(async () => {{ const v = document.querySelector('.wv').waveView, I = WaveLens.internal, T = 60000,
+        R = n => v.M.rows.find(r => r.name === n && r.type === 'sig'); {e} }})()""")
+    shape = """const m = v.menuEl, top = m.querySelectorAll(':scope > button, :scope > label.mi, :scope > .mh, :scope > .msub');
+        const ids = [...m.querySelectorAll('button[data-m]')].map(b => b.dataset.m + (b.dataset.g != null ? '#' + b.dataset.g : ''));
+        const sub = c => [...m.querySelectorAll(c + ' + .sub button[data-m]')].map(b => b.dataset.m);
+        return { all: ids, rows: top.length, scroll: m.scrollHeight > m.clientHeight, dup: ids.filter((x, i) => ids.indexOf(x) !== i), nested: m.querySelectorAll('.sub .msub').length,
+          empty: [...m.querySelectorAll('.msub')].filter(s => !s.querySelector('.sub button, .sub .mi')).length,
+          top: [...m.querySelectorAll(':scope > button[data-m]')].map(b => b.dataset.m), radix: !!m.querySelector(':scope > label.mi select'),
+          heads: [...m.querySelectorAll(':scope > .msub > button')].map(b => b.className), v: sub('.subv'), p: sub('.subp'), t: sub('.subt'), r: sub('.subr') };"""
+    # the shape in each mode, at 1280×600
+    fresh()
+    modes = {
+        'axis': ("0", "null"), 'plain signal': ("0", "R('PSEL')"), 'bus': ("0", "R('PADDR')"),
+        'module header': ("0", "v.M.groups[Object.keys(v.M.groups)[0]]"),
+        'your group': ("await v.run([{ op: 'group', name: 'g1', signals: 'PSEL,PADDR' }])", "I.peek(v).vis.find(r => r.user && r.name === 'g1')"),
+        'largest': ("v.setRange(T, T + 40000, R('PADDR')); v.setCursor2(T + 20000); await v.run([{ op: 'bookmark', t: T + 1000 }, "
+                    "{ op: 'marker', t: T + 3000, label: 'mk' }, { op: 'span', from: T - 5000, to: T + 5000, label: 'sp' }]); v.hide([R('PWDATA')])", "R('PADDR')"),
+    }
+    got = {}
+    for k, (setup, row) in modes.items():
+        fresh()
+        got[k] = js(f"{setup}; v.menu(300, 100, {row}, T); try {{ {shape} }} finally {{ v.closeMenu(); }}")
+    bad = {k: g for k, g in got.items() if g['scroll'] or g['dup'] or g['nested'] or g['empty'] or (k != 'largest' and g['rows'] > 16)}
+    check(not bad, f'the menu at 1280×600 in every mode: no scroll (a range, a span, two cursors, marks, a hidden row on a bus too), ≤ 16 rows '
+          f'at the top on a row, every item once, no submenu in a submenu, none empty {bad}')
+    b, a, L = got['bus'], got['axis'], got['largest']
+    check({'copyimg', 'hl', 'dup', 'hide', 'copyname'} <= set(b['top']) and b['radix'] and b['v'] == ['analog', 'bits', 'dupbits', 'types']
+          and b['p'] == ['png', 'svg', 'wdjson', 'wdcopy', 'wlpiece'] and {'mark', 'umark', 'c2', 'copylink', 'mlist'} <= set(b['t'])
+          and b['heads'] == ['subv', 'subg', 'subt', 'subp', 'subh', 'subc', 'subm'],
+          f'a bus: Copy image, Highlight, Duplicate, Hide, Copy the path, Radix at once; Show as ▸, Your groups ▸, Here ▸, Export ▸ (the files), '
+          f'Gaps ▸, Cycles ▸, Modules ▸ {b["top"]} {b["heads"]} {b["v"]} {b["p"]} {b["t"]}')
+    check(not {'types', 'dup', 'dupbits', 'analog'} & set(got['module header']['all'] + got['your group']['all'] + a['all']),
+          f'M-01: Type… (and the forms of a signal) only on a signal: not on a module, your group, the axis {got["module header"]["all"]}')
+    check(a['heads'][0] == 'subt' and 'mark' not in a['t'] and {'umark', 'c2'} <= set(a['t']) and 'copyimg' in a['top'],
+          f'the axis: Here ▸ (no bookmark: no signal), Copy image {a}')
+    check(L['top'][:2] == ['zoom', 'clear'] and L['r'] == ['marks', 'copyd', 'keepsp'] and {'c2x', 'copyv', 'clearmarks'} <= set(L['t'])
+          and {'asrange', 'spdel'} <= set(L['top']), f'a range: Zoom, Range ▸, Clear the range together; a span at once; the second cursor\'s items in Here ▸ {L}')
+    # Here ▸ on the time axis: a marker with no signal at the time clicked; with a second cursor, Clear the second cursor
+    fresh(); js("v.setCursor2(T + 20000); v.root.scrollIntoView(); return 0;"); settle(page)
+    c = page.locator('.wv canvas').first; box = c.bounding_box()
+    page.mouse.click(box['x'] + 400, box['y'] + 8, button='right'); page.wait_for_timeout(80)
+    t_at = js("return v.t0 + 400 / v.pxPerT();")
+    here = [page.locator('.wv-menu .subt').count(), page.locator('.wv-menu button[data-m=c2x]').count()]
+    n0 = js("return v.markList().length;")
+    if here[0]:   # (not there: the check below says so, the next ones go on)
+        mclick(page, 'umark'); page.keyboard.type('axis'); page.keyboard.press('Enter'); page.wait_for_timeout(100)
+    page.keyboard.press('Escape')
+    mk = js("const m = v.markList().find(m => m.label === 'axis'); return m ? [m.signal || null, m.t] : null;")
+    check(here == [1, 1] and js("return v.markList().length;") == n0 + 1 and mk and mk[0] is None and abs(mk[1] - t_at) <= 3 / js("return v.pxPerT();"),
+          f'the right button on the axis: Here ▸, Marker here: a marker with no signal at the time clicked; Clear the second cursor there {here} {mk} {t_at}')
+    js("v.reset(); v.setCursor2(null); return 0;")
+    y = js("const o = I.peek(v).lay.find(o => o.row.name === 'PADDR'); return o.y + o.h / 2 - (I.peek(v).oy || 0);")
+    # each part on its own: one that breaks (a menu of before, with no submenus) fails its check, the next ones go on
+    def part(what, fn):
+        try:
+            fn()
+        except Exception as e:   # noqa: BLE001 — said as the failure of that part
+            check(False, f'{what}: {type(e).__name__} {str(e)[:160]}')
+            page.keyboard.press('Escape'); page.keyboard.press('Escape'); page.set_viewport_size({'width': 1280, 'height': 600})
+    # the keys: ↑ ↓ through the items, → opens a submenu (its first item focused), ← closes it, Enter on another: one open,
+    # Esc in a submenu closes it only, Esc again the menu
+    def p_keys():
+        page.mouse.click(box['x'] + 300, box['y'] + y, button='right'); page.wait_for_timeout(80)
+        ae = lambda: page.evaluate("(a => a.dataset.m || a.className || a.tagName)(document.activeElement)")
+        k0 = ae(); page.keyboard.press('ArrowDown'); k1 = ae(); page.keyboard.press('ArrowDown'); k2 = ae()
+        for _ in range(20):
+            if ae() == 'subv':
+                break
+            page.keyboard.press('ArrowDown')
+        page.keyboard.press('ArrowRight')
+        opened = page.evaluate("(m => [!m.querySelector('.subv + .sub').hidden, m.querySelector('.subv + .sub').contains(document.activeElement)])(document.querySelector('.wv-menu'))")
+        page.keyboard.press('ArrowLeft')
+        back = page.evaluate("(m => [m.querySelector('.subv + .sub').hidden, document.activeElement === m.querySelector('.subv')])(document.querySelector('.wv-menu'))")
+        page.evaluate("document.querySelector('.wv-menu .subh').focus()"); page.keyboard.press('Enter')
+        page.evaluate("document.querySelector('.wv-menu .subc').focus()"); page.keyboard.press('Enter')
+        one = page.evaluate("[...document.querySelectorAll('.wv-menu .sub')].filter(s => !s.hidden).map(s => s.previousElementSibling.className)")
+        page.keyboard.press('Escape')
+        esc1 = page.evaluate("(m => !!m && ![...m.querySelectorAll('.sub')].some(s => !s.hidden) && document.activeElement === m.querySelector('.subc'))(document.querySelector('.wv-menu'))")
+        page.keyboard.press('Escape'); esc2 = page.locator('.wv-menu').count()
+        check(k1 != k0 and k2 != k1 and opened == [True, True] and back == [True, True] and one == ['subc'] and esc1 and esc2 == 0,
+              f'the keys: ↓ ↓ move ({k0} {k1} {k2}), → opens Show as ▸ (focus inside) {opened}, ← closes it {back}, Enter on Gaps then '
+              f'Cycles: one open {one}, Esc closes the submenu {esc1}, again the menu {esc2}')
+    part('the keys', p_keys)
+    # the pointer: another submenu after a rest on its header, the open one kept on the way; a plain item closes it; a click toggles
+    def p_pointer():
+        page.mouse.click(box['x'] + 300, box['y'] + y, button='right'); page.wait_for_timeout(80)
+        openh = lambda: page.evaluate("[...document.querySelectorAll('.wv-menu .sub')].filter(s => !s.hidden).map(s => s.previousElementSibling.className)")
+        page.locator('.wv-menu .subv').hover(); s1 = openh()
+        page.locator('.wv-menu .subt').hover(); s2 = openh(); page.wait_for_timeout(350); s3 = openh()
+        page.locator('.wv-menu button[data-m=hide]').hover(); page.wait_for_timeout(450); s4 = openh()
+        page.locator('.wv-menu .subp').click(); s5 = openh(); page.locator('.wv-menu .subp').click(); s6 = openh()
+        page.keyboard.press('Escape'); page.keyboard.press('Escape')
+        check([s1, s2, s3, s4, s5, s6] == [['subv'], ['subv'], ['subt'], [], ['subp'], []],
+              f'the pointer: Show as ▸ at once, Here ▸ after a rest (Show as ▸ kept on the way), a plain item closes it, a click on Export ▸ opens, '
+              f'a second closes {[s1, s2, s3, s4, s5, s6]}')
+    part('the pointer', p_pointer)
+    # its place: by the right edge of the window the submenu on the left of the menu, the first time (M-04); a narrow window: inside the menu
+    def p_place():
+        page.set_viewport_size({'width': 1000, 'height': 520}); settle(page)
+        js("v.menu(innerWidth - 10, 100, R('PADDR'), T); return 0;"); page.wait_for_timeout(50)
+        page.locator('.wv-menu .subg').hover(); page.wait_for_timeout(50)
+        pl = page.evaluate("""(() => { const m = document.querySelector('.wv-menu').getBoundingClientRect(), s = document.querySelector('.wv-menu .subg + .sub').getBoundingClientRect();
+          return [Math.round(m.left), Math.round(m.right), Math.round(s.left), Math.round(s.right), s.right <= m.left + 3 || s.left >= m.right - 3]; })()""")
+        page.keyboard.press('Escape')
+        page.set_viewport_size({'width': 560, 'height': 600}); settle(page)
+        js("v.menu(200, 100, R('PADDR'), T); return 0;"); page.wait_for_timeout(50)
+        page.locator('.wv-menu .subh').hover(); page.wait_for_timeout(50)
+        nar = page.evaluate("""(() => { const h = document.querySelector('.wv-menu .subh'), s = h.nextElementSibling, a = h.getBoundingClientRect(), b = s.getBoundingClientRect();
+          return [s.classList.contains('in'), a.top >= 0 && a.bottom <= b.top + 1, b.left >= 0 && b.right <= innerWidth]; })()""")
+        page.keyboard.press('Escape')
+        check(pl[4] and nar == [True, True, True], f'its place: by the right edge the submenu beside the menu, not over it, the first time {pl}; '
+              f'560 px wide: inside the menu under its header {nar}')
+        page.set_viewport_size({'width': 1280, 'height': 600}); settle(page)
+    part('the place', p_place)
+    # tips: the headers and the items whose tip was their own (M-09)
+    def p_tips():
+        js("v.setRange(T, T + 40000, R('PADDR')); v.setCursor2(T + 20000); await v.run([{ op: 'span', from: T - 5000, to: T + 5000 }]); v.menu(300, 100, R('PADDR'), T); 0")
+        tips = js("""return ['button[data-m=keepsp]', 'button[data-m=dupbits]', 'button[data-m=asrange]', 'button[data-m=copyv]', '.subr', '.subv', '.subt', '.subp', '.subm',
+            '.subg', '.subh', '.subc'].filter(q => { const e = v.menuEl.querySelector(q); return !e || !WaveLens.tips.of(e); });""")
+        check(not tips, f'a tip on each submenu\'s header and on Keep as span…, Duplicate bits…, As range, Copy A · B · Δ (missing: {tips})')
+    part('the tips', p_tips)
+    # every header opened once, in a few modes: no page error
+    for row in ("R('PADDR')", "R('PSEL')", "v.M.groups[Object.keys(v.M.groups)[0]]", "null"):
+        js(f"v.closeMenu(); v.menu(300, 100, {row}, T); 0")
+        for h in page.locator('.wv-menu .msub > button').all():
+            h.hover(); page.wait_for_timeout(220)
+    page.keyboard.press('Escape')
+    check(not errs, 'no page errors (the menu in submenus)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
+    page.close()
+
+def menu_bugs(browser, build):
+    """The bugs of the right button's menu (docs/reviews/menus-2026-11-11, M-02 … M-18): ctrl+Z with the menu open, the
+    highlight of a row of your group, many rows counted by the shown signals, no group items for a bit, the link of the place
+    clicked, the hex field whole, labels by the kind of row, Radix and Copy the path for many rows, no Duplicate of a slice,
+    contextMenu: false after alt+drag, the Menu key on the waves, the gaps' line wrapped, the top line's markers."""
+    apb = build / 'examples' / 'apb' / 'apb_all.html'
+    if not need(apb, how='make examples'):
+        return
+    print('the bugs of the right button\'s menu')
+    page = browser.new_page(viewport={'width': 1280, 'height': 600})
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    fresh = lambda: (page.goto(apb.as_uri()), page.wait_for_load_state('networkidle'), page.evaluate('localStorage.clear()'), page.reload(),
+                     page.wait_for_load_state('networkidle'), page.evaluate("document.querySelector('.wv').scrollIntoView()"))
+    js = lambda e: page.evaluate(f"""(async () => {{ const v = document.querySelector('.wv').waveView, I = WaveLens.internal, T = 60000,
+        R = n => v.M.rows.find(r => r.name === n && r.type === 'sig'), M = () => v.menuEl, ids = () => [...(v.menuEl || document).querySelectorAll('.wv-menu button[data-m]')]
+          .map(b => b.dataset.m), lab = m => ((v.menuEl && v.menuEl.querySelector('button[data-m=' + m + '] span')) || {{}}).textContent; {e} }})()""")
+    def part(what, fn):
+        try:
+            fn()
+        except Exception as e:   # noqa: BLE001 — said as the failure of that part
+            check(False, f'{what}: {type(e).__name__} {str(e)[:200]}')
+
+    def m02():   # ctrl+Z with the menu open: the menu closes (its items would act on the numbers taken when it opened)
+        fresh()
+        js("await v.run([{ op: 'marker', t: 20000, label: 'A' }, { op: 'marker', t: 40000, label: 'B' }, { op: 'marker', t: 80000, label: 'C' }]); "
+           "v.undoTick(); await v.run([{ op: 'marker', id: 1, delete: true }]); v.undoTick(); v.menu(300, 100, null, 80000, v.umarks[1]); return 0;")
+        a = [page.evaluate("!!document.activeElement.closest('.wv-menu')")]
+        page.keyboard.press('Control+z'); page.wait_for_timeout(150)
+        a += [page.locator('.wv-menu').count(), js("return v.umarks.map(m => m.label);")]
+        js("v.menu(300, 100, R('PADDR'), T); return 0;"); page.locator('.wv-menu .subh').hover(); page.locator('.wv-menu input.gon').check()
+        page.keyboard.press('Control+z'); page.wait_for_timeout(150)
+        a += [page.locator('.wv-menu').count(), js("return v.gapOpt().gaps;")]
+        check(a == [True, 0, ['A', 'B', 'C'], 0, False], f'M-02: ctrl+Z with the menu open closes it (the marker deleted back, the gaps off) {a}')
+
+    def m05():   # a row of your group highlighted through its signal: Remove the highlight, one pick
+        fresh()
+        a = js("await v.run([{ op: 'group', name: 'G', signals: 'PSEL' }]); v.toggleHighlight(R('PSEL')); const g = I.peek(v).vis.find(r => r.ug && r.name === 'PSEL'); "
+               "v.menu(300, 100, g, T); const l = lab('hl'); v.menuEl.querySelector('button[data-m=hl]').click(); return [l, v.picks.size];")
+        check(a == ['Remove the highlight', 0], f'M-05: Highlight on a row of your group whose signal is highlighted: "Remove the highlight", removes it {a}')
+
+    def m06():   # many by the shown signals of the picks: a module alone is its signals; hidden ones do not count
+        fresh()
+        a = js("const u = v.scopes().find(g => g.path === 'apb_tb.u_count'); v.toggleHighlight(u); v.menu(300, 100, u, T); "
+               "const c = (v.menuEl.querySelector(':scope > label.mi') || {}).textContent || ''; v.closeMenu(); v.highlight(null); "
+               "['PSEL', 'PENABLE'].forEach(n => v.toggleHighlight(R(n))); v.hide([R('PSEL'), R('PENABLE')]); v.toggleHighlight(R('PWRITE')); "
+               "v.menu(300, 100, R('PWRITE'), T); return [c.trim().startsWith('Colour of '), lab('hide'), v.menuEl.querySelector('.mh').textContent];")
+        check(a[:2] == [True, 'Hide'] and ' 1 signals' not in a[2], f'M-06: a highlighted module alone: the colour of its signals; the highlight of hidden rows not counted {a}')
+
+    def m07():   # no group items for a bit row (not a signal of the dump); toGroup says an error
+        fresh()
+        a = js("await v.run([{ op: 'bits', signals: 'PADDR', on: true }]); const b = v.sigByPath('apb_tb.PADDR[3]'); v.menu(300, 100, b, T); return [!!b, ...ids()];")
+        check(a[0] and not {'ugnew', 'ugto', 'ugoff'} & set(a), f'M-07: a bit row: no New group with it / Into (it would make a group of no rows) {a}')
+
+    def m08():   # Copy link to here: the place clicked, not the cursor
+        fresh()
+        a = js("v.cursor = 20000; v.copyText = s => { window.__c = s; }; v.menu(300, 100, R('PADDR'), 100000); v.menuEl.querySelector('button[data-m=copylink]').click(); "
+               "return [window.__c, v.linkTo({ t: v.snap(R('PADDR'), 100000), sel: R('PADDR').full })];")
+        check(a[0] == a[1], f'M-08: Copy link to here links the time clicked (snapped to the signal), not the cursor {a}')
+
+    def m10():   # the colour's hex code whole
+        fresh()
+        a = js("v.menu(300, 100, R('PADDR'), T); const h = v.menuEl.querySelector('.wv-hex'); return [h.scrollWidth, h.clientWidth];")
+        check(a[0] <= a[1] + 1, f'M-10: the hex code of the colour is not cut {a}')
+
+    def m11():   # labels by the kind of row
+        fresh()
+        a = js("""await v.run([{ op: 'group', name: 'G', signals: 'PSEL' }, { op: 'group', name: 'D', divider: true }]); const vis = I.peek(v).vis;
+            v.menu(300, 100, vis.find(r => r.user && r.name === 'G'), T); const g = [lab('hide')];
+            v.menu(300, 100, vis.find(r => r.user && r.name === 'D'), T); const d = ids(), dl = lab('ugdel');
+            v.menu(300, 100, vis.find(r => r.type === 'group' && r.name.startsWith('⇄')), T); const pl = lab('hide');
+            const k = vis.find(r => r.ug && r.name === 'PSEL'); v.menu(300, 100, k, T); const f = v.menuEl.querySelector('button[data-m=foldup]');
+            if (f) f.click(); return [g, d.includes('ugfold') || d.includes('fold'), dl, pl, I.peek(v).collapsed.has(k.ug.id)];""")
+        check(a == [['Hide this group'], False, 'Delete this divider', 'Hide this group', False],
+              f'M-11: your group: "Hide this group"; a divider: no Fold, "Delete this divider"; a plugin\'s group: not "this module"; '
+              f'Fold its module on a row of your group does not fold your group {a}')
+
+    def m12():   # many rows from a module header: Radix there; Copy the path: every row
+        fresh()
+        a = js("const u = v.scopes().find(g => g.path === 'apb_tb.u_regs'); v.toggleHighlight(u); v.toggleHighlight(R('PADDR')); v.menu(300, 100, u, T); "
+               "const rx = !!v.menuEl.querySelector('label.mi select'); v.closeMenu(); v.highlight(null); "
+               "const run = ['PSEL', 'PENABLE', 'PWRITE', 'PREADY'].map(R); v.selRun = new Set(run); v.sel = run[3]; let got = null; v.copyRows = rs => { got = rs.map(r => r.full); }; "
+               "v.menu(300, 100, run[1], T); v.menuEl.querySelector('button[data-m=copyname]').click(); return [rx, got && got.length];")
+        check(a == [True, 4], f'M-12: a highlighted module and a bus, the menu on the module: Radix; a run of 4: Copy the path copies the 4 {a}')
+
+    def m13():   # no Duplicate of a slice
+        fresh()
+        a = js("await v.run([{ op: 'duplicate', signals: 'PADDR', bits: '7:4' }]); const s = v.sigByPath('apb_tb.PADDR[7:4]'); v.menu(300, 100, s, T); return [!!s, ...ids()];")
+        check(a[0] and 'dup' not in a, f'M-13: a slice of a bus: no Duplicate (it copied the whole bus) {a}')
+
+    def m14():   # contextMenu: false: no menu after an alt+drag box either
+        fresh()
+        js("v.S.contextMenu = false; return 0;"); c = page.locator('.wv canvas').first; b = c.bounding_box()
+        y0, y1 = [js(f"const o = I.peek(v).lay.find(o => o.row.name === '{n}'); return o.y + o.h / 2 - (I.peek(v).oy || 0);") for n in ('PSEL', 'PREADY')]
+        page.keyboard.down('Alt'); page.mouse.move(b['x'] + 150, b['y'] + y0); page.mouse.down(); page.mouse.move(b['x'] + 400, b['y'] + y1, steps=5)
+        page.mouse.up(); page.keyboard.up('Alt'); page.wait_for_timeout(100)
+        a = [page.locator('.wv-menu').count(), js("return !!v.range;")]
+        check(a == [0, True], f'M-14: contextMenu false: an alt+drag box keeps its range and selection, no menu {a}')
+
+    def m15():   # the Menu key on the waves: the menu at the cursor, on the selected row
+        fresh()
+        js("v.select('apb_tb.PADDR'); v.canvas.focus(); return 0;"); page.keyboard.press('ContextMenu'); page.wait_for_timeout(100)
+        a = js("return v.menuEl ? v.menuEl.querySelector('.mh').textContent : null;")
+        check(a == 'apb_tb.PADDR', f'M-15: the Menu key on the waves opens the menu of the selected row {a}')
+
+    def m16():   # the gaps' lines wrap in their box
+        fresh()
+        a = js("v.setGaps({ gaps: true, gapSignals: ['apb_tb.PSEL', 'apb_tb.PENABLE'], gapAux: ['apb_tb.PWRITE'], gapClock: 'apb_tb.PCLK', gapOnly: true }); "
+               "v.menu(300, 100, R('PADDR'), T); const s = v.menuEl.querySelector('.subh + .sub'); s.hidden = false; "
+               "return [...s.querySelectorAll('.mi.gp')].map(x => x.scrollWidth - x.clientWidth);")
+        check(a and max(a) <= 1, f'M-16: Gaps ▸: every line inside its box (the texts\' list not cut) {a}')
+
+    def m18():   # the top line: the Δ and the markers with no signal drawn on it
+        fresh()
+        a = js("await v.run([{ op: 'marker', t: 20000, label: 'A' }, { op: 'marker', t: 40000, label: 'B' }, { op: 'marker', t: 80000, label: 'C' }, "
+               "{ op: 'deltas', on: true }]); v.draw(); const o = I.peek(v).lay.find(o => o.row.type === 'lane' && o.row.ids.includes('d:top')); "
+               "const l = v.lineAt(o.y + o.row.ids.indexOf('d:top') * v.S.laneHeight + 1); return [l.ds.length, l.ms.length, l.n];")
+        check(a == [2, 3, 5], f'M-18: the top line: its Δ and the markers with no signal whose texts are on it {a}')
+
+    def m17():   # a right drag: no span block of the place it began (the menu stands where it ended)
+        fresh()
+        js("await v.run([{ op: 'span', from: 45000, to: 65000, label: 'w' }]); return 0;"); c = page.locator('.wv canvas').first; b = c.bounding_box()
+        x = lambda t: b['x'] + js(f"return ({t} - v.t0) * v.pxPerT();")
+        y = js("const o = I.peek(v).lay.find(o => o.row.name === 'PSEL'); return o.y + o.h / 2 - (I.peek(v).oy || 0);")
+        page.mouse.move(x(60000), b['y'] + y); page.mouse.down(button='right'); page.mouse.move(x(90000), b['y'] + y, steps=6); page.mouse.up(button='right')
+        page.wait_for_timeout(100)
+        a = js("return v.menuEl ? [...v.menuEl.querySelectorAll(':scope > .mh')].map(h => h.textContent) : null;")
+        check(a is not None and not any(h.startswith('Span') for h in a), f'M-17: after a right drag the span where it began is not offered {a}')
+
+    for name, fn in (('M-02', m02), ('M-05', m05), ('M-06', m06), ('M-07', m07), ('M-08', m08), ('M-10', m10), ('M-11', m11), ('M-12', m12),
+                     ('M-13', m13), ('M-14', m14), ('M-15', m15), ('M-16', m16), ('M-17', m17),
+                     ('M-18', m18)):
+        part(name, fn)
+    check(not errs, 'no page errors (the menu\'s bugs)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
+    page.close()
 
 def spike(browser, build):
     """make sva-spike: sva-core as WebAssembly in a page."""
@@ -8926,6 +9217,7 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'wave_piece': 'a piece of the waves saved as x.wavelens.json (the box\'s Save as WaveLens) and opened on its own, its view with it',
     'ranges': 'a range on the waves (shift+drag, the right button) and its menu: zoom, bookmarks, the picture, a colour',
     'tips': 'every control has a tooltip with its keys; ? shows the keys and the mouse',
+    'menus': 'the right button\'s menu in submenus: its shape in each mode (no scroll at 1280×600), Here ▸ on the axis, the keys, the pointer, its place, the tips',
     'buses': 'stage 11: bus transactions (AXI4, AXI4-Stream, APB, AHB, Avalon-MM / ST, Wishbone, OBI) on a dump of every protocol and the examples',
     'sva_report': 'stage 8: the report against sva eval',
     'sva_edit': 'an assertion edited in the page (✎, Apply, kept, Revert, a bad text) and read from the disk again (⟳, Watch)',
@@ -9205,6 +9497,8 @@ def main():
         run('wave_piece', wave_piece, b, build)
         run('ranges', ranges, b, build)
         run('ranges', small_menu, b, build)
+        run('menus', menus, b, build)
+        run('menus', menu_bugs, b, build)
         run('buses', buses, b, build)
         run('tips', tips, b, build)
         run('sva_report', sva_report, b, build)

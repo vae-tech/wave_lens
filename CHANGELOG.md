@@ -5,6 +5,41 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.52 — 11 November 2026
+
+The right button's menu in submenus, its keys and its 19 bugs (`docs/reviews/menus-2026-11-11/`).
+
+**The right button's menu in submenus** (`docs/reviews/menus-2026-11-11/`): the menu had grown to 27–45 rows and scrolled on
+every row at 600 px; now a bus fits in 15 rows (385 px), a range on a bus in 19, a range, a span, two cursors and marks on a
+bus in 22 (571 px). At one click stay the blocks of what was clicked and the frequent things; the rest moved, each item in one
+place, its name and its `data-m` kept (`menu(clientX, clientY, row?, t?)` and the commands do not change):
+
+| at the top | moved into |
+|---|---|
+| Zoom to the range, Clear the range (from the bottom of the menu) | **Range ▸**: Bookmarks at its ends, Copy Δ, Keep as span…, Keep as a slice (Runs), Save as FST… (Slice ▸ is gone) |
+| Colour, Its own colour, Radix, Highlight, Duplicate, Remove the copy, Hide, Copy the path | **Show as ▸**: Analog, Bits, Duplicate bits…, Type… · **Your groups ▸** (was Groups ▸): Move up / down, To the top / bottom, Fold this group, and its items |
+| Copy image | **Export ▸**: Save image as PNG / SVG, Save as WaveDrom, Copy WaveDrom, Save as WaveLens (JSON) |
+| — | **Here ▸**, the time clicked on its header, now on the axis, a marker and a Δ too: Bookmark here, Marker here, Second cursor here, Clear the second cursor, Copy A · B · Δ, Copy link to here, Markers…, Clear bookmarks and markers |
+| — | **Modules ▸** (Rows ▸ with no modules): Fold this / its module, Fold / Open every module, Show the hidden, Modules…, Locate, Only, State machines…, Clear the FSM layer |
+
+One submenu is open at a time, beside the menu, measured before it is placed (by the right edge: on the left, the first
+time); in a window too narrow for both it opens inside the menu under its header. The pointer opens one at once, another
+after 180 ms on its header (the way into the open one crosses others), a plain item rested on closes it, a click toggles.
+**The keys**: ↑ ↓ Home End through the items, → Enter Space open a submenu (its first item), ← Esc close it, Esc again the
+menu; the bar's tools menu and the ctrl+G list share the helper. Items are 2 px lower; the focused item is marked once a key is
+used. Every item has a tip (the nine with none, the submenus' headers).
+
+The bugs of the menu (M-01…M-19 of the review): ctrl+Z with the menu open closes it first — its items acted on the marker
+or span numbers of before (M-02); Type… only on a signal (M-01); a row of your group whose signal is highlighted reads
+Remove the highlight (M-05); many rows counted by the shown signals of the highlight — a module alone is its signals, a
+hidden row is not counted, "1 signal" (M-06); no group items on a bit row, a group refused is said (M-07); Copy link to here
+links the time clicked (M-08); the colour's hex code whole (M-10); labels by the kind of row — Hide this group, Delete this
+divider, no Fold on a divider, Fold its module on a row of your group folds its module, not your group (M-11); Radix and the
+forms for many rows from a module's header, Copy the path copies every path (M-12); no Duplicate of a slice (M-13);
+`contextMenu: false` holds after an alt+drag box (M-14); the Menu key / shift+F10 on the waves (M-15); the gaps' lines wrap
+in their box (M-16); after a right drag no span block of where it began (M-17); the top line's colour takes the markers with no signal drawn on it (M-18); the keys, the placing, the
+tips and the open header (M-03, M-04, M-09, M-19).
+
 ## 0.51 — 11 November 2026
 
 The range follows the signal you select (walk the names, read each one's edges or changes in the same range), the bar's

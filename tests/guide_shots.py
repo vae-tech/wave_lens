@@ -198,9 +198,11 @@ def gaps(S, ex, build):
     v.scroll_into_view_if_needed()
     bb = v.locator('canvas').bounding_box()
     js("(v.select('valid'), 0)")
-    js(f"(v.menu({bb['x'] + 260}, {bb['y'] + 70}, v.M.rows.find(r => r.name === 'valid')), 0)")
-    page.locator('.wv-menu .subh').hover(); shots.settle(page)
-    S.save('gaps-menu', clip=union(page.locator('.wv-menu').bounding_box(), page.locator('.wv-menu .sub').first.bounding_box()), page=page, pad=6)
+    menu = lambda y: js(f"(v.menu({bb['x'] + 260}, {y}, v.M.rows.find(r => r.name === 'valid')), 0)")
+    menu(bb['y'] + 70)   # Gaps ▸ in the lower part of the menu: the menu put up so that its header is at the valid row
+    dy = page.evaluate("(m => m.querySelector('.subh').getBoundingClientRect().top - m.getBoundingClientRect().top)(document.querySelector('.wv-menu'))")
+    menu(max(4, bb['y'] + 100 - dy)); page.locator('.wv-menu .subh').hover(); shots.settle(page)
+    S.save('gaps-menu', clip=union(page.locator('.wv-menu').bounding_box(), page.locator('.wv-menu .subh + .sub').bounding_box()), page=page, pad=6)
     S.save('gaps-menu-viewer', v, upto=v.locator('.notes'))
     js("(v.closeMenu(), 0)")
     # roles in the names column: // the gaps follow, ↑ the clock counted, + counted in a gap
@@ -277,8 +279,10 @@ def viewer(S, ex, build):
     # a measured range (ctrl+drag) on PADDR, then two cursors with an analog bus
     js("(v.setRange(45000, 105000, v.M.rows.find(r => r.name === 'PADDR')), v.select('PADDR'), 0)"); shots.settle(page)
     S.save('viewer-range', v, upto=v.locator('.notes'))
-    js(f"(v.menu({bb['x'] + 640}, {bb['y'] + y}, v.M.rows.find(r => r.name === 'PADDR'), v.range), 0)"); shots.settle(page)
-    S.save('viewer-menu', clip=union(page.locator('.wv-menu').bounding_box(), {'x': bb['x'] - 160, 'y': bb['y'], 'width': 900, 'height': 10}),
+    js(f"(v.menu({bb['x'] + 640}, {bb['y'] + y}, v.M.rows.find(r => r.name === 'PADDR'), v.range), 0)")
+    page.locator('.wv-menu .subv').hover(); shots.settle(page)   # Show as ▸ open
+    S.save('viewer-menu', clip=union(page.locator('.wv-menu').bounding_box(), page.locator('.wv-menu .subv + .sub').bounding_box(),
+                                     {'x': bb['x'] - 160, 'y': bb['y'], 'width': 900, 'height': 10}),
            page=page, pad=6)
     js('(v.closeMenu(), v.setRange(null), 0)')
     js('(v.keyHintOn("g"), v.keyHintShow("g"), 0)'); shots.settle(page)
@@ -365,8 +369,9 @@ def viewer(S, ex, build):
     v.locator('button[data-act=fselect]').click(); shots.settle(page)
     cb = v.locator('canvas').bounding_box()
     y = js("(o => o ? o.y + o.h / 2 : 60)((v.lay || []).find(o => o.row === v.sel))")
-    js(f"(v.menu({cb['x'] + 380}, {cb['y'] + y}, v.sel), 0)"); shots.settle(page)
-    S.save('viewer-find-select', clip=union(page.locator('.wv-menu').bounding_box(), dict(v.bounding_box(), height=560)), page=page)
+    js(f"(v.menu({cb['x'] + 380}, {cb['y'] + y}, v.sel), 0)"); page.locator('.wv-menu .subg').hover(); shots.settle(page)   # New group of the N
+    S.save('viewer-find-select', clip=union(page.locator('.wv-menu').bounding_box(), page.locator('.wv-menu .subg + .sub').bounding_box(),
+                                            dict(v.bounding_box(), height=560)), page=page)
     js('(v.closeMenu(), 0)')
     v.locator('canvas').focus(); page.keyboard.press('Escape'); page.keyboard.press('Escape')
     page.close()

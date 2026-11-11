@@ -206,7 +206,17 @@ class WaveView {
     let drag = null;
     const local = e => { const b = c.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top + (this.oy || 0)]; };   // layout y
     // on a bookmark: drag moves it (time + signal row), shift+drag draws an arrow to another bookmark; elsewhere drag pans
-    c.addEventListener('contextmenu', e => { if (this.S.contextMenu) e.preventDefault(); });   // the viewer's menu instead
+    // the viewer's menu instead of the browser's; a contextmenu with no right press before it (the Menu key, shift+F10): the menu at
+    // the cursor, on the selected row (M-15)
+    let rdown = 0;
+    c.addEventListener('contextmenu', e => {
+      if (!this.S.contextMenu) return;
+      e.preventDefault(); if (rdown) return;
+      const b = c.getBoundingClientRect(), o = this.sel && (this.lay || []).find(o => o.row === this.sel), x = (this.cursor - this.t0) * this.pxPerT();
+      this.menu(b.left + Math.min(Math.max(x, 0), b.width), o ? b.top + o.y + o.h / 2 - (this.oy || 0) : b.top + this.hdrH + 8, this.sel, this.cursor);
+    });
+    c.addEventListener('pointerdown', e => { if (e.button === 2) { clearTimeout(rdown); rdown = setTimeout(() => { rdown = 0; }, 60000); } }, true);
+    c.addEventListener('pointerup', e => { if (e.button === 2 && rdown) { clearTimeout(rdown); rdown = setTimeout(() => { rdown = 0; }, 400); } }, true);
     c.addEventListener('pointerdown', e => {
       if (e.button === 1) { const [x] = local(e); drag = { zoom: x, x: e.clientX, y: e.clientY }; c.setPointerCapture(e.pointerId); return; }
       const [x, y] = local(e), bm = e.button === 0 && this.bmAt(x, y), mk = !bm && !this.onDot(x, y) && this.markAt(x, y);
@@ -278,12 +288,12 @@ class WaveView {
         const d = drag; drag = null;
         if (!d.moved && !d.menu) this.setRange(null);   // ctrl+click: no range
         if (d.placed) { this.toast(`${d.placed} marker${d.placed > 1 ? 's' : ''} placed: their labels and Δ bounds in the Markers list`); return; }
-        if (d.menu) this.menu(e.clientX, e.clientY, d.mk && !d.moved ? null : d.row, d.range, d.mk && !d.moved ? d.mk.m : null, d.moved ? {} : d);
+        if (d.menu) this.menu(e.clientX, e.clientY, d.mk && !d.moved ? null : d.row, d.range, d.mk && !d.moved ? d.mk.m : null, d.moved ? { moved: true } : d);
         return;
       }
       if (drag && drag.box) {   // the box: the menu on its signals; a click: the cursor here, not snapped
         const d = drag; drag = null; this.box = null;
-        if (d.moved) { this.draw(); this.menu(e.clientX, e.clientY, this.sel, this.cursor); return; }
+        if (d.moved) { this.draw(); if (this.S.contextMenu) this.menu(e.clientX, e.clientY, this.sel, this.cursor); return; }   // (M-14)
         const row = (this.lay || []).find(o => y >= o.y && y < o.y + o.h);
         this.cursor = this.pickTime(x, y, true); this.rangeOff(); this.selRun = new Set();
         if (row && row.row.type === 'sig' && row.row.tr) this.sel = this.selAnchor = row.row;
@@ -1287,8 +1297,10 @@ class WaveView {
   lineAt(y) {
     const o = (this.lay || []).find(o => y >= o.y && y < o.y + o.h); if (!o || o.row.type !== 'lane') return null;
     const id = o.row.ids[Math.floor((y - o.y) / this.S.laneHeight)], on = x => x.signal && x.lift && laneId(x) === id;
+    const onTop = m => (m.signal ? on(m) : id === 'd:top');   // the markers with no signal: their texts on the first line of the Δ (M-18)
     const ds = this.deltaList().filter(d => (d.a.dsignal ? laneId({ signal: d.a.dsignal, lift: d.a.dlift || true }) : dTop(d.level)) === id).map(d => d.a);
-    const ms = this.umarks.filter(m => !m.hidden && on(m)), bs = this.bms.filter(on), as = typeof id === 'number' && this.arrows[id] ? [this.arrows[id]] : [];
+    const ms = this.umarks.filter(m => !m.hidden && onTop(m)), bs = this.bms.filter(on);
+    const as = typeof id === 'number' && this.arrows[id] ? [this.arrows[id]] : [];
     return { id, ds, ms, bs, as, n: ds.length + ms.length + bs.length + as.length };
   }
   // the commands that give all on a line a colour (null: their own again)

@@ -2542,7 +2542,7 @@ const TIPS = {
   '.gonly': ['The picture and WaveDrom: only the signals the gaps follow'],
   '.gcnt': ['The texts of the gaps: under the axis the time left out and the clock cycles; under each signal marked + what it did there (its ' +
     'edges, its changes); none marked, "+ changes in a gap": under every one but the ones the gaps follow; or no texts'],
-  'm:hl': ['Highlight', ['ctrl+click']], 'm:hide': ['Leave it out of the view'], 'm:unhide': ['Show the hidden rows'],
+  'm:hl': ['Highlight', ['ctrl+click']], 'm:hide': ['Leave it out of the view (Hidden: N ✕ in the bar shows it again)'], 'm:unhide': ['Show the hidden rows'],
   'm:fold': ['Fold / open this module'], 'm:foldup': ['Fold its module', ['zc']], 'm:zM': ['Fold every module', ['zM']], 'm:zR': ['Open every module', ['zR']],
   'm:types': ['Where its labels or fields come from: the types file and the path in it, the width, why it has none'],
   'm:mark': ['Bookmark on this signal here: its text asked here, then in the list', ['b']],
@@ -2566,7 +2566,20 @@ const TIPS = {
   '.ugn': ['Group name', ['Enter']],
   'act:live': ['Driven by an agent (tools/wavemcp.py view_live): its edits come in as you watch; click: disconnect'],
 };
-TIPS['.subg'] = ['Your groups: put the signals into one, a new one, go to one', ['ctrl+G', 'gl']];
+TIPS['.subg'] = ['Your groups: the place of this row (or group) among them, into one, out of one, a new one, go to one', ['ctrl+G', 'gl']];
+// the submenus of the right button's menu (menuSub) and the items whose tip was their own
+Object.assign(TIPS, { '.subr': ['More of the range: bookmarks at its ends, its Δ copied, kept as a span of yours, as waves of their own'],
+  '.subv': ['How the signal is drawn: a step plot, bit by bit, some bits as a row of their own; where its type comes from'],
+  '.subt': ['The time clicked: a bookmark or a marker there, the second cursor, a link to it; the lists of the marks'],
+  '.subp': ['The picture (the range, else the window; the highlighted rows, else the ones on the screen) as a file, WaveDrom, WaveLens'],
+  '.subm': ['The rows as a whole: fold the modules, show the hidden, the Modules panel and Only, the state machines'],
+  'm:asrange': ['This span measured as the range'], 'm:spdel': ['Delete this span of yours'],
+  'm:keepsp': ['A span of yours over this range, its label asked (empty: none); the range stays'],
+  'm:copyv': ['The value at each cursor and the change between them, as the value column shows them'],
+  'm:dupbits': ['Some bits of the bus as a row of their own: 7:4'],
+  'm:clearmarks': ['Every bookmark, arrow and marker of yours deleted (ctrl+Z brings them back)'],
+  'm:dlown': ['The Δ arrow in the default colour again'], 'm:dlnone': ['No Δ arrow from this marker (the marker stays)'],
+  'm:lnown': ['The things on this line (Δ arrows, markers, bookmarks) in their own colours again'] });
 Object.assign(TIPS, { '.subc': ['The clock cycles in a band under the time axis: numbered from cycle 0, the cursor\'s in the title, Δ in them; ' +
   'c147 in the cursor field goes to cycle 147'], 'm:cycon': ['The band of cycle numbers under the time axis'],
   'm:cyclk': ['Count the cycles of this clock (its rising edges)'], 'm:cyc0': ['The rising edge at or before the time clicked is cycle 0'],
@@ -2615,7 +2628,7 @@ const HELP = [
     [['1', '…', '9'], 'go to bookmark 1 … 9'],
     [['ctrl+drag'], 'measure a range: Δ, the edges or changes of that signal, then of each one you select (↑ ↓, a click on a name)'],
     [['alt+drag'], 'a box: its time and its signals, then the menu (picture, WaveDrom, colour)'], [['ctrl+click'], 'clear the range'],
-    [['right button'], 'a range and the menu: picture, colour, radix, duplicate, hide'], [['b'], 'bookmark at the cursor'],
+    [['right button'], 'a range and the menu: colour, radix, hide, Copy image; Show as ▸, Here ▸, Export ▸ …'], [['b'], 'bookmark at the cursor'],
     [[']b', '[b'], 'next / previous bookmark'], [['m'], 'marker at the cursor: its label asked'], [[']m', '[m'], 'next / previous marker'],
     [['right button + click'], 'the left button while the right one is down: a marker there at once (M1, M2 …; over the signal, else under it)'],
     [['gm'], 'the markers and bookmarks: a list, ↑ ↓ go through them'], [['drag a bookmark'], 'move it'],
@@ -2628,7 +2641,7 @@ const HELP = [
   ['Menus', [[['g'], 'a moment after it: a box with what can follow, press the key or click it: go to, markers and bookmarks, the state, the dump'],
     [['z', 'y', '[', ']'], 'the same box: fold, copy, next, previous'], [['Esc'], 'with the box open: closes it, nothing else'],
     [['t', 'T'], 'the panels of the modules, the state machines'], [['gm', 'gl'], 'the lists of the markers and bookmarks, your groups'],
-    [['right button'], 'on the waves or a name: the menu of what is there']]],
+    [['right button', 'Menu key'], 'on the waves or a name: the menu of what is there (↑ ↓ → ← Enter Esc in it, a submenu ▸ by →)']]],
   ['Undo', [[['ctrl+Z'], 'undo the last change of bookmarks, arrows, groups, colours, radix, hidden rows, highlight'],
     [['ctrl+shift+Z', 'ctrl+Y'], 'redo']]],
   ['Help', [[['?'], 'this box'], [['hover a button'], 'what it does, its keys']]],
@@ -3509,7 +3522,17 @@ class WaveView {
     let drag = null;
     const local = e => { const b = c.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top + (this.oy || 0)]; };   // layout y
     // on a bookmark: drag moves it (time + signal row), shift+drag draws an arrow to another bookmark; elsewhere drag pans
-    c.addEventListener('contextmenu', e => { if (this.S.contextMenu) e.preventDefault(); });   // the viewer's menu instead
+    // the viewer's menu instead of the browser's; a contextmenu with no right press before it (the Menu key, shift+F10): the menu at
+    // the cursor, on the selected row (M-15)
+    let rdown = 0;
+    c.addEventListener('contextmenu', e => {
+      if (!this.S.contextMenu) return;
+      e.preventDefault(); if (rdown) return;
+      const b = c.getBoundingClientRect(), o = this.sel && (this.lay || []).find(o => o.row === this.sel), x = (this.cursor - this.t0) * this.pxPerT();
+      this.menu(b.left + Math.min(Math.max(x, 0), b.width), o ? b.top + o.y + o.h / 2 - (this.oy || 0) : b.top + this.hdrH + 8, this.sel, this.cursor);
+    });
+    c.addEventListener('pointerdown', e => { if (e.button === 2) { clearTimeout(rdown); rdown = setTimeout(() => { rdown = 0; }, 60000); } }, true);
+    c.addEventListener('pointerup', e => { if (e.button === 2 && rdown) { clearTimeout(rdown); rdown = setTimeout(() => { rdown = 0; }, 400); } }, true);
     c.addEventListener('pointerdown', e => {
       if (e.button === 1) { const [x] = local(e); drag = { zoom: x, x: e.clientX, y: e.clientY }; c.setPointerCapture(e.pointerId); return; }
       const [x, y] = local(e), bm = e.button === 0 && this.bmAt(x, y), mk = !bm && !this.onDot(x, y) && this.markAt(x, y);
@@ -3581,12 +3604,12 @@ class WaveView {
         const d = drag; drag = null;
         if (!d.moved && !d.menu) this.setRange(null);   // ctrl+click: no range
         if (d.placed) { this.toast(`${d.placed} marker${d.placed > 1 ? 's' : ''} placed: their labels and Δ bounds in the Markers list`); return; }
-        if (d.menu) this.menu(e.clientX, e.clientY, d.mk && !d.moved ? null : d.row, d.range, d.mk && !d.moved ? d.mk.m : null, d.moved ? {} : d);
+        if (d.menu) this.menu(e.clientX, e.clientY, d.mk && !d.moved ? null : d.row, d.range, d.mk && !d.moved ? d.mk.m : null, d.moved ? { moved: true } : d);
         return;
       }
       if (drag && drag.box) {   // the box: the menu on its signals; a click: the cursor here, not snapped
         const d = drag; drag = null; this.box = null;
-        if (d.moved) { this.draw(); this.menu(e.clientX, e.clientY, this.sel, this.cursor); return; }
+        if (d.moved) { this.draw(); if (this.S.contextMenu) this.menu(e.clientX, e.clientY, this.sel, this.cursor); return; }   // (M-14)
         const row = (this.lay || []).find(o => y >= o.y && y < o.y + o.h);
         this.cursor = this.pickTime(x, y, true); this.rangeOff(); this.selRun = new Set();
         if (row && row.row.type === 'sig' && row.row.tr) this.sel = this.selAnchor = row.row;
@@ -4590,8 +4613,10 @@ class WaveView {
   lineAt(y) {
     const o = (this.lay || []).find(o => y >= o.y && y < o.y + o.h); if (!o || o.row.type !== 'lane') return null;
     const id = o.row.ids[Math.floor((y - o.y) / this.S.laneHeight)], on = x => x.signal && x.lift && laneId(x) === id;
+    const onTop = m => (m.signal ? on(m) : id === 'd:top');   // the markers with no signal: their texts on the first line of the Δ (M-18)
     const ds = this.deltaList().filter(d => (d.a.dsignal ? laneId({ signal: d.a.dsignal, lift: d.a.dlift || true }) : dTop(d.level)) === id).map(d => d.a);
-    const ms = this.umarks.filter(m => !m.hidden && on(m)), bs = this.bms.filter(on), as = typeof id === 'number' && this.arrows[id] ? [this.arrows[id]] : [];
+    const ms = this.umarks.filter(m => !m.hidden && onTop(m)), bs = this.bms.filter(on);
+    const as = typeof id === 'number' && this.arrows[id] ? [this.arrows[id]] : [];
     return { id, ds, ms, bs, as, n: ds.length + ms.length + bs.length + as.length };
   }
   // the commands that give all on a line a colour (null: their own again)
@@ -5405,6 +5430,80 @@ function hexFields(el) {
     t.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Escape') { back(); t.blur(); } else if (e.key === 'Enter') t.blur(); });
   }
 }
+// a submenu of a menu: its header (label: HTML, a class lc on it; kk: HTML before the ▸) and its box; nothing when the box has
+// nothing to pick; an <hr> at either end of the box or two in a row left out
+function menuSub(cls, label, html, kk = '', lc = '') {
+  html = html.replace(/(<hr>)+/g, '<hr>').replace(/^<hr>|<hr>$/g, '');
+  if (!/<(button|label|div class="mi)/.test(html)) return '';
+  return `<div class="msub"><button type="button" role="menuitem" class="${cls}" aria-haspopup="menu" aria-expanded="false"><span` +
+    `${lc ? ` class="${lc}"` : ''}>${label}</span><span class="kk">${kk}▸</span></button><div class="sub" role="menu" hidden>${html}</div></div>`;
+}
+// the submenus of a menu el (.msub: a header, a .sub box): one open at a time, beside the menu (on its right, else its left, else
+// under its header inside the menu: a narrow window). The pointer on a header opens it at once when none is open, after a rest
+// (180 ms) when another one is (on its way into the open box the pointer crosses other headers); resting on a plain item of the
+// menu (300 ms) closes it. A click on a header opens it; a second click (or the first after the keys opened it) closes it.
+// set(msub | null, how) opens one (closing the other) or none
+function menuSubs(el) {
+  let open = null, by = '', T = 0;
+  const head = s => s.querySelector(':scope > button'), box = s => s.querySelector(':scope > .sub');
+  // fixed on the screen by its header's place (the menu scrolls: an absolute one would be cut by it, B-83), measured at 0, 0
+  // before it is placed (its width is its own, not cut by the window's edge)
+  const place = s => {
+    const b = box(s); b.classList.remove('in'); Object.assign(b.style, { left: '0px', top: '0px' });
+    const m = el.getBoundingClientRect(), h = head(s).getBoundingClientRect(), w = b.offsetWidth, hh = b.offsetHeight;
+    const left = m.right - 2 + w <= innerWidth - 4 ? m.right - 2 : m.left + 2 - w >= 4 ? m.left + 2 - w : null;
+    if (left == null) { b.classList.add('in'); b.style.left = b.style.top = ''; b.scrollIntoView({ block: 'nearest' }); return; }
+    Object.assign(b.style, { left: left + 'px', top: Math.max(4, Math.min(h.top - 5, innerHeight - 4 - hh)) + 'px' });
+  };
+  const set = (s, how = '') => {
+    clearTimeout(T);
+    if (open && open !== s) { box(open).hidden = true; head(open).setAttribute('aria-expanded', 'false'); }
+    open = s; by = how; if (!s) return;
+    if (box(s).hidden) { box(s).hidden = false; head(s).setAttribute('aria-expanded', 'true'); place(s); }
+  };
+  for (const s of el.querySelectorAll('.msub')) {
+    const h = head(s);
+    h.addEventListener('mouseenter', () => { clearTimeout(T); if (open === s) return;
+      if (!open) set(s, 'hover'); else T = setTimeout(() => set(s, 'hover'), 180); });
+    h.addEventListener('mouseleave', () => clearTimeout(T));
+    h.addEventListener('click', () => { if (open === s && by !== 'hover') set(null); else set(s, 'click'); });
+    box(s).addEventListener('mouseenter', () => clearTimeout(T));
+  }
+  for (const x of el.querySelectorAll(':scope > button, :scope > label.mi')) {
+    x.addEventListener('mouseenter', () => { clearTimeout(T); if (open) T = setTimeout(() => set(null), 300); });
+    x.addEventListener('mouseleave', () => clearTimeout(T));
+  }
+  el.addEventListener('scroll', () => { if (open && !box(open).classList.contains('in')) place(open); });
+  return { set, head, box, get open() { return open; } };
+}
+// the keys of a menu el: ↑ ↓ (round), Home, End over the items of the level the focus is in (the menu, an open submenu); → Enter
+// Space on a submenu's header open it, its first item focused; ← or Esc in a submenu close it, back on its header; Esc in the menu:
+// done(). A field to type in keeps its keys (Esc aside); a list (Radix) is opened by Space or Enter; subs: menuSubs(el), none for a
+// menu with no submenus
+function menuKeys(el, done, subs = null) {
+  const items = lv => [...lv.children].flatMap(c => (c.matches('button') ? [c] : c.matches('.msub') ? [c.querySelector(':scope > button')] :
+    c.matches('.mi') ? [...c.querySelectorAll('input:not(.wv-hex), select, button')] : [])).filter(x => !x.hidden && x.getClientRects().length);
+  el.addEventListener('keydown', e => {
+    const k = e.key, a = document.activeElement, lv = (subs && a && a.closest('.wv-menu .sub')) || el, s = lv === el ? null : lv.parentElement;
+    el.classList.add('kb');   // the focused item marked from now on
+    if (k !== 'Escape' && a && a.matches('textarea, input:not([type=checkbox]):not([type=color])')) return;   // a select: ↑ ↓ move on
+    if (k === 'Escape' || (k === 'ArrowLeft' && s)) {
+      e.preventDefault(); e.stopPropagation();
+      if (s) { subs.set(null); subs.head(s).focus({ preventScroll: true }); } else done();
+      return;
+    }
+    const hd = subs && a && a.matches('.msub > button') ? a.parentElement : null;
+    if (hd && (k === 'ArrowRight' || k === 'Enter' || k === ' ')) {
+      e.preventDefault(); subs.set(hd, 'key'); const f = items(subs.box(hd))[0]; if (f) f.focus({ preventScroll: true });
+      return;
+    }
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(k)) return;
+    const bs = items(lv), i = bs.indexOf(a), n = bs.length; if (!n) return;
+    e.preventDefault();
+    const j = k === 'Home' ? 0 : k === 'End' ? n - 1 : i < 0 ? (k === 'ArrowDown' ? 0 : n - 1) : (i + (k === 'ArrowDown' ? 1 : -1) + n) % n;
+    bs[j].focus({ preventScroll: true }); bs[j].scrollIntoView({ block: 'nearest' });
+  });
+}
 Object.assign(WaveView.prototype, {
   // the right button's menu at (cx, cy) on the screen: the range (zoom, bookmarks at its ends, copy Δ), the picture (copy,
   // PNG, SVG), the signal under the pointer (colour, highlight, copy its path); Esc, a click elsewhere or a choice closes it
@@ -5413,10 +5512,15 @@ Object.assign(WaveView.prototype, {
     this.closeMenu(); this.menuAt = [cx, cy];   // where it was opened: a text asked there after (Bookmark here, Marker here)
     const r = this.range, sig = row && row.type === 'sig' && row.tr ? row : null, grp = row && row.type === 'group' &&
       this.M.groups[row.id] === row ? row : null, it = row && (sig || grp);
-    const up = sig && sig.anc.length ? sig.anc[sig.anc.length - 1] : null, nh = this.hiddenRows.size, ng = Object.keys(this.M.groups).length;
+    // the module of a signal (a row of your group: of its signal, not your group); a group by its kind (labels)
+    const ua = sig ? (sig.ug ? sig.orig.anc : sig.anc) : [], up = ua.length ? ua[ua.length - 1] : null, nh = this.hiddenRows.size;
+    const ng = Object.keys(this.M.groups).length, gk = !grp ? '' : grp.cls === 'ugdiv' ? 'divider' : grp.user ? 'group' :
+      grp.kind === 'struct' || grp.kind === 'union' ? grp.kind : this.scopeOf(grp.path) === grp ? 'module' : 'group';
     // a span of yours where it was opened (the time clicked, on its rows): As range
     const onSpan = sp => !sp.signals || !sp.signals.length || (row && (sp.signals.includes(row.full) || sp.signals.includes(row.name)));
-    const spAt = this.spans.filter(sp => at >= sp.from && at <= sp.to && onSpan(sp)).pop() || null, spId = spAt ? this.spans.indexOf(spAt) + 1 : 0;
+    // (not after a right drag: the menu stands where it ended, the span would be the one where it began, M-17)
+    const spAt = on.moved ? null : this.spans.filter(sp => at >= sp.from && at <= sp.to && onSpan(sp)).pop() || null;
+    const spId = spAt ? this.spans.indexOf(spAt) + 1 : 0;
     // a row of your groups (its place there) or a header of one (its place among yours): Move up / down, to the top / bottom
     const ugh = row && row.user ? row : null, mine = sig && sig.ug ? sig : null, ugOf = n => this.ugroups.find(g => g.name === n);
     const mvAt = ugh ? [this.ugroups.indexOf(ugOf(ugh.name)), this.ugroups.length] : mine ? [ugOf(mine.ug.name).signals.indexOf(mine.orig.full),
@@ -5426,11 +5530,20 @@ Object.assign(WaveView.prototype, {
     const pk = new Set([...this.picks.keys()].map(r => r.orig || r)), picked = r => pk.has(r.orig || r) || r.anc.some(id => this.picks.has(this.M.groups[id]));
     // or a row of the shift+click run: every row of the run
     const run = !!sig && this.selRun.size > 1 && this.selRun.has(sig);
-    const many = run || (it && (pk.has(it.orig || it) || sig && picked(sig)) && this.picks.size > 1);
-    const sigs = run ? [...this.selRun] : many ? this.rowPool().filter(r => r.type === 'sig' && r.tr && picked(r) && this.shown(r)) : sig ? [sig] : [];
+    // many: the highlighted signals shown (a module highlighted: its signals) are more than the one clicked (M-06)
+    const pool = it && (pk.has(it.orig || it) || (sig && picked(sig))) ?
+      this.rowPool().filter(r => r.type === 'sig' && r.tr && picked(r) && this.shown(r)) : [];
+    const many = run || pool.length > 1 || (!sig && pool.length > 0);
+    const sigs = run ? [...this.selRun] : many ? pool : sig ? [sig] : [];
+    // the pick of the row itself (a row of your group: its signal's) or of the module it is lit through (M-05)
+    const hk = it && [it, it.orig].find(x => x && this.picks.has(x)), hlBy = !hk && sig && !many &&
+      ua.map(id => this.M.groups[id]).find(g => g && this.picks.has(g));
+    // the rows your groups take: signals of the dump and their copies (not a bit, a plugin's lane: M-07)
+    const sp = sigs.length ? new Set(this.sigPool()) : null, gsigs = sigs.filter(r => sp.has(r.orig || r));
     const vecs = sigs.map(r => r.orig || r).filter(isVec);   // Bits: the buses bit by bit
     // Duplicate: every signal but a bit, a plugin's copy; a copy's own row goes
-    const dupable = sigs.filter(r => rowBase(r).bit == null && !rowBase(r).same), copies = [...new Set(sigs.map(r => r.orig || r).filter(r => r.dupOf))];
+    const dupable = sigs.filter(r => rowBase(r).bit == null && !rowBase(r).same && !(r.orig || r).slice);   // (a slice: not the bus again, M-13)
+    const copies = [...new Set(sigs.map(r => r.orig || r).filter(r => r.dupOf))];
     const buses = sigs.filter(r => r.width > 1 && r.tr.some(o => o.raw != null)),
       rows = run ? sigs : many ? [...this.picks.keys()].filter(r => r.full && (r.type === 'sig' || this.M.groups[r.id] === r) && this.shown(r)) : [it];
     const acc = getComputedStyle(this.root).getPropertyValue('--wave-paint').trim(), col = sig && this.painted.get(sig.full) ||
@@ -5457,8 +5570,10 @@ Object.assign(WaveView.prototype, {
       if (key === 'gapClock') o.gapClock = on ? sig0.full : null; else { if (on) o[key].push(...fs); if (fs.includes(g.gapClock)) o.gapClock = null; }
       if (key === 'gapAux' && on && g.gapCount === 'off') o.gapCount = 'clock';   // counted: its counts in the picture
       this.setGaps(o); };
-    const b = (m, label) => { const k = (TIPS['m:' + m] || [])[1];
-      return `<button type="button" role="menuitem" data-m="${m}"><span>${esc(label)}</span>${k ? `<span class="kk">${esc(k[0])}</span>` : ''}</button>`; };
+    // an item: its keys from TIPS beside it; a tip of its own (title) when TIPS has none
+    const b = (m, label, tip) => { const k = (TIPS['m:' + m] || [])[1];
+      return `<button type="button" role="menuitem" data-m="${m}"${tip ? ` title="${esc(tip)}"` : ''}><span>${esc(label)}</span>` +
+        `${k ? `<span class="kk">${esc(k[0])}</span>` : ''}</button>`; };
     const ugb = (m, i, label) => b(m, label).replace('data-m=', `data-g="${i}" data-m=`);   // an item of your group i
     const mvs = (where) => !mvAt || mvAt[1] < 2 ? '' : (mvAt[0] > 0 ? b('mvup', 'Move up') : '') + (mvAt[0] < mvAt[1] - 1 ? b('mvdn', 'Move down') : '') +
       (mvAt[0] > 0 ? b('mvtop', `To the top of ${where}`) : '') + (mvAt[0] < mvAt[1] - 1 ? b('mvbot', `To the bottom of ${where}`) : '');
@@ -5467,32 +5582,81 @@ Object.assign(WaveView.prototype, {
     const six = c => /^#[0-9a-f]{6}$/i.test(c || ''), acc6 = getComputedStyle(this.root).getPropertyValue('--accent').trim();
     const dm = on.dl ? on.dl.m : null, dlId = dm ? this.umarks.indexOf(dm) + 1 : 0, dd = dm && this.deltaList().find(d => d.a === dm);
     const ln = on.line && on.line.n > (dm || mk ? 1 : 0) ? on.line : null, pick0 = c => esc(six(c) ? c : six(acc6) ? acc6 : '#808080');
-    el.innerHTML = (dm && dd ? `<div class="mh">Δ ${esc(this.deltaText(dd))}${dd.bad ? ' ' + esc(this.deltaBound(dd)) : ''} · from marker ${dlId}</div>` +
+    // the blocks of the menu, each by what was clicked, an <hr> between them; the rare items of a block in a submenu of it (menuSub)
+    const dlB = dm && dd ? `<div class="mh">Δ ${esc(this.deltaText(dd))}${dd.bad ? ' ' + esc(this.deltaBound(dd)) : ''} · from marker ${dlId}</div>` +
       `<label class="mi">Colour <input type="color" class="dlc" value="${pick0(dm.dcolor)}" aria-label="the colour of this Δ"></label>` +
-      (dm.dcolor ? b('dlown', 'Its own colour') : '') +
-      b('dlnone', 'No arrow from this marker') + '<hr>' : '') +
-      (ln ? `<div class="mh">This line · ${ln.n} thing${ln.n === 1 ? '' : 's'}</div>` +
+      (dm.dcolor ? b('dlown', 'Its own colour') : '') + b('dlnone', 'No arrow from this marker') : '';
+    const lnB = ln ? `<div class="mh">This line · ${ln.n} thing${ln.n === 1 ? '' : 's'}</div>` +
       `<label class="mi">Colour <input type="color" class="lnc" value="${pick0()}" aria-label="the colour of this line"></label>` +
-      b('lnown', 'Their own colours') + '<hr>' : '') +
-      (mk ? `<div class="mh">Marker ${mkId}${mk.label ? ' · ' + esc(mk.label) : ''}</div>` + b('mktext', 'Its text…') +
+      b('lnown', 'Their own colours') : '';
+    const mkB = mk ? `<div class="mh">Marker ${mkId}${mk.label ? ' · ' + esc(mk.label) : ''}</div>` + b('mktext', 'Its text…') +
       `<label class="mi">Colour <input type="color" class="mkc" value="${esc(six(mk.color) ? mk.color : six(pale) ? pale : '#808080')}" ` +
-      `aria-label="marker ${mkId} colour"></label>` + (mk.color ? b('mkpale', 'Pale again') : '') + b('mkdel', 'Delete the marker') + '<hr>' : '') +
-      (r ? `<div class="mh">${esc(this.rangeText())}</div>` + b('zoom', 'Zoom to the range') + b('marks', 'Bookmarks at its ends',
-      'Two bookmarks and an arrow with the Δ between them') + b('copyd', 'Copy Δ') + b('keepsp', 'Keep as span…',
-      'A span of yours over this range, its label asked (empty: none); the range stays') +
-      // the range as waves of their own: a slice among the runs kept, an FST file (its times from 0: its first sample is 0)
-      (this.M.timed && this.runsHost() ? `<div class="msub"><button type="button" role="menuitem" class="subs" aria-haspopup="menu" ` +
-        `aria-expanded="false"><span>Slice</span><span class="kk">▸</span></button><div class="sub" role="menu" hidden>` +
-        '<div class="mh">the range alone, its times from 0</div>' + b('slkeep', 'Keep as a slice (Runs)') + b('slfst', 'Save as FST…') +
-        '</div></div>' : '') + '<hr>' : '') +
-      (spAt ? `<div class="mh">Span ${spId}${spAt.label ? ' · ' + esc(spAt.label) : ''}</div>` + b('asrange', 'As range', 'This span measured as the range') +
-        b('spdel', 'Delete the span') + '<hr>' : '') +
-      (np ? `<div class="mh">${np} ${this.selRun.size > 1 ? 'selected' : 'highlighted'} rows</div>` : '') + b('copyimg', 'Copy image') + b('png',
-        'Save image as PNG') + b('svg', 'Save image as SVG') + b('wdjson', 'Save as WaveDrom') + b('wdcopy', 'Copy WaveDrom') +
-        (this.M.timed ? b('wlpiece', 'Save as WaveLens (JSON)') : '') +
-      // the gaps: a submenu (its settings, the role of the signals clicked, a reset)
-      (`<div class="msub"><button type="button" role="menuitem" class="subh" aria-haspopup="menu" aria-expanded="false"><span class="gh">${gn()}</span>` +
-        `<span class="kk">▸</span></button><div class="sub" role="menu" hidden>`) +
+      `aria-label="marker ${mkId} colour"></label>` + (mk.color ? b('mkpale', 'Pale again') : '') + b('mkdel', 'Delete the marker') : '';
+    // the range: Zoom and Clear at once; its bookmarks, its Δ, a span of it, the range as waves of their own (a slice among the
+    // runs kept, an FST file: its times from 0, its first sample is 0) in Range ▸
+    const rangeB = r ? `<div class="mh">${esc(this.rangeText())}</div>` + b('zoom', 'Zoom to the range') +
+      menuSub('subr', 'Range', b('marks', 'Bookmarks at its ends') + b('copyd', 'Copy Δ') +
+        b('keepsp', 'Keep as span…') +
+        (this.M.timed && this.runsHost() ? '<hr><div class="mh">the range alone, its times from 0</div>' + b('slkeep', 'Keep as a slice (Runs)') +
+          b('slfst', 'Save as FST…') : '')) +
+      b('clear', 'Clear the range') : '';
+    const spanB = spAt ? `<div class="mh">Span ${spId}${spAt.label ? ' · ' + esc(spAt.label) : ''}</div>` +
+      b('asrange', 'As range') + b('spdel', 'Delete the span') : '';
+    // the row clicked (a signal, a module, your group): its look at once, its forms in Show as ▸, your groups in Your groups ▸
+    const rowB = !it ? '' : `<div class="mh">${esc(ugh ? `${ugh.name} · ${gk === 'divider' ? 'a divider' : 'your group'}` : it.full || it.name)}${many ?
+      `<br>+ every ${run ? 'selected' : 'highlighted'} row: ${sigs.length} signal${sigs.length === 1 ? '' : 's'}` : ''}${hlBy ?
+      `<br>highlighted with ${esc(hlBy.name)}` : ''}</div>` +
+      (sigs.length ?
+        `<label class="mi">${many ? `Colour of ${sigs.length}` : 'Colour'} <input type="color" value="${esc(col)}"
+          aria-label="colour of ${esc(of)}"></label>` +
+          (sigs.some(r => this.painted.has(r.full)) ? b('unpaint', many ? 'Their own colours' : 'Its own colour') : '') : '') +
+      (buses.length ?
+        (`<label class="mi">${many ? `Radix of ${buses.length}` : 'Radix'} <span><select aria-label="radix of ${esc(of)}"><option value="">the ` +
+          `page's${many ? '' : ` (${esc(rx)})`}</option>` +
+          RADIX.map(x => `<option${buses.every(r => this.radixes.get(r.full) === x) ? ' selected' : ''}>${x}</option>`).join('')) +
+        (`<option value="q"${qk === 'q' ? ' selected' : ''}>fixed q (unsigned)</option><option value="sq"${qk === 'sq' ? ' selected' : ''}>fixed sq ` +
+            `(signed)</option></select>`) +
+        (`<input type="number" class="qf" min="0" max="128" value="${qf}" aria-label="fraction bits" title="Fraction bits of the fixed-point ` +
+            `value"${qk ? '' : ' hidden'}></span></label>`) : '') +
+      (sigs.length ? menuSub('subv', 'Show as',
+        (buses.length ? b('analog', buses.every(r => r.analog) ? 'As a bus' : many ? `Analog: ${buses.length}` : 'Analog (step plot)') : '') +
+        (vecs.length ? b('bits', vecs.every(r => this.bitsOpen.has(r.full)) ? (many ? `Fold the bits of ${vecs.length}` : 'Fold the bits') :
+          many ? `Bits of ${vecs.length}` : `Bits: ${vecs[0].width} rows`) : '') +
+        (vecs.length && !vecs.some(r => r.slice) ? b('dupbits', 'Duplicate bits…') : '') +
+        '<hr>' + (sig ? b('types', 'Type…') : '')) : '') +
+      (gk === 'divider' ? '' : b('hl', hk ? 'Remove the highlight' : 'Highlight')) +   // a divider: neither
+      (dupable.length ? b('dup', dupable.length > 1 ? `Duplicate ${dupable.length}` : 'Duplicate') : '') +
+      (copies.length ? b('undup', copies.length > 1 ? `Remove the ${copies.length} copies` : 'Remove the copy') : '') +
+      (gk === 'divider' ? '' : b('hide', many ? `Hide the ${rows.length} ${run ? 'selected' : 'highlighted'}` : grp ? `Hide this ${gk}` : 'Hide')) +
+      b('copyname', many ? `Copy the ${sigs.length} paths` : 'Copy the path') +
+      // your groups: its place there (or a group's among yours), into / out of a group, a new one, delete; go to any of them
+      menuSub('subg', 'Your groups',
+        (sig && !mine && gsigs.length ? '<div class="mh">to move it: into a group of yours, any order there</div>' : '') +
+        mvs(ugh ? 'your groups' : mine ? `“${mine.ug.name}”` : '') +   // (b() escapes it)
+        (ugh && ugh.cls !== 'ugdiv' ? b('ugfold', this.collapsed.has(ugh.id) ? 'Open this group' : 'Fold this group') : '') + '<hr>' +
+        (gsigs.length ? this.ugroups.map((g, i) => (g.divider ? '' : gsigs.every(r => g.signals.includes((r.orig || r).full)) ?
+          ugb('ugoff', i, `Out of “${g.name}”`) :
+          ugb('ugto', i, `Into “${g.name}”`))).join('') + b('ugnew', gsigs.length > 1 ? `New group of the ${gsigs.length}` : 'New group with it') : '') +
+        (sig && sig.ug ? b('ugout', `Out of “${sig.ug.name}” (this row)`) : '') +
+        (grp && grp.user ? b('ugdel', gk === 'divider' ? 'Delete this divider' : 'Delete this group') : '') +
+        (this.ugroups.length ? '<hr><div class="mh">Go to</div>' +
+          this.ugroups.map((g, i) => (g.divider ? '' : ugb('ugo', i, `${g.name} · ${g.signals.length}`))).join('') : ''),
+        this.ugroups.length ? this.ugroups.length + ' ' : '');
+    // the time clicked: marks there, the second cursor, copies of the moment; the lists of the marks
+    const atT = at != null && isFinite(at) ? this.fmtCursor(at) : '';
+    const hereB = menuSub('subt', 'Here', (atT ? `<div class="mh">${at === this.cursor ? 'at the cursor · ' : 'at '}${esc(atT)}</div>` : '') +
+      (sig ? b('mark', 'Bookmark here') : '') + b('umark', 'Marker here') +
+      b('c2', 'Second cursor here') + (this.cursor2 != null ? b('c2x', 'Clear the second cursor') + (sig && sig.tr ? b('copyv', 'Copy A · B · Δ') : '') : '') +
+      b('copylink', 'Copy link to here') + '<hr>' +
+      b('mlist', 'Markers…') + (this.bms.length || this.umarks.length ? b('clearmarks', 'Clear bookmarks and markers') : ''), atT ? esc(atT) + ' ' : '');
+    // the picture (the range, else the window; the selected run, the highlighted rows, else the screen's): Copy image at once,
+    // the files and the other formats in Export ▸
+    const picB = b('copyimg', np ? `Copy image (${np} rows)` : 'Copy image') +
+      menuSub('subp', 'Export', (np ? `<div class="mh">${np} ${this.selRun.size > 1 ? 'selected' : 'highlighted'} rows</div>` : '') +
+        b('png', 'Save image as PNG') + b('svg', 'Save image as SVG') + '<hr>' + b('wdjson', 'Save as WaveDrom') + b('wdcopy', 'Copy WaveDrom') +
+        (this.M.timed ? b('wlpiece', 'Save as WaveLens (JSON)') : ''));
+    // the gaps: a submenu (its settings, the role of the signals clicked, a reset)
+    const gapsB = menuSub('subh', gn(),
       (`<div class="mi gp"><label><input type="checkbox" class="gon"${gp.gaps ? ' checked' : ''}> <span class="gn">${gn()}</span></label>` +
         `<label><input type="checkbox" ` +
         `class="gview"${gp.gapView ? ' checked' : ''}> on the waves</label></div><div class="mi gp"><span>idle ` +
@@ -5512,84 +5676,26 @@ Object.assign(WaveView.prototype, {
         b('gref', gref ? 'Not by this signal' : many ? `By the ${sigs.length}: their changes kept` : 'By this signal: its changes kept') +
         b('gaux', gaux ? 'Do not count it' : many ? `Count the changes of the ${sigs.length} in a gap` : 'Count its changes in a gap') +
         (sig && sig.width === 1 ? b('gclk', isGck ? 'Not by its cycles' : 'Count in cycles of this clock') : '') : '') +
-      '<hr>' + b('greset', 'Reset the gaps') + '</div></div>' +
-      // the clock cycles under the time axis: a submenu (on / off, this clock, cycle 0 here, a reset)
-      (`<div class="msub"><button type="button" role="menuitem" class="subc" aria-haspopup="menu" aria-expanded="false"><span>${co.cycles ? 'Cycles: ' +
-        (cd ? esc(cd.clk.name) : 'no clock') : 'Cycles'}</span><span class="kk">▸</span></button><div class="sub" role="menu" hidden>`) +
+      '<hr>' + b('greset', 'Reset the gaps'), '', 'gh');
+    // the clock cycles under the time axis: a submenu (on / off, this clock, cycle 0 here, a reset)
+    const cycB = menuSub('subc', co.cycles ? 'Cycles: ' + (cd ? esc(cd.clk.name) : 'no clock') : 'Cycles',
       (cda ? b('cycon', co.cycles ? 'Hide the cycles' : `Show the cycles of ${esc(cda.clk.name)}`) : '<div class="mh">no clock found: pick a 1-bit one</div>') +
       (sig && sig.width === 1 ? b('cyclk', isCyc ? 'Not by this clock' : `Cycles of ${esc(sig.name)}`) : '') +
       (cda ? b('cyc0', at < cda.ups[0] ? `Cycle 0 at the first edge of ${esc(cda.clk.name)}` : `Cycle 0 at this edge of ${esc(cda.clk.name)}`) : '') +
-      '<hr>' + b('cycx', 'Reset the cycles') + '</div></div>' +
-      (ugh ? `<hr><div class="mh">${esc(ugh.name)} · your group</div>` + mvs('your groups') + b('ugfold', this.collapsed.has(ugh.id) ? 'Open this group' :
-        'Fold this group') : '') +
-      (it ? `<hr><div class="mh">${esc(it.full || it.name)}${many ? `<br>+ every ${run ? 'selected' : 'highlighted'} row: ${sigs.length} signals` : ''}</div>` +
-        (mine ? mvs(`“${mine.ug.name}”`) : '') +   // (b() escapes it)
-        (sigs.length ?
-          `<label class="mi">${many ? `Colour of ${sigs.length}` : 'Colour'} <input type="color" value="${esc(col)}"
-            aria-label="colour of ${esc(of)}"></label>` +
-            (sigs.some(r => this.painted.has(r.full)) ? b('unpaint', many ? 'Their own colours' : 'Its own colour') : '') : '') +
-        (sig && buses.length ?
-          (`<label class="mi">${many ? `Radix of ${buses.length}` : 'Radix'} <span><select aria-label="radix of ${esc(of)}"><option value="">the ` +
-            `page's${many ? '' : ` (${esc(rx)})`}</option>` +
-            RADIX.map(x => `<option${buses.every(r => this.radixes.get(r.full) === x) ? ' selected' : ''}>${x}</option>`).join('')) +
-          (`<option value="q"${qk === 'q' ? ' selected' : ''}>fixed q (unsigned)</option><option value="sq"${qk === 'sq' ? ' selected' : ''}>fixed sq ` +
-              `(signed)</option></select>`) +
-          (`<input type="number" class="qf" min="0" max="128" value="${qf}" aria-label="fraction bits" title="Fraction bits of the fixed-point ` +
-              `value"${qk ? '' : ' hidden'}></span></label>`) : '') +
-        (sig && buses.length ? b('analog', buses.every(r => r.analog) ? 'As a bus' : many ? `Analog: ${buses.length}` : 'Analog (step plot)') : '') +
-        (vecs.length ? b('bits', vecs.every(r => this.bitsOpen.has(r.full)) ? (many ? `Fold the bits of ${vecs.length}` : 'Fold the bits') :
-          many ? `Bits of ${vecs.length}` : `Bits: ${vecs[0].width} rows`) : '') +
-        (dupable.length ? b('dup', dupable.length > 1 ? `Duplicate ${dupable.length}` : 'Duplicate') : '') +
-        (vecs.length && !vecs.some(r => r.slice) ? b('dupbits', 'Duplicate bits…', 'Some bits of the bus as a row of their own: 7:4') : '') +
-        (copies.length ? b('undup', copies.length > 1 ? `Remove the ${copies.length} copies` : 'Remove the copy') : '') +
-        (grp && grp.cls === 'ugdiv' ? '' : b('hl', this.picks.has(it) ? 'Remove the highlight' : 'Highlight') + b('hide',   // a divider: neither
-          many ? `Hide the ${rows.length} ${run ? 'selected' : 'highlighted'}` : grp ? 'Hide this module' : 'Hide',
-          'Leave it out of the view (Hidden: N ✕ in the bar shows it again)')) +
-        (grp && !ugh ? b('fold', this.collapsed.has(grp.id) ? 'Open this module' : 'Fold this module') : up != null ? b('foldup', 'Fold its module') : '') +
-        (sig ? b('mark', 'Bookmark here', 'A bookmark on this signal at the time clicked') : '') +
-        // your groups: a submenu (into / out of a group, a new one, delete; go to any of them)
-        (`<div class="msub"><button type="button" role="menuitem" class="subg" aria-haspopup="menu" aria-expanded="false">` +
-          `<span>Groups${this.ugroups.length ? ` (${this.ugroups.length})` : ''}</span><span class="kk">▸</span></button><div class="sub" role="menu" hidden>` +
-          (sig && !mine ? '<div class="mh">to move it: into a group of yours, any order there</div>' : '') +
-          (sigs.length ? this.ugroups.map((g, i) => (g.divider ? '' : sigs.every(r => g.signals.includes((r.orig || r).full)) ?
-            ugb('ugoff', i, `Out of “${g.name}”`) :
-            ugb('ugto', i, `Into “${g.name}”`))).join('') + b('ugnew', many ? `New group of the ${sigs.length}` : 'New group with it') : '') +
-          (sig && sig.ug ? b('ugout', `Out of “${sig.ug.name}” (this row)`) : '') + (grp && grp.user ? b('ugdel', 'Delete this group') : '') +
-          (this.ugroups.length ? '<hr><div class="mh">Go to</div>' +
-            this.ugroups.map((g, i) => (g.divider ? '' : ugb('ugo', i, `${g.name} · ${g.signals.length}`))).join('') :
-            '<div class="mh">no groups yet</div>') + '</div></div>') +
-        b('umark', 'Marker here') + b('mlist', 'Markers…') + b('c2',
-          'Second cursor here') + (this.cursor2 != null ? b('c2x', 'Clear the second cursor') +
-          (sig && sig.tr ? b('copyv', 'Copy A · B · Δ', 'The value at each cursor and the change between them, as the value column shows them') : '') : '') +
-          b('copyname', 'Copy the path') +
-        b('copylink', 'Copy link to here', 'A link to this moment: the page opened by it puts the cursor here and selects this signal') +
-        b('types', 'Type…') : '') +
-      (ng || nh ? '<hr>' + (ng ? b('zM', 'Fold every module') + b('zR', 'Open every module') : '') + (nh ? b('unhide', `Show the hidden (${nh})`) : '') : '') +
-      (this.scopes().length ? '<hr>' + b('mods', 'Modules…') + (it && this.scopeOfRow(it) ? b('locate', 'Locate module in tree') : '') +
-        (this.only ? b('onlyp', this.only.on ? 'Pause Only' : 'Resume Only') + b('onlyx', 'Clear Only') : '') : '') +
-      (this.fsms().length ? '<hr>' + b('fsms', 'State machines…') + (this.fsm ? b('fsmx', 'Clear the FSM layer') : '') : '') +
-      (r ? '<hr>' + b('clear', 'Clear the range') : '') +
-      (this.bms.length || this.umarks.length ? '<hr>' + b('clearmarks', 'Clear bookmarks and markers') : '');
+      '<hr>' + b('cycx', 'Reset the cycles'));
+    // the rows as a whole: folding, the hidden, the Modules panel and Only, the state machines
+    const modB = menuSub('subm', this.scopes().length ? 'Modules' : 'Rows',
+      (grp && !ugh ? b('fold', `${this.collapsed.has(grp.id) ? 'Open' : 'Fold'} this ${gk}`) : up != null ? b('foldup', 'Fold its module') : '') +
+      (ng ? b('zM', 'Fold every module') + b('zR', 'Open every module') : '') + (nh ? b('unhide', `Show the hidden (${nh})`) : '') + '<hr>' +
+      (this.scopes().length ? b('mods', 'Modules…') + (it && this.scopeOfRow(it) ? b('locate', 'Locate module in tree') : '') +
+        (this.only ? b('onlyp', this.only.on ? 'Pause Only' : 'Resume Only') + b('onlyx', 'Clear Only') : '') : '') + '<hr>' +
+      (this.fsms().length ? b('fsms', 'State machines…') + (this.fsm ? b('fsmx', 'Clear the FSM layer') : '') : ''));
+    el.innerHTML = [dlB, lnB, mkB, rangeB, spanB, rowB, hereB + picB + gapsB + cycB + modB].filter(Boolean).join('<hr>');
     this.root.append(el); this.menuEl = el; hexFields(el);   // each colour with its hex code
     const box = el.getBoundingClientRect();
     el.style.left = Math.max(4, Math.min(cx, innerWidth - box.width - 4)) + 'px'; el.style.top = Math.max(4, Math.min(cy, innerHeight - box.height - 4)) + 'px';
     const done = () => { this.closeMenu(); this.refocus(); };
-    // the submenu: open on the pointer or a click, beside the menu (the left side when the right has no room)
-    for (const msub of el.querySelectorAll('.msub')) {   // the gaps, the cycles, your groups
-      const sub = msub.querySelector('.sub'), subh = msub.querySelector('.subh, .subc, .subg, .subs');
-      // fixed on the screen by its item's place (the menu scrolls: an absolute one would be cut by it, B-83), placed again
-      // when the menu scrolls
-      const subOpen = on => {
-        sub.hidden = !on; subh.setAttribute('aria-expanded', on); if (!on) return;
-        const m = msub.getBoundingClientRect(), s = sub.getBoundingClientRect();
-        const left = m.right + s.width > innerWidth - 4 ? Math.max(4, m.left - s.width) : m.right;
-        Object.assign(sub.style, { left: left + 'px', top: Math.max(4, Math.min(m.top - 5, innerHeight - 4 - s.height)) + 'px' });
-      };
-      el.addEventListener('scroll', () => { if (!sub.hidden) subOpen(true); });
-      msub.addEventListener('mouseenter', () => subOpen(true));
-      msub.addEventListener('mouseleave', () => { if (!sub.contains(document.activeElement)) subOpen(false); });   // not while typing in it
-      subh.addEventListener('click', () => subOpen(true));   // (the pointer opened it already: stays open)
-    }
+    const subs = menuSubs(el);   // one open at a time, by the pointer, a click, the keys
     el.addEventListener('click', e => {
       const m = e.target.closest('button[data-m]'); if (!m) return;
       const act = m.dataset.m;
@@ -5637,7 +5743,7 @@ Object.assign(WaveView.prototype, {
             `${this.fmt(tb, (tb - ta) / 1000, tb - ta)} (Open… or a drop opens it)`); }, e => this.toast('not saved: ' + e.message));
       }
       else if (act === 'unpaint') { sigs.forEach(r => this.painted.delete(r.full)); this.savePaint(); this.renderNames(); this.draw(); }
-      else if (act === 'hl') this.toggleHighlight(it);
+      else if (act === 'hl') this.toggleHighlight(hk || it);
       else if (act === 'analog') { const on = !buses.every(r => r.analog); buses.forEach(r => this.setAnalog(r, on ? 3 : false)); }
       else if (act === 'bits') this.setBits(vecs, !vecs.every(r => this.bitsOpen.has(r.full)));
       else if (act === 'dup') { const out = dupable.map(r => this.dupAdd(r)).filter(Boolean); this.dupDone();
@@ -5671,9 +5777,11 @@ Object.assign(WaveView.prototype, {
         this.askText(x, y, `Bookmark · ${sig.name} · ${this.fmtCursor(t)}`, 'its text', text => {
           const n = Math.max(0, ...this.bms.map(b => b.n)) + 1; this.bms.push({ n, t, signal: sig.full, text, color: null, top }); this.changed(true); });
         return this; }
-      else if (act === 'copyname') this.copyRows([it]);
+      else if (act === 'copyname') this.copyRows(many ? sigs : [it]);
       else if (act === 'copyv') this.copyText(`${sig.name}: ${this.valueTwo(sig, true)}`);
-      else if (act === 'copylink') this.copyText(this.linkTo({ t: this.cursor, sel: it && it.type === 'sig' ? it.full : this.sel && this.sel.full }));
+      else if (act === 'copylink') {   // the place clicked (on a signal: snapped as Bookmark here), M-08
+        const t = at == null ? this.cursor : sig ? this.snap(sig, at) : at;
+        this.copyText(this.linkTo({ t, sel: it && it.type === 'sig' ? it.full : this.sel && this.sel.full })); }
       else if (act === 'types') { const x = this.menuEl.getBoundingClientRect(); this.closeMenu(); this.typesBox(sig0, x.left, x.top); return this; }
       else if (act === 'mlist') { this.closeMenu(); this.marksMenu(); return this; }
       else if (act === 'mktext') { const [x, y] = this.menuAt;
@@ -5685,11 +5793,11 @@ Object.assign(WaveView.prototype, {
         this.askText(x, y, `Marker · ${this.fmtCursor(at)}`, 'its label',
           label => this.run(Object.assign({ op: 'marker', t: at }, label ? { label } : {})));
         return this; }
-      else if (act === 'ugto') this.toGroup(this.ugroups[+m.dataset.g].name, sigs);
-      else if (act === 'ugoff') this.run({ op: 'group', name: this.ugroups[+m.dataset.g].name, remove: sigs.map(x => (x.orig || x).full) });
+      else if (act === 'ugto') this.toGroup(this.ugroups[+m.dataset.g].name, gsigs);
+      else if (act === 'ugoff') this.run({ op: 'group', name: this.ugroups[+m.dataset.g].name, remove: gsigs.map(x => (x.orig || x).full) });
       else if (act === 'ugo') { this.closeMenu(); return this.goGroup(this.ugroups[+m.dataset.g].name); }
       else if (act === 'ugnew') { let k = this.ugroups.length + 1; while (this.ugroups.some(g => g.name === `group ${k}`)) k++;
-        this.toGroup(`group ${k}`, sigs); }
+        this.toGroup(`group ${k}`, gsigs); }
       else if (act === 'ugout') this.hide([sig]);
       else if (act === 'ugdel') this.run({ op: 'group', name: (ugh || grp).name, delete: true });
       else if (act === 'mvup' || act === 'mvdn' || act === 'mvtop' || act === 'mvbot') {
@@ -5750,11 +5858,11 @@ Object.assign(WaveView.prototype, {
       if (!e.target.matches('.gi, .gk') || !this.gapLive()) return;
       this.gapType(() => this.gapFields(el.querySelector('.gi'), el.querySelector('.gk'), true));
     });
-    el.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); done(); } });
+    menuKeys(el, done, subs);
     // Windows sends contextmenu on the release of the button: by then this menu is under the pointer (no browser menu over it)
     el.addEventListener('contextmenu', e => e.preventDefault());
     this.menuOff(el);
-    (el.querySelector('button') || el).focus({ preventScroll: true });
+    (el.querySelector(':scope > button, :scope > .msub > button') || el).focus({ preventScroll: true });
     return el;
   },
   // the right button on the bar: its tool groups with a tick each (a click shows / hides one), Show all, Hide all; the
@@ -5779,12 +5887,7 @@ Object.assign(WaveView.prototype, {
       else if (!H.delete(m.dataset.tg)) H.add(m.dataset.tg);
       this.setToolsHidden([...H]); mark();
     });
-    el.addEventListener('keydown', e => {
-      const bs = [...el.querySelectorAll('button')], k = bs.indexOf(document.activeElement);
-      if (e.key === 'Escape') { e.stopPropagation(); this.closeMenu(); this.refocus(); }
-      else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault();
-        bs[(k + (e.key === 'ArrowDown' ? 1 : -1) + bs.length) % bs.length]?.focus(); }
-    });
+    menuKeys(el, () => { this.closeMenu(); this.refocus(); });   // ↑ ↓ Home End, Esc
     el.addEventListener('contextmenu', e => e.preventDefault());
     this.menuOff(el);
     (el.querySelector('button') || el).focus({ preventScroll: true });
@@ -5806,12 +5909,7 @@ Object.assign(WaveView.prototype, {
     el.addEventListener('click', e => { const m = e.target.closest('button[data-g]'); if (!m) return; this.closeMenu();
       this.goGroup(this.ugroups[+m.dataset.g].name); });
     const f = this.menuFilter(el, (b, take) => { if (take) b.click(); else b.focus(); });
-    el.addEventListener('keydown', e => {
-      const bs = [...el.querySelectorAll('button')].filter(b => !b.hidden), k = bs.indexOf(document.activeElement);
-      if (e.key === 'Escape') { e.stopPropagation(); this.closeMenu(); this.refocus(); }
-      else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault();
-        bs[(k + (e.key === 'ArrowDown' ? 1 : -1) + bs.length) % bs.length]?.focus(); }
-    });
+    menuKeys(el, () => { this.closeMenu(); this.refocus(); });   // ↑ ↓ Home End, Esc
     this.menuOff(el);
     (f || el.querySelector('button') || el).focus({ preventScroll: true });
     return el;
@@ -7197,6 +7295,7 @@ Object.assign(WaveView.prototype, {
   },
   async undo(dir = -1) {   // -1: undo, 1: redo -> what changed back ('' nothing done)
     if (this.undoCur == null || this.undoing) return '';
+    this.closeMenu();   // a menu open: its items hold the numbers of before (a marker, a span: the wrong one) (M-02)
     if (this.held || PTR.down) { this.toast('a change is not done yet: undo after it'); return ''; }   // a batch waiting, a drag
     this.undoTick();
     const from = dir < 0 ? this.undoS : this.redoS, to = dir < 0 ? this.redoS : this.undoS;
@@ -7359,7 +7458,8 @@ Object.assign(WaveView.prototype, {
     return (this.ugMemo = out);
   },
   // the right button's "Add to a group": a group by its name (made when missing) gets these signals
-  toGroup(name, rows) { return this.run({ op: 'group', name, add: rows.map(r => (r.orig || r).full) }); },
+  toGroup(name, rows) { return this.run({ op: 'group', name, add: rows.map(r => (r.orig || r).full) }).then(r => {
+    if (r && r[0] && r[0].error) this.toast(r[0].error); return r; }); },   // (not taken: said, M-07)
 });
 
 /* ---------------- the edits a page carries (tools/viewedit.py; wavemcp.py view_edit on a page that is not live) ---------------- */
@@ -10111,7 +10211,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.51',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.52',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,

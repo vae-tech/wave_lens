@@ -727,6 +727,7 @@ Object.assign(WaveView.prototype, {
   },
   async undo(dir = -1) {   // -1: undo, 1: redo -> what changed back ('' nothing done)
     if (this.undoCur == null || this.undoing) return '';
+    this.closeMenu();   // a menu open: its items hold the numbers of before (a marker, a span: the wrong one) (M-02)
     if (this.held || PTR.down) { this.toast('a change is not done yet: undo after it'); return ''; }   // a batch waiting, a drag
     this.undoTick();
     const from = dir < 0 ? this.undoS : this.redoS, to = dir < 0 ? this.redoS : this.undoS;
@@ -889,7 +890,8 @@ Object.assign(WaveView.prototype, {
     return (this.ugMemo = out);
   },
   // the right button's "Add to a group": a group by its name (made when missing) gets these signals
-  toGroup(name, rows) { return this.run({ op: 'group', name, add: rows.map(r => (r.orig || r).full) }); },
+  toGroup(name, rows) { return this.run({ op: 'group', name, add: rows.map(r => (r.orig || r).full) }).then(r => {
+    if (r && r[0] && r[0].error) this.toast(r[0].error); return r; }); },   // (not taken: said, M-07)
 });
 
 /* ---------------- the edits a page carries (tools/viewedit.py; wavemcp.py view_edit on a page that is not live) ---------------- */

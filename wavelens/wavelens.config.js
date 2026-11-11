@@ -49,7 +49,7 @@ window.WAVELENS_CONFIG = {
   busDetect: true,              // bus.js: the bus ports found by their signal names (AXI, AXI-Stream, APB, AHB, Avalon, Wishbone, OBI) drawn as transactions
   buses: null,                  // bus.js: ports of your own [{protocol, scope, prefix?, map?: {role: name}, clock?, name?}] (busDetect: false: only these)
   menuTipDelay: 2000,           // ms: the wait before a tooltip in that menu (the bar's: 350 ms)
-  contextMenu: true,            // the right button on the waves (a range and the viewer's menu: picture, colour, …) and on the names; false: the browser's
+  contextMenu: true,            // the right button on the waves (a range, the menu: Show as ▸, Here ▸, Export ▸ …) and on the names; false: the browser's
   exprLibrary: [],              // expressions of the project, offered to write: [{"text": "PSEL && !PREADY", "label": "wait"}] (or texts); the editor's completion, Library…
   sharedMarkers: false,         // your markers (and the Δ) the same in every viewer of the page of one dump (mkhtml.py --marks-views tests sets it)
   keys: {},                     // your keys: a key or a sequence -> the viewer's key it stands for, null: none; {"gx": "gm", "m": null, "ctrl+k": "ctrl+g"}

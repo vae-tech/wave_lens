@@ -163,8 +163,8 @@ def main():
         v = view(page)
         js(page, 0, "(v.setRange(45000, 105000, v.M.rows.find(r => r.name === 'PADDR')), v.select('PADDR'), 0)")
         bb = v.locator('canvas').bounding_box()
-        js(page, 0, f"(v.menu({bb['x'] + 640}, {bb['y'] + 30}, v.sel, v.range), 0)"); settle(page)
-        shot('range', v, upto=v.locator('.notes'))
+        js(page, 0, f"(v.menu({bb['x'] + 640}, {bb['y'] + 30}, v.sel, v.range), 0)"); page.locator('.wv-menu .subr').hover(); settle(page)
+        shot('range', v, upto=v.locator('.notes'))   # Range ▸ open: the range's items
         js(page, 0, "(v.closeMenu(), v.setRange(null), v.select('PCLK'), v.cursor = 35000, v.setCursor2(115000), v.setAnalog(v.M.rows.find(r => r.name === 'PADDR'), 3), 0)")
         settle(page)
         shot('cursors', v, upto=v.locator('.notes'))

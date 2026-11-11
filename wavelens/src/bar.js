@@ -86,7 +86,7 @@ const TIPS = {
   '.gonly': ['The picture and WaveDrom: only the signals the gaps follow'],
   '.gcnt': ['The texts of the gaps: under the axis the time left out and the clock cycles; under each signal marked + what it did there (its ' +
     'edges, its changes); none marked, "+ changes in a gap": under every one but the ones the gaps follow; or no texts'],
-  'm:hl': ['Highlight', ['ctrl+click']], 'm:hide': ['Leave it out of the view'], 'm:unhide': ['Show the hidden rows'],
+  'm:hl': ['Highlight', ['ctrl+click']], 'm:hide': ['Leave it out of the view (Hidden: N ✕ in the bar shows it again)'], 'm:unhide': ['Show the hidden rows'],
   'm:fold': ['Fold / open this module'], 'm:foldup': ['Fold its module', ['zc']], 'm:zM': ['Fold every module', ['zM']], 'm:zR': ['Open every module', ['zR']],
   'm:types': ['Where its labels or fields come from: the types file and the path in it, the width, why it has none'],
   'm:mark': ['Bookmark on this signal here: its text asked here, then in the list', ['b']],
@@ -110,7 +110,20 @@ const TIPS = {
   '.ugn': ['Group name', ['Enter']],
   'act:live': ['Driven by an agent (tools/wavemcp.py view_live): its edits come in as you watch; click: disconnect'],
 };
-TIPS['.subg'] = ['Your groups: put the signals into one, a new one, go to one', ['ctrl+G', 'gl']];
+TIPS['.subg'] = ['Your groups: the place of this row (or group) among them, into one, out of one, a new one, go to one', ['ctrl+G', 'gl']];
+// the submenus of the right button's menu (menuSub) and the items whose tip was their own
+Object.assign(TIPS, { '.subr': ['More of the range: bookmarks at its ends, its Δ copied, kept as a span of yours, as waves of their own'],
+  '.subv': ['How the signal is drawn: a step plot, bit by bit, some bits as a row of their own; where its type comes from'],
+  '.subt': ['The time clicked: a bookmark or a marker there, the second cursor, a link to it; the lists of the marks'],
+  '.subp': ['The picture (the range, else the window; the highlighted rows, else the ones on the screen) as a file, WaveDrom, WaveLens'],
+  '.subm': ['The rows as a whole: fold the modules, show the hidden, the Modules panel and Only, the state machines'],
+  'm:asrange': ['This span measured as the range'], 'm:spdel': ['Delete this span of yours'],
+  'm:keepsp': ['A span of yours over this range, its label asked (empty: none); the range stays'],
+  'm:copyv': ['The value at each cursor and the change between them, as the value column shows them'],
+  'm:dupbits': ['Some bits of the bus as a row of their own: 7:4'],
+  'm:clearmarks': ['Every bookmark, arrow and marker of yours deleted (ctrl+Z brings them back)'],
+  'm:dlown': ['The Δ arrow in the default colour again'], 'm:dlnone': ['No Δ arrow from this marker (the marker stays)'],
+  'm:lnown': ['The things on this line (Δ arrows, markers, bookmarks) in their own colours again'] });
 Object.assign(TIPS, { '.subc': ['The clock cycles in a band under the time axis: numbered from cycle 0, the cursor\'s in the title, Δ in them; ' +
   'c147 in the cursor field goes to cycle 147'], 'm:cycon': ['The band of cycle numbers under the time axis'],
   'm:cyclk': ['Count the cycles of this clock (its rising edges)'], 'm:cyc0': ['The rising edge at or before the time clicked is cycle 0'],
@@ -159,7 +172,7 @@ const HELP = [
     [['1', '…', '9'], 'go to bookmark 1 … 9'],
     [['ctrl+drag'], 'measure a range: Δ, the edges or changes of that signal, then of each one you select (↑ ↓, a click on a name)'],
     [['alt+drag'], 'a box: its time and its signals, then the menu (picture, WaveDrom, colour)'], [['ctrl+click'], 'clear the range'],
-    [['right button'], 'a range and the menu: picture, colour, radix, duplicate, hide'], [['b'], 'bookmark at the cursor'],
+    [['right button'], 'a range and the menu: colour, radix, hide, Copy image; Show as ▸, Here ▸, Export ▸ …'], [['b'], 'bookmark at the cursor'],
     [[']b', '[b'], 'next / previous bookmark'], [['m'], 'marker at the cursor: its label asked'], [[']m', '[m'], 'next / previous marker'],
     [['right button + click'], 'the left button while the right one is down: a marker there at once (M1, M2 …; over the signal, else under it)'],
     [['gm'], 'the markers and bookmarks: a list, ↑ ↓ go through them'], [['drag a bookmark'], 'move it'],
@@ -172,7 +185,7 @@ const HELP = [
   ['Menus', [[['g'], 'a moment after it: a box with what can follow, press the key or click it: go to, markers and bookmarks, the state, the dump'],
     [['z', 'y', '[', ']'], 'the same box: fold, copy, next, previous'], [['Esc'], 'with the box open: closes it, nothing else'],
     [['t', 'T'], 'the panels of the modules, the state machines'], [['gm', 'gl'], 'the lists of the markers and bookmarks, your groups'],
-    [['right button'], 'on the waves or a name: the menu of what is there']]],
+    [['right button', 'Menu key'], 'on the waves or a name: the menu of what is there (↑ ↓ → ← Enter Esc in it, a submenu ▸ by →)']]],
   ['Undo', [[['ctrl+Z'], 'undo the last change of bookmarks, arrows, groups, colours, radix, hidden rows, highlight'],
     [['ctrl+shift+Z', 'ctrl+Y'], 'redo']]],
   ['Help', [[['?'], 'this box'], [['hover a button'], 'what it does, its keys']]],

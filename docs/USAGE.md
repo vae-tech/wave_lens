@@ -287,7 +287,7 @@ at once; the names come from the design's types (guide: [State names and structs
 - **Which run.** The types and the dump are compared as far as both tell: written more than a day apart (Questa's types and
   its VCD come from one `vsim`), an instance of the types under a module the dump has but not in it. Either is a note
   (`mkconfig.py`, `svtypes.py check`'s `run:` lines, the viewer's log and **Type…**): the labels may be of another design or
-  other parameters. The right button's **Type…** on a signal tells where its labels come from: the types file and the path
+  other parameters. The right button's **Show as ▸ Type…** on a signal tells where its labels come from: the types file and the path
   there, a width that does not fit, a plain vector in the types, no entry (with the paths of its name the file has, and the
   `"map"` to write when they are under another root); the command `types` answers the same.
 - **What the dump lacks.** Questa's types declare every signal (`describe` of each, unpacked arrays and parameters too):
@@ -366,7 +366,7 @@ add theirs (`WaveLens.registerDefaults`).
 | `exprsOpen` | false | the list of expressions (`sva.js`) open when the page opens and it has some; folded: ▸ Expressions opens it |
 | `dumpBudget` | 3000000 | a VCD opened in the page (Open…, dropped on a viewer): the signals nearest the top up to this many value changes |
 | `busDetect`, `buses` | true, none | bus transactions (`bus.js`): the ports found by their names; ports of your own `[{protocol, scope, prefix, map, clock, name}]` |
-| `contextMenu` | true | the right button on the waves (a range and the viewer's menu) and on the names (the menu of that row); false: the browser's |
+| `contextMenu` | true | the right button on the waves (a range and the viewer's menu), an alt+drag box and the Menu key there, and on the names (the menu of that row); false: the browser's (the box keeps its range) |
 | `menuTipDelay` | 2000 | ms before a tooltip in that menu shows (the bar's: 350 ms) |
 | `exprLibrary` | `[]` | the project's expressions, `[{"text": "PSEL && !PREADY", "label": "wait"}]` or texts: the expression editor offers them as you type (by label or text) and in **Library…** of the list of expressions |
 | `sharedMarkers` | false | true: your markers and their Δ the same in every viewer of the page of the same dump (a marker made in one is in each; a page of a view per test, `mkhtml.py --marks-views tests`, sets it) |
@@ -682,7 +682,7 @@ setting is the start; a find left out still floats over the waves on `/`). Navig
 | `gu` | the runs kept of the dump (VS Code: the Runs panel, *The runs kept of a dump*) | `]r` `[r` | B: compare A with the next (older) / previous run kept, over the same window |
 | `]w` `[w` | A: the next (older) / previous run kept shown here (now among them), the view kept; with no B the walk through the runs | | |
 | `yn` `yt` | copy the selected signal's name; the time of the cursor | `yl` | copy a link to here: the cursor and the selected signal ([§ A link to a moment](#a-link-to-a-moment)) |
-| `gm` (the right button's **Markers…**) | the markers (the page's, yours) and the bookmarks in a list over the waves, by time (a line at its top filters them as you type, the list in its order, the others hidden; ↓ the first shown, Enter the best match; Enter with nothing typed closes it): `↓` the first (`↑` the last), then `↑ ↓` Home End step through them, a click picks one — the cursor on it and the waves at its time with the span they have: a marker in the middle, a bookmark as going to it does (below); Enter or Esc closes it there | `gl`, ctrl+G | your groups: a list (filtered as you type) |
+| `gm` (the right button's **Here ▸ Markers…**) | the markers (the page's, yours) and the bookmarks in a list over the waves, by time (a line at its top filters them as you type, the list in its order, the others hidden; ↓ the first shown, Enter the best match; Enter with nothing typed closes it): `↓` the first (`↑` the last), then `↑ ↓` Home End step through them, a click picks one — the cursor on it and the waves at its time with the span they have: a marker in the middle, a bookmark as going to it does (below); Enter or Esc closes it there | `gl`, ctrl+G | your groups: a list (filtered as you type) |
 | shift+click the waves | a second cursor (dashed, on an edge): Δ to the cursor in time, its frequency (`Δ 40 ns / 25 MHz`) and in cycles of the clock (the cycles band's when it is on, else the selected signal's, else the nearest `*clk*`) on the axis and in the readout; the value column says each row at both and the change, `0x04 · 0x40 · +0x3c` (a bus modulo its width, in hex or its radix — bin `+0b101`, oct, signed `−64`; a float or a fixed point `q8` the difference of the values, `+0.5`; ascii and an enum `IDLE → SETUP`; a bit ↑ ↓ =; x or z: ?; its title both forms, `+0xc0 (−0x40)`; the right button's **Copy A · B · Δ** copies them); `x` swaps the two; Esc clears it | `1` … `9` | go to that bookmark (each bookmark's line shows its Δ from the cursor; the bookmarks and markers at the cursor are marked in their lists) |
 | `zM` / `zR` | fold / open every module | `zc` / `zo` / `za` | fold / open / toggle the module of the selected signal |
 | `B`, a click on a bus's `[7:0]` | the selected bus bit by bit: a row per bit under it (§ below); again, or on one of its bits: folded | | |
@@ -702,12 +702,12 @@ place in the vector, `[15:13]`; a struct's row its whole value's; none on a bit,
 leaves them out, in the viewer and the pictures). The width, not the declared numbers: a VCD's `[0:7]` or `[15:8]` shows
 as `[7:0]`, its bits numbered from 0 at the least significant one (`[7]` is the declared `[0]` of a `[0:7]`, `[0]` the
 `[8]` of a `[15:8]`) in the rows, the commands and the pictures; the WaveJSON keeps no range. A click on the width (or `B` on the selected bus, or the right button's
-**Bits: N rows**) shows the bus bit by bit: a row per bit under it, the highest first, named `[7]` … `[0]` with the full
+**Show as ▸ Bits: N rows**) shows the bus bit by bit: a row per bit under it, the highest first, named `[7]` … `[0]` with the full
 path `PADDR[7]`, each the 0 / 1 / x / z of its bit of the value; again (or `B` on one of its bits) folds them. The
 buses shown so are kept in the browser and in the saved state (`"bits": ["PADDR"]`); a bit is a signal like any other —
 selected, searched for its edges, bookmarked (`"signal": "PADDR[2]"`: going to it shows the bits), in the picture.
 
-**Some bits of a bus as a row.** **Duplicate bits…** asks `msb:lsb` (`7:4`) and puts that slice of the bus under it, `PADDR[7:4]`: an address decode, a nibble,
+**Some bits of a bus as a row.** **Duplicate bits…** (the right button's **Show as ▸**) asks `msb:lsb` (`7:4`) and puts that slice of the bus under it, `PADDR[7:4]`: an address decode, a nibble,
 a byte lane of a wide bus without a types file; a radix, a plot and a colour of its own, its bits by the bus's numbers (`B`), kept as a copy is (`duplicate … bits: [7, 4]`).
 
 **One signal, two forms.** The right button's **Duplicate**, on a name or on the waves, puts the same signal again in a row under it, `PADDR #2`:
@@ -725,7 +725,7 @@ own colour (here `u_master`, `u_slave`, `u_regfile`; the clocks keep the green o
 
 ![The generated AXI-Lite page: u_master folded, u_slave and u_regfile open, one colour per module](img/hierarchy.png)
 
-**The Modules panel and Only.** `t` (or **Modules** in the bar, **Modules…** in the right button's menu) opens the
+**The Modules panel and Only.** `t` (or **Modules** in the bar, **Modules…** in the right button's **Modules ▸**) opens the
 page's modules as a tree over the viewer, without their signals: per module the signals of its own and with its
 submodules (`12 / 2060`; a packed struct is one), ● at the module of the selected signal; a filter on top (fuzzy, as
 the find). The tree folds on its own (▸ ▾, ← →); its header moves the panel, any edge or corner sizes it, never past
@@ -758,7 +758,7 @@ WaveDrom its cells; a signal of your group whole is in it, its module left out o
 kept in this browser: a page opened again starts with every module. The command [`only`](#commands-and-edits) does the
 same from a script or an agent.
 
-**The state machines.** `T` (or **FSMs** in the bar, **State machines…** in the right button's menu) opens the FSMs of the
+**The state machines.** `T` (or **FSMs** in the bar, **State machines…** in the right button's **Modules ▸**) opens the FSMs of the
 waves — every signal with enum labels: an FST's tables, a types file, **Sources…**, a config's `"enum"` ([§ FSM state
 names](#fsm-state-names-fst-or-vcd--the-designs-types)) — in the tree of the modules above them, as the Modules panel looks:
 each FSM with its state at the cursor and how many of its table's states the waves reach (`4/5`; x and z are none). It
@@ -901,7 +901,7 @@ No match is an error naming the bookmark: `views.gap.bookmarks[3] (n 4): no matc
 
 ![The bookmark and arrow lists under the waves](img/bookmarks.png)
 
-**Markers and your groups.** The right button's **Marker here** (`m`: at the cursor) draws a dashed line across every row with a label at
+**Markers and your groups.** The right button's **Here ▸ Marker here** (`m`: at the cursor) draws a dashed line across every row with a label at
 the top (yours, next to the page's own markers): a small box asks its label where you clicked — **Enter** (or **Add**)
 puts it in, also empty, **Esc** or a click elsewhere leaves it out — and it goes into the Markers list under the waves,
 edited there. A marker is pale until you give it a colour. **Its text goes on any line**: drag it (a marker without a text: by the top of its dashed line)
@@ -941,7 +941,7 @@ when it is moved. On a Δ arrow: its **Colour**, **Its own colour**, **No arrow 
 
 **Hidden markers.** **hidden** beside a marker keeps it in the list and takes it off the waves, the pictures and `]m [m`, and out of the Δ: its neighbours' arrows go through it, one aimed at it is not drawn (`"hidden": true` in the state; still in **Markers…**).
 
-**Clear all** in the head of the Markers list, and **Clear bookmarks and markers** at the end of the right button's menu, delete every bookmark, arrow and marker of yours (undo brings them back); the page's own markers stay.
+**Clear all** in the head of the Markers list, and **Clear bookmarks and markers** in the right button's **Here ▸**, delete every bookmark, arrow and marker of yours (undo brings them back); the page's own markers stay.
 
 **Markers…** (`gm`) lists them all over the waves to step through with ↑ ↓, the waves following; the waves stay where they are (**Bookmark here** asks a bookmark's text the same way).
 ### A link to a moment
@@ -951,7 +951,7 @@ hash changed in an open page) the page shows the section `view` (the key of a vi
 shows that test), goes to its bookmark `bm`, puts the cursor at `t` (a time with a unit, or a number in ps) in the middle of the window
 and selects the signal `sel` (a path, a name, the end of a path), its modules opened, in sight. It goes after the state this browser keeps
 and the page's edits, and is not kept itself: reloaded, the page goes there again while the hash says so. A link that names what is not
-there is said in a toast. **#** beside a bookmark in the list, **Copy link to here** in the right button's menu and `yl` copy one (in the
+there is said in a toast. **#** beside a bookmark in the list, **Copy link to here** in the right button's **Here ▸** (the time clicked, on a signal snapped to its edge) and `yl` (the cursor) copy one (in the
 VS Code tab: the dump's name and the hash). The `goto` command does the same on a live page.
 
 **Going to a bookmark** (`1`–`9`, `]b [b`, **Markers…**, a number in the list under the waves) shows the waves as they
@@ -960,7 +960,7 @@ selected, and the rows scrolled so that the row that was at the top under the ti
 in the bookmarks' JSON: a signal's or module's path; the other rows as they are now: what you hid or left out with
 Only stays so); a module folded since is opened on the way to that row and to its signal. A bookmark without a `top`
 (made before, or by the command without one), or whose row is no longer there, brings its signal into sight. The
-list's **cursor** button moves a bookmark to the cursor and to the screen of now (its `top` the row at the top). The right button's **Groups ▸** submenu puts the signal (the highlighted or selected
+list's **cursor** button moves a bookmark to the cursor and to the screen of now (its `top` the row at the top). The right button's **Your groups ▸** submenu puts the signal (the highlighted or selected
 ones) **Into** a group of your own or a **New group** — a folder at the top of the names with its signals in your order
 (they stay in their modules too; their radix, colour and values are the signal's; bookmarks and highlight of a signal
 show on its row in the group) —, takes them **Out**, **Deletes** the group on its header, and **Go to** any group.
@@ -968,7 +968,7 @@ show on its row in the group) —, takes them **Out**, **Deletes** the group on 
 selects its first signal. Their order is yours: **alt+↑ / alt+↓** move the selected signal (a run of them) one place
 in its group, **alt+shift+↑ / ↓** the group among yours; a signal of a group, or a group's header, **dragged** in the
 names goes where the line shows (into another group of yours too), and the right button on a name has **Move up / Move
-down / To the top / To the bottom** (on a group's header: among yours) — each one step to undo. The right button on any
+down / To the top / To the bottom** in **Your groups ▸** (on a group's header: among yours) — each one step to undo. The right button on any
 name opens the same menu as on the waves for that row, at the cursor (text selected in the names: the browser's menu). Under the waves the **Markers** list has each marker's time, signal (empty: the top; ↥ ↧ over it or under it), label, colour and **pale**, the
 **Groups** list each group's name and colour (its signals get the colour). Both are kept in this browser and in a saved
 state, as the bookmarks are; [commands](#commands-and-edits) make them too.
@@ -1130,7 +1130,7 @@ wherever it is in the run: B offset to it, over the shorter of the two (said), f
 without that case: an error on its row); a run that has cases but not this one is compared over the window as it is (said). Two runs whose earlier cases took longer still compare case by case. In a browser
 there is no Runs panel: the runs are kept by `sva runs`.
 
-**Slices: pieces of the waves compared with each other.** The right button over a range has **Slice ▸** (VS Code):
+**Slices: pieces of the waves compared with each other.** The right button over a range has in **Range ▸** (VS Code):
 **Keep as a slice (Runs)** keeps the range of the waves shown — the dump, or the run that is A — as a run of its own, every
 signal, **its times from 0**: its first sample (the range's start, on the edge the range snapped to) is 0. Its row says
 `slice 120 ns … 145 ns, from 0`, its name by default `tb.vcd 120 ns–145 ns` (✎ renames it), no test cases (`sva runs set
@@ -1216,10 +1216,11 @@ then: walk the list and read each signal's rising edges or changes in the same r
 signal folded away (its module or your group closed) is not selected — the `select` command answers `null` — and the range
 stays where it was. Unselecting keeps the last one; hiding it (Hide, Only) counts the range on none. A click on the waves,
 ctrl+click or Esc clears it; `wavelens:range` says each change once. The right button
-does the same and opens a menu: **Zoom to the range**, **Bookmarks at its ends** (an arrow with the Δ between them),
-**Copy Δ**, **Keep as span…** (a span of yours over the range, its label asked; undo takes it back), **Slice ▸** (VS Code: the
-range kept as a run of its own from 0, or saved as an FST — *Slices* under the runs kept); on a span of yours, **As range** (it
-measured as the range) and **Delete the span**; **Copy image** (PNG to the clipboard), **Save image as PNG / SVG** — the range (else the window) of the rows
+does the same and opens a menu (its tree below): **Zoom to the range** and **Clear the range**, and in **Range ▸** **Bookmarks at
+its ends** (an arrow with the Δ between them), **Copy Δ**, **Keep as span…** (a span of yours over the range, its label asked; undo
+takes it back) and in VS Code **Keep as a slice (Runs)** / **Save as FST…** (the range kept as a run of its own from 0, or saved
+as an FST — *Slices* under the runs kept); on a span of yours, **As range** (it measured as the range) and **Delete the span**;
+**Copy image** (PNG to the clipboard), in **Export ▸** **Save image as PNG / SVG** — the range (else the window) of the rows
 on the screen, or of the highlighted rows when there are some, drawn as the viewer shows them (folding, colours,
 bookmarks, cursor) with names and axis, the page's colours put in, so the SVG opens anywhere (a PNG stops at 16384 px a side: fewer rows, or SVG); **Save as WaveDrom** /
 **Copy WaveDrom** — the same signals over the range as WaveJSON (`<title>.wavedrom.json`): one cell per cycle of their
@@ -1268,10 +1269,12 @@ time is never cut out (settings `gaps`, `gapIdle`, `gapKeep`, `gapSignals`, `gap
 `gapCount`, `gapLine`, `gapView`; kept in the browser and in the saved state); for the signal under the pointer
 **Colour** (**Its own colour**: the
 paint taken off), **Radix** (a bus of the dump:
-auto, hex, dec, signed, bin, oct, ascii, float, fixed q / sq with its fraction bits), **Analog** (the bus as a step plot
+auto, hex, dec, signed, bin, oct, ascii, float, fixed q / sq with its fraction bits), in **Show as ▸** **Analog** (the bus as a step plot
 three rows high between its smallest and largest value, in its radix: signed, float, fixed; **As a bus** back), **Bits: N rows**
-(the bus bit by bit, **Fold the bits** back; below), **Highlight**, **Hide**, **Fold its module**, **Bookmark here**,
-**Second cursor here** (and **Clear the second cursor** when there is one), **Copy the path** (on a module: fold / open, highlight, hide it all); **Fold / Open every module** and **Show the hidden**;
+(the bus bit by bit, **Fold the bits** back; below), **Duplicate bits…** and **Type…**; **Highlight**, **Duplicate**, **Hide**,
+**Copy the path** (several rows: every path, one per line; on a module: highlight, hide it all); in **Here ▸** **Bookmark here**,
+**Marker here**, **Second cursor here** (and **Clear the second cursor** when there is one), **Copy link to here**; in
+**Modules ▸** **Fold its module** (on a module: **Fold / Open this module**), **Fold / Open every module**, **Show the hidden**,
 **Modules…**, **Locate module in tree** (the row's module in the panel), **Pause / Resume Only** and **Clear Only**. On a
 highlighted row (ctrl+click, ctrl+shift+click) the colour, the radix and Hide go to every highlighted row, on a row of
 a selected run (shift+click a name, or **alt+drag** a box over time and rows) to every selected one (a row hidden since
@@ -1280,7 +1283,24 @@ WaveDrom then take the selected run (else the highlighted rows, else the screen'
 rows come back with **Hidden: N ✕** in the bar; the radix and the hidden rows are kept in the browser and in the saved
 state. `"contextMenu": false` leaves the right button to the browser.
 
-![A measured range over two APB transfers and the right button's menu](img/range.png)
+**The menu's tree.** At one click: the blocks of what was clicked (a Δ arrow, a line between the rows, a marker's text, the
+range, a span of yours, the row) and **Copy image**; the rest in submenus. Each item is in one place:
+
+| at the top | its submenus |
+|---|---|
+| the range: **Zoom to the range**, **Clear the range** | **Range ▸** Bookmarks at its ends, Copy Δ, Keep as span…, (VS Code) Keep as a slice (Runs), Save as FST… |
+| the row: **Colour**, **Its own colour**, **Radix**, **Highlight**, **Duplicate**, **Remove the copy**, **Hide**, **Copy the path** | **Show as ▸** Analog, Bits, Duplicate bits…, Type… · **Your groups ▸** Move up / down, To the top / bottom, Fold this group, Into / Out of “G”, New group with it, Out of “G” (this row), Delete this group, Go to |
+| **Copy image** | **Export ▸** Save image as PNG, Save image as SVG, Save as WaveDrom, Copy WaveDrom, Save as WaveLens (JSON) |
+| always | **Here ▸** (the time clicked on its header) Bookmark here (on a signal), Marker here, Second cursor here, Clear the second cursor, Copy A · B · Δ, Copy link to here, Markers…, Clear bookmarks and markers · **Gaps ▸** · **Cycles ▸** · **Modules ▸** (**Rows ▸** on a page with no modules) Fold this / its module, Fold / Open every module, Show the hidden, Modules…, Locate module in tree, Pause / Resume Only, Clear Only, State machines…, Clear the FSM layer |
+
+One submenu is open at a time, beside the menu (in a window too narrow for both: inside it, under its header). The pointer
+opens one at once, another after a short rest on its header (on its way into the open one it crosses others), and a plain
+item rested on closes it; a click on a header opens it, a second one closes it. The keys: **↑ ↓ Home End** through the items,
+**→ Enter Space** open a submenu (its first item), **← Esc** close it, **Esc** again the menu (a field keeps its keys, a list
+opens with Space); the **Menu key** (shift+F10) on the waves opens the menu at the cursor, on the selected row. ctrl+Z with the
+menu open closes it first.
+
+![A measured range over two APB transfers and the right button's menu, Range ▸ open](img/range.png)
 
 ![The cursor and a second cursor 80 ns later: Δ in time and in cycles of PCLK on the axis and in the readout](img/cursors.png)
 
