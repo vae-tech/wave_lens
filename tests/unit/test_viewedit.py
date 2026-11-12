@@ -481,8 +481,23 @@ class Twin(unittest.TestCase):
         r = e.run([{'op': 'layout', 'height': 400}, {'op': 'layout', 'scroll': 'page', 'tools': 'fold'}, {'op': 'find', 'query': 'dut.st'},
                    {'op': 'find', 'query': 'val|clk', 'regex': True}, {'op': 'find', 'query': 'state', 'word': True, 'regex': False},
                    {'op': 'cycles', 'on': True}])
-        self.assertEqual(r[0], {'op': 'layout', 'scroll': 'window', 'height': 400, 'tools': 'open'})
-        self.assertEqual(r[1], {'op': 'layout', 'scroll': 'page', 'height': None, 'tools': 'fold'})
+        sd = {'strip': True, 'stripAt': 0}   # the strip over the time axis: on, at the left (wavelens.config.js)
+        self.assertEqual(r[0], {'op': 'layout', 'scroll': 'window', 'height': 400, 'tools': 'open', 'compact': 'auto', 'bar': None, **sd})
+        self.assertEqual(r[1], {'op': 'layout', 'scroll': 'page', 'height': None, 'tools': 'fold', 'compact': 'auto', 'bar': None, **sd})
+        # the strip (look.js setCursorStrip, setStripAt): off, a place by name or 0 .. 1; what is wrong said
+        x = e.run([{'op': 'layout', 'strip': False, 'stripAt': 'center'}, {'op': 'layout', 'stripAt': 0.25}, {'op': 'layout', 'strip': 'no'},
+                   {'op': 'layout', 'stripAt': 2}, {'op': 'layout', 'stripAt': 'top'}])
+        self.assertEqual([(x[0]['strip'], x[0]['stripAt']), x[1]['stripAt'], x[2]['error'], x[3]['error'], x[4]['error']],
+                         [(False, 0.5), 0.25, 'strip: true or false'] + ['stripAt: 0 .. 1, "left", "center" or "right"'] * 2)
+        self.assertEqual([e.st['config']['cursorStrip'], e.st['config']['cursorStripAt']], [False, 0.25])
+        c = e.run([{'op': 'layout', 'compact': True}, {'op': 'layout', 'compact': 'auto'}, {'op': 'layout', 'compact': 'wide'}])
+        self.assertEqual([x.get('compact') for x in c[:2]] + [c[2]['error']], [True, 'auto', 'compact: auto, true or false'])
+        self.assertEqual(e.st['config']['toolsCompact'], 'auto')   # as the state has it (look.js setToolsCompact, view.js state)
+        # the bar's arrangement (model.js toolLines): lower case, the names of before, each once, no empty line, at most 6; null: the default
+        b = e.run([{'op': 'layout', 'bar': [['Find', 'cursor', 'find'], [], ['state', 'style', 'list']]}, {'op': 'layout', 'bar': 'x'},
+                   {'op': 'layout', 'bar': [[str(i)] for i in range(9)]}, {'op': 'layout', 'bar': None}])
+        self.assertEqual([b[0]['bar'], b[1]['error'], len(b[2]['bar']), b[3]['bar'], e.st['config']['toolLayout']],
+                         [[['find', 'cursor'], ['file', 'list']], 'bar: lines of group labels, [["find", "cursor"], ["list"]], or null', 6, None, None])
         pl = {'plugins': V.Editor(V.Model()).run([{'op': 'find', 'query': 'x'}])[0]['plugins']}   # (the plugins' rows: not counted, B-19)
         self.assertEqual(r[2], {'op': 'find', 'found': ['tb.dut.state'], 'count': 1, **pl})
         self.assertEqual(r[3], {'op': 'find', 'found': ['clk', 'tb.dut.valid'], 'count': 2, **pl})

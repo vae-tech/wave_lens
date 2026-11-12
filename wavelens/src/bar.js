@@ -4,10 +4,13 @@
 // A control's tooltip: [what it does, in a few words, its keys]; found by its data-act / -sv / -x / -bm / -m value or a
 // class (".q"); plugins add theirs (WaveLens.tips.add). A control without one shows its title the same way (boot.js).
 const TIPS = {
-  '.ct': ['Cursor time: 85.12us, or a number in the unit', ['Enter']], 'act:cset': ['Put the cursor at this time', ['Enter']],
-  '.cs': ['Window span around the cursor', ['Enter']], 'act:cshow': ['The window of this span at the cursor'],
-  '.cu': ['Unit of the cursor field'], '.su': ['Unit of the span field'],
+  '.ct': ['Cursor time: 85.12us, c147 (a clock cycle), or a number in the unit; Esc: as it was', ['Enter', 'Esc']],
+  '.cs': ['The window\'s span, centred on the cursor: 200ns, or a number in the unit; Esc: as it was', ['Enter', 'Esc']],
+  '.cu': ['Unit of the cursor and span fields'],
   'act:out': ['Zoom out', ['o', '-', 'ctrl+wheel']], 'act:in': ['Zoom in', ['i', '+', 'ctrl+wheel']], 'act:fit': ['Show everything', ['f']],
+  'act:zlast': ['The window before the last zoom', ['l']], 'act:zcur': ['Zoom in on the cursor', ['c']],
+  'act:zrange': ['Zoom to the range, else to the two cursors', ['shift+drag', 'middle drag']], 'act:t0': ['The start', ['Home']],
+  'act:t1': ['The end', ['End']],
   '.ws': ['Edge style: auto, slanted (WaveDrom), vertical (simulator), square'],
   '.q': ['Fuzzy find: letters in order, a.b for paths', ['/', 'ctrl+F', 'Enter', 'Esc']], 'act:fdock': ['Back into the bar', ['Esc']],
   'act:fcase': ['Match case', ['alt+C']], 'act:fword': ['Full match: the whole name (a.b: the end of the path)', ['alt+W']],
@@ -22,6 +25,10 @@ const TIPS = {
   'act:dcmpx': ['Compare no more'], 'act:dcmpv': ['Which run the waves show: this one, the second, both over each other', ['d', 'D']],
   'act:fprev': ['Previous match', ['N', 'shift+Enter']], 'act:fnext': ['Next match', ['n', 'Enter']],
   'act:fhl': ['Found rows in front, the rest dimmed'], 'act:fopen': ['Fold the modules without a match'],
+  'act:fmask': ['The found rows only (and the modules on the way to them)'],
+  'act:fselect': ['Select the found signals: the right button then takes them all (a new group, colour, radix, hide …)', ['ctrl+click: add them']],
+  '.subtg': ['Which groups of tools the bar shows: Show all, Hide all, a tick each'], '.subth': ['The theme of the page: auto, light, white, dark'],
+  '.subcp': ['The short form of the bar: the groups\' labels hidden, their rarer controls behind ⋯'],
   '.fcol': ['Colour for Paint: at once on the found, highlighted and shift+click selected signals (none of them: the selected one)'],
   'act:fpaint': ['Paint the found, highlighted and shift+click selected signals (none of them: the selected one)'],
   'act:funpaint': ['Their own colours back'],
@@ -30,8 +37,14 @@ const TIPS = {
   'act:expand': ['Open every module', ['zR']], 'act:collapse': ['Fold every module', ['zM']],
   'act:hl': ['Clear the highlight', ['Esc']], 'act:unhide': ['Show the hidden rows again'],
   'act:prev': ['Previous edge of the selected signal', ['shift+Tab', '[e']], '.edge': ['Edge kind: any, rising, falling, a value, X / Z', ['e']],
-  'act:next': ['Next edge of the selected signal', ['Tab', ']e']], 'act:mark': ['Bookmark at the cursor', ['b']],
-  'act:ssave': ['Save the view to a file (.view.json)'], 'act:sload': ['Load a saved view'],
+  'act:next': ['Next edge of the selected signal', ['Tab', ']e']], 'act:mark': ['Bookmark at the cursor, on the selected signal', ['b']],
+  'act:umark': ['A marker at the cursor: a dashed line across the rows; its label asked', ['m']],
+  'act:mprev': ['The previous bookmark or marker in time', ['[b', '[m']], 'act:mnext': ['The next bookmark or marker in time', [']b', ']m']],
+  'act:mlist': ['The markers and bookmarks in a list: ↑ ↓ go through them, the waves follow', ['gm']],
+  'act:ssave': ['Save the view to a file (.view.json)', ['gs']], 'act:sload': ['Load a saved view', ['gL']],
+  'act:sreload': ['The state loaded last, read again', ['r']],
+  'act:sforget': ['Forget what is kept of this view (rows, paint, marks, look, edits, assertions bound) and the last state; ' +
+    'asked first'], 'act:svload': ['Load SystemVerilog assertion files (.sv, .sva)'],
   'act:spage': ['This page as a file (.view.html) with your view in it — bookmarks, groups, colours, cursor, window, assertions: whoever opens ' +
     'it sees what you see, no other file needed'],
   'act:undo': ['Undo the last change of bookmarks, arrows, markers, your groups, colours, radix, analog, hidden rows, the highlight, the edge ' +
@@ -39,8 +52,31 @@ const TIPS = {
   'act:help': ['Keys and mouse', ['?']],
   'act:theme': ['The theme: auto (the system\'s light or dark), light, white, dark; kept in this browser. In VS Code: its list, with VS ' +
     'Code\'s own colours too'],
-  'act:scroll': ['The rows scroll in a window of their own (the bar above them), or with the page (the bar sticks to the top); kept in this browser'],
-  'act:tools': ['Fold the tools to this line, or open them (/ opens them for the find field)'], 'jump': ['Go to this marker'],
+  'act:scroll': ['Ticked: the rows scroll in a window of their own (the bar above them); else with the page (the bar sticks to the top); kept in ' +
+    'this browser'],
+  'act:strip': ['Ticked: the cursor (time, unit, span) and the edges in a slim strip over the time axis; else in the bar\'s lines (cursorStrip)'],
+  'act:axlock': ['Unlock the strip: ⠿ moves it along the waves (it snaps to the left, the middle, the right); again: lock it there'],
+  'act:axgrip': ['Drag the strip along the waves; ← → Home End move it too (shift: a quarter); where it stands is kept', ['drag', '←', '→']],
+  'act:snap': ['Ticked: a click puts the cursor on an edge of the signal near it (cursorSnap px); alt+click never does'],
+  'act:tg': ['Show or leave out this group of tools'], 'act:tgall': ['Every group of tools in the bar'],
+  'act:tgnone': ['No group of tools (/ still floats the find)'],
+  'act:compact': ['The short form: the groups\' labels hidden, their rarer controls behind ⋯ (auto: when the bar is narrower than 900 px)'],
+  'act:tools': ['Fold the tools to this line, or open them (/ floats the find over a folded bar)'], 'jump': ['Go to this marker'],
+  'act:arrange': ['Move the groups of the bar: drag one by its label, within a line, to another, to a new one (the keys: a list); kept in this browser'],
+  'act:barreset': ['The bar as the settings have it: the order of the groups, the short form, the groups shown'],
+  '.pgear': ['The bar and the look: the theme, where the rows scroll, the edge style, the sort prefixes, snap, the tool groups shown, the short ' +
+    'form (the right button on the bar opens it too)'],
+  '.pfile': ['The files: open a dump, compare one, its sources, the runs kept; save, load, reload the view; save the page; load assertions'],
+  '.ppaint': ['Paint: a colour on the found, highlighted and shift+click selected signals (none of them: the selected one); Unpaint'],
+  '.pimg': ['More of the picture: save it as PNG or SVG, as WaveDrom'], '.mx': ['The rest of this group'],
+  '.chipn': ['The filters on the rows: the highlight, the hidden rows, Only, the FSM layer'],
+  '.rx': ['Radix of the selected signal (shift+click a name: of a run of them); "the page\'s": its own again'],
+  'act:cycles': ['The clock cycles in a band under the time axis (the right button: Cycles ▸ for the clock, cycle 0)'],
+  'act:gaps': ['The waves with the gaps cut out (where nothing changes), or in continuous time; idle and keep beside it', ['gv']],
+  'act:copyimg': ['The range (else the window) as PNG to the clipboard: the highlighted rows, else the ones on the screen'],
+  'act:png': ['Save the picture as PNG'], 'act:svg': ['Save the picture as SVG'],
+  'act:wdjson': ['The range (else the window) as a WaveDrom file (.json), a cell per clock cycle'], 'act:wdcopy': ['The same WaveDrom to the clipboard'],
+  'act:dprev': ['The previous difference from the dump compared', ['[d']], 'act:dnext': ['The next difference from the dump compared', [']d']],
   '.mk': ['Highlight: in front, the rest dimmed', ['ctrl+click', 'ctrl+shift+click: every row to here']],
   'bm:json': ['The bookmarks and arrows as JSON for a config'], 'bm:clear': ['Remove this browser\'s bookmarks'],
   'bm:go': ['Go to this bookmark', [']b', '[b']], 'bm:here': ['Move it to the cursor'],
@@ -179,7 +215,10 @@ const HELP = [
     [['drag a marker\'s text'], 'to a line over or under a signal, along the time (alt: the time stays)'],
     [['drag a Δ'], 'between markers (Δ between markers in their list): up and down, to a line over or under a signal; its dot along, to another marker'],
     [['shift+drag a bookmark'], 'an arrow to another one']]],
-  ['The bar', [[['right button'], 'on the bar: which of its tool groups it shows (Show all, Hide all, a tick each)'],
+  ['The bar', [[['⚙', 'right button'], 'on the bar: the theme, scroll, edge style, sort prefixes, snap, the tool groups shown, the short form'],
+    [['File ▾'], 'open, compare, sources, runs; save, load, reload the view; save the page'],
+    [['⋯'], 'a narrow bar (the short form): the rest of a group'],
+    [['⚙ Arrange the bar…'], 'drag a group by its label (Esc: back); the keys: alt+↑ ↓ ← → move a group, Space shows / hides it'],
     [['▴', '▾ tools'], 'fold the tools to the title line / open them'], [['r'], 'the last state loaded, read again (Reload)'],
     [['R'], 'the dump read again from the disk, the view kept (⟳)']]],
   ['Menus', [[['g'], 'a moment after it: a box with what can follow, press the key or click it: go to, markers and bookmarks, the state, the dump'],
@@ -224,11 +263,19 @@ const FIND_OPTS = [
   ['fre', 'findRegex', '.*', 'Regular expression on the name or the full path, as grep -E (JavaScript RegExp; \\< \\> as in vim; alt+R)', 'KeyR'],
 ];
 
-// the bar's tools, one line per kind of work: where you are in time (cursor, zoom, edges, jumps), the signals by name
-// and the times by a condition (find; sva.js: expression), the rows and the files (list, edge style, state, assertions)
-const TOOL_LINES = { cursor: 'time', view: 'time', edges: 'time', 'go to': 'time', find: 'find', expression: 'find', list: 'rows', style: 'rows', state: 'rows',
-  dump: 'rows', assertions: 'rows' };
+// the bar's tools, one line per kind of work: where you are in time (cursor, zoom, edges, marks, jumps), the signals by
+// name and the times by a condition (find; sva.js: expression, assertions), the rows, the signals' look, the files and a
+// compare (list, signal, file, compare)
+const TOOL_LINES = { cursor: 'time', view: 'time', edges: 'time', marks: 'time', 'go to': 'time', find: 'find', expression: 'find', assertions: 'find',
+  list: 'rows', signal: 'rows', file: 'rows', compare: 'rows' };
+// the groups of the strip over the time axis (cursorStrip), in its order: the cursor's time, unit and span, the edges
+const STRIP_GROUPS = ['cursor', 'edges'];
+const STRIP_SNAP = 14;   // px: a dragged strip snaps to the left, the middle, the right of the waves this near
+const LOCK_SVG = (open) => '<svg viewBox="0 0 12 14" width="10" height="12" aria-hidden="true"><rect x="1.5" y="6" width="9" height="7" rx="1.2" ' +
+  `fill="currentColor"/><path d="${open ? 'M3.5 6V3.5a2.5 2.5 0 0 1 5 0' : 'M3.5 6V4a2.5 2.5 0 0 1 5 0V6'}" fill="none" stroke="currentColor" ` +
+  'stroke-width="1.4"/></svg>';
 const toolLine = (ln, html) => `<div class="tln" data-ln="${ln}">${html}</div>`;
+const BAR_SHORT = 900;   // px: a bar narrower than this takes its short form (toolsCompact 'auto'): no labels, the rest of a group behind ⋯
 
 // a WaveDrom document as text: a signal (or a group) per line, as hand-written WaveJSON looks
 const wdText = d => '{ "signal": [\n' + d.signal.map(s => Array.isArray(s)
@@ -248,101 +295,108 @@ function buildText() {
 const themeButtonOn = S => S.themeButton === true || (S.themeButton === 'auto' && !document.querySelector('button#theme'));
 const THEME_CYCLE = ['auto', 'light', 'white', 'dark'];
 
+// a menu of the bar: its header (a button, ▾; its data-own, the controls in its box, set by layoutShow) and its box (.bpop in the
+// bar, hidden until the header opens it, a .wv-menu while it is open: look.js popOpen); the box's items are the bar's own buttons (data-act),
+// one each, so the bar's click and the g menu's keys reach them as they reach the others
+const popHead = (id, label, cls, aria = '') => `<button type="button" class="pop ${cls}" data-pop="${id}" aria-haspopup="menu" aria-expanded="false"` +
+  `${aria ? ` aria-label="${aria}"` : ''}>${label}</button>`;
+const popBox = (id, html, cls = '') => `<div class="bpop${cls ? ' ' + cls : ''}" data-pop="${id}" role="menu" hidden>${html}</div>`;
+const mItem = (act, label, kk = '', more = '') => `<button type="button" role="menuitem" data-act="${act}"${more}><span>${label}</span>` +
+  `${kk ? `<span class="kk">${kk}</span>` : ''}</button>`;
+const mTick = (act, label, more = '') => `<button type="button" role="menuitemcheckbox" aria-checked="false" data-act="${act}"${more}><span><span ` +
+  `class="ck"></span>${label}</span></button>`;
+const btn = (act, label, more = '') => `<button type="button" data-act="${act}"${more}>${label}</button>`;
+// the bar's state the buttons show (disabled, pressed): worked out when a viewer draws, the DOM touched when it changed
+const barState = v => {
+  const run = v.selRun.size > 1 ? [...v.selRun] : v.sel ? [v.sel] : [], bus = run.map(r => r.orig || r).filter(r => r.type === 'sig' && r.width > 1);
+  const rx = !bus.length ? '' : bus.every(r => !v.radixes.has(r.full)) ? '-' : bus.every(r => v.radixes.get(r.full) === v.radixes.get(bus[0].full)) ?
+    v.radixes.get(bus[0].full) : '';
+  const co = v.cycOpt(), m = v.clkMemo;   // a clock to count: looked for once per model and clock setting (not on every draw)
+  if (!m || m[0] !== v.M.rows || m[1] !== co.cycleClock) v.clkMemo = [v.M.rows, co.cycleClock, !cycClock(v.M.rows, co.cycleClock)];
+  return { zlast: !v.lastView, zrange: !v.range && v.cursor2 == null, marks: !anyMark(v), rx, rxOff: !bus.length, cyc: co.cycles,
+    cycOff: v.clkMemo[2], gaps: v.gapLive() };
+};
+
 class Bar {
   // the viewer's markup: the bar (title line, tool groups), the names column and the waves, the lists, the hint
   static html(v) {
-    const r = v.root, S = v.S, groups = Object.keys(v.M.groups).length > 0;
-    const paint = getComputedStyle(r).getPropertyValue('--wave-paint').trim();   // a token, so a theme may change it
+    const S = v.S, groups = Object.keys(v.M.groups).length > 0;
+    const paint = getComputedStyle(v.root).getPropertyValue('--wave-paint').trim();   // a token, so a theme may change it
     const jumps = v.jumps.map((j, i) => `<button type="button" data-jump="${i}">${esc(j.label)}</button>`).join('');
-    const sort = S.sortButton ?
-      (`<button type="button" data-act="sort" title="Sort signals by name (key: s)"></button><input type="text" class="pfx" spellcheck="false" size="8" ` +
-        `value="${esc(v.sortIgnore.join(','))}" placeholder="i_,o_" title="Name prefixes ignored when sorting (comma-separated)" aria-label="prefixes ` +
-        `ignored when sorting">`) : '';
-    const seg = (...parts) => `<span class="seg">${parts.join('')}</span>`, grp = (label, ...parts) =>
-      `<span class="tg" data-tg="${label}"><span class="tl">${label}</span>${parts.join('')}</span>`;
-    const find = grp('find',
-      seg((`<input type="search" class="q" spellcheck="false" autocomplete="off" placeholder="find  /" aria-label="fuzzy find signals" title="Fuzzy find: ` +
-          `the letters in order (pxvd finds s_pix_valid); a word with '.' searches full paths (dev.fifo); words separated by spaces must all match. Enter ` +
-          `/ n: next, shift+Enter / N: previous, Esc: reset">`),
-        ('<span class="cnt"></span><button type="button" data-act="fprev" title="Previous match (N, shift+Enter)">‹</button><button type="button" ' +
-            'data-act="fnext" title="Next match (n, Enter)">›</button>')),
-      seg(...FIND_OPTS.map(([act, k, label, t]) =>
-        `<button type="button" class="fo" data-act="${act}" aria-pressed="${!!S[k]}" title="${esc(t)}">${esc(label)}</button>`)),
-      seg(`<button type="button" data-act="fhl" aria-pressed="${!!S.findHighlight}" title="Found rows in front, the rest dimmed">Highlight</button>`,
-        `<button type="button" data-act="fopen" aria-pressed="${!!S.findOpen}" title="Every module folded except the ones with a match">Open</button>`,
-        `<button type="button" data-act="fmask" aria-pressed="${!!S.findMask}" title="The found rows only (and the modules on the way to them)">Mask</button>`),
-      seg(`<input type="color" class="fcol" value="${/^#[0-9a-f]{6}$/i.test(paint) ? paint : '#d6336c'}" aria-label="paint colour" ` +
-        'title="Colour for Paint: at once on the found, highlighted and shift+click selected signals (none of them: the selected one)">',
-        ('<button type="button" data-act="fpaint" title="Paint the found, the highlighted and the shift+click selected signals in this colour (none of ' +
-          'them: the selected one; kept in this ' +
-          'browser)">Paint</button>')),
-      (`<button type="button" data-act="funpaint" title="Back to the signals' own colours" hidden>Unpaint</button><button type="button" data-act="fselect" ` +
-          `title="Select the found signals: the right button then takes them all (a new group, colour, radix, hide …); ctrl+click: add them to the ` +
-          `selection">Select</button><button type="button" data-act="fcopy" ` +
-          `title="Copy the full paths of the found rows, one per line">Copy</button><button type="button" class="fx" data-act="fdock" title="Back into the ` +
-          `bar (Esc: and reset the search)" aria-label="close">✕</button>`)).replace('class="tg"', 'class="tg find"');
-    // cursor: type a time (in the unit chosen, or with its own: 85.12us) and Set; a span and Show: the window around the cursor
-    // the edge style of the waves (the "style" setting): kept in this browser; a signal with a style of its own keeps it
-    const wstyle =
-      (`<select class="ws" aria-label="edge style" title="Edges: auto (wave strings slanted, exact transitions vertical) · slanted (WaveDrom) · vertical (a ` +
-        `simulator: narrow bus crossings) · square (no bevel). Kept in this browser; a signal with its own style keeps ` +
-        `it">${Object.entries(STYLE_NAMES).map(([k, n]) => `<option value="${k}"${k === S.style ? ' selected' : ''}>${n}</option>`).join('')}</select>`);
-    const units = v.M.timed ?
-      (`<select class="cu" aria-label="time unit" title="Unit of the two ` +
-        `fields">${['ps', 'ns', 'µs', 'ms', 's'].map(u => `<option${u === v.unit() ? ' selected' : ''}>${u}</option>`).join('')}</select>`) :
-      '<span class="cyc">cyc</span>';
-    const cursor =
-      seg(('<input type="text" class="ct" inputmode="decimal" spellcheck="false" aria-label="cursor time" title="Cursor time: a number in the unit shown, or ' +
-        'with a unit (85.12us); Enter or Set">'),
-        units, '<button type="button" data-act="cset" title="Put the cursor at this time">Set</button>') +
-      seg(('<span class="lbl">span</span><input type="text" class="cs" inputmode="decimal" spellcheck="false" aria-label="view span" title="Width of the ' +
-          'window; Enter or Show">'),
-        units.replace('class="cu"', 'class="su"'),
-          '<button type="button" data-act="cshow" title="Window of this span centred on the cursor (key: c)">Show</button>');
-    const list = grp('list', sort ? seg(sort) : '', groups ? seg('<button type="button" data-act="expand" title="Expand all groups">Expand</button>',
-      '<button type="button" data-act="collapse" title="Collapse all groups">Collapse</button>',
-      '<button type="button" data-act="mods" title="The modules as a tree (t)">Modules</button>' +
-        (v.fsms().length ? '<button type="button" data-act="fsms" title="The state machines as a tree (T)">FSMs</button>' : '')) : '',
-      '<button type="button" data-act="hl" title="Clear the highlight (Esc)" hidden></button>',
-        '<button type="button" data-act="unhide" title="Show the rows hidden with the right button\'s menu again" hidden></button>',
-      '<button type="button" data-act="onlyp" title="Only these modules: a click pauses it" hidden></button><button type="button" data-act="onlyx" ' +
-        'title="Every module again" aria-label="clear Only" hidden>✕</button>',
-      '<button type="button" data-act="fsmx" title="The view without the FSM layer" hidden></button>');
-    const edges = grp('edges', seg('<button type="button" data-act="prev" title="Previous edge of the selected signal, or of any shown signal ([e)">◀</button>',
-      (`<select class="edge" aria-label="edge kind" title="Edge kind (e): any, rise, fall, a value, X / ` +
-          `Z">${Object.entries(EDGE_KINDS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select>`),
-      ('<input type="text" class="ev" spellcheck="false" hidden placeholder="0x40, \'h40, 64, IDLE" aria-label="value to find" title="The value to find: ' +
-          ('0x40, \'h40, 8\'d64, 64, -3, \'b101, or a text (an enum label); Enter / shift+Enter: the next / previous time the selected signal (none: any ' +
-          'shown) becomes it">')),
-      '<button type="button" data-act="next" title="Next edge (]e)">▶</button>'),
-        '<button type="button" data-act="mark" title="Bookmark at the cursor, on the selected signal (b)">+ Mark</button>');
-    const state = grp('state',
-      ('<button type="button" data-act="ssave" title="Save what you did in this viewer to a file: the window, the cursor, the order, the folding, the ' +
-        'highlight, the paint, the bookmarks and arrows, the search, the assertions and the expressions">Save</button>'),
-      ('<button type="button" data-act="sload" title="Load a saved file into this viewer (what is not in these waves is left out)">Load…</button><input ' +
-          'type="file" class="sfile" accept=".json,application/json" hidden>'),
-      '<button type="button" data-act="sreload" title="Read the state loaded last again (r)" hidden>Reload</button>',
-      '<button type="button" data-act="spage" class="spage">Save page</button>',
-      '<button type="button" class="live" data-act="live" hidden></button>');
-    // dump: a VCD read in the page (Open…, or a file dropped on the viewer), ⟳ reads it again from the disk keeping the view
-    const dump = grp('dump',
-      ('<button type="button" data-act="dopen" title="Open a VCD dump in this viewer (or drop one on it): its signals by scope, exact ' +
-        'transitions">Open…</button>'),
-      ('<button type="button" data-act="dreload" title="Read the dump again from the disk; the view, the folding and the bookmarks stay (R)" ' +
-          'hidden>⟳</button><input type="file" class="dfile" accept=".vcd,.fst,.json" hidden>'),
-      ('<button type="button" data-act="dcmp">Compare…</button><button type="button" data-act="dcmpx" class="cmpx" hidden></button>' +
-        '<span class="seg cmpv" hidden><button type="button" data-act="dcmpv" data-run="a" aria-pressed="true">A</button>' +
-        '<button type="button" data-act="dcmpv" data-run="b" aria-pressed="false">B</button>' +
-        '<button type="button" data-act="dcmpv" data-run="overlay" aria-pressed="false">A+B</button></span>' +
-        '<input type="file" class="cfile" accept=".vcd" hidden>' +
-        `<button type="button" data-act="druns"${v.runsHost() ? '' : ' hidden'}>Runs…</button>`),
-      '<button type="button" data-act="dsrc" title="SystemVerilog sources, or the design\'s types (x.types.json: Questa, Verilator)">Sources…</button>' +
-      '<input type="file" class="srcfile" accept=".sv,.svh,.v,.vh,.json" multiple hidden>');
-    const zoom = seg('<button type="button" data-act="out" title="Zoom out (−)">−</button>',
-      '<button type="button" data-act="in" title="Zoom in (+)">+</button>', '<button type="button" data-act="fit" title="Show everything (0)">Fit</button>') +
-      ('<span class="gapv" hidden>gaps idle <input type="text" class="bgi" spellcheck="false" aria-label="gaps: idle this long"> keep <input type="text" ' +
-        'class="bgk" spellcheck="false" aria-label="gaps: kept around a change"><button type="button" data-act="gapvx" aria-label="the gaps off the ' +
-        'waves">✕</button></span>');
+    const seg = (...parts) => `<span class="seg">${parts.join('')}</span>`, more = (...parts) => `<span class="more">${parts.join('')}</span>`;
+    // a group: its label, its controls; the rarer ones in .more (the short form: behind its ⋯)
+    const grp = (label, ...parts) => { const h = parts.join(''); return `<span class="tg" data-tg="${label}"><span class="tl">${label}</span>${h}${
+      h.includes('class="more"') ? '<button type="button" class="mx" data-act="more" aria-haspopup="true" aria-expanded="false" aria-label="more of ' +
+        `${label}">⋯</button>` : ''}</span>`; };
+    // cursor: a time typed (in the unit chosen, or with its own: 85.12us; c147 a cycle), Enter; the span of the window around it, Enter
+    const units = v.M.timed ? `<select class="cu" aria-label="time unit">${['ps', 'ns', 'µs', 'ms', 's'].map(u => `<option${u === v.unit() ? ' selected' :
+      ''}>${u}</option>`).join('')}</select>` : '<span class="cyc">cyc</span>';
+    const cursor = grp('cursor', seg('<input type="text" class="ct" inputmode="decimal" spellcheck="false" aria-label="cursor time">', units),
+      more(seg('<span class="lbl">span</span><input type="text" class="cs" spellcheck="false" aria-label="view span">')));
+    const view = grp('view', seg(btn('out', '−', ' aria-label="zoom out"'), btn('in', '+', ' aria-label="zoom in"'), btn('fit', 'Fit')),
+      more(seg(btn('zlast', 'Last', ' disabled'), btn('zcur', '⊙', ' aria-label="zoom in on the cursor"'),
+        btn('zrange', '⇔', ' aria-label="zoom to the range" disabled')),
+      seg(btn('t0', '|◀', ' aria-label="the start"'), btn('t1', '▶|', ' aria-label="the end"'))));
+    const edges = grp('edges', seg(btn('prev', '◀', ' aria-label="previous edge"'),
+      `<select class="edge" aria-label="edge kind">${Object.entries(EDGE_KINDS).map(([k, n]) => `<option value="${k}">${n}</option>`).join('')}</select>`,
+      '<input type="text" class="ev" spellcheck="false" hidden placeholder="0x40, \'h40, 64, IDLE" aria-label="value to find" title="The value to find: ' +
+        '0x40, \'h40, 8\'d64, 64, -3, \'b101, or a text (an enum label); Enter / shift+Enter: the next / previous time the selected signal (none: any ' +
+        'shown) becomes it">', btn('next', '▶', ' aria-label="next edge"')));
+    const marks = grp('marks', btn('mark', '+ Bookmark'), btn('umark', '+ Marker'),
+      seg(btn('mprev', '◀', ' aria-label="previous mark" disabled'), btn('mnext', '▶', ' aria-label="next mark" disabled')),
+      more(btn('mlist', 'Marks…', ' disabled')));
+    // find: the field with its count at its right end, ‹ › through the matches; its options, the view of the found, Select, Copy, Paint ▾
+    const fcol = `<input type="color" class="fcol" value="${/^#[0-9a-f]{6}$/i.test(paint) ? paint : '#d6336c'}" aria-label="paint colour">`;
+    const find = grp('find', `<span class="qw"><input type="search" class="q" spellcheck="false" autocomplete="off" placeholder="find  /" ` +
+      'aria-label="fuzzy find signals"><span class="cnt"></span></span>', seg(btn('fprev', '‹', ' aria-label="previous match"'),
+        btn('fnext', '›', ' aria-label="next match"')),
+      more(seg(...FIND_OPTS.map(([act, k, label]) => `<button type="button" class="fo" data-act="${act}" aria-pressed="${!!S[k]}">${esc(label)}</button>`)),
+        seg(`<button type="button" data-act="fhl" aria-pressed="${!!S.findHighlight}">Highlight</button>`,
+          `<button type="button" data-act="fopen" aria-pressed="${!!S.findOpen}">Open</button>`,
+          `<button type="button" data-act="fmask" aria-pressed="${!!S.findMask}">Mask</button>`),
+        btn('fselect', 'Select'), btn('fcopy', 'Copy'), popHead('paint', 'Paint ▾', 'ppaint'),
+        popBox('paint', `<label class="mi">Colour ${fcol}</label>` + mItem('fpaint', 'Paint') + mItem('funpaint', 'Unpaint', '', ' hidden'))),
+      '<button type="button" class="fx" data-act="fdock" aria-label="close">✕</button>').replace('class="tg"', 'class="tg find"');
+    const list = grp('list', S.sortButton ? btn('sort', '') : '', groups ? more(seg(btn('expand', '⊞', ' aria-label="open every module"'),
+      btn('collapse', '⊟', ' aria-label="fold every module"'))) + btn('mods', 'Modules') + (v.fsms().length ? btn('fsms', 'FSMs') : '') : '');
+    const signal = grp('signal', `<select class="rx" aria-label="radix of the selected signals" disabled><option value="">radix</option><option ` +
+      `value="-">the page's</option>${RADIX.map(x => `<option>${x}</option>`).join('')}</select>`,
+      more(btn('cycles', 'Cycles', ' aria-pressed="false"'), btn('gaps', 'Gaps', ' aria-pressed="false"'),
+        '<span class="gapv" hidden>idle <input type="text" class="bgi" spellcheck="false" aria-label="gaps: idle this long"> keep <input type="text" ' +
+          'class="bgk" spellcheck="false" aria-label="gaps: kept around a change"><button type="button" data-act="gapvx" aria-label="the gaps off the ' +
+          'waves">✕</button></span>'));
+    // the files: a dump read in the page (Open…, or a file dropped on the viewer; ⟳ reads it again from the disk keeping the view), a
+    // second one compared, the sources; the view saved, loaded, read again; the page saved; assertions loaded (sva.js)
+    const file = grp('file', popHead('file', 'File ▾', 'pfile'), popBox('file',
+      mItem('dopen', 'Open dump…', 'g O') + mItem('dcmp', 'Compare with…', 'g C') + mItem('dsrc', 'Sources…') +
+        mItem('druns', 'Runs…', 'g u', v.runsHost() ? '' : ' hidden') + '<hr>' + mItem('ssave', 'Save view…', 'g s') + mItem('sload', 'Load view…', 'g L') +
+        mItem('sreload', 'Reload view', 'r', ' hidden') + mItem('sforget', 'Forget the kept view…') + mItem('spage', 'Save page', 'g p', ' class="spage"') +
+        mItem('svload', 'Load assertions…', '', ' hidden')),
+      btn('dreload', '⟳', ' aria-label="read the dump again" hidden'),
+      more(seg(btn('copyimg', 'Copy image'), popHead('img', '▾', 'pimg', 'more of the picture')),
+        popBox('img', mItem('png', 'Save image as PNG') + mItem('svg', 'Save image as SVG') + '<hr>' + mItem('wdjson', 'Save as WaveDrom') +
+          mItem('wdcopy', 'Copy WaveDrom'))),
+      '<button type="button" class="live" data-act="live" hidden></button><input type="file" class="sfile" accept=".json,application/json" hidden>' +
+        '<input type="file" class="dfile" accept=".vcd,.fst,.json" hidden><input type="file" class="cfile" accept=".vcd" hidden>' +
+        '<input type="file" class="srcfile" accept=".sv,.svh,.v,.vh,.json" multiple hidden>');
+    // a second dump compared (diff.js cmpShow: the group only while there is one, or one is being read)
+    const compare = grp('compare', `<span class="seg cmpv" hidden>${btn('dcmpv', 'A', ' data-run="a" aria-pressed="true"')}${
+      btn('dcmpv', 'B', ' data-run="b" aria-pressed="false"')}${btn('dcmpv', 'A+B', ' data-run="overlay" aria-pressed="false"')}</span>`,
+      seg(btn('dprev', '◀', ' aria-label="previous difference"'), btn('dnext', '▶', ' aria-label="next difference"')),
+      btn('dcmpx', '', ' class="cmpx" hidden')).replace('class="tg"', 'class="tg" hidden');
+    // ⚙: the bar and the look (the right button on the bar opens it too); Tools in the bar: its groups, ticked when the box opens
+    const gear = popBox('gear', '<div class="mh">The bar and the look</div>' +
+      (themeButtonOn(S) ? menuSub('subth', 'Theme', THEME_CYCLE.map(t => mTick('theme', t, ` data-v="${t}"`)).join('')) : '') +
+      mTick('scroll', 'Scroll in the window') +
+      `<label class="mi">Edge style <select class="ws" aria-label="edge style">${Object.entries(STYLE_NAMES).map(([k, n]) =>
+        `<option value="${k}"${k === S.style ? ' selected' : ''}>${n}</option>`).join('')}</select></label>` +
+      (S.sortButton ? `<label class="mi">Sort prefixes <input type="text" class="pfx" spellcheck="false" value="${esc(v.sortIgnore.join(','))}" ` +
+        'placeholder="i_,o_" aria-label="prefixes ignored when sorting"></label>' : '') +
+      mTick('snap', 'Snap to edges') + mTick('strip', 'Cursor over the axis') + '<hr>' +
+      menuSub('subtg', 'Tools in the bar', mItem('tgall', 'Show all') + mItem('tgnone', 'Hide all')) +
+      menuSub('subcp', 'Short form', [['auto', 'auto: under 900 px'], ['on', 'always'], ['off', 'never']].map(([k, n]) =>
+        mTick('compact', n, ` data-v="${k}"`)).join('')) + '<hr>' + mItem('arrange', 'Arrange the bar…') + mItem('barreset', 'Reset the bar'),
+      'wv-tools wv-gear');
     const hint = 'Wheel: scroll · ctrl+wheel: zoom · shift+wheel / drag: pan · shift or middle drag: zoom to a range · ctrl+drag: measure · ' +
       'alt+drag: a box of time and signals · click: cursor (on a near edge; alt: not) + select a signal · keys on the waves (as in Questa): ' +
       'i o zoom in / out, f full, l last, c in on the cursor · ← → pan, Home End · shift+← → cursor · ↑ ↓ (j k) select, gg G first / last · ' +
@@ -352,17 +406,24 @@ class Bar {
       `Esc reset${groups ? ' · click a module to fold it' : ''} · shift+click a name: select every signal to it · ` +
       '○ or ctrl+click a name: highlight, ctrl+shift+click: every row to it';
     const [ver, verTip] = buildText();
+    // the head: the title, the filters on the rows (chips: each ✕ clears its own; folded into one when the readout would be cut short),
+    // the toast and the readout, the version, undo / redo, ⚙, the fold, ?
+    const chips = '<span class="chips">' + btn('hl', '', ' hidden') + btn('unhide', '', ' hidden') + btn('onlyp', '', ' hidden') +
+      btn('onlyx', '✕', ' aria-label="clear Only" hidden') + btn('fsmx', '', ' hidden') + '</span>';
+    // (the folded chips' button in the readout's box: on a narrow head it floats on the readout's first line, no row of its own)
+    const chipn = '<button type="button" class="chipn" aria-haspopup="true" aria-expanded="false" hidden></button>';
     return `<div class="bar"><div class="head"><span
-      class="eyebrow">${esc(v.opts.title || v.M.title || 'Waveform').replace(/µ/g, '<span class="mu">µ</span>')}</span><span class="rd"><span
+      class="eyebrow">${esc(v.opts.title || v.M.title || 'Waveform').replace(/µ/g, '<span class="mu">µ</span>')}</span>${chips}<span class="rd">${chipn}<span
         class="toast" role="status" aria-live="polite"></span><span class="cur"></span></span>${
-        S.version ? `<span class="ver" title="${esc(verTip)}">${esc(ver)}</span>` : ''}${
-        themeButtonOn(S) ? '<button type="button" data-act="theme" class="lay" aria-label="theme">◐</button>' : ''}<button type="button"
-        data-act="undo" class="lay undo" disabled aria-label="undo">↶</button><button
-        type="button" data-act="redo" class="lay undo" disabled aria-label="redo">↷</button><button type="button" class="lay" data-act="scroll"></button><button
-        type="button" class="lay" data-act="tools" aria-label="fold the tools"></button><button type="button" class="hb" data-act="help"
-        aria-label="keys and mouse">?</button></div>
-      <div class="tools">${toolLine('time', grp('cursor', cursor) + grp('view', zoom) + edges + (jumps ? grp('go to', jumps) : ''))}${toolLine('find', find)}${
-        toolLine('rows', list + grp('style', wstyle) + state + dump)}</div></div>
+        S.version ? `<span class="ver" title="${esc(verTip)}">${esc(ver)}</span>` : ''}<span class="hbs"><span class="seg ur">${
+        btn('undo', '↶', ' class="undo" disabled ' +
+        'aria-label="undo"')}${btn('redo', '↷', ' class="undo" disabled aria-label="redo"')}</span>${popHead('gear', '⚙ ▾', 'pgear', 'the bar and the look')}${
+        btn('tools', '', ' class="lay" aria-label="fold the tools"')}${btn('help', '?', ' class="hb" aria-label="keys and mouse"')}</span></div>
+      <div class="tools">${toolLine('time', cursor + view + edges + marks + (jumps ? grp('go to', jumps) : ''))}${toolLine('find', find)}${
+        toolLine('rows', list + signal + file + compare)}</div>${gear}<div class="axs" role="toolbar" aria-label="the cursor over the time axis" hidden><div
+        class="axw"><div class="axb"><span class="axh">${btn('axlock', LOCK_SVG(false) + LOCK_SVG(true), ' class="axl" aria-pressed="false" ' +
+        'aria-label="unlock the strip: ⠿ moves it"')}<button type="button" class="axg" data-act="axgrip" aria-label="move the strip: drag, or ← → Home End"
+        hidden>⠿</button></span></div></div></div></div>
       <div class="body"><div class="names"></div><div class="wcol"><canvas tabindex="0" role="application" aria-roledescription="waveform"
         aria-label="waveform: + − zoom, ← → pan, shift+← → move the cursor, ↑ ↓ select a signal, [e ]e or Tab edges"></canvas></div></div>
       <div class="notes" hidden></div>
@@ -370,17 +431,21 @@ class Bar {
       ${S.hint ? `<div class="hint">${esc(v.hintBase = hint)}</div>` : ''}`;
   }
   constructor(v) {
-    this.v = v; const r = v.root;
+    this.v = v; const r = v.root, bar = r.querySelector('.bar');
     v.canvas = r.querySelector('canvas'); v.wcol = r.querySelector('.wcol'); v.bodyEl = r.querySelector('.body'); v.namesEl = r.querySelector('.names');
       v.curEl = r.querySelector('.cur');
     v.sortBtn = r.querySelector('button[data-act=sort]'); v.hlBtn = r.querySelector('button[data-act=hl]');
       v.unhideBtn = r.querySelector('button[data-act=unhide]');
     v.notesEl = r.querySelector('.notes'); v.edgeSel = r.querySelector('select.edge');
-    v.ctEl = r.querySelector('input.ct'); v.csEl = r.querySelector('input.cs');
-    v.cuEl = r.querySelector('select.cu'); v.suEl = r.querySelector('select.su');
-    for (const [inp, fn] of [[v.ctEl, x => v.setCursor(x)], [v.csEl, x => v.showCursor(x)]])
-      inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); fn(inp.value); } });
-    for (const sel of [v.cuEl, v.suEl]) if (sel) sel.addEventListener('change', () => { v.syncCursorFields(true); });
+    v.ctEl = r.querySelector('input.ct'); v.csEl = r.querySelector('input.cs'); v.cuEl = r.querySelector('select.cu');
+    // Enter: the cursor there, the window of that span; Esc: the field as it was, the keys on the waves again (T-07)
+    for (const [inp, fn] of [[v.ctEl, x => v.setCursor(x)], [v.csEl, x => v.showCursor(x)]]) {
+      inp.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); fn(inp.value); }
+        else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); v.syncCursorFields(true); inp.classList.remove('bad'); v.refocus(); }
+      });
+    }
+    if (v.cuEl) v.cuEl.addEventListener('change', () => { v.syncCursorFields(true); });
     v.qEl = r.querySelector('input.q'); v.cntEl = r.querySelector('.find .cnt'); v.fcol = r.querySelector('input.fcol');
     v.unpaintBtn = r.querySelector('button[data-act=funpaint]'); v.unpaintBtn.hidden = !v.painted.size;
     // the colour picked (or typed in its hex field) goes on at once to what Paint would take, as the right button's colour
@@ -392,9 +457,13 @@ class Bar {
       if (e.key === 'Enter') { e.preventDefault(); v.findStep(e.shiftKey ? -1 : 1); }
       const opt = e.altKey && !keyLeft(v.S, e) && FIND_OPTS.find(o => o[4] === e.code);   // alt+C W R, as in VS Code (by the key's place: any layout)
       if (opt) { e.preventDefault(); v.setFindOpt(opt[1], !v[opt[1]]); }
-
     });
+    // / on a folded bar opened the tools for the find (not kept, T-06): the find left empty folds them again
+    r.querySelector('.tg.find').addEventListener('focusout', e => { if (v.toolsPeek && !v.qEl.value && !e.currentTarget.contains(e.relatedTarget)) {
+      v.toolsPeek = false; v.layoutShow(); } });
     v.evEl = r.querySelector('input.ev');
+    const axg = r.querySelector('.axs .axg');   // the strip over the time axis, unlocked: ⠿ dragged, or ← → Home End on it
+    axg.addEventListener('pointerdown', e => v.stripDown(e)); axg.addEventListener('keydown', e => v.stripKey(e));
     v.edgeSel.addEventListener('change', () => v.setEdgeKind(v.edgeSel.value, true));
     const gv = r.querySelector('.gapv'), bgi = gv.querySelector('.bgi'), bgk = gv.querySelector('.bgk');   // idle, keep: the waves follow as they are typed
     gv.addEventListener('input', () => v.gapType(() => v.gapFields(bgi, bgk, true)));
@@ -402,57 +471,20 @@ class Bar {
     v.syncGapBar();
     v.evEl.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); v.edge(e.shiftKey ? -1 : 1); } });
     v.wsEl = r.querySelector('select.ws'); v.wsEl.addEventListener('change', () => v.setStyle(v.wsEl.value));
-    r.querySelector('.bar').addEventListener('contextmenu', e => {   // the right button on the bar: which tool groups it shows (a field: the browser's)
-      if (!v.S.contextMenu || e.target.closest('input, select, textarea')) return; e.preventDefault(); v.toolsMenu(e.clientX, e.clientY); });
-    r.querySelector('.bar').addEventListener('click', e => {
-      const b = e.target.closest('button'); if (!b) return;
-      if (b.dataset.act === 'in') v.zoom(0.5, 0.5);
-      else if (b.dataset.act === 'out') v.zoom(2, 0.5);
-      else if (b.dataset.act === 'fit') v.fit();
-      else if (b.dataset.act === 'sort') v.setSort(SORTS[(SORTS.indexOf(v.sort) + 1) % SORTS.length]);
-      else if (b.dataset.act === 'hl') v.highlight(null);
-      else if (b.dataset.act === 'unhide') v.unhide();
-      else if (b.dataset.act === 'mods') v.modules();
-      else if (b.dataset.act === 'fsms') v.fsmPanel();
-      else if (b.dataset.act === 'theme') v.themeNext();
-      else if (b.dataset.act === 'fsmx') { v.setFsm(null); v.toast('the view without the FSM layer'); }
-      else if (b.dataset.act === 'onlyp') v.setOnly({ on: !v.only.on });
-      else if (b.dataset.act === 'onlyx') { v.setOnly(null); v.toast('Only: every module again'); }
-      else if (b.dataset.act === 'expand') v.expandAll();
-      else if (b.dataset.act === 'collapse') v.collapseAll();
-      else if (b.dataset.act === 'prev' || b.dataset.act === 'next') v.edge(b.dataset.act === 'next' ? 1 : -1);
-      else if (b.dataset.act === 'mark') v.mark();
-      else if (FIND_VIEW[b.dataset.act]) {
-        const k = FIND_VIEW[b.dataset.act][0]; v[k] = !v[k]; b.setAttribute('aria-pressed', v[k]); v.find(v.q || '', k === 'findOpen');
-      }
-      else if (FIND_OPTS.some(o => o[0] === b.dataset.act)) { const k = FIND_OPTS.find(o => o[0] === b.dataset.act)[1]; v.setFindOpt(k, !v[k]); }
-      else if (b.dataset.act === 'fpaint') v.paint(v.fcol.value);
-      else if (b.dataset.act === 'funpaint') v.unpaint();
-      else if (b.dataset.act === 'cset') v.setCursor(v.ctEl.value);
-      else if (b.dataset.act === 'cshow') v.showCursor(v.csEl.value);
-      else if (b.dataset.act === 'fnext' || b.dataset.act === 'fprev') v.findStep(b.dataset.act === 'fnext' ? 1 : -1);
-      else if (b.dataset.act === 'fdock') { v.floatFind(false); v.refocus(); }
-      else if (b.dataset.act === 'fselect') v.selectFound(e.ctrlKey || e.metaKey);
-      else if (b.dataset.act === 'fcopy') v.copyRows(v.allRows().filter(r => v.found.has(r)));
-      else if (b.dataset.act === 'ssave') v.saveState();
-      else if (b.dataset.act === 'spage') { try { const n = savePage(); v.toast('saved ' + n); v.log('ok', 'saved the page: ' + n); }
-        catch (e) { v.toast(e.message); v.logError(e, 'cannot save the page: ' + e.message); } }
-      else if (b.dataset.act === 'undo' || b.dataset.act === 'redo') v.undo(b.dataset.act === 'undo' ? -1 : 1);
-      else if (b.dataset.act === 'help') v.help();
-      else if (b.dataset.act === 'scroll') v.setScroll(v.S.maxHeight != null && v.S.maxHeight !== '' ? 'page' : 'window');
-      else if (b.dataset.act === 'tools') v.setTools(!v.S.toolsFolded);
-      else if (b.dataset.act === 'sload') v.pickState();
-      else if (b.dataset.act === 'sreload') v.reloadState();
-      else if (b.dataset.act === 'dopen') v.openDump();
-      else if (b.dataset.act === 'gapvx') v.setGaps({ gapView: false });
-      else if (b.dataset.act === 'dcmp') v.cfile.click();
-      else if (b.dataset.act === 'druns') v.runsPanel();
-      else if (b.dataset.act === 'dcmpx') { if (v.cmpReading) v.compareStop(); else v.compare(null); }
-      else if (b.dataset.act === 'dcmpv') v.compareView(b.dataset.run);
-      else if (b.dataset.act === 'dsrc') v.srcfile.click();
-      else if (b.dataset.act === 'dreload') v.reloadDump();
-      else if (b.dataset.act === 'live') liveClick();
+    const rx = r.querySelector('select.rx');   // the radix of the selected signals (a run of them: every one)
+    rx.addEventListener('change', () => { const rows = v.selRun.size > 1 ? [...v.selRun] : v.sel ? [v.sel] : [], to = rx.value === '-' ? null : rx.value;
+      if (rx.value) { rows.forEach(x => v.setRadix(x, to, true)); v.saveRows(); v.renderNames(); v.draw(); } v.barSync(true); });
+    bar.addEventListener('contextmenu', e => {   // the right button on the bar: the ⚙ menu there (a field: the browser's)
+      if (!v.S.contextMenu || e.target.closest('input, select, textarea')) return; e.preventDefault();
+      if (!e.target.closest('.bpop')) v.toolsMenu(e.clientX, e.clientY); });
+    bar.addEventListener('click', e => {
+      const b = e.target.closest('button'); if (!b || b.disabled) return;
+      if (b.dataset.pop) { v.popToggle(b); return; }
+      if (b.classList.contains('chipn')) { v.popToggle(b, r.querySelector('.bar .chips')); return; }
+      const box = b.closest('.bpop'), keep = b.dataset.act === 'tg' || b.dataset.act === 'tgall' || b.dataset.act === 'tgnone';
+      if (b.dataset.act) this.act(b.dataset.act, b, e);
       else if (b.dataset.jump !== undefined) { const j = v.jumps[b.dataset.jump]; v.goto(j.t, j.span); }
+      if (box && !keep && !b.closest('.msub > button') && v.root.contains(b)) v.popClose(box);
     });
     v.dfile = r.querySelector('input.dfile');
     v.dfile.addEventListener('change', () => { const f = v.dfile.files[0]; v.dfile.value = ''; if (f) v.openDump(f); });
@@ -478,8 +510,95 @@ class Bar {
     v.stateBtn = r.querySelector('button[data-act=sreload]'); v.stateShow();
     if (!r.wlState && G.showOpenFilePicker) stateDb('readonly', s => s.get('last')).then(h => { if (h && !r.wlState) { r.wlState = h;
       if (r.waveView) r.waveView.stateShow(); } }).catch(() => { /* no database here */ });
+    // the sort prefixes (in ⚙): live as they are typed; Esc: as they were when the field was entered (T-07)
     const pfx = r.querySelector('input.pfx');
-    if (pfx) pfx.addEventListener('input', () => { v.fitPfx(); v.setSort(v.sort, pfx.value); });
+    if (pfx) { let was = pfx.value;
+      pfx.addEventListener('focus', () => { was = pfx.value; });
+      pfx.addEventListener('input', () => { v.fitPfx(); v.setSort(v.sort, pfx.value); });
+      pfx.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && pfx.value !== was) { pfx.value = was; v.fitPfx(); v.setSort(v.sort, was); }
+        // ↑ ↓ in ⚙: on to the item before / after (the field has no use for them; the menu's keys leave a field its own)
+        const box = pfx.closest('.bpop'); if (!box || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return;
+        const its = [...box.querySelectorAll(':scope > button, :scope > .msub > button, :scope > label.mi input, :scope > label.mi select')]
+          .filter(x => !x.hidden && x.getClientRects().length), i = its.indexOf(pfx);
+        const to = its[(i + (e.key === 'ArrowDown' ? 1 : -1) + its.length) % its.length];
+        if (to) { e.preventDefault(); e.stopPropagation(); to.focus({ preventScroll: true }); } }); }
     v.fitPfx();
+  }
+  // what a control of the bar does, by its data-act (a button in the bar or in one of its menus; a g key through it): el the
+  // control, e the click
+  act(a, b, e = {}) {
+    const v = this.v;
+    if (a === 'in' || a === 'out') { v.markView(); v.zoom(a === 'in' ? 0.5 : 2, 0.5); }
+    else if (a === 'fit') { v.markView(); v.fit(); }
+    else if (a === 'zlast') v.zoomLast();
+    else if (a === 'zcur') { v.markView(); v.showCursor(Math.max(v.span / 2, v.minSpan)); }
+    else if (a === 'zrange') { const z = v.range || (v.cursor2 != null ? [Math.min(v.cursor, v.cursor2), Math.max(v.cursor, v.cursor2)] : null);
+      if (z) v.zoomTo(...z); }
+    else if (a === 't0' || a === 't1') { v.markView(); v.center(a === 't0' ? v.M.t0 : v.M.t1, a === 't0' ? 0 : 1); v.draw(); }
+    else if (a === 'sort') v.setSort(SORTS[(SORTS.indexOf(v.sort) + 1) % SORTS.length]);
+    else if (a === 'hl') v.highlight(null);
+    else if (a === 'unhide') v.unhide();
+    else if (a === 'mods') v.modules();
+    else if (a === 'fsms') v.fsmPanel();
+    else if (a === 'theme') v.themeNext(b && b.dataset.v);
+    else if (a === 'fsmx') { v.setFsm(null); v.toast('the view without the FSM layer'); }
+    else if (a === 'onlyp') v.setOnly({ on: !v.only.on });
+    else if (a === 'onlyx') { v.setOnly(null); v.toast('Only: every module again'); }
+    else if (a === 'expand') v.expandAll();
+    else if (a === 'collapse') v.collapseAll();
+    else if (a === 'prev' || a === 'next') v.edge(a === 'next' ? 1 : -1);
+    else if (a === 'mark') v.mark();
+    else if (a === 'umark') v.markerKey();
+    else if (a === 'mprev' || a === 'mnext') v.stepMarks(a === 'mnext' ? 1 : -1);
+    else if (a === 'mlist') v.marksMenu();
+    else if (FIND_VIEW[a]) { const k = FIND_VIEW[a][0]; v[k] = !v[k]; b.setAttribute('aria-pressed', v[k]); v.find(v.q || '', k === 'findOpen'); }
+    else if (FIND_OPTS.some(o => o[0] === a)) { const k = FIND_OPTS.find(o => o[0] === a)[1]; v.setFindOpt(k, !v[k]); }
+    else if (a === 'fpaint') v.paint(v.fcol.value);
+    else if (a === 'funpaint') v.unpaint();
+    else if (a === 'fnext' || a === 'fprev') v.findStep(a === 'fnext' ? 1 : -1);
+    else if (a === 'fdock') { v.floatFind(false); v.refocus(); }
+    else if (a === 'fselect') v.selectFound(e.ctrlKey || e.metaKey);
+    else if (a === 'fcopy') v.copyRows(v.allRows().filter(r => v.found.has(r)));
+    else if (a === 'ssave') v.saveState();
+    else if (a === 'spage') { try { const n = savePage(); v.toast('saved ' + n); v.log('ok', 'saved the page: ' + n); }
+      catch (err) { v.toast(err.message); v.logError(err, 'cannot save the page: ' + err.message); } }
+    else if (a === 'undo' || a === 'redo') { v.undo(a === 'undo' ? -1 : 1); v.refocus(); }   // the button may go disabled: the keys stay on the waves (T-08)
+    else if (a === 'help') v.help();
+    else if (a === 'scroll') v.setScroll(v.S.maxHeight != null && v.S.maxHeight !== '' ? 'page' : 'window');
+    else if (a === 'snap') v.setSnap(!(v.S.cursorSnap > 0));
+    else if (a === 'strip') v.setCursorStrip(!v.S.cursorStrip);
+    else if (a === 'axlock') v.stripLock(!!v.stripOpen);
+    else if (a === 'tools') v.setTools(!v.S.toolsFolded);
+    else if (a === 'tg' || a === 'tgall' || a === 'tgnone') { const H = new Set(toolNames(v.S.toolsHidden));
+      if (a === 'tgall') H.clear(); else if (a === 'tgnone') v.toolGroups().forEach(n => H.add(n)); else if (!H.delete(b.dataset.tg)) H.add(b.dataset.tg);
+      if (v.S.toolsFolded) v.setTools(false);   // on a folded bar a tick would change nothing seen (T-12)
+      v.setToolsHidden([...H]); }
+    else if (a === 'compact') v.setToolsCompact({ on: true, off: false }[b.dataset.v] ?? 'auto');
+    else if (a === 'arrange') v.arrange(true, e.detail === 0);   // by the keys: the dialog too
+    else if (a === 'barreset') v.barReset();
+    else if (a === 'sload') v.pickState();
+    else if (a === 'sreload') v.reloadState();
+    else if (a === 'sforget') { const h = v.root.querySelector('.bar .pfile').getBoundingClientRect();
+      v.askYes(h.left, h.bottom + 4, 'Forget the kept view?', 'What this browser keeps of this view goes: the rows hidden and grouped, the paint, the ' +
+        'bookmarks and markers, the look, the assertions bound; and the state loaded last (Reload). The waves come back as they came. ' +
+        'Undo cannot bring it back.', () => v.forgetView(), 'Forget'); }
+    else if (a === 'dopen') v.openDump();
+    else if (a === 'gapvx') v.setGaps({ gapView: false });
+    else if (a === 'gaps') v.seq('gv');
+    else if (a === 'cycles') { const co = v.cycOpt(); if (!co.cycles && !cycClock(v.M.rows, co.cycleClock)) v.toast('no clock found: the right button on ' +
+      'a 1-bit signal, Cycles ▸'); else v.setCycles({ cycles: !co.cycles }); }
+    else if (['copyimg', 'png', 'svg', 'wdjson', 'wdcopy'].includes(a)) { const ex = v.exportRows(); v.picAct(a, v.range, ex ? { rows: ex } : {}); }
+    else if (a === 'dcmp') v.cfile.click();
+    else if (a === 'druns') v.runsPanel();
+    else if (a === 'dcmpx') { if (v.cmpReading) v.compareStop(); else v.compare(null); }
+    else if (a === 'dcmpv') v.compareView(b.dataset.run);
+    else if (a === 'dprev' || a === 'dnext') v.diffStep(a === 'dnext' ? 1 : -1);
+    else if (a === 'dsrc') v.srcfile.click();
+    else if (a === 'svload') { const s = v.root.querySelector('button[data-sv=load]'); if (s) s.click(); }
+    else if (a === 'dreload') v.reloadDump();
+    else if (a === 'live') liveClick();
+    else if (a === 'more') v.popToggle(b, b.closest('.tg').querySelector(':scope > .more'));
+    v.barSync();
   }
 }

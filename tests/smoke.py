@@ -155,6 +155,31 @@ def settle(page):
     page.evaluate('new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))')
 
 
+def bact(page, act, extra='', root='.wv'):
+    """Click the bar's control data-act=act (of the first viewer of root); when it is not in sight, open what holds it first: ⚙, File ▾,
+    Paint ▾, Copy image ▾ (their header's data-own names it) or a group's ⋯ in the short form, the outer one first."""
+    bopen(page, act, root)
+    (page.locator(root).first if isinstance(root, str) else root).locator(f'[data-act={act}]{extra}').first.click()
+
+
+def bopen(page, name, root='.wv'):
+    """Open the bar's menus (and the ⋯ of a group) that hold the control named name (a data-act, or a field's class: pfx, ws, fcol) of the
+    first viewer of root (a selector, or a locator of the viewer), the outer one first; nothing when it is in sight already."""
+    v = page.locator(root).first if isinstance(root, str) else root
+    it = v.locator(f'[data-act={name}], .bar .{name}').first
+    for _ in range(3):
+        if it.is_visible():
+            return
+        hs = v.locator(f'.bar [data-own~="{name}"]')
+        h = next((hs.nth(i) for i in range(hs.count()) if hs.nth(i).is_visible() and hs.nth(i).get_attribute('aria-expanded') != 'true'), None)
+        if h is None:   # open already: a submenu of it (⚙ Theme ▸, Tools in the bar ▸)
+            sub = it.locator('xpath=ancestor::*[contains(@class,"msub")][1]/button')
+            if sub.count() and sub.is_visible():
+                sub.click()
+            return
+        h.click()
+
+
 def mclick(page, m=None, extra='', text=None):
     """Click the right button's menu item data-m=m (or the button with that text) with the pointer, its submenu opened first
     by the pointer on its header when it is in one (Range ▸, Show as ▸, Here ▸, Export ▸ …)."""
@@ -214,7 +239,7 @@ def sorting(page):
     check(val('i_data') == '0x10' and val('o_ready') == '0', f'values follow their rows after sorting (i_data={val("i_data")}, o_ready={val("o_ready")})')
     btn.click()
     check(names() == ['i_valid', 'rst_n', 'o_ready', 'o_data', 'i_data', 'clk'], f'Sort Z→A {names()}')
-    v.locator('input.pfx').fill('')
+    bopen(page, 'pfx', '#ex-sort-view'); v.locator('input.pfx').fill('')   # (in ⚙)
     btn.click(); btn.click()
     check(names() == ['clk', 'i_data', 'i_valid', 'o_data', 'o_ready', 'rst_n'], f'empty prefix field: plain A→Z {names()}')
     canvas.focus(); page.keyboard.press('s')
@@ -313,18 +338,20 @@ def cursor(page):
     js = lambda e: page.evaluate(f"(() => {{ const v = document.querySelector('.bench > div.wv[data-wave=\"DEMO_WAVES.exact\"]').waveView; return {e}; }})()")
     ct, cs = ex.locator('input.ct'), ex.locator('input.cs')
     ex.locator('select.cu').select_option('ns'); ct.fill('250'); ct.press('Enter')
-    a = js('v.cursor'); ct.fill('1.2us'); ex.locator('button[data-act=cset]').click(); b = js('v.cursor')
+    a = js('v.cursor'); ct.fill('1.2us'); ct.press('Enter'); b = js('v.cursor')
     ct.fill('soon'); ct.press('Enter'); c = js('v.cursor')
     check((a, b, c) == (250000, 1200000, 1200000), f'cursor time field: 250 ns, 1.2us with its own unit, bad input refused ({a}, {b}, {c})')
-    ex.locator('select.su').select_option('ns'); cs.fill('100'); ex.locator('button[data-act=cshow]').click()
-    check(js('[v.span, v.t0]') == [100000, 1150000], f'span 100 ns + Show: the window around the cursor {js("[v.span, v.t0]")}')
+    bopen(page, 'cs', '.bench > div.wv[data-wave="DEMO_WAVES.exact"]'); cs.fill('0.3us'); cs.press('Enter'); w = js('v.span')
+    cs.fill('100'); cs.press('Enter')
+    check(w == 300000 and js('[v.span, v.t0]') == [100000, 1150000], f'span 0.3us (its own unit), then 100 (in the cursor\'s, ns) + Enter: the window around the cursor '
+          f'{w} {js("[v.span, v.t0]")}')
     ex.locator('select.cu').select_option('µs')
-    check(ct.input_value() == '1.2' and cs.input_value() == '100', f'another unit converts the shown cursor ({ct.input_value()} µs)')
+    check(ct.input_value() == '1.2' and cs.input_value() == '0.1', f'another unit converts the shown cursor and span ({ct.input_value()} µs, {cs.input_value()} µs)')
     js('(v.zoom(4, 0.5), 0)'); ex.locator('canvas').evaluate('c => c.focus({ preventScroll: true })'); page.keyboard.press('c')
-    check(abs(js('v.t0 + v.span / 2') - 1200000) < 1 and cs.input_value() == '200', f'key c zooms in on the cursor (Questa): centred, half the span ({cs.input_value()} ns)')
+    check(abs(js('v.t0 + v.span / 2') - 1200000) < 1 and cs.input_value() == '0.2', f'key c zooms in on the cursor (Questa): centred, half the span ({cs.input_value()} µs)')
     bm = page.locator('#ex-bm')
     bm.locator('input.ct').fill('5'); bm.locator('input.ct').press('Enter')
-    check(bm.locator('.cyc').count() == 2 and page.evaluate("document.getElementById('ex-bm').waveView.cursor") == 5, 'cycle diagrams: the fields are in cycles')
+    check(bm.locator('.cyc').count() == 1 and page.evaluate("document.getElementById('ex-bm').waveView.cursor") == 5, 'cycle diagrams: the fields are in cycles (one cyc for both)')
     js('(v.fit(), v.cursor = 0, v.draw(), 0)')
     page.evaluate("(v => { v.cursor = 0; v.draw(); })(document.getElementById('ex-bm').waveView)")   # the next tests start at 0
 
@@ -342,9 +369,9 @@ def bookmarks(page):
           f'AU-WL-002: a bookmark\'s text field has the whole text as its title, a new text too ({t0!r}, {(t1 or "")[:24]!r}…)')
     rows = v.locator('.names .row:not(.lane)')
     n0 = rows.count()
-    v.locator('button[data-act=collapse]').click()
+    bact(page, 'collapse', root=v)
     n1 = rows.count()
-    v.locator('button[data-act=expand]').click()
+    bact(page, 'expand', root=v)
     check(n1 == n0 - 3 and rows.count() == n0, f'Collapse / Expand fold and open every group ({n0} -> {n1} -> {n0})')
     lanes = v.locator('.names .row.lane')
     order = v.locator('.names .row').evaluate_all("els => els.map(e => e.classList.contains('lane') ? '|' : e.querySelector('.n').textContent.trim())")
@@ -559,9 +586,9 @@ def find(page, P):
     q.fill(P['path']); settle(page)
     fp = js("[...v.found.keys()].map(r => r.full)")
     check(fp and all(P['leaf'] in p.rsplit('.', 1)[1] and P['mod'] in p for p in fp), f'"a.b": a below a module path, b in the name {fp[:6]} ({len(fp)})')
-    v.locator('input.fcol').fill('#2f9e44'); v.locator('button[data-act=fpaint]').click()
+    bopen(page, 'fcol'); v.locator('input.fcol').fill('#2f9e44'); v.locator('button[data-act=fpaint]').click()   # (Paint ▾)
     painted = js("[[...v.found.keys()].every(r => v.strokeOf(r) === '#2f9e44'), [...v.found.keys()].some(r => r.stroke === '#2f9e44')]")
-    check(painted == [True, False] and v.locator('button[data-act=funpaint]').is_visible(), f'Paint recolours the found signals in this viewer, the model rows stay as they are {painted}')
+    check(painted == [True, False] and v.locator('button[data-act=funpaint]').get_attribute('hidden') is None, f'Paint recolours the found signals in this viewer, the model rows stay as they are {painted}')
     hp = js("""(() => { const was = v.picks, r = v.M.rows.find(r => r.type === 'sig' && !v.found.has(r) && v.strokeOf(r) !== '#2f9e44'); v.picks = new Map([[r, 0]]);
         v.paint('#1971c2'); const out = [v.strokeOf(r), [...v.found.keys()].every(f => v.strokeOf(f) === '#1971c2')]; v.picks = was; return out; })()""")
     check(hp == ['#1971c2', True], f'Paint recolours the highlighted signals too (ctrl+click, the mark), not only the found ones {hp}')
@@ -629,8 +656,9 @@ def find(page, P):
         const dt = new DataTransfer(); document.querySelector('.wv .names').dispatchEvent(new ClipboardEvent('copy', { clipboardData: dt, bubbles: true, cancelable: true }));
         getSelection().removeAllRanges(); return [dt.getData('text/plain'), rows.map(e => e.querySelector('.n').title)]; })()""")
     check(got[0].split('\n') == got[1], f'selecting names and copying gives clean full paths {got[0].splitlines()}')
-    v.locator('button[data-act=funpaint]').click()
-    check(js("v.painted.size === 0 && v.M.rows.every(r => v.strokeOf(r) === (r.stroke || v.groupStroke.get(r)))") and not v.locator('button[data-act=funpaint]').is_visible(), 'Unpaint gives the signals their own colours back')
+    bact(page, 'funpaint')
+    check(js("v.painted.size === 0 && v.M.rows.every(r => v.strokeOf(r) === (r.stroke || v.groupStroke.get(r)))") and
+          v.locator('button[data-act=funpaint]').get_attribute('hidden') is not None, 'Unpaint (Paint ▾) gives the signals their own colours back')
     # the options, as in grep / VS Code: Full (the whole name), Aa (the case), .* (a regular expression; alt+C W R in the field)
     hit = P['hit']; opt = lambda a: v.locator(f'button[data-act={a}]')
     opt('fword').click(); q.fill(hit.upper()); settle(page); full = js("[...v.found.keys()].map(r => r.name)")
@@ -674,9 +702,9 @@ def hierarchy(page, P):
     check(v.locator('.names .row.hl').count() > 10 and v.locator('.names .row.dim').count() > 10, f'highlighting the instance {P["inst"]} ({covered} signals in it) dims the other rows')
     dev.locator('.mk').click()
     n0 = v.locator('.names .row').count()
-    v.locator('button[data-act=collapse]').click()
+    bact(page, 'collapse', root=v)
     n1 = v.locator('.names .row').count()
-    v.locator('button[data-act=expand]').click()
+    bact(page, 'expand', root=v)
     n2 = v.locator('.names .row').count()
     check(n1 == 1 and n2 > n0, f'Collapse folds every instance, Expand opens all ({n0} -> {n1} -> {n2} rows)')
     same = page.evaluate(f"(() => {{ const M = WaveLens.parse(WAVES.{P['view']}), s = M.rows.filter(r => r.src && r.src.same); return [s.length, s.filter(r => r.tr.length > 2).length]; }})()")
@@ -1231,11 +1259,12 @@ def viewer(page):
         got.append(js('v.cursor') == near[2])
     check(got == [True, False, False], f'a click 5 px from an edge puts the cursor on it; alt+click, or {near[3] + 6} px away, does not {got}')
     # the edge style from the bar: the waves drawn again, kept over a reload, in the saved state
-    ws = v.locator('select.ws')
-    sty = [ws.input_value()]; ws.select_option('questa')
+    ws = v.locator('select.ws')   # (in ⚙)
+    sty = [ws.input_value()]; bopen(page, 'ws', ex); ws.select_option('questa'); page.keyboard.press('Escape')
     sty += [js('v.S.style'), js("JSON.parse(localStorage.getItem(v.lookKey)).style"), js('v.state().config.style')]
     page.reload(); page.wait_for_load_state('networkidle')
-    sty += [ws.input_value(), js('v.S.style')]; ws.select_option('auto'); js('(v.setStyle(null), 0)'); sty.append(js('localStorage.getItem(v.lookKey)'))
+    sty += [ws.input_value(), js('v.S.style')]; bopen(page, 'ws', ex); ws.select_option('auto'); page.keyboard.press('Escape'); js('(v.setStyle(null), 0)')
+    sty.append(js('localStorage.getItem(v.lookKey)'))
     check(sty == ['auto', 'questa', 'questa', 'questa', 'questa', 'questa', None], f'the edge style list: vertical (questa) drawn, kept in this browser and in the state, back to the settings\' {sty}')
     keep = js('[v.bookmarks(), v.arrowList()]'); js('(v.setBookmarks([{n: 1, t: 1234567}]), 0)')
     check(v.locator('.notes input.tm').input_value() == '1.234567 µs', f'a bookmark shows its exact time ({v.locator(".notes input.tm").input_value()})')
@@ -2098,6 +2127,20 @@ def vscode_tab(browser, build):
           f'the types beside the dump: tb.plain by its path, not the sources\' name; gone: the sources again {typed}')
     check(js("localStorage.getItem('wavelens.given')") == 'yes' and js("(localStorage.setItem('wavelens.k', 'v'), localStorage.getItem('wavelens.k'))") == 'v' and
           any(m['key'] == 'wavelens.k' and m['value'] == 'v' for m in sent('store')), 'localStorage: the store given, a write posted')
+    # T-05: the bar of every tab (the groups shown, the fold, the arrangement): the extension's global store, not this dump's; a
+    # change from another tab followed at once
+    js("(v.setToolsHidden(['find']), v.setToolLayout([['find', 'marks']]), 0)"); page.wait_for_timeout(50)
+    gl = [m for m in sent('gstore') if m['key'] == 'look'], [m for m in sent('gstore') if m['key'] == 'bar']
+    own = page.evaluate("Object.keys(window.__STORE).filter(k => k.startsWith('wavelens.look:')).map(k => window.__STORE[k])")
+    page.evaluate("window.postMessage({ type: 'gstore', key: 'look', value: JSON.stringify({ toolsHidden: ['view'] }) }, '*')"); page.wait_for_timeout(100)
+    page.evaluate("window.postMessage({ type: 'gstore', key: 'bar', value: JSON.stringify({ v: 1, layout: [['list', 'marks']], stripAt: 1 }) }, '*')")
+    page.wait_for_timeout(100)
+    got = [js('v.S.toolsHidden'), js('v.S.toolLayout'), js("[...v.root.querySelector('.bar .tln').querySelectorAll(':scope > .tg')].map(g => g.dataset.tg)"
+                                                         ".filter(g => g === 'list' || g === 'marks')"), js('v.S.cursorStripAt')]
+    check(gl[0] and json.loads(gl[0][-1]['value']) == {'toolsHidden': ['find']} and gl[1] and json.loads(gl[1][-1]['value'])['layout'] == [['find', 'marks']]
+          and all('toolsHidden' not in x for x in own) and got == [['view'], [['list', 'marks']], ['list', 'marks'], 1],
+          f'VS Code (T-05): the groups shown, the arrangement, the strip\'s place go to the global store, not the dump\'s; another tab\'s change followed {got}')
+    js("(v.barReset(), 0)")
     js("(v.saveState(), 0)"); until("window.__sent.some(m => m.type === 'save')", timeout=5000); settle(page)
     sv = sent('save')[0]
     check(sv['name'].endswith('.view.json') and 'wavelens' in json.loads(base64.b64decode(sv['b64'])), f'Save state: a save of {sv["name"]} with the state')
@@ -2121,6 +2164,16 @@ def vscode_tab(browser, build):
     page.evaluate('s => { window.__S = s; }', st)
     page.evaluate("window.postMessage({ type: 'laststate', path: '/other/x.view.json' }, '*')"); until("WaveLens.views().find(x => x.root.isConnected).root.wlState.path === '/other/x.view.json'", timeout=5000)
     check(js("v.stateBtn.title") == 'Read /other/x.view.json again (r)', 'another tab loaded a state: this one follows')
+    # Forget the kept view: the dump's store emptied (the viewer's keys and the rest), the extension told; its laststate null: no Reload
+    js("(localStorage.setItem('wavelens.extra', 'x'), v.setState({ wavelens: 'state', bookmarks: [{ n: 1, t: 1000, text: 'mine' }] }), 0)")
+    page.wait_for_timeout(50); had = page.evaluate("Object.keys(window.__STORE).filter(k => k.startsWith('wavelens.')).length")
+    js("(await v.forgetView(), 0)"); until("window.__sent.some(m => m.type === 'forget')", timeout=5000)
+    page.evaluate("window.postMessage({ type: 'laststate', path: null }, '*')"); until("WaveLens.views().find(x => x.root.isConnected).stateBtn.hidden", timeout=5000)
+    left = page.evaluate("Object.keys(window.__STORE).filter(k => !k.startsWith('wavelens.look:'))")
+    check(had > 1 and left == [] and js("v.bookmarks().length") == 0 and js("v.root.wlState") is None,
+          f'VS Code: Forget the kept view empties the dump\'s store ({had} keys before, left {left}), says it to the extension; laststate null: no Reload')
+    page.evaluate("window.postMessage({ type: 'laststate', path: '/other/x.view.json' }, '*')")
+    until("WaveLens.views().find(x => x.root.isConnected).root.wlState?.path === '/other/x.view.json'", timeout=5000)
     n = len(sent('pick'))
     js("(v.openDump(), 0)"); until(f"window.__sent.filter(m => m.type === 'pick').length > {n}", timeout=5000)
     check('.fst' in sent('pick')[-1]['accept'] and not page.evaluate('!!window.showOpenFilePicker'), 'Open…: a pick of a dump (no showOpenFilePicker)')
@@ -2191,7 +2244,7 @@ def vscode_tab(browser, build):
     page.locator('.wv canvas').first.click(); page.keyboard.press('g'); page.keyboard.press('l'); settle(page)
     gl = page.evaluate("!!document.querySelector('.wv .wv-menu')"); page.keyboard.press('Escape')
     ver = page.evaluate("[document.querySelector('.wv .bar .ver').textContent, document.querySelector('.wv .bar .ver').title]")
-    page.locator('.wv button[data-act=theme]').first.click(); settle(page)
+    bact(page, 'theme'); settle(page)   # (⚙ Theme ▸)
     check(gl and ver[0] == WL_VERSION + ' · dev@abc1234*' and 'with changes not committed' in ver[1] and sent('theme'),
           f'VS Code: gl opens the groups list; the build in the bar ({ver}); ◐ asks the extension for its list of themes ({sent("theme")})')
     # the assertions in the page under the CSP: the engine inlined (wasm-unsafe-eval) and in a Web Worker from a Blob
@@ -2270,6 +2323,8 @@ def vscode_tab(browser, build):
     check(fresh_got == [True, False, title], f'a new dump: the last state of the workspace taken at once, Reload there {fresh_got}')
     check(tab({'wavelens.given': 'yes'}) == [False, False, title], 'a dump with a view of its own keeps it: Reload there, nothing loaded')
     check(tab({}, False) == [False, False, title], 'wavelens.openLastState off: Reload there, nothing loaded')
+    other = tab({}, True, "window.__S = Object.assign({}, window.__S, { only: { modules: ['no.such.module'] }, hidden: ['no.a', 'no.b'] });")
+    check(other == [False, False, title], f'a new dump and a last state of other waves (its Only of no module here): not taken, Reload there {other}')
     # bughunt B-66: a page VS Code made again (the tab moved to a window of its own) has the html of when the tab opened (its store
     # empty, the last state of then): the extension's source says it is not the tab's first page, and the last state of now
     again = tab({}, True, "window.__FRESH = false; window.__LAST = '/states/t.view.json';")
@@ -2323,7 +2378,7 @@ def vscode_tab(browser, build):
     check(d['op'] == 'diff' and d['from'] == 5000 and d['to'] == 15000, f'Δ all over your span ({d.get("from")} … {d.get("to")})')
     check(d.get('case') == 'tc1', f'your span tc1 a case of a run: Δ all compares each run\'s case tc1 ({d.get("case")})')
     check(js("[...v.root.querySelectorAll('.wv-runs .rd')].map(x => x.classList.contains('bad')).join()") == 'false,true', 'each run\'s numbers on its row')
-    page.click('.bar [data-act=druns]'); page.wait_for_timeout(100)
+    bact(page, 'druns'); page.wait_for_timeout(100)
     check(js("!document.querySelector('.wv-runs')"), 'Runs… again closes it')
     page.locator('.wv canvas').first.click(); page.keyboard.press(']'); page.keyboard.press('r')
     until("(v => v.cmp && v.cmp.name === '#1 golden')(WaveLens.views().find(x => x.root.isConnected))")
@@ -2333,7 +2388,7 @@ def vscode_tab(browser, build):
     js("v.runCompare(2, true)")
     c = sent('runs')[-1]
     check(c['run'] == 2 and 'case' not in c, 'a run without that case: over the window as it is')
-    page.click('.bar [data-act=druns]')
+    bact(page, 'druns')
     until("document.querySelectorAll('.wv-runs .rn').length === 3")
     page.click('.wv-runs [data-a=keep]')
     page.fill('.wv-runs .rfn', 'after fix'); page.fill('.wv-runs .rft', 'fix, b-12'); page.fill('.wv-runs .rfc', 'the counter')
@@ -2392,7 +2447,7 @@ def vscode_tab(browser, build):
     check(a == 'runs: no directory .wavelens-runs' and c['run'] == 2, f'the list refused by the host: said ({a}); ⟳: the run compared again ({c})')
     rl.focus(); page.keyboard.press('Escape')
     gone = js("!document.querySelector('.wv-runs') && !v.runsP")
-    page.click('.bar [data-act=druns]')
+    bact(page, 'druns')
     until("document.querySelectorAll('.wv-runs .rn').length === 4")
     check(gone, 'Esc in the list closes the panel')
     # review of the runs (2026-11-05): the list's keys compare once they stop (B-19)
@@ -2448,7 +2503,7 @@ def vscode_tab(browser, build):
     # the run pick (review 2026-11-06): A and B on the list. B is the compare's: dropped with it (B-01), kept in a saved state
     # (B-02), the row ]r lands on is the one lit (B-03); w makes a run A (its waves here, the window and rows kept, B compared
     # with the new A), x no B (]w then walks the runs, nothing compared); the rows a run lacks come back on the next (snapshot)
-    page.click('.bar [data-act=druns]')
+    bact(page, 'druns')
     until("document.querySelector('.wv-runs .rn .rB.on')")
     lit = js("[...v.root.querySelectorAll('.wv-runs .rn')].filter(e => e.querySelector('.rB.on')).map(e => +e.dataset.i)")
     check(lit == [js("v.runsP.rowOf(9)")], f'B lit on the run compared ({lit})')
@@ -3567,9 +3622,9 @@ def dump(browser, build):
           'tb.u_gone' in ins[2][1] and ins[3] == ins[1] and ins[4], f'Type…: a path through the map, a plain vector the types know; the run: another day, '
           f'an instance not in the dump {ins}')
     # the bar of viewer.html: the version, ◐ (no theme button of the page's own), the theme kept in this browser
-    th = page.evaluate("""() => { const b = document.querySelector('.wv button[data-act=theme]'); b.click(); b.click();
+    th = page.evaluate("""() => { const t = n => document.querySelector(`.wv button[data-act=theme][data-v=${n}]`); t('light').click(); t('white').click();
         return [document.querySelector('.wv .bar .ver').textContent, document.documentElement.dataset.theme, localStorage.getItem('wavelens-theme')]; }""")
-    check(th == [WL_VERSION, 'white', 'white'], f'viewer.html: the version in the bar; ◐ auto -> light -> white, kept in this browser {th}')
+    check(th == [WL_VERSION, 'white', 'white'], f'viewer.html: the version in the bar; ⚙ Theme ▸ light, then white, kept in this browser {th}')
     page.evaluate("localStorage.removeItem('wavelens-theme'); WaveLens.setTheme('auto')")
     check(not errs, 'no page errors (dump)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
     page.close()
@@ -3683,7 +3738,7 @@ def state(browser, build):
         await v.svaExprs.setList(['PSEL && !PREADY']); v.sva.unbind(v.sva.bindings[0]); v.sva.bind('apb_enable_needs_sel', 'apb_tb.u_regs'); await v.sva.queue;
         return v.state(); }""")
     with page.expect_download() as dl:
-        v.locator('button[data-act=ssave]').click()
+        bact(page, 'ssave', root=v)
     path = dl.value.path(); name = dl.value.suggested_filename
     saved = json.loads(pathlib.Path(path).read_text(encoding='utf-8'))
     check(saved == st and name.endswith('.view.json') and set(st) >= {'from', 'to', 'cursor', 'config', 'paint', 'select', 'find', 'bookmarks', 'arrows', 'sva', 'exprs'},
@@ -4406,7 +4461,7 @@ def savepage(browser, build):
     text = page.evaluate('WaveLens.pageText()')
     again = page.evaluate('WaveLens.pageText()')   # twice: one block of edits, the next revision of nothing new
     blocks = lambda t: len(_re.findall(r'^<script type="application/json" id="wavelens-edits">', t, _re.M))
-    shown = page.locator('.wv button[data-act=spage]').first.is_visible()
+    shown = page.locator('.wv button[data-act=spage]').first.get_attribute('hidden') is None   # (an item of File ▾)
     pb.write_text(text, encoding='utf-8')
     data = lambda t: _re.search(r'<script>\nwindow\.WAVES = (.*?)\n</script>', t, _re.S).group(1)
     same = data(text) == data(src)
@@ -4430,13 +4485,13 @@ def savepage(browser, build):
     # a page that is not all in itself (docs/index.html: wavelens.js beside it): no button, Save page says why
     page.goto((ROOT / 'docs' / 'index.html').as_uri()); page.wait_for_load_state('networkidle')
     why = page.evaluate("(() => { try { WaveLens.pageText(); return 'saved'; } catch (e) { return e.message; } })()")
-    hid = page.locator('.wv button[data-act=spage]').first.is_hidden()
+    hid = page.locator('.wv button[data-act=spage]').first.get_attribute('hidden') is not None
     check(hid and 'all in itself' in why, f'docs/index.html (wavelens.js beside it): no Save page, it says why {why!r}')
     page.goto((ROOT / 'tests' / 'conformance.html').as_uri()); page.wait_for_load_state('networkidle')   # its viewers built before the page was read
     vis = page.locator('.wv button[data-act=spage]').evaluate_all('bs => bs.filter(b => !b.hidden).length')
     check(vis == 0, f'tests/conformance.html (its viewers built early, wavelens.js beside it): no Save page on any viewer ({vis} shown)')
     page.evaluate("WaveLens.configure({ savePage: false })")
-    check(page.locator('.wv button[data-act=spage]').first.is_hidden(), 'savePage: false hides the button')
+    check(page.locator('.wv button[data-act=spage]').first.get_attribute('hidden') is not None, 'savePage: false hides the button')
     page.evaluate("WaveLens.configure({ savePage: true })")
     check(not errs, 'no page errors (save page)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
     ctx.close()
@@ -5346,20 +5401,20 @@ def edit(browser, build):
     page.set_viewport_size({'width': 1300, 'height': 600})
     w = page.locator('.wv').nth(page.evaluate(f"WaveLens.views().indexOf({V})"))
     lay = lambda: page.evaluate(f"""(v => {{ const b = v.root.querySelector('.bar').getBoundingClientRect(), c = v.canvas.getBoundingClientRect();
-        return [v.root.classList.contains('wv-scroll'), v.root.querySelector('[data-act=scroll]').textContent, Math.round(b.top), Math.round(c.top - b.bottom),
+        return [v.root.classList.contains('wv-scroll'), v.root.querySelector('[data-act=scroll]').getAttribute('aria-checked'), Math.round(b.top), Math.round(c.top - b.bottom),
           v.root.querySelector('.bar .tools').offsetHeight > 0]; }})({V})""")
     first = lay()
-    w.locator('button[data-act=scroll]').click(); flip = lay()
+    bact(page, 'scroll', root=w); flip = lay()   # (⚙ Scroll in the window: a tick)
     if not flip[0]:   # now with the page: back to a window and again, the button both ways
-        w.locator('button[data-act=scroll]').click(); flip = lay()
-    w.locator('button[data-act=scroll]').click()
+        bact(page, 'scroll', root=w); flip = lay()
+    bact(page, 'scroll', root=w)
     into = f"(v => window.scrollTo(0, v.bodyEl.getBoundingClientRect().top + scrollY + 150))({V})"   # among its rows
     page.evaluate(into); page.wait_for_timeout(200 * SCALE); paged = lay()
     w.locator('button[data-act=tools]').click(); page.evaluate(into); page.wait_for_timeout(200 * SCALE); folded = lay()
     open_(pb); kept = lay()
-    check(flip[:2] == [True, 'Scroll: window'] and paged[:2] == [False, 'Scroll: page'] and abs(paged[2]) <= 1 and abs(paged[3]) <= 1 and folded[4] is False
+    check(flip[:2] == [True, 'true'] and paged[:2] == [False, 'false'] and abs(paged[2]) <= 1 and abs(paged[3]) <= 1 and folded[4] is False
           and abs(folded[2]) <= 1 and abs(folded[3]) <= 1
-          and kept[1] == 'Scroll: page' and kept[4] is False, f'Scroll: window / page; with the page the bar sticks to the top over its rows (the canvas '
+          and kept[1] == 'false' and kept[4] is False, f'⚙ Scroll in the window ticked / not; with the page the bar sticks to the top over its rows (the canvas '
           f'under it), ▴ folds the tools; kept after a reload {first} {flip} {paged} {folded} {kept}')
     got = page.evaluate(f"{V}.run({{op: 'layout', scroll: 'window', height: 300, tools: 'open'}}).then(r => [r[0], {V}.bodyEl.clientHeight])")
     check(got[0].get('scroll') == 'window' and got[0].get('tools') == 'open' and got[1] <= 300, f'layout: the rows in a window 300 px high again {got}')
@@ -6552,7 +6607,7 @@ def marker_lanes(browser, build):
     check(seen == '#d6336c' and bad and got == ['#1971cb', True, '#1971cb'] and lists and all(lists),
           f'a colour\'s hex code beside its picker: read ({seen}), a wrong one marked ({bad}), typed and Enter picks it, its keys the field\'s {got}; '
           f'every picker of the viewer has one {lists}')
-    hx = page.locator('.wv').first.locator('input.fcol + input.wv-hex'); hx.fill('#abc'); hx.press('Enter')
+    bopen(page, 'fcol'); hx = page.locator('.wv').first.locator('input.fcol + input.wv-hex'); hx.fill('#abc'); hx.press('Enter')   # (Paint ▾)
     check(js("return v.root.querySelector('input.fcol').value;") == '#aabbcc', 'the bar\'s Paint colour: #abc typed, #aabbcc picked')
     page.mouse.click(x, y, button='right'); page.wait_for_timeout(60); page.locator('.wv-menu button[data-m=mkpale]').click(); page.wait_for_timeout(40)
     pl = js('return v.markList()[1].color ?? null;'); g, t, x, y = tag(1)
@@ -7597,10 +7652,10 @@ def sva_hardening(browser, build):
     page.evaluate('SVA.ready()')
     st0 = page.evaluate("(() => { const p = SVA.panels()[0]; const b = p.bind('a_pfx', 'apb_tb.u_regs'); return b && b.state; })()")
     pfx = v.locator('input.pfx')
-    pfx.fill('x_'); settle(page); page.evaluate('SVA.ready()')
+    bopen(page, 'pfx', v); pfx.fill('x_'); settle(page); page.evaluate('SVA.ready()')   # (⚙ Sort prefixes)
     st1 = page.evaluate("(() => { const b = SVA.panels()[0].bindings.find(b => b.assert === 'a_pfx'); return [b.state, b.results && b.results.assertions[0].stats.pass]; })()")
     check(st0 == 'cannot' and st1 == ['bound', 5], f'a new prefix in the sort field binds x_PSEL to PSEL ({st0} -> {st1})')
-    pfx.fill('i_,o_,s_,m_')
+    bopen(page, 'pfx', v); pfx.fill('i_,o_,s_,m_')
     # the rows hook: a row of a plugin under u_regs folds, sorts and is found with it
     hook = page.evaluate("""(() => { const v = document.querySelector('.wv').waveView, g = Object.values(v.M.groups).find(g => g.name === 'u_regs');
         const src = v.M.rows.find(r => r.full === 'apb_tb.u_regs.PSEL'), row = { type: 'sig', name: 'probe_row', full: 'apb_tb.u_regs.probe_row', tr: src.tr, width: 1 };
@@ -7720,10 +7775,11 @@ def sva_waves(browser, build):
     for k in (']f', ']f', '[f'):
         page.keyboard.press(k[0]); page.keyboard.press(k[1]); seq.append(js('return [p.selA.i, v.cursor];'))
     btns = v.locator('.bar .svj button.fail')
-    check([x[0] for x in seq] == [2, 1, 2] and seq[0][1] == 115000 and btns.count() == 2, f']f / [f step through the two failures, round the end {seq}; {btns.count()} failure buttons in go to')
+    check([x[0] for x in seq] == [2, 1, 2] and seq[0][1] == 115000 and btns.count() == 2 and v.locator('.bar .svn').inner_text() == '✕ 2',
+          f']f / [f step through the two failures, round the end {seq}; {btns.count()} failures in the ▾ of SVA ✕ 2')
     page.keyboard.press('Escape')
     esc = js("return [p.selA, v.extraPicks.size, p.el.querySelector('li[data-a=\"apb_demo_no_wait\"]').innerText.includes('attempt'), p.el.querySelector('.svw').hidden];")
-    btns.nth(1).click()
+    v.locator('.bar .svf').click(); btns.nth(1).click()
     check(esc == [None, 0, False, True] and js('return p.selA && p.selA.i;') == 2, f'Esc clears the selection and Why {esc}; the second failure button selects that attempt')
     # tooltips: a circle names its step, the ✕ its reason once; a bar gives start → end
     tips = js("""const st = p.bindings.find(b => b.assert === 'apb_demo_no_wait').draw;
@@ -8351,38 +8407,735 @@ def synth_vcd(path):
 
 
 def bar_tools(page, P):
-    """The right button on the bar: its tool groups with a tick each; a click leaves one out (the menu stays open), Hide
-    all leaves every line of tools out, / still floats the find; kept in this browser and in the state; Show all; a field
-    keeps the browser's own menu."""
+    """The right button on the bar: ⚙ there, its Tools in the bar ▸ the tool groups with a tick each; a click leaves one out (the
+    menu stays open), Hide all leaves every line of tools out, / still floats the find; kept in this browser and in the state; Show
+    all; a field keeps the browser's own menu."""
     print('bar_tools: the right button on the bar')
     v = page.locator('.wv').first
     js = lambda e: page.evaluate(f"(() => {{ const v = document.querySelector('.wv').waveView; return {e}; }})()")
-    m, ticks = page.locator('.wv-menu.wv-tools'), lambda: m.locator('button[data-tg]').evaluate_all("bs => bs.map(b => [b.dataset.tg, b.getAttribute('aria-checked')])")
-    v.locator('.bar .tg[data-tg="list"] .tl').click(button='right'); settle(page)
+    m = v.locator('.bar .wv-gear')
+    ticks = lambda: m.locator('button[data-tg]').evaluate_all("bs => bs.map(b => [b.dataset.tg, b.getAttribute('aria-checked')])")
+    sub = lambda: m.locator('.subtg').click() if not m.locator('button[data-tg]').first.is_visible() else None
+    v.locator('.bar .tg[data-tg="list"] .tl').click(button='right'); settle(page); sub(); settle(page)
     t = ticks()
-    check(m.count() == 1 and {'cursor', 'view', 'find', 'list', 'state'} <= {n for n, _ in t} and all(c == 'true' for _, c in t),
-          f'the right button on the bar: a menu of its tool groups, each ticked {[n for n, _ in t]}')
+    check(m.is_visible() and {'cursor', 'view', 'find', 'list', 'file'} <= {n for n, _ in t} and all(c == 'true' for _, c in t),
+          f'the right button on the bar: ⚙, Tools in the bar ▸ its tool groups, each ticked {[n for n, _ in t]}')
     m.locator('button[data-tg="cursor"]').click(); settle(page)
-    check(m.count() == 1 and v.locator('.bar .tg[data-tg="cursor"]').is_hidden() and dict(ticks())['cursor'] == 'false' and
+    check(m.is_visible() and v.locator('.bar .tg[data-tg="cursor"]').is_hidden() and dict(ticks())['cursor'] == 'false' and
           js('v.state().config.toolsHidden') == ['cursor'] and 'cursor' in (js('localStorage.getItem(v.lookKey)') or ''),
           'a click leaves the cursor out: the menu stays open, its tick off; in the state and in this browser')
     h0 = js("v.root.querySelector('.bar').getBoundingClientRect().height")
-    m.locator('button[data-m=none]').click(); settle(page)
+    m.locator('button[data-act=tgnone]').click(); settle(page)
     left = js("[...v.root.querySelectorAll('.bar .tools .tln')].filter(l => l.querySelector('.tg') && l.offsetHeight).length")
     h1 = js("v.root.querySelector('.bar').getBoundingClientRect().height")
     check(left == 0 and h1 < h0 and all(c == 'false' for _, c in ticks()), f'Hide all: no line of tools left, the bar {h0:.0f} -> {h1:.0f} px')
-    page.keyboard.press('Escape'); settle(page)
+    page.keyboard.press('Escape'); page.keyboard.press('Escape'); settle(page)
     v.locator('canvas').evaluate('c => c.focus({ preventScroll: true })'); page.keyboard.press('/'); settle(page)
-    fl = [m.count(), v.locator('.tg.find.float').is_visible(), page.evaluate('document.activeElement.matches("input.q")')]
-    check(fl == [0, True, True], f'Esc closes the menu; / floats the find that is left out of the bar {fl}')
+    fl = [m.is_visible(), v.locator('.tg.find.float').is_visible(), page.evaluate('document.activeElement.matches("input.q")')]
+    check(fl == [False, True, True], f'Esc closes the menu; / floats the find that is left out of the bar {fl}')
     page.keyboard.press('Escape'); settle(page)
     check(v.locator('.tg.find').is_hidden(), 'Esc puts it back: left out again')
-    v.locator('.bar .head').click(button='right'); settle(page); m.locator('button[data-m=all]').click(); settle(page)
+    v.locator('.bar .head').click(button='right'); settle(page); sub(); m.locator('button[data-act=tgall]').click(); settle(page)
     check(v.locator('.bar .tools .tg.off').count() == 0 and js('v.state().config.toolsHidden') == [] and 'toolsHidden' not in (js('localStorage.getItem(v.lookKey)') or ''),
           'Show all: every group again, nothing kept')
-    page.keyboard.press('Escape')
+    page.keyboard.press('Escape'); page.keyboard.press('Escape')
     v.locator('input.q').dispatch_event('contextmenu'); settle(page)
-    check(m.count() == 0, 'the right button in a field: the browser\'s menu (paste), not this one')
+    check(not m.is_visible(), 'the right button in a field: the browser\'s menu (paste), not this one')
+
+
+# a page's settings with the strip over the time axis off (cursorStrip: false): wavelens.config.js's object taken as it is set
+NO_STRIP = """(() => { let c; Object.defineProperty(window, 'WAVELENS_CONFIG', { configurable: true, get: () => c,
+  set: x => { c = Object.assign(x || {}, { cursorStrip: false }); } }); })()"""
+
+
+def bar_layout(browser, build):
+    """The bar (docs/reviews/toolbar-2026-11-11): its bugs T-01 … T-19 first, each failing on the bar of 0.52; then the layout of
+    Variant 2 — three tool rows from a 1175 px bar up, the same height at rest and busy (the filters in the head, the count in the
+    field), the short form under 900 px with nothing out of reach, the groups and the names of before, every new button as its key,
+    ⚙ and File ▾ by the keys, the tips."""
+    apb, alll, axi = (build / 'examples' / ex / f'{ex}{s}.html' for ex, s in (('apb', ''), ('apb', '_all'), ('axi_lite', '')))
+    if not need(apb, alll, axi, how='make examples'):
+        return
+    print('the bar: its bugs, its layout, its menus, the short form')
+    page = browser.new_page(viewport={'width': 1400, 'height': 900})
+    page.add_init_script(NO_STRIP)   # (the cursor and the edges in the lines, as the bar of 0.52 had them)
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+
+    def fresh(path=apb, w=1400):
+        page.set_viewport_size({'width': w, 'height': 900})
+        page.goto(path.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload()
+        page.wait_for_load_state('networkidle'); page.evaluate("document.querySelector('.wv').scrollIntoView()"); settle(page); settle(page)
+    js = lambda e: page.evaluate(f"""(async () => {{ const v = document.querySelector('.wv').waveView, I = WaveLens.internal, bar = v.root.querySelector('.bar'),
+        q = s => v.root.querySelector(s), R = n => v.M.rows.find(r => r.name === n && r.type === 'sig'); {e} }})()""")
+
+    def part(what, fn):
+        try:
+            fn()
+        except Exception as e:   # noqa: BLE001 — said as the failure of that part
+            check(False, f'{what}: {type(e).__name__} {str(e)[:200]}')
+    # every control of the bar shown: inside the bar's width and the one under its middle (nothing cut by the viewer, T-01)
+    CUT = """return [...bar.querySelectorAll('button, input:not([type=file]), select')].filter(e => e.getClientRects().length && !e.closest('.bpop, .chips.fold'))
+        .filter(e => { const r = e.getBoundingClientRect(), b = bar.getBoundingClientRect(), x = Math.min(r.left + r.width / 2, innerWidth - 1), y = r.top + r.height / 2;
+          const at = document.elementFromPoint(x, y); return r.right > b.right + 1 || !(at && (at === e || e.contains(at))); })
+        .map(e => e.dataset.act || e.className || e.tagName);"""
+
+    def t01():
+        out = []
+        for w in (560, 360):
+            fresh(apb, w); out.append(js(CUT))
+        check(out == [[], []], f'T-01: at 560 and 360 px every control of the bar is inside it and under the pointer (cut: {out})')
+    part('T-01', t01)
+
+    def t02():
+        fresh(apb, 1220)
+        h0 = js("return bar.getBoundingClientRect().height;")
+        page.locator('.wv input.q').first.fill('pen'); page.wait_for_timeout(150)
+        h1, cnt = js("return [bar.getBoundingClientRect().height, v.cntEl.textContent];")
+        check(h0 == h1 and cnt.endswith('found'), f'T-02: typing in the find (1220 px) leaves the bar\'s height as it was ({h0} -> {h1}), its count "{cnt}"')
+    part('T-02', t02)
+
+    def t06():
+        fresh(apb)
+        js("v.setTools(true); v.refocus(); return 0;"); page.keyboard.press('/'); settle(page)
+        mid = js("return [document.activeElement === v.qEl, !v.root.classList.contains('wv-tools-folded') || q('.tg.find.float') != null];")
+        page.keyboard.press('Escape'); settle(page)
+        a = js("return [v.S.toolsFolded, JSON.parse(localStorage.getItem(v.lookKey) || '{}').toolsFolded, v.root.classList.contains('wv-tools-folded')];")
+        check(mid == [True, True] and a == [True, True, True], f'T-06: / on a folded bar gives the find, Esc folds it again, the fold kept {mid} {a}')
+    part('T-06', t06)
+
+    def t07():
+        fresh(apb)
+        ct = page.locator('.wv input.ct').first; shown = ct.input_value()
+        ct.fill('abc'); ct.press('Enter'); page.wait_for_timeout(50)
+        toast = js("return q('.toast').textContent;")
+        ct.press('Escape'); settle(page)
+        a = [ct.input_value() == shown, js("return document.activeElement === v.canvas;"), 'abc' in toast]
+        cs = page.locator('.wv input.cs').first
+        if not cs.is_visible():
+            bopen(page, 'cs')
+        cs.fill('zzz'); cs.press('Escape'); settle(page)
+        a += [cs.input_value() != 'zzz', js("return document.activeElement === v.canvas;")]
+        check(a == [True] * 5, f'T-07: a bad time says why in the toast; Esc in the cursor and span fields: the value back, the keys on the waves {a} {toast!r}')
+    part('T-07', t07)
+
+    def t08():
+        fresh(apb)
+        js("v.mark(); v.undoTick(); return 0;"); page.locator('.wv [data-act=undo]').first.click(); settle(page)
+        a = js("return [document.activeElement === v.canvas, q('[data-act=undo]').disabled];")
+        check(a == [True, True], f'T-08: ↶ that leaves nothing to undo: the focus on the waves, not the page {a}')
+    part('T-08', t08)
+
+    def t09():
+        fresh(apb)
+        bad = js("return [...bar.querySelectorAll('button[data-act]')].filter(b => (b.title || '').match(/\\((\\S+)\\)$/) && WaveLens.tips.of(b)).map(b => [b.dataset.act, b.title])"
+                 ".filter(([a, t]) => !(WaveLens.tips.of(q(`[data-act=${a}]`))[1] || []).some(k => t.includes(`(${k})`)));")
+        check(not bad, f'T-09: no title of the bar names a key its tip has not (Fit: f, not 0) {bad}')
+    part('T-09', t09)
+
+    def t10():
+        fresh(apb)
+        js("v.setScroll('page'); v.setToolsHidden(['find']); document.body.style.paddingBottom = '3000px'; return 0;")
+        js("scrollTo(0, 0); scrollTo(0, v.wcol.getBoundingClientRect().top + 200); return 0;"); page.wait_for_timeout(100)   # the waves' top under the sticky bar
+        js("v.refocus(); return 0;"); page.keyboard.press('Control+f'); settle(page)
+        a = js("const f = q('.tg.find.float'), b = bar.getBoundingClientRect(); return f ? [Math.round(f.getBoundingClientRect().top), Math.round(b.bottom)] : null;")
+        check(a and a[0] >= a[1], f'T-10: the find floated for a hidden group under the sticky bar, not over its controls {a}')
+        page.keyboard.press('Escape'); js("v.setScroll(null); document.body.style.paddingBottom = ''; return 0;")
+    part('T-10', t10)
+
+    def t11():
+        out = []
+        for th in ('light', 'dark'):
+            fresh(apb)
+            out.append(js(f"""WaveLens.setTheme('{th}'); await new Promise(r => requestAnimationFrame(r));
+              const c = document.createElement('canvas').getContext('2d', {{ willReadFrequently: true }});
+              const rgb = s => {{ c.clearRect(0, 0, 1, 1); c.fillStyle = '#000'; c.fillStyle = s; c.fillRect(0, 0, 1, 1); return [...c.getImageData(0, 0, 1, 1).data].slice(0, 3); }};
+              const L = a => {{ const [r, g, b] = a.map(x => x / 255).map(x => x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4); return 0.2126 * r + 0.7152 * g + 0.0722 * b; }};
+              const cr = (f, b) => {{ const [x, y] = [L(rgb(f)), L(rgb(b))].sort((p, q) => q - p); return Math.round((x + 0.05) / (y + 0.05) * 100) / 100; }};
+              const inp = v.qEl, hl = q('[data-act=fhl]'); hl.setAttribute('aria-pressed', 'true');
+              return [cr(getComputedStyle(inp, '::placeholder').color, getComputedStyle(inp).backgroundColor), cr(getComputedStyle(hl).color, getComputedStyle(hl).backgroundColor)];"""))
+        js("WaveLens.setTheme('auto'); return 0;")
+        check(all(min(x) >= 4.5 for x in out), f'T-11: the find field\'s placeholder and a pressed button readable (≥ 4.5:1) in the light and the dark theme {out}')
+    part('T-11', t11)
+
+    def t12():
+        fresh(apb)
+        js("v.setTools(true); v.toolsMenu(300, 60); return 0;"); page.wait_for_timeout(50)
+        tick = page.locator('.wv .wv-menu button[data-tg="cursor"]').first
+        if not tick.is_visible():
+            page.locator('.wv .wv-menu .subtg').first.click()
+        tick.click(); settle(page)
+        a = js("return [v.root.classList.contains('wv-tools-folded'), q('.tg[data-tg=cursor]').classList.contains('off')];")
+        check(a == [False, True], f'T-12: a group\'s tick on a folded bar opens the tools (the change seen) {a}')
+        page.keyboard.press('Escape')
+    part('T-12', t12)
+
+    def t13_14_17():
+        fresh(apb)
+        a = js("""const head = q('.bar .head'), f = q('.tg.find'), ys = [...f.querySelectorAll(':scope > button, :scope > .seg, :scope > .qw, :scope > input, :scope > .more > *')]
+              .filter(e => e.getClientRects().length).map(e => { const r = e.getBoundingClientRect(); return Math.round(r.top + r.height / 2); });
+            const mk = q('[data-act=mark]');
+            return [!!head.querySelector('[data-act=scroll]') && head.querySelector('[data-act=scroll]').getClientRects().length > 0, Math.max(...ys) - Math.min(...ys),
+              mk.textContent, mk.closest('.tg').dataset.tg];""")
+        check(a[0] is False and a[1] <= 1 and a[2:] == ['+ Bookmark', 'marks'],
+              f'T-13 no Scroll button in the head (a tick in ⚙); T-14 the find\'s controls on one line (±1 px); T-17 "+ Bookmark" in marks {a}')
+    part('T-13, T-14, T-17', t13_14_17)
+
+    def t15():
+        fresh(apb, 960)
+        a = js("""v.setToolsCompact ? v.setToolsCompact(false) : 0; await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+            const gs = [...bar.querySelectorAll('.tools .tg')].filter(g => g.offsetParent), rows = new Map();
+            for (const g of gs) { const k = g.parentElement.dataset.ln + Math.round(g.getBoundingClientRect().top); rows.set(k, [...(rows.get(k) || []), g]); }
+            const last = [...rows.values()].map(r => r[r.length - 1]).filter(g => parseFloat(getComputedStyle(g).borderRightWidth) > 0).map(g => g.dataset.tg);
+            const first = [...rows.values()].map(r => r[0]), L = new Set(first.map(g => Math.round(g.querySelector('.tl').getBoundingClientRect().left)));
+            const C = new Set(first.map(g => Math.round([...g.children].find(c => !c.matches('.tl') && c.getClientRects().length).getBoundingClientRect().left)));
+            return [rows.size, last, L.size, C.size];""")
+        check(a[0] > 3 and a[1:] == [[], 1, 1], f'T-15: the full form wrapped (874 px): no separator at a row\'s end, the labels and the first controls in one column {a}')
+    part('T-15', t15)
+
+    def t16():
+        fresh(apb)
+        a = js("""const p = q('[data-act=prev]'); p.hidden = true; const r = getComputedStyle(q('select.edge')).borderTopLeftRadius; p.hidden = false; return r;""")
+        check(a == '4px', f'T-16: a pill whose first member is hidden: its next one has the round corner ({a})')
+    part('T-16', t16)
+
+    def t18():
+        fresh(apb)
+        a = js("const k = q('.svqk'); return k ? [k.textContent, k.offsetWidth] : null;")
+        check(a and a[0] == '' and a[1] == 0, f'T-18: no expression picked: its empty position text takes no room {a}')
+    part('T-18', t18)
+
+    def t19():
+        fresh(apb)
+        a = js("""v.setToolsHidden(['find', 'expression', 'assertions']); await new Promise(r => requestAnimationFrame(r)); const h0 = q('.tools').getBoundingClientRect().height;
+            v.refocus(); v.focusFind(); await new Promise(r => requestAnimationFrame(r)); const h1 = q('.tools').getBoundingClientRect().height;
+            const fl = !!q('.tg.find.float'); v.floatFind(false); return [fl, h0, h1];""")
+        check(a[0] and a[1] == a[2], f'T-19: the find, alone on its line and left out, floats: the line takes no row meanwhile {a}')
+    part('T-19', t19)
+
+    # ---- the layout of Variant 2 ----
+    BUSY = """v.highlight(['PADDR', 'PWDATA', 'PRDATA']); v.hide([R('PSEL'), R('PENABLE')]);
+        const sc = v.scopes()[0]; if (sc) await v.run([{ op: 'only', modules: [sc.path] }]); v.qEl.value = 'p'; v.find('p');
+        v.cmpReading = 1; v.cmpShow(); return 0;"""   # (a second dump being read: the compare group, ≠ … ✕)
+    ROWS = """await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(r))));   // (the bar fits a frame after a resize)
+        const gs = [...bar.querySelectorAll('.tools .tg')].filter(g => g.offsetParent && !g.classList.contains('float'));
+        const ts = gs.map(g => g.getBoundingClientRect().top).sort((a, b) => a - b), rows = ts.filter((t, i) => !i || t > ts[i - 1] + 8).length;
+        return [rows, Math.round(bar.getBoundingClientRect().height),
+          Math.round(q('.tools').getBoundingClientRect().height), bar.classList.contains('short'), Math.round(bar.clientWidth)];"""
+
+    def rows_height():
+        out = {}
+        for path in (apb, alll, axi):
+            for bw in (1812, 1292, 1175, 874):
+                fresh(path, 1920)
+                js(f"v.root.style.width = '{bw}px'; v.root.style.maxWidth = 'none'; return 0;")
+                rest = js(ROWS)
+                js(BUSY); busy = js(ROWS)
+                out[f'{path.stem}@{bw}'] = (rest, busy, js("return !q('.tg[data-tg=compare]').hidden;"))
+        bad = {k: x for k, x in out.items() if not (x[0][0] <= 3 and x[1][0] <= 3 and x[0][2] == x[1][2] and x[2] and (x[0][3] == (x[0][4] < 900)))}
+        same = {k: x for k, x in out.items() if not k.endswith('874') and x[0][1] != x[1][1]}
+        check(not bad and not same, f'three tool rows at most (874 px: the short form), the tool lines as high at rest as busy (the chips in the head, a compare, '
+              f'a find), the bar too from 1175 px {bad or same or {k: (x[0][:2], x[1][:2]) for k, x in out.items()}}')
+        fresh(apb, 1920)
+        js("v.root.style.width = '498px'; return 0;"); js(BUSY)
+        a = js("await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(r))));" + CUT.replace('return ', 'const cut = ', 1) + """
+            const pops = []; for (const m of [...bar.querySelectorAll('.tg > .mx')].filter(x => x.getClientRects().length)) { m.click();
+              await new Promise(r => requestAnimationFrame(r)); const b = m.parentElement.querySelector(':scope > .more').getBoundingClientRect(), o = bar.getBoundingClientRect();
+              if (b.left < o.left - 1 || b.right > o.right + 1 || !b.width) pops.push(m.parentElement.dataset.tg); m.click(); }
+            return [cut, pops, bar.classList.contains('short')];""")
+        check(a == [[], [], True], f'a 498 px bar: the short form, nothing cut, every ⋯ box inside the bar {a}')
+    part('rows and height', rows_height)
+
+    def groups():
+        fresh(alll)
+        a = js("return [v.toolGroups(), q('.tg[data-tg=assertions] .tl').textContent];")
+        page.locator('.wv input.cfile').first.set_input_files(str(build / 'examples' / 'apb' / 'apb.vcd')); page.wait_for_timeout(400 * SCALE)
+        b = js("return v.toolGroups();")
+        js("v.compare(null); return 0;")
+        c = js("return [v.toolGroups().includes('compare')];")
+        want = ['cursor', 'view', 'edges', 'marks', 'find', 'expression', 'assertions', 'list', 'signal', 'file']
+        check(a == [want, 'SVA'] and b == want + ['compare'] and c[0] is False,
+              f'the groups: {a}, with a compare + compare {b[len(want):]}, gone with it; the assertions\' label SVA')
+        d = js("""const t0 = v.S.toolsHidden; v.setToolsHidden(['state', 'dump', 'style', 'find']); const r = [v.S.toolsHidden, q('.tg[data-tg=file]').classList.contains('off'),
+            q('.tg[data-tg=find]').classList.contains('off')]; v.setToolsHidden(null); return r;""")
+        check(d == [['file', 'find'], True, True], f'the names of before: toolsHidden state, dump, style, find -> file, find (style: no group now) {d}')
+    part('the groups', groups)
+
+    def buttons():   # each new button: the state after it as after its key, from the same start
+        fresh(apb)
+        def same(act, key, setup='', state='[v.t0, v.span, v.cursor]', seq=False):
+            js(f"v.fit(); v.cursor = (v.M.t0 + v.M.t1) / 2; v.zoom(0.25, 0.5); v.markView(); v.zoom(0.5, 0.5); {setup}; v.draw(); return 0;"); settle(page)
+            if seq:
+                js(f"v.refocus(); v.seq('{key}'); return 0;")
+            else:
+                js("v.refocus(); return 0;"); page.keyboard.press(key)
+            settle(page); k = js(f"return {state};")
+            js(f"v.fit(); v.cursor = (v.M.t0 + v.M.t1) / 2; v.zoom(0.25, 0.5); v.markView(); v.zoom(0.5, 0.5); {setup}; v.draw(); return 0;"); settle(page)
+            bact(page, act); settle(page)
+            b = js(f"return {state};")
+            return k == b or (act, k, b)
+        res = [same('zlast', 'l'), same('zcur', 'c'), same('t0', 'Home'), same('t1', 'End')]
+        a = js("v.setRange(v.t0 + v.span * 0.3, v.t0 + v.span * 0.4); const r = v.range.slice(); return r;"); bact(page, 'zrange'); settle(page)
+        res.append(js(f"return Math.abs(v.t0 - {a[0]}) < 1 && Math.abs(v.span - ({a[1]} - {a[0]})) < 2;") or ('zrange', a))
+        js("v.setRange(null); v.setCursor2(null); return 0;")
+        res.append(js("return q('[data-act=zrange]').disabled;") or 'zrange enabled with no range')
+        js("await v.run([{ op: 'marker', t: v.M.t0 + (v.M.t1 - v.M.t0) * 0.7, label: 'M' }]); v.bms.push({ n: 9, t: v.M.t0 + (v.M.t1 - v.M.t0) * 0.6, signal: null, text: '' }); "
+           "v.changed(true); v.cursor = v.M.t0; v.draw(); return 0;"); settle(page)
+        ts = js("return [...new Set([...v.bms.map(b => b.t), ...v.markers.filter(m => !m.hidden).map(m => m.t)])].sort((a, b) => a - b);")
+        bact(page, 'mnext'); t1 = js("return v.cursor;"); bact(page, 'mnext'); t2 = js("return v.cursor;"); bact(page, 'mprev'); t3 = js("return v.cursor;")
+        res.append(([t1, t2, t3] == [ts[0], ts[1], ts[0]]) or ('mnext/mprev', ts, t1, t2, t3))
+        js("v.cursor = v.M.t0 + 1000; v.draw(); return 0;"); bact(page, 'umark'); page.wait_for_timeout(50); page.keyboard.type('Q'); page.keyboard.press('Enter'); settle(page)
+        res.append(js("return v.umarks.some(m => m.label === 'Q' && m.t === v.cursor);") or 'umark')
+        on0 = js("return v.cycOpt().cycles;"); bact(page, 'cycles'); settle(page)
+        res.append(js(f"return v.cycOpt().cycles === {str(not on0).lower()} && q('[data-act=cycles]').getAttribute('aria-pressed') === '{str(not on0).lower()}';") or 'cycles')
+        g0 = js("return v.gapLive();"); bact(page, 'gaps'); settle(page)
+        res.append(js(f"return v.gapLive() === {str(not g0).lower()} && q('[data-act=gaps]').getAttribute('aria-pressed') === '{str(not g0).lower()}' && "
+                      "!q('.gapv').hidden === v.gapLive();") or 'gaps')
+        # the radix of the selected: none selected disabled; two buses (a run) -> hex on both
+        js("v.select(null); v.selRun = new Set(); v.draw(); return 0;"); settle(page)
+        res.append(js("return q('select.rx').disabled;") or 'radix enabled with nothing selected')
+        js("const a = R('PADDR'), b = R('PWDATA'); v.selRun = new Set([a, b]); v.sel = b; v.draw(); return 0;"); settle(page)
+        bopen(page, 'rx'); page.locator('.wv select.rx').first.select_option('hex'); settle(page)
+        res.append(js("return [v.radixes.get(R('PADDR').full), v.radixes.get(R('PWDATA').full)].join() === 'hex,hex';") or 'radix of the run')
+        page.evaluate("window.__img = null; navigator.clipboard.write = items => (window.__img = items.map(i => i.types).flat(), Promise.resolve()); 0")
+        bact(page, 'copyimg'); page.wait_for_timeout(300)
+        res.append(page.evaluate("JSON.stringify(window.__img)") == '["image/png"]' or 'copyimg')
+        bad = [x for x in res if x is not True]
+        check(not bad, f'every new button as its key from the same start (Last, ⊙, |◀ ▶|, ⇔, the marks\' walk, + Marker, Cycles, Gaps, the radix, Copy image) {bad}')
+    part('the new buttons', buttons)
+
+    def walks():   # the differences and the failures: ◀ ▶ of compare and SVA as ]d [d, ]f [f
+        fresh(alll)
+        page.locator('.wv input.cfile').first.set_input_files(str(build / 'examples' / 'apb' / 'apb.vcd')); page.wait_for_timeout(400 * SCALE)
+        a = js("return [!q('.tg[data-tg=compare]').hidden, q('[data-act=dnext]').getClientRects().length > 0];")
+        fresh(apb)
+        b = js("return !!q('.tg[data-tg=assertions] .svwalk') && !q('.tg[data-tg=assertions] .svwalk').hidden;")
+        fs = js("return v.sva ? v.sva.failures().length : 0;")
+        if b and fs:
+            js("v.cursor = v.M.t0; v.draw(); v.refocus(); return 0;"); page.keyboard.press(']'); page.keyboard.press('f'); settle(page); k = js("return v.cursor;")
+            js("v.cursor = v.M.t0; v.sva.selA = null; v.draw(); return 0;"); page.locator('.wv [data-sv=fnext]').first.click(); settle(page); c = js("return v.cursor;")
+            page.locator('.wv .svf').first.click(); n = page.locator('.wv').first.locator('.bpop.svj button.fail').count(); page.keyboard.press('Escape')
+            b = [k == c, n == fs]
+        check(a == [True, True] and b == [True, True], f'compare\'s ◀ ▶ there with a compare; SVA ◀ ▶ as ]f, its ▾ every failure by name {a} {b} ({fs} failures)')
+    part('the walks', walks)
+
+    def menus():
+        fresh(apb)
+        g = page.locator('.wv .bar .pgear').first; g.focus(); page.keyboard.press('Enter'); page.wait_for_timeout(50)
+        sc = js("return v.S.maxHeight;")
+        for _ in range(8):
+            if js("return document.activeElement.dataset.act === 'scroll';"):
+                break
+            page.keyboard.press('ArrowDown')
+        page.keyboard.press('Enter'); settle(page)
+        a = [js("return v.S.maxHeight;") != sc]
+        if not page.locator('.wv .bpop.wv-gear').first.is_visible():
+            g.click()
+        a.append(js("const b = q('.wv-gear [data-act=scroll]'); return b.getAttribute('aria-checked') === String(v.S.maxHeight != null && v.S.maxHeight !== '');"))
+        th = page.locator('.wv .wv-gear .subth').first
+        if th.count():
+            th.focus(); page.keyboard.press('ArrowRight'); page.wait_for_timeout(50)
+            a.append(js("return !!document.activeElement.closest('.sub') && document.activeElement.dataset.act === 'theme';"))
+            page.keyboard.press('Escape')
+        page.keyboard.press('Escape'); page.wait_for_timeout(50)
+        a.append(js("return q('.wv-gear').hidden && document.activeElement === q('.pgear');"))
+        check(all(a), f'⚙ by the keys: Enter opens it, ↓ to Scroll in the window, Enter toggles it and the tick follows; → opens Theme ▸; Esc closes, the focus on ⚙ {a}')
+        page.locator('.wv .pfile').first.click(); page.wait_for_timeout(50)
+        items = js("return [...q('.bpop[data-pop=file]').querySelectorAll('button[data-act]')].filter(b => !b.hidden).map(b => [b.dataset.act, (b.querySelector('.kk') || {}).textContent || '']);")
+        page.keyboard.press('Escape')
+        want = {'dopen': 'g O', 'dcmp': 'g C', 'dsrc': '', 'ssave': 'g s', 'sload': 'g L', 'spage': 'g p'}
+        got = dict(items)
+        check(all(got.get(k) == x for k, x in want.items()), f'File ▾: Open, Compare, Sources, Save, Load, Save page with their keys {items}')
+        page.evaluate("document.querySelector('.wv input.srcfile').click = () => (window.__src = 1)")
+        bact(page, 'dsrc'); a = [page.evaluate("window.__src === 1"), js("return q('.bpop[data-pop=file]').hidden;")]
+        page.locator('.wv .bar .tl').first.click(button='right'); page.wait_for_timeout(50)
+        a.append(js("return !q('.wv-gear').hidden;")); page.keyboard.press('Escape')
+        check(a == [True, True, True], f'Sources… through File ▾ (closed after it); the right button on the bar opens ⚙ {a}')
+    part('the menus', menus)
+
+    def chips():
+        fresh(apb, 1400)
+        t0 = js("return [...v.root.querySelectorAll('.tools .tln')].map(l => l.getBoundingClientRect().height);")
+        js("v.highlight(['PADDR', 'PWDATA', 'PRDATA']); return 0;"); settle(page)
+        a = js("const h = q('[data-act=hl]'); return [!!h.closest('.head'), !h.hidden];")
+        t1 = js("return [...v.root.querySelectorAll('.tools .tln')].map(l => l.getBoundingClientRect().height);")
+        fresh(apb, 1920); js("v.root.style.width = '1175px'; return 0;"); js(BUSY); settle(page); settle(page); settle(page)
+        b = js("""const head = q('.head'), ts = [...head.children].filter(e => e.getClientRects().length).map(e => e.getBoundingClientRect().top).sort((x, y) => x - y);
+            const c = q('.cur'); return [ts.filter((t, i) => !i || t > ts[i - 1] + 8).length, c.scrollWidth > c.clientWidth ? getComputedStyle(c).textOverflow : 'whole', q('.chips').classList.contains('fold'),
+              q('.chipn').hidden ? '' : q('.chipn').textContent];""")
+        check(a == [True, True] and t0 == t1 and b[0] == 1 and (b[1] in ('ellipsis', 'whole') or b[2]),
+              f'the filters in the head: Highlight there, the tool lines as high {t0} {t1}; 1175 px busy: one head row, the readout whole or cut with … or the chips folded {b}')
+    part('the chips', chips)
+
+    def short():
+        fresh(apb, 1400)
+        js("v.setToolsCompact(true); return 0;"); settle(page)
+        a = [js("return bar.classList.contains('short');")]
+        bact(page, 'fmask'); settle(page)
+        a.append(js("return v.findMask;"))
+        if not js("return q('.tg.find').classList.contains('open');"):
+            page.locator('.wv .tg.find > .mx').first.click()
+        page.locator('.wv [data-act=fcase]').first.focus(); page.keyboard.press('Escape'); settle(page)
+        a.append(js("return !q('.tg.find').classList.contains('open');"))
+        js("v.setToolsHidden(['find']); v.refocus(); return 0;"); page.keyboard.press('/'); settle(page)
+        a.append(js("const f = q('.tg.find.float'), all = [...f.querySelectorAll(':scope > * button, :scope > button, :scope > .qw input')].filter(e => !e.closest('.bpop') && "
+                    "!e.matches('.mx') && !e.hidden); return f ? all.filter(e => e.getClientRects().length).length === all.length && all.length : 0;"))
+        page.keyboard.press('Escape'); js("v.setToolsHidden(null); return 0;")
+        r = js("const r = await v.run([{ op: 'layout', compact: false }, { op: 'layout', compact: 'auto' }]); return [r[0].compact, r[1].compact, bar.classList.contains('short')];")
+        check(a[:3] == [True, True, True] and a[3] >= 13 and r == [False, 'auto', False],
+              f'the short form forced at 1292 px: Mask through the find\'s ⋯, Esc closes it, / floats a whole find {a}; the layout command\'s compact {r}')
+    part('the short form', short)
+
+    def tips():
+        fresh(alll, 1400)
+        miss = js("return [...bar.querySelectorAll('button, select, input:not([type=file])')].filter(e => !WaveLens.tips.of(e)).map(e => e.outerHTML.slice(0, 90));")
+        check(not miss, f'every button, list and field of the bar (its menus too) has a tip {miss[:5]}')
+    part('the tips', tips)
+    check(not errs, 'no page errors (the bar)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
+    page.close()
+
+
+def bar_arrange(browser, build):
+    """Arranging the bar (docs/reviews/toolbar-2026-11-11 §4, stage 2): at rest nothing moves and no pixel changes; in the mode a
+    group dragged within its line, to another, to a new one: the DOM, the setting, this browser's wavelens.bar, the state, the rows
+    marked, the page's other viewer at once; Esc during a drag; a reload, ctrl+Z; a group added again in its place (T-04); the find
+    moved, hidden, floated, docked back; the dialog by the keys only; the presets; bad stored data; touch; the chips of a narrow head."""
+    import base64
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('the bar arranged: the mode, the drag, the dialog, the presets, kept in this browser')
+    page = browser.new_page(viewport={'width': 1400, 'height': 900})
+    page.add_init_script(NO_STRIP)   # (the cursor and the edges arranged as any group)
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+
+    def fresh(w=1400, clear=True):
+        page.set_viewport_size({'width': w, 'height': 900})
+        page.goto(apb.as_uri()); page.wait_for_load_state('networkidle')
+        if clear:
+            page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+        page.evaluate("document.querySelector('.wv').scrollIntoView()"); settle(page); settle(page)
+    js = lambda e, n=0: page.evaluate(f"""(async () => {{ const v = document.querySelectorAll('.wv')[{n}].waveView, bar = v.root.querySelector('.bar'),
+        q = s => v.root.querySelector(s); {e} }})()""")
+    order = lambda n=0: js("return [...v.root.querySelectorAll('.bar .tools > .tln')].map(l => [...l.querySelectorAll(':scope > .tg')].map(g => g.dataset.tg))"
+                           ".filter(l => l.length);", n)
+    label = lambda tg, n=0: page.locator('.wv').nth(n).locator(f'.tg[data-tg="{tg}"] > .tl')
+
+    def part(what, fn):
+        try:
+            fn()
+        except Exception as e:   # noqa: BLE001 — said as the failure of that part
+            check(False, f'{what}: {type(e).__name__} {str(e)[:200]}')
+
+    def drag(src, x, y, steps=8):
+        b = src.bounding_box(); page.mouse.move(b['x'] + 6, b['y'] + b['height'] / 2); page.mouse.down()
+        page.mouse.move(x, y, steps=steps)
+
+    def at_rest():
+        fresh()
+        o0 = order()
+        drag(label('edges'), label('cursor').bounding_box()['x'] + 2, label('cursor').bounding_box()['y'] + 6); page.mouse.up(); settle(page)
+        o1 = order(); page.evaluate('getSelection().removeAllRanges()'); page.mouse.move(2, 2); page.wait_for_timeout(500)
+        shot0 = page.locator('.wv .bar').first.screenshot()   # (the drag at rest may select text: the picture after it)
+        js("v.arrange(true); v.arrange(false); return 0;"); page.wait_for_timeout(500); settle(page)
+        shot1 = page.locator('.wv .bar').first.screenshot()
+        d = page.evaluate("""async ([a, b]) => { const im = async s => { const i = new Image(); i.src = 'data:image/png;base64,' + s; await i.decode();
+            const c = document.createElement('canvas'); c.width = i.width; c.height = i.height; const g = c.getContext('2d'); g.drawImage(i, 0, 0);
+            return [i.width, i.height, g.getImageData(0, 0, i.width, i.height).data]; };
+          const [A, B] = [await im(a), await im(b)]; if (A[0] !== B[0] || A[1] !== B[1]) return [A[0], A[1], B[0], B[1]];
+          let n = 0; for (let i = 0; i < A[2].length; i += 4) if (Math.max(...[0, 1, 2].map(k => Math.abs(A[2][i + k] - B[2][i + k]))) > 8) n++; return n; }""",
+                          [base64.b64encode(shot0).decode(), base64.b64encode(shot1).decode()])
+        check(o0 == o1 and js("return v.S.toolLayout;") is None and d == 0,
+              f'at rest: a drag by a label moves nothing; the mode on and off leaves no pixel changed ({d})')
+    part('at rest', at_rest)
+
+    def drags():
+        fresh()
+        js("v.arrange(true); return 0;"); settle(page)
+        c = label('cursor').bounding_box(); drag(label('edges'), c['x'] + 2, c['y'] + c['height'] / 2); page.mouse.up(); settle(page)
+        a = order()
+        e = js("const e = q('.tg[data-tg=assertions]').getBoundingClientRect(); return [e.right - 4, e.top + e.height / 2];")
+        drag(label('signal'), e[0], e[1]); page.mouse.up(); settle(page)
+        b = order()
+        nl = page.locator('.wv').first.locator('.tln.newln').bounding_box(); drag(label('file'), nl['x'] + 60, nl['y'] + nl['height'] / 2); page.mouse.up(); settle(page)
+        c3 = order()
+        st = js("""return [v.S.toolLayout, JSON.parse(localStorage.getItem('wavelens.bar')).layout, v.state().config.toolLayout,
+            [...bar.querySelectorAll('.tools > .tln')].every(l => { const gs = [...l.querySelectorAll(':scope > .tg')].filter(g => g.offsetParent);
+              return gs.every((g, i) => g.classList.contains('rs') === (i === 0 || g.offsetTop > gs[i - 1].offsetTop + 2)); })];""")
+        two = order(1)
+        js("v.arrange(false); return 0;"); settle(page)
+        js("v.select(v.M.rows.find(r => r.type === 'sig' && r.name === 'PSEL')); v.cursor = v.M.t0; v.draw(); return 0;")
+        page.locator('.wv').first.locator('[data-act=next]').click(); moved = js("return v.cursor > v.M.t0;")
+        check(a[0][:2] == ['edges', 'cursor'] and b[1][-1] == 'signal' and c3[-1] == ['file'] and st[0] == c3 and st[1] == c3 and st[2] == c3 and st[3] and
+              [[g for g in l if g != 'go to'] for l in two] == c3 and moved,   # (its own go to: a group the arrangement does not name)
+              f'the mode: edges before cursor, signal to the end of the find line, file on a new line: the order {c3}, the setting, this browser, the state, '
+              f'the rows marked {st[3]}; the other viewer {two}; the moved ▶ still steps {moved} {st[:3]}')
+    part('drags', drags)
+
+    def esc_drag():
+        fresh()
+        js("v.arrange(true); return 0;"); w0 = js("return [v.t0, v.span];"); o0 = order()
+        c = label('find').bounding_box(); drag(label('list'), c['x'] + 2, c['y'] + 6); page.keyboard.press('Escape'); page.mouse.up(); settle(page)
+        a = [order() == o0, js("return [!!q('.arm'), v.S.toolLayout, v.arranging, [v.t0, v.span]];")]
+        page.keyboard.press('Escape'); a.append(js("return [v.arranging, !!q('.arr')];"))
+        check(a[0] and a[1] == [False, None, True, w0] and a[2] == [False, False], f'Esc during a drag: nothing moved, no mark left, the window kept; Esc again: done {a}')
+    part('esc', esc_drag)
+
+    def reload_undo():
+        fresh()
+        js("v.arrange(true); return 0;"); c = label('cursor').bounding_box(); drag(label('marks'), c['x'] + 2, c['y'] + 6); page.mouse.up(); settle(page)
+        js("v.arrange(false); v.undoTick(); return 0;"); want = order()
+        fresh(clear=False); a = [order(), order(1)[0][:2]]
+        js("v.arrange(true); return 0;"); c = label('cursor').bounding_box(); drag(label('view'), c['x'] + 2, c['y'] + 6); page.mouse.up(); settle(page)
+        js("v.arrange(false); v.undoTick(); return 0;"); b = order(); js("v.refocus(); return 0;"); page.keyboard.press('Control+z'); page.wait_for_timeout(200)
+        check(a[0] == want and a[1] == ['marks', 'cursor'] and b != want and order() == want, f'a reload: both viewers as kept {a}; ctrl+Z after a move: back {order()}')
+    part('reload, undo', reload_undo)
+
+    def t04():
+        fresh()
+        js("v.setToolLayout([['find', 'expression', 'cursor'], ['view', 'edges', 'marks'], ['list', 'signal', 'file']]); return 0;")
+        a = js("const g = q('.tg[data-tg=expression]'), html = g.innerHTML; g.remove(); const n = v.addTool('expression'); n.innerHTML = html;"
+               " return [...n.parentElement.children].map(x => x.dataset.tg);")
+        b = js("v.addTool('probe', '<button type=\"button\" data-x=\"open\">p</button>'); return q('.tg[data-tg=probe]').parentElement.dataset.ln;")
+        check(a[:3] == ['find', 'expression', 'cursor'] and b == 'more', f'T-04: a group made again goes to its place of the arrangement {a}; one it does not name: its own line ({b})')
+    part('T-04', t04)
+
+    def float_find():
+        fresh()
+        js("v.setToolLayout([['cursor', 'view'], ['edges', 'marks'], ['list', 'signal', 'file'], ['find']]); v.setToolsHidden(['find']); return 0;"); settle(page)
+        a = [js("return q('.tln[data-ln=l3]') ? q('.tln[data-ln=l3]').hidden || q('.tln[data-ln=l3]').classList.contains('fl') : 'none';")]
+        js("v.refocus(); return 0;"); page.keyboard.press('/'); settle(page)
+        a.append(js("return !!q('.tg.find.float') && document.activeElement === v.qEl;"))
+        page.keyboard.press('Escape'); settle(page)
+        a.append(js("return [q('.tg.find').parentElement.dataset.ln, q('.tg.find').classList.contains('float')];"))
+        check(a == [True, True, ['l3', False]], f'the find on a line of its own, left out: the line gone; / floats it; Esc docks it at its place {a}')
+    part('find moved', float_find)
+
+    def dialog():
+        fresh()
+        g = page.locator('.wv .bar .pgear').first; g.focus(); page.keyboard.press('Enter'); page.wait_for_timeout(50)
+        for _ in range(14):
+            if js("return document.activeElement.dataset.act === 'arrange';"):
+                break
+            page.keyboard.press('ArrowDown')
+        page.keyboard.press('Enter'); page.wait_for_timeout(80)
+        same = lambda: js("return JSON.stringify([...q('.wv-arrd').querySelectorAll('.arl')].map(l => [...l.querySelectorAll('.ari')].map(r => r.dataset.tg))) === "
+                          "JSON.stringify(v.barLines());")
+        a = [js("return !!q('.wv-arrd') && document.activeElement.dataset.tg === 'cursor';")]
+        page.keyboard.press('Alt+ArrowDown'); a += [same(), order()[0][:2] == ['view', 'cursor']]
+        page.keyboard.press('Alt+ArrowRight'); page.keyboard.press('Alt+ArrowRight'); a += [same(), 'cursor' in order()[2]]
+        js("const r = [...q('.wv-arrd').querySelectorAll('.ari')][0]; r.focus(); return 0;")
+        page.keyboard.press('Alt+ArrowUp'); a.append('already at the start' in js("return q('.arlive').textContent;"))
+        page.keyboard.press(' '); a += [same(), js("return v.S.toolsHidden.length === 1;")]
+        js("q('.wv-arrd [data-ar=reset]').focus(); return 0;"); page.keyboard.press('Enter'); page.wait_for_timeout(50)
+        a += [js("return v.S.toolLayout === null && v.S.toolsHidden.length === 0;")]
+        js("q('.wv-arrd .ari').focus(); return 0;"); page.keyboard.press('Escape'); page.wait_for_timeout(50)
+        a.append(js("return !v.arranging && document.activeElement === q('.pgear');"))
+        check(all(a), f'the dialog by the keys only: ⚙, Arrange the bar…, alt+↓, alt+→ ×2, alt+↑ at the start said, Space, Reset, Esc: the bar as the dialog, the focus on ⚙ {a}')
+    part('dialog', dialog)
+
+    def presets():
+        fresh()
+        js("v.arrange(true); return 0;"); c = label('cursor').bounding_box(); drag(label('find'), c['x'] + 2, c['y'] + 6); page.mouse.up(); settle(page)
+        mine = order()
+        page.locator('.wv .arr [data-ar=compact]').first.click(); settle(page); settle(page); a = [js("return bar.classList.contains('short');")]
+        page.locator('.wv .arr [data-ar=full]').first.click(); settle(page); full = order()
+        page.locator('.wv .arr [data-ar=mine]').first.click(); settle(page)
+        a += [full[0][:2] == ['cursor', 'view'], order() == mine, js("return q('.arr [data-ar=mine]').getAttribute('aria-pressed');") == 'true']
+        js("v.arrange(false); return 0;")
+        check(all(a), f'presets: Compact the short form at 1292 px, Full the default order, Mine the dragged one again {a}')
+    part('presets', presets)
+
+    def bad():
+        fresh()
+        page.evaluate("""localStorage.setItem('wavelens.bar', '{"v":1,"layout":"x"}')"""); fresh(clear=False); a = [order()[0][:2]]
+        page.evaluate("localStorage.setItem('wavelens.bar', JSON.stringify({ v: 1, layout: [...Array(9).keys()].map(i => i ? ['nope' + i] : ['list', 'cursor']) }))")
+        fresh(clear=False); a += [js("return v.S.toolLayout.length;"), order()[0][:2]]
+        check(a == [['cursor', 'view'], 6, ['list', 'cursor']] and not errs, f'bad stored data: the default order; 9 lines: the first 6, unknown labels kept {a} {errs[:2]}')
+    part('bad data', bad)
+
+    def touch():
+        ctx = browser.new_context(viewport={'width': 560, 'height': 700}, has_touch=True); ctx.add_init_script(NO_STRIP)
+        tp = ctx.new_page(); tp.goto(apb.as_uri()); tp.wait_for_load_state('networkidle'); tp.evaluate('localStorage.clear()'); tp.reload(); tp.wait_for_load_state('networkidle')
+        tp.evaluate("document.body.style.paddingBottom = '2000px'; document.querySelector('.wv').scrollIntoView()")
+        cdp = ctx.new_cdp_session(tp)
+        def swipe(a, b, steps=8):
+            cdp.send('Input.dispatchTouchEvent', {'type': 'touchStart', 'touchPoints': [{'x': a[0], 'y': a[1]}]})
+            for i in range(1, steps + 1):
+                cdp.send('Input.dispatchTouchEvent', {'type': 'touchMove', 'touchPoints': [{'x': a[0] + (b[0] - a[0]) * i / steps, 'y': a[1] + (b[1] - a[1]) * i / steps}]})
+                tp.wait_for_timeout(16)
+            cdp.send('Input.dispatchTouchEvent', {'type': 'touchEnd', 'touchPoints': []}); tp.wait_for_timeout(150)
+        tj = lambda e: tp.evaluate(f"(() => {{ const v = document.querySelector('.wv').waveView, q = s => v.root.querySelector(s); {e} }})()")
+        tj("v.setToolsCompact(false, { only: true }); v.arrange(true); return 0;"); tp.wait_for_timeout(80)   # (the labels shown at 560 px)
+        s = tp.locator('.wv').first.locator('.tg[data-tg=marks] > .tl').bounding_box(); d = tp.locator('.wv').first.locator('.tg[data-tg=cursor] > .tl').bounding_box()
+        swipe((s['x'] + 8, s['y'] + s['height'] / 2), (d['x'] + 2, d['y'] + d['height'] / 2))
+        a = [tj("return v.barLines()[0][0];")]
+        tj("v.arrange(false); return 0;"); y0 = tp.evaluate('scrollY'); o0 = tj("return JSON.stringify(v.barLines());")
+        s = tp.locator('.wv').first.locator('.tg[data-tg=list] > .tl').bounding_box()
+        swipe((s['x'] + 8, s['y'] + s['height'] / 2), (s['x'] + 8, s['y'] + s['height'] / 2 - 200))
+        a += [tp.evaluate('scrollY') > y0 + 50, tj("return JSON.stringify(v.barLines());") == o0]
+        ctx.close()
+        check(a == ['marks', True, True], f'touch at 560 px: in the mode a drag moves the group; out of it a swipe over a label scrolls the page, nothing moves {a}')
+    part('touch', touch)
+
+    def narrow_chips():
+        fresh(1920)
+        js("v.root.style.width = '498px'; return 0;"); settle(page); settle(page); settle(page)
+        h0 = js("return Math.round(q('.head').getBoundingClientRect().height);")
+        js("v.highlight(['PADDR', 'PWDATA']); v.hide([v.M.rows.find(r => r.name === 'PSEL')]); return 0;"); settle(page); settle(page); settle(page)
+        a = js("return [Math.round(q('.head').getBoundingClientRect().height), q('.chipn').hidden ? '' : q('.chipn').textContent];")
+        check(a == [h0, '2 filters ▾'], f'a narrow head: the filters folded into one, the head as high as without them ({h0} -> {a})')
+    part('narrow chips', narrow_chips)
+    check(not errs, 'no page errors (the bar arranged)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
+    page.close()
+
+
+def cursor_strip(browser, build):
+    """The cursor and the edges in the strip over the time axis (cursorStrip): there by default, over the waves' column above the
+    axis, out of the bar's lines, seen with the tools folded; 🔒 unlocks ⠿: a drag snaps to the middle, Esc puts it back, the keys move
+    it; kept in this browser (wavelens.bar) for the page's other viewer at once and after a reload (locked again); ⚙ Cursor over the
+    axis puts the groups back in the lines; the groups hidden hide it; the state, the layout command; the cursor field in it works."""
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('the cursor over the time axis: the strip, its lock, its drag, kept')
+    page = browser.new_page(viewport={'width': 1400, 'height': 900})
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle')
+    page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+    page.evaluate("document.querySelector('.wv').scrollIntoView()"); settle(page); settle(page)
+    js = lambda e, n=0: page.evaluate(f"""(async () => {{ const v = document.querySelectorAll('.wv')[{n}].waveView, bar = v.root.querySelector('.bar'),
+        q = s => v.root.querySelector(s), ax = q('.bar .axs'), R = e => e.getBoundingClientRect(); {e} }})()""")
+    wv = page.locator('.wv').first
+    a = js("""const b = R(q('.axs .axb')), w = R(v.wcol), c = R(v.canvas), t = R(q('.bar .tools'));
+        return [ax.hidden, [...ax.querySelectorAll('.axb > .tg')].map(g => g.dataset.tg), [...q('.bar .tools').querySelectorAll('.tg')].some(g =>
+          ['cursor', 'edges'].includes(g.dataset.tg)), Math.abs(b.left - w.left) < 12, b.bottom <= c.top + 1, b.top >= t.bottom - 1,
+          R(ax).height, getComputedStyle(q('.axs .tg > .tl')).display, q('.axs .axg').hidden];""")
+    check(a[:6] == [False, ['cursor', 'edges'], False, True, True, True] and a[6] < 30 and a[7] == 'none' and a[8],
+          f'the strip: there by default, the cursor and the edges in it (not in the lines), at the left of the waves\' column, between the '
+          f'tools and the axis, slim, no labels, locked {a}')
+    c0 = js('return v.cursor;'); wv.locator('.axs .ct').fill('55'); wv.locator('.axs .ct').press('Enter'); settle(page)
+    c1 = js("return [v.cursor, q('.axs .ct').value, q('.axs .ct').classList.contains('bad')];")
+    check(c1[0] != c0 and c1[1:] == ['55', False], f'the cursor field in the strip: Enter takes the time {c0} {c1}')
+    wv.locator('button[data-act=tools]').click(); settle(page)
+    f = js("return [v.root.classList.contains('wv-tools-folded'), ax.hidden, R(ax).height > 0];")
+    wv.locator('button[data-act=tools]').click(); settle(page)
+    check(f == [True, False, True], f'the tools folded: the strip stays {f}')
+    # 🔒: ⠿ appears; a drag near the middle snaps to it; kept in wavelens.bar; the page's other viewer follows at once
+    wv.locator('.axs .axl').click(); settle(page)
+    u = js("return [ax.classList.contains('open'), q('.axs .axg').hidden, q('.axs .axl').getAttribute('aria-pressed')];")
+    g, w, b = (wv.locator(s).bounding_box() for s in ('.axs .axg', '.axs .axw', '.axs .axb'))
+    to = g['x'] + 4 + (w['width'] - b['width']) / 2 + 9   # 9 px off the middle: snapped
+    page.mouse.move(g['x'] + 4, g['y'] + 6); page.mouse.down(); page.mouse.move(to, g['y'] + 6, steps=10); page.mouse.up(); settle(page)
+    m = js("""const b = R(q('.axs .axb')), w = R(q('.axs .axw'));
+        return [v.S.cursorStripAt, JSON.parse(localStorage.getItem('wavelens.bar') || '{}').stripAt, Math.abs((b.left + b.right) / 2 - (w.left + w.right) / 2) < 2];""")
+    two = js('return v.S.cursorStripAt;', 1) if page.locator('.wv').count() > 1 else 0.5   # (apb.html: three viewers)
+    check(u == [True, False, 'true'] and m == [0.5, 0.5, True] and two == 0.5,
+          f'🔒 unlocked: ⠿ shown; a drag 9 px off the middle snaps to it, kept in wavelens.bar, the other viewer follows {u} {m} {two}')
+    g = wv.locator('.axs .axg').bounding_box()
+    page.mouse.move(g['x'] + 4, g['y'] + 6); page.mouse.down(); page.mouse.move(g['x'] - 300, g['y'] + 6, steps=6); page.keyboard.press('Escape'); page.mouse.up()
+    settle(page)
+    e = js("return [v.S.cursorStripAt, ax.style.getPropertyValue('--axp'), ax.classList.contains('drag')];")
+    wv.locator('.axs .axg').focus(); page.keyboard.press('End'); k1 = js('return v.S.cursorStripAt;')
+    page.keyboard.press('ArrowLeft'); k2 = js('return v.S.cursorStripAt;'); page.keyboard.press('Home'); k3 = js('return v.S.cursorStripAt;')
+    page.keyboard.press('ArrowRight'); k4 = js('return v.S.cursorStripAt;')
+    check(e == [0.5, '0.5', False] and [k1, k2, k3, k4] == [1, 0.95, 0, 0.05],
+          f'Esc during a drag: back where it was; End ← Home → on ⠿ {e} {[k1, k2, k3, k4]}')
+    page.reload(); page.wait_for_load_state('networkidle'); settle(page)
+    r = js("return [v.S.cursorStripAt, ax.classList.contains('open'), q('.axs .axg').hidden];")
+    check(r == [0.05, False, True], f'a reload: the place kept, locked again {r}')
+    # ⚙ Cursor over the axis: off puts the groups back in the time line (in their order), on takes them out again
+    js("v.setCursorStrip(false); return 0;"); settle(page)
+    o = js("""return [ax.hidden, [...q('.bar .tools .tln').querySelectorAll(':scope > .tg')].map(g => g.dataset.tg).slice(0, 3),
+        JSON.parse(localStorage.getItem('wavelens.bar')).strip, v.state().config.cursorStrip,
+        q('.bpop.wv-gear [data-act=strip]').getAttribute('aria-checked')];""")
+    page.locator('.wv').first.locator('.pgear').click(); page.locator('.wv-menu [data-act=strip]').first.click(); settle(page)
+    on = js("return [ax.hidden, v.S.cursorStrip, [...ax.querySelectorAll('.axb > .tg')].map(g => g.dataset.tg)];")
+    check(o == [True, ['cursor', 'view', 'edges'], False, False, 'false'] and on == [False, True, ['cursor', 'edges']],
+          f'⚙ Cursor over the axis: off, the groups in the time line, kept, in the state; on again {o} {on}')
+    js("v.setToolsHidden(['cursor', 'edges']); return 0;"); hid = js('return ax.hidden;'); js("v.setToolsHidden(null); return 0;")
+    c = js("""const r = await v.run([{ op: 'layout', strip: false, stripAt: 'right' }]), st = v.state().config, b = JSON.parse(localStorage.getItem('wavelens.bar'));
+        const bad = await v.run([{ op: 'layout', stripAt: 3 }]); await v.run([{ op: 'layout', strip: true }]);
+        return [r[0].strip, r[0].stripAt, st.cursorStrip, st.cursorStripAt, b.strip, bad[0].error];""")
+    check(hid is True and c == [False, 1, False, 1, None, 'stripAt: 0 .. 1, "left", "center" or "right"'] and not errs,
+          f'both groups hidden: no strip; the layout command: this viewer only, its errors {hid} {c} {errs[:2]}')
+    page.close()
+
+
+def state_fit(browser, build):
+    """A state of other waves (the trouble of VS Code's last state on a new dump): stateFit counts what it names that is here; taken by
+    itself (o.fit) it is not applied, said, kept for Reload; loaded by hand an Only of no module here is no Only (rows stay), a folding of
+    modules not here leaves the folding; File ▾ Forget the kept view… asks, Cancel keeps all, Forget empties this viewer's keys and the
+    last state and builds the waves again."""
+    apb = build / 'examples' / 'axi_lite' / 'axi_lite_all.html'   # (modules: an Only of one)
+    if not need(apb, how='make examples'):
+        return
+    print('a state of other waves, Forget the kept view')
+    page = browser.new_page(viewport={'width': 1400, 'height': 900})
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+    settle(page)
+    js = lambda e: page.evaluate(f"""(async () => {{ const v = document.querySelector('.wv').waveView, q = s => v.root.querySelector(s),
+        file = (o, n = 'other.view.json') => new File([JSON.stringify(Object.assign({{ wavelens: 'state', version: v.state().version }}, o))], n);
+        {e} }})()""")
+    other = "{ only: { modules: ['no.such.module'] }, hidden: ['no.a', 'no.b'], paint: { 'no.c': '#ff0000' }, select: 'no.d', bookmarks: [{ n: 1, t: 1000, text: 'other' }] }"
+    a = js(f"""const mine = v.stateFit(v.state()), them = v.stateFit({other}), vis = WaveLens.internal.peek(v).vis.length, r = await v.loadState(file({other}), null, {{ fit: true }});
+        return [mine.ok, them.ok, them.named, them.found, r, v.only, v.hiddenRows.size, v.bookmarks().some(b => b.text === 'other'), WaveLens.internal.peek(v).vis.length === vis,
+          q('.bar .toast').textContent.includes('of other waves'), v.root.wlState && v.root.wlState.name];""")
+    check(a == [True, False, 5, 0, None, None, 0, False, True, True, 'other.view.json'],
+          f'a state of other waves taken by itself: does not fit (none of its 5 here), not applied, said, kept for Reload {a}')
+    mod = js("return Object.values(v.M.groups).filter(g => g.path && v.scopeOf(g.path))[2].path;")
+    b = js(f"""const vis = WaveLens.internal.peek(v).vis.length; await v.loadState(file({other}));
+        const r1 = [v.only, WaveLens.internal.peek(v).vis.length > 0, v.bookmarks().some(x => x.text === 'other')];
+        const was = [...WaveLens.internal.peek(v).collapsed].join(); await v.setState({{ wavelens: 'state', config: {{ fold: ['no.such.module'] }} }});
+        await v.setState({{ wavelens: 'state', only: {{ modules: ['no.such.module', '{mod}'] }} }});
+        return [...r1, [...WaveLens.internal.peek(v).collapsed].join() === was, v.only && v.only.modules, v.onlyOn()];""")
+    check(b == [None, True, True, True, [mod], True],
+          f'loaded by hand: an Only of no module here is none (rows stay), the marks on the axis; a folding of no module here leaves it; '
+          f'an Only with one module here keeps that one {b}')
+    # assertions that attach to none of these modules (APB's own page: one bound to a module not here, one not loaded): the bindings
+    # here stay, the ones left out said; the state does not fit by them
+    ap = browser.new_page(); ap.on('pageerror', lambda e: errs.append(str(e)))
+    ap.goto((build / 'examples' / 'apb' / 'apb.html').as_uri()); ap.wait_for_load_state('networkidle'); ap.evaluate('localStorage.clear()')
+    ap.reload(); ap.wait_for_load_state('networkidle'); settle(ap)
+    s1 = ap.evaluate("""(async () => { const v = document.querySelector('.wv').waveView, was = v.sva.bindings.map(b => b.assert + '@' + b.scope).join();
+        const sva = { bind: [{ assert: 'apb_setup_then_access', scope: 'no.such.module' }, { assert: 'not_loaded_here', scope: 'apb_tb' }] };
+        const fit = v.stateFit({ wavelens: 'state', sva }), mine = v.stateFit(v.state());
+        await v.loadState(new File([JSON.stringify({ wavelens: 'state', version: v.state().version, sva })], 'other.view.json'));
+        return [was.length > 0, v.sva.bindings.map(b => b.assert + '@' + b.scope).join() === was, fit.ok, fit.named, mine.ok,
+          v.root.querySelector('.bar .toast').textContent.includes('apb_setup_then_access@no.such.module')]; })()""")
+    ap.close()
+    check(s1 == [True, True, False, 2, True, True],
+          f'a state whose assertions attach to none of these modules: the bindings here stay, the ones left out said, it does not fit; the '
+          f'page\'s own state fits {s1}')
+    # a plugin that throws (its rows, a row's drawing, its marks): left out and said, the waves drawn all the same
+    p1 = js("""const vis = WaveLens.internal.peek(v).vis.length;
+        v.extraRows.push(g => { if (!g) throw new Error('rows boom'); return []; });
+        v.extraRows.push(g => (g ? [] : [{ type: 'space', name: '', height: 14, draw() { throw new Error('draw boom'); }, overlay() { throw new Error('over boom'); } }]));
+        v.extraMarks.push(() => { throw new Error('marks boom'); });
+        v.rowsStale = true; v.renderNames(); v.draw(); await new Promise(r => setTimeout(r, 100)); v.draw();
+        const said = v.logList().map(e => e.text).join(' ');
+        return [WaveLens.internal.peek(v).vis.length >= vis, said.includes('rows boom'), v.canvas.width > 0];""")
+    check(p1 == [True, True, True], f'a plugin that throws in its rows, its row\'s drawing, its overlay, its marks: left out, said in the log, the waves drawn {p1}')
+    errs[:] = [e for e in errs if 'boom' not in e]
+    # Forget the kept view…: asked; Cancel keeps; Forget: the viewer's keys and the last state gone, the waves as they came
+    js("await v.setState({ wavelens: 'state', bookmarks: [{ n: 1, t: 1000, text: 'mine' }], paint: { [v.M.rows.find(r => r.type === 'sig').full]: '#ff0000' } }); return 0;")
+    keys = lambda: page.evaluate("Object.keys(localStorage).filter(k => k.endsWith(':' + document.querySelector('.wv').waveView.storeId))")
+    k0 = keys()
+    wv = page.locator('.wv').first
+    wv.locator('.bar .pfile').click(); wv.locator('.bpop [data-act=sforget]').first.click(); settle(page)
+    ask = page.evaluate("[!!document.querySelector('.wv-ask[role=alertdialog]'), document.activeElement && document.activeElement.dataset.m]")
+    page.locator('.wv-ask button[data-m=no]').click(); settle(page)
+    k1 = keys()
+    wv.locator('.bar .pfile').click(); wv.locator('.bpop [data-act=sforget]').first.click(); settle(page)
+    page.locator('.wv-ask button[data-m=ok]').click(); page.wait_for_timeout(300); settle(page)
+    c = js("""return [v.bookmarks().some(b => b.text === 'mine'), v.painted.size, v.root.wlState, v.only, q('.bar .toast').textContent.includes('forgotten')];""")
+    check(ask == [True, 'no'] and len(k0) >= 2 and k1 == k0 and keys() == [] and c == [False, 0, None, None, True] and not errs,
+          f'File ▾ Forget the kept view…: asked (Cancel in focus), Cancel keeps it; Forget: its keys gone, the waves as they came, said {ask} {k0} {k1} {c} {errs[:2]}')
+    page.close()
 
 
 def synth_page(build):
@@ -8555,9 +9308,11 @@ def tips(browser, build):
     check(fold and all(f == [False, False, 'false'] for f in fold) and opened, f'the assertion list starts folded (svaOpen: false); ▸ Assertions opens it {fold}')
     lines = page.evaluate("[...document.querySelector('.wv .bar .tools').children].map(l => [l.dataset.ln, [...l.querySelectorAll(':scope > .tg')].map(g => g.dataset.tg), Math.round(l.getBoundingClientRect().top)])")
     got = {l[0]: l[1] for l in lines}
-    check([l[0] for l in lines] == ['time', 'find', 'rows'] and got['time'][:3] == ['cursor', 'view', 'edges'] and got['find'] == ['find', 'expression']
-          and got['rows'] == ['list', 'style', 'state', 'dump', 'assertions'] and len({l[2] for l in lines}) == 3,
-          f'the bar: one line per kind (time, signals and conditions, rows and files), the plugins\' groups on theirs {lines}')
+    strip = page.evaluate("[...document.querySelector('.wv .bar .axs .axb').querySelectorAll(':scope > .tg')].map(g => g.dataset.tg)")
+    check([l[0] for l in lines] == ['time', 'find', 'rows'] and got['time'][:2] == ['view', 'marks'] and got['find'] == ['find', 'expression', 'assertions']
+          and got['rows'] == ['list', 'signal', 'file', 'compare'] and len({l[2] for l in lines}) == 3 and strip == ['cursor', 'edges'],
+          f'the bar: one line per kind (time, signals and conditions, rows and files), the plugins\' groups on theirs; the cursor and the edges '
+          f'over the axis {lines} {strip}')
     miss = page.evaluate("""[...document.querySelector('.wv').querySelectorAll('button, input:not([type=file]), select, .mk')].filter(e => !WaveLens.tips.of(e)).map(e => e.outerHTML.slice(0, 80))""")
     check(not miss, f'every button, field and list of a viewer (bar, assertions, bookmarks) has a tooltip (missing: {miss[:5]})')
     b = page.locator('.wv button[data-act=in]').first; b.hover(); until(page, "!!document.querySelector('.wv-tip')")
@@ -9168,6 +9923,10 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'deep': 'the synthetic page (and work/test_stream_video.html): every level on the page, virtualised canvas',
     'modules': 'the synthetic page: the Modules panel (t), a click goes to a module, a box keeps Only those, the keys, the twin; 10 000 modules',
     'bar_tools': 'the synthetic page: the right button on the bar, its tool groups shown or left out (Show all, Hide all)',
+    'bar_layout': 'the bar: its bugs T-01 … T-19, three rows at rest and busy, the short form, the groups, the new buttons as their keys, ⚙ and File ▾',
+    'state_fit': 'a state of other waves: not taken by itself, an Only of no module here none, a folding left; Forget the kept view… asked, Cancel, Forget',
+    'cursor_strip': 'the cursor and the edges over the time axis: there by default, folded tools, 🔒 ⠿ drag with a snap, Esc, the keys, kept, ⚙ off / on, the command',
+    'bar_arrange': 'the bar arranged: at rest nothing changes; the mode, the drag, Esc, a reload, undo, T-04, the dialog by the keys, presets, bad data, touch',
     'fst': 'BUILD/demo_fst.html (make demo-fst): FSM state names and hierarchy from the FST',
     'examples': 'the example pages (make examples): bookmarks, arrows, colours, state names, their assertions',
     'big': 'every built page: redraw time, Sort',
@@ -9294,16 +10053,16 @@ def state_reload(page, v, st):
     write('first')
     page.evaluate("""() => { window.__opts = []; window.__hand = { kind: 'file', name: 'h.view.json', queryPermission: async () => 'granted',
         getFile: async () => new File([window.__txt], 'h.view.json') }; window.showOpenFilePicker = async o => { window.__opts.push(o); return [window.__hand]; }; }""")
-    v.locator('button[data-act=sload]').click(); has('first')
+    bact(page, 'sload', root=v); has('first')   # (File ▾)
     check(page.evaluate('window.__opts[0].id') == 'wavelens-state' and page.evaluate(f"{view}.stateBtn.title") == 'Read h.view.json again (r)',
           'Load…: the picker of its own folder (its id), Reload names the file')
-    write('second'); v.locator('button[data-act=sreload]').click(); has('second')
+    write('second'); bact(page, 'sreload', root=v); has('second')
     check(len(page.evaluate('window.__opts')) == 1, 'Reload: the file read again, no picker')
     write('third'); v.locator('canvas').first.click(position={'x': 40, 'y': 40}); page.keyboard.press('r'); has('third')
     check(True, 'r: the same as Reload')
     page.evaluate(f"{view}.openDump(new File([`$timescale 1ns $end\\n$var wire 1 ! a $end\\n$enddefinitions $end\\n#0\\n0!\\n#5\\n1!\\n`], 'n.vcd'))")
     page.wait_for_function(f"{view}.opts.title === 'n.vcd'", timeout=5000)
-    write('fourth'); v.locator('button[data-act=sreload]').click()
+    write('fourth'); bact(page, 'sreload', root=v)
     page.wait_for_function(f"{view}.root.querySelector('.bar .toast').textContent.includes('h.view.json loaded')", timeout=5000)
     check(page.evaluate(f"{view}.stateBtn.hidden") is False, 'a dump opened after it: Reload stays, reads the same file')
     page.evaluate("delete window.showOpenFilePicker")
@@ -9499,6 +10258,10 @@ def main():
         run('ranges', small_menu, b, build)
         run('menus', menus, b, build)
         run('menus', menu_bugs, b, build)
+        run('bar_layout', bar_layout, b, build)
+        run('bar_arrange', bar_arrange, b, build)
+        run('cursor_strip', cursor_strip, b, build)
+        run('state_fit', state_fit, b, build)
         run('buses', buses, b, build)
         run('tips', tips, b, build)
         run('sva_report', sva_report, b, build)

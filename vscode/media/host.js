@@ -5,7 +5,8 @@
    - a file picker (an <input type=file> clicked: Load state, the .sv files, Open…) -> an open dialog on the host (Open…
      a dump: a tab of its own); no showOpenFilePicker (a handle of the client's disk);
    - the last state loaded in this workspace: a handle over the host's file, for Reload (r) in every tab; a new dump takes it
-     (wavelens.openLastState);
+     (wavelens.openLastState) when it fits the dump (stateFit: else said, r applies it); Forget the kept view: this dump's store
+     emptied, the last state forgotten in every tab;
    - Compare… -> an open dialog on the host and sva diff there (the second dump, VCD or FST, never sent here): its result
      over the tab's waves (compareResult);
    - the runs kept (WAVELENS_RUNS, the Runs panel): sva runs on the host (.wavelens-runs beside the dump), a run compared
@@ -46,12 +47,39 @@
     return btoa(s); };
   const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
 
-  /* ---- localStorage: this dump's keys ---- */
+  /* ---- localStorage: this dump's keys; the bar's, one for every tab (T-05 of docs/reviews/toolbar-2026-11-11) ---- */
+  // the key wavelens.bar (the arrangement, the short form) and the tools' parts of a viewer's look (toolsHidden, toolsFolded) are
+  // the extension's globalState: the same bar in every tab, a change posted to the others (gstore)
   const data = new Map(Object.entries(H.store || {}));
+  const glob = { bar: null, look: {} }, GLOOK = ['toolsHidden', 'toolsFolded'];
+  if (H.global && typeof H.global === 'object') { if (typeof H.global.bar === 'string') glob.bar = H.global.bar;
+    if (H.global.look && typeof H.global.look === 'object') glob.look = H.global.look; }
+  const isLook = k => k.startsWith('wavelens.look:');
+  const parse = t => { try { const o = JSON.parse(t); return o && typeof o === 'object' ? o : {}; } catch (e) { return {}; } };
+  const gput = (key, value) => vscode.postMessage({ type: 'gstore', key, value });
+  const own = (k, v) => { if (v == null) { if (data.delete(k)) vscode.postMessage({ type: 'store', key: k, value: null }); return; }
+    if (data.get(k) === v) return; data.set(k, v); vscode.postMessage({ type: 'store', key: k, value: v }); };
   const store = {
-    getItem: k => (data.has(String(k)) ? data.get(String(k)) : null),
-    setItem(k, v) { k = String(k); v = String(v); if (data.get(k) === v) return; data.set(k, v); vscode.postMessage({ type: 'store', key: k, value: v }); },
-    removeItem(k) { k = String(k); if (data.delete(k)) vscode.postMessage({ type: 'store', key: k, value: null }); },
+    getItem(k) {
+      k = String(k); if (k === 'wavelens.bar') return glob.bar;
+      if (!isLook(k)) return data.has(k) ? data.get(k) : null;
+      const o = Object.assign(parse(data.get(k) || '{}'), glob.look); for (const x of GLOOK) if (!(x in glob.look)) delete o[x];
+      return Object.keys(o).length ? JSON.stringify(o) : null;
+    },
+    setItem(k, v) {
+      k = String(k); v = String(v);
+      if (k === 'wavelens.bar') { if (glob.bar !== v) { glob.bar = v; gput('bar', v); } return; }
+      if (!isLook(k)) { own(k, v); return; }
+      const o = parse(v), g = {}; for (const x of GLOOK) if (x in o) { g[x] = o[x]; delete o[x]; }
+      if (JSON.stringify(g) !== JSON.stringify(glob.look)) { glob.look = g; gput('look', JSON.stringify(g)); }
+      own(k, Object.keys(o).length ? JSON.stringify(o) : null);
+    },
+    removeItem(k) {
+      k = String(k);
+      if (k === 'wavelens.bar') { if (glob.bar != null) { glob.bar = null; gput('bar', null); } return; }
+      if (isLook(k) && Object.keys(glob.look).length) { glob.look = {}; gput('look', null); }
+      own(k, null);
+    },
     clear() { for (const k of [...data.keys()]) this.removeItem(k); },
     key: i => [...data.keys()][i] ?? null,
     get length() { return data.size; },
@@ -76,7 +104,12 @@
   const lastState = p => ({ kind: 'file', name: p.replace(/^.*[\\/]/, ''), path: p, getFile: async () => { const m = await call('state-read', {});
     if (m.error) throw new Error(m.error);
     return new File([unb64(m.b64)], m.name, { lastModified: m.mtime }); } });
-  on.laststate = m => { lastPath = m.path; const v = view(); if (v) v.keepState(lastState(m.path)); };
+  on.laststate = m => { lastPath = m.path || null; const v = view(); if (!v) return;
+    if (lastPath) v.keepState(lastState(lastPath)); else { v.root.wlState = null; v.stateShow(); } };
+  // File ▾ Forget the kept view: every key of this dump's store goes (the viewer's own are gone already), the last state of the
+  // workspace too (the extension tells every tab)
+  document.addEventListener('wavelens:forget', () => { for (const k of [...data.keys()]) own(k, null); lastPath = null;
+    vscode.postMessage({ type: 'forget' }); });
 
   /* ---- file pickers ---- */
   const iclick = HTMLInputElement.prototype.click;
@@ -210,6 +243,10 @@
     }
   };
   on.config = m => userConfig(m.config, true);
+  // another tab changed the bar: this one's viewers take it (nothing written back)
+  on.gstore = m => { if (m.key === 'bar') glob.bar = m.value == null ? null : String(m.value); else if (m.key === 'look') glob.look = m.value == null ? {} :
+    parse(m.value);
+    if (G.WaveLens) for (const v of WaveLens.views()) if (v.root.isConnected && v.barReload) v.barReload(); };
   document.addEventListener('wavelens:theme', e => { e.preventDefault(); vscode.postMessage({ type: 'theme' }); }, true);   // the bar's ◐: VS Code's list
   if (H.build) G.WAVELENS_BUILD = H.build;   // the bar's version line: the extension's branch and commit
 
@@ -296,7 +333,8 @@
     const v = view(); let nv = v;
     try { await sources(); nv = await view().openDump(await fetchDump(), handle); }
     catch (e) { if (v) v.toast('cannot read ' + H.name + ': ' + e.message); vscode.postMessage({ type: 'log', text: String(e.stack || e) }); nv = null; }
-    if (nv && lastPath) { nv.keepState(lastState(lastPath)); if (fresh && H.openLastState) await nv.reloadState(); }
+    // (taken by itself only when it fits this dump: a state of other waves would leave rows or modules out, an Only of none)
+    if (nv && lastPath) { nv.keepState(lastState(lastPath)); if (fresh && H.openLastState) await nv.reloadState({ fit: true }); }
     vscode.postMessage(Object.assign({ type: 'ready', title: nv && nv.opts.title }, last));
   });
   // a dump dropped on the tab would replace its waves under this tab's name, store and watcher: a tab of its own instead

@@ -243,6 +243,8 @@ Object.assign(SVA, { load, plan, assemble, tvSampler, rowSampler, fromLabel });
 // the tooltips of the panel's and the bar's controls (WaveLens.tips): what each does, its keys
 if (G.WaveLens && G.WaveLens.tips) G.WaveLens.tips.add({
   'sv:load': ['Load .sv / .sva files (kept in this browser)'], 'sv:tw': ['Fold / open the assertions'],
+  'sv:fprev': ['The previous assertion failure in the view', ['[f']], 'sv:fnext': ['The next assertion failure in the view', [']f']],
+  '.svf': ['The failures by name and time: a click goes there'],
   'sv:watch': ['Read the files again when they change on the disk'], 'sv:json': ['The bindings (and files) as JSON for a config'],
   'sv:clear': ['Forget this browser\'s files and bindings'], 'sv:table': ['One row per binding: counts, failures, latency'],
   'sv:fails': ['Every failed attempt by time'], 'sv:xmd': ['Download the report as Markdown'], 'sv:xjson': ['Download the results as JSON'],
@@ -975,14 +977,24 @@ class Panel {
     this.key = 'wavelens.sva:' + (v.storeId || G.location.pathname + ':' + (v.opts.key || v.root.id || v.root.dataset.wave || v.M.title));
     this.el = document.createElement('div'); this.el.className = 'sva'; this.el.hidden = true;
     v.addPanel(this.el);
+    // the bar's SVA group: ◀ ✕ N ▶ through the failures in the view, ▾ them by name (once there are bindings), else Load file…
+    // (File ▾ of the bar has Load assertions… too)
     if (G.WAVELENS_SVA_WASM) {
       const g = v.addTool('assertions',
-        ('<button type="button" data-sv="load" title="Load SystemVerilog assertion files (.sv, .sva): parsed in the page, kept in this browser">Load ' +
-          'file…</button><input type="file" class="svfile" multiple accept=".sv,.sva,.svh,.v,.vh,.txt" hidden>'));
-      g.classList.add('sv');
+        ('<span class="seg svwalk" hidden><button type="button" data-sv="fprev" aria-label="previous failure" disabled>◀</button><span class="svn">✕ 0</span>' +
+          '<button type="button" data-sv="fnext" aria-label="next failure" disabled>▶</button><button type="button" class="pop svf" data-pop="svaf" ' +
+          'aria-haspopup="menu" aria-expanded="false" aria-label="the failures by name">▾</button></span>' +
+          '<div class="bpop svj" data-pop="svaf" role="menu" hidden></div>') +
+        ('<button type="button" data-sv="load">Load file…</button><input type="file" class="svfile" multiple accept=".sv,.sva,.svh,.v,.vh,.txt" hidden>'));
+      g.classList.add('sv'); g.querySelector('.tl').textContent = 'SVA';
       const inp = g.querySelector('input.svfile');
       g.querySelector('button[data-sv=load]').addEventListener('click', () => inp.click());
       inp.addEventListener('change', () => { const fs = [...inp.files]; inp.value = ''; if (fs.length) this.load(fs); });
+      g.addEventListener('click', e => { const b = e.target.closest('button[data-sv=fprev], button[data-sv=fnext]');
+        if (b) this.step(b.dataset.sv === 'fnext' ? 1 : -1); });
+      this.walkG = g; this.jumpEl = g.querySelector('.svj');
+      this.jumpEl.addEventListener('click', e => { const btn = e.target.closest('button[data-svj]'); if (!btn) return;
+        const f = this.failures()[+btn.dataset.svj]; if (f) this.select(f.b, f.i); });
     }
     this.el.addEventListener('click', e => this.click(e));
     this.el.addEventListener('keydown', e => {   // in the editor: ctrl+Enter applies, Esc cancels
@@ -1004,7 +1016,7 @@ class Panel {
     v.root.addEventListener('wavelens:settings', () => this.sync(), { signal: v.ac.signal });   // sortIgnore prefixes: the names resolve again
     if (v.extraJSON) v.extraJSON.push(() => this.bindings.length ? `"bind": [\n${this.bindJSON().map(x => '  ' + JSON.stringify(x)).join(',\n')}\n]` : null);
     // undo: the bindings and the hidden ones (not the files read: a load is no step of its own)
-    if (v.extraState) v.extraState.push({ key: 'sva', get: () => this.snapshot(), set: s => this.restore(s),
+    if (v.extraState) v.extraState.push({ key: 'sva', get: () => this.snapshot(), set: s => this.restore(s), fit: s => this.fit(s),
       undo: () => ({ bind: this.bindJSON(), hidden: [...this.hidden] }) });
     // on the waves: the rows of the bindings, f / F through the failures, Esc unselects
     this.selA = null; this.dirty = true; this.at = new Map(); this.sumN = 0;
@@ -1052,11 +1064,25 @@ class Panel {
       i: this.selA.i } } : {}) };
     return s;
   }
+  // a binding of a state that would attach here: its assertion loaded and its signals found in its module of these waves
+  attaches(x) { const y = LIB.byLabel.get(x.assert); try { return !!(y && resolve(this.v, y.a, x.scope || '').ok); } catch (e) { return false; } }
+  // the viewer's stateFit: the bindings of a state, the ones that would not attach here (an assertion not loaded and not in the
+  // state's files, or its signals not in these waves; one in its files, not loaded yet: not judged)
+  fit(s) {
+    const list = (s && Array.isArray(s.bind) ? s.bind : []).filter(b => b && b.assert), files = s && Array.isArray(s.files) ? s.files : [];
+    const judged = list.filter(x => LIB.byLabel.has(x.assert) || !files.some(f => f && typeof f.source === 'string' && f.source.includes(x.assert)));
+    return { named: judged.length, miss: judged.filter(x => !this.attaches(x)).map(x => `${x.assert}@${x.scope || '(top)'}`) };
+  }
+  // -> the bindings of the state that do not attach here (said by Load…). None of them attaching (a state of other waves): the
+  // bindings here stay as they are, not replaced by ones that cannot be drawn
   async restore(s) {
     const files = (s.files || []).filter(f => f && f.name && typeof f.source === 'string' && !active().some(x => x.name === f.name && x.source === f.source));
     if (files.length) await SVA.loadFiles(files.map(f => ({ name: f.name, text: f.source }))); else await LIB.parsing;
+    const named = (s.bind || []).filter(b => b && b.assert).map(b => ({ assert: b.assert, scope: b.scope || '' }));
+    const out = named.filter(x => !this.attaches(x)).map(x => `${x.assert}@${x.scope || '(top)'}`);
+    if (named.length && out.length === named.length && !this.v.undoing) return out;   // (undo: as it was, whatever it was)
     if (s.bind !== undefined || s.hidden !== undefined) {
-      const list = (s.bind || []).filter(b => b && b.assert).map(b => ({ assert: b.assert, scope: b.scope || '' })), want = new Set(list.map(bkey));
+      const list = named, want = new Set(list.map(bkey));
       const old = this.bindings, page = pageBinds(this.v.M);
       for (const b of old) if (!want.has(bkey(b))) { this.dropSel(b); if (b.page) this.removed.add(bkey(b)); }
       this.bindings = list.map(x => {
@@ -1074,6 +1100,7 @@ class Panel {
       const w = s.view.sel, b = w && this.bindings.find(x => x.assert === w.assert && (x.scope || '') === w.scope);
       if (b && b.results) this.select(b, w.i);
     }
+    return out;
   }
   toast(m) { this.v.toast(m); }
   // after the files or the settings changed: resolve the bindings again, take kept results, evaluate the others
@@ -1331,21 +1358,19 @@ class Panel {
     if (i < 0) { this.toast('no failure'); return; }
     this.select(b, i);
   }
-  // at most six failures: jump buttons in the bar's "go to" group
+  // the bar's SVA group: the failures of the drawn bindings in the view counted, ◀ ▶ through them, ▾ each by name (any number of them,
+  // the box scrolls); no binding: Load file… instead
   jumps() {
-    let el = this.jumpEl;
-    const fs = this.failures(), show = fs.length > 0 && fs.length <= 6;
-    // a "go to" of its own goes too
-    if (!show) { if (el) { const g = el.parentElement; el.remove(); this.jumpEl = null; if (g && g.children.length === 1) g.remove(); } return; }
-    if (!el) {
-      el = this.jumpEl = document.createElement('span'); el.className = 'svj';
-      this.v.addTool('go to', el);
-      el.addEventListener('click', e => { const btn = e.target.closest('button[data-svj]'); if (!btn) return; const f = this.failures()[+btn.dataset.svj];
-        if (f) this.select(f.b, f.i); });
-    }
-    el.innerHTML = fs.map((f, k) =>
-      (`<button type="button" class="fail" data-svj="${k}" title="${esc(`${f.b.assert}: ${f.a.note || 'fail'} (cycle ${f.a.start})`)}">✕ ${esc(f.b.assert)} ` +
-        `${esc(this.v.fmt(f.t, (this.v.M.t1 - this.v.M.t0) / 1000, this.v.M.t1 - this.v.M.t0))}</button>`)).join('');
+    const g = this.walkG; if (!g) return;
+    const fs = this.failures(), inv = fs.filter(f => this.inView(f.b)).length, w = g.querySelector('.svwalk'), ld = g.querySelector('button[data-sv=load]');
+    const has = this.bindings.length > 0;
+    if (w.hidden === has || ld.hidden !== has) { w.hidden = !has; ld.hidden = has; this.v.layoutShow(); }
+    g.querySelector('.svn').textContent = `✕ ${inv}${inv < fs.length ? ` / ${fs.length}` : ''}`;
+    for (const b of g.querySelectorAll('button[data-sv=fprev], button[data-sv=fnext], .svf')) b.disabled = !fs.length;
+    this.jumpEl.innerHTML = '<div class="mh">The failures, by time</div>' + fs.map((f, k) =>
+      (`<button type="button" role="menuitem" class="fail" data-svj="${k}" title="${esc(`${f.b.assert}: ${f.a.note || 'fail'} (cycle ${f.a.start})`)}">` +
+        `<span>✕ ${esc(f.b.assert)}</span><span class="kk">${esc(this.v.fmt(f.t, (this.v.M.t1 - this.v.M.t0) / 1000, this.v.M.t1 - this.v.M.t0))}</span>` +
+        '</button>')).join('');
   }
   async load(files) {
     this.toast('parsing…');
@@ -1938,8 +1963,8 @@ class Exprs {
     const g = v.addTool('expression',
       ('<button type="button" data-x="open" aria-pressed="false" title="The list of expressions: write them, mark them on the waves, go through their ' +
         'matches (g x)">ƒ Expressions<span class="svqn"></span></button>') +
-      ('<button type="button" data-x="prev" title="The previous match of the expression you are on ([x)">◀</button>' +
-        '<button type="button" data-x="next" title="The next match of the expression you are on (]x)">▶</button>' +
+      ('<span class="more"><span class="seg"><button type="button" data-x="prev" aria-label="previous match">◀</button>' +
+        '<button type="button" data-x="next" aria-label="next match">▶</button></span></span>' +
         '<span class="svqk" aria-live="polite"></span>'));
     g.classList.add('svx-tool');
     this.btn = g.querySelector('[data-x=open]'); this.cnt = g.querySelector('.svqn'); this.pos = g.querySelector('.svqk');

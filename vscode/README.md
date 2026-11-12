@@ -20,7 +20,8 @@ is turned into VCD text with it, kept in the extension's storage).
 - **A new simulation**: the tab says when the dump changed; ⟳ (the bar, or *WaveLens: Read the dump again* in the editor's title) reads it again with the
   view kept. `wavelens.autoReload`: at once.
 - **The last state**, the workspace's whichever dump it was: Load… opens on that file, **Reload** (`r`) reads it in every tab, a dump seen for
-  the first time takes it at once (`wavelens.openLastState`), a dump with a view of its own keeps it.
+  the first time takes it at once (`wavelens.openLastState`) when it fits the dump: at least half of the signals and modules it names are there, and one module of its Only — a state of other waves is not applied (said in the bar and the log; `r` applies it anyway); a dump with a view of its own keeps it. **File ▾ →
+  Forget the kept view…** forgets a dump's view and the last state; *WaveLens: Forget the kept views*, every dump's.
 - **Saving** (state, PNG, SVG, WaveDrom, the report) asks where on the host; **Load…**, the `.sv` files and Compare
   pick on the host too. Bookmarks, groups, colours are kept per dump in the workspace (the store of a dump that no longer exists goes at the next start).
 - **A piece of the waves** (the right button on a range: *Save as WaveLens (JSON)*): `x.wavelens.json` opens in a tab
@@ -55,7 +56,7 @@ is turned into VCD text with it, kept in the extension's storage).
   value, a `$timescale` it cannot read, …) to the output channel *WaveLens* and to the **Problems** panel on their
   lines; a dump it cannot read is an error there with its line. *WaveLens: Show the log* (the editor's title).
 - **Theme**: `wavelens.theme` — `auto` (light or dark by VS Code's), `vscode` (the colours of VS Code's theme),
-  `light`, `white`, `dark`; **◐** in the bar (or *WaveLens: Choose the theme of the waves* in the editor's title) previews
+  `light`, `white`, `dark`; **⚙ ▾ → Theme ▸** in the bar (or *WaveLens: Choose the theme of the waves* in the editor's title) previews
   each on the open tabs.
 - **The version** in the bar: `0.35 · dev@5470d89*`, the extension's branch and commit (`*`: changes not committed).
 

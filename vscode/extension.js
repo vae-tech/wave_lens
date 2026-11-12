@@ -227,6 +227,7 @@ const typesFile = f => f.replace(/\.(vcd|fst)$/i, '') + '.types.json';
 
 /* ---------------- a tab: one dump in a webview ---------------- */
 const LAST_STATE = 'lastState';   // workspaceState: the path of the state loaded last
+const GLOBAL_BAR = 'wavelens.bar';   // globalState: the bar of every tab {bar: the text of wavelens.bar, look: {toolsHidden, toolsFolded}}
 class Tab {
   constructor(uri, panel) {
     this.uri = uri; this.file = uri.fsPath; this.panel = panel; this.wait = new Map(); this.rid = 0; this.streams = new Map(); this.procs = new Set();
@@ -253,7 +254,7 @@ class Tab {
     const host = { name, path: this.file, store: this.storeNow(), autoReload: !!vscode.workspace.getConfiguration('wavelens').get('autoReload'),
       theme: themeOf(), build: buildOf(), keysLeft: vscode.workspace.getConfiguration('wavelens').get('keysToVSCode') || [],
       lastState: CTX.workspaceState.get(LAST_STATE) || null, openLastState: !!vscode.workspace.getConfiguration('wavelens').get('openLastState'),
-      config: cfgNow() };
+      config: cfgNow(), global: CTX.globalState.get(GLOBAL_BAR) || {} };
     const scripts = MEDIA.filter(f => f.endsWith('.js')).map(f => `<script nonce="${nonce}" src="${u(r.wavelens, f)}"></script>`).join('\n');
     return `<!doctype html>
 <html lang="en">
@@ -338,9 +339,20 @@ ${scripts}
         clearTimeout(this.storeT); this.storeT = setTimeout(() => this.flush(), 300);
         return;
       }
+      case 'gstore': {   // the bar of every tab (its arrangement, the tools shown and folded): kept for VS Code, posted to the other tabs
+        if (m.key !== 'bar' && m.key !== 'look') return;
+        const g = Object.assign({}, CTX.globalState.get(GLOBAL_BAR) || {}), v = m.value == null ? null : String(m.value);
+        if (m.key === 'bar') { if (v == null) delete g.bar; else g.bar = v; }
+        else { let o = null; try { o = v == null ? null : JSON.parse(v); } catch (e) { o = null; }
+          if (o && typeof o === 'object') g.look = o; else delete g.look; }
+        await CTX.globalState.update(GLOBAL_BAR, g);
+        for (const t of TABS) if (t !== this) t.post({ type: 'gstore', key: m.key, value: v });
+        return;
+      }
       case 'save': return reply(await this.save(String(m.name || 'wavelens.out'), Buffer.from(String(m.b64 || ''), 'base64')));
       case 'pick': return reply(await this.pick(String(m.accept || ''), !!m.multiple, !!m.state));
       case 'state-kept': return this.stateKept();
+      case 'forget': return forgetLast();
       case 'state-read': return reply(await this.stateRead());
       case 'compare': return reply(await this.compare(Array.isArray(m.signals) ? m.signals.map(String) : [], +m.from, +m.to,
         typeof m.path === 'string' && m.path ? m.path : null, m.of));
@@ -980,6 +992,26 @@ async function cfgOpen() {
   try { cfgRead(doc.getText()); } catch (e) { /* marks only */ }
 }
 // Reset to the defaults: the file written anew (asked first), applied
+// the last state of the workspace forgotten (Forget the kept view of a tab, the command): no tab reloads it, no new dump takes it
+async function forgetLast() {
+  await CTX.workspaceState.update(LAST_STATE, undefined);
+  for (const t of TABS) t.post({ type: 'laststate', path: null });
+}
+// WaveLens: Forget the kept views — every dump's store of this workspace (its rows, paint, marks, look …) and the last state; the
+// tabs open are made again from their dumps
+async function forgetViews() {
+  const yes = 'Forget';
+  const ask = 'WaveLens: forget the kept view of every dump of this workspace (rows, paint, bookmarks, markers, look) and the state loaded last? ' +
+    'The bar\'s arrangement stays.';
+  if (await vscode.window.showWarningMessage(ask, { modal: true }, yes) !== yes) return;
+  const keys = CTX.workspaceState.keys().filter(k => k.startsWith('store:'));
+  for (const k of keys) await CTX.workspaceState.update(k, undefined);
+  await CTX.workspaceState.update(LAST_STATE, undefined);
+  const r = roots();
+  for (const t of TABS) { clearTimeout(t.storeT); t.storeT = null; t.changed.clear(); t.fresh = true; t.panel.webview.html = t.html(r); }
+  log(`forgot the kept views of ${keys.length} dump${keys.length === 1 ? '' : 's'} and the last state`);
+  vscode.window.showInformationMessage(`WaveLens: the kept views of ${keys.length} dump${keys.length === 1 ? '' : 's'} forgotten, and the last state`);
+}
 async function cfgReset() {
   const yes = 'Reset';
   const ask = 'WaveLens: the configuration back to the defaults? Your values in it are lost.';
@@ -1049,6 +1081,7 @@ function activate(ctx) {
     vscode.commands.registerCommand('wavelens.log', () => OUT.show(true)),
     vscode.commands.registerCommand('wavelens.openConfig', cfgOpen),
     vscode.commands.registerCommand('wavelens.resetConfig', cfgReset),
+    vscode.commands.registerCommand('wavelens.forgetViews', forgetViews),
     vscode.workspace.onDidSaveTextDocument(doc => { if (CTX && doc.uri.fsPath === configFile()) cfgApply(doc.getText()); }),
     vscode.commands.registerCommand('wavelens.verilatorTypes', opts => verilatorTypes(active(), opts || {})),
     vscode.commands.registerCommand('wavelens.toFst', (uri, opts) => {   // the explorer's file, else the active tab's dump

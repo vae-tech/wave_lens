@@ -98,7 +98,7 @@
     workspace: they survive closing the tab and VS Code.</td></tr>
   <tr><td>theme and keys</td><td><code>wavelens.theme</code>: the viewer's light or dark by VS Code's (<code>auto</code>), the
     colours of VS Code's own theme (<code>vscode</code>), or always <code>light</code>, <code>white</code> or <code>dark</code>;
-    <b>◐</b> in the viewer's bar (or <i>WaveLens: Choose the theme of the waves</i> in the editor's title) shows each on the open
+    <b>⚙ ▾ → Theme ▸</b> in the viewer's bar (or <i>WaveLens: Choose the theme of the waves</i> in the editor's title) shows each on the open
     tabs as you move through the list. The viewer's keys (<kbd>?</kbd>) work in the tab and do not reach VS Code: the plain ones,
     and <kbd>ctrl+F</kbd> <kbd>ctrl+C</kbd> <kbd>ctrl+Z</kbd> <kbd>alt+C W R</kbd>, which mean what they mean in VS Code.
     <code>wavelens.keysToVSCode</code> (default <kbd>ctrl+G</kbd>, Go to Line) go to VS Code — the viewer's list of your groups is
@@ -153,6 +153,8 @@
   <li>One that breaks the viewer anyway: the tab goes back to the defaults (VS Code's theme and keys kept, your colours gone) and says so
     (<span class="ui">Open</span> or <span class="ui">Reset</span>).</li>
   <li><i>WaveLens: Reset the configuration to the defaults</i> writes the file anew (asked first) and applies it.</li>
+  <li><i>WaveLens: Forget the kept views</i> (asked first): the kept view of every dump of the workspace and the state loaded last go; the
+    tabs open come back as their dumps came (<span class="ui">File ▾ → Forget the kept view…</span>: one dump's).</li>
 </ul>
 
 <h2 id="agent">With an AI agent on the host</h2>
@@ -178,7 +180,7 @@
   <tr><td><code>wavelens.logLinks</code></td><td><code>[]</code></td><td>more patterns of a time in a log or the terminal (regular expressions
     with the groups <code>t</code>, <code>unit</code>, <code>sig</code>): links to the dump's tab, <a href="#log-links">below</a></td></tr>
   <tr><td><code>wavelens.autoReload</code></td><td>false</td><td>after a new simulation: read the dump at once (false: offer ⟳)</td></tr>
-  <tr><td><code>wavelens.openLastState</code></td><td>true</td><td>a dump seen for the first time takes the state loaded last (false: only Reload offers it)</td></tr>
+  <tr><td><code>wavelens.openLastState</code></td><td>true</td><td>a dump seen for the first time takes the state loaded last when it fits the dump (half of the signals and modules it names there, one module of its Only; else said, <kbd>r</kbd> applies it); false: only Reload offers it</td></tr>
   <tr><td><code>wavelens.lazy</code></td><td>auto</td><td>a large dump read as it is needed (auto: an FST of 4 MB, a VCD of 64 MB
     and more; always; never: read whole, cut to <code>dumpBudget</code>)</td></tr>
   <tr><td><code>wavelens.live</code></td><td>true</td><td>the tabs connect to an agent's live link (false: they do not); <i>WaveLens: Connect to the agent</i> connects the tab now</td></tr>
@@ -193,7 +195,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.52 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.53 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

@@ -571,15 +571,29 @@ command('style', 'name', `the edge style: ${Object.keys(EDGES).join(' ')} (null:
   if (a.name != null && !hasKey(EDGES, a.name)) fail(`name: one of ${Object.keys(EDGES).join(' ')}`);
   v.setStyle(a.name); return { style: v.S.style };
 });
-command('layout', 'scroll? height? tools?', 'where the rows scroll: window (in the viewer, height: "80vh", 600) or page (with the page, the ' +
-  'bar sticking to the top); tools: fold or open (the bar\'s tools to its title line)', (v, a) => {
+command('layout', 'scroll? height? tools? compact? bar? strip? stripAt?', 'where the rows scroll: window (in the viewer, height: "80vh", 600) or ' +
+  'page (with the page, the bar sticking to the top); tools: fold or open (the bar\'s tools to its title line); compact: the bar\'s short form, auto ' +
+  '(a bar narrower than 900 px), true or false; bar: its groups arranged, lines of their labels ([["find", "cursor"], ["list"]]; null: the default ' +
+  'order); strip: the cursor and the edges in a strip over the time axis (true) or in the bar (false); stripAt: where the strip stands, 0 (left) .. ' +
+  '1 (right), "left", "center", "right"',
+  (v, a) => {
   if (a.scroll != null && !['window', 'page'].includes(a.scroll)) fail('scroll: window or page');
   if (a.tools != null && !['fold', 'open'].includes(a.tools)) fail('tools: fold or open');
+  if (a.compact != null && ![true, false, 'auto'].includes(a.compact)) fail('compact: auto, true or false');
+  if (a.bar != null && !toolLines(a.bar)) fail('bar: lines of group labels, [["find", "cursor"], ["list"]], or null');
+  if (a.strip != null && typeof a.strip !== 'boolean') fail('strip: true or false');
+  if (a.stripAt != null && !(typeof a.stripAt === 'number' ? a.stripAt >= 0 && a.stripAt <= 1 : hasKey(STRIP_AT, String(a.stripAt).toLowerCase()))) {
+    fail('stripAt: 0 .. 1, "left", "center" or "right"'); }
   const hOk = h => (typeof h === 'number' ? h > 0 : /^\s*[\d.]+\s*(px|vh|em|rem|%)?\s*$/.test(h));
   if (a.height != null && !hOk(a.height)) fail('height: 600 (px) or "80vh"');
   if (a.scroll != null || a.height != null) v.setScroll(a.scroll || 'window', a.height ?? undefined);
   if (a.tools != null) v.setTools(a.tools === 'fold');
-  return { scroll: v.S.maxHeight != null && v.S.maxHeight !== '' ? 'window' : 'page', height: v.S.maxHeight || null, tools: v.S.toolsFolded ? 'fold' : 'open' };
+  if (a.compact != null) v.setToolsCompact(a.compact, { only: true });
+  if ('bar' in a) v.setToolLayout(a.bar ?? null, { only: true });   // (this viewer's: the browser's arrangement stays the user's)
+  if (a.strip != null) v.setCursorStrip(a.strip, { only: true });
+  if (a.stripAt != null) v.setStripAt(a.stripAt, { only: true });
+  return { scroll: v.S.maxHeight != null && v.S.maxHeight !== '' ? 'window' : 'page', height: v.S.maxHeight || null, tools: v.S.toolsFolded ? 'fold' : 'open',
+    compact: compactOf(v.S.toolsCompact), bar: toolLines(v.S.toolLayout), strip: !!v.S.cursorStrip, stripAt: stripAt(v.S.cursorStripAt) };
 });
 command('find', 'query case? word? regex? highlight? open? mask?', 'the find field: rows by a fuzzy query ("" ends it); its options as the bar\'s ' +
   'buttons',
@@ -708,7 +722,9 @@ Object.assign(WaveView.prototype, {
       dups: [...this.dups.keys()], deltas: this.deltas, bits: [...this.bitsOpen], only: this.onlyState(), fsm: this.fsmState(),
       onlyGrp: this.onlyGrp ?? null,   // the panel's "Your groups whole" with no Only set too (onlyState is null then)
       config: Object.assign({ style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded,
-        toolsHidden: toolNames(this.S.toolsHidden), sort: this.sort, sortIgnore: [...this.sortIgnore] }, this.gapOpt(true), this.cycOpt()),
+        toolsHidden: toolNames(this.S.toolsHidden), toolsCompact: compactOf(this.S.toolsCompact), toolLayout: toolLines(this.S.toolLayout), sort: this.sort,
+        sortIgnore: [...this.sortIgnore], cursorStrip: !!this.S.cursorStrip, cursorStripAt: stripAt(this.S.cursorStripAt) },
+        this.gapOpt(true), this.cycOpt()),
       hl: this.hlOrder().map(r => [r.full, this.picks.get(r)]), ext: this.undoExt() });
   },
   // the plugins' parts that undo takes back: an extraState with undo (true: its state; a function: what of it, for its set)
@@ -904,7 +920,7 @@ Object.assign(WaveView.prototype, {
 // is applied every time, as the page's own settings are.
 const SHARE = { on: false };   // markers being shared (shareMarks): the others do not share them back
 const KEPT = ['dups', 'deltas', 'bookmarks', 'arrows', 'markers', 'spans', 'groups', 'paint', 'radix', 'analog', 'hidden', 'bits'];
-const KEPT_CFG = ['style', 'maxHeight', 'toolsFolded', 'toolsHidden', ...GAP_KEYS, ...CYC_KEYS];
+const KEPT_CFG = ['style', 'maxHeight', 'toolsFolded', 'toolsHidden', 'toolsCompact', 'toolLayout', 'cursorStrip', 'cursorStripAt', ...GAP_KEYS, ...CYC_KEYS];
 // what undo takes back: the above and Only (not kept in this browser: a page opened again applies a revision's Only anew)
 const UNDO_KEYS = [...KEPT, 'only', 'fsm'];
 const UNDO_N = 100;   // the steps undo keeps

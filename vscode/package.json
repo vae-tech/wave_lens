@@ -36,7 +36,8 @@
       { "command": "wavelens.toFst", "title": "Convert to FST (beside the VCD, FSM states kept)", "category": "WaveLens" },
       { "command": "wavelens.goto", "title": "Go to a moment of the dump (a link of a log)", "category": "WaveLens" },
       { "command": "wavelens.openConfig", "title": "Open the configuration (colours, sizes, radix …)", "category": "WaveLens", "icon": "$(settings-gear)" },
-      { "command": "wavelens.resetConfig", "title": "Reset the configuration to the defaults", "category": "WaveLens" }
+      { "command": "wavelens.resetConfig", "title": "Reset the configuration to the defaults", "category": "WaveLens" },
+      { "command": "wavelens.forgetViews", "title": "Forget the kept views (every dump of the workspace) and the last state", "category": "WaveLens" }
     ],
     "menus": {
       "explorer/context": [
@@ -84,7 +85,7 @@
         "wavelens.openLastState": {
           "type": "boolean",
           "default": true,
-          "description": "A dump seen for the first time in this workspace takes the state loaded last (Load…), as Reload would. A dump you have worked on keeps its own view."
+          "description": "A dump seen for the first time in this workspace takes the state loaded last (Load…), as Reload would. A dump you have worked on keeps its own view; one that does not fit it (fewer than half of the signals and modules it names are in the dump, or none of its Only) is not applied, said, and r applies it. File ▾ Forget the kept view… forgets a dump's view and the last state; WaveLens: Forget the kept views, every dump's."
         },
         "wavelens.lazy": {
           "type": "string",

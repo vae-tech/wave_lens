@@ -16,6 +16,9 @@
     gapIdle: ['number', 'string'],          // cycles | a time ('2us')
     gapKeep: ['number', 'string'],
     themeButton: ['string', 'boolean'],     // 'auto' | true | false
+    toolsCompact: ['string', 'boolean'],    // 'auto' | true | false
+    toolLayout: ['array'],                  // [["find", "cursor"], ["list"]] | null
+    cursorStripAt: ['number', 'string'],    // 0 .. 1 | 'left' | 'center' | 'right'
     svaSignals: ['string', 'boolean'],      // 'view' | true | false
     fontMono: ['string'], fontBody: ['string'],
     enumColors: ['object'], groupColors: ['object'], buses: ['array'],

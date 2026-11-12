@@ -70,6 +70,7 @@ const flatText = t => Array.isArray(t) ? t.slice(typeof t[1] === 'object' && !Ar
 const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight: 24, traceWidth: 1.4, busWidth: 1.2,
   labelSize: 11, fontSize: 11.5, sort: 'none', sortIgnore: [], sortButton: true, hint: true, style: 'auto', radix: 'auto', fold: null,
   highlight: null, dim: 0.3, groupColors: null, bookmarkLeft: 0.2, arrowLabels: 'lane', laneHeight: 16, maxHeight: null, toolsFolded: false, toolsHidden: [],
+  toolsCompact: 'auto', toolLayout: null, cursorStrip: true, cursorStripAt: 0,
   groupOrder: 'file', onlyGroups: true, moduleShading: true, findHighlight: true, findOpen: true, findMask: false, findCase: false, findWord: false,
   findRegex: false, cursorSnap: 8, keyHints: 200, showWidth: true, exprLibrary: [], sharedMarkers: false, keys: {},
     wheel: 'scroll', contextMenu: true, enumColors: null, dumpBudget: 3000000, gaps: false, gapIdle: 16, gapKeep: 2,
@@ -82,8 +83,32 @@ const SVG_DEFAULTS = { groupHeight: 20, spaceHeight: 12 };   // the static figur
 const GLOBAL = {};
 // settings that live in CSS (so the names column, fonts and static SVG text follow them too); numbers are px
 const STYLE_VAR = { nameWidth: '--wv-names', fontSize: '--wv-font-size', fontMono: '--font-mono', fontBody: '--font-body', maxHeight: '--wv-max-h' };
-// the bar's tool groups left out (toolsHidden): their labels, lower case, sorted ("cursor,go to" or a list)
-const toolNames = v => [...new Set((Array.isArray(v) ? v : String(v ?? '').split(',')).map(s => String(s).trim().toLowerCase()).filter(Boolean))].sort();
+// the bar's tool groups left out (toolsHidden): their labels, lower case, sorted ("cursor,go to" or a list); the names of before 0.53
+// read as the groups they went into (state, dump: file; style: in ⚙ now, no group)
+const TOOL_WAS = { state: 'file', dump: 'file', style: null };
+const toolNames = v => [...new Set((Array.isArray(v) ? v : String(v ?? '').split(',')).map(s => String(s).trim().toLowerCase())
+  .map(s => (hasKey(TOOL_WAS, s) ? TOOL_WAS[s] : s)).filter(Boolean))].sort();
+// the bar's arrangement (toolLayout): lines of group labels, in order ([["find", "cursor"], ["list"]]), lower case, the names of
+// before read as toolNames reads them, each label once (the first wins), no empty line, at most TOOL_LINES_MAX lines; anything
+// else (null, a text, a number): null, the default order
+const TOOL_LINES_MAX = 6;
+const toolLines = v => {
+  if (!Array.isArray(v)) return null;
+  const seen = new Set(), out = [];
+  for (const ln of v) {
+    if (!Array.isArray(ln)) continue;
+    const l = ln.map(s => String(s ?? '').trim().toLowerCase()).map(s => (hasKey(TOOL_WAS, s) ? TOOL_WAS[s] : s)).filter(s => s && !seen.has(s) && seen.add(s));
+    if (l.length) out.push(l);
+  }
+  return out.length ? out.slice(0, TOOL_LINES_MAX) : null;
+};
+// the bar's short form (toolsCompact): 'auto' (a narrow bar), true (always), false (never); "on" / "off" too
+// the strip over the time axis (cursorStripAt): where it stands in the width of the waves, 0 (left) .. 1 (right); "left", "center"
+// ("centre"), "right" too; anything else: 0
+const STRIP_AT = { left: 0, center: 0.5, centre: 0.5, right: 1 };
+const stripAt = p => { const n = typeof p === 'string' ? (hasKey(STRIP_AT, p.trim().toLowerCase()) ? STRIP_AT[p.trim().toLowerCase()] : parseFloat(p)) : p;
+  return typeof n === 'number' && isFinite(n) ? Math.round(Math.min(1, Math.max(0, n)) * 1000) / 1000 : 0; };
+const compactOf = c => (c === true || c === 'on' || c === 'true' ? true : c === false || c === 'off' || c === 'false' ? false : 'auto');
 const prefixes = v => (Array.isArray(v) ? v : String(v ?? '').split(',')).map(s => String(s).trim()).filter(Boolean);
 const jsonOr = t => { try { return JSON.parse(t); } catch (e) { return null; } };
 // your keys (the setting "keys": {"gx": "gm", "m": null, "ctrl+k": "ctrl+g"}): a key or a sequence typed -> the key it stands for (one of
@@ -230,13 +255,24 @@ function orderRows(rows, dir, pfx, groupOrder) {
 // bookmarks stay on the original), `legend: [{n?, text, color?, bold?}]` (lines under the static SVG). A function with
 // `head: true` puts its top rows (group null) before every other row (the viewer's own groups), not after the top's signals.
 let XID = 1e6;
+// a plugin's part that threw (its rows, a row's drawing, an overlay): left out, the waves drawn without it; said once per plugin
+// part on the console and in the viewer's log (the assertions bound to modules that are not in these waves must never leave
+// the viewer empty)
+const plugSafe = (f, owner, what, self, ...args) => {
+  try { return f.apply(self, args); }
+  catch (e) {
+    if (!f.wlErr) { f.wlErr = true; console.error(`wavelens: ${what}:`, e);
+      if (owner && typeof owner.log === 'function') owner.log('error', `${what}: ${e.message} — left out, the waves drawn without it`); }
+    return null;
+  }
+};
 const XGROUPS = new WeakMap();   // owner (a viewer, an SVG host, a model) -> the ids of the groups its plugins added last time
 function withExtra(rows, fns, M, owner = M) {
   if (!fns || !fns.length) return rows;
   const ids = new Set();
   const extras = (g, head = false) => {
     const out = [];
-    for (const f of fns) if (!!f.head === head) for (const r of f(g) || []) {
+    for (const f of fns) if (!!f.head === head) for (const r of plugSafe(f, owner, 'a plugin\'s rows', null, g) || []) {
       if (!r.anc) { r.anc = g ? g.anc.concat(g.id) : []; r.depth = g ? g.depth + 1 : 0; }
       if (r.type === 'group' && r.id != null) { M.groups[r.id] = r; ids.add(r.id); }
       out.push(r);

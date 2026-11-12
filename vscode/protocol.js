@@ -17,10 +17,12 @@
     bytes: { ask: '', reply: ['data'] },                           // what source named, as bytes (a URI the webview could not fetch)
     codes: { ask: 'codes', reply: ['text'] },                      // a lazy dump's signals by their id codes: sva vcd --codes
     store: { ask: 'key value', reply: null },                      // a localStorage key of this dump (value null: removed)
+    gstore: { ask: 'key value', reply: null },                     // the bar's, for every tab: key bar (wavelens.bar) or look (toolsHidden, toolsFolded)
     save: { ask: 'name b64', reply: ['path', 'cancel'] },          // a download: a save dialog on the host
     pick: { ask: 'accept multiple? state?', reply: ['files'] },    // a file picker: an open dialog on the host
     'state-kept': { ask: '', reply: null },                        // the state picked is loaded: Reload reads it
     'state-read': { ask: '', reply: ['name mtime b64'] },          // Reload (r): the last state read on the host
+    forget: { ask: '', reply: null },                              // Forget the kept view: the last state of the workspace forgotten
     compare: { ask: 'signals from to path? of?', reply: ['result', ''] },   // Compare…: A the waves shown (of: a run), B a dump picked (path:
     //   the one picked before, compared again with a new A), sva diff --page ('' the dialog closed)
     runs: { ask: 'op', ops: {                                      // the Runs panel: sva runs
@@ -51,7 +53,7 @@
   };
   const HOST = {
     laststate: 'path', changed: 'auto', reload: '', 'runs-panel': '', 'runs-changed': '', run: 'rid ops', es: 'sid event data?',
-    live: 'link', theme: 'theme', keys: 'keysLeft', config: 'config',
+    live: 'link', theme: 'theme', keys: 'keysLeft', config: 'config', gstore: 'key value',
   };
   const words = s => String(s).split(' ').filter(Boolean);
   const need = s => words(s).filter(k => !k.endsWith('?'));

@@ -22,7 +22,7 @@ window.WAVELENS_CONFIG = {
   busWidth: 1.2,                // px: bus outlines
   sort: 'none',                 // initial order: 'none' (file order) | 'asc' | 'desc'
   sortIgnore: ['i_', 'o_'],     // name prefixes skipped when sorting (i_valid sorts as "valid")
-  sortButton: true,             // Sort button + prefix field in the viewer bar
+  sortButton: true,             // the bar's Sort button and the sort prefixes field (⚙ Sort prefixes)
   hint: true,                   // help line under the viewer
   style: 'auto',                // edges: 'auto' | 'wavedrom' (slanted) | 'questa' / 'square' (vertical, like a simulator)
   radix: 'auto',                // bus values: 'auto' (≤6 bits dec, else hex) | 'hex' | 'dec' | 'signed' | 'bin' | 'oct' | 'ascii' | 'float' | fixed point 'q8' / 'sq15'
@@ -54,7 +54,7 @@ window.WAVELENS_CONFIG = {
   sharedMarkers: false,         // your markers (and the Δ) the same in every viewer of the page of one dump (mkhtml.py --marks-views tests sets it)
   keys: {},                     // your keys: a key or a sequence -> the viewer's key it stands for, null: none; {"gx": "gm", "m": null, "ctrl+k": "ctrl+g"}
   keyHints: 200,                // ms after the first key of a sequence (g z y [ ]): a box says what can follow, to press or to click; false = never
-  cursorSnap: 8,                // px: a click on the waves puts the cursor on an edge of that signal this near (alt+click: not); 0 = off
+  cursorSnap: 8,                // px: a click on the waves puts the cursor on an edge of that signal this near (alt+click: not); 0 = off (⚙ Snap to edges)
   showWidth: true,              // a bus's width after its name ([7:0], a field's [msb:lsb]; a click on it: the bus bit by bit); false: none
   moduleShading: true,          // signals of neighbouring modules on alternating backgrounds, a line where the module changes
   svaSignals: 'view',           // assertion groups (sva.js): the bound signals again under the steps: 'view' (viewers), true (also static SVGs), false
@@ -74,9 +74,19 @@ window.WAVELENS_CONFIG = {
   gapView: false,               //   the waves of the viewer with the gaps cut out, and live ("Gaps ▸ on the waves", gv); what you see is what you save
   gapLine: 'dashdot',           //   the line of a gap: 'dashdot' | 'wave' | 'waves' | 'zigzag' | 'double'
   maxHeight: null,              // e.g. '80vh' or 600: the rows scroll inside the viewer (the bar stays in view); null = page scroll
-                                //   (the bar sticks to the top while its rows go by); the bar's Scroll button switches on the fly
+                                //   (the bar sticks to the top while its rows go by); ⚙ Scroll in the window switches on the fly
   toolsFolded: false,           // the bar's tools folded to its title line (▴ / ▾ in the bar)
-  toolsHidden: [],              // the bar's tool groups left out ("cursor", "go to", "find" …; the right button on the bar)
+  toolsHidden: [],              // the bar's tool groups left out: cursor, view, edges, marks, go to, find, expression, assertions, list,
+                                //   signal, file, compare (⚙ Tools in the bar, the right button on the bar; state, dump: file)
+  toolsCompact: 'auto',         // the bar's short form (no group labels, the rarer controls behind each group's ⋯): 'auto' (a bar
+                                //   narrower than 900 px), true / false: always / never (⚙ Short form)
+  toolLayout: null,             // the bar's groups arranged: lines of their labels in order, e.g. [["find", "cursor", "view"],
+                                //   ["edges", "marks"], ["list", "signal", "file"]] (a group not named: on its own line); null: the
+                                //   default order. ⚙ Arrange the bar… makes one by dragging the groups (kept in this browser)
+  cursorStrip: true,            // the cursor (its time, unit, span) and the edges in a slim strip over the time axis, out of the
+                                //   bar's lines (seen with the tools folded too); false: in the bar as any group (⚙ Cursor over the axis)
+  cursorStripAt: 0,             // where the strip stands over the waves: 0 (left) .. 1 (right), or 'left' | 'center' | 'right';
+                                //   its 🔒 unlocked, ⠿ drags it (it snaps to the edges and the middle). Both kept in this browser
   // the clock cycles in a band under the time axis (the right button's Cycles ▸; kept in the browser, the saved state):
   cycles: false,                //   the band of cycle numbers on; the cursor's cycle in the title, Δ of the second cursor in them
   cycleClock: null,             //   the clock counted (a full path or a name); null: the clock found (a 1-bit *clk* / *clock*)
@@ -86,7 +96,7 @@ window.WAVELENS_CONFIG = {
   log: 'auto',                  // the log under the viewer (what was done, what went wrong, a JSON file's error with its line): 'auto'
                                 //   from the first thing done in the page (a dump read, Sources…, Load…), true / false: always / never
   savePage: true,               // the bar's Save page: this page as a file with your view in it (false: off; the page's text is kept for it)
-  themeButton: 'auto',          // ◐ in the bar's title line: auto, light, white, dark (in VS Code also its colours); 'auto': when the page
+  themeButton: 'auto',          // ⚙ Theme ▸ in the bar: auto, light, white, dark (in VS Code also its colours); 'auto': when the page
                                 //   has no theme button of its own (viewer.html, the VS Code tab), true / false: always / never
   keysLeft: [],                 // keys the viewer leaves to its host, e.g. ['ctrl+G'] (the VS Code tab: wavelens.keysToVSCode, default
                                 //   ctrl+G: Go to Line; the group list is gl then); ctrl+ is cmd+ too, a letter by its place

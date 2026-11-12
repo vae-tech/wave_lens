@@ -50,8 +50,8 @@ F.run(async () => {
   // every type of the table, in its order; the runs' operations in the order that keeps, changes and removes a run
   fs.writeFileSync(state, JSON.stringify({ wavelens: 'state', version: 3 }));
   const REQ = {
-    page: {}, source: {}, bytes: {}, codes: { codes: [] }, store: { key: 'k', value: 'v' }, save: { name: 'x.txt', b64: Buffer.from('hi').toString('base64') },
-    pick: { accept: '.json', multiple: false, state: true }, 'state-kept': {}, 'state-read': {},
+    page: {}, source: {}, bytes: {}, codes: { codes: [] }, store: { key: 'k', value: 'v' }, gstore: { key: 'bar', value: '{"v":1}' }, save: { name: 'x.txt', b64: Buffer.from('hi').toString('base64') },
+    pick: { accept: '.json', multiple: false, state: true }, 'state-kept': {}, 'state-read': {}, forget: {},
     compare: { signals: ['tb.s', 'tb.cnt'], from: 0, to: 30000, of: 0 }, open: { path: state }, sources: {}, config: {}, clip: { text: 'PSEL' }, theme: {},
     result: { rid: 99, results: [] }, ready: { title: 't' }, loaded: { name: 't.vcd', shown: 2, total: 2 },
     dumperror: { name: 't.vcd', error: 'the time goes back', line: 9 }, log: { text: 'a line' }, configerror: { text: 'boom' },

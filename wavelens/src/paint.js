@@ -307,7 +307,7 @@ function paintBody(P, M, lay, X, tA, tB, xL, xR, hl, sel, allLay, band, late, st
     if (isSel) P.rect(xL, y, xR - xL, h, 'acc', SEL_ALPHA);
     if (row.type !== 'space') sep.push(['M', xL, y + h - 0.5], ['L', xR, y + h - 0.5]);
     if (bgOnly) continue;
-    if (row.draw) row.draw(P, { y, h, X, tA, tB, xL, xR });
+    if (row.draw) plugSafe(row.draw, null, 'a plugin\'s row', row, P, { y, h, X, tA, tB, xL, xR });
     if (row.overlay) over.add(row.overlay);
     if (row.lazy) { P.text(xL + 6, y + h / 2, 'reading…', { size: 10, fill: 'muted' }); rowY.set(row, y + h / 2); continue; }   // not read yet
     if (row.type === 'sig') { if (row.tr) paintSig(P, row, y, h, X, tA, tB, xL, xR, M.t1, strokeOf(row), b === 1 ? 'band' : 'panel', isSel);
@@ -323,7 +323,8 @@ function paintBody(P, M, lay, X, tA, tB, xL, xR, hl, sel, allLay, band, late, st
   }
   if (over.size) {
     const yA = lay.length ? lay[0].y : 0, yB = lay.length ? lay[lay.length - 1].y + lay[lay.length - 1].h : 0;   // the rows drawn: from, to
-    const pos = new Map((allLay || lay).map(o => [o.row, o])), go = () => { for (const f of over) f(P, { pos, X, tA, tB, xL, xR, yA, yB }); };
+    const pos = new Map((allLay || lay).map(o => [o.row, o]));
+    const go = () => { for (const f of over) plugSafe(f, null, 'a plugin\'s overlay', null, P, { pos, X, tA, tB, xL, xR, yA, yB }); };
     if (late) late.push(go); else go();
   }
   paintEdges(P, M, rowY, X);

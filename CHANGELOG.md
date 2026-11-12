@@ -5,6 +5,74 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.53 — 12 November 2026
+
+The bar in a new order (File ▾, ⚙ ▾, the short form) and arranged by you; the cursor and the edges in a strip over the time
+axis; a state of other waves never empties the viewer (VS Code's last state, the assertions), and Forget the kept view.
+
+**A state of other waves.** VS Code's last state taken by a new dump (`wavelens.openLastState`) is applied only when it fits the
+dump: at least half of the signals and modules it names are there, and one module of its Only (`stateFit`); else it is not
+applied, the bar and the log say why, `r` applies it anyway. Before, a state of another design gave an Only of no module (an
+empty viewer), its folding and rows, and the dump kept that as its own view. A state loaded by hand: an Only none of whose modules
+is here is no Only, a folding of modules not here leaves the folding as it is. **File ▾ → Forget the kept view…** (asked first):
+what this browser (VS Code: the workspace) keeps of the view — rows, paint, bookmarks and markers, look, page's edits, assertions
+bound — and the state loaded last go, the waves come back as they came; the bar's tools shown and folded stay. VS Code: the
+command *WaveLens: Forget the kept views*, for every dump of the workspace (the tabs open made again).
+The assertions too: a state's bindings count in `stateFit` (an assertion not loaded, or its signals not in its module here: not
+attached); loaded, a state none of whose bindings attaches here leaves the bindings of the dump as they are (before, they were
+replaced by ones that could not be drawn, and the page's own assertions were taken off for good), the ones left out said. A
+plugin's rows, a row's drawing, an overlay, its marks or values that throw are left out and said in the log: the waves are drawn
+without them, never an empty viewer.
+
+**The cursor over the time axis.** The **cursor** group (time, unit, span) and the **edges** stand by default in a slim strip over
+the time axis, above the waves' column, out of the bar's lines (seen with the tools folded too). Its **🔒** unlocks it: **⠿** drags
+it along the waves, snapping to the left, the middle and the right (← → Home End on ⠿), 🔒 locks it again. New settings
+`cursorStrip` (true; ⚙ ▾ → **Cursor over the axis**) and `cursorStripAt` (0 .. 1, `"left"`, `"center"`, `"right"`), kept in this
+browser for every viewer (`wavelens.bar`; VS Code: every tab), in a saved state, undo, the `layout` command's `strip` and `stripAt`
+(and `tools/viewedit.py`, the MCP).
+
+**Arranging the bar yourself** (stage 2 of `docs/reviews/toolbar-2026-11-11/`): **⚙ ▾ → Arrange the bar…** — whole groups
+dragged by their labels within a line, to another, to a new one (an accent bar where they land; Esc during a drag: back; touch
+too), a strip Full | Compact | Mine · Reset · Keys… · Done, and a dialog for the keys (alt+↑ ↓ within the line, alt+← → to the
+line before / after, Space shows / hides; a live line says each step). **⚙ Reset the bar**. The new setting `toolLayout` (lines of
+group labels; null: the default order) is kept in this browser for every viewer of every page (`localStorage` `wavelens.bar`,
+with the short form `toolsCompact` and Mine; the page's other viewers follow at once, other pages by the storage event); a saved
+state, Save page, undo, the `layout` command's `bar` (and `tools/viewedit.py`, the MCP) carry it for one viewer. A plugin's group
+added again goes to its place of the arrangement (T-04). VS Code: the arrangement, the short form, the groups shown and the fold
+are the extension's global store, the same in every tab, a change in one shown in the others (T-05). The filters of a narrow
+head fold into "N filters ▾" too, so its height does not change with them. At rest the bar is what it was (no pixel of the mode).
+
+**The bar in a new order** (`docs/reviews/toolbar-2026-11-11/`, Variant 2; stage 1 of 2, the arranging comes next): three tool
+rows from a 1175 px bar up, as high with the filters, a compare and a find as without (it was 3–5 rows at 1175–1400 and grew
+by a row with them); under 900 px of bar a short form (no group labels, the rarer controls behind each group's **⋯**) gives 3
+rows at 874 px (was 6–7) and leaves nothing out of reach at 500 px (6–13 controls were cut). Every `data-act` kept its name and
+what it does; the groups' names of before still read in `toolsHidden` (`state`, `dump`: `file`; `style`: no group now).
+
+| was | is |
+|---|---|
+| cursor: time, unit, **Set**; span, unit, **Show** | cursor: time, unit; span (its own unit or the cursor's): Enter does what Set and Show did; Esc: the value back |
+| view: − + Fit | − + Fit, **Last** (`l`), **⊙** (`c`), **⇔** (the range, else the two cursors), **\|◀ ▶\|** (Home / End) |
+| edges: ◀ kind ▶, **+ Mark** | edges: ◀ kind ▶; **marks**: **+ Bookmark** (the same `data-act=mark`, `b`), **+ Marker** (`m`), ◀ ▶ through both, **Marks…** (`gm`) |
+| go to: the page's jumps and ≤ 6 assertion failures | go to: the page's jumps (cut to 12 letters); the failures: **SVA ◀ ✕ N ▶ ▾** (`[f ]f`, any number, by name in the ▾) |
+| find: … colour, hex, **Paint**, Unpaint …; its count in a box after the field | find: … **Paint ▾** (the colour, its hex, Paint, Unpaint); the count at the field's right end |
+| list: Sort, the prefix field, Expand, Collapse, Modules, FSMs, the chips | list: Sort, **⊞ ⊟**, Modules, FSMs; the prefixes in ⚙; **the chips** (Highlight, Hidden, Only, FSMs) **in the title line** |
+| style: the edge style list | ⚙ ▾ → Edge style |
+| state: Save, Load…, Reload, Save page; dump: Open…, ⟳, Compare…, ≠ N ✕, A B A+B, Runs…, Sources…; assertions: Load file… | **file**: **File ▾** (Open dump…, Compare with…, Sources…, Runs…, Save view…, Load view…, Reload view, Save page, Load assertions…, each with its `g` key), ⟳, **Copy image ▾** (PNG to the clipboard; Save PNG, SVG, WaveDrom); **compare** (only while comparing): A B A+B, ◀ ▶ (`[d ]d`), ≠ N ✕ |
+| title line: ◐, **Scroll: window / page**, ↶ ↷, ▴, ? | ↶ ↷, **⚙ ▾** (Theme ▸, Scroll in the window ✓, Edge style, Sort prefixes, Snap to edges ✓, Tools in the bar ▸, Short form ▸), ▴, ? |
+| — | **signal**: the radix of the selected signals, **Cycles**, **Gaps** (`gv`, its idle / keep beside it) |
+
+The right button on the bar opens ⚙ at the pointer; its menus go by the keys (↑ ↓ → ← Enter Esc). New setting `toolsCompact`
+(`'auto'` | `true` | `false`; kept in this browser, the saved state, undo, the `layout` command's `compact` and `viewedit.py`).
+The bugs of the review: groups wrap inside themselves, nothing is cut by a narrow viewer (T-01); typing in the find no longer
+moves the waves (T-02); the chips and the compare controls no longer add a row (T-03); `/` on a folded bar opens the tools
+without keeping it (T-06); Esc in the cursor, span and prefix fields, a bad time says why (T-07); ↶ ↷ leave the focus on the
+waves (T-08); the titles and the tips from one source (Fit: `f`, T-09); the floated find under a sticky bar (T-10); the
+placeholder and the pressed buttons readable, ≥ 4.5:1 (T-11); a group ticked on a folded bar opens it (T-12); no Scroll button
+changing width (T-13); Paint's controls no longer out of line (T-14); no separator at a wrapped row's end, the labels in one
+column (T-15); a pill's corners by its members shown (T-16); "+ Mark" is "+ Bookmark" (T-17); no room after an empty expression
+position (T-18); a line whose only group floats takes no row (T-19). T-20 rejected (Theme ▸ is there only on pages without a
+theme button of their own); T-04, T-05 belong to the arranging; T-21 is a task of its own.
+
 ## 0.52 — 11 November 2026
 
 The right button's menu in submenus, its keys and its 19 bugs (`docs/reviews/menus-2026-11-11/`).

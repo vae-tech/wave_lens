@@ -63,33 +63,73 @@
 /* bar: title line (title, messages, cursor), then the tools in labelled groups; buttons of one control are joined */
 .wv .bar { border-bottom: 1px solid var(--line); background: var(--panel-2); font-size: 12.5px; }
 .wv .bar .head { display: flex; align-items: baseline; gap: 6px 12px; flex-wrap: wrap; padding: 6px 10px 2px; }
-.wv .bar .tools { display: flex; flex-direction: column; gap: 5px; padding: 3px 10px 7px; }
-.wv .bar .tln { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 0; }   /* a line per kind: time, find, expression, rows and files */
+.wv .bar .tools { display: flex; flex-direction: column; gap: 4px; padding: 3px 10px 7px; }
+.wv .bar .tln { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 0; }   /* a line per kind: time, find and conditions, rows and files */
 .wv .bar .tln:empty { display: none; }
-.wv .bar .tln > .tg:first-child > .tl { min-width: 6.6em; }   /* the lines start in one column */
-.wv .bar .tg { display: inline-flex; align-items: center; gap: 6px; padding-right: 12px; margin-right: 12px; border-right: 1px solid var(--line); }
-.wv .bar .tg:last-child, .wv .bar .tg.end { border-right: 0; margin-right: 0; padding-right: 0; }
-.wv .bar .tg.off:not(.float) { display: none; }   /* left out (toolsHidden; the right button on the bar) */
+.wv .bar .tln.fl { position: absolute; }   /* its only group floats (the find left out of the bar): no empty row meanwhile (T-19) */
+.wv .bar .tg.rs > .tl { min-width: 7.4em; }   /* the visual rows start in one column (rs: the first group of a row, look.js barFit; T-15) */
+/* a group wraps inside itself when it is wider than the bar (T-01); a pill (.seg), the find field stay whole */
+.wv .bar .tg { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; padding-right: 10px; margin-right: 10px; border-right: 1px solid var(--line); }
+.wv .bar .tg:last-child, .wv .bar .tg.re { border-right: 0; margin-right: 0; padding-right: 0; }   /* the last of a visual row: no separator */
+.wv .bar .tg.off:not(.float) { display: none; }   /* left out (toolsHidden; ⚙ Tools in the bar) */
+.wv .bar .tl { margin-right: 2px; }
+/* the rarer controls of a group (.more): in line; the short form (a narrow bar, toolsCompact): behind the group's ⋯, in a box under it */
+.wv .bar .more { display: contents; }
+.wv .bar .mx { display: none; }
+.wv .bar.short .tools .tg > .tl { display: none; }
+.wv .bar.short .tg { padding-right: 6px; margin-right: 6px; }
+.wv .bar.short .tg > .more { display: none; }
+.wv .bar.short .tg > .mx { display: inline-block; padding: 2px 7px; font-weight: 700; }
+.wv .bar.short .tg.open > .more { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; position: fixed; z-index: 46; padding: 6px 8px;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18); }
+.wv .bar .tg.find.float > .more { display: contents !important; }   /* the floating find: always whole */
+.wv .bar .tg.find.float > .mx { display: none !important; }
 .wv .wv-menu .ck { display: inline-block; width: 1.2em; }   /* a tick of the bar's tools menu */
 .wv .bar .tl { font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 .wv .bar .seg { display: inline-flex; align-items: stretch; }
 .wv .bar .seg > * { border-radius: 0 !important; margin: 0 0 0 -1px !important; }
-.wv .bar .seg > :first-child { border-radius: 4px 0 0 4px !important; margin-left: 0 !important; }
-.wv .bar .seg > :last-child { border-radius: 0 4px 4px 0 !important; }
+/* the corners of a pill by its members shown (a hidden one is no end, T-16) */
+.wv .bar .seg > :nth-child(1 of :not([hidden])) { border-radius: 4px 0 0 4px !important; margin-left: 0 !important; }
+.wv .bar .seg > :nth-last-child(1 of :not([hidden])) { border-radius: 0 4px 4px 0 !important; }
+.wv .bar .seg > :nth-child(1 of :not([hidden])):nth-last-child(1 of :not([hidden])) { border-radius: 4px !important; }
 .wv .bar .seg > :focus-visible { position: relative; z-index: 1; }
 .wv .bar .cmpv[hidden] { display: none; }
-.wv .bar .gapv { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; color: var(--muted); white-space: nowrap; }
+.wv .bar .gapv { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); white-space: nowrap; }
 .wv .bar .gapv[hidden] { display: none; }
 .wv .bar .gapv input { width: 4em; }
 .wv .bar .gapv input.bad { outline: 2px solid var(--wave-x); outline-offset: -1px; }
-.wv .bar .cmpv { margin-left: 4px; }
 .wv .bar .cmpv button[data-run="b"][aria-pressed="true"], .wv .bar .cmpv button[data-run="overlay"][aria-pressed="true"] { border-color: var(--wave-run-b); color: var(--wave-run-b); }
 .wv .bar button[data-act="in"], .wv .bar button[data-act="out"] { min-width: 2.4em; font-weight: 600; }
 .wv .bar .eyebrow { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
-.wv .bar button { font: inherit; font-size: 12px; padding: 2px 9px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); border-radius: 4px; cursor: pointer; }
+.wv .bar button { font: inherit; font-size: 12px; padding: 2px 6px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); border-radius: 4px; cursor: pointer; }
 .wv .bar button:hover { border-color: var(--accent); color: var(--accent); }
+.wv .bar button:disabled { opacity: 0.45; cursor: default; border-color: var(--line); color: var(--fg); }
 .wv .bar button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.wv .bar button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+/* pressed: the accent a step towards the text, readable on the bar in every theme (≥ 4.5:1, T-11) */
+.wv .bar button[aria-pressed="true"] { border-color: var(--accent); color: color-mix(in srgb, var(--accent) 78%, var(--fg)); }
+.wv .bar input::placeholder { color: var(--muted); opacity: 1; }
+/* a menu of the bar (.bpop: ⚙, File ▾, Paint ▾, Copy image ▾, the SVA failures): its items are the bar's buttons, drawn as the menus' */
+.wv .bar .wv-menu { font-size: 12.5px; max-height: calc(100vh - 8px); overflow: auto; }
+.wv .bar .wv-menu button { padding: 4px 10px; border: 0; border-radius: 4px; background: none; color: var(--fg); font-size: 12.5px; min-width: 0; }
+.wv .bar .wv-menu button:hover, .wv .bar .wv-menu button:focus-visible { background: var(--accent-soft); color: var(--fg); outline: none; }
+.wv .bar .wv-menu button:disabled { opacity: 0.45; }
+.wv .bar .wv-menu .mi input.pfx { width: 12ch; height: auto; padding: 1px 6px; color: var(--fg); background: var(--panel); cursor: text; border-left-style: solid; }
+.wv .bar .wv-menu button.fail { color: var(--sva-fail); }
+.wv .bar .pop[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+.wv .bar .tg[data-tg="go to"] button { max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }   /* the whole label in its tip */
+/* the head: the filters on the rows (chips; each ✕ clears its own), folded into "N filters ▾" when the readout would be cut short */
+.wv .bar .chips { display: inline-flex; flex-wrap: wrap; gap: 4px; flex: none; align-self: center; }
+.wv .bar .chips:not(:has(> :not([hidden]))) { display: none; }
+.wv .bar .chips button, .wv .bar .chipn { font-size: 11.5px; padding: 1px 7px; border-color: var(--accent); color: var(--accent); }
+.wv .bar .chips.fold { position: absolute; visibility: hidden; pointer-events: none; }   /* measured, not shown */
+.wv .bar .chips.fold.open { position: fixed; z-index: 50; visibility: visible; pointer-events: auto; padding: 6px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--panel); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18); }
+.wv .bar .chipn { align-self: center; flex: none; padding: 0 6px; line-height: 15px; }   /* no taller than the title: its row keeps its height */
+@container (max-width: 960px) { .wv .bar .rd .chipn { float: right; margin-left: 10px; } }
+.wv .bar .head .hbs { display: inline-flex; align-items: center; flex: none; }   /* ↶ ↷ ⚙ ▴ ? wrap as one */
+.wv .bar .head .ur { margin-left: 8px; align-self: center; }
+.wv .bar .head .ur button { font-size: 11.5px; padding: 1px 7px; }
+.wv .bar .head .pgear { font-size: 11.5px; padding: 1px 8px; margin-left: 4px; }
 .wv .bar button[data-act="sort"] { min-width: 8.5em; }
 .wv .bar input.pfx { font: inherit; font-family: var(--font-mono); font-size: 11.5px; width: 9ch; max-width: 24ch; padding: 2px 6px; border: 1px solid var(--line); border-left-style: dashed; background: var(--panel); color: var(--fg); }
 .wv .bar input.pfx:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -147,16 +187,19 @@
 .wv .names .row.grp[aria-expanded="false"]:not(.sel) { background-color: var(--panel); }   /* a folded module: the plain background */
 /* module shading: the signals of every other module on a light band (moduleShading) */
 /* fuzzy find: the field, its options, the matched letters in the names */
-.wv .bar input.q { font: inherit; font-family: var(--font-mono); font-size: 11.5px; width: 20ch; padding: 2px 6px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); }
+/* the find field, its count at its right end (room kept for it: typing does not move a thing, T-02) */
+.wv .bar .qw { position: relative; display: inline-flex; align-items: stretch; }
+.wv .bar input.q { font: inherit; font-family: var(--font-mono); font-size: 11.5px; width: 22ch; padding: 2px 9.5ch 2px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); color: var(--fg); }
 .wv .bar input.q:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }   /* same width: buttons must not move under the pointer */
-.wv .bar .cnt { font-family: var(--font-mono); font-size: 11px; color: var(--muted); padding: 2px 6px; border: 1px solid var(--line); background: var(--panel-2); white-space: nowrap; display: inline-flex; align-items: center; }
+.wv .bar .cnt { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); max-width: 9ch; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); white-space: nowrap; }
 .wv .bar .cnt:empty { display: none; }
 .wv .bar .cnt.none { color: var(--wave-x); }
 .wv .bar button.fo { font-family: var(--font-mono); font-size: 11.5px; padding: 2px 6px; min-width: 2.4em; }   /* find options: Aa Full .* */
 .wv .bar input.ct, .wv .bar input.cs { font: inherit; font-family: var(--font-mono); font-size: 11.5px; width: 9ch; padding: 2px 6px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); text-align: right; }
 .wv .bar input.ct:focus-visible, .wv .bar input.cs:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
 .wv .bar input.ct.bad, .wv .bar input.cs.bad { outline: 2px solid var(--wave-x); outline-offset: -1px; }
-.wv .bar .seg .lbl, .wv .bar .seg .cyc { font-size: 11px; color: var(--muted); padding: 2px 6px; border: 1px solid var(--line); background: var(--panel-2); display: inline-flex; align-items: center; }
+.wv .bar .seg .lbl, .wv .bar .seg .cyc, .wv .bar .seg .svn { font-size: 11px; color: var(--muted); padding: 2px 6px; border: 1px solid var(--line); background: var(--panel-2); display: inline-flex; align-items: center; }
+.wv .bar .seg .svn { font-family: var(--font-mono); color: var(--sva-fail); white-space: nowrap; }
 .wv .bar button[data-act="fprev"], .wv .bar button[data-act="fnext"] { padding: 2px 8px; font-weight: 700; }
 .wv .bar input.fcol { width: 26px; padding: 1px 2px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; }
 .wv .names .row:not(.grp) .n { user-select: text; cursor: text; }   /* select names to copy their full paths */
@@ -339,10 +382,10 @@
 .wv .names .row.sva-step .n b.sn { display: inline-block; min-width: 1.6em; color: var(--fg); font-weight: 600; }
 .wv .names .row.sva-copy .n::before { content: "= "; color: var(--muted); }
 .wv .names .row.sva-lane .v.fail, .wv .names .row.sva-lane .v { font-weight: 600; }
-.wv .bar .svj button.fail { color: var(--sva-fail); }
 /* numbers of the assertions (stage 8): totals, the table, the failure list; a count is a filter button */
 /* expressions: the list (sva.js Exprs), its editor, the ƒ rows; Why: the selected attempt taken apart, a column per cycle */
 .wv .bar .svqk { font-family: var(--font-mono); font-size: 11px; color: var(--muted); min-width: 3ch; }
+.wv .bar .svqk:empty { min-width: 0; margin-left: -4px; }   /* no expression picked: no room after the group (T-18) */
 .wv .sva.xpanel ol.xl { list-style: none; margin: 4px 0 0; padding: 0; overflow: auto; resize: vertical; max-height: min(24em, 42vh); }
 .wv .sva ol.xl > li { display: grid; grid-template-columns: 2.2em auto minmax(0, 1fr) auto; column-gap: 8px; align-items: start; padding: 3px 4px; border-top: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
 .wv .sva ol.xl > li:hover { background: var(--panel-2); }
@@ -511,6 +554,8 @@
 .wv .wv-ask .ak { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 11px; }
 .wv .wv-ask .ak button { all: unset; padding: 2px 10px; border: 1px solid var(--line); border-radius: 4px; cursor: pointer; color: var(--fg); }
 .wv .wv-ask .ak button:hover { border-color: var(--accent); color: var(--accent); }
+.wv .wv-ask .ak button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.wv .wv-ask .aq { margin: 0 2px; font-size: 12px; line-height: 1.4; color: var(--fg); white-space: normal; }
 .wv .wv-menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 2px; }
 /* tooltips of the controls (what it does, its keys) and the help box (? in the bar) */
 .wv .wv-tip { position: fixed; z-index: 60; max-width: 340px; padding: 5px 8px; border-radius: 5px; background: var(--fg); color: var(--panel); font: 12px/1.35 var(--font-body);
@@ -686,3 +731,52 @@
 .wv .wv-hex { width: 5.4em; margin-left: 3px; padding: 0 3px; font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; vertical-align: middle;
   border: 1px solid var(--line); border-radius: 3px; background: var(--panel); color: var(--fg); }
 .wv .wv-hex.bad { border-color: var(--wave-x); color: var(--wave-x); }
+/* arranging the bar (⚙ Arrange the bar…, arrange.js): only under .arranging, so at rest no pixel changes. Groups outlined, a ⠿ on
+   their labels (the handle; touch-action none, or the browser takes the gesture), their controls asleep; the group dragged pale,
+   an accent bar where it lands, a last line to drop on for a new one; the strip; the keyboard's dialog under the bar */
+.wv .bar.arranging .tools .tg { outline: 1px dashed var(--muted); outline-offset: 2px; border-radius: 3px; }
+.wv .bar.arranging .tools .tg > :not(.tl) { pointer-events: none; }
+.wv .bar.arranging .tools .tg > .tl { cursor: grab; touch-action: none; user-select: none; color: var(--fg); }
+.wv .bar.arranging .tools .tg > .tl::before { content: '⠿ '; color: var(--accent); }
+.wv .bar.arranging.short .tools .tg > .tl { display: inline-block; }   /* the short form has no labels: the handles come back */
+.wv .bar.arranging .tools .tg.drag { opacity: 0.4; }
+.wv .bar.arranging .arm { align-self: stretch; width: 4px; min-height: 22px; margin: 0 3px; border-radius: 2px; background: var(--accent); }
+.wv .bar.arranging .tln.newln { min-height: 26px; padding: 3px 8px; border: 1px dashed var(--line); border-radius: 4px; color: var(--muted); font-size: 11px; }
+.wv .bar.arranging .tln.newln:has(.tg, .arm) { color: transparent; }
+.wv .bar.arranging .arr { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding-top: 2px; }
+.wv .bar.arranging .arr .arh { color: var(--muted); font-size: 11px; margin-right: 6px; }
+@media (pointer: coarse) { .wv .bar.arranging .tools .tg > .tl { min-height: 36px; min-width: 36px; display: inline-flex; align-items: center; } }
+/* the strip over the time axis (cursorStrip): the cursor and the edges over the waves' column, slimmer than the bar's lines,
+   no labels; at --axp of the room the waves leave it (0 left .. 1 right); its 🔒 open: a dashed outline, ⠿ drags it */
+.wv .bar .axs { padding: 0 8px 3px calc(var(--wv-names, 200px) + 4px); }
+.wv .bar .axs[hidden] { display: none; }
+.wv .bar .axw { position: relative; min-width: 0; display: flex; }   /* (flex: no line box, the bar's height whole pixels) */
+.wv .bar .axb { position: relative; left: calc(var(--axp, 0) * 100%); transform: translateX(calc(var(--axp, 0) * -100%)); display: flex; flex: none;
+  flex-wrap: wrap; align-items: center; gap: 3px 0; max-width: 100%; border-radius: 3px; }
+.wv .bar .axs .tg { gap: 3px; padding-right: 6px; margin-right: 6px; }
+.wv .bar .axs .tg > .tl { display: none; }
+.wv .bar .axs button, .wv .bar .axs select, .wv .bar .axs input.ct, .wv .bar .axs input.cs, .wv .bar .axs input.ev { font-size: 11px; height: 20px;
+  padding-top: 0; padding-bottom: 0; }
+.wv .bar .axs .cyc, .wv .bar .axs .lbl { font-size: 11px; }
+.wv .bar .axs .lbl, .wv .bar .axs .cyc { height: 20px; padding-top: 0; padding-bottom: 0; display: inline-flex; align-items: center; }
+.wv .bar .axh { display: inline-flex; align-items: center; margin-right: 2px; }
+.wv .bar .axs .axh button { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; padding: 0 3px; border-color: transparent;
+  background: none; color: var(--muted); }
+.wv .bar .axs .axh button[hidden] { display: none; }
+.wv .bar .axs .axl svg + svg, .wv .bar .axs.open .axl svg:first-child { display: none; }
+.wv .bar .axs.open .axl svg + svg { display: inline; }
+.wv .bar .axs.open .axl { color: var(--accent); }
+.wv .bar .axs.open .axb { outline: 1px dashed var(--accent); outline-offset: 1px; }
+.wv .bar .axs .axg { color: var(--accent); cursor: grab; touch-action: none; user-select: none; }
+.wv .bar .axs.drag .axg { cursor: grabbing; }
+@media (pointer: coarse) { .wv .bar .axs .axh button { min-width: 32px; min-height: 28px; } }
+.wv .wv-arrd { position: fixed; z-index: 52; width: min(420px, calc(100vw - 16px)); max-height: 70vh; overflow: auto; padding: 8px 10px; background: var(--panel);
+  color: var(--fg); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2); font: 12.5px var(--font-body); }
+.wv .wv-arrd .arht { font-weight: 600; margin-bottom: 2px; }
+.wv .wv-arrd .arhint, .wv .wv-arrd .arln { color: var(--muted); font-size: 11px; }
+.wv .wv-arrd .arl { margin-top: 6px; }
+.wv .wv-arrd .ari { display: flex; gap: 6px; padding: 2px 6px; border-radius: 4px; cursor: pointer; }
+.wv .wv-arrd .ari:focus { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--accent-soft); }
+.wv .wv-arrd .ari .ck { width: 1.2em; }
+.wv .wv-arrd .arlive { min-height: 1.4em; margin-top: 6px; color: var(--accent); font-size: 11.5px; }
+.wv .wv-arrd .arb { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }

@@ -313,24 +313,7 @@ Object.assign(WaveView.prototype, {
       else if (act === 'asrange') this.setRange(spAt.from, spAt.to);
       else if (act === 'spdel') this.run({ op: 'span', id: spId, delete: true });
       else if (act === 'copyd') this.copyText(this.rangeText().replace(/^Δ /, '').split(' · ')[0].split(' / ')[0]);
-      else if (act === 'copyimg') {
-        const png = this.toPNG(pic);
-        try { navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]).then(() => this.toast('image copied'), err =>
-          this.toast('not copied: ' + err.message)); }
-        catch (err) { this.toast('this browser cannot copy an image: Save image as PNG'); }
-      }
-      else if (act === 'png') this.toPNG(pic).then(bl => { this.download(bl, this.picName('png')); this.toast('saved ' + this.picName('png')); }, err =>
-        this.toast(err.message));
-      else if (act === 'svg') { this.download(new Blob([this.toSVG(pic)], { type: 'image/svg+xml' }), this.picName('svg'));
-        this.toast('saved ' + this.picName('svg')); }
-      else if (act === 'wdjson' || act === 'wdcopy') {
-        const [ta, tb] = r || [this.t0, this.t0 + this.span], text = wdText(this.toWaveDrom(ta, tb)), cut = this.wdCut ? ` — the first ${WD_CELLS} ` +
-          `cycles only, to ${this.fmt(this.wdCut.to, (this.wdCut.to - ta) / 1000, this.wdCut.to - ta)}` : '';
-        if (act === 'wdcopy') { try { navigator.clipboard.writeText(text).then(() => this.toast('WaveDrom copied' + cut), () => this.toast('not copied'));
-          } catch (e) { this.toast('not copied'); } }
-        else { this.download(new Blob([text + '\n'], { type: 'application/json' }), this.picName('wavedrom.json'));
-          this.toast('saved ' + this.picName('wavedrom.json') + cut); }
-      }
+      else if (act === 'copyimg' || act === 'png' || act === 'svg' || act === 'wdjson' || act === 'wdcopy') this.picAct(act, r, pic);
       else if (act === 'wlpiece') {   // the range of these signals as waves of their own (x.wavelens.json), opened by Open… or a drop
         const [ta, tb] = r || [this.t0, this.t0 + this.span], name = this.picName('wavelens.json');
         this.toPiece(ta, tb, pic.rows || null).then(doc => { this.download(new Blob([JSON.stringify(doc) + '\n'], { type: 'application/json' }), name);
@@ -460,34 +443,6 @@ Object.assign(WaveView.prototype, {
     (el.querySelector(':scope > button, :scope > .msub > button') || el).focus({ preventScroll: true });
     return el;
   },
-  // the right button on the bar: its tool groups with a tick each (a click shows / hides one), Show all, Hide all; the
-  // menu stays open for the next one
-  toolsMenu(cx, cy) {
-    this.closeMenu();
-    const el = document.createElement('div'); el.className = 'wv-menu wv-tools'; el.setAttribute('role', 'menu');
-    const item = n => `<button type="button" role="menuitemcheckbox" data-m="tg" data-tg="${esc(n)}"><span><span class="ck"></span>${
-      esc(n.charAt(0).toUpperCase() + n.slice(1))}</span></button>`;
-    el.innerHTML = '<div class="mh">Tools in the bar</div><button type="button" role="menuitem" data-m="all"><span>Show all</span></button>' +
-      '<button type="button" role="menuitem" data-m="none"><span>Hide all</span></button><hr>' + this.toolGroups().map(item).join('');
-    const mark = () => { const H = new Set(toolNames(this.S.toolsHidden));
-      for (const b of el.querySelectorAll('button[data-tg]')) { const on = !H.has(b.dataset.tg); b.setAttribute('aria-checked', on);
-        b.querySelector('.ck').textContent = on ? '✓' : ''; } };
-    mark(); this.root.append(el); this.menuEl = el;
-    const box = el.getBoundingClientRect();
-    el.style.left = Math.max(4, Math.min(cx, innerWidth - box.width - 4)) + 'px'; el.style.top = Math.max(4, Math.min(cy, innerHeight - box.height - 4)) + 'px';
-    el.addEventListener('click', e => {
-      const m = e.target.closest('button[data-m]'); if (!m) return;
-      const H = new Set(toolNames(this.S.toolsHidden));
-      if (m.dataset.m === 'all') H.clear(); else if (m.dataset.m === 'none') this.toolGroups().forEach(n => H.add(n));
-      else if (!H.delete(m.dataset.tg)) H.add(m.dataset.tg);
-      this.setToolsHidden([...H]); mark();
-    });
-    menuKeys(el, () => { this.closeMenu(); this.refocus(); });   // ↑ ↓ Home End, Esc
-    el.addEventListener('contextmenu', e => e.preventDefault());
-    this.menuOff(el);
-    (el.querySelector('button') || el).focus({ preventScroll: true });
-    return el;
-  },
   // ctrl+G: your groups in a list over the names (as the right button's menu); a click or Enter goes there
   groupsMenu() {
     this.closeMenu();
@@ -615,8 +570,49 @@ Object.assign(WaveView.prototype, {
     inp.focus({ preventScroll: true });
     return el;
   },
+  // a yes or no asked where the menu was (Forget the kept view): the button, Enter on it, gives it; Esc, Cancel (in focus at first) or a
+  // click elsewhere: nothing
+  askYes(x, y, title, text, yes, label = 'OK') {
+    this.closeMenu();
+    const el = document.createElement('div'); el.className = 'wv-menu wv-ask'; el.setAttribute('role', 'alertdialog'); el.setAttribute('aria-label', title);
+    el.innerHTML = `<div class="mh">${esc(title)}</div><p class="aq">${esc(text)}</p><div class="ak"><span>Esc: cancel</span><span><button type="button" ` +
+      `data-m="no">Cancel</button> <button type="button" data-m="ok">${esc(label)}</button></span></div>`;
+    this.root.append(el); this.menuEl = el;
+    const b = el.getBoundingClientRect();
+    el.style.left = Math.max(4, Math.min(x, innerWidth - b.width - 4)) + 'px'; el.style.top = Math.max(4, Math.min(y, innerHeight - b.height - 4)) + 'px';
+    const done = ok => { this.closeMenu(); if (ok) yes(); else this.refocus(); };
+    el.addEventListener('click', e => { const m = e.target.closest('button[data-m]'); if (m) done(m.dataset.m === 'ok'); });
+    el.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(false); } });
+    el.addEventListener('contextmenu', e => e.preventDefault());
+    this.menuOff(el, false);
+    el.querySelector('button[data-m=no]').focus({ preventScroll: true });
+    return el;
+  },
   // a menu el opened: a press outside it or the window's blur closes it, the keys back on the waves when nothing took them. After
   // the click that opened it; not for a menu closed meanwhile (its listener would close the next one). blur false: a box to type in stays
+  // the picture of the range r (else the window) and its rows (pic.rows: else the screen's): as PNG to the clipboard (copyimg), saved as
+  // PNG or SVG, as WaveDrom saved or copied — the right button's Copy image, Export ▸ and the bar's Copy image ▾
+  picAct(act, r, pic = {}) {
+    if (act === 'copyimg') {
+      const png = this.toPNG(pic);
+      try { navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]).then(() => this.toast('image copied'), err =>
+        this.toast('not copied: ' + err.message)); }
+      catch (err) { this.toast('this browser cannot copy an image: Save image as PNG'); }
+    }
+    else if (act === 'png') this.toPNG(pic).then(bl => { this.download(bl, this.picName('png')); this.toast('saved ' + this.picName('png')); }, err =>
+      this.toast(err.message));
+    else if (act === 'svg') { this.download(new Blob([this.toSVG(pic)], { type: 'image/svg+xml' }), this.picName('svg'));
+      this.toast('saved ' + this.picName('svg')); }
+    else if (act === 'wdjson' || act === 'wdcopy') {
+      const [ta, tb] = r || [this.t0, this.t0 + this.span], text = wdText(this.toWaveDrom(ta, tb)), cut = this.wdCut ? ` — the first ${WD_CELLS} ` +
+        `cycles only, to ${this.fmt(this.wdCut.to, (this.wdCut.to - ta) / 1000, this.wdCut.to - ta)}` : '';
+      if (act === 'wdcopy') { try { navigator.clipboard.writeText(text).then(() => this.toast('WaveDrom copied' + cut), () => this.toast('not copied'));
+        } catch (e) { this.toast('not copied'); } }
+      else { this.download(new Blob([text + '\n'], { type: 'application/json' }), this.picName('wavedrom.json'));
+        this.toast('saved ' + this.picName('wavedrom.json') + cut); }
+    }
+    return this;
+  },
   menuOff(el, blur = true) {
     const off = this.offMenu = e => {
       if (e.target instanceof Node && el.contains(e.target)) return;   // the window's blur: its target is the window, no node

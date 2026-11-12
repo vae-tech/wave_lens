@@ -68,7 +68,7 @@ COMMANDS = {
     'fold': 'groups? all?', 'unfold': 'groups? all?', 'radix': 'signals radix', 'analog': 'signals rows', 'bits': 'signals on?',
     'duplicate': 'signals bits? radix? rows? delete?',
     'sort': 'dir ignore?', 'style': 'name',
-    'layout': 'scroll? height? tools?', 'find': 'query case? word? regex? highlight? open? mask?', 'gaps': 'on? idle? keep? signals? clock? aux? only? count? view? reset?',
+    'layout': 'scroll? height? tools? compact? bar? strip? stripAt?', 'find': 'query case? word? regex? highlight? open? mask?', 'gaps': 'on? idle? keep? signals? clock? aux? only? count? view? reset?',
     'cycles': 'on? clock? zero? reset?', 'only': 'modules? on? clear? open? groups?', 'fsm': 'mode? signals? fields? clear?',
     'fsm_stats': 'signal', 'fsm_panel': 'signal? tab? off?', 'fsm_go': 'signal state? from? to? dir? first?', 'types': 'signals?',
     'edge': 'dir? kind? value? signal?', 'reset': '', 'state': '', 'set_state': 'state', 'rows': 'pattern? limit? offset?',
@@ -140,6 +140,51 @@ def js_str(x):
     if isinstance(x, dict):
         return '[object Object]'
     return str(x)
+
+
+TOOL_WAS = {'state': 'file', 'dump': 'file', 'style': None}   # model.js: the bar's groups of before 0.53
+
+
+def tool_lines(v):
+    """The bar's arrangement as model.js toolLines has it: lines of group labels, lower case, the names of before read, each once,
+    no empty line, at most 6 lines; anything else None."""
+    if not isinstance(v, list):
+        return None
+    seen, out = set(), []
+    for ln in v:
+        if not isinstance(ln, list):
+            continue
+        line = []
+        for x in ln:
+            s = str('' if x is None else x).strip().lower()
+            s = TOOL_WAS.get(s, s) if s in TOOL_WAS else s
+            if s and s not in seen:
+                seen.add(s); line.append(s)
+        if line:
+            out.append(line)
+    return out[:6] if out else None
+
+
+def compact_of(c):
+    """The bar's short form as model.js compactOf has it: True, False or 'auto' (on / off too)."""
+    return True if c is True or c in ('on', 'true') else False if c is False or c in ('off', 'false') else 'auto'
+
+
+STRIP_AT = {'left': 0, 'center': 0.5, 'centre': 0.5, 'right': 1}
+
+
+def strip_at(p):
+    """Where the strip over the time axis stands, as model.js stripAt has it: 0 (left) .. 1 (right), a name of STRIP_AT; else 0."""
+    if isinstance(p, str):
+        k = p.strip().lower()
+        try:
+            p = STRIP_AT[k] if k in STRIP_AT else float(k)
+        except ValueError:
+            return 0
+    if isinstance(p, bool) or not isinstance(p, (int, float)) or p != p or p in (float('inf'), float('-inf')):
+        return 0
+    x = round(min(1, max(0, p)) * 1000) / 1000
+    return int(x) if x == int(x) else x
 
 
 def prefixes(v):
@@ -1650,11 +1695,22 @@ class Editor:
         return {'style': self.config()['style']}
 
     def c_layout(self, a):
-        """Where the rows scroll and the bar's tools folded (view.js setScroll, setTools): as the state's maxHeight, toolsFolded."""
+        """Where the rows scroll, the bar's tools folded, its short form, its arrangement, the strip over the time axis (look.js setScroll,
+        setTools, setToolsCompact, setToolLayout, setCursorStrip, setStripAt): as the state's maxHeight, toolsFolded, toolsCompact,
+        toolLayout, cursorStrip, cursorStripAt."""
         if a.get('scroll') is not None and a['scroll'] not in ('window', 'page'):
             fail('scroll: window or page')
         if a.get('tools') is not None and a['tools'] not in ('fold', 'open'):
             fail('tools: fold or open')
+        if a.get('compact') is not None and not any(a['compact'] is x for x in (True, False)) and a['compact'] != 'auto':
+            fail('compact: auto, true or false')
+        if a.get('bar') is not None and not tool_lines(a['bar']):
+            fail('bar: lines of group labels, [["find", "cursor"], ["list"]], or null')
+        if a.get('strip') is not None and not isinstance(a['strip'], bool):
+            fail('strip: true or false')
+        sa = a.get('stripAt')
+        if sa is not None and not (0 <= sa <= 1 if isinstance(sa, (int, float)) and not isinstance(sa, bool) else str(sa).lower() in STRIP_AT):
+            fail('stripAt: 0 .. 1, "left", "center" or "right"')
         h = a.get('height')
         if h is not None and not (h > 0 if isinstance(h, (int, float)) and not isinstance(h, bool) else
                                   isinstance(h, str) and re.fullmatch(r'\s*[\d.]+\s*(px|vh|em|rem|%)?\s*', h)):
@@ -1665,9 +1721,21 @@ class Editor:
             c['maxHeight'] = ('' if win else None) if a.get('scroll') == 'page' else h if h is not None else base if win else '80vh'
         if a.get('tools') is not None:
             c['toolsFolded'] = a['tools'] == 'fold'
+        if a.get('compact') is not None:
+            c['toolsCompact'] = a['compact']
+        if 'bar' in a:
+            c['toolLayout'] = tool_lines(a['bar'])
+        if a.get('strip') is not None:
+            c['cursorStrip'] = a['strip']
+        if sa is not None:
+            c['cursorStripAt'] = strip_at(sa)
         mh = c['maxHeight'] if 'maxHeight' in c else base
         tf = c['toolsFolded'] if 'toolsFolded' in c else self.m.cfg.get('toolsFolded')
-        return {'scroll': 'window' if mh is not None and mh != '' else 'page', 'height': mh or None, 'tools': 'fold' if tf else 'open'}
+        return {'scroll': 'window' if mh is not None and mh != '' else 'page', 'height': mh or None, 'tools': 'fold' if tf else 'open',
+                'compact': compact_of(c['toolsCompact'] if 'toolsCompact' in c else self.m.cfg.get('toolsCompact')),
+                'bar': tool_lines(c['toolLayout'] if 'toolLayout' in c else self.m.cfg.get('toolLayout')),
+                'strip': (c['cursorStrip'] if 'cursorStrip' in c else self.m.cfg.get('cursorStrip')) is not False,
+                'stripAt': strip_at(c['cursorStripAt'] if 'cursorStripAt' in c else self.m.cfg.get('cursorStripAt'))}
 
     def opt(self, k, default=None):
         """A setting as the viewer has it: the state's config, else the page's, else the default (wavelens.config.js)."""

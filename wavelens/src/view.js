@@ -35,7 +35,9 @@ function stateKinds(st) {
   }
   return null;
 }
-const CYC_KEYS = ['cycles', 'cycleClock', 'cycleZero'], CYC_H = 16;   // the band of clock cycles under the time axis, its height
+const CYC_KEYS = ['cycles', 'cycleClock', 'cycleZero'], CYC_H = 16;
+// a state taken by itself (VS Code's last state on a new dump): at least this share of what it names is here
+const STATE_FIT = 0.5;   // the band of clock cycles under the time axis, its height
 // the browser's database of this origin: fn(store) in a transaction -> what its request gave
 const stateDb = (mode, fn) => new Promise((ok, no) => {
   const q = indexedDB.open('wavelens', 1);
@@ -47,7 +49,7 @@ const stateDb = (mode, fn) => new Promise((ok, no) => {
 
 class WaveView {
   constructor(root, model, opts = {}) {
-    this.root = root; this.M = parse(model); this.opts = opts;
+    this.root = root; this.M = parse(model); this.opts = opts; this.doc = model;   // (doc: the waves as they came, Forget builds them again)
     const M = this.M;
     applyLook(root, opts.theme ?? M.theme, Object.assign({}, M.colors, opts.colors));
     this.storeId = this.storeName();
@@ -105,7 +107,10 @@ class WaveView {
       if (b > a) { this.span = Math.min(Math.max(b - a, this.minSpan), M.t1 - M.t0); this.t0 = this.clamp(a); this.draw(); }
       else said.push(`from ${this.when(a)} … to ${this.when(b)}: "to" is not after "from": the whole waves shown`);
     }
-    this.ro = new ResizeObserver(() => this.draw()); this.ro.observe(this.wcol); this.ro.observe(this.root.querySelector('.bar'));
+    // the bar's short form, its rows and its chips worked out a frame after it changed size (its own change is no loop then)
+    this.ro = new ResizeObserver(() => { this.draw(); cancelAnimationFrame(this.fitT);
+      this.fitT = requestAnimationFrame(() => { if (VIEWS.has(this)) this.barFit(); }); });
+    this.ro.observe(this.wcol); this.ro.observe(this.root.querySelector('.bar')); this.ro.observe(this.root.querySelector('.bar .chips'));
     // every colour picker with its hex code beside it (menu.js hexFields): the bar's here; the menu's and the lists' where they
     // are made (menu, the lists' render), none other makes one
     hexFields(this.root);
@@ -154,7 +159,7 @@ class WaveView {
     this.hdrH = this.headH(); this.syncGapBar();
     this.sort = S.sort; this.sortIgnore = S.sortIgnore;
     this.root.style.setProperty('--wv-dim', S.dim);
-    this.layoutShow();
+    this.arrangeTools(); this.layoutShow();   // (cursorStrip: the cursor and the edges over the axis or in the lines)
     const hlFrom = JSON.stringify(S.highlight ?? null);   // a new "highlight" setting (configure) replaces the picks
     if (redraw && hlFrom !== this.hlFrom) { this.hlFrom = hlFrom; this.picks = hlPick(this.M, S.highlight); }
     if (redraw && this.qEl && this.q) this.find(this.q);
@@ -167,7 +172,7 @@ class WaveView {
   build() {
     const r = this.root; r.classList.add('wv');
     r.innerHTML = Bar.html(this);
-    this.bar = new Bar(this); this.layoutShow();
+    this.bar = new Bar(this); this.arrangeTools(); this.layoutShow();   // (the plugins' groups: addTool puts them in their places)
     this.names = new Names(this);
     this.wheelInput(this.canvas); this.pointerInput(this.canvas); this.keyInput(this.canvas);
     // Esc anywhere in the viewer (waves, find field, names) except the bookmark fields: back to no search, no highlight,
@@ -635,18 +640,20 @@ class WaveView {
     if (c) { const d = at && this.cycData(true); return d ? cycTime(d.ups, d.iz, +c[1]) ?? undefined : undefined; }
     return this.M.timed ? parseT(v) : undefined;
   }
-  bad(inp) { inp.classList.add('bad'); setTimeout(() => inp.classList.remove('bad'), 900); }
+  bad(inp, why) { inp.classList.add('bad'); setTimeout(() => inp.classList.remove('bad'), 900); if (why) this.toast(why); }   // and why (T-07)
   setCursor(v) { // cursor at a typed time; the view follows when it is outside
     const same = typeof v === 'string' && this.ctSaid === `${v}|${this.cuEl && this.cuEl.value}`;   // the field as it showed the cursor: rounded
     const t = same ? this.cursor : typeof v === 'number' ? v : this.parseIn(v, this.cuEl, true);
-    if (t == null || !isFinite(t)) { this.bad(this.ctEl); return this; }
+    if (t == null || !isFinite(t)) { this.bad(this.ctEl, typeof v === 'string' ? `cursor: “${v.trim()}” is no time (85.12us, 250, c147)` : '');
+      return this; }
     this.cursor = Math.min(Math.max(t, this.M.t0), this.M.t1);
     if (this.cursor < this.t0 || this.cursor > this.t0 + this.span) this.center(this.cursor);
     this.draw(); this.syncCursorFields(true); return this;
   }
   showCursor(v) { // window of a span (typed, else the current one) centred on the cursor
-    const sp = v == null || v === '' ? this.span : typeof v === 'number' ? v : this.parseIn(v, this.suEl);
-    if (sp == null || !isFinite(sp) || sp <= 0) { this.bad(this.csEl); return this; }
+    const sp = v == null || v === '' ? this.span : typeof v === 'number' ? v : this.parseIn(v, this.cuEl);   // a number: in the cursor's unit
+    if (sp == null || !isFinite(sp) || sp <= 0) { this.bad(this.csEl, typeof v === 'string' ? `span: “${v.trim()}” is no span (200ns, 1.5us, 40)` : '');
+      return this; }
     this.span = Math.min(Math.max(sp, this.minSpan), this.M.t1 - this.M.t0);
     this.center(this.cursor); this.draw(); this.syncCursorFields(true); return this;
   }
@@ -654,7 +661,7 @@ class WaveView {
     if (!this.ctEl) return;
     const show = (inp, sel, t) => { if (force || document.activeElement !== inp) inp.value = String(Number((t / (this.M.timed &&
       sel ? UNIT_PS[sel.value] : 1)).toPrecision(7))); };
-    show(this.ctEl, this.cuEl, this.cursor + this.tickOff()); show(this.csEl, this.suEl, this.span);
+    show(this.ctEl, this.cuEl, this.cursor + this.tickOff()); show(this.csEl, this.cuEl, this.span);
     this.ctSaid = `${this.ctEl.value}|${this.cuEl && this.cuEl.value}`;
   }
   clearFind() { // the search ends; the selection and time stay, the folding from before it (the way to the selection open)
@@ -745,7 +752,8 @@ class WaveView {
     const M = this.M, folded = this.foldSaved || this.collapsed;   // during a search: the folding from before it
     const st = { wavelens: 'state', version: STATE_VERSION, title: this.opts.title || M.title || '', from: this.t0, to: this.t0 + this.span,
       cursor: this.cursor, config: { style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded,
-        toolsHidden: toolNames(this.S.toolsHidden), sort: this.sort, sortIgnore: [...this.sortIgnore],
+        toolsHidden: toolNames(this.S.toolsHidden), toolsCompact: compactOf(this.S.toolsCompact), toolLayout: toolLines(this.S.toolLayout), sort: this.sort,
+        sortIgnore: [...this.sortIgnore], cursorStrip: !!this.S.cursorStrip, cursorStripAt: stripAt(this.S.cursorStripAt),
         fold: [...folded].map(id => M.groups[id] && M.groups[id].path).filter(Boolean),
         highlight: this.hlOrder().map(r => r.full).filter(Boolean), findHighlight: !!this.findHl, findOpen: !!this.findOpen,
         findMask: !!this.findMask,
@@ -778,7 +786,9 @@ class WaveView {
       for (const c of ['color', 'dcolor']) if (x && typeof x === 'object' && x[c] != null && x[c] !== '' && !colorOk(x[c])) noCol.push(`${k}: ${x[c]}`);
     if (noCol.length) this.log('warning', `the state: ${noCol.length} colour${noCol.length === 1 ? '' : 's'} not read, left out`, { items: noCol });
     const M = this.M, C = st.config || {}, miss = new Set();
-    for (const x of this.extraState) if (st[x.key] !== undefined) { try { await x.set(st[x.key]); } catch (e) { this.toast(`${x.key}: ${e.message}`); } }
+    // (a plugin's part: what of it is not in these waves comes back as a list, said with the rest)
+    for (const x of this.extraState) if (st[x.key] !== undefined) {
+      try { const r = await x.set(st[x.key]); if (Array.isArray(r)) r.forEach(p => miss.add(String(p))); } catch (e) { this.toast(`${x.key}: ${e.message}`); } }
     if (st.dups !== undefined) { this.setDups(st.dups).forEach(p => miss.add(p)); this.saveRows(); }   // first: all that follows may name a copy
     const sigs = new Set(this.sigPool().map(r => r.full));
     if (st.groups !== undefined) {   // a group of the same name stays the same object: its rows, folding and selection stay
@@ -796,6 +806,11 @@ class WaveView {
     if (C.maxHeight !== undefined) this.setScroll(C.maxHeight == null || C.maxHeight === '' ? 'page' : 'window', C.maxHeight || undefined);
     if (C.toolsFolded !== undefined) this.setTools(!!C.toolsFolded);
     if (C.toolsHidden !== undefined) this.setToolsHidden(C.toolsHidden ?? []);
+    // the bar's arrangement and short form of a state: this viewer's only (undo: the user's own, kept in this browser again)
+    if (C.toolsCompact !== undefined) this.setToolsCompact(C.toolsCompact, { only: !this.undoing });
+    if (C.toolLayout !== undefined) this.setToolLayout(C.toolLayout ?? null, { only: !this.undoing });
+    if (C.cursorStrip !== undefined) this.setCursorStrip(C.cursorStrip, { only: !this.undoing });
+    if (C.cursorStripAt !== undefined) this.setStripAt(C.cursorStripAt, { only: !this.undoing });
     const gk = GAP_KEYS.filter(k => C[k] !== undefined);
     if (gk.length) this.setGaps(Object.fromEntries(gk.map(k => [k, C[k]])), true);   // null: the clock found (not the page's)
     const ck = CYC_KEYS.filter(k => C[k] !== undefined);
@@ -810,8 +825,9 @@ class WaveView {
     }
     for (const [act, k] of FIND_OPTS) if (C[k] !== undefined) { this[k] = !!C[k];
       this.root.querySelector(`button[data-act=${act}]`)?.setAttribute('aria-pressed', this[k]); }
-    if (C.fold !== undefined) { (Array.isArray(C.fold) ? C.fold : []).forEach(p => seen(p)); this.foldSaved = null; this.collapsed = foldSet(M, C.fold);
-      this.foldTouched = true; }
+    // (a list of modules none of which is here: the folding left as it is)
+    if (C.fold !== undefined && !(Array.isArray(C.fold) && C.fold.length && !C.fold.filter(p => seen(p)).length)) {
+      this.foldSaved = null; this.collapsed = foldSet(M, C.fold); this.foldTouched = true; }
     // "folds": {path: true | false, "*": every group}: the groups the page's edits folded or opened (tools/viewedit.py), the rest as they are
     if (st.folds && typeof st.folds === 'object') { this.foldSaved = null; this.foldTouched = true;
       for (const [p, on] of Object.entries(st.folds)) {
@@ -839,7 +855,8 @@ class WaveView {
     // "only": {modules: [paths], on} (on left out: on), null: every module; a path not of a module here: left out (said)
     if (st.only !== undefined) { const o = st.only && typeof st.only === 'object' ? st.only : null, ms = o && Array.isArray(o.modules) ? o.modules : [];
       ms.forEach(p => { if (!this.scopeOf(p)) miss.add(String(p)); });
-      this.only = o ? { modules: this.onlyNorm(ms), on: o.on !== false } : null; this.onlyMemo = null;
+      const mods = this.onlyNorm(ms);   // (modules named, none here: no Only, not one that leaves no row)
+      this.only = o && (mods.length || !ms.length) ? { modules: mods, on: o.on !== false } : null; this.onlyMemo = null;
       if (o) this.onlyGrp = typeof o.groups === 'boolean' ? o.groups : undefined;   // left out: the setting onlyGroups
       this.onlyShow(); }
     // "fsm": {mode: only | add, signals: [paths]}, null: off; a path that is no FSM here: left out (said)
@@ -900,8 +917,10 @@ class WaveView {
       await this.loadState(await h.getFile(), h); }
     catch (e) { if (e.name !== 'AbortError') { this.toast(e.message); this.logError(e, `cannot load: ${e.message}`); } }
   }
-  // handle: what Reload reads again (a Promise of it: a dropped file's); none: the file as picked, while the browser still reads it
-  async loadState(file, handle = null) {
+  // handle: what Reload reads again (a Promise of it: a dropped file's); none: the file as picked, while the browser still reads it.
+  // o.fit: applied only when it fits these waves (stateFit; a state taken by itself, VS Code's last state on a new dump), else
+  // kept for Reload and said
+  async loadState(file, handle = null, o = {}) {
     try {
       const name = file.name || 'state', text = typeof file === 'string' ? file : await file.text(), j = jsonParse(text, name);
       if (j && j.wavelens === 'waves' && typeof file !== 'string') {   // a piece of waves: waves of its own, not a view of these
@@ -914,6 +933,13 @@ class WaveView {
         const v = await this.openDump(file, handle);   // r: the piece read again (its view with it)
         if (v) v.keepState(handle || { name, getFile: async () => file });
         return v;
+      }
+      const fit = o.fit && j && j.wavelens === 'state' && this.stateFit(j);
+      if (fit && !fit.ok) {
+        if (handle && handle.then) handle = await handle.catch(() => null);
+        if (typeof file !== 'string') this.keepState(handle || { name, getFile: async () => file });
+        const m = `${name}: of other waves (${fit.found} of the ${fit.named} signals and modules it names are here): not applied · r applies it`;
+        this.toast(m); this.log('warning', m, { items: fit.miss.slice(0, 50) }); return null;
       }
       const miss = await this.setState(j);
       this.undoTick();   // the load is one step to undo
@@ -933,13 +959,57 @@ class WaveView {
     if (G.FileSystemHandle && h instanceof G.FileSystemHandle) stateDb('readwrite', s => s.put(h, 'last')).catch(() => { /* not kept */ });
   }
   stateShow() { const h = this.root.wlState, b = this.stateBtn; if (!b) return; b.hidden = !h; if (h) b.title = `Read ${h.path || h.name} again (r)`; }
-  async reloadState() {
+  async reloadState(o = {}) {
     const h = this.root.wlState; if (!h) { this.toast('r: no state loaded yet: Load… first'); return null; }
     try {
       const can = { mode: 'read' };   // (a handle of an earlier page asks, on the click that came here)
       if (h.queryPermission && await h.queryPermission(can) !== 'granted' && await h.requestPermission(can) !== 'granted') throw new Error('not allowed');
-      return await this.loadState(await h.getFile(), h);
+      return await this.loadState(await h.getFile(), h, o);
     } catch (e) { const m = `cannot read ${h.name} again (pick it with Load…): ${e.message}`; this.toast(m); this.logError(e, m); return null; }
+  }
+  // whether a state fits these waves: the signals, modules and groups it names (its selection, rows hidden, paint, radix, bits, your
+  // groups, copies, folding, highlight, marks, Only, FSMs) found here -> {named, found, miss, ok}: ok when it names none, or at least
+  // STATE_FIT of them are here and, with an Only, one of its modules (an Only of none: no row left)
+  stateFit(st) {
+    const C = (st && st.config) || {}, named = new Set(), list = x => (Array.isArray(x) ? x : []), keys = x => Object.keys(x && typeof x === 'object' ? x : {});
+    const add = p => { if (typeof p === 'string' && p && !p.includes('*')) named.add(p.replace(/#\d+$/, '')); };
+    add(st.select); list(st.hidden).forEach(add); list(st.bits).forEach(add); list(st.dups).forEach(add);
+    for (const k of ['paint', 'radix', 'analog']) keys(st[k]).forEach(add);
+    list(st.groups).forEach(g => list(g && g.signals).forEach(add));
+    for (const k of ['bookmarks', 'markers']) list(st[k]).forEach(b => { if (b && typeof b === 'object') { add(b.signal); add(b.dsignal); } });
+    if (Array.isArray(C.fold)) C.fold.forEach(add);
+    if (C.highlight != null) prefixes(C.highlight).forEach(add);
+    list(st.fsm && st.fsm.signals).forEach(add);
+    const M = this.M, paths = new Set([...M.rows.map(r => r.full), ...Object.values(M.groups).map(g => g.path)]);
+    const miss = [...named].filter(p => !paths.has(p) && !this.sigByPath(p));
+    const mods = list(st.only && st.only.modules).map(String), gone = mods.filter(p => !this.scopeOf(p));
+    // the plugins' parts (sva.js: the assertions bound, by their modules): {named, miss}
+    const plug = this.extraState.filter(x => x.fit && st[x.key] !== undefined).map(x => plugSafe(x.fit, this, `the state's ${x.key}`, null, st[x.key]))
+      .filter(r => r && r.named >= 0 && Array.isArray(r.miss));
+    const n = named.size + mods.length + plug.reduce((t, r) => t + r.named, 0), out = [...miss, ...gone, ...plug.flatMap(r => r.miss)];
+    return { named: n, found: n - out.length, miss: out, ok: !n || (n - out.length >= n * STATE_FIT && !(mods.length && gone.length === mods.length)) };
+  }
+  // ⚙ File ▾ Forget the kept view…: what this browser (VS Code: the workspace) keeps of this viewer's view goes — the rows, the
+  // paint, the bookmarks and markers, the look, the page's edits applied, the assertions and expressions bound (the keys
+  // wavelens.<part>:<storeId>; the bar's tools shown and folded stay, a bar setting) — and the last state (Reload's); the waves
+  // are built again as they came. The page hears it (wavelens:forget: VS Code forgets the last state of the workspace)
+  async forgetView() {
+    const id = this.storeId, own = k => k && k.startsWith('wavelens.') && k.slice(k.indexOf(':') + 1) === id, gone = [];
+    const bar = Object.fromEntries(['toolsHidden', 'toolsFolded'].filter(k => k in this.local).map(k => [k, this.local[k]]));
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) { const k = localStorage.key(i); if (own(k)) gone.push(k); }
+      for (const k of gone) localStorage.removeItem(k);
+      if (Object.keys(bar).length) localStorage.setItem(this.lookKey, JSON.stringify(bar));
+    } catch (e) { /* no storage */ }
+    this.root.wlState = null;
+    if (G.indexedDB) await stateDb('readwrite', s => s.delete('last')).catch(() => { /* none kept */ });
+    this.root.dispatchEvent(new CustomEvent('wavelens:forget', { bubbles: true, detail: { keys: gone } }));
+    const root = this.root, opts = this.opts, doc = this.doc, panelBox = this.panelBox;
+    if (this.runsP) this.runsP.close(true);
+    this.destroy(); root.innerHTML = '';
+    const v = new WaveView(root, doc, opts); v.panelBox = panelBox;
+    const m = `the kept view forgotten (${gone.length} part${gone.length === 1 ? '' : 's'}) and the last state: the waves as they came`;
+    v.toast(m); v.log('ok', m, { items: gone }); return v;
   }
   // the colour a row is drawn in here: your paint, its own colour, its group's (groupColors); the model is not changed
   strokeOf(r) { return (r.type === 'sig' && this.painted.get(r.full)) || r.stroke || (this.groupStroke && this.groupStroke.get(r.orig || r)) || undefined; }
@@ -1099,13 +1169,17 @@ class WaveView {
     const tools = this.root.querySelector('.bar .tools');
     let g = [...tools.querySelectorAll('.tg')].find(t => t.dataset.tg === group);
     if (!g) {
-      const ln = TOOL_LINES[group] || 'more';   // its line of the bar (a group of its own kind: a line at the end)
-      let line = tools.querySelector(`.tln[data-ln="${ln}"]`);
-      if (!line) { tools.insertAdjacentHTML('beforeend', toolLine(ln, '')); line = tools.lastElementChild; }
-      g = document.createElement('span'); g.className = 'tg'; g.dataset.tg = group; g.innerHTML = `<span class="tl">${esc(group)}</span>`; line.appendChild(g);
+      // its place: the line and the place of the arrangement (toolLayout), else of TOOL_LINES (the expression after the find, the
+      // assertions after it, whichever plugin came first; a group of its own kind: a line at the end) — T-04
+      const [line, before] = this.toolSlot(group);
+      g = document.createElement('span'); g.className = 'tg'; g.dataset.tg = group; g.innerHTML = `<span class="tl">${esc(group)}</span>`;
+      line.insertBefore(g, before);
       this.layoutShow();   // left out when toolsHidden names it
     }
-    if (typeof content === 'string') g.insertAdjacentHTML('beforeend', content); else if (content) g.appendChild(content);
+    const mx = g.querySelector(':scope > .mx');   // (its ⋯ stays last)
+    if (typeof content === 'string') (mx ? mx.insertAdjacentHTML('beforebegin', content) : g.insertAdjacentHTML('beforeend', content));
+    else if (content) g.insertBefore(content, mx);
+    if (content) this.layoutShow();   // its ⋯, the headers of its menus
     return g;
   }
   addPanel(el) { this.root.querySelector('.bar').after(el); return el; }   // a panel under the bar (sva.js: the assertions)
@@ -1403,7 +1477,7 @@ class WaveView {
       return s && t <= s[1] ? line(m.tip || m.label, s[0], s[1]) : ''; });
     return this.spans.filter(s => t >= s.from && t <= s.to && on(s)).map(s => line(s.label || 'span', s.from, s.to)).concat(marks).filter(Boolean).join('\n');
   }
-  timeMarks() { return this.extraMarks.flatMap(f => f() || []); }   // what the plugins mark on the waves now
+  timeMarks() { return this.extraMarks.flatMap(f => plugSafe(f, this, 'a plugin\'s marks', null) || []); }   // what the plugins mark on the waves now
   spanList() { return this.spans.map(s => Object.fromEntries(Object.entries({ from: s.from, to: s.to, label: s.label, color: s.color,
     signals: s.signals && s.signals.length ? [...s.signals] : null }).filter(([, x]) => x != null && x !== ''))); }
   groupList() { return this.ugroups.map(g => Object.fromEntries(Object.entries({ name: g.name, signals: [...g.signals], color: g.color,
@@ -1619,6 +1693,13 @@ class WaveView {
     const bs = [...this.bms].sort((a, b) => a.t - b.t); if (!bs.length) return this;
     return this.goBm(bs[stepTo(bs.map(x => x.t), this.cursor, dir)]);
   }
+  // the bar's ◀ ▶ of the marks: the next / previous bookmark or marker in time, one walk over both (a bookmark: as ]b, a marker: as ]m)
+  stepMarks(dir) {
+    const all = [...this.bms.map(b => ({ t: b.t, b })), ...this.markers.filter(m => !m.hidden).map(m => ({ t: m.t }))].sort((a, b) => a.t - b.t);
+    if (!all.length) return this;
+    const ts = [...new Set(all.map(x => x.t))], t = ts[stepTo(ts, this.cursor, dir)], bm = all.find(x => x.t === t && x.b);
+    return bm ? this.goBm(bm.b) : this.moveTo(t);
+  }
   stepMarker(dir) {   // the cursor to the next / previous marker in time (round the ends), the page's and yours
     const ts = [...new Set(this.markers.filter(m => !m.hidden).map(m => m.t))].sort((a, b) => a - b); if (!ts.length) return this;
     return this.moveTo(ts[stepTo(ts, this.cursor, dir)]);
@@ -1630,7 +1711,7 @@ class WaveView {
   // ctrl+F, /: the find field; with the bar off the screen (a long page scrolled down) the find group floats over the
   // waves where you are, at the top right of what you see of them, until ✕ or Esc puts it back
   focusFind() {
-    if (this.S.toolsFolded) this.setTools(false);   // the field is in the tools
+    if (this.S.toolsFolded && !this.toolsPeek) { this.toolsPeek = true; this.layoutShow(); }   // the field is in the tools: opened, not kept (T-06)
     const g = this.qEl.closest('.find'), b = g.getBoundingClientRect();
     // off the screen, or left out of the bar (toolsHidden): it floats
     if (!g.classList.contains('float') && (g.classList.contains('off') || b.top < 0 || b.bottom > innerHeight)) this.floatFind(true);
@@ -1639,9 +1720,11 @@ class WaveView {
   floatFind(on) {
     const g = this.qEl && this.qEl.closest('.find'); if (!g || g.classList.contains('float') === !!on) return this;
     g.classList.toggle('float', !!on); this.layoutShow();   // its line, when the find is left out of the bar
-    if (!on) { g.style.top = g.style.right = ''; return this; }
+    if (!on) { g.style.top = g.style.right = ''; this.arrangeTools(); return this; }   // (back at its place: the arrangement changed meanwhile)
     const w = this.wcol.getBoundingClientRect(), gb = g.getBoundingClientRect();   // right-anchored: the count grows it leftwards
-    g.style.top = Math.min(Math.max(w.top, 0) + 30, innerHeight - gb.height - 6) + 'px';
+    const bb = this.root.querySelector('.bar').getBoundingClientRect();
+    const under = bb.bottom > 0 && bb.top < innerHeight ? bb.bottom + 4 : 0;   // the bar in sight: under it, not over its controls (T-10)
+    g.style.top = Math.min(Math.max(Math.max(w.top, 0) + 30, under), innerHeight - gb.height - 6) + 'px';
     g.style.right = Math.max(6, document.documentElement.clientWidth - Math.min(w.right, innerWidth) + 10) + 'px';
     return this;
   }
@@ -1904,7 +1987,7 @@ class WaveView {
     return d.includes(' → ') ? d : `${a} · ${b} · ${d}`;   // an enum's names: the change says both
   }
   valueAt(sig, t) {
-    if (sig.value) return sig.value(t);
+    if (sig.value) return plugSafe(sig.value, this, 'a plugin\'s value', sig, t) ?? '';
     if (!sig.tr) return '';
     const i = lastLE(sig.tr, t); if (i < 0) return '';
     const o = sig.tr[i]; return o.k === '=' ? vtext(sig, o, this.S.radix) : o.k;
@@ -1914,6 +1997,7 @@ class WaveView {
   // draw = size (the canvas and its offset) + paintFrame (the pixels) + syncReadouts (the cursor line, fields, values).
   draw() {
     if (this.held) { this.held.draw = true; return; }
+    this.barSync();   // the bar's buttons by the state (Last, ⇔, the marks' walk, the radix …): when it changed
     if (this.laneKey !== laneKey(this.bms, this.arrows, this.laneMarks())) {   // a bookmark, a marker or an arrow label changed: its lane?
       this.laneKey = laneKey(this.bms, this.arrows, this.laneMarks());
       const lanes = arrowLanes(this.vis, this.bms, this.S.arrowLabels === 'lane' ? this.arrows : [], this.laneMarks());
@@ -2067,10 +2151,10 @@ class WaveView {
   setTheme(name) { applyLook(this.root, name || 'auto', null); this.draw(); return this; }
   // the bar's ◐: the page's next theme (auto, light, white, dark), kept in this browser; a host takes it instead
   // (wavelens:theme, cancelled: the VS Code tab opens its list of themes)
-  themeNext() {
-    if (!this.root.dispatchEvent(new CustomEvent('wavelens:theme', { bubbles: true, cancelable: true, detail: { view: this } }))) return this;
+  themeNext(to) {   // to: that theme (⚙ Theme ▸), else the next one
+    if (!this.root.dispatchEvent(new CustomEvent('wavelens:theme', { bubbles: true, cancelable: true, detail: { view: this, theme: to } }))) return this;
     const h = document.documentElement, now = THEMES.includes(h.dataset.theme) ? h.dataset.theme : 'auto';
-    const next = THEME_CYCLE[(THEME_CYCLE.indexOf(now) + 1) % THEME_CYCLE.length];
+    const next = THEME_CYCLE.includes(to) ? to : THEME_CYCLE[(THEME_CYCLE.indexOf(now) + 1) % THEME_CYCLE.length];
     setTheme(next); try { localStorage.setItem('wavelens-theme', next); } catch (e) { /* not kept */ }
     this.toast(`theme: ${next}${next === 'auto' ? ' (the system\'s light or dark)' : ''}`); return this;
   }

@@ -290,6 +290,10 @@ Object.assign(WaveView.prototype, {
       x.title = s !== 'a' && !has ? this.cmpCant(s) : s === 'a' ? `Show ${names.a} (the run of these waves; d flips to the other)` : s === 'b' ?
         `Show ${names.b}, the second run, on these rows (d flips to the other)` : `Both runs over each other where they differ: ${names.a}, ${names.b} (D)`; } }
     this.root.classList.toggle('wv-runb', !!this.cmp && this.cmpRun === 'b');
+    // the bar's compare group: there while a dump is compared or read (its ◀ ▶ with a compare)
+    const g = b.closest('.tg'), on = !!this.cmp || !!this.cmpReading, walk = this.root.querySelector('.bar [data-act=dnext]');
+    if (walk) walk.parentElement.hidden = !this.cmp;
+    if (g && g.hidden === on) { g.hidden = !on; this.layoutShow(); }
     if (this.cmpReading) { b.hidden = false; b.textContent = '≠ … ✕'; b.title = 'reading the second dump: click to stop'; return; }
     b.hidden = !this.cmp; if (this.cmp) b.textContent = `≠ ${this.cmp.differ} ✕`;
     b.title = this.cmp ? `${this.cmp.name}: ${this.cmp.differ} of ${this.cmp.compared} signals differ${this.cmp.missing ? `, ${this.cmp.missing} not in it` :

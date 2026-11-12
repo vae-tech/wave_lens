@@ -81,51 +81,91 @@
   (<kbd>gg</kbd>, <kbd>zM</kbd>, <kbd>yy</kbd>, <kbd>]m</kbd> …) is two keys within a second.</p></div>
 
 <h2 id="bar">The bar, group by group</h2>
-<figure><img src="img/viewer-bar.png" alt="The bar: cursor, view, edges; find; expression; list, style, state, dump, assertions" loading="lazy">
-  <figcaption><b>The bar of the APB example.</b> Time on the first line, find and the expressions on the second, the rows and the files on the
-  last.</figcaption></figure>
+<figure><img src="img/viewer-bar.png" alt="The bar: cursor, view, edges, marks; find, expression, SVA; list, signal, file" loading="lazy">
+  <figcaption><b>The bar of the APB example.</b> Time on the first line, find and the conditions on the second, the rows, the look of
+  the signals and the files on the last. The title line has the filters on the rows, the readout, ↶ ↷, ⚙, the fold and ?.</figcaption></figure>
 <table>
   <tr><th>Group</th><th>What it does</th></tr>
-  <tr><td>cursor</td><td>A time and its unit, <span class="ui">Set</span> puts the cursor there; a span and its unit,
-    <span class="ui">Show</span> makes a window that wide around the cursor (<a href="#cursor">The cursor</a>).</td></tr>
-  <tr><td>view</td><td><span class="ui">−</span> <span class="ui">+</span> zoom out / in, <span class="ui">Fit</span> shows everything.</td></tr>
-  <tr><td>edges</td><td>◀ and ▶ step to the previous / next edge of the selected signal, of the kind picked between them;
-    <span class="ui">+ Mark</span> puts a bookmark at the cursor (<a href="#edges">Edges</a>).</td></tr>
-  <tr><td>go to</td><td>Jump buttons: the view's markers (when there are at most six) and, with assertions, their failures. Only when there
-    is something to jump to (the exact APB view has <span class="ui">→ done 1</span>, <span class="ui">→ error</span> …).</td></tr>
-  <tr><td>find</td><td>The find field, ‹ ›, <span class="ui">Aa</span> <span class="ui">Full</span> <span class="ui">.*</span>,
-    <span class="ui">Highlight</span>, <span class="ui">Open</span>, <span class="ui">Mask</span>, the colour and <span class="ui">Paint</span>,
-    <span class="ui">Select</span>, <span class="ui">Copy</span> (<a href="#find">Find</a>).</td></tr>
-  <tr><td>expression</td><td>On the line of find: <span class="ui">ƒ Expressions</span> opens the list of conditions of the signals
+  <tr><td>cursor</td><td>A time and its unit: Enter puts the cursor there; the span of the window around the cursor (<code>200ns</code>, or
+    a number in the same unit): Enter makes that window. Esc in either puts back what it showed (<a href="#cursor">The cursor</a>).</td></tr>
+  <tr><td>view</td><td><span class="ui">−</span> <span class="ui">+</span> zoom out / in, <span class="ui">Fit</span> shows everything;
+    <span class="ui">Last</span> the window before the last zoom (<kbd>l</kbd>), <span class="ui">⊙</span> zoom in on the cursor
+    (<kbd>c</kbd>), <span class="ui">⇔</span> zoom to the range (else the two cursors), <span class="ui">|◀</span>
+    <span class="ui">▶|</span> the start and the end (<kbd>Home</kbd> <kbd>End</kbd>).</td></tr>
+  <tr><td>edges</td><td>◀ and ▶ step to the previous / next edge of the selected signal, of the kind picked between them
+    (<a href="#edges">Edges</a>).</td></tr>
+  <tr><td>marks</td><td><span class="ui">+ Bookmark</span> (<kbd>b</kbd>) and <span class="ui">+ Marker</span> (<kbd>m</kbd>) at the
+    cursor, ◀ ▶ to the previous / next of them in time, <span class="ui">Marks…</span> their list (<kbd>gm</kbd>).</td></tr>
+  <tr><td>go to</td><td>Jump buttons: the page's <code>jumps</code>, or its markers when there are at most six (the exact APB view has
+    <span class="ui">→ done 1</span>, <span class="ui">→ error</span> …); a long label is cut, its tip says it whole.</td></tr>
+  <tr><td>find</td><td>The find field with its count at its right end, ‹ ›, <span class="ui">Aa</span> <span class="ui">Full</span>
+    <span class="ui">.*</span>, <span class="ui">Highlight</span>, <span class="ui">Open</span>, <span class="ui">Mask</span>,
+    <span class="ui">Select</span>, <span class="ui">Copy</span>, <span class="ui">Paint ▾</span> (the colour, its hex code,
+    <span class="ui">Paint</span>, <span class="ui">Unpaint</span>; <a href="#find">Find</a>).</td></tr>
+  <tr><td>expression</td><td><span class="ui">ƒ Expressions</span> opens the list of conditions of the signals
     (<code>PSEL &amp;&amp; !PREADY</code>), marked on the waves; ◀ ▶ through the matches of the one you are on:
     <a href="sva.html#expressions">Expressions</a>.</td></tr>
-  <tr><td>list</td><td><span class="ui">Sort</span> and the ignored prefixes (<a href="#sort">Sorting</a>),
-    <span class="ui">Expand</span> / <span class="ui">Collapse</span> every module, <span class="ui">Modules</span>
-    (<a href="modules.html">Modules</a>), <span class="ui">FSMs</span> (<a href="types.html#fsms">State names</a>), and when there are such rows
-    <span class="ui">Highlight: N ✕</span>, <span class="ui">Hidden: N ✕</span> and <span class="ui">Only: N modules ‖ ✕</span>.</td></tr>
-  <tr><td>style</td><td>The edges: <code>auto</code>, slanted (WaveDrom), vertical (a simulator's), square; kept in this browser for this
-    viewer.</td></tr>
-  <tr><td>state</td><td><span class="ui">Save</span>, <span class="ui">Load…</span> and <span class="ui">Reload</span> what you did in the viewer,
-    <span class="ui">Save page</span> the page with it (<a href="#state">Save and Load</a>).</td></tr>
-  <tr><td>dump</td><td><span class="ui">Open…</span> a VCD, <span class="ui">⟳</span> read it again (<a href="#open">Opening waves</a>),
-    <span class="ui">Compare…</span> a second run (<a href="compare.html">Compare two runs</a>), <span class="ui">Sources…</span>
-    the design's types (<code>x.types.json</code>, <a href="types.html">State names</a>) or SystemVerilog files whose
-    <code>typedef enum</code> names the states of a VCD (it has none).</td></tr>
-  <tr><td>assertions</td><td><span class="ui">Load file…</span> reads <code>.sv</code> / <code>.sva</code> files; see
-    <a href="sva.html">Assertions</a>.</td></tr>
+  <tr><td>SVA</td><td>With assertions bound: ◀ <span class="ui">✕ N</span> ▶ through their failures in the view (<kbd>[f</kbd>
+    <kbd>]f</kbd>), ▾ every failure by name and time; before that <span class="ui">Load file…</span> (<a href="sva.html">Assertions</a>).</td></tr>
+  <tr><td>list</td><td><span class="ui">Sort</span> (<a href="#sort">Sorting</a>), <span class="ui">⊞</span> / <span class="ui">⊟</span>
+    open / fold every module, <span class="ui">Modules</span> (<a href="modules.html">Modules</a>), <span class="ui">FSMs</span>
+    (<a href="types.html#fsms">State names</a>).</td></tr>
+  <tr><td>signal</td><td>The radix of the selected signal (shift+click a name: of a run of them), <span class="ui">Cycles</span> (the band
+    of clock cycles), <span class="ui">Gaps</span> (the waves with the gaps cut out, <kbd>gv</kbd>; idle and keep beside it).</td></tr>
+  <tr><td>file</td><td><span class="ui">File ▾</span>: <span class="ui">Open dump…</span>, <span class="ui">Compare with…</span>,
+    <span class="ui">Sources…</span>, <span class="ui">Runs…</span> (VS Code), <span class="ui">Save view…</span>,
+    <span class="ui">Load view…</span>, <span class="ui">Reload view</span>, <span class="ui">Forget the kept view…</span> (asked first: what the
+    browser keeps of this view and the last state go), <span class="ui">Save page</span>,
+    <span class="ui">Load assertions…</span>, each with its <kbd>g</kbd> key (<a href="#state">Save and Load</a>,
+    <a href="#open">Opening waves</a>, <a href="compare.html">Compare two runs</a>, <a href="types.html">State names</a>);
+    <span class="ui">⟳</span> reads a dump opened in the page again; <span class="ui">Copy image</span> (the range, else the window, as
+    PNG to the clipboard) and its ▾ (PNG, SVG, WaveDrom).</td></tr>
+  <tr><td>compare</td><td>Only while a second dump is compared: <span class="ui">A</span> <span class="ui">B</span>
+    <span class="ui">A+B</span>, ◀ ▶ through the differences (<kbd>[d</kbd> <kbd>]d</kbd>), <span class="ui">≠ N ✕</span>.</td></tr>
 </table>
-<h3 id="tools">Only the tools you use</h3>
-<p>The right button on the bar lists its tool groups with a tick each: a click shows or hides one, <span class="ui">Show all</span>
-  and <span class="ui">Hide all</span> do them all. The menu stays open while you pick; <kbd>Esc</kbd> or a click elsewhere closes it.
-  A line of the bar with no group left goes, so a bar of the cursor and the find is two lines high. A hidden find still floats over the
-  waves on <kbd>/</kbd> or <kbd>ctrl+F</kbd>. The choice is kept in this browser for this viewer (the setting
-  <code>toolsHidden</code>, a list of group names, starts a page that way).</p>
+<p>The filters on the rows sit in the title line: <span class="ui">Highlight: N ✕</span>, <span class="ui">Hidden: N ✕</span>,
+  <span class="ui">Only: N modules ‖ ✕</span>, <span class="ui">FSMs … ✕</span> (each ✕ clears its own; when the readout would be cut
+  beside them, and always on a narrow bar, they fold into one <span class="ui">N filters ▾</span>). They never add a row to the tools, nor does the find's count.</p>
+<h3 id="tools">⚙, the groups shown, the short form</h3>
+<p><span class="ui">⚙ ▾</span> at the right of the title line (the right button anywhere on the bar opens it too) holds what is set once:
+  <span class="ui">Theme ▸</span> (on a page without a theme button of its own), <span class="ui">Scroll in the window</span>,
+  <span class="ui">Edge style</span>, <span class="ui">Sort prefixes</span>, <span class="ui">Snap to edges</span>,
+  <span class="ui">Tools in the bar ▸</span> — every group with a tick: a click shows or hides one, <span class="ui">Show all</span> and
+  <span class="ui">Hide all</span> do them all, the menu stays open while you pick — and <span class="ui">Short form ▸</span>. The menus
+  go by the keys: ↑ ↓, → opens a submenu, ← or <kbd>Esc</kbd> closes it, <kbd>Esc</kbd> closes the menu. A line of the bar with no
+  group left goes; a hidden find still floats over the waves on <kbd>/</kbd> or <kbd>ctrl+F</kbd>. The choices are kept in this
+  browser for this viewer (the settings <code>toolsHidden</code> and <code>toolsCompact</code> start a page that way).</p>
+<p><b>The short form</b>: on a bar narrower than 900 px (a side tab of VS Code, a phone; always with <code>toolsCompact: true</code>)
+  the group labels go and the rarer controls of each group move behind its <span class="ui">⋯</span>, into a box under it. Every
+  control stays one or two clicks away, nothing is cut at any width.</p>
 <div class="pair">
-  <figure><img src="img/viewer-bar-tools.png" alt="The menu Tools in the bar: Show all, Hide all, and a tick for cursor, view, edges, find, expression, list, style, state, dump, assertions" loading="lazy">
-    <figcaption><b>The right button on the bar.</b> Every group with its tick.</figcaption></figure>
-  <figure><img src="img/viewer-bar-compact.png" alt="The viewer with only the cursor, view, find, expression and assertions groups in the bar" loading="lazy">
-    <figcaption><b>A compact bar.</b> Edges, go to, list, style, state and dump hidden: more of the waves in sight.</figcaption></figure>
+  <figure><img src="img/viewer-bar-tools.png" alt="The ⚙ menu with Tools in the bar open: Show all, Hide all, a tick for each group" loading="lazy">
+    <figcaption><b>⚙ and Tools in the bar.</b> Every group with its tick.</figcaption></figure>
+  <figure><img src="img/viewer-bar-file.png" alt="File ▾ open: Open dump, Compare with, Sources, Save view, Load view, Save page, Load assertions" loading="lazy">
+    <figcaption><b>File ▾.</b> The files of the dump and of your view, each with its key.</figcaption></figure>
 </div>
+<figure><img src="img/viewer-bar-compact.png" alt="The bar in its short form, the find's ⋯ open under it" loading="lazy">
+  <figcaption><b>The short form.</b> No labels, the find's ⋯ open: its options, Select, Copy, Paint ▾.</figcaption></figure>
+<h3 id="arrange">Arranging the bar yourself</h3>
+<p><span class="ui">⚙ ▾ → Arrange the bar…</span> outlines the groups and puts a ⠿ on each label: drag a group by its label to another
+  place of its line, to another line, or onto <i>new line — drop a group here</i>; an accent bar shows where it lands, <kbd>Esc</kbd>
+  during the drag puts it back. The strip under the lines has the presets <span class="ui">Full</span> (the default order),
+  <span class="ui">Compact</span> (the short form at any width), <span class="ui">Mine</span> (the order you made last),
+  <span class="ui">Reset</span>, <span class="ui">Keys…</span> and <span class="ui">Done</span> (or <kbd>Esc</kbd>). <span class="ui">Keys…</span>
+  lists the groups line by line: <kbd>alt+↑</kbd> <kbd>alt+↓</kbd> move the one in focus within its line, <kbd>alt+←</kbd>
+  <kbd>alt+→</kbd> to the line before or after (past the last: a new one), <kbd>Space</kbd> shows or hides it. The order is kept in this
+  browser for every viewer of every page (in VS Code: for every tab); a saved state carries its own for its viewer.</p>
+<figure><img src="img/viewer-arrange.png" alt="The bar in the arranging mode: groups outlined, a handle on each label, a group dragged, the new line and the strip" loading="lazy">
+  <figcaption><b>Arranging.</b> MARKS dragged before VIEW (the accent bar where it lands), the new line under the lines, the strip of
+  the presets.</figcaption></figure>
+<h3 id="strip">The cursor over the time axis</h3>
+<p>The <b>cursor</b> group (time, unit, span) and the <b>edges</b> (◀ edge kind ▶) stand in a slim strip right over the time axis,
+  above the waves, not in the bar's lines: they stay with the tools folded. <span class="ui">🔒</span> at its left unlocks it: drag
+  <span class="ui">⠿</span> along the waves (it snaps to the left, the middle, the right; <kbd>←</kbd> <kbd>→</kbd> <kbd>Home</kbd>
+  <kbd>End</kbd> on it too), then <span class="ui">🔒</span> again to lock it. The place is kept in this browser for every viewer;
+  <span class="ui">⚙ ▾ → Cursor over the axis</span> puts the two groups back in the bar's lines.</p>
+<figure><img src="img/viewer-strip.png" alt="The strip over the time axis unlocked: the open lock, the handle, the cursor's time, unit and span, the edge buttons, outlined" loading="lazy">
+  <figcaption><b>The cursor over the axis, unlocked.</b> ⠿ drags it along the waves; 🔒 locks it again.</figcaption></figure>
 <h3 id="tips">Tooltips and the keys box</h3>
 <p>Hover any button, field or list of the bar for what it does and its keys; the tooltip shows after 350 ms (in the right button's menu
   after 2 s, the <code>menuTipDelay</code> setting, so that it does not get in the way while you read the menu).</p>
@@ -152,12 +192,12 @@
   <tr><td>scroll the rows</td><td>the wheel</td><td><kbd>PgUp</kbd> <kbd>PgDn</kbd></td></tr>
 </table>
 <p>With many rows, <code>"maxHeight": "80vh"</code> makes them scroll inside the viewer; the canvas only covers the rows in view, so
-  any number of rows scrolls smoothly. <b>Scroll: window / page</b> at the right of the bar's title line switches on the fly: with the
+  any number of rows scrolls smoothly. <b>⚙ ▾ → Scroll in the window</b> (a tick) switches on the fly: with the
   page, the rows go by with the browser's scroll bar and the bar sticks to the top of the window, the time axis under it down to the
   last rows; in a window of their own, the box is never taller than the browser's window under the bar, so the bar and the axis
   stay in sight together, and the end of the rows does not scroll the page on; <b>▴</b>
-  folds the tools to the title line while you read, <b>▾ tools</b> (or <kbd>/</kbd>) opens them again. Both are kept in this
-  browser.</p>
+  folds the tools to the title line while you read, <b>▾ tools</b> opens them again (<kbd>/</kbd> opens them for the find, and folds
+  them back when you leave it empty). Both are kept in this browser.</p>
 
 <h2 id="cursor">The cursor</h2>
 <p>A click on the waves puts the cursor there and selects the signal under the pointer. When an edge of that signal is within 8 px of the
@@ -165,10 +205,11 @@
   <kbd>alt+click</kbd> never snaps. The cursor reads exactly at any zoom (<code>cursor 1.234567 µs</code>), and the value column shows
   every signal's value there. <kbd>shift+←</kbd> / <kbd>shift+→</kbd> move the cursor a hundredth of the view.</p>
 <p>The <b>cursor</b> group places it by number: type a time (<code>1.2us</code>: a unit typed wins over the unit list, or a number in the
-  listed unit) and press <span class="ui">Set</span> or <kbd>Enter</kbd>. The span field and <span class="ui">Show</span> give a window that
-  wide centred on the cursor. A cycle diagram (clock-sampled without time) counts in cycles.</p>
+  listed unit) and press <kbd>Enter</kbd>. The span field (its own unit, or a number in the cursor's) and <kbd>Enter</kbd> give a window
+  that wide centred on the cursor. A time it cannot read flashes red and the title line says why; <kbd>Esc</kbd> puts back what the field
+  showed. A cycle diagram (clock-sampled without time) counts in cycles.</p>
 <figure><img src="../img/cursor.png" alt="The demo's exact view with the cursor at 1.2 µs and a 100 ns window around it" loading="lazy">
-  <figcaption><b>The cursor fields.</b> Cursor set to 1.2 µs, span 100 ns, <span class="ui">Show</span>: a 100 ns window around it.</figcaption></figure>
+  <figcaption><b>The cursor fields.</b> Cursor set to 1.2 µs, span 100 ns, <kbd>Enter</kbd>: a 100 ns window around it.</figcaption></figure>
 <h3 id="cursor2">A second cursor</h3>
 <p><kbd>shift+click</kbd> on the waves (or <span class="ui">Here ▸ Second cursor here</span> in the right button's menu) puts a dashed second
   cursor, snapped to an edge like the first. The axis and the title line then show the distance to the cursor in time, its frequency, and
@@ -353,7 +394,7 @@
     one, each scrolled to the middle of the waves.</li>
   <li><span class="ui">Highlight</span> (on by default) dims the rows without a match; <span class="ui">Open</span> (on by default) folds
     every module without one.</li>
-  <li><span class="ui">Paint</span> colours the found signals (and the highlighted ones) in the colour next to it — kept in this browser;
+  <li><span class="ui">Paint ▾</span> colours the found signals (and the highlighted ones) in the colour picked in it — kept in this browser;
     <span class="ui">Unpaint</span> takes it off. <span class="ui">Copy</span> copies the found rows' full paths, one per line.</li>
   <li><span class="ui">Mask</span> leaves only the found rows on the waves, with the modules on the way to them (a found module with what
     is in it). The search still runs over every row; ending it, or Mask off, brings them all back.</li>
@@ -394,7 +435,7 @@
 <h2 id="hierarchy">Hierarchy and folding</h2>
 <p>In a page made from a whole dump (<code>"hierarchy": true</code>, what <code>mkconfig.py</code> writes) every scope is a group: module rows
   are bold on a darker band, and neighbouring modules alternate between two backgrounds (<code>moduleShading</code>), so you see where one
-  instance ends. A click on a module row folds or opens it; <span class="ui">Expand</span> / <span class="ui">Collapse</span> in the list group
+  instance ends. A click on a module row folds or opens it; <span class="ui">⊞</span> / <span class="ui">⊟</span> in the list group
   open or fold all of them.</p>
 <table>
   <tr><th>Keys</th><th>Fold</th></tr>
@@ -454,7 +495,7 @@
 <p>A bookmark is a numbered circle on a signal at a time, with a colour and a text: the event you want someone to look at. An arrow joins
   two bookmarks with a label — a latency, a cause and its effect.</p>
 <ol class="steps">
-  <li>Select a signal, put the cursor near the event and press <span class="ui">+ Mark</span> or <kbd>b</kbd>: a bookmark, snapped to an
+  <li>Select a signal, put the cursor near the event and press <span class="ui">+ Bookmark</span> or <kbd>b</kbd>: a bookmark, snapped to an
     edge of that signal. <span class="ui">Here ▸ Bookmark here</span> in the right button's menu puts one where you clicked.</li>
   <li>Type its text in the list under the waves, a short label by the circle too; change its time (<code>250ns</code>, <code>85.12us</code>), its signal (empty: the time axis)
     or its colour there. <span class="ui">cursor</span> moves it to the cursor; the Δ column shows its distance from the cursor.</li>
@@ -540,7 +581,7 @@
 
 <h2 id="themes">Themes</h2>
 <p>Three themes: <b>light</b> (warm paper), <b>white</b> (black traces, for print and slides) and <b>dark</b>. They follow the system
-  (<code>prefers-color-scheme</code>) unless set: the theme button in a generated page's header, ◐ in the bar's title line of <code>wavelens/viewer.html</code> (<code>themeButton</code>), <code>&lt;html data-theme="white"&gt;</code>,
+  (<code>prefers-color-scheme</code>) unless set: the theme button in a generated page's header, ⚙ ▾ → Theme ▸ in the bar of <code>wavelens/viewer.html</code> (<code>themeButton</code>), <code>&lt;html data-theme="white"&gt;</code>,
   <code>WaveLens.setTheme('dark')</code>, or <code>"config": {"theme": …}</code>. Every colour is a CSS custom property; see
   <a href="pages.html">Dump → page</a> <a href="types.html">State names</a> for colours per signal, group and module.</p>
 <div class="pair">
@@ -628,7 +669,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.52 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.53 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

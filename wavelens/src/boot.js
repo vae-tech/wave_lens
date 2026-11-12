@@ -151,10 +151,11 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 
 /* ---------------- tooltips: what a control of a viewer does and its keys ---------------- */
 // [text, keys] of a control: TIPS by its data-act / -sv / -x / -bm / -m / -jump value or a class, else its own title
-const TIP_DATA = ['act', 'sv', 'x', 'bm', 'm', 'jump'];
+const TIP_DATA = ['act', 'sv', 'x', 'bm', 'm', 'jump', 'ar'];
 function tipOf(el) {
   const d = el.dataset;
-  for (const k of TIP_DATA) if (d[k] != null) { const t = TIPS[`${k}:${d[k]}`] || (k === 'jump' && TIPS.jump); if (t) return t; }
+  for (const k of TIP_DATA) if (d[k] != null) {   // a jump: its whole label too (the button cuts it)
+    const t = TIPS[`${k}:${d[k]}`] || (k === 'jump' && [`${TIPS.jump[0]}: ${el.textContent}`]); if (t) return t; }
   for (const c of el.classList) if (TIPS['.' + c]) return TIPS['.' + c];
   const own = el.title || d.ttl;
   return own ? [own] : null;
@@ -193,7 +194,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.52',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.53',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,

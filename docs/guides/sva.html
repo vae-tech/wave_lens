@@ -132,8 +132,10 @@ make config WAVES=work/x.vcd SVA="checks/*.sv"                                  
 
 <h3>In the page</h3>
 <p>A viewer with the engine (every page of <code>make html</code>, <code>wavelens/viewer.html</code>; in your own page the scripts
-  <code>sva.wasm.js</code> and <code>sva.js</code>) has an <span class="ui">assertions</span> group in its bar: <span class="ui">Load file…</span> reads more
-  <code>.sv</code> / <code>.sva</code> files into this browser. Then bind a loaded assertion in one of two ways:</p>
+  <code>sva.wasm.js</code> and <code>sva.js</code>) has an <span class="ui">SVA</span> group in its bar (<code>assertions</code> in <code>toolsHidden</code>):
+  <span class="ui">Load file…</span> while nothing is bound (and <span class="ui">File ▾ → Load assertions…</span> at any time) reads more
+  <code>.sv</code> / <code>.sva</code> files into this browser; once assertions are bound it walks their failures in the view,
+  ◀ <span class="ui">✕ N</span> ▶ (<kbd>[f</kbd> <kbd>]f</kbd>), and its ▾ lists every failure by name and time. Then bind a loaded assertion in one of two ways:</p>
 <ul>
   <li><b>Drag</b> its line from the panel onto a module in the names column. While you drag, the modules that have all its signals turn
     green; the others fade and say what they miss.</li>
@@ -159,11 +161,10 @@ make config WAVES=work/x.vcd SVA="checks/*.sv"                                  
 
 <h2 id="panel">The assertions panel</h2>
 <p>The panel sits under the bar. Folded it is one line, <span class="ui">▸ Assertions</span> with the number loaded (setting
-  <code>svaOpen</code>: open when the page opens); the bar's <span class="ui">go to</span> group has a button per failure (at most
-  six).</p>
-<figure><img src="img/sva-page.png" alt="The viewer bar with the go to failure buttons and the folded assertions panel" loading="lazy">
-<figcaption><b>Folded.</b> <span class="ui">go to</span>: the two failures of <code>apb_demo_no_wait</code> (105 ns, 115 ns); the
-  <span class="ui">ƒ Expressions</span> button; <span class="ui">Load file…</span> in <span class="ui">assertions</span>; the panel's
+  <code>svaOpen</code>: open when the page opens); the bar's <span class="ui">SVA</span> group walks the failures in the view (◀ ▶) and lists them all in its ▾.</p>
+<figure><img src="img/sva-page.png" alt="The viewer bar with the SVA failure walk and the folded assertions panel" loading="lazy">
+<figcaption><b>Folded.</b> <span class="ui">SVA ◀ ✕ 2 ▶ ▾</span>: the two failures of <code>apb_demo_no_wait</code> (105 ns, 115 ns,
+  by name in its ▾); the <span class="ui">ƒ Expressions</span> button; the panel's
   header with <span class="ui">Watch</span>, <span class="ui">JSON</span>, <span class="ui">Clear</span>, <span class="ui">Table</span>,
   <span class="ui">Failures</span>, <span class="ui">report.md</span>, <span class="ui">report.json</span>.</figcaption></figure>
 <figure><img src="img/sva-panel.png" alt="The assertions panel open: a totals line and one entry per assertion" loading="lazy">
@@ -221,7 +222,7 @@ make config WAVES=work/x.vcd SVA="checks/*.sv"                                  
   <code>= PCLK</code>, <code>= PRESETn</code>, <code>= PSEL</code>, <code>= PENABLE</code>, <code>= PREADY</code>.</figcaption></figure>
 
 <h3 id="select">Selecting an attempt</h3>
-<p>Click a bracket or a circle (or a failure in the panel, a <span class="ui">go to</span> button, <kbd>]f</kbd>): the attempt is
+<p>Click a bracket or a circle (or a failure in the panel, one in the ▾ of <span class="ui">SVA</span>, its ◀ ▶, <kbd>]f</kbd>): the attempt is
   <b>selected</b>. The cursor goes to its start and the view moves to it at the same zoom; its circles and arrows come to the front,
   the signals it read are highlighted, and its circles are drawn on those signals too — the names in the step's label, so
   <code>1. PSEL &amp;&amp; PENABLE</code> puts a <b>1</b> on <code>PSEL</code> and on <code>PENABLE</code>. Its start and end are dashed
@@ -237,7 +238,7 @@ make config WAVES=work/x.vcd SVA="checks/*.sv"                                  
     attempt in the middle of the window; click again for its next attempt</td></tr>
   <tr><td><kbd>]a</kbd> / <kbd>[a</kbd></td><td>the next / previous assertion (its first failure, else its first pass)</td></tr>
   <tr><td><kbd>]f</kbd> / <kbd>[f</kbd></td><td>the next / previous failure of any assertion</td></tr>
-  <tr><td><span class="ui">go to</span> buttons</td><td>a failure each (at most six)</td></tr>
+  <tr><td><span class="ui">SVA ◀ ✕ N ▶ ▾</span></td><td>the failures in the view, walked and listed by name (any number)</td></tr>
   <tr><td><kbd>Esc</kbd></td><td>clears the selection (and the search, the highlight)</td></tr>
 </table>
 <p>The keys work once the waves have the focus (click the waves or a name). With more than three assertions on one instance the ones
@@ -445,7 +446,7 @@ make sva-eval WAVES=x.fst SVA="pkg.sv checks.sva" SCOPE=tb.dut ARGS="--junit rep
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.52 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.53 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>
