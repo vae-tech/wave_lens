@@ -58,7 +58,10 @@ may be the default). What the tab does differently from a page in a browser:
   500 MB). What needs other signals reads them first: an assertion its signals, the FSM panel and `fsm_stats` the state
   machines, a picture its rows. Their values are the ones the whole dump gives (smoke `lazy_dump` holds it to that).
   With no `sva` CLI on the host (Windows without `wavelens.sva`), or one that fails on the VCD, the VCD is read whole
-  instead, the reason in the tab and the log; an FST needs the CLI.
+  instead, the reason in the tab and the log; an FST needs the CLI. VS Code then offers *WaveLens: Set the sva program…*
+  (also in the tab's ⋯ menu): the sva programs found on the machine (on the PATH, `~/.cargo/bin`, the workspace's builds:
+  `bin/windows-x86_64/`, `sva/target/release/`, any `sva.exe` of it, `C:\Tools\wavelens`), each tried with `--help`,
+  or Browse… for its file; the one picked goes to `wavelens.sva`, a dump read whole for want of it is read again.
   An FST written over by a new run while its tab is open is not read under the old header: the signals not read yet say
   *changed on the disk since it was read: ⟳ (R) reads it again*, once (a read that failed is not run again on every draw;
   ⟳ or `R` reads the dump again, `wavelens.autoReload` at once).

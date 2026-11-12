@@ -80,7 +80,9 @@
     and signal at once, the top level open and its modules folded, no value read yet; open a module and the signals on the screen
     are read from the dump's FST (<code>sva vcd --codes</code>; a VCD is made an FST once). Assertions, the FSM panel and pictures
     read what they need first. With no <code>sva</code> CLI on the host (Windows without <code>wavelens.sva</code>) a VCD is
-    read whole instead, the tab says why; an FST needs the CLI.</td></tr>
+    read whole instead, the tab says why; an FST needs the CLI. <i>WaveLens: Set the sva program…</i> (offered then, also in the
+    tab's ⋯ menu) lists the <code>sva</code> programs found on the machine, each tried, or a file you pick, and sets
+    <code>wavelens.sva</code>.</td></tr>
   <tr><td>a new simulation</td><td>the tab sees the dump change on the disk (polled: an NFS home works too) and offers
     <span class="ui">⟳</span> in the bar, or <i>WaveLens: Read the dump again</i> in the editor's title; the view is kept.
     <code>wavelens.autoReload: true</code> reads it at once.</td></tr>
@@ -188,7 +190,8 @@
   <tr><td><code>wavelens.runsDir</code></td><td></td><td>where the Runs panel keeps the runs (empty: <code>.wavelens-runs</code> beside the
     dump; relative to the workspace folder, or absolute: one directory for every dump; in the workspace's settings,
     <code>sva runs</code> in a shell and an agent's <code>wave_runs</code> find it too)</td></tr>
-  <tr><td><code>wavelens.sva</code></td><td></td><td>another <code>sva</code> program than the one the extension carries</td></tr>
+  <tr><td><code>wavelens.sva</code></td><td></td><td>another <code>sva</code> program than the one the extension carries (<i>WaveLens: Set the sva
+  program…</i> finds and sets it)</td></tr>
 </table>
 <p>The output channel <b>WaveLens</b> (View → Output, or <i>WaveLens: Show the log</i>) logs each read and what went wrong: a
   dump that could not be read (with its line, also in the Problems panel), an FST the <code>sva</code> could not convert, the live link. A host that is not Linux x86-64 needs <code>wavelens.sva</code> pointing at a
@@ -196,7 +199,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.55 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.56 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

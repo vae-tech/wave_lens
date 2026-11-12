@@ -242,6 +242,73 @@ class LazyNoCli(unittest.TestCase):
             self.assertIn('read whole', o['codes'].get('error', ''), 'no FST behind it: no codes asked of the CLI')
             self.assertIn('error', o['fst'], o['fst'])
 
+
+LOCATE = r"""
+const fs = require('fs'), path = require('path');
+const [F, ext, dir] = process.argv.slice(1).map((x, i) => (i ? x : require(x)));
+const settings = { keysToVSCode: [], lazy: 'always', sva: path.join(dir, 'gone', 'sva') }, out = { warned: [], ran: [], set: [] };
+let pick = null, answer = undefined;
+const h = F.host({ ext, dir, extensionPath: path.join(dir, 'ext'), workspaceState: new Map(),
+  workspace: { getConfiguration: () => ({ get: k => settings[k], inspect: () => ({}), update: async (k, v) => { settings[k] = v; out.set.push(v); } }),
+    workspaceFolders: [{ uri: { fsPath: path.join(dir, 'ws') } }], findFiles: async () => [] },
+  vscode: { commands: { registerCommand: () => ({ dispose() {} }), executeCommand: async id => { out.ran.push(id); } } },
+  window: { withProgress: async (o, f) => f(), showErrorMessage: async () => undefined,
+    showWarningMessage: async (s, ...b) => { out.warned.push([s, b.filter(x => typeof x === 'string')]); return b.find(x => typeof x === 'string'); },
+    showInformationMessage: async (s, ...b) => { out.info = s; return answer; },
+    showQuickPick: async items => { out.items = items.map(i => [i.label, i.detail]); return pick(items); } } });
+F.run(async () => {
+  const A = await h.tab(path.join(dir, 'big.vcd'));
+  await A.send({ type: 'source', id: 1 }); out.note = A.reply(1).note || '';
+  await new Promise(r => setTimeout(r, 20));
+  out.cands = (await h.api.svaCandidates()).map(c => [path.relative(dir, c.path), c.why]);
+  out.warnedAfter = out.warned.length;   // trying the candidates offers nothing
+  pick = items => items[0]; answer = 'Read again';
+  await h.api.locateSva();
+  out.reloaded = A.said.some(m => m.type === 'reload');
+  pick = items => items.find(i => i.clear); await h.api.locateSva();
+  return out;
+});
+"""
+
+
+class LocateSva(unittest.TestCase):
+    @H.needs(NODE, 'node (or VS Code\'s, ~/.vscode-server/bin/*/node)')
+    def test_the_sva_programs_found_tried_and_set(self):
+        """WaveLens: Set the sva program…: the sva programs of this machine found (the workspace's builds here), each tried (one
+        that runs first; one that is no sva, one that cannot run: why); the one picked set in wavelens.sva, the tab read whole
+        for want of it read again; The default empties it. A CLI that did not start offers the command once (VS Code's warning
+        with its button); trying the candidates offers nothing."""
+        with H.tmp() as d:
+            text = '$timescale 1ns $end\n$scope module t $end\n$var wire 1 ! a $end\n$upscope $end\n$enddefinitions $end\n#0\n1!\n'
+            with open(os.path.join(d, 'big.vcd'), 'w', encoding='utf-8') as f:
+                f.write(text)
+            progs = {'ws/sva/target/release/sva': ('#!/bin/sh\necho "usage: sva parse FILE"\n', 0o755),
+                     'ws/bin/linux-x86_64/sva': ('#!/bin/sh\necho "something else" >&2\nexit 3\n', 0o755),
+                     'ws/out/sva-target/release/sva': ('#!/bin/sh\necho "usage: sva"\n', 0o644)}
+            for rel, (body, mode) in progs.items():
+                os.makedirs(os.path.dirname(os.path.join(d, rel)), exist_ok=True)
+                with open(os.path.join(d, rel), 'w', encoding='utf-8') as f:
+                    f.write(body)
+                os.chmod(os.path.join(d, rel), mode)
+            os.makedirs(os.path.join(d, 'ext'))
+            r = subprocess.run([NODE, '-e', LOCATE, FAKE, os.path.join(H.ROOT, 'vscode', 'extension.js'), d], capture_output=True, text=True,
+                               timeout=60, env=dict(os.environ, PATH='/usr/bin:/bin'))
+            self.assertEqual(r.returncode, 0, r.stderr)
+            o = json.loads(next(x for x in r.stdout.splitlines() if x.startswith('RESULT'))[6:])
+        self.assertIn('Set the sva program', o['note'], 'the page\'s note names the command')
+        self.assertEqual(len(o['warned']), 1, o['warned'])
+        self.assertEqual(o['warned'][0][1], ['Set the sva program…'], 'the warning\'s button')
+        self.assertIn('wavelens.locateSva', o['ran'], 'the button runs the command')
+        cands = dict(o['cands'])
+        self.assertEqual(o['cands'][0], ['ws/sva/target/release/sva', ''], f'the one that runs first: {o["cands"]}')
+        self.assertIn('not sva', cands['ws/bin/linux-x86_64/sva'])
+        self.assertIn('cannot run', cands['ws/out/sva-target/release/sva'])
+        self.assertEqual(o['warnedAfter'], 1, 'trying the candidates offers nothing')
+        self.assertTrue(o['items'][-2][0].endswith('Browse…') and o['items'][-1][0].endswith('The default'), o['items'])
+        self.assertEqual(o['set'][0], os.path.join(d, 'ws/sva/target/release/sva'))
+        self.assertTrue(o['reloaded'], 'the tab read whole for want of it read again')
+        self.assertIsNone(o['set'][1], 'The default: wavelens.sva emptied')
+
 WP8 = r'''
 const fs = require('fs'), path = require('path');
 const [F, ext, dir, mode] = process.argv.slice(1).map((x, i) => (i ? x : require(x)));

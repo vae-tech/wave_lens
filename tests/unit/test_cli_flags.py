@@ -8,7 +8,7 @@ from . import helpers as H
 from .test_vscode_state import FAKE, NODE
 
 # the usage of each command: its source file under sva/cli/src
-USAGE_OF = {'diff': 'diff.rs', 'diff --results': 'resdiff.rs', 'runs': 'runs.rs', 'vcd': 'vcd.rs', 'fst': 'fst.rs'}
+USAGE_OF = {'sva': 'main.rs', 'diff': 'diff.rs', 'diff --results': 'resdiff.rs', 'runs': 'runs.rs', 'vcd': 'vcd.rs', 'fst': 'fst.rs'}
 
 # the argument lists of the CLI: (file, the line the builder starts at, the text it ends before (None: the next line indented
 # no deeper than the first), the command whose usage it is checked against, may hold no flag)
@@ -29,6 +29,7 @@ BUILDERS = [
     ('vscode/extension.js', '  cutOf(src,', None, 'fst', False),
     ('vscode/extension.js', '  async recordOf(of) {', None, 'runs', False),
     ('vscode/extension.js', 'async function toFst(', None, 'fst', True),
+    ('vscode/extension.js', 'function svaCheck(', None, 'sva', False),   # Set the sva program…: a candidate tried
 ]
 FLAG = re.compile(r'''['"`](--?[A-Za-z][\w-]*)''')   # a string that starts with a flag ('--from', '--from=…', '-q')
 BUILT = re.compile(r'''['"`]--?(\{|\$\{)''')   # a flag made of a variable (f'--{k}'): not readable here

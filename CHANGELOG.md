@@ -5,6 +5,14 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.56 — 12 November 2026
+
+VS Code: the sva program found and set from VS Code (Windows has none bundled).
+
+- VS Code: *WaveLens: Set the sva program…* (the palette, the tab's ⋯ menu; offered by VS Code the first time no sva runs):
+  the sva programs found on the machine (the PATH, `~/.cargo/bin`, the workspace's builds, `C:\Tools\wavelens`), each tried
+  with `--help`, or Browse… for a file; the one picked set in `wavelens.sva`, a dump read whole for want of it read again.
+
 ## 0.55 — 12 November 2026
 
 VS Code on Windows: a large VCD opens without the sva CLI.

@@ -45,24 +45,107 @@ function svaBin() {
 }
 // a CLI that did not start: none bundled for this host (the .vsix carries the Linux x86_64 one) and none on the PATH, or one
 // that cannot run here (not executable, built for another system) -> wavelens.sva named
-const noCli = (bin, e) => (e.code === 'ENOENT' ? `there is no sva CLI on this host (${bin}; none bundled for ${hostOf()}): set wavelens.sva ` +
-  'to its path (the repository builds one: make dist-linux, make dist-windows)' : e.code === 'EACCES' || e.code === 'ENOEXEC' || e.errno === -8 ?
-  `${bin} cannot run on this host (${hostOf()}: ${e.code || e.message}; not executable, or built for another system): set wavelens.sva to ` +
-  'an sva built for it (cargo build --release -p sva-cli in sva/ of the repository)' : `${bin}: ${e.message}`);
+const cliGone = e => e.code === 'ENOENT' || e.code === 'EACCES' || e.code === 'ENOEXEC' || e.errno === -8;
+const noCli = (bin, e) => { if (cliGone(e) && !e.probe) offerSva(); return e.code === 'ENOENT' ? `there is no sva CLI on this host (${bin}; none bundled for ` +
+  `${hostOf()}): set wavelens.sva to its path (WaveLens: Set the sva program…; the repository builds one: make dist-linux, make dist-windows)` :
+  cliGone(e) ? `${bin} cannot run on this host (${hostOf()}: ${e.code || e.message}; not executable, or built for another system): set wavelens.sva ` +
+  'to an sva built for it (WaveLens: Set the sva program…; cargo build --release -p sva-cli in sva/ of the repository)' : `${bin}: ${e.message}`; };
+// the first CLI of a session that did not start: VS Code offers the command that finds one (Set the sva program…)
+let svaOffered = false;
+function offerSva() {
+  if (svaOffered) return;
+  svaOffered = true;
+  const set = 'Set the sva program…', said = 'WaveLens: no sva program runs here: a large VCD is read whole, an FST, Compare and the runs kept ' +
+    'need one. Pick one found on this machine, or its file';
+  Promise.resolve(vscode.window.showWarningMessage(said, set)).then(a => { if (a === set) vscode.commands.executeCommand('wavelens.locateSva'); }, () => {});
+}
+
+/* ---------------- WaveLens: Set the sva program… — the ones found on this machine, each run once, or a file picked ---------------- */
+// a program that answers --help with sva's usage in 5 s -> '' (it runs here), else why not
+function svaCheck(bin) {
+  const keep = p => { const t = setTimeout(() => p.kill(), 5000); p.on('close', () => clearTimeout(t)); return p; };
+  return spawnRun(bin, ['--help'], { maxOut: 1 << 16, keep, probe: true })
+    .then(r => (r.code === 0 && /usage: sva/.test(r.out + r.err) ? '' : r.code === -1 ? r.err : `not sva (${r.err.split('\n')[0] || 'exit ' + r.code})`));
+}
+// the sva programs on this machine: the one set, inside the extension, the repository's, on the PATH, cargo's, the workspace's
+// builds (make dist-*, cargo build in sva/, any sva of it), C:\Tools\wavelens -> [{path, from, why}] (why '': it runs here)
+async function svaCandidates() {
+  const win = process.platform === 'win32', exe = win ? 'sva.exe' : 'sva', seen = new Map();
+  const add = (p, from) => { if (!p) return; const f = path.resolve(p), k = win ? f.toLowerCase() : f;
+    try { if (!seen.has(k) && fs.statSync(f).isFile()) seen.set(k, { path: f, from }); } catch (e) { /* not there */ } };
+  const set = vscode.workspace.getConfiguration('wavelens').get('sva');
+  if (set && /[\\/]/.test(set)) add(set, 'set now');
+  const ext = CTX.extensionPath;
+  add(path.join(ext, 'bin', exe), 'inside the extension');
+  for (const d of Object.values(OS_DIR)) add(path.join(ext, '..', 'bin', `${d}-x86_64`, d === 'windows' ? 'sva.exe' : 'sva'), 'the repository');
+  for (const d of (process.env.PATH || process.env.Path || '').split(path.delimiter)) if (d) add(path.join(d, exe), 'on the PATH');
+  add(path.join(os.homedir(), '.cargo', 'bin', exe), 'cargo install');
+  const builds = ['bin/windows-x86_64/sva.exe', 'bin/linux-x86_64/sva', `sva/target/release/${exe}`, 'sva/target/x86_64-pc-windows-gnu/release/sva.exe',
+    `out/sva-target/release/${exe}`, 'out/sva-target/x86_64-pc-windows-gnu/release/sva.exe'];
+  for (const f of vscode.workspace.workspaceFolders || []) for (const b of builds) add(path.join(f.uri.fsPath, b), 'the workspace');
+  try { for (const u of await vscode.workspace.findFiles(`**/${exe}`, '**/node_modules/**', 30) || []) add(u.fsPath, 'the workspace'); }
+  catch (e) { /* no workspace */ }
+  if (win) add('C:\\Tools\\wavelens\\sva.exe', 'C:\\Tools\\wavelens');
+  const list = [...seen.values()];
+  await Promise.all(list.map(async c => { c.why = await svaCheck(c.path); }));
+  return list.sort((a, b) => (a.why ? 1 : 0) - (b.why ? 1 : 0));   // the ones that run first
+}
+// the setting where it is set: the workspace's when it has one, else the user's
+const svaTarget = () => { const i = vscode.workspace.getConfiguration('wavelens').inspect('sva');
+  return i && i.workspaceValue !== undefined ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global; };
+async function setSva(bin) {
+  await vscode.workspace.getConfiguration('wavelens').update('sva', bin || undefined, svaTarget());
+  svaOffered = false;
+  log(bin ? `wavelens.sva: ${bin}` : 'wavelens.sva: the default (the bundled one on its host, else sva on the PATH)');
+}
+// the command: a pick of the ones found (✓ runs here, ⚠ why not), Browse…, the default; a program that does not run asked
+// about first; the tabs read whole for want of one offered a read again (lazy now)
+async function locateSva() {
+  const now = vscode.workspace.getConfiguration('wavelens').get('sva') || '';
+  const list = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'WaveLens: looking for sva programs' },
+    () => svaCandidates());
+  const items = list.map(c => ({ label: `${c.why ? '$(warning)' : '$(check)'} ${c.path}`, description: c.from + (now && path.resolve(now) === c.path ?
+    ' · wavelens.sva now' : ''), detail: c.why ? `does not run here: ${c.why}` : 'runs here', c }));
+  items.push({ label: '$(folder-opened) Browse…', detail: 'the sva program\'s file (Windows: sva.exe: make dist-windows, or cargo build --release ' +
+    '-p sva-cli in sva/ of the repository)', browse: true });
+  items.push({ label: '$(discard) The default', detail: `wavelens.sva empty: the one inside the extension on Linux x86_64, else sva on the PATH${now ?
+    ' (now: ' + now + ')' : ''}`, clear: true });
+  const got = await vscode.window.showQuickPick(items, { title: 'WaveLens: the sva program', matchOnDescription: true, matchOnDetail: true,
+    placeHolder: list.length ? `${list.filter(c => !c.why).length} of ${list.length} found run here: large dumps, FST, Compare, the runs kept` :
+      'none found on this machine: Browse… for its file' });
+  if (!got) return;
+  if (got.clear) { await setSva(''); vscode.window.showInformationMessage('WaveLens: wavelens.sva back to the default'); return; }
+  let bin = got.c && got.c.path, why = got.c && got.c.why;
+  if (got.browse) {
+    const u = await vscode.window.showOpenDialog({ canSelectMany: false, title: 'WaveLens: the sva program', openLabel: 'Use this sva',
+      filters: process.platform === 'win32' ? { programs: ['exe'], 'every file': ['*'] } : undefined });
+    if (!u || !u[0]) return;
+    bin = u[0].fsPath; why = await svaCheck(bin);
+  }
+  const ask = `WaveLens: ${bin} does not run here: ${why}. Set it all the same?`;
+  if (why && await vscode.window.showWarningMessage(ask, { modal: true }, 'Set') !== 'Set') return;
+  await setSva(bin);
+  const whole = [...TABS].filter(t => t.whole), again = 'Read again';
+  if (!why && whole.length) {
+    const n = whole.length === 1 ? path.basename(whole[0].file) : `${whole.length} dumps`;
+    if (await vscode.window.showInformationMessage(`WaveLens: sva set (${bin}). ${n} read whole for want of it: read again, lazy?`, again) === again)
+      for (const t of whole) t.post({ type: 'reload' });
+  } else vscode.window.showInformationMessage(`WaveLens: sva set: ${bin}`);
+}
 // the JSON the CLI wrote on stdout: where sva cannot put fd 1 aside (Windows) wellen's "WARN: …" lines stand before it
 const cliJson = s => JSON.parse(s.slice(Math.max(0, s.search(/^[{[]/m))));
 
 // The CLI run with what it reads on stdin -> {code, out, err} (code -1: it did not start; big: its output passed maxOut and it
 // was killed). Its stdin guarded: a CLI that exits before node has written (sva runs list reads none) is no EPIPE thrown
 // out of the extension. keep(p): the child, to kill with the tab or a newer ask
-function spawnRun(bin, args, { input = '', maxOut = Infinity, keep = p => p } = {}) {
+function spawnRun(bin, args, { input = '', maxOut = Infinity, keep = p => p, probe = false } = {}) {
   return new Promise(ok => {
     const p = keep(cp.spawn(bin, args, { stdio: ['pipe', 'pipe', 'pipe'] })), out = [], err = [];
     let size = 0, big = false;
     p.stdin.on('error', () => { /* it closed its stdin: what it says comes on stdout, stderr and its exit */ });
     p.stdout.on('data', d => { size += d.length; if (size > maxOut) { big = true; p.kill(); } else out.push(d); });
     p.stderr.on('data', d => err.push(d));
-    p.on('error', e => ok({ code: -1, out: '', err: noCli(bin, e) }));
+    p.on('error', e => ok({ code: -1, out: '', err: noCli(bin, Object.assign(e, { probe })) }));   // probe: a check, no offer
     p.on('close', (code, sig) => ok({ code: code == null ? -1 : code, sig, big, out: Buffer.concat(out).toString('utf8'),
       err: Buffer.concat(err).toString('utf8').trim().replace(/^sva: /, '') }));
     p.stdin.end(input);
@@ -292,6 +375,7 @@ ${scripts}
     this.shown = null;
     let o;
     try { o = await this.srcOf(this.file, path.basename(this.file)); } catch (e) { this.report({ error: e.message }); throw e; }
+    this.whole = !!o.note;   // read whole for want of the CLI: Set the sva program… offers a read again
     return Object.assign(o, { store: this.storeNow() });
   }
   // the file the tab shows (the dump, or a run kept) served: this.src the text the webview reads (bytes()), this.fst the FST
@@ -308,7 +392,7 @@ ${scripts}
       } catch (e) {
         if (/\.fst$/i.test(file)) throw e;   // an FST is read through the CLI only
         lazy = false; fst = null; at = null;
-        note = `${name}: read whole (not lazy): ${e.message.replace(/^sva: /, '')}`;
+        note = `${name}: read whole (not lazy): ${e.message.replace(/^sva: /, '')}`;   // its fix: Set the sva program… (the tab's ⋯)
         log(note);
       }
     }
@@ -1095,6 +1179,7 @@ function activate(ctx) {
     vscode.commands.registerCommand('wavelens.openConfig', cfgOpen),
     vscode.commands.registerCommand('wavelens.resetConfig', cfgReset),
     vscode.commands.registerCommand('wavelens.forgetViews', forgetViews),
+    vscode.commands.registerCommand('wavelens.locateSva', locateSva),
     vscode.workspace.onDidSaveTextDocument(doc => { if (CTX && doc.uri.fsPath === configFile()) cfgApply(doc.getText()); }),
     vscode.commands.registerCommand('wavelens.verilatorTypes', opts => verilatorTypes(active(), opts || {})),
     vscode.commands.registerCommand('wavelens.toFst', (uri, opts) => {   // the explorer's file, else the active tab's dump
@@ -1133,7 +1218,7 @@ function activate(ctx) {
     try { if (!fs.existsSync(vscode.Uri.parse(k.slice(6)).fsPath)) ctx.workspaceState.update(k, undefined); } catch (e) { log(`the store of ${k}: ${e.message}`); } }
   const timer = setInterval(liveCheck, 1500); ctx.subscriptions.push({ dispose: () => clearInterval(timer) });
   liveCheck();
-  return { events: EVENTS.event, tabs: () => [...TABS], vcdOf, problems: uri => DIAG.get(uri) || [] };   // for the tests (vscode/test)
+  return { events: EVENTS.event, tabs: () => [...TABS], vcdOf, problems: uri => DIAG.get(uri) || [], svaCandidates, locateSva };   // for the tests (vscode/test)
 }
 function deactivate() { for (const t of TABS) t.dispose(); }
 module.exports = { activate, deactivate };
