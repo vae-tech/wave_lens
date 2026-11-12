@@ -5,6 +5,19 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.57 — 12 November 2026
+
+VS Code on Windows: the sva CLI inside the package; a VCD read whole without one only up to 256 MB.
+
+- VS Code: the package carries the `sva` CLI of Windows too (`bin/sva.exe`, beside Linux's `bin/sva`; one package for every
+  platform, no TargetPlatform): VS Code on Windows reads a large dump lazy, converts FSTs, compares and keeps runs with
+  nothing to set.
+- VS Code: a VCD the CLI cannot make lazy is read whole up to 256 MB only; a larger one (a 1 GB text read whole kept the
+  tab loading for minutes) is an error that names the fix (*Set the sva program…*, offered again).
+- `make dist` builds both CLIs (`bin/linux-x86_64/sva`, `bin/windows-x86_64/sva.exe`, now committed) and then the package;
+  `dist-linux` is the same (its old name). mingw-w64 is found on the PATH or in `~/.local/mingw-w64` (`make mingw-local`:
+  Ubuntu's packages unpacked there, no sudo). `make unit` holds `sva.exe`'s FST and evaluation to the Linux CLI's (in WSL).
+
 ## 0.56 — 12 November 2026
 
 VS Code: the sva program found and set from VS Code (Windows has none bundled).

@@ -86,7 +86,7 @@ sva/                          the SVA engine (Rust: core, native CLI, WebAssembl
                               writes it), sva diff (cli/src/diff.rs: two dumps streamed and merged by time) and sva runs
                               (cli/src/runs.rs: the runs kept of a dump, .wavelens-runs/runs.json, diff over a window)
 prompts/                      the roadmap as a series of prompts (on dev only)
-bin/                          the prebuilt sva CLI, committed: linux-x86_64/sva (static); windows-x86_64/sva.exe by make dist-windows
+bin/                          the prebuilt sva CLI, committed: linux-x86_64/sva (static), windows-x86_64/sva.exe (mingw-w64)
 out/                          build products (make's BUILD, git-ignored): cargo target, example dumps and pages, shots
 Makefile                      make help lists the targets; build products go to BUILD (default out/)
 ```
@@ -100,7 +100,7 @@ What each part needs:
 | open the pages | a browser |
 | the tools | python3 ≥ 3.9 (standard library only) |
 | the examples | Verilator ≥ 5 (`make examples`); for the cocotb example (`make cocotb`, in `make check`) also Verilator ≥ 5.036 and `pip install cocotb` ≥ 2.0; `make cocotb SIM=questa` needs `vsim` on PATH, is not in `make check`, and smoke checks its page when it is built (checked on Questa 2021.1) |
-| the assertion engine | cargo ≥ 1.82 and `rustup target add wasm32-unknown-unknown` (`make sva-build`); musl for `make dist-linux`, mingw-w64 for `make dist-windows` |
+| the assertion engine | cargo ≥ 1.82 and `rustup target add wasm32-unknown-unknown` (`make sva-build`); musl and mingw-w64 for `make dist` (`sudo apt install mingw-w64`, or `make mingw-local` without sudo) |
 | the tests and the pictures | `pip install playwright`, `python3 -m playwright install chromium` (`make smoke`, `make check`); `fonts-ibm-plex` (or the network) for `make shots`, `make guide-shots`; GTKWave's `vcd2fst` and `fst2vcd` (`apt install gtkwave`) for `make check`: `sva fst` is compared with them (`tests/unit/test_svafst.py`, `sva/cli/tests/cli.rs`) |
 | the SystemVerilog style | verible (`make fmt`) and Verilator (`make lint`) |
 
@@ -119,7 +119,7 @@ make guide-shots            # tests/guide_shots.py: docs/guides/img/*.png (after
 make vsix                   # tools/mkvsix.py: BUILD/wavelens.vsix, its copy wavelens-<version>.vsix (the extension, the viewer, the static sva); make check builds it
 make vscode-e2e             # tests/vscode_e2e.py: the extension in a real VS Code (INSTALLED: python3 tests/vscode_e2e.py --installed)
 make sva-build              # the SVA engine (needs cargo + the wasm32 target): the sva CLI, wavelens/sva.wasm.js
-make dist                   # the CLI: bin/linux-x86_64/sva (musl, static, committed) + bin/windows-x86_64/sva.exe (mingw-w64); dist-linux also bin/wavelens.vsix (committed)
+make dist                   # the CLI: bin/linux-x86_64/sva (musl, static) + bin/windows-x86_64/sva.exe (mingw-w64), then bin/wavelens.vsix with both (all committed)
 make sva-test               # the SVA engine: unit tests, the corpus tests/sva (third_party too), the JSON schema, the CLI
 make sva-bless              # rewrite tests/sva/golden/*.txt after a reviewed change of the parser output
 make sva-examples sva-spike # sva parse + sva eval of examples/*/*.sva; the WebAssembly build in a page (wasm32 target)
@@ -138,10 +138,13 @@ removes it. On a slow mount (this repository on `/mnt/c` under WSL) `make BUILD=
 is emptied on a reboot, and `make smoke` reports what is missing as `SKIPPED n pages / n sections (run make examples, …)`.
 
 **The prebuilt CLI.** `bin/linux-x86_64/sva` (`x86_64-unknown-linux-musl`, statically linked) is committed, so a
-clone runs the tools with assertions without Rust; like `wavelens/sva.wasm.js` it is rebuilt (`make dist-linux`) in the
-commit that changes the engine. `bin/windows-x86_64/sva.exe` (`x86_64-pc-windows-gnu`, linked by mingw-w64) is not
-committed yet: `make dist-windows` builds it where mingw-w64 is installed (commit it then, with every engine change). One time: `rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu` and, for Windows,
-`sudo apt install mingw-w64`. The tools take the CLI from `--sva-bin`, else `$WAVELENS_SVA`, else `out/sva-target/release/sva`
+clone runs the tools with assertions without Rust; like `wavelens/sva.wasm.js` it is rebuilt (`make dist`) in the
+commit that changes the engine. `bin/windows-x86_64/sva.exe` (`x86_64-pc-windows-gnu`, linked by mingw-w64: Windows' own
+DLLs only) is committed beside it, built by the same `make dist` (`dist-windows` alone; in WSL it is run once there, and
+`make unit` holds its `sva fst` and evaluation to the Linux one's). `bin/wavelens.vsix` carries both (no TargetPlatform: one
+package for VS Code on Windows, on Linux, over Remote-SSH / WSL; the extension runs the one of its host). One time:
+`rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu` and, for Windows, `sudo apt install mingw-w64` (without
+sudo: `make mingw-local` unpacks Ubuntu's packages into `~/.local/mingw-w64`, where `make` finds it). The tools take the CLI from `--sva-bin`, else `$WAVELENS_SVA`, else `out/sva-target/release/sva`
 (`make sva-build`), else `bin/<os>-x86_64/`, else `sva` on PATH. `make unit` gives them the CLI of its `BUILD` when
 that is built, and `make check` builds it first: an older `out/` build would test stale code.
 
@@ -434,8 +437,8 @@ MAJOR.MINOR "what it brings"` writes the tree of `dev/vMAJOR.MINOR` less the int
 with the message `vMAJOR.MINOR: <that line>`, and tags it `vMAJOR.MINOR`. Only `master` and the `v*` tags go to GitHub (a local
 `.git/hooks/pre-push` refuses the rest; deleting a branch there it lets through). One commit on the branch before the merge raises the version in five places: `VERSION`,
 `version:` in `wavelens/src/boot.js` (then `make wavelens`), a new top entry in `CHANGELOG.md`, the footers and kickers of `docs/guides/*.html`, and the committed builds
-that carry it (`make sva-build dist-linux`: the `sva` CLI writes the version into a report's meta through
-`include_str!` of `VERSION`, and `dist-linux` ends with `bin/wavelens.vsix`, the package with that CLI: the last build before the commit, after every other file of the version); `make unit` fails when they disagree, and `publish.py` refuses a version whose package is not the build of its tree (`mkvsix.py --plain`: the tree alone decides the package's bytes, the bar shows no commit). The Rust crates keep their own semver in
+that carry it (`make sva-build dist`: the `sva` CLI writes the version into a report's meta through
+`include_str!` of `VERSION`, and `dist` ends with `bin/wavelens.vsix`, the package with both CLIs: the last build before the commit, after every other file of the version); `make unit` fails when they disagree, and `publish.py` refuses a version whose package is not the build of its tree (`mkvsix.py --plain`: the tree alone decides the package's bytes, the bar shows no commit). The Rust crates keep their own semver in
 `sva/Cargo.toml`. A page tells its version in `WaveLens.version`; `make smoke` names a page under `work/` built with
 another one.
 

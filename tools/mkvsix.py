@@ -2,17 +2,19 @@
 """mkvsix.py — the VS Code extension (vscode/) as one .vsix, without node or npm: a VSIX is a zip of extension/ (the
 extension's files) with its manifest (extension.vsixmanifest) and [Content_Types].xml.
 
-  mkvsix.py [--out out/wavelens.vsix] [--one] [--plain] [--sva bin/linux-x86_64/sva] [--target linux-x64]
+  mkvsix.py [--out out/wavelens.vsix] [--one] [--plain] [--sva bin/linux-x86_64/sva] [--sva-win bin/windows-x86_64/sva.exe]
+            [--target PLATFORM]
 
 Two files: OUT (the last build, the same install line each time) and beside it a copy named by its version
 (wavelens-0.20.0.vsix: the versions kept side by side, to install one and another and compare); --one: OUT only.
 --plain: without the build of the bar (the checkout's commit), so that the package depends on the tree alone: bin/wavelens.vsix,
-committed with a version (make dist-linux); publish.py refuses a version whose package is not of its tree (stale()).
+committed with a version (make dist); publish.py refuses a version whose package is not of its tree (stale()).
 
 Into extension/: vscode/package.json (its "version" from VERSION: 0.17 -> 0.17.0), vscode/extension.js, vscode/links.js, vscode/userconfig.js, vscode/protocol.js, vscode/media/
 host.js, the viewer's files of wavelens/ under media/ (wavelens.css, wavelens.config.js, wavelens.js, sva.wasm.js, bus.js,
-sva.js), the static sva CLI as bin/sva (mode 755; FST -> VCD text on the host), vscode/README.md. The
-package is for one platform of the host that runs the extension (Remote-SSH / WSL: the Linux machine): --target.
+sva.js), the static sva CLI of Linux x86_64 as bin/sva (mode 755; FST -> VCD text on the host) and of Windows x86_64 as
+bin/sva.exe (the extension takes the one of its host), vscode/README.md. The package is for every platform (no
+TargetPlatform: VS Code on Windows, on a Linux machine, over Remote-SSH / WSL); --target names one.
 The same input gives the same bytes (fixed times in the zip). Install: code --install-extension FILE.vsix in a terminal
 of the remote window, or Extensions → … → Install from VSIX… while connected.
 """
@@ -27,6 +29,7 @@ from common import WaveError, run_main  # noqa: E402
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 COMMITTED = 'bin/wavelens.vsix'
 SVA = 'bin/linux-x86_64/sva'
+SVA_WIN = 'bin/windows-x86_64/sva.exe'
 MEDIA = ['wavelens.css', 'wavelens.config.js', 'wavelens.js', 'sva.wasm.js', 'bus.js', 'sva.js']
 TYPES = {'.json': 'application/json', '.js': 'application/javascript', '.css': 'text/css', '.md': 'text/markdown',
          '.txt': 'text/plain', '.vsixmanifest': 'text/xml'}
@@ -94,7 +97,7 @@ def stale(read):
         return [COMMITTED]
     with zipfile.ZipFile(io.BytesIO(data)) as z:
         has = {n: z.read(n) for n in z.namelist()}
-    out = [p for n, p in sources() + [('bin/sva', SVA)] if has.get('extension/' + n) != read(p)]
+    out = [p for n, p in sources() + [('bin/sva', SVA), ('bin/sva.exe', SVA_WIN)] if has.get('extension/' + n) != read(p)]
     pkg, own = json.loads(has['extension/package.json']), json.loads(read('vscode/package.json'))
     pkg.pop('wavelensBuild', None)
     if pkg != {**own, 'version': semver(read('VERSION').decode().strip())}:
@@ -102,7 +105,7 @@ def stale(read):
     return out
 
 
-def build(out, sva, target, plain=False):
+def build(out, sva, target, plain=False, sva_win=None):
     with open(os.path.join(ROOT, 'VERSION'), encoding='utf-8') as f:
         ver = f.read().strip()
     with open(os.path.join(ROOT, 'vscode', 'package.json'), encoding='utf-8') as f:
@@ -116,9 +119,14 @@ def build(out, sva, target, plain=False):
         with open(os.path.join(ROOT, p), 'rb') as f:
             files.append(('extension/' + name, f.read(), 0o644))
     if not os.path.isfile(sva):
-        raise WaveError(f'no sva CLI at {sva} (make dist-linux, or --sva)')
+        raise WaveError(f'no sva CLI at {sva} (make dist, or --sva)')
     with open(sva, 'rb') as f:
         files.append(('extension/bin/sva', f.read(), 0o755))
+    sva_win = sva_win or os.path.join(ROOT, SVA_WIN)
+    if not os.path.isfile(sva_win):
+        raise WaveError(f'no sva CLI of Windows at {sva_win} (make dist, or --sva-win)')
+    with open(sva_win, 'rb') as f:
+        files.append(('extension/bin/sva.exe', f.read(), 0o755))
     names = [n for n, _, _ in files]
     head = [('[Content_Types].xml', content_types(names + ['extension.vsixmanifest']).encode(), 0o644),
             ('extension.vsixmanifest', manifest(pkg, target).encode(), 0o644)]
@@ -139,10 +147,11 @@ def main():
     ap.add_argument('--one', action='store_true', help='OUT only, not its copy named by the version')
     ap.add_argument('--plain', action='store_true', help='no build of the bar: the package of the tree alone (the committed one)')
     ap.add_argument('--sva', default=os.path.join(ROOT, SVA), help='the static sva CLI of the host (default: %(default)s)')
-    ap.add_argument('--target', default='linux-x64', help='the platform of the host, as VS Code names it (default: %(default)s; "" none)')
+    ap.add_argument('--sva-win', default=os.path.join(ROOT, SVA_WIN), help='the sva CLI of Windows (default: %(default)s)')
+    ap.add_argument('--target', default='', help='one platform of the host, as VS Code names it (linux-x64, win32-x64; default: every one)')
     a = ap.parse_args()
     out = a.out or os.path.join(ROOT, 'out', 'wavelens.vsix')
-    v, n = build(out, a.sva, a.target, a.plain)
+    v, n = build(out, a.sva, a.target, a.plain, a.sva_win)
     print(f'mkvsix: {out} (wavelens {v}, {n} files, {os.path.getsize(out) // 1024} KB)')
     if not a.one:
         named = os.path.join(os.path.dirname(os.path.abspath(out)), f'wavelens-{v}.vsix')

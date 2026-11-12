@@ -104,7 +104,7 @@ and an agent live in the tab: [the VS Code guide](docs/guides/vscode.html).
 | read an FST with the tools | GTKWave's `fst2vcd`, or the `sva` CLI committed in `bin/linux-x86_64/` (static, any Linux x86-64; the tools find it) |
 | turn a VCD into an FST (FSM states kept) | the `sva` CLI: `sva fst tb.vcd` writes `tb.fst`; in VS Code *Convert to FST* on a `.vcd` |
 | compare two runs in the shell or in CI, cut a window out of a dump | the `sva` CLI: `sva diff a.vcd b.vcd [--map …] [--segment tb_test] [--junit diff.xml]` (streamed: dumps of hundreds of MB), `sva vcd x.vcd --from T --to T --signals …`; the runs kept: `sva runs keep tb.vcd --name golden`, `sva runs diff tb.vcd --from T --to T` |
-| check assertions from the tools or in CI (`mkhtml.py --sva`, `mkconfig.py --sva`, `sva eval`) | the `sva` CLI: `bin/linux-x86_64/sva`; on Windows `make dist-windows` builds it (mingw-w64). Without it a page still evaluates its assertions in the browser |
+| check assertions from the tools or in CI (`mkhtml.py --sva`, `mkconfig.py --sva`, `sva eval`) | the `sva` CLI: `bin/linux-x86_64/sva`, on Windows `bin/windows-x86_64/sva.exe` (both in the VS Code package too). Without it a page still evaluates its assertions in the browser |
 | build the examples | Make and Verilator ≥ 5 |
 | state names on a VCD from the design's types | Questa (`tools/questa/wavelens_types.tcl` in `vsim`) or Verilator ≥ 5 (`tools/svtypes.py verilator`) |
 | the VS Code extension | VS Code ≥ 1.80; the package (`bin/wavelens.vsix`) is for a Linux x86-64 host of Remote-SSH / WSL |

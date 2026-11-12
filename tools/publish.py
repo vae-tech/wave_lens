@@ -51,7 +51,7 @@ def main():
     parent = git('rev-parse', '--verify', '-q', f'refs/heads/{a.branch}', check=False)
     old = mkvsix.stale(lambda p: blob(src, p))
     if old:
-        raise WaveError(f'{mkvsix.COMMITTED} of {a.src or "dev/" + tag} is not the build of its tree ({", ".join(old)}): make dist-linux, commit, tag again')
+        raise WaveError(f'{mkvsix.COMMITTED} of {a.src or "dev/" + tag} is not the build of its tree ({", ".join(old)}): make dist, commit, tag again')
     internal = INTERNAL + (git('show', f'{src}:prompts/INTERNAL', check=False) or '').split()
     index = os.path.join(git('rev-parse', '--absolute-git-dir'), 'publish.index')
     env = dict(os.environ, GIT_INDEX_FILE=index)

@@ -12,7 +12,7 @@ and draws the bindings. Parse errors do not stop the build: they are printed and
 page's printable "Assertions" section: the bindings evaluated over the whole dump, `sva report --html`.
 
 The CLI: --sva-bin, else $WAVELENS_SVA, else the Makefile's build (out/sva-target/release/sva), else the prebuilt one of
-the repository (bin/linux-x86_64/sva: make dist-linux; bin/windows-x86_64/sva.exe when made by make dist-windows), else
+the repository (bin/linux-x86_64/sva, bin/windows-x86_64/sva.exe: make dist), else
 `sva` on PATH.
 Without it the sources go into the page unparsed and the page parses and evaluates them (WebAssembly).
 

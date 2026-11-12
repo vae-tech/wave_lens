@@ -1,5 +1,5 @@
 """tools/mkvsix.py and what it ships: the package's files as the extension needs them, the committed sva CLI the build's."""
-import hashlib, json, os, re, subprocess, sys, unittest, zipfile
+import hashlib, json, os, re, shutil, subprocess, sys, unittest, zipfile
 
 from tests.unit import helpers as H
 
@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.join(H.ROOT, 'tools'))
 import mkvsix  # noqa: E402
 
 SHIPPED = os.path.join(H.ROOT, 'bin', 'linux-x86_64', 'sva')
+SHIPPED_WIN = os.path.join(H.ROOT, 'bin', 'windows-x86_64', 'sva.exe')
 EXAMPLES = [('apb', 'apb_tb', ['examples/apb/apb_tb.sv', 'examples/apb/apb.sva']),   # the cases of sva/cli/tests/cli.rs
             ('axi_lite', 'axi_lite_tb.u_slave', ['examples/axi_lite/axi_lite.sva']),
             ('fsm', 'fsm_tb.u_rx', ['examples/fsm/uart_pkg.sv', 'examples/fsm/fsm.sva'])]
@@ -51,6 +52,10 @@ class Package(unittest.TestCase):
         self.assertIn('extension/media/host.js', names)
         self.assertEqual(mode['extension/bin/sva'], 0o755)
         self.assertEqual(body['extension/bin/sva'][:4], b'\x7fELF')
+        self.assertEqual(body['extension/bin/sva.exe'][:2], b'MZ', 'the Windows CLI too (VS Code on Windows: none of its own)')
+        with open(SHIPPED_WIN, 'rb') as f:
+            self.assertEqual(body['extension/bin/sva.exe'], f.read())
+        self.assertNotIn('TargetPlatform', body['extension.vsixmanifest'].decode(), 'one package for every platform')
         if subprocess.run(['git', '-C', H.ROOT, 'rev-parse', 'HEAD'], capture_output=True).returncode == 0:
             b = pkg.get('wavelensBuild') or {}
             head = subprocess.run(['git', '-C', H.ROOT, 'rev-parse', '--short', 'HEAD'], capture_output=True, text=True).stdout.strip()
@@ -91,6 +96,7 @@ class Committed(unittest.TestCase):
             over = lambda path, data: lambda p: data if p == path else read(p)
             self.assertEqual(mkvsix.stale(over('wavelens/wavelens.js', b'//')), ['wavelens/wavelens.js'], 'the viewer')
             self.assertEqual(mkvsix.stale(over('bin/linux-x86_64/sva', b'x')), ['bin/linux-x86_64/sva'], 'the CLI it carries')
+            self.assertEqual(mkvsix.stale(over('bin/windows-x86_64/sva.exe', b'x')), ['bin/windows-x86_64/sva.exe'], 'the Windows one')
             self.assertIn('VERSION', mkvsix.stale(over('VERSION', b'99.1\n')), 'the version')
             self.assertEqual(mkvsix.stale(over('bin/wavelens.vsix', None)), ['bin/wavelens.vsix'], 'no package')
 
@@ -110,10 +116,34 @@ class Shipped(unittest.TestCase):
             with self.subTest(ex):
                 a, b = (subprocess.run([exe, *args], capture_output=True, text=True, timeout=300) for exe in (fresh, SHIPPED))
                 self.assertEqual((b.returncode, b.stdout), (a.returncode, a.stdout), f'{ex}: bin/linux-x86_64/sva is not the build of sva/ '
-                                 '(make dist-linux and commit it)')
+                                 '(make dist and commit it)')
                 a, b = (subprocess.run([exe, 'vcd', fst], capture_output=True, timeout=300) for exe in (fresh, SHIPPED))
                 self.assertEqual(hashlib.sha256(b.stdout).hexdigest(), hashlib.sha256(a.stdout).hexdigest(), f'{ex}: sva vcd')
 
+    def test_the_windows_build(self):
+        """bin/windows-x86_64/sva.exe (the package's for VS Code on Windows) gives what the Linux one gives: sva fst of a VCD
+        byte for byte (the lazy reading of a large VCD) and the evaluation. Runs where Windows programs run (WSL)."""
+        if not os.path.isfile('/proc/version') or 'microsoft' not in H.text('/proc/version').lower():
+            H.skip(self, 'no Windows here to run sva.exe (WSL runs it)')
+        ex, scope, files = EXAMPLES[2]
+        vcd = os.path.join(H.BUILD, 'examples', ex, ex + '.vcd')
+        if not os.path.isfile(vcd):
+            H.skip(self, f'{vcd}: make examples')
+        with H.tmp() as d:   # relative paths: sva.exe takes Windows paths, the directory is the same for both
+            shutil.copyfile(vcd, os.path.join(d, 'a.vcd'))
+            for f in files:
+                shutil.copyfile(os.path.join(H.ROOT, f), os.path.join(d, os.path.basename(f)))
+            run = (lambda exe, *args: subprocess.run([exe, *args], cwd=d, capture_output=True, text=True, timeout=300))
+            fst = []
+            for exe, name in ((SHIPPED, 'lin.fst'), (SHIPPED_WIN, 'win.fst')):
+                r = run(exe, 'fst', 'a.vcd', '--no-types', '-q', '--out', name)
+                self.assertEqual(r.returncode, 0, f'{exe}: {r.stderr}')
+                with open(os.path.join(d, name), 'rb') as f:
+                    fst.append(hashlib.sha256(f.read()).hexdigest())
+            self.assertEqual(fst[1], fst[0], 'sva.exe fst: the FST the Linux CLI writes (make dist, commit both)')
+            args = ['eval', '--waves', 'a.vcd', '--scope', scope, '--attempts'] + [x for f in files for x in ('--sva', os.path.basename(f))]
+            a, b = run(SHIPPED, *args), run(SHIPPED_WIN, *args)
+            self.assertEqual((b.returncode, b.stdout.replace('\r\n', '\n')), (a.returncode, a.stdout), 'sva.exe eval: the Linux CLI\'s results')
 
 if __name__ == '__main__':
     unittest.main()

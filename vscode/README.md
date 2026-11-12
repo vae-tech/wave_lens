@@ -74,7 +74,7 @@ that breaks the viewer: the defaults again, said. *WaveLens: Reset the configura
 The keys are the viewer's (`?` in the tab): the plain ones, and the ctrl / alt ones that mean what they mean in VS Code
 (ctrl+F, ctrl+C, ctrl+Z, alt+C W R); `wavelens.keysToVSCode` (`ctrl+G`: Go to Line) go to VS Code — the list of your
 groups is `gl` then. Settings: `wavelens.logLinks` (`[]`: more patterns of a log's links), `wavelens.theme` (auto), `wavelens.keysToVSCode` (`["ctrl+G"]`), `wavelens.openLastState` (true), `wavelens.verilator` (verilator), `wavelens.sources` (`**/*.sv`, `**/*.svh`), `wavelens.lazy` (auto: a large dump read as it is needed; always, never), `wavelens.autoReload` (false: the tab offers ⟳ after a new
-simulation; true: it reads the dump at once), `wavelens.live` (true), `wavelens.runsDir` (empty: `.wavelens-runs` beside the dump), `wavelens.sva` (another sva program; the package carries the Linux x86_64 one, used on such a host only: on a Windows host the path of `sva.exe`, `make dist-windows`; on macOS or Linux arm64 one built there, `cargo build --release -p sva-cli` in `sva/`; else `sva` on the PATH).
+simulation; true: it reads the dump at once), `wavelens.live` (true), `wavelens.runsDir` (empty: `.wavelens-runs` beside the dump), `wavelens.sva` (another sva program; the package carries the Linux x86_64 and the Windows x86_64 one, each used on its host; on macOS or Linux arm64 one built there, `cargo build --release -p sva-cli` in `sva/`; else `sva` on the PATH).
 
 **Install.** Build the package from the repository (`make vsix`: `out/wavelens.vsix`, a copy as `wavelens-<version>.vsix`, for a Linux x86-64 host;
 VS Code ≥ 1.80), then in a terminal of the **remote** window `code --install-extension out/wavelens.vsix` (or

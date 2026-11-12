@@ -26,9 +26,9 @@ function roots() {
   const ext = CTX.extensionPath, inside = path.join(ext, 'media');
   return { host: inside, wavelens: exists(path.join(inside, 'wavelens.js')) ? inside : path.join(ext, '..', 'wavelens') };
 }
-// the CLI: wavelens.sva, else the package's (bin/sva: the .vsix carries the Linux x86_64 one), else the repository's (make
-// dist-linux: bin/linux-x86_64/sva, make dist-windows: bin/windows-x86_64/sva.exe), else sva on the PATH (none: noCli says so).
-// The bundled ones only on the host they are built for: on macOS or Linux arm64 the Linux x86_64 one does not start (B-67)
+// the CLI: wavelens.sva, else the package's (the .vsix carries bin/sva of Linux x86_64 and bin/sva.exe of Windows x86_64), else
+// the repository's (make dist: bin/linux-x86_64/sva, bin/windows-x86_64/sva.exe), else sva on the PATH (none: noCli says so).
+// The bundled ones only on the host they are built for: on macOS or Linux arm64 neither starts (B-67)
 const OS_DIR = { linux: 'linux', win32: 'windows' };
 const hostOf = () => `${process.platform} ${process.arch}`;
 function svaBin() {
@@ -43,19 +43,19 @@ function svaBin() {
   }
   return 'sva';   // on the PATH
 }
-// a CLI that did not start: none bundled for this host (the .vsix carries the Linux x86_64 one) and none on the PATH, or one
+// a CLI that did not start: none bundled for this host (the .vsix carries Linux and Windows x86_64 ones) and none on the PATH, or one
 // that cannot run here (not executable, built for another system) -> wavelens.sva named
 const cliGone = e => e.code === 'ENOENT' || e.code === 'EACCES' || e.code === 'ENOEXEC' || e.errno === -8;
 const noCli = (bin, e) => { if (cliGone(e) && !e.probe) offerSva(); return e.code === 'ENOENT' ? `there is no sva CLI on this host (${bin}; none bundled for ` +
-  `${hostOf()}): set wavelens.sva to its path (WaveLens: Set the sva program…; the repository builds one: make dist-linux, make dist-windows)` :
+  `${hostOf()}): set wavelens.sva to its path (WaveLens: Set the sva program…; the repository builds one: make dist)` :
   cliGone(e) ? `${bin} cannot run on this host (${hostOf()}: ${e.code || e.message}; not executable, or built for another system): set wavelens.sva ` +
   'to an sva built for it (WaveLens: Set the sva program…; cargo build --release -p sva-cli in sva/ of the repository)' : `${bin}: ${e.message}`; };
 // the first CLI of a session that did not start: VS Code offers the command that finds one (Set the sva program…)
-let svaOffered = false;
-function offerSva() {
-  if (svaOffered) return;
-  svaOffered = true;
-  const set = 'Set the sva program…', said = 'WaveLens: no sva program runs here: a large VCD is read whole, an FST, Compare and the runs kept ' +
+let svaSaid = 0;
+function offerSva(again = false) {   // again: said once more (a dump too large to read without it), not twice in a row
+  if (svaSaid && (!again || Date.now() - svaSaid < 3000)) return;
+  svaSaid = Date.now();
+  const set = 'Set the sva program…', said = 'WaveLens: no sva program runs here: a large dump (read lazy), an FST, Compare and the runs kept ' +
     'need one. Pick one found on this machine, or its file';
   Promise.resolve(vscode.window.showWarningMessage(said, set)).then(a => { if (a === set) vscode.commands.executeCommand('wavelens.locateSva'); }, () => {});
 }
@@ -95,7 +95,7 @@ const svaTarget = () => { const i = vscode.workspace.getConfiguration('wavelens'
   return i && i.workspaceValue !== undefined ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global; };
 async function setSva(bin) {
   await vscode.workspace.getConfiguration('wavelens').update('sva', bin || undefined, svaTarget());
-  svaOffered = false;
+  svaSaid = 0;
   log(bin ? `wavelens.sva: ${bin}` : 'wavelens.sva: the default (the bundled one on its host, else sva on the PATH)');
 }
 // the command: a pick of the ones found (✓ runs here, ⚠ why not), Browse…, the default; a program that does not run asked
@@ -158,6 +158,10 @@ function spawnRun(bin, args, { input = '', maxOut = Infinity, keep = p => p, pro
 // a VCD becomes an FST once (sva fst --no-types, kept as the text is)
 const CONV = new Map();   // the conversions running: their output -> Promise
 const LAZY_FST = 4 << 20, LAZY_VCD = 64 << 20;
+// a VCD the CLI could not make lazy is read whole up to this size; a larger one would load the tab for minutes (a 1 GB text
+// fetched and parsed in the webview): an error that names the fix instead (Set the sva program…)
+const WHOLE_MAX = 256 << 20;
+const mb = n => `${Math.round(n / (1 << 20))} MB`;
 function lazyFor(file, size) {
   const set = vscode.workspace.getConfiguration('wavelens').get('lazy') || 'auto';
   if (/\.json$/i.test(file)) return false;   // a piece of waves (x.wavelens.json): read whole
@@ -383,7 +387,8 @@ ${scripts}
   // A large VCD the CLI cannot make lazy (no sva on this host: Windows without wavelens.sva; one that fails on it): read whole,
   // as before the lazy reading, the reason in the log and on the page (note) -> the waves shown, never an empty tab
   async srcOf(file, name) {
-    let lazy = lazyFor(file, (await fs.promises.stat(file)).size), fst = null, at = null, f = null, note = '';
+    const size = (await fs.promises.stat(file)).size;
+    let lazy = lazyFor(file, size), fst = null, at = null, f = null, note = '';
     if (lazy) {
       try {
         fst = await fstOf(file);
@@ -391,6 +396,11 @@ ${scripts}
         f = await headerOf(fst);
       } catch (e) {
         if (/\.fst$/i.test(file)) throw e;   // an FST is read through the CLI only
+        if (size > WHOLE_MAX) {
+          offerSva(true);
+          throw new Error(`${name} is ${mb(size)}: too large to read whole (over ${mb(WHOLE_MAX)}) and no sva to read it lazy: ` +
+            `${e.message.replace(/^sva: /, '')}`);
+        }
         lazy = false; fst = null; at = null;
         note = `${name}: read whole (not lazy): ${e.message.replace(/^sva: /, '')}`;   // its fix: Set the sva program… (the tab's ⋯)
         log(note);

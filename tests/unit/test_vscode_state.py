@@ -216,6 +216,8 @@ F.run(async () => {
   await A.send({ type: 'codes', id: 2, codes: ['!'] }); out.codes = A.reply(2);
   const B = await h.tab(path.join(dir, 'big.fst'));
   await B.send({ type: 'source', id: 3 }); out.fst = B.reply(3);
+  const C = await h.tab(path.join(dir, 'huge.vcd'));
+  await C.send({ type: 'source', id: 4 }); out.huge = C.reply(4);
   return out;
 });
 """
@@ -224,13 +226,16 @@ F.run(async () => {
 class LazyNoCli(unittest.TestCase):
     @H.needs(NODE, 'node (or VS Code\'s, ~/.vscode-server/bin/*/node)')
     def test_a_large_vcd_read_whole_without_the_cli(self):
-        """A large VCD with no sva CLI on the host (Windows without wavelens.sva: none bundled there): read whole, not lazy,
-        the reason told to the page (note), never an empty tab; an FST, which only the CLI reads, still an error."""
+        """A large VCD with no sva CLI on the host (Windows without wavelens.sva): read whole, not lazy, the reason told to the
+        page (note), never an empty tab; past 256 MB an error that names the fix (a 1 GB text read whole hangs the tab); an FST,
+        which only the CLI reads, still an error."""
         text = '$timescale 1ns $end\n$scope module t $end\n$var wire 1 ! a $end\n$upscope $end\n$enddefinitions $end\n#0\n1!\n'
         with H.tmp() as d:
-            for n in ('big.vcd', 'big.fst'):
+            for n in ('big.vcd', 'big.fst', 'huge.vcd'):
                 with open(os.path.join(d, n), 'w', encoding='utf-8') as f:
                     f.write(text)
+                    if n == 'huge.vcd':
+                        f.truncate(257 << 20)   # sparse: past WHOLE_MAX (256 MB), no disk taken
             r = subprocess.run([NODE, '-e', NOCLI, FAKE, os.path.join(H.ROOT, 'vscode', 'extension.js'), d], capture_output=True, text=True, timeout=30)
             self.assertEqual(r.returncode, 0, r.stderr)
             o = json.loads(next(x for x in r.stdout.splitlines() if x.startswith('RESULT'))[6:])
@@ -241,6 +246,8 @@ class LazyNoCli(unittest.TestCase):
             self.assertIn('no sva CLI', v['note'])
             self.assertIn('read whole', o['codes'].get('error', ''), 'no FST behind it: no codes asked of the CLI')
             self.assertIn('error', o['fst'], o['fst'])
+            self.assertIn('too large to read whole', o['huge'].get('error', ''), 'past 256 MB: an error naming the fix, not minutes of reading')
+            self.assertIn('Set the sva program', o['huge']['error'])
 
 
 LOCATE = r"""

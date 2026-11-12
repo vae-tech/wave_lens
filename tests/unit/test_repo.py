@@ -191,7 +191,7 @@ class Version(unittest.TestCase):
         self.assertEqual(re.search(r'^## (\S+)', read('CHANGELOG.md'), re.M).group(1), v)   # the top entry
         self.assertIn('include_str!("../../../VERSION")', read('sva', 'cli', 'src', 'main.rs'))
         with zipfile.ZipFile(os.path.join(H.ROOT, 'bin', 'wavelens.vsix')) as z:   # the package committed with the version
-            self.assertEqual(json.loads(z.read('extension/package.json'))['version'], v + '.0', 'bin/wavelens.vsix: make dist-linux')
+            self.assertEqual(json.loads(z.read('extension/package.json'))['version'], v + '.0', 'bin/wavelens.vsix: make dist')
         guides = os.path.join(H.ROOT, 'docs', 'guides')
         for f in sorted(os.listdir(guides)):   # the guides' footers (and the index's kicker) name the version
             if f.endswith('.html'):

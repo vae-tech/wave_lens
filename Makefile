@@ -61,10 +61,12 @@ help:
 	@echo 'make config     WAVES=work/x.vcd: write or update work/x.config.json (every signal, your edits kept); SVA=…: "bind" lines'
 	@echo 'make wavelens   wavelens/wavelens.js from wavelens/src/*.js (the page needs one file: run it after editing the sources)'
 	@echo 'make sva-build  the SVA engine (sva/, Rust): native CLI $$(BUILD)/sva-target/release/sva + sva_wasm.wasm -> wavelens/sva.wasm.js'
-	@echo 'make dist       the prebuilt sva CLI: dist-linux (bin/linux-x86_64/sva, static, committed) and dist-windows'
-	@echo 'make dist-linux    bin/linux-x86_64/sva (musl, static), then dist-vsix: the package that carries it'
+	@echo 'make dist       the prebuilt sva CLIs (Linux, Windows; committed), then dist-vsix: the package that carries both'
+	@echo 'make dist-linux    the same as dist (its name of before 0.57)'
+	@echo 'make dist-sva-linux  bin/linux-x86_64/sva (musl, static)'
+	@echo 'make dist-windows  bin/windows-x86_64/sva.exe (needs mingw-w64: sudo apt install mingw-w64, or make mingw-local)'
+	@echo 'make mingw-local   mingw-w64 without sudo: Ubuntu packages unpacked into ~/.local/mingw-w64'
 	@echo 'make dist-vsix     bin/wavelens.vsix (committed with a version), and make vsix'
-	@echo 'make dist-windows  bin/windows-x86_64/sva.exe (needs mingw-w64: sudo apt install mingw-w64)'
 	@echo 'make sva-test   cargo test of the SVA engine: unit tests, the corpus tests/sva (third_party too), the schema, the CLI'
 	@echo 'make sva-bless  rewrite tests/sva/golden/*.txt after a reviewed change of the parser output'
 	@echo 'make sva-examples  sva parse + sva eval of the assertion files of examples/ (apb, axi_lite, fsm; after make examples)'
@@ -265,28 +267,44 @@ sva-build:
 	@ls -l $(SVA_BIN) $(SVA_WASM) wavelens/sva.wasm.js
 
 # The prebuilt CLI for a clone without Rust, committed and rebuilt in the commit of an engine change (as
-# wavelens/sva.wasm.js): Linux static (musl: any distribution), Windows through mingw-w64. The tools find it by
-# themselves (tools/svabuild.py: --sva-bin, $$WAVELENS_SVA, out/sva-target, bin/<os>-x86_64, sva on PATH).
+# wavelens/sva.wasm.js): Linux static (musl: any distribution), Windows through mingw-w64 (only Windows' own DLLs);
+# the package bin/wavelens.vsix carries both (the extension runs the one of its host). The tools find it by themselves
+# (tools/svabuild.py: --sva-bin, $$WAVELENS_SVA, out/sva-target, bin/<os>-x86_64, sva on PATH).
 # Needs rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu, and x86_64-w64-mingw32-gcc for Windows
-# (Ubuntu: sudo apt install mingw-w64).
+# (Ubuntu: sudo apt install mingw-w64; without sudo: make mingw-local, into ~/.local/mingw-w64, found by itself).
+# make dist: both CLIs, then the package; dist-linux is its name of before 0.57 (the same).
 DIST_LINUX := bin/linux-x86_64/sva
 DIST_WIN   := bin/windows-x86_64/sva.exe
 DIST_VSIX  := bin/wavelens.vsix
-MINGW_CC   := x86_64-w64-mingw32-gcc
-dist: dist-linux dist-windows
-dist-linux:
+MINGW_LOCAL := $(HOME)/.local/mingw-w64
+MINGW_CC   ?= $(firstword $(shell command -v x86_64-w64-mingw32-gcc x86_64-w64-mingw32-gcc-posix 2>/dev/null) \
+                $(wildcard $(MINGW_LOCAL)/usr/bin/x86_64-w64-mingw32-gcc-posix))
+dist: dist-sva-linux dist-windows
+	$(MAKE) dist-vsix
+dist-linux: dist
+dist-sva-linux:
 	cd sva && $(CARGO) build --release -p sva-cli --target x86_64-unknown-linux-musl
 	mkdir -p $(dir $(DIST_LINUX)) && cp $(B)/sva-target/x86_64-unknown-linux-musl/release/sva $(DIST_LINUX)
 	$(DIST_LINUX) parse examples/axi_lite/axi_lite.sva > /dev/null && ls -l $(DIST_LINUX)
-	$(MAKE) dist-vsix
 dist-vsix:
 	$(PY) tools/mkvsix.py --out $(DIST_VSIX) --one --plain
 	$(MAKE) vsix
 dist-windows:
-	@command -v $(MINGW_CC) >/dev/null || { echo 'dist-windows: $(MINGW_CC) is not installed (Ubuntu: sudo apt install mingw-w64)'; exit 1; }
+	@test -n "$(MINGW_CC)" || { echo 'dist-windows: no x86_64-w64-mingw32-gcc (Ubuntu: sudo apt install mingw-w64; without sudo: make mingw-local)'; exit 1; }
 	cd sva && CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=$(MINGW_CC) $(CARGO) build --release -p sva-cli --target x86_64-pc-windows-gnu
 	mkdir -p $(dir $(DIST_WIN)) && cp $(B)/sva-target/x86_64-pc-windows-gnu/release/sva.exe $(DIST_WIN)
+	@head -c 2 $(DIST_WIN) | grep -q MZ || { echo 'dist-windows: $(DIST_WIN) is no Windows program'; exit 1; }
+	@if grep -qi microsoft /proc/version 2>/dev/null; then $(DIST_WIN) parse examples/axi_lite/axi_lite.sva > /dev/null && echo 'dist-windows: it runs (WSL)'; fi
 	@ls -l $(DIST_WIN)
+# mingw-w64 without sudo: Ubuntu's packages downloaded (apt-get download, kept in $(B)/mingw-debs) and unpacked into
+# ~/.local/mingw-w64, where MINGW_CC finds it
+MINGW_DEBS := gcc-mingw-w64-x86-64-posix gcc-mingw-w64-x86-64-posix-runtime gcc-mingw-w64-base binutils-mingw-w64-x86-64 \
+              mingw-w64-x86-64-dev mingw-w64-common
+mingw-local:
+	mkdir -p $(B)/mingw-debs $(MINGW_LOCAL)
+	cd $(B)/mingw-debs && apt-get download $(MINGW_DEBS)
+	for f in $(B)/mingw-debs/*.deb; do dpkg -x $$f $(MINGW_LOCAL); done
+	$(MINGW_LOCAL)/usr/bin/x86_64-w64-mingw32-gcc-posix --version | head -1
 
 # unit tests (lexer, preprocessor, parser, expansion, evaluator), the corpus tests/sva/*.sv against its annotations
 # and golden files, docs/sva/ast.schema.json against the output, the sva binary end to end
@@ -363,7 +381,7 @@ sva-spike: sva-build $(VCD)
 # two files: wavelens.vsix (the last build: the same install line each time) and wavelens-<version>.vsix (kept side by side)
 VSIX := $(B)/wavelens.vsix
 vsix: $(VSIX)
-$(VSIX): VERSION tools/mkvsix.py $(wildcard vscode/*.js vscode/*.json vscode/*.md vscode/media/*.js) $(DIST_LINUX) \
+$(VSIX): VERSION tools/mkvsix.py $(wildcard vscode/*.js vscode/*.json vscode/*.md vscode/media/*.js) $(DIST_LINUX) $(DIST_WIN) \
     $(addprefix wavelens/,wavelens.css wavelens.config.js wavelens.js sva.wasm.js bus.js sva.js)
 	$(PY) tools/mkvsix.py --out $@
 vscode-e2e:
@@ -447,4 +465,4 @@ clean-all:
 	$(if $(filter $(B),/ $(CURDIR) $(HOME) $(abspath $(HOME)/..)),$(error clean-all: BUILD=$(B) is not a build directory))
 	rm -rf $(B)
 
-.PHONY: fsm-stats diff-results cocotb pageshot unit-bless unit-shuffle vsix dist-vsix vscode-e2e wavelens help demo demo-fst fst diff example examples questa types-fixture missing-fixture shots guide-shots html config sva-build dist dist-linux dist-windows sva-test sva-bless sva-examples sva-verify sva-eval sva-spike mcp-bench smoke shots-check unit check fmt lint clean clean-all
+.PHONY: fsm-stats diff-results cocotb pageshot unit-bless unit-shuffle vsix dist-vsix vscode-e2e wavelens help demo demo-fst fst diff example examples questa types-fixture missing-fixture shots guide-shots html config sva-build dist dist-linux dist-sva-linux dist-windows mingw-local sva-test sva-bless sva-examples sva-verify sva-eval sva-spike mcp-bench smoke shots-check unit check fmt lint clean clean-all
