@@ -54,9 +54,11 @@ const TIPS = {
     'Code\'s own colours too'],
   'act:scroll': ['Ticked: the rows scroll in a window of their own (the bar above them); else with the page (the bar sticks to the top); kept in ' +
     'this browser'],
-  'act:strip': ['Ticked: the cursor (time, unit, span) and the edges in a slim strip over the time axis; else in the bar\'s lines (cursorStrip)'],
-  'act:axlock': ['Unlock the strip: ⠿ moves it along the waves (it snaps to the left, the middle, the right); again: lock it there'],
-  'act:axgrip': ['Drag the strip along the waves; ← → Home End move it too (shift: a quarter); where it stands is kept', ['drag', '←', '→']],
+  'act:strip': ['Ticked: the strip over the time axis, its groups (the find, the marks, the cursor, the edges) out of the bar\'s lines ' +
+    '(stripGroups; Arrange the bar… moves a group in or out)'],
+  'act:axlock': ['Unlock the strip: ⠿ moves a box (it snaps to the edges, the middle, the names\' edge; over the other, the two swap); ' +
+    'again: lock them there'],
+  'act:axgrip': ['Drag this box along the strip; over another, the two swap; ← → Home End move it too (shift: a quarter); kept', ['drag', '←', '→']],
   'act:snap': ['Ticked: a click puts the cursor on an edge of the signal near it (cursorSnap px); alt+click never does'],
   'act:tg': ['Show or leave out this group of tools'], 'act:tgall': ['Every group of tools in the bar'],
   'act:tgnone': ['No group of tools (/ still floats the find)'],
@@ -267,10 +269,13 @@ const FIND_OPTS = [
 // name and the times by a condition (find; sva.js: expression, assertions), the rows, the signals' look, the files and a
 // compare (list, signal, file, compare)
 const TOOL_LINES = { cursor: 'time', view: 'time', edges: 'time', marks: 'time', 'go to': 'time', find: 'find', expression: 'find', assertions: 'find',
-  list: 'rows', signal: 'rows', file: 'rows', compare: 'rows' };
-// the groups of the strip over the time axis (cursorStrip), in its order: the cursor's time, unit and span, the edges
-const STRIP_GROUPS = ['cursor', 'edges'];
-const STRIP_SNAP = 14;   // px: a dragged strip snaps to the left, the middle, the right of the waves this near
+  list: 'rows', prefixes: 'rows', signal: 'rows', file: 'rows', compare: 'rows' };
+// the strip over the time axis, a band of its own under the bar's lines: a box per group of it (stripGroups), each at its place
+// (toolAt; else these: the find and the marks at the left, the cursor and the edges at the right)
+const STRIP_AT0 = { find: 0, marks: 0, cursor: 1, edges: 1 };
+const TOOL_GRID = 16;    // px: the grid a group dropped in a line or in the strip snaps to (Arrange the bar…)
+const STRIP_SNAP = 14;   // px: a dragged box snaps to the left, the middle, the right of the strip and the names' edge this near
+const STRIP_GAP = 12;    // px between two boxes of the strip
 const LOCK_SVG = (open) => '<svg viewBox="0 0 12 14" width="10" height="12" aria-hidden="true"><rect x="1.5" y="6" width="9" height="7" rx="1.2" ' +
   `fill="currentColor"/><path d="${open ? 'M3.5 6V3.5a2.5 2.5 0 0 1 5 0' : 'M3.5 6V4a2.5 2.5 0 0 1 5 0V6'}" fill="none" stroke="currentColor" ` +
   'stroke-width="1.4"/></svg>';
@@ -359,6 +364,10 @@ class Bar {
       '<button type="button" class="fx" data-act="fdock" aria-label="close">✕</button>').replace('class="tg"', 'class="tg find"');
     const list = grp('list', S.sortButton ? btn('sort', '') : '', groups ? more(seg(btn('expand', '⊞', ' aria-label="open every module"'),
       btn('collapse', '⊟', ' aria-label="fold every module"'))) + btn('mods', 'Modules') + (v.fsms().length ? btn('fsms', 'FSMs') : '') : '');
+    // the sort prefixes, a group of their own (in ⚙ too): the names sorted without them, live as they are typed
+    const pfxIn = () => `<input type="text" class="pfx" spellcheck="false" value="${esc(v.sortIgnore.join(','))}" placeholder="i_,o_" ` +
+      'aria-label="prefixes ignored when sorting">';
+    const pfxGrp = S.sortButton ? grp('prefixes', pfxIn()) : '';
     const signal = grp('signal', `<select class="rx" aria-label="radix of the selected signals" disabled><option value="">radix</option><option ` +
       `value="-">the page's</option>${RADIX.map(x => `<option>${x}</option>`).join('')}</select>`,
       more(btn('cycles', 'Cycles', ' aria-pressed="false"'), btn('gaps', 'Gaps', ' aria-pressed="false"'),
@@ -390,9 +399,8 @@ class Bar {
       mTick('scroll', 'Scroll in the window') +
       `<label class="mi">Edge style <select class="ws" aria-label="edge style">${Object.entries(STYLE_NAMES).map(([k, n]) =>
         `<option value="${k}"${k === S.style ? ' selected' : ''}>${n}</option>`).join('')}</select></label>` +
-      (S.sortButton ? `<label class="mi">Sort prefixes <input type="text" class="pfx" spellcheck="false" value="${esc(v.sortIgnore.join(','))}" ` +
-        'placeholder="i_,o_" aria-label="prefixes ignored when sorting"></label>' : '') +
-      mTick('snap', 'Snap to edges') + mTick('strip', 'Cursor over the axis') + '<hr>' +
+      (S.sortButton ? `<label class="mi">Sort prefixes ${pfxIn()}</label>` : '') +
+      mTick('snap', 'Snap to edges') + mTick('strip', 'Strip over the axis') + '<hr>' +
       menuSub('subtg', 'Tools in the bar', mItem('tgall', 'Show all') + mItem('tgnone', 'Hide all')) +
       menuSub('subcp', 'Short form', [['auto', 'auto: under 900 px'], ['on', 'always'], ['off', 'never']].map(([k, n]) =>
         mTick('compact', n, ` data-v="${k}"`)).join('')) + '<hr>' + mItem('arrange', 'Arrange the bar…') + mItem('barreset', 'Reset the bar'),
@@ -420,10 +428,10 @@ class Bar {
         'aria-label="undo"')}${btn('redo', '↷', ' class="undo" disabled aria-label="redo"')}</span>${popHead('gear', '⚙ ▾', 'pgear', 'the bar and the look')}${
         btn('tools', '', ' class="lay" aria-label="fold the tools"')}${btn('help', '?', ' class="hb" aria-label="keys and mouse"')}</span></div>
       <div class="tools">${toolLine('time', cursor + view + edges + marks + (jumps ? grp('go to', jumps) : ''))}${toolLine('find', find)}${
-        toolLine('rows', list + signal + file + compare)}</div>${gear}<div class="axs" role="toolbar" aria-label="the cursor over the time axis" hidden><div
-        class="axw"><div class="axb"><span class="axh">${btn('axlock', LOCK_SVG(false) + LOCK_SVG(true), ' class="axl" aria-pressed="false" ' +
-        'aria-label="unlock the strip: ⠿ moves it"')}<button type="button" class="axg" data-act="axgrip" aria-label="move the strip: drag, or ← → Home End"
-        hidden>⠿</button></span></div></div></div></div>
+        toolLine('rows', list + pfxGrp + signal + file + compare)}</div>${gear}<div class="axs" role="toolbar" aria-label="the strip over the time axis"
+        hidden><div class="axw">${btn('axlock', LOCK_SVG(false) + LOCK_SVG(true), ' class="axl" aria-pressed="false" aria-label="unlock the strip: ⠿ ' +
+        'moves a box"')}<div class="axr"></div><span class="axe" aria-hidden="true">the strip over the time axis — drop a group here</span></div>` +
+        `</div></div>
       <div class="body"><div class="names"></div><div class="wcol"><canvas tabindex="0" role="application" aria-roledescription="waveform"
         aria-label="waveform: + − zoom, ← → pan, shift+← → move the cursor, ↑ ↓ select a signal, [e ]e or Tab edges"></canvas></div></div>
       <div class="notes" hidden></div>
@@ -462,8 +470,9 @@ class Bar {
     r.querySelector('.tg.find').addEventListener('focusout', e => { if (v.toolsPeek && !v.qEl.value && !e.currentTarget.contains(e.relatedTarget)) {
       v.toolsPeek = false; v.layoutShow(); } });
     v.evEl = r.querySelector('input.ev');
-    const axg = r.querySelector('.axs .axg');   // the strip over the time axis, unlocked: ⠿ dragged, or ← → Home End on it
-    axg.addEventListener('pointerdown', e => v.stripDown(e)); axg.addEventListener('keydown', e => v.stripKey(e));
+    const axs = r.querySelector('.axs');   // the strip over the time axis, unlocked: a box's ⠿ dragged, or ← → Home End on it
+    axs.addEventListener('pointerdown', e => { const g = e.target.closest('.axg'); if (g) v.stripDown(e, g); });
+    axs.addEventListener('keydown', e => { const g = e.target.closest('.axg'); if (g) v.stripKey(e, g); });
     v.edgeSel.addEventListener('change', () => v.setEdgeKind(v.edgeSel.value, true));
     const gv = r.querySelector('.gapv'), bgi = gv.querySelector('.bgi'), bgk = gv.querySelector('.bgk');   // idle, keep: the waves follow as they are typed
     gv.addEventListener('input', () => v.gapType(() => v.gapFields(bgi, bgk, true)));
@@ -510,13 +519,14 @@ class Bar {
     v.stateBtn = r.querySelector('button[data-act=sreload]'); v.stateShow();
     if (!r.wlState && G.showOpenFilePicker) stateDb('readonly', s => s.get('last')).then(h => { if (h && !r.wlState) { r.wlState = h;
       if (r.waveView) r.waveView.stateShow(); } }).catch(() => { /* no database here */ });
-    // the sort prefixes (in ⚙): live as they are typed; Esc: as they were when the field was entered (T-07)
-    const pfx = r.querySelector('input.pfx');
-    if (pfx) { let was = pfx.value;
+    // the sort prefixes (their group, ⚙): live as they are typed, the other field the same; Esc: as they were when the field was
+    // entered (T-07)
+    const pfxs = [...r.querySelectorAll('input.pfx')], same = (from, t) => { for (const x of pfxs) if (x !== from) x.value = t; };
+    for (const pfx of pfxs) { let was = pfx.value;
       pfx.addEventListener('focus', () => { was = pfx.value; });
-      pfx.addEventListener('input', () => { v.fitPfx(); v.setSort(v.sort, pfx.value); });
+      pfx.addEventListener('input', () => { same(pfx, pfx.value); v.fitPfx(); v.setSort(v.sort, pfx.value); });
       pfx.addEventListener('keydown', e => {
-        if (e.key === 'Escape' && pfx.value !== was) { pfx.value = was; v.fitPfx(); v.setSort(v.sort, was); }
+        if (e.key === 'Escape' && pfx.value !== was) { pfx.value = was; same(pfx, was); v.fitPfx(); v.setSort(v.sort, was); }
         // ↑ ↓ in ⚙: on to the item before / after (the field has no use for them; the menu's keys leave a field its own)
         const box = pfx.closest('.bpop'); if (!box || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return;
         const its = [...box.querySelectorAll(':scope > button, :scope > .msub > button, :scope > label.mi input, :scope > label.mi select')]
@@ -567,7 +577,8 @@ class Bar {
     else if (a === 'help') v.help();
     else if (a === 'scroll') v.setScroll(v.S.maxHeight != null && v.S.maxHeight !== '' ? 'page' : 'window');
     else if (a === 'snap') v.setSnap(!(v.S.cursorSnap > 0));
-    else if (a === 'strip') v.setCursorStrip(!v.S.cursorStrip);
+    else if (a === 'strip') { const base = stripNames(settings(GLOBAL, v.M.cfg, v.opts).stripGroups);   // off: none; on: the settings' (none: these)
+      v.setStripGroups(v.stripGroups().length ? [] : base.length ? null : Object.keys(STRIP_AT0)); }
     else if (a === 'axlock') v.stripLock(!!v.stripOpen);
     else if (a === 'tools') v.setTools(!v.S.toolsFolded);
     else if (a === 'tg' || a === 'tgall' || a === 'tgnone') { const H = new Set(toolNames(v.S.toolsHidden));

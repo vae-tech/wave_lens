@@ -68,7 +68,7 @@ COMMANDS = {
     'fold': 'groups? all?', 'unfold': 'groups? all?', 'radix': 'signals radix', 'analog': 'signals rows', 'bits': 'signals on?',
     'duplicate': 'signals bits? radix? rows? delete?',
     'sort': 'dir ignore?', 'style': 'name',
-    'layout': 'scroll? height? tools? compact? bar? strip? stripAt?', 'find': 'query case? word? regex? highlight? open? mask?', 'gaps': 'on? idle? keep? signals? clock? aux? only? count? view? reset?',
+    'layout': 'scroll? height? tools? compact? bar? stripGroups? at? strip? stripAt?', 'find': 'query case? word? regex? highlight? open? mask?', 'gaps': 'on? idle? keep? signals? clock? aux? only? count? view? reset?',
     'cycles': 'on? clock? zero? reset?', 'only': 'modules? on? clear? open? groups?', 'fsm': 'mode? signals? fields? clear?',
     'fsm_stats': 'signal', 'fsm_panel': 'signal? tab? off?', 'fsm_go': 'signal state? from? to? dir? first?', 'types': 'signals?',
     'edge': 'dir? kind? value? signal?', 'reset': '', 'state': '', 'set_state': 'state', 'rows': 'pattern? limit? offset?',
@@ -185,6 +185,34 @@ def strip_at(p):
         return 0
     x = round(min(1, max(0, p)) * 1000) / 1000
     return int(x) if x == int(x) else x
+
+
+STRIP_GROUPS = ['find', 'marks', 'cursor', 'edges']   # wavelens.config.js stripGroups
+
+
+def strip_names(v):
+    """The groups in the strip as model.js stripNames has them: a list (or a text with commas) of labels, lower case, the names of
+    before read, each once, in order."""
+    items = v if isinstance(v, list) else str('' if v is None else v).split(',')
+    out = []
+    for x in items:
+        s = str('' if x is None else x).strip().lower()
+        s = TOOL_WAS.get(s, s) if s in TOOL_WAS else s
+        if s and s not in out:
+            out.append(s)
+    return out
+
+
+def tool_ats(v):
+    """The groups placed as model.js toolAts has them: {label: 0 .. 1}; a place that is none (an object, a list, null, '') left out."""
+    out = {}
+    if isinstance(v, dict):
+        for k, x in v.items():
+            n = str(k).strip().lower()
+            n = TOOL_WAS.get(n, n) if n in TOOL_WAS else n
+            if n and ((isinstance(x, (int, float)) and not isinstance(x, bool)) or (isinstance(x, str) and x.strip())):
+                out[n] = strip_at(x)
+    return out
 
 
 def prefixes(v):
@@ -1695,9 +1723,11 @@ class Editor:
         return {'style': self.config()['style']}
 
     def c_layout(self, a):
-        """Where the rows scroll, the bar's tools folded, its short form, its arrangement, the strip over the time axis (look.js setScroll,
-        setTools, setToolsCompact, setToolLayout, setCursorStrip, setStripAt): as the state's maxHeight, toolsFolded, toolsCompact,
-        toolLayout, cursorStrip, cursorStripAt."""
+        """Where the rows scroll, the bar's tools folded, its short form, its arrangement, the strip over the time axis and the groups
+        placed (look.js setScroll, setTools, setToolsCompact, setToolLayout, setStripGroups, setToolAt, setCursorStrip, setStripAt): as
+        the state's maxHeight, toolsFolded, toolsCompact, toolLayout, stripGroups, toolAt, cursorStrip."""
+        def place_ok(p):
+            return 0 <= p <= 1 if isinstance(p, (int, float)) and not isinstance(p, bool) else str(p).lower() in STRIP_AT
         if a.get('scroll') is not None and a['scroll'] not in ('window', 'page'):
             fail('scroll: window or page')
         if a.get('tools') is not None and a['tools'] not in ('fold', 'open'):
@@ -1708,9 +1738,12 @@ class Editor:
             fail('bar: lines of group labels, [["find", "cursor"], ["list"]], or null')
         if a.get('strip') is not None and not isinstance(a['strip'], bool):
             fail('strip: true or false')
-        sa = a.get('stripAt')
-        if sa is not None and not (0 <= sa <= 1 if isinstance(sa, (int, float)) and not isinstance(sa, bool) else str(sa).lower() in STRIP_AT):
+        if a.get('stripAt') is not None and not place_ok(a['stripAt']):
             fail('stripAt: 0 .. 1, "left", "center" or "right"')
+        if a.get('stripGroups') is not None and not isinstance(a['stripGroups'], list):
+            fail('stripGroups: a list of group labels, ["find", "cursor"], or null')
+        if a.get('at') is not None and (not isinstance(a['at'], dict) or any(p is not None and not place_ok(p) for p in a['at'].values())):
+            fail('at: {"group": 0 .. 1, "left", "center", "right" or null}')
         h = a.get('height')
         if h is not None and not (h > 0 if isinstance(h, (int, float)) and not isinstance(h, bool) else
                                   isinstance(h, str) and re.fullmatch(r'\s*[\d.]+\s*(px|vh|em|rem|%)?\s*', h)):
@@ -1725,17 +1758,31 @@ class Editor:
             c['toolsCompact'] = a['compact']
         if 'bar' in a:
             c['toolLayout'] = tool_lines(a['bar'])
+        cfg = self.m.cfg
+        if 'stripGroups' in a:
+            c['stripGroups'] = strip_names(cfg.get('stripGroups', STRIP_GROUPS) if a['stripGroups'] is None else a['stripGroups'])
+        ats = tool_ats(c['toolAt'] if 'toolAt' in c else cfg.get('toolAt'))
+        if a.get('at') is not None:
+            for k, p in a['at'].items():
+                n = (strip_names([k]) or [None])[0]
+                if n and p is None:
+                    ats.pop(n, None)
+                elif n:
+                    ats[n] = strip_at(p)
+            c['toolAt'] = ats
         if a.get('strip') is not None:
             c['cursorStrip'] = a['strip']
-        if sa is not None:
-            c['cursorStripAt'] = strip_at(sa)
+        if a.get('stripAt') is not None:
+            ats['cursor'] = ats['edges'] = strip_at(a['stripAt'])
+            c['toolAt'] = ats
         mh = c['maxHeight'] if 'maxHeight' in c else base
         tf = c['toolsFolded'] if 'toolsFolded' in c else self.m.cfg.get('toolsFolded')
         return {'scroll': 'window' if mh is not None and mh != '' else 'page', 'height': mh or None, 'tools': 'fold' if tf else 'open',
                 'compact': compact_of(c['toolsCompact'] if 'toolsCompact' in c else self.m.cfg.get('toolsCompact')),
                 'bar': tool_lines(c['toolLayout'] if 'toolLayout' in c else self.m.cfg.get('toolLayout')),
-                'strip': (c['cursorStrip'] if 'cursorStrip' in c else self.m.cfg.get('cursorStrip')) is not False,
-                'stripAt': strip_at(c['cursorStripAt'] if 'cursorStripAt' in c else self.m.cfg.get('cursorStripAt'))}
+                'stripGroups': strip_names(c['stripGroups'] if 'stripGroups' in c else cfg.get('stripGroups', STRIP_GROUPS)), 'at': ats,
+                'strip': (c['cursorStrip'] if 'cursorStrip' in c else cfg.get('cursorStrip')) is not False,
+                'stripAt': ats['cursor'] if 'cursor' in ats else strip_at(cfg.get('cursorStripAt', 1))}
 
     def opt(self, k, default=None):
         """A setting as the viewer has it: the state's config, else the page's, else the default (wavelens.config.js)."""

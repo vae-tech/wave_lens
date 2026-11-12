@@ -389,8 +389,10 @@ add theirs (`WaveLens.registerDefaults`).
 | `toolsFolded` | false | the bar's tools folded to its title line (**▴** / **▾ tools** in the bar) |
 | `toolsHidden` | `[]` | the bar's tool groups left out by their labels (`["signal", "file"]`; ⚙ Tools in the bar, the right button on the bar); the names of before 0.53 still read: `state`, `dump` are `file`, `style` is no group (⚙ Edge style) |
 | `toolsCompact` | `auto` | the bar's short form (no group labels, the rarer controls behind each group's ⋯): `auto` under 900 px of bar, `true` / `false` always / never (⚙ Short form) |
-| `cursorStrip` | true | the **cursor** group (time, unit, span) and the **edges** in a slim strip over the time axis, above the waves' column, out of the bar's lines (seen with the tools folded too); false: in the lines as any group (⚙ **Cursor over the axis**); kept in this browser for every viewer |
-| `cursorStripAt` | 0 | where the strip stands over the waves: 0 (left) .. 1 (right), or `"left"`, `"center"`, `"right"`; **🔒** unlocked, **⠿** drags it (below); kept in this browser for every viewer |
+| `stripGroups` | `["find", "marks", "cursor", "edges"]` | the bar's groups in the strip over the time axis, a band of its own under the bar's lines (seen with the tools folded too), a box each; `[]`: no strip (⚙ **Strip over the axis**); **⚙ Arrange the bar…** drags a group in or out; kept in this browser for every viewer |
+| `toolAt` | null | groups placed in their line or in the strip: `{"marks": 0.5}`, 0 (left) .. 1 (right) of the room the line leaves them, or `"left"`, `"center"`, `"right"`; a group not named: in the flow of its line (in the strip: find, marks at the left, cursor, edges at the right). Arrange the bar… places a group where it is dropped, on a grid of 16 px; the strip's **🔒** unlocked, a box's **⠿** drags it; kept in this browser for every viewer |
+| `cursorStrip` | true | false: the cursor and the edges not in the strip (0.53's; as `stripGroups` without them) |
+| `cursorStripAt` | 1 | the place of the cursor and the edges in the strip when `toolAt` has none (0.53's) |
 | `toolLayout` | null | the bar's groups arranged: lines of their labels in order (`[["find", "cursor", "view"], ["edges", "marks"], ["list", "signal", "file"]]`; a group not named goes on its own line, after the ones before it there; at most 6 lines); null: the default order. **⚙ Arrange the bar…** makes one by dragging (below); kept in this browser for every viewer, over the settings' |
 | `themeButton` | `auto` | **⚙ Theme ▸** in the bar: the page's theme (auto, light, white, dark; kept in this browser; in VS Code its list, VS Code's colours too); `auto`: when the page has no theme button of its own (`viewer.html`, the VS Code tab) |
 | `version` | true | the version in the bar's title line, and the build the page was made from (`0.40 · dev@5470d89*`: branch, commit, `*` changes not committed; `mkhtml.py` and the VS Code extension write it) |
@@ -647,15 +649,16 @@ selecting another signal with a range never moves the waves.
 
 | Line | Group | What is in it (*in ⋯*: behind the group's ⋯ in the short form) |
 |---|---|---|
-| time | **cursor** (over the axis: below) | the cursor's time and its unit (`85.12us`, `c147` a clock cycle, a plain number in the unit; Enter), *the span* of the window around the cursor (`200ns`, or a number in the same unit; Enter); Esc in either: the value as it was |
+| time | **cursor** (in the strip: below) | the cursor's time and its unit (`85.12us`, `c147` a clock cycle, a plain number in the unit; Enter), *the span* of the window around the cursor (`200ns`, or a number in the same unit; Enter); Esc in either: the value as it was |
 | | **view** | **− + Fit**; *Last* (`l`, the window before the last zoom), *⊙* (`c`, zoom in on the cursor), *⇔* (the range, else the two cursors), *\|◀ ▶\|* (Home / End) |
-| | **edges** (over the axis: below) | ◀ edge kind ▶ (`[e ]e`; a value: its field) |
-| | **marks** | **+ Bookmark** (`b`), **+ Marker** (`m`), ◀ ▶ the previous / next bookmark or marker in time, *Marks…* (`gm`) |
+| | **edges** (in the strip: below) | ◀ edge kind ▶ (`[e ]e`; a value: its field) |
+| | **marks** (in the strip: below) | **+ Bookmark** (`b`), **+ Marker** (`m`), ◀ ▶ the previous / next bookmark or marker in time, *Marks…* (`gm`) |
 | | **go to** | the page's jumps (its `jumps`, or its markers when there are at most six), each cut to 12 letters, the whole in its tip |
-| find | **find** | the field, its count at its right end (no row added while you type), ‹ ›; *Aa Full .\**, *Highlight Open Mask*, *Select*, *Copy*, *Paint ▾* (the colour with its hex code, **Paint**, **Unpaint**) |
+| find | **find** (in the strip: below) | the field, its count at its right end (no row added while you type), ‹ ›; *Aa Full .\**, *Highlight Open Mask*, *Select*, *Copy*, *Paint ▾* (the colour with its hex code, **Paint**, **Unpaint**) |
 | | **expression** | **ƒ Expressions** (`sva.js`: their list), *◀ ▶* through the matches of the one you are on |
 | | **SVA** (`assertions`) | ◀ ✕ N ▶ through the assertion failures in the view (`[f ]f`), ▾ every failure by name and time; **Load file…** while no assertion is bound |
 | rows | **list** | **Sort** (`s`), *⊞ ⊟* (open / fold every module, `zR` `zM`), **Modules** (`t`), **FSMs** (`T`) |
+| | **prefixes** | the sort prefixes, the parts of a name that sorting skips (`i_,o_`; ⚙ has the same field); a group of its own, to put where you like |
 | | **signal** | the radix of the selected signal (shift+click a name: of a run of them; *the page's*: their own again), *Cycles* (the band of cycle numbers), *Gaps* (`gv`, the waves with the gaps cut out; *idle* and *keep* beside it) |
 | | **file** | **File ▾**, **⟳** (`R`, the dump read again, only after one was opened in the page), *Copy image* (the range, else the window, as PNG to the clipboard) and its *▾* (Save as PNG, SVG, WaveDrom, Copy WaveDrom) |
 | | **compare** | only while a second dump is compared or read: **A B A+B** (`d` `D`), ◀ ▶ through the differences (`[d ]d`), **≠ N ✕** |
@@ -667,7 +670,7 @@ waves come back as they came; the bar's tools shown and folded stay), **Save pag
 (the right button on the bar opens the same): **Theme ▸** (when the page has no theme button of its own, the `themeButton`
 setting), **Scroll in the window** (a tick: where the rows scroll, below), **Edge style** (auto, slanted, vertical, square; kept in
 this browser), **Sort prefixes** (the ones sorting skips, `i_,o_`), **Snap to edges** (a tick: a click puts the cursor on a near
-edge, `cursorSnap`), **Cursor over the axis** (a tick: the cursor and the edges in the strip over the time axis, below),
+edge, `cursorSnap`), **Strip over the axis** (a tick: the strip over the time axis and its groups, below),
 **Tools in the bar ▸** (**Show all**, **Hide all**, a tick per group: a click leaves one out or brings it
 back, the menu stays open; a line left without a group goes; on a folded bar it opens the tools), **Short form ▸** (auto, always,
 never: `toolsCompact`). The menus go by the keys too: ↑ ↓ Home End, → or Enter opens a submenu, ← or Esc closes it, Esc closes the
@@ -679,31 +682,40 @@ they stay the browser's (ctrl+S saves the page, it does not sort), except ctrl+C
 ctrl+Z / ctrl+shift+Z / ctrl+Y (undo, redo; ↶ ↷ give the focus back to the waves), alt+↑ ↓ and alt+shift+↑ ↓ (the order of your
 groups). **?** at the right of the title line (key `?`) opens the box of all the keys and the mouse, the plugins' too.
 
-**The strip over the time axis.** The **cursor** group (its time, unit and span) and the **edges** (◀ edge kind ▶) stand by
-default in a slim strip right over the time axis, above the waves' column, not in the bar's lines: they stay there with the tools
-folded (▴), and the time line of the bar is the shorter for it. **🔒** at the strip's left unlocks it: a dashed outline and a
-**⠿** — drag ⠿ along the waves (it snaps to the left, the middle and the right), or ← → (shift: a quarter) Home End on it; 🔒 again
-locks it where it is (a page opened again: locked). Where it stands (`cursorStripAt`) and whether it is there at all (⚙ ▾ →
-**Cursor over the axis**, `cursorStrip`) are kept in this browser for every viewer, as the arrangement; a saved state and the
-`layout` command's `strip`, `stripAt` set them for one viewer. With the strip off the two groups are in the bar's lines and
-arranged as any other.
+**The strip over the time axis.** Under the bar's lines a band of its own — the waves' colour, a line over it: what moves you on
+the waves, apart from the commands above — holds groups taken out of the lines, a box each (`stripGroups`): by default the
+**find** (its field, its count, ‹ ›, Aa Full .\*, Highlight Open Mask, Select, Copy, Paint ▾) and the **marks** at the left, over
+the names, the **cursor** (its time, unit and span) and the **edges** (◀ edge kind ▶) at the right, over the waves. They stay with
+the tools folded (▴; `/` types in the find there, no tools opened). **🔒** at the band's left unlocks it: a dashed outline and a
+**⠿** on each box — drag a box along the band (it snaps to the grid, the left, the middle, the right and the names' edge), or ← →
+(shift: a quarter) Home End on its ⠿; dragged over others, they move a place each (the first passed goes where it started; Esc
+during the drag: all back); 🔒 again locks it (a page opened again: locked). Too narrow for all side by side: the find's rarer
+controls go behind its **⋯**, then rows of boxes; never one over another. Which groups and where (`stripGroups`, `toolAt`) are
+kept in this browser for every viewer, as the arrangement; ⚙ ▾ → **Strip over the axis** turns the band off (its groups back in
+their lines) and on; **Arrange the bar…** moves any group into it or out of it; a saved state and the `layout` command's
+`stripGroups`, `at` set them for one viewer.
 
 **Arranging the bar.** **⚙ ▾ → Arrange the bar…** (the right button on the bar opens ⚙ too) turns the bar into a mode: each
-group outlined, a ⠿ on its label, its controls asleep, a last line *new line — drop a group here* and a strip
-**Full | Compact | Mine · Reset · Keys… · Done**. Drag a group by its label (4 px before it starts; on a touch screen too): an
-accent bar shows where it lands — before another group of the row under the pointer, at a row's end, or on the new line (at most
-six lines). Esc during a drag puts it back; Esc or **Done** ends the mode. **Keys…** (and Arrange the bar… chosen by the keys)
-opens a dialog under the bar: a list per line, ↑ ↓ ← → move the focus, **alt+↑ / alt+↓** move the group within its line,
-**alt+← / alt+→** to the line before / after (past the last: a new one), **Space** shows or hides it, a line says what happened;
-the bar follows each step. The presets: **Full** (the default order, the short form when narrow), **Compact** (the short form at
-any width), **Mine** (the order you made last, kept when you pick another). **⚙ Reset the bar** (or Reset in the mode): the
-order, the short form and the groups shown as the settings have them. Whole groups move, not single buttons; a move is one
-step of undo (ctrl+Z). What wins, lowest first: the settings (`toolLayout`, `toolsCompact`), then this browser — the
-arrangement and the short form are kept in `localStorage` `wavelens.bar`, one for every viewer of every page here (a page with
-two viewers is arranged once: the other follows at once), the groups shown and the fold per viewer — then a saved state or a
-page's edits (Load…, Save page, the `layout` command's `bar`), which arrange that viewer only and leave the browser's as it is. In
-VS Code every tab has the same bar: the arrangement, the short form, the groups shown and the fold live in the extension's global
-store, a change in one tab shows in the others.
+group outlined, a ⠿ on its label, its controls asleep, a dotted grid (16 px) along each line, a last line *new line — drop a group
+here*, the strip over the time axis as a line too (outlined; empty: *drop a group here*) and a strip of buttons **Full | Compact |
+Mine · Reset · Keys… · Done**. Drag a group by its label (4 px before it starts; on a touch screen too): an accent bar shows where
+its left edge lands — over another group: before it or after it, in the flow of the line; in the free room of a line (right of its
+groups, or between two apart): placed there, on the grid (a dashed bar), and it stays there (`toolAt`; a line too narrow for its
+places: in the flow alone); on the new line (at most six lines); in the strip: a box of its own, placed on the grid. Dropped back
+over a group of a line, a group placed goes back to the flow. Esc during a drag puts it back; Esc or **Done** ends the mode.
+**Keys…** (and Arrange the bar… chosen by the keys) opens a dialog under the bar: a list per line, the strip last ("over the time
+axis"), ↑ ↓ ← → move the focus, **alt+↑ / alt+↓** move the group within its line (in the strip: it trades places with the box
+beside it), **alt+← / alt+→** to the line before / after (past the last: a new one, then the strip), **Space** shows or hides it,
+a line says what happened; the bar follows each step. The presets: **Full** (the default order, the strip and the places as the
+settings have them, the short form when narrow), **Compact** (the short form at any width), **Mine** (the arrangement you made
+last, kept when you pick another). **⚙ Reset the bar** (or Reset in the mode): the order, the strip, the places, the short form
+and the groups shown as the settings have them. Whole groups move, not single buttons; a move is one step of undo (ctrl+Z). What
+wins, lowest first: the settings (`toolLayout`, `stripGroups`, `toolAt`, `toolsCompact`), then this browser — the arrangement,
+the strip, the places and the short form are kept in `localStorage` `wavelens.bar`, one for every viewer of every page here (a
+page with two viewers is arranged once: the other follows at once), the groups shown and the fold per viewer — then a saved state
+or a page's edits (Load…, Save page, the `layout` command's `bar`, `stripGroups`, `at`), which arrange that viewer only and leave
+the browser's as it is. In VS Code every tab has the same bar: the arrangement, the strip, the places, the short form, the groups
+shown and the fold live in the extension's global store, a change in one tab shows in the others.
 
 **Scroll in the window** (⚙) switches where the rows scroll, on the fly (kept in this browser; the
 `maxHeight` setting is the start): in a **window** of their own (`80vh` high unless the settings say otherwise, never
@@ -1040,7 +1052,7 @@ and the bindings) and the expressions. **Load…** reads it back into a viewer �
 left out and counted in the bar). The last file loaded stays: **Reload** in the bar, or `r`, reads it again with no dialog, after a dump opened in the viewer too and, where the browser
 keeps a file's handle (Chrome, Edge), in the next page (it may ask to read the file on the first click); Load… opens in its folder. A state says what is not there too (`"cursor2": null`, `"range": null`, the edge kind
 `"edge": {"kind": "any", "value": ""}`): loaded, it clears them; a key it leaves out keeps the viewer's. Its `"config"`
-(`style`, `maxHeight`, `toolsFolded`, `toolsHidden`, `toolsCompact`, `toolLayout`, `cursorStrip`, `cursorStripAt`, `sort`, `sortIgnore`, `fold`, `highlight`, `findHighlight`, `findOpen`, `findMask`, `findCase`, `findWord`, `findRegex`, the gaps' and the cycles' keys) pastes into a
+(`style`, `maxHeight`, `toolsFolded`, `toolsHidden`, `toolsCompact`, `toolLayout`, `stripGroups`, `toolAt`, `cursorStrip`, `sort`, `sortIgnore`, `fold`, `highlight`, `findHighlight`, `findOpen`, `findMask`, `findCase`, `findWord`, `findRegex`, the gaps' and the cycles' keys) pastes into a
 config file as it is; times are model units (ps).
 **Save page** downloads the page itself as `<page>.view.html` with your view in it: every viewer's state goes into the
 page's edits (the block `tools/viewedit.py` writes, a new revision), so whoever opens that one file — another browser,
@@ -1600,7 +1612,7 @@ theme (`c3`…`c9`, `hl1`…`hl8`, `fg`, `acc`, …: it follows dark and light);
 | `span` | `id? from? to? label? color? signals? delete?` | a coloured stretch of time across the rows (or the rows of `signals`) with its label: new (`from` and `to`; reversed: swapped; at one time: refused), or span `id` changed; `delete`: `id` or `"all"` |
 | `compare` | `result? dump? a? map? offset? off? show?` | a second dump over the waves (red bands, ≠, `]d [d`): `result` (`sva diff`'s, the WaveJSON `"compare"`), `off`: none; `dump` (`a`: the page's dump, `map`, `offset`) in `tools/viewedit.py` / `view_edit` only (they run `sva diff`); answers `name`, `compared`, `differ`, `first`, `missing`; `show`: which run the waves show, `a`, `b` or `overlay` (*Which run the waves show*; alone it answers `show`, `name`; `b` and `overlay` need B's values: a result without `vcd` refuses); in the saved state (`compareShow`) |
 | `group` | `name signals? add? remove? color? rename? delete? go? move? divider?` | your group: `signals` sets its signals in this order (a module: its signals), `add`, `remove`, `rename`, `delete`; `divider: true`: no signals, a line with its name between your groups and through the waves, in the picture too (`— Handshake —`; with signals an error; Hide, Highlight and the groups' lists leave it out); `go`: opened, in the middle, its first signal selected (ctrl+G); `move`: its place among your groups (`up`, `down`, `top`, `bottom`, a number) |
-| `layout` | `scroll? height? tools? compact? bar? strip? stripAt?` | where the rows scroll: `window` (`height`: `"80vh"`, `600`) or `page`; the bar's tools `fold` or `open`; `compact`: the bar's short form, `"auto"`, `true` or `false`; `bar`: its groups arranged, lines of their labels (`[["find", "cursor"], ["list"]]`; null: the default order); `strip`: the cursor and the edges over the time axis (`true`) or in the bar (`false`); `stripAt`: where the strip stands, `0` (left) .. `1` (right), `"left"`, `"center"`, `"right"` — this viewer's, the browser's arrangement stays; answers `scroll`, `height`, `tools`, `compact`, `bar`, `strip`, `stripAt` |
+| `layout` | `scroll? height? tools? compact? bar? stripGroups? at? strip? stripAt?` | where the rows scroll: `window` (`height`: `"80vh"`, `600`) or `page`; the bar's tools `fold` or `open`; `compact`: the bar's short form, `"auto"`, `true` or `false`; `bar`: its groups arranged, lines of their labels (`[["find", "cursor"], ["list"]]`; null: the default order); `stripGroups`: the groups in the strip over the time axis (`["find", "cursor"]`; `[]`: none; null: the default); `at`: groups placed, `{"marks": 0.5}` (0 left .. 1 right, `"left"`, `"center"`, `"right"`; null: back in the flow); `strip`, `stripAt`: 0.53's, the cursor and the edges in the strip or not, their place — this viewer's, the browser's arrangement stays; answers `scroll`, `height`, `tools`, `compact`, `bar`, `stripGroups`, `at`, `strip`, `stripAt` |
 | `highlight` | `add? remove? set? clear?` | signals and modules (and your groups) in front in their colours, the rest dimmed |
 | `paint` | `signals? color? clear?` | a colour (trace, outline, name) for signals; `color: null` their own again; `clear`: every one off (a `color` that is none: an error, nothing cleared) |
 | `select` | `signal? signals?` | the selected signal (edges, new bookmarks, a measured range counted on it), or several; one folded away, hidden or out of Only is not selected (`select: null`) |

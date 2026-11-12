@@ -147,25 +147,31 @@
 <figure><img src="img/viewer-bar-compact.png" alt="The bar in its short form, the find's ⋯ open under it" loading="lazy">
   <figcaption><b>The short form.</b> No labels, the find's ⋯ open: its options, Select, Copy, Paint ▾.</figcaption></figure>
 <h3 id="arrange">Arranging the bar yourself</h3>
-<p><span class="ui">⚙ ▾ → Arrange the bar…</span> outlines the groups and puts a ⠿ on each label: drag a group by its label to another
-  place of its line, to another line, or onto <i>new line — drop a group here</i>; an accent bar shows where it lands, <kbd>Esc</kbd>
-  during the drag puts it back. The strip under the lines has the presets <span class="ui">Full</span> (the default order),
-  <span class="ui">Compact</span> (the short form at any width), <span class="ui">Mine</span> (the order you made last),
+<p><span class="ui">⚙ ▾ → Arrange the bar…</span> outlines the groups, puts a ⠿ on each label and a dotted grid along each line: drag a
+  group by its label over another group (before it or after it), into the free room of a line (it stays there, its left edge on the
+  16 px grid), onto <i>new line — drop a group here</i>, or into the strip over the time axis (a box of its own); an accent bar shows
+  where its left edge lands (dashed: placed on the grid), <kbd>Esc</kbd> during the drag puts it back. Dropped back over a group, a
+  placed group goes back to the flow. The buttons under the lines: <span class="ui">Full</span> (the default order, strip and
+  places), <span class="ui">Compact</span> (the short form at any width), <span class="ui">Mine</span> (the arrangement you made last),
   <span class="ui">Reset</span>, <span class="ui">Keys…</span> and <span class="ui">Done</span> (or <kbd>Esc</kbd>). <span class="ui">Keys…</span>
-  lists the groups line by line: <kbd>alt+↑</kbd> <kbd>alt+↓</kbd> move the one in focus within its line, <kbd>alt+←</kbd>
-  <kbd>alt+→</kbd> to the line before or after (past the last: a new one), <kbd>Space</kbd> shows or hides it. The order is kept in this
-  browser for every viewer of every page (in VS Code: for every tab); a saved state carries its own for its viewer.</p>
+  lists the groups line by line, the strip last: <kbd>alt+↑</kbd> <kbd>alt+↓</kbd> move the one in focus within its line,
+  <kbd>alt+←</kbd> <kbd>alt+→</kbd> to the line before or after (past the last: a new one, then the strip), <kbd>Space</kbd> shows or
+  hides it. The arrangement is kept in this browser for every viewer of every page (in VS Code: for every tab); a saved state carries
+  its own for its viewer.</p>
 <figure><img src="img/viewer-arrange.png" alt="The bar in the arranging mode: groups outlined, a handle on each label, a group dragged, the new line and the strip" loading="lazy">
   <figcaption><b>Arranging.</b> MARKS dragged before VIEW (the accent bar where it lands), the new line under the lines, the strip of
   the presets.</figcaption></figure>
-<h3 id="strip">The cursor over the time axis</h3>
-<p>The <b>cursor</b> group (time, unit, span) and the <b>edges</b> (◀ edge kind ▶) stand in a slim strip right over the time axis,
-  above the waves, not in the bar's lines: they stay with the tools folded. <span class="ui">🔒</span> at its left unlocks it: drag
-  <span class="ui">⠿</span> along the waves (it snaps to the left, the middle, the right; <kbd>←</kbd> <kbd>→</kbd> <kbd>Home</kbd>
-  <kbd>End</kbd> on it too), then <span class="ui">🔒</span> again to lock it. The place is kept in this browser for every viewer;
-  <span class="ui">⚙ ▾ → Cursor over the axis</span> puts the two groups back in the bar's lines.</p>
-<figure><img src="img/viewer-strip.png" alt="The strip over the time axis unlocked: the open lock, the handle, the cursor's time, unit and span, the edge buttons, outlined" loading="lazy">
-  <figcaption><b>The cursor over the axis, unlocked.</b> ⠿ drags it along the waves; 🔒 locks it again.</figcaption></figure>
+<h3 id="strip">The strip over the time axis</h3>
+<p>Under the bar's lines a band of its own (the waves' colour, a line over it) holds groups taken out of the lines, a box each: by
+  default the <b>find</b> with all its options and the <b>marks</b> at the left, over the names, the <b>cursor</b> (time, unit, span) and
+  the <b>edges</b> (◀ edge kind ▶) at the right, over the waves. They stay with the tools folded, and <kbd>/</kbd> types in the find
+  there. <span class="ui">🔒</span> at the band's left unlocks it: drag a box by its <span class="ui">⠿</span> (it snaps to the grid, the
+  edges, the middle and the names' edge; <kbd>←</kbd> <kbd>→</kbd> <kbd>Home</kbd> <kbd>End</kbd> on it too); dragged over others, they
+  move a place each. <span class="ui">🔒</span> again locks it. Too narrow for all: the find's rarer controls go behind its ⋯, then rows
+  of boxes. <span class="ui">⚙ ▾ → Arrange the bar…</span> moves any group into the band or out of it;
+  <span class="ui">⚙ ▾ → Strip over the axis</span> turns it off. All is kept in this browser for every viewer.</p>
+<figure><img src="img/viewer-strip.png" alt="The strip over the time axis unlocked: the open lock, the find's and the marks' boxes at the left, the cursor's and the edges' at the right, each with its handle, outlined" loading="lazy">
+  <figcaption><b>The strip, unlocked.</b> ⠿ drags a box along the band; over others, they move a place each; 🔒 locks them again.</figcaption></figure>
 <h3 id="tips">Tooltips and the keys box</h3>
 <p>Hover any button, field or list of the bar for what it does and its keys; the tooltip shows after 350 ms (in the right button's menu
   after 2 s, the <code>menuTipDelay</code> setting, so that it does not get in the way while you read the menu).</p>
@@ -669,7 +675,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.53 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.54 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

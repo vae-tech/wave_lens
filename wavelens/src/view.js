@@ -164,7 +164,7 @@ class WaveView {
     if (redraw && hlFrom !== this.hlFrom) { this.hlFrom = hlFrom; this.picks = hlPick(this.M, S.highlight); }
     if (redraw && this.qEl && this.q) this.find(this.q);
     if (this.wsEl) this.wsEl.value = S.style;
-    if (redraw) { const i = this.root.querySelector('input.pfx'); if (i) i.value = S.sortIgnore.join(','); this.fitPfx(); this.renderNames(); this.draw();
+    if (redraw) { for (const i of this.root.querySelectorAll('input.pfx')) i.value = S.sortIgnore.join(','); this.fitPfx(); this.renderNames(); this.draw();
       this.logRender();   // "log": shown or not
       this.settingsChanged(); }
     this.keymap();   // the setting keys read now: what is wrong in them said in the log at once
@@ -432,7 +432,7 @@ class WaveView {
     }
     return this.km;
   }
-  fitPfx() { const i = this.root.querySelector('input.pfx'); if (i) i.style.width = Math.max(7, i.value.length + 2) + 'ch'; }
+  fitPfx() { for (const i of this.root.querySelectorAll('input.pfx')) i.style.width = Math.max(7, i.value.length + 2) + 'ch'; }
   // every row in display order (the model's and the plugins'), and the ones not folded away
   // the ones Hide leaves (rowsHid), then the ones Only keeps (modules.js), then the find's Mask: rowsAll. The FSM layer
   // (fsm.js): "only" — the FSMs of its set after Hide (Only and the Mask not applied under it); "add" — its FSMs and the
@@ -753,7 +753,8 @@ class WaveView {
     const st = { wavelens: 'state', version: STATE_VERSION, title: this.opts.title || M.title || '', from: this.t0, to: this.t0 + this.span,
       cursor: this.cursor, config: { style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded,
         toolsHidden: toolNames(this.S.toolsHidden), toolsCompact: compactOf(this.S.toolsCompact), toolLayout: toolLines(this.S.toolLayout), sort: this.sort,
-        sortIgnore: [...this.sortIgnore], cursorStrip: !!this.S.cursorStrip, cursorStripAt: stripAt(this.S.cursorStripAt),
+        sortIgnore: [...this.sortIgnore], stripGroups: stripNames(this.S.stripGroups), toolAt: toolAts(this.S.toolAt),
+        cursorStrip: this.S.cursorStrip !== false,
         fold: [...folded].map(id => M.groups[id] && M.groups[id].path).filter(Boolean),
         highlight: this.hlOrder().map(r => r.full).filter(Boolean), findHighlight: !!this.findHl, findOpen: !!this.findOpen,
         findMask: !!this.findMask,
@@ -809,16 +810,17 @@ class WaveView {
     // the bar's arrangement and short form of a state: this viewer's only (undo: the user's own, kept in this browser again)
     if (C.toolsCompact !== undefined) this.setToolsCompact(C.toolsCompact, { only: !this.undoing });
     if (C.toolLayout !== undefined) this.setToolLayout(C.toolLayout ?? null, { only: !this.undoing });
+    if (C.stripGroups !== undefined) this.setStripGroups(C.stripGroups ?? null, { only: !this.undoing });
+    if (C.toolAt !== undefined) this.setToolAt(C.toolAt ?? null, { only: !this.undoing });
     if (C.cursorStrip !== undefined) this.setCursorStrip(C.cursorStrip, { only: !this.undoing });
-    if (C.cursorStripAt !== undefined) this.setStripAt(C.cursorStripAt, { only: !this.undoing });
+    if (C.cursorStripAt !== undefined) this.setStripAt(C.cursorStripAt, { only: !this.undoing });   // (0.53's states)
     const gk = GAP_KEYS.filter(k => C[k] !== undefined);
     if (gk.length) this.setGaps(Object.fromEntries(gk.map(k => [k, C[k]])), true);   // null: the clock found (not the page's)
     const ck = CYC_KEYS.filter(k => C[k] !== undefined);
     if (ck.length) this.setCycles(Object.fromEntries(ck.map(k => [k, C[k]])));   // null: the clock found, the first edge (not the page's)
     if (C.sort !== undefined || C.sortIgnore !== undefined) {
-      const pfx = this.root.querySelector('input.pfx');
       this.sort = sortDir(C.sort ?? this.sort); if (C.sortIgnore !== undefined) this.sortIgnore = prefixes(C.sortIgnore).sort((a, b) => b.length - a.length);
-      if (pfx) { pfx.value = this.sortIgnore.join(','); this.fitPfx(); }
+      for (const pfx of this.root.querySelectorAll('input.pfx')) pfx.value = this.sortIgnore.join(','); this.fitPfx();
     }
     for (const [act, [own, k]] of Object.entries(FIND_VIEW)) if (C[k] !== undefined) {
       this[own] = !!C[k]; this.root.querySelector(`button[data-act=${act}]`)?.setAttribute('aria-pressed', this[own]);
@@ -1711,7 +1713,8 @@ class WaveView {
   // ctrl+F, /: the find field; with the bar off the screen (a long page scrolled down) the find group floats over the
   // waves where you are, at the top right of what you see of them, until ✕ or Esc puts it back
   focusFind() {
-    if (this.S.toolsFolded && !this.toolsPeek) { this.toolsPeek = true; this.layoutShow(); }   // the field is in the tools: opened, not kept (T-06)
+    // the field in the tools (not in the strip): they open, not kept (T-06)
+    if (this.S.toolsFolded && !this.toolsPeek && !this.qEl.closest('.axs')) { this.toolsPeek = true; this.layoutShow(); }
     const g = this.qEl.closest('.find'), b = g.getBoundingClientRect();
     // off the screen, or left out of the bar (toolsHidden): it floats
     if (!g.classList.contains('float') && (g.classList.contains('off') || b.top < 0 || b.bottom > innerHeight)) this.floatFind(true);
@@ -2163,6 +2166,7 @@ class WaveView {
   destroy() {
     if (!VIEWS.has(this)) return;
     this.ro.disconnect(); this.ac.abort();   // every listener on the root, the window and the document
+    if (this.stripRO) this.stripRO.disconnect(); cancelAnimationFrame(this.stripRaf);
     this.help(false);
     cancelAnimationFrame(this.raf); cancelAnimationFrame(this.inv); clearTimeout(this.toastT); clearTimeout(this.gapTypeT);
     if (ACTIVE.view === this) ACTIVE.view = null;

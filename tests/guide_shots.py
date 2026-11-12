@@ -376,11 +376,11 @@ def viewer(S, ex, build):
     # Mask: only the found rows (and the modules on the way to them); Select: the found signals selected, the menu takes them all
     js('(v.expandAll(), 0)')
     v.locator('input.q').fill('ready'); shots.settle(page)
-    v.locator('button[data-act=fmask]').click(); shots.settle(page)
+    v.locator('button[data-act=fmask]').evaluate('b => b.click()')   # (behind the find's ⋯ in a tight strip); shots.settle(page)
     S.quiet(page)
     S.save('viewer-find-mask', v, clip=dict(v.bounding_box(), height=520))
-    v.locator('button[data-act=fmask]').click(); shots.settle(page)
-    v.locator('button[data-act=fselect]').click(); shots.settle(page)
+    v.locator('button[data-act=fmask]').evaluate('b => b.click()')   # (behind the find's ⋯ in a tight strip); shots.settle(page)
+    v.locator('button[data-act=fselect]').evaluate('b => b.click()'); shots.settle(page)
     cb = v.locator('canvas').bounding_box()
     y = js("(o => o ? o.y + o.h / 2 : 60)((v.lay || []).find(o => o.row === v.sel))")
     js(f"(v.menu({cb['x'] + 380}, {cb['y'] + y}, v.sel), 0)"); page.locator('.wv-menu .subg').hover(); shots.settle(page)   # New group of the N

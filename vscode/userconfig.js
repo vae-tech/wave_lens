@@ -19,6 +19,8 @@
     toolsCompact: ['string', 'boolean'],    // 'auto' | true | false
     toolLayout: ['array'],                  // [["find", "cursor"], ["list"]] | null
     cursorStripAt: ['number', 'string'],    // 0 .. 1 | 'left' | 'center' | 'right'
+    stripGroups: ['array', 'string'],       // ['find', 'cursor'] | 'find, cursor'
+    toolAt: ['object'],                     // {"marks": 0.5} | null
     svaSignals: ['string', 'boolean'],      // 'view' | true | false
     fontMono: ['string'], fontBody: ['string'],
     enumColors: ['object'], groupColors: ['object'], buses: ['array'],

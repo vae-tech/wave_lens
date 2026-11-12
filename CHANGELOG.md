@@ -5,6 +5,23 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.54 — 12 November 2026
+
+The bar arranged anywhere: a group placed on a grid in its line, the strip over the time axis a line of it (the find, the marks,
+the cursor and the edges by default), the sort prefixes a group of their own.
+
+**The bar arranged anywhere; the strip a line of it.** ⚙ ▾ → Arrange the bar… places a group in the free room of a line where it is
+dropped, on a grid of 16 px (dotted in the mode; `toolAt`, 0 .. 1 of the room; a line too narrow for its places: in the flow
+alone), and the strip over the time axis is a line of it too: any group dragged in (a box of its own) or out; the keys' dialog lists
+the strip last (alt+→ past the last line). The strip is a band of its own under the bar's lines (the waves' colour, a line over
+it) and holds by default the **find** (with all its options) and the **marks** at the left, the cursor and the edges at the right
+(`stripGroups`); one 🔒, a ⠿ on each box (it snaps to the grid, the edges, the middle, the names' edge), a box dragged over others:
+they move a place each, Esc: all back; too narrow: the find's rarer controls behind ⋯, then rows of boxes, never one over another;
+`/` types in the find with the tools folded; ⚙ ▾ Strip over the axis. 0.53's `cursorStrip`, `cursorStripAt` (now 1: the right) still
+work; the `layout` command's `stripGroups`, `at`; the API's `setStripGroups`, `setToolAt`, `placeTool`.
+The sort prefixes (`i_,o_`) are a group of the bar of their own too (**prefixes**, beside the list; ⚙ keeps its field, the two
+the same), to arrange as any other.
+
 ## 0.53 — 12 November 2026
 
 The bar in a new order (File ▾, ⚙ ▾, the short form) and arranged by you; the cursor and the edges in a strip over the time

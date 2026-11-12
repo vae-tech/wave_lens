@@ -70,7 +70,7 @@ const flatText = t => Array.isArray(t) ? t.slice(typeof t[1] === 'object' && !Ar
 const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight: 24, traceWidth: 1.4, busWidth: 1.2,
   labelSize: 11, fontSize: 11.5, sort: 'none', sortIgnore: [], sortButton: true, hint: true, style: 'auto', radix: 'auto', fold: null,
   highlight: null, dim: 0.3, groupColors: null, bookmarkLeft: 0.2, arrowLabels: 'lane', laneHeight: 16, maxHeight: null, toolsFolded: false, toolsHidden: [],
-  toolsCompact: 'auto', toolLayout: null, cursorStrip: true, cursorStripAt: 0,
+  toolsCompact: 'auto', toolLayout: null, stripGroups: ['find', 'marks', 'cursor', 'edges'], toolAt: null, cursorStrip: true, cursorStripAt: 1,
   groupOrder: 'file', onlyGroups: true, moduleShading: true, findHighlight: true, findOpen: true, findMask: false, findCase: false, findWord: false,
   findRegex: false, cursorSnap: 8, keyHints: 200, showWidth: true, exprLibrary: [], sharedMarkers: false, keys: {},
     wheel: 'scroll', contextMenu: true, enumColors: null, dumpBudget: 3000000, gaps: false, gapIdle: 16, gapKeep: 2,
@@ -103,11 +103,24 @@ const toolLines = v => {
   return out.length ? out.slice(0, TOOL_LINES_MAX) : null;
 };
 // the bar's short form (toolsCompact): 'auto' (a narrow bar), true (always), false (never); "on" / "off" too
-// the strip over the time axis (cursorStripAt): where it stands in the width of the waves, 0 (left) .. 1 (right); "left", "center"
-// ("centre"), "right" too; anything else: 0
+// a place of a group in its line or in the strip over the time axis (toolAt, cursorStripAt): 0 (left) .. 1 (right) of the room the
+// line leaves it; "left", "center" ("centre"), "right" too; anything else: 0
 const STRIP_AT = { left: 0, center: 0.5, centre: 0.5, right: 1 };
 const stripAt = p => { const n = typeof p === 'string' ? (hasKey(STRIP_AT, p.trim().toLowerCase()) ? STRIP_AT[p.trim().toLowerCase()] : parseFloat(p)) : p;
   return typeof n === 'number' && isFinite(n) ? Math.round(Math.min(1, Math.max(0, n)) * 1000) / 1000 : 0; };
+// the groups in the strip over the time axis (stripGroups): labels, lower case, the names of before read, each once, in order
+const stripNames = v => [...new Set((Array.isArray(v) ? v : String(v ?? '').split(',')).map(s => String(s).trim().toLowerCase())
+  .map(s => (hasKey(TOOL_WAS, s) ? TOOL_WAS[s] : s)).filter(Boolean))];
+// the groups placed (toolAt): {label: 0 .. 1 of the room their line or the strip leaves them}; a label of before read as now; what is
+// no place (an object, a list, null) left out
+const toolAts = v => {
+  const o = {};
+  if (v && typeof v === 'object' && !Array.isArray(v)) for (const [k, x] of Object.entries(v)) {
+    const n = String(k).trim().toLowerCase(), m = hasKey(TOOL_WAS, n) ? TOOL_WAS[n] : n;
+    if (m && (typeof x === 'number' || (typeof x === 'string' && x.trim()))) o[m] = stripAt(x);
+  }
+  return o;
+};
 const compactOf = c => (c === true || c === 'on' || c === 'true' ? true : c === false || c === 'off' || c === 'false' ? false : 'auto');
 const prefixes = v => (Array.isArray(v) ? v : String(v ?? '').split(',')).map(s => String(s).trim()).filter(Boolean);
 const jsonOr = t => { try { return JSON.parse(t); } catch (e) { return null; } };

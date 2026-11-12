@@ -72,7 +72,7 @@ const flatText = t => Array.isArray(t) ? t.slice(typeof t[1] === 'object' && !Ar
 const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight: 24, traceWidth: 1.4, busWidth: 1.2,
   labelSize: 11, fontSize: 11.5, sort: 'none', sortIgnore: [], sortButton: true, hint: true, style: 'auto', radix: 'auto', fold: null,
   highlight: null, dim: 0.3, groupColors: null, bookmarkLeft: 0.2, arrowLabels: 'lane', laneHeight: 16, maxHeight: null, toolsFolded: false, toolsHidden: [],
-  toolsCompact: 'auto', toolLayout: null, cursorStrip: true, cursorStripAt: 0,
+  toolsCompact: 'auto', toolLayout: null, stripGroups: ['find', 'marks', 'cursor', 'edges'], toolAt: null, cursorStrip: true, cursorStripAt: 1,
   groupOrder: 'file', onlyGroups: true, moduleShading: true, findHighlight: true, findOpen: true, findMask: false, findCase: false, findWord: false,
   findRegex: false, cursorSnap: 8, keyHints: 200, showWidth: true, exprLibrary: [], sharedMarkers: false, keys: {},
     wheel: 'scroll', contextMenu: true, enumColors: null, dumpBudget: 3000000, gaps: false, gapIdle: 16, gapKeep: 2,
@@ -105,11 +105,24 @@ const toolLines = v => {
   return out.length ? out.slice(0, TOOL_LINES_MAX) : null;
 };
 // the bar's short form (toolsCompact): 'auto' (a narrow bar), true (always), false (never); "on" / "off" too
-// the strip over the time axis (cursorStripAt): where it stands in the width of the waves, 0 (left) .. 1 (right); "left", "center"
-// ("centre"), "right" too; anything else: 0
+// a place of a group in its line or in the strip over the time axis (toolAt, cursorStripAt): 0 (left) .. 1 (right) of the room the
+// line leaves it; "left", "center" ("centre"), "right" too; anything else: 0
 const STRIP_AT = { left: 0, center: 0.5, centre: 0.5, right: 1 };
 const stripAt = p => { const n = typeof p === 'string' ? (hasKey(STRIP_AT, p.trim().toLowerCase()) ? STRIP_AT[p.trim().toLowerCase()] : parseFloat(p)) : p;
   return typeof n === 'number' && isFinite(n) ? Math.round(Math.min(1, Math.max(0, n)) * 1000) / 1000 : 0; };
+// the groups in the strip over the time axis (stripGroups): labels, lower case, the names of before read, each once, in order
+const stripNames = v => [...new Set((Array.isArray(v) ? v : String(v ?? '').split(',')).map(s => String(s).trim().toLowerCase())
+  .map(s => (hasKey(TOOL_WAS, s) ? TOOL_WAS[s] : s)).filter(Boolean))];
+// the groups placed (toolAt): {label: 0 .. 1 of the room their line or the strip leaves them}; a label of before read as now; what is
+// no place (an object, a list, null) left out
+const toolAts = v => {
+  const o = {};
+  if (v && typeof v === 'object' && !Array.isArray(v)) for (const [k, x] of Object.entries(v)) {
+    const n = String(k).trim().toLowerCase(), m = hasKey(TOOL_WAS, n) ? TOOL_WAS[n] : n;
+    if (m && (typeof x === 'number' || (typeof x === 'string' && x.trim()))) o[m] = stripAt(x);
+  }
+  return o;
+};
 const compactOf = c => (c === true || c === 'on' || c === 'true' ? true : c === false || c === 'off' || c === 'false' ? false : 'auto');
 const prefixes = v => (Array.isArray(v) ? v : String(v ?? '').split(',')).map(s => String(s).trim()).filter(Boolean);
 const jsonOr = t => { try { return JSON.parse(t); } catch (e) { return null; } };
@@ -2547,9 +2560,11 @@ const TIPS = {
     'Code\'s own colours too'],
   'act:scroll': ['Ticked: the rows scroll in a window of their own (the bar above them); else with the page (the bar sticks to the top); kept in ' +
     'this browser'],
-  'act:strip': ['Ticked: the cursor (time, unit, span) and the edges in a slim strip over the time axis; else in the bar\'s lines (cursorStrip)'],
-  'act:axlock': ['Unlock the strip: ⠿ moves it along the waves (it snaps to the left, the middle, the right); again: lock it there'],
-  'act:axgrip': ['Drag the strip along the waves; ← → Home End move it too (shift: a quarter); where it stands is kept', ['drag', '←', '→']],
+  'act:strip': ['Ticked: the strip over the time axis, its groups (the find, the marks, the cursor, the edges) out of the bar\'s lines ' +
+    '(stripGroups; Arrange the bar… moves a group in or out)'],
+  'act:axlock': ['Unlock the strip: ⠿ moves a box (it snaps to the edges, the middle, the names\' edge; over the other, the two swap); ' +
+    'again: lock them there'],
+  'act:axgrip': ['Drag this box along the strip; over another, the two swap; ← → Home End move it too (shift: a quarter); kept', ['drag', '←', '→']],
   'act:snap': ['Ticked: a click puts the cursor on an edge of the signal near it (cursorSnap px); alt+click never does'],
   'act:tg': ['Show or leave out this group of tools'], 'act:tgall': ['Every group of tools in the bar'],
   'act:tgnone': ['No group of tools (/ still floats the find)'],
@@ -2760,10 +2775,13 @@ const FIND_OPTS = [
 // name and the times by a condition (find; sva.js: expression, assertions), the rows, the signals' look, the files and a
 // compare (list, signal, file, compare)
 const TOOL_LINES = { cursor: 'time', view: 'time', edges: 'time', marks: 'time', 'go to': 'time', find: 'find', expression: 'find', assertions: 'find',
-  list: 'rows', signal: 'rows', file: 'rows', compare: 'rows' };
-// the groups of the strip over the time axis (cursorStrip), in its order: the cursor's time, unit and span, the edges
-const STRIP_GROUPS = ['cursor', 'edges'];
-const STRIP_SNAP = 14;   // px: a dragged strip snaps to the left, the middle, the right of the waves this near
+  list: 'rows', prefixes: 'rows', signal: 'rows', file: 'rows', compare: 'rows' };
+// the strip over the time axis, a band of its own under the bar's lines: a box per group of it (stripGroups), each at its place
+// (toolAt; else these: the find and the marks at the left, the cursor and the edges at the right)
+const STRIP_AT0 = { find: 0, marks: 0, cursor: 1, edges: 1 };
+const TOOL_GRID = 16;    // px: the grid a group dropped in a line or in the strip snaps to (Arrange the bar…)
+const STRIP_SNAP = 14;   // px: a dragged box snaps to the left, the middle, the right of the strip and the names' edge this near
+const STRIP_GAP = 12;    // px between two boxes of the strip
 const LOCK_SVG = (open) => '<svg viewBox="0 0 12 14" width="10" height="12" aria-hidden="true"><rect x="1.5" y="6" width="9" height="7" rx="1.2" ' +
   `fill="currentColor"/><path d="${open ? 'M3.5 6V3.5a2.5 2.5 0 0 1 5 0' : 'M3.5 6V4a2.5 2.5 0 0 1 5 0V6'}" fill="none" stroke="currentColor" ` +
   'stroke-width="1.4"/></svg>';
@@ -2852,6 +2870,10 @@ class Bar {
       '<button type="button" class="fx" data-act="fdock" aria-label="close">✕</button>').replace('class="tg"', 'class="tg find"');
     const list = grp('list', S.sortButton ? btn('sort', '') : '', groups ? more(seg(btn('expand', '⊞', ' aria-label="open every module"'),
       btn('collapse', '⊟', ' aria-label="fold every module"'))) + btn('mods', 'Modules') + (v.fsms().length ? btn('fsms', 'FSMs') : '') : '');
+    // the sort prefixes, a group of their own (in ⚙ too): the names sorted without them, live as they are typed
+    const pfxIn = () => `<input type="text" class="pfx" spellcheck="false" value="${esc(v.sortIgnore.join(','))}" placeholder="i_,o_" ` +
+      'aria-label="prefixes ignored when sorting">';
+    const pfxGrp = S.sortButton ? grp('prefixes', pfxIn()) : '';
     const signal = grp('signal', `<select class="rx" aria-label="radix of the selected signals" disabled><option value="">radix</option><option ` +
       `value="-">the page's</option>${RADIX.map(x => `<option>${x}</option>`).join('')}</select>`,
       more(btn('cycles', 'Cycles', ' aria-pressed="false"'), btn('gaps', 'Gaps', ' aria-pressed="false"'),
@@ -2883,9 +2905,8 @@ class Bar {
       mTick('scroll', 'Scroll in the window') +
       `<label class="mi">Edge style <select class="ws" aria-label="edge style">${Object.entries(STYLE_NAMES).map(([k, n]) =>
         `<option value="${k}"${k === S.style ? ' selected' : ''}>${n}</option>`).join('')}</select></label>` +
-      (S.sortButton ? `<label class="mi">Sort prefixes <input type="text" class="pfx" spellcheck="false" value="${esc(v.sortIgnore.join(','))}" ` +
-        'placeholder="i_,o_" aria-label="prefixes ignored when sorting"></label>' : '') +
-      mTick('snap', 'Snap to edges') + mTick('strip', 'Cursor over the axis') + '<hr>' +
+      (S.sortButton ? `<label class="mi">Sort prefixes ${pfxIn()}</label>` : '') +
+      mTick('snap', 'Snap to edges') + mTick('strip', 'Strip over the axis') + '<hr>' +
       menuSub('subtg', 'Tools in the bar', mItem('tgall', 'Show all') + mItem('tgnone', 'Hide all')) +
       menuSub('subcp', 'Short form', [['auto', 'auto: under 900 px'], ['on', 'always'], ['off', 'never']].map(([k, n]) =>
         mTick('compact', n, ` data-v="${k}"`)).join('')) + '<hr>' + mItem('arrange', 'Arrange the bar…') + mItem('barreset', 'Reset the bar'),
@@ -2913,10 +2934,10 @@ class Bar {
         'aria-label="undo"')}${btn('redo', '↷', ' class="undo" disabled aria-label="redo"')}</span>${popHead('gear', '⚙ ▾', 'pgear', 'the bar and the look')}${
         btn('tools', '', ' class="lay" aria-label="fold the tools"')}${btn('help', '?', ' class="hb" aria-label="keys and mouse"')}</span></div>
       <div class="tools">${toolLine('time', cursor + view + edges + marks + (jumps ? grp('go to', jumps) : ''))}${toolLine('find', find)}${
-        toolLine('rows', list + signal + file + compare)}</div>${gear}<div class="axs" role="toolbar" aria-label="the cursor over the time axis" hidden><div
-        class="axw"><div class="axb"><span class="axh">${btn('axlock', LOCK_SVG(false) + LOCK_SVG(true), ' class="axl" aria-pressed="false" ' +
-        'aria-label="unlock the strip: ⠿ moves it"')}<button type="button" class="axg" data-act="axgrip" aria-label="move the strip: drag, or ← → Home End"
-        hidden>⠿</button></span></div></div></div></div>
+        toolLine('rows', list + pfxGrp + signal + file + compare)}</div>${gear}<div class="axs" role="toolbar" aria-label="the strip over the time axis"
+        hidden><div class="axw">${btn('axlock', LOCK_SVG(false) + LOCK_SVG(true), ' class="axl" aria-pressed="false" aria-label="unlock the strip: ⠿ ' +
+        'moves a box"')}<div class="axr"></div><span class="axe" aria-hidden="true">the strip over the time axis — drop a group here</span></div>` +
+        `</div></div>
       <div class="body"><div class="names"></div><div class="wcol"><canvas tabindex="0" role="application" aria-roledescription="waveform"
         aria-label="waveform: + − zoom, ← → pan, shift+← → move the cursor, ↑ ↓ select a signal, [e ]e or Tab edges"></canvas></div></div>
       <div class="notes" hidden></div>
@@ -2955,8 +2976,9 @@ class Bar {
     r.querySelector('.tg.find').addEventListener('focusout', e => { if (v.toolsPeek && !v.qEl.value && !e.currentTarget.contains(e.relatedTarget)) {
       v.toolsPeek = false; v.layoutShow(); } });
     v.evEl = r.querySelector('input.ev');
-    const axg = r.querySelector('.axs .axg');   // the strip over the time axis, unlocked: ⠿ dragged, or ← → Home End on it
-    axg.addEventListener('pointerdown', e => v.stripDown(e)); axg.addEventListener('keydown', e => v.stripKey(e));
+    const axs = r.querySelector('.axs');   // the strip over the time axis, unlocked: a box's ⠿ dragged, or ← → Home End on it
+    axs.addEventListener('pointerdown', e => { const g = e.target.closest('.axg'); if (g) v.stripDown(e, g); });
+    axs.addEventListener('keydown', e => { const g = e.target.closest('.axg'); if (g) v.stripKey(e, g); });
     v.edgeSel.addEventListener('change', () => v.setEdgeKind(v.edgeSel.value, true));
     const gv = r.querySelector('.gapv'), bgi = gv.querySelector('.bgi'), bgk = gv.querySelector('.bgk');   // idle, keep: the waves follow as they are typed
     gv.addEventListener('input', () => v.gapType(() => v.gapFields(bgi, bgk, true)));
@@ -3003,13 +3025,14 @@ class Bar {
     v.stateBtn = r.querySelector('button[data-act=sreload]'); v.stateShow();
     if (!r.wlState && G.showOpenFilePicker) stateDb('readonly', s => s.get('last')).then(h => { if (h && !r.wlState) { r.wlState = h;
       if (r.waveView) r.waveView.stateShow(); } }).catch(() => { /* no database here */ });
-    // the sort prefixes (in ⚙): live as they are typed; Esc: as they were when the field was entered (T-07)
-    const pfx = r.querySelector('input.pfx');
-    if (pfx) { let was = pfx.value;
+    // the sort prefixes (their group, ⚙): live as they are typed, the other field the same; Esc: as they were when the field was
+    // entered (T-07)
+    const pfxs = [...r.querySelectorAll('input.pfx')], same = (from, t) => { for (const x of pfxs) if (x !== from) x.value = t; };
+    for (const pfx of pfxs) { let was = pfx.value;
       pfx.addEventListener('focus', () => { was = pfx.value; });
-      pfx.addEventListener('input', () => { v.fitPfx(); v.setSort(v.sort, pfx.value); });
+      pfx.addEventListener('input', () => { same(pfx, pfx.value); v.fitPfx(); v.setSort(v.sort, pfx.value); });
       pfx.addEventListener('keydown', e => {
-        if (e.key === 'Escape' && pfx.value !== was) { pfx.value = was; v.fitPfx(); v.setSort(v.sort, was); }
+        if (e.key === 'Escape' && pfx.value !== was) { pfx.value = was; same(pfx, was); v.fitPfx(); v.setSort(v.sort, was); }
         // ↑ ↓ in ⚙: on to the item before / after (the field has no use for them; the menu's keys leave a field its own)
         const box = pfx.closest('.bpop'); if (!box || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return;
         const its = [...box.querySelectorAll(':scope > button, :scope > .msub > button, :scope > label.mi input, :scope > label.mi select')]
@@ -3060,7 +3083,8 @@ class Bar {
     else if (a === 'help') v.help();
     else if (a === 'scroll') v.setScroll(v.S.maxHeight != null && v.S.maxHeight !== '' ? 'page' : 'window');
     else if (a === 'snap') v.setSnap(!(v.S.cursorSnap > 0));
-    else if (a === 'strip') v.setCursorStrip(!v.S.cursorStrip);
+    else if (a === 'strip') { const base = stripNames(settings(GLOBAL, v.M.cfg, v.opts).stripGroups);   // off: none; on: the settings' (none: these)
+      v.setStripGroups(v.stripGroups().length ? [] : base.length ? null : Object.keys(STRIP_AT0)); }
     else if (a === 'axlock') v.stripLock(!!v.stripOpen);
     else if (a === 'tools') v.setTools(!v.S.toolsFolded);
     else if (a === 'tg' || a === 'tgall' || a === 'tgnone') { const H = new Set(toolNames(v.S.toolsHidden));
@@ -3636,7 +3660,7 @@ class WaveView {
     if (redraw && hlFrom !== this.hlFrom) { this.hlFrom = hlFrom; this.picks = hlPick(this.M, S.highlight); }
     if (redraw && this.qEl && this.q) this.find(this.q);
     if (this.wsEl) this.wsEl.value = S.style;
-    if (redraw) { const i = this.root.querySelector('input.pfx'); if (i) i.value = S.sortIgnore.join(','); this.fitPfx(); this.renderNames(); this.draw();
+    if (redraw) { for (const i of this.root.querySelectorAll('input.pfx')) i.value = S.sortIgnore.join(','); this.fitPfx(); this.renderNames(); this.draw();
       this.logRender();   // "log": shown or not
       this.settingsChanged(); }
     this.keymap();   // the setting keys read now: what is wrong in them said in the log at once
@@ -3904,7 +3928,7 @@ class WaveView {
     }
     return this.km;
   }
-  fitPfx() { const i = this.root.querySelector('input.pfx'); if (i) i.style.width = Math.max(7, i.value.length + 2) + 'ch'; }
+  fitPfx() { for (const i of this.root.querySelectorAll('input.pfx')) i.style.width = Math.max(7, i.value.length + 2) + 'ch'; }
   // every row in display order (the model's and the plugins'), and the ones not folded away
   // the ones Hide leaves (rowsHid), then the ones Only keeps (modules.js), then the find's Mask: rowsAll. The FSM layer
   // (fsm.js): "only" — the FSMs of its set after Hide (Only and the Mask not applied under it); "add" — its FSMs and the
@@ -4225,7 +4249,8 @@ class WaveView {
     const st = { wavelens: 'state', version: STATE_VERSION, title: this.opts.title || M.title || '', from: this.t0, to: this.t0 + this.span,
       cursor: this.cursor, config: { style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded,
         toolsHidden: toolNames(this.S.toolsHidden), toolsCompact: compactOf(this.S.toolsCompact), toolLayout: toolLines(this.S.toolLayout), sort: this.sort,
-        sortIgnore: [...this.sortIgnore], cursorStrip: !!this.S.cursorStrip, cursorStripAt: stripAt(this.S.cursorStripAt),
+        sortIgnore: [...this.sortIgnore], stripGroups: stripNames(this.S.stripGroups), toolAt: toolAts(this.S.toolAt),
+        cursorStrip: this.S.cursorStrip !== false,
         fold: [...folded].map(id => M.groups[id] && M.groups[id].path).filter(Boolean),
         highlight: this.hlOrder().map(r => r.full).filter(Boolean), findHighlight: !!this.findHl, findOpen: !!this.findOpen,
         findMask: !!this.findMask,
@@ -4281,16 +4306,17 @@ class WaveView {
     // the bar's arrangement and short form of a state: this viewer's only (undo: the user's own, kept in this browser again)
     if (C.toolsCompact !== undefined) this.setToolsCompact(C.toolsCompact, { only: !this.undoing });
     if (C.toolLayout !== undefined) this.setToolLayout(C.toolLayout ?? null, { only: !this.undoing });
+    if (C.stripGroups !== undefined) this.setStripGroups(C.stripGroups ?? null, { only: !this.undoing });
+    if (C.toolAt !== undefined) this.setToolAt(C.toolAt ?? null, { only: !this.undoing });
     if (C.cursorStrip !== undefined) this.setCursorStrip(C.cursorStrip, { only: !this.undoing });
-    if (C.cursorStripAt !== undefined) this.setStripAt(C.cursorStripAt, { only: !this.undoing });
+    if (C.cursorStripAt !== undefined) this.setStripAt(C.cursorStripAt, { only: !this.undoing });   // (0.53's states)
     const gk = GAP_KEYS.filter(k => C[k] !== undefined);
     if (gk.length) this.setGaps(Object.fromEntries(gk.map(k => [k, C[k]])), true);   // null: the clock found (not the page's)
     const ck = CYC_KEYS.filter(k => C[k] !== undefined);
     if (ck.length) this.setCycles(Object.fromEntries(ck.map(k => [k, C[k]])));   // null: the clock found, the first edge (not the page's)
     if (C.sort !== undefined || C.sortIgnore !== undefined) {
-      const pfx = this.root.querySelector('input.pfx');
       this.sort = sortDir(C.sort ?? this.sort); if (C.sortIgnore !== undefined) this.sortIgnore = prefixes(C.sortIgnore).sort((a, b) => b.length - a.length);
-      if (pfx) { pfx.value = this.sortIgnore.join(','); this.fitPfx(); }
+      for (const pfx of this.root.querySelectorAll('input.pfx')) pfx.value = this.sortIgnore.join(','); this.fitPfx();
     }
     for (const [act, [own, k]] of Object.entries(FIND_VIEW)) if (C[k] !== undefined) {
       this[own] = !!C[k]; this.root.querySelector(`button[data-act=${act}]`)?.setAttribute('aria-pressed', this[own]);
@@ -5183,7 +5209,8 @@ class WaveView {
   // ctrl+F, /: the find field; with the bar off the screen (a long page scrolled down) the find group floats over the
   // waves where you are, at the top right of what you see of them, until ✕ or Esc puts it back
   focusFind() {
-    if (this.S.toolsFolded && !this.toolsPeek) { this.toolsPeek = true; this.layoutShow(); }   // the field is in the tools: opened, not kept (T-06)
+    // the field in the tools (not in the strip): they open, not kept (T-06)
+    if (this.S.toolsFolded && !this.toolsPeek && !this.qEl.closest('.axs')) { this.toolsPeek = true; this.layoutShow(); }
     const g = this.qEl.closest('.find'), b = g.getBoundingClientRect();
     // off the screen, or left out of the bar (toolsHidden): it floats
     if (!g.classList.contains('float') && (g.classList.contains('off') || b.top < 0 || b.bottom > innerHeight)) this.floatFind(true);
@@ -5635,6 +5662,7 @@ class WaveView {
   destroy() {
     if (!VIEWS.has(this)) return;
     this.ro.disconnect(); this.ac.abort();   // every listener on the root, the window and the document
+    if (this.stripRO) this.stripRO.disconnect(); cancelAnimationFrame(this.stripRaf);
     this.help(false);
     cancelAnimationFrame(this.raf); cancelAnimationFrame(this.inv); clearTimeout(this.toastT); clearTimeout(this.gapTypeT);
     if (ACTIVE.view === this) ACTIVE.view = null;
@@ -6315,17 +6343,20 @@ Object.assign(WaveView.prototype, {
 });
 /* ======================== src/look.js ======================== */
 // the bar as this browser keeps it (localStorage wavelens.bar, one for every viewer of every page here; VS Code: one for every tab):
-// {v: 1, layout, compact, mine, strip, stripAt}. barKept: what of it is good ({} for nothing, or nothing good); barKeep(v, part): a part changed
-// (undefined: taken out), the rest kept, the other viewers of this page follow at once (other pages: the storage event)
+// {v: 1, layout, compact, mine, sg (the strip's groups), at (the groups placed), strip, stripAt (0.53's cursor in the strip, its
+// place)}. barKept: what of it is good ({} for nothing, or nothing good); barKeep(v, part): a part changed (undefined: taken out), the
+// rest kept, the other viewers of this page follow at once (other pages: the storage event)
 const BARKEY = 'wavelens.bar';
 const barRaw = () => { try { const o = JSON.parse(localStorage.getItem(BARKEY) || 'null'); return o && typeof o === 'object' && o.v === 1 ? o : null; }
   catch (e) { return null; } };
 const barKept = () => { const o = barRaw(), out = {}; if (!o) return out;
   if ('layout' in o) out.layout = toolLines(o.layout);
   if ('compact' in o) out.compact = compactOf(o.compact);
+  if ('sg' in o) out.sg = stripNames(o.sg);
+  if ('at' in o) out.at = toolAts(o.at);
   if (typeof o.strip === 'boolean') out.strip = o.strip;
   if ('stripAt' in o) out.stripAt = stripAt(o.stripAt);
-  out.mine = toolLines(o.mine); return out; };
+  out.mine = toolLines(o.mine); if ('msg' in o) out.msg = stripNames(o.msg); if ('mat' in o) out.mat = toolAts(o.mat); return out; };
 const barKeep = (v, part) => {
   const o = Object.assign({}, barRaw() || {}, { v: 1 });
   for (const [k, x] of Object.entries(part)) { if (x === undefined) delete o[k]; else o[k] = x; }
@@ -6466,8 +6497,8 @@ Object.assign(WaveView.prototype, {
       const B = barKept();   // the bar's arrangement and its short form: this browser's, one for every viewer of it
       if (B.layout !== undefined) L.toolLayout = B.layout;
       if (B.compact !== undefined) L.toolsCompact = B.compact;
-      if (B.strip !== undefined) L.cursorStrip = B.strip;
-      if (B.stripAt !== undefined) L.cursorStripAt = B.stripAt;
+      for (const [k, b] of [['stripGroups', 'sg'], ['toolAt', 'at'], ['cursorStrip', 'strip'], ['cursorStripAt', 'stripAt']]) {
+        if (B[b] !== undefined) L[k] = B[b]; }
       return L; } catch (e) { return {}; } },
   // where the rows scroll: 'window' (in the viewer, maxHeight high: height, else the settings', else 80vh; the bar above
   // them) or 'page' (with the page; the bar sticks to the top while the rows go by); null: the settings' again. Kept in
@@ -6508,43 +6539,119 @@ Object.assign(WaveView.prototype, {
     this.S.toolLayout = 'toolLayout' in this.local ? this.local.toolLayout : base;
     this.arrangeTools(); this.layoutShow(); this.draw(); this.settingsChanged(); return this;
   },
-  // the cursor and the edges in the strip over the time axis (cursorStrip) or in the bar's lines; null: the settings' again. Kept
-  // in this browser for every viewer of it (wavelens.bar), as the arrangement; o.only: this viewer only
+  // the groups in the strip over the time axis now (stripGroups; cursorStrip false: without the cursor and the edges)
+  stripGroups() { const g = stripNames(this.S.stripGroups); return this.S.cursorStrip === false ? g.filter(n => n !== 'cursor' && n !== 'edges') : g; },
+  // where a group is placed (toolAt: 0 .. 1 of the room its line or the strip leaves it), null: none (in the flow of its line); in the
+  // strip one always is: STRIP_AT0 (the cursor and the edges: cursorStripAt, 0.53's)
+  toolAtOf(n) {
+    const A = toolAts(this.S.toolAt); if (hasKey(A, n)) return A[n];
+    if (!this.stripGroups().includes(n)) return null;
+    return n === 'cursor' || n === 'edges' ? stripAt(this.S.cursorStripAt) : STRIP_AT0[n] ?? 0;
+  },
+  // the groups in the strip (a list; null: the settings' again) and the groups placed ({label: 0 .. 1}; null: the settings'). Kept in
+  // this browser for every viewer of it (wavelens.bar), as the arrangement; o.only: this viewer only
+  setStripGroups(list, o = {}) {
+    const base = stripNames(settings(GLOBAL, this.M.cfg, this.opts).stripGroups), want = list == null ? base : stripNames(list);
+    const same = want.join() === base.join(); if (same) delete this.local.stripGroups; else this.local.stripGroups = want;
+    if (!o.only) barKeep(this, Object.assign({ sg: same ? undefined : want }, o.mine ? { msg: want } : {}));
+    this.S.stripGroups = want; if (!this.stripGroups().length) this.stripLock(true);
+    this.arrangeTools(); this.layoutShow(); this.draw(); this.settingsChanged(); return this;
+  },
+  setToolAt(map, o = {}) {
+    const base = toolAts(settings(GLOBAL, this.M.cfg, this.opts).toolAt), want = map == null ? base : toolAts(map);
+    const same = JSON.stringify(want) === JSON.stringify(base); if (same) delete this.local.toolAt; else this.local.toolAt = want;
+    if (!o.only) barKeep(this, Object.assign({ at: same ? undefined : want }, o.mine ? { mat: want } : {}));
+    this.S.toolAt = want; this.barFit(); this.settingsChanged(); return this;
+  },
+  // one group placed (at 0 .. 1, "center" …) or back in the flow (null)
+  placeTool(n, at, o = {}) {
+    const A = toolAts(this.S.toolAt); if (at == null) delete A[n]; else A[n] = stripAt(at);
+    return this.setToolAt(A, o);
+  },
+  // 0.53's: the cursor and the edges in the strip or not (cursorStrip), their place (both placed there: toolAt)
   setCursorStrip(on, o = {}) {
     const base = settings(GLOBAL, this.M.cfg, this.opts).cursorStrip !== false, want = on == null ? base : !!on;
     if (want === base) delete this.local.cursorStrip; else this.local.cursorStrip = want;
     if (!o.only) barKeep(this, { strip: want === base ? undefined : want });
-    this.S.cursorStrip = want; if (!want) this.stripLock(true);
+    this.S.cursorStrip = want; if (!this.stripGroups().length) this.stripLock(true);
     this.arrangeTools(); this.layoutShow(); this.draw(); this.settingsChanged(); return this;
   },
-  // where the strip stands over the waves (cursorStripAt: 0 left .. 1 right, "center" …); null: the settings' again. Kept as above
   setStripAt(p, o = {}) {
-    const base = stripAt(settings(GLOBAL, this.M.cfg, this.opts).cursorStripAt), want = p == null ? base : stripAt(p);
-    if (want === base) delete this.local.cursorStripAt; else this.local.cursorStripAt = want;
-    if (!o.only) barKeep(this, { stripAt: want === base ? undefined : want });
-    this.S.cursorStripAt = want; this.stripShow(); this.settingsChanged(); return this;
+    const A = toolAts(this.S.toolAt);
+    if (p == null) { delete A.cursor; delete A.edges; } else A.cursor = A.edges = stripAt(p);
+    return this.setToolAt(A, o);
   },
-  // the strip's 🔒: locked (true: ⠿ gone, nothing moves it) or not; not kept (a page opened again: locked)
+  // the strip's 🔒: locked (true: the ⠿ gone, nothing moves a box) or not; not kept (a page opened again: locked)
   stripLock(lock) {
     this.stripOpen = !lock; const a = this.root.querySelector('.bar .axs'); if (!a) return this;
     a.classList.toggle('open', !lock); const b = a.querySelector('[data-act=axlock]');
-    if (b) { b.setAttribute('aria-pressed', !lock); b.setAttribute('aria-label', lock ? 'unlock the strip: ⠿ moves it' : 'lock the strip where it is'); }
-    const g = a.querySelector('.axg');   // (⠿ in focus when it goes: the focus to 🔒)
-    if (g) { if (lock && document.activeElement === g && b) b.focus(); g.hidden = lock; }
+    if (b) { b.setAttribute('aria-pressed', !lock); b.setAttribute('aria-label', lock ? 'unlock the strip: ⠿ moves a box' : 'lock the strip as it is'); }
+    for (const g of a.querySelectorAll('.axg')) { if (lock && document.activeElement === g && b) b.focus(); g.hidden = lock; }   // (⠿ in focus: to 🔒)
+    return this.stripFit();   // (the boxes wider by their ⠿)
+  },
+  stripShow() { return this.stripFit(); },
+  // the strip laid out: a box per group of it (shown: its group shown), each at its place in the room (at: 0 .. 1 of the room left by
+  // it; a drag's place meanwhile), in the order of their middles, none over another (STRIP_GAP px between them: the later one pushed
+  // right, then back left at the right end); too narrow for them all: the find's rarer controls behind its ⋯ (tight), then rows of
+  // as many as fit, each at its place. The room as high as they are, in whole pixels (the sticky canvas lies right under the bar).
+  // Arranging: there even with no box (a line to drop a group on)
+  stripFit() {
+    const a = this.root.querySelector('.bar .axs'); if (!a) return this;
+    const room = a.querySelector('.axr'), drag = this.stripDrag, SG = this.stripGroups();
+    const boxes = [...room.querySelectorAll(':scope > .axb')].map(el => ({ el, n: el.dataset.tg, g: el.querySelector(':scope > .tg') }));
+    // (a group floating over the waves, the find on / or ctrl+F: its box no box, out of the strip's layout)
+    for (const x of boxes) { const fl = !!x.g && x.g.classList.contains('float'); x.el.classList.toggle('fl', fl);
+      x.el.hidden = !fl && (!x.g || x.g.hidden || x.g.classList.contains('off')); }
+    const on = boxes.filter(x => !x.el.hidden && !x.el.classList.contains('fl'));
+    const fl = boxes.some(x => x.el.classList.contains('fl'));   // (a floating group only: the strip no band, its group over the waves)
+    a.hidden = !on.length && !fl && !this.arranging; a.classList.toggle('empty', !on.length); a.classList.toggle('flonly', !on.length && fl && !this.arranging);
+    room.style.height = ''; if (!on.length || !room.clientWidth) return this;
+    const W = room.clientWidth, at = x => stripAt(drag && drag.at[x.n] != null ? drag.at[x.n] : this.toolAtOf(x.n) ?? 0);
+    a.classList.remove('tight');
+    const sum = () => on.reduce((t, x) => t + x.el.offsetWidth, 0) + STRIP_GAP * (on.length - 1);
+    if (sum() > W) a.classList.add('tight');
+    for (const x of on) { x.w = x.el.offsetWidth; x.h = x.el.offsetHeight; x.left = at(x) * Math.max(0, W - x.w); }
+    on.sort((p, q) => p.left - q.left || SG.indexOf(p.n) - SG.indexOf(q.n));   // (two at one place: in the strip's order)
+    const rows = []; let used = Infinity;   // as many a row as fit, in that order
+    for (const x of on) { if (used + STRIP_GAP + x.w > W) { rows.push([]); used = -STRIP_GAP; } rows[rows.length - 1].push(x); used += STRIP_GAP + x.w; }
+    let top = 0;
+    for (const r of rows) {
+      for (let i = 1; i < r.length; i++) r[i].left = Math.max(r[i].left, r[i - 1].left + r[i - 1].w + STRIP_GAP);
+      for (let i = r.length - 1; i >= 0; i--) r[i].left = Math.max(0, Math.min(r[i].left, (i < r.length - 1 ? r[i + 1].left - STRIP_GAP : W) - r[i].w));
+      for (const x of r) x.top = top;
+      top += Math.max(...r.map(x => Math.ceil(x.h))) + STRIP_GAP / 2;
+    }
+    for (const x of on) { x.el.style.left = Math.round(x.left) + 'px'; x.el.style.top = x.top + 'px'; }
+    room.style.height = (top - STRIP_GAP / 2) + 'px';
+    this.stripOrder = on.map(x => x.n);   // (left to right, row by row: the drag sees a swap by it)
     return this;
   },
-  // the strip shown (on, a group of it shown) or not, where it stands
-  stripShow() {
-    const a = this.root.querySelector('.bar .axs'); if (!a) return this;
-    const gs = [...a.querySelectorAll('.axb > .tg')].filter(g => !g.hidden && !g.classList.contains('off'));
-    a.hidden = !this.S.cursorStrip || !gs.length; a.style.setProperty('--axp', stripAt(this.S.cursorStripAt)); return this;
+  // the bar's lines: a group placed (toolAt) pushed to its place by a margin, the rest in the flow; a line that would wrap with the
+  // margins (a narrow bar) is in the flow alone
+  lineFit() {
+    if (this.arrDrag) return this;
+    const A = toolAts(this.S.toolAt);
+    for (const ln of this.root.querySelectorAll('.bar .tools > .tln:not(.newln)')) {
+      const gs = [...ln.children].filter(g => g.classList.contains('tg') && g.offsetParent && !g.classList.contains('float'));
+      for (const g of gs) g.style.marginLeft = '';
+      if (!gs.some(g => hasKey(A, g.dataset.tg)) || !ln.clientWidth) continue;
+      const top0 = gs[0].offsetTop; if (gs.some(g => g.offsetTop > top0 + 2)) continue;   // wrapped already: as it is
+      const L = ln.getBoundingClientRect().left, W = ln.clientWidth;
+      for (const g of gs) { if (!hasKey(A, g.dataset.tg)) continue;
+        const r = g.getBoundingClientRect(), want = A[g.dataset.tg] * Math.max(0, W - r.width), now = r.left - L;
+        if (want > now + 0.5) g.style.marginLeft = Math.round(want - now) + 'px'; }
+      if (gs.some(g => g.offsetTop > top0 + 2)) for (const g of gs) g.style.marginLeft = '';
+    }
+    return this;
   },
   // wavelens.bar changed (another viewer of this page, another page of this browser, another tab of VS Code): its arrangement,
   // short form and the tools' folding and groups again, nothing written; undo starts from it (no step of its own)
   barReload() {
     const L = this.loadLook(), base = settings(GLOBAL, this.M.cfg, this.opts);
-    for (const k of ['toolLayout', 'toolsCompact', 'toolsHidden', 'toolsFolded', 'cursorStrip', 'cursorStripAt']) {
+    for (const k of ['toolLayout', 'toolsCompact', 'toolsHidden', 'toolsFolded', 'stripGroups', 'toolAt', 'cursorStrip', 'cursorStripAt']) {
       if (k in L) this.local[k] = L[k]; else delete this.local[k]; }
+    this.S.stripGroups = 'stripGroups' in this.local ? this.local.stripGroups : stripNames(base.stripGroups);
+    this.S.toolAt = 'toolAt' in this.local ? this.local.toolAt : toolAts(base.toolAt);
     this.S.cursorStrip = 'cursorStrip' in this.local ? this.local.cursorStrip : base.cursorStrip !== false;
     this.S.cursorStripAt = 'cursorStripAt' in this.local ? this.local.cursorStripAt : stripAt(base.cursorStripAt);
     this.S.toolLayout = 'toolLayout' in this.local ? this.local.toolLayout : toolLines(base.toolLayout);
@@ -6580,12 +6687,26 @@ Object.assign(WaveView.prototype, {
   // focus in it stays), the floating find stays where it floats; the lines the arrangement added and left empty go
   arrangeTools() {
     const tools = this.root.querySelector('.bar .tools'); if (!tools) return this;
-    // the strip over the time axis: the cursor and the edges in it (in that order) out of the lines, or back in them below
-    const ax = this.root.querySelector('.bar .axs .axb');
-    if (ax) {
-      if (this.S.cursorStrip) for (const n of STRIP_GROUPS) { const g = [...tools.querySelectorAll(':scope > .tln > .tg')].find(x => x.dataset.tg === n);
-        if (g) { g.classList.remove('rs', 're', 'end'); ax.appendChild(g); } }
-      else for (const g of [...ax.querySelectorAll(':scope > .tg')]) tools.querySelector(':scope > .tln').appendChild(g);
+    // the strip over the time axis: a box for each of its groups (its ⠿ and the group), out of the lines; a group no more of it back
+    // in them below, its box gone (the find floating stays where it floats)
+    const room = this.root.querySelector('.bar .axs .axr'), SG = this.stripGroups();
+    if (room) {
+      for (const box of [...room.querySelectorAll(':scope > .axb')]) {
+        const g = box.querySelector(':scope > .tg'); if (SG.includes(box.dataset.tg) || (g && g.classList.contains('float'))) continue;
+        if (g) tools.querySelector(':scope > .tln').appendChild(g);
+        box.remove();
+      }
+      for (const n of SG) {
+        const g = [...tools.querySelectorAll(':scope > .tln > .tg')].find(x => x.dataset.tg === n); if (!g || g.classList.contains('float')) continue;
+        let box = [...room.querySelectorAll(':scope > .axb')].find(b => b.dataset.tg === n);
+        if (!box) { room.insertAdjacentHTML('beforeend', `<div class="axb" data-tg="${esc(n)}"><button type="button" class="axg" data-act="axgrip" ` +
+          `aria-label="move ${esc(n)}: drag, or ← → Home End"${this.stripOpen ? '' : ' hidden'}>⠿</button></div>`); box = room.lastElementChild;
+          // a box's width changes by itself (the edges' value field, the find's Unpaint, its ⠿): the strip laid out again, a frame later
+          if (!this.stripRO && G.ResizeObserver) this.stripRO = new ResizeObserver(() => { cancelAnimationFrame(this.stripRaf);
+            this.stripRaf = requestAnimationFrame(() => { if (this.root.isConnected) this.stripFit(); }); });
+          if (this.stripRO) this.stripRO.observe(box); }
+        g.classList.remove('rs', 're', 'end'); g.style.marginLeft = ''; box.appendChild(g);
+      }
     }
     const gs = [...tools.querySelectorAll(':scope > .tln > .tg')].filter(g => !g.classList.contains('float')), L = toolLines(this.S.toolLayout) || [];
     const named = L.flat(), by = new Map(gs.map(g => [g.dataset.tg, g]));
@@ -6684,6 +6805,7 @@ Object.assign(WaveView.prototype, {
       if (fold !== folded) { if (!fold) this.popClose(chips); chips.classList.toggle('fold', fold); }
       cn.hidden = !fold; if (fold) cn.textContent = `${n} filter${n === 1 ? '' : 's'} ▾`;
     }
+    this.lineFit(); this.stripFit();   // (their room changed with the bar)
     if (this.arrDlg) this.arrPlace();
   },
   // the bar's buttons by the viewer's state (disabled, pressed, the radix of the selection), when it changed (force: anyway)
@@ -6703,7 +6825,7 @@ Object.assign(WaveView.prototype, {
     for (const b of m.querySelectorAll('[data-act=theme]')) tick(b, b.dataset.v === th);
     for (const b of m.querySelectorAll('[data-act=compact]')) tick(b, b.dataset.v === (cp === true ? 'on' : cp === false ? 'off' : 'auto'));
     tick(m.querySelector('[data-act=scroll]'), this.S.maxHeight != null && this.S.maxHeight !== '');
-    tick(m.querySelector('[data-act=snap]'), this.S.cursorSnap > 0); tick(m.querySelector('[data-act=strip]'), !!this.S.cursorStrip);
+    tick(m.querySelector('[data-act=snap]'), this.S.cursorSnap > 0); tick(m.querySelector('[data-act=strip]'), this.stripGroups().length > 0);
     const H = new Set(toolNames(this.S.toolsHidden)), tl = m.querySelector('.subtg').nextElementSibling, gs = this.toolGroups();   // Tools in the bar ▸
     if (tl.dataset.g !== gs.join()) { tl.dataset.g = gs.join(); tl.innerHTML = mItem('tgall', 'Show all') + mItem('tgnone', 'Hide all') + '<hr>' +
       gs.map(g => mTick('tg', esc(g.charAt(0).toUpperCase() + g.slice(1)), ` data-tg="${esc(g)}"`)).join(''); }
@@ -6887,7 +7009,7 @@ Object.assign(WaveView.prototype, {
       for (const x of tools.querySelectorAll('.arr, .tln.newln')) x.remove();
       if (this.arrDlg) { this.arrDlg.remove(); this.arrDlg = null; }
       if (this.toolsPeek) { this.toolsPeek = false; this.layoutShow(); }
-      this.arrAc.abort(); this.barFit(); return this;
+      this.arrAc.abort(); this.barFit(); this.stripFit(); return this;
     }
     if (!this.arranging) {
       this.popClose(); this.closeMenu(); this.arranging = true; bar.classList.add('arranging');
@@ -6901,12 +7023,15 @@ Object.assign(WaveView.prototype, {
       // nothing of the groups works meanwhile: a click (a key's too) on one of their controls is swallowed before it gets there
       tools.addEventListener('click', e => { if (e.target.closest('.tg')) { e.preventDefault(); e.stopPropagation(); } }, { capture: true, ...own });
       tools.addEventListener('pointerdown', e => this.arrDown(e), own);
+      const axs = bar.querySelector('.axs');   // the strip over the time axis: a line too (shown with no box: a place to drop a group)
+      if (axs) { axs.addEventListener('click', e => { if (e.target.closest('.tg')) { e.preventDefault(); e.stopPropagation(); } }, { capture: true, ...own });
+        axs.addEventListener('pointerdown', e => this.arrDown(e), own); }
       // Esc: a drag cancelled, else the mode off (before the viewer's Esc: the window and the search stay)
       G.addEventListener('keydown', e => {
         if (e.key !== 'Escape' || !this.arranging || (this.arrDlg && this.arrDlg.contains(e.target)) || (!this.arrDrag && (this.pops || []).length)) return;
         e.preventDefault(); e.stopPropagation(); if (this.arrDrag) this.arrCancel(); else this.arrange(false);
       }, { capture: true, ...own });
-      this.arrMark();
+      this.arrMark(); this.stripFit();
     }
     if (kbd) this.arrDialog();
     return this;
@@ -6920,9 +7045,10 @@ Object.assign(WaveView.prototype, {
     const nl = bar.querySelector('.tln.newln'); if (nl) nl.hidden = this.barLines().length >= TOOL_LINES_MAX;
   },
   arrAct(k, e = {}) {
-    if (k === 'full') { this.setToolLayout(null); this.setToolsCompact('auto'); }
+    if (k === 'full') { this.setToolLayout(null); this.setStripGroups(null); this.setToolAt(null); this.setToolsCompact('auto'); }
     else if (k === 'compact') this.setToolsCompact(true);
-    else if (k === 'mine') { const m = barKept().mine; if (m) { this.setToolLayout(m); this.setToolsCompact('auto'); } }
+    else if (k === 'mine') { const B = barKept(); if (B.mine) { this.setToolLayout(B.mine);
+      if (B.msg) this.setStripGroups(B.msg); if (B.mat) this.setToolAt(B.mat); this.setToolsCompact('auto'); } }
     else if (k === 'reset') this.barReset();
     else if (k === 'keys') this.arrDialog();
     else if (k === 'done') { this.arrange(false); const g = this.root.querySelector('.bar .pgear'); if (g && e.detail === 0) g.focus({ preventScroll: true }); }
@@ -6933,7 +7059,7 @@ Object.assign(WaveView.prototype, {
   barReset() {
     try { localStorage.removeItem(BARKEY); } catch (e) { /* none */ }
     this.setToolLayout(undefined, { only: true }); this.setToolsCompact(null, { only: true }); this.setToolsHidden(null);
-    this.setCursorStrip(null, { only: true }); this.setStripAt(null, { only: true });
+    this.setStripGroups(null, { only: true }); this.setToolAt(null, { only: true }); this.setCursorStrip(null, { only: true });
     for (const w of VIEWS) if (w !== this && w.root.isConnected) w.barReload();
     this.toast('the bar as the settings have it'); return this;
   },
@@ -6941,38 +7067,66 @@ Object.assign(WaveView.prototype, {
   arrDown(e) {
     const tl = e.button === 0 && e.target.closest('.tg > .tl'); if (!tl || this.arrDrag) return;
     e.preventDefault(); const g = tl.parentElement; tl.setPointerCapture(e.pointerId);
-    const d = this.arrDrag = { g, tl, x: e.clientX, y: e.clientY, on: false, id: e.pointerId, from: [g.parentElement, g.nextElementSibling] };
+    const d = this.arrDrag = { g, tl, x: e.clientX, y: e.clientY, on: false, id: e.pointerId, grab: e.clientX - g.getBoundingClientRect().left };
     const move = ev => {
       if (!d.on && Math.hypot(ev.clientX - d.x, ev.clientY - d.y) < ARR_PX) return;
-      if (!d.on) { d.on = true; g.classList.add('drag'); d.mark = document.createElement('span'); d.mark.className = 'arm'; }
+      if (!d.on) { d.on = true; g.classList.add('drag'); d.mark = document.createElement('span'); d.mark.className = 'arx';
+        this.root.querySelector('.bar').append(d.mark); }
       this.arrOver(ev.clientX, ev.clientY);
     };
-    const up = () => { end(); if (d.on) this.arrDrop(); else this.arrDrag = null; };
+    const up = () => { end(); if (d.on && d.to) this.arrDrop(); else this.arrCancel(); };
     const end = () => { for (const [t, f] of [['pointermove', move], ['pointerup', up], ['pointercancel', cancel]]) tl.removeEventListener(t, f); };
     const cancel = () => { end(); this.arrCancel(); };
     d.end = end;
     tl.addEventListener('pointermove', move); tl.addEventListener('pointerup', up); tl.addEventListener('pointercancel', cancel);
   },
-  // where the group would land at (x, y): the line under the pointer (or the new line), before the first group of its visual row
-  // whose middle is right of x, else after the last one of that row
+  // where the group would land at (x, y): the line under the pointer (or the new line, or the strip over the time axis). Over a group
+  // of it: before it or after it (by its middle), in the flow; in the free room of the line (right of its groups, or between two
+  // apart): placed there, its left on the grid (TOOL_GRID px from the line's left), at the place its left gives (0 .. 1 of the room);
+  // in the strip: always placed. The accent bar shows where its left edge goes
   arrOver(x, y) {
-    const d = this.arrDrag, tools = this.root.querySelector('.bar .tools');
+    const d = this.arrDrag, bar = this.root.querySelector('.bar'), tools = bar.querySelector('.tools'), room = bar.querySelector('.axs:not([hidden]) .axr');
     const lines = [...tools.querySelectorAll(':scope > .tln')].filter(l => !l.hidden && l.getClientRects().length);
-    const ln = lines.find(l => { const r = l.getBoundingClientRect(); return y >= r.top - 3 && y <= r.bottom + 3; }) ||
-      (y < lines[0].getBoundingClientRect().top ? lines[0] : lines[lines.length - 1]);
-    const gs = [...ln.children].filter(c => c.classList.contains('tg') && c !== d.g && c.getClientRects().length);
+    if (room) lines.push(room);
+    const near = l => { const r = l.getBoundingClientRect(); return Math.max(r.top - y, y - r.bottom, 0); };
+    const ln = lines.reduce((b, l) => (near(l) < near(b) ? l : b), lines[0]);
+    const R = ln.getBoundingClientRect(), w = d.g.getBoundingClientRect().width, strip = ln === room;
+    const gs = strip ? [] : [...ln.children].filter(c => c.classList.contains('tg') && c !== d.g && c.getClientRects().length);
     const row = gs.filter(c => { const r = c.getBoundingClientRect(); return y >= r.top - 3 && y <= r.bottom + 3; });
-    const pick = (row.length ? row : gs).find(c => { const r = c.getBoundingClientRect(); return x < r.left + r.width / 2; });
-    const after = !pick && row.length ? row[row.length - 1].nextElementSibling : null;
-    const before = pick || (after && after !== d.mark ? after : null);
-    if (d.mark.parentElement !== ln || d.mark.nextElementSibling !== before) ln.insertBefore(d.mark, before);
-    d.to = [ln, before];
+    const over = row.find(c => { const r = c.getBoundingClientRect(); return x >= r.left - 2 && x <= r.right + 2; });
+    let left, at = null, before;
+    if (over) {   // in the flow: before it or after it
+      const r = over.getBoundingClientRect(), aft = x > r.left + r.width / 2;
+      before = aft ? over.nextElementSibling : over; left = aft ? r.right + 4 : r.left - 4;
+    } else {      // placed: on the grid, before the first group of the row right of it
+      const free = Math.max(0, R.width - w);
+      left = Math.min(free, Math.max(0, Math.round((x - d.grab - R.left) / TOOL_GRID) * TOOL_GRID));
+      at = free ? Math.round(left / free * 1000) / 1000 : 0;
+      before = strip ? null : (row.length ? row : gs).find(c => c.getBoundingClientRect().left > R.left + left) || null;
+      if (before && before.classList.contains('arx')) before = null;
+      d.px = left; left += R.left;
+    }
+    const top = row.length ? Math.min(...row.map(c => c.getBoundingClientRect().top)) : R.top;
+    const bot = row.length ? Math.max(...row.map(c => c.getBoundingClientRect().bottom)) : Math.max(R.bottom, R.top + 20);
+    Object.assign(d.mark.style, { left: Math.round(left - 1) + 'px', top: Math.round(top) + 'px', height: Math.round(bot - top) + 'px' });
+    d.mark.classList.toggle('placed', at != null);
+    d.to = { ln, before, at, strip };
   },
+  // the drop: the group in its line (DOM, then the arrangement of the lines), in the strip or out of it, placed or in the flow; one step
   arrDrop() {
-    const d = this.arrDrag; this.arrDrag = null; d.g.classList.remove('drag');
-    if (d.mark && d.mark.parentElement) { d.mark.parentElement.insertBefore(d.g, d.mark); d.mark.remove(); }
-    this.setToolLayout(this.barLines(), { mine: true }); this.arrMark();
-    if (this.arrDlg) this.arrRender();
+    const d = this.arrDrag; this.arrDrag = null; d.g.classList.remove('drag'); if (d.mark) d.mark.remove();
+    const n = d.g.dataset.tg, to = d.to, A = toolAts(this.S.toolAt), SG = this.stripGroups();
+    if (to.at == null) delete A[n]; else A[n] = to.at;
+    if (to.strip) { if (!SG.includes(n)) SG.push(n); }
+    else { const i = SG.indexOf(n); if (i >= 0) SG.splice(i, 1); to.ln.insertBefore(d.g, to.before && to.before.parentElement === to.ln ? to.before : null); }
+    const L = this.barLines();   // (the lines as the drop left them, before anything arranges the groups again)
+    this.setToolLayout(L, { mine: true }); this.setStripGroups(SG, { mine: true }); this.setToolAt(A, { mine: true });
+    // placed: its left on the grid as the mark showed it, whatever width it has there (a box of the strip, a group of a line)
+    const el = to.strip ? [...this.root.querySelectorAll('.bar .axs .axb')].find(b => b.dataset.tg === n) : d.g;
+    const box = to.strip ? this.root.querySelector('.bar .axs .axr') : d.g.parentElement;
+    if (to.at != null && el && box) { const f = box.clientWidth - el.offsetWidth, at = f > 0 ? Math.min(1, Math.max(0, d.px / f)) : 0;
+      if (Math.abs(at - A[n]) > 0.0005) { A[n] = at; this.setToolAt(A, { mine: true }); } }
+    this.arrMark(); if (this.arrDlg) this.arrRender();
   },
   arrCancel() {
     const d = this.arrDrag; if (!d) return this; this.arrDrag = null; if (d.end) d.end();
@@ -6995,15 +7149,21 @@ Object.assign(WaveView.prototype, {
     const f = this.arrDlg.querySelector('.ari[tabindex="0"]') || this.arrDlg.querySelector('.ari'); if (f) f.focus({ preventScroll: true });
     return this;
   },
+  // the strip's groups in the dialog: left to right as it shows them
+  arrStrip() {
+    const SG = this.stripGroups(), o = this.stripOrder || [];
+    return SG.slice().sort((a, b) => (o.indexOf(a) + 1 || 99) - (o.indexOf(b) + 1 || 99));
+  },
   arrRender() {
-    const el = this.arrDlg, H = new Set(toolNames(this.S.toolsHidden)), lines = this.barLines();
+    const el = this.arrDlg, H = new Set(toolNames(this.S.toolsHidden)), lines = [...this.barLines(), this.arrStrip()], si = lines.length - 1;
     const name = g => esc(g === 'assertions' ? 'SVA (assertions)' : g);
-    const f = this.arrFocus && lines.flat().includes(this.arrFocus) ? this.arrFocus : lines[0][0];
+    const f = this.arrFocus && lines.flat().includes(this.arrFocus) ? this.arrFocus : lines.flat()[0];
     const row = g => `<div class="ari" role="checkbox" aria-checked="${!H.has(g)}" tabindex="${g === f ? 0 : -1}" data-tg="${esc(g)}"><span class="ck">${
       H.has(g) ? '' : '✓'}</span>${name(g)}</div>`;
     el.innerHTML = '<div class="arht">Arrange the bar</div><div class="arhint">↑ ↓ ← → a group · alt+↑ ↓ within its line · alt+← → to the line before ' +
-      '/ after (past the last: a new one) · Space: shown or not · Esc: done</div>' +
-      lines.map((l, i) => `<div class="arl" role="group" aria-label="line ${i + 1}"><div class="arln">line ${i + 1}</div>${l.map(row).join('')}</div>`)
+      '/ after (past the last: a new one, then the strip over the time axis) · Space: shown or not · Esc: done</div>' +
+      lines.map((l, i) => { const t = i === si ? 'over the time axis' : `line ${i + 1}`;
+        return `<div class="arl" role="group" aria-label="${t}"><div class="arln">${t}</div>${l.map(row).join('') || '<div class="are">—</div>'}</div>`; })
         .join('') +
       '<div class="arlive" aria-live="polite"></div><div class="arb">' + ARR_PRESETS +
       '<button type="button" data-ar="reset">Reset</button><button type="button" data-ar="done">Done</button></div>';
@@ -7030,7 +7190,8 @@ Object.assign(WaveView.prototype, {
     if (k === 'Escape') { e.preventDefault(); e.stopPropagation(); this.arrange(false);
       const g = this.root.querySelector('.bar .pgear'); if (g) g.focus({ preventScroll: true }); return; }
     if (!row) return;
-    const lines = this.barLines(), g = row.dataset.tg, li = lines.findIndex(l => l.includes(g)), gi = lines[li].indexOf(g);
+    const bl = this.barLines(), lines = [...bl, this.arrStrip()], si = lines.length - 1, g = row.dataset.tg;
+    const li = lines.findIndex(l => l.includes(g)), gi = lines[li].indexOf(g);
     const say = t => { this.arrSaid = t; const lv = this.arrDlg.querySelector('.arlive'); if (lv) lv.textContent = t; };
     if (k === ' ' || k === 'Spacebar') { e.preventDefault(); this.arrFocus = g; this.arrToggle(g); return; }
     if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(k)) return;
@@ -7043,7 +7204,19 @@ Object.assign(WaveView.prototype, {
       this.arrFocus = to; for (const r of this.arrDlg.querySelectorAll('.ari')) r.tabIndex = r.dataset.tg === to ? 0 : -1;
       this.arrFocusRow(); return;
     }
-    const L = lines.map(l => l.slice());
+    const L = bl.map(l => l.slice()), A = toolAts(this.S.toolAt), SG = this.stripGroups(), done = t => { this.arrFocus = g; this.arrSaid = t;
+      this.arrRender(); this.arrFocusRow(); };
+    if (li === si) {   // in the strip: ↑ ↓ trade places with the box beside it; ← to the last line, in its flow
+      const S = lines[si];
+      if (k === 'ArrowUp' || k === 'ArrowDown') { const j = gi + (k === 'ArrowUp' ? -1 : 1), o = S[j];
+        if (!o) { say(`${g}: already at the ${j < 0 ? 'start' : 'end'} of the strip`); return; }
+        const ag = this.toolAtOf(g), ao = this.toolAtOf(o); A[g] = ao; A[o] = ag; if (ag === ao) A[k === 'ArrowUp' ? g : o] = Math.max(0, ag - 0.001);
+        this.setToolAt(A, { mine: true }); this.stripFit(); done(`${g} moved to place ${this.arrStrip().indexOf(g) + 1} of the strip`); return; }
+      if (k === 'ArrowRight') { say(`${g}: already in the strip`); return; }
+      SG.splice(SG.indexOf(g), 1); delete A[g]; if (!L.length) L.push([]); L[L.length - 1].push(g);
+      this.setStripGroups(SG, { mine: true }); this.setToolAt(A, { mine: true }); this.setToolLayout(L, { mine: true });
+      done(`${g} moved to line ${L.length}, out of the strip`); return;
+    }
     if (k === 'ArrowUp' || k === 'ArrowDown') {
       const j = gi + (k === 'ArrowUp' ? -1 : 1);
       if (j < 0 || j >= L[li].length) { say(`${g}: already at the ${j < 0 ? 'start' : 'end'} of line ${li + 1}`); return; }
@@ -7051,40 +7224,64 @@ Object.assign(WaveView.prototype, {
     } else {
       const lj = li + (k === 'ArrowLeft' ? -1 : 1);
       if (lj < 0) { say(`${g}: already on the first line`); return; }
-      if (lj >= L.length && (L.length >= TOOL_LINES_MAX || L[li].length === 1)) { say(`${g}: already on the last line`); return; }
+      if (lj >= L.length && (L.length >= TOOL_LINES_MAX || L[li].length === 1)) {   // no new line: into the strip
+        L[li].splice(gi, 1); SG.push(g); delete A[g];
+        this.setStripGroups(SG, { mine: true }); this.setToolAt(A, { mine: true }); this.setToolLayout(L.filter(l => l.length), { mine: true });
+        done(`${g} moved to the strip over the time axis`); return;
+      }
       L[li].splice(gi, 1); if (lj >= L.length) L.push([]);
       L[lj].splice(Math.min(gi, L[lj].length), 0, g);
     }
-    const N = L.filter(l => l.length); this.setToolLayout(N, { mine: true }); this.arrFocus = g;
+    const N = L.filter(l => l.length); this.setToolLayout(N, { mine: true });
     const nl = this.barLines(), nli = nl.findIndex(l => l.includes(g));
-    this.arrSaid = `${g} moved to line ${nli + 1}, place ${nl[nli].indexOf(g) + 1}`; this.arrRender(); this.arrFocusRow();
+    done(`${g} moved to line ${nli + 1}, place ${nl[nli].indexOf(g) + 1}`);
   },
-  // the strip over the time axis, its 🔒 open: ⠿ dragged along the waves (snapping to the left, the middle, the right within
-  // STRIP_SNAP px), put where it is let go and kept (setStripAt); Esc during it: back as it was
-  stripDown(e) {
+  // the strip over the time axis, its 🔒 open: a box's ⠿ dragged along its row (snapping to the grid, and to the left, the middle,
+  // the right of the room and the names' edge within STRIP_SNAP px), put where it is let go and kept (toolAt). Its front edge past
+  // the middle of another box of the row (a wide box at the end of the room cannot get its middle there): the order of the row
+  // changes, the boxes it passed each go to the left edge of the place one over (the places of the row stay; the first passed
+  // goes where this one started); Esc during it: back as it was
+  stripDown(e, g) {
     if (e.button !== 0 || !this.stripOpen) return;
-    const g = e.currentTarget, ax = g.closest('.axs'), w = ax.querySelector('.axw'), b = w.querySelector('.axb');
+    const ax = g.closest('.axs'), room = ax.querySelector('.axr'), b = g.closest('.axb'), n = b.dataset.tg;
     e.preventDefault(); g.focus({ preventScroll: true }); try { g.setPointerCapture(e.pointerId); } catch (err) { /* a synthetic event */ }
-    const free = Math.max(0, w.clientWidth - b.offsetWidth), x0 = e.clientX, from = stripAt(this.S.cursorStripAt) * free;
-    let p = stripAt(this.S.cursorStripAt); ax.classList.add('drag');
+    const W = room.clientWidth, w = b.offsetWidth, free = Math.max(0, W - w), x0 = e.clientX, from = b.offsetLeft, top = b.offsetTop;
+    const nx = this.namesEl.getBoundingClientRect().right - room.getBoundingClientRect().left;   // the names' edge in the room
+    const snaps = [0, free / 2, free, nx, nx - w].filter(t => t >= 0 && t <= free);
+    const row = [...room.querySelectorAll(':scope > .axb')].filter(o => !o.hidden && Math.abs(o.offsetTop - top) < 2)
+      .map(o => ({ n: o.dataset.tg, left: o.offsetLeft, w: o.offsetWidth, mid: o.offsetLeft + o.offsetWidth / 2 })).sort((p, q) => p.left - q.left);
+    const slots = row.map(o => o.left), others = row.filter(o => o.n !== n);   // (the places of the row: the lefts its boxes have now)
+    const drag = this.stripDrag = { at: { [n]: this.toolAtOf(n) ?? 0 } }; ax.classList.add('drag');
     const ac = new AbortController(), own = { signal: ac.signal };
-    const end = keep => { ac.abort(); ax.classList.remove('drag'); if (keep) this.setStripAt(p); else this.stripShow(); };
+    const end = keep => {
+      ac.abort(); ax.classList.remove('drag'); this.stripDrag = null;
+      if (keep) { const A = toolAts(this.S.toolAt); for (const [k, v] of Object.entries(drag.at)) if (v != null) A[k] = stripAt(v); this.setToolAt(A); }
+      else this.stripFit();
+    };
     g.addEventListener('pointermove', ev => {
-      let x = Math.min(free, Math.max(0, from + ev.clientX - x0)); const s = [0, free / 2, free].find(t => Math.abs(x - t) <= STRIP_SNAP);
-      if (s != null) x = s;
-      p = free ? x / free : 0; ax.style.setProperty('--axp', p);
+      let x = Math.min(free, Math.max(0, from + ev.clientX - x0));
+      const s = snaps.find(t => Math.abs(x - t) <= STRIP_SNAP); x = s != null ? s : Math.min(free, Math.round(x / TOOL_GRID) * TOOL_GRID);
+      drag.at[n] = free ? Math.round(x / free * 1000) / 1000 : 0;
+      // the new order of the row: the boxes it passed move one place towards where it started, each to the place of that slot
+      const passed = others.filter(o => (o.left < from ? x < o.mid : x + w > o.mid));
+      const lefts = others.filter(o => o.left < from && !passed.includes(o)), rights = others.filter(o => o.left > from && !passed.includes(o));
+      const pl = others.filter(o => o.left < from && passed.includes(o)), pr = others.filter(o => o.left > from && passed.includes(o));
+      const now = [...lefts, ...pr, { n }, ...pl, ...rights];
+      now.forEach((o, k) => { if (o.n === n) return; const f = Math.max(0, W - o.w);
+        drag.at[o.n] = row[k].n === o.n ? null : f ? Math.min(1, Math.round(slots[k] / f * 1000) / 1000) : 0; });
+      this.stripFit();
     }, own);
     g.addEventListener('pointerup', () => end(true), own); g.addEventListener('pointercancel', () => end(false), own);
     G.addEventListener('keydown', ev => { if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); end(false); } }, { capture: true, ...own });
   },
-  // ⠿ by the keys: ← → a twentieth of the way (shift: a quarter; the middle on the way a stop), Home End the ends
-  stripKey(e) {
-    const p = stripAt(this.S.cursorStripAt), d = e.shiftKey ? 0.25 : 0.05;
+  // a box's ⠿ by the keys: ← → a twentieth of the way (shift: a quarter; the middle on the way a stop), Home End the ends
+  stripKey(e, g) {
+    const n = g.closest('.axb').dataset.tg, p = this.toolAtOf(n) ?? 0, d = e.shiftKey ? 0.25 : 0.05;
     let to = e.key === 'Home' ? 0 : e.key === 'End' ? 1 : e.key === 'ArrowLeft' ? p - d : e.key === 'ArrowRight' ? p + d : null;
     if (to == null) return;
     e.preventDefault(); e.stopPropagation();
     if (e.key.startsWith('Arrow') && ((p < 0.5 && to > 0.5) || (p > 0.5 && to < 0.5))) to = 0.5;
-    this.setStripAt(Math.round(to * 100) / 100);
+    this.placeTool(n, Math.round(to * 100) / 100);
   },
 });
 /* ======================== src/warp.js ======================== */
@@ -7885,29 +8082,38 @@ command('style', 'name', `the edge style: ${Object.keys(EDGES).join(' ')} (null:
   if (a.name != null && !hasKey(EDGES, a.name)) fail(`name: one of ${Object.keys(EDGES).join(' ')}`);
   v.setStyle(a.name); return { style: v.S.style };
 });
-command('layout', 'scroll? height? tools? compact? bar? strip? stripAt?', 'where the rows scroll: window (in the viewer, height: "80vh", 600) or ' +
-  'page (with the page, the bar sticking to the top); tools: fold or open (the bar\'s tools to its title line); compact: the bar\'s short form, auto ' +
-  '(a bar narrower than 900 px), true or false; bar: its groups arranged, lines of their labels ([["find", "cursor"], ["list"]]; null: the default ' +
-  'order); strip: the cursor and the edges in a strip over the time axis (true) or in the bar (false); stripAt: where the strip stands, 0 (left) .. ' +
-  '1 (right), "left", "center", "right"',
+command('layout', 'scroll? height? tools? compact? bar? stripGroups? at? strip? stripAt?', 'where the rows scroll: window (in the viewer, ' +
+  'height: "80vh", 600) or page (with the page, the bar sticking to the top); tools: fold or open (the bar\'s tools to its title line); compact: ' +
+  'the bar\'s short form, auto (a bar narrower than 900 px), true or false; bar: its groups arranged, lines of their labels ([["find", "cursor"], ' +
+  '["list"]]; null: the default order); stripGroups: the groups in the strip over the time axis (["find", "cursor"]; []: no strip; null: the ' +
+  'default); at: groups placed in their line or the strip, {"marks": 0.5} (0 left .. 1 right, "left", "center", "right"; null: in the flow); ' +
+  'strip, stripAt: 0.53\'s, the cursor and the edges in the strip or not, their place',
   (v, a) => {
   if (a.scroll != null && !['window', 'page'].includes(a.scroll)) fail('scroll: window or page');
   if (a.tools != null && !['fold', 'open'].includes(a.tools)) fail('tools: fold or open');
   if (a.compact != null && ![true, false, 'auto'].includes(a.compact)) fail('compact: auto, true or false');
   if (a.bar != null && !toolLines(a.bar)) fail('bar: lines of group labels, [["find", "cursor"], ["list"]], or null');
   if (a.strip != null && typeof a.strip !== 'boolean') fail('strip: true or false');
-  if (a.stripAt != null && !(typeof a.stripAt === 'number' ? a.stripAt >= 0 && a.stripAt <= 1 : hasKey(STRIP_AT, String(a.stripAt).toLowerCase()))) {
-    fail('stripAt: 0 .. 1, "left", "center" or "right"'); }
+  const placeOk = p => (typeof p === 'number' ? p >= 0 && p <= 1 : hasKey(STRIP_AT, String(p).toLowerCase()));
+  if (a.stripAt != null && !placeOk(a.stripAt)) fail('stripAt: 0 .. 1, "left", "center" or "right"');
+  if (a.stripGroups != null && !Array.isArray(a.stripGroups)) fail('stripGroups: a list of group labels, ["find", "cursor"], or null');
+  if (a.at != null && (typeof a.at !== 'object' || Array.isArray(a.at) || Object.values(a.at).some(p => p != null && !placeOk(p)))) {
+    fail('at: {"group": 0 .. 1, "left", "center", "right" or null}'); }
   const hOk = h => (typeof h === 'number' ? h > 0 : /^\s*[\d.]+\s*(px|vh|em|rem|%)?\s*$/.test(h));
   if (a.height != null && !hOk(a.height)) fail('height: 600 (px) or "80vh"');
   if (a.scroll != null || a.height != null) v.setScroll(a.scroll || 'window', a.height ?? undefined);
   if (a.tools != null) v.setTools(a.tools === 'fold');
   if (a.compact != null) v.setToolsCompact(a.compact, { only: true });
   if ('bar' in a) v.setToolLayout(a.bar ?? null, { only: true });   // (this viewer's: the browser's arrangement stays the user's)
+  if ('stripGroups' in a) v.setStripGroups(a.stripGroups ?? null, { only: true });
+  if (a.at != null) { const A = toolAts(v.S.toolAt);
+    for (const [k, p] of Object.entries(a.at)) { const n = stripNames([k])[0]; if (!n) continue; if (p == null) delete A[n]; else A[n] = stripAt(p); }
+    v.setToolAt(A, { only: true }); }
   if (a.strip != null) v.setCursorStrip(a.strip, { only: true });
   if (a.stripAt != null) v.setStripAt(a.stripAt, { only: true });
   return { scroll: v.S.maxHeight != null && v.S.maxHeight !== '' ? 'window' : 'page', height: v.S.maxHeight || null, tools: v.S.toolsFolded ? 'fold' : 'open',
-    compact: compactOf(v.S.toolsCompact), bar: toolLines(v.S.toolLayout), strip: !!v.S.cursorStrip, stripAt: stripAt(v.S.cursorStripAt) };
+    compact: compactOf(v.S.toolsCompact), bar: toolLines(v.S.toolLayout), stripGroups: stripNames(v.S.stripGroups), at: toolAts(v.S.toolAt),
+    strip: v.S.cursorStrip !== false, stripAt: toolAts(v.S.toolAt).cursor ?? stripAt(v.S.cursorStripAt) };
 });
 command('find', 'query case? word? regex? highlight? open? mask?', 'the find field: rows by a fuzzy query ("" ends it); its options as the bar\'s ' +
   'buttons',
@@ -8037,7 +8243,8 @@ Object.assign(WaveView.prototype, {
       onlyGrp: this.onlyGrp ?? null,   // the panel's "Your groups whole" with no Only set too (onlyState is null then)
       config: Object.assign({ style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded,
         toolsHidden: toolNames(this.S.toolsHidden), toolsCompact: compactOf(this.S.toolsCompact), toolLayout: toolLines(this.S.toolLayout), sort: this.sort,
-        sortIgnore: [...this.sortIgnore], cursorStrip: !!this.S.cursorStrip, cursorStripAt: stripAt(this.S.cursorStripAt) },
+        sortIgnore: [...this.sortIgnore], stripGroups: stripNames(this.S.stripGroups), toolAt: toolAts(this.S.toolAt),
+        cursorStrip: this.S.cursorStrip !== false },
         this.gapOpt(true), this.cycOpt()),
       hl: this.hlOrder().map(r => [r.full, this.picks.get(r)]), ext: this.undoExt() });
   },
@@ -8234,7 +8441,8 @@ Object.assign(WaveView.prototype, {
 // is applied every time, as the page's own settings are.
 const SHARE = { on: false };   // markers being shared (shareMarks): the others do not share them back
 const KEPT = ['dups', 'deltas', 'bookmarks', 'arrows', 'markers', 'spans', 'groups', 'paint', 'radix', 'analog', 'hidden', 'bits'];
-const KEPT_CFG = ['style', 'maxHeight', 'toolsFolded', 'toolsHidden', 'toolsCompact', 'toolLayout', 'cursorStrip', 'cursorStripAt', ...GAP_KEYS, ...CYC_KEYS];
+const KEPT_CFG = ['style', 'maxHeight', 'toolsFolded', 'toolsHidden', 'toolsCompact', 'toolLayout', 'stripGroups', 'toolAt', 'cursorStrip',
+  'cursorStripAt', ...GAP_KEYS, ...CYC_KEYS];
 // what undo takes back: the above and Only (not kept in this browser: a page opened again applies a revision's Only anew)
 const UNDO_KEYS = [...KEPT, 'only', 'fsm'];
 const UNDO_N = 100;   // the steps undo keeps
@@ -10978,7 +11186,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.53',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.54',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,

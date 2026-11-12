@@ -77,16 +77,21 @@ window.WAVELENS_CONFIG = {
                                 //   (the bar sticks to the top while its rows go by); ⚙ Scroll in the window switches on the fly
   toolsFolded: false,           // the bar's tools folded to its title line (▴ / ▾ in the bar)
   toolsHidden: [],              // the bar's tool groups left out: cursor, view, edges, marks, go to, find, expression, assertions, list,
-                                //   signal, file, compare (⚙ Tools in the bar, the right button on the bar; state, dump: file)
+                                //   prefixes, signal, file, compare (⚙ Tools in the bar, the right button on the bar; state, dump: file)
   toolsCompact: 'auto',         // the bar's short form (no group labels, the rarer controls behind each group's ⋯): 'auto' (a bar
                                 //   narrower than 900 px), true / false: always / never (⚙ Short form)
   toolLayout: null,             // the bar's groups arranged: lines of their labels in order, e.g. [["find", "cursor", "view"],
                                 //   ["edges", "marks"], ["list", "signal", "file"]] (a group not named: on its own line); null: the
                                 //   default order. ⚙ Arrange the bar… makes one by dragging the groups (kept in this browser)
-  cursorStrip: true,            // the cursor (its time, unit, span) and the edges in a slim strip over the time axis, out of the
-                                //   bar's lines (seen with the tools folded too); false: in the bar as any group (⚙ Cursor over the axis)
-  cursorStripAt: 0,             // where the strip stands over the waves: 0 (left) .. 1 (right), or 'left' | 'center' | 'right';
-                                //   its 🔒 unlocked, ⠿ drags it (it snaps to the edges and the middle). Both kept in this browser
+  stripGroups: ['find', 'marks', 'cursor', 'edges'],   // the bar's groups in the strip over the time axis, a band of its own under
+                                //   its lines (seen with the tools folded too), each a box of its own; []: no strip (⚙ Strip over the
+                                //   axis). ⚙ Arrange the bar… drags a group into it or out of it
+  toolAt: null,                 // groups placed in their line or in the strip: {"marks": 0.5}, 0 (left) .. 1 (right) of the room the
+                                //   line leaves them, or 'left' | 'center' | 'right'; a group not named: in the flow of its line (in the
+                                //   strip: find, marks at the left, cursor, edges at the right). Arrange the bar… places one where it
+                                //   is dropped (a grid of 16 px); the strip's 🔒 unlocked, a box's ⠿ drags it. Kept in this browser
+  cursorStrip: true,            // false: the cursor and the edges not in the strip (as stripGroups without them)
+  cursorStripAt: 1,             // the place of the cursor and the edges in the strip when toolAt has none (0.53's)
   // the clock cycles in a band under the time axis (the right button's Cycles ▸; kept in the browser, the saved state):
   cycles: false,                //   the band of cycle numbers on; the cursor's cycle in the title, Δ of the second cursor in them
   cycleClock: null,             //   the clock counted (a full path or a name); null: the clock found (a 1-bit *clk* / *clock*)

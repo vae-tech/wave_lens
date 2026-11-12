@@ -133,6 +133,7 @@
 .wv .bar button[data-act="sort"] { min-width: 8.5em; }
 .wv .bar input.pfx { font: inherit; font-family: var(--font-mono); font-size: 11.5px; width: 9ch; max-width: 24ch; padding: 2px 6px; border: 1px solid var(--line); border-left-style: dashed; background: var(--panel); color: var(--fg); }
 .wv .bar input.pfx:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.wv .bar .tg[data-tg=prefixes] input.pfx { border-left-style: solid; border-radius: 4px; }   /* a group of its own: a whole field */
 .wv .bar .tg.find .fx { display: none; }
 .wv.wv-drop { outline: 2px dashed var(--accent); outline-offset: -2px; }   /* a dump dragged over the viewer */
 /* ctrl+F with the bar off the screen: the find group floats over the waves (focusFind) */
@@ -734,42 +735,62 @@
 /* arranging the bar (⚙ Arrange the bar…, arrange.js): only under .arranging, so at rest no pixel changes. Groups outlined, a ⠿ on
    their labels (the handle; touch-action none, or the browser takes the gesture), their controls asleep; the group dragged pale,
    an accent bar where it lands, a last line to drop on for a new one; the strip; the keyboard's dialog under the bar */
-.wv .bar.arranging .tools .tg { outline: 1px dashed var(--muted); outline-offset: 2px; border-radius: 3px; }
-.wv .bar.arranging .tools .tg > :not(.tl) { pointer-events: none; }
-.wv .bar.arranging .tools .tg > .tl { cursor: grab; touch-action: none; user-select: none; color: var(--fg); }
-.wv .bar.arranging .tools .tg > .tl::before { content: '⠿ '; color: var(--accent); }
-.wv .bar.arranging.short .tools .tg > .tl { display: inline-block; }   /* the short form has no labels: the handles come back */
-.wv .bar.arranging .tools .tg.drag { opacity: 0.4; }
-.wv .bar.arranging .arm { align-self: stretch; width: 4px; min-height: 22px; margin: 0 3px; border-radius: 2px; background: var(--accent); }
+.wv .bar.arranging .tools .tg, .wv .bar.arranging .axs .tg { outline: 1px dashed var(--muted); outline-offset: 2px; border-radius: 3px; }
+.wv .bar.arranging .tools .tg > :not(.tl), .wv .bar.arranging .axs .tg > :not(.tl) { pointer-events: none; }
+.wv .bar.arranging .tools .tg > .tl, .wv .bar.arranging .axs .tg > .tl { cursor: grab; touch-action: none; user-select: none; color: var(--fg); }
+.wv .bar.arranging .tools .tg > .tl::before, .wv .bar.arranging .axs .tg > .tl::before { content: '⠿ '; color: var(--accent); }
+.wv .bar.arranging.short .tools .tg > .tl, .wv .bar.arranging .axs .tg > .tl { display: inline-block; }   /* no labels (the short form, the strip): the handles come back */
+.wv .bar.arranging .tools .tg.drag, .wv .bar.arranging .axs .tg.drag { opacity: 0.4; }
+/* where a dragged group lands: its left edge (fixed: over a line or the strip); placed in the free room: on the grid, dashed */
+.wv .bar .arx { position: fixed; z-index: 47; width: 4px; border-radius: 2px; background: var(--accent); pointer-events: none; }
+.wv .bar .arx.placed { width: 0; border-left: 3px dashed var(--accent); background: none; }
+/* the grid a group dropped in the free room snaps to (TOOL_GRID px), a dot every step along each line and the strip */
+.wv .bar.arranging .tools > .tln:not(.newln), .wv .bar.arranging .axs .axr {
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--muted) 55%, transparent) 1px, transparent 1.4px);
+  background-size: 16px 6px; background-repeat: repeat-x; background-position: 0 100%; }
 .wv .bar.arranging .tln.newln { min-height: 26px; padding: 3px 8px; border: 1px dashed var(--line); border-radius: 4px; color: var(--muted); font-size: 11px; }
-.wv .bar.arranging .tln.newln:has(.tg, .arm) { color: transparent; }
+.wv .bar.arranging .tln.newln:has(.tg) { color: transparent; }
+.wv .bar.arranging .axs .axr { min-height: 24px; outline: 1px dashed var(--line); outline-offset: 2px; border-radius: 3px; }
+.wv .bar .axs .axe { display: none; }
+.wv .bar.arranging .axs.empty .axe { display: block; position: absolute; margin: 4px 0 0 34px; color: var(--muted); font-size: 11px; pointer-events: none; }
 .wv .bar.arranging .arr { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding-top: 2px; }
 .wv .bar.arranging .arr .arh { color: var(--muted); font-size: 11px; margin-right: 6px; }
-@media (pointer: coarse) { .wv .bar.arranging .tools .tg > .tl { min-height: 36px; min-width: 36px; display: inline-flex; align-items: center; } }
-/* the strip over the time axis (cursorStrip): the cursor and the edges over the waves' column, slimmer than the bar's lines,
-   no labels; at --axp of the room the waves leave it (0 left .. 1 right); its 🔒 open: a dashed outline, ⠿ drags it */
-.wv .bar .axs { padding: 0 8px 3px calc(var(--wv-names, 200px) + 4px); }
-.wv .bar .axs[hidden] { display: none; }
-.wv .bar .axw { position: relative; min-width: 0; display: flex; }   /* (flex: no line box, the bar's height whole pixels) */
-.wv .bar .axb { position: relative; left: calc(var(--axp, 0) * 100%); transform: translateX(calc(var(--axp, 0) * -100%)); display: flex; flex: none;
-  flex-wrap: wrap; align-items: center; gap: 3px 0; max-width: 100%; border-radius: 3px; }
-.wv .bar .axs .tg { gap: 3px; padding-right: 6px; margin-right: 6px; }
+@media (pointer: coarse) { .wv .bar.arranging .tools .tg > .tl, .wv .bar.arranging .axs .tg > .tl { min-height: 36px; min-width: 36px; display: inline-flex;
+  align-items: center; } }
+/* the strip over the time axis: a band of its own under the bar's lines (the waves' colour, a line over it) — what moves you on
+   the waves, apart from the commands above; 🔒 at its left, the room of its boxes (the find, the cursor) right of it: each box
+   placed by look.js stripFit (absolute, whole pixels), slimmer controls than the bar's, no labels; 🔒 open: a dashed outline and
+   a ⠿ on each box. tight: the find's rarer controls behind its ⋯; stack: one box a line */
+.wv .bar .axs { padding: 4px 8px; border-top: 1px solid var(--line); background: var(--panel); }
+.wv .bar .axs[hidden], .wv .bar .axs .axb[hidden] { display: none; }
+.wv .bar .axs .axb.fl { display: contents; }
+.wv .bar .axs.flonly { padding: 0; border: 0; }
+.wv .bar .axs.flonly .axl { display: none; }   /* its group floats over the waves (the find on /): no box meanwhile */
+.wv .bar .axs .axb.fl > .axg { display: none; }
+.wv .bar .axw { position: relative; display: flex; align-items: flex-start; gap: 6px; }
+.wv .bar .axr { position: relative; flex: 1 1 auto; min-width: 0; }
+.wv .bar .axb { position: absolute; left: 0; top: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 3px 0; width: max-content; max-width: 100%;
+  border-radius: 3px; }   /* (its width its own, not what its left leaves of the room) */
+.wv .bar .axs .tg { gap: 3px; padding-right: 0; margin-right: 0; border-right: 0; flex-wrap: nowrap; }   /* a group a box: no separator */
 .wv .bar .axs .tg > .tl { display: none; }
-.wv .bar .axs button, .wv .bar .axs select, .wv .bar .axs input.ct, .wv .bar .axs input.cs, .wv .bar .axs input.ev { font-size: 11px; height: 20px;
-  padding-top: 0; padding-bottom: 0; }
+.wv .bar .axs button, .wv .bar .axs select, .wv .bar .axs input.ct, .wv .bar .axs input.cs, .wv .bar .axs input.ev, .wv .bar .axs input.q, .wv .bar .axs input.pfx {
+  font-size: 11px; height: 20px; padding-top: 0; padding-bottom: 0; }
 .wv .bar .axs .cyc, .wv .bar .axs .lbl { font-size: 11px; }
 .wv .bar .axs .lbl, .wv .bar .axs .cyc { height: 20px; padding-top: 0; padding-bottom: 0; display: inline-flex; align-items: center; }
-.wv .bar .axh { display: inline-flex; align-items: center; margin-right: 2px; }
-.wv .bar .axs .axh button { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; padding: 0 3px; border-color: transparent;
-  background: none; color: var(--muted); }
-.wv .bar .axs .axh button[hidden] { display: none; }
+.wv .bar .axs .axl, .wv .bar .axs .axg { display: inline-flex; align-items: center; justify-content: center; flex: none; min-width: 18px; padding: 0 3px;
+  border-color: transparent; background: none; color: var(--muted); }
+.wv .bar .axs .axg[hidden] { display: none; }
 .wv .bar .axs .axl svg + svg, .wv .bar .axs.open .axl svg:first-child { display: none; }
 .wv .bar .axs.open .axl svg + svg { display: inline; }
 .wv .bar .axs.open .axl { color: var(--accent); }
 .wv .bar .axs.open .axb { outline: 1px dashed var(--accent); outline-offset: 1px; }
-.wv .bar .axs .axg { color: var(--accent); cursor: grab; touch-action: none; user-select: none; }
+.wv .bar .axs .axg { color: var(--accent); cursor: grab; touch-action: none; user-select: none; margin-right: 2px; }
 .wv .bar .axs.drag .axg { cursor: grabbing; }
-@media (pointer: coarse) { .wv .bar .axs .axh button { min-width: 32px; min-height: 28px; } }
+.wv .bar .axs.tight .tg.find > .more { display: none; }
+.wv .bar .axs.tight .tg.find > .mx { display: inline-block; padding: 0 7px; font-weight: 700; }
+.wv .bar .axs.tight .tg.find.open > .more { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; position: fixed; z-index: 46; padding: 6px 8px;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18); }
+@media (pointer: coarse) { .wv .bar .axs .axl, .wv .bar .axs .axg { min-width: 32px; min-height: 28px; } }
 .wv .wv-arrd { position: fixed; z-index: 52; width: min(420px, calc(100vw - 16px)); max-height: 70vh; overflow: auto; padding: 8px 10px; background: var(--panel);
   color: var(--fg); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2); font: 12.5px var(--font-body); }
 .wv .wv-arrd .arht { font-weight: 600; margin-bottom: 2px; }

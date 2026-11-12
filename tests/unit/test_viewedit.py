@@ -481,15 +481,20 @@ class Twin(unittest.TestCase):
         r = e.run([{'op': 'layout', 'height': 400}, {'op': 'layout', 'scroll': 'page', 'tools': 'fold'}, {'op': 'find', 'query': 'dut.st'},
                    {'op': 'find', 'query': 'val|clk', 'regex': True}, {'op': 'find', 'query': 'state', 'word': True, 'regex': False},
                    {'op': 'cycles', 'on': True}])
-        sd = {'strip': True, 'stripAt': 0}   # the strip over the time axis: on, at the left (wavelens.config.js)
+        sd = {'stripGroups': ['find', 'marks', 'cursor', 'edges'], 'at': {}, 'strip': True, 'stripAt': 1}   # the strip and the places (wavelens.config.js)
         self.assertEqual(r[0], {'op': 'layout', 'scroll': 'window', 'height': 400, 'tools': 'open', 'compact': 'auto', 'bar': None, **sd})
         self.assertEqual(r[1], {'op': 'layout', 'scroll': 'page', 'height': None, 'tools': 'fold', 'compact': 'auto', 'bar': None, **sd})
-        # the strip (look.js setCursorStrip, setStripAt): off, a place by name or 0 .. 1; what is wrong said
-        x = e.run([{'op': 'layout', 'strip': False, 'stripAt': 'center'}, {'op': 'layout', 'stripAt': 0.25}, {'op': 'layout', 'strip': 'no'},
-                   {'op': 'layout', 'stripAt': 2}, {'op': 'layout', 'stripAt': 'top'}])
-        self.assertEqual([(x[0]['strip'], x[0]['stripAt']), x[1]['stripAt'], x[2]['error'], x[3]['error'], x[4]['error']],
-                         [(False, 0.5), 0.25, 'strip: true or false'] + ['stripAt: 0 .. 1, "left", "center" or "right"'] * 2)
-        self.assertEqual([e.st['config']['cursorStrip'], e.st['config']['cursorStripAt']], [False, 0.25])
+        # the strip's groups and the places (look.js setStripGroups, setToolAt, 0.53's setCursorStrip, setStripAt); what is wrong said
+        x = e.run([{'op': 'layout', 'stripGroups': ['Find', 'state', 'find'], 'at': {'Marks': 'center', 'view': 0.25}},
+                   {'op': 'layout', 'at': {'view': None}, 'strip': False, 'stripAt': 'left'}, {'op': 'layout', 'stripGroups': 'find'},
+                   {'op': 'layout', 'at': {'marks': 2}}, {'op': 'layout', 'strip': 'no'}, {'op': 'layout', 'stripAt': 'top'}, {'op': 'layout', 'stripGroups': None}])
+        self.assertEqual([x[0]['stripGroups'], x[0]['at'], x[1]['at'], (x[1]['strip'], x[1]['stripAt']), x[2]['error'], x[3]['error'], x[4]['error'],
+                          x[5]['error'], x[6]['stripGroups']],
+                         [['find', 'file'], {'marks': 0.5, 'view': 0.25}, {'marks': 0.5, 'cursor': 0, 'edges': 0}, (False, 0),
+                          'stripGroups: a list of group labels, ["find", "cursor"], or null', 'at: {"group": 0 .. 1, "left", "center", "right" or null}',
+                          'strip: true or false', 'stripAt: 0 .. 1, "left", "center" or "right"', ['find', 'marks', 'cursor', 'edges']])
+        self.assertEqual([e.st['config'][k] for k in ('stripGroups', 'toolAt', 'cursorStrip')],
+                         [['find', 'marks', 'cursor', 'edges'], {'marks': 0.5, 'cursor': 0, 'edges': 0}, False])
         c = e.run([{'op': 'layout', 'compact': True}, {'op': 'layout', 'compact': 'auto'}, {'op': 'layout', 'compact': 'wide'}])
         self.assertEqual([x.get('compact') for x in c[:2]] + [c[2]['error']], [True, 'auto', 'compact: auto, true or false'])
         self.assertEqual(e.st['config']['toolsCompact'], 'auto')   # as the state has it (look.js setToolsCompact, view.js state)

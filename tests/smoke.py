@@ -239,7 +239,7 @@ def sorting(page):
     check(val('i_data') == '0x10' and val('o_ready') == '0', f'values follow their rows after sorting (i_data={val("i_data")}, o_ready={val("o_ready")})')
     btn.click()
     check(names() == ['i_valid', 'rst_n', 'o_ready', 'o_data', 'i_data', 'clk'], f'Sort Z→A {names()}')
-    bopen(page, 'pfx', '#ex-sort-view'); v.locator('input.pfx').fill('')   # (in ⚙)
+    bopen(page, 'pfx', '#ex-sort-view'); v.locator('.tg[data-tg=prefixes] input.pfx').fill('')   # (its group; ⚙ has the same field)
     btn.click(); btn.click()
     check(names() == ['clk', 'i_data', 'i_valid', 'o_data', 'o_ready', 'rst_n'], f'empty prefix field: plain A→Z {names()}')
     canvas.focus(); page.keyboard.press('s')
@@ -247,7 +247,7 @@ def sorting(page):
     btn.click()
     # demo viewer: a group is sorted as a block; the demo config's sortIgnore (rx_, bit_) beats the global i_,o_
     ex = page.locator('.bench > div.wv[data-wave="DEMO_WAVES.exact"]')
-    pfx = ex.locator('input.pfx').input_value()
+    pfx = ex.locator('input.pfx').first.input_value()
     check(pfx == 'bit_,rx_', f'JSON config beats wavelens.config.js ({pfx!r})')
     ex.locator('button[data-act=sort]').click()
     en = [re.sub(r'\s*\[\d+:\d+\]$', '', x.strip()) for x in ex.locator('.names .row .n').all_inner_texts()]
@@ -2129,16 +2129,16 @@ def vscode_tab(browser, build):
           any(m['key'] == 'wavelens.k' and m['value'] == 'v' for m in sent('store')), 'localStorage: the store given, a write posted')
     # T-05: the bar of every tab (the groups shown, the fold, the arrangement): the extension's global store, not this dump's; a
     # change from another tab followed at once
-    js("(v.setToolsHidden(['find']), v.setToolLayout([['find', 'marks']]), 0)"); page.wait_for_timeout(50)
+    js("(v.setToolsHidden(['find']), v.setToolLayout([['signal', 'view']]), 0)"); page.wait_for_timeout(50)
     gl = [m for m in sent('gstore') if m['key'] == 'look'], [m for m in sent('gstore') if m['key'] == 'bar']
     own = page.evaluate("Object.keys(window.__STORE).filter(k => k.startsWith('wavelens.look:')).map(k => window.__STORE[k])")
     page.evaluate("window.postMessage({ type: 'gstore', key: 'look', value: JSON.stringify({ toolsHidden: ['view'] }) }, '*')"); page.wait_for_timeout(100)
-    page.evaluate("window.postMessage({ type: 'gstore', key: 'bar', value: JSON.stringify({ v: 1, layout: [['list', 'marks']], stripAt: 1 }) }, '*')")
+    page.evaluate("window.postMessage({ type: 'gstore', key: 'bar', value: JSON.stringify({ v: 1, layout: [['list', 'view']], stripAt: 1 }) }, '*')")
     page.wait_for_timeout(100)
     got = [js('v.S.toolsHidden'), js('v.S.toolLayout'), js("[...v.root.querySelector('.bar .tln').querySelectorAll(':scope > .tg')].map(g => g.dataset.tg)"
-                                                         ".filter(g => g === 'list' || g === 'marks')"), js('v.S.cursorStripAt')]
-    check(gl[0] and json.loads(gl[0][-1]['value']) == {'toolsHidden': ['find']} and gl[1] and json.loads(gl[1][-1]['value'])['layout'] == [['find', 'marks']]
-          and all('toolsHidden' not in x for x in own) and got == [['view'], [['list', 'marks']], ['list', 'marks'], 1],
+                                                         ".filter(g => g === 'list' || g === 'view')"), js('v.S.cursorStripAt')]
+    check(gl[0] and json.loads(gl[0][-1]['value']) == {'toolsHidden': ['find']} and gl[1] and json.loads(gl[1][-1]['value'])['layout'] == [['signal', 'view']]
+          and all('toolsHidden' not in x for x in own) and got == [['view'], [['list', 'view']], ['list', 'view'], 1],
           f'VS Code (T-05): the groups shown, the arrangement, the strip\'s place go to the global store, not the dump\'s; another tab\'s change followed {got}')
     js("(v.barReset(), 0)")
     js("(v.saveState(), 0)"); until("window.__sent.some(m => m.type === 'save')", timeout=5000); settle(page)
@@ -7651,8 +7651,8 @@ def sva_hardening(browser, build):
     page.evaluate("""async () => { await SVA.loadFiles([{ name: 'pfx.sva', text: 'module pfx (input logic PCLK, x_PSEL, PENABLE); a_pfx: assert property (@(posedge PCLK) PENABLE |-> x_PSEL); endmodule' }]); }""")
     page.evaluate('SVA.ready()')
     st0 = page.evaluate("(() => { const p = SVA.panels()[0]; const b = p.bind('a_pfx', 'apb_tb.u_regs'); return b && b.state; })()")
-    pfx = v.locator('input.pfx')
-    bopen(page, 'pfx', v); pfx.fill('x_'); settle(page); page.evaluate('SVA.ready()')   # (⚙ Sort prefixes)
+    pfx = v.locator('.tg[data-tg=prefixes] input.pfx')
+    bopen(page, 'pfx', v); pfx.fill('x_'); settle(page); page.evaluate('SVA.ready()')   # (the prefixes group)
     st1 = page.evaluate("(() => { const b = SVA.panels()[0].bindings.find(b => b.assert === 'a_pfx'); return [b.state, b.results && b.results.assertions[0].stats.pass]; })()")
     check(st0 == 'cannot' and st1 == ['bound', 5], f'a new prefix in the sort field binds x_PSEL to PSEL ({st0} -> {st1})')
     bopen(page, 'pfx', v); pfx.fill('i_,o_,s_,m_')
@@ -8443,9 +8443,9 @@ def bar_tools(page, P):
     check(not m.is_visible(), 'the right button in a field: the browser\'s menu (paste), not this one')
 
 
-# a page's settings with the strip over the time axis off (cursorStrip: false): wavelens.config.js's object taken as it is set
+# a page's settings with the strip over the time axis off (stripGroups: []): wavelens.config.js's object taken as it is set
 NO_STRIP = """(() => { let c; Object.defineProperty(window, 'WAVELENS_CONFIG', { configurable: true, get: () => c,
-  set: x => { c = Object.assign(x || {}, { cursorStrip: false }); } }); })()"""
+  set: x => { c = Object.assign(x || {}, { stripGroups: [] }); } }); })()"""
 
 
 def bar_layout(browser, build):
@@ -8653,7 +8653,7 @@ def bar_layout(browser, build):
         b = js("return v.toolGroups();")
         js("v.compare(null); return 0;")
         c = js("return [v.toolGroups().includes('compare')];")
-        want = ['cursor', 'view', 'edges', 'marks', 'find', 'expression', 'assertions', 'list', 'signal', 'file']
+        want = ['cursor', 'view', 'edges', 'marks', 'find', 'expression', 'assertions', 'list', 'prefixes', 'signal', 'file']
         check(a == [want, 'SVA'] and b == want + ['compare'] and c[0] is False,
               f'the groups: {a}, with a compare + compare {b[len(want):]}, gone with it; the assertions\' label SVA')
         d = js("""const t0 = v.S.toolsHidden; v.setToolsHidden(['state', 'dump', 'style', 'find']); const r = [v.S.toolsHidden, q('.tg[data-tg=file]').classList.contains('off'),
@@ -8877,7 +8877,7 @@ def bar_arrange(browser, build):
         fresh()
         js("v.arrange(true); return 0;"); w0 = js("return [v.t0, v.span];"); o0 = order()
         c = label('find').bounding_box(); drag(label('list'), c['x'] + 2, c['y'] + 6); page.keyboard.press('Escape'); page.mouse.up(); settle(page)
-        a = [order() == o0, js("return [!!q('.arm'), v.S.toolLayout, v.arranging, [v.t0, v.span]];")]
+        a = [order() == o0, js("return [!!q('.arx'), v.S.toolLayout, v.arranging, [v.t0, v.span]];")]
         page.keyboard.press('Escape'); a.append(js("return [v.arranging, !!q('.arr')];"))
         check(a[0] and a[1] == [False, None, True, w0] and a[2] == [False, False], f'Esc during a drag: nothing moved, no mark left, the window kept; Esc again: done {a}')
     part('esc', esc_drag)
@@ -8920,8 +8920,8 @@ def bar_arrange(browser, build):
                 break
             page.keyboard.press('ArrowDown')
         page.keyboard.press('Enter'); page.wait_for_timeout(80)
-        same = lambda: js("return JSON.stringify([...q('.wv-arrd').querySelectorAll('.arl')].map(l => [...l.querySelectorAll('.ari')].map(r => r.dataset.tg))) === "
-                          "JSON.stringify(v.barLines());")
+        same = lambda: js("return JSON.stringify([...q('.wv-arrd').querySelectorAll('.arl')].slice(0, -1).map(l => [...l.querySelectorAll('.ari')]"
+                          ".map(r => r.dataset.tg))) === JSON.stringify(v.barLines());")   # (the last: the strip over the time axis)
         a = [js("return !!q('.wv-arrd') && document.activeElement.dataset.tg === 'cursor';")]
         page.keyboard.press('Alt+ArrowDown'); a += [same(), order()[0][:2] == ['view', 'cursor']]
         page.keyboard.press('Alt+ArrowRight'); page.keyboard.press('Alt+ArrowRight'); a += [same(), 'cursor' in order()[2]]
@@ -8934,6 +8934,31 @@ def bar_arrange(browser, build):
         a.append(js("return !v.arranging && document.activeElement === q('.pgear');"))
         check(all(a), f'the dialog by the keys only: ⚙, Arrange the bar…, alt+↓, alt+→ ×2, alt+↑ at the start said, Space, Reset, Esc: the bar as the dialog, the focus on ⚙ {a}')
     part('dialog', dialog)
+
+    def free_place():
+        # a group dropped in the free room of a line: placed there, its left on the grid (16 px); kept, still there out of the mode;
+        # dropped in the strip over the time axis: a box of it; dropped back over a group of a line: in the flow, no place
+        fresh()
+        js("v.arrange(true); return 0;"); settle(page)
+        end = js("const ln = q('.tools .tln[data-ln=rows]'); return [Math.max(...[...ln.querySelectorAll(':scope > .tg')].map(g => g.getBoundingClientRect().right)), "
+                 "ln.getBoundingClientRect().top + 8];")
+        drag(label('view'), end[0] + 120, end[1]); page.mouse.up(); settle(page)
+        a = js("""const ln = q('.tools .tln[data-ln=rows]'), g = q('.tg[data-tg=view]'), off = g.getBoundingClientRect().left - ln.getBoundingClientRect().left;
+            return [v.S.toolAt.view > 0.3, Math.min(off % 16, 16 - off % 16) < 1.5, g.parentElement === ln, [...ln.querySelectorAll(':scope > .tg')].pop() === g];""")
+        js("v.arrange(false); return 0;"); settle(page)
+        b = js("return [parseFloat(q('.tg[data-tg=view]').style.marginLeft) > 0, JSON.parse(localStorage.getItem('wavelens.bar')).at.view > 0.3];")
+        js("v.arrange(true); return 0;"); settle(page)
+        room = page.locator('.wv').first.locator('.axs .axr').bounding_box()
+        drag(label('marks'), room['x'] + 400, room['y'] + room['height'] / 2); page.mouse.up(); settle(page)
+        c = js("""const box = q('.axs .axb[data-tg=marks]'), off = box.getBoundingClientRect().left - q('.axs .axr').getBoundingClientRect().left;
+            return [v.stripGroups(), !!box && !!box.querySelector('.tg[data-tg=marks]'), Math.min(off % 16, 16 - off % 16) < 1.5, v.barLines().flat().includes('marks')];""")
+        s_ = label('signal').bounding_box(); drag(label('marks'), s_['x'] + 4, s_['y'] + 6); page.mouse.up(); settle(page)
+        d = js("return [v.stripGroups(), 'marks' in v.S.toolAt, v.barLines().find(l => l.includes('signal')).indexOf('marks') >= 0, !!q('.axs .axb[data-tg=marks]')];")
+        js("v.arrange(false); return 0;")
+        check(a == [True, True, True, True] and b == [True, True] and c == [['marks'], True, True, False] and d == [[], False, True, False],
+              f'free room: a group placed on the grid, kept out of the mode; into the strip (a box, on the grid); back over a group: in the flow '
+              f'{a} {b} {c} {d}')
+    part('free places and the strip', free_place)
 
     def presets():
         fresh()
@@ -8992,14 +9017,15 @@ def bar_arrange(browser, build):
 
 
 def cursor_strip(browser, build):
-    """The cursor and the edges in the strip over the time axis (cursorStrip): there by default, over the waves' column above the
-    axis, out of the bar's lines, seen with the tools folded; 🔒 unlocks ⠿: a drag snaps to the middle, Esc puts it back, the keys move
-    it; kept in this browser (wavelens.bar) for the page's other viewer at once and after a reload (locked again); ⚙ Cursor over the
-    axis puts the groups back in the lines; the groups hidden hide it; the state, the layout command; the cursor field in it works."""
+    """The strip over the time axis, a band of its own under the bar's lines, a box per group of it (stripGroups): the find and the
+    marks at the left, the cursor and the edges at the right, out of the bar's lines, seen with the tools folded (/ there: no tools
+    opened); one 🔒: a ⠿ on each box, a box dragged over others: they move a place each, Esc puts all back, the keys move a box;
+    kept in this browser (wavelens.bar) for the page's other viewer at once and after a reload (locked again); too narrow: the
+    find's rarer controls behind ⋯, then rows of boxes, never one over another; ⚙ Strip over the axis; the state, the command."""
     apb = build / 'examples' / 'apb' / 'apb.html'
     if not need(apb, how='make examples'):
         return
-    print('the cursor over the time axis: the strip, its lock, its drag, kept')
+    print('the strip over the time axis: its boxes, the lock, the drag and the swap, kept')
     page = browser.new_page(viewport={'width': 1400, 'height': 900})
     errs = []
     page.on('pageerror', lambda e: errs.append(str(e)))
@@ -9007,60 +9033,83 @@ def cursor_strip(browser, build):
     page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
     page.evaluate("document.querySelector('.wv').scrollIntoView()"); settle(page); settle(page)
     js = lambda e, n=0: page.evaluate(f"""(async () => {{ const v = document.querySelectorAll('.wv')[{n}].waveView, bar = v.root.querySelector('.bar'),
-        q = s => v.root.querySelector(s), ax = q('.bar .axs'), R = e => e.getBoundingClientRect(); {e} }})()""")
+        q = s => v.root.querySelector(s), ax = q('.bar .axs'), R = e => e.getBoundingClientRect(), box = k => q(`.axb[data-tg="${{k}}"]`); {e} }})()""")
     wv = page.locator('.wv').first
-    a = js("""const b = R(q('.axs .axb')), w = R(v.wcol), c = R(v.canvas), t = R(q('.bar .tools'));
-        return [ax.hidden, [...ax.querySelectorAll('.axb > .tg')].map(g => g.dataset.tg), [...q('.bar .tools').querySelectorAll('.tg')].some(g =>
-          ['cursor', 'edges'].includes(g.dataset.tg)), Math.abs(b.left - w.left) < 12, b.bottom <= c.top + 1, b.top >= t.bottom - 1,
-          R(ax).height, getComputedStyle(q('.axs .tg > .tl')).display, q('.axs .axg').hidden];""")
-    check(a[:6] == [False, ['cursor', 'edges'], False, True, True, True] and a[6] < 30 and a[7] == 'none' and a[8],
-          f'the strip: there by default, the cursor and the edges in it (not in the lines), at the left of the waves\' column, between the '
-          f'tools and the axis, slim, no labels, locked {a}')
+    a = js("""const r = R(q('.axr')), cv = R(v.canvas), t = R(q('.bar .tools')), b = ['find', 'marks', 'cursor', 'edges'].map(k => R(box(k)));
+        return [ax.hidden, v.stripOrder, [...q('.bar .tools').querySelectorAll('.tg')].some(g => ['find', 'marks', 'cursor', 'edges'].includes(g.dataset.tg)),
+          Math.abs(b[0].left - r.left) < 2, Math.round(b[1].left - b[0].right), Math.abs(b[3].right - r.right) < 2, Math.round(b[3].left - b[2].right),
+          R(ax).bottom <= cv.top + 1, R(ax).top >= t.bottom - 1, getComputedStyle(ax).backgroundColor !== getComputedStyle(bar).backgroundColor,
+          getComputedStyle(ax).borderTopWidth, Math.round(b[2].height), [...ax.querySelectorAll('.axg')].every(g => g.hidden), bar.offsetHeight === R(bar).height];""")
+    check(a == [False, ['find', 'marks', 'cursor', 'edges'], False, True, 12, True, 12, True, True, True, '1px', 20, True, True],
+          f'the strip: the find and the marks at the left, the cursor and the edges at the right (a box each, 12 px apart), out of the lines, '
+          f'between the tools and the axis, a band of its own (its colour, a line over it), slim, locked; the bar whole pixels high {a}')
     c0 = js('return v.cursor;'); wv.locator('.axs .ct').fill('55'); wv.locator('.axs .ct').press('Enter'); settle(page)
     c1 = js("return [v.cursor, q('.axs .ct').value, q('.axs .ct').classList.contains('bad')];")
-    check(c1[0] != c0 and c1[1:] == ['55', False], f'the cursor field in the strip: Enter takes the time {c0} {c1}')
     wv.locator('button[data-act=tools]').click(); settle(page)
-    f = js("return [v.root.classList.contains('wv-tools-folded'), ax.hidden, R(ax).height > 0];")
+    wv.locator('canvas').click(); page.keyboard.press('/'); page.keyboard.type('PSEL'); settle(page)
+    f = js("""return [v.root.classList.contains('wv-tools-folded'), ax.hidden, !!document.activeElement.closest('.axs'), v.toolsPeek || false,
+        q('.axs .cnt').textContent.length > 0];""")
+    page.keyboard.press('Escape'); js("(v.find(''), 0)")
     wv.locator('button[data-act=tools]').click(); settle(page)
-    check(f == [True, False, True], f'the tools folded: the strip stays {f}')
-    # 🔒: ⠿ appears; a drag near the middle snaps to it; kept in wavelens.bar; the page's other viewer follows at once
+    check(c1[0] != c0 and c1[1:] == ['55', False] and f == [True, False, True, False, True],
+          f'in the strip: the cursor field takes a time; with the tools folded the strip stays, / types in its find (no tools opened) {c1} {f}')
+    # 🔒: a ⠿ on each box; the cursor's dragged to the left end over the marks and the find: they move a place right each; kept, followed
     wv.locator('.axs .axl').click(); settle(page)
-    u = js("return [ax.classList.contains('open'), q('.axs .axg').hidden, q('.axs .axl').getAttribute('aria-pressed')];")
-    g, w, b = (wv.locator(s).bounding_box() for s in ('.axs .axg', '.axs .axw', '.axs .axb'))
-    to = g['x'] + 4 + (w['width'] - b['width']) / 2 + 9   # 9 px off the middle: snapped
-    page.mouse.move(g['x'] + 4, g['y'] + 6); page.mouse.down(); page.mouse.move(to, g['y'] + 6, steps=10); page.mouse.up(); settle(page)
-    m = js("""const b = R(q('.axs .axb')), w = R(q('.axs .axw'));
-        return [v.S.cursorStripAt, JSON.parse(localStorage.getItem('wavelens.bar') || '{}').stripAt, Math.abs((b.left + b.right) / 2 - (w.left + w.right) / 2) < 2];""")
-    two = js('return v.S.cursorStripAt;', 1) if page.locator('.wv').count() > 1 else 0.5   # (apb.html: three viewers)
-    check(u == [True, False, 'true'] and m == [0.5, 0.5, True] and two == 0.5,
-          f'🔒 unlocked: ⠿ shown; a drag 9 px off the middle snaps to it, kept in wavelens.bar, the other viewer follows {u} {m} {two}')
-    g = wv.locator('.axs .axg').bounding_box()
-    page.mouse.move(g['x'] + 4, g['y'] + 6); page.mouse.down(); page.mouse.move(g['x'] - 300, g['y'] + 6, steps=6); page.keyboard.press('Escape'); page.mouse.up()
+    u = js("return [ax.classList.contains('open'), [...ax.querySelectorAll('.axg')].map(g => g.hidden)];")
+    g, f0 = wv.locator('.axb[data-tg=cursor] .axg').bounding_box(), wv.locator('.axb[data-tg=find]').bounding_box()
+    page.mouse.move(g['x'] + 4, g['y'] + 6); page.mouse.down(); page.mouse.move(f0['x'] - 60, g['y'] + 6, steps=12); page.mouse.up(); settle(page)
+    sw = js("""const B = JSON.parse(localStorage.getItem('wavelens.bar') || '{}'), b = ['cursor', 'find', 'marks'].map(k => R(box(k)));
+        return [v.stripOrder, v.toolAtOf('cursor'), B.at && B.at.cursor, b[0].right <= b[1].left && b[1].right <= b[2].left];""")
+    two = js('return v.stripOrder;', 1) if page.locator('.wv').count() > 1 else sw[0]
+    check(u == [True, [False] * 4] and sw == [['cursor', 'find', 'marks', 'edges'], 0, 0, True] and two == sw[0],
+          f'🔒 unlocked: a ⠿ on each box; the cursor\'s dragged over the marks and the find: they move a place each, kept in wavelens.bar, '
+          f'the other viewer follows {u} {sw} {two}')
+    was = js('return [v.stripOrder, JSON.stringify(v.S.toolAt)];')
+    g = wv.locator('.axb[data-tg=edges] .axg').bounding_box()
+    page.mouse.move(g['x'] + 4, g['y'] + 6); page.mouse.down(); page.mouse.move(g['x'] - 900, g['y'] + 6, steps=6); page.keyboard.press('Escape'); page.mouse.up()
     settle(page)
-    e = js("return [v.S.cursorStripAt, ax.style.getPropertyValue('--axp'), ax.classList.contains('drag')];")
-    wv.locator('.axs .axg').focus(); page.keyboard.press('End'); k1 = js('return v.S.cursorStripAt;')
-    page.keyboard.press('ArrowLeft'); k2 = js('return v.S.cursorStripAt;'); page.keyboard.press('Home'); k3 = js('return v.S.cursorStripAt;')
-    page.keyboard.press('ArrowRight'); k4 = js('return v.S.cursorStripAt;')
-    check(e == [0.5, '0.5', False] and [k1, k2, k3, k4] == [1, 0.95, 0, 0.05],
-          f'Esc during a drag: back where it was; End ← Home → on ⠿ {e} {[k1, k2, k3, k4]}')
+    e = js("return [v.stripOrder, JSON.stringify(v.S.toolAt), ax.classList.contains('drag')];")
+    wv.locator('.axb[data-tg=marks] .axg').focus(); page.keyboard.press('Home'); k1 = js("return v.toolAtOf('marks');")
+    page.keyboard.press('ArrowRight'); k2 = js("return v.toolAtOf('marks');")
+    check(e == [*was, False] and [k1, k2] == [0, 0.05], f'Esc during a drag: all back; Home, → on a box\'s ⠿ {e} {[k1, k2]}')
     page.reload(); page.wait_for_load_state('networkidle'); settle(page)
-    r = js("return [v.S.cursorStripAt, ax.classList.contains('open'), q('.axs .axg').hidden];")
-    check(r == [0.05, False, True], f'a reload: the place kept, locked again {r}')
-    # ⚙ Cursor over the axis: off puts the groups back in the time line (in their order), on takes them out again
-    js("v.setCursorStrip(false); return 0;"); settle(page)
-    o = js("""return [ax.hidden, [...q('.bar .tools .tln').querySelectorAll(':scope > .tg')].map(g => g.dataset.tg).slice(0, 3),
-        JSON.parse(localStorage.getItem('wavelens.bar')).strip, v.state().config.cursorStrip,
-        q('.bpop.wv-gear [data-act=strip]').getAttribute('aria-checked')];""")
-    page.locator('.wv').first.locator('.pgear').click(); page.locator('.wv-menu [data-act=strip]').first.click(); settle(page)
-    on = js("return [ax.hidden, v.S.cursorStrip, [...ax.querySelectorAll('.axb > .tg')].map(g => g.dataset.tg)];")
-    check(o == [True, ['cursor', 'view', 'edges'], False, False, 'false'] and on == [False, True, ['cursor', 'edges']],
-          f'⚙ Cursor over the axis: off, the groups in the time line, kept, in the state; on again {o} {on}')
-    js("v.setToolsHidden(['cursor', 'edges']); return 0;"); hid = js('return ax.hidden;'); js("v.setToolsHidden(null); return 0;")
-    c = js("""const r = await v.run([{ op: 'layout', strip: false, stripAt: 'right' }]), st = v.state().config, b = JSON.parse(localStorage.getItem('wavelens.bar'));
-        const bad = await v.run([{ op: 'layout', stripAt: 3 }]); await v.run([{ op: 'layout', strip: true }]);
-        return [r[0].strip, r[0].stripAt, st.cursorStrip, st.cursorStripAt, b.strip, bad[0].error];""")
-    check(hid is True and c == [False, 1, False, 1, None, 'stripAt: 0 .. 1, "left", "center" or "right"'] and not errs,
-          f'both groups hidden: no strip; the layout command: this viewer only, its errors {hid} {c} {errs[:2]}')
+    r = js("return [v.toolAtOf('cursor'), v.toolAtOf('marks'), ax.classList.contains('open'), [...ax.querySelectorAll('.axg')].every(g => g.hidden)];")
+    check(r == [0, 0.05, False, True], f'a reload: the places kept, locked again {r}')
+    # too narrow for them all (no short form): the find's rarer controls behind ⋯, then rows; never one over another, inside the strip
+    lay = []
+    for w in (1100, 900, 620):
+        page.set_viewport_size({'width': w, 'height': 900}); js("(v.setToolsCompact(false, { only: true }), 0)"); settle(page)
+        lay.append(js("""const bs = [...ax.querySelectorAll('.axb:not([hidden])')].map(R), r = R(q('.axr'));
+            const apart = bs.every((p, i) => bs.every((o, j) => i === j || p.right <= o.left || o.right <= p.left || p.bottom <= o.top || o.bottom <= p.top));
+            return [ax.classList.contains('tight'), new Set(bs.map(b => Math.round(b.top))).size, apart, bs.every(b => b.left >= r.left - 1 && b.right <= r.right + 1),
+              Number.isInteger(R(ax).height)];"""))
+    page.set_viewport_size({'width': 1400, 'height': 900}); js("(v.setToolsCompact(null, { only: true }), 0)"); settle(page)
+    check(all(x[2:] == [True, True, True] for x in lay) and lay[-1][0] and lay[-1][1] > 1,
+          f'narrower: tight (the find\'s ⋯), then rows of boxes; never one over another, inside the strip {lay}')
+    # ⚙ Strip over the axis off: the groups back in their lines, kept, in the state; on again: the settings' four
+    wv.locator('.pgear').click(); page.locator('.wv-menu [data-act=strip]').first.click(); settle(page)
+    o = js("""return [ax.hidden, v.barLines().flat().filter(g => ['find', 'marks', 'cursor', 'edges'].includes(g)).sort(),
+        JSON.parse(localStorage.getItem('wavelens.bar')).sg, v.state().config.stripGroups];""")
+    wv.locator('.pgear').click(); page.locator('.wv-menu [data-act=strip]').first.click(); settle(page)
+    on = js("return [ax.hidden, v.stripGroups()];")
+    check(o == [True, ['cursor', 'edges', 'find', 'marks'], [], []] and on == [False, ['find', 'marks', 'cursor', 'edges']],
+          f'⚙ Strip over the axis off: the groups in their lines, kept, in the state; on again {o} {on}')
+    js("v.setToolsHidden(['cursor', 'edges', 'find', 'marks']); return 0;"); hid = js('return ax.hidden;'); js("v.setToolsHidden(null); return 0;")
+    c = js("""const r = await v.run([{ op: 'layout', stripGroups: ['find', 'view'], at: { view: 'right', marks: 0.5 } }]), st = v.state().config;
+        const b = JSON.parse(localStorage.getItem('wavelens.bar')), here = v.stripOrder;
+        const bad = await v.run([{ op: 'layout', at: { view: 3 } }]); await v.run([{ op: 'layout', stripGroups: null, at: { view: null, marks: null } }]);
+        return [r[0].stripGroups, r[0].at, st.stripGroups, here, b.sg, bad[0].error, v.stripGroups(), JSON.stringify(v.S.toolAt)];""")
+    c[1] = {k: c[1].get(k) for k in ('view', 'marks')}
+    check(hid is True and c[:7] == [['find', 'view'], {'view': 1, 'marks': 0.5}, ['find', 'view'], ['find', 'view'], None,
+                                    'at: {"group": 0 .. 1, "left", "center", "right" or null}', ['find', 'marks', 'cursor', 'edges']] and not errs,
+          f'every group of the strip hidden: no strip; the layout command: this viewer only, its errors {hid} {c} {errs[:2]}')
+    # the sort prefixes, a group of their own beside the list (⚙ keeps its field): typed in one, the other the same, the names sorted live
+    pf = js("""const [a, b] = [...v.root.querySelectorAll('input.pfx')], pg = q('.tg[data-tg=prefixes]');
+        a.value = 'P'; a.dispatchEvent(new Event('input', { bubbles: true }));
+        const r = [!!pg && pg.parentElement === q('.tln[data-ln=rows]') && pg.previousElementSibling.dataset.tg === 'list', a.closest('.tg') === pg,
+          !!b.closest('.wv-gear'), b.value, v.sortIgnore];
+        a.value = ''; a.dispatchEvent(new Event('input', { bubbles: true })); return r.concat([b.value]);""")
+    check(pf == [True, True, True, 'P', ['P'], ''], f'the sort prefixes: a group after the list, its field and ⚙\'s the same, live {pf}')
     page.close()
 
 
@@ -9308,11 +9357,11 @@ def tips(browser, build):
     check(fold and all(f == [False, False, 'false'] for f in fold) and opened, f'the assertion list starts folded (svaOpen: false); ▸ Assertions opens it {fold}')
     lines = page.evaluate("[...document.querySelector('.wv .bar .tools').children].map(l => [l.dataset.ln, [...l.querySelectorAll(':scope > .tg')].map(g => g.dataset.tg), Math.round(l.getBoundingClientRect().top)])")
     got = {l[0]: l[1] for l in lines}
-    strip = page.evaluate("[...document.querySelector('.wv .bar .axs .axb').querySelectorAll(':scope > .tg')].map(g => g.dataset.tg)")
-    check([l[0] for l in lines] == ['time', 'find', 'rows'] and got['time'][:2] == ['view', 'marks'] and got['find'] == ['find', 'expression', 'assertions']
-          and got['rows'] == ['list', 'signal', 'file', 'compare'] and len({l[2] for l in lines}) == 3 and strip == ['cursor', 'edges'],
-          f'the bar: one line per kind (time, signals and conditions, rows and files), the plugins\' groups on theirs; the cursor and the edges '
-          f'over the axis {lines} {strip}')
+    strip = page.evaluate("[...document.querySelector('.wv .bar .axs').querySelectorAll('.axb > .tg')].map(g => g.dataset.tg)")
+    check([l[0] for l in lines] == ['time', 'find', 'rows'] and got['time'][:1] == ['view'] and got['find'] == ['expression', 'assertions']
+          and got['rows'] == ['list', 'prefixes', 'signal', 'file', 'compare'] and len({l[2] for l in lines}) == 3 and strip == ['find', 'marks', 'cursor', 'edges'],
+          f'the bar: one line per kind (time, signals and conditions, rows and files), the plugins\' groups on theirs; the find, the marks, the '
+          f'cursor and the edges over the axis {lines} {strip}')
     miss = page.evaluate("""[...document.querySelector('.wv').querySelectorAll('button, input:not([type=file]), select, .mk')].filter(e => !WaveLens.tips.of(e)).map(e => e.outerHTML.slice(0, 80))""")
     check(not miss, f'every button, field and list of a viewer (bar, assertions, bookmarks) has a tooltip (missing: {miss[:5]})')
     b = page.locator('.wv button[data-act=in]').first; b.hover(); until(page, "!!document.querySelector('.wv-tip')")
@@ -9925,7 +9974,7 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'bar_tools': 'the synthetic page: the right button on the bar, its tool groups shown or left out (Show all, Hide all)',
     'bar_layout': 'the bar: its bugs T-01 … T-19, three rows at rest and busy, the short form, the groups, the new buttons as their keys, ⚙ and File ▾',
     'state_fit': 'a state of other waves: not taken by itself, an Only of no module here none, a folding left; Forget the kept view… asked, Cancel, Forget',
-    'cursor_strip': 'the cursor and the edges over the time axis: there by default, folded tools, 🔒 ⠿ drag with a snap, Esc, the keys, kept, ⚙ off / on, the command',
+    'cursor_strip': 'the strip over the time axis: a box per group (find, marks, cursor, edges), folded tools, 🔒 ⠿ drag and swaps, Esc, the keys, kept, narrow, ⚙, the command',
     'bar_arrange': 'the bar arranged: at rest nothing changes; the mode, the drag, Esc, a reload, undo, T-04, the dialog by the keys, presets, bad data, touch',
     'fst': 'BUILD/demo_fst.html (make demo-fst): FSM state names and hierarchy from the FST',
     'examples': 'the example pages (make examples): bookmarks, arrows, colours, state names, their assertions',
