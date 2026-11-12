@@ -12,7 +12,7 @@
 (function (root) {
   const PAGE = {
     page: { ask: '', reply: null },                                // a page starts (again: a tab moved to a window): the streams before closed
-    source: { ask: '', reply: ['src name lazy store fresh? lastState?'] },   // the dump's URI now (an FST: its VCD text; lazy: its header), its
+    source: { ask: '', reply: ['src name lazy store fresh? lastState? note?'] },   // the dump's URI now (an FST: its VCD text; lazy: its header), its
     //   store; fresh: the tab's first page (a page made again takes no last state), lastState: the path of the state loaded last
     bytes: { ask: '', reply: ['data'] },                           // what source named, as bytes (a URI the webview could not fetch)
     codes: { ask: 'codes', reply: ['text'] },                      // a lazy dump's signals by their id codes: sva vcd --codes
@@ -27,7 +27,7 @@
     //   the one picked before, compared again with a new A), sva diff --page ('' the dialog closed)
     runs: { ask: 'op', ops: {                                      // the Runs panel: sva runs
       list: { ask: '', reply: ['dir runs others? now? shown?'] },
-      open: { ask: 'run', reply: ['src name lazy store?'] },     // A: a run's waves served as the tab's (0: the dump of now)
+      open: { ask: 'run', reply: ['src name lazy store? note?'] },  // A: a run's waves served as the tab's (0: the dump of now)
       keep: { ask: 'name? tags? comment? cases? from? to? of?', reply: ['run'] },   // from, to: a slice of the waves of (a run; 0 the dump)
       cut: { ask: 'from to of?', reply: ['path', 'cancel'] },      // that window as an FST of its own (a save dialog), its times from 0
       set: { ask: 'run name? tags? comment?', reply: ['run'] },

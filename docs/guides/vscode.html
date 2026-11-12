@@ -79,7 +79,8 @@
   <tr><td>a large dump</td><td>an FST of 4 MB or a VCD of 64 MB and more (<code>wavelens.lazy</code>) opens with every module
     and signal at once, the top level open and its modules folded, no value read yet; open a module and the signals on the screen
     are read from the dump's FST (<code>sva vcd --codes</code>; a VCD is made an FST once). Assertions, the FSM panel and pictures
-    read what they need first.</td></tr>
+    read what they need first. With no <code>sva</code> CLI on the host (Windows without <code>wavelens.sva</code>) a VCD is
+    read whole instead, the tab says why; an FST needs the CLI.</td></tr>
   <tr><td>a new simulation</td><td>the tab sees the dump change on the disk (polled: an NFS home works too) and offers
     <span class="ui">⟳</span> in the bar, or <i>WaveLens: Read the dump again</i> in the editor's title; the view is kept.
     <code>wavelens.autoReload: true</code> reads it at once.</td></tr>
@@ -195,7 +196,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.54 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.55 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

@@ -203,6 +203,45 @@ class LazyDump(unittest.TestCase):
             self.assertEqual(rel, [[True, 2]], 'the line in the text read beside it')
 
 
+
+NOCLI = r"""
+const path = require('path');
+const [F, ext, dir] = process.argv.slice(1).map((x, i) => (i ? x : require(x)));
+const h = F.host({ ext, dir, workspaceState: new Map(), config: { sva: path.join(dir, 'no-such-sva'), lazy: 'always' },
+  window: { withProgress: async (o, f) => f(), showErrorMessage: async () => undefined } });
+F.run(async () => {
+  const out = {};
+  const A = await h.tab(path.join(dir, 'big.vcd'));
+  await A.send({ type: 'source', id: 1 }); out.vcd = A.reply(1);
+  await A.send({ type: 'codes', id: 2, codes: ['!'] }); out.codes = A.reply(2);
+  const B = await h.tab(path.join(dir, 'big.fst'));
+  await B.send({ type: 'source', id: 3 }); out.fst = B.reply(3);
+  return out;
+});
+"""
+
+
+class LazyNoCli(unittest.TestCase):
+    @H.needs(NODE, 'node (or VS Code\'s, ~/.vscode-server/bin/*/node)')
+    def test_a_large_vcd_read_whole_without_the_cli(self):
+        """A large VCD with no sva CLI on the host (Windows without wavelens.sva: none bundled there): read whole, not lazy,
+        the reason told to the page (note), never an empty tab; an FST, which only the CLI reads, still an error."""
+        text = '$timescale 1ns $end\n$scope module t $end\n$var wire 1 ! a $end\n$upscope $end\n$enddefinitions $end\n#0\n1!\n'
+        with H.tmp() as d:
+            for n in ('big.vcd', 'big.fst'):
+                with open(os.path.join(d, n), 'w', encoding='utf-8') as f:
+                    f.write(text)
+            r = subprocess.run([NODE, '-e', NOCLI, FAKE, os.path.join(H.ROOT, 'vscode', 'extension.js'), d], capture_output=True, text=True, timeout=30)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            o = json.loads(next(x for x in r.stdout.splitlines() if x.startswith('RESULT'))[6:])
+            v = o['vcd']
+            self.assertNotIn('error', v, v)
+            self.assertTrue(v['src'].endswith('big.vcd') and v['lazy'] is False, v)
+            self.assertIn('read whole', v.get('note', ''), v)
+            self.assertIn('no sva CLI', v['note'])
+            self.assertIn('read whole', o['codes'].get('error', ''), 'no FST behind it: no codes asked of the CLI')
+            self.assertIn('error', o['fst'], o['fst'])
+
 WP8 = r'''
 const fs = require('fs'), path = require('path');
 const [F, ext, dir, mode] = process.argv.slice(1).map((x, i) => (i ? x : require(x)));

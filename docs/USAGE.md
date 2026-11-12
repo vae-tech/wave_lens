@@ -57,6 +57,8 @@ may be the default). What the tab does differently from a page in a browser:
   `sva vcd --codes`; a VCD is made an FST once (`sva fst --no-types`, kept in the extension's storage, a few seconds for
   500 MB). What needs other signals reads them first: an assertion its signals, the FSM panel and `fsm_stats` the state
   machines, a picture its rows. Their values are the ones the whole dump gives (smoke `lazy_dump` holds it to that).
+  With no `sva` CLI on the host (Windows without `wavelens.sva`), or one that fails on the VCD, the VCD is read whole
+  instead, the reason in the tab and the log; an FST needs the CLI.
   An FST written over by a new run while its tab is open is not read under the old header: the signals not read yet say
   *changed on the disk since it was read: ⟳ (R) reads it again*, once (a read that failed is not run again on every draw;
   ⟳ or `R` reads the dump again, `wavelens.autoReload` at once).

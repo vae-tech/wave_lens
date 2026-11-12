@@ -2003,7 +2003,7 @@ def vscode_tab(browser, build):
       // what the extension answers, by type (every type of the table with an answer has one here)
       const ANSWER = {
         source: () => ({ src: '%s' + (window.__LAZY ? '/head.vcd' : window.__DUMP || '/dump.vcd'), name: 'enum.vcd', lazy: !!window.__LAZY,
-          store: Object.assign({}, window.__STORE), fresh: window.__FRESH, lastState: window.__LAST }),
+          store: Object.assign({}, window.__STORE), fresh: window.__FRESH, lastState: window.__LAST, note: window.__NOTE || undefined }),
         // the dump the page could not fetch (a moved tab over a remote connection: 404), as the extension reads it: dump.vcd
         bytes: () => fetch('%s/dump.vcd').then(r => r.arrayBuffer()).then(b => ({ data: new Uint8Array(b) })),
         codes: m => window.lazyCodes(m.codes).then(text => ({ text })),
@@ -2196,6 +2196,13 @@ def vscode_tab(browser, build):
     check(page.evaluate(plain) == was and any('could not fetch it (404' in m.get('text', '') for m in sent('log')) and sent('bytes'),
           'a URI that answers 404: the dump read through the extension as bytes, the log says so')
     check(page.evaluate("localStorage.getItem('wavelens.moved')") == 'now', 'the store as the extension has it now (a page made again)')
+    # a large VCD the extension could not make lazy (no sva CLI on the host: Windows): served whole with a note, said on the page
+    n_load = len(sent('loaded'))
+    page.evaluate("window.__NOTE = 'enum.vcd: read whole (not lazy): there is no sva CLI on this host'; window.postMessage({ type: 'reload' }, '*')")
+    until(f"window.__sent.filter(m => m.type === 'loaded').length > {n_load}", timeout=5000)
+    page.evaluate("window.__NOTE = null")
+    check('read whole (not lazy)' in js("v.root.querySelector('.bar .toast').textContent") and page.evaluate(plain) == was,
+          'a dump served whole for want of the CLI: the waves shown, the reason on the page')
     page.evaluate("window.postMessage({ type: 'live', link: '8742:tok123' }, '*')")
     until("window.__sent.some(m => m.type === 'es-open')", timeout=5000)
     es = sent('es-open')[0]

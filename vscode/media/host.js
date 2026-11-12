@@ -254,6 +254,7 @@
   // The dump's store comes with it: a webview VS Code made again (the tab moved to a window of its own) has the page of when
   // the tab opened, its store of then. The dump by its webview URI; one that does not come (a moved tab over a remote
   // connection: 404) through the extension, as bytes
+  let noted = '';   // what the extension said of how it serves the dump (read whole: no sva CLI here), said once it is shown
   const fetchDump = async () => {
     const s = await call('source', {});
     if (s.error) throw new Error(s.error);
@@ -275,6 +276,7 @@
       blob = new Blob([b.data]);
     }
     const f = new File([blob], s.name);
+    noted = s.note || '';   // read whole, not lazy (no sva CLI here): said once the waves are shown
     // a large dump: its header now, the signals the viewer shows read by the extension as they are needed
     if (s.lazy) Object.assign(f, { wlLazy: true, wlLoad: async codes => { const x = await call('codes', { codes }); if (x.error) throw new Error(x.error);
       return x.text; } });
@@ -286,6 +288,7 @@
   // read: why, and the line
   document.addEventListener('wavelens:dump', e => { last = e.detail || {}; vscode.postMessage(Object.assign({ type: 'loaded' }, last));
     const bad = (last.log || []).filter(x => x.level !== 'info').length;
+    if (noted) { toast(noted); noted = ''; return; }
     if (bad) toast(`${last.name}: ${last.shown} of ${last.total} signals · ${bad} warning${bad === 1 ? '' : 's'}: the Problems panel (ctrl+shift+M), ` +
       'WaveLens: Show the log'); }, true);   // capture: it does not bubble
   document.addEventListener('wavelens:dumperror', e => vscode.postMessage(Object.assign({ type: 'dumperror' }, e.detail)), true);

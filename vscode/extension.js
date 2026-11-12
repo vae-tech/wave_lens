@@ -296,13 +296,26 @@ ${scripts}
   }
   // the file the tab shows (the dump, or a run kept) served: this.src the text the webview reads (bytes()), this.fst the FST
   // its signals are read from when lazy (codes()), this.fstAt its size and time when its header was read -> {src, name, lazy}
+  // A large VCD the CLI cannot make lazy (no sva on this host: Windows without wavelens.sva; one that fails on it): read whole,
+  // as before the lazy reading, the reason in the log and on the page (note) -> the waves shown, never an empty tab
   async srcOf(file, name) {
-    const lazy = lazyFor(file, (await fs.promises.stat(file)).size), fst = lazy ? await fstOf(file) : null;
-    const at = fst ? stamp(await fs.promises.stat(fst)) : null;   // before the header: a file written meanwhile is "changed"
-    const f = lazy ? await headerOf(fst) : await vcdOf(file);
+    let lazy = lazyFor(file, (await fs.promises.stat(file)).size), fst = null, at = null, f = null, note = '';
+    if (lazy) {
+      try {
+        fst = await fstOf(file);
+        at = stamp(await fs.promises.stat(fst));   // before the header: a file written meanwhile is "changed"
+        f = await headerOf(fst);
+      } catch (e) {
+        if (/\.fst$/i.test(file)) throw e;   // an FST is read through the CLI only
+        lazy = false; fst = null; at = null;
+        note = `${name}: read whole (not lazy): ${e.message.replace(/^sva: /, '')}`;
+        log(note);
+      }
+    }
+    if (!f) f = await vcdOf(file);
     this.fst = fst; this.fstAt = at; this.src = f;
     if (lazy) log(`${name}: large: its modules and signals first, the values of the ones shown as they are needed`);
-    return { src: this.panel.webview.asWebviewUri(vscode.Uri.file(f)).toString(), name, lazy };
+    return Object.assign({ src: this.panel.webview.asWebviewUri(vscode.Uri.file(f)).toString(), name, lazy }, note ? { note } : {});
   }
   // the bytes of what source() named, for a webview that could not fetch its URI (a tab moved to a window of its own over a
   // remote connection: its resource loads answer 404) -> {data: Uint8Array}

@@ -5,6 +5,14 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.55 — 12 November 2026
+
+VS Code on Windows: a large VCD opens without the sva CLI.
+
+- VS Code: a large VCD (`wavelens.lazy`, 64 MB and more) on a host with no `sva` CLI (Windows without `wavelens.sva`: the
+  package carries the Linux one only) gave an empty tab, "there is no sva CLI on this host": it is read whole now, as before
+  the lazy reading, the reason said in the tab and the log. An FST still needs the CLI.
+
 ## 0.54 — 12 November 2026
 
 The bar arranged anywhere: a group placed on a grid in its line, the strip over the time axis a line of it (the find, the marks,

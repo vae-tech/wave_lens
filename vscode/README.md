@@ -13,7 +13,8 @@ is turned into VCD text with it, kept in the extension's storage).
 - **A large dump** (`wavelens.lazy`, auto: an FST of 4 MB, a VCD of 64 MB and more) opens with every module and signal
   at once, the top level open and its modules folded; the signals you open are read from its FST then (a VCD becomes an
   FST once, kept). Assertions, the FSM panel and pictures read what they need first. An FST a new run wrote over is
-  not read under the old header: the tab says so once, ⟳ reads it again.
+  not read under the old header: the tab says so once, ⟳ reads it again. With no sva CLI on the host (Windows without
+  `wavelens.sva`) a VCD is read whole instead, the tab says why; an FST needs the CLI.
 - **A tab in a window of its own** (*Move into New Window*, *Copy into New Window*): VS Code makes its page again; the dump is
   read again as it is (through the extension when the window's webview cannot load it, as over a remote connection: the
   log says so), with the view as you left it.
