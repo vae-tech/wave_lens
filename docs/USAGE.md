@@ -57,6 +57,23 @@ may be the default). What the tab does differently from a page in a browser:
   `sva vcd --codes`; a VCD is made an FST once (`sva fst --no-types`, kept in the extension's storage, a few seconds for
   500 MB). What needs other signals reads them first: an assertion its signals, the FSM panel and `fsm_stats` the state
   machines, a picture its rows. Their values are the ones the whole dump gives (smoke `lazy_dump` holds it to that).
+  A row is read over the whole dump as a **summary** (`sva vcd --codes --from --to --lod --keep`, 32 rows a read, one
+  read at a time): a signal with at most `lazyKeep` (16384) changes comes whole; a busier one (a clock, a counter) as
+  `lazyBuckets` (2048) buckets of the dump, a bucket of one or two changes exact, a denser one drawn as a bar up to its
+  last change (hatched when zoomed in further than it was read) and its value there `…` (the value column, the
+  tooltip), never a value that may be wrong. A 1 GB / 200 ms dump with a 100 MHz clock: its 9 top-level signals drawn in
+  3 s, 17 MB of the page's memory. A row the reader could not read says `not read: …` and is not asked again until the
+  dump is read again (⟳, R). **Zoomed in**, the busy rows on the screen are read again for the view and half a span each
+  side, 150 ms after the zoom or the scroll stops (one read for a burst of them; a read made stale by a jump is stopped,
+  its CLI killed), exact as soon as a signal changes at most `lazyKeep` times there (that clock: a 20 µs view, its 4000
+  edges as `sva vcd` cuts them, 0.3 s); a row scrolled away or out of its window goes back to its summary at once, the
+  windows held are at most `lazyHeld` changes. A draw never waits for a read. The narrowest view is a millionth of the
+  dump but at most 1 ns (a 200 ms dump zooms to one edge). What needs **every change** of a busy row — the FSM panel and
+  `fsm_stats` / `fsm_go`, the cycles, the gaps, assertions and expressions, *Save as WaveLens* — reads it whole when it
+  changes at most `lazyWhole` (1 000 000) times over the dump (a row as any other from then on); a busier one (that
+  100 MHz clock: 40 M) is refused with a message naming it (assertions: `sva eval --waves DUMP` gives the same verdicts
+  from a terminal; no cycles band, no gaps). The edge search, the range's counts, the cycles between two times and the
+  tooltip work where the row is held exactly, else say to zoom in; never a wrong count.
   With no `sva` CLI on the host (Windows without `wavelens.sva`), or one that fails on the VCD, the VCD is read whole
   instead, the reason in the tab and the log; an FST needs the CLI. VS Code then offers *WaveLens: Set the sva program…*
   (also in the tab's ⋯ menu): the sva programs found on the machine (on the PATH, `~/.cargo/bin`, the workspace's builds:
@@ -372,6 +389,8 @@ add theirs (`WaveLens.registerDefaults`).
 | `svaOpen` | false | the assertion list (`sva.js`) open when the page opens; folded: ▸ Assertions opens it |
 | `exprsOpen` | false | the list of expressions (`sva.js`) open when the page opens and it has some; folded: ▸ Expressions opens it |
 | `dumpBudget` | 3000000 | a VCD opened in the page (Open…, dropped on a viewer): the signals nearest the top up to this many value changes |
+| `lazyBuckets`, `lazyKeep` | 2048, 16384 | a large dump read by the window (the VS Code tab): a signal with more than `lazyKeep` changes in a window is read as `lazyBuckets` buckets of it (a bar where it is dense) |
+| `lazyWhole`, `lazyHeld` | 1000000, 2000000 | the most changes of one signal read whole for a feature that needs all of it; the changes held at most in the windows of the busy signals shown |
 | `busDetect`, `buses` | true, none | bus transactions (`bus.js`): the ports found by their names; ports of your own `[{protocol, scope, prefix, map, clock, name}]` |
 | `contextMenu` | true | the right button on the waves (a range and the viewer's menu), an alt+drag box and the Menu key there, and on the names (the menu of that row); false: the browser's (the box keeps its range) |
 | `menuTipDelay` | 2000 | ms before a tooltip in that menu shows (the bar's: 350 ms) |
@@ -1900,7 +1919,15 @@ values of the gap are). `sva vcd` of a VCD reads it with wellen: the adjacent bi
 large dump as it is needed (the VS Code tab): `--header` every declaration and the dump's first and last times, no
 value (313 kB and 0.01 s of a 127 MB FST of 10 000 signals); `--codes FILE` (`-`: stdin) the variables of those id
 codes as the whole text numbers them — their declarations in their scopes, their enum tables, their changes, the end
-(50 signals of it: 0.06 s); a reader of a part gets what it gets of the whole text for them. Of any dump a **cut**:
+(50 signals of it: 0.06 s); a reader of a part gets what it gets of the whole text for them. Neither reads the FST's
+table of times: the header of a 1 GB / 200 ms dump (40 M times) takes 0.03 s and 3 MB instead of 1.3 s and 600 MB.
+A **window** of them, `--codes FILE --from T --to T --lod N [--keep K]` (`--from`/`--to` default to the dump's ends):
+each variable's value at `--from` as `$dumpvars` (none yet: no line), its changes up to `--to`; one with more than K
+changes there (16384 by default) is reduced to N buckets of the window, a bucket of one or two changes whole, of more its
+last change only, and the line `$comment sva window FROM TO STEP INDEX=CHANGES:BUCKET*COUNT/RISES,… $end` after the
+declarations names them (INDEX: the id code's number from 0; the times in the dump's unit; RISES: the changes to 1 of a
+bit). The 9 busiest signals of that dump over all 200 ms in 2048 buckets: 0.7 MB in 3.3 s; a 1 ms window 0.34 s, 100 µs
+0.27 s. Of any dump a **cut**:
 `sva vcd DUMP --from T --to T [--signals PAT,…] [--out cut.vcd]` writes the declarations of those signals (paths or `*`
 `?` patterns; none: all; an element of an unpacked array by either name, `mem[1]` as Verilator's FST holds it or `mem.[1]`
 as `wave_signals` and the page list it, a `$var … [1]` in `$scope module mem` too; a name as `sva diff` and the page give

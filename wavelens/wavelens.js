@@ -75,7 +75,8 @@ const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight
   toolsCompact: 'auto', toolLayout: null, stripGroups: ['find', 'marks', 'cursor', 'edges'], toolAt: null, cursorStrip: true, cursorStripAt: 1,
   groupOrder: 'file', onlyGroups: true, moduleShading: true, findHighlight: true, findOpen: true, findMask: false, findCase: false, findWord: false,
   findRegex: false, cursorSnap: 8, keyHints: 200, showWidth: true, exprLibrary: [], sharedMarkers: false, keys: {},
-    wheel: 'scroll', contextMenu: true, enumColors: null, dumpBudget: 3000000, gaps: false, gapIdle: 16, gapKeep: 2,
+    wheel: 'scroll', contextMenu: true, enumColors: null, dumpBudget: 3000000, lazyBuckets: 2048, lazyKeep: 16384, lazyWhole: 1000000,
+    lazyHeld: 2000000, gaps: false, gapIdle: 16, gapKeep: 2,
     gapSignals: null, gapClock: null, gapAux: null, gapOnly: false, gapCount: 'clock', gapLine: 'dashdot', gapView: false, menuTipDelay: 2000, cycles: false,
     cycleClock: null, cycleZero: null, savePage: true, themeButton: 'auto', version: true, keysLeft: [], log: 'auto' };
 // a plugin's settings with their defaults (bus.js: busDetect, buses; sva.js: svaOpen, svaShow, svaSignals): in every
@@ -789,13 +790,19 @@ function parse(src) {
   return M;
 }
 // lazy rows (a large dump read as it is needed, "lazy": the id codes of a signal not read yet): the WaveJSON signals read
-// later (their path, their tv) onto their rows, the fields of a vector and a struct's whole value made again -> the rows
-function fillRows(M, sigs) {
+// later (their path, their tv) onto their rows, the fields of a vector and a struct's whole value made again -> the rows.
+// win (codesWin): the answer was a window of the dump; a row reduced in it, or of a window that is not the whole dump,
+// holds its changes in part (r.part, partOf): r.tr then has the value at part.a, the changes up to part.b, and of each
+// dense span (more changes than the reader kept) only its last change; the summary over the whole dump kept as r.sum
+function fillRows(M, sigs, win = null, only = null) {   // only: rows read again (a detail window of part rows), lazy or not
   const by = new Map(sigs.filter(s => s && s.path && s.tv).map(s => [s.path, s])), got = new Set();
   for (const r of M.rows) {
-    if (r.type !== 'sig' || !r.lazy || r.field) continue;
+    if (r.type !== 'sig' || r.field || !(r.lazy || (only && only.has(r)))) continue;
     const s = by.get(r.path); if (!s) continue;
-    const w = r.width; r.src.tv = s.tv; r.tr = parseTV(r.src, r).tr; r.width = w; r.lazy = false; got.add(r);
+    const w = r.width; r.src.tv = s.tv; r.tr = parseTV(r.src, r).tr; r.width = w; r.lazy = false; r.unread = null; got.add(r);
+    r.part = win ? winPart(win, r.src.lazy || [], M) : null;
+    if (!r.part) r.sum = null;   // the whole dump read whole: a row as any other
+    else if (r.part.whole) r.sum = { tr: r.tr, part: r.part };   // the summary, kept: a detail window falls back to it
   }
   if (!got.size) return [];
   rowsMade(M, got);
@@ -813,6 +820,48 @@ function rowsMade(M, got) {
     g.sig.tr = joinBits(g, structParts(M, g)).tr;
   }
 }
+// The window of an answer of sva vcd --codes --from --to --lod (its line "$comment sva window FROM TO STEP INDEX=CHANGES:
+// BUCKET*COUNT/RISES,... $end", times in the dump's unit) -> { from, to, step (ps), red: Map of the reduced variables by
+// their index (an id code's number: codeIndex) -> { n: its changes in the window, dense: [[bucket, count, rises]] } };
+// null: no window (a whole read: an older reader, a plain page)
+function codesWin(text) {
+  const m = /\$comment sva window (\d+) (\d+) (\d+)((?: \S+)*) \$end/.exec(text); if (!m) return null;
+  const ts = /\$timescale\s+(\d+)\s*(fs|ps|ns|us|ms|s)\b/.exec(text);
+  const u = ts ? +ts[1] * { fs: 1e-3, ps: 1, ns: 1e3, us: 1e6, ms: 1e9, s: 1e12 }[ts[2]] : 1, red = new Map();
+  for (const w of m[4].split(' ').filter(Boolean)) {
+    const [idx, rest = ''] = w.split('='), [n, list = ''] = rest.split(':');
+    const bucket = x => { const [i, c = ''] = x.split('*'), [k, r] = c.split('/'); return [+i, +k, +r]; };
+    red.set(+idx, { n: +n, dense: list.split(',').filter(Boolean).map(bucket) });
+  }
+  return { from: +m[1] * u, to: +m[2] * u, step: +m[3] * u, red };
+}
+// an id code's number (sva's index of a variable: base 94 over ! .. ~, the first character the lowest digit)
+const codeIndex = c => { let n = 0; for (let i = c.length - 1; i >= 0; i--) n = n * 94 + c.charCodeAt(i) - 32; return n - 1; };
+// the part of a row of these id codes in a window: null when it holds the whole dump unreduced (a row as any other);
+// else { a, b: the window, step, dense: [[t0, t1, count, rises]] (changes in (t0, t1], sorted), n: its changes in the
+// window, whole: the window is the whole dump (the summary), exact: no dense span }
+function winPart(win, codes, M) {
+  const dense = []; let n = 0, red = false;
+  for (const c of codes) {
+    const x = win.red.get(codeIndex(c)); if (!x) continue;
+    red = true; n += x.n;
+    for (const [i, k, r] of x.dense) dense.push([win.from + i * win.step, Math.min(win.from + (i + 1) * win.step, win.to), k, r]);
+  }
+  const whole = win.from <= M.t0 && win.to >= M.t1;
+  if (!red && whole) return null;
+  dense.sort((a, b) => a[0] - b[0]);
+  return { a: win.from, b: win.to, step: win.step, dense, n, whole, exact: !dense.length };
+}
+// the part a row holds (a copy, a field, a bit, a slice: their signal's), null: the whole dump
+const partOf = r => { const q = r && (r.dupOf || r.of || r); return (q && q.part) || null; };
+// the first dense span of a part that [a, b] reaches into (a == b: a time inside one), else null
+function denseAt(p, a, b) {
+  const d = p.dense; let lo = 0, hi = d.length;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (d[m][1] <= a) lo = m + 1; else hi = m; }
+  return lo < d.length && d[lo][0] < b && a < d[lo][1] ? d[lo] : null;
+}
+// a row's changes over [a, b] are all held: read, and in a part row inside its window and in no dense span
+const exactIn = (r, a, b) => { if (!r || r.lazy) return false; const p = partOf(r); return !p || (p.a <= a && b <= p.b && !denseAt(p, a, b)); };
 // the rows a row on the screen needs read (lazy): itself, the vector of a field, every signal of a struct
 const lazyOf = (M, r0, r = r0.dupOf || r0) => (r.type === 'sig' ? (r.lazy ? [r] : r.field && r.of && r.of.lazy ? [r.of] : []) :
   r.type === 'group' && r.sig && r.sig.struct ? M.rows.slice(M.rows.indexOf(r) + 1, r.last + 1).filter(q => q.lazy) : []);
@@ -2070,10 +2119,41 @@ function paintAnalog(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk) {
     lab = { size: S.labelSize - 1, fill: 'muted' };
     P.text(xL + 4, yh + 2, f(hi), lab); P.text(xL + 4, yl - 2, f(lo), lab); }
 }
+// A run of dense spans of a row held in part (more changes there than were read): a bar; its buckets wider than 3 px
+// (zoomed in further than it was read: coarse) hatched, not read at this zoom yet
+function denseBar(P, x0, x1, yh, yl, fill, bit, coarse) {
+  const box = [['M', x0, yh], ['L', x1, yh], ['L', x1, yl], ['L', x0, yl], ['Z']];
+  if (!coarse) { P.path(box, { fill, alpha: bit ? 0.85 : 0.55 }); return; }
+  P.path(box, { fill, alpha: 0.3 });
+  P.clip(x0, yh, x1 - x0, yl - yh, () => {
+    const hh = yl - yh, d = []; for (let x = x0 - hh; x < x1; x += 5) d.push(['M', x, yl], ['L', x + hh, yh]);
+    P.path(d, { stroke: fill, w: 0.8, alpha: 0.6 });
+  });
+}
 // sk: its colour (a viewer's paint), bg: the row's background (the module band), tint: selected (the bus values too), lane: half
 // a row (a compare's overlay): less margin, a smaller text
+// A part row's changes to draw: each run of adjacent dense spans an entry { t: its start, k: 'dense', end }, then the value
+// it ends with at its end (the summary keeps one change of a dense bucket, often equal to the one before it: dropped, so a
+// run is never found through the changes), the changes inside a run left out; kept on the row while its changes are these
+function partTr(s, a, pt) {
+  const c = s.paintPart; if (c && c.tr === a && c.p === pt) return c.out;
+  const runs = [], out = [];
+  for (const x of pt.dense) { const L = runs[runs.length - 1]; if (L && x[0] <= L[1]) L[1] = Math.max(L[1], x[1]); else runs.push([x[0], x[1]]); }
+  let k = 0;
+  for (const [t0, t1] of runs) {
+    while (k < a.length && a[k].t <= t0) out.push(a[k++]);
+    while (k < a.length && a[k].t <= t1) k++;
+    out.push({ t: t0, k: 'dense', end: t1 });
+    const i = lastLE(a, t1); if (i >= 0) out.push(Object.assign({}, a[i], { t: t1, s: true }));
+  }
+  while (k < a.length) out.push(a[k++]);
+  s.paintPart = { tr: a, p: pt, out };
+  return out;
+}
 function paintSig(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk = s.stroke, bg = 'panel', tint = false, lane = false) {
-  const a = s.tr; if (!a.length) return;
+  if (!s.tr.length) return;
+  // a row held in part (a large dump read by the window): its dense spans as bars (partTr, denseBar), its last value to its window's end
+  const pt = partOf(s), a = pt && pt.dense.length ? partTr(s, s.tr, pt) : s.tr, sEnd = pt && pt.b < (s.end ?? tEnd) ? pt.b : (s.end ?? tEnd);
   if (s.analog && s.width > 1) return paintAnalog(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk);
   const yh = y + (lane ? 1 : 4), yl = y + h - (lane ? 1 : 5), ym = (yh + yl) / 2;
   const cl = x => Math.min(Math.max(x, xL - 8), xR + 8);
@@ -2083,16 +2163,20 @@ function paintSig(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk = s.stroke, bg = 'pane
   const flush = x => { if (lv) { lv.push(['L', cl(x), py]); P.path(lv, { stroke: trace, w: S.traceWidth, dash: lvDash }); lv = null; } };
   for (let i = Math.max(lastLE(a, tA), 0); i < a.length && a[i].t <= tB; i++) {
     const o = a[i], xs = X(o.t);
+    if (o.k === 'dense') {   // a run of dense spans: a bar
+      flush(xs); xe = X(o.end);
+      denseBar(P, cl(xs), cl(xe), yh, yl, s.width === 1 ? trace : sk || 'bus', s.width === 1, X(o.t + pt.step) - xs > 3); pk = null; pw = 1; continue;
+    }
     // burst: transitions less than 1 px apart (a clock or busy bus far zoomed out) -> one solid bar, not thousands of edges
-    if (i + 2 < a.length && X(a[i + 1].t) - xs < 1 && X(a[i + 2].t) - X(a[i + 1].t) < 1) {
+    if (i + 2 < a.length && a[i + 1].k !== 'dense' && a[i + 2].k !== 'dense' && X(a[i + 1].t) - xs < 1 && X(a[i + 2].t) - X(a[i + 1].t) < 1) {
       let j = i + 2;
-      while (j + 1 < a.length && a[j + 1].t <= tB && X(a[j + 1].t) - X(a[j].t) < 1) j++;
+      while (j + 1 < a.length && a[j + 1].k !== 'dense' && a[j + 1].t <= tB && X(a[j + 1].t) - X(a[j].t) < 1) j++;
       const x0 = cl(xs), x1 = cl(X(a[j].t)), bit = s.width === 1 && o.k !== '=';
       flush(xs);
       P.path([['M', x0, yh], ['L', x1, yh], ['L', x1, yl], ['L', x0, yl], ['Z']], { fill: bit ? trace : sk || 'bus', alpha: bit ? 0.85 : 0.55 });
       pk = null; pw = 1; i = j - 1; continue;
     }
-    xe = X(i + 1 < a.length ? a[i + 1].t : (s.end ?? tEnd));
+    xe = X(i + 1 < a.length ? a[i + 1].t : sEnd);
     const w = xe - xs, sl = o.s ? 0 : Math.max(0, Math.min(slope, w / 3, pw / 3));
     if (o.k === '0' || o.k === '1' || o.k === 'u' || o.k === 'd') {
       const yv = (o.k === '1' || o.k === 'u') ? yh : yl, dash = (o.k === 'u' || o.k === 'd') ? [3, 2] : null;
@@ -2233,7 +2317,10 @@ function paintBody(P, M, lay, X, tA, tB, xL, xR, hl, sel, allLay, band, late, st
     if (bgOnly) continue;
     if (row.draw) plugSafe(row.draw, null, 'a plugin\'s row', row, P, { y, h, X, tA, tB, xL, xR });
     if (row.overlay) over.add(row.overlay);
-    if (row.lazy) { P.text(xL + 6, y + h / 2, 'reading…', { size: 10, fill: 'muted' }); rowY.set(row, y + h / 2); continue; }   // not read yet
+    if (row.lazy) {   // not read yet; a read that failed: why
+      P.text(xL + 6, y + h / 2, row.unread ? 'not read: ' + row.unread : 'reading…', { size: 10, fill: row.unread ? 'x' : 'muted' });
+      rowY.set(row, y + h / 2); continue;
+    }
     if (row.type === 'sig') { if (row.tr) paintSig(P, row, y, h, X, tA, tB, xL, xR, M.t1, strokeOf(row), b === 1 ? 'band' : 'panel', isSel);
       rowY.set(row, y + h / 2); }
   }
@@ -3512,6 +3599,9 @@ class Notes {
 // a piece of the page lives; the viewer is the one object that plugins and tests talk to.
 /* ---------------- interactive viewer ---------------- */
 const PNG_MAX = 16384;   // px, a side of a canvas that every browser draws
+const CODES_PORTION = 32;   // a large dump's rows read at once (need): a portion, one read at a time
+const WIN_DEBOUNCE = 150;   // ms after a zoom or a scroll before the busy rows' window is read again (a wheel burst: one read)
+const LEFT_OUT = 'not in the dump read';   // a lazy row an answer did not bring (need asks it again, a draw does not)
 const VIEWS = new Set(), ACTIVE = { view: null };   // ACTIVE.view: the viewer used last (Esc while the focus is on the page)
 const PLUGINS = [];   // WaveLens.plugin(fn): fn(viewer) for every viewer, now and later (wavelens/sva.js: the assertions panel)
 const STATE_VERSION = 3;   // a saved viewer state (state()): 2 has range and edge, 3 your markers and groups
@@ -3566,7 +3656,8 @@ class WaveView {
     this.rowsKey = 'wavelens.rows:' + this.storeId; this.radixes = new Map(); this.analogs = new Map(); this.hiddenRows = new Set();
     this.bitsOpen = new Set(); this.bitMemo = new WeakMap(); this.dups = new Map(); this.dupsBy = new Map(); this.deltas = false; this.loadRows();
     this.t0 = M.t0; this.span = M.t1 - M.t0;
-    this.minSpan = opts.minSpan ?? (M.timed ? Math.max(this.span / 1e6, 10) : 0.5);
+    // the narrowest view: a millionth of the dump, at most 1 ns (a 200 ms dump: one clock edge, not 20 periods), at least 10 ps
+    this.minSpan = opts.minSpan ?? (M.timed ? Math.max(Math.min(this.span / 1e6, 1000), 10) : 0.5);
     // what the page gives that is no time is left out, a cursor outside the waves put at their end: said in the log (B-71, B-72, B-80)
     const said = M.dropped.slice(), tOf = x => (typeof x === 'number' ? x : num(parseT(x)));
     if (opts.cursor != null && !isFinite(tOf(opts.cursor))) said.push(noTime('the cursor of the page', null, opts.cursor));
@@ -4782,10 +4873,15 @@ class WaveView {
     let best = null, at = null;
     const w = kind === 'value' ? (want != null ? parseWant(want) : parseWant(this.evEl && this.evEl.value)) : null;
     if (kind === 'value' && !w) { if (this.evEl) { this.evEl.hidden = false; this.bad(this.evEl); this.evEl.focus(); } return this; }
+    let partly = null;   // a row of a large dump held in part: an edge only where it is held exactly (else: zoom in)
     for (const s of this.sel ? [this.sel] : this.vis.filter(r => r.type === 'sig' && r.tr)) {
       const t = findEdge(s, this.cursor, dir, kind, w, this.S.radix);
+      if (t != null && partOf(s) && !exactIn(s, Math.min(t, this.cursor), Math.max(t, this.cursor))) { partly = partly || s; continue; }
+      const p = partOf(s);   // none found in what is held: a detail window, or dense spans of the summary on that side
+      if (t == null && p && (!p.whole || denseAt(p, dir > 0 ? this.cursor : -Infinity, dir > 0 ? Infinity : this.cursor))) { partly = partly || s; continue; }
       if (t != null && (best == null || (dir > 0 ? t < best : t > best))) { best = t; at = s; }
     }
+    if (best == null && partly) { this.toast(`${partly.name} is read in part here (a large dump): zoom in to step through its edges`); return this; }
     if (best == null) { if (kind === 'value' ||
       kind === 'xz') this.toast(`no ${kind === 'xz' ? 'X / Z' : w.text} ${dir > 0 ? 'after' : 'before'} the cursor${this.sel ? ' on ' + this.sel.name : ''}`);
       return this; }
@@ -5173,7 +5269,7 @@ class WaveView {
   }
   // the rising edges of clk in (a, b]: two searches in its (cached) list of rise times, not a pass over all its changes
   cycles(clk, a, b) {
-    if (!clk) return null;
+    if (!clk || (partOf(clk) && !exactIn(clk, Math.min(a, b), Math.max(a, b)))) return null;   // a busy clock held in part: not known
     const ups = riseTimes(clk);
     const le = t => { let lo = 0, hi = ups.length; while (lo < hi) { const m = (lo + hi) >> 1; if (ups[m] <= t) lo = m + 1; else hi = m; } return lo; };
     return le(Math.max(a, b)) - le(Math.min(a, b));
@@ -5271,7 +5367,8 @@ class WaveView {
     const key = `${a}|${b}|${s ? s.full : ''}|${clk ? clk.full : ''}|${zero}`;
     if (this.rangeKey === key) return this.rangeTxt;
     let more = '';
-    if (s && s.tr && s.tr.length) {
+    if (s && s.tr && s.tr.length && partOf(s) && !exactIn(s, a, b)) more = ` · ${s.name} read in part here: zoom in for its changes`;
+    else if (s && s.tr && s.tr.length) {
       const tr = s.tr, i0 = lastLE(tr, a) + 1, i1 = lastLE(tr, b), bus = s.width > 1 || tr.some(o => o.k === '=');
       const nm = s.bit != null && s.of ? s.of.name + s.name : s.name;   // a bus's bit with its bus: "PADDR[0]", not "[0]"
       if (!bus) { let n = 0; for (let i = Math.max(i0, 1); i <= i1; i++) if (tr[i].k === '1' && tr[i - 1].k === '0') n++;
@@ -5439,26 +5536,137 @@ class WaveView {
     for (const o of lay) if (o.y + o.h >= oy && o.y <= oy + h) for (const r of lazyOf(this.M, o.row.orig || o.row)) if (!this.lazyWait.has(r)) want.add(r);
     if (want.size) this.need([...want]);
   }
+  // The whole history of some rows for a feature that needs all of it (the FSM panel, the cycles, the gaps, assertions and
+  // expressions, Save as WaveLens): read as needed (need), then a row held in part (a busy signal of a large dump) read whole
+  // when it changes at most lazyWhole times over the dump (a row as any other from then on, its summary dropped); one that
+  // changes more: refused, an error naming it and `what` (once said, not read again) -> this
+  async needWhole(rows, what) {
+    await this.need(rows);
+    const M = this.M, S = this.S, sigs = new Set();
+    for (const r0 of rows) { const q = r0.orig || r0, r = q.dupOf || q.of || q;
+      if (r.type === 'sig') sigs.add(r);
+      else if (r.type === 'group' && r.sig) M.rows.slice(M.rows.indexOf(r) + 1, r.last + 1).filter(k => k.type === 'sig').forEach(k => sigs.add(k)); }
+    const part = [...sigs].filter(r => r.sum), no = part.filter(r => r.sum.part.n > S.lazyWhole), read = part.filter(r => !no.includes(r));
+    if (read.length && this.opts.loadCodes) {
+      const win = { from: Math.max(0, Math.floor(M.t0)), to: Math.ceil(M.t1), lod: 1, keep: S.lazyWhole };
+      for (let i = 0; i < read.length; i += 4) {   // a few at a time: each up to lazyWhole changes
+        const some = read.slice(i, i + 4), text = await this.opts.loadCodes([...new Set(some.flatMap(r => r.src.lazy || []))], win);
+        if (!VIEWS.has(this) || this.root.waveView !== this) return this;
+        const got = fillRows(M, vcdSignals(vcdToWave(text, { name: this.opts.title, budget: Infinity }).doc.signal), codesWin(text), new Set(some));
+        for (const r of got) { r.an = null; if (this.partRows) this.partRows.delete(r); }
+        if (got.length) { this.cmpTake(got); this.dataChanged(); this.invalidate(); }
+      }
+      no.push(...read.filter(r => r.sum));
+    }
+    if (no.length) throw new Error(this.partWhy(no, what));
+    return this;
+  }
+  // why a feature cannot have every change of these rows (a large dump's busy signals)
+  partWhy(rows, what) {
+    const r = rows[0], n = r.sum ? r.sum.part.n : 0, more = rows.length > 1 ? ` (and ${rows.length - 1} more)` : '';
+    return `${r.full}${more} changes ${n.toLocaleString('en')} times, more than lazyWhole (${this.S.lazyWhole.toLocaleString('en')}): ${what} ` +
+      'needs every change of it, and this large dump is read by the window';
+  }
+  // A large dump's busy rows (held in part: r.part) on the screen, zoomed in past what they hold or scrolled out of it: their
+  // window read again after WIN_DEBOUNCE ms (one read for the view and half a span each side: sva vcd --codes --from --to
+  // --lod --keep), the read in flight that no longer covers the view stopped; meanwhile, and for the rows that left the
+  // screen, their summary (r.sum): a draw never waits. The windows held: at most lazyHeld changes, the oldest dropped first
+  winWant(lay, oy, h) {
+    if (!this.opts.loadCodes || !this.M.rows.some(r => r.sum)) return;
+    const S = this.S, span = this.span, t0 = this.t0, t1 = t0 + span, on = new Set();
+    for (const o of lay) if (o.y + o.h >= oy && o.y <= oy + h) { const q = o.row.orig || o.row, s = q.dupOf || q.of || q; if (s.sum && !s.lazy) on.add(s); }
+    const fresh = p => p.a <= t0 && p.b >= t1 && (p.exact || p.step <= 4 * span / S.lazyBuckets);
+    let back = false;
+    this.partRows = this.partRows || new Map();   // the rows holding a detail window -> when it came
+    for (const [r] of this.partRows) if (!on.has(r) || !(r.part && r.part.a <= t0 && r.part.b >= t1)) { this.toSum(r); back = true; }
+    if (back) this.dataChanged();
+    const want = [...on].filter(r => !fresh(r.part));
+    const ask = this.winAsk;
+    if (ask && (!want.length || !(ask.a <= t0 && ask.b >= t1 && ask.step <= 4 * span / S.lazyBuckets))) { this.winAsk = null; if (ask.p.stop) ask.p.stop(); }
+    clearTimeout(this.winT);
+    if (want.length && !this.winAsk) this.winT = setTimeout(() => this.winRead(), WIN_DEBOUNCE);
+  }
+  // before a frame: the busy rows whose window no longer covers the view back to their summary
+  winBack() {
+    if (!this.partRows || !this.partRows.size) return;
+    const t0 = this.t0, t1 = t0 + this.span; let back = false;
+    for (const [r] of this.partRows) if (!(r.part && r.part.a <= t0 && r.part.b >= t1)) { this.toSum(r); back = true; }
+    if (back) this.dataChanged();
+  }
+  // a row back to its summary (its window dropped)
+  toSum(r) { r.tr = r.sum.tr; r.part = r.sum.part; r.an = null; this.partRows.delete(r); }
+  // the window of the view read for the busy rows on the screen (winWant), in one read; its answer taken while it is the
+  // read wanted (not stopped, the viewer the same)
+  winRead() {
+    if (!VIEWS.has(this) || this.root.waveView !== this) return;
+    const M = this.M, S = this.S, span = this.span, t0 = this.t0, lay = this.lay || [], oy = this.oy || 0, h = this.hc || 0, rows = new Set();
+    for (const o of lay) if (o.y + o.h >= oy && o.y <= oy + h) { const q = o.row.orig || o.row, s = q.dupOf || q.of || q; if (s.sum && !s.lazy) rows.add(s); }
+    const fresh = p => p.a <= t0 && p.b >= t0 + span && (p.exact || p.step <= 4 * span / S.lazyBuckets);
+    const list = [...rows].filter(r => !fresh(r.part)).slice(0, CODES_PORTION);
+    if (!list.length) return;
+    const a = Math.max(M.t0, Math.floor(t0 - span / 2)), b = Math.min(M.t1, Math.ceil(t0 + span * 3 / 2));
+    const win = { from: Math.max(0, a), to: b, lod: S.lazyBuckets, keep: S.lazyKeep };
+    const p = this.opts.loadCodes([...new Set(list.flatMap(r => r.src.lazy || []))], win);
+    const ask = this.winAsk = { a, b, step: (b - a) / S.lazyBuckets, p };
+    p.then(text => {
+      if (this.winAsk !== ask || !VIEWS.has(this) || this.root.waveView !== this) return;
+      this.winAsk = null;
+      const only = new Set(list), got = fillRows(M, vcdSignals(vcdToWave(text, { name: this.opts.title, budget: Infinity }).doc.signal), codesWin(text), only);
+      const now = performance.now();
+      for (const r of got) { r.an = null; if (r.part && !r.part.whole) this.partRows.set(r, now); else this.partRows.delete(r); }
+      // the windows held at most lazyHeld changes: the oldest back to their summary
+      let held = 0; const old = [...this.partRows].sort((x, y) => y[1] - x[1]);
+      for (const [r] of old) { held += r.tr.length; if (held > S.lazyHeld) this.toSum(r); }
+      if (got.length) { this.cmpTake(got); this.dataChanged(); }
+      this.invalidate();
+    }, e => {
+      if (this.winAsk === ask) this.winAsk = null;
+      if (e && e.stopped || !VIEWS.has(this)) return;
+      this.logError(e, 'reading a window of the signals: ' + e.message);
+    });
+  }
   // the changes of these rows read (the ones not read yet; a row asked for already: that read) -> a promise, when they are
   // there; the assertions, the FSM panel and the commands ask for theirs this way. A read that failed is not run again on
   // every draw: its rows wait for the dump read again (⟳, R; bughunt B-20); an answer for a viewer gone (destroyed, another
   // on its element) is dropped (B-21)
   need(rows) {
-    const M = this.M, all = new Set(rows.flatMap(r => lazyOf(M, r.orig || r))), ask = [...all].filter(r => !this.lazyWait.has(r));
-    const gone = () => !VIEWS.has(this) || this.root.waveView !== this;
+    // a row an answer left out is asked again when a feature or a command needs it (here), never by a draw (lazyAsk: it is
+    // still in lazyWait); a row whose read failed waits for the dump read again
+    const M = this.M, all = new Set(rows.flatMap(r => lazyOf(M, r.orig || r)));
+    for (const r of all) if (r.unread === LEFT_OUT) { r.unread = null; this.lazyWait.delete(r); }
+    const ask = [...all].filter(r => !this.lazyWait.has(r) && !r.unread);
     if (ask.length && this.opts.loadCodes) {
-      const p = (async () => {
-        const text = await this.opts.loadCodes([...new Set(ask.flatMap(r => r.src.lazy || []))]);
-        if (gone()) return [];
-        const got = fillRows(M, vcdSignals(vcdToWave(text, { name: this.opts.title, budget: Infinity }).doc.signal));
-        for (const r of ask) if (r.lazy) this.lazyWait.delete(r);   // not in what came: asked again when it is on the screen
-        if (got.length) { this.cmpTake(got); this.dataChanged(); this.invalidate(); }
-        return got;
-      })().catch(e => { if (gone()) return []; this.toast('reading the signals: ' + e.message);
-        this.logError(e, 'reading the signals: ' + e.message); return []; });
-      for (const r of ask) this.lazyWait.set(r, p);
+      // in portions, one read at a time: a dense clock's read does not hold back the rows after it (stage 2 R4)
+      for (let i = 0; i < ask.length; i += CODES_PORTION) {
+        const part = ask.slice(i, i + CODES_PORTION);
+        const p = this.lazyQ = (this.lazyQ || Promise.resolve()).then(() => this.readRows(part));
+        for (const r of part) this.lazyWait.set(r, p);
+      }
     }
     return Promise.all([...all].map(r => this.lazyWait.get(r)).filter(Boolean)).then(() => this);
+  }
+  // One read of some lazy rows: the whole dump as a summary (sva vcd --codes --from --to --lod --keep: a signal that changes
+  // more than lazyKeep times is reduced to lazyBuckets buckets and its row holds it in part: fillRows). A row the answer
+  // leaves out, or a read that failed: r.unread, said on the row and not asked again until the dump is read again (no read
+  // on every draw); a stopped read: nothing said
+  async readRows(rows) {
+    const M = this.M, S = this.S, gone = () => !VIEWS.has(this) || this.root.waveView !== this;
+    if (gone()) return [];
+    const win = { from: Math.max(0, Math.floor(M.t0)), to: Math.ceil(M.t1), lod: S.lazyBuckets, keep: S.lazyKeep };
+    try {
+      const text = await this.opts.loadCodes([...new Set(rows.flatMap(r => r.src.lazy || []))], win);
+      if (gone()) return [];
+      const got = fillRows(M, vcdSignals(vcdToWave(text, { name: this.opts.title, budget: Infinity }).doc.signal), codesWin(text));
+      for (const r of rows) if (r.lazy) r.unread = LEFT_OUT;
+      if (got.length) { this.cmpTake(got); this.dataChanged(); }
+      this.invalidate();
+      return got;
+    } catch (e) {
+      if (gone() || e.stopped) return [];
+      for (const r of rows) if (r.lazy) r.unread = e.message;
+      this.toast('reading the signals: ' + e.message); this.logError(e, 'reading the signals: ' + e.message); this.invalidate();
+      return [];
+    }
   }
   // the changes of some rows are others (read late, a compare's B shown or not): what the viewer made of them made again —
   // the clock and its cycles, the FSMs, the gaps' warp, the range, the value column (bughunt B-18, B-19)
@@ -5471,6 +5679,11 @@ class WaveView {
   }
   // the tooltip of a signal at t: its value there, the change into it and the next change ("prev → value @ t")
   valueTip(r, t) {
+    const pt = partOf(r), d = pt && denseAt(pt, t, t);
+    if (pt && (d || t < pt.a || t > pt.b)) {
+      return `${r.name}: ${d ? d[2].toLocaleString('en') + ' changes in this stretch' : 'not read here'} (a large dump read by the window): zoom in` +
+        this.cmpTip(r, t);
+    }
     const a = r.tr, i = lastLE(a, t), txt = o => o.k === '=' ? vtext(r, o, this.S.radix) : o.k;
     if (i < 0) return `${r.name}: no value yet${this.cmpTip(r, t)}`;
     const o = a[i], p = a[i - 1], n = a[i + 1];
@@ -5480,7 +5693,7 @@ class WaveView {
   // a row's value at the cursor, at the second cursor, and the change between them: "0x04 · 0x40 · +0x3c"
   valueTwo(sig, both = false) {   // both: the change in both forms, modulo and signed (the title)
     const a = String(this.valueAt(sig, this.cursor)), b = String(this.valueAt(sig, this.cursor2));
-    if (sig.value || !sig.tr) return `${a} · ${b}`;
+    if (sig.value || !sig.tr || a === '…' || b === '…') return `${a} · ${b}`;
     const o = t => { const i = lastLE(sig.tr, t); return i < 0 ? null : sig.tr[i]; };
     const d = cursorDiff(sig, o(this.cursor), o(this.cursor2), this.S.radix, both);
     return d.includes(' → ') ? d : `${a} · ${b} · ${d}`;   // an enum's names: the change says both
@@ -5488,6 +5701,8 @@ class WaveView {
   valueAt(sig, t) {
     if (sig.value) return plugSafe(sig.value, this, 'a plugin\'s value', sig, t) ?? '';
     if (!sig.tr) return '';
+    // a row held in part (a large dump read by the window): outside what it holds, or in a dense span, not known here
+    const p = partOf(sig); if (p && (t < p.a || t > p.b || denseAt(p, t, t))) return '…';
     const i = lastLE(sig.tr, t); if (i < 0) return '';
     const o = sig.tr[i]; return o.k === '=' ? vtext(sig, o, this.S.radix) : o.k;
   }
@@ -5506,9 +5721,10 @@ class WaveView {
     const lay = this.lay = this.layout();
     if (this.wcol.style.height !== lay.H + 'px') this.wcol.style.height = lay.H + 'px';
     if (this.sel && !this.vis.includes(this.sel)) { this.sel = null; if (this.mods) this.mods.render(); }   // folded away (the panel's ● goes)
+    this.winBack();   // a busy row whose window no longer covers the view: drawn from its summary in this frame
     if (this.printing) this.paintPrint(lay);
     else { const f = this.size(lay); this.names.slide(f.oy, f.Hc); this.bmGeo = this.paintFrame(this.canvas, f.W, f.Hc, f.oy, lay, true, f.dpr);
-      this.lazyAsk(lay, f.oy, f.Hc); }
+      this.lazyAsk(lay, f.oy, f.Hc); this.winWant(lay, f.oy, f.Hc); }
     this.syncReadouts();
   }
   size(lay) { // the canvas: as wide as its column, as tall as the rows in view (at least the axis and a little more)
@@ -5665,6 +5881,7 @@ class WaveView {
     if (this.stripRO) this.stripRO.disconnect(); cancelAnimationFrame(this.stripRaf);
     this.help(false);
     cancelAnimationFrame(this.raf); cancelAnimationFrame(this.inv); clearTimeout(this.toastT); clearTimeout(this.gapTypeT);
+    clearTimeout(this.winT); if (this.winAsk && this.winAsk.p.stop) this.winAsk.p.stop();   // a window of a large dump being read: stopped
     if (ACTIVE.view === this) ACTIVE.view = null;
     this.closeMenu(); if (this.mods) { this.mods.ac.abort(); this.mods.el.remove(); } if (this.fsmP) { this.fsmP.ac.abort(); this.fsmP.el.remove(); }
     VIEWS.delete(this);
@@ -6956,8 +7173,10 @@ Object.assign(WaveView.prototype, {
     const key = JSON.stringify(o);
     if (!this.cycMemo || this.cycMemo.key !== key) {
       const clk = cycClock(this.M.rows, o.cycleClock), ups = clk ? cycUps(clk) : [];
-      if (clk && clk.lazy) this.need([clk]);   // a large dump: the clock read, the band drawn when it is there (need resets the memo)
-      this.cycMemo = { key, d: clk && ups.length ? { clk, ups, iz: cycZero(ups, o.cycleZero, this.M.t0) } : null };
+      // a large dump: the clock read whole, the band drawn when it is there (need resets the memo); one too busy to read whole: none
+      const once = e => { if (this.cycNo !== clk) { this.cycNo = clk; this.toast(e.message); } };
+      if (clk && (clk.lazy || clk.sum)) this.needWhole([clk], 'the cycles').catch(once);
+      this.cycMemo = { key, d: clk && ups.length && !clk.sum ? { clk, ups, iz: cycZero(ups, o.cycleZero, this.M.t0) } : null };
     }
     return this.cycMemo.d;
   },
@@ -7370,9 +7589,12 @@ Object.assign(WaveView.prototype, {
     let m = this.warpMemo;
     if (!m || m.gck !== G.clk || m.run !== this.cmpRun || !same(m.rows, rows) || !same(m.ref, ref) || !m.by !== !by) {
       const sigs = by ? [] : ref.length ? ref : rows, clk = this.gapClockFor(rows);
-      const un = [...(clk ? [clk] : []), ...sigs].filter(r => lazyOf(M, r.orig || r).length);
-      if (un.length) this.need(un);   // a large dump: read, then worked out again (need resets the memo)
-      m = this.warpMemo = { rows, ref, sigs, clk, gck: G.clk, run: this.cmpRun, by, ts: gapTimes(sigs, M.t0, M.t1, clk, ref.length > 0) };
+      const un = [...(clk ? [clk] : []), ...sigs].filter(r => lazyOf(M, r.orig || r).length || (r.orig || r).sum);
+      // a large dump: read whole, then worked out again (need resets the memo); a busy row held in part: no gaps (its summary
+      // has none of the changes inside its dense spans), said once
+      if (un.length) this.needWhole(un, 'the gaps').catch(e => { if (this.gapNo !== e.message) { this.gapNo = e.message; this.toast(e.message); } });
+      const partly = [...(clk ? [clk] : []), ...sigs].some(r => (r.orig || r).sum);
+      m = this.warpMemo = { rows, ref, sigs, clk, gck: G.clk, run: this.cmpRun, by, ts: partly ? [] : gapTimes(sigs, M.t0, M.t1, clk, ref.length > 0) };
     }
     const bm = this.bms.map(x => x.t), key = JSON.stringify([g.gapIdle, g.gapKeep, bm]);
     if (m.key !== key || m.by !== by) { m.key = key; m.by = by;
@@ -7978,7 +8200,7 @@ const fsmRow = (v, spec) => { const all = v.fsms(true), p = String(spec ?? ''), 
 command('fsm_stats', 'signal', 'an FSM on these waves: each state of its table with how many times it entered it, the time it held it (share: of ' +
   'the whole time) and its first entry; the states it never reaches (never); the values not in its table (invalid: x, z, a code without a ' +
   'label); its changes from one value to another, the most frequent first, with their count and first time', async (v, a) => {
-  const r = fsmRow(v, a.signal); await v.need([r]);   // a large dump read as it is needed: its changes first
+  const r = fsmRow(v, a.signal); await v.needWhole([r], 'fsm_stats');   // a large dump read as it is needed: its changes first, whole
   const st = v.fsmStatsOf(r), span = v.M.t1 - v.M.t0;
   const one = s => ({ state: st.name(s.key), value: s.key, entries: s.entries.length, first: s.entries.length ? s.entries[0] : null, time: s.time,
     share: span > 0 ? Math.round(1e4 * s.time / span) / 1e4 : 0 });
@@ -8002,7 +8224,7 @@ command('fsm_panel', 'signal? tab? off?', 'the FSM panel (T): open, with an FSM\
 });
 command('fsm_go', 'signal state? from? to? dir? first?', 'the cursor to the next (dir 1) or previous (-1) time an FSM enters a state (its ' +
   'label or value) or makes a change (from, to: labels or values); first: the first time; past the last it rounds to the first', async (v, a) => {
-  const r = fsmRow(v, a.signal); await v.need([r]);
+  const r = fsmRow(v, a.signal); await v.needWhole([r], 'fsm_go');
   if (a.state == null && (a.from == null || a.to == null)) fail('fsm_go: a state, or from and to');
   const t = v.fsmGo(r, a.state != null ? { state: String(a.state), first: !!a.first } : { from: String(a.from), to: String(a.to), first: !!a.first },
     a.dir < 0 ? -1 : 1);
@@ -8637,7 +8859,7 @@ Object.assign(WaveView.prototype, {
     const base = r => { const x = rowBase(r); return x.field && x.of ? x.of : x; };
     const pick = (rows || this.screenRows()).map(r => (r.type === 'group' && r.sig ? r.sig : r)).filter(r => r.type === 'sig').map(base);
     let sigs = [...new Set(pick)].filter(r => r.tr && r.src && !r.same);
-    if (sigs.some(r => r.lazy)) { await this.need(sigs); sigs = sigs.filter(r => !r.lazy); }
+    if (sigs.some(r => r.lazy || r.sum)) { await this.needWhole(sigs, 'Save as WaveLens'); sigs = sigs.filter(r => !r.lazy); }
     if (!sigs.length) throw new Error('no signal of the dump in it');
     const tvOf = r => {
       const text = r.src.kind === 'real' || r.src.kind === 'string';
@@ -9016,7 +9238,9 @@ Object.assign(WaveView.prototype, {
     const got = new Set();
     for (const [a, x] of c.rows) {
       if (!x.row && !x.missing && !x.omitted && !x.other) continue;
-      if (on) { x.atr = a.tr; a.tr = x.row ? x.row.tr : []; } else a.tr = x.atr;
+      // a large dump's row held in part: its part and summary go with its changes (B's rows are whole)
+      if (on) { x.atr = a.tr; x.apart = a.part; x.asum = a.sum; a.tr = x.row ? x.row.tr : []; a.part = null; a.sum = null; }
+      else { a.tr = x.atr; a.part = x.apart || null; a.sum = x.asum || null; }
       a.an = null; got.add(a);   // (its bits, its copies and the rises read through to its changes: riseTimes)
     }
     rowsMade(this.M, got);
@@ -9027,7 +9251,7 @@ Object.assign(WaveView.prototype, {
     const c = this.cmp; if (!c || !c.swapped) return;
     const got = new Set();
     for (const a of rows) { const x = c.rows.get(a); if (!x || (!x.row && !x.missing && !x.omitted && !x.other)) continue;
-      x.atr = a.tr; a.tr = x.row ? x.row.tr : []; a.an = null; got.add(a); }
+      x.atr = a.tr; x.apart = a.part; x.asum = a.sum; a.tr = x.row ? x.row.tr : []; a.part = null; a.sum = null; a.an = null; got.add(a); }
     if (got.size) rowsMade(this.M, got);
   },
   // these waves again, before the compare changes
@@ -9691,7 +9915,8 @@ Object.assign(WaveView.prototype, {
     if (!this.fsms().length) {
       this.toast('no state machines on these waves: none has enum labels (an FST\'s, x.types.json or .sv files in Sources…)'); return this; }
     if (!this.fsmP) this.fsmP = new Fsms(this);
-    this.need(this.fsms());   // a large dump read as it is needed: the FSMs' changes (their states reached, the details)
+    // a large dump read as it is needed: the FSMs' changes, whole (their states reached, the details)
+    this.needWhole(this.fsms(), 'the FSM panel').catch(e => this.toast(e.message));
     this.fsmP.focusRow();
     return this;
   },
@@ -11186,7 +11411,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.57',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.58',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,

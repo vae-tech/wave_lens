@@ -136,18 +136,27 @@ async function locateSva() {
 const cliJson = s => JSON.parse(s.slice(Math.max(0, s.search(/^[{[]/m))));
 
 // The CLI run with what it reads on stdin -> {code, out, err} (code -1: it did not start; big: its output passed maxOut and it
-// was killed). Its stdin guarded: a CLI that exits before node has written (sva runs list reads none) is no EPIPE thrown
-// out of the extension. keep(p): the child, to kill with the tab or a newer ask
-function spawnRun(bin, args, { input = '', maxOut = Infinity, keep = p => p, probe = false } = {}) {
+// was killed; late: no end in `timeout` ms, killed). Its stdin guarded: a CLI that exits before node has written (sva runs
+// list reads none) is no EPIPE thrown out of the extension. keep(p): the child, to kill with the tab or a newer ask. It
+// always settles: an output too large for one string (V8: 512 MB) is `big`, not a throw in 'close' that left the page
+// waiting for ever (a 1 GB dump's clock read whole)
+function spawnRun(bin, args, { input = '', maxOut = Infinity, keep = p => p, probe = false, timeout = 0 } = {}) {
   return new Promise(ok => {
     const p = keep(cp.spawn(bin, args, { stdio: ['pipe', 'pipe', 'pipe'] })), out = [], err = [];
-    let size = 0, big = false;
+    let size = 0, big = false, late = false;
+    const t = timeout ? setTimeout(() => { late = true; p.kill(); }, timeout) : null;
     p.stdin.on('error', () => { /* it closed its stdin: what it says comes on stdout, stderr and its exit */ });
     p.stdout.on('data', d => { size += d.length; if (size > maxOut) { big = true; p.kill(); } else out.push(d); });
     p.stderr.on('data', d => err.push(d));
-    p.on('error', e => ok({ code: -1, out: '', err: noCli(bin, Object.assign(e, { probe })) }));   // probe: a check, no offer
-    p.on('close', (code, sig) => ok({ code: code == null ? -1 : code, sig, big, out: Buffer.concat(out).toString('utf8'),
-      err: Buffer.concat(err).toString('utf8').trim().replace(/^sva: /, '') }));
+    p.on('error', e => { clearTimeout(t); ok({ code: -1, out: '', err: noCli(bin, Object.assign(e, { probe })) }); });   // probe: a check, no offer
+    p.on('close', (code, sig) => {
+      clearTimeout(t);
+      const said = Buffer.concat(err).toString('utf8').trim().replace(/^sva: /, '');
+      try {
+        ok({ code: code == null ? -1 : code, sig, big, late, out: big ? '' : Buffer.concat(out).toString('utf8'),
+          err: late ? `no answer in ${Math.round(timeout / 1000)} s` : said });
+      } catch (e) { ok({ code: -1, sig, big: true, late, out: '', err: `the answer is too large to hold (${mb(size)}): ${e.message}` }); }
+    });
     p.stdin.end(input);
   });
 }
@@ -161,6 +170,9 @@ const LAZY_FST = 4 << 20, LAZY_VCD = 64 << 20;
 // a VCD the CLI could not make lazy is read whole up to this size; a larger one would load the tab for minutes (a 1 GB text
 // fetched and parsed in the webview): an error that names the fix instead (Set the sva program…)
 const WHOLE_MAX = 256 << 20;
+// a read of some signals (codes): at most this much text (a window or a summary is a few MB; past it, fewer signals at
+// once), an answer in this time, this many CLIs of a tab at once (the rest wait their turn)
+const CODES_MAX = 48 << 20, CODES_TIMEOUT = +process.env.WAVELENS_CODES_TIMEOUT || 120000, CODES_PROCS = 2;
 const mb = n => `${Math.round(n / (1 << 20))} MB`;
 function lazyFor(file, size) {
   const set = vscode.workspace.getConfiguration('wavelens').get('lazy') || 'auto';
@@ -318,6 +330,7 @@ const GLOBAL_BAR = 'wavelens.bar';   // globalState: the bar of every tab {bar: 
 class Tab {
   constructor(uri, panel) {
     this.uri = uri; this.file = uri.fsPath; this.panel = panel; this.wait = new Map(); this.rid = 0; this.streams = new Map(); this.procs = new Set();
+    this.reads = new Map(); this.codesQ = []; this.codesN = 0;   // the reads of signals (codes): by rid, waiting, running
     this.storeKey = 'store:' + uri.toString(); this.changed = new Map();
     // the tab's first page takes the last state when the dump has no view of its own; a page VS Code makes again later (the
     // tab moved to a window of its own: the html of when it opened) does not (source() says it, B-66)
@@ -422,13 +435,51 @@ ${scripts}
   // the VCD text of some signals of the large dump (their id codes in its header): sva vcd --codes of its FST -> {text}; the
   // FST another since its header was read (the user's .fst written over by a new run): an error, never another file's
   // signals under these codes (bughunt B-17); the page says it once, ⟳ (R) reads the dump again
-  async codes(list) {
+  // win {from, to, lod, keep} (ps; any of them): a window of them, reduced where they change more than keep times (sva vcd
+  // --codes --from --to --lod --keep); rid: the page's number of this read (codes-stop). At most CODES_PROCS at once, the
+  // rest in turn; every read answered: its text, or why not (too large, too late, stopped, an older sva)
+  async codes(list, win, rid) {
     const bin = svaBin(), fst = this.fst;
     if (!fst) return { error: 'this dump is read whole' };
     const now = await fs.promises.stat(fst).then(stamp, () => 'gone');
     if (now !== this.fstAt) return { error: `${path.basename(this.file)} changed on the disk since it was read: ⟳ (R) reads it again` };
-    const r = await spawnRun(bin, ['vcd', fst, '--codes', '-'], { input: list.map(String).join('\n'), keep: p => this.proc(p) });
-    return r.code === 0 ? { text: r.out } : { error: r.err || `${bin} vcd --codes: exit ${r.code}` };
+    const args = ['vcd', fst, '--codes', '-'];
+    for (const [k, flag] of [['from', '--from'], ['to', '--to'], ['lod', '--lod'], ['keep', '--keep']]) {
+      const v = win && win[k];
+      if (v == null) continue;
+      if (typeof v !== 'number' || !isFinite(v) || v < 0 || v > 2 ** 53 || Math.floor(v) !== v) return { error: `codes: ${k} ${v} is no time or count` };
+      args.push(flag, String(v));
+    }
+    const job = { rid, stopped: false, p: null };
+    if (rid != null) this.reads.set(rid, job);
+    const r = await new Promise(ok => {
+      job.ok = ok;
+      job.go = () => spawnRun(bin, args, { input: list.map(String).join('\n'), maxOut: CODES_MAX, timeout: CODES_TIMEOUT,
+        keep: p => { job.p = p; return this.proc(p); } }).then(ok);
+      this.codesQ.push(job);
+      this.codesNext();
+    });
+    if (job.p) { this.codesN--; this.codesNext(); }
+    if (rid != null) this.reads.delete(rid);
+    if (job.stopped || r.stopped) return { error: 'stopped' };
+    if (r.big) return { error: `more than ${mb(CODES_MAX)} of changes at once: fewer signals, or a shorter window` };
+    if (r.code === 0) return { text: r.out };
+    if (/unknown option --(lod|keep)/.test(r.err)) {
+      offerSva(true);
+      return { error: `${bin} is older than the extension (no --lod): WaveLens: Set the sva program…` };
+    }
+    return { error: r.err || `${bin} vcd --codes: exit ${r.code}` };
+  }
+  codesNext() {
+    while (this.codesN < CODES_PROCS && this.codesQ.length) { this.codesN++; this.codesQ.shift().go(); }
+  }
+  // a read the page no longer wants: out of the queue, or its CLI killed; answered 'stopped'
+  codesStop(rid) {
+    const job = this.reads.get(rid);
+    if (!job) return;
+    job.stopped = true;
+    const i = this.codesQ.indexOf(job);
+    if (i >= 0) { this.codesQ.splice(i, 1); job.ok({ stopped: true }); } else if (job.p) job.p.kill();
   }
   async message(m) {
     // vscode/protocol.js: a message that is none of the page's (its type unknown, a key it needs not there) is said in the
@@ -439,7 +490,9 @@ ${scripts}
     switch (m.type) {
       case 'source': return reply(Object.assign(await this.source(), { fresh: this.fresh, lastState: CTX.workspaceState.get(LAST_STATE) || null }));
       case 'bytes': return reply(await this.bytes());
-      case 'codes': return reply(await this.codes(Array.isArray(m.codes) ? m.codes : []));
+      case 'codes': return reply(await this.codes(Array.isArray(m.codes) ? m.codes : [],
+        { from: m.from, to: m.to, lod: m.lod, keep: m.keep }, m.rid));
+      case 'codes-stop': this.codesStop(m.rid); return;
       case 'store': {   // a localStorage key of this dump (null: removed), kept in the workspace: the keys changed, not a snapshot
         if (typeof m.key !== 'string') return;
         this.changed.set(m.key, m.value == null ? null : String(m.value));

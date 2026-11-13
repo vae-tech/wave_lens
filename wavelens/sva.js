@@ -589,7 +589,9 @@ SVA.pageBinds = pageBinds;
 // each request. -> 'page' | 'worker'
 async function evaluateScope(v, bs, progress) {
   const asserts = bs.map(b => LIB.byLabel.get(b.assert).a), rows = Object.assign({}, ...bs.map(b => b.res.map));
-  if (v.lazy) await v.need(Object.values(rows));   // a large dump read as it is needed: the signals they read first
+  // a large dump read as it is needed: the signals they read first, whole (a busy one held in part: refused, the error says it)
+  const why = 'an assertion (sva eval --waves DUMP gives the same verdicts)';
+  if (v.lazy) await (v.needWhole ? v.needWhole(Object.values(rows), why) : v.need(Object.values(rows)));
   const unit = v.M.timed ? 'ps' : 'cycles', steps = plan(SOURCES(), asserts, rowSampler(rows), unit);
   const eng = await SVA.engine(), outs = [];
   let via = 'page';
@@ -2000,7 +2002,7 @@ class Exprs {
   }
   // the scope a new expression is written in: the selected signal's module, else the view's top ('')
   scope() { const I = scopeInfo(this.v.M), r = this.v.sel, s = r && I.of.get(r); return s && s !== I.root ? s : ''; }   // '': the view's top
-  need() { return this.v.lazy ? rows => this.v.need(rows) : undefined; }   // a large dump: the signals it reads first
+  need() { return this.v.lazy ? rows => this.v.needWhole(rows, 'an expression') : undefined; }   // a large dump: the signals it reads first, whole
   async value(x) {
     const k = x.text + '\n' + x.scope;
     if (!this.cache.has(k)) this.cache.set(k, valueOf(this.v.M, this.v.sortIgnore || [], x, this.need()).catch(err => ({ err: err.message })));

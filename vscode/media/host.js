@@ -254,7 +254,7 @@
   // The dump's store comes with it: a webview VS Code made again (the tab moved to a window of its own) has the page of when
   // the tab opened, its store of then. The dump by its webview URI; one that does not come (a moved tab over a remote
   // connection: 404) through the extension, as bytes
-  let noted = '';   // what the extension said of how it serves the dump (read whole: no sva CLI here), said once it is shown
+  let noted = '', reads = 0;   // what the extension said of how it serves the dump (read whole: no sva CLI here), said once it is shown
   const fetchDump = async () => {
     const s = await call('source', {});
     if (s.error) throw new Error(s.error);
@@ -277,9 +277,14 @@
     }
     const f = new File([blob], s.name);
     noted = s.note || '';   // read whole, not lazy (no sva CLI here): said once the waves are shown
-    // a large dump: its header now, the signals the viewer shows read by the extension as they are needed
-    if (s.lazy) Object.assign(f, { wlLazy: true, wlLoad: async codes => { const x = await call('codes', { codes }); if (x.error) throw new Error(x.error);
-      return x.text; } });
+    // a large dump: its header now, the signals the viewer shows read by the extension as they are needed; wlLoad(codes, win):
+    // win {from, to, lod, keep} a window of them; the promise has stop() (codes-stop: its CLI killed, the read answers stopped)
+    if (s.lazy) Object.assign(f, { wlLazy: true, wlLoad: (codes, win) => { const rid = ++reads;
+      const p = call('codes', Object.assign({ codes, rid }, win || {})).then(x => {
+        if (x.error) throw Object.assign(new Error(x.error), { stopped: x.error === 'stopped' });
+        return x.text; });
+      p.stop = () => vscode.postMessage({ type: 'codes-stop', rid });
+      return p; } });
     return f;
   };
   const handle = { kind: 'file', name: H.name, getFile: fetchDump };   // what reloadDump (⟳) reads again

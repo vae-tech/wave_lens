@@ -220,7 +220,11 @@ type of it through the extension (and a large dump's `source` / `codes`, an FST'
 checks that `extension.js` and `media/host.js` name its types and no other; the smoke's fake host (section `vscode`)
 answers by it and fails on a message or an answer it does not name. A new message: its row in the table first. A tab
 shows one file at a time, the dump or a run kept (`runs open`: `Tab.shown`, the run's FST served by `srcOf` as the dump is,
-so `bytes` and `codes` read the file shown); `source` (⟳, the dump changed) serves the dump of now and clears it. On the
+so `bytes` and `codes` read the file shown); `source` (⟳, the dump changed) serves the dump of now and clears it. A read of
+signals (`codes`, optionally a window: `from to lod keep`, numbered `rid`) always settles: at most 48 MB of text
+(`CODES_MAX`), an answer in 120 s (`CODES_TIMEOUT`, `$WAVELENS_CODES_TIMEOUT` in the tests), two CLIs of a tab at once
+(`CODES_PROCS`, the rest in turn); `codes-stop` takes one out of the queue or kills its CLI (answered `stopped`); `spawnRun`
+never throws in `close` (an output too large for a string is `big`). On the
 page the run shown is `runsShown` (A), the run compared is the compare's own (`cmp.result.run`, the getter `runCur`: B);
 a step of A (`runsShow`, `openDump(keep)`) takes the view's time as it is and its rows from a snapshot taken on now and on
 each run that had every row of it (`runsKeep`), so a run without a row does not lose it for the next one: the snapshot is

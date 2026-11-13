@@ -614,8 +614,10 @@ Object.assign(WaveView.prototype, {
     const key = JSON.stringify(o);
     if (!this.cycMemo || this.cycMemo.key !== key) {
       const clk = cycClock(this.M.rows, o.cycleClock), ups = clk ? cycUps(clk) : [];
-      if (clk && clk.lazy) this.need([clk]);   // a large dump: the clock read, the band drawn when it is there (need resets the memo)
-      this.cycMemo = { key, d: clk && ups.length ? { clk, ups, iz: cycZero(ups, o.cycleZero, this.M.t0) } : null };
+      // a large dump: the clock read whole, the band drawn when it is there (need resets the memo); one too busy to read whole: none
+      const once = e => { if (this.cycNo !== clk) { this.cycNo = clk; this.toast(e.message); } };
+      if (clk && (clk.lazy || clk.sum)) this.needWhole([clk], 'the cycles').catch(once);
+      this.cycMemo = { key, d: clk && ups.length && !clk.sum ? { clk, ups, iz: cycZero(ups, o.cycleZero, this.M.t0) } : null };
     }
     return this.cycMemo.d;
   },

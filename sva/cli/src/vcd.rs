@@ -16,7 +16,13 @@
 //! Of an FST also a part (a viewer that reads a large dump as it is needed: the VS Code tab): `--header` the
 //! declarations and the dump's first and last times, no value; `--codes FILE` (`-`: stdin) the variables of those id
 //! codes (as the whole text numbers them, apart by white space): their declarations in their scopes, their enum
-//! tables, their changes. A reader of the parts gets what it gets of the whole text, those variables only.
+//! tables, their changes. A reader of the parts gets what it gets of the whole text, those variables only. Neither reads
+//! the FST's table of times (a large dump's 40 M times: a second and 600 MB): the first and last times are its header's.
+//!
+//! A window of some variables (`--codes FILE --from T --to T --lod N [--keep K]`: a viewer of a large dump asks what it
+//! shows): each one's value at `from`, its changes up to `to`; one with more than K changes there reduced to N buckets of
+//! the window, a bucket of one or two changes whole, of more its last change only, and the line
+//! `$comment sva window FROM TO STEP INDEX=CHANGES:BUCKET*COUNT/RISES,... $end` names the reduced ones (`fst_lod`).
 //!
 //! Of any dump a cut (`--from`, `--to`: floored to the dump's unit; `--signals`: by the names `sva diff` gives, wellen's,
 //! or as the dump declares them): the declarations of those signals only (their scopes, their enum tables), the value
@@ -30,11 +36,19 @@ use fst_reader::{FstFilter, FstHierarchyEntry, FstReader, FstScopeType, FstSigna
 use wellen::stream::{self, Filter};
 use wellen::{Hierarchy, ItemRef, LoadOptions, ScopeType, SignalRef, SignalValueRef, TimescaleUnit, VarRef, VarType};
 
-const USAGE: &str = "usage: sva vcd [--waves] DUMP [--out FILE.vcd] [--header | --codes FILE] [--from T] [--to T] [--zero] [--signals PAT,...] [--signals-from FILE]
+const USAGE: &str = "usage: sva vcd [--waves] DUMP [--out FILE.vcd] [--header | --codes FILE [--lod N [--keep K]]] [--from T] [--to T] [--zero] [--signals PAT,...]
+       [--signals-from FILE]
 The dump (FST or VCD) as VCD text, to FILE or stdout, as GTKWave's fst2vcd -e writes it: the names as the FST holds
 them, FST enum tables included, strings escaped as fstapi does (\\040 for a space), the end time of the dump kept.
 Of an FST a part: --header the declarations and the first and last times only; --codes FILE (- stdin) the variables
 of those id codes (as the whole text numbers them, apart by white space) with their changes.
+A window of them (a viewer of a large dump): --codes FILE --from T --to T --lod N: each variable's value at --from under
+#from as $dumpvars (none yet: no line), its changes after --from up to --to, #to. A variable with more than K changes
+there (--keep, 16384) is reduced: the window in N buckets (each ceil((to - from) / N) of the dump's unit, the first
+starts after --from), a bucket with one or two changes whole, of a bucket with more its last change only; the line
+\"$comment sva window FROM TO STEP INDEX=CHANGES:BUCKET*COUNT/RISES,... $end\" after $enddefinitions names the window
+(the dump's unit), the bucket and, per reduced variable (INDEX: its id code's number, from 0), its changes in the
+window and each reduced bucket with its count and its changes to 1. --from and --to default to the dump's ends.
 A cut: --from/--to a window (TIME: 100ns, 2.5us; ps without one; both floored to the dump's time unit): each
 signal's value at --from as $dumpvars under #from (x when it has none yet), its changes up to --to, then #to (--zero:
 the times from 0, #from is #0); --signals only those (paths, * ? patterns, or the one path that ends with a name; the
@@ -197,11 +211,33 @@ fn index_of(code: &str) -> Option<usize> {
     n.checked_sub(1)
 }
 
-/// What of an FST is written: every value, none (`--header`), the variables of some signals (`--codes`: their indices).
+/// What of an FST is written: every value, none (`--header`), the variables of some signals (`--codes`: their indices),
+/// a window of them (`--codes --from --to --lod --keep`: ps, as given).
 pub(crate) enum Part {
     All,
     Header,
     Codes(HashSet<usize>),
+    Lod(Lod),
+}
+
+/// A window of some variables, reduced where they change more than `keep` times (`fst_lod`).
+pub(crate) struct Lod {
+    pub want: HashSet<usize>,
+    pub from: Option<u64>,
+    pub to: Option<u64>,
+    pub n: u64,
+    pub keep: usize,
+}
+
+impl Part {
+    /// The variables asked for, None for all of them.
+    fn wanted(&self) -> Option<&HashSet<usize>> {
+        match self {
+            Part::Codes(w) => Some(w),
+            Part::Lod(l) => Some(&l.want),
+            _ => None,
+        }
+    }
 }
 
 /// One entry of an FST's hierarchy as declarations; `strings[handle]` marks the string variables.
@@ -328,6 +364,221 @@ fn fst_cut<R: BufRead + Seek>(r: &mut FstReader<R>, path: Option<&str>, part: &P
     o.flush()
 }
 
+/// A value of an FST's change kept by `fst_lod`: its bytes (a bit, a vector, a string) or a real.
+#[derive(Clone)]
+enum Val {
+    Bytes(Vec<u8>),
+    Real(f64),
+}
+
+impl Val {
+    fn of(v: FstSignalValue) -> Val {
+        match v {
+            FstSignalValue::Real(x) => Val::Real(x),
+            FstSignalValue::String(b) => Val::Bytes(b.to_vec()),
+        }
+    }
+    /// Overwritten by `v`, its buffer reused (a dense bucket's last change).
+    fn set(&mut self, v: FstSignalValue) {
+        match (self, v) {
+            (Val::Bytes(b), FstSignalValue::String(x)) => {
+                b.clear();
+                b.extend_from_slice(x);
+            }
+            (me, v) => *me = Val::of(v),
+        }
+    }
+    fn line(&self, strings: &[bool], i: usize) -> String {
+        match self {
+            Val::Bytes(b) => fst_line(strings, i, FstSignalValue::String(b)),
+            Val::Real(x) => fst_line(strings, i, FstSignalValue::Real(*x)),
+        }
+    }
+}
+
+/// A change kept: its time, its place among the changes read (one time's changes in the order the FST gives them), its value.
+struct Kept {
+    t: u64,
+    seq: u64,
+    v: Val,
+}
+
+/// A bucket of a reduced variable: its index in the window, its changes and changes to 1, the ones kept (one or two
+/// while it has no more; else the last only).
+struct Bucket {
+    i: u64,
+    n: u64,
+    rises: u64,
+    kept: Vec<Kept>,
+}
+
+/// One variable of a window: its value at `from`, its changes in the window while they are at most `keep` (`exact`),
+/// else its buckets.
+#[derive(Default)]
+struct LodSig {
+    before: Option<Val>,
+    n: u64,
+    exact: Vec<Kept>,
+    buckets: Option<Vec<Bucket>>,
+}
+
+impl LodSig {
+    /// A change into its bucket: a bucket of one or two changes keeps them, of more its last one only.
+    fn bucket(buckets: &mut Vec<Bucket>, i: u64, k: Kept, rise: bool) {
+        if buckets.last().is_none_or(|b| b.i != i) {
+            buckets.push(Bucket { i, n: 0, rises: 0, kept: Vec::new() });
+        }
+        let b = buckets.last_mut().unwrap();
+        b.n += 1;
+        b.rises += u64::from(rise);
+        if b.n <= 2 {
+            b.kept.push(k);
+        } else {
+            b.kept.truncate(1);
+            b.kept[0] = k;
+        }
+    }
+}
+
+/// A change to 1 of a one-bit variable (a bucket's rises: the cycles of a clock).
+fn is_rise(v: &FstSignalValue, width: Option<u32>) -> bool {
+    matches!(v, FstSignalValue::String([b'1'])) && width == Some(1)
+}
+
+/// A window of some variables of an FST, after their declarations (`--codes --from --to --lod --keep`): the comment that
+/// names the window and the reduced variables, each variable's value at `from` as `$dumpvars` (none yet: no line), its
+/// changes after `from` up to `to` (one with more than `keep` of them reduced to buckets: `LodSig::bucket`), `#to`.
+/// Memory: at most max(keep, 2 n) changes a variable, whatever the window.
+#[allow(clippy::too_many_arguments)]
+fn fst_lod<R: BufRead + Seek>(r: &mut FstReader<R>, path: Option<&str>, l: &Lod, strings: &[bool], widths: &[Option<u32>], from: u64, to: u64,
+    o: &mut impl Write) -> std::io::Result<()> {
+    let count = strings.len();
+    let mut handles: Vec<usize> = l.want.iter().copied().filter(|&i| i < count).collect();
+    handles.sort_unstable();
+    let step = (to - from).div_ceil(l.n.max(1)).max(1);
+    // by handle: a change's variable without a hash (70 M changes of a large dump's clocks)
+    let mut sigs: Vec<Option<LodSig>> = (0..count).map(|_| None).collect();
+    for &h in &handles {
+        sigs[h] = Some(LodSig::default());
+    }
+    // a late window: the blocks before the one holding `from` not read (their values at its start)
+    let seed = path.filter(|_| from > 0).and_then(|p| crate::fst::frame_at(p, from, Some(&handles)));
+    let first = seed.as_ref().map(|s| s.0);
+    if let Some((_, values)) = &seed {
+        for (&h, b) in handles.iter().zip(values) {
+            let one = [b.first().map_or(b'x', u8::to_ascii_lowercase)];
+            if let Some(Some(s)) = sigs.get_mut(h) {
+                s.before = Some(Val::Bytes(if b.len() == 1 { one.to_vec() } else { b.clone() }));
+            }
+        }
+    }
+    let include = Some(handles.iter().map(|&i| fst_reader::FstSignalHandle::from_index(i)).collect());
+    let mut seq = 0u64;
+    let keep = l.keep.max(1);
+    let res = r.read_signals(&FstFilter { start: first.map_or(0, |f| f + 1), end: Some(to), include }, |t, handle, v| -> std::io::Result<()> {
+        if t > to || first.is_some_and(|f| t < f) {
+            return Ok(());
+        }
+        let h = handle.get_index();
+        let Some(Some(s)) = sigs.get_mut(h) else { return Ok(()) };
+        if t <= from {
+            match &mut s.before {
+                Some(b) => b.set(v),
+                None => s.before = Some(Val::of(v)),
+            }
+            return Ok(());
+        }
+        seq += 1;
+        s.n += 1;
+        let rise = is_rise(&v, widths[h]);
+        let i = (t - from - 1) / step;
+        if let Some(b) = &mut s.buckets {
+            // the dense bucket's last change overwritten in place
+            if let Some(last) = b.last_mut().filter(|x| x.i == i && x.n >= 2) {
+                last.n += 1;
+                last.rises += u64::from(rise);
+                last.kept.truncate(1);
+                last.kept[0].t = t;
+                last.kept[0].seq = seq;
+                last.kept[0].v.set(v);
+                return Ok(());
+            }
+            LodSig::bucket(b, i, Kept { t, seq, v: Val::of(v) }, rise);
+            return Ok(());
+        }
+        s.exact.push(Kept { t, seq, v: Val::of(v) });
+        if s.exact.len() > keep {
+            // past keep: what is held into buckets, by the same rule
+            let mut b = Vec::new();
+            for k in s.exact.drain(..) {
+                let r = matches!(&k.v, Val::Bytes(x) if x.as_slice() == b"1") && widths[h] == Some(1);
+                LodSig::bucket(&mut b, (k.t - from - 1) / step, k, r);
+            }
+            s.buckets = Some(b);
+        }
+        Ok(())
+    });
+    match res {
+        Ok(()) => {}
+        Err(ReadSignalsError::CallbackError(e)) => return Err(e),
+        Err(ReadSignalsError::ReadError(e)) => return Err(std::io::Error::other(e)),
+    }
+    // the comment: the window, the bucket, the reduced variables with their dense buckets
+    let mut note = format!("$comment sva window {from} {to} {step}");
+    for &h in &handles {
+        let Some(s) = &sigs[h] else { continue };
+        if let Some(b) = &s.buckets {
+            let dense: Vec<String> = b.iter().filter(|x| x.n > 2).map(|x| format!("{}*{}/{}", x.i, x.n, x.rises)).collect();
+            note += &format!(" {h}={}:{}", s.n, dense.join(","));
+        }
+    }
+    writeln!(o, "{note} $end")?;
+    writeln!(o, "#{from}\n$dumpvars")?;
+    for &h in &handles {
+        if let Some(v) = sigs[h].as_ref().and_then(|s| s.before.as_ref()) {
+            writeln!(o, "{}", v.line(strings, h))?;
+        }
+    }
+    writeln!(o, "$end")?;
+    let mut all: Vec<(&Kept, usize)> = Vec::new();
+    for &h in &handles {
+        let Some(s) = &sigs[h] else { continue };
+        match &s.buckets {
+            Some(b) => all.extend(b.iter().flat_map(|x| x.kept.iter()).map(|k| (k, h))),
+            None => all.extend(s.exact.iter().map(|k| (k, h))),
+        }
+    }
+    all.sort_unstable_by_key(|(k, _)| (k.t, k.seq));
+    let mut now = from;
+    for (k, h) in all {
+        if k.t != now {
+            writeln!(o, "#{}", k.t)?;
+            now = k.t;
+        }
+        writeln!(o, "{}", k.v.line(strings, h))?;
+    }
+    if now < to {
+        writeln!(o, "#{to}")?;
+    }
+    o.flush()
+}
+
+/// An FST opened for a part: without its table of times when the part needs none (a header, codes, a window: the
+/// header's first and last times), unless the header has no span (one time step, or an FST its writer did not finish:
+/// its times then from the table).
+fn open_fst(f: std::io::BufReader<std::fs::File>, path: &str, light: bool) -> Result<FstReader<std::io::BufReader<std::fs::File>>, String> {
+    if light {
+        let r = FstReader::open(f).map_err(|e| e.to_string())?;
+        let h = r.get_header();
+        if h.end_time > h.start_time {
+            return Ok(r);
+        }
+        let f = std::io::BufReader::new(std::fs::File::open(path).map_err(|e| e.to_string())?);
+        return FstReader::open_and_read_time_table(f).map_err(|e| e.to_string());
+    }
+    FstReader::open_and_read_time_table(f).map_err(|e| e.to_string())
+}
+
 /// An FST as VCD text: the header, the declarations, the value changes, the end time; of `part` only; `win`: a cut
 /// of it (in the FST's time unit).
 fn fst_text<R: BufRead + Seek>(r: &mut FstReader<R>, path: Option<&str>, part: &Part, win: Option<(u64, u64)>, o: &mut impl Write) -> std::io::Result<()> {
@@ -348,7 +599,7 @@ fn fst_text<R: BufRead + Seek>(r: &mut FstReader<R>, path: Option<&str>, part: &
         if res.is_err() {
             return;
         }
-        if let Part::Codes(want) = part {
+        if let Some(want) = part.wanted() {
             match &e {
                 FstHierarchyEntry::EnumTableRef { .. } => {
                     held = Some(e);
@@ -378,9 +629,16 @@ fn fst_text<R: BufRead + Seek>(r: &mut FstReader<R>, path: Option<&str>, part: &
     }).map_err(std::io::Error::other)?;
     res?;
     writeln!(o, "$enddefinitions $end")?;
+    // a reader opened without the table of times (a header, codes, a window: `open_fst`) has the header's times
     let times = r.get_time_table().map(<[u64]>::to_vec).unwrap_or_default();
     let end = times.last().map_or(h.end_time, |&t| t.max(h.end_time));
     let start = times.first().map_or(h.start_time, |&t| t.min(h.start_time));
+    if let Part::Lod(l) = part {
+        let ppu = 10f64.powi(i32::from(h.timescale_exponent) + 12);
+        let from = l.from.map_or(start, |t| units(t, ppu));
+        let to = l.to.map_or(end, |t| units(t, ppu)).min(end).max(from);
+        return fst_lod(r, path, l, &strings, &widths, from, to, o);
+    }
     if let Some((from, to)) = win {
         // no clamp to the dump's start: a cut from before it has x until the first value, as a VCD's cut
         return fst_cut(r, path, part, &strings, &widths, from, to.min(end).max(from), o);
@@ -415,7 +673,7 @@ fn fst_text<R: BufRead + Seek>(r: &mut FstReader<R>, path: Option<&str>, part: &
         Ok(())
     };
     let filter = match part {
-        Part::Codes(want) => {
+        Part::Codes(want) | Part::Lod(Lod { want, .. }) => {
             let mut v: Vec<usize> = want.iter().copied().filter(|&i| i < h.max_handle as usize).collect();
             v.sort_unstable();
             FstFilter { start: 0, end: None, include: Some(v.into_iter().map(fst_reader::FstSignalHandle::from_index).collect()) }
@@ -935,8 +1193,8 @@ fn convert_as(waves: &str, part: &Part, cut: Option<&Cut>, o: &mut impl Write) -
     let waves = waves.as_str();
     let mut f = std::io::BufReader::new(std::fs::File::open(waves).map_err(|e| e.to_string())?);
     if fst_reader::is_fst_file(&mut f) {
-        let mut r = FstReader::open_and_read_time_table(f).map_err(|e| e.to_string())?;
-        let Some(c) = cut else { return fst_text(&mut r, None, part, None, o).map(|_| Vec::new()).map_err(io_text) };
+        let mut r = open_fst(f, waves, cut.is_none() && !matches!(part, Part::All))?;
+        let Some(c) = cut else { return fst_text(&mut r, Some(waves), part, None, o).map(|_| Vec::new()).map_err(io_text) };
         let ppu = 10f64.powi(i32::from(r.get_header().timescale_exponent) + 12);
         let win = (units(c.from.unwrap_or(0), ppu), c.to.map_or(u64::MAX, |t| units(t, ppu)));
         if c.signals.is_empty() {
@@ -1024,6 +1282,7 @@ pub(crate) fn signals_arg(flag: &str, v: Option<&String>, into: &mut Vec<String>
 
 pub fn vcd_cmd(args: &[String]) -> ExitCode {
     let (mut waves, mut out, mut header, mut codes) = (None::<String>, None::<String>, false, None::<String>);
+    let (mut lod, mut keep) = (None::<String>, None::<String>);
     let mut cut = Cut { from: None, to: None, signals: Vec::new(), zero: false, lenient: false };
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -1033,6 +1292,8 @@ pub fn vcd_cmd(args: &[String]) -> ExitCode {
             "--header" => header = true,
             "--zero" => cut.zero = true,
             "--codes" => codes = it.next().cloned(),
+            "--lod" => lod = Some(it.next().cloned().unwrap_or_default()),
+            "--keep" => keep = Some(it.next().cloned().unwrap_or_default()),
             "--from" | "--to" => {
                 let t = match it.next().map(|v| crate::time(v)) {
                     Some(Ok(t)) => t,
@@ -1072,9 +1333,36 @@ pub fn vcd_cmd(args: &[String]) -> ExitCode {
         eprintln!("sva: {waves}: {e}");
         return ExitCode::from(2);
     }
-    let cutting = cut.from.is_some() || cut.to.is_some() || !cut.signals.is_empty() || cut.zero;
+    // --lod N [--keep K]: a window of --codes (--from --to are its ends, not a cut)
+    let number = |flag: &str, v: &Option<String>| -> Result<Option<u64>, String> {
+        match v {
+            None => Ok(None),
+            Some(x) => x.parse::<u64>().ok().filter(|&n| n > 0).map(Some).ok_or_else(|| format!("{flag} needs a number above 0, not \"{x}\"")),
+        }
+    };
+    let (lod, keep) = match (number("--lod", &lod), number("--keep", &keep)) {
+        (Ok(a), Ok(b)) => (a, b),
+        (Err(e), _) | (_, Err(e)) => {
+            eprintln!("sva: {e}\n{USAGE}");
+            return ExitCode::from(2);
+        }
+    };
+    let why = if keep.is_some() && lod.is_none() {
+        Some("--keep goes with --lod")
+    } else if lod.is_some() && codes.is_none() {
+        Some("--lod is a window of --codes FILE")
+    } else if lod.is_some() && (header || cut.zero || !cut.signals.is_empty()) {
+        Some("--lod and --header / --zero / --signals, not together")
+    } else {
+        None
+    };
+    if let Some(w) = why {
+        eprintln!("sva: {w}\n{USAGE}");
+        return ExitCode::from(2);
+    }
+    let cutting = lod.is_none() && (cut.from.is_some() || cut.to.is_some() || !cut.signals.is_empty() || cut.zero);
     if cutting && (header || codes.is_some()) {
-        eprintln!("sva: --header / --codes and a cut (--from --to --signals), not together\n{USAGE}");
+        eprintln!("sva: --header / --codes and a cut (--from --to --signals), not together (a window of --codes: --lod)\n{USAGE}");
         return ExitCode::from(2);
     }
     if let (Some(f), Some(t)) = (cut.from, cut.to) {
@@ -1116,7 +1404,10 @@ pub fn vcd_cmd(args: &[String]) -> ExitCode {
                     }
                 }
             }
-            Part::Codes(want)
+            match lod {
+                Some(n) => Part::Lod(Lod { want, from: cut.from, to: cut.to, n, keep: keep.map_or(16384, |k| k as usize) }),
+                None => Part::Codes(want),
+            }
         }
     };
     // --out: never the dump itself (it would be emptied before it is read); written beside it as a part, renamed over it

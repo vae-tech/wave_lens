@@ -73,7 +73,8 @@ const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight
   toolsCompact: 'auto', toolLayout: null, stripGroups: ['find', 'marks', 'cursor', 'edges'], toolAt: null, cursorStrip: true, cursorStripAt: 1,
   groupOrder: 'file', onlyGroups: true, moduleShading: true, findHighlight: true, findOpen: true, findMask: false, findCase: false, findWord: false,
   findRegex: false, cursorSnap: 8, keyHints: 200, showWidth: true, exprLibrary: [], sharedMarkers: false, keys: {},
-    wheel: 'scroll', contextMenu: true, enumColors: null, dumpBudget: 3000000, gaps: false, gapIdle: 16, gapKeep: 2,
+    wheel: 'scroll', contextMenu: true, enumColors: null, dumpBudget: 3000000, lazyBuckets: 2048, lazyKeep: 16384, lazyWhole: 1000000,
+    lazyHeld: 2000000, gaps: false, gapIdle: 16, gapKeep: 2,
     gapSignals: null, gapClock: null, gapAux: null, gapOnly: false, gapCount: 'clock', gapLine: 'dashdot', gapView: false, menuTipDelay: 2000, cycles: false,
     cycleClock: null, cycleZero: null, savePage: true, themeButton: 'auto', version: true, keysLeft: [], log: 'auto' };
 // a plugin's settings with their defaults (bus.js: busDetect, buses; sva.js: svaOpen, svaShow, svaSignals): in every
@@ -787,13 +788,19 @@ function parse(src) {
   return M;
 }
 // lazy rows (a large dump read as it is needed, "lazy": the id codes of a signal not read yet): the WaveJSON signals read
-// later (their path, their tv) onto their rows, the fields of a vector and a struct's whole value made again -> the rows
-function fillRows(M, sigs) {
+// later (their path, their tv) onto their rows, the fields of a vector and a struct's whole value made again -> the rows.
+// win (codesWin): the answer was a window of the dump; a row reduced in it, or of a window that is not the whole dump,
+// holds its changes in part (r.part, partOf): r.tr then has the value at part.a, the changes up to part.b, and of each
+// dense span (more changes than the reader kept) only its last change; the summary over the whole dump kept as r.sum
+function fillRows(M, sigs, win = null, only = null) {   // only: rows read again (a detail window of part rows), lazy or not
   const by = new Map(sigs.filter(s => s && s.path && s.tv).map(s => [s.path, s])), got = new Set();
   for (const r of M.rows) {
-    if (r.type !== 'sig' || !r.lazy || r.field) continue;
+    if (r.type !== 'sig' || r.field || !(r.lazy || (only && only.has(r)))) continue;
     const s = by.get(r.path); if (!s) continue;
-    const w = r.width; r.src.tv = s.tv; r.tr = parseTV(r.src, r).tr; r.width = w; r.lazy = false; got.add(r);
+    const w = r.width; r.src.tv = s.tv; r.tr = parseTV(r.src, r).tr; r.width = w; r.lazy = false; r.unread = null; got.add(r);
+    r.part = win ? winPart(win, r.src.lazy || [], M) : null;
+    if (!r.part) r.sum = null;   // the whole dump read whole: a row as any other
+    else if (r.part.whole) r.sum = { tr: r.tr, part: r.part };   // the summary, kept: a detail window falls back to it
   }
   if (!got.size) return [];
   rowsMade(M, got);
@@ -811,6 +818,48 @@ function rowsMade(M, got) {
     g.sig.tr = joinBits(g, structParts(M, g)).tr;
   }
 }
+// The window of an answer of sva vcd --codes --from --to --lod (its line "$comment sva window FROM TO STEP INDEX=CHANGES:
+// BUCKET*COUNT/RISES,... $end", times in the dump's unit) -> { from, to, step (ps), red: Map of the reduced variables by
+// their index (an id code's number: codeIndex) -> { n: its changes in the window, dense: [[bucket, count, rises]] } };
+// null: no window (a whole read: an older reader, a plain page)
+function codesWin(text) {
+  const m = /\$comment sva window (\d+) (\d+) (\d+)((?: \S+)*) \$end/.exec(text); if (!m) return null;
+  const ts = /\$timescale\s+(\d+)\s*(fs|ps|ns|us|ms|s)\b/.exec(text);
+  const u = ts ? +ts[1] * { fs: 1e-3, ps: 1, ns: 1e3, us: 1e6, ms: 1e9, s: 1e12 }[ts[2]] : 1, red = new Map();
+  for (const w of m[4].split(' ').filter(Boolean)) {
+    const [idx, rest = ''] = w.split('='), [n, list = ''] = rest.split(':');
+    const bucket = x => { const [i, c = ''] = x.split('*'), [k, r] = c.split('/'); return [+i, +k, +r]; };
+    red.set(+idx, { n: +n, dense: list.split(',').filter(Boolean).map(bucket) });
+  }
+  return { from: +m[1] * u, to: +m[2] * u, step: +m[3] * u, red };
+}
+// an id code's number (sva's index of a variable: base 94 over ! .. ~, the first character the lowest digit)
+const codeIndex = c => { let n = 0; for (let i = c.length - 1; i >= 0; i--) n = n * 94 + c.charCodeAt(i) - 32; return n - 1; };
+// the part of a row of these id codes in a window: null when it holds the whole dump unreduced (a row as any other);
+// else { a, b: the window, step, dense: [[t0, t1, count, rises]] (changes in (t0, t1], sorted), n: its changes in the
+// window, whole: the window is the whole dump (the summary), exact: no dense span }
+function winPart(win, codes, M) {
+  const dense = []; let n = 0, red = false;
+  for (const c of codes) {
+    const x = win.red.get(codeIndex(c)); if (!x) continue;
+    red = true; n += x.n;
+    for (const [i, k, r] of x.dense) dense.push([win.from + i * win.step, Math.min(win.from + (i + 1) * win.step, win.to), k, r]);
+  }
+  const whole = win.from <= M.t0 && win.to >= M.t1;
+  if (!red && whole) return null;
+  dense.sort((a, b) => a[0] - b[0]);
+  return { a: win.from, b: win.to, step: win.step, dense, n, whole, exact: !dense.length };
+}
+// the part a row holds (a copy, a field, a bit, a slice: their signal's), null: the whole dump
+const partOf = r => { const q = r && (r.dupOf || r.of || r); return (q && q.part) || null; };
+// the first dense span of a part that [a, b] reaches into (a == b: a time inside one), else null
+function denseAt(p, a, b) {
+  const d = p.dense; let lo = 0, hi = d.length;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (d[m][1] <= a) lo = m + 1; else hi = m; }
+  return lo < d.length && d[lo][0] < b && a < d[lo][1] ? d[lo] : null;
+}
+// a row's changes over [a, b] are all held: read, and in a part row inside its window and in no dense span
+const exactIn = (r, a, b) => { if (!r || r.lazy) return false; const p = partOf(r); return !p || (p.a <= a && b <= p.b && !denseAt(p, a, b)); };
 // the rows a row on the screen needs read (lazy): itself, the vector of a field, every signal of a struct
 const lazyOf = (M, r0, r = r0.dupOf || r0) => (r.type === 'sig' ? (r.lazy ? [r] : r.field && r.of && r.of.lazy ? [r.of] : []) :
   r.type === 'group' && r.sig && r.sig.struct ? M.rows.slice(M.rows.indexOf(r) + 1, r.last + 1).filter(q => q.lazy) : []);

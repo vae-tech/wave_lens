@@ -334,7 +334,9 @@ Object.assign(WaveView.prototype, {
     const got = new Set();
     for (const [a, x] of c.rows) {
       if (!x.row && !x.missing && !x.omitted && !x.other) continue;
-      if (on) { x.atr = a.tr; a.tr = x.row ? x.row.tr : []; } else a.tr = x.atr;
+      // a large dump's row held in part: its part and summary go with its changes (B's rows are whole)
+      if (on) { x.atr = a.tr; x.apart = a.part; x.asum = a.sum; a.tr = x.row ? x.row.tr : []; a.part = null; a.sum = null; }
+      else { a.tr = x.atr; a.part = x.apart || null; a.sum = x.asum || null; }
       a.an = null; got.add(a);   // (its bits, its copies and the rises read through to its changes: riseTimes)
     }
     rowsMade(this.M, got);
@@ -345,7 +347,7 @@ Object.assign(WaveView.prototype, {
     const c = this.cmp; if (!c || !c.swapped) return;
     const got = new Set();
     for (const a of rows) { const x = c.rows.get(a); if (!x || (!x.row && !x.missing && !x.omitted && !x.other)) continue;
-      x.atr = a.tr; a.tr = x.row ? x.row.tr : []; a.an = null; got.add(a); }
+      x.atr = a.tr; x.apart = a.part; x.asum = a.sum; a.tr = x.row ? x.row.tr : []; a.part = null; a.sum = null; a.an = null; got.add(a); }
     if (got.size) rowsMade(this.M, got);
   },
   // these waves again, before the compare changes

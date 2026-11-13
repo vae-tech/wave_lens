@@ -78,8 +78,9 @@
   <tr><th></th><th>In a VS Code tab</th></tr>
   <tr><td>a large dump</td><td>an FST of 4 MB or a VCD of 64 MB and more (<code>wavelens.lazy</code>) opens with every module
     and signal at once, the top level open and its modules folded, no value read yet; open a module and the signals on the screen
-    are read from the dump's FST (<code>sva vcd --codes</code>; a VCD is made an FST once). Assertions, the FSM panel and pictures
-    read what they need first. With no <code>sva</code> CLI on the host (Windows without <code>wavelens.sva</code>) a VCD is
+    are read from the dump's FST (<code>sva vcd --codes</code>; a VCD is made an FST once) over the whole dump as a summary: a busy
+    signal (a clock) as a bar where it changes more often than the screen shows, its value there <code>…</code>. Assertions, the
+    FSM panel and pictures read what they need first. With no <code>sva</code> CLI on the host (Windows without <code>wavelens.sva</code>) a VCD is
     read whole instead, the tab says why; an FST needs the CLI. <i>WaveLens: Set the sva program…</i> (offered then, also in the
     tab's ⋯ menu) lists the <code>sva</code> programs found on the machine, each tried, or a file you pick, and sets
     <code>wavelens.sva</code>.</td></tr>
@@ -199,7 +200,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.57 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.58 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

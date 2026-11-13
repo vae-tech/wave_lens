@@ -5,6 +5,33 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.58 — 13 November 2026
+
+A large dump read by the visible window: the 1 GB / 200 ms VCD that hung the VS Code tab opens in seconds.
+
+A large dump read by the visible window (stage 2; the 1 GB / 200 ms dump that hung the VS Code tab):
+- `sva vcd --header` and `--codes` read no table of times: that dump's header in 0.03 s and 3 MB (was 1.35 s, 626 MB).
+- `sva vcd --codes FILE --from T --to T --lod N [--keep K]`: a window of some signals, one that changes more than K times
+  there reduced to N buckets (a bucket of one or two changes whole, of more its last change), a `$comment sva window …`
+  line naming them; its 9 busiest signals over 200 ms: 0.7 MB in 3.3 s, a 1 ms window in 0.34 s.
+- VS Code: a read of signals always gets an answer (at most 48 MB, 120 s, two at once, stoppable: `codes-stop`); 0.57
+  waited for ever on an answer past 512 MB.
+- The page reads a large dump's rows as a summary of the whole dump (32 rows a read, one at a time): a signal over
+  `lazyKeep` (16384) changes as `lazyBuckets` (2048) buckets, a part row (`r.part`, `r.sum`) whose dense spans are bars
+  (hatched when zoomed in past them) and whose value there is `…`; that dump's 9 top rows in 2.8 s and 17 MB of heap. A row
+  the answer leaves out, or a failed read: `not read: …` on it, not asked again. Settings `lazyBuckets`, `lazyKeep`,
+  `lazyWhole`, `lazyHeld`.
+- Zoomed in on a large dump, the busy rows on the screen are read again for the view (150 ms after the zoom or scroll
+  stops, one read a burst, a stale one stopped), exact once narrow enough; scrolled out: their summary at once. That dump:
+  a 20 µs view exact (4000 clock edges, as `sva vcd` cuts them) 0.3 s after the read starts. The narrowest view is at most
+  1 ns (was a millionth of the dump: 200 ns on 200 ms).
+- What needs every change of a busy row (FSM panel, fsm_stats / fsm_go, cycles, gaps, assertions, expressions, Save as
+  WaveLens) reads it whole up to `lazyWhole` (1 M) changes, else says why (needWhole); the edge search, the range counts,
+  the cycles between two times and the tooltip only where the row is held exactly (zoom in). A compare's B carries no
+  part. A dense run is drawn from its spans (the summary keeps one change of a dense bucket, often equal to the one before
+  it and dropped), hatched when its buckets are wider than 3 px; a row whose window no longer covers the view is drawn from
+  its summary in the same frame.
+
 ## 0.57 — 12 November 2026
 
 VS Code on Windows: the sva CLI inside the package; a VCD read whole without one only up to 256 MB.

@@ -721,6 +721,200 @@ fn vcd_parts_of_an_fst() {
     assert!(err(&sva(&["vcd", &vcd.to_string_lossy(), "--header"])).contains("read an FST"));
 }
 
+/// The dump of the window tests: a clock of 100 edges (`!`), a bus (`"`), a bit that changes twice (`#`), one with no value
+/// until 300 (`$`), a real (`%`) and a string (`&`); an FST of many blocks of it.
+fn window_fst(test: &str) -> (PathBuf, String) {
+    let mut t = String::from("$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! clk $end\n$var wire 8 \" bus [7:0] $end\n\
+        $var wire 1 # q $end\n$var wire 1 $ late $end\n$var real 64 % r $end\n$var string 1 & s $end\n$upscope $end\n$enddefinitions $end\n\
+        #0\n0!\nb0 \"\n0#\nr0.5 %\nsa &\n");
+    for i in 1..=100 {
+        let at = i * 5;
+        t += &format!("#{at}\n{}!\n", i % 2);
+        if i % 3 == 0 {
+            t += &format!("b{:b} \"\n", i * 7 % 256);
+        }
+        match at {
+            120 => t += "sb\\040c &\n",
+            250 => t += "r-2.25 %\n1#\n",
+            300 => t += "1$\n",
+            400 => t += "0#\nsd &\n",
+            _ => {}
+        }
+    }
+    let vcd = own(test, "w.vcd", &t);
+    let fst = vcd.with_extension("fst");
+    let o = sva(&["fst", &vcd.to_string_lossy(), "--block-bytes", "256", "-q"]);
+    assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+    assert!(fst_header(&fst)[5] > 3, "blocks: {:?}", fst_header(&fst));
+    (fst, t)
+}
+
+/// The changes of a text by code: (time, line) in order, a `$dumpvars` line at its time (the body after $enddefinitions).
+fn by_code(t: &str) -> std::collections::BTreeMap<String, Vec<(u64, String)>> {
+    let mut m: std::collections::BTreeMap<String, Vec<(u64, String)>> = Default::default();
+    let mut now = 0;
+    for l in t.split("$enddefinitions $end").nth(1).unwrap_or("").lines().map(str::trim) {
+        if l.is_empty() || l.starts_with('$') {
+            continue;
+        }
+        if let Some(x) = l.strip_prefix('#') {
+            now = x.parse().unwrap();
+            continue;
+        }
+        let code = if l.starts_with(['b', 'r', 's']) { l.rsplit(' ').next().unwrap().to_string() } else { l[1..].to_string() };
+        m.entry(code).or_default().push((now, l.to_string()));
+    }
+    m
+}
+
+/// The value of a code at `t` (its last change at or before it) in `by_code`'s list.
+fn value_at(v: &[(u64, String)], t: u64) -> Option<&str> {
+    v.iter().rev().find(|x| x.0 <= t).map(|x| x.1.as_str())
+}
+
+/// `sva vcd --header` and `--codes` read no table of times (a large dump's: a second and 600 MB): the header of an FST
+/// of many blocks is the whole text's declarations and its first and last times, the codes' text the whole one's changes.
+#[test]
+fn vcd_header_and_codes_of_many_blocks() {
+    let (fst, _) = window_fst("vcd-head-blocks");
+    let f = fst.to_string_lossy();
+    let whole = out(&sva(&["vcd", &f]));
+    let head = out(&sva(&["vcd", &f, "--header"]));
+    let decl = |t: &str| t.split("$enddefinitions $end").next().unwrap().to_string();
+    assert_eq!(decl(&head), decl(&whole));
+    assert!(head.ends_with("$enddefinitions $end\n#0\n#500\n"), "{head}");
+    let codes = own("vcd-head-blocks", "c.txt", "! \" % &");
+    let part = out(&sva(&["vcd", &f, "--codes", &codes.to_string_lossy()]));
+    let (a, b) = (by_code(&part), by_code(&whole));
+    for c in ["!", "\"", "%", "&"] {
+        assert_eq!(a[c], b[c], "{c}");
+    }
+    assert!(part.contains("\n#500\n"), "the end of the dump: {part}");
+}
+
+/// A window of some codes (`--codes --from --to --lod`): with a keep above their changes, each code's value at --from and
+/// its changes after it up to --to, as the whole text has them, from the first block or a later one (the frame), a
+/// window of one time, one past the end; a code with no value yet has no line; nothing reduced: the comment names the
+/// window only.
+#[test]
+fn vcd_window_of_codes_is_the_whole_text_cut() {
+    let (fst, _) = window_fst("vcd-window");
+    let f = fst.to_string_lossy();
+    let codes = own("vcd-window", "c.txt", "! \" # $ % &");
+    let c = codes.to_string_lossy();
+    let whole = by_code(&out(&sva(&["vcd", &f])));
+    for (from, to) in [(0u64, 500u64), (0, 37), (12, 260), (233, 333), (300, 300), (420, 9999), (499, 500)] {
+        let o = sva(&["vcd", &f, "--codes", &c, "--from", &format!("{from}ns"), "--to", &format!("{to}ns"), "--lod", "16", "--keep", "1000"]);
+        assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+        let t = out(&o);
+        let end = to.min(500);
+        assert!(t.contains(&format!("$enddefinitions $end\n$comment sva window {from} {end} {} $end\n#{from}\n$dumpvars\n",
+            (end - from).div_ceil(16).max(1))), "{from} {to}: {t}");
+        let got = by_code(&t);
+        for (code, all) in &whole {
+            let mut want: Vec<(u64, String)> = value_at(all, from).map(|l| (from, l.to_string())).into_iter().collect();
+            want.extend(all.iter().filter(|x| x.0 > from && x.0 <= end).cloned());
+            assert_eq!(got.get(code).cloned().unwrap_or_default(), want, "{code} in {from} … {to}");
+        }
+        if from < 300 {
+            assert!(!t.split("$dumpvars").nth(1).unwrap().split("$end").next().unwrap().contains('$'), "late: no value yet, no line: {t}");
+        }
+        assert!(t.contains(&format!("\n#{end}\n")) || t.trim_end().ends_with(&format!("#{end}")), "the window's end: {t}");
+    }
+}
+
+/// A code with more than --keep changes in the window is reduced to --lod buckets: a bucket of one or two changes whole,
+/// of more its last change only, at its time; the comment counts each dense bucket's changes and rises, and with the
+/// kept ones they are the code's changes; the value at every bucket's end is the whole text's.
+#[test]
+fn vcd_window_of_codes_reduced() {
+    let (fst, _) = window_fst("vcd-lod");
+    let f = fst.to_string_lossy();
+    let codes = own("vcd-lod", "c.txt", "! \" #");
+    let whole = by_code(&out(&sva(&["vcd", &f])));
+    for (from, to, n) in [(0u64, 500u64, 8u64), (100, 400, 8), (0, 500, 64), (7, 493, 5)] {
+        let o = sva(&["vcd", &f, "--codes", &codes.to_string_lossy(), "--from", &format!("{from}ns"), "--to", &format!("{to}ns"),
+                      "--lod", &n.to_string(), "--keep", "4"]);
+        assert_eq!(o.status.code(), Some(0), "{}", err(&o));
+        let t = out(&o);
+        let head = t.split("$comment sva window ").nth(1).unwrap().split(" $end").next().unwrap().to_string();
+        let mut w = head.split(' ');
+        let (wf, wt, step): (u64, u64, u64) = (w.next().unwrap().parse().unwrap(), w.next().unwrap().parse().unwrap(), w.next().unwrap().parse().unwrap());
+        assert_eq!((wf, wt, step), (from, to, (to - from).div_ceil(n)), "{head}");
+        let got = by_code(&t);
+        let mut reduced = std::collections::HashMap::new();
+        for r in w {
+            let (idx, rest) = r.split_once('=').unwrap();
+            let (total, list) = rest.split_once(':').unwrap();
+            let dense: Vec<(u64, u64, u64)> = list.split(',').filter(|x| !x.is_empty()).map(|x| {
+                let (i, c) = x.split_once('*').unwrap();
+                let (c, r) = c.split_once('/').unwrap();
+                (i.parse().unwrap(), c.parse().unwrap(), r.parse().unwrap())
+            }).collect();
+            reduced.insert(idx.parse::<usize>().unwrap(), (total.parse::<u64>().unwrap(), dense));
+        }
+        for (i, code) in ["!", "\""].iter().enumerate() {
+            let all = &whole[*code];
+            let inside: Vec<&(u64, String)> = all.iter().filter(|x| x.0 > from && x.0 <= to).collect();
+            let (total, dense) = reduced.get(&i).unwrap_or_else(|| panic!("{code} reduced: {head}"));
+            assert_eq!(*total, inside.len() as u64, "{code}");
+            let mine: Vec<&(u64, String)> = got[*code].iter().filter(|x| x.0 > from).collect();
+            for b in 0..n {
+                let (lo, hi) = (from + b * step, (from + (b + 1) * step).min(to));
+                let real: Vec<&&(u64, String)> = inside.iter().filter(|x| x.0 > lo && x.0 <= hi).collect();
+                let kept: Vec<&&(u64, String)> = mine.iter().filter(|x| x.0 > lo && x.0 <= hi).collect();
+                let d = dense.iter().find(|x| x.0 == b);
+                if real.len() <= 2 {
+                    assert!(d.is_none(), "{code} bucket {b}: whole");
+                    assert_eq!(kept.len(), real.len(), "{code} bucket {b}");
+                } else {
+                    let (_, count, rises) = d.unwrap_or_else(|| panic!("{code} bucket {b} dense: {head}"));
+                    assert_eq!(*count, real.len() as u64, "{code} bucket {b}");
+                    assert_eq!(*rises, if i == 0 { real.iter().filter(|x| x.1.starts_with('1')).count() as u64 } else { 0 }, "rises");
+                    assert_eq!(kept.len(), 1, "{code} bucket {b}: its last change only");
+                    assert_eq!(kept[0], *real.last().unwrap(), "{code} bucket {b}: the last change at its time");
+                }
+                assert_eq!(value_at(&got[*code], hi), value_at(all, hi), "{code}: the value at the end of bucket {b}");
+            }
+        }
+        assert!(!reduced.contains_key(&2), "q changes twice: whole: {head}");
+        assert_eq!(got["#"], whole["#"].iter().filter(|x| x.0 > from && x.0 <= to).cloned()
+            .chain(value_at(&whole["#"], from).map(|l| (from, l.to_string()))).fold(Vec::new(), |mut v, x| {
+                if x.0 == from { v.insert(0, x) } else { v.push(x) }
+                v
+            }), "q whole");
+    }
+}
+
+/// The flags of a window: --lod needs --codes, a number above 0, and goes with --from/--to only; --keep with --lod;
+/// --codes with --from without --lod is a cut and refused; a VCD has no parts.
+#[test]
+fn vcd_window_flags() {
+    let (fst, _) = window_fst("vcd-lod-flags");
+    let f = fst.to_string_lossy();
+    let codes = own("vcd-lod-flags", "c.txt", "!");
+    let c = codes.to_string_lossy();
+    for (args, says) in [
+        (vec!["--lod", "8"], "--lod is a window of --codes"),
+        (vec!["--codes", &c, "--lod", "0"], "--lod needs a number above 0"),
+        (vec!["--codes", &c, "--lod", "x"], "--lod needs a number above 0"),
+        (vec!["--codes", &c, "--keep", "5"], "--keep goes with --lod"),
+        (vec!["--codes", &c, "--lod", "8", "--zero"], "not together"),
+        (vec!["--codes", &c, "--lod", "8", "--signals", "tb.clk"], "not together"),
+        (vec!["--header", "--lod", "8"], "--lod is a window of --codes"),
+        (vec!["--codes", &c, "--from", "5ns"], "a window of --codes: --lod"),
+    ] {
+        let o = sva(&[&["vcd", &f][..], &args].concat());
+        assert_eq!(o.status.code(), Some(2), "{args:?}");
+        assert!(err(&o).contains(says), "{args:?}: {}", err(&o));
+    }
+    let vcd = fst.with_extension("vcd");
+    assert!(err(&sva(&["vcd", &vcd.to_string_lossy(), "--codes", &c, "--lod", "8"])).contains("read an FST"));
+    // the whole window by default: --from and --to the dump's ends
+    let t = out(&sva(&["vcd", &f, "--codes", &c, "--lod", "4", "--keep", "1000"]));
+    assert!(t.contains("$comment sva window 0 500 125 $end"), "{t}");
+}
+
 /// The blocks of changes (64 MiB each; `--block-bytes` makes them small) and the aliases of equal changes read back as
 /// one block does; --out names another file.
 #[test]

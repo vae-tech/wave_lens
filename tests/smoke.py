@@ -3054,9 +3054,11 @@ def lazy_dump(browser, build):
         return rd(), rd('--header')
     asked = []
 
-    def codes(name, cs):
+    def codes(name, cs, win=None):   # win: the viewer's window (from, to, lod, keep) as the VS Code tab passes it
         asked.append((name, len(cs)))
-        return subprocess.run([str(exe), 'vcd', str(parts[name]), '--codes', '-'], input='\n'.join(cs), capture_output=True, text=True, check=True).stdout
+        flags = [x for k in ('from', 'to', 'lod', 'keep') if (win or {}).get(k) is not None for x in ('--' + k, str(int(win[k])))]
+        return subprocess.run([str(exe), 'vcd', str(parts[name]), '--codes', '-', *flags], input='\n'.join(cs), capture_output=True, text=True,
+                              check=True).stdout
     page = browser.new_page(viewport={'width': 1400, 'height': 900})
     errs = []
     page.on('pageerror', lambda e: errs.append(str(e)))
@@ -3068,7 +3070,7 @@ def lazy_dump(browser, build):
     # every signal read: the rows of the whole text (fixtures, generated dumps, the design-shaped one, the examples)
     same = """async ([n, whole, head]) => { const a = document.createElement('div'), b = document.createElement('div'); document.body.append(a, b);
       const va = new WaveLens.WaveView(a, WaveLens.vcdToWave(whole, { name: n, budget: Infinity }).doc, {});
-      const vb = new WaveLens.WaveView(b, WaveLens.vcdToWave(head, { name: n, lazy: true }).doc, { loadCodes: c => window.lazyCodes(n, c) });
+      const vb = new WaveLens.WaveView(b, WaveLens.vcdToWave(head, { name: n, lazy: true }).doc, { loadCodes: (c, w) => window.lazyCodes(n, c, w) });
       const was = vb.M.rows.filter(r => r.lazy).length; await vb.need(vb.M.rows);
       const key = v => JSON.stringify([v.M.t0, v.M.t1, v.M.rows.map(r => [r.type, r.full, r.width, r.kind || null,
         (r.type === 'sig' ? r.tr : r.sig ? r.sig.tr : []).map(o => [o.t, o.k, o.raw ?? null, o.v ?? null, o.bits ?? null])])]);
@@ -3084,7 +3086,104 @@ def lazy_dump(browser, build):
         r = page.evaluate(same, [name, *w]); n += 1
         if not r[0] or r[2] or (r[1] == 0 and 'signal' in w[0] and '$var' in w[1] and False):
             bad.append((name, r))
-    check(not bad and n >= 40, f'{n} dumps read as they are needed, every signal: the rows of the whole text {bad}')
+    check(not bad and n >= 40, f'{n} dumps read as they are needed (the whole dump as a window: sva vcd --codes --from --to --lod --keep), every '
+          f'signal: the rows of the whole text {bad}')
+    # stage 2: a signal that changes more than lazyKeep times is read as lazyBuckets buckets of the dump (a part row): its
+    # values where it is not dense are the whole dump's, '…' where it is; a signal under lazyKeep a whole row; a row the
+    # answer leaves out says so and is not asked again
+    gen = ['$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! clk $end\n$var wire 8 " cnt [7:0] $end\n$var wire 1 # q $end\n'
+           '$var wire 3 $ st [2:0] $end\n$upscope $end\n$enddefinitions $end\n#0\n0!\nb0 "\n0#\nb0 $\n']
+    for i in range(1, 20001):
+        gen.append(f'#{i}\n{i % 2}!\n' + (f'b{(i // 2) % 256:b} "\n' if i % 2 == 0 else '') + ('1#\n' if i == 5000 else '0#\n' if i == 15000 else '')
+                   + (f'b{(i // 100) % 8:b} $\n' if i % 100 == 0 else ''))
+    pw, ph = fst_of('parts', ''.join(gen))
+    parts_r = page.evaluate("""async ([whole, head]) => { const a = document.createElement('div'), b = document.createElement('div'); document.body.append(a, b);
+      const va = new WaveLens.WaveView(a, WaveLens.vcdToWave(whole, { name: 'parts', budget: Infinity }).doc, {});
+      const vb = new WaveLens.WaveView(b, WaveLens.vcdToWave(head, { name: 'parts', lazy: true }).doc, { loadCodes: (c, w) => window.lazyCodes('parts', c, w),
+        lazyKeep: 256, lazyBuckets: 512 });
+      await vb.need(vb.M.rows); const R = (v, n) => v.M.rows.find(r => r.name === n), out = {};
+      out.parts = ['clk', 'cnt', 'q', 'st'].map(n => { const p = R(vb, n).part; return p && [p.dense.length > 100, p.exact, p.n]; });
+      let same = 0, dots = 0, wrong = [];
+      for (let k = 0; k < 400; k++) { const t = (k * 7919) % 20000 + 0.5;
+        for (const n of ['clk', 'cnt', 'q', 'st']) { const x = vb.valueAt(R(vb, n), t), y = va.valueAt(R(va, n), t);
+          if (x === '…') dots++; else if (x === y) same++; else wrong.push([n, t, x, y]); } }
+      out.values = [same, dots, wrong.slice(0, 4)];
+      out.whole = ['q', 'st'].map(n => JSON.stringify(R(vb, n).tr) === JSON.stringify(R(va, n).tr));
+      vb.draw(); const t0 = performance.now(); for (let i = 0; i < 10; i++) vb.draw(); out.draw = (performance.now() - t0) / 10;
+      let calls = 0; const c = document.createElement('div'); document.body.append(c);
+      const vc = new WaveLens.WaveView(c, WaveLens.vcdToWave(head, { name: 'parts', lazy: true }).doc, { loadCodes: (cs, w) => { calls++;
+        return window.lazyCodes('parts', cs.slice(0, 1), w); } });
+      await vc.need(vc.M.rows); for (let i = 0; i < 10; i++) { vc.draw(); await new Promise(r => requestAnimationFrame(r)); }
+      out.left = [calls, vc.M.rows.filter(r => r.unread === 'not in the dump read').length, vc.M.rows.filter(r => r.type === 'sig' && !r.lazy).length];
+      for (const v of [va, vb, vc]) { const el = v.root; v.destroy(); el.remove(); }
+      return out; }""", [pw, ph])
+    check(parts_r['parts'][0] == [True, False, 20000] and parts_r['parts'][1] == [True, False, 10000] and parts_r['parts'][2:] == [None, None],
+          f'a part row: the clock and the counter (over lazyKeep) as buckets with their dense spans; a quiet bit and a slow bus whole rows {parts_r["parts"]}')
+    check(not parts_r['values'][2] and parts_r['values'][0] > 400 and parts_r['values'][1] > 100 and parts_r['whole'] == [True, True],
+          f'a part row\'s values: the whole dump\'s where it is not dense, … where it is; the whole rows the whole text\'s {parts_r["values"]} {parts_r["whole"]}')
+    check(parts_r['left'] == [1, 3, 1] and parts_r['draw'] < 50, f'a row the answer leaves out: not read, said, not asked again {parts_r["left"]}; '
+          f'a frame {parts_r["draw"]:.1f} ms')
+    # stage 2 C5: zoomed in, the busy rows' window is read again after a pause (one read for a burst of zooms), exact once
+    # narrow enough and the whole dump's there; scrolled out of it: the summary at once and one new read; a read made
+    # stale by a jump stopped, its answer not taken; a draw never waits for a read
+    win_r = page.evaluate("""async ([whole, head]) => { const a = document.createElement('div'), b = document.createElement('div'); document.body.append(a, b);
+      const va = new WaveLens.WaveView(a, WaveLens.vcdToWave(whole, { name: 'parts', budget: Infinity }).doc, {});
+      const calls = [], stops = []; let slow = 0;
+      const load = (c, w) => { const n = calls.push(w); let stop = false;
+        const p = new Promise(r => setTimeout(r, slow)).then(() => window.lazyCodes('parts', c, w)).then(t => { if (stop) throw Object.assign(new Error('stopped'),
+          { stopped: true }); return t; });
+        p.stop = () => { stop = true; stops.push(n); }; return p; };
+      const vb = new WaveLens.WaveView(b, WaveLens.vcdToWave(head, { name: 'parts', lazy: true }).doc, { loadCodes: load, lazyKeep: 256, lazyBuckets: 512 });
+      await vb.need(vb.M.rows); const R = (v, n) => v.M.rows.find(r => r.name === n), wait = ms => new Promise(r => setTimeout(r, ms)), out = {};
+      const at = (t0, span) => { vb.t0 = t0; vb.span = span; vb.draw(); };
+      const first = calls.length;
+      for (let i = 0; i < 10; i++) { at(1e7 + i * 1000, 1e5); await wait(8); }
+      await wait(600);
+      const clk = R(vb, 'clk'), view = r => JSON.stringify(r.tr.filter(o => o.t >= vb.t0 && o.t <= vb.t0 + vb.span).map(o => [o.t, o.k]));
+      out.zoom = [calls.length - first, calls[calls.length - 1] && [calls[calls.length - 1].from <= vb.t0, calls[calls.length - 1].to >= vb.t0 + vb.span],
+        !!clk.part && clk.part.exact, view(clk) === view(R(va, 'clk')), view(R(vb, 'cnt')) === view(R(va, 'cnt'))];
+      const n1 = calls.length; at(1.5e7, 1e5);
+      out.pan = [clk.tr === clk.sum.tr]; await wait(600); out.pan.push(calls.length - n1, clk.part.exact && clk.part.a <= 1.5e7);
+      slow = 400; at(5e6, 1e5); await wait(250); const n2 = calls.length; at(1.8e7, 1e5);
+      const d0 = performance.now(); vb.draw(); out.drawMs = performance.now() - d0;
+      await wait(1200);
+      out.stale = [stops.includes(n2), clk.part.a <= 1.8e7 && clk.part.b >= 1.8e7 + 1e5, vb.winAsk === null];
+      for (const v of [va, vb]) { const el = v.root; v.destroy(); el.remove(); }
+      return out; }""", [pw, ph])
+    check(win_r['zoom'] == [1, [True, True], True, True, True], f'zoomed in: one read after a burst of zooms, its window the view\'s, the clock '
+          f'exact there and the whole dump\'s {win_r["zoom"]}')
+    check(win_r['pan'] == [True, 1, True], f'scrolled out of the window: the summary at once, one new read, exact again {win_r["pan"]}')
+    check(win_r['stale'] == [True, True, True] and win_r['drawMs'] < 30, f'a read made stale by a jump: stopped, its answer not taken; a draw '
+          f'that does not wait ({win_r["drawMs"]:.1f} ms) {win_r["stale"]}')
+    # stage 2 C6: a feature that needs every change of a row reads it whole when it changes at most lazyWhole times (a row
+    # as any other then), else says why; the edge search, the range counts, the cycles and the tooltip only where a row is
+    # held exactly; Save as WaveLens and the FSM command refuse a row too busy to read whole; a compare's B carries no part
+    feat = page.evaluate("""async ([whole, head]) => { const a = document.createElement('div'), b = document.createElement('div'); document.body.append(a, b);
+      const va = new WaveLens.WaveView(a, WaveLens.vcdToWave(whole, { name: 'parts', budget: Infinity }).doc, {});
+      const vb = new WaveLens.WaveView(b, WaveLens.vcdToWave(head, { name: 'parts', lazy: true }).doc, { loadCodes: (c, w) => window.lazyCodes('parts', c, w),
+        lazyKeep: 256, lazyBuckets: 512, lazyWhole: 15000 });
+      await vb.need(vb.M.rows); const R = (v, n) => v.M.rows.find(r => r.name === n), out = {}, err = async f => { try { await f(); return null; } catch (e) { return e.message; } };
+      await vb.needWhole([R(vb, 'cnt')], 'a test');
+      const key = r => JSON.stringify(r.tr.map(o => [o.t, o.k, o.raw ?? null, o.v ?? null]));
+      out.whole = [R(vb, 'cnt').sum, R(vb, 'cnt').part, key(R(vb, 'cnt')) === key(R(va, 'cnt'))];
+      out.refused = await err(() => vb.needWhole([R(vb, 'clk')], 'a test'));
+      let said = ''; const toast = vb.toast; vb.toast = m => { said = m; return toast.call(vb, m); };
+      vb.cursor = 1e7; vb.sel = R(vb, 'clk'); vb.edge(1, 'any'); out.edge = [vb.cursor, said];
+      vb.sel = R(vb, 'cnt'); vb.edge(1, 'any'); va.cursor = 1e7; va.sel = R(va, 'cnt'); va.edge(1, 'any'); out.edgeWhole = [vb.cursor, va.cursor];
+      out.cycles = [vb.cycles(R(vb, 'clk'), 0, 2e7), va.cycles(R(va, 'clk'), 0, 2e7)];
+      vb.range = [5e6, 6e6]; vb.rangeRow = R(vb, 'clk'); vb.rangeKey = null; out.range = vb.rangeText();
+      out.tip = vb.valueTip(R(vb, 'clk'), 1e7 + 1234);
+      out.piece = await err(() => vb.toPiece(0, 2e7, [R(vb, 'clk')]));
+      out.fsm = await err(() => vb.run([{ op: 'range' }]).then(() => vb.needWhole([R(vb, 'clk')], 'fsm_stats')));
+      for (const v of [va, vb]) { const el = v.root; v.destroy(); el.remove(); }
+      return out; }""", [pw, ph])
+    check(feat['whole'] == [None, None, True], f'a busy row under lazyWhole read whole for a feature: a row as any other, the whole dump\'s changes {feat["whole"]}')
+    check('more than lazyWhole' in (feat['refused'] or '') and 'tb.clk' in feat['refused'] and 'more than lazyWhole' in (feat['piece'] or '')
+          and 'more than lazyWhole' in (feat['fsm'] or ''), f'one over it: refused, said with its name (Save as WaveLens, fsm_stats too) {feat["refused"]}')
+    check(feat['edge'][0] == 1e7 and 'zoom in' in feat['edge'][1] and feat['edgeWhole'][0] == feat['edgeWhole'][1],
+          f'the edge search: not over a row held in part (zoom in), as the whole dump on a row read whole {feat["edge"]} {feat["edgeWhole"]}')
+    check(feat['cycles'] == [None, 10000] and 'read in part' in feat['range'] and 'changes in this stretch' in feat['tip'],
+          f'cycles, the range counts, the tooltip of a busy row: not a wrong number where it is held in part {feat["cycles"]} {feat["range"]} {feat["tip"]}')
     # the design-shaped dump: the top level open, its modules folded; the signals on the screen read, only those
     whole, head = fst_of('design', lazy_vcd())
     asked.clear()

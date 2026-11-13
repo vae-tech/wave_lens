@@ -15,7 +15,9 @@
     source: { ask: '', reply: ['src name lazy store fresh? lastState? note?'] },   // the dump's URI now (an FST: its VCD text; lazy: its header), its
     //   store; fresh: the tab's first page (a page made again takes no last state), lastState: the path of the state loaded last
     bytes: { ask: '', reply: ['data'] },                           // what source named, as bytes (a URI the webview could not fetch)
-    codes: { ask: 'codes', reply: ['text'] },                      // a lazy dump's signals by their id codes: sva vcd --codes
+    codes: { ask: 'codes from? to? lod? keep? rid?', reply: ['text'] },   // a lazy dump's signals by their id codes: sva vcd --codes;
+    //   from, to (ps), lod, keep: a window of them (--from --to --lod --keep); rid: the page's number of this read (codes-stop)
+    'codes-stop': { ask: 'rid', reply: null },                     // that read no longer wanted: its CLI killed, answered { error: 'stopped' }
     store: { ask: 'key value', reply: null },                      // a localStorage key of this dump (value null: removed)
     gstore: { ask: 'key value', reply: null },                     // the bar's, for every tab: key bar (wavelens.bar) or look (toolsHidden, toolsFolded)
     save: { ask: 'name b64', reply: ['path', 'cancel'] },          // a download: a save dialog on the host

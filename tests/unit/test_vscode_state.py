@@ -316,6 +316,73 @@ class LocateSva(unittest.TestCase):
         self.assertTrue(o['reloaded'], 'the tab read whole for want of it read again')
         self.assertIsNone(o['set'][1], 'The default: wavelens.sva emptied')
 
+
+CODES = r"""
+const fs = require('fs'), path = require('path');
+const [F, ext, dir] = process.argv.slice(1).map((x, i) => (i ? x : require(x)));
+const h = F.host({ ext, dir, workspaceState: new Map(), config: { sva: path.join(dir, 'sva'), lazy: 'never' },
+  window: { withProgress: async (o, f) => f(), showWarningMessage: async () => undefined } });
+const mode = m => fs.writeFileSync(path.join(dir, 'mode'), m);
+const alive = pid => { try { process.kill(pid, 0); return true; } catch (e) { return false; } };
+F.run(async () => {
+  const f = path.join(dir, 'd.fst'), A = await h.tab(f), out = {};
+  const t = h.api.tabs()[0], st = fs.statSync(f);
+  t.fst = f; t.fstAt = `${st.size}:${st.mtimeMs}`;   // read lazy (its header as source() reads it: not this test's)
+  const ask = (id, more) => A.send(Object.assign({ type: 'codes', id, codes: ['!', '"'] }, more)).then(() => A.reply(id));
+  mode('args'); out.args = (await ask(1, { from: 0, to: 2000, lod: 64, keep: 100, rid: 1 })).text;
+  out.whole = (await ask(2, {})).text;
+  out.bad = await ask(3, { from: -1, lod: 4 });
+  mode('big'); const t0 = Date.now(); out.big = await ask(4, { lod: 4, rid: 4 }); out.bigMs = Date.now() - t0;
+  mode('sleep'); out.late = await ask(5, { lod: 4, rid: 5 });
+  mode('old'); out.old = await ask(6, { lod: 4, rid: 6 });
+  // a read stopped while it runs: its CLI killed, answered stopped; one stopped while it waits (2 run at once): never started
+  mode('sleep');
+  const runs = [7, 8, 9].map(id => ask(id, { lod: 4, rid: id }));
+  await new Promise(r => setTimeout(r, 300));
+  const pids = [...t.procs].map(p => p.pid);
+  out.running = [pids.length, t.codesQ.length];
+  await A.send({ type: 'codes-stop', rid: 7 }); await A.send({ type: 'codes-stop', rid: 9 }); await A.send({ type: 'codes-stop', rid: 8 });
+  out.stopped = (await Promise.all(runs)).map(r => r.error);
+  await new Promise(r => setTimeout(r, 300));
+  out.left = pids.filter(alive).length;
+  out.unknownStop = await A.send({ type: 'codes-stop', rid: 99 }).then(() => 'ok');
+  return out;
+});
+"""
+
+
+class Codes(unittest.TestCase):
+    @H.needs(NODE, 'node (or VS Code\'s, ~/.vscode-server/bin/*/node)')
+    def test_every_read_of_signals_settles(self):
+        """Stage 2 R1 / R2: a read of signals (codes) always gets an answer: its window passed to the CLI (--from --to --lod
+        --keep); an answer past 48 MB an error, not a promise that never settles (0.57: a 1 GB dump's clock read whole threw in
+        'close' past 512 MB and the page waited for ever); no answer in the time an error; an older sva without --lod said;
+        a read stopped (codes-stop) killed or taken out of the queue, answered stopped; two CLIs of a tab at once."""
+        with H.tmp() as d:
+            with open(os.path.join(d, 'd.fst'), 'w', encoding='utf-8') as f:
+                f.write('fst')
+            sva = os.path.join(d, 'sva')
+            with open(sva, 'w', encoding='utf-8') as f:
+                f.write('#!/bin/sh\nm=$(cat "$(dirname "$0")/mode")\ncase $m in\n'
+                        '  args) cat >/dev/null; echo "ARGS $*";;\n'
+                        '  big) head -c 62914560 /dev/zero | tr "\\000" a;;\n'
+                        '  sleep) exec sleep 30;;\n'
+                        '  old) echo "unknown option --lod" >&2; exit 2;;\nesac\n')
+            os.chmod(sva, 0o755)
+            r = subprocess.run([NODE, '-e', CODES, FAKE, os.path.join(H.ROOT, 'vscode', 'extension.js'), d], capture_output=True, text=True,
+                               timeout=60, env=dict(os.environ, WAVELENS_CODES_TIMEOUT='500'))
+            self.assertEqual(r.returncode, 0, r.stderr)
+            o = json.loads(next(x for x in r.stdout.splitlines() if x.startswith('RESULT'))[6:])
+        self.assertTrue(o['args'].endswith('--codes - --from 0 --to 2000 --lod 64 --keep 100\n'), o['args'])
+        self.assertTrue(o['whole'].endswith('--codes -\n'), 'no window: the whole read as before')
+        self.assertIn('no time or count', o['bad']['error'])
+        self.assertIn('more than 48 MB', o['big'].get('error', ''), o['big'])
+        self.assertIn('no answer in', o['late'].get('error', ''), o['late'])
+        self.assertIn('older than the extension', o['old'].get('error', ''))
+        self.assertEqual(o['running'], [2, 1], 'two CLIs at once, the third waits')
+        self.assertEqual(o['stopped'], ['stopped'] * 3)
+        self.assertEqual(o['left'], 0, 'the stopped reads\' CLIs killed')
+
 WP8 = r'''
 const fs = require('fs'), path = require('path');
 const [F, ext, dir, mode] = process.argv.slice(1).map((x, i) => (i ? x : require(x)));

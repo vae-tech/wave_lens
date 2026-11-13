@@ -146,10 +146,41 @@ function paintAnalog(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk) {
     lab = { size: S.labelSize - 1, fill: 'muted' };
     P.text(xL + 4, yh + 2, f(hi), lab); P.text(xL + 4, yl - 2, f(lo), lab); }
 }
+// A run of dense spans of a row held in part (more changes there than were read): a bar; its buckets wider than 3 px
+// (zoomed in further than it was read: coarse) hatched, not read at this zoom yet
+function denseBar(P, x0, x1, yh, yl, fill, bit, coarse) {
+  const box = [['M', x0, yh], ['L', x1, yh], ['L', x1, yl], ['L', x0, yl], ['Z']];
+  if (!coarse) { P.path(box, { fill, alpha: bit ? 0.85 : 0.55 }); return; }
+  P.path(box, { fill, alpha: 0.3 });
+  P.clip(x0, yh, x1 - x0, yl - yh, () => {
+    const hh = yl - yh, d = []; for (let x = x0 - hh; x < x1; x += 5) d.push(['M', x, yl], ['L', x + hh, yh]);
+    P.path(d, { stroke: fill, w: 0.8, alpha: 0.6 });
+  });
+}
 // sk: its colour (a viewer's paint), bg: the row's background (the module band), tint: selected (the bus values too), lane: half
 // a row (a compare's overlay): less margin, a smaller text
+// A part row's changes to draw: each run of adjacent dense spans an entry { t: its start, k: 'dense', end }, then the value
+// it ends with at its end (the summary keeps one change of a dense bucket, often equal to the one before it: dropped, so a
+// run is never found through the changes), the changes inside a run left out; kept on the row while its changes are these
+function partTr(s, a, pt) {
+  const c = s.paintPart; if (c && c.tr === a && c.p === pt) return c.out;
+  const runs = [], out = [];
+  for (const x of pt.dense) { const L = runs[runs.length - 1]; if (L && x[0] <= L[1]) L[1] = Math.max(L[1], x[1]); else runs.push([x[0], x[1]]); }
+  let k = 0;
+  for (const [t0, t1] of runs) {
+    while (k < a.length && a[k].t <= t0) out.push(a[k++]);
+    while (k < a.length && a[k].t <= t1) k++;
+    out.push({ t: t0, k: 'dense', end: t1 });
+    const i = lastLE(a, t1); if (i >= 0) out.push(Object.assign({}, a[i], { t: t1, s: true }));
+  }
+  while (k < a.length) out.push(a[k++]);
+  s.paintPart = { tr: a, p: pt, out };
+  return out;
+}
 function paintSig(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk = s.stroke, bg = 'panel', tint = false, lane = false) {
-  const a = s.tr; if (!a.length) return;
+  if (!s.tr.length) return;
+  // a row held in part (a large dump read by the window): its dense spans as bars (partTr, denseBar), its last value to its window's end
+  const pt = partOf(s), a = pt && pt.dense.length ? partTr(s, s.tr, pt) : s.tr, sEnd = pt && pt.b < (s.end ?? tEnd) ? pt.b : (s.end ?? tEnd);
   if (s.analog && s.width > 1) return paintAnalog(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk);
   const yh = y + (lane ? 1 : 4), yl = y + h - (lane ? 1 : 5), ym = (yh + yl) / 2;
   const cl = x => Math.min(Math.max(x, xL - 8), xR + 8);
@@ -159,16 +190,20 @@ function paintSig(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk = s.stroke, bg = 'pane
   const flush = x => { if (lv) { lv.push(['L', cl(x), py]); P.path(lv, { stroke: trace, w: S.traceWidth, dash: lvDash }); lv = null; } };
   for (let i = Math.max(lastLE(a, tA), 0); i < a.length && a[i].t <= tB; i++) {
     const o = a[i], xs = X(o.t);
+    if (o.k === 'dense') {   // a run of dense spans: a bar
+      flush(xs); xe = X(o.end);
+      denseBar(P, cl(xs), cl(xe), yh, yl, s.width === 1 ? trace : sk || 'bus', s.width === 1, X(o.t + pt.step) - xs > 3); pk = null; pw = 1; continue;
+    }
     // burst: transitions less than 1 px apart (a clock or busy bus far zoomed out) -> one solid bar, not thousands of edges
-    if (i + 2 < a.length && X(a[i + 1].t) - xs < 1 && X(a[i + 2].t) - X(a[i + 1].t) < 1) {
+    if (i + 2 < a.length && a[i + 1].k !== 'dense' && a[i + 2].k !== 'dense' && X(a[i + 1].t) - xs < 1 && X(a[i + 2].t) - X(a[i + 1].t) < 1) {
       let j = i + 2;
-      while (j + 1 < a.length && a[j + 1].t <= tB && X(a[j + 1].t) - X(a[j].t) < 1) j++;
+      while (j + 1 < a.length && a[j + 1].k !== 'dense' && a[j + 1].t <= tB && X(a[j + 1].t) - X(a[j].t) < 1) j++;
       const x0 = cl(xs), x1 = cl(X(a[j].t)), bit = s.width === 1 && o.k !== '=';
       flush(xs);
       P.path([['M', x0, yh], ['L', x1, yh], ['L', x1, yl], ['L', x0, yl], ['Z']], { fill: bit ? trace : sk || 'bus', alpha: bit ? 0.85 : 0.55 });
       pk = null; pw = 1; i = j - 1; continue;
     }
-    xe = X(i + 1 < a.length ? a[i + 1].t : (s.end ?? tEnd));
+    xe = X(i + 1 < a.length ? a[i + 1].t : sEnd);
     const w = xe - xs, sl = o.s ? 0 : Math.max(0, Math.min(slope, w / 3, pw / 3));
     if (o.k === '0' || o.k === '1' || o.k === 'u' || o.k === 'd') {
       const yv = (o.k === '1' || o.k === 'u') ? yh : yl, dash = (o.k === 'u' || o.k === 'd') ? [3, 2] : null;
@@ -309,7 +344,10 @@ function paintBody(P, M, lay, X, tA, tB, xL, xR, hl, sel, allLay, band, late, st
     if (bgOnly) continue;
     if (row.draw) plugSafe(row.draw, null, 'a plugin\'s row', row, P, { y, h, X, tA, tB, xL, xR });
     if (row.overlay) over.add(row.overlay);
-    if (row.lazy) { P.text(xL + 6, y + h / 2, 'reading…', { size: 10, fill: 'muted' }); rowY.set(row, y + h / 2); continue; }   // not read yet
+    if (row.lazy) {   // not read yet; a read that failed: why
+      P.text(xL + 6, y + h / 2, row.unread ? 'not read: ' + row.unread : 'reading…', { size: 10, fill: row.unread ? 'x' : 'muted' });
+      rowY.set(row, y + h / 2); continue;
+    }
     if (row.type === 'sig') { if (row.tr) paintSig(P, row, y, h, X, tA, tB, xL, xR, M.t1, strokeOf(row), b === 1 ? 'band' : 'panel', isSel);
       rowY.set(row, y + h / 2); }
   }

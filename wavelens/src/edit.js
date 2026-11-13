@@ -467,7 +467,7 @@ const fsmRow = (v, spec) => { const all = v.fsms(true), p = String(spec ?? ''), 
 command('fsm_stats', 'signal', 'an FSM on these waves: each state of its table with how many times it entered it, the time it held it (share: of ' +
   'the whole time) and its first entry; the states it never reaches (never); the values not in its table (invalid: x, z, a code without a ' +
   'label); its changes from one value to another, the most frequent first, with their count and first time', async (v, a) => {
-  const r = fsmRow(v, a.signal); await v.need([r]);   // a large dump read as it is needed: its changes first
+  const r = fsmRow(v, a.signal); await v.needWhole([r], 'fsm_stats');   // a large dump read as it is needed: its changes first, whole
   const st = v.fsmStatsOf(r), span = v.M.t1 - v.M.t0;
   const one = s => ({ state: st.name(s.key), value: s.key, entries: s.entries.length, first: s.entries.length ? s.entries[0] : null, time: s.time,
     share: span > 0 ? Math.round(1e4 * s.time / span) / 1e4 : 0 });
@@ -491,7 +491,7 @@ command('fsm_panel', 'signal? tab? off?', 'the FSM panel (T): open, with an FSM\
 });
 command('fsm_go', 'signal state? from? to? dir? first?', 'the cursor to the next (dir 1) or previous (-1) time an FSM enters a state (its ' +
   'label or value) or makes a change (from, to: labels or values); first: the first time; past the last it rounds to the first', async (v, a) => {
-  const r = fsmRow(v, a.signal); await v.need([r]);
+  const r = fsmRow(v, a.signal); await v.needWhole([r], 'fsm_go');
   if (a.state == null && (a.from == null || a.to == null)) fail('fsm_go: a state, or from and to');
   const t = v.fsmGo(r, a.state != null ? { state: String(a.state), first: !!a.first } : { from: String(a.from), to: String(a.to), first: !!a.first },
     a.dir < 0 ? -1 : 1);
@@ -1126,7 +1126,7 @@ Object.assign(WaveView.prototype, {
     const base = r => { const x = rowBase(r); return x.field && x.of ? x.of : x; };
     const pick = (rows || this.screenRows()).map(r => (r.type === 'group' && r.sig ? r.sig : r)).filter(r => r.type === 'sig').map(base);
     let sigs = [...new Set(pick)].filter(r => r.tr && r.src && !r.same);
-    if (sigs.some(r => r.lazy)) { await this.need(sigs); sigs = sigs.filter(r => !r.lazy); }
+    if (sigs.some(r => r.lazy || r.sum)) { await this.needWhole(sigs, 'Save as WaveLens'); sigs = sigs.filter(r => !r.lazy); }
     if (!sigs.length) throw new Error('no signal of the dump in it');
     const tvOf = r => {
       const text = r.src.kind === 'real' || r.src.kind === 'string';
