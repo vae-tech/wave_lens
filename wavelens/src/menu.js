@@ -246,8 +246,11 @@ Object.assign(WaveView.prototype, {
       b('mlist', 'Markers…') + (this.bms.length || this.umarks.length ? b('clearmarks', 'Clear bookmarks and markers') : ''), atT ? esc(atT) + ' ' : '');
     // the picture (the range, else the window; the selected run, the highlighted rows, else the screen's): Copy image at once,
     // the files and the other formats in Export ▸
+    // in Export ▸ every row of the list (the open modules' rows, the ones scrolled out of the screen too) when the screen has not all of them
+    const nAll = (this.rowsL || []).filter(x => x.type === 'sig').length, nScr = this.screenRows().filter(x => x.type === 'sig').length;
     const picB = b('copyimg', np ? `Copy image (${np} rows)` : 'Copy image') +
-      menuSub('subp', 'Export', (np ? `<div class="mh">${np} ${this.selRun.size > 1 ? 'selected' : 'highlighted'} rows</div>` : '') +
+      menuSub('subp', 'Export', (nAll > nScr ? b('copyall', `Copy image of all rows (${nAll})`) + b('svgall', 'Save image of all rows as SVG') + '<hr>' : '') +
+        (np ? `<div class="mh">${np} ${this.selRun.size > 1 ? 'selected' : 'highlighted'} rows</div>` : '') +
         b('png', 'Save image as PNG') + b('svg', 'Save image as SVG') + '<hr>' + b('wdjson', 'Save as WaveDrom') + b('wdcopy', 'Copy WaveDrom') +
         (this.M.timed ? b('wlpiece', 'Save as WaveLens (JSON)') : ''));
     // the gaps: a submenu (its settings, the role of the signals clicked, a reset)
@@ -313,7 +316,7 @@ Object.assign(WaveView.prototype, {
       else if (act === 'asrange') this.setRange(spAt.from, spAt.to);
       else if (act === 'spdel') this.run({ op: 'span', id: spId, delete: true });
       else if (act === 'copyd') this.copyText(this.rangeText().replace(/^Δ /, '').split(' · ')[0].split(' / ')[0]);
-      else if (act === 'copyimg' || act === 'png' || act === 'svg' || act === 'wdjson' || act === 'wdcopy') this.picAct(act, r, pic);
+      else if (['copyimg', 'copyall', 'svgall', 'png', 'svg', 'wdjson', 'wdcopy'].includes(act)) this.picAct(act, r, pic);
       else if (act === 'wlpiece') {   // the range of these signals as waves of their own (x.wavelens.json), opened by Open… or a drop
         const [ta, tb] = r || [this.t0, this.t0 + this.span], name = this.picName('wavelens.json');
         this.toPiece(ta, tb, pic.rows || null).then(doc => { this.download(new Blob([JSON.stringify(doc) + '\n'], { type: 'application/json' }), name);
@@ -353,7 +356,8 @@ Object.assign(WaveView.prototype, {
       // a bookmark, a marker: its text asked over the waves first, then it goes into its list below them (edited there)
       else if (act === 'mark') { const t = this.snap(sig, at), [x, y] = this.menuAt, top = this.topNow();   // the waves as they are now
         this.askText(x, y, `Bookmark · ${sig.name} · ${this.fmtCursor(t)}`, 'its text', text => {
-          const n = Math.max(0, ...this.bms.map(b => b.n)) + 1; this.bms.push({ n, t, signal: sig.full, text, color: null, top }); this.changed(true); });
+          const n = Math.max(0, ...this.bms.map(b => b.n)) + 1; this.bms.push({ n, t, signal: sig.full, text, color: null, top }); this.changed(true); },
+          '', true);
         return this; }
       else if (act === 'copyname') this.copyRows(many ? sigs : [it]);
       else if (act === 'copyv') this.copyText(`${sig.name}: ${this.valueTwo(sig, true)}`);
@@ -553,7 +557,8 @@ Object.assign(WaveView.prototype, {
   },
   // a text asked over the waves where the menu was (a bookmark's text, a marker's label): Enter gives it (empty too), Esc
   // or a click elsewhere gives nothing; the waves stay where they are (no field below them takes the focus)
-  askText(x, y, title, hint, give, value = '') {
+  // away: a click elsewhere gives what was typed too (none typed: nothing)
+  askText(x, y, title, hint, give, value = '', away = false) {
     this.closeMenu();
     const el = document.createElement('div'); el.className = 'wv-menu wv-ask'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', title);
     el.innerHTML = `<div class="mh">${esc(title)}</div><input type="text" spellcheck="false" autocomplete="off" placeholder="${esc(hint)}" ` +
@@ -562,6 +567,7 @@ Object.assign(WaveView.prototype, {
     const b = el.getBoundingClientRect(), inp = el.querySelector('input'); inp.value = value;
     el.style.left = Math.max(4, Math.min(x, innerWidth - b.width - 4)) + 'px'; el.style.top = Math.max(4, Math.min(y, innerHeight - b.height - 4)) + 'px';
     const done = ok => { const v = inp.value.trim(); this.closeMenu(); this.refocus(); if (ok) give(v); };
+    if (away) el.wlAway = () => { const v = inp.value.trim(); if (v) give(v); };
     inp.addEventListener('keydown', e => {
       if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(e.key === 'Enter'); } });
     el.querySelector('button[data-m=ok]').addEventListener('click', () => done(true));
@@ -591,8 +597,11 @@ Object.assign(WaveView.prototype, {
   // a menu el opened: a press outside it or the window's blur closes it, the keys back on the waves when nothing took them. After
   // the click that opened it; not for a menu closed meanwhile (its listener would close the next one). blur false: a box to type in stays
   // the picture of the range r (else the window) and its rows (pic.rows: else the screen's): as PNG to the clipboard (copyimg), saved as
-  // PNG or SVG, as WaveDrom saved or copied — the right button's Copy image, Export ▸ and the bar's Copy image ▾
+  // PNG or SVG, as WaveDrom saved or copied — the right button's Copy image, Export ▸ and the bar's Copy image ▾. copyall: the
+  // picture of every row of the list top to bottom (the rows of the open modules, folded ones as their line; scrolled out of the
+  // screen too; the selection aside), its rows of a large dump read first
   picAct(act, r, pic = {}) {
+    if (act === 'copyall' || act === 'svgall') return this.picAll(act === 'svgall');
     if (act === 'copyimg') {
       const png = this.toPNG(pic);
       try { navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]).then(() => this.toast('image copied'), err =>
@@ -613,10 +622,35 @@ Object.assign(WaveView.prototype, {
     }
     return this;
   },
+  // the picture of every row of the list (Copy image of all rows: a PNG to the clipboard; svg: Save image of all rows as SVG, no
+  // height limit): the rows of a large dump read first, its busy ones as exact as the picture's time needs (picRead) and held
+  // for it; a PNG taller than PNG_MAX refused (by the SVG's own height: names, axis, bookmarks' texts, gaps' rows)
+  picAll(svg) {
+    const rows = this.rowsL || [], est = (this.lay || []).reduce((n, o) => n + o.h, 0) + (this.hdrH || 0);
+    const tall = h => `${rows.length} rows, ${Math.round(h)} px high: a PNG stops at ${PNG_MAX} px: Export ▸ Save image of all rows as SVG, ` +
+      'or fold some modules';
+    if (!svg && est > PNG_MAX) { this.toast(tall(est)); return this; }   // at least that tall: refused before reading anything
+    const [a, b] = this.range || [this.t0, this.t0 + this.span], n = rows.filter(x => x.lazy || x.sum).length;
+    if (this.lazy && n) this.toast(`reading ${n} rows for the picture…`);
+    const ready = (this.lazy ? this.need(rows).then(() => this.picRead(rows, a, b)) : Promise.resolve()).then(() => {
+      const text = this.toSVG({ rows: 'all' }), left = rows.filter(x => x.unread).length;
+      this.picHold = null; this.invalidate();
+      return { text, h: +text.match(/height="(\d+)"/)[1], left: left ? ` (${left} rows not read: “not read” on them)` : '' };
+    }, e => { this.picHold = null; throw e; });
+    if (svg) { ready.then(({ text, left }) => { const name = this.picName('svg'); this.download(new Blob([text], { type: 'image/svg+xml' }), name);
+      this.toast(`saved ${name}: ${rows.length} rows${left}`); }, e => this.toast('not saved: ' + e.message)); return this; }
+    let said = '', left = '';
+    const png = ready.then(x => { left = x.left; if (x.h > PNG_MAX) throw new Error(said = tall(x.h)); return this.toPNG({ svg: x.text }); })
+      .catch(e => { said = said || e.message; throw e; });
+    try { navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]).then(() => this.toast(`image of all ${rows.length} rows copied${left}`),
+      err => this.toast('not copied: ' + (said || err.message))); }
+    catch (err) { this.toast('this browser cannot copy an image: Export ▸ Save image of all rows as SVG'); }
+    return this;
+  },
   menuOff(el, blur = true) {
     const off = this.offMenu = e => {
       if (e.target instanceof Node && el.contains(e.target)) return;   // the window's blur: its target is the window, no node
-      this.closeMenu();
+      const away = el.wlAway; this.closeMenu(); if (away) away();   // a box that keeps what was typed (a bookmark's text)
       if (e.type === 'pointerdown') setTimeout(() => { const a = document.activeElement;
         if (VIEWS.has(this) && (a === document.body || (this.root.contains(a) && !a.matches('input, select, textarea')))) this.refocus(); }, 0);
     };
@@ -663,6 +697,7 @@ Object.assign(WaveView.prototype, {
     this.root.append(el); this.keysEl = el;
   },
   closeMenu() {
+    if (this.askAc) { this.askAc.abort(); this.askAc = null; } this.askPlace = null;   // a box that follows its row (bookmarkKey)
     if (!this.menuEl) return;
     this.menuEl.remove(); this.menuEl = null;
     document.removeEventListener('pointerdown', this.offMenu, true); window.removeEventListener('blur', this.offMenu);

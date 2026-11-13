@@ -974,11 +974,16 @@ const cycTime = (ups, iz, n) => (Number.isInteger(n) && iz + n >= 0 && iz + n < 
 // and the ends a, b of the range, ts their sorted times), the stretch from keep after p to keep before q is left out, min
 // long at least; its ends on the rising edges ups (sorted, if any): the cycle of p and keep more kept, keep before the cycle
 // of q -> the parts kept, [[from, to], …] ([[a, b]]: no gap)
-function idleCuts(ts, a, b, idle, keep, ups = [], min = 0) {
-  const out = [], pts = [a, ...ts.filter(t => t > a && t < b), b];
+function idleCuts(ts, a, b, idle, keep, ups = [], min = 0, busy = null) {
+  const out = [];
+  let st, en;   // the starts and ends of what goes on: the changes, and the busy stretches (gapBusy) as a whole
+  if (busy && busy.length) {
+    const S = mergeSpans([...ts.map(t => [t, t]), ...busy]).filter(([p, q]) => q > a && p < b);
+    st = [a, ...S.map(s => Math.max(Math.floor(s[0]), a)), b]; en = [a, ...S.map(s => Math.min(Math.ceil(s[1]), b)), b];   // a bucket's ends: whole
+  } else st = en = [a, ...ts.filter(t => t > a && t < b), b];
   let from = a;
-  for (let i = 1; i < pts.length; i++) {
-    const p = pts[i - 1], q = pts[i];
+  for (let i = 1; i < st.length; i++) {
+    const p = en[i - 1], q = st[i];
     if (!(q - p >= idle)) continue;
     let hs = p + keep, he = q - keep;
     if (ups.length) { const j = lastBefore(ups.length, k => ups[k], hs) + 1, k = lastBefore(ups.length, k => ups[k], he);
@@ -1019,11 +1024,29 @@ function gapCuts(rows, a, b, S, clk, cycle = 1, also = [], picked = false, times
   const { idle, keep, ups, min } = gapLens(S, clk, a, b, cycle);
   if (!(idle > 0)) return [[a, b]];
   const ts = times || gapTimes(rows, a, b, clk, picked), more = also.filter(t => t > a && t < b);
-  return idleCuts(more.length ? [...new Set([...ts, ...more])].sort((x, y) => x - y) : ts, a, b, idle, keep, ups, min);
+  return idleCuts(more.length ? [...new Set([...ts, ...more])].sort((x, y) => x - y) : ts, a, b, idle, keep, ups, min, gapBusy(rows, clk, picked));
+}
+// a large dump's busy rows held in part (r.sum: its summary over the whole dump): the stretches where they change too often to
+// be held change by change (the dense spans of the summary), busy throughout for the gaps (the changes outside them: gapTimes)
+function gapBusy(rows, clk, picked = false) {
+  const out = [];
+  for (const r of rows) {
+    const s = r.type === 'group' ? r.sig : r;
+    if (!s || !s.sum || s === clk || (!picked && isClkRow(s))) continue;
+    for (const d of s.sum.part.dense) out.push([d[0], d[1]]);
+  }
+  return out;
+}
+// a clock held in part (a large dump's, r.sum): its period, the middle one of its dense spans' (span / rising edges), else 0
+function partPeriod(clk) {
+  const p = clk && clk.sum ? clk.sum.part.dense.filter(d => d[3] > 1).map(d => (d[1] - d[0]) / d[3]).sort((x, y) => x - y) : [];
+  return p.length ? p[p.length >> 1] : 0;
 }
 // idle and keep (S: gapIdle, gapKeep) over [a, b] in cycles of clk (the step of its rising edges there), else of the model's
 // cycle; ups: its edges, min: the shortest gap (two cycles), when it has any there
 function gapLens(S, clk, a, b, cycle) {
+  const per = partPeriod(clk);   // a large dump's busy clock: its period from its summary, no edges to put the ends of a gap on
+  if (per) return { idle: gapLen(S.gapIdle, per), keep: Math.max(0, gapLen(S.gapKeep, per) || 0), ups: [], min: 2 * per };
   const ups = clk ? riseTimes(clk) : [], u = ups.filter(t => t >= a && t <= b), d = u.slice(1).map((t, i) => t - u[i]).sort((x, y) => x - y);
   const cyc = d.length ? d[d.length >> 1] : cycle, ok = d.length > 0;
   return { idle: gapLen(S.gapIdle, cyc), keep: Math.max(0, gapLen(S.gapKeep, cyc) || 0), ups: ok ? ups : [], min: ok ? 2 * cyc : 0 };
@@ -1070,7 +1093,8 @@ function gapTimes(rows, a, b, clk, picked = false) {
   for (const r of rows) {
     const s = r.type === 'group' ? r.sig : r;
     if (!s || !s.tr || !s.tr.length || s === clk || (!picked && isClkRow(s))) continue;
-    for (let i = lastLE(s.tr, a) + 1; i < s.tr.length && s.tr[i].t < b; i++) if (s.tr[i].t > a) ts.add(s.tr[i].t);
+    const tr = s.sum ? s.sum.tr : s.tr;   // held in part: its summary over the whole dump (a window holds only the view), gapBusy its dense spans
+    for (let i = lastLE(tr, a) + 1; i < tr.length && tr[i].t < b; i++) if (tr[i].t > a) ts.add(tr[i].t);
   }
   return [...ts].sort((x, y) => x - y);
 }
@@ -1078,8 +1102,9 @@ function gapTimes(rows, a, b, clk, picked = false) {
 // the cycles of clk in it, in a part kept its cycles; each: a thin row (a tag on the waves) over a gap for each signal
 // counted (aux with any texts; none marked: with "edges" every one but refs and clk), kind as gapText takes it
 function gapTexts(M, gc, clk, aux, refs) {
-  const kind = ['edges', 'rise', 'fall', 'any'].includes(gc) ? gc : 'edges', ups = clk ? riseTimes(clk) : [];
-  const cyc = (p, q) => lastBefore(ups.length, j => ups[j], q, true) - lastBefore(ups.length, j => ups[j], p, true);   // the cycles that start in [p, q)
+  const kind = ['edges', 'rise', 'fall', 'any'].includes(gc) ? gc : 'edges', per = partPeriod(clk), ups = clk && !per ? riseTimes(clk) : [];
+  // the cycles that start in [p, q); a clock held in part (a large dump's): the time over its period
+  const cyc = per ? (p, q) => Math.round((q - p) / per) : (p, q) => lastBefore(ups.length, j => ups[j], q, true) - lastBefore(ups.length, j => ups[j], p, true);
   const len = d => (M.timed ? fmtTime(d, d / 100, d) : trimNum(d));
   return { kind, cyc, each: gc !== 'off' && (aux.size > 0 || kind === gc),
     counted: r => r.type === 'sig' && r.tr && r !== clk && (aux.size ? aux.has(r) : !refs.has(r)),

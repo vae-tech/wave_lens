@@ -119,7 +119,8 @@
     <span class="ui">Load assertions…</span>, each with its <kbd>g</kbd> key (<a href="#state">Save and Load</a>,
     <a href="#open">Opening waves</a>, <a href="compare.html">Compare two runs</a>, <a href="types.html">State names</a>);
     <span class="ui">⟳</span> reads a dump opened in the page again; <span class="ui">Copy image</span> (the range, else the window, as
-    PNG to the clipboard) and its ▾ (PNG, SVG, WaveDrom).</td></tr>
+    PNG to the clipboard) and its ▾ (<span class="ui">Copy image of all rows</span>, <span class="ui">Save image of all rows as SVG</span>, PNG,
+    SVG, WaveDrom).</td></tr>
   <tr><td>compare</td><td>Only while a second dump is compared: <span class="ui">A</span> <span class="ui">B</span>
     <span class="ui">A+B</span>, ◀ ▶ through the differences (<kbd>[d</kbd> <kbd>]d</kbd>), <span class="ui">≠ N ✕</span>.</td></tr>
 </table>
@@ -344,6 +345,9 @@
     (<kbd>gm</kbd>), <span class="ui">Clear bookmarks and markers</span></td></tr>
   <tr><td>Copy image</td><td>a PNG to the clipboard: the range (else the window) of the rows — a selected run, else the highlighted rows,
     else the ones on the screen</td></tr>
+  <tr><td>Export ▸ Copy image of all rows</td><td>the same, of every row of the list top to bottom: the ones scrolled out of the window too —
+    the signals of the open modules, a folded module as its one line (shown while the screen has not all of them); a PNG stops at
+    16384 px, <span class="ui">Save image of all rows as SVG</span> has no limit</td></tr>
   <tr><td>Export ▸</td><td><span class="ui">Save image as PNG / SVG</span>: a file named after the view's title, drawn as the viewer shows the
     waves (folding, colours, bookmarks, cursor) with the names and the axis, the page's colours written in, so the SVG opens anywhere;
     <span class="ui">Save as WaveDrom / Copy WaveDrom</span>: the same signals over the range as WaveJSON
@@ -502,8 +506,10 @@
   two bookmarks with a label — a latency, a cause and its effect.</p>
 <ol class="steps">
   <li>Select a signal, put the cursor near the event and press <span class="ui">+ Bookmark</span> or <kbd>b</kbd>: a bookmark, snapped to an
-    edge of that signal. <span class="ui">Here ▸ Bookmark here</span> in the right button's menu puts one where you clicked.</li>
-  <li>Type its text in the list under the waves, a short label by the circle too; change its time (<code>250ns</code>, <code>85.12us</code>), its signal (empty: the time axis)
+    edge of that signal: a small box there asks its text (<kbd>Enter</kbd> adds it, the text too, a click elsewhere too when a text is
+    typed; <kbd>Esc</kbd>: none), as
+    <kbd>m</kbd> a marker's label. <span class="ui">Here ▸ Bookmark here</span> in the right button's menu puts one where you clicked.</li>
+  <li>Change its text in the list under the waves, a short label by the circle too; change its time (<code>250ns</code>, <code>85.12us</code>), its signal (empty: the time axis)
     or its colour there. <span class="ui">cursor</span> moves it to the cursor; the Δ column shows its distance from the cursor.</li>
   <li>Drag a circle on the waves to move it. <kbd>shift+drag</kbd> from one circle to another draws an arrow; or
     <span class="ui">+ Arrow</span> joins the last two.</li>
@@ -644,7 +650,7 @@
   <tr><td><kbd>r</kbd></td><td>the last state loaded, read again (<span class="ui">Reload</span>)</td><td><kbd>R</kbd></td><td>the dump read again from the disk, the view kept (⟳)</td></tr>
   <tr><td><kbd>g</kbd></td><td>a box of what can follow, to press or to click: <kbd>gg</kbd> <kbd>gl</kbd> <kbd>gt</kbd> <kbd>gT</kbd>, <kbd>gm</kbd> <kbd>gM</kbd> <kbd>gB</kbd> <kbd>gd</kbd> <kbd>gc</kbd>,
     <kbd>gs</kbd> <kbd>gL</kbd> <kbd>gr</kbd>, <kbd>gO</kbd> <kbd>gR</kbd> <kbd>gC</kbd>, <kbd>gv</kbd>, <kbd>gp</kbd></td><td><kbd>z</kbd> <kbd>y</kbd> <kbd>[</kbd> <kbd>]</kbd></td><td>the same box; <kbd>yn</kbd> <kbd>yt</kbd> <kbd>yl</kbd>: copy the name, the time of the cursor, a link to here (the cursor and the signal)</td></tr>
-  <tr><td><kbd>b</kbd></td><td>bookmark at the cursor</td><td><kbd>]b</kbd> <kbd>[b</kbd>, <kbd>1</kbd> … <kbd>9</kbd></td>
+  <tr><td><kbd>b</kbd></td><td>bookmark at the cursor (its text asked there)</td><td><kbd>]b</kbd> <kbd>[b</kbd>, <kbd>1</kbd> … <kbd>9</kbd></td>
     <td>next / previous bookmark, bookmark n</td></tr>
   <tr><td><kbd>m</kbd></td><td>marker at the cursor: its label asked</td><td><kbd>]m</kbd> <kbd>[m</kbd></td><td>next / previous marker</td></tr>
   <tr><td><kbd>gm</kbd></td><td>the markers and bookmarks: a list, <kbd>↑</kbd> <kbd>↓</kbd> go through them</td><td><kbd>gl</kbd>, <kbd>ctrl+G</kbd></td>
@@ -675,7 +681,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.58 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.59 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

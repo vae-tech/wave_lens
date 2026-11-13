@@ -37,7 +37,8 @@ const TIPS = {
   'act:expand': ['Open every module', ['zR']], 'act:collapse': ['Fold every module', ['zM']],
   'act:hl': ['Clear the highlight', ['Esc']], 'act:unhide': ['Show the hidden rows again'],
   'act:prev': ['Previous edge of the selected signal', ['shift+Tab', '[e']], '.edge': ['Edge kind: any, rising, falling, a value, X / Z', ['e']],
-  'act:next': ['Next edge of the selected signal', ['Tab', ']e']], 'act:mark': ['Bookmark at the cursor, on the selected signal', ['b']],
+  'act:next': ['Next edge of the selected signal', ['Tab', ']e']],
+  'act:mark': ['Bookmark at the cursor, on the selected signal: its text asked there, then in the list', ['b']],
   'act:umark': ['A marker at the cursor: a dashed line across the rows; its label asked', ['m']],
   'act:mprev': ['The previous bookmark or marker in time', ['[b', '[m']], 'act:mnext': ['The next bookmark or marker in time', [']b', ']m']],
   'act:mlist': ['The markers and bookmarks in a list: ↑ ↓ go through them, the waves follow', ['gm']],
@@ -70,11 +71,13 @@ const TIPS = {
     'form (the right button on the bar opens it too)'],
   '.pfile': ['The files: open a dump, compare one, its sources, the runs kept; save, load, reload the view; save the page; load assertions'],
   '.ppaint': ['Paint: a colour on the found, highlighted and shift+click selected signals (none of them: the selected one); Unpaint'],
-  '.pimg': ['More of the picture: save it as PNG or SVG, as WaveDrom'], '.mx': ['The rest of this group'],
+  '.pimg': ['More of the picture: all rows (the open modules, top to bottom), save it as PNG or SVG, as WaveDrom'], '.mx': ['The rest of this group'],
   '.chipn': ['The filters on the rows: the highlight, the hidden rows, Only, the FSM layer'],
   '.rx': ['Radix of the selected signal (shift+click a name: of a run of them); "the page\'s": its own again'],
   'act:cycles': ['The clock cycles in a band under the time axis (the right button: Cycles ▸ for the clock, cycle 0)'],
   'act:gaps': ['The waves with the gaps cut out (where nothing changes), or in continuous time; idle and keep beside it', ['gv']],
+  'act:svgall': ['Every row of the list as an SVG file (no height limit): the range, else the window; the ones scrolled out of the window too'],
+  'act:copyall': ['The range (else the window) of every row of the list as PNG to the clipboard: the ones scrolled out of the window too (the open modules)'],
   'act:copyimg': ['The range (else the window) as PNG to the clipboard: the highlighted rows, else the ones on the screen'],
   'act:png': ['Save the picture as PNG'], 'act:svg': ['Save the picture as SVG'],
   'act:wdjson': ['The range (else the window) as a WaveDrom file (.json), a cell per clock cycle'], 'act:wdcopy': ['The same WaveDrom to the clipboard'],
@@ -91,6 +94,8 @@ const TIPS = {
   '.from': ['From bookmark'], '.to': ['To bookmark'], '.shape': ['Arrow shape'], '.head': ['Arrow head'],
     '.line': ['Line'],
   'm:zoom': ['Zoom to the range', ['shift+drag', 'middle drag']], 'm:marks': ['Bookmarks at its ends, an arrow with Δ'], 'm:copyd': ['Copy Δ'],
+  'm:svgall': ['Every row of the list as an SVG file (no height limit): the range, else the window; the ones scrolled out of the window too'],
+  'm:copyall': ['The range (else the window) of every row of the list as PNG to the clipboard: the ones scrolled out of the window too (the open modules)'],
   'm:copyimg': ['The range (else the window) as PNG to the clipboard: the highlighted rows, else the ones on the screen'], 'm:png': ['Save the picture as PNG'],
     'm:svg': ['Save the picture as SVG'],
   'm:c2': ['A second cursor: Δ to the cursor in time and clock cycles', ['shift+click']], 'm:c2x': ['No second cursor', ['Esc']],
@@ -210,7 +215,8 @@ const HELP = [
     [['1', '…', '9'], 'go to bookmark 1 … 9'],
     [['ctrl+drag'], 'measure a range: Δ, the edges or changes of that signal, then of each one you select (↑ ↓, a click on a name)'],
     [['alt+drag'], 'a box: its time and its signals, then the menu (picture, WaveDrom, colour)'], [['ctrl+click'], 'clear the range'],
-    [['right button'], 'a range and the menu: colour, radix, hide, Copy image; Show as ▸, Here ▸, Export ▸ …'], [['b'], 'bookmark at the cursor'],
+    [['right button'], 'a range and the menu: colour, radix, hide, Copy image; Show as ▸, Here ▸, Export ▸ …'],
+    [['b'], 'bookmark at the cursor: its text asked'],
     [[']b', '[b'], 'next / previous bookmark'], [['m'], 'marker at the cursor: its label asked'], [[']m', '[m'], 'next / previous marker'],
     [['right button + click'], 'the left button while the right one is down: a marker there at once (M1, M2 …; over the signal, else under it)'],
     [['gm'], 'the markers and bookmarks: a list, ↑ ↓ go through them'], [['drag a bookmark'], 'move it'],
@@ -383,7 +389,8 @@ class Bar {
         mItem('svload', 'Load assertions…', '', ' hidden')),
       btn('dreload', '⟳', ' aria-label="read the dump again" hidden'),
       more(seg(btn('copyimg', 'Copy image'), popHead('img', '▾', 'pimg', 'more of the picture')),
-        popBox('img', mItem('png', 'Save image as PNG') + mItem('svg', 'Save image as SVG') + '<hr>' + mItem('wdjson', 'Save as WaveDrom') +
+        popBox('img', mItem('copyall', 'Copy image of all rows') + mItem('svgall', 'Save image of all rows as SVG') + '<hr>' +
+          mItem('png', 'Save image as PNG') + mItem('svg', 'Save image as SVG') + '<hr>' + mItem('wdjson', 'Save as WaveDrom') +
           mItem('wdcopy', 'Copy WaveDrom'))),
       '<button type="button" class="live" data-act="live" hidden></button><input type="file" class="sfile" accept=".json,application/json" hidden>' +
         '<input type="file" class="dfile" accept=".vcd,.fst,.json" hidden><input type="file" class="cfile" accept=".vcd" hidden>' +
@@ -558,7 +565,7 @@ class Bar {
     else if (a === 'expand') v.expandAll();
     else if (a === 'collapse') v.collapseAll();
     else if (a === 'prev' || a === 'next') v.edge(a === 'next' ? 1 : -1);
-    else if (a === 'mark') v.mark();
+    else if (a === 'mark') v.bookmarkKey();
     else if (a === 'umark') v.markerKey();
     else if (a === 'mprev' || a === 'mnext') v.stepMarks(a === 'mnext' ? 1 : -1);
     else if (a === 'mlist') v.marksMenu();
@@ -599,7 +606,8 @@ class Bar {
     else if (a === 'gaps') v.seq('gv');
     else if (a === 'cycles') { const co = v.cycOpt(); if (!co.cycles && !cycClock(v.M.rows, co.cycleClock)) v.toast('no clock found: the right button on ' +
       'a 1-bit signal, Cycles ▸'); else v.setCycles({ cycles: !co.cycles }); }
-    else if (['copyimg', 'png', 'svg', 'wdjson', 'wdcopy'].includes(a)) { const ex = v.exportRows(); v.picAct(a, v.range, ex ? { rows: ex } : {}); }
+    else if (['copyimg', 'copyall', 'svgall', 'png', 'svg', 'wdjson', 'wdcopy'].includes(a)) {
+      const ex = v.exportRows(); v.picAct(a, v.range, ex ? { rows: ex } : {}); }
     else if (a === 'dcmp') v.cfile.click();
     else if (a === 'druns') v.runsPanel();
     else if (a === 'dcmpx') { if (v.cmpReading) v.compareStop(); else v.compare(null); }

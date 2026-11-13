@@ -86,11 +86,10 @@ Object.assign(WaveView.prototype, {
     if (!m || m.gck !== G.clk || m.run !== this.cmpRun || !same(m.rows, rows) || !same(m.ref, ref) || !m.by !== !by) {
       const sigs = by ? [] : ref.length ? ref : rows, clk = this.gapClockFor(rows);
       const un = [...(clk ? [clk] : []), ...sigs].filter(r => lazyOf(M, r.orig || r).length || (r.orig || r).sum);
-      // a large dump: read whole, then worked out again (need resets the memo); a busy row held in part: no gaps (its summary
-      // has none of the changes inside its dense spans), said once
-      if (un.length) this.needWhole(un, 'the gaps').catch(e => { if (this.gapNo !== e.message) { this.gapNo = e.message; this.toast(e.message); } });
-      const partly = [...(clk ? [clk] : []), ...sigs].some(r => (r.orig || r).sum);
-      m = this.warpMemo = { rows, ref, sigs, clk, gck: G.clk, run: this.cmpRun, by, ts: partly ? [] : gapTimes(sigs, M.t0, M.t1, clk, ref.length > 0) };
+      // a large dump: read whole, then worked out again (need resets the memo); a busy row held in part (over lazyWhole
+      // changes): by its summary, its dense spans busy throughout (gapBusy), a clock's cycles by its period (partPeriod)
+      if (un.length) this.needWhole(un, 'the gaps', true).catch(e => { if (this.gapNo !== e.message) { this.gapNo = e.message; this.toast(e.message); } });
+      m = this.warpMemo = { rows, ref, sigs, clk, gck: G.clk, run: this.cmpRun, by, ts: gapTimes(sigs, M.t0, M.t1, clk, ref.length > 0) };
     }
     const bm = this.bms.map(x => x.t), key = JSON.stringify([g.gapIdle, g.gapKeep, bm]);
     if (m.key !== key || m.by !== by) { m.key = key; m.by = by;

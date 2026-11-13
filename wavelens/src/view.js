@@ -383,7 +383,7 @@ class WaveView {
       // the selected name (vim: the word under the cursor)
       else if (k === '*' || k === '#') { if (this.sel) { this.qEl.value = this.sel.name; this.find(this.sel.name); this.findStep(k === '*' ? 1 : -1); } }
       else if (k === 'm') this.markerKey();
-      else if (k === 'b') this.mark();
+      else if (k === 'b') this.bookmarkKey();
       // the selected bus bit by bit, again: folded (a bit selected: its bus folded)
       else if (k === 'B') { const s = this.sel && (this.sel.bit != null ? this.sel.of : this.sel);
         if (isVec(s)) this.setBits(s, this.sel.bit != null ? false : undefined); else this.toast('B: select a bus to show it bit by bit'); }
@@ -1402,6 +1402,26 @@ class WaveView {
       label => this.run(Object.assign({ op: 'marker', t }, label ? { label } : {})));
     return this;
   }
+  // b, gB, the bar's + Bookmark: a bookmark at the cursor, on an edge of the selected signal; its text asked over the waves
+  // there first (as m a marker's label), then it goes into the list below them; Esc: none, a click elsewhere: what was typed.
+  // The row out of sight is brought into it; the box follows the row as the waves scroll (hidden while the row is away)
+  bookmarkKey() {
+    const s = this.sel, t = this.cursor = this.snap(s, this.cursor);
+    if (s && !this.inSight(s)) this.centerRow(s);
+    const top = this.topNow(); this.draw();
+    const at = () => { const r = this.canvas.getBoundingClientRect(), o = s && (this.lay || []).find(o => o.row === s), y0 = r.top + this.hdrH;
+      const x = r.left + Math.min(Math.max((t - this.t0) / this.span, 0), 1) * r.width, y = o ? r.top + o.y + o.h - (this.oy || 0) : y0 + 8;
+      return [x, y, !!o && (y - o.h < y0 - 1 || y > Math.min(r.bottom, innerHeight) + 1)]; };
+    const [x, y] = at();
+    const box = this.askText(x, y, `Bookmark · ${s ? s.name + ' · ' : ''}${this.fmtCursor(t)}`, 'its text',
+      text => this.mark(text, { t, top, signal: s ? s.full : null }), '', true);
+    this.askPlace = () => { if (this.menuEl !== box) return; const [px, py, away] = at(), w = box.offsetWidth, h = box.offsetHeight;
+      box.style.visibility = away ? 'hidden' : ''; box.style.left = Math.max(4, Math.min(px, innerWidth - w - 4)) + 'px';
+      box.style.top = Math.max(4, Math.min(py, innerHeight - h - 4)) + 'px'; };
+    this.askAc = new AbortController();
+    window.addEventListener('scroll', () => this.askPlace && this.askPlace(), { capture: true, passive: true, signal: this.askAc.signal });
+    return this;
+  }
   // a marker at (x, y) at once (the left button while the right one draws a range): the time as the cursor's, on an edge of
   // the signal there (free: not); its label the next of M1, M2 …; its text on a signal's row in the line over it, or under it
   // when over it something is there already (both taken: over it), on a line or the axis there (markPlace)
@@ -1445,13 +1465,15 @@ class WaveView {
     b.t = Math.min(Math.max(this.snap(s, this.tOfX(x)), this.M.t0), this.M.t1); delete b.at;   // moved: no longer at its event
     this.draw();
   }
-  // bookmark: numbered circle at the cursor on the selected signal (snapped to its edge within 6 px), described below the waves
-  mark(text = '') {
-    const s = this.sel, t = this.cursor = this.snap(s, this.cursor);
+  // a bookmark (a numbered circle, described below the waves) at the cursor (on an edge of the selected signal) -> its number;
+  // at: {t, top, signal} of one asked first (bookmarkKey: its text given there, the list below the waves not focused); none,
+  // no text: its text field focused
+  mark(text = '', at = null) {
+    const s = this.sel, t = at ? at.t : (this.cursor = this.snap(s, this.cursor));
     const n = Math.max(0, ...this.bms.map(b => b.n)) + 1;
-    this.bms.push({ n, t, signal: s ? s.full : null, text, color: null, top: this.topNow() });
+    this.bms.push({ n, t, signal: at ? at.signal : s ? s.full : null, text, color: null, top: at ? at.top : this.topNow() });
     this.saveBookmarks(); this.renderNotes(); this.draw();
-    if (!text) this.notesEl.querySelector(`li[data-n="${n}"] input.txt`)?.focus();
+    if (!text && !at) this.notesEl.querySelector(`li[data-n="${n}"] input.txt`)?.focus();
     return n;
   }
   arrow(from, to, opts = {}) { this.arrows.push(...arNorm([Object.assign({ from, to }, opts)])); this.saveBookmarks(); this.renderNotes(); this.draw();
@@ -1586,7 +1608,7 @@ class WaveView {
     else if (s === 'gt') this.modules(true, !!this.mods || !!this.sel);
     else if (s === 'gT') this.fsmPanel(true);
     else if (s === 'gM') this.markerKey();
-    else if (s === 'gB') this.mark();
+    else if (s === 'gB') this.bookmarkKey();
     else if (s === 'gd') this.run({ op: 'deltas', on: !this.deltas });
     else if (s === 'gc') this.clearMarks();
     else if (s === 'gs') bar('ssave');
@@ -1886,9 +1908,11 @@ class WaveView {
     const svg = WaveSVG.toString(null, { view: this, from, to, rows, cuts, width: o.width || Math.max(640, this.root.clientWidth) });
     return svg.replace(/var\((--[\w-]+)\)/g, (m, n) => cs.getPropertyValue(n).trim().replace(/"/g, "'") || m);
   }
-  // -> a Promise of a PNG Blob of toSVG at scale × (2: sharp on a high-density screen and in a document)
-  toPNG(o = {}, scale = 2) {
-    const svg = this.toSVG(o), w = +svg.match(/width="(\d+)"/)[1], h = +svg.match(/height="(\d+)"/)[1];
+  // -> a Promise of a PNG Blob of toSVG at scale × (2: sharp on a high-density screen and in a document; a tall picture, all
+  // rows: less, down to 1, to stay within PNG_MAX)
+  toPNG(o = {}, scale = 2) {   // o.svg: the picture made already
+    const svg = o.svg || this.toSVG(o), w = +svg.match(/width="(\d+)"/)[1], h = +svg.match(/height="(\d+)"/)[1];
+    if (scale > 1) scale = Math.max(1, Math.min(scale, PNG_MAX / Math.max(w, h)));
     if (Math.max(w, h) * scale > PNG_MAX) return Promise.reject(new Error(`${w * scale} × ${h * scale} px: a PNG stops at ${PNG_MAX}: fewer rows, or SVG`));
     return new Promise((ok, no) => {
       const img = new Image(), url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
@@ -1957,7 +1981,8 @@ class WaveView {
   // expressions, Save as WaveLens): read as needed (need), then a row held in part (a busy signal of a large dump) read whole
   // when it changes at most lazyWhole times over the dump (a row as any other from then on, its summary dropped); one that
   // changes more: refused, an error naming it and `what` (once said, not read again) -> this
-  async needWhole(rows, what) {
+  // inPart: the ones too busy are left held in part, no error (the gaps: by their summary)
+  async needWhole(rows, what, inPart = false) {
     await this.need(rows);
     const M = this.M, S = this.S, sigs = new Set();
     for (const r0 of rows) { const q = r0.orig || r0, r = q.dupOf || q.of || q;
@@ -1975,7 +2000,7 @@ class WaveView {
       }
       no.push(...read.filter(r => r.sum));
     }
-    if (no.length) throw new Error(this.partWhy(no, what));
+    if (no.length && !inPart) throw new Error(this.partWhy(no, what));
     return this;
   }
   // why a feature cannot have every change of these rows (a large dump's busy signals)
@@ -1995,7 +2020,9 @@ class WaveView {
     const fresh = p => p.a <= t0 && p.b >= t1 && (p.exact || p.step <= 4 * span / S.lazyBuckets);
     let back = false;
     this.partRows = this.partRows || new Map();   // the rows holding a detail window -> when it came
-    for (const [r] of this.partRows) if (!on.has(r) || !(r.part && r.part.a <= t0 && r.part.b >= t1)) { this.toSum(r); back = true; }
+    for (const [r] of this.partRows) {
+      if (this.picHold && this.picHold.has(r)) continue;   // read for a picture being made (picRead)
+      if (!on.has(r) || !(r.part && r.part.a <= t0 && r.part.b >= t1)) { this.toSum(r); back = true; } }
     if (back) this.dataChanged();
     const want = [...on].filter(r => !fresh(r.part));
     const ask = this.winAsk;
@@ -2007,8 +2034,28 @@ class WaveView {
   winBack() {
     if (!this.partRows || !this.partRows.size) return;
     const t0 = this.t0, t1 = t0 + this.span; let back = false;
-    for (const [r] of this.partRows) if (!(r.part && r.part.a <= t0 && r.part.b >= t1)) { this.toSum(r); back = true; }
+    for (const [r] of this.partRows) {
+      if (!(r.part && r.part.a <= t0 && r.part.b >= t1) && !(this.picHold && this.picHold.has(r))) { this.toSum(r); back = true; } }
     if (back) this.dataChanged();
+  }
+  // the busy rows of a large dump in a picture (all rows: the ones off the screen too) read for its time [a, b] as a window is
+  // for the view (winRead), CODES_PORTION a read, and held for it (picHold: no frame takes them back to their summary until
+  // the picture is made) -> a promise
+  async picRead(rows, a, b) {
+    const M = this.M, S = this.S, span = b - a, base = r => { const q = r.orig || r; return q.dupOf || q.of || q; };
+    const fresh = p => p.a <= a && p.b >= b && (p.exact || p.step <= 4 * span / S.lazyBuckets);
+    const list = [...new Set(rows.map(base))].filter(r => r.type === 'sig' && r.sum && !r.lazy && !fresh(r.part));
+    this.picHold = new Set(list); this.partRows = this.partRows || new Map();
+    if (!list.length || !this.opts.loadCodes) return;
+    const win = { from: Math.max(0, Math.floor(a)), to: Math.ceil(b), lod: S.lazyBuckets, keep: S.lazyKeep };
+    for (let i = 0; i < list.length; i += CODES_PORTION) {
+      const some = list.slice(i, i + CODES_PORTION), text = await this.opts.loadCodes([...new Set(some.flatMap(r => r.src.lazy || []))], win);
+      if (!VIEWS.has(this) || this.root.waveView !== this) return;
+      const got = fillRows(M, vcdSignals(vcdToWave(text, { name: this.opts.title, budget: Infinity }).doc.signal), codesWin(text), new Set(some));
+      const now = performance.now();
+      for (const r of got) { r.an = null; if (r.part && !r.part.whole) this.partRows.set(r, now); else this.partRows.delete(r); }
+      if (got.length) { this.cmpTake(got); this.dataChanged(); }
+    }
   }
   // a row back to its summary (its window dropped)
   toSum(r) { r.tr = r.sum.tr; r.part = r.sum.part; r.an = null; this.partRows.delete(r); }
@@ -2142,6 +2189,7 @@ class WaveView {
     if (this.printing) this.paintPrint(lay);
     else { const f = this.size(lay); this.names.slide(f.oy, f.Hc); this.bmGeo = this.paintFrame(this.canvas, f.W, f.Hc, f.oy, lay, true, f.dpr);
       this.lazyAsk(lay, f.oy, f.Hc); this.winWant(lay, f.oy, f.Hc); }
+    if (this.askPlace) this.askPlace();   // a bookmark's box follows its row
     this.syncReadouts();
   }
   size(lay) { // the canvas: as wide as its column, as tall as the rows in view (at least the axis and a little more)

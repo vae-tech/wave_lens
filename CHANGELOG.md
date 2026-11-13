@@ -5,6 +5,25 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.59 — 13 November 2026
+
+A picture of every row (PNG or SVG), a bookmark's text asked where it goes, the gaps of a large dump fixed.
+
+- **Copy image of all rows** (the right button's Export ▸ while the screen has not all of them, the bar's *Copy image ▾*): the
+  picture of every row of the list top to bottom, the ones scrolled out of the window too — the signals of the open modules,
+  a folded module as its one line, the hidden ones left out; a tall PNG drawn at less than twice the size, one over 16384 px
+  refused by the picture's own height (names, bookmarks' texts, gaps' rows); **Save image of all rows as SVG** beside it,
+  no height limit. A large dump: the rows read first, the busy ones as exact over the picture's time as on the screen
+  (picRead, held until the picture is made), a toast while they are read and the rows not read named.
+
+- **+ Bookmark**, `b`, `gB`: the bookmark's text asked over the waves where it goes (Enter adds it with the text, Esc: none),
+  as `m` a marker's label and the right button's Bookmark here; the list below the waves no longer takes the focus. A
+  click elsewhere keeps a text typed; the selected row out of sight is brought in, the box follows it as the waves scroll.
+
+- The gaps on a large dump (VS Code, read by the window): a busy signal held as a summary (over `lazyWhole` changes) made
+  the whole dump one gap, a line and nothing else (0.58); now its dense stretches count as busy throughout, its other
+  changes as they are, and a busy clock's cycles go by its period: the gaps of the whole dump, their ends within a bucket.
+
 ## 0.58 — 13 November 2026
 
 A large dump read by the visible window: the 1 GB / 200 ms VCD that hung the VS Code tab opens in seconds.

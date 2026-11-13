@@ -976,11 +976,16 @@ const cycTime = (ups, iz, n) => (Number.isInteger(n) && iz + n >= 0 && iz + n < 
 // and the ends a, b of the range, ts their sorted times), the stretch from keep after p to keep before q is left out, min
 // long at least; its ends on the rising edges ups (sorted, if any): the cycle of p and keep more kept, keep before the cycle
 // of q -> the parts kept, [[from, to], …] ([[a, b]]: no gap)
-function idleCuts(ts, a, b, idle, keep, ups = [], min = 0) {
-  const out = [], pts = [a, ...ts.filter(t => t > a && t < b), b];
+function idleCuts(ts, a, b, idle, keep, ups = [], min = 0, busy = null) {
+  const out = [];
+  let st, en;   // the starts and ends of what goes on: the changes, and the busy stretches (gapBusy) as a whole
+  if (busy && busy.length) {
+    const S = mergeSpans([...ts.map(t => [t, t]), ...busy]).filter(([p, q]) => q > a && p < b);
+    st = [a, ...S.map(s => Math.max(Math.floor(s[0]), a)), b]; en = [a, ...S.map(s => Math.min(Math.ceil(s[1]), b)), b];   // a bucket's ends: whole
+  } else st = en = [a, ...ts.filter(t => t > a && t < b), b];
   let from = a;
-  for (let i = 1; i < pts.length; i++) {
-    const p = pts[i - 1], q = pts[i];
+  for (let i = 1; i < st.length; i++) {
+    const p = en[i - 1], q = st[i];
     if (!(q - p >= idle)) continue;
     let hs = p + keep, he = q - keep;
     if (ups.length) { const j = lastBefore(ups.length, k => ups[k], hs) + 1, k = lastBefore(ups.length, k => ups[k], he);
@@ -1021,11 +1026,29 @@ function gapCuts(rows, a, b, S, clk, cycle = 1, also = [], picked = false, times
   const { idle, keep, ups, min } = gapLens(S, clk, a, b, cycle);
   if (!(idle > 0)) return [[a, b]];
   const ts = times || gapTimes(rows, a, b, clk, picked), more = also.filter(t => t > a && t < b);
-  return idleCuts(more.length ? [...new Set([...ts, ...more])].sort((x, y) => x - y) : ts, a, b, idle, keep, ups, min);
+  return idleCuts(more.length ? [...new Set([...ts, ...more])].sort((x, y) => x - y) : ts, a, b, idle, keep, ups, min, gapBusy(rows, clk, picked));
+}
+// a large dump's busy rows held in part (r.sum: its summary over the whole dump): the stretches where they change too often to
+// be held change by change (the dense spans of the summary), busy throughout for the gaps (the changes outside them: gapTimes)
+function gapBusy(rows, clk, picked = false) {
+  const out = [];
+  for (const r of rows) {
+    const s = r.type === 'group' ? r.sig : r;
+    if (!s || !s.sum || s === clk || (!picked && isClkRow(s))) continue;
+    for (const d of s.sum.part.dense) out.push([d[0], d[1]]);
+  }
+  return out;
+}
+// a clock held in part (a large dump's, r.sum): its period, the middle one of its dense spans' (span / rising edges), else 0
+function partPeriod(clk) {
+  const p = clk && clk.sum ? clk.sum.part.dense.filter(d => d[3] > 1).map(d => (d[1] - d[0]) / d[3]).sort((x, y) => x - y) : [];
+  return p.length ? p[p.length >> 1] : 0;
 }
 // idle and keep (S: gapIdle, gapKeep) over [a, b] in cycles of clk (the step of its rising edges there), else of the model's
 // cycle; ups: its edges, min: the shortest gap (two cycles), when it has any there
 function gapLens(S, clk, a, b, cycle) {
+  const per = partPeriod(clk);   // a large dump's busy clock: its period from its summary, no edges to put the ends of a gap on
+  if (per) return { idle: gapLen(S.gapIdle, per), keep: Math.max(0, gapLen(S.gapKeep, per) || 0), ups: [], min: 2 * per };
   const ups = clk ? riseTimes(clk) : [], u = ups.filter(t => t >= a && t <= b), d = u.slice(1).map((t, i) => t - u[i]).sort((x, y) => x - y);
   const cyc = d.length ? d[d.length >> 1] : cycle, ok = d.length > 0;
   return { idle: gapLen(S.gapIdle, cyc), keep: Math.max(0, gapLen(S.gapKeep, cyc) || 0), ups: ok ? ups : [], min: ok ? 2 * cyc : 0 };
@@ -1072,7 +1095,8 @@ function gapTimes(rows, a, b, clk, picked = false) {
   for (const r of rows) {
     const s = r.type === 'group' ? r.sig : r;
     if (!s || !s.tr || !s.tr.length || s === clk || (!picked && isClkRow(s))) continue;
-    for (let i = lastLE(s.tr, a) + 1; i < s.tr.length && s.tr[i].t < b; i++) if (s.tr[i].t > a) ts.add(s.tr[i].t);
+    const tr = s.sum ? s.sum.tr : s.tr;   // held in part: its summary over the whole dump (a window holds only the view), gapBusy its dense spans
+    for (let i = lastLE(tr, a) + 1; i < tr.length && tr[i].t < b; i++) if (tr[i].t > a) ts.add(tr[i].t);
   }
   return [...ts].sort((x, y) => x - y);
 }
@@ -1080,8 +1104,9 @@ function gapTimes(rows, a, b, clk, picked = false) {
 // the cycles of clk in it, in a part kept its cycles; each: a thin row (a tag on the waves) over a gap for each signal
 // counted (aux with any texts; none marked: with "edges" every one but refs and clk), kind as gapText takes it
 function gapTexts(M, gc, clk, aux, refs) {
-  const kind = ['edges', 'rise', 'fall', 'any'].includes(gc) ? gc : 'edges', ups = clk ? riseTimes(clk) : [];
-  const cyc = (p, q) => lastBefore(ups.length, j => ups[j], q, true) - lastBefore(ups.length, j => ups[j], p, true);   // the cycles that start in [p, q)
+  const kind = ['edges', 'rise', 'fall', 'any'].includes(gc) ? gc : 'edges', per = partPeriod(clk), ups = clk && !per ? riseTimes(clk) : [];
+  // the cycles that start in [p, q); a clock held in part (a large dump's): the time over its period
+  const cyc = per ? (p, q) => Math.round((q - p) / per) : (p, q) => lastBefore(ups.length, j => ups[j], q, true) - lastBefore(ups.length, j => ups[j], p, true);
   const len = d => (M.timed ? fmtTime(d, d / 100, d) : trimNum(d));
   return { kind, cyc, each: gc !== 'off' && (aux.size > 0 || kind === gc),
     counted: r => r.type === 'sig' && r.tr && r !== clk && (aux.size ? aux.has(r) : !refs.has(r)),
@@ -2630,7 +2655,8 @@ const TIPS = {
   'act:expand': ['Open every module', ['zR']], 'act:collapse': ['Fold every module', ['zM']],
   'act:hl': ['Clear the highlight', ['Esc']], 'act:unhide': ['Show the hidden rows again'],
   'act:prev': ['Previous edge of the selected signal', ['shift+Tab', '[e']], '.edge': ['Edge kind: any, rising, falling, a value, X / Z', ['e']],
-  'act:next': ['Next edge of the selected signal', ['Tab', ']e']], 'act:mark': ['Bookmark at the cursor, on the selected signal', ['b']],
+  'act:next': ['Next edge of the selected signal', ['Tab', ']e']],
+  'act:mark': ['Bookmark at the cursor, on the selected signal: its text asked there, then in the list', ['b']],
   'act:umark': ['A marker at the cursor: a dashed line across the rows; its label asked', ['m']],
   'act:mprev': ['The previous bookmark or marker in time', ['[b', '[m']], 'act:mnext': ['The next bookmark or marker in time', [']b', ']m']],
   'act:mlist': ['The markers and bookmarks in a list: ↑ ↓ go through them, the waves follow', ['gm']],
@@ -2663,11 +2689,13 @@ const TIPS = {
     'form (the right button on the bar opens it too)'],
   '.pfile': ['The files: open a dump, compare one, its sources, the runs kept; save, load, reload the view; save the page; load assertions'],
   '.ppaint': ['Paint: a colour on the found, highlighted and shift+click selected signals (none of them: the selected one); Unpaint'],
-  '.pimg': ['More of the picture: save it as PNG or SVG, as WaveDrom'], '.mx': ['The rest of this group'],
+  '.pimg': ['More of the picture: all rows (the open modules, top to bottom), save it as PNG or SVG, as WaveDrom'], '.mx': ['The rest of this group'],
   '.chipn': ['The filters on the rows: the highlight, the hidden rows, Only, the FSM layer'],
   '.rx': ['Radix of the selected signal (shift+click a name: of a run of them); "the page\'s": its own again'],
   'act:cycles': ['The clock cycles in a band under the time axis (the right button: Cycles ▸ for the clock, cycle 0)'],
   'act:gaps': ['The waves with the gaps cut out (where nothing changes), or in continuous time; idle and keep beside it', ['gv']],
+  'act:svgall': ['Every row of the list as an SVG file (no height limit): the range, else the window; the ones scrolled out of the window too'],
+  'act:copyall': ['The range (else the window) of every row of the list as PNG to the clipboard: the ones scrolled out of the window too (the open modules)'],
   'act:copyimg': ['The range (else the window) as PNG to the clipboard: the highlighted rows, else the ones on the screen'],
   'act:png': ['Save the picture as PNG'], 'act:svg': ['Save the picture as SVG'],
   'act:wdjson': ['The range (else the window) as a WaveDrom file (.json), a cell per clock cycle'], 'act:wdcopy': ['The same WaveDrom to the clipboard'],
@@ -2684,6 +2712,8 @@ const TIPS = {
   '.from': ['From bookmark'], '.to': ['To bookmark'], '.shape': ['Arrow shape'], '.head': ['Arrow head'],
     '.line': ['Line'],
   'm:zoom': ['Zoom to the range', ['shift+drag', 'middle drag']], 'm:marks': ['Bookmarks at its ends, an arrow with Δ'], 'm:copyd': ['Copy Δ'],
+  'm:svgall': ['Every row of the list as an SVG file (no height limit): the range, else the window; the ones scrolled out of the window too'],
+  'm:copyall': ['The range (else the window) of every row of the list as PNG to the clipboard: the ones scrolled out of the window too (the open modules)'],
   'm:copyimg': ['The range (else the window) as PNG to the clipboard: the highlighted rows, else the ones on the screen'], 'm:png': ['Save the picture as PNG'],
     'm:svg': ['Save the picture as SVG'],
   'm:c2': ['A second cursor: Δ to the cursor in time and clock cycles', ['shift+click']], 'm:c2x': ['No second cursor', ['Esc']],
@@ -2803,7 +2833,8 @@ const HELP = [
     [['1', '…', '9'], 'go to bookmark 1 … 9'],
     [['ctrl+drag'], 'measure a range: Δ, the edges or changes of that signal, then of each one you select (↑ ↓, a click on a name)'],
     [['alt+drag'], 'a box: its time and its signals, then the menu (picture, WaveDrom, colour)'], [['ctrl+click'], 'clear the range'],
-    [['right button'], 'a range and the menu: colour, radix, hide, Copy image; Show as ▸, Here ▸, Export ▸ …'], [['b'], 'bookmark at the cursor'],
+    [['right button'], 'a range and the menu: colour, radix, hide, Copy image; Show as ▸, Here ▸, Export ▸ …'],
+    [['b'], 'bookmark at the cursor: its text asked'],
     [[']b', '[b'], 'next / previous bookmark'], [['m'], 'marker at the cursor: its label asked'], [[']m', '[m'], 'next / previous marker'],
     [['right button + click'], 'the left button while the right one is down: a marker there at once (M1, M2 …; over the signal, else under it)'],
     [['gm'], 'the markers and bookmarks: a list, ↑ ↓ go through them'], [['drag a bookmark'], 'move it'],
@@ -2976,7 +3007,8 @@ class Bar {
         mItem('svload', 'Load assertions…', '', ' hidden')),
       btn('dreload', '⟳', ' aria-label="read the dump again" hidden'),
       more(seg(btn('copyimg', 'Copy image'), popHead('img', '▾', 'pimg', 'more of the picture')),
-        popBox('img', mItem('png', 'Save image as PNG') + mItem('svg', 'Save image as SVG') + '<hr>' + mItem('wdjson', 'Save as WaveDrom') +
+        popBox('img', mItem('copyall', 'Copy image of all rows') + mItem('svgall', 'Save image of all rows as SVG') + '<hr>' +
+          mItem('png', 'Save image as PNG') + mItem('svg', 'Save image as SVG') + '<hr>' + mItem('wdjson', 'Save as WaveDrom') +
           mItem('wdcopy', 'Copy WaveDrom'))),
       '<button type="button" class="live" data-act="live" hidden></button><input type="file" class="sfile" accept=".json,application/json" hidden>' +
         '<input type="file" class="dfile" accept=".vcd,.fst,.json" hidden><input type="file" class="cfile" accept=".vcd" hidden>' +
@@ -3151,7 +3183,7 @@ class Bar {
     else if (a === 'expand') v.expandAll();
     else if (a === 'collapse') v.collapseAll();
     else if (a === 'prev' || a === 'next') v.edge(a === 'next' ? 1 : -1);
-    else if (a === 'mark') v.mark();
+    else if (a === 'mark') v.bookmarkKey();
     else if (a === 'umark') v.markerKey();
     else if (a === 'mprev' || a === 'mnext') v.stepMarks(a === 'mnext' ? 1 : -1);
     else if (a === 'mlist') v.marksMenu();
@@ -3192,7 +3224,8 @@ class Bar {
     else if (a === 'gaps') v.seq('gv');
     else if (a === 'cycles') { const co = v.cycOpt(); if (!co.cycles && !cycClock(v.M.rows, co.cycleClock)) v.toast('no clock found: the right button on ' +
       'a 1-bit signal, Cycles ▸'); else v.setCycles({ cycles: !co.cycles }); }
-    else if (['copyimg', 'png', 'svg', 'wdjson', 'wdcopy'].includes(a)) { const ex = v.exportRows(); v.picAct(a, v.range, ex ? { rows: ex } : {}); }
+    else if (['copyimg', 'copyall', 'svgall', 'png', 'svg', 'wdjson', 'wdcopy'].includes(a)) {
+      const ex = v.exportRows(); v.picAct(a, v.range, ex ? { rows: ex } : {}); }
     else if (a === 'dcmp') v.cfile.click();
     else if (a === 'druns') v.runsPanel();
     else if (a === 'dcmpx') { if (v.cmpReading) v.compareStop(); else v.compare(null); }
@@ -3966,7 +3999,7 @@ class WaveView {
       // the selected name (vim: the word under the cursor)
       else if (k === '*' || k === '#') { if (this.sel) { this.qEl.value = this.sel.name; this.find(this.sel.name); this.findStep(k === '*' ? 1 : -1); } }
       else if (k === 'm') this.markerKey();
-      else if (k === 'b') this.mark();
+      else if (k === 'b') this.bookmarkKey();
       // the selected bus bit by bit, again: folded (a bit selected: its bus folded)
       else if (k === 'B') { const s = this.sel && (this.sel.bit != null ? this.sel.of : this.sel);
         if (isVec(s)) this.setBits(s, this.sel.bit != null ? false : undefined); else this.toast('B: select a bus to show it bit by bit'); }
@@ -4985,6 +5018,26 @@ class WaveView {
       label => this.run(Object.assign({ op: 'marker', t }, label ? { label } : {})));
     return this;
   }
+  // b, gB, the bar's + Bookmark: a bookmark at the cursor, on an edge of the selected signal; its text asked over the waves
+  // there first (as m a marker's label), then it goes into the list below them; Esc: none, a click elsewhere: what was typed.
+  // The row out of sight is brought into it; the box follows the row as the waves scroll (hidden while the row is away)
+  bookmarkKey() {
+    const s = this.sel, t = this.cursor = this.snap(s, this.cursor);
+    if (s && !this.inSight(s)) this.centerRow(s);
+    const top = this.topNow(); this.draw();
+    const at = () => { const r = this.canvas.getBoundingClientRect(), o = s && (this.lay || []).find(o => o.row === s), y0 = r.top + this.hdrH;
+      const x = r.left + Math.min(Math.max((t - this.t0) / this.span, 0), 1) * r.width, y = o ? r.top + o.y + o.h - (this.oy || 0) : y0 + 8;
+      return [x, y, !!o && (y - o.h < y0 - 1 || y > Math.min(r.bottom, innerHeight) + 1)]; };
+    const [x, y] = at();
+    const box = this.askText(x, y, `Bookmark · ${s ? s.name + ' · ' : ''}${this.fmtCursor(t)}`, 'its text',
+      text => this.mark(text, { t, top, signal: s ? s.full : null }), '', true);
+    this.askPlace = () => { if (this.menuEl !== box) return; const [px, py, away] = at(), w = box.offsetWidth, h = box.offsetHeight;
+      box.style.visibility = away ? 'hidden' : ''; box.style.left = Math.max(4, Math.min(px, innerWidth - w - 4)) + 'px';
+      box.style.top = Math.max(4, Math.min(py, innerHeight - h - 4)) + 'px'; };
+    this.askAc = new AbortController();
+    window.addEventListener('scroll', () => this.askPlace && this.askPlace(), { capture: true, passive: true, signal: this.askAc.signal });
+    return this;
+  }
   // a marker at (x, y) at once (the left button while the right one draws a range): the time as the cursor's, on an edge of
   // the signal there (free: not); its label the next of M1, M2 …; its text on a signal's row in the line over it, or under it
   // when over it something is there already (both taken: over it), on a line or the axis there (markPlace)
@@ -5028,13 +5081,15 @@ class WaveView {
     b.t = Math.min(Math.max(this.snap(s, this.tOfX(x)), this.M.t0), this.M.t1); delete b.at;   // moved: no longer at its event
     this.draw();
   }
-  // bookmark: numbered circle at the cursor on the selected signal (snapped to its edge within 6 px), described below the waves
-  mark(text = '') {
-    const s = this.sel, t = this.cursor = this.snap(s, this.cursor);
+  // a bookmark (a numbered circle, described below the waves) at the cursor (on an edge of the selected signal) -> its number;
+  // at: {t, top, signal} of one asked first (bookmarkKey: its text given there, the list below the waves not focused); none,
+  // no text: its text field focused
+  mark(text = '', at = null) {
+    const s = this.sel, t = at ? at.t : (this.cursor = this.snap(s, this.cursor));
     const n = Math.max(0, ...this.bms.map(b => b.n)) + 1;
-    this.bms.push({ n, t, signal: s ? s.full : null, text, color: null, top: this.topNow() });
+    this.bms.push({ n, t, signal: at ? at.signal : s ? s.full : null, text, color: null, top: at ? at.top : this.topNow() });
     this.saveBookmarks(); this.renderNotes(); this.draw();
-    if (!text) this.notesEl.querySelector(`li[data-n="${n}"] input.txt`)?.focus();
+    if (!text && !at) this.notesEl.querySelector(`li[data-n="${n}"] input.txt`)?.focus();
     return n;
   }
   arrow(from, to, opts = {}) { this.arrows.push(...arNorm([Object.assign({ from, to }, opts)])); this.saveBookmarks(); this.renderNotes(); this.draw();
@@ -5169,7 +5224,7 @@ class WaveView {
     else if (s === 'gt') this.modules(true, !!this.mods || !!this.sel);
     else if (s === 'gT') this.fsmPanel(true);
     else if (s === 'gM') this.markerKey();
-    else if (s === 'gB') this.mark();
+    else if (s === 'gB') this.bookmarkKey();
     else if (s === 'gd') this.run({ op: 'deltas', on: !this.deltas });
     else if (s === 'gc') this.clearMarks();
     else if (s === 'gs') bar('ssave');
@@ -5469,9 +5524,11 @@ class WaveView {
     const svg = WaveSVG.toString(null, { view: this, from, to, rows, cuts, width: o.width || Math.max(640, this.root.clientWidth) });
     return svg.replace(/var\((--[\w-]+)\)/g, (m, n) => cs.getPropertyValue(n).trim().replace(/"/g, "'") || m);
   }
-  // -> a Promise of a PNG Blob of toSVG at scale × (2: sharp on a high-density screen and in a document)
-  toPNG(o = {}, scale = 2) {
-    const svg = this.toSVG(o), w = +svg.match(/width="(\d+)"/)[1], h = +svg.match(/height="(\d+)"/)[1];
+  // -> a Promise of a PNG Blob of toSVG at scale × (2: sharp on a high-density screen and in a document; a tall picture, all
+  // rows: less, down to 1, to stay within PNG_MAX)
+  toPNG(o = {}, scale = 2) {   // o.svg: the picture made already
+    const svg = o.svg || this.toSVG(o), w = +svg.match(/width="(\d+)"/)[1], h = +svg.match(/height="(\d+)"/)[1];
+    if (scale > 1) scale = Math.max(1, Math.min(scale, PNG_MAX / Math.max(w, h)));
     if (Math.max(w, h) * scale > PNG_MAX) return Promise.reject(new Error(`${w * scale} × ${h * scale} px: a PNG stops at ${PNG_MAX}: fewer rows, or SVG`));
     return new Promise((ok, no) => {
       const img = new Image(), url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
@@ -5540,7 +5597,8 @@ class WaveView {
   // expressions, Save as WaveLens): read as needed (need), then a row held in part (a busy signal of a large dump) read whole
   // when it changes at most lazyWhole times over the dump (a row as any other from then on, its summary dropped); one that
   // changes more: refused, an error naming it and `what` (once said, not read again) -> this
-  async needWhole(rows, what) {
+  // inPart: the ones too busy are left held in part, no error (the gaps: by their summary)
+  async needWhole(rows, what, inPart = false) {
     await this.need(rows);
     const M = this.M, S = this.S, sigs = new Set();
     for (const r0 of rows) { const q = r0.orig || r0, r = q.dupOf || q.of || q;
@@ -5558,7 +5616,7 @@ class WaveView {
       }
       no.push(...read.filter(r => r.sum));
     }
-    if (no.length) throw new Error(this.partWhy(no, what));
+    if (no.length && !inPart) throw new Error(this.partWhy(no, what));
     return this;
   }
   // why a feature cannot have every change of these rows (a large dump's busy signals)
@@ -5578,7 +5636,9 @@ class WaveView {
     const fresh = p => p.a <= t0 && p.b >= t1 && (p.exact || p.step <= 4 * span / S.lazyBuckets);
     let back = false;
     this.partRows = this.partRows || new Map();   // the rows holding a detail window -> when it came
-    for (const [r] of this.partRows) if (!on.has(r) || !(r.part && r.part.a <= t0 && r.part.b >= t1)) { this.toSum(r); back = true; }
+    for (const [r] of this.partRows) {
+      if (this.picHold && this.picHold.has(r)) continue;   // read for a picture being made (picRead)
+      if (!on.has(r) || !(r.part && r.part.a <= t0 && r.part.b >= t1)) { this.toSum(r); back = true; } }
     if (back) this.dataChanged();
     const want = [...on].filter(r => !fresh(r.part));
     const ask = this.winAsk;
@@ -5590,8 +5650,28 @@ class WaveView {
   winBack() {
     if (!this.partRows || !this.partRows.size) return;
     const t0 = this.t0, t1 = t0 + this.span; let back = false;
-    for (const [r] of this.partRows) if (!(r.part && r.part.a <= t0 && r.part.b >= t1)) { this.toSum(r); back = true; }
+    for (const [r] of this.partRows) {
+      if (!(r.part && r.part.a <= t0 && r.part.b >= t1) && !(this.picHold && this.picHold.has(r))) { this.toSum(r); back = true; } }
     if (back) this.dataChanged();
+  }
+  // the busy rows of a large dump in a picture (all rows: the ones off the screen too) read for its time [a, b] as a window is
+  // for the view (winRead), CODES_PORTION a read, and held for it (picHold: no frame takes them back to their summary until
+  // the picture is made) -> a promise
+  async picRead(rows, a, b) {
+    const M = this.M, S = this.S, span = b - a, base = r => { const q = r.orig || r; return q.dupOf || q.of || q; };
+    const fresh = p => p.a <= a && p.b >= b && (p.exact || p.step <= 4 * span / S.lazyBuckets);
+    const list = [...new Set(rows.map(base))].filter(r => r.type === 'sig' && r.sum && !r.lazy && !fresh(r.part));
+    this.picHold = new Set(list); this.partRows = this.partRows || new Map();
+    if (!list.length || !this.opts.loadCodes) return;
+    const win = { from: Math.max(0, Math.floor(a)), to: Math.ceil(b), lod: S.lazyBuckets, keep: S.lazyKeep };
+    for (let i = 0; i < list.length; i += CODES_PORTION) {
+      const some = list.slice(i, i + CODES_PORTION), text = await this.opts.loadCodes([...new Set(some.flatMap(r => r.src.lazy || []))], win);
+      if (!VIEWS.has(this) || this.root.waveView !== this) return;
+      const got = fillRows(M, vcdSignals(vcdToWave(text, { name: this.opts.title, budget: Infinity }).doc.signal), codesWin(text), new Set(some));
+      const now = performance.now();
+      for (const r of got) { r.an = null; if (r.part && !r.part.whole) this.partRows.set(r, now); else this.partRows.delete(r); }
+      if (got.length) { this.cmpTake(got); this.dataChanged(); }
+    }
   }
   // a row back to its summary (its window dropped)
   toSum(r) { r.tr = r.sum.tr; r.part = r.sum.part; r.an = null; this.partRows.delete(r); }
@@ -5725,6 +5805,7 @@ class WaveView {
     if (this.printing) this.paintPrint(lay);
     else { const f = this.size(lay); this.names.slide(f.oy, f.Hc); this.bmGeo = this.paintFrame(this.canvas, f.W, f.Hc, f.oy, lay, true, f.dpr);
       this.lazyAsk(lay, f.oy, f.Hc); this.winWant(lay, f.oy, f.Hc); }
+    if (this.askPlace) this.askPlace();   // a bookmark's box follows its row
     this.syncReadouts();
   }
   size(lay) { // the canvas: as wide as its column, as tall as the rows in view (at least the axis and a little more)
@@ -6136,8 +6217,11 @@ Object.assign(WaveView.prototype, {
       b('mlist', 'Markers…') + (this.bms.length || this.umarks.length ? b('clearmarks', 'Clear bookmarks and markers') : ''), atT ? esc(atT) + ' ' : '');
     // the picture (the range, else the window; the selected run, the highlighted rows, else the screen's): Copy image at once,
     // the files and the other formats in Export ▸
+    // in Export ▸ every row of the list (the open modules' rows, the ones scrolled out of the screen too) when the screen has not all of them
+    const nAll = (this.rowsL || []).filter(x => x.type === 'sig').length, nScr = this.screenRows().filter(x => x.type === 'sig').length;
     const picB = b('copyimg', np ? `Copy image (${np} rows)` : 'Copy image') +
-      menuSub('subp', 'Export', (np ? `<div class="mh">${np} ${this.selRun.size > 1 ? 'selected' : 'highlighted'} rows</div>` : '') +
+      menuSub('subp', 'Export', (nAll > nScr ? b('copyall', `Copy image of all rows (${nAll})`) + b('svgall', 'Save image of all rows as SVG') + '<hr>' : '') +
+        (np ? `<div class="mh">${np} ${this.selRun.size > 1 ? 'selected' : 'highlighted'} rows</div>` : '') +
         b('png', 'Save image as PNG') + b('svg', 'Save image as SVG') + '<hr>' + b('wdjson', 'Save as WaveDrom') + b('wdcopy', 'Copy WaveDrom') +
         (this.M.timed ? b('wlpiece', 'Save as WaveLens (JSON)') : ''));
     // the gaps: a submenu (its settings, the role of the signals clicked, a reset)
@@ -6203,7 +6287,7 @@ Object.assign(WaveView.prototype, {
       else if (act === 'asrange') this.setRange(spAt.from, spAt.to);
       else if (act === 'spdel') this.run({ op: 'span', id: spId, delete: true });
       else if (act === 'copyd') this.copyText(this.rangeText().replace(/^Δ /, '').split(' · ')[0].split(' / ')[0]);
-      else if (act === 'copyimg' || act === 'png' || act === 'svg' || act === 'wdjson' || act === 'wdcopy') this.picAct(act, r, pic);
+      else if (['copyimg', 'copyall', 'svgall', 'png', 'svg', 'wdjson', 'wdcopy'].includes(act)) this.picAct(act, r, pic);
       else if (act === 'wlpiece') {   // the range of these signals as waves of their own (x.wavelens.json), opened by Open… or a drop
         const [ta, tb] = r || [this.t0, this.t0 + this.span], name = this.picName('wavelens.json');
         this.toPiece(ta, tb, pic.rows || null).then(doc => { this.download(new Blob([JSON.stringify(doc) + '\n'], { type: 'application/json' }), name);
@@ -6243,7 +6327,8 @@ Object.assign(WaveView.prototype, {
       // a bookmark, a marker: its text asked over the waves first, then it goes into its list below them (edited there)
       else if (act === 'mark') { const t = this.snap(sig, at), [x, y] = this.menuAt, top = this.topNow();   // the waves as they are now
         this.askText(x, y, `Bookmark · ${sig.name} · ${this.fmtCursor(t)}`, 'its text', text => {
-          const n = Math.max(0, ...this.bms.map(b => b.n)) + 1; this.bms.push({ n, t, signal: sig.full, text, color: null, top }); this.changed(true); });
+          const n = Math.max(0, ...this.bms.map(b => b.n)) + 1; this.bms.push({ n, t, signal: sig.full, text, color: null, top }); this.changed(true); },
+          '', true);
         return this; }
       else if (act === 'copyname') this.copyRows(many ? sigs : [it]);
       else if (act === 'copyv') this.copyText(`${sig.name}: ${this.valueTwo(sig, true)}`);
@@ -6443,7 +6528,8 @@ Object.assign(WaveView.prototype, {
   },
   // a text asked over the waves where the menu was (a bookmark's text, a marker's label): Enter gives it (empty too), Esc
   // or a click elsewhere gives nothing; the waves stay where they are (no field below them takes the focus)
-  askText(x, y, title, hint, give, value = '') {
+  // away: a click elsewhere gives what was typed too (none typed: nothing)
+  askText(x, y, title, hint, give, value = '', away = false) {
     this.closeMenu();
     const el = document.createElement('div'); el.className = 'wv-menu wv-ask'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', title);
     el.innerHTML = `<div class="mh">${esc(title)}</div><input type="text" spellcheck="false" autocomplete="off" placeholder="${esc(hint)}" ` +
@@ -6452,6 +6538,7 @@ Object.assign(WaveView.prototype, {
     const b = el.getBoundingClientRect(), inp = el.querySelector('input'); inp.value = value;
     el.style.left = Math.max(4, Math.min(x, innerWidth - b.width - 4)) + 'px'; el.style.top = Math.max(4, Math.min(y, innerHeight - b.height - 4)) + 'px';
     const done = ok => { const v = inp.value.trim(); this.closeMenu(); this.refocus(); if (ok) give(v); };
+    if (away) el.wlAway = () => { const v = inp.value.trim(); if (v) give(v); };
     inp.addEventListener('keydown', e => {
       if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(e.key === 'Enter'); } });
     el.querySelector('button[data-m=ok]').addEventListener('click', () => done(true));
@@ -6481,8 +6568,11 @@ Object.assign(WaveView.prototype, {
   // a menu el opened: a press outside it or the window's blur closes it, the keys back on the waves when nothing took them. After
   // the click that opened it; not for a menu closed meanwhile (its listener would close the next one). blur false: a box to type in stays
   // the picture of the range r (else the window) and its rows (pic.rows: else the screen's): as PNG to the clipboard (copyimg), saved as
-  // PNG or SVG, as WaveDrom saved or copied — the right button's Copy image, Export ▸ and the bar's Copy image ▾
+  // PNG or SVG, as WaveDrom saved or copied — the right button's Copy image, Export ▸ and the bar's Copy image ▾. copyall: the
+  // picture of every row of the list top to bottom (the rows of the open modules, folded ones as their line; scrolled out of the
+  // screen too; the selection aside), its rows of a large dump read first
   picAct(act, r, pic = {}) {
+    if (act === 'copyall' || act === 'svgall') return this.picAll(act === 'svgall');
     if (act === 'copyimg') {
       const png = this.toPNG(pic);
       try { navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]).then(() => this.toast('image copied'), err =>
@@ -6503,10 +6593,35 @@ Object.assign(WaveView.prototype, {
     }
     return this;
   },
+  // the picture of every row of the list (Copy image of all rows: a PNG to the clipboard; svg: Save image of all rows as SVG, no
+  // height limit): the rows of a large dump read first, its busy ones as exact as the picture's time needs (picRead) and held
+  // for it; a PNG taller than PNG_MAX refused (by the SVG's own height: names, axis, bookmarks' texts, gaps' rows)
+  picAll(svg) {
+    const rows = this.rowsL || [], est = (this.lay || []).reduce((n, o) => n + o.h, 0) + (this.hdrH || 0);
+    const tall = h => `${rows.length} rows, ${Math.round(h)} px high: a PNG stops at ${PNG_MAX} px: Export ▸ Save image of all rows as SVG, ` +
+      'or fold some modules';
+    if (!svg && est > PNG_MAX) { this.toast(tall(est)); return this; }   // at least that tall: refused before reading anything
+    const [a, b] = this.range || [this.t0, this.t0 + this.span], n = rows.filter(x => x.lazy || x.sum).length;
+    if (this.lazy && n) this.toast(`reading ${n} rows for the picture…`);
+    const ready = (this.lazy ? this.need(rows).then(() => this.picRead(rows, a, b)) : Promise.resolve()).then(() => {
+      const text = this.toSVG({ rows: 'all' }), left = rows.filter(x => x.unread).length;
+      this.picHold = null; this.invalidate();
+      return { text, h: +text.match(/height="(\d+)"/)[1], left: left ? ` (${left} rows not read: “not read” on them)` : '' };
+    }, e => { this.picHold = null; throw e; });
+    if (svg) { ready.then(({ text, left }) => { const name = this.picName('svg'); this.download(new Blob([text], { type: 'image/svg+xml' }), name);
+      this.toast(`saved ${name}: ${rows.length} rows${left}`); }, e => this.toast('not saved: ' + e.message)); return this; }
+    let said = '', left = '';
+    const png = ready.then(x => { left = x.left; if (x.h > PNG_MAX) throw new Error(said = tall(x.h)); return this.toPNG({ svg: x.text }); })
+      .catch(e => { said = said || e.message; throw e; });
+    try { navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]).then(() => this.toast(`image of all ${rows.length} rows copied${left}`),
+      err => this.toast('not copied: ' + (said || err.message))); }
+    catch (err) { this.toast('this browser cannot copy an image: Export ▸ Save image of all rows as SVG'); }
+    return this;
+  },
   menuOff(el, blur = true) {
     const off = this.offMenu = e => {
       if (e.target instanceof Node && el.contains(e.target)) return;   // the window's blur: its target is the window, no node
-      this.closeMenu();
+      const away = el.wlAway; this.closeMenu(); if (away) away();   // a box that keeps what was typed (a bookmark's text)
       if (e.type === 'pointerdown') setTimeout(() => { const a = document.activeElement;
         if (VIEWS.has(this) && (a === document.body || (this.root.contains(a) && !a.matches('input, select, textarea')))) this.refocus(); }, 0);
     };
@@ -6553,6 +6668,7 @@ Object.assign(WaveView.prototype, {
     this.root.append(el); this.keysEl = el;
   },
   closeMenu() {
+    if (this.askAc) { this.askAc.abort(); this.askAc = null; } this.askPlace = null;   // a box that follows its row (bookmarkKey)
     if (!this.menuEl) return;
     this.menuEl.remove(); this.menuEl = null;
     document.removeEventListener('pointerdown', this.offMenu, true); window.removeEventListener('blur', this.offMenu);
@@ -7590,11 +7706,10 @@ Object.assign(WaveView.prototype, {
     if (!m || m.gck !== G.clk || m.run !== this.cmpRun || !same(m.rows, rows) || !same(m.ref, ref) || !m.by !== !by) {
       const sigs = by ? [] : ref.length ? ref : rows, clk = this.gapClockFor(rows);
       const un = [...(clk ? [clk] : []), ...sigs].filter(r => lazyOf(M, r.orig || r).length || (r.orig || r).sum);
-      // a large dump: read whole, then worked out again (need resets the memo); a busy row held in part: no gaps (its summary
-      // has none of the changes inside its dense spans), said once
-      if (un.length) this.needWhole(un, 'the gaps').catch(e => { if (this.gapNo !== e.message) { this.gapNo = e.message; this.toast(e.message); } });
-      const partly = [...(clk ? [clk] : []), ...sigs].some(r => (r.orig || r).sum);
-      m = this.warpMemo = { rows, ref, sigs, clk, gck: G.clk, run: this.cmpRun, by, ts: partly ? [] : gapTimes(sigs, M.t0, M.t1, clk, ref.length > 0) };
+      // a large dump: read whole, then worked out again (need resets the memo); a busy row held in part (over lazyWhole
+      // changes): by its summary, its dense spans busy throughout (gapBusy), a clock's cycles by its period (partPeriod)
+      if (un.length) this.needWhole(un, 'the gaps', true).catch(e => { if (this.gapNo !== e.message) { this.gapNo = e.message; this.toast(e.message); } });
+      m = this.warpMemo = { rows, ref, sigs, clk, gck: G.clk, run: this.cmpRun, by, ts: gapTimes(sigs, M.t0, M.t1, clk, ref.length > 0) };
     }
     const bm = this.bms.map(x => x.t), key = JSON.stringify([g.gapIdle, g.gapKeep, bm]);
     if (m.key !== key || m.by !== by) { m.key = key; m.by = by;
@@ -11411,7 +11526,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.58',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.59',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,

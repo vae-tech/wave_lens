@@ -72,7 +72,9 @@ may be the default). What the tab does differently from a page in a browser:
   `fsm_stats` / `fsm_go`, the cycles, the gaps, assertions and expressions, *Save as WaveLens* — reads it whole when it
   changes at most `lazyWhole` (1 000 000) times over the dump (a row as any other from then on); a busier one (that
   100 MHz clock: 40 M) is refused with a message naming it (assertions: `sva eval --waves DUMP` gives the same verdicts
-  from a terminal; no cycles band, no gaps). The edge search, the range's counts, the cycles between two times and the
+  from a terminal; no cycles band). The **gaps** take such a row by its summary: a dense bucket busy throughout, the
+  changes outside them exact, a busy clock's cycles by its period (a dense bucket's span over its rising edges): the
+  gaps of the whole dump, their ends within a bucket (that 200 ms dump: 98 µs). The edge search, the range's counts, the cycles between two times and the
   tooltip work where the row is held exactly, else say to zoom in; never a wrong count.
   With no `sva` CLI on the host (Windows without `wavelens.sva`), or one that fails on the VCD, the VCD is read whole
   instead, the reason in the tab and the log; an FST needs the CLI. VS Code then offers *WaveLens: Set the sva program…*
@@ -684,7 +686,7 @@ selecting another signal with a range never moves the waves.
 | rows | **list** | **Sort** (`s`), *⊞ ⊟* (open / fold every module, `zR` `zM`), **Modules** (`t`), **FSMs** (`T`) |
 | | **prefixes** | the sort prefixes, the parts of a name that sorting skips (`i_,o_`; ⚙ has the same field); a group of its own, to put where you like |
 | | **signal** | the radix of the selected signal (shift+click a name: of a run of them; *the page's*: their own again), *Cycles* (the band of cycle numbers), *Gaps* (`gv`, the waves with the gaps cut out; *idle* and *keep* beside it) |
-| | **file** | **File ▾**, **⟳** (`R`, the dump read again, only after one was opened in the page), *Copy image* (the range, else the window, as PNG to the clipboard) and its *▾* (Save as PNG, SVG, WaveDrom, Copy WaveDrom) |
+| | **file** | **File ▾**, **⟳** (`R`, the dump read again, only after one was opened in the page), *Copy image* (the range, else the window, as PNG to the clipboard) and its *▾* (Copy image of all rows, Save as PNG, SVG, WaveDrom, Copy WaveDrom) |
 | | **compare** | only while a second dump is compared or read: **A B A+B** (`d` `D`), ◀ ▶ through the differences (`[d ]d`), **≠ N ✕** |
 
 **File ▾** holds the files: **Open dump…** (`gO`), **Compare with…** (`gC`), **Sources…**, **Runs…** (`gu`, VS Code), **Save view…**
@@ -767,7 +769,7 @@ is in sight. Navigation follows Questa's wave window, the lists and the text vim
 | edge kind **= value** | a field: `0x40`, `'h40`, `8'd64`, `64`, `-3`, `'b101`, a literal with x / z compared bit for bit (`'b10x1`, `8'hx5`: x and z apart) or a text (an enum label: `ACCESS`); Enter / ◀ ▶ / Tab: the next / previous time the selected signal becomes it (none selected: any shown signal) | edge kind **X / Z** | the next / previous x or z (a bus with x / z bits too) of the selected signal or of any shown one: the first X after reset from the reset's edge |
 | shift+`← →` | move the cursor a hundredth of the view | the pointer on a signal | its value there, the change into it and the next one (tooltip) |
 | `/`, ctrl+F | find (the bar scrolled away: the find group floats over the waves; ✕ or Esc puts it back) | `n N`, `*` `#` | next / previous match; find the selected signal's name and go to its next / previous match |
-| `b` | bookmark at the cursor | `]b [b` | the next / previous bookmark |
+| `b` | bookmark at the cursor (its text asked there) | `]b [b` | the next / previous bookmark |
 | `m` | marker at the cursor: its label asked (Enter) | `]m [m` | the next / previous marker |
 | `r` | the last state loaded, read again (Reload) | `R` | the dump read again from the disk, the view kept (⟳) |
 | `g` | a moment after it (`keyHints`) a box says what can follow, to press or to click, as long as it stays open (Esc, or a key it does not list: it closes, nothing else): go to `gg gl gt gT`, markers and bookmarks `gm gM gB gd gc`, the state `gs gL gr`, the dump `gO gR gC gu`, `gv`, `gp` | `z y [ ]` | the same box: fold, copy, next, previous |
@@ -922,7 +924,8 @@ the title line; Esc puts back the value it showed. Cycle diagrams count in cycle
 ![Cursor at 1.2 µs, a 100 ns window around it](img/cursor.png)
 
 **Bookmarks and arrows.** **+ Bookmark** (`b`) puts a numbered bookmark on the selected signal at the cursor, snapped to an
-edge. Below the waves each bookmark has a time, a signal, a colour and a text; drag a circle to move it, shift+drag from
+edge: a small box over the waves there asks its text first (Enter adds it, a click elsewhere too when a text is typed, Esc:
+none; as `m` a marker's label; the row brought into sight, the box following it as the waves scroll). Below the waves each bookmark has a time, a signal, a colour and a text; drag a circle to move it, shift+drag from
 one circle to another to draw an arrow (shape `- ~ -~ ~- -| |- -|-`, head, line, colour, label). Labels get a thin
 lane of their own between the signals; an arrow between two bookmarks of one signal is a dimension line in that lane,
 above the signal. A circle dragged onto the top quarter of its row (or **↥** in its line) is **lifted** into such a lane
@@ -1318,7 +1321,12 @@ takes it back) and in VS Code **Keep as a slice (Runs)** / **Save as FST…** (t
 as an FST — *Slices* under the runs kept); on a span of yours, **As range** (it measured as the range) and **Delete the span**;
 **Copy image** (PNG to the clipboard), in **Export ▸** **Save image as PNG / SVG** — the range (else the window) of the rows
 on the screen, or of the highlighted rows when there are some, drawn as the viewer shows them (folding, colours,
-bookmarks, cursor) with names and axis, the page's colours put in, so the SVG opens anywhere (a PNG stops at 16384 px a side: fewer rows, or SVG); **Save as WaveDrom** /
+bookmarks, cursor) with names and axis, the page's colours put in, so the SVG opens anywhere (a PNG stops at 16384 px a side: fewer rows, or SVG);
+in **Export ▸** **Copy image of all rows** and **Save image of all rows as SVG** (while the screen has not all of them;
+also the bar's *Copy image ▾*) — every row of the list top to bottom, the ones scrolled out of the window too: the signals
+of the open modules, a folded module as its one line, the hidden ones left out, the highlight, the selection and the gaps'
+*only them* aside (a large dump: its rows read first, the busy ones as exact over the picture's time as on the screen; a tall
+PNG drawn at less than twice the size; one over 16384 px refused, the SVG has no limit); **Save as WaveDrom** /
 **Copy WaveDrom** — the same signals over the range as WaveJSON (`<title>.wavedrom.json`): one cell per cycle of their
 clock (a 1-bit `*clk*` among them or in their modules, else the shortest time between changes; at most 2048 cycles —
 a longer range is cut there, and the head, the foot and the toast say where), each cell the value
@@ -1386,7 +1394,7 @@ range, a span of yours, the row) and **Copy image**; the rest in submenus. Each 
 |---|---|
 | the range: **Zoom to the range**, **Clear the range** | **Range ▸** Bookmarks at its ends, Copy Δ, Keep as span…, (VS Code) Keep as a slice (Runs), Save as FST… |
 | the row: **Colour**, **Its own colour**, **Radix**, **Highlight**, **Duplicate**, **Remove the copy**, **Hide**, **Copy the path** | **Show as ▸** Analog, Bits, Duplicate bits…, Type… · **Your groups ▸** Move up / down, To the top / bottom, Fold this group, Into / Out of “G”, New group with it, Out of “G” (this row), Delete this group, Go to |
-| **Copy image** | **Export ▸** Save image as PNG, Save image as SVG, Save as WaveDrom, Copy WaveDrom, Save as WaveLens (JSON) |
+| **Copy image** | **Export ▸** Copy image of all rows, Save image as PNG, Save image as SVG, Save as WaveDrom, Copy WaveDrom, Save as WaveLens (JSON) |
 | always | **Here ▸** (the time clicked on its header) Bookmark here (on a signal), Marker here, Second cursor here, Clear the second cursor, Copy A · B · Δ, Copy link to here, Markers…, Clear bookmarks and markers · **Gaps ▸** · **Cycles ▸** · **Modules ▸** (**Rows ▸** on a page with no modules) Fold this / its module, Fold / Open every module, Show the hidden, Modules…, Locate module in tree, Pause / Resume Only, Clear Only, State machines…, Clear the FSM layer |
 
 One submenu is open at a time, beside the menu (in a window too narrow for both: inside it, under its header). The pointer

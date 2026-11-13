@@ -394,9 +394,16 @@ def bookmarks(page):
     v.locator('select.edge').select_option('fall'); nxt.click()
     check(js('v.cursor') == 6, f'falling edge of req at cycle 6 ({js("v.cursor")})')
     v.locator('button[data-act=mark]').click()
+    ask = page.locator('.wv-ask'); asked = [ask.count(), ask.locator('.mh').inner_text() if ask.count() else '', bl.count()]
+    page.keyboard.press('Escape')
+    esc = [page.locator('.wv-ask').count(), bl.count()]
+    check(asked[0] == 1 and asked[1].startswith('Bookmark · req') and asked[2] == 3 and esc == [0, 3],
+          f'+ Bookmark: its text asked over the waves first, none yet; Esc: none {asked} {esc}')
+    v.locator('button[data-act=mark]').click(); page.keyboard.type('req drops'); page.keyboard.press('Enter')
     b4 = bl.nth(3)
-    check(bl.count() == 4 and b4.locator('.eg').inner_text() == '↓', f'+ Mark adds bookmark 4 on the falling edge ({b4.locator(".eg").inner_text()!r})')
-    page.keyboard.type('req drops')
+    check(bl.count() == 4 and b4.locator('.eg').inner_text() == '↓' and b4.locator('input.txt').input_value() == 'req drops' and
+          js('document.activeElement === v.canvas'), f'+ Bookmark, its text typed there, Enter: bookmark 4 on the falling edge with it, in the list, the keys '
+          f'on the waves ({b4.locator(".eg").inner_text()!r})')
     tm = b4.locator('input.tm'); tm.fill('7'); tm.press('Enter')
     t7 = js('v.bms[3].t')
     b4.locator('input.tm').fill('soon'); b4.locator('input.tm').press('Enter')
@@ -459,13 +466,13 @@ def bookmarks(page):
     check(v.locator('.names .row.sel').inner_text().startswith('ack'), 'clicking a row on the waves selects that signal')
     v.locator('canvas').focus(); page.keyboard.press('ArrowDown')
     check(v.locator('.names .row.sel').inner_text().startswith('data'), 'ArrowDown moves the selection')
-    page.keyboard.press('b')
+    page.keyboard.press('b'); page.keyboard.press('Enter')
     check(bl.count() == 4, 'key b bookmarks too')
     ex = page.locator('.bench > div.wv[data-wave="DEMO_WAVES.exact"]')
     ex.locator('.names .row', has_text='txd').locator('.n').click()
     ex.locator('select.edge').select_option('rise'); ex.locator('button[data-act=next]').click()
     check(ex.locator('.names .row.sel .v').inner_text() == '1', 'edge search on exact "tv" transitions')
-    ex.locator('button[data-act=mark]').click()
+    ex.locator('button[data-act=mark]').click(); page.keyboard.press('Enter')
     t = ex.locator('.notes ol.bms > li input.tm'); t.fill('250ns'); t.press('Enter')
     check(page.evaluate("document.querySelector('.bench > div.wv[data-wave=\"DEMO_WAVES.exact\"]').waveView.bms[0].t") == 250000, 'a time with a unit on a timed wave (250ns)')
     page.reload(); settle(page)
@@ -3184,6 +3191,49 @@ def lazy_dump(browser, build):
           f'the edge search: not over a row held in part (zoom in), as the whole dump on a row read whole {feat["edge"]} {feat["edgeWhole"]}')
     check(feat['cycles'] == [None, 10000] and 'read in part' in feat['range'] and 'changes in this stretch' in feat['tip'],
           f'cycles, the range counts, the tooltip of a busy row: not a wrong number where it is held in part {feat["cycles"]} {feat["range"]} {feat["tip"]}')
+    # a picture of all rows (off the screen too): the busy rows read for its time as exact as the view would be, held until it
+    # is made (a frame does not take them back), then back to their summary
+    pic = page.evaluate("""async ([whole, head]) => { const a = document.createElement('div'), b = document.createElement('div'); document.body.append(a, b);
+      const va = new WaveLens.WaveView(a, WaveLens.vcdToWave(whole, { name: 'parts', budget: Infinity }).doc, {});
+      const vb = new WaveLens.WaveView(b, WaveLens.vcdToWave(head, { name: 'parts', lazy: true }).doc, { loadCodes: (c, w) => window.lazyCodes('parts', c, w),
+        lazyKeep: 256, lazyBuckets: 512 });
+      await vb.need(vb.M.rows); const R = (v, n) => v.M.rows.find(r => r.name === n), clk = R(vb, 'clk'), out = {};
+      const view = (v, r, p, q) => JSON.stringify(r.tr.filter(o => o.t >= p && o.t <= q).map(o => [o.t, o.k]));
+      await vb.picRead(vb.rowsL, 1e7, 1e7 + 1e5); vb.draw();
+      out.held = [!!clk.part && clk.part.exact, view(vb, clk, 1e7, 1e7 + 1e5) === view(va, R(va, 'clk'), 1e7, 1e7 + 1e5), clk.tr !== clk.sum.tr];
+      vb.picHold = null; vb.draw(); out.back = clk.tr === clk.sum.tr;
+      let file = null; vb.download = (bl, name) => { file = name; }; vb.range = [1e7, 1e7 + 1e5]; vb.picAct('svgall', null);
+      for (let i = 0; i < 60 && !file; i++) await new Promise(r => setTimeout(r, 50));
+      out.svg = [file, vb.picHold === null, vb.root.querySelector('.bar .toast').textContent];
+      for (const v of [va, vb]) { const el = v.root; v.destroy(); el.remove(); }
+      return out; }""", [pw, ph])
+    check(pic['held'] == [True, True, True] and pic['back'] and pic['svg'][0] and pic['svg'][1], f'a picture of all rows of a large dump: the busy rows '
+          f'exact over its time (the whole dump\'s changes), held while it is made, then their summary again {pic}')
+    # the gaps over busy rows held in part (a 1 GB dump cut to one gap over all of it, 0.58): by the summary, a dense stretch
+    # busy throughout, the clock's cycles by its period: the gaps of the whole text, their ends within a bucket
+    gen = ['$timescale 1ns $end\n$scope module tb $end\n$var wire 1 ! clk $end\n$var wire 8 " cnt [7:0] $end\n$var wire 1 # q $end\n'
+           '$upscope $end\n$enddefinitions $end\n#0\n0!\nb0 "\n0#\n']
+    for i in range(1, 40001):   # bursts of cnt [0, 2000) of every 10000 ns, the clock all the time, q once in an idle stretch
+        gen.append(f'#{i}\n{i % 2}!\n' + (f'b{(i // 2) % 256:b} "\n' if i % 2 == 0 and i % 10000 < 2000 else '') + ('1#\n' if i == 25000 else ''))
+    bw, bh = fst_of('burst', ''.join(gen))
+    gap = page.evaluate("""async ([whole, head]) => { const a = document.createElement('div'), b = document.createElement('div'); document.body.append(a, b);
+      const va = new WaveLens.WaveView(a, WaveLens.vcdToWave(whole, { name: 'burst', budget: Infinity }).doc, {});
+      const vb = new WaveLens.WaveView(b, WaveLens.vcdToWave(head, { name: 'burst', lazy: true }).doc, { loadCodes: (c, w) => window.lazyCodes('burst', c, w),
+        lazyKeep: 256, lazyBuckets: 512, lazyWhole: 1000 });
+      await vb.need(vb.M.rows); const R = (v, n) => v.M.rows.find(r => r.name === n), wait = ms => new Promise(r => setTimeout(r, ms));
+      const out = { part: [!!R(vb, 'clk').sum, !!R(vb, 'cnt').sum] }; let said = ''; const toast = vb.toast; vb.toast = m => { said = m; return toast.call(vb, m); };
+      for (const v of [va, vb]) v.setGaps({ gaps: true, gapView: true, gapIdle: '16', gapKeep: '2' });
+      await wait(300); vb.draw(); await wait(100);
+      out.a = va.liveCuts().w.cuts; out.b = vb.liveCuts().w.cuts; out.said = said; out.step = R(vb, 'cnt').sum.part.step;
+      const hole = v => { const c = v.liveCuts().w.cuts; return v.gapTextsNow().hole(c[0][1], c[1][0]); }; out.hole = [hole(va), hole(vb)];
+      for (const v of [va, vb]) { const el = v.root; v.destroy(); el.remove(); }
+      return out; }""", [bw, bh])
+    near = gap['a'] and gap['b'] and len(gap['a']) == len(gap['b']) and all(abs(x - y) <= 2 * gap['step'] + 4000 for p, q in zip(gap['a'], gap['b'])
+                                                                       for x, y in zip(p, q))
+    check(gap['part'] == [True, True] and len(gap['a']) == 6 and near and 'lazyWhole' not in gap['said'] and gap['hole'][1].split(' · ')[1].split(' ')[0].isdigit()
+          and abs(int(gap['hole'][1].split(' · ')[1].split(' ')[0]) - int(gap['hole'][0].split(' · ')[1].split(' ')[0])) <= 2 * gap['step'] / 2000 + 4,
+          f'the gaps over busy rows held in part: the whole text\'s ({len(gap["a"] or [])} parts kept), their ends within a bucket '
+          f'({gap["step"]:.0f} ps), the cycles in a gap by the clock\'s period, nothing refused {gap["part"]} {gap["a"]} {gap["b"]} {gap["hole"]} {gap["said"]!r}')
     # the design-shaped dump: the top level open, its modules folded; the signals on the screen read, only those
     whole, head = fst_of('design', lazy_vcd())
     asked.clear()
@@ -5629,9 +5679,25 @@ def marker_deltas(browser, build):
     page.keyboard.type('first'); page.keyboard.press('Enter'); settle(page)
     a = js("return [v.umarks.length, v.umarks[v.umarks.length - 1].label, v.bms.length];")
     check(a == [n0[0] + 1, 'first', n0[1]], f'm: a marker with the label typed, no bookmark {a}')
-    js("v.setCursor(100000); v.canvas.focus();"); page.keyboard.press('b'); settle(page)
-    a = js("return [v.umarks.length, v.bms.length];")
-    check(a == [n0[0] + 1, n0[1] + 1], f'b: a bookmark, no marker {a}')
+    js("v.setCursor(100000); v.canvas.focus();"); page.keyboard.press('b'); box = page.locator('.wv-ask')
+    check(box.count() == 1 and js("return v.bms.length") == n0[1], 'b: a bookmark, its text asked first')
+    page.keyboard.type('second'); page.keyboard.press('Enter'); settle(page)
+    a = js("return [v.umarks.length, v.bms.length, v.bms[v.bms.length - 1].text, v.bms[v.bms.length - 1].signal];")
+    check(a[:3] == [n0[0] + 1, n0[1] + 1, 'second'] and a[3].endswith('PSEL'), f'b: a bookmark with the text typed, on the selected signal, no marker {a}')
+    js("v.setCursor(120000); v.canvas.focus();"); page.keyboard.press('b'); page.keyboard.type('third'); page.wait_for_timeout(50); page.mouse.click(3, 3); settle(page)
+    js("v.setCursor(140000); v.canvas.focus();"); page.keyboard.press('b'); page.wait_for_timeout(50); page.mouse.click(3, 3); settle(page)
+    a = js("return [v.bms.length, v.bms[v.bms.length - 1].text];")
+    check(a == [n0[1] + 2, 'third'], f'b, a click elsewhere: the text typed kept (a bookmark), none typed: none {a}')
+    js("v.select('PSEL'); window.scrollTo(0, document.body.scrollHeight); v.canvas.focus({ preventScroll: true });"); settle(page)
+    page.keyboard.press('b'); settle(page)
+    a = js("const b = document.querySelector('.wv-ask').getBoundingClientRect(), q = v.rowBox(v.sel), c = v.canvas.getBoundingClientRect(); "
+           "return [v.inSight(v.sel), Math.round(b.top - q.bottom), b.top > c.top && b.top < Math.min(c.bottom, innerHeight)];")
+    page.mouse.wheel(0, 150); page.wait_for_timeout(200)
+    a2 = js("const e = document.querySelector('.wv-ask'), b = e.getBoundingClientRect(), q = v.rowBox(v.sel); "
+            "return [getComputedStyle(e).visibility, Math.round(b.top - q.bottom)];")
+    page.keyboard.press('Escape')
+    check(a[0] and abs(a[1]) <= 2 and a[2] and (a2[0] == 'hidden' or abs(a2[1]) <= 2), f'b on a row out of sight: the row brought in, the box under it; the '
+          f'waves scrolled: the box follows the row (hidden while it is away) {a} {a2}')
     page.keyboard.press('Escape')
     js("""await v.run([{ op: 'bits', signals: 'PADDR', on: false }]); v.select('PADDR'); v.canvas.focus();""")
     page.keyboard.press('B'); settle(page)
@@ -6909,6 +6975,46 @@ def ranges(browser, build):
     page.wait_for_function('window.__img')
     check(png[:8] == bytes([137, 80, 78, 71, 13, 10, 26, 10]) and len(png) > 5000 and page.evaluate('window.__img') == ['image/png'],
           f'Save image as PNG ({len(png)} bytes), Copy image: a PNG to the clipboard')
+    # Copy image of all rows: every row of the list top to bottom (the ones scrolled out of the window too), a folded module as
+    # its one line; in the bar's ▾ and in the right button's menu while the screen has not all of them; too tall: said, not drawn
+    ca = page.evaluate("""async () => { const el = document.body.appendChild(document.createElement('div')), wait = ms => new Promise(r => setTimeout(r, ms));
+      const sig = (p, i) => ({ name: p + i, wave: '0101' }), keep = navigator.clipboard.write, got = [];
+      const v = new WaveLens.WaveView(el, { signal: [['top', ...Array.from({ length: 40 }, (_, i) => sig('a', i)),
+        ['sub', ...Array.from({ length: 20 }, (_, i) => sig('b', i))]]] }, { maxHeight: '240px' }); v.draw(); await wait(50);
+      navigator.clipboard.write = async items => { got.push((await createImageBitmap(await items[0].getType('image/png'))).height); };
+      const H = async act => { got.length = 0; v.picAct(act, null); for (let i = 0; i < 100 && !got.length; i++) await wait(30); return got[0] || 0; };
+      const out = { bar: !!el.querySelector('.bar [data-act=copyall]') };
+      const r = WaveLens.internal.peek(v).lay.find(o => o.row.name === 'a3'), c = v.canvas.getBoundingClientRect();
+      v.canvas.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: c.left + 200, clientY: c.top + r.y - (WaveLens.internal.peek(v).oy || 0) + 4 }));
+      await wait(50); const it = document.querySelector('.wv-menu [data-m=copyall]'); out.menu = it ? it.textContent : null; v.closeMenu();
+      out.screen = await H('copyimg'); out.all = await H('copyall');
+      await v.run([{ op: 'fold', groups: v.M.rows.find(x => x.type === 'group' && x.name === 'sub').full }]); await wait(50);
+      out.folded = await H('copyall');
+      const w = new WaveLens.WaveView(document.body.appendChild(document.createElement('div')),
+        { signal: [['big', ...Array.from({ length: 2000 }, (_, i) => sig('c', i))]] }, { maxHeight: '240px' }); w.draw(); await wait(50);
+      got.length = 0; w.picAct('copyall', null); await wait(100); out.big = [got.length, w.root.querySelector('.bar .toast').textContent];
+      let file = null; w.download = (bl, name) => { file = [bl, name]; }; w.picAct('svgall', null); await wait(200);
+      out.svg = file ? [file[1], ((await file[0].text()).match(/>c\d+</g) || []).length] : null;
+      // a list just under the PNG's limit by its rows, over it with the bookmarks' texts of the picture: refused by the SVG's height
+      const mkN = n => new WaveLens.WaveView(document.body.appendChild(document.createElement('div')),
+        { signal: [['tall', ...Array.from({ length: n }, (_, i) => sig('d', i))]] }, { maxHeight: '240px' });
+      const est = x => WaveLens.internal.peek(x).lay.reduce((n, o) => n + o.h, 0) + x.hdrH;
+      let u = mkN(100); u.draw(); const per = (est(u) - u.hdrH) / 101; u.root.remove(); u.destroy();
+      u = mkN(Math.floor((16300 - u.hdrH) / per) - 1); u.draw(); await wait(50);
+      for (let i = 0; i < 12; i++) { u.cursor = u.t0 + u.span * (i + 1) / 14; u.mark('note ' + i); }
+      u.draw(); await wait(50); got.length = 0; const e0 = est(u); u.picAct('copyall', null);
+      for (let i = 0; i < 60 && !/PNG stops/.test(u.root.querySelector('.bar .toast').textContent); i++) await wait(50);
+      out.tall = [e0 <= 16384, got.length, u.root.querySelector('.bar .toast').textContent]; u.root.remove(); u.destroy();
+      navigator.clipboard.write = keep; for (const x of [v, w]) { const e = x.root; x.destroy(); e.remove(); }
+      return out; }""")
+    check(ca['bar'] and ca['menu'] == 'Copy image of all rows (60)', f'Copy image of all rows: in the bar\'s ▾ and the right button\'s Export ▸ {ca["bar"]} {ca["menu"]!r}')
+    check(0 < ca['screen'] < ca['folded'] < ca['all'] and abs((ca['all'] - ca['folded']) / ca['all'] - 20 / 62) < 0.05, f'Copy image of all rows: every row of the list, taller than the '
+          f'screen\'s; a folded module as one line (px high: screen {ca["screen"]}, all {ca["all"]}, sub folded {ca["folded"]})')
+    check(ca['big'][0] == 0 and 'a PNG stops at 16384' in ca['big'][1] and 'Save image of all rows as SVG' in ca['big'][1],
+          f'all rows too tall for a PNG: said, the SVG offered, nothing copied {ca["big"]}')
+    check(ca['svg'] and ca['svg'][1] == 2000, f'Save image of all rows as SVG: every row, no height limit (2000 rows) {ca["svg"]}')
+    check(ca['tall'][0] and ca['tall'][1] == 0 and 'a PNG stops at 16384' in ca['tall'][2], f'rows under the limit, bookmarks\' texts over it: '
+          f'refused by the picture\'s own height, nothing copied {ca["tall"]}')
     nb = js('v.bms.length'); page.mouse.click(box['x'] + 5, box['y'] + r[0], button='right'); mclick(page, 'marks')
     mk = js("[v.bms.length, v.bms.slice(-2).map(b => [b.t, b.signal]), v.arrows[v.arrows.length - 1].label]")
     lane = js("(() => { v.draw(); const m = v.bmGeo.mids.find(x => x[0] === v.arrows.length - 1), o = WaveLens.internal.peek(v).lay.find(o => o.row.name === 'PSEL'); return [m[2] < o.y, o.y]; })()")
@@ -9798,7 +9904,7 @@ def menus(browser, build):
           f'at the top on a row, every item once, no submenu in a submenu, none empty {bad}')
     b, a, L = got['bus'], got['axis'], got['largest']
     check({'copyimg', 'hl', 'dup', 'hide', 'copyname'} <= set(b['top']) and b['radix'] and b['v'] == ['analog', 'bits', 'dupbits', 'types']
-          and b['p'] == ['png', 'svg', 'wdjson', 'wdcopy', 'wlpiece'] and {'mark', 'umark', 'c2', 'copylink', 'mlist'} <= set(b['t'])
+          and [x for x in b['p'] if x not in ('copyall', 'svgall')] == ['png', 'svg', 'wdjson', 'wdcopy', 'wlpiece'] and {'mark', 'umark', 'c2', 'copylink', 'mlist'} <= set(b['t'])
           and b['heads'] == ['subv', 'subg', 'subt', 'subp', 'subh', 'subc', 'subm'],
           f'a bus: Copy image, Highlight, Duplicate, Hide, Copy the path, Radix at once; Show as ▸, Your groups ▸, Here ▸, Export ▸ (the files), '
           f'Gaps ▸, Cycles ▸, Modules ▸ {b["top"]} {b["heads"]} {b["v"]} {b["p"]} {b["t"]}')
