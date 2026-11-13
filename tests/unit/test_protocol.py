@@ -44,13 +44,21 @@ F.run(async () => {
   if (mode === 'lazy') {   // a large dump: its FST's header first, then the signals asked by their codes
     const s = await ask({ type: 'source' }), head = fs.readFileSync(fileOf(s.src), 'utf8');
     const code = /\$var \S+ 4 (\S+) cnt/.exec(head)[1];
-    return { s, head, code, codes: await ask({ type: 'codes', codes: [code] }), none: await ask({ type: 'codes', codes: [] }),
+    const sv = (name, text) => [{ name, source: `module tb;\n  ${text}\nendmodule\n` }];
+    const sva = await ask({ type: 'sva', files: sv('a.sv', "a_cnt: assert property (@(posedge s) cnt == 4'd3);"), scope: 'tb', asserts: ['a_cnt'],
+      passes: false, max: 10 });
+    const svaBad = await ask({ type: 'sva', files: sv('b.sv', 'a_x: assert property (@(posedge s) nope);'), scope: 'tb' });
+    const svaSyntax = await ask({ type: 'sva', files: sv('c.sv', 'a_y: assert property (@(posedge s) ;'), scope: 'tb' });
+    // a window with no edge of the clock: sva eval writes its results and exits 2: the results, not an error (review B-09)
+    const svaNone = await ask({ type: 'sva', files: sv('a.sv', "a_cnt: assert property (@(posedge s) cnt == 4'd3);"), scope: 'tb', from: 20000, to: 29000 });
+    return { s, head, code, sva, svaBad, svaSyntax, svaNone, codes: await ask({ type: 'codes', codes: [code] }), none: await ask({ type: 'codes', codes: [] }),
       fst: fs.readdirSync(path.join(dir, 'fst')).filter(f => f.endsWith('.fst')).length };
   }
   // every type of the table, in its order; the runs' operations in the order that keeps, changes and removes a run
   fs.writeFileSync(state, JSON.stringify({ wavelens: 'state', version: 3 }));
   const REQ = {
-    page: {}, source: {}, bytes: {}, codes: { codes: [] }, 'codes-stop': { rid: 1 }, store: { key: 'k', value: 'v' }, gstore: { key: 'bar', value: '{"v":1}' }, save: { name: 'x.txt', b64: Buffer.from('hi').toString('base64') },
+    page: {}, source: {}, bytes: {}, codes: { codes: [] }, 'codes-stop': { rid: 1 },
+    sva: { files: [{ name: 'a.sv', source: "module tb;\n  a_cnt: assert property (@(posedge s) cnt == 4'd3);\nendmodule\n" }], scope: 'tb' }, store: { key: 'k', value: 'v' }, gstore: { key: 'bar', value: '{"v":1}' }, save: { name: 'x.txt', b64: Buffer.from('hi').toString('base64') },
     pick: { accept: '.json', multiple: false, state: true }, 'state-kept': {}, 'state-read': {}, forget: {},
     compare: { signals: ['tb.s', 'tb.cnt'], from: 0, to: 30000, of: 0 }, open: { path: state }, sources: {}, config: {}, clip: { text: 'PSEL' }, theme: {},
     result: { rid: 99, results: [] }, ready: { title: 't' }, loaded: { name: 't.vcd', shown: 2, total: 2 },
@@ -179,6 +187,15 @@ class Dump(unittest.TestCase):
         self.assertNotIn(' s $end', text, 'only the signal asked')
         self.assertEqual(re.findall(r'^b(\d+) ', text, re.M), ['0000', '0011'], text)
         self.assertNotIn('$var', o['none']['text'], 'no code: no signal')
+        # an assertion over the dump by the CLI (a clock too busy for the page): sva eval on its FST, the cycles as runs
+        r = json.loads(o['sva']['text'])
+        a = r['assertions'][0]
+        self.assertEqual((r['cycle_runs'], a['name'], a['stats']['fail'], [x['result'] for x in a['attempts']], 'lane' in a),
+                         ([[10000, 0, 1]], 'a_cnt', 1, ['fail'], False), r)
+        # a signal not in the dump: the results say it (each assertion its own state: review B-09); a syntax error: no results
+        self.assertEqual(json.loads(o['svaBad']['text'])['assertions'][0]['missing'], ['nope'], o['svaBad'])
+        self.assertIn('c.sv', o['svaSyntax'].get('error', ''), o['svaSyntax'])
+        self.assertEqual(json.loads(o['svaNone']['text'])['assertions'][0]['attempts'], [], o['svaNone'])
 
     def test_the_fsm_examples_fst_as_vcd_text(self):
         """T-09: an FST read whole: its VCD text made by the CLI (convert) into the extension's storage, kept and made once,

@@ -184,7 +184,7 @@ fn results_validate() {
         "widths": { "bus": 8 } });
     let mut kinds = std::collections::BTreeSet::new();
     let mut fields = std::collections::BTreeSet::new();
-    for opt in [json!({}), json!({"vacuous": true, "max_threads": 1, "lane": false})] {
+    for opt in [json!({}), json!({"vacuous": true, "max_threads": 1, "lane": false}), json!({"passes": false})] {
         let req = json!({ "source": src, "trace": trace, "options": opt }).to_string();
         let out: Value = serde_json::from_str(&sva_core::run_json(&req)).unwrap();
         assert!(out.get("errors").is_none(), "{out}");
@@ -205,9 +205,14 @@ fn results_validate() {
     for w in want {
         assert!(kinds.contains(w), "no {w} in {kinds:?}");
     }
-    for f in ["truncated", "ante_end", "reason", "failed_at", "note", "missing", "notes", "lane"] {
+    for f in ["truncated", "ante_end", "reason", "failed_at", "note", "missing", "notes", "lane", "listed"] {
         assert!(fields.contains(f), "no {f} in {fields:?}");
     }
+    // a document of sva eval --cycle-runs: runs instead of cycles
+    let mut runs: Value = serde_json::from_str(&sva_core::run_json(&json!({ "source": src, "trace": trace }).to_string())).unwrap();
+    runs.as_object_mut().unwrap().remove("cycles");
+    runs["cycle_runs"] = json!([[5, 10, 300]]);
+    v.check(&s, &runs, "$").unwrap_or_else(|e| panic!("{e}"));
     // and it rejects a result it does not know
     let mut bad: Value = serde_json::from_str(&sva_core::run_json(&json!({ "source": src, "trace": trace }).to_string())).unwrap();
     bad["assertions"][0]["attempts"][0]["result"] = json!("maybe");

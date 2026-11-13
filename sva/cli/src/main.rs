@@ -28,7 +28,7 @@ mod vcd;
 
 use std::collections::BTreeMap;
 use std::process::ExitCode;
-use sva_core::{check_report_input, describe, diagnostic, evaluate, report_html, report_junit, report_markdown, summarize, time_text, Assertion, Column, Kind, Options, Outcome, Results, Trace, Unit, XMode, V};
+use sva_core::{check_report_input, describe, diagnostic, evaluate, report_html, report_junit, report_markdown, summarize, time_text, Assertion, Column, Kind, Listed, Options, Outcome, Results, Status, Trace, Unit, XMode, V};
 use wellen::{simple, Hierarchy, SignalRef, TimeTableIdx, VarRef, VarType};
 
 /// Set when stdout is closed (`sva eval … | head -1`): the rest of the output is dropped, the exit status stays the
@@ -124,6 +124,7 @@ const USAGE: &str = "usage: sva parse [--json] [--expand] [-D NAME[=VALUE]] FILE
                 [--from TIME] [--to TIME] [--out results.json] [--json] [--attempts] [--x fail|false] [--vacuous]
                 [--no-lane] [--resolve up|scope] [--ignore-prefix i_,o_] [--alias NAME=PATH ...] [-D NAME[=VALUE]]
                 [--max-threads N] [--report report.md|.html|.json|.xml] [--junit report.xml] [--max-failures N]
+                [--no-pass] [--max-attempts N] [--cycle-runs]
        sva FILE... --waves DUMP [...]          (the same as sva eval)
        sva --waves DUMP --info
        sva vcd DUMP [--out FILE.vcd]          (an FST as VCD text, enum tables included, as fst2vcd -e writes it)
@@ -143,6 +144,9 @@ const USAGE: &str = "usage: sva parse [--json] [--expand] [-D NAME[=VALUE]] FILE
 TIME is a number with a unit (100ns, 2.5us; ps without one). --alias: a shown name of a config (the page's alias) for
 the variable at PATH. --report: .md, .html, .xml (JUnit), .json (the results with the meta, as a page's report.json;
 sva report --json writes the summary). --max-failures: failures listed per assertion in the texts (default 20, 0 all).
+A large dump (the page reads it so): --no-pass lists the failures and the attempts without verdict, the passes only
+counted; --max-attempts N lists the first N attempts of each assertion (a note says how many there were); --cycle-runs
+writes the cycles' times in the JSON as runs, \"cycle_runs\": [[first, step, count], ...], not one number per cycle.
 Exit status: 0 everything evaluated passed; 1 a failure or an attempt without verdict (capped, the thread limit:
 --max-threads, default 256); 2 nothing checked as asked (usage, syntax error, a signal not in the dump, no assertion,
 a file that does not read).";
@@ -170,6 +174,10 @@ struct Args {
     /// --alias NAME=PATH: the shown name of the variable at PATH (a config's "alias", as the page has it)
     aliases: BTreeMap<String, String>,
     max_failures: Option<u64>,
+    /// --max-attempts: the first N attempts of each assertion listed (the rest counted)
+    max_attempts: Option<usize>,
+    /// --cycle-runs: the cycles' times in the JSON as runs [first, step, count]
+    cycle_runs: bool,
 }
 
 /// `100ns`, `2.5us`, `40` (ps) -> ps.
@@ -232,6 +240,9 @@ fn args(argv: &[String]) -> Result<Args, String> {
             }
             "--max-threads" => a.opt.max_threads = count(&next(&mut it, "--max-threads")?, "--max-threads")?.max(1) as usize,
             "--max-failures" => a.max_failures = Some(count(&next(&mut it, "--max-failures")?, "--max-failures")?),
+            "--max-attempts" => a.max_attempts = Some(count(&next(&mut it, "--max-attempts")?, "--max-attempts")? as usize),
+            "--cycle-runs" => a.cycle_runs = true,
+            "--no-pass" => a.opt.passes = false,
             "--x" => {
                 a.opt.x = match next(&mut it, "--x")?.as_str() {
                     "fail" => XMode::Fail,
@@ -505,6 +516,74 @@ fn summary(o: &Outcome, times: &[u64], width: usize) -> String {
     format!("{head} {} attempts: {} pass, {} fail, {} vacuous, {} active, {} disabled{capped}{fail}", s.attempts, s.pass, s.fail, s.vacuous, s.active, s.disabled)
 }
 
+/// --max-attempts: the first n attempts of `o` listed, the failures first (a list of disabled or capped attempts does not hide
+/// them), then the others, by start; what the cut list cannot say (how many there were, the failure found last, the longest)
+/// in `o.listed`.
+fn cut_attempts(o: &mut Outcome, n: usize) {
+    if o.attempts.len() <= n {
+        return;
+    }
+    let total = o.attempts.len();
+    let last = o.attempts.iter().filter(|x| x.result == Status::Fail).max_by_key(|x| (x.failed_at.unwrap_or(x.end), x.start)).cloned();
+    let longest = (o.kind != Kind::Cover).then(|| {
+        o.attempts.iter().filter(|x| !matches!(x.result, Status::Active | Status::Capped)).map(|x| (x.end.max(x.start) - x.start, x.start))
+            .max_by_key(|&(l, s)| (l, std::cmp::Reverse(s)))
+    }).flatten();
+    let l = o.listed.get_or_insert(Listed { passes: true, of: None, longest: None, last_fail: None });
+    l.of = Some(total);
+    l.last_fail = last;
+    if l.longest.is_none() {
+        l.longest = longest.map(|(len, s)| [len, s]);
+    }
+    let fails = o.attempts.iter().filter(|x| x.result == Status::Fail).count().min(n);
+    let mut left = (fails, n - fails);
+    o.attempts.retain(|x| {
+        let k = if x.result == Status::Fail { &mut left.0 } else { &mut left.1 };
+        if *k == 0 {
+            return false;
+        }
+        *k -= 1;
+        true
+    });
+    o.notes.push(format!("the first {n} of {total} attempts listed, the failures first (--max-attempts)"));
+}
+
+/// Times as runs `[first, step, count]` (a clock's edges: one run while its period holds).
+fn runs(t: &[u64]) -> Vec<[u64; 3]> {
+    let mut out: Vec<[u64; 3]> = Vec::new();
+    let mut i = 0;
+    while i < t.len() {
+        let step = if i + 1 < t.len() { t[i + 1] - t[i] } else { 0 };
+        let mut j = i + 1;
+        while j < t.len() && t[j] - t[j - 1] == step {
+            j += 1;
+        }
+        out.push([t[i], step, (j - i) as u64]);
+        i = j;
+    }
+    out
+}
+
+/// The results JSON with `cycle_runs` for every `cycles` (--cycle-runs).
+fn with_runs(doc: &Results) -> serde_json::Value {
+    let mut v = serde_json::to_value(doc).unwrap();
+    let swap = |o: &mut serde_json::Map<String, serde_json::Value>| {
+        if let Some(c) = o.remove("cycles") {
+            let t: Vec<u64> = serde_json::from_value(c).unwrap_or_default();
+            o.insert("cycle_runs".into(), serde_json::to_value(runs(&t)).unwrap());
+        }
+    };
+    if let Some(o) = v.as_object_mut() {
+        swap(o);
+        if let Some(serde_json::Value::Array(l)) = o.get_mut("assertions") {
+            for x in l.iter_mut().filter_map(|x| x.as_object_mut()) {
+                swap(x);
+            }
+        }
+    }
+    v
+}
+
 fn eval_cmd(a: Args) -> ExitCode {
     let t0 = std::time::Instant::now();
     if let Err(e) = std::fs::File::open(&a.waves) {   // a one-line message with the path (wellen's error does not name the file)
@@ -620,7 +699,9 @@ fn eval_cmd(a: Args) -> ExitCode {
     }
 
     let mut doc = Results { clock: String::new(), unit: "ps".into(), cycles: Vec::new(), assertions: Vec::new() };
-    let mut outs: Vec<(usize, Outcome, Vec<u64>)> = Vec::new();
+    // each assertion with the index of its clock's times in gtimes (once per clock: a 5 M-cycle dump's are 40 MB)
+    let mut outs: Vec<(usize, Outcome, usize)> = Vec::new();
+    let mut gtimes: Vec<Vec<u64>> = Vec::new();
     for (gi, ((clk, edge), members)) in groups.iter().enumerate() {
         let h = w.hierarchy();
         let mut refs: Vec<(String, VarRef)> = Vec::new();
@@ -684,7 +765,11 @@ fn eval_cmd(a: Args) -> ExitCode {
                         o.clock = Some(clk_name.clone());
                         o.cycles = Some(shown.clone());
                     }
-                    outs.push((k, o, times.clone()));
+                    // cut now, not once every assertion is held whole (review 2026-11-13 B-16)
+                    if let Some(n) = a.max_attempts {
+                        cut_attempts(&mut o, n);
+                    }
+                    outs.push((k, o, gi));
                 }
                 Err(e) => {
                     eprintln!("sva: {file}:{}:{}: {}", e.line, e.col, e.msg);
@@ -692,11 +777,13 @@ fn eval_cmd(a: Args) -> ExitCode {
                 }
             }
         }
+        gtimes.push(times);
     }
     outs.sort_by_key(|o| o.0);
     let width = outs.iter().map(|o| o.1.name.len()).max().unwrap_or(0);
     let mut failed = false;
-    for (_, o, times) in &outs {
+    for (_, o, g) in &outs {
+        let times = gtimes.get(*g).map_or(&[][..], |t| &t[..]);
         // a failure of an assert / assume, or an attempt without verdict (capped) of any kind, a cover too: exit 1
         failed |= (o.kind != Kind::Cover && o.stats.fail > 0) || o.stats.capped > 0;
         if !a.json {
@@ -720,16 +807,17 @@ fn eval_cmd(a: Args) -> ExitCode {
             o.signals = paths[k].iter().map(|(n, (p, _))| (n.clone(), p.clone())).collect();
             o.missing = missing;
             o.lane = None;
-            outs.push((k, o, Vec::new()));
+            outs.push((k, o, usize::MAX));
         }
     }
     outs.sort_by_key(|o| o.0);
     doc.assertions = outs.into_iter().map(|o| o.1).collect();
     if a.json {
-        outln!("{}", serde_json::to_string_pretty(&doc).unwrap());
+        outln!("{}", if a.cycle_runs { serde_json::to_string_pretty(&with_runs(&doc)) } else { serde_json::to_string_pretty(&doc) }.unwrap());
     }
     if let Some(f) = &a.out {
-        if let Err(e) = std::fs::write(f, serde_json::to_string(&doc).unwrap()) {
+        let text = if a.cycle_runs { serde_json::to_string(&with_runs(&doc)) } else { serde_json::to_string(&doc) }.unwrap();
+        if let Err(e) = std::fs::write(f, text) {
             eprintln!("sva: {f}: {e}");
             return ExitCode::from(2);
         }

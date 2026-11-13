@@ -964,6 +964,31 @@ fn report_numbers_per_assertion() {
 }
 
 #[test]
+fn report_of_cycle_runs() {
+    // sva eval --cycle-runs: the cycles as runs, the same report as with the array
+    let mut d = report_doc();
+    d.as_object_mut().unwrap().remove("cycles");
+    d["cycle_runs"] = serde_json::json!([[10, 10, 8]]);
+    let a = crate::summarize(&serde_json::json!({ "results": [report_doc()] }));
+    let b = crate::summarize(&serde_json::json!({ "results": [d] }));
+    assert_eq!(a["assertions"], b["assertions"]);
+    assert_eq!(b["assertions"][0]["first_fail"]["time"], "20 ps");
+}
+
+#[test]
+fn report_of_a_partial_list() {
+    // sva eval --no-pass --max-attempts: the facts of all the attempts in "listed", not the ones of the list (review B-15)
+    let mut d = report_doc();
+    let a = &mut d["assertions"][0];
+    a["attempts"] = serde_json::json!([a["attempts"][1].clone()]);
+    a["listed"] = serde_json::json!({ "passes": false, "of": 3, "longest": [5, 2],
+        "last_fail": { "start": 6, "end": 6, "result": "fail", "trace": [], "failed_at": 6, "reason": { "kind": "unknown", "cycle": 6 } } });
+    let r = crate::summarize(&serde_json::json!({ "results": [d] }));
+    let x = &r["assertions"][0];
+    assert_eq!((x["last_fail"]["start"].as_u64(), x["longest"]["cycles"].as_u64(), x["latency"].is_null()), (Some(6), Some(5), true), "{x}");
+}
+
+#[test]
 fn report_texts() {
     let r = crate::summarize(&serde_json::json!({ "meta": { "title": "T", "dump": "x.fst" }, "results": [report_doc()] }));
     let md = crate::report_markdown(&r);

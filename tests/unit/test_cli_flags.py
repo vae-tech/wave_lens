@@ -24,6 +24,7 @@ BUILDERS = [
     ('vscode/extension.js', 'const fstOf = ', None, 'fst', False),
     ('vscode/extension.js', 'const headerOf = ', None, 'vcd', False),
     ('vscode/extension.js', '  async codes(list, win, rid) {', None, 'vcd', False),
+    ('vscode/extension.js', '  async svaEval(m) {', None, 'sva', False),
     ('vscode/extension.js', '  async compare(signals,', None, 'diff', False),
     ('vscode/extension.js', '  async runs(m) {', None, 'runs', False),
     ('vscode/extension.js', '  cutOf(src,', None, 'fst', False),

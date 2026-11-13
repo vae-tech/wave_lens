@@ -119,12 +119,29 @@ class Shipped(unittest.TestCase):
                                  '(make dist and commit it)')
                 a, b = (subprocess.run([exe, 'vcd', fst], capture_output=True, timeout=300) for exe in (fresh, SHIPPED))
                 self.assertEqual(hashlib.sha256(b.stdout).hexdigest(), hashlib.sha256(a.stdout).hexdigest(), f'{ex}: sva vcd')
+                # the flags of the last releases, as the VS Code tab asks them (review 2026-11-13 T-02: binaries built before their
+                # sources' change once passed here): the header, a window of codes, an evaluation of a large dump
+                head = [subprocess.run([exe, 'vcd', fst, '--header'], capture_output=True, text=True, timeout=300) for exe in (fresh, SHIPPED)]
+                self.assertEqual(head[1].stdout, head[0].stdout, f'{ex}: sva vcd --header')
+                codes = '\n'.join(re.findall(r'^\$var \S+ \S+ (\S+) ', head[0].stdout, re.M)[:3])
+                win = ['vcd', fst, '--codes', '-', '--from', '0', '--to', '100000', '--lod', '8', '--keep', '4']
+                a, b = (subprocess.run([exe, *win], input=codes, capture_output=True, text=True, timeout=300) for exe in (fresh, SHIPPED))
+                self.assertEqual((b.returncode, b.stdout), (a.returncode, a.stdout), f'{ex}: sva vcd --codes --from --to --lod --keep')
+                with H.tmp() as d:
+                    outs = []
+                    for exe in (fresh, SHIPPED):
+                        o = os.path.join(d, f'{len(outs)}.json')
+                        r = subprocess.run([exe, *args[:-1 - 2 * len(files)], *[x for f in files for x in ('--sva', os.path.join(H.ROOT, f))], '--no-pass',
+                                            '--max-attempts', '3', '--cycle-runs', '--no-lane', '--resolve', 'scope', '--out', o],
+                                           capture_output=True, text=True, timeout=300)
+                        outs.append((r.returncode, H.text(o) if os.path.isfile(o) else r.stderr))
+                    self.assertEqual(outs[1], outs[0], f'{ex}: sva eval --no-pass --max-attempts --cycle-runs (the extension\'s)')
 
     def test_the_windows_build(self):
         """bin/windows-x86_64/sva.exe (the package's for VS Code on Windows) gives what the Linux one gives: sva fst of a VCD
         byte for byte (the lazy reading of a large VCD) and the evaluation. Runs where Windows programs run (WSL)."""
         if not os.path.isfile('/proc/version') or 'microsoft' not in H.text('/proc/version').lower():
-            H.skip(self, 'no Windows here to run sva.exe (WSL runs it)')
+            H.skip(self, 'no Windows here to run sva.exe (WSL runs it)', built=False)   # (review 2026-11-13 T-11)
         ex, scope, files = EXAMPLES[2]
         vcd = os.path.join(H.BUILD, 'examples', ex, ex + '.vcd')
         if not os.path.isfile(vcd):

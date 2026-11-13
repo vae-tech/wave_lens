@@ -612,37 +612,44 @@ Object.assign(WaveView.prototype, {
       this.toast(err.message));
     else if (act === 'svg') { this.download(new Blob([this.toSVG(pic)], { type: 'image/svg+xml' }), this.picName('svg'));
       this.toast('saved ' + this.picName('svg')); }
-    else if (act === 'wdjson' || act === 'wdcopy') {
-      const [ta, tb] = r || [this.t0, this.t0 + this.span], text = wdText(this.toWaveDrom(ta, tb)), cut = this.wdCut ? ` — the first ${WD_CELLS} ` +
-        `cycles only, to ${this.fmt(this.wdCut.to, (this.wdCut.to - ta) / 1000, this.wdCut.to - ta)}` : '';
-      if (act === 'wdcopy') { try { navigator.clipboard.writeText(text).then(() => this.toast('WaveDrom copied' + cut), () => this.toast('not copied'));
-        } catch (e) { this.toast('not copied'); } }
-      else { this.download(new Blob([text + '\n'], { type: 'application/json' }), this.picName('wavedrom.json'));
-        this.toast('saved ' + this.picName('wavedrom.json') + cut); }
+    else if (act === 'wdjson' || act === 'wdcopy') {   // a large dump: its rows read exact over the time first, else refused (review B-04)
+      const [ta, tb] = r || [this.t0, this.t0 + this.span];
+      this.wdExact(ta, tb).then(() => this.wdOut(act, ta, tb), e => this.toast(`no WaveDrom: ${e.message}`)).finally(() => { this.picHold = null; });
     }
+    return this;
+  },
+  // the WaveDrom of [ta, tb] copied (wdcopy) or saved (wdjson)
+  wdOut(act, ta, tb) {
+    const text = wdText(this.toWaveDrom(ta, tb)), cut = this.wdCut ? ` — the first ${WD_CELLS} ` +
+      `cycles only, to ${this.fmt(this.wdCut.to, (this.wdCut.to - ta) / 1000, this.wdCut.to - ta)}` : '';
+    if (act === 'wdcopy') { try { navigator.clipboard.writeText(text).then(() => this.toast('WaveDrom copied' + cut), () => this.toast('not copied'));
+    } catch (e) { this.toast('not copied'); } }
+    else { this.download(new Blob([text + '\n'], { type: 'application/json' }), this.picName('wavedrom.json'));
+      this.toast('saved ' + this.picName('wavedrom.json') + cut); }
     return this;
   },
   // the picture of every row of the list (Copy image of all rows: a PNG to the clipboard; svg: Save image of all rows as SVG, no
   // height limit): the rows of a large dump read first, its busy ones as exact as the picture's time needs (picRead) and held
   // for it; a PNG taller than PNG_MAX refused (by the SVG's own height: names, axis, bookmarks' texts, gaps' rows)
   picAll(svg) {
-    const rows = this.rowsL || [], est = (this.lay || []).reduce((n, o) => n + o.h, 0) + (this.hdrH || 0);
-    const tall = h => `${rows.length} rows, ${Math.round(h)} px high: a PNG stops at ${PNG_MAX} px: Export ▸ Save image of all rows as SVG, ` +
+    const rows = this.rowsL || [], nSig = rows.filter(x => x.type === 'sig').length, est = (this.lay || []).reduce((n, o) => n + o.h, 0) + (this.hdrH || 0);
+    const tall = h => `${nSig} rows, ${Math.round(h)} px high: a PNG stops at ${PNG_MAX} px: Export ▸ Save image of all rows as SVG, ` +
       'or fold some modules';
     if (!svg && est > PNG_MAX) { this.toast(tall(est)); return this; }   // at least that tall: refused before reading anything
     const [a, b] = this.range || [this.t0, this.t0 + this.span], n = rows.filter(x => x.lazy || x.sum).length;
     if (this.lazy && n) this.toast(`reading ${n} rows for the picture…`);
     const ready = (this.lazy ? this.need(rows).then(() => this.picRead(rows, a, b)) : Promise.resolve()).then(() => {
-      const text = this.toSVG({ rows: 'all' }), left = rows.filter(x => x.unread).length;
-      this.picHold = null; this.invalidate();
+      let text; try { text = this.toSVG({ rows: 'all' }); } finally { this.picHold = null; }   // held for it only (review B-27)
+      const left = rows.filter(x => x.unread).length;
+      this.invalidate();
       return { text, h: +text.match(/height="(\d+)"/)[1], left: left ? ` (${left} rows not read: “not read” on them)` : '' };
     }, e => { this.picHold = null; throw e; });
     if (svg) { ready.then(({ text, left }) => { const name = this.picName('svg'); this.download(new Blob([text], { type: 'image/svg+xml' }), name);
-      this.toast(`saved ${name}: ${rows.length} rows${left}`); }, e => this.toast('not saved: ' + e.message)); return this; }
+      this.toast(`saved ${name}: ${nSig} rows${left}`); }, e => this.toast('not saved: ' + e.message)); return this; }
     let said = '', left = '';
     const png = ready.then(x => { left = x.left; if (x.h > PNG_MAX) throw new Error(said = tall(x.h)); return this.toPNG({ svg: x.text }); })
       .catch(e => { said = said || e.message; throw e; });
-    try { navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]).then(() => this.toast(`image of all ${rows.length} rows copied${left}`),
+    try { navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]).then(() => this.toast(`image of all ${nSig} rows copied${left}`),
       err => this.toast('not copied: ' + (said || err.message))); }
     catch (err) { this.toast('this browser cannot copy an image: Export ▸ Save image of all rows as SVG'); }
     return this;

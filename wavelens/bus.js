@@ -362,6 +362,7 @@ const DECODE = {
 };
 DECODE.avst = DECODE.axis;
 const summary = D => {
+  if (D.why) return D.why;
   const k = t => D.tx.filter(x => x.kind === t).length, e = D.tx.filter(x => x.err).length, r = k('R'), w = k('W'), pk = k('P');
   return [r && `${r} R`, w && `${w} W`, pk && `${pk} packet${pk === 1 ? '' : 's'}`, e && `${e} err`].filter(Boolean).join(' · ') || 'no transfers';
 };
@@ -529,12 +530,27 @@ class Buses {
     return Object.assign({ ports: ports.map(p => ({ name: p.name, proto: p.label || PROTO[p.proto].label, summary: summary(p.D) })),
       transactions: this.txl.table(rows.slice(0, lim)) }, rows.length > lim ? { more: rows.length - lim } : {});
   }
-  // the ports and their transactions, found once (again when the settings change)
+  // the ports and their transactions, found once (again when the settings change). A large dump read as it is needed: the
+  // ports' signals read whole first (a summary or a window is no signal to decode), decoded once they are there; a port
+  // with one too busy for that says so instead of "no transfers" (review 2026-11-13 B-02)
   list() {
-    if (!this.ports) {
-      const v = this.v;
-      this.ports = findPorts(v.M, v.S).map(p => { p.D = decode(p, v); return p; });
+    if (this.ports) return this.ports;
+    const v = this.v, ports = findPorts(v.M, v.S), base = r => { const q = r.orig || r; return q.dupOf || q.of || q; };
+    const rowsOf = p => Object.values(p.sig).concat(p.clk ? [p.clk] : []).filter(Boolean).map(base);
+    if (v.lazy && v.needWhole && !this.read && ports.some(p => rowsOf(p).some(r => r.lazy || r.sum))) {
+      this.read = true;   // once: the rows read whole (the ones that can be), the ports found and decoded again then
+      v.needWhole(ports.flatMap(rowsOf), 'the bus decoder').catch(() => {}).then(() => {
+        if (!v.root.isConnected || v.buses !== this) return;
+        this.ports = null; if (this.txl) this.txl.render(); v.renderNames(); v.draw(); });
+      return [];
     }
+    this.ports = ports.map(p => {
+      p.D = decode(p, v);
+      const busy = rowsOf(p).find(r => r.lazy || r.sum);
+      const why = busy && `${busy.full} ${busy.lazy ? 'not read' : 'changes too often to read whole here (a large dump)'}: its transfers are not decoded`;
+      if (busy) p.D = Object.assign({}, p.D, { tx: [], ch: [], why });
+      return p;
+    });
     return this.ports;
   }
   rowsFor(g) {

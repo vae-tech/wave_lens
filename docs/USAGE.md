@@ -71,8 +71,18 @@ may be the default). What the tab does differently from a page in a browser:
   dump but at most 1 ns (a 200 ms dump zooms to one edge). What needs **every change** of a busy row — the FSM panel and
   `fsm_stats` / `fsm_go`, the cycles, the gaps, assertions and expressions, *Save as WaveLens* — reads it whole when it
   changes at most `lazyWhole` (1 000 000) times over the dump (a row as any other from then on); a busier one (that
-  100 MHz clock: 40 M) is refused with a message naming it (assertions: `sva eval --waves DUMP` gives the same verdicts
-  from a terminal; no cycles band). The **gaps** take such a row by its summary: a dense bucket busy throughout, the
+  100 MHz clock: 40 M) is refused with a message naming it (no cycles band). **Assertions** over such a signal are
+  evaluated by the CLI instead, over the whole dump (`sva eval` on its FST, the names resolved as the panel does: a 5 M-cycle
+  dump in 5 s): the counts, the failures (the first 20 000, the line says when there are more) and the attempts without
+  verdict, on the waves and for *Go to first failure* and `]f` / `[f`; the passes are counted, listed only for the time
+  shown once it is 20 000 cycles or fewer (one more `sva eval` of that window and a span either side for every such binding
+  of the module, 0.3 s after the zoom stops: its passes and its failures past the first 20 000; one that fails is said on
+  the binding's line and asked again once the view leaves it). An attempt that starts before such a window and ends in it is
+  not drawn. *Why* reads the signals over the attempt first. These results are evaluated again, not kept in the browser
+  (a saved state finds its attempt by its cycles). Expressions over such a signal are still refused. Other readers of a
+  busy signal: the bus decoder reads its ports' signals whole first (a port too busy for that says so); *WaveDrom* reads
+  the rows over its time first and refuses one still held in part there; a struct of the `.sv` types is filled as its
+  signal is read; the analog form is not drawn over a summary. The **gaps** take such a row by its summary: a dense bucket busy throughout, the
   changes outside them exact, a busy clock's cycles by its period (a dense bucket's span over its rising edges): the
   gaps of the whole dump, their ends within a bucket (that 200 ms dump: 98 µs). The edge search, the range's counts, the cycles between two times and the
   tooltip work where the row is held exactly, else say to zoom in; never a wrong count.
@@ -753,7 +763,7 @@ the title line (title, cursor, the buttons), **▾ tools** opens them again; `/`
 keeping it (Esc, or leaving the find empty, folds them again). The tool groups left out (⚙ Tools in the bar, the `toolsHidden`
 setting is the start) are kept in this browser; a find left out still floats over the waves on `/`, under the bar when the bar
 is in sight. Navigation follows Questa's wave window, the lists and the text vim: a sequence (`gg`, `zM`, `yy`,
-`]f` …) is two keys within a second.
+`]f` …) is two keys within a second. The keys go by their place on the keyboard: on a Russian layout `ш` is `i`, `ъ` `а` is `]f`, `.` is `/`.
 
 | Key | Action | Key | Action |
 |---|---|---|---|
@@ -779,6 +789,7 @@ is in sight. Navigation follows Questa's wave window, the lists and the text vim
 | `gu` | the runs kept of the dump (VS Code: the Runs panel, *The runs kept of a dump*) | `]r` `[r` | B: compare A with the next (older) / previous run kept, over the same window |
 | `]w` `[w` | A: the next (older) / previous run kept shown here (now among them), the view kept; with no B the walk through the runs | | |
 | `yn` `yt` | copy the selected signal's name; the time of the cursor | `yl` | copy a link to here: the cursor and the selected signal ([§ A link to a moment](#a-link-to-a-moment)) |
+| `yi` `yI` | copy an image of the range (else the window): the rows on the screen (the highlighted ones); every row of the list | `zz` | zoom to the range, else to the two cursors |
 | `gm` (the right button's **Here ▸ Markers…**) | the markers (the page's, yours) and the bookmarks in a list over the waves, by time (a line at its top filters them as you type, the list in its order, the others hidden; ↓ the first shown, Enter the best match; Enter with nothing typed closes it): `↓` the first (`↑` the last), then `↑ ↓` Home End step through them, a click picks one — the cursor on it and the waves at its time with the span they have: a marker in the middle, a bookmark as going to it does (below); Enter or Esc closes it there | `gl`, ctrl+G | your groups: a list (filtered as you type) |
 | shift+click the waves | a second cursor (dashed, on an edge): Δ to the cursor in time, its frequency (`Δ 40 ns / 25 MHz`) and in cycles of the clock (the cycles band's when it is on, else the selected signal's, else the nearest `*clk*`) on the axis and in the readout; the value column says each row at both and the change, `0x04 · 0x40 · +0x3c` (a bus modulo its width, in hex or its radix — bin `+0b101`, oct, signed `−64`; a float or a fixed point `q8` the difference of the values, `+0.5`; ascii and an enum `IDLE → SETUP`; a bit ↑ ↓ =; x or z: ?; its title both forms, `+0xc0 (−0x40)`; the right button's **Copy A · B · Δ** copies them); `x` swaps the two; Esc clears it | `1` … `9` | go to that bookmark (each bookmark's line shows its Δ from the cursor; the bookmarks and markers at the cursor are marked in their lists) |
 | `zM` / `zR` | fold / open every module | `zc` / `zo` / `za` | fold / open / toggle the module of the selected signal |
@@ -791,7 +802,7 @@ is in sight. Navigation follows Questa's wave window, the lists and the text vim
 | `]x [x` | next / previous match of the expression you are on | `]X [X` | next / previous expression |
 | `]a [a` | next / previous assertion: its first failure, else its first pass | click a line of the assertions panel (again: its next attempt) | go to an assertion |
 | `d` / `D` | a dump compared: the other run / both over each other (*Which run the waves show*) | `]d [d` | next / previous difference |
-| `]t [t` | next / previous transfer of the selected bus (`bus.js`) | `?` | the keys in a box |
+| `]t [t` | next / previous bus transaction (`bus.js`) | `?` | the keys in a box |
 | ctrl+Z / ctrl+shift+Z, ctrl+Y | undo / redo (bookmarks, spans, groups, colours, hidden rows, sort, the expressions, the assertions' bindings …) | alt+`↑ ↓` | a row of your group up / down (shift: the group) |
 
 **Bus widths and bits.** A bus has its width after its name, as declared: `PADDR [7:0]` (a field of a packed struct its

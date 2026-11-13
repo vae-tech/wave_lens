@@ -92,11 +92,26 @@ fn avg_text(x: f64) -> String {
     if t.ends_with('.') { format!("{t}0") } else { t.to_string() }
 }
 
+/// The cycles' times of a results document or of an assertion on another clock: `cycles`, or `cycle_runs` (`[first, step,
+/// count]` each: sva eval --cycle-runs, the page's large dumps; at most 2^31 cycles)
+pub fn cycle_times(x: &Value) -> Option<Vec<u64>> {
+    if let Some(a) = x.get("cycles").and_then(Value::as_array) {
+        return Some(a.iter().filter_map(Value::as_u64).collect());
+    }
+    let runs = x.get("cycle_runs").and_then(Value::as_array)?;
+    let mut out = Vec::new();
+    for r in runs.iter().filter_map(Value::as_array) {
+        let f = |k: usize| r.get(k).and_then(Value::as_u64).unwrap_or(0);
+        let (t, d, n) = (f(0), f(1), f(2).min((1u64 << 31).saturating_sub(out.len() as u64)));
+        out.extend((0..n).map(|j| t.saturating_add(j.saturating_mul(d))));
+    }
+    Some(out)
+}
+
 /// One assertion of a results document -> its row of the report (with its failures, taken out by `summarize`).
 fn assertion(o: &Value, doc: &Value, row: usize, source: &str) -> Value {
     let unit = s(doc, "unit");
-    let cycles: Vec<u64> = o.get("cycles").or_else(|| doc.get("cycles")).and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
+    let cycles = cycle_times(o).or_else(|| cycle_times(doc)).unwrap_or_default();
     let empty = vec![];
     let attempts = o.get("attempts").and_then(Value::as_array).unwrap_or(&empty);
     let cover = s(o, "kind") == "cover";
@@ -131,6 +146,15 @@ fn assertion(o: &Value, doc: &Value, row: usize, source: &str) -> Value {
             lat.push(last - a0);
         }
     }
+    // a partial list (sva eval --no-pass, --max-attempts: a large dump): the facts of all the attempts it carries in
+    // "listed" instead of the ones of the list; no latency without the passes (review 2026-11-13 B-15)
+    let listed = o.get("listed");
+    if let Some(l) = listed.and_then(|l| l.get("longest")).and_then(Value::as_array) {
+        longest = Some((l.first().and_then(Value::as_u64).unwrap_or(0), l.get(1).and_then(Value::as_u64).unwrap_or(0)));
+    }
+    if listed.is_some_and(|l| l.get("passes") == Some(&json!(false))) {
+        lat.clear();
+    }
     let latency = (!lat.is_empty()).then(|| {
         let sum: u64 = lat.iter().sum();
         let (mn, mx, avg) = (*lat.iter().min().unwrap(), *lat.iter().max().unwrap(), sum as f64 / lat.len() as f64);
@@ -142,7 +166,7 @@ fn assertion(o: &Value, doc: &Value, row: usize, source: &str) -> Value {
         "row": row, "source": source, "name": s(o, "name"), "kind": s(o, "kind"), "scope": s(o, "scope"), "file": s(o, "file"), "line": u(o, "line"), "text": s(o, "text"),
         "unit": unit, "stats": stats,
         "first_fail": fails.first().map(ev),
-        "last_fail": fails.last().map(ev),
+        "last_fail": listed.and_then(|l| l.get("last_fail")).map(|a| ev(&a)).or_else(|| fails.last().map(ev)),
         "longest": longest.map(|(l, st)| json!({ "cycles": l, "start": st, "time": cycles.get(st as usize).map(|t| time_text(*t, unit)) })),
         "latency": latency,
         "covered": if cover { json!(stats.get("matches").and_then(Value::as_u64).unwrap_or(u(&stats, "pass"))) } else { Value::Null },

@@ -106,13 +106,15 @@ fn read(f: &str) -> Result<Vec<Asr>, String> {
     let text = std::fs::read_to_string(f).map_err(|e| format!("{f}: {e}"))?;
     let doc: Value = serde_json::from_str(&text).map_err(|e| format!("{f}: not JSON: {e}"))?;
     let list = doc["assertions"].as_array().ok_or_else(|| format!("{f}: no \"assertions\": a results JSON of sva eval --json"))?;
-    let top = doc["cycles"].as_array();
+    // the cycles' times: an array, or runs (sva eval --cycle-runs: review 2026-11-13 B-22)
+    let top = sva_core::cycle_times(&doc);
     let mut out = Vec::new();
     for x in list {
-        let cycles = x["cycles"].as_array().or(top);
+        let own = sva_core::cycle_times(x);
+        let cycles = own.as_ref().or(top.as_ref());
         let at = |c: &Value| -> u64 {
             let k = c.as_u64().unwrap_or(0) as usize;
-            cycles.and_then(|cs| cs.get(k)).and_then(Value::as_u64).unwrap_or(k as u64)
+            cycles.and_then(|cs| cs.get(k)).copied().unwrap_or(k as u64)
         };
         let mut fails: Vec<Fail> = x["attempts"].as_array().into_iter().flatten().filter(|t| t["result"] == "fail")
             .map(|t| Fail { start: at(&t["start"]), at: at(if t["failed_at"].is_null() { &t["end"] } else { &t["failed_at"] }) }).collect();

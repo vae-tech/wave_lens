@@ -794,7 +794,9 @@ function parse(src) {
 // dense span (more changes than the reader kept) only its last change; the summary over the whole dump kept as r.sum
 function fillRows(M, sigs, win = null, only = null) {   // only: rows read again (a detail window of part rows), lazy or not
   const by = new Map(sigs.filter(s => s && s.path && s.tv).map(s => [s.path, s])), got = new Set();
-  for (const r of M.rows) {
+  // a packed struct of the types (.sv, the config): its signal is its group's, not a row of the list (review 2026-11-13 B-03)
+  const own = Object.values(M.groups).filter(g => g.kind === 'struct' && g.sig && !g.sig.struct && g.sig.src).map(g => g.sig);
+  for (const r of M.rows.concat(own)) {
     if (r.type !== 'sig' || r.field || !(r.lazy || (only && only.has(r)))) continue;
     const s = by.get(r.path); if (!s) continue;
     const w = r.width; r.src.tv = s.tv; r.tr = parseTV(r.src, r).tr; r.width = w; r.lazy = false; r.unread = null; got.add(r);
@@ -815,7 +817,12 @@ function rowsMade(M, got) {
     if (!g.sig || !g.sig.struct) continue;
     const kids = M.rows.slice(M.rows.indexOf(g) + 1, g.last + 1);
     if (!kids.some(r => got.has(r)) || kids.some(r => r.lazy)) continue;
-    g.sig.tr = joinBits(g, structParts(M, g)).tr;
+    g.sig.tr = joinBits(g, structParts(M, g)).tr; g.sig.an = null;
+    // a member held in part (a large dump's window or summary): the whole value is no more exact than its parts (review B-05)
+    const ps = kids.map(r => r.type === 'sig' && r.part).filter(Boolean);
+    g.sig.part = !ps.length ? null : { a: Math.max(...ps.map(p => p.a)), b: Math.min(...ps.map(p => p.b)), step: Math.max(...ps.map(p => p.step || 0)),
+      dense: ps.flatMap(p => p.dense).sort((x, y) => x[0] - y[0]), n: Math.max(...ps.map(p => p.n || 0)), whole: ps.every(p => p.whole),
+      exact: ps.every(p => p.exact) };
   }
 }
 // The window of an answer of sva vcd --codes --from --to --lod (its line "$comment sva window FROM TO STEP INDEX=CHANGES:
@@ -862,7 +869,8 @@ function denseAt(p, a, b) {
 const exactIn = (r, a, b) => { if (!r || r.lazy) return false; const p = partOf(r); return !p || (p.a <= a && b <= p.b && !denseAt(p, a, b)); };
 // the rows a row on the screen needs read (lazy): itself, the vector of a field, every signal of a struct
 const lazyOf = (M, r0, r = r0.dupOf || r0) => (r.type === 'sig' ? (r.lazy ? [r] : r.field && r.of && r.of.lazy ? [r.of] : []) :
-  r.type === 'group' && r.sig && r.sig.struct ? M.rows.slice(M.rows.indexOf(r) + 1, r.last + 1).filter(q => q.lazy) : []);
+  r.type === 'group' && r.sig && r.sig.struct ? M.rows.slice(M.rows.indexOf(r) + 1, r.last + 1).filter(q => q.lazy) :
+    r.type === 'group' && r.sig && r.sig.lazy ? [r.sig] : []);
 // template.html's dump format ({ t0, t1, signals: [{ name, w, t: [[ps, value]] }] }) -> WaveJSON with the time extension
 function fromTV(wave, extra = {}) {
   return Object.assign({ signal: wave.signals.map(s => ({ name: s.name, width: s.w, tv: s.t })),

@@ -688,7 +688,9 @@ command('picture', 'format? from? to? rows?', 'the waves as a picture: png (base
     { groups: true })).map(r => v.rowsL.find(x => x === r) || r).filter(r => v.shown(r));   // the ones in the view (Hide, Only)
   if (Array.isArray(o.rows) && o.rows.length > PICTURE_ROWS) fail(`${o.rows.length} rows: at most ${PICTURE_ROWS} in a picture: give fewer`);
   await v.need(Array.isArray(o.rows) ? o.rows : o.rows === 'all' ? v.allRows(false, true) : o.rows === 'picked' ? [...v.picks.keys()] : v.vis);   // read
-  if (f === 'wavedrom') { const wavedrom = v.toWaveDrom(o.from, o.to, Array.isArray(o.rows) ? o.rows : null);   // cut: the first cycles only
+  if (f === 'wavedrom') {   // a large dump: the rows exact over the time first, else refused (review 2026-11-13 B-04)
+    try { await v.wdExact(p, q, Array.isArray(o.rows) ? o.rows : null); } catch (e) { v.picHold = null; fail(e.message); }
+    let wavedrom; try { wavedrom = v.toWaveDrom(o.from, o.to, Array.isArray(o.rows) ? o.rows : null); } finally { v.picHold = null; }   // cut: the first cycles
     return v.wdCut ? { wavedrom, cut: { cycles: v.wdCut.cells, to: v.wdCut.to } } : { wavedrom }; }
   if (f === 'svg') return { svg: v.toSVG(o) };
   if (f !== 'png') fail('format: png, svg or wavedrom');

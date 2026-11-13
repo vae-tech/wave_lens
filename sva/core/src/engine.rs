@@ -1078,6 +1078,7 @@ pub fn evaluate(a: &Assertion, tr: &Trace, opt: &Options) -> Result<Outcome, Sva
         lane: None,
         missing: Vec::new(),
         notes: Vec::new(),
+        listed: None,
     };
     let names: Vec<&str> = a.signals.iter().skip(1).map(|s| s.name.as_str()).collect(); // the clock first
     out.missing = names.iter().filter(|n| !tr.signals.contains_key(**n)).map(|n| n.to_string()).collect();
@@ -1130,6 +1131,9 @@ pub fn evaluate(a: &Assertion, tr: &Trace, opt: &Options) -> Result<Outcome, Sva
     let end = opt.to.unwrap_or(tr.cycles).min(tr.cycles);
     let mut groups: Vec<Group> = Vec::new();
     let mut recs: Vec<Rec> = Vec::new();
+    // the attempts not listed (vacuous ones; passes with options.passes false): counted, on the lane, no trace kept — a
+    // large dump has millions of them (review 2026-11-13 B-16)
+    let mut light: Vec<(usize, usize, Status)> = Vec::new();
     let mut cover_hits: Vec<(usize, usize, Steps)> = Vec::new();
     let mut matches = 0usize;
     let mut gc_at = 1usize << 16;
@@ -1149,10 +1153,12 @@ pub fn evaluate(a: &Assertion, tr: &Trace, opt: &Options) -> Result<Outcome, Sva
     };
     // a decided group: one record per attempt. x reads as false; a non-vacuous pass stands, any other result of an
     // attempt that read an unknown fails naming it (option x: "false" keeps the IEEE result)
-    let rec = |e: &Eng, g: &Group, v: &Verdict, c: usize, recs: &mut Vec<Rec>| {
+    let unlisted = |s: Status| !cover && ((s == Status::Vacuous && !opt.vacuous) || (s == Status::Pass && !opt.passes));
+    let rec = |e: &Eng, g: &Group, v: &Verdict, c: usize, recs: &mut Vec<Rec>, light: &mut Vec<(usize, usize, Status)>| {
         for m in &g.members {
-            let r = |result, end, p, failed_at, note| Rec { start: m.start, end, result, steps: e.member_path(m, p), failed_at, note, ante: ante(m, &g.ps) };
-            recs.push(match (v, g.x) {
+            let r = |result, end, p, failed_at, note| Rec { start: m.start, end, result, steps: if unlisted(result) { Vec::new() } else { e.member_path(m, p) },
+                failed_at, note, ante: if unlisted(result) { Vec::new() } else { ante(m, &g.ps) } };
+            let x = match (v, g.x) {
                 _ if g.capped => {
                     let p = match v {
                         Verdict::Pass { path, .. } | Verdict::Fail { path, .. } => *path,
@@ -1167,7 +1173,12 @@ pub fn evaluate(a: &Assertion, tr: &Trace, opt: &Options) -> Result<Outcome, Sva
                 (Verdict::Pass { end, .. }, None) => r(Status::Vacuous, *end, NIL, None, None),
                 (Verdict::Fail { at, note, path }, None) => r(Status::Fail, *at, *path, Some(*at), Some(note.clone())),
                 (Verdict::Pending, None) => unreachable!(),
-            });
+            };
+            if unlisted(x.result) {
+                light.push((x.start, x.end, x.result));
+            } else {
+                recs.push(x);
+            }
         }
     };
     for c in 0..end {
@@ -1218,7 +1229,7 @@ pub fn evaluate(a: &Assertion, tr: &Trace, opt: &Options) -> Result<Outcome, Sva
                 i += 1;
                 continue;
             }
-            rec(&e, &groups[i], &v, c, &mut recs);
+            rec(&e, &groups[i], &v, c, &mut recs, &mut light);
             groups.remove(i);
         }
         // attempts in the same state go on as one: their steps from here are the same
@@ -1264,7 +1275,7 @@ pub fn evaluate(a: &Assertion, tr: &Trace, opt: &Options) -> Result<Outcome, Sva
         let strong = e.strong(&g.ps);
         if strong.is_none() {
             if let Some(v) = e.settled(&g.ps) {
-                rec(&e, g, &v, last, &mut recs);
+                rec(&e, g, &v, last, &mut recs, &mut light);
                 continue;
             }
         }
@@ -1287,8 +1298,8 @@ pub fn evaluate(a: &Assertion, tr: &Trace, opt: &Options) -> Result<Outcome, Sva
     }
     recs.sort_by_key(|r| (r.start, r.end));
     let st = &mut out.stats;
-    for r in &recs {
-        match r.result {
+    for r in recs.iter().map(|r| r.result).chain(light.iter().map(|l| l.2)) {
+        match r {
             Status::Pass => st.pass += 1,
             Status::Fail => st.fail += 1,
             Status::Vacuous => st.vacuous += 1,
@@ -1309,21 +1320,29 @@ pub fn evaluate(a: &Assertion, tr: &Trace, opt: &Options) -> Result<Outcome, Sva
             }
         }
     };
-    for r in &recs {
-        if r.result == Status::Vacuous || (cover && r.result == Status::Fail) {
+    for (start, end, result) in recs.iter().map(|r| (r.start, r.end, r.result)).chain(light.iter().copied()) {
+        if result == Status::Vacuous || (cover && result == Status::Fail) {
             continue;
         }
-        mark(r.start, b'S');
-        match r.result {
-            Status::Pass => mark(r.end, b'P'),
-            Status::Fail => mark(r.end, b'F'),
-            Status::Disabled => mark(r.end, b'D'),
-            Status::Capped => mark(r.end, b'C'),
+        mark(start, b'S');
+        match result {
+            Status::Pass => mark(end, b'P'),
+            Status::Fail => mark(end, b'F'),
+            Status::Disabled => mark(end, b'D'),
+            Status::Capped => mark(end, b'C'),
             _ => {}
         }
     }
     if opt.lane {
         out.lane = Some(String::from_utf8(lane).unwrap());
+    }
+    // the passes counted only: the longest decided attempt of all said apart (the list lacks the passes)
+    if !opt.passes && !cover {
+        let longest = recs.iter().map(|r| (r.start, r.end, r.result)).chain(light.iter().copied())
+            .filter(|(_, _, s)| !matches!(s, Status::Active | Status::Capped | Status::Vacuous))
+            .map(|(s0, e0, _)| (e0.max(s0) - s0, s0))
+            .max_by_key(|&(l, s0)| (l, std::cmp::Reverse(s0)));
+        out.listed = Some(Listed { passes: false, of: None, longest: longest.map(|(l, s0)| [l, s0]), last_fail: None });
     }
     let attempt = |r: &Rec| {
         let (trace, truncated) = e.steps(&r.steps);
@@ -1349,7 +1368,7 @@ pub fn evaluate(a: &Assertion, tr: &Trace, opt: &Options) -> Result<Outcome, Sva
     } else if cover {
         recs.iter().filter(|r| r.result == Status::Pass).take(opt.cover_traces).map(attempt).collect()
     } else {
-        recs.iter().filter(|r| opt.vacuous || r.result != Status::Vacuous).map(attempt).collect()
+        recs.iter().filter(|r| (opt.vacuous || r.result != Status::Vacuous) && (opt.passes || r.result != Status::Pass)).map(attempt).collect()
     };
     Ok(out)
 }

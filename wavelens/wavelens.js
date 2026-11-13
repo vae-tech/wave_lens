@@ -796,7 +796,9 @@ function parse(src) {
 // dense span (more changes than the reader kept) only its last change; the summary over the whole dump kept as r.sum
 function fillRows(M, sigs, win = null, only = null) {   // only: rows read again (a detail window of part rows), lazy or not
   const by = new Map(sigs.filter(s => s && s.path && s.tv).map(s => [s.path, s])), got = new Set();
-  for (const r of M.rows) {
+  // a packed struct of the types (.sv, the config): its signal is its group's, not a row of the list (review 2026-11-13 B-03)
+  const own = Object.values(M.groups).filter(g => g.kind === 'struct' && g.sig && !g.sig.struct && g.sig.src).map(g => g.sig);
+  for (const r of M.rows.concat(own)) {
     if (r.type !== 'sig' || r.field || !(r.lazy || (only && only.has(r)))) continue;
     const s = by.get(r.path); if (!s) continue;
     const w = r.width; r.src.tv = s.tv; r.tr = parseTV(r.src, r).tr; r.width = w; r.lazy = false; r.unread = null; got.add(r);
@@ -817,7 +819,12 @@ function rowsMade(M, got) {
     if (!g.sig || !g.sig.struct) continue;
     const kids = M.rows.slice(M.rows.indexOf(g) + 1, g.last + 1);
     if (!kids.some(r => got.has(r)) || kids.some(r => r.lazy)) continue;
-    g.sig.tr = joinBits(g, structParts(M, g)).tr;
+    g.sig.tr = joinBits(g, structParts(M, g)).tr; g.sig.an = null;
+    // a member held in part (a large dump's window or summary): the whole value is no more exact than its parts (review B-05)
+    const ps = kids.map(r => r.type === 'sig' && r.part).filter(Boolean);
+    g.sig.part = !ps.length ? null : { a: Math.max(...ps.map(p => p.a)), b: Math.min(...ps.map(p => p.b)), step: Math.max(...ps.map(p => p.step || 0)),
+      dense: ps.flatMap(p => p.dense).sort((x, y) => x[0] - y[0]), n: Math.max(...ps.map(p => p.n || 0)), whole: ps.every(p => p.whole),
+      exact: ps.every(p => p.exact) };
   }
 }
 // The window of an answer of sva vcd --codes --from --to --lod (its line "$comment sva window FROM TO STEP INDEX=CHANGES:
@@ -864,7 +871,8 @@ function denseAt(p, a, b) {
 const exactIn = (r, a, b) => { if (!r || r.lazy) return false; const p = partOf(r); return !p || (p.a <= a && b <= p.b && !denseAt(p, a, b)); };
 // the rows a row on the screen needs read (lazy): itself, the vector of a field, every signal of a struct
 const lazyOf = (M, r0, r = r0.dupOf || r0) => (r.type === 'sig' ? (r.lazy ? [r] : r.field && r.of && r.of.lazy ? [r.of] : []) :
-  r.type === 'group' && r.sig && r.sig.struct ? M.rows.slice(M.rows.indexOf(r) + 1, r.last + 1).filter(q => q.lazy) : []);
+  r.type === 'group' && r.sig && r.sig.struct ? M.rows.slice(M.rows.indexOf(r) + 1, r.last + 1).filter(q => q.lazy) :
+    r.type === 'group' && r.sig && r.sig.lazy ? [r.sig] : []);
 // template.html's dump format ({ t0, t1, signals: [{ name, w, t: [[ps, value]] }] }) -> WaveJSON with the time extension
 function fromTV(wave, extra = {}) {
   return Object.assign({ signal: wave.signals.map(s => ({ name: s.name, width: s.w, tv: s.t })),
@@ -2179,7 +2187,8 @@ function paintSig(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk = s.stroke, bg = 'pane
   if (!s.tr.length) return;
   // a row held in part (a large dump read by the window): its dense spans as bars (partTr, denseBar), its last value to its window's end
   const pt = partOf(s), a = pt && pt.dense.length ? partTr(s, s.tr, pt) : s.tr, sEnd = pt && pt.b < (s.end ?? tEnd) ? pt.b : (s.end ?? tEnd);
-  if (s.analog && s.width > 1) return paintAnalog(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk);
+  // the analog form: not over a dense span (a summary is no curve: drawn as the bars below), to the window's end (review B-06)
+  if (s.analog && s.width > 1 && !(pt && denseAt(pt, tA, tB))) return paintAnalog(P, s, y, h, X, tA, tB, xL, xR, pt ? sEnd : tEnd, sk);
   const yh = y + (lane ? 1 : 4), yl = y + h - (lane ? 1 : 5), ym = (yh + yl) / 2;
   const cl = x => Math.min(Math.max(x, xL - 8), xR + 8);
   let lv = null, lvDash = null, pk = null, py = ym, pw = Infinity, xe = 0;
@@ -2627,17 +2636,17 @@ const TIPS = {
   '.cu': ['Unit of the cursor and span fields'],
   'act:out': ['Zoom out', ['o', '-', 'ctrl+wheel']], 'act:in': ['Zoom in', ['i', '+', 'ctrl+wheel']], 'act:fit': ['Show everything', ['f']],
   'act:zlast': ['The window before the last zoom', ['l']], 'act:zcur': ['Zoom in on the cursor', ['c']],
-  'act:zrange': ['Zoom to the range, else to the two cursors', ['shift+drag', 'middle drag']], 'act:t0': ['The start', ['Home']],
+  'act:zrange': ['Zoom to the range, else to the two cursors', ['zz', 'shift+drag', 'middle drag']], 'act:t0': ['The start', ['Home']],
   'act:t1': ['The end', ['End']],
   '.ws': ['Edge style: auto, slanted (WaveDrom), vertical (simulator), square'],
   '.q': ['Fuzzy find: letters in order, a.b for paths', ['/', 'ctrl+F', 'Enter', 'Esc']], 'act:fdock': ['Back into the bar', ['Esc']],
   'act:fcase': ['Match case', ['alt+C']], 'act:fword': ['Full match: the whole name (a.b: the end of the path)', ['alt+W']],
     'act:fre': ['Regular expression (as grep -E; \\< \\> as in vim)', ['alt+R']],
   '.ev': ['The value to find (0x40, \'h40, 64, -3, IDLE)', ['Enter', 'shift+Enter']],
-  'act:dopen': ['Open a VCD dump here (or drop it on the viewer)'], 'act:dreload': ['Read the dump again, the view kept'],
+  'act:dopen': ['Open a VCD dump here (or drop it on the viewer)', ['gO']], 'act:dreload': ['Read the dump again, the view kept', ['R']],
   'act:dsrc': ['SystemVerilog sources: the names of "typedef enum" on the state buses of a VCD (it has none), "typedef struct packed" as ' +
     'fields; kept for the next read (⟳)'],
-  'act:dcmp': ['Compare with a second dump (a VCD of another run): where its values differ, a red band on the row, ≠ on the name', [']d', '[d']],
+  'act:dcmp': ['Compare with a second dump (a VCD of another run): where its values differ, a red band on the row, ≠ on the name', ['gC', ']d', '[d']],
   'act:druns': ['The runs kept of this dump (VS Code): keep this one with a name, tags, a comment; show one here (A), compare one with it (B) ' +
     'over the waves in sight or a span of yours', ['gu', ']w', ']r']],
   'act:dcmpx': ['Compare no more'], 'act:dcmpv': ['Which run the waves show: this one, the second, both over each other', ['d', 'D']],
@@ -2695,8 +2704,9 @@ const TIPS = {
   'act:cycles': ['The clock cycles in a band under the time axis (the right button: Cycles ▸ for the clock, cycle 0)'],
   'act:gaps': ['The waves with the gaps cut out (where nothing changes), or in continuous time; idle and keep beside it', ['gv']],
   'act:svgall': ['Every row of the list as an SVG file (no height limit): the range, else the window; the ones scrolled out of the window too'],
-  'act:copyall': ['The range (else the window) of every row of the list as PNG to the clipboard: the ones scrolled out of the window too (the open modules)'],
-  'act:copyimg': ['The range (else the window) as PNG to the clipboard: the highlighted rows, else the ones on the screen'],
+  'act:copyall': ['The range (else the window) of every row of the list as PNG to the clipboard: the ones scrolled out of the window too (the open modules)',
+    ['yI']],
+  'act:copyimg': ['The range (else the window) as PNG to the clipboard: the highlighted rows, else the ones on the screen', ['yi']],
   'act:png': ['Save the picture as PNG'], 'act:svg': ['Save the picture as SVG'],
   'act:wdjson': ['The range (else the window) as a WaveDrom file (.json), a cell per clock cycle'], 'act:wdcopy': ['The same WaveDrom to the clipboard'],
   'act:dprev': ['The previous difference from the dump compared', ['[d']], 'act:dnext': ['The next difference from the dump compared', [']d']],
@@ -2713,8 +2723,10 @@ const TIPS = {
     '.line': ['Line'],
   'm:zoom': ['Zoom to the range', ['shift+drag', 'middle drag']], 'm:marks': ['Bookmarks at its ends, an arrow with Δ'], 'm:copyd': ['Copy Δ'],
   'm:svgall': ['Every row of the list as an SVG file (no height limit): the range, else the window; the ones scrolled out of the window too'],
-  'm:copyall': ['The range (else the window) of every row of the list as PNG to the clipboard: the ones scrolled out of the window too (the open modules)'],
-  'm:copyimg': ['The range (else the window) as PNG to the clipboard: the highlighted rows, else the ones on the screen'], 'm:png': ['Save the picture as PNG'],
+  'm:copyall': ['The range (else the window) of every row of the list as PNG to the clipboard: the ones scrolled out of the window too (the open modules)',
+    ['yI']],
+  'm:copyimg': ['The range (else the window) as PNG to the clipboard: the highlighted rows, else the ones on the screen', ['yi']],
+  'm:png': ['Save the picture as PNG'],
     'm:svg': ['Save the picture as SVG'],
   'm:c2': ['A second cursor: Δ to the cursor in time and clock cycles', ['shift+click']], 'm:c2x': ['No second cursor', ['Esc']],
   'm:analog': ['The bus as a step plot, three rows high (its radix: signed, float, fixed)'],
@@ -2782,7 +2794,7 @@ Object.assign(TIPS, { '.subr': ['More of the range: bookmarks at its ends, its �
   'm:keepsp': ['A span of yours over this range, its label asked (empty: none); the range stays'],
   'm:copyv': ['The value at each cursor and the change between them, as the value column shows them'],
   'm:dupbits': ['Some bits of the bus as a row of their own: 7:4'],
-  'm:clearmarks': ['Every bookmark, arrow and marker of yours deleted (ctrl+Z brings them back)'],
+  'm:clearmarks': ['Every bookmark, arrow and marker of yours deleted (ctrl+Z brings them back)', ['gc']],
   'm:dlown': ['The Δ arrow in the default colour again'], 'm:dlnone': ['No Δ arrow from this marker (the marker stays)'],
   'm:lnown': ['The things on this line (Δ arrows, markers, bookmarks) in their own colours again'] });
 Object.assign(TIPS, { '.subc': ['The clock cycles in a band under the time axis: numbered from cycle 0, the cursor\'s in the title, Δ in them; ' +
@@ -2817,7 +2829,8 @@ const HELP = [
     [['zM', 'zR'], 'fold / open every module'], [['t'], 'the modules as a tree: a click goes to one, a box keeps Only those (again: the selected one\'s)'],
     [['T'], 'the state machines in the tree of their modules: go to one, Only them, add them to the view'],
     [['zc', 'zo', 'za'], 'the selected signal\'s module'], [['B', 'click [7:0]'], 'the selected bus bit by bit (again: folded)'],
-    [['s'], 'sort'], [['yy', 'ctrl+C'], 'copy the path'],
+    [['s'], 'sort'], [['yy', 'ctrl+C'], 'copy the path'], [['yi', 'yI'], 'copy an image of the range (else the window): its rows / all rows'],
+    [['zz'], 'zoom to the range (else the two cursors)'],
       [['Esc'], 'reset: search, highlight, selection']]],
   ['Find', [[['/', 'ctrl+F'], 'find (the bar scrolled away: it floats over the waves)'],
     [['alt+C', 'alt+W', 'alt+R'], 'in the field: match case, full match, regular expression'], [['n', 'N', 'Enter'], 'next / previous match'],
@@ -2870,8 +2883,9 @@ const KEY_MENUS = {
     ['u', 'the runs kept…', onBar('druns')],
     ['More'], ['v', v => (v.gapLive() ? 'the waves in continuous time' : 'the gaps cut out of the waves')], ['p', 'save the page', onBar('spage')]]],
   z: ['Fold the modules', [['R', 'open every module'], ['M', 'fold every module'], ['o', 'open the selected signal\'s'], ['c', 'fold the selected signal\'s'],
-    ['a', 'open or fold it']]],
-  y: ['Copy', [['y', 'the selected signal\'s path'], ['n', 'its name'], ['t', 'the time of the cursor'], ['l', 'a link to here (the cursor, the signal)']]],
+    ['a', 'open or fold it'], ['z', 'zoom to the range', v => !!v.range || v.cursor2 != null]]],
+  y: ['Copy', [['y', 'the selected signal\'s path'], ['n', 'its name'], ['t', 'the time of the cursor'], ['l', 'a link to here (the cursor, the signal)'],
+    ['i', 'an image of the range (else the window)'], ['I', 'an image of all rows']]],
   ']': ['Next', [['b', 'bookmark'], ['m', 'marker'], ['e', 'edge'], ['d', 'difference', v => v.cmp], ['r', 'run kept (B, compared)', v => v.runsHost()],
     ['w', 'run kept (A, the waves shown)', v => v.runsHost()]]],
   '[': ['Previous', [['b', 'bookmark'], ['m', 'marker'], ['e', 'edge'], ['d', 'difference', v => v.cmp], ['r', 'run kept (B, compared)', v => v.runsHost()],
@@ -3633,6 +3647,20 @@ class Notes {
 /* ---------------- interactive viewer ---------------- */
 const PNG_MAX = 16384;   // px, a side of a canvas that every browser draws
 const CODES_PORTION = 32;   // a large dump's rows read at once (need): a portion, one read at a time
+// a key of another layout (Russian: ш where i is, х where [ is): the key at that place on a US keyboard, so every key and
+// sequence works whatever the layout (review 2026-11-13 K-01); a Latin letter, a digit, a sign as it is. The Russian '.' on
+// the US '/' too (find)
+const US_KEY = { BracketLeft: '[{', BracketRight: ']}', Slash: '/?', Backslash: '\\|', Semicolon: ';:', Quote: '\'"', Comma: ',<', Period: '.>',
+  Backquote: '`~', Minus: '-_', Equal: '=+' }, US_DIGIT = ')!@#$%^&*(';
+function usKey(e) {
+  const k = e.key, c = e.code || '';
+  if (typeof k !== 'string' || k.length !== 1 || (k.charCodeAt(0) < 128 && !(c === 'Slash' && (k === '.' || k === ',')))) return k;
+  let m = /^Key([A-Z])$/.exec(c);
+  if (m) return e.shiftKey ? m[1] : m[1].toLowerCase();
+  m = /^Digit(\d)$/.exec(c);
+  if (m) return e.shiftKey ? US_DIGIT[+m[1]] : m[1];
+  return US_KEY[c] ? US_KEY[c][e.shiftKey ? 1 : 0] : k;
+}
 const WIN_DEBOUNCE = 150;   // ms after a zoom or a scroll before the busy rows' window is read again (a wheel burst: one read)
 const LEFT_OUT = 'not in the dump read';   // a lazy row an answer did not bring (need asks it again, a draw does not)
 const VIEWS = new Set(), ACTIVE = { view: null };   // ACTIVE.view: the viewer used last (Esc while the focus is on the page)
@@ -3963,7 +3991,7 @@ class WaveView {
     // (gg, zR, yy, ]f …) start with g z y [ ]: the second key within a second, or as long as the box of what can follow is open (keyHintOn)
     c.addEventListener('blur', () => this.keyHintOff());
     c.addEventListener('keydown', e => {
-      const k = e.key, ctl = e.ctrlKey || e.metaKey; let h = true;
+      const k = usKey(e), ctl = e.ctrlKey || e.metaKey; let h = true;
       if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock'].includes(k)) return;   // a modifier alone: a sequence goes on (z, shift+M)
       if (keyLeft(this.S, e)) return;   // the host's (keysLeft: VS Code's ctrl+G)
       if (!e.wlKey && this.keyMine(e, k, ctl)) return;   // your keys (the setting keys)
@@ -4688,7 +4716,8 @@ class WaveView {
       const cmpAgain = keep && this.cmp && !this.cmp.result && this.cmpSrc ? { ...this.cmpSrc, run: this.cmpRun } : null;
       this.runsTo = keep && typeof keep === 'object' ? keep.runs : undefined;   // a run shown (runsShow): the A asked, with this open
       const st = keep ? this.runsKeep() : null, root = this.root, opts = Object.assign({}, this.opts,
-        { title: file.name, dumpSrc: { name: file.name, handle, file }, dumpDate: r.info.date, svWhy: why, svRun: run, loadCodes: file.wlLoad || null }),
+        { title: file.name, dumpSrc: { name: file.name, handle, file }, dumpDate: r.info.date, svWhy: why, svRun: run, loadCodes: file.wlLoad || null,
+          evalSva: file.wlEval || null }),
         panel = keep && this.fsmPanelOf(), runs = keep && this.runsOf();
       this.runsTo = undefined;
       if (this.runsP) this.runsP.close(true);   // its listeners go with it (the root is emptied)
@@ -5014,7 +5043,7 @@ class WaveView {
   // m: a marker at the cursor, on an edge of the selected signal as a bookmark; its label asked over it
   markerKey() {
     const t = this.cursor = this.snap(this.sel, this.cursor), r = this.canvas.getBoundingClientRect();
-    this.askText(r.left + Math.min(Math.max((t - this.t0) / this.span, 0), 1) * r.width, r.top + this.hdrH + 8, `Marker · ${this.fmtCursor(t)}`, 'its label',
+    this.askText(r.left + Math.min(Math.max(this.xOfT(t), 0), r.width), r.top + this.hdrH + 8, `Marker · ${this.fmtCursor(t)}`, 'its label',   // (B-23)
       label => this.run(Object.assign({ op: 'marker', t }, label ? { label } : {})));
     return this;
   }
@@ -5026,13 +5055,16 @@ class WaveView {
     if (s && !this.inSight(s)) this.centerRow(s);
     const top = this.topNow(); this.draw();
     const at = () => { const r = this.canvas.getBoundingClientRect(), o = s && (this.lay || []).find(o => o.row === s), y0 = r.top + this.hdrH;
-      const x = r.left + Math.min(Math.max((t - this.t0) / this.span, 0), 1) * r.width, y = o ? r.top + o.y + o.h - (this.oy || 0) : y0 + 8;
+      const x = r.left + Math.min(Math.max(this.xOfT(t), 0), r.width), y = o ? r.top + o.y + o.h - (this.oy || 0) : y0 + 8;   // with gaps: where drawn
       return [x, y, !!o && (y - o.h < y0 - 1 || y > Math.min(r.bottom, innerHeight) + 1)]; };
     const [x, y] = at();
     const box = this.askText(x, y, `Bookmark · ${s ? s.name + ' · ' : ''}${this.fmtCursor(t)}`, 'its text',
       text => this.mark(text, { t, top, signal: s ? s.full : null }), '', true);
     this.askPlace = () => { if (this.menuEl !== box) return; const [px, py, away] = at(), w = box.offsetWidth, h = box.offsetHeight;
-      box.style.visibility = away ? 'hidden' : ''; box.style.left = Math.max(4, Math.min(px, innerWidth - w - 4)) + 'px';
+      // back in sight: its field has the keys again (a hidden field loses the focus: review B-17)
+      const back = box.style.visibility === 'hidden' && !away; box.style.visibility = away ? 'hidden' : '';
+      if (back) { const i = box.querySelector('input'); if (i) i.focus({ preventScroll: true }); }
+      box.style.left = Math.max(4, Math.min(px, innerWidth - w - 4)) + 'px';
       box.style.top = Math.max(4, Math.min(py, innerHeight - h - 4)) + 'px'; };
     this.askAc = new AbortController();
     window.addEventListener('scroll', () => this.askPlace && this.askPlace(), { capture: true, passive: true, signal: this.askAc.signal });
@@ -5185,6 +5217,7 @@ class WaveView {
   frac(e) { const r = this.canvas.getBoundingClientRect(); return (e.clientX - r.left) / r.width; }
   pxPerT() { const F = this.warpSync(); return F ? F.k : this.canvas.getBoundingClientRect().width / this.span; }   // with gaps on the waves: in a part
   tOfX(x) { const F = this.warpSync(); return F ? F.T(x) : this.t0 + x / this.pxPerT(); }   // the time at x on the waves
+  xOfT(t) { const F = this.warpSync(); return F ? F.X(t) : (t - this.t0) * this.pxPerT(); }   // the x of time t on the waves (gaps too)
   clamp(t) { return Math.min(Math.max(t, this.M.t0), this.M.t1 - this.span); }
   // the window puts time t at this fraction of its width (the gaps on the waves: on the screen, not in time); a new span set: as it is
   center(t, f = 0.5) {
@@ -5249,6 +5282,12 @@ class WaveView {
       this.foldTouched = true; this.renderNames(); this.draw();
     }
     else if (s === 'yy') this.copyKey();
+    // an image of the range (else the window): its rows on the screen, or every row of the list (review 2026-11-13 K-04)
+    else if (s === 'yi' || s === 'yI') this.picAct(s === 'yi' ? 'copyimg' : 'copyall', this.range || null);
+    else if (s === 'zz') {   // zoom to the range, else to the two cursors (the bar's ⇔)
+      const z = this.range || (this.cursor2 != null ? [Math.min(this.cursor, this.cursor2), Math.max(this.cursor, this.cursor2)] : null);
+      if (z) { this.markView(); this.zoomTo(...z); } else this.toast('zz: no range (a right-button drag) and no second cursor (shift+click)');
+    }
     else if (s === 'gl') this.groupsMenu();   // your groups (ctrl+G; this one where ctrl+G is the host's)
     else if (s === 'gm') this.marksMenu();   // the markers and the bookmarks: a list to step through
     else if (s === ']b' || s === '[b') this.stepMark(s[0] === ']' ? 1 : -1);
@@ -5453,16 +5492,39 @@ class WaveView {
     const p = this.selRun.size > 1 ? (this.rowsL || []).filter(r => this.selRun.has(r)) : this.picks.size ? this.pickedRows() : [];
     return p.length ? p : null; }
   pickedRows() { return (this.rowsL || []).filter(r => this.picks.has(r) || (r.anc || []).some(id => this.picks.has(this.M.groups[id]))); }
-  // WaveDrom (WaveJSON) of signals over [a, b]: the highlighted ones (else the rows on the screen); one cell per period of
-  // a clock — a 1-bit *clk* / *clock* among them, else in their modules —, else of the shortest time between changes;
-  // the values at the start of each cell (as vcd2wavedrom.py samples), buses as "=" with their text in the radix shown
-  toWaveDrom(a = this.t0, b = this.t0 + this.span, rows = null) {
+  // the signals of a WaveDrom and its clock: the highlighted ones, else the rows on the screen
+  wdRows(rows = null) {
     const mask = this.gapMask() && [...this.gapRefSet(), ...this.gapRows().aux].filter(r => this.shown(r));   // what is in the view (Hide, Only)
     const picked = mask || (this.selRun.size > 1 ? this.sigPool().filter(r => this.selRun.has(r) && this.shown(r)) : this.picks.size ?
       this.sigPool().filter(r => (this.picks.has(r) || r.anc.some(id => this.picks.has(this.M.groups[id]))) && this.shown(r)) : this.screenRows());
     const sigs = (rows || picked).filter(r => r.type === 'sig' && r.tr && r.tr.length);
+    return { sigs, clk: (this.gapOpt().gaps && this.gapClockRow()) || this.clockFor(sigs) };
+  }
+  // A large dump: the rows given exact over [a, b] — read for that time as the view would be (picRead), held until the caller
+  // is done (picHold = null) — else an error naming one still held in part there (a busy row over a long time) (review B-04)
+  async exactRows(rows, a, b, what) {
+    if (!this.lazy) return this;
+    await this.need(rows);
+    await this.picRead(rows, a, b);
+    const base = r => { const q = r.orig || r; return q.dupOf || q.of || q; };
+    const no = [...new Set(rows.map(base))].filter(r => r.type === 'sig' && (r.lazy || (partOf(r) && !exactIn(r, a, b))));
+    if (no.length) { this.picHold = null; throw new Error(`${no[0].full}${no.length > 1 ? ` (and ${no.length - 1} more)` : ''} ` +
+      `${no[0].lazy ? 'not read' : 'read in part over this time (a large dump)'}: ${what} needs every change of it: a shorter time`); }
+    return this;
+  }
+  // the rows of a WaveDrom over [a, b] exact first (a large dump) -> a promise; picHold to clear after
+  async wdExact(a, b, rows = null) {
+    if (!this.lazy) return this;
+    await this.need(rows || this.wdRows().sigs.concat(this.screenRows()));
+    const { sigs, clk } = this.wdRows(rows);
+    return this.exactRows(clk ? sigs.concat([clk]) : sigs, a, b, 'WaveDrom');
+  }
+  // WaveDrom (WaveJSON) of signals over [a, b]: the highlighted ones (else the rows on the screen); one cell per period of
+  // a clock — a 1-bit *clk* / *clock* among them, else in their modules —, else of the shortest time between changes;
+  // the values at the start of each cell (as vcd2wavedrom.py samples), buses as "=" with their text in the radix shown
+  toWaveDrom(a = this.t0, b = this.t0 + this.span, rows = null) {
+    const { sigs, clk } = this.wdRows(rows);
     this.wdCut = null;
-    const clk = (this.gapOpt().gaps && this.gapClockRow()) || this.clockFor(sigs);
     let cuts = this.cutsOf(a, b, sigs), ng = cuts.length - 1;
     const kept = cuts.reduce((n, [p, q]) => n + q - p, 0);
     let cells = clk ? clk.tr.filter(o => o.k === '1' && o.t >= a && o.t < b).map(o => o.t) : [], cellT = 0;
@@ -5603,17 +5665,31 @@ class WaveView {
     const M = this.M, S = this.S, sigs = new Set();
     for (const r0 of rows) { const q = r0.orig || r0, r = q.dupOf || q.of || q;
       if (r.type === 'sig') sigs.add(r);
+      else if (r.type === 'group' && r.sig && !r.sig.struct) sigs.add(r.sig);   // a packed struct of the types: its own signal
       else if (r.type === 'group' && r.sig) M.rows.slice(M.rows.indexOf(r) + 1, r.last + 1).filter(k => k.type === 'sig').forEach(k => sigs.add(k)); }
+    // a row whose read failed (an answer that left it out, an error): nothing to compute over, said (review 2026-11-13 B-07)
+    const unread = [...sigs].filter(r => r.lazy || r.unread);
+    if (unread.length && !inPart) throw new Error(`${unread[0].full}${unread.length > 1 ? ` (and ${unread.length - 1} more)` : ''} not read` +
+      `${unread[0].unread ? ': ' + unread[0].unread : ''}: ${what} needs it`);
     const part = [...sigs].filter(r => r.sum), no = part.filter(r => r.sum.part.n > S.lazyWhole), read = part.filter(r => !no.includes(r));
     if (read.length && this.opts.loadCodes) {
+      // a row being read whole already (the cycles, the gaps asked again on every change of the data): that read waited for,
+      // not another (review B-08)
+      const Q = this.wholeQ || (this.wholeQ = new Map()), mine = read.filter(r => !Q.has(r));
+      const theirs = [...new Set(read.filter(r => Q.has(r)).map(r => Q.get(r)))];
       const win = { from: Math.max(0, Math.floor(M.t0)), to: Math.ceil(M.t1), lod: 1, keep: S.lazyWhole };
-      for (let i = 0; i < read.length; i += 4) {   // a few at a time: each up to lazyWhole changes
-        const some = read.slice(i, i + 4), text = await this.opts.loadCodes([...new Set(some.flatMap(r => r.src.lazy || []))], win);
-        if (!VIEWS.has(this) || this.root.waveView !== this) return this;
-        const got = fillRows(M, vcdSignals(vcdToWave(text, { name: this.opts.title, budget: Infinity }).doc.signal), codesWin(text), new Set(some));
-        for (const r of got) { r.an = null; if (this.partRows) this.partRows.delete(r); }
-        if (got.length) { this.cmpTake(got); this.dataChanged(); this.invalidate(); }
-      }
+      const job = (async () => {
+        for (let i = 0; i < mine.length; i += 4) {   // a few at a time: each up to lazyWhole changes
+          const some = mine.slice(i, i + 4), text = await this.opts.loadCodes([...new Set(some.flatMap(r => r.src.lazy || []))], win);
+          if (!VIEWS.has(this) || this.root.waveView !== this) return;
+          const got = fillRows(M, vcdSignals(vcdToWave(text, { name: this.opts.title, budget: Infinity }).doc.signal), codesWin(text), new Set(some));
+          for (const r of got) { r.an = null; if (this.partRows) this.partRows.delete(r); }
+          if (got.length) { this.cmpTake(got); this.dataChanged(); this.invalidate(); }
+        }
+      })();
+      mine.forEach(r => Q.set(r, job));
+      try { await Promise.all([job, ...theirs]); } finally { mine.forEach(r => { if (Q.get(r) === job) Q.delete(r); }); }
+      if (!VIEWS.has(this) || this.root.waveView !== this) return this;
       no.push(...read.filter(r => r.sum));
     }
     if (no.length && !inPart) throw new Error(this.partWhy(no, what));
@@ -5644,6 +5720,8 @@ class WaveView {
     const ask = this.winAsk;
     if (ask && (!want.length || !(ask.a <= t0 && ask.b >= t1 && ask.step <= 4 * span / S.lazyBuckets))) { this.winAsk = null; if (ask.p.stop) ask.p.stop(); }
     clearTimeout(this.winT);
+    const no = this.winNo;   // a read of this window failed: asked again once the view leaves it (or the dump is read again)
+    if (no && no.a <= t0 && no.b >= t1 && no.step <= 4 * span / S.lazyBuckets) return;
     if (want.length && !this.winAsk) this.winT = setTimeout(() => this.winRead(), WIN_DEBOUNCE);
   }
   // before a frame: the busy rows whose window no longer covers the view back to their summary
@@ -5667,14 +5745,19 @@ class WaveView {
     for (let i = 0; i < list.length; i += CODES_PORTION) {
       const some = list.slice(i, i + CODES_PORTION), text = await this.opts.loadCodes([...new Set(some.flatMap(r => r.src.lazy || []))], win);
       if (!VIEWS.has(this) || this.root.waveView !== this) return;
-      const got = fillRows(M, vcdSignals(vcdToWave(text, { name: this.opts.title, budget: Infinity }).doc.signal), codesWin(text), new Set(some));
+      // a row read whole meanwhile (needWhole: no summary left) is not made a window again
+      const got = fillRows(M, vcdSignals(vcdToWave(text, { name: this.opts.title, budget: Infinity }).doc.signal), codesWin(text),
+        new Set(some.filter(r => r.sum)));
       const now = performance.now();
       for (const r of got) { r.an = null; if (r.part && !r.part.whole) this.partRows.set(r, now); else this.partRows.delete(r); }
       if (got.length) { this.cmpTake(got); this.dataChanged(); }
     }
   }
   // a row back to its summary (its window dropped)
-  toSum(r) { r.tr = r.sum.tr; r.part = r.sum.part; r.an = null; this.partRows.delete(r); }
+  toSum(r) {
+    if (r.sum) { r.tr = r.sum.tr; r.part = r.sum.part; r.an = null; rowsMade(this.M, new Set([r])); }   // its fields, a struct of it: again
+    this.partRows.delete(r);
+  }
   // the window of the view read for the busy rows on the screen (winWant), in one read; its answer taken while it is the
   // read wanted (not stopped, the viewer the same)
   winRead() {
@@ -5684,24 +5767,27 @@ class WaveView {
     const fresh = p => p.a <= t0 && p.b >= t0 + span && (p.exact || p.step <= 4 * span / S.lazyBuckets);
     const list = [...rows].filter(r => !fresh(r.part)).slice(0, CODES_PORTION);
     if (!list.length) return;
-    const a = Math.max(M.t0, Math.floor(t0 - span / 2)), b = Math.min(M.t1, Math.ceil(t0 + span * 3 / 2));
+    const a = Math.max(Math.floor(M.t0), Math.floor(t0 - span / 2)), b = Math.min(Math.ceil(M.t1), Math.ceil(t0 + span * 3 / 2));   // whole ps
     const win = { from: Math.max(0, a), to: b, lod: S.lazyBuckets, keep: S.lazyKeep };
     const p = this.opts.loadCodes([...new Set(list.flatMap(r => r.src.lazy || []))], win);
     const ask = this.winAsk = { a, b, step: (b - a) / S.lazyBuckets, p };
     p.then(text => {
       if (this.winAsk !== ask || !VIEWS.has(this) || this.root.waveView !== this) return;
-      this.winAsk = null;
-      const only = new Set(list), got = fillRows(M, vcdSignals(vcdToWave(text, { name: this.opts.title, budget: Infinity }).doc.signal), codesWin(text), only);
+      this.winAsk = null; this.winNo = null;
+      // a row read whole meanwhile (needWhole: its summary dropped) stays whole, not a window again (a race of 0.58)
+      const only = new Set(list.filter(r => r.sum));
+      const got = fillRows(M, vcdSignals(vcdToWave(text, { name: this.opts.title, budget: Infinity }).doc.signal), codesWin(text), only);
       const now = performance.now();
       for (const r of got) { r.an = null; if (r.part && !r.part.whole) this.partRows.set(r, now); else this.partRows.delete(r); }
       // the windows held at most lazyHeld changes: the oldest back to their summary
       let held = 0; const old = [...this.partRows].sort((x, y) => y[1] - x[1]);
-      for (const [r] of old) { held += r.tr.length; if (held > S.lazyHeld) this.toSum(r); }
+      for (const [r] of old) { held += r.tr.length; if (held > S.lazyHeld && !(this.picHold && this.picHold.has(r))) this.toSum(r); }   // (B-27)
       if (got.length) { this.cmpTake(got); this.dataChanged(); }
       this.invalidate();
     }, e => {
       if (this.winAsk === ask) this.winAsk = null;
       if (e && e.stopped || !VIEWS.has(this)) return;
+      this.winNo = { a, b, step: ask.step };
       this.logError(e, 'reading a window of the signals: ' + e.message);
     });
   }
@@ -6583,37 +6669,44 @@ Object.assign(WaveView.prototype, {
       this.toast(err.message));
     else if (act === 'svg') { this.download(new Blob([this.toSVG(pic)], { type: 'image/svg+xml' }), this.picName('svg'));
       this.toast('saved ' + this.picName('svg')); }
-    else if (act === 'wdjson' || act === 'wdcopy') {
-      const [ta, tb] = r || [this.t0, this.t0 + this.span], text = wdText(this.toWaveDrom(ta, tb)), cut = this.wdCut ? ` — the first ${WD_CELLS} ` +
-        `cycles only, to ${this.fmt(this.wdCut.to, (this.wdCut.to - ta) / 1000, this.wdCut.to - ta)}` : '';
-      if (act === 'wdcopy') { try { navigator.clipboard.writeText(text).then(() => this.toast('WaveDrom copied' + cut), () => this.toast('not copied'));
-        } catch (e) { this.toast('not copied'); } }
-      else { this.download(new Blob([text + '\n'], { type: 'application/json' }), this.picName('wavedrom.json'));
-        this.toast('saved ' + this.picName('wavedrom.json') + cut); }
+    else if (act === 'wdjson' || act === 'wdcopy') {   // a large dump: its rows read exact over the time first, else refused (review B-04)
+      const [ta, tb] = r || [this.t0, this.t0 + this.span];
+      this.wdExact(ta, tb).then(() => this.wdOut(act, ta, tb), e => this.toast(`no WaveDrom: ${e.message}`)).finally(() => { this.picHold = null; });
     }
+    return this;
+  },
+  // the WaveDrom of [ta, tb] copied (wdcopy) or saved (wdjson)
+  wdOut(act, ta, tb) {
+    const text = wdText(this.toWaveDrom(ta, tb)), cut = this.wdCut ? ` — the first ${WD_CELLS} ` +
+      `cycles only, to ${this.fmt(this.wdCut.to, (this.wdCut.to - ta) / 1000, this.wdCut.to - ta)}` : '';
+    if (act === 'wdcopy') { try { navigator.clipboard.writeText(text).then(() => this.toast('WaveDrom copied' + cut), () => this.toast('not copied'));
+    } catch (e) { this.toast('not copied'); } }
+    else { this.download(new Blob([text + '\n'], { type: 'application/json' }), this.picName('wavedrom.json'));
+      this.toast('saved ' + this.picName('wavedrom.json') + cut); }
     return this;
   },
   // the picture of every row of the list (Copy image of all rows: a PNG to the clipboard; svg: Save image of all rows as SVG, no
   // height limit): the rows of a large dump read first, its busy ones as exact as the picture's time needs (picRead) and held
   // for it; a PNG taller than PNG_MAX refused (by the SVG's own height: names, axis, bookmarks' texts, gaps' rows)
   picAll(svg) {
-    const rows = this.rowsL || [], est = (this.lay || []).reduce((n, o) => n + o.h, 0) + (this.hdrH || 0);
-    const tall = h => `${rows.length} rows, ${Math.round(h)} px high: a PNG stops at ${PNG_MAX} px: Export ▸ Save image of all rows as SVG, ` +
+    const rows = this.rowsL || [], nSig = rows.filter(x => x.type === 'sig').length, est = (this.lay || []).reduce((n, o) => n + o.h, 0) + (this.hdrH || 0);
+    const tall = h => `${nSig} rows, ${Math.round(h)} px high: a PNG stops at ${PNG_MAX} px: Export ▸ Save image of all rows as SVG, ` +
       'or fold some modules';
     if (!svg && est > PNG_MAX) { this.toast(tall(est)); return this; }   // at least that tall: refused before reading anything
     const [a, b] = this.range || [this.t0, this.t0 + this.span], n = rows.filter(x => x.lazy || x.sum).length;
     if (this.lazy && n) this.toast(`reading ${n} rows for the picture…`);
     const ready = (this.lazy ? this.need(rows).then(() => this.picRead(rows, a, b)) : Promise.resolve()).then(() => {
-      const text = this.toSVG({ rows: 'all' }), left = rows.filter(x => x.unread).length;
-      this.picHold = null; this.invalidate();
+      let text; try { text = this.toSVG({ rows: 'all' }); } finally { this.picHold = null; }   // held for it only (review B-27)
+      const left = rows.filter(x => x.unread).length;
+      this.invalidate();
       return { text, h: +text.match(/height="(\d+)"/)[1], left: left ? ` (${left} rows not read: “not read” on them)` : '' };
     }, e => { this.picHold = null; throw e; });
     if (svg) { ready.then(({ text, left }) => { const name = this.picName('svg'); this.download(new Blob([text], { type: 'image/svg+xml' }), name);
-      this.toast(`saved ${name}: ${rows.length} rows${left}`); }, e => this.toast('not saved: ' + e.message)); return this; }
+      this.toast(`saved ${name}: ${nSig} rows${left}`); }, e => this.toast('not saved: ' + e.message)); return this; }
     let said = '', left = '';
     const png = ready.then(x => { left = x.left; if (x.h > PNG_MAX) throw new Error(said = tall(x.h)); return this.toPNG({ svg: x.text }); })
       .catch(e => { said = said || e.message; throw e; });
-    try { navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]).then(() => this.toast(`image of all ${rows.length} rows copied${left}`),
+    try { navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]).then(() => this.toast(`image of all ${nSig} rows copied${left}`),
       err => this.toast('not copied: ' + (said || err.message))); }
     catch (err) { this.toast('this browser cannot copy an image: Export ▸ Save image of all rows as SVG'); }
     return this;
@@ -8536,7 +8629,9 @@ command('picture', 'format? from? to? rows?', 'the waves as a picture: png (base
     { groups: true })).map(r => v.rowsL.find(x => x === r) || r).filter(r => v.shown(r));   // the ones in the view (Hide, Only)
   if (Array.isArray(o.rows) && o.rows.length > PICTURE_ROWS) fail(`${o.rows.length} rows: at most ${PICTURE_ROWS} in a picture: give fewer`);
   await v.need(Array.isArray(o.rows) ? o.rows : o.rows === 'all' ? v.allRows(false, true) : o.rows === 'picked' ? [...v.picks.keys()] : v.vis);   // read
-  if (f === 'wavedrom') { const wavedrom = v.toWaveDrom(o.from, o.to, Array.isArray(o.rows) ? o.rows : null);   // cut: the first cycles only
+  if (f === 'wavedrom') {   // a large dump: the rows exact over the time first, else refused (review 2026-11-13 B-04)
+    try { await v.wdExact(p, q, Array.isArray(o.rows) ? o.rows : null); } catch (e) { v.picHold = null; fail(e.message); }
+    let wavedrom; try { wavedrom = v.toWaveDrom(o.from, o.to, Array.isArray(o.rows) ? o.rows : null); } finally { v.picHold = null; }   // cut: the first cycles
     return v.wdCut ? { wavedrom, cut: { cycles: v.wdCut.cells, to: v.wdCut.to } } : { wavedrom }; }
   if (f === 'svg') return { svg: v.toSVG(o) };
   if (f !== 'png') fail('format: png, svg or wavedrom');
@@ -11526,7 +11621,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.59',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.60',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,

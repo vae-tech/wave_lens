@@ -13,7 +13,7 @@ for the subset; where this document makes a choice, the choice is listed under *
 | Rust | `sva_core::evaluate(&Assertion, &Trace, &Options) -> Outcome`, `evaluate_all`, `run(source, …) -> Results` | a `Trace`: one `Column` (4-state values) per signal name, one value per cycle |
 | JSON / WASM | `run_json({"source" \| "files": [...], "trace", "options"?, "assert"?})` -> the results document; `run_json({"report": {meta, results}, "format"?})` -> `{summary, text}` (*Report*) | the trace as JSON (below); `files`: several sources as one compilation unit |
 | page | `SVA.load(wasmBytes)` -> `{parse, evaluate}`; `evaluate(parsed, sampler, options)` | a *sampler*: `edges(name, edge)` -> clock edge times, `before(name, t)` -> the value just before `t`; `SVA.tvSampler({name: {tv, width}})` builds one from WaveJSON `tv` arrays |
-| shell | `sva eval --waves dump.vcd\|fst --scope tb.dut --sva checks.sv [--sva …] [--assert NAME …] [--from T --to T] [--out results.json] [--json] [--attempts] [--x fail\|false] [--vacuous] [--no-lane] [--resolve up\|scope] [--ignore-prefix i_,o_] [--alias NAME=PATH …] [--max-threads N] [--report r.md\|.html\|.xml\|.json] [--junit r.xml] [--max-failures N] [-D NAME[=V]]`; `sva report RESULTS.json… [--title T] [--md F] [--junit F] [--html F] [--json F] [--max-failures N]`; `sva --waves DUMP --info` (the scopes, variables, widths and enum tables of a dump); `sva parse [--json] [--expand] [-D NAME[=V]] FILE…` (`--expand`: the assertions after expansion); every command takes `-h` / `--help` | the dump, read with wellen |
+| shell | `sva eval --waves dump.vcd\|fst --scope tb.dut --sva checks.sv [--sva …] [--assert NAME …] [--from T --to T] [--out results.json] [--json] [--attempts] [--x fail\|false] [--vacuous] [--no-lane] [--resolve up\|scope] [--ignore-prefix i_,o_] [--alias NAME=PATH …] [--max-threads N] [--report r.md\|.html\|.xml\|.json] [--junit r.xml] [--max-failures N] [--no-pass] [--max-attempts N] [--cycle-runs] [-D NAME[=V]]`; `sva report RESULTS.json… [--title T] [--md F] [--junit F] [--html F] [--json F] [--max-failures N]`; `sva --waves DUMP --info` (the scopes, variables, widths and enum tables of a dump); `sva parse [--json] [--expand] [-D NAME[=V]] FILE…` (`--expand`: the assertions after expansion); every command takes `-h` / `--help` | the dump, read with wellen |
 | make | `make sva-eval WAVES=… SVA="pkg.sv checks.sva" SCOPE=… [OUT=…] [ARGS=…]`, `make sva-examples`, `make sva-test` | |
 
 The shell reads a dump with wellen, which merges the adjacent one-bit selects of a vector into the vector, as ModelSim
@@ -226,7 +226,18 @@ Options (all optional): `vacuous` (list vacuous attempts too; default false), `l
 default, or `"false"`), `max_threads` (per sequence of one attempt, default 256), `cover_traces` (matches of a cover
 listed with their traces, default 100; all are counted), `from` / `to` (attempts start at cycles `from .. to`, the
 evaluation ends at `to`; `sva eval --from 2us --to 5us` maps times to cycles), `merge` (default true: attempts in the
-same state are stepped once; false steps each one, for tests).
+same state are stepped once; false steps each one, for tests), `passes` (default true: the passing attempts of an assert
+or assume listed; false counts them only, the failures and the attempts without verdict listed: `sva eval --no-pass`, a
+large dump's millions of passes).
+
+`sva eval` for a large dump (the page in VS Code evaluates so when a signal is too busy to read whole): `--no-pass`
+(`passes` false: the passes and the vacuous attempts are counted and marked on the lane, no record of them kept), `--max-attempts N` (the first N
+attempts of each assertion listed, the failures first; a note says how many there were) — a list so made carries
+`listed`: `{passes, of, longest: [cycles, start], last_fail}`, the facts of all the attempts it lacks (the report takes
+its Last failure and Longest from there, no latency without the passes) — and
+`--cycle-runs` (the JSON's `cycles`, the document's and an assertion's on another clock, written as `cycle_runs`:
+`[[first, step, count], ...]`, one run while the clock's period holds, not one number per cycle: a 5 M-cycle dump's
+results 2 MB instead of 180).
 
 A signal with fewer values than `cycles` reads its initial value after its last one, and a value wider than 64 bits
 keeps its low 64 bits; both give a note on the assertions that read the signal.

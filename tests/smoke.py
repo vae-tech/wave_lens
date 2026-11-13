@@ -1510,6 +1510,12 @@ def plugin_api(page):
     k = t("""(() => { let n = 0; v.addKey('q', () => n++, 'q quit nothing'); const k = (o) => v.canvas.dispatchEvent(new KeyboardEvent('keydown', Object.assign({ key: 'q', bubbles: true }, o)));
         k({}); k({ ctrlKey: true }); return [n, v.root.querySelector('.hint').textContent.includes('q quit nothing'), window.__n]; })()""")
     check(k == [1, True, 1], f'addKey: the key on the waves (not with ctrl), its line in the hint; listen on the names column {k}')
+    # review 2026-11-13 K-01: the keys by their place on another layout (Russian: ш is i, ъ а is ]f… , . is /)
+    ru = t("""(() => { const k = (key, code, o) => v.canvas.dispatchEvent(new KeyboardEvent('keydown', Object.assign({ key, code, bubbles: true,
+        cancelable: true }, o || {}))); const s0 = v.span; k('ш', 'KeyI'); const s1 = v.span; k('щ', 'KeyO'); const s2 = v.span;
+        v.canvas.focus(); k('.', 'Slash'); const find = document.activeElement && document.activeElement.matches('input'); v.canvas.focus();
+        let n = 0; v.addKey('Q', () => n++, 'Q'); k('Й', 'KeyQ', { shiftKey: true }); return [s1 / s0, s2 / s1, find, n]; })()""")
+    check(ru == [0.5, 2, True, 1], f'the keys on a Russian layout by their place: ш zooms in as i, щ out as o, . finds as /, shift+й is Q {ru}')
     ev = t("(window.__ev.length = 0, v.setCursor(30), v.zoom(0.5, 0.5), v.select('tb.w.state'), v.select('tb.w.state'), window.__ev.slice())")
     check(ev == ['cursor', 'view', 'select'], f'events wavelens:cursor, wavelens:view, wavelens:select, once per change {ev}')
     # bug hunt 2026-11-10 B-39, B-40: wavelens:range once per change of the range or its signal, wherever it changed; none without one
@@ -2014,6 +2020,7 @@ def vscode_tab(browser, build):
         // the dump the page could not fetch (a moved tab over a remote connection: 404), as the extension reads it: dump.vcd
         bytes: () => fetch('%s/dump.vcd').then(r => r.arrayBuffer()).then(b => ({ data: new Uint8Array(b) })),
         codes: m => window.lazyCodes(m.codes).then(text => ({ text })),
+        sva: () => (window.__SVAERR ? { error: window.__SVAERR } : { text: '{"clock":"","unit":"ps","cycle_runs":[],"assertions":[]}' }),
         save: m => (window.__cancel ? { cancel: true } : { path: '/host/dumps/' + m.name }),
         pick: m => ({ files: /fst/.test(m.accept) ? [] : [{ name: 's.view.json', path: '/states/s.view.json', mtime: 1, b64: btoa(JSON.stringify(window.__S)) }] }),
         'state-read': () => (window.__S ? { name: 's.view.json', mtime: 2, b64: btoa(JSON.stringify(window.__S)) } : { error: 'gone' }),
@@ -2290,6 +2297,19 @@ def vscode_tab(browser, build):
         check(lz[0] >= 4 and lz[1] == [] and lz[2] >= 1 and sv2 == ['bound', None, sv[0][3]],
               f'a large dump: its header first, the signals on the screen read through "codes" (a struct\'s header: its fields, for its whole value); '
               f'an assertion reads its own (the counts of the whole dump) {lz} {sv2} / {sv[0][3]}')
+        # host.js's bridge (review 2026-11-13 T-01): a window of a read and an evaluation go to the extension as asked, numbered,
+        # stopped by their number; 'stopped' answered: a rejection marked stopped
+        br = page.evaluate("""async () => { const v = WaveLens.views().find(x => x.root.isConnected), n = window.__sent.length, out = {};
+          const p = v.opts.loadCodes(['!'], { from: 1, to: 2, lod: 3, keep: 4 }); await p; p.stop();
+          const c = window.__sent.slice(n).find(m => m.type === 'codes'), s = window.__sent.slice(n).find(m => m.type === 'codes-stop');
+          out.codes = [c && [c.from, c.to, c.lod, c.keep, c.codes], !!c && !!s && s.rid === c.rid];
+          const e = await v.opts.evalSva({ files: [{ name: 'a.sv', source: 'x' }], scope: 'tb', passes: false, from: 5, to: 9 });
+          const q = window.__sent.slice(n).find(m => m.type === 'sva');
+          out.sva = [JSON.parse(e).assertions.length, q && [q.scope, q.passes, q.from, q.to, q.files.length, typeof q.rid]];
+          window.__SVAERR = 'stopped'; out.stopped = await v.opts.evalSva({ files: [], scope: '' }).then(() => null, x => [x.message, !!x.stopped]);
+          window.__SVAERR = null; return out; }""")
+        check(br['codes'] == [[1, 2, 3, 4, ['!']], True] and br['sva'] == [0, ['tb', False, 5, 9, 1, 'number']] and br['stopped'] == ['stopped', True],
+              f'host.js: a window of a read and an evaluation sent as asked, numbered, stopped by their number {br}')
         page.evaluate("window.__LAZY = false")
         shutil.rmtree(tmp, ignore_errors=True)
     # a save cancelled in the dialog: no "saved"
@@ -3066,10 +3086,26 @@ def lazy_dump(browser, build):
         flags = [x for k in ('from', 'to', 'lod', 'keep') if (win or {}).get(k) is not None for x in ('--' + k, str(int(win[k])))]
         return subprocess.run([str(exe), 'vcd', str(parts[name]), '--codes', '-', *flags], input='\n'.join(cs), capture_output=True, text=True,
                               check=True).stdout
+
+    def sva_eval(name, req):   # the extension's svaEval (vscode/extension.js): sva eval over the dump's FST, the page's files
+        d = pathlib.Path(tempfile.mkdtemp(dir=tmp)); out = d / 'results.json'
+        args = [str(exe), 'eval', '--waves', str(parts[name]), '--resolve', 'scope', '--cycle-runs', '--no-lane', '--out', str(out)]
+        args += ['--scope', req['scope']] if req.get('scope') else []
+        args += ['--ignore-prefix', ','.join(req['ignore'])] if req.get('ignore') else []
+        args += [x for a in req.get('asserts') or [] for x in ('--assert', a)] + (['--no-pass'] if req.get('passes') is False else [])
+        args += [x for k, f in (('max', '--max-attempts'), ('from', '--from'), ('to', '--to')) if req.get(k) is not None
+                 for x in (f, str(int(req[k])) + ('' if k == 'max' else 'ps'))]
+        for i, f in enumerate(req['files']):
+            (d / str(i)).mkdir(); (d / str(i) / f['name']).write_text(f['source']); args += ['--sva', str(d / str(i) / f['name'])]
+        r = subprocess.run(args, capture_output=True, text=True)
+        if r.returncode not in (0, 1):
+            raise RuntimeError(r.stderr)
+        return out.read_text()
     page = browser.new_page(viewport={'width': 1400, 'height': 900})
     errs = []
     page.on('pageerror', lambda e: errs.append(str(e)))
     page.expose_function('lazyCodes', codes)
+    page.expose_function('lazyEval', sva_eval)
     page.goto(pg.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('SVA.ready()')
     js = lambda e: page.evaluate(f"(async () => {{ const v = document.querySelector('.wv').waveView; return {e}; }})()")
     open_ = ("([n, t, lazy]) => { const f = new File([t], n + '.fst'); if (lazy) { f.wlLazy = true; f.wlLoad = c => window.lazyCodes(n, c); } "
@@ -3091,7 +3127,7 @@ def lazy_dump(browser, build):
         if w is None:
             continue   # a dump sva fst refuses (time back, cut off)
         r = page.evaluate(same, [name, *w]); n += 1
-        if not r[0] or r[2] or (r[1] == 0 and 'signal' in w[0] and '$var' in w[1] and False):
+        if not r[0] or r[2] or (r[1] == 0 and '$var' in w[1]):   # lazy rows before the read: a header with signals (review T-08)
             bad.append((name, r))
     check(not bad and n >= 40, f'{n} dumps read as they are needed (the whole dump as a window: sva vcd --codes --from --to --lod --keep), every '
           f'signal: the rows of the whole text {bad}')
@@ -3191,6 +3227,171 @@ def lazy_dump(browser, build):
           f'the edge search: not over a row held in part (zoom in), as the whole dump on a row read whole {feat["edge"]} {feat["edgeWhole"]}')
     check(feat['cycles'] == [None, 10000] and 'read in part' in feat['range'] and 'changes in this stretch' in feat['tip'],
           f'cycles, the range counts, the tooltip of a busy row: not a wrong number where it is held in part {feat["cycles"]} {feat["range"]} {feat["tip"]}')
+    # an assertion over a clock too busy to read whole (a 1 GB dump's, 0.59: refused): by the CLI over the whole dump (sva
+    # eval --no-pass --cycle-runs): the counts and the failures of the whole text, the passes listed for the time shown
+    # once it is narrow enough (a window's sva eval), the same as the whole text's there; zoomed out: said, not asked
+    cli = page.evaluate("""async ([whole, head]) => { const a = document.createElement('div'), b = document.createElement('div'); document.body.append(a, b);
+      await SVA.loadFiles([{ name: 'big.sv', text: 'module tb;\\n  a_q: assert property (@(posedge clk) q |-> st != 3\\'d2);\\nendmodule\\n' }]);
+      const calls = [], wait = ms => new Promise(r => setTimeout(r, ms));
+      const va = new WaveLens.WaveView(a, WaveLens.vcdToWave(whole, { name: 'parts', budget: Infinity }).doc, {});
+      const vb = new WaveLens.WaveView(b, WaveLens.vcdToWave(head, { name: 'parts', lazy: true }).doc, { loadCodes: (c, w) => window.lazyCodes('parts', c, w),
+        evalSva: req => { calls.push(req); return window.lazyEval('parts', req); }, lazyKeep: 256, lazyBuckets: 512, lazyWhole: 15000 });
+      await SVA.ready(); await vb.need(vb.M.rows);
+      const ba = va.sva.bind('a_q', 'tb'), bb = vb.sva.bind('a_q', 'tb'); await va.sva.queue; await vb.sva.queue;
+      const oa = ba.results.assertions[0], ob = bb.results.assertions[0], out = {};
+      const fails = o => JSON.stringify(o.attempts.filter(x => x.result !== 'pass').map(x => [x.start, x.end, x.result, x.failed_at, x.note]));
+      const Ta = ba.results.cycles, Tb = bb.results.cycles;
+      out.whole = [bb.via, bb.error, JSON.stringify(oa.stats) === JSON.stringify(ob.stats), oa.stats.fail > 10 && oa.stats.pass > 100, fails(oa) === fails(ob),
+        ob.attempts.every(x => x.result !== 'pass'), Ta.length === Tb.length && Ta.every((t, i) => t === Tb[i])];
+      const rep = await vb.sva.report(); out.report = [rep.summary.totals.fail === oa.stats.fail && ob.file === 'big.sv', 'cycle_runs' in rep.input.results[0],
+        rep.summary.assertions[0].first_fail.time === (await va.sva.report()).summary.assertions[0].first_fail.time];
+      out.req = [calls.length, calls[0].passes, calls[0].max, calls[0].scope, calls[0].files.map(f => f.name).includes('big.sv')];
+      out.line0 = vb.sva.el.textContent.includes('the passes listed zoomed in');
+      // zoomed in where it passes: the window's passes asked once, listed with the failures
+      const w0 = Tb[6000], span = 400000; vb.sva.reveal(bb); vb.t0 = w0; vb.span = span; vb.draw();
+      for (let i = 0; i < 100 && !(bb.cli && bb.cli.win); i++) await wait(50);
+      const inWin = (o, T) => JSON.stringify(o.attempts.filter(x => T[x.start] >= w0 && T[x.start] <= w0 + span).map(x => [x.start, x.end, x.result]));
+      const ow = bb.results.assertions[0];
+      out.win = [calls.length, calls[1] && calls[1].passes, calls[1] && calls[1].from <= w0 && calls[1].to >= w0 + span, !!bb.cli.win,
+        ow.attempts.some(x => x.result === 'pass'), inWin(oa, Ta) === inWin(ow, Tb), JSON.stringify(ow.stats) === JSON.stringify(oa.stats), fails(ow) === fails(oa)];
+      out.line1 = /sva eval: \\d+ passes of this window/.test(vb.sva.el.textContent);
+      await wait(50); out.drawn = (bb.draw.lane.marks || []).some(x => x[0] === 'pass');   // on the waves too
+      vb.draw(); await wait(500); out.again = calls.length;   // the same view: not asked again
+      SVA.cli.cycles = 2000; vb.t0 = 0; vb.span = Ta[Ta.length - 1] + 1000; vb.draw(); await wait(500); SVA.cli.cycles = 20000;
+      out.wide = [calls.length, bb.cli.wide, vb.sva.el.textContent.includes('the passes listed zoomed in')];
+      out.saved = !(vb.sva.saved && vb.sva.saved.results && vb.sva.saved.results['a_q@tb']);
+      for (const v of [va, vb]) { const el = v.root; v.destroy(); el.remove(); }
+      return out; }""", [pw, ph])
+    check(cli['whole'] == ['cli', None, True, True, True, True, True] and cli['req'] == [1, False, 20000, 'tb', True] and cli['line0']
+          and cli['report'] == [True, True, True],
+          f'an assertion over a clock too busy to read whole: by sva eval over the dump, the counts and failures of the whole text, no pass listed, '
+          f'the same cycles, the report by their runs {cli["whole"]} {cli["req"]} {cli["report"]}')
+    check(cli['win'] == [2, True, True, True, True, True, True, True] and cli['line1'] and cli['drawn'] and cli['again'] == 2,
+          f'zoomed in: the passes of the time shown by one sva eval of that window, the same as the whole text\'s there, the failures kept '
+          f'{cli["win"]} {cli["line1"]} drawn {cli["drawn"]} {cli["again"]}')
+    check(cli['wide'] == [2, True, True] and cli['saved'], f'zoomed out: said, not asked; the CLI\'s results not kept in the browser {cli["wide"]} {cli["saved"]}')
+    # review 2026-11-13: past the failures listed (SVA.cli.failures) a window lists its own failures too (B-01), one sva eval
+    # of a window for every CLI binding of a scope (B-11), a failed window not asked again on every frame (B-10), Why of a
+    # failure read over its attempt (B-12), a state restores the attempt by its cycles (B-13), an edit while it evaluates:
+    # evaluated again (B-14)
+    rv = page.evaluate("""async ([whole, head]) => { const a = document.createElement('div'), b = document.createElement('div'); document.body.append(a, b);
+      await SVA.loadFiles([{ name: 'big2.sv', text: 'module tb;\\n  a_s2: assert property (@(posedge clk) q |-> st != 3\\'d2);\\n' +
+        '  a_s5: assert property (@(posedge clk) q |-> st != 3\\'d5);\\nendmodule\\n' }]);
+      const calls = [], wait = ms => new Promise(r => setTimeout(r, ms)); let fail = false, slow = 0;
+      SVA.cli.failures = 50;
+      const va = new WaveLens.WaveView(a, WaveLens.vcdToWave(whole, { name: 'parts', budget: Infinity }).doc, {});
+      const vb = new WaveLens.WaveView(b, WaveLens.vcdToWave(head, { name: 'parts', lazy: true }).doc, { loadCodes: (c, w) => window.lazyCodes('parts', c, w),
+        evalSva: async req => { calls.push(req); if (slow && req.from == null) await wait(slow); if (fail && req.from != null) throw new Error('boom');
+          return window.lazyEval('parts', req); }, lazyKeep: 256, lazyBuckets: 512, lazyWhole: 15000 });
+      await SVA.ready(); await vb.need(vb.M.rows);
+      const bind = (v, l) => v.sva.bind(l, 'tb'), A = [bind(va, 'a_s2'), bind(va, 'a_s5')], B = [bind(vb, 'a_s2'), bind(vb, 'a_s5')];
+      await va.sva.queue; await vb.sva.queue;
+      const T = B[0].results.cycles, out = {}, ob = () => B[0].results.assertions[0], oa = A[0].results.assertions[0];
+      out.cut = [ob().attempts.length === 50, ob().attempts.every(x => x.result === 'fail'), oa.stats.fail > 50,
+        /the first 50 of \\d+ listed/.test(vb.sva.el.textContent)];
+      // a state restores the attempt by its cycles though the list differs (the passes of a window before it loaded)
+      const o1 = () => B[1].results.assertions[0];   // a_s5: its failures from cycle 2750, passes before them
+      vb.sva.select(B[1], 10); const at = o1().attempts[10], snap = vb.sva.snapshot(); await wait(100);
+      vb.t0 = T[2600]; vb.span = 100000; vb.draw(); for (let i = 0; i < 100 && !(B[1].cli.win && B[1].cli.win.a <= T[2600]); i++) await wait(50);
+      vb.sva.selA = null; const moved = o1().attempts.indexOf(at) > 10;
+      await vb.sva.restore(snap); const got = vb.sva.selA && o1().attempts[vb.sva.selA.i];
+      out.sel = [snap.view.sel.start === at.start, moved, !!got && got.start === at.start && got.end === at.end];
+      // a window past the 50 failures listed: the whole text's attempts there (passes and failures), one ask for both
+      const w0 = T[6880], span = 100000, n0 = calls.length; vb.sva.reveal(B[0]); vb.t0 = w0; vb.span = span; vb.draw();
+      const over = c => c.win && c.win.a <= w0 && c.win.b >= w0 + span;
+      for (let i = 0; i < 100 && !(over(B[0].cli) && over(B[1].cli)); i++) await wait(50);
+      const inWin = (o, T) => JSON.stringify(o.attempts.filter(x => T[x.start] >= w0 && T[x.start] <= w0 + span && x.result !== 'vacuous')
+        .map(x => [x.start, x.end, x.result]));
+      out.win = [calls.length - n0, (calls[n0] || {}).asserts, inWin(oa, A[0].results.cycles) === inWin(ob(), T),
+        ob().attempts.some(x => x.result === 'fail' && T[x.start] >= w0), B[0].cli.win && B[0].cli.win.fails > 0];
+      // Why of a failure of that window: its table (the signals read over the attempt)
+      const fi = ob().attempts.findIndex(x => x.result === 'fail' && T[x.start] >= w0); vb.sva.select(B[0], fi);
+      for (let i = 0; i < 60 && !/<table/.test(vb.sva.why || ''); i++) await wait(50);
+      out.why = /<table/.test(vb.sva.why || '');
+      // a failing window: asked once while the view stays in it, said on the line
+      fail = true; const n1 = calls.length; vb.t0 = T[3000]; vb.span = span;
+      for (let i = 0; i < 8; i++) { vb.draw(); await wait(450); }
+      out.failed = [calls.length - n1, /this window not evaluated: boom/.test(vb.sva.el.textContent)]; fail = false;
+      // the assertion edited while its evaluation runs: evaluated again, the new text's results
+      slow = 400; vb.sva.evaluate(B[0]); await wait(100);
+      await SVA.loadFiles([{ name: 'big2.sv', text: 'module tb;\\n  a_s2: assert property (@(posedge clk) q |-> st != 3\\'d3);\\n' +
+        '  a_s5: assert property (@(posedge clk) q |-> st != 3\\'d5);\\nendmodule\\n' }]);
+      for (let i = 0; i < 100 && (B[0].running || !B[0].results || /'d2/.test(ob().text)); i++) await wait(50);
+      out.edit = [!!B[0].results && /'d3/.test(ob().text), B[0].error || null]; slow = 0;
+      SVA.cli.failures = 20000;
+      for (const v of [va, vb]) { const el = v.root; v.destroy(); el.remove(); }
+      return out; }""", [pw, ph])
+    check(rv['cut'] == [True, True, True, True] and rv['win'][0] == 1 and {'a_s2', 'a_s5'} <= set(rv['win'][1]) and rv['win'][2:] == [True, True, True],
+          f'past the failures listed: the line says so; a window lists its failures too, the whole text\'s attempts there; one sva eval for both '
+          f'bindings {rv["cut"]} {rv["win"]}')
+    check(rv['why'] and rv['sel'] == [True, True, True], f'Why of a CLI failure: its table; a state restores the attempt by its cycles {rv["why"]} {rv["sel"]}')
+    check(rv['failed'] == [1, True] and rv['edit'] == [True, None], f'a failed window asked once, said; edited while evaluated: evaluated again '
+          f'{rv["failed"]} {rv["edit"]}')
+    # review 2026-11-13, the readers of a busy row: WaveDrom over a short time exact, over a long one refused (B-04); a packed
+    # struct of the .sv types filled (B-03); a feature over a row whose read failed refused (B-07); one whole read of a row
+    # however often it is asked meanwhile (B-08)
+    rd = page.evaluate("""async ([whole, head]) => { const a = document.createElement('div'), b = document.createElement('div'); document.body.append(a, b);
+      const sv = WaveLens.svTables(['typedef struct packed { logic [3:0] hi; logic [3:0] lo; } c_t;\\nmodule tb; c_t cnt; endmodule\\n']);
+      const mk = (t, o) => { const d = WaveLens.vcdToWave(t, o).doc; WaveLens.svApply(d, sv, []); return d; }, wait = ms => new Promise(r => setTimeout(r, ms));
+      let reads = 0, failSt = false;
+      const va = new WaveLens.WaveView(a, mk(whole, { name: 'parts', budget: Infinity }), {});
+      const vb = new WaveLens.WaveView(b, mk(head, { name: 'parts', lazy: true }), { loadCodes: (c, w) => { if (w && w.lod === 1) reads++;
+        if (failSt && c.includes('$')) return Promise.reject(new Error('too large')); return window.lazyCodes('parts', c, w); },
+        lazyKeep: 256, lazyBuckets: 512, lazyWhole: 15000 });
+      await vb.need(vb.M.rows); const R = (v, n) => v.M.rows.find(r => r.name === n), out = {};
+      const lo0 = vb.valueAt(R(vb, 'lo'), 5000.5);   // held in part (a summary): '…', not '' (it was never filled)
+      reads = 0; await Promise.all([1, 2, 3, 4].map(() => vb.needWhole([R(vb, 'cnt')], 'a test'))); out.once = reads;   // one whole read for four asks
+      out.struct = [vb.valueAt(R(vb, 'lo'), 5000.5), va.valueAt(R(va, 'lo'), 5000.5), vb.valueAt(R(vb, 'hi'), 7777.5) === va.valueAt(R(va, 'hi'), 7777.5),
+        lo0];
+      const wd = async (v, a, b) => { const sel = v.M.rows.filter(r => ['clk', 'q'].includes(r.name)); v.picks = new Map(sel.map(r => [r, 'hl']));
+        try { const r = await v.run([{ op: 'picture', format: 'wavedrom', from: a, to: b }]);
+          return r[0].error ? 'ERR ' + r[0].error : JSON.stringify(r[0].wavedrom); } catch (e) { return 'ERR ' + e.message; } };
+      out.wd = [await wd(vb, 1e7, 1e7 + 40000) === await wd(va, 1e7, 1e7 + 40000), (await wd(vb, 0, 2e7)).startsWith('ERR'), vb.picHold === null];
+      for (const v of [va, vb]) { const el = v.root; v.destroy(); el.remove(); }
+      // a row whose read failed: a feature over it refused, named
+      const d = document.createElement('div'); document.body.append(d); failSt = true;
+      const vc = new WaveLens.WaveView(d, mk(head, { name: 'parts', lazy: true }), { loadCodes: (c, w) => (c.includes('$') ? Promise.reject(new Error('too large')) :
+        window.lazyCodes('parts', c, w)) });
+      await vc.need(vc.M.rows).catch(() => {});
+      out.unread = await vc.needWhole([R(vc, 'st')], 'fsm_stats').then(() => 'no error', e => e.message);
+      vc.destroy(); d.remove();
+      return out; }""", [pw, ph])
+    check(rd['struct'][0] == rd['struct'][1] and rd['struct'][0] not in ('', None) and rd['struct'][2] and rd['struct'][3] == '…' and rd['wd'] == [True, True, True] and rd['once'] == 1,
+          f'a struct of the .sv types filled on a large dump; WaveDrom exact over a short time, refused over a long one; one whole read for four asks '
+          f'{rd["struct"]} {rd["wd"]} {rd["once"]}')
+    check('tb.st' in rd['unread'] and 'not read' in rd['unread'], f'a feature over a row whose read failed: refused, the row named {rd["unread"]!r}')
+    # the race of 0.58 (review T-10): a window's answer that comes after its row was read whole leaves it whole, no error
+    race = page.evaluate("""async ([whole, head]) => { const b = document.createElement('div'); document.body.append(b);
+      const wait = ms => new Promise(r => setTimeout(r, ms)); let errs = 0; const onErr = () => { errs++; }; window.addEventListener('error', onErr);
+      const vb = new WaveLens.WaveView(b, WaveLens.vcdToWave(head, { name: 'parts', lazy: true }).doc, { loadCodes: (c, w) =>
+        (w && w.lod !== 1 && w.from > 0 ? wait(500) : Promise.resolve()).then(() => window.lazyCodes('parts', c, w)), lazyKeep: 256, lazyBuckets: 512,
+        lazyWhole: 15000 });
+      await vb.need(vb.M.rows); const cnt = vb.M.rows.find(r => r.name === 'cnt');
+      vb.t0 = 1e7; vb.span = 1e5; vb.draw(); await wait(250); const asked = !!vb.winAsk;
+      await vb.needWhole([cnt], 'a test'); const read = !cnt.sum && !cnt.part;
+      await wait(700); vb.draw(); vb.t0 = 2e6; vb.draw(); await wait(50);
+      const out = [asked, read, !cnt.sum && !cnt.part, errs]; window.removeEventListener('error', onErr); vb.destroy(); b.remove(); return out; }""", [pw, ph])
+    check(race == [True, True, True, 0], f'a window answered after its row was read whole: the row stays whole, no error {race}')
+    # the bus plugin on a large dump: its ports' signals read whole first, the transfers of the whole text (B-02)
+    L = ['$timescale 1ns $end', '$scope module tb $end', '$var wire 1 ! pclk $end', '$var wire 1 " psel $end', '$var wire 1 # penable $end',
+         '$var wire 1 $ pready $end', '$var wire 1 % pwrite $end', '$var wire 8 & paddr [7:0] $end', '$var wire 8 ( pwdata [7:0] $end', '$upscope $end',
+         '$enddefinitions $end', '#0', '0!', '0"', '0#', '1$', '0%', 'b0 &', 'b0 (']
+    for k in range(200):   # a transfer every 4 cycles: setup, access
+        t0 = k * 40
+        L += [f'#{t0+5}', '1!', f'#{t0+6}', '1"', '1%', f'b{k%256:b} &', f'b{(k*3)%256:b} (', f'#{t0+10}', '0!', f'#{t0+15}', '1!', f'#{t0+16}', '1#',
+              f'#{t0+20}', '0!', f'#{t0+25}', '1!', f'#{t0+26}', '0"', '0#', f'#{t0+30}', '0!', f'#{t0+35}', '1!', f'#{t0+40}', '0!']
+    aw, ah = fst_of('apbz', '\n'.join(L) + '\n')
+    bus = page.evaluate("""async ([whole, head]) => { const a = document.createElement('div'), b = document.createElement('div'); document.body.append(a, b);
+      const va = new WaveLens.WaveView(a, WaveLens.vcdToWave(whole, { name: 'apbz', budget: Infinity }).doc, {});
+      const vb = new WaveLens.WaveView(b, WaveLens.vcdToWave(head, { name: 'apbz', lazy: true }).doc, { loadCodes: (c, w) => window.lazyCodes('apbz', c, w),
+        lazyKeep: 256, lazyBuckets: 64 });
+      const wait = ms => new Promise(r => setTimeout(r, ms));
+      const run = v => v.run([{ op: 'bus_list', limit: 3 }]).then(x => JSON.stringify([x[0].ports, x[0].transactions.map(t => t.label)]));
+      let rb = await run(vb); for (let i = 0; i < 40 && rb !== await run(va); i++) { await wait(100); rb = await run(vb); }
+      const out = [await run(va), rb, !!vb.M.rows.find(r => r.name === 'pclk').part];
+      for (const v of [va, vb]) { const el = v.root; v.destroy(); el.remove(); }
+      return out; }""", [aw, ah])
+    check(bus[0] == bus[1] and 'no transfers' not in bus[1], f'the bus plugin on a large dump: its ports read whole, the transfers of the whole text {bus}')
     # a picture of all rows (off the screen too): the busy rows read for its time as exact as the view would be, held until it
     # is made (a frame does not take them back), then back to their summary
     pic = page.evaluate("""async ([whole, head]) => { const a = document.createElement('div'), b = document.createElement('div'); document.body.append(a, b);
@@ -7007,7 +7208,7 @@ def ranges(browser, build):
       out.tall = [e0 <= 16384, got.length, u.root.querySelector('.bar .toast').textContent]; u.root.remove(); u.destroy();
       navigator.clipboard.write = keep; for (const x of [v, w]) { const e = x.root; x.destroy(); e.remove(); }
       return out; }""")
-    check(ca['bar'] and ca['menu'] == 'Copy image of all rows (60)', f'Copy image of all rows: in the bar\'s ▾ and the right button\'s Export ▸ {ca["bar"]} {ca["menu"]!r}')
+    check(ca['bar'] and ca['menu'] in ('Copy image of all rows (60)', 'Copy image of all rows (60)yI'), f'Copy image of all rows: in the bar\'s ▾ and the right button\'s Export ▸ {ca["bar"]} {ca["menu"]!r}')
     check(0 < ca['screen'] < ca['folded'] < ca['all'] and abs((ca['all'] - ca['folded']) / ca['all'] - 20 / 62) < 0.05, f'Copy image of all rows: every row of the list, taller than the '
           f'screen\'s; a folded module as one line (px high: screen {ca["screen"]}, all {ca["all"]}, sub folded {ca["folded"]})')
     check(ca['big'][0] == 0 and 'a PNG stops at 16384' in ca['big'][1] and 'Save image of all rows as SVG' in ca['big'][1],

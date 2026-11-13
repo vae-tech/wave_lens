@@ -63,9 +63,9 @@ function offerSva(again = false) {   // again: said once more (a dump too large 
 /* ---------------- WaveLens: Set the sva program… — the ones found on this machine, each run once, or a file picked ---------------- */
 // a program that answers --help with sva's usage in 5 s -> '' (it runs here), else why not
 function svaCheck(bin) {
-  const keep = p => { const t = setTimeout(() => p.kill(), 5000); p.on('close', () => clearTimeout(t)); return p; };
-  return spawnRun(bin, ['--help'], { maxOut: 1 << 16, keep, probe: true })
-    .then(r => (r.code === 0 && /usage: sva/.test(r.out + r.err) ? '' : r.code === -1 ? r.err : `not sva (${r.err.split('\n')[0] || 'exit ' + r.code})`));
+  return spawnRun(bin, ['--help'], { maxOut: 1 << 16, probe: true, timeout: 5000 })   // a kill is no answer: "no answer in 5 s" (review B-24)
+    .then(r => (r.code === 0 && /usage: sva/.test(r.out + r.err) ? '' : r.late ? `no answer in 5 s` : r.code === -1 ? r.err || 'did not run' :
+      `not sva (${r.err.split('\n')[0] || 'exit ' + r.code})`));
 }
 // the sva programs on this machine: the one set, inside the extension, the repository's, on the PATH, cargo's, the workspace's
 // builds (make dist-*, cargo build in sva/, any sva of it), C:\Tools\wavelens -> [{path, from, why}] (why '': it runs here)
@@ -142,7 +142,10 @@ const cliJson = s => JSON.parse(s.slice(Math.max(0, s.search(/^[{[]/m))));
 // waiting for ever (a 1 GB dump's clock read whole)
 function spawnRun(bin, args, { input = '', maxOut = Infinity, keep = p => p, probe = false, timeout = 0 } = {}) {
   return new Promise(ok => {
-    const p = keep(cp.spawn(bin, args, { stdio: ['pipe', 'pipe', 'pipe'] })), out = [], err = [];
+    let p;
+    // a spawn that throws at once (a .cmd without a shell on Windows, a NUL in an argument): did not start, answered (review B-25)
+    try { p = keep(cp.spawn(bin, args, { stdio: ['pipe', 'pipe', 'pipe'] })); } catch (e) { ok({ code: -1, out: '', err: noCli(bin, Object.assign(e, { probe })) }); return; }
+    const out = [], err = [];
     let size = 0, big = false, late = false;
     const t = timeout ? setTimeout(() => { late = true; p.kill(); }, timeout) : null;
     p.stdin.on('error', () => { /* it closed its stdin: what it says comes on stdout, stderr and its exit */ });
@@ -173,6 +176,8 @@ const WHOLE_MAX = 256 << 20;
 // a read of some signals (codes): at most this much text (a window or a summary is a few MB; past it, fewer signals at
 // once), an answer in this time, this many CLIs of a tab at once (the rest wait their turn)
 const CODES_MAX = 48 << 20, CODES_TIMEOUT = +process.env.WAVELENS_CODES_TIMEOUT || 120000, CODES_PROCS = 2;
+// an evaluation of assertions over a large dump by the CLI (sva eval): an answer in this time
+const SVA_TIMEOUT = +process.env.WAVELENS_SVA_TIMEOUT || 600000;
 const mb = n => `${Math.round(n / (1 << 20))} MB`;
 function lazyFor(file, size) {
   const set = vscode.workspace.getConfiguration('wavelens').get('lazy') || 'auto';
@@ -345,7 +350,7 @@ class Tab {
     this.watch();
     TABS.add(this);
   }
-  post(m) { return this.panel.webview.postMessage(m); }
+  post(m) { return this.disposed ? Promise.resolve(false) : this.panel.webview.postMessage(m); }   // (a tab closed: nothing)
   html(r) {
     const w = this.panel.webview, nonce = crypto.randomBytes(16).toString('base64'), src = w.cspSource;
     const u = (root, f) => w.asWebviewUri(vscode.Uri.file(path.join(root, f))).toString();
@@ -470,7 +475,63 @@ ${scripts}
     }
     return { error: r.err || `${bin} vcd --codes: exit ${r.code}` };
   }
+  // Assertions over the whole dump by the CLI (a large dump read by the window: a clock too busy to read whole in the page):
+  // sva eval on its FST, the page's files written to a directory of their own (each under its name: the errors say it),
+  // the names resolved as the page does (--resolve scope, its prefixes) -> {text: the results JSON} | {error}. passes false:
+  // the failures listed alone (--no-pass), max: --max-attempts, from / to (ps): a window; stopped as a read (codes-stop rid)
+  async svaEval(m) {
+    const bin = svaBin(), fst = this.fst;
+    if (!fst) return { error: 'this dump is read whole' };
+    const now = await fs.promises.stat(fst).then(stamp, () => 'gone');
+    if (now !== this.fstAt) return { error: `${path.basename(this.file)} changed on the disk since it was read: ⟳ (R) reads it again` };
+    const files = (Array.isArray(m.files) ? m.files : []).filter(f => f && typeof f.name === 'string' && typeof f.source === 'string');
+    if (!files.length) return { error: 'no SystemVerilog file to evaluate' };
+    const n = (k, v) => (v == null ? null : typeof v !== 'number' || !isFinite(v) || v < 0 || v > 2 ** 53 || Math.floor(v) !== v ?
+      `sva: ${k} ${v} is no time or count` : '');
+    for (const k of ['max', 'from', 'to']) { const bad = n(k, m[k]); if (bad) return { error: bad }; }
+    const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'wavelens-sva-')), out = path.join(dir, 'results.json');
+    const args = ['eval', '--waves', fst, '--resolve', 'scope', '--cycle-runs', '--no-lane', '--out', out];
+    if (m.scope) args.push('--scope', String(m.scope));
+    if (Array.isArray(m.ignore) && m.ignore.length) args.push('--ignore-prefix', m.ignore.map(String).join(','));
+    for (const a of Array.isArray(m.asserts) ? m.asserts : []) args.push('--assert', String(a));
+    if (m.passes === false) args.push('--no-pass');
+    if (m.max != null) args.push('--max-attempts', String(m.max));
+    if (m.from != null) args.push('--from', `${m.from}ps`);
+    if (m.to != null) args.push('--to', `${m.to}ps`);
+    const job = { rid: m.rid, stopped: false, p: null };
+    try {
+      for (const [i, f] of files.entries()) {
+        const p = path.join(dir, String(i), path.basename(f.name.replace(/\\/g, '/')) || 'assertions.sv');
+        await fs.promises.mkdir(path.dirname(p), { recursive: true });
+        await fs.promises.writeFile(p, f.source);
+        args.push('--sva', p);
+      }
+      if (m.rid != null) this.reads.set(m.rid, job);
+      // in turn with the reads of signals: at most CODES_PROCS CLIs of a tab at once (an evaluation of a large dump: 0.5 GB)
+      const r = await new Promise(ok => { job.ok = ok;
+        job.go = () => spawnRun(bin, args, { timeout: SVA_TIMEOUT, keep: p => { job.p = p; return this.proc(p); } }).then(ok);
+        this.codesQ.push(job); this.codesNext(); });
+      if (job.p) { this.codesN--; this.codesNext(); }
+      if (job.stopped || r.stopped) return { error: 'stopped' };
+      if (r.code === 0 || r.code === 1) return { text: await fs.promises.readFile(out, 'utf8') };
+      // 2 with its results written (a window with no clock edge, one assertion of several on a signal the dump lacks): those
+      // results, each assertion's own state in them; an error only without a file
+      if (r.code === 2) {
+        const t = await fs.promises.readFile(out, 'utf8').catch(() => null);
+        try { if (t && JSON.parse(t)) return { text: t }; } catch (e) { /* not a results file: the error below */ }
+      }
+      if (/unknown option --(no-pass|cycle-runs|max-attempts)/.test(r.err)) {
+        offerSva(true);
+        return { error: `${bin} is older than the extension (no --cycle-runs): WaveLens: Set the sva program…` };
+      }
+      return { error: r.err.split('\n').filter(l => !/^sva: \d+ assertions over/.test(l)).join('; ') || `${bin} eval: exit ${r.code}` };
+    } finally {
+      if (m.rid != null) this.reads.delete(m.rid);
+      fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
   codesNext() {
+    if (this.disposed) return;
     while (this.codesN < CODES_PROCS && this.codesQ.length) { this.codesN++; this.codesQ.shift().go(); }
   }
   // a read the page no longer wants: out of the queue, or its CLI killed; answered 'stopped'
@@ -493,6 +554,7 @@ ${scripts}
       case 'codes': return reply(await this.codes(Array.isArray(m.codes) ? m.codes : [],
         { from: m.from, to: m.to, lod: m.lod, keep: m.keep }, m.rid));
       case 'codes-stop': this.codesStop(m.rid); return;
+      case 'sva': return reply(await this.svaEval(m));
       case 'store': {   // a localStorage key of this dump (null: removed), kept in the workspace: the keys changed, not a snapshot
         if (typeof m.key !== 'string') return;
         this.changed.set(m.key, m.value == null ? null : String(m.value));
@@ -541,7 +603,7 @@ ${scripts}
           'WaveLens: Open the configuration to mend it, or Reset it', 'Open', 'Reset')
           .then(a => (a === 'Open' ? cfgOpen() : a === 'Reset' ? cfgReset() : null));
         return;
-      case 'page': for (const x of this.streams.values()) x.close(); this.streams.clear(); return;   // a page (again): its own streams
+      case 'page': for (const x of this.streams.values()) x.close(); this.streams.clear(); this.stopAll(); return;   // a page (again): its own streams, reads
       case 'es-open': { const old = this.streams.get(m.sid); if (old) old.close(); return this.esOpen(m.sid, String(m.url)); }
       case 'es-close': { const s = this.streams.get(m.sid); this.streams.delete(m.sid); if (s) s.close(); return; }
       case 'http': return reply(await relay(this, String(m.url), m.body == null ? '' : String(m.body)));
@@ -884,13 +946,21 @@ ${scripts}
     go();
   }
   dispose() {
-    TABS.delete(this); fs.unwatchFile(this.file, this.onStat); fs.unwatchFile(typesFile(this.file), this.onTypes);
+    this.disposed = true; TABS.delete(this); fs.unwatchFile(this.file, this.onStat); fs.unwatchFile(typesFile(this.file), this.onTypes);
     if (this.runsWatched) fs.unwatchFile(this.runsWatched, this.onRuns);
     clearTimeout(this.changeT); clearTimeout(this.typesT);
     try { DIAG.delete(this.uri); } catch (e) { /* disposed: the window closes */ }
     this.flush();
     for (const s of this.streams.values()) s.close();
     this.streams.clear();
+    this.stopAll();   // the reads waiting do not start after (review B-18)
+  }
+  // every read and evaluation of the tab: the ones waiting answered 'stopped', the running ones killed (the tab closed, its page
+  // made again: the new page's numbers start from 1 again; review B-19)
+  stopAll() {
+    for (const job of this.codesQ.splice(0)) { job.stopped = true; job.ok({ stopped: true }); }
+    for (const [, job] of this.reads) { job.stopped = true; if (job.p) job.p.kill(); }
+    this.reads.clear();
     for (const p of this.procs) p.kill();
   }
 }

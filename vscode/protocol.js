@@ -18,6 +18,8 @@
     codes: { ask: 'codes from? to? lod? keep? rid?', reply: ['text'] },   // a lazy dump's signals by their id codes: sva vcd --codes;
     //   from, to (ps), lod, keep: a window of them (--from --to --lod --keep); rid: the page's number of this read (codes-stop)
     'codes-stop': { ask: 'rid', reply: null },                     // that read no longer wanted: its CLI killed, answered { error: 'stopped' }
+    sva: { ask: 'files scope? asserts? ignore? passes? max? from? to? rid?', reply: ['text'] },   // assertions over a lazy dump's FST: sva eval
+    //   --cycle-runs --no-lane (files [{name, source}], passes false: --no-pass, max: --max-attempts, from, to (ps)); stopped as a codes read (rid)
     store: { ask: 'key value', reply: null },                      // a localStorage key of this dump (value null: removed)
     gstore: { ask: 'key value', reply: null },                     // the bar's, for every tab: key bar (wavelens.bar) or look (toolsHidden, toolsFolded)
     save: { ask: 'name b64', reply: ['path', 'cancel'] },          // a download: a save dialog on the host

@@ -5,6 +5,40 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.60 — 13 November 2026
+
+Assertions on a large dump by the CLI over the whole dump, the review of 2026-11-13 fixed, the keys on any layout.
+
+- **Assertions on a large dump** (VS Code, read by the window) whose clock or signal changes more than `lazyWhole`
+  times (a 12 MHz clock over a long test: 3.5 M changes; refused in 0.58–0.59): evaluated by the CLI over the whole dump,
+  `sva eval` on its FST — the counts, every failure and the attempts without verdict listed (on the waves, *Go to first
+  failure*, `]f` / `[f`); the passes counted, listed for the time shown once it is 20 000 cycles or fewer (an `sva eval` of
+  that window). The binding's line says so.
+- `sva eval --no-pass` (the failures listed alone, the passes counted), `--max-attempts N`, `--cycle-runs` (the cycles'
+  times as runs `[first, step, count]`: a 5 M-cycle dump's results 2 MB, not 180); the engine's option `passes`.
+- A large dump: a window's answer that came after the signal was read whole (an assertion, the FSM panel) made it a
+  window again with no summary to go back to: an error on the next frame (0.58).
+- The review of 2026-11-13 (`docs/reviews/review-2026-11-13/report.md`):
+  - the CLI's assertions: a window lists its failures too past the 20 000 listed (they were dropped: a green lane where the
+    dump fails), the cut keeps the failures first; one `sva eval` of a window for every binding of a module, in turn with
+    the reads (two CLIs of a tab at once); a window that failed is not asked again on every frame; *Why* reads the signals
+    over the attempt; a saved state finds its attempt by its cycles; an assertion edited while it is evaluated is
+    evaluated again; an `sva eval` that exits 2 with its results (a window with no clock edge, one signal missing) gives
+    them;
+  - the results of a partial list say so (`listed`: the passes counted only, how many there were, the longest attempt and
+    the last failure of all): the report's Last failure and Longest are the dump's, not the list's; `sva diff --results`
+    reads a `--cycle-runs` file; `sva eval` of a large dump holds no record of a pass or a vacuous attempt it does not list
+    and cuts each assertion's list at once (5 M cycles: 0.69 GB and 7 s, was 1.31 GB and 12 s);
+  - the readers of a busy signal of a large dump: the bus decoder ("no transfers" before), a struct of the `.sv` types
+    (never filled), WaveDrom (made of a summary), a struct of the dump's scopes (its value shown exact), the analog form
+    (a summary drawn as a curve), a feature over a signal whose read failed (it computed over nothing), the cycles and
+    the gaps (one whole read of a clock per change of the data); the window read's last stretch of an fs dump;
+  - the extension: a closed tab starts no read waiting, a page made again stops the old one's reads, a spawn that throws
+    is answered, a candidate `sva` that hangs on `--help` is not "runs here";
+  - the keys work by their place on another layout (Russian: `ш` is `i`, `ъ` `а` is `]f`); `yi` / `yI` copy an image of
+    the range (else the window) / of all rows, `zz` zooms to the range; the bookmark box takes the keys back when its row
+    comes back in sight, sits at the cursor with the gaps on; tips name `gO`, `R`, `gC`, `gc`.
+
 ## 0.59 — 13 November 2026
 
 A picture of every row (PNG or SVG), a bookmark's text asked where it goes, the gaps of a large dump fixed.

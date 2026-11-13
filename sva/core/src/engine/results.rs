@@ -156,11 +156,14 @@ pub struct Options {
     pub to: Option<usize>,
     /// Attempts in the same state are stepped once (default); false steps each one (for tests).
     pub merge: bool,
+    /// List the passing attempts of an assert / assume (default); false: counted only, the failures and the attempts
+    /// without verdict listed (a large dump: its passes are too many to list).
+    pub passes: bool,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Options { vacuous: false, lane: true, x: XMode::Fail, max_threads: 256, cover_traces: 100, from: 0, to: None, merge: true }
+        Options { vacuous: false, lane: true, x: XMode::Fail, max_threads: 256, cover_traces: 100, from: 0, to: None, merge: true, passes: true }
     }
 }
 
@@ -289,6 +292,26 @@ pub struct Outcome {
     /// Limits that were hit (thread caps).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<String>,
+    /// `attempts` is not every non-vacuous attempt (the passes counted only, the list cut): what it lacks, and the facts of
+    /// all of them it cannot give.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub listed: Option<Listed>,
+}
+
+/// What a partial list of attempts leaves out (sva eval --no-pass, --max-attempts: a large dump).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Listed {
+    /// The passing attempts are listed (false: counted only).
+    pub passes: bool,
+    /// The attempts there were before the list was cut (--max-attempts); none: not cut.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub of: Option<usize>,
+    /// The longest decided attempt of all, `[cycles, start]`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub longest: Option<[usize; 2]>,
+    /// The failure found last of all (the latest `failed_at`, then start).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_fail: Option<Attempt>,
 }
 
 impl Outcome {

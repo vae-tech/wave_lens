@@ -181,7 +181,8 @@ function paintSig(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk = s.stroke, bg = 'pane
   if (!s.tr.length) return;
   // a row held in part (a large dump read by the window): its dense spans as bars (partTr, denseBar), its last value to its window's end
   const pt = partOf(s), a = pt && pt.dense.length ? partTr(s, s.tr, pt) : s.tr, sEnd = pt && pt.b < (s.end ?? tEnd) ? pt.b : (s.end ?? tEnd);
-  if (s.analog && s.width > 1) return paintAnalog(P, s, y, h, X, tA, tB, xL, xR, tEnd, sk);
+  // the analog form: not over a dense span (a summary is no curve: drawn as the bars below), to the window's end (review B-06)
+  if (s.analog && s.width > 1 && !(pt && denseAt(pt, tA, tB))) return paintAnalog(P, s, y, h, X, tA, tB, xL, xR, pt ? sEnd : tEnd, sk);
   const yh = y + (lane ? 1 : 4), yl = y + h - (lane ? 1 : 5), ym = (yh + yl) / 2;
   const cl = x => Math.min(Math.max(x, xL - 8), xR + 8);
   let lv = null, lvDash = null, pk = null, py = ym, pw = Infinity, xe = 0;

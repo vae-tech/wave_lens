@@ -346,6 +346,22 @@ F.run(async () => {
   await new Promise(r => setTimeout(r, 300));
   out.left = pids.filter(alive).length;
   out.unknownStop = await A.send({ type: 'codes-stop', rid: 99 }).then(() => 'ok');
+  // assertions over the dump (sva) wait their turn with the reads; a page made again stops every one (review 2026-11-13 B-11, B-19)
+  mode('sleep');
+  const ev = id => A.send({ type: 'sva', id, rid: id, files: [{ name: 'a.sv', source: 'x' }], scope: 'tb' }).then(() => A.reply(id));
+  const evs = [20, 21, 22].map(ev);
+  await new Promise(r => setTimeout(r, 300));
+  const pids2 = [...t.procs].map(p => p.pid);
+  out.evRunning = [pids2.length, t.codesQ.length];
+  await A.send({ type: 'page' });
+  out.evStopped = (await Promise.all(evs)).map(r => r.error);
+  await new Promise(r => setTimeout(r, 300));
+  out.evLeft = pids2.filter(alive).length;
+  // a tab closed: the reads waiting never start (B-18)
+  [30, 31, 32].forEach(id => ask(id, { lod: 4, rid: id }));
+  await new Promise(r => setTimeout(r, 300));
+  t.dispose(); await new Promise(r => setTimeout(r, 300));
+  out.disposed = [t.procs.size, t.codesQ.length];
   return out;
 });
 """
@@ -382,6 +398,9 @@ class Codes(unittest.TestCase):
         self.assertEqual(o['running'], [2, 1], 'two CLIs at once, the third waits')
         self.assertEqual(o['stopped'], ['stopped'] * 3)
         self.assertEqual(o['left'], 0, 'the stopped reads\' CLIs killed')
+        self.assertEqual(o['evRunning'], [2, 1], 'evaluations in turn with the reads: two CLIs at once')
+        self.assertEqual((o['evStopped'], o['evLeft']), (['stopped'] * 3, 0), 'a page made again: every read stopped, its CLI killed')
+        self.assertEqual(o['disposed'], [0, 0], 'a tab closed: nothing running, nothing waiting')
 
 WP8 = r'''
 const fs = require('fs'), path = require('path');

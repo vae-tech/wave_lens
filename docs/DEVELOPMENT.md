@@ -224,7 +224,12 @@ so `bytes` and `codes` read the file shown); `source` (⟳, the dump changed) se
 signals (`codes`, optionally a window: `from to lod keep`, numbered `rid`) always settles: at most 48 MB of text
 (`CODES_MAX`), an answer in 120 s (`CODES_TIMEOUT`, `$WAVELENS_CODES_TIMEOUT` in the tests), two CLIs of a tab at once
 (`CODES_PROCS`, the rest in turn); `codes-stop` takes one out of the queue or kills its CLI (answered `stopped`); `spawnRun`
-never throws in `close` (an output too large for a string is `big`). On the
+never throws in `close` (an output too large for a string is `big`). `sva` (`svaEval`): assertions over the dump's FST by
+`sva eval --cycle-runs --no-lane --resolve scope` (the page's files written to a temporary directory, each under its
+name; `passes` false: `--no-pass`, `max`, `from`/`to`), stopped by `codes-stop` as a read, in turn with them (`codesQ`, two CLIs of a tab at once); `stopAll` on `dispose` and on
+a `page` (a page made again numbers its reads from 1); on the page `evaluateCli`
+(sva.js: a bound row over `lazyWhole`, `opts.evalSva` given) and `Panel.winWant` / `winRead` (the passes of a window,
+limits in `SVA.cli`). On the
 page the run shown is `runsShown` (A), the run compared is the compare's own (`cmp.result.run`, the getter `runCur`: B);
 a step of A (`runsShow`, `openDump(keep)`) takes the view's time as it is and its rows from a snapshot taken on now and on
 each run that had every row of it (`runsKeep`), so a run without a row does not lose it for the next one: the snapshot is

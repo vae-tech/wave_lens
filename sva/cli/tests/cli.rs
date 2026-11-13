@@ -326,6 +326,65 @@ fn edges_as_ieee_9_4_2() {
 }
 
 #[test]
+fn a_large_dump_failures_alone_and_cycle_runs() {
+    // req every cycle, ack every third: passes, failures; --no-pass lists the failures alone (the counts are the same),
+    // --max-attempts cuts the list with a note, --cycle-runs writes the edges as runs (a stop of the clock: a new run)
+    let mut body = String::from("#0\n0!\n1\"\n0#\n");
+    for k in 0..30u64 {
+        let t = 10 * k;
+        body += &format!("#{}\n1!\n{}#\n#{}\n0!\n", t + 5, if k % 3 == 0 { 1 } else { 0 }, t + 10);
+    }
+    body += "#400\n1!\n#410\n0!\n";
+    let d = clock_dump("large.vcd", "1ns", &body);
+    let json = |extra: &[&str]| {
+        let mut args = vec!["eval", "--waves", d.as_str(), "--scope", "tb", "--sva", "", "--assert", "a_req", "--json"];
+        let c = checks();
+        args[6] = c.as_str();
+        args.extend_from_slice(extra);
+        let o = sva(&args);
+        assert_eq!(o.status.code(), Some(1), "{}", err(&o));
+        serde_json::from_slice::<serde_json::Value>(&o.stdout).unwrap()
+    };
+    let all = json(&[]);
+    let few = json(&["--no-pass"]);
+    let a = &all["assertions"][0];
+    let f = &few["assertions"][0];
+    assert_eq!(a["stats"], f["stats"]);
+    let fails = |o: &serde_json::Value| o["attempts"].as_array().unwrap().iter().filter(|x| x["result"] == "fail").cloned().collect::<Vec<_>>();
+    assert!(a["stats"]["pass"].as_u64().unwrap() > 0 && f["attempts"].as_array().unwrap().len() == fails(a).len() && fails(f) == fails(a));
+    let cut = json(&["--no-pass", "--max-attempts", "3"]);
+    let c = &cut["assertions"][0];
+    assert_eq!(c["attempts"].as_array().unwrap().len(), 3);
+    assert!(c["notes"][0].as_str().unwrap().contains(&format!("the first 3 of {} attempts listed", fails(a).len())), "{c}");
+    // the cut keeps the failures first: passes listed too, the 3 kept are failures (review 2026-11-13 B-01)
+    let mixed = json(&["--max-attempts", "3"]);
+    assert!(mixed["assertions"][0]["attempts"].as_array().unwrap().iter().all(|x| x["result"] == "fail"), "{mixed}");
+    // what the partial list cannot say: in "listed" (review B-15)
+    assert_eq!(f["listed"]["passes"], false);
+    assert!(f["listed"]["longest"].is_array(), "{f}");
+    let cl = &cut["assertions"][0]["listed"];
+    assert_eq!(cl["of"].as_u64(), Some(fails(a).len() as u64));
+    assert_eq!(cl["last_fail"]["start"], fails(a).last().unwrap()["start"]);
+    // sva diff --results reads a --cycle-runs file by its times (review B-22)
+    let pa = write("res-a.json", &serde_json::to_string(&all).unwrap());
+    let rr = {
+        let mut args = vec!["eval", "--waves", d.as_str(), "--scope", "tb", "--sva", "", "--assert", "a_req", "--json", "--cycle-runs"];
+        let c = checks();
+        args[6] = c.as_str();
+        String::from_utf8(sva(&args).stdout).unwrap()
+    };
+    let pb = write("res-b.json", &rr);
+    let o = sva(&["diff", "--results", &pa, &pb, "--json", "-"]);
+    let dj: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap_or_else(|_| panic!("{}{}", out(&o), err(&o)));
+    assert_eq!((dj["moved"].as_u64(), dj["new"].as_u64(), dj["gone"].as_u64()), (Some(0), Some(0), Some(0)), "{dj}");
+    let r = json(&["--cycle-runs"]);
+    let t: Vec<u64> = all["cycles"].as_array().unwrap().iter().map(|x| x.as_u64().unwrap()).collect();
+    assert!(r.get("cycles").is_none());
+    assert_eq!(r["cycle_runs"], serde_json::json!([[5000, 10000, 30], [400000, 0, 1]]));
+    assert_eq!(t.len(), 31);
+}
+
+#[test]
 fn nothing_to_check_exits_2() {
     let c = checks();
     let d = clock_dump("noedge.vcd", "1ns", "#0\n0!\n1\"\n1#\n#10\n1\"\n");

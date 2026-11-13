@@ -589,8 +589,10 @@ SVA.pageBinds = pageBinds;
 // each request. -> 'page' | 'worker'
 async function evaluateScope(v, bs, progress) {
   const asserts = bs.map(b => LIB.byLabel.get(b.assert).a), rows = Object.assign({}, ...bs.map(b => b.res.map));
-  // a large dump read as it is needed: the signals they read first, whole (a busy one held in part: refused, the error says it)
+  // a large dump read as it is needed: the signals they read first, whole; one too busy for that (held in part, over
+  // lazyWhole): by the CLI over the dump (VS Code: sva eval on its FST), else refused, the error says it
   const why = 'an assertion (sva eval --waves DUMP gives the same verdicts)';
+  if (v.lazy && v.opts.evalSva && v.need) { await v.need(Object.values(rows)); if (tooBusy(v, Object.values(rows))) return evaluateCli(v, bs, progress); }
   if (v.lazy) await (v.needWhole ? v.needWhole(Object.values(rows), why) : v.need(Object.values(rows)));
   const unit = v.M.timed ? 'ps' : 'cycles', steps = plan(SOURCES(), asserts, rowSampler(rows), unit);
   const eng = await SVA.engine(), outs = [];
@@ -618,9 +620,77 @@ async function evaluateScope(v, bs, progress) {
     delete o.cycles; delete o.clock;
     o.scope = b.scope; o.signals = Object.fromEntries(Object.entries(b.res.map).map(([n, r]) => [n, r.full]));
     b.results = { clock: b.res.map[clock] ? b.res.map[clock].full : clock, unit: doc.unit, cycles, assertions: [o] };
-    b.error = null; b.via = via;
+    b.error = null; b.via = via; b.cli = null;
   }
   return via;
+}
+// A large dump's assertions by the CLI (sva eval over the whole dump, opts.evalSva): a row they read changes more than
+// lazyWhole times (a 1 GB dump's clock), too many to hold in the page. Its answer: the counts of the whole dump, its
+// failures and attempts without verdict listed (at most SVA.cli.failures), not its passes; the cycles' times as runs. The passes of
+// the time shown come when it is narrow enough (Panel.winWant: an evaluation of that window)
+// SVA.cli: failures, the most failures listed; cycles, the most cycles shown for the passes of a window; passes, the most
+// listed of one window; pause (ms) before a window is asked
+SVA.cli = { failures: 20000, cycles: 20000, passes: 50000, pause: 300 };
+const tooBusy = (v, rows) => rows.some(r0 => { const q = r0.orig || r0, r = q.dupOf || q.of || q;
+  return !!(r.sum && r.sum.part && r.sum.part.n > v.S.lazyWhole); });
+const cliReq = (v, scope, asserts, more) => Object.assign({ files: active().map(f => ({ name: f.name, source: f.source })), scope: scope || '', asserts,
+  ignore: v.sortIgnore || [] }, more);
+// the cycles' times of a results JSON written with --cycle-runs ([first, step, count] each) as one array per clock, the
+// last few kept (a window's are the same clock's)
+const RUNS = new Map(), RUNS_OF = new WeakMap();   // RUNS_OF: such an array -> its runs (the report takes those: summary.rs)
+function fromRuns(runs) {
+  const k = JSON.stringify(runs);
+  if (RUNS.has(k)) return RUNS.get(k);
+  const T = [];
+  for (const [t, d, n] of runs) for (let j = 0; j < n; j++) T.push(t + j * d);
+  if (RUNS.size > 3) RUNS.delete(RUNS.keys().next().value);
+  RUNS.set(k, T); RUNS_OF.set(T, runs);
+  return T;
+}
+// a results document for the report: a large dump's cycles as their runs (millions of times: a second to pass to the engine)
+const forReport = r => {
+  const runs = RUNS_OF.get(r.cycles); if (!runs) return r;
+  const out = Object.assign({}, r, { cycle_runs: runs, assertions: r.assertions.map(o => { const x = Object.assign({}, o); delete x.laneList; return x; }) });
+  delete out.cycles;
+  return out;
+};
+function cliDoc(text) {
+  const doc = JSON.parse(text);
+  if (doc.cycle_runs) { doc.cycles = fromRuns(doc.cycle_runs); delete doc.cycle_runs; }
+  for (const o of doc.assertions || []) if (o.cycle_runs) { o.cycles = fromRuns(o.cycle_runs); delete o.cycle_runs; }
+  return doc;
+}
+// the per-cycle strip of the attempts listed (the engine's lane, of those only): [cycle, mark] by cycle, the strongest
+// mark of a cycle (S start, P pass, C capped, D disabled, F fail)
+function laneOf(o) {
+  const L = new Map(), cover = o.kind === 'cover', put = (k, ch) => { if (STRIP[ch] > (STRIP[L.get(k)] || 0)) L.set(k, ch); };
+  for (const a of o.attempts || []) {
+    if (a.result === 'vacuous' || (cover && a.result === 'fail')) continue;
+    put(a.start, 'S');
+    const e = { pass: 'P', fail: 'F', disabled: 'D', capped: 'C' }[a.result];
+    if (e) put(a.end, e);
+  }
+  return [...L].sort((x, y) => x[0] - y[0]);
+}
+async function evaluateCli(v, bs, progress) {
+  progress(0, 1, { cli: true });
+  const doc = cliDoc(await v.opts.evalSva(cliReq(v, bs[0].scope, [...new Set(bs.map(b => b.assert))], { passes: false, max: SVA.cli.failures })));
+  for (const b of bs) {
+    const o = doc.assertions.find(o => o.name === b.assert);
+    if (!o) { b.error = 'not evaluated by sva eval'; continue; }
+    if (o.missing && o.missing.length) { b.error = `sva eval: not in the dump: ${o.missing.join(', ')}`; continue; }
+    const cycles = o.cycles || doc.cycles, clock = o.clock || doc.clock;
+    delete o.cycles; delete o.clock;
+    // the CLI resolved the names itself (--resolve scope, the prefixes): another variable than the page's is said
+    const other = Object.entries(b.res.map).filter(([n, r]) => o.signals && o.signals[n] && o.signals[n] !== r.full);
+    o.notes = (o.notes || []).concat(other.map(([n, r]) => `sva eval read ${n} as ${o.signals[n]}, not ${r.full}`));
+    o.scope = b.scope; o.signals = Object.fromEntries(Object.entries(b.res.map).map(([n, r]) => [n, r.full]));
+    if (o.file) o.file = o.file.replace(/^.*[\\/]/, '');   // its name, as the page's evaluation says it (the CLI's: a copy in a temporary directory)
+    o.laneList = laneOf(o);
+    b.results = { clock, unit: doc.unit, cycles, assertions: [o] };
+    b.error = null; b.via = 'cli'; b.cli = { o, win: null, ask: null, t: 0 };
+  }
+  return 'cli';
 }
 const outcome = b => b.results && b.results.assertions && b.results.assertions[0];
 const RID = new WeakMap(); let ridN = 0;
@@ -797,15 +867,19 @@ function assertionRows(st, res, opt) {
     hits: [], drawn: 0,
     draw(P, { y, h, X, tA, tB, xL, xR }) {
       const hits = this.hits = [], W = Math.ceil(xR - xL) + 2, cx = x => Math.min(Math.max(x, xL - 4), xR + 4);
-      if (o.lane) {   // the per-cycle strip: the strongest event per pixel, failures at least 2 px wide
-        const col = new Uint8Array(W), lane = o.lane, T = m.T;
-        // one cycle wide, centred on its edge
-        for (let k = Math.max(0, firstFrom(T.length, i => T[i], tA) - 1); k < T.length && (k === 0 || T[k - 1] <= tB); k++) {
-          const r = STRIP[lane[k]]; if (!r) continue;
+      if (opt.want) opt.want(tA, tB);   // evaluated by the CLI (a large dump): the passes of this window asked
+      if (o.lane || o.laneList) {   // the per-cycle strip: the strongest event per pixel, failures at least 2 px wide
+        const col = new Uint8Array(W), lane = o.lane, T = m.T, L = o.laneList;
+        // one cycle wide, centred on its edge; the CLI's: the cycles it marks only (a large dump: millions of cycles)
+        const one = (k, ch) => {
+          const r = STRIP[ch]; if (!r) return;
           const xe = X(T[k]) - xL, half = (k + 1 < T.length ? X(T[k + 1]) - xL - xe : k > 0 ? xe - X(T[k - 1]) + xL : 2) / 2, x0 = xe - half, x1 = xe + half;
           const c0 = Math.max(0, Math.floor(x0)), c1 = Math.min(W, Math.max(c0 + (r === 5 ? 2 : 1), Math.ceil(x1)));
           for (let c = c0; c < c1; c++) if (col[c] < r) col[c] = r;
-        }
+        };
+        if (L) { for (let i = Math.max(0, firstFrom(L.length, j => T[L[j][0]], tA) - 1); i < L.length && (i === 0 || T[L[i - 1][0]] <= tB); i++)
+          one(L[i][0], L[i][1]); }
+        else for (let k = Math.max(0, firstFrom(T.length, i => T[i], tA) - 1); k < T.length && (k === 0 || T[k - 1] <= tB); k++) one(k, lane[k]);
         for (let c = 0; c < W;) { const r = col[c]; let e = c + 1; while (e < W && col[e] === r) e++;
           if (r) P.rect(xL + c, y + 2, e - c, 3, STRIP_COL[r], r === 1 ? 0.5 : 0.95); c = e; }
       }
@@ -1028,7 +1102,8 @@ class Panel {
     v.addKey(']f', () => this.step(1), ']f [f next / previous assertion failure').addKey('[f', () => this.step(-1));
     v.addKey(']a', () => this.stepAssert(1), ']a [a next / previous assertion').addKey('[a', () => this.stepAssert(-1));
     v.root.addEventListener('wavelens:reset', () => this.unselect(false), { signal: v.ac.signal });
-    v.root.addEventListener('wavelens:destroy', () => { LIB.panels.delete(this); this.el.remove(); v.sva = null; }, { once: true });
+    v.root.addEventListener('wavelens:destroy', () => { this.bindings.forEach(b => this.winStop(b)); LIB.panels.delete(this); this.el.remove(); v.sva = null; },
+      { once: true });
     // this browser's bindings, with the page's that are new since (the ones the user unbound stay away)
     this.saved = store.get(this.key) || {};
     this.hidden = new Set(this.saved.hidden || []);
@@ -1047,7 +1122,7 @@ class Panel {
   // came from: other files, no results)
   save() {
     const results = {};
-    for (const b of this.bindings) if (b.results && !b.page) results[bkey(b)] = b.results;
+    for (const b of this.bindings) if (b.results && !b.page && !b.cli) results[bkey(b)] = b.results;   // the CLI's: evaluated again
     const rec = { bind: this.bindJSON(), removed: [...this.removed], hidden: [...this.hidden], src: LIB.src, results };
     if (Object.keys(results).length) rec.wave = this.wave();
     if (JSON.stringify(results).length > 200000) delete rec.results;
@@ -1063,7 +1138,8 @@ class Panel {
       hidden: [...this.hidden] };
     // what the panel shows: its table and failure list, the selected attempt (its binding and number)
     s.view = { table: !!this.showTable, fails: !!this.showFails, ...(this.selA ? { sel: { assert: this.selA.b.assert, scope: this.selA.b.scope || '',
-      i: this.selA.i } } : {}) };
+      i: this.selA.i, ...(outcome(this.selA.b) && outcome(this.selA.b).attempts[this.selA.i] ? { start: outcome(this.selA.b).attempts[this.selA.i].start,
+        end: outcome(this.selA.b).attempts[this.selA.i].end } : {}) } } : {}) };   // the attempt by its cycles: a list evaluated again may differ
     return s;
   }
   // a binding of a state that would attach here: its assertion loaded and its signals found in its module of these waves
@@ -1100,7 +1176,9 @@ class Panel {
     if (s.view) {
       this.showTable = !!s.view.table; this.showFails = !!s.view.fails; this.render();
       const w = s.view.sel, b = w && this.bindings.find(x => x.assert === w.assert && (x.scope || '') === w.scope);
-      if (b && b.results) this.select(b, w.i);
+      const as = b && outcome(b) ? outcome(b).attempts : [];
+      const i = w && w.start != null ? as.findIndex(x => x.start === w.start && x.end === w.end) : w ? w.i : -1;
+      if (b && i >= 0 && i < as.length) this.select(b, i);
     }
     return out;
   }
@@ -1138,16 +1216,77 @@ class Panel {
     return b;
   }
   unbind(b) {
+    this.winStop(b);
     this.bindings = this.bindings.filter(x => x !== b);
     this.dropSel(b);
     if (b.page) this.removed.add(bkey(b));
     this.save(); this.render(); this.changed(b);
   }
   evaluate(b) { return this.evaluateMany([b]); }
+  // A binding evaluated by the CLI (a large dump: evaluateCli): the time shown narrow enough (SVA.cli.cycles at most),
+  // after a pause, the attempts of that time and a span either side: sva eval of that window (attempts start in it, the
+  // values before it read), one for every CLI binding of its scope; listed with the whole dump's failures. A window there
+  // already, asked, or one that failed (asked again once the view leaves it): nothing asked
+  winWant(b, tA, tB) {
+    const c = b.cli;
+    if (!c || this.v.sva !== this || !this.bindings.includes(b) || !b.results || !this.v.opts.evalSva) return;
+    const T = b.results.cycles, n = firstFrom(T.length, i => T[i], tB) - firstFrom(T.length, i => T[i], tA);
+    const wide = n > SVA.cli.cycles;
+    if (wide !== !!c.wide) { c.wide = wide; this.renderB(b); }
+    const has = w => w && w.a <= tA && w.b >= tB;
+    if (wide || has(c.win) || has(c.ask)) return;
+    clearTimeout(c.t);
+    c.t = setTimeout(() => this.winRead(b, tA, tB), SVA.cli.pause);
+  }
+  async winRead(b, tA, tB) {
+    const span = tB - tA, a = Math.max(0, Math.floor(tA - span)), z = Math.ceil(tB + span), has = w => w && w.a <= tA && w.b >= tB;
+    if (!b.cli || this.v.sva !== this) return;   // (a viewer gone meanwhile)
+    const bs = this.bindings.filter(x => x.cli && x.scope === b.scope && x.results && !has(x.cli.win) && !has(x.cli.ask));
+    if (!bs.includes(b)) return;
+    bs.forEach(x => { clearTimeout(x.cli.t); this.winStop(x); });
+    const p = this.v.opts.evalSva(cliReq(this.v, b.scope, bs.map(x => x.assert), { passes: true, max: SVA.cli.passes, from: a, to: z }));
+    const ask = { a, b: z, p };
+    bs.forEach(x => { x.cli.ask = ask; });
+    const mine = () => bs.filter(x => x.cli && x.cli.ask === ask && this.bindings.includes(x));
+    let doc;
+    try { doc = JSON.parse(await p); } catch (e) {
+      const got = mine();
+      got.forEach(x => { x.cli.ask = null; });
+      if (e.stopped || !got.length || this.v.sva !== this) return;
+      got.forEach(x => { x.cli.win = { a, b: z, n: 0, fails: 0, error: e.message }; this.renderB(x); });   // not asked again here
+      this.toast(`${got.map(x => x.assert).join(', ')}: the attempts of this window: ${e.message}`);
+      return;
+    }
+    if (this.v.sva !== this) return;
+    const got = mine();
+    for (const x of got) {
+      x.cli.ask = null;
+      const w = doc.assertions.find(o => o.name === x.assert);
+      if (w) this.winTake(x, w, (w.cycle_runs || doc.cycle_runs || []).reduce((n, r) => n + r[2], 0), a, z);
+    }
+    if (got.length) { this.redraw(); this.explain(); }   // its rows again (the names column too: their layout)
+  }
+  // a window's attempts with a verdict in it (one running at its end, or failed by a strong operator there, has none): its
+  // passes, and its failures past the whole dump's list (cut at SVA.cli.failures), merged with that list; n: its cycles
+  winTake(b, w, n, a, z) {
+    const c = b.cli, key = x => x.start + ':' + x.end, have = new Set(c.o.attempts.map(key));
+    const done = x => x.result !== 'vacuous' && x.result !== 'active' && !(x.reason && x.reason.kind === 'strong_end') && x.end < n - 1;
+    const add = (w.attempts || []).filter(x => done(x) && !have.has(key(x)));
+    const all = c.o.attempts.concat(add).sort((x, y) => x.start - y.start || x.end - y.end);
+    const was = this.selA && this.selA.b === b ? outcome(b).attempts[this.selA.i] : null;
+    const o = Object.assign({}, c.o, { attempts: all });
+    o.laneList = laneOf(o);
+    b.results = Object.assign({}, b.results, { assertions: [o] });
+    c.win = { a, b: z, n: add.filter(x => x.result === 'pass').length, fails: add.filter(x => x.result !== 'pass').length,
+      cut: !!(w.listed && w.listed.of) };
+    if (was) { this.selA.i = all.findIndex(x => x.start === was.start && x.end === was.end); if (this.selA.i < 0) this.selA = null; }
+    this.renderB(b);
+  }
+  winStop(b) { const c = b.cli; if (!c) return; clearTimeout(c.t); if (c.ask && c.ask.p.stop) c.ask.p.stop(); c.ask = null; }
   // the bindings of each scope in one evaluation; the lines show the progress; queued after the running ones
   evaluateMany(bs) {
     if (!bs.length) return this.queue || Promise.resolve();
-    for (const b of bs) { b.error = null; b.workerError = null; b.running = true; b.msg = 'evaluating…'; }
+    for (const b of bs) { b.error = null; b.workerError = null; b.running = true; b.msg = 'evaluating…'; this.winStop(b); b.cli = null; }
     bs.forEach(b => this.renderB(b));
     const byScope = new Map();
     for (const b of bs) { if (!byScope.has(b.scope)) byScope.set(b.scope, []); byScope.get(b.scope).push(b); }
@@ -1158,14 +1297,20 @@ class Panel {
         const ok = live.filter(b => b.state === 'bound');
         live.filter(b => b.state !== 'bound').forEach(b => { b.running = false; b.msg = null; this.renderB(b); });
         if (!ok.length) continue;
+        const sigOf = b => { const x = LIB.byLabel.get(b.assert); return x ? asig(x.a) : null; }, sig0 = new Map(ok.map(b => [b, sigOf(b)]));
         try {
           await evaluateScope(this.v, ok, (i, n, p) => {
             const w = p.edges ? p.edges.length * p.n : 0;
-            for (const b of ok) { b.msg = (n > 1 ? `evaluating ${i + 1} / ${n}` : 'evaluating') + (useWorker(w) ? ` (${p.edges.length} cycles, in a worker)…` :
-              '…'); this.renderB(b); }
+            for (const b of ok) { b.msg = p.cli ? 'evaluating over the whole dump (sva eval)…' : (n > 1 ? `evaluating ${i + 1} / ${n}` : 'evaluating') +
+              (useWorker(w) ? ` (${p.edges.length} cycles, in a worker)…` : '…'); this.renderB(b); }
           });
         } catch (err) { ok.forEach(b => { b.error = err.message; }); }
+        // the assertion's text changed while it was evaluated (an edit, a reload: sync left it running): its results are the
+        // old text's, evaluated again
+        const stale = ok.filter(b => sigOf(b) !== sig0.get(b));
+        stale.forEach(b => { b.results = null; b.cli = null; b.error = null; });
         for (const b of ok) { b.running = false; b.msg = null; b.fromPage = false; this.dropSel(b); this.renderB(b); this.changed(b, false); }
+        if (stale.length) this.evaluateMany(stale.filter(b => this.bindings.includes(b)));
         this.redraw();
         if (ok.length === 1 && outcome(ok[0])) this.toast(`${ok[0].assert}: ${plainCounts(outcome(ok[0]))}`);
       }
@@ -1196,7 +1341,8 @@ class Panel {
       const copies = S.svaSignals === false || !b.res ? [] : [...new Set(Object.values(b.res.map))];
       const rows = assertionRows(st, b.results, { S, label: b.assert, scope: b.scope, copies, map: b.res ? b.res.map : rowsOf(v.M, outcome(b)), view: v,
         base: { anc: g ? g.anc.concat(g.id) : [], depth: g ? g.depth + 1 : 0 },
-        sel: () => (this.selA && this.selA.b === b ? this.selA.i : -1), pick: i => this.select(b, i), only: b.only || null });
+        sel: () => (this.selA && this.selA.b === b ? this.selA.i : -1), pick: i => this.select(b, i), only: b.only || null,
+        want: b.cli ? (tA, tB) => this.winWant(b, tA, tB) : null });
       // many at one place: the passing ones folded
       if (first && n.get(k) > 3 && !(outcome(b).stats.fail > 0 && outcome(b).kind !== 'cover')) v.fold(st.gid, true, true);
       if (!this.at.has(k)) this.at.set(k, []);
@@ -1305,6 +1451,13 @@ class Panel {
         `aria-label="close" title="Close (Esc on the waves)">✕</button></div>`);
     const say = m => { if (this.whyKey === key) { this.why = head + `<p class="muted">${esc(m)}</p>`; this.fillWhy(); } };
     if (!x || !b.res || !b.res.ok) { say('the signals of this binding are not in this view: nothing to take apart'); return; }
+    if (b.cli && v.picRead) {   // a large dump: the signals over the attempt read exact first (a summary has no edges to take apart)
+      const T = o.cycles || b.results.cycles, last = Math.max(a.end, a.failed_at ?? a.end), at = k => T[Math.min(Math.max(k, 0), T.length - 1)];
+      say('reading the signals over this attempt…');
+      const held = v.picHold;
+      try { await v.picRead(Object.values(b.res.map), at(a.start - 64), at(last + 2)); } catch (e) { say(e.message); return; } finally { v.picHold = held; }
+      if (this.whyKey !== key) return;
+    }
     try {
       const p = plan(SOURCES(), [x.a], rowSampler(b.res.map), v.M.timed ? 'ps' : 'cycles')[0], E = p.edges || [], T = o.cycles || b.results.cycles;
       const last = Math.max(a.end, a.failed_at ?? a.end), t0 = T[a.start], from = E.indexOf(t0);
@@ -1390,6 +1543,7 @@ class Panel {
     const sc = esc(this.label(b.scope)), path = sc.replace(/\./g, '.<wbr>'), o = outcome(b);
     const how = [...((b.res && b.res.notes) || []), ...((b.res && b.res.errors) || [])];
     if (b.workerError) how.push(`the worker failed (${b.workerError}): evaluated in the page`);
+    if (b.cli) how.push('evaluated over the whole dump by sva eval: a signal it reads changes too often to read whole here', ...(b.cli.o.notes || []));
     const info = how.length ?
       ` <button type="button" class="how" data-sv="how" aria-label="how ${esc(b.assert)} was bound" title="${esc(how.join('\n'))}">ⓘ</button>` : '';
     const two = (cls, tip, msg, cn) => `<span class="st bp ${cls}" title="${esc(tip)}"><b class="sp">${path}</b>${info}</span>` +
@@ -1404,6 +1558,16 @@ class Panel {
       const not = [...b.res.missing, ...b.res.errors].join(', ');
       return two('dump', 'bound to ' + this.label(b.scope) + '; results of sva eval at build time; this view does not show ' + not,
         `from the dump, not in this view: ${esc(not)}`, true);
+    }
+    if (b.cli) {   // a large dump, by the CLI: what is listed
+      const c = b.cli, w = c.win, of = c.o.listed && c.o.listed.of, cut = of ? [null, c.o.attempts.length, of] : null;   // listed: what the list lacks
+      const whole = cut ? `the first ${cut[1]} of ${cut[2]} failures and attempts without verdict listed (the failures first), the ` +
+        'others of the time shown when it is narrow enough' : 'every failure listed';
+      const now = c.wide || !w ? `the passes listed zoomed in (≤ ${SVA.cli.cycles} cycles)` : w.error ? `this window not evaluated: ${w.error}` :
+        `${w.n} passes${w.fails ? ` and ${w.fails} more failures` : ''} of this window${w.cut ? ' (cut)' : ''}`;
+      return two('ok', 'bound to ' + this.label(b.scope) + ': evaluated over the whole dump by sva eval (a signal too busy to read whole here); ' +
+        whole + '; the passes of the time shown once it is ' + SVA.cli.cycles + ' cycles at most',
+        `sva eval: ${cut ? `the first ${cut[1]} of ${cut[2]} listed · ` : ''}${now}`, true);
     }
     return two('ok', 'bound to ' + this.label(b.scope), '', true);
   }
@@ -1545,7 +1709,7 @@ class Panel {
     const meta = { title: `Assertions · ${this.v.opts.title || M.title || document.title || 'waveform'}`, dump: (M.src.meta && M.src.meta.waves) || '',
       page: G.location ? G.location.pathname.split('/').pop() : '',
       tool: `wavelens sva.js ${(G.WaveLens && G.WaveLens.version) || ''}`, date: localDate() };
-    return { bs, input: { meta, results: bs.map(b => b.results) } };
+    return { bs, input: { meta, results: bs.map(b => forReport(b.results)) } };
   }
   async report(format) {
     const { bs, input } = this.reportInput(), e = await SVA.engine();

@@ -284,6 +284,14 @@
         if (x.error) throw Object.assign(new Error(x.error), { stopped: x.error === 'stopped' });
         return x.text; });
       p.stop = () => vscode.postMessage({ type: 'codes-stop', rid });
+      return p; },
+    // wlEval(req): assertions over the dump by the CLI (sva eval on its FST: a clock too busy to read whole), the results JSON
+    // text; stop() as a read's
+    wlEval: req => { const rid = ++reads;
+      const p = call('sva', Object.assign({ rid }, req)).then(x => {
+        if (x.error) throw Object.assign(new Error(x.error), { stopped: x.error === 'stopped' });
+        return x.text; });
+      p.stop = () => vscode.postMessage({ type: 'codes-stop', rid });
       return p; } });
     return f;
   };

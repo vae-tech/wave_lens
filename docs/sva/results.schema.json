@@ -3,12 +3,15 @@
   "$id": "https://raw.githubusercontent.com/vae-tech/wavelens/master/docs/sva/results.schema.json",
   "title": "SVA results: sva eval --out, the page's evaluate(), run_json with a trace (docs/sva/ENGINE.md, Results JSON)",
   "type": "object",
-  "required": ["clock", "unit", "cycles", "assertions"],
+  "required": ["clock", "unit", "assertions"],
+  "oneOf": [{ "required": ["cycles"] }, { "required": ["cycle_runs"] }],
   "additionalProperties": false,
   "properties": {
     "clock": { "type": "string", "description": "The clock of the first assertion (a dump path from sva eval)." },
     "unit": { "type": "string", "description": "The unit of the times in cycles (ps from dumps)." },
     "cycles": { "type": "array", "items": { "type": "integer" }, "description": "cycles[k]: the time of sampling point k (the k-th clock edge)." },
+    "cycle_runs": { "type": "array", "items": { "type": "array", "items": { "type": "integer" } },
+      "description": "sva eval --cycle-runs: the cycles as runs [first, step, count] instead of cycles." },
     "assertions": { "type": "array", "items": { "$ref": "#/$defs/outcome" } }
   },
   "$defs": {
@@ -31,7 +34,21 @@
         "attempts": { "type": "array", "items": { "$ref": "#/$defs/attempt" }, "description": "Every non-vacuous attempt by start (covers: the first cover_traces matches)." },
         "lane": { "type": "string", "description": "One character per cycle, . S P C D F; derived from the attempts (a cache)." },
         "missing": { "type": "array", "items": { "type": "string" }, "description": "Signals not in the trace: not evaluated." },
-        "notes": { "type": "array", "items": { "type": "string" } }
+        "notes": { "type": "array", "items": { "type": "string" } },
+        "cycle_runs": { "type": "array", "items": { "type": "array", "items": { "type": "integer" } }, "description": "With clock, --cycle-runs: its own times as runs." },
+        "listed": { "$ref": "#/$defs/listed" }
+      }
+    },
+    "listed": {
+      "type": "object",
+      "required": ["passes"],
+      "additionalProperties": false,
+      "description": "attempts is not every non-vacuous attempt (sva eval --no-pass, --max-attempts): what it leaves out.",
+      "properties": {
+        "passes": { "type": "boolean", "description": "The passing attempts are listed (false: counted only)." },
+        "of": { "type": "integer", "description": "The attempts before the list was cut." },
+        "longest": { "type": "array", "items": { "type": "integer" }, "description": "The longest decided attempt of all: [cycles, start]." },
+        "last_fail": { "$ref": "#/$defs/attempt", "description": "The failure found last of all." }
       }
     },
     "step": {
