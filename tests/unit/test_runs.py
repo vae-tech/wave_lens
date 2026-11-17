@@ -252,11 +252,11 @@ class Mcp(unittest.TestCase):
 
 EXT = r'''
 const [F, ext, dir, dump, mode] = process.argv.slice(1).map((x, i) => (i ? x : require(x)));
-let warned = null, answer = 'Remove', saveTo = null, saveAsked = null;
+let warned = null, answer = 'Remove', saveTo = null, saveAsked = null, wsf;
 const h = F.host({ ext, dir, config: { sva: process.env.WAVELENS_SVA }, vscode: { ProgressLocation: { Notification: 15 } },
   window: { withProgress: async (o, f) => f(), showWarningMessage: async (m) => { warned = m; return answer; },
     showSaveDialog: async o => { saveAsked = o.defaultUri.fsPath; return saveTo ? h.Uri.file(saveTo) : undefined; } },
-  workspace: { getWorkspaceFolder: () => undefined } });
+  workspace: { getWorkspaceFolder: () => wsf } });
 process.on('uncaughtException', e => { console.error('UNCAUGHT ' + e.message); process.exit(3); });
 (async () => {
   const A = await h.tab(dump);
@@ -338,6 +338,15 @@ process.on('uncaughtException', e => { console.error('UNCAUGHT ' + e.message); p
   answer = undefined; out.kept = await ask({ op: 'rm', run: 2 }); out.warned = warned;
   answer = 'Remove'; out.rm = await ask({ op: 'rm', run: 2 });
   out.after = await ask({ op: 'list' });
+  // the panel's ★ (dir): the dump in no workspace folder: the user's settings, the path whole; in one: the workspace's,
+  // relative to the folder; ★ again: the setting in effect cleared, the directory beside the dump again
+  const last = () => h.updates[h.updates.length - 1], star = async keep => { const { id, ...r } = await ask({ op: 'dir', keep }); return r; };
+  out.star = await star(true); out.starSet = last();
+  out.starList = (await ask({ op: 'list' })).dirOf;
+  out.unstar = await star(false); out.unstarSet = last();
+  wsf = { uri: h.Uri.file(dir) };
+  out.wsStar = await star(true); out.wsSet = last();
+  out.wsUnstar = await star(false); out.wsUnset = last();
   console.log('RESULT' + JSON.stringify(out)); process.exit(0);
 })().catch(e => { console.error(e.stack); process.exit(1); });
 '''
@@ -451,6 +460,14 @@ class VsCode(unittest.TestCase):
             self.assertTrue(o['kept'].get('cancelled') and '#2 broken' in o['warned'], 'rm asks first; no answer: kept')
             self.assertEqual(o['rm']['removed']['id'], 2)
             self.assertEqual([x['id'] for x in o['after']['runs']], [1])
+            # the panel's ★: where the directory comes from, the setting written and cleared
+            self.assertEqual(o['empty']['dirOf'], {'set': '', 'scope': ''}, 'no setting: the default, said')
+            self.assertEqual((o['star'], o['starSet'], o['starList']), ({'dir': runs, 'dirOf': {'set': runs, 'scope': 'user'}}, ['runsDir', runs, 1],
+                                                                      {'set': runs, 'scope': 'user'}), 'no workspace folder: the user\'s, the path whole')
+            self.assertEqual((o['unstar'], o['unstarSet'][1:]), ({'dir': runs, 'dirOf': {'set': '', 'scope': ''}}, [None, 1]), 'cleared where it was')
+            self.assertEqual((o['wsStar'], o['wsSet']), ({'dir': runs, 'dirOf': {'set': '.wavelens-runs', 'scope': 'workspace'}},
+                                                         ['runsDir', '.wavelens-runs', 2]), 'in a workspace folder: its settings, relative to it')
+            self.assertEqual((o['wsUnstar']['dirOf'], o['wsUnset'][1:]), ({'set': '', 'scope': ''}, [None, 2]))
 
     def test_a_run_compared_by_its_test_case(self):
         with H.tmp() as d:

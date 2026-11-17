@@ -33,14 +33,19 @@ class Names {
         if (e.shiftKey && v.hlAnchor && v.vis.includes(v.hlAnchor)) v.highlightRun(v.hlAnchor, r); else { v.toggleHighlight(r); v.hlAnchor = r; }
         v.refocus(); return;
       }
-      if (row.classList.contains('grp')) toggle(row);
+      if (row.classList.contains('grp')) { const r = rowOf(row); toggle(row); if (e.detail === 2 && rename(r)) return; }
       // shift+click: every signal from the last one clicked to it, selected
       else if (e.shiftKey && v.selAnchor && v.vis.includes(v.selAnchor)) v.selectRun(v.selAnchor, rowOf(row));
       else { const s = rowOf(row); v.select(v.sel === s && !v.selRun.size ? null : s); }   // a signal name: select it (again: unselect)
       v.refocus();   // the keys (Esc, arrows, n, m …) act on this viewer
     });
+    // your group's name (a divider's) renamed: a double-click on it (its two clicks fold and open it again; the row built again between
+    // them: no dblclick event, the second click's count), F2 on it; the box under its row
+    const rename = r => { if (!r || r.type !== 'group' || !r.user) return false; const n = v.namesEl.getBoundingClientRect(), q = v.rowBox(r);
+      v.renameGroup(r.name, n.left + 8, (q ? q.bottom : n.top) + 2); return true; };
     v.namesEl.addEventListener('keydown', e => {
       const at = e.target.closest('.row[data-r]');
+      if (e.key === 'F2' && at && at.classList.contains('grp') && rename(rowOf(at))) { e.preventDefault(); return; }
       if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && e.altKey && !e.ctrlKey && !e.metaKey && !keyLeft(v.S, e)) {   // the row with the focus moves
         e.preventDefault(); const r = at && rowOf(at);
         if (!r || !(r.user || r.ug)) { v.toast('alt+↑ / alt+↓ order the rows of your groups (the right button: Groups ▸)'); return; }   // not the selection's

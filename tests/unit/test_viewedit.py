@@ -222,8 +222,8 @@ class Commands(unittest.TestCase):
         self.assertEqual((r[0]['missing'], r[1]['state']), (['gone'], {'cursor': 1.5, 'bookmarks': [{'n': 4, 't': 7}], 'paint': {'gone': '#fff'}}))
         self.assertEqual(e.run([{'op': 'set_state', 'state': [1]}])[0]['error'], 'set_state: not a saved viewer state ({"wavelens": "state", …})')
         over = {'label': 'w', 'from': 5000, 'to': 10000}   # the Runs panel's window (review of 0.50 B-08): carried as the page keeps it
-        r = self.run_ok(e, {'op': 'set_state', 'state': {'wavelens': 'state', 'version': 3, 'runsOver': over}}, {'op': 'state'})
-        self.assertEqual(r[1]['state'].get('runsOver'), over, r)
+        r = self.run_ok(e, {'op': 'set_state', 'state': {'wavelens': 'state', 'version': 3, 'runsOver': over, 'runsMode': 'open'}}, {'op': 'state'})
+        self.assertEqual((r[1]['state'].get('runsOver'), r[1]['state'].get('runsMode')), (over, 'open'), r)   # and the panel's mode (Open)
         rows = self.run_ok(ed(), {'op': 'group', 'name': 'g', 'signals': 'clk'}, {'op': 'rows', 'pattern': 'st', 'limit': 1})[1]
         self.assertEqual(rows, {'op': 'rows', 'total': 2, 'rows': [['tb.dut.state', 2]], 'next_offset': 1})
 

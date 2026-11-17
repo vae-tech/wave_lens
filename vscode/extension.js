@@ -750,12 +750,20 @@ ${scripts}
   // against} -> {result}: A (against: a run's id, 0 the dump; none: the waves shown) with B (run; 0: the dump) over that window
   // only, B's values of the signals that differ there (sva runs diff --page). keep {cases}: the page's spans with a label,
   // the run's test cases (none sent: the marks beside the dump, sva runs keep); case: the window's name, a run's case of that
-  // name compared, wherever it is in the run (B offset to it, the shorter length)
+  // name compared, wherever it is in the run (B offset to it, the shorter length). dir {keep} -> {dir, dirOf}: the panel's ★ —
+  // the directory of now written to the setting wavelens.runsDir (the workspace's settings when the dump is in a workspace
+  // folder: relative to it when inside; else the user's, absolute), keep false: the setting in effect cleared
   runsDir() {
     const set = vscode.workspace.getConfiguration('wavelens').get('runsDir');
     if (!set) return path.join(path.dirname(this.file), '.wavelens-runs');
     const ws = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(this.file));
     return path.isAbsolute(set) ? set : path.join(ws ? ws.uri.fsPath : path.dirname(this.file), set);
+  }
+  // where the runs' directory comes from: the setting wavelens.runsDir (set: its text; scope: the settings that have it,
+  // workspace or user), or none (set '': .wavelens-runs beside the dump)
+  runsDirOf() {
+    const c = vscode.workspace.getConfiguration('wavelens'), set = String(c.get('runsDir') || ''), i = (c.inspect && c.inspect('runsDir')) || {};
+    return { set, scope: !set ? '' : i.workspaceFolderValue !== undefined || i.workspaceValue !== undefined ? 'workspace' : 'user' };
   }
   // a window [from, to] of a dump as an FST of its own at out, its times from 0 (the runs' cut)
   cutOf(src, [from, to], out) { return this.sva(['fst', src, '--from', from, '--to', to, '--zero', '--out', out, '--quiet']); }
@@ -780,7 +788,24 @@ ${scripts}
         const r = await this.sva(['runs', 'list', this.file, '--dir', dir, '--json']), d = json(r);
         let st = null; try { st = await fs.promises.stat(this.file); } catch (e) { /* gone meanwhile */ }
         const now = { name, mtime: st ? st.mtimeMs : null, bytes: st ? st.size : null };
-        return r.code === 0 && d ? { dir, runs: d.runs || [], others: d.others || 0, now, shown: this.shown ? this.shown.id : 0 } : fail(r, 'list');
+        return r.code === 0 && d ? { dir, dirOf: this.runsDirOf(), runs: d.runs || [], others: d.others || 0, now, shown: this.shown ? this.shown.id : 0 }
+          : fail(r, 'list');
+      }
+      case 'dir': {   // ★: this directory for every dump (the setting written), or the setting in effect cleared
+        const c = vscode.workspace.getConfiguration('wavelens'), T = vscode.ConfigurationTarget;
+        const ws = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(this.file)), i = (c.inspect && c.inspect('runsDir')) || {};
+        try {
+          if (m.keep) {   // inside the workspace folder: relative to it (the folder moved or cloned: still its runs; sva runs reads it so);
+            // several folders (a .code-workspace): a relative one would be each folder's own, so the path whole
+            const rel = ws ? path.relative(ws.uri.fsPath, dir) : '', wf = vscode.workspace.workspaceFolders, one = !(Array.isArray(wf) && wf.length > 1);
+            const inside = one && !!rel && rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel);
+            await c.update('runsDir', inside ? rel.split(path.sep).join('/') : dir, ws ? T.Workspace : T.Global);
+          } else await c.update('runsDir', undefined, i.workspaceValue !== undefined ? T.Workspace : T.Global);
+        } catch (e) { return { error: `the setting wavelens.runsDir is not written: ${e.message}` }; }
+        const now = this.runsDir(), of = this.runsDirOf();
+        log(`${name}: wavelens.runsDir ${of.set ? `= ${of.set} (the ${of.scope}'s settings)` : 'cleared'}: the runs in ${now}`);
+        this.watchRuns(now);
+        return { dir: now, dirOf: of };
       }
       case 'open': {   // A: a run's waves served as the dump's are (converted once: its FST does not change); 0 the dump of now
         if (!(parseInt(m.run, 10) > 0)) return this.source();
@@ -1320,6 +1345,9 @@ function activate(ctx) {
       return toFst(uri && uri.fsPath ? uri.fsPath : t && t.file, opts || {});
     }),
     vscode.workspace.onDidChangeConfiguration(e => { if (e.affectsConfiguration('wavelens.theme')) themeAll(themeOf());
+      // the runs' directory moved (a tab's ★, the settings edited): every tab reads its list again, watches the new runs.json
+      if (e.affectsConfiguration('wavelens.runsDir')) for (const tab of TABS) { if (tab.runsWatched) tab.watchRuns(tab.runsDir());
+        tab.post({ type: 'runs-changed' }); }
       if (e.affectsConfiguration('wavelens.keysToVSCode')) {
         const keysLeft = vscode.workspace.getConfiguration('wavelens').get('keysToVSCode') || [];
         for (const tab of TABS) tab.post({ type: 'keys', keysLeft }); } }),

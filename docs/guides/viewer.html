@@ -336,7 +336,7 @@
   <tr><td>Copy the path</td><td>the full hierarchical path (<kbd>yy</kbd>); several rows: every path, one per line</td></tr>
   <tr><td>Your groups ▸</td><td><span class="ui">Move up / down</span>, <span class="ui">To the top / bottom</span> on a row of your group,
     <span class="ui">Into “…”</span> a group of yours, <span class="ui">New group with it</span> (of the N selected), <span class="ui">Out of
-    …</span>, <span class="ui">Delete this group</span>, <span class="ui">Go to</span> any group (<a href="#groups">Your groups</a>)</td></tr>
+    …</span>, <span class="ui">Rename this group…</span>, <span class="ui">Delete this group</span>, <span class="ui">Go to</span> any group (<a href="#groups">Your groups</a>)</td></tr>
   <tr><td colspan="2"><b>Always</b></td></tr>
   <tr><td>Here ▸</td><td>the time clicked on its header: <span class="ui">Bookmark here</span> (on a signal: a small box there asks its
     text, <kbd>Enter</kbd> adds it), <span class="ui">Marker here</span> (<kbd>m</kbd>: at the cursor; a dashed line across every row,
@@ -472,8 +472,10 @@
 <p>The right button's <span class="ui">Your groups ▸</span> puts the signal clicked (or the highlighted, the selected ones) <span class="ui">Into</span>
   a group of your own or a <span class="ui">New group</span>: a folder at the top of the names with its signals in your order. They stay in
   their modules too; radix, colour, bookmarks and highlight are the signal's. <span class="ui">Out</span> takes them out, the header's
-  <span class="ui">Delete this group</span> removes it, <span class="ui">Go to</span> (or <kbd>ctrl+G</kbd>) opens one, brings it to the middle and
-  selects its first signal.</p>
+  <span class="ui">Rename this group…</span> gives it a new name, <span class="ui">Delete this group</span> removes it, <span class="ui">Go to</span>
+  (or <kbd>ctrl+G</kbd>) opens one, brings it to the middle and selects its first signal. A double-click on a group's name in the names
+  (or <kbd>F2</kbd> on it) renames it too, as the <span class="ui">✎</span> of its line in the <kbd>ctrl+G</kbd> list (or <kbd>F2</kbd>
+  there): its name in a small box, <kbd>Enter</kbd> renames, <kbd>Esc</kbd> leaves it.</p>
 <p>The order is yours. <kbd>alt+↑</kbd> / <kbd>alt+↓</kbd> move the selected signal (a selected run of them, as one block) one place in
   its group, or the row of the names with the focus (a group's header: its group);
   <kbd>alt+shift+↑</kbd> / <kbd>alt+shift+↓</kbd> move the whole group among yours. Drag a signal of a group, or a group's header, in
@@ -506,10 +508,10 @@
   two bookmarks with a label — a latency, a cause and its effect.</p>
 <ol class="steps">
   <li>Select a signal, put the cursor near the event and press <span class="ui">+ Bookmark</span> or <kbd>b</kbd>: a bookmark, snapped to an
-    edge of that signal: a small box there asks its text (<kbd>Enter</kbd> adds it, the text too, a click elsewhere too when a text is
-    typed; <kbd>Esc</kbd>: none), as
+    edge of that signal: a small box there asks its label, the short text by the circle (<kbd>Enter</kbd> adds it, the label too, a click
+    elsewhere too when a label is typed; <kbd>Esc</kbd>: none), as
     <kbd>m</kbd> a marker's label. <span class="ui">Here ▸ Bookmark here</span> in the right button's menu puts one where you clicked.</li>
-  <li>Change its text in the list under the waves, a short label by the circle too; change its time (<code>250ns</code>, <code>85.12us</code>), its signal (empty: the time axis)
+  <li>Write what happened in its text in the list under the waves, change its label there too; change its time (<code>250ns</code>, <code>85.12us</code>), its signal (empty: the time axis)
     or its colour there. <span class="ui">cursor</span> moves it to the cursor; the Δ column shows its distance from the cursor.</li>
   <li>Drag a circle on the waves to move it. <kbd>shift+drag</kbd> from one circle to another draws an arrow; or
     <span class="ui">+ Arrow</span> joins the last two.</li>
@@ -613,8 +615,9 @@
 </ul>
 
 <h2 id="keys">All the keys</h2>
-<p id="key-menu"><b>The box of what can follow.</b> A moment after the first key of a sequence (<kbd>g</kbd>, <kbd>z</kbd>, <kbd>y</kbd>, <kbd>[</kbd>, <kbd>]</kbd>) a box in the corner lists what can
-  follow, as LazyVim does. Press the key or click it; it waits as long as it is open, <kbd>Esc</kbd> or a click elsewhere closes it, and so does a key it does not list (that key does nothing then; another first key starts its own box). <kbd>g</kbd> is the menu of nearly everything: going to things, the
+<p id="key-menu"><b>The box of what can follow.</b> A moment after the first key of a sequence (<kbd>g</kbd>, <kbd>z</kbd>, <kbd>y</kbd>, <kbd>[</kbd>, <kbd>]</kbd>) a box under the mouse pointer lists what can
+  follow, as LazyVim does (where the window ends it opens on the pointer's left or above it; before the mouse has moved on the page, in the
+  bottom right corner). Press the key or click it; it waits as long as it is open, <kbd>Esc</kbd> or a click elsewhere closes it, and so does a key it does not list (that key does nothing then; another first key starts its own box). <kbd>g</kbd> is the menu of nearly everything: going to things, the
   markers and bookmarks, the state, the dump. It lists only what this page can do now. Fast typing does not show it; <code>keyHints</code> sets the moment (<code>false</code>: never).</p>
   <p><b>Your keys.</b> The setting <code>keys</code> (the global config, the config file's <code>"config"</code>, an element's
   <code>data-keys</code> as JSON; the layers merge key by key) maps a key you type to one the viewer has:
@@ -650,7 +653,7 @@
   <tr><td><kbd>r</kbd></td><td>the last state loaded, read again (<span class="ui">Reload</span>)</td><td><kbd>R</kbd></td><td>the dump read again from the disk, the view kept (⟳)</td></tr>
   <tr><td><kbd>g</kbd></td><td>a box of what can follow, to press or to click: <kbd>gg</kbd> <kbd>gl</kbd> <kbd>gt</kbd> <kbd>gT</kbd>, <kbd>gm</kbd> <kbd>gM</kbd> <kbd>gB</kbd> <kbd>gd</kbd> <kbd>gc</kbd>,
     <kbd>gs</kbd> <kbd>gL</kbd> <kbd>gr</kbd>, <kbd>gO</kbd> <kbd>gR</kbd> <kbd>gC</kbd>, <kbd>gv</kbd>, <kbd>gp</kbd></td><td><kbd>z</kbd> <kbd>y</kbd> <kbd>[</kbd> <kbd>]</kbd></td><td>the same box; <kbd>yn</kbd> <kbd>yt</kbd> <kbd>yl</kbd>: copy the name, the time of the cursor, a link to here (the cursor and the signal)</td></tr>
-  <tr><td><kbd>b</kbd></td><td>bookmark at the cursor (its text asked there)</td><td><kbd>]b</kbd> <kbd>[b</kbd>, <kbd>1</kbd> … <kbd>9</kbd></td>
+  <tr><td><kbd>b</kbd></td><td>bookmark at the cursor (its label asked there)</td><td><kbd>]b</kbd> <kbd>[b</kbd>, <kbd>1</kbd> … <kbd>9</kbd></td>
     <td>next / previous bookmark, bookmark n</td></tr>
   <tr><td><kbd>m</kbd></td><td>marker at the cursor: its label asked</td><td><kbd>]m</kbd> <kbd>[m</kbd></td><td>next / previous marker</td></tr>
   <tr><td><kbd>gm</kbd></td><td>the markers and bookmarks: a list, <kbd>↑</kbd> <kbd>↓</kbd> go through them</td><td><kbd>gl</kbd>, <kbd>ctrl+G</kbd></td>
@@ -682,7 +685,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.60 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.61 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

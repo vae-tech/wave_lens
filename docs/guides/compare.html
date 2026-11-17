@@ -104,12 +104,16 @@
     the dump as it is on the disk goes into <code>.wavelens-runs</code> beside it as an FST (a VCD converted, the FSM states of
     its <code>x.types.json</code> kept), listed in <code>runs.json</code>. The directory has a <code>.gitignore</code> of its own:
     git leaves it out. <code>wavelens.runsDir</code> puts it elsewhere (a folder of yours: only the runs' files ignored, and the
-    panel lists this dump's runs).</li>
+    panel lists this dump's runs). The panel's last line shows the directory (<span class="ui">Copy</span> copies its path); its
+    <span class="ui">★</span> writes that setting with the directory of now, so every dump keeps its runs there (a lit ★: the
+    setting names it; a click clears it).</li>
   <li>Choose the window: <span class="ui">over</span> the waves in sight, or one of your spans (a test case: the spans of
     cocotb's marks, <code>"every"</code> in a config).</li>
   <li>The list starts with <b>now</b>, the dump on the disk, then the runs, newest first. Two rows carry a letter on the left:
     <b>A</b>, the waves shown in the tab (now at first), and <b>B</b>, the run compared with A. The same two names stand on the
-    time axis and in the status line, so who is compared with whom is always on the screen.</li>
+    time axis and in the status line, so who is compared with whom is always on the screen. A row's second line starts with
+    the run's comment, in the text's colour: with the tags, each in its own colour, it tells apart runs whose names are all
+    the dump's.</li>
   <li>Click a run (or ↑ ↓ in the list, <kbd>]</kbd> <kbd>r</kbd> / <kbd>[</kbd> <kbd>r</kbd> anywhere): it becomes B, compared with A
     over that window only, and only that window of the run is read — a run of gigabytes costs the window, not its size. Then
     it is a compare as above: the bands, ≠, <kbd>]d</kbd> <kbd>[d</kbd>, A / B / A+B, and the view you chose stays from run to run.</li>
@@ -119,6 +123,9 @@
     <span class="ui">no B</span>) that is a walk through the runs: each one's waves in the same window, nothing compared.
     A run without a row of yours says so, and the row is back on the next run that has it. ⟳ reads the dump of now: A is now
     again.</li>
+  <li>To only look through the runs, switch the panel from <span class="ui">Compare</span> to <span class="ui">Open</span>
+    (<kbd>o</kbd> in the list): a row chosen opens its waves in the tab, one run after another in the same window, with no A
+    and B and nothing compared; ↑ ↓ held down open the row they rest on. <kbd>o</kbd> again: Compare.</li>
   <li>↑ ↓ in the list compare once you stop on a run. The dump read again after a new simulation keeps the panel and compares
     with the run again; the status says equal, or what differs first, and why the run's values are not shown when they are not.</li>
   <li><span class="ui">Δ all</span> asks every run at once: how many signals differ from A in the window and the first difference, on
@@ -136,7 +143,9 @@
 <p><b>Slices.</b> The right button over a range: <span class="ui">Slice ▸ Keep as a slice (Runs)</span> keeps that piece of the
   waves shown as a run of its own whose times start at 0 — its first sample is 0. Cut two bursts (two packets, two calls) and
   compare them like two runs, A one and B the other: they line up on their first samples (a slice against the whole dump
-  is read at its place in it). <span class="ui">Save as FST…</span>
+  is read at its place in it). <span class="ui">↔</span> on a slice's row (<kbd>s</kbd>) puts the window and the range of the
+  waves shown on the slice's start and end, so the same piece of another run is one <span class="ui">Keep as a slice</span>
+  away. <span class="ui">Save as FST…</span>
   writes the piece as an FST file; in the shell <code>sva runs keep tb.vcd --from 4us --to 6us</code> and
   <code>sva fst tb.vcd --from 4us --to 6us --zero --out burst1.fst</code>.</p>
 
@@ -177,7 +186,7 @@ B: apb_b.vcd  0 ps … 205 ns, 58 signals
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.60 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.61 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

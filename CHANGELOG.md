@@ -5,6 +5,27 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.61 — 17 November 2026
+
+The Runs panel browsed without A and B, a run's comment readable, a slice's span on the waves, the runs' directory kept;
+pictures of selected rows with their lanes, a bookmark's label asked, your groups renamed, the key box at the pointer.
+
+- **The Runs panel** (VS Code, `gu`): a mode **Compare | Open** (`o`): in Open a row chosen opens its waves here, nothing
+  compared (↑ ↓ open the row they stop on); kept with the view (`runsMode`). A run's **comment** is first on its second
+  line, in the text's colour, what the run is after it, muted (it was cut off at the end); a name that is only the dump's
+  muted; each **tag** a colour of its own; A / B clearer at rest. A slice's **↔** (`s`): the waves shown open on the
+  slice's start and end, the range set to it (Slice ▸ keeps the same piece of these waves at once; a slice shown as A:
+  its time mapped). The runs' **directory** at the panel's foot, selectable, **Copy**; **★** makes it the setting
+  `wavelens.runsDir` (the workspace's, else the user's; clicked again: cleared).
+- **Copy image** (Export) of the selected or highlighted rows: the Δ arrows on a signal's line, the markers' texts and
+  the lifted bookmarks stay on their signals (they fell onto the line over the rows).
+- A new bookmark (`b`, **+ Bookmark**, **Bookmark here**) asks its **label**, the short text by the circle; its text in the
+  list.
+- **Your groups renamed**: a double-click on the name in the names (or F2 there), the **✎** of its line in the ctrl+G list
+  (or F2), the right button's **Rename this group…** (a divider's too).
+- The box of a key sequence (`g z y [ ]`) opens **under the mouse pointer** (on its left, above it where the window ends;
+  the corner before the mouse has moved on the page).
+
 ## 0.60 — 13 November 2026
 
 Assertions on a large dump by the CLI over the whole dump, the review of 2026-11-13 fixed, the keys on any layout.

@@ -151,6 +151,8 @@
     diff: b => call('runs', Object.assign({}, b, { op: 'diff' })),
     compare: b => call('runs', Object.assign({}, b, { op: 'compare', run: b.id, id: undefined })),
     cancel: () => call('runs', { op: 'cancel' }),   // the compare asked is not wanted any more (no B, ✕): its sva stopped
+    // ★: the runs' directory the permanent one (keep false: no more): the setting wavelens.runsDir written -> {dir, dirOf}
+    dir: keep => call('runs', { op: 'dir', keep: !!keep }),
     // A: a run's waves (0: the dump of now) as the dump's are served -> {file, handle}: ⟳ (the handle) reads the dump of now
     open: async run => { const m = await call('runs', { op: 'open', run });
       return m.error ? m : { file: await fileOf(m), handle, name: m.name }; },

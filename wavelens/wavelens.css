@@ -596,6 +596,9 @@
 .wv .bar button.lay + button.lay { margin-left: 4px; }
 @media print { .wv > .bar { position: static !important; } }
 .wv .wv-menu.wv-groups { min-width: 220px; }   /* ctrl+G: your groups */
+.wv .wv-menu.wv-groups button > span:first-child { flex: 1 1 auto; }   /* the name, the count, ✎ (renames it) */
+.wv .wv-menu.wv-groups .ren { color: var(--muted); padding: 0 4px; border-radius: 3px; margin-left: -4px; }
+.wv .wv-menu.wv-groups .ren:hover { color: var(--accent); background: var(--panel-2); }
 .wv .wv-menu .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 7px; vertical-align: 0; }
 /* the Modules panel (t, modules.js): the tree of the modules over the viewer, its header moves it, its edges and corners
    (.rz) size it; a drawer at the side on a narrow screen; not printed. A module Only keeps: .on (picked), .inc (under a picked one) */
@@ -653,12 +656,21 @@
 .wv .wv-runs .rn { height: 40px; flex-direction: column; align-items: stretch; justify-content: center; gap: 1px; padding: 0 6px 0 8px; cursor: pointer;
   border-bottom: 1px solid color-mix(in srgb, var(--line) 50%, transparent); }
 .wv .wv-runs .rn .r1 { display: flex; align-items: center; gap: 5px; min-width: 0; }
-.wv .wv-runs .rn .r2 { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* a row's second line: the comment first, in the text's colour (it tells the runs apart: it keeps its place, cut only when
+   it alone is too long), then what the run is, muted, cut first */
+.wv .wv-runs .rn .r2 { display: flex; gap: 8px; min-width: 0; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.wv .wv-runs .rn .r2 .rcm { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--fg); }
+.wv .wv-runs .rn .r2 .rmt { flex: 1 1 0; min-width: 3em; overflow: hidden; text-overflow: ellipsis; }   /* the room the comment leaves */
+.wv .wv-runs .rn .nm.dn { color: var(--muted); }   /* a name that is only the dump's */
 .wv .wv-runs .rn button { padding: 0 4px; font-size: 11px; opacity: 0.6; }
 .wv .wv-runs .rn:hover button, .wv .wv-runs .rn.pv button { opacity: 1; }
-.wv .wv-runs .rtag { font-size: 10.5px; padding: 0 5px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); }
+/* a tag: a colour of its own (--h: the hue of its text, runs.js tagHue), mixed with the theme's so that it reads on any of them */
+.wv .wv-runs .rtag { --tc: hsl(var(--h, 210) 85% 50%); font-size: 10.5px; padding: 0 6px; border-radius: 8px; font-weight: 600;
+  background: color-mix(in srgb, var(--tc) 20%, var(--panel)); border: 1px solid color-mix(in srgb, var(--tc) 55%, var(--panel));
+  color: color-mix(in srgb, var(--tc) 45%, var(--fg)); }
 .wv .wv-runs .rn .nm { flex: 0 1 auto; min-width: 2em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wv .wv-runs .rn .rtags { display: flex; gap: 3px; min-width: 0; flex: 0 1 auto; overflow: hidden; }
+/* the tags keep their width (a long name is cut, not they), up to half of the row */
+.wv .wv-runs .rn .rtags { display: flex; gap: 3px; min-width: 0; flex: 0 0 auto; max-width: 50%; overflow: hidden; }
 .wv .wv-runs .rtag { flex: 0 1 auto; min-width: 1.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wv .wv-runs .rd.old { opacity: 0.55; }
 .wv .wv-runs .rn .r1 > button { flex: none; }
@@ -668,11 +680,26 @@
 /* the roles on a row: A (the waves shown, the accent) and B (compared with A, the second run's colour), lit where they are */
 .wv .wv-runs .rn .rab { display: flex; gap: 2px; flex: none; }
 .wv .wv-runs .rn .rab button { width: 16px; height: 16px; padding: 0; font-size: 10.5px; font-weight: 700; line-height: 14px; border-radius: 3px;
-  opacity: 0.35; border: 1px solid var(--line); background: transparent; color: var(--muted); }
-.wv .wv-runs .rn:hover .rab button, .wv .wv-runs .rn.pv .rab button { opacity: 0.8; }
+  opacity: 0.7; border: 1px solid color-mix(in srgb, var(--muted) 60%, var(--line)); background: transparent; color: var(--muted); }
+.wv .wv-runs .rn:hover .rab button, .wv .wv-runs .rn.pv .rab button { opacity: 1; }
 .wv .wv-runs .rn .rab .rA.on { opacity: 1; background: var(--accent); border-color: var(--accent); color: var(--panel); }
 .wv .wv-runs .rn .rab .rB.on { opacity: 1; background: var(--wave-run-b); border-color: var(--wave-run-b); color: var(--panel); }
 .wv .wv-runs .rn.rnow .r1 b { font-style: italic; }
+/* the mode: Compare | Open, the one on lit; the Open mode: the compare's tools away */
+.wv .wv-runs .rmode { display: flex; flex: none; }
+.wv .wv-runs .rmode button { border-radius: 0; }
+.wv .wv-runs .rmode button:first-child { border-radius: 4px 0 0 4px; }
+.wv .wv-runs .rmode button:last-child { border-radius: 0 4px 4px 0; margin-left: -1px; }
+.wv .wv-runs .rmode button[aria-pressed=true] { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+.wv .wv-runs.open .mf .rc { display: none; }
+/* the runs' directory: the panel's last line, its path selectable; ★ lit: the setting names it */
+.wv .wv-runs .rdir { display: flex; align-items: center; gap: 4px; padding: 3px 16px 3px 8px; border-top: 1px solid var(--line); font-size: 11px;
+  color: var(--muted); }
+.wv .wv-runs .rdir[hidden] { display: none; }
+.wv .wv-runs .rdir .rp { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  user-select: text; cursor: text; font-family: var(--font-mono); }
+.wv .wv-runs .rdir button { flex: none; padding: 0 4px; font-size: 11px; }
+.wv .wv-runs .rdir .rstar.on { color: var(--accent); border-color: var(--accent); }
 @media (max-width: 600px) { .wv .wv-mods { left: 0 !important; top: 0 !important; bottom: 0; width: min(88vw, 340px) !important;
   height: auto !important; max-width: none !important; max-height: none !important; border-radius: 0 6px 6px 0; }
   .wv .wv-mods .mh { cursor: default; } .wv .wv-mods .rz { display: none; } }

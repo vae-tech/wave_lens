@@ -85,7 +85,7 @@ TIME_ARGS = {'cursor': ('t',), 'cursor2': ('t',), 'view': ('from', 'to', 'at', '
              'picture': ('from', 'to'), 'cycles': ('zero',), 'compare': ('offset',), 'expr_matches': ('from', 'to')}
 # what a saved state has (view.js state(), the plugins' addState): set_state takes these, nothing else
 STATE_KEYS = {'from', 'to', 'cursor', 'cursor2', 'range', 'edge', 'paint', 'radix', 'analog', 'hidden', 'dups', 'deltas', 'bits', 'select', 'find',
-              'bookmarks', 'arrows', 'markers', 'spans', 'groups', 'only', 'fsm', 'compare', 'compareShow', 'runsOver', 'folds', 'exprs', 'sva', 'bus'}
+              'bookmarks', 'arrows', 'markers', 'spans', 'groups', 'only', 'fsm', 'compare', 'compareShow', 'runsOver', 'runsMode', 'folds', 'exprs', 'sva', 'bus'}
 COLOR_FN = re.compile(r'(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\([^;{}()]*\)|var\(\s*--[\w-]+\s*\)', re.I)
 # the painters' colour names (model.js TOK, and the tokens bus.js and sva.js register): a word the page draws as a colour
 TOKENS = {'fg', 'muted', 'line', 'panel', 'panel2', 'acc', 'one', 'bus', 'x', 'xsoft', 'z', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9', 'band',

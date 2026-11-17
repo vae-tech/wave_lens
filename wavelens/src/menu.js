@@ -75,6 +75,23 @@ function menuSubs(el) {
 // Space on a submenu's header open it, its first item focused; ← or Esc in a submenu close it, back on its header; Esc in the menu:
 // done(). A field to type in keeps its keys (Esc aside); a list (Radix) is opened by Space or Enter; subs: menuSubs(el), none for a
 // menu with no submenus
+// where the pointer was last on this page (client px; none before it moved: the box of a key sequence in its corner)
+const PTR_AT = { x: null, y: null };
+if (typeof window !== 'undefined') {
+  const at = e => { PTR_AT.x = e.clientX; PTR_AT.y = e.clientY; };
+  for (const ev of ['pointermove', 'pointerdown']) window.addEventListener(ev, at, { capture: true, passive: true }); }
+// a box (position: fixed) under the pointer, on its right; no room there: on its left, above it; in the window whatever its size
+// (as near the pointer as it fits); the pointer not known yet: where its CSS puts it
+function atPointer(el, gap = 8, m = 4) {
+  if (PTR_AT.x == null) return el;
+  const w = el.offsetWidth, h = el.offsetHeight, W = innerWidth, H = innerHeight;
+  let x = PTR_AT.x + gap, y = PTR_AT.y + gap;
+  if (x + w > W - m) x = PTR_AT.x - gap - w;
+  if (y + h > H - m) y = PTR_AT.y - gap - h;
+  const left = Math.max(m, Math.min(x, W - w - m)), top = Math.max(m, Math.min(y, H - h - m));
+  Object.assign(el.style, { left: left + 'px', top: top + 'px', right: 'auto', bottom: 'auto' });
+  return el;
+}
 function menuKeys(el, done, subs = null) {
   const items = lv => [...lv.children].flatMap(c => (c.matches('button') ? [c] : c.matches('.msub') ? [c.querySelector(':scope > button')] :
     c.matches('.mi') ? [...c.querySelectorAll('input:not(.wv-hex), select, button')] : [])).filter(x => !x.hidden && x.getClientRects().length);
@@ -233,7 +250,8 @@ Object.assign(WaveView.prototype, {
           ugb('ugoff', i, `Out of “${g.name}”`) :
           ugb('ugto', i, `Into “${g.name}”`))).join('') + b('ugnew', gsigs.length > 1 ? `New group of the ${gsigs.length}` : 'New group with it') : '') +
         (sig && sig.ug ? b('ugout', `Out of “${sig.ug.name}” (this row)`) : '') +
-        (grp && grp.user ? b('ugdel', gk === 'divider' ? 'Delete this divider' : 'Delete this group') : '') +
+        (grp && grp.user ? b('ugren', gk === 'divider' ? 'Rename this divider…' : 'Rename this group…') +
+          b('ugdel', gk === 'divider' ? 'Delete this divider' : 'Delete this group') : '') +
         (this.ugroups.length ? '<hr><div class="mh">Go to</div>' +
           this.ugroups.map((g, i) => (g.divider ? '' : ugb('ugo', i, `${g.name} · ${g.signals.length}`))).join('') : ''),
         this.ugroups.length ? this.ugroups.length + ' ' : '');
@@ -353,11 +371,11 @@ Object.assign(WaveView.prototype, {
       else if (act === 'onlyx') this.setOnly(null);
       else if (act === 'fsms') { this.closeMenu(); this.fsmPanel(true); return this; }
       else if (act === 'fsmx') this.setFsm(null);
-      // a bookmark, a marker: its text asked over the waves first, then it goes into its list below them (edited there)
+      // a bookmark, a marker: its label asked over the waves first, then it goes into its list below them (edited there, a bookmark's text too)
       else if (act === 'mark') { const t = this.snap(sig, at), [x, y] = this.menuAt, top = this.topNow();   // the waves as they are now
-        this.askText(x, y, `Bookmark · ${sig.name} · ${this.fmtCursor(t)}`, 'its text', text => {
-          const n = Math.max(0, ...this.bms.map(b => b.n)) + 1; this.bms.push({ n, t, signal: sig.full, text, color: null, top }); this.changed(true); },
-          '', true);
+        this.askText(x, y, `Bookmark · ${sig.name} · ${this.fmtCursor(t)}`, 'its label', label => {   // the text (its description): in the list
+          const n = Math.max(0, ...this.bms.map(b => b.n)) + 1; this.bms.push({ n, t, signal: sig.full, text: '', label, color: null, top });
+          this.changed(true); }, '', true);
         return this; }
       else if (act === 'copyname') this.copyRows(many ? sigs : [it]);
       else if (act === 'copyv') this.copyText(`${sig.name}: ${this.valueTwo(sig, true)}`);
@@ -382,6 +400,7 @@ Object.assign(WaveView.prototype, {
         this.toGroup(`group ${k}`, gsigs); }
       else if (act === 'ugout') this.hide([sig]);
       else if (act === 'ugdel') this.run({ op: 'group', name: (ugh || grp).name, delete: true });
+      else if (act === 'ugren') { const [x, y] = this.menuAt; this.renameGroup((ugh || grp).name, x, y); return this; }
       else if (act === 'mvup' || act === 'mvdn' || act === 'mvtop' || act === 'mvbot') {
         this.moveKey({ mvup: -1, mvdn: 1, mvtop: -Infinity, mvbot: Infinity }[act], false, ugh || mine); }
       else if (act === 'ugfold') { if (this.collapsed.has(ugh.id)) this.collapsed.delete(ugh.id); else this.collapsed.add(ugh.id);
@@ -447,25 +466,33 @@ Object.assign(WaveView.prototype, {
     (el.querySelector(':scope > button, :scope > .msub > button') || el).focus({ preventScroll: true });
     return el;
   },
-  // ctrl+G: your groups in a list over the names (as the right button's menu); a click or Enter goes there
-  groupsMenu() {
+  // ctrl+G: your groups in a list over the names (as the right button's menu); a click or Enter goes there; its ✎ or F2 renames
+  // it (the list again after, on it). at: the name of the group to focus
+  groupsMenu(at = null) {
     this.closeMenu();
     const el = document.createElement('div'); el.className = 'wv-menu wv-groups'; el.setAttribute('role', 'menu');
     const item = (g, i) => `<button type="button" role="menuitem" data-m="ugo" data-g="${i}"><span><i class="sw" style="background:${
-      esc(g.color || 'var(--accent)')}"></i>${esc(g.name)}</span><span class="kk">${g.signals.length}</span></button>`;
-    el.innerHTML = '<div class="mh">Your groups</div>' + (this.ugroups.some(g => !g.divider) ?   // a divider is no group to go to
+      esc(g.color || 'var(--accent)')}"></i>${esc(g.name)}</span><span class="kk">${g.signals.length}</span><span class="ren" ` +
+      `title="Rename the group (F2)" aria-hidden="true">✎</span></button>`;
+    el.innerHTML = '<div class="mh">Your groups · F2 renames</div>' + (this.ugroups.some(g => !g.divider) ?   // a divider is no group to go to
       this.ugroups.map((g, i) => (g.divider ? '' : item(g, i))).join('') :
       '<div class="mh">none yet: the right button on a signal, Groups ▸ New group</div>');
     this.root.append(el); this.menuEl = el;
     const n = this.namesEl.getBoundingClientRect(), box = el.getBoundingClientRect();
     el.style.left = Math.max(4, Math.min(n.left + 12, innerWidth - box.width - 4)) + 'px';
     el.style.top = Math.max(4, Math.min(Math.max(n.top, 0) + this.hdrH + 8, innerHeight - box.height - 4)) + 'px';
-    el.addEventListener('click', e => { const m = e.target.closest('button[data-g]'); if (!m) return; this.closeMenu();
-      this.goGroup(this.ugroups[+m.dataset.g].name); });
+    const ren = m => { const g = this.ugroups[+m.dataset.g], q = m.getBoundingClientRect(); if (!g) return;
+      this.renameGroup(g.name, q.left, q.bottom + 2, name => this.groupsMenu(name)); };
+    el.addEventListener('click', e => { const m = e.target.closest('button[data-g]'); if (!m) return;
+      if (e.target.closest('.ren')) { ren(m); return; }
+      this.closeMenu(); this.goGroup(this.ugroups[+m.dataset.g].name); });
+    el.addEventListener('keydown', e => { const m = e.key === 'F2' && e.target.closest('button[data-g]');
+      if (m) { e.preventDefault(); e.stopPropagation(); ren(m); } });
     const f = this.menuFilter(el, (b, take) => { if (take) b.click(); else b.focus(); });
     menuKeys(el, () => { this.closeMenu(); this.refocus(); });   // ↑ ↓ Home End, Esc
     this.menuOff(el);
-    (f || el.querySelector('button') || el).focus({ preventScroll: true });
+    const on = at != null && [...el.querySelectorAll('button[data-g]')].find(b => this.ugroups[+b.dataset.g].name === at);
+    (on || f || el.querySelector('button') || el).focus({ preventScroll: true });
     return el;
   },
   // gm (the right button's Markers…): the markers (the page's and yours) and the bookmarks in a list over the waves, by
@@ -555,14 +582,15 @@ Object.assign(WaveView.prototype, {
     const first = this.vis.find(r => r.ug === g); if (first) this.select(first); else this.draw();
     this.centerRow(g); this.toast(name); return this;
   },
-  // a text asked over the waves where the menu was (a bookmark's text, a marker's label): Enter gives it (empty too), Esc
+  // a text asked over the waves where the menu was (a bookmark's or a marker's label): Enter gives it (empty too), Esc
   // or a click elsewhere gives nothing; the waves stay where they are (no field below them takes the focus)
-  // away: a click elsewhere gives what was typed too (none typed: nothing)
-  askText(x, y, title, hint, give, value = '', away = false) {
+  // away: a click elsewhere gives what was typed too (none typed: nothing); verb: the button's word (Rename: the value given selected)
+  askText(x, y, title, hint, give, value = '', away = false, verb = null) {
     this.closeMenu();
     const el = document.createElement('div'); el.className = 'wv-menu wv-ask'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', title);
     el.innerHTML = `<div class="mh">${esc(title)}</div><input type="text" spellcheck="false" autocomplete="off" placeholder="${esc(hint)}" ` +
-      `aria-label="${esc(hint)}"><div class="ak"><span>Enter: add · Esc: cancel</span><button type="button" data-m="ok">Add</button></div>`;
+      `aria-label="${esc(hint)}"><div class="ak"><span>Enter: ${esc((verb || 'add').toLowerCase())} · Esc: cancel</span><button type="button" data-m="ok">` +
+      `${esc(verb || 'Add')}</button></div>`;
     this.root.append(el); this.menuEl = el;
     const b = el.getBoundingClientRect(), inp = el.querySelector('input'); inp.value = value;
     el.style.left = Math.max(4, Math.min(x, innerWidth - b.width - 4)) + 'px'; el.style.top = Math.max(4, Math.min(y, innerHeight - b.height - 4)) + 'px';
@@ -573,8 +601,18 @@ Object.assign(WaveView.prototype, {
     el.querySelector('button[data-m=ok]').addEventListener('click', () => done(true));
     el.addEventListener('contextmenu', e => e.preventDefault());
     this.menuOff(el, false);
-    inp.focus({ preventScroll: true });
+    inp.focus({ preventScroll: true }); if (verb) inp.select();
     return el;
+  },
+  // your group (a divider too) renamed: its new name asked in a box at (x, y) (under its row in the names, its line of the ctrl+G
+  // list, where the menu was), its name there selected; then(name): after it (the ctrl+G list opened again on it)
+  renameGroup(name, x, y, then = null) {
+    const g = this.ugroups.find(u => u.name === name); if (!g) return this;
+    this.askText(x, y, `Rename ${g.divider ? 'the divider' : 'the group'} “${name}”`, 'its new name', to => {
+      if (!to || to === name) { if (then) then(name); return; }
+      this.run({ op: 'group', name, rename: to }).then(r => { if (r[0].error) this.toast(r[0].error); if (then) then(r[0].error ? name : to); });
+    }, name, false, 'Rename');
+    return this;
   },
   // a yes or no asked where the menu was (Forget the kept view): the button, Enter on it, gives it; Esc, Cancel (in focus at first) or a
   // click elsewhere: nothing
@@ -665,7 +703,7 @@ Object.assign(WaveView.prototype, {
       if (blur) window.addEventListener('blur', off, { signal: this.ac.signal }); }, 0);
   },
   refocus() { this.canvas.focus({ preventScroll: true }); return this; },
-  // the first key of a sequence: a moment after it (keyHints ms, false: never) a box says what can follow; a key or a click on it goes on,
+  // the first key of a sequence: a moment after it (keyHints ms, false: never) a box under the pointer says what can follow; a key or a click on it goes on,
   // as long as it is open (the keys stay on the waves), Esc or a click elsewhere closes it
   keyHintOn(k) {
     this.kpre = { k, t: Date.now() };
@@ -701,7 +739,7 @@ Object.assign(WaveView.prototype, {
     el.addEventListener('click', e => { const b = e.target.closest('button[data-k]'); if (!b) return; this.keyHintOff(); this.seq(k + b.dataset.k); });
     this.keysOff = e => { if (!el.contains(e.target)) this.keyHintOff(); };
     document.addEventListener('pointerdown', this.keysOff, true);
-    this.root.append(el); this.keysEl = el;
+    this.root.append(el); this.keysEl = el; atPointer(el);
   },
   closeMenu() {
     if (this.askAc) { this.askAc.abort(); this.askAc = null; } this.askPlace = null;   // a box that follows its row (bookmarkKey)

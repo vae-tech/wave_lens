@@ -409,7 +409,7 @@ add theirs (`WaveLens.registerDefaults`).
 | `exprLibrary` | `[]` | the project's expressions, `[{"text": "PSEL && !PREADY", "label": "wait"}]` or texts: the expression editor offers them as you type (by label or text) and in **Library…** of the list of expressions |
 | `sharedMarkers` | false | true: your markers and their Δ the same in every viewer of the page of the same dump (a marker made in one is in each; a page of a view per test, `mkhtml.py --marks-views tests`, sets it) |
 | `keys` | `{}` | your keys: a key or a sequence → the viewer's key it stands for (`null`: none): `{"gx": "gm", "M": "m", "m": null, "ctrl+k": "ctrl+g"}`; a key is one character, a sequence of your own after `g z y [ ]` (its box lists it under **Your keys** with what it does), `ctrl+` or `ctrl+shift+` a key, or a named key (`ArrowUp` … `F12`); a key stands for one key of the viewer (no chain: `x` → `y` → `z` does not go on), alt+ a key is always the viewer's; `g z y [ ]` alone, Esc and `?` stay; key by key over the three layers (`data-keys='{…}'` on the element last); **?** lists them in place of the viewer's rows they take; a key it cannot take is said in the log when the setting is read, one standing for no key of the viewer when pressed (a toast too) |
-| `keyHints` | 200 | ms after the first key of a sequence (`g z y [ ]`): a box says what can follow, to press or to click; `false`: never, and the second key within a second, as before |
+| `keyHints` | 200 | ms after the first key of a sequence (`g z y [ ]`): a box says what can follow, to press or to click, under the mouse pointer; `false`: never, and the second key within a second, as before |
 | `cursorSnap` | 8 | px: a click on the waves puts the cursor on an edge of the signal under the pointer this near (alt+click: not); 0 = off |
 | `showWidth` | true | a bus's width after its name (`[7:0]`, a field's `[msb:lsb]`; a click on it: the bus bit by bit), in the viewer and the pictures; false: none |
 | `gapView` | false | with `gaps`: the viewer's waves themselves with the gaps cut out, every change of a gap setting shown at once (**Gaps ▸ on the waves**, `gv`); a picture saved cuts where the waves do (an end in a gap keeps that gap's column, as the window shows it); a range or the cursors measured through gaps count the time and the clocks hidden, the clock of the gaps said on any row, an end on a gap's column at the side nearer (alt: inside it) |
@@ -779,10 +779,10 @@ is in sight. Navigation follows Questa's wave window, the lists and the text vim
 | edge kind **= value** | a field: `0x40`, `'h40`, `8'd64`, `64`, `-3`, `'b101`, a literal with x / z compared bit for bit (`'b10x1`, `8'hx5`: x and z apart) or a text (an enum label: `ACCESS`); Enter / ◀ ▶ / Tab: the next / previous time the selected signal becomes it (none selected: any shown signal) | edge kind **X / Z** | the next / previous x or z (a bus with x / z bits too) of the selected signal or of any shown one: the first X after reset from the reset's edge |
 | shift+`← →` | move the cursor a hundredth of the view | the pointer on a signal | its value there, the change into it and the next one (tooltip) |
 | `/`, ctrl+F | find (the bar scrolled away: the find group floats over the waves; ✕ or Esc puts it back) | `n N`, `*` `#` | next / previous match; find the selected signal's name and go to its next / previous match |
-| `b` | bookmark at the cursor (its text asked there) | `]b [b` | the next / previous bookmark |
+| `b` | bookmark at the cursor (its label asked there) | `]b [b` | the next / previous bookmark |
 | `m` | marker at the cursor: its label asked (Enter) | `]m [m` | the next / previous marker |
 | `r` | the last state loaded, read again (Reload) | `R` | the dump read again from the disk, the view kept (⟳) |
-| `g` | a moment after it (`keyHints`) a box says what can follow, to press or to click, as long as it stays open (Esc, or a key it does not list: it closes, nothing else): go to `gg gl gt gT`, markers and bookmarks `gm gM gB gd gc`, the state `gs gL gr`, the dump `gO gR gC gu`, `gv`, `gp` | `z y [ ]` | the same box: fold, copy, next, previous |
+| `g` | a moment after it (`keyHints`) a box says what can follow, to press or to click (under the mouse pointer, on its left or above it where the window ends; the corner before the mouse has moved on the page), as long as it stays open (Esc, or a key it does not list: it closes, nothing else): go to `gg gl gt gT`, markers and bookmarks `gm gM gB gd gc`, the state `gs gL gr`, the dump `gO gR gC gu`, `gv`, `gp` | `z y [ ]` | the same box: fold, copy, next, previous |
 | `gM` `gB` | a marker, a bookmark at the cursor (as `m`, `b`) | `gd` `gc` | the Δ between markers on / off; clear every bookmark, arrow and marker of yours |
 | `gt` `gT` | the Modules panel, the state machines (as `t`, `T`) | `gs` `gL` `gr` | the state: Save, Load…, Reload |
 | `gO` `gR` `gC` | the dump: Open…, ⟳, Compare… | `gp` | Save page |
@@ -935,8 +935,8 @@ the title line; Esc puts back the value it showed. Cycle diagrams count in cycle
 ![Cursor at 1.2 µs, a 100 ns window around it](img/cursor.png)
 
 **Bookmarks and arrows.** **+ Bookmark** (`b`) puts a numbered bookmark on the selected signal at the cursor, snapped to an
-edge: a small box over the waves there asks its text first (Enter adds it, a click elsewhere too when a text is typed, Esc:
-none; as `m` a marker's label; the row brought into sight, the box following it as the waves scroll). Below the waves each bookmark has a time, a signal, a colour and a text; drag a circle to move it, shift+drag from
+edge: a small box over the waves there asks its label first, the short text by the circle (Enter adds it, a click elsewhere too when a
+label is typed, Esc: none; as `m` a marker's label; its longer text, the description, in the list; the row brought into sight, the box following it as the waves scroll). Below the waves each bookmark has a time, a signal, a colour, a label and a text; drag a circle to move it, shift+drag from
 one circle to another to draw an arrow (shape `- ~ -~ ~- -| |- -|-`, head, line, colour, label). Labels get a thin
 lane of their own between the signals; an arrow between two bookmarks of one signal is a dimension line in that lane,
 above the signal. A circle dragged onto the top quarter of its row (or **↥** in its line) is **lifted** into such a lane
@@ -1073,9 +1073,11 @@ Only stays so); a module folded since is opened on the way to that row and to it
 list's **cursor** button moves a bookmark to the cursor and to the screen of now (its `top` the row at the top). The right button's **Your groups ▸** submenu puts the signal (the highlighted or selected
 ones) **Into** a group of your own or a **New group** — a folder at the top of the names with its signals in your order
 (they stay in their modules too; their radix, colour and values are the signal's; bookmarks and highlight of a signal
-show on its row in the group) —, takes them **Out**, **Deletes** the group on its header, and **Go to** any group.
-**ctrl+G** on the waves lists your groups the same way: a click or Enter opens one, brings it to the middle and
-selects its first signal. Their order is yours: **alt+↑ / alt+↓** move the selected signal (a run of them) one place
+show on its row in the group) —, takes them **Out**, **Renames** (**Rename this group…**) or **Deletes** the group on
+its header, and **Go to** any group. A double-click on a group's name in the names (or F2 on it) renames it too: its
+name in a box under the row, Enter renames, Esc leaves it. **ctrl+G** on the waves lists your groups the same way: a
+click or Enter opens one, brings it to the middle and selects its first signal; its **✎** (or F2 on the line) renames
+it, the list opened again on it. Their order is yours: **alt+↑ / alt+↓** move the selected signal (a run of them) one place
 in its group, **alt+shift+↑ / ↓** the group among yours; a signal of a group, or a group's header, **dragged** in the
 names goes where the line shows (into another group of yours too), and the right button on a name has **Move up / Move
 down / To the top / To the bottom** in **Your groups ▸** (on a group's header: among yours) — each one step to undo. The right button on any
@@ -1197,8 +1199,19 @@ does it, its `x.types.json` read; an FST copied) in `.wavelens-runs` beside the 
 relative to the workspace folder or absolute), listed in its `runs.json`. A directory keep made, or one named `.wavelens-runs`,
 gets a `.gitignore` of `*` (git leaves it out); another one without a `.gitignore` (a folder of yours named by
 `wavelens.runsDir`) gets one of the runs' files only (`*.fst`, `*.part`, `runs.json*`), never more. The panel lists the dump of now first (the row **now**: its file, its time and size on the disk), then the runs of
-this dump (by its file name; a shared `wavelens.runsDir` holds others, counted in the panel's header), newest first (#number,
-name, tags, when kept — and "of a dump of 12:03" when the dump was written earlier than it was kept —, its size, the comment).
+this dump (by its file name; a shared `wavelens.runsDir` holds others, counted in the panel's header), newest first. A row
+has two lines. The first: #number, the name (muted when it is only the dump's name, as a keep without a name and a slice
+get: such names do not tell the runs apart) and the tags, each in a colour of its own (the colour of its text: the same tag
+has the same colour on every row). The second starts with the **comment** (its first line, in the text's colour: the
+whole of it in the row's tooltip), then, muted, what the run is: a slice's times, when kept — and "of a dump of 12:03" when
+the dump was written earlier than it was kept —, its size, its cases, its dump when it is another than this one's. The
+panel's last line is **the directory of the runs** (its path can be selected; **Copy** copies it; its tooltip says whether it
+is the default beside the dump or the setting `wavelens.runsDir`, and whose settings have it) with a **★**: a click writes
+the setting `wavelens.runsDir` with this directory — in the workspace's settings when the dump is in a workspace folder
+(relative to the folder when inside it; a workspace of several folders: the whole path), else in yours (the whole path)
+— so the dumps opened later keep their runs here too (the other tabs read their lists again); the ★ is lit while the setting names the directory, and a click on a lit ★ clears the setting (the runs kept stay
+where they are; `.wavelens-runs` beside each dump again; when that is another directory, B and the Δ numbers are dropped
+and the dump of now is shown: the runs listed are others).
 Two rows have a role, a letter on the left of the row, lit where it is (each row has both, as buttons): **A**, the waves
 shown in the tab (now at first), and **B**, the run compared with A. Who is compared with whom is on the screen: the two
 letters on the list, `A · name` and `B · name` on the time axis, both names in the status line (`A #3 golden ≠ B #1 golden:
@@ -1223,6 +1236,14 @@ letters on the list, `A · name` and `B · name` on the time axis, both names in
   row of yours (a signal added since): the toast says which, and the rows come back on the next waves that have them, with
   their colour, radix, places in your groups; what you change meanwhile on the other rows stays. A run shorter than the window: said
   (`it ends at 30 µs`). ⟳ (`R`) and a new simulation read the dump of now: A is now again (said).
+- **Open** (the switch **Compare | Open** in the panel's tool line, `o` in the list): the mode to look through the runs one
+  after another, without A and B. A row chosen (a click, Enter, its `A`) opens its waves in the tab, the view kept as `w`
+  keeps it; nothing is compared — the B of before is dropped when the mode is entered, the B letters and the compare's tools
+  (over, Δ all, ⟳, no B) are away, the lit row is the run shown. ↑ ↓ Home End PgUp PgDn held down open only the row they
+  rest on (after 0.6 s: a run's waves are read); keys pressed on while a run is read light their row over the new waves
+  and open it when they rest. The status line starts with `Open ·`. The mode is kept with the view (a saved state's
+  `runsMode`: `open` or `compare`; the dump read again keeps it); `]r` `[r` (a B asked) are the Compare mode again, `]w` `[w`
+  work in both. A file of Compare… is not the panel's B: it stays, compared again with each run opened (the bar's ✕ ends it).
 - **Δ all** lists for every run how many signals differ from A in the window and the first difference (red: some,
   `= equal`: none, `not in this window`: the run does not cover it; numbers of another window or another A than the one now
   are greyed with theirs; the dump read again keeps them); ⟳ compares A with B again over the window as it is now.
@@ -1253,6 +1274,12 @@ it (B offset by the slice's start, said in the status: `B's 120 ns … 145 ns: a
 view's times go with it: from the dump to its slice the window, the cursor, your markers, bookmarks and spans (and the Runs
 panel's window when it is one of your spans) move by the slice's start, and back again on now (slice to slice: both from 0, nothing moves). **Save as FST…**
 writes the range as an FST file of its own, its times from 0, where the save dialog says (`sva fst --from --to --zero`).
+**A slice's span on other waves**: **↔** on a slice's row (`s` in the list) puts the window and the range of the waves
+shown (A) on the slice's start and end — the place it was cut from, in A's time: the dump's time on the dump or a whole
+run, less A's start when A is a slice itself — so **Range ▸ Keep as a slice (Runs)** or **Save as FST…** then takes the same
+piece of these waves (another run's same 120 ns … 145 ns, to compare the two slices). A span that reaches past an end of A
+is cut to A (said); one wholly outside A's time is said and not applied. (The viewer's commands have no runs: an agent
+reads a slice's `slice.from` / `slice.to` with `wave_runs` and sets `view` and `range`.)
 
 **The runs kept, in the shell.** `sva runs keep DUMP [--name N] [--tags T,...] [--comment C]` keeps a run (a VCD as an FST
 in blocks of 1 MiB of changes — a window late in it reads only the blocks from there; an FST copied as it is; the directory:
@@ -1404,7 +1431,7 @@ range, a span of yours, the row) and **Copy image**; the rest in submenus. Each 
 | at the top | its submenus |
 |---|---|
 | the range: **Zoom to the range**, **Clear the range** | **Range ▸** Bookmarks at its ends, Copy Δ, Keep as span…, (VS Code) Keep as a slice (Runs), Save as FST… |
-| the row: **Colour**, **Its own colour**, **Radix**, **Highlight**, **Duplicate**, **Remove the copy**, **Hide**, **Copy the path** | **Show as ▸** Analog, Bits, Duplicate bits…, Type… · **Your groups ▸** Move up / down, To the top / bottom, Fold this group, Into / Out of “G”, New group with it, Out of “G” (this row), Delete this group, Go to |
+| the row: **Colour**, **Its own colour**, **Radix**, **Highlight**, **Duplicate**, **Remove the copy**, **Hide**, **Copy the path** | **Show as ▸** Analog, Bits, Duplicate bits…, Type… · **Your groups ▸** Move up / down, To the top / bottom, Fold this group, Into / Out of “G”, New group with it, Out of “G” (this row), Rename this group…, Delete this group, Go to |
 | **Copy image** | **Export ▸** Copy image of all rows, Save image as PNG, Save image as SVG, Save as WaveDrom, Copy WaveDrom, Save as WaveLens (JSON) |
 | always | **Here ▸** (the time clicked on its header) Bookmark here (on a signal), Marker here, Second cursor here, Clear the second cursor, Copy A · B · Δ, Copy link to here, Markers…, Clear bookmarks and markers · **Gaps ▸** · **Cycles ▸** · **Modules ▸** (**Rows ▸** on a page with no modules) Fold this / its module, Fold / Open every module, Show the hidden, Modules…, Locate module in tree, Pause / Resume Only, Clear Only, State machines…, Clear the FSM layer |
 

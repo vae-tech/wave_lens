@@ -783,7 +783,7 @@ class WaveView {
         bookmarks: this.bookmarks(), arrows: this.arrowList(),
         markers: this.markList(), spans: this.spanList(),
         groups: this.groupList(), only: this.onlyState(), fsm: this.fsmState(), compare: this.cmpState(), compareShow: this.cmp ? this.cmpRun : null,
-        runsOver: this.runsWin ? Object.assign({}, this.runsWin) : null };
+        runsOver: this.runsWin ? Object.assign({}, this.runsWin) : null, runsMode: this.runsMode === 'open' ? 'open' : 'compare' };
     // none is said (null, the kind "any"): a state loaded later clears what is there then (a key left out keeps it)
     st.cursor2 = this.cursor2 ?? null;
     st.range = this.range ? { from: this.range[0], to: this.range[1], signal: (this.rangeRow && this.rangeRow.full) || null } : null;
@@ -899,6 +899,8 @@ class WaveView {
     if (st.runsOver !== undefined) { const w = st.runsOver;   // the window the runs are compared over (runs.js): one of the spans
       this.runsWin = w && typeof w === 'object' && isFinite(w.from) && isFinite(w.to) ? { label: String(w.label || ''), from: +w.from, to: +w.to } : null;
       if (this.runsP) this.runsP.windows(); }
+    // the Runs panel's mode: open (a row chosen opens its waves: no B, a run compared is dropped) or compare (it is B)
+    if (st.runsMode !== undefined) this.runsModeSet(st.runsMode, true);
     if (st.compareShow && this.cmp && !this.cmpCant(st.compareShow) && st.compareShow !== this.cmpRun) {
       await this.compareView(st.compareShow, true); }
 
@@ -1417,8 +1419,8 @@ class WaveView {
       label => this.run(Object.assign({ op: 'marker', t }, label ? { label } : {})));
     return this;
   }
-  // b, gB, the bar's + Bookmark: a bookmark at the cursor, on an edge of the selected signal; its text asked over the waves
-  // there first (as m a marker's label), then it goes into the list below them; Esc: none, a click elsewhere: what was typed.
+  // b, gB, the bar's + Bookmark: a bookmark at the cursor, on an edge of the selected signal; its label (by the circle)
+  // asked over the waves there first (as m a marker's), then it goes into the list below them (its text there); Esc: none, a click elsewhere: what was typed.
   // The row out of sight is brought into it; the box follows the row as the waves scroll (hidden while the row is away)
   bookmarkKey() {
     const s = this.sel, t = this.cursor = this.snap(s, this.cursor);
@@ -1428,8 +1430,8 @@ class WaveView {
       const x = r.left + Math.min(Math.max(this.xOfT(t), 0), r.width), y = o ? r.top + o.y + o.h - (this.oy || 0) : y0 + 8;   // with gaps: where drawn
       return [x, y, !!o && (y - o.h < y0 - 1 || y > Math.min(r.bottom, innerHeight) + 1)]; };
     const [x, y] = at();
-    const box = this.askText(x, y, `Bookmark · ${s ? s.name + ' · ' : ''}${this.fmtCursor(t)}`, 'its text',
-      text => this.mark(text, { t, top, signal: s ? s.full : null }), '', true);
+    const box = this.askText(x, y, `Bookmark · ${s ? s.name + ' · ' : ''}${this.fmtCursor(t)}`, 'its label',   // the text: in the list
+      label => this.mark('', { t, top, signal: s ? s.full : null, label }), '', true);
     this.askPlace = () => { if (this.menuEl !== box) return; const [px, py, away] = at(), w = box.offsetWidth, h = box.offsetHeight;
       // back in sight: its field has the keys again (a hidden field loses the focus: review B-17)
       const back = box.style.visibility === 'hidden' && !away; box.style.visibility = away ? 'hidden' : '';
@@ -1484,12 +1486,12 @@ class WaveView {
     this.draw();
   }
   // a bookmark (a numbered circle, described below the waves) at the cursor (on an edge of the selected signal) -> its number;
-  // at: {t, top, signal} of one asked first (bookmarkKey: its text given there, the list below the waves not focused); none,
+  // at: {t, top, signal, label} of one asked first (bookmarkKey: its label given there, the list below the waves not focused); none,
   // no text: its text field focused
   mark(text = '', at = null) {
     const s = this.sel, t = at ? at.t : (this.cursor = this.snap(s, this.cursor));
     const n = Math.max(0, ...this.bms.map(b => b.n)) + 1;
-    this.bms.push({ n, t, signal: at ? at.signal : s ? s.full : null, text, color: null, top: at ? at.top : this.topNow() });
+    this.bms.push({ n, t, signal: at ? at.signal : s ? s.full : null, text, label: (at && at.label) || '', color: null, top: at ? at.top : this.topNow() });
     this.saveBookmarks(); this.renderNotes(); this.draw();
     if (!text && !at) this.notesEl.querySelector(`li[data-n="${n}"] input.txt`)?.focus();
     return n;
@@ -1951,10 +1953,22 @@ class WaveView {
   // the names, the axis, the cursor and the bookmarks, as this viewer draws them; the page's colours put in: a standalone SVG
   toSVG(o = {}) {
     const [a, b] = this.range || [this.t0, this.t0 + this.span], cs = getComputedStyle(this.root);
-    const rows = Array.isArray(o.rows) ? o.rows : o.rows === 'all' ? this.rowsL : o.rows === 'picked' ? this.pickedRows() : this.screenRows();
+    const part = Array.isArray(o.rows) ? this.picLanes(o.rows) : o.rows === 'picked' ? this.picLanes(this.pickedRows()) : null;
+    const rows = part ? part.rows : o.rows === 'all' ? this.rowsL : this.screenRows(), band = part ? part.band : undefined;
     const from = o.from ?? a, to = o.to ?? b, cuts = o.cuts || this.cutsOf(from, to, rows);
-    const svg = WaveSVG.toString(null, { view: this, from, to, rows, cuts, width: o.width || Math.max(640, this.root.clientWidth) });
+    const svg = WaveSVG.toString(null, { view: this, from, to, rows, band, cuts, width: o.width || Math.max(640, this.root.clientWidth) });
     return svg.replace(/var\((--[\w-]+)\)/g, (m, n) => cs.getPropertyValue(n).trim().replace(/"/g, "'") || m);
+  }
+  // the rows of a picture of some of them (the selected, the highlighted, the ones given): their lanes worked out again for them,
+  // as rowsL's for the view: a lifted bookmark, a marker's text, a Δ on a signal's line stay over (under) it, not on the line over
+  // the rows (the view's lanes are not in such a list); a lane on its neighbours' module band
+  picLanes(rows) {
+    const sig = rows.filter(r => r.type !== 'lane');
+    const out = withLanes(sig, arrowLanes(sig, this.bms, this.S.arrowLabels === 'lane' ? this.arrows : [], this.laneMarks()));
+    const band = this.band && new Map(this.band);
+    if (band) out.forEach((r, i) => { const b = r.type === 'lane' ? band.get(out[i - 1]) ?? band.get(out[i + 1]) : undefined;
+      if (b !== undefined) band.set(r, b); });
+    return { rows: out, band };
   }
   // -> a Promise of a PNG Blob of toSVG at scale × (2: sharp on a high-density screen and in a document; a tall picture, all
   // rows: less, down to 1, to stay within PNG_MAX)

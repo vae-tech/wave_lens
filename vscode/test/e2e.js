@@ -195,6 +195,15 @@ async function run() {
     finally { vscode.window.showWarningMessage = was; }
     ok(RUNS, id && listed && (listed.runs || []).some(x => x.id === id) && r[0] && r[0].differ === 1 && rm && rm.removed && rm.removed.id === id,
       { kept: kept.run || kept.error, listed: listed && (listed.runs || listed.error), compared: r[0] || got.error, removed: rm && (rm.removed || rm.error) });
+    // the panel's ★ (runs dir): the directory of now written to the setting wavelens.runsDir (the workspace's settings when the
+    // dump is in a workspace folder, else the user's), the same directory then; ★ again: the setting cleared
+    const cfg = () => vscode.workspace.getConfiguration('wavelens').get('runsDir') || '';
+    if (!cfg()) {
+      const star = await o.tab.runs({ op: 'dir', keep: true }), set = cfg(), unstar = await o.tab.runs({ op: 'dir', keep: false });
+      ok('runs: ★ writes wavelens.runsDir with the directory of the runs, ★ again clears it', !!set && star.dirOf && star.dirOf.set === set &&
+        star.dir === (listed && listed.dir) && unstar.dirOf && unstar.dirOf.set === '' && !cfg(),
+      { star: star.dirOf || star.error, dir: star.dir, listed: listed && listed.dir, unstar: unstar.dirOf || unstar.error, left: cfg() });
+    }
     await closeAll();
   } catch (e) { ok(RUNS, false, { error: e.message }); }
   // the log: what the reader noticed in a dump goes to the Problems panel on its line; one it cannot read, an error there

@@ -22,11 +22,15 @@ function host(o) {
   let provider = null;
   const Uri = { file: p => ({ fsPath: p, toString: () => 'file://' + p, scheme: 'file' }), parse: s => ({ fsPath: s.replace('file://', '') }),
     joinPath: () => ({ fsPath: o.dir }) };
-  const settings = Object.assign({ keysToVSCode: [] }, o.config);
+  const settings = Object.assign({ keysToVSCode: [] }, o.config), updates = [];
   const vscode = fake('vscode', Object.assign({ Uri,
     window: fake('window', Object.assign({ registerCustomEditorProvider: (id, p) => { provider = p; return disposable(); },
       createOutputChannel: () => fake('out') }, o.window)),
-    workspace: fake('workspace', Object.assign({ getConfiguration: () => ({ get: k => settings[k] }) }, o.workspace)) },
+    // the settings: read, and written as the user's (update: undefined removes; the target kept in h.updates)
+    ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
+    workspace: fake('workspace', Object.assign({ getConfiguration: () => ({ get: k => settings[k],
+      inspect: k => ({ [updates.some(u => u[0] === k && u[2] === 2) ? 'workspaceValue' : 'globalValue']: settings[k] }),
+      update: async (k, v, target) => { updates.push([k, v, target]); if (v === undefined) delete settings[k]; else settings[k] = v; } }) }, o.workspace)) },
   o.languages ? { languages: fake('languages', o.languages) } : {}, o.vscode));
   const load = Module._load;
   Module._load = (r, ...a) => (r === 'vscode' ? vscode : load(r, ...a));
@@ -48,7 +52,7 @@ function host(o) {
       // the host's data in the page (<script id="wavelens-host">)
       host: () => JSON.parse(/id="wavelens-host">(.*?)<\/script>/s.exec(webview.html)[1].replace(/\\u003c/g, '<')) };
   };
-  return { vscode, ctx, Uri, tab, api };
+  return { vscode, ctx, Uri, tab, api, updates };
 }
 
 // the test's body: its result printed on one line RESULT{…} (read by the Python side), a throw: the stack, exit 1

@@ -30,7 +30,9 @@
     compare: { ask: 'signals from to path? of?', reply: ['result', ''] },   // Compare…: A the waves shown (of: a run), B a dump picked (path:
     //   the one picked before, compared again with a new A), sva diff --page ('' the dialog closed)
     runs: { ask: 'op', ops: {                                      // the Runs panel: sva runs
-      list: { ask: '', reply: ['dir runs others? now? shown?'] },
+      list: { ask: '', reply: ['dir runs others? now? shown? dirOf?'] },   // dirOf {set, scope}: the setting wavelens.runsDir that names
+      //   the directory (set '': none, .wavelens-runs beside the dump) and the settings that have it (workspace, user)
+      dir: { ask: 'keep', reply: ['dir dirOf'] },                  // ★: that directory written to the setting (keep false: the setting cleared)
       open: { ask: 'run', reply: ['src name lazy store? note?'] },  // A: a run's waves served as the tab's (0: the dump of now)
       keep: { ask: 'name? tags? comment? cases? from? to? of?', reply: ['run'] },   // from, to: a slice of the waves of (a run; 0 the dump)
       cut: { ask: 'from to of?', reply: ['path', 'cancel'] },      // that window as an FST of its own (a save dialog), its times from 0

@@ -2665,7 +2665,7 @@ const TIPS = {
   'act:hl': ['Clear the highlight', ['Esc']], 'act:unhide': ['Show the hidden rows again'],
   'act:prev': ['Previous edge of the selected signal', ['shift+Tab', '[e']], '.edge': ['Edge kind: any, rising, falling, a value, X / Z', ['e']],
   'act:next': ['Next edge of the selected signal', ['Tab', ']e']],
-  'act:mark': ['Bookmark at the cursor, on the selected signal: its text asked there, then in the list', ['b']],
+  'act:mark': ['Bookmark at the cursor, on the selected signal: its label asked there, its text in the list', ['b']],
   'act:umark': ['A marker at the cursor: a dashed line across the rows; its label asked', ['m']],
   'act:mprev': ['The previous bookmark or marker in time', ['[b', '[m']], 'act:mnext': ['The next bookmark or marker in time', [']b', ']m']],
   'act:mlist': ['The markers and bookmarks in a list: ↑ ↓ go through them, the waves follow', ['gm']],
@@ -2762,7 +2762,7 @@ const TIPS = {
   'm:hl': ['Highlight', ['ctrl+click']], 'm:hide': ['Leave it out of the view (Hidden: N ✕ in the bar shows it again)'], 'm:unhide': ['Show the hidden rows'],
   'm:fold': ['Fold / open this module'], 'm:foldup': ['Fold its module', ['zc']], 'm:zM': ['Fold every module', ['zM']], 'm:zR': ['Open every module', ['zR']],
   'm:types': ['Where its labels or fields come from: the types file and the path in it, the width, why it has none'],
-  'm:mark': ['Bookmark on this signal here: its text asked here, then in the list', ['b']],
+  'm:mark': ['Bookmark on this signal here: its label asked here, its text in the list', ['b']],
   'm:copyname': ['Copy the path', ['yy']], 'm:copylink': ['Copy a link to this moment: the page opened by it goes here', ['yl']],
   'm:clear': ['Clear the range', ['Esc', 'ctrl+click']],
   'm:unpaint': ['Its own colour back'],
@@ -2771,6 +2771,7 @@ const TIPS = {
   'm:mlist': ['The markers and bookmarks in a list: ↑ ↓ go through them, the waves follow', ['gm']],
   'm:ugnew': ['A group of your own at the top of the names'],
   'm:ugout': ['Out of your group (the signal stays in its module)'], 'm:ugdel': ['Delete your group; its signals stay where they are'],
+  'm:ugren': ['A new name for your group (or a double-click on its name, F2 there)'],
   'm:mvup': ['One place up in your group (a selected run: as a block; a group: among yours)', ['alt+↑', 'drag the name']],
   'm:mvdn': ['One place down in your group (a selected run: as a block; a group: among yours)', ['alt+↓', 'drag the name']],
   'm:mvtop': ['First in your group (a group: the first of yours)'], 'm:mvbot': ['Last in your group (a group: the last of yours)'],
@@ -2822,7 +2823,7 @@ const HELP = [
   ['Cursor and edges', [[['click'], 'cursor on a near edge (alt: not) + select the signal'], [['shift+←', 'shift+→'], 'move the cursor'],
     [['Tab', 'shift+Tab'], 'next / previous edge (no signal selected: the focus moves on)'], [[']e', '[e'], 'next / previous edge'], [['e'], 'edge kind']]],
   ['Signals', [[['↑', '↓', 'j', 'k'], 'select the next / previous'], [['shift+click a name'], 'select every signal from the last clicked one'],
-    [['gg', 'G'], 'the first / last'], [['ctrl+G', 'gl'], 'your groups: a list, a click goes there'],
+    [['gg', 'G'], 'the first / last'], [['ctrl+G', 'gl'], 'your groups: a list, a click goes there, ✎ or F2 renames'],
     [['gv'], 'the waves with the gaps cut out, or in continuous time'],
     [['alt+↑', 'alt+↓'], 'the selected signal up / down in your group (shift: the group); or drag it in the names'],
     [['ctrl+click', '○'], 'highlight'], [['ctrl+shift+click'], 'highlight every row from the last one to it'],
@@ -2847,7 +2848,7 @@ const HELP = [
     [['ctrl+drag'], 'measure a range: Δ, the edges or changes of that signal, then of each one you select (↑ ↓, a click on a name)'],
     [['alt+drag'], 'a box: its time and its signals, then the menu (picture, WaveDrom, colour)'], [['ctrl+click'], 'clear the range'],
     [['right button'], 'a range and the menu: colour, radix, hide, Copy image; Show as ▸, Here ▸, Export ▸ …'],
-    [['b'], 'bookmark at the cursor: its text asked'],
+    [['b'], 'bookmark at the cursor: its label asked'],
     [[']b', '[b'], 'next / previous bookmark'], [['m'], 'marker at the cursor: its label asked'], [[']m', '[m'], 'next / previous marker'],
     [['right button + click'], 'the left button while the right one is down: a marker there at once (M1, M2 …; over the signal, else under it)'],
     [['gm'], 'the markers and bookmarks: a list, ↑ ↓ go through them'], [['drag a bookmark'], 'move it'],
@@ -3287,14 +3288,19 @@ class Names {
         if (e.shiftKey && v.hlAnchor && v.vis.includes(v.hlAnchor)) v.highlightRun(v.hlAnchor, r); else { v.toggleHighlight(r); v.hlAnchor = r; }
         v.refocus(); return;
       }
-      if (row.classList.contains('grp')) toggle(row);
+      if (row.classList.contains('grp')) { const r = rowOf(row); toggle(row); if (e.detail === 2 && rename(r)) return; }
       // shift+click: every signal from the last one clicked to it, selected
       else if (e.shiftKey && v.selAnchor && v.vis.includes(v.selAnchor)) v.selectRun(v.selAnchor, rowOf(row));
       else { const s = rowOf(row); v.select(v.sel === s && !v.selRun.size ? null : s); }   // a signal name: select it (again: unselect)
       v.refocus();   // the keys (Esc, arrows, n, m …) act on this viewer
     });
+    // your group's name (a divider's) renamed: a double-click on it (its two clicks fold and open it again; the row built again between
+    // them: no dblclick event, the second click's count), F2 on it; the box under its row
+    const rename = r => { if (!r || r.type !== 'group' || !r.user) return false; const n = v.namesEl.getBoundingClientRect(), q = v.rowBox(r);
+      v.renameGroup(r.name, n.left + 8, (q ? q.bottom : n.top) + 2); return true; };
     v.namesEl.addEventListener('keydown', e => {
       const at = e.target.closest('.row[data-r]');
+      if (e.key === 'F2' && at && at.classList.contains('grp') && rename(rowOf(at))) { e.preventDefault(); return; }
       if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && e.altKey && !e.ctrlKey && !e.metaKey && !keyLeft(v.S, e)) {   // the row with the focus moves
         e.preventDefault(); const r = at && rowOf(at);
         if (!r || !(r.user || r.ug)) { v.toast('alt+↑ / alt+↓ order the rows of your groups (the right button: Groups ▸)'); return; }   // not the selection's
@@ -4413,7 +4419,7 @@ class WaveView {
         bookmarks: this.bookmarks(), arrows: this.arrowList(),
         markers: this.markList(), spans: this.spanList(),
         groups: this.groupList(), only: this.onlyState(), fsm: this.fsmState(), compare: this.cmpState(), compareShow: this.cmp ? this.cmpRun : null,
-        runsOver: this.runsWin ? Object.assign({}, this.runsWin) : null };
+        runsOver: this.runsWin ? Object.assign({}, this.runsWin) : null, runsMode: this.runsMode === 'open' ? 'open' : 'compare' };
     // none is said (null, the kind "any"): a state loaded later clears what is there then (a key left out keeps it)
     st.cursor2 = this.cursor2 ?? null;
     st.range = this.range ? { from: this.range[0], to: this.range[1], signal: (this.rangeRow && this.rangeRow.full) || null } : null;
@@ -4529,6 +4535,8 @@ class WaveView {
     if (st.runsOver !== undefined) { const w = st.runsOver;   // the window the runs are compared over (runs.js): one of the spans
       this.runsWin = w && typeof w === 'object' && isFinite(w.from) && isFinite(w.to) ? { label: String(w.label || ''), from: +w.from, to: +w.to } : null;
       if (this.runsP) this.runsP.windows(); }
+    // the Runs panel's mode: open (a row chosen opens its waves: no B, a run compared is dropped) or compare (it is B)
+    if (st.runsMode !== undefined) this.runsModeSet(st.runsMode, true);
     if (st.compareShow && this.cmp && !this.cmpCant(st.compareShow) && st.compareShow !== this.cmpRun) {
       await this.compareView(st.compareShow, true); }
 
@@ -5047,8 +5055,8 @@ class WaveView {
       label => this.run(Object.assign({ op: 'marker', t }, label ? { label } : {})));
     return this;
   }
-  // b, gB, the bar's + Bookmark: a bookmark at the cursor, on an edge of the selected signal; its text asked over the waves
-  // there first (as m a marker's label), then it goes into the list below them; Esc: none, a click elsewhere: what was typed.
+  // b, gB, the bar's + Bookmark: a bookmark at the cursor, on an edge of the selected signal; its label (by the circle)
+  // asked over the waves there first (as m a marker's), then it goes into the list below them (its text there); Esc: none, a click elsewhere: what was typed.
   // The row out of sight is brought into it; the box follows the row as the waves scroll (hidden while the row is away)
   bookmarkKey() {
     const s = this.sel, t = this.cursor = this.snap(s, this.cursor);
@@ -5058,8 +5066,8 @@ class WaveView {
       const x = r.left + Math.min(Math.max(this.xOfT(t), 0), r.width), y = o ? r.top + o.y + o.h - (this.oy || 0) : y0 + 8;   // with gaps: where drawn
       return [x, y, !!o && (y - o.h < y0 - 1 || y > Math.min(r.bottom, innerHeight) + 1)]; };
     const [x, y] = at();
-    const box = this.askText(x, y, `Bookmark · ${s ? s.name + ' · ' : ''}${this.fmtCursor(t)}`, 'its text',
-      text => this.mark(text, { t, top, signal: s ? s.full : null }), '', true);
+    const box = this.askText(x, y, `Bookmark · ${s ? s.name + ' · ' : ''}${this.fmtCursor(t)}`, 'its label',   // the text: in the list
+      label => this.mark('', { t, top, signal: s ? s.full : null, label }), '', true);
     this.askPlace = () => { if (this.menuEl !== box) return; const [px, py, away] = at(), w = box.offsetWidth, h = box.offsetHeight;
       // back in sight: its field has the keys again (a hidden field loses the focus: review B-17)
       const back = box.style.visibility === 'hidden' && !away; box.style.visibility = away ? 'hidden' : '';
@@ -5114,12 +5122,12 @@ class WaveView {
     this.draw();
   }
   // a bookmark (a numbered circle, described below the waves) at the cursor (on an edge of the selected signal) -> its number;
-  // at: {t, top, signal} of one asked first (bookmarkKey: its text given there, the list below the waves not focused); none,
+  // at: {t, top, signal, label} of one asked first (bookmarkKey: its label given there, the list below the waves not focused); none,
   // no text: its text field focused
   mark(text = '', at = null) {
     const s = this.sel, t = at ? at.t : (this.cursor = this.snap(s, this.cursor));
     const n = Math.max(0, ...this.bms.map(b => b.n)) + 1;
-    this.bms.push({ n, t, signal: at ? at.signal : s ? s.full : null, text, color: null, top: at ? at.top : this.topNow() });
+    this.bms.push({ n, t, signal: at ? at.signal : s ? s.full : null, text, label: (at && at.label) || '', color: null, top: at ? at.top : this.topNow() });
     this.saveBookmarks(); this.renderNotes(); this.draw();
     if (!text && !at) this.notesEl.querySelector(`li[data-n="${n}"] input.txt`)?.focus();
     return n;
@@ -5581,10 +5589,22 @@ class WaveView {
   // the names, the axis, the cursor and the bookmarks, as this viewer draws them; the page's colours put in: a standalone SVG
   toSVG(o = {}) {
     const [a, b] = this.range || [this.t0, this.t0 + this.span], cs = getComputedStyle(this.root);
-    const rows = Array.isArray(o.rows) ? o.rows : o.rows === 'all' ? this.rowsL : o.rows === 'picked' ? this.pickedRows() : this.screenRows();
+    const part = Array.isArray(o.rows) ? this.picLanes(o.rows) : o.rows === 'picked' ? this.picLanes(this.pickedRows()) : null;
+    const rows = part ? part.rows : o.rows === 'all' ? this.rowsL : this.screenRows(), band = part ? part.band : undefined;
     const from = o.from ?? a, to = o.to ?? b, cuts = o.cuts || this.cutsOf(from, to, rows);
-    const svg = WaveSVG.toString(null, { view: this, from, to, rows, cuts, width: o.width || Math.max(640, this.root.clientWidth) });
+    const svg = WaveSVG.toString(null, { view: this, from, to, rows, band, cuts, width: o.width || Math.max(640, this.root.clientWidth) });
     return svg.replace(/var\((--[\w-]+)\)/g, (m, n) => cs.getPropertyValue(n).trim().replace(/"/g, "'") || m);
+  }
+  // the rows of a picture of some of them (the selected, the highlighted, the ones given): their lanes worked out again for them,
+  // as rowsL's for the view: a lifted bookmark, a marker's text, a Δ on a signal's line stay over (under) it, not on the line over
+  // the rows (the view's lanes are not in such a list); a lane on its neighbours' module band
+  picLanes(rows) {
+    const sig = rows.filter(r => r.type !== 'lane');
+    const out = withLanes(sig, arrowLanes(sig, this.bms, this.S.arrowLabels === 'lane' ? this.arrows : [], this.laneMarks()));
+    const band = this.band && new Map(this.band);
+    if (band) out.forEach((r, i) => { const b = r.type === 'lane' ? band.get(out[i - 1]) ?? band.get(out[i + 1]) : undefined;
+      if (b !== undefined) band.set(r, b); });
+    return { rows: out, band };
   }
   // -> a Promise of a PNG Blob of toSVG at scale × (2: sharp on a high-density screen and in a document; a tall picture, all
   // rows: less, down to 1, to stay within PNG_MAX)
@@ -6132,6 +6152,23 @@ function menuSubs(el) {
 // Space on a submenu's header open it, its first item focused; ← or Esc in a submenu close it, back on its header; Esc in the menu:
 // done(). A field to type in keeps its keys (Esc aside); a list (Radix) is opened by Space or Enter; subs: menuSubs(el), none for a
 // menu with no submenus
+// where the pointer was last on this page (client px; none before it moved: the box of a key sequence in its corner)
+const PTR_AT = { x: null, y: null };
+if (typeof window !== 'undefined') {
+  const at = e => { PTR_AT.x = e.clientX; PTR_AT.y = e.clientY; };
+  for (const ev of ['pointermove', 'pointerdown']) window.addEventListener(ev, at, { capture: true, passive: true }); }
+// a box (position: fixed) under the pointer, on its right; no room there: on its left, above it; in the window whatever its size
+// (as near the pointer as it fits); the pointer not known yet: where its CSS puts it
+function atPointer(el, gap = 8, m = 4) {
+  if (PTR_AT.x == null) return el;
+  const w = el.offsetWidth, h = el.offsetHeight, W = innerWidth, H = innerHeight;
+  let x = PTR_AT.x + gap, y = PTR_AT.y + gap;
+  if (x + w > W - m) x = PTR_AT.x - gap - w;
+  if (y + h > H - m) y = PTR_AT.y - gap - h;
+  const left = Math.max(m, Math.min(x, W - w - m)), top = Math.max(m, Math.min(y, H - h - m));
+  Object.assign(el.style, { left: left + 'px', top: top + 'px', right: 'auto', bottom: 'auto' });
+  return el;
+}
 function menuKeys(el, done, subs = null) {
   const items = lv => [...lv.children].flatMap(c => (c.matches('button') ? [c] : c.matches('.msub') ? [c.querySelector(':scope > button')] :
     c.matches('.mi') ? [...c.querySelectorAll('input:not(.wv-hex), select, button')] : [])).filter(x => !x.hidden && x.getClientRects().length);
@@ -6290,7 +6327,8 @@ Object.assign(WaveView.prototype, {
           ugb('ugoff', i, `Out of “${g.name}”`) :
           ugb('ugto', i, `Into “${g.name}”`))).join('') + b('ugnew', gsigs.length > 1 ? `New group of the ${gsigs.length}` : 'New group with it') : '') +
         (sig && sig.ug ? b('ugout', `Out of “${sig.ug.name}” (this row)`) : '') +
-        (grp && grp.user ? b('ugdel', gk === 'divider' ? 'Delete this divider' : 'Delete this group') : '') +
+        (grp && grp.user ? b('ugren', gk === 'divider' ? 'Rename this divider…' : 'Rename this group…') +
+          b('ugdel', gk === 'divider' ? 'Delete this divider' : 'Delete this group') : '') +
         (this.ugroups.length ? '<hr><div class="mh">Go to</div>' +
           this.ugroups.map((g, i) => (g.divider ? '' : ugb('ugo', i, `${g.name} · ${g.signals.length}`))).join('') : ''),
         this.ugroups.length ? this.ugroups.length + ' ' : '');
@@ -6410,11 +6448,11 @@ Object.assign(WaveView.prototype, {
       else if (act === 'onlyx') this.setOnly(null);
       else if (act === 'fsms') { this.closeMenu(); this.fsmPanel(true); return this; }
       else if (act === 'fsmx') this.setFsm(null);
-      // a bookmark, a marker: its text asked over the waves first, then it goes into its list below them (edited there)
+      // a bookmark, a marker: its label asked over the waves first, then it goes into its list below them (edited there, a bookmark's text too)
       else if (act === 'mark') { const t = this.snap(sig, at), [x, y] = this.menuAt, top = this.topNow();   // the waves as they are now
-        this.askText(x, y, `Bookmark · ${sig.name} · ${this.fmtCursor(t)}`, 'its text', text => {
-          const n = Math.max(0, ...this.bms.map(b => b.n)) + 1; this.bms.push({ n, t, signal: sig.full, text, color: null, top }); this.changed(true); },
-          '', true);
+        this.askText(x, y, `Bookmark · ${sig.name} · ${this.fmtCursor(t)}`, 'its label', label => {   // the text (its description): in the list
+          const n = Math.max(0, ...this.bms.map(b => b.n)) + 1; this.bms.push({ n, t, signal: sig.full, text: '', label, color: null, top });
+          this.changed(true); }, '', true);
         return this; }
       else if (act === 'copyname') this.copyRows(many ? sigs : [it]);
       else if (act === 'copyv') this.copyText(`${sig.name}: ${this.valueTwo(sig, true)}`);
@@ -6439,6 +6477,7 @@ Object.assign(WaveView.prototype, {
         this.toGroup(`group ${k}`, gsigs); }
       else if (act === 'ugout') this.hide([sig]);
       else if (act === 'ugdel') this.run({ op: 'group', name: (ugh || grp).name, delete: true });
+      else if (act === 'ugren') { const [x, y] = this.menuAt; this.renameGroup((ugh || grp).name, x, y); return this; }
       else if (act === 'mvup' || act === 'mvdn' || act === 'mvtop' || act === 'mvbot') {
         this.moveKey({ mvup: -1, mvdn: 1, mvtop: -Infinity, mvbot: Infinity }[act], false, ugh || mine); }
       else if (act === 'ugfold') { if (this.collapsed.has(ugh.id)) this.collapsed.delete(ugh.id); else this.collapsed.add(ugh.id);
@@ -6504,25 +6543,33 @@ Object.assign(WaveView.prototype, {
     (el.querySelector(':scope > button, :scope > .msub > button') || el).focus({ preventScroll: true });
     return el;
   },
-  // ctrl+G: your groups in a list over the names (as the right button's menu); a click or Enter goes there
-  groupsMenu() {
+  // ctrl+G: your groups in a list over the names (as the right button's menu); a click or Enter goes there; its ✎ or F2 renames
+  // it (the list again after, on it). at: the name of the group to focus
+  groupsMenu(at = null) {
     this.closeMenu();
     const el = document.createElement('div'); el.className = 'wv-menu wv-groups'; el.setAttribute('role', 'menu');
     const item = (g, i) => `<button type="button" role="menuitem" data-m="ugo" data-g="${i}"><span><i class="sw" style="background:${
-      esc(g.color || 'var(--accent)')}"></i>${esc(g.name)}</span><span class="kk">${g.signals.length}</span></button>`;
-    el.innerHTML = '<div class="mh">Your groups</div>' + (this.ugroups.some(g => !g.divider) ?   // a divider is no group to go to
+      esc(g.color || 'var(--accent)')}"></i>${esc(g.name)}</span><span class="kk">${g.signals.length}</span><span class="ren" ` +
+      `title="Rename the group (F2)" aria-hidden="true">✎</span></button>`;
+    el.innerHTML = '<div class="mh">Your groups · F2 renames</div>' + (this.ugroups.some(g => !g.divider) ?   // a divider is no group to go to
       this.ugroups.map((g, i) => (g.divider ? '' : item(g, i))).join('') :
       '<div class="mh">none yet: the right button on a signal, Groups ▸ New group</div>');
     this.root.append(el); this.menuEl = el;
     const n = this.namesEl.getBoundingClientRect(), box = el.getBoundingClientRect();
     el.style.left = Math.max(4, Math.min(n.left + 12, innerWidth - box.width - 4)) + 'px';
     el.style.top = Math.max(4, Math.min(Math.max(n.top, 0) + this.hdrH + 8, innerHeight - box.height - 4)) + 'px';
-    el.addEventListener('click', e => { const m = e.target.closest('button[data-g]'); if (!m) return; this.closeMenu();
-      this.goGroup(this.ugroups[+m.dataset.g].name); });
+    const ren = m => { const g = this.ugroups[+m.dataset.g], q = m.getBoundingClientRect(); if (!g) return;
+      this.renameGroup(g.name, q.left, q.bottom + 2, name => this.groupsMenu(name)); };
+    el.addEventListener('click', e => { const m = e.target.closest('button[data-g]'); if (!m) return;
+      if (e.target.closest('.ren')) { ren(m); return; }
+      this.closeMenu(); this.goGroup(this.ugroups[+m.dataset.g].name); });
+    el.addEventListener('keydown', e => { const m = e.key === 'F2' && e.target.closest('button[data-g]');
+      if (m) { e.preventDefault(); e.stopPropagation(); ren(m); } });
     const f = this.menuFilter(el, (b, take) => { if (take) b.click(); else b.focus(); });
     menuKeys(el, () => { this.closeMenu(); this.refocus(); });   // ↑ ↓ Home End, Esc
     this.menuOff(el);
-    (f || el.querySelector('button') || el).focus({ preventScroll: true });
+    const on = at != null && [...el.querySelectorAll('button[data-g]')].find(b => this.ugroups[+b.dataset.g].name === at);
+    (on || f || el.querySelector('button') || el).focus({ preventScroll: true });
     return el;
   },
   // gm (the right button's Markers…): the markers (the page's and yours) and the bookmarks in a list over the waves, by
@@ -6612,14 +6659,15 @@ Object.assign(WaveView.prototype, {
     const first = this.vis.find(r => r.ug === g); if (first) this.select(first); else this.draw();
     this.centerRow(g); this.toast(name); return this;
   },
-  // a text asked over the waves where the menu was (a bookmark's text, a marker's label): Enter gives it (empty too), Esc
+  // a text asked over the waves where the menu was (a bookmark's or a marker's label): Enter gives it (empty too), Esc
   // or a click elsewhere gives nothing; the waves stay where they are (no field below them takes the focus)
-  // away: a click elsewhere gives what was typed too (none typed: nothing)
-  askText(x, y, title, hint, give, value = '', away = false) {
+  // away: a click elsewhere gives what was typed too (none typed: nothing); verb: the button's word (Rename: the value given selected)
+  askText(x, y, title, hint, give, value = '', away = false, verb = null) {
     this.closeMenu();
     const el = document.createElement('div'); el.className = 'wv-menu wv-ask'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', title);
     el.innerHTML = `<div class="mh">${esc(title)}</div><input type="text" spellcheck="false" autocomplete="off" placeholder="${esc(hint)}" ` +
-      `aria-label="${esc(hint)}"><div class="ak"><span>Enter: add · Esc: cancel</span><button type="button" data-m="ok">Add</button></div>`;
+      `aria-label="${esc(hint)}"><div class="ak"><span>Enter: ${esc((verb || 'add').toLowerCase())} · Esc: cancel</span><button type="button" data-m="ok">` +
+      `${esc(verb || 'Add')}</button></div>`;
     this.root.append(el); this.menuEl = el;
     const b = el.getBoundingClientRect(), inp = el.querySelector('input'); inp.value = value;
     el.style.left = Math.max(4, Math.min(x, innerWidth - b.width - 4)) + 'px'; el.style.top = Math.max(4, Math.min(y, innerHeight - b.height - 4)) + 'px';
@@ -6630,8 +6678,18 @@ Object.assign(WaveView.prototype, {
     el.querySelector('button[data-m=ok]').addEventListener('click', () => done(true));
     el.addEventListener('contextmenu', e => e.preventDefault());
     this.menuOff(el, false);
-    inp.focus({ preventScroll: true });
+    inp.focus({ preventScroll: true }); if (verb) inp.select();
     return el;
+  },
+  // your group (a divider too) renamed: its new name asked in a box at (x, y) (under its row in the names, its line of the ctrl+G
+  // list, where the menu was), its name there selected; then(name): after it (the ctrl+G list opened again on it)
+  renameGroup(name, x, y, then = null) {
+    const g = this.ugroups.find(u => u.name === name); if (!g) return this;
+    this.askText(x, y, `Rename ${g.divider ? 'the divider' : 'the group'} “${name}”`, 'its new name', to => {
+      if (!to || to === name) { if (then) then(name); return; }
+      this.run({ op: 'group', name, rename: to }).then(r => { if (r[0].error) this.toast(r[0].error); if (then) then(r[0].error ? name : to); });
+    }, name, false, 'Rename');
+    return this;
   },
   // a yes or no asked where the menu was (Forget the kept view): the button, Enter on it, gives it; Esc, Cancel (in focus at first) or a
   // click elsewhere: nothing
@@ -6722,7 +6780,7 @@ Object.assign(WaveView.prototype, {
       if (blur) window.addEventListener('blur', off, { signal: this.ac.signal }); }, 0);
   },
   refocus() { this.canvas.focus({ preventScroll: true }); return this; },
-  // the first key of a sequence: a moment after it (keyHints ms, false: never) a box says what can follow; a key or a click on it goes on,
+  // the first key of a sequence: a moment after it (keyHints ms, false: never) a box under the pointer says what can follow; a key or a click on it goes on,
   // as long as it is open (the keys stay on the waves), Esc or a click elsewhere closes it
   keyHintOn(k) {
     this.kpre = { k, t: Date.now() };
@@ -6758,7 +6816,7 @@ Object.assign(WaveView.prototype, {
     el.addEventListener('click', e => { const b = e.target.closest('button[data-k]'); if (!b) return; this.keyHintOff(); this.seq(k + b.dataset.k); });
     this.keysOff = e => { if (!el.contains(e.target)) this.keyHintOff(); };
     document.addEventListener('pointerdown', this.keysOff, true);
-    this.root.append(el); this.keysEl = el;
+    this.root.append(el); this.keysEl = el; atPointer(el);
   },
   closeMenu() {
     if (this.askAc) { this.askAc.abort(); this.askAc = null; } this.askPlace = null;   // a box that follows its row (bookmarkKey)
@@ -10667,6 +10725,14 @@ function runsMerge(st, snap, miss) {
 }
 /* ---------------- the viewer's side ---------------- */
 const RUN_SETTLE = 250;   // ms: the list's keys move the row, the compare goes when they stop (Enter at once)
+const RUN_OPEN_SETTLE = 600;   // the same in the Open mode: a run's waves are read (a dump), so the keys rest longer first
+// a tag's hue, of its text (FNV-1a, then murmur3's last mix: short texts that differ by a letter fall far apart): the same tag
+// the same colour on every row, every day; the CSS mixes it with the theme's
+const tagHue = t => {
+  let h = 2166136261; for (const c of String(t)) h = Math.imul(h ^ c.codePointAt(0), 16777619);
+  h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b); h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16;
+  return (h >>> 0) % 360;
+};
 // a case's name of a span's label: without "TC3 " before it and " · PASS" after it (cocotb's marks); sva runs.rs case_name
 const caseName = l => { const s = String(l || '').split(' · ')[0].trim(), m = /^TC\d+ (.*)$/.exec(s); return (m ? m[1] : s).trim(); };
 const sameSpan = (s, w) => !!s && !!w && s.from === w.from && s.to === w.to && (s.label || '') === (w.label || '');
@@ -10730,6 +10796,7 @@ Object.assign(WaveView.prototype, {
     if (!this.runsL || again) {
       const m = await h.list(); if (m.error) throw new Error(m.error);
       this.runsL = (m.runs || []).slice().reverse(); this.runsDir = m.dir || ''; this.runsOthers = m.others || 0; this.runsNow = m.now || null;
+      this.runsDirOf = m.dirOf || null;   // where the directory comes from: {set: the setting's text ('' the default), scope}
     }
     return this.runsL;
   },
@@ -10737,6 +10804,7 @@ Object.assign(WaveView.prototype, {
   // a later ask wins (the host stops the one before). show: the view to show after it (a step of A: the one of before)
   async runCompare(id, quiet, show) {
     const h = this.runsHost(); if (!h) { this.toast('no runs kept here'); return null; }
+    if (this.runsMode === 'open') this.runsModeSet('compare', true);   // a B asked (]r [r, a caller): the panel compares again
     const a = this.runsA(), say = s => { if (!quiet) this.toast(s); if (this.runsP) this.runsP.status(s); return null; };
     if (id === a) return say(id ? `#${id} is A, the waves shown: B is another run (or now)` : 'A and B are both now: make a run A (w) first');
     let runs = await this.runsList(), run = id ? runs.find(r => r.id === id) : null;
@@ -10765,6 +10833,52 @@ Object.assign(WaveView.prototype, {
     if (this.runsP) { this.runsP.got(id, w, r);
       this.runsP.status(runSaid(na, nb, r, m.result, w, f, this.cmpCan()) + (cn && !byCase && run && run.cases ? ` · no case ${cn} in it` : '')); }
     return r;
+  },
+  // the panel's mode: 'compare' (a row chosen is B, compared with A) or 'open' (a row chosen opens its waves here, one run
+  // after another: no B, nothing compared — the B of before dropped); kept with the view's state (runsMode)
+  runsModeSet(mode, quiet) {
+    const m = mode === 'open' ? 'open' : 'compare', was = this.runsMode === 'open' ? 'open' : 'compare', b = this.runCur;
+    this.runsMode = m;
+    if (m === was) return this;
+    if (m === 'open') { this.runsDrop(); if (b != null) this.compare(null); }
+    if (this.runsP) this.runsP.mode(quiet, m === 'open' && b != null);
+    return this;
+  },
+  // a slice's span on the waves shown (A): the window and the range on the slice's start and end — its from … to in the time
+  // of the dump it was cut from, less A's origin when A is a slice itself (its times from 0) — so Slice ▸ takes the same
+  // piece of these waves. A span past an end of A: cut to A (said); wholly outside: said, not applied -> [from, to] or null
+  runsSpan(id, quiet) {
+    const say = s => { if (!quiet) this.toast(s); if (this.runsP) this.runsP.status(s); };
+    const r = (this.runsL || []).find(x => x.id === id), s = r && r.slice, name = this.runName(id);
+    if (!r) { say(id ? `no run #${id}` : 'now is the dump on the disk: a slice\'s row has a span'); return null; }
+    if (!s || !isFinite(s.from) || !isFinite(s.to)) { say(`${name} is a whole run, not a slice: no span of its own`); return null; }
+    const { t0, t1 } = this.M, f = t => this.fmt(t, (t1 - t0) / 1000, t1 - t0), a = this.runsA();
+    const d = this.runOrigin(a) || 0, p = s.from - d, q = s.to - d, lo = Math.max(p, t0), hi = Math.min(q, t1);
+    // where it is in the dump, when A's time is not the dump's
+    const of = d ? ` (${f(s.from)} … ${f(s.to)} of the dump: A is a slice from ${f(d)})` : '';
+    if (!(hi > lo)) { say(`the span of ${name}, ${f(p)} … ${f(q)}${of}, is outside these waves (A ${this.runName(a)}: ${f(t0)} … ${f(t1)}): ` +
+      'not applied'); return null; }
+    this.zoomTo(lo, hi); this.warpSync(); this.setRange(lo, hi);
+    say(`the span of ${name} on A ${this.runName(a)}: the window and the range ${f(lo)} … ${f(hi)}${of}` +
+      `${lo > p || hi < q ? ` — cut to these waves (its ${f(p)} … ${f(q)})` : ''} · Slice ▸ takes this piece`);
+    return [lo, hi];
+  },
+  // ★: the directory of the runs made the permanent one (on false: no more) — the host writes the setting wavelens.runsDir
+  // (VS Code: the workspace's settings when the dump is in a workspace folder, else the user's), the list read again
+  async runsDirKeep(on = true) {
+    const h = this.runsHost(), say = s => { this.toast(s); if (this.runsP) this.runsP.status(s); return this; };
+    if (!h || !h.dir) return say('the runs\' directory is set by VS Code (the setting wavelens.runsDir)');
+    let m; try { m = await h.dir(!!on); } catch (e) { m = { error: e.message }; }
+    if (m.error) return say(`the runs' directory: ${m.error}`);
+    const o = m.dirOf || {}, was = this.runsDir, moved = m.dir !== was;
+    const where = o.scope ? `the ${o.scope === 'user' ? 'user' : 'workspace'}'s settings` : 'the settings';
+    // another directory: its runs are others (their numbers too) — no B, no Δ of before, the dump of now shown
+    if (moved) { this.runsDrop(); if (this.runCur != null) this.compare(null); if (this.runsP) this.runsP.deltas.clear(); }
+    if (this.runsP) await this.runsP.load(); else await this.runsList(true).catch(() => {});
+    if (moved && this.runsA()) this.runsShow(0, true);
+    return say(o.set ? `★ wavelens.runsDir = ${o.set} (${where}): the runs of this dump are kept in ${m.dir}, the other dumps' by the same ` +
+      `setting${on ? '' : ' — still set there'}` : `wavelens.runsDir cleared: the runs beside each dump again (.wavelens-runs)` +
+      `${moved ? `, here ${m.dir}; the ones of before stay in ${was}` : ''}`);
   },
   // B dropped or replaced (no B, ✕, compare off, Compare…, a result given): a run compare still asked is not taken when it comes,
   // and the host stops it (runs cancel; B-63, B-64)
@@ -10814,8 +10928,10 @@ Object.assign(WaveView.prototype, {
     if (id && !runs.some(r => r.id === id)) return say(`no run #${id}`);
     const name = this.runName(id);
     if (this.runsP) this.runsP.status(`reading ${name}…`);
+    this.runsOpening = id;   // the run being read (the panel: the keys back on A meanwhile open A again)
     let m; try { m = await h.open(id); } catch (e) { m = { error: e.message }; }
     if (stale()) return this.root.waveView || this;
+    this.runsOpening = null;
     if (m.error || !m.file) return say(`${name}: ${m.error || 'not read'}${this.runsTried === id ? ' (]w goes on)' : ''}`);
     return this.openDump(m.file, m.handle || null, { runs: id });   // the run asked goes with the open (to the viewer there then)
   },
@@ -10873,13 +10989,18 @@ Object.assign(WaveView.prototype, {
       aOf: to ? { origin: this.runOrigin(to), name: this.runName(to) } : null,   // A's slice origin and name, kept while it is A
       to: this.t0 + this.span + d, focus: !!this.runsP && this.runsP.el.contains(document.activeElement), file,
       deltas: this.runsP ? [...this.runsP.deltas] : null,   // Δ all's numbers on the rows (still of the window and A they say)
-      snap: this.runsSnap || null, list: this.runsL || null, now: this.runsNow || null, dir: this.runsDir, others: this.runsOthers };
+      // the Open mode: the row the keys went on to while a run was read (its open still waits for them to rest), when it is
+      // not the run asked: lit again over the new waves, opened when the keys rest. A row lit another way (↔, a keep) is not
+      lit: this.runsP && this.runsMode === 'open' && this.runsP.pend != null && this.runsP.pend !== to ? this.runsP.pend : null,
+      snap: this.runsSnap || null, list: this.runsL || null, now: this.runsNow || null, dir: this.runsDir, dirOf: this.runsDirOf || null,
+      others: this.runsOthers };
   },
   async runsAgain(o) {
     if (!o || !this.runsHost()) return this;
     Object.assign(this, { runsWin: o.win || null, runsShown: o.shown || 0, runsSnap: o.snap, runsL: o.list, runsNow: o.now, runsDir: o.dir,
-      runsOthers: o.others, runsAOf: o.shown ? o.aOf || null : null });
+      runsOthers: o.others, runsAOf: o.shown ? o.aOf || null : null, runsDirOf: o.dirOf || null });
     if (o.open) this.runsPanel(true, o.focus);   // the keys where they were: the list, or the waves (]w ]w … walks on)
+    if (o.lit != null && this.runsP) this.runsP.want = o.lit;
     if (o.deltas && this.runsP) { this.runsP.deltas = new Map(o.deltas); this.runsP.render(); }
     // what openDump's toast adds (runsNote): A now again, or a run's rows and end
     if (!o.shown && o.was) { this.runsNote = `the dump of now again (${o.wasName || this.runName(o.was)} was shown)`;
@@ -10927,11 +11048,15 @@ PLUGINS.push(v => { v.addKey(']r', () => v.runStep(1)).addKey('[r', () => v.runS
 
 /* ---------------- the panel ---------------- */
 // One per viewer, over it, as the Modules panel (its look, its header moves it, its corner sizes it). Rows: the dump of now
-// first, then a run each, newest first: #id, its name, tags, when kept, its comment; on the left the two roles, A (the
-// waves shown) and B (compared with A), lit on the row that has it and buttons on each; after a compare or Δ all, how many
-// signals differ from A in the window and the first difference. Keys: ↑ ↓ Home End go through the rows and make them B,
-// Enter makes the row B, w makes it A, x: no B (the waves only), e edits, Delete removes (the host asks), k keeps this dump,
-// a Δ all, Esc closes (the form: cancels it).
+// first, then a run each, newest first. A row's first line: the two roles, A (the waves shown) and B (compared with A), lit
+// on the row that has it and buttons on each; #id, its name (muted when it is only the dump's name), its tags, each in a
+// colour of its own; after a compare or Δ all, how many signals differ from A in the window and the first difference; its
+// buttons (a slice: ↔ its span). Its second line: the comment first, in the text's colour (it tells the runs apart), then
+// what the run is, muted — a slice's times, when kept, its size, its cases, its dump. The last line of the panel: the
+// directory of the runs (selectable), Copy, and ★: it is made the permanent one.
+// Keys: ↑ ↓ Home End go through the rows and make them B (Open mode: open the row they rest on), Enter makes the row B
+// (Open: opens it), w makes it A, o: the mode (Compare / Open), s: a slice's span on the waves, x: no B (the waves only),
+// e edits, Delete removes (the host asks), k keeps this dump, a Δ all, Esc closes (the form: cancels it).
 const RUN_H = 40;
 class Runs {
   constructor(v) {
@@ -10940,38 +11065,77 @@ class Runs {
     el.setAttribute('aria-label', 'runs kept');
     el.innerHTML = ('<div class="mh"><b>Runs kept</b><span class="mt"></span><button type="button" data-a="x" aria-label="close" ' +
       'title="Close (Esc)">✕</button></div>' +
-      '<div class="mf"><button type="button" data-a="keep" title="Keep the dump of now as a run: a name, tags, a comment (k)">Keep this dump…</button>' +
-      '<label title="The window a run is compared over: the waves in sight, or one of your spans (only that time of the run is read)">over ' +
-      '<select class="rw" aria-label="the window compared"></select></label>' +
-      '<button type="button" data-a="all" title="How many signals of each run differ from A in the window (a)">Δ all</button>' +
-      '<button type="button" data-a="again" title="Compare A with B again over the window as it is now">⟳</button>' +
-      '<button type="button" data-a="nob" title="No B: the waves only, nothing compared (x); ]w [w then walk the runs">no B</button></div>' +
+      '<div class="mf"><span class="rmode" role="group" aria-label="what a row chosen does">' +
+      '<button type="button" data-a="mcmp" title="Compare: a row chosen is B, compared with A over the window (o: the other mode)">Compare</button>' +
+      '<button type="button" data-a="mopen" title="Open: a row chosen opens its waves here, one run after another — no B, nothing compared ' +
+      '(o: the other mode)">Open</button></span>' +
+      '<button type="button" data-a="keep" title="Keep the dump of now as a run: a name, tags, a comment (k)">Keep this dump…</button>' +
+      '<label class="rc" title="The window a run is compared over: the waves in sight, or one of your spans (only that time of the run is read)">' +
+      'over <select class="rw" aria-label="the window compared"></select></label>' +
+      '<button type="button" class="rc" data-a="all" title="How many signals of each run differ from A in the window (a)">Δ all</button>' +
+      '<button type="button" class="rc" data-a="again" title="Compare A with B again over the window as it is now">⟳</button>' +
+      '<button type="button" class="rc" data-a="nob" title="No B: the waves only, nothing compared (x); ]w [w then walk the runs">no B</button></div>' +
       '<form class="rf" hidden><input type="text" class="rfn" spellcheck="false" placeholder="name" aria-label="the run\'s name">' +
       '<input type="text" class="rft" spellcheck="false" placeholder="tags, a comma between them" aria-label="tags">' +
       '<textarea class="rfc" rows="2" placeholder="comment" aria-label="comment"></textarea>' +
       '<span class="rfb"><button type="submit" class="rfo">Keep</button><button type="button" data-a="cancel">Cancel</button></span></form>' +
-      '<div class="ms"></div><div class="mtr rl" role="listbox" aria-label="runs kept" tabindex="0"><div class="mrows"></div></div>');
+      '<div class="ms"></div><div class="mtr rl" role="listbox" aria-label="runs kept" tabindex="0"><div class="mrows"></div></div>' +
+      '<div class="rdir" hidden><span class="rp"></span><button type="button" data-a="cpd" title="Copy the path of the runs\' directory">Copy</button>' +
+      '<button type="button" class="rstar" data-a="star" aria-pressed="false" aria-label="the permanent directory of the runs">☆</button></div>');
     v.root.append(el);
     this.rowsEl = el.querySelector('.mrows'); this.list = el.querySelector('.rl'); this.stEl = el.querySelector('.ms'); this.form = el.querySelector('.rf');
-    this.win = el.querySelector('.rw');
+    this.win = el.querySelector('.rw'); this.dirEl = el.querySelector('.rdir'); this.said = ''; this.want = this.pend = null;
     panelPlace(this, 'runs');
-    this.events(); this.windows(); this.load();
+    this.events(); this.windows(); this.mode(true); this.load();
   }
   close(quiet) { panelKeep(this, 'runs'); clearTimeout(this.settle); this.ac.abort(); this.el.remove(); if (this.v.runsP === this) this.v.runsP = null;
     if (!quiet) this.v.refocus(); }
   focusRow() { if (this.form.hidden) this.list.focus(); else this.form.querySelector('.rfn').focus(); }
-  status(s) { this.stEl.textContent = s || ''; }
+  // the status line; in the Open mode it starts with the mode's name (a row chosen does another thing there)
+  status(s, ofMode = false) { this.said = s || ''; this.saidMode = ofMode; const open = this.v.runsMode === 'open';
+    this.stEl.textContent = open ? `Open · ${this.said || 'a row chosen opens its waves here, nothing compared (o: Compare)'}` : this.said; }
+  // the mode shown: the switch, the compare's tools and B's letters away in the Open mode, the status line (quiet: its text kept)
+  mode(quiet, dropped) {
+    const open = this.v.runsMode === 'open';
+    clearTimeout(this.settle); this.pend = null; this.el.classList.toggle('open', open);
+    this.el.querySelector('[data-a=mcmp]').setAttribute('aria-pressed', String(!open));
+    this.el.querySelector('[data-a=mopen]').setAttribute('aria-pressed', String(open));
+    if (this.v.runsL) this.render();
+    // quiet: what the line said stays, but a word about the mode of before
+    if (quiet && !this.saidMode) this.status(this.said);
+    else this.status(open ? `a row chosen opens its waves here, nothing compared${dropped ? ' (B dropped)' : ''} · o: Compare` :
+      quiet ? '' : 'Compare: a row chosen is B, compared with A over the window (o: Open)', true);
+  }
   // the rows: the dump of now (id 0), then the runs, newest first
   rows() { const n = this.v.runsNow || {}; return [Object.assign({}, n, { id: 0, now: true, name: 'now', dump: n.name || '' }), ...(this.v.runsL || [])]; }
   rowOf(id) { return Math.max(0, this.rows().findIndex(r => r.id === id)); }
   async load(again = true) {
     try { await this.v.runsList(again); } catch (e) { this.status('runs: ' + e.message); return; }
-    const o = this.v.runsOthers, mt = this.el.querySelector('.mt');
-    mt.textContent = (this.v.runsDir || '') + (o ? ` · ${o} of other dumps` : '');
+    // the row waited for: the one handed over (want), else the one the keys rest on (the list read again meanwhile)
+    const v = this.v, o = v.runsOthers, mt = this.el.querySelector('.mt'), want = this.want != null ? this.want : this.pend;
+    mt.textContent = o ? `${o} of other dumps` : '';
     mt.title = o ? `${o} run${o === 1 ? '' : 's'} of other dumps in this directory (sva runs list --all)` : '';
-    const cur = this.v.runCur; this.fi = this.rowOf(cur != null ? cur : this.v.runsA());
+    this.dir();
+    // a row the keys went on to while a run was read (Open): lit again, opened when they rest; else B's row, else A's
+    const on = want != null && this.rows().some(r => r.id === want); this.want = null; clearTimeout(this.settle); this.pend = null;
+    const cur = v.runCur; this.fi = this.rowOf(on ? want : cur != null ? cur : v.runsA());
     this.render();
-    if (!this.v.runsL.length) this.status('no run kept yet: Keep this dump… (the dump of now, as an FST in the runs\' directory)');
+    if (on) this.pick(this.fi, true, true);
+    if (!v.runsL.length) this.status('no run kept yet: Keep this dump… (the dump of now, as an FST in the runs\' directory)');
+  }
+  // the directory of the runs: its path (selectable text), where it comes from in its tooltip, ★ lit when the setting names it
+  dir() {
+    const v = this.v, d = v.runsDir || '', o = v.runsDirOf, h = v.runsHost(), p = this.dirEl.querySelector('.rp'), st = this.dirEl.querySelector('.rstar');
+    const scope = o && o.scope ? ` in the ${o.scope === 'user' ? 'user' : 'workspace'}'s settings` : '';
+    this.dirEl.hidden = !d; p.textContent = d;
+    p.title = `the directory of the runs: ${d}\n` + (!o ? '' : o.set ?
+      `from the setting wavelens.runsDir (${o.set})${scope}` :
+      'the default: .wavelens-runs beside the dump (the setting wavelens.runsDir is empty)');
+    const lit = !!(o && o.set); st.hidden = !(h && h.dir && o);
+    st.textContent = lit ? '★' : '☆'; st.setAttribute('aria-pressed', String(lit)); st.classList.toggle('on', lit);
+    st.title = lit ? `The permanent directory: the setting wavelens.runsDir names it${scope}. A click: the setting cleared — ` +
+      '.wavelens-runs beside each dump again (the runs kept here stay here)' : 'Make this directory the permanent one: the setting wavelens.runsDir ' +
+      'written (the workspace\'s settings when the dump is in a workspace folder, else yours), the runs of the dumps opened later kept here too';
   }
   // the window choices: the waves in sight, then your spans as they are now (a span chosen and gone: the waves in sight)
   windows() {
@@ -10989,43 +11153,62 @@ class Runs {
     this.render(); }
   // Δ numbers of another window than the one now, or of another A: greyed, their window in their text
   stale(d) { const w = this.v.runsWindow(); return Math.abs(d.from - w.from) > 1e-6 || Math.abs(d.to - w.to) > 1e-6 || (d.a || 0) !== this.v.runsA(); }
-  render() {
-    const v = this.v, rows = this.rows(), f = t => v.fmt(t, (v.M.t1 - v.M.t0) / 1000, v.M.t1 - v.M.t0), a = v.runsA(), b = v.runCur;
-    const hm = s => (s || '').slice(0, 16).replace('T', ' ');
+  // a run's Δ against A on its row (none in the Open mode: nothing is compared there)
+  deltaHtml(r, f) {
+    const v = this.v, d = this.deltas.get(r.id);
+    if (!d || r.id === v.runsA() || v.runsMode === 'open') return '';
+    if (d.error) return `<span class="rd bad" title="${esc(d.error)}">${esc(d.error)}</span>`;
+    const old = this.stale(d), over = `${esc(f(d.from))} … ${esc(f(d.to))}`, cmpOld = old && r.id === v.runCur ? ' (the compare on the waves)' : '';
+    return `<span class="rd${d.differ ? ' bad' : ''}${old ? ' old' : ''}" title="against A ${esc(v.runName(d.a || 0))} over ${over}${cmpOld}` +
+      `${old ? ' (not the window or the A of now: ⟳ or Δ all again)' : ''}">` +
+      `${d.outside ? 'not in this window' : d.differ ? `≠ ${d.differ} of ${d.compared}${d.first == null ? '' : ` · ${esc(f(d.first))}`}` : '= equal'}` +
+      `${old ? ` (${over})` : ''}</span>`;
+  }
+  // the roles of a row: A and B, lit where they are; the Open mode: A only (the run shown), a click opens the row
+  rolesHtml(r) {
+    const v = this.v, a = r.id === v.runsA(), b = r.id === v.runCur, open = v.runsMode === 'open';
+    return `<span class="rab"><button type="button" data-a="ra" class="rA${a ? ' on' : ''}" aria-pressed="${a}" ` +
+      `title="${a ? 'A: the waves shown here' : open ? 'Open it: its waves shown here, the view kept (Enter, w)' :
+        'Make it A: its waves shown here, the view kept (w)'}">A</button>` + (open ? '' :
+      `<button type="button" data-a="rb" class="rB${b ? ' on' : ''}" aria-pressed="${b}" ` +
+      `title="${b ? 'B: compared with A (click: no B)' : 'Make it B: compared with A over the window (Enter)'}">B</button>`) + '</span>';
+  }
+  // what a run is, the muted part of its second line: a slice's times, when kept, its size, its cases, its dump when another
+  // than this one's (now: the dump on the disk)
+  metaOf(r, f) {
+    const hm = s => (s || '').slice(0, 16).replace('T', ' '), me = this.v.runsNow && this.v.runsNow.name;
     const mb = n => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} kB`);
-    const me = v.runsNow && v.runsNow.name;
+    const when = r.now ? `${r.mtime ? new Date(r.mtime).toISOString().slice(0, 16).replace('T', ' ') + ' on the disk' : 'the dump on the disk'}` :
+      `kept ${hm(r.kept)}${r.source_mtime && Math.abs(Date.parse(r.source_mtime) - Date.parse(r.kept)) > 60000 ?
+        ` of a dump of ${hm(r.source_mtime).slice(11)}` : ''}`;
+    const size = r.now || r.slice ? r.bytes : r.source_bytes, sl = this.sliceOf(r) ? `slice ${f(r.slice.from)} … ${f(r.slice.to)}, from 0` : '';
+    return [r.now ? r.dump : '', sl, when, size ? mb(size) : '', r.cases && r.cases.length ? `${r.cases.length} case${r.cases.length === 1 ? '' : 's'}` : '',
+      !r.now && r.dump && r.dump !== me ? r.dump : ''].filter(Boolean).join(' · ');
+  }
+  sliceOf(r) { return !!r && !!r.slice && isFinite(r.slice.from) && isFinite(r.slice.to); }
+  // a run's name is only its dump's (what a keep without a name gives; a slice: "DUMP FROM–TO"): it does not tell the runs apart
+  plainName(r) { return !r.name || r.name === r.dump || (!!r.slice && !!r.dump && r.name.startsWith(r.dump + ' ')); }
+  rowHtml(r, i, f) {
+    const tags = (r.tags || []).map(t => `<span class="rtag" style="--h:${tagHue(t)}" title="tag: ${esc(t)}">${esc(t)}</span>`).join('');
+    const comment = r.comment ? r.comment.trim().split('\n')[0] : '', sl = this.sliceOf(r);
+    const title = r.now ? `the dump of now: ${r.dump}` : `#${r.id} ${r.name || ''}${(r.tags || []).length ? ` [${r.tags.join(', ')}]` : ''}\n` +
+      `${r.dump || ''} kept ${(r.kept || '').replace('T', ' ').replace('Z', ' UTC')}${r.comment ? '\n' + r.comment : ''}`;
+    return `<div class="mn rn${r.now ? ' rnow' : ''}${i === this.fi ? ' pv' : ''}" role="option" data-i="${i}" style="top:${i * RUN_H}px" ` +
+      `title="${esc(title)}"><span class="r1">${this.rolesHtml(r)}<b>${r.now ? 'now' : '#' + esc(String(r.id))}</b> ` +
+      `<span class="nm${!r.now && this.plainName(r) ? ' dn' : ''}">${r.now ? '' : esc(r.name || '')}</span>` +
+      `<span class="rtags">${tags}</span>${this.deltaHtml(r, f)}` +
+      (sl ? '<button type="button" data-a="sp" aria-label="its span on the waves shown" ' +
+        `title="Its span on the waves shown: the window and the range on ${esc(f(r.slice.from))} … ` +
+        `${esc(f(r.slice.to))} of the dump, in A's time (s) — Slice ▸ then takes the same piece of these waves">↔</button>` : '') + (r.now ? '' :
+        '<button type="button" data-a="ed" title="Name, tags, comment (e)">✎</button>' +
+        '<button type="button" data-a="rm" title="Remove the run and its file (Delete)">✕</button>') + '</span>' +
+      `<span class="r2">${comment ? `<span class="rcm">${esc(comment)}</span>` : ''}<span class="rmt">${esc(this.metaOf(r, f))}</span></span></div>`;
+  }
+  render() {
+    const v = this.v, rows = this.rows(), f = t => v.fmt(t, (v.M.t1 - v.M.t0) / 1000, v.M.t1 - v.M.t0);
     this.fi = Math.max(0, Math.min(this.fi, rows.length - 1));
     this.rowsEl.style.height = rows.length * RUN_H + 'px';
-    this.rowsEl.innerHTML = rows.map((r, i) => {
-      const d = this.deltas.get(r.id), tags = (r.tags || []).map(t => `<span class="rtag">${esc(t)}</span>`).join('');
-      const old = d && !d.error && this.stale(d), over = d && !d.error ? `${esc(f(d.from))} … ${esc(f(d.to))}` : '';
-      const cmpOld = old && r.id === b ? ' (the compare on the waves)' : '';
-      const delta = !d || r.id === a ? '' : d.error ? `<span class="rd bad" title="${esc(d.error)}">${esc(d.error)}</span>` :
-        `<span class="rd${d.differ ? ' bad' : ''}${old ? ' old' : ''}" title="against A ${esc(v.runName(d.a || 0))} over ${over}${cmpOld}` +
-        `${old ? ' (not the window or the A of now: ⟳ or Δ all again)' : ''}">` +
-        `${d.outside ? 'not in this window' : d.differ ? `≠ ${d.differ} of ${d.compared}${d.first == null ? '' : ` · ${esc(f(d.first))}`}` : '= equal'}` +
-        `${old ? ` (${over})` : ''}</span>`;
-      const ab = `<span class="rab"><button type="button" data-a="ra" class="rA${r.id === a ? ' on' : ''}" aria-pressed="${r.id === a}" ` +
-        `title="${r.id === a ? 'A: the waves shown here' : 'Make it A: its waves shown here, the view kept (w)'}">A</button>` +
-        `<button type="button" data-a="rb" class="rB${r.id === b ? ' on' : ''}" aria-pressed="${r.id === b}" ` +
-        `title="${r.id === b ? 'B: compared with A (click: no B)' : 'Make it B: compared with A over the window (Enter)'}">B</button></span>`;
-      const when = r.now ? `${r.mtime ? new Date(r.mtime).toISOString().slice(0, 16).replace('T', ' ') + ' on the disk' : 'the dump on the disk'}` :
-        `kept ${hm(r.kept)}${r.source_mtime && Math.abs(Date.parse(r.source_mtime) - Date.parse(r.kept)) > 60000 ?
-          ` of a dump of ${hm(r.source_mtime).slice(11)}` : ''}`;
-      const size = r.now || r.slice ? r.bytes : r.source_bytes, sl = r.slice && isFinite(r.slice.from) && isFinite(r.slice.to) ?
-        `slice ${f(r.slice.from)} … ${f(r.slice.to)}, from 0` : '';
-      const line2 = [r.now ? r.dump : r.dump && r.dump !== me ? r.dump : '', sl, when, size ? mb(size) : '',
-        r.cases && r.cases.length ? `${r.cases.length} case${r.cases.length === 1 ? '' : 's'}` : '', r.comment ? r.comment.split('\n')[0] : '']
-        .filter(Boolean).map(esc).join(' · ');
-      return `<div class="mn rn${r.now ? ' rnow' : ''}${i === this.fi ? ' pv' : ''}" role="option" data-i="${i}" style="top:${i * RUN_H}px" ` +
-        `title="${esc(r.now ? `the dump of now: ${r.dump}` : `${r.dump || ''} kept ${(r.kept || '').replace('T', ' ').replace('Z', ' UTC')}` +
-          `${r.comment ? '\n' + r.comment : ''}`)}">` +
-        `<span class="r1">${ab}<b>${r.now ? 'now' : '#' + esc(String(r.id))}</b> <span class="nm">${r.now ? '' : esc(r.name || '')}</span>` +
-        `<span class="rtags">${tags}</span>${delta}` + (r.now ? '' :
-          '<button type="button" data-a="ed" title="Name, tags, comment (e)">✎</button>' +
-          '<button type="button" data-a="rm" title="Remove the run and its file (Delete)">✕</button>') + '</span>' +
-        `<span class="r2">${line2}</span></div>`;
-    }).join('');
+    this.rowsEl.innerHTML = rows.map((r, i) => this.rowHtml(r, i, f)).join('');
     const cur = this.rowsEl.children[this.fi];
     if (cur) { const t = cur.offsetTop, h = this.list.clientHeight; if (t < this.list.scrollTop) this.list.scrollTop = t;
       else if (t + RUN_H > this.list.scrollTop + h) this.list.scrollTop = t + RUN_H - h; }
@@ -11087,19 +11270,27 @@ class Runs {
     this.status(`${n} of ${(m.runs || []).length} runs differ from A ${v.runName(a)} over ${over}`);
   }
   // a row chosen: made B at once (a click, Enter) or when the keys stop (settle: ↑ ↓ Home End PgUp PgDn held down
-  // compare once, the row they stop on); the row of A only focused
-  pick(i, compare = true, settle = false) {
-    const rows = this.rows();
+  // compare once, the row they stop on); the row of A only focused. The Open mode: its waves opened here in place of the
+  // compare (a longer rest of the keys: a dump is read), the lit row then the run shown
+  pick(i, act = true, settle = false) {
+    const v = this.v, rows = this.rows(), open = v.runsMode === 'open';
     this.fi = Math.max(0, Math.min(i, rows.length - 1)); this.render();
-    clearTimeout(this.settle);
+    clearTimeout(this.settle); this.pend = null;   // pend: the row whose compare / open waits for the keys to rest
     const id = rows[this.fi].id;
-    if (!compare) return;
-    if (id === this.v.runsA()) { if (!settle) this.status(`${this.v.runName(id)} is A, the waves shown: B is another row`); return; }
-    if (settle) this.settle = setTimeout(() => this.v.runCompare(id, true), RUN_SETTLE); else this.v.runCompare(id, true);
+    if (!act) return;
+    if (id === v.runsA()) {
+      if (!settle) this.status(open ? `${v.runName(id)} is shown: these waves` : `${v.runName(id)} is A, the waves shown: B is another row`);
+      // Open: the keys back on A while another run is read: A's row waits, opened again over the waves that come
+      if (open && v.runsOpening != null && v.runsOpening !== id) this.pend = id;
+      return; }
+    const go = () => { this.pend = null; return open ? v.runsShow(id, true) : v.runCompare(id, true); };
+    if (settle) { this.pend = id; this.settle = setTimeout(go, open ? RUN_OPEN_SETTLE : RUN_SETTLE); } else go();
   }
   // no B: the compare dropped, the waves only
   noB() { clearTimeout(this.settle); this.v.runsDrop(); if (this.v.runCur != null) this.v.compare(null);
     this.render(); this.status('no B: the waves only (]w [w walk the runs)'); }
+  // what the Open mode has not got (Δ all, ⟳, no B: the compare's)
+  onlyCompare(what) { if (this.v.runsMode !== 'open') return false; this.status(`${what} is the Compare mode's (o)`); return true; }
   events() {
     const v = this.v, el = this.el, sig = { signal: this.ac.signal };
     el.addEventListener('click', e => {
@@ -11109,6 +11300,10 @@ class Runs {
         if (a === 'x') this.close();
         else if (a === 'keep') this.openForm(null);
         else if (a === 'cancel') this.closeForm();
+        else if (a === 'mcmp' || a === 'mopen') { v.runsModeSet(a === 'mopen' ? 'open' : 'compare'); this.focusRow(); }
+        else if (a === 'cpd') v.copyText(v.runsDir || '');
+        else if (a === 'star') v.runsDirKeep(b.getAttribute('aria-pressed') !== 'true');
+        else if (a === 'sp' && run) { this.fi = +row.dataset.i; this.render(); v.runsSpan(run.id, true); }
         else if (a === 'all') this.all();
         else if (a === 'nob') this.noB();
         else if (a === 'again') { if (v.runCur != null) v.runCompare(v.runCur, true);
@@ -11128,11 +11323,16 @@ class Runs {
     el.addEventListener('keydown', e => {
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (!this.form.hidden) this.closeForm(); else this.close(); return; }
       if (e.target.closest('input, textarea, select')) { e.stopPropagation(); return; }   // typing: not the viewer's keys
+      if (e.ctrlKey || e.metaKey || e.altKey) return;   // the browser's, the viewer's
+      if ((e.key === 'Enter' || e.key === ' ') && e.target.closest('button')) { e.stopPropagation(); return; }   // the button's own click
       const rows = this.rows(), run = rows[this.fi], k = e.key;
       const go = { ArrowDown: this.fi + 1, ArrowUp: this.fi - 1, Home: 0, End: rows.length - 1, PageDown: this.fi + 5, PageUp: this.fi - 5 }[k];
       if (go !== undefined) this.pick(go, true, true);
       else if (k === 'Enter' && run) this.pick(this.fi);
       else if (k === 'w' && run) v.runsShow(run.id);
+      else if (k === 'o') v.runsModeSet(v.runsMode === 'open' ? 'compare' : 'open');
+      else if (k === 's' && run) v.runsSpan(run.id, true);
+      else if ((k === 'x' || k === 'a') && this.onlyCompare(k === 'x' ? 'no B' : 'Δ all')) { /* said */ }
       else if (k === 'x') this.noB();
       else if (k === 'e' && run) this.openForm(run);
       else if ((k === 'Delete' || k === 'Backspace') && run) this.remove(run);
@@ -11258,7 +11458,7 @@ const WaveSVG = {
     const rh = { sig: S.rowHeight, group: S.groupHeight, space: S.spaceHeight }, bms = V ? V.bms : M.bookmarks, ars = V ? V.arrows : M.arrows;
     const marks = V ? V.markers : optTimes(opts.markers, 'a marker', []).map(pageMark).concat(M.markers);
     let C, timeMarks = V ? V.timeMarks() : [], keeps = null;
-    if (V) C = { rows: opts.rows || V.rowsL, band: V.band, hl: V.hl };
+    if (V) C = { rows: opts.rows || V.rowsL, band: opts.band || V.band, hl: V.hl };   // band: of the lanes of a part of the rows (picLanes)
     else {
       const sorted = orderRows(M.rows, S.sort, S.sortIgnore, S.groupOrder);
       const extra = (opts.extraRows || []).concat(...SVG_PLUGINS.map(f => f(M, S, opts) || []));
@@ -11621,7 +11821,7 @@ const tips = { add: map => Object.assign(TIPS, map), of: tipOf };
 const plugin = fn => { PLUGINS.push(fn); VIEWS.forEach(v => { if (v.root.isConnected) try { fn(v); } catch (e) { console.error('wavelens plugin:', e); } }); };
 // static SVGs: fn(model, settings, opts) -> extraRows functions; the SVGs already drawn are drawn again
 const svgPlugin = fn => { SVG_PLUGINS.push(fn); redrawSvgs(); };
-G.WaveLens = { version: '0.60',   // the project's version: VERSION (make check compares them)
+G.WaveLens = { version: '0.61',   // the project's version: VERSION (make check compares them)
   rowId: () => ++XID, parse, fromTV, vcdToWave, vcdToWaveFile, svTables, svApply, svTypes, WaveView, WaveSVG, upgrade, redrawAll, redrawSvgs, setTheme,
   setColors,
   configure, savePage, pageText,

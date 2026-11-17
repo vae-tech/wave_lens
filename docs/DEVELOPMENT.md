@@ -13,7 +13,7 @@ wavelens/                     what a page needs, nothing else
                               and what they draw), bar.js (the bar: Bar, tooltips, help), names.js (the names column Names, the lists Notes), view.js (WaveView), menu.js (its menus), look.js (what it keeps in this browser, gaps, cycles, where the bar's groups go), arrange.js (arranging the bar: the mode, the drag, the dialog), warp.js (the gaps on the waves: time ↔ screen, its frame and painting), edit.js (the
                               viewer's commands view.run, your groups and markers, undo, Save page, the live link),
                               diff.js (a second dump compared: bands, A / B / overlay), modules.js (the Modules panel and Only), fsm.js (the
-                              state machines panel and its layer), runs.js (the runs kept: the Runs panel, ]r [r; its
+                              state machines panel and its layer), runs.js (the runs kept: the Runs panel and its Compare / Open modes, ]r [r; its
                               host is VS Code's), log.js (the log under the viewer), svg.js
                               (WaveSVG), boot.js (themes, configure, upgrade, exports): one scope, in this order
   wavelens.config.js          global settings file (all keys, with defaults), loaded before wavelens.js

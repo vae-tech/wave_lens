@@ -398,11 +398,12 @@ def bookmarks(page):
     page.keyboard.press('Escape')
     esc = [page.locator('.wv-ask').count(), bl.count()]
     check(asked[0] == 1 and asked[1].startswith('Bookmark · req') and asked[2] == 3 and esc == [0, 3],
-          f'+ Bookmark: its text asked over the waves first, none yet; Esc: none {asked} {esc}')
+          f'+ Bookmark: its label asked over the waves first, none yet; Esc: none {asked} {esc}')
     v.locator('button[data-act=mark]').click(); page.keyboard.type('req drops'); page.keyboard.press('Enter')
     b4 = bl.nth(3)
-    check(bl.count() == 4 and b4.locator('.eg').inner_text() == '↓' and b4.locator('input.txt').input_value() == 'req drops' and
-          js('document.activeElement === v.canvas'), f'+ Bookmark, its text typed there, Enter: bookmark 4 on the falling edge with it, in the list, the keys '
+    check(bl.count() == 4 and b4.locator('.eg').inner_text() == '↓' and b4.locator('input.lbl').input_value() == 'req drops' and
+          b4.locator('input.txt').input_value() == '' and js('document.activeElement === v.canvas'), f'+ Bookmark, its label typed there (the text left for the '
+          f'list), Enter: bookmark 4 on the falling edge with it, in the list, the keys '
           f'on the waves ({b4.locator(".eg").inner_text()!r})')
     tm = b4.locator('input.tm'); tm.fill('7'); tm.press('Enter')
     t7 = js('v.bms[3].t')
@@ -2057,8 +2058,11 @@ def vscode_tab(browser, build):
       window.runsAnswer = m => {
         if (window.__RUNERR && window.__RUNERR[m.op] && !(m.op === 'open' && window.__RUNERR.openRun != null && m.run !== window.__RUNERR.openRun))
           return { error: window.__RUNERR[m.op] };   // openRun: the open of that run only errs
+        // __DIRSET: the setting wavelens.runsDir as the panel's ★ wrote it (none: the default directory, beside the dump)
+        const dirOf = () => ({ set: window.__DIRSET || '', scope: window.__DIRSET ? 'workspace' : '' });
         if (m.op === 'list') return { dir: '/host/dumps/.wavelens-runs', runs: window.__RUNS, now: { name: 'enum.vcd', mtime: 1762423380000, bytes: 1234 },
-          shown: window.__SHOWN || 0 };
+          shown: window.__SHOWN || 0, dirOf: dirOf() };
+        if (m.op === 'dir') { window.__DIRSET = m.keep ? '.wavelens-runs' : ''; return { dir: '/host/dumps/.wavelens-runs', dirOf: dirOf() }; }
         // A: a run's waves served as the dump's (the same dump under the run's name; __OPENFILE: another, e.g. one without tb.plain)
         if (m.op === 'open') { window.__SHOWN = m.run; if (!m.run) return ANSWER.source();
           const r = window.__RUNS.find(x => x.id === m.run); if (!r) return { error: 'no run #' + m.run };
@@ -2754,6 +2758,152 @@ def vscode_tab(browser, build):
                    ['Compare…, then ✕', None, False, 0], ['a run, then Compare…', None, 'other.vcd', 1]],
           f'a compare pending when B is dropped or replaced: not taken when it comes, the host told (B-63, B-64) {ends}')
     js("(v.compare(null), 0)")
+    # ---- the runs browsed: the comment and the tags on a row, a slice's span on the waves, the Open mode, the directory and its ★
+    long = 'a_very_long_dump_name_of_the_regression_tb_top_with_seed_1234567_and_more.vcd'
+    comment = 'the counter stops at 9 after the reset fix'
+    mk = lambda i, name, tags, com, sl=None: dict({'id': i, 'name': name, 'tags': tags, 'comment': com, 'kept': f'2026-11-07T10:{i}:00Z', 'dump': long,
+                                                  'file': f'{i}-x.fst', 'source_bytes': 2500000, 'bytes': 300}, **({'slice': {'from': sl[0], 'to': sl[1]}} if sl else {}))
+    runs = [mk(21, long, ['base', 'seed-7'], comment + '\nits second line'), mk(22, f'{long} 5000–10000', ['base'], 'the burst alone', (5000, 10000)),
+            mk(23, 'far', ['wip'], '', (40000, 50000)), mk(24, 'tail', [], '', (12000, 20000)), mk(25, 'inner', [], '', (6000, 8000))]
+    old = js("window.__RUNS")
+    js(f"(window.__RUNS = {json.dumps(runs)}, v.runsPanel(true), v.runsP.load())")
+    until("document.querySelectorAll('.wv-runs .rn').length === 6")
+    page.mouse.move(5, 5)
+    row = lambda i: f"v.root.querySelector('.wv-runs .rn[data-i=\"' + v.runsP.rowOf({i}) + '\"]')"
+    # the comment: first on the second line, whole, in the text's colour, though the dump's name is long and the row a slice's
+    for i, com in ((21, comment), (22, 'the burst alone')):
+        c = js(f"(r => {{ const c = r.querySelector('.r2 .rcm'), m = r.querySelector('.r2 .rmt'), cs = getComputedStyle; "
+               f"const wide = e => {{ const g = document.createRange(); g.selectNodeContents(e); return g.getBoundingClientRect().width; }}; return c && m && "
+               f"[c.textContent, wide(c) <= c.getBoundingClientRect().width + 0.01, c.getBoundingClientRect().left < m.getBoundingClientRect().left, "
+               f"cs(c).color === cs(r.querySelector('.r1 b')).color, cs(m).color !== cs(c).color, r.title, m.textContent]; }})({row(i)})")
+        check(c and c[:5] == [com, True, True, True, True] and (i != 21 or 'its second line' in c[5]) and long in c[6] and (i != 22 or 'slice 5' in c[6]),
+              f'a run\'s comment first on its second line, whole and in the text\'s colour, what the run is after it, muted; all of it in the tooltip (#{i}: {c})')
+    nm = js(f"[21, 22, 23].map(i => v.root.querySelector('.wv-runs .rn[data-i=\"' + v.runsP.rowOf(i) + '\"] .nm').classList.contains('dn'))")
+    check(nm == [True, True, False], f'a name that is only the dump\'s (a keep without a name, a slice\'s) muted, a name given not {nm}')
+    # the tags: a colour each, of its text (the same tag the same on every row, the same every day), not the muted grey
+    def fnv(t):
+        h = 2166136261
+        for ch in t:
+            h = ((h ^ ord(ch)) * 16777619) & 0xffffffff
+        for sh, mul in ((16, 0x85ebca6b), (13, 0xc2b2ae35), (16, 1)):
+            h = ((h ^ (h >> sh)) * mul) & 0xffffffff
+        return h % 360
+    tg = js("[...v.root.querySelectorAll('.wv-runs .rtag')].map(e => [e.textContent, +e.style.getPropertyValue('--h'), getComputedStyle(e).backgroundColor, "
+            "getComputedStyle(e).color, getComputedStyle(v.root.querySelector('.wv-runs .rmt')).color, "
+            "(g => (g.selectNodeContents(e), g.getBoundingClientRect().width <= e.clientWidth + 0.01))(document.createRange())])")
+    by = {}
+    for t, h, bg, fg, _muted, _fits in tg:
+        by.setdefault(t, set()).add((h, bg, fg))
+    hues = sorted(fnv(t) for t in ('base', 'seed-7', 'wip'))
+    check(sorted(by) == ['base', 'seed-7', 'wip'] and all(len(x) == 1 for x in by.values()) and len({next(iter(x)) for x in by.values()}) == 3
+          and min(hues[1] - hues[0], hues[2] - hues[1], hues[0] + 360 - hues[2]) >= 25 and all(next(iter(by[t]))[0] == fnv(t) for t in by) and all(x[3] != x[4] and x[5] for x in tg) and len({x[2] for x in tg}) == 3,
+          f'a tag\'s colour is its text\'s: the same on every row, another per tag, the hue of its text; a tag whole beside a long name {tg}')
+    op = js(f"[...{row(23)}.querySelectorAll('.rab button')].map(b => +getComputedStyle(b).opacity)")
+    check(len(op) == 2 and min(op) >= 0.6, f'the role letters A B of a row at rest are readable (opacity {op})')
+    # a slice's span on the waves shown: the window and the range; outside these waves: said, not applied; past their end: cut
+    sp = lambda i: (js(f"({row(i)}.querySelector('[data-a=sp]').click(), 0)"), js("[v.t0, v.span, v.range, v.runsP.stEl.textContent]"))[1]
+    js("(v.zoomTo(0, 15000), v.setRange(null), 0)")
+    a = sp(22)
+    check(a[:3] == [5000, 5000, [5000, 10000]] and 'the span of #22' in a[3] and js(f"v.runsP.fi === v.runsP.rowOf(22) && !{row(21)}.querySelector('[data-a=sp]')"),
+          f'↔ on a slice\'s row: the window and the range on its span; a whole run has none {a}')
+    b = sp(23)
+    check(b[:3] == a[:3] and 'outside these waves' in b[3] and 'not applied' in b[3], f'a span outside these waves: said, nothing moved {b}')
+    c = sp(24)
+    check(c[:3] == [12000, 3000, [12000, 15000]] and 'cut to these waves' in c[3], f'a span past the end of these waves: cut to them, said {c}')
+    js(f"(v.runsP.pick(v.runsP.rowOf(21), false), 0)"); page.locator('.wv-runs .rl').focus(); page.keyboard.press('s')
+    d = js("[v.t0, v.span, v.range, v.runsP.stEl.textContent]")
+    check(d[:3] == c[:3] and 'not a slice' in d[3], f's on a whole run: said {d}')
+    # A a slice (its times from 0, cut at 5 ns of the dump): another slice's span in A's time; the key s
+    js("v.runsShow(22)"); shown(22)
+    js(f"(v.runsP.pick(v.runsP.rowOf(25), false), 0)"); page.locator('.wv-runs .rl').focus(); page.keyboard.press('s')
+    e = js("[v.t0, v.span, v.range, v.runsP.stEl.textContent]")
+    f = js("[v.runsSpan(22, true), v.runsSpan(23, true), v.runsP.stEl.textContent]")
+    check(e[:3] == [1000, 2000, [1000, 3000]] and 'A is a slice from 5.000 ns' in e[3] and f[:2] == [[0, 5000], None] and 'outside' in f[2],
+          f'A a slice: a slice\'s span in A\'s time (the dump\'s less A\'s start), its own span the whole of it, one outside refused {e} {f}')
+    js("v.runsShow(0)"); shown(0)
+    # the Open mode: B dropped, a row chosen opens its waves (no compare), the lit row the run shown; the mode in the state
+    js("(v.runCompare(21, true), 0)"); until("(v => v && v.runCur === 21)(WaveLens.views().find(x => x.root.isConnected))")
+    ncmp = lambda: len([m for m in sent('runs') if m['op'] == 'compare'])
+    opens = lambda: [m['run'] for m in sent('runs') if m['op'] == 'open']
+    page.click('.wv-runs [data-a=mopen]')
+    o = js("[v.runsMode, v.runCur, !!v.cmp, v.runsP.el.classList.contains('open'), v.root.querySelectorAll('.wv-runs .rB').length, "
+           "v.root.querySelector('.wv-runs [data-a=all]').offsetParent === null, v.root.querySelector('.wv-runs [data-a=mopen]').getAttribute('aria-pressed'), "
+           "v.runsP.stEl.textContent, v.state().runsMode, document.activeElement === v.runsP.list]")
+    check(o[:7] == ['open', None, False, True, 0, True, 'true'] and o[7].startswith('Open · ') and 'B dropped' in o[7] and o[8] == 'open' and o[9],
+          f'the switch Open: B dropped, B\'s letters and the compare\'s tools away, the mode said and in the state, the keys in the list {o}')
+    n0 = ncmp()
+    js(f"({row(21)}.click(), 0)"); shown(21)
+    until("(v => v && v.runsP && v.runsL)(WaveLens.views().find(x => x.root.isConnected))"); page.wait_for_timeout(150)
+    o = js(f"[v.runsMode, v.runCur, !!v.cmp, v.runsP.fi === v.runsP.rowOf(21), !!{row(21)}.querySelector('.rA.on'), v.runsP.stEl.textContent, v.state().runsMode]")
+    check(o[:5] == ['open', None, False, True, True] and o[5].startswith('Open · ') and o[6] == 'open' and ncmp() == n0,
+          f'Open: a click on a row opens its waves here, nothing compared; the lit row is the run shown; the mode kept over the new waves {o}')
+    # ↑ ↓ held down: only the row they rest on is opened, after a longer rest than a compare's
+    n1 = len(opens()); page.locator('.wv-runs .rl').focus()
+    for _ in range(3):
+        page.keyboard.press('ArrowUp')
+    page.wait_for_timeout(300)
+    early = len(opens()) - n1
+    shown(24)
+    check(early == 0 and opens()[n1:] == [24] and js("v.runsMode === 'open' && v.runsP.fi === v.runsP.rowOf(24) && v.runCur == null") and ncmp() == n0,
+          f'Open: three ↑ in a row open one run, the row they rest on, once the keys rest ({early} before; {opens()[n1:]})')
+    # the keys went on while a run was read: the row they reached is lit over the new waves, and opened when they rest
+    page.evaluate("window.__HOLD = { 'runs open': true }")
+    js("(v.runsP.pick(v.runsP.rowOf(23)), 0)")
+    until("window.__held.length === 1")
+    js("(v.runsP.pick(v.runsP.rowOf(21), true, true), 0)")
+    go('runs open'); page.evaluate("window.__HOLD = null")
+    shown(21)
+    check(opens()[-2:] == [23, 21], f'Open: a row chosen while another run was read: that row opened, not the one before it {opens()[-3:]}')
+    # ⟳ (the dump of now read again) while a run is shown in the Open mode: now stays, the run is not opened again by itself
+    # (a row lit without a key resting on it — ↔, a keep — is not one waited for: not opened over the new waves)
+    n1 = len(opens()); js("(v.runsP.pick(v.runsP.rowOf(22), false), v.reloadDump(), 0)"); shown(0); page.wait_for_timeout(900)
+    o = js("[v.runsShown || 0, v.runsMode, v.runsP && v.runsP.fi]")
+    check(o == [0, 'open', 0] and len(opens()) == n1, f'Open: ⟳ on a run shown reads the dump of now and stays on it {o} {opens()[n1:]}')
+    # the keys back on the row shown while another run is read: that run comes, then the row they rest on is opened again
+    page.evaluate("window.__HOLD = { 'runs open': true }")
+    js("(v.runsP.pick(v.runsP.rowOf(25)), 0)"); until("window.__held.length === 1")
+    js("(v.runsP.pick(v.runsP.rowOf(0), true, true), 0)")
+    go('runs open'); page.evaluate("window.__HOLD = null")
+    shown(25); shown(0); page.wait_for_timeout(200)
+    check(opens()[-2:] == [25, 0] and js("v.runsP && v.runsP.fi === 0 && v.runsMode === 'open'"),
+          f'Open: back on the row shown while a run was read: the waves the keys rest on again {opens()[-3:]}')
+    # the key o: Compare again (said), a click then compares; a state brings the mode; ]r (a B asked) leaves the Open mode
+    page.locator('.wv-runs .rl').focus(); page.keyboard.press('o')
+    o = js("[v.runsMode, v.runsP.el.classList.contains('open'), v.root.querySelectorAll('.wv-runs .rB').length, v.runsP.stEl.textContent, v.state().runsMode]")
+    check(o[:3] == ['compare', False, 6] and o[3].startswith('Compare') and o[4] == 'compare', f'o in the list: the Compare mode again {o}')
+    # the switch by the keyboard: Enter on its button is the button's (not the list's Enter)
+    page.locator('.wv-runs [data-a=mopen]').focus(); page.keyboard.press('Enter'); k1 = js("v.runsMode")
+    page.locator('.wv-runs [data-a=mcmp]').focus(); page.keyboard.press('Enter'); k2 = js("v.runsMode")
+    check([k1, k2] == ['open', 'compare'], f'Enter on the switch\'s buttons sets the mode {[k1, k2]}')
+    js("(v.runCompare(22, true), 0)"); until("(v => v && v.runCur === 22)(WaveLens.views().find(x => x.root.isConnected))")
+    js("v.setState({ wavelens: 'state', version: v.state().version, runsMode: 'open' })")
+    o = js("[v.runsMode, v.runsP.el.classList.contains('open'), v.runsP.stEl.textContent, v.runCur, !!v.cmp]")
+    js("v.runStep(1)"); until("(v => v && v.runCur != null)(WaveLens.views().find(x => x.root.isConnected))")
+    o2 = js("[v.runsMode, v.runsP.el.classList.contains('open'), v.root.querySelectorAll('.wv-runs .rB.on').length]")
+    check(o[:2] == ['open', True] and o[2].startswith('Open · ') and o[3:] == [None, False] and o2 == ['compare', False, 1],
+          f'a state\'s runsMode sets the panel\'s mode (open: the B there dropped); ]r (a B asked) is the Compare mode again {o} {o2}')
+    js("(v.compare(null), v.runsShow(0))"); shown(0)
+    until("(v => v && v.runsP && v.runsL)(WaveLens.views().find(x => x.root.isConnected))"); page.wait_for_timeout(150)
+    # the runs' directory: the panel's last line (selectable), where it comes from, Copy, ★ writes the setting / clears it
+    dl = "(d => [d.hidden, d.querySelector('.rp').textContent, getComputedStyle(d.querySelector('.rp')).userSelect, d.querySelector('.rp').title, " \
+         "d.querySelector('.rstar').textContent, d.querySelector('.rstar').getAttribute('aria-pressed'), d.querySelector('.rstar').hidden])" \
+         "(v.root.querySelector('.wv-runs .rdir'))"
+    d0 = js(dl)
+    check(d0[:3] == [False, '/host/dumps/.wavelens-runs', 'text'] and 'the default' in d0[3] and d0[4:] == ['☆', 'false', False],
+          f'the runs\' directory in the panel: its path, selectable, the default said, ★ not lit {d0}')
+    page.click('.wv-runs [data-a=cpd]'); until("window.__sent.some(m => m.type === 'clip' && m.text === '/host/dumps/.wavelens-runs')")
+    page.click('.wv-runs [data-a=star]')
+    until("document.querySelector('.wv-runs .rstar').getAttribute('aria-pressed') === 'true'")
+    d1, st1, m1 = js(dl), js("v.runsP.stEl.textContent"), [m for m in sent('runs') if m['op'] == 'dir'][-1]
+    check(m1.get('keep') is True and d1[4:6] == ['★', 'true'] and 'wavelens.runsDir (.wavelens-runs) in the workspace\'s settings' in d1[3]
+          and 'wavelens.runsDir = .wavelens-runs' in st1 and 'workspace' in st1,
+          f'★: the host asked to write the setting, the ★ lit, the setting and whose it is said {m1} {d1} {st1!r}')
+    page.click('.wv-runs [data-a=star]')
+    until("document.querySelector('.wv-runs .rstar').getAttribute('aria-pressed') === 'false'")
+    d2, m2 = js(dl), [m for m in sent('runs') if m['op'] == 'dir'][-1]
+    check(m2.get('keep') is False and d2[4:6] == ['☆', 'false'] and 'the default' in d2[3] and 'cleared' in js("v.runsP.stEl.textContent"),
+          f'a lit ★ again: the setting cleared, the default said {m2} {d2}')
+    js(f"(window.__RUNS = {json.dumps(old)}, v.runsP.load())")
     # every runs message host.js sent, by operation: its keys (T-03: rm with id in place of run passed before), and against the table
     shapes = {}
     for m in sent('runs'):
@@ -2762,9 +2912,9 @@ def vscode_tab(browser, build):
     want = {'list': {()}, 'keep': {('comment', 'name', 'tags'), ('cases', 'comment', 'name', 'tags'), ('from', 'of', 'to')}, 'set': {('comment', 'name', 'run', 'tags')},
             'cut': {('from', 'of', 'to')},
             'rm': {('run',)}, 'diff': {('against',) + sig, ('against', 'case') + sig}, 'open': {('run',)},
-            'compare': {('against', 'from', 'run', 'signals', 'to'), ('against', 'case', 'from', 'run', 'signals', 'to')}, 'cancel': {()}}
+            'compare': {('against', 'from', 'run', 'signals', 'to'), ('against', 'case', 'from', 'run', 'signals', 'to')}, 'cancel': {()}, 'dir': {('keep',)}}
     check(set(shapes) == set(want) and all(shapes[k] <= want[k] for k in want) and all(type(m['run']) is int for m in sent('runs') if 'run' in m),
-          f'every runs message of host.js with its keys: list, keep, set, rm, diff, compare, open, cut, cancel {shapes}')
+          f'every runs message of host.js with its keys: list, keep, set, rm, diff, compare, open, cut, cancel, dir {shapes}')
     bad = page.evaluate('window.__bad')
     check(not bad, f'every message of host.js one of vscode/protocol.js with its keys, every answer of the fake host one its type gets {bad[:3]}')
     # a link of a log (vscode/links.js): the extension runs goto in the tab
@@ -5731,9 +5881,9 @@ def edit(browser, build):
     n_esc = page.evaluate(f"(v => v.markList().length)({V})")
     page.evaluate(f"(v => v.menu(200, 200, v.M.rows.find(r => r.name === 'PWRITE'), 70000))({V})")
     mclick(page, 'mark'); page.keyboard.type('write'); page.locator('.wv-ask button[data-m=ok]').click()
-    bm = page.evaluate(f"(v => {{ const b = v.bms[v.bms.length - 1]; return [b.signal, b.text, document.activeElement === v.canvas]; }})({V})")
-    check(n_esc == 2 and bm[1:] == ['write', True] and bm[0].endswith('PWRITE'),
-          f'Esc in it: no marker; Bookmark here asks its text too (Add: added, the keys back on the waves) {n_esc} {bm}')
+    bm = page.evaluate(f"(v => {{ const b = v.bms[v.bms.length - 1]; return [b.signal, b.label, b.text, document.activeElement === v.canvas]; }})({V})")
+    check(n_esc == 2 and bm[1:] == ['write', '', True] and bm[0].endswith('PWRITE'),
+          f'Esc in it: no marker; Bookmark here asks its label too (Add: added, the keys back on the waves) {n_esc} {bm}')
     # gm: the markers (by time) and the bookmarks in a list over the waves; ↓ the first, each step the cursor on it and the
     # waves at its time with their span, a bookmark's signal selected; a click too; Enter closes it there; the page stays
     page.evaluate(f"(v => {{ v.run({{op: 'view', from: '0ns', to: '40ns'}}); v.canvas.focus({{preventScroll: true}}); }})({V})"); settle(page)
@@ -5881,14 +6031,15 @@ def marker_deltas(browser, build):
     a = js("return [v.umarks.length, v.umarks[v.umarks.length - 1].label, v.bms.length];")
     check(a == [n0[0] + 1, 'first', n0[1]], f'm: a marker with the label typed, no bookmark {a}')
     js("v.setCursor(100000); v.canvas.focus();"); page.keyboard.press('b'); box = page.locator('.wv-ask')
-    check(box.count() == 1 and js("return v.bms.length") == n0[1], 'b: a bookmark, its text asked first')
+    check(box.count() == 1 and js("return v.bms.length") == n0[1], 'b: a bookmark, its label asked first')
     page.keyboard.type('second'); page.keyboard.press('Enter'); settle(page)
-    a = js("return [v.umarks.length, v.bms.length, v.bms[v.bms.length - 1].text, v.bms[v.bms.length - 1].signal];")
-    check(a[:3] == [n0[0] + 1, n0[1] + 1, 'second'] and a[3].endswith('PSEL'), f'b: a bookmark with the text typed, on the selected signal, no marker {a}')
+    a = js("return [v.umarks.length, v.bms.length, v.bms[v.bms.length - 1].label, v.bms[v.bms.length - 1].signal, v.bms[v.bms.length - 1].text];")
+    check(a[:3] == [n0[0] + 1, n0[1] + 1, 'second'] and a[3].endswith('PSEL') and a[4] == '', f'b: a bookmark with the label typed (no text), on the selected '
+          f'signal, no marker {a}')
     js("v.setCursor(120000); v.canvas.focus();"); page.keyboard.press('b'); page.keyboard.type('third'); page.wait_for_timeout(50); page.mouse.click(3, 3); settle(page)
     js("v.setCursor(140000); v.canvas.focus();"); page.keyboard.press('b'); page.wait_for_timeout(50); page.mouse.click(3, 3); settle(page)
-    a = js("return [v.bms.length, v.bms[v.bms.length - 1].text];")
-    check(a == [n0[1] + 2, 'third'], f'b, a click elsewhere: the text typed kept (a bookmark), none typed: none {a}')
+    a = js("return [v.bms.length, v.bms[v.bms.length - 1].label];")
+    check(a == [n0[1] + 2, 'third'], f'b, a click elsewhere: the label typed kept (a bookmark), none typed: none {a}')
     js("v.select('PSEL'); window.scrollTo(0, document.body.scrollHeight); v.canvas.focus({ preventScroll: true });"); settle(page)
     page.keyboard.press('b'); settle(page)
     a = js("const b = document.querySelector('.wv-ask').getBoundingClientRect(), q = v.rowBox(v.sel), c = v.canvas.getBoundingClientRect(); "
@@ -5935,6 +6086,20 @@ def marker_deltas(browser, build):
     top(); drag(lambda: row('PRDATA', 0.75))
     a = js("""const m = v.umarks.find(x => x.label === 'zero'); return [m.dsignal, m.dlift, v.rowsL.flatMap(r => r.ids || []), v.markList().find(x => x.label === 'zero')];""")
     check(a[0] == 'PRDATA' and a[1] == 'below' and 'b:PRDATA:below' in a[2] and 'b:PADDR' not in a[2] and a[3].get('dsignal') == 'PRDATA' and a[3].get('dlift') == 'below', f'and under another, it leaves the first line {a}')
+    # a picture of some rows (the right button's Copy image of the selected run or the highlighted rows: exportRows): the lanes made for
+    # them, the Δ under its signal, a marker's text over its own, a lifted bookmark over its own; not on the line over the rows
+    a = js("""const yAt = (s, k) => { const i = s.lastIndexOf(k), m = i < 0 ? null : s.slice(0, i).match(/y="([0-9.]+)"[^<]*$/); return m ? +m[1] : null; };
+        const txt = v.deltaText(v.deltaList().find(d => d.a.label === 'zero')), by = n => v.rowsL.find(r => r.full === n);
+        await v.run([{ op: 'marker', t: '170ns', label: 'mtxt', signal: 'PRDATA' }, { op: 'bookmark', n: 7, t: '90ns', signal: 'PREADY', label: 'bk', lift: true }]);
+        const ys = () => { const s = v.toSVG({ rows: v.exportRows() }); return ['>' + txt + '<', '>mtxt<', '>bk<', ...['PWDATA', 'PRDATA', 'PREADY'].map(n => `>${n}<`)]
+          .map(k => yAt(s, k)); };
+        v.selectRun(by('PWDATA'), by('PREADY')); const run = ys(); v.select(null);
+        await v.run({ op: 'highlight', set: ['PWDATA', 'PRDATA', 'PREADY'] }); const hl = ys();
+        await v.run([{ op: 'highlight', clear: true }, { op: 'marker', id: v.umarks.findIndex(m => m.label === 'mtxt') + 1, delete: true }, { op: 'bookmark', n: 7, delete: true }]);
+        return [run, hl, v.rowsL.flatMap(r => r.ids || []).filter(x => typeof x === 'string').sort()];""")
+    ok = lambda y: None not in y and y[4] < y[0] < y[5] and y[3] < y[1] < y[4] and y[4] < y[2] < y[5]   # Δ, bk: PRDATA–PREADY; the text: PWDATA–PRDATA
+    check(ok(a[0]) and ok(a[1]) and a[2] == ['b:PRDATA:below', 'd:top'], f'a picture of the selected (the highlighted) rows: the Δ, a marker\'s text, a bookmark '
+          f'on the lines of their signals; the view\'s lanes as they were {a}')
     # kept
     keep = "[v.state().deltas, v.state().markers]"
     before = js(f"return {keep};")
@@ -6068,8 +6233,18 @@ def key_hints(browser, build):
     check(box.locator('.ks').all_inner_texts()[:2] == ['Go to', 'Markers and bookmarks'] and 'undefined' not in box.inner_text(), f'headings between them {box.inner_text()!r}')
     page.wait_for_timeout(1300)
     check(box.count() == 1, 'it waits')
+    rect = lambda: page.evaluate("(b => [b.left, b.top, b.right, b.bottom].map(Math.round))(document.querySelector('.wv-keys').getBoundingClientRect())")
+    a = rect()
+    check(a[2] == 1400 - 16 and a[3] == 1000 - 16, f'the pointer not moved yet on the page: the box in the corner, as before {a}')
     page.keyboard.press('Escape'); settle(page)
     check(box.count() == 0 and js("return !!v.sel;"), 'Esc: it closes, the selection stays')
+    # where the pointer is: under it, on its right; at the window's right and bottom: on its left, above it, whole in the window
+    page.mouse.move(300, 200); page.keyboard.press('g'); box.wait_for(); a = rect(); page.keyboard.press('Escape'); settle(page)
+    page.mouse.move(1390, 990); page.keyboard.press('g'); box.wait_for(); b = rect(); page.keyboard.press('Escape'); settle(page)
+    page.mouse.move(1390, 30); page.keyboard.press('g'); box.wait_for(); c = rect(); page.keyboard.press('Escape'); settle(page)
+    check(a[:2] == [308, 208] and b[2] == 1382 and b[3] == 982 and b[0] >= 4 and b[1] >= 4 and c[2] == 1382 and c[1] == 38 and c[3] <= 996,
+          f'the box under the pointer; no room on the right or below: on its left, above it, in the window {a} {b} {c}')
+    check(js("return document.activeElement === v.canvas;"), 'the keys still on the waves')
     page.keyboard.press('g'); box.wait_for(); page.keyboard.press('M'); settle(page)
     check(box.count() == 0 and page.locator('.wv-ask, .wv-menu input, .wv input.ask').count() + js("return document.activeElement.tagName === 'INPUT' ? 1 : 0;") >= 1, 'a key on it: gM asks a marker\'s label')
     page.keyboard.press('Enter'); settle(page); focus()
@@ -6662,6 +6837,35 @@ def small_ui(browser, build):
         const t = [...document.querySelectorAll('.wv-groups button[data-g]')].map(b => b.textContent); v.closeMenu();
         return [I.peek(v).vis.some(r => r.name === '— Handshake —'), t.some(x => x.includes('Handshake')), t.length];""")
     check(a == [True, False, 2], f'hide leaves a divider; ctrl+G lists the groups, not the divider {a}')
+    # your group renamed: a double-click on its name in the names (F2 there), ✎ or F2 in the ctrl+G list, the right button's Rename this group…
+    names = lambda: js("return v.ugroups.map(g => g.name);")
+    ask = lambda: js("const e = document.querySelector('.wv-ask'), i = e && e.querySelector('input'); return e && [i.value, i.selectionStart, i.selectionEnd, "
+                     "e.querySelector('button[data-m=ok]').textContent];")
+    js("v.root.scrollIntoView(); v.refocus();"); settle(page)
+    row = lambda n: js(f"const k = I.peek(v).vis.findIndex(r => r.user && r.name === {json.dumps(n)}); return k < 0 ? null : (b => [b.x + 30, b.y + b.height / 2])("
+                       f"I.peek(v).namesEl.querySelector(`.row[data-r=\"${{k}}\"]`).getBoundingClientRect());")
+    fold0 = js("return [...I.peek(v).collapsed].length;")
+    p = row('handshake'); page.mouse.dblclick(p[0], p[1]); a = ask()
+    page.keyboard.type('hs'); page.keyboard.press('Enter'); settle(page)
+    check(a == ['handshake', 0, 9, 'Rename'] and 'hs' in names() and 'handshake' not in names() and js("return [...I.peek(v).collapsed].length;") == fold0 and
+          js("return v.state().groups.some(g => g.name === 'hs');"),
+          f'a double-click on your group\'s name: its name asked (selected), Enter renames it, the folding as it was, in the state {a} {names()}')
+    js("const k = I.peek(v).vis.findIndex(r => r.user && r.name === 'hs'); I.peek(v).namesEl.querySelector(`.row[data-r=\"${k}\"]`).focus();")
+    page.keyboard.press('F2'); a = ask(); page.keyboard.press('Escape')
+    check(a and a[0] == 'hs' and 'hs' in names() and not js("return !!document.querySelector('.wv-ask');"), f'F2 on its name: asked; Esc: as it was {a}')
+    js("v.groupsMenu();"); page.locator('.wv-groups button[data-g]', has_text='data').locator('.ren').click(); a = ask()
+    page.keyboard.type('payload'); page.keyboard.press('Enter'); settle(page)
+    b = js("const f = document.activeElement; return [!!document.querySelector('.wv-groups'), f && f.matches('.wv-groups button[data-g]') ? f.textContent : null, v.sel && v.sel.full];")
+    check(a and a[0] == 'data' and 'payload' in names() and 'data' not in names() and b[0] and b[1] and b[1].startswith('payload'),
+          f'ctrl+G: ✎ renames the group, not goes there; the list again, on it {a} {b} {names()}')
+    page.keyboard.press('F2'); page.keyboard.type('hs'); page.keyboard.press('Enter'); settle(page)
+    b = js("const f = document.activeElement; return [f && f.matches('.wv-groups button[data-g]') ? f.textContent : null, v.root.querySelector('.wv-toast, .toast')?.textContent];")
+    check(names().count('hs') == 1 and 'payload' in names() and b[0] and b[0].startswith('payload'), f'F2 in the list: a name taken is refused (said), the list on it {b} {names()}')
+    page.keyboard.press('Escape')
+    js("v.menu(200, 200, I.peek(v).vis.find(r => r.user && r.name === 'payload'), 70000);"); mclick(page, 'ugren'); a = ask()
+    page.keyboard.type('pay'); page.keyboard.press('Enter'); settle(page)
+    n1 = names(); js("await v.undo();"); n2 = names()
+    check(a and a[0] == 'payload' and 'pay' in n1 and 'payload' in n2 and 'pay' not in n2, f'the right button: Rename this group…; undo: the name before {a} {n1} {n2}')
     # review S26-1, S26-4: the filter hides in place (the order and the headers come back); Enter with nothing typed closes
     js("v.setCursor(10000); v.marksMenu();")
     order = lambda: page.evaluate("[...document.querySelectorAll('.wv-marks > *')].map(e => e.tagName + (e.dataset.i || '') + (e.hidden ? '-' : ''))")
@@ -10376,7 +10580,8 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'markup': 'markup on the waves: a bookmark lifted under its signal, its label by the circle, {dt} / {cycles} in arrow labels, spans; the SVG the same',
     'bookmark_view': 'going to a bookmark: the rows scrolled as when it was made, its time bookmarkLeft from the left (1–9, ]m, Markers…, the command)',
     'vscode_config': 'vscode/userconfig.js: your configuration of the viewer in VS Code: the file of the defaults, JSONC, the values checked',
-    'vscode': 'the VS Code extension\'s tab (host.js, its CSP) with a fake VS Code: the dump, the store, save, pick, clipboard, reload, live',
+    'vscode': 'the VS Code extension\'s tab (host.js, its CSP) with a fake VS Code: the dump, the store, save, pick, clipboard, reload, live, '
+              'the Runs panel (compare, Open mode, comments and tags, a slice\'s span, the directory and its ★)',
     'docs': 'docs/index.html: cursor, zoom, sorting, settings, styles, highlight, cursor fields, themes, bookmarks',
     'sva_docs': 'docs/index.html: the assertions section and the unit checks of wavelens/sva.js',
     'conformance': 'tests/conformance.html against stock WaveDrom: lanes and texts per case',

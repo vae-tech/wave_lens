@@ -103,7 +103,7 @@
         "wavelens.runsDir": {
           "type": "string",
           "default": "",
-          "description": "Where the Runs panel (gu) keeps the runs of a dump: empty, .wavelens-runs beside the dump; a path relative to the workspace folder, or absolute (one directory for every dump). It has runs.json and a .gitignore of its own. Set in the workspace's settings, sva runs in a shell and an agent's wave_runs use it too."
+          "description": "Where the Runs panel (gu) keeps the runs of a dump: empty, .wavelens-runs beside the dump; a path relative to the workspace folder, or absolute (one directory for every dump). It has runs.json and a .gitignore of its own. Set in the workspace's settings, sva runs in a shell and an agent's wave_runs use it too. The Runs panel shows the directory in its last line; its ★ writes this setting (the directory of now for every dump), a click on a lit ★ clears it."
         },
         "wavelens.theme": {
           "type": "string",

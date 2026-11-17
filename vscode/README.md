@@ -38,7 +38,9 @@ is turned into VCD text with it, kept in the extension's storage).
   waves shown in the tab (`w`: a run's waves read here, the window and rows kept; `]w` `[w` walk through the runs), and **B**,
   the run compared with A (a click, `]r` `[r`; `x`: none, the waves only) — or Δ all of them against A — over the waves in
   sight or a span of yours (a test case: each run's case of that name, wherever it is in the run): only that window of a run
-  is read, by `sva` on the host.
+  is read, by `sva` on the host. The panel's switch **Compare | Open** (`o`): in Open a row chosen opens its waves, one run
+  after another, nothing compared. A row shows the run's comment and tags (a colour per tag); **↔** on a slice's row puts
+  the window and the range on its span; the panel's last line is the runs' directory, its **★** writes `wavelens.runsDir`.
 - **An agent** (Claude Code, Codex with `tools/wavemcp.py`) on the same host: when it starts its live link
   (`view_live`), the open tabs connect (● live in the bar); `view_live` with a dump and `open` opens it here, and
   `view_edit` / `view_get` with `page` = the dump's path work on its tab. *WaveLens: Connect to the agent* connects the tab now. On by default; `"wavelens.live": false`

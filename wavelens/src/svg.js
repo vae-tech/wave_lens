@@ -17,7 +17,7 @@ const WaveSVG = {
     const rh = { sig: S.rowHeight, group: S.groupHeight, space: S.spaceHeight }, bms = V ? V.bms : M.bookmarks, ars = V ? V.arrows : M.arrows;
     const marks = V ? V.markers : optTimes(opts.markers, 'a marker', []).map(pageMark).concat(M.markers);
     let C, timeMarks = V ? V.timeMarks() : [], keeps = null;
-    if (V) C = { rows: opts.rows || V.rowsL, band: V.band, hl: V.hl };
+    if (V) C = { rows: opts.rows || V.rowsL, band: opts.band || V.band, hl: V.hl };   // band: of the lanes of a part of the rows (picLanes)
     else {
       const sorted = orderRows(M.rows, S.sort, S.sortIgnore, S.groupOrder);
       const extra = (opts.extraRows || []).concat(...SVG_PLUGINS.map(f => f(M, S, opts) || []));
