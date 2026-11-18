@@ -48,7 +48,7 @@ class Names {
       if (e.key === 'F2' && at && at.classList.contains('grp') && rename(rowOf(at))) { e.preventDefault(); return; }
       if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && e.altKey && !e.ctrlKey && !e.metaKey && !keyLeft(v.S, e)) {   // the row with the focus moves
         e.preventDefault(); const r = at && rowOf(at);
-        if (!r || !(r.user || r.ug)) { v.toast('alt+↑ / alt+↓ order the rows of your groups (the right button: Groups ▸)'); return; }   // not the selection's
+        if (!r || !(r.user || r.ug || v.ownRow(r))) { v.toast('alt+↑ / alt+↓ move a signal or a module (not a copy, a bit, a plugin\'s row)'); return; }
         v.moveKey(e.key === 'ArrowUp' ? -1 : 1, e.shiftKey, r).then(() => { const i = v.vis.indexOf(r || v.sel);
           const k = i >= 0 && v.namesEl.querySelector(`.row[data-r="${i}"]`); if (k) k.focus({ preventScroll: false }); });
         return;
@@ -181,7 +181,7 @@ class Names {
     const hl = v.hl, c = hl ? hl.cover.get(r) : undefined, dim = !!hl && !hl.on.has(r);
     const key = `${+dim}${c ?? '-'}${+v.picks.has(r)}${v.strokeOf(r) || ''}${+v.collapsed.has(r.id)}${+v.isSel(r)}${+(r === v.tabRow)}` +
       `${v.found.has(r) ? 'f' : ''}${v.labGen}${+v.gapRefSet().has(r)}${+(r === v.gapClockRow())}${+v.gapRows().aux.has(r)}` +
-      `${+v.bitsOpen.has((r.orig || r).full)}`;
+      `${+v.bitsOpen.has((r.orig || r).full)}${r.cls || ''}|${r.name}`;   // the name: your group renamed is the same row
     if (v.rowKey.get(r) === key) return;   // nothing of this row changed
     v.rowKey.set(r, key);
     el.classList.toggle('dim', dim);

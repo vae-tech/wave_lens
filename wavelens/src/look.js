@@ -22,11 +22,59 @@ const barKeep = (v, part) => {
   for (const w of VIEWS) if (w !== v && w.root.isConnected) w.barReload();
 };
 G.addEventListener('storage', e => { if (e.key === BARKEY || e.key === null) for (const w of VIEWS) if (w.root.isConnected) w.barReload(); });
+// the horizontal scroll bar at the foot of the waves in sight (the setting scrollbar): its track all of the waves (the gaps on
+// the waves: the cut-out axis, as the window shows it), its thumb the window. A drag moves the window, a click on the track
+// brings the window's middle there; while it is held, the window's ends, rounded to its scale, over the thumb
+const HSB_H = 10;
+Object.assign(WaveView.prototype, {
+  hsbGeom() {
+    const F = this.warpSync(), M = this.M;
+    if (F) { const end = warpV(F.w, M.t1, F.k, F.g); return { T: Math.max(end, F.W), a: F.v0, b: F.v0 + F.W, F }; }
+    return { T: M.t1 - M.t0, a: this.t0 - M.t0, b: this.t0 - M.t0 + this.span, F: null };
+  },
+  hsbTo(a) { const g = this.hsbGeom(); if (g.F) this.warpPlace(g.F, a); else this.t0 = this.clamp(this.M.t0 + a); this.draw(); },
+  // after a frame (draw): the bar on the last line of the canvas in sight, its thumb where the window is; none when all is in it
+  hsbPlace(f) {
+    const el = this.hsbEl; if (!el) return;
+    const g = this.hsbGeom(), on = this.S.scrollbar !== false && g.T > 0 && g.b - g.a < g.T * 0.9999;
+    if (el.hidden === on) el.hidden = !on;
+    if (!on) return;
+    this.hsbF = f;
+    const W = f.W, w = Math.min(W, Math.max((g.b - g.a) / g.T * W, 18)), x = Math.max(0, Math.min(g.a / g.T * W, W - w)), t = el.firstChild;
+    // on the canvas's last line, or the screen's (the box's) when the canvas goes on under it: in sight
+    const own = this.root.classList.contains('wv-scroll'), top = this.wcol.getBoundingClientRect().top;
+    const low = (own ? this.bodyEl.getBoundingClientRect().bottom : window.innerHeight) - top;
+    el.style.top = Math.max(f.oy, Math.min(f.oy + f.Hc, low) - HSB_H) + 'px'; t.style.left = x + 'px'; t.style.width = w + 'px';
+    if (this.hsbHeld) this.hsbTip();
+  },
+  hsbTip() {
+    const tip = this.hsbEl.querySelector('.hsbtip'), t = this.hsbEl.firstChild, f = x => this.fmt(x, this.span / 100, this.span);
+    tip.hidden = false; tip.textContent = `${f(this.t0)} … ${f(this.t0 + this.span)}`;
+    const tw = tip.offsetWidth, W = this.hsbEl.clientWidth, c = t.offsetLeft + t.offsetWidth / 2;
+    tip.style.left = Math.max(0, Math.min(W - tw, c - tw / 2)) + 'px';
+  },
+  hsbInput() {
+    const el = this.hsbEl; if (!el) return; let d = null;
+    el.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return; e.preventDefault(); e.stopPropagation();
+      const r = el.getBoundingClientRect(), g = this.hsbGeom(), k = g.T / Math.max(r.width, 1);
+      this.markView();   // l: the window before
+      if (e.target !== el.firstChild) this.hsbTo((e.clientX - r.left) * k - (g.b - g.a) / 2);   // the track: the window's middle there
+      d = { x: e.clientX, a: this.hsbGeom().a, k, id: e.pointerId };
+      try { el.setPointerCapture(e.pointerId); } catch (x) { /* gone */ }
+      el.classList.add('on'); this.hsbHeld = true; this.hsbTip();
+    });
+    el.addEventListener('pointermove', e => { if (d && e.pointerId === d.id) this.hsbTo(d.a + (e.clientX - d.x) * d.k); });
+    const end = e => { if (!d || e.pointerId !== d.id) return; d = null; this.hsbHeld = false; el.classList.remove('on');
+      el.querySelector('.hsbtip').hidden = true; try { el.releasePointerCapture(e.pointerId); } catch (x) { /* gone */ } };
+    el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
+  },
+});
 Object.assign(WaveView.prototype, {
   loadRows() {
     let o = {};
     try { o = JSON.parse(localStorage.getItem(this.rowsKey) || '{}') || {}; } catch (e) { /* no storage */ }
-    this.hiddenRows = new Set(Array.isArray(o.hidden) ? o.hidden : []); this.ugroups = groupNorm(o.groups);
+    this.hiddenRows = new Set(Array.isArray(o.hidden) ? o.hidden : []); this.ugroups = groupNorm(o.groups); this.order = ownOrder(o.order);
     this.bitsOpen = new Set(Array.isArray(o.bits) ? o.bits.map(String) : []);
     if (Array.isArray(o.dups)) this.setDups(o.dups);
     this.deltas = o.deltas !== undefined ? !!o.deltas : (this.M.measures || []).length > 0;   // a page with measurements: their Δ shown
@@ -123,11 +171,13 @@ Object.assign(WaveView.prototype, {
   },
   saveRows() {
     try {
-      if (this.radixes.size || this.hiddenRows.size || this.analogs.size || this.ugroups.length || this.bitsOpen.size || this.dups.size || this.deltas ||
+      if (this.radixes.size || this.hiddenRows.size || Object.keys(this.order).length || this.analogs.size ||
+        this.ugroups.length || this.bitsOpen.size || this.dups.size || this.deltas ||
         (this.M.measures || []).length) {   // (the Δ off on a page with measurements: kept off)
         localStorage.setItem(this.rowsKey,
         JSON.stringify({ radix: Object.fromEntries(this.radixes), hidden: [...this.hiddenRows], analog: Object.fromEntries(this.analogs),
-          groups: this.groupList(), bits: [...this.bitsOpen], dups: [...this.dups.keys()], deltas: this.deltas }));
+          groups: this.groupList(), bits: [...this.bitsOpen], dups: [...this.dups.keys()], deltas: this.deltas,
+          ...(Object.keys(this.order).length ? { order: ownOrder(this.order) } : {}) }));
       } else localStorage.removeItem(this.rowsKey);
     } catch (e) { /* private mode */ }
   },

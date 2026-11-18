@@ -8,7 +8,7 @@
      (wavelens.openLastState) when it fits the dump (stateFit: else said, r applies it); Forget the kept view: this dump's store
      emptied, the last state forgotten in every tab;
    - Compare… -> an open dialog on the host and sva diff there (the second dump, VCD or FST, never sent here): its result
-     over the tab's waves (compareResult);
+     over the tab's waves (compareResult) — Compare… picks the file, Compare (g=) compares it over the window in sight;
    - the runs kept (WAVELENS_RUNS, the Runs panel): sva runs on the host (.wavelens-runs beside the dump), a run compared
      with A (the dump, or a run shown) over a window as Compare… compares; a run's waves shown in the tab (A: its FST read on
      the host as the dump is; ⟳ reads the dump of now);
@@ -115,13 +115,11 @@
   const iclick = HTMLInputElement.prototype.click;
   HTMLInputElement.prototype.click = function () {
     if (this.type !== 'file') return iclick.call(this);
-    if (this.classList.contains('cfile')) {   // Compare…: sva diff on the host over this view's signals and time
+    if (this.classList.contains('cfile')) {   // Compare…: B picked on the host (its dialog); Compare then runs sva diff over the window
       const root = this.closest('.wv'), v = (root && root.waveView) || view(); if (!v) return;
-      const signals = v.cmpRows().map(r => (r.src && r.src.path) || r.path || r.full), still = v.cmpAsk();
-      call('compare', { signals, from: v.M.t0, to: v.M.t1, of: v.runsA() }).then(m => {
-        if (!still()) return;   // no B since (✕, no B), or another compare asked: the later wins (B-63)
+      call('compare', { pick: true, of: v.runsA() }).then(m => {
         if (m.error) { toast(m.error); return; }
-        if (m.result) v.compareResult(m.result);
+        if (m.path) v.comparePick({ name: m.name || m.path.replace(/^.*[\\/]/, ''), path: m.path });
       });
       return;
     }

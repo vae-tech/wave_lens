@@ -137,6 +137,9 @@ Object.assign(WaveView.prototype, {
     const ugh = row && row.user ? row : null, mine = sig && sig.ug ? sig : null, ugOf = n => this.ugroups.find(g => g.name === n);
     const mvAt = ugh ? [this.ugroups.indexOf(ugOf(ugh.name)), this.ugroups.length] : mine ? [ugOf(mine.ug.name).signals.indexOf(mine.orig.full),
       ugOf(mine.ug.name).signals.length] : null;
+    // a signal or a module of the dump: its place among the rows of its module shown (your order, alt+↑ ↓)
+    const own = !mvAt && row && this.ownRow(row) ? row : null, ownAt = own && this.ownPlace(own), mvAt2 = mvAt || (ownAt && [ownAt.i, ownAt.n]);
+    const ownIn = own ? (own.anc.length ? `“${this.M.groups[own.anc[own.anc.length - 1]].name}”` : 'the list') : '';
     // a highlighted row clicked: colour, radix and hide go to every highlighted one (a highlighted module: its signals)
     // (a row of your groups stands for its signal: .orig)
     const pk = new Set([...this.picks.keys()].map(r => r.orig || r)), picked = r => pk.has(r.orig || r) || r.anc.some(id => this.picks.has(this.M.groups[id]));
@@ -187,8 +190,8 @@ Object.assign(WaveView.prototype, {
       return `<button type="button" role="menuitem" data-m="${m}"${tip ? ` title="${esc(tip)}"` : ''}><span>${esc(label)}</span>` +
         `${k ? `<span class="kk">${esc(k[0])}</span>` : ''}</button>`; };
     const ugb = (m, i, label) => b(m, label).replace('data-m=', `data-g="${i}" data-m=`);   // an item of your group i
-    const mvs = (where) => !mvAt || mvAt[1] < 2 ? '' : (mvAt[0] > 0 ? b('mvup', 'Move up') : '') + (mvAt[0] < mvAt[1] - 1 ? b('mvdn', 'Move down') : '') +
-      (mvAt[0] > 0 ? b('mvtop', `To the top of ${where}`) : '') + (mvAt[0] < mvAt[1] - 1 ? b('mvbot', `To the bottom of ${where}`) : '');
+    const mvs = (where, m = mvAt2) => !m || m[1] < 2 ? '' : (m[0] > 0 ? b('mvup', 'Move up') : '') + (m[0] < m[1] - 1 ? b('mvdn', 'Move down') : '') +
+      (m[0] > 0 ? b('mvtop', `To the top of ${where}`) : '') + (m[0] < m[1] - 1 ? b('mvbot', `To the bottom of ${where}`) : '');
     const el = document.createElement('div'); el.className = 'wv-menu'; el.setAttribute('role', 'menu');
     const mkId = mk ? this.umarks.indexOf(mk) + 1 : 0, pale = getComputedStyle(this.root).getPropertyValue('--muted').trim();
     const six = c => /^#[0-9a-f]{6}$/i.test(c || ''), acc6 = getComputedStyle(this.root).getPropertyValue('--accent').trim();
@@ -243,8 +246,9 @@ Object.assign(WaveView.prototype, {
       b('copyname', many ? `Copy the ${sigs.length} paths` : 'Copy the path') +
       // your groups: its place there (or a group's among yours), into / out of a group, a new one, delete; go to any of them
       menuSub('subg', 'Your groups',
+        (own && mvAt2[1] > 1 ? `<div class="mh">its place in ${esc(ownIn)} (alt+↑ ↓)</div>` + mvs(ownIn) : '') +   // the dump's rows: your order
         (sig && !mine && gsigs.length ? '<div class="mh">to move it: into a group of yours, any order there</div>' : '') +
-        mvs(ugh ? 'your groups' : mine ? `“${mine.ug.name}”` : '') +   // (b() escapes it)
+        (own ? '' : mvs(ugh ? 'your groups' : mine ? `“${mine.ug.name}”` : '')) +   // (b() escapes it)
         (ugh && ugh.cls !== 'ugdiv' ? b('ugfold', this.collapsed.has(ugh.id) ? 'Open this group' : 'Fold this group') : '') + '<hr>' +
         (gsigs.length ? this.ugroups.map((g, i) => (g.divider ? '' : gsigs.every(r => g.signals.includes((r.orig || r).full)) ?
           ugb('ugoff', i, `Out of “${g.name}”`) :
@@ -402,7 +406,7 @@ Object.assign(WaveView.prototype, {
       else if (act === 'ugdel') this.run({ op: 'group', name: (ugh || grp).name, delete: true });
       else if (act === 'ugren') { const [x, y] = this.menuAt; this.renameGroup((ugh || grp).name, x, y); return this; }
       else if (act === 'mvup' || act === 'mvdn' || act === 'mvtop' || act === 'mvbot') {
-        this.moveKey({ mvup: -1, mvdn: 1, mvtop: -Infinity, mvbot: Infinity }[act], false, ugh || mine); }
+        this.moveKey({ mvup: -1, mvdn: 1, mvtop: -Infinity, mvbot: Infinity }[act], false, ugh || mine || own); }
       else if (act === 'ugfold') { if (this.collapsed.has(ugh.id)) this.collapsed.delete(ugh.id); else this.collapsed.add(ugh.id);
         this.renderNames(); this.draw(); }
       else if (act === 'c2') this.setCursor2(sig ? this.snap(sig, at) : at);

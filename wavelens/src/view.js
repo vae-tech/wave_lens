@@ -42,7 +42,7 @@ const GAP_COUNTS = ['off', 'clock', 'edges', 'rise', 'fall', 'any'];   // gapCou
 // the kinds of a state's keys (null: each may be): a state with a key of another kind is applied in nothing (set_state, Load…;
 // tools/viewedit.py state_kinds) -> the first such key said, or null
 const STATE_LISTS = ['bookmarks', 'arrows', 'markers', 'groups', 'spans', 'hidden', 'dups', 'bits', 'exprs'];
-const STATE_MAPS = ['config', 'paint', 'radix', 'analog', 'folds'], STATE_TIMES = ['from', 'to', 'cursor', 'cursor2'];
+const STATE_MAPS = ['config', 'paint', 'radix', 'analog', 'folds', 'order'], STATE_TIMES = ['from', 'to', 'cursor', 'cursor2'];
 function stateKinds(st) {
   for (const [k, v] of Object.entries(st)) {
     const what = v == null ? null : STATE_LISTS.includes(k) && !Array.isArray(v) ? 'a list'
@@ -84,7 +84,7 @@ class WaveView {
     this.paintKey = 'wavelens.paint:' + this.storeId;
     this.painted = new Map(); this.loadPaint();
     // the menu's radix per signal, hidden rows, the buses shown bit by bit (their bit rows: bitsOf)
-    this.rowsKey = 'wavelens.rows:' + this.storeId; this.radixes = new Map(); this.analogs = new Map(); this.hiddenRows = new Set();
+    this.rowsKey = 'wavelens.rows:' + this.storeId; this.radixes = new Map(); this.analogs = new Map(); this.hiddenRows = new Set(); this.order = {};
     this.bitsOpen = new Set(); this.bitMemo = new WeakMap(); this.dups = new Map(); this.dupsBy = new Map(); this.deltas = false; this.loadRows();
     this.t0 = M.t0; this.span = M.t1 - M.t0;
     // the narrowest view: a millionth of the dump, at most 1 ns (a 200 ms dump: one clock edge, not 20 periods), at least 10 ps
@@ -133,7 +133,8 @@ class WaveView {
     // are made (menu, the lists' render), none other makes one
     hexFields(this.root);
     // the canvas is only as tall as the visible part of the rows (sticky in its column): redraw when that part moves
-    this.onScroll = () => { if (!this.raf && this.lay && this.lay.H > this.hc + 1) this.raf = requestAnimationFrame(() =>
+    this.onScroll = () => { if (this.hsbF && !this.hsbEl.hidden) this.hsbPlace(this.hsbF);   // the scroll bar stays in sight
+      if (!this.raf && this.lay && this.lay.H > this.hc + 1) this.raf = requestAnimationFrame(() =>
       { this.raf = 0; if (this.root.isConnected) this.draw(); }); };
     const own = { signal: this.ac.signal };
     window.addEventListener('scroll', this.onScroll, { passive: true, ...own }); window.addEventListener('resize', this.onScroll, own);
@@ -192,7 +193,7 @@ class WaveView {
     r.innerHTML = Bar.html(this);
     this.bar = new Bar(this); this.arrangeTools(); this.layoutShow();   // (the plugins' groups: addTool puts them in their places)
     this.names = new Names(this);
-    this.wheelInput(this.canvas); this.pointerInput(this.canvas); this.keyInput(this.canvas);
+    this.wheelInput(this.canvas); this.pointerInput(this.canvas); this.keyInput(this.canvas); this.hsbInput();
     // Esc anywhere in the viewer (waves, find field, names) except the bookmark fields: back to no search, no highlight,
     // no selected signal; the view (opened modules, scroll, time) stays
     this.onActive = () => { ACTIVE.view = this; };
@@ -456,7 +457,8 @@ class WaveView {
   // (fsm.js): "only" — the FSMs of its set after Hide (Only and the Mask not applied under it); "add" — its FSMs and the
   // modules on the way to them kept through Hide, Only and the Mask
   allRows(hidden = false, unmasked = false) {   // hidden: the hidden rows too, where they would be (the command rows); unmasked: no Mask
-    const rows = this.withBits(this.withDups(withExtra(orderRows(this.M.rows, this.sort, this.sortIgnore, this.S.groupOrder), this.extraRows, this.M, this)));
+    const own = orderRows(this.M.rows, this.sort, this.sortIgnore, this.S.groupOrder, this.order);
+    const rows = this.withBits(this.withDups(withExtra(own, this.extraRows, this.M, this)));
     if (hidden) return rows;
     const H = this.hiddenRows, ids = H.size && new Set(Object.values(this.M.groups).filter(g => H.has(g.path)).map(g => g.id));   // a hidden module: all of it
     const F = this.fsm ? this.fsmTest() : null, add = !!F && this.fsm.mode === 'add';
@@ -517,7 +519,10 @@ class WaveView {
   }
   settingsChanged() { this.root.dispatchEvent(new CustomEvent('wavelens:settings')); }   // sort, prefixes, settings
   // dir: none | asc | desc; ignore: prefixes skipped when comparing names ("i_,o_" or an array)
-  setSort(dir, ignore) {
+  setSort(dir, ignore) {   // another order of the names: your order (alt+↑ ↓ on the dump's rows) dropped, said (undo brings it back)
+    const was = Object.keys(this.order).length;
+    if (sortDir(dir) !== this.sort && was) { this.order = {}; this.rowsStale = true; this.saveRows();
+      this.toast(`your order of ${was === 1 ? 'one module' : was + ' modules'} dropped for the sort (ctrl+Z: back)`); }
     this.sort = sortDir(dir);
     if (ignore !== undefined) this.sortIgnore = prefixes(ignore).sort((a, b) => b.length - a.length);
     this.renderNames(); this.draw(); this.settingsChanged(); return this;
@@ -772,13 +777,14 @@ class WaveView {
       cursor: this.cursor, config: { style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded,
         toolsHidden: toolNames(this.S.toolsHidden), toolsCompact: compactOf(this.S.toolsCompact), toolLayout: toolLines(this.S.toolLayout), sort: this.sort,
         sortIgnore: [...this.sortIgnore], stripGroups: stripNames(this.S.stripGroups), toolAt: toolAts(this.S.toolAt),
-        cursorStrip: this.S.cursorStrip !== false,
+        cursorStrip: this.S.cursorStrip !== false, compareMask: this.cmpMask !== false,
         fold: [...folded].map(id => M.groups[id] && M.groups[id].path).filter(Boolean),
         highlight: this.hlOrder().map(r => r.full).filter(Boolean), findHighlight: !!this.findHl, findOpen: !!this.findOpen,
         findMask: !!this.findMask,
           ...Object.fromEntries(FIND_OPTS.map(o => [o[1], !!this[o[1]]])), ...this.gapOpt(true), ...this.cycOpt() },
       paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs),
-        hidden: [...this.hiddenRows], dups: [...this.dups.keys()], deltas: this.deltas, bits: [...this.bitsOpen], select: (this.sel && this.sel.full) || null,
+        hidden: [...this.hiddenRows], order: ownOrder(this.order),
+        dups: [...this.dups.keys()], deltas: this.deltas, bits: [...this.bitsOpen], select: (this.sel && this.sel.full) || null,
         find: this.q || '',
         bookmarks: this.bookmarks(), arrows: this.arrowList(),
         markers: this.markList(), spans: this.spanList(),
@@ -822,6 +828,7 @@ class WaveView {
     const paths = new Set([...M.rows.map(r => r.full), ...Object.values(M.groups).map(g => g.path)]);
     const seen = p => paths.has(p) || !!this.sigByPath(p) || (miss.add(p), false);   // a bit of a bus too ("data[3]")
     if (C.style !== undefined) this.setStyle(C.style);
+    if (C.compareMask !== undefined) this.compareMask(C.compareMask ?? this.S.compareMask, true);
     if (C.maxHeight !== undefined) this.setScroll(C.maxHeight == null || C.maxHeight === '' ? 'page' : 'window', C.maxHeight || undefined);
     if (C.toolsFolded !== undefined) this.setTools(!!C.toolsFolded);
     if (C.toolsHidden !== undefined) this.setToolsHidden(C.toolsHidden ?? []);
@@ -865,6 +872,7 @@ class WaveView {
       for (const [p, n] of Object.entries(st.analog || {})) if (seen(p)) this.setAnalog(p, n, true);
     }
     if (st.radix !== undefined || st.analog !== undefined) this.saveRows();   // once (renderNames and draw: find() below)
+    if (st.order !== undefined) { this.order = ownOrder(st.order); this.rowsStale = true; this.saveRows(); }
     if (st.hidden !== undefined) { this.hiddenRows = new Set((st.hidden || []).filter(p => seen(p))); this.rowsStale = true; this.saveRows(); }
     if (st.bits !== undefined) { this.bitsOpen = new Set((st.bits || []).map(String).filter(p => seen(p) && isVec(this.sigByPath(p)))); this.rowsStale = true;
       this.saveRows(); }
@@ -1098,8 +1106,7 @@ class WaveView {
       if (st) { delete st.title; if (cmpAgain) { delete st.compare; delete st.compareShow; } v.runsMiss = await v.setState(st); }
       else if (piece) {
         try { await v.setState(Object.assign({}, piece, { wavelens: 'state' })); } catch (e) { v.logError(e, `${file.name}: its view: ${e.message}`); } }
-      if (cmpAgain) { const c = await v.compare(cmpAgain.file, cmpAgain.name);
-        if (c && cmpAgain.run && cmpAgain.run !== 'a') await v.compareView(cmpAgain.run); }
+      if (cmpAgain) v.comparePick({ file: cmpAgain.file, name: cmpAgain.name, show: cmpAgain.run });   // B picked again: Compare compares it (as shown)
       v.fsmPanelAgain(panel);   // the FSM panel stays open (⟳)
       await v.runsAgain(runs);   // the Runs panel too, and the run compared is compared again with the new waves
       const bad = r.log.filter(x => x.level !== 'info').length;
@@ -1631,6 +1638,8 @@ class WaveView {
     else if (s === 'gM') this.markerKey();
     else if (s === 'gB') this.bookmarkKey();
     else if (s === 'gd') this.run({ op: 'deltas', on: !this.deltas });
+    else if (s === 'g=') this.compareGo();
+    else if (s === 'gb') { if (this.cmp) this.run({ op: 'compare', mask: this.cmpMask === false }); else this.toast('gb: compare with a second dump first'); }
     else if (s === 'gc') this.clearMarks();
     else if (s === 'gs') bar('ssave');
     else if (s === 'gL') bar('sload');
@@ -2274,9 +2283,10 @@ class WaveView {
     this.winBack();   // a busy row whose window no longer covers the view: drawn from its summary in this frame
     if (this.printing) this.paintPrint(lay);
     else { const f = this.size(lay); this.names.slide(f.oy, f.Hc); this.bmGeo = this.paintFrame(this.canvas, f.W, f.Hc, f.oy, lay, true, f.dpr);
-      this.lazyAsk(lay, f.oy, f.Hc); this.winWant(lay, f.oy, f.Hc); }
+      this.lazyAsk(lay, f.oy, f.Hc); this.winWant(lay, f.oy, f.Hc); this.hsbPlace(f); }
     if (this.askPlace) this.askPlace();   // a bookmark's box follows its row
     this.syncReadouts();
+    if (this.cmp || this.cmpPick) this.cmpStaleShow();   // Compare lit once the window moved from the one compared
   }
   size(lay) { // the canvas: as wide as its column, as tall as the rows in view (at least the axis and a little more)
     const c = this.canvas, dpr = window.devicePixelRatio || 1, H = lay.H, hdr = this.hdrH;

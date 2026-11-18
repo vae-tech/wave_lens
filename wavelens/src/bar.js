@@ -19,10 +19,14 @@ const TIPS = {
   'act:dopen': ['Open a VCD dump here (or drop it on the viewer)', ['gO']], 'act:dreload': ['Read the dump again, the view kept', ['R']],
   'act:dsrc': ['SystemVerilog sources: the names of "typedef enum" on the state buses of a VCD (it has none), "typedef struct packed" as ' +
     'fields; kept for the next read (⟳)'],
-  'act:dcmp': ['Compare with a second dump (a VCD of another run): where its values differ, a red band on the row, ≠ on the name', ['gC', ']d', '[d']],
+  'act:dcmp': ['Pick a second dump (a VCD of another run) as B; Compare then shows where its values differ over the window in sight: a red band on the ' +
+    'row, ≠ on the name', ['gC', 'g=', ']d', '[d']],
   'act:druns': ['The runs kept of this dump (VS Code): keep this one with a name, tags, a comment; show one here (A), compare one with it (B) ' +
     'over the waves in sight or a span of yours', ['gu', ']w', ']r']],
-  'act:dcmpx': ['Compare no more'], 'act:dcmpv': ['Which run the waves show: this one, the second, both over each other', ['d', 'D']],
+  'act:dcmpx': ['Compare no more (B picked: dropped)'],
+  'act:dcmpgo': ['Compare A and B over the window in sight (your span chosen in the Runs panel: that span); zoomed or panned since: Compare again', ['g=']],
+  'act:dcmpm': ['▒: the red mask over the differences, on or off (off: d flips between the two runs alone; ≠ and ]d [d stay)',
+    ['gb']], 'act:dcmpv': ['Which run the waves show: this one, the second, both over each other', ['d', 'D']],
   'act:fprev': ['Previous match', ['N', 'shift+Enter']], 'act:fnext': ['Next match', ['n', 'Enter']],
   'act:fhl': ['Found rows in front, the rest dimmed'], 'act:fopen': ['Fold the modules without a match'],
   'act:fmask': ['The found rows only (and the modules on the way to them)'],
@@ -145,8 +149,10 @@ const TIPS = {
   'm:ugnew': ['A group of your own at the top of the names'],
   'm:ugout': ['Out of your group (the signal stays in its module)'], 'm:ugdel': ['Delete your group; its signals stay where they are'],
   'm:ugren': ['A new name for your group (or a double-click on its name, F2 there)'],
-  'm:mvup': ['One place up in your group (a selected run: as a block; a group: among yours)', ['alt+↑', 'drag the name']],
-  'm:mvdn': ['One place down in your group (a selected run: as a block; a group: among yours)', ['alt+↓', 'drag the name']],
+  'm:mvup': ['One place up in your group or its module (a selected run: as a block; a group: among yours; a module: with its rows)',
+    ['alt+↑', 'drag the name']],
+  'm:mvdn': ['One place down in your group or its module (a selected run: as a block; a group: among yours; a module: with its rows)',
+    ['alt+↓', 'drag the name']],
   'm:mvtop': ['First in your group (a group: the first of yours)'], 'm:mvbot': ['Last in your group (a group: the last of yours)'],
   'm:ugfold': ['Fold / open your group'],
   'bm:mdel': ['Delete the marker'], 'bm:gdel': ['Delete your group; its signals stay where they are'], '.mt': ['Marker time: 250ns, 85.12us', ['Enter']],
@@ -198,7 +204,7 @@ const HELP = [
   ['Signals', [[['↑', '↓', 'j', 'k'], 'select the next / previous'], [['shift+click a name'], 'select every signal from the last clicked one'],
     [['gg', 'G'], 'the first / last'], [['ctrl+G', 'gl'], 'your groups: a list, a click goes there, ✎ or F2 renames'],
     [['gv'], 'the waves with the gaps cut out, or in continuous time'],
-    [['alt+↑', 'alt+↓'], 'the selected signal up / down in your group (shift: the group); or drag it in the names'],
+    [['alt+↑', 'alt+↓'], 'the selected signal up / down in your group or its module (shift: the group, the module); or drag it in your group'],
     [['ctrl+click', '○'], 'highlight'], [['ctrl+shift+click'], 'highlight every row from the last one to it'],
     [['zM', 'zR'], 'fold / open every module'], [['t'], 'the modules as a tree: a click goes to one, a box keeps Only those (again: the selected one\'s)'],
     [['T'], 'the state machines in the tree of their modules: go to one, Only them, add them to the view'],
@@ -214,6 +220,8 @@ const HELP = [
     [[']d', '[d'], 'next / previous difference from a dump compared (Compare… in the bar)'],
     [['d'], 'a dump compared: flip the waves between the two runs (the time axis names the one shown)'],
     [['D'], 'a dump compared: both runs over each other where they differ, again one'],
+    [['gb'], 'a dump compared: the red mask over the differences on or off (off: d blinks between the runs)'],
+    [['g='], 'compare A and B (Compare… a file, the Runs panel\'s) over the window in sight; zoomed since: again'],
     [['gu'], 'the runs kept of this dump (VS Code): keep this one, show one (A), compare one with it (B) over the waves in sight or a span'],
     [[']r', '[r'], 'B: compare A with the next (older) / previous run kept, over the same window'],
     [[']w', '[w'], 'A: the waves of the next (older) / previous run kept shown here, the view kept (now among them)'],
@@ -254,6 +262,8 @@ const KEY_MENUS = {
     ['d', v => (v.deltas ? 'hide the Δ between markers' : 'show the Δ between markers'), v => v.umarks.length], ['c', 'clear them all', anyMark],
     ['The state'], ['s', 'save…', onBar('ssave')], ['L', 'load…', onBar('sload')], ['r', 'reload', v => v.root.wlState],
     ['The dump'], ['O', 'open…', onBar('dopen')], ['R', 'reload', v => v.opts.dumpSrc], ['C', 'compare…', onBar('dcmp')],
+    ['=', 'compare A and B over the window in sight', v => v.cmp || v.cmpPend()],
+    ['b', v => (v.cmpMask !== false ? 'no red mask on the differences' : 'the differences masked in red'), v => v.cmp],
     ['u', 'the runs kept…', onBar('druns')],
     ['More'], ['v', v => (v.gapLive() ? 'the waves in continuous time' : 'the gaps cut out of the waves')], ['p', 'save the page', onBar('spage')]]],
   z: ['Fold the modules', [['R', 'open every module'], ['M', 'fold every module'], ['o', 'open the selected signal\'s'], ['c', 'fold the selected signal\'s'],
@@ -403,7 +413,8 @@ class Bar {
         '<input type="file" class="srcfile" accept=".sv,.svh,.v,.vh,.json" multiple hidden>');
     // a second dump compared (diff.js cmpShow: the group only while there is one, or one is being read)
     const compare = grp('compare', `<span class="seg cmpv" hidden>${btn('dcmpv', 'A', ' data-run="a" aria-pressed="true"')}${
-      btn('dcmpv', 'B', ' data-run="b" aria-pressed="false"')}${btn('dcmpv', 'A+B', ' data-run="overlay" aria-pressed="false"')}</span>`,
+      btn('dcmpv', 'B', ' data-run="b" aria-pressed="false"')}${btn('dcmpv', 'A+B', ' data-run="overlay" aria-pressed="false"')}</span>` +
+      btn('dcmpgo', 'Compare', ' class="cgo" hidden') + btn('dcmpm', '▒', ' aria-pressed="true" aria-label="the red mask of the differences"'),
       seg(btn('dprev', '◀', ' aria-label="previous difference"'), btn('dnext', '▶', ' aria-label="next difference"')),
       btn('dcmpx', '', ' class="cmpx" hidden')).replace('class="tg"', 'class="tg" hidden');
     // ⚙: the bar and the look (the right button on the bar opens it too); Tools in the bar: its groups, ticked when the box opens
@@ -446,14 +457,18 @@ class Bar {
         'moves a box"')}<div class="axr"></div><span class="axe" aria-hidden="true">the strip over the time axis — drop a group here</span></div>` +
         `</div></div>
       <div class="body"><div class="names"></div><div class="wcol"><canvas tabindex="0" role="application" aria-roledescription="waveform"
-        aria-label="waveform: + − zoom, ← → pan, shift+← → move the cursor, ↑ ↓ select a signal, [e ]e or Tab edges"></canvas></div></div>
+        aria-label="waveform: + − zoom, ← → pan, shift+← → move the cursor, ↑ ↓ select a signal, [e ]e or Tab edges"></canvas>` +
+        `<div class="hsb" hidden title="All of the waves: drag the window, click to bring it there (held: its ends)">` +
+        '<div class="hsbt"></div>' +
+        `<span class="hsbtip" hidden></span></div></div></div>
       <div class="notes" hidden></div>
       <div class="wlog" hidden></div>
       ${S.hint ? `<div class="hint">${esc(v.hintBase = hint)}</div>` : ''}`;
   }
   constructor(v) {
     this.v = v; const r = v.root, bar = r.querySelector('.bar');
-    v.canvas = r.querySelector('canvas'); v.wcol = r.querySelector('.wcol'); v.bodyEl = r.querySelector('.body'); v.namesEl = r.querySelector('.names');
+    v.canvas = r.querySelector('canvas'); v.hsbEl = r.querySelector('.hsb');
+    v.wcol = r.querySelector('.wcol'); v.bodyEl = r.querySelector('.body'); v.namesEl = r.querySelector('.names');
       v.curEl = r.querySelector('.cur');
     v.sortBtn = r.querySelector('button[data-act=sort]'); v.hlBtn = r.querySelector('button[data-act=hl]');
       v.unhideBtn = r.querySelector('button[data-act=unhide]');
@@ -511,7 +526,8 @@ class Bar {
     v.dfile = r.querySelector('input.dfile');
     v.dfile.addEventListener('change', () => { const f = v.dfile.files[0]; v.dfile.value = ''; if (f) v.openDump(f); });
     v.cfile = r.querySelector('input.cfile');
-    v.cfile.addEventListener('change', () => { const f = v.cfile.files[0]; v.cfile.value = ''; if (f) v.compare(f); });
+    v.cfile.addEventListener('change', () => { const f = v.cfile.files[0]; v.cfile.value = '';   // B picked: Compare compares
+      if (f) v.comparePick({ file: f, name: f.name }); });
     v.srcfile = r.querySelector('input.srcfile');
     v.srcfile.addEventListener('change', () => { const fs = [...v.srcfile.files]; v.srcfile.value = ''; if (fs.length) v.setSources(fs); });
     v.reloadBtn = r.querySelector('button[data-act=dreload]'); v.reloadBtn.hidden = !v.opts.dumpSrc;
@@ -616,8 +632,10 @@ class Bar {
       const ex = v.exportRows(); v.picAct(a, v.range, ex ? { rows: ex } : {}); }
     else if (a === 'dcmp') v.cfile.click();
     else if (a === 'druns') v.runsPanel();
-    else if (a === 'dcmpx') { if (v.cmpReading) v.compareStop(); else v.compare(null); }
+    else if (a === 'dcmpx') { if (v.cmpReading) v.compareStop(); else v.compareOff(); }
+    else if (a === 'dcmpgo') v.compareGo();
     else if (a === 'dcmpv') v.compareView(b.dataset.run);
+    else if (a === 'dcmpm') v.seq('gb');
     else if (a === 'dprev' || a === 'dnext') v.diffStep(a === 'dnext' ? 1 : -1);
     else if (a === 'dsrc') v.srcfile.click();
     else if (a === 'svload') { const s = v.root.querySelector('button[data-sv=load]'); if (s) s.click(); }

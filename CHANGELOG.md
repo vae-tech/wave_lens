@@ -5,6 +5,28 @@ published as one commit of the public branch `master` tagged `vMAJOR.MINOR`; the
 into a report; `make unit` checks that they agree with the top entry here (DEVELOPMENT.md § Versions). The tags of
 0.1–0.8 were put on the commits that ended those stages, after the fact.
 
+## 0.62 — 18 November 2026
+
+A compare is asked for: picking A and B does nothing, Compare compares them over the window in sight; the red mask on and
+off; any row of the dump moved with alt+↑ ↓; a renamed group shown at once; a scroll bar under the waves.
+
+- **Compare** (the bar, the Runs panel, `c` in its list, `g=`): choosing only picks. **Compare…** (`gC`) picks a dump as B
+  (the bar says `B: b.vcd ✕`); in the Runs panel a click, Enter, ↑ ↓ or `]r [r` pick a run as B and `w` one as A — their
+  letters in dashed boxes, nothing read or compared. Compare opens a picked A first (the view kept), then compares A and B
+  over **the window in sight** (or the span chosen) only. Zoom or pan afterwards and nothing is compared again: the compare
+  stays the one of its window, the time outside it shaded, Compare shown in the bar until it is pressed again. A dump read
+  in the page is read once: Compare again over another window only compares. When A moves (a run shown, the dump read again)
+  its compare goes and B stays picked. VS Code: the host's Compare… dialog only picks (`compare {pick}`).
+- **▒** in the compare group (`gb`, the command `compare` with `mask`, the setting `compareMask`) turns the red mask over the
+  differences off and on: off, `d` flips between A and B with nothing over them; ≠ and `]d [d` still find them.
+- **alt+↑ / alt+↓** move any signal or module of the dump among the rows of its module (a run of selected rows as one block,
+  a module with its rows; alt+shift: its module), from the names or the waves, and Move up / down in **Your groups ▸** of its
+  menu. The state keeps it as `"order"` (Save, this browser, undo); another Sort drops it (said; ctrl+Z brings it back);
+  `tools/viewedit.py` orders its rows the same way.
+- A **renamed group** says its new name at once in the names (it kept the old one until something else of the row changed).
+- **The scroll bar** at the foot of the waves in sight (setting `scrollbar`): zoomed in, all of the waves with the window as
+  its thumb; drag it (the window's ends, rounded, over it while held) or click the track; `l` goes back.
+
 ## 0.61 — 17 November 2026
 
 The Runs panel browsed without A and B, a run's comment readable, a slice's span on the waves, the runs' directory kept;

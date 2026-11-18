@@ -1282,7 +1282,7 @@ def summary(st, timed, base=None):
     for k in ('paint', 'radix', 'analog'):
         if st.get(k):
             out[k] = st[k]
-    for k in ('hidden', 'dups', 'deltas', 'bits'):
+    for k in ('hidden', 'order', 'dups', 'deltas', 'bits'):
         if st.get(k):
             out[k] = st[k]
     fold = ed.fold()

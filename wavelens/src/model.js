@@ -68,7 +68,8 @@ const flatText = t => Array.isArray(t) ? t.slice(typeof t[1] === 'object' && !Ar
 // Layers, later wins: DEFAULTS < global (window.WAVELENS_CONFIG, WaveLens.configure) < WaveJSON "config" < element / opts.
 // theme and colors are not merged here: they become data-theme / CSS custom properties (see applyLook).
 const DEFAULTS = { rowHeight: 26, groupHeight: 22, spaceHeight: 14, headerHeight: 24, traceWidth: 1.4, busWidth: 1.2,
-  labelSize: 11, fontSize: 11.5, sort: 'none', sortIgnore: [], sortButton: true, hint: true, style: 'auto', radix: 'auto', fold: null,
+  labelSize: 11, fontSize: 11.5, sort: 'none', sortIgnore: [], sortButton: true, hint: true, compareMask: true,
+  scrollbar: true, style: 'auto', radix: 'auto', fold: null,
   highlight: null, dim: 0.3, groupColors: null, bookmarkLeft: 0.2, arrowLabels: 'lane', laneHeight: 16, maxHeight: null, toolsFolded: false, toolsHidden: [],
   toolsCompact: 'auto', toolLayout: null, stripGroups: ['find', 'marks', 'cursor', 'edges'], toolAt: null, cursorStrip: true, cursorStripAt: 1,
   groupOrder: 'file', onlyGroups: true, moduleShading: true, findHighlight: true, findOpen: true, findMask: false, findCase: false, findWord: false,
@@ -236,25 +237,38 @@ const COLL = typeof Intl !== 'undefined' ? new Intl.Collator(undefined, { numeri
 const stripPfx = (name, pfx) => { const p = pfx.find(p => name.startsWith(p) && name.length > p.length); return p ? [p, name.slice(p.length)] : ['', name]; };
 // rows in display order: siblings (one group level, between {} spacers) sorted by name; groups move as a block;
 // groupOrder: 'first' / 'last' = inside every group the sub-groups (modules) come before / after the signals; 'file' = as given
-function orderRows(rows, dir, pfx, groupOrder) {
+// own: your order (alt+↑ ↓ in the names; the state's "order"): a module's path ('' the top) -> the names of its rows in your order.
+// The places of the rows it names (in each run between spacers, after the sort) are filled again in its order; a row it does
+// not name (a signal new in the dump) keeps its place
+function orderRows(rows, dir, pfx, groupOrder, own = null) {
   const sorting = dir === 'asc' || dir === 'desc', gs = groupOrder === 'first' ? -1 : groupOrder === 'last' ? 1 : 0;
-  if (!sorting && !gs) return rows;
+  const mine = own && Object.keys(own).length ? own : null;
+  if (!sorting && !gs && !mine) return rows;
   const kids = new Map([[null, []]]);
   for (const r of rows) { kids.get(r.anc.length ? r.anc[r.anc.length - 1] : null).push(r); if (r.type === 'group') kids.set(r.id, []); }
   const key = r => stripPfx(r.name, pfx)[1], sgn = dir === 'desc' ? -1 : 1;
   const c = (x, y) => (COLL ? COLL.compare(x, y) : x < y ? -1 : x > y ? 1 : 0);
   const byName = (a, b) => sgn * (c(key(a), key(b)) || c(a.name, b.name));   // i_data / o_data: full name breaks the tie
   const cmp = (a, b) => gs * ((a.type === 'group') - (b.type === 'group')) || (sorting ? byName(a, b) : 0);   // stable sort
+  const yours = (run, path) => {
+    const L = mine && Array.isArray(mine[path]) ? mine[path] : null; if (!L) return run;
+    const at = new Map(); L.forEach((n, i) => { if (!at.has(n)) at.set(n, i); });
+    const k = run.map((r, i) => (at.has(r.name) ? i : -1)).filter(i => i >= 0), put = k.map(i => run[i]).sort((a, b) => at.get(a.name) - at.get(b.name));
+    k.forEach((i, j) => { run[i] = put[j]; }); return run;
+  };
   const out = [];
-  const emit = list => {
+  const emit = (list, path) => {
     let run = [];
-    const flush = () => { for (const r of run.sort(cmp)) { out.push(r); if (r.type === 'group') emit(kids.get(r.id)); } run = []; };
+    const flush = () => { for (const r of yours(run.sort(cmp), path)) { out.push(r); if (r.type === 'group') emit(kids.get(r.id), r.path); } run = []; };
     for (const r of list) { if (r.type === 'space') { flush(); out.push(r); } else run.push(r); }
     flush();
   };
-  emit(kids.get(null));
+  emit(kids.get(null), '');
   return out;
 }
+// your order as the state keeps it: a module's path -> its rows' names (strings), a list of none left out
+const ownOrder = o => Object.fromEntries(Object.entries(o && typeof o === 'object' && !Array.isArray(o) ? o : {})
+  .filter(([, l]) => Array.isArray(l) && l.length).map(([p, l]) => [p, l.map(String)]));
 
 /* ---------------- rows of plugins (view.extraRows, WaveSVG opts.extraRows) ---------------- */
 // fn(group | null) -> [row] for every group of the diagram and its top (null); the rows go after the group's own signals

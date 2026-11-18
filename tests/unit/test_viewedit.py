@@ -519,6 +519,21 @@ class Twin(unittest.TestCase):
                    {'op': 'rows'}])[-1]
         self.assertEqual(r['rows'], [['@g', 'group'], ['a', 1], ['i_b2', 1], ['b10', 1], ['m', 'module'], ['m.z', 1]])
 
+    def test_rows_your_order(self):
+        """your order (alt+up / down in the names, the state's "order": a module's path -> its rows' names) orders the rows as
+        model.js orderRows does: a row it does not name keeps its place; another sort drops it (view.js setSort)."""
+        doc = {'signal': [{'name': 'b', 'wave': '01'}, {'name': 'a', 'wave': '01'}, {'name': 'c', 'wave': '01'},
+                          ['m', {'name': 'y', 'wave': '0'}, {'name': 'x', 'wave': '0'}]]}
+        e = ed(doc=doc)
+        r = e.run([{'op': 'set_state', 'state': {'wavelens': 'state', 'order': {'': ['c', 'm', 'b'], 'm': ['x', 'y']}}}, {'op': 'rows'}])[-1]
+        self.assertEqual(r['rows'], [['c', 1], ['a', 1], ['m', 'module'], ['m.x', 1], ['m.y', 1], ['b', 1]])
+        r = e.run([{'op': 'sort', 'dir': 'none'}, {'op': 'rows'}])[-1]   # the same sort: kept
+        self.assertEqual(r['rows'][0], ['c', 1])
+        r = e.run([{'op': 'sort', 'dir': 'asc'}, {'op': 'rows'}])[-1]
+        self.assertEqual(r['rows'], [['a', 1], ['b', 1], ['c', 1], ['m', 'module'], ['m.x', 1], ['m.y', 1]])
+        self.assertEqual(e.st['order'], {})
+        self.assertIn('error', e.run([{'op': 'set_state', 'state': {'wavelens': 'state', 'order': ['a']}}])[0])
+
     def test_times(self):
         """One time parser (model.js parseT) for viewedit.py and wavemcp.py: units in any case, µs, an exponent."""
         for text, ps in (('100NS', 1e5), ('1E2', 100), ('0.1µs', 1e5), (' -5 ns ', -5000), ('2.5us', 2.5e6), ('1e-3ns', 1)):
@@ -837,7 +852,10 @@ class Compare(unittest.TestCase):
         self.assertEqual(dict(zip(*zip(*[(r[0], r[2:]) for r in e.c_rows({})['rows']])))['tb.dut.valid'], ['≠'])
         self.assertEqual(e.run([{'op': 'compare', 'off': True}])[0], {'op': 'compare', 'off': True})
         self.assertIsNone(e.st['compare'])
-        self.assertIn('result, show, dump or off', e.run([{'op': 'compare'}])[0]['error'])
+        self.assertIn('result, show, dump, mask or off', e.run([{'op': 'compare'}])[0]['error'])
+        self.assertEqual(e.run([{'op': 'compare', 'mask': False}])[0], {'op': 'compare', 'mask': False})   # diff.js compareMask
+        self.assertIs(e.config()['compareMask'], False)
+        self.assertIn('true or false', e.run([{'op': 'compare', 'mask': 'off'}])[0]['error'])
         self.assertIn('compare with a second dump first', e.run([{'op': 'compare', 'show': 'b'}])[0]['error'])
         e.run([{'op': 'compare', 'result': res}])
         self.assertIn('differences only', e.run([{'op': 'compare', 'show': 'b'}])[0]['error'], 'no "vcd" in this result')

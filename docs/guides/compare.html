@@ -19,8 +19,9 @@
 <div class="page toc-side">
 <main>
 <header class="hero"><div class="kicker">Guide</div><h1>Compare two runs</h1>
-<p class="lead">The same test before and after a change of the RTL, or with another seed: <span class="ui">Compare…</span> reads the
-  second run's dump over the waves you have open and marks, signal by signal, where the two differ. A red band on the row, ≠ on the
+<p class="lead">The same test before and after a change of the RTL, or with another seed: <span class="ui">Compare…</span> picks the
+  second run's dump, <span class="ui">Compare</span> compares it with the waves you have open over the window in sight and marks,
+  signal by signal, where the two differ. A red band on the row, ≠ on the
   name, and <kbd>]d</kbd> to go from one difference to the next.</p></header>
 
 <h2 id="example">The example: run B of the APB testbench</h2>
@@ -34,8 +35,12 @@
   <li>Open the page with the first run (A). The compare works on <b>exact</b> waves — a page made with <code>--exact</code>, the exact
     view of an example, a dump opened in <code>wavelens/viewer.html</code>. A clock-sampled view refuses: one cell per cycle is
     another time scale.</li>
-  <li><span class="ui">Compare…</span> in the bar's <b>dump</b> group, then pick B's VCD. An FST: turn it into VCD text first,
-    <code>bin/linux-x86_64/sva vcd b.fst --out b.vcd</code> (in VS Code the extension does that for you).</li>
+  <li><span class="ui">Compare…</span> in the bar's <b>dump</b> group, then pick B's VCD: it is only picked (the bar says
+    <span class="ui">B: b.vcd ✕</span>). An FST: turn it into VCD text first, <code>bin/linux-x86_64/sva vcd b.fst --out b.vcd</code>
+    (in VS Code the extension does that for you).</li>
+  <li><span class="ui">Compare</span> in the bar (<kbd>g</kbd> <kbd>=</kbd>) compares A and B over <b>the window in sight</b>. Zoom
+    or pan and nothing is compared again: the bands stay the ones of that window (the time outside it shaded) and Compare
+    shows in the bar until you press it again — B is read once, every Compare after it only compares.</li>
   <li>The signals are matched by their path; else by their name under the page's scope; else by the one path of B that ends with the
     name. One found by its short name only (<code>tb.a.ready</code> as <code>tb.b.ready</code>) is still compared but said:
     <i>matched by name: tb.a.ready → tb.b.ready</i> in the toast and in the tooltip of <span class="ui">≠ N ✕</span>.</li>
@@ -75,6 +80,9 @@
     and the FSM panel read the run shown; the assertions stay A's.</li>
   <li><kbd>D</kbd> puts both over each other where they differ: a bit's B over its A in B's colour, a bus's row in two lanes, A above
     B, each with its value; the value column says <code>1 ≠ 0</code>. <kbd>D</kbd> again: the run before.</li>
+  <li><span class="ui">▒</span> in the bar (or <kbd>gb</kbd>) turns the red mask over the differences off and on: off, <kbd>d</kbd> just flips
+    between the two runs with nothing over them, to see the difference blink; <span class="ui">≠</span> and <kbd>]d</kbd> <kbd>[d</kbd>
+    still find them. The setting <code>compareMask</code> starts without it; Save keeps it.</li>
 </ul>
 <figure><img src="img/compare-overlay.png" alt="Both runs over each other: PREADY's B low in its colour, PRDATA in two lanes, both dumps named on the time axis" loading="lazy">
   <figcaption><b><kbd>D</kbd>: both runs.</b> The time axis names them in the colours of their waves; where they agree the row is
@@ -114,20 +122,21 @@
     time axis and in the status line, so who is compared with whom is always on the screen. A row's second line starts with
     the run's comment, in the text's colour: with the tags, each in its own colour, it tells apart runs whose names are all
     the dump's.</li>
-  <li>Click a run (or ↑ ↓ in the list, <kbd>]</kbd> <kbd>r</kbd> / <kbd>[</kbd> <kbd>r</kbd> anywhere): it becomes B, compared with A
-    over that window only, and only that window of the run is read — a run of gigabytes costs the window, not its size. Then
+  <li>Click a run (or ↑ ↓ in the list, <kbd>]</kbd> <kbd>r</kbd> / <kbd>[</kbd> <kbd>r</kbd> anywhere): it is picked as B, its letter
+    in a dashed box, nothing read. <span class="ui">Compare</span> (<kbd>c</kbd> in the list) compares it with A over the window
+    in sight only, and only that window of the run is read — a run of gigabytes costs the window, not its size. Then
     it is a compare as above: the bands, ≠, <kbd>]d</kbd> <kbd>[d</kbd>, A / B / A+B, and the view you chose stays from run to run.</li>
-  <li><kbd>w</kbd> on a row (its <b>A</b>) shows that run's waves in the tab instead, with your window, rows, markers and spans
-    kept; B, if there is one, is compared with it. Two runs kept are compared with each other this way: one A, the other B.
-    <kbd>]</kbd> <kbd>w</kbd> / <kbd>[</kbd> <kbd>w</kbd> step A through now and the runs. With no B (<kbd>x</kbd>, or
-    <span class="ui">no B</span>) that is a walk through the runs: each one's waves in the same window, nothing compared.
+  <li><kbd>w</kbd> on a row (its <b>A</b>) picks it as A; <span class="ui">Compare</span> then shows that run's waves in the tab,
+    with your window, rows, markers and spans kept, and compares B with it. Two runs kept are compared with each other this way: one A, the other B.
+    <kbd>]</kbd> <kbd>w</kbd> / <kbd>[</kbd> <kbd>w</kbd> open A's waves at once, stepping through now and the runs: a walk
+    through the runs, each one's waves in the same window, nothing compared (a B picked stays: Compare compares it).
     A run without a row of yours says so, and the row is back on the next run that has it. ⟳ reads the dump of now: A is now
     again.</li>
   <li>To only look through the runs, switch the panel from <span class="ui">Compare</span> to <span class="ui">Open</span>
     (<kbd>o</kbd> in the list): a row chosen opens its waves in the tab, one run after another in the same window, with no A
     and B and nothing compared; ↑ ↓ held down open the row they rest on. <kbd>o</kbd> again: Compare.</li>
-  <li>↑ ↓ in the list compare once you stop on a run. The dump read again after a new simulation keeps the panel and compares
-    with the run again; the status says equal, or what differs first, and why the run's values are not shown when they are not.</li>
+  <li>↑ ↓ in the list only pick. The dump read again after a new simulation keeps the panel and the run picked as B: Compare
+    compares with it again; the status says equal, or what differs first, and why the run's values are not shown when they are not.</li>
   <li><span class="ui">Δ all</span> asks every run at once: how many signals differ from A in the window and the first difference, on
     each run's row (red: some). The run where it broke stands out; make a golden run A first to ask "which run left it".</li>
   <li>Test cases: a run keeps its cases (your labelled spans when kept, or cocotb's <code>wavelens.marks.json</code> beside the
@@ -186,7 +195,7 @@ B: apb_b.vcd  0 ps … 205 ns, 58 signals
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.61 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.62 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

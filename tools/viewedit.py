@@ -72,7 +72,7 @@ COMMANDS = {
     'cycles': 'on? clock? zero? reset?', 'only': 'modules? on? clear? open? groups?', 'fsm': 'mode? signals? fields? clear?',
     'fsm_stats': 'signal', 'fsm_panel': 'signal? tab? off?', 'fsm_go': 'signal state? from? to? dir? first?', 'types': 'signals?',
     'edge': 'dir? kind? value? signal?', 'reset': '', 'state': '', 'set_state': 'state', 'rows': 'pattern? limit? offset?',
-    'picture': 'format? from? to? rows?', 'compare': 'result? dump? a? map? offset? off? show?',
+    'picture': 'format? from? to? rows?', 'compare': 'result? dump? a? map? offset? off? show? mask?',
 }
 LIVE_ONLY = {'fit': 'the time of the waves', 'edge': 'the values of the signals', 'picture': 'the screen',
              'fsm': 'the enum labels of the signals', 'fsm_stats': 'the transitions of the signals', 'fsm_go': 'the transitions of the signals',
@@ -84,7 +84,7 @@ TIME_ARGS = {'cursor': ('t',), 'cursor2': ('t',), 'view': ('from', 'to', 'at', '
              'span': ('from', 'to'),
              'picture': ('from', 'to'), 'cycles': ('zero',), 'compare': ('offset',), 'expr_matches': ('from', 'to')}
 # what a saved state has (view.js state(), the plugins' addState): set_state takes these, nothing else
-STATE_KEYS = {'from', 'to', 'cursor', 'cursor2', 'range', 'edge', 'paint', 'radix', 'analog', 'hidden', 'dups', 'deltas', 'bits', 'select', 'find',
+STATE_KEYS = {'from', 'to', 'cursor', 'cursor2', 'range', 'edge', 'paint', 'radix', 'analog', 'hidden', 'order', 'dups', 'deltas', 'bits', 'select', 'find',
               'bookmarks', 'arrows', 'markers', 'spans', 'groups', 'only', 'fsm', 'compare', 'compareShow', 'runsOver', 'runsMode', 'folds', 'exprs', 'sva', 'bus'}
 COLOR_FN = re.compile(r'(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\([^;{}()]*\)|var\(\s*--[\w-]+\s*\)', re.I)
 # the painters' colour names (model.js TOK, and the tokens bus.js and sva.js register): a word the page draws as a colour
@@ -700,7 +700,7 @@ def group_list(gs):
 
 # ---------------- the commands on a state ----------------
 STATE_LISTS = ('bookmarks', 'arrows', 'markers', 'groups', 'spans', 'hidden', 'dups', 'bits', 'exprs')   # view.js STATE_KINDS
-STATE_MAPS = ('config', 'paint', 'radix', 'analog', 'folds')
+STATE_MAPS = ('config', 'paint', 'radix', 'analog', 'folds', 'order')
 STATE_TIMES = ('from', 'to', 'cursor', 'cursor2')
 
 
@@ -727,7 +727,7 @@ def clean_state(state):
     for k in ('hidden', 'dups', 'bits', 'exprs'):
         if k in st and not isinstance(st[k], list):
             st.pop(k)
-    for k in ('config', 'paint', 'radix', 'analog', 'folds'):
+    for k in ('config', 'paint', 'radix', 'analog', 'folds', 'order'):
         if k in st and not isinstance(st[k], dict):
             st.pop(k)
     for k in ('from', 'to', 'cursor', 'cursor2'):
@@ -1710,6 +1710,8 @@ class Editor:
         if a.get('dir') not in SORTS:
             fail(f'dir: one of {" ".join(SORTS)}')
         c = self.config()
+        if a['dir'] != self.opt('sort', 'none') and own_order(self.st.get('order')):
+            self.st['order'] = {}   # (view.js setSort: another order of the names drops yours)
         c['sort'] = a['dir']
         if a.get('ignore') is not None:
             c['sortIgnore'] = sorted(prefixes(a['ignore']), key=lambda s: -len(s))
@@ -1975,7 +1977,7 @@ class Editor:
         """view.js allRows: your groups at the top, then the rows in the order of "sort"; hidden rows and what is under a
         hidden module left out, then (only) the rows Only leaves out."""
         sort, ign = self.opt('sort', 'none'), sorted(prefixes(self.opt('sortIgnore')), key=lambda p: -len(p))
-        rows = order_rows(self.m.rows, sort, ign, self.m.cfg.get('groupOrder', 'file'))
+        rows = order_rows(self.m.rows, sort, ign, self.m.cfg.get('groupOrder', 'file'), own_order(self.st.get('order')))
         copies = self.m.dup_rows(self.st)
         if copies:   # (look.js withDups) under their signal, in their order
             copies.sort(key=lambda d: copy_order(d['full']))   # the slices first, the highest msb first, then #2, #3 … (B-02)
@@ -2001,6 +2003,13 @@ class Editor:
             self.st['compare'] = None
             self.st.pop('compareShow', None)
             return {'off': True}
+        mask = a.get('mask')
+        if mask is not None and not isinstance(mask, bool):
+            fail('mask: true or false')
+        if mask is not None:   # diff.js compareMask: the red bands on or off, the setting compareMask of the state
+            self.config()['compareMask'] = mask
+            if a.get('result') is None and a.get('show') is None and not a.get('dump'):
+                return {'mask': mask}
         show = a.get('show')
         if show is not None and show not in ('a', 'b', 'overlay'):
             fail(f'compare: show is a, b, overlay, not "{show}"')
@@ -2017,7 +2026,7 @@ class Editor:
         elif a.get('dump'):
             c = compare_dump(self.m, getattr(self, 'base', None), a)
         else:
-            fail('compare: result, show, dump or off')
+            fail('compare: result, show, dump, mask or off')
         if not self.m.timed and self.m.doc:
             fail('compare: these waves are clock-sampled (one cell per cycle): a compare is of exact waves')
         self.st['compare'] = c
@@ -2074,10 +2083,17 @@ def collate(s):
     return out
 
 
-def order_rows(rows, sort, pfx, group_order):
-    """model.js orderRows: siblings (between spacers) sorted by name without the ignored prefixes; groups move as a block."""
+def own_order(o):
+    """model.js ownOrder: your order as the state keeps it, a module's path -> its rows' names; a list of none left out."""
+    return {p: [str(n) for n in l] for p, l in (o.items() if isinstance(o, dict) else ()) if isinstance(l, list) and l}
+
+
+def order_rows(rows, sort, pfx, group_order, own=None):
+    """model.js orderRows: siblings (between spacers) sorted by name without the ignored prefixes; groups move as a block;
+    own (your order, alt+up / down in the names): a module's path ('' the top) -> its rows' names, the places of the rows
+    it names in each run filled again in its order."""
     sorting, gs = sort in ('asc', 'desc'), -1 if group_order == 'first' else 1 if group_order == 'last' else 0
-    if not sorting and not gs:
+    if not sorting and not gs and not own:
         return list(rows)
     kids = {None: []}
     for r in rows:
@@ -2090,14 +2106,26 @@ def order_rows(rows, sort, pfx, group_order):
     def cmp(a, b):
         g = gs * ((a['type'] == 'group') - (b['type'] == 'group'))
         return g or (sgn * (c(strip(a['name']), strip(b['name'])) or c(a['name'], b['name'])) if sorting else 0)
+    def yours(run, path):
+        lst = (own or {}).get(path)
+        if not lst:
+            return run
+        at = {}
+        for i, n in enumerate(lst):
+            at.setdefault(n, i)
+        k = [i for i, r in enumerate(run) if r['name'] in at]
+        put = sorted((run[i] for i in k), key=lambda r: at[r['name']])
+        for i, r in zip(k, put):
+            run[i] = r
+        return run
     out = []
-    def emit(lst):
+    def emit(lst, path):
         run = []
         def flush():
-            for r in sorted(run, key=functools.cmp_to_key(cmp)):
+            for r in yours(sorted(run, key=functools.cmp_to_key(cmp)), path):
                 out.append(r)
                 if r['type'] == 'group':
-                    emit(kids.get(r['id'], []))
+                    emit(kids.get(r['id'], []), r.get('path', ''))
             run.clear()
         for r in lst:
             if r['type'] == 'space':
@@ -2106,7 +2134,7 @@ def order_rows(rows, sort, pfx, group_order):
             else:
                 run.append(r)
         flush()
-    emit(kids[None])
+    emit(kids[None], '')
     return out
 
 

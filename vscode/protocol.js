@@ -27,8 +27,8 @@
     'state-kept': { ask: '', reply: null },                        // the state picked is loaded: Reload reads it
     'state-read': { ask: '', reply: ['name mtime b64'] },          // Reload (r): the last state read on the host
     forget: { ask: '', reply: null },                              // Forget the kept view: the last state of the workspace forgotten
-    compare: { ask: 'signals from to path? of?', reply: ['result', ''] },   // Compare…: A the waves shown (of: a run), B a dump picked (path:
-    //   the one picked before, compared again with a new A), sva diff --page ('' the dialog closed)
+    compare: { ask: 'signals? from? to? path? of? pick?', reply: ['result', 'path name', ''] },   // Compare…: pick: B picked (its dialog)
+    //   -> path name; else A the waves shown (of: a run) with B (path: the one picked) over the window, sva diff --page ('' closed)
     runs: { ask: 'op', ops: {                                      // the Runs panel: sva runs
       list: { ask: '', reply: ['dir runs others? now? shown? dirOf?'] },   // dirOf {set, scope}: the setting wavelens.runsDir that names
       //   the directory (set '': none, .wavelens-runs beside the dump) and the settings that have it (workspace, user)

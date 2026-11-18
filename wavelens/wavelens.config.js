@@ -22,6 +22,8 @@ window.WAVELENS_CONFIG = {
   busWidth: 1.2,                // px: bus outlines
   sort: 'none',                 // initial order: 'none' (file order) | 'asc' | 'desc'
   sortIgnore: ['i_', 'o_'],     // name prefixes skipped when sorting (i_valid sorts as "valid")
+  compareMask: true,            // a dump compared: the red mask over the differences (▒ in the bar, gb); false: d flips between the runs alone
+  scrollbar: true,              // the scroll bar at the foot of the waves: all of them, the window its thumb (held: the window's ends)
   sortButton: true,             // the bar's Sort button and the sort prefixes field (⚙ Sort prefixes)
   hint: true,                   // help line under the viewer
   style: 'auto',                // edges: 'auto' | 'wavedrom' (slanted) | 'questa' / 'square' (vertical, like a simulator)

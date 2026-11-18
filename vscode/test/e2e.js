@@ -150,9 +150,11 @@ async function run() {
     const a = path.join(OUT, 'cmp_a.vcd'), b = path.join(OUT, 'cmp_b.vcd');
     fs.writeFileSync(a, head + '#0\n0!\n#10\n1!\n#20\n'); fs.writeFileSync(b, head + '#0\n0!\n#15\n1!\n#20\n');
     const o = await open(api, a), was = vscode.window.showOpenDialog;
-    let got;
-    try { vscode.window.showOpenDialog = async () => [vscode.Uri.file(b)]; got = await o.tab.compare(['tb.a'], 0, 20000); }
+    let got, picked;
+    try { vscode.window.showOpenDialog = async () => [vscode.Uri.file(b)]; picked = await o.tab.compare([], NaN, NaN, null, 0, true);
+      got = await o.tab.compare(['tb.a'], 0, 20000, picked.path); }
     finally { vscode.window.showOpenDialog = was; }
+    ok('Compare…: the dialog only picks B (its path, nothing compared)', picked.path === b && !picked.result, picked);
     const r = got.result ? await o.tab.run([{ op: 'compare', result: got.result }, { op: 'rows' }]) : [];
     ok('compare: the second dump through sva diff on the host', r[0] && r[0].differ === 1 && r[1].rows.some(x => x[2] === '≠'),
       { result: r[0], error: got.error });

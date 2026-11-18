@@ -331,11 +331,14 @@ command('expr_markers', 'id? label? color? signal? limit? deltas? delete?', 'a m
   if (S.length > n) v.toast(`${n} of ${S.length} matches: narrow the window for the others`);
   return { id: x.id, markers: n, more: S.length - n, from, to };
 });
-command('compare', 'result? dump? a? map? offset? off? show?', 'a second dump over these waves, where its values differ (red bands, ≠, ]d [d): ' +
+command('compare', 'result? dump? a? map? offset? off? show? mask?', 'a second dump over these waves, where its values differ (red bands, ≠, ]d [d): ' +
   'result (sva diff\'s, as the page\'s "compare": tools/viewedit.py and view_edit make it of dump); off: compared no more; show: which run the waves ' +
-  'show, a (these waves), b (the second dump\'s values on these rows) or overlay (both over each other where they differ), alone or with result',
+  'show, a (these waves), b (the second dump\'s values on these rows) or overlay (both over each other where they differ), alone or with result; ' +
+  'mask: the red bands on (true, the setting compareMask) or off (d then flips between the two runs alone)',
 async (v, a) => {
   if (a.off) { v.compareResult(null); return { off: true }; }
+  if (a.mask != null && typeof a.mask !== 'boolean') fail('mask: true or false');
+  if (a.mask != null) { v.compareMask(a.mask, true); if (a.result == null && a.show == null && a.dump == null) return { mask: v.cmpMask }; }
   const shown = async () => {
     const no = v.cmpCant(a.show); if (no) fail(no);
     await v.compareView(a.show, true); return v.cmpRun;
@@ -350,7 +353,7 @@ async (v, a) => {
   if (a.show != null && a.dump == null) return { show: await shown(), name: v.cmp.name };
   if (a.dump != null) fail('compare dump: a page reads no file by itself: pick it with Compare… here; an agent gives result (view_edit makes it of dump ' +
     'on the page\'s file, or live)');
-  fail('compare: result, show or off');
+  fail('compare: result, show, mask or off');
 });
 command('span', 'id? from? to? label? color? signals? delete?', 'a coloured stretch of time over every row, or over the rows of signals, with its ' +
   'label: a new one (from and to), or span id (1, 2 … as listed) changed; delete: id or "all"', (v, a) => {
@@ -730,12 +733,12 @@ Object.assign(WaveView.prototype, {
     const groups = this.groupList().map((g, i) => Object.assign(g, { uid: this.ugroups[i].uid || (this.ugroups[i].uid = ++XID) }));   // a group over a rename
     return JSON.stringify({ bookmarks: this.bookmarks(), arrows: this.arrowList(), markers: this.markList(), spans: this.spanList(), groups,
       paint: Object.fromEntries(this.painted), radix: Object.fromEntries(this.radixes), analog: Object.fromEntries(this.analogs), hidden: [...this.hiddenRows],
-      dups: [...this.dups.keys()], deltas: this.deltas, bits: [...this.bitsOpen], only: this.onlyState(), fsm: this.fsmState(),
+      order: ownOrder(this.order), dups: [...this.dups.keys()], deltas: this.deltas, bits: [...this.bitsOpen], only: this.onlyState(), fsm: this.fsmState(),
       onlyGrp: this.onlyGrp ?? null,   // the panel's "Your groups whole" with no Only set too (onlyState is null then)
       config: Object.assign({ style: this.S.style, maxHeight: this.S.maxHeight ?? null, toolsFolded: !!this.S.toolsFolded,
         toolsHidden: toolNames(this.S.toolsHidden), toolsCompact: compactOf(this.S.toolsCompact), toolLayout: toolLines(this.S.toolLayout), sort: this.sort,
         sortIgnore: [...this.sortIgnore], stripGroups: stripNames(this.S.stripGroups), toolAt: toolAts(this.S.toolAt),
-        cursorStrip: this.S.cursorStrip !== false },
+        cursorStrip: this.S.cursorStrip !== false, compareMask: this.cmpMask !== false },
         this.gapOpt(true), this.cycOpt()),
       hl: this.hlOrder().map(r => [r.full, this.picks.get(r)]), ext: this.undoExt() });
   },
@@ -826,8 +829,9 @@ Object.assign(WaveView.prototype, {
       const j = Math.min(Math.max(i + dir, 0), n - 1); if (!g || j === i) return false;
       await this.run({ op: 'group', name: g.name, move: dir === -1 ? 'up' : dir === 1 ? 'down' : dir < 0 ? 'top' : 'bottom' });
       this.toast(`${g.name}: group ${j + 1} of ${n}`); return true; }
-    const s = row && row.ug ? row : this.sel;
-    if (!s || !s.ug) { this.toast('alt+↑ / alt+↓ order the rows of your groups (the right button: Groups ▸)'); return false; }
+    const s = row && row.ug ? row : row || this.sel;
+    if (!s) { this.toast('alt+↑ / alt+↓ move the selected signal (shift: its module) one place up / down'); return false; }
+    if (!s.ug) return this.moveOwn(dir, whole, s);   // a row of the dump: your order of its module
     if (whole) return this.moveKey(dir, false, s.ug);
     const g = this.ugroups.find(x => x.name === s.ug.name), run = this.selRun.size > 1 && this.selRun.has(s) ? [...this.selRun].filter(r => r.ug === s.ug) :
       [s];
@@ -836,6 +840,41 @@ Object.assign(WaveView.prototype, {
     if (JSON.stringify(rest) === JSON.stringify(g.signals)) return false;
     await this.run({ op: 'group', name: g.name, signals: rest });
     this.toast(`${block.length === 1 ? s.orig.name : block.length + ' signals'}: ${pos + 1} of ${rest.length} in ${g.name}`); return true;
+  },
+  // your order of the dump's rows (alt+↑ / alt+↓ on a signal or a module, alt+shift: its module; the menu's Move up / down):
+  // the row (a selected run of its siblings: as one block) past the next sibling shown, in its run between spacers; the
+  // state's "order" keeps its module's rows in that order (the sort drops it). -> {i, n} its place (no dir), else moved or not
+  ownPlace(r, blk = [r]) {
+    const M = this.M, pid = r.anc.length ? r.anc[r.anc.length - 1] : null;
+    const sib = orderRows(M.rows, this.sort, this.sortIgnore, this.S.groupOrder, this.order)
+      .filter(x => (x.anc.length ? x.anc[x.anc.length - 1] : null) === pid);
+    let a = sib.indexOf(r), b = a; if (a < 0) return null;
+    while (a > 0 && sib[a - 1].type !== 'space') a--;
+    while (b < sib.length - 1 && sib[b + 1].type !== 'space') b++;
+    const run = sib.slice(a, b + 1), shown = new Set(this.rowsAll || run), rest = run.filter(x => !blk.includes(x));
+    const pos = rest.filter(x => run.indexOf(x) < run.indexOf(blk[0])).length;
+    return { sib, a, b, run, rest, pos, shown, path: pid == null ? '' : M.groups[pid].path, i: rest.filter((x, k) => k < pos && shown.has(x)).length,
+      n: rest.filter(x => shown.has(x)).length + 1 };
+  },
+  ownRow(r) { return r && (r.type === 'sig' || r.type === 'group') && !r.ug && !r.user && !r.dupOf && r.bit == null && this.M.rows.includes(r); },
+  moveOwn(dir, whole = false, r = this.sel) {
+    if (!this.ownRow(r)) { this.toast('this row has no place of its own to move to (a copy, a bit, a plugin\'s row)'); return false; }
+    if (whole) { const p = r.anc.length && this.M.groups[r.anc[r.anc.length - 1]];
+      if (!p || !this.ownRow(p)) { this.toast('at the top: no module to move'); return false; } return this.moveOwn(dir, false, p); }
+    const blk0 = r.type === 'sig' && this.selRun.size > 1 && this.selRun.has(r) ? [...this.selRun] : [r];
+    const P0 = this.ownPlace(r), blk = P0.run.filter(x => blk0.includes(x)), P = this.ownPlace(r, blk), rest = P.rest;
+    let pos = P.pos;
+    if (dir === -Infinity) pos = 0;
+    else if (dir === Infinity) pos = rest.length;
+    else if (dir < 0) { let k = pos - 1; while (k >= 0 && !P.shown.has(rest[k])) k--; if (k < 0) return false; pos = k; }
+    else { let k = pos; while (k < rest.length && !P.shown.has(rest[k])) k++; if (k >= rest.length) return false; pos = k + 1; }
+    if (pos === P.pos) return false;
+    rest.splice(pos, 0, ...blk);
+    const list = P.sib.slice(0, P.a).concat(rest, P.sib.slice(P.b + 1)).filter(x => x.type !== 'space').map(x => x.name);
+    this.order = Object.assign({}, this.order, { [P.path]: list });
+    this.allRows(); this.saveRows(); this.renderNames(); this.draw();
+    const Q = this.ownPlace(r, blk);
+    this.toast(`${blk.length === 1 ? r.name : blk.length + ' rows'}: ${Q.i + 1} of ${Q.n} in ${P.path || 'the top'}`); return true;
   },
   // a drag in the names: the rows of your groups (a signal, a run of selected ones, a group's header) to another place in
   // them or another group of yours; a line where they go; 6 px before it starts (a click stays a click); the pointer
@@ -931,7 +970,7 @@ Object.assign(WaveView.prototype, {
 // rest (cursor, window, highlight, selection, folding, order, search), which a page opened again starts from anyway,
 // is applied every time, as the page's own settings are.
 const SHARE = { on: false };   // markers being shared (shareMarks): the others do not share them back
-const KEPT = ['dups', 'deltas', 'bookmarks', 'arrows', 'markers', 'spans', 'groups', 'paint', 'radix', 'analog', 'hidden', 'bits'];
+const KEPT = ['dups', 'deltas', 'bookmarks', 'arrows', 'markers', 'spans', 'groups', 'paint', 'radix', 'analog', 'hidden', 'bits', 'order'];
 const KEPT_CFG = ['style', 'maxHeight', 'toolsFolded', 'toolsHidden', 'toolsCompact', 'toolLayout', 'stripGroups', 'toolAt', 'cursorStrip',
   'cursorStripAt', ...GAP_KEYS, ...CYC_KEYS];
 // what undo takes back: the above and Only (not kept in this browser: a page opened again applies a revision's Only anew)

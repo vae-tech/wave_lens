@@ -126,7 +126,7 @@ const WaveSVG = {
           if (V) V.paintDiff(P, lay, X, p, q);   // the viewer's picture: a dump compared, where it differs
           else if (M.compare) {   // the page's compare result (WaveJSON "compare"), its "show"
             if (docShow === 'b') paintCmpOut(P, lay, X, p, q, M.compare);
-            paintCmp(P, lay, X, p, q, cmpOfDoc(M.compare), docShow === 'overlay', M.t1);
+            paintCmp(P, lay, X, p, q, cmpOfDoc(M.compare), docShow === 'overlay', M.t1, S.compareMask !== false);
           }
         };
         if (ng) P.clip(xa, 0, xb - xa, Ht, go); else go();

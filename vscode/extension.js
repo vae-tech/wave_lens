@@ -577,7 +577,7 @@ ${scripts}
       case 'forget': return forgetLast();
       case 'state-read': return reply(await this.stateRead());
       case 'compare': return reply(await this.compare(Array.isArray(m.signals) ? m.signals.map(String) : [], +m.from, +m.to,
-        typeof m.path === 'string' && m.path ? m.path : null, m.of));
+        typeof m.path === 'string' && m.path ? m.path : null, m.of, !!m.pick));
       case 'runs': return reply(await this.runs(m));
       case 'open': {   // a piece of waves Load… picked: in a tab of its own (the path is the host's dialog's, a .json only)
         const p = String(m.path || '');
@@ -698,7 +698,8 @@ ${scripts}
   // build makes it of a config's "compare" (tools/svabuild.py compare)
   // Compare…: A the waves the page shows (of: a run kept, 0 or none the dump), B a file picked — or path, the one picked
   // before (the page compares it again with a new A)
-  async compare(signals, from, to, path0, of) {
+  // pick: the dialog only -> {path, name} (Compare… picks B; the page's Compare then compares it over the window in sight)
+  async compare(signals, from, to, path0, of, pick = false) {
     const rec = await this.recordOf(of), a = rec && rec.file;
     if (!a) return { error: `compare: no run #${of}` };
     // a slice as A is read at its place in the file (a whole one, from 0): B's time is A's plus the slice's start (runs.rs prep)
@@ -709,6 +710,7 @@ ${scripts}
         title: `Compare ${path.basename(a)} with`, filters: { 'vcd, fst': ['vcd', 'fst'], 'every file': ['*'] } });
       if (!got || !got.length) return {};
       b = got[0].fsPath;
+      if (pick) return { path: b, name: path.basename(b) };
     }
     const bin = svaBin();
     // sva diff --page: the compare as the tab takes it, the run's values of the signals that differ in it (at most 32 MiB:

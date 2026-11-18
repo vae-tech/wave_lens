@@ -77,7 +77,7 @@
 <div class="note"><p>The keys work once the waves have the focus: click the waves or a name first. With ctrl, alt or ⌘ held the keys stay
   the browser's (ctrl+S saves the page, it does not sort), except <kbd>ctrl+C</kbd>, <kbd>ctrl+F</kbd>, <kbd>ctrl+G</kbd>,
   <kbd>ctrl+Z</kbd> / <kbd>ctrl+shift+Z</kbd> / <kbd>ctrl+Y</kbd> (undo, redo; in a text field they are the field's),
-  <kbd>alt+↑ ↓</kbd> and <kbd>alt+shift+↑ ↓</kbd> (the order of your groups). A two-key sequence
+  <kbd>alt+↑ ↓</kbd> and <kbd>alt+shift+↑ ↓</kbd> (the order of the rows: your groups', the dump's). A two-key sequence
   (<kbd>gg</kbd>, <kbd>zM</kbd>, <kbd>yy</kbd>, <kbd>]m</kbd> …) is two keys within a second.</p></div>
 
 <h2 id="bar">The bar, group by group</h2>
@@ -194,7 +194,7 @@
   <tr><td>show everything</td><td><span class="ui">Fit</span></td><td><kbd>f</kbd></td></tr>
   <tr><td>the window before the last zoom</td><td></td><td><kbd>l</kbd></td></tr>
   <tr><td>zoom in on the cursor</td><td></td><td><kbd>c</kbd> (half the span, the cursor in the middle)</td></tr>
-  <tr><td>pan</td><td><kbd>shift+wheel</kbd>, a sideways swipe, a drag</td><td><kbd>←</kbd> <kbd>→</kbd> (a fifth of the view)</td></tr>
+  <tr><td>pan</td><td><kbd>shift+wheel</kbd>, a sideways swipe, a drag, the scroll bar under the waves (held: the window's ends)</td><td><kbd>←</kbd> <kbd>→</kbd> (a fifth of the view)</td></tr>
   <tr><td>the start / end of the dump</td><td></td><td><kbd>Home</kbd> / <kbd>End</kbd></td></tr>
   <tr><td>scroll the rows</td><td>the wheel</td><td><kbd>PgUp</kbd> <kbd>PgDn</kbd></td></tr>
 </table>
@@ -476,6 +476,10 @@
   (or <kbd>ctrl+G</kbd>) opens one, brings it to the middle and selects its first signal. A double-click on a group's name in the names
   (or <kbd>F2</kbd> on it) renames it too, as the <span class="ui">✎</span> of its line in the <kbd>ctrl+G</kbd> list (or <kbd>F2</kbd>
   there): its name in a small box, <kbd>Enter</kbd> renames, <kbd>Esc</kbd> leaves it.</p>
+<p>Any signal or module of the dump moves the same way among the rows of its module: <kbd>alt+↑</kbd> / <kbd>alt+↓</kbd> on it (a module
+  with its rows; <kbd>alt+shift</kbd>: its module), or <span class="ui">Move up</span> / <span class="ui">Move down</span> in its menu (<span class="ui">Your groups ▸</span>). The
+  order is kept with the view (Save, this browser, undo); another <span class="ui">Sort</span> drops it, said (<kbd>ctrl+Z</kbd> brings it
+  back).</p>
 <p>The order is yours. <kbd>alt+↑</kbd> / <kbd>alt+↓</kbd> move the selected signal (a selected run of them, as one block) one place in
   its group, or the row of the names with the focus (a group's header: its group);
   <kbd>alt+shift+↑</kbd> / <kbd>alt+shift+↓</kbd> move the whole group among yours. Drag a signal of a group, or a group's header, in
@@ -672,12 +676,12 @@
     (<a href="sva.html">Assertions</a>)</td></tr>
   <tr><td><kbd>ctrl+Z</kbd></td><td>undo (<a href="#undo">Undo and redo</a>)</td><td><kbd>ctrl+shift+Z</kbd>, <kbd>ctrl+Y</kbd></td>
     <td>redo</td></tr>
-  <tr><td><kbd>alt+↑</kbd> <kbd>alt+↓</kbd></td><td>move the selected signal in its group of yours</td><td><kbd>alt+shift+↑</kbd>
-    <kbd>alt+shift+↓</kbd></td><td>move the group among yours</td></tr>
+  <tr><td><kbd>alt+↑</kbd> <kbd>alt+↓</kbd></td><td>move the selected signal in its group of yours or its module</td><td><kbd>alt+shift+↑</kbd>
+    <kbd>alt+shift+↓</kbd></td><td>move the group among yours, the module in its</td></tr>
   <tr><td><kbd>]d</kbd> <kbd>[d</kbd></td><td>next / previous difference (<a href="compare.html">Compare</a>)</td><td><kbd>]</kbd>,
     <kbd>[</kbd> alone</td><td>nothing: the first key of a pair</td></tr>
   <tr><td><kbd>?</kbd></td><td>the keys box</td><td>hover a control</td><td>what it does, its keys</td></tr>
-  <tr><td><kbd>d</kbd> / <kbd>D</kbd></td><td>a dump compared: the other run / both over each other (<a href="compare.html#flip">Compare</a>)</td>
+  <tr><td><kbd>d</kbd> / <kbd>D</kbd></td><td>a dump compared: the other run / both over each other; <kbd>gb</kbd>: the red mask off / on (<a href="compare.html#flip">Compare</a>)</td>
     <td><kbd>B</kbd></td><td>the selected bus bit by bit</td></tr>
   <tr><td><kbd>T</kbd></td><td>the state machines panel (<a href="types.html">Types</a>)</td><td><kbd>c</kbd></td><td>zoom in on the cursor</td></tr>
   <tr><td><kbd>G</kbd></td><td>the last signal</td><td><kbd>N</kbd></td><td>the previous match</td></tr>
@@ -685,7 +689,7 @@
 </main>
 <nav class="toc" aria-label="Contents"><h2>Contents</h2><ol></ol></nav>
 </div>
-<footer>WaveLens 0.61 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
+<footer>WaveLens 0.62 · <a href="index.html">all guides</a> · the full list of settings and keys: <a href="../USAGE.md">USAGE.md</a>, live reference:
   <a href="../index.html">docs/index.html</a></footer>
 <script src="guide.js"></script>
 </body>

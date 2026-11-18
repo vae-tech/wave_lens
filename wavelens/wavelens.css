@@ -455,11 +455,18 @@
 .wv .sva .bs .sel { font-size: 11.5px; color: var(--wave-hl8); font-weight: 600; }
 .wv canvas { display: block; width: 100%; cursor: crosshair; touch-action: none; position: sticky; top: 0; }
 .wv canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.wv canvas.wv-print { position: absolute; left: 0; width: 100%; }   /* print: the rows in pages of canvases (paintPrint) */
+.wv canvas.wv-print { position: absolute; left: 0; width: 100%; }
+/* the scroll bar at the foot of the waves in sight (look.js hsbPlace): all of the waves, the window its thumb; held: its ends */
+.wv .hsb { position: absolute; left: 0; right: 0; height: 10px; z-index: 3; cursor: default; touch-action: none; }
+.wv .hsb .hsbt { position: absolute; top: 3px; height: 5px; border-radius: 3px; background: var(--muted); opacity: 0.45; }
+.wv .hsb:hover .hsbt, .wv .hsb.on .hsbt { top: 1px; height: 8px; opacity: 0.8; }
+.wv .hsb.on .hsbt { background: var(--accent); }
+.wv .hsb .hsbtip { position: absolute; bottom: 12px; white-space: nowrap; font: 11px var(--font-mono); color: var(--fg); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 3px; padding: 1px 6px; pointer-events: none; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25); }   /* print: the rows in pages of canvases (paintPrint) */
 @media print {
   .wv.wv-scroll .body { max-height: none; overflow: visible; }        /* every row, not the scroll box */
   .wv .wcol > canvas:not(.wv-print) { display: none; }
-  .wv .bar .tools, .wv .hint { display: none; }                       /* the title and the cursor readout stay */
+  .wv .bar .tools, .wv .hint, .wv .hsb { display: none; }                     /* the title and the cursor readout stay */
   .wv .bar .cur, .wv .bar .cur .cp { white-space: normal; overflow: visible; }   /* whole on paper: no … */
   .wv, .wv .body { break-inside: auto; }
 }
@@ -684,6 +691,11 @@
 .wv .wv-runs .rn:hover .rab button, .wv .wv-runs .rn.pv .rab button { opacity: 1; }
 .wv .wv-runs .rn .rab .rA.on { opacity: 1; background: var(--accent); border-color: var(--accent); color: var(--panel); }
 .wv .wv-runs .rn .rab .rB.on { opacity: 1; background: var(--wave-run-b); border-color: var(--wave-run-b); color: var(--panel); }
+/* picked, not compared yet (Compare does it): the letter in its colour, its box dashed */
+.wv .wv-runs .rn .rab .rA.pk { background: transparent; color: var(--accent); border-style: dashed; }
+.wv .wv-runs .rn .rab .rB.pk { background: transparent; color: var(--wave-run-b); border-style: dashed; }
+/* Compare (the bar's, the Runs panel's): B or A picked, or the window moved since the compare on the waves */
+.wv .bar button.cgo.stale, .wv .wv-runs .mf .rgo.stale { border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .wv .wv-runs .rn.rnow .r1 b { font-style: italic; }
 /* the mode: Compare | Open, the one on lit; the Open mode: the compare's tools away */
 .wv .wv-runs .rmode { display: flex; flex: none; }

@@ -2026,7 +2026,7 @@ def vscode_tab(browser, build):
         pick: m => ({ files: /fst/.test(m.accept) ? [] : [{ name: 's.view.json', path: '/states/s.view.json', mtime: 1, b64: btoa(JSON.stringify(window.__S)) }] }),
         'state-read': () => (window.__S ? { name: 's.view.json', mtime: 2, b64: btoa(JSON.stringify(window.__S)) } : { error: 'gone' }),
         // the dialog closed; path (Compare… again, A moved): a result of that file, its path back
-        compare: m => (m.path || window.__CMPFILE ? { result: { name: 'other.vcd', from: m.from, to: m.to, compared: 1, differ: 1, first: 1000,
+        compare: m => (m.pick ? (window.__CMPFILE ? { path: window.__CMPFILE, name: 'other.vcd' } : {}) : m.path || window.__CMPFILE ? { result: { name: 'other.vcd', from: m.from, to: m.to, compared: 1, differ: 1, first: 1000,
           src: { path: m.path || window.__CMPFILE },
           signals: { 'tb.plain': { spans: [[1000, 2000]] } }, missing: [], map: [] } } : {}),
         open: m => { window.__OPENED = m.path; return { ok: true }; },
@@ -2383,7 +2383,7 @@ def vscode_tab(browser, build):
     asked = one.evaluate("window.__sent.filter(m => m.type === 'config').length")
     one.close()
     check(rh == 34 and asked == 1, f'a configuration saved while the tab loaded: asked once at its load, the newer one applied (rowHeight {rh}, asked {asked})')
-    # the runs kept (the Runs panel, gu): the host lists them, a click compares over the window in sight, ]r the next, Δ all, Keep this dump…
+    # the runs kept (the Runs panel, gu): the host lists them, a click picks B, Compare compares over the window in sight, ]r the next, Δ all, Keep this dump…
     page.bring_to_front()
     check(js("!v.root.querySelector('.bar [data-act=druns]').hidden"), 'the bar has Runs… where the host keeps runs')
     page.locator('.wv canvas').first.click(); page.keyboard.press('g'); page.keyboard.press('u')
@@ -2393,17 +2393,26 @@ def vscode_tab(browser, build):
     check(js("[...v.root.querySelectorAll('.wv-runs .rn .rA.on')].map(e => e.closest('.rn').dataset.i).join()") == '0' and
           not js("v.root.querySelector('.wv-runs .rn .rB.on')"), 'the row now is A (the waves shown), no B yet')
     js("v.zoomTo(5000, 10000), 0")
-    page.click('.wv-runs .rn[data-i="2"]')
+    page.click('.wv-runs .rn[data-i="2"]'); page.wait_for_timeout(150)
+    pk = js("[window.__sent.some(m => m.type === 'runs' && m.op === 'compare'), !!v.cmp, v.runPickB, "
+            "!!v.root.querySelector('.wv-runs .rn[data-i=\"2\"] .rB.on.pk'), v.root.querySelector('button[data-act=dcmpx]').textContent, "
+            "v.root.querySelector('.wv-runs .rgo').classList.contains('stale')]")
+    check(pk == [False, False, 1, True, 'B: #1 golden ✕', True], f'a click on a run: picked as B (its letter dashed), nothing asked of the host {pk}')
+    page.locator('.wv-runs .rl').focus(); page.keyboard.press('c')
     until("window.__sent.some(m => m.type === 'runs' && m.op === 'compare')")
     until("(v => v && v.cmp && v.cmp.name === '#1 golden')(WaveLens.views().find(x => x.root.isConnected))")
     c = sent('runs')[-1]
     check(c['op'] == 'compare' and c['run'] == 1 and abs(c['from'] - 5000) < 1 and abs(c['to'] - 10000) < 1 and 'tb.plain' in c['signals'],
-          f'a click on a run: compared over the waves in sight only ({c.get("from")} … {c.get("to")}, {c.get("signals")})')
+          f'c (Compare): compared over the waves in sight only ({c.get("from")} … {c.get("to")}, {c.get("signals")})')
     t = js("v.root.querySelector('button[data-act=dcmpx]').textContent")
     check(t == '≠ 1 ✕', f'its differences on the waves, as Compare… shows them ({t})')
-    page.locator('.wv-runs .rl').focus(); page.keyboard.press('ArrowUp')
+    page.locator('.wv-runs .rl').focus(); page.keyboard.press('ArrowUp'); page.wait_for_timeout(100)
+    check(js("[v.cmp.name, v.runPickB]") == ['#1 golden', 2], '↑ in the list: the newer run picked, the compare on the waves as it was')
+    js("v.zoomTo(6000, 9000), 0"); page.wait_for_timeout(100); n0 = len([m for m in sent('runs') if m.get('op') == 'compare'])
+    check(len([m for m in sent('runs') if m.get('op') == 'compare']) == n0, 'zoomed: nothing compared again')
+    js("v.zoomTo(5000, 10000), 0"); page.locator('.wv-runs [data-a=go]').click()
     until("(v => v.cmp && v.cmp.name === '#2 seed 7')(WaveLens.views().find(x => x.root.isConnected))")
-    check(js("v.root.querySelector('button[data-act=dcmpx]').textContent") == '≠ 0 ✕', '↑ in the list: the newer run compared')
+    check(js("v.root.querySelector('button[data-act=dcmpx]').textContent") == '≠ 0 ✕', 'the panel\'s Compare: the run picked compared')
     sp = js("v.run([{ op: 'span', from: '5ns', to: '15ns', label: 'tc1' }]).then(r => [r, v.spans.length])")
     page.locator('.wv-runs .rw').focus()
     check(js("v.root.querySelectorAll('.wv-runs .rw option').length") == 2, f'your spans in the window\'s choices {sp}')
@@ -2418,10 +2427,12 @@ def vscode_tab(browser, build):
     check(js("[...v.root.querySelectorAll('.wv-runs .rd')].map(x => x.classList.contains('bad')).join()") == 'false,true', 'each run\'s numbers on its row')
     bact(page, 'druns'); page.wait_for_timeout(100)
     check(js("!document.querySelector('.wv-runs')"), 'Runs… again closes it')
-    page.locator('.wv canvas').first.click(); page.keyboard.press(']'); page.keyboard.press('r')
+    page.locator('.wv canvas').first.click(); page.keyboard.press(']'); page.keyboard.press('r'); page.wait_for_timeout(100)
+    check(js("[v.runPickB, v.cmp.name]") == [1, '#2 seed 7'], ']r: the next (older) run picked as B, not compared')
+    page.keyboard.press('g'); page.keyboard.press('=')
     until("(v => v.cmp && v.cmp.name === '#1 golden')(WaveLens.views().find(x => x.root.isConnected))")
     c = sent('runs')[-1]
-    check(c['from'] == 5000, ']r: the next (older) run, over the same window (your span)')
+    check(c['from'] == 5000, 'g=: compared over the same window (your span)')
     check(c.get('case') == 'tc1', f'the run #1 has a case tc1: compared with its case, not its same time ({c.get("case")})')
     js("v.runCompare(2, true)")
     c = sent('runs')[-1]
@@ -2479,22 +2490,26 @@ def vscode_tab(browser, build):
     page.evaluate("window.__RUNERR = null"); js("(v.runCompare(2, true), 0)")
     until("(v => v.cmp && v.cmp.name === '#2 seed 7b')(WaveLens.views().find(x => x.root.isConnected))")
     n0 = len(ops('compare'))
-    page.click('.wv-runs [data-a=again]')
+    page.click('.wv-runs [data-a=go]')
     until(f"window.__sent.filter(m => m.type === 'runs' && m.op === 'compare').length > {n0}")
     c = ops('compare')[-1]
-    check(a == 'runs: no directory .wavelens-runs' and c['run'] == 2, f'the list refused by the host: said ({a}); ⟳: the run compared again ({c})')
+    check(a == 'runs: no directory .wavelens-runs' and c['run'] == 2, f'the list refused by the host: said ({a}); Compare: the run compared again ({c})')
     rl.focus(); page.keyboard.press('Escape')
     gone = js("!document.querySelector('.wv-runs') && !v.runsP")
     bact(page, 'druns')
     until("document.querySelectorAll('.wv-runs .rn').length === 4")
     check(gone, 'Esc in the list closes the panel')
-    # review of the runs (2026-11-05): the list's keys compare once they stop (B-19)
+    # the list's keys only pick (B-19 then: one compare when they stop; now none until Compare)
     n0 = len([m for m in sent('runs') if m['op'] == 'compare'])
     page.locator('.wv-runs .rl').focus()
     for k in ('Home', 'End', 'PageUp', 'PageDown', 'ArrowDown', 'ArrowUp'):
         page.keyboard.press(k)
-    page.wait_for_timeout(600)
-    check(len([m for m in sent('runs') if m['op'] == 'compare']) - n0 == 1, 'six keys of the list in a row: one compare, of the row they stop on')
+    page.wait_for_timeout(400)
+    fi = js("v.runsP.rows()[v.runsP.fi].id")
+    check(len([m for m in sent('runs') if m['op'] == 'compare']) == n0 and js("v.runsB()") == (fi if fi != 0 else js("v.runsB()")),
+          'six keys of the list in a row: nothing compared, the row they stop on picked')
+    page.keyboard.press('c'); page.wait_for_timeout(300)
+    check(len([m for m in sent('runs') if m['op'] == 'compare']) - n0 == 1, 'c: one compare, of the row picked')
     # an equal run says equal, not "bands only"; a run whose cut failed says why (B-11)
     js("v.runCompare(2, true)")
     st = js("v.root.querySelector('.wv-runs .ms').textContent")
@@ -2518,13 +2533,16 @@ def vscode_tab(browser, build):
     inside = js("(() => { const p = v.root.querySelector('.wv-runs').getBoundingClientRect(), b = v.root.querySelector('.wv-runs .rn [data-a=rm]')"
                 ".getBoundingClientRect(); return b.right <= p.right + 1; })()")
     check(inside, 'a 300-character tag: ✕ stays inside the panel')
-    # the dump read again with the panel open: the panel back, the run compared again (B-06)
+    # the dump read again with the panel open: the panel back, the run of before picked as B again, compared by Compare (B-06 then: at once)
     js("v.runCompare(1, true)")
     n1 = len([m for m in sent('runs') if m['op'] == 'compare'])
     page.evaluate("window.postMessage({ type: 'changed', auto: true }, '*')")
-    until("(v => v && v.runsP && v.runCur === 1)(WaveLens.views().find(x => x.root.isConnected))", timeout=15000)
-    until(f"window.__sent.filter(m => m.type === 'runs' && m.op === 'compare').length > {n1}")
-    check(js("!!document.querySelector('.wv-runs') && v.cmp && v.cmp.name === '#1 golden'"), 'the dump read again: the panel back, compared with the run again')
+    until("(v => v && v.runsP && v.runPickB === 1)(WaveLens.views().find(x => x.root.isConnected))", timeout=15000)
+    page.wait_for_timeout(200)
+    check(js("!!document.querySelector('.wv-runs') && !v.cmp && v.root.querySelector('button[data-act=dcmpx]').textContent === 'B: #1 golden ✕'") and
+          len([m for m in sent('runs') if m['op'] == 'compare']) == n1, 'the dump read again: the panel back, the run picked as B again, nothing compared')
+    js("v.compareGo()"); until(f"window.__sent.filter(m => m.type === 'runs' && m.op === 'compare').length > {n1}")
+    until("(v => v && v.cmp && v.cmp.name === '#1 golden')(WaveLens.views().find(x => x.root.isConnected))")
     # the run compared removed: the compare goes with it (B-12)
     page.locator('.wv-runs .rl').focus()
     i = js("v.runsP.rowOf(1)")
@@ -2535,8 +2553,8 @@ def vscode_tab(browser, build):
     # a run kept elsewhere: ]r reads the list again (B-09)
     js("(window.__RUNS = window.__RUNS.concat([{ id: 9, name: 'from a shell', tags: [], kept: '2026-11-05T12:00:00Z', dump: 'enum.vcd', file: '9-enum.fst' }]), 0)")
     page.keyboard.press('Escape'); page.locator('.wv canvas').first.click(); page.keyboard.press(']'); page.keyboard.press('r')
-    until("(v => v && v.runCur === 9)(WaveLens.views().find(x => x.root.isConnected))")
-    check(True, ']r with no run compared: the newest, a run kept in a shell meanwhile')
+    until("(v => v && v.runPickB === 9)(WaveLens.views().find(x => x.root.isConnected))")
+    check(True, ']r with no run compared: the newest picked, a run kept in a shell meanwhile')
     page.keyboard.press('Escape')
     # the run pick (review 2026-11-06): A and B on the list. B is the compare's: dropped with it (B-01), kept in a saved state
     # (B-02), the row ]r lands on is the one lit (B-03); w makes a run A (its waves here, the window and rows kept, B compared
@@ -2559,22 +2577,25 @@ def vscode_tab(browser, build):
     page.locator('.wv canvas').first.click(); page.keyboard.press('g'); page.keyboard.press('u')
     until("(v => v && (v.runsP))(WaveLens.views().find(x => x.root.isConnected))")
     page.locator('.wv canvas').first.click(); page.keyboard.press(']'); page.keyboard.press('r')
-    until("(v => v && (v.runCur !== 2 && v.runCur != null))(WaveLens.views().find(x => x.root.isConnected))")
+    until("(v => v && (v.runsB() !== 2 && v.runsB() != null))(WaveLens.views().find(x => x.root.isConnected))")
     page.keyboard.press(']'); page.keyboard.press('r'); page.wait_for_timeout(50)
-    until("(v => v && (v.runsP && v.runsP.fi === v.runsP.rowOf(v.runCur)))(WaveLens.views().find(x => x.root.isConnected))")
-    check(js("v.root.querySelectorAll('.wv-runs .rn.pv').length") == 1, ']r twice, the panel open: the row focused is the run compared')
+    until("(v => v && (v.runsP && v.runsP.fi === v.runsP.rowOf(v.runsB())))(WaveLens.views().find(x => x.root.isConnected))")
+    check(js("v.root.querySelectorAll('.wv-runs .rn.pv').length") == 1 and js("v.runCur") == 2, ']r twice, the panel open: the row focused is the run picked (the compare as it was)')
     js("v.runCompare(2, true)")
     before = js("[v.t0, v.span, v.M.rows.map(r => r.full).join()]")
     n0 = len([m for m in sent('runs') if m['op'] == 'compare'])
-    js(f"(v.runsP.pick(v.runsP.rowOf(3), false), 0)"); page.locator('.wv-runs .rl').focus(); page.keyboard.press('w')
+    js(f"(v.runsP.pick(v.runsP.rowOf(3), false), 0)"); page.locator('.wv-runs .rl').focus(); page.keyboard.press('w'); page.wait_for_timeout(150)
+    pa = js("[v.runPickA, v.runsShown || 0, !!v.root.querySelector('.wv-runs .rn .rA.on.pk'), window.__sent.filter(m => m.type === 'runs' && m.op === 'open').length]")
+    check(pa[:3] == [3, 0, True], f'w on a run: picked as A (its letter dashed), nothing read {pa}')
+    page.keyboard.press('c')
     until("(v => v && v.runsShown === 3 && v.runCur === 2)(WaveLens.views().find(x => x.root.isConnected))", timeout=15000)
     o = [m for m in sent('runs') if m['op'] == 'open'][-1]
     c = [m for m in sent('runs') if m['op'] == 'compare'][-1]
     after = js("[v.t0, v.span, v.M.rows.map(r => r.full).join()]")
     check(o['run'] == 3 and after == before and js("v.opts.title") == '#3 after fix' and js("v.cmpNames()[0]") == '#3 after fix',
-          f'w on a run: its waves read here (open {o}), the window and rows kept ({before[:2]} → {after[:2]}), A named #3')
+          f'c with A picked: its waves read here (open {o}), the window and rows kept ({before[:2]} → {after[:2]}), A named #3')
     check(c['against'] == 3 and c['run'] == 2 and len([m for m in sent('runs') if m['op'] == 'compare']) == n0 + 1,
-          f'B kept: compared with the new A ({c.get("against")} with {c.get("run")})')
+          f'then B compared with the new A ({c.get("against")} with {c.get("run")})')
     lit = js("[...v.root.querySelectorAll('.wv-runs .rn')].map(e => (e.querySelector('.rA.on') ? 'A' : '') + (e.querySelector('.rB.on') ? 'B' : '')).join()")
     check(lit == js("v.runsP.rows().map(r => r.id === 3 ? 'A' : r.id === 2 ? 'B' : '').join()"), f'the letters on their rows: A on #3, B on #2 ({lit})')
     st = js("v.root.querySelector('.wv-runs .ms').textContent")
@@ -2675,17 +2696,23 @@ def vscode_tab(browser, build):
     js("(v.compareResult({ name: 'other.vcd', from: 0, to: 20000, compared: 1, differ: 1, first: 1000, src: { path: '/host/other.vcd' }, " +
        "signals: { 'tb.plain': { spans: [[1000, 2000]] } }, missing: [], map: [] }), 0)")
     js("v.runsShow(3)")
-    until("(v => v && v.runsShown === 3 && v.cmp && v.cmp.name === 'other.vcd')(WaveLens.views().find(x => x.root.isConnected))", timeout=15000)
+    until("(v => v && v.runsShown === 3 && v.cmpPick && v.cmpPick.path === '/host/other.vcd')(WaveLens.views().find(x => x.root.isConnected))", timeout=15000)
+    n2 = len([m for m in sent('compare') if m.get('path')])
+    check(not js("v.cmp") and js("v.root.querySelector('button[data-act=dcmpx]').textContent") == 'B: other.vcd ✕',
+          'A moved: the file of Compare… picked as B again, not compared with the new A')
+    js("v.zoomTo(3000, 8000), v.compareGo()")
+    until("(v => v && v.cmp && v.cmp.name === 'other.vcd')(WaveLens.views().find(x => x.root.isConnected))", timeout=15000)
     fc = [m for m in sent('compare') if m.get('path')][-1]
-    check(fc['path'] == '/host/other.vcd' and fc['of'] == 3, f'A moved: the file of Compare… compared again with the new A {fc}')
+    check(len([m for m in sent('compare') if m.get('path')]) == n2 + 1 and fc['path'] == '/host/other.vcd' and fc['of'] == 3 and
+          (fc['from'], fc['to']) == (3000, 8000), f'Compare: the file with the new A over the window in sight {fc}')
     js("v.compare(null)")
     seen = []
     for _ in range(len(js("v.runsL")) + 1):
         page.locator('.wv canvas').first.click(); page.keyboard.press(']'); page.keyboard.press('r')
         prev = json.dumps(seen[-1] if seen else None)
-        until(f"(v => v && v.runCur != null && v.runCur !== {prev})(WaveLens.views().find(x => x.root.isConnected))"); seen.append(js("v.runCur"))
+        until(f"(v => v && v.runsB() != null && v.runsB() !== {prev})(WaveLens.views().find(x => x.root.isConnected))"); seen.append(js("v.runsB()"))
     check(0 in seen and 3 not in seen, f']r with A a run: now is one of the Bs, A is not {seen}')
-    js("v.compare(null)")
+    js("v.compareOff()")
     js("v.runsShow(0)")
     until("(v => v && v.runsShown === 0)(WaveLens.views().find(x => x.root.isConnected))", timeout=15000)
     js("(v.runsPanel(true, false), 0)"); until("(v => v && v.runsP)(WaveLens.views().find(x => x.root.isConnected))")
@@ -2751,7 +2778,8 @@ def vscode_tab(browser, build):
     ends.append(['Compare…, then ✕', js("v.runCur"), js("!!v.cmp"), 0])
     n0 = cancels(); page.evaluate("window.__HOLD = { 'runs compare': true }")
     js("(v.runCompare(2, true), 0)"); until("window.__held.length === 1")
-    js("(v.root.querySelector('input.cfile').click(), 0)"); until("(v => v && v.cmp && v.cmp.name === 'other.vcd')(WaveLens.views().find(x => x.root.isConnected))")
+    js("(v.root.querySelector('input.cfile').click(), 0)"); until("(v => v && v.cmpPick && v.cmpPick.name === 'other.vcd')(WaveLens.views().find(x => x.root.isConnected))")
+    js("v.compareGo()"); until("(v => v && v.cmp && v.cmp.name === 'other.vcd')(WaveLens.views().find(x => x.root.isConnected))")
     go('runs compare'); page.evaluate("window.__HOLD = null; window.__CMPFILE = null"); page.wait_for_timeout(150)
     ends.append(['a run, then Compare…', js("v.runCur"), js("v.cmp && v.cmp.name"), cancels() - n0])
     check(ends == [["v.runsP.noB()", None, False, 1], ["v.compare(null)", None, False, 1], ["v.compareResult(null)", None, False, 1],
@@ -2878,7 +2906,7 @@ def vscode_tab(browser, build):
     js("(v.runCompare(22, true), 0)"); until("(v => v && v.runCur === 22)(WaveLens.views().find(x => x.root.isConnected))")
     js("v.setState({ wavelens: 'state', version: v.state().version, runsMode: 'open' })")
     o = js("[v.runsMode, v.runsP.el.classList.contains('open'), v.runsP.stEl.textContent, v.runCur, !!v.cmp]")
-    js("v.runStep(1)"); until("(v => v && v.runCur != null)(WaveLens.views().find(x => x.root.isConnected))")
+    js("v.runStep(1)"); until("(v => v && v.runsB() != null)(WaveLens.views().find(x => x.root.isConnected))")
     o2 = js("[v.runsMode, v.runsP.el.classList.contains('open'), v.root.querySelectorAll('.wv-runs .rB.on').length]")
     check(o[:2] == ['open', True] and o[2].startswith('Open · ') and o[3:] == [None, False] and o2 == ['compare', False, 1],
           f'a state\'s runsMode sets the panel\'s mode (open: the B there dropped); ]r (a B asked) is the Compare mode again {o} {o2}')
@@ -4910,10 +4938,11 @@ def order(browser, build):
     pick(hdr('gA'), 'ugfold'); folded = idx('gA', 'PWRITE') < 0; pick(hdr('gA'), 'ugfold')
     dm = names_menu(js("return WaveLens.internal.peek(v).vis.findIndex(r => !r.ug && r.name === 'PRDATA');"))
     hint = page.evaluate("[...document.querySelectorAll('.wv-menu .sub .mh')].some(h => /to move it/.test(h.textContent))")
+    dsub = page.evaluate("!!document.querySelector('.wv-menu .subg + .sub button[data-m=mvup]')")
     page.keyboard.press('Escape')
     check('mvup' not in top and 'mvtop' not in top and {'mvdn', 'ugfold'} <= set(hm) and 'fold' not in hm and e[:2] == ['gB', 'gA'] and folded and
-          not {'mvup', 'mvdn'} & set(dm) and 'copyname' in dm and hint,
-          f'the first row: no Move up; a header: the group moves among yours, folds; a signal of the dump: its menu and how to move it {top} {hm} {e} {dm}')
+          {'mvup', 'mvdn'} <= set(dm) and dsub and 'copyname' in dm and hint,
+          f'the first row: no Move up; a header: the group moves among yours, folds; a signal of the dump: its menu, Move up / down in Your groups ▸ {top} {hm} {e} {dm}')
     r1 = box(js("return WaveLens.internal.peek(v).vis.findIndex(r => !r.ug && r.name === 'PSEL');"))
     page.mouse.dblclick(r1['x'] + 20, r1['y'] + r1['height'] / 2); page.mouse.click(r1['x'] + 20, r1['y'] + r1['height'] / 2, button='right')
     page.wait_for_timeout(80); native = page.evaluate("!document.querySelector('.wv-menu') && !!String(getSelection())"); page.keyboard.press('Escape')
@@ -5036,6 +5065,11 @@ def compare(browser, build):
     V = "WaveLens.views().find(v => v.editKey() === 'exact')"
     w = page.locator('.wv').nth(page.evaluate(f"WaveLens.views().indexOf({V})"))
     w.locator('input.cfile').set_input_files(str(bv)); page.wait_for_timeout(300 * SCALE)
+    # Compare… picks B, nothing compared; Compare compares over the window in sight (here all of it)
+    pk = page.evaluate(f"""(v => {{ const go = v.root.querySelector('button[data-act=dcmpgo]'); return [!!v.cmp, v.root.querySelector('button[data-act=dcmpx]').textContent,
+        go && !go.hidden, go && go.classList.contains('stale'), v.root.querySelector('.cmpv').hidden]; }})({V})""")
+    check(pk == [False, 'B: b.vcd ✕', True, True, True], f'Compare… picks B: nothing compared, B: b.vcd ✕ and Compare lit in the bar {pk}')
+    page.evaluate(f"(v => v.fit())({V})"); w.locator('button[data-act=dcmpgo]').click(); page.wait_for_timeout(300 * SCALE)
     got = page.evaluate(f"""(v => {{ const c = v.cmp, R = n => v.M.rows.find(r => r.name === n);
         const el = n => WaveLens.internal.peek(v).rowEls[WaveLens.internal.peek(v).vis.indexOf(R(n))]; return c && [c.differ, c.missing, c.first, el('PREADY').classList.contains('cmpd'),
         el('PSLVERR').classList.contains('cmpm'), el('PSEL').classList.contains('cmpd'), v.root.querySelector('button[data-act=dcmpx]').textContent,
@@ -5055,6 +5089,15 @@ def compare(browser, build):
     pic2 = page.evaluate(f"(v => {{ const c = v.cmp; v.cmp = null; const s = v.toSVG(); v.cmp = c; return s; }})({V})")
     check(c1 == moved and c2 == moved and pic1.count('<rect') == pic2.count('<rect') + 3, f']d to the difference (round the ends with [d); the picture '
           f'has its band (3 more rects: the shade, the line, the tag of the run) {c1} {c2} {pic1.count("<rect")} {pic2.count("<rect")}')
+    # zoomed in away from the difference: the compare stays as it was, Compare lit; Compare again: that window only, B not read again
+    st = page.evaluate(f"""(async v => {{ const go = v.root.querySelector('button[data-act=dcmpgo]'); v.zoomTo(v.M.t0, v.M.t0 + 50000);
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+        const a = [v.cmp.differ, go.classList.contains('stale')]; let read = 0; const o = v.cmpShow.bind(v);
+        v.cmpShow = function () {{ if (this.cmpReading) read++; return o(); }}; await v.compareGo(); v.cmpShow = o;
+        return a.concat([v.cmp.differ, v.cmp.from, v.cmp.to, go.classList.contains('stale'), read, (v.toSVG().match(/<rect/g) || []).length > 0]); }})({V})""")
+    check(st[:2] == [1, True] and st[2] == 0 and st[3] == page.evaluate(f"{V}.M.t0") and st[4] == st[3] + 50000 and not st[5] and st[6] == 0,
+          f'zoomed in: the compare stays, Compare lit; Compare: over that window only (PREADY outside it), B not read again {st}')
+    page.evaluate(f"(v => {{ v.fit(); return v.compareGo(); }})({V})"); page.wait_for_timeout(100)
     ref = page.evaluate("WaveLens.views()[0].compare('$timescale 1ns $end $scope module t $end $var wire 1 ! a $end $upscope $end $enddefinitions $end #0 0!', 'x.vcd')")
     toast = page.evaluate("WaveLens.views()[0].root.querySelector('.toast').textContent")
     w.locator('button[data-act=dcmpx]').click()
@@ -5128,6 +5171,7 @@ def compare(browser, build):
       obs.observe(v.root, { subtree: true, childList: true, characterData: true });
       const f = document.getElementById('bigin').files[0], t0 = performance.now(), r = await v.compare(f), ms = performance.now() - t0;
       obs.disconnect();
+      v.cmpDoc = null;   // (B is kept once read: a second compare of it reads nothing; read again here to stop it)
       const rd = v.compare(f); await new Promise(res => setTimeout(res, 5)); const reading = v.root.querySelector('button[data-act=dcmpx]').textContent;
       v.compareStop(); const stopped = await rd, kept = v.cmp && v.cmp.name;
       v.destroy();
@@ -5143,6 +5187,71 @@ def compare(browser, build):
           and got['kept'] == 'big.vcd', f'B of {big.stat().st_size >> 20} MB, 2000 signals: the page\'s 7 read once in {got["ms"]:.0f} ms '
           f'(< {3000 * SCALE:.0f}), its progress said; ≠ … ✕ stops a read, the compare before it kept {got}')
     check(not errs, 'no page errors (compare)' + (': ' + ' | '.join(errs[:3]) if errs else ''))
+    ctx.close()
+
+
+def compare_mask(browser, build):
+    """The red mask over the differences of a compare, on and off: the bar's Mask, gb, the command compare's mask, the setting
+    compareMask, the state and the picture; off, d flips between A and B with nothing over them, ≠ and ]d [d stay."""
+    print('viewer: the mask of the differences on and off')
+    d = build / 'smoke' / 'compare_view'
+    d.mkdir(parents=True, exist_ok=True)
+    pg = d / 'mask.html'
+    pg.write_text(f'''<!doctype html><html><head><meta charset="utf-8"><title>mask</title>
+<link rel="stylesheet" href="{(ROOT / 'wavelens' / 'wavelens.css').as_uri()}"></head><body><div id="w"></div>
+<script src="{(ROOT / 'wavelens' / 'wavelens.js').as_uri()}"></script></body></html>''', encoding='utf-8')
+    ctx = browser.new_context(viewport={'width': 1200, 'height': 700})
+    page = ctx.new_page()
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(pg.as_uri())
+    got = page.evaluate("""(async () => {
+      const B = '$timescale 1ps $end $scope module tb $end $var wire 1 ! a $end $var wire 8 " d [7:0] $end $upscope $end $enddefinitions $end ' +
+        '#0 0! b1 " #20 1! b10 " #40 b11 " #100 0! #120';
+      const doc = () => ({ signal: [['tb', { name: 'a', path: 'tb.a', tv: [[0, '0'], [30, '1'], [100, '0']] }, { name: 'd', path: 'tb.d', width: 8,
+        tv: [[0, '1'], [40, '3']] }]], time: { t0: 0, t1: 120, unit: 'ps' } });
+      const el = document.body.appendChild(document.createElement('div')), w = new WaveLens.WaveView(el, doc(), {}), I = WaveLens.internal;
+      const btn = () => w.root.querySelector('button[data-act=dcmpm]'), red = () => (w.toSVG().match(/<rect[^>]*(--wave-x|#e03131|#fa5252|#c23a2b)[^>]*>/gi) || []).length;
+      const px = () => { const c = w.canvas, k = c.getContext('2d'), dp = window.devicePixelRatio || 1, o = I.peek(w).lay.find(x => x.row.name === 'a');
+        const X = I.peek(w).X || null; return o ? [...k.getImageData(Math.round((c.clientWidth * 0.2) * dp), Math.round((o.y + o.h - 2) * dp), 1, 1).data].slice(0, 3) : null; };
+      const out = {};
+      out.before = [!!btn(), btn() && btn().closest('.tg').hidden];
+      await w.compare(B, 'b.vcd'); w.draw(); await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      out.on = [btn().getAttribute('aria-pressed'), btn().disabled, red(), w.state().config.compareMask];
+      const r = (await w.run([{ op: 'compare', mask: false }]))[0];
+      out.off = [r.mask, btn().getAttribute('aria-pressed'), red(), w.state().config.compareMask, w.cmp.differ];
+      w.cursor = 0; w.diffStep(1); out.step = w.cursor;
+      w.canvas.focus();
+      const key = async k => { w.canvas.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true })); await new Promise(res => setTimeout(res, 30)); };
+      await key('d'); out.flip = [w.cmpRun, red()]; await key('d'); out.flip.push(w.cmpRun);
+      await key('D'); out.over = [w.cmpRun, /--wave-run-b|#c2255c/i.test(w.toSVG())]; await key('D');
+      await key('g'); await key('b'); out.gb = [w.cmpMask, btn().getAttribute('aria-pressed'), red() > 0];
+      btn().click(); await new Promise(res => setTimeout(res, 30)); out.click = [w.cmpMask, red()];
+      await w.undo(); out.undo = w.cmpMask;
+      const st = w.state(); st.config.compareMask = false; await w.setState(st); out.state = w.cmpMask;
+      out.bad = (await w.run([{ op: 'compare', mask: 'no' }]))[0].error || '';
+      WaveLens.configure && 0;
+      const el2 = document.body.appendChild(document.createElement('div'));
+      const v2 = new WaveLens.WaveView(el2, Object.assign(doc(), { config: { compareMask: false } }), {}); await v2.compare(B, 'b.vcd');
+      out.setting = [v2.cmpMask, (v2.toSVG().match(/<rect[^>]*(--wave-x|#e03131|#fa5252|#c23a2b)[^>]*>/gi) || []).length];
+      const res = { name: 'r.vcd', from: 0, to: 120, signals: { 'tb.a': { spans: [[20, 30]] } } };
+      const fig = o => (WaveSVG.toString(Object.assign(doc(), { compare: res }, o)).match(/<rect[^>]*(--wave-x|#e03131|#fa5252|#c23a2b)[^>]*>/gi) || []).length;
+      out.fig = [fig({}), fig({ config: { compareMask: false } })];
+      return out;
+    })()""")
+    check(got['before'] == [True, True], f'no compare: the compare group (Mask with it) not shown {got["before"]}')
+    check(got['on'][0] == 'true' and not got['on'][1] and got['on'][2] > 0 and got['on'][3] is True,
+          f'a compare: Mask pressed, the red bands drawn (the picture too), compareMask in the state {got["on"]}')
+    check(got['off'][:4] == [False, 'false', 0, False] and got['off'][4] > 0 and got['step'] == 20,
+          f'compare mask false: no red, the button not pressed, the state says it; ≠ and ]d stay {got["off"]} {got["step"]}')
+    check(got['flip'] == ['b', 0, 'a'], f'no mask: d flips between A and B with nothing over them {got["flip"]}')
+    check(got['over'] == ['overlay', True], f'no mask: D still draws B over A {got["over"]}')
+    check(got['gb'] == [True, 'true', True] and got['click'] == [False, 0] and got['undo'] is True,
+          f'gb and the bar\'s Mask toggle it; one step to undo {got["gb"]} {got["click"]} {got["undo"]}')
+    check(got['state'] is False and 'mask' in got['bad'], f'a state brings it; mask not a boolean refused {got["state"]} {got["bad"]!r}')
+    check(got['setting'] == [False, 0], f'the setting compareMask false: no mask from the start {got["setting"]}')
+    check(got['fig'][0] > 0 and got['fig'][1] == 0, f'the static SVG of a page\'s compare: its config\'s compareMask {got["fig"]}')
+    check(not errs, f'no page errors {errs[:2]}')
     ctx.close()
 
 
@@ -6192,13 +6301,14 @@ def review_1103(browser, build):
     js("await v.clearMarks();"); page.reload(); page.wait_for_load_state('networkidle')
     a = js("return [v.bms.length, v.umarks.length];")
     check(n0 > 0 and a == [n0, 0], f'B-08: Clear all, reloaded: the page\'s {n0} bookmarks back, no markers {a}')
-    # B-04: ⟳ with a second dump compared keeps it
+    # B-04: ⟳ with a second dump compared: B picked again (Compare compares, as it was shown)
     vcd = lambda x: ('$timescale 1ns $end\n$scope module top $end\n$var wire 8 ! data $end\n$var wire 1 " clk $end\n$upscope $end\n$enddefinitions $end\n'
                      f'#0\nb00000000 !\n0"\n#10\nb{x:08b} !\n1"\n#20\n0"\n#30\n1"\n')
     a = js(f"""await v.openDump(new File([{json.dumps(vcd(0xAA))}], 'a.vcd')); const w = () => document.querySelector('.wv').waveView;
         await w().compare(new File([{json.dumps(vcd(0xAB))}], 'b.vcd')); await w().compareView('b'); const b0 = [w().cmpRun, w().cmpCan()];
-        await w().reloadDump(); await new Promise(r => setTimeout(r, 200)); return [b0, w().cmpRun, w().cmpCan(), !!w().cmp];""")
-    check(a == [['b', True], 'b', True, True], f'B-04: ⟳ reads the compared dump again, B still shown {a}')
+        await w().reloadDump(); await new Promise(r => setTimeout(r, 200)); const p = [!!w().cmp, w().cmpPick && w().cmpPick.name];
+        await w().compareGo(); return [b0, p, w().cmpRun, w().cmpCan(), !!w().cmp];""")
+    check(a == [['b', True], [False, 'b.vcd'], 'b', True, True], f'B-04: ⟳ with a dump compared: B picked again, Compare shows B as before {a}')
     check(not errs, f'no page errors {errs[:2]}')
     page.close()
 
@@ -6891,6 +7001,133 @@ def dump_stats(browser, build):
         return e && [e.text, e.items.length, e.items[0], e.quiet, e.items.some(x => x.startsWith('never changes'))]; })()""")
     check(a and a[0].startswith('the dump: 61 signals, 58 change, 3 never change · the busiest apb_tb.PCLK (41)') and a[1] == 13 and a[3] is True and a[4],
           f'a line of the log with the busiest and the ones that never change under it, quiet (the strip not shown for it) {a}')
+    page.close()
+
+
+def hscroll(browser, build):
+    """The scroll bar at the foot of the waves in sight: hidden with all of the waves in the window, its thumb the window, a drag moves
+    the window (the window's ends, rounded, over the thumb while held), a click on the track brings the window's middle there, l goes
+    back; in sight while the canvas goes on under the screen; the setting scrollbar false: none."""
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('viewer: the scroll bar of the waves')
+    page = browser.new_page(viewport={'width': 1400, 'height': 900})
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+    js = lambda e: page.evaluate(f"(async () => {{ const v = WaveLens.views()[0]; {e} }})()")
+    js("v.fit();"); settle(page)
+    check(js("return v.hsbEl.hidden;"), 'all of the waves in the window: no scroll bar')
+    js("const T = v.M.t1 - v.M.t0; v.zoomTo(v.M.t0 + T * 0.2, v.M.t0 + T * 0.3); v.root.scrollIntoView();"); settle(page)
+    g = js("const t = v.hsbEl.firstChild.getBoundingClientRect(), c = v.canvas.getBoundingClientRect(), T = v.M.t1 - v.M.t0; "
+           "return [v.hsbEl.hidden, t.x - c.x, t.width, c.width, t.y, t.bottom, innerHeight, (v.t0 - v.M.t0) / T, v.span / T, c.x];")
+    check(not g[0] and abs(g[1] / g[3] - g[7]) < 0.01 and abs(g[2] / g[3] - g[8]) < 0.01 and g[5] <= g[6],
+          f'zoomed in: the bar, its thumb where the window is and as wide, in sight on the screen {g}')
+    t0, span = js("return [v.t0, v.span];")
+    x, y = g[9] + g[1] + g[2] / 2, g[4] + 3
+    page.mouse.move(x, y); page.mouse.down(); page.mouse.move(x + 112, y, steps=4)
+    tip = js("const t = v.hsbEl.querySelector('.hsbtip'); return [t.hidden, t.textContent, v.t0, v.span, v.fmt(v.t0, v.span / 100, v.span)];")
+    page.mouse.up(); settle(page)
+    moved = js("return [v.hsbEl.querySelector('.hsbtip').hidden, v.t0, v.span];")
+    check(not tip[0] and tip[2] > t0 and abs(tip[3] - span) < 1e-6 and tip[1].startswith(tip[4]) and ' … ' in tip[1] and moved[0] and moved[1] == tip[2],
+          f'a drag of the thumb: the window moves, its span kept; held, its ends rounded over the thumb; let go, the label goes {tip} {moved}')
+    js("v.refocus();"); page.keyboard.press('l'); settle(page)
+    back = js("return v.t0;")
+    check(abs(back - t0) < 1e-6, f'l: the window before the drag {back} {t0}')
+    c = js("const r = v.hsbEl.getBoundingClientRect(); return [r.x + r.width * 0.9, r.y + 5];")
+    page.mouse.click(c[0], c[1]); settle(page)
+    mid = js("const T = v.M.t1 - v.M.t0; return [(v.t0 + v.span / 2 - v.M.t0) / T, v.t0 + v.span >= v.M.t1 - 1e-6];")
+    check(abs(mid[0] - 0.9) < 0.03 or mid[1], f'a click on the track: the window\'s middle there (or the end) {mid}')
+    js("window.scrollBy(0, 300);"); settle(page); page.wait_for_timeout(50)
+    sc = js("const r = v.hsbEl.firstChild.getBoundingClientRect(), c = v.canvas.getBoundingClientRect(); return [r.bottom <= innerHeight, r.bottom <= c.bottom + 1];")
+    check(sc == [True, True], f'the page scrolled: the bar still in sight, on the waves {sc}')
+    js("v.S.scrollbar = false; v.draw();"); settle(page)
+    off = js("return v.hsbEl.hidden;")
+    js("v.S.scrollbar = true; v.draw();"); settle(page)
+    check(off and not js("return v.hsbEl.hidden;"), 'the setting scrollbar false: no bar; true again: there')
+    check(not errs, f'no page errors {errs[:2]}')
+    page.close()
+
+
+def own_order(browser, build):
+    """alt+up / alt+down move any row of the dump (a signal, a module; a selected run as one block; alt+shift: its module) among the rows of
+    its module shown — the state's "order", kept, undone, dropped by another sort; the right button's Move up / down; your group renamed: its
+    row in the names says the new name at once (wherever it was renamed)."""
+    apb = build / 'examples' / 'apb' / 'apb.html'
+    if not need(apb, how='make examples'):
+        return
+    print('viewer: your order of the dump\'s rows, a group renamed at once')
+    page = browser.new_page(viewport={'width': 1400, 'height': 1000})
+    errs = []
+    page.on('pageerror', lambda e: errs.append(str(e)))
+    page.goto(apb.as_uri()); page.wait_for_load_state('networkidle'); page.evaluate('localStorage.clear()'); page.reload(); page.wait_for_load_state('networkidle')
+    mk = """(() => { document.querySelectorAll('.wv').forEach(e => e.remove()); const d = document.createElement('div'); d.id = 'wv-own';
+        document.body.prepend(d); const s = n => ({ name: n, tv: [[0, '0'], [10, '1']] });
+        window.__own = new WaveView(d, { signal: [['top', s('a'), s('b'), ['sub', s('x'), s('y')], s('c')], s('z')], time: { t0: 0, cycle: 10, t1: 40 } },
+          { title: 'own' }); })()"""
+    page.evaluate(mk); settle(page)
+    js = lambda e: page.evaluate(f"(async () => {{ const v = window.__own, I = WaveLens.internal; {e} }})()")
+    names = lambda: js("return I.peek(v).vis.map(r => r.name).join(' ');")
+    toast = lambda: js("return v.root.querySelector('.wv-toast, .toast')?.textContent || '';")
+    focus = lambda n: js(f"const k = I.peek(v).vis.findIndex(r => r.name === {json.dumps(n)}); I.peek(v).namesEl.querySelector(`.row[data-r=\"${{k}}\"]`).focus();")
+    n0 = names()
+    check(n0 == 'top a b sub x y c z', f'the dump\'s order {n0}')
+    focus('a'); page.keyboard.press('Alt+ArrowDown'); settle(page)
+    a = [names(), toast(), js("return v.state().order;"), js("return document.activeElement.textContent;")]
+    check(a[0] == 'top b a sub x y c z' and 'a: 2 of 4 in top' in a[1] and a[2] == {'top': ['b', 'a', 'sub', 'c']} and a[3].startswith('a'),
+          f'alt+down on a signal of the dump in the names: one place down among its module\'s rows, said, in the state, the focus on it {a}')
+    page.keyboard.press('Alt+ArrowDown'); settle(page)
+    check(names() == 'top b sub x y a c z', f'again: past the module sub (its rows with it) {names()}')
+    js("await v.run([{ op: 'hide', signals: 'top.c' }]);"); focus('a'); page.keyboard.press('Alt+ArrowDown'); settle(page)
+    check(js("return I.peek(v).vis.map(r => r.name).join(' ');") == 'top b sub x y a z' and js("return v.state().order.top;") == ['b', 'sub', 'a', 'c'],
+          f'the last one shown: no place further (a hidden row is not one) {js("return v.state().order;")}')
+    js("await v.run([{ op: 'show' }]);")
+    focus('sub'); page.keyboard.press('Alt+ArrowUp'); settle(page)
+    check(names() == 'top sub x y b a c z', f'alt+up on a module: it moves with its rows {names()}')
+    focus('y'); page.keyboard.press('Alt+Shift+ArrowUp'); settle(page)
+    check(names() == 'top sub x y b a c z' and 'no place' not in toast(), f'alt+shift on a signal: its module (sub is first in top already: stays) {names()}')
+    focus('y'); page.keyboard.press('Alt+Shift+ArrowDown'); settle(page)
+    check(names() == 'top b sub x y a c z', f'alt+shift+down on a signal: its module one place down {names()}')
+    focus('sub'); page.keyboard.press('Alt+ArrowUp'); settle(page)
+    js("v.select(I.peek(v).vis.find(r => r.name === 'x')); v.canvas.focus();"); page.keyboard.press('Alt+ArrowDown'); settle(page)
+    check(names() == 'top sub y x b a c z', f'alt+down on the waves: the selected signal {names()}')
+    # a run selected: one block
+    js("const r = n => I.peek(v).vis.find(x => x.name === n); await v.run([{ op: 'select', signals: ['top.b', 'top.a'] }]); v.canvas.focus();")
+    page.keyboard.press('Alt+ArrowDown'); settle(page)
+    check(names() == 'top sub y x c b a z', f'a selected run of rows: as one block {names()}')
+    # the right button's Move up on a row of the dump
+    js("const k = I.peek(v).vis.findIndex(r => r.name === 'c'); const b = I.peek(v).namesEl.querySelector(`.row[data-r=\"${k}\"]`).getBoundingClientRect();"
+       "window.__p = [b.x + 30, b.y + b.height / 2];")
+    p = page.evaluate('window.__p'); page.mouse.click(p[0], p[1], button='right'); settle(page)
+    items = page.evaluate("[...document.querySelectorAll('.wv-menu button[data-m]')].map(b => b.dataset.m)")
+    sub = page.evaluate("!!document.querySelector('.wv-menu .subg + .sub button[data-m=mvup]')")
+    check('mvup' in items and 'mvdn' in items and sub, f'the right button on a row of the dump: Move up / down in Your groups ▸ {items}')
+    page.locator('.wv-menu .subg').click(); page.locator('.wv-menu button[data-m=mvup]').click(); settle(page)
+    check(names() == 'top c sub y x b a z', f'Move up: one place among its module\'s rows (over sub and its rows) {names()}')
+    # undo, kept in this browser, the sort drops it (said), undo brings it back
+    js("v.refocus();"); page.keyboard.press('Control+z'); settle(page); u = names()
+    check(u == 'top sub y x c b a z', f'ctrl+Z: the move undone {u}')
+    st = js("return v.state().order;")
+    page.evaluate(mk); settle(page)
+    check(names() == u and js("return v.state().order;") == st, f'kept in this browser: the viewer made again has your order {names()}')
+    js("v.setSort('asc');"); settle(page); t = toast()
+    check(names() == 'top a b c sub x y z' and js("return v.state().order;") == {} and 'your order' in t and 'dropped' in t,
+          f'another sort drops your order, said {names()} {t!r}')
+    js("v.refocus();"); page.keyboard.press('Control+z'); settle(page)
+    check(names() == u, f'ctrl+Z: your order back {names()}')
+    js("v.setSort('none');"); settle(page)
+    # your group renamed: its row in the names says it at once (the row of the same group stays: its key once had no name)
+    js("await v.run([{ op: 'group', name: 'g1', signals: ['top.a', 'top.b'] }]);")
+    row = lambda n: js(f"const k = I.peek(v).vis.findIndex(r => r.user && r.name === {json.dumps(n)}); const e = k < 0 ? null : "
+                       f"I.peek(v).namesEl.querySelector(`.row[data-r=\"${{k}}\"]`); return e && e.textContent;")
+    js("await v.run([{ op: 'group', name: 'g1', rename: 'g2' }]);"); settle(page)
+    check((row('g2') or '').strip().endswith('g2'), f'a group renamed by a command: its row says the new name at once {row("g2")!r}')
+    js("v.groupsMenu();"); page.locator('.wv-groups button[data-g]').first.locator('.ren').click()
+    page.keyboard.press('Control+a'); page.keyboard.type('g3'); page.keyboard.press('Enter'); settle(page)
+    lst = page.evaluate("[...document.querySelectorAll('.wv-groups button[data-g]')].map(b => b.textContent)")
+    check((row('g3') or '').strip().endswith('g3') and any(x.startswith('g3') for x in lst), f'ctrl+G ✎: the names and the list say it at once {row("g3")!r} {lst}')
+    check(not errs, f'no page errors {errs[:2]}')
     page.close()
 
 
@@ -9266,7 +9503,8 @@ def bar_layout(browser, build):
     def groups():
         fresh(alll)
         a = js("return [v.toolGroups(), q('.tg[data-tg=assertions] .tl').textContent];")
-        page.locator('.wv input.cfile').first.set_input_files(str(build / 'examples' / 'apb' / 'apb.vcd')); page.wait_for_timeout(400 * SCALE)
+        page.locator('.wv input.cfile').first.set_input_files(str(build / 'examples' / 'apb' / 'apb.vcd')); page.wait_for_timeout(100)
+        js("return v.compareGo().then(() => 0);"); page.wait_for_timeout(300 * SCALE)
         b = js("return v.toolGroups();")
         js("v.compare(null); return 0;")
         c = js("return [v.toolGroups().includes('compare')];")
@@ -9323,7 +9561,8 @@ def bar_layout(browser, build):
 
     def walks():   # the differences and the failures: ◀ ▶ of compare and SVA as ]d [d, ]f [f
         fresh(alll)
-        page.locator('.wv input.cfile').first.set_input_files(str(build / 'examples' / 'apb' / 'apb.vcd')); page.wait_for_timeout(400 * SCALE)
+        page.locator('.wv input.cfile').first.set_input_files(str(build / 'examples' / 'apb' / 'apb.vcd')); page.wait_for_timeout(100)
+        js("return v.compareGo().then(() => 0);"); page.wait_for_timeout(300 * SCALE)
         a = js("return [!q('.tg[data-tg=compare]').hidden, q('[data-act=dnext]').getClientRects().length > 0];")
         fresh(apb)
         b = js("return !!q('.tg[data-tg=assertions] .svwalk') && !q('.tg[data-tg=assertions] .svwalk').hidden;")
@@ -10635,6 +10874,9 @@ SECTIONS = {   # section: what it checks (smoke.py --list)
     'bus_slices': 'a slice of a bus as a row (duplicate bits, Duplicate bits…), the values at two cursors and their change',
     'shared_marks': 'sharedMarkers: a marker of yours in one viewer is in each of the same dump (a page of a view per test); undo; apart without it',
     'fsm_shell': 'tools/fsmstats.py counts an FSM in a dump as the page does; --strict exits 1 on a state never reached',
+    'compare_mask': 'the red mask of a compare on and off: Mask, gb, compare mask, compareMask, the state, the picture; d flips alone',
+    'hscroll': 'the scroll bar of the waves: the thumb the window, a drag, its ends while held, a click on the track, l, in sight, the setting',
+    'own_order': 'alt+up / down move any row of the dump (a run, a module, alt+shift), Move up / down, kept, undone, dropped by a sort; a group renamed at once',
     'small_ui': 'a filter line in Markers… and the groups\' list, Keep as span… / As range, a divider among your groups',
     'dump_stats': 'the dump\'s statistics (mkhtml.py meta.stats) as a quiet line of the log',
     'your_keys': 'the setting keys: a sequence of your own, a key taken away, one as another, ctrl+; the boxes and ? list them; the layers',
@@ -10896,6 +11138,9 @@ def main():
         run('fsm_shell', fsm_shell, b, build)
         run('small_ui', small_ui, b, build)
         run('dump_stats', dump_stats, b, build)
+        run('own_order', own_order, b, build)
+        run('hscroll', hscroll, b, build)
+        run('compare_mask', compare_mask, b, build)
         run('your_keys', your_keys, b, build)
         run('key_hints', key_hints, b, build)
         run('review_1103', review_1103, b, build)
